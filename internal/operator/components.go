@@ -62,12 +62,18 @@ func components(ctx context.Context, env upgradeEnv, cluster v1alpha1.Cluster) (
 }
 
 func resetComponents(status v1alpha1.ClusterStatus) v1alpha1.ClusterStatus {
+	if status.Phase != v1alpha1.PhaseComponents {
+		return status
+	}
 	next := *status.DeepCopy()
 	next.Components = nil
 	return next
 }
 
 func reportComponent(status v1alpha1.ClusterStatus, component v1alpha1.ComponentStatus) v1alpha1.ClusterStatus {
+	if status.Phase != v1alpha1.PhaseComponents {
+		return status
+	}
 	next := *status.DeepCopy()
 	next.Components = append(next.Components, component)
 	state := "ready"

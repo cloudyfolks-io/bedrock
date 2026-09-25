@@ -3,6 +3,7 @@ package operator
 import (
 	"context"
 	"errors"
+	"reflect"
 	"slices"
 	"strings"
 	"sync"
@@ -90,6 +91,18 @@ func TestReportComponent(t *testing.T) {
 	}
 	if len(status.Components) != 1 || len(got.Components) != 1 {
 		t.Fatal("input changed")
+	}
+}
+
+func TestComponentWritesOnlyInTheComponentsPhase(t *testing.T) {
+	status := inPhase(v1alpha1.PhaseWorkers)
+	status.Components = []v1alpha1.ComponentStatus{{Name: "old", Available: true}}
+	status.Upgrade.Message = "workers: node-a rebooting"
+	if got := resetComponents(status); !reflect.DeepEqual(got, status) {
+		t.Fatalf("resetComponents changed a status outside PhaseComponents: %+v", got)
+	}
+	if got := reportComponent(status, v1alpha1.ComponentStatus{Name: "fabric", Available: true}); !reflect.DeepEqual(got, status) {
+		t.Fatalf("reportComponent changed a status outside PhaseComponents: %+v", got)
 	}
 }
 
