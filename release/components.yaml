@@ -83,6 +83,7 @@ components:
       - quay.io/kubevirt/cdi-apiserver:v1.66.1
       - quay.io/kubevirt/cdi-uploadserver:v1.66.1
       - quay.io/kubevirt/cdi-uploadproxy:v1.66.1
+      - quay.io/kubevirt/cirros-container-disk-demo:v1.9.0
   - name: cert-manager
     order: 60
     chart: charts/cert-manager

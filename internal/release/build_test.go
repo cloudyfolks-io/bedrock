@@ -253,6 +253,47 @@ func TestBuildKeepsTagsForMarkedComponents(t *testing.T) {
 	}
 }
 
+func TestBuildAppliesOverridesAndBinaryChecksums(t *testing.T) {
+	cfg, opts := testBuild(t)
+	binaries := t.TempDir()
+	for _, arch := range []string{"amd64", "arm64"} {
+		if err := os.WriteFile(filepath.Join(binaries, "bedrock-v9.9.9-linux-"+arch), []byte("bedrock "+arch), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	opts.K0sVersion = "v1.36.2+k0s.0"
+	opts.UpgradeFrom = []string{"v9.9.8"}
+	opts.Binaries = binaries
+	if err := Build(cfg, opts); err != nil {
+		t.Fatal(err)
+	}
+	bundle, err := Load(os.DirFS(opts.Out))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if bundle.Spec.K0sVersion != "v1.36.2+k0s.0" || !slices.Equal(bundle.Spec.UpgradeFrom, []string{"v9.9.8"}) {
+		t.Fatalf("overrides not applied: %+v", bundle.Spec)
+	}
+	want, err := FileSHA256(filepath.Join(binaries, "bedrock-v9.9.9-linux-arm64"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(bundle.Spec.BedrockChecksums) != 2 || bundle.Spec.BedrockChecksums["arm64"] != want {
+		t.Fatalf("bedrockChecksums %v, want arm64 %s", bundle.Spec.BedrockChecksums, want)
+	}
+	if len(bundle.Spec.Images) == 0 || !slices.Equal(bundle.Spec.Images, bundle.Images) {
+		t.Fatalf("release images %v must equal images.txt %v", bundle.Spec.Images, bundle.Images)
+	}
+}
+
+func TestBuildFailsForMissingBinary(t *testing.T) {
+	cfg, opts := testBuild(t)
+	opts.Binaries = t.TempDir()
+	if err := Build(cfg, opts); err == nil || !strings.Contains(err.Error(), "bedrock-v9.9.9-linux-amd64") {
+		t.Fatalf("expected an error naming the missing binary, got %v", err)
+	}
+}
+
 func TestValidateOutRejectsDangerousPaths(t *testing.T) {
 	cwd, err := os.Getwd()
 	if err != nil {

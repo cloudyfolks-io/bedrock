@@ -40,12 +40,13 @@ func defaultBundleDeps() BundleDeps {
 }
 
 type bundleBuildOptions struct {
-	releaseDir string
-	arch       string
-	out        string
-	cacheDir   string
-	k0sBaseURL string
-	workDir    string
+	releaseDir    string
+	arch          string
+	out           string
+	cacheDir      string
+	k0sBaseURL    string
+	workDir       string
+	bedrockBinary string
 }
 
 type bundlePullOptions struct {
@@ -81,11 +82,12 @@ func bundleBuild(args []string, stdout, stderr io.Writer) int {
 	flags.StringVar(&o.cacheDir, "cache-dir", "dist/cache", "download cache")
 	flags.StringVar(&o.k0sBaseURL, "k0s-base-url", release.DefaultK0sBaseURL, "base url for k0s assets")
 	flags.StringVar(&o.workDir, "work-dir", "", "keep the unpacked bundle in this directory")
+	flags.StringVar(&o.bedrockBinary, "bedrock-binary", "", "bedrock binary for the bundle architecture")
 	if err := flags.Parse(args); err != nil {
 		return 2
 	}
-	if o.out == "" {
-		fmt.Fprintln(stderr, "bundle build: --out is required")
+	if o.out == "" || o.bedrockBinary == "" {
+		fmt.Fprintln(stderr, "bundle build: --out and --bedrock-binary are required")
 		return 2
 	}
 	return RunBundleBuild(context.Background(), o, defaultBundleDeps(), stdout, stderr)
@@ -115,7 +117,7 @@ func RunBundleBuild(ctx context.Context, o bundleBuildOptions, deps BundleDeps, 
 	}
 	defer cleanup()
 	step(stdout, "pulling %d images", len(bundle.Images)+1)
-	spec, err := release.BuildBundle(ctx, release.BundleInputs{ReleaseDir: o.releaseDir, Arch: o.arch, K0sBinary: k0sPath, K0sAirgap: airgap, Pull: deps.Pull}, workDir)
+	spec, err := release.BuildBundle(ctx, release.BundleInputs{ReleaseDir: o.releaseDir, Arch: o.arch, K0sBinary: k0sPath, BedrockBinary: o.bedrockBinary, K0sAirgap: airgap, Pull: deps.Pull}, workDir)
 	if err != nil {
 		return fail(stderr, err)
 	}

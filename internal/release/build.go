@@ -40,16 +40,21 @@ type BuildConfig struct {
 }
 
 type BuildOptions struct {
-	Version    string
-	Image      string
-	Out        string
-	Helm       string
-	Root       string
-	K0sBaseURL string
-	CacheDir   string
-	PinDigests bool
-	Resolve    Resolver
+	Version     string
+	Image       string
+	Out         string
+	Helm        string
+	Root        string
+	K0sBaseURL  string
+	CacheDir    string
+	PinDigests  bool
+	Resolve     Resolver
+	K0sVersion  string
+	UpgradeFrom []string
+	Binaries    string
 }
+
+var releaseArches = []string{"amd64", "arm64"}
 
 func LoadBuildConfig(path string) (BuildConfig, error) {
 	raw, err := os.ReadFile(path)
@@ -111,6 +116,7 @@ func Build(cfg BuildConfig, opts BuildOptions) error {
 	if err := validateOut(opts.Out); err != nil {
 		return err
 	}
+	cfg = withOverrides(cfg, opts)
 	dirs := groupDirs(cfg)
 	var files []rendered
 	for _, component := range cfg.Components {
@@ -141,6 +147,7 @@ func Build(cfg BuildConfig, opts BuildOptions) error {
 	if err != nil {
 		return err
 	}
+	images := sortedImages(mergeImages(ImagesOf(groups), extraImagesOf(cfg)))
 	spec := v1alpha1.ReleaseSpec{
 		Version:     opts.Version,
 		Image:       opts.Image,
@@ -148,15 +155,56 @@ func Build(cfg BuildConfig, opts BuildOptions) error {
 		UpgradeFrom: cfg.UpgradeFrom,
 		SupportedOS: cfg.SupportedOS,
 		Components:  componentSpecs(cfg, groups, opts.Version),
+		Images:      images,
+	}
+	if opts.Binaries != "" {
+		sums, err := binaryChecksums(opts.Binaries, opts.Version, releaseArches)
+		if err != nil {
+			return err
+		}
+		spec.BedrockChecksums = sums
 	}
 	if opts.K0sBaseURL != "" {
-		sums, err := K0sChecksums(context.Background(), opts.K0sBaseURL, cfg.K0sVersion, []string{"amd64", "arm64"}, opts.CacheDir)
+		sums, err := K0sChecksums(context.Background(), opts.K0sBaseURL, cfg.K0sVersion, releaseArches, opts.CacheDir)
 		if err != nil {
 			return err
 		}
 		spec.K0sChecksums = sums
 	}
-	return writeMetadata(opts.Out, spec, mergeImages(ImagesOf(groups), extraImagesOf(cfg)))
+	return writeMetadata(opts.Out, spec, images)
+}
+
+func withOverrides(cfg BuildConfig, opts BuildOptions) BuildConfig {
+	out := cfg
+	if opts.K0sVersion != "" {
+		out.K0sVersion = opts.K0sVersion
+	}
+	if opts.UpgradeFrom != nil {
+		out.UpgradeFrom = append([]string(nil), opts.UpgradeFrom...)
+	}
+	return out
+}
+
+func BinaryName(version, arch string) string {
+	return fmt.Sprintf("bedrock-%s-linux-%s", version, arch)
+}
+
+func binaryChecksums(dir, version string, arches []string) (map[string]string, error) {
+	sums := make(map[string]string, len(arches))
+	for _, arch := range arches {
+		sum, err := FileSHA256(filepath.Join(dir, BinaryName(version, arch)))
+		if err != nil {
+			return nil, fmt.Errorf("bedrock binary: %w", err)
+		}
+		sums[arch] = sum
+	}
+	return sums, nil
+}
+
+func sortedImages(images []string) []string {
+	sorted := append([]string(nil), images...)
+	sort.Strings(sorted)
+	return sorted
 }
 
 func extraImagesOf(cfg BuildConfig) []string {

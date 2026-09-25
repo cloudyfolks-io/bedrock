@@ -410,7 +410,15 @@ func buildFixtureBundle(t *testing.T, version, k0sVersion string) (path, checksu
 	if err != nil {
 		t.Fatal(err)
 	}
-	releaseYAML := fmt.Sprintf("version: %s\nimage: ghcr.io/cloudyfolks-labs/bedrock:%s\nk0sVersion: %s\nk0sChecksums:\n  %s: %s\nsupportedOS:\n  - ubuntu-24.04\n", version, version, k0sVersion, fixtureArch, sum)
+	bedrockSrc := filepath.Join(t.TempDir(), "bedrock-src")
+	if err := os.WriteFile(bedrockSrc, []byte("bedrock"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	bedrockSum, err := release.FileSHA256(bedrockSrc)
+	if err != nil {
+		t.Fatal(err)
+	}
+	releaseYAML := fmt.Sprintf("version: %s\nimage: ghcr.io/cloudyfolks-labs/bedrock:%s\nk0sVersion: %s\nk0sChecksums:\n  %s: %s\nbedrockChecksums:\n  %s: %s\nsupportedOS:\n  - ubuntu-24.04\n", version, version, k0sVersion, fixtureArch, sum, fixtureArch, bedrockSum)
 	if err := os.WriteFile(filepath.Join(releaseDir, "release.yaml"), []byte(releaseYAML), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -428,7 +436,7 @@ func buildFixtureBundle(t *testing.T, version, k0sVersion string) (path, checksu
 		return "sha256:" + strings.Repeat("e", 64), os.WriteFile(dest, []byte("layout:"+ref), 0o644)
 	}
 	work := t.TempDir()
-	if _, err := release.BuildBundle(context.Background(), release.BundleInputs{ReleaseDir: releaseDir, Arch: fixtureArch, K0sBinary: k0sSrc, K0sAirgap: airgap, Pull: pull}, work); err != nil {
+	if _, err := release.BuildBundle(context.Background(), release.BundleInputs{ReleaseDir: releaseDir, Arch: fixtureArch, K0sBinary: k0sSrc, BedrockBinary: bedrockSrc, K0sAirgap: airgap, Pull: pull}, work); err != nil {
 		t.Fatal(err)
 	}
 	out := filepath.Join(t.TempDir(), "bundle.tar.zst")

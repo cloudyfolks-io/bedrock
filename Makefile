@@ -13,6 +13,8 @@ CRANE_VERSION ?= v0.22.1
 RELEASE_CONFIG ?= release/components.yaml
 PIN_DIGESTS ?=
 BUNDLE_ARCH ?= amd64
+K0S_VERSION ?=
+UPGRADE_FROM ?=
 
 .PHONY: build test lint generate crds envtest-assets e2e-kind e2e-init e2e-bundle controller-gen release crane bundle binaries
 
@@ -51,12 +53,12 @@ e2e-kind: build crds release crane
 e2e-init: build release
 	hack/e2e-init.sh
 
-release: build
+release: build binaries
 	@command -v $(HELM) >/dev/null || { echo "helm is required"; exit 1; }
-	$(BIN) release build --config $(RELEASE_CONFIG) --version $(VERSION) --image $(IMAGE) --out dist/release --helm $(HELM) --cache-dir dist/cache $(if $(PIN_DIGESTS),--pin-digests,)
+	$(BIN) release build --config $(RELEASE_CONFIG) --version $(VERSION) --image $(IMAGE) --out dist/release --helm $(HELM) --cache-dir dist/cache --binaries dist $(if $(PIN_DIGESTS),--pin-digests,) $(if $(K0S_VERSION),--k0s-version $(K0S_VERSION),) $(if $(UPGRADE_FROM),--upgrade-from $(UPGRADE_FROM),)
 
 bundle: build release
-	$(BIN) bundle build --release dist/release --arch $(BUNDLE_ARCH) --out dist/bedrock-$(VERSION)-bundle-$(BUNDLE_ARCH).tar.zst --cache-dir dist/cache
+	$(BIN) bundle build --release dist/release --arch $(BUNDLE_ARCH) --out dist/bedrock-$(VERSION)-bundle-$(BUNDLE_ARCH).tar.zst --cache-dir dist/cache --bedrock-binary dist/bedrock-$(VERSION)-linux-$(BUNDLE_ARCH)
 
 e2e-bundle: bundle
 	BUNDLE=dist/bedrock-$(VERSION)-bundle-$(BUNDLE_ARCH).tar.zst hack/e2e-init.sh

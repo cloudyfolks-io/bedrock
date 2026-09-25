@@ -20,9 +20,18 @@ func writeReleaseFixture(t *testing.T, dir string, images []string) {
 		}
 	}
 	must(os.MkdirAll(filepath.Join(dir, "manifests", "00-crds"), 0o755))
-	must(os.WriteFile(filepath.Join(dir, "release.yaml"), []byte("version: v0.1.0\nimage: ghcr.io/cloudyfolks-labs/bedrock:v0.1.0\nk0sVersion: v1.36.3+k0s.0\nk0sChecksums:\n  amd64: sha256:2b7bb4d64d416013eb5b4015dabe1d7cad590fd3ce7ce411f3a4489ae32f49b2\n"), 0o644))
+	must(os.WriteFile(filepath.Join(dir, "release.yaml"), []byte("version: v0.1.0\nimage: ghcr.io/cloudyfolks-labs/bedrock:v0.1.0\nk0sVersion: v1.36.3+k0s.0\nk0sChecksums:\n  amd64: sha256:2b7bb4d64d416013eb5b4015dabe1d7cad590fd3ce7ce411f3a4489ae32f49b2\nbedrockChecksums:\n  amd64: sha256:2d7f45d7b98b427f824e0c643295583e9cf013faffdb5e7095d070ff85276bf4\n"), 0o644))
 	must(os.WriteFile(filepath.Join(dir, "images.txt"), []byte(strings.Join(images, "\n")+"\n"), 0o644))
 	must(os.WriteFile(filepath.Join(dir, "manifests", "00-crds", "a.yaml"), []byte("apiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: a\n  namespace: default\n"), 0o644))
+}
+
+func writeBedrockBinary(t *testing.T, content string) string {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "bedrock-bin")
+	if err := os.WriteFile(path, []byte(content), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	return path
 }
 
 func fakePull(calls *[]string) func(context.Context, string, string) (string, error) {
@@ -41,7 +50,7 @@ func TestBuildBundleLaysOutEverything(t *testing.T) {
 	os.WriteFile(airgap, []byte("airgap"), 0o644)
 	var calls []string
 	work := t.TempDir()
-	spec, err := BuildBundle(context.Background(), BundleInputs{ReleaseDir: releaseDir, Arch: "amd64", K0sBinary: k0s, K0sAirgap: airgap, Pull: fakePull(&calls)}, work)
+	spec, err := BuildBundle(context.Background(), BundleInputs{ReleaseDir: releaseDir, Arch: "amd64", K0sBinary: k0s, BedrockBinary: writeBedrockBinary(t, "bedrock"), K0sAirgap: airgap, Pull: fakePull(&calls)}, work)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -51,7 +60,7 @@ func TestBuildBundleLaysOutEverything(t *testing.T) {
 	if len(calls) != 2 {
 		t.Fatalf("expected 2 pulls, got %v", calls)
 	}
-	for _, path := range []string{"bundle.yaml", "release/release.yaml", "release/images.txt", "release/manifests/00-crds/a.yaml", "k0s/k0s", "images/k0s-airgap.tar"} {
+	for _, path := range []string{"bundle.yaml", "release/release.yaml", "release/images.txt", "release/manifests/00-crds/a.yaml", "k0s/k0s", "bedrock/bedrock", "images/k0s-airgap.tar"} {
 		if _, err := os.Stat(filepath.Join(work, path)); err != nil {
 			t.Fatalf("missing %s", path)
 		}
@@ -66,9 +75,11 @@ func TestBuildBundleLaysOutEverything(t *testing.T) {
 	if err := yaml.Unmarshal(raw, &reread); err != nil || len(reread.Images) != 2 {
 		t.Fatalf("bundle.yaml %s err %v", raw, err)
 	}
-	info, _ := os.Stat(filepath.Join(work, "k0s", "k0s"))
-	if info.Mode()&0o111 == 0 {
-		t.Fatal("k0s binary must be executable")
+	for _, binary := range []string{"k0s/k0s", "bedrock/bedrock"} {
+		info, _ := os.Stat(filepath.Join(work, binary))
+		if info.Mode()&0o111 == 0 {
+			t.Fatalf("%s must be executable", binary)
+		}
 	}
 }
 
@@ -81,8 +92,22 @@ func TestBuildBundleRejectsBadK0sChecksum(t *testing.T) {
 	airgap := filepath.Join(t.TempDir(), "airgap.tar")
 	os.WriteFile(airgap, []byte("airgap"), 0o644)
 	var calls []string
-	if _, err := BuildBundle(context.Background(), BundleInputs{ReleaseDir: releaseDir, Arch: "amd64", K0sBinary: k0s, K0sAirgap: airgap, Pull: fakePull(&calls)}, t.TempDir()); err == nil || !strings.Contains(err.Error(), "k0s") {
+	if _, err := BuildBundle(context.Background(), BundleInputs{ReleaseDir: releaseDir, Arch: "amd64", K0sBinary: k0s, BedrockBinary: writeBedrockBinary(t, "bedrock"), K0sAirgap: airgap, Pull: fakePull(&calls)}, t.TempDir()); err == nil || !strings.Contains(err.Error(), "k0s") {
 		t.Fatalf("expected k0s checksum error, got %v", err)
+	}
+}
+
+func TestBuildBundleRejectsBadBedrockChecksum(t *testing.T) {
+	releaseDir := t.TempDir()
+	writeReleaseFixture(t, releaseDir, []string{"quay.io/a/b:1"})
+	k0s := filepath.Join(t.TempDir(), "k0s-bin")
+	os.WriteFile(k0s, []byte("k0s"), 0o755)
+	airgap := filepath.Join(t.TempDir(), "airgap.tar")
+	os.WriteFile(airgap, []byte("airgap"), 0o644)
+	var calls []string
+	_, err := BuildBundle(context.Background(), BundleInputs{ReleaseDir: releaseDir, Arch: "amd64", K0sBinary: k0s, BedrockBinary: writeBedrockBinary(t, "tampered"), K0sAirgap: airgap, Pull: fakePull(&calls)}, t.TempDir())
+	if err == nil || !strings.Contains(err.Error(), "bedrock: checksum mismatch") {
+		t.Fatalf("expected a bedrock checksum error, got %v", err)
 	}
 }
 
@@ -94,10 +119,10 @@ func TestPackAndOpenBundleRoundTrip(t *testing.T) {
 	os.WriteFile(k0s, []byte("k0s"), 0o755)
 	os.WriteFile(airgap, []byte("airgap"), 0o644)
 	sum := "sha256:" + fileSHA256OrFail(t, k0s)
-	os.WriteFile(filepath.Join(releaseDir, "release.yaml"), []byte("version: v0.1.0\nimage: ghcr.io/cloudyfolks-labs/bedrock:v0.1.0\nk0sVersion: v1\nk0sChecksums:\n  amd64: "+sum+"\n"), 0o644)
+	os.WriteFile(filepath.Join(releaseDir, "release.yaml"), []byte("version: v0.1.0\nimage: ghcr.io/cloudyfolks-labs/bedrock:v0.1.0\nk0sVersion: v1\nk0sChecksums:\n  amd64: "+sum+"\nbedrockChecksums:\n  amd64: sha256:2d7f45d7b98b427f824e0c643295583e9cf013faffdb5e7095d070ff85276bf4\n"), 0o644)
 	var calls []string
 	work := t.TempDir()
-	if _, err := BuildBundle(context.Background(), BundleInputs{ReleaseDir: releaseDir, Arch: "amd64", K0sBinary: k0s, K0sAirgap: airgap, Pull: fakePull(&calls)}, work); err != nil {
+	if _, err := BuildBundle(context.Background(), BundleInputs{ReleaseDir: releaseDir, Arch: "amd64", K0sBinary: k0s, BedrockBinary: writeBedrockBinary(t, "bedrock"), K0sAirgap: airgap, Pull: fakePull(&calls)}, work); err != nil {
 		t.Fatal(err)
 	}
 	out := filepath.Join(t.TempDir(), "bundle.tar.zst")

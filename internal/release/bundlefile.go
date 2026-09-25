@@ -15,11 +15,12 @@ import (
 )
 
 const (
-	BundleFileName   = "bundle.yaml"
-	bundleReleaseDir = "release"
-	bundleK0sPath    = "k0s/k0s"
-	bundleImagesDir  = "images"
-	bundleAirgapFile = "k0s-airgap.tar"
+	BundleFileName    = "bundle.yaml"
+	bundleReleaseDir  = "release"
+	bundleK0sPath     = "k0s/k0s"
+	bundleBedrockPath = "bedrock/bedrock"
+	bundleImagesDir   = "images"
+	bundleAirgapFile  = "k0s-airgap.tar"
 )
 
 var unsafeRefChars = regexp.MustCompile(`[^A-Za-z0-9._-]`)
@@ -40,11 +41,12 @@ type BundleSpec struct {
 }
 
 type BundleInputs struct {
-	ReleaseDir string
-	Arch       string
-	K0sBinary  string
-	K0sAirgap  string
-	Pull       func(ctx context.Context, ref, dest string) (string, error)
+	ReleaseDir    string
+	Arch          string
+	K0sBinary     string
+	BedrockBinary string
+	K0sAirgap     string
+	Pull          func(ctx context.Context, ref, dest string) (string, error)
 }
 
 func BuildBundle(ctx context.Context, in BundleInputs, workDir string) (BundleSpec, error) {
@@ -52,13 +54,19 @@ func BuildBundle(ctx context.Context, in BundleInputs, workDir string) (BundleSp
 	if err != nil {
 		return BundleSpec{}, err
 	}
-	if err := verifyK0sBinary(in.K0sBinary, bundle.Spec.K0sChecksums[in.Arch]); err != nil {
+	if err := verifyBinary("k0s", in.K0sBinary, bundle.Spec.K0sChecksums[in.Arch]); err != nil {
+		return BundleSpec{}, err
+	}
+	if err := verifyBinary("bedrock", in.BedrockBinary, bundle.Spec.BedrockChecksums[in.Arch]); err != nil {
 		return BundleSpec{}, err
 	}
 	if err := copyTree(in.ReleaseDir, filepath.Join(workDir, bundleReleaseDir)); err != nil {
 		return BundleSpec{}, err
 	}
 	if err := copyFileMode(in.K0sBinary, filepath.Join(workDir, bundleK0sPath), 0o755); err != nil {
+		return BundleSpec{}, err
+	}
+	if err := copyFileMode(in.BedrockBinary, filepath.Join(workDir, bundleBedrockPath), 0o755); err != nil {
 		return BundleSpec{}, err
 	}
 	imagesDir := filepath.Join(workDir, bundleImagesDir)
@@ -98,16 +106,16 @@ func ImageFileName(ref string) string {
 	return name + ".tar"
 }
 
-func verifyK0sBinary(path, want string) error {
+func verifyBinary(name, path, want string) error {
 	if want == "" {
-		return fmt.Errorf("k0s: release has no checksum for this architecture")
+		return fmt.Errorf("%s: release has no checksum for this architecture", name)
 	}
 	got, err := FileSHA256(path)
 	if err != nil {
-		return fmt.Errorf("k0s: %w", err)
+		return fmt.Errorf("%s: %w", name, err)
 	}
 	if got != want {
-		return fmt.Errorf("k0s: checksum mismatch for %s", path)
+		return fmt.Errorf("%s: checksum mismatch for %s", name, path)
 	}
 	return nil
 }

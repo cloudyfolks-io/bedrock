@@ -2,6 +2,7 @@ package cli
 
 import (
 	"bytes"
+	"slices"
 	"testing"
 )
 
@@ -41,5 +42,18 @@ func TestReleaseApplyRejectsNonPositiveInterval(t *testing.T) {
 	}
 	if !bytes.Contains(errOut.Bytes(), []byte("--interval")) {
 		t.Fatalf("stderr %q", errOut.String())
+	}
+}
+
+func TestSplitList(t *testing.T) {
+	cases := map[string][]string{
+		"":                 nil,
+		"v0.1.0":           {"v0.1.0"},
+		"v0.1.0, v0.2.0,,": {"v0.1.0", "v0.2.0"},
+	}
+	for in, want := range cases {
+		if got := splitList(in); !slices.Equal(got, want) {
+			t.Fatalf("splitList(%q) = %v, want %v", in, got, want)
+		}
 	}
 }

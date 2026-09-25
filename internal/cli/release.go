@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"strings"
 	"time"
 
 	ctrl "sigs.k8s.io/controller-runtime"
@@ -15,7 +16,7 @@ import (
 	"github.com/cloudyfolks-labs/bedrock/internal/release"
 )
 
-const releaseUsage = "usage: bedrock release build --config FILE --version VERSION --image IMAGE --out DIR [--helm helm]\n       bedrock release apply --dir DIR [--timeout 10m] [--interval 2s]"
+const releaseUsage = "usage: bedrock release build --config FILE --version VERSION --image IMAGE --out DIR [--helm helm] [--k0s-version V] [--upgrade-from V1,V2] [--binaries DIR]\n       bedrock release apply --dir DIR [--timeout 10m] [--interval 2s]"
 
 func releaseCommand(args []string, stdout, stderr io.Writer) int {
 	if len(args) == 0 {
@@ -44,6 +45,9 @@ func releaseBuild(args []string, stdout, stderr io.Writer) int {
 	k0sBaseURL := flags.String("k0s-base-url", release.DefaultK0sBaseURL, "base url for k0s binaries")
 	cacheDir := flags.String("cache-dir", "dist/cache", "download cache")
 	pin := flags.Bool("pin-digests", false, "rewrite image references to their index digests")
+	k0sVersion := flags.String("k0s-version", "", "k0s version, overrides the build configuration")
+	upgradeFrom := flags.String("upgrade-from", "", "comma list of versions this release upgrades from, overrides the build configuration")
+	binaries := flags.String("binaries", "", "directory with bedrock-<version>-linux-<arch> binaries for bedrockChecksums")
 	if err := flags.Parse(args); err != nil {
 		return 2
 	}
@@ -56,7 +60,7 @@ func releaseBuild(args []string, stdout, stderr io.Writer) int {
 		fmt.Fprintln(stderr, err)
 		return 1
 	}
-	opts := release.BuildOptions{Version: *version, Image: *image, Out: *out, Helm: *helm, Root: *root, K0sBaseURL: *k0sBaseURL, CacheDir: *cacheDir, PinDigests: *pin}
+	opts := release.BuildOptions{Version: *version, Image: *image, Out: *out, Helm: *helm, Root: *root, K0sBaseURL: *k0sBaseURL, CacheDir: *cacheDir, PinDigests: *pin, K0sVersion: *k0sVersion, UpgradeFrom: splitList(*upgradeFrom), Binaries: *binaries}
 	if err := release.Build(cfg, opts); err != nil {
 		fmt.Fprintln(stderr, err)
 		return 1
@@ -123,4 +127,14 @@ func releaseApply(args []string, stdout, stderr io.Writer) int {
 	}
 	fmt.Fprintf(stdout, "release %s applied\n", bundle.Spec.Version)
 	return 0
+}
+
+func splitList(value string) []string {
+	var items []string
+	for _, item := range strings.Split(value, ",") {
+		if trimmed := strings.TrimSpace(item); trimmed != "" {
+			items = append(items, trimmed)
+		}
+	}
+	return items
 }
