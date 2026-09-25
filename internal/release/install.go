@@ -9,6 +9,10 @@ import (
 )
 
 func Install(ctx context.Context, c client.Client, bundle Bundle, vars map[string]string, gates Gates, interval, groupTimeout time.Duration, report func(group Group, err error)) error {
+	return InstallGroups(ctx, c, bundle, vars, gates, interval, groupTimeout, report, func(context.Context, Group) error { return nil })
+}
+
+func InstallGroups(ctx context.Context, c client.Client, bundle Bundle, vars map[string]string, gates Gates, interval, groupTimeout time.Duration, report func(group Group, err error), after func(ctx context.Context, group Group) error) error {
 	bundle, err := Substitute(bundle, vars)
 	if err != nil {
 		return err
@@ -23,6 +27,9 @@ func Install(ctx context.Context, c client.Client, bundle Bundle, vars map[strin
 		err := applier.Apply(groupCtx, group)
 		if err == nil {
 			err = WaitGroup(groupCtx, c, gates, group, interval)
+		}
+		if err == nil {
+			err = after(groupCtx, group)
 		}
 		cancel()
 		report(group, err)
