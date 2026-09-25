@@ -283,6 +283,25 @@ func TestAbortInControlPlaneRestoresASingleController(t *testing.T) {
 	}
 }
 
+func TestResumeAfterAManualRestoreIsRefused(t *testing.T) {
+	c, ctx := abortWorld(t, v1alpha1.PhaseControlPlane)
+	cluster := getCluster(t, ctx, c)
+	manual := "restore on node-a failed: k0s restore: exit status 1: follow " + restoreRunbook
+	cluster.Status = restoreManual(cluster.Status, manual, cluster.Generation)
+	if err := c.Status().Update(ctx, &cluster); err != nil {
+		t.Fatal(err)
+	}
+	setAction(t, ctx, c, v1alpha1.UpgradeActionResume)
+	got := runRole(t, ctx, c, oldRole())
+	progressing := meta.FindStatusCondition(got.Status.Conditions, v1alpha1.ConditionProgressing)
+	if got.Status.Phase != v1alpha1.PhaseFailed || got.Spec.Upgrade.Action != "" || progressing.Reason != v1alpha1.ReasonRestoreManual || progressing.Message != manual {
+		t.Fatalf("resume must be refused after a manual restore: action %q status %+v", got.Spec.Upgrade.Action, got.Status)
+	}
+	if got.Status.Upgrade.Message != "resume is not possible after a manual restore: follow "+restoreRunbook || got.Status.Upgrade.FailedPhase != v1alpha1.PhaseControlPlane || got.Status.Upgrade.Attempt != 1 {
+		t.Fatalf("upgrade %+v", got.Status.Upgrade)
+	}
+}
+
 func TestAbortInControlPlaneWithManyControllers(t *testing.T) {
 	c, ctx := abortWorld(t, v1alpha1.PhaseControlPlane)
 	createDepotHost(t, ctx, c, "node-c", v1alpha1.RoleControlPlane)

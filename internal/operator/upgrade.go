@@ -121,6 +121,8 @@ func decide(cluster v1alpha1.Cluster) decision {
 	phase := activePhase(status)
 	blockedAt, blocked := blockedGeneration(status)
 	switch {
+	case action == v1alpha1.UpgradeActionResume && restoredByHand(status):
+		return decision{Kind: decisionIgnore, Message: "resume is not possible after a manual restore: follow " + restoreRunbook}
 	case action == v1alpha1.UpgradeActionResume && blocked:
 		return decision{Kind: decisionRetry}
 	case action == v1alpha1.UpgradeActionResume && (status.Phase != v1alpha1.PhaseFailed || status.Upgrade == nil):
@@ -150,6 +152,11 @@ func decide(cluster v1alpha1.Cluster) decision {
 func abortEnded(cluster v1alpha1.Cluster) bool {
 	progressing := meta.FindStatusCondition(cluster.Status.Conditions, v1alpha1.ConditionProgressing)
 	return progressing != nil && progressing.Status == metav1.ConditionFalse && progressing.Reason == v1alpha1.ReasonAborted && progressing.ObservedGeneration == cluster.Generation
+}
+
+func restoredByHand(status v1alpha1.ClusterStatus) bool {
+	progressing := meta.FindStatusCondition(status.Conditions, v1alpha1.ConditionProgressing)
+	return status.Phase == v1alpha1.PhaseFailed && progressing != nil && progressing.Reason == v1alpha1.ReasonRestoreManual
 }
 
 func blockedGeneration(status v1alpha1.ClusterStatus) (int64, bool) {

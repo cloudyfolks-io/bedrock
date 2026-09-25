@@ -90,28 +90,31 @@ func TestDecide(t *testing.T) {
 		cluster.Status = blockUpgrade(inPhase(v1alpha1.PhasePreflight), "timeSynced: node-a clock not synced", 5)
 		return cluster
 	}
+	restoredByHand := withAction(failed(v1alpha1.PhaseControlPlane), v1alpha1.UpgradeActionResume)
+	restoredByHand.Status = restoreManual(restoredByHand.Status, "restore on node-a failed: exit status 1: follow "+restoreRunbook, 3)
 	abortedAfterABlock := blockedAt(5)
 	abortedAfterABlock.Status = abortUpgrade(abortedAfterABlock.Status, "", 5)
 	cases := map[string]struct {
 		cluster v1alpha1.Cluster
 		want    decision
 	}{
-		"start":                      {idle, decision{Kind: decisionStart}},
-		"run":                        {running(v1alpha1.PhaseBackup), decision{Kind: decisionRun}},
-		"failed waits":               {failed(v1alpha1.PhaseBackup), decision{Kind: decisionWait}},
-		"resume":                     {withAction(failed(v1alpha1.PhaseWorkers), v1alpha1.UpgradeActionResume), decision{Kind: decisionResume}},
-		"resume while running":       {withAction(running(v1alpha1.PhaseBackup), v1alpha1.UpgradeActionResume), decision{Kind: decisionIgnore, Message: "resume ignored: phase Backup has not failed"}},
-		"resume before a start":      {withAction(idle, v1alpha1.UpgradeActionResume), decision{Kind: decisionIgnore, Message: "resume ignored: phase Idle has not failed"}},
-		"abort in Components":        {withAction(running(v1alpha1.PhaseComponents), v1alpha1.UpgradeActionAbort), decision{Kind: decisionRefuseAbort, Message: "abort refused in Components: no rollback after Components started; resume continues the upgrade"}},
-		"abort after Workers failed": {withAction(failed(v1alpha1.PhaseWorkers), v1alpha1.UpgradeActionAbort), decision{Kind: decisionRefuseAbort, Message: "abort refused in Workers: no rollback after Components started; resume continues the upgrade"}},
-		"abort in Verify":            {withAction(running(v1alpha1.PhaseVerify), v1alpha1.UpgradeActionAbort), decision{Kind: decisionRefuseAbort, Message: "abort refused in Verify: no rollback after Components started; resume continues the upgrade"}},
-		"desired changed":            {retargeted, decision{Kind: decisionRetarget, Message: "desiredVersion is v3 while the upgrade to v2 runs: set it back to v2, or abort"}},
-		"abort without its patch":    {abortedAt(5), decision{Kind: decisionEndAbort}},
-		"new start after an abort":   {abortedAt(4), decision{Kind: decisionStart}},
-		"blocked waits":              {blockedAt(5), decision{Kind: decisionWait}},
-		"blocked resumes":            {withAction(blockedAt(6), v1alpha1.UpgradeActionResume), decision{Kind: decisionRetry}},
-		"blocked with a new target":  {blockedAt(6), decision{Kind: decisionStart}},
-		"aborted after a block":      {abortedAfterABlock, decision{Kind: decisionEndAbort}},
+		"start":                       {idle, decision{Kind: decisionStart}},
+		"run":                         {running(v1alpha1.PhaseBackup), decision{Kind: decisionRun}},
+		"failed waits":                {failed(v1alpha1.PhaseBackup), decision{Kind: decisionWait}},
+		"resume":                      {withAction(failed(v1alpha1.PhaseWorkers), v1alpha1.UpgradeActionResume), decision{Kind: decisionResume}},
+		"resume while running":        {withAction(running(v1alpha1.PhaseBackup), v1alpha1.UpgradeActionResume), decision{Kind: decisionIgnore, Message: "resume ignored: phase Backup has not failed"}},
+		"resume before a start":       {withAction(idle, v1alpha1.UpgradeActionResume), decision{Kind: decisionIgnore, Message: "resume ignored: phase Idle has not failed"}},
+		"abort in Components":         {withAction(running(v1alpha1.PhaseComponents), v1alpha1.UpgradeActionAbort), decision{Kind: decisionRefuseAbort, Message: "abort refused in Components: no rollback after Components started; resume continues the upgrade"}},
+		"abort after Workers failed":  {withAction(failed(v1alpha1.PhaseWorkers), v1alpha1.UpgradeActionAbort), decision{Kind: decisionRefuseAbort, Message: "abort refused in Workers: no rollback after Components started; resume continues the upgrade"}},
+		"abort in Verify":             {withAction(running(v1alpha1.PhaseVerify), v1alpha1.UpgradeActionAbort), decision{Kind: decisionRefuseAbort, Message: "abort refused in Verify: no rollback after Components started; resume continues the upgrade"}},
+		"desired changed":             {retargeted, decision{Kind: decisionRetarget, Message: "desiredVersion is v3 while the upgrade to v2 runs: set it back to v2, or abort"}},
+		"abort without its patch":     {abortedAt(5), decision{Kind: decisionEndAbort}},
+		"new start after an abort":    {abortedAt(4), decision{Kind: decisionStart}},
+		"blocked waits":               {blockedAt(5), decision{Kind: decisionWait}},
+		"blocked resumes":             {withAction(blockedAt(6), v1alpha1.UpgradeActionResume), decision{Kind: decisionRetry}},
+		"blocked with a new target":   {blockedAt(6), decision{Kind: decisionStart}},
+		"aborted after a block":       {abortedAfterABlock, decision{Kind: decisionEndAbort}},
+		"resume after manual restore": {restoredByHand, decision{Kind: decisionIgnore, Message: "resume is not possible after a manual restore: follow docs/runbooks/restore-control-plane.md"}},
 	}
 	for name, tc := range cases {
 		t.Run(name, func(t *testing.T) {
