@@ -131,7 +131,7 @@ func Tick(ctx context.Context, c client.Client, deps Deps) error {
 		Hostname:     hostname(deps),
 		Checks:       hostChecks(ctx, deps),
 		Depot:        depotStatus(ctx, c, deps),
-		Restore:      current.Status.Restore,
+		Restore:      readRestoreMarker(deps.Root),
 	}
 	if invErr != nil {
 		next.Inventory = current.Status.Inventory

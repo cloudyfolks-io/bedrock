@@ -152,18 +152,30 @@ func TestTickReportsDepotOnlyWithBundles(t *testing.T) {
 	}
 }
 
-func TestTickKeepsRestore(t *testing.T) {
+func TestTickReportsTheRestoreMarker(t *testing.T) {
 	createHost(t, "node-a", false, "")
-	restore := &v1alpha1.RestoreStatus{Backup: "/var/lib/bedrock/backups/a.tar.gz", CompletedAt: metav1.NewTime(time.Date(2026, 10, 1, 10, 0, 0, 0, time.UTC))}
-	if err := ApplyStatus(context.Background(), k8sClient, "node-a", v1alpha1.HostStatus{Restore: restore}); err != nil {
+	root := t.TempDir()
+	deps := newDeps(&host.FakeExec{}, time.Now())
+	deps.Root = root
+	if err := Tick(context.Background(), k8sClient, deps); err != nil {
 		t.Fatal(err)
 	}
-	if err := Tick(context.Background(), k8sClient, newDeps(&host.FakeExec{}, time.Now())); err != nil {
+	if restore := getHost(t, "node-a").Status.Restore; restore != nil {
+		t.Fatalf("no marker must mean no restore, got %+v", restore)
+	}
+	marker := `{"backup":"/var/lib/bedrock/backups/a.tar.gz","completedAt":"2026-10-01T10:00:00Z"}`
+	if err := os.MkdirAll(filepath.Join(root, "var/lib/bedrock"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "var/lib/bedrock/restore.json"), []byte(marker), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := Tick(context.Background(), k8sClient, deps); err != nil {
 		t.Fatal(err)
 	}
 	got := getHost(t, "node-a").Status.Restore
-	if got == nil || got.Backup != restore.Backup {
-		t.Fatalf("Tick must keep status.restore, got %+v", got)
+	if got == nil || got.Backup != "/var/lib/bedrock/backups/a.tar.gz" || !got.CompletedAt.Time.Equal(time.Date(2026, 10, 1, 10, 0, 0, 0, time.UTC)) {
+		t.Fatalf("restore %+v", got)
 	}
 }
 
