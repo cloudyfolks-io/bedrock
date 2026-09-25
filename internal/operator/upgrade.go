@@ -43,6 +43,7 @@ type upgradeEnv struct {
 	Gates        release.Gates
 	PollInterval time.Duration
 	GroupTimeout time.Duration
+	Dial         func(ctx context.Context, address string) error
 }
 
 type phaseResult struct {
@@ -324,5 +325,6 @@ func newPhases() map[string]phaseFunc {
 		v1alpha1.PhaseControlPlane: controlPlane,
 		v1alpha1.PhaseComponents:   components,
 		v1alpha1.PhaseWorkers:      workers,
+		v1alpha1.PhaseVerify:       verify,
 	}
 }
