@@ -323,5 +323,6 @@ func newPhases() map[string]phaseFunc {
 		v1alpha1.PhasePreload:      preload,
 		v1alpha1.PhaseControlPlane: controlPlane,
 		v1alpha1.PhaseComponents:   components,
+		v1alpha1.PhaseWorkers:      workers,
 	}
 }
