@@ -79,9 +79,6 @@ func smokeTest(ctx context.Context, env upgradeEnv, cluster v1alpha1.Cluster, ho
 	case !result.Done:
 		return phaseResult{Message: "verify: " + result.Message}, nil
 	}
-	if err := deleteSmokeVM(ctx, env.Client); err != nil {
-		return phaseResult{}, err
-	}
 	if err := appendStep(ctx, env.Client, *cluster.Status.Upgrade, hosts, nodes, v1alpha1.StepPrune); err != nil {
 		return phaseResult{}, err
 	}

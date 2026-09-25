@@ -159,13 +159,16 @@ func TestVerifyPhase(t *testing.T) {
 	run(phaseResult{Message: "verify: smoke VM 10.244.0.9:22: connection refused"})
 	dialErr = nil
 	run(phaseResult{Message: "verify: smoke VM reached 10.244.0.9:22, disk skipped: no StorageClass block"})
-	if _, ok := smokeVMExists(t, ctx, c); ok {
-		t.Fatal("the smoke VM must be deleted")
+	if _, ok := smokeVMExists(t, ctx, c); !ok {
+		t.Fatal("the smoke VM must stay until prune shows")
 	}
 	if steps := getNodeUpgrade(t, ctx, c, "node-a").Spec.Steps; !slices.Equal(steps, []string{v1alpha1.StepPreload, v1alpha1.StepPrune}) {
 		t.Fatalf("steps %v", steps)
 	}
 	run(phaseResult{Message: "verify: prune 0/1 nodes, waiting for node-a"})
+	if _, ok := smokeVMExists(t, ctx, c); ok {
+		t.Fatal("the smoke VM must be deleted")
+	}
 	if len(dialed) != 2 {
 		t.Fatalf("a passed smoke test must not run again: dialed %v", dialed)
 	}
