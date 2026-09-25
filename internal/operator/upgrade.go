@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"slices"
+	"strings"
 	"time"
 
 	"k8s.io/apimachinery/pkg/api/meta"
@@ -130,7 +131,7 @@ func decide(cluster v1alpha1.Cluster) decision {
 	case action == v1alpha1.UpgradeActionResume:
 		return decision{Kind: decisionResume}
 	case action == v1alpha1.UpgradeActionAbort && slices.Contains(noRollbackPhases(), phase):
-		return decision{Kind: decisionRefuseAbort, Message: fmt.Sprintf("abort refused in %s: no rollback after Components started; resume continues the upgrade", phase)}
+		return decision{Kind: decisionRefuseAbort, Message: keepFailure(status, fmt.Sprintf("abort refused in %s: no rollback after Components started; resume continues the upgrade", phase))}
 	case action == v1alpha1.UpgradeActionAbort && phase == v1alpha1.PhaseControlPlane:
 		return decision{Kind: decisionRestore}
 	case action == v1alpha1.UpgradeActionAbort:
@@ -152,6 +153,17 @@ func decide(cluster v1alpha1.Cluster) decision {
 func abortEnded(cluster v1alpha1.Cluster) bool {
 	progressing := meta.FindStatusCondition(cluster.Status.Conditions, v1alpha1.ConditionProgressing)
 	return progressing != nil && progressing.Status == metav1.ConditionFalse && progressing.Reason == v1alpha1.ReasonAborted && progressing.ObservedGeneration == cluster.Generation
+}
+
+func keepFailure(status v1alpha1.ClusterStatus, message string) string {
+	progressing := meta.FindStatusCondition(status.Conditions, v1alpha1.ConditionProgressing)
+	switch {
+	case status.Phase != v1alpha1.PhaseFailed || progressing == nil || progressing.Message == "":
+		return message
+	case strings.HasSuffix(progressing.Message, message):
+		return progressing.Message
+	}
+	return progressing.Message + "; " + message
 }
 
 func restoredByHand(status v1alpha1.ClusterStatus) bool {

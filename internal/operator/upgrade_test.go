@@ -92,6 +92,11 @@ func TestDecide(t *testing.T) {
 	}
 	restoredByHand := withAction(failed(v1alpha1.PhaseControlPlane), v1alpha1.UpgradeActionResume)
 	restoredByHand.Status = restoreManual(restoredByHand.Status, "restore on node-a failed: exit status 1: follow "+restoreRunbook, 3)
+	refusal := "abort refused in Workers: no rollback after Components started; resume continues the upgrade"
+	workersFailed := withAction(failed(v1alpha1.PhaseWorkers), v1alpha1.UpgradeActionAbort)
+	workersFailed.Status = failPhase(running(v1alpha1.PhaseWorkers).Status, "workers: node-b drain timed out", 3)
+	refusedTwice := workersFailed
+	refusedTwice.Status = failPhase(workersFailed.Status, "workers: node-b drain timed out; "+refusal, 4)
 	abortedAfterABlock := blockedAt(5)
 	abortedAfterABlock.Status = abortUpgrade(abortedAfterABlock.Status, "", 5)
 	cases := map[string]struct {
@@ -115,6 +120,8 @@ func TestDecide(t *testing.T) {
 		"blocked with a new target":   {blockedAt(6), decision{Kind: decisionStart}},
 		"aborted after a block":       {abortedAfterABlock, decision{Kind: decisionEndAbort}},
 		"resume after manual restore": {restoredByHand, decision{Kind: decisionIgnore, Message: "resume is not possible after a manual restore: follow docs/runbooks/restore-control-plane.md"}},
+		"refusal keeps the failure":   {workersFailed, decision{Kind: decisionRefuseAbort, Message: "workers: node-b drain timed out; " + refusal}},
+		"refusal added once":          {refusedTwice, decision{Kind: decisionRefuseAbort, Message: "workers: node-b drain timed out; " + refusal}},
 	}
 	for name, tc := range cases {
 		t.Run(name, func(t *testing.T) {
