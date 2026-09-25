@@ -1,6 +1,7 @@
 package operator
 
 import (
+	"context"
 	"fmt"
 	"maps"
 	"slices"
@@ -13,11 +14,13 @@ import (
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 	sigyaml "sigs.k8s.io/yaml"
 
 	"github.com/cloudyfolks-labs/bedrock/api/v1alpha1"
 	"github.com/cloudyfolks-labs/bedrock/internal/release"
 	"github.com/cloudyfolks-labs/bedrock/internal/settings"
+	"github.com/cloudyfolks-labs/bedrock/internal/ssa"
 )
 
 func OperatorRole(bundle release.Bundle) (rbacv1.ClusterRole, error) {
@@ -36,6 +39,14 @@ func OperatorRole(bundle release.Bundle) (rbacv1.ClusterRole, error) {
 		ObjectMeta: metav1.ObjectMeta{Name: operatorDeployment, Labels: map[string]string{release.ComponentLabel: "bedrock"}},
 		Rules:      mergeRules(append(rules, fixedRules()...)),
 	}, nil
+}
+
+func ensureOperatorRole(ctx context.Context, c client.Client, bundle release.Bundle) error {
+	role, err := OperatorRole(bundle)
+	if err != nil {
+		return err
+	}
+	return ssa.Apply(ctx, c, &role, v1alpha1.OperatorFieldManager)
 }
 
 func RoleYAML(role rbacv1.ClusterRole) ([]byte, error) {
@@ -77,10 +88,12 @@ func fixedRules() []rbacv1.PolicyRule {
 		{APIGroups: []string{""}, Resources: []string{"events"}, Verbs: []string{"create", "patch"}},
 		{APIGroups: []string{"coordination.k8s.io"}, Resources: []string{"leases"}, Verbs: standardVerbs()},
 		{APIGroups: []string{"apps"}, Resources: []string{"controllerrevisions"}, Verbs: read},
+		{APIGroups: []string{"apps"}, Resources: []string{"deployments"}, Verbs: []string{"get", "patch"}},
 		{APIGroups: []string{"storage.k8s.io"}, Resources: []string{"storageclasses"}, Verbs: read},
 		{APIGroups: []string{planGVK.Group}, Resources: []string{"plans"}, Verbs: standardVerbs()},
 		{APIGroups: []string{vmGVK.Group}, Resources: []string{"virtualmachineinstances", "virtualmachines"}, Verbs: standardVerbs()},
 		{APIGroups: []string{rbacv1.GroupName}, Resources: []string{"clusterrolebindings", "clusterroles", "rolebindings", "roles"}, Verbs: []string{"bind", "escalate"}},
+		{APIGroups: []string{rbacv1.GroupName}, Resources: []string{"clusterroles"}, Verbs: []string{"patch"}},
 	}
 }
 

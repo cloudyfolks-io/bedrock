@@ -65,6 +65,13 @@ rules:
   - list
   - watch
 - apiGroups:
+  - apps
+  resources:
+  - deployments
+  verbs:
+  - get
+  - patch
+- apiGroups:
   - autopilot.k0sproject.io
   resources:
   - plans
@@ -239,6 +246,12 @@ rules:
   - patch
   - update
   - watch
+- apiGroups:
+  - rbac.authorization.k8s.io
+  resources:
+  - clusterroles
+  verbs:
+  - patch
 - apiGroups:
   - scheduling.k8s.io
   resources:

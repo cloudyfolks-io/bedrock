@@ -33,7 +33,7 @@ type upgradeWorld struct {
 
 func flowBundle(t *testing.T, version, image string, upgradeFrom []string) release.Bundle {
 	t.Helper()
-	bundle := testBundle(t)
+	bundle := rbacBundle(t)
 	bundle.Spec.Version = version
 	bundle.Spec.Image = image
 	bundle.Spec.K0sVersion = targetK0s

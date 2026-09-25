@@ -2,12 +2,14 @@ package operator
 
 import (
 	"context"
+	"reflect"
 	"slices"
 	"sync/atomic"
 	"testing"
 	"time"
 
 	corev1 "k8s.io/api/core/v1"
+	rbacv1 "k8s.io/api/rbac/v1"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	ctrl "sigs.k8s.io/controller-runtime"
@@ -212,6 +214,37 @@ func TestClusterReconcilerStartsAnUpgradeOnTheOldOperator(t *testing.T) {
 	}
 	if progressing == nil || progressing.Reason != v1alpha1.ReasonUpgrading || progressing.ObservedGeneration != got.Generation || result.RequeueAfter != time.Second {
 		t.Fatalf("progressing %+v result %+v", progressing, result)
+	}
+}
+
+func TestClusterReconcilerAppliesItsRoleBeforeUpgrading(t *testing.T) {
+	c, _ := StartTestEnv(t)
+	ctx := context.Background()
+	bundle := rbacBundle(t)
+	bundle.Spec.Version = "v2"
+	createClusterWithStatus(t, ctx, c, "v2", v1alpha1.ClusterStatus{Version: "v1", Phase: v1alpha1.PhaseIdle})
+	existing := &rbacv1.ClusterRole{
+		TypeMeta:   metav1.TypeMeta{APIVersion: rbacv1.SchemeGroupVersion.String(), Kind: "ClusterRole"},
+		ObjectMeta: metav1.ObjectMeta{Name: operatorDeployment},
+		Rules:      []rbacv1.PolicyRule{{APIGroups: []string{""}, Resources: []string{"pods"}, Verbs: []string{"get"}}},
+	}
+	if err := c.Create(ctx, existing); err != nil {
+		t.Fatal(err)
+	}
+	r := &ClusterReconciler{Client: c, Bundle: bundle, Gates: release.Gates{}, Interval: 100 * time.Millisecond, GroupTimeout: time.Second, UpgradeInterval: time.Second}
+	if _, err := r.Reconcile(ctx, ctrl.Request{NamespacedName: client.ObjectKey{Name: v1alpha1.ClusterName}}); err != nil {
+		t.Fatal(err)
+	}
+	want, err := OperatorRole(bundle)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got rbacv1.ClusterRole
+	if err := c.Get(ctx, client.ObjectKey{Name: operatorDeployment}, &got); err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(got.Rules, want.Rules) {
+		t.Fatalf("rules %+v, want %+v", got.Rules, want.Rules)
 	}
 }
 

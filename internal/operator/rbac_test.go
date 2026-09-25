@@ -118,6 +118,19 @@ func TestOperatorRoleCoversEveryBedrockCRD(t *testing.T) {
 	}
 }
 
+func TestOperatorRoleCanAlwaysPatchItself(t *testing.T) {
+	role, err := OperatorRole(rbacBundle(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !allows(role, "rbac.authorization.k8s.io", "clusterroles", "patch") {
+		t.Fatal("the operator must patch its own ClusterRole on every reconcile, even when the release renders no other ClusterRole")
+	}
+	if !allows(role, "apps", "deployments", "get") || !allows(role, "apps", "deployments", "patch") {
+		t.Fatal("the operator must read and patch its own Deployment to switch images, even when the release renders no Deployment")
+	}
+}
+
 func TestRoleYAML(t *testing.T) {
 	role, err := OperatorRole(rbacBundle(t))
 	if err != nil {

@@ -48,6 +48,9 @@ func (r *ClusterReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 	case routeOld:
 		return runUpgrade(ctx, r.upgradeEnv(), cluster, oldRole())
 	case routeNew:
+		if err := ensureOperatorRole(ctx, r.Client, r.Bundle); err != nil {
+			return ctrl.Result{}, err
+		}
 		return runUpgrade(ctx, r.upgradeEnv(), cluster, newRole())
 	}
 	return ctrl.Result{}, r.writeStatus(ctx, func(s *v1alpha1.ClusterStatus) {
