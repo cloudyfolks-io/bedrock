@@ -71,3 +71,35 @@ jobs:
       - run: make bundle VERSION=dev IMAGE=localhost:5000/bedrock:dev PIN_DIGESTS=1
       - run: docker rm -f registry
       - run: sudo -E env "PATH=$PATH" KUBECONFIG=/var/lib/k0s/pki/admin.conf BUNDLE=dist/bedrock-dev-bundle-amd64.tar.zst IMAGE=localhost:5000/bedrock:dev hack/e2e-init.sh
+  e2e-upgrade:
+    name: ${{ matrix.name }}
+    runs-on: ubuntu-latest
+    needs: test
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: e2e-upgrade
+            abort: ""
+          - name: e2e-upgrade-abort
+            abort: ControlPlane
+    env:
+      VERSION_A: v0.0.0-e2e.1
+      VERSION_B: v0.0.0-e2e.2
+      K0S_A: v1.36.2+k0s.0
+      K0S_B: v1.36.3+k0s.0
+      ABORT_IN: ${{ matrix.abort }}
+    steps:
+      - uses: actions/checkout@v5
+      - run: sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL && df -h /
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+      - uses: azure/setup-helm@v4
+        with:
+          version: v3.19.0
+      - run: docker run --rm -d -p 5000:5000 --name registry registry:3
+      - run: for i in $(seq 1 30); do curl -sf http://localhost:5000/v2/ && break; sleep 1; done; curl -sf http://localhost:5000/v2/
+      - run: hack/e2e-upgrade-build.sh && rm -rf dist/cache
+      - run: docker rm -f registry && docker system prune -af && df -h /
+      - run: sudo -E env "PATH=$PATH" hack/e2e-upgrade.sh
