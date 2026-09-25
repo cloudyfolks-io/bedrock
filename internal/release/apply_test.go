@@ -5,12 +5,14 @@ import (
 	stderrors "errors"
 	"fmt"
 	"os"
+	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
 	"time"
 
 	corev1 "k8s.io/api/core/v1"
+	rbacv1 "k8s.io/api/rbac/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
@@ -268,5 +270,50 @@ func TestWaitGroupNotFoundThenTimeout(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "not found yet") {
 		t.Fatalf("expected not found yet message, got %v", err)
+	}
+}
+
+func loadOperatorManifestObjects(t *testing.T) []*unstructured.Unstructured {
+	t.Helper()
+	raw, err := os.ReadFile(filepath.Join("..", "..", "manifests", "90-bedrock", "operator.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	objects, err := splitDocuments(raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return objects
+}
+
+func TestApplyRenamesTheOperatorBindingWithoutChangingRoleRef(t *testing.T) {
+	c, _ := startTestEnv(t)
+	ctx := context.Background()
+	if err := c.Create(ctx, &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: SystemNamespace}}); err != nil {
+		t.Fatal(err)
+	}
+	old := &rbacv1.ClusterRoleBinding{
+		ObjectMeta: metav1.ObjectMeta{Name: "bedrock-operator"},
+		RoleRef:    rbacv1.RoleRef{APIGroup: rbacv1.GroupName, Kind: "ClusterRole", Name: "cluster-admin"},
+		Subjects:   []rbacv1.Subject{{Kind: "ServiceAccount", Name: "bedrock-operator", Namespace: SystemNamespace}},
+	}
+	if err := c.Create(ctx, old); err != nil {
+		t.Fatal(err)
+	}
+	objects := loadOperatorManifestObjects(t)
+	if err := (Applier{Client: c}).Apply(ctx, Group{Name: "bedrock", Objects: objects}); err != nil {
+		t.Fatal(err)
+	}
+	var scoped rbacv1.ClusterRoleBinding
+	if err := c.Get(ctx, client.ObjectKey{Name: "bedrock-operator-scoped"}, &scoped); err != nil {
+		t.Fatal(err)
+	}
+	if scoped.RoleRef.Name != "bedrock-operator" {
+		t.Fatalf("roleRef %+v", scoped.RoleRef)
+	}
+	for _, obj := range objects {
+		if obj.GetKind() == "ClusterRoleBinding" && obj.GetName() == "bedrock-operator" {
+			t.Fatal("the manifest must not define a ClusterRoleBinding named bedrock-operator, so prune removes the old one")
+		}
 	}
 }

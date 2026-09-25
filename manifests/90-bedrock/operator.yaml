@@ -16,7 +16,7 @@ metadata:
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding
 metadata:
-  name: bedrock-operator
+  name: bedrock-operator-scoped
   labels:
     bedrock.cloudyfolks.io/component: bedrock
 roleRef:
