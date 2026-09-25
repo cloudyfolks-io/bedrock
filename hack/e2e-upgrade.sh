@@ -62,10 +62,19 @@ if [ -n "$abort_in" ]; then
   for _ in $(seq 1 720); do
     phase=$(kubectl get cluster cluster -o jsonpath='{.status.phase}' 2>/dev/null || true)
     if [ "$phase" = "$abort_in" ]; then break; fi
+    if ! kill -0 "$upgrade" 2>/dev/null; then break; fi
     sleep 5
   done
   test "$phase" = "$abort_in"
-  "$cli_b" upgrade abort --yes
+  aborted=0
+  for _ in $(seq 1 12); do
+    if "$cli_b" upgrade abort --yes; then
+      aborted=1
+      break
+    fi
+    sleep 5
+  done
+  test "$aborted" -eq 1
 fi
 set +e
 wait "$upgrade"
