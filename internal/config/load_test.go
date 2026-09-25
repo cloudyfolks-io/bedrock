@@ -1,8 +1,11 @@
 package config
 
 import (
+	"os"
 	"path/filepath"
 	"testing"
+
+	"sigs.k8s.io/yaml"
 
 	"github.com/cloudyfolks-labs/bedrock/api/v1alpha1"
 )
@@ -102,4 +105,55 @@ func TestToSettingsVirtualization(t *testing.T) {
 		}
 	}
 	t.Fatal("virt.emulation setting missing")
+}
+
+func TestLoadResolvesBundleBesideConfig(t *testing.T) {
+	base, err := os.ReadFile(filepath.Join("testdata", "single-node.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	dir := t.TempDir()
+	cases := []struct {
+		bundle string
+		want   string
+	}{
+		{"bundle.tar.zst", filepath.Join(dir, "bundle.tar.zst")},
+		{"/srv/bedrock/bundle.tar.zst", "/srv/bedrock/bundle.tar.zst"},
+		{"", ""},
+	}
+	for _, tc := range cases {
+		cfg, err := Load(writeConfigWithBundle(t, base, dir, tc.bundle))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if cfg.Spec.Registry.Bundle != tc.want {
+			t.Fatalf("bundle %q resolved to %q, want %q", tc.bundle, cfg.Spec.Registry.Bundle, tc.want)
+		}
+	}
+}
+
+func writeConfigWithBundle(t *testing.T, base []byte, dir, bundle string) string {
+	t.Helper()
+	var doc map[string]any
+	if err := yaml.Unmarshal(base, &doc); err != nil {
+		t.Fatal(err)
+	}
+	spec := doc["spec"].(map[string]any)
+	registry, _ := spec["registry"].(map[string]any)
+	next := map[string]any{"bundle": bundle}
+	for key, value := range registry {
+		if key != "bundle" {
+			next[key] = value
+		}
+	}
+	spec["registry"] = next
+	raw, err := yaml.Marshal(doc)
+	if err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(dir, "cluster.yaml")
+	if err := os.WriteFile(path, raw, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	return path
 }

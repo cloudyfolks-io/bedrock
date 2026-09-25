@@ -5,6 +5,7 @@ import (
 	"net"
 	"net/netip"
 	"os"
+	"path/filepath"
 	"slices"
 	"strconv"
 
@@ -29,11 +30,24 @@ func Load(path string) (v1alpha1.ClusterConfig, error) {
 	if err := yaml.UnmarshalStrict(raw, &cfg); err != nil {
 		return v1alpha1.ClusterConfig{}, fmt.Errorf("parse %s: %w", path, err)
 	}
-	cfg = WithDefaults(cfg)
+	cfg = withBundleBesides(WithDefaults(cfg), filepath.Dir(path))
 	if err := Validate(cfg); err != nil {
 		return v1alpha1.ClusterConfig{}, err
 	}
 	return cfg, nil
+}
+
+func withBundleBesides(cfg v1alpha1.ClusterConfig, dir string) v1alpha1.ClusterConfig {
+	out := *cfg.DeepCopy()
+	out.Spec.Registry.Bundle = resolvePath(dir, out.Spec.Registry.Bundle)
+	return out
+}
+
+func resolvePath(dir, path string) string {
+	if path == "" || filepath.IsAbs(path) {
+		return path
+	}
+	return filepath.Join(dir, path)
 }
 
 func WithDefaults(cfg v1alpha1.ClusterConfig) v1alpha1.ClusterConfig {
