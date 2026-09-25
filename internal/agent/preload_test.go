@@ -23,7 +23,23 @@ type fakeContainerd struct {
 	calls    []string
 	images   map[string][]string
 	present  []string
+	targets  map[string]string
 	failures map[string]error
+}
+
+func imageListing(names []string, targets map[string]string) string {
+	lines := []string{"REF TYPE DIGEST SIZE PLATFORMS LABELS"}
+	for _, name := range names {
+		target, overridden := targets[name]
+		if _, digest, pinned := strings.Cut(name, "@"); !overridden && pinned {
+			target = digest
+		}
+		if target == "" {
+			target = "sha256:" + strings.Repeat("0", 64)
+		}
+		lines = append(lines, name+" application/vnd.oci.image.index.v1+json "+target+" 1.2 MiB linux/amd64 -")
+	}
+	return strings.Join(lines, "\n") + "\n"
 }
 
 func (f *fakeContainerd) Run(_ context.Context, name string, args ...string) (string, error) {
@@ -35,6 +51,8 @@ func (f *fakeContainerd) Run(_ context.Context, name string, args ...string) (st
 	switch {
 	case call == "/usr/local/bin/k0s ctr --namespace k8s.io images ls --quiet":
 		return strings.Join(f.present, "\n") + "\n", nil
+	case call == "/usr/local/bin/k0s ctr --namespace k8s.io images ls":
+		return imageListing(f.present, f.targets), nil
 	case strings.HasPrefix(call, "/usr/local/bin/k0s ctr --namespace k8s.io images import "):
 		f.present = append(f.present, f.images[filepath.Base(strings.TrimPrefix(call, "/usr/local/bin/k0s ctr --namespace k8s.io images import "))]...)
 		return "", nil
@@ -194,6 +212,17 @@ func TestPreloadFailsWhenAnImageStaysMissing(t *testing.T) {
 	_, err := preload(context.Background(), fixture.env)
 	if err == nil || !strings.Contains(err.Error(), "quay.io/a/b@sha256:1111") {
 		t.Fatalf("error %v must name the missing image", err)
+	}
+}
+
+func TestPreloadFailsWhenAnImageHasAnotherDigest(t *testing.T) {
+	fixture := newPreloadFixture(t)
+	writeFixtureFile(t, filepath.Join(fixture.nodeRoot, "run/k0s/containerd.sock"), "")
+	other := "sha256:" + strings.Repeat("9", 64)
+	fixture.container.targets = map[string]string{"quay.io/a/b@sha256:" + strings.Repeat("1", 64): other}
+	_, err := preload(context.Background(), fixture.env)
+	if err == nil || !strings.Contains(err.Error(), pinnedImage) || !strings.Contains(err.Error(), other) {
+		t.Fatalf("error %v must name the image and the digest containerd holds", err)
 	}
 }
 

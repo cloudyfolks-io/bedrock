@@ -144,7 +144,7 @@ func containerdImages(ctx context.Context, e host.Exec) ([]string, error) {
 }
 
 func requireImages(ctx context.Context, e host.Exec, wanted []string) error {
-	present, err := containerdImages(ctx, e)
+	targets, err := containerdTargets(ctx, e)
 	if err != nil {
 		return err
 	}
@@ -153,11 +153,34 @@ func requireImages(ctx context.Context, e host.Exec, wanted []string) error {
 		if err != nil {
 			return err
 		}
-		if !containsAll(present, names) {
-			return fmt.Errorf("image %s missing after import, want names %v", image, names)
+		for _, name := range names {
+			target, present := targets[name]
+			_, digest, pinned := strings.Cut(name, "@")
+			switch {
+			case !present:
+				return fmt.Errorf("image %s missing after import, want names %v", image, names)
+			case pinned && target != digest:
+				return fmt.Errorf("image %s: %s points to %s after import, want %s", image, name, target, digest)
+			}
 		}
 	}
 	return nil
+}
+
+func containerdTargets(ctx context.Context, e host.Exec) (map[string]string, error) {
+	out, err := e.Run(ctx, k0s.DefaultBinary, "ctr", "--namespace", "k8s.io", "images", "ls")
+	if err != nil {
+		return nil, err
+	}
+	targets := map[string]string{}
+	for _, line := range strings.Split(out, "\n") {
+		fields := strings.Fields(line)
+		if len(fields) < 3 || fields[0] == "REF" {
+			continue
+		}
+		targets[fields[0]] = fields[2]
+	}
+	return targets, nil
 }
 
 func containsAll(present, names []string) bool {
