@@ -135,7 +135,7 @@ func releaseProblems(in preflightInput) []string {
 	if ready := meta.FindStatusCondition(in.Target.Status.Conditions, v1alpha1.ConditionReady); ready != nil && ready.Status == metav1.ConditionFalse {
 		problems = append(problems, fmt.Sprintf("release: Release/%s is not ready: %s", in.To, ready.Message))
 	}
-	if !in.Target.AllowsUpgradeFrom(in.Running) {
+	if !v1alpha1.ReleaseAllowsUpgrade(*in.Target, in.Running) {
 		problems = append(problems, fmt.Sprintf("release: %s does not list %s in upgradeFrom", in.To, in.Running))
 	}
 	return problems

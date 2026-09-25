@@ -216,8 +216,8 @@ type HostList struct {
 	Items           []Host `json:"items"`
 }
 
-func (h *Host) HasRole(role string) bool {
-	return slices.Contains(h.Spec.Roles, role)
+func HostHasRole(host Host, role string) bool {
+	return slices.Contains(host.Spec.Roles, role)
 }
 
 func init() {

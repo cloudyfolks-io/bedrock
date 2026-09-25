@@ -16,12 +16,12 @@ func TestClusterPhasesAreDistinct(t *testing.T) {
 	}
 }
 
-func TestReleaseAllowsUpgradeFrom(t *testing.T) {
+func TestReleaseAllowsUpgrade(t *testing.T) {
 	release := Release{Spec: ReleaseSpec{Version: "v0.2.0", UpgradeFrom: []string{"v0.1.0", "v0.1.1"}}}
-	if !release.AllowsUpgradeFrom("v0.1.1") {
+	if !ReleaseAllowsUpgrade(release, "v0.1.1") {
 		t.Fatal("v0.1.1 must be allowed")
 	}
-	if release.AllowsUpgradeFrom("v0.0.9") {
+	if ReleaseAllowsUpgrade(release, "v0.0.9") {
 		t.Fatal("v0.0.9 must not be allowed")
 	}
 }

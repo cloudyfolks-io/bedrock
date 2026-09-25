@@ -20,10 +20,10 @@ func TestValidRole(t *testing.T) {
 
 func TestHostHasRole(t *testing.T) {
 	host := Host{Spec: HostSpec{Roles: []string{RoleControlPlane, RoleWorkload}}}
-	if !host.HasRole(RoleWorkload) {
+	if !HostHasRole(host, RoleWorkload) {
 		t.Fatal("workload expected")
 	}
-	if host.HasRole(RoleCephOSD) {
+	if HostHasRole(host, RoleCephOSD) {
 		t.Fatal("ceph-osd not expected")
 	}
 }

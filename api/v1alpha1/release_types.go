@@ -57,8 +57,8 @@ type ReleaseList struct {
 	Items           []Release `json:"items"`
 }
 
-func (r *Release) AllowsUpgradeFrom(version string) bool {
-	return slices.Contains(r.Spec.UpgradeFrom, version)
+func ReleaseAllowsUpgrade(release Release, version string) bool {
+	return slices.Contains(release.Spec.UpgradeFrom, version)
 }
 
 func init() {
