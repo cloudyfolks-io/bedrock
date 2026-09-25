@@ -17,7 +17,9 @@ import (
 	"github.com/cloudyfolks-labs/bedrock/internal/k0s"
 )
 
-var certificateDirs = []string{"var/lib/k0s/pki", "var/lib/k0s/pki/etcd", "var/lib/kubelet/pki"}
+var certificateDirs = []string{"var/lib/k0s/pki", "var/lib/k0s/pki/etcd"}
+
+var kubeletCertificates = []string{"var/lib/kubelet/pki/kubelet-client-current.pem", "var/lib/kubelet/pki/kubelet-server-current.pem"}
 
 func hostChecks(ctx context.Context, deps Deps) *v1alpha1.HostChecks {
 	free, _ := deps.FreeBytes(filepath.Join(deps.Root, "var", "lib"))
@@ -68,13 +70,18 @@ func etcdMembers(ctx context.Context, e host.Exec, root string) int32 {
 }
 
 func certificatesNotAfter(root string) *metav1.Time {
-	var earliest *metav1.Time
+	var times []time.Time
 	for _, dir := range certificateDirs {
-		for _, notAfter := range dirNotAfters(filepath.Join(root, dir)) {
-			if earliest == nil || notAfter.Before(earliest.Time) {
-				found := metav1.NewTime(notAfter)
-				earliest = &found
-			}
+		times = append(times, dirNotAfters(filepath.Join(root, dir))...)
+	}
+	for _, file := range kubeletCertificates {
+		times = append(times, fileNotAfters(filepath.Join(root, file))...)
+	}
+	var earliest *metav1.Time
+	for _, notAfter := range times {
+		if earliest == nil || notAfter.Before(earliest.Time) {
+			found := metav1.NewTime(notAfter)
+			earliest = &found
 		}
 	}
 	return earliest
@@ -90,13 +97,17 @@ func dirNotAfters(dir string) []time.Time {
 		if entry.IsDir() || !(strings.HasSuffix(entry.Name(), ".crt") || strings.HasSuffix(entry.Name(), ".pem")) {
 			continue
 		}
-		raw, err := os.ReadFile(filepath.Join(dir, entry.Name()))
-		if err != nil {
-			continue
-		}
-		times = append(times, pemNotAfters(raw)...)
+		times = append(times, fileNotAfters(filepath.Join(dir, entry.Name()))...)
 	}
 	return times
+}
+
+func fileNotAfters(path string) []time.Time {
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return nil
+	}
+	return pemNotAfters(raw)
 }
 
 func pemNotAfters(raw []byte) []time.Time {

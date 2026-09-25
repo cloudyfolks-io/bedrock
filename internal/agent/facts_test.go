@@ -52,6 +52,24 @@ func TestCertificatesNotAfterFindsTheEarliest(t *testing.T) {
 	}
 }
 
+func TestCertificatesNotAfterReadsOnlyTheKubeletCertificatesInUse(t *testing.T) {
+	root := t.TempDir()
+	base := time.Date(2027, 1, 1, 0, 0, 0, 0, time.UTC)
+	kubelet := filepath.Join(root, "var/lib/kubelet/pki")
+	writeCertificate(t, filepath.Join(root, "var/lib/k0s/pki/server.crt"), base.Add(48*time.Hour))
+	writeCertificate(t, filepath.Join(kubelet, "kubelet-client-2027-01-01-00-00-00.pem"), base.Add(24*time.Hour))
+	if err := os.Symlink("kubelet-client-2027-01-01-00-00-00.pem", filepath.Join(kubelet, "kubelet-client-current.pem")); err != nil {
+		t.Fatal(err)
+	}
+	writeCertificate(t, filepath.Join(kubelet, "kubelet-server-current.pem"), base.Add(12*time.Hour))
+	writeCertificate(t, filepath.Join(kubelet, "kubelet-client-2026-01-01-00-00-00.pem"), base.Add(-365*24*time.Hour))
+	writeCertificate(t, filepath.Join(kubelet, "kubelet.crt"), base.Add(-30*24*time.Hour))
+	got := certificatesNotAfter(root)
+	if want := base.Add(12 * time.Hour); got == nil || !got.Time.Equal(want) {
+		t.Fatalf("earliest notAfter %v, want %v: a rotated client certificate and kubelet.crt must not count", got, want)
+	}
+}
+
 func TestCertificatesNotAfterWithoutCertificates(t *testing.T) {
 	if got := certificatesNotAfter(t.TempDir()); got != nil {
 		t.Fatalf("no certificates must give nil, got %v", got)
