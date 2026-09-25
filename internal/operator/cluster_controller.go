@@ -20,6 +20,7 @@ import (
 
 type ClusterReconciler struct {
 	Client          client.Client
+	APIReader       client.Reader
 	Bundle          release.Bundle
 	Gates           release.Gates
 	Interval        time.Duration
@@ -37,7 +38,7 @@ func (r *ClusterReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 		return ctrl.Result{}, err
 	}
 	var cluster v1alpha1.Cluster
-	if err := r.Client.Get(ctx, req.NamespacedName, &cluster); err != nil {
+	if err := r.APIReader.Get(ctx, req.NamespacedName, &cluster); err != nil {
 		return ctrl.Result{}, client.IgnoreNotFound(err)
 	}
 	switch route(cluster, r.Bundle.Spec.Version) {

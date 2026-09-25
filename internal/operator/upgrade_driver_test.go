@@ -2,6 +2,7 @@ package operator
 
 import (
 	"context"
+	"path/filepath"
 	"reflect"
 	"slices"
 	"sync/atomic"
@@ -202,7 +203,7 @@ func TestClusterReconcilerStartsAnUpgradeOnTheOldOperator(t *testing.T) {
 	c, _ := StartTestEnv(t)
 	ctx := context.Background()
 	createClusterWithStatus(t, ctx, c, "v0.2.0", v1alpha1.ClusterStatus{Version: "v0.1.0-test", Phase: v1alpha1.PhaseIdle})
-	r := &ClusterReconciler{Client: c, Bundle: testBundle(t), Gates: release.Gates{}, Interval: 100 * time.Millisecond, GroupTimeout: time.Second, UpgradeInterval: time.Second}
+	r := &ClusterReconciler{Client: c, APIReader: c, Bundle: testBundle(t), Gates: release.Gates{}, Interval: 100 * time.Millisecond, GroupTimeout: time.Second, UpgradeInterval: time.Second}
 	result, err := r.Reconcile(ctx, ctrl.Request{NamespacedName: client.ObjectKey{Name: v1alpha1.ClusterName}})
 	if err != nil {
 		t.Fatal(err)
@@ -231,7 +232,7 @@ func TestClusterReconcilerAppliesItsRoleBeforeUpgrading(t *testing.T) {
 	if err := c.Create(ctx, existing); err != nil {
 		t.Fatal(err)
 	}
-	r := &ClusterReconciler{Client: c, Bundle: bundle, Gates: release.Gates{}, Interval: 100 * time.Millisecond, GroupTimeout: time.Second, UpgradeInterval: time.Second}
+	r := &ClusterReconciler{Client: c, APIReader: c, Bundle: bundle, Gates: release.Gates{}, Interval: 100 * time.Millisecond, GroupTimeout: time.Second, UpgradeInterval: time.Second}
 	if _, err := r.Reconcile(ctx, ctrl.Request{NamespacedName: client.ObjectKey{Name: v1alpha1.ClusterName}}); err != nil {
 		t.Fatal(err)
 	}
@@ -253,7 +254,7 @@ func TestClusterReconcilerIgnoresActionsWithoutAnUpgrade(t *testing.T) {
 	ctx := context.Background()
 	createClusterWithStatus(t, ctx, c, "v0.1.0-test", v1alpha1.ClusterStatus{Version: "v0.1.0-test", Phase: v1alpha1.PhaseIdle})
 	setAction(t, ctx, c, v1alpha1.UpgradeActionAbort)
-	r := &ClusterReconciler{Client: c, Bundle: testBundle(t), Gates: release.Gates{}, Interval: 100 * time.Millisecond, GroupTimeout: time.Second}
+	r := &ClusterReconciler{Client: c, APIReader: c, Bundle: testBundle(t), Gates: release.Gates{}, Interval: 100 * time.Millisecond, GroupTimeout: time.Second}
 	if _, err := r.Reconcile(ctx, ctrl.Request{NamespacedName: client.ObjectKey{Name: v1alpha1.ClusterName}}); err != nil {
 		t.Fatal(err)
 	}
@@ -316,5 +317,81 @@ func TestAnswerActionKeepsANewerAction(t *testing.T) {
 	got := getCluster(t, ctx, c)
 	if got.Spec.Upgrade.Action != v1alpha1.UpgradeActionAbort {
 		t.Fatalf("action %q, want %q", got.Spec.Upgrade.Action, v1alpha1.UpgradeActionAbort)
+	}
+}
+
+type staleClusterClient struct {
+	client.Client
+	stale  v1alpha1.Cluster
+	served *atomic.Bool
+}
+
+func (c staleClusterClient) Get(ctx context.Context, key client.ObjectKey, obj client.Object, opts ...client.GetOption) error {
+	cluster, isCluster := obj.(*v1alpha1.Cluster)
+	if !isCluster || c.served.Swap(true) {
+		return c.Client.Get(ctx, key, obj, opts...)
+	}
+	c.stale.DeepCopyInto(cluster)
+	return nil
+}
+
+func withStaleCache(r ClusterReconciler, stale v1alpha1.Cluster) *ClusterReconciler {
+	next := r
+	next.Client = staleClusterClient{Client: r.Client, stale: stale, served: &atomic.Bool{}}
+	return &next
+}
+
+func reconcileCluster(t *testing.T, ctx context.Context, r *ClusterReconciler) {
+	t.Helper()
+	if _, err := r.Reconcile(ctx, ctrl.Request{NamespacedName: client.ObjectKey{Name: v1alpha1.ClusterName}}); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestClusterReconcilerIgnoresAStaleCacheAfterVerify(t *testing.T) {
+	c, _ := startTestEnvWithCRDs(t, filepath.Join("testdata", "crds"))
+	ctx := context.Background()
+	createOperatorDeployment(t, ctx, c, newImage)
+	createDepotHost(t, ctx, c, "node-a", v1alpha1.RoleControlPlane)
+	preloadedNodeUpgrade(t, ctx, c, "node-a")
+	upgrade := getNodeUpgrade(t, ctx, c, "node-a")
+	upgrade.Spec.Steps = append(upgrade.Spec.Steps, v1alpha1.StepPrune)
+	if err := c.Update(ctx, &upgrade); err != nil {
+		t.Fatal(err)
+	}
+	finishSteps(t, ctx, c, "node-a", v1alpha1.StepPrune)
+	createClusterWithStatus(t, ctx, c, "v2", upgradeStatusIn(v1alpha1.PhaseVerify))
+	r := ClusterReconciler{Client: c, APIReader: c, Bundle: flowBundle(t, "v2", newImage, []string{"v1"}), Gates: release.Gates{}, Interval: 50 * time.Millisecond, GroupTimeout: 10 * time.Second, Dial: func(context.Context, string) error { return nil }}
+	stale := getCluster(t, ctx, c)
+
+	reconcileCluster(t, ctx, &r)
+	if done := getCluster(t, ctx, c); done.Status.Phase != v1alpha1.PhaseIdle || done.Status.Version != "v2" {
+		t.Fatalf("setup: the last Verify reconcile must finish the upgrade: %+v", done.Status)
+	}
+	reconcileCluster(t, ctx, withStaleCache(r, stale))
+	if _, ok := smokeVMExists(t, ctx, c); ok {
+		t.Fatal("a stale cache must not start the smoke VM again")
+	}
+	if upgrades, err := listNodeUpgrades(ctx, c, "v2"); err != nil || len(upgrades) != 0 {
+		t.Fatalf("a stale cache must not create NodeUpgrades: %d %v", len(upgrades), err)
+	}
+}
+
+func TestClusterReconcilerIgnoresAStaleCacheAfterAbort(t *testing.T) {
+	c, ctx := abortWorld(t, v1alpha1.PhasePreload)
+	setAction(t, ctx, c, v1alpha1.UpgradeActionAbort)
+	r := ClusterReconciler{Client: c, APIReader: c, Bundle: flowBundle(t, "v1", oldImage, nil), Gates: release.Gates{}, Interval: 50 * time.Millisecond, GroupTimeout: 10 * time.Second}
+	reconcileCluster(t, ctx, &r)
+	finishSteps(t, ctx, c, "node-a", v1alpha1.StepCleanup)
+	finishSteps(t, ctx, c, "node-b", v1alpha1.StepCleanup)
+	stale := getCluster(t, ctx, c)
+
+	reconcileCluster(t, ctx, &r)
+	if done := getCluster(t, ctx, c); done.Spec.DesiredVersion != "v1" || done.Status.Upgrade != nil {
+		t.Fatalf("setup: the last abort reconcile must end the abort: spec %+v status %+v", done.Spec, done.Status)
+	}
+	reconcileCluster(t, ctx, withStaleCache(r, stale))
+	if upgrades, err := listNodeUpgrades(ctx, c, "v2"); err != nil || len(upgrades) != 0 {
+		t.Fatalf("a stale cache must not create cleanup NodeUpgrades: %d %v", len(upgrades), err)
 	}
 }

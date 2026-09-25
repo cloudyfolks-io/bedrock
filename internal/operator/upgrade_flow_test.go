@@ -65,7 +65,7 @@ func newUpgradeWorldAs(t *testing.T, operatorClient func(*testing.T, context.Con
 	operatorView := operatorClient(t, ctx, c, cfg)
 	operator := func(bundle release.Bundle) *ClusterReconciler {
 		return &ClusterReconciler{
-			Client: operatorView, Bundle: bundle, Gates: release.Gates{}, Interval: 50 * time.Millisecond, GroupTimeout: 10 * time.Second,
+			Client: operatorView, APIReader: operatorView, Bundle: bundle, Gates: release.Gates{}, Interval: 50 * time.Millisecond, GroupTimeout: 10 * time.Second,
 			Exec: func(context.Context, string, string, string, []string) ([]byte, error) { return nil, nil },
 			Dial: func(context.Context, string) error { return nil },
 		}

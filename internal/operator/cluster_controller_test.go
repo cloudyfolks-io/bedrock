@@ -70,7 +70,7 @@ func TestClusterReconcilerInstallsEmbeddedRelease(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	r := &ClusterReconciler{Client: mgr.GetClient(), Bundle: testBundle(t), Gates: release.Gates{}, Interval: 200 * time.Millisecond, GroupTimeout: 20 * time.Second}
+	r := &ClusterReconciler{Client: mgr.GetClient(), APIReader: mgr.GetAPIReader(), Bundle: testBundle(t), Gates: release.Gates{}, Interval: 200 * time.Millisecond, GroupTimeout: 20 * time.Second}
 	if err := r.SetupWithManager(mgr); err != nil {
 		t.Fatal(err)
 	}
@@ -122,7 +122,7 @@ func TestClusterReconcilerAwaitsUpgradeForOtherVersion(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	r := &ClusterReconciler{Client: mgr.GetClient(), Bundle: testBundle(t), Gates: release.Gates{}, Interval: 200 * time.Millisecond, GroupTimeout: 20 * time.Second}
+	r := &ClusterReconciler{Client: mgr.GetClient(), APIReader: mgr.GetAPIReader(), Bundle: testBundle(t), Gates: release.Gates{}, Interval: 200 * time.Millisecond, GroupTimeout: 20 * time.Second}
 	if err := r.SetupWithManager(mgr); err != nil {
 		t.Fatal(err)
 	}
@@ -169,7 +169,7 @@ func TestClusterReconcilerFailsAndResumes(t *testing.T) {
 		}
 		return release.Readiness{Ready: true}
 	}
-	r := &ClusterReconciler{Client: mgr.GetClient(), Bundle: testBundle(t), Gates: release.Gates{schema.GroupKind{Kind: "ConfigMap"}: gate}, Interval: 100 * time.Millisecond, GroupTimeout: 1 * time.Second}
+	r := &ClusterReconciler{Client: mgr.GetClient(), APIReader: mgr.GetAPIReader(), Bundle: testBundle(t), Gates: release.Gates{schema.GroupKind{Kind: "ConfigMap"}: gate}, Interval: 100 * time.Millisecond, GroupTimeout: 1 * time.Second}
 	if err := r.SetupWithManager(mgr); err != nil {
 		t.Fatal(err)
 	}
@@ -219,7 +219,7 @@ func TestClusterReconcilerWaitsForMasterNodes(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	r := &ClusterReconciler{Client: mgr.GetClient(), Bundle: testBundleUsingMasterIPs(t), Gates: release.Gates{}, Interval: 200 * time.Millisecond, GroupTimeout: 20 * time.Second}
+	r := &ClusterReconciler{Client: mgr.GetClient(), APIReader: mgr.GetAPIReader(), Bundle: testBundleUsingMasterIPs(t), Gates: release.Gates{}, Interval: 200 * time.Millisecond, GroupTimeout: 20 * time.Second}
 	if err := r.SetupWithManager(mgr); err != nil {
 		t.Fatal(err)
 	}
@@ -257,7 +257,7 @@ func TestClusterReconcilerInstallsWithoutMasterNodesWhenBundleDoesNotNeedThem(t 
 	if err != nil {
 		t.Fatal(err)
 	}
-	r := &ClusterReconciler{Client: mgr.GetClient(), Bundle: testBundle(t), Gates: release.Gates{}, Interval: 200 * time.Millisecond, GroupTimeout: 20 * time.Second}
+	r := &ClusterReconciler{Client: mgr.GetClient(), APIReader: mgr.GetAPIReader(), Bundle: testBundle(t), Gates: release.Gates{}, Interval: 200 * time.Millisecond, GroupTimeout: 20 * time.Second}
 	if err := r.SetupWithManager(mgr); err != nil {
 		t.Fatal(err)
 	}
