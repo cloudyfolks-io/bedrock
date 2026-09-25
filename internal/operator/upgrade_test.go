@@ -77,6 +77,13 @@ func TestDecide(t *testing.T) {
 	idle.Status.Phase = v1alpha1.PhaseIdle
 	retargeted := running(v1alpha1.PhaseBackup)
 	retargeted.Spec.DesiredVersion = "v3"
+	abortedAt := func(generation int64) v1alpha1.Cluster {
+		cluster := idle
+		cluster.Generation = 5
+		cluster.Status.Conditions = nil
+		setCondition(&cluster.Status, v1alpha1.ConditionProgressing, metav1.ConditionFalse, v1alpha1.ReasonAborted, "", generation)
+		return cluster
+	}
 	cases := map[string]struct {
 		cluster v1alpha1.Cluster
 		want    decision
@@ -91,6 +98,8 @@ func TestDecide(t *testing.T) {
 		"abort after Workers failed": {withAction(failed(v1alpha1.PhaseWorkers), v1alpha1.UpgradeActionAbort), decision{Kind: decisionRefuseAbort, Message: "abort refused in Workers: no rollback after Components started; resume continues the upgrade"}},
 		"abort in Verify":            {withAction(running(v1alpha1.PhaseVerify), v1alpha1.UpgradeActionAbort), decision{Kind: decisionRefuseAbort, Message: "abort refused in Verify: no rollback after Components started; resume continues the upgrade"}},
 		"desired changed":            {retargeted, decision{Kind: decisionRetarget, Message: "desiredVersion is v3 while the upgrade to v2 runs: set it back to v2, or abort"}},
+		"abort without its patch":    {abortedAt(5), decision{Kind: decisionEndAbort}},
+		"new start after an abort":   {abortedAt(4), decision{Kind: decisionStart}},
 	}
 	for name, tc := range cases {
 		t.Run(name, func(t *testing.T) {

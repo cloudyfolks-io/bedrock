@@ -31,6 +31,7 @@ const (
 	decisionRetarget    = "retarget"
 	decisionAbort       = "abort"
 	decisionRestore     = "restore"
+	decisionEndAbort    = "endAbort"
 
 	reasonInstalled     = "Installed"
 	reasonActionIgnored = "ActionIgnored"
@@ -128,6 +129,8 @@ func decide(cluster v1alpha1.Cluster) decision {
 		return decision{Kind: decisionRestore}
 	case action == v1alpha1.UpgradeActionAbort:
 		return decision{Kind: decisionAbort}
+	case status.Upgrade == nil && abortEnded(cluster):
+		return decision{Kind: decisionEndAbort}
 	case status.Upgrade == nil:
 		return decision{Kind: decisionStart}
 	case status.Upgrade.To != cluster.Spec.DesiredVersion:
@@ -136,6 +139,11 @@ func decide(cluster v1alpha1.Cluster) decision {
 		return decision{Kind: decisionWait}
 	}
 	return decision{Kind: decisionRun}
+}
+
+func abortEnded(cluster v1alpha1.Cluster) bool {
+	progressing := meta.FindStatusCondition(cluster.Status.Conditions, v1alpha1.ConditionProgressing)
+	return progressing != nil && progressing.Status == metav1.ConditionFalse && progressing.Reason == v1alpha1.ReasonAborted && progressing.ObservedGeneration == cluster.Generation
 }
 
 func startUpgrade(status v1alpha1.ClusterStatus, to string, now metav1.Time, generation int64) v1alpha1.ClusterStatus {
@@ -278,6 +286,8 @@ func runUpgrade(ctx context.Context, env upgradeEnv, cluster v1alpha1.Cluster, r
 		return again, role.Abort(ctx, env, cluster)
 	case decisionRestore:
 		return again, role.Restore(ctx, env, cluster)
+	case decisionEndAbort:
+		return again, endAbort(ctx, env.Client, cluster)
 	case decisionStart:
 		return again, writeClusterStatus(ctx, env.Client, func(s *v1alpha1.ClusterStatus) {
 			*s = startUpgrade(*s, cluster.Spec.DesiredVersion, now, generation)

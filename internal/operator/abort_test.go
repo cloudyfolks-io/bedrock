@@ -204,6 +204,21 @@ func TestAbortRerunKeepsTheCleanupReport(t *testing.T) {
 	}
 }
 
+func TestAbortEndsWhenItsSpecPatchIsLost(t *testing.T) {
+	c, _ := StartTestEnv(t)
+	ctx := context.Background()
+	createClusterWithStatus(t, ctx, c, "v2", upgradeStatusIn(v1alpha1.PhasePreload))
+	cluster := getCluster(t, ctx, c)
+	cluster.Status = abortUpgrade(cluster.Status, "", cluster.Generation)
+	if err := c.Status().Update(ctx, &cluster); err != nil {
+		t.Fatal(err)
+	}
+	got := runRole(t, ctx, c, oldRole())
+	if got.Spec.DesiredVersion != got.Status.Version || got.Spec.Upgrade.Action != "" || got.Status.Upgrade != nil || got.Status.Phase != v1alpha1.PhaseIdle {
+		t.Fatalf("an abort that lost its spec patch must end, not start again: spec %+v status %+v", got.Spec, got.Status)
+	}
+}
+
 func TestAbortWhenBlocked(t *testing.T) {
 	c, _ := StartTestEnv(t)
 	ctx := context.Background()
