@@ -124,7 +124,7 @@ run_e2e_init() {
 
 run_e2e_bundle() {
   vm_up
-  DOCKER_CONTEXT=colima-$profile docker run -d -p "$port:5000" --name registry registry:3
+  DOCKER_CONTEXT=colima-$profile docker run --rm -d -p "$port:5000" --name registry registry:3
   wait_registry
   DOCKER_CONTEXT=colima-$profile make build release binaries VERSION=dev IMAGE=localhost:$port/bedrock:dev PIN_DIGESTS=1
   DOCKER_CONTEXT=colima-$profile docker build -t localhost:$port/bedrock:dev -f Containerfile .
@@ -139,7 +139,7 @@ run_e2e_bundle() {
 run_upgrade() {
   local abort_in=$1
   vm_up
-  DOCKER_CONTEXT=colima-$profile docker run -d -p "$port:5000" --name registry registry:3
+  DOCKER_CONTEXT=colima-$profile docker run --rm -d -p "$port:5000" --name registry registry:3
   wait_registry
   DOCKER_CONTEXT=colima-$profile REGISTRY=localhost:$port ARCH=$arch VERSION_A=v0.0.0-e2e.1 VERSION_B=v0.0.0-e2e.2 K0S_A=v1.36.2+k0s.0 K0S_B=v1.36.3+k0s.0 hack/e2e-upgrade-build.sh
   DOCKER_CONTEXT=colima-$profile docker rm -f registry
