@@ -44,9 +44,14 @@ trap dump EXIT
 BUNDLE=dist/bedrock-$VERSION_A-bundle-$arch.tar.zst VERSION=$VERSION_A IMAGE=$image_a \
   BIN=dist/bedrock-$VERSION_A-linux-$arch RELEASE_DIR=dist/release-$VERSION_A ARCH=$arch hack/e2e-init.sh
 
+node=$(hostname | tr '[:upper:]' '[:lower:]')
+test "$(kubectl get host "$node" -o jsonpath='{.spec.management.enabled}')" != "true"
+kubectl wait --for=jsonpath='{.status.conditions[?(@.type=="ManagementApplied")].reason}'=ManagementDisabled host/"$node" --timeout=180s
+grep -q 'config_path = "/etc/k0s/containerd.d/certs.d"' /etc/k0s/containerd.d/cri-registry.toml
+mkdir -p /etc/k0s/containerd.d/certs.d/_default
+printf 'server = "https://127.0.0.1:1"\n' > /etc/k0s/containerd.d/certs.d/_default/hosts.toml
 rm -f "dist/bedrock-$VERSION_A-bundle-$arch.tar.zst"
 df -h / /var/lib
-node=$(hostname | tr '[:upper:]' '[:lower:]')
 /usr/local/bin/k0s version | grep -qx "$K0S_A"
 rm -f /var/run/reboot-required /var/run/reboot-required.pkgs
 
@@ -89,6 +94,10 @@ if [ -n "$abort_in" ]; then
   done
   test -z "$(kubectl get nodeupgrades -o name)"
   kubectl wait --for=condition=Ready node --all --timeout=300s
+  grep -qx 'server = "https://127.0.0.1:1"' /etc/k0s/containerd.d/certs.d/_default/hosts.toml
+  if kubectl get pods -A -o jsonpath='{range .items[*]}{.status.containerStatuses[*].state.waiting.reason}{"\n"}{end}' | grep -qE 'ImagePullBackOff|ErrImagePull'; then
+    exit 1
+  fi
   echo "e2e-upgrade abort passed"
   exit 0
 fi
@@ -116,4 +125,8 @@ test ! -e "/var/lib/bedrock/staged/$VERSION_B"
 test ! -e /var/lib/bedrock/previous/k0s
 test "$(kubectl get node "$node" -o jsonpath='{.spec.unschedulable}')" != "true"
 kubectl wait --for=condition=Ready node --all --timeout=300s
+grep -qx 'server = "https://127.0.0.1:1"' /etc/k0s/containerd.d/certs.d/_default/hosts.toml
+if kubectl get pods -A -o jsonpath='{range .items[*]}{.status.containerStatuses[*].state.waiting.reason}{"\n"}{end}' | grep -qE 'ImagePullBackOff|ErrImagePull'; then
+  exit 1
+fi
 echo "e2e-upgrade passed"
