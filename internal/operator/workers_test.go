@@ -22,13 +22,16 @@ func TestActiveNodes(t *testing.T) {
 		concurrency int
 		want        []string
 	}{
-		"first controller":           {map[string]string{}, 2, []string{"cp-a"}},
-		"controller in progress":     {map[string]string{"cp-a": workerDone, "cp-b": workerUpdating}, 2, []string{"cp-b"}},
-		"workers in a window":        {map[string]string{"cp-a": workerDone, "cp-b": workerDone}, 2, []string{"w-a", "w-b"}},
-		"started nodes stay":         {map[string]string{"cp-a": workerDone, "cp-b": workerDone, "w-c": workerDraining}, 2, []string{"w-c", "w-a"}},
-		"one finished frees a place": {map[string]string{"cp-a": workerDone, "cp-b": workerDone, "w-a": workerDone, "w-b": workerUpdating}, 2, []string{"w-b", "w-c"}},
-		"everything done":            {map[string]string{"cp-a": workerDone, "cp-b": workerDone, "w-a": workerDone, "w-b": workerDone, "w-c": workerDone}, 2, nil},
-		"concurrency below one":      {map[string]string{"cp-a": workerDone, "cp-b": workerDone}, 0, []string{"w-a"}},
+		"first controller":                          {map[string]string{}, 2, []string{"cp-a"}},
+		"controller in progress":                    {map[string]string{"cp-a": workerDone, "cp-b": workerUpdating}, 2, []string{"cp-b"}},
+		"workers in a window":                       {map[string]string{"cp-a": workerDone, "cp-b": workerDone}, 2, []string{"w-a", "w-b"}},
+		"started nodes stay":                        {map[string]string{"cp-a": workerDone, "cp-b": workerDone, "w-c": workerDraining}, 2, []string{"w-c", "w-a"}},
+		"one finished frees a place":                {map[string]string{"cp-a": workerDone, "cp-b": workerDone, "w-a": workerDone, "w-b": workerUpdating}, 2, []string{"w-b", "w-c"}},
+		"everything done":                           {map[string]string{"cp-a": workerDone, "cp-b": workerDone, "w-a": workerDone, "w-b": workerDone, "w-c": workerDone}, 2, nil},
+		"concurrency below one":                     {map[string]string{"cp-a": workerDone, "cp-b": workerDone}, 0, []string{"w-a"}},
+		"late controller waits for started workers": {map[string]string{"cp-a": workerDone, "w-a": workerUpdating}, 1, []string{"w-a"}},
+		"late controller after the window empties":  {map[string]string{"cp-a": workerDone, "w-a": workerDone}, 1, []string{"cp-b"}},
+		"started nodes stay when concurrency drops": {map[string]string{"cp-a": workerDone, "cp-b": workerDone, "w-a": workerUpdating, "w-b": workerDraining}, 1, []string{"w-a", "w-b"}},
 	}
 	for name, tc := range cases {
 		t.Run(name, func(t *testing.T) {

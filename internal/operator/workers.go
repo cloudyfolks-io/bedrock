@@ -157,35 +157,23 @@ func workerProgress(upgrades []v1alpha1.NodeUpgrade) map[string]string {
 }
 
 func activeNodes(order, controllers []string, progress map[string]string, concurrency int) []string {
-	var waitingControllers []string
-	for _, name := range order {
-		if slices.Contains(controllers, name) && progress[name] != workerDone {
-			waitingControllers = append(waitingControllers, name)
-		}
+	started := slices.DeleteFunc(slices.Clone(order), func(name string) bool {
+		return progress[name] == "" || progress[name] == workerDone
+	})
+	waiting := slices.DeleteFunc(slices.Clone(order), func(name string) bool {
+		return progress[name] != ""
+	})
+	isController := func(name string) bool { return slices.Contains(controllers, name) }
+	switch {
+	case slices.ContainsFunc(waiting, isController) && len(started) > 0:
+		return started
+	case slices.ContainsFunc(waiting, isController):
+		return []string{waiting[slices.IndexFunc(waiting, isController)]}
+	case slices.ContainsFunc(started, isController):
+		return started
 	}
-	if len(waitingControllers) > 0 {
-		for _, name := range waitingControllers {
-			if progress[name] != "" {
-				return []string{name}
-			}
-		}
-		return waitingControllers[:1]
-	}
-	var active []string
-	for _, name := range order {
-		if progress[name] != "" && progress[name] != workerDone {
-			active = append(active, name)
-		}
-	}
-	for _, name := range order {
-		if len(active) >= max(concurrency, 1) {
-			break
-		}
-		if progress[name] == "" {
-			active = append(active, name)
-		}
-	}
-	return active
+	free := max(max(concurrency, 1)-len(started), 0)
+	return append(started, waiting[:min(free, len(waiting))]...)
 }
 
 func etcdProblem(hosts []v1alpha1.Host) string {
