@@ -1,6 +1,7 @@
 package operator
 
 import (
+	"slices"
 	"testing"
 
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
@@ -18,7 +19,7 @@ func TestRenderVirtualizationDefaults(t *testing.T) {
 	emulation, _, _ := unstructured.NestedBool(kv.Object, "spec", "configuration", "developerConfiguration", "useEmulation")
 	methods, _, _ := unstructured.NestedStringSlice(kv.Object, "spec", "workloadUpdateStrategy", "workloadUpdateMethods")
 	pull, _, _ := unstructured.NestedString(kv.Object, "spec", "imagePullPolicy")
-	if emulation || len(methods) != 1 || methods[0] != "LiveMigrate" || pull != "IfNotPresent" {
+	if emulation || !slices.Equal(methods, []string{"LiveMigrate", "Evict"}) || pull != "IfNotPresent" {
 		t.Fatalf("kubevirt spec %+v", kv.Object["spec"])
 	}
 	cdi := findObject(out.Objects, "CDI", "cdi")

@@ -45,7 +45,7 @@ func kubeVirt(emulation bool) *unstructured.Unstructured {
 	return object("kubevirt.io/v1", "KubeVirt", kubevirtNamespace, "kubevirt", map[string]any{
 		"imagePullPolicy":        "IfNotPresent",
 		"configuration":          map[string]any{"developerConfiguration": map[string]any{"useEmulation": emulation}},
-		"workloadUpdateStrategy": map[string]any{"workloadUpdateMethods": []any{"LiveMigrate"}},
+		"workloadUpdateStrategy": map[string]any{"workloadUpdateMethods": []any{"LiveMigrate", "Evict"}},
 	})
 }
 
