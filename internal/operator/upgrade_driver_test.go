@@ -49,7 +49,7 @@ func setAction(t *testing.T, ctx context.Context, c client.Client, action string
 
 func reconcileUpgrade(t *testing.T, ctx context.Context, c client.Client, phases map[string]phaseFunc) v1alpha1.Cluster {
 	t.Helper()
-	if _, err := runUpgrade(ctx, upgradeEnv{Client: c}, getCluster(t, ctx, c), phases); err != nil {
+	if _, err := runUpgrade(ctx, upgradeEnv{Client: c}, getCluster(t, ctx, c), upgradeRole{Phases: phases}); err != nil {
 		t.Fatal(err)
 	}
 	return getCluster(t, ctx, c)

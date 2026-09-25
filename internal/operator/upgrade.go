@@ -29,6 +29,8 @@ const (
 	decisionIgnore      = "ignore"
 	decisionRefuseAbort = "refuseAbort"
 	decisionRetarget    = "retarget"
+	decisionAbort       = "abort"
+	decisionRestore     = "restore"
 
 	reasonInstalled     = "Installed"
 	reasonActionIgnored = "ActionIgnored"
@@ -122,6 +124,10 @@ func decide(cluster v1alpha1.Cluster) decision {
 		return decision{Kind: decisionResume}
 	case action == v1alpha1.UpgradeActionAbort && slices.Contains(noRollbackPhases(), phase):
 		return decision{Kind: decisionRefuseAbort, Message: fmt.Sprintf("abort refused in %s: no rollback after Components started; resume continues the upgrade", phase)}
+	case action == v1alpha1.UpgradeActionAbort && phase == v1alpha1.PhaseControlPlane:
+		return decision{Kind: decisionRestore}
+	case action == v1alpha1.UpgradeActionAbort:
+		return decision{Kind: decisionAbort}
 	case status.Upgrade == nil:
 		return decision{Kind: decisionStart}
 	case status.Upgrade.To != cluster.Spec.DesiredVersion:
@@ -256,11 +262,22 @@ func lastCondition(conditions []metav1.Condition, conditionType string, value me
 	return *current
 }
 
-func runUpgrade(ctx context.Context, env upgradeEnv, cluster v1alpha1.Cluster, phases map[string]phaseFunc) (ctrl.Result, error) {
+func runUpgrade(ctx context.Context, env upgradeEnv, cluster v1alpha1.Cluster, role upgradeRole) (ctrl.Result, error) {
 	now := metav1.Now()
 	generation := cluster.Generation
 	again := ctrl.Result{RequeueAfter: env.Interval}
+	var hosts v1alpha1.HostList
+	if err := env.Client.List(ctx, &hosts); err != nil {
+		return ctrl.Result{}, err
+	}
+	if restoreFinished(hosts.Items, cluster.Status.Upgrade) {
+		return again, role.Abort(ctx, env, cluster)
+	}
 	switch d := decide(cluster); d.Kind {
+	case decisionAbort:
+		return again, role.Abort(ctx, env, cluster)
+	case decisionRestore:
+		return again, role.Restore(ctx, env, cluster)
 	case decisionStart:
 		return again, writeClusterStatus(ctx, env.Client, func(s *v1alpha1.ClusterStatus) {
 			*s = startUpgrade(*s, cluster.Spec.DesiredVersion, now, generation)
@@ -287,7 +304,7 @@ func runUpgrade(ctx context.Context, env upgradeEnv, cluster v1alpha1.Cluster, p
 	case decisionWait:
 		return ctrl.Result{}, nil
 	}
-	run, ok := phases[cluster.Status.Phase]
+	run, ok := role.Phases[cluster.Status.Phase]
 	if !ok {
 		return again, nil
 	}

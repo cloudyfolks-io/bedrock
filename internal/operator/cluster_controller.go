@@ -46,9 +46,9 @@ func (r *ClusterReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 	case routeSteady:
 		return ctrl.Result{}, r.reconcileSteady(ctx, cluster)
 	case routeOld:
-		return runUpgrade(ctx, r.upgradeEnv(), cluster, oldPhases())
+		return runUpgrade(ctx, r.upgradeEnv(), cluster, oldRole())
 	case routeNew:
-		return runUpgrade(ctx, r.upgradeEnv(), cluster, newPhases())
+		return runUpgrade(ctx, r.upgradeEnv(), cluster, newRole())
 	}
 	return ctrl.Result{}, r.writeStatus(ctx, func(s *v1alpha1.ClusterStatus) {
 		setCondition(s, v1alpha1.ConditionProgressing, metav1.ConditionFalse, "AwaitingUpgrade", fmt.Sprintf("desired %s, embedded %s", cluster.Spec.DesiredVersion, r.Bundle.Spec.Version), cluster.Generation)
