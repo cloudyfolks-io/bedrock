@@ -283,6 +283,26 @@ func TestAbortInControlPlaneWithManyControllers(t *testing.T) {
 	}
 }
 
+func TestAbortInControlPlaneWithNoDepotGoesManual(t *testing.T) {
+	c, _ := startTestEnvWithCRDs(t, filepath.Join("testdata", "crds"))
+	ctx := context.Background()
+	createOperatorDeployment(t, ctx, c, "ghcr.io/cloudyfolks-labs/bedrock:v2")
+	createReleases(t, ctx, c)
+	createHostWithStatus(t, ctx, c, healthyHost("node-a"))
+	createNodeWithStatus(t, ctx, c, readyNode("node-a", "amd64"))
+	status := upgradeStatusIn(v1alpha1.PhaseControlPlane)
+	status.Upgrade.Backup = backupLocationText
+	createClusterWithStatus(t, ctx, c, "v2", status)
+	setAction(t, ctx, c, v1alpha1.UpgradeActionAbort)
+
+	got := runRole(t, ctx, c, newRole())
+	progressing := meta.FindStatusCondition(got.Status.Conditions, v1alpha1.ConditionProgressing)
+	want := "abort in ControlPlane needs a manual restore of " + backupLocationText + ": no host serves v2 for amd64: follow " + restoreRunbook
+	if got.Status.Phase != v1alpha1.PhaseFailed || progressing.Reason != v1alpha1.ReasonRestoreManual || got.Status.Upgrade.Message != want || got.Spec.Upgrade.Action != "" {
+		t.Fatalf("status %+v action %q", got.Status.Upgrade, got.Spec.Upgrade.Action)
+	}
+}
+
 func TestFinishedRestoreEndsTheUpgrade(t *testing.T) {
 	c, ctx := abortWorld(t, v1alpha1.PhaseBackup)
 	cluster := getCluster(t, ctx, c)

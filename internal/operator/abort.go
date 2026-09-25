@@ -2,7 +2,6 @@ package operator
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"path/filepath"
 	"strings"
@@ -179,12 +178,15 @@ func restoreControlPlane(ctx context.Context, env upgradeEnv, cluster v1alpha1.C
 			return restoreManual(s, message, cluster.Generation)
 		})
 	}
+	if node != controllers[0].Name {
+		return answerManualRestore(ctx, env, cluster, upgrade, fmt.Sprintf("the backup node %s is not the controller %s", node, controllers[0].Name))
+	}
 	if err := deletePlan(ctx, env.Client); err != nil {
 		return err
 	}
 	want, problem := nodeUpgradeFor(upgrade, hostNamed(hosts, node), hosts, nodes, []string{v1alpha1.StepRestore})
 	if problem != "" {
-		return errors.New(problem)
+		return answerManualRestore(ctx, env, cluster, upgrade, problem)
 	}
 	want.Spec.Backup = path
 	if err := applyNodeUpgrade(ctx, env.Client, want); err != nil {
@@ -195,6 +197,13 @@ func restoreControlPlane(ctx context.Context, env upgradeEnv, cluster v1alpha1.C
 	}
 	return writeClusterStatus(ctx, env.Client, func(s *v1alpha1.ClusterStatus) {
 		*s = restoring(*s, "restoring "+upgrade.Backup, cluster.Generation)
+	})
+}
+
+func answerManualRestore(ctx context.Context, env upgradeEnv, cluster v1alpha1.Cluster, upgrade v1alpha1.UpgradeStatus, problem string) error {
+	message := fmt.Sprintf("abort in ControlPlane needs a manual restore of %s: %s: follow %s", upgrade.Backup, problem, restoreRunbook)
+	return answerAction(ctx, env.Client, cluster, func(s v1alpha1.ClusterStatus) v1alpha1.ClusterStatus {
+		return restoreManual(s, message, cluster.Generation)
 	})
 }
 
