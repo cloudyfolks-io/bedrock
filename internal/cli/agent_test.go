@@ -6,6 +6,8 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -181,5 +183,43 @@ func TestDepotIP(t *testing.T) {
 	}
 	if _, err := depotIP(context.Background(), load, agentOptions{kubeconfig: "k", node: "node-b"}); err == nil {
 		t.Fatal("a node that does not exist yet must be an error so serveDepot retries")
+	}
+}
+
+func TestServeDepotRetriesAfterAServeError(t *testing.T) {
+	scheme, err := operator.Scheme()
+	if err != nil {
+		t.Fatal(err)
+	}
+	node := &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: "node-a"}, Status: corev1.NodeStatus{Addresses: []corev1.NodeAddress{{Type: corev1.NodeInternalIP, Address: "10.0.0.11"}}}}
+	c := fake.NewClientBuilder().WithScheme(scheme).WithObjects(node).Build()
+	load := func(string) (client.WithWatch, time.Time, error) { return c, time.Time{}, nil }
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	var calls atomic.Int32
+	serving := make(chan struct{})
+	serve := func(ctx context.Context, ip, root string) error {
+		if calls.Add(1) == 1 {
+			return errors.New("listen tcp 10.0.0.11:9480: bind: address already in use")
+		}
+		close(serving)
+		<-ctx.Done()
+		return nil
+	}
+	var stderr bytes.Buffer
+	done := make(chan struct{})
+	go func() {
+		serveDepot(ctx, load, serve, agentOptions{kubeconfig: "k", node: "node-a", root: "/", interval: 10 * time.Millisecond}, &stderr)
+		close(done)
+	}()
+	select {
+	case <-serving:
+	case <-time.After(5 * time.Second):
+		t.Fatal("serveDepot must retry after a serve error")
+	}
+	cancel()
+	<-done
+	if !strings.Contains(stderr.String(), "agent: depot: listen tcp 10.0.0.11:9480: bind: address already in use") {
+		t.Fatalf("stderr %q", stderr.String())
 	}
 }

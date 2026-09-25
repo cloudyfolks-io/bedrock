@@ -78,7 +78,7 @@ func agentCommand(args []string, _, stderr io.Writer) int {
 		Load: load,
 		Run:  agent.Run,
 	}
-	go serveDepot(ctx, load, o, stderr)
+	go serveDepot(ctx, load, depot.Serve, o, stderr)
 	if err := runAgent(ctx, o, deps, stderr); err != nil {
 		return fail(stderr, err)
 	}
@@ -158,16 +158,14 @@ func reportExit(stderr io.Writer, err error) {
 	}
 }
 
-func serveDepot(ctx context.Context, load func(string) (client.WithWatch, time.Time, error), o agentOptions, stderr io.Writer) {
+func serveDepot(ctx context.Context, load func(string) (client.WithWatch, time.Time, error), serve func(ctx context.Context, ip, root string) error, o agentOptions, stderr io.Writer) {
 	ticker := time.NewTicker(o.interval)
 	defer ticker.Stop()
 	for {
-		ip, err := depotIP(ctx, load, o)
-		if err == nil {
-			if err := depot.Serve(ctx, ip, o.root); err != nil {
+		if ip, err := depotIP(ctx, load, o); err == nil {
+			if err := serve(ctx, ip, o.root); err != nil {
 				fmt.Fprintf(stderr, "agent: depot: %v\n", err)
 			}
-			return
 		}
 		select {
 		case <-ctx.Done():
