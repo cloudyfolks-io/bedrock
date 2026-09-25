@@ -107,6 +107,21 @@ func TestTimeSynced(t *testing.T) {
 	}
 }
 
+func TestImagesBytesSumsTheImageFiles(t *testing.T) {
+	root := t.TempDir()
+	writeFixtureFile(t, filepath.Join(root, k0sImagesDir, "a.tar"), "01234")
+	writeFixtureFile(t, filepath.Join(root, k0sImagesDir, "b.tar"), "0123456789")
+	if got := imagesBytes(root); got != 15 {
+		t.Fatalf("imagesBytes %d, want 15", got)
+	}
+}
+
+func TestImagesBytesWithoutTheDirectory(t *testing.T) {
+	if got := imagesBytes(t.TempDir()); got != 0 {
+		t.Fatalf("imagesBytes %d, want 0", got)
+	}
+}
+
 func TestK0sVersion(t *testing.T) {
 	exec := &host.FakeExec{Responses: map[string]string{"/usr/local/bin/k0s version": "v1.36.3+k0s.0\n"}}
 	if got := k0sVersion(context.Background(), exec); got != "v1.36.3+k0s.0" {

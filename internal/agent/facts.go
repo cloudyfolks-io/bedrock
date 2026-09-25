@@ -28,7 +28,24 @@ func hostChecks(ctx context.Context, deps Deps) *v1alpha1.HostChecks {
 		VarLibFreeBytes:      int64(free),
 		CertificatesNotAfter: certificatesNotAfter(deps.Root),
 		EtcdMembers:          etcdMembers(ctx, deps.Exec, deps.Root),
+		ImagesBytes:          imagesBytes(deps.Root),
 	}
+}
+
+func imagesBytes(root string) int64 {
+	entries, err := os.ReadDir(filepath.Join(root, k0sImagesDir))
+	if err != nil {
+		return 0
+	}
+	var total int64
+	for _, entry := range entries {
+		info, err := entry.Info()
+		if err != nil || !info.Mode().IsRegular() {
+			continue
+		}
+		total += info.Size()
+	}
+	return total
 }
 
 func hostname(deps Deps) string {

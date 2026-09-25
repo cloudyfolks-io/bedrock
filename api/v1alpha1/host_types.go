@@ -162,6 +162,8 @@ type HostChecks struct {
 	CertificatesNotAfter *metav1.Time `json:"certificatesNotAfter,omitempty"`
 	// +optional
 	EtcdMembers int32 `json:"etcdMembers,omitempty"`
+	// +optional
+	ImagesBytes int64 `json:"imagesBytes,omitempty"`
 }
 
 type RestoreStatus struct {

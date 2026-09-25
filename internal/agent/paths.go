@@ -6,4 +6,6 @@ const (
 	backupDir        = "var/lib/bedrock/backups"
 	ovnDir           = "etc/origin/ovn"
 	containerdSocket = "run/k0s/containerd.sock"
+	k0sImagesDir     = "var/lib/k0s/images"
+	airgapFile       = "k0s-airgap.tar"
 )

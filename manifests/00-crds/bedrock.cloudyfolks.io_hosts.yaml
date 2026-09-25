@@ -126,6 +126,9 @@ spec:
                   etcdMembers:
                     format: int32
                     type: integer
+                  imagesBytes:
+                    format: int64
+                    type: integer
                   timeSynced:
                     type: boolean
                   varLibFreeBytes:
