@@ -385,10 +385,39 @@ func TestUpgradeToABlockedVersionResumesIt(t *testing.T) {
 	if err := c.Status().Update(context.Background(), &cluster); err != nil {
 		t.Fatal(err)
 	}
+	deps := upgradeDeps(scriptOperator(c, inPreflight(), upgradedTo("v0.3.0")), "")
+	deps.Pull = func(ctx context.Context, version, arch, dir string) (string, error) {
+		return writeUpgradeBundle(t, version, arch), nil
+	}
 	var stdout, stderr bytes.Buffer
-	code := RunUpgrade(context.Background(), upgradeOptions{to: "v0.3.0", root: t.TempDir(), timeout: 10 * time.Second}, upgradeDeps(scriptOperator(c, inPreflight(), upgradedTo("v0.3.0")), ""), &stdout, &stderr)
+	code := RunUpgrade(context.Background(), upgradeOptions{to: "v0.3.0", root: t.TempDir(), timeout: 10 * time.Second}, deps, &stdout, &stderr)
 	if code != 0 || !strings.Contains(stdout.String(), "==> retrying the blocked upgrade of v0.2.0 to v0.3.0\n") || !strings.HasSuffix(stdout.String(), "cluster upgraded to v0.3.0\n") {
 		t.Fatalf("exit %d stdout %q stderr %q", code, stdout.String(), stderr.String())
+	}
+	if err := c.Get(context.Background(), client.ObjectKey{Name: v1alpha1.ClusterName}, &cluster); err != nil {
+		t.Fatal(err)
+	}
+	if cluster.Spec.Upgrade.Action != v1alpha1.UpgradeActionResume || cluster.Spec.DesiredVersion != "v0.3.0" {
+		t.Fatalf("spec %+v", cluster.Spec)
+	}
+}
+
+func TestUpgradeToABlockedVersionStagesTheBundleThenResumes(t *testing.T) {
+	withVersion(t, "v0.3.0")
+	c := upgradeClient(t, "v0.2.0", "amd64")
+	cluster := requestedCluster(t, c, "v0.3.0", blockedAt(0))
+	cluster.Status = blockedAt(cluster.Generation)
+	if err := c.Status().Update(context.Background(), &cluster); err != nil {
+		t.Fatal(err)
+	}
+	root := t.TempDir()
+	var stdout, stderr bytes.Buffer
+	code := RunUpgrade(context.Background(), upgradeOptions{to: "v0.3.0", bundles: []string{writeUpgradeBundle(t, "v0.3.0", "amd64")}, root: root, timeout: 10 * time.Second}, upgradeDeps(scriptOperator(c, inPreflight(), upgradedTo("v0.3.0")), ""), &stdout, &stderr)
+	if code != 0 || !strings.HasSuffix(stdout.String(), "cluster upgraded to v0.3.0\n") {
+		t.Fatalf("exit %d stdout %q stderr %q", code, stdout.String(), stderr.String())
+	}
+	if _, err := os.Stat(filepath.Join(depot.BundleDir(root, "v0.3.0", "amd64"), release.BundleFileName)); err != nil {
+		t.Fatalf("bundle not staged in the depot: %v", err)
 	}
 	if err := c.Get(context.Background(), client.ObjectKey{Name: v1alpha1.ClusterName}, &cluster); err != nil {
 		t.Fatal(err)
