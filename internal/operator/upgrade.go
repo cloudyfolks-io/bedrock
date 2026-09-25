@@ -306,9 +306,13 @@ func answerAction(ctx context.Context, c client.Client, cluster v1alpha1.Cluster
 }
 
 func oldPhases() map[string]phaseFunc {
-	return map[string]phaseFunc{}
+	return map[string]phaseFunc{
+		v1alpha1.PhasePreflight: preflight,
+	}
 }
 
 func newPhases() map[string]phaseFunc {
-	return map[string]phaseFunc{}
+	return map[string]phaseFunc{
+		v1alpha1.PhasePreflight: preflight,
+	}
 }
