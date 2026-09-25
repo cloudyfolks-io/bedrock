@@ -51,7 +51,7 @@ type preloadFixture struct {
 
 const pinnedImage = "quay.io/a/b:1@sha256:1111111111111111111111111111111111111111111111111111111111111111"
 
-func newPreloadFixture(t *testing.T, containers bool) preloadFixture {
+func newPreloadFixture(t *testing.T) preloadFixture {
 	t.Helper()
 	depotRoot := t.TempDir()
 	bundle := depot.BundleDir(depotRoot, "v0.3.0", runtime.GOARCH)
@@ -70,9 +70,6 @@ func newPreloadFixture(t *testing.T, containers bool) preloadFixture {
 	bedrockSum, _ := release.FileSHA256(filepath.Join(bundle, "bedrock/bedrock"))
 	nodeRoot := t.TempDir()
 	writeFixtureFile(t, filepath.Join(nodeRoot, "usr/local/bin/k0s"), "old k0s")
-	if containers {
-		writeFixtureFile(t, filepath.Join(nodeRoot, "run/k0s/containerd.sock"), "")
-	}
 	names, err := release.ContainerdNames(pinnedImage)
 	if err != nil {
 		t.Fatal(err)
@@ -107,7 +104,8 @@ func readFixtureFile(t *testing.T, path string) string {
 }
 
 func TestPreloadStagesBinariesAndImages(t *testing.T) {
-	fixture := newPreloadFixture(t, true)
+	fixture := newPreloadFixture(t)
+	writeFixtureFile(t, filepath.Join(fixture.nodeRoot, "run/k0s/containerd.sock"), "")
 	outcome, err := preload(context.Background(), fixture.env)
 	if err != nil {
 		t.Fatal(err)
@@ -141,7 +139,8 @@ func TestPreloadStagesBinariesAndImages(t *testing.T) {
 }
 
 func TestPreloadSkipsImagesAlreadyPresent(t *testing.T) {
-	fixture := newPreloadFixture(t, true)
+	fixture := newPreloadFixture(t)
+	writeFixtureFile(t, filepath.Join(fixture.nodeRoot, "run/k0s/containerd.sock"), "")
 	names, _ := release.ContainerdNames(pinnedImage)
 	fixture.container.present = names
 	if _, err := preload(context.Background(), fixture.env); err != nil {
@@ -155,7 +154,7 @@ func TestPreloadSkipsImagesAlreadyPresent(t *testing.T) {
 }
 
 func TestPreloadKeepsTheFirstPrevious(t *testing.T) {
-	fixture := newPreloadFixture(t, false)
+	fixture := newPreloadFixture(t)
 	writeFixtureFile(t, filepath.Join(fixture.nodeRoot, "var/lib/bedrock/previous/k0s"), "k0s before the upgrade")
 	if _, err := preload(context.Background(), fixture.env); err != nil {
 		t.Fatal(err)
@@ -166,7 +165,7 @@ func TestPreloadKeepsTheFirstPrevious(t *testing.T) {
 }
 
 func TestPreloadWithoutContainersStagesBinariesOnly(t *testing.T) {
-	fixture := newPreloadFixture(t, false)
+	fixture := newPreloadFixture(t)
 	outcome, err := preload(context.Background(), fixture.env)
 	if err != nil {
 		t.Fatal(err)
@@ -177,7 +176,7 @@ func TestPreloadWithoutContainersStagesBinariesOnly(t *testing.T) {
 }
 
 func TestPreloadRejectsABadChecksum(t *testing.T) {
-	fixture := newPreloadFixture(t, false)
+	fixture := newPreloadFixture(t)
 	fixture.env.Target.Spec.K0sChecksums[runtime.GOARCH] = "sha256:" + strings.Repeat("0", 64)
 	_, err := preload(context.Background(), fixture.env)
 	if err == nil || !strings.Contains(err.Error(), "sha256:"+strings.Repeat("0", 64)) {
@@ -189,7 +188,8 @@ func TestPreloadRejectsABadChecksum(t *testing.T) {
 }
 
 func TestPreloadFailsWhenAnImageStaysMissing(t *testing.T) {
-	fixture := newPreloadFixture(t, true)
+	fixture := newPreloadFixture(t)
+	writeFixtureFile(t, filepath.Join(fixture.nodeRoot, "run/k0s/containerd.sock"), "")
 	fixture.container.images[release.ImageFileName(pinnedImage)] = nil
 	_, err := preload(context.Background(), fixture.env)
 	if err == nil || !strings.Contains(err.Error(), "quay.io/a/b@sha256:1111") {
