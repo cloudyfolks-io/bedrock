@@ -112,9 +112,6 @@ func unitCommands(unit v1alpha1.UnitSpec, replaced map[string]bool) [][]string {
 }
 
 func mirrorsStep(_ context.Context, deps Deps, spec v1alpha1.HostConfigSpec) (string, error) {
-	if len(spec.ContainerdMirrors) == 0 {
-		return "", nil
-	}
 	return "", host.EnsureMirrors(deps.Root, spec.ContainerdMirrors)
 }
 

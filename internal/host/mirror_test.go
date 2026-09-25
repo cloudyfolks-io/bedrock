@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/cloudyfolks-labs/bedrock/api/v1alpha1"
 )
@@ -52,5 +53,54 @@ func TestMirrorFilesForWritesOnePerRegistry(t *testing.T) {
 	}
 	if MirrorFiles("https://m.example")["certs.d/_default/hosts.toml"] != files["certs.d/_default/hosts.toml"] {
 		t.Fatal("single-mirror form must match the _default entry")
+	}
+}
+
+func TestMirrorFilesForNoMirrors(t *testing.T) {
+	if files := MirrorFilesFor(nil); len(files) != 0 {
+		t.Fatalf("no mirrors must give no files, got %v", files)
+	}
+}
+
+func TestEnsureMirrorsLeavesUnchangedFilesAlone(t *testing.T) {
+	root := t.TempDir()
+	mirrors := []v1alpha1.MirrorSpec{{Registry: "_default", Endpoint: "https://m.example"}}
+	if err := EnsureMirrors(root, mirrors); err != nil {
+		t.Fatal(err)
+	}
+	old := time.Date(2020, 1, 1, 0, 0, 0, 0, time.UTC)
+	paths := []string{filepath.Join(root, "etc/k0s/containerd.d/cri-registry.toml"), filepath.Join(root, "etc/k0s/containerd.d/certs.d/_default/hosts.toml")}
+	for _, path := range paths {
+		if err := os.Chtimes(path, old, old); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := EnsureMirrors(root, mirrors); err != nil {
+		t.Fatal(err)
+	}
+	for _, path := range paths {
+		info, err := os.Stat(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !info.ModTime().Equal(old) {
+			t.Fatalf("%s was rewritten; k0s reloads containerd on every change in containerd.d", path)
+		}
+	}
+}
+
+func TestEnsureMirrorsRemovesStaleRegistries(t *testing.T) {
+	root := t.TempDir()
+	if err := EnsureMirrors(root, []v1alpha1.MirrorSpec{{Registry: "_default", Endpoint: "https://m.example"}, {Registry: "quay.io", Endpoint: "https://q.example"}}); err != nil {
+		t.Fatal(err)
+	}
+	if err := EnsureMirrors(root, []v1alpha1.MirrorSpec{{Registry: "_default", Endpoint: "https://m.example"}}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(root, "etc/k0s/containerd.d/certs.d/quay.io")); !os.IsNotExist(err) {
+		t.Fatalf("a removed mirror must be deleted, stat error %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(root, "etc/k0s/containerd.d/certs.d/_default/hosts.toml")); err != nil {
+		t.Fatalf("the kept mirror must stay: %v", err)
 	}
 }

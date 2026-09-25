@@ -151,3 +151,22 @@ func TestApplyRestartsChangedEnabledUnits(t *testing.T) {
 		t.Fatalf("only the changed enabled unit may restart, got %v", restarts)
 	}
 }
+
+func TestApplyRemovesMirrorsNoLongerWanted(t *testing.T) {
+	root := t.TempDir()
+	stale := filepath.Join(root, "etc", "k0s", "containerd.d", "certs.d", "_default", "hosts.toml")
+	if err := os.MkdirAll(filepath.Dir(stale), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(stale, []byte("[host.\"https://old.example\"]\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	exec := &host.FakeExec{ResponsePrefixes: map[string]string{"sysctl -p ": ""}}
+	steps := Apply(context.Background(), Deps{Exec: exec, Root: root, Packages: pkgmgr.Manager{Exec: exec, Family: "apt", Root: root}}, v1alpha1.HostConfigSpec{})
+	if stateOf(steps, "containerdMirrors").State != "Applied" {
+		t.Fatalf("containerdMirrors %+v", stateOf(steps, "containerdMirrors"))
+	}
+	if _, err := os.Stat(filepath.Dir(stale)); !os.IsNotExist(err) {
+		t.Fatalf("a mirror no longer in the HostConfig must be removed, stat error %v", err)
+	}
+}
