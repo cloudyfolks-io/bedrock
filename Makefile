@@ -16,7 +16,7 @@ BUNDLE_ARCH ?= amd64
 K0S_VERSION ?=
 UPGRADE_FROM ?=
 
-.PHONY: build test lint generate crds envtest-assets e2e-kind e2e-init e2e-bundle controller-gen release crane bundle binaries rbac
+.PHONY: build test lint generate crds envtest-assets e2e-kind e2e-init e2e-bundle controller-gen release crane bundle binaries rbac local-ci
 
 build:
 	CGO_ENABLED=0 $(GO) build -trimpath -ldflags "-X github.com/cloudyfolks-labs/bedrock/internal/cli.Version=$(VERSION)" -o $(BIN) ./cmd/bedrock
@@ -65,3 +65,6 @@ bundle: build release
 
 e2e-bundle: bundle
 	BUNDLE=dist/bedrock-$(VERSION)-bundle-$(BUNDLE_ARCH).tar.zst hack/e2e-init.sh
+
+local-ci:
+	hack/local-ci.sh $(JOBS)
