@@ -3,6 +3,9 @@ set -euo pipefail
 
 version=${VERSION:-dev}
 image=${IMAGE:-ghcr.io/cloudyfolks-labs/bedrock:$version}
+bin=${BIN:-bin/bedrock}
+release_dir=${RELEASE_DIR:-dist/release}
+arch=${ARCH:-$(uname -m | sed 's/x86_64/amd64/;s/aarch64/arm64/')}
 workdir=$(mktemp -d)
 export KUBECONFIG=/var/lib/k0s/pki/admin.conf
 
@@ -89,14 +92,14 @@ if [ -n "${BUNDLE:-}" ]; then
   mkdir -p /etc/k0s/containerd.d/certs.d/_default
   printf '[plugins."io.containerd.cri.v1.images".registry]\nconfig_path = "/etc/k0s/containerd.d/certs.d"\n' > /etc/k0s/containerd.d/cri-registry.toml
   printf 'server = "https://127.0.0.1:1"\n' > /etc/k0s/containerd.d/certs.d/_default/hosts.toml
-  bin/bedrock init -f "$workdir/cluster.yaml" --bundle "$BUNDLE" --timeout 45m
+  "$bin" init -f "$workdir/cluster.yaml" --bundle "$BUNDLE" --timeout 45m
   test -f /var/lib/k0s/images/k0s-airgap.tar
   test "$(ls /var/lib/k0s/images/*.tar | wc -l)" -ge 3
-  sha256sum /usr/local/bin/k0s | awk '{print "sha256:"$1}' | grep -qx "$(awk '/amd64:/ {print $2}' dist/release/release.yaml)"
+  sha256sum /usr/local/bin/k0s | awk '{print "sha256:"$1}' | grep -qx "$(awk -v arch="$arch:" '$1 == arch {print $2}' "$release_dir/release.yaml")"
 else
   mkdir -p "$workdir/preload"
   docker save "$image" -o "$workdir/preload/bedrock.tar"
-  bin/bedrock init -f "$workdir/cluster.yaml" --release-dir dist/release --images-dir "$workdir/preload" --timeout 45m
+  "$bin" init -f "$workdir/cluster.yaml" --release-dir "$release_dir" --images-dir "$workdir/preload" --timeout 45m
 fi
 
 kubectl get nodes -o wide
@@ -105,9 +108,9 @@ ip -4 addr show dev "$iface" | grep -q "$vip"
 kubectl -n kube-system rollout status daemonset/kube-vip --timeout=120s
 kubectl get cluster cluster -o jsonpath='{.status.version}' | grep -qx "$version"
 kubectl wait --for=condition=Available cluster/cluster --timeout=120s
-if [ "$image" = "localhost:5000/bedrock:dev" ]; then
-  test "$(kubectl -n bedrock-system get deploy/bedrock-operator -o jsonpath='{.spec.template.spec.containers[0].image}')" = "$image"
-fi
+case "$image" in
+localhost:*) test "$(kubectl -n bedrock-system get deploy/bedrock-operator -o jsonpath='{.spec.template.spec.containers[0].image}')" = "$image" ;;
+esac
 if kubectl get pods -A -o jsonpath='{range .items[*]}{.status.containerStatuses[*].state.waiting.reason}{"\n"}{end}' | grep -qE 'ImagePullBackOff|ErrImagePull'; then
   exit 1
 fi
@@ -173,7 +176,7 @@ kubectl -n kube-system rollout status daemonset/kured --timeout=180s
 kubectl patch host "$node" --type=merge -p '{"spec":{"management":{"enabled":false}}}'
 kubectl get host "$(hostname | tr '[:upper:]' '[:lower:]')" -o jsonpath='{.spec.roles}' | grep -q ceph-osd
 kubectl get setting storage.replicas -o jsonpath='{.spec.value}' | grep -qx 1
-token=$(bin/bedrock token create --roles workload --expiry 10m)
+token=$("$bin" token create --roles workload --expiry 10m)
 test -n "$token"
 echo "$token" | python3 -c 'import base64,json,sys; t=sys.stdin.read().strip(); t+="="*(-len(t)%4); json.loads(base64.urlsafe_b64decode(t))["k0sToken"]'
 echo "e2e-init passed"
