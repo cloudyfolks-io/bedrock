@@ -8,6 +8,7 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
 	"k8s.io/client-go/rest"
+	"k8s.io/client-go/util/flowcontrol"
 	"k8s.io/utils/ptr"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -41,6 +42,7 @@ func startTestEnvWithCRDs(t *testing.T, dirs ...string) (client.Client, *rest.Co
 	if err != nil {
 		t.Fatal(err)
 	}
+	cfg.RateLimiter = flowcontrol.NewFakeAlwaysRateLimiter()
 	t.Cleanup(func() { _ = env.Stop() })
 	c, err := client.New(cfg, client.Options{Scheme: scheme})
 	if err != nil {
