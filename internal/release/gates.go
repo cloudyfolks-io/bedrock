@@ -37,13 +37,21 @@ func DefaultGate(obj *unstructured.Unstructured) Readiness {
 		return generationCurrent(obj, replicasReady(obj, "readyReplicas", "updatedReplicas", specReplicas(obj)))
 	case schema.GroupKind{Group: "apps", Kind: "DaemonSet"}:
 		desired, _, _ := unstructured.NestedInt64(obj.Object, "status", "desiredNumberScheduled")
-		return generationCurrent(obj, replicasReady(obj, "numberReady", "updatedNumberScheduled", desired))
+		return generationCurrent(obj, replicasReady(obj, "numberReady", daemonSetUpdatedField(obj), desired))
 	case schema.GroupKind{Group: "batch", Kind: "Job"}:
 		return jobReadiness(obj)
 	case schema.GroupKind{Group: "apiextensions.k8s.io", Kind: "CustomResourceDefinition"}:
 		return conditionTrue(obj, "Established")
 	}
 	return Readiness{Ready: true}
+}
+
+func daemonSetUpdatedField(obj *unstructured.Unstructured) string {
+	strategy, _, _ := unstructured.NestedString(obj.Object, "spec", "updateStrategy", "type")
+	if strategy == "OnDelete" {
+		return "numberReady"
+	}
+	return "updatedNumberScheduled"
 }
 
 func specReplicas(obj *unstructured.Unstructured) int64 {

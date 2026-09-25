@@ -54,6 +54,18 @@ func TestDefaultGateDaemonSetAndStatefulSet(t *testing.T) {
 	if r := DefaultGate(ds); r.Ready {
 		t.Fatal("daemonset with 2/3 ready must not be ready")
 	}
+	onDelete := obj("apps/v1", "DaemonSet", map[string]any{"updateStrategy": map[string]any{"type": "OnDelete"}}, map[string]any{"observedGeneration": int64(2), "desiredNumberScheduled": int64(3), "numberReady": int64(3), "updatedNumberScheduled": int64(0)}, 2)
+	if r := DefaultGate(onDelete); !r.Ready {
+		t.Fatalf("an OnDelete daemonset is ready when every pod is ready: %q", r.Message)
+	}
+	onDelete.Object["status"].(map[string]any)["numberReady"] = int64(2)
+	if r := DefaultGate(onDelete); r.Ready || r.Message != "x 2/3 ready, 2 updated" {
+		t.Fatalf("an OnDelete daemonset with 2/3 ready: %+v", r)
+	}
+	rolling := obj("apps/v1", "DaemonSet", map[string]any{"updateStrategy": map[string]any{"type": "RollingUpdate"}}, map[string]any{"observedGeneration": int64(2), "desiredNumberScheduled": int64(3), "numberReady": int64(3), "updatedNumberScheduled": int64(0)}, 2)
+	if r := DefaultGate(rolling); r.Ready {
+		t.Fatal("a rolling daemonset needs every pod updated")
+	}
 	sts := obj("apps/v1", "StatefulSet", map[string]any{"replicas": int64(3)}, map[string]any{"observedGeneration": int64(1), "readyReplicas": int64(3), "updatedReplicas": int64(3)}, 1)
 	if r := DefaultGate(sts); !r.Ready {
 		t.Fatalf("statefulset: %q", r.Message)
