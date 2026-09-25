@@ -44,6 +44,7 @@ const (
 func Steps() map[string]Step {
 	return map[string]Step{
 		v1alpha1.StepPreload: preload,
+		v1alpha1.StepBackup:  backup,
 	}
 }
 
