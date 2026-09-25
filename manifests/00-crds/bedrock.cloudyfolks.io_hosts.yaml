@@ -96,6 +96,8 @@ spec:
             type: object
           status:
             properties:
+              agentVersion:
+                type: string
               applied:
                 properties:
                   generation:
@@ -115,6 +117,20 @@ spec:
                       - state
                       type: object
                     type: array
+                type: object
+              checks:
+                properties:
+                  certificatesNotAfter:
+                    format: date-time
+                    type: string
+                  etcdMembers:
+                    format: int32
+                    type: integer
+                  timeSynced:
+                    type: boolean
+                  varLibFreeBytes:
+                    format: int64
+                    type: integer
                 type: object
               conditions:
                 items:
@@ -175,6 +191,31 @@ spec:
                 x-kubernetes-list-map-keys:
                 - type
                 x-kubernetes-list-type: map
+              depot:
+                properties:
+                  bundles:
+                    items:
+                      properties:
+                        arch:
+                          type: string
+                        bytes:
+                          format: int64
+                          type: integer
+                        version:
+                          type: string
+                      required:
+                      - arch
+                      - bytes
+                      - version
+                      type: object
+                    type: array
+                  url:
+                    type: string
+                required:
+                - url
+                type: object
+              hostname:
+                type: string
               inventory:
                 properties:
                   cpu:
@@ -275,11 +316,24 @@ spec:
                       type: object
                     type: array
                 type: object
+              k0sVersion:
+                type: string
               kubernetesVersion:
                 type: string
               observedGeneration:
                 format: int64
                 type: integer
+              restore:
+                properties:
+                  backup:
+                    type: string
+                  completedAt:
+                    format: date-time
+                    type: string
+                required:
+                - backup
+                - completedAt
+                type: object
             type: object
         required:
         - spec

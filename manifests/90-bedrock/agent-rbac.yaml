@@ -11,6 +11,12 @@ rules:
   - apiGroups: [bedrock.cloudyfolks.io]
     resources: [hosts/status]
     verbs: [get, update, patch]
+  - apiGroups: [bedrock.cloudyfolks.io]
+    resources: [nodeupgrades, releases]
+    verbs: [get, list, watch]
+  - apiGroups: [bedrock.cloudyfolks.io]
+    resources: [nodeupgrades/status]
+    verbs: [get, update, patch]
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding
@@ -56,4 +62,35 @@ metadata:
     bedrock.cloudyfolks.io/component: bedrock
 spec:
   policyName: bedrock-agent-own-host
+  validationActions: [Deny]
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicy
+metadata:
+  name: bedrock-agent-own-nodeupgrade
+  labels:
+    bedrock.cloudyfolks.io/component: bedrock
+spec:
+  failurePolicy: Fail
+  matchConstraints:
+    resourceRules:
+      - apiGroups: [bedrock.cloudyfolks.io]
+        apiVersions: [v1alpha1]
+        operations: [UPDATE]
+        resources: [nodeupgrades/status]
+  matchConditions:
+    - name: node-identity
+      expression: "request.userInfo.username.startsWith('system:node:')"
+  validations:
+    - expression: "request.userInfo.username == 'system:node:' + object.spec.node"
+      message: "a node may only update the status of its own NodeUpgrade"
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicyBinding
+metadata:
+  name: bedrock-agent-own-nodeupgrade
+  labels:
+    bedrock.cloudyfolks.io/component: bedrock
+spec:
+  policyName: bedrock-agent-own-nodeupgrade
   validationActions: [Deny]

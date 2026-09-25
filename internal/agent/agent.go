@@ -127,7 +127,7 @@ func Tick(ctx context.Context, c client.Client, deps Deps) error {
 	return invErr
 }
 
-func manage(ctx context.Context, c client.Client, deps Deps, current v1alpha1.Host) (v1alpha1.AppliedConfig, metav1.Condition) {
+func manage(ctx context.Context, c client.Client, deps Deps, current v1alpha1.Host) (*v1alpha1.AppliedConfig, metav1.Condition) {
 	var config v1alpha1.HostConfig
 	err := c.Get(ctx, client.ObjectKey{Name: deps.Node}, &config)
 	if errors.IsNotFound(err) {
@@ -137,9 +137,9 @@ func manage(ctx context.Context, c client.Client, deps Deps, current v1alpha1.Ho
 		return current.Status.Applied, condition(v1alpha1.ConditionManagementApplied, metav1.ConditionFalse, "ReadFailed", err.Error(), current.Generation)
 	}
 	applied := current.Status.Applied
-	if applied.Generation != config.Generation || hostconfig.Failed(applied.Steps) {
+	if applied == nil || applied.Generation != config.Generation || hostconfig.Failed(applied.Steps) {
 		steps := deps.Apply(ctx, hostconfig.Deps{Exec: deps.Exec, Root: deps.Root, Packages: deps.Packages}, config.Spec)
-		applied = v1alpha1.AppliedConfig{Generation: config.Generation, Steps: steps}
+		applied = &v1alpha1.AppliedConfig{Generation: config.Generation, Steps: steps}
 	}
 	if hostconfig.Failed(applied.Steps) {
 		return applied, condition(v1alpha1.ConditionManagementApplied, metav1.ConditionFalse, "StepFailed", firstFailure(applied.Steps), current.Generation)

@@ -9,6 +9,7 @@ import (
 
 	apimeta "k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/watch"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
@@ -63,6 +64,21 @@ func TestTickWritesInventoryOnly(t *testing.T) {
 	}
 }
 
+func TestTickOmitsAppliedWhenUnmanaged(t *testing.T) {
+	createHost(t, "node-a", false, "")
+	if err := Tick(context.Background(), k8sClient, newDeps(&host.FakeExec{}, time.Now())); err != nil {
+		t.Fatal(err)
+	}
+	live := &unstructured.Unstructured{}
+	live.SetGroupVersionKind(v1alpha1.GroupVersion.WithKind("Host"))
+	if err := k8sClient.Get(context.Background(), client.ObjectKey{Name: "node-a"}, live); err != nil {
+		t.Fatal(err)
+	}
+	if applied, found, _ := unstructured.NestedFieldNoCopy(live.Object, "status", "applied"); found {
+		t.Fatalf("status.applied must be absent for an unmanaged host, got %v", applied)
+	}
+}
+
 func TestTickAppliesHostConfigWhenManaged(t *testing.T) {
 	createHost(t, "node-a", true, "")
 	hc := &v1alpha1.HostConfig{ObjectMeta: metav1.ObjectMeta{Name: "node-a"}, Spec: v1alpha1.HostConfigSpec{Sysctls: map[string]string{"net.ipv4.ip_forward": "1"}}}
@@ -81,7 +97,7 @@ func TestTickAppliesHostConfigWhenManaged(t *testing.T) {
 	if !v1alpha1.IsConditionTrue(h.Status.Conditions, v1alpha1.ConditionManagementApplied) {
 		t.Fatalf("conditions %+v", h.Status.Conditions)
 	}
-	if h.Status.Applied.Generation != hc.Generation || len(h.Status.Applied.Steps) != 7 {
+	if h.Status.Applied == nil || h.Status.Applied.Generation != hc.Generation || len(h.Status.Applied.Steps) != 7 {
 		t.Fatalf("applied %+v", h.Status.Applied)
 	}
 	calls := len(exec.Calls)

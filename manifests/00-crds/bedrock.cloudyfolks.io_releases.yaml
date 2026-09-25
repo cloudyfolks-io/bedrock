@@ -44,6 +44,10 @@ spec:
             type: object
           spec:
             properties:
+              bedrockChecksums:
+                additionalProperties:
+                  type: string
+                type: object
               components:
                 items:
                   properties:
@@ -61,6 +65,10 @@ spec:
                 type: array
               image:
                 type: string
+              images:
+                items:
+                  type: string
+                type: array
               k0sChecksums:
                 additionalProperties:
                   type: string

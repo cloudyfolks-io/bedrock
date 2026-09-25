@@ -141,6 +141,34 @@ type AppliedConfig struct {
 	Steps []StepResult `json:"steps,omitempty"`
 }
 
+type DepotBundle struct {
+	Version string `json:"version"`
+	Arch    string `json:"arch"`
+	Bytes   int64  `json:"bytes"`
+}
+
+type DepotStatus struct {
+	URL string `json:"url"`
+	// +optional
+	Bundles []DepotBundle `json:"bundles,omitempty"`
+}
+
+type HostChecks struct {
+	// +optional
+	TimeSynced bool `json:"timeSynced,omitempty"`
+	// +optional
+	VarLibFreeBytes int64 `json:"varLibFreeBytes,omitempty"`
+	// +optional
+	CertificatesNotAfter *metav1.Time `json:"certificatesNotAfter,omitempty"`
+	// +optional
+	EtcdMembers int32 `json:"etcdMembers,omitempty"`
+}
+
+type RestoreStatus struct {
+	Backup      string      `json:"backup"`
+	CompletedAt metav1.Time `json:"completedAt"`
+}
+
 type HostStatus struct {
 	// +optional
 	ObservedGeneration int64 `json:"observedGeneration,omitempty"`
@@ -151,9 +179,21 @@ type HostStatus struct {
 	// +optional
 	Inventory Inventory `json:"inventory,omitempty"`
 	// +optional
-	Applied AppliedConfig `json:"applied,omitempty"`
+	Applied *AppliedConfig `json:"applied,omitempty"`
 	// +optional
 	KubernetesVersion string `json:"kubernetesVersion,omitempty"`
+	// +optional
+	AgentVersion string `json:"agentVersion,omitempty"`
+	// +optional
+	K0sVersion string `json:"k0sVersion,omitempty"`
+	// +optional
+	Hostname string `json:"hostname,omitempty"`
+	// +optional
+	Depot *DepotStatus `json:"depot,omitempty"`
+	// +optional
+	Checks *HostChecks `json:"checks,omitempty"`
+	// +optional
+	Restore *RestoreStatus `json:"restore,omitempty"`
 }
 
 // +kubebuilder:object:root=true

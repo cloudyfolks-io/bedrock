@@ -20,6 +20,14 @@ const (
 	UpgradeActionResume = "resume"
 	UpgradeActionAbort  = "abort"
 
+	ReasonUpgrading     = "Upgrading"
+	ReasonBlocked       = "Blocked"
+	ReasonAborted       = "Aborted"
+	ReasonRestoring     = "Restoring"
+	ReasonRestoreManual = "RestoreManual"
+	ReasonPhaseFailed   = "PhaseFailed"
+	ReasonUpgraded      = "Upgraded"
+
 	ConditionAvailable           = "Available"
 	ConditionUpgradeBlocked      = "UpgradeBlocked"
 	ConditionStorageReady        = "StorageReady"
@@ -85,6 +93,21 @@ type BackupRecord struct {
 	Digest   string      `json:"digest"`
 }
 
+type UpgradeStatus struct {
+	From           string      `json:"from"`
+	To             string      `json:"to"`
+	StartedAt      metav1.Time `json:"startedAt"`
+	PhaseStartedAt metav1.Time `json:"phaseStartedAt"`
+	// +kubebuilder:validation:Minimum=1
+	Attempt int32 `json:"attempt"`
+	// +optional
+	Backup string `json:"backup,omitempty"`
+	// +optional
+	FailedPhase string `json:"failedPhase,omitempty"`
+	// +optional
+	Message string `json:"message,omitempty"`
+}
+
 type ClusterStatus struct {
 	// +optional
 	ObservedGeneration int64 `json:"observedGeneration,omitempty"`
@@ -98,6 +121,8 @@ type ClusterStatus struct {
 	Components []ComponentStatus `json:"components,omitempty"`
 	// +optional
 	Backups []BackupRecord `json:"backups,omitempty"`
+	// +optional
+	Upgrade *UpgradeStatus `json:"upgrade,omitempty"`
 }
 
 // +kubebuilder:object:root=true

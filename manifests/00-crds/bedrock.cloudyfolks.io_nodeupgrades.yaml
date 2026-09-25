@@ -1,0 +1,160 @@
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  annotations:
+    controller-gen.kubebuilder.io/version: v0.20.0
+  name: nodeupgrades.bedrock.cloudyfolks.io
+spec:
+  group: bedrock.cloudyfolks.io
+  names:
+    kind: NodeUpgrade
+    listKind: NodeUpgradeList
+    plural: nodeupgrades
+    singular: nodeupgrade
+  scope: Cluster
+  versions:
+  - additionalPrinterColumns:
+    - jsonPath: .spec.node
+      name: Node
+      type: string
+    - jsonPath: .spec.version
+      name: Version
+      type: string
+    name: v1alpha1
+    schema:
+      openAPIV3Schema:
+        properties:
+          apiVersion:
+            description: |-
+              APIVersion defines the versioned schema of this representation of an object.
+              Servers should convert recognized schemas to the latest internal value, and
+              may reject unrecognized values.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources
+            type: string
+          kind:
+            description: |-
+              Kind is a string value representing the REST resource this object represents.
+              Servers may infer this from the endpoint the client submits requests to.
+              Cannot be updated.
+              In CamelCase.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds
+            type: string
+          metadata:
+            type: object
+          spec:
+            properties:
+              attempt:
+                format: int32
+                minimum: 1
+                type: integer
+                x-kubernetes-validations:
+                - message: attempt may only increase
+                  rule: self >= oldSelf
+              backup:
+                maxLength: 512
+                type: string
+                x-kubernetes-validations:
+                - message: backup is set once
+                  rule: oldSelf == '' || self == oldSelf
+              depot:
+                maxLength: 512
+                type: string
+                x-kubernetes-validations:
+                - message: depot is immutable
+                  rule: self == oldSelf
+              from:
+                maxLength: 64
+                minLength: 1
+                type: string
+                x-kubernetes-validations:
+                - message: from is immutable
+                  rule: self == oldSelf
+              node:
+                maxLength: 253
+                minLength: 1
+                type: string
+                x-kubernetes-validations:
+                - message: node is immutable
+                  rule: self == oldSelf
+              steps:
+                items:
+                  enum:
+                  - Preload
+                  - Backup
+                  - AgentUpdate
+                  - OSUpdate
+                  - Reboot
+                  - Prune
+                  - Cleanup
+                  - Restore
+                  maxLength: 16
+                  type: string
+                maxItems: 8
+                type: array
+                x-kubernetes-list-type: set
+              version:
+                maxLength: 64
+                minLength: 1
+                type: string
+                x-kubernetes-validations:
+                - message: version is immutable
+                  rule: self == oldSelf
+            required:
+            - attempt
+            - from
+            - node
+            - version
+            type: object
+            x-kubernetes-validations:
+            - message: steps may only be appended
+              rule: '!has(oldSelf.steps) || (has(self.steps) && oldSelf.steps.all(s,
+                s in self.steps))'
+          status:
+            properties:
+              bootID:
+                type: string
+              observedGeneration:
+                format: int64
+                type: integer
+              steps:
+                items:
+                  properties:
+                    attempt:
+                      format: int32
+                      type: integer
+                    finishedAt:
+                      format: date-time
+                      type: string
+                    message:
+                      type: string
+                    name:
+                      type: string
+                    startedAt:
+                      format: date-time
+                      type: string
+                    state:
+                      enum:
+                      - Pending
+                      - Running
+                      - Succeeded
+                      - Failed
+                      type: string
+                  required:
+                  - name
+                  - state
+                  type: object
+                type: array
+                x-kubernetes-list-map-keys:
+                - name
+                x-kubernetes-list-type: map
+            type: object
+        required:
+        - spec
+        type: object
+    selectableFields:
+    - jsonPath: .spec.node
+    served: true
+    storage: true
+    subresources:
+      status: {}

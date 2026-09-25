@@ -198,6 +198,35 @@ spec:
                 type: integer
               phase:
                 type: string
+              upgrade:
+                properties:
+                  attempt:
+                    format: int32
+                    minimum: 1
+                    type: integer
+                  backup:
+                    type: string
+                  failedPhase:
+                    type: string
+                  from:
+                    type: string
+                  message:
+                    type: string
+                  phaseStartedAt:
+                    format: date-time
+                    type: string
+                  startedAt:
+                    format: date-time
+                    type: string
+                  to:
+                    type: string
+                required:
+                - attempt
+                - from
+                - phaseStartedAt
+                - startedAt
+                - to
+                type: object
               version:
                 type: string
             type: object

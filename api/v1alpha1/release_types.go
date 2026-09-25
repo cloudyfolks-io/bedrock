@@ -24,6 +24,10 @@ type ReleaseSpec struct {
 	SupportedOS []string `json:"supportedOS,omitempty"`
 	// +optional
 	K0sChecksums map[string]string `json:"k0sChecksums,omitempty"`
+	// +optional
+	BedrockChecksums map[string]string `json:"bedrockChecksums,omitempty"`
+	// +optional
+	Images []string `json:"images,omitempty"`
 }
 
 type ReleaseStatus struct {
