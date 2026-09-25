@@ -148,7 +148,7 @@ func TestRunBundlePullVerifiesWithCosign(t *testing.T) {
 	server := bundleServer(t, "v0.1.0", bundle, sums)
 	defer server.Close()
 	out := t.TempDir()
-	exec := &host.FakeExec{ResponsePrefixes: map[string]string{"cosign verify-blob": ""}}
+	exec := &host.FakeExec{Responses: map[string]string{"cosign version --json": `{"gitVersion":"v3.0.2"}`}, ResponsePrefixes: map[string]string{"cosign verify-blob": ""}}
 	deps := BundleDeps{Exec: exec, LookPath: func(string) (string, error) { return "/usr/bin/cosign", nil }}
 	var stdout, stderr bytes.Buffer
 	code := RunBundlePull(context.Background(), bundlePullOptions{version: "v0.1.0", out: out, arch: "amd64", baseURL: server.URL}, deps, &stdout, &stderr)
@@ -159,7 +159,7 @@ func TestRunBundlePullVerifiesWithCosign(t *testing.T) {
 	if string(got) != "bundle-bytes" {
 		t.Fatalf("bundle content %q", got)
 	}
-	if len(exec.Calls) != 1 || !strings.HasPrefix(exec.Calls[0], "cosign verify-blob --bundle "+filepath.Join(out, "SHA256SUMS.sigstore.json")) || !strings.Contains(exec.Calls[0], "refs/tags/"+regexp.QuoteMeta("v0.1.0")) {
+	if len(exec.Calls) != 2 || exec.Calls[0] != "cosign version --json" || !strings.HasPrefix(exec.Calls[1], "cosign verify-blob --bundle "+filepath.Join(out, "SHA256SUMS.sigstore.json")) || !strings.Contains(exec.Calls[1], "refs/tags/"+regexp.QuoteMeta("v0.1.0")) {
 		t.Fatalf("cosign call %v", exec.Calls)
 	}
 }
@@ -198,7 +198,7 @@ func TestRunBundlePullFailsCosignVerification(t *testing.T) {
 	sum := sha256.Sum256(bundle)
 	server := bundleServer(t, "v0.1.0", bundle, hex.EncodeToString(sum[:])+"  "+BundleAssetName("v0.1.0", "amd64")+"\n")
 	defer server.Close()
-	exec := &host.FakeExec{Errors: map[string]error{}}
+	exec := &host.FakeExec{Responses: map[string]string{"cosign version --json": `{"gitVersion":"v3.0.2"}`}}
 	exec.ErrorPrefixes = map[string]error{"cosign verify-blob": &host.ExitError{Code: 1}}
 	deps := BundleDeps{Exec: exec, LookPath: func(string) (string, error) { return "/usr/bin/cosign", nil }}
 	out := t.TempDir()
@@ -210,5 +210,58 @@ func TestRunBundlePullFailsCosignVerification(t *testing.T) {
 		if _, err := os.Stat(filepath.Join(out, name)); !os.IsNotExist(err) {
 			t.Fatalf("%s must be removed after a failed signature check", name)
 		}
+	}
+}
+
+func TestRunBundlePullRejectsOldCosign(t *testing.T) {
+	bundle := []byte("b")
+	sum := sha256.Sum256(bundle)
+	server := bundleServer(t, "v0.1.0", bundle, hex.EncodeToString(sum[:])+"  "+BundleAssetName("v0.1.0", "amd64")+"\n")
+	defer server.Close()
+	exec := &host.FakeExec{Responses: map[string]string{"cosign version --json": `{"gitVersion":"v2.6.1"}`}}
+	deps := BundleDeps{Exec: exec, LookPath: func(string) (string, error) { return "/usr/bin/cosign", nil }}
+	out := t.TempDir()
+	var stdout, stderr bytes.Buffer
+	if code := RunBundlePull(context.Background(), bundlePullOptions{version: "v0.1.0", out: out, arch: "amd64", baseURL: server.URL}, deps, &stdout, &stderr); code == 0 {
+		t.Fatal("an old cosign must fail the pull")
+	}
+	if !strings.Contains(stderr.String(), "cosign v2.6.1 is older than the minimum v3.0.0") {
+		t.Fatalf("stderr %q", stderr.String())
+	}
+	if _, err := os.Stat(filepath.Join(out, BundleAssetName("v0.1.0", "amd64"))); !os.IsNotExist(err) {
+		t.Fatal("the unverified bundle must be removed")
+	}
+}
+
+func TestRequireCosign(t *testing.T) {
+	cases := []struct {
+		output string
+		want   string
+	}{
+		{`{"gitVersion":"v3.0.0"}`, ""},
+		{`{"gitVersion":"v3.1.2"}`, ""},
+		{`{"gitVersion":"v10.0.0"}`, ""},
+		{`{"gitVersion":"v2.6.1"}`, "cosign v2.6.1 is older than the minimum v3.0.0"},
+		{`{"gitVersion":""}`, "cosign reported no version"},
+		{`not json`, "read cosign version"},
+	}
+	for _, tc := range cases {
+		err := requireCosign(tc.output, "v3.0.0")
+		if tc.want == "" && err != nil {
+			t.Fatalf("%s: unexpected error %v", tc.output, err)
+		}
+		if tc.want != "" && (err == nil || !strings.Contains(err.Error(), tc.want)) {
+			t.Fatalf("%s: error %v, want %q", tc.output, err, tc.want)
+		}
+	}
+}
+
+func TestBundlePullUsageNamesMinimumCosign(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	if code := bundlePull(nil, &stdout, &stderr); code != 2 {
+		t.Fatalf("exit %d", code)
+	}
+	if !strings.Contains(stderr.String(), "cosign v3.0.0 or newer") {
+		t.Fatalf("usage must name the minimum cosign version: %q", stderr.String())
 	}
 }

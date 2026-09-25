@@ -2,6 +2,7 @@ package cli
 
 import (
 	"context"
+	"encoding/json"
 	"flag"
 	"fmt"
 	"io"
@@ -10,6 +11,9 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"slices"
+	"strconv"
+	"strings"
 
 	"github.com/cloudyfolks-labs/bedrock/internal/host"
 	"github.com/cloudyfolks-labs/bedrock/internal/release"
@@ -21,6 +25,7 @@ const (
 	sigstoreBundleFile    = "SHA256SUMS.sigstore.json"
 	oidcIssuer            = "https://token.actions.githubusercontent.com"
 	identityFormat        = `^https://github.com/cloudyfolks-labs/bedrock/\.github/workflows/release\.yml@refs/tags/%s$`
+	minCosignVersion      = "v3.0.0"
 )
 
 type BundleDeps struct {
@@ -148,11 +153,15 @@ func bundlePull(args []string, stdout, stderr io.Writer) int {
 	flags.StringVar(&o.out, "out", ".", "output directory")
 	flags.StringVar(&o.arch, "arch", "amd64", "target architecture")
 	flags.StringVar(&o.baseURL, "base-url", DefaultReleaseBaseURL, "release download base url")
+	flags.Usage = func() {
+		fmt.Fprintf(stderr, "usage: bedrock bundle pull vX.Y.Z --out dir\nthe signature check needs cosign %s or newer\n", minCosignVersion)
+		flags.PrintDefaults()
+	}
 	if err := flags.Parse(args); err != nil {
 		return 2
 	}
 	if flags.NArg() != 1 {
-		fmt.Fprintln(stderr, "usage: bedrock bundle pull vX.Y.Z --out dir")
+		flags.Usage()
 		return 2
 	}
 	o.version = flags.Arg(0)
@@ -193,9 +202,16 @@ func verifySignature(ctx context.Context, deps BundleDeps, o bundlePullOptions, 
 		fmt.Fprintln(stderr, "warning: cosign not found, signature not verified")
 		return nil
 	}
+	version, err := deps.Exec.Run(ctx, "cosign", "version", "--json")
+	if err != nil {
+		return fmt.Errorf("cosign version: %w", err)
+	}
+	if err := requireCosign(version, minCosignVersion); err != nil {
+		return err
+	}
 	step(stdout, "verifying signature")
 	identity := fmt.Sprintf(identityFormat, regexp.QuoteMeta(o.version))
-	_, err := deps.Exec.Run(ctx, "cosign", "verify-blob", "--bundle", filepath.Join(o.out, sigstoreBundleFile), "--certificate-identity-regexp", identity, "--certificate-oidc-issuer", oidcIssuer, filepath.Join(o.out, sumsFile))
+	_, err = deps.Exec.Run(ctx, "cosign", "verify-blob", "--bundle", filepath.Join(o.out, sigstoreBundleFile), "--certificate-identity-regexp", identity, "--certificate-oidc-issuer", oidcIssuer, filepath.Join(o.out, sumsFile))
 	if err != nil {
 		return fmt.Errorf("signature verification failed: %w", err)
 	}
@@ -248,4 +264,45 @@ func downloadTo(ctx context.Context, url, path string) error {
 		return err
 	}
 	return os.Rename(part, path)
+}
+
+func requireCosign(output, minimum string) error {
+	var info struct {
+		GitVersion string `json:"gitVersion"`
+	}
+	if err := json.Unmarshal([]byte(output), &info); err != nil {
+		return fmt.Errorf("read cosign version: %w", err)
+	}
+	if info.GitVersion == "" {
+		return fmt.Errorf("cosign reported no version")
+	}
+	have, err := versionNumbers(info.GitVersion)
+	if err != nil {
+		return err
+	}
+	want, err := versionNumbers(minimum)
+	if err != nil {
+		return err
+	}
+	if slices.Compare(have, want) < 0 {
+		return fmt.Errorf("cosign %s is older than the minimum %s", info.GitVersion, minimum)
+	}
+	return nil
+}
+
+func versionNumbers(version string) ([]int, error) {
+	core, _, _ := strings.Cut(strings.TrimPrefix(version, "v"), "-")
+	parts := strings.Split(core, ".")
+	if len(parts) != 3 {
+		return nil, fmt.Errorf("version %q is not vX.Y.Z", version)
+	}
+	numbers := make([]int, 0, len(parts))
+	for _, part := range parts {
+		n, err := strconv.Atoi(part)
+		if err != nil {
+			return nil, fmt.Errorf("version %q is not vX.Y.Z", version)
+		}
+		numbers = append(numbers, n)
+	}
+	return numbers, nil
 }
