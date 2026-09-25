@@ -29,7 +29,7 @@ func OperatorRole(bundle release.Bundle) (rbacv1.ClusterRole, error) {
 	plurals := crdPlurals(objects)
 	var rules []rbacv1.PolicyRule
 	for _, kind := range groupKinds(append(objectKinds(objects), addonKinds...)) {
-		rules = append(rules, rbacv1.PolicyRule{APIGroups: []string{kind.Group}, Resources: []string{resourceOf(kind, plurals)}, Verbs: standardVerbs()})
+		rules = append(rules, rbacv1.PolicyRule{APIGroups: []string{kind.Group}, Resources: []string{resourceOf(kind, plurals)}, Verbs: verbsFor(kind)})
 	}
 	return rbacv1.ClusterRole{
 		TypeMeta:   metav1.TypeMeta{APIVersion: rbacv1.SchemeGroupVersion.String(), Kind: "ClusterRole"},
@@ -49,6 +49,21 @@ func RoleYAML(role rbacv1.ClusterRole) ([]byte, error) {
 
 func standardVerbs() []string {
 	return []string{"create", "delete", "get", "list", "patch", "update", "watch"}
+}
+
+func verbsFor(kind schema.GroupKind) []string {
+	if neverDeleted(kind) {
+		return standardVerbsWithoutDelete()
+	}
+	return standardVerbs()
+}
+
+func neverDeleted(kind schema.GroupKind) bool {
+	return kind == (schema.GroupKind{Kind: "Namespace"}) || kind == (schema.GroupKind{Group: "apiextensions.k8s.io", Kind: "CustomResourceDefinition"})
+}
+
+func standardVerbsWithoutDelete() []string {
+	return []string{"create", "get", "list", "patch", "update", "watch"}
 }
 
 func fixedRules() []rbacv1.PolicyRule {

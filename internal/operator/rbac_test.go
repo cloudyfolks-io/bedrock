@@ -50,6 +50,8 @@ func TestOperatorRole(t *testing.T) {
 		{"cert-manager.io", "clusterissuers", "patch"},
 		{"", "secrets", "get"},
 		{"storage.k8s.io", "storageclasses", "patch"},
+		{"apiextensions.k8s.io", "customresourcedefinitions", "patch"},
+		{"", "namespaces", "patch"},
 		{"bedrock.cloudyfolks.io", "clusters/status", "update"},
 		{"bedrock.cloudyfolks.io", "nodeupgrades", "create"},
 		{"bedrock.cloudyfolks.io", "settings/status", "patch"},
@@ -77,6 +79,9 @@ func TestOperatorRole(t *testing.T) {
 	}
 	if allows(role, "", "pods", "create") || allows(role, "", "nodes", "delete") {
 		t.Fatal("the operator never creates pods or deletes nodes")
+	}
+	if allows(role, "apiextensions.k8s.io", "customresourcedefinitions", "delete") || allows(role, "", "namespaces", "delete") {
+		t.Fatal("the operator never deletes CRDs or namespaces")
 	}
 	again, err := OperatorRole(rbacBundle(t))
 	if err != nil || !reflect.DeepEqual(again, role) {

@@ -26,7 +26,6 @@ rules:
   - customresourcedefinitions
   verbs:
   - create
-  - delete
   - get
   - list
   - patch
@@ -306,7 +305,6 @@ rules:
   - ""
   resources:
   - configmaps
-  - namespaces
   - secrets
   - serviceaccounts
   - services
@@ -325,6 +323,17 @@ rules:
   verbs:
   - create
   - get
+- apiGroups:
+  - ""
+  resources:
+  - namespaces
+  verbs:
+  - create
+  - get
+  - list
+  - patch
+  - update
+  - watch
 - apiGroups:
   - ""
   resources:
