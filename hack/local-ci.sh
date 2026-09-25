@@ -33,11 +33,8 @@ for job in "$@"; do
 done
 
 job_order=("$@")
-declare -A job_status
-declare -A job_minutes
-for job in "${job_order[@]}"; do
-  job_status[$job]=SKIP
-done
+summary=""
+ran=0
 
 cd "$repo"
 
@@ -158,8 +155,11 @@ cleanup() {
   fi
   rm -f dist/bedrock-*-bundle-*.tar.zst
   rm -rf dist/cache
-  for job in "${job_order[@]}"; do
-    echo "$job: ${job_status[$job]} (${job_minutes[$job]:-0}m)"
+  printf '%s' "$summary"
+  local i=$ran
+  while [ "$i" -lt "${#job_order[@]}" ]; do
+    echo "${job_order[$i]}: SKIP (0m)"
+    i=$((i + 1))
   done
 }
 trap cleanup EXIT
@@ -172,15 +172,18 @@ for job in "${job_order[@]}"; do
   if [ "$stop" -eq 1 ]; then
     continue
   fi
+  ran=$((ran + 1))
   start=$(date +%s)
   if ( guard && "run_${job//-/_}" ); then
-    job_status[$job]=PASS
+    status=PASS
   else
-    job_status[$job]=FAIL
+    status=FAIL
     stop=1
     rc=1
   fi
-  job_minutes[$job]=$(( ($(date +%s) - start) / 60 ))
+  minutes=$(( ($(date +%s) - start) / 60 ))
+  printf -v line '%s: %s (%sm)\n' "$job" "$status" "$minutes"
+  summary="${summary}${line}"
 done
 
 exit "$rc"
