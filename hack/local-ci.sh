@@ -12,6 +12,11 @@ arch=$(uname -m | sed 's/x86_64/amd64/;s/aarch64/arm64/')
 previous_context=$(docker context show 2>/dev/null || true)
 docker_host="unix://$HOME/.colima/$profile/docker.sock"
 mac_env=("DOCKER_HOST=$docker_host")
+proxy_http=${HTTP_PROXY:-${http_proxy:-${HTTPS_PROXY:-${https_proxy:-}}}}
+proxy_https=${HTTPS_PROXY:-${https_proxy:-${HTTP_PROXY:-${http_proxy:-}}}}
+vm_http=""
+vm_https=""
+vm_no_proxy=""
 known_jobs=(test e2e-kind e2e-init e2e-bundle e2e-upgrade e2e-upgrade-abort)
 
 if [ "$#" -eq 0 ]; then
@@ -70,6 +75,36 @@ vm_up() {
 exec /usr/local/bin/k0s kubectl "$@"
 SCRIPT
   colima ssh --profile "$profile" -- sudo chmod +x /usr/local/bin/kubectl
+  if [ -n "$proxy_https" ]; then
+    use_proxy
+  fi
+}
+
+vm_url() {
+  printf '%s' "$1" | sed "s#127\.0\.0\.1#$2#g;s#localhost#$2#g"
+}
+
+use_proxy() {
+  local host vm_ip
+  host=$(colima ssh --profile "$profile" -- getent ahostsv4 host.lima.internal | awk 'NR==1 {print $1}')
+  vm_ip=$(colima ssh --profile "$profile" -- ip -4 route get 1.1.1.1 | awk '{for (i = 1; i < NF; i++) if ($i == "src") print $(i + 1)}')
+  test -n "$host"
+  test -n "$vm_ip"
+  vm_http=$(vm_url "$proxy_http" "$host")
+  vm_https=$(vm_url "$proxy_https" "$host")
+  vm_no_proxy="localhost,127.0.0.1,$vm_ip,${vm_ip%.*}.0/24,.svc,.cluster.local,10.16.0.0/16,10.96.0.0/12,100.64.0.0/16"
+  mkdir -p "$tmp/docker-config"
+  printf '{"proxies":{"default":{"httpProxy":"%s","httpsProxy":"%s","noProxy":"localhost,127.0.0.1"}},"cliPluginsExtraDirs":["%s"]}\n' "$vm_http" "$vm_https" "$HOME/.docker/cli-plugins" > "$tmp/docker-config/config.json"
+  mac_env+=("DOCKER_CONFIG=$tmp/docker-config")
+}
+
+k0s_proxy() {
+  local unit
+  for unit in k0scontroller k0sworker; do
+    colima ssh --profile "$profile" -- sudo mkdir -p "/etc/systemd/system/$unit.service.d"
+    printf '[Service]\nEnvironment=HTTP_PROXY=%s\nEnvironment=HTTPS_PROXY=%s\nEnvironment=NO_PROXY=%s\n' "$vm_http" "$vm_https" "$vm_no_proxy" | colima ssh --profile "$profile" -- sudo tee "/etc/systemd/system/$unit.service.d/proxy.conf" >/dev/null
+  done
+  colima ssh --profile "$profile" -- sudo systemctl daemon-reload
 }
 
 vm_down() {
@@ -77,8 +112,11 @@ vm_down() {
 }
 
 in_vm() {
-  local vars=$1 cmd=$2
-  colima ssh --profile "$profile" -- sudo env PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin $vars bash -c "cd '$repo' && $cmd"
+  local vars=$1 cmd=$2 proxy=""
+  if [ -n "$vm_https" ]; then
+    proxy="http_proxy=$vm_http https_proxy=$vm_https no_proxy=$vm_no_proxy HTTP_PROXY=$vm_http HTTPS_PROXY=$vm_https NO_PROXY=$vm_no_proxy"
+  fi
+  colima ssh --profile "$profile" -- sudo env PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin $proxy $vars bash -c "cd '$repo' && $cmd"
 }
 
 warn_docker_desktop() {
@@ -123,6 +161,9 @@ run_e2e_kind() {
 
 run_e2e_init() {
   vm_up
+  if [ -n "$vm_https" ]; then
+    k0s_proxy
+  fi
   env "${mac_env[@]}" make build release binaries VERSION=dev
   env "${mac_env[@]}" docker build -t ghcr.io/cloudyfolks-labs/bedrock:dev -f Containerfile .
   in_vm "VERSION=dev KUBECONFIG=/var/lib/k0s/pki/admin.conf BIN=dist/bedrock-dev-linux-$arch ARCH=$arch" hack/e2e-init.sh
