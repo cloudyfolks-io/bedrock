@@ -3,8 +3,11 @@
 Use this runbook when `bedrock upgrade abort` during the ControlPlane phase
 stops with phase `Failed` and reason `RestoreManual`. This occurs when:
 
-- the cluster has more than one controller, or
-- the automatic restore on a single controller failed.
+- the cluster has more than one controller,
+- the automatic restore on a single controller failed, or
+- the API does not answer after `bedrock upgrade abort` in the ControlPlane
+  phase. A failed automatic restore on a single controller can leave k0s
+  stopped, so the operator cannot report `RestoreManual`.
 
 Every change to the cluster after the backup is lost.
 
@@ -21,6 +24,13 @@ Every change to the cluster after the backup is lost.
 
   The value is `host:<node>:<path>`. `<node>` is the backup node. `<path>`
   is the backup archive on that node.
+- When the API does not answer, find the path another way:
+  - Look for the line `restoring host:<node>:<path>` that `bedrock upgrade
+    abort` printed.
+  - Or, on the controller, take the newest archive under
+    `/var/lib/bedrock/backups`.
+- The agent may have already moved the k0s state directories into
+  `/var/lib/k0s/.pre-restore-<time>` on that node. Check there first.
 
 ## 1. Stop k0s on every controller
 
@@ -32,20 +42,24 @@ systemctl stop k0scontroller
 
 ## 2. Restore the backup node
 
-On the backup node, set the archive path and do these steps:
+On the backup node, run this script in a child shell, with `<path>` set to
+the backup archive path. A step failure then stops the script and leaves
+your root shell open.
 
 ```sh
-BACKUP=<path>
+BACKUP=<path> sh -eu <<'EOF'
 install -m 0755 /var/lib/bedrock/previous/k0s /usr/local/bin/k0s
 mkdir -p /root/restore
 tar -xzf "$BACKUP" -C /root/restore
-mkdir -p /var/lib/k0s/.pre-restore
+HOLD=/var/lib/k0s/.pre-restore-$(date -u +%Y%m%dT%H%M%SZ)
+mkdir -p "$HOLD"
 for dir in etcd pki manifests images helmhome; do
-  [ -e "/var/lib/k0s/$dir" ] && mv "/var/lib/k0s/$dir" /var/lib/k0s/.pre-restore/
+  if [ -e "/var/lib/k0s/$dir" ]; then mv "/var/lib/k0s/$dir" "$HOLD/"; fi
 done
 k0s restore --config-out /root/restore/k0s.yaml /root/restore/k0s_backup_*.tar.gz
 printf '{"backup":"%s","completedAt":"%s"}\n' "$BACKUP" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" > /var/lib/bedrock/restore.json
 systemctl start k0scontroller
+EOF
 ```
 
 The file `/var/lib/bedrock/restore.json` is the same marker that the agent
