@@ -174,7 +174,15 @@ for job in "${job_order[@]}"; do
   fi
   ran=$((ran + 1))
   start=$(date +%s)
-  if ( guard && "run_${job//-/_}" ); then
+  set +e
+  (
+    set -e
+    guard
+    "run_${job//-/_}"
+  )
+  code=$?
+  set -e
+  if [ "$code" -eq 0 ]; then
     status=PASS
   else
     status=FAIL
