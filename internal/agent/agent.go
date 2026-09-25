@@ -3,6 +3,7 @@ package agent
 import (
 	"context"
 	"fmt"
+	"net/http"
 	"os"
 	"sync"
 	"time"
@@ -32,6 +33,7 @@ type Deps struct {
 	Version   string
 	Hostname  func() (string, error)
 	FreeBytes func(string) (uint64, error)
+	HTTP      *http.Client
 }
 
 func Run(ctx context.Context, c client.WithWatch, deps Deps) error {

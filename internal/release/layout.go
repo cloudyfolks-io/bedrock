@@ -54,7 +54,7 @@ func refAnnotations(ref string) layout.Option {
 }
 
 func appendNamed(path layout.Path, desc *remote.Descriptor, ref string) error {
-	names, err := containerdNames(ref)
+	names, err := ContainerdNames(ref)
 	if err != nil {
 		return err
 	}
@@ -81,7 +81,7 @@ func appendOnce(path layout.Path, desc *remote.Descriptor, named string) error {
 	return path.AppendImage(img, refAnnotations(named))
 }
 
-func containerdNames(ref string) ([]string, error) {
+func ContainerdNames(ref string) ([]string, error) {
 	base, digest, pinned := strings.Cut(ref, "@")
 	if !pinned {
 		named, err := containerdName(ref)

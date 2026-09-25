@@ -42,7 +42,9 @@ const (
 )
 
 func Steps() map[string]Step {
-	return map[string]Step{}
+	return map[string]Step{
+		v1alpha1.StepPreload: preload,
+	}
 }
 
 func RunUpgrades(ctx context.Context, c client.Client, deps Deps, steps map[string]Step) error {

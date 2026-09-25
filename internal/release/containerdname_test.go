@@ -36,7 +36,7 @@ func TestContainerdNames(t *testing.T) {
 		"localhost:5000/bedrock@" + digest:                   {"localhost:5000/bedrock@" + digest},
 	}
 	for ref, want := range cases {
-		got, err := containerdNames(ref)
+		got, err := ContainerdNames(ref)
 		if err != nil {
 			t.Fatalf("%s: %v", ref, err)
 		}

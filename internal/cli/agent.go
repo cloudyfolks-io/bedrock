@@ -6,6 +6,7 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"net/http"
 	"os"
 	"os/signal"
 	"path/filepath"
@@ -101,6 +102,7 @@ func runAgent(ctx context.Context, o agentOptions, deps agentDeps, stderr io.Wri
 		Version:   Version,
 		Hostname:  os.Hostname,
 		FreeBytes: host.FreeBytes,
+		HTTP:      &http.Client{},
 	}
 	for {
 		changed, err := runUntilKubeconfigChanges(ctx, o, deps, loopDeps, stderr)

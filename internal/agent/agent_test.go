@@ -3,6 +3,7 @@ package agent
 import (
 	"context"
 	"errors"
+	"net/http"
 	"os"
 	"path/filepath"
 	"slices"
@@ -29,7 +30,7 @@ func fakeInventory(ctx context.Context, _ host.Exec, _ string) (v1alpha1.Invento
 }
 
 func newDeps(exec *host.FakeExec, now time.Time) Deps {
-	return Deps{Exec: exec, Root: "/nonexistent", Node: "node-a", Now: func() time.Time { return now }, Interval: time.Hour, Inventory: fakeInventory, Apply: hostconfig.Apply, Packages: pkgmgr.Manager{Exec: exec, Family: "apt", Root: "/nonexistent"}, Version: "test", Hostname: func() (string, error) { return "node-a", nil }, FreeBytes: func(string) (uint64, error) { return 0, nil }}
+	return Deps{Exec: exec, Root: "/nonexistent", Node: "node-a", Now: func() time.Time { return now }, Interval: time.Hour, Inventory: fakeInventory, Apply: hostconfig.Apply, Packages: pkgmgr.Manager{Exec: exec, Family: "apt", Root: "/nonexistent"}, Version: "test", Hostname: func() (string, error) { return "node-a", nil }, FreeBytes: func(string) (uint64, error) { return 0, nil }, HTTP: &http.Client{}}
 }
 
 func createHost(t *testing.T, name string, managed bool, window string) {
