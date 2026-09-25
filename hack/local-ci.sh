@@ -9,6 +9,9 @@ min_free=${CI_MIN_FREE_GB:-25}
 port=${CI_REGISTRY_PORT:-5001}
 repo=$(git rev-parse --show-toplevel)
 arch=$(uname -m | sed 's/x86_64/amd64/;s/aarch64/arm64/')
+previous_context=$(docker context show 2>/dev/null || true)
+docker_host="unix://$HOME/.colima/$profile/docker.sock"
+mac_env=("DOCKER_HOST=$docker_host")
 known_jobs=(test e2e-kind e2e-init e2e-bundle e2e-upgrade e2e-upgrade-abort)
 
 if [ "$#" -eq 0 ]; then
@@ -51,8 +54,15 @@ profile_exists() {
   colima list 2>/dev/null | awk 'NR>1 {print $1}' | grep -qx "$profile"
 }
 
+restore_context() {
+  if [ -n "$previous_context" ]; then
+    docker context use "$previous_context" >/dev/null 2>&1 || true
+  fi
+}
+
 vm_up() {
   colima start --profile "$profile" --vm-type vz --cpu "$cpus" --memory "$memory" --disk "$disk" --runtime docker --mount "$repo:w"
+  restore_context
   colima ssh --profile "$profile" -- sudo apt-get update -qq
   colima ssh --profile "$profile" -- sudo apt-get install -y -qq gettext-base
   colima ssh --profile "$profile" -- sudo tee /usr/local/bin/kubectl >/dev/null <<'SCRIPT'
@@ -107,27 +117,27 @@ run_test() {
 
 run_e2e_kind() {
   vm_up
-  DOCKER_CONTEXT=colima-$profile make e2e-kind
+  env "${mac_env[@]}" KUBECONFIG="$tmp/kubeconfig" make e2e-kind
   vm_down
 }
 
 run_e2e_init() {
   vm_up
-  DOCKER_CONTEXT=colima-$profile make build release binaries VERSION=dev
-  DOCKER_CONTEXT=colima-$profile docker build -t ghcr.io/cloudyfolks-labs/bedrock:dev -f Containerfile .
+  env "${mac_env[@]}" make build release binaries VERSION=dev
+  env "${mac_env[@]}" docker build -t ghcr.io/cloudyfolks-labs/bedrock:dev -f Containerfile .
   in_vm "VERSION=dev KUBECONFIG=/var/lib/k0s/pki/admin.conf BIN=dist/bedrock-dev-linux-$arch ARCH=$arch" hack/e2e-init.sh
   vm_down
 }
 
 run_e2e_bundle() {
   vm_up
-  DOCKER_CONTEXT=colima-$profile docker run --rm -d -p "$port:5000" --name registry registry:3
+  env "${mac_env[@]}" docker run --rm -d -p "$port:5000" --name registry registry:3
   wait_registry
-  DOCKER_CONTEXT=colima-$profile make build release binaries VERSION=dev IMAGE=localhost:$port/bedrock:dev PIN_DIGESTS=1
-  DOCKER_CONTEXT=colima-$profile docker build -t localhost:$port/bedrock:dev -f Containerfile .
-  DOCKER_CONTEXT=colima-$profile docker push localhost:$port/bedrock:dev
-  DOCKER_CONTEXT=colima-$profile make bundle VERSION=dev IMAGE=localhost:$port/bedrock:dev PIN_DIGESTS=1 BUNDLE_ARCH=$arch
-  DOCKER_CONTEXT=colima-$profile docker rm -f registry
+  env "${mac_env[@]}" make build release binaries VERSION=dev IMAGE=localhost:$port/bedrock:dev PIN_DIGESTS=1
+  env "${mac_env[@]}" docker build -t localhost:$port/bedrock:dev -f Containerfile .
+  env "${mac_env[@]}" docker push localhost:$port/bedrock:dev
+  env "${mac_env[@]}" make bundle VERSION=dev IMAGE=localhost:$port/bedrock:dev PIN_DIGESTS=1 BUNDLE_ARCH=$arch
+  env "${mac_env[@]}" docker rm -f registry
   in_vm "KUBECONFIG=/var/lib/k0s/pki/admin.conf BUNDLE=dist/bedrock-dev-bundle-$arch.tar.zst IMAGE=localhost:$port/bedrock:dev BIN=dist/bedrock-dev-linux-$arch ARCH=$arch" hack/e2e-init.sh
   rm -f "dist/bedrock-dev-bundle-$arch.tar.zst"
   vm_down
@@ -136,11 +146,11 @@ run_e2e_bundle() {
 run_upgrade() {
   local abort_in=$1
   vm_up
-  DOCKER_CONTEXT=colima-$profile docker run --rm -d -p "$port:5000" --name registry registry:3
+  env "${mac_env[@]}" docker run --rm -d -p "$port:5000" --name registry registry:3
   wait_registry
-  DOCKER_CONTEXT=colima-$profile REGISTRY=localhost:$port ARCH=$arch VERSION_A=v0.0.0-e2e.1 VERSION_B=v0.0.0-e2e.2 K0S_A=v1.36.2+k0s.0 K0S_B=v1.36.3+k0s.0 hack/e2e-upgrade-build.sh
-  DOCKER_CONTEXT=colima-$profile docker rm -f registry
-  DOCKER_CONTEXT=colima-$profile docker system prune -af
+  env "${mac_env[@]}" REGISTRY=localhost:$port ARCH=$arch VERSION_A=v0.0.0-e2e.1 VERSION_B=v0.0.0-e2e.2 K0S_A=v1.36.2+k0s.0 K0S_B=v1.36.3+k0s.0 hack/e2e-upgrade-build.sh
+  env "${mac_env[@]}" docker rm -f registry
+  env "${mac_env[@]}" docker system prune -af
   in_vm "REGISTRY=localhost:$port ARCH=$arch VERSION_A=v0.0.0-e2e.1 VERSION_B=v0.0.0-e2e.2 K0S_A=v1.36.2+k0s.0 K0S_B=v1.36.3+k0s.0${abort_in:+ ABORT_IN=$abort_in}" hack/e2e-upgrade.sh
   rm -f dist/bedrock-*-bundle-*.tar.zst
   vm_down
@@ -155,6 +165,8 @@ cleanup() {
   fi
   rm -f dist/bedrock-*-bundle-*.tar.zst
   rm -rf dist/cache
+  restore_context
+  rm -rf "$tmp"
   printf '%s' "$summary"
   local i=$ran
   while [ "$i" -lt "${#job_order[@]}" ]; do
@@ -162,6 +174,7 @@ cleanup() {
     i=$((i + 1))
   done
 }
+tmp=$(mktemp -d)
 trap cleanup EXIT
 
 warn_docker_desktop
