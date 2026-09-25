@@ -247,6 +247,38 @@ func TestUpgradeAbortAsksWhenItRestores(t *testing.T) {
 	}
 }
 
+func TestUpgradeAbortIsRefusedPastThePointOfNoReturn(t *testing.T) {
+	running := func(phase string) v1alpha1.ClusterStatus {
+		return v1alpha1.ClusterStatus{Version: "v0.2.0", Phase: phase, Upgrade: &v1alpha1.UpgradeStatus{From: "v0.2.0", To: "v0.3.0", Attempt: 1}}
+	}
+	workersFailed := running(v1alpha1.PhaseFailed)
+	workersFailed.Upgrade.FailedPhase = v1alpha1.PhaseWorkers
+	cases := map[string]v1alpha1.ClusterStatus{
+		v1alpha1.PhaseComponents: running(v1alpha1.PhaseComponents),
+		v1alpha1.PhaseWorkers:    workersFailed,
+		v1alpha1.PhaseVerify:     running(v1alpha1.PhaseVerify),
+	}
+	for phase, status := range cases {
+		c := upgradeClient(t, "v0.2.0", "amd64")
+		var cluster v1alpha1.Cluster
+		if err := c.Get(context.Background(), client.ObjectKey{Name: v1alpha1.ClusterName}, &cluster); err != nil {
+			t.Fatal(err)
+		}
+		cluster.Status = status
+		if err := c.Status().Update(context.Background(), &cluster); err != nil {
+			t.Fatal(err)
+		}
+		var stdout, stderr bytes.Buffer
+		code := RunUpgradeAction(context.Background(), v1alpha1.UpgradeActionAbort, upgradeOptions{yes: true}, upgradeDeps(c, ""), &stdout, &stderr)
+		if err := c.Get(context.Background(), client.ObjectKey{Name: v1alpha1.ClusterName}, &cluster); err != nil {
+			t.Fatal(err)
+		}
+		if code != 1 || stderr.String() != "abort is not possible in "+phase+": the upgrade is past the point of no return\n" || cluster.Spec.Upgrade.Action != "" {
+			t.Fatalf("%s: exit %d stderr %q action %q", phase, code, stderr.String(), cluster.Spec.Upgrade.Action)
+		}
+	}
+}
+
 func TestUpgradeRefusesAnotherUpgradeInProgress(t *testing.T) {
 	withVersion(t, "v0.3.0")
 	c := upgradeClient(t, "v0.2.0", "amd64")

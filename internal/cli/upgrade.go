@@ -383,6 +383,9 @@ func RunUpgradeAction(ctx context.Context, action string, o upgradeOptions, deps
 	if err := c.Get(ctx, client.ObjectKey{Name: v1alpha1.ClusterName}, &cluster); err != nil {
 		return fail(stderr, err)
 	}
+	if phase, past := pastNoReturn(cluster.Status); action == v1alpha1.UpgradeActionAbort && past {
+		return fail(stderr, fmt.Errorf("abort is not possible in %s: the upgrade is past the point of no return", phase))
+	}
 	if action == v1alpha1.UpgradeActionAbort && restoresBackup(cluster.Status) && !o.yes {
 		fmt.Fprint(stdout, "abort during ControlPlane restores the backup: every cluster change since the backup is lost\ncontinue? [y/N] ")
 		if !confirmed(deps.Stdin) {
@@ -396,6 +399,14 @@ func RunUpgradeAction(ctx context.Context, action string, o upgradeOptions, deps
 	}
 	fmt.Fprintf(stdout, "%s requested\n", action)
 	return 0
+}
+
+func pastNoReturn(status v1alpha1.ClusterStatus) (string, bool) {
+	phase := status.Phase
+	if phase == v1alpha1.PhaseFailed && status.Upgrade != nil {
+		phase = status.Upgrade.FailedPhase
+	}
+	return phase, slices.Contains([]string{v1alpha1.PhaseComponents, v1alpha1.PhaseWorkers, v1alpha1.PhaseVerify}, phase)
 }
 
 func restoresBackup(status v1alpha1.ClusterStatus) bool {
