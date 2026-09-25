@@ -170,9 +170,18 @@ func (r *ClusterReconciler) ensureRelease(ctx context.Context) error {
 }
 
 func clearAction(ctx context.Context, c client.Client, cluster v1alpha1.Cluster) error {
-	cleared := cluster.DeepCopy()
-	cleared.Spec.Upgrade.Action = ""
-	return c.Patch(ctx, cleared, client.MergeFrom(&cluster))
+	return retry.OnError(statusWriteBackoff, errors.IsConflict, func() error {
+		var current v1alpha1.Cluster
+		if err := c.Get(ctx, client.ObjectKey{Name: v1alpha1.ClusterName}, &current); err != nil {
+			return client.IgnoreNotFound(err)
+		}
+		if current.Spec.Upgrade.Action != cluster.Spec.Upgrade.Action {
+			return nil
+		}
+		cleared := current.DeepCopy()
+		cleared.Spec.Upgrade.Action = ""
+		return c.Patch(ctx, cleared, client.MergeFromWithOptions(&current, client.MergeFromWithOptimisticLock{}))
+	})
 }
 
 var statusWriteBackoff = wait.Backoff{Steps: 10, Duration: 20 * time.Millisecond, Factor: 1.5, Jitter: 0.1}

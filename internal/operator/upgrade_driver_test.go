@@ -269,3 +269,19 @@ func TestAddonReconcilerHoldsDuringAnUpgrade(t *testing.T) {
 		return condition != nil && condition.Status == metav1.ConditionTrue
 	})
 }
+
+func TestAnswerActionKeepsANewerAction(t *testing.T) {
+	c, _ := StartTestEnv(t)
+	ctx := context.Background()
+	createClusterWithStatus(t, ctx, c, "v2", upgradeStatusIn(v1alpha1.PhaseBackup))
+	setAction(t, ctx, c, v1alpha1.UpgradeActionResume)
+	stale := getCluster(t, ctx, c)
+	setAction(t, ctx, c, v1alpha1.UpgradeActionAbort)
+	if err := answerAction(ctx, c, stale, func(s v1alpha1.ClusterStatus) v1alpha1.ClusterStatus { return s }); err != nil {
+		t.Fatal(err)
+	}
+	got := getCluster(t, ctx, c)
+	if got.Spec.Upgrade.Action != v1alpha1.UpgradeActionAbort {
+		t.Fatalf("action %q, want %q", got.Spec.Upgrade.Action, v1alpha1.UpgradeActionAbort)
+	}
+}
