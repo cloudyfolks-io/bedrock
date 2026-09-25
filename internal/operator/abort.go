@@ -173,20 +173,18 @@ func restoreControlPlane(ctx context.Context, env upgradeEnv, cluster v1alpha1.C
 	controllers := hostsWithRole(hosts, v1alpha1.RoleControlPlane)
 	node, path, ok := parseBackupLocation(upgrade.Backup)
 	if len(controllers) != 1 || !ok {
-		message := fmt.Sprintf("abort in ControlPlane needs a manual restore of %s on %d controllers: follow %s", upgrade.Backup, len(controllers), restoreRunbook)
-		return answerAction(ctx, env.Client, cluster, func(s v1alpha1.ClusterStatus) v1alpha1.ClusterStatus {
-			return restoreManual(s, message, cluster.Generation)
-		})
+		return answerManualRestore(ctx, env, cluster, fmt.Sprintf("abort in ControlPlane needs a manual restore of %s on %d controllers: follow %s", upgrade.Backup, len(controllers), restoreRunbook))
 	}
 	if node != controllers[0].Name {
-		return answerManualRestore(ctx, env, cluster, upgrade, fmt.Sprintf("the backup node %s is not the controller %s", node, controllers[0].Name))
+		problem := fmt.Sprintf("the backup node %s is not the controller %s", node, controllers[0].Name)
+		return answerManualRestore(ctx, env, cluster, fmt.Sprintf("abort in ControlPlane needs a manual restore of %s: %s: follow %s", upgrade.Backup, problem, restoreRunbook))
 	}
 	if err := deletePlan(ctx, env.Client); err != nil {
 		return err
 	}
 	want, problem := nodeUpgradeFor(upgrade, hostNamed(hosts, node), hosts, nodes, []string{v1alpha1.StepRestore})
 	if problem != "" {
-		return answerManualRestore(ctx, env, cluster, upgrade, problem)
+		return answerManualRestore(ctx, env, cluster, fmt.Sprintf("abort in ControlPlane needs a manual restore of %s: %s: follow %s", upgrade.Backup, problem, restoreRunbook))
 	}
 	want.Spec.Backup = path
 	if err := applyNodeUpgrade(ctx, env.Client, want); err != nil {
@@ -200,8 +198,7 @@ func restoreControlPlane(ctx context.Context, env upgradeEnv, cluster v1alpha1.C
 	})
 }
 
-func answerManualRestore(ctx context.Context, env upgradeEnv, cluster v1alpha1.Cluster, upgrade v1alpha1.UpgradeStatus, problem string) error {
-	message := fmt.Sprintf("abort in ControlPlane needs a manual restore of %s: %s: follow %s", upgrade.Backup, problem, restoreRunbook)
+func answerManualRestore(ctx context.Context, env upgradeEnv, cluster v1alpha1.Cluster, message string) error {
 	return answerAction(ctx, env.Client, cluster, func(s v1alpha1.ClusterStatus) v1alpha1.ClusterStatus {
 		return restoreManual(s, message, cluster.Generation)
 	})
