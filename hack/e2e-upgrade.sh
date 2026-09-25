@@ -6,6 +6,8 @@ registry=${REGISTRY:-localhost:5000}
 arch=${ARCH:-$(uname -m | sed 's/x86_64/amd64/;s/aarch64/arm64/')}
 image_a=$registry/bedrock:$VERSION_A
 image_b=$registry/bedrock:$VERSION_B
+image_a_file=$(printf '%s' "$image_a" | sed -E 's/[^A-Za-z0-9._-]/_/g').tar
+image_b_file=$(printf '%s' "$image_b" | sed -E 's/[^A-Za-z0-9._-]/_/g').tar
 bundle_b=dist/bedrock-$VERSION_B-bundle-$arch.tar.zst
 cli_b=dist/bedrock-$VERSION_B-linux-$arch
 abort_in=${ABORT_IN:-}
@@ -97,6 +99,8 @@ if [ -n "$abort_in" ]; then
   test "$(kubectl -n bedrock-system get deploy/bedrock-operator -o jsonpath='{.spec.template.spec.containers[0].image}')" = "$image_a"
   kubectl -n bedrock-system rollout status deploy/bedrock-operator --timeout=300s
   kubectl get host "$node" -o jsonpath='{.status.restore.backup}' | grep -q "^/var/lib/bedrock/backups/bedrock-$VERSION_A-"
+  test -f /var/lib/k0s/images/k0s-airgap.tar
+  test ! -e "/var/lib/k0s/images/k0s-airgap-$VERSION_B.tar"
   for _ in $(seq 1 60); do
     if [ -z "$(kubectl get nodeupgrades -o name)" ]; then break; fi
     sleep 5
@@ -132,6 +136,11 @@ if kubectl -n bedrock-system get virtualmachine bedrock-smoke 2>/dev/null; then 
 test -z "$(kubectl get nodeupgrades -o name)"
 test ! -e "/var/lib/bedrock/staged/$VERSION_B"
 test ! -e /var/lib/bedrock/previous/k0s
+test -f "/var/lib/k0s/images/k0s-airgap-$VERSION_B.tar"
+test ! -e /var/lib/k0s/images/k0s-airgap.tar
+if [ "$image_a_file" != "$image_b_file" ]; then
+  test ! -e "/var/lib/k0s/images/$image_a_file"
+fi
 test "$(kubectl get node "$node" -o jsonpath='{.spec.unschedulable}')" != "true"
 kubectl wait --for=condition=Ready node --all --timeout=300s
 grep -qx 'server = "https://127.0.0.1:1"' /etc/k0s/containerd.d/certs.d/_default/hosts.toml
