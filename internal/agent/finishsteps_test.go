@@ -135,6 +135,60 @@ func TestCleanupRemovesTargetOnlyImagesAndKeepsTheDepot(t *testing.T) {
 	}
 }
 
+func writeImageTarball(t *testing.T, root, name string) {
+	t.Helper()
+	writeFixtureFile(t, filepath.Join(root, k0sImagesDir, name), "tar")
+}
+
+func TestPruneRemovesOldImageTarballsAndAirgapKeepsTarget(t *testing.T) {
+	env, _ := finishEnv(t, nil)
+	root := env.Deps.Root
+	writeImageTarball(t, root, release.ImageFileName(oldOnly))
+	writeImageTarball(t, root, release.ImageFileName(shared))
+	writeImageTarball(t, root, release.ImageFileName(newOnly))
+	writeImageTarball(t, root, release.ImageFileName(retagged))
+	writeImageTarball(t, root, "k0s-airgap.tar")
+	writeImageTarball(t, root, "k0s-airgap-v0.2.0.tar")
+	writeImageTarball(t, root, "k0s-airgap-v0.3.0.tar")
+	if _, err := prune(context.Background(), env); err != nil {
+		t.Fatal(err)
+	}
+	for _, gone := range []string{release.ImageFileName(oldOnly), release.ImageFileName(shared), "k0s-airgap.tar", "k0s-airgap-v0.2.0.tar"} {
+		if _, err := os.Stat(filepath.Join(root, k0sImagesDir, gone)); !os.IsNotExist(err) {
+			t.Fatalf("%s must be removed", gone)
+		}
+	}
+	for _, kept := range []string{release.ImageFileName(newOnly), release.ImageFileName(retagged), "k0s-airgap-v0.3.0.tar"} {
+		if _, err := os.Stat(filepath.Join(root, k0sImagesDir, kept)); err != nil {
+			t.Fatalf("%s must be kept: %v", kept, err)
+		}
+	}
+}
+
+func TestCleanupRemovesTargetOnlyTarballsKeepsFromAndBaseAirgap(t *testing.T) {
+	env, _ := finishEnv(t, nil)
+	root := env.Deps.Root
+	writeImageTarball(t, root, release.ImageFileName(oldOnly))
+	writeImageTarball(t, root, release.ImageFileName(shared))
+	writeImageTarball(t, root, release.ImageFileName(newOnly))
+	writeImageTarball(t, root, release.ImageFileName(retagged))
+	writeImageTarball(t, root, "k0s-airgap.tar")
+	writeImageTarball(t, root, "k0s-airgap-v0.3.0.tar")
+	if _, err := cleanup(context.Background(), env); err != nil {
+		t.Fatal(err)
+	}
+	for _, gone := range []string{release.ImageFileName(newOnly), release.ImageFileName(retagged), "k0s-airgap-v0.3.0.tar"} {
+		if _, err := os.Stat(filepath.Join(root, k0sImagesDir, gone)); !os.IsNotExist(err) {
+			t.Fatalf("%s must be removed", gone)
+		}
+	}
+	for _, kept := range []string{release.ImageFileName(oldOnly), release.ImageFileName(shared), "k0s-airgap.tar"} {
+		if _, err := os.Stat(filepath.Join(root, k0sImagesDir, kept)); err != nil {
+			t.Fatalf("%s must be kept: %v", kept, err)
+		}
+	}
+}
+
 func TestPruneWithoutContainersRemovesFilesOnly(t *testing.T) {
 	env, container := finishEnv(t, nil)
 	if err := os.Remove(filepath.Join(env.Deps.Root, "run/k0s/containerd.sock")); err != nil {

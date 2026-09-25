@@ -226,6 +226,56 @@ func TestPreloadFailsWhenAnImageHasAnotherDigest(t *testing.T) {
 	}
 }
 
+func TestPreloadLinksTargetTarballsForK0sReimport(t *testing.T) {
+	fixture := newPreloadFixture(t)
+	writeFixtureFile(t, filepath.Join(fixture.nodeRoot, "run/k0s/containerd.sock"), "")
+	if _, err := preload(context.Background(), fixture.env); err != nil {
+		t.Fatal(err)
+	}
+	imagesDir := filepath.Join(fixture.nodeRoot, k0sImagesDir)
+	imageFile := release.ImageFileName(pinnedImage)
+	if readFixtureFile(t, filepath.Join(imagesDir, imageFile)) != "layout" {
+		t.Fatal("the target image tarball must be kept for k0s to re-import")
+	}
+	if readFixtureFile(t, filepath.Join(imagesDir, "k0s-airgap-v0.3.0.tar")) != "airgap" {
+		t.Fatal("the target airgap tarball must be kept under its versioned name")
+	}
+	if _, err := os.Stat(filepath.Join(imagesDir, "k0s-airgap.tar")); !os.IsNotExist(err) {
+		t.Fatal("k0s-airgap.tar must never be written by Preload")
+	}
+}
+
+func TestPreloadRelinkingTarballsIsANoOp(t *testing.T) {
+	fixture := newPreloadFixture(t)
+	writeFixtureFile(t, filepath.Join(fixture.nodeRoot, "run/k0s/containerd.sock"), "")
+	if _, err := preload(context.Background(), fixture.env); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := preload(context.Background(), fixture.env); err != nil {
+		t.Fatal(err)
+	}
+	entries, err := os.ReadDir(filepath.Join(fixture.nodeRoot, k0sImagesDir))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) != 2 {
+		t.Fatalf("images dir has %d entries, want 2 (the image and the versioned airgap file)", len(entries))
+	}
+}
+
+func TestPreloadKeepsAnExistingImageTarball(t *testing.T) {
+	fixture := newPreloadFixture(t)
+	writeFixtureFile(t, filepath.Join(fixture.nodeRoot, "run/k0s/containerd.sock"), "")
+	imageFile := release.ImageFileName(pinnedImage)
+	writeFixtureFile(t, filepath.Join(fixture.nodeRoot, k0sImagesDir, imageFile), "already there")
+	if _, err := preload(context.Background(), fixture.env); err != nil {
+		t.Fatal(err)
+	}
+	if got := readFixtureFile(t, filepath.Join(fixture.nodeRoot, k0sImagesDir, imageFile)); got != "already there" {
+		t.Fatalf("an existing tarball with the same name must be kept, got %q", got)
+	}
+}
+
 func TestPreloadIsRegistered(t *testing.T) {
 	if _, ok := Steps()[v1alpha1.StepPreload]; !ok {
 		t.Fatal("Steps must include Preload")

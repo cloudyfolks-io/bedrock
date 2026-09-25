@@ -37,6 +37,10 @@ func prune(ctx context.Context, env StepEnv) (Outcome, error) {
 	if err != nil {
 		return Outcome{}, err
 	}
+	dropped := onlyIn(env.From.Spec.Images, env.Target.Spec.Images)
+	if err := removeImageTarballs(deps.Root, dropped, []string{airgapFile, versionedAirgap(env.From.Spec.Version)}); err != nil {
+		return Outcome{}, err
+	}
 	if err := removeUpgradeFiles(deps.Root, env.Upgrade.Spec.Version); err != nil {
 		return Outcome{}, err
 	}
@@ -52,10 +56,33 @@ func cleanup(ctx context.Context, env StepEnv) (Outcome, error) {
 	if err != nil {
 		return Outcome{}, err
 	}
+	dropped := onlyIn(env.Target.Spec.Images, env.From.Spec.Images)
+	if err := removeImageTarballs(deps.Root, dropped, []string{versionedAirgap(env.Target.Spec.Version)}); err != nil {
+		return Outcome{}, err
+	}
 	if err := removeUpgradeFiles(deps.Root, env.Upgrade.Spec.Version); err != nil {
 		return Outcome{}, err
 	}
 	return Outcome{Message: fmt.Sprintf("removed %d images", count)}, nil
+}
+
+func versionedAirgap(version string) string {
+	return "k0s-airgap-" + version + ".tar"
+}
+
+func removeImageTarballs(root string, refs, names []string) error {
+	dir := filepath.Join(root, k0sImagesDir)
+	toRemove := make([]string, 0, len(refs)+len(names))
+	toRemove = append(toRemove, names...)
+	for _, ref := range refs {
+		toRemove = append(toRemove, release.ImageFileName(ref))
+	}
+	for _, name := range toRemove {
+		if err := os.Remove(filepath.Join(dir, name)); err != nil && !errors.Is(err, fs.ErrNotExist) {
+			return err
+		}
+	}
+	return nil
 }
 
 func removeImages(ctx context.Context, deps Deps, drop, keep []string) (int, error) {

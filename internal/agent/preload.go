@@ -4,12 +4,12 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"io/fs"
 	"os"
 	"path/filepath"
 	"runtime"
 	"slices"
 	"strings"
+	"syscall"
 
 	sigyaml "sigs.k8s.io/yaml"
 
@@ -89,7 +89,7 @@ func preloadImages(ctx context.Context, deps Deps, bundleURL, dir string, wanted
 	if err != nil {
 		return 0, err
 	}
-	files := []string{"k0s-airgap.tar"}
+	files := []string{airgapFile}
 	for _, image := range spec.Images {
 		names, err := release.ContainerdNames(image.Ref)
 		if err != nil {
@@ -99,8 +99,13 @@ func preloadImages(ctx context.Context, deps Deps, bundleURL, dir string, wanted
 			files = append(files, image.File)
 		}
 	}
+	imagesDir := filepath.Join(deps.Root, k0sImagesDir)
 	for _, file := range files {
-		if err := importImage(ctx, deps, bundleURL+"/images/"+file, filepath.Join(dir, file)); err != nil {
+		staged := filepath.Join(dir, file)
+		if err := importImage(ctx, deps, bundleURL+"/images/"+file, staged); err != nil {
+			return 0, err
+		}
+		if err := keepTarball(staged, filepath.Join(imagesDir, tarballName(file, spec.Version))); err != nil {
 			return 0, err
 		}
 	}
@@ -108,6 +113,29 @@ func preloadImages(ctx context.Context, deps Deps, bundleURL, dir string, wanted
 		return 0, err
 	}
 	return len(wanted), requireImages(ctx, deps.Exec, wanted)
+}
+
+func tarballName(file, version string) string {
+	if file == airgapFile {
+		return versionedAirgap(version)
+	}
+	return file
+}
+
+func keepTarball(staged, dest string) error {
+	if _, err := os.Stat(dest); err == nil {
+		return nil
+	}
+	if err := os.MkdirAll(filepath.Dir(dest), 0o755); err != nil {
+		return err
+	}
+	if err := os.Link(staged, dest); err != nil {
+		if errors.Is(err, syscall.EXDEV) {
+			return release.CopyFile(staged, dest)
+		}
+		return err
+	}
+	return nil
 }
 
 func readBundleSpec(path string) (release.BundleSpec, error) {
@@ -126,13 +154,8 @@ func importImage(ctx context.Context, deps Deps, url, dest string) error {
 	if err := depot.Download(ctx, deps.HTTP, url, dest); err != nil {
 		return err
 	}
-	if _, err := deps.Exec.Run(ctx, k0s.DefaultBinary, "ctr", "--namespace", "k8s.io", "images", "import", dest); err != nil {
-		return err
-	}
-	if err := os.Remove(dest); err != nil && !errors.Is(err, fs.ErrNotExist) {
-		return err
-	}
-	return nil
+	_, err := deps.Exec.Run(ctx, k0s.DefaultBinary, "ctr", "--namespace", "k8s.io", "images", "import", dest)
+	return err
 }
 
 func containerdImages(ctx context.Context, e host.Exec) ([]string, error) {
