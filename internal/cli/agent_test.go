@@ -9,10 +9,14 @@ import (
 	"testing"
 	"time"
 
+	corev1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 
 	"github.com/cloudyfolks-labs/bedrock/internal/agent"
 	"github.com/cloudyfolks-labs/bedrock/internal/host"
+	"github.com/cloudyfolks-labs/bedrock/internal/operator"
 )
 
 func TestRunAgentReloadsClientWhenKubeconfigChanges(t *testing.T) {
@@ -160,5 +164,22 @@ func TestAgentCommandRejectsNonPositiveInterval(t *testing.T) {
 	}
 	if !bytes.Contains(errOut.Bytes(), []byte("interval")) {
 		t.Fatalf("stderr %s", errOut.String())
+	}
+}
+
+func TestDepotIP(t *testing.T) {
+	scheme, err := operator.Scheme()
+	if err != nil {
+		t.Fatal(err)
+	}
+	node := &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: "node-a"}, Status: corev1.NodeStatus{Addresses: []corev1.NodeAddress{{Type: corev1.NodeInternalIP, Address: "10.0.0.11"}}}}
+	c := fake.NewClientBuilder().WithScheme(scheme).WithObjects(node).Build()
+	load := func(string) (client.WithWatch, time.Time, error) { return c, time.Time{}, nil }
+	ip, err := depotIP(context.Background(), load, agentOptions{kubeconfig: "k", node: "node-a"})
+	if err != nil || ip != "10.0.0.11" {
+		t.Fatalf("ip %q err %v", ip, err)
+	}
+	if _, err := depotIP(context.Background(), load, agentOptions{kubeconfig: "k", node: "node-b"}); err == nil {
+		t.Fatal("a node that does not exist yet must be an error so serveDepot retries")
 	}
 }

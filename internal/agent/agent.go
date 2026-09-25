@@ -118,6 +118,7 @@ func Tick(ctx context.Context, c client.Client, deps Deps) error {
 		K0sVersion:   k0sVersion(ctx, deps.Exec),
 		Hostname:     hostname(deps),
 		Checks:       hostChecks(ctx, deps),
+		Depot:        depotStatus(ctx, c, deps),
 		Restore:      current.Status.Restore,
 	}
 	if invErr != nil {

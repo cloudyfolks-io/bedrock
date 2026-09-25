@@ -16,6 +16,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	"github.com/cloudyfolks-labs/bedrock/internal/agent"
+	"github.com/cloudyfolks-labs/bedrock/internal/depot"
 	"github.com/cloudyfolks-labs/bedrock/internal/host"
 	"github.com/cloudyfolks-labs/bedrock/internal/hostconfig"
 	"github.com/cloudyfolks-labs/bedrock/internal/inventory"
@@ -69,12 +70,14 @@ func agentCommand(args []string, _, stderr io.Writer) int {
 	}
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGTERM, syscall.SIGINT)
 	defer stop()
+	load := func(path string) (client.WithWatch, time.Time, error) { return agent.LoadClient(path, scheme) }
 	deps := agentDeps{
 		Exec: host.RealExec{},
 		OSID: id,
-		Load: func(path string) (client.WithWatch, time.Time, error) { return agent.LoadClient(path, scheme) },
+		Load: load,
 		Run:  agent.Run,
 	}
+	go serveDepot(ctx, load, o, stderr)
 	if err := runAgent(ctx, o, deps, stderr); err != nil {
 		return fail(stderr, err)
 	}
@@ -151,4 +154,31 @@ func reportExit(stderr io.Writer, err error) {
 	if err != nil {
 		fmt.Fprintf(stderr, "agent: %v\n", err)
 	}
+}
+
+func serveDepot(ctx context.Context, load func(string) (client.WithWatch, time.Time, error), o agentOptions, stderr io.Writer) {
+	ticker := time.NewTicker(o.interval)
+	defer ticker.Stop()
+	for {
+		ip, err := depotIP(ctx, load, o)
+		if err == nil {
+			if err := depot.Serve(ctx, ip, o.root); err != nil {
+				fmt.Fprintf(stderr, "agent: depot: %v\n", err)
+			}
+			return
+		}
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+		}
+	}
+}
+
+func depotIP(ctx context.Context, load func(string) (client.WithWatch, time.Time, error), o agentOptions) (string, error) {
+	c, _, err := load(o.kubeconfig)
+	if err != nil {
+		return "", err
+	}
+	return agent.NodeInternalIP(ctx, c, o.node)
 }

@@ -3,11 +3,14 @@ package agent
 import (
 	"context"
 	"errors"
+	"os"
+	"path/filepath"
 	"slices"
 	"sync/atomic"
 	"testing"
 	"time"
 
+	corev1 "k8s.io/api/core/v1"
 	apimeta "k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
@@ -93,6 +96,58 @@ func TestTickReportsHostFacts(t *testing.T) {
 	}
 	if status.Checks == nil || !status.Checks.TimeSynced || status.Checks.VarLibFreeBytes != 42<<30 {
 		t.Fatalf("checks %+v", status.Checks)
+	}
+}
+
+func createNode(t *testing.T, name, internalIP string) {
+	t.Helper()
+	node := &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: name}}
+	if err := k8sClient.Create(context.Background(), node); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { k8sClient.Delete(context.Background(), node) })
+	node.Status.Addresses = []corev1.NodeAddress{{Type: corev1.NodeHostName, Address: name}, {Type: corev1.NodeInternalIP, Address: internalIP}}
+	if err := k8sClient.Status().Update(context.Background(), node); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestNodeInternalIP(t *testing.T) {
+	createNode(t, "node-b", "10.0.0.12")
+	ip, err := NodeInternalIP(context.Background(), k8sClient, "node-b")
+	if err != nil || ip != "10.0.0.12" {
+		t.Fatalf("ip %q err %v", ip, err)
+	}
+	if _, err := NodeInternalIP(context.Background(), k8sClient, "node-missing"); err == nil {
+		t.Fatal("a missing node must be an error")
+	}
+}
+
+func TestTickReportsDepotOnlyWithBundles(t *testing.T) {
+	createHost(t, "node-a", false, "")
+	createNode(t, "node-a", "10.0.0.11")
+	root := t.TempDir()
+	deps := newDeps(&host.FakeExec{}, time.Now())
+	deps.Root = root
+	if err := Tick(context.Background(), k8sClient, deps); err != nil {
+		t.Fatal(err)
+	}
+	if depot := getHost(t, "node-a").Status.Depot; depot != nil {
+		t.Fatalf("an empty depot must not be reported, got %+v", depot)
+	}
+	manifest := filepath.Join(root, "var/lib/bedrock/depot/v0.3.0/amd64/bundle.yaml")
+	if err := os.MkdirAll(filepath.Dir(manifest), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(manifest, []byte("version: v0.3.0\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := Tick(context.Background(), k8sClient, deps); err != nil {
+		t.Fatal(err)
+	}
+	depot := getHost(t, "node-a").Status.Depot
+	if depot == nil || depot.URL != "http://10.0.0.11:9480" || len(depot.Bundles) != 1 || depot.Bundles[0].Version != "v0.3.0" || depot.Bundles[0].Arch != "amd64" {
+		t.Fatalf("depot %+v", depot)
 	}
 }
 
