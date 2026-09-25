@@ -20,6 +20,7 @@ jobs:
       - run: make test
       - run: make release VERSION=ci
       - run: hack/check-release.sh
+      - run: make rbac && git diff --exit-code manifests/90-bedrock/operator-rbac.yaml
   e2e-kind:
     runs-on: ubuntu-latest
     needs: test

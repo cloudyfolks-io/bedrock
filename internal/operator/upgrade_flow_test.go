@@ -12,6 +12,7 @@ import (
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/client-go/rest"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
@@ -43,7 +44,12 @@ func flowBundle(t *testing.T, version, image string, upgradeFrom []string) relea
 
 func newUpgradeWorld(t *testing.T) upgradeWorld {
 	t.Helper()
-	c, _ := startTestEnvWithCRDs(t, filepath.Join("testdata", "crds"))
+	return newUpgradeWorldAs(t, func(_ *testing.T, _ context.Context, admin client.Client, _ *rest.Config) client.Client { return admin })
+}
+
+func newUpgradeWorldAs(t *testing.T, operatorClient func(*testing.T, context.Context, client.Client, *rest.Config) client.Client) upgradeWorld {
+	t.Helper()
+	c, cfg := startTestEnvWithCRDs(t, filepath.Join("testdata", "crds"))
 	ctx := context.Background()
 	createOperatorDeployment(t, ctx, c, oldImage)
 	createDepotHost(t, ctx, c, "node-a", v1alpha1.RoleControlPlane)
@@ -56,9 +62,10 @@ func newUpgradeWorld(t *testing.T) upgradeWorld {
 		t.Fatal(err)
 	}
 	createClusterWithStatus(t, ctx, c, "v2", v1alpha1.ClusterStatus{Version: "v1", Phase: v1alpha1.PhaseIdle})
+	operatorView := operatorClient(t, ctx, c, cfg)
 	operator := func(bundle release.Bundle) *ClusterReconciler {
 		return &ClusterReconciler{
-			Client: c, Bundle: bundle, Gates: release.Gates{}, Interval: 50 * time.Millisecond, GroupTimeout: 10 * time.Second,
+			Client: operatorView, Bundle: bundle, Gates: release.Gates{}, Interval: 50 * time.Millisecond, GroupTimeout: 10 * time.Second,
 			Exec: func(context.Context, string, string, string, []string) ([]byte, error) { return nil, nil },
 			Dial: func(context.Context, string) error { return nil },
 		}
