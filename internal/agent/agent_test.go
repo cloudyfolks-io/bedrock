@@ -572,7 +572,35 @@ func TestRunWaitsATickBeforeRewatching(t *testing.T) {
 	if got < 2 {
 		t.Fatalf("watch calls %d, the fake watch was never used", got)
 	}
-	if got > 24 {
+	if got > 36 {
 		t.Fatalf("watch calls %d, a closed watch must wait a tick before the next attempt", got)
+	}
+}
+
+func TestRunWakesForOwnNodeUpgrades(t *testing.T) {
+	createHost(t, "node-a", false, "")
+	createReleases(t)
+	watching, err := client.NewWithWatch(cfg, client.Options{Scheme: k8sClient.Scheme()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	deps := newDeps(&host.FakeExec{}, time.Now())
+	deps.Root = t.TempDir()
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() { done <- Run(ctx, watching, deps) }()
+	time.Sleep(500 * time.Millisecond)
+	createUpgrade(t, "node-a", v1alpha1.StepPreload)
+	deadline := time.Now().Add(5 * time.Second)
+	for len(getUpgrade(t, "node-a").Status.Steps) == 0 {
+		if time.Now().After(deadline) {
+			cancel()
+			t.Fatal("a new NodeUpgrade must wake the loop although the interval is an hour")
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	cancel()
+	if err := <-done; err != nil {
+		t.Fatal(err)
 	}
 }

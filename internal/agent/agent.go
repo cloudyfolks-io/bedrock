@@ -43,6 +43,9 @@ func Run(ctx context.Context, c client.WithWatch, deps Deps) error {
 		if err := Tick(ctx, c, deps); err != nil {
 			fmt.Fprintf(os.Stderr, "agent: %v\n", err)
 		}
+		if err := RunUpgrades(ctx, c, deps, Steps()); err != nil {
+			fmt.Fprintf(os.Stderr, "agent: upgrade: %v\n", err)
+		}
 		for ready := false; !ready; {
 			select {
 			case <-ctx.Done():
@@ -84,9 +87,15 @@ func watchOwn(ctx context.Context, c client.WithWatch, name string) (<-chan stru
 		hosts.Stop()
 		return nil, nil, err
 	}
+	upgrades, err := c.Watch(ctx, &v1alpha1.NodeUpgradeList{}, client.MatchingFieldsSelector{Selector: fields.OneTermEqualSelector("spec.node", name)})
+	if err != nil {
+		hosts.Stop()
+		configs.Stop()
+		return nil, nil, err
+	}
 	events := make(chan struct{}, 1)
 	var forwarding sync.WaitGroup
-	forwarding.Add(2)
+	forwarding.Add(3)
 	forward := func(in <-chan watch.Event) {
 		defer forwarding.Done()
 		for range in {
@@ -98,11 +107,12 @@ func watchOwn(ctx context.Context, c client.WithWatch, name string) (<-chan stru
 	}
 	go forward(hosts.ResultChan())
 	go forward(configs.ResultChan())
+	go forward(upgrades.ResultChan())
 	go func() {
 		forwarding.Wait()
 		close(events)
 	}()
-	return events, func() { hosts.Stop(); configs.Stop() }, nil
+	return events, func() { hosts.Stop(); configs.Stop(); upgrades.Stop() }, nil
 }
 
 func Tick(ctx context.Context, c client.Client, deps Deps) error {
