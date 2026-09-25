@@ -3,6 +3,7 @@ package agent
 import (
 	"context"
 	"errors"
+	"slices"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -25,7 +26,7 @@ func fakeInventory(ctx context.Context, _ host.Exec, _ string) (v1alpha1.Invento
 }
 
 func newDeps(exec *host.FakeExec, now time.Time) Deps {
-	return Deps{Exec: exec, Root: "/nonexistent", Node: "node-a", Now: func() time.Time { return now }, Interval: time.Hour, Inventory: fakeInventory, Apply: hostconfig.Apply, Packages: pkgmgr.Manager{Exec: exec, Family: "apt", Root: "/nonexistent"}}
+	return Deps{Exec: exec, Root: "/nonexistent", Node: "node-a", Now: func() time.Time { return now }, Interval: time.Hour, Inventory: fakeInventory, Apply: hostconfig.Apply, Packages: pkgmgr.Manager{Exec: exec, Family: "apt", Root: "/nonexistent"}, Version: "test", Hostname: func() (string, error) { return "node-a", nil }, FreeBytes: func(string) (uint64, error) { return 0, nil }}
 }
 
 func createHost(t *testing.T, name string, managed bool, window string) {
@@ -59,8 +60,54 @@ func TestTickWritesInventoryOnly(t *testing.T) {
 	if v1alpha1.IsConditionTrue(h.Status.Conditions, v1alpha1.ConditionManagementApplied) {
 		t.Fatal("management must not be applied")
 	}
-	if len(exec.Calls) != 0 {
-		t.Fatalf("no host command may run when management is off: %v", exec.Calls)
+	if changes := hostChanges(exec.Calls); len(changes) != 0 {
+		t.Fatalf("no host command may change the host when management is off: %v", changes)
+	}
+}
+
+var readOnlyFacts = []string{"/usr/local/bin/k0s version", "timedatectl show -p NTPSynchronized --value", "/usr/local/bin/k0s etcd member-list"}
+
+func hostChanges(calls []string) []string {
+	var changes []string
+	for _, call := range calls {
+		if !slices.Contains(readOnlyFacts, call) {
+			changes = append(changes, call)
+		}
+	}
+	return changes
+}
+
+func TestTickReportsHostFacts(t *testing.T) {
+	createHost(t, "node-a", false, "")
+	exec := &host.FakeExec{Responses: map[string]string{"/usr/local/bin/k0s version": "v1.36.3+k0s.0\n", "timedatectl show -p NTPSynchronized --value": "yes\n"}}
+	deps := newDeps(exec, time.Now())
+	deps.Version = "v0.3.0"
+	deps.Hostname = func() (string, error) { return "Node-A", nil }
+	deps.FreeBytes = func(string) (uint64, error) { return 42 << 30, nil }
+	if err := Tick(context.Background(), k8sClient, deps); err != nil {
+		t.Fatal(err)
+	}
+	status := getHost(t, "node-a").Status
+	if status.AgentVersion != "v0.3.0" || status.K0sVersion != "v1.36.3+k0s.0" || status.Hostname != "node-a" {
+		t.Fatalf("versions and hostname: %+v", status)
+	}
+	if status.Checks == nil || !status.Checks.TimeSynced || status.Checks.VarLibFreeBytes != 42<<30 {
+		t.Fatalf("checks %+v", status.Checks)
+	}
+}
+
+func TestTickKeepsRestore(t *testing.T) {
+	createHost(t, "node-a", false, "")
+	restore := &v1alpha1.RestoreStatus{Backup: "/var/lib/bedrock/backups/a.tar.gz", CompletedAt: metav1.NewTime(time.Date(2026, 10, 1, 10, 0, 0, 0, time.UTC))}
+	if err := ApplyStatus(context.Background(), k8sClient, "node-a", v1alpha1.HostStatus{Restore: restore}); err != nil {
+		t.Fatal(err)
+	}
+	if err := Tick(context.Background(), k8sClient, newDeps(&host.FakeExec{}, time.Now())); err != nil {
+		t.Fatal(err)
+	}
+	got := getHost(t, "node-a").Status.Restore
+	if got == nil || got.Backup != restore.Backup {
+		t.Fatalf("Tick must keep status.restore, got %+v", got)
 	}
 }
 
@@ -100,12 +147,12 @@ func TestTickAppliesHostConfigWhenManaged(t *testing.T) {
 	if h.Status.Applied == nil || h.Status.Applied.Generation != hc.Generation || len(h.Status.Applied.Steps) != 7 {
 		t.Fatalf("applied %+v", h.Status.Applied)
 	}
-	calls := len(exec.Calls)
+	calls := len(hostChanges(exec.Calls))
 	if err := Tick(context.Background(), k8sClient, deps); err != nil {
 		t.Fatal(err)
 	}
-	if len(exec.Calls) != calls {
-		t.Fatalf("second tick at the same generation must not re-apply: %v", exec.Calls)
+	if len(hostChanges(exec.Calls)) != calls {
+		t.Fatalf("second tick at the same generation must not re-apply: %v", hostChanges(exec.Calls))
 	}
 }
 
@@ -134,8 +181,8 @@ func TestTickRunsSecurityUpdateInWindow(t *testing.T) {
 	if err := Tick(context.Background(), k8sClient, deps); err != nil {
 		t.Fatal(err)
 	}
-	if len(exec.Calls) != 2 {
-		t.Fatalf("calls %v", exec.Calls)
+	if changes := hostChanges(exec.Calls); len(changes) != 2 {
+		t.Fatalf("calls %v", changes)
 	}
 	h := getHost(t, "node-a")
 	if v1alpha1.IsConditionTrue(h.Status.Conditions, v1alpha1.ConditionRebootPending) {
@@ -199,8 +246,8 @@ func TestTickSkipsUpdateOutsideWindow(t *testing.T) {
 	if err := Tick(context.Background(), k8sClient, newDeps(exec, monday)); err != nil {
 		t.Fatal(err)
 	}
-	if len(exec.Calls) != 0 {
-		t.Fatalf("calls %v", exec.Calls)
+	if changes := hostChanges(exec.Calls); len(changes) != 0 {
+		t.Fatalf("calls %v", changes)
 	}
 }
 
@@ -306,14 +353,14 @@ func TestTickKeepsRebootPendingOutsideWindow(t *testing.T) {
 	if cond.Status != metav1.ConditionTrue || cond.Reason != "SecurityUpdate" {
 		t.Fatalf("condition %+v", cond)
 	}
-	calls := len(exec.Calls)
+	calls := len(hostChanges(exec.Calls))
 	monday := time.Date(2026, time.September, 14, 3, 0, 0, 0, time.Local)
 	deps.Now = func() time.Time { return monday }
 	if err := Tick(context.Background(), k8sClient, deps); err != nil {
 		t.Fatal(err)
 	}
-	if len(exec.Calls) != calls {
-		t.Fatalf("a closed window must run nothing: %v", exec.Calls)
+	if len(hostChanges(exec.Calls)) != calls {
+		t.Fatalf("a closed window must run nothing: %v", hostChanges(exec.Calls))
 	}
 	cond = requireCondition(t, "node-carry", v1alpha1.ConditionRebootPending)
 	if cond.Status != metav1.ConditionTrue || cond.Reason != "SecurityUpdate" {
@@ -330,8 +377,8 @@ func TestTickReportsInvalidWindow(t *testing.T) {
 	if err := Tick(context.Background(), k8sClient, deps); err != nil {
 		t.Fatal(err)
 	}
-	if len(exec.Calls) != 0 {
-		t.Fatalf("calls %v", exec.Calls)
+	if changes := hostChanges(exec.Calls); len(changes) != 0 {
+		t.Fatalf("calls %v", changes)
 	}
 	_, parseErr := maintenance.Parse(window)
 	if parseErr == nil {

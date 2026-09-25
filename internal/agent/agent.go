@@ -29,6 +29,9 @@ type Deps struct {
 	Inventory func(context.Context, host.Exec, string) (v1alpha1.Inventory, error)
 	Apply     func(context.Context, hostconfig.Deps, v1alpha1.HostConfigSpec) []v1alpha1.StepResult
 	Packages  pkgmgr.Manager
+	Version   string
+	Hostname  func() (string, error)
+	FreeBytes func(string) (uint64, error)
 }
 
 func Run(ctx context.Context, c client.WithWatch, deps Deps) error {
@@ -108,7 +111,15 @@ func Tick(ctx context.Context, c client.Client, deps Deps) error {
 		return client.IgnoreNotFound(err)
 	}
 	inv, invErr := deps.Inventory(ctx, deps.Exec, deps.Root)
-	next := v1alpha1.HostStatus{Inventory: inv, Applied: current.Status.Applied}
+	next := v1alpha1.HostStatus{
+		Inventory:    inv,
+		Applied:      current.Status.Applied,
+		AgentVersion: deps.Version,
+		K0sVersion:   k0sVersion(ctx, deps.Exec),
+		Hostname:     hostname(deps),
+		Checks:       hostChecks(ctx, deps),
+		Restore:      current.Status.Restore,
+	}
 	if invErr != nil {
 		next.Inventory = current.Status.Inventory
 	}

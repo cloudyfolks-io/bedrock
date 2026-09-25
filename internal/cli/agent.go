@@ -95,6 +95,9 @@ func runAgent(ctx context.Context, o agentOptions, deps agentDeps, stderr io.Wri
 		Inventory: inventory.Gather,
 		Apply:     hostconfig.Apply,
 		Packages:  pkgmgr.Manager{Exec: deps.Exec, Family: family, Root: o.root},
+		Version:   Version,
+		Hostname:  os.Hostname,
+		FreeBytes: host.FreeBytes,
 	}
 	for {
 		changed, err := runUntilKubeconfigChanges(ctx, o, deps, loopDeps, stderr)

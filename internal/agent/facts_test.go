@@ -1,0 +1,100 @@
+package agent
+
+import (
+	"context"
+	"crypto/ecdsa"
+	"crypto/elliptic"
+	"crypto/rand"
+	"crypto/x509"
+	"crypto/x509/pkix"
+	"encoding/pem"
+	"errors"
+	"math/big"
+	"os"
+	"path/filepath"
+	"testing"
+	"time"
+
+	"github.com/cloudyfolks-labs/bedrock/internal/host"
+)
+
+func writeCertificate(t *testing.T, path string, notAfter time.Time) {
+	t.Helper()
+	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	template := &x509.Certificate{SerialNumber: big.NewInt(1), Subject: pkix.Name{CommonName: filepath.Base(path)}, NotBefore: notAfter.Add(-time.Hour), NotAfter: notAfter}
+	der, err := x509.CreateCertificate(rand.Reader, template, template, &key.PublicKey, key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: der}), 0o644); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestCertificatesNotAfterFindsTheEarliest(t *testing.T) {
+	root := t.TempDir()
+	base := time.Date(2027, 1, 1, 0, 0, 0, 0, time.UTC)
+	writeCertificate(t, filepath.Join(root, "var/lib/k0s/pki/server.crt"), base.Add(48*time.Hour))
+	writeCertificate(t, filepath.Join(root, "var/lib/k0s/pki/etcd/peer.crt"), base.Add(72*time.Hour))
+	writeCertificate(t, filepath.Join(root, "var/lib/kubelet/pki/kubelet-client-current.pem"), base)
+	if err := os.WriteFile(filepath.Join(root, "var/lib/k0s/pki/server.key"), []byte("not a certificate"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	got := certificatesNotAfter(root)
+	if got == nil || !got.Time.Equal(base) {
+		t.Fatalf("earliest notAfter %v, want %v", got, base)
+	}
+}
+
+func TestCertificatesNotAfterWithoutCertificates(t *testing.T) {
+	if got := certificatesNotAfter(t.TempDir()); got != nil {
+		t.Fatalf("no certificates must give nil, got %v", got)
+	}
+}
+
+func TestEtcdMembers(t *testing.T) {
+	root := t.TempDir()
+	exec := &host.FakeExec{Responses: map[string]string{"/usr/local/bin/k0s etcd member-list": `{"members":{"a":"https://10.0.0.1:2380","b":"https://10.0.0.2:2380"}}`}}
+	if got := etcdMembers(context.Background(), exec, root); got != 0 || len(exec.Calls) != 0 {
+		t.Fatalf("a host without etcd must report 0 without running k0s, got %d calls %v", got, exec.Calls)
+	}
+	if err := os.MkdirAll(filepath.Join(root, "var/lib/k0s/pki/etcd"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if got := etcdMembers(context.Background(), exec, root); got != 2 {
+		t.Fatalf("members %d, want 2", got)
+	}
+}
+
+func TestTimeSynced(t *testing.T) {
+	key := "timedatectl show -p NTPSynchronized --value"
+	cases := []struct {
+		exec *host.FakeExec
+		want bool
+	}{
+		{&host.FakeExec{Responses: map[string]string{key: "yes\n"}}, true},
+		{&host.FakeExec{Responses: map[string]string{key: "no\n"}}, false},
+		{&host.FakeExec{Errors: map[string]error{key: errors.New("no timedatectl")}}, false},
+	}
+	for _, tc := range cases {
+		if got := timeSynced(context.Background(), tc.exec); got != tc.want {
+			t.Fatalf("timeSynced %v, want %v", got, tc.want)
+		}
+	}
+}
+
+func TestK0sVersion(t *testing.T) {
+	exec := &host.FakeExec{Responses: map[string]string{"/usr/local/bin/k0s version": "v1.36.3+k0s.0\n"}}
+	if got := k0sVersion(context.Background(), exec); got != "v1.36.3+k0s.0" {
+		t.Fatalf("k0s version %q", got)
+	}
+	if got := k0sVersion(context.Background(), &host.FakeExec{}); got != "" {
+		t.Fatalf("a failed k0s version must be empty, got %q", got)
+	}
+}

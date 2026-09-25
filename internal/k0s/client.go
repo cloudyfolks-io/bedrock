@@ -10,7 +10,10 @@ import (
 	"github.com/cloudyfolks-labs/bedrock/internal/host"
 )
 
-const DefaultKubeletRootDir = "/var/lib/kubelet"
+const (
+	DefaultKubeletRootDir = "/var/lib/kubelet"
+	DefaultBinary         = "/usr/local/bin/k0s"
+)
 
 type InstallOptions struct {
 	Role              string

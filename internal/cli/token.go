@@ -27,7 +27,7 @@ func tokenCommand(args []string, stdout, stderr io.Writer) int {
 	roleList := flags.String("roles", "", "comma separated roles for the joining node")
 	expiry := flags.String("expiry", "1h", "token validity")
 	kubeconfig := flags.String("kubeconfig", "/var/lib/k0s/pki/admin.conf", "admin kubeconfig")
-	k0sBin := flags.String("k0s-bin", "/usr/local/bin/k0s", "k0s binary path")
+	k0sBin := flags.String("k0s-bin", k0s.DefaultBinary, "k0s binary path")
 	if err := flags.Parse(args[1:]); err != nil {
 		return 2
 	}

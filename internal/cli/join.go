@@ -42,7 +42,7 @@ func RunJoin(ctx context.Context, args []string, deps InitDeps, stdout, stderr i
 	flags.StringVar(&o.token, "token", "", "join token from bedrock token create")
 	flags.StringVar(&o.roles, "roles", "", "comma separated roles, default from the token")
 	flags.StringVar(&o.dataDir, "data-dir", "/var/lib/k0s", "k0s data directory")
-	flags.StringVar(&o.k0sBin, "k0s-bin", "/usr/local/bin/k0s", "k0s binary path")
+	flags.StringVar(&o.k0sBin, "k0s-bin", k0s.DefaultBinary, "k0s binary path")
 	flags.StringVar(&o.imagesDir, "images-dir", "", "directory of image tarballs to preload")
 	flags.StringVar(&o.k0sBaseURL, "k0s-base-url", release.DefaultK0sBaseURL, "k0s download base url")
 	flags.StringVar(&o.bundle, "bundle", "", "install from this bundle archive")
