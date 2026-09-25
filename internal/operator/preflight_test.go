@@ -131,6 +131,15 @@ func TestPreflightProblems(t *testing.T) {
 			in.Hosts[1].Status.Checks.VarLibFreeBytes = 7 * gib
 			return in
 		}, "disk: node-b has 7.0 GiB free in /var/lib, needs 8.0 GiB"},
+		"disk too small on the backup host counts its images": {func(in preflightInput) preflightInput {
+			in.Hosts[0].Status.Checks.ImagesBytes = 4 * gib
+			in.Hosts[0].Status.Checks.VarLibFreeBytes = 9 * gib
+			return in
+		}, "disk: node-a has 9.0 GiB free in /var/lib, needs 10.0 GiB"},
+		"images on a non backup host do not count": {func(in preflightInput) preflightInput {
+			in.Hosts[1].Status.Checks.ImagesBytes = 100 * gib
+			return in
+		}, ""},
 		"ceph warn": {func(in preflightInput) preflightInput {
 			in.Ceph = cephReport{Health: "HEALTH_WARN", PGs: 8, CleanPGs: 8}
 			return in

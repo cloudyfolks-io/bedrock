@@ -249,10 +249,18 @@ func hostCheckProblems(in preflightInput, host v1alpha1.Host) []string {
 	if !checks.TimeSynced {
 		problems = append(problems, fmt.Sprintf("time: %s clock is not synchronized", host.Name))
 	}
-	if need := 2 * hostBundleBytes(in, host); checks.VarLibFreeBytes < need {
+	if need := diskNeed(in, host); checks.VarLibFreeBytes < need {
 		problems = append(problems, fmt.Sprintf("disk: %s has %s free in /var/lib, needs %s", host.Name, gibibytes(checks.VarLibFreeBytes), gibibytes(need)))
 	}
 	return problems
+}
+
+func diskNeed(in preflightInput, host v1alpha1.Host) int64 {
+	need := 2 * hostBundleBytes(in, host)
+	if backup, ok := backupHost(in.Hosts); ok && backup.Name == host.Name {
+		need += host.Status.Checks.ImagesBytes
+	}
+	return need
 }
 
 func hostBundleBytes(in preflightInput, host v1alpha1.Host) int64 {
