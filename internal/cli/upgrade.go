@@ -118,40 +118,52 @@ func RunUpgrade(ctx context.Context, o upgradeOptions, deps UpgradeDeps, stdout,
 	if running := cluster.Spec.DesiredVersion; running != cluster.Status.Version && running != o.to {
 		return fail(stderr, fmt.Errorf("an upgrade to %s is in progress: finish or abort it first", running))
 	}
-	arches, err := nodeArches(ctx, c)
+	since, err := requestUpgrade(ctx, c, cluster, o, deps, stdout)
 	if err != nil {
 		return fail(stderr, err)
+	}
+	if err := streamUpgrade(ctx, c, o.to, since, deps.Interval, stdout); err != nil {
+		return fail(stderr, err)
+	}
+	fmt.Fprintf(stdout, "cluster upgraded to %s\n", o.to)
+	return 0
+}
+
+func requestUpgrade(ctx context.Context, c client.Client, cluster v1alpha1.Cluster, o upgradeOptions, deps UpgradeDeps, stdout io.Writer) (int64, error) {
+	if cluster.Spec.DesiredVersion == o.to {
+		step(stdout, "following the upgrade of %s to %s", cluster.Status.Version, o.to)
+		return cluster.Generation, nil
+	}
+	arches, err := nodeArches(ctx, c)
+	if err != nil {
+		return 0, err
 	}
 	bundles := o.bundles
 	if len(bundles) == 0 {
 		step(stdout, "downloading bundles for %s", strings.Join(arches, ", "))
 		if bundles, err = pullBundles(ctx, deps, o.to, arches); err != nil {
-			return fail(stderr, err)
+			return 0, err
 		}
 	}
 	step(stdout, "staging %d bundles", len(bundles))
 	releaseDir, err := stageBundles(bundles, o.to, arches, o.root)
 	if err != nil {
-		return fail(stderr, err)
+		return 0, err
 	}
 	if err := ensureRelease(ctx, c, releaseDir, o.to); err != nil {
-		return fail(stderr, err)
+		return 0, err
 	}
 	step(stdout, "waiting for the depot")
 	if err := waitForDepot(ctx, c, o.to, arches, deps.Interval); err != nil {
-		return fail(stderr, err)
+		return 0, err
 	}
-	patch := client.MergeFrom(cluster.DeepCopy())
-	cluster.Spec.DesiredVersion = o.to
-	if err := c.Patch(ctx, &cluster, patch); err != nil {
-		return fail(stderr, err)
+	requested := cluster.DeepCopy()
+	requested.Spec.DesiredVersion = o.to
+	if err := c.Patch(ctx, requested, client.MergeFrom(&cluster)); err != nil {
+		return 0, err
 	}
 	step(stdout, "upgrading %s to %s", cluster.Status.Version, o.to)
-	if err := streamUpgrade(ctx, c, o.to, cluster.Generation, deps.Interval, stdout); err != nil {
-		return fail(stderr, err)
-	}
-	fmt.Fprintf(stdout, "cluster upgraded to %s\n", o.to)
-	return 0
+	return requested.Generation, nil
 }
 
 func nodeArches(ctx context.Context, c client.Client) ([]string, error) {

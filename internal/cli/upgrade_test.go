@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -13,6 +14,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
+	"sigs.k8s.io/controller-runtime/pkg/client/interceptor"
 	sigyaml "sigs.k8s.io/yaml"
 
 	"github.com/cloudyfolks-labs/bedrock/api/v1alpha1"
@@ -260,6 +262,56 @@ func TestUpgradeRefusesAnotherUpgradeInProgress(t *testing.T) {
 	code := RunUpgrade(context.Background(), upgradeOptions{to: "v0.3.0", root: t.TempDir(), timeout: time.Second}, upgradeDeps(c, ""), &stdout, &stderr)
 	if code == 0 || !strings.Contains(stderr.String(), "an upgrade to v0.2.5 is in progress: finish or abort it first") {
 		t.Fatalf("exit %d stderr %q", code, stderr.String())
+	}
+}
+
+func finishOnThirdRead(c client.Client, version string) client.Client {
+	var reads atomic.Int32
+	return interceptor.NewClient(c.(client.WithWatch), interceptor.Funcs{Get: func(ctx context.Context, inner client.WithWatch, key client.ObjectKey, obj client.Object, opts ...client.GetOption) error {
+		if err := inner.Get(ctx, key, obj, opts...); err != nil {
+			return err
+		}
+		if cluster, ok := obj.(*v1alpha1.Cluster); ok && reads.Add(1) >= 3 {
+			cluster.Status = v1alpha1.ClusterStatus{Version: version, Phase: v1alpha1.PhaseIdle}
+		}
+		return nil
+	}})
+}
+
+func TestUpgradeFollowsAnUpgradeInFlight(t *testing.T) {
+	withVersion(t, "v0.3.0")
+	root := t.TempDir()
+	live := filepath.Join(depot.BundleDir(root, "v0.3.0", "amd64"), release.BundleFileName)
+	if err := os.MkdirAll(filepath.Dir(live), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(live, []byte("served"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	c := upgradeClient(t, "v0.2.0", "amd64")
+	var cluster v1alpha1.Cluster
+	if err := c.Get(context.Background(), client.ObjectKey{Name: v1alpha1.ClusterName}, &cluster); err != nil {
+		t.Fatal(err)
+	}
+	cluster.Spec.DesiredVersion = "v0.3.0"
+	if err := c.Update(context.Background(), &cluster); err != nil {
+		t.Fatal(err)
+	}
+	cluster.Status.Phase = v1alpha1.PhasePreload
+	cluster.Status.Upgrade = &v1alpha1.UpgradeStatus{From: "v0.2.0", To: "v0.3.0", Attempt: 1, Message: "preload 1/1 nodes"}
+	if err := c.Status().Update(context.Background(), &cluster); err != nil {
+		t.Fatal(err)
+	}
+	var stdout, stderr bytes.Buffer
+	code := RunUpgrade(context.Background(), upgradeOptions{to: "v0.3.0", root: root, timeout: 10 * time.Second}, upgradeDeps(finishOnThirdRead(c, "v0.3.0"), ""), &stdout, &stderr)
+	if code != 0 || !strings.Contains(stdout.String(), "phase Preload: preload 1/1 nodes") || !strings.HasSuffix(stdout.String(), "cluster upgraded to v0.3.0\n") {
+		t.Fatalf("exit %d stdout %q stderr %q", code, stdout.String(), stderr.String())
+	}
+	if strings.Contains(stdout.String(), "downloading") || strings.Contains(stdout.String(), "staging") {
+		t.Fatalf("an upgrade in flight must not pull or stage again: %q", stdout.String())
+	}
+	if raw, err := os.ReadFile(live); err != nil || string(raw) != "served" {
+		t.Fatalf("the served depot must stay untouched: %q %v", raw, err)
 	}
 }
 
