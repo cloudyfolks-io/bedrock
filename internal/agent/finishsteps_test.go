@@ -3,6 +3,7 @@ package agent
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"slices"
@@ -204,6 +205,20 @@ func TestRestoreRollsBackK0sAndEtcd(t *testing.T) {
 	}
 	if outcome.Message != "restored "+env.Upgrade.Spec.Backup {
 		t.Fatalf("message %q", outcome.Message)
+	}
+}
+
+func TestRestoreWritesTheMarkerBeforeK0sStarts(t *testing.T) {
+	exec := &host.FakeExec{Responses: map[string]string{"systemctl stop k0scontroller.service": ""}, Errors: map[string]error{"systemctl start k0scontroller.service": errors.New("exit status 1")}, ResponsePrefixes: map[string]string{"/usr/local/bin/k0s restore --config-out ": ""}}
+	env := restoreEnv(t, exec)
+	if _, err := restore(context.Background(), env); err == nil || err.Error() != "exit status 1" {
+		t.Fatalf("error %v", err)
+	}
+	if exec.Calls[len(exec.Calls)-1] != "systemctl start k0scontroller.service" {
+		t.Fatalf("calls %v", exec.Calls)
+	}
+	if _, err := os.Stat(filepath.Join(env.Deps.Root, "var/lib/bedrock/restore.json")); err != nil {
+		t.Fatalf("the restore marker must be written before k0s starts: %v", err)
 	}
 }
 

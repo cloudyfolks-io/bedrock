@@ -169,10 +169,10 @@ func restore(ctx context.Context, env StepEnv) (Outcome, error) {
 	if _, err := deps.Exec.Run(ctx, k0s.DefaultBinary, "restore", "--config-out", filepath.Join(work, "k0s.yaml"), snapshot); err != nil {
 		return Outcome{}, err
 	}
-	if _, err := deps.Exec.Run(ctx, "systemctl", "start", k0sControllerUnit); err != nil {
+	if err := writeRestoreMarker(deps.Root, backupPath, deps.Now()); err != nil {
 		return Outcome{}, err
 	}
-	if err := writeRestoreMarker(deps.Root, backupPath, deps.Now()); err != nil {
+	if _, err := deps.Exec.Run(ctx, "systemctl", "start", k0sControllerUnit); err != nil {
 		return Outcome{}, err
 	}
 	return Outcome{Message: "restored " + backupPath}, nil
