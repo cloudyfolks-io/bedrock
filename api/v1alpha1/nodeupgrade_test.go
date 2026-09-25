@@ -7,13 +7,3 @@ func TestNodeUpgradeName(t *testing.T) {
 		t.Fatalf("name %q", got)
 	}
 }
-
-func TestNodeUpgradeStepState(t *testing.T) {
-	upgrade := NodeUpgrade{Status: NodeUpgradeStatus{Steps: []NodeUpgradeStepStatus{{Name: StepPreload, State: StepSucceeded}}}}
-	if got := upgrade.StepState(StepPreload); got != StepSucceeded {
-		t.Fatalf("preload state %q", got)
-	}
-	if got := upgrade.StepState(StepBackup); got != "" {
-		t.Fatalf("absent step must report an empty state, got %q", got)
-	}
-}

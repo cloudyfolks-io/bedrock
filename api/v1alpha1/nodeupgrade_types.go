@@ -102,15 +102,6 @@ func NodeUpgradeName(version, node string) string {
 	return version + "-" + node
 }
 
-func (n *NodeUpgrade) StepState(name string) string {
-	for _, step := range n.Status.Steps {
-		if step.Name == name {
-			return step.State
-		}
-	}
-	return ""
-}
-
 func init() {
 	SchemeBuilder.Register(&NodeUpgrade{}, &NodeUpgradeList{})
 }
