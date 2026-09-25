@@ -7,6 +7,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"time"
 
@@ -83,7 +84,7 @@ func RunJoin(ctx context.Context, args []string, deps InitDeps, stdout, stderr i
 		return fail(stderr, fmt.Errorf("preflight failed"))
 	}
 
-	bundleDir, err := openBundle(initOptions{bundle: o.bundle, workDir: o.workDir}, "")
+	bundleDir, err := openBundle(initOptions{bundle: o.bundle, workDir: o.workDir}, "", runtime.GOARCH, token.Version)
 	if err != nil {
 		return fail(stderr, err)
 	}

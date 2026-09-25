@@ -115,7 +115,7 @@ func RunInit(ctx context.Context, args []string, deps InitDeps, stdout, stderr i
 	if bundlePath == "" {
 		bundlePath = cfg.Spec.Registry.Bundle
 	}
-	bundleDir, err := openBundle(o, cfg.Spec.Registry.Bundle)
+	bundleDir, err := openBundle(o, cfg.Spec.Registry.Bundle, runtime.GOARCH, cfg.Spec.Version)
 	if err != nil {
 		return fail(stderr, err)
 	}
@@ -339,7 +339,7 @@ func installK0sFromBundle(src, bin, wantSum string) error {
 	return os.Chmod(bin, 0o755)
 }
 
-func openBundle(o initOptions, configured string) (string, error) {
+func openBundle(o initOptions, configured, arch, version string) (string, error) {
 	path := o.bundle
 	if path == "" {
 		path = configured
@@ -351,10 +351,24 @@ func openBundle(o initOptions, configured string) (string, error) {
 	if err := os.RemoveAll(dir); err != nil {
 		return "", err
 	}
-	if _, err := release.OpenBundle(path, dir); err != nil {
+	spec, err := release.OpenBundle(path, dir)
+	if err != nil {
+		return "", fmt.Errorf("bundle %s: %w", path, err)
+	}
+	if err := checkBundle(spec, arch, version); err != nil {
 		return "", fmt.Errorf("bundle %s: %w", path, err)
 	}
 	return dir, nil
+}
+
+func checkBundle(spec release.BundleSpec, arch, version string) error {
+	if spec.Arch != arch {
+		return fmt.Errorf("bundle is for %s, this host is %s", spec.Arch, arch)
+	}
+	if spec.Version != version {
+		return fmt.Errorf("bundle is version %s, want %s", spec.Version, version)
+	}
+	return nil
 }
 
 func removeBundleDir(dir string) {
