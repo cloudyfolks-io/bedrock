@@ -58,6 +58,9 @@ func parseBackupLocation(location string) (string, string, bool) {
 }
 
 func abortUpgrade(status v1alpha1.ClusterStatus, message string, generation int64) v1alpha1.ClusterStatus {
+	if progressing := meta.FindStatusCondition(status.Conditions, v1alpha1.ConditionProgressing); status.Upgrade == nil && progressing != nil && progressing.Status == metav1.ConditionFalse && progressing.Reason == v1alpha1.ReasonAborted {
+		return status
+	}
 	next := *status.DeepCopy()
 	next.Phase = v1alpha1.PhaseIdle
 	next.Upgrade = nil

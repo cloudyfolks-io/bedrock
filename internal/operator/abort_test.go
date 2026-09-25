@@ -100,6 +100,15 @@ func TestAbortTransforms(t *testing.T) {
 	}
 }
 
+func TestAbortUpgradeKeepsAnEarlierReport(t *testing.T) {
+	status := v1alpha1.ClusterStatus{Phase: v1alpha1.PhaseIdle, Version: "v1"}
+	setCondition(&status, v1alpha1.ConditionProgressing, metav1.ConditionFalse, v1alpha1.ReasonAborted, "cleanup failed on node-b: x", 1)
+	got := abortUpgrade(status, "", 2)
+	if !reflect.DeepEqual(got, status) {
+		t.Fatalf("abortUpgrade must keep an already-aborted status unchanged: %+v", got)
+	}
+}
+
 func createReleases(t *testing.T, ctx context.Context, c client.Client) {
 	t.Helper()
 	for _, version := range []string{"v1", "v2"} {
@@ -163,6 +172,35 @@ func TestAbortBeforeControlPlane(t *testing.T) {
 	}
 	if upgrades, err := listNodeUpgrades(ctx, c, "v2"); err != nil || len(upgrades) != 0 {
 		t.Fatalf("node upgrades %d %v", len(upgrades), err)
+	}
+}
+
+func TestAbortRerunKeepsTheCleanupReport(t *testing.T) {
+	c, ctx := abortWorld(t, v1alpha1.PhasePreload)
+	setAction(t, ctx, c, v1alpha1.UpgradeActionAbort)
+	runRole(t, ctx, c, oldRole())
+	reportStep(t, ctx, c, "node-a", v1alpha1.NodeUpgradeStepStatus{Name: v1alpha1.StepCleanup, State: v1alpha1.StepSucceeded, Attempt: 1})
+	reportStep(t, ctx, c, "node-b", v1alpha1.NodeUpgradeStepStatus{Name: v1alpha1.StepCleanup, State: v1alpha1.StepFailed, Attempt: 1, Message: "k0s ctr images rm: exit status 1"})
+	done := runRole(t, ctx, c, oldRole())
+	wantMessage := "cleanup failed on node-b: k0s ctr images rm: exit status 1"
+	if got := meta.FindStatusCondition(done.Status.Conditions, v1alpha1.ConditionProgressing).Message; got != wantMessage {
+		t.Fatalf("setup: progressing message %q", got)
+	}
+
+	stale := getCluster(t, ctx, c)
+	stale.Spec.DesiredVersion = "v2"
+	stale.Spec.Upgrade.Action = v1alpha1.UpgradeActionAbort
+	if err := c.Update(ctx, &stale); err != nil {
+		t.Fatal(err)
+	}
+
+	rerun := runRole(t, ctx, c, oldRole())
+	progressing := meta.FindStatusCondition(rerun.Status.Conditions, v1alpha1.ConditionProgressing)
+	if progressing.Message != wantMessage {
+		t.Fatalf("a rerun must keep the cleanup report: %q", progressing.Message)
+	}
+	if rerun.Spec.DesiredVersion != rerun.Status.Version || rerun.Spec.Upgrade.Action != "" {
+		t.Fatalf("spec %+v status.version %s", rerun.Spec, rerun.Status.Version)
 	}
 }
 
