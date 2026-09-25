@@ -26,6 +26,7 @@ import (
 	"github.com/cloudyfolks-labs/bedrock/internal/preflight"
 	"github.com/cloudyfolks-labs/bedrock/internal/release"
 	"github.com/cloudyfolks-labs/bedrock/internal/roles"
+	"github.com/cloudyfolks-labs/bedrock/internal/ssa"
 )
 
 const initFieldOwner = "bedrock-init"
@@ -395,7 +396,7 @@ func kubeVIPData(vip, iface string) map[string]string {
 
 func applyKubeVIPConfig(ctx context.Context, c client.Client, vip, iface string) error {
 	cm := &corev1.ConfigMap{TypeMeta: metav1.TypeMeta{APIVersion: "v1", Kind: "ConfigMap"}, ObjectMeta: metav1.ObjectMeta{Namespace: "kube-system", Name: "kube-vip", Labels: map[string]string{v1alpha1.LabelKind: "KubeVIPConfig", v1alpha1.LabelName: "kube-vip"}}, Data: kubeVIPData(vip, iface)}
-	return c.Patch(ctx, cm, client.Apply, client.ForceOwnership, client.FieldOwner(initFieldOwner))
+	return ssa.Apply(ctx, c, cm, initFieldOwner)
 }
 
 func createObjects(ctx context.Context, c client.Client, cfg v1alpha1.ClusterConfig, nodeName string) error {
@@ -410,7 +411,7 @@ func createObjects(ctx context.Context, c client.Client, cfg v1alpha1.ClusterCon
 	for _, setting := range config.ToSettings(cfg) {
 		s := setting
 		s.TypeMeta = metav1.TypeMeta{APIVersion: v1alpha1.GroupVersion.String(), Kind: "Setting"}
-		if err := c.Patch(ctx, &s, client.Apply, client.ForceOwnership, client.FieldOwner(initFieldOwner)); err != nil {
+		if err := ssa.Apply(ctx, c, &s, initFieldOwner); err != nil {
 			return err
 		}
 	}

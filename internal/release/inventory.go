@@ -12,6 +12,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	"github.com/cloudyfolks-labs/bedrock/api/v1alpha1"
+	"github.com/cloudyfolks-labs/bedrock/internal/ssa"
 )
 
 const (
@@ -94,5 +95,5 @@ func WriteInventory(ctx context.Context, c client.Client, inv Inventory) error {
 		ObjectMeta: metav1.ObjectMeta{Namespace: SystemNamespace, Name: InventoryConfigMapName, Labels: map[string]string{v1alpha1.LabelKind: "Inventory", v1alpha1.LabelName: InventoryConfigMapName}},
 		Data:       map[string]string{inventoryKey: string(raw)},
 	}
-	return c.Patch(ctx, cm, client.Apply, client.ForceOwnership, client.FieldOwner(FieldManager))
+	return ssa.Apply(ctx, c, cm, FieldManager)
 }

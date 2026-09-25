@@ -8,6 +8,8 @@ import (
 	"k8s.io/apimachinery/pkg/api/meta"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+
+	"github.com/cloudyfolks-labs/bedrock/internal/ssa"
 )
 
 type Applier struct {
@@ -16,8 +18,7 @@ type Applier struct {
 
 func (a Applier) Apply(ctx context.Context, group Group) error {
 	for _, obj := range group.Objects {
-		target := obj.DeepCopy()
-		if err := a.Client.Patch(ctx, target, client.Apply, client.ForceOwnership, client.FieldOwner(FieldManager)); err != nil {
+		if err := ssa.Apply(ctx, a.Client, obj, FieldManager); err != nil {
 			return fmt.Errorf("apply %s %s/%s: %w", obj.GetKind(), obj.GetNamespace(), obj.GetName(), err)
 		}
 	}

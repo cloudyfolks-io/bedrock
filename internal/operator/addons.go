@@ -21,6 +21,7 @@ import (
 	"github.com/cloudyfolks-labs/bedrock/api/v1alpha1"
 	"github.com/cloudyfolks-labs/bedrock/internal/release"
 	"github.com/cloudyfolks-labs/bedrock/internal/settings"
+	"github.com/cloudyfolks-labs/bedrock/internal/ssa"
 )
 
 const (
@@ -150,7 +151,7 @@ func (r *AddonReconciler) reconcileAddon(ctx context.Context, addon Addon, input
 		return addonCondition(addon, metav1.ConditionFalse, rendered.SkipReason, rendered.SkipMessage)
 	}
 	for _, obj := range rendered.Objects {
-		err := r.Client.Patch(ctx, obj.DeepCopy(), client.Apply, client.ForceOwnership, client.FieldOwner(v1alpha1.OperatorFieldManager))
+		err := ssa.Apply(ctx, r.Client, obj, v1alpha1.OperatorFieldManager)
 		if meta.IsNoMatchError(err) {
 			return addonCondition(addon, metav1.ConditionFalse, "MissingCRD", fmt.Sprintf("%s %s: %v", obj.GetKind(), obj.GetName(), err))
 		}
