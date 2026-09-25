@@ -20,6 +20,11 @@ import (
 
 func StartTestEnv(t *testing.T) (client.Client, *rest.Config) {
 	t.Helper()
+	return startTestEnvWithCRDs(t)
+}
+
+func startTestEnvWithCRDs(t *testing.T, dirs ...string) (client.Client, *rest.Config) {
+	t.Helper()
 	scheme := runtime.NewScheme()
 	if err := clientgoscheme.AddToScheme(scheme); err != nil {
 		t.Fatal(err)
@@ -28,7 +33,7 @@ func StartTestEnv(t *testing.T) (client.Client, *rest.Config) {
 		t.Fatal(err)
 	}
 	env := &envtest.Environment{
-		CRDDirectoryPaths:     []string{filepath.Join("..", "..", "manifests", "00-crds")},
+		CRDDirectoryPaths:     append([]string{filepath.Join("..", "..", "manifests", "00-crds")}, dirs...),
 		ErrorIfCRDPathMissing: true,
 	}
 	env.ControlPlane.GetAPIServer().Configure().Append("disable-admission-plugins", "TaintNodesByCondition")

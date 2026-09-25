@@ -54,7 +54,11 @@ func Run(ctx context.Context, cfg *rest.Config, scheme *runtime.Scheme, opts Run
 	if err := (&HostReconciler{Client: mgr.GetClient()}).SetupWithManager(mgr); err != nil {
 		return err
 	}
-	if err := (&ClusterReconciler{Client: mgr.GetClient(), Bundle: bundle, Gates: release.Gates{}, Interval: 2 * time.Second, GroupTimeout: 30 * time.Minute, UpgradeInterval: 10 * time.Second}).SetupWithManager(mgr); err != nil {
+	exec, err := podExec(cfg)
+	if err != nil {
+		return err
+	}
+	if err := (&ClusterReconciler{Client: mgr.GetClient(), Bundle: bundle, Gates: release.Gates{}, Interval: 2 * time.Second, GroupTimeout: 30 * time.Minute, UpgradeInterval: 10 * time.Second, Exec: exec}).SetupWithManager(mgr); err != nil {
 		return err
 	}
 	if err := (&StorageTopologyReconciler{Client: mgr.GetClient()}).SetupWithManager(mgr); err != nil {

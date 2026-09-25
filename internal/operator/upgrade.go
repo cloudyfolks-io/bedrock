@@ -39,6 +39,7 @@ type upgradeEnv struct {
 	Client   client.Client
 	Bundle   release.Bundle
 	Interval time.Duration
+	Exec     execFunc
 }
 
 type phaseResult struct {

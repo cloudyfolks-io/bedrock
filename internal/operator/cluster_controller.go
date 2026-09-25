@@ -25,6 +25,7 @@ type ClusterReconciler struct {
 	Interval        time.Duration
 	GroupTimeout    time.Duration
 	UpgradeInterval time.Duration
+	Exec            execFunc
 }
 
 func (r *ClusterReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
@@ -54,7 +55,7 @@ func (r *ClusterReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 }
 
 func (r *ClusterReconciler) upgradeEnv() upgradeEnv {
-	return upgradeEnv{Client: r.Client, Bundle: r.Bundle, Interval: r.UpgradeInterval}
+	return upgradeEnv{Client: r.Client, Bundle: r.Bundle, Interval: r.UpgradeInterval, Exec: r.Exec}
 }
 
 func (r *ClusterReconciler) reconcileSteady(ctx context.Context, cluster v1alpha1.Cluster) error {
