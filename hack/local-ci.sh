@@ -167,6 +167,7 @@ trap cleanup EXIT
 warn_docker_desktop
 
 stop=0
+rc=0
 for job in "${job_order[@]}"; do
   if [ "$stop" -eq 1 ]; then
     continue
@@ -177,6 +178,9 @@ for job in "${job_order[@]}"; do
   else
     job_status[$job]=FAIL
     stop=1
+    rc=1
   fi
   job_minutes[$job]=$(( ($(date +%s) - start) / 60 ))
 done
+
+exit "$rc"
