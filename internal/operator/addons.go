@@ -72,7 +72,7 @@ func (r *AddonReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 	if err := r.Client.Get(ctx, req.NamespacedName, &cluster); err != nil {
 		return ctrl.Result{}, client.IgnoreNotFound(err)
 	}
-	if cluster.Status.Version == "" {
+	if cluster.Status.Version == "" || upgrading(cluster.Status) {
 		return ctrl.Result{RequeueAfter: r.Interval}, nil
 	}
 	input, err := r.input(ctx, cluster)
@@ -193,14 +193,21 @@ func addonCondition(addon Addon, status metav1.ConditionStatus, reason, message 
 	return metav1.Condition{Type: addon.Condition, Status: status, Reason: reason, Message: message}
 }
 
-func (r *AddonReconciler) SetupWithManager(mgr ctrl.Manager) error {
-	toCluster := handler.EnqueueRequestsFromMapFunc(func(_ context.Context, _ client.Object) []reconcile.Request {
+func upgrading(status v1alpha1.ClusterStatus) bool {
+	return status.Upgrade != nil && status.Upgrade.To != status.Version
+}
+
+func enqueueCluster() handler.EventHandler {
+	return handler.EnqueueRequestsFromMapFunc(func(_ context.Context, _ client.Object) []reconcile.Request {
 		return []reconcile.Request{{NamespacedName: types.NamespacedName{Name: v1alpha1.ClusterName}}}
 	})
+}
+
+func (r *AddonReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	return ctrl.NewControllerManagedBy(mgr).
 		Named("addons").
 		For(&v1alpha1.Cluster{}).
-		Watches(&v1alpha1.Host{}, toCluster).
-		Watches(&v1alpha1.Setting{}, toCluster).
+		Watches(&v1alpha1.Host{}, enqueueCluster()).
+		Watches(&v1alpha1.Setting{}, enqueueCluster()).
 		Complete(r)
 }

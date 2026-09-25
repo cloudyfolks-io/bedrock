@@ -19,11 +19,12 @@ import (
 )
 
 type ClusterReconciler struct {
-	Client       client.Client
-	Bundle       release.Bundle
-	Gates        release.Gates
-	Interval     time.Duration
-	GroupTimeout time.Duration
+	Client          client.Client
+	Bundle          release.Bundle
+	Gates           release.Gates
+	Interval        time.Duration
+	GroupTimeout    time.Duration
+	UpgradeInterval time.Duration
 }
 
 func (r *ClusterReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
@@ -37,24 +38,46 @@ func (r *ClusterReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 	if err := r.Client.Get(ctx, req.NamespacedName, &cluster); err != nil {
 		return ctrl.Result{}, client.IgnoreNotFound(err)
 	}
-	embedded := r.Bundle.Spec.Version
-	if cluster.Spec.DesiredVersion != embedded {
-		return ctrl.Result{}, r.writeStatus(ctx, func(s *v1alpha1.ClusterStatus) {
-			setCondition(s, v1alpha1.ConditionProgressing, metav1.ConditionFalse, "AwaitingUpgrade", fmt.Sprintf("desired %s, embedded %s", cluster.Spec.DesiredVersion, embedded), cluster.Generation)
-		})
+	switch route(cluster, r.Bundle.Spec.Version) {
+	case routeInstall:
+		return r.reconcileInstall(ctx, cluster)
+	case routeSteady:
+		return ctrl.Result{}, r.reconcileSteady(ctx, cluster)
+	case routeOld:
+		return runUpgrade(ctx, r.upgradeEnv(), cluster, oldPhases())
+	case routeNew:
+		return runUpgrade(ctx, r.upgradeEnv(), cluster, newPhases())
 	}
-	if cluster.Status.Version == embedded && cluster.Status.Phase != v1alpha1.PhaseFailed {
-		return ctrl.Result{}, r.writeStatus(ctx, func(s *v1alpha1.ClusterStatus) {
-			s.Phase = v1alpha1.PhaseIdle
-			setCondition(s, v1alpha1.ConditionAvailable, metav1.ConditionTrue, "Installed", "", cluster.Generation)
-			setCondition(s, v1alpha1.ConditionProgressing, metav1.ConditionFalse, "Installed", "", cluster.Generation)
-		})
+	return ctrl.Result{}, r.writeStatus(ctx, func(s *v1alpha1.ClusterStatus) {
+		setCondition(s, v1alpha1.ConditionProgressing, metav1.ConditionFalse, "AwaitingUpgrade", fmt.Sprintf("desired %s, embedded %s", cluster.Spec.DesiredVersion, r.Bundle.Spec.Version), cluster.Generation)
+	})
+}
+
+func (r *ClusterReconciler) upgradeEnv() upgradeEnv {
+	return upgradeEnv{Client: r.Client, Bundle: r.Bundle, Interval: r.UpgradeInterval}
+}
+
+func (r *ClusterReconciler) reconcileSteady(ctx context.Context, cluster v1alpha1.Cluster) error {
+	if err := r.writeStatus(ctx, func(s *v1alpha1.ClusterStatus) {
+		*s = settle(*s, cluster.Generation)
+	}); err != nil {
+		return err
 	}
+	action := cluster.Spec.Upgrade.Action
+	if action == "" {
+		return nil
+	}
+	return answerAction(ctx, r.Client, cluster, func(s v1alpha1.ClusterStatus) v1alpha1.ClusterStatus {
+		return ignoreAction(s, fmt.Sprintf("%s ignored: no upgrade in progress", action), cluster.Generation)
+	})
+}
+
+func (r *ClusterReconciler) reconcileInstall(ctx context.Context, cluster v1alpha1.Cluster) (ctrl.Result, error) {
 	if cluster.Status.Phase == v1alpha1.PhaseFailed && cluster.Spec.Upgrade.Action != v1alpha1.UpgradeActionResume {
 		return ctrl.Result{}, nil
 	}
 	if cluster.Spec.Upgrade.Action == v1alpha1.UpgradeActionResume {
-		if err := r.clearAction(ctx, &cluster); err != nil {
+		if err := clearAction(ctx, r.Client, cluster); err != nil {
 			return ctrl.Result{}, err
 		}
 	}
@@ -146,10 +169,10 @@ func (r *ClusterReconciler) ensureRelease(ctx context.Context) error {
 	return r.Client.Status().Update(ctx, &existing)
 }
 
-func (r *ClusterReconciler) clearAction(ctx context.Context, cluster *v1alpha1.Cluster) error {
-	patch := client.MergeFrom(cluster.DeepCopy())
-	cluster.Spec.Upgrade.Action = ""
-	return r.Client.Patch(ctx, cluster, patch)
+func clearAction(ctx context.Context, c client.Client, cluster v1alpha1.Cluster) error {
+	cleared := cluster.DeepCopy()
+	cleared.Spec.Upgrade.Action = ""
+	return c.Patch(ctx, cleared, client.MergeFrom(&cluster))
 }
 
 var statusWriteBackoff = wait.Backoff{Steps: 10, Duration: 20 * time.Millisecond, Factor: 1.5, Jitter: 0.1}
@@ -180,5 +203,9 @@ func setCondition(status *v1alpha1.ClusterStatus, conditionType string, value me
 }
 
 func (r *ClusterReconciler) SetupWithManager(mgr ctrl.Manager) error {
-	return ctrl.NewControllerManagedBy(mgr).For(&v1alpha1.Cluster{}).Complete(r)
+	return ctrl.NewControllerManagedBy(mgr).
+		For(&v1alpha1.Cluster{}).
+		Watches(&v1alpha1.NodeUpgrade{}, enqueueCluster()).
+		Watches(&v1alpha1.Host{}, enqueueCluster()).
+		Complete(r)
 }
