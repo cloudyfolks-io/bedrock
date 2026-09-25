@@ -130,6 +130,15 @@ func RunUpgrade(ctx context.Context, o upgradeOptions, deps UpgradeDeps, stdout,
 }
 
 func requestUpgrade(ctx context.Context, c client.Client, cluster v1alpha1.Cluster, o upgradeOptions, deps UpgradeDeps, stdout io.Writer) (int64, error) {
+	if cluster.Spec.DesiredVersion == o.to && upgradeBlocked(cluster) {
+		step(stdout, "retrying the blocked upgrade of %s to %s", cluster.Status.Version, o.to)
+		resumed := cluster.DeepCopy()
+		resumed.Spec.Upgrade.Action = v1alpha1.UpgradeActionResume
+		if err := c.Patch(ctx, resumed, client.MergeFrom(&cluster)); err != nil {
+			return 0, err
+		}
+		return resumed.Generation, nil
+	}
 	if cluster.Spec.DesiredVersion == o.to {
 		step(stdout, "following the upgrade of %s to %s", cluster.Status.Version, o.to)
 		return cluster.Generation, nil
@@ -350,7 +359,7 @@ func progressLine(cluster v1alpha1.Cluster) string {
 func upgradeResult(cluster v1alpha1.Cluster, version string, since int64) (bool, error) {
 	status := cluster.Status
 	if blocked := currentCondition(status.Conditions, v1alpha1.ConditionUpgradeBlocked, since); blocked != nil && blocked.Status == metav1.ConditionTrue {
-		return true, fmt.Errorf("upgrade blocked: %s", blocked.Message)
+		return true, fmt.Errorf("upgrade blocked: %s\nfix the cause, then run: bedrock upgrade resume", blocked.Message)
 	}
 	if progressing := currentCondition(status.Conditions, v1alpha1.ConditionProgressing, since); progressing != nil && progressing.Reason == v1alpha1.ReasonAborted {
 		return true, errors.New("upgrade aborted")
@@ -392,13 +401,27 @@ func RunUpgradeAction(ctx context.Context, action string, o upgradeOptions, deps
 			return fail(stderr, errors.New("abort cancelled"))
 		}
 	}
-	patch := client.MergeFrom(cluster.DeepCopy())
-	cluster.Spec.Upgrade.Action = action
-	if err := c.Patch(ctx, &cluster, patch); err != nil {
+	requested := cluster.DeepCopy()
+	requested.Spec.Upgrade.Action = action
+	if err := c.Patch(ctx, requested, client.MergeFrom(&cluster)); err != nil {
 		return fail(stderr, err)
 	}
 	fmt.Fprintf(stdout, "%s requested\n", action)
+	if action != v1alpha1.UpgradeActionResume || !upgradeBlocked(cluster) {
+		return 0
+	}
+	ctx, cancel := context.WithTimeout(ctx, o.timeout)
+	defer cancel()
+	if err := streamUpgrade(ctx, c, cluster.Spec.DesiredVersion, requested.Generation, deps.Interval, stdout); err != nil {
+		return fail(stderr, err)
+	}
+	fmt.Fprintf(stdout, "cluster upgraded to %s\n", cluster.Spec.DesiredVersion)
 	return 0
+}
+
+func upgradeBlocked(cluster v1alpha1.Cluster) bool {
+	blocked := currentCondition(cluster.Status.Conditions, v1alpha1.ConditionUpgradeBlocked, cluster.Generation)
+	return cluster.Status.Upgrade == nil && blocked != nil && blocked.Status == metav1.ConditionTrue
 }
 
 func pastNoReturn(status v1alpha1.ClusterStatus) (string, bool) {

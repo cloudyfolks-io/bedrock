@@ -195,7 +195,7 @@ func TestUpgradeResult(t *testing.T) {
 		{"running", v1alpha1.ClusterStatus{Version: "v0.2.0", Phase: v1alpha1.PhasePreload}, false, ""},
 		{"upgraded", v1alpha1.ClusterStatus{Version: "v0.3.0", Phase: v1alpha1.PhaseIdle}, true, ""},
 		{"failed", v1alpha1.ClusterStatus{Version: "v0.2.0", Phase: v1alpha1.PhaseFailed, Upgrade: &v1alpha1.UpgradeStatus{Message: "preload: depot unreachable"}}, true, "upgrade failed: preload: depot unreachable"},
-		{"blocked", v1alpha1.ClusterStatus{Version: "v0.2.0", Phase: v1alpha1.PhaseIdle, Conditions: []metav1.Condition{condition(v1alpha1.ConditionUpgradeBlocked, v1alpha1.ReasonBlocked, metav1.ConditionTrue)}}, true, "upgrade blocked: certificates expire in 3 days"},
+		{"blocked", v1alpha1.ClusterStatus{Version: "v0.2.0", Phase: v1alpha1.PhaseIdle, Conditions: []metav1.Condition{condition(v1alpha1.ConditionUpgradeBlocked, v1alpha1.ReasonBlocked, metav1.ConditionTrue)}}, true, "upgrade blocked: certificates expire in 3 days\nfix the cause, then run: bedrock upgrade resume"},
 		{"aborted", v1alpha1.ClusterStatus{Version: "v0.2.0", Phase: v1alpha1.PhaseIdle, Conditions: []metav1.Condition{condition(v1alpha1.ConditionProgressing, v1alpha1.ReasonAborted, metav1.ConditionFalse)}}, true, "upgrade aborted"},
 	}
 	stale := v1alpha1.Cluster{ObjectMeta: metav1.ObjectMeta{Generation: 4}, Status: v1alpha1.ClusterStatus{Version: "v0.2.0", Phase: v1alpha1.PhaseIdle, Conditions: []metav1.Condition{condition(v1alpha1.ConditionUpgradeBlocked, v1alpha1.ReasonBlocked, metav1.ConditionTrue)}}}
@@ -297,17 +297,47 @@ func TestUpgradeRefusesAnotherUpgradeInProgress(t *testing.T) {
 	}
 }
 
-func finishOnThirdRead(c client.Client, version string) client.Client {
+func scriptOperator(c client.Client, statuses ...v1alpha1.ClusterStatus) client.Client {
 	var reads atomic.Int32
 	return interceptor.NewClient(c.(client.WithWatch), interceptor.Funcs{Get: func(ctx context.Context, inner client.WithWatch, key client.ObjectKey, obj client.Object, opts ...client.GetOption) error {
 		if err := inner.Get(ctx, key, obj, opts...); err != nil {
 			return err
 		}
-		if cluster, ok := obj.(*v1alpha1.Cluster); ok && reads.Add(1) >= 3 {
-			cluster.Status = v1alpha1.ClusterStatus{Version: version, Phase: v1alpha1.PhaseIdle}
+		cluster, ok := obj.(*v1alpha1.Cluster)
+		if step := int(reads.Add(1)) - 2; ok && step >= 0 {
+			cluster.Status = statuses[min(step, len(statuses)-1)]
 		}
 		return nil
 	}})
+}
+
+func inPreflight() v1alpha1.ClusterStatus {
+	return v1alpha1.ClusterStatus{Version: "v0.2.0", Phase: v1alpha1.PhasePreflight, Upgrade: &v1alpha1.UpgradeStatus{From: "v0.2.0", To: "v0.3.0", Attempt: 1, Message: "preflight"}}
+}
+
+func upgradedTo(version string) v1alpha1.ClusterStatus {
+	return v1alpha1.ClusterStatus{Version: version, Phase: v1alpha1.PhaseIdle}
+}
+
+func blockedAt(generation int64) v1alpha1.ClusterStatus {
+	return v1alpha1.ClusterStatus{Version: "v0.2.0", Phase: v1alpha1.PhaseIdle, Conditions: []metav1.Condition{{Type: v1alpha1.ConditionUpgradeBlocked, Status: metav1.ConditionTrue, Reason: v1alpha1.ReasonBlocked, Message: "timeSynced: node-a clock not synced", ObservedGeneration: generation}}}
+}
+
+func requestedCluster(t *testing.T, c client.Client, desired string, status v1alpha1.ClusterStatus) v1alpha1.Cluster {
+	t.Helper()
+	var cluster v1alpha1.Cluster
+	if err := c.Get(context.Background(), client.ObjectKey{Name: v1alpha1.ClusterName}, &cluster); err != nil {
+		t.Fatal(err)
+	}
+	cluster.Spec.DesiredVersion = desired
+	if err := c.Update(context.Background(), &cluster); err != nil {
+		t.Fatal(err)
+	}
+	cluster.Status = status
+	if err := c.Status().Update(context.Background(), &cluster); err != nil {
+		t.Fatal(err)
+	}
+	return cluster
 }
 
 func TestUpgradeFollowsAnUpgradeInFlight(t *testing.T) {
@@ -321,21 +351,10 @@ func TestUpgradeFollowsAnUpgradeInFlight(t *testing.T) {
 		t.Fatal(err)
 	}
 	c := upgradeClient(t, "v0.2.0", "amd64")
-	var cluster v1alpha1.Cluster
-	if err := c.Get(context.Background(), client.ObjectKey{Name: v1alpha1.ClusterName}, &cluster); err != nil {
-		t.Fatal(err)
-	}
-	cluster.Spec.DesiredVersion = "v0.3.0"
-	if err := c.Update(context.Background(), &cluster); err != nil {
-		t.Fatal(err)
-	}
-	cluster.Status.Phase = v1alpha1.PhasePreload
-	cluster.Status.Upgrade = &v1alpha1.UpgradeStatus{From: "v0.2.0", To: "v0.3.0", Attempt: 1, Message: "preload 1/1 nodes"}
-	if err := c.Status().Update(context.Background(), &cluster); err != nil {
-		t.Fatal(err)
-	}
+	preloading := v1alpha1.ClusterStatus{Version: "v0.2.0", Phase: v1alpha1.PhasePreload, Upgrade: &v1alpha1.UpgradeStatus{From: "v0.2.0", To: "v0.3.0", Attempt: 1, Message: "preload 1/1 nodes"}}
+	requestedCluster(t, c, "v0.3.0", preloading)
 	var stdout, stderr bytes.Buffer
-	code := RunUpgrade(context.Background(), upgradeOptions{to: "v0.3.0", root: root, timeout: 10 * time.Second}, upgradeDeps(finishOnThirdRead(c, "v0.3.0"), ""), &stdout, &stderr)
+	code := RunUpgrade(context.Background(), upgradeOptions{to: "v0.3.0", root: root, timeout: 10 * time.Second}, upgradeDeps(scriptOperator(c, preloading, upgradedTo("v0.3.0")), ""), &stdout, &stderr)
 	if code != 0 || !strings.Contains(stdout.String(), "phase Preload: preload 1/1 nodes") || !strings.HasSuffix(stdout.String(), "cluster upgraded to v0.3.0\n") {
 		t.Fatalf("exit %d stdout %q stderr %q", code, stdout.String(), stderr.String())
 	}
@@ -344,6 +363,52 @@ func TestUpgradeFollowsAnUpgradeInFlight(t *testing.T) {
 	}
 	if raw, err := os.ReadFile(live); err != nil || string(raw) != "served" {
 		t.Fatalf("the served depot must stay untouched: %q %v", raw, err)
+	}
+}
+
+func TestUpgradeBlockedTellsHowToRetry(t *testing.T) {
+	withVersion(t, "v0.3.0")
+	c := upgradeClient(t, "v0.2.0", "amd64")
+	cluster := requestedCluster(t, c, "v0.3.0", inPreflight())
+	var stdout, stderr bytes.Buffer
+	code := RunUpgrade(context.Background(), upgradeOptions{to: "v0.3.0", root: t.TempDir(), timeout: 10 * time.Second}, upgradeDeps(scriptOperator(c, blockedAt(cluster.Generation)), ""), &stdout, &stderr)
+	if code != 1 || stderr.String() != "upgrade blocked: timeSynced: node-a clock not synced\nfix the cause, then run: bedrock upgrade resume\n" {
+		t.Fatalf("exit %d stderr %q", code, stderr.String())
+	}
+}
+
+func TestUpgradeToABlockedVersionResumesIt(t *testing.T) {
+	withVersion(t, "v0.3.0")
+	c := upgradeClient(t, "v0.2.0", "amd64")
+	cluster := requestedCluster(t, c, "v0.3.0", blockedAt(0))
+	cluster.Status = blockedAt(cluster.Generation)
+	if err := c.Status().Update(context.Background(), &cluster); err != nil {
+		t.Fatal(err)
+	}
+	var stdout, stderr bytes.Buffer
+	code := RunUpgrade(context.Background(), upgradeOptions{to: "v0.3.0", root: t.TempDir(), timeout: 10 * time.Second}, upgradeDeps(scriptOperator(c, inPreflight(), upgradedTo("v0.3.0")), ""), &stdout, &stderr)
+	if code != 0 || !strings.Contains(stdout.String(), "==> retrying the blocked upgrade of v0.2.0 to v0.3.0\n") || !strings.HasSuffix(stdout.String(), "cluster upgraded to v0.3.0\n") {
+		t.Fatalf("exit %d stdout %q stderr %q", code, stdout.String(), stderr.String())
+	}
+	if err := c.Get(context.Background(), client.ObjectKey{Name: v1alpha1.ClusterName}, &cluster); err != nil {
+		t.Fatal(err)
+	}
+	if cluster.Spec.Upgrade.Action != v1alpha1.UpgradeActionResume || cluster.Spec.DesiredVersion != "v0.3.0" {
+		t.Fatalf("spec %+v", cluster.Spec)
+	}
+}
+
+func TestUpgradeResumeStreamsABlockedUpgrade(t *testing.T) {
+	c := upgradeClient(t, "v0.2.0", "amd64")
+	cluster := requestedCluster(t, c, "v0.3.0", blockedAt(0))
+	cluster.Status = blockedAt(cluster.Generation)
+	if err := c.Status().Update(context.Background(), &cluster); err != nil {
+		t.Fatal(err)
+	}
+	var stdout, stderr bytes.Buffer
+	code := RunUpgradeAction(context.Background(), v1alpha1.UpgradeActionResume, upgradeOptions{timeout: 10 * time.Second}, upgradeDeps(scriptOperator(c, inPreflight(), upgradedTo("v0.3.0")), ""), &stdout, &stderr)
+	if code != 0 || !strings.HasPrefix(stdout.String(), "resume requested\n") || !strings.Contains(stdout.String(), "phase Preflight: preflight\n") || !strings.HasSuffix(stdout.String(), "cluster upgraded to v0.3.0\n") {
+		t.Fatalf("exit %d stdout %q stderr %q", code, stdout.String(), stderr.String())
 	}
 }
 
