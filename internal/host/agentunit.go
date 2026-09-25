@@ -34,17 +34,20 @@ func AgentUnit(binary, kubeconfig string) string {
 }
 
 func EnsureAgentUnit(ctx context.Context, e Exec, root, binary, kubeconfig string) error {
-	path := filepath.Join(root, "etc", "systemd", "system", agentUnitName)
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-		return err
-	}
-	if err := os.WriteFile(path, []byte(AgentUnit(binary, kubeconfig)), 0o644); err != nil {
+	replaced, err := ReplaceFile(filepath.Join(root, "etc", "systemd", "system", agentUnitName), AgentUnit(binary, kubeconfig), 0o644)
+	if err != nil {
 		return err
 	}
 	if _, err := e.Run(ctx, "systemctl", "daemon-reload"); err != nil {
 		return err
 	}
-	_, err := e.Run(ctx, "systemctl", "enable", "--now", agentUnitName)
+	if _, err := e.Run(ctx, "systemctl", "enable", "--now", agentUnitName); err != nil {
+		return err
+	}
+	if !replaced {
+		return nil
+	}
+	_, err = e.Run(ctx, "systemctl", "restart", agentUnitName)
 	return err
 }
 

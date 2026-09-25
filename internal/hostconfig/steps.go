@@ -79,24 +79,36 @@ func unitsStep(ctx context.Context, deps Deps, spec v1alpha1.HostConfigSpec) (st
 	if len(spec.Units) == 0 {
 		return "", nil
 	}
+	replaced := map[string]bool{}
 	for _, unit := range spec.Units {
-		if err := writeFile(filepath.Join(deps.Root, "etc", "systemd", "system", unit.Name), unit.Content); err != nil {
+		changed, err := host.ReplaceFile(filepath.Join(deps.Root, "etc", "systemd", "system", unit.Name), unit.Content, 0o644)
+		if err != nil {
 			return "", err
 		}
+		replaced[unit.Name] = changed
 	}
 	if _, err := deps.Exec.Run(ctx, "systemctl", "daemon-reload"); err != nil {
 		return "", err
 	}
 	for _, unit := range spec.Units {
-		action := "disable"
-		if unit.Enabled {
-			action = "enable"
-		}
-		if _, err := deps.Exec.Run(ctx, "systemctl", action, "--now", unit.Name); err != nil {
-			return "", err
+		for _, command := range unitCommands(unit, replaced) {
+			if _, err := deps.Exec.Run(ctx, command[0], command[1:]...); err != nil {
+				return "", err
+			}
 		}
 	}
 	return "", nil
+}
+
+func unitCommands(unit v1alpha1.UnitSpec, replaced map[string]bool) [][]string {
+	if !unit.Enabled {
+		return [][]string{{"systemctl", "disable", "--now", unit.Name}}
+	}
+	commands := [][]string{{"systemctl", "enable", "--now", unit.Name}}
+	if replaced[unit.Name] {
+		commands = append(commands, []string{"systemctl", "restart", unit.Name})
+	}
+	return commands
 }
 
 func mirrorsStep(_ context.Context, deps Deps, spec v1alpha1.HostConfigSpec) (string, error) {

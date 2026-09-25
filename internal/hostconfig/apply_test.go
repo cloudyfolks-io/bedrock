@@ -123,3 +123,31 @@ func TestApplyDisablesUnits(t *testing.T) {
 		t.Fatalf("units %+v", stateOf(steps, "units"))
 	}
 }
+
+func TestApplyRestartsChangedEnabledUnits(t *testing.T) {
+	root := t.TempDir()
+	dir := filepath.Join(root, "etc", "systemd", "system")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	for name, content := range map[string]string{"app.service": "old", "same.service": "same", "off.service": "old"} {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	exec := &host.FakeExec{ResponsePrefixes: map[string]string{"systemctl ": "", "sysctl -p ": ""}}
+	units := []v1alpha1.UnitSpec{{Name: "app.service", Content: "new", Enabled: true}, {Name: "same.service", Content: "same", Enabled: true}, {Name: "off.service", Content: "new", Enabled: false}}
+	steps := Apply(context.Background(), Deps{Exec: exec, Root: root, Packages: pkgmgr.Manager{Exec: exec, Family: "apt", Root: root}}, v1alpha1.HostConfigSpec{Units: units})
+	if stateOf(steps, "units").State != "Applied" {
+		t.Fatalf("units %+v", stateOf(steps, "units"))
+	}
+	restarts := []string{}
+	for _, call := range exec.Calls {
+		if strings.HasPrefix(call, "systemctl restart ") {
+			restarts = append(restarts, call)
+		}
+	}
+	if len(restarts) != 1 || restarts[0] != "systemctl restart app.service" {
+		t.Fatalf("only the changed enabled unit may restart, got %v", restarts)
+	}
+}
