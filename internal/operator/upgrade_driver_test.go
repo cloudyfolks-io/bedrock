@@ -172,7 +172,7 @@ func TestRunUpgradeAnswersActionsWithoutMeaning(t *testing.T) {
 	})
 }
 
-func TestRunUpgradeBlocksAndStartsAgain(t *testing.T) {
+func TestRunUpgradeStaysBlockedUntilResume(t *testing.T) {
 	c, _ := StartTestEnv(t)
 	ctx := context.Background()
 	createClusterWithStatus(t, ctx, c, "v2", v1alpha1.ClusterStatus{Version: "v1", Phase: v1alpha1.PhaseIdle})
@@ -191,7 +191,15 @@ func TestRunUpgradeBlocksAndStartsAgain(t *testing.T) {
 	if blocked.Status.Phase != v1alpha1.PhaseIdle || blocked.Status.Upgrade != nil || condition == nil || condition.Status != metav1.ConditionTrue || condition.Message != "timeSynced: node-a clock not synced" {
 		t.Fatalf("status %+v", blocked.Status)
 	}
-	reconcileUpgrade(t, ctx, c, phases)
+	waiting := reconcileUpgrade(t, ctx, c, phases)
+	if calls.Load() != 1 || !reflect.DeepEqual(waiting.Status, blocked.Status) {
+		t.Fatalf("a blocked upgrade must not start again by itself: %d preflight runs, status %+v", calls.Load(), waiting.Status)
+	}
+	setAction(t, ctx, c, v1alpha1.UpgradeActionResume)
+	restarted := reconcileUpgrade(t, ctx, c, phases)
+	if restarted.Status.Phase != v1alpha1.PhasePreflight || restarted.Status.Upgrade == nil || restarted.Spec.Upgrade.Action != "" {
+		t.Fatalf("resume must start the blocked upgrade again: action %q status %+v", restarted.Spec.Upgrade.Action, restarted.Status)
+	}
 	passed := reconcileUpgrade(t, ctx, c, phases)
 	condition = meta.FindStatusCondition(passed.Status.Conditions, v1alpha1.ConditionUpgradeBlocked)
 	if passed.Status.Phase != v1alpha1.PhaseBackup || condition.Status != metav1.ConditionFalse {

@@ -84,6 +84,14 @@ func TestDecide(t *testing.T) {
 		setCondition(&cluster.Status, v1alpha1.ConditionProgressing, metav1.ConditionFalse, v1alpha1.ReasonAborted, "", generation)
 		return cluster
 	}
+	blockedAt := func(generation int64) v1alpha1.Cluster {
+		cluster := idle
+		cluster.Generation = generation
+		cluster.Status = blockUpgrade(inPhase(v1alpha1.PhasePreflight), "timeSynced: node-a clock not synced", 5)
+		return cluster
+	}
+	abortedAfterABlock := blockedAt(5)
+	abortedAfterABlock.Status = abortUpgrade(abortedAfterABlock.Status, "", 5)
 	cases := map[string]struct {
 		cluster v1alpha1.Cluster
 		want    decision
@@ -100,6 +108,10 @@ func TestDecide(t *testing.T) {
 		"desired changed":            {retargeted, decision{Kind: decisionRetarget, Message: "desiredVersion is v3 while the upgrade to v2 runs: set it back to v2, or abort"}},
 		"abort without its patch":    {abortedAt(5), decision{Kind: decisionEndAbort}},
 		"new start after an abort":   {abortedAt(4), decision{Kind: decisionStart}},
+		"blocked waits":              {blockedAt(5), decision{Kind: decisionWait}},
+		"blocked resumes":            {withAction(blockedAt(6), v1alpha1.UpgradeActionResume), decision{Kind: decisionRetry}},
+		"blocked with a new target":  {blockedAt(6), decision{Kind: decisionStart}},
+		"aborted after a block":      {abortedAfterABlock, decision{Kind: decisionEndAbort}},
 	}
 	for name, tc := range cases {
 		t.Run(name, func(t *testing.T) {

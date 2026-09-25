@@ -32,6 +32,7 @@ const (
 	decisionAbort       = "abort"
 	decisionRestore     = "restore"
 	decisionEndAbort    = "endAbort"
+	decisionRetry       = "retry"
 
 	reasonInstalled     = "Installed"
 	reasonActionIgnored = "ActionIgnored"
@@ -118,7 +119,10 @@ func decide(cluster v1alpha1.Cluster) decision {
 	status := cluster.Status
 	action := cluster.Spec.Upgrade.Action
 	phase := activePhase(status)
+	blockedAt, blocked := blockedGeneration(status)
 	switch {
+	case action == v1alpha1.UpgradeActionResume && blocked:
+		return decision{Kind: decisionRetry}
 	case action == v1alpha1.UpgradeActionResume && (status.Phase != v1alpha1.PhaseFailed || status.Upgrade == nil):
 		return decision{Kind: decisionIgnore, Message: fmt.Sprintf("resume ignored: phase %s has not failed", status.Phase)}
 	case action == v1alpha1.UpgradeActionResume:
@@ -131,6 +135,8 @@ func decide(cluster v1alpha1.Cluster) decision {
 		return decision{Kind: decisionAbort}
 	case status.Upgrade == nil && abortEnded(cluster):
 		return decision{Kind: decisionEndAbort}
+	case blocked && blockedAt == cluster.Generation:
+		return decision{Kind: decisionWait}
 	case status.Upgrade == nil:
 		return decision{Kind: decisionStart}
 	case status.Upgrade.To != cluster.Spec.DesiredVersion:
@@ -144,6 +150,14 @@ func decide(cluster v1alpha1.Cluster) decision {
 func abortEnded(cluster v1alpha1.Cluster) bool {
 	progressing := meta.FindStatusCondition(cluster.Status.Conditions, v1alpha1.ConditionProgressing)
 	return progressing != nil && progressing.Status == metav1.ConditionFalse && progressing.Reason == v1alpha1.ReasonAborted && progressing.ObservedGeneration == cluster.Generation
+}
+
+func blockedGeneration(status v1alpha1.ClusterStatus) (int64, bool) {
+	blocked := meta.FindStatusCondition(status.Conditions, v1alpha1.ConditionUpgradeBlocked)
+	if status.Upgrade != nil || blocked == nil || blocked.Status != metav1.ConditionTrue {
+		return 0, false
+	}
+	return blocked.ObservedGeneration, true
 }
 
 func startUpgrade(status v1alpha1.ClusterStatus, to string, now metav1.Time, generation int64) v1alpha1.ClusterStatus {
@@ -291,6 +305,10 @@ func runUpgrade(ctx context.Context, env upgradeEnv, cluster v1alpha1.Cluster, r
 	case decisionStart:
 		return again, writeClusterStatus(ctx, env.Client, func(s *v1alpha1.ClusterStatus) {
 			*s = startUpgrade(*s, cluster.Spec.DesiredVersion, now, generation)
+		})
+	case decisionRetry:
+		return again, answerAction(ctx, env.Client, cluster, func(s v1alpha1.ClusterStatus) v1alpha1.ClusterStatus {
+			return startUpgrade(s, cluster.Spec.DesiredVersion, now, generation)
 		})
 	case decisionIgnore:
 		return again, answerAction(ctx, env.Client, cluster, func(s v1alpha1.ClusterStatus) v1alpha1.ClusterStatus {
