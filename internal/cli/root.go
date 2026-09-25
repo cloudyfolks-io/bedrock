@@ -20,6 +20,7 @@ func Commands() map[string]Command {
 		"join":     joinCommand,
 		"token":    tokenCommand,
 		"agent":    agentCommand,
+		"upgrade":  upgradeCommand,
 	}
 }
 
