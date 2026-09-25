@@ -315,8 +315,9 @@ func oldPhases() map[string]phaseFunc {
 
 func newPhases() map[string]phaseFunc {
 	return map[string]phaseFunc{
-		v1alpha1.PhasePreflight: preflight,
-		v1alpha1.PhaseBackup:    backup,
-		v1alpha1.PhasePreload:   preload,
+		v1alpha1.PhasePreflight:    preflight,
+		v1alpha1.PhaseBackup:       backup,
+		v1alpha1.PhasePreload:      preload,
+		v1alpha1.PhaseControlPlane: controlPlane,
 	}
 }
