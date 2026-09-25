@@ -55,7 +55,7 @@ func (r *ClusterReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 }
 
 func (r *ClusterReconciler) upgradeEnv() upgradeEnv {
-	return upgradeEnv{Client: r.Client, Bundle: r.Bundle, Interval: r.UpgradeInterval, Exec: r.Exec}
+	return upgradeEnv{Client: r.Client, Bundle: r.Bundle, Interval: r.UpgradeInterval, Exec: r.Exec, Gates: r.Gates, PollInterval: r.Interval, GroupTimeout: r.GroupTimeout}
 }
 
 func (r *ClusterReconciler) reconcileSteady(ctx context.Context, cluster v1alpha1.Cluster) error {

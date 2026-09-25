@@ -36,10 +36,13 @@ const (
 )
 
 type upgradeEnv struct {
-	Client   client.Client
-	Bundle   release.Bundle
-	Interval time.Duration
-	Exec     execFunc
+	Client       client.Client
+	Bundle       release.Bundle
+	Interval     time.Duration
+	Exec         execFunc
+	Gates        release.Gates
+	PollInterval time.Duration
+	GroupTimeout time.Duration
 }
 
 type phaseResult struct {
@@ -319,5 +322,6 @@ func newPhases() map[string]phaseFunc {
 		v1alpha1.PhaseBackup:       backup,
 		v1alpha1.PhasePreload:      preload,
 		v1alpha1.PhaseControlPlane: controlPlane,
+		v1alpha1.PhaseComponents:   components,
 	}
 }
