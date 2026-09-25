@@ -16,7 +16,7 @@ import (
 	"github.com/cloudyfolks-labs/bedrock/internal/release"
 )
 
-const releaseUsage = "usage: bedrock release build --config FILE --version VERSION --image IMAGE --out DIR [--helm helm] [--k0s-version V] [--upgrade-from V1,V2] [--binaries DIR]\n       bedrock release apply --dir DIR [--timeout 10m] [--interval 2s]"
+const releaseUsage = "usage: bedrock release build --config FILE --version VERSION --image IMAGE --out DIR [--helm helm] [--k0s-version V] [--upgrade-from V1,V2] [--binaries DIR]\n       bedrock release apply --dir DIR [--timeout 10m] [--interval 2s]\n       bedrock release rbac --release DIR --out FILE"
 
 func releaseCommand(args []string, stdout, stderr io.Writer) int {
 	if len(args) == 0 {
@@ -28,6 +28,8 @@ func releaseCommand(args []string, stdout, stderr io.Writer) int {
 		return releaseBuild(args[1:], stdout, stderr)
 	case "apply":
 		return releaseApply(args[1:], stdout, stderr)
+	case "rbac":
+		return releaseRBAC(args[1:], stdout, stderr)
 	}
 	fmt.Fprintln(stderr, releaseUsage)
 	return 2
@@ -126,6 +128,33 @@ func releaseApply(args []string, stdout, stderr io.Writer) int {
 		return 1
 	}
 	fmt.Fprintf(stdout, "release %s applied\n", bundle.Spec.Version)
+	return 0
+}
+
+func releaseRBAC(args []string, stdout, stderr io.Writer) int {
+	flags := flag.NewFlagSet("release rbac", flag.ContinueOnError)
+	flags.SetOutput(stderr)
+	dir := flags.String("release", "dist/release", "built release directory")
+	out := flags.String("out", "manifests/90-bedrock/operator-rbac.yaml", "file for the operator ClusterRole")
+	if err := flags.Parse(args); err != nil {
+		return 2
+	}
+	bundle, err := release.Load(os.DirFS(*dir))
+	if err != nil {
+		return fail(stderr, err)
+	}
+	role, err := operator.OperatorRole(bundle)
+	if err != nil {
+		return fail(stderr, err)
+	}
+	body, err := operator.RoleYAML(role)
+	if err != nil {
+		return fail(stderr, err)
+	}
+	if err := os.WriteFile(*out, body, 0o644); err != nil {
+		return fail(stderr, err)
+	}
+	fmt.Fprintf(stdout, "wrote %s with %d rules\n", *out, len(role.Rules))
 	return 0
 }
 

@@ -16,7 +16,7 @@ BUNDLE_ARCH ?= amd64
 K0S_VERSION ?=
 UPGRADE_FROM ?=
 
-.PHONY: build test lint generate crds envtest-assets e2e-kind e2e-init e2e-bundle controller-gen release crane bundle binaries
+.PHONY: build test lint generate crds envtest-assets e2e-kind e2e-init e2e-bundle controller-gen release crane bundle binaries rbac
 
 build:
 	CGO_ENABLED=0 $(GO) build -trimpath -ldflags "-X github.com/cloudyfolks-labs/bedrock/internal/cli.Version=$(VERSION)" -o $(BIN) ./cmd/bedrock
@@ -56,6 +56,9 @@ e2e-init: build release
 release: build binaries
 	@command -v $(HELM) >/dev/null || { echo "helm is required"; exit 1; }
 	$(BIN) release build --config $(RELEASE_CONFIG) --version $(VERSION) --image $(IMAGE) --out dist/release --helm $(HELM) --cache-dir dist/cache --binaries dist $(if $(PIN_DIGESTS),--pin-digests,) $(if $(K0S_VERSION),--k0s-version $(K0S_VERSION),) $(if $(UPGRADE_FROM),--upgrade-from $(UPGRADE_FROM),)
+
+rbac: build
+	$(BIN) release rbac --release dist/release --out manifests/90-bedrock/operator-rbac.yaml
 
 bundle: build release
 	$(BIN) bundle build --release dist/release --arch $(BUNDLE_ARCH) --out dist/bedrock-$(VERSION)-bundle-$(BUNDLE_ARCH).tar.zst --cache-dir dist/cache --bedrock-binary dist/bedrock-$(VERSION)-linux-$(BUNDLE_ARCH)
