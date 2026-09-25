@@ -419,6 +419,13 @@ func TestUpgradeToABlockedVersionStagesTheBundleThenResumes(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(depot.BundleDir(root, "v0.3.0", "amd64"), release.BundleFileName)); err != nil {
 		t.Fatalf("bundle not staged in the depot: %v", err)
 	}
+	var created v1alpha1.Release
+	if err := c.Get(context.Background(), client.ObjectKey{Name: "v0.3.0"}, &created); err != nil {
+		t.Fatalf("release v0.3.0 not created: %v", err)
+	}
+	if !strings.Contains(stdout.String(), "==> waiting for the depot\n") {
+		t.Fatalf("the retry must wait for the depot: stdout %q", stdout.String())
+	}
 	if err := c.Get(context.Background(), client.ObjectKey{Name: v1alpha1.ClusterName}, &cluster); err != nil {
 		t.Fatal(err)
 	}

@@ -130,23 +130,23 @@ func RunUpgrade(ctx context.Context, o upgradeOptions, deps UpgradeDeps, stdout,
 }
 
 func requestUpgrade(ctx context.Context, c client.Client, cluster v1alpha1.Cluster, o upgradeOptions, deps UpgradeDeps, stdout io.Writer) (int64, error) {
-	if cluster.Spec.DesiredVersion == o.to && upgradeBlocked(cluster) {
-		if _, _, err := stageUpgradeBundles(ctx, c, o, deps, stdout); err != nil {
-			return 0, err
-		}
-		step(stdout, "retrying the blocked upgrade of %s to %s", cluster.Status.Version, o.to)
-		resumed := cluster.DeepCopy()
-		resumed.Spec.Upgrade.Action = v1alpha1.UpgradeActionResume
-		if err := c.Patch(ctx, resumed, client.MergeFrom(&cluster)); err != nil {
-			return 0, err
-		}
-		return resumed.Generation, nil
-	}
-	if cluster.Spec.DesiredVersion == o.to {
+	if cluster.Spec.DesiredVersion == o.to && !upgradeBlocked(cluster) {
 		step(stdout, "following the upgrade of %s to %s", cluster.Status.Version, o.to)
 		return cluster.Generation, nil
 	}
-	releaseDir, arches, err := stageUpgradeBundles(ctx, c, o, deps, stdout)
+	arches, err := nodeArches(ctx, c)
+	if err != nil {
+		return 0, err
+	}
+	bundles := o.bundles
+	if len(bundles) == 0 {
+		step(stdout, "downloading bundles for %s", strings.Join(arches, ", "))
+		if bundles, err = pullBundles(ctx, deps, o.to, arches); err != nil {
+			return 0, err
+		}
+	}
+	step(stdout, "staging %d bundles", len(bundles))
+	releaseDir, err := stageBundles(bundles, o.to, arches, o.root)
 	if err != nil {
 		return 0, err
 	}
@@ -157,6 +157,15 @@ func requestUpgrade(ctx context.Context, c client.Client, cluster v1alpha1.Clust
 	if err := waitForDepot(ctx, c, o.to, arches, deps.Interval); err != nil {
 		return 0, err
 	}
+	if cluster.Spec.DesiredVersion == o.to {
+		step(stdout, "retrying the blocked upgrade of %s to %s", cluster.Status.Version, o.to)
+		resumed := cluster.DeepCopy()
+		resumed.Spec.Upgrade.Action = v1alpha1.UpgradeActionResume
+		if err := c.Patch(ctx, resumed, client.MergeFrom(&cluster)); err != nil {
+			return 0, err
+		}
+		return resumed.Generation, nil
+	}
 	requested := cluster.DeepCopy()
 	requested.Spec.DesiredVersion = o.to
 	if err := c.Patch(ctx, requested, client.MergeFrom(&cluster)); err != nil {
@@ -164,26 +173,6 @@ func requestUpgrade(ctx context.Context, c client.Client, cluster v1alpha1.Clust
 	}
 	step(stdout, "upgrading %s to %s", cluster.Status.Version, o.to)
 	return requested.Generation, nil
-}
-
-func stageUpgradeBundles(ctx context.Context, c client.Client, o upgradeOptions, deps UpgradeDeps, stdout io.Writer) (string, []string, error) {
-	arches, err := nodeArches(ctx, c)
-	if err != nil {
-		return "", nil, err
-	}
-	bundles := o.bundles
-	if len(bundles) == 0 {
-		step(stdout, "downloading bundles for %s", strings.Join(arches, ", "))
-		if bundles, err = pullBundles(ctx, deps, o.to, arches); err != nil {
-			return "", nil, err
-		}
-	}
-	step(stdout, "staging %d bundles", len(bundles))
-	releaseDir, err := stageBundles(bundles, o.to, arches, o.root)
-	if err != nil {
-		return "", nil, err
-	}
-	return releaseDir, arches, nil
 }
 
 func nodeArches(ctx context.Context, c client.Client) ([]string, error) {
