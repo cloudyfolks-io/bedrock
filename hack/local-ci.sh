@@ -7,6 +7,7 @@ cpus=${CI_CPUS:-6}
 memory=${CI_MEMORY:-11}
 disk=${CI_DISK:-16}
 root_disk=${CI_ROOT_DISK:-44}
+upgrade_root_disk=${CI_UPGRADE_ROOT_DISK:-64}
 min_free=${CI_MIN_FREE_GB:-25}
 floor=${CI_FLOOR_GB:-15}
 port=${CI_REGISTRY_PORT:-5001}
@@ -228,7 +229,7 @@ run_e2e_bundle() {
 }
 
 run_upgrade() {
-  local abort_in=$1
+  local abort_in=$1 root_disk=$upgrade_root_disk
   vm_up
   if [ "$(colima ssh --profile "$profile" -- timedatectl show -p NTPSynchronized --value)" != "yes" ]; then
     echo "the VM clock is not NTP synchronized; the upgrade Preflight would block" >&2
@@ -239,6 +240,7 @@ run_upgrade() {
   env "${mac_env[@]}" REGISTRY=localhost:$port ARCH=$arch VERSION_A=v0.0.0-e2e.1 VERSION_B=v0.0.0-e2e.2 K0S_A=v1.36.2+k0s.0 K0S_B=v1.36.3+k0s.0 hack/e2e-upgrade-build.sh
   env "${mac_env[@]}" docker rm -f registry
   env "${mac_env[@]}" docker system prune -af
+  colima ssh --profile "$profile" -- sudo fstrim -av
   in_vm "REGISTRY=localhost:$port ARCH=$arch VERSION_A=v0.0.0-e2e.1 VERSION_B=v0.0.0-e2e.2 K0S_A=v1.36.2+k0s.0 K0S_B=v1.36.3+k0s.0${abort_in:+ ABORT_IN=$abort_in}" hack/e2e-upgrade.sh
   rm -f dist/bedrock-*-bundle-*.tar.zst
   vm_down
