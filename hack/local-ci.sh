@@ -242,6 +242,7 @@ cleanup() {
     vm_down
   fi
   rm -f dist/bedrock-*-bundle-*.tar.zst
+  rm -rf dist/.bundle-*
   restore_context
   rm -rf "$tmp"
   printf '%s' "$summary"
