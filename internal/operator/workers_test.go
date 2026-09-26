@@ -172,7 +172,7 @@ func TestWorkersPhaseOnASingleNode(t *testing.T) {
 	createPod(t, ctx, c, web)
 	createClusterWithStatus(t, ctx, c, "v2", upgradeStatusIn(v1alpha1.PhaseWorkers))
 	env := upgradeEnv{Client: c}
-	for _, want := range []string{"workers: node-a started", "workers: node-a drain skipped"} {
+	for _, want := range []string{"workers: node-a drain skipped", "workers: updating node-a: Preload Succeeded, AgentUpdate Pending, Reboot Pending"} {
 		got, err := workers(ctx, env, getCluster(t, ctx, c))
 		if err != nil || got != (phaseResult{Message: want}) {
 			t.Fatalf("result %+v err %v, want %q", got, err, want)
@@ -184,6 +184,41 @@ func TestWorkersPhaseOnASingleNode(t *testing.T) {
 	}
 	if getNode(t, ctx, c, "node-a").Spec.Unschedulable {
 		t.Fatal("the only node is not cordoned")
+	}
+}
+
+func TestWorkersPhaseKeepsRoomForADrain(t *testing.T) {
+	c, _ := startTestEnvWithCRDs(t, filepath.Join("testdata", "crds"))
+	ctx := context.Background()
+	createDepotHost(t, ctx, c, "w-a", v1alpha1.RoleWorkload)
+	createDepotHost(t, ctx, c, "w-b", v1alpha1.RoleWorkload)
+	preloadedNodeUpgrade(t, ctx, c, "w-a")
+	preloadedNodeUpgrade(t, ctx, c, "w-b")
+	target := targetRelease()
+	if err := c.Create(ctx, &target); err != nil {
+		t.Fatal(err)
+	}
+	createClusterWithStatus(t, ctx, c, "v2", upgradeStatusIn(v1alpha1.PhaseWorkers))
+	cluster := getCluster(t, ctx, c)
+	cluster.Spec.NodeConcurrency = 2
+	if err := c.Update(ctx, &cluster); err != nil {
+		t.Fatal(err)
+	}
+	env := upgradeEnv{Client: c}
+	for _, want := range []string{
+		"workers: w-a cordoned; waiting for another schedulable node before draining w-b",
+		"workers: w-a drained; waiting for another schedulable node before draining w-b",
+	} {
+		got, err := workers(ctx, env, getCluster(t, ctx, c))
+		if err != nil || got != (phaseResult{Message: want}) {
+			t.Fatalf("result %+v err %v, want %q", got, err, want)
+		}
+	}
+	if !getNode(t, ctx, c, "w-a").Spec.Unschedulable || getNode(t, ctx, c, "w-b").Spec.Unschedulable {
+		t.Fatal("only w-a may be cordoned while w-b is its only room")
+	}
+	if steps := getNodeUpgrade(t, ctx, c, "w-b").Spec.Steps; !slices.Equal(steps, []string{v1alpha1.StepPreload}) {
+		t.Fatalf("w-b must not start without room: %v", steps)
 	}
 }
 

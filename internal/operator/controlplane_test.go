@@ -71,9 +71,41 @@ func runningPod(t *testing.T, ctx context.Context, c client.Client, name, node s
 	createPod(t, ctx, c, pod)
 }
 
-func TestControlPlanePhaseWithOneSchedulableNode(t *testing.T) {
+func TestControlPlanePhaseOnASingleNode(t *testing.T) {
+	c, ctx, run := controlPlaneWorld(t)
+	createDepotHost(t, ctx, c, "node-a", v1alpha1.RoleControlPlane)
+	setEtcd(t, ctx, c, "node-a", 1, true)
+	preloadedNodeUpgrade(t, ctx, c, "node-a")
+	runningPod(t, ctx, c, "web", "node-a")
+
+	run(phaseResult{Message: "controlplane: node-a drain skipped"})
+	started := getNodeUpgrade(t, ctx, c, "node-a")
+	if getNode(t, ctx, c, "node-a").Spec.Unschedulable || started.Annotations[controlPlaneProgressAnnotation] != nodeUpdating || started.Annotations[workerProgressAnnotation] != "" {
+		t.Fatalf("node-a must stay schedulable and be marked for ControlPlane only: %v", started.Annotations)
+	}
+	var kept corev1.Pod
+	if err := c.Get(ctx, client.ObjectKey{Namespace: "tenant-a", Name: "web"}, &kept); err != nil || kept.DeletionTimestamp != nil {
+		t.Fatalf("the only node is not drained: %v", err)
+	}
+	if !slices.Equal(started.Spec.Steps, []string{v1alpha1.StepPreload, v1alpha1.StepK0sUpdate}) {
+		t.Fatalf("node-a steps %v", started.Spec.Steps)
+	}
+	run(phaseResult{Message: "controlplane: updating node-a: K0sUpdate Pending"})
+	finishSteps(t, ctx, c, "node-a", v1alpha1.StepK0sUpdate)
+	run(phaseResult{Message: "controlplane: waiting for k0s v1.36.3+k0s.0 on node-a"})
+	setK0sVersion(t, ctx, c, "node-a", targetK0s)
+	run(phaseResult{Message: "controlplane: node-a uncordoned"})
+	if getNode(t, ctx, c, "node-a").Spec.Unschedulable {
+		t.Fatal("node-a must be schedulable")
+	}
+	run(phaseResult{Message: "controlplane: node-a done"})
+	run(phaseResult{Done: true})
+	setK0sVersion(t, ctx, c, "node-a", "v1.36.2+k0s.0")
+	run(phaseResult{Message: "controlplane: waiting for k0s v1.36.3+k0s.0 on node-a"})
+}
+
+func TestControlPlanePhaseWaitsForASpareNode(t *testing.T) {
 	cases := map[string]func(*corev1.Node){
-		"single node":         nil,
 		"other node cordoned": func(n *corev1.Node) { n.Spec.Unschedulable = true },
 		"other node tainted": func(n *corev1.Node) {
 			n.Spec.Taints = []corev1.Taint{{Key: "example.com/maintenance", Effect: corev1.TaintEffectNoSchedule}}
@@ -85,38 +117,22 @@ func TestControlPlanePhaseWithOneSchedulableNode(t *testing.T) {
 			createDepotHost(t, ctx, c, "node-a", v1alpha1.RoleControlPlane)
 			setEtcd(t, ctx, c, "node-a", 1, true)
 			preloadedNodeUpgrade(t, ctx, c, "node-a")
-			runningPod(t, ctx, c, "web", "node-a")
-			if other != nil {
-				node := readyNode("node-b", "amd64")
-				other(&node)
-				createNodeWithStatus(t, ctx, c, node)
-			}
+			node := readyNode("node-b", "amd64")
+			other(&node)
+			createNodeWithStatus(t, ctx, c, node)
 
-			run(phaseResult{Message: "controlplane: node-a started"})
-			started := getNodeUpgrade(t, ctx, c, "node-a")
-			if getNode(t, ctx, c, "node-a").Spec.Unschedulable || started.Annotations[controlPlaneProgressAnnotation] != nodeDraining || started.Annotations[workerProgressAnnotation] != "" {
-				t.Fatalf("node-a must stay schedulable and be marked for ControlPlane only: %v", started.Annotations)
+			run(phaseResult{Message: "controlplane: waiting for another schedulable node before draining node-a"})
+			run(phaseResult{Message: "controlplane: waiting for another schedulable node before draining node-a"})
+			waiting := getNodeUpgrade(t, ctx, c, "node-a")
+			if getNode(t, ctx, c, "node-a").Spec.Unschedulable || waiting.Annotations[controlPlaneProgressAnnotation] != "" || !slices.Equal(waiting.Spec.Steps, []string{v1alpha1.StepPreload}) {
+				t.Fatalf("node-a must not start: annotations %v steps %v", waiting.Annotations, waiting.Spec.Steps)
 			}
-			run(phaseResult{Message: "controlplane: node-a drain skipped"})
-			var kept corev1.Pod
-			if err := c.Get(ctx, client.ObjectKey{Namespace: "tenant-a", Name: "web"}, &kept); err != nil || kept.DeletionTimestamp != nil {
-				t.Fatalf("the only schedulable node is not drained: %v", err)
+			spare := getNode(t, ctx, c, "node-b")
+			spare.Spec.Unschedulable, spare.Spec.Taints = false, nil
+			if err := c.Update(ctx, &spare); err != nil {
+				t.Fatal(err)
 			}
-			if steps := getNodeUpgrade(t, ctx, c, "node-a").Spec.Steps; !slices.Equal(steps, []string{v1alpha1.StepPreload, v1alpha1.StepK0sUpdate}) {
-				t.Fatalf("node-a steps %v", steps)
-			}
-			run(phaseResult{Message: "controlplane: updating node-a: K0sUpdate Pending"})
-			finishSteps(t, ctx, c, "node-a", v1alpha1.StepK0sUpdate)
-			run(phaseResult{Message: "controlplane: waiting for k0s v1.36.3+k0s.0 on node-a"})
-			setK0sVersion(t, ctx, c, "node-a", targetK0s)
-			run(phaseResult{Message: "controlplane: node-a uncordoned"})
-			if getNode(t, ctx, c, "node-a").Spec.Unschedulable {
-				t.Fatal("node-a must be schedulable")
-			}
-			run(phaseResult{Message: "controlplane: node-a done"})
-			run(phaseResult{Done: true})
-			setK0sVersion(t, ctx, c, "node-a", "v1.36.2+k0s.0")
-			run(phaseResult{Message: "controlplane: waiting for k0s v1.36.3+k0s.0 on node-a"})
+			run(phaseResult{Message: "controlplane: node-a cordoned"})
 		})
 	}
 }
@@ -134,6 +150,9 @@ func TestControlPlanePhaseWalksControllersOneAtATime(t *testing.T) {
 	runningPod(t, ctx, c, "web", "node-a")
 
 	run(phaseResult{Message: "controlplane: node-a cordoned"})
+	if err := setUnschedulable(ctx, c, "node-b", true); err != nil {
+		t.Fatal(err)
+	}
 	run(phaseResult{Message: "controlplane: draining node-a: tenant-a/web"})
 	var evicted corev1.Pod
 	if err := c.Get(ctx, client.ObjectKey{Namespace: "tenant-a", Name: "web"}, &evicted); err != nil || evicted.DeletionTimestamp == nil {
@@ -143,6 +162,9 @@ func TestControlPlanePhaseWalksControllersOneAtATime(t *testing.T) {
 		t.Fatal(err)
 	}
 	run(phaseResult{Message: "controlplane: node-a drained"})
+	if err := setUnschedulable(ctx, c, "node-b", false); err != nil {
+		t.Fatal(err)
+	}
 	reportStep(t, ctx, c, "node-a", v1alpha1.NodeUpgradeStepStatus{Name: v1alpha1.StepK0sUpdate, State: v1alpha1.StepFailed, Attempt: 1, Message: "staged k0s: checksum mismatch"})
 	run(phaseResult{Failure: "controlplane: node-a K0sUpdate failed: staged k0s: checksum mismatch"})
 	if err := raiseAttempts(ctx, c, "v2", 2); err != nil {
@@ -162,7 +184,6 @@ func TestControlPlanePhaseWalksControllersOneAtATime(t *testing.T) {
 	setEtcd(t, ctx, c, "node-a", 2, true)
 	run(phaseResult{Message: "controlplane: node-a done"})
 
-	run(phaseResult{Message: "controlplane: node-c started"})
 	run(phaseResult{Message: "controlplane: node-c drain skipped"})
 	if steps := getNodeUpgrade(t, ctx, c, "node-c").Spec.Steps; !slices.Equal(steps, []string{v1alpha1.StepPreload, v1alpha1.StepK0sUpdate}) {
 		t.Fatalf("node-c steps %v", steps)

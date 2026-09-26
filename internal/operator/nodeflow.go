@@ -33,7 +33,8 @@ type nodeFacts struct {
 	Progress   string
 	Controller bool
 	HasNode    bool
-	Evacuate   bool
+	SingleNode bool
+	Spare      bool
 	NodeReady  bool
 	PodsLeft   []string
 	Steps      []v1alpha1.NodeUpgradeStepStatus
@@ -106,8 +107,23 @@ func walkNodes(ctx context.Context, env upgradeEnv, cluster v1alpha1.Cluster, fl
 			return phaseResult{Failure: flow.Label + ": " + move.Failure}, nil
 		}
 		messages = append(messages, move.Message)
+		in = afterMove(in, name, move)
 	}
 	return phaseResult{Message: flow.Label + ": " + strings.Join(messages, "; ")}, nil
+}
+
+func afterMove(in flowInput, name string, move nodeMove) flowInput {
+	if !move.Cordon {
+		return in
+	}
+	next := in
+	next.Nodes = make([]corev1.Node, 0, len(in.Nodes))
+	for _, node := range in.Nodes {
+		copied := *node.DeepCopy()
+		copied.Spec.Unschedulable = copied.Spec.Unschedulable || copied.Name == name
+		next.Nodes = append(next.Nodes, copied)
+	}
+	return next
 }
 
 func k0sReached(label string, hosts []v1alpha1.Host, version string) phaseResult {
@@ -204,7 +220,8 @@ func nodeFactsFor(in flowInput, name string) nodeFacts {
 		Progress:   in.Progress[name],
 		Controller: slices.Contains(host.Spec.Roles, v1alpha1.RoleControlPlane),
 		HasNode:    hasNode,
-		Evacuate:   hasNode && spareNode(in.Nodes, name),
+		SingleNode: len(in.Nodes) == 1,
+		Spare:      spareNode(in.Nodes, name),
 		NodeReady:  hasNode && nodeReady(node),
 		Steps:      steps,
 		K0sCurrent: host.Status.K0sVersion == in.Target.Spec.K0sVersion,
@@ -239,17 +256,17 @@ func nextNodeMove(f nodeFacts) nodeMove {
 }
 
 func startMove(f nodeFacts) nodeMove {
-	if f.Evacuate {
-		return nodeMove{Cordon: true, Progress: nodeDraining, Message: f.Name + " cordoned"}
+	switch {
+	case !f.HasNode || f.SingleNode:
+		return nodeMove{Append: true, Progress: nodeUpdating, Message: f.Name + " drain skipped"}
+	case !f.Spare:
+		return nodeMove{Message: "waiting for another schedulable node before draining " + f.Name}
 	}
-	return nodeMove{Progress: nodeDraining, Message: f.Name + " started"}
+	return nodeMove{Cordon: true, Progress: nodeDraining, Message: f.Name + " cordoned"}
 }
 
 func drainingMove(f nodeFacts) nodeMove {
-	switch {
-	case !f.Evacuate:
-		return nodeMove{Append: true, Progress: nodeUpdating, Message: f.Name + " drain skipped"}
-	case len(f.PodsLeft) > 0:
+	if len(f.PodsLeft) > 0 {
 		return nodeMove{Message: fmt.Sprintf("draining %s: %s", f.Name, strings.Join(f.PodsLeft, ", "))}
 	}
 	return nodeMove{Append: true, Progress: nodeUpdating, Message: f.Name + " drained"}
@@ -292,7 +309,7 @@ func uncordonedMove(f nodeFacts) nodeMove {
 
 func advanceNode(ctx context.Context, c client.Client, in flowInput, name string) (nodeMove, error) {
 	facts := nodeFactsFor(in, name)
-	if facts.Progress == nodeDraining && facts.Evacuate {
+	if facts.Progress == nodeDraining {
 		left, err := drainNode(ctx, c, name)
 		if err != nil {
 			return nodeMove{}, err

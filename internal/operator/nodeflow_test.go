@@ -105,7 +105,7 @@ func TestSpareNode(t *testing.T) {
 }
 
 func TestNextNodeMove(t *testing.T) {
-	base := nodeFacts{Name: "w-a", HasNode: true, Evacuate: true, NodeReady: true, K0sCurrent: true, TargetK0s: targetK0s}
+	base := nodeFacts{Name: "w-a", HasNode: true, Spare: true, NodeReady: true, K0sCurrent: true, TargetK0s: targetK0s}
 	with := func(change func(nodeFacts) nodeFacts) nodeFacts {
 		return change(base)
 	}
@@ -116,13 +116,17 @@ func TestNextNodeMove(t *testing.T) {
 	}{
 		"start": {base, nodeMove{Cordon: true, Progress: nodeDraining, Message: "w-a cordoned"}},
 		"start without a node": {with(func(f nodeFacts) nodeFacts {
-			f.HasNode, f.Evacuate = false, false
+			f.HasNode, f.Spare = false, false
 			return f
-		}), nodeMove{Progress: nodeDraining, Message: "w-a started"}},
-		"start on the only schedulable node": {with(func(f nodeFacts) nodeFacts {
-			f.Evacuate = false
+		}), nodeMove{Append: true, Progress: nodeUpdating, Message: "w-a drain skipped"}},
+		"start on a one-node cluster": {with(func(f nodeFacts) nodeFacts {
+			f.SingleNode, f.Spare = true, false
 			return f
-		}), nodeMove{Progress: nodeDraining, Message: "w-a started"}},
+		}), nodeMove{Append: true, Progress: nodeUpdating, Message: "w-a drain skipped"}},
+		"start without a spare node": {with(func(f nodeFacts) nodeFacts {
+			f.Spare = false
+			return f
+		}), nodeMove{Message: "waiting for another schedulable node before draining w-a"}},
 		"pods left": {with(func(f nodeFacts) nodeFacts {
 			f.Progress, f.PodsLeft = nodeDraining, []string{"tenant-a/web", "tenant-a/db"}
 			return f
@@ -131,10 +135,14 @@ func TestNextNodeMove(t *testing.T) {
 			f.Progress = nodeDraining
 			return f
 		}), nodeMove{Append: true, Progress: nodeUpdating, Message: "w-a drained"}},
-		"drain skipped": {with(func(f nodeFacts) nodeFacts {
-			f.Progress, f.Evacuate = nodeDraining, false
+		"a started drain continues without a spare node": {with(func(f nodeFacts) nodeFacts {
+			f.Progress, f.Spare, f.PodsLeft = nodeDraining, false, []string{"tenant-a/web"}
 			return f
-		}), nodeMove{Append: true, Progress: nodeUpdating, Message: "w-a drain skipped"}},
+		}), nodeMove{Message: "draining w-a: tenant-a/web"}},
+		"a started drain finishes without a spare node": {with(func(f nodeFacts) nodeFacts {
+			f.Progress, f.Spare = nodeDraining, false
+			return f
+		}), nodeMove{Append: true, Progress: nodeUpdating, Message: "w-a drained"}},
 		"step failed": {with(func(f nodeFacts) nodeFacts {
 			f.Progress, f.Steps = nodeUpdating, stepsIn(v1alpha1.StepSucceeded, v1alpha1.StepSucceeded, v1alpha1.StepFailed)
 			return f
@@ -156,7 +164,7 @@ func TestNextNodeMove(t *testing.T) {
 			return f
 		}), nodeMove{Uncordon: true, Progress: nodeUncordoned, Message: "w-a uncordoned"}},
 		"updated without a node": {with(func(f nodeFacts) nodeFacts {
-			f.Progress, f.Steps, f.HasNode, f.Evacuate, f.NodeReady = nodeUpdating, done, false, false, false
+			f.Progress, f.Steps, f.HasNode, f.Spare, f.NodeReady = nodeUpdating, done, false, false, false
 			return f
 		}), nodeMove{Progress: nodeUncordoned, Message: "w-a updated"}},
 		"ceph recovering": {with(func(f nodeFacts) nodeFacts {
@@ -164,7 +172,7 @@ func TestNextNodeMove(t *testing.T) {
 			return f
 		}), nodeMove{Message: "w-a: ceph: 3 of 33 PGs are not active+clean"}},
 		"ceph ignored without a node": {with(func(f nodeFacts) nodeFacts {
-			f.Progress, f.HasNode, f.Evacuate, f.Ceph = nodeUncordoned, false, false, "ceph: 3 of 33 PGs are not active+clean"
+			f.Progress, f.HasNode, f.Spare, f.Ceph = nodeUncordoned, false, false, "ceph: 3 of 33 PGs are not active+clean"
 			return f
 		}), nodeMove{Progress: nodeDone, Message: "w-a done"}},
 		"controller waits for etcd": {with(func(f nodeFacts) nodeFacts {
