@@ -86,6 +86,7 @@ vm_up() {
   restore_context
   colima ssh --profile "$profile" -- sudo apt-get update -qq
   colima ssh --profile "$profile" -- sudo apt-get install -y -qq gettext-base iputils-ping pciutils
+  colima ssh --profile "$profile" -- sudo sysctl -w fs.inotify.max_user_instances=8192 fs.inotify.max_user_watches=1048576 vm.max_map_count=262144
   colima ssh --profile "$profile" -- sudo tee /tmp/fix-resolv.sh >/dev/null <<'FIX_RESOLV'
 #!/bin/sh
 set -e
