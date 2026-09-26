@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"slices"
 	"strings"
-	"time"
 
 	"k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
@@ -16,8 +15,9 @@ import (
 )
 
 const (
-	autopilotPlanName = "autopilot"
-	planCompleted     = "Completed"
+	autopilotPlanName              = "autopilot"
+	planCompleted                  = "Completed"
+	controlPlaneProgressAnnotation = "bedrock.cloudyfolks.io/controlplane"
 )
 
 var planGVK = schema.GroupVersionKind{Group: "autopilot.k0sproject.io", Version: "v1beta2", Kind: "Plan"}
@@ -26,40 +26,17 @@ func runningPlanStates() []string {
 	return []string{"", "Schedulable", "SchedulableWait"}
 }
 
+func controlPlaneFlow() nodeFlow {
+	return nodeFlow{
+		Label:      "controlplane",
+		Annotation: controlPlaneProgressAnnotation,
+		Members:    func(hosts []v1alpha1.Host) []v1alpha1.Host { return hostsWithRole(hosts, v1alpha1.RoleControlPlane) },
+		Steps:      func(v1alpha1.Host) []string { return []string{v1alpha1.StepK0sUpdate} },
+	}
+}
+
 func controlPlane(ctx context.Context, env upgradeEnv, cluster v1alpha1.Cluster) (phaseResult, error) {
-	upgrade := *cluster.Status.Upgrade
-	target, err := optionalRelease(ctx, env.Client, upgrade.To)
-	if err != nil {
-		return phaseResult{}, err
-	}
-	if target == nil {
-		return phaseResult{Failure: fmt.Sprintf("controlplane: Release/%s does not exist", upgrade.To)}, nil
-	}
-	hosts, nodes, err := hostsAndNodes(ctx, env.Client)
-	if err != nil {
-		return phaseResult{}, err
-	}
-	controllers := hostsWithRole(hosts, v1alpha1.RoleControlPlane)
-	platforms, problem := k0sPlatforms(hosts, *target, nodeArchitectures(nodes))
-	if problem != "" {
-		return phaseResult{Failure: "controlplane: " + problem}, nil
-	}
-	want := autopilotPlan(planID(upgrade.To, "controlplane", upgrade.Attempt), target.Spec.K0sVersion, platforms, hostNames(controllers), nil, 1, time.Now().UTC().Format(time.RFC3339))
-	plan, message, err := ensurePlan(ctx, env.Client, want)
-	if err != nil {
-		return phaseResult{}, err
-	}
-	if plan == nil {
-		return phaseResult{Message: "controlplane: " + message}, nil
-	}
-	result := planProgress("controlplane", plan)
-	if !result.Done {
-		return result, nil
-	}
-	if waiting := hostsNotAt(controllers, target.Spec.K0sVersion); len(waiting) > 0 {
-		return phaseResult{Message: fmt.Sprintf("controlplane: waiting for k0s %s on %s", target.Spec.K0sVersion, strings.Join(waiting, ", "))}, nil
-	}
-	return result, nil
+	return walkNodes(ctx, env, cluster, controlPlaneFlow())
 }
 
 func hostsWithRole(hosts []v1alpha1.Host, role string) []v1alpha1.Host {

@@ -4,9 +4,10 @@ import (
 	"context"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"testing"
 
-	"k8s.io/apimachinery/pkg/api/errors"
+	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -156,70 +157,123 @@ func setK0sVersion(t *testing.T, ctx context.Context, c client.Client, name, ver
 	}
 }
 
-func TestControlPlanePhase(t *testing.T) {
+func controlPlaneWorld(t *testing.T) (client.Client, context.Context, func(phaseResult)) {
+	t.Helper()
 	c, _ := startTestEnvWithCRDs(t, filepath.Join("testdata", "crds"))
 	ctx := context.Background()
-	createDepotHost(t, ctx, c, "node-a", v1alpha1.RoleControlPlane)
-	createDepotHost(t, ctx, c, "node-b", v1alpha1.RoleWorkload)
+	if err := c.Create(ctx, &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "tenant-a"}}); err != nil {
+		t.Fatal(err)
+	}
 	target := targetRelease()
 	if err := c.Create(ctx, &target); err != nil {
 		t.Fatal(err)
 	}
 	createClusterWithStatus(t, ctx, c, "v2", upgradeStatusIn(v1alpha1.PhaseControlPlane))
 	env := upgradeEnv{Client: c}
-	run := func() phaseResult {
+	run := func(want phaseResult) {
 		t.Helper()
-		result, err := controlPlane(ctx, env, getCluster(t, ctx, c))
+		got, err := controlPlane(ctx, env, getCluster(t, ctx, c))
 		if err != nil {
 			t.Fatal(err)
 		}
-		return result
+		if got != want {
+			t.Fatalf("result %+v, want %+v", got, want)
+		}
 	}
+	return c, ctx, run
+}
 
-	if got := run(); got != (phaseResult{Message: "controlplane: creating autopilot plan v2-controlplane-1"}) {
-		t.Fatalf("result %+v", got)
+func runningPod(t *testing.T, ctx context.Context, c client.Client, name, node string) {
+	t.Helper()
+	pod := podOn(name, node)
+	pod.Status = corev1.PodStatus{Phase: corev1.PodRunning}
+	createPod(t, ctx, c, pod)
+}
+
+func TestControlPlanePhaseOnASingleNode(t *testing.T) {
+	c, ctx, run := controlPlaneWorld(t)
+	createDepotHost(t, ctx, c, "node-a", v1alpha1.RoleControlPlane)
+	setEtcdMembers(t, ctx, c, "node-a", 1)
+	preloadedNodeUpgrade(t, ctx, c, "node-a")
+	runningPod(t, ctx, c, "web", "node-a")
+
+	run(phaseResult{Message: "controlplane: node-a cordoned"})
+	cordoned := getNodeUpgrade(t, ctx, c, "node-a")
+	if !getNode(t, ctx, c, "node-a").Spec.Unschedulable || cordoned.Annotations[controlPlaneProgressAnnotation] != nodeDraining || cordoned.Annotations[workerProgressAnnotation] != "" {
+		t.Fatalf("node-a must be cordoned and marked draining for ControlPlane only: %v", cordoned.Annotations)
 	}
-	plan := getPlan(t, ctx, c)
-	commands, _, _ := unstructured.NestedSlice(plan.Object, "spec", "commands")
-	update := commands[0].(map[string]any)["k0supdate"].(map[string]any)
-	controllers, _, _ := unstructured.NestedStringSlice(update, "targets", "controllers", "discovery", "static", "nodes")
-	workers, _, _ := unstructured.NestedStringSlice(update, "targets", "workers", "discovery", "static", "nodes")
-	url, _, _ := unstructured.NestedString(update, "platforms", "linux-amd64", "url")
-	if !reflect.DeepEqual(controllers, []string{"node-a"}) || len(workers) != 0 || update["version"] != targetK0s || url != "http://10.0.0.11:9480/v2/amd64/k0s/k0s" {
-		t.Fatalf("plan spec %+v", plan.Object["spec"])
+	run(phaseResult{Message: "controlplane: node-a drained"})
+	var kept corev1.Pod
+	if err := c.Get(ctx, client.ObjectKey{Namespace: "tenant-a", Name: "web"}, &kept); err != nil || kept.DeletionTimestamp != nil {
+		t.Fatalf("the only schedulable node is not drained: %v", err)
 	}
-	if got := run(); got != (phaseResult{Message: "controlplane: autopilot plan v2-controlplane-1 is new"}) {
-		t.Fatalf("result %+v", got)
+	if steps := getNodeUpgrade(t, ctx, c, "node-a").Spec.Steps; !slices.Equal(steps, []string{v1alpha1.StepPreload, v1alpha1.StepK0sUpdate}) {
+		t.Fatalf("node-a steps %v", steps)
 	}
-	setPlanState(t, ctx, c, "Completed")
-	setK0sVersion(t, ctx, c, "node-a", "v1.36.2+k0s.0")
-	if got := run(); got != (phaseResult{Message: "controlplane: waiting for k0s v1.36.3+k0s.0 on node-a"}) {
-		t.Fatalf("result %+v", got)
-	}
+	run(phaseResult{Message: "controlplane: updating node-a: K0sUpdate Pending"})
+	finishSteps(t, ctx, c, "node-a", v1alpha1.StepK0sUpdate)
+	run(phaseResult{Message: "controlplane: waiting for k0s v1.36.3+k0s.0 on node-a"})
 	setK0sVersion(t, ctx, c, "node-a", targetK0s)
-	if got := run(); got != (phaseResult{Done: true}) {
-		t.Fatalf("result %+v", got)
+	run(phaseResult{Message: "controlplane: node-a uncordoned"})
+	if getNode(t, ctx, c, "node-a").Spec.Unschedulable {
+		t.Fatal("node-a must be uncordoned")
 	}
-	setPlanState(t, ctx, c, "IncompleteTargets")
-	if got := run(); got != (phaseResult{Failure: "controlplane: autopilot plan v2-controlplane-1 is IncompleteTargets"}) {
-		t.Fatalf("result %+v", got)
-	}
+	run(phaseResult{Message: "controlplane: node-a done"})
+	run(phaseResult{Done: true})
+	setK0sVersion(t, ctx, c, "node-a", "v1.36.2+k0s.0")
+	run(phaseResult{Message: "controlplane: waiting for k0s v1.36.3+k0s.0 on node-a"})
+}
 
-	resumed := getCluster(t, ctx, c)
-	resumed.Status.Upgrade.Attempt = 2
-	if err := c.Status().Update(ctx, &resumed); err != nil {
+func TestControlPlanePhaseWalksControllersOneAtATime(t *testing.T) {
+	c, ctx, run := controlPlaneWorld(t)
+	createDepotHost(t, ctx, c, "node-a", v1alpha1.RoleControlPlane)
+	createDepotHost(t, ctx, c, "node-b", v1alpha1.RoleWorkload)
+	controllerOnly := hostWithRoles("node-c", v1alpha1.RoleControlPlane)
+	controllerOnly.Status = v1alpha1.HostStatus{Hostname: "node-c", Checks: &v1alpha1.HostChecks{TimeSynced: true}}
+	createHostWithStatus(t, ctx, c, controllerOnly)
+	for _, node := range []string{"node-a", "node-b", "node-c"} {
+		preloadedNodeUpgrade(t, ctx, c, node)
+	}
+	runningPod(t, ctx, c, "web", "node-a")
+
+	run(phaseResult{Message: "controlplane: node-a cordoned"})
+	run(phaseResult{Message: "controlplane: draining node-a: tenant-a/web"})
+	var evicted corev1.Pod
+	if err := c.Get(ctx, client.ObjectKey{Namespace: "tenant-a", Name: "web"}, &evicted); err != nil || evicted.DeletionTimestamp == nil {
+		t.Fatalf("web must be evicted: %v", err)
+	}
+	if err := c.Delete(ctx, &evicted, client.GracePeriodSeconds(0)); err != nil {
 		t.Fatal(err)
 	}
-	if got := run(); got != (phaseResult{Message: "controlplane: replacing autopilot plan v2-controlplane-1"}) {
-		t.Fatalf("result %+v", got)
+	run(phaseResult{Message: "controlplane: node-a drained"})
+	reportStep(t, ctx, c, "node-a", v1alpha1.NodeUpgradeStepStatus{Name: v1alpha1.StepK0sUpdate, State: v1alpha1.StepFailed, Attempt: 1, Message: "staged k0s: checksum mismatch"})
+	run(phaseResult{Failure: "controlplane: node-a K0sUpdate failed: staged k0s: checksum mismatch"})
+	finishSteps(t, ctx, c, "node-a", v1alpha1.StepK0sUpdate)
+	setK0sVersion(t, ctx, c, "node-a", targetK0s)
+	run(phaseResult{Message: "controlplane: node-a uncordoned"})
+	run(phaseResult{Message: "controlplane: node-a: etcd: node-a reports 0 of 2 members"})
+	if steps := getNodeUpgrade(t, ctx, c, "node-c").Spec.Steps; !slices.Equal(steps, []string{v1alpha1.StepPreload}) {
+		t.Fatalf("node-c must wait for node-a: %v", steps)
 	}
-	gone := &unstructured.Unstructured{}
-	gone.SetGroupVersionKind(planGVK)
-	if err := c.Get(ctx, client.ObjectKey{Name: autopilotPlanName}, gone); !errors.IsNotFound(err) {
-		t.Fatalf("the old plan must be deleted: %v", err)
+	setEtcdMembers(t, ctx, c, "node-a", 2)
+	setEtcdMembers(t, ctx, c, "node-c", 2)
+	run(phaseResult{Message: "controlplane: node-a done"})
+
+	run(phaseResult{Message: "controlplane: node-c cordoned"})
+	run(phaseResult{Message: "controlplane: node-c drained"})
+	if steps := getNodeUpgrade(t, ctx, c, "node-c").Spec.Steps; !slices.Equal(steps, []string{v1alpha1.StepPreload, v1alpha1.StepK0sUpdate}) {
+		t.Fatalf("node-c steps %v", steps)
 	}
-	if got := run(); got != (phaseResult{Message: "controlplane: creating autopilot plan v2-controlplane-2"}) {
-		t.Fatalf("result %+v", got)
+	finishSteps(t, ctx, c, "node-c", v1alpha1.StepK0sUpdate)
+	run(phaseResult{Message: "controlplane: waiting for k0s v1.36.3+k0s.0 on node-c"})
+	setK0sVersion(t, ctx, c, "node-c", targetK0s)
+	run(phaseResult{Message: "controlplane: node-c uncordoned"})
+	run(phaseResult{Message: "controlplane: node-c done"})
+	run(phaseResult{Done: true})
+
+	worker := getNodeUpgrade(t, ctx, c, "node-b")
+	if !slices.Equal(worker.Spec.Steps, []string{v1alpha1.StepPreload}) || worker.Annotations[controlPlaneProgressAnnotation] != "" || getNode(t, ctx, c, "node-b").Spec.Unschedulable {
+		t.Fatalf("ControlPlane must leave the worker alone: steps %v annotations %v", worker.Spec.Steps, worker.Annotations)
 	}
 }
 

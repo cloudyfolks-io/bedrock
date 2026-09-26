@@ -92,7 +92,7 @@ func walkNodes(ctx context.Context, env upgradeEnv, cluster v1alpha1.Cluster, fl
 	progress := flowProgress(upgrades, flow.Annotation)
 	active := activeNodes(workerOrder(members), hostNames(hostsWithRole(members, v1alpha1.RoleControlPlane)), progress, int(cluster.Spec.NodeConcurrency))
 	if len(active) == 0 {
-		return phaseResult{Done: true}, nil
+		return k0sReached(flow.Label, members, target.Spec.K0sVersion), nil
 	}
 	in := flowInput{Flow: flow, Upgrade: upgrade, Target: *target, Hosts: hosts, Nodes: nodes, Upgrades: upgrades, Progress: progress, Ceph: uncordonedCeph(ctx, env, active, progress)}
 	messages := make([]string, 0, len(active))
@@ -107,6 +107,13 @@ func walkNodes(ctx context.Context, env upgradeEnv, cluster v1alpha1.Cluster, fl
 		messages = append(messages, move.Message)
 	}
 	return phaseResult{Message: flow.Label + ": " + strings.Join(messages, "; ")}, nil
+}
+
+func k0sReached(label string, hosts []v1alpha1.Host, version string) phaseResult {
+	if waiting := hostsNotAt(hosts, version); len(waiting) > 0 {
+		return phaseResult{Message: fmt.Sprintf("%s: waiting for k0s %s on %s", label, version, strings.Join(waiting, ", "))}
+	}
+	return phaseResult{Done: true}
 }
 
 func flowProgress(upgrades []v1alpha1.NodeUpgrade, annotation string) map[string]string {

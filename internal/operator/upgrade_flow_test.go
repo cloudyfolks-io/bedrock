@@ -139,6 +139,12 @@ func fakeStepEffect(t *testing.T, ctx context.Context, c client.Client, upgrade 
 		t.Fatal(err)
 	}
 	switch step {
+	case v1alpha1.StepK0sUpdate:
+		var target v1alpha1.Release
+		if err := c.Get(ctx, client.ObjectKey{Name: upgrade.Spec.Version}, &target); err != nil {
+			t.Fatal(err)
+		}
+		host.Status.K0sVersion = target.Spec.K0sVersion
 	case v1alpha1.StepAgentUpdate:
 		host.Status.AgentVersion = upgrade.Spec.Version
 	case v1alpha1.StepRestore:
