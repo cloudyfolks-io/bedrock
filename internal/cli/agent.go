@@ -91,20 +91,21 @@ func runAgent(ctx context.Context, o agentOptions, deps agentDeps, stderr io.Wri
 		fmt.Fprintf(stderr, "agent: %v, package steps will fail\n", err)
 	}
 	loopDeps := agent.Deps{
-		Exec:       deps.Exec,
-		Root:       o.root,
-		Node:       o.node,
-		Now:        time.Now,
-		Interval:   o.interval,
-		Inventory:  inventory.Gather,
-		Apply:      hostconfig.Apply,
-		Packages:   pkgmgr.Manager{Exec: deps.Exec, Family: family, Root: o.root},
-		Version:    Version,
-		Hostname:   os.Hostname,
-		DiskSpace:  host.DiskSpace,
-		HTTP:       &http.Client{},
-		K0sTimeout: agent.K0sRestartTimeout,
-		K0sPoll:    agent.K0sRestartPoll,
+		Exec:         deps.Exec,
+		Root:         o.root,
+		Node:         o.node,
+		Now:          time.Now,
+		Interval:     o.interval,
+		Inventory:    inventory.Gather,
+		Apply:        hostconfig.Apply,
+		Packages:     pkgmgr.Manager{Exec: deps.Exec, Family: family, Root: o.root},
+		Version:      Version,
+		Hostname:     os.Hostname,
+		DiskSpace:    host.DiskSpace,
+		HTTP:         &http.Client{},
+		K0sTimeout:   agent.K0sRestartTimeout,
+		K0sPoll:      agent.K0sRestartPoll,
+		ProbeTimeout: agent.FactProbeTimeout,
 	}
 	for {
 		changed, err := runUntilKubeconfigChanges(ctx, o, deps, loopDeps, stderr)

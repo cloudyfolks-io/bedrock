@@ -25,14 +25,24 @@ var kubeletCertificates = []string{"var/lib/kubelet/pki/kubelet-client-current.p
 func hostChecks(ctx context.Context, deps Deps) *v1alpha1.HostChecks {
 	space, _ := deps.DiskSpace(filepath.Join(deps.Root, "var", "lib"))
 	return &v1alpha1.HostChecks{
-		TimeSynced:           timeSynced(ctx, deps.Exec),
+		TimeSynced:           bounded(ctx, deps.ProbeTimeout, func(c context.Context) bool { return timeSynced(c, deps.Exec) }),
 		VarLibFreeBytes:      int64(space.FreeBytes),
 		VarLibSizeBytes:      int64(space.SizeBytes),
 		CertificatesNotAfter: certificatesNotAfter(deps.Root),
-		EtcdMembers:          etcdMembers(ctx, deps.Exec, deps.Root),
-		EtcdHealthy:          etcdHealthy(ctx, deps.Exec, deps.Root),
+		EtcdMembers:          bounded(ctx, deps.ProbeTimeout, func(c context.Context) int32 { return etcdMembers(c, deps.Exec, deps.Root) }),
+		EtcdHealthy:          bounded(ctx, deps.ProbeTimeout, func(c context.Context) bool { return etcdHealthy(c, deps.Exec, deps.Root) }),
 		ImagesBytes:          imagesBytes(deps.Root),
 	}
+}
+
+func probedK0sVersion(ctx context.Context, deps Deps) string {
+	return bounded(ctx, deps.ProbeTimeout, func(probeCtx context.Context) string { return runningK0sVersion(probeCtx, deps.Exec) })
+}
+
+func bounded[T any](ctx context.Context, limit time.Duration, read func(context.Context) T) T {
+	probeCtx, cancel := context.WithTimeout(ctx, limit)
+	defer cancel()
+	return read(probeCtx)
 }
 
 func imagesBytes(root string) int64 {

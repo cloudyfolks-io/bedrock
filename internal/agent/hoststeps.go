@@ -106,7 +106,7 @@ func k0sUpdate(ctx context.Context, env StepEnv) (Outcome, error) {
 
 func settledK0sVersion(ctx context.Context, env StepEnv) string {
 	for read := 1; ; read++ {
-		if running := runningK0sVersion(ctx, env.Deps.Exec); running != "" || read == k0sStatusReads {
+		if running := probedK0sVersion(ctx, env.Deps); running != "" || read == k0sStatusReads {
 			return running
 		}
 		select {
@@ -138,7 +138,7 @@ func k0sServiceOf(own v1alpha1.Host) k0sService {
 }
 
 func runsTargetK0s(ctx context.Context, env StepEnv) string {
-	switch running := runningK0sVersion(ctx, env.Deps.Exec); running {
+	switch running := probedK0sVersion(ctx, env.Deps); running {
 	case env.Target.Spec.K0sVersion:
 		return ""
 	case "":
@@ -149,7 +149,9 @@ func runsTargetK0s(ctx context.Context, env StepEnv) string {
 }
 
 func apiServesReady(ctx context.Context, env StepEnv) string {
-	return apiProblem(ctx, env.Deps.Exec, env.Deps.Root, "/readyz")
+	return bounded(ctx, env.Deps.ProbeTimeout, func(probeCtx context.Context) string {
+		return apiProblem(probeCtx, env.Deps.Exec, env.Deps.Root, "/readyz")
+	})
 }
 
 func k0sProblem(ctx context.Context, env StepEnv, probes []k0sProbe) string {

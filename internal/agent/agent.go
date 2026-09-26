@@ -24,23 +24,25 @@ import (
 const (
 	K0sRestartTimeout = 10 * time.Minute
 	K0sRestartPoll    = 5 * time.Second
+	FactProbeTimeout  = 10 * time.Second
 )
 
 type Deps struct {
-	Exec       host.Exec
-	Root       string
-	Node       string
-	Now        func() time.Time
-	Interval   time.Duration
-	Inventory  func(context.Context, host.Exec, string) (v1alpha1.Inventory, error)
-	Apply      func(context.Context, hostconfig.Deps, v1alpha1.HostConfigSpec) []v1alpha1.StepResult
-	Packages   pkgmgr.Manager
-	Version    string
-	Hostname   func() (string, error)
-	DiskSpace  func(string) (host.Space, error)
-	HTTP       *http.Client
-	K0sTimeout time.Duration
-	K0sPoll    time.Duration
+	Exec         host.Exec
+	Root         string
+	Node         string
+	Now          func() time.Time
+	Interval     time.Duration
+	Inventory    func(context.Context, host.Exec, string) (v1alpha1.Inventory, error)
+	Apply        func(context.Context, hostconfig.Deps, v1alpha1.HostConfigSpec) []v1alpha1.StepResult
+	Packages     pkgmgr.Manager
+	Version      string
+	Hostname     func() (string, error)
+	DiskSpace    func(string) (host.Space, error)
+	HTTP         *http.Client
+	K0sTimeout   time.Duration
+	K0sPoll      time.Duration
+	ProbeTimeout time.Duration
 }
 
 func Run(ctx context.Context, c client.WithWatch, deps Deps) error {
@@ -124,20 +126,29 @@ func watchOwn(ctx context.Context, c client.WithWatch, name string) (<-chan stru
 	return events, func() { hosts.Stop(); configs.Stop(); upgrades.Stop() }, nil
 }
 
+type inventoryRead struct {
+	Inventory v1alpha1.Inventory
+	Err       error
+}
+
 func Tick(ctx context.Context, c client.Client, deps Deps) error {
 	var current v1alpha1.Host
 	if err := c.Get(ctx, client.ObjectKey{Name: deps.Node}, &current); err != nil {
 		return client.IgnoreNotFound(err)
 	}
-	inv, invErr := deps.Inventory(ctx, deps.Exec, deps.Root)
+	gathered := bounded(ctx, deps.ProbeTimeout, func(probeCtx context.Context) inventoryRead {
+		inv, err := deps.Inventory(probeCtx, deps.Exec, deps.Root)
+		return inventoryRead{Inventory: inv, Err: err}
+	})
+	invErr := gathered.Err
 	next := v1alpha1.HostStatus{
-		Inventory:    inv,
+		Inventory:    gathered.Inventory,
 		Applied:      current.Status.Applied,
 		AgentVersion: deps.Version,
-		K0sVersion:   runningK0sVersion(ctx, deps.Exec),
+		K0sVersion:   probedK0sVersion(ctx, deps),
 		Hostname:     hostname(deps),
 		Checks:       hostChecks(ctx, deps),
-		Depot:        depotStatus(ctx, c, deps),
+		Depot:        bounded(ctx, deps.ProbeTimeout, func(probeCtx context.Context) *v1alpha1.DepotStatus { return depotStatus(probeCtx, c, deps) }),
 		Restore:      readRestoreMarker(deps.Root),
 	}
 	if invErr != nil {

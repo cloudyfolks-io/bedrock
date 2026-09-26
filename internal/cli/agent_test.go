@@ -142,8 +142,8 @@ func TestRunAgentGivesK0sTenMinutesToRestart(t *testing.T) {
 	if err := runAgent(context.Background(), agentOptions{kubeconfig: path, node: "n", root: "/", interval: time.Hour}, deps, &bytes.Buffer{}); err == nil {
 		t.Fatal("expected error")
 	}
-	if got.K0sTimeout != 10*time.Minute || got.K0sPoll != 5*time.Second {
-		t.Fatalf("k0s wait %s, poll %s", got.K0sTimeout, got.K0sPoll)
+	if got.K0sTimeout != 10*time.Minute || got.K0sPoll != 5*time.Second || got.ProbeTimeout != 10*time.Second {
+		t.Fatalf("k0s wait %s, poll %s, fact probe %s", got.K0sTimeout, got.K0sPoll, got.ProbeTimeout)
 	}
 }
 

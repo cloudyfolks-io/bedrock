@@ -30,7 +30,7 @@ func fakeInventory(ctx context.Context, _ host.Exec, _ string) (v1alpha1.Invento
 }
 
 func newDeps(exec *host.FakeExec, now time.Time) Deps {
-	return Deps{Exec: exec, Root: "/nonexistent", Node: "node-a", Now: func() time.Time { return now }, Interval: time.Hour, Inventory: fakeInventory, Apply: hostconfig.Apply, Packages: pkgmgr.Manager{Exec: exec, Family: "apt", Root: "/nonexistent"}, Version: "test", Hostname: func() (string, error) { return "node-a", nil }, DiskSpace: func(string) (host.Space, error) { return host.Space{}, nil }, HTTP: &http.Client{}}
+	return Deps{Exec: exec, Root: "/nonexistent", Node: "node-a", Now: func() time.Time { return now }, Interval: time.Hour, Inventory: fakeInventory, Apply: hostconfig.Apply, Packages: pkgmgr.Manager{Exec: exec, Family: "apt", Root: "/nonexistent"}, Version: "test", Hostname: func() (string, error) { return "node-a", nil }, DiskSpace: func(string) (host.Space, error) { return host.Space{}, nil }, HTTP: &http.Client{}, ProbeTimeout: time.Minute}
 }
 
 func createHost(t *testing.T, name string, managed bool, window string) {
@@ -68,6 +68,46 @@ func TestTickReportsEtcdHealth(t *testing.T) {
 	}
 	if checks := getHost(t, "node-etcd").Status.Checks; checks == nil || checks.EtcdMembers != 1 || !checks.EtcdHealthy {
 		t.Fatalf("checks %+v", checks)
+	}
+}
+
+type hungExec struct{}
+
+func (hungExec) Run(ctx context.Context, _ string, _ ...string) (string, error) {
+	<-ctx.Done()
+	return "", ctx.Err()
+}
+
+func TestTickBoundsHungProbes(t *testing.T) {
+	createHost(t, "node-hung", false, "")
+	deps := newDeps(&host.FakeExec{}, time.Now())
+	deps.Root = t.TempDir()
+	deps.Node = "node-hung"
+	if err := os.MkdirAll(filepath.Join(deps.Root, "var/lib/k0s/pki/etcd"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	deps.Exec = &host.FakeExec{Responses: map[string]string{
+		"/usr/local/bin/k0s status -o json":           `{"Version":"v1.36.3+k0s.0"}`,
+		"timedatectl show -p NTPSynchronized --value": "yes\n",
+		"/usr/local/bin/k0s etcd member-list":         `{"members":{"a":"https://10.0.0.1:2380","b":"https://10.0.0.2:2380","c":"https://10.0.0.3:2380"}}`,
+		"/usr/local/bin/k0s kubectl --kubeconfig " + filepath.Join(deps.Root, "var/lib/k0s/pki/admin.conf") + " --request-timeout=10s get --raw /readyz/etcd": "ok",
+	}}
+	if err := Tick(context.Background(), k8sClient, deps); err != nil {
+		t.Fatal(err)
+	}
+	if status := getHost(t, "node-hung").Status; status.K0sVersion == "" || !status.Checks.TimeSynced || status.Checks.EtcdMembers != 3 || !status.Checks.EtcdHealthy {
+		t.Fatalf("the first tick must report good facts: %+v %+v", status, status.Checks)
+	}
+	deps.Exec = hungExec{}
+	deps.ProbeTimeout = 50 * time.Millisecond
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if err := Tick(ctx, k8sClient, deps); err != nil {
+		t.Fatalf("a hung probe must not hold the tick: %v", err)
+	}
+	status := getHost(t, "node-hung").Status
+	if status.K0sVersion != "" || status.Checks.TimeSynced || status.Checks.EtcdMembers != 0 || status.Checks.EtcdHealthy {
+		t.Fatalf("a probe that timed out must report unknown, not the last value: %+v %+v", status, status.Checks)
 	}
 }
 
