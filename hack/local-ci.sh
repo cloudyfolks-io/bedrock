@@ -71,6 +71,15 @@ vm_up() {
   restore_context
   colima ssh --profile "$profile" -- sudo apt-get update -qq
   colima ssh --profile "$profile" -- sudo apt-get install -y -qq gettext-base iputils-ping
+  colima ssh --profile "$profile" -- sudo tee /tmp/fix-resolv.sh >/dev/null <<'FIX_RESOLV'
+#!/bin/sh
+set -e
+gw=$(ip route show default | awk '{for (i = 1; i <= NF; i++) if ($i == "via") print $(i + 1)}')
+rm -f /etc/resolv.conf
+printf 'nameserver %s\n' "$gw" > /etc/resolv.conf
+systemctl restart systemd-timesyncd
+FIX_RESOLV
+  colima ssh --profile "$profile" -- sudo sh /tmp/fix-resolv.sh
   colima ssh --profile "$profile" -- sudo tee /usr/local/bin/kubectl >/dev/null <<'SCRIPT'
 #!/bin/sh
 exec /usr/local/bin/k0s kubectl "$@"
