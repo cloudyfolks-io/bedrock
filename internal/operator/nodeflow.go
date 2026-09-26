@@ -282,7 +282,7 @@ func updatingMove(f nodeFacts) nodeMove {
 
 func uncordonedMove(f nodeFacts) nodeMove {
 	switch {
-	case f.Ceph != "":
+	case f.HasNode && f.Ceph != "":
 		return nodeMove{Message: f.Name + ": " + f.Ceph}
 	case f.Controller && f.Etcd != "":
 		return nodeMove{Message: f.Name + ": " + f.Etcd}

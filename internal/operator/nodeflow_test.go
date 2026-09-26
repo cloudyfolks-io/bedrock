@@ -163,6 +163,10 @@ func TestNextNodeMove(t *testing.T) {
 			f.Progress, f.Ceph = nodeUncordoned, "ceph: 3 of 33 PGs are not active+clean"
 			return f
 		}), nodeMove{Message: "w-a: ceph: 3 of 33 PGs are not active+clean"}},
+		"ceph ignored without a node": {with(func(f nodeFacts) nodeFacts {
+			f.Progress, f.HasNode, f.Evacuate, f.Ceph = nodeUncordoned, false, false, "ceph: 3 of 33 PGs are not active+clean"
+			return f
+		}), nodeMove{Progress: nodeDone, Message: "w-a done"}},
 		"controller waits for etcd": {with(func(f nodeFacts) nodeFacts {
 			f.Progress, f.Controller, f.Etcd = nodeUncordoned, true, "etcd: cp-b reports 2 of 3 members"
 			return f
