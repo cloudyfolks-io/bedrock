@@ -76,7 +76,15 @@ for _ in $(seq 1 360); do
   if ! kill -0 "$upgrade" 2>/dev/null; then break; fi
   sleep 5
 done
-rm -f "$bundle_b"
+case " $depot " in
+*" $VERSION_B "*) rm -f "$bundle_b" ;;
+*)
+  if kill -0 "$upgrade" 2>/dev/null; then
+    echo "no host reports the depot for $VERSION_B" >&2
+    exit 1
+  fi
+  ;;
+esac
 if [ -n "$abort_in" ]; then
   phase=""
   for _ in $(seq 1 720); do
