@@ -54,18 +54,15 @@ func prune(ctx context.Context, env StepEnv) (Outcome, error) {
 
 func cleanup(ctx context.Context, env StepEnv) (Outcome, error) {
 	deps := env.Deps
-	count, err := removeImages(ctx, deps, env.Target.Spec.Images, env.From.Spec.Images)
-	if err != nil {
-		return Outcome{}, err
-	}
+	count, imagesErr := removeImages(ctx, deps, env.Target.Spec.Images, env.From.Spec.Images)
 	dropped := onlyIn(env.Target.Spec.Images, env.From.Spec.Images)
-	if err := removeImageTarballs(deps.Root, dropped, []string{versionedAirgap(env.Target.Spec.Version)}); err != nil {
-		return Outcome{}, err
-	}
-	if err := removeUpgradeFiles(deps.Root, env.Upgrade.Spec.Version); err != nil {
-		return Outcome{}, err
-	}
-	if err := removePreRestoreData(deps.Root); err != nil {
+	err := errors.Join(
+		imagesErr,
+		removeImageTarballs(deps.Root, dropped, []string{versionedAirgap(env.Target.Spec.Version)}),
+		removeUpgradeFiles(deps.Root, env.Upgrade.Spec.Version),
+		removePreRestoreData(deps.Root),
+	)
+	if err != nil {
 		return Outcome{}, err
 	}
 	return Outcome{Message: fmt.Sprintf("removed %d images", count)}, nil

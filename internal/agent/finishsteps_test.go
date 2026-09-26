@@ -157,6 +157,22 @@ func TestCleanupRemovesPreRestoreData(t *testing.T) {
 	}
 }
 
+func TestCleanupTriesEveryRemovalAfterAFailure(t *testing.T) {
+	env, container := finishEnv(t, namesOf(t, oldOnly, newOnly, shared, retagged))
+	container.failures["/usr/local/bin/k0s ctr --namespace k8s.io images ls --quiet"] = errors.New("containerd is down")
+	root := env.Deps.Root
+	writeImageTarball(t, root, "k0s-airgap-v0.3.0.tar")
+	writeFixtureFile(t, filepath.Join(root, "var/lib/k0s/.pre-restore-20261001T110000Z/etcd/data"), "old etcd")
+	if _, err := cleanup(context.Background(), env); err == nil || !strings.Contains(err.Error(), "containerd is down") {
+		t.Fatalf("error %v", err)
+	}
+	for _, path := range []string{"var/lib/k0s/images/k0s-airgap-v0.3.0.tar", "var/lib/bedrock/staged/v0.3.0", "var/lib/bedrock/previous/k0s", "var/lib/k0s/.pre-restore-20261001T110000Z"} {
+		if _, err := os.Stat(filepath.Join(root, path)); !os.IsNotExist(err) {
+			t.Fatalf("%s must be removed although the image removal failed", path)
+		}
+	}
+}
+
 func writeImageTarball(t *testing.T, root, name string) {
 	t.Helper()
 	writeFixtureFile(t, filepath.Join(root, k0sImagesDir, name), "tar")
