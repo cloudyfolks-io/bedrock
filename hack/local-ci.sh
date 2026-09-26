@@ -19,9 +19,10 @@ vm_http=""
 vm_https=""
 vm_no_proxy=""
 known_jobs=(test e2e-kind e2e-init e2e-bundle e2e-upgrade e2e-upgrade-abort)
+default_jobs=(test e2e-kind e2e-bundle e2e-upgrade e2e-upgrade-abort)
 
 if [ "$#" -eq 0 ]; then
-  set -- "${known_jobs[@]}"
+  set -- "${default_jobs[@]}"
 fi
 
 is_known_job() {
@@ -228,12 +229,19 @@ run_upgrade() {
 run_e2e_upgrade() { run_upgrade ""; }
 run_e2e_upgrade_abort() { run_upgrade ControlPlane; }
 
+cache_size() {
+  if [ -d dist/cache ]; then
+    du -sh dist/cache | awk '{print $1}'
+  else
+    echo 0B
+  fi
+}
+
 cleanup() {
   if profile_exists; then
     vm_down
   fi
   rm -f dist/bedrock-*-bundle-*.tar.zst
-  rm -rf dist/cache
   restore_context
   rm -rf "$tmp"
   printf '%s' "$summary"
@@ -242,6 +250,7 @@ cleanup() {
     echo "${job_order[$i]}: SKIP (0m)"
     i=$((i + 1))
   done
+  echo "cache: $(cache_size) in dist/cache"
 }
 tmp=$(mktemp -d)
 trap cleanup EXIT
