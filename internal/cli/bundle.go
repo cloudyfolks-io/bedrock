@@ -30,7 +30,7 @@ const (
 
 type BundleDeps struct {
 	Exec     host.Exec
-	Pull     func(ctx context.Context, ref, dest, cacheDir string) (string, error)
+	Pull     func(ctx context.Context, ref, dest, cacheDir, arch string) (string, error)
 	Airgap   func(ctx context.Context, baseURL, version, arch, cacheDir string) (string, error)
 	LookPath func(file string) (string, error)
 }
@@ -118,7 +118,7 @@ func RunBundleBuild(ctx context.Context, o bundleBuildOptions, deps BundleDeps, 
 	defer cleanup()
 	step(stdout, "pulling %d images", len(bundle.Images)+1)
 	pull := func(ctx context.Context, ref, dest string) (string, error) {
-		return deps.Pull(ctx, ref, dest, o.cacheDir)
+		return deps.Pull(ctx, ref, dest, o.cacheDir, o.arch)
 	}
 	spec, err := release.BuildBundle(ctx, release.BundleInputs{ReleaseDir: o.releaseDir, Arch: o.arch, K0sBinary: k0sPath, BedrockBinary: o.bedrockBinary, K0sAirgap: airgap, Pull: pull}, workDir)
 	if err != nil {

@@ -146,7 +146,7 @@ func testCache(dir string, next http.RoundTripper) blobCache {
 func pullLayer(t *testing.T, cache blobCache, ref, hex string) []byte {
 	t.Helper()
 	dest := filepath.Join(t.TempDir(), "layer.tar")
-	if _, err := pullLayout(context.Background(), cache, ref, dest); err != nil {
+	if _, err := pullLayout(context.Background(), cache, ref, dest, linuxARM64); err != nil {
 		t.Fatal(err)
 	}
 	files := layoutFiles(t, dest)
@@ -248,7 +248,7 @@ func TestBlobCacheGivesUpAfterThreeAttemptsWithoutProgress(t *testing.T) {
 		w.WriteHeader(http.StatusServiceUnavailable)
 	})
 	ref, hex, _ := pushLayer(t, host, "lib/down:1.0")
-	_, err := pullLayout(context.Background(), testCache(t.TempDir(), http.DefaultTransport), ref, filepath.Join(t.TempDir(), "down.tar"))
+	_, err := pullLayout(context.Background(), testCache(t.TempDir(), http.DefaultTransport), ref, filepath.Join(t.TempDir(), "down.tar"), linuxARM64)
 	if err == nil || !strings.Contains(err.Error(), "sha256:"+hex) || !strings.Contains(err.Error(), "3 attempts") {
 		t.Fatalf("error %v, want one that names sha256:%s and 3 attempts", err, hex)
 	}
@@ -262,7 +262,7 @@ func TestBlobCacheGivesUpAtTheAttemptLimit(t *testing.T) {
 	ref, hex, _ := pushLayer(t, host, "lib/slow:1.0")
 	var breaks atomic.Int64
 	breaks.Store(blobAttempts * 2)
-	_, err := pullLayout(context.Background(), testCache(t.TempDir(), breakBodies{next: http.DefaultTransport, hex: hex, after: 1, breaks: &breaks}), ref, filepath.Join(t.TempDir(), "slow.tar"))
+	_, err := pullLayout(context.Background(), testCache(t.TempDir(), breakBodies{next: http.DefaultTransport, hex: hex, after: 1, breaks: &breaks}), ref, filepath.Join(t.TempDir(), "slow.tar"), linuxARM64)
 	want := strconv.Itoa(blobAttempts) + " attempts"
 	if err == nil || !strings.Contains(err.Error(), "sha256:"+hex) || !strings.Contains(err.Error(), want) {
 		t.Fatalf("error %v, want one that names sha256:%s and %s", err, hex, want)

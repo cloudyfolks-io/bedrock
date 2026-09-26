@@ -101,11 +101,7 @@ func pushIndex(t *testing.T, host, repository string) string {
 	if err != nil {
 		t.Fatal(err)
 	}
-	idx, err := random.Index(256, 2, 2)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := remote.WriteIndex(ref, idx); err != nil {
+	if err := remote.WriteIndex(ref, twoPlatformIndex(t)); err != nil {
 		t.Fatal(err)
 	}
 	return ref.String()
@@ -119,7 +115,7 @@ func TestPullLayoutReadsBlobsFromTheCache(t *testing.T) {
 	cache := t.TempDir()
 	first := filepath.Join(t.TempDir(), "first.tar")
 	start := gets.Load()
-	if _, err := PullLayout(context.Background(), ref, first, cache); err != nil {
+	if _, err := PullLayout(context.Background(), ref, first, cache, "arm64"); err != nil {
 		t.Fatal(err)
 	}
 	if gets.Load() == start {
@@ -127,7 +123,7 @@ func TestPullLayoutReadsBlobsFromTheCache(t *testing.T) {
 	}
 	second := filepath.Join(t.TempDir(), "second.tar")
 	start = gets.Load()
-	if _, err := PullLayout(context.Background(), ref, second, cache); err != nil {
+	if _, err := PullLayout(context.Background(), ref, second, cache, "arm64"); err != nil {
 		t.Fatal(err)
 	}
 	if got := gets.Load() - start; got != 0 {
@@ -146,14 +142,14 @@ func TestPullLayoutRetriesABrokenBlobBody(t *testing.T) {
 	ref := pushIndex(t, strings.TrimPrefix(server.URL, "http://"), "lib/flaky:1.0")
 	var broken atomic.Bool
 	dest := filepath.Join(t.TempDir(), "flaky.tar")
-	if _, err := pullLayout(context.Background(), testCache(t.TempDir(), breakBlobOnce{next: http.DefaultTransport, broken: &broken}), ref, dest); err != nil {
+	if _, err := pullLayout(context.Background(), testCache(t.TempDir(), breakBlobOnce{next: http.DefaultTransport, broken: &broken}), ref, dest, linuxARM64); err != nil {
 		t.Fatal(err)
 	}
 	if !broken.Load() {
 		t.Fatal("no blob body was broken")
 	}
 	clean := filepath.Join(t.TempDir(), "clean.tar")
-	if _, err := PullLayout(context.Background(), ref, clean, t.TempDir()); err != nil {
+	if _, err := PullLayout(context.Background(), ref, clean, t.TempDir(), "arm64"); err != nil {
 		t.Fatal(err)
 	}
 	files := layoutFiles(t, dest)
@@ -202,7 +198,7 @@ func TestPullLayoutReplacesACorruptCachedBlob(t *testing.T) {
 		t.Fatal(err)
 	}
 	dest := filepath.Join(t.TempDir(), "corrupt.tar")
-	if _, err := PullLayout(context.Background(), ref.String(), dest, cache); err != nil {
+	if _, err := PullLayout(context.Background(), ref.String(), dest, cache, "arm64"); err != nil {
 		t.Fatal(err)
 	}
 	files := layoutFiles(t, dest)

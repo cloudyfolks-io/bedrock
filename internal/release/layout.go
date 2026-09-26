@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"io/fs"
+	"maps"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -13,6 +14,7 @@ import (
 	"time"
 
 	"github.com/google/go-containerregistry/pkg/name"
+	v1 "github.com/google/go-containerregistry/pkg/v1"
 	"github.com/google/go-containerregistry/pkg/v1/empty"
 	"github.com/google/go-containerregistry/pkg/v1/layout"
 	"github.com/google/go-containerregistry/pkg/v1/remote"
@@ -25,11 +27,11 @@ const (
 
 var pullBackoff = remote.Backoff{Duration: time.Second, Factor: 3, Jitter: 0.1, Steps: 5}
 
-func PullLayout(ctx context.Context, ref, dest, cacheDir string) (string, error) {
-	return pullLayout(ctx, blobCache{dir: cacheDir, next: remote.DefaultTransport, idle: blobIdleTimeout, pause: blobPauseBase}, ref, dest)
+func PullLayout(ctx context.Context, ref, dest, cacheDir, arch string) (string, error) {
+	return pullLayout(ctx, blobCache{dir: cacheDir, next: remote.DefaultTransport, idle: blobIdleTimeout, pause: blobPauseBase}, ref, dest, v1.Platform{OS: "linux", Architecture: arch})
 }
 
-func pullLayout(ctx context.Context, transport http.RoundTripper, ref, dest string) (string, error) {
+func pullLayout(ctx context.Context, transport http.RoundTripper, ref, dest string, platform v1.Platform) (string, error) {
 	parsed, err := name.ParseReference(ref)
 	if err != nil {
 		return "", err
@@ -47,7 +49,7 @@ func pullLayout(ctx context.Context, transport http.RoundTripper, ref, dest stri
 	if err != nil {
 		return "", fmt.Errorf("write layout %s: %w", ref, err)
 	}
-	if err := appendNamed(path, desc, ref); err != nil {
+	if err := appendNamed(path, desc, ref, platform); err != nil {
 		return "", fmt.Errorf("write layout %s: %w", ref, err)
 	}
 	if err := tarDirectory(dir, dest); err != nil {
@@ -57,36 +59,29 @@ func pullLayout(ctx context.Context, transport http.RoundTripper, ref, dest stri
 	return desc.Digest.String(), nil
 }
 
-func refAnnotations(ref string) layout.Option {
-	return layout.WithAnnotations(map[string]string{annotationRefName: ref, annotationImageName: ref})
-}
-
-func appendNamed(path layout.Path, desc *remote.Descriptor, ref string) error {
+func appendNamed(path layout.Path, desc *remote.Descriptor, ref string, platform v1.Platform) error {
 	names, err := ContainerdNames(ref)
 	if err != nil {
 		return err
 	}
+	top, err := writePlatform(path, desc, platform)
+	if err != nil {
+		return err
+	}
 	for _, named := range names {
-		if err := appendOnce(path, desc, named); err != nil {
+		if err := path.AppendDescriptor(withRefName(top, named)); err != nil {
 			return err
 		}
 	}
 	return nil
 }
 
-func appendOnce(path layout.Path, desc *remote.Descriptor, named string) error {
-	if desc.MediaType.IsIndex() {
-		index, err := desc.ImageIndex()
-		if err != nil {
-			return err
-		}
-		return path.AppendIndex(index, refAnnotations(named))
-	}
-	img, err := desc.Image()
-	if err != nil {
-		return err
-	}
-	return path.AppendImage(img, refAnnotations(named))
+func withRefName(desc v1.Descriptor, ref string) v1.Descriptor {
+	annotations := map[string]string{}
+	maps.Copy(annotations, desc.Annotations)
+	maps.Copy(annotations, map[string]string{annotationRefName: ref, annotationImageName: ref})
+	desc.Annotations = annotations
+	return desc
 }
 
 func ContainerdNames(ref string) ([]string, error) {
