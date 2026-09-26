@@ -8,6 +8,7 @@ memory=${CI_MEMORY:-11}
 disk=${CI_DISK:-16}
 root_disk=${CI_ROOT_DISK:-44}
 upgrade_root_disk=${CI_UPGRADE_ROOT_DISK:-64}
+nested=${CI_NESTED_VIRT:-true}
 min_free=${CI_MIN_FREE_GB:-25}
 floor=${CI_FLOOR_GB:-15}
 port=${CI_REGISTRY_PORT:-5001}
@@ -83,7 +84,7 @@ restore_context() {
 
 vm_up() {
   vm_down
-  colima start --profile "$profile" --vm-type vz --cpu "$cpus" --memory "$memory" --disk "$disk" --root-disk "$root_disk" --runtime docker --mount "$repo:w"
+  colima start --profile "$profile" --vm-type vz --cpu "$cpus" --memory "$memory" --disk "$disk" --root-disk "$root_disk" --runtime docker --mount "$repo:w" --nested-virtualization="$nested"
   restore_context
   colima ssh --profile "$profile" -- sudo apt-get update -qq
   colima ssh --profile "$profile" -- sudo apt-get install -y -qq gettext-base iputils-ping pciutils
