@@ -147,15 +147,22 @@ func activeNodes(order, controllers []string, progress map[string]string, concur
 func etcdProblem(hosts []v1alpha1.Host) string {
 	controllers := hostsWithRole(hosts, v1alpha1.RoleControlPlane)
 	for _, host := range controllers {
-		var members int32
-		if host.Status.Checks != nil {
-			members = host.Status.Checks.EtcdMembers
-		}
-		if members != int32(len(controllers)) {
-			return fmt.Sprintf("etcd: %s reports %d of %d members", host.Name, members, len(controllers))
+		checks := hostChecks(host)
+		switch {
+		case checks.EtcdMembers != int32(len(controllers)):
+			return fmt.Sprintf("etcd: %s reports %d of %d members", host.Name, checks.EtcdMembers, len(controllers))
+		case !checks.EtcdHealthy:
+			return fmt.Sprintf("etcd: %s is not healthy", host.Name)
 		}
 	}
 	return ""
+}
+
+func hostChecks(host v1alpha1.Host) v1alpha1.HostChecks {
+	if host.Status.Checks == nil {
+		return v1alpha1.HostChecks{}
+	}
+	return *host.Status.Checks
 }
 
 func uncordonedCeph(ctx context.Context, env upgradeEnv, active []string, progress map[string]string) string {

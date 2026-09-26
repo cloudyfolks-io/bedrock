@@ -52,7 +52,7 @@ func newUpgradeWorldAs(t *testing.T, operatorClient func(*testing.T, context.Con
 	createOperatorDeployment(t, ctx, c, oldImage)
 	createDepotHost(t, ctx, c, "node-a", v1alpha1.RoleControlPlane)
 	createDepotHost(t, ctx, c, "node-b", v1alpha1.RoleWorkload)
-	setEtcdMembers(t, ctx, c, "node-a", 1)
+	setEtcd(t, ctx, c, "node-a", 1, true)
 	oldBundle := flowBundle(t, "v1", oldImage, nil)
 	newBundle := flowBundle(t, "v2", newImage, []string{"v1"})
 	target := &v1alpha1.Release{ObjectMeta: metav1.ObjectMeta{Name: "v2", Labels: map[string]string{v1alpha1.LabelKind: "Release", v1alpha1.LabelName: "v2"}}, Spec: newBundle.Spec}

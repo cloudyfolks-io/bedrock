@@ -37,20 +37,27 @@ func TestActiveNodes(t *testing.T) {
 }
 
 func TestEtcdProblem(t *testing.T) {
-	member := func(name string, members int32) v1alpha1.Host {
+	member := func(name string, members int32, healthy bool) v1alpha1.Host {
 		host := hostWithRoles(name, v1alpha1.RoleControlPlane)
-		host.Status.Checks = &v1alpha1.HostChecks{EtcdMembers: members}
+		host.Status.Checks = &v1alpha1.HostChecks{EtcdMembers: members, EtcdHealthy: healthy}
 		return host
 	}
 	worker := hostWithRoles("w-a", v1alpha1.RoleWorkload)
-	if got := etcdProblem([]v1alpha1.Host{member("cp-a", 2), member("cp-b", 2), worker}); got != "" {
-		t.Fatalf("healthy etcd: %q", got)
+	cases := map[string]struct {
+		hosts []v1alpha1.Host
+		want  string
+	}{
+		"healthy":          {[]v1alpha1.Host{member("cp-a", 2, true), member("cp-b", 2, true), worker}, ""},
+		"missing member":   {[]v1alpha1.Host{member("cp-a", 2, true), member("cp-b", 1, true), worker}, "etcd: cp-b reports 1 of 2 members"},
+		"unhealthy member": {[]v1alpha1.Host{member("cp-a", 2, true), member("cp-b", 2, false), worker}, "etcd: cp-b is not healthy"},
+		"no checks":        {[]v1alpha1.Host{hostWithRoles("cp-a", v1alpha1.RoleControlPlane)}, "etcd: cp-a reports 0 of 1 members"},
 	}
-	if got := etcdProblem([]v1alpha1.Host{member("cp-a", 2), member("cp-b", 1), worker}); got != "etcd: cp-b reports 1 of 2 members" {
-		t.Fatalf("problem %q", got)
-	}
-	if got := etcdProblem([]v1alpha1.Host{hostWithRoles("cp-a", v1alpha1.RoleControlPlane)}); got != "etcd: cp-a reports 0 of 1 members" {
-		t.Fatalf("a controller without checks: %q", got)
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			if got := etcdProblem(tc.hosts); got != tc.want {
+				t.Fatalf("problem %q, want %q", got, tc.want)
+			}
+		})
 	}
 }
 

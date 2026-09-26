@@ -49,13 +49,14 @@ func preloadedNodeUpgrade(t *testing.T, ctx context.Context, c client.Client, no
 	reportStep(t, ctx, c, node, v1alpha1.NodeUpgradeStepStatus{Name: v1alpha1.StepPreload, State: v1alpha1.StepSucceeded, Attempt: 1})
 }
 
-func setEtcdMembers(t *testing.T, ctx context.Context, c client.Client, name string, members int32) {
+func setEtcd(t *testing.T, ctx context.Context, c client.Client, name string, members int32, healthy bool) {
 	t.Helper()
 	var host v1alpha1.Host
 	if err := c.Get(ctx, client.ObjectKey{Name: name}, &host); err != nil {
 		t.Fatal(err)
 	}
 	host.Status.Checks.EtcdMembers = members
+	host.Status.Checks.EtcdHealthy = healthy
 	if err := c.Status().Update(ctx, &host); err != nil {
 		t.Fatal(err)
 	}
@@ -132,7 +133,9 @@ func TestWorkersPhase(t *testing.T) {
 		t.Fatal("node-a must be uncordoned")
 	}
 	run(phaseResult{Message: "workers: node-a: etcd: node-a reports 0 of 1 members"})
-	setEtcdMembers(t, ctx, c, "node-a", 1)
+	setEtcd(t, ctx, c, "node-a", 1, false)
+	run(phaseResult{Message: "workers: node-a: etcd: node-a is not healthy"})
+	setEtcd(t, ctx, c, "node-a", 1, true)
 	run(phaseResult{Message: "workers: node-a done"})
 
 	run(phaseResult{Message: "workers: node-b cordoned"})

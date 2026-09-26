@@ -74,7 +74,7 @@ func runningPod(t *testing.T, ctx context.Context, c client.Client, name, node s
 func TestControlPlanePhaseOnASingleNode(t *testing.T) {
 	c, ctx, run := controlPlaneWorld(t)
 	createDepotHost(t, ctx, c, "node-a", v1alpha1.RoleControlPlane)
-	setEtcdMembers(t, ctx, c, "node-a", 1)
+	setEtcd(t, ctx, c, "node-a", 1, true)
 	preloadedNodeUpgrade(t, ctx, c, "node-a")
 	runningPod(t, ctx, c, "web", "node-a")
 
@@ -140,8 +140,10 @@ func TestControlPlanePhaseWalksControllersOneAtATime(t *testing.T) {
 	if steps := getNodeUpgrade(t, ctx, c, "node-c").Spec.Steps; !slices.Equal(steps, []string{v1alpha1.StepPreload}) {
 		t.Fatalf("node-c must wait for node-a: %v", steps)
 	}
-	setEtcdMembers(t, ctx, c, "node-a", 2)
-	setEtcdMembers(t, ctx, c, "node-c", 2)
+	setEtcd(t, ctx, c, "node-a", 2, false)
+	setEtcd(t, ctx, c, "node-c", 2, true)
+	run(phaseResult{Message: "controlplane: node-a: etcd: node-a is not healthy"})
+	setEtcd(t, ctx, c, "node-a", 2, true)
 	run(phaseResult{Message: "controlplane: node-a done"})
 
 	run(phaseResult{Message: "controlplane: node-c cordoned"})
