@@ -66,6 +66,42 @@ func TestEtcdProblem(t *testing.T) {
 	}
 }
 
+func TestEtcdGate(t *testing.T) {
+	member := func(name string) v1alpha1.Host {
+		host := hostWithRoles(name, v1alpha1.RoleControlPlane)
+		host.Status.Checks = &v1alpha1.HostChecks{EtcdMembers: 3, EtcdHealthy: true}
+		return host
+	}
+	sick := member("cp-c")
+	sick.Status.Checks.EtcdHealthy = false
+	node := func(name string, status corev1.ConditionStatus) corev1.Node {
+		ready := readyNode(name, "amd64")
+		ready.Status.Conditions = []corev1.NodeCondition{{Type: corev1.NodeReady, Status: status}}
+		return ready
+	}
+	controllers := []v1alpha1.Host{member("cp-a"), member("cp-b"), member("cp-c"), hostWithRoles("w-a", v1alpha1.RoleWorkload)}
+	cases := map[string]struct {
+		hosts []v1alpha1.Host
+		nodes []corev1.Node
+		want  string
+	}{
+		"every controller Node is Ready":                  {controllers, []corev1.Node{node("cp-a", corev1.ConditionTrue), node("cp-b", corev1.ConditionTrue), node("cp-c", corev1.ConditionTrue)}, ""},
+		"a dead peer still reports healthy facts":         {controllers, []corev1.Node{node("cp-a", corev1.ConditionTrue), node("cp-b", corev1.ConditionTrue), node("cp-c", corev1.ConditionUnknown)}, "etcd: the Node of controller cp-c is not Ready"},
+		"a peer Node is NotReady":                         {controllers, []corev1.Node{node("cp-a", corev1.ConditionTrue), node("cp-b", corev1.ConditionFalse), node("cp-c", corev1.ConditionTrue)}, "etcd: the Node of controller cp-b is not Ready"},
+		"a peer Node has no Ready condition":              {controllers, []corev1.Node{node("cp-a", corev1.ConditionTrue), {ObjectMeta: metav1.ObjectMeta{Name: "cp-b"}}, node("cp-c", corev1.ConditionTrue)}, "etcd: the Node of controller cp-b is not Ready"},
+		"a controller without a Node":                     {controllers, []corev1.Node{node("cp-a", corev1.ConditionTrue), node("cp-b", corev1.ConditionTrue)}, ""},
+		"a controller without a Node keeps the fact rule": {[]v1alpha1.Host{member("cp-a"), member("cp-b"), sick}, []corev1.Node{node("cp-a", corev1.ConditionTrue), node("cp-b", corev1.ConditionTrue)}, "etcd: cp-c is not healthy"},
+		"a worker Node is NotReady":                       {controllers, []corev1.Node{node("cp-a", corev1.ConditionTrue), node("cp-b", corev1.ConditionTrue), node("cp-c", corev1.ConditionTrue), node("w-a", corev1.ConditionFalse)}, ""},
+	}
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			if got := etcdGate(tc.hosts, tc.nodes); got != tc.want {
+				t.Fatalf("problem %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
 func stepsIn(states ...string) []v1alpha1.NodeUpgradeStepStatus {
 	names := []string{v1alpha1.StepPreload, v1alpha1.StepAgentUpdate, v1alpha1.StepReboot}
 	steps := make([]v1alpha1.NodeUpgradeStepStatus, 0, len(states))

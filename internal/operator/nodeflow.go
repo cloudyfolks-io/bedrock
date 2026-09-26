@@ -182,6 +182,15 @@ func etcdProblem(hosts []v1alpha1.Host) string {
 	return ""
 }
 
+func etcdGate(hosts []v1alpha1.Host, nodes []corev1.Node) string {
+	for _, host := range hostsWithRole(hosts, v1alpha1.RoleControlPlane) {
+		if node, ok := findNode(nodes, host.Name); ok && !nodeReady(node) {
+			return fmt.Sprintf("etcd: the Node of controller %s is not Ready", host.Name)
+		}
+	}
+	return etcdProblem(hosts)
+}
+
 func hostChecks(host v1alpha1.Host) v1alpha1.HostChecks {
 	if host.Status.Checks == nil {
 		return v1alpha1.HostChecks{}
@@ -234,7 +243,7 @@ func nodeFactsFor(in flowInput, name string) nodeFacts {
 		K0sCurrent: host.Status.K0sVersion == in.Target.Spec.K0sVersion,
 		TargetK0s:  in.Target.Spec.K0sVersion,
 		Ceph:       in.Ceph,
-		Etcd:       etcdProblem(in.Hosts),
+		Etcd:       etcdGate(in.Hosts, in.Nodes),
 	}
 }
 

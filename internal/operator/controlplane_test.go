@@ -284,6 +284,46 @@ func TestControlPlanePhaseWalksControllersOneAtATime(t *testing.T) {
 	}
 }
 
+func setNodeReady(t *testing.T, ctx context.Context, c client.Client, name string, status corev1.ConditionStatus) {
+	t.Helper()
+	node := getNode(t, ctx, c, name)
+	node.Status.Conditions = []corev1.NodeCondition{{Type: corev1.NodeReady, Status: status}}
+	if err := c.Status().Update(ctx, &node); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestControlPlanePhaseWaitsForADeadPeerController(t *testing.T) {
+	c, ctx, run := controlPlaneWorld(t)
+	for _, name := range []string{"node-a", "node-b", "node-c"} {
+		createDepotHost(t, ctx, c, name, v1alpha1.RoleControlPlane, v1alpha1.RoleWorkload)
+		setEtcd(t, ctx, c, name, 3, true)
+		preloadedNodeUpgrade(t, ctx, c, name)
+	}
+	if err := setNodeProgress(ctx, c, v1alpha1.NodeUpgradeName("v2", "node-a"), controlPlaneProgressAnnotation, nodeDone); err != nil {
+		t.Fatal(err)
+	}
+	setNodeReady(t, ctx, c, "node-c", corev1.ConditionUnknown)
+	waiting := "controlplane: waiting before updating node-b: etcd: the Node of controller node-c is not Ready"
+
+	run(phaseResult{Message: waiting})
+	if getNode(t, ctx, c, "node-b").Spec.Unschedulable || getNodeUpgrade(t, ctx, c, "node-b").Annotations[controlPlaneProgressAnnotation] != "" {
+		t.Fatal("the next controller must not start while a peer Node is not Ready")
+	}
+	setNodeReady(t, ctx, c, "node-c", corev1.ConditionTrue)
+	run(phaseResult{Message: "controlplane: node-b cordoned"})
+	setNodeReady(t, ctx, c, "node-c", corev1.ConditionFalse)
+	run(phaseResult{Message: waiting})
+	if steps := getNodeUpgrade(t, ctx, c, "node-b").Spec.Steps; !slices.Equal(steps, []string{v1alpha1.StepPreload}) {
+		t.Fatalf("a drained controller must not get its steps while a peer Node is not Ready: %v", steps)
+	}
+	setNodeReady(t, ctx, c, "node-c", corev1.ConditionTrue)
+	run(phaseResult{Message: "controlplane: node-b drained"})
+	if steps := getNodeUpgrade(t, ctx, c, "node-b").Spec.Steps; !slices.Equal(steps, []string{v1alpha1.StepPreload, v1alpha1.StepK0sUpdate}) {
+		t.Fatalf("node-b steps %v", steps)
+	}
+}
+
 func TestControlPlanePhaseTable(t *testing.T) {
 	if newPhases()[v1alpha1.PhaseControlPlane] == nil {
 		t.Fatal("the new operator runs ControlPlane")
