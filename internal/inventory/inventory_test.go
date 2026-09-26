@@ -42,6 +42,16 @@ func TestParseLscpuNested(t *testing.T) {
 	}
 }
 
+func TestParseLscpuArm64Clusters(t *testing.T) {
+	cpu, err := ParseLscpu(fixture(t, "lscpu-arm64.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cpu.Model != "-" || cpu.Sockets != 1 || cpu.Cores != 6 || cpu.Threads != 6 {
+		t.Fatalf("cpu %+v", cpu)
+	}
+}
+
 func TestParseLscpuFailsWithoutModel(t *testing.T) {
 	if _, err := ParseLscpu([]byte(`{"lscpu": [{"field": "Socket(s):", "data": "1"}]}`)); err == nil {
 		t.Fatal("expected error")

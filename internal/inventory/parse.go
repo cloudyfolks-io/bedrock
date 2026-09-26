@@ -38,11 +38,18 @@ func ParseLscpu(raw []byte) (v1alpha1.CPUInfo, error) {
 	if fields["Model name:"] == "" {
 		return v1alpha1.CPUInfo{}, fmt.Errorf("lscpu: Model name not found")
 	}
-	perSocket := atoi(fields["Core(s) per socket:"])
 	perCore := atoi(fields["Thread(s) per core:"])
 	sockets := atoi(fields["Socket(s):"])
-	cores := perSocket * sockets
+	cores := lscpuCores(fields, sockets)
 	return v1alpha1.CPUInfo{Model: fields["Model name:"], Cores: cores, Threads: perCore * cores, Sockets: sockets}, nil
+}
+
+func lscpuCores(fields map[string]string, sockets int32) int32 {
+	if perSocket, ok := fields["Core(s) per socket:"]; ok {
+		return atoi(perSocket) * sockets
+	}
+	clusters := atoi(fields["Cluster(s):"])
+	return atoi(fields["Core(s) per cluster:"]) * clusters
 }
 
 func atoi(s string) int32 {
