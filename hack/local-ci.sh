@@ -8,6 +8,7 @@ memory=${CI_MEMORY:-11}
 disk=${CI_DISK:-16}
 root_disk=${CI_ROOT_DISK:-44}
 min_free=${CI_MIN_FREE_GB:-25}
+floor=${CI_FLOOR_GB:-15}
 port=${CI_REGISTRY_PORT:-5001}
 repo=$(git rev-parse --show-toplevel)
 arch=$(uname -m | sed 's/x86_64/amd64/;s/aarch64/arm64/')
@@ -46,8 +47,23 @@ done
 job_order=("$@")
 summary=""
 ran=0
+job_pid=""
+watcher_pid=""
 
 cd "$repo"
+
+watch_floor() {
+  local job=$1 pid=$2 free
+  while sleep 10 && kill -0 "$pid" 2>/dev/null; do
+    free=$(df -Pk "$repo" | awk 'NR==2 {print int($4/1048576)}')
+    if [ "$free" -lt "$floor" ]; then
+      echo "only ${free}GiB free on $repo, below the ${floor}GiB floor; stopping $job" >&2
+      : >"$tmp/floor-stop"
+      kill -TERM "-$pid" 2>/dev/null || true
+      return
+    fi
+  done
+}
 
 guard() {
   local free
@@ -239,6 +255,18 @@ cache_size() {
 }
 
 cleanup() {
+  if [ -n "$job_pid" ]; then
+    kill -TERM "-$job_pid" 2>/dev/null || true
+  fi
+  if [ -n "$watcher_pid" ]; then
+    kill -TERM "$watcher_pid" 2>/dev/null || true
+  fi
+  if [ -n "$job_pid" ]; then
+    wait "$job_pid" 2>/dev/null || true
+  fi
+  if [ -n "$watcher_pid" ]; then
+    wait "$watcher_pid" 2>/dev/null || true
+  fi
   vm_down
   rm -f dist/bedrock-*-bundle-*.tar.zst
   rm -rf dist/.bundle-*
@@ -265,15 +293,26 @@ for job in "${job_order[@]}"; do
   fi
   ran=$((ran + 1))
   start=$(date +%s)
-  set +e
+  rm -f "$tmp/floor-stop"
+  set -m
   (
     set -e
     guard
     "run_${job//-/_}"
-  )
+  ) </dev/null &
+  job_pid=$!
+  set +m
+  watch_floor "$job" "$job_pid" &
+  watcher_pid=$!
+  set +e
+  wait "$job_pid"
   code=$?
   set -e
-  if [ "$code" -eq 0 ]; then
+  kill "$watcher_pid" 2>/dev/null || true
+  wait "$watcher_pid" 2>/dev/null || true
+  job_pid=""
+  watcher_pid=""
+  if [ "$code" -eq 0 ] && [ ! -f "$tmp/floor-stop" ]; then
     status=PASS
   else
     status=FAIL
