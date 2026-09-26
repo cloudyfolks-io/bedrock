@@ -21,19 +21,26 @@ import (
 	"github.com/cloudyfolks-labs/bedrock/internal/pkgmgr"
 )
 
+const (
+	K0sRestartTimeout = 10 * time.Minute
+	K0sRestartPoll    = 5 * time.Second
+)
+
 type Deps struct {
-	Exec      host.Exec
-	Root      string
-	Node      string
-	Now       func() time.Time
-	Interval  time.Duration
-	Inventory func(context.Context, host.Exec, string) (v1alpha1.Inventory, error)
-	Apply     func(context.Context, hostconfig.Deps, v1alpha1.HostConfigSpec) []v1alpha1.StepResult
-	Packages  pkgmgr.Manager
-	Version   string
-	Hostname  func() (string, error)
-	DiskSpace func(string) (host.Space, error)
-	HTTP      *http.Client
+	Exec       host.Exec
+	Root       string
+	Node       string
+	Now        func() time.Time
+	Interval   time.Duration
+	Inventory  func(context.Context, host.Exec, string) (v1alpha1.Inventory, error)
+	Apply      func(context.Context, hostconfig.Deps, v1alpha1.HostConfigSpec) []v1alpha1.StepResult
+	Packages   pkgmgr.Manager
+	Version    string
+	Hostname   func() (string, error)
+	DiskSpace  func(string) (host.Space, error)
+	HTTP       *http.Client
+	K0sTimeout time.Duration
+	K0sPoll    time.Duration
 }
 
 func Run(ctx context.Context, c client.WithWatch, deps Deps) error {

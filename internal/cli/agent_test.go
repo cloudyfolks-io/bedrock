@@ -124,6 +124,29 @@ func TestRunAgentExitsWhenTheLoopReturns(t *testing.T) {
 	}
 }
 
+func TestRunAgentGivesK0sTenMinutesToRestart(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "kubelet.conf")
+	if err := os.WriteFile(path, []byte("a"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	var got agent.Deps
+	deps := agentDeps{
+		Exec: &host.FakeExec{},
+		OSID: "ubuntu",
+		Load: func(string) (client.WithWatch, time.Time, error) { return nil, time.Time{}, nil },
+		Run: func(_ context.Context, _ client.WithWatch, d agent.Deps) error {
+			got = d
+			return errors.New("stop")
+		},
+	}
+	if err := runAgent(context.Background(), agentOptions{kubeconfig: path, node: "n", root: "/", interval: time.Hour}, deps, &bytes.Buffer{}); err == nil {
+		t.Fatal("expected error")
+	}
+	if got.K0sTimeout != 10*time.Minute || got.K0sPoll != 5*time.Second {
+		t.Fatalf("k0s wait %s, poll %s", got.K0sTimeout, got.K0sPoll)
+	}
+}
+
 func TestRunAgentReturnsTheLoopError(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "kubelet.conf")
 	if err := os.WriteFile(path, []byte("a"), 0o600); err != nil {

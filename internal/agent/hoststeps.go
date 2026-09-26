@@ -6,7 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
-	"strings"
+	"time"
 
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
@@ -62,56 +62,105 @@ func reboot(ctx context.Context, env StepEnv) (Outcome, error) {
 	return Outcome{Message: "reboot pending", Reboot: true}, nil
 }
 
+type k0sProbe func(ctx context.Context, env StepEnv) string
+
+type k0sService struct {
+	Unit   string
+	Probes []k0sProbe
+}
+
 func k0sUpdate(ctx context.Context, env StepEnv) (Outcome, error) {
 	version := env.Target.Spec.K0sVersion
 	checksum := env.Target.Spec.K0sChecksums[runtime.GOARCH]
 	staged := filepath.Join(env.Deps.Root, stagedDir, env.Target.Spec.Version, "k0s")
-	if err := verifyStaged(staged, checksum); err != nil {
+	if err := depot.Verify(staged, checksum); err != nil {
+		return Outcome{}, err
+	}
+	service, err := k0sServiceFor(ctx, env)
+	if err != nil {
 		return Outcome{}, err
 	}
 	installed := filepath.Join(env.Deps.Root, k0s.DefaultBinary)
-	if current, err := release.FileSHA256(installed); err == nil && sameDigest(current, checksum) {
+	current := hasChecksum(installed, checksum)
+	if current && runningK0sVersion(ctx, env.Deps.Exec) == version {
+		if err := awaitK0s(ctx, env, service.Probes); err != nil {
+			return Outcome{}, err
+		}
 		return Outcome{Message: "k0s already at " + version}, nil
 	}
-	unit, err := k0sUnit(ctx, env)
-	if err != nil {
+	if !current {
+		if err := replaceBinary(staged, installed); err != nil {
+			return Outcome{}, err
+		}
+	}
+	if _, err := env.Deps.Exec.Run(ctx, "systemctl", "restart", "--no-block", service.Unit); err != nil {
 		return Outcome{}, err
 	}
-	if err := replaceBinary(staged, installed); err != nil {
+	if err := awaitK0s(ctx, env, service.Probes); err != nil {
 		return Outcome{}, err
 	}
-	if _, err := env.Deps.Exec.Run(ctx, "systemctl", "restart", "--no-block", unit); err != nil {
-		return Outcome{}, err
-	}
-	return Outcome{Message: fmt.Sprintf("k0s %s installed, restarting %s", version, unit)}, nil
+	return Outcome{Message: fmt.Sprintf("k0s %s installed, restarted %s", version, service.Unit)}, nil
 }
 
-func verifyStaged(path, checksum string) error {
+func hasChecksum(path, checksum string) bool {
 	got, err := release.FileSHA256(path)
-	if err != nil {
-		return fmt.Errorf("staged k0s: %w", err)
-	}
-	if !sameDigest(got, checksum) {
-		return fmt.Errorf("staged k0s %s: checksum %s, want %s", path, got, checksum)
-	}
-	return nil
+	return err == nil && got == checksum
 }
 
-func sameDigest(a, b string) bool {
-	return strings.TrimPrefix(a, "sha256:") == strings.TrimPrefix(b, "sha256:")
-}
-
-func k0sUnit(ctx context.Context, env StepEnv) (string, error) {
+func k0sServiceFor(ctx context.Context, env StepEnv) (k0sService, error) {
 	var own v1alpha1.Host
 	if err := env.Client.Get(ctx, client.ObjectKey{Name: env.Deps.Node}, &own); err != nil {
-		return "", fmt.Errorf("host %s: %w", env.Deps.Node, err)
+		return k0sService{}, fmt.Errorf("host %s: %w", env.Deps.Node, err)
 	}
-	return k0sUnitOf(own), nil
+	return k0sServiceOf(own), nil
 }
 
-func k0sUnitOf(own v1alpha1.Host) string {
+func k0sServiceOf(own v1alpha1.Host) k0sService {
 	if v1alpha1.HostHasRole(own, v1alpha1.RoleControlPlane) {
-		return k0sControllerUnit
+		return k0sService{Unit: k0sControllerUnit, Probes: []k0sProbe{runsTargetK0s, apiServesReady}}
 	}
-	return k0sWorkerUnit
+	return k0sService{Unit: k0sWorkerUnit, Probes: []k0sProbe{runsTargetK0s}}
+}
+
+func runsTargetK0s(ctx context.Context, env StepEnv) string {
+	switch running := runningK0sVersion(ctx, env.Deps.Exec); running {
+	case env.Target.Spec.K0sVersion:
+		return ""
+	case "":
+		return "k0s does not run"
+	default:
+		return "k0s runs " + running
+	}
+}
+
+func apiServesReady(ctx context.Context, env StepEnv) string {
+	return apiProblem(ctx, env.Deps.Exec, env.Deps.Root, "/readyz")
+}
+
+func k0sProblem(ctx context.Context, env StepEnv, probes []k0sProbe) string {
+	for _, probe := range probes {
+		if problem := probe(ctx, env); problem != "" {
+			return problem
+		}
+	}
+	return ""
+}
+
+func awaitK0s(ctx context.Context, env StepEnv, probes []k0sProbe) error {
+	waitCtx, cancel := context.WithTimeout(ctx, env.Deps.K0sTimeout)
+	defer cancel()
+	for {
+		problem := k0sProblem(waitCtx, env, probes)
+		if problem == "" {
+			return nil
+		}
+		select {
+		case <-waitCtx.Done():
+			if err := ctx.Err(); err != nil {
+				return err
+			}
+			return fmt.Errorf("k0s %s is not ready after %s: %s", env.Target.Spec.K0sVersion, env.Deps.K0sTimeout, problem)
+		case <-time.After(env.Deps.K0sPoll):
+		}
+	}
 }
