@@ -165,6 +165,8 @@ type HostChecks struct {
 	// +optional
 	EtcdMembers int32 `json:"etcdMembers,omitempty"`
 	// +optional
+	EtcdHealthy bool `json:"etcdHealthy,omitempty"`
+	// +optional
 	ImagesBytes int64 `json:"imagesBytes,omitempty"`
 }
 

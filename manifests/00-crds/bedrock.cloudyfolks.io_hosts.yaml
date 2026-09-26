@@ -123,6 +123,8 @@ spec:
                   certificatesNotAfter:
                     format: date-time
                     type: string
+                  etcdHealthy:
+                    type: boolean
                   etcdMembers:
                     format: int32
                     type: integer

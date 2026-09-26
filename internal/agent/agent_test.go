@@ -51,6 +51,26 @@ func getHost(t *testing.T, name string) v1alpha1.Host {
 	return h
 }
 
+func TestTickReportsEtcdHealth(t *testing.T) {
+	createHost(t, "node-etcd", false, "")
+	deps := newDeps(&host.FakeExec{}, time.Now())
+	deps.Root = t.TempDir()
+	deps.Node = "node-etcd"
+	if err := os.MkdirAll(filepath.Join(deps.Root, "var/lib/k0s/pki/etcd"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	deps.Exec = &host.FakeExec{Responses: map[string]string{
+		"/usr/local/bin/k0s etcd member-list": `{"members":{"a":"https://10.0.0.1:2380"}}`,
+		"/usr/local/bin/k0s kubectl --kubeconfig " + filepath.Join(deps.Root, "var/lib/k0s/pki/admin.conf") + " get --raw /readyz/etcd": "ok",
+	}}
+	if err := Tick(context.Background(), k8sClient, deps); err != nil {
+		t.Fatal(err)
+	}
+	if checks := getHost(t, "node-etcd").Status.Checks; checks == nil || checks.EtcdMembers != 1 || !checks.EtcdHealthy {
+		t.Fatalf("checks %+v", checks)
+	}
+}
+
 func TestTickWritesInventoryOnly(t *testing.T) {
 	createHost(t, "node-a", false, "")
 	exec := &host.FakeExec{}

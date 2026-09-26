@@ -5,6 +5,7 @@ import (
 	"crypto/x509"
 	"encoding/json"
 	"encoding/pem"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -29,6 +30,7 @@ func hostChecks(ctx context.Context, deps Deps) *v1alpha1.HostChecks {
 		VarLibSizeBytes:      int64(space.SizeBytes),
 		CertificatesNotAfter: certificatesNotAfter(deps.Root),
 		EtcdMembers:          etcdMembers(ctx, deps.Exec, deps.Root),
+		EtcdHealthy:          etcdHealthy(ctx, deps.Exec, deps.Root),
 		ImagesBytes:          imagesBytes(deps.Root),
 	}
 }
@@ -76,8 +78,28 @@ func timeSynced(ctx context.Context, e host.Exec) bool {
 	return err == nil && strings.TrimSpace(out) == "yes"
 }
 
+func hasEtcd(root string) bool {
+	_, err := os.Stat(filepath.Join(root, "var", "lib", "k0s", "pki", "etcd"))
+	return err == nil
+}
+
+func etcdHealthy(ctx context.Context, e host.Exec, root string) bool {
+	return hasEtcd(root) && apiProblem(ctx, e, root, "/readyz/etcd") == ""
+}
+
+func apiProblem(ctx context.Context, e host.Exec, root, path string) string {
+	out, err := e.Run(ctx, k0s.DefaultBinary, "kubectl", "--kubeconfig", filepath.Join(root, adminKubeconfig), "get", "--raw", path)
+	if err != nil {
+		return fmt.Sprintf("%s: %v", path, err)
+	}
+	if answer := strings.TrimSpace(out); answer != "ok" {
+		return fmt.Sprintf("%s: %s", path, answer)
+	}
+	return ""
+}
+
 func etcdMembers(ctx context.Context, e host.Exec, root string) int32 {
-	if _, err := os.Stat(filepath.Join(root, "var", "lib", "k0s", "pki", "etcd")); err != nil {
+	if !hasEtcd(root) {
 		return 0
 	}
 	out, err := e.Run(ctx, k0s.DefaultBinary, "etcd", "member-list")

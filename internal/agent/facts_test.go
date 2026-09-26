@@ -90,6 +90,33 @@ func TestEtcdMembers(t *testing.T) {
 	}
 }
 
+func TestEtcdHealthy(t *testing.T) {
+	root := t.TempDir()
+	probe := "/usr/local/bin/k0s kubectl --kubeconfig " + filepath.Join(root, "var/lib/k0s/pki/admin.conf") + " get --raw /readyz/etcd"
+	healthy := &host.FakeExec{Responses: map[string]string{probe: "ok"}}
+	if etcdHealthy(context.Background(), healthy, root) || len(healthy.Calls) != 0 {
+		t.Fatalf("a host without etcd is not healthy and runs nothing, calls %v", healthy.Calls)
+	}
+	if err := os.MkdirAll(filepath.Join(root, "var/lib/k0s/pki/etcd"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	cases := map[string]struct {
+		exec *host.FakeExec
+		want bool
+	}{
+		"ok":      {healthy, true},
+		"failing": {&host.FakeExec{Responses: map[string]string{probe: "[-]etcd failed: reason withheld"}}, false},
+		"down":    {&host.FakeExec{Errors: map[string]error{probe: errors.New("exit status 1")}}, false},
+	}
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			if got := etcdHealthy(context.Background(), tc.exec, root); got != tc.want {
+				t.Fatalf("healthy %v, want %v", got, tc.want)
+			}
+		})
+	}
+}
+
 func TestTimeSynced(t *testing.T) {
 	key := "timedatectl show -p NTPSynchronized --value"
 	cases := []struct {
