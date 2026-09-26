@@ -163,7 +163,7 @@ func fakeKubelets(t *testing.T, ctx context.Context, c client.Client) {
 		t.Fatal(err)
 	}
 	for _, node := range nodes.Items {
-		heartbeat(t, ctx, c, node.Name, time.Now().Add(time.Second))
+		renewLease(t, ctx, c, node.Name, time.Now().Add(time.Second))
 	}
 }
 

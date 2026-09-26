@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	coordinationv1 "k8s.io/api/coordination/v1"
 	corev1 "k8s.io/api/core/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
@@ -60,6 +61,7 @@ type flowInput struct {
 	Target   v1alpha1.Release
 	Hosts    []v1alpha1.Host
 	Nodes    []corev1.Node
+	Leases   []coordinationv1.Lease
 	Upgrades []v1alpha1.NodeUpgrade
 	Progress map[string]string
 	Ceph     string
@@ -97,7 +99,11 @@ func walkNodes(ctx context.Context, env upgradeEnv, cluster v1alpha1.Cluster, fl
 	if len(active) == 0 {
 		return k0sReached(flow.Label, members, target.Spec.K0sVersion), nil
 	}
-	in := flowInput{Flow: flow, Upgrade: upgrade, Target: *target, Hosts: hosts, Nodes: nodes, Upgrades: upgrades, Progress: progress, Ceph: uncordonedCeph(ctx, env, active, progress)}
+	leases, err := nodeLeases(ctx, env.Client)
+	if err != nil {
+		return phaseResult{}, err
+	}
+	in := flowInput{Flow: flow, Upgrade: upgrade, Target: *target, Hosts: hosts, Nodes: nodes, Leases: leases, Upgrades: upgrades, Progress: progress, Ceph: uncordonedCeph(ctx, env, active, progress)}
 	messages := make([]string, 0, len(active))
 	for _, name := range active {
 		move, err := advanceNode(ctx, env.Client, in, name)
@@ -223,7 +229,7 @@ func nodeFactsFor(in flowInput, name string) nodeFacts {
 		HasNode:    hasNode,
 		SingleNode: len(in.Nodes) == 1,
 		Spare:      spareNode(in.Nodes, name),
-		NodeReady:  hasNode && readySince(node, lastFinished(steps)),
+		NodeReady:  hasNode && readySince(node, leaseNamed(in.Leases, name), lastFinished(steps)),
 		Steps:      steps,
 		K0sCurrent: host.Status.K0sVersion == in.Target.Spec.K0sVersion,
 		TargetK0s:  in.Target.Spec.K0sVersion,
@@ -368,13 +374,24 @@ func setNodeProgress(ctx context.Context, c client.Client, name, annotation, pro
 	return c.Patch(ctx, patched, client.MergeFrom(&upgrade))
 }
 
-func readySince(node corev1.Node, since time.Time) bool {
-	index := slices.IndexFunc(node.Status.Conditions, func(condition corev1.NodeCondition) bool { return condition.Type == corev1.NodeReady })
-	if index < 0 {
-		return false
+func readySince(node corev1.Node, lease coordinationv1.Lease, since time.Time) bool {
+	return nodeReady(node) && lease.Spec.RenewTime != nil && lease.Spec.RenewTime.Time.After(since)
+}
+
+func nodeLeases(ctx context.Context, c client.Client) ([]coordinationv1.Lease, error) {
+	var leases coordinationv1.LeaseList
+	if err := c.List(ctx, &leases, client.InNamespace(corev1.NamespaceNodeLease)); err != nil {
+		return nil, err
 	}
-	ready := node.Status.Conditions[index]
-	return ready.Status == corev1.ConditionTrue && ready.LastHeartbeatTime.After(since)
+	return leases.Items, nil
+}
+
+func leaseNamed(leases []coordinationv1.Lease, name string) coordinationv1.Lease {
+	index := slices.IndexFunc(leases, func(lease coordinationv1.Lease) bool { return lease.Name == name })
+	if index < 0 {
+		return coordinationv1.Lease{}
+	}
+	return leases[index]
 }
 
 func lastFinished(steps []v1alpha1.NodeUpgradeStepStatus) time.Time {

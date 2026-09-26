@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	coordinationv1 "k8s.io/api/coordination/v1"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
@@ -108,24 +109,29 @@ func TestSpareNode(t *testing.T) {
 
 func TestReadySince(t *testing.T) {
 	finished := time.Date(2026, 10, 1, 10, 0, 0, 0, time.UTC)
-	node := func(status corev1.ConditionStatus, heartbeat time.Time) corev1.Node {
+	node := func(status corev1.ConditionStatus) corev1.Node {
 		ready := readyNode("node-a", "amd64")
-		ready.Status.Conditions = []corev1.NodeCondition{{Type: corev1.NodeReady, Status: status, LastHeartbeatTime: metav1.NewTime(heartbeat)}}
+		ready.Status.Conditions = []corev1.NodeCondition{{Type: corev1.NodeReady, Status: status, LastHeartbeatTime: metav1.NewTime(finished.Add(-time.Hour))}}
 		return ready
 	}
+	lease := func(renewed time.Time) coordinationv1.Lease {
+		return coordinationv1.Lease{ObjectMeta: metav1.ObjectMeta{Name: "node-a", Namespace: corev1.NamespaceNodeLease}, Spec: coordinationv1.LeaseSpec{RenewTime: &metav1.MicroTime{Time: renewed}}}
+	}
 	cases := map[string]struct {
-		node corev1.Node
-		want bool
+		node  corev1.Node
+		lease coordinationv1.Lease
+		want  bool
 	}{
-		"heartbeat after the step":  {node(corev1.ConditionTrue, finished.Add(time.Second)), true},
-		"heartbeat before the step": {node(corev1.ConditionTrue, finished.Add(-time.Second)), false},
-		"heartbeat at the step":     {node(corev1.ConditionTrue, finished), false},
-		"not ready":                 {node(corev1.ConditionFalse, finished.Add(time.Second)), false},
-		"no ready condition":        {corev1.Node{}, false},
+		"lease renewed after the step":  {node(corev1.ConditionTrue), lease(finished.Add(time.Second)), true},
+		"lease renewed before the step": {node(corev1.ConditionTrue), lease(finished.Add(-time.Second)), false},
+		"lease renewed at the step":     {node(corev1.ConditionTrue), lease(finished), false},
+		"no lease":                      {node(corev1.ConditionTrue), coordinationv1.Lease{}, false},
+		"not ready":                     {node(corev1.ConditionFalse), lease(finished.Add(time.Second)), false},
+		"no ready condition":            {corev1.Node{}, lease(finished.Add(time.Second)), false},
 	}
 	for name, tc := range cases {
 		t.Run(name, func(t *testing.T) {
-			if got := readySince(tc.node, finished); got != tc.want {
+			if got := readySince(tc.node, tc.lease, finished); got != tc.want {
 				t.Fatalf("ready %v, want %v", got, tc.want)
 			}
 		})

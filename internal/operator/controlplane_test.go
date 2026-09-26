@@ -7,9 +7,11 @@ import (
 	"testing"
 	"time"
 
+	coordinationv1 "k8s.io/api/coordination/v1"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 
 	"github.com/cloudyfolks-labs/bedrock/api/v1alpha1"
 )
@@ -72,11 +74,14 @@ func runningPod(t *testing.T, ctx context.Context, c client.Client, name, node s
 	createPod(t, ctx, c, pod)
 }
 
-func heartbeat(t *testing.T, ctx context.Context, c client.Client, name string, at time.Time) {
+func renewLease(t *testing.T, ctx context.Context, c client.Client, name string, at time.Time) {
 	t.Helper()
-	node := getNode(t, ctx, c, name)
-	node.Status.Conditions = []corev1.NodeCondition{{Type: corev1.NodeReady, Status: corev1.ConditionTrue, LastHeartbeatTime: metav1.NewTime(at)}}
-	if err := c.Status().Update(ctx, &node); err != nil {
+	lease := &coordinationv1.Lease{ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: corev1.NamespaceNodeLease}}
+	if _, err := controllerutil.CreateOrUpdate(ctx, c, lease, func() error {
+		lease.Spec.HolderIdentity = &name
+		lease.Spec.RenewTime = &metav1.MicroTime{Time: at}
+		return nil
+	}); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -105,7 +110,7 @@ func TestControlPlanePhaseOnASingleNode(t *testing.T) {
 	reportStep(t, ctx, c, "node-a", v1alpha1.NodeUpgradeStepStatus{Name: v1alpha1.StepK0sUpdate, State: v1alpha1.StepSucceeded, Attempt: 1, FinishedAt: &finished})
 	setK0sVersion(t, ctx, c, "node-a", targetK0s)
 	run(phaseResult{Message: "controlplane: waiting for node-a to be Ready"})
-	heartbeat(t, ctx, c, "node-a", finished.Add(time.Second))
+	renewLease(t, ctx, c, "node-a", finished.Add(time.Second))
 	run(phaseResult{Message: "controlplane: node-a uncordoned"})
 	if getNode(t, ctx, c, "node-a").Spec.Unschedulable {
 		t.Fatal("node-a must be schedulable")
