@@ -61,7 +61,7 @@ func TestTickReportsEtcdHealth(t *testing.T) {
 	}
 	deps.Exec = &host.FakeExec{Responses: map[string]string{
 		"/usr/local/bin/k0s etcd member-list": `{"members":{"a":"https://10.0.0.1:2380"}}`,
-		"/usr/local/bin/k0s kubectl --kubeconfig " + filepath.Join(deps.Root, "var/lib/k0s/pki/admin.conf") + " get --raw /readyz/etcd": "ok",
+		"/usr/local/bin/k0s kubectl --kubeconfig " + filepath.Join(deps.Root, "var/lib/k0s/pki/admin.conf") + " --request-timeout=10s get --raw /readyz/etcd": "ok",
 	}}
 	if err := Tick(context.Background(), k8sClient, deps); err != nil {
 		t.Fatal(err)

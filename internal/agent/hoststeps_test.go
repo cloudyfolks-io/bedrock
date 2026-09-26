@@ -150,10 +150,10 @@ func (h *k0sHost) Run(_ context.Context, name string, args ...string) (string, e
 		return fmt.Sprintf(`{"Version":%q,"Pid":42}`, h.running), nil
 	case call == "/usr/local/bin/k0s status -o json":
 		return "", errors.New("k0s is not running")
-	case call == "/usr/local/bin/k0s kubectl --kubeconfig "+filepath.Join(h.root, "var/lib/k0s/pki/admin.conf")+" get --raw /readyz" && h.readyPolls > 0:
+	case call == readyzCall(h.root) && h.readyPolls > 0:
 		h.readyPolls--
 		return "", errors.New("connection refused")
-	case call == "/usr/local/bin/k0s kubectl --kubeconfig "+filepath.Join(h.root, "var/lib/k0s/pki/admin.conf")+" get --raw /readyz":
+	case call == readyzCall(h.root):
 		return "ok\n", nil
 	}
 	return "", fmt.Errorf("no fake response for %q", call)
@@ -190,7 +190,7 @@ func k0sStepEnv(t *testing.T, node, role string) (StepEnv, *k0sHost) {
 }
 
 func readyzCall(root string) string {
-	return "/usr/local/bin/k0s kubectl --kubeconfig " + filepath.Join(root, "var/lib/k0s/pki/admin.conf") + " get --raw /readyz"
+	return "/usr/local/bin/k0s kubectl --kubeconfig " + filepath.Join(root, "var/lib/k0s/pki/admin.conf") + " --request-timeout=10s get --raw /readyz"
 }
 
 const statusCall = "/usr/local/bin/k0s status -o json"

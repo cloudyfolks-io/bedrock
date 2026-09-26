@@ -92,7 +92,7 @@ func TestEtcdMembers(t *testing.T) {
 
 func TestEtcdHealthy(t *testing.T) {
 	root := t.TempDir()
-	probe := "/usr/local/bin/k0s kubectl --kubeconfig " + filepath.Join(root, "var/lib/k0s/pki/admin.conf") + " get --raw /readyz/etcd"
+	probe := "/usr/local/bin/k0s kubectl --kubeconfig " + filepath.Join(root, "var/lib/k0s/pki/admin.conf") + " --request-timeout=10s get --raw /readyz/etcd"
 	healthy := &host.FakeExec{Responses: map[string]string{probe: "ok"}}
 	if etcdHealthy(context.Background(), healthy, root) || len(healthy.Calls) != 0 {
 		t.Fatalf("a host without etcd is not healthy and runs nothing, calls %v", healthy.Calls)

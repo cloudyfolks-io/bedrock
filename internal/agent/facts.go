@@ -88,7 +88,7 @@ func etcdHealthy(ctx context.Context, e host.Exec, root string) bool {
 }
 
 func apiProblem(ctx context.Context, e host.Exec, root, path string) string {
-	out, err := e.Run(ctx, k0s.DefaultBinary, "kubectl", "--kubeconfig", filepath.Join(root, adminKubeconfig), "get", "--raw", path)
+	out, err := e.Run(ctx, k0s.DefaultBinary, "kubectl", "--kubeconfig", filepath.Join(root, adminKubeconfig), "--request-timeout=10s", "get", "--raw", path)
 	if err != nil {
 		return fmt.Sprintf("%s: %v", path, err)
 	}
