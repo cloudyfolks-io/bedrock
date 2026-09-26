@@ -177,6 +177,40 @@ func TestRunUpgradesRunsCleanupAfterFailure(t *testing.T) {
 	}
 }
 
+func TestRunUpgradesRestoresAfterK0sUpdate(t *testing.T) {
+	cases := map[string]struct {
+		k0sUpdate *v1alpha1.NodeUpgradeStepStatus
+		want      []string
+	}{
+		"K0sUpdate pending":   {nil, []string{"K0sUpdate@v0.3.0<-v0.2.0", "Restore@v0.3.0<-v0.2.0"}},
+		"K0sUpdate succeeded": {&v1alpha1.NodeUpgradeStepStatus{Name: v1alpha1.StepK0sUpdate, State: v1alpha1.StepSucceeded, Attempt: 1}, []string{"Restore@v0.3.0<-v0.2.0"}},
+		"K0sUpdate failed":    {&v1alpha1.NodeUpgradeStepStatus{Name: v1alpha1.StepK0sUpdate, State: v1alpha1.StepFailed, Attempt: 1, Message: "k0s is not ready"}, []string{"Restore@v0.3.0<-v0.2.0"}},
+	}
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			createReleases(t)
+			createUpgrade(t, "node-a", v1alpha1.StepK0sUpdate, v1alpha1.StepRestore)
+			if tc.k0sUpdate != nil {
+				recordStatus(t, "node-a", v1alpha1.NodeUpgradeStatus{Steps: []v1alpha1.NodeUpgradeStepStatus{*tc.k0sUpdate}})
+			}
+			recorder := &stepRecorder{}
+			steps := map[string]Step{
+				v1alpha1.StepK0sUpdate: recorder.step(v1alpha1.StepK0sUpdate, Outcome{}, nil),
+				v1alpha1.StepRestore:   recorder.step(v1alpha1.StepRestore, Outcome{Message: "restored"}, nil),
+			}
+			if err := RunUpgrades(context.Background(), k8sClient, upgradeDeps(t, &host.FakeExec{}, "boot-1"), steps); err != nil {
+				t.Fatal(err)
+			}
+			if !slices.Equal(recorder.calls, tc.want) {
+				t.Fatalf("calls %v, want %v", recorder.calls, tc.want)
+			}
+			if status := stepStatus(getUpgrade(t, "node-a"), v1alpha1.StepRestore); status.State != v1alpha1.StepSucceeded {
+				t.Fatalf("restore status %+v", status)
+			}
+		})
+	}
+}
+
 func TestRunUpgradesRestartsAfterAgentUpdate(t *testing.T) {
 	createReleases(t)
 	createUpgrade(t, "node-a", v1alpha1.StepAgentUpdate, v1alpha1.StepReboot)
