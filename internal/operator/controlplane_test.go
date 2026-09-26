@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"slices"
 	"testing"
+	"time"
 
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -71,6 +72,15 @@ func runningPod(t *testing.T, ctx context.Context, c client.Client, name, node s
 	createPod(t, ctx, c, pod)
 }
 
+func heartbeat(t *testing.T, ctx context.Context, c client.Client, name string, at time.Time) {
+	t.Helper()
+	node := getNode(t, ctx, c, name)
+	node.Status.Conditions = []corev1.NodeCondition{{Type: corev1.NodeReady, Status: corev1.ConditionTrue, LastHeartbeatTime: metav1.NewTime(at)}}
+	if err := c.Status().Update(ctx, &node); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestControlPlanePhaseOnASingleNode(t *testing.T) {
 	c, ctx, run := controlPlaneWorld(t)
 	createDepotHost(t, ctx, c, "node-a", v1alpha1.RoleControlPlane)
@@ -91,9 +101,11 @@ func TestControlPlanePhaseOnASingleNode(t *testing.T) {
 		t.Fatalf("node-a steps %v", started.Spec.Steps)
 	}
 	run(phaseResult{Message: "controlplane: updating node-a: K0sUpdate Pending"})
-	finishSteps(t, ctx, c, "node-a", v1alpha1.StepK0sUpdate)
-	run(phaseResult{Message: "controlplane: waiting for k0s v1.36.3+k0s.0 on node-a"})
+	finished := metav1.NewTime(time.Now().Add(time.Minute))
+	reportStep(t, ctx, c, "node-a", v1alpha1.NodeUpgradeStepStatus{Name: v1alpha1.StepK0sUpdate, State: v1alpha1.StepSucceeded, Attempt: 1, FinishedAt: &finished})
 	setK0sVersion(t, ctx, c, "node-a", targetK0s)
+	run(phaseResult{Message: "controlplane: waiting for node-a to be Ready"})
+	heartbeat(t, ctx, c, "node-a", finished.Add(time.Second))
 	run(phaseResult{Message: "controlplane: node-a uncordoned"})
 	if getNode(t, ctx, c, "node-a").Spec.Unschedulable {
 		t.Fatal("node-a must be schedulable")

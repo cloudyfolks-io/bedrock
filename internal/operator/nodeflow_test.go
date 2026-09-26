@@ -4,8 +4,10 @@ import (
 	"reflect"
 	"slices"
 	"testing"
+	"time"
 
 	corev1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	"github.com/cloudyfolks-labs/bedrock/api/v1alpha1"
 )
@@ -101,6 +103,40 @@ func TestSpareNode(t *testing.T) {
 				t.Fatalf("spare node %v, want %v", got, tc.want)
 			}
 		})
+	}
+}
+
+func TestReadySince(t *testing.T) {
+	finished := time.Date(2026, 10, 1, 10, 0, 0, 0, time.UTC)
+	node := func(status corev1.ConditionStatus, heartbeat time.Time) corev1.Node {
+		ready := readyNode("node-a", "amd64")
+		ready.Status.Conditions = []corev1.NodeCondition{{Type: corev1.NodeReady, Status: status, LastHeartbeatTime: metav1.NewTime(heartbeat)}}
+		return ready
+	}
+	cases := map[string]struct {
+		node corev1.Node
+		want bool
+	}{
+		"heartbeat after the step":  {node(corev1.ConditionTrue, finished.Add(time.Second)), true},
+		"heartbeat before the step": {node(corev1.ConditionTrue, finished.Add(-time.Second)), false},
+		"heartbeat at the step":     {node(corev1.ConditionTrue, finished), false},
+		"not ready":                 {node(corev1.ConditionFalse, finished.Add(time.Second)), false},
+		"no ready condition":        {corev1.Node{}, false},
+	}
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			if got := readySince(tc.node, finished); got != tc.want {
+				t.Fatalf("ready %v, want %v", got, tc.want)
+			}
+		})
+	}
+	steps := []v1alpha1.NodeUpgradeStepStatus{
+		{Name: v1alpha1.StepPreload, FinishedAt: &metav1.Time{Time: finished.Add(-time.Hour)}},
+		{Name: v1alpha1.StepK0sUpdate, FinishedAt: &metav1.Time{Time: finished}},
+		{Name: v1alpha1.StepReboot},
+	}
+	if got := lastFinished(steps); !got.Equal(finished) {
+		t.Fatalf("last finished %v, want %v", got, finished)
 	}
 }
 

@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/rest"
@@ -90,6 +91,7 @@ func reconcileWorld(t *testing.T, w upgradeWorld, restarts int) (string, []strin
 		phases = append(phases, getCluster(t, w.ctx, w.client).Status.Phase)
 	}
 	fakeAgents(t, w.ctx, w.client)
+	fakeKubelets(t, w.ctx, w.client)
 	fakeKubeVirt(t, w.ctx, w.client)
 	return name, phases
 }
@@ -151,6 +153,17 @@ func fakeStepEffect(t *testing.T, ctx context.Context, c client.Client, upgrade 
 	}
 	if err := c.Status().Update(ctx, &host); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func fakeKubelets(t *testing.T, ctx context.Context, c client.Client) {
+	t.Helper()
+	var nodes corev1.NodeList
+	if err := c.List(ctx, &nodes); err != nil {
+		t.Fatal(err)
+	}
+	for _, node := range nodes.Items {
+		heartbeat(t, ctx, c, node.Name, time.Now().Add(time.Second))
 	}
 }
 

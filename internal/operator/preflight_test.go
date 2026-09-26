@@ -33,7 +33,7 @@ func healthyHost(name string) v1alpha1.Host {
 func readyNode(name, arch string) corev1.Node {
 	node := corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: name}}
 	node.Status.NodeInfo.Architecture = arch
-	node.Status.Conditions = []corev1.NodeCondition{{Type: corev1.NodeReady, Status: corev1.ConditionTrue}}
+	node.Status.Conditions = []corev1.NodeCondition{{Type: corev1.NodeReady, Status: corev1.ConditionTrue, LastHeartbeatTime: metav1.Now()}}
 	return node
 }
 

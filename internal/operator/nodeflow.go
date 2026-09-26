@@ -7,6 +7,7 @@ import (
 	"maps"
 	"slices"
 	"strings"
+	"time"
 
 	corev1 "k8s.io/api/core/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -222,7 +223,7 @@ func nodeFactsFor(in flowInput, name string) nodeFacts {
 		HasNode:    hasNode,
 		SingleNode: len(in.Nodes) == 1,
 		Spare:      spareNode(in.Nodes, name),
-		NodeReady:  hasNode && nodeReady(node),
+		NodeReady:  hasNode && readySince(node, lastFinished(steps)),
 		Steps:      steps,
 		K0sCurrent: host.Status.K0sVersion == in.Target.Spec.K0sVersion,
 		TargetK0s:  in.Target.Spec.K0sVersion,
@@ -365,4 +366,23 @@ func setNodeProgress(ctx context.Context, c client.Client, name, annotation, pro
 	patched := upgrade.DeepCopy()
 	patched.Annotations = annotations
 	return c.Patch(ctx, patched, client.MergeFrom(&upgrade))
+}
+
+func readySince(node corev1.Node, since time.Time) bool {
+	index := slices.IndexFunc(node.Status.Conditions, func(condition corev1.NodeCondition) bool { return condition.Type == corev1.NodeReady })
+	if index < 0 {
+		return false
+	}
+	ready := node.Status.Conditions[index]
+	return ready.Status == corev1.ConditionTrue && ready.LastHeartbeatTime.After(since)
+}
+
+func lastFinished(steps []v1alpha1.NodeUpgradeStepStatus) time.Time {
+	var last time.Time
+	for _, step := range steps {
+		if step.FinishedAt != nil && step.FinishedAt.After(last) {
+			last = step.FinishedAt.Time
+		}
+	}
+	return last
 }
