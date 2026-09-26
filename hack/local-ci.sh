@@ -259,7 +259,7 @@ cleanup() {
     kill -TERM "-$job_pid" 2>/dev/null || true
   fi
   if [ -n "$watcher_pid" ]; then
-    kill -TERM "$watcher_pid" 2>/dev/null || true
+    kill -TERM "-$watcher_pid" 2>/dev/null || true
   fi
   if [ -n "$job_pid" ]; then
     wait "$job_pid" 2>/dev/null || true
@@ -301,14 +301,14 @@ for job in "${job_order[@]}"; do
     "run_${job//-/_}"
   ) </dev/null &
   job_pid=$!
-  set +m
   watch_floor "$job" "$job_pid" &
   watcher_pid=$!
+  set +m
   set +e
   wait "$job_pid"
   code=$?
   set -e
-  kill "$watcher_pid" 2>/dev/null || true
+  kill -TERM "-$watcher_pid" 2>/dev/null || true
   wait "$watcher_pid" 2>/dev/null || true
   job_pid=""
   watcher_pid=""
