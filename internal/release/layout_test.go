@@ -82,7 +82,7 @@ func TestPullLayoutWritesFullIndex(t *testing.T) {
 		t.Fatal(err)
 	}
 	dest := t.TempDir() + "/app.tar"
-	digest, err := PullLayout(context.Background(), ref.String(), dest)
+	digest, err := PullLayout(context.Background(), ref.String(), dest, t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -123,7 +123,7 @@ func TestPullLayoutNamesTheIndex(t *testing.T) {
 		t.Fatal(err)
 	}
 	dest := t.TempDir() + "/named-index.tar"
-	digest, err := PullLayout(context.Background(), ref.String(), dest)
+	digest, err := PullLayout(context.Background(), ref.String(), dest, t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -179,7 +179,7 @@ func TestPullLayoutNamesAPinnedTagTwice(t *testing.T) {
 	}
 	pinned := host + "/lib/pinned:1.0@" + digest.String()
 	dest := t.TempDir() + "/pinned.tar"
-	if _, err := PullLayout(context.Background(), pinned, dest); err != nil {
+	if _, err := PullLayout(context.Background(), pinned, dest, t.TempDir()); err != nil {
 		t.Fatal(err)
 	}
 	var names []string
@@ -211,7 +211,7 @@ func TestPullLayoutNamesTheSingleImage(t *testing.T) {
 		t.Fatal(err)
 	}
 	dest := t.TempDir() + "/single.tar"
-	digest, err := PullLayout(context.Background(), ref.String(), dest)
+	digest, err := PullLayout(context.Background(), ref.String(), dest, t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -239,7 +239,7 @@ func TestPullLayoutFailsForMissingImage(t *testing.T) {
 	defer server.Close()
 	host := strings.TrimPrefix(server.URL, "http://")
 	dest := t.TempDir() + "/missing.tar"
-	if _, err := PullLayout(context.Background(), host+"/lib/missing:1", dest); err == nil {
+	if _, err := PullLayout(context.Background(), host+"/lib/missing:1", dest, t.TempDir()); err == nil {
 		t.Fatal("expected error")
 	}
 	if _, err := os.Stat(dest); !os.IsNotExist(err) {

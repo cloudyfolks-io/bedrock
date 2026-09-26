@@ -11,6 +11,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strings"
 	"testing"
 
@@ -46,8 +47,10 @@ func TestRunBundleBuildProducesArchive(t *testing.T) {
 	writeBundleRelease(t, releaseDir, "sha256:"+hex.EncodeToString(sum[:]))
 	airgap := filepath.Join(t.TempDir(), "airgap.tar")
 	os.WriteFile(airgap, []byte("airgap"), 0o644)
+	var pullCaches []string
 	deps := BundleDeps{
-		Pull: func(_ context.Context, ref, dest string) (string, error) {
+		Pull: func(_ context.Context, ref, dest, cacheDir string) (string, error) {
+			pullCaches = append(pullCaches, cacheDir)
 			return "sha256:" + strings.Repeat("f", 64), os.WriteFile(dest, []byte(ref), 0o644)
 		},
 		Airgap: func(_ context.Context, _, _, _, _ string) (string, error) { return airgap, nil },
@@ -64,6 +67,9 @@ func TestRunBundleBuildProducesArchive(t *testing.T) {
 	}
 	if spec.Version != "v0.1.0" || len(spec.Images) != 2 {
 		t.Fatalf("spec %+v", spec)
+	}
+	if !slices.Equal(pullCaches, []string{cache, cache}) {
+		t.Fatalf("pull cache dirs %v, want %s for every image", pullCaches, cache)
 	}
 	if !strings.Contains(stdout.String(), out) {
 		t.Fatalf("stdout %q", stdout.String())
@@ -83,7 +89,7 @@ func TestRunBundleBuildDownloadsK0sWhenMissing(t *testing.T) {
 	airgap := filepath.Join(t.TempDir(), "airgap.tar")
 	os.WriteFile(airgap, []byte("airgap"), 0o644)
 	deps := BundleDeps{
-		Pull: func(_ context.Context, ref, dest string) (string, error) {
+		Pull: func(_ context.Context, ref, dest, _ string) (string, error) {
 			return "sha256:" + strings.Repeat("f", 64), os.WriteFile(dest, []byte(ref), 0o644)
 		},
 		Airgap: func(_ context.Context, _, _, _, _ string) (string, error) { return airgap, nil },

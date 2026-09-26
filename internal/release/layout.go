@@ -6,9 +6,11 @@ import (
 	"fmt"
 	"io"
 	"io/fs"
+	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/google/go-containerregistry/pkg/name"
 	"github.com/google/go-containerregistry/pkg/v1/empty"
@@ -21,12 +23,18 @@ const (
 	annotationImageName = "io.containerd.image.name"
 )
 
-func PullLayout(ctx context.Context, ref, dest string) (string, error) {
+var pullBackoff = remote.Backoff{Duration: time.Second, Factor: 3, Jitter: 0.1, Steps: 5}
+
+func PullLayout(ctx context.Context, ref, dest, cacheDir string) (string, error) {
+	return pullLayout(ctx, remote.DefaultTransport, ref, dest, cacheDir)
+}
+
+func pullLayout(ctx context.Context, next http.RoundTripper, ref, dest, cacheDir string) (string, error) {
 	parsed, err := name.ParseReference(ref)
 	if err != nil {
 		return "", err
 	}
-	desc, err := remote.Get(parsed, remote.WithContext(ctx))
+	desc, err := remote.Get(parsed, remote.WithContext(ctx), remote.WithTransport(blobCache{dir: cacheDir, next: next}), remote.WithRetryBackoff(pullBackoff))
 	if err != nil {
 		return "", fmt.Errorf("pull %s: %w", ref, err)
 	}
