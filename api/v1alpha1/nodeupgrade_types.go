@@ -7,6 +7,7 @@ import (
 const (
 	StepPreload     = "Preload"
 	StepBackup      = "Backup"
+	StepK0sUpdate   = "K0sUpdate"
 	StepAgentUpdate = "AgentUpdate"
 	StepOSUpdate    = "OSUpdate"
 	StepReboot      = "Reboot"
@@ -47,9 +48,9 @@ type NodeUpgradeSpec struct {
 	Attempt int32 `json:"attempt"`
 	// +optional
 	// +listType=set
-	// +kubebuilder:validation:MaxItems=8
+	// +kubebuilder:validation:MaxItems=9
 	// +kubebuilder:validation:items:MaxLength=16
-	// +kubebuilder:validation:items:Enum=Preload;Backup;AgentUpdate;OSUpdate;Reboot;Prune;Cleanup;Restore
+	// +kubebuilder:validation:items:Enum=Preload;Backup;K0sUpdate;AgentUpdate;OSUpdate;Reboot;Prune;Cleanup;Restore
 	Steps []string `json:"steps,omitempty"`
 }
 

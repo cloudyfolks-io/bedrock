@@ -21,7 +21,7 @@ func TestNodeUpgradeValidation(t *testing.T) {
 	if err := c.Create(ctx, upgrade); err != nil {
 		t.Fatal(err)
 	}
-	upgrade.Spec.Steps = append(upgrade.Spec.Steps, v1alpha1.StepBackup)
+	upgrade.Spec.Steps = append(upgrade.Spec.Steps, v1alpha1.StepBackup, v1alpha1.StepK0sUpdate)
 	upgrade.Spec.Backup = "/var/lib/bedrock/backups/a.tar.gz"
 	upgrade.Spec.Attempt = 2
 	if err := c.Update(ctx, upgrade); err != nil {

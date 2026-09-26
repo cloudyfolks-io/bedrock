@@ -82,6 +82,7 @@ spec:
                   enum:
                   - Preload
                   - Backup
+                  - K0sUpdate
                   - AgentUpdate
                   - OSUpdate
                   - Reboot
@@ -90,7 +91,7 @@ spec:
                   - Restore
                   maxLength: 16
                   type: string
-                maxItems: 8
+                maxItems: 9
                 type: array
                 x-kubernetes-list-type: set
               version:
