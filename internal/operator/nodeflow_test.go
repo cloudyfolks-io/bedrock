@@ -197,10 +197,10 @@ func TestNextNodeMove(t *testing.T) {
 			f.Etcd = "etcd: cp-b is not healthy"
 			return f
 		}), nodeMove{Cordon: true, Progress: nodeDraining, Message: "w-a cordoned"}},
-		"a drained controller gets its steps": {with(func(f nodeFacts) nodeFacts {
+		"a drained controller waits for etcd before its steps": {with(func(f nodeFacts) nodeFacts {
 			f.Progress, f.Controller, f.Etcd = nodeDraining, true, "etcd: cp-b is not healthy"
 			return f
-		}), nodeMove{Append: true, Progress: nodeUpdating, Message: "w-a drained"}},
+		}), nodeMove{Message: "waiting before updating w-a: etcd: cp-b is not healthy"}},
 		"controller on a one-node cluster waits for etcd": {with(func(f nodeFacts) nodeFacts {
 			f.SingleNode, f.Controller, f.Etcd = true, true, "etcd: w-a is not healthy"
 			return f

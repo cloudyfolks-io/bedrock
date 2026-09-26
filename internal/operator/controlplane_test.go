@@ -238,6 +238,12 @@ func TestControlPlanePhaseWalksControllersOneAtATime(t *testing.T) {
 	if err := c.Delete(ctx, &evicted, client.GracePeriodSeconds(0)); err != nil {
 		t.Fatal(err)
 	}
+	setEtcd(t, ctx, c, "node-c", 2, false)
+	run(phaseResult{Message: "controlplane: waiting before updating node-a: etcd: node-c is not healthy"})
+	if steps := getNodeUpgrade(t, ctx, c, "node-a").Spec.Steps; !slices.Equal(steps, []string{v1alpha1.StepPreload}) {
+		t.Fatalf("a drained controller must not get its steps while a peer is unhealthy: %v", steps)
+	}
+	setEtcd(t, ctx, c, "node-c", 2, true)
 	run(phaseResult{Message: "controlplane: node-a drained"})
 	if err := setUnschedulable(ctx, c, "node-b", false); err != nil {
 		t.Fatal(err)

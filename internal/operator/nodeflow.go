@@ -265,7 +265,7 @@ func nextNodeMove(f nodeFacts) nodeMove {
 func startMove(f nodeFacts) nodeMove {
 	switch {
 	case f.Controller && f.Etcd != "":
-		return nodeMove{Message: fmt.Sprintf("waiting before updating %s: %s", f.Name, f.Etcd)}
+		return etcdWait(f)
 	case !f.HasNode || f.SingleNode:
 		return nodeMove{Append: true, Progress: nodeUpdating, Message: f.Name + " drain skipped"}
 	case !f.Spare:
@@ -275,10 +275,17 @@ func startMove(f nodeFacts) nodeMove {
 }
 
 func drainingMove(f nodeFacts) nodeMove {
-	if len(f.PodsLeft) > 0 {
+	switch {
+	case len(f.PodsLeft) > 0:
 		return nodeMove{Message: fmt.Sprintf("draining %s: %s", f.Name, strings.Join(f.PodsLeft, ", "))}
+	case f.Controller && f.Etcd != "":
+		return etcdWait(f)
 	}
 	return nodeMove{Append: true, Progress: nodeUpdating, Message: f.Name + " drained"}
+}
+
+func etcdWait(f nodeFacts) nodeMove {
+	return nodeMove{Message: fmt.Sprintf("waiting before updating %s: %s", f.Name, f.Etcd)}
 }
 
 func updatingMove(f nodeFacts) nodeMove {
