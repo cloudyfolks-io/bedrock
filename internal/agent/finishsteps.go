@@ -28,6 +28,7 @@ const (
 	restoreMarker     = "var/lib/bedrock/restore.json"
 	k0sDataDir        = "var/lib/k0s"
 	k0sControllerUnit = "k0scontroller.service"
+	k0sWorkerUnit     = "k0sworker.service"
 	preRestorePrefix  = ".pre-restore-"
 )
 
