@@ -65,9 +65,10 @@ EOF
 The file `/var/lib/bedrock/restore.json` is the same marker that the agent
 writes after an automatic restore. The agent reports it in
 `Host.status.restore`. The operator then ends the upgrade: it removes the
-staged files, sets `desiredVersion` back and sets reason `Aborted`. Do not
-skip this step. Without the marker, the restored operator continues the
-upgrade from the Backup phase.
+staged files and the `/var/lib/k0s/.pre-restore-*` directories, sets
+`desiredVersion` back and sets reason `Aborted`. Do not skip this step.
+Without the marker, the restored operator continues the upgrade from the
+Backup phase.
 
 The archive also contains the OVN databases `ovnnb_db.db` and `ovnsb_db.db`.
 This procedure does not use them.

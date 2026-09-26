@@ -135,6 +135,28 @@ func TestCleanupRemovesTargetOnlyImagesAndKeepsTheDepot(t *testing.T) {
 	}
 }
 
+func TestCleanupRemovesPreRestoreData(t *testing.T) {
+	env, _ := finishEnv(t, nil)
+	root := env.Deps.Root
+	for _, holder := range []string{".pre-restore-20261001T110000Z", ".pre-restore-20261002T090000Z"} {
+		writeFixtureFile(t, filepath.Join(root, "var/lib/k0s", holder, "etcd", "data"), "old etcd")
+	}
+	writeFixtureFile(t, filepath.Join(root, "var/lib/k0s/etcd/data"), "etcd")
+	if _, err := cleanup(context.Background(), env); err != nil {
+		t.Fatal(err)
+	}
+	leftover, err := filepath.Glob(filepath.Join(root, "var/lib/k0s/.pre-restore-*"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(leftover) != 0 {
+		t.Fatalf("cleanup must remove the data a restore moved aside: %v", leftover)
+	}
+	if readFixtureFile(t, filepath.Join(root, "var/lib/k0s/etcd/data")) != "etcd" {
+		t.Fatal("the live k0s data must stay")
+	}
+}
+
 func writeImageTarball(t *testing.T, root, name string) {
 	t.Helper()
 	writeFixtureFile(t, filepath.Join(root, k0sImagesDir, name), "tar")

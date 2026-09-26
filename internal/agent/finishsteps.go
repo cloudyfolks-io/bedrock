@@ -13,6 +13,7 @@ import (
 	"path"
 	"path/filepath"
 	"slices"
+	"strings"
 	"time"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -27,6 +28,7 @@ const (
 	restoreMarker     = "var/lib/bedrock/restore.json"
 	k0sDataDir        = "var/lib/k0s"
 	k0sControllerUnit = "k0scontroller.service"
+	preRestorePrefix  = ".pre-restore-"
 )
 
 var k0sRestoreTargets = []string{"etcd", "pki", "manifests", "images", "helmhome"}
@@ -61,6 +63,9 @@ func cleanup(ctx context.Context, env StepEnv) (Outcome, error) {
 		return Outcome{}, err
 	}
 	if err := removeUpgradeFiles(deps.Root, env.Upgrade.Spec.Version); err != nil {
+		return Outcome{}, err
+	}
+	if err := removePreRestoreData(deps.Root); err != nil {
 		return Outcome{}, err
 	}
 	return Outcome{Message: fmt.Sprintf("removed %d images", count)}, nil
@@ -149,6 +154,26 @@ func removeUpgradeFiles(root, version string) error {
 	return errors.Join(os.RemoveAll(filepath.Join(root, stagedDir, version)), os.RemoveAll(filepath.Join(root, previousK0s)))
 }
 
+func removePreRestoreData(root string) error {
+	dir := filepath.Join(root, k0sDataDir)
+	entries, err := os.ReadDir(dir)
+	if errors.Is(err, fs.ErrNotExist) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	for _, entry := range entries {
+		if !strings.HasPrefix(entry.Name(), preRestorePrefix) {
+			continue
+		}
+		if err := os.RemoveAll(filepath.Join(dir, entry.Name())); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 func removeOtherDepots(root, keep string) error {
 	entries, err := os.ReadDir(filepath.Join(root, depot.Dir))
 	if errors.Is(err, fs.ErrNotExist) {
@@ -189,7 +214,7 @@ func restore(ctx context.Context, env StepEnv) (Outcome, error) {
 	if err := replaceBinary(filepath.Join(deps.Root, previousK0s), filepath.Join(deps.Root, k0s.DefaultBinary)); err != nil {
 		return Outcome{}, fmt.Errorf("previous k0s: %w", err)
 	}
-	holder := ".pre-restore-" + deps.Now().UTC().Format("20060102T150405Z")
+	holder := preRestorePrefix + deps.Now().UTC().Format("20060102T150405Z")
 	if err := moveAside(filepath.Join(deps.Root, k0sDataDir), k0sRestoreTargets, holder); err != nil {
 		return Outcome{}, err
 	}
