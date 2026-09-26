@@ -38,6 +38,16 @@ dump() {
     journalctl -u k0scontroller --no-pager -n 200 || true
     echo "--- depot and backups"
     find /var/lib/bedrock -maxdepth 4 | head -100 || true
+    echo "--- disk"
+    df -h / /var/lib || true
+    echo "--- node conditions"
+    kubectl describe nodes | sed -n '/Conditions/,/Addresses/p' || true
+    echo "--- events"
+    kubectl get events -A --sort-by=.lastTimestamp | tail -60 || true
+    echo "--- out of memory"
+    dmesg | grep -i -E 'oom|out of memory' | tail -20 || true
+    echo "--- vmis"
+    kubectl get vmi -A -o wide || true
   fi
   rm -rf "$workdir"
 }
