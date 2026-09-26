@@ -224,14 +224,18 @@ func TestRunUpgradesRebootsAndFinishesAfterBoot(t *testing.T) {
 	}
 }
 
-func recordRunning(t *testing.T, node, name string, started time.Time) {
+func recordStatus(t *testing.T, node string, status v1alpha1.NodeUpgradeStatus) {
 	t.Helper()
 	upgrade := getUpgrade(t, node)
-	startedAt := metav1.NewTime(started)
-	upgrade.Status.Steps = []v1alpha1.NodeUpgradeStepStatus{{Name: name, State: v1alpha1.StepRunning, Attempt: 1, StartedAt: &startedAt}}
+	upgrade.Status = status
 	if err := k8sClient.Status().Update(context.Background(), &upgrade); err != nil {
 		t.Fatal(err)
 	}
+}
+
+func runningSince(name string, started time.Time) v1alpha1.NodeUpgradeStepStatus {
+	startedAt := metav1.NewTime(started)
+	return v1alpha1.NodeUpgradeStepStatus{Name: name, State: v1alpha1.StepRunning, Attempt: 1, StartedAt: &startedAt}
 }
 
 func writeRestoreFixture(t *testing.T, root string, completed time.Time) {
@@ -244,7 +248,7 @@ func TestRunUpgradesDoesNotRerunAStepFromBeforeTheRestore(t *testing.T) {
 	createReleases(t)
 	createUpgrade(t, "node-a", v1alpha1.StepBackup, v1alpha1.StepCleanup)
 	started := time.Date(2026, 10, 1, 9, 0, 0, 0, time.UTC)
-	recordRunning(t, "node-a", v1alpha1.StepBackup, started)
+	recordStatus(t, "node-a", v1alpha1.NodeUpgradeStatus{Steps: []v1alpha1.NodeUpgradeStepStatus{runningSince(v1alpha1.StepBackup, started)}})
 	deps := upgradeDeps(t, &host.FakeExec{}, "boot-1")
 	writeRestoreFixture(t, deps.Root, time.Date(2026, 10, 1, 9, 30, 0, 0, time.UTC))
 	recorder := &stepRecorder{}
@@ -267,7 +271,7 @@ func TestRunUpgradesDoesNotRerunAStepFromBeforeTheRestore(t *testing.T) {
 func TestRunUpgradesRerunsAStepStartedAfterTheRestore(t *testing.T) {
 	createReleases(t)
 	createUpgrade(t, "node-a", v1alpha1.StepCleanup)
-	recordRunning(t, "node-a", v1alpha1.StepCleanup, time.Date(2026, 10, 1, 9, 45, 0, 0, time.UTC))
+	recordStatus(t, "node-a", v1alpha1.NodeUpgradeStatus{Steps: []v1alpha1.NodeUpgradeStepStatus{runningSince(v1alpha1.StepCleanup, time.Date(2026, 10, 1, 9, 45, 0, 0, time.UTC))}})
 	deps := upgradeDeps(t, &host.FakeExec{}, "boot-1")
 	writeRestoreFixture(t, deps.Root, time.Date(2026, 10, 1, 9, 30, 0, 0, time.UTC))
 	recorder := &stepRecorder{}
@@ -277,6 +281,64 @@ func TestRunUpgradesRerunsAStepStartedAfterTheRestore(t *testing.T) {
 	}
 	if !slices.Equal(recorder.calls, []string{"Cleanup@v0.3.0<-v0.2.0"}) {
 		t.Fatalf("a step interrupted after the restore must run again: calls %v", recorder.calls)
+	}
+}
+
+func TestRunUpgradesDoesNotFinishARebootFromBeforeTheRestore(t *testing.T) {
+	createReleases(t)
+	createUpgrade(t, "node-a", v1alpha1.StepReboot, v1alpha1.StepPrune)
+	recordStatus(t, "node-a", v1alpha1.NodeUpgradeStatus{BootID: "boot-0", Steps: []v1alpha1.NodeUpgradeStepStatus{runningSince(v1alpha1.StepReboot, time.Date(2026, 10, 1, 9, 0, 0, 0, time.UTC))}})
+	exec := &host.FakeExec{}
+	deps := upgradeDeps(t, exec, "boot-1")
+	writeRestoreFixture(t, deps.Root, time.Date(2026, 10, 1, 9, 30, 0, 0, time.UTC))
+	recorder := &stepRecorder{}
+	steps := map[string]Step{v1alpha1.StepReboot: recorder.step(v1alpha1.StepReboot, Outcome{Reboot: true}, nil), v1alpha1.StepPrune: recorder.step(v1alpha1.StepPrune, Outcome{}, nil)}
+	if err := RunUpgrades(context.Background(), k8sClient, deps, steps); err != nil {
+		t.Fatal(err)
+	}
+	if len(recorder.calls) != 0 || len(exec.Calls) != 0 {
+		t.Fatalf("a Reboot from before the restore must neither run nor finish: calls %v, host calls %v", recorder.calls, exec.Calls)
+	}
+	if status := stepStatus(getUpgrade(t, "node-a"), v1alpha1.StepReboot); status.State != v1alpha1.StepRunning {
+		t.Fatalf("reboot status %+v", status)
+	}
+}
+
+func TestRunUpgradesDoesNotRerunARestoreFromBeforeTheMarker(t *testing.T) {
+	createReleases(t)
+	createUpgrade(t, "node-a", v1alpha1.StepRestore, v1alpha1.StepCleanup)
+	recordStatus(t, "node-a", v1alpha1.NodeUpgradeStatus{Steps: []v1alpha1.NodeUpgradeStepStatus{runningSince(v1alpha1.StepRestore, time.Date(2026, 10, 1, 9, 0, 0, 0, time.UTC))}})
+	deps := upgradeDeps(t, &host.FakeExec{}, "boot-1")
+	writeRestoreFixture(t, deps.Root, time.Date(2026, 10, 1, 9, 30, 0, 0, time.UTC))
+	recorder := &stepRecorder{}
+	steps := map[string]Step{v1alpha1.StepRestore: recorder.step(v1alpha1.StepRestore, Outcome{}, nil), v1alpha1.StepCleanup: recorder.step(v1alpha1.StepCleanup, Outcome{}, nil)}
+	if err := RunUpgrades(context.Background(), k8sClient, deps, steps); err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Equal(recorder.calls, []string{"Cleanup@v0.3.0<-v0.2.0"}) {
+		t.Fatalf("the marker proves the restore completed, it must not run again: calls %v", recorder.calls)
+	}
+	if status := stepStatus(getUpgrade(t, "node-a"), v1alpha1.StepRestore); status.State != v1alpha1.StepRunning {
+		t.Fatalf("restore status %+v", status)
+	}
+}
+
+func TestRunUpgradesIgnoresARestoreMarkerFromTheFuture(t *testing.T) {
+	createReleases(t)
+	createUpgrade(t, "node-a", v1alpha1.StepReboot, v1alpha1.StepPrune)
+	recordStatus(t, "node-a", v1alpha1.NodeUpgradeStatus{BootID: "boot-0", Steps: []v1alpha1.NodeUpgradeStepStatus{runningSince(v1alpha1.StepReboot, time.Date(2026, 10, 1, 9, 0, 0, 0, time.UTC))}})
+	deps := upgradeDeps(t, &host.FakeExec{}, "boot-1")
+	writeRestoreFixture(t, deps.Root, time.Date(2026, 10, 1, 12, 0, 0, 0, time.UTC))
+	recorder := &stepRecorder{}
+	steps := map[string]Step{v1alpha1.StepReboot: recorder.step(v1alpha1.StepReboot, Outcome{Reboot: true}, nil), v1alpha1.StepPrune: recorder.step(v1alpha1.StepPrune, Outcome{}, nil)}
+	if err := RunUpgrades(context.Background(), k8sClient, deps, steps); err != nil {
+		t.Fatal(err)
+	}
+	if status := stepStatus(getUpgrade(t, "node-a"), v1alpha1.StepReboot); status.State != v1alpha1.StepSucceeded || status.Message != "rebooted" {
+		t.Fatalf("a marker after now must not block the Reboot: %+v", status)
+	}
+	if !slices.Equal(recorder.calls, []string{"Prune@v0.3.0<-v0.2.0"}) {
+		t.Fatalf("calls %v", recorder.calls)
 	}
 }
 

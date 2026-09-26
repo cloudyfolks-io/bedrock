@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+	"time"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/fields"
@@ -63,7 +64,7 @@ func RunUpgrades(ctx context.Context, c client.Client, deps Deps, steps map[stri
 	upgrades := slices.Clone(list.Items)
 	slices.SortFunc(upgrades, func(a, b v1alpha1.NodeUpgrade) int { return strings.Compare(a.Name, b.Name) })
 	bootID := readBootID(deps.Root)
-	restored := readRestoreMarker(deps.Root)
+	restored := pastRestore(readRestoreMarker(deps.Root), deps.Now())
 	for _, upgrade := range upgrades {
 		stopped, err := runUpgrade(ctx, c, deps, steps, upgrade, bootID, restored)
 		if err != nil || stopped {
@@ -148,6 +149,13 @@ func stepAction(current v1alpha1.NodeUpgradeStepStatus, name string, attempt int
 		return decisionBlock
 	}
 	return decisionRun
+}
+
+func pastRestore(marker *v1alpha1.RestoreStatus, now time.Time) *v1alpha1.RestoreStatus {
+	if marker == nil || marker.CompletedAt.After(now) {
+		return nil
+	}
+	return marker
 }
 
 func startedBeforeRestore(step v1alpha1.NodeUpgradeStepStatus, restored *v1alpha1.RestoreStatus) bool {
