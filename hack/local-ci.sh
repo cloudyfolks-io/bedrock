@@ -4,7 +4,8 @@ set -euo pipefail
 profile=${CI_PROFILE:-bedrock-ci}
 cpus=${CI_CPUS:-6}
 memory=${CI_MEMORY:-11}
-disk=${CI_DISK:-60}
+disk=${CI_DISK:-16}
+root_disk=${CI_ROOT_DISK:-44}
 min_free=${CI_MIN_FREE_GB:-25}
 port=${CI_REGISTRY_PORT:-5001}
 repo=$(git rev-parse --show-toplevel)
@@ -66,18 +67,32 @@ restore_context() {
 }
 
 vm_up() {
-  colima start --profile "$profile" --vm-type vz --cpu "$cpus" --memory "$memory" --disk "$disk" --runtime docker --mount "$repo:w"
+  colima start --profile "$profile" --vm-type vz --cpu "$cpus" --memory "$memory" --disk "$disk" --root-disk "$root_disk" --runtime docker --mount "$repo:w"
   restore_context
   colima ssh --profile "$profile" -- sudo apt-get update -qq
-  colima ssh --profile "$profile" -- sudo apt-get install -y -qq gettext-base
+  colima ssh --profile "$profile" -- sudo apt-get install -y -qq gettext-base iputils-ping
   colima ssh --profile "$profile" -- sudo tee /usr/local/bin/kubectl >/dev/null <<'SCRIPT'
 #!/bin/sh
 exec /usr/local/bin/k0s kubectl "$@"
 SCRIPT
   colima ssh --profile "$profile" -- sudo chmod +x /usr/local/bin/kubectl
+  if ! wait_ntp; then
+    echo "warning: the VM clock is not NTP synchronized" >&2
+  fi
   if [ -n "$proxy_https" ]; then
     use_proxy
   fi
+}
+
+wait_ntp() {
+  local i
+  for i in $(seq 1 24); do
+    if [ "$(colima ssh --profile "$profile" -- timedatectl show -p NTPSynchronized --value)" = "yes" ]; then
+      return 0
+    fi
+    sleep 5
+  done
+  return 1
 }
 
 vm_url() {
@@ -187,6 +202,10 @@ run_e2e_bundle() {
 run_upgrade() {
   local abort_in=$1
   vm_up
+  if [ "$(colima ssh --profile "$profile" -- timedatectl show -p NTPSynchronized --value)" != "yes" ]; then
+    echo "the VM clock is not NTP synchronized; the upgrade Preflight would block" >&2
+    return 1
+  fi
   env "${mac_env[@]}" docker run --rm -d -p "$port:5000" --name registry registry:3
   wait_registry
   env "${mac_env[@]}" REGISTRY=localhost:$port ARCH=$arch VERSION_A=v0.0.0-e2e.1 VERSION_B=v0.0.0-e2e.2 K0S_A=v1.36.2+k0s.0 K0S_B=v1.36.3+k0s.0 hack/e2e-upgrade-build.sh
