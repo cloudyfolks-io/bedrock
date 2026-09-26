@@ -22,10 +22,11 @@ var certificateDirs = []string{"var/lib/k0s/pki", "var/lib/k0s/pki/etcd"}
 var kubeletCertificates = []string{"var/lib/kubelet/pki/kubelet-client-current.pem", "var/lib/kubelet/pki/kubelet-server-current.pem"}
 
 func hostChecks(ctx context.Context, deps Deps) *v1alpha1.HostChecks {
-	free, _ := deps.FreeBytes(filepath.Join(deps.Root, "var", "lib"))
+	space, _ := deps.DiskSpace(filepath.Join(deps.Root, "var", "lib"))
 	return &v1alpha1.HostChecks{
 		TimeSynced:           timeSynced(ctx, deps.Exec),
-		VarLibFreeBytes:      int64(free),
+		VarLibFreeBytes:      int64(space.FreeBytes),
+		VarLibSizeBytes:      int64(space.SizeBytes),
 		CertificatesNotAfter: certificatesNotAfter(deps.Root),
 		EtcdMembers:          etcdMembers(ctx, deps.Exec, deps.Root),
 		ImagesBytes:          imagesBytes(deps.Root),

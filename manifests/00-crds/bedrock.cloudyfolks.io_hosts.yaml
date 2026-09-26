@@ -134,6 +134,9 @@ spec:
                   varLibFreeBytes:
                     format: int64
                     type: integer
+                  varLibSizeBytes:
+                    format: int64
+                    type: integer
                 type: object
               conditions:
                 items:

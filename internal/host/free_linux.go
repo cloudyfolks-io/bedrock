@@ -2,10 +2,10 @@ package host
 
 import "syscall"
 
-func FreeBytes(path string) (uint64, error) {
+func DiskSpace(path string) (Space, error) {
 	var stat syscall.Statfs_t
 	if err := syscall.Statfs(path, &stat); err != nil {
-		return 0, err
+		return Space{}, err
 	}
-	return stat.Bavail * uint64(stat.Bsize), nil
+	return Space{FreeBytes: stat.Bavail * uint64(stat.Bsize), SizeBytes: stat.Blocks * uint64(stat.Bsize)}, nil
 }

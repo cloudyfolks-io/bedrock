@@ -159,6 +159,8 @@ type HostChecks struct {
 	// +optional
 	VarLibFreeBytes int64 `json:"varLibFreeBytes,omitempty"`
 	// +optional
+	VarLibSizeBytes int64 `json:"varLibSizeBytes,omitempty"`
+	// +optional
 	CertificatesNotAfter *metav1.Time `json:"certificatesNotAfter,omitempty"`
 	// +optional
 	EtcdMembers int32 `json:"etcdMembers,omitempty"`

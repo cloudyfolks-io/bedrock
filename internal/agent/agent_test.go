@@ -30,7 +30,7 @@ func fakeInventory(ctx context.Context, _ host.Exec, _ string) (v1alpha1.Invento
 }
 
 func newDeps(exec *host.FakeExec, now time.Time) Deps {
-	return Deps{Exec: exec, Root: "/nonexistent", Node: "node-a", Now: func() time.Time { return now }, Interval: time.Hour, Inventory: fakeInventory, Apply: hostconfig.Apply, Packages: pkgmgr.Manager{Exec: exec, Family: "apt", Root: "/nonexistent"}, Version: "test", Hostname: func() (string, error) { return "node-a", nil }, FreeBytes: func(string) (uint64, error) { return 0, nil }, HTTP: &http.Client{}}
+	return Deps{Exec: exec, Root: "/nonexistent", Node: "node-a", Now: func() time.Time { return now }, Interval: time.Hour, Inventory: fakeInventory, Apply: hostconfig.Apply, Packages: pkgmgr.Manager{Exec: exec, Family: "apt", Root: "/nonexistent"}, Version: "test", Hostname: func() (string, error) { return "node-a", nil }, DiskSpace: func(string) (host.Space, error) { return host.Space{}, nil }, HTTP: &http.Client{}}
 }
 
 func createHost(t *testing.T, name string, managed bool, window string) {
@@ -87,7 +87,7 @@ func TestTickReportsHostFacts(t *testing.T) {
 	deps := newDeps(exec, time.Now())
 	deps.Version = "v0.3.0"
 	deps.Hostname = func() (string, error) { return "Node-A", nil }
-	deps.FreeBytes = func(string) (uint64, error) { return 42 << 30, nil }
+	deps.DiskSpace = func(string) (host.Space, error) { return host.Space{FreeBytes: 42 << 30, SizeBytes: 100 << 30}, nil }
 	if err := Tick(context.Background(), k8sClient, deps); err != nil {
 		t.Fatal(err)
 	}
@@ -95,7 +95,7 @@ func TestTickReportsHostFacts(t *testing.T) {
 	if status.AgentVersion != "v0.3.0" || status.K0sVersion != "v1.36.3+k0s.0" || status.Hostname != "node-a" {
 		t.Fatalf("versions and hostname: %+v", status)
 	}
-	if status.Checks == nil || !status.Checks.TimeSynced || status.Checks.VarLibFreeBytes != 42<<30 {
+	if status.Checks == nil || !status.Checks.TimeSynced || status.Checks.VarLibFreeBytes != 42<<30 || status.Checks.VarLibSizeBytes != 100<<30 {
 		t.Fatalf("checks %+v", status.Checks)
 	}
 }

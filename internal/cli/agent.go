@@ -101,7 +101,7 @@ func runAgent(ctx context.Context, o agentOptions, deps agentDeps, stderr io.Wri
 		Packages:  pkgmgr.Manager{Exec: deps.Exec, Family: family, Root: o.root},
 		Version:   Version,
 		Hostname:  os.Hostname,
-		FreeBytes: host.FreeBytes,
+		DiskSpace: host.DiskSpace,
 		HTTP:      &http.Client{},
 	}
 	for {

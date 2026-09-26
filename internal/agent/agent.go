@@ -32,7 +32,7 @@ type Deps struct {
 	Packages  pkgmgr.Manager
 	Version   string
 	Hostname  func() (string, error)
-	FreeBytes func(string) (uint64, error)
+	DiskSpace func(string) (host.Space, error)
 	HTTP      *http.Client
 }
 
