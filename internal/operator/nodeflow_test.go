@@ -5,6 +5,8 @@ import (
 	"slices"
 	"testing"
 
+	corev1 "k8s.io/api/core/v1"
+
 	"github.com/cloudyfolks-labs/bedrock/api/v1alpha1"
 )
 
@@ -70,8 +72,40 @@ func stepsIn(states ...string) []v1alpha1.NodeUpgradeStepStatus {
 	return steps
 }
 
+func TestSpareNode(t *testing.T) {
+	node := func(name string, change func(*corev1.Node)) corev1.Node {
+		ready := readyNode(name, "amd64")
+		change(&ready)
+		return ready
+	}
+	keep := func(*corev1.Node) {}
+	cordon := func(n *corev1.Node) { n.Spec.Unschedulable = true }
+	taint := func(effect corev1.TaintEffect) func(*corev1.Node) {
+		return func(n *corev1.Node) { n.Spec.Taints = []corev1.Taint{{Key: "example.com/busy", Effect: effect}} }
+	}
+	cases := map[string]struct {
+		nodes []corev1.Node
+		want  bool
+	}{
+		"only node":                  {[]corev1.Node{node("node-a", keep)}, false},
+		"another schedulable node":   {[]corev1.Node{node("node-a", keep), node("node-b", keep)}, true},
+		"the other node is cordoned": {[]corev1.Node{node("node-a", keep), node("node-b", cordon)}, false},
+		"NoSchedule taint":           {[]corev1.Node{node("node-a", keep), node("node-b", taint(corev1.TaintEffectNoSchedule))}, false},
+		"NoExecute taint":            {[]corev1.Node{node("node-a", keep), node("node-b", taint(corev1.TaintEffectNoExecute))}, false},
+		"PreferNoSchedule taint":     {[]corev1.Node{node("node-a", keep), node("node-b", taint(corev1.TaintEffectPreferNoSchedule))}, true},
+		"this node cordoned already": {[]corev1.Node{node("node-a", cordon), node("node-b", keep)}, true},
+	}
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			if got := spareNode(tc.nodes, "node-a"); got != tc.want {
+				t.Fatalf("spare node %v, want %v", got, tc.want)
+			}
+		})
+	}
+}
+
 func TestNextNodeMove(t *testing.T) {
-	base := nodeFacts{Name: "w-a", HasNode: true, NodeReady: true, K0sCurrent: true, TargetK0s: targetK0s}
+	base := nodeFacts{Name: "w-a", HasNode: true, Evacuate: true, NodeReady: true, K0sCurrent: true, TargetK0s: targetK0s}
 	with := func(change func(nodeFacts) nodeFacts) nodeFacts {
 		return change(base)
 	}
@@ -82,9 +116,13 @@ func TestNextNodeMove(t *testing.T) {
 	}{
 		"start": {base, nodeMove{Cordon: true, Progress: nodeDraining, Message: "w-a cordoned"}},
 		"start without a node": {with(func(f nodeFacts) nodeFacts {
-			f.HasNode = false
+			f.HasNode, f.Evacuate = false, false
 			return f
-		}), nodeMove{Progress: nodeDraining, Message: "w-a cordoned"}},
+		}), nodeMove{Progress: nodeDraining, Message: "w-a started"}},
+		"start on the only schedulable node": {with(func(f nodeFacts) nodeFacts {
+			f.Evacuate = false
+			return f
+		}), nodeMove{Progress: nodeDraining, Message: "w-a started"}},
 		"pods left": {with(func(f nodeFacts) nodeFacts {
 			f.Progress, f.PodsLeft = nodeDraining, []string{"tenant-a/web", "tenant-a/db"}
 			return f
@@ -93,6 +131,10 @@ func TestNextNodeMove(t *testing.T) {
 			f.Progress = nodeDraining
 			return f
 		}), nodeMove{Append: true, Progress: nodeUpdating, Message: "w-a drained"}},
+		"drain skipped": {with(func(f nodeFacts) nodeFacts {
+			f.Progress, f.Evacuate = nodeDraining, false
+			return f
+		}), nodeMove{Append: true, Progress: nodeUpdating, Message: "w-a drain skipped"}},
 		"step failed": {with(func(f nodeFacts) nodeFacts {
 			f.Progress, f.Steps = nodeUpdating, stepsIn(v1alpha1.StepSucceeded, v1alpha1.StepSucceeded, v1alpha1.StepFailed)
 			return f
@@ -114,9 +156,9 @@ func TestNextNodeMove(t *testing.T) {
 			return f
 		}), nodeMove{Uncordon: true, Progress: nodeUncordoned, Message: "w-a uncordoned"}},
 		"updated without a node": {with(func(f nodeFacts) nodeFacts {
-			f.Progress, f.Steps, f.HasNode, f.NodeReady = nodeUpdating, done, false, false
+			f.Progress, f.Steps, f.HasNode, f.Evacuate, f.NodeReady = nodeUpdating, done, false, false, false
 			return f
-		}), nodeMove{Progress: nodeUncordoned, Message: "w-a uncordoned"}},
+		}), nodeMove{Progress: nodeUncordoned, Message: "w-a updated"}},
 		"ceph recovering": {with(func(f nodeFacts) nodeFacts {
 			f.Progress, f.Ceph = nodeUncordoned, "ceph: 3 of 33 PGs are not active+clean"
 			return f

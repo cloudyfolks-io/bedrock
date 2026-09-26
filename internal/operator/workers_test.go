@@ -172,7 +172,7 @@ func TestWorkersPhaseOnASingleNode(t *testing.T) {
 	createPod(t, ctx, c, web)
 	createClusterWithStatus(t, ctx, c, "v2", upgradeStatusIn(v1alpha1.PhaseWorkers))
 	env := upgradeEnv{Client: c}
-	for _, want := range []string{"workers: node-a cordoned", "workers: node-a drained"} {
+	for _, want := range []string{"workers: node-a started", "workers: node-a drain skipped"} {
 		got, err := workers(ctx, env, getCluster(t, ctx, c))
 		if err != nil || got != (phaseResult{Message: want}) {
 			t.Fatalf("result %+v err %v, want %q", got, err, want)
@@ -181,6 +181,9 @@ func TestWorkersPhaseOnASingleNode(t *testing.T) {
 	var kept corev1.Pod
 	if err := c.Get(ctx, client.ObjectKey{Namespace: "tenant-a", Name: "web"}, &kept); err != nil || kept.DeletionTimestamp != nil {
 		t.Fatalf("the only node is not drained: %v", err)
+	}
+	if getNode(t, ctx, c, "node-a").Spec.Unschedulable {
+		t.Fatal("the only node is not cordoned")
 	}
 }
 
