@@ -8,10 +8,8 @@ import (
 	"testing"
 	"time"
 
-	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/client-go/rest"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -92,7 +90,6 @@ func reconcileWorld(t *testing.T, w upgradeWorld, restarts int) (string, []strin
 		phases = append(phases, getCluster(t, w.ctx, w.client).Status.Phase)
 	}
 	fakeAgents(t, w.ctx, w.client)
-	fakeAutopilot(t, w.ctx, w.client)
 	fakeKubeVirt(t, w.ctx, w.client)
 	return name, phases
 }
@@ -153,34 +150,6 @@ func fakeStepEffect(t *testing.T, ctx context.Context, c client.Client, upgrade 
 		return
 	}
 	if err := c.Status().Update(ctx, &host); err != nil {
-		t.Fatal(err)
-	}
-}
-
-func fakeAutopilot(t *testing.T, ctx context.Context, c client.Client) {
-	t.Helper()
-	plan := &unstructured.Unstructured{}
-	plan.SetGroupVersionKind(planGVK)
-	err := c.Get(ctx, client.ObjectKey{Name: autopilotPlanName}, plan)
-	if apierrors.IsNotFound(err) {
-		return
-	}
-	if err != nil {
-		t.Fatal(err)
-	}
-	if state, _, _ := unstructured.NestedString(plan.Object, "status", "state"); state == planCompleted {
-		return
-	}
-	commands, _, _ := unstructured.NestedSlice(plan.Object, "spec", "commands")
-	update, _ := commands[0].(map[string]any)["k0supdate"].(map[string]any)
-	version, _ := update["version"].(string)
-	controllers, _, _ := unstructured.NestedStringSlice(update, "targets", "controllers", "discovery", "static", "nodes")
-	workers, _, _ := unstructured.NestedStringSlice(update, "targets", "workers", "discovery", "static", "nodes")
-	for _, node := range append(controllers, workers...) {
-		setK0sVersion(t, ctx, c, node, version)
-	}
-	plan.Object["status"] = map[string]any{"state": planCompleted}
-	if err := c.Status().Update(ctx, plan); err != nil {
 		t.Fatal(err)
 	}
 }

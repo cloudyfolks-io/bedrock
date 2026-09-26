@@ -18,13 +18,25 @@ func TestWorkerOrderAndSteps(t *testing.T) {
 	if got := workerOrder(hosts); !slices.Equal(got, []string{"cp-a", "cp-b", "w-a", "w-b"}) {
 		t.Fatalf("order %v", got)
 	}
-	if got := updateSteps(hostWithRoles("w-a")); !slices.Equal(got, []string{v1alpha1.StepPreload, v1alpha1.StepAgentUpdate, v1alpha1.StepReboot}) {
-		t.Fatalf("steps %v", got)
+	windowed := func(host v1alpha1.Host) v1alpha1.Host {
+		host.Spec.MaintenanceWindow = "Sun 02:00-04:00"
+		return host
 	}
-	windowed := hostWithRoles("w-a")
-	windowed.Spec.MaintenanceWindow = "Sun 02:00-04:00"
-	if got := updateSteps(windowed); !slices.Equal(got, []string{v1alpha1.StepPreload, v1alpha1.StepAgentUpdate, v1alpha1.StepOSUpdate, v1alpha1.StepReboot}) {
-		t.Fatalf("steps %v", got)
+	cases := map[string]struct {
+		host v1alpha1.Host
+		want []string
+	}{
+		"worker":                 {hostWithRoles("w-a", v1alpha1.RoleWorkload), []string{v1alpha1.StepPreload, v1alpha1.StepK0sUpdate, v1alpha1.StepAgentUpdate, v1alpha1.StepReboot}},
+		"worker in a window":     {windowed(hostWithRoles("w-a", v1alpha1.RoleCephOSD)), []string{v1alpha1.StepPreload, v1alpha1.StepK0sUpdate, v1alpha1.StepAgentUpdate, v1alpha1.StepOSUpdate, v1alpha1.StepReboot}},
+		"controller":             {hostWithRoles("cp-a", v1alpha1.RoleControlPlane, v1alpha1.RoleWorkload), []string{v1alpha1.StepPreload, v1alpha1.StepAgentUpdate, v1alpha1.StepReboot}},
+		"controller in a window": {windowed(hostWithRoles("cp-a", v1alpha1.RoleControlPlane)), []string{v1alpha1.StepPreload, v1alpha1.StepAgentUpdate, v1alpha1.StepOSUpdate, v1alpha1.StepReboot}},
+	}
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			if got := updateSteps(tc.host); !slices.Equal(got, tc.want) {
+				t.Fatalf("steps %v, want %v", got, tc.want)
+			}
+		})
 	}
 }
 
@@ -94,8 +106,6 @@ func TestWorkersPhase(t *testing.T) {
 		}
 	}
 
-	run(phaseResult{Message: "workers: creating autopilot plan v2-workers-1"})
-	setPlanState(t, ctx, c, "Completed")
 	run(phaseResult{Message: "workers: node-a cordoned"})
 	if !getNode(t, ctx, c, "node-a").Spec.Unschedulable || getNodeUpgrade(t, ctx, c, "node-a").Annotations[workerProgressAnnotation] != nodeDraining {
 		t.Fatal("node-a must be cordoned and marked draining")
@@ -127,10 +137,12 @@ func TestWorkersPhase(t *testing.T) {
 
 	run(phaseResult{Message: "workers: node-b cordoned"})
 	run(phaseResult{Message: "workers: node-b drained"})
-	if steps := getNodeUpgrade(t, ctx, c, "node-b").Spec.Steps; !slices.Equal(steps, []string{v1alpha1.StepPreload, v1alpha1.StepAgentUpdate, v1alpha1.StepOSUpdate, v1alpha1.StepReboot}) {
+	if steps := getNodeUpgrade(t, ctx, c, "node-b").Spec.Steps; !slices.Equal(steps, []string{v1alpha1.StepPreload, v1alpha1.StepK0sUpdate, v1alpha1.StepAgentUpdate, v1alpha1.StepOSUpdate, v1alpha1.StepReboot}) {
 		t.Fatalf("node-b steps %v", steps)
 	}
-	finishSteps(t, ctx, c, "node-b", v1alpha1.StepAgentUpdate, v1alpha1.StepOSUpdate)
+	reportStep(t, ctx, c, "node-b", v1alpha1.NodeUpgradeStepStatus{Name: v1alpha1.StepK0sUpdate, State: v1alpha1.StepRunning, Attempt: 1})
+	run(phaseResult{Message: "workers: updating node-b: Preload Succeeded, K0sUpdate Running, AgentUpdate Pending, OSUpdate Pending, Reboot Pending"})
+	finishSteps(t, ctx, c, "node-b", v1alpha1.StepK0sUpdate, v1alpha1.StepAgentUpdate, v1alpha1.StepOSUpdate)
 	reportStep(t, ctx, c, "node-b", v1alpha1.NodeUpgradeStepStatus{Name: v1alpha1.StepReboot, State: v1alpha1.StepFailed, Attempt: 1, Message: "systemctl reboot: exit status 1"})
 	run(phaseResult{Failure: "workers: node-b Reboot failed: systemctl reboot: exit status 1"})
 	finishSteps(t, ctx, c, "node-b", v1alpha1.StepReboot)
