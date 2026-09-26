@@ -127,7 +127,7 @@ func Tick(ctx context.Context, c client.Client, deps Deps) error {
 		Inventory:    inv,
 		Applied:      current.Status.Applied,
 		AgentVersion: deps.Version,
-		K0sVersion:   k0sVersion(ctx, deps.Exec),
+		K0sVersion:   runningK0sVersion(ctx, deps.Exec),
 		Hostname:     hostname(deps),
 		Checks:       hostChecks(ctx, deps),
 		Depot:        depotStatus(ctx, c, deps),

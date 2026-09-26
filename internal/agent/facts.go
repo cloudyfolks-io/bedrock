@@ -57,12 +57,18 @@ func hostname(deps Deps) string {
 	return strings.ToLower(name)
 }
 
-func k0sVersion(ctx context.Context, e host.Exec) string {
-	out, err := e.Run(ctx, k0s.DefaultBinary, "version")
+func runningK0sVersion(ctx context.Context, e host.Exec) string {
+	out, err := e.Run(ctx, k0s.DefaultBinary, "status", "-o", "json")
 	if err != nil {
 		return ""
 	}
-	return strings.TrimSpace(out)
+	var status struct {
+		Version string
+	}
+	if err := json.Unmarshal([]byte(out), &status); err != nil {
+		return ""
+	}
+	return status.Version
 }
 
 func timeSynced(ctx context.Context, e host.Exec) bool {

@@ -122,12 +122,17 @@ func TestImagesBytesWithoutTheDirectory(t *testing.T) {
 	}
 }
 
-func TestK0sVersion(t *testing.T) {
-	exec := &host.FakeExec{Responses: map[string]string{"/usr/local/bin/k0s version": "v1.36.3+k0s.0\n"}}
-	if got := k0sVersion(context.Background(), exec); got != "v1.36.3+k0s.0" {
-		t.Fatalf("k0s version %q", got)
+func TestRunningK0sVersion(t *testing.T) {
+	status := "/usr/local/bin/k0s status -o json"
+	running := &host.FakeExec{Responses: map[string]string{status: `{"Version": "v1.36.3+k0s.0", "Pid": 1234, "Role": "controller+worker"}`}}
+	if got := runningK0sVersion(context.Background(), running); got != "v1.36.3+k0s.0" {
+		t.Fatalf("running k0s version %q", got)
 	}
-	if got := k0sVersion(context.Background(), &host.FakeExec{}); got != "" {
-		t.Fatalf("a failed k0s version must be empty, got %q", got)
+	if got := runningK0sVersion(context.Background(), &host.FakeExec{}); got != "" {
+		t.Fatalf("k0s that does not run must give an empty version, got %q", got)
+	}
+	garbled := &host.FakeExec{Responses: map[string]string{status: "Version: v1.36.3+k0s.0"}}
+	if got := runningK0sVersion(context.Background(), garbled); got != "" {
+		t.Fatalf("a status that is not JSON must give an empty version, got %q", got)
 	}
 }

@@ -69,7 +69,7 @@ func TestTickWritesInventoryOnly(t *testing.T) {
 	}
 }
 
-var readOnlyFacts = []string{"/usr/local/bin/k0s version", "timedatectl show -p NTPSynchronized --value", "/usr/local/bin/k0s etcd member-list"}
+var readOnlyFacts = []string{"/usr/local/bin/k0s status -o json", "timedatectl show -p NTPSynchronized --value", "/usr/local/bin/k0s etcd member-list"}
 
 func hostChanges(calls []string) []string {
 	var changes []string
@@ -83,7 +83,7 @@ func hostChanges(calls []string) []string {
 
 func TestTickReportsHostFacts(t *testing.T) {
 	createHost(t, "node-a", false, "")
-	exec := &host.FakeExec{Responses: map[string]string{"/usr/local/bin/k0s version": "v1.36.3+k0s.0\n", "timedatectl show -p NTPSynchronized --value": "yes\n"}}
+	exec := &host.FakeExec{Responses: map[string]string{"/usr/local/bin/k0s status -o json": `{"Version":"v1.36.3+k0s.0"}`, "/usr/local/bin/k0s version": "v1.36.2+k0s.0\n", "timedatectl show -p NTPSynchronized --value": "yes\n"}}
 	deps := newDeps(exec, time.Now())
 	deps.Version = "v0.3.0"
 	deps.Hostname = func() (string, error) { return "Node-A", nil }
