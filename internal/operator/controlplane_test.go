@@ -147,6 +147,8 @@ func TestControlPlanePhaseWalksControllersOneAtATime(t *testing.T) {
 	for _, node := range []string{"node-a", "node-b", "node-c"} {
 		preloadedNodeUpgrade(t, ctx, c, node)
 	}
+	setEtcd(t, ctx, c, "node-a", 2, true)
+	setEtcd(t, ctx, c, "node-c", 2, false)
 	runningPod(t, ctx, c, "web", "node-a")
 
 	run(phaseResult{Message: "controlplane: node-a cordoned"})
@@ -161,6 +163,11 @@ func TestControlPlanePhaseWalksControllersOneAtATime(t *testing.T) {
 	if err := c.Delete(ctx, &evicted, client.GracePeriodSeconds(0)); err != nil {
 		t.Fatal(err)
 	}
+	run(phaseResult{Message: "controlplane: waiting before updating node-a: etcd: node-c is not healthy"})
+	if steps := getNodeUpgrade(t, ctx, c, "node-a").Spec.Steps; !slices.Equal(steps, []string{v1alpha1.StepPreload}) {
+		t.Fatalf("the first controller must wait for a healthy etcd: %v", steps)
+	}
+	setEtcd(t, ctx, c, "node-c", 2, true)
 	run(phaseResult{Message: "controlplane: node-a drained"})
 	if err := setUnschedulable(ctx, c, "node-b", false); err != nil {
 		t.Fatal(err)
@@ -173,13 +180,13 @@ func TestControlPlanePhaseWalksControllersOneAtATime(t *testing.T) {
 	run(phaseResult{Message: "controlplane: updating node-a: K0sUpdate Pending"})
 	reportStep(t, ctx, c, "node-a", v1alpha1.NodeUpgradeStepStatus{Name: v1alpha1.StepK0sUpdate, State: v1alpha1.StepSucceeded, Attempt: 2})
 	setK0sVersion(t, ctx, c, "node-a", targetK0s)
+	setEtcd(t, ctx, c, "node-a", 1, false)
 	run(phaseResult{Message: "controlplane: node-a uncordoned"})
-	run(phaseResult{Message: "controlplane: node-a: etcd: node-a reports 0 of 2 members"})
+	run(phaseResult{Message: "controlplane: node-a: etcd: node-a reports 1 of 2 members"})
 	if steps := getNodeUpgrade(t, ctx, c, "node-c").Spec.Steps; !slices.Equal(steps, []string{v1alpha1.StepPreload}) {
 		t.Fatalf("node-c must wait for node-a: %v", steps)
 	}
 	setEtcd(t, ctx, c, "node-a", 2, false)
-	setEtcd(t, ctx, c, "node-c", 2, true)
 	run(phaseResult{Message: "controlplane: node-a: etcd: node-a is not healthy"})
 	setEtcd(t, ctx, c, "node-a", 2, true)
 	run(phaseResult{Message: "controlplane: node-a done"})

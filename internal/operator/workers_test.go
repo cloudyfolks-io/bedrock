@@ -119,6 +119,11 @@ func TestWorkersPhase(t *testing.T) {
 	if err := c.Delete(ctx, &evicted, client.GracePeriodSeconds(0)); err != nil {
 		t.Fatal(err)
 	}
+	run(phaseResult{Message: "workers: waiting before updating node-a: etcd: node-a reports 0 of 1 members"})
+	if steps := getNodeUpgrade(t, ctx, c, "node-a").Spec.Steps; !slices.Equal(steps, []string{v1alpha1.StepPreload}) {
+		t.Fatalf("a controller must not get its steps while etcd is unhealthy: %v", steps)
+	}
+	setEtcd(t, ctx, c, "node-a", 1, true)
 	run(phaseResult{Message: "workers: node-a drained"})
 	if steps := getNodeUpgrade(t, ctx, c, "node-a").Spec.Steps; !slices.Equal(steps, []string{v1alpha1.StepPreload, v1alpha1.StepAgentUpdate, v1alpha1.StepReboot}) {
 		t.Fatalf("node-a steps %v", steps)
@@ -132,7 +137,6 @@ func TestWorkersPhase(t *testing.T) {
 	if getNode(t, ctx, c, "node-a").Spec.Unschedulable {
 		t.Fatal("node-a must be uncordoned")
 	}
-	run(phaseResult{Message: "workers: node-a: etcd: node-a reports 0 of 1 members"})
 	setEtcd(t, ctx, c, "node-a", 1, false)
 	run(phaseResult{Message: "workers: node-a: etcd: node-a is not healthy"})
 	setEtcd(t, ctx, c, "node-a", 1, true)
@@ -162,6 +166,7 @@ func TestWorkersPhaseOnASingleNode(t *testing.T) {
 		t.Fatal(err)
 	}
 	createDepotHost(t, ctx, c, "node-a", v1alpha1.RoleControlPlane)
+	setEtcd(t, ctx, c, "node-a", 1, true)
 	preloadedNodeUpgrade(t, ctx, c, "node-a")
 	target := targetRelease()
 	if err := c.Create(ctx, &target); err != nil {

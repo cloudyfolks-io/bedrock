@@ -258,7 +258,7 @@ func nextNodeMove(f nodeFacts) nodeMove {
 func startMove(f nodeFacts) nodeMove {
 	switch {
 	case !f.HasNode || f.SingleNode:
-		return nodeMove{Append: true, Progress: nodeUpdating, Message: f.Name + " drain skipped"}
+		return appendMove(f, f.Name+" drain skipped")
 	case !f.Spare:
 		return nodeMove{Message: "waiting for another schedulable node before draining " + f.Name}
 	}
@@ -269,7 +269,14 @@ func drainingMove(f nodeFacts) nodeMove {
 	if len(f.PodsLeft) > 0 {
 		return nodeMove{Message: fmt.Sprintf("draining %s: %s", f.Name, strings.Join(f.PodsLeft, ", "))}
 	}
-	return nodeMove{Append: true, Progress: nodeUpdating, Message: f.Name + " drained"}
+	return appendMove(f, f.Name+" drained")
+}
+
+func appendMove(f nodeFacts, message string) nodeMove {
+	if f.Controller && f.Etcd != "" {
+		return nodeMove{Message: fmt.Sprintf("waiting before updating %s: %s", f.Name, f.Etcd)}
+	}
+	return nodeMove{Append: true, Progress: nodeUpdating, Message: message}
 }
 
 func updatingMove(f nodeFacts) nodeMove {

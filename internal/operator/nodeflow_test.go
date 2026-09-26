@@ -143,6 +143,18 @@ func TestNextNodeMove(t *testing.T) {
 			f.Progress, f.Spare = nodeDraining, false
 			return f
 		}), nodeMove{Append: true, Progress: nodeUpdating, Message: "w-a drained"}},
+		"controller waits for etcd before its steps": {with(func(f nodeFacts) nodeFacts {
+			f.Progress, f.Controller, f.Etcd = nodeDraining, true, "etcd: cp-b is not healthy"
+			return f
+		}), nodeMove{Message: "waiting before updating w-a: etcd: cp-b is not healthy"}},
+		"controller on a one-node cluster waits for etcd": {with(func(f nodeFacts) nodeFacts {
+			f.SingleNode, f.Controller, f.Etcd = true, true, "etcd: w-a is not healthy"
+			return f
+		}), nodeMove{Message: "waiting before updating w-a: etcd: w-a is not healthy"}},
+		"worker gets its steps while etcd is unhealthy": {with(func(f nodeFacts) nodeFacts {
+			f.Progress, f.Etcd = nodeDraining, "etcd: cp-b is not healthy"
+			return f
+		}), nodeMove{Append: true, Progress: nodeUpdating, Message: "w-a drained"}},
 		"step failed": {with(func(f nodeFacts) nodeFacts {
 			f.Progress, f.Steps = nodeUpdating, stepsIn(v1alpha1.StepSucceeded, v1alpha1.StepSucceeded, v1alpha1.StepFailed)
 			return f
