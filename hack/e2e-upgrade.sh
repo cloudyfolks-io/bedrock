@@ -59,6 +59,14 @@ rm -f /var/run/reboot-required /var/run/reboot-required.pkgs
 
 "$cli_b" upgrade --to "$VERSION_B" --bundle "$bundle_b" --yes --timeout 2h > "$workdir/upgrade.log" 2>&1 &
 upgrade=$!
+depot=""
+for _ in $(seq 1 360); do
+  depot=$(kubectl get hosts -o jsonpath='{.items[*].status.depot.bundles[*].version}' 2>/dev/null || true)
+  case " $depot " in *" $VERSION_B "*) break ;; esac
+  if ! kill -0 "$upgrade" 2>/dev/null; then break; fi
+  sleep 5
+done
+rm -f "$bundle_b"
 if [ -n "$abort_in" ]; then
   phase=""
   for _ in $(seq 1 720); do
