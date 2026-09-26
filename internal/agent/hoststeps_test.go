@@ -269,6 +269,35 @@ func TestK0sUpdateSkipsARunningTarget(t *testing.T) {
 	}
 }
 
+func TestK0sUpdateRetriesAFailedStatusRead(t *testing.T) {
+	statuses := func(count int) []string {
+		return slices.Repeat([]string{statusCall}, count)
+	}
+	cases := map[string]struct {
+		node        string
+		failedReads int
+		want        Outcome
+		calls       []string
+	}{
+		"transient failure": {"k0s-status-a", 3, Outcome{Message: "k0s already at v1.36.3+k0s.0"}, statuses(5)},
+		"k0s stays down":    {"k0s-status-b", 1 << 30, Outcome{Message: "k0s v1.36.3+k0s.0 installed, restarted k0sworker.service"}, slices.Concat(statuses(6), []string{"systemctl restart --no-block k0sworker.service"}, statuses(3))},
+	}
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			env, fake := k0sStepEnv(t, tc.node, v1alpha1.RoleWorkload)
+			writeFixtureFile(t, filepath.Join(env.Deps.Root, "usr/local/bin/k0s"), "new k0s")
+			fake.running, fake.starting = newK0s, tc.failedReads
+			outcome, err := k0sUpdate(context.Background(), env)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if outcome != tc.want || !slices.Equal(fake.calls, tc.calls) {
+				t.Fatalf("outcome %+v calls %v", outcome, fake.calls)
+			}
+		})
+	}
+}
+
 func TestK0sUpdateTimesOut(t *testing.T) {
 	cases := map[string]struct {
 		node, role string

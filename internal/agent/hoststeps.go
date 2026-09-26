@@ -62,6 +62,8 @@ func reboot(ctx context.Context, env StepEnv) (Outcome, error) {
 	return Outcome{Message: "reboot pending", Reboot: true}, nil
 }
 
+const k0sStatusReads = 6
+
 type k0sProbe func(ctx context.Context, env StepEnv) string
 
 type k0sService struct {
@@ -82,7 +84,7 @@ func k0sUpdate(ctx context.Context, env StepEnv) (Outcome, error) {
 	}
 	installed := filepath.Join(env.Deps.Root, k0s.DefaultBinary)
 	current := hasChecksum(installed, checksum)
-	if current && runningK0sVersion(ctx, env.Deps.Exec) == version {
+	if current && settledK0sVersion(ctx, env) == version {
 		if err := awaitK0s(ctx, env, service.Probes); err != nil {
 			return Outcome{}, err
 		}
@@ -100,6 +102,19 @@ func k0sUpdate(ctx context.Context, env StepEnv) (Outcome, error) {
 		return Outcome{}, err
 	}
 	return Outcome{Message: fmt.Sprintf("k0s %s installed, restarted %s", version, service.Unit)}, nil
+}
+
+func settledK0sVersion(ctx context.Context, env StepEnv) string {
+	for read := 1; ; read++ {
+		if running := runningK0sVersion(ctx, env.Deps.Exec); running != "" || read == k0sStatusReads {
+			return running
+		}
+		select {
+		case <-ctx.Done():
+			return ""
+		case <-time.After(env.Deps.K0sPoll):
+		}
+	}
 }
 
 func hasChecksum(path, checksum string) bool {
