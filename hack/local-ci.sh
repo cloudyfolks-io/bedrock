@@ -71,7 +71,7 @@ vm_up() {
   colima start --profile "$profile" --vm-type vz --cpu "$cpus" --memory "$memory" --disk "$disk" --root-disk "$root_disk" --runtime docker --mount "$repo:w"
   restore_context
   colima ssh --profile "$profile" -- sudo apt-get update -qq
-  colima ssh --profile "$profile" -- sudo apt-get install -y -qq gettext-base iputils-ping
+  colima ssh --profile "$profile" -- sudo apt-get install -y -qq gettext-base iputils-ping pciutils
   colima ssh --profile "$profile" -- sudo tee /tmp/fix-resolv.sh >/dev/null <<'FIX_RESOLV'
 #!/bin/sh
 set -e
