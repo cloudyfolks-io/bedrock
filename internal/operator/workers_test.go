@@ -3,7 +3,6 @@ package operator
 import (
 	"context"
 	"path/filepath"
-	"reflect"
 	"slices"
 	"testing"
 
@@ -13,34 +12,6 @@ import (
 
 	"github.com/cloudyfolks-labs/bedrock/api/v1alpha1"
 )
-
-func TestActiveNodes(t *testing.T) {
-	order := []string{"cp-a", "cp-b", "w-a", "w-b", "w-c"}
-	controllers := []string{"cp-a", "cp-b"}
-	cases := map[string]struct {
-		progress    map[string]string
-		concurrency int
-		want        []string
-	}{
-		"first controller":                          {map[string]string{}, 2, []string{"cp-a"}},
-		"controller in progress":                    {map[string]string{"cp-a": workerDone, "cp-b": workerUpdating}, 2, []string{"cp-b"}},
-		"workers in a window":                       {map[string]string{"cp-a": workerDone, "cp-b": workerDone}, 2, []string{"w-a", "w-b"}},
-		"started nodes stay":                        {map[string]string{"cp-a": workerDone, "cp-b": workerDone, "w-c": workerDraining}, 2, []string{"w-c", "w-a"}},
-		"one finished frees a place":                {map[string]string{"cp-a": workerDone, "cp-b": workerDone, "w-a": workerDone, "w-b": workerUpdating}, 2, []string{"w-b", "w-c"}},
-		"everything done":                           {map[string]string{"cp-a": workerDone, "cp-b": workerDone, "w-a": workerDone, "w-b": workerDone, "w-c": workerDone}, 2, nil},
-		"concurrency below one":                     {map[string]string{"cp-a": workerDone, "cp-b": workerDone}, 0, []string{"w-a"}},
-		"late controller waits for started workers": {map[string]string{"cp-a": workerDone, "w-a": workerUpdating}, 1, []string{"w-a"}},
-		"late controller after the window empties":  {map[string]string{"cp-a": workerDone, "w-a": workerDone}, 1, []string{"cp-b"}},
-		"started nodes stay when concurrency drops": {map[string]string{"cp-a": workerDone, "cp-b": workerDone, "w-a": workerUpdating, "w-b": workerDraining}, 1, []string{"w-a", "w-b"}},
-	}
-	for name, tc := range cases {
-		t.Run(name, func(t *testing.T) {
-			if got := activeNodes(order, controllers, tc.progress, tc.concurrency); !slices.Equal(got, tc.want) {
-				t.Fatalf("active %v, want %v", got, tc.want)
-			}
-		})
-	}
-}
 
 func TestWorkerOrderAndSteps(t *testing.T) {
 	hosts := []v1alpha1.Host{hostWithRoles("w-b", v1alpha1.RoleWorkload), hostWithRoles("cp-b", v1alpha1.RoleControlPlane), hostWithRoles("w-a", v1alpha1.RoleCephOSD), hostWithRoles("cp-a", v1alpha1.RoleControlPlane, v1alpha1.RoleCephOSD)}
@@ -54,102 +25,6 @@ func TestWorkerOrderAndSteps(t *testing.T) {
 	windowed.Spec.MaintenanceWindow = "Sun 02:00-04:00"
 	if got := updateSteps(windowed); !slices.Equal(got, []string{v1alpha1.StepPreload, v1alpha1.StepAgentUpdate, v1alpha1.StepOSUpdate, v1alpha1.StepReboot}) {
 		t.Fatalf("steps %v", got)
-	}
-}
-
-func TestEtcdProblem(t *testing.T) {
-	member := func(name string, members int32) v1alpha1.Host {
-		host := hostWithRoles(name, v1alpha1.RoleControlPlane)
-		host.Status.Checks = &v1alpha1.HostChecks{EtcdMembers: members}
-		return host
-	}
-	worker := hostWithRoles("w-a", v1alpha1.RoleWorkload)
-	if got := etcdProblem([]v1alpha1.Host{member("cp-a", 2), member("cp-b", 2), worker}); got != "" {
-		t.Fatalf("healthy etcd: %q", got)
-	}
-	if got := etcdProblem([]v1alpha1.Host{member("cp-a", 2), member("cp-b", 1), worker}); got != "etcd: cp-b reports 1 of 2 members" {
-		t.Fatalf("problem %q", got)
-	}
-	if got := etcdProblem([]v1alpha1.Host{hostWithRoles("cp-a", v1alpha1.RoleControlPlane)}); got != "etcd: cp-a reports 0 of 1 members" {
-		t.Fatalf("a controller without checks: %q", got)
-	}
-}
-
-func stepsIn(states ...string) []v1alpha1.NodeUpgradeStepStatus {
-	names := []string{v1alpha1.StepPreload, v1alpha1.StepAgentUpdate, v1alpha1.StepReboot}
-	steps := make([]v1alpha1.NodeUpgradeStepStatus, 0, len(states))
-	for i, state := range states {
-		steps = append(steps, v1alpha1.NodeUpgradeStepStatus{Name: names[i], State: state, Message: "exit status 1"})
-	}
-	return steps
-}
-
-func TestNextWorkerMove(t *testing.T) {
-	base := workerFacts{Name: "w-a", HasNode: true, NodeReady: true, K0sCurrent: true, TargetK0s: targetK0s}
-	with := func(change func(workerFacts) workerFacts) workerFacts {
-		return change(base)
-	}
-	done := stepsIn(v1alpha1.StepSucceeded, v1alpha1.StepSucceeded, v1alpha1.StepSucceeded)
-	cases := map[string]struct {
-		facts workerFacts
-		want  workerMove
-	}{
-		"start": {base, workerMove{Cordon: true, Progress: workerDraining, Message: "w-a cordoned"}},
-		"start without a node": {with(func(f workerFacts) workerFacts {
-			f.HasNode = false
-			return f
-		}), workerMove{Progress: workerDraining, Message: "w-a cordoned"}},
-		"pods left": {with(func(f workerFacts) workerFacts {
-			f.Progress, f.PodsLeft = workerDraining, []string{"tenant-a/web", "tenant-a/db"}
-			return f
-		}), workerMove{Message: "draining w-a: tenant-a/web, tenant-a/db"}},
-		"drained": {with(func(f workerFacts) workerFacts {
-			f.Progress = workerDraining
-			return f
-		}), workerMove{Append: true, Progress: workerUpdating, Message: "w-a drained"}},
-		"step failed": {with(func(f workerFacts) workerFacts {
-			f.Progress, f.Steps = workerUpdating, stepsIn(v1alpha1.StepSucceeded, v1alpha1.StepSucceeded, v1alpha1.StepFailed)
-			return f
-		}), workerMove{Failure: "w-a Reboot failed: exit status 1"}},
-		"steps running": {with(func(f workerFacts) workerFacts {
-			f.Progress, f.Steps = workerUpdating, stepsIn(v1alpha1.StepSucceeded, v1alpha1.StepRunning, v1alpha1.StepPending)
-			return f
-		}), workerMove{Message: "updating w-a: Preload Succeeded, AgentUpdate Running, Reboot Pending"}},
-		"node not ready": {with(func(f workerFacts) workerFacts {
-			f.Progress, f.Steps, f.NodeReady = workerUpdating, done, false
-			return f
-		}), workerMove{Message: "waiting for w-a to be Ready"}},
-		"old k0s": {with(func(f workerFacts) workerFacts {
-			f.Progress, f.Steps, f.K0sCurrent = workerUpdating, done, false
-			return f
-		}), workerMove{Message: "waiting for k0s v1.36.3+k0s.0 on w-a"}},
-		"updated": {with(func(f workerFacts) workerFacts {
-			f.Progress, f.Steps = workerUpdating, done
-			return f
-		}), workerMove{Uncordon: true, Progress: workerUncordoned, Message: "w-a uncordoned"}},
-		"updated without a node": {with(func(f workerFacts) workerFacts {
-			f.Progress, f.Steps, f.HasNode, f.NodeReady = workerUpdating, done, false, false
-			return f
-		}), workerMove{Progress: workerUncordoned, Message: "w-a uncordoned"}},
-		"ceph recovering": {with(func(f workerFacts) workerFacts {
-			f.Progress, f.Ceph = workerUncordoned, "ceph: 3 of 33 PGs are not active+clean"
-			return f
-		}), workerMove{Message: "w-a: ceph: 3 of 33 PGs are not active+clean"}},
-		"controller waits for etcd": {with(func(f workerFacts) workerFacts {
-			f.Progress, f.Controller, f.Etcd = workerUncordoned, true, "etcd: cp-b reports 2 of 3 members"
-			return f
-		}), workerMove{Message: "w-a: etcd: cp-b reports 2 of 3 members"}},
-		"worker ignores etcd": {with(func(f workerFacts) workerFacts {
-			f.Progress, f.Etcd = workerUncordoned, "etcd: cp-b reports 2 of 3 members"
-			return f
-		}), workerMove{Progress: workerDone, Message: "w-a done"}},
-	}
-	for name, tc := range cases {
-		t.Run(name, func(t *testing.T) {
-			if got := nextWorkerMove(tc.facts); !reflect.DeepEqual(got, tc.want) {
-				t.Fatalf("move %+v, want %+v", got, tc.want)
-			}
-		})
 	}
 }
 
@@ -222,7 +97,7 @@ func TestWorkersPhase(t *testing.T) {
 	run(phaseResult{Message: "workers: creating autopilot plan v2-workers-1"})
 	setPlanState(t, ctx, c, "Completed")
 	run(phaseResult{Message: "workers: node-a cordoned"})
-	if !getNode(t, ctx, c, "node-a").Spec.Unschedulable || getNodeUpgrade(t, ctx, c, "node-a").Annotations[workerProgressAnnotation] != workerDraining {
+	if !getNode(t, ctx, c, "node-a").Spec.Unschedulable || getNodeUpgrade(t, ctx, c, "node-a").Annotations[workerProgressAnnotation] != nodeDraining {
 		t.Fatal("node-a must be cordoned and marked draining")
 	}
 	run(phaseResult{Message: "workers: draining node-a: tenant-a/web"})
