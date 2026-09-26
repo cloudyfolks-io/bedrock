@@ -57,10 +57,6 @@ guard() {
   fi
 }
 
-profile_exists() {
-  colima list 2>/dev/null | awk 'NR>1 {print $1}' | grep -qx "$profile"
-}
-
 restore_context() {
   if [ -n "$previous_context" ]; then
     docker context use "$previous_context" >/dev/null 2>&1 || true
@@ -68,6 +64,7 @@ restore_context() {
 }
 
 vm_up() {
+  vm_down
   colima start --profile "$profile" --vm-type vz --cpu "$cpus" --memory "$memory" --disk "$disk" --root-disk "$root_disk" --runtime docker --mount "$repo:w"
   restore_context
   colima ssh --profile "$profile" -- sudo apt-get update -qq
@@ -133,7 +130,7 @@ k0s_proxy() {
 }
 
 vm_down() {
-  colima delete --profile "$profile" --force
+  colima delete --profile "$profile" --force --data
 }
 
 in_vm() {
@@ -238,9 +235,7 @@ cache_size() {
 }
 
 cleanup() {
-  if profile_exists; then
-    vm_down
-  fi
+  vm_down
   rm -f dist/bedrock-*-bundle-*.tar.zst
   rm -rf dist/.bundle-*
   restore_context
