@@ -37,6 +37,19 @@ func readyNode(name, arch string) corev1.Node {
 	return node
 }
 
+func healthyEtcd(hosts []v1alpha1.Host) []v1alpha1.Host {
+	members := int32(len(hostsWithRole(hosts, v1alpha1.RoleControlPlane)))
+	settled := make([]v1alpha1.Host, 0, len(hosts))
+	for _, host := range hosts {
+		copied := *host.DeepCopy()
+		if v1alpha1.HostHasRole(copied, v1alpha1.RoleControlPlane) && copied.Status.Checks != nil {
+			copied.Status.Checks.EtcdMembers, copied.Status.Checks.EtcdHealthy = members, true
+		}
+		settled = append(settled, copied)
+	}
+	return settled
+}
+
 func healthyPreflight() preflightInput {
 	depotHost := healthyHost("node-a")
 	depotHost.Status.Depot = &v1alpha1.DepotStatus{URL: "http://10.0.0.11:9480", Bundles: []v1alpha1.DepotBundle{{Version: "v2", Arch: "amd64", Bytes: 3 * gib}, {Version: "v2", Arch: "arm64", Bytes: 4 * gib}}}
@@ -45,7 +58,7 @@ func healthyPreflight() preflightInput {
 		Running: "v1",
 		To:      "v2",
 		Target:  target,
-		Hosts:   []v1alpha1.Host{depotHost, healthyHost("node-b")},
+		Hosts:   healthyEtcd([]v1alpha1.Host{depotHost, healthyHost("node-b")}),
 		Nodes:   []corev1.Node{readyNode("node-a", "amd64"), readyNode("node-b", "arm64")},
 		Ceph:    cephReport{Health: "HEALTH_OK", PGs: 8, CleanPGs: 8},
 		Now:     preflightTime(),
@@ -95,7 +108,7 @@ func TestPreflightProblems(t *testing.T) {
 		}, "release: v2 does not list v1 in upgradeFrom"},
 		"no depot for an arch": {func(in preflightInput) preflightInput {
 			in.Nodes = append(in.Nodes, readyNode("node-c", "riscv64"))
-			in.Hosts = append(in.Hosts, healthyHost("node-c"))
+			in.Hosts = healthyEtcd(append(in.Hosts, healthyHost("node-c")))
 			return in
 		}, "depot: no host serves v2 for riscv64"},
 		"node not ready": {func(in preflightInput) preflightInput {
@@ -107,13 +120,33 @@ func TestPreflightProblems(t *testing.T) {
 			return in
 		}, "nodes: host node-b reports hostname \"worker-7\", its Node is node-b"},
 		"host without a node": {func(in preflightInput) preflightInput {
-			in.Hosts = append(in.Hosts, healthyHost("controller-only"))
+			in.Hosts = healthyEtcd(append(in.Hosts, healthyHost("controller-only")))
 			return in
 		}, ""},
 		"host without checks": {func(in preflightInput) preflightInput {
 			in.Hosts[1].Status.Checks = nil
 			return in
-		}, "hosts: node-b reports no checks"},
+		}, "hosts: node-b reports no checks; etcd: node-b reports 0 of 2 members"},
+		"etcd member missing": {func(in preflightInput) preflightInput {
+			in.Hosts[1].Status.Checks.EtcdMembers = 1
+			return in
+		}, "etcd: node-b reports 1 of 2 members"},
+		"etcd member unhealthy": {func(in preflightInput) preflightInput {
+			in.Hosts[1].Status.Checks.EtcdHealthy = false
+			return in
+		}, "etcd: node-b is not healthy"},
+		"one controller needs only its own etcd": {func(in preflightInput) preflightInput {
+			in.Hosts[1].Spec.Roles = []string{v1alpha1.RoleWorkload}
+			in.Hosts[1].Status.Checks.EtcdMembers, in.Hosts[1].Status.Checks.EtcdHealthy = 0, false
+			in.Hosts = healthyEtcd(in.Hosts)
+			return in
+		}, ""},
+		"one controller with unhealthy etcd": {func(in preflightInput) preflightInput {
+			in.Hosts[1].Spec.Roles = []string{v1alpha1.RoleWorkload}
+			in.Hosts = healthyEtcd(in.Hosts)
+			in.Hosts[0].Status.Checks.EtcdHealthy = false
+			return in
+		}, "etcd: node-a is not healthy"},
 		"certificate expires soon": {func(in preflightInput) preflightInput {
 			soon := metav1.NewTime(preflightTime().Add(6 * 24 * time.Hour))
 			in.Hosts[0].Status.Checks.CertificatesNotAfter = &soon
@@ -162,7 +195,7 @@ func TestPreflightProblems(t *testing.T) {
 			controller := healthyHost("controller-only")
 			controller.Status.Checks.VarLibSizeBytes = 40 * gib
 			controller.Status.Checks.VarLibFreeBytes = 8 * gib
-			in.Hosts = append(in.Hosts, controller)
+			in.Hosts = healthyEtcd(append(in.Hosts, controller))
 			return in
 		}, ""},
 		"an unknown filesystem size adds no reserve": {func(in preflightInput) preflightInput {
@@ -237,7 +270,7 @@ func TestPreflightPhase(t *testing.T) {
 	host := v1alpha1.Host{ObjectMeta: metav1.ObjectMeta{Name: "node-a"}, Spec: v1alpha1.HostSpec{Roles: []string{v1alpha1.RoleControlPlane}}}
 	host.Status = v1alpha1.HostStatus{
 		Hostname: "node-a",
-		Checks:   &v1alpha1.HostChecks{TimeSynced: true, VarLibFreeBytes: 20 * gib, CertificatesNotAfter: &notAfter},
+		Checks:   &v1alpha1.HostChecks{TimeSynced: true, VarLibFreeBytes: 20 * gib, CertificatesNotAfter: &notAfter, EtcdMembers: 1, EtcdHealthy: true},
 		Depot:    &v1alpha1.DepotStatus{URL: "http://10.0.0.11:9480", Bundles: []v1alpha1.DepotBundle{{Version: "v2", Arch: "amd64", Bytes: 3 * gib}}},
 	}
 	createHostWithStatus(t, ctx, c, host)

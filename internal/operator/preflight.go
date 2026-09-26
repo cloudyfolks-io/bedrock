@@ -120,12 +120,19 @@ func errorText(err error) string {
 }
 
 func preflightProblem(in preflightInput) string {
-	checks := []func(preflightInput) []string{releaseProblems, depotProblems, nodeProblems, hostProblems, cephProblems, vmProblems}
+	checks := []func(preflightInput) []string{releaseProblems, depotProblems, nodeProblems, hostProblems, etcdProblems, cephProblems, vmProblems}
 	var problems []string
 	for _, check := range checks {
 		problems = append(problems, check(in)...)
 	}
 	return strings.Join(problems, "; ")
+}
+
+func etcdProblems(in preflightInput) []string {
+	if problem := etcdProblem(in.Hosts); problem != "" {
+		return []string{problem}
+	}
+	return nil
 }
 
 func releaseProblems(in preflightInput) []string {
