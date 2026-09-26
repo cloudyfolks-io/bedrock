@@ -2,6 +2,7 @@
 set -euo pipefail
 
 profile=${CI_PROFILE:-bedrock-ci}
+lima_home=${COLIMA_HOME:-$HOME/.colima}/_lima
 cpus=${CI_CPUS:-6}
 memory=${CI_MEMORY:-11}
 disk=${CI_DISK:-16}
@@ -131,6 +132,9 @@ k0s_proxy() {
 
 vm_down() {
   colima delete --profile "$profile" --force --data
+  if [ -d "$lima_home/_disks/colima-$profile" ]; then
+    LIMA_HOME="$lima_home" limactl disk delete --force "colima-$profile"
+  fi
 }
 
 in_vm() {
