@@ -168,6 +168,11 @@ func TestControlPlanePhaseWalksControllersOneAtATime(t *testing.T) {
 	setEtcd(t, ctx, c, "node-c", 2, false)
 	runningPod(t, ctx, c, "web", "node-a")
 
+	run(phaseResult{Message: "controlplane: waiting before updating node-a: etcd: node-c is not healthy"})
+	if getNode(t, ctx, c, "node-a").Spec.Unschedulable || getNodeUpgrade(t, ctx, c, "node-a").Annotations[controlPlaneProgressAnnotation] != "" {
+		t.Fatal("the first controller must stay in service while etcd is unhealthy")
+	}
+	setEtcd(t, ctx, c, "node-c", 2, true)
 	run(phaseResult{Message: "controlplane: node-a cordoned"})
 	if err := setUnschedulable(ctx, c, "node-b", true); err != nil {
 		t.Fatal(err)
@@ -180,11 +185,6 @@ func TestControlPlanePhaseWalksControllersOneAtATime(t *testing.T) {
 	if err := c.Delete(ctx, &evicted, client.GracePeriodSeconds(0)); err != nil {
 		t.Fatal(err)
 	}
-	run(phaseResult{Message: "controlplane: waiting before updating node-a: etcd: node-c is not healthy"})
-	if steps := getNodeUpgrade(t, ctx, c, "node-a").Spec.Steps; !slices.Equal(steps, []string{v1alpha1.StepPreload}) {
-		t.Fatalf("the first controller must wait for a healthy etcd: %v", steps)
-	}
-	setEtcd(t, ctx, c, "node-c", 2, true)
 	run(phaseResult{Message: "controlplane: node-a drained"})
 	if err := setUnschedulable(ctx, c, "node-b", false); err != nil {
 		t.Fatal(err)

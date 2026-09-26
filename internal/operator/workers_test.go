@@ -107,6 +107,11 @@ func TestWorkersPhase(t *testing.T) {
 		}
 	}
 
+	run(phaseResult{Message: "workers: waiting before updating node-a: etcd: node-a reports 0 of 1 members"})
+	if getNode(t, ctx, c, "node-a").Spec.Unschedulable || getNodeUpgrade(t, ctx, c, "node-a").Annotations[workerProgressAnnotation] != "" {
+		t.Fatal("a controller must stay in service while etcd is unhealthy")
+	}
+	setEtcd(t, ctx, c, "node-a", 1, true)
 	run(phaseResult{Message: "workers: node-a cordoned"})
 	if !getNode(t, ctx, c, "node-a").Spec.Unschedulable || getNodeUpgrade(t, ctx, c, "node-a").Annotations[workerProgressAnnotation] != nodeDraining {
 		t.Fatal("node-a must be cordoned and marked draining")
@@ -119,11 +124,6 @@ func TestWorkersPhase(t *testing.T) {
 	if err := c.Delete(ctx, &evicted, client.GracePeriodSeconds(0)); err != nil {
 		t.Fatal(err)
 	}
-	run(phaseResult{Message: "workers: waiting before updating node-a: etcd: node-a reports 0 of 1 members"})
-	if steps := getNodeUpgrade(t, ctx, c, "node-a").Spec.Steps; !slices.Equal(steps, []string{v1alpha1.StepPreload}) {
-		t.Fatalf("a controller must not get its steps while etcd is unhealthy: %v", steps)
-	}
-	setEtcd(t, ctx, c, "node-a", 1, true)
 	run(phaseResult{Message: "workers: node-a drained"})
 	if steps := getNodeUpgrade(t, ctx, c, "node-a").Spec.Steps; !slices.Equal(steps, []string{v1alpha1.StepPreload, v1alpha1.StepAgentUpdate, v1alpha1.StepReboot}) {
 		t.Fatalf("node-a steps %v", steps)
