@@ -146,7 +146,7 @@ func TestPullLayoutRetriesABrokenBlobBody(t *testing.T) {
 	ref := pushIndex(t, strings.TrimPrefix(server.URL, "http://"), "lib/flaky:1.0")
 	var broken atomic.Bool
 	dest := filepath.Join(t.TempDir(), "flaky.tar")
-	if _, err := pullLayout(context.Background(), breakBlobOnce{next: http.DefaultTransport, broken: &broken}, ref, dest, t.TempDir()); err != nil {
+	if _, err := pullLayout(context.Background(), testCache(t.TempDir(), breakBlobOnce{next: http.DefaultTransport, broken: &broken}), ref, dest); err != nil {
 		t.Fatal(err)
 	}
 	if !broken.Load() {

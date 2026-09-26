@@ -26,15 +26,15 @@ const (
 var pullBackoff = remote.Backoff{Duration: time.Second, Factor: 3, Jitter: 0.1, Steps: 5}
 
 func PullLayout(ctx context.Context, ref, dest, cacheDir string) (string, error) {
-	return pullLayout(ctx, remote.DefaultTransport, ref, dest, cacheDir)
+	return pullLayout(ctx, blobCache{dir: cacheDir, next: remote.DefaultTransport, idle: blobIdleTimeout, pause: blobPauseBase}, ref, dest)
 }
 
-func pullLayout(ctx context.Context, next http.RoundTripper, ref, dest, cacheDir string) (string, error) {
+func pullLayout(ctx context.Context, transport http.RoundTripper, ref, dest string) (string, error) {
 	parsed, err := name.ParseReference(ref)
 	if err != nil {
 		return "", err
 	}
-	desc, err := remote.Get(parsed, remote.WithContext(ctx), remote.WithTransport(blobCache{dir: cacheDir, next: next}), remote.WithRetryBackoff(pullBackoff))
+	desc, err := remote.Get(parsed, remote.WithContext(ctx), remote.WithTransport(transport), remote.WithRetryBackoff(pullBackoff))
 	if err != nil {
 		return "", fmt.Errorf("pull %s: %w", ref, err)
 	}
