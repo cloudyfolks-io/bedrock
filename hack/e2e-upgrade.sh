@@ -77,7 +77,7 @@ if [ -n "$abort_in" ]; then
   done
   test "$phase" = "$abort_in"
   aborted=0
-  for _ in $(seq 1 12); do
+  for _ in $(seq 1 60); do
     if "$cli_b" upgrade abort --yes; then
       aborted=1
       break
