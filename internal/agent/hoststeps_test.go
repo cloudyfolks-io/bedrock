@@ -124,12 +124,13 @@ type k0sHost struct {
 	running    string
 	startPolls int
 	readyPolls int
+	hangs      bool
 	starting   int
 	restartErr error
 	calls      []string
 }
 
-func (h *k0sHost) Run(_ context.Context, name string, args ...string) (string, error) {
+func (h *k0sHost) Run(ctx context.Context, name string, args ...string) (string, error) {
 	call := strings.TrimSpace(name + " " + strings.Join(args, " "))
 	h.calls = append(h.calls, call)
 	switch {
@@ -153,6 +154,9 @@ func (h *k0sHost) Run(_ context.Context, name string, args ...string) (string, e
 	case call == readyzCall(h.root) && h.readyPolls > 0:
 		h.readyPolls--
 		return "", errors.New("connection refused")
+	case call == readyzCall(h.root) && h.hangs:
+		<-ctx.Done()
+		return "", errors.New("signal: killed")
 	case call == readyzCall(h.root):
 		return "ok\n", nil
 	}
@@ -304,9 +308,10 @@ func TestK0sUpdateTimesOut(t *testing.T) {
 		change     func(*k0sHost)
 		want       string
 	}{
-		"api never ready":    {"k0s-timeout-a", v1alpha1.RoleControlPlane, func(h *k0sHost) { h.readyPolls = 1 << 30 }, "k0s v1.36.3+k0s.0 is not ready after 50ms: /readyz: connection refused"},
-		"k0s never runs":     {"k0s-timeout-b", v1alpha1.RoleWorkload, func(h *k0sHost) { h.startPolls = 1 << 30 }, "k0s v1.36.3+k0s.0 is not ready after 50ms: k0s does not run"},
-		"old k0s comes back": {"k0s-timeout-c", v1alpha1.RoleWorkload, func(h *k0sHost) { h.versions["new k0s"] = oldK0s }, "k0s v1.36.3+k0s.0 is not ready after 50ms: k0s runs v1.36.2+k0s.0"},
+		"api never ready":                {"k0s-timeout-a", v1alpha1.RoleControlPlane, func(h *k0sHost) { h.readyPolls = 1 << 30 }, "k0s v1.36.3+k0s.0 is not ready after 50ms: /readyz: connection refused"},
+		"k0s never runs":                 {"k0s-timeout-b", v1alpha1.RoleWorkload, func(h *k0sHost) { h.startPolls = 1 << 30 }, "k0s v1.36.3+k0s.0 is not ready after 50ms: k0s does not run"},
+		"a probe killed by the deadline": {"k0s-timeout-d", v1alpha1.RoleControlPlane, func(h *k0sHost) { h.readyPolls, h.hangs = 1, true }, "k0s v1.36.3+k0s.0 is not ready after 50ms: /readyz: connection refused"},
+		"old k0s comes back":             {"k0s-timeout-c", v1alpha1.RoleWorkload, func(h *k0sHost) { h.versions["new k0s"] = oldK0s }, "k0s v1.36.3+k0s.0 is not ready after 50ms: k0s runs v1.36.2+k0s.0"},
 	}
 	for name, tc := range cases {
 		t.Run(name, func(t *testing.T) {

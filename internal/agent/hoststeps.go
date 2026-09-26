@@ -164,18 +164,27 @@ func k0sProblem(ctx context.Context, env StepEnv, probes []k0sProbe) string {
 func awaitK0s(ctx context.Context, env StepEnv, probes []k0sProbe) error {
 	waitCtx, cancel := context.WithTimeout(ctx, env.Deps.K0sTimeout)
 	defer cancel()
+	observed := ""
 	for {
 		problem := k0sProblem(waitCtx, env, probes)
 		if problem == "" {
 			return nil
 		}
+		observed = lastObservation(observed, problem, waitCtx.Err())
 		select {
 		case <-waitCtx.Done():
 			if err := ctx.Err(); err != nil {
 				return err
 			}
-			return fmt.Errorf("k0s %s is not ready after %s: %s", env.Target.Spec.K0sVersion, env.Deps.K0sTimeout, problem)
+			return fmt.Errorf("k0s %s is not ready after %s: %s", env.Target.Spec.K0sVersion, env.Deps.K0sTimeout, observed)
 		case <-time.After(env.Deps.K0sPoll):
 		}
 	}
+}
+
+func lastObservation(previous, current string, deadline error) string {
+	if deadline != nil && previous != "" {
+		return previous
+	}
+	return current
 }
