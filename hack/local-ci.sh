@@ -84,6 +84,17 @@ restore_context() {
   fi
 }
 
+retry() {
+  local attempts=$1 i code
+  shift
+  for i in $(seq 1 "$attempts"); do
+    "$@" && return 0
+    code=$?
+    sleep 2
+  done
+  return "$code"
+}
+
 image_cache_file() {
   printf '%s' "$1" | sed 's/[^A-Za-z0-9._-]/_/g'
 }
@@ -243,7 +254,7 @@ run_e2e_init() {
     k0s_proxy
   fi
   env "${mac_env[@]}" make build release binaries VERSION=dev
-  env "${mac_env[@]}" docker build -t ghcr.io/cloudyfolks-labs/bedrock:dev -f Containerfile .
+  retry 3 env "${mac_env[@]}" docker build -t ghcr.io/cloudyfolks-labs/bedrock:dev -f Containerfile .
   in_vm "VERSION=dev KUBECONFIG=/var/lib/k0s/pki/admin.conf BIN=dist/bedrock-dev-linux-$arch ARCH=$arch" hack/e2e-init.sh
   vm_down
 }
@@ -253,8 +264,8 @@ run_e2e_bundle() {
   env "${mac_env[@]}" docker run --rm -d -p "$port:5000" --name registry registry:3
   wait_registry
   env "${mac_env[@]}" make build release binaries VERSION=dev IMAGE=localhost:$port/bedrock:dev PIN_DIGESTS=1
-  env "${mac_env[@]}" docker build -t localhost:$port/bedrock:dev -f Containerfile .
-  env "${mac_env[@]}" docker push localhost:$port/bedrock:dev
+  retry 3 env "${mac_env[@]}" docker build -t localhost:$port/bedrock:dev -f Containerfile .
+  retry 3 env "${mac_env[@]}" docker push localhost:$port/bedrock:dev
   env "${mac_env[@]}" make bundle VERSION=dev IMAGE=localhost:$port/bedrock:dev PIN_DIGESTS=1 BUNDLE_ARCH=$arch
   env "${mac_env[@]}" docker rm -f registry
   in_vm "KUBECONFIG=/var/lib/k0s/pki/admin.conf BUNDLE=dist/bedrock-dev-bundle-$arch.tar.zst IMAGE=localhost:$port/bedrock:dev BIN=dist/bedrock-dev-linux-$arch ARCH=$arch" hack/e2e-init.sh
