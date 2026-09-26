@@ -8,7 +8,6 @@ import (
 
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	"github.com/cloudyfolks-labs/bedrock/api/v1alpha1"
@@ -179,9 +178,6 @@ func restoreControlPlane(ctx context.Context, env upgradeEnv, cluster v1alpha1.C
 		problem := fmt.Sprintf("the backup node %s is not the controller %s", node, controllers[0].Name)
 		return answerManualRestore(ctx, env, cluster, fmt.Sprintf("abort in ControlPlane needs a manual restore of %s: %s: follow %s", upgrade.Backup, problem, restoreRunbook))
 	}
-	if err := deletePlan(ctx, env.Client); err != nil {
-		return err
-	}
 	want, problem := nodeUpgradeFor(upgrade, hostNamed(hosts, node), hosts, nodes, []string{v1alpha1.StepRestore})
 	if problem != "" {
 		return answerManualRestore(ctx, env, cluster, fmt.Sprintf("abort in ControlPlane needs a manual restore of %s: %s: follow %s", upgrade.Backup, problem, restoreRunbook))
@@ -221,15 +217,4 @@ func awaitRestore(ctx context.Context, env upgradeEnv, cluster v1alpha1.Cluster)
 	return writeClusterStatus(ctx, env.Client, func(s *v1alpha1.ClusterStatus) {
 		*s = withMessage(*s, fmt.Sprintf("abort: waiting for the restore of %s (%s)", upgrade.Backup, step.State))
 	})
-}
-
-func deletePlan(ctx context.Context, c client.Client) error {
-	plan := &unstructured.Unstructured{}
-	plan.SetGroupVersionKind(planGVK)
-	plan.SetName(autopilotPlanName)
-	err := c.Delete(ctx, plan)
-	if meta.IsNoMatchError(err) {
-		return nil
-	}
-	return client.IgnoreNotFound(err)
 }

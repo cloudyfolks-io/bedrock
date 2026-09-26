@@ -23,9 +23,6 @@ dump() {
     kubectl get cluster cluster -o yaml || true
     echo "--- node upgrades"
     kubectl get nodeupgrades -o yaml || true
-    echo "--- autopilot"
-    kubectl get plans.autopilot.k0sproject.io -o yaml || true
-    kubectl get controlnodes.autopilot.k0sproject.io -o yaml || true
     echo "--- hosts"
     kubectl get hosts -o yaml || true
     echo "--- pods"

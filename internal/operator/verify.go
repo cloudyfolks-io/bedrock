@@ -133,6 +133,13 @@ func runSmoke(ctx context.Context, env upgradeEnv, vm *unstructured.Unstructured
 	return phaseResult{Done: true, Message: "smoke VM reached " + address}, nil
 }
 
+func stateName(state string) string {
+	if state == "" {
+		return "new"
+	}
+	return state
+}
+
 func vmiAddress(instance unstructured.Unstructured) (string, bool) {
 	interfaces, _, _ := unstructured.NestedSlice(instance.Object, "status", "interfaces")
 	for _, item := range interfaces {

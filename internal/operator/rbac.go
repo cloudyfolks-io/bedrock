@@ -90,7 +90,6 @@ func fixedRules() []rbacv1.PolicyRule {
 		{APIGroups: []string{"apps"}, Resources: []string{"controllerrevisions"}, Verbs: read},
 		{APIGroups: []string{"apps"}, Resources: []string{"deployments"}, Verbs: []string{"get", "patch"}},
 		{APIGroups: []string{"storage.k8s.io"}, Resources: []string{"storageclasses"}, Verbs: read},
-		{APIGroups: []string{planGVK.Group}, Resources: []string{"plans"}, Verbs: standardVerbs()},
 		{APIGroups: []string{vmGVK.Group}, Resources: []string{"virtualmachineinstances", "virtualmachines"}, Verbs: standardVerbs()},
 		{APIGroups: []string{rbacv1.GroupName}, Resources: []string{"clusterrolebindings", "clusterroles", "rolebindings", "roles"}, Verbs: []string{"bind", "escalate"}},
 		{APIGroups: []string{rbacv1.GroupName}, Resources: []string{"clusterroles"}, Verbs: []string{"patch"}},

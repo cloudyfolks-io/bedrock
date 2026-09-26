@@ -8,10 +8,8 @@ import (
 	"testing"
 	"time"
 
-	"k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	"github.com/cloudyfolks-labs/bedrock/api/v1alpha1"
@@ -247,21 +245,12 @@ func TestAbortOnTheNewOperatorHandsBack(t *testing.T) {
 
 func TestAbortInControlPlaneRestoresASingleController(t *testing.T) {
 	c, ctx := abortWorld(t, v1alpha1.PhaseControlPlane)
-	plan := autopilotPlan("v2-controlplane-1", targetK0s, map[string]any{}, []string{"node-a"}, nil, 1, "now")
-	if err := c.Create(ctx, plan); err != nil {
-		t.Fatal(err)
-	}
 	setAction(t, ctx, c, v1alpha1.UpgradeActionAbort)
 
 	got := runRole(t, ctx, c, newRole())
 	progressing := meta.FindStatusCondition(got.Status.Conditions, v1alpha1.ConditionProgressing)
 	if got.Status.Phase != v1alpha1.PhaseControlPlane || progressing.Reason != v1alpha1.ReasonRestoring || got.Status.Upgrade.Message != "restoring "+backupLocationText || got.Spec.Upgrade.Action != v1alpha1.UpgradeActionAbort {
 		t.Fatalf("status %+v action %q", got.Status, got.Spec.Upgrade.Action)
-	}
-	gone := &unstructured.Unstructured{}
-	gone.SetGroupVersionKind(planGVK)
-	if err := c.Get(ctx, client.ObjectKey{Name: autopilotPlanName}, gone); !errors.IsNotFound(err) {
-		t.Fatalf("the autopilot plan must be deleted: %v", err)
 	}
 	restore := getNodeUpgrade(t, ctx, c, "node-a")
 	if !slices.Equal(restore.Spec.Steps, []string{v1alpha1.StepPreload, v1alpha1.StepRestore}) || restore.Spec.Backup != "/var/lib/bedrock/backups/bedrock-v1-20261001T100200Z.tar.gz" {

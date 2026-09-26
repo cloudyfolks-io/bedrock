@@ -61,7 +61,6 @@ func TestOperatorRole(t *testing.T) {
 		{"", "pods/exec", "create"},
 		{"coordination.k8s.io", "leases", "update"},
 		{"apps", "controllerrevisions", "list"},
-		{"autopilot.k0sproject.io", "plans", "delete"},
 		{"kubevirt.io", "virtualmachines", "create"},
 		{"kubevirt.io", "virtualmachineinstances", "get"},
 		{"rbac.authorization.k8s.io", "clusterroles", "escalate"},
@@ -82,6 +81,9 @@ func TestOperatorRole(t *testing.T) {
 	}
 	if allows(role, "apiextensions.k8s.io", "customresourcedefinitions", "delete") || allows(role, "", "namespaces", "delete") {
 		t.Fatal("the operator never deletes CRDs or namespaces")
+	}
+	if slices.ContainsFunc(role.Rules, func(rule rbacv1.PolicyRule) bool { return slices.Contains(rule.APIGroups, "autopilot.k0sproject.io") }) {
+		t.Fatal("the operator no longer uses k0s autopilot")
 	}
 	again, err := OperatorRole(rbacBundle(t))
 	if err != nil || !reflect.DeepEqual(again, role) {
