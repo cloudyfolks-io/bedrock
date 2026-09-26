@@ -243,32 +243,61 @@ func TestAbortOnTheNewOperatorHandsBack(t *testing.T) {
 	}
 }
 
+func appendK0sUpdate(t *testing.T, ctx context.Context, c client.Client, node string) {
+	t.Helper()
+	upgrade := getNodeUpgrade(t, ctx, c, node)
+	upgrade.Spec.Steps = append(upgrade.Spec.Steps, v1alpha1.StepK0sUpdate)
+	if err := c.Update(ctx, &upgrade); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestAbortInControlPlaneRestoresASingleController(t *testing.T) {
-	c, ctx := abortWorld(t, v1alpha1.PhaseControlPlane)
-	setAction(t, ctx, c, v1alpha1.UpgradeActionAbort)
+	cases := map[string]struct {
+		k0sUpdate *v1alpha1.NodeUpgradeStepStatus
+		steps     []string
+	}{
+		"before K0sUpdate":    {nil, []string{v1alpha1.StepPreload, v1alpha1.StepRestore}},
+		"K0sUpdate pending":   {&v1alpha1.NodeUpgradeStepStatus{Name: v1alpha1.StepK0sUpdate, State: v1alpha1.StepPending}, []string{v1alpha1.StepPreload, v1alpha1.StepK0sUpdate, v1alpha1.StepRestore}},
+		"K0sUpdate succeeded": {&v1alpha1.NodeUpgradeStepStatus{Name: v1alpha1.StepK0sUpdate, State: v1alpha1.StepSucceeded, Attempt: 1, Message: "k0s v1.36.3+k0s.0 installed, restarted k0scontroller.service"}, []string{v1alpha1.StepPreload, v1alpha1.StepK0sUpdate, v1alpha1.StepRestore}},
+		"K0sUpdate failed":    {&v1alpha1.NodeUpgradeStepStatus{Name: v1alpha1.StepK0sUpdate, State: v1alpha1.StepFailed, Attempt: 1, Message: "k0s v1.36.3+k0s.0 is not ready after 10m0s: /readyz: exit status 1"}, []string{v1alpha1.StepPreload, v1alpha1.StepK0sUpdate, v1alpha1.StepRestore}},
+	}
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			c, ctx := abortWorld(t, v1alpha1.PhaseControlPlane)
+			if tc.k0sUpdate != nil {
+				appendK0sUpdate(t, ctx, c, "node-a")
+				reportStep(t, ctx, c, "node-a", *tc.k0sUpdate)
+			}
+			setAction(t, ctx, c, v1alpha1.UpgradeActionAbort)
 
-	got := runRole(t, ctx, c, newRole())
-	progressing := meta.FindStatusCondition(got.Status.Conditions, v1alpha1.ConditionProgressing)
-	if got.Status.Phase != v1alpha1.PhaseControlPlane || progressing.Reason != v1alpha1.ReasonRestoring || got.Status.Upgrade.Message != "restoring "+backupLocationText || got.Spec.Upgrade.Action != v1alpha1.UpgradeActionAbort {
-		t.Fatalf("status %+v action %q", got.Status, got.Spec.Upgrade.Action)
-	}
-	restore := getNodeUpgrade(t, ctx, c, "node-a")
-	if !slices.Equal(restore.Spec.Steps, []string{v1alpha1.StepPreload, v1alpha1.StepRestore}) || restore.Spec.Backup != "/var/lib/bedrock/backups/bedrock-v1-20261001T100200Z.tar.gz" {
-		t.Fatalf("restore spec %+v", restore.Spec)
-	}
-	if image := operatorImage(t, ctx, c).Spec.Template.Spec.Containers[1].Image; image != "ghcr.io/cloudyfolks-labs/bedrock:v1" {
-		t.Fatalf("image %s", image)
-	}
+			got := runRole(t, ctx, c, newRole())
+			progressing := meta.FindStatusCondition(got.Status.Conditions, v1alpha1.ConditionProgressing)
+			if got.Status.Phase != v1alpha1.PhaseControlPlane || progressing.Reason != v1alpha1.ReasonRestoring || got.Status.Upgrade.Message != "restoring "+backupLocationText || got.Spec.Upgrade.Action != v1alpha1.UpgradeActionAbort {
+				t.Fatalf("status %+v action %q", got.Status, got.Spec.Upgrade.Action)
+			}
+			restore := getNodeUpgrade(t, ctx, c, "node-a")
+			if !slices.Equal(restore.Spec.Steps, tc.steps) || restore.Spec.Backup != "/var/lib/bedrock/backups/bedrock-v1-20261001T100200Z.tar.gz" {
+				t.Fatalf("restore spec %+v", restore.Spec)
+			}
+			if tc.k0sUpdate != nil && currentStep(restore, v1alpha1.StepK0sUpdate).State != tc.k0sUpdate.State {
+				t.Fatalf("the abort must leave K0sUpdate %s: %+v", tc.k0sUpdate.State, restore.Status.Steps)
+			}
+			if image := operatorImage(t, ctx, c).Spec.Template.Spec.Containers[1].Image; image != "ghcr.io/cloudyfolks-labs/bedrock:v1" {
+				t.Fatalf("image %s", image)
+			}
 
-	waiting := runRole(t, ctx, c, oldRole())
-	if waiting.Status.Upgrade.Message != "abort: waiting for the restore of "+backupLocationText+" (Pending)" {
-		t.Fatalf("message %q", waiting.Status.Upgrade.Message)
-	}
-	reportStep(t, ctx, c, "node-a", v1alpha1.NodeUpgradeStepStatus{Name: v1alpha1.StepRestore, State: v1alpha1.StepFailed, Attempt: 1, Message: "k0s restore: exit status 1"})
-	failed := runRole(t, ctx, c, oldRole())
-	manual := meta.FindStatusCondition(failed.Status.Conditions, v1alpha1.ConditionProgressing)
-	if failed.Status.Phase != v1alpha1.PhaseFailed || manual.Reason != v1alpha1.ReasonRestoreManual || failed.Spec.Upgrade.Action != "" || failed.Status.Upgrade.Message != "restore on node-a failed: k0s restore: exit status 1: follow "+restoreRunbook {
-		t.Fatalf("status %+v action %q", failed.Status.Upgrade, failed.Spec.Upgrade.Action)
+			waiting := runRole(t, ctx, c, oldRole())
+			if waiting.Status.Upgrade.Message != "abort: waiting for the restore of "+backupLocationText+" (Pending)" {
+				t.Fatalf("message %q", waiting.Status.Upgrade.Message)
+			}
+			reportStep(t, ctx, c, "node-a", v1alpha1.NodeUpgradeStepStatus{Name: v1alpha1.StepRestore, State: v1alpha1.StepFailed, Attempt: 1, Message: "k0s restore: exit status 1"})
+			failed := runRole(t, ctx, c, oldRole())
+			manual := meta.FindStatusCondition(failed.Status.Conditions, v1alpha1.ConditionProgressing)
+			if failed.Status.Phase != v1alpha1.PhaseFailed || manual.Reason != v1alpha1.ReasonRestoreManual || failed.Spec.Upgrade.Action != "" || failed.Status.Upgrade.Message != "restore on node-a failed: k0s restore: exit status 1: follow "+restoreRunbook {
+				t.Fatalf("status %+v action %q", failed.Status.Upgrade, failed.Spec.Upgrade.Action)
+			}
+		})
 	}
 }
 
