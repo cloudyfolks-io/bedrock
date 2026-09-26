@@ -241,7 +241,7 @@ run_upgrade() {
   env "${mac_env[@]}" REGISTRY=localhost:$port ARCH=$arch VERSION_A=v0.0.0-e2e.1 VERSION_B=v0.0.0-e2e.2 K0S_A=v1.36.2+k0s.0 K0S_B=v1.36.3+k0s.0 hack/e2e-upgrade-build.sh
   env "${mac_env[@]}" docker rm -f registry
   env "${mac_env[@]}" docker system prune -af
-  colima ssh --profile "$profile" -- sudo fstrim -av
+  colima ssh --profile "$profile" -- sudo fstrim --all --verbose || echo "warning: fstrim failed" >&2
   in_vm "REGISTRY=localhost:$port ARCH=$arch VERSION_A=v0.0.0-e2e.1 VERSION_B=v0.0.0-e2e.2 K0S_A=v1.36.2+k0s.0 K0S_B=v1.36.3+k0s.0${abort_in:+ ABORT_IN=$abort_in}" hack/e2e-upgrade.sh
   rm -f dist/bedrock-*-bundle-*.tar.zst
   vm_down
