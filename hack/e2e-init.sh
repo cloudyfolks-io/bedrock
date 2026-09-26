@@ -143,7 +143,7 @@ test "$(kubectl -n nmstate get ds nmstate-handler -o jsonpath='{.status.desiredN
 kubectl get storageclass block 2>/dev/null && exit 1
 systemctl is-active bedrock-agent.service
 node=$(hostname | tr '[:upper:]' '[:lower:]')
-for _ in $(seq 1 30); do
+for _ in $(seq 1 60); do
   cores=$(kubectl get host "$node" -o jsonpath='{.status.inventory.cpu.cores}' 2>/dev/null || true)
   if [ "${cores:-0}" -gt 0 ] 2>/dev/null; then break; fi
   sleep 5
