@@ -224,6 +224,62 @@ func TestRunUpgradesRebootsAndFinishesAfterBoot(t *testing.T) {
 	}
 }
 
+func recordRunning(t *testing.T, node, name string, started time.Time) {
+	t.Helper()
+	upgrade := getUpgrade(t, node)
+	startedAt := metav1.NewTime(started)
+	upgrade.Status.Steps = []v1alpha1.NodeUpgradeStepStatus{{Name: name, State: v1alpha1.StepRunning, Attempt: 1, StartedAt: &startedAt}}
+	if err := k8sClient.Status().Update(context.Background(), &upgrade); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func writeRestoreFixture(t *testing.T, root string, completed time.Time) {
+	t.Helper()
+	marker := `{"backup":"/var/lib/bedrock/backups/bedrock-v0.2.0-20261001T090000Z.tar.gz","completedAt":"` + completed.UTC().Format(time.RFC3339) + `"}`
+	writeFixtureFile(t, filepath.Join(root, "var/lib/bedrock/restore.json"), marker)
+}
+
+func TestRunUpgradesDoesNotRerunAStepFromBeforeTheRestore(t *testing.T) {
+	createReleases(t)
+	createUpgrade(t, "node-a", v1alpha1.StepBackup, v1alpha1.StepCleanup)
+	started := time.Date(2026, 10, 1, 9, 0, 0, 0, time.UTC)
+	recordRunning(t, "node-a", v1alpha1.StepBackup, started)
+	deps := upgradeDeps(t, &host.FakeExec{}, "boot-1")
+	writeRestoreFixture(t, deps.Root, time.Date(2026, 10, 1, 9, 30, 0, 0, time.UTC))
+	recorder := &stepRecorder{}
+	steps := map[string]Step{v1alpha1.StepBackup: recorder.step(v1alpha1.StepBackup, Outcome{Message: "/b.tar.gz sha256:x"}, nil), v1alpha1.StepCleanup: recorder.step(v1alpha1.StepCleanup, Outcome{}, nil)}
+	if err := RunUpgrades(context.Background(), k8sClient, deps, steps); err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Equal(recorder.calls, []string{"Cleanup@v0.3.0<-v0.2.0"}) {
+		t.Fatalf("a step that was Running in the restored snapshot must not run again, Cleanup runs alone: calls %v", recorder.calls)
+	}
+	upgrade := getUpgrade(t, "node-a")
+	if status := stepStatus(upgrade, v1alpha1.StepCleanup); status.State != v1alpha1.StepSucceeded {
+		t.Fatalf("cleanup status %+v", status)
+	}
+	if status := stepStatus(upgrade, v1alpha1.StepBackup); status.State != v1alpha1.StepRunning || status.StartedAt == nil || !status.StartedAt.Time.Equal(started) {
+		t.Fatalf("backup status %+v", status)
+	}
+}
+
+func TestRunUpgradesRerunsAStepStartedAfterTheRestore(t *testing.T) {
+	createReleases(t)
+	createUpgrade(t, "node-a", v1alpha1.StepCleanup)
+	recordRunning(t, "node-a", v1alpha1.StepCleanup, time.Date(2026, 10, 1, 9, 45, 0, 0, time.UTC))
+	deps := upgradeDeps(t, &host.FakeExec{}, "boot-1")
+	writeRestoreFixture(t, deps.Root, time.Date(2026, 10, 1, 9, 30, 0, 0, time.UTC))
+	recorder := &stepRecorder{}
+	steps := map[string]Step{v1alpha1.StepCleanup: recorder.step(v1alpha1.StepCleanup, Outcome{}, nil)}
+	if err := RunUpgrades(context.Background(), k8sClient, deps, steps); err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Equal(recorder.calls, []string{"Cleanup@v0.3.0<-v0.2.0"}) {
+		t.Fatalf("a step interrupted after the restore must run again: calls %v", recorder.calls)
+	}
+}
+
 func TestRunUpgradesOnlyTouchesItsOwnNode(t *testing.T) {
 	createReleases(t)
 	createUpgrade(t, "node-b", v1alpha1.StepPreload)

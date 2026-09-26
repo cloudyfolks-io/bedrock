@@ -63,8 +63,9 @@ func RunUpgrades(ctx context.Context, c client.Client, deps Deps, steps map[stri
 	upgrades := slices.Clone(list.Items)
 	slices.SortFunc(upgrades, func(a, b v1alpha1.NodeUpgrade) int { return strings.Compare(a.Name, b.Name) })
 	bootID := readBootID(deps.Root)
+	restored := readRestoreMarker(deps.Root)
 	for _, upgrade := range upgrades {
-		stopped, err := runUpgrade(ctx, c, deps, steps, upgrade, bootID)
+		stopped, err := runUpgrade(ctx, c, deps, steps, upgrade, bootID, restored)
 		if err != nil || stopped {
 			return err
 		}
@@ -72,7 +73,7 @@ func RunUpgrades(ctx context.Context, c client.Client, deps Deps, steps map[stri
 	return nil
 }
 
-func runUpgrade(ctx context.Context, c client.Client, deps Deps, steps map[string]Step, upgrade v1alpha1.NodeUpgrade, bootID string) (bool, error) {
+func runUpgrade(ctx context.Context, c client.Client, deps Deps, steps map[string]Step, upgrade v1alpha1.NodeUpgrade, bootID string, restored *v1alpha1.RestoreStatus) (bool, error) {
 	env, envErr := stepEnv(ctx, c, deps, upgrade)
 	status := *upgrade.Status.DeepCopy()
 	status.ObservedGeneration = upgrade.Generation
@@ -80,7 +81,7 @@ func runUpgrade(ctx context.Context, c client.Client, deps Deps, steps map[strin
 	blocked := false
 	for _, name := range upgrade.Spec.Steps {
 		current := stepEntry(status, name)
-		decision := stepAction(current, name, attempt, status.BootID, bootID)
+		decision := stepAction(current, name, attempt, status.BootID, bootID, restored)
 		if decision == decisionSkip {
 			continue
 		}
@@ -135,16 +136,22 @@ func runUpgrade(ctx context.Context, c client.Client, deps Deps, steps map[strin
 	return false, writeUpgradeStatus(ctx, c, upgrade.Name, status)
 }
 
-func stepAction(current v1alpha1.NodeUpgradeStepStatus, name string, attempt int32, recordedBoot, bootID string) stepDecision {
+func stepAction(current v1alpha1.NodeUpgradeStepStatus, name string, attempt int32, recordedBoot, bootID string, restored *v1alpha1.RestoreStatus) stepDecision {
 	switch {
 	case current.State == v1alpha1.StepSucceeded:
 		return decisionSkip
+	case current.State == v1alpha1.StepRunning && startedBeforeRestore(current, restored):
+		return decisionBlock
 	case current.State == v1alpha1.StepRunning && name == v1alpha1.StepReboot && recordedBoot != "" && recordedBoot != bootID:
 		return decisionFinishReboot
 	case current.State == v1alpha1.StepFailed && current.Attempt >= attempt:
 		return decisionBlock
 	}
 	return decisionRun
+}
+
+func startedBeforeRestore(step v1alpha1.NodeUpgradeStepStatus, restored *v1alpha1.RestoreStatus) bool {
+	return restored != nil && step.StartedAt.Before(&restored.CompletedAt)
 }
 
 func alwaysRuns(name string) bool {
