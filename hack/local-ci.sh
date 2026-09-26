@@ -13,6 +13,8 @@ min_free=${CI_MIN_FREE_GB:-25}
 floor=${CI_FLOOR_GB:-15}
 port=${CI_REGISTRY_PORT:-5001}
 repo=$(git rev-parse --show-toplevel)
+image_cache=$repo/dist/cache/images
+base_images=(golang:1.27 gcr.io/distroless/static:nonroot registry:3)
 arch=$(uname -m | sed 's/x86_64/amd64/;s/aarch64/arm64/')
 previous_context=$(docker context show 2>/dev/null || true)
 docker_host="unix://$HOME/.colima/$profile/docker.sock"
@@ -82,6 +84,36 @@ restore_context() {
   fi
 }
 
+image_cache_file() {
+  printf '%s' "$1" | sed 's/[^A-Za-z0-9._-]/_/g'
+}
+
+seed_image() {
+  local image=$1 attempt=1
+  local file="$image_cache/$(image_cache_file "$image").tar"
+  if [ -f "$file" ]; then
+    env "${mac_env[@]}" docker load -i "$file"
+    return
+  fi
+  until env "${mac_env[@]}" docker pull "$image"; do
+    if [ "$attempt" -ge 5 ]; then
+      return 1
+    fi
+    sleep "$((attempt * 2))"
+    attempt=$((attempt + 1))
+  done
+  mkdir -p "$image_cache"
+  env "${mac_env[@]}" docker save -o "$file.part" "$image"
+  mv "$file.part" "$file"
+}
+
+seed_images() {
+  local image
+  for image in "${base_images[@]}"; do
+    seed_image "$image"
+  done
+}
+
 vm_up() {
   vm_down
   colima start --profile "$profile" --vm-type vz --cpu "$cpus" --memory "$memory" --disk "$disk" --root-disk "$root_disk" --runtime docker --mount "$repo:w" --nested-virtualization="$nested"
@@ -109,6 +141,7 @@ SCRIPT
   if [ -n "$proxy_https" ]; then
     use_proxy
   fi
+  seed_images
 }
 
 wait_ntp() {
