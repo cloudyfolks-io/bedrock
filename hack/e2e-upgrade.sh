@@ -132,6 +132,8 @@ if [ -n "$abort_in" ]; then
     sleep 5
   done
   test -z "$(kubectl get nodeupgrades -o name)"
+  test -z "$(find /var/lib/k0s -maxdepth 1 -name '.pre-restore-*')"
+  test "$(find /var/lib/bedrock/backups -maxdepth 1 -name "bedrock-$VERSION_A-*.tar.gz" | wc -l)" -eq 1
   kubectl wait --for=condition=Ready node --all --timeout=300s
   grep -qx 'server = "https://127.0.0.1:1"' /etc/k0s/containerd.d/certs.d/_default/hosts.toml
   if kubectl get pods -A -o jsonpath='{range .items[*]}{.status.containerStatuses[*].state.waiting.reason}{"\n"}{end}' | grep -qE 'ImagePullBackOff|ErrImagePull'; then
