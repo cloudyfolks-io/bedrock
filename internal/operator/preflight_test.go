@@ -131,13 +131,35 @@ func TestPreflightProblems(t *testing.T) {
 			in.Hosts[1].Status.Checks.VarLibFreeBytes = 7 * gib
 			return in
 		}, "disk: node-b has 7.0 GiB free in /var/lib, needs 8.0 GiB"},
-		"disk too small on the backup host counts its images": {func(in preflightInput) preflightInput {
+		"disk too small on the backup host counts its images twice": {func(in preflightInput) preflightInput {
 			in.Hosts[0].Status.Checks.ImagesBytes = 4 * gib
-			in.Hosts[0].Status.Checks.VarLibFreeBytes = 9 * gib
+			in.Hosts[0].Status.Checks.VarLibFreeBytes = 13 * gib
 			return in
-		}, "disk: node-a has 9.0 GiB free in /var/lib, needs 10.0 GiB"},
+		}, "disk: node-a has 13.0 GiB free in /var/lib, needs 14.0 GiB"},
 		"images on a non backup host do not count": {func(in preflightInput) preflightInput {
 			in.Hosts[1].Status.Checks.ImagesBytes = 100 * gib
+			return in
+		}, ""},
+		"the backup host needs twice its images and the kubelet reserve": {func(in preflightInput) preflightInput {
+			in.Hosts[0].Status.Checks.ImagesBytes = 4 * gib
+			in.Hosts[0].Status.Checks.VarLibSizeBytes = 40 * gib
+			in.Hosts[0].Status.Checks.VarLibFreeBytes = 19 * gib
+			return in
+		}, "disk: node-a has 19.0 GiB free in /var/lib, needs 20.0 GiB"},
+		"the backup host with room for its images and the kubelet reserve": {func(in preflightInput) preflightInput {
+			in.Hosts[0].Status.Checks.ImagesBytes = 4 * gib
+			in.Hosts[0].Status.Checks.VarLibSizeBytes = 40 * gib
+			in.Hosts[0].Status.Checks.VarLibFreeBytes = 20 * gib
+			return in
+		}, ""},
+		"another host needs its bundle and the kubelet reserve": {func(in preflightInput) preflightInput {
+			in.Hosts[1].Status.Checks.ImagesBytes = 100 * gib
+			in.Hosts[1].Status.Checks.VarLibSizeBytes = 40 * gib
+			in.Hosts[1].Status.Checks.VarLibFreeBytes = 13 * gib
+			return in
+		}, "disk: node-b has 13.0 GiB free in /var/lib, needs 14.0 GiB"},
+		"an unknown filesystem size adds no reserve": {func(in preflightInput) preflightInput {
+			in.Hosts[1].Status.Checks.VarLibFreeBytes = 8 * gib
 			return in
 		}, ""},
 		"ceph warn": {func(in preflightInput) preflightInput {

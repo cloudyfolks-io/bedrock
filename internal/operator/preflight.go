@@ -21,6 +21,7 @@ import (
 const (
 	allowShutdownAnnotation = "bedrock.cloudyfolks.io/allow-shutdown"
 	certificateMargin       = 7 * 24 * time.Hour
+	kubeletReservePercent   = 15
 )
 
 var (
@@ -256,11 +257,16 @@ func hostCheckProblems(in preflightInput, host v1alpha1.Host) []string {
 }
 
 func diskNeed(in preflightInput, host v1alpha1.Host) int64 {
-	need := 2 * hostBundleBytes(in, host)
+	checks := host.Status.Checks
+	need := 2*hostBundleBytes(in, host) + kubeletReserve(checks.VarLibSizeBytes)
 	if backup, ok := backupHost(in.Hosts); ok && backup.Name == host.Name {
-		need += host.Status.Checks.ImagesBytes
+		need += 2 * checks.ImagesBytes
 	}
 	return need
+}
+
+func kubeletReserve(sizeBytes int64) int64 {
+	return sizeBytes * kubeletReservePercent / 100
 }
 
 func hostBundleBytes(in preflightInput, host v1alpha1.Host) int64 {
