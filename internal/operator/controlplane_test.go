@@ -129,7 +129,11 @@ func TestControlPlanePhaseWalksControllersOneAtATime(t *testing.T) {
 	run(phaseResult{Message: "controlplane: node-a drained"})
 	reportStep(t, ctx, c, "node-a", v1alpha1.NodeUpgradeStepStatus{Name: v1alpha1.StepK0sUpdate, State: v1alpha1.StepFailed, Attempt: 1, Message: "staged k0s: checksum mismatch"})
 	run(phaseResult{Failure: "controlplane: node-a K0sUpdate failed: staged k0s: checksum mismatch"})
-	finishSteps(t, ctx, c, "node-a", v1alpha1.StepK0sUpdate)
+	if err := raiseAttempts(ctx, c, "v2", 2); err != nil {
+		t.Fatal(err)
+	}
+	run(phaseResult{Message: "controlplane: updating node-a: K0sUpdate Pending"})
+	reportStep(t, ctx, c, "node-a", v1alpha1.NodeUpgradeStepStatus{Name: v1alpha1.StepK0sUpdate, State: v1alpha1.StepSucceeded, Attempt: 2})
 	setK0sVersion(t, ctx, c, "node-a", targetK0s)
 	run(phaseResult{Message: "controlplane: node-a uncordoned"})
 	run(phaseResult{Message: "controlplane: node-a: etcd: node-a reports 0 of 2 members"})
