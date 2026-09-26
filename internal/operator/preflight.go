@@ -120,7 +120,7 @@ func errorText(err error) string {
 }
 
 func preflightProblem(in preflightInput) string {
-	checks := []func(preflightInput) []string{releaseProblems, depotProblems, nodeProblems, hostProblems, etcdProblems, cephProblems, vmProblems}
+	checks := []func(preflightInput) []string{releaseProblems, depotProblems, nodeProblems, spareProblems, hostProblems, etcdProblems, cephProblems, vmProblems}
 	var problems []string
 	for _, check := range checks {
 		problems = append(problems, check(in)...)
@@ -232,6 +232,14 @@ func nodeProblems(in preflightInput) []string {
 		}
 	}
 	return problems
+}
+
+func spareProblems(in preflightInput) []string {
+	count := len(slices.DeleteFunc(slices.Clone(in.Nodes), func(node corev1.Node) bool { return !schedulable(node) }))
+	if len(in.Nodes) < 2 || count >= 2 {
+		return nil
+	}
+	return []string{fmt.Sprintf("nodes: a drain needs 2 schedulable Nodes, found %d of %d", count, len(in.Nodes))}
 }
 
 func hostProblems(in preflightInput) []string {

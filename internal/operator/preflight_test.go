@@ -115,6 +115,25 @@ func TestPreflightProblems(t *testing.T) {
 			in.Nodes[1].Status.Conditions = []corev1.NodeCondition{{Type: corev1.NodeReady, Status: corev1.ConditionUnknown}}
 			return in
 		}, "nodes: node-b is not Ready"},
+		"one schedulable node of two": {func(in preflightInput) preflightInput {
+			in.Nodes[1].Spec.Unschedulable = true
+			return in
+		}, "nodes: a drain needs 2 schedulable Nodes, found 1 of 2"},
+		"a tainted node": {func(in preflightInput) preflightInput {
+			in.Nodes[0].Spec.Taints = []corev1.Taint{{Key: "example.com/busy", Effect: corev1.TaintEffectNoExecute}}
+			return in
+		}, "nodes: a drain needs 2 schedulable Nodes, found 1 of 2"},
+		"one-node cluster": {func(in preflightInput) preflightInput {
+			in.Nodes = in.Nodes[:1]
+			in.Hosts = healthyEtcd(in.Hosts[:1])
+			return in
+		}, ""},
+		"one-node cluster that is cordoned": {func(in preflightInput) preflightInput {
+			in.Nodes = in.Nodes[:1]
+			in.Nodes[0].Spec.Unschedulable = true
+			in.Hosts = healthyEtcd(in.Hosts[:1])
+			return in
+		}, ""},
 		"hostname differs": {func(in preflightInput) preflightInput {
 			in.Hosts[1].Status.Hostname = "worker-7"
 			return in
