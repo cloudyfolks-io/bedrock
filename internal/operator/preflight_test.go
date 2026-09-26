@@ -158,6 +158,13 @@ func TestPreflightProblems(t *testing.T) {
 			in.Hosts[1].Status.Checks.VarLibFreeBytes = 13 * gib
 			return in
 		}, "disk: node-b has 13.0 GiB free in /var/lib, needs 14.0 GiB"},
+		"a host without a node needs no kubelet reserve": {func(in preflightInput) preflightInput {
+			controller := healthyHost("controller-only")
+			controller.Status.Checks.VarLibSizeBytes = 40 * gib
+			controller.Status.Checks.VarLibFreeBytes = 8 * gib
+			in.Hosts = append(in.Hosts, controller)
+			return in
+		}, ""},
 		"an unknown filesystem size adds no reserve": {func(in preflightInput) preflightInput {
 			in.Hosts[1].Status.Checks.VarLibFreeBytes = 8 * gib
 			return in

@@ -258,15 +258,18 @@ func hostCheckProblems(in preflightInput, host v1alpha1.Host) []string {
 
 func diskNeed(in preflightInput, host v1alpha1.Host) int64 {
 	checks := host.Status.Checks
-	need := 2*hostBundleBytes(in, host) + kubeletReserve(checks.VarLibSizeBytes)
+	need := 2*hostBundleBytes(in, host) + kubeletReserve(in, host)
 	if backup, ok := backupHost(in.Hosts); ok && backup.Name == host.Name {
 		need += 2 * checks.ImagesBytes
 	}
 	return need
 }
 
-func kubeletReserve(sizeBytes int64) int64 {
-	return sizeBytes * kubeletReservePercent / 100
+func kubeletReserve(in preflightInput, host v1alpha1.Host) int64 {
+	if _, ok := findNode(in.Nodes, host.Name); !ok {
+		return 0
+	}
+	return host.Status.Checks.VarLibSizeBytes * kubeletReservePercent / 100
 }
 
 func hostBundleBytes(in preflightInput, host v1alpha1.Host) int64 {
