@@ -9,5 +9,5 @@ spec:
   network:
     managementInterface: ${IFACE}
   virtualization:
-    emulation: true
+    emulation: ${EMULATION}
   roles: [control-plane, ceph-osd, fabric-gateway, workload]

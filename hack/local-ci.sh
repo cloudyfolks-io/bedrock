@@ -208,6 +208,14 @@ in_vm() {
   colima ssh --profile "$profile" -- sudo env PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin $proxy $vars bash -c "cd '$repo' && $cmd"
 }
 
+emulation_flag() {
+  if [ "$nested" = "true" ]; then
+    echo false
+  else
+    echo true
+  fi
+}
+
 warn_docker_desktop() {
   if pgrep -x com.docker.backend >/dev/null 2>&1; then
     echo "warning: Docker Desktop is running and will compete with the VM for RAM" >&2
@@ -255,7 +263,7 @@ run_e2e_init() {
   fi
   env "${mac_env[@]}" make build release binaries VERSION=dev
   retry 3 env "${mac_env[@]}" docker build -t ghcr.io/cloudyfolks-labs/bedrock:dev -f Containerfile .
-  in_vm "VERSION=dev KUBECONFIG=/var/lib/k0s/pki/admin.conf BIN=dist/bedrock-dev-linux-$arch ARCH=$arch" hack/e2e-init.sh
+  in_vm "VERSION=dev KUBECONFIG=/var/lib/k0s/pki/admin.conf BIN=dist/bedrock-dev-linux-$arch ARCH=$arch EMULATION=$(emulation_flag)" hack/e2e-init.sh
   vm_down
 }
 
@@ -268,7 +276,7 @@ run_e2e_bundle() {
   retry 3 env "${mac_env[@]}" docker push localhost:$port/bedrock:dev
   env "${mac_env[@]}" make bundle VERSION=dev IMAGE=localhost:$port/bedrock:dev PIN_DIGESTS=1 BUNDLE_ARCH=$arch
   env "${mac_env[@]}" docker rm -f registry
-  in_vm "KUBECONFIG=/var/lib/k0s/pki/admin.conf BUNDLE=dist/bedrock-dev-bundle-$arch.tar.zst IMAGE=localhost:$port/bedrock:dev BIN=dist/bedrock-dev-linux-$arch ARCH=$arch" hack/e2e-init.sh
+  in_vm "KUBECONFIG=/var/lib/k0s/pki/admin.conf BUNDLE=dist/bedrock-dev-bundle-$arch.tar.zst IMAGE=localhost:$port/bedrock:dev BIN=dist/bedrock-dev-linux-$arch ARCH=$arch EMULATION=$(emulation_flag)" hack/e2e-init.sh
   rm -f "dist/bedrock-dev-bundle-$arch.tar.zst"
   vm_down
 }
@@ -286,7 +294,7 @@ run_upgrade() {
   env "${mac_env[@]}" docker rm -f registry
   env "${mac_env[@]}" docker system prune -af
   colima ssh --profile "$profile" -- sudo fstrim --all --verbose || echo "warning: fstrim failed" >&2
-  in_vm "REGISTRY=localhost:$port ARCH=$arch VERSION_A=v0.0.0-e2e.1 VERSION_B=v0.0.0-e2e.2 K0S_A=v1.36.2+k0s.0 K0S_B=v1.36.3+k0s.0${abort_in:+ ABORT_IN=$abort_in}" hack/e2e-upgrade.sh
+  in_vm "REGISTRY=localhost:$port ARCH=$arch VERSION_A=v0.0.0-e2e.1 VERSION_B=v0.0.0-e2e.2 K0S_A=v1.36.2+k0s.0 K0S_B=v1.36.3+k0s.0 EMULATION=$(emulation_flag)${abort_in:+ ABORT_IN=$abort_in}" hack/e2e-upgrade.sh
   rm -f dist/bedrock-*-bundle-*.tar.zst
   vm_down
 }

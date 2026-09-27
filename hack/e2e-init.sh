@@ -6,6 +6,7 @@ image=${IMAGE:-ghcr.io/cloudyfolks-labs/bedrock:$version}
 bin=${BIN:-bin/bedrock}
 release_dir=${RELEASE_DIR:-dist/release}
 arch=${ARCH:-$(uname -m | sed 's/x86_64/amd64/;s/aarch64/arm64/')}
+emulation=${EMULATION:-true}
 workdir=$(mktemp -d)
 export KUBECONFIG=/var/lib/k0s/pki/admin.conf
 
@@ -85,7 +86,7 @@ nodeip=$(ip -json -4 addr show dev "$iface" | python3 -c 'import json,sys; print
 vip=$(echo "$nodeip" | awk -F. '{printf "%s.%s.%s.250", $1, $2, $3}')
 if [ "$vip" = "$nodeip" ]; then vip=$(echo "$nodeip" | awk -F. '{printf "%s.%s.%s.251", $1, $2, $3}'); fi
 
-VERSION=$version VIP=$vip IFACE=$iface envsubst < hack/e2e/cluster.yaml.tmpl > "$workdir/cluster.yaml"
+VERSION=$version VIP=$vip IFACE=$iface EMULATION=$emulation envsubst < hack/e2e/cluster.yaml.tmpl > "$workdir/cluster.yaml"
 cat "$workdir/cluster.yaml"
 
 if [ -n "${BUNDLE:-}" ]; then
@@ -123,7 +124,7 @@ kubectl -n kubevirt rollout status deployment/virt-operator --timeout=300s
 kubectl -n cdi rollout status deployment/cdi-operator --timeout=300s
 kubectl -n traefik rollout status deployment/traefik --timeout=300s
 kubectl wait --for=jsonpath='{.status.phase}'=Deployed -n kubevirt kubevirt/kubevirt --timeout=900s
-kubectl -n kubevirt get kubevirt kubevirt -o jsonpath='{.spec.configuration.developerConfiguration.useEmulation}' | grep -qx true
+kubectl -n kubevirt get kubevirt kubevirt -o jsonpath='{.spec.configuration.developerConfiguration.useEmulation}' | grep -qx "$emulation"
 kubectl wait --for=jsonpath='{.status.phase}'=Deployed cdi/cdi --timeout=600s
 kubectl wait --for=condition=VirtualizationReady cluster/cluster --timeout=300s
 kubectl wait --for=condition=PlatformReady cluster/cluster --timeout=300s
