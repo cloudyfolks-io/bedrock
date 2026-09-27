@@ -209,15 +209,19 @@ func TestControlPlanePhaseKeepsTheDrainDecisionAfterARestart(t *testing.T) {
 
 func TestControlPlanePhaseAfterARestartWithTheStepAppended(t *testing.T) {
 	failed := v1alpha1.NodeUpgradeStepStatus{Name: v1alpha1.StepK0sUpdate, State: v1alpha1.StepFailed, Attempt: 1, Message: "k0s v1.36.3+k0s.0 is not ready after 10m0s: k0s does not run"}
+	succeeded := v1alpha1.NodeUpgradeStepStatus{Name: v1alpha1.StepK0sUpdate, State: v1alpha1.StepSucceeded, Attempt: 1, Message: "k0s v1.36.3+k0s.0 installed, restarted k0scontroller.service"}
 	failure := phaseResult{Failure: "controlplane: node-a K0sUpdate failed: k0s v1.36.3+k0s.0 is not ready after 10m0s: k0s does not run"}
+	drained := phaseResult{Message: "controlplane: node-a drained"}
 	cases := map[string]struct {
 		progress   string
-		drained    bool
+		cordoned   bool
 		step       v1alpha1.NodeUpgradeStepStatus
 		members    int32
 		want       phaseResult
 		annotation string
 	}{
+		"draining, the step not started":                  {nodeDraining, true, v1alpha1.NodeUpgradeStepStatus{}, 1, drained, nodeUpdating},
+		"draining, the step succeeded":                    {nodeDraining, true, succeeded, 1, drained, nodeUpdating},
 		"draining, the step failed and etcd is down":      {nodeDraining, true, failed, 0, failure, nodeDraining},
 		"drain skipped, the step failed and etcd is down": {"", false, failed, 0, failure, ""},
 	}
@@ -227,7 +231,7 @@ func TestControlPlanePhaseAfterARestartWithTheStepAppended(t *testing.T) {
 			createDepotHost(t, ctx, c, "node-a", v1alpha1.RoleControlPlane)
 			setEtcd(t, ctx, c, "node-a", tc.members, tc.members == 1)
 			preloadedNodeUpgrade(t, ctx, c, "node-a")
-			if tc.drained {
+			if tc.cordoned {
 				createNodeWithStatus(t, ctx, c, readyNode("node-b", "amd64"))
 				if err := setUnschedulable(ctx, c, "node-a", true); err != nil {
 					t.Fatal(err)
@@ -250,6 +254,9 @@ func TestControlPlanePhaseAfterARestartWithTheStepAppended(t *testing.T) {
 			}
 			if got := upgrade.Annotations[controlPlaneProgressAnnotation]; got != tc.annotation {
 				t.Fatalf("progress %q, want %q", got, tc.annotation)
+			}
+			if got := getNode(t, ctx, c, "node-a").Spec.Unschedulable; got != tc.cordoned {
+				t.Fatalf("node-a unschedulable %v, want %v", got, tc.cordoned)
 			}
 		})
 	}
