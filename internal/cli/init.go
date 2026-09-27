@@ -16,6 +16,7 @@ import (
 	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/tools/clientcmd"
+	"k8s.io/client-go/util/retry"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	"github.com/cloudyfolks-labs/bedrock/api/v1alpha1"
@@ -432,19 +433,18 @@ func createObjects(ctx context.Context, c client.Client, cfg v1alpha1.ClusterCon
 	return nil
 }
 
-func createOrUpdateSpec[T client.Object](ctx context.Context, c client.Client, obj T, mutate func(T)) error {
-	err := c.Create(ctx, obj)
-	if err == nil {
-		return nil
-	}
-	if !errors.IsAlreadyExists(err) {
+func createOrUpdateSpec[T client.Object](ctx context.Context, c client.Client, desired T, setSpec func(T)) error {
+	if err := c.Create(ctx, desired); !errors.IsAlreadyExists(err) {
 		return err
 	}
-	if err := c.Get(ctx, client.ObjectKeyFromObject(obj), obj); err != nil {
-		return err
-	}
-	mutate(obj)
-	return c.Update(ctx, obj)
+	return retry.RetryOnConflict(retry.DefaultRetry, func() error {
+		existing := desired.DeepCopyObject().(T)
+		if err := c.Get(ctx, client.ObjectKeyFromObject(desired), existing); err != nil {
+			return err
+		}
+		setSpec(existing)
+		return c.Update(ctx, existing)
+	})
 }
 
 func waitClusterVersion(ctx context.Context, c client.Client, version string) error {
