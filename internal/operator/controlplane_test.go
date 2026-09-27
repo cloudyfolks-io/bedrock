@@ -207,6 +207,54 @@ func TestControlPlanePhaseKeepsTheDrainDecisionAfterARestart(t *testing.T) {
 	}
 }
 
+func TestControlPlanePhaseAfterARestartWithTheStepAppended(t *testing.T) {
+	failed := v1alpha1.NodeUpgradeStepStatus{Name: v1alpha1.StepK0sUpdate, State: v1alpha1.StepFailed, Attempt: 1, Message: "k0s v1.36.3+k0s.0 is not ready after 10m0s: k0s does not run"}
+	failure := phaseResult{Failure: "controlplane: node-a K0sUpdate failed: k0s v1.36.3+k0s.0 is not ready after 10m0s: k0s does not run"}
+	cases := map[string]struct {
+		progress   string
+		drained    bool
+		step       v1alpha1.NodeUpgradeStepStatus
+		members    int32
+		want       phaseResult
+		annotation string
+	}{
+		"draining, the step failed and etcd is down":      {nodeDraining, true, failed, 0, failure, nodeDraining},
+		"drain skipped, the step failed and etcd is down": {"", false, failed, 0, failure, ""},
+	}
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			c, ctx, run := controlPlaneWorld(t)
+			createDepotHost(t, ctx, c, "node-a", v1alpha1.RoleControlPlane)
+			setEtcd(t, ctx, c, "node-a", tc.members, tc.members == 1)
+			preloadedNodeUpgrade(t, ctx, c, "node-a")
+			if tc.drained {
+				createNodeWithStatus(t, ctx, c, readyNode("node-b", "amd64"))
+				if err := setUnschedulable(ctx, c, "node-a", true); err != nil {
+					t.Fatal(err)
+				}
+			}
+			appendK0sUpdate(t, ctx, c, "node-a")
+			if tc.step.Name != "" {
+				reportStep(t, ctx, c, "node-a", tc.step)
+			}
+			if tc.progress != "" {
+				if err := setNodeProgress(ctx, c, v1alpha1.NodeUpgradeName("v2", "node-a"), controlPlaneProgressAnnotation, tc.progress); err != nil {
+					t.Fatal(err)
+				}
+			}
+
+			run(tc.want)
+			upgrade := getNodeUpgrade(t, ctx, c, "node-a")
+			if !slices.Equal(upgrade.Spec.Steps, []string{v1alpha1.StepPreload, v1alpha1.StepK0sUpdate}) {
+				t.Fatalf("node-a steps %v", upgrade.Spec.Steps)
+			}
+			if got := upgrade.Annotations[controlPlaneProgressAnnotation]; got != tc.annotation {
+				t.Fatalf("progress %q, want %q", got, tc.annotation)
+			}
+		})
+	}
+}
+
 func TestControlPlanePhaseWalksControllersOneAtATime(t *testing.T) {
 	c, ctx, run := controlPlaneWorld(t)
 	createDepotHost(t, ctx, c, "node-a", v1alpha1.RoleControlPlane)

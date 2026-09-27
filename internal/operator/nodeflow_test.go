@@ -241,6 +241,14 @@ func TestNextNodeMove(t *testing.T) {
 			f.SingleNode, f.Controller, f.Etcd = true, true, "etcd: w-a is not healthy"
 			return f
 		}), nodeMove{Message: "waiting before updating w-a: etcd: w-a is not healthy"}},
+		"a drained controller reports a failed step before etcd": {with(func(f nodeFacts) nodeFacts {
+			f.Progress, f.Controller, f.Etcd, f.Steps = nodeDraining, true, "etcd: w-a reports 0 of 3 members", stepsIn(v1alpha1.StepSucceeded, v1alpha1.StepSucceeded, v1alpha1.StepFailed)
+			return f
+		}), nodeMove{Failure: "w-a Reboot failed: exit status 1"}},
+		"a controller with a skipped drain reports a failed step before etcd": {with(func(f nodeFacts) nodeFacts {
+			f.SingleNode, f.Controller, f.Etcd, f.Steps = true, true, "etcd: w-a reports 0 of 1 members", stepsIn(v1alpha1.StepSucceeded, v1alpha1.StepFailed)
+			return f
+		}), nodeMove{Failure: "w-a AgentUpdate failed: exit status 1"}},
 		"worker gets its steps while etcd is unhealthy": {with(func(f nodeFacts) nodeFacts {
 			f.Progress, f.Etcd = nodeDraining, "etcd: cp-b is not healthy"
 			return f

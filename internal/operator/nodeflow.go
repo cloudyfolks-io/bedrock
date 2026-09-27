@@ -258,6 +258,9 @@ func schedulable(node corev1.Node) bool {
 }
 
 func nextNodeMove(f nodeFacts) nodeMove {
+	if index := slices.IndexFunc(f.Steps, stepFailed); index >= 0 {
+		return nodeMove{Failure: fmt.Sprintf("%s %s failed: %s", f.Name, f.Steps[index].Name, f.Steps[index].Message)}
+	}
 	switch f.Progress {
 	case "":
 		return startMove(f)
@@ -293,6 +296,10 @@ func drainingMove(f nodeFacts) nodeMove {
 	return nodeMove{Append: true, Progress: nodeUpdating, Message: f.Name + " drained"}
 }
 
+func stepFailed(step v1alpha1.NodeUpgradeStepStatus) bool {
+	return step.State == v1alpha1.StepFailed
+}
+
 func etcdWait(f nodeFacts) nodeMove {
 	return nodeMove{Message: fmt.Sprintf("waiting before updating %s: %s", f.Name, f.Etcd)}
 }
@@ -301,9 +308,6 @@ func updatingMove(f nodeFacts) nodeMove {
 	states := make([]string, 0, len(f.Steps))
 	succeeded := 0
 	for _, step := range f.Steps {
-		if step.State == v1alpha1.StepFailed {
-			return nodeMove{Failure: fmt.Sprintf("%s %s failed: %s", f.Name, step.Name, step.Message)}
-		}
 		if step.State == v1alpha1.StepSucceeded {
 			succeeded++
 		}
