@@ -1,3 +1,6 @@
+global:
+  registry:
+    address: ghcr.io/cloudyfolks-io
 crds:
   enabled: true
 frr:
