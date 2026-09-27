@@ -252,9 +252,11 @@ func spareNode(nodes []corev1.Node, name string) bool {
 }
 
 func schedulable(node corev1.Node) bool {
-	return !node.Spec.Unschedulable && !slices.ContainsFunc(node.Spec.Taints, func(taint corev1.Taint) bool {
-		return taint.Effect == corev1.TaintEffectNoSchedule || taint.Effect == corev1.TaintEffectNoExecute
-	})
+	return !node.Spec.Unschedulable && !slices.ContainsFunc(node.Spec.Taints, blocksScheduling)
+}
+
+func blocksScheduling(taint corev1.Taint) bool {
+	return taint.Effect == corev1.TaintEffectNoSchedule || taint.Effect == corev1.TaintEffectNoExecute
 }
 
 func nextNodeMove(f nodeFacts) nodeMove {

@@ -235,11 +235,29 @@ func nodeProblems(in preflightInput) []string {
 }
 
 func spareProblems(in preflightInput) []string {
-	count := len(slices.DeleteFunc(slices.Clone(in.Nodes), func(node corev1.Node) bool { return !schedulable(node) }))
+	blocked := slices.DeleteFunc(slices.Clone(in.Nodes), schedulable)
+	count := len(in.Nodes) - len(blocked)
 	if len(in.Nodes) < 2 || count >= 2 {
 		return nil
 	}
-	return []string{fmt.Sprintf("nodes: a drain needs 2 schedulable Nodes, found %d of %d", count, len(in.Nodes))}
+	reasons := make([]string, 0, len(blocked))
+	for _, node := range blocked {
+		reasons = append(reasons, unschedulableReason(node))
+	}
+	return []string{fmt.Sprintf("nodes: a drain needs 2 schedulable Nodes, found %d of %d (%s): uncordon a Node, remove a taint, or give a Host the workload role so that at least 2 Nodes are schedulable", count, len(in.Nodes), strings.Join(reasons, ", "))}
+}
+
+func unschedulableReason(node corev1.Node) string {
+	var reasons []string
+	if node.Spec.Unschedulable {
+		reasons = append(reasons, "is cordoned")
+	}
+	for _, taint := range node.Spec.Taints {
+		if blocksScheduling(taint) {
+			reasons = append(reasons, "has the taint "+taint.ToString())
+		}
+	}
+	return node.Name + " " + strings.Join(reasons, " and ")
 }
 
 func hostProblems(in preflightInput) []string {
