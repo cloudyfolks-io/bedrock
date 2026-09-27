@@ -433,12 +433,16 @@ func createObjects(ctx context.Context, c client.Client, cfg v1alpha1.ClusterCon
 	return nil
 }
 
-func createOrUpdateSpec[T client.Object](ctx context.Context, c client.Client, desired T, setSpec func(T)) error {
-	if err := c.Create(ctx, desired); !errors.IsAlreadyExists(err) {
+func createOrUpdateSpec[O any, T interface {
+	*O
+	client.Object
+}](ctx context.Context, c client.Client, desired T, setSpec func(T)) error {
+	err := c.Create(ctx, desired)
+	if err == nil || !errors.IsAlreadyExists(err) {
 		return err
 	}
 	return retry.RetryOnConflict(retry.DefaultRetry, func() error {
-		existing := desired.DeepCopyObject().(T)
+		existing := T(new(O))
 		if err := c.Get(ctx, client.ObjectKeyFromObject(desired), existing); err != nil {
 			return err
 		}
