@@ -24,8 +24,14 @@ import (
 func TestSmokeVM(t *testing.T) {
 	plain := smokeVM()
 	volumes, _, _ := unstructured.NestedSlice(plain.Object, "spec", "template", "spec", "volumes")
+	disks, _, _ := unstructured.NestedSlice(plain.Object, "spec", "template", "spec", "domain", "devices", "disks")
+	if len(volumes) != 2 || len(disks) != 2 {
+		t.Fatalf("want a container disk and a cloud-init disk, got volumes %v disks %v", volumes, disks)
+	}
 	image, _, _ := unstructured.NestedString(volumes[0].(map[string]any), "containerDisk", "image")
-	if plain.GetName() != smokeName || plain.GetNamespace() != release.SystemNamespace || image != "quay.io/kubevirt/cirros-container-disk-demo:v1.9.0" || len(volumes) != 1 {
+	userData, _, _ := unstructured.NestedString(volumes[1].(map[string]any), "cloudInitNoCloud", "userData")
+	cloudInitDisk, _, _ := unstructured.NestedString(disks[1].(map[string]any), "name")
+	if plain.GetName() != smokeName || plain.GetNamespace() != release.SystemNamespace || image != "quay.io/kubevirt/cirros-container-disk-demo:v1.9.0" || userData == "" || cloudInitDisk != volumes[1].(map[string]any)["name"] {
 		t.Fatalf("vm %+v", plain.Object)
 	}
 	if _, found, _ := unstructured.NestedFieldNoCopy(plain.Object, "spec", "template", "spec", "affinity"); found {
@@ -36,10 +42,10 @@ func TestSmokeVM(t *testing.T) {
 	templates, _, _ := unstructured.NestedSlice(full.Object, "spec", "dataVolumeTemplates")
 	class, _, _ := unstructured.NestedString(templates[0].(map[string]any), "spec", "storage", "storageClassName")
 	size, _, _ := unstructured.NestedString(templates[0].(map[string]any), "spec", "storage", "resources", "requests", "storage")
-	disks, _, _ := unstructured.NestedSlice(full.Object, "spec", "template", "spec", "domain", "devices", "disks")
+	disks, _, _ = unstructured.NestedSlice(full.Object, "spec", "template", "spec", "domain", "devices", "disks")
 	volumes, _, _ = unstructured.NestedSlice(full.Object, "spec", "template", "spec", "volumes")
 	terms, _, _ := unstructured.NestedSlice(full.Object, "spec", "template", "spec", "affinity", "podAntiAffinity", "requiredDuringSchedulingIgnoredDuringExecution")
-	if class != "block" || size != "1Gi" || len(disks) != 2 || len(volumes) != 2 || len(terms) != 1 {
+	if class != "block" || size != "1Gi" || len(disks) != 3 || len(volumes) != 3 || len(terms) != 1 {
 		t.Fatalf("vm %+v", full.Object["spec"])
 	}
 	topology, _, _ := unstructured.NestedString(terms[0].(map[string]any), "topologyKey")

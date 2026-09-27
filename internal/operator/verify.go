@@ -171,13 +171,13 @@ func smokeVM() *unstructured.Unstructured {
 				"spec": map[string]any{
 					"domain": map[string]any{
 						"devices": map[string]any{
-							"disks":      []any{map[string]any{"name": "containerdisk", "disk": map[string]any{"bus": "virtio"}}},
+							"disks":      []any{map[string]any{"name": "containerdisk", "disk": map[string]any{"bus": "virtio"}}, map[string]any{"name": "cloudinitdisk", "disk": map[string]any{"bus": "virtio"}}},
 							"interfaces": []any{map[string]any{"name": "default", "masquerade": map[string]any{}}},
 						},
 						"resources": map[string]any{"requests": map[string]any{"memory": "128Mi"}},
 					},
 					"networks": []any{map[string]any{"name": "default", "pod": map[string]any{}}},
-					"volumes":  []any{map[string]any{"name": "containerdisk", "containerDisk": map[string]any{"image": smokeImage}}},
+					"volumes":  []any{map[string]any{"name": "containerdisk", "containerDisk": map[string]any{"image": smokeImage}}, map[string]any{"name": "cloudinitdisk", "cloudInitNoCloud": map[string]any{"userData": "#!/bin/sh\n"}}},
 				},
 			},
 		},
