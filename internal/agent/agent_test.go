@@ -17,6 +17,7 @@ import (
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/watch"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/client/interceptor"
 
 	"github.com/cloudyfolks-labs/bedrock/api/v1alpha1"
 	"github.com/cloudyfolks-labs/bedrock/internal/host"
@@ -75,18 +76,49 @@ type hungExec struct{}
 
 func (hungExec) Run(ctx context.Context, _ string, _ ...string) (string, error) {
 	<-ctx.Done()
-	return "", ctx.Err()
+	return "", context.Cause(ctx)
+}
+
+func lscpuInventory(ctx context.Context, e host.Exec, root string) (v1alpha1.Inventory, error) {
+	if _, err := e.Run(ctx, "lscpu", "-J"); err != nil {
+		return v1alpha1.Inventory{}, err
+	}
+	return fakeInventory(ctx, e, root)
+}
+
+func hungNodeReads(t *testing.T) client.Client {
+	t.Helper()
+	watching, err := client.NewWithWatch(cfg, client.Options{Scheme: k8sClient.Scheme()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return interceptor.NewClient(watching, interceptor.Funcs{Get: func(ctx context.Context, inner client.WithWatch, key client.ObjectKey, obj client.Object, opts ...client.GetOption) error {
+		if _, ok := obj.(*corev1.Node); ok {
+			<-ctx.Done()
+			return context.Cause(ctx)
+		}
+		return inner.Get(ctx, key, obj, opts...)
+	}})
 }
 
 func TestTickBoundsHungProbes(t *testing.T) {
 	createHost(t, "node-hung", false, "")
+	createNode(t, "node-hung", "10.0.0.13")
 	deps := newDeps(&host.FakeExec{}, time.Now())
 	deps.Root = t.TempDir()
 	deps.Node = "node-hung"
-	if err := os.MkdirAll(filepath.Join(deps.Root, "var/lib/k0s/pki/etcd"), 0o755); err != nil {
+	deps.Inventory = lscpuInventory
+	bundle := filepath.Join(deps.Root, "var/lib/bedrock/depot/v0.3.0/amd64/bundle.yaml")
+	for _, dir := range []string{filepath.Join(deps.Root, "var/lib/k0s/pki/etcd"), filepath.Dir(bundle)} {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.WriteFile(bundle, []byte("version: v0.3.0\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	deps.Exec = &host.FakeExec{Responses: map[string]string{
+		"lscpu -J":                                    "{}",
 		"/usr/local/bin/k0s status -o json":           `{"Version":"v1.36.3+k0s.0"}`,
 		"timedatectl show -p NTPSynchronized --value": "yes\n",
 		"/usr/local/bin/k0s etcd member-list":         `{"members":{"a":"https://10.0.0.1:2380","b":"https://10.0.0.2:2380","c":"https://10.0.0.3:2380"}}`,
@@ -95,19 +127,22 @@ func TestTickBoundsHungProbes(t *testing.T) {
 	if err := Tick(context.Background(), k8sClient, deps); err != nil {
 		t.Fatal(err)
 	}
-	if status := getHost(t, "node-hung").Status; status.K0sVersion == "" || !status.Checks.TimeSynced || status.Checks.EtcdMembers != 3 || !status.Checks.EtcdHealthy {
+	if status := getHost(t, "node-hung").Status; status.K0sVersion == "" || !status.Checks.TimeSynced || status.Checks.EtcdMembers != 3 || !status.Checks.EtcdHealthy || status.Depot == nil || status.Inventory.CPU.Cores != 4 {
 		t.Fatalf("the first tick must report good facts: %+v %+v", status, status.Checks)
 	}
 	deps.Exec = hungExec{}
 	deps.ProbeTimeout = 50 * time.Millisecond
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	if err := Tick(ctx, k8sClient, deps); err != nil {
-		t.Fatalf("a hung probe must not hold the tick: %v", err)
+	if err := Tick(ctx, hungNodeReads(t), deps); err == nil || err.Error() != "timed out after 50ms" {
+		t.Fatalf("hung probes must stop at their limit and not hold the tick: %v", err)
 	}
 	status := getHost(t, "node-hung").Status
-	if status.K0sVersion != "" || status.Checks.TimeSynced || status.Checks.EtcdMembers != 0 || status.Checks.EtcdHealthy {
+	if status.K0sVersion != "" || status.Checks.TimeSynced || status.Checks.EtcdMembers != 0 || status.Checks.EtcdHealthy || status.Depot != nil {
 		t.Fatalf("a probe that timed out must report unknown, not the last value: %+v %+v", status, status.Checks)
+	}
+	if status.Inventory.CPU.Cores != 4 {
+		t.Fatalf("an inventory that timed out keeps the last inventory: %+v", status.Inventory)
 	}
 }
 
