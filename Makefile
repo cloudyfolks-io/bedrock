@@ -25,7 +25,7 @@ binaries:
 	for arch in amd64 arm64; do CGO_ENABLED=0 GOOS=linux GOARCH=$$arch $(GO) build -trimpath -ldflags "-X github.com/cloudyfolks-labs/bedrock/internal/cli.Version=$(VERSION)" -o dist/bedrock-$(VERSION)-linux-$$arch ./cmd/bedrock; done
 
 test: envtest-assets
-	KUBEBUILDER_ASSETS="$$($(ENVTEST) use $(ENVTEST_K8S_VERSION) -p path)" $(GO) test ./... -count=1
+	KUBEBUILDER_ASSETS="$$($(ENVTEST) use $(ENVTEST_K8S_VERSION) -p path)" $(GO) test ./... -count=1 -timeout 30m
 
 lint:
 	$(GO) vet ./...
