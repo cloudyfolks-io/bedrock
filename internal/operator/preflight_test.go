@@ -12,6 +12,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	"github.com/cloudyfolks-labs/bedrock/api/v1alpha1"
+	"github.com/cloudyfolks-labs/bedrock/internal/roles"
 )
 
 const gib = int64(1) << 30
@@ -118,19 +119,27 @@ func TestPreflightProblems(t *testing.T) {
 		"one schedulable node of two": {func(in preflightInput) preflightInput {
 			in.Nodes[1].Spec.Unschedulable = true
 			return in
-		}, "nodes: a drain needs 2 schedulable Nodes, found 1 of 2 (node-b is cordoned): uncordon a Node, remove a taint, or give a Host the workload role so that at least 2 Nodes are schedulable"},
+		}, "nodes: a drain needs 2 schedulable Nodes, found 1 of 2: node-b: uncordon it, or join another Node with the workload role"},
+		"a node cordoned only by its taint": {func(in preflightInput) preflightInput {
+			in.Nodes[1].Spec.Taints = []corev1.Taint{{Key: corev1.TaintNodeUnschedulable, Effect: corev1.TaintEffectNoSchedule}}
+			return in
+		}, "nodes: a drain needs 2 schedulable Nodes, found 1 of 2: node-b: uncordon it, or join another Node with the workload role"},
+		"a node without the workload role": {func(in preflightInput) preflightInput {
+			in.Nodes[0].Spec.Taints = []corev1.Taint{{Key: roles.NoWorkloadTaint, Effect: corev1.TaintEffectNoSchedule}}
+			return in
+		}, "nodes: a drain needs 2 schedulable Nodes, found 1 of 2: node-a: give its Host the workload role, or join another Node with the workload role"},
 		"a tainted node": {func(in preflightInput) preflightInput {
 			in.Nodes[0].Spec.Taints = []corev1.Taint{{Key: "example.com/busy", Effect: corev1.TaintEffectNoExecute}}
 			return in
-		}, "nodes: a drain needs 2 schedulable Nodes, found 1 of 2 (node-a has the taint example.com/busy:NoExecute): uncordon a Node, remove a taint, or give a Host the workload role so that at least 2 Nodes are schedulable"},
-		"every reason of every Node that is not schedulable": {func(in preflightInput) preflightInput {
+		}, "nodes: a drain needs 2 schedulable Nodes, found 1 of 2: node-a: remove the taint example.com/busy:NoExecute, or join another Node with the workload role"},
+		"every action of every Node that is not schedulable": {func(in preflightInput) preflightInput {
 			in.Nodes = append(in.Nodes, readyNode("node-c", "amd64"))
 			in.Hosts = healthyEtcd(append(in.Hosts, healthyHost("node-c")))
 			in.Nodes[0].Spec.Unschedulable = true
-			in.Nodes[0].Spec.Taints = []corev1.Taint{{Key: "bedrock.cloudyfolks.io/no-workload", Effect: corev1.TaintEffectNoSchedule}}
+			in.Nodes[0].Spec.Taints = []corev1.Taint{{Key: roles.NoWorkloadTaint, Effect: corev1.TaintEffectNoSchedule}}
 			in.Nodes[1].Spec.Taints = []corev1.Taint{{Key: "example.com/prefer", Effect: corev1.TaintEffectPreferNoSchedule}, {Key: "example.com/busy", Value: "backup", Effect: corev1.TaintEffectNoExecute}, {Key: "node.kubernetes.io/disk-pressure", Effect: corev1.TaintEffectNoSchedule}}
 			return in
-		}, "nodes: a drain needs 2 schedulable Nodes, found 1 of 3 (node-a is cordoned and has the taint bedrock.cloudyfolks.io/no-workload:NoSchedule, node-b has the taint example.com/busy=backup:NoExecute and has the taint node.kubernetes.io/disk-pressure:NoSchedule): uncordon a Node, remove a taint, or give a Host the workload role so that at least 2 Nodes are schedulable"},
+		}, "nodes: a drain needs 2 schedulable Nodes, found 1 of 3: node-a: uncordon it, node-a: give its Host the workload role, node-b: remove the taint example.com/busy=backup:NoExecute, node-b: remove the taint node.kubernetes.io/disk-pressure:NoSchedule, or join another Node with the workload role"},
 		"one-node cluster": {func(in preflightInput) preflightInput {
 			in.Nodes = in.Nodes[:1]
 			in.Hosts = healthyEtcd(in.Hosts[:1])

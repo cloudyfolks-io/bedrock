@@ -16,6 +16,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	"github.com/cloudyfolks-labs/bedrock/api/v1alpha1"
+	"github.com/cloudyfolks-labs/bedrock/internal/roles"
 )
 
 const (
@@ -240,24 +241,41 @@ func spareProblems(in preflightInput) []string {
 	if len(in.Nodes) < 2 || count >= 2 {
 		return nil
 	}
-	reasons := make([]string, 0, len(blocked))
+	var actions []string
 	for _, node := range blocked {
-		reasons = append(reasons, unschedulableReason(node))
+		actions = append(actions, blockedNodeActions(node)...)
 	}
-	return []string{fmt.Sprintf("nodes: a drain needs 2 schedulable Nodes, found %d of %d (%s): uncordon a Node, remove a taint, or give a Host the workload role so that at least 2 Nodes are schedulable", count, len(in.Nodes), strings.Join(reasons, ", "))}
+	return []string{fmt.Sprintf("nodes: a drain needs 2 schedulable Nodes, found %d of %d: %s, or join another Node with the workload role", count, len(in.Nodes), strings.Join(actions, ", "))}
 }
 
-func unschedulableReason(node corev1.Node) string {
-	var reasons []string
-	if node.Spec.Unschedulable {
-		reasons = append(reasons, "is cordoned")
-	}
+func blockedNodeActions(node corev1.Node) []string {
+	cordoned := node.Spec.Unschedulable
+	needsWorkloadRole := false
+	var otherTaints []string
 	for _, taint := range node.Spec.Taints {
-		if blocksScheduling(taint) {
-			reasons = append(reasons, "has the taint "+taint.ToString())
+		if !blocksScheduling(taint) {
+			continue
+		}
+		switch taint.Key {
+		case corev1.TaintNodeUnschedulable:
+			cordoned = true
+		case roles.NoWorkloadTaint:
+			needsWorkloadRole = true
+		default:
+			otherTaints = append(otherTaints, taint.ToString())
 		}
 	}
-	return node.Name + " " + strings.Join(reasons, " and ")
+	var actions []string
+	if cordoned {
+		actions = append(actions, node.Name+": uncordon it")
+	}
+	if needsWorkloadRole {
+		actions = append(actions, node.Name+": give its Host the workload role")
+	}
+	for _, taint := range otherTaints {
+		actions = append(actions, node.Name+": remove the taint "+taint)
+	}
+	return actions
 }
 
 func hostProblems(in preflightInput) []string {
