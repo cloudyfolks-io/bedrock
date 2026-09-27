@@ -40,7 +40,7 @@ func probedK0sVersion(ctx context.Context, deps Deps) string {
 }
 
 func bounded[T any](ctx context.Context, limit time.Duration, read func(context.Context) T) T {
-	probeCtx, cancel := context.WithTimeout(ctx, limit)
+	probeCtx, cancel := context.WithTimeoutCause(ctx, limit, fmt.Errorf("timed out after %s", limit))
 	defer cancel()
 	return read(probeCtx)
 }

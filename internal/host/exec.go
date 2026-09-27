@@ -28,11 +28,18 @@ func (RealExec) Run(ctx context.Context, name string, args ...string) (string, e
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout, cmd.Stderr = &stdout, &stderr
 	if err := cmd.Run(); err != nil {
-		var exitErr *exec.ExitError
-		if errors.As(err, &exitErr) {
-			err = &ExitError{Code: exitErr.ExitCode()}
-		}
-		return stdout.String(), fmt.Errorf("%s %s: %w: %s", name, strings.Join(args, " "), err, strings.TrimSpace(stderr.String()))
+		return stdout.String(), fmt.Errorf("%s %s: %w: %s", name, strings.Join(args, " "), runError(ctx, err), strings.TrimSpace(stderr.String()))
 	}
 	return stdout.String(), nil
+}
+
+func runError(ctx context.Context, err error) error {
+	if cause := context.Cause(ctx); cause != nil {
+		return cause
+	}
+	var exitErr *exec.ExitError
+	if errors.As(err, &exitErr) {
+		return &ExitError{Code: exitErr.ExitCode()}
+	}
+	return err
 }

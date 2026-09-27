@@ -9,6 +9,7 @@ import (
 	"crypto/x509/pkix"
 	"encoding/pem"
 	"errors"
+	"fmt"
 	"math/big"
 	"os"
 	"path/filepath"
@@ -34,6 +35,16 @@ func writeCertificate(t *testing.T, path string, notAfter time.Time) {
 	}
 	if err := os.WriteFile(path, pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: der}), 0o644); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestBoundedProbeReportsItsLimit(t *testing.T) {
+	problem := bounded(context.Background(), 50*time.Millisecond, func(probeCtx context.Context) string {
+		_, err := host.RealExec{}.Run(probeCtx, "sleep", "10")
+		return fmt.Sprint(err)
+	})
+	if problem != "sleep 10: timed out after 50ms: " {
+		t.Fatalf("problem %q", problem)
 	}
 }
 
