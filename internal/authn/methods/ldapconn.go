@@ -79,6 +79,21 @@ func closeWhenDialed(outcome <-chan ldapDialOutcome) {
 	}
 }
 
+type ctxBoundLDAPConn struct {
+	LDAPConn
+	stop func() bool
+}
+
+func (c *ctxBoundLDAPConn) Close() error {
+	c.stop()
+	return c.LDAPConn.Close()
+}
+
+func bindToContext(ctx context.Context, conn *ldap.Conn) LDAPConn {
+	stop := context.AfterFunc(ctx, func() { conn.Close() })
+	return &ctxBoundLDAPConn{LDAPConn: conn, stop: stop}
+}
+
 func DialLDAP(ctx context.Context, provider v1alpha1.IdentityProvider, caBundle []byte) (LDAPConn, error) {
 	parsed, err := url.Parse(provider.Spec.LDAP.URL)
 	if err != nil {
@@ -105,6 +120,6 @@ func DialLDAP(ctx context.Context, provider v1alpha1.IdentityProvider, caBundle 
 		if result.err != nil {
 			return nil, result.err
 		}
-		return result.conn, nil
+		return bindToContext(ctx, result.conn), nil
 	}
 }

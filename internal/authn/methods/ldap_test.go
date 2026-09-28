@@ -151,6 +151,87 @@ func TestDialLDAPHonorsTheContextTimeout(t *testing.T) {
 	}
 }
 
+func selfSignedServerCert(t *testing.T, host string) (tls.Certificate, []byte) {
+	t.Helper()
+	key, err := rsa.GenerateKey(rand.Reader, 2048)
+	if err != nil {
+		t.Fatal(err)
+	}
+	template := &x509.Certificate{
+		SerialNumber:          big.NewInt(1),
+		Subject:               pkix.Name{CommonName: host},
+		NotBefore:             time.Now().Add(-time.Hour),
+		NotAfter:              time.Now().Add(time.Hour),
+		IsCA:                  true,
+		KeyUsage:              x509.KeyUsageCertSign | x509.KeyUsageDigitalSignature | x509.KeyUsageKeyEncipherment,
+		ExtKeyUsage:           []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth},
+		BasicConstraintsValid: true,
+		IPAddresses:           []net.IP{net.ParseIP(host)},
+	}
+	der, err := x509.CreateCertificate(rand.Reader, template, template, &key.PublicKey, key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	certPEM := pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: der})
+	keyPEM := pem.EncodeToMemory(&pem.Block{Type: "RSA PRIVATE KEY", Bytes: x509.MarshalPKCS1PrivateKey(key)})
+	cert, err := tls.X509KeyPair(certPEM, keyPEM)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return cert, certPEM
+}
+
+func TestDialLDAPCancelsAPendingOperationWhenTheContextIsCancelled(t *testing.T) {
+	cert, certPEM := selfSignedServerCert(t, "127.0.0.1")
+	listener, err := tls.Listen("tcp", "127.0.0.1:0", &tls.Config{Certificates: []tls.Certificate{cert}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer listener.Close()
+	go func() {
+		conn, err := listener.Accept()
+		if err != nil {
+			return
+		}
+		defer conn.Close()
+		buf := make([]byte, 4096)
+		for {
+			if _, err := conn.Read(buf); err != nil {
+				return
+			}
+		}
+	}()
+
+	provider := v1alpha1.IdentityProvider{Spec: v1alpha1.IdentityProviderSpec{LDAP: &v1alpha1.LDAPProvider{
+		URL: "ldaps://" + listener.Addr().String(),
+	}}}
+	ctx, cancel := context.WithCancel(context.Background())
+	conn, err := DialLDAP(ctx, provider, certPEM)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close()
+
+	done := make(chan error, 1)
+	go func() {
+		_, searchErr := conn.Search(ldap.NewSearchRequest(
+			"dc=example,dc=test", ldap.ScopeBaseObject, ldap.NeverDerefAliases, 0, 0, false, "(objectClass=*)", nil, nil,
+		))
+		done <- searchErr
+	}()
+
+	time.Sleep(100 * time.Millisecond)
+	cancel()
+	select {
+	case searchErr := <-done:
+		if searchErr == nil {
+			t.Fatal("expected an error once the context was cancelled mid-search")
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("Search did not return promptly after the context was cancelled")
+	}
+}
+
 type fakeLDAPConn struct {
 	bind   func(dn, password string) error
 	search func(req *ldap.SearchRequest) (*ldap.SearchResult, error)
