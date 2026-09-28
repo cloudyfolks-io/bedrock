@@ -170,7 +170,7 @@ func (m totpMethod) readSeed(ctx context.Context, cred v1alpha1.Credential) ([]b
 		return nil, err
 	}
 	seed, err := base32.StdEncoding.WithPadding(base32.NoPadding).DecodeString(string(sec.Data["seed"]))
-	if err != nil {
+	if err != nil || len(seed) != totpSeedLen {
 		return nil, errors.New("methods: malformed totp seed")
 	}
 	return seed, nil

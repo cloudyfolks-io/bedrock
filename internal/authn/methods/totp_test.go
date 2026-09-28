@@ -8,6 +8,8 @@ import (
 	"testing"
 	"time"
 
+	corev1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	"github.com/cloudyfolks-io/bedrock/api/v1alpha1"
@@ -237,5 +239,32 @@ func TestTOTPEnrollRefusesToReplaceConfirmedCredential(t *testing.T) {
 
 	if _, err := method.Enroll(context.Background(), user, Answer{}); err == nil {
 		t.Fatal("enrolling again over a confirmed credential must be refused")
+	}
+}
+
+func TestTOTPCompleteRejectsAMalformedStoredSeed(t *testing.T) {
+	c, _ := startTestEnv(t)
+	user := createUser(t, c, "harper")
+	name := v1alpha1.CredentialName(user.Name, v1alpha1.MethodTOTP)
+	cred := v1alpha1.Credential{
+		TypeMeta:   metav1.TypeMeta{APIVersion: v1alpha1.GroupVersion.String(), Kind: "Credential"},
+		ObjectMeta: metav1.ObjectMeta{Namespace: "bedrock-system", Name: name},
+		Spec:       v1alpha1.CredentialSpec{UserRef: user.Name, Method: v1alpha1.MethodTOTP, SecretRef: name},
+	}
+	if err := c.Create(context.Background(), &cred); err != nil {
+		t.Fatal(err)
+	}
+	shortSeed := base32.StdEncoding.WithPadding(base32.NoPadding).EncodeToString([]byte("short"))
+	sec := &corev1.Secret{
+		ObjectMeta: metav1.ObjectMeta{Namespace: "bedrock-system", Name: name},
+		Data:       map[string][]byte{"seed": []byte(shortSeed)},
+	}
+	if err := c.Create(context.Background(), sec); err != nil {
+		t.Fatal(err)
+	}
+
+	method := NewTOTP(c, rand.Reader, fixedIssuer("sso.example.test"))
+	if _, err := method.Complete(context.Background(), Flow{Now: time.Now()}, user, Answer{Code: "000000"}); err == nil {
+		t.Fatal("a malformed stored seed must return an error, not a match result")
 	}
 }
