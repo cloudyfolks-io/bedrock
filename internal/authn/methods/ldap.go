@@ -203,7 +203,7 @@ func (m ldapMethod) authenticate(ctx context.Context, provider v1alpha1.Identity
 	}
 	normalized, err := v1alpha1.NormalizeUsername(entry.GetAttributeValue(provider.Spec.LDAP.UserSearch.UsernameAttribute))
 	if err != nil {
-		normalized = username
+		return ExternalIdentity{}, false, err
 	}
 	return ExternalIdentity{
 		Username:    normalized,

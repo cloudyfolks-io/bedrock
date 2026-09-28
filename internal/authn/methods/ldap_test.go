@@ -507,6 +507,27 @@ func TestLDAPRefusesAUserProvisionedByADifferentUpstreamProvider(t *testing.T) {
 	}
 }
 
+func TestLDAPFailsWhenTheDirectoryUsernameCannotBeNormalized(t *testing.T) {
+	c, _ := startTestEnv(t)
+	provider := createLDAPProvider(t, c, "bad-username-ldap", "service-secret")
+	entry := ldap.NewEntry("uid=weird,ou=people,dc=example,dc=test", map[string][]string{"uid": {"not a valid username"}})
+	conn := &fakeLDAPConn{
+		bind: func(dn, password string) error { return nil },
+		search: func(req *ldap.SearchRequest) (*ldap.SearchResult, error) {
+			return &ldap.SearchResult{Entries: []*ldap.Entry{entry}}, nil
+		},
+	}
+	method := NewLDAP(c, fixedDialer(conn))
+	request := loginRequestFor(provider.Name, "weird")
+	result, err := method.Complete(context.Background(), Flow{AuthRequest: request, Now: time.Now()}, v1alpha1.User{}, Answer{Password: "anything"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Failure != FailureProviderError {
+		t.Fatalf("result = %+v, want FailureProviderError", result)
+	}
+}
+
 func TestLDAPProviderForFindsTheMatchingProvider(t *testing.T) {
 	c, _ := startTestEnv(t)
 	provider := createLDAPProvider(t, c, "discover-ldap", "service-secret")
