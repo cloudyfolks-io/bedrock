@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -131,6 +132,19 @@ func abortWorld(t *testing.T, phase string) (client.Client, context.Context) {
 	status.Upgrade.Backup = backupLocationText
 	createClusterWithStatus(t, ctx, c, "v2", status)
 	return c, ctx
+}
+
+func removeNode(t *testing.T, ctx context.Context, c client.Client, name string) {
+	t.Helper()
+	for _, obj := range []client.Object{
+		&v1alpha1.NodeUpgrade{ObjectMeta: metav1.ObjectMeta{Name: v1alpha1.NodeUpgradeName("v2", name)}},
+		&v1alpha1.Host{ObjectMeta: metav1.ObjectMeta{Name: name}},
+		&corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: name}},
+	} {
+		if err := client.IgnoreNotFound(c.Delete(ctx, obj)); err != nil {
+			t.Fatal(err)
+		}
+	}
 }
 
 func runRole(t *testing.T, ctx context.Context, c client.Client, role upgradeRole) v1alpha1.Cluster {
@@ -265,6 +279,7 @@ func TestAbortInControlPlaneRestoresASingleController(t *testing.T) {
 	for name, tc := range cases {
 		t.Run(name, func(t *testing.T) {
 			c, ctx := abortWorld(t, v1alpha1.PhaseControlPlane)
+			removeNode(t, ctx, c, "node-b")
 			if tc.k0sUpdate != nil {
 				appendK0sUpdate(t, ctx, c, "node-a")
 				reportStep(t, ctx, c, "node-a", *tc.k0sUpdate)
@@ -332,6 +347,23 @@ func TestAbortInControlPlaneWithManyControllers(t *testing.T) {
 	}
 	if image := operatorImage(t, ctx, c).Spec.Template.Spec.Containers[1].Image; image != "ghcr.io/cloudyfolks-labs/bedrock:v2" {
 		t.Fatalf("a manual restore leaves the operator alone: %s", image)
+	}
+}
+
+func TestAbortInControlPlaneWithWorkersGoesManual(t *testing.T) {
+	c, ctx := abortWorld(t, v1alpha1.PhaseControlPlane)
+	setAction(t, ctx, c, v1alpha1.UpgradeActionAbort)
+	got := runRole(t, ctx, c, newRole())
+	progressing := meta.FindStatusCondition(got.Status.Conditions, v1alpha1.ConditionProgressing)
+	want := "abort in ControlPlane needs a manual restore of " + backupLocationText + ": the cluster has 2 nodes, and the automatic restore runs only on a single node: follow " + restoreRunbook
+	if got.Status.Phase != v1alpha1.PhaseFailed || progressing.Reason != v1alpha1.ReasonRestoreManual || got.Status.Upgrade.Message != want || got.Spec.Upgrade.Action != "" {
+		t.Fatalf("status %+v action %q", got.Status.Upgrade, got.Spec.Upgrade.Action)
+	}
+	if image := operatorImage(t, ctx, c).Spec.Template.Spec.Containers[1].Image; image != "ghcr.io/cloudyfolks-labs/bedrock:v2" {
+		t.Fatalf("a manual restore leaves the operator alone: %s", image)
+	}
+	if restore := getNodeUpgrade(t, ctx, c, "node-a"); slices.Contains(restore.Spec.Steps, v1alpha1.StepRestore) {
+		t.Fatalf("no automatic restore on a cluster with workers: %v", restore.Spec.Steps)
 	}
 }
 

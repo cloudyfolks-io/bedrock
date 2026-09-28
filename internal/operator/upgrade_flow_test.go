@@ -46,6 +46,13 @@ func newUpgradeWorld(t *testing.T) upgradeWorld {
 	return newUpgradeWorldAs(t, func(_ *testing.T, _ context.Context, admin client.Client, _ *rest.Config) client.Client { return admin })
 }
 
+func newSingleNodeUpgradeWorld(t *testing.T) upgradeWorld {
+	t.Helper()
+	w := newUpgradeWorld(t)
+	removeNode(t, w.ctx, w.client, "node-b")
+	return w
+}
+
 func newUpgradeWorldAs(t *testing.T, operatorClient func(*testing.T, context.Context, client.Client, *rest.Config) client.Client) upgradeWorld {
 	t.Helper()
 	c, cfg := startTestEnvWithCRDs(t, filepath.Join("testdata", "crds"))
@@ -282,18 +289,19 @@ func abortIn(t *testing.T, w upgradeWorld, phase string, afterSwitch bool) func(
 
 func TestUpgradeFlowAbortsBeforeComponents(t *testing.T) {
 	cases := map[string]struct {
+		world       func(*testing.T) upgradeWorld
 		phase       string
 		afterSwitch bool
 	}{
-		"preflight":             {v1alpha1.PhasePreflight, false},
-		"backup":                {v1alpha1.PhaseBackup, false},
-		"preload":               {v1alpha1.PhasePreload, false},
-		"preload after switch":  {v1alpha1.PhasePreload, true},
-		"controlplane restores": {v1alpha1.PhaseControlPlane, true},
+		"preflight":                              {newUpgradeWorld, v1alpha1.PhasePreflight, false},
+		"backup":                                 {newUpgradeWorld, v1alpha1.PhaseBackup, false},
+		"preload":                                {newUpgradeWorld, v1alpha1.PhasePreload, false},
+		"preload after switch":                   {newUpgradeWorld, v1alpha1.PhasePreload, true},
+		"controlplane restores on a single node": {newSingleNodeUpgradeWorld, v1alpha1.PhaseControlPlane, true},
 	}
 	for name, tc := range cases {
 		t.Run(name, func(t *testing.T) {
-			w := newUpgradeWorld(t)
+			w := tc.world(t)
 			end := runFlow(t, w, 0, func(cluster v1alpha1.Cluster) bool {
 				return aborted(cluster) || cluster.Status.Phase == v1alpha1.PhaseFailed || upgraded(cluster)
 			}, abortIn(t, w, tc.phase, tc.afterSwitch))

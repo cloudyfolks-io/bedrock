@@ -174,6 +174,9 @@ func restoreControlPlane(ctx context.Context, env upgradeEnv, cluster v1alpha1.C
 	if len(controllers) != 1 || !ok {
 		return answerManualRestore(ctx, env, cluster, fmt.Sprintf("abort in ControlPlane needs a manual restore of %s on %d controllers: follow %s", upgrade.Backup, len(controllers), restoreRunbook))
 	}
+	if len(nodes) != 1 {
+		return answerManualRestore(ctx, env, cluster, fmt.Sprintf("abort in ControlPlane needs a manual restore of %s: the cluster has %d nodes, and the automatic restore runs only on a single node: follow %s", upgrade.Backup, len(nodes), restoreRunbook))
+	}
 	if node != controllers[0].Name {
 		problem := fmt.Sprintf("the backup node %s is not the controller %s", node, controllers[0].Name)
 		return answerManualRestore(ctx, env, cluster, fmt.Sprintf("abort in ControlPlane needs a manual restore of %s: %s: follow %s", upgrade.Backup, problem, restoreRunbook))

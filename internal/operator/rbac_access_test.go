@@ -60,6 +60,7 @@ func TestOperatorRBACCoversTheUpgrade(t *testing.T) {
 
 func TestOperatorRBACCoversAbortAndRestore(t *testing.T) {
 	w := newUpgradeWorldAs(t, operatorAs)
+	removeNode(t, w.ctx, w.client, "node-b")
 	end := runFlow(t, w, 0, func(cluster v1alpha1.Cluster) bool {
 		return aborted(cluster) || cluster.Status.Phase == v1alpha1.PhaseFailed || upgraded(cluster)
 	}, abortIn(t, w, v1alpha1.PhaseControlPlane, true))
