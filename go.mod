@@ -5,6 +5,7 @@ go 1.27
 require (
 	github.com/google/go-containerregistry v0.22.1
 	github.com/klauspost/compress v1.19.2
+	github.com/pquerna/otp v1.5.0
 	golang.org/x/crypto v0.57.0
 	k8s.io/api v0.36.3
 	k8s.io/apiextensions-apiserver v0.36.3
@@ -17,6 +18,7 @@ require (
 
 require (
 	github.com/beorn7/perks v1.0.1 // indirect
+	github.com/boombuler/barcode v1.0.1-0.20190219062509-6c824513bacc // indirect
 	github.com/cespare/xxhash/v2 v2.3.0 // indirect
 	github.com/davecgh/go-spew v1.1.2-0.20180830191138-d8f796af33cc // indirect
 	github.com/docker/cli v29.7.2+incompatible // indirect
