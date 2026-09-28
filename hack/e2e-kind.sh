@@ -43,6 +43,7 @@ while read -r ref || [ -n "$ref" ]; do
 done < dist/release/images.txt
 
 kubectl apply -f manifests/00-crds
+kubectl apply -f manifests/85-authn/00-namespace.yaml
 kubectl apply -f manifests/90-bedrock
 kubectl -n bedrock-system rollout status deployment/bedrock-operator --timeout=120s
 

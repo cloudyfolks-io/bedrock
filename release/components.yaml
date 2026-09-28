@@ -99,6 +99,9 @@ components:
     namespace: traefik
     values: release/values/traefik.yaml
     crdsToGroup: crds
+  - name: authn
+    order: 85
+    dirs: [manifests/85-authn]
   - name: monitoring
     order: 70
     chart: charts/metrics-server

@@ -94,3 +94,36 @@ metadata:
 spec:
   policyName: bedrock-agent-own-nodeupgrade
   validationActions: [Deny]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: bedrock-agent-authn
+  namespace: bedrock-system
+  labels:
+    bedrock.cloudyfolks.io/component: bedrock
+rules:
+  - apiGroups: [""]
+    resources: [configmaps]
+    resourceNames: [bedrock-authn-apiserver]
+    verbs: [get, list, watch]
+  - apiGroups: [""]
+    resources: [secrets]
+    resourceNames: [bedrock-authn-webhook]
+    verbs: [get, list, watch]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: bedrock-agent-authn
+  namespace: bedrock-system
+  labels:
+    bedrock.cloudyfolks.io/component: bedrock
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: bedrock-agent-authn
+subjects:
+  - kind: Group
+    name: system:nodes
+    apiGroup: rbac.authorization.k8s.io
