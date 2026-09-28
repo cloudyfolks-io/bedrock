@@ -9,6 +9,8 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/util/wait"
+	"k8s.io/client-go/util/retry"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	"github.com/cloudyfolks-io/bedrock/api/v1alpha1"
@@ -18,6 +20,8 @@ import (
 )
 
 const dummyHash = "$argon2id$v=19$m=65536,t=3,p=2$AAAAAAAAAAAAAAAAAAAAAA$AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+
+var conflictRetryBackoff = wait.Backoff{Steps: 20, Duration: 20 * time.Millisecond, Factor: 1.0, Jitter: 0.1}
 
 type passwordMethod struct {
 	client   client.Client
@@ -95,21 +99,25 @@ func (m passwordMethod) currentHash(ctx context.Context, user v1alpha1.User) (st
 }
 
 func (m passwordMethod) recordFailure(ctx context.Context, user v1alpha1.User, threshold int, now time.Time) error {
-	var fresh v1alpha1.User
-	if err := m.client.Get(ctx, client.ObjectKey{Namespace: release.SystemNamespace, Name: user.Name}, &fresh); err != nil {
-		return err
-	}
-	fresh.Status = RecordFailure(fresh.Status, threshold, now)
-	return m.client.Status().Update(ctx, &fresh)
+	return retry.RetryOnConflict(conflictRetryBackoff, func() error {
+		var fresh v1alpha1.User
+		if err := m.client.Get(ctx, client.ObjectKey{Namespace: release.SystemNamespace, Name: user.Name}, &fresh); err != nil {
+			return err
+		}
+		fresh.Status = RecordFailure(fresh.Status, threshold, now)
+		return m.client.Status().Update(ctx, &fresh, client.FieldOwner(v1alpha1.AuthnFieldManager))
+	})
 }
 
 func (m passwordMethod) recordSuccess(ctx context.Context, user v1alpha1.User, now time.Time) error {
-	var fresh v1alpha1.User
-	if err := m.client.Get(ctx, client.ObjectKey{Namespace: release.SystemNamespace, Name: user.Name}, &fresh); err != nil {
-		return err
-	}
-	fresh.Status = RecordSuccess(fresh.Status, now)
-	return m.client.Status().Update(ctx, &fresh)
+	return retry.RetryOnConflict(conflictRetryBackoff, func() error {
+		var fresh v1alpha1.User
+		if err := m.client.Get(ctx, client.ObjectKey{Namespace: release.SystemNamespace, Name: user.Name}, &fresh); err != nil {
+			return err
+		}
+		fresh.Status = RecordSuccess(fresh.Status, now)
+		return m.client.Status().Update(ctx, &fresh, client.FieldOwner(v1alpha1.AuthnFieldManager))
+	})
 }
 
 func SetPassword(ctx context.Context, c client.Client, random io.Reader, user v1alpha1.User, password string) error {
@@ -126,26 +134,28 @@ func SetPassword(ctx context.Context, c client.Client, random io.Reader, user v1
 			ObjectMeta: metav1.ObjectMeta{Namespace: release.SystemNamespace, Name: name, Labels: map[string]string{v1alpha1.LabelKind: "Credential", v1alpha1.LabelName: name}},
 			Spec:       v1alpha1.CredentialSpec{UserRef: user.Name, Method: v1alpha1.MethodPassword, SecretRef: name},
 		}
-		if err := c.Create(ctx, &cred); err != nil {
+		if err := c.Create(ctx, &cred, client.FieldOwner(v1alpha1.AuthnFieldManager)); err != nil {
 			return err
 		}
 		cred.TypeMeta = metav1.TypeMeta{APIVersion: v1alpha1.GroupVersion.String(), Kind: "Credential"}
-		if err := c.Create(ctx, secret.Object(&cred, name, map[string][]byte{"hash": []byte(hash)})); err != nil {
+		if err := c.Create(ctx, secret.Object(&cred, name, map[string][]byte{"hash": []byte(hash)}), client.FieldOwner(v1alpha1.AuthnFieldManager)); err != nil {
 			return err
 		}
 		cred.Status.EnrolledAt = &metav1.Time{Time: time.Now()}
-		return c.Status().Update(ctx, &cred)
+		return c.Status().Update(ctx, &cred, client.FieldOwner(v1alpha1.AuthnFieldManager))
 	}
 	if err != nil {
 		return err
 	}
-	var sec corev1.Secret
-	if err := c.Get(ctx, client.ObjectKey{Namespace: release.SystemNamespace, Name: cred.Spec.SecretRef}, &sec); err != nil {
-		return err
-	}
-	if sec.Data == nil {
-		sec.Data = map[string][]byte{}
-	}
-	sec.Data["hash"] = []byte(hash)
-	return c.Update(ctx, &sec)
+	return retry.RetryOnConflict(conflictRetryBackoff, func() error {
+		var sec corev1.Secret
+		if err := c.Get(ctx, client.ObjectKey{Namespace: release.SystemNamespace, Name: cred.Spec.SecretRef}, &sec); err != nil {
+			return err
+		}
+		if sec.Data == nil {
+			sec.Data = map[string][]byte{}
+		}
+		sec.Data["hash"] = []byte(hash)
+		return c.Update(ctx, &sec, client.FieldOwner(v1alpha1.AuthnFieldManager))
+	})
 }

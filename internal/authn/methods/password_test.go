@@ -3,6 +3,7 @@ package methods
 import (
 	"context"
 	"crypto/rand"
+	"sync"
 	"testing"
 	"time"
 
@@ -130,6 +131,96 @@ func TestPasswordLockoutIgnoresCase(t *testing.T) {
 	final := refetchUser(t, c, user)
 	if final.Status.Locks != 1 || final.Status.LockedUntil == nil {
 		t.Fatalf("three failures against three casings of the same username must share one lockout counter: %+v", final.Status)
+	}
+}
+
+func TestSetPasswordTwiceRotatesTheHash(t *testing.T) {
+	c, _ := startTestEnv(t)
+	user := createUser(t, c, "dana")
+	if err := SetPassword(context.Background(), c, rand.Reader, user, "first-passphrase"); err != nil {
+		t.Fatal(err)
+	}
+	if err := SetPassword(context.Background(), c, rand.Reader, user, "second-passphrase"); err != nil {
+		t.Fatal(err)
+	}
+	method := NewPassword(c, rand.Reader, NewRateLimiter(10, time.Minute), fixedSettings(5))
+	now := time.Now()
+
+	stale, err := method.Complete(context.Background(), Flow{ClientIP: "10.0.0.7", Now: now}, refetchUser(t, c, user), Answer{Password: "first-passphrase"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stale.Failure != FailureInvalidCredentials {
+		t.Fatalf("the rotated-out password must no longer authenticate: %+v", stale)
+	}
+
+	fresh, err := method.Complete(context.Background(), Flow{ClientIP: "10.0.0.7", Now: now.Add(time.Second)}, refetchUser(t, c, user), Answer{Password: "second-passphrase"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if fresh.Subject == nil {
+		t.Fatalf("the rotated-in password must authenticate: %+v", fresh)
+	}
+}
+
+func TestPasswordCaseInsensitiveLookupSharesLockout(t *testing.T) {
+	c, _ := startTestEnv(t)
+	user := createUser(t, c, "dave")
+	if err := SetPassword(context.Background(), c, rand.Reader, user, "s3cret-passphrase"); err != nil {
+		t.Fatal(err)
+	}
+	method := NewPassword(c, rand.Reader, NewRateLimiter(100, time.Minute), fixedSettings(3))
+	now := time.Now()
+	for i, raw := range []string{"Dave", " DAVE ", "dave"} {
+		normalized, err := v1alpha1.NormalizeUsername(raw)
+		if err != nil {
+			t.Fatal(err)
+		}
+		objectName := v1alpha1.UserObjectName(normalized)
+		var resolved v1alpha1.User
+		if err := c.Get(context.Background(), client.ObjectKey{Namespace: "bedrock-system", Name: objectName}, &resolved); err != nil {
+			t.Fatal(err)
+		}
+		flow := Flow{ClientIP: "10.0.0.8", Now: now.Add(time.Duration(i) * time.Second)}
+		if _, err := method.Complete(context.Background(), flow, resolved, Answer{Password: "wrong"}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	final := refetchUser(t, c, user)
+	if final.Status.Locks != 1 || final.Status.LockedUntil == nil {
+		t.Fatalf("three raw-casing variants resolving to the same object must share one lockout counter: %+v", final.Status)
+	}
+}
+
+func TestPasswordConcurrentFailuresDoNotDropCounts(t *testing.T) {
+	c, _ := startTestEnv(t)
+	user := createUser(t, c, "erin")
+	if err := SetPassword(context.Background(), c, rand.Reader, user, "s3cret-passphrase"); err != nil {
+		t.Fatal(err)
+	}
+	const attempts = 10
+	method := NewPassword(c, rand.Reader, NewRateLimiter(1000, time.Minute), fixedSettings(attempts+5))
+	now := time.Now()
+	flow := Flow{ClientIP: "10.0.0.9", Now: now}
+
+	var wg sync.WaitGroup
+	for i := 0; i < attempts; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			if _, err := method.Complete(context.Background(), flow, user, Answer{Password: "wrong"}); err != nil {
+				t.Error(err)
+			}
+		}()
+	}
+	wg.Wait()
+
+	final := refetchUser(t, c, user)
+	if final.Status.LockedUntil != nil {
+		return
+	}
+	if final.Status.FailedAttempts != attempts {
+		t.Fatalf("expected exactly %d recorded failures under concurrency, got %d", attempts, final.Status.FailedAttempts)
 	}
 }
 
