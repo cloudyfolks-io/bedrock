@@ -6,10 +6,10 @@ dependencies:
   repository: ""
   version: 1.2.1
 description: Kubernetes network fabric for multi-tenant clouds, a fork of fabric
-home: https://github.com/cloudyfolks-labs/fabric
+home: https://github.com/cloudyfolks-io/fabric
 kubeVersion: '>= 1.29.0-0'
 name: fabric
 sources:
-- https://github.com/cloudyfolks-labs/fabric
+- https://github.com/cloudyfolks-io/fabric
 type: application
 version: 1.2.1
