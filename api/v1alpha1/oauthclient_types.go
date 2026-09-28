@@ -30,6 +30,7 @@ type OAuthClientSpec struct {
 	// +optional
 	TokenExchange *TokenExchange `json:"tokenExchange,omitempty"`
 	// +optional
+	// +kubebuilder:default=""
 	SecretRef string `json:"secretRef,omitempty"`
 }
 

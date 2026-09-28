@@ -68,6 +68,7 @@ spec:
               requireSecondFactor:
                 type: boolean
               secretRef:
+                default: ""
                 type: string
               tokenExchange:
                 properties:
