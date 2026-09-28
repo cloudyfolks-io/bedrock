@@ -108,6 +108,9 @@ func runUpgrade(ctx context.Context, c client.Client, deps Deps, steps map[strin
 			return false, err
 		}
 		outcome, err := execute(ctx, steps, name, env, envErr)
+		if restoredSince(name, deps.Root, started) {
+			return true, err
+		}
 		finished := metav1.NewTime(deps.Now())
 		if err != nil {
 			blocked = true
@@ -136,6 +139,11 @@ func runUpgrade(ctx context.Context, c client.Client, deps Deps, steps map[strin
 		}
 	}
 	return false, writeUpgradeStatus(ctx, c, upgrade.Name, status)
+}
+
+func restoredSince(step, root string, started metav1.Time) bool {
+	marker := readRestoreMarker(root)
+	return step == v1alpha1.StepRestore && marker != nil && !marker.CompletedAt.Time.Before(started.Time.Truncate(time.Second))
 }
 
 func stepAction(current v1alpha1.NodeUpgradeStepStatus, name string, attempt int32, recordedBoot, bootID string, restored *v1alpha1.RestoreStatus) stepDecision {
