@@ -88,9 +88,7 @@ func (m recoveryMethod) Complete(ctx context.Context, flow Flow, user v1alpha1.U
 		return Result{}, err
 	}
 	cred.Status.LastUsed = &metav1.Time{Time: flow.Now}
-	if err := m.client.Status().Update(ctx, &cred, client.FieldOwner(v1alpha1.AuthnFieldManager)); err != nil {
-		return Result{}, err
-	}
+	_ = m.client.Status().Update(ctx, &cred, client.FieldOwner(v1alpha1.AuthnFieldManager))
 	return Result{Subject: &Subject{User: user, AMR: []string{"otp"}}}, nil
 }
 

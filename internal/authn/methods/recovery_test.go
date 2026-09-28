@@ -3,10 +3,14 @@ package methods
 import (
 	"context"
 	"crypto/rand"
+	"errors"
 	"strings"
 	"sync"
 	"testing"
 	"time"
+
+	"k8s.io/apimachinery/pkg/runtime"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
 func TestRecoveryCodesFormat(t *testing.T) {
@@ -215,5 +219,61 @@ func TestRecoveryCompleteRejectsAStaleConflictOnConsume(t *testing.T) {
 	}
 	if again.Failure != FailureInvalidCode {
 		t.Fatalf("the code must stay consumed once, not revert after the conflict: %+v", again)
+	}
+}
+
+type statusFailClient struct {
+	client.Client
+}
+
+func (statusFailClient) Status() client.SubResourceWriter {
+	return failingSubResourceWriter{}
+}
+
+var errStatusWriteDisabled = errors.New("methods: status write disabled for test")
+
+type failingSubResourceWriter struct{}
+
+func (failingSubResourceWriter) Create(ctx context.Context, obj client.Object, subResource client.Object, opts ...client.SubResourceCreateOption) error {
+	return errStatusWriteDisabled
+}
+
+func (failingSubResourceWriter) Update(ctx context.Context, obj client.Object, opts ...client.SubResourceUpdateOption) error {
+	return errStatusWriteDisabled
+}
+
+func (failingSubResourceWriter) Patch(ctx context.Context, obj client.Object, patch client.Patch, opts ...client.SubResourcePatchOption) error {
+	return errStatusWriteDisabled
+}
+
+func (failingSubResourceWriter) Apply(ctx context.Context, obj runtime.ApplyConfiguration, opts ...client.SubResourceApplyOption) error {
+	return errStatusWriteDisabled
+}
+
+func TestRecoveryCompleteSucceedsWhenLastUsedWriteFails(t *testing.T) {
+	c, _ := startTestEnv(t)
+	user := createUser(t, c, "liam")
+	enrolling := NewRecovery(c, rand.Reader)
+	enrollment, err := enrolling.Enroll(context.Background(), user, Answer{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	code := NormalizeRecoveryCode(enrollment.RecoveryCodes[0])
+
+	method := NewRecovery(statusFailClient{Client: c}, rand.Reader)
+	result, err := method.Complete(context.Background(), Flow{Now: time.Now()}, user, Answer{Code: code})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Subject == nil {
+		t.Fatalf("a correctly burned code must still succeed when the lastUsed write fails: %+v", result)
+	}
+
+	second, err := enrolling.Complete(context.Background(), Flow{Now: time.Now()}, user, Answer{Code: code})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if second.Failure != FailureInvalidCode {
+		t.Fatalf("the code must remain consumed even though its lastUsed write failed: %+v", second)
 	}
 }
