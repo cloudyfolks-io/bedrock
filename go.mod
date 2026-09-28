@@ -3,6 +3,7 @@ module github.com/cloudyfolks-io/bedrock
 go 1.27
 
 require (
+	github.com/go-ldap/ldap/v3 v3.4.14
 	github.com/google/go-containerregistry v0.22.1
 	github.com/klauspost/compress v1.19.2
 	github.com/pquerna/otp v1.5.0
@@ -17,6 +18,7 @@ require (
 )
 
 require (
+	github.com/Azure/go-ntlmssp v0.1.1 // indirect
 	github.com/beorn7/perks v1.0.1 // indirect
 	github.com/boombuler/barcode v1.0.1-0.20190219062509-6c824513bacc // indirect
 	github.com/cespare/xxhash/v2 v2.3.0 // indirect
@@ -27,6 +29,7 @@ require (
 	github.com/evanphx/json-patch/v5 v5.9.11 // indirect
 	github.com/fsnotify/fsnotify v1.9.0 // indirect
 	github.com/fxamacker/cbor/v2 v2.9.1 // indirect
+	github.com/go-asn1-ber/asn1-ber v1.5.8 // indirect
 	github.com/go-logr/logr v1.4.3 // indirect
 	github.com/go-logr/zapr v1.3.0 // indirect
 	github.com/go-openapi/jsonpointer v1.0.0 // indirect
