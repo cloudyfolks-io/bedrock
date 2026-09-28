@@ -30,6 +30,18 @@ func TestBase62HasNoBias(t *testing.T) {
 			t.Fatalf("Base62 = %q, want %q (250, 255 and 254 are out of range for 62 letters and must be skipped)", got, want)
 		}
 	})
+	t.Run("skips a long run of out of range bytes", func(t *testing.T) {
+		rejects := bytes.Repeat([]byte{255}, 30)
+		reader := bytes.NewReader(append(rejects, 42))
+		got, err := Base62(reader, 1)
+		if err != nil {
+			t.Fatal(err)
+		}
+		want := string(base62Alphabet[42])
+		if got != want {
+			t.Fatalf("Base62 = %q, want %q (30 consecutive out of range bytes must all be skipped)", got, want)
+		}
+	})
 }
 
 func TestAPITokenFormat(t *testing.T) {

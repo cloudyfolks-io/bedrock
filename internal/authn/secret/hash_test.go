@@ -40,13 +40,19 @@ func TestVerifyReadsParametersFromTheHash(t *testing.T) {
 }
 
 func TestVerifyRefusesMalformed(t *testing.T) {
+	validSalt := "AAAAAAAAAAAAAAAAAAAAAA"
+	validKey := "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
 	cases := map[string]string{
-		"empty":           "",
-		"wrong algorithm": "$argon2i$v=19$m=65536,t=3,p=2$c2FsdA$aGFzaA",
-		"wrong version":   "$argon2id$v=1$m=65536,t=3,p=2$c2FsdA$aGFzaA",
-		"bad parameters":  "$argon2id$v=19$bogus$c2FsdA$aGFzaA",
-		"bad salt":        "$argon2id$v=19$m=65536,t=3,p=2$not-base64!$aGFzaA",
-		"bad key":         "$argon2id$v=19$m=65536,t=3,p=2$c2FsdA$not-base64!",
+		"empty":            "",
+		"wrong algorithm":  "$argon2i$v=19$m=65536,t=3,p=2$c2FsdA$aGFzaA",
+		"wrong version":    "$argon2id$v=1$m=65536,t=3,p=2$c2FsdA$aGFzaA",
+		"bad parameters":   "$argon2id$v=19$bogus$c2FsdA$aGFzaA",
+		"bad salt":         "$argon2id$v=19$m=65536,t=3,p=2$not-base64!$aGFzaA",
+		"bad key":          "$argon2id$v=19$m=65536,t=3,p=2$c2FsdA$not-base64!",
+		"memory too large": "$argon2id$v=19$m=4194304,t=3,p=2$" + validSalt + "$" + validKey,
+		"time too large":   "$argon2id$v=19$m=65536,t=11,p=2$" + validSalt + "$" + validKey,
+		"zero threads":     "$argon2id$v=19$m=65536,t=3,p=0$" + validSalt + "$" + validKey,
+		"salt too short":   "$argon2id$v=19$m=65536,t=3,p=2$AAAAAA$" + validKey,
 	}
 	for name, encoded := range cases {
 		t.Run(name, func(t *testing.T) {

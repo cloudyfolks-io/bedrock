@@ -21,6 +21,15 @@ type Params struct {
 
 var DefaultParams = Params{Time: 3, MemoryKiB: 64 * 1024, Threads: 2, SaltLen: 16, KeyLen: 32}
 
+const (
+	maxDecodedMemoryKiB = 256 * 1024
+	maxDecodedTime      = 10
+	minDecodedSaltLen   = 8
+	maxDecodedSaltLen   = 64
+	minDecodedKeyLen    = 8
+	maxDecodedKeyLen    = 64
+)
+
 func Hash(random io.Reader, params Params, plain string) (string, error) {
 	salt := make([]byte, params.SaltLen)
 	if _, err := io.ReadFull(random, salt); err != nil {
@@ -61,6 +70,11 @@ func decodePHC(encoded string) (Params, []byte, []byte, error) {
 	key, err := base64.RawStdEncoding.DecodeString(parts[5])
 	if err != nil {
 		return Params{}, nil, nil, errors.New("secret: malformed argon2id key")
+	}
+	if memory > maxDecodedMemoryKiB || time > maxDecodedTime || threads == 0 ||
+		len(salt) < minDecodedSaltLen || len(salt) > maxDecodedSaltLen ||
+		len(key) < minDecodedKeyLen || len(key) > maxDecodedKeyLen {
+		return Params{}, nil, nil, errors.New("secret: argon2id parameters out of bounds")
 	}
 	return Params{Time: time, MemoryKiB: memory, Threads: threads, SaltLen: uint32(len(salt)), KeyLen: uint32(len(key))}, salt, key, nil
 }
