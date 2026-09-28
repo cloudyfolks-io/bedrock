@@ -477,6 +477,36 @@ func TestLDAPRefusesALocalUserOfTheSameName(t *testing.T) {
 	}
 }
 
+func TestLDAPRefusesAUserProvisionedByADifferentUpstreamProvider(t *testing.T) {
+	c, _ := startTestEnv(t)
+	provider := createLDAPProvider(t, c, "other-provider-ldap", "service-secret")
+	name := v1alpha1.UserObjectName("oscar")
+	existing := v1alpha1.User{
+		TypeMeta:   metav1.TypeMeta{APIVersion: v1alpha1.GroupVersion.String(), Kind: "User"},
+		ObjectMeta: metav1.ObjectMeta{Namespace: "bedrock-system", Name: name, Labels: map[string]string{v1alpha1.LabelKind: "User", v1alpha1.LabelName: name}},
+		Spec:       v1alpha1.UserSpec{Username: "oscar", Source: "corp-oidc", Methods: []string{v1alpha1.MethodOIDC}},
+	}
+	if err := c.Create(context.Background(), &existing); err != nil {
+		t.Fatal(err)
+	}
+	entry := ldap.NewEntry("uid=oscar,ou=people,dc=example,dc=test", map[string][]string{"uid": {"oscar"}})
+	conn := &fakeLDAPConn{
+		bind: func(dn, password string) error { return nil },
+		search: func(req *ldap.SearchRequest) (*ldap.SearchResult, error) {
+			return &ldap.SearchResult{Entries: []*ldap.Entry{entry}}, nil
+		},
+	}
+	method := NewLDAP(c, fixedDialer(conn))
+	request := loginRequestFor(provider.Name, "oscar")
+	result, err := method.Complete(context.Background(), Flow{AuthRequest: request, Now: time.Now()}, existing, Answer{Password: "anything"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Failure != FailureInvalidCredentials {
+		t.Fatalf("an LDAP login for a user provisioned by a different upstream provider must be refused: %+v", result)
+	}
+}
+
 func TestLDAPProviderForFindsTheMatchingProvider(t *testing.T) {
 	c, _ := startTestEnv(t)
 	provider := createLDAPProvider(t, c, "discover-ldap", "service-secret")
