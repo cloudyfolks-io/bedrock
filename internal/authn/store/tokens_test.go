@@ -216,7 +216,6 @@ func TestRefreshRotationRejectsAStaleRead(t *testing.T) {
 	s := newTestStore(c, testNow, testSettings(), nil)
 	token := issue(t, s, loginRequest("alice", "bedrock-cli"))
 	family := storedRefresh(t, c, token).Spec.Family
-
 	hook := &hookClient{Client: c}
 	hook.afterGet = func() {
 		if _, err := refresh(ctx, s, token); err != nil {
@@ -239,6 +238,51 @@ func TestRefreshRotationRejectsAStaleRead(t *testing.T) {
 	}
 	if left := familyTokens(t, c, family); len(left) != 0 {
 		t.Fatalf("the family must be revoked, %d tokens left", len(left))
+	}
+}
+
+type failAfterNthRefreshTokenGet struct {
+	client.Client
+	failOn int
+	err    error
+	seen   int
+}
+
+func (f *failAfterNthRefreshTokenGet) Get(ctx context.Context, key client.ObjectKey, obj client.Object, opts ...client.GetOption) error {
+	if _, ok := obj.(*v1alpha1.RefreshToken); ok {
+		f.seen++
+		if f.seen == f.failOn {
+			return f.err
+		}
+	}
+	return f.Client.Get(ctx, key, obj, opts...)
+}
+
+func TestRefreshRotationSurvivesATransientReReadError(t *testing.T) {
+	c := startTestEnv(t)
+	ctx := context.Background()
+	create(t, c, testUser("alice"))
+	s := newTestStore(c, testNow, testSettings(), nil)
+	token := issue(t, s, loginRequest("alice", "bedrock-cli"))
+	family := storedRefresh(t, c, token).Spec.Family
+	transient := errors.New("transient read failure")
+	failing := &failAfterNthRefreshTokenGet{Client: c, failOn: 2, err: transient}
+	flaky := New(Config{
+		Client:   c,
+		Reader:   failing,
+		Random:   rand.Reader,
+		Clock:    func() time.Time { return testNow },
+		Settings: func(context.Context) (policy.Settings, error) { return testSettings(), nil },
+	})
+	request, err := flaky.TokenRequestByRefreshToken(ctx, token)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, _, _, err := flaky.CreateAccessAndRefreshTokens(ctx, request, token); !errors.Is(err, transient) {
+		t.Fatalf("a transient re-read error must surface as-is, got %v", err)
+	}
+	if left := familyTokens(t, c, family); len(left) != 2 {
+		t.Fatalf("a transient re-read error must not revoke the family, got %d tokens left", len(left))
 	}
 }
 

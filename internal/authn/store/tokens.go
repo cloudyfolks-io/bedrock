@@ -214,6 +214,9 @@ func (s *Store) rotate(ctx context.Context, previous, next v1alpha1.RefreshToken
 		return err
 	}
 	if err := s.reader.Get(ctx, objectKey(previous.Name), &v1alpha1.RefreshToken{}); err != nil {
+		if !apierrors.IsNotFound(err) {
+			return err
+		}
 		return reused(client.IgnoreNotFound(s.client.Delete(ctx, &next)), s.revokeFamily(ctx, previous.Spec.Family))
 	}
 	return nil
