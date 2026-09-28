@@ -133,8 +133,12 @@ func (s *Store) CreateAccessToken(_ context.Context, request op.TokenRequest) (s
 	return accessTokenID(random, request.GetScopes()), accessTokenExpiry(request, s.clock()), nil
 }
 
-func accessTokenExpiry(_ op.TokenRequest, now time.Time) time.Time {
-	return now.Add(accessTokenLifetime)
+func accessTokenExpiry(request op.TokenRequest, now time.Time) time.Time {
+	exchange, ok := request.(op.TokenExchangeRequest)
+	if !ok {
+		return now.Add(accessTokenLifetime)
+	}
+	return ExchangeExpiry(claimTime(exchange.GetExchangeSubjectTokenClaims()["exp"]), now)
 }
 
 func (s *Store) CreateAccessAndRefreshTokens(ctx context.Context, request op.TokenRequest, _ string) (string, string, time.Time, error) {
