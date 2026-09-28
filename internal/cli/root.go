@@ -12,15 +12,16 @@ var Version = "dev"
 
 func Commands() map[string]Command {
 	return map[string]Command{
-		"version":  versionCommand,
-		"operator": operatorCommand,
-		"release":  releaseCommand,
-		"bundle":   bundleCommand,
-		"init":     initCommand,
-		"join":     joinCommand,
-		"token":    tokenCommand,
-		"agent":    agentCommand,
-		"upgrade":  upgradeCommand,
+		"version":           versionCommand,
+		"operator":          operatorCommand,
+		"release":           releaseCommand,
+		"bundle":            bundleCommand,
+		"init":              initCommand,
+		"join":              joinCommand,
+		"token":             tokenCommand,
+		"agent":             agentCommand,
+		"upgrade":           upgradeCommand,
+		"restart-workloads": restartWorkloadsCommand,
 	}
 }
 
