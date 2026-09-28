@@ -163,15 +163,22 @@ func TestSetUserinfoFromTokenIsScopedByTheAccessTokenID(t *testing.T) {
 	ctx := context.Background()
 	create(t, c, testUser("alice"))
 	s := newTestStore(c, testNow, testSettings(), nil)
-
 	openIDOnly := accessTokenID("abcdefghijklmnopqrstuv", []string{oidc.ScopeOpenID})
-	for _, tokenID := range []string{openIDOnly, "not-an-access-token-id"} {
+	cases := map[string]string{
+		"openid-only scopes":  openIDOnly,
+		"no separator":        "not-an-access-token-id",
+		"21-character prefix": "abcdefghijklmnopqrstu.oeg",
+		"23-character prefix": "abcdefghijklmnopqrstuvw.oeg",
+		"unknown code byte":   "abcdefghijklmnopqrstuv.ox",
+		"duplicate code byte": "abcdefghijklmnopqrstuv.oo",
+	}
+	for name, tokenID := range cases {
 		info := &oidc.UserInfo{}
 		if err := s.SetUserinfoFromToken(ctx, info, tokenID, "alice", ""); err != nil {
 			t.Fatal(err)
 		}
 		if info.Subject != "alice" || info.Email != "" || info.Name != "" || info.PreferredUsername != "" || info.Claims["groups"] != nil {
-			t.Fatalf("token %q: an openid-only access token must carry no profile, email or groups, got %+v", tokenID, info)
+			t.Fatalf("%s (%q): an openid-only access token must carry no profile, email or groups, got %+v", name, tokenID, info)
 		}
 	}
 }

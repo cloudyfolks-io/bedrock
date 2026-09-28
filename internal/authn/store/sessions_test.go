@@ -2,15 +2,18 @@ package store
 
 import (
 	"context"
+	"crypto/rand"
 	"errors"
 	"reflect"
 	"testing"
 	"time"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	"github.com/cloudyfolks-io/bedrock/api/v1alpha1"
 	"github.com/cloudyfolks-io/bedrock/internal/authn/methods"
+	"github.com/cloudyfolks-io/bedrock/internal/authn/policy"
 	"github.com/cloudyfolks-io/bedrock/internal/authn/secret"
 	"github.com/cloudyfolks-io/bedrock/internal/release"
 )
@@ -79,6 +82,93 @@ func TestSessionByCookie(t *testing.T) {
 	}
 	if _, err := s.SessionByCookie(ctx, cookie); !errors.Is(err, ErrUserDisabled) {
 		t.Fatalf("a disabled user's session must fail, got %v", err)
+	}
+}
+
+func TestSessionByCookieWritesLastSeenAtMostOncePerMinute(t *testing.T) {
+	c := startTestEnv(t)
+	ctx := context.Background()
+	create(t, c, testUser("alice"))
+	s := newTestStore(c, testNow, testSettings(), nil)
+	cookie, err := s.CreateSession(ctx, methods.Subject{User: *testUser("alice")}, "curl/8.9", "192.0.2.10")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.SessionByCookie(ctx, cookie); err != nil {
+		t.Fatal(err)
+	}
+	var afterFirst v1alpha1.Session
+	if err := c.Get(ctx, objectKey(secret.SHA256Hex(cookie)), &afterFirst); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.SessionByCookie(ctx, cookie); err != nil {
+		t.Fatal(err)
+	}
+	var afterSecond v1alpha1.Session
+	if err := c.Get(ctx, objectKey(secret.SHA256Hex(cookie)), &afterSecond); err != nil {
+		t.Fatal(err)
+	}
+	if afterSecond.ResourceVersion != afterFirst.ResourceVersion {
+		t.Fatalf("a second call within a minute must not write lastSeen again, resourceVersion moved from %q to %q", afterFirst.ResourceVersion, afterSecond.ResourceVersion)
+	}
+	later := newTestStore(c, testNow.Add(lastSeenInterval), testSettings(), nil)
+	if _, err := later.SessionByCookie(ctx, cookie); err != nil {
+		t.Fatal(err)
+	}
+	var afterLater v1alpha1.Session
+	if err := c.Get(ctx, objectKey(secret.SHA256Hex(cookie)), &afterLater); err != nil {
+		t.Fatal(err)
+	}
+	if afterLater.ResourceVersion == afterSecond.ResourceVersion {
+		t.Fatal("a call a minute later must write lastSeen again")
+	}
+	if afterLater.Status.LastSeen == nil || !afterLater.Status.LastSeen.Time.Equal(testNow.Add(lastSeenInterval)) {
+		t.Fatalf("lastSeen %v, want %v", afterLater.Status.LastSeen, testNow.Add(lastSeenInterval))
+	}
+}
+
+func TestSessionByCookieIgnoresAConflictOnLastSeen(t *testing.T) {
+	c := startTestEnv(t)
+	ctx := context.Background()
+	create(t, c, testUser("alice"))
+	s := newTestStore(c, testNow, testSettings(), nil)
+	cookie, err := s.CreateSession(ctx, methods.Subject{User: *testUser("alice")}, "curl/8.9", "192.0.2.10")
+	if err != nil {
+		t.Fatal(err)
+	}
+	later := testNow.Add(lastSeenInterval)
+	racerSeen := later.Add(time.Hour)
+	hook := &hookClient{Client: c}
+	hook.afterGet = func() {
+		var racer v1alpha1.Session
+		if err := c.Get(ctx, objectKey(secret.SHA256Hex(cookie)), &racer); err != nil {
+			t.Fatal(err)
+		}
+		racer.Status.LastSeen = &metav1.Time{Time: racerSeen}
+		if err := c.Status().Update(ctx, &racer, client.FieldOwner(v1alpha1.AuthnFieldManager)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	racing := New(Config{
+		Client:   c,
+		Reader:   hook,
+		Random:   rand.Reader,
+		Clock:    func() time.Time { return later },
+		Settings: func(context.Context) (policy.Settings, error) { return testSettings(), nil },
+	})
+	session, err := racing.SessionByCookie(ctx, cookie)
+	if err != nil {
+		t.Fatalf("a conflicting lastSeen write must be ignored, got %v", err)
+	}
+	if session.Status.LastSeen == nil || !session.Status.LastSeen.Time.Equal(later) {
+		t.Fatalf("session lastSeen %v, want %v", session.Status.LastSeen, later)
+	}
+	var persisted v1alpha1.Session
+	if err := c.Get(ctx, objectKey(secret.SHA256Hex(cookie)), &persisted); err != nil {
+		t.Fatal(err)
+	}
+	if persisted.Status.LastSeen == nil || !persisted.Status.LastSeen.Time.Equal(racerSeen) {
+		t.Fatalf("the racing writer's lastSeen must survive the conflict, got %v", persisted.Status.LastSeen)
 	}
 }
 
