@@ -5,6 +5,8 @@ import (
 	"time"
 )
 
+const rateLimiterSweepThreshold = 4096
+
 type RateLimiter struct {
 	mu     sync.Mutex
 	limit  int
@@ -20,16 +22,40 @@ func (l *RateLimiter) Allow(key string, now time.Time) bool {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	cutoff := now.Add(-l.window)
-	kept := l.hits[key][:0]
-	for _, seen := range l.hits[key] {
-		if seen.After(cutoff) {
-			kept = append(kept, seen)
-		}
-	}
-	if len(kept) >= l.limit {
+	kept := pruneBefore(l.hits[key], cutoff)
+	if len(kept) == 0 {
+		delete(l.hits, key)
+	} else {
 		l.hits[key] = kept
+	}
+	if len(l.hits) > rateLimiterSweepThreshold {
+		l.sweep(cutoff)
+	}
+	kept = l.hits[key]
+	if len(kept) >= l.limit {
 		return false
 	}
 	l.hits[key] = append(kept, now)
 	return true
+}
+
+func (l *RateLimiter) sweep(cutoff time.Time) {
+	for key, hits := range l.hits {
+		kept := pruneBefore(hits, cutoff)
+		if len(kept) == 0 {
+			delete(l.hits, key)
+		} else {
+			l.hits[key] = kept
+		}
+	}
+}
+
+func pruneBefore(hits []time.Time, cutoff time.Time) []time.Time {
+	kept := hits[:0]
+	for _, seen := range hits {
+		if seen.After(cutoff) {
+			kept = append(kept, seen)
+		}
+	}
+	return kept
 }
