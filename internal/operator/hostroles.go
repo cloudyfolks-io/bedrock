@@ -7,8 +7,8 @@ import (
 
 	corev1 "k8s.io/api/core/v1"
 
-	"github.com/cloudyfolks-labs/bedrock/api/v1alpha1"
-	"github.com/cloudyfolks-labs/bedrock/internal/roles"
+	"github.com/cloudyfolks-io/bedrock/api/v1alpha1"
+	"github.com/cloudyfolks-io/bedrock/internal/roles"
 )
 
 func managedLabelKeys() []string { return roles.ManagedLabelKeys() }

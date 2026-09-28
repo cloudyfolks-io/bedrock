@@ -12,8 +12,8 @@ import (
 	apiextensionsv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
 	sigyaml "sigs.k8s.io/yaml"
 
-	"github.com/cloudyfolks-labs/bedrock/api/v1alpha1"
-	"github.com/cloudyfolks-labs/bedrock/internal/release"
+	"github.com/cloudyfolks-io/bedrock/api/v1alpha1"
+	"github.com/cloudyfolks-io/bedrock/internal/release"
 )
 
 func rbacBundle(t *testing.T) release.Bundle {

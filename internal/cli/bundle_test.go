@@ -15,8 +15,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/cloudyfolks-labs/bedrock/internal/host"
-	"github.com/cloudyfolks-labs/bedrock/internal/release"
+	"github.com/cloudyfolks-io/bedrock/internal/host"
+	"github.com/cloudyfolks-io/bedrock/internal/release"
 )
 
 func writeBundleRelease(t *testing.T, dir, k0sSum string) {

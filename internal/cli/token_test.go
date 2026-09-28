@@ -9,9 +9,9 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 
-	"github.com/cloudyfolks-labs/bedrock/api/v1alpha1"
-	"github.com/cloudyfolks-labs/bedrock/internal/host"
-	"github.com/cloudyfolks-labs/bedrock/internal/k0s"
+	"github.com/cloudyfolks-io/bedrock/api/v1alpha1"
+	"github.com/cloudyfolks-io/bedrock/internal/host"
+	"github.com/cloudyfolks-io/bedrock/internal/k0s"
 )
 
 func TestTokenUsage(t *testing.T) {

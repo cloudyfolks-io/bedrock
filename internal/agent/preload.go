@@ -13,10 +13,10 @@ import (
 
 	sigyaml "sigs.k8s.io/yaml"
 
-	"github.com/cloudyfolks-labs/bedrock/internal/depot"
-	"github.com/cloudyfolks-labs/bedrock/internal/host"
-	"github.com/cloudyfolks-labs/bedrock/internal/k0s"
-	"github.com/cloudyfolks-labs/bedrock/internal/release"
+	"github.com/cloudyfolks-io/bedrock/internal/depot"
+	"github.com/cloudyfolks-io/bedrock/internal/host"
+	"github.com/cloudyfolks-io/bedrock/internal/k0s"
+	"github.com/cloudyfolks-io/bedrock/internal/release"
 )
 
 func preload(ctx context.Context, env StepEnv) (Outcome, error) {

@@ -7,7 +7,7 @@ version=${VERSION:-dev}
 if ! limactl list --format '{{.Name}}' | grep -qx "$name"; then
   limactl start --name "$name" --tty=false --cpus 4 --memory 8 --disk 60 template://ubuntu-24.04
 fi
-GOOS=linux GOARCH=$(limactl shell "$name" uname -m | sed 's/x86_64/amd64/;s/aarch64/arm64/') CGO_ENABLED=0 go build -trimpath -ldflags "-X github.com/cloudyfolks-labs/bedrock/internal/cli.Version=$version" -o bin/bedrock-linux ./cmd/bedrock
+GOOS=linux GOARCH=$(limactl shell "$name" uname -m | sed 's/x86_64/amd64/;s/aarch64/arm64/') CGO_ENABLED=0 go build -trimpath -ldflags "-X github.com/cloudyfolks-io/bedrock/internal/cli.Version=$version" -o bin/bedrock-linux ./cmd/bedrock
 limactl shell "$name" sudo mkdir -p /opt/bedrock/bin /opt/bedrock/dist /opt/bedrock/hack
 limactl copy bin/bedrock-linux "$name:/tmp/bedrock"
 limactl copy -r dist/release "$name:/tmp/release"

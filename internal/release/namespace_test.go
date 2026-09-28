@@ -8,7 +8,7 @@ import (
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/client-go/discovery"
 
-	"github.com/cloudyfolks-labs/bedrock/api/v1alpha1"
+	"github.com/cloudyfolks-io/bedrock/api/v1alpha1"
 )
 
 func manifest(apiVersion, kind, namespace, name string) *unstructured.Unstructured {

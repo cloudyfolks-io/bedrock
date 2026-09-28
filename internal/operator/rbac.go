@@ -17,10 +17,10 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	sigyaml "sigs.k8s.io/yaml"
 
-	"github.com/cloudyfolks-labs/bedrock/api/v1alpha1"
-	"github.com/cloudyfolks-labs/bedrock/internal/release"
-	"github.com/cloudyfolks-labs/bedrock/internal/settings"
-	"github.com/cloudyfolks-labs/bedrock/internal/ssa"
+	"github.com/cloudyfolks-io/bedrock/api/v1alpha1"
+	"github.com/cloudyfolks-io/bedrock/internal/release"
+	"github.com/cloudyfolks-io/bedrock/internal/settings"
+	"github.com/cloudyfolks-io/bedrock/internal/ssa"
 )
 
 func OperatorRole(bundle release.Bundle) (rbacv1.ClusterRole, error) {

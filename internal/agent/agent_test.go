@@ -19,11 +19,11 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/interceptor"
 
-	"github.com/cloudyfolks-labs/bedrock/api/v1alpha1"
-	"github.com/cloudyfolks-labs/bedrock/internal/host"
-	"github.com/cloudyfolks-labs/bedrock/internal/hostconfig"
-	"github.com/cloudyfolks-labs/bedrock/internal/maintenance"
-	"github.com/cloudyfolks-labs/bedrock/internal/pkgmgr"
+	"github.com/cloudyfolks-io/bedrock/api/v1alpha1"
+	"github.com/cloudyfolks-io/bedrock/internal/host"
+	"github.com/cloudyfolks-io/bedrock/internal/hostconfig"
+	"github.com/cloudyfolks-io/bedrock/internal/maintenance"
+	"github.com/cloudyfolks-io/bedrock/internal/pkgmgr"
 )
 
 func fakeInventory(ctx context.Context, _ host.Exec, _ string) (v1alpha1.Inventory, error) {

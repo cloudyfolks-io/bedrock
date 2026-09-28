@@ -3,7 +3,7 @@ package main
 import (
 	"os"
 
-	"github.com/cloudyfolks-labs/bedrock/internal/cli"
+	"github.com/cloudyfolks-io/bedrock/internal/cli"
 )
 
 func main() {

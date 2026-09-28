@@ -10,7 +10,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 
-	"github.com/cloudyfolks-labs/bedrock/api/v1alpha1"
+	"github.com/cloudyfolks-io/bedrock/api/v1alpha1"
 )
 
 var baselineModules = []string{"overlay", "br_netfilter", "kvm", "vhost_net"}

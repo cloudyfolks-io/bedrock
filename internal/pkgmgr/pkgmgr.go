@@ -7,7 +7,7 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/cloudyfolks-labs/bedrock/internal/host"
+	"github.com/cloudyfolks-io/bedrock/internal/host"
 )
 
 const Sentinel = "var/run/reboot-required"

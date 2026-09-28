@@ -6,7 +6,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/cloudyfolks-labs/bedrock/internal/host"
+	"github.com/cloudyfolks-io/bedrock/internal/host"
 )
 
 func TestDetect(t *testing.T) {

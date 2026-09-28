@@ -18,10 +18,10 @@ import (
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
-	"github.com/cloudyfolks-labs/bedrock/api/v1alpha1"
-	"github.com/cloudyfolks-labs/bedrock/internal/depot"
-	"github.com/cloudyfolks-labs/bedrock/internal/k0s"
-	"github.com/cloudyfolks-labs/bedrock/internal/release"
+	"github.com/cloudyfolks-io/bedrock/api/v1alpha1"
+	"github.com/cloudyfolks-io/bedrock/internal/depot"
+	"github.com/cloudyfolks-io/bedrock/internal/k0s"
+	"github.com/cloudyfolks-io/bedrock/internal/release"
 )
 
 const (

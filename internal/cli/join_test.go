@@ -8,9 +8,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/cloudyfolks-labs/bedrock/internal/host"
-	"github.com/cloudyfolks-labs/bedrock/internal/k0s"
-	"github.com/cloudyfolks-labs/bedrock/internal/roles"
+	"github.com/cloudyfolks-io/bedrock/internal/host"
+	"github.com/cloudyfolks-io/bedrock/internal/k0s"
+	"github.com/cloudyfolks-io/bedrock/internal/roles"
 )
 
 func TestJoinRequiresToken(t *testing.T) {

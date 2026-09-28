@@ -4,7 +4,7 @@ import (
 	"context"
 	"slices"
 
-	"github.com/cloudyfolks-labs/bedrock/api/v1alpha1"
+	"github.com/cloudyfolks-io/bedrock/api/v1alpha1"
 )
 
 const controlPlaneProgressAnnotation = "bedrock.cloudyfolks.io/controlplane"

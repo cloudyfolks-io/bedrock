@@ -7,7 +7,7 @@ import (
 
 	"sigs.k8s.io/yaml"
 
-	"github.com/cloudyfolks-labs/bedrock/api/v1alpha1"
+	"github.com/cloudyfolks-io/bedrock/api/v1alpha1"
 )
 
 func TestLoadAppliesDefaults(t *testing.T) {

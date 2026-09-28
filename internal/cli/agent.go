@@ -16,13 +16,13 @@ import (
 
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
-	"github.com/cloudyfolks-labs/bedrock/internal/agent"
-	"github.com/cloudyfolks-labs/bedrock/internal/depot"
-	"github.com/cloudyfolks-labs/bedrock/internal/host"
-	"github.com/cloudyfolks-labs/bedrock/internal/hostconfig"
-	"github.com/cloudyfolks-labs/bedrock/internal/inventory"
-	"github.com/cloudyfolks-labs/bedrock/internal/operator"
-	"github.com/cloudyfolks-labs/bedrock/internal/pkgmgr"
+	"github.com/cloudyfolks-io/bedrock/internal/agent"
+	"github.com/cloudyfolks-io/bedrock/internal/depot"
+	"github.com/cloudyfolks-io/bedrock/internal/host"
+	"github.com/cloudyfolks-io/bedrock/internal/hostconfig"
+	"github.com/cloudyfolks-io/bedrock/internal/inventory"
+	"github.com/cloudyfolks-io/bedrock/internal/operator"
+	"github.com/cloudyfolks-io/bedrock/internal/pkgmgr"
 )
 
 type agentOptions struct {

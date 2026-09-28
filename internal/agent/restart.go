@@ -10,8 +10,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/cloudyfolks-labs/bedrock/internal/k0s"
-	"github.com/cloudyfolks-labs/bedrock/internal/release"
+	"github.com/cloudyfolks-io/bedrock/internal/k0s"
+	"github.com/cloudyfolks-io/bedrock/internal/release"
 )
 
 const (

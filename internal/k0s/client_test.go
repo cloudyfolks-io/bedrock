@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/cloudyfolks-labs/bedrock/internal/host"
+	"github.com/cloudyfolks-io/bedrock/internal/host"
 )
 
 func TestInstallArgsController(t *testing.T) {

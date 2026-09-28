@@ -12,8 +12,8 @@ import (
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
-	"github.com/cloudyfolks-labs/bedrock/internal/operator"
-	"github.com/cloudyfolks-labs/bedrock/internal/release"
+	"github.com/cloudyfolks-io/bedrock/internal/operator"
+	"github.com/cloudyfolks-io/bedrock/internal/release"
 )
 
 const releaseUsage = "usage: bedrock release build --config FILE --version VERSION --image IMAGE --out DIR [--helm helm] [--k0s-version V] [--upgrade-from V1,V2] [--binaries DIR]\n       bedrock release apply --dir DIR [--timeout 10m] [--interval 2s]\n       bedrock release rbac --release DIR --out FILE"

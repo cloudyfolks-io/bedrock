@@ -18,10 +18,10 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/handler"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
-	"github.com/cloudyfolks-labs/bedrock/api/v1alpha1"
-	"github.com/cloudyfolks-labs/bedrock/internal/release"
-	"github.com/cloudyfolks-labs/bedrock/internal/settings"
-	"github.com/cloudyfolks-labs/bedrock/internal/ssa"
+	"github.com/cloudyfolks-io/bedrock/api/v1alpha1"
+	"github.com/cloudyfolks-io/bedrock/internal/release"
+	"github.com/cloudyfolks-io/bedrock/internal/settings"
+	"github.com/cloudyfolks-io/bedrock/internal/ssa"
 )
 
 const (

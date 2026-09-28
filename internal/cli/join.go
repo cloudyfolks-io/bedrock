@@ -11,12 +11,12 @@ import (
 	"strings"
 	"time"
 
-	"github.com/cloudyfolks-labs/bedrock/api/v1alpha1"
-	"github.com/cloudyfolks-labs/bedrock/internal/host"
-	"github.com/cloudyfolks-labs/bedrock/internal/k0s"
-	"github.com/cloudyfolks-labs/bedrock/internal/preflight"
-	"github.com/cloudyfolks-labs/bedrock/internal/release"
-	"github.com/cloudyfolks-labs/bedrock/internal/roles"
+	"github.com/cloudyfolks-io/bedrock/api/v1alpha1"
+	"github.com/cloudyfolks-io/bedrock/internal/host"
+	"github.com/cloudyfolks-io/bedrock/internal/k0s"
+	"github.com/cloudyfolks-io/bedrock/internal/preflight"
+	"github.com/cloudyfolks-io/bedrock/internal/release"
+	"github.com/cloudyfolks-io/bedrock/internal/roles"
 )
 
 type joinOptions struct {

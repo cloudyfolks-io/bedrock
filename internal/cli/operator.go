@@ -9,7 +9,7 @@ import (
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
 
-	"github.com/cloudyfolks-labs/bedrock/internal/operator"
+	"github.com/cloudyfolks-io/bedrock/internal/operator"
 )
 
 func operatorCommand(args []string, _, stderr io.Writer) int {

@@ -4,7 +4,7 @@ import (
 	"context"
 	"errors"
 
-	"github.com/cloudyfolks-labs/bedrock/api/v1alpha1"
+	"github.com/cloudyfolks-io/bedrock/api/v1alpha1"
 )
 
 var errSkipped = errors.New("skipped")

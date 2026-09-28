@@ -9,8 +9,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/cloudyfolks-labs/bedrock/internal/agent"
-	"github.com/cloudyfolks-labs/bedrock/internal/host"
+	"github.com/cloudyfolks-io/bedrock/internal/agent"
+	"github.com/cloudyfolks-io/bedrock/internal/host"
 )
 
 func adminKubectlCall(root string, args ...string) string {

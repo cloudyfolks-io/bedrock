@@ -16,9 +16,9 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 
-	"github.com/cloudyfolks-labs/bedrock/internal/agent"
-	"github.com/cloudyfolks-labs/bedrock/internal/host"
-	"github.com/cloudyfolks-labs/bedrock/internal/operator"
+	"github.com/cloudyfolks-io/bedrock/internal/agent"
+	"github.com/cloudyfolks-io/bedrock/internal/host"
+	"github.com/cloudyfolks-io/bedrock/internal/operator"
 )
 
 func TestRunAgentReloadsClientWhenKubeconfigChanges(t *testing.T) {

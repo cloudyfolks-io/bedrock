@@ -8,8 +8,8 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/cloudyfolks-labs/bedrock/internal/agent"
-	"github.com/cloudyfolks-labs/bedrock/internal/host"
+	"github.com/cloudyfolks-io/bedrock/internal/agent"
+	"github.com/cloudyfolks-io/bedrock/internal/host"
 )
 
 func restartWorkloadsCommand(args []string, stdout, stderr io.Writer) int {

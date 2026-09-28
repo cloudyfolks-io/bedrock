@@ -15,16 +15,16 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/cloudyfolks-labs/bedrock/internal/host"
-	"github.com/cloudyfolks-labs/bedrock/internal/release"
+	"github.com/cloudyfolks-io/bedrock/internal/host"
+	"github.com/cloudyfolks-io/bedrock/internal/release"
 )
 
 const (
-	DefaultReleaseBaseURL = "https://github.com/cloudyfolks-labs/bedrock/releases/download"
+	DefaultReleaseBaseURL = "https://github.com/cloudyfolks-io/bedrock/releases/download"
 	sumsFile              = "SHA256SUMS"
 	sigstoreBundleFile    = "SHA256SUMS.sigstore.json"
 	oidcIssuer            = "https://token.actions.githubusercontent.com"
-	identityFormat        = `^https://github.com/cloudyfolks-labs/bedrock/\.github/workflows/release\.yml@refs/tags/%s$`
+	identityFormat        = `^https://github.com/cloudyfolks-io/bedrock/\.github/workflows/release\.yml@refs/tags/%s$`
 	minCosignVersion      = "v3.0.0"
 )
 

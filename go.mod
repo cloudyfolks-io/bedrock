@@ -1,4 +1,4 @@
-module github.com/cloudyfolks-labs/bedrock
+module github.com/cloudyfolks-io/bedrock
 
 go 1.27
 

@@ -14,11 +14,11 @@ import (
 	"k8s.io/apimachinery/pkg/watch"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
-	"github.com/cloudyfolks-labs/bedrock/api/v1alpha1"
-	"github.com/cloudyfolks-labs/bedrock/internal/host"
-	"github.com/cloudyfolks-labs/bedrock/internal/hostconfig"
-	"github.com/cloudyfolks-labs/bedrock/internal/maintenance"
-	"github.com/cloudyfolks-labs/bedrock/internal/pkgmgr"
+	"github.com/cloudyfolks-io/bedrock/api/v1alpha1"
+	"github.com/cloudyfolks-io/bedrock/internal/host"
+	"github.com/cloudyfolks-io/bedrock/internal/hostconfig"
+	"github.com/cloudyfolks-io/bedrock/internal/maintenance"
+	"github.com/cloudyfolks-io/bedrock/internal/pkgmgr"
 )
 
 const (

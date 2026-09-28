@@ -16,7 +16,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/cloudyfolks-labs/bedrock/internal/host"
+	"github.com/cloudyfolks-io/bedrock/internal/host"
 )
 
 func writeCertificate(t *testing.T, path string, notAfter time.Time) {
