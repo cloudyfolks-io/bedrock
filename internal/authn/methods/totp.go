@@ -113,23 +113,46 @@ func (m totpMethod) Complete(ctx context.Context, flow Flow, user v1alpha1.User,
 	return Result{Subject: &Subject{User: user, AMR: []string{"otp"}}}, nil
 }
 
+var errTOTPAlreadyEnrolled = errors.New("methods: totp already enrolled")
+
 func (m totpMethod) Enroll(ctx context.Context, user v1alpha1.User, input Answer) (Enrollment, error) {
 	name := v1alpha1.CredentialName(user.Name, v1alpha1.MethodTOTP)
 	seed := make([]byte, totpSeedLen)
 	if _, err := io.ReadFull(m.random, seed); err != nil {
 		return Enrollment{}, err
 	}
-	cred := v1alpha1.Credential{
-		TypeMeta:   metav1.TypeMeta{APIVersion: v1alpha1.GroupVersion.String(), Kind: "Credential"},
-		ObjectMeta: metav1.ObjectMeta{Namespace: release.SystemNamespace, Name: name, Labels: map[string]string{v1alpha1.LabelKind: "Credential", v1alpha1.LabelName: name}},
-		Spec:       v1alpha1.CredentialSpec{UserRef: user.Name, Method: v1alpha1.MethodTOTP, SecretRef: name},
-	}
-	if err := m.client.Create(ctx, &cred); err != nil {
+	var cred v1alpha1.Credential
+	err := m.client.Get(ctx, client.ObjectKey{Namespace: release.SystemNamespace, Name: name}, &cred)
+	switch {
+	case apierrors.IsNotFound(err):
+		cred = v1alpha1.Credential{
+			TypeMeta:   metav1.TypeMeta{APIVersion: v1alpha1.GroupVersion.String(), Kind: "Credential"},
+			ObjectMeta: metav1.ObjectMeta{Namespace: release.SystemNamespace, Name: name, Labels: map[string]string{v1alpha1.LabelKind: "Credential", v1alpha1.LabelName: name}},
+			Spec:       v1alpha1.CredentialSpec{UserRef: user.Name, Method: v1alpha1.MethodTOTP, SecretRef: name},
+		}
+		if err := m.client.Create(ctx, &cred, client.FieldOwner(v1alpha1.AuthnFieldManager)); err != nil {
+			return Enrollment{}, err
+		}
+		cred.TypeMeta = metav1.TypeMeta{APIVersion: v1alpha1.GroupVersion.String(), Kind: "Credential"}
+		if err := m.client.Create(ctx, secret.Object(&cred, name, map[string][]byte{"seed": []byte(base32Seed(seed))}), client.FieldOwner(v1alpha1.AuthnFieldManager)); err != nil {
+			return Enrollment{}, err
+		}
+	case err != nil:
 		return Enrollment{}, err
-	}
-	cred.TypeMeta = metav1.TypeMeta{APIVersion: v1alpha1.GroupVersion.String(), Kind: "Credential"}
-	if err := m.client.Create(ctx, secret.Object(&cred, name, map[string][]byte{"seed": []byte(base32Seed(seed))})); err != nil {
-		return Enrollment{}, err
+	case cred.Status.EnrolledAt != nil:
+		return Enrollment{}, errTOTPAlreadyEnrolled
+	default:
+		var sec corev1.Secret
+		if err := m.client.Get(ctx, client.ObjectKey{Namespace: release.SystemNamespace, Name: cred.Spec.SecretRef}, &sec); err != nil {
+			return Enrollment{}, err
+		}
+		if sec.Data == nil {
+			sec.Data = map[string][]byte{}
+		}
+		sec.Data["seed"] = []byte(base32Seed(seed))
+		if err := m.client.Update(ctx, &sec, client.FieldOwner(v1alpha1.AuthnFieldManager)); err != nil {
+			return Enrollment{}, err
+		}
 	}
 	issuer, err := m.issuer(ctx)
 	if err != nil {

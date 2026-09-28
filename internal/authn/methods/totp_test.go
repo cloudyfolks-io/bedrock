@@ -169,3 +169,73 @@ func TestTOTPReplayAcrossReplicas(t *testing.T) {
 		}
 	}
 }
+
+func TestTOTPEnrollReplacesUnconfirmedCredential(t *testing.T) {
+	c, _ := startTestEnv(t)
+	user := createUser(t, c, "frank")
+	method := NewTOTP(c, rand.Reader, fixedIssuer("sso.example.test"))
+
+	first, err := method.Enroll(context.Background(), user, Answer{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := method.Enroll(context.Background(), user, Answer{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if second.TOTP.Secret == first.TOTP.Secret {
+		t.Fatal("a second enrollment attempt must generate a fresh seed")
+	}
+
+	firstSeed, err := base32.StdEncoding.WithPadding(base32.NoPadding).DecodeString(first.TOTP.Secret)
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now()
+	stale, err := method.Complete(context.Background(), Flow{Now: now}, user, Answer{Code: TOTPCode(firstSeed, TOTPStep(now))})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stale.Subject != nil {
+		t.Fatalf("the replaced seed must no longer validate: %+v", stale)
+	}
+
+	secondSeed, err := base32.StdEncoding.WithPadding(base32.NoPadding).DecodeString(second.TOTP.Secret)
+	if err != nil {
+		t.Fatal(err)
+	}
+	fresh, err := method.Complete(context.Background(), Flow{Now: now}, user, Answer{Code: TOTPCode(secondSeed, TOTPStep(now))})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if fresh.Subject == nil {
+		t.Fatalf("the replacement seed must validate: %+v", fresh)
+	}
+}
+
+func TestTOTPEnrollRefusesToReplaceConfirmedCredential(t *testing.T) {
+	c, _ := startTestEnv(t)
+	user := createUser(t, c, "grace")
+	method := NewTOTP(c, rand.Reader, fixedIssuer("sso.example.test"))
+
+	enrollment, err := method.Enroll(context.Background(), user, Answer{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	seed, err := base32.StdEncoding.WithPadding(base32.NoPadding).DecodeString(enrollment.TOTP.Secret)
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now()
+	confirmed, err := method.Complete(context.Background(), Flow{Now: now}, user, Answer{Code: TOTPCode(seed, TOTPStep(now))})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if confirmed.Subject == nil {
+		t.Fatalf("setup: the first valid code must confirm enrollment: %+v", confirmed)
+	}
+
+	if _, err := method.Enroll(context.Background(), user, Answer{}); err == nil {
+		t.Fatal("enrolling again over a confirmed credential must be refused")
+	}
+}
