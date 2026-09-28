@@ -225,7 +225,12 @@ func restore(ctx context.Context, env StepEnv) (Outcome, error) {
 	if _, err := deps.Exec.Run(ctx, "systemctl", "start", k0sControllerUnit); err != nil {
 		return Outcome{}, err
 	}
-	return Outcome{Message: "restored " + backupPath}, nil
+	restarted, err := RestartPlatformWorkloads(ctx, deps)
+	message := fmt.Sprintf("restored %s, workloads restarted: %d", backupPath, restarted)
+	if err != nil {
+		return Outcome{}, fmt.Errorf("%s: %w", message, err)
+	}
+	return Outcome{Message: message}, nil
 }
 
 func extractK0sBackup(archive, dest string) (string, error) {

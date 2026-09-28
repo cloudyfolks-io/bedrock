@@ -260,12 +260,15 @@ func restoreEnv(t *testing.T, exec *host.FakeExec) StepEnv {
 	}
 	deps := newDeps(exec, time.Date(2026, 10, 1, 11, 0, 0, 0, time.UTC))
 	deps.Root = root
-	return StepEnv{Deps: deps, Upgrade: v1alpha1.NodeUpgrade{Spec: v1alpha1.NodeUpgradeSpec{Node: "node-a", Version: "v0.3.0", From: "v0.2.0", Attempt: 1, Backup: "/var/lib/bedrock/backups/bedrock-v0.2.0-20261001T100000Z.tar.gz"}}}
+	deps.K0sTimeout = time.Second
+	deps.K0sPoll = time.Millisecond
+	return StepEnv{Deps: deps, Client: k8sClient, Upgrade: v1alpha1.NodeUpgrade{Spec: v1alpha1.NodeUpgradeSpec{Node: "node-a", Version: "v0.3.0", From: "v0.2.0", Attempt: 1, Backup: "/var/lib/bedrock/backups/bedrock-v0.2.0-20261001T100000Z.tar.gz"}}}
 }
 
 func TestRestoreRollsBackK0sAndEtcd(t *testing.T) {
-	exec := &host.FakeExec{Responses: map[string]string{"systemctl stop k0scontroller.service": "", "systemctl start k0scontroller.service": ""}, ResponsePrefixes: map[string]string{"/usr/local/bin/k0s restore --config-out ": ""}}
-	env := restoreEnv(t, exec)
+	env := restoreEnv(t, &host.FakeExec{})
+	exec := restoredClusterExec(env.Deps.Root, `{"items":[]}`)
+	env.Deps.Exec = exec
 	outcome, err := restore(context.Background(), env)
 	if err != nil {
 		t.Fatal(err)
@@ -274,7 +277,7 @@ func TestRestoreRollsBackK0sAndEtcd(t *testing.T) {
 	if readFixtureFile(t, filepath.Join(root, "usr/local/bin/k0s")) != "old k0s" {
 		t.Fatal("the previous k0s binary must be back")
 	}
-	if len(exec.Calls) != 3 || exec.Calls[0] != "systemctl stop k0scontroller.service" || !strings.HasPrefix(exec.Calls[1], "/usr/local/bin/k0s restore --config-out ") || !strings.HasSuffix(exec.Calls[1], "k0s_backup_2026-10-01T10_00_00Z.tar.gz") || exec.Calls[2] != "systemctl start k0scontroller.service" {
+	if len(exec.Calls) < 3 || exec.Calls[0] != "systemctl stop k0scontroller.service" || !strings.HasPrefix(exec.Calls[1], "/usr/local/bin/k0s restore --config-out ") || !strings.HasSuffix(exec.Calls[1], "k0s_backup_2026-10-01T10_00_00Z.tar.gz") || exec.Calls[2] != "systemctl start k0scontroller.service" {
 		t.Fatalf("calls %v", exec.Calls)
 	}
 	for _, dir := range []string{"etcd", "pki", "manifests", "images"} {
@@ -295,7 +298,7 @@ func TestRestoreRollsBackK0sAndEtcd(t *testing.T) {
 	if marker.Backup != env.Upgrade.Spec.Backup || !marker.CompletedAt.Time.Equal(time.Date(2026, 10, 1, 11, 0, 0, 0, time.UTC)) {
 		t.Fatalf("marker %+v", marker)
 	}
-	if outcome.Message != "restored "+env.Upgrade.Spec.Backup {
+	if outcome.Message != "restored "+env.Upgrade.Spec.Backup+", workloads restarted: 0" {
 		t.Fatalf("message %q", outcome.Message)
 	}
 }
