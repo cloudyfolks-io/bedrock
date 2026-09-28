@@ -104,7 +104,10 @@ func (m totpMethod) Complete(ctx context.Context, flow Flow, user v1alpha1.User,
 	if cred.Status.EnrolledAt == nil {
 		cred.Status.EnrolledAt = &metav1.Time{Time: flow.Now}
 	}
-	if err := m.client.Status().Update(ctx, &cred); err != nil {
+	if err := m.client.Status().Update(ctx, &cred, client.FieldOwner(v1alpha1.AuthnFieldManager)); err != nil {
+		if apierrors.IsConflict(err) {
+			return Result{Failure: FailureInvalidCode}, nil
+		}
 		return Result{}, err
 	}
 	return Result{Subject: &Subject{User: user, AMR: []string{"otp"}}}, nil

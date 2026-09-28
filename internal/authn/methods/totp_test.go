@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/base32"
+	"sync"
 	"testing"
 	"time"
 
@@ -125,24 +126,46 @@ func TestTOTPReplayAcrossReplicas(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	now := time.Now()
-	code := TOTPCode(seed, TOTPStep(now))
 
-	replicaA := NewTOTP(c, rand.Reader, fixedIssuer("sso.example.test"))
-	replicaB := NewTOTP(c, rand.Reader, fixedIssuer("sso.example.test"))
+	base := time.Unix(1700000000, 0).UTC()
+	for round := int64(0); round < 5; round++ {
+		now := base.Add(time.Duration(round*totpStepSeconds) * time.Second)
+		code := TOTPCode(seed, TOTPStep(now))
 
-	resultA, err := replicaA.Complete(context.Background(), Flow{Now: now}, user, Answer{Code: code})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if resultA.Subject == nil {
-		t.Fatalf("replica A must accept the first use: %+v", resultA)
-	}
-	resultB, err := replicaB.Complete(context.Background(), Flow{Now: now}, user, Answer{Code: code})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if resultB.Failure != FailureInvalidCode {
-		t.Fatalf("replica B must refuse the code replica A already used: %+v", resultB)
+		start := make(chan struct{})
+		results := make(chan Result, 2)
+		var wg sync.WaitGroup
+		for _, replica := range []Method{
+			NewTOTP(c, rand.Reader, fixedIssuer("sso.example.test")),
+			NewTOTP(c, rand.Reader, fixedIssuer("sso.example.test")),
+		} {
+			wg.Add(1)
+			go func(replica Method) {
+				defer wg.Done()
+				<-start
+				result, err := replica.Complete(context.Background(), Flow{Now: now}, user, Answer{Code: code})
+				if err != nil {
+					t.Error(err)
+					return
+				}
+				results <- result
+			}(replica)
+		}
+		close(start)
+		wg.Wait()
+		close(results)
+
+		accepted := 0
+		for result := range results {
+			switch {
+			case result.Subject != nil:
+				accepted++
+			case result.Failure != FailureInvalidCode:
+				t.Fatalf("round %d: unexpected failure %+v", round, result)
+			}
+		}
+		if accepted != 1 {
+			t.Fatalf("round %d: expected exactly one Complete to succeed, got %d", round, accepted)
+		}
 	}
 }
