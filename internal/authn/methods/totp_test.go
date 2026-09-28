@@ -19,6 +19,20 @@ func fixedIssuer(v string) func(context.Context) (string, error) {
 	return func(context.Context) (string, error) { return v, nil }
 }
 
+type hookClient struct {
+	client.Client
+	afterGet func()
+}
+
+func (h *hookClient) Get(ctx context.Context, key client.ObjectKey, obj client.Object, opts ...client.GetOption) error {
+	err := h.Client.Get(ctx, key, obj, opts...)
+	if hook := h.afterGet; hook != nil {
+		h.afterGet = nil
+		hook()
+	}
+	return err
+}
+
 func TestTOTPCodeMatchesRFC6238Vectors(t *testing.T) {
 	seed := []byte("12345678901234567890")
 	cases := map[int64]string{
@@ -169,6 +183,63 @@ func TestTOTPReplayAcrossReplicas(t *testing.T) {
 		if accepted != 1 {
 			t.Fatalf("round %d: expected exactly one Complete to succeed, got %d", round, accepted)
 		}
+	}
+}
+
+func TestTOTPCompleteRejectsAConcurrentLastStepConflict(t *testing.T) {
+	c, _ := startTestEnv(t)
+	user := createUser(t, c, "ivy")
+	enrolling := NewTOTP(c, rand.Reader, fixedIssuer("sso.example.test"))
+	enrollment, err := enrolling.Enroll(context.Background(), user, Answer{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	seed, err := base32.StdEncoding.WithPadding(base32.NoPadding).DecodeString(enrollment.TOTP.Secret)
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now()
+	confirmed, err := enrolling.Complete(context.Background(), Flow{Now: now}, user, Answer{Code: TOTPCode(seed, TOTPStep(now))})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if confirmed.Subject == nil {
+		t.Fatalf("setup: the first valid code must confirm enrollment: %+v", confirmed)
+	}
+
+	name := v1alpha1.CredentialName(user.Name, v1alpha1.MethodTOTP)
+	stale := TOTPStep(now)
+	otherWriterStep := stale + 50
+	nextValid := now.Add(totpStepSeconds * time.Second)
+
+	hook := &hookClient{Client: c}
+	hook.afterGet = func() {
+		var racer v1alpha1.Credential
+		if err := c.Get(context.Background(), client.ObjectKey{Namespace: "bedrock-system", Name: name}, &racer); err != nil {
+			t.Fatal(err)
+		}
+		racer.Status.LastStep = otherWriterStep
+		racer.Status.LastUsed = &metav1.Time{Time: nextValid}
+		if err := c.Status().Update(context.Background(), &racer, client.FieldOwner(v1alpha1.AuthnFieldManager)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	racing := NewTOTP(hook, rand.Reader, fixedIssuer("sso.example.test"))
+
+	result, err := racing.Complete(context.Background(), Flow{Now: nextValid}, user, Answer{Code: TOTPCode(seed, TOTPStep(nextValid))})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Failure != FailureInvalidCode {
+		t.Fatalf("a stale conditional write that conflicts with a concurrent LastStep advance must be refused: %+v", result)
+	}
+
+	var final v1alpha1.Credential
+	if err := c.Get(context.Background(), client.ObjectKey{Namespace: "bedrock-system", Name: name}, &final); err != nil {
+		t.Fatal(err)
+	}
+	if final.Status.LastStep != otherWriterStep {
+		t.Fatalf("the other writer's LastStep must survive the conflict, got %d want %d", final.Status.LastStep, otherWriterStep)
 	}
 }
 
