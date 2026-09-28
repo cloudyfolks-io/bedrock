@@ -3,7 +3,6 @@ package operator
 import (
 	"encoding/base64"
 	"fmt"
-	"strings"
 
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
@@ -11,6 +10,7 @@ import (
 
 	"github.com/cloudyfolks-io/bedrock/api/v1alpha1"
 	"github.com/cloudyfolks-io/bedrock/internal/release"
+	"github.com/cloudyfolks-io/bedrock/internal/settings"
 )
 
 const (
@@ -32,15 +32,8 @@ func DefaultAddons() []Addon {
 	return []Addon{storageAddon, virtualizationAddon, platformAddon}
 }
 
-func PlatformHost(vip, host string) string {
-	if host != "" {
-		return host
-	}
-	return strings.ReplaceAll(vip, ".", "-") + ".sslip.io"
-}
-
 func RenderPlatform(in AddonInput) (Rendered, error) {
-	host := PlatformHost(in.Cluster.Spec.API.VIP, in.Settings["platform.host"])
+	host := settings.PlatformHost(in.Cluster.Spec.API.VIP, in.Settings["platform.host"])
 	mode := in.Settings["platform.tls-mode"]
 	if mode == "" {
 		mode = "SelfSigned"

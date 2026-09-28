@@ -20,15 +20,6 @@ func platformInput(values map[string]string) AddonInput {
 	return AddonInput{Cluster: cluster, Settings: settings}
 }
 
-func TestPlatformHost(t *testing.T) {
-	if got := PlatformHost("10.0.0.250", ""); got != "10-0-0-250.sslip.io" {
-		t.Fatalf("host %q", got)
-	}
-	if got := PlatformHost("10.0.0.250", "cloud.example.com"); got != "cloud.example.com" {
-		t.Fatalf("host %q", got)
-	}
-}
-
 func TestRenderPlatformSelfSigned(t *testing.T) {
 	out, err := RenderPlatform(platformInput(nil))
 	if err != nil {

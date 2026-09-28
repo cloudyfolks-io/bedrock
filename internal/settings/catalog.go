@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"slices"
 	"strconv"
+	"time"
 
 	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -63,6 +64,22 @@ func float(v string) error {
 	return err
 }
 
+func duration(min time.Duration) func(string) error {
+	return func(v string) error {
+		if v == "" {
+			return nil
+		}
+		d, err := time.ParseDuration(v)
+		if err != nil {
+			return err
+		}
+		if d < min {
+			return fmt.Errorf("value %s below minimum %s", d, min)
+		}
+		return nil
+	}
+}
+
 func Catalog() []Definition {
 	return []Definition{
 		{"platform.host", "", "Public host name of the platform. Empty means the VIP under sslip.io.", free},
@@ -88,6 +105,9 @@ func Catalog() []Definition {
 		{"images.refresh-schedule", "0 3 * * *", "Cron schedule for catalog image refresh.", free},
 		{"images.keep", "3", "Catalog image versions to keep.", intMin(1)},
 		{"authn.require-second-factor", "false", "Require a second factor for every login.", boolean},
+		{"authn.session-ttl", "12h", "Login session cookie lifetime.", duration(5 * time.Minute)},
+		{"authn.refresh-ttl", "720h", "Refresh token lifetime.", duration(time.Hour)},
+		{"authn.lockout-threshold", "5", "Failed password attempts before lockout.", intMin(1)},
 	}
 }
 
