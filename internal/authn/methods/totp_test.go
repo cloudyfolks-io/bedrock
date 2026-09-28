@@ -313,6 +313,59 @@ func TestTOTPEnrollRefusesToReplaceConfirmedCredential(t *testing.T) {
 	}
 }
 
+func TestTOTPEnrollRefusesWhenConfirmedAfterItsRead(t *testing.T) {
+	c, _ := startTestEnv(t)
+	user := createUser(t, c, "jill")
+	plain := NewTOTP(c, rand.Reader, fixedIssuer("sso.example.test"))
+
+	first, err := plain.Enroll(context.Background(), user, Answer{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	seed, err := base32.StdEncoding.WithPadding(base32.NoPadding).DecodeString(first.TOTP.Secret)
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now()
+
+	hook := &hookClient{Client: c}
+	hook.afterGet = func() {
+		result, err := plain.Complete(context.Background(), Flow{Now: now}, user, Answer{Code: TOTPCode(seed, TOTPStep(now))})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if result.Subject == nil {
+			t.Fatalf("setup: the concurrent code must confirm enrollment: %+v", result)
+		}
+	}
+	racing := NewTOTP(hook, rand.Reader, fixedIssuer("sso.example.test"))
+
+	if _, err := racing.Enroll(context.Background(), user, Answer{}); err == nil {
+		t.Fatal("Enroll must refuse when the credential was confirmed after its own read")
+	}
+
+	name := v1alpha1.CredentialName(user.Name, v1alpha1.MethodTOTP)
+	var cred v1alpha1.Credential
+	if err := c.Get(context.Background(), client.ObjectKey{Namespace: "bedrock-system", Name: name}, &cred); err != nil {
+		t.Fatal(err)
+	}
+	if cred.Status.EnrolledAt == nil {
+		t.Fatal("setup: the credential must be confirmed")
+	}
+
+	var sec corev1.Secret
+	if err := c.Get(context.Background(), client.ObjectKey{Namespace: "bedrock-system", Name: cred.Spec.SecretRef}, &sec); err != nil {
+		t.Fatal(err)
+	}
+	stillSeed, err := base32.StdEncoding.WithPadding(base32.NoPadding).DecodeString(string(sec.Data["seed"]))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(stillSeed) != string(seed) {
+		t.Fatal("the confirmed credential's seed must not be overwritten by the racing Enroll")
+	}
+}
+
 func TestTOTPCompleteRejectsAMalformedStoredSeed(t *testing.T) {
 	c, _ := startTestEnv(t)
 	user := createUser(t, c, "harper")

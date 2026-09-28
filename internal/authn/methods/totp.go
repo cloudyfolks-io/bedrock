@@ -142,6 +142,12 @@ func (m totpMethod) Enroll(ctx context.Context, user v1alpha1.User, input Answer
 	case cred.Status.EnrolledAt != nil:
 		return Enrollment{}, errTOTPAlreadyEnrolled
 	default:
+		if err := m.client.Update(ctx, &cred, client.FieldOwner(v1alpha1.AuthnFieldManager)); err != nil {
+			if apierrors.IsConflict(err) {
+				return Enrollment{}, errTOTPAlreadyEnrolled
+			}
+			return Enrollment{}, err
+		}
 		var sec corev1.Secret
 		if err := m.client.Get(ctx, client.ObjectKey{Namespace: release.SystemNamespace, Name: cred.Spec.SecretRef}, &sec); err != nil {
 			return Enrollment{}, err
