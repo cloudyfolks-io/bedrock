@@ -1,7 +1,12 @@
 package methods
 
 import (
+	"context"
+	"errors"
+
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	"github.com/cloudyfolks-io/bedrock/api/v1alpha1"
 	"github.com/cloudyfolks-io/bedrock/internal/release"
@@ -33,4 +38,29 @@ func ProvisionUser(existing *v1alpha1.User, provider string, identity ExternalId
 		user.Status.UpstreamSubject = identity.Subject
 	}
 	return user
+}
+
+var errUserConflict = errors.New("methods: user is bound to a different identity")
+
+func sourceMismatch(existing v1alpha1.User, providerName string) bool {
+	return existing.Spec.Source != providerName
+}
+
+func subjectMismatch(existing v1alpha1.User, subject string) bool {
+	return existing.Status.UpstreamSubject != "" && existing.Status.UpstreamSubject != subject
+}
+
+func CreateOrExistingUser(ctx context.Context, c client.Client, created v1alpha1.User) (v1alpha1.User, bool, error) {
+	err := c.Create(ctx, &created, client.FieldOwner(v1alpha1.AuthnFieldManager))
+	if err == nil {
+		return created, false, nil
+	}
+	if !apierrors.IsAlreadyExists(err) {
+		return v1alpha1.User{}, false, err
+	}
+	var fresh v1alpha1.User
+	if err := c.Get(ctx, client.ObjectKey{Namespace: created.Namespace, Name: created.Name}, &fresh); err != nil {
+		return v1alpha1.User{}, false, err
+	}
+	return fresh, true, nil
 }

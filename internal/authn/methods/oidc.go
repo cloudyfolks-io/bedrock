@@ -203,15 +203,10 @@ func (m oidcMethod) Complete(ctx context.Context, flow Flow, user v1alpha1.User,
 	if user.Name != "" {
 		existing = &user
 	}
-	if existing != nil {
-		if existing.Spec.Source != provider.Name {
-			return Result{Failure: FailureProviderError}, nil
-		}
-		if existing.Status.UpstreamSubject != "" && existing.Status.UpstreamSubject != identity.Subject {
-			return Result{Failure: FailureProviderError}, nil
-		}
-	}
 	provisioned, err := m.provision(ctx, existing, provider.Name, identity)
+	if errors.Is(err, errUserConflict) {
+		return Result{Failure: FailureProviderError}, nil
+	}
 	if err != nil {
 		return Result{}, err
 	}
@@ -221,22 +216,29 @@ func (m oidcMethod) Complete(ctx context.Context, flow Flow, user v1alpha1.User,
 
 func (m oidcMethod) provision(ctx context.Context, existing *v1alpha1.User, providerName string, identity ExternalIdentity) (v1alpha1.User, error) {
 	if existing == nil {
-		return m.createUser(ctx, providerName, identity)
+		created := ProvisionUser(nil, providerName, identity)
+		created.Spec.Methods = appendMethod(created.Spec.Methods, v1alpha1.MethodOIDC)
+		result, existed, err := CreateOrExistingUser(ctx, m.client, created)
+		if err != nil {
+			return v1alpha1.User{}, err
+		}
+		if !existed {
+			return m.setSubject(ctx, result, identity.Subject)
+		}
+		existing = &result
+	}
+	if sourceMismatch(*existing, providerName) || subjectMismatch(*existing, identity.Subject) {
+		return v1alpha1.User{}, errUserConflict
 	}
 	return m.updateUser(ctx, existing.Name, providerName, identity)
 }
 
-func (m oidcMethod) createUser(ctx context.Context, providerName string, identity ExternalIdentity) (v1alpha1.User, error) {
-	created := ProvisionUser(nil, providerName, identity)
-	created.Spec.Methods = appendMethod(created.Spec.Methods, v1alpha1.MethodOIDC)
-	if err := m.client.Create(ctx, &created, client.FieldOwner(v1alpha1.AuthnFieldManager)); err != nil {
+func (m oidcMethod) setSubject(ctx context.Context, user v1alpha1.User, subject string) (v1alpha1.User, error) {
+	user.Status.UpstreamSubject = subject
+	if err := m.client.Status().Update(ctx, &user, client.FieldOwner(v1alpha1.AuthnFieldManager)); err != nil {
 		return v1alpha1.User{}, err
 	}
-	created.Status.UpstreamSubject = identity.Subject
-	if err := m.client.Status().Update(ctx, &created, client.FieldOwner(v1alpha1.AuthnFieldManager)); err != nil {
-		return v1alpha1.User{}, err
-	}
-	return created, nil
+	return user, nil
 }
 
 func (m oidcMethod) updateUser(ctx context.Context, name, providerName string, identity ExternalIdentity) (v1alpha1.User, error) {

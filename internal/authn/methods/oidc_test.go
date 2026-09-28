@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"sync"
 	"testing"
 	"time"
 
@@ -345,5 +346,114 @@ func TestOIDCMapsGroupClaims(t *testing.T) {
 	got := result.Subject.User.Spec.Groups
 	if len(got) != 1 || got[0] != "developers" {
 		t.Fatalf("groups = %v, want [developers]: a raw upstream claim equal to an internal group name but absent from the mapping must not grant it", got)
+	}
+}
+
+func TestOIDCToleratesARacingFirstLogin(t *testing.T) {
+	c, _ := startTestEnv(t)
+	issuer := newFakeUpstreamIssuer(t)
+	provider := oidcProviderFixture("race-oidc", issuer.server.URL)
+	if err := c.Create(context.Background(), &provider); err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now()
+	cookie := UpstreamCookie{Verifier: "verifier-value-long-enough-0123456789", Nonce: "a-nonce-value", State: "auth-request-1"}
+	request := v1alpha1.AuthRequest{Status: v1alpha1.AuthRequestStatus{Login: v1alpha1.LoginState{Provider: provider.Name, Upstream: EncodeUpstream(cookie)}}}
+	issuer.claims = map[string]any{
+		"iss": issuer.server.URL, "sub": "upstream-subject-race", "aud": provider.Spec.OIDC.ClientID,
+		"exp": now.Add(time.Hour).Unix(), "iat": now.Unix(), "nonce": cookie.Nonce,
+		"preferred_username": "racer",
+	}
+	ctx := op.ContextWithIssuer(context.Background(), "https://sso.example.test")
+
+	raced := &createRaceClient{Client: c}
+	raced.beforeCreate = func() {
+		winner := NewOIDC(c, fixedRelyingParty("client-secret"))
+		result, err := winner.Complete(ctx, Flow{AuthRequest: request, Now: now}, v1alpha1.User{}, Answer{Code: "auth-code-winner"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if result.Subject == nil {
+			t.Fatalf("setup: the racing winner must succeed: %+v", result)
+		}
+	}
+	method := NewOIDC(raced, fixedRelyingParty("client-secret"))
+	result, err := method.Complete(ctx, Flow{AuthRequest: request, Now: now}, v1alpha1.User{}, Answer{Code: "auth-code-loser"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Subject == nil {
+		t.Fatalf("a first login racing another must still succeed once the user already exists: %+v", result)
+	}
+	if result.Subject.User.Status.UpstreamSubject != "upstream-subject-race" {
+		t.Fatalf("upstream subject not persisted after the race: %+v", result.Subject.User.Status)
+	}
+	var users v1alpha1.UserList
+	if err := c.List(context.Background(), &users, client.InNamespace("bedrock-system")); err != nil {
+		t.Fatal(err)
+	}
+	count := 0
+	for _, u := range users.Items {
+		if u.Spec.Username == "racer" {
+			count++
+		}
+	}
+	if count != 1 {
+		t.Fatalf("want exactly one User for the racing identity, got %d", count)
+	}
+}
+
+func TestOIDCConcurrentFirstLoginsProduceOneUser(t *testing.T) {
+	c, _ := startTestEnv(t)
+	issuer := newFakeUpstreamIssuer(t)
+	provider := oidcProviderFixture("concurrent-oidc", issuer.server.URL)
+	if err := c.Create(context.Background(), &provider); err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now()
+	cookie := UpstreamCookie{Verifier: "verifier-value-long-enough-0123456789", Nonce: "a-nonce-value", State: "auth-request-1"}
+	request := v1alpha1.AuthRequest{Status: v1alpha1.AuthRequestStatus{Login: v1alpha1.LoginState{Provider: provider.Name, Upstream: EncodeUpstream(cookie)}}}
+	issuer.claims = map[string]any{
+		"iss": issuer.server.URL, "sub": "upstream-subject-concurrent", "aud": provider.Spec.OIDC.ClientID,
+		"exp": now.Add(time.Hour).Unix(), "iat": now.Unix(), "nonce": cookie.Nonce,
+		"preferred_username": "concurrent",
+	}
+	method := NewOIDC(c, fixedRelyingParty("client-secret"))
+	ctx := op.ContextWithIssuer(context.Background(), "https://sso.example.test")
+
+	var wg sync.WaitGroup
+	results := make([]Result, 2)
+	errs := make([]error, 2)
+	codes := []string{"auth-code-a", "auth-code-b"}
+	for i := range results {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			results[i], errs[i] = method.Complete(ctx, Flow{AuthRequest: request, Now: now}, v1alpha1.User{}, Answer{Code: codes[i]})
+		}(i)
+	}
+	wg.Wait()
+	for i, err := range errs {
+		if err != nil {
+			t.Fatalf("login %d: %v", i, err)
+		}
+	}
+	for i, r := range results {
+		if r.Subject == nil {
+			t.Fatalf("login %d must succeed: %+v", i, r)
+		}
+	}
+	var users v1alpha1.UserList
+	if err := c.List(context.Background(), &users, client.InNamespace("bedrock-system")); err != nil {
+		t.Fatal(err)
+	}
+	count := 0
+	for _, u := range users.Items {
+		if u.Spec.Username == "concurrent" {
+			count++
+		}
+	}
+	if count != 1 {
+		t.Fatalf("want exactly one User, got %d", count)
 	}
 }

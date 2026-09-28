@@ -127,10 +127,10 @@ func (m ldapMethod) Complete(ctx context.Context, flow Flow, user v1alpha1.User,
 	if user.Name != "" {
 		existing = &user
 	}
-	if existing != nil && existing.Spec.Source != providerName {
+	provisioned, err := m.provision(ctx, existing, providerName, identity)
+	if errors.Is(err, errUserConflict) {
 		return Result{Failure: FailureInvalidCredentials}, nil
 	}
-	provisioned, err := m.provision(ctx, existing, providerName, identity)
 	if err != nil {
 		return Result{}, err
 	}
@@ -141,15 +141,26 @@ func (m ldapMethod) provision(ctx context.Context, existing *v1alpha1.User, prov
 	if existing == nil {
 		created := ProvisionUser(nil, providerName, identity)
 		created.Spec.Methods = appendMethod(created.Spec.Methods, v1alpha1.MethodLDAP)
-		if err := m.client.Create(ctx, &created, client.FieldOwner(v1alpha1.AuthnFieldManager)); err != nil {
+		result, existed, err := CreateOrExistingUser(ctx, m.client, created)
+		if err != nil {
 			return v1alpha1.User{}, err
 		}
-		return created, nil
+		if !existed {
+			return result, nil
+		}
+		existing = &result
 	}
+	if sourceMismatch(*existing, providerName) {
+		return v1alpha1.User{}, errUserConflict
+	}
+	return m.updateUser(ctx, existing.Name, providerName, identity)
+}
+
+func (m ldapMethod) updateUser(ctx context.Context, name, providerName string, identity ExternalIdentity) (v1alpha1.User, error) {
 	var updated v1alpha1.User
 	err := retry.RetryOnConflict(conflictRetryBackoff, func() error {
 		var fresh v1alpha1.User
-		if err := m.client.Get(ctx, client.ObjectKey{Namespace: release.SystemNamespace, Name: existing.Name}, &fresh); err != nil {
+		if err := m.client.Get(ctx, client.ObjectKey{Namespace: release.SystemNamespace, Name: name}, &fresh); err != nil {
 			return err
 		}
 		next := ProvisionUser(&fresh, providerName, identity)

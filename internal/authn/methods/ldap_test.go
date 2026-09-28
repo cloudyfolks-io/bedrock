@@ -11,6 +11,7 @@ import (
 	"errors"
 	"math/big"
 	"net"
+	"sync"
 	"testing"
 	"time"
 
@@ -562,5 +563,100 @@ func TestLDAPProviderForReportsNoMatchWithoutEnumeration(t *testing.T) {
 	}
 	if ok || name != "" {
 		t.Fatalf("name = %q, ok = %v, want no match", name, ok)
+	}
+}
+
+func TestLDAPToleratesARacingFirstLogin(t *testing.T) {
+	c, _ := startTestEnv(t)
+	provider := createLDAPProvider(t, c, "race-ldap", "service-secret")
+	entry := ldap.NewEntry("uid=racer,ou=people,dc=example,dc=test", map[string][]string{"uid": {"racer"}})
+	conn := &fakeLDAPConn{
+		bind: func(dn, password string) error { return nil },
+		search: func(req *ldap.SearchRequest) (*ldap.SearchResult, error) {
+			return &ldap.SearchResult{Entries: []*ldap.Entry{entry}}, nil
+		},
+	}
+	request := loginRequestFor(provider.Name, "racer")
+
+	raced := &createRaceClient{Client: c}
+	raced.beforeCreate = func() {
+		winner := NewLDAP(c, fixedDialer(conn))
+		result, err := winner.Complete(context.Background(), Flow{AuthRequest: request, Now: time.Now()}, v1alpha1.User{}, Answer{Password: "anything"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if result.Subject == nil {
+			t.Fatalf("setup: the racing winner must succeed: %+v", result)
+		}
+	}
+	method := NewLDAP(raced, fixedDialer(conn))
+	result, err := method.Complete(context.Background(), Flow{AuthRequest: request, Now: time.Now()}, v1alpha1.User{}, Answer{Password: "anything"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Subject == nil {
+		t.Fatalf("a first login racing another must still succeed once the user already exists: %+v", result)
+	}
+	var users v1alpha1.UserList
+	if err := c.List(context.Background(), &users, client.InNamespace("bedrock-system")); err != nil {
+		t.Fatal(err)
+	}
+	count := 0
+	for _, u := range users.Items {
+		if u.Spec.Username == "racer" {
+			count++
+		}
+	}
+	if count != 1 {
+		t.Fatalf("want exactly one User for the racing identity, got %d", count)
+	}
+}
+
+func TestLDAPConcurrentFirstLoginsProduceOneUser(t *testing.T) {
+	c, _ := startTestEnv(t)
+	provider := createLDAPProvider(t, c, "concurrent-ldap", "service-secret")
+	entry := ldap.NewEntry("uid=concurrent,ou=people,dc=example,dc=test", map[string][]string{"uid": {"concurrent"}})
+	conn := &fakeLDAPConn{
+		bind: func(dn, password string) error { return nil },
+		search: func(req *ldap.SearchRequest) (*ldap.SearchResult, error) {
+			return &ldap.SearchResult{Entries: []*ldap.Entry{entry}}, nil
+		},
+	}
+	method := NewLDAP(c, fixedDialer(conn))
+	request := loginRequestFor(provider.Name, "concurrent")
+
+	var wg sync.WaitGroup
+	results := make([]Result, 2)
+	errs := make([]error, 2)
+	for i := range results {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			results[i], errs[i] = method.Complete(context.Background(), Flow{AuthRequest: request, Now: time.Now()}, v1alpha1.User{}, Answer{Password: "anything"})
+		}(i)
+	}
+	wg.Wait()
+	for i, err := range errs {
+		if err != nil {
+			t.Fatalf("login %d: %v", i, err)
+		}
+	}
+	for i, r := range results {
+		if r.Subject == nil {
+			t.Fatalf("login %d must succeed: %+v", i, r)
+		}
+	}
+	var users v1alpha1.UserList
+	if err := c.List(context.Background(), &users, client.InNamespace("bedrock-system")); err != nil {
+		t.Fatal(err)
+	}
+	count := 0
+	for _, u := range users.Items {
+		if u.Spec.Username == "concurrent" {
+			count++
+		}
+	}
+	if count != 1 {
+		t.Fatalf("want exactly one User, got %d", count)
 	}
 }
