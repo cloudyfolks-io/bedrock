@@ -86,19 +86,31 @@ rules:
 - apiGroups:
   - bedrock.cloudyfolks.io
   resources:
+  - apitokens
+  - apitokens/status
   - clusterconfigs
   - clusters
   - clusters/status
+  - credentials
+  - credentials/status
+  - groups
+  - groups/status
   - hostconfigs
   - hostconfigs/status
   - hosts
   - hosts/status
+  - identityproviders
+  - identityproviders/status
   - nodeupgrades
   - nodeupgrades/status
+  - oauthclients
+  - oauthclients/status
   - releases
   - releases/status
   - settings
   - settings/status
+  - users
+  - users/status
   verbs:
   - create
   - delete

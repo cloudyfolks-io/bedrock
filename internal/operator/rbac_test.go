@@ -53,6 +53,8 @@ func TestOperatorRole(t *testing.T) {
 		{"apiextensions.k8s.io", "customresourcedefinitions", "patch"},
 		{"", "namespaces", "patch"},
 		{"bedrock.cloudyfolks.io", "clusters/status", "update"},
+		{"bedrock.cloudyfolks.io", "users", "patch"},
+		{"bedrock.cloudyfolks.io", "credentials/status", "update"},
 		{"bedrock.cloudyfolks.io", "nodeupgrades", "create"},
 		{"bedrock.cloudyfolks.io", "settings/status", "patch"},
 		{"", "nodes", "patch"},

@@ -16,4 +16,22 @@ var (
 const (
 	LabelKind = "bedrock.cloudyfolks.io/kind"
 	LabelName = "bedrock.cloudyfolks.io/name"
+
+	LabelAuthn        = "bedrock.cloudyfolks.io/authn"
+	LabelFamily       = "bedrock.cloudyfolks.io/family"
+	AuthnFieldManager = "bedrock-authn"
+	AuthnPrefix       = "bedrock:"
+	GroupAdmins       = "bedrock-admins"
+	UserAdmin         = "admin"
+
+	GrantAuthorizationCode = "authorization_code"
+	GrantRefreshToken      = "refresh_token"
+	GrantDeviceCode        = "urn:ietf:params:oauth:grant-type:device_code"
+	GrantTokenExchange     = "urn:ietf:params:oauth:grant-type:token-exchange"
+
+	MethodPassword = "password"
+	MethodTOTP     = "totp"
+	MethodRecovery = "recovery"
+	MethodLDAP     = "ldap"
+	MethodOIDC     = "oidc"
 )
