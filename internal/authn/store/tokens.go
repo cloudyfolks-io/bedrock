@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"slices"
+	"strings"
 	"time"
 
 	"github.com/zitadel/oidc/v3/pkg/oidc"
@@ -22,12 +23,67 @@ const (
 	familyLength       = 22
 	tokenIDLength      = 22
 	fieldUserRef       = "spec.userRef"
+	scopeIDSeparator   = "."
 )
 
 var (
 	errRefreshReused = errors.New("refresh token was already used")
 	errNoIdentity    = errors.New("a refresh token needs a request with a subject")
 )
+
+var accessTokenScopeCodes = []struct {
+	scope string
+	code  byte
+}{
+	{oidc.ScopeOpenID, 'o'},
+	{oidc.ScopeProfile, 'p'},
+	{oidc.ScopeEmail, 'e'},
+	{scopeGroups, 'g'},
+}
+
+func encodeAccessTokenScopes(scopes []string) string {
+	granted := make(map[string]bool, len(scopes))
+	for _, scope := range scopes {
+		granted[scope] = true
+	}
+	encoded := make([]byte, 0, len(accessTokenScopeCodes))
+	for _, entry := range accessTokenScopeCodes {
+		if granted[entry.scope] {
+			encoded = append(encoded, entry.code)
+		}
+	}
+	return string(encoded)
+}
+
+func decodeAccessTokenScopes(encoded string) ([]string, bool) {
+	codeToScope := make(map[byte]string, len(accessTokenScopeCodes))
+	for _, entry := range accessTokenScopeCodes {
+		codeToScope[entry.code] = entry.scope
+	}
+	scopes := make([]string, 0, len(encoded))
+	seen := make(map[byte]bool, len(encoded))
+	for i := range len(encoded) {
+		scope, known := codeToScope[encoded[i]]
+		if !known || seen[encoded[i]] {
+			return nil, false
+		}
+		seen[encoded[i]] = true
+		scopes = append(scopes, scope)
+	}
+	return scopes, true
+}
+
+func accessTokenID(random string, scopes []string) string {
+	return random + scopeIDSeparator + encodeAccessTokenScopes(scopes)
+}
+
+func scopesOfAccessTokenID(id string) ([]string, bool) {
+	random, encoded, cut := strings.Cut(id, scopeIDSeparator)
+	if !cut || len(random) != tokenIDLength {
+		return nil, false
+	}
+	return decodeAccessTokenScopes(encoded)
+}
 
 type RefreshTokenRequest struct {
 	Object v1alpha1.RefreshToken
@@ -70,11 +126,11 @@ func (r *RefreshTokenRequest) sessionID() string {
 }
 
 func (s *Store) CreateAccessToken(_ context.Context, request op.TokenRequest) (string, time.Time, error) {
-	id, err := secret.Base62(s.random, tokenIDLength)
+	random, err := secret.Base62(s.random, tokenIDLength)
 	if err != nil {
 		return "", time.Time{}, err
 	}
-	return id, accessTokenExpiry(request, s.clock()), nil
+	return accessTokenID(random, request.GetScopes()), accessTokenExpiry(request, s.clock()), nil
 }
 
 func accessTokenExpiry(_ op.TokenRequest, now time.Time) time.Time {

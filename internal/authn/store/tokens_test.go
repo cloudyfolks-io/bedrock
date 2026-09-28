@@ -80,7 +80,8 @@ func TestRefreshRotates(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(accessID) != 22 || len(first) != 43 || !expiry.Equal(testNow.Add(time.Hour)) {
+	accessScopes, ok := scopesOfAccessTokenID(accessID)
+	if !ok || !reflect.DeepEqual(accessScopes, []string{oidc.ScopeOpenID}) || len(first) != 43 || !expiry.Equal(testNow.Add(time.Hour)) {
 		t.Fatalf("access id %q, refresh token length %d, expiry %v", accessID, len(first), expiry)
 	}
 	stored := storedRefresh(t, c, first)

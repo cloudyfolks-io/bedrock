@@ -149,10 +149,29 @@ func TestSubjectHasEffectiveGroups(t *testing.T) {
 		t.Fatalf("id token userinfo %+v", info)
 	}
 	full := &oidc.UserInfo{}
-	if err := s.SetUserinfoFromToken(ctx, full, "token-id", "alice", ""); err != nil {
+	fullScopeToken := accessTokenID("abcdefghijklmnopqrstuv", []string{oidc.ScopeOpenID, oidc.ScopeProfile, oidc.ScopeEmail, scopeGroups})
+	if err := s.SetUserinfoFromToken(ctx, full, fullScopeToken, "alice", ""); err != nil {
 		t.Fatal(err)
 	}
 	if full.Email != "alice@example.test" || full.Name != "Test alice" || !reflect.DeepEqual(full.Claims["groups"], []string{"admins", "ops"}) {
 		t.Fatalf("userinfo endpoint answer %+v", full)
+	}
+}
+
+func TestSetUserinfoFromTokenIsScopedByTheAccessTokenID(t *testing.T) {
+	c := startTestEnv(t)
+	ctx := context.Background()
+	create(t, c, testUser("alice"))
+	s := newTestStore(c, testNow, testSettings(), nil)
+
+	openIDOnly := accessTokenID("abcdefghijklmnopqrstuv", []string{oidc.ScopeOpenID})
+	for _, tokenID := range []string{openIDOnly, "not-an-access-token-id"} {
+		info := &oidc.UserInfo{}
+		if err := s.SetUserinfoFromToken(ctx, info, tokenID, "alice", ""); err != nil {
+			t.Fatal(err)
+		}
+		if info.Subject != "alice" || info.Email != "" || info.Name != "" || info.PreferredUsername != "" || info.Claims["groups"] != nil {
+			t.Fatalf("token %q: an openid-only access token must carry no profile, email or groups, got %+v", tokenID, info)
+		}
 	}
 }

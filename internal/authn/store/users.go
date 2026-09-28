@@ -84,12 +84,16 @@ func (s *Store) SetUserinfoFromRequest(ctx context.Context, userinfo *oidc.UserI
 	return nil
 }
 
-func (s *Store) SetUserinfoFromToken(ctx context.Context, userinfo *oidc.UserInfo, _, subject, _ string) error {
+func (s *Store) SetUserinfoFromToken(ctx context.Context, userinfo *oidc.UserInfo, tokenID, subject, _ string) error {
 	found, err := s.Subject(ctx, subject)
 	if err != nil {
 		return err
 	}
-	*userinfo = *Userinfo(found.User, found.Groups, allScopes())
+	scopes, ok := scopesOfAccessTokenID(tokenID)
+	if !ok {
+		scopes = []string{oidc.ScopeOpenID}
+	}
+	*userinfo = *Userinfo(found.User, found.Groups, scopes)
 	return nil
 }
 
@@ -142,10 +146,6 @@ func Userinfo(user v1alpha1.User, groups []string, scopes []string) *oidc.UserIn
 		}
 	}
 	return info
-}
-
-func allScopes() []string {
-	return []string{oidc.ScopeOpenID, oidc.ScopeProfile, oidc.ScopeEmail, scopeGroups}
 }
 
 func withClaims(info oidc.UserInfo, claims map[string]any) oidc.UserInfo {
