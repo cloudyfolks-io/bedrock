@@ -169,3 +169,51 @@ func TestRecoveryReplayAcrossReplicas(t *testing.T) {
 		}
 	}
 }
+
+func TestRecoveryCompleteRejectsAStaleConflictOnConsume(t *testing.T) {
+	c, _ := startTestEnv(t)
+	user := createUser(t, c, "kim")
+	enrolling := NewRecovery(c, rand.Reader)
+	enrollment, err := enrolling.Enroll(context.Background(), user, Answer{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	flow := Flow{Now: time.Now()}
+	code := NormalizeRecoveryCode(enrollment.RecoveryCodes[0])
+
+	getCount := 0
+	hook := &hookClient{Client: c}
+	var onGet func()
+	onGet = func() {
+		getCount++
+		if getCount == 1 {
+			hook.afterGet = onGet
+			return
+		}
+		concurrent, err := enrolling.Complete(context.Background(), flow, user, Answer{Code: code})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if concurrent.Subject == nil {
+			t.Fatalf("setup: the concurrent consumption via the first copy must succeed: %+v", concurrent)
+		}
+	}
+	hook.afterGet = onGet
+	racing := NewRecovery(hook, rand.Reader)
+
+	result, err := racing.Complete(context.Background(), flow, user, Answer{Code: code})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Failure != FailureInvalidCode {
+		t.Fatalf("a stale conditional write racing a concurrent consumption must be refused: %+v", result)
+	}
+
+	again, err := enrolling.Complete(context.Background(), flow, user, Answer{Code: code})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if again.Failure != FailureInvalidCode {
+		t.Fatalf("the code must stay consumed once, not revert after the conflict: %+v", again)
+	}
+}
