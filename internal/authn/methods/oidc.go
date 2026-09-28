@@ -16,6 +16,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	"github.com/cloudyfolks-io/bedrock/api/v1alpha1"
+	"github.com/cloudyfolks-io/bedrock/internal/authn/policy"
 	"github.com/cloudyfolks-io/bedrock/internal/release"
 )
 
@@ -197,6 +198,7 @@ func (m oidcMethod) Complete(ctx context.Context, flow Flow, user v1alpha1.User,
 	if err != nil {
 		return Result{Failure: FailureProviderError}, nil
 	}
+	identity.Groups = policy.MapGroups(provider.Spec.GroupMapping, identity.Groups)
 	var existing *v1alpha1.User
 	if user.Name != "" {
 		existing = &user

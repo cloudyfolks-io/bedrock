@@ -315,3 +315,35 @@ func TestOIDCProvisionsAndUpdatesTheUserWithSubject(t *testing.T) {
 		t.Fatalf("updated = %+v %+v", updated.Spec, updated.Status)
 	}
 }
+
+func TestOIDCMapsGroupClaims(t *testing.T) {
+	c, _ := startTestEnv(t)
+	issuer := newFakeUpstreamIssuer(t)
+	provider := oidcProviderFixture("groupmap-oidc", issuer.server.URL)
+	provider.Spec.GroupMapping = []v1alpha1.GroupMapping{{External: "eng", Group: "developers"}}
+	if err := c.Create(context.Background(), &provider); err != nil {
+		t.Fatal(err)
+	}
+	method := NewOIDC(c, fixedRelyingParty("client-secret"))
+	ctx := op.ContextWithIssuer(context.Background(), "https://sso.example.test")
+	now := time.Now()
+	cookie := UpstreamCookie{Verifier: "verifier-value-long-enough-0123456789", Nonce: "a-nonce-value", State: "auth-request-1"}
+	request := v1alpha1.AuthRequest{Status: v1alpha1.AuthRequestStatus{Login: v1alpha1.LoginState{Provider: provider.Name, Upstream: EncodeUpstream(cookie)}}}
+	issuer.claims = map[string]any{
+		"iss": issuer.server.URL, "sub": "upstream-subject-groupmap", "aud": provider.Spec.OIDC.ClientID,
+		"exp": now.Add(time.Hour).Unix(), "iat": now.Unix(), "nonce": cookie.Nonce,
+		"preferred_username": "gina", "groups": []any{"eng", "developers"},
+	}
+
+	result, err := method.Complete(ctx, Flow{AuthRequest: request, Now: now}, v1alpha1.User{}, Answer{Code: "auth-code-1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Subject == nil {
+		t.Fatalf("login = %+v", result)
+	}
+	got := result.Subject.User.Spec.Groups
+	if len(got) != 1 || got[0] != "developers" {
+		t.Fatalf("groups = %v, want [developers]: a raw upstream claim equal to an internal group name but absent from the mapping must not grant it", got)
+	}
+}
