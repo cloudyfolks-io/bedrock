@@ -6,6 +6,17 @@ image=ghcr.io/cloudyfolks-labs/bedrock:dev
 tmpdir=$(mktemp -d)
 crane=${CRANE:-crane}
 
+retry() {
+  local attempts=$1 i code=1
+  shift
+  for i in $(seq 1 "$attempts"); do
+    "$@" && return 0
+    code=$?
+    sleep "$((i * 2))"
+  done
+  return "$code"
+}
+
 cleanup() {
   local status=$?
   if [ "$status" -ne 0 ]; then
@@ -27,7 +38,7 @@ arch=$(docker version --format '{{.Server.Arch}}')
 while read -r ref || [ -n "$ref" ]; do
   [ -z "$ref" ] && continue
   [ "$ref" = "$image" ] && continue
-  "$crane" pull --platform "linux/$arch" "$ref" "$tmpdir/image.tar"
+  retry 3 "$crane" pull --platform "linux/$arch" "$ref" "$tmpdir/image.tar"
   kind load image-archive "$tmpdir/image.tar" --name "$cluster"
 done < dist/release/images.txt
 
