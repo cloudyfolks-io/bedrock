@@ -27,7 +27,7 @@ import (
 func ovsPod(name, node, revision string, ready bool) corev1.Pod {
 	pod := corev1.Pod{
 		ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: fabricNamespace, Labels: map[string]string{ovsPodLabel: ovsPodLabelValue, revisionHashLabel: revision}},
-		Spec:       corev1.PodSpec{NodeName: node, Containers: []corev1.Container{{Name: "openvswitch", Image: "ghcr.io/cloudyfolks-labs/fabric:v1.2.1"}}},
+		Spec:       corev1.PodSpec{NodeName: node, Containers: []corev1.Container{{Name: "openvswitch", Image: "ghcr.io/cloudyfolks-io/fabric:v1.2.1"}}},
 	}
 	status := corev1.ConditionFalse
 	if ready {
@@ -119,7 +119,7 @@ func createOVSDaemonSet(t *testing.T, ctx context.Context, c client.Client) apps
 			UpdateStrategy: appsv1.DaemonSetUpdateStrategy{Type: appsv1.OnDeleteDaemonSetStrategyType},
 			Template: corev1.PodTemplateSpec{
 				ObjectMeta: metav1.ObjectMeta{Labels: labels},
-				Spec:       corev1.PodSpec{Containers: []corev1.Container{{Name: "openvswitch", Image: "ghcr.io/cloudyfolks-labs/fabric:v1.2.1"}}},
+				Spec:       corev1.PodSpec{Containers: []corev1.Container{{Name: "openvswitch", Image: "ghcr.io/cloudyfolks-io/fabric:v1.2.1"}}},
 			},
 		},
 	}

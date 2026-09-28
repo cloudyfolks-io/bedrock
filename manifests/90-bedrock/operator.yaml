@@ -51,7 +51,7 @@ spec:
         runAsUser: 65532
       containers:
         - name: operator
-          image: ghcr.io/cloudyfolks-labs/bedrock:dev
+          image: ghcr.io/cloudyfolks-io/bedrock:dev
           args: ["operator"]
           env:
             - name: BEDROCK_RELEASE_DIR

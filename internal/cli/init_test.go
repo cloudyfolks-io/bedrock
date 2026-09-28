@@ -418,7 +418,7 @@ func buildFixtureBundle(t *testing.T, version, k0sVersion string) (path, checksu
 	if err != nil {
 		t.Fatal(err)
 	}
-	releaseYAML := fmt.Sprintf("version: %s\nimage: ghcr.io/cloudyfolks-labs/bedrock:%s\nk0sVersion: %s\nk0sChecksums:\n  %s: %s\nbedrockChecksums:\n  %s: %s\nsupportedOS:\n  - ubuntu-24.04\n", version, version, k0sVersion, fixtureArch, sum, fixtureArch, bedrockSum)
+	releaseYAML := fmt.Sprintf("version: %s\nimage: ghcr.io/cloudyfolks-io/bedrock:%s\nk0sVersion: %s\nk0sChecksums:\n  %s: %s\nbedrockChecksums:\n  %s: %s\nsupportedOS:\n  - ubuntu-24.04\n", version, version, k0sVersion, fixtureArch, sum, fixtureArch, bedrockSum)
 	if err := os.WriteFile(filepath.Join(releaseDir, "release.yaml"), []byte(releaseYAML), 0o644); err != nil {
 		t.Fatal(err)
 	}

@@ -16,7 +16,7 @@ import (
 	"github.com/cloudyfolks-io/bedrock/api/v1alpha1"
 )
 
-const bedrockImagePrefix = "ghcr.io/cloudyfolks-labs/bedrock:"
+const bedrockImagePrefix = "ghcr.io/cloudyfolks-io/bedrock:"
 
 type ComponentConfig struct {
 	Name        string   `json:"name"`

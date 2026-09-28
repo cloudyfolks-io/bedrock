@@ -2,7 +2,7 @@
 set -euo pipefail
 
 cluster=bedrock-e2e
-image=ghcr.io/cloudyfolks-labs/bedrock:dev
+image=ghcr.io/cloudyfolks-io/bedrock:dev
 tmpdir=$(mktemp -d)
 crane=${CRANE:-crane}
 

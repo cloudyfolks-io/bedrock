@@ -5,7 +5,7 @@ crds:
 # @section -- Global parameters
 global:
   registry:
-    address: ghcr.io/cloudyfolks-labs
+    address: ghcr.io/cloudyfolks-io
     imagePullSecrets: []
   images:
     fabric:

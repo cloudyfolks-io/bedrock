@@ -20,7 +20,7 @@ func writeReleaseFixture(t *testing.T, dir string, images []string) {
 		}
 	}
 	must(os.MkdirAll(filepath.Join(dir, "manifests", "00-crds"), 0o755))
-	must(os.WriteFile(filepath.Join(dir, "release.yaml"), []byte("version: v0.1.0\nimage: ghcr.io/cloudyfolks-labs/bedrock:v0.1.0\nk0sVersion: v1.36.3+k0s.0\nk0sChecksums:\n  amd64: sha256:2b7bb4d64d416013eb5b4015dabe1d7cad590fd3ce7ce411f3a4489ae32f49b2\nbedrockChecksums:\n  amd64: sha256:2d7f45d7b98b427f824e0c643295583e9cf013faffdb5e7095d070ff85276bf4\n"), 0o644))
+	must(os.WriteFile(filepath.Join(dir, "release.yaml"), []byte("version: v0.1.0\nimage: ghcr.io/cloudyfolks-io/bedrock:v0.1.0\nk0sVersion: v1.36.3+k0s.0\nk0sChecksums:\n  amd64: sha256:2b7bb4d64d416013eb5b4015dabe1d7cad590fd3ce7ce411f3a4489ae32f49b2\nbedrockChecksums:\n  amd64: sha256:2d7f45d7b98b427f824e0c643295583e9cf013faffdb5e7095d070ff85276bf4\n"), 0o644))
 	must(os.WriteFile(filepath.Join(dir, "images.txt"), []byte(strings.Join(images, "\n")+"\n"), 0o644))
 	must(os.WriteFile(filepath.Join(dir, "manifests", "00-crds", "a.yaml"), []byte("apiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: a\n  namespace: default\n"), 0o644))
 }
@@ -43,7 +43,7 @@ func fakePull(calls *[]string) func(context.Context, string, string) (string, er
 
 func TestBuildBundleLaysOutEverything(t *testing.T) {
 	releaseDir := t.TempDir()
-	writeReleaseFixture(t, releaseDir, []string{"quay.io/a/b@sha256:" + strings.Repeat("1", 64), "ghcr.io/cloudyfolks-labs/bedrock:v0.1.0"})
+	writeReleaseFixture(t, releaseDir, []string{"quay.io/a/b@sha256:" + strings.Repeat("1", 64), "ghcr.io/cloudyfolks-io/bedrock:v0.1.0"})
 	k0s := filepath.Join(t.TempDir(), "k0s-bin")
 	airgap := filepath.Join(t.TempDir(), "airgap.tar")
 	os.WriteFile(k0s, []byte("k0s"), 0o755)
@@ -54,7 +54,7 @@ func TestBuildBundleLaysOutEverything(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if spec.Version != "v0.1.0" || spec.Arch != "amd64" || spec.K0sVersion != "v1.36.3+k0s.0" || spec.Image != "ghcr.io/cloudyfolks-labs/bedrock:v0.1.0" || spec.ImageDigest == "" {
+	if spec.Version != "v0.1.0" || spec.Arch != "amd64" || spec.K0sVersion != "v1.36.3+k0s.0" || spec.Image != "ghcr.io/cloudyfolks-io/bedrock:v0.1.0" || spec.ImageDigest == "" {
 		t.Fatalf("spec %+v", spec)
 	}
 	if len(calls) != 2 {
@@ -86,7 +86,7 @@ func TestBuildBundleLaysOutEverything(t *testing.T) {
 func TestBuildBundleRejectsBadK0sChecksum(t *testing.T) {
 	releaseDir := t.TempDir()
 	writeReleaseFixture(t, releaseDir, []string{"quay.io/a/b:1"})
-	os.WriteFile(filepath.Join(releaseDir, "release.yaml"), []byte("version: v0.1.0\nimage: ghcr.io/cloudyfolks-labs/bedrock:v0.1.0\nk0sVersion: v1\nk0sChecksums:\n  amd64: sha256:"+strings.Repeat("0", 64)+"\n"), 0o644)
+	os.WriteFile(filepath.Join(releaseDir, "release.yaml"), []byte("version: v0.1.0\nimage: ghcr.io/cloudyfolks-io/bedrock:v0.1.0\nk0sVersion: v1\nk0sChecksums:\n  amd64: sha256:"+strings.Repeat("0", 64)+"\n"), 0o644)
 	k0s := filepath.Join(t.TempDir(), "k0s-bin")
 	os.WriteFile(k0s, []byte("k0s"), 0o755)
 	airgap := filepath.Join(t.TempDir(), "airgap.tar")
@@ -119,7 +119,7 @@ func TestPackAndOpenBundleRoundTrip(t *testing.T) {
 	os.WriteFile(k0s, []byte("k0s"), 0o755)
 	os.WriteFile(airgap, []byte("airgap"), 0o644)
 	sum := "sha256:" + fileSHA256OrFail(t, k0s)
-	os.WriteFile(filepath.Join(releaseDir, "release.yaml"), []byte("version: v0.1.0\nimage: ghcr.io/cloudyfolks-labs/bedrock:v0.1.0\nk0sVersion: v1\nk0sChecksums:\n  amd64: "+sum+"\nbedrockChecksums:\n  amd64: sha256:2d7f45d7b98b427f824e0c643295583e9cf013faffdb5e7095d070ff85276bf4\n"), 0o644)
+	os.WriteFile(filepath.Join(releaseDir, "release.yaml"), []byte("version: v0.1.0\nimage: ghcr.io/cloudyfolks-io/bedrock:v0.1.0\nk0sVersion: v1\nk0sChecksums:\n  amd64: "+sum+"\nbedrockChecksums:\n  amd64: sha256:2d7f45d7b98b427f824e0c643295583e9cf013faffdb5e7095d070ff85276bf4\n"), 0o644)
 	var calls []string
 	work := t.TempDir()
 	if _, err := BuildBundle(context.Background(), BundleInputs{ReleaseDir: releaseDir, Arch: "amd64", K0sBinary: k0s, BedrockBinary: writeBedrockBinary(t, "bedrock"), K0sAirgap: airgap, Pull: fakePull(&calls)}, work); err != nil {

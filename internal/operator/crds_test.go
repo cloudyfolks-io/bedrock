@@ -26,7 +26,7 @@ func TestCRDsRoundTrip(t *testing.T) {
 	if err := c.Create(ctx, bad); err == nil {
 		t.Fatal("invalid role must be rejected by the CRD schema")
 	}
-	release := &v1alpha1.Release{ObjectMeta: metav1.ObjectMeta{Name: "v0.1.0"}, Spec: v1alpha1.ReleaseSpec{Version: "v0.1.0", Image: "ghcr.io/cloudyfolks-labs/bedrock/release:v0.1.0", K0sVersion: "v1.36.3+k0s.0"}}
+	release := &v1alpha1.Release{ObjectMeta: metav1.ObjectMeta{Name: "v0.1.0"}, Spec: v1alpha1.ReleaseSpec{Version: "v0.1.0", Image: "ghcr.io/cloudyfolks-io/bedrock/release:v0.1.0", K0sVersion: "v1.36.3+k0s.0"}}
 	if err := c.Create(ctx, release); err != nil {
 		t.Fatal(err)
 	}

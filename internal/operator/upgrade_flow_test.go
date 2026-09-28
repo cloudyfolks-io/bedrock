@@ -20,8 +20,8 @@ import (
 )
 
 const (
-	oldImage = "ghcr.io/cloudyfolks-labs/bedrock:v1"
-	newImage = "ghcr.io/cloudyfolks-labs/bedrock:v2"
+	oldImage = "ghcr.io/cloudyfolks-io/bedrock:v1"
+	newImage = "ghcr.io/cloudyfolks-io/bedrock:v2"
 )
 
 type upgradeWorld struct {

@@ -49,7 +49,7 @@ jobs:
         with:
           version: v3.19.0
       - run: make build release VERSION=dev
-      - run: docker build -t ghcr.io/cloudyfolks-labs/bedrock:dev -f Containerfile .
+      - run: docker build -t ghcr.io/cloudyfolks-io/bedrock:dev -f Containerfile .
       - run: sudo -E env "PATH=$PATH" KUBECONFIG=/var/lib/k0s/pki/admin.conf hack/e2e-init.sh
   e2e-bundle:
     runs-on: ubuntu-latest

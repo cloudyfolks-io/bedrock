@@ -3,7 +3,7 @@ package k0s
 import "testing"
 
 func TestTokenRoundTrip(t *testing.T) {
-	in := Token{Version: "v0.3.0", Roles: []string{"control-plane", "workload"}, K0sToken: "abc", K0sConfig: []byte("apiVersion: k0s"), VIP: "10.0.10.10", Image: "ghcr.io/cloudyfolks-labs/bedrock:v0.3.0", K0sVersion: "v1.36.3+k0s.0", K0sChecksums: map[string]string{"amd64": "sha256:aa"}, SupportedOS: []string{"ubuntu-24.04"}}
+	in := Token{Version: "v0.3.0", Roles: []string{"control-plane", "workload"}, K0sToken: "abc", K0sConfig: []byte("apiVersion: k0s"), VIP: "10.0.10.10", Image: "ghcr.io/cloudyfolks-io/bedrock:v0.3.0", K0sVersion: "v1.36.3+k0s.0", K0sChecksums: map[string]string{"amd64": "sha256:aa"}, SupportedOS: []string{"ubuntu-24.04"}}
 	encoded, err := EncodeToken(in)
 	if err != nil {
 		t.Fatal(err)

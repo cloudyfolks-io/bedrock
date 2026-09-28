@@ -2,7 +2,7 @@
 set -euo pipefail
 
 version=${VERSION:-dev}
-image=${IMAGE:-ghcr.io/cloudyfolks-labs/bedrock:$version}
+image=${IMAGE:-ghcr.io/cloudyfolks-io/bedrock:$version}
 bin=${BIN:-bin/bedrock}
 release_dir=${RELEASE_DIR:-dist/release}
 arch=${ARCH:-$(uname -m | sed 's/x86_64/amd64/;s/aarch64/arm64/')}

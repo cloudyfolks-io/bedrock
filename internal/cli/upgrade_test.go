@@ -32,7 +32,7 @@ func writeUpgradeBundle(t *testing.T, version, arch string) string {
 	}
 	files := map[string]string{
 		release.BundleFileName:             string(spec),
-		"release/release.yaml":             "version: " + version + "\nimage: ghcr.io/cloudyfolks-labs/bedrock:" + version + "\nk0sVersion: v1.36.3+k0s.0\nupgradeFrom: [v0.2.0]\n",
+		"release/release.yaml":             "version: " + version + "\nimage: ghcr.io/cloudyfolks-io/bedrock:" + version + "\nk0sVersion: v1.36.3+k0s.0\nupgradeFrom: [v0.2.0]\n",
 		"release/images.txt":               "quay.io/a/b:1\n",
 		"release/manifests/00-crds/a.yaml": "apiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: a\n  namespace: default\n",
 	}
@@ -151,7 +151,7 @@ func TestUpgradeStagesTheReleaseAndStreams(t *testing.T) {
 	if err := c.Get(context.Background(), client.ObjectKey{Name: "v0.3.0"}, &created); err != nil {
 		t.Fatal(err)
 	}
-	if created.Spec.Image != "ghcr.io/cloudyfolks-labs/bedrock:v0.3.0" || len(created.Spec.UpgradeFrom) != 1 {
+	if created.Spec.Image != "ghcr.io/cloudyfolks-io/bedrock:v0.3.0" || len(created.Spec.UpgradeFrom) != 1 {
 		t.Fatalf("release %+v", created.Spec)
 	}
 	if !strings.Contains(stdout.String(), "phase Preload: preload 1/1 nodes") {

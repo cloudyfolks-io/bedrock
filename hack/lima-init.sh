@@ -13,7 +13,7 @@ limactl copy bin/bedrock-linux "$name:/tmp/bedrock"
 limactl copy -r dist/release "$name:/tmp/release"
 limactl copy -r hack "$name:/tmp/hack"
 limactl shell "$name" sudo bash -c 'install -m 0755 /tmp/bedrock /opt/bedrock/bin/bedrock && rm -rf /opt/bedrock/dist/release && mv /tmp/release /opt/bedrock/dist/release && rm -rf /opt/bedrock/hack && mv /tmp/hack /opt/bedrock/hack && apt-get install -y -qq gettext-base docker.io >/dev/null'
-docker save "ghcr.io/cloudyfolks-labs/bedrock:$version" -o /tmp/bedrock-image.tar
+docker save "ghcr.io/cloudyfolks-io/bedrock:$version" -o /tmp/bedrock-image.tar
 limactl copy /tmp/bedrock-image.tar "$name:/tmp/bedrock-image.tar"
 limactl shell "$name" sudo docker load -i /tmp/bedrock-image.tar
 limactl shell "$name" sudo bash -c "cd /opt/bedrock && VERSION=$version PATH=/opt/bedrock/bin:\$PATH bash hack/e2e-init.sh"

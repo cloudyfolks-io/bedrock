@@ -48,17 +48,17 @@ func TestResolveDigestsPinsAndSkips(t *testing.T) {
 	}
 	images := []string{
 		"quay.io/jetstack/cert-manager-controller:v1.20.2",
-		"ghcr.io/cloudyfolks-labs/bedrock:v0.1.0",
+		"ghcr.io/cloudyfolks-io/bedrock:v0.1.0",
 		"registry.k8s.io/pause@sha256:" + strings.Repeat("b", 64),
 	}
-	pins, err := ResolveDigests(context.Background(), images, "ghcr.io/cloudyfolks-labs/bedrock", resolve)
+	pins, err := ResolveDigests(context.Background(), images, "ghcr.io/cloudyfolks-io/bedrock", resolve)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if got := pins["quay.io/jetstack/cert-manager-controller:v1.20.2"]; got != "quay.io/jetstack/cert-manager-controller:v1.20.2@sha256:"+strings.Repeat("a", 64) {
 		t.Fatalf("pinned %q", got)
 	}
-	if _, ok := pins["ghcr.io/cloudyfolks-labs/bedrock:v0.1.0"]; ok {
+	if _, ok := pins["ghcr.io/cloudyfolks-io/bedrock:v0.1.0"]; ok {
 		t.Fatal("bedrock image must not be pinned")
 	}
 	if _, ok := pins["registry.k8s.io/pause@sha256:"+strings.Repeat("b", 64)]; ok {
@@ -80,14 +80,14 @@ func TestPinImagesRewritesEveryImageField(t *testing.T) {
 		"spec": map[string]any{
 			"template": map[string]any{"spec": map[string]any{
 				"initContainers": []any{map[string]any{"image": "quay.io/a/init:1"}},
-				"containers":     []any{map[string]any{"image": "quay.io/a/b:1"}, map[string]any{"image": "ghcr.io/cloudyfolks-labs/bedrock:v1"}},
+				"containers":     []any{map[string]any{"image": "quay.io/a/b:1"}, map[string]any{"image": "ghcr.io/cloudyfolks-io/bedrock:v1"}},
 			}},
 		},
 	}}
 	pins := map[string]string{"quay.io/a/b:1": "quay.io/a/b@sha256:x", "quay.io/a/init:1": "quay.io/a/init@sha256:y"}
 	out := PinImages([]rendered{{group: "90-x", file: "d.yaml", objects: []*unstructured.Unstructured{obj}}}, pins, nil)
 	got := ImagesOf([]Group{{Objects: out[0].objects}})
-	want := []string{"ghcr.io/cloudyfolks-labs/bedrock:v1", "quay.io/a/b@sha256:x", "quay.io/a/init@sha256:y"}
+	want := []string{"ghcr.io/cloudyfolks-io/bedrock:v1", "quay.io/a/b@sha256:x", "quay.io/a/init@sha256:y"}
 	if strings.Join(got, ",") != strings.Join(want, ",") {
 		t.Fatalf("got %v want %v", got, want)
 	}

@@ -100,10 +100,10 @@ func operatorImage(t *testing.T, ctx context.Context, c client.Client) appsv1.De
 func TestPreloadThenSwitch(t *testing.T) {
 	c, _ := StartTestEnv(t)
 	ctx := context.Background()
-	createOperatorDeployment(t, ctx, c, "ghcr.io/cloudyfolks-labs/bedrock:v1")
+	createOperatorDeployment(t, ctx, c, "ghcr.io/cloudyfolks-io/bedrock:v1")
 	createDepotHost(t, ctx, c, "node-a", v1alpha1.RoleControlPlane)
 	createClusterWithStatus(t, ctx, c, "v2", upgradeStatusIn(v1alpha1.PhasePreload))
-	target := &v1alpha1.Release{ObjectMeta: metav1.ObjectMeta{Name: "v2"}, Spec: v1alpha1.ReleaseSpec{Version: "v2", Image: "ghcr.io/cloudyfolks-labs/bedrock:v2", UpgradeFrom: []string{"v1"}}}
+	target := &v1alpha1.Release{ObjectMeta: metav1.ObjectMeta{Name: "v2"}, Spec: v1alpha1.ReleaseSpec{Version: "v2", Image: "ghcr.io/cloudyfolks-io/bedrock:v2", UpgradeFrom: []string{"v1"}}}
 	if err := c.Create(ctx, target); err != nil {
 		t.Fatal(err)
 	}
@@ -111,18 +111,18 @@ func TestPreloadThenSwitch(t *testing.T) {
 	if got, err := preloadThenSwitch(ctx, env, getCluster(t, ctx, c)); err != nil || got != (phaseResult{Message: "preload 0/1 nodes, waiting for node-a"}) {
 		t.Fatalf("result %+v err %v", got, err)
 	}
-	if image := operatorImage(t, ctx, c).Spec.Template.Spec.Containers[1].Image; image != "ghcr.io/cloudyfolks-labs/bedrock:v1" {
+	if image := operatorImage(t, ctx, c).Spec.Template.Spec.Containers[1].Image; image != "ghcr.io/cloudyfolks-io/bedrock:v1" {
 		t.Fatalf("the switch must wait for Preload: %s", image)
 	}
 	reportStep(t, ctx, c, "node-a", v1alpha1.NodeUpgradeStepStatus{Name: v1alpha1.StepPreload, State: v1alpha1.StepSucceeded, Attempt: 1})
 	for range 2 {
 		got, err := preloadThenSwitch(ctx, env, getCluster(t, ctx, c))
-		if err != nil || got != (phaseResult{Message: "preload done, operator switching to ghcr.io/cloudyfolks-labs/bedrock:v2"}) {
+		if err != nil || got != (phaseResult{Message: "preload done, operator switching to ghcr.io/cloudyfolks-io/bedrock:v2"}) {
 			t.Fatalf("result %+v err %v", got, err)
 		}
 	}
 	containers := operatorImage(t, ctx, c).Spec.Template.Spec.Containers
-	if containers[1].Image != "ghcr.io/cloudyfolks-labs/bedrock:v2" || containers[0].Image != "registry.example/sidecar:1" || containers[1].Env[0].Value != "/release" || containers[1].Args[0] != "operator" {
+	if containers[1].Image != "ghcr.io/cloudyfolks-io/bedrock:v2" || containers[0].Image != "registry.example/sidecar:1" || containers[1].Env[0].Value != "/release" || containers[1].Args[0] != "operator" {
 		t.Fatalf("containers %+v", containers)
 	}
 }
@@ -130,13 +130,13 @@ func TestPreloadThenSwitch(t *testing.T) {
 func TestSetOperatorImageNeedsTheContainer(t *testing.T) {
 	c, _ := StartTestEnv(t)
 	ctx := context.Background()
-	createOperatorDeployment(t, ctx, c, "ghcr.io/cloudyfolks-labs/bedrock:v1")
+	createOperatorDeployment(t, ctx, c, "ghcr.io/cloudyfolks-io/bedrock:v1")
 	deployment := operatorImage(t, ctx, c)
 	deployment.Spec.Template.Spec.Containers[1].Name = "renamed"
 	if err := c.Update(ctx, &deployment); err != nil {
 		t.Fatal(err)
 	}
-	if err := setOperatorImage(ctx, c, "ghcr.io/cloudyfolks-labs/bedrock:v2"); err == nil || err.Error() != "deployment bedrock-system/bedrock-operator has no container operator" {
+	if err := setOperatorImage(ctx, c, "ghcr.io/cloudyfolks-io/bedrock:v2"); err == nil || err.Error() != "deployment bedrock-system/bedrock-operator has no container operator" {
 		t.Fatalf("error %v", err)
 	}
 }

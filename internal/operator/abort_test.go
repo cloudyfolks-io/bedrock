@@ -111,7 +111,7 @@ func TestAbortUpgradeKeepsAnEarlierReport(t *testing.T) {
 func createReleases(t *testing.T, ctx context.Context, c client.Client) {
 	t.Helper()
 	for _, version := range []string{"v1", "v2"} {
-		rel := &v1alpha1.Release{ObjectMeta: metav1.ObjectMeta{Name: version}, Spec: v1alpha1.ReleaseSpec{Version: version, Image: "ghcr.io/cloudyfolks-labs/bedrock:" + version, K0sVersion: targetK0s, K0sChecksums: map[string]string{"amd64": amd64Checksum}}}
+		rel := &v1alpha1.Release{ObjectMeta: metav1.ObjectMeta{Name: version}, Spec: v1alpha1.ReleaseSpec{Version: version, Image: "ghcr.io/cloudyfolks-io/bedrock:" + version, K0sVersion: targetK0s, K0sChecksums: map[string]string{"amd64": amd64Checksum}}}
 		if err := c.Create(ctx, rel); err != nil {
 			t.Fatal(err)
 		}
@@ -122,7 +122,7 @@ func abortWorld(t *testing.T, phase string) (client.Client, context.Context) {
 	t.Helper()
 	c, _ := startTestEnvWithCRDs(t, filepath.Join("testdata", "crds"))
 	ctx := context.Background()
-	createOperatorDeployment(t, ctx, c, "ghcr.io/cloudyfolks-labs/bedrock:v2")
+	createOperatorDeployment(t, ctx, c, "ghcr.io/cloudyfolks-io/bedrock:v2")
 	createReleases(t, ctx, c)
 	createDepotHost(t, ctx, c, "node-a", v1alpha1.RoleControlPlane)
 	createDepotHost(t, ctx, c, "node-b", v1alpha1.RoleWorkload)
@@ -163,7 +163,7 @@ func TestAbortBeforeControlPlane(t *testing.T) {
 	if waiting.Status.Upgrade.Message != "abort: cleanup 0/2 nodes, waiting for node-a, node-b" || waiting.Spec.Upgrade.Action != v1alpha1.UpgradeActionAbort {
 		t.Fatalf("status %+v action %q", waiting.Status.Upgrade, waiting.Spec.Upgrade.Action)
 	}
-	if image := operatorImage(t, ctx, c).Spec.Template.Spec.Containers[1].Image; image != "ghcr.io/cloudyfolks-labs/bedrock:v1" {
+	if image := operatorImage(t, ctx, c).Spec.Template.Spec.Containers[1].Image; image != "ghcr.io/cloudyfolks-io/bedrock:v1" {
 		t.Fatalf("the old operator must take its image back: %s", image)
 	}
 	for _, node := range []string{"node-a", "node-b"} {
@@ -246,10 +246,10 @@ func TestAbortOnTheNewOperatorHandsBack(t *testing.T) {
 	c, ctx := abortWorld(t, v1alpha1.PhasePreload)
 	setAction(t, ctx, c, v1alpha1.UpgradeActionAbort)
 	got := runRole(t, ctx, c, newRole())
-	if got.Status.Upgrade.Message != "abort: operator switching back to ghcr.io/cloudyfolks-labs/bedrock:v1" || got.Spec.Upgrade.Action != v1alpha1.UpgradeActionAbort {
+	if got.Status.Upgrade.Message != "abort: operator switching back to ghcr.io/cloudyfolks-io/bedrock:v1" || got.Spec.Upgrade.Action != v1alpha1.UpgradeActionAbort {
 		t.Fatalf("status %+v action %q", got.Status.Upgrade, got.Spec.Upgrade.Action)
 	}
-	if image := operatorImage(t, ctx, c).Spec.Template.Spec.Containers[1].Image; image != "ghcr.io/cloudyfolks-labs/bedrock:v1" {
+	if image := operatorImage(t, ctx, c).Spec.Template.Spec.Containers[1].Image; image != "ghcr.io/cloudyfolks-io/bedrock:v1" {
 		t.Fatalf("image %s", image)
 	}
 	if steps := getNodeUpgrade(t, ctx, c, "node-a").Spec.Steps; !slices.Equal(steps, []string{v1alpha1.StepPreload}) {
@@ -298,7 +298,7 @@ func TestAbortInControlPlaneRestoresASingleController(t *testing.T) {
 			if tc.k0sUpdate != nil && currentStep(restore, v1alpha1.StepK0sUpdate).State != tc.k0sUpdate.State {
 				t.Fatalf("the abort must leave K0sUpdate %s: %+v", tc.k0sUpdate.State, restore.Status.Steps)
 			}
-			if image := operatorImage(t, ctx, c).Spec.Template.Spec.Containers[1].Image; image != "ghcr.io/cloudyfolks-labs/bedrock:v1" {
+			if image := operatorImage(t, ctx, c).Spec.Template.Spec.Containers[1].Image; image != "ghcr.io/cloudyfolks-io/bedrock:v1" {
 				t.Fatalf("image %s", image)
 			}
 
@@ -345,7 +345,7 @@ func TestAbortInControlPlaneWithManyControllers(t *testing.T) {
 	if got.Status.Phase != v1alpha1.PhaseFailed || progressing.Reason != v1alpha1.ReasonRestoreManual || got.Status.Upgrade.Message != want || got.Spec.Upgrade.Action != "" {
 		t.Fatalf("status %+v action %q", got.Status.Upgrade, got.Spec.Upgrade.Action)
 	}
-	if image := operatorImage(t, ctx, c).Spec.Template.Spec.Containers[1].Image; image != "ghcr.io/cloudyfolks-labs/bedrock:v2" {
+	if image := operatorImage(t, ctx, c).Spec.Template.Spec.Containers[1].Image; image != "ghcr.io/cloudyfolks-io/bedrock:v2" {
 		t.Fatalf("a manual restore leaves the operator alone: %s", image)
 	}
 }
@@ -359,7 +359,7 @@ func TestAbortInControlPlaneWithWorkersGoesManual(t *testing.T) {
 	if got.Status.Phase != v1alpha1.PhaseFailed || progressing.Reason != v1alpha1.ReasonRestoreManual || got.Status.Upgrade.Message != want || got.Spec.Upgrade.Action != "" {
 		t.Fatalf("status %+v action %q", got.Status.Upgrade, got.Spec.Upgrade.Action)
 	}
-	if image := operatorImage(t, ctx, c).Spec.Template.Spec.Containers[1].Image; image != "ghcr.io/cloudyfolks-labs/bedrock:v2" {
+	if image := operatorImage(t, ctx, c).Spec.Template.Spec.Containers[1].Image; image != "ghcr.io/cloudyfolks-io/bedrock:v2" {
 		t.Fatalf("a manual restore leaves the operator alone: %s", image)
 	}
 	if restore := getNodeUpgrade(t, ctx, c, "node-a"); slices.Contains(restore.Spec.Steps, v1alpha1.StepRestore) {
@@ -370,7 +370,7 @@ func TestAbortInControlPlaneWithWorkersGoesManual(t *testing.T) {
 func TestAbortInControlPlaneWithNoDepotGoesManual(t *testing.T) {
 	c, _ := startTestEnvWithCRDs(t, filepath.Join("testdata", "crds"))
 	ctx := context.Background()
-	createOperatorDeployment(t, ctx, c, "ghcr.io/cloudyfolks-labs/bedrock:v2")
+	createOperatorDeployment(t, ctx, c, "ghcr.io/cloudyfolks-io/bedrock:v2")
 	createReleases(t, ctx, c)
 	createHostWithStatus(t, ctx, c, healthyHost("node-a"))
 	createNodeWithStatus(t, ctx, c, readyNode("node-a", "amd64"))

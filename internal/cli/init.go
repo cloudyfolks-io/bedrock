@@ -63,7 +63,7 @@ func parseInitFlags(args []string, stderr io.Writer) (initOptions, error) {
 	var o initOptions
 	flags.StringVar(&o.configPath, "f", "", "cluster configuration file")
 	flags.StringVar(&o.releaseDir, "release-dir", "", "release directory, default is extracted from the image")
-	flags.StringVar(&o.image, "image", "ghcr.io/cloudyfolks-labs/bedrock:"+Version, "bedrock image")
+	flags.StringVar(&o.image, "image", "ghcr.io/cloudyfolks-io/bedrock:"+Version, "bedrock image")
 	flags.StringVar(&o.imagesDir, "images-dir", "", "directory of image tarballs to preload")
 	flags.StringVar(&o.dataDir, "data-dir", "/var/lib/k0s", "k0s data directory")
 	flags.StringVar(&o.k0sBin, "k0s-bin", k0s.DefaultBinary, "k0s binary path")

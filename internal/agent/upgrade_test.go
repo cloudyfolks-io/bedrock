@@ -30,7 +30,7 @@ func (r *stepRecorder) step(name string, outcome Outcome, err error) Step {
 func createReleases(t *testing.T) {
 	t.Helper()
 	for _, version := range []string{"v0.2.0", "v0.3.0"} {
-		release := &v1alpha1.Release{ObjectMeta: metav1.ObjectMeta{Name: version}, Spec: v1alpha1.ReleaseSpec{Version: version, Image: "ghcr.io/cloudyfolks-labs/bedrock:" + version, K0sVersion: "v1.36.3+k0s.0"}}
+		release := &v1alpha1.Release{ObjectMeta: metav1.ObjectMeta{Name: version}, Spec: v1alpha1.ReleaseSpec{Version: version, Image: "ghcr.io/cloudyfolks-io/bedrock:" + version, K0sVersion: "v1.36.3+k0s.0"}}
 		if err := k8sClient.Create(context.Background(), release); err != nil {
 			t.Fatal(err)
 		}

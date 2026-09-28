@@ -35,9 +35,9 @@ jobs:
           file: Containerfile
           platforms: linux/amd64,linux/arm64
           push: true
-          tags: ghcr.io/cloudyfolks-labs/bedrock:${{ github.ref_name }}
+          tags: ghcr.io/cloudyfolks-io/bedrock:${{ github.ref_name }}
           build-args: VERSION=${{ github.ref_name }}
-      - run: cosign sign --yes ghcr.io/cloudyfolks-labs/bedrock@${{ steps.image.outputs.digest }}
+      - run: cosign sign --yes ghcr.io/cloudyfolks-io/bedrock@${{ steps.image.outputs.digest }}
       - run: bin/bedrock bundle build --release dist/release --arch amd64 --out dist/bedrock-${{ github.ref_name }}-bundle-amd64.tar.zst
       - run: cd dist && sha256sum bedrock-${{ github.ref_name }}-linux-amd64 bedrock-${{ github.ref_name }}-linux-arm64 bedrock-${{ github.ref_name }}-bundle-amd64.tar.zst > SHA256SUMS
       - run: cosign sign-blob --yes --bundle dist/SHA256SUMS.sigstore.json dist/SHA256SUMS

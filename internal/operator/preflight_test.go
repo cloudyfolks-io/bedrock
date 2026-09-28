@@ -320,7 +320,7 @@ func TestPreflightPhase(t *testing.T) {
 	if err != nil || result.Blocked != "release: Release/v2 does not exist" {
 		t.Fatalf("result %+v err %v", result, err)
 	}
-	target := &v1alpha1.Release{ObjectMeta: metav1.ObjectMeta{Name: "v2"}, Spec: v1alpha1.ReleaseSpec{Version: "v2", Image: "ghcr.io/cloudyfolks-labs/bedrock:v2", UpgradeFrom: []string{"v1"}}}
+	target := &v1alpha1.Release{ObjectMeta: metav1.ObjectMeta{Name: "v2"}, Spec: v1alpha1.ReleaseSpec{Version: "v2", Image: "ghcr.io/cloudyfolks-io/bedrock:v2", UpgradeFrom: []string{"v1"}}}
 	if err := c.Create(ctx, target); err != nil {
 		t.Fatal(err)
 	}

@@ -68,7 +68,7 @@ func rbacRelease(t *testing.T) string {
 	if err := os.CopyFS(dir, os.DirFS(source)); err != nil {
 		t.Fatal(err)
 	}
-	spec := "version: v0.1.0-test\nimage: ghcr.io/cloudyfolks-labs/bedrock:v0.1.0-test\nk0sVersion: v1.36.3+k0s.0\nupgradeFrom: []\ncomponents:\n  - name: bedrock\n    version: v0.1.0-test\n    image: ghcr.io/cloudyfolks-labs/bedrock:v0.1.0-test\n  - name: rook\n    version: v1.20.7\n    image: quay.io/ceph/ceph:v20.2.4\nsupportedOS:\n  - ubuntu-24.04\n"
+	spec := "version: v0.1.0-test\nimage: ghcr.io/cloudyfolks-io/bedrock:v0.1.0-test\nk0sVersion: v1.36.3+k0s.0\nupgradeFrom: []\ncomponents:\n  - name: bedrock\n    version: v0.1.0-test\n    image: ghcr.io/cloudyfolks-io/bedrock:v0.1.0-test\n  - name: rook\n    version: v1.20.7\n    image: quay.io/ceph/ceph:v20.2.4\nsupportedOS:\n  - ubuntu-24.04\n"
 	if err := os.WriteFile(filepath.Join(dir, "release.yaml"), []byte(spec), 0o644); err != nil {
 		t.Fatal(err)
 	}

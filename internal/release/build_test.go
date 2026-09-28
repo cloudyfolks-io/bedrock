@@ -25,7 +25,7 @@ func testBuild(t *testing.T) (BuildConfig, BuildOptions) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	opts := BuildOptions{Version: "v9.9.9", Image: "ghcr.io/cloudyfolks-labs/bedrock:v9.9.9", Out: t.TempDir(), Helm: "helm", Root: filepath.Join("testdata", "build"), K0sBaseURL: ""}
+	opts := BuildOptions{Version: "v9.9.9", Image: "ghcr.io/cloudyfolks-io/bedrock:v9.9.9", Out: t.TempDir(), Helm: "helm", Root: filepath.Join("testdata", "build"), K0sBaseURL: ""}
 	return cfg, opts
 }
 
@@ -42,7 +42,7 @@ func TestBuildRendersChartsAndDirs(t *testing.T) {
 		_, _ = w.Write([]byte("binary for " + r.URL.Path))
 	}))
 	defer server.Close()
-	opts := BuildOptions{Version: "v9.9.9", Image: "ghcr.io/cloudyfolks-labs/bedrock:v9.9.9", Out: out, Helm: "helm", Root: filepath.Join("testdata", "build"), K0sBaseURL: server.URL, CacheDir: t.TempDir()}
+	opts := BuildOptions{Version: "v9.9.9", Image: "ghcr.io/cloudyfolks-io/bedrock:v9.9.9", Out: out, Helm: "helm", Root: filepath.Join("testdata", "build"), K0sBaseURL: server.URL, CacheDir: t.TempDir()}
 	if err := Build(cfg, opts); err != nil {
 		t.Fatal(err)
 	}
@@ -75,7 +75,7 @@ func TestBuildRendersChartsAndDirs(t *testing.T) {
 		t.Fatalf("operator image not rewritten: %v", operatorImages)
 	}
 	images := bundle.Images
-	if len(images) != 3 || images[0] != "ghcr.io/cloudyfolks-labs/bedrock:v9.9.9" || images[1] != "quay.io/example/extra:1" || images[2] != "quay.io/example/widgets:0.1.0" {
+	if len(images) != 3 || images[0] != "ghcr.io/cloudyfolks-io/bedrock:v9.9.9" || images[1] != "quay.io/example/extra:1" || images[2] != "quay.io/example/widgets:0.1.0" {
 		t.Fatalf("images %v", images)
 	}
 	if len(bundle.Spec.Components) != 3 || bundle.Spec.Components[1].Version != "0.1.0" || bundle.Spec.Components[1].Image != "quay.io/example/widgets:0.1.0" {
@@ -99,7 +99,7 @@ func TestBuildMergesSameNamedOutputs(t *testing.T) {
 		t.Fatal(err)
 	}
 	out := t.TempDir()
-	opts := BuildOptions{Version: "v9.9.9", Image: "ghcr.io/cloudyfolks-labs/bedrock:v9.9.9", Out: out, Helm: "helm", Root: filepath.Join("testdata", "build")}
+	opts := BuildOptions{Version: "v9.9.9", Image: "ghcr.io/cloudyfolks-io/bedrock:v9.9.9", Out: out, Helm: "helm", Root: filepath.Join("testdata", "build")}
 	if err := Build(cfg, opts); err != nil {
 		t.Fatal(err)
 	}
@@ -187,7 +187,7 @@ func TestBuildMovesDirCRDsAndReportsImage(t *testing.T) {
 		t.Fatal(err)
 	}
 	out := t.TempDir()
-	opts := BuildOptions{Version: "v9.9.9", Image: "ghcr.io/cloudyfolks-labs/bedrock:v9.9.9", Out: out, Helm: "helm", Root: filepath.Join("testdata", "build"), CacheDir: t.TempDir()}
+	opts := BuildOptions{Version: "v9.9.9", Image: "ghcr.io/cloudyfolks-io/bedrock:v9.9.9", Out: out, Helm: "helm", Root: filepath.Join("testdata", "build"), CacheDir: t.TempDir()}
 	if err := Build(cfg, opts); err != nil {
 		t.Fatal(err)
 	}
@@ -233,7 +233,7 @@ func TestBuildKeepsTagsForMarkedComponents(t *testing.T) {
 	resolve := func(_ context.Context, _ string) (string, error) {
 		return "sha256:" + strings.Repeat("a", 64), nil
 	}
-	opts := BuildOptions{Version: "v9.9.9", Image: "ghcr.io/cloudyfolks-labs/bedrock:v9.9.9", Out: out, Helm: "helm", Root: filepath.Join("testdata", "build"), CacheDir: t.TempDir(), PinDigests: true, Resolve: resolve}
+	opts := BuildOptions{Version: "v9.9.9", Image: "ghcr.io/cloudyfolks-io/bedrock:v9.9.9", Out: out, Helm: "helm", Root: filepath.Join("testdata", "build"), CacheDir: t.TempDir(), PinDigests: true, Resolve: resolve}
 	if err := Build(cfg, opts); err != nil {
 		t.Fatal(err)
 	}
