@@ -99,17 +99,23 @@ func fixedRules() []rbacv1.PolicyRule {
 func bedrockResources() []string {
 	return []string{
 		"apitokens", "apitokens/status",
+		"authcodes", "authcodes/status",
+		"authrequests", "authrequests/status",
 		"clusterconfigs",
 		"clusters", "clusters/status",
 		"credentials", "credentials/status",
+		"devicerequests", "devicerequests/status",
 		"groups", "groups/status",
 		"hostconfigs", "hostconfigs/status",
 		"hosts", "hosts/status",
 		"identityproviders", "identityproviders/status",
 		"nodeupgrades", "nodeupgrades/status",
 		"oauthclients", "oauthclients/status",
+		"refreshtokens", "refreshtokens/status",
 		"releases", "releases/status",
+		"sessions", "sessions/status",
 		"settings", "settings/status",
+		"signingkeys", "signingkeys/status",
 		"users", "users/status",
 	}
 }

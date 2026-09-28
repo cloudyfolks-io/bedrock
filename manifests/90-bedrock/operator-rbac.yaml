@@ -88,11 +88,17 @@ rules:
   resources:
   - apitokens
   - apitokens/status
+  - authcodes
+  - authcodes/status
+  - authrequests
+  - authrequests/status
   - clusterconfigs
   - clusters
   - clusters/status
   - credentials
   - credentials/status
+  - devicerequests
+  - devicerequests/status
   - groups
   - groups/status
   - hostconfigs
@@ -105,10 +111,16 @@ rules:
   - nodeupgrades/status
   - oauthclients
   - oauthclients/status
+  - refreshtokens
+  - refreshtokens/status
   - releases
   - releases/status
+  - sessions
+  - sessions/status
   - settings
   - settings/status
+  - signingkeys
+  - signingkeys/status
   - users
   - users/status
   verbs:
