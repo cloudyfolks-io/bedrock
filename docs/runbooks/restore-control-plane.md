@@ -3,17 +3,32 @@
 Use this runbook when `bedrock upgrade abort` during the ControlPlane phase
 stops with phase `Failed` and reason `RestoreManual`. This occurs when:
 
-- the cluster has more than one controller,
-- the automatic restore on a single controller failed, or
+- the cluster has more than one node (the automatic restore runs only on a
+  single-node cluster),
+- the automatic restore on a single node failed, or
 - the API does not answer after `bedrock upgrade abort` in the ControlPlane
-  phase. A failed automatic restore on a single controller can leave k0s
+  phase. A failed automatic restore on a single node can leave k0s
   stopped, so the operator cannot report `RestoreManual`.
 
-Every change to the cluster after the backup is lost.
+Every change to the cluster after the backup is lost. The restore also
+brings back the Nodes and Hosts that you removed after the backup. Delete
+them again with `kubectl delete node <name>` and
+`kubectl delete host <name>`.
+
+### The agent restored the backup, but the abort does not end
+
+The file `/var/lib/bedrock/restore.json` on the backup node shows an
+automatic restore. The abort does not end within 15 minutes, or
+`journalctl -u bedrock-agent` shows `restart` failures. An agent of an
+older version restores without the workload restarts.
+
+In this case, do not do steps 1 to 3. Do steps 4 and 5 only. For step 5,
+use the `bedrock` binary of the new version:
+`/var/lib/bedrock/depot/<version>/<arch>/bedrock restart-workloads`.
 
 ## Before you start
 
-- Get root access on every controller node.
+- Get root access on every node.
 - Get the bundle of the version that ran before the upgrade, for each node
   architecture.
 - Read the backup location while the API is available:
@@ -75,6 +90,8 @@ This procedure does not use them.
 
 ## 3. Join the other controllers again
 
+Do this step only when the cluster has more than one controller.
+
 On each other controller, remove its state:
 
 ```sh
@@ -95,7 +112,47 @@ previous version:
 bedrock join --token <token> --bundle <bundle of the previous version>
 ```
 
-## 4. Check the result
+## 4. Restart the kubelet on every worker
+
+The kubelet on a worker kept its cache while etcd returned to the backup.
+It does not see the pods that the restore brought back. On each node that
+is not a controller:
+
+```sh
+systemctl restart k0sworker
+```
+
+The pods on the node continue to run.
+
+## 5. Restart the platform workloads
+
+The pods kept their caches while etcd returned to the backup. For example,
+the CNI does not see a restored pod, so that pod gets no network. On the
+backup node:
+
+```sh
+bedrock restart-workloads
+```
+
+The command waits for the API. Then it restarts the Deployments,
+DaemonSets and StatefulSets in the platform namespaces. The platform
+namespaces are `kube-system` and the namespaces with the label
+`bedrock.cloudyfolks.io/component`. The command does not restart:
+
+- the workloads in other namespaces, for example tenant workloads,
+- the `OnDelete` sets, for example the OVS data plane,
+- the Ceph daemons (label `ceph_daemon_type`),
+- `ovs-ovn`, `ovs-ovn-dpdk`, `ovn-central` and `kube-vip`.
+
+The automatic restore does the same. The restarts cause short effects:
+
+- Traefik closes long connections.
+- The nmstate handler applies its policies again.
+- A VM migration that runs at this time fails. Running VMs continue.
+
+When the command shows a failure, run it again.
+
+## 6. Check the result
 
 ```sh
 kubectl get nodes
