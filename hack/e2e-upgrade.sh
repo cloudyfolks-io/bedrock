@@ -100,6 +100,15 @@ if [ -n "$abort_in" ]; then
     sleep 5
   done
   test "$aborted" -eq 1
+  for _ in $(seq 1 360); do
+    if ! kill -0 "$upgrade" 2>/dev/null; then break; fi
+    sleep 5
+  done
+  if kill -0 "$upgrade" 2>/dev/null; then
+    kill "$upgrade" 2>/dev/null || true
+    echo "the abort did not finish within 30 minutes" >&2
+    exit 1
+  fi
 fi
 set +e
 wait "$upgrade"
