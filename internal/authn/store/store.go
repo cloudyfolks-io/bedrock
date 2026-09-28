@@ -6,6 +6,7 @@ import (
 	"io"
 	"time"
 
+	"github.com/zitadel/oidc/v3/pkg/op"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -22,6 +23,14 @@ const (
 	audienceBedrock     = "bedrock"
 	scopeGroups         = "groups"
 	maxLabelValue       = 63
+)
+
+var (
+	_ op.Storage                        = (*Store)(nil)
+	_ op.DeviceAuthorizationStorage     = (*Store)(nil)
+	_ op.TokenExchangeStorage           = (*Store)(nil)
+	_ op.CanSetUserinfoFromRequest      = (*Store)(nil)
+	_ op.CanGetPrivateClaimsFromRequest = (*Store)(nil)
 )
 
 type Clock func() time.Time
