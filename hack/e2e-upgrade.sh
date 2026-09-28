@@ -27,6 +27,10 @@ dump() {
     kubectl get hosts -o yaml || true
     echo "--- pods"
     kubectl get pods -A -o wide || true
+    echo "--- workloads"
+    kubectl get deployments,daemonsets,statefulsets -A -o wide || true
+    echo "--- fabric-cni log"
+    kubectl -n kube-system logs daemonset/fabric-cni --tail=100 || true
     echo "--- operator log"
     kubectl -n bedrock-system logs deploy/bedrock-operator --tail=300 || true
     echo "--- agent log"
@@ -131,6 +135,8 @@ if [ -n "$abort_in" ]; then
   test "$(kubectl -n bedrock-system get deploy/bedrock-operator -o jsonpath='{.spec.template.spec.containers[0].image}')" = "$image_a"
   kubectl -n bedrock-system rollout status deploy/bedrock-operator --timeout=300s
   kubectl get host "$node" -o jsonpath='{.status.restore.backup}' | grep -q "^/var/lib/bedrock/backups/bedrock-$VERSION_A-"
+  test -n "$(kubectl -n bedrock-system get deploy/bedrock-operator -o jsonpath='{.spec.template.metadata.annotations.kubectl\.kubernetes\.io/restartedAt}')"
+  test -n "$(kubectl -n kube-system get daemonset/fabric-cni -o jsonpath='{.spec.template.metadata.annotations.kubectl\.kubernetes\.io/restartedAt}')"
   test -f /var/lib/k0s/images/k0s-airgap.tar
   test ! -e "/var/lib/k0s/images/k0s-airgap-$VERSION_B.tar"
   for _ in $(seq 1 60); do
