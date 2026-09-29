@@ -64,6 +64,7 @@ export function OtpField({ length, value, onChange, label }: OtpFieldProps) {
           inputMode="numeric"
           pattern="[0-9]*"
           maxLength={1}
+          autoComplete={index === 0 ? "one-time-code" : "off"}
           value={digit}
           onChange={handleChange(index)}
           onKeyDown={handleKeyDown(index)}
