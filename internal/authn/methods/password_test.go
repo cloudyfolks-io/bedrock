@@ -98,12 +98,52 @@ func TestPasswordLockoutAfterThreshold(t *testing.T) {
 	if third.Failure != FailureInvalidCredentials {
 		t.Fatalf("the 3rd wrong attempt itself is still invalid_credentials: %+v", third)
 	}
-	locked, err := method.Complete(context.Background(), Flow{ClientIP: "10.0.0.2", Now: now.Add(3 * time.Second)}, refetchUser(t, c, user), Answer{Password: "s3cret-passphrase"})
+	beforeAttempt := refetchUser(t, c, user)
+	if beforeAttempt.Status.LockedUntil == nil {
+		t.Fatalf("the 3rd failure must have locked the user: %+v", beforeAttempt.Status)
+	}
+	duringLock, err := method.Complete(context.Background(), Flow{ClientIP: "10.0.0.2", Now: now.Add(3 * time.Second)}, beforeAttempt, Answer{Password: "s3cret-passphrase"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if locked.Failure != FailureLocked {
-		t.Fatalf("a locked user must refuse even the right password: %+v", locked)
+	if duringLock.Failure != FailureInvalidCredentials || duringLock.Subject != nil {
+		t.Fatalf("a locked user must refuse even the right password, without revealing the lock: %+v", duringLock)
+	}
+	afterAttempt := refetchUser(t, c, user)
+	if afterAttempt.Status.LockedUntil == nil || !afterAttempt.Status.LockedUntil.Time.Equal(beforeAttempt.Status.LockedUntil.Time) {
+		t.Fatalf("an attempt during the lock must not extend or clear it: before=%+v after=%+v", beforeAttempt.Status, afterAttempt.Status)
+	}
+}
+
+func TestPasswordLockedUserSameAnswerAsUnknownUser(t *testing.T) {
+	c, _ := startTestEnv(t)
+	user := createUser(t, c, "frank")
+	if err := SetPassword(context.Background(), c, rand.Reader, user, "s3cret-passphrase"); err != nil {
+		t.Fatal(err)
+	}
+	method := NewPassword(c, rand.Reader, NewRateLimiter(100, time.Minute), fixedSettings(1))
+	now := time.Now()
+	if _, err := method.Complete(context.Background(), Flow{ClientIP: "10.0.0.10", Now: now}, refetchUser(t, c, user), Answer{Password: "wrong"}); err != nil {
+		t.Fatal(err)
+	}
+	locked := refetchUser(t, c, user)
+	if locked.Status.LockedUntil == nil {
+		t.Fatalf("one failure at threshold 1 must lock the user: %+v", locked.Status)
+	}
+
+	lockedResult, err := method.Complete(context.Background(), Flow{ClientIP: "10.0.0.10", Now: now.Add(time.Second)}, locked, Answer{Password: "s3cret-passphrase"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	unknownResult, err := method.Complete(context.Background(), Flow{ClientIP: "10.0.0.11", Now: now.Add(time.Second)}, v1alpha1.User{}, Answer{Password: "s3cret-passphrase"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if lockedResult != unknownResult {
+		t.Fatalf("a locked user's answer must match an unknown user's answer: locked=%+v unknown=%+v", lockedResult, unknownResult)
+	}
+	if lockedResult.Failure != FailureInvalidCredentials {
+		t.Fatalf("a locked user's answer must be invalid_credentials, not locked: %+v", lockedResult)
 	}
 }
 

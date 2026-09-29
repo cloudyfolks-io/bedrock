@@ -46,14 +46,12 @@ func (m passwordMethod) Complete(ctx context.Context, flow Flow, user v1alpha1.U
 	if !m.limiter.Allow(flow.ClientIP, flow.Now) {
 		return Result{Failure: FailureRateLimited}, nil
 	}
-	if user.Name != "" && Locked(user.Status, flow.Now) {
-		return Result{Failure: FailureLocked}, nil
-	}
 	settings, err := m.settings(ctx)
 	if err != nil {
 		return Result{}, err
 	}
-	hash, known, err := m.currentHash(ctx, user)
+	locked := user.Name != "" && Locked(user.Status, flow.Now)
+	hash, known, err := m.hashForVerify(ctx, user, locked)
 	if err != nil {
 		return Result{}, err
 	}
@@ -62,7 +60,7 @@ func (m passwordMethod) Complete(ctx context.Context, flow Flow, user v1alpha1.U
 		return Result{}, err
 	}
 	if !known || !verified {
-		if user.Name != "" {
+		if user.Name != "" && !locked {
 			if err := m.recordFailure(ctx, user, settings.LockoutThreshold, flow.Now); err != nil {
 				return Result{}, err
 			}
@@ -77,6 +75,13 @@ func (m passwordMethod) Complete(ctx context.Context, flow Flow, user v1alpha1.U
 
 func (m passwordMethod) Enroll(ctx context.Context, user v1alpha1.User, input Answer) (Enrollment, error) {
 	return Enrollment{}, errors.New("methods: password has no enrollment step, use SetPassword")
+}
+
+func (m passwordMethod) hashForVerify(ctx context.Context, user v1alpha1.User, locked bool) (string, bool, error) {
+	if locked {
+		return dummyHash, false, nil
+	}
+	return m.currentHash(ctx, user)
 }
 
 func (m passwordMethod) currentHash(ctx context.Context, user v1alpha1.User) (string, bool, error) {
