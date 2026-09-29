@@ -43,3 +43,26 @@ func TestCRDsRoundTrip(t *testing.T) {
 		t.Fatalf("value %q", got.Spec.Value)
 	}
 }
+
+func TestClusterJoinCIDRDefaultsAndIsImmutable(t *testing.T) {
+	c, _ := StartTestEnv(t)
+	ctx := context.Background()
+	cluster := &v1alpha1.Cluster{
+		ObjectMeta: metav1.ObjectMeta{Name: v1alpha1.ClusterName},
+		Spec:       v1alpha1.ClusterSpec{DesiredVersion: "v0.1.0", API: v1alpha1.APISpec{VIP: "10.0.0.10"}},
+	}
+	if err := c.Create(ctx, cluster); err != nil {
+		t.Fatal(err)
+	}
+	if cluster.Spec.JoinCIDR != "100.64.0.0/16" {
+		t.Fatalf("joinCIDR must default to the kube-ovn join subnet: %q", cluster.Spec.JoinCIDR)
+	}
+	cluster.Spec.NodeConcurrency = 2
+	if err := c.Update(ctx, cluster); err != nil {
+		t.Fatalf("updating another field must not trip the joinCIDR immutability rule: %v", err)
+	}
+	cluster.Spec.JoinCIDR = "100.99.0.0/16"
+	if err := c.Update(ctx, cluster); err == nil {
+		t.Fatal("joinCIDR must be immutable")
+	}
+}

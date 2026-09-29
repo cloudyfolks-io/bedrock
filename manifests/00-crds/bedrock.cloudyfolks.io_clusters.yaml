@@ -76,7 +76,11 @@ spec:
                     type: object
                 type: object
               joinCIDR:
+                default: 100.64.0.0/16
                 type: string
+                x-kubernetes-validations:
+                - message: joinCIDR is immutable
+                  rule: self == oldSelf
               maintenanceWindow:
                 type: string
               nodeConcurrency:

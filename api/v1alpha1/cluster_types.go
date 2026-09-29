@@ -78,6 +78,8 @@ type ClusterSpec struct {
 	Encryption EncryptionSpec `json:"encryption,omitempty"`
 	// +optional
 	Upgrade UpgradeSpec `json:"upgrade,omitempty"`
+	// +kubebuilder:default="100.64.0.0/16"
+	// +kubebuilder:validation:XValidation:rule="self == oldSelf",message="joinCIDR is immutable"
 	// +optional
 	JoinCIDR string `json:"joinCIDR,omitempty"`
 }
