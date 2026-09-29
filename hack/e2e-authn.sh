@@ -13,6 +13,7 @@ dump() {
   if [ "$status" -ne 0 ]; then
     echo "--- authn deployment"
     kubectl -n bedrock-system get deploy/bedrock-authn -o wide || true
+    kubectl -n bedrock-system get networkpolicy bedrock-authn -o yaml || true
     echo "--- authn log"
     kubectl -n bedrock-system logs deploy/bedrock-authn --tail=300 --all-containers || true
     echo "--- operator log"
@@ -57,6 +58,13 @@ BEDROCK_HOST=$host LDAP_CA_BUNDLE=$ca_bundle DEX_CA_BUNDLE=$ca_bundle \
 
 kubectl -n authn-e2e rollout status deployment/openldap --timeout=180s
 kubectl -n authn-e2e rollout status deployment/dex --timeout=180s
+for _ in $(seq 1 30); do
+  if kubectl -n bedrock-system get networkpolicy bedrock-authn >/dev/null 2>&1; then
+    break
+  fi
+  sleep 5
+done
+kubectl -n bedrock-system get networkpolicy bedrock-authn -o jsonpath='{.spec.policyTypes[*]}' | grep -qx Ingress
 kubectl -n bedrock-system rollout status deployment/bedrock-authn --timeout=180s
 
 for _ in $(seq 1 30); do
