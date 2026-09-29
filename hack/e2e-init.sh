@@ -90,22 +90,32 @@ if [ "$vip" = "$nodeip" ]; then vip=$(echo "$nodeip" | awk -F. '{printf "%s.%s.%
 VERSION=$version VIP=$vip IFACE=$iface EMULATION=$emulation envsubst < hack/e2e/cluster.yaml.tmpl > "$workdir/cluster.yaml"
 cat "$workdir/cluster.yaml"
 
+run_init() {
+  local rc=0
+  (umask 077 && "$@" >"$workdir/init.log") || rc=$?
+  grep -v '^admin password: ' "$workdir/init.log"
+  return "$rc"
+}
+
 if [ -n "${BUNDLE:-}" ]; then
   mkdir -p /etc/k0s/containerd.d/certs.d/_default
   printf '[plugins."io.containerd.cri.v1.images".registry]\nconfig_path = "/etc/k0s/containerd.d/certs.d"\n' > /etc/k0s/containerd.d/cri-registry.toml
   printf 'server = "https://127.0.0.1:1"\n' > /etc/k0s/containerd.d/certs.d/_default/hosts.toml
-  "$bin" init -f "$workdir/cluster.yaml" --bundle "$BUNDLE" --timeout 45m | tee "$workdir/init.log"
+  run_init "$bin" init -f "$workdir/cluster.yaml" --bundle "$BUNDLE" --timeout 45m
   test -f /var/lib/k0s/images/k0s-airgap.tar
   test "$(ls /var/lib/k0s/images/*.tar | wc -l)" -ge 3
   sha256sum /usr/local/bin/k0s | awk '{print "sha256:"$1}' | grep -qx "$(awk -v arch="$arch:" '$1 == arch {print $2}' "$release_dir/release.yaml")"
 else
   mkdir -p "$workdir/preload"
   docker save "$image" -o "$workdir/preload/bedrock.tar"
-  "$bin" init -f "$workdir/cluster.yaml" --release-dir "$release_dir" --images-dir "$workdir/preload" --timeout 45m | tee "$workdir/init.log"
+  run_init "$bin" init -f "$workdir/cluster.yaml" --release-dir "$release_dir" --images-dir "$workdir/preload" --timeout 45m
 fi
 
+install -m 0600 /dev/null "$admin_password_file"
 grep '^admin password: ' "$workdir/init.log" | sed 's/^admin password: //' >"$admin_password_file"
-chmod 0600 "$admin_password_file"
+if [ "${GITHUB_ACTIONS:-}" = true ]; then
+  echo "::add-mask::$(cat "$admin_password_file")"
+fi
 export ADMIN_PASSWORD_FILE="$admin_password_file"
 
 kubectl get nodes -o wide
