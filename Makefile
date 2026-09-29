@@ -16,12 +16,16 @@ BUNDLE_ARCH ?= amd64
 K0S_VERSION ?=
 UPGRADE_FROM ?=
 
-.PHONY: build test lint generate crds envtest-assets e2e-kind e2e-init e2e-bundle controller-gen release crane bundle binaries rbac local-ci
+.PHONY: build test lint generate crds envtest-assets e2e-kind e2e-init e2e-bundle controller-gen release crane bundle binaries rbac local-ci ui
 
-build:
+ui:
+	cd ui && pnpm install --frozen-lockfile && pnpm -r test && pnpm -r typecheck && pnpm --filter login build
+	touch internal/authn/server/ui/dist/.keep
+
+build: ui
 	CGO_ENABLED=0 $(GO) build -trimpath -ldflags "-X github.com/cloudyfolks-io/bedrock/internal/cli.Version=$(VERSION)" -o $(BIN) ./cmd/bedrock
 
-binaries:
+binaries: ui
 	for arch in amd64 arm64; do CGO_ENABLED=0 GOOS=linux GOARCH=$$arch $(GO) build -trimpath -ldflags "-X github.com/cloudyfolks-io/bedrock/internal/cli.Version=$(VERSION)" -o dist/bedrock-$(VERSION)-linux-$$arch ./cmd/bedrock; done
 
 test: envtest-assets

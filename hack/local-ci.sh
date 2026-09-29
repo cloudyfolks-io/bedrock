@@ -12,7 +12,7 @@ registry_name=${CI_REGISTRY_NAME:-bedrock-ci-registry}
 kind_image=ghcr.io/cloudyfolks-io/bedrock:dev
 repo=$(git rev-parse --show-toplevel)
 arch=$(uname -m | sed 's/x86_64/amd64/;s/aarch64/arm64/')
-base_images=(golang:1.27 gcr.io/distroless/static:nonroot registry:3)
+base_images=(golang:1.27 gcr.io/distroless/static:nonroot registry:3 node:24-bookworm-slim)
 upgrade_env="REGISTRY=localhost:$port ARCH=$arch VERSION_A=v0.0.0-e2e.1 VERSION_B=v0.0.0-e2e.2 K0S_A=v1.36.2+k0s.0 K0S_B=v1.36.3+k0s.0"
 known_jobs=(test e2e-kind e2e-bundle e2e-upgrade e2e-upgrade-abort)
 vm_path=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin

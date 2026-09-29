@@ -11,6 +11,12 @@ jobs:
       - uses: actions/setup-go@v6
         with:
           go-version-file: go.mod
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 24
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 12.6.0
       - uses: azure/setup-helm@v4
         with:
           version: v3.19.0
@@ -29,6 +35,12 @@ jobs:
       - uses: actions/setup-go@v6
         with:
           go-version-file: go.mod
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 24
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 12.6.0
       - uses: azure/setup-helm@v4
         with:
           version: v3.19.0
@@ -45,6 +57,12 @@ jobs:
       - uses: actions/setup-go@v6
         with:
           go-version-file: go.mod
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 24
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 12.6.0
       - uses: azure/setup-helm@v4
         with:
           version: v3.19.0
@@ -60,6 +78,12 @@ jobs:
       - uses: actions/setup-go@v6
         with:
           go-version-file: go.mod
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 24
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 12.6.0
       - uses: azure/setup-helm@v4
         with:
           version: v3.19.0
@@ -95,6 +119,12 @@ jobs:
       - uses: actions/setup-go@v6
         with:
           go-version-file: go.mod
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 24
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 12.6.0
       - uses: azure/setup-helm@v4
         with:
           version: v3.19.0

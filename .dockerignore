@@ -3,6 +3,6 @@ bin/
 dist/
 !dist/release
 .superpowers/
-ui/node_modules/
+ui/**/node_modules/
 *.test
 coverage.out
