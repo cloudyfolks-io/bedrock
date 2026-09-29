@@ -9,6 +9,7 @@ import { authRequestFromLocation, routeFor } from "./router";
 import { DeviceEntry } from "./screens/DeviceEntry";
 import { screenFor } from "./screens";
 import type { Challenge } from "./types";
+import { codeFromRejection } from "./useAnswer";
 
 export function languageLabel(locale: Locale): string {
   return new Intl.DisplayNames([locale], { type: "language" }).of(locale) ?? locale;
@@ -32,7 +33,9 @@ export function App() {
 
   useEffect(() => {
     if (route !== "device" && route !== "account") {
-      loadChallenge(window.location.search).then(setChallenge);
+      loadChallenge(window.location.search)
+        .then(setChallenge)
+        .catch((reason: unknown) => setChallenge({ type: "error", error: { code: codeFromRejection(reason) } }));
     }
   }, [route]);
 

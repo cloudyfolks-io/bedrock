@@ -9,7 +9,7 @@ export interface UseAnswer {
   fail: (reason?: unknown) => void;
 }
 
-function codeFromRejection(reason: unknown): string {
+export function codeFromRejection(reason: unknown): string {
   return reason instanceof ApiError ? reason.code : "unknown";
 }
 
