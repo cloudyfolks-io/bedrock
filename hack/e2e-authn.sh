@@ -43,7 +43,15 @@ k0s ctr --namespace k8s.io images import dist/cache/e2e-authn/dex.tar
 kubectl apply -f test/e2e/authn/fixtures/openldap.yaml
 BEDROCK_HOST=$host envsubst '${BEDROCK_HOST}' <test/e2e/authn/fixtures/dex.yaml | kubectl apply -f -
 
-ca_bundle=$(kubectl get secret -n cert-manager bedrock-ca -o jsonpath='{.data.ca\.crt}' | base64 -d | awk '{printf "%s\\n", $0}')
+for _ in $(seq 1 30); do
+  ca_bundle_b64=$(kubectl get secret -n cert-manager bedrock-ca -o jsonpath='{.data.ca\.crt}' 2>/dev/null || true)
+  if [ -n "$ca_bundle_b64" ]; then
+    break
+  fi
+  sleep 5
+done
+test -n "$ca_bundle_b64"
+ca_bundle=$(echo "$ca_bundle_b64" | base64 -d | awk '{printf "%s\\n", $0}')
 BEDROCK_HOST=$host LDAP_CA_BUNDLE=$ca_bundle DEX_CA_BUNDLE=$ca_bundle \
   envsubst '${BEDROCK_HOST} ${LDAP_CA_BUNDLE} ${DEX_CA_BUNDLE}' <test/e2e/authn/fixtures/providers.yaml.tmpl | kubectl apply -f -
 
@@ -60,7 +68,14 @@ for _ in $(seq 1 30); do
   sleep 5
 done
 grep -q '^dn: uid=alice,ou=people,dc=bedrock,dc=test$' "$workdir/ldapsearch.out"
-curl -sk -m 10 "https://dex.$host/.well-known/openid-configuration" | grep -q '"issuer"'
+
+for _ in $(seq 1 30); do
+  if curl -sk -m 10 "https://dex.$host/.well-known/openid-configuration" >"$workdir/dex.out" 2>"$workdir/dex.err"; then
+    break
+  fi
+  sleep 5
+done
+grep -q '"issuer"' "$workdir/dex.out"
 
 install -m 0755 "$bin" /usr/local/bin/bedrock
 
