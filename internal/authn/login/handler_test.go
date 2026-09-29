@@ -605,3 +605,15 @@ func TestUpstreamCallbackRefusesADenial(t *testing.T) {
 		t.Fatalf("a denial must not reach the method: %+v", completes)
 	}
 }
+
+func TestLoginRefusesALargeBody(t *testing.T) {
+	h := newHarness(t, methods.NewRateLimiter(100, time.Minute))
+	browser := newBrowser(t, h.server)
+	large := map[string]string{"authRequest": strings.Repeat("a", 70<<10)}
+	if code := errorOf(t, send(t, browser, http.MethodPost, h.server.URL+"/api/v1/login/start", "", large, nil), http.StatusBadRequest); code != "invalid_request" {
+		t.Fatalf("large start body: %q", code)
+	}
+	if code := errorOf(t, send(t, browser, http.MethodPost, h.server.URL+"/api/v1/login/device", "", map[string]string{"userCode": large["authRequest"]}, nil), http.StatusBadRequest); code != "invalid_request" {
+		t.Fatalf("large device body: %q", code)
+	}
+}

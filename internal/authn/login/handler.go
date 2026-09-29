@@ -80,7 +80,7 @@ func Handler(deps Deps) http.Handler {
 }
 
 func start(w http.ResponseWriter, r *http.Request, deps Deps) {
-	body, err := decodeJSON[startBody](r)
+	body, err := decodeJSON[startBody](w, r)
 	if err != nil {
 		writeDecodeError(w, err)
 		return
@@ -127,7 +127,7 @@ func restart(w http.ResponseWriter, r *http.Request, deps Deps, request v1alpha1
 }
 
 func startDevice(w http.ResponseWriter, r *http.Request, deps Deps) {
-	body, err := decodeJSON[deviceBody](r)
+	body, err := decodeJSON[deviceBody](w, r)
 	if err != nil {
 		writeDecodeError(w, err)
 		return
@@ -198,7 +198,7 @@ func answer(w http.ResponseWriter, r *http.Request, deps Deps) {
 		writeError(w, http.StatusForbidden, "csrf")
 		return
 	}
-	given, err := decodeJSON[methods.Answer](r)
+	given, err := decodeJSON[methods.Answer](w, r)
 	if err != nil {
 		writeDecodeError(w, err)
 		return
@@ -877,13 +877,13 @@ func expired() methods.Challenge {
 	return failed(v1alpha1.LoginState{}, errorExpired).Challenge
 }
 
-func decodeJSON[T any](r *http.Request) (T, error) {
+func decodeJSON[T any](w http.ResponseWriter, r *http.Request) (T, error) {
 	var body T
 	mediaType, _, err := mime.ParseMediaType(r.Header.Get("Content-Type"))
 	if err != nil || mediaType != "application/json" {
 		return body, errUnsupportedMedia
 	}
-	err = json.NewDecoder(io.LimitReader(r.Body, maxBody)).Decode(&body)
+	err = json.NewDecoder(http.MaxBytesReader(w, r.Body, maxBody)).Decode(&body)
 	return body, err
 }
 
