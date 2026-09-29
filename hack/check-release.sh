@@ -16,7 +16,7 @@ grep -q 'kind: CustomResourceDefinition' "$dir/manifests/00-crds/fabric-crds.yam
 grep -q 'kind: DaemonSet' "$dir/manifests/25-multus/multus.yaml"
 grep -q 'multus-cni:v4.3.1-thick' "$dir/manifests/25-multus/multus.yaml"
 grep -q 'name: network-attachment-definitions.k8s.cni.cncf.io' "$dir/manifests/00-crds/multus-crds.yaml"
-! grep -q 'kind: CustomResourceDefinition' "$dir/manifests/25-multus/multus.yaml"
+if grep -q 'kind: CustomResourceDefinition' "$dir/manifests/25-multus/multus.yaml"; then exit 1; fi
 grep -q 'name: nmstate-operator' "$dir/manifests/30-nmstate/nmstate.yaml"
 grep -q 'kind: NMState' "$dir/manifests/30-nmstate/nmstate.yaml"
 grep -q 'name: nmstates.nmstate.io' "$dir/manifests/00-crds/nmstate-crds.yaml"
