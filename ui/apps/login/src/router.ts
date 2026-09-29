@@ -14,6 +14,15 @@ export function authRequestFromLocation(search: string): string | null {
   return new URLSearchParams(search).get("authRequest");
 }
 
+export function userCodeFromLocation(search: string): string {
+  const raw = new URLSearchParams(search).get("user_code");
+  if (!raw) {
+    return "";
+  }
+  const compact = raw.replace(/[\s-]/g, "").toUpperCase();
+  return compact.match(/.{1,4}/g)?.join("-") ?? compact;
+}
+
 export function loginPath(): string {
   return "/login/";
 }

@@ -3,6 +3,7 @@ import { useLingui } from "@lingui/react/macro";
 import { Alert, Button, Card, TextField } from "@bedrock/design";
 import * as api from "../api";
 import { errorDescriptor } from "../errorMessages";
+import { userCodeFromLocation } from "../router";
 import { useAnswer, useFocusFirstField, useFocusOnError } from "../useAnswer";
 import type { Challenge } from "../types";
 
@@ -12,7 +13,7 @@ interface DeviceEntryProps {
 
 export function DeviceEntry({ onChallenge }: DeviceEntryProps) {
   const { t } = useLingui();
-  const [userCode, setUserCode] = useState("");
+  const [userCode, setUserCode] = useState(() => userCodeFromLocation(window.location.search));
   const { error, submit } = useAnswer(onChallenge);
   const fieldRef = useFocusFirstField();
   const errorRef = useFocusOnError(error !== null);
