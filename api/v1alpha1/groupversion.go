@@ -24,6 +24,8 @@ const (
 	GroupAdmins       = "bedrock-admins"
 	UserAdmin         = "admin"
 
+	AnnotationEnrollWriteAt = "bedrock.cloudyfolks.io/enroll-write-at"
+
 	GrantAuthorizationCode = "authorization_code"
 	GrantRefreshToken      = "refresh_token"
 	GrantDeviceCode        = "urn:ietf:params:oauth:grant-type:device_code"

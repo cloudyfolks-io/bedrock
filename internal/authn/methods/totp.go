@@ -41,6 +41,10 @@ func base32Seed(seed []byte) string {
 	return base32.StdEncoding.WithPadding(base32.NoPadding).EncodeToString(seed)
 }
 
+func enrollWriteAt(now time.Time) string {
+	return now.UTC().Format(time.RFC3339Nano)
+}
+
 func MatchTOTP(seed []byte, code string, now time.Time, lastStep int64) (int64, bool) {
 	current := TOTPStep(now)
 	for _, step := range []int64{current - 1, current, current + 1} {
@@ -126,9 +130,14 @@ func (m totpMethod) Enroll(ctx context.Context, user v1alpha1.User, input Answer
 	switch {
 	case apierrors.IsNotFound(err):
 		cred = v1alpha1.Credential{
-			TypeMeta:   metav1.TypeMeta{APIVersion: v1alpha1.GroupVersion.String(), Kind: "Credential"},
-			ObjectMeta: metav1.ObjectMeta{Namespace: release.SystemNamespace, Name: name, Labels: map[string]string{v1alpha1.LabelKind: "Credential", v1alpha1.LabelName: name}},
-			Spec:       v1alpha1.CredentialSpec{UserRef: user.Name, Method: v1alpha1.MethodTOTP, SecretRef: name},
+			TypeMeta: metav1.TypeMeta{APIVersion: v1alpha1.GroupVersion.String(), Kind: "Credential"},
+			ObjectMeta: metav1.ObjectMeta{
+				Namespace:   release.SystemNamespace,
+				Name:        name,
+				Labels:      map[string]string{v1alpha1.LabelKind: "Credential", v1alpha1.LabelName: name},
+				Annotations: map[string]string{v1alpha1.AnnotationEnrollWriteAt: enrollWriteAt(time.Now())},
+			},
+			Spec: v1alpha1.CredentialSpec{UserRef: user.Name, Method: v1alpha1.MethodTOTP, SecretRef: name},
 		}
 		if err := m.client.Create(ctx, &cred, client.FieldOwner(v1alpha1.AuthnFieldManager)); err != nil {
 			return Enrollment{}, err
@@ -142,6 +151,10 @@ func (m totpMethod) Enroll(ctx context.Context, user v1alpha1.User, input Answer
 	case cred.Status.EnrolledAt != nil:
 		return Enrollment{}, errTOTPAlreadyEnrolled
 	default:
+		if cred.Annotations == nil {
+			cred.Annotations = map[string]string{}
+		}
+		cred.Annotations[v1alpha1.AnnotationEnrollWriteAt] = enrollWriteAt(time.Now())
 		if err := m.client.Update(ctx, &cred, client.FieldOwner(v1alpha1.AuthnFieldManager)); err != nil {
 			if apierrors.IsConflict(err) {
 				return Enrollment{}, errTOTPAlreadyEnrolled
