@@ -10,20 +10,22 @@ import (
 
 	"github.com/cloudyfolks-io/bedrock/api/v1alpha1"
 	"github.com/cloudyfolks-io/bedrock/internal/authn/apiserver"
+	"github.com/cloudyfolks-io/bedrock/internal/config"
 	"github.com/cloudyfolks-io/bedrock/internal/release"
 	"github.com/cloudyfolks-io/bedrock/internal/settings"
 )
 
 const (
-	authnName            = "bedrock-authn"
-	cliClientID          = "bedrock-cli"
-	consoleClientID      = "bedrock-console"
-	consoleSecretName    = "bedrock-console-client"
-	traefikAPIVersion    = "traefik.io/v1alpha1"
-	authnServicePort     = int64(443)
-	authnPlatformCAKey   = "ca.crt"
-	authnServingPort     = "https"
-	authnDefaultJoinCIDR = "100.64.0.0/16"
+	authnName          = "bedrock-authn"
+	cliClientID        = "bedrock-cli"
+	consoleClientID    = "bedrock-console"
+	consoleSecretName  = "bedrock-console-client"
+	traefikAPIVersion  = "traefik.io/v1alpha1"
+	authnServicePort   = int64(443)
+	authnPlatformCAKey = "ca.crt"
+	authnServingPort   = "https"
+	authnHealthzPath   = "/healthz"
+	authnReadyzPath    = "/readyz"
 )
 
 var authnAddon = Addon{Name: "authn", Condition: v1alpha1.ConditionAuthnReady, Render: RenderAuthn}
@@ -96,7 +98,7 @@ func BuiltinClients(host string) []*unstructured.Unstructured {
 
 func joinCIDR(cluster v1alpha1.Cluster) string {
 	if cluster.Spec.JoinCIDR == "" {
-		return authnDefaultJoinCIDR
+		return config.DefaultJoinCIDR
 	}
 	return cluster.Spec.JoinCIDR
 }
@@ -124,9 +126,10 @@ func authnNetworkPolicy(cidr string) *unstructured.Unstructured {
 
 func authnIngressRoute(host string) *unstructured.Unstructured {
 	service := map[string]any{"name": authnName, "port": authnServicePort, "scheme": "https", "serversTransport": authnName}
+	match := "Host(`sso." + host + "`) && !Path(`" + authnHealthzPath + "`) && !Path(`" + authnReadyzPath + "`)"
 	return authnObject(traefikAPIVersion, "IngressRoute", authnName, map[string]any{"spec": map[string]any{
 		"entryPoints": []any{"websecure"},
-		"routes":      []any{map[string]any{"match": "Host(`sso." + host + "`)", "kind": "Rule", "services": []any{service}}},
+		"routes":      []any{map[string]any{"match": match, "kind": "Rule", "services": []any{service}}},
 		"tls":         map[string]any{},
 	}})
 }

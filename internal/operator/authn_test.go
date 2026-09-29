@@ -77,7 +77,8 @@ func TestRenderAuthnObjects(t *testing.T) {
 	match, _, _ := unstructured.NestedString(routes[0].(map[string]any), "match")
 	services, _, _ := unstructured.NestedSlice(routes[0].(map[string]any), "services")
 	service := services[0].(map[string]any)
-	if match != "Host(`sso.lab.example`)" || service["name"] != "bedrock-authn" || service["port"] != int64(443) || service["scheme"] != "https" || service["serversTransport"] != "bedrock-authn" {
+	wantMatch := "Host(`sso.lab.example`) && !Path(`/healthz`) && !Path(`/readyz`)"
+	if match != wantMatch || service["name"] != "bedrock-authn" || service["port"] != int64(443) || service["scheme"] != "https" || service["serversTransport"] != "bedrock-authn" {
 		t.Fatalf("route %+v", routes[0])
 	}
 	assertAuthnNetworkPolicy(t, out.Objects, "100.64.0.0/16")
@@ -128,24 +129,48 @@ func assertAuthnNetworkPolicy(t *testing.T, objects []*unstructured.Unstructured
 	if len(ingress) != 2 {
 		t.Fatalf("ingress rules %+v", ingress)
 	}
-	traefikRule := ingress[0].(map[string]any)
+	traefikRule, ok := ingress[0].(map[string]any)
+	if !ok {
+		t.Fatalf("ingress[0] %+v is not an object", ingress[0])
+	}
 	from, _, _ := unstructured.NestedSlice(traefikRule, "from")
-	peer := from[0].(map[string]any)
+	if len(from) == 0 {
+		t.Fatalf("traefik rule %+v has no from peers", traefikRule)
+	}
+	peer, ok := from[0].(map[string]any)
+	if !ok {
+		t.Fatalf("from[0] %+v is not an object", from[0])
+	}
 	namespaceSelector, _, _ := unstructured.NestedStringMap(peer, "namespaceSelector", "matchLabels")
 	podPeerSelector, _, _ := unstructured.NestedStringMap(peer, "podSelector", "matchLabels")
 	if namespaceSelector["kubernetes.io/metadata.name"] != "traefik" || podPeerSelector["app.kubernetes.io/name"] != "traefik" {
 		t.Fatalf("traefik peer %+v", peer)
 	}
-	probeRule := ingress[1].(map[string]any)
+	probeRule, ok := ingress[1].(map[string]any)
+	if !ok {
+		t.Fatalf("ingress[1] %+v is not an object", ingress[1])
+	}
 	probeFrom, _, _ := unstructured.NestedSlice(probeRule, "from")
-	probePeer := probeFrom[0].(map[string]any)
+	if len(probeFrom) == 0 {
+		t.Fatalf("probe rule %+v has no from peers", probeRule)
+	}
+	probePeer, ok := probeFrom[0].(map[string]any)
+	if !ok {
+		t.Fatalf("probeFrom[0] %+v is not an object", probeFrom[0])
+	}
 	cidr, _, _ := unstructured.NestedString(probePeer, "ipBlock", "cidr")
 	if cidr != wantCIDR {
 		t.Fatalf("kubelet probe ipBlock cidr %q, want %q", cidr, wantCIDR)
 	}
 	for _, rule := range []map[string]any{traefikRule, probeRule} {
 		ports, _, _ := unstructured.NestedSlice(rule, "ports")
-		port := ports[0].(map[string]any)
+		if len(ports) == 0 {
+			t.Fatalf("rule %+v has no ports", rule)
+		}
+		port, ok := ports[0].(map[string]any)
+		if !ok {
+			t.Fatalf("ports[0] %+v is not an object", ports[0])
+		}
 		if port["protocol"] != "TCP" || port["port"] != "https" {
 			t.Fatalf("rule port %+v", port)
 		}
@@ -160,6 +185,23 @@ func TestRenderAuthnNetworkPolicyUsesTheClusterJoinCIDR(t *testing.T) {
 		t.Fatal(err)
 	}
 	assertAuthnNetworkPolicy(t, out.Objects, "100.99.0.0/16")
+}
+
+func TestRenderAuthnIngressRouteExcludesHealthPaths(t *testing.T) {
+	out, err := RenderAuthn(authnInput("lab.example", "SelfSigned"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	routes, _, _ := unstructured.NestedSlice(findObject(out.Objects, "IngressRoute", "bedrock-authn").Object, "spec", "routes")
+	match, _, _ := unstructured.NestedString(routes[0].(map[string]any), "match")
+	for _, path := range []string{"/healthz", "/readyz"} {
+		if !strings.Contains(match, "!Path(`"+path+"`)") {
+			t.Fatalf("the public route must exclude %s: %s", path, match)
+		}
+	}
+	if !strings.HasPrefix(match, "Host(`sso.lab.example`)") {
+		t.Fatalf("the route must still match the platform host: %s", match)
+	}
 }
 
 func TestAuthnAddonFollowsPlatformHost(t *testing.T) {
@@ -194,7 +236,7 @@ func TestAuthnAddonFollowsPlatformHost(t *testing.T) {
 		t.Fatal("the rendered file must change with the host")
 	}
 	match, _, _ := unstructured.NestedSlice(findObject(after.Objects, "IngressRoute", "bedrock-authn").Object, "spec", "routes")
-	if match[0].(map[string]any)["match"] != "Host(`sso.new.example`)" {
+	if match[0].(map[string]any)["match"] != "Host(`sso.new.example`) && !Path(`/healthz`) && !Path(`/readyz`)" {
 		t.Fatalf("route %+v", match)
 	}
 	redirects, _, _ := unstructured.NestedStringSlice(findObject(after.Objects, "OAuthClient", "bedrock-console").Object, "spec", "redirectURIs")
