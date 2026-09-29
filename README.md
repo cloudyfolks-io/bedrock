@@ -10,3 +10,8 @@ Status: pre-release. Follow the milestones in the GitHub project.
 
     make build
     make test
+
+## Identity
+
+Read `docs/authn.md` for users, groups, LDAP and OIDC, API tokens,
+`bedrock login` and token exchange.
