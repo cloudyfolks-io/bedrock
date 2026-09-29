@@ -39,38 +39,49 @@ type harness struct {
 	store    *store.Store
 	server   *httptest.Server
 	upstream *fakeUpstream
-	reader   *hookReader
+	reader   *hookClient
+	handler  *hookClient
 }
 
-type hookReader struct {
+type hookClient struct {
 	client.Client
-	mu        sync.Mutex
-	afterAuth func()
+	mu    sync.Mutex
+	match func(client.Object) bool
+	hook  func()
 }
 
-func (h *hookReader) Get(ctx context.Context, key client.ObjectKey, obj client.Object, opts ...client.GetOption) error {
+func (h *hookClient) Get(ctx context.Context, key client.ObjectKey, obj client.Object, opts ...client.GetOption) error {
 	err := h.Client.Get(ctx, key, obj, opts...)
-	if _, ok := obj.(*v1alpha1.AuthRequest); ok {
-		h.takeHook()()
-	}
+	h.takeHook(obj)()
 	return err
 }
 
-func (h *hookReader) takeHook() func() {
+func (h *hookClient) takeHook(obj client.Object) func() {
 	h.mu.Lock()
 	defer h.mu.Unlock()
-	hook := h.afterAuth
-	h.afterAuth = nil
-	if hook == nil {
+	if h.hook == nil || !h.match(obj) {
 		return func() {}
 	}
+	hook := h.hook
+	h.hook = nil
 	return hook
 }
 
-func (h *hookReader) afterNextAuthRequestGet(hook func()) {
+func (h *hookClient) afterNextGet(match func(client.Object) bool, hook func()) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
-	h.afterAuth = hook
+	h.match = match
+	h.hook = hook
+}
+
+func isAuthRequest(obj client.Object) bool {
+	_, ok := obj.(*v1alpha1.AuthRequest)
+	return ok
+}
+
+func isCredential(obj client.Object) bool {
+	_, ok := obj.(*v1alpha1.Credential)
+	return ok
 }
 
 type upstreamCall struct {
@@ -157,7 +168,8 @@ func newHarness(t *testing.T, limiter *methods.RateLimiter) harness {
 	t.Helper()
 	c := startTestEnv(t)
 	settings := func(context.Context) (policy.Settings, error) { return testSettings(), nil }
-	reader := &hookReader{Client: c}
+	reader := &hookClient{Client: c}
+	handlerClient := &hookClient{Client: c}
 	st := store.New(store.Config{
 		Client:   c,
 		Reader:   reader,
@@ -175,7 +187,7 @@ func newHarness(t *testing.T, limiter *methods.RateLimiter) harness {
 	)
 	server := httptest.NewTLSServer(Handler(Deps{
 		Store:    st,
-		Client:   c,
+		Client:   handlerClient,
 		Methods:  registry,
 		Settings: settings,
 		Random:   rand.Reader,
@@ -193,7 +205,7 @@ func newHarness(t *testing.T, limiter *methods.RateLimiter) harness {
 			GrantTypes:   []string{v1alpha1.GrantAuthorizationCode, v1alpha1.GrantRefreshToken, v1alpha1.GrantDeviceCode},
 		},
 	})
-	return harness{client: c, store: st, server: server, upstream: upstream, reader: reader}
+	return harness{client: c, store: st, server: server, upstream: upstream, reader: reader, handler: handlerClient}
 }
 
 func create(t *testing.T, c client.Client, objects ...client.Object) {

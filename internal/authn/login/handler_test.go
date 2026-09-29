@@ -437,7 +437,7 @@ func TestAnswerRefusesALoginDoneMeanwhile(t *testing.T) {
 	createLocalUser(t, h.client, "alice")
 	browser := newBrowser(t, h.server)
 	id, first := startLogin(t, h, browser)
-	h.reader.afterNextAuthRequestGet(func() {
+	h.reader.afterNextGet(isAuthRequest, func() {
 		advance(t, h, id, func(status v1alpha1.AuthRequestStatus) v1alpha1.AuthRequestStatus {
 			status.Done = true
 			return status
@@ -460,7 +460,7 @@ func TestAnswerRefusesAConcurrentCSRFUse(t *testing.T) {
 	id, first := startLogin(t, h, browser)
 	password := answerWith(t, h, browser, first.CSRF, methods.Answer{Type: methods.ChallengeUsername, Username: "alice"})
 	winner := secret.SHA256Hex("the answer that came first")
-	h.reader.afterNextAuthRequestGet(func() {
+	h.reader.afterNextGet(isAuthRequest, func() {
 		advance(t, h, id, func(status v1alpha1.AuthRequestStatus) v1alpha1.AuthRequestStatus {
 			status.Login.CSRFHash = winner
 			return status
@@ -483,6 +483,7 @@ func TestAnswerRefusesAConcurrentCSRFUse(t *testing.T) {
 }
 
 func advance(t *testing.T, h harness, id string, change func(v1alpha1.AuthRequestStatus) v1alpha1.AuthRequestStatus) {
+	t.Helper()
 	var request v1alpha1.AuthRequest
 	if err := h.client.Get(context.Background(), client.ObjectKey{Namespace: release.SystemNamespace, Name: id}, &request); err != nil {
 		t.Errorf("read %s: %v", id, err)
@@ -511,5 +512,56 @@ func TestDeviceEntryIsRateLimited(t *testing.T) {
 	}
 	if code := errorOf(t, send(t, browser, http.MethodPost, target, "", body, from("198.51.100.9")), http.StatusNotFound); code != methods.FailureInvalidCode {
 		t.Fatalf("another client IP has its own budget: %q", code)
+	}
+}
+
+func TestChallengeKeepsATOTPEnrolledMeanwhile(t *testing.T) {
+	h := newHarness(t, methods.NewRateLimiter(100, time.Minute))
+	user := createLocalUser(t, h.client, "alice")
+	create(t, h.client, &v1alpha1.Group{
+		ObjectMeta: metav1.ObjectMeta{Name: "ops", Namespace: release.SystemNamespace},
+		Spec:       v1alpha1.GroupSpec{Members: []string{"alice"}, RequireSecondFactor: true},
+	})
+	browser := newBrowser(t, h.server)
+	_, first := startLogin(t, h, browser)
+	password := answerWith(t, h, browser, first.CSRF, methods.Answer{Type: methods.ChallengeUsername, Username: "alice"})
+	enroll := answerWith(t, h, browser, password.CSRF, methods.Answer{Type: methods.ChallengePassword, Password: testPassword})
+	if enroll.Type != methods.ChallengeTOTPEnroll || enroll.Enroll == nil {
+		t.Fatalf("enroll %+v", enroll)
+	}
+	key := client.ObjectKey{Namespace: release.SystemNamespace, Name: v1alpha1.CredentialName(user.Name, v1alpha1.MethodTOTP)}
+	var pending v1alpha1.Credential
+	if err := h.client.Get(context.Background(), key, &pending); err != nil {
+		t.Fatal(err)
+	}
+	h.handler.afterNextGet(isCredential, func() { markEnrolled(t, h, key) })
+	reloaded := challengeOf(t, get(t, browser, h.server.URL+"/api/v1/login/challenge"))
+	if reloaded.Type != methods.ChallengeTOTPEnroll || reloaded.Enroll != nil || reloaded.Error != nil || reloaded.CSRF == "" {
+		t.Fatalf("a reload must not replace a credential enrolled meanwhile: %+v", reloaded)
+	}
+	var kept v1alpha1.Credential
+	if err := h.client.Get(context.Background(), key, &kept); err != nil || kept.UID != pending.UID || kept.Status.EnrolledAt == nil {
+		t.Fatalf("the enrolled credential must stay: %+v, %v", kept.Status, err)
+	}
+	seed, err := base32.StdEncoding.WithPadding(base32.NoPadding).DecodeString(enroll.Enroll.Secret)
+	if err != nil {
+		t.Fatal(err)
+	}
+	codes := answerWith(t, h, browser, reloaded.CSRF, methods.Answer{Type: methods.ChallengeTOTPEnroll, Code: methods.TOTPCode(seed, methods.TOTPStep(time.Now()))})
+	if codes.Type != methods.ChallengeTOTPEnroll || len(codes.RecoveryCodes) != 10 {
+		t.Fatalf("the first secret must still work: %+v", codes)
+	}
+}
+
+func markEnrolled(t *testing.T, h harness, key client.ObjectKey) {
+	t.Helper()
+	var credential v1alpha1.Credential
+	if err := h.client.Get(context.Background(), key, &credential); err != nil {
+		t.Errorf("read %s: %v", key.Name, err)
+		return
+	}
+	credential.Status.EnrolledAt = &metav1.Time{Time: time.Now()}
+	if err := h.client.Status().Update(context.Background(), &credential); err != nil {
+		t.Errorf("enroll %s: %v", key.Name, err)
 	}
 }

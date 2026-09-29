@@ -444,8 +444,12 @@ func enrollTOTP(ctx context.Context, deps Deps, request v1alpha1.AuthRequest, st
 	if err != nil {
 		return decoration{}, err
 	}
-	if err := dropPendingTOTP(ctx, deps.Client, user.Name); err != nil {
+	replaceable, err := dropPendingTOTP(ctx, deps.Client, user.Name)
+	if err != nil {
 		return decoration{}, err
+	}
+	if !replaceable {
+		return decoration{challenge: step.Challenge, status: status}, nil
 	}
 	enrollment, err := method.Enroll(ctx, user, methods.Answer{})
 	if err != nil {
@@ -474,22 +478,35 @@ func recoveryCodes(ctx context.Context, deps Deps, request v1alpha1.AuthRequest,
 	return decoration{challenge: challenge, status: status}, nil
 }
 
-func dropPendingTOTP(ctx context.Context, c client.Client, user string) error {
+func dropPendingTOTP(ctx context.Context, c client.Client, user string) (bool, error) {
 	var credential v1alpha1.Credential
 	err := c.Get(ctx, objectKey(v1alpha1.CredentialName(user, v1alpha1.MethodTOTP)), &credential)
 	switch {
 	case apierrors.IsNotFound(err):
-		return nil
+		return true, nil
 	case err != nil:
-		return err
+		return false, err
 	case credential.Status.EnrolledAt != nil:
-		return nil
+		return false, nil
 	}
-	if err := client.IgnoreNotFound(c.Delete(ctx, &credential)); err != nil {
-		return err
+	var pending corev1.Secret
+	if err := client.IgnoreNotFound(c.Get(ctx, objectKey(credential.Spec.SecretRef), &pending)); err != nil {
+		return false, err
 	}
-	pending := &corev1.Secret{ObjectMeta: metav1.ObjectMeta{Namespace: release.SystemNamespace, Name: credential.Spec.SecretRef}}
-	return client.IgnoreNotFound(c.Delete(ctx, pending))
+	err = c.Delete(ctx, &credential, client.Preconditions{UID: &credential.UID, ResourceVersion: &credential.ResourceVersion})
+	switch {
+	case apierrors.IsConflict(err), apierrors.IsNotFound(err):
+		return false, nil
+	case err != nil:
+		return false, err
+	case pending.UID == "":
+		return true, nil
+	}
+	err = c.Delete(ctx, &pending, client.Preconditions{UID: &pending.UID})
+	if err != nil && !apierrors.IsConflict(err) && !apierrors.IsNotFound(err) {
+		return false, err
+	}
+	return true, nil
 }
 
 func loadFacts(ctx context.Context, deps Deps, request v1alpha1.AuthRequest, user *v1alpha1.User) (Facts, error) {
