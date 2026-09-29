@@ -70,6 +70,13 @@ worked. An empty answer or a bind error means the account, the host or
 the network path is wrong. Either way nothing in the platform LDAP
 changed, because a search makes no write.
 
+Warning: an optional last step signs in with the known username and a
+wrong password. This performs a real bind as that user against the real
+platform LDAP, and it counts against the platform LDAP's own lockout
+policy, not against any Bedrock lockout. Use a test account that can
+tolerate a lockout, or skip this step, and run it at most once. Step 2's
+`ldapsearch` alone is already proof enough.
+
 Optionally, sign in at `https://sso.<test cluster host>/login/` with the
 known username and a wrong password. Every answer looks the same,
 `invalid_credentials`, whether the bind failed, the search found no

@@ -49,10 +49,11 @@ never says the account is locked. An administrator sees the lock in the
 
 `bedrock-authn` also rate-limits credential checks. Each replica allows
 10 attempts per minute per client IP. Each replica also runs at most 4
-credential checks at once: a password hash, a TOTP code check or a
-recovery code check, whether at sign-in or on the account page. Past
-either limit the answer is `rate_limited`. This answer never hints at
-which account or which check was slow.
+credential checks at once. This gate covers the login step answer and
+the login challenge request, plus the account password change, the
+account TOTP verify, and account recovery-code generation. Past either
+limit the answer is `rate_limited`. This answer never hints at which
+account or which check was slow.
 
 TOTP follows RFC 6238: six digits, thirty-second steps, one step of
 clock skew either way, each code accepted once. Enrollment shows a QR
@@ -63,6 +64,11 @@ once. A recovery code is a second-factor answer, not an enrollment step.
 It stands in for a TOTP code at sign-in. It cannot enroll or re-enroll
 TOTP itself. Each recovery code works once, until it is used or replaced
 by enrolling TOTP again.
+
+Two more Settings control session and token lifetime:
+`authn.session-ttl` sets the login session cookie lifetime (default
+`12h`), and `authn.refresh-ttl` sets the refresh token lifetime (default
+`720h`).
 
 ## Second-factor policy
 
@@ -171,9 +177,11 @@ bearer token:
 kubectl --token=brk_... --server=https://api.<platform.host>:6443 get pods
 ```
 
-Disabling a user (`spec.disabled: true`) refuses that user's API tokens
-and refresh tokens at once; an access token already issued keeps working
-until its own hour is up, because kube-apiserver caches the JWKS.
+Disabling a user (`spec.disabled: true`) refuses that user's new logins,
+refresh-token requests, userinfo requests and new API tokens, all at
+once. An access token already issued keeps working until its own hour
+is up, because a JWT access token is verified only by its own signature
+and expiry, not by asking Bedrock whether the user is still enabled.
 
 ## `bedrock login` and kubeconfig
 
