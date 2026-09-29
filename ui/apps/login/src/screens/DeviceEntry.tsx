@@ -1,7 +1,9 @@
 import { useState } from "react";
 import { useLingui } from "@lingui/react/macro";
-import { Button, Card, TextField } from "@bedrock/design";
+import { Alert, Button, Card, TextField } from "@bedrock/design";
 import * as api from "../api";
+import { errorDescriptor } from "../errorMessages";
+import { useAnswer } from "../useAnswer";
 import type { Challenge } from "../types";
 
 interface DeviceEntryProps {
@@ -11,13 +13,15 @@ interface DeviceEntryProps {
 export function DeviceEntry({ onChallenge }: DeviceEntryProps) {
   const { t } = useLingui();
   const [userCode, setUserCode] = useState("");
+  const { error, submit } = useAnswer(onChallenge);
 
   return (
     <Card title={t({ id: "login.device.enterCode", message: "Enter the code shown on your device" })}>
+      {error ? <Alert tone="error">{t(errorDescriptor(error))}</Alert> : null}
       <form
         onSubmit={(event) => {
           event.preventDefault();
-          api.startDevice(userCode).then(onChallenge);
+          submit(api.startDevice(userCode));
         }}
       >
         <TextField

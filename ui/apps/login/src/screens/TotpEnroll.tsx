@@ -11,18 +11,21 @@ export function TotpEnroll({ challenge, onChallenge }: ScreenProps) {
   const { t } = useLingui();
   const [svg, setSvg] = useState("");
   const [code, setCode] = useState("");
-  const { error, submit } = useAnswer(onChallenge);
+  const { error, submit, fail } = useAnswer(onChallenge);
   const codes = challenge.recoveryCodes;
 
   useEffect(() => {
     if (challenge.enroll) {
-      otpauthSVG(challenge.enroll.otpauthURL).then(setSvg);
+      otpauthSVG(challenge.enroll.otpauthURL).then(setSvg).catch(fail);
     }
   }, [challenge.enroll]);
+
+  const errorAlert = error ? <Alert tone="error">{t(errorDescriptor(error))}</Alert> : null;
 
   if (codes) {
     return (
       <Card title={t({ id: "login.enroll.recoveryCodes", message: "Save these recovery codes" })}>
+        {errorAlert}
         <p>{t({ id: "login.enroll.recoveryCodesHint", message: "Each code works once. Store them somewhere safe." })}</p>
         <ul>
           {codes.map((recoveryCode) => (
@@ -34,7 +37,7 @@ export function TotpEnroll({ challenge, onChallenge }: ScreenProps) {
         </Button>
         <Button
           variant="primary"
-          onClick={() => api.answer({ type: "totp-enroll" }, challenge.csrf ?? "").then(onChallenge)}
+          onClick={() => submit(api.answer({ type: "totp-enroll" }, challenge.csrf ?? ""))}
         >
           {t({ id: "login.enroll.continue", message: "Continue" })}
         </Button>
@@ -44,7 +47,7 @@ export function TotpEnroll({ challenge, onChallenge }: ScreenProps) {
 
   return (
     <Card title={t({ id: "login.enroll.title", message: "Set up your authenticator" })}>
-      {error ? <Alert tone="error">{t(errorDescriptor(error))}</Alert> : null}
+      {errorAlert}
       <p>{t({ id: "login.enroll.scan", message: "Scan this code with your authenticator app" })}</p>
       <div dangerouslySetInnerHTML={{ __html: svg }} />
       <p>{t({ id: "login.enroll.secretLabel", message: "Or enter this key manually" })}</p>

@@ -4,10 +4,13 @@ import type { Challenge } from "./types";
 export interface UseAnswer {
   error: string | null;
   submit: (promise: Promise<Challenge>) => void;
+  fail: () => void;
 }
 
 export function useAnswer(onChallenge: (next: Challenge) => void): UseAnswer {
   const [error, setError] = useState<string | null>(null);
+
+  const fail = () => setError("unknown");
 
   const submit = (promise: Promise<Challenge>) => {
     promise
@@ -18,8 +21,8 @@ export function useAnswer(onChallenge: (next: Challenge) => void): UseAnswer {
         }
         onChallenge(next);
       })
-      .catch(() => setError("unknown"));
+      .catch(fail);
   };
 
-  return { error, submit };
+  return { error, submit, fail };
 }
