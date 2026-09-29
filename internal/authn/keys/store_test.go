@@ -112,3 +112,68 @@ func TestSaveAndLoadKeys(t *testing.T) {
 		t.Fatalf("deleting a key without its Secret must not fail: %v", err)
 	}
 }
+
+func corruptSecret(t *testing.T, c client.Client, id string) {
+	t.Helper()
+	ctx := context.Background()
+	var stored corev1.Secret
+	if err := c.Get(ctx, objectKey(id), &stored); err != nil {
+		t.Fatal(err)
+	}
+	stored.Data[secretKey] = []byte("not a pem block")
+	if err := c.Update(ctx, &stored); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestLoadSkipsUndecodableSecret(t *testing.T) {
+	c := startTestEnv(t)
+	ctx := context.Background()
+	good, err := Generate(rand.Reader, t0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := Save(ctx, c, good); err != nil {
+		t.Fatal(err)
+	}
+	bad, err := Generate(rand.Reader, t0.Add(Lifetime))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := Save(ctx, c, bad); err != nil {
+		t.Fatal(err)
+	}
+	corruptSecret(t, c, bad.ID)
+	loaded, err := Load(ctx, c)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(loaded) != 1 || loaded[0].ID != good.ID {
+		t.Fatalf("Load must skip the undecodable key and keep the good one, got %v", ids(loaded))
+	}
+}
+
+func TestNextNotBeforeHealsAfterOnlyKeyIsUndecodable(t *testing.T) {
+	c := startTestEnv(t)
+	ctx := context.Background()
+	bad, err := Generate(rand.Reader, t0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := Save(ctx, c, bad); err != nil {
+		t.Fatal(err)
+	}
+	corruptSecret(t, c, bad.ID)
+	loaded, err := Load(ctx, c)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(loaded) != 0 {
+		t.Fatalf("the only key is undecodable, Load must return none, got %v", ids(loaded))
+	}
+	now := t0.Add(10 * day)
+	next, ok := NextNotBefore(loaded, now)
+	if !ok || !next.Equal(now) {
+		t.Fatalf("with no usable keys the issuer must be told to mint one now, got %v %v", next, ok)
+	}
+}

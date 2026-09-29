@@ -7,7 +7,6 @@ import (
 	"crypto/x509"
 	"encoding/pem"
 	"errors"
-	"fmt"
 
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -41,7 +40,7 @@ func Load(ctx context.Context, c client.Reader) ([]Key, error) {
 		}
 		private, err := decodePrivateKey(stored.Data[secretKey])
 		if err != nil {
-			return nil, fmt.Errorf("signing key %s: %w", item.Name, err)
+			continue
 		}
 		loaded = append(loaded, Key{ID: item.Name, Private: private, NotBefore: item.Spec.NotBefore.Time, RetireAfter: item.Spec.RetireAfter.Time})
 	}
