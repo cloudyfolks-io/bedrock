@@ -2,14 +2,15 @@ import { useState } from "react";
 import { useLingui } from "@lingui/react/macro";
 import { Alert, Button } from "@bedrock/design";
 import * as api from "../api";
-import { ApiError } from "../api";
 import { errorDescriptor } from "../errorMessages";
+import { handleAccountError } from "./session";
 
 interface RecoverySectionProps {
   csrf: string;
+  onSessionExpired: () => void;
 }
 
-export function RecoverySection({ csrf }: RecoverySectionProps) {
+export function RecoverySection({ csrf, onSessionExpired }: RecoverySectionProps) {
   const { t } = useLingui();
   const [codes, setCodes] = useState<string[] | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -19,9 +20,7 @@ export function RecoverySection({ csrf }: RecoverySectionProps) {
     api
       .newRecoveryCodes(csrf)
       .then((result) => setCodes(result.recoveryCodes))
-      .catch((thrown: unknown) => {
-        setError(thrown instanceof ApiError ? thrown.code : "unknown");
-      });
+      .catch((thrown: unknown) => handleAccountError(thrown, onSessionExpired, setError));
   };
 
   if (codes) {

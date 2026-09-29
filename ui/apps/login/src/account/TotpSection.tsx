@@ -6,14 +6,16 @@ import { ApiError } from "../api";
 import { errorDescriptor } from "../errorMessages";
 import { otpauthSVG } from "../qr";
 import type { AccountMethod } from "../types";
+import { handleAccountError } from "./session";
 
 interface TotpSectionProps {
   csrf: string;
   methods: AccountMethod[];
   onChanged: () => void;
+  onSessionExpired: () => void;
 }
 
-export function TotpSection({ csrf, methods, onChanged }: TotpSectionProps) {
+export function TotpSection({ csrf, methods, onChanged, onSessionExpired }: TotpSectionProps) {
   const { t } = useLingui();
   const enrolled = methods.some((method) => method.method === "totp");
   const [enrollment, setEnrollment] = useState<{ secret: string; svg: string } | null>(null);
@@ -27,9 +29,7 @@ export function TotpSection({ csrf, methods, onChanged }: TotpSectionProps) {
     api
       .beginTOTP(csrf)
       .then((data) => otpauthSVG(data.otpauthURL).then((svg) => setEnrollment({ secret: data.secret, svg })))
-      .catch((thrown: unknown) => {
-        setError(thrown instanceof ApiError ? thrown.code : "unknown");
-      });
+      .catch((thrown: unknown) => handleAccountError(thrown, onSessionExpired, setError));
   };
 
   const verify = () => {
@@ -42,9 +42,7 @@ export function TotpSection({ csrf, methods, onChanged }: TotpSectionProps) {
         setRecoveryCodes(result.recoveryCodes);
         onChanged();
       })
-      .catch((thrown: unknown) => {
-        setError(thrown instanceof ApiError ? thrown.code : "unknown");
-      });
+      .catch((thrown: unknown) => handleAccountError(thrown, onSessionExpired, setError));
   };
 
   const remove = () => {
@@ -58,7 +56,7 @@ export function TotpSection({ csrf, methods, onChanged }: TotpSectionProps) {
           setBlocked(true);
           return;
         }
-        setError(thrown instanceof ApiError ? thrown.code : "unknown");
+        handleAccountError(thrown, onSessionExpired, setError);
       });
   };
 

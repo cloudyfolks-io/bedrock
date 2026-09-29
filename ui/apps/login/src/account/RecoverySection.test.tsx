@@ -18,7 +18,7 @@ describe("RecoverySection", () => {
 
   for (const locale of locales) {
     it(`shows the codes once in ${locale} then dismisses them`, async () => {
-      renderWithLocale(<RecoverySection csrf="csrf-acct" />, locale);
+      renderWithLocale(<RecoverySection csrf="csrf-acct" onSessionExpired={() => {}} />, locale);
       expect(document.documentElement.dir).toBe(dirOf(locale));
       fireEvent.click(screen.getByText(generates[locale]));
       expect(await screen.findByText("a2b3c4d5e6")).not.toBeNull();

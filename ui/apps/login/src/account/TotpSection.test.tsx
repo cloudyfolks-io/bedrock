@@ -41,7 +41,12 @@ describe("TotpSection", () => {
     it(`shows the removeBlocked message in ${locale} when the server refuses`, async () => {
       vi.mocked(api.removeTOTP).mockRejectedValue(new MockApiError("second_factor_required"));
       renderWithLocale(
-        <TotpSection csrf="csrf-acct" methods={[{ method: "totp", enrolledAt: "2026-01-01T00:00:00Z", lastUsed: null }]} onChanged={() => {}} />,
+        <TotpSection
+          csrf="csrf-acct"
+          methods={[{ method: "totp", enrolledAt: "2026-01-01T00:00:00Z", lastUsed: null }]}
+          onChanged={() => {}}
+          onSessionExpired={() => {}}
+        />,
         locale,
       );
       expect(document.documentElement.dir).toBe(dirOf(locale));

@@ -2,14 +2,15 @@ import { useState } from "react";
 import { useLingui } from "@lingui/react/macro";
 import { Alert, Button, TextField } from "@bedrock/design";
 import * as api from "../api";
-import { ApiError } from "../api";
 import { errorDescriptor } from "../errorMessages";
+import { handleAccountError } from "./session";
 
 interface PasswordSectionProps {
   csrf: string;
+  onSessionExpired: () => void;
 }
 
-export function PasswordSection({ csrf }: PasswordSectionProps) {
+export function PasswordSection({ csrf, onSessionExpired }: PasswordSectionProps) {
   const { t } = useLingui();
   const [current, setCurrent] = useState("");
   const [next, setNext] = useState("");
@@ -32,9 +33,7 @@ export function PasswordSection({ csrf }: PasswordSectionProps) {
               setCurrent("");
               setNext("");
             })
-            .catch((thrown: unknown) => {
-              setError(thrown instanceof ApiError ? thrown.code : "unknown");
-            });
+            .catch((thrown: unknown) => handleAccountError(thrown, onSessionExpired, setError));
         }}
       >
         <TextField

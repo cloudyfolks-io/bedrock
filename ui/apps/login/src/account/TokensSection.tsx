@@ -2,15 +2,16 @@ import { useEffect, useState } from "react";
 import { useLingui } from "@lingui/react/macro";
 import { Alert, Button, TextField } from "@bedrock/design";
 import * as api from "../api";
-import { ApiError } from "../api";
 import { errorDescriptor } from "../errorMessages";
 import type { TokenInfo } from "../types";
+import { handleAccountError } from "./session";
 
 interface TokensSectionProps {
   csrf: string;
+  onSessionExpired: () => void;
 }
 
-export function TokensSection({ csrf }: TokensSectionProps) {
+export function TokensSection({ csrf, onSessionExpired }: TokensSectionProps) {
   const { t } = useLingui();
   const [tokens, setTokens] = useState<TokenInfo[]>([]);
   const [description, setDescription] = useState("");
@@ -18,7 +19,7 @@ export function TokensSection({ csrf }: TokensSectionProps) {
   const [error, setError] = useState<string | null>(null);
 
   const refresh = () => {
-    api.listTokens().then(setTokens);
+    api.listTokens().then(setTokens).catch((thrown: unknown) => handleAccountError(thrown, onSessionExpired, setError));
   };
 
   useEffect(refresh, []);
@@ -50,9 +51,7 @@ export function TokensSection({ csrf }: TokensSectionProps) {
                 setDescription("");
                 refresh();
               })
-              .catch((thrown: unknown) => {
-                setError(thrown instanceof ApiError ? thrown.code : "unknown");
-              });
+              .catch((thrown: unknown) => handleAccountError(thrown, onSessionExpired, setError));
           }}
         >
           <TextField
@@ -80,9 +79,7 @@ export function TokensSection({ csrf }: TokensSectionProps) {
                   api
                     .revokeToken(token.id, csrf)
                     .then(refresh)
-                    .catch((thrown: unknown) => {
-                      setError(thrown instanceof ApiError ? thrown.code : "unknown");
-                    });
+                    .catch((thrown: unknown) => handleAccountError(thrown, onSessionExpired, setError));
                 }}
               >
                 {t({ id: "account.tokens.revoke", message: "Revoke" })}

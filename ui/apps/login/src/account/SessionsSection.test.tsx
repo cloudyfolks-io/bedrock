@@ -9,6 +9,13 @@ vi.mock("../api", () => ({
   listSessions: vi.fn(),
   revokeSession: vi.fn(),
   logout: vi.fn(),
+  ApiError: class ApiError extends Error {
+    code: string;
+    constructor(code: string) {
+      super(code);
+      this.code = code;
+    }
+  },
 }));
 
 const currents = { en: "This device", fa: "این دستگاه", ar: "هذا الجهاز" };
@@ -26,7 +33,7 @@ describe("SessionsSection", () => {
 
   for (const locale of locales) {
     it(`marks the current session in ${locale} and logs out with the CSRF token`, async () => {
-      renderWithLocale(<SessionsSection csrf="csrf-acct" />, locale);
+      renderWithLocale(<SessionsSection csrf="csrf-acct" onSessionExpired={() => {}} />, locale);
       expect(document.documentElement.dir).toBe(dirOf(locale));
       expect(await screen.findByText(currents[locale])).not.toBeNull();
       fireEvent.click(screen.getByText(logouts[locale]));
@@ -35,4 +42,10 @@ describe("SessionsSection", () => {
       });
     });
   }
+
+  it("shows an error instead of an empty list when loading sessions fails", async () => {
+    vi.mocked(api.listSessions).mockRejectedValue(new Error("network down"));
+    renderWithLocale(<SessionsSection csrf="csrf-acct" onSessionExpired={() => {}} />, "en");
+    expect(await screen.findByRole("alert")).not.toBeNull();
+  });
 });

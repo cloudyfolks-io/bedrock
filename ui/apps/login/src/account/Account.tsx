@@ -21,6 +21,8 @@ export function Account() {
 
   useEffect(load, [load]);
 
+  const onSessionExpired = useCallback(() => setSignedOut(true), []);
+
   if (signedOut) {
     return (
       <Card title={t({ id: "account.signedOut.title", message: "You are signed out" })}>
@@ -35,11 +37,13 @@ export function Account() {
 
   return (
     <Card title={t({ id: "account.title", message: "Account" })}>
-      {account.user.source === "" ? <PasswordSection csrf={account.csrf} /> : null}
-      <TotpSection csrf={account.csrf} methods={account.methods} onChanged={load} />
-      <RecoverySection csrf={account.csrf} />
-      <TokensSection csrf={account.csrf} />
-      <SessionsSection csrf={account.csrf} />
+      {account.user.source === "" ? (
+        <PasswordSection csrf={account.csrf} onSessionExpired={onSessionExpired} />
+      ) : null}
+      <TotpSection csrf={account.csrf} methods={account.methods} onChanged={load} onSessionExpired={onSessionExpired} />
+      <RecoverySection csrf={account.csrf} onSessionExpired={onSessionExpired} />
+      <TokensSection csrf={account.csrf} onSessionExpired={onSessionExpired} />
+      <SessionsSection csrf={account.csrf} onSessionExpired={onSessionExpired} />
     </Card>
   );
 }

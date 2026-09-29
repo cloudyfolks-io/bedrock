@@ -9,6 +9,13 @@ vi.mock("../api", () => ({
   listTokens: vi.fn(),
   createToken: vi.fn(),
   revokeToken: vi.fn(),
+  ApiError: class ApiError extends Error {
+    code: string;
+    constructor(code: string) {
+      super(code);
+      this.code = code;
+    }
+  },
 }));
 
 const descriptionLabels = { en: "Description", fa: "توضیحات", ar: "الوصف" };
@@ -24,7 +31,7 @@ describe("TokensSection", () => {
 
   for (const locale of locales) {
     it(`creates a token in ${locale}, shows it once with the CSRF token`, async () => {
-      renderWithLocale(<TokensSection csrf="csrf-acct" />, locale);
+      renderWithLocale(<TokensSection csrf="csrf-acct" onSessionExpired={() => {}} />, locale);
       expect(document.documentElement.dir).toBe(dirOf(locale));
       fireEvent.change(screen.getByLabelText(descriptionLabels[locale]), { target: { value: "laptop" } });
       fireEvent.click(screen.getByText(creates[locale]));
@@ -34,4 +41,21 @@ describe("TokensSection", () => {
       expect(await screen.findByText("brk_secretvalue")).not.toBeNull();
     });
   }
+
+  it("sends the user to login when creating a token answers no_session", async () => {
+    vi.mocked(api.createToken).mockRejectedValue(new api.ApiError("no_session"));
+    const onSessionExpired = vi.fn();
+    renderWithLocale(<TokensSection csrf="csrf-acct" onSessionExpired={onSessionExpired} />, "en");
+    fireEvent.change(screen.getByLabelText(descriptionLabels.en), { target: { value: "laptop" } });
+    fireEvent.click(screen.getByText(creates.en));
+    await waitFor(() => {
+      expect(onSessionExpired).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  it("shows an error instead of an empty list when loading tokens fails", async () => {
+    vi.mocked(api.listTokens).mockRejectedValue(new Error("network down"));
+    renderWithLocale(<TokensSection csrf="csrf-acct" onSessionExpired={() => {}} />, "en");
+    expect(await screen.findByRole("alert")).not.toBeNull();
+  });
 });

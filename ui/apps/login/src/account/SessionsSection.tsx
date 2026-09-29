@@ -2,22 +2,23 @@ import { useEffect, useState } from "react";
 import { useLingui } from "@lingui/react/macro";
 import { Alert, Button } from "@bedrock/design";
 import * as api from "../api";
-import { ApiError } from "../api";
 import { errorDescriptor } from "../errorMessages";
 import { loginPath } from "../router";
 import type { SessionInfo } from "../types";
+import { handleAccountError } from "./session";
 
 interface SessionsSectionProps {
   csrf: string;
+  onSessionExpired: () => void;
 }
 
-export function SessionsSection({ csrf }: SessionsSectionProps) {
+export function SessionsSection({ csrf, onSessionExpired }: SessionsSectionProps) {
   const { t } = useLingui();
   const [sessions, setSessions] = useState<SessionInfo[]>([]);
   const [error, setError] = useState<string | null>(null);
 
   const refresh = () => {
-    api.listSessions().then(setSessions);
+    api.listSessions().then(setSessions).catch((thrown: unknown) => handleAccountError(thrown, onSessionExpired, setError));
   };
 
   useEffect(refresh, []);
@@ -37,9 +38,7 @@ export function SessionsSection({ csrf }: SessionsSectionProps) {
                 api
                   .revokeSession(session.id, csrf)
                   .then(refresh)
-                  .catch((thrown: unknown) => {
-                    setError(thrown instanceof ApiError ? thrown.code : "unknown");
-                  });
+                  .catch((thrown: unknown) => handleAccountError(thrown, onSessionExpired, setError));
               }}
             >
               {t({ id: "account.sessions.revoke", message: "Revoke" })}
@@ -54,9 +53,7 @@ export function SessionsSection({ csrf }: SessionsSectionProps) {
           api
             .logout(csrf)
             .then(() => window.location.assign(loginPath()))
-            .catch((thrown: unknown) => {
-              setError(thrown instanceof ApiError ? thrown.code : "unknown");
-            });
+            .catch((thrown: unknown) => handleAccountError(thrown, onSessionExpired, setError));
         }}
       >
         {t({ id: "account.sessions.logout", message: "Sign out" })}
