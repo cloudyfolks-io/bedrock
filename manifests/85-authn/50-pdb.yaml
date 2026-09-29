@@ -1,0 +1,12 @@
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: bedrock-authn
+  namespace: bedrock-system
+  labels:
+    bedrock.cloudyfolks.io/component: authn
+spec:
+  maxUnavailable: 1
+  selector:
+    matchLabels:
+      app: bedrock-authn

@@ -1,0 +1,30 @@
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: bedrock-authn
+  namespace: bedrock-system
+  labels:
+    bedrock.cloudyfolks.io/component: authn
+spec:
+  podSelector:
+    matchLabels:
+      app: bedrock-authn
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: traefik
+          podSelector:
+            matchLabels:
+              app.kubernetes.io/name: traefik
+      ports:
+        - protocol: TCP
+          port: https
+    - from:
+        - ipBlock:
+            cidr: 100.64.0.0/16
+      ports:
+        - protocol: TCP
+          port: https

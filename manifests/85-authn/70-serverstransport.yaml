@@ -1,0 +1,11 @@
+apiVersion: traefik.io/v1alpha1
+kind: ServersTransport
+metadata:
+  name: bedrock-authn
+  namespace: bedrock-system
+  labels:
+    bedrock.cloudyfolks.io/component: authn
+spec:
+  serverName: bedrock-authn.bedrock-system.svc
+  rootCAs:
+    - secret: bedrock-authn-tls

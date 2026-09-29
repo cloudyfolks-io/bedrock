@@ -1,0 +1,21 @@
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: bedrock-authn-tls
+  namespace: bedrock-system
+  labels:
+    bedrock.cloudyfolks.io/component: authn
+spec:
+  secretName: bedrock-authn-tls
+  commonName: bedrock-authn.bedrock-system.svc
+  dnsNames:
+    - bedrock-authn.bedrock-system.svc
+    - bedrock-authn.bedrock-system.svc.cluster.local
+  privateKey:
+    algorithm: ECDSA
+    size: 256
+    rotationPolicy: Always
+  issuerRef:
+    group: cert-manager.io
+    kind: ClusterIssuer
+    name: bedrock-ca
