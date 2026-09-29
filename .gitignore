@@ -2,6 +2,8 @@
 /dist/
 /ui/node_modules/
 /ui/dist/
+/internal/authn/server/ui/dist/*
+!/internal/authn/server/ui/dist/.keep
 *.test
 coverage.out
 /.superpowers/
