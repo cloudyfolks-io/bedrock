@@ -6,6 +6,7 @@ import (
 	"strings"
 	"time"
 
+	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
@@ -31,12 +32,15 @@ const (
 )
 
 type AddonInput struct {
-	Cluster    v1alpha1.Cluster
-	Hosts      []v1alpha1.Host
-	Settings   map[string]string
-	Bundle     release.Bundle
-	CustomTLS  *corev1.Secret
-	PlatformCA *corev1.Secret
+	Cluster        v1alpha1.Cluster
+	Hosts          []v1alpha1.Host
+	Settings       map[string]string
+	Bundle         release.Bundle
+	CustomTLS      *corev1.Secret
+	PlatformCA     *corev1.Secret
+	CustomCA       []byte
+	WebhookToken   string
+	AuthnInstalled bool
 }
 
 type Probe struct {
@@ -115,7 +119,15 @@ func (r *AddonReconciler) input(ctx context.Context, cluster v1alpha1.Cluster) (
 	if err != nil {
 		return AddonInput{}, err
 	}
-	input := AddonInput{Cluster: cluster, Hosts: hosts.Items, Settings: values, Bundle: r.Bundle, PlatformCA: platformCA}
+	token, err := optionalSecret(ctx, r.Client, client.ObjectKey{Namespace: release.SystemNamespace, Name: apiserver.TokenSecretName})
+	if err != nil {
+		return AddonInput{}, err
+	}
+	installed, err := deploymentExists(ctx, r.Client, client.ObjectKey{Namespace: release.SystemNamespace, Name: authnName})
+	if err != nil {
+		return AddonInput{}, err
+	}
+	input := AddonInput{Cluster: cluster, Hosts: hosts.Items, Settings: values, Bundle: r.Bundle, PlatformCA: platformCA, WebhookToken: string(secretData(token, "token")), AuthnInstalled: installed}
 	if values["platform.tls-mode"] != "Custom" || values["platform.custom-tls"] == "" {
 		return input, nil
 	}
@@ -124,6 +136,7 @@ func (r *AddonReconciler) input(ctx context.Context, cluster v1alpha1.Cluster) (
 		return AddonInput{}, err
 	}
 	input.CustomTLS = customTLS
+	input.CustomCA = secretData(customTLS, "ca.crt")
 	return input, nil
 }
 
@@ -137,6 +150,22 @@ func optionalSecret(ctx context.Context, c client.Reader, key client.ObjectKey) 
 		return nil, err
 	}
 	return &secret, nil
+}
+
+func secretData(secret *corev1.Secret, key string) []byte {
+	if secret == nil {
+		return nil
+	}
+	return secret.Data[key]
+}
+
+func deploymentExists(ctx context.Context, c client.Reader, key client.ObjectKey) (bool, error) {
+	var deployment appsv1.Deployment
+	err := c.Get(ctx, key, &deployment)
+	if errors.IsNotFound(err) {
+		return false, nil
+	}
+	return err == nil, err
 }
 
 func settingValues(ctx context.Context, c client.Client) (map[string]string, error) {

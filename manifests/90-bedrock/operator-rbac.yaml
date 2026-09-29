@@ -311,6 +311,7 @@ rules:
 - apiGroups:
   - traefik.io
   resources:
+  - ingressroutes
   - tlsstores
   verbs:
   - create

@@ -152,3 +152,35 @@ func TestRoleYAML(t *testing.T) {
 		t.Fatalf("round trip: %v", err)
 	}
 }
+
+func TestOperatorRoleCoversAuthnAddon(t *testing.T) {
+	role, err := OperatorRole(rbacBundle(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, rule := range []struct{ group, resource, verb string }{
+		{"traefik.io", "ingressroutes", "patch"},
+		{"bedrock.cloudyfolks.io", "oauthclients", "patch"},
+		{"", "configmaps", "patch"},
+		{"", "secrets", "patch"},
+		{"", "secrets", "watch"},
+		{"apps", "deployments", "get"},
+		{"apps", "deployments", "list"},
+		{"apps", "deployments", "watch"},
+	} {
+		if !allows(role, rule.group, rule.resource, rule.verb) {
+			t.Errorf("role must allow %s %s/%s", rule.verb, rule.group, rule.resource)
+		}
+	}
+	body, err := os.ReadFile(filepath.Join("..", "..", "manifests", "90-bedrock", "operator-rbac.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var committed rbacv1.ClusterRole
+	if err := sigyaml.Unmarshal(body, &committed); err != nil {
+		t.Fatal(err)
+	}
+	if !allows(committed, "traefik.io", "ingressroutes", "patch") || !allows(committed, "apps", "deployments", "watch") {
+		t.Fatal("run make rbac: the committed ClusterRole lacks the authn addon")
+	}
+}

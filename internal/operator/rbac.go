@@ -161,9 +161,9 @@ func sampleAddonInputs(bundle release.Bundle) []AddonInput {
 	letsEncrypt := withSettings(catalogDefaults(), map[string]string{"platform.tls-mode": "LetsEncrypt", "letsencrypt.email": "ops@example.com"})
 	custom := withSettings(catalogDefaults(), map[string]string{"platform.tls-mode": "Custom", "platform.custom-tls": "sample"})
 	return []AddonInput{
-		{Cluster: cluster, Hosts: hosts, Settings: catalogDefaults(), Bundle: bundle, PlatformCA: ca},
-		{Cluster: cluster, Hosts: hosts, Settings: letsEncrypt, Bundle: bundle, PlatformCA: ca},
-		{Cluster: cluster, Hosts: hosts, Settings: custom, Bundle: bundle, CustomTLS: secret, PlatformCA: ca},
+		{Cluster: cluster, Hosts: hosts, Settings: catalogDefaults(), Bundle: bundle, PlatformCA: ca, WebhookToken: "sample", AuthnInstalled: true},
+		{Cluster: cluster, Hosts: hosts, Settings: letsEncrypt, Bundle: bundle, PlatformCA: ca, WebhookToken: "sample", AuthnInstalled: true},
+		{Cluster: cluster, Hosts: hosts, Settings: custom, Bundle: bundle, CustomTLS: secret, PlatformCA: ca, WebhookToken: "sample", AuthnInstalled: true},
 	}
 }
 
