@@ -14,7 +14,7 @@ repo=$(git rev-parse --show-toplevel)
 arch=$(uname -m | sed 's/x86_64/amd64/;s/aarch64/arm64/')
 base_images=(golang:1.27 gcr.io/distroless/static:nonroot registry:3 node:24-bookworm-slim)
 upgrade_env="REGISTRY=localhost:$port ARCH=$arch VERSION_A=v0.0.0-e2e.1 VERSION_B=v0.0.0-e2e.2 K0S_A=v1.36.2+k0s.0 K0S_B=v1.36.3+k0s.0"
-known_jobs=(test e2e-kind e2e-bundle e2e-upgrade e2e-upgrade-abort)
+known_jobs=(test e2e-kind e2e-bundle e2e-upgrade e2e-upgrade-abort e2e-authn)
 vm_path=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 
 if [ "$#" -eq 0 ]; then
@@ -251,6 +251,24 @@ run_e2e_bundle() {
   remove_job_images
   vm_up
   in_vm "KUBECONFIG=/var/lib/k0s/pki/admin.conf BUNDLE=dist/bedrock-dev-bundle-$arch.tar.zst IMAGE=localhost:$port/bedrock:dev BIN=dist/bedrock-dev-linux-$arch ARCH=$arch EMULATION=$(emulation_flag)" hack/e2e-init.sh
+  rm -f "dist/bedrock-dev-bundle-$arch.tar.zst"
+  vm_down
+}
+
+run_e2e_authn() {
+  ensure_images
+  registry_up
+  make build release binaries VERSION=dev IMAGE="localhost:$port/bedrock:dev" PIN_DIGESTS=1
+  retry 3 docker build -t "localhost:$port/bedrock:dev" -f Containerfile .
+  retry 3 docker push "localhost:$port/bedrock:dev"
+  make bundle VERSION=dev IMAGE="localhost:$port/bedrock:dev" PIN_DIGESTS=1 BUNDLE_ARCH="$arch"
+  registry_down
+  remove_job_images
+  CGO_ENABLED=0 GOOS=linux GOARCH="$arch" go test -c -tags e2e -o "dist/e2e-authn-$arch.test" ./test/e2e/authn
+  ARCH="$arch" hack/e2e-authn-images.sh
+  vm_up
+  in_vm "KUBECONFIG=/var/lib/k0s/pki/admin.conf BUNDLE=dist/bedrock-dev-bundle-$arch.tar.zst IMAGE=localhost:$port/bedrock:dev BIN=dist/bedrock-dev-linux-$arch ARCH=$arch EMULATION=$(emulation_flag)" hack/e2e-init.sh
+  in_vm "BEDROCK_BIN=dist/bedrock-dev-linux-$arch E2E_TEST=dist/e2e-authn-$arch.test" hack/e2e-authn.sh
   rm -f "dist/bedrock-dev-bundle-$arch.tar.zst"
   vm_down
 }

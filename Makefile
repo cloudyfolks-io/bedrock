@@ -16,7 +16,7 @@ BUNDLE_ARCH ?= amd64
 K0S_VERSION ?=
 UPGRADE_FROM ?=
 
-.PHONY: build test lint generate crds envtest-assets e2e-kind e2e-init e2e-bundle controller-gen release crane bundle binaries rbac local-ci ui
+.PHONY: build test lint generate crds envtest-assets e2e-kind e2e-init e2e-bundle e2e-authn controller-gen release crane bundle binaries rbac local-ci ui
 
 ui:
 	cd ui && pnpm install --frozen-lockfile && pnpm -r test && pnpm -r typecheck && pnpm --filter login build
@@ -69,6 +69,11 @@ bundle: build release
 
 e2e-bundle: bundle
 	BUNDLE=dist/bedrock-$(VERSION)-bundle-$(BUNDLE_ARCH).tar.zst hack/e2e-init.sh
+
+e2e-authn: bundle
+	CGO_ENABLED=0 $(GO) test -c -tags e2e -o dist/e2e-authn.test ./test/e2e/authn
+	BUNDLE=dist/bedrock-$(VERSION)-bundle-$(BUNDLE_ARCH).tar.zst hack/e2e-init.sh
+	E2E_TEST=dist/e2e-authn.test hack/e2e-authn.sh
 
 local-ci:
 	hack/local-ci.sh $(JOBS)
