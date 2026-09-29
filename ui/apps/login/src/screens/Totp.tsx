@@ -3,12 +3,13 @@ import { useLingui } from "@lingui/react/macro";
 import { Alert, Button, Card, OtpField } from "@bedrock/design";
 import * as api from "../api";
 import { errorDescriptor } from "../errorMessages";
+import { useAnswer } from "../useAnswer";
 import type { ScreenProps } from "../screens";
 
 export function Totp({ challenge, onChallenge }: ScreenProps) {
   const { t } = useLingui();
   const [code, setCode] = useState("");
-  const [error, setError] = useState<string | null>(null);
+  const { error, submit } = useAnswer(onChallenge);
 
   return (
     <Card title={t({ id: "login.totp.title", message: "Enter your authenticator code" })}>
@@ -16,16 +17,7 @@ export function Totp({ challenge, onChallenge }: ScreenProps) {
       <form
         onSubmit={(event) => {
           event.preventDefault();
-          api
-            .answer({ type: "totp", code }, challenge.csrf ?? "")
-            .then((next) => {
-              if (next.type === "error") {
-                setError(next.error?.code ?? "unknown");
-                return;
-              }
-              onChallenge(next);
-            })
-            .catch(() => setError("unknown"));
+          submit(api.answer({ type: "totp", code }, challenge.csrf ?? ""));
         }}
       >
         <OtpField

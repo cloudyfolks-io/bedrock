@@ -3,12 +3,13 @@ import { useLingui } from "@lingui/react/macro";
 import { Alert, Button, Card, TextField } from "@bedrock/design";
 import * as api from "../api";
 import { errorDescriptor } from "../errorMessages";
+import { useAnswer } from "../useAnswer";
 import type { ScreenProps } from "../screens";
 
 export function Recovery({ challenge, onChallenge }: ScreenProps) {
   const { t } = useLingui();
   const [code, setCode] = useState("");
-  const [error, setError] = useState<string | null>(null);
+  const { error, submit } = useAnswer(onChallenge);
 
   return (
     <Card title={t({ id: "login.recovery.title", message: "Enter a recovery code" })}>
@@ -16,16 +17,7 @@ export function Recovery({ challenge, onChallenge }: ScreenProps) {
       <form
         onSubmit={(event) => {
           event.preventDefault();
-          api
-            .answer({ type: "recovery", code, method: "recovery" }, challenge.csrf ?? "")
-            .then((next) => {
-              if (next.type === "error") {
-                setError(next.error?.code ?? "unknown");
-                return;
-              }
-              onChallenge(next);
-            })
-            .catch(() => setError("unknown"));
+          submit(api.answer({ type: "recovery", code, method: "recovery" }, challenge.csrf ?? ""));
         }}
       >
         <TextField
