@@ -8,11 +8,15 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/cloudyfolks-io/bedrock/internal/cliauth"
+	"k8s.io/client-go/tools/clientcmd"
+	clientcmdapi "k8s.io/client-go/tools/clientcmd/api"
 )
 
 func fakeIDToken(sub string) string {
@@ -60,6 +64,9 @@ func newFakeOP(t *testing.T, tokenResponse func(*http.Request) map[string]any) *
 	mux.HandleFunc("/token", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(tokenResponse(r))
+	})
+	mux.HandleFunc("/api/v1/cluster", func(w http.ResponseWriter, r *http.Request) {
+		json.NewEncoder(w).Encode(map[string]string{"server": "https://api.test:6443", "certificateAuthority": "-----BEGIN CERTIFICATE-----\nMA==\n-----END CERTIFICATE-----\n"})
 	})
 	ts := httptest.NewServer(mux)
 	issuer = ts.URL
@@ -169,5 +176,66 @@ func TestLoginNeedsServer(t *testing.T) {
 func TestRootListsLogin(t *testing.T) {
 	if _, ok := Commands()["login"]; !ok {
 		t.Fatal("bedrock login must be a command")
+	}
+}
+
+func TestKubeconfigMergeKeepsOtherContexts(t *testing.T) {
+	op := newFakeOP(t, successTokens("alice"))
+	home := t.TempDir()
+	kubeconfigPath := filepath.Join(home, ".kube", "config")
+	if err := os.MkdirAll(filepath.Dir(kubeconfigPath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	existing := clientcmdapi.NewConfig()
+	existing.Clusters["other"] = &clientcmdapi.Cluster{Server: "https://other.example.com"}
+	existing.Contexts["other"] = &clientcmdapi.Context{Cluster: "other"}
+	existing.CurrentContext = "other"
+	if err := clientcmd.WriteToFile(*existing, kubeconfigPath); err != nil {
+		t.Fatal(err)
+	}
+	deps := LoginDeps{Home: home, HTTP: func(string) (*http.Client, error) { return op.Client(), nil }, Open: func(string) error { t.Fatal("must not open a browser"); return nil }, Now: time.Now}
+	var stdout, stderr bytes.Buffer
+	if code := RunLogin(context.Background(), []string{"--server", op.URL, "--write-kubeconfig"}, deps, &stdout, &stderr); code != 0 {
+		t.Fatalf("exit %d stderr %q", code, stderr.String())
+	}
+	merged, err := clientcmd.LoadFromFile(kubeconfigPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := merged.Contexts["other"]; !ok {
+		t.Fatal("the merge must keep the other context")
+	}
+	if _, ok := merged.Contexts["bedrock"]; !ok {
+		t.Fatal("the merge must add the bedrock context")
+	}
+	if merged.CurrentContext != "bedrock" {
+		t.Fatalf("current context %q", merged.CurrentContext)
+	}
+}
+
+func TestExecCredentialRefreshes(t *testing.T) {
+	op := newFakeOP(t, successTokens("alice"))
+	home := t.TempDir()
+	path := cliauth.CachePath(home, op.URL)
+	stale := cliauth.Tokens{AccessToken: "old", RefreshToken: "r", IDToken: fakeIDToken("alice"), Expiry: time.Now().Add(-time.Hour)}
+	if err := cliauth.WriteCache(path, stale); err != nil {
+		t.Fatal(err)
+	}
+	deps := LoginDeps{Home: home, HTTP: func(string) (*http.Client, error) { return op.Client(), nil }, Open: func(string) error { t.Fatal("must not open a browser"); return nil }, Now: time.Now}
+	var stdout, stderr bytes.Buffer
+	if code := RunLogin(context.Background(), []string{"--server", op.URL, "--exec-credential"}, deps, &stdout, &stderr); code != 0 {
+		t.Fatalf("exit %d stderr %q", code, stderr.String())
+	}
+	var credential struct {
+		Kind   string `json:"kind"`
+		Status struct {
+			Token string `json:"token"`
+		} `json:"status"`
+	}
+	if err := json.Unmarshal(stdout.Bytes(), &credential); err != nil {
+		t.Fatalf("stdout %q: %v", stdout.String(), err)
+	}
+	if credential.Kind != "ExecCredential" || credential.Status.Token != "access-alice" {
+		t.Fatalf("credential %+v", credential)
 	}
 }

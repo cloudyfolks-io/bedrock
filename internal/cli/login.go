@@ -12,11 +12,14 @@ import (
 	"net/http"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"runtime"
 	"strings"
 	"time"
 
 	"github.com/cloudyfolks-io/bedrock/internal/cliauth"
+	"k8s.io/client-go/tools/clientcmd"
+	clientcmdapi "k8s.io/client-go/tools/clientcmd/api"
 )
 
 type LoginDeps struct {
@@ -68,6 +71,100 @@ func loadTokens(ctx context.Context, c *http.Client, deps LoginDeps, issuer, cli
 	return flow(ctx, c, issuer, clientID)
 }
 
+type optionalPath struct {
+	set   bool
+	value string
+}
+
+func (p *optionalPath) String() string { return p.value }
+
+func (p *optionalPath) Set(value string) error {
+	p.set = true
+	if value != "true" {
+		p.value = value
+	}
+	return nil
+}
+
+func (p *optionalPath) IsBoolFlag() bool { return true }
+
+func absolutePath(path string) (string, error) {
+	if path == "" {
+		return "", nil
+	}
+	return filepath.Abs(path)
+}
+
+func atomicWriteFile(path string, data []byte, perm os.FileMode) error {
+	dir := filepath.Dir(path)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return err
+	}
+	temp, err := os.CreateTemp(dir, ".kubeconfig-*.tmp")
+	if err != nil {
+		return err
+	}
+	tempPath := temp.Name()
+	if _, err := temp.Write(data); err != nil {
+		temp.Close()
+		os.Remove(tempPath)
+		return err
+	}
+	if err := temp.Close(); err != nil {
+		os.Remove(tempPath)
+		return err
+	}
+	if err := os.Chmod(tempPath, perm); err != nil {
+		os.Remove(tempPath)
+		return err
+	}
+	if err := os.Rename(tempPath, path); err != nil {
+		os.Remove(tempPath)
+		return err
+	}
+	return nil
+}
+
+func writeKubeconfigFile(ctx context.Context, c *http.Client, issuer, caFile, path string) error {
+	server, ca, err := cliauth.ClusterInfo(ctx, c, issuer)
+	if err != nil {
+		return err
+	}
+	absCAFile, err := absolutePath(caFile)
+	if err != nil {
+		return err
+	}
+	fresh, err := cliauth.Kubeconfig(server, ca, issuer, absCAFile)
+	if err != nil {
+		return err
+	}
+	addition, err := clientcmd.Load(fresh)
+	if err != nil {
+		return err
+	}
+	existing, err := clientcmd.LoadFromFile(path)
+	if os.IsNotExist(err) {
+		existing = clientcmdapi.NewConfig()
+	} else if err != nil {
+		return err
+	}
+	for name, cluster := range addition.Clusters {
+		existing.Clusters[name] = cluster
+	}
+	for name, authInfo := range addition.AuthInfos {
+		existing.AuthInfos[name] = authInfo
+	}
+	for name, loginContext := range addition.Contexts {
+		existing.Contexts[name] = loginContext
+	}
+	existing.CurrentContext = addition.CurrentContext
+	merged, err := clientcmd.Write(*existing)
+	if err != nil {
+		return err
+	}
+	return atomicWriteFile(path, merged, 0o600)
+}
+
 func RunLogin(ctx context.Context, args []string, deps LoginDeps, stdout, stderr io.Writer) int {
 	flags := flag.NewFlagSet("login", flag.ContinueOnError)
 	flags.SetOutput(stderr)
@@ -75,6 +172,9 @@ func RunLogin(ctx context.Context, args []string, deps LoginDeps, stdout, stderr
 	clientID := flags.String("client-id", "bedrock-cli", "OAuth client ID")
 	browser := flags.Bool("browser", false, "use the loopback authorization code flow instead of the device flow")
 	caFile := flags.String("ca-file", "", "additional CA certificate for the authn server")
+	var writeKubeconfig optionalPath
+	flags.Var(&writeKubeconfig, "write-kubeconfig", "write a kubeconfig for the cluster, optionally =<path> (default ~/.kube/config)")
+	execCredential := flags.Bool("exec-credential", false, "print an ExecCredential instead of logging in interactively")
 	if err := flags.Parse(args); err != nil {
 		return 2
 	}
@@ -100,7 +200,27 @@ func RunLogin(ctx context.Context, args []string, deps LoginDeps, stdout, stderr
 		fmt.Fprintln(stderr, err)
 		return 1
 	}
-	fmt.Fprintf(stdout, "logged in as %s\n", subjectOf(tokens.IDToken))
+	switch {
+	case *execCredential:
+		credential, err := cliauth.ExecCredential(tokens)
+		if err != nil {
+			fmt.Fprintln(stderr, err)
+			return 1
+		}
+		fmt.Fprintln(stdout, string(credential))
+	case writeKubeconfig.set:
+		path := writeKubeconfig.value
+		if path == "" {
+			path = filepath.Join(deps.Home, ".kube", "config")
+		}
+		if err := writeKubeconfigFile(ctx, client, *server, *caFile, path); err != nil {
+			fmt.Fprintln(stderr, err)
+			return 1
+		}
+		fmt.Fprintf(stdout, "wrote kubeconfig to %s\n", path)
+	default:
+		fmt.Fprintf(stdout, "logged in as %s\n", subjectOf(tokens.IDToken))
+	}
 	return 0
 }
 
