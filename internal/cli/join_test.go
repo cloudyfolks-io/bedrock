@@ -3,13 +3,22 @@ package cli
 import (
 	"bytes"
 	"context"
+	"crypto/rand"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
+	"k8s.io/apimachinery/pkg/runtime"
+	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
+	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/client/fake"
+
+	"github.com/cloudyfolks-io/bedrock/internal/authn/apiserver"
 	"github.com/cloudyfolks-io/bedrock/internal/host"
 	"github.com/cloudyfolks-io/bedrock/internal/k0s"
+	"github.com/cloudyfolks-io/bedrock/internal/operator"
 	"github.com/cloudyfolks-io/bedrock/internal/roles"
 )
 
@@ -125,7 +134,7 @@ func TestRunJoinControlPlaneEnablesWorkerWithoutWorkloadRole(t *testing.T) {
 	})
 	e.Responses["/usr/local/bin/k0s "+strings.Join(installArgs, " ")] = ""
 	executable := fakeExecutable(t)
-	deps := InitDeps{Exec: e, Uid: 0, FreeBytes: func(string) (uint64, error) { return 100 << 30, nil }, Root: root, Executable: executable}
+	deps := InitDeps{Exec: e, Uid: 0, FreeBytes: func(string) (uint64, error) { return 100 << 30, nil }, Root: root, Executable: executable, NewClient: clusterWith(t)}
 	var out, errOut bytes.Buffer
 	code := RunJoin(context.Background(), []string{"--token", controlPlaneJoinToken(t), "--data-dir", dataDir, "--k0s-bin", "/usr/local/bin/k0s"}, deps, &out, &errOut)
 	if code != 0 {
@@ -295,7 +304,7 @@ func TestJoinWritesAuthnFiles(t *testing.T) {
 	e.Responses["/usr/local/bin/k0s "+strings.Join(installArgs, " ")] = ""
 	present := false
 	exec := filesAtStart{FakeExec: e, paths: authnPaths(root), present: &present}
-	deps := InitDeps{Exec: exec, Uid: 0, FreeBytes: func(string) (uint64, error) { return 100 << 30, nil }, Root: root, Executable: fakeExecutable(t)}
+	deps := InitDeps{Exec: exec, Uid: 0, FreeBytes: func(string) (uint64, error) { return 100 << 30, nil }, Root: root, Executable: fakeExecutable(t), NewClient: clusterWith(t)}
 	var out, errOut bytes.Buffer
 	code := RunJoin(context.Background(), []string{"--token", controlPlaneJoinToken(t), "--data-dir", dataDir, "--k0s-bin", "/usr/local/bin/k0s"}, deps, &out, &errOut)
 	if code != 0 {
@@ -356,5 +365,91 @@ func TestCheckAuthnFilesRefusesOtherNames(t *testing.T) {
 	}
 	if err := checkAuthnFiles(map[string][]byte{"authentication.yaml": []byte("a"), "webhook.kubeconfig": nil}); err == nil || !strings.Contains(err.Error(), "webhook.kubeconfig") {
 		t.Fatalf("an empty webhook file must be refused: %v", err)
+	}
+}
+
+func clusterWith(t *testing.T, objects ...client.Object) func(string) (client.Client, error) {
+	t.Helper()
+	scheme := runtime.NewScheme()
+	if err := clientgoscheme.AddToScheme(scheme); err != nil {
+		t.Fatal(err)
+	}
+	c := fake.NewClientBuilder().WithScheme(scheme).WithObjects(objects...).Build()
+	return func(string) (client.Client, error) { return c, nil }
+}
+
+func controllerJoinHost(t *testing.T) (string, string, *host.FakeExec) {
+	t.Helper()
+	root, e := fakeHost(t)
+	dataDir := filepath.Join(root, "var", "lib", "k0s")
+	e.Errors["/usr/local/bin/k0s status --data-dir "+dataDir] = &host.ExitError{Code: 1}
+	installArgs := k0s.InstallArgs(k0s.InstallOptions{
+		Role: "controller", Force: true, ConfigPath: filepath.Join(root, "etc", "k0s", "k0s.yaml"), TokenFile: filepath.Join(root, "etc", "k0s", "join-token"),
+		EnableWorker: true, NoTaints: true, DynamicConfig: true, Labels: roles.Labels([]string{"control-plane"}),
+		KubeletExtraArgs: []string{"--node-status-update-frequency=4s"}, DataDir: dataDir, KubeletRootDir: k0s.DefaultKubeletRootDir, DisableComponents: k0s.DefaultDisabledComponents,
+	})
+	e.Responses["/usr/local/bin/k0s "+strings.Join(installArgs, " ")] = ""
+	return root, dataDir, e
+}
+
+func clusterAuthnSecretsFor(t *testing.T, bearer string) ([]byte, []byte, []client.Object) {
+	t.Helper()
+	certPEM, keyPEM, err := apiserver.NewCA(rand.Reader, time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	return certPEM, keyPEM, []client.Object{apiserver.CASecret(certPEM, keyPEM), operator.WebhookTokenSecret(bearer)}
+}
+
+func TestJoinRestoresAuthnBootstrapFromTheCluster(t *testing.T) {
+	root, dataDir, e := controllerJoinHost(t)
+	certPEM, keyPEM, secrets := clusterAuthnSecretsFor(t, "cluster-bearer")
+	deps := InitDeps{Exec: e, Uid: 0, FreeBytes: func(string) (uint64, error) { return 100 << 30, nil }, Root: root, Executable: fakeExecutable(t), NewClient: clusterWith(t, secrets...)}
+	var out, errOut bytes.Buffer
+	if code := RunJoin(context.Background(), []string{"--token", controlPlaneJoinToken(t), "--data-dir", dataDir, "--k0s-bin", "/usr/local/bin/k0s"}, deps, &out, &errOut); code != 0 {
+		t.Fatalf("exit %d\nstdout %s\nstderr %s", code, out.String(), errOut.String())
+	}
+	dir := filepath.Join(root, "var", "lib", "bedrock", "authn")
+	for name, want := range map[string]string{"ca.crt": string(certPEM), "ca.key": string(keyPEM), "webhook-token": "cluster-bearer"} {
+		got, err := os.ReadFile(filepath.Join(dir, name))
+		if err != nil || string(got) != want {
+			t.Fatalf("%s = %q %v", name, got, err)
+		}
+		if info, err := os.Stat(filepath.Join(dir, name)); err != nil || info.Mode().Perm() != 0o600 {
+			t.Fatalf("%s mode %v %v", name, info, err)
+		}
+	}
+}
+
+func TestJoinWithoutClusterMaterialLeavesNoBootstrap(t *testing.T) {
+	root, dataDir, e := controllerJoinHost(t)
+	deps := InitDeps{Exec: e, Uid: 0, FreeBytes: func(string) (uint64, error) { return 100 << 30, nil }, Root: root, Executable: fakeExecutable(t), NewClient: clusterWith(t)}
+	var out, errOut bytes.Buffer
+	if code := RunJoin(context.Background(), []string{"--token", controlPlaneJoinToken(t), "--data-dir", dataDir, "--k0s-bin", "/usr/local/bin/k0s"}, deps, &out, &errOut); code != 0 {
+		t.Fatalf("exit %d\nstdout %s\nstderr %s", code, out.String(), errOut.String())
+	}
+	if _, err := os.Stat(filepath.Join(root, "var", "lib", "bedrock", "authn")); !os.IsNotExist(err) {
+		t.Fatalf("a join must not make authn material: %v", err)
+	}
+}
+
+func TestJoinRefusesOtherAuthnBootstrap(t *testing.T) {
+	root, dataDir, e := controllerJoinHost(t)
+	_, _, secrets := clusterAuthnSecretsFor(t, "cluster-bearer")
+	dir := filepath.Join(root, "var", "lib", "bedrock", "authn")
+	if _, _, err := loadOrBootstrapAuthn(dir, rand.Reader, time.Now(), "lab.example"); err != nil {
+		t.Fatal(err)
+	}
+	before, err := os.ReadFile(filepath.Join(dir, "ca.key"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	deps := InitDeps{Exec: e, Uid: 0, FreeBytes: func(string) (uint64, error) { return 100 << 30, nil }, Root: root, Executable: fakeExecutable(t), NewClient: clusterWith(t, secrets...)}
+	var out, errOut bytes.Buffer
+	if code := RunJoin(context.Background(), []string{"--token", controlPlaneJoinToken(t), "--data-dir", dataDir, "--k0s-bin", "/usr/local/bin/k0s"}, deps, &out, &errOut); code != 1 || !strings.Contains(errOut.String(), "cert-manager/bedrock-ca") {
+		t.Fatalf("exit %d stderr %s", code, errOut.String())
+	}
+	if after, err := os.ReadFile(filepath.Join(dir, "ca.key")); err != nil || string(after) != string(before) {
+		t.Fatal("the host material must stay")
 	}
 }

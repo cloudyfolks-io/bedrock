@@ -32,7 +32,7 @@ type joinOptions struct {
 }
 
 func joinCommand(args []string, stdout, stderr io.Writer) int {
-	deps := InitDeps{Exec: host.RealExec{}, Uid: os.Getuid(), FreeBytes: host.FreeBytes, Stat: os.Stat, Root: "/", Executable: os.Executable}
+	deps := InitDeps{Exec: host.RealExec{}, Uid: os.Getuid(), FreeBytes: host.FreeBytes, Stat: os.Stat, Root: "/", NewClient: newClusterClient, Executable: os.Executable}
 	return RunJoin(context.Background(), args, deps, stdout, stderr)
 }
 
@@ -158,6 +158,14 @@ func RunJoin(ctx context.Context, args []string, deps InitDeps, stdout, stderr i
 	if controlPlane {
 		step(stdout, "waiting for the api server")
 		if err := k0sClient.WaitReady(ctx); err != nil {
+			return fail(stderr, err)
+		}
+		step(stdout, "authn bootstrap")
+		c, err := deps.NewClient(filepath.Join(o.dataDir, "pki", "admin.conf"))
+		if err != nil {
+			return fail(stderr, err)
+		}
+		if err := syncAuthnBootstrap(ctx, c, filepath.Join(deps.Root, authnBootstrapDir)); err != nil {
 			return fail(stderr, err)
 		}
 	}

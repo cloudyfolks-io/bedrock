@@ -29,6 +29,7 @@ import (
 	"github.com/cloudyfolks-io/bedrock/internal/authn/apiserver"
 	"github.com/cloudyfolks-io/bedrock/internal/host"
 	"github.com/cloudyfolks-io/bedrock/internal/k0s"
+	"github.com/cloudyfolks-io/bedrock/internal/operator"
 	"github.com/cloudyfolks-io/bedrock/internal/release"
 	"github.com/cloudyfolks-io/bedrock/internal/roles"
 )
@@ -772,12 +773,50 @@ func authnHostFiles(t *testing.T, root string) map[string]string {
 	return files
 }
 
-func TestInitRefusesLostBootstrapOnARunningCluster(t *testing.T) {
+func TestInitRestoresLostBootstrapFromTheCluster(t *testing.T) {
+	run := prepareInit(t)
+	runPreparedInit(t, run)
+	before := authnHostFiles(t, run.root)
+	bootstrap := filepath.Join(run.root, "var", "lib", "bedrock", "authn")
+	saved := bootstrapFilesIn(t, bootstrap)
+	if err := os.RemoveAll(bootstrap); err != nil {
+		t.Fatal(err)
+	}
+	markRunning(run)
+	runPreparedInit(t, run)
+	if !reflect.DeepEqual(bootstrapFilesIn(t, bootstrap), saved) {
+		t.Fatal("the bootstrap dir must come back from the cluster Secrets")
+	}
+	if info, err := os.Stat(bootstrap); err != nil || info.Mode().Perm() != 0o700 {
+		t.Fatalf("bootstrap dir %v %v", info, err)
+	}
+	if !reflect.DeepEqual(authnHostFiles(t, run.root), before) {
+		t.Fatal("the authn host files must stay")
+	}
+}
+
+func bootstrapFilesIn(t *testing.T, dir string) map[string]string {
+	t.Helper()
+	files := map[string]string{}
+	for _, name := range []string{"ca.crt", "ca.key", "webhook-token"} {
+		path := filepath.Join(dir, name)
+		if info, err := os.Stat(path); err != nil || info.Mode().Perm() != 0o600 {
+			t.Fatalf("%s mode %v %v", name, info, err)
+		}
+		files[name] = readInitFile(t, path)
+	}
+	return files
+}
+
+func TestInitRefusesLostBootstrapWithPartialClusterMaterial(t *testing.T) {
 	run := prepareInit(t)
 	runPreparedInit(t, run)
 	before := authnHostFiles(t, run.root)
 	bootstrap := filepath.Join(run.root, "var", "lib", "bedrock", "authn")
 	if err := os.RemoveAll(bootstrap); err != nil {
+		t.Fatal(err)
+	}
+	if err := run.c.Delete(context.Background(), &corev1.Secret{ObjectMeta: metav1.ObjectMeta{Namespace: "bedrock-system", Name: "bedrock-authn-webhook-token"}}); err != nil {
 		t.Fatal(err)
 	}
 	markRunning(run)
@@ -790,6 +829,39 @@ func TestInitRefusesLostBootstrapOnARunningCluster(t *testing.T) {
 	}
 	if !reflect.DeepEqual(authnHostFiles(t, run.root), before) {
 		t.Fatal("the authn host files must stay")
+	}
+}
+
+func TestInitOnAnUpgradedClusterTakesTheClusterMaterial(t *testing.T) {
+	run := prepareInit(t)
+	ctx := context.Background()
+	certPEM, keyPEM, err := apiserver.NewCA(rand.Reader, time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	bearer := "operator-made-bearer-0123456789ab"
+	for _, name := range []string{"cert-manager", "bedrock-system"} {
+		if err := client.IgnoreAlreadyExists(run.c.Create(ctx, &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: name}})); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, secret := range []*corev1.Secret{apiserver.CASecret(certPEM, keyPEM), operator.WebhookTokenSecret(bearer)} {
+		if err := run.c.Create(ctx, secret); err != nil {
+			t.Fatal(err)
+		}
+	}
+	markRunning(run)
+	runPreparedInit(t, run)
+	saved := bootstrapFilesIn(t, filepath.Join(run.root, "var", "lib", "bedrock", "authn"))
+	if saved["ca.key"] != string(keyPEM) || saved["ca.crt"] != string(certPEM) || saved["webhook-token"] != bearer {
+		t.Fatal("init must take the material the operator created")
+	}
+	config, err := clientcmd.Load([]byte(readInitFile(t, authnPaths(run.root)[1])))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if config.AuthInfos["kube-apiserver"].Token != bearer {
+		t.Fatal("the webhook file must carry the cluster bearer")
 	}
 }
 

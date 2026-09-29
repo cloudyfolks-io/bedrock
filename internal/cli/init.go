@@ -44,7 +44,6 @@ const (
 	bootstrapCACert         = "ca.crt"
 	bootstrapCAKey          = "ca.key"
 	bootstrapBearer         = "webhook-token"
-	webhookBearerLength     = 32
 	generatedPasswordLength = 20
 )
 
@@ -520,7 +519,7 @@ func bootstrapAuthn(random io.Reader, now time.Time, host string) (apiserver.Inp
 	if err != nil {
 		return apiserver.Inputs{}, nil, err
 	}
-	bearer, err := secret.Base62(random, webhookBearerLength)
+	bearer, err := operator.NewWebhookToken(random)
 	if err != nil {
 		return apiserver.Inputs{}, nil, err
 	}
@@ -678,16 +677,7 @@ func createAuthnSecrets(ctx context.Context, c client.Client, caCert, caKey []by
 }
 
 func authnSecrets(caCert, caKey []byte, bearer string) []*corev1.Secret {
-	token := &corev1.Secret{
-		ObjectMeta: metav1.ObjectMeta{
-			Namespace: release.SystemNamespace,
-			Name:      apiserver.TokenSecretName,
-			Labels:    map[string]string{v1alpha1.LabelAuthn: "true", v1alpha1.LabelKind: "WebhookToken", v1alpha1.LabelName: apiserver.TokenSecretName},
-		},
-		Type: corev1.SecretTypeOpaque,
-		Data: map[string][]byte{"token": []byte(bearer)},
-	}
-	return []*corev1.Secret{apiserver.CASecret(caCert, caKey), token}
+	return []*corev1.Secret{apiserver.CASecret(caCert, caKey), operator.WebhookTokenSecret(bearer)}
 }
 
 func ensureAuthnSecret(ctx context.Context, c client.Client, desired *corev1.Secret) error {
@@ -727,10 +717,10 @@ func checkRunningAuthn(ctx context.Context, k0sClient k0s.Client, newClient func
 	if err != nil {
 		return err
 	}
-	return checkAuthnMaterial(ctx, c, dir)
+	return syncAuthnBootstrap(ctx, c, dir)
 }
 
-func checkAuthnMaterial(ctx context.Context, c client.Client, dir string) error {
+func syncAuthnBootstrap(ctx context.Context, c client.Client, dir string) error {
 	missing, err := missingBootstrapFiles(dir)
 	if err != nil {
 		return err
@@ -742,6 +732,21 @@ func checkAuthnMaterial(ctx context.Context, c client.Client, dir string) error 
 		}
 		return compareAuthnSecrets(ctx, c, authnSecrets(in.CA, key, in.Bearer))
 	}
+	found, err := clusterAuthnSecrets(ctx, c)
+	if err != nil {
+		return err
+	}
+	switch {
+	case len(found) == 0:
+		return nil
+	case len(missing) == len(bootstrapFiles()) && len(found) == len(authnSecrets(nil, nil, "")):
+		return restoreAuthnBootstrap(dir, found[0], found[1])
+	}
+	return fmt.Errorf("authn bootstrap %s lacks %s while Secret %s/%s exists, restore that directory from the Secrets", filepath.Join("/", authnBootstrapDir), strings.Join(missing, ", "), found[0].Namespace, found[0].Name)
+}
+
+func clusterAuthnSecrets(ctx context.Context, c client.Client) ([]corev1.Secret, error) {
+	var found []corev1.Secret
 	for _, want := range authnSecrets(nil, nil, "") {
 		var existing corev1.Secret
 		err := c.Get(ctx, client.ObjectKeyFromObject(want), &existing)
@@ -749,11 +754,22 @@ func checkAuthnMaterial(ctx context.Context, c client.Client, dir string) error 
 			continue
 		}
 		if err != nil {
-			return err
+			return nil, err
 		}
-		return fmt.Errorf("authn bootstrap %s lacks %s while Secret %s/%s exists, restore that directory from the Secrets", filepath.Join("/", authnBootstrapDir), strings.Join(missing, ", "), want.Namespace, want.Name)
+		found = append(found, existing)
 	}
-	return nil
+	return found, nil
+}
+
+func restoreAuthnBootstrap(dir string, ca, token corev1.Secret) error {
+	cert, key, bearer := ca.Data[corev1.TLSCertKey], ca.Data[corev1.TLSPrivateKeyKey], string(token.Data[operator.WebhookTokenKey])
+	if _, err := tls.X509KeyPair(cert, key); err != nil {
+		return fmt.Errorf("secret %s/%s holds no usable CA: %w", ca.Namespace, ca.Name, err)
+	}
+	if bearer == "" {
+		return fmt.Errorf("secret %s/%s holds no %s", token.Namespace, token.Name, operator.WebhookTokenKey)
+	}
+	return saveAuthnBootstrap(dir, apiserver.Inputs{CA: cert, Bearer: bearer}, key)
 }
 
 func createAdmin(ctx context.Context, c client.Client, random io.Reader) (string, bool, error) {

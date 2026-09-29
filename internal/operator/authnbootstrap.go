@@ -19,7 +19,7 @@ import (
 
 const (
 	authnGroup         = "authn"
-	webhookTokenKey    = "token"
+	WebhookTokenKey    = "token"
 	webhookTokenLength = 32
 )
 
@@ -36,7 +36,7 @@ func WebhookTokenSecret(bearer string) *corev1.Secret {
 			Labels:    map[string]string{v1alpha1.LabelAuthn: "true", v1alpha1.LabelKind: "WebhookToken", v1alpha1.LabelName: apiserver.TokenSecretName},
 		},
 		Type: corev1.SecretTypeOpaque,
-		Data: map[string][]byte{webhookTokenKey: []byte(bearer)},
+		Data: map[string][]byte{WebhookTokenKey: []byte(bearer)},
 	}
 }
 
