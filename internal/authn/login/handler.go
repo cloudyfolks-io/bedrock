@@ -1,0 +1,896 @@
+package login
+
+import (
+	"context"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"io"
+	"mime"
+	"net/http"
+	"net/url"
+	"slices"
+	"strings"
+	"time"
+
+	corev1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"sigs.k8s.io/controller-runtime/pkg/client"
+
+	"github.com/cloudyfolks-io/bedrock/api/v1alpha1"
+	"github.com/cloudyfolks-io/bedrock/internal/authn/methods"
+	"github.com/cloudyfolks-io/bedrock/internal/authn/policy"
+	"github.com/cloudyfolks-io/bedrock/internal/authn/secret"
+	"github.com/cloudyfolks-io/bedrock/internal/authn/store"
+	"github.com/cloudyfolks-io/bedrock/internal/release"
+)
+
+const (
+	cookieSecretLength = 43
+	requestIDLength    = 26
+	requestIDAlphabet  = "abcdefghijklmnopqrstuvwxyz0123456789"
+	verifierLength     = 64
+	nonceLength        = 32
+	upstreamTTL        = 10 * time.Minute
+	maxBody            = 64 << 10
+)
+
+var (
+	errUnexpectedAnswer = errors.New("login: unexpected answer")
+	errUnsupportedMedia = errors.New("login: body is not application/json")
+	errLoginDone        = errors.New("login: the auth request is done")
+	errLoginChanged     = errors.New("login: the login state changed meanwhile")
+)
+
+type Deps struct {
+	Store    *store.Store
+	Client   client.Client
+	Methods  methods.Registry
+	Settings func(context.Context) (policy.Settings, error)
+	Random   io.Reader
+	Clock    func() time.Time
+	Limiter  *methods.RateLimiter
+	Callback func(ctx context.Context, id string) string
+	LDAPDial methods.LDAPDialer
+}
+
+type decoration struct {
+	challenge methods.Challenge
+	status    v1alpha1.AuthRequestStatus
+	cookies   []func(http.ResponseWriter)
+}
+
+type startBody struct {
+	AuthRequest string `json:"authRequest"`
+}
+
+type deviceBody struct {
+	UserCode string `json:"userCode"`
+}
+
+func Handler(deps Deps) http.Handler {
+	mux := http.NewServeMux()
+	mux.HandleFunc("POST /api/v1/login/start", func(w http.ResponseWriter, r *http.Request) { start(w, r, deps) })
+	mux.HandleFunc("POST /api/v1/login/device", func(w http.ResponseWriter, r *http.Request) { startDevice(w, r, deps) })
+	mux.HandleFunc("GET /api/v1/login/challenge", func(w http.ResponseWriter, r *http.Request) { current(w, r, deps) })
+	mux.HandleFunc("POST /api/v1/login/answer", func(w http.ResponseWriter, r *http.Request) { answer(w, r, deps) })
+	mux.HandleFunc("GET /api/v1/login/providers/{name}/callback", func(w http.ResponseWriter, r *http.Request) { callback(w, r, deps) })
+	return mux
+}
+
+func start(w http.ResponseWriter, r *http.Request, deps Deps) {
+	body, err := decodeJSON[startBody](r)
+	if err != nil {
+		writeDecodeError(w, err)
+		return
+	}
+	request, err := loadRequest(r.Context(), deps, body.AuthRequest)
+	if err != nil || request.Status.Done || request.Spec.DeviceRequest != "" {
+		writeJSON(w, http.StatusOK, expired())
+		return
+	}
+	if request.Status.CookieHash != "" {
+		restart(w, r, deps, request)
+		return
+	}
+	value, err := newLoginCookie(deps.Random, request.Name)
+	if err != nil {
+		internal(w)
+		return
+	}
+	bound, err := deps.Store.SaveLogin(r.Context(), request.Name, bindCookie(secret.SHA256Hex(value)))
+	if err != nil {
+		internal(w)
+		return
+	}
+	if !isBound(bound, value) {
+		writeError(w, http.StatusConflict, "already_started")
+		return
+	}
+	SetCookie(w, CookieLogin, value, request.Spec.ExpiresAt.Sub(deps.Clock()))
+	facts, err := loadFacts(r.Context(), deps, bound, nil)
+	if err != nil {
+		internal(w)
+		return
+	}
+	respond(w, r, deps, bound, Start(facts))
+}
+
+func restart(w http.ResponseWriter, r *http.Request, deps Deps, request v1alpha1.AuthRequest) {
+	_, value, ok := loginCookie(r)
+	if !ok || !isBound(request, value) {
+		writeError(w, http.StatusConflict, "already_started")
+		return
+	}
+	resumeLogin(w, r, deps, request)
+}
+
+func startDevice(w http.ResponseWriter, r *http.Request, deps Deps) {
+	body, err := decodeJSON[deviceBody](r)
+	if err != nil {
+		writeDecodeError(w, err)
+		return
+	}
+	ctx := r.Context()
+	now := deps.Clock()
+	if !deps.Limiter.Allow(ClientIP(r), now) {
+		writeError(w, http.StatusTooManyRequests, methods.FailureRateLimited)
+		return
+	}
+	device, err := deps.Store.DeviceRequestByUserCode(ctx, body.UserCode)
+	if err != nil || settled(device) {
+		writeError(w, http.StatusNotFound, methods.FailureInvalidCode)
+		return
+	}
+	id, err := secret.FromAlphabet(deps.Random, requestIDAlphabet, requestIDLength)
+	if err != nil {
+		internal(w)
+		return
+	}
+	value, err := newLoginCookie(deps.Random, id)
+	if err != nil {
+		internal(w)
+		return
+	}
+	request := deviceAuthRequest(id, device, store.NormalizeUserCode(body.UserCode))
+	if err := deps.Client.Create(ctx, &request, client.FieldOwner(v1alpha1.AuthnFieldManager)); err != nil {
+		internal(w)
+		return
+	}
+	bound, err := deps.Store.SaveLogin(ctx, id, bindCookie(secret.SHA256Hex(value)))
+	if err != nil {
+		internal(w)
+		return
+	}
+	SetCookie(w, CookieLogin, value, device.Spec.ExpiresAt.Sub(now))
+	facts, err := loadFacts(ctx, deps, bound, nil)
+	if err != nil {
+		internal(w)
+		return
+	}
+	respond(w, r, deps, bound, Start(facts))
+}
+
+func current(w http.ResponseWriter, r *http.Request, deps Deps) {
+	request, ok := boundRequest(w, r, deps)
+	if !ok {
+		return
+	}
+	resumeLogin(w, r, deps, request)
+}
+
+func resumeLogin(w http.ResponseWriter, r *http.Request, deps Deps, request v1alpha1.AuthRequest) {
+	facts, err := subjectFacts(r.Context(), deps, request)
+	if err != nil {
+		internal(w)
+		return
+	}
+	respond(w, r, deps, request, resume(request.Status.Login, facts))
+}
+
+func answer(w http.ResponseWriter, r *http.Request, deps Deps) {
+	request, ok := boundRequest(w, r, deps)
+	if !ok {
+		return
+	}
+	if !CheckCSRF(request.Status.Login.CSRFHash, r.Header.Get("X-CSRF-Token")) {
+		writeError(w, http.StatusForbidden, "csrf")
+		return
+	}
+	given, err := decodeJSON[methods.Answer](r)
+	if err != nil {
+		writeDecodeError(w, err)
+		return
+	}
+	step, updated, err := dispatch(r, deps, request, given)
+	switch {
+	case errors.Is(err, errUnexpectedAnswer):
+		writeError(w, http.StatusBadRequest, "unexpected_answer")
+	case err != nil:
+		internal(w)
+	default:
+		respond(w, r, deps, updated, step)
+	}
+}
+
+func callback(w http.ResponseWriter, r *http.Request, deps Deps) {
+	request, ok := boundRequest(w, r, deps)
+	if !ok {
+		return
+	}
+	upstream, err := r.Cookie(CookieUpstream)
+	if err != nil || !upstreamMatches(request, upstream.Value, r.PathValue("name"), r.URL.Query().Get("state")) {
+		writeError(w, http.StatusBadRequest, "invalid_state")
+		return
+	}
+	ClearCookie(w, CookieUpstream)
+	given := methods.Answer{Type: v1alpha1.MethodOIDC, Provider: r.PathValue("name"), Code: r.URL.Query().Get("code")}
+	step, updated, err := runMethod(r.Context(), deps, request, flowOf(r, deps, withUpstream(request, upstream.Value)), v1alpha1.MethodOIDC, given)
+	if err != nil {
+		internal(w)
+		return
+	}
+	challenge, err := commit(w, r, deps, updated, step)
+	if err != nil {
+		writeCommitError(w, err)
+		return
+	}
+	http.Redirect(w, r, afterUpstream(challenge, request.Name), http.StatusSeeOther)
+}
+
+func dispatch(r *http.Request, deps Deps, request v1alpha1.AuthRequest, given methods.Answer) (Step, v1alpha1.AuthRequest, error) {
+	ctx := r.Context()
+	state := request.Status.Login
+	flow := flowOf(r, deps, request)
+	switch {
+	case state.Step == methods.ChallengeUsername && given.Type == methods.ChallengeUsername:
+		username := usernameOf(given.Username)
+		facts, err := usernameFacts(ctx, deps, request, username)
+		return AfterUsername(state, username, facts), request, err
+	case (state.Step == methods.ChallengeUsername || state.Step == methods.ChallengeProviders) && given.Type == answerProvider:
+		facts, err := loadFacts(ctx, deps, request, nil)
+		return afterProvider(state, given.Provider, facts), request, err
+	case state.Step == methods.ChallengePassword && given.Type == methods.ChallengePassword:
+		return runMethod(ctx, deps, request, flow, state.Primary, given)
+	case state.Step == methods.ChallengeTOTP && wantsRecovery(given) && given.Code == "":
+		return toRecovery(state), request, nil
+	case state.Step == methods.ChallengeTOTP && wantsRecovery(given):
+		return runMethod(ctx, deps, request, flow, v1alpha1.MethodRecovery, given)
+	case state.Step == methods.ChallengeTOTP && given.Type == methods.ChallengeTOTP:
+		return runMethod(ctx, deps, request, flow, v1alpha1.MethodTOTP, given)
+	case state.Step == methods.ChallengeRecovery && given.Type == methods.ChallengeRecovery:
+		return runMethod(ctx, deps, request, flow, v1alpha1.MethodRecovery, given)
+	case state.Step == methods.ChallengeTOTPEnroll && given.Type == methods.ChallengeTOTPEnroll:
+		return runMethod(ctx, deps, request, flow, v1alpha1.MethodTOTP, given)
+	case state.Step == stepRecoveryCodes && given.Type == methods.ChallengeTOTPEnroll:
+		facts, err := subjectFacts(ctx, deps, request)
+		return afterRecoveryCodes(state, facts), request, err
+	case isDeviceAnswer(state, given) && *given.Approve:
+		return AfterDeviceApprove(state), request, nil
+	case isDeviceAnswer(state, given):
+		return AfterDeviceDeny(state), request, deps.Store.DenyDevice(ctx, request.Spec.DeviceRequest)
+	}
+	return Step{}, request, errUnexpectedAnswer
+}
+
+func runMethod(ctx context.Context, deps Deps, request v1alpha1.AuthRequest, flow methods.Flow, name string, given methods.Answer) (Step, v1alpha1.AuthRequest, error) {
+	method, err := registered(deps, name)
+	if err != nil {
+		return Step{}, request, err
+	}
+	if !deps.Limiter.Allow(flow.ClientIP, flow.Now) {
+		return afterResult(ctx, deps, request, name, methods.Result{Failure: methods.FailureRateLimited}, flow.Now)
+	}
+	user, err := methodUser(ctx, deps, request)
+	if err != nil {
+		return Step{}, request, err
+	}
+	result, err := method.Complete(ctx, flow, user, withUsername(given, request.Status.Login.Username))
+	if err != nil {
+		return Step{}, request, err
+	}
+	return afterResult(ctx, deps, request, name, result, flow.Now)
+}
+
+func afterResult(ctx context.Context, deps Deps, request v1alpha1.AuthRequest, name string, result methods.Result, now time.Time) (Step, v1alpha1.AuthRequest, error) {
+	if result.Subject == nil {
+		facts, err := subjectFacts(ctx, deps, request)
+		return AfterMethod(request.Status.Login, name, result, facts), request, err
+	}
+	updated := withSubject(request, *result.Subject, now)
+	facts, err := loadFacts(ctx, deps, updated, &result.Subject.User)
+	return AfterMethod(updated.Status.Login, name, result, facts), updated, err
+}
+
+func respond(w http.ResponseWriter, r *http.Request, deps Deps, request v1alpha1.AuthRequest, step Step) {
+	challenge, err := commit(w, r, deps, request, step)
+	if err != nil {
+		writeCommitError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, challenge)
+}
+
+func commit(w http.ResponseWriter, r *http.Request, deps Deps, request v1alpha1.AuthRequest, step Step) (methods.Challenge, error) {
+	next, err := decorate(r, deps, request, step)
+	if err != nil {
+		return methods.Challenge{}, err
+	}
+	csrf, csrfHash, err := NewCSRF(deps.Random)
+	if err != nil {
+		return methods.Challenge{}, err
+	}
+	saved, err := deps.Store.SaveLogin(r.Context(), request.Name, withStatus(request.Status.Login.CSRFHash, next.status, csrfHash))
+	if err != nil {
+		return methods.Challenge{}, err
+	}
+	if err := savedWith(saved, csrfHash); err != nil {
+		return methods.Challenge{}, err
+	}
+	for _, write := range next.cookies {
+		write(w)
+	}
+	return withCSRF(next.challenge, csrf), nil
+}
+
+func savedWith(saved v1alpha1.AuthRequest, csrfHash string) error {
+	switch {
+	case saved.Status.Login.CSRFHash == csrfHash:
+		return nil
+	case saved.Status.Done:
+		return errLoginDone
+	}
+	return errLoginChanged
+}
+
+func decorate(r *http.Request, deps Deps, request v1alpha1.AuthRequest, step Step) (decoration, error) {
+	status := *request.Status.DeepCopy()
+	status.Login = step.State
+	switch {
+	case step.Complete && request.Spec.DeviceRequest != "":
+		return approveDevice(r.Context(), deps, request, step, status)
+	case step.Complete:
+		return finish(r, deps, request, step, status)
+	case step.Begin != "":
+		return beginUpstream(r, deps, request, step, status)
+	case step.State.Step == methods.ChallengeTOTPEnroll && step.Challenge.Error == nil:
+		return enrollTOTP(r.Context(), deps, request, step, status)
+	case step.State.Step == stepRecoveryCodes:
+		return recoveryCodes(r.Context(), deps, request, step, status)
+	case step.Challenge.Type == methods.ChallengeDeviceConfirm:
+		return decoration{challenge: withUserCode(step.Challenge, request.Spec.State), status: status}, nil
+	}
+	return decoration{challenge: step.Challenge, status: status}, nil
+}
+
+func finish(r *http.Request, deps Deps, request v1alpha1.AuthRequest, step Step, status v1alpha1.AuthRequestStatus) (decoration, error) {
+	ctx := r.Context()
+	subject, err := sessionSubject(ctx, deps, request)
+	if err != nil {
+		return decoration{}, err
+	}
+	settings, err := deps.Settings(ctx)
+	if err != nil {
+		return decoration{}, err
+	}
+	cookie, err := deps.Store.CreateSession(ctx, subject, r.UserAgent(), ClientIP(r))
+	if err != nil {
+		return decoration{}, err
+	}
+	done := status
+	done.Done = true
+	done.Session = secret.SHA256Hex(cookie)
+	challenge := step.Challenge
+	challenge.Redirect = deps.Callback(ctx, request.Name)
+	return decoration{
+		challenge: challenge,
+		status:    done,
+		cookies: []func(http.ResponseWriter){
+			func(w http.ResponseWriter) { SetCookie(w, CookieSession, cookie, settings.SessionTTL) },
+			func(w http.ResponseWriter) { ClearCookie(w, CookieLogin) },
+		},
+	}, nil
+}
+
+func approveDevice(ctx context.Context, deps Deps, request v1alpha1.AuthRequest, step Step, status v1alpha1.AuthRequestStatus) (decoration, error) {
+	subject, err := sessionSubject(ctx, deps, request)
+	if err != nil {
+		return decoration{}, err
+	}
+	if err := deps.Store.ApproveDevice(ctx, request.Spec.DeviceRequest, subject); err != nil {
+		return decoration{}, err
+	}
+	done := status
+	done.Done = true
+	return decoration{
+		challenge: step.Challenge,
+		status:    done,
+		cookies:   []func(http.ResponseWriter){func(w http.ResponseWriter) { ClearCookie(w, CookieLogin) }},
+	}, nil
+}
+
+func beginUpstream(r *http.Request, deps Deps, request v1alpha1.AuthRequest, step Step, status v1alpha1.AuthRequestStatus) (decoration, error) {
+	method, err := registered(deps, step.Begin)
+	if err != nil {
+		return decoration{}, err
+	}
+	cookie, err := newUpstreamCookie(deps.Random, request.Name)
+	if err != nil {
+		return decoration{}, err
+	}
+	encoded := methods.EncodeUpstream(cookie)
+	flowRequest := request.DeepCopy()
+	flowRequest.Status.Login = step.State
+	challenge, err := method.Begin(r.Context(), flowOf(r, deps, withUpstream(*flowRequest, encoded)), v1alpha1.User{})
+	if err != nil {
+		return decoration{}, err
+	}
+	begun := status
+	begun.Login.Upstream = secret.SHA256Hex(encoded)
+	return decoration{
+		challenge: challenge,
+		status:    begun,
+		cookies:   []func(http.ResponseWriter){func(w http.ResponseWriter) { SetCookie(w, CookieUpstream, encoded, upstreamTTL) }},
+	}, nil
+}
+
+func enrollTOTP(ctx context.Context, deps Deps, request v1alpha1.AuthRequest, step Step, status v1alpha1.AuthRequestStatus) (decoration, error) {
+	method, err := registered(deps, v1alpha1.MethodTOTP)
+	if err != nil {
+		return decoration{}, err
+	}
+	user, err := deps.Store.User(ctx, request.Status.Subject)
+	if err != nil {
+		return decoration{}, err
+	}
+	if err := dropPendingTOTP(ctx, deps.Client, user.Name); err != nil {
+		return decoration{}, err
+	}
+	enrollment, err := method.Enroll(ctx, user, methods.Answer{})
+	if err != nil {
+		return decoration{}, err
+	}
+	challenge := step.Challenge
+	challenge.Enroll = enrollment.TOTP
+	return decoration{challenge: challenge, status: status}, nil
+}
+
+func recoveryCodes(ctx context.Context, deps Deps, request v1alpha1.AuthRequest, step Step, status v1alpha1.AuthRequestStatus) (decoration, error) {
+	method, err := registered(deps, v1alpha1.MethodRecovery)
+	if err != nil {
+		return decoration{}, err
+	}
+	user, err := deps.Store.User(ctx, request.Status.Subject)
+	if err != nil {
+		return decoration{}, err
+	}
+	enrollment, err := method.Enroll(ctx, user, methods.Answer{})
+	if err != nil {
+		return decoration{}, err
+	}
+	challenge := step.Challenge
+	challenge.RecoveryCodes = enrollment.RecoveryCodes
+	return decoration{challenge: challenge, status: status}, nil
+}
+
+func dropPendingTOTP(ctx context.Context, c client.Client, user string) error {
+	var credential v1alpha1.Credential
+	err := c.Get(ctx, objectKey(v1alpha1.CredentialName(user, v1alpha1.MethodTOTP)), &credential)
+	switch {
+	case apierrors.IsNotFound(err):
+		return nil
+	case err != nil:
+		return err
+	case credential.Status.EnrolledAt != nil:
+		return nil
+	}
+	if err := client.IgnoreNotFound(c.Delete(ctx, &credential)); err != nil {
+		return err
+	}
+	pending := &corev1.Secret{ObjectMeta: metav1.ObjectMeta{Namespace: release.SystemNamespace, Name: credential.Spec.SecretRef}}
+	return client.IgnoreNotFound(c.Delete(ctx, pending))
+}
+
+func loadFacts(ctx context.Context, deps Deps, request v1alpha1.AuthRequest, user *v1alpha1.User) (Facts, error) {
+	settings, err := deps.Settings(ctx)
+	if err != nil {
+		return Facts{}, err
+	}
+	groups, err := deps.Store.Groups(ctx)
+	if err != nil {
+		return Facts{}, err
+	}
+	var oauth v1alpha1.OAuthClient
+	if err := deps.Client.Get(ctx, objectKey(request.Spec.ClientID), &oauth); err != nil {
+		return Facts{}, err
+	}
+	providers, err := enabledProviders(ctx, deps.Client)
+	if err != nil {
+		return Facts{}, err
+	}
+	enrolled, err := enrolledMethods(ctx, deps.Client, user)
+	if err != nil {
+		return Facts{}, err
+	}
+	device, err := deviceRequest(ctx, deps.Client, request.Spec.DeviceRequest)
+	if err != nil {
+		return Facts{}, err
+	}
+	return Facts{User: user, Groups: groups, Client: oauth, Settings: settings, Enrolled: enrolled, Providers: providers, Device: device}, nil
+}
+
+func subjectFacts(ctx context.Context, deps Deps, request v1alpha1.AuthRequest) (Facts, error) {
+	if request.Status.Subject == "" {
+		return loadFacts(ctx, deps, request, nil)
+	}
+	user, err := deps.Store.User(ctx, request.Status.Subject)
+	if err != nil {
+		return Facts{}, err
+	}
+	return loadFacts(ctx, deps, request, &user)
+}
+
+func usernameFacts(ctx context.Context, deps Deps, request v1alpha1.AuthRequest, username string) (Facts, error) {
+	user, err := userByUsername(ctx, deps.Client, username)
+	if err != nil {
+		return Facts{}, err
+	}
+	if user.Name != "" {
+		return loadFacts(ctx, deps, request, &user)
+	}
+	facts, err := loadFacts(ctx, deps, request, nil)
+	if err != nil || !slices.ContainsFunc(facts.Providers, isLDAP) {
+		return facts, err
+	}
+	provider, found, err := methods.LDAPProviderFor(ctx, deps.Client, deps.LDAPDial, username)
+	if err != nil || !found {
+		return facts, err
+	}
+	return withLDAPProvider(facts, provider), nil
+}
+
+func methodUser(ctx context.Context, deps Deps, request v1alpha1.AuthRequest) (v1alpha1.User, error) {
+	if request.Status.Subject != "" {
+		return deps.Store.User(ctx, request.Status.Subject)
+	}
+	return userByUsername(ctx, deps.Client, request.Status.Login.Username)
+}
+
+func userByUsername(ctx context.Context, c client.Client, username string) (v1alpha1.User, error) {
+	if username == "" {
+		return v1alpha1.User{}, nil
+	}
+	var user v1alpha1.User
+	err := c.Get(ctx, objectKey(v1alpha1.UserObjectName(username)), &user)
+	switch {
+	case apierrors.IsNotFound(err):
+		return v1alpha1.User{}, nil
+	case err != nil:
+		return v1alpha1.User{}, err
+	case user.Spec.Username != username:
+		return v1alpha1.User{}, nil
+	}
+	return user, nil
+}
+
+func sessionSubject(ctx context.Context, deps Deps, request v1alpha1.AuthRequest) (methods.Subject, error) {
+	subject, err := deps.Store.Subject(ctx, request.Status.Subject)
+	if err != nil {
+		return methods.Subject{}, err
+	}
+	return methods.Subject{User: subject.User, Groups: subject.Groups, AMR: slices.Clone(request.Status.AMR)}, nil
+}
+
+func enabledProviders(ctx context.Context, c client.Client) ([]v1alpha1.IdentityProvider, error) {
+	var list v1alpha1.IdentityProviderList
+	if err := c.List(ctx, &list, client.InNamespace(release.SystemNamespace)); err != nil {
+		return nil, err
+	}
+	return slices.DeleteFunc(list.Items, func(provider v1alpha1.IdentityProvider) bool { return provider.Spec.Disabled }), nil
+}
+
+func enrolledMethods(ctx context.Context, c client.Client, user *v1alpha1.User) ([]string, error) {
+	if user == nil {
+		return nil, nil
+	}
+	var list v1alpha1.CredentialList
+	if err := c.List(ctx, &list, client.InNamespace(release.SystemNamespace), client.MatchingFields{"spec.userRef": user.Name}); err != nil {
+		return nil, err
+	}
+	var enrolled []string
+	for _, credential := range list.Items {
+		if credential.Status.EnrolledAt != nil {
+			enrolled = append(enrolled, credential.Spec.Method)
+		}
+	}
+	slices.Sort(enrolled)
+	return enrolled, nil
+}
+
+func deviceRequest(ctx context.Context, c client.Client, name string) (*v1alpha1.DeviceRequest, error) {
+	if name == "" {
+		return nil, nil
+	}
+	var device v1alpha1.DeviceRequest
+	err := c.Get(ctx, objectKey(name), &device)
+	switch {
+	case apierrors.IsNotFound(err):
+		return nil, nil
+	case err != nil:
+		return nil, err
+	}
+	return &device, nil
+}
+
+func loadRequest(ctx context.Context, deps Deps, id string) (v1alpha1.AuthRequest, error) {
+	found, err := deps.Store.AuthRequestByID(ctx, id)
+	if err != nil {
+		return v1alpha1.AuthRequest{}, err
+	}
+	request, ok := found.(store.AuthRequest)
+	if !ok {
+		return v1alpha1.AuthRequest{}, fmt.Errorf("login: unexpected auth request type %T", found)
+	}
+	return request.Object, nil
+}
+
+func boundRequest(w http.ResponseWriter, r *http.Request, deps Deps) (v1alpha1.AuthRequest, bool) {
+	id, value, ok := loginCookie(r)
+	if !ok {
+		writeError(w, http.StatusUnauthorized, "no_login")
+		return v1alpha1.AuthRequest{}, false
+	}
+	request, err := loadRequest(r.Context(), deps, id)
+	if err != nil {
+		writeJSON(w, http.StatusOK, expired())
+		return v1alpha1.AuthRequest{}, false
+	}
+	if !isBound(request, value) {
+		writeError(w, http.StatusUnauthorized, "no_login")
+		return v1alpha1.AuthRequest{}, false
+	}
+	if request.Status.Done {
+		writeJSON(w, http.StatusOK, expired())
+		return v1alpha1.AuthRequest{}, false
+	}
+	return request, true
+}
+
+func loginCookie(r *http.Request) (string, string, bool) {
+	cookie, err := r.Cookie(CookieLogin)
+	if err != nil {
+		return "", "", false
+	}
+	id, rest, found := strings.Cut(cookie.Value, ".")
+	return id, cookie.Value, found && id != "" && rest != ""
+}
+
+func isBound(request v1alpha1.AuthRequest, value string) bool {
+	return request.Status.CookieHash != "" && secret.Equal(request.Status.CookieHash, secret.SHA256Hex(value))
+}
+
+func bindCookie(hash string) func(v1alpha1.AuthRequest) v1alpha1.AuthRequest {
+	return func(current v1alpha1.AuthRequest) v1alpha1.AuthRequest {
+		if current.Status.CookieHash != "" || current.Status.Done {
+			return current
+		}
+		next := current.DeepCopy()
+		next.Status.CookieHash = hash
+		return *next
+	}
+}
+
+func withStatus(expected string, status v1alpha1.AuthRequestStatus, csrfHash string) func(v1alpha1.AuthRequest) v1alpha1.AuthRequest {
+	return func(current v1alpha1.AuthRequest) v1alpha1.AuthRequest {
+		if current.Status.Done || current.Status.Login.CSRFHash != expected {
+			return current
+		}
+		next := current.DeepCopy()
+		next.Status = *status.DeepCopy()
+		next.Status.Login.CSRFHash = csrfHash
+		return *next
+	}
+}
+
+func withSubject(request v1alpha1.AuthRequest, subject methods.Subject, now time.Time) v1alpha1.AuthRequest {
+	next := request.DeepCopy()
+	next.Status.Subject = subject.User.Name
+	next.Status.AMR = union(request.Status.AMR, subject.AMR)
+	if next.Status.AuthTime == nil {
+		next.Status.AuthTime = &metav1.Time{Time: now}
+	}
+	return *next
+}
+
+func withUpstream(request v1alpha1.AuthRequest, encoded string) v1alpha1.AuthRequest {
+	next := request.DeepCopy()
+	next.Status.Login.Upstream = encoded
+	return *next
+}
+
+func upstreamMatches(request v1alpha1.AuthRequest, raw, provider, state string) bool {
+	cookie, err := methods.DecodeUpstream(raw)
+	login := request.Status.Login
+	return err == nil &&
+		login.Step == methods.ChallengeRedirect &&
+		login.Provider == provider &&
+		login.Upstream != "" &&
+		secret.Equal(login.Upstream, secret.SHA256Hex(raw)) &&
+		cookie.State == request.Name &&
+		secret.Equal(cookie.State, state)
+}
+
+func afterUpstream(challenge methods.Challenge, id string) string {
+	if challenge.Type == methods.ChallengeDone && challenge.Redirect != "" {
+		return challenge.Redirect
+	}
+	return "/login/?authRequest=" + url.QueryEscape(id)
+}
+
+func deviceAuthRequest(id string, device v1alpha1.DeviceRequest, userCode string) v1alpha1.AuthRequest {
+	return v1alpha1.AuthRequest{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      id,
+			Namespace: release.SystemNamespace,
+			Labels:    map[string]string{v1alpha1.LabelKind: "AuthRequest", v1alpha1.LabelName: id},
+		},
+		Spec: v1alpha1.AuthRequestSpec{
+			ClientID:      device.Spec.ClientID,
+			Scopes:        slices.Clone(device.Spec.Scopes),
+			State:         formatUserCode(userCode),
+			DeviceRequest: device.Name,
+			ExpiresAt:     device.Spec.ExpiresAt,
+		},
+	}
+}
+
+func formatUserCode(normalized string) string {
+	if len(normalized) != 8 {
+		return normalized
+	}
+	return normalized[:4] + "-" + normalized[4:]
+}
+
+func settled(device v1alpha1.DeviceRequest) bool {
+	return device.Status.State == v1alpha1.DeviceStateApproved || device.Status.State == v1alpha1.DeviceStateDenied
+}
+
+func isDeviceAnswer(state v1alpha1.LoginState, given methods.Answer) bool {
+	return state.Step == methods.ChallengeDeviceConfirm && given.Type == methods.ChallengeDeviceConfirm && given.Approve != nil
+}
+
+func wantsRecovery(given methods.Answer) bool {
+	return given.Type == methods.ChallengeRecovery || given.Method == v1alpha1.MethodRecovery
+}
+
+func isLDAP(provider v1alpha1.IdentityProvider) bool {
+	return provider.Spec.Type == v1alpha1.MethodLDAP
+}
+
+func withLDAPProvider(facts Facts, provider string) Facts {
+	next := facts
+	next.LDAPProviders = []string{provider}
+	return next
+}
+
+func withUsername(given methods.Answer, username string) methods.Answer {
+	next := given
+	next.Username = username
+	return next
+}
+
+func withCSRF(challenge methods.Challenge, csrf string) methods.Challenge {
+	next := challenge
+	next.CSRF = csrf
+	return next
+}
+
+func withUserCode(challenge methods.Challenge, userCode string) methods.Challenge {
+	if challenge.Device == nil {
+		return challenge
+	}
+	device := *challenge.Device
+	device.UserCode = userCode
+	next := challenge
+	next.Device = &device
+	return next
+}
+
+func usernameOf(raw string) string {
+	normalized, err := v1alpha1.NormalizeUsername(raw)
+	if err != nil {
+		return strings.TrimSpace(raw)
+	}
+	return normalized
+}
+
+func union(current, added []string) []string {
+	merged := append(slices.Clone(current), added...)
+	slices.Sort(merged)
+	return slices.Compact(merged)
+}
+
+func newLoginCookie(random io.Reader, id string) (string, error) {
+	value, err := secret.Base62(random, cookieSecretLength)
+	if err != nil {
+		return "", err
+	}
+	return id + "." + value, nil
+}
+
+func newUpstreamCookie(random io.Reader, id string) (methods.UpstreamCookie, error) {
+	verifier, err := secret.Base62(random, verifierLength)
+	if err != nil {
+		return methods.UpstreamCookie{}, err
+	}
+	nonce, err := secret.Base62(random, nonceLength)
+	if err != nil {
+		return methods.UpstreamCookie{}, err
+	}
+	return methods.UpstreamCookie{Verifier: verifier, Nonce: nonce, State: id}, nil
+}
+
+func flowOf(r *http.Request, deps Deps, request v1alpha1.AuthRequest) methods.Flow {
+	return methods.Flow{AuthRequest: request, ClientIP: ClientIP(r), Now: deps.Clock()}
+}
+
+func registered(deps Deps, name string) (methods.Method, error) {
+	method, ok := deps.Methods[name]
+	if !ok {
+		return nil, fmt.Errorf("login: method %q is not registered", name)
+	}
+	return method, nil
+}
+
+func objectKey(name string) client.ObjectKey {
+	return client.ObjectKey{Namespace: release.SystemNamespace, Name: name}
+}
+
+func expired() methods.Challenge {
+	return failed(v1alpha1.LoginState{}, errorExpired).Challenge
+}
+
+func decodeJSON[T any](r *http.Request) (T, error) {
+	var body T
+	mediaType, _, err := mime.ParseMediaType(r.Header.Get("Content-Type"))
+	if err != nil || mediaType != "application/json" {
+		return body, errUnsupportedMedia
+	}
+	err = json.NewDecoder(io.LimitReader(r.Body, maxBody)).Decode(&body)
+	return body, err
+}
+
+func writeDecodeError(w http.ResponseWriter, err error) {
+	if errors.Is(err, errUnsupportedMedia) {
+		writeError(w, http.StatusUnsupportedMediaType, "unsupported_media_type")
+		return
+	}
+	writeError(w, http.StatusBadRequest, "invalid_request")
+}
+
+func writeJSON(w http.ResponseWriter, status int, body any) {
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Cache-Control", "no-store")
+	w.WriteHeader(status)
+	_ = json.NewEncoder(w).Encode(body)
+}
+
+func writeError(w http.ResponseWriter, status int, code string) {
+	writeJSON(w, status, map[string]string{"error": code})
+}
+
+func writeCommitError(w http.ResponseWriter, err error) {
+	switch {
+	case errors.Is(err, errLoginDone):
+		writeJSON(w, http.StatusOK, expired())
+	case errors.Is(err, errLoginChanged):
+		writeError(w, http.StatusForbidden, "csrf")
+	default:
+		internal(w)
+	}
+}
+
+func internal(w http.ResponseWriter) {
+	writeError(w, http.StatusInternalServerError, "internal")
+}
