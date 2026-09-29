@@ -57,6 +57,13 @@ func TestRenderAuthnObjects(t *testing.T) {
 			t.Fatalf("object %s %s meta %s %v", obj.GetKind(), obj.GetName(), obj.GetNamespace(), obj.GetLabels())
 		}
 	}
+	secret := findObject(out.Objects, "Secret", apiserver.SecretName)
+	if secret.GetLabels()[v1alpha1.LabelAuthn] != "true" {
+		t.Fatalf("the webhook Secret must carry the authn label: %v", secret.GetLabels())
+	}
+	if cm := findObject(out.Objects, "ConfigMap", apiserver.ConfigMapName); cm.GetLabels()[v1alpha1.LabelAuthn] != "" {
+		t.Fatalf("the ConfigMap must not carry the authn label: %v", cm.GetLabels())
+	}
 	route := findObject(out.Objects, "IngressRoute", "bedrock-authn")
 	if route == nil || route.GetAPIVersion() != "traefik.io/v1alpha1" {
 		t.Fatalf("objects %+v", out.Objects)

@@ -106,10 +106,14 @@ func authnConfigMap(authentication []byte) *unstructured.Unstructured {
 }
 
 func authnWebhookSecret(webhook []byte) *unstructured.Unstructured {
-	return authnObject("v1", "Secret", apiserver.SecretName, map[string]any{
+	secret := authnObject("v1", "Secret", apiserver.SecretName, map[string]any{
 		"type": "Opaque",
 		"data": map[string]any{apiserver.WebhookFile: base64.StdEncoding.EncodeToString(webhook)},
 	})
+	labels := secret.GetLabels()
+	labels[v1alpha1.LabelAuthn] = "true"
+	secret.SetLabels(labels)
+	return secret
 }
 
 func authnObject(apiVersion, kind, name string, fields map[string]any) *unstructured.Unstructured {
