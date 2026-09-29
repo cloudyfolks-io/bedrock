@@ -3,6 +3,8 @@ package housekeeping
 import (
 	"context"
 	"crypto/rand"
+	"errors"
+	"fmt"
 	"sync"
 	"testing"
 	"time"
@@ -27,6 +29,18 @@ func (h *hookClient) List(ctx context.Context, list client.ObjectList, opts ...c
 		hook()
 	}
 	return err
+}
+
+type failingListClient struct {
+	client.Client
+	failListType string
+}
+
+func (f *failingListClient) List(ctx context.Context, list client.ObjectList, opts ...client.ListOption) error {
+	if fmt.Sprintf("%T", list) == f.failListType {
+		return errors.New("housekeeping: injected list failure")
+	}
+	return f.Client.List(ctx, list, opts...)
 }
 
 func authCode(name string, expiresAt metav1.Time) *v1alpha1.AuthCode {
@@ -195,6 +209,36 @@ func TestSweepDeleteConflictIsNotCounted(t *testing.T) {
 	}
 	if !present(t, c, req) {
 		t.Fatal("the recreated request must survive the conflicting delete")
+	}
+}
+
+func TestSweepContinuesPastAFailingKind(t *testing.T) {
+	c, _ := startTestEnv(t)
+	ctx := context.Background()
+	now := time.Now().UTC()
+	expired := metav1.NewTime(now.Add(-time.Minute))
+	create(t, c,
+		authRequest("expired-request", expired),
+		authCode("expired-code", expired),
+		session("expired-session", expired),
+	)
+	failing := &failingListClient{Client: c, failListType: "*v1alpha1.AuthCodeList"}
+
+	swept, err := Sweep(ctx, failing, now)
+	if err == nil {
+		t.Fatal("Sweep must return the injected list error")
+	}
+	if swept.AuthRequests != 1 {
+		t.Fatalf("a kind listed before the failing one must still be swept, got %+v", swept)
+	}
+	if swept.Sessions != 1 {
+		t.Fatalf("a kind listed after the failing one must still be swept, got %+v", swept)
+	}
+	if swept.AuthCodes != 0 {
+		t.Fatalf("the failing kind must report zero, got %+v", swept)
+	}
+	if !present(t, c, authCode("expired-code", expired)) {
+		t.Fatal("the failing kind's object must survive since its list never ran")
 	}
 }
 

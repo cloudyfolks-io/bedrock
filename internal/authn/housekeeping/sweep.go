@@ -30,6 +30,7 @@ type Swept struct {
 
 func Sweep(ctx context.Context, c client.Client, now time.Time) (Swept, error) {
 	var swept Swept
+	var errs error
 	steps := []struct {
 		count *int
 		list  client.ObjectList
@@ -46,21 +47,19 @@ func Sweep(ctx context.Context, c client.Client, now time.Time) (Swept, error) {
 	for _, step := range steps {
 		count, err := deleteMatching(ctx, c, step.list, step.match)
 		*step.count = count
-		if err != nil {
-			return swept, err
-		}
+		errs = errors.Join(errs, err)
 	}
 	loaded, err := keys.Load(ctx, c)
 	if err != nil {
-		return swept, err
+		return swept, errors.Join(errs, err)
 	}
 	for _, key := range keys.Expired(loaded, now) {
 		if err := keys.Delete(ctx, c, key); err != nil {
-			return swept, err
+			return swept, errors.Join(errs, err)
 		}
 		swept.SigningKeys++
 	}
-	return swept, nil
+	return swept, errs
 }
 
 func Rotate(ctx context.Context, c client.Client, random io.Reader, now time.Time) error {
