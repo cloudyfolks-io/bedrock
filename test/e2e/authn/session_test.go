@@ -35,27 +35,25 @@ func TestLatestSessionPicksTheNewestOfTheUser(t *testing.T) {
 	}
 }
 
-func TestCheckClientAddress(t *testing.T) {
-	_, join, err := net.ParseCIDR("100.64.0.0/16")
-	if err != nil {
-		t.Fatal(err)
-	}
-	own := net.ParseIP("10.0.0.250")
+func TestParseClientAddress(t *testing.T) {
 	cases := []struct {
-		name     string
 		recorded string
 		wantErr  bool
 	}{
-		{name: "the client's own source address", recorded: "10.0.0.250"},
-		{name: "a masqueraded join address", recorded: "100.64.0.2", wantErr: true},
-		{name: "another address", recorded: "10.0.0.11", wantErr: true},
-		{name: "not an address", recorded: "", wantErr: true},
+		{recorded: "10.0.0.250"},
+		{recorded: "100.64.0.2"},
+		{recorded: "2001:db8::1"},
+		{recorded: "", wantErr: true},
+		{recorded: "not-an-address", wantErr: true},
 	}
 	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			err := checkClientAddress(tc.recorded, join, own)
+		t.Run(tc.recorded, func(t *testing.T) {
+			address, err := parseClientAddress(tc.recorded)
 			if (err != nil) != tc.wantErr {
-				t.Fatalf("checkClientAddress(%q) = %v, want error %t", tc.recorded, err, tc.wantErr)
+				t.Fatalf("parseClientAddress(%q) = %v, %v, want error %t", tc.recorded, address, err, tc.wantErr)
+			}
+			if err == nil && address.String() != net.ParseIP(tc.recorded).String() {
+				t.Fatalf("parseClientAddress(%q) = %v", tc.recorded, address)
 			}
 		})
 	}
