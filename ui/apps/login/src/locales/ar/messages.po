@@ -123,3 +123,99 @@ msgstr "هذا الحساب معطّل."
 
 msgid "login.error.unknown"
 msgstr "حدث خطأ ما. حاول مرة أخرى."
+
+msgid "account.title"
+msgstr "الحساب"
+
+msgid "account.signedOut.title"
+msgstr "لقد تم تسجيل خروجك"
+
+msgid "account.signedOut.link"
+msgstr "بدء تسجيل دخول جديد"
+
+msgid "account.password.title"
+msgstr "كلمة المرور"
+
+msgid "account.password.current"
+msgstr "كلمة المرور الحالية"
+
+msgid "account.password.new"
+msgstr "كلمة المرور الجديدة"
+
+msgid "account.password.submit"
+msgstr "تغيير كلمة المرور"
+
+msgid "account.password.success"
+msgstr "تم تغيير كلمة المرور"
+
+msgid "account.totp.title"
+msgstr "تطبيق المصادقة"
+
+msgid "account.totp.enrolled"
+msgstr "مفعّل"
+
+msgid "account.totp.notEnrolled"
+msgstr "غير معدّ"
+
+msgid "account.totp.enroll"
+msgstr "إعداد"
+
+msgid "account.totp.remove"
+msgstr "إزالة"
+
+msgid "account.totp.removeBlocked"
+msgstr "يتطلب النظام عاملاً ثانيًا ولا يمكن إزالته."
+
+msgid "account.totp.codeLabel"
+msgstr "أدخل الرمز المكوّن من 6 أرقام"
+
+msgid "account.totp.verify"
+msgstr "تحقق"
+
+msgid "account.recovery.title"
+msgstr "رموز الاسترداد"
+
+msgid "account.recovery.generate"
+msgstr "إنشاء رموز استرداد جديدة"
+
+msgid "account.recovery.hint"
+msgstr "يعمل كل رمز مرة واحدة فقط. احتفظ بها في مكان آمن."
+
+msgid "account.recovery.copy"
+msgstr "نسخ"
+
+msgid "account.tokens.title"
+msgstr "رموز API"
+
+msgid "account.tokens.descriptionLabel"
+msgstr "الوصف"
+
+msgid "account.tokens.create"
+msgstr "إنشاء رمز"
+
+msgid "account.tokens.createdHint"
+msgstr "انسخ هذا الرمز الآن. لن تراه مرة أخرى."
+
+msgid "account.tokens.copy"
+msgstr "نسخ"
+
+msgid "account.tokens.revoke"
+msgstr "إلغاء"
+
+msgid "account.tokens.empty"
+msgstr "لا توجد رموز بعد"
+
+msgid "account.sessions.title"
+msgstr "الجلسات"
+
+msgid "account.sessions.current"
+msgstr "هذا الجهاز"
+
+msgid "account.sessions.revoke"
+msgstr "إلغاء"
+
+msgid "account.sessions.logout"
+msgstr "تسجيل الخروج"
+
+msgid "account.done"
+msgstr "تم"

@@ -123,3 +123,99 @@ msgstr "این حساب غیرفعال است."
 
 msgid "login.error.unknown"
 msgstr "خطایی رخ داد. دوباره امتحان کنید."
+
+msgid "account.title"
+msgstr "حساب کاربری"
+
+msgid "account.signedOut.title"
+msgstr "شما از سیستم خارج شده‌اید"
+
+msgid "account.signedOut.link"
+msgstr "شروع ورود دوباره"
+
+msgid "account.password.title"
+msgstr "رمز عبور"
+
+msgid "account.password.current"
+msgstr "رمز عبور فعلی"
+
+msgid "account.password.new"
+msgstr "رمز عبور جدید"
+
+msgid "account.password.submit"
+msgstr "تغییر رمز عبور"
+
+msgid "account.password.success"
+msgstr "رمز عبور تغییر کرد"
+
+msgid "account.totp.title"
+msgstr "برنامه احراز هویت"
+
+msgid "account.totp.enrolled"
+msgstr "فعال"
+
+msgid "account.totp.notEnrolled"
+msgstr "تنظیم نشده"
+
+msgid "account.totp.enroll"
+msgstr "تنظیم"
+
+msgid "account.totp.remove"
+msgstr "حذف"
+
+msgid "account.totp.removeBlocked"
+msgstr "طبق سیاست، عامل دوم الزامی است و قابل حذف نیست."
+
+msgid "account.totp.codeLabel"
+msgstr "کد ۶ رقمی را وارد کنید"
+
+msgid "account.totp.verify"
+msgstr "تأیید"
+
+msgid "account.recovery.title"
+msgstr "کدهای بازیابی"
+
+msgid "account.recovery.generate"
+msgstr "ساخت کدهای بازیابی جدید"
+
+msgid "account.recovery.hint"
+msgstr "هر کد فقط یک‌بار کار می‌کند. آن‌ها را در جایی امن نگه دارید."
+
+msgid "account.recovery.copy"
+msgstr "رونوشت"
+
+msgid "account.tokens.title"
+msgstr "توکن‌های API"
+
+msgid "account.tokens.descriptionLabel"
+msgstr "توضیحات"
+
+msgid "account.tokens.create"
+msgstr "ساخت توکن"
+
+msgid "account.tokens.createdHint"
+msgstr "اکنون این توکن را کپی کنید. دیگر آن را نخواهید دید."
+
+msgid "account.tokens.copy"
+msgstr "رونوشت"
+
+msgid "account.tokens.revoke"
+msgstr "لغو"
+
+msgid "account.tokens.empty"
+msgstr "هنوز توکنی وجود ندارد"
+
+msgid "account.sessions.title"
+msgstr "نشست‌ها"
+
+msgid "account.sessions.current"
+msgstr "این دستگاه"
+
+msgid "account.sessions.revoke"
+msgstr "لغو"
+
+msgid "account.sessions.logout"
+msgstr "خروج از سیستم"
+
+msgid "account.done"
+msgstr "پایان"

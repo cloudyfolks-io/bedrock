@@ -123,3 +123,99 @@ msgstr "This account is disabled."
 
 msgid "login.error.unknown"
 msgstr "Something went wrong. Try again."
+
+msgid "account.title"
+msgstr "Account"
+
+msgid "account.signedOut.title"
+msgstr "You are signed out"
+
+msgid "account.signedOut.link"
+msgstr "Start a new sign-in"
+
+msgid "account.password.title"
+msgstr "Password"
+
+msgid "account.password.current"
+msgstr "Current password"
+
+msgid "account.password.new"
+msgstr "New password"
+
+msgid "account.password.submit"
+msgstr "Change password"
+
+msgid "account.password.success"
+msgstr "Password changed"
+
+msgid "account.totp.title"
+msgstr "Authenticator app"
+
+msgid "account.totp.enrolled"
+msgstr "Enabled"
+
+msgid "account.totp.notEnrolled"
+msgstr "Not set up"
+
+msgid "account.totp.enroll"
+msgstr "Set up"
+
+msgid "account.totp.remove"
+msgstr "Remove"
+
+msgid "account.totp.removeBlocked"
+msgstr "A second factor is required by policy and cannot be removed."
+
+msgid "account.totp.codeLabel"
+msgstr "Enter the 6-digit code"
+
+msgid "account.totp.verify"
+msgstr "Verify"
+
+msgid "account.recovery.title"
+msgstr "Recovery codes"
+
+msgid "account.recovery.generate"
+msgstr "Generate new recovery codes"
+
+msgid "account.recovery.hint"
+msgstr "Each code works once. Store them somewhere safe."
+
+msgid "account.recovery.copy"
+msgstr "Copy"
+
+msgid "account.tokens.title"
+msgstr "API tokens"
+
+msgid "account.tokens.descriptionLabel"
+msgstr "Description"
+
+msgid "account.tokens.create"
+msgstr "Create token"
+
+msgid "account.tokens.createdHint"
+msgstr "Copy this token now. You will not see it again."
+
+msgid "account.tokens.copy"
+msgstr "Copy"
+
+msgid "account.tokens.revoke"
+msgstr "Revoke"
+
+msgid "account.tokens.empty"
+msgstr "No tokens yet"
+
+msgid "account.sessions.title"
+msgstr "Sessions"
+
+msgid "account.sessions.current"
+msgstr "This device"
+
+msgid "account.sessions.revoke"
+msgstr "Revoke"
+
+msgid "account.sessions.logout"
+msgstr "Sign out"
+
+msgid "account.done"
+msgstr "Done"
