@@ -2,9 +2,10 @@ package server
 
 import (
 	"context"
-	"encoding/json"
 	"log/slog"
 	"net/http"
+
+	"github.com/cloudyfolks-io/bedrock/internal/authn/httpjson"
 )
 
 func HostGuard(host func(context.Context) (string, error), next http.Handler) http.Handler {
@@ -19,7 +20,7 @@ func HostGuard(host func(context.Context) (string, error), next http.Handler) ht
 			return
 		}
 		if r.Host != "sso."+current {
-			writeError(w, http.StatusMisdirectedRequest, "misdirected_request")
+			httpjson.WriteError(w, http.StatusMisdirectedRequest, "misdirected_request")
 			return
 		}
 		next.ServeHTTP(w, r)
@@ -30,18 +31,7 @@ func hostExempt(path string) bool {
 	return path == pathHealthz || path == pathReadyz || path == pathWebhook
 }
 
-func writeJSON(w http.ResponseWriter, status int, body any) {
-	w.Header().Set("Content-Type", "application/json")
-	w.Header().Set("Cache-Control", "no-store")
-	w.WriteHeader(status)
-	_ = json.NewEncoder(w).Encode(body)
-}
-
-func writeError(w http.ResponseWriter, status int, code string) {
-	writeJSON(w, status, map[string]string{"error": code})
-}
-
 func unavailable(w http.ResponseWriter, r *http.Request, code string, err error) {
 	slog.ErrorContext(r.Context(), "authn server unavailable", "code", code, "method", r.Method, "path", r.URL.Path, "error", err)
-	writeError(w, http.StatusServiceUnavailable, code)
+	httpjson.WriteError(w, http.StatusServiceUnavailable, code)
 }

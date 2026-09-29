@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/cloudyfolks-io/bedrock/internal/authn/httpjson"
 	"github.com/cloudyfolks-io/bedrock/internal/authn/methods"
 )
 
@@ -33,7 +34,7 @@ func (g credentialGate) middleware(matches func(*http.Request) bool, next http.H
 		select {
 		case g.slots <- struct{}{}:
 		case <-ctx.Done():
-			writeError(w, http.StatusTooManyRequests, methods.FailureRateLimited)
+			httpjson.WriteError(w, http.StatusTooManyRequests, methods.FailureRateLimited)
 			return
 		}
 		defer func() { <-g.slots }()

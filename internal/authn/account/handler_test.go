@@ -18,6 +18,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	"github.com/cloudyfolks-io/bedrock/api/v1alpha1"
+	"github.com/cloudyfolks-io/bedrock/internal/authn/httpjson"
 	"github.com/cloudyfolks-io/bedrock/internal/authn/login"
 	"github.com/cloudyfolks-io/bedrock/internal/authn/methods"
 	"github.com/cloudyfolks-io/bedrock/internal/authn/policy"
@@ -418,7 +419,7 @@ func TestOversizedBodyClosesTheConnection(t *testing.T) {
 	alice := createUser(t, h, "alice", "")
 	cookie := loginAs(t, h, alice)
 	csrf := accountOf(t, h, cookie).CSRF
-	resp := call(t, h, http.MethodPost, "/api/v1/account/tokens", cookie, csrf, map[string]string{"description": strings.Repeat("a", maxBody)})
+	resp := call(t, h, http.MethodPost, "/api/v1/account/tokens", cookie, csrf, map[string]string{"description": strings.Repeat("a", httpjson.MaxBody)})
 	if code := errorOf(t, resp, http.StatusBadRequest); code != "invalid_request" || !resp.Close {
 		t.Fatalf("an oversized body must fail and close the connection: %q close=%v", code, resp.Close)
 	}

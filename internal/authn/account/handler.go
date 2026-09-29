@@ -3,12 +3,9 @@ package account
 import (
 	"cmp"
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
-	"log/slog"
-	"mime"
 	"net/http"
 	"slices"
 	"time"
@@ -20,6 +17,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	"github.com/cloudyfolks-io/bedrock/api/v1alpha1"
+	"github.com/cloudyfolks-io/bedrock/internal/authn/httpjson"
 	"github.com/cloudyfolks-io/bedrock/internal/authn/login"
 	"github.com/cloudyfolks-io/bedrock/internal/authn/methods"
 	"github.com/cloudyfolks-io/bedrock/internal/authn/policy"
@@ -31,13 +29,9 @@ import (
 const (
 	csrfContext       = "bedrock-account-csrf:"
 	minPasswordLength = 12
-	maxBody           = 64 << 10
 )
 
-var (
-	errUnsupportedMedia = errors.New("account: body is not application/json")
-	errNoTOTPEnrollment = errors.New("account: the TOTP method enrolled nothing")
-)
+var errNoTOTPEnrollment = errors.New("account: the TOTP method enrolled nothing")
 
 type Deps struct {
 	Store    *store.Store
@@ -126,7 +120,7 @@ func withSession(deps Deps, next action) http.Handler {
 func withCSRF(deps Deps, next action) http.Handler {
 	return withSession(deps, func(w http.ResponseWriter, r *http.Request, deps Deps, who caller) {
 		if !login.CheckCSRF(secret.SHA256Hex(csrfFor(who.cookie)), r.Header.Get("X-CSRF-Token")) {
-			writeError(w, http.StatusForbidden, "csrf")
+			httpjson.WriteError(w, http.StatusForbidden, "csrf")
 			return
 		}
 		next(w, r, deps, who)
@@ -154,7 +148,7 @@ func authenticate(w http.ResponseWriter, r *http.Request, deps Deps) (caller, bo
 
 func denySession(w http.ResponseWriter) {
 	login.ClearCookie(w, login.CookieSession)
-	writeError(w, http.StatusUnauthorized, "no_session")
+	httpjson.WriteError(w, http.StatusUnauthorized, "no_session")
 }
 
 func show(w http.ResponseWriter, r *http.Request, deps Deps, who caller) {
@@ -168,21 +162,21 @@ func show(w http.ResponseWriter, r *http.Request, deps Deps, who caller) {
 		internal(w, r, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, accountView{User: viewUser(who.user, subject.Groups), Methods: viewMethods(credentials.Items), CSRF: csrfFor(who.cookie)})
+	httpjson.Write(w, http.StatusOK, accountView{User: viewUser(who.user, subject.Groups), Methods: viewMethods(credentials.Items), CSRF: csrfFor(who.cookie)})
 }
 
 func changePassword(w http.ResponseWriter, r *http.Request, deps Deps, who caller) {
 	if who.user.Spec.Source != "" {
-		writeError(w, http.StatusConflict, "not_local")
+		httpjson.WriteError(w, http.StatusConflict, "not_local")
 		return
 	}
-	body, err := decodeJSON[passwordBody](w, r)
+	body, err := httpjson.Decode[passwordBody](w, r)
 	if err != nil {
-		writeDecodeError(w, err)
+		httpjson.WriteDecodeError(w, err)
 		return
 	}
 	if utf8.RuneCountInString(body.New) < minPasswordLength {
-		writeError(w, http.StatusBadRequest, "weak_password")
+		httpjson.WriteError(w, http.StatusBadRequest, "weak_password")
 		return
 	}
 	result, err := complete(r, deps, who, v1alpha1.MethodPassword, methods.Answer{Type: methods.ChallengePassword, Username: who.user.Spec.Username, Password: body.Current})
@@ -208,7 +202,7 @@ func beginTOTP(w http.ResponseWriter, r *http.Request, deps Deps, who caller) {
 		return
 	}
 	if enrolled {
-		writeError(w, http.StatusConflict, "already_enrolled")
+		httpjson.WriteError(w, http.StatusConflict, "already_enrolled")
 		return
 	}
 	if err := deleteCredential(r.Context(), deps.Client, who.user.Name, v1alpha1.MethodTOTP); err != nil {
@@ -224,13 +218,13 @@ func beginTOTP(w http.ResponseWriter, r *http.Request, deps Deps, who caller) {
 		internal(w, r, errNoTOTPEnrollment)
 		return
 	}
-	writeJSON(w, http.StatusOK, enrollment.TOTP)
+	httpjson.Write(w, http.StatusOK, enrollment.TOTP)
 }
 
 func verifyTOTP(w http.ResponseWriter, r *http.Request, deps Deps, who caller) {
-	body, err := decodeJSON[codeBody](w, r)
+	body, err := httpjson.Decode[codeBody](w, r)
 	if err != nil {
-		writeDecodeError(w, err)
+		httpjson.WriteDecodeError(w, err)
 		return
 	}
 	result, err := complete(r, deps, who, v1alpha1.MethodTOTP, methods.Answer{Type: methods.ChallengeTOTP, Code: body.Code})
@@ -257,7 +251,7 @@ func removeTOTP(w http.ResponseWriter, r *http.Request, deps Deps, who caller) {
 		return
 	}
 	if policy.SecondFactorRequired(settings, who.user, groups, v1alpha1.OAuthClient{}) {
-		writeError(w, http.StatusConflict, "second_factor_required")
+		httpjson.WriteError(w, http.StatusConflict, "second_factor_required")
 		return
 	}
 	for _, method := range []string{v1alpha1.MethodTOTP, v1alpha1.MethodRecovery} {
@@ -276,7 +270,7 @@ func newRecoveryCodes(w http.ResponseWriter, r *http.Request, deps Deps, who cal
 		return
 	}
 	if !enrolled {
-		writeError(w, http.StatusConflict, "totp_not_enrolled")
+		httpjson.WriteError(w, http.StatusConflict, "totp_not_enrolled")
 		return
 	}
 	answerRecoveryCodes(w, r, deps, who)
@@ -292,7 +286,7 @@ func answerRecoveryCodes(w http.ResponseWriter, r *http.Request, deps Deps, who 
 		internal(w, r, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string][]string{"recoveryCodes": enrollment.RecoveryCodes})
+	httpjson.Write(w, http.StatusOK, map[string][]string{"recoveryCodes": enrollment.RecoveryCodes})
 }
 
 func listSessions(w http.ResponseWriter, r *http.Request, deps Deps, who caller) {
@@ -301,7 +295,7 @@ func listSessions(w http.ResponseWriter, r *http.Request, deps Deps, who caller)
 		internal(w, r, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, viewSessions(sessions.Items, who.session.Name, deps.Clock()))
+	httpjson.Write(w, http.StatusOK, viewSessions(sessions.Items, who.session.Name, deps.Clock()))
 }
 
 func revokeSession(w http.ResponseWriter, r *http.Request, deps Deps, who caller) {
@@ -311,7 +305,7 @@ func revokeSession(w http.ResponseWriter, r *http.Request, deps Deps, who caller
 		return
 	}
 	if !found {
-		writeError(w, http.StatusNotFound, "not_found")
+		httpjson.WriteError(w, http.StatusNotFound, "not_found")
 		return
 	}
 	if err := endSession(r.Context(), deps.Client, session); err != nil {
@@ -473,10 +467,10 @@ func failureOf(result methods.Result) string {
 
 func refuse(w http.ResponseWriter, failure string) {
 	if failure == methods.FailureRateLimited {
-		writeError(w, http.StatusTooManyRequests, failure)
+		httpjson.WriteError(w, http.StatusTooManyRequests, failure)
 		return
 	}
-	writeError(w, http.StatusForbidden, failure)
+	httpjson.WriteError(w, http.StatusForbidden, failure)
 }
 
 func validID(id string) bool {
@@ -495,36 +489,6 @@ func clientKey(name string) client.ObjectKey {
 	return client.ObjectKey{Namespace: release.SystemNamespace, Name: name}
 }
 
-func decodeJSON[T any](w http.ResponseWriter, r *http.Request) (T, error) {
-	var body T
-	mediaType, _, err := mime.ParseMediaType(r.Header.Get("Content-Type"))
-	if err != nil || mediaType != "application/json" {
-		return body, errUnsupportedMedia
-	}
-	err = json.NewDecoder(http.MaxBytesReader(w, r.Body, maxBody)).Decode(&body)
-	return body, err
-}
-
-func writeDecodeError(w http.ResponseWriter, err error) {
-	if errors.Is(err, errUnsupportedMedia) {
-		writeError(w, http.StatusUnsupportedMediaType, "unsupported_media_type")
-		return
-	}
-	writeError(w, http.StatusBadRequest, "invalid_request")
-}
-
-func writeJSON(w http.ResponseWriter, status int, body any) {
-	w.Header().Set("Content-Type", "application/json")
-	w.Header().Set("Cache-Control", "no-store")
-	w.WriteHeader(status)
-	_ = json.NewEncoder(w).Encode(body)
-}
-
-func writeError(w http.ResponseWriter, status int, code string) {
-	writeJSON(w, status, map[string]string{"error": code})
-}
-
 func internal(w http.ResponseWriter, r *http.Request, err error) {
-	slog.ErrorContext(r.Context(), "account request failed", "method", r.Method, "path", r.URL.Path, "error", err)
-	writeError(w, http.StatusInternalServerError, "internal")
+	httpjson.Internal(w, r, "account request failed", err)
 }

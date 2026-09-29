@@ -27,6 +27,7 @@ import (
 
 	"github.com/cloudyfolks-io/bedrock/api/v1alpha1"
 	"github.com/cloudyfolks-io/bedrock/internal/authn/account"
+	"github.com/cloudyfolks-io/bedrock/internal/authn/httpjson"
 	"github.com/cloudyfolks-io/bedrock/internal/authn/keys"
 	"github.com/cloudyfolks-io/bedrock/internal/authn/login"
 	"github.com/cloudyfolks-io/bedrock/internal/authn/methods"
@@ -191,7 +192,7 @@ func ClusterHandler(reader client.Reader, host func(context.Context) (string, er
 			unavailable(w, r, "cluster_ca_unavailable", errCAMissing)
 			return
 		}
-		writeJSON(w, http.StatusOK, map[string]string{
+		httpjson.Write(w, http.StatusOK, map[string]string{
 			"server":               "https://api." + current + ":" + apiServerPort,
 			"certificateAuthority": ca.Data["ca.crt"],
 		})
@@ -202,19 +203,19 @@ func sessionBound(reader client.Reader, next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		id, err := op.ParseAuthorizeCallbackRequest(r)
 		if err != nil {
-			writeError(w, http.StatusBadRequest, "invalid_request")
+			httpjson.WriteError(w, http.StatusBadRequest, "invalid_request")
 			return
 		}
 		var request v1alpha1.AuthRequest
 		err = reader.Get(r.Context(), client.ObjectKey{Namespace: release.SystemNamespace, Name: id}, &request)
 		switch {
 		case apierrors.IsNotFound(err):
-			writeError(w, http.StatusUnauthorized, "no_session")
+			httpjson.WriteError(w, http.StatusUnauthorized, "no_session")
 		case err != nil:
 			slog.ErrorContext(r.Context(), "authorize callback failed", "error", err)
-			writeError(w, http.StatusInternalServerError, "internal")
+			httpjson.WriteError(w, http.StatusInternalServerError, "internal")
 		case !sessionMatches(request.Status.Session, r):
-			writeError(w, http.StatusUnauthorized, "no_session")
+			httpjson.WriteError(w, http.StatusUnauthorized, "no_session")
 		default:
 			next.ServeHTTP(w, r)
 		}
@@ -229,7 +230,7 @@ func sessionMatches(hash string, r *http.Request) bool {
 func refuseCrossSite(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Header.Get("Sec-Fetch-Site") == crossSite && changesState(r) {
-			writeError(w, http.StatusForbidden, "csrf")
+			httpjson.WriteError(w, http.StatusForbidden, "csrf")
 			return
 		}
 		next.ServeHTTP(w, r)

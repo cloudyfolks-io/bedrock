@@ -2,12 +2,9 @@ package login
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
-	"log/slog"
-	"mime"
 	"net/http"
 	"net/url"
 	"slices"
@@ -20,6 +17,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	"github.com/cloudyfolks-io/bedrock/api/v1alpha1"
+	"github.com/cloudyfolks-io/bedrock/internal/authn/httpjson"
 	"github.com/cloudyfolks-io/bedrock/internal/authn/methods"
 	"github.com/cloudyfolks-io/bedrock/internal/authn/policy"
 	"github.com/cloudyfolks-io/bedrock/internal/authn/secret"
@@ -34,12 +32,10 @@ const (
 	verifierLength     = 64
 	nonceLength        = 32
 	upstreamTTL        = 10 * time.Minute
-	maxBody            = 64 << 10
 )
 
 var (
 	errUnexpectedAnswer = errors.New("login: unexpected answer")
-	errUnsupportedMedia = errors.New("login: body is not application/json")
 	errLoginDone        = errors.New("login: the auth request is done")
 	errLoginChanged     = errors.New("login: the login state changed meanwhile")
 )
@@ -81,14 +77,14 @@ func Handler(deps Deps) http.Handler {
 }
 
 func start(w http.ResponseWriter, r *http.Request, deps Deps) {
-	body, err := decodeJSON[startBody](w, r)
+	body, err := httpjson.Decode[startBody](w, r)
 	if err != nil {
-		writeDecodeError(w, err)
+		httpjson.WriteDecodeError(w, err)
 		return
 	}
 	request, err := loadRequest(r.Context(), deps, body.AuthRequest)
 	if err != nil || request.Status.Done || request.Spec.DeviceRequest != "" {
-		writeJSON(w, http.StatusOK, expired())
+		httpjson.Write(w, http.StatusOK, expired())
 		return
 	}
 	if request.Status.CookieHash != "" {
@@ -106,7 +102,7 @@ func start(w http.ResponseWriter, r *http.Request, deps Deps) {
 		return
 	}
 	if !isBound(bound, value) {
-		writeError(w, http.StatusConflict, "already_started")
+		httpjson.WriteError(w, http.StatusConflict, "already_started")
 		return
 	}
 	SetCookie(w, CookieLogin, value, request.Spec.ExpiresAt.Sub(deps.Clock()))
@@ -121,27 +117,27 @@ func start(w http.ResponseWriter, r *http.Request, deps Deps) {
 func restart(w http.ResponseWriter, r *http.Request, deps Deps, request v1alpha1.AuthRequest) {
 	_, value, ok := loginCookie(r)
 	if !ok || !isBound(request, value) {
-		writeError(w, http.StatusConflict, "already_started")
+		httpjson.WriteError(w, http.StatusConflict, "already_started")
 		return
 	}
 	resumeLogin(w, r, deps, request)
 }
 
 func startDevice(w http.ResponseWriter, r *http.Request, deps Deps) {
-	body, err := decodeJSON[deviceBody](w, r)
+	body, err := httpjson.Decode[deviceBody](w, r)
 	if err != nil {
-		writeDecodeError(w, err)
+		httpjson.WriteDecodeError(w, err)
 		return
 	}
 	ctx := r.Context()
 	now := deps.Clock()
 	if !deps.Limiter.Allow(ClientIP(r), now) {
-		writeError(w, http.StatusTooManyRequests, methods.FailureRateLimited)
+		httpjson.WriteError(w, http.StatusTooManyRequests, methods.FailureRateLimited)
 		return
 	}
 	device, err := deps.Store.DeviceRequestByUserCode(ctx, body.UserCode)
 	if err != nil || settled(device) {
-		writeError(w, http.StatusNotFound, methods.FailureInvalidCode)
+		httpjson.WriteError(w, http.StatusNotFound, methods.FailureInvalidCode)
 		return
 	}
 	id, err := secret.FromAlphabet(deps.Random, requestIDAlphabet, requestIDLength)
@@ -196,18 +192,18 @@ func answer(w http.ResponseWriter, r *http.Request, deps Deps) {
 		return
 	}
 	if !CheckCSRF(request.Status.Login.CSRFHash, r.Header.Get("X-CSRF-Token")) {
-		writeError(w, http.StatusForbidden, "csrf")
+		httpjson.WriteError(w, http.StatusForbidden, "csrf")
 		return
 	}
-	given, err := decodeJSON[methods.Answer](w, r)
+	given, err := httpjson.Decode[methods.Answer](w, r)
 	if err != nil {
-		writeDecodeError(w, err)
+		httpjson.WriteDecodeError(w, err)
 		return
 	}
 	step, updated, err := dispatch(r, deps, request, given)
 	switch {
 	case errors.Is(err, errUnexpectedAnswer):
-		writeError(w, http.StatusBadRequest, "unexpected_answer")
+		httpjson.WriteError(w, http.StatusBadRequest, "unexpected_answer")
 	case err != nil:
 		internal(w, r, err)
 	default:
@@ -222,7 +218,7 @@ func callback(w http.ResponseWriter, r *http.Request, deps Deps) {
 	}
 	upstream, err := r.Cookie(CookieUpstream)
 	if err != nil || !upstreamMatches(request, upstream.Value, r.PathValue("name"), r.URL.Query().Get("state")) {
-		writeError(w, http.StatusBadRequest, "invalid_state")
+		httpjson.WriteError(w, http.StatusBadRequest, "invalid_state")
 		return
 	}
 	ClearCookie(w, CookieUpstream)
@@ -319,7 +315,7 @@ func respond(w http.ResponseWriter, r *http.Request, deps Deps, request v1alpha1
 		writeCommitError(w, r, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, challenge)
+	httpjson.Write(w, http.StatusOK, challenge)
 }
 
 func commit(w http.ResponseWriter, r *http.Request, deps Deps, request v1alpha1.AuthRequest, step Step) (methods.Challenge, error) {
@@ -665,20 +661,20 @@ func loadRequest(ctx context.Context, deps Deps, id string) (v1alpha1.AuthReques
 func boundRequest(w http.ResponseWriter, r *http.Request, deps Deps) (v1alpha1.AuthRequest, bool) {
 	id, value, ok := loginCookie(r)
 	if !ok {
-		writeError(w, http.StatusUnauthorized, "no_login")
+		httpjson.WriteError(w, http.StatusUnauthorized, "no_login")
 		return v1alpha1.AuthRequest{}, false
 	}
 	request, err := loadRequest(r.Context(), deps, id)
 	if err != nil {
-		writeJSON(w, http.StatusOK, expired())
+		httpjson.Write(w, http.StatusOK, expired())
 		return v1alpha1.AuthRequest{}, false
 	}
 	if !isBound(request, value) {
-		writeError(w, http.StatusUnauthorized, "no_login")
+		httpjson.WriteError(w, http.StatusUnauthorized, "no_login")
 		return v1alpha1.AuthRequest{}, false
 	}
 	if request.Status.Done {
-		writeJSON(w, http.StatusOK, expired())
+		httpjson.Write(w, http.StatusOK, expired())
 		return v1alpha1.AuthRequest{}, false
 	}
 	return request, true
@@ -878,47 +874,17 @@ func expired() methods.Challenge {
 	return failed(v1alpha1.LoginState{}, errorExpired).Challenge
 }
 
-func decodeJSON[T any](w http.ResponseWriter, r *http.Request) (T, error) {
-	var body T
-	mediaType, _, err := mime.ParseMediaType(r.Header.Get("Content-Type"))
-	if err != nil || mediaType != "application/json" {
-		return body, errUnsupportedMedia
-	}
-	err = json.NewDecoder(http.MaxBytesReader(w, r.Body, maxBody)).Decode(&body)
-	return body, err
-}
-
-func writeDecodeError(w http.ResponseWriter, err error) {
-	if errors.Is(err, errUnsupportedMedia) {
-		writeError(w, http.StatusUnsupportedMediaType, "unsupported_media_type")
-		return
-	}
-	writeError(w, http.StatusBadRequest, "invalid_request")
-}
-
-func writeJSON(w http.ResponseWriter, status int, body any) {
-	w.Header().Set("Content-Type", "application/json")
-	w.Header().Set("Cache-Control", "no-store")
-	w.WriteHeader(status)
-	_ = json.NewEncoder(w).Encode(body)
-}
-
-func writeError(w http.ResponseWriter, status int, code string) {
-	writeJSON(w, status, map[string]string{"error": code})
-}
-
 func writeCommitError(w http.ResponseWriter, r *http.Request, err error) {
 	switch {
 	case errors.Is(err, errLoginDone):
-		writeJSON(w, http.StatusOK, expired())
+		httpjson.Write(w, http.StatusOK, expired())
 	case errors.Is(err, errLoginChanged):
-		writeError(w, http.StatusForbidden, "csrf")
+		httpjson.WriteError(w, http.StatusForbidden, "csrf")
 	default:
 		internal(w, r, err)
 	}
 }
 
 func internal(w http.ResponseWriter, r *http.Request, err error) {
-	slog.ErrorContext(r.Context(), "login request failed", "method", r.Method, "path", r.URL.Path, "error", err)
-	writeError(w, http.StatusInternalServerError, "internal")
+	httpjson.Internal(w, r, "login request failed", err)
 }

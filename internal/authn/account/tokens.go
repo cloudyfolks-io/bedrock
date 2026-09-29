@@ -10,6 +10,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	"github.com/cloudyfolks-io/bedrock/api/v1alpha1"
+	"github.com/cloudyfolks-io/bedrock/internal/authn/httpjson"
 	"github.com/cloudyfolks-io/bedrock/internal/authn/secret"
 	"github.com/cloudyfolks-io/bedrock/internal/release"
 )
@@ -48,17 +49,17 @@ func NewToken(user string, description string, scopes []string, expiresAt *metav
 }
 
 func createToken(w http.ResponseWriter, r *http.Request, deps Deps, who caller) {
-	body, err := decodeJSON[tokenBody](w, r)
+	body, err := httpjson.Decode[tokenBody](w, r)
 	if err != nil {
-		writeDecodeError(w, err)
+		httpjson.WriteDecodeError(w, err)
 		return
 	}
 	if utf8.RuneCountInString(body.Description) > maxDescription {
-		writeError(w, http.StatusBadRequest, "invalid_request")
+		httpjson.WriteError(w, http.StatusBadRequest, "invalid_request")
 		return
 	}
 	if body.ExpiresAt != nil && !body.ExpiresAt.After(deps.Clock()) {
-		writeError(w, http.StatusBadRequest, "invalid_expiry")
+		httpjson.WriteError(w, http.StatusBadRequest, "invalid_expiry")
 		return
 	}
 	token, err := secret.NewAPIToken(deps.Random)
@@ -71,7 +72,7 @@ func createToken(w http.ResponseWriter, r *http.Request, deps Deps, who caller) 
 		internal(w, r, err)
 		return
 	}
-	writeJSON(w, http.StatusCreated, map[string]string{"id": object.Name, "token": token})
+	httpjson.Write(w, http.StatusCreated, map[string]string{"id": object.Name, "token": token})
 }
 
 func listTokens(w http.ResponseWriter, r *http.Request, deps Deps, who caller) {
@@ -80,20 +81,20 @@ func listTokens(w http.ResponseWriter, r *http.Request, deps Deps, who caller) {
 		internal(w, r, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, viewTokens(tokens.Items))
+	httpjson.Write(w, http.StatusOK, viewTokens(tokens.Items))
 }
 
 func revokeToken(w http.ResponseWriter, r *http.Request, deps Deps, who caller) {
 	id := r.PathValue("id")
 	if !validID(id) {
-		writeError(w, http.StatusNotFound, "not_found")
+		httpjson.WriteError(w, http.StatusNotFound, "not_found")
 		return
 	}
 	var token v1alpha1.APIToken
 	err := deps.Client.Get(r.Context(), clientKey(id), &token)
 	switch {
 	case apierrors.IsNotFound(err), err == nil && token.Spec.UserRef != who.user.Name:
-		writeError(w, http.StatusNotFound, "not_found")
+		httpjson.WriteError(w, http.StatusNotFound, "not_found")
 		return
 	case err != nil:
 		internal(w, r, err)
