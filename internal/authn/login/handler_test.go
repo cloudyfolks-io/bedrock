@@ -351,7 +351,7 @@ func TestRateLimitPerClientIP(t *testing.T) {
 	browser := newBrowser(t, h.server)
 	_, first := startLogin(t, h, browser)
 	password := answerWith(t, h, browser, first.CSRF, methods.Answer{Type: methods.ChallengeUsername, Username: "alice"})
-	from := func(ip string) http.Header { return http.Header{"X-Forwarded-For": []string{ip + ", 10.0.0.1"}} }
+	from := func(ip string) http.Header { return http.Header{"X-Forwarded-For": []string{"10.0.0.1, " + ip}} }
 	target := h.server.URL + "/api/v1/login/answer"
 	wrong := methods.Answer{Type: methods.ChallengePassword, Password: "wrong"}
 	csrf := password.CSRF

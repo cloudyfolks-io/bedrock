@@ -37,13 +37,20 @@ func ClearCookie(w http.ResponseWriter, name string) {
 }
 
 func ClientIP(r *http.Request) string {
-	if forwarded := r.Header.Get("X-Forwarded-For"); forwarded != "" {
-		first, _, _ := strings.Cut(forwarded, ",")
-		return strings.TrimSpace(first)
+	if hop := lastForwardedHop(r.Header.Values("X-Forwarded-For")); hop != "" {
+		return hop
 	}
 	host, _, err := net.SplitHostPort(r.RemoteAddr)
 	if err != nil {
 		return r.RemoteAddr
 	}
 	return host
+}
+
+func lastForwardedHop(values []string) string {
+	if len(values) == 0 {
+		return ""
+	}
+	hops := strings.Split(values[len(values)-1], ",")
+	return strings.TrimSpace(hops[len(hops)-1])
 }

@@ -64,14 +64,26 @@ func TestCSRF(t *testing.T) {
 }
 
 func TestClientIP(t *testing.T) {
-	forwarded := httptest.NewRequest(http.MethodPost, "/api/v1/login/answer", nil)
-	forwarded.Header.Set("X-Forwarded-For", " 203.0.113.7 , 10.0.0.1")
-	if got := ClientIP(forwarded); got != "203.0.113.7" {
-		t.Fatalf("forwarded %q", got)
+	cases := []struct {
+		name      string
+		forwarded []string
+		want      string
+	}{
+		{"proxy hop", []string{" 203.0.113.7 , 10.0.0.1 "}, "10.0.0.1"},
+		{"spoofed first value", []string{"198.51.100.66, 10.0.0.1"}, "10.0.0.1"},
+		{"single value", []string{"10.0.0.1"}, "10.0.0.1"},
+		{"repeated header", []string{"198.51.100.66", "203.0.113.7, 10.0.0.2"}, "10.0.0.2"},
+		{"empty last value", []string{"10.0.0.1, "}, "192.0.2.4"},
+		{"no header", nil, "192.0.2.4"},
 	}
-	direct := httptest.NewRequest(http.MethodPost, "/api/v1/login/answer", nil)
-	direct.RemoteAddr = "192.0.2.4:51234"
-	if got := ClientIP(direct); got != "192.0.2.4" {
-		t.Fatalf("direct %q", got)
+	for _, tc := range cases {
+		request := httptest.NewRequest(http.MethodPost, "/api/v1/login/answer", nil)
+		request.RemoteAddr = "192.0.2.4:51234"
+		for _, value := range tc.forwarded {
+			request.Header.Add("X-Forwarded-For", value)
+		}
+		if got := ClientIP(request); got != tc.want {
+			t.Fatalf("%s: %q, want %q", tc.name, got, tc.want)
+		}
 	}
 }
