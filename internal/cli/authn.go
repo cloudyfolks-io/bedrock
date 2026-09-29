@@ -16,13 +16,17 @@ import (
 	"time"
 
 	corev1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/client-go/rest"
+	"k8s.io/client-go/util/retry"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
 
+	"github.com/cloudyfolks-io/bedrock/api/v1alpha1"
 	"github.com/cloudyfolks-io/bedrock/internal/authn/apiserver"
 	"github.com/cloudyfolks-io/bedrock/internal/authn/housekeeping"
+	"github.com/cloudyfolks-io/bedrock/internal/authn/methods"
 	"github.com/cloudyfolks-io/bedrock/internal/authn/server"
 	"github.com/cloudyfolks-io/bedrock/internal/operator"
 	"github.com/cloudyfolks-io/bedrock/internal/release"
@@ -59,6 +63,8 @@ func authnCommand(args []string, stdout, stderr io.Writer) int {
 	case "serve":
 		ctrl.SetLogger(zap.New())
 		return RunAuthnServe(ctrl.SetupSignalHandler(), args[1:], AuthnDeps{RestConfig: ctrl.GetConfig, Listen: net.Listen}, stdout, stderr)
+	case "reset-password":
+		return RunResetPassword(context.Background(), args[1:], newClusterClient, rand.Reader, stdout, stderr)
 	}
 	fmt.Fprintf(stderr, "unknown authn command: %s\n", args[0])
 	return 2
@@ -209,4 +215,108 @@ func tunedRestConfig(cfg *rest.Config) *rest.Config {
 	tuned.QPS = restQPS
 	tuned.Burst = restBurst
 	return tuned
+}
+
+const resetPasswordUsage = "usage: bedrock authn reset-password <username> [--kubeconfig PATH]"
+
+func RunResetPassword(ctx context.Context, args []string, newClient func(string) (client.Client, error), random io.Reader, stdout, stderr io.Writer) int {
+	flags := flag.NewFlagSet("authn reset-password", flag.ContinueOnError)
+	flags.SetOutput(stderr)
+	kubeconfig := flags.String("kubeconfig", "/var/lib/k0s/pki/admin.conf", "admin kubeconfig")
+	if err := flags.Parse(args); err != nil {
+		return 2
+	}
+	if flags.NArg() == 0 {
+		fmt.Fprintln(stderr, resetPasswordUsage)
+		return 2
+	}
+	raw := flags.Arg(0)
+	if err := flags.Parse(flags.Args()[1:]); err != nil {
+		return 2
+	}
+	if flags.NArg() != 0 {
+		fmt.Fprintln(stderr, resetPasswordUsage)
+		return 2
+	}
+	username, err := v1alpha1.NormalizeUsername(raw)
+	if err != nil {
+		return fail(stderr, err)
+	}
+	c, err := newClient(*kubeconfig)
+	if err != nil {
+		return fail(stderr, err)
+	}
+	password, err := resetPassword(ctx, c, random, username)
+	if err != nil {
+		return fail(stderr, err)
+	}
+	fmt.Fprintf(stdout, "password: %s\n", password)
+	return 0
+}
+
+func resetPassword(ctx context.Context, c client.Client, random io.Reader, username string) (string, error) {
+	var user v1alpha1.User
+	err := c.Get(ctx, client.ObjectKey{Namespace: release.SystemNamespace, Name: v1alpha1.UserObjectName(username)}, &user)
+	if apierrors.IsNotFound(err) {
+		return "", fmt.Errorf("user %s not found", username)
+	}
+	if err != nil {
+		return "", err
+	}
+	if user.Spec.Source != "" {
+		return "", fmt.Errorf("user %s comes from %s, change the password there", username, user.Spec.Source)
+	}
+	password, err := generatedPassword(random)
+	if err != nil {
+		return "", err
+	}
+	if err := methods.SetPassword(ctx, c, random, user, password); err != nil {
+		return "", err
+	}
+	if err := retry.RetryOnConflict(retry.DefaultRetry, func() error {
+		var current v1alpha1.User
+		if err := c.Get(ctx, client.ObjectKeyFromObject(&user), &current); err != nil {
+			return err
+		}
+		current.Status = unlocked(current.Status)
+		return c.Status().Update(ctx, &current)
+	}); err != nil {
+		return "", err
+	}
+	if err := revokeLogins(ctx, c, user.Name); err != nil {
+		return "", err
+	}
+	return password, nil
+}
+
+func unlocked(status v1alpha1.UserStatus) v1alpha1.UserStatus {
+	next := *status.DeepCopy()
+	next.LockedUntil = nil
+	next.FailureWindowStart = nil
+	next.FailedAttempts = 0
+	next.Locks = 0
+	return next
+}
+
+func revokeLogins(ctx context.Context, c client.Client, user string) error {
+	byUser := []client.ListOption{client.InNamespace(release.SystemNamespace), client.MatchingFields{"spec.userRef": user}}
+	var tokens v1alpha1.RefreshTokenList
+	if err := c.List(ctx, &tokens, byUser...); err != nil {
+		return err
+	}
+	for i := range tokens.Items {
+		if err := client.IgnoreNotFound(c.Delete(ctx, &tokens.Items[i])); err != nil {
+			return err
+		}
+	}
+	var sessions v1alpha1.SessionList
+	if err := c.List(ctx, &sessions, byUser...); err != nil {
+		return err
+	}
+	for i := range sessions.Items {
+		if err := client.IgnoreNotFound(c.Delete(ctx, &sessions.Items[i])); err != nil {
+			return err
+		}
+	}
+	return nil
 }

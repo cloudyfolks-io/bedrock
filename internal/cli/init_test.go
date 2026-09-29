@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"reflect"
 	goruntime "runtime"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -959,5 +960,19 @@ func TestCreateAuthnSecretsRefusesOtherMaterial(t *testing.T) {
 	var ca corev1.Secret
 	if err := c.Get(ctx, client.ObjectKey{Namespace: "cert-manager", Name: "bedrock-ca"}, &ca); err != nil || string(ca.Data["tls.key"]) != "key" {
 		t.Fatalf("the CA Secret must stay: %v", err)
+	}
+}
+
+func TestInitPrintsAdminPasswordOnce(t *testing.T) {
+	run := prepareInit(t)
+	first := runPreparedInit(t, run)
+	lines := strings.Split(first, "\n")
+	printed := slices.IndexFunc(lines, func(line string) bool { return strings.HasPrefix(line, "admin password: ") })
+	if printed < 0 || len(strings.TrimPrefix(lines[printed], "admin password: ")) != 20 {
+		t.Fatalf("stdout %s", first)
+	}
+	second := runPreparedInit(t, run)
+	if strings.Contains(second, "admin password:") || !strings.Contains(second, "admin exists\n") {
+		t.Fatalf("a second init prints no password: %s", second)
 	}
 }

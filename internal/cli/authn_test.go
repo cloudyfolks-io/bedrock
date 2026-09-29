@@ -17,16 +17,21 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 	"time"
 
 	corev1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/rest"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/envtest"
 
+	"github.com/cloudyfolks-io/bedrock/api/v1alpha1"
+	"github.com/cloudyfolks-io/bedrock/internal/authn/methods"
+	"github.com/cloudyfolks-io/bedrock/internal/authn/secret"
 	"github.com/cloudyfolks-io/bedrock/internal/operator"
 	"github.com/cloudyfolks-io/bedrock/internal/release"
 )
@@ -188,4 +193,133 @@ func writeTestCertificate(t *testing.T) (string, string) {
 		t.Fatal(err)
 	}
 	return certFile, keyFile
+}
+
+func resetEnv(t *testing.T) (client.Client, func(string) (client.Client, error)) {
+	t.Helper()
+	c, newClient := startEnv(t)
+	if err := c.Create(context.Background(), &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: release.SystemNamespace}}); err != nil {
+		t.Fatal(err)
+	}
+	return c, newClient
+}
+
+func createTestUser(t *testing.T, c client.Client, spec v1alpha1.UserSpec) *v1alpha1.User {
+	t.Helper()
+	name := v1alpha1.UserObjectName(spec.Username)
+	user := &v1alpha1.User{ObjectMeta: metav1.ObjectMeta{Namespace: release.SystemNamespace, Name: name, Labels: map[string]string{v1alpha1.LabelKind: "User", v1alpha1.LabelName: name}}, Spec: spec}
+	if err := c.Create(context.Background(), user); err != nil {
+		t.Fatal(err)
+	}
+	return user
+}
+
+func loginObjects(user, seed string) []client.Object {
+	now := metav1.Now()
+	expires := metav1.NewTime(now.Add(time.Hour))
+	token := &v1alpha1.RefreshToken{
+		ObjectMeta: metav1.ObjectMeta{Namespace: release.SystemNamespace, Name: secret.SHA256Hex("refresh-" + seed), Labels: map[string]string{v1alpha1.LabelFamily: "family-" + seed}},
+		Spec:       v1alpha1.RefreshTokenSpec{Family: "family-" + seed, UserRef: user, ClientID: "bedrock-cli", Scopes: []string{"openid"}, Audience: []string{"bedrock"}, AMR: []string{"pwd"}, AuthTime: now, Session: secret.SHA256Hex("session-" + seed), ExpiresAt: expires},
+	}
+	session := &v1alpha1.Session{
+		ObjectMeta: metav1.ObjectMeta{Namespace: release.SystemNamespace, Name: secret.SHA256Hex("session-" + seed)},
+		Spec:       v1alpha1.SessionSpec{UserRef: user, AMR: []string{"pwd"}, AuthTime: now, UserAgent: "test", ClientIP: "127.0.0.1", ExpiresAt: expires},
+	}
+	return []client.Object{token, session}
+}
+
+func loginsOf(t *testing.T, c client.Client, user string) int {
+	t.Helper()
+	ctx := context.Background()
+	var tokens v1alpha1.RefreshTokenList
+	if err := c.List(ctx, &tokens, client.InNamespace(release.SystemNamespace), client.MatchingFields{"spec.userRef": user}); err != nil {
+		t.Fatal(err)
+	}
+	var sessions v1alpha1.SessionList
+	if err := c.List(ctx, &sessions, client.InNamespace(release.SystemNamespace), client.MatchingFields{"spec.userRef": user}); err != nil {
+		t.Fatal(err)
+	}
+	return len(tokens.Items) + len(sessions.Items)
+}
+
+func TestResetPassword(t *testing.T) {
+	c, newClient := resetEnv(t)
+	ctx := context.Background()
+	alice := createTestUser(t, c, v1alpha1.UserSpec{Username: "alice", Methods: []string{v1alpha1.MethodPassword}})
+	createTestUser(t, c, v1alpha1.UserSpec{Username: "bob", Methods: []string{v1alpha1.MethodPassword}})
+	if err := methods.SetPassword(ctx, c, rand.Reader, *alice, "old-password-123"); err != nil {
+		t.Fatal(err)
+	}
+	if err := c.Get(ctx, client.ObjectKeyFromObject(alice), alice); err != nil {
+		t.Fatal(err)
+	}
+	locked := metav1.NewTime(time.Now().Add(time.Hour))
+	alice.Status = v1alpha1.UserStatus{LockedUntil: &locked, FailedAttempts: 5, FailureWindowStart: &locked, Locks: 2}
+	if err := c.Status().Update(ctx, alice); err != nil {
+		t.Fatal(err)
+	}
+	for _, obj := range append(loginObjects("alice", "a"), loginObjects("bob", "b")...) {
+		if err := c.Create(ctx, obj); err != nil {
+			t.Fatal(err)
+		}
+	}
+	var out, errOut bytes.Buffer
+	code := RunResetPassword(ctx, []string{" Alice ", "--kubeconfig", "/unused/admin.conf"}, newClient, rand.Reader, &out, &errOut)
+	if code != 0 {
+		t.Fatalf("exit %d stderr %s", code, errOut.String())
+	}
+	match := regexp.MustCompile(`^password: ([0-9A-Za-z]{20})\n$`).FindStringSubmatch(out.String())
+	if match == nil {
+		t.Fatalf("stdout %q", out.String())
+	}
+	hash := storedPasswordHash(t, c, "alice")
+	if ok, err := secret.Verify(hash, match[1]); err != nil || !ok {
+		t.Fatalf("the new password must verify: %v %v", ok, err)
+	}
+	if ok, _ := secret.Verify(hash, "old-password-123"); ok {
+		t.Fatal("the old password must stop working")
+	}
+	var after v1alpha1.User
+	if err := c.Get(ctx, client.ObjectKeyFromObject(alice), &after); err != nil {
+		t.Fatal(err)
+	}
+	if after.Status.LockedUntil != nil || after.Status.FailedAttempts != 0 || after.Status.FailureWindowStart != nil || after.Status.Locks != 0 {
+		t.Fatalf("the lock must be cleared: %+v", after.Status)
+	}
+	if loginsOf(t, c, "alice") != 0 || loginsOf(t, c, "bob") != 2 {
+		t.Fatalf("only alice's refresh tokens and sessions go: alice %d bob %d", loginsOf(t, c, "alice"), loginsOf(t, c, "bob"))
+	}
+}
+
+func TestResetPasswordRefusesLDAPUser(t *testing.T) {
+	c, newClient := resetEnv(t)
+	createTestUser(t, c, v1alpha1.UserSpec{Username: "t.farahani", Source: "corp-ldap", Methods: []string{v1alpha1.MethodLDAP}})
+	var out, errOut bytes.Buffer
+	if code := RunResetPassword(context.Background(), []string{"t.farahani"}, newClient, rand.Reader, &out, &errOut); code != 1 {
+		t.Fatalf("exit %d", code)
+	}
+	if !strings.Contains(errOut.String(), "user t.farahani comes from corp-ldap") || out.Len() != 0 {
+		t.Fatalf("stdout %q stderr %q", out.String(), errOut.String())
+	}
+	var credential v1alpha1.Credential
+	err := c.Get(context.Background(), client.ObjectKey{Namespace: release.SystemNamespace, Name: v1alpha1.CredentialName("t.farahani", v1alpha1.MethodPassword)}, &credential)
+	if !apierrors.IsNotFound(err) {
+		t.Fatalf("no password may be set for an LDAP user: %v", err)
+	}
+}
+
+func TestResetPasswordUnknownUser(t *testing.T) {
+	_, newClient := resetEnv(t)
+	var out, errOut bytes.Buffer
+	if code := RunResetPassword(context.Background(), []string{"nobody"}, newClient, rand.Reader, &out, &errOut); code != 1 || !strings.Contains(errOut.String(), "user nobody not found") {
+		t.Fatalf("exit %d stderr %q", code, errOut.String())
+	}
+	errOut.Reset()
+	if code := RunResetPassword(context.Background(), nil, newClient, rand.Reader, &out, &errOut); code != 2 || !strings.Contains(errOut.String(), "reset-password <username>") {
+		t.Fatalf("exit %d stderr %q", code, errOut.String())
+	}
+	errOut.Reset()
+	if code := RunResetPassword(context.Background(), []string{"a", "b"}, newClient, rand.Reader, &out, &errOut); code != 2 {
+		t.Fatalf("two usernames: exit %d", code)
+	}
 }

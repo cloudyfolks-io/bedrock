@@ -24,6 +24,7 @@ import (
 
 	"github.com/cloudyfolks-io/bedrock/api/v1alpha1"
 	"github.com/cloudyfolks-io/bedrock/internal/authn/apiserver"
+	"github.com/cloudyfolks-io/bedrock/internal/authn/methods"
 	"github.com/cloudyfolks-io/bedrock/internal/authn/secret"
 	"github.com/cloudyfolks-io/bedrock/internal/config"
 	"github.com/cloudyfolks-io/bedrock/internal/host"
@@ -39,11 +40,12 @@ import (
 const initFieldOwner = "bedrock-init"
 
 const (
-	authnBootstrapDir   = "var/lib/bedrock/authn"
-	bootstrapCACert     = "ca.crt"
-	bootstrapCAKey      = "ca.key"
-	bootstrapBearer     = "webhook-token"
-	webhookBearerLength = 32
+	authnBootstrapDir       = "var/lib/bedrock/authn"
+	bootstrapCACert         = "ca.crt"
+	bootstrapCAKey          = "ca.key"
+	bootstrapBearer         = "webhook-token"
+	webhookBearerLength     = 32
+	generatedPasswordLength = 20
 )
 
 type InitDeps struct {
@@ -283,6 +285,17 @@ func RunInit(ctx context.Context, args []string, deps InitDeps, stdout, stderr i
 	}
 	if err := createObjects(ctx, c, cfg, nodeName); err != nil {
 		return fail(stderr, err)
+	}
+
+	step(stdout, "bootstrap admin")
+	password, created, err := createAdmin(ctx, c, rand.Reader)
+	if err != nil {
+		return fail(stderr, err)
+	}
+	if created {
+		fmt.Fprintf(stdout, "admin password: %s\n", password)
+	} else {
+		fmt.Fprintln(stdout, "admin exists")
 	}
 
 	step(stdout, "waiting for the operator")
@@ -741,4 +754,31 @@ func checkAuthnMaterial(ctx context.Context, c client.Client, dir string) error 
 		return fmt.Errorf("authn bootstrap %s lacks %s while Secret %s/%s exists, restore that directory from the Secrets", filepath.Join("/", authnBootstrapDir), strings.Join(missing, ", "), want.Namespace, want.Name)
 	}
 	return nil
+}
+
+func createAdmin(ctx context.Context, c client.Client, random io.Reader) (string, bool, error) {
+	name := v1alpha1.UserObjectName(v1alpha1.UserAdmin)
+	admin := v1alpha1.User{
+		ObjectMeta: metav1.ObjectMeta{Namespace: release.SystemNamespace, Name: name, Labels: map[string]string{v1alpha1.LabelKind: "User", v1alpha1.LabelName: name}},
+		Spec:       v1alpha1.UserSpec{Username: v1alpha1.UserAdmin, DisplayName: "Administrator", Groups: []string{v1alpha1.GroupAdmins}, Methods: []string{v1alpha1.MethodPassword}},
+	}
+	err := c.Create(ctx, &admin)
+	if errors.IsAlreadyExists(err) {
+		return "", false, nil
+	}
+	if err != nil {
+		return "", false, err
+	}
+	password, err := generatedPassword(random)
+	if err != nil {
+		return "", false, err
+	}
+	if err := methods.SetPassword(ctx, c, random, admin, password); err != nil {
+		return "", false, fmt.Errorf("admin created without a password, run bedrock authn reset-password admin: %w", err)
+	}
+	return password, true, nil
+}
+
+func generatedPassword(random io.Reader) (string, error) {
+	return secret.Base62(random, generatedPasswordLength)
 }
