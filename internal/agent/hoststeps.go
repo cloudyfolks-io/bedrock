@@ -175,22 +175,32 @@ func k0sProblem(ctx context.Context, env StepEnv, probes []k0sProbe) string {
 }
 
 func awaitK0s(ctx context.Context, env StepEnv, probes []k0sProbe) error {
-	waitCtx, cancel := context.WithTimeout(ctx, env.Deps.K0sTimeout)
+	observed, err := waitClear(ctx, env.Deps.K0sTimeout, env.Deps.K0sPoll, func(waitCtx context.Context) string {
+		return k0sProblem(waitCtx, env, probes)
+	})
+	if err != nil && ctx.Err() == nil {
+		return fmt.Errorf("k0s %s is not ready after %s: %s", env.Target.Spec.K0sVersion, env.Deps.K0sTimeout, observed)
+	}
+	return err
+}
+
+func waitClear(ctx context.Context, timeout, poll time.Duration, problem func(context.Context) string) (string, error) {
+	waitCtx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 	observed := ""
 	for {
-		problem := k0sProblem(waitCtx, env, probes)
-		if problem == "" {
-			return nil
+		current := problem(waitCtx)
+		if current == "" {
+			return "", nil
 		}
-		observed = lastObservation(observed, problem, waitCtx.Err())
+		observed = lastObservation(observed, current, waitCtx.Err())
 		select {
 		case <-waitCtx.Done():
 			if err := ctx.Err(); err != nil {
-				return err
+				return observed, err
 			}
-			return fmt.Errorf("k0s %s is not ready after %s: %s", env.Target.Spec.K0sVersion, env.Deps.K0sTimeout, observed)
-		case <-time.After(env.Deps.K0sPoll):
+			return observed, waitCtx.Err()
+		case <-time.After(poll):
 		}
 	}
 }

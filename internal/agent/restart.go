@@ -145,24 +145,13 @@ func adminKubectl(ctx context.Context, deps Deps, args ...string) (string, error
 }
 
 func awaitAPI(ctx context.Context, deps Deps) error {
-	waitCtx, cancel := context.WithTimeout(ctx, deps.K0sTimeout)
-	defer cancel()
-	observed := ""
-	for {
-		problem := bounded(waitCtx, deps.ProbeTimeout, func(probeCtx context.Context) string {
+	observed, err := waitClear(ctx, deps.K0sTimeout, deps.K0sPoll, func(waitCtx context.Context) string {
+		return bounded(waitCtx, deps.ProbeTimeout, func(probeCtx context.Context) string {
 			return apiProblem(probeCtx, deps.Exec, deps.Root, "/readyz")
 		})
-		if problem == "" {
-			return nil
-		}
-		observed = lastObservation(observed, problem, waitCtx.Err())
-		select {
-		case <-waitCtx.Done():
-			if err := ctx.Err(); err != nil {
-				return err
-			}
-			return fmt.Errorf("the API did not answer within %s: %s", deps.K0sTimeout, observed)
-		case <-time.After(deps.K0sPoll):
-		}
+	})
+	if err != nil && ctx.Err() == nil {
+		return fmt.Errorf("the API did not answer within %s: %s", deps.K0sTimeout, observed)
 	}
+	return err
 }
