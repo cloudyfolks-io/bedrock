@@ -748,6 +748,69 @@ func TestInitKeepsExistingCA(t *testing.T) {
 	if string(ca.Data["tls.key"]) != firstKey {
 		t.Fatal("the Secret must hold the kept CA key")
 	}
+	markRunning(run)
+	runPreparedInit(t, run)
+	if readInitFile(t, filepath.Join(bootstrap, "ca.key")) != firstKey || readInitFile(t, authnPaths(run.root)[1]) != firstWebhook {
+		t.Fatal("a re-run on a running cluster must keep the CA and the bearer")
+	}
+}
+
+func markRunning(run initRun) {
+	e := run.deps.Exec.(*host.FakeExec)
+	status := "/usr/local/bin/k0s status --data-dir " + filepath.Join(run.root, "var", "lib", "k0s")
+	delete(e.Errors, status)
+	e.Responses[status] = ""
+}
+
+func authnHostFiles(t *testing.T, root string) map[string]string {
+	t.Helper()
+	files := map[string]string{}
+	for _, path := range authnPaths(root) {
+		files[path] = readInitFile(t, path)
+	}
+	return files
+}
+
+func TestInitRefusesLostBootstrapOnARunningCluster(t *testing.T) {
+	run := prepareInit(t)
+	runPreparedInit(t, run)
+	before := authnHostFiles(t, run.root)
+	bootstrap := filepath.Join(run.root, "var", "lib", "bedrock", "authn")
+	if err := os.RemoveAll(bootstrap); err != nil {
+		t.Fatal(err)
+	}
+	markRunning(run)
+	var out, errOut bytes.Buffer
+	if code := RunInit(context.Background(), run.args, run.deps, &out, &errOut); code != 1 || !strings.Contains(errOut.String(), "cert-manager/bedrock-ca") {
+		t.Fatalf("exit %d stderr %s", code, errOut.String())
+	}
+	if _, err := os.Stat(bootstrap); !os.IsNotExist(err) {
+		t.Fatal("no new CA may be saved while the cluster holds the old one")
+	}
+	if !reflect.DeepEqual(authnHostFiles(t, run.root), before) {
+		t.Fatal("the authn host files must stay")
+	}
+}
+
+func TestInitRefusesOtherBootstrapOnARunningCluster(t *testing.T) {
+	run := prepareInit(t)
+	runPreparedInit(t, run)
+	before := authnHostFiles(t, run.root)
+	bootstrap := filepath.Join(run.root, "var", "lib", "bedrock", "authn")
+	if err := os.RemoveAll(bootstrap); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := loadOrBootstrapAuthn(bootstrap, rand.Reader, time.Now(), "10-0-10-10.sslip.io"); err != nil {
+		t.Fatal(err)
+	}
+	markRunning(run)
+	var out, errOut bytes.Buffer
+	if code := RunInit(context.Background(), run.args, run.deps, &out, &errOut); code != 1 || !strings.Contains(errOut.String(), "cert-manager/bedrock-ca") {
+		t.Fatalf("exit %d stderr %s", code, errOut.String())
+	}
+	if !reflect.DeepEqual(authnHostFiles(t, run.root), before) {
+		t.Fatal("the authn host files must stay")
+	}
 }
 
 func TestInitCreatesAuthnSecrets(t *testing.T) {
@@ -775,6 +838,11 @@ func TestInitCreatesAuthnSecrets(t *testing.T) {
 	}
 	if config.AuthInfos["kube-apiserver"].Token != string(token.Data["token"]) {
 		t.Fatal("the webhook file and the Secret must hold the same bearer")
+	}
+	for _, written := range []corev1.Secret{ca, token} {
+		if len(written.ManagedFields) != 1 || written.ManagedFields[0].Manager != v1alpha1.AuthnFieldManager {
+			t.Fatalf("%s field managers %v", written.Name, written.ManagedFields)
+		}
 	}
 	if strings.Contains(stdout, string(token.Data["token"])) || strings.Contains(stdout, "PRIVATE KEY") {
 		t.Fatal("init must not print the bearer or the CA key")

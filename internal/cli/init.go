@@ -172,6 +172,19 @@ func RunInit(ctx context.Context, args []string, deps InitDeps, stdout, stderr i
 		return fail(stderr, err)
 	}
 
+	step(stdout, "authn bootstrap")
+	bootstrapDir := filepath.Join(deps.Root, authnBootstrapDir)
+	running := k0sClient.Running(ctx)
+	if running {
+		if err := checkRunningAuthn(ctx, k0sClient, deps.NewClient, o.dataDir, bootstrapDir); err != nil {
+			return fail(stderr, err)
+		}
+	}
+	authnInputs, caKey, err := loadOrBootstrapAuthn(bootstrapDir, rand.Reader, time.Now(), settings.PlatformHost(cfg.Spec.API.VIP, cfg.Spec.Platform.Host))
+	if err != nil {
+		return fail(stderr, err)
+	}
+
 	step(stdout, "vip %s on %s", cfg.Spec.API.VIP, cfg.Spec.Network.ManagementInterface)
 	if err := host.EnsureAddress(ctx, deps.Exec, cfg.Spec.API.VIP, cfg.Spec.Network.ManagementInterface); err != nil {
 		return fail(stderr, err)
@@ -193,12 +206,6 @@ func RunInit(ctx context.Context, args []string, deps InitDeps, stdout, stderr i
 		return fail(stderr, err)
 	}
 
-	step(stdout, "authn bootstrap")
-	authnInputs, caKey, err := loadOrBootstrapAuthn(filepath.Join(deps.Root, authnBootstrapDir), rand.Reader, time.Now(), settings.PlatformHost(cfg.Spec.API.VIP, cfg.Spec.Platform.Host))
-	if err != nil {
-		return fail(stderr, err)
-	}
-
 	if o.imagesDir != "" {
 		step(stdout, "preloading images from %s", o.imagesDir)
 		n, err := release.PreloadImages(o.imagesDir, filepath.Join(o.dataDir, "images"))
@@ -209,7 +216,6 @@ func RunInit(ctx context.Context, args []string, deps InitDeps, stdout, stderr i
 	}
 
 	step(stdout, "installing k0s controller")
-	running := k0sClient.Running(ctx)
 	if !running {
 		if err := k0sClient.Install(ctx, k0s.InstallOptions{
 			Role: "controller", Force: true, ConfigPath: configPath, EnableWorker: true, NoTaints: true, DynamicConfig: true,
@@ -572,20 +578,52 @@ func readAuthnBootstrap(dir, host string) (apiserver.Inputs, []byte, error) {
 }
 
 func saveAuthnBootstrap(dir string, in apiserver.Inputs, key []byte) error {
-	if err := os.MkdirAll(filepath.Dir(dir), 0o755); err != nil {
+	parent := filepath.Dir(dir)
+	if err := os.MkdirAll(parent, 0o755); err != nil {
 		return err
 	}
-	staging, err := os.MkdirTemp(filepath.Dir(dir), "."+filepath.Base(dir)+".")
+	staging, err := os.MkdirTemp(parent, "."+filepath.Base(dir)+".")
 	if err != nil {
 		return err
 	}
 	defer os.RemoveAll(staging)
 	for name, content := range map[string][]byte{bootstrapCACert: in.CA, bootstrapCAKey: key, bootstrapBearer: []byte(in.Bearer)} {
-		if err := os.WriteFile(filepath.Join(staging, name), content, 0o600); err != nil {
+		if err := writeSyncedFile(filepath.Join(staging, name), content); err != nil {
 			return err
 		}
 	}
-	return os.Rename(staging, dir)
+	if err := syncDir(staging); err != nil {
+		return err
+	}
+	if err := os.Rename(staging, dir); err != nil {
+		return err
+	}
+	return syncDir(parent)
+}
+
+func writeSyncedFile(path string, content []byte) error {
+	file, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
+	if err != nil {
+		return err
+	}
+	if _, err := file.Write(content); err != nil {
+		file.Close()
+		return err
+	}
+	if err := file.Sync(); err != nil {
+		file.Close()
+		return err
+	}
+	return file.Close()
+}
+
+func syncDir(dir string) error {
+	opened, err := os.Open(dir)
+	if err != nil {
+		return err
+	}
+	defer opened.Close()
+	return opened.Sync()
 }
 
 func authnFileInputs(mode string, in apiserver.Inputs) apiserver.Inputs {
@@ -618,6 +656,15 @@ func createAuthnSecrets(ctx context.Context, c client.Client, caCert, caKey []by
 			return err
 		}
 	}
+	for _, desired := range authnSecrets(caCert, caKey, bearer) {
+		if err := ensureAuthnSecret(ctx, c, desired); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func authnSecrets(caCert, caKey []byte, bearer string) []*corev1.Secret {
 	token := &corev1.Secret{
 		ObjectMeta: metav1.ObjectMeta{
 			Namespace: release.SystemNamespace,
@@ -627,27 +674,71 @@ func createAuthnSecrets(ctx context.Context, c client.Client, caCert, caKey []by
 		Type: corev1.SecretTypeOpaque,
 		Data: map[string][]byte{"token": []byte(bearer)},
 	}
-	for _, desired := range []*corev1.Secret{apiserver.CASecret(caCert, caKey), token} {
-		if err := ensureAuthnSecret(ctx, c, desired); err != nil {
+	return []*corev1.Secret{apiserver.CASecret(caCert, caKey), token}
+}
+
+func ensureAuthnSecret(ctx context.Context, c client.Client, desired *corev1.Secret) error {
+	err := c.Create(ctx, desired.DeepCopy(), client.FieldOwner(v1alpha1.AuthnFieldManager))
+	if !errors.IsAlreadyExists(err) {
+		return err
+	}
+	return compareAuthnSecrets(ctx, c, []*corev1.Secret{desired})
+}
+
+func compareAuthnSecrets(ctx context.Context, c client.Client, desired []*corev1.Secret) error {
+	for _, want := range desired {
+		var existing corev1.Secret
+		err := c.Get(ctx, client.ObjectKeyFromObject(want), &existing)
+		if errors.IsNotFound(err) {
+			continue
+		}
+		if err != nil {
 			return err
+		}
+		for key, value := range want.Data {
+			if !bytes.Equal(existing.Data[key], value) {
+				return fmt.Errorf("secret %s/%s holds other authn material than %s, restore that directory from the Secret", want.Namespace, want.Name, filepath.Join("/", authnBootstrapDir))
+			}
 		}
 	}
 	return nil
 }
 
-func ensureAuthnSecret(ctx context.Context, c client.Client, desired *corev1.Secret) error {
-	err := c.Create(ctx, desired.DeepCopy(), client.FieldOwner(initFieldOwner))
-	if !errors.IsAlreadyExists(err) {
+func checkRunningAuthn(ctx context.Context, k0sClient k0s.Client, newClient func(string) (client.Client, error), dataDir, dir string) error {
+	readyCtx, cancel := context.WithTimeout(ctx, 10*time.Minute)
+	defer cancel()
+	if err := k0sClient.WaitReady(readyCtx); err != nil {
 		return err
 	}
-	var existing corev1.Secret
-	if err := c.Get(ctx, client.ObjectKeyFromObject(desired), &existing); err != nil {
+	c, err := newClient(filepath.Join(dataDir, "pki", "admin.conf"))
+	if err != nil {
 		return err
 	}
-	for key, value := range desired.Data {
-		if !bytes.Equal(existing.Data[key], value) {
-			return fmt.Errorf("secret %s/%s holds other authn material than %s, restore that directory from the Secret", desired.Namespace, desired.Name, filepath.Join("/", authnBootstrapDir))
+	return checkAuthnMaterial(ctx, c, dir)
+}
+
+func checkAuthnMaterial(ctx context.Context, c client.Client, dir string) error {
+	missing, err := missingBootstrapFiles(dir)
+	if err != nil {
+		return err
+	}
+	if len(missing) == 0 {
+		in, key, err := readAuthnBootstrap(dir, "")
+		if err != nil {
+			return err
 		}
+		return compareAuthnSecrets(ctx, c, authnSecrets(in.CA, key, in.Bearer))
+	}
+	for _, want := range authnSecrets(nil, nil, "") {
+		var existing corev1.Secret
+		err := c.Get(ctx, client.ObjectKeyFromObject(want), &existing)
+		if errors.IsNotFound(err) {
+			continue
+		}
+		if err != nil {
+			return err
+		}
+		return fmt.Errorf("authn bootstrap %s lacks %s while Secret %s/%s exists, restore that directory from the Secrets", filepath.Join("/", authnBootstrapDir), strings.Join(missing, ", "), want.Namespace, want.Name)
 	}
 	return nil
 }
