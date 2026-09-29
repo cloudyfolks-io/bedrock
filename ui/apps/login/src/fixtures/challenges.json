@@ -1,0 +1,12 @@
+[
+  { "name": "username", "challenge": { "type": "username", "csrf": "csrf-a1b2c3" } },
+  { "name": "password", "challenge": { "type": "password", "csrf": "csrf-b2c3d4", "username": "alice" } },
+  { "name": "totp", "challenge": { "type": "totp", "csrf": "csrf-c3d4e5", "username": "alice", "methods": ["totp", "recovery"] } },
+  { "name": "recovery", "challenge": { "type": "recovery", "csrf": "csrf-d4e5f6", "username": "alice" } },
+  { "name": "totp-enroll", "challenge": { "type": "totp-enroll", "csrf": "csrf-e5f6a7", "username": "alice", "enroll": { "otpauthURL": "otpauth://totp/sso.bedrock.test:alice?secret=JBSWY3DPEHPK3PXP&issuer=sso.bedrock.test", "secret": "JBSWY3DPEHPK3PXP" } } },
+  { "name": "providers", "challenge": { "type": "providers", "csrf": "csrf-f6a7b8", "providers": [{ "name": "corp-ldap", "displayName": "Corporate LDAP", "type": "ldap" }, { "name": "dex", "displayName": "Dadehat SSO", "type": "oidc" }] } },
+  { "name": "redirect", "challenge": { "type": "redirect", "redirect": "/api/v1/login/providers/dex/callback?state=st-a1" } },
+  { "name": "device-confirm", "challenge": { "type": "device-confirm", "csrf": "csrf-a7b8c9", "device": { "userCode": "ABCD-EFGH", "clientID": "bedrock-cli", "scopes": ["openid", "offline_access"] } } },
+  { "name": "done", "challenge": { "type": "done", "redirect": "https://sso.bedrock.test/oauth/v2/authorize/callback?code=cd1&state=st-b2" } },
+  { "name": "error", "challenge": { "type": "error", "error": { "code": "invalid_credentials" } } }
+]
