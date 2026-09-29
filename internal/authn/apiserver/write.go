@@ -70,20 +70,33 @@ func writeFile(path string, content []byte, owner Owner) (bool, error) {
 		return false, err
 	}
 	defer os.Remove(next.Name())
-	if _, err := next.Write(content); err != nil {
-		next.Close()
-		return false, err
-	}
-	if err := next.Close(); err != nil {
-		return false, err
-	}
-	if err := os.Chmod(next.Name(), fileMode); err != nil {
+	if err := writeTemp(next, content, owner); err != nil {
 		return false, err
 	}
 	if err := os.Rename(next.Name(), path); err != nil {
 		return false, err
 	}
-	return true, owner(path)
+	return true, syncDir(filepath.Dir(path))
+}
+
+func writeTemp(next *os.File, content []byte, owner Owner) error {
+	defer next.Close()
+	if _, err := next.Write(content); err != nil {
+		return err
+	}
+	if err := owner(next.Name()); err != nil {
+		return err
+	}
+	return next.Sync()
+}
+
+func syncDir(dir string) error {
+	opened, err := os.Open(dir)
+	if err != nil {
+		return err
+	}
+	defer opened.Close()
+	return opened.Sync()
 }
 
 func settle(path string, mode os.FileMode, owner Owner) error {

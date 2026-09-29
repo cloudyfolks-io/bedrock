@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -108,10 +107,20 @@ func TestSyncWritesFilesWithMode0600(t *testing.T) {
 		if info, err := os.Stat(path); err != nil || info.Mode().Perm() != 0o600 {
 			t.Fatalf("%s mode %v %v", name, info, err)
 		}
-		if !slices.Contains(owned, path) {
+		if !ownedTempFile(owned, name) {
 			t.Fatalf("%s must belong to the kube-apiserver user: %v", name, owned)
 		}
 	}
+}
+
+func ownedTempFile(owned []string, name string) bool {
+	prefix := "." + name + "."
+	for _, path := range owned {
+		if strings.HasPrefix(filepath.Base(path), prefix) {
+			return true
+		}
+	}
+	return false
 }
 
 func TestSyncSkipsWorkers(t *testing.T) {

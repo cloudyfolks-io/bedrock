@@ -1,9 +1,11 @@
 package apiserver
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"slices"
+	"strings"
 	"testing"
 )
 
@@ -33,8 +35,8 @@ func TestWriteFiles(t *testing.T) {
 		if err != nil || info.Mode().Perm() != 0o600 {
 			t.Fatalf("%s mode %v %v", name, info, err)
 		}
-		if !slices.Contains(owned, path) {
-			t.Fatalf("owner not applied to %s: %v", path, owned)
+		if !ownedTempFile(owned, name) {
+			t.Fatalf("owner not applied to the temp file for %s before rename: %v", name, owned)
 		}
 	}
 	if !slices.Contains(owned, dir) {
@@ -57,5 +59,40 @@ func TestWriteFiles(t *testing.T) {
 	}
 	if info, _ := os.Stat(filepath.Join(dir, WebhookFile)); info.Mode().Perm() != 0o600 {
 		t.Fatalf("a rewritten file is 0600, got %v", info.Mode().Perm())
+	}
+}
+
+func ownedTempFile(owned []string, name string) bool {
+	prefix := "." + name + "."
+	for _, path := range owned {
+		if strings.HasPrefix(filepath.Base(path), prefix) {
+			return true
+		}
+	}
+	return false
+}
+
+func TestWriteFilesOwnerFailureLeavesOldFileLive(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "etc", "bedrock", "authn")
+	if _, err := WriteFiles(dir, map[string][]byte{AuthenticationFile: []byte("old")}, KeepOwner); err != nil {
+		t.Fatal(err)
+	}
+	failing := func(path string) error {
+		if path == dir {
+			return nil
+		}
+		return errors.New("chown failed")
+	}
+	changed, err := WriteFiles(dir, map[string][]byte{AuthenticationFile: []byte("new")}, failing)
+	if err == nil || changed {
+		t.Fatalf("owner failure must report changed=false and an error: changed %v err %v", changed, err)
+	}
+	got, readErr := os.ReadFile(filepath.Join(dir, AuthenticationFile))
+	if readErr != nil || string(got) != "old" {
+		t.Fatalf("the old file must stay live: %q %v", got, readErr)
+	}
+	entries, err := os.ReadDir(dir)
+	if err != nil || len(entries) != 1 {
+		t.Fatalf("no temporary file may stay after an owner failure: %v %v", entries, err)
 	}
 }
