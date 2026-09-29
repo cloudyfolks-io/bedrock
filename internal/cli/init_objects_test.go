@@ -130,6 +130,37 @@ func TestCreateAdminOnce(t *testing.T) {
 	}
 }
 
+func TestCreateAdminRepairsAMissingCredential(t *testing.T) {
+	c, _ := startEnv(t)
+	ctx := context.Background()
+	if err := c.Create(ctx, &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: release.SystemNamespace}}); err != nil {
+		t.Fatal(err)
+	}
+	name := v1alpha1.UserObjectName(v1alpha1.UserAdmin)
+	half := &v1alpha1.User{
+		ObjectMeta: metav1.ObjectMeta{Namespace: release.SystemNamespace, Name: name, Labels: map[string]string{v1alpha1.LabelKind: "User", v1alpha1.LabelName: name}},
+		Spec:       v1alpha1.UserSpec{Username: v1alpha1.UserAdmin, DisplayName: "Administrator", Groups: []string{v1alpha1.GroupAdmins}, Methods: []string{v1alpha1.MethodPassword}},
+	}
+	if err := c.Create(ctx, half); err != nil {
+		t.Fatal(err)
+	}
+	password, created, err := createAdmin(ctx, c, rand.Reader)
+	if err != nil || !created || len(password) != 20 {
+		t.Fatalf("a half-created admin must be repaired: length %d created %v err %v", len(password), created, err)
+	}
+	hash := storedPasswordHash(t, c, "admin")
+	if ok, err := secret.Verify(hash, password); err != nil || !ok {
+		t.Fatalf("the repaired password must match the stored hash: %v %v", ok, err)
+	}
+	again, created, err := createAdmin(ctx, c, rand.Reader)
+	if err != nil || created || again != "" {
+		t.Fatalf("a repaired admin must not be repaired twice: %q %v %v", again, created, err)
+	}
+	if storedPasswordHash(t, c, "admin") != hash {
+		t.Fatal("the repaired password must not change again")
+	}
+}
+
 func TestAdminsBindingNamesTheGroup(t *testing.T) {
 	raw, err := os.ReadFile(filepath.Join("..", "..", "manifests", "85-authn", "80-admins.yaml"))
 	if err != nil {

@@ -762,12 +762,21 @@ func createAdmin(ctx context.Context, c client.Client, random io.Reader) (string
 		ObjectMeta: metav1.ObjectMeta{Namespace: release.SystemNamespace, Name: name, Labels: map[string]string{v1alpha1.LabelKind: "User", v1alpha1.LabelName: name}},
 		Spec:       v1alpha1.UserSpec{Username: v1alpha1.UserAdmin, DisplayName: "Administrator", Groups: []string{v1alpha1.GroupAdmins}, Methods: []string{v1alpha1.MethodPassword}},
 	}
-	err := c.Create(ctx, &admin)
-	if errors.IsAlreadyExists(err) {
-		return "", false, nil
+	createErr := c.Create(ctx, &admin, client.FieldOwner(v1alpha1.AuthnFieldManager))
+	if createErr != nil && !errors.IsAlreadyExists(createErr) {
+		return "", false, createErr
 	}
-	if err != nil {
-		return "", false, err
+	if errors.IsAlreadyExists(createErr) {
+		if err := c.Get(ctx, client.ObjectKeyFromObject(&admin), &admin); err != nil {
+			return "", false, err
+		}
+		hasCredential, err := adminHasCredential(ctx, c, name)
+		if err != nil {
+			return "", false, err
+		}
+		if hasCredential {
+			return "", false, nil
+		}
 	}
 	password, err := generatedPassword(random)
 	if err != nil {
@@ -777,6 +786,19 @@ func createAdmin(ctx context.Context, c client.Client, random io.Reader) (string
 		return "", false, fmt.Errorf("admin created without a password, run bedrock authn reset-password admin: %w", err)
 	}
 	return password, true, nil
+}
+
+func adminHasCredential(ctx context.Context, c client.Client, name string) (bool, error) {
+	var credential v1alpha1.Credential
+	err := c.Get(ctx, client.ObjectKey{Namespace: release.SystemNamespace, Name: v1alpha1.CredentialName(name, v1alpha1.MethodPassword)}, &credential)
+	switch {
+	case err == nil:
+		return true, nil
+	case errors.IsNotFound(err):
+		return false, nil
+	default:
+		return false, err
+	}
 }
 
 func generatedPassword(random io.Reader) (string, error) {

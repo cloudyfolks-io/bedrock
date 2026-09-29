@@ -279,7 +279,7 @@ func resetPassword(ctx context.Context, c client.Client, random io.Reader, usern
 			return err
 		}
 		current.Status = unlocked(current.Status)
-		return c.Status().Update(ctx, &current)
+		return c.Status().Update(ctx, &current, client.FieldOwner(v1alpha1.AuthnFieldManager))
 	}); err != nil {
 		return "", err
 	}
