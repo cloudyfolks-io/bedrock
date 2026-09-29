@@ -2,12 +2,16 @@ package operator
 
 import (
 	"encoding/base64"
+	"os"
+	"path/filepath"
 	"testing"
 
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	sigyaml "sigs.k8s.io/yaml"
 
 	"github.com/cloudyfolks-io/bedrock/api/v1alpha1"
+	"github.com/cloudyfolks-io/bedrock/internal/authn/apiserver"
 )
 
 func platformInput(values map[string]string) AddonInput {
@@ -17,7 +21,8 @@ func platformInput(values map[string]string) AddonInput {
 	}
 	cluster := v1alpha1.Cluster{}
 	cluster.Spec.API.VIP = "10.0.0.250"
-	return AddonInput{Cluster: cluster, Settings: settings}
+	ca := &corev1.Secret{Data: map[string][]byte{"ca.crt": []byte("CA"), "tls.crt": []byte("CA"), "tls.key": []byte("KEY")}}
+	return AddonInput{Cluster: cluster, Settings: settings, PlatformCA: ca}
 }
 
 func TestRenderPlatformSelfSigned(t *testing.T) {
@@ -44,7 +49,7 @@ func TestRenderPlatformSelfSigned(t *testing.T) {
 	issuerName, _, _ := unstructured.NestedString(cert.Object, "spec", "issuerRef", "name")
 	issuerKind, _, _ := unstructured.NestedString(cert.Object, "spec", "issuerRef", "kind")
 	want := []string{"10-0-0-250.sslip.io", "console.10-0-0-250.sslip.io", "sso.10-0-0-250.sslip.io", "api.10-0-0-250.sslip.io", "upload.10-0-0-250.sslip.io"}
-	if len(names) != 5 || secret != "platform-tls" || issuerName != "bedrock-selfsigned" || issuerKind != "ClusterIssuer" {
+	if len(names) != 5 || secret != "platform-tls" || issuerName != "bedrock-ca" || issuerKind != "ClusterIssuer" {
 		t.Fatalf("certificate spec %+v", cert.Object["spec"])
 	}
 	for i := range want {
@@ -137,5 +142,67 @@ func TestDefaultAddonsOrder(t *testing.T) {
 	addons := DefaultAddons()
 	if len(addons) != 3 || addons[0].Name != "storage" || addons[1].Name != "virtualization" || addons[2].Name != "platform" {
 		t.Fatalf("addons %+v", addons)
+	}
+}
+
+func TestRenderPlatformSelfSignedUsesBedrockCA(t *testing.T) {
+	out, err := RenderPlatform(platformInput(map[string]string{"platform.host": "cloud.example.com"}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	cert := findObject(out.Objects, "Certificate", "platform-tls")
+	if cert == nil {
+		t.Fatalf("objects %+v", out.Objects)
+	}
+	issuerName, _, _ := unstructured.NestedString(cert.Object, "spec", "issuerRef", "name")
+	if issuerName != issuerCA {
+		t.Fatalf("platform-tls must come from the Bedrock CA, issuer %q", issuerName)
+	}
+	for _, mode := range []string{"LetsEncrypt", "Custom"} {
+		in := platformInput(map[string]string{"platform.tls-mode": mode, "letsencrypt.email": "ops@example.com", "platform.custom-tls": "my-tls"})
+		in.CustomTLS = &corev1.Secret{Data: map[string][]byte{"tls.crt": []byte("CERT"), "tls.key": []byte("KEY")}}
+		out, err := RenderPlatform(in)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if cert := findObject(out.Objects, "Certificate", "platform-tls"); cert != nil {
+			name, _, _ := unstructured.NestedString(cert.Object, "spec", "issuerRef", "name")
+			if name == issuerCA {
+				t.Fatalf("%s must not use the Bedrock CA", mode)
+			}
+		}
+	}
+}
+
+func TestRenderPlatformWaitsForTheCA(t *testing.T) {
+	in := platformInput(nil)
+	in.PlatformCA = nil
+	out, err := RenderPlatform(in)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if out.SkipReason != "WaitingForPlatformCA" || out.SkipMessage != "platform CA secret cert-manager/bedrock-ca not found" || len(out.Objects) != 0 {
+		t.Fatalf("rendered %+v", out)
+	}
+	in = platformInput(map[string]string{"platform.tls-mode": "LetsEncrypt", "letsencrypt.email": "ops@example.com"})
+	in.PlatformCA = nil
+	out, err = RenderPlatform(in)
+	if err != nil || out.SkipReason != "" {
+		t.Fatalf("LetsEncrypt does not need the Bedrock CA: %+v %v", out, err)
+	}
+}
+
+func TestBedrockCAIssuerManifest(t *testing.T) {
+	raw, err := os.ReadFile(filepath.Join("..", "..", "manifests", "85-authn", "05-ca-issuer.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var issuer unstructured.Unstructured
+	if err := sigyaml.Unmarshal(raw, &issuer.Object); err != nil {
+		t.Fatal(err)
+	}
+	secretName, _, _ := unstructured.NestedString(issuer.Object, "spec", "ca", "secretName")
+	if issuer.GetAPIVersion() != "cert-manager.io/v1" || issuer.GetKind() != "ClusterIssuer" || issuer.GetName() != issuerCA || secretName != apiserver.CASecretName {
+		t.Fatalf("issuer %+v", issuer.Object)
 	}
 }

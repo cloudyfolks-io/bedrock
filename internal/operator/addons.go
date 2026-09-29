@@ -19,6 +19,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	"github.com/cloudyfolks-io/bedrock/api/v1alpha1"
+	"github.com/cloudyfolks-io/bedrock/internal/authn/apiserver"
 	"github.com/cloudyfolks-io/bedrock/internal/release"
 	"github.com/cloudyfolks-io/bedrock/internal/settings"
 	"github.com/cloudyfolks-io/bedrock/internal/ssa"
@@ -30,11 +31,12 @@ const (
 )
 
 type AddonInput struct {
-	Cluster   v1alpha1.Cluster
-	Hosts     []v1alpha1.Host
-	Settings  map[string]string
-	Bundle    release.Bundle
-	CustomTLS *corev1.Secret
+	Cluster    v1alpha1.Cluster
+	Hosts      []v1alpha1.Host
+	Settings   map[string]string
+	Bundle     release.Bundle
+	CustomTLS  *corev1.Secret
+	PlatformCA *corev1.Secret
 }
 
 type Probe struct {
@@ -109,20 +111,32 @@ func (r *AddonReconciler) input(ctx context.Context, cluster v1alpha1.Cluster) (
 	if err != nil {
 		return AddonInput{}, err
 	}
-	input := AddonInput{Cluster: cluster, Hosts: hosts.Items, Settings: values, Bundle: r.Bundle}
-	if values["platform.tls-mode"] != "Custom" || values["platform.custom-tls"] == "" {
-		return input, nil
-	}
-	var secret corev1.Secret
-	err = r.Client.Get(ctx, client.ObjectKey{Namespace: release.SystemNamespace, Name: values["platform.custom-tls"]}, &secret)
-	if errors.IsNotFound(err) {
-		return input, nil
-	}
+	platformCA, err := optionalSecret(ctx, r.Client, client.ObjectKey{Namespace: apiserver.CASecretNamespace, Name: apiserver.CASecretName})
 	if err != nil {
 		return AddonInput{}, err
 	}
-	input.CustomTLS = &secret
+	input := AddonInput{Cluster: cluster, Hosts: hosts.Items, Settings: values, Bundle: r.Bundle, PlatformCA: platformCA}
+	if values["platform.tls-mode"] != "Custom" || values["platform.custom-tls"] == "" {
+		return input, nil
+	}
+	customTLS, err := optionalSecret(ctx, r.Client, client.ObjectKey{Namespace: release.SystemNamespace, Name: values["platform.custom-tls"]})
+	if err != nil {
+		return AddonInput{}, err
+	}
+	input.CustomTLS = customTLS
 	return input, nil
+}
+
+func optionalSecret(ctx context.Context, c client.Reader, key client.ObjectKey) (*corev1.Secret, error) {
+	var secret corev1.Secret
+	err := c.Get(ctx, key, &secret)
+	if errors.IsNotFound(err) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return &secret, nil
 }
 
 func settingValues(ctx context.Context, c client.Client) (map[string]string, error) {

@@ -9,6 +9,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	"github.com/cloudyfolks-io/bedrock/api/v1alpha1"
+	"github.com/cloudyfolks-io/bedrock/internal/authn/apiserver"
 	"github.com/cloudyfolks-io/bedrock/internal/release"
 	"github.com/cloudyfolks-io/bedrock/internal/settings"
 )
@@ -17,6 +18,7 @@ const (
 	traefikNamespace  = "traefik"
 	platformTLSSecret = "platform-tls"
 	issuerSelfSigned  = "bedrock-selfsigned"
+	issuerCA          = "bedrock-ca"
 	issuerLetsEncrypt = "letsencrypt"
 	acmeServer        = "https://acme-v02.api.letsencrypt.org/directory"
 )
@@ -42,7 +44,10 @@ func RenderPlatform(in AddonInput) (Rendered, error) {
 	certificateProbe := Probe{GVK: certificateGVK, Key: client.ObjectKey{Namespace: traefikNamespace, Name: platformTLSSecret}, Gate: release.ConditionGate("Ready")}
 	switch mode {
 	case "SelfSigned":
-		objects = append(objects, certificate(host, issuerSelfSigned))
+		if in.PlatformCA == nil {
+			return Rendered{SkipReason: "WaitingForPlatformCA", SkipMessage: fmt.Sprintf("platform CA secret %s/%s not found", apiserver.CASecretNamespace, apiserver.CASecretName)}, nil
+		}
+		objects = append(objects, certificate(host, issuerCA))
 		return Rendered{Objects: objects, Probes: []Probe{certificateProbe}}, nil
 	case "LetsEncrypt":
 		issuer, err := letsEncryptIssuer(in.Settings["letsencrypt.email"], in.Settings["letsencrypt.solver"])

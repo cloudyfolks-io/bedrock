@@ -120,3 +120,30 @@ func TestAddonReconcilerAppliesProbesAndSkips(t *testing.T) {
 		return cond != nil && cond.Status == metav1.ConditionTrue && cond.Reason == "Ready" && cond.ObservedGeneration == cluster.Generation
 	})
 }
+
+func TestAddonInputReadsThePlatformCA(t *testing.T) {
+	c, _ := StartTestEnv(t)
+	ctx := context.Background()
+	cluster := v1alpha1.Cluster{ObjectMeta: metav1.ObjectMeta{Name: v1alpha1.ClusterName}, Spec: v1alpha1.ClusterSpec{API: v1alpha1.APISpec{VIP: "10.0.0.250"}}}
+	r := &AddonReconciler{Client: c}
+	in, err := r.input(ctx, cluster)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if in.PlatformCA != nil {
+		t.Fatal("no CA Secret yet")
+	}
+	if err := c.Create(ctx, &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "cert-manager"}}); err != nil {
+		t.Fatal(err)
+	}
+	if err := c.Create(ctx, &corev1.Secret{ObjectMeta: metav1.ObjectMeta{Namespace: "cert-manager", Name: "bedrock-ca"}, Data: map[string][]byte{"ca.crt": []byte("CA")}}); err != nil {
+		t.Fatal(err)
+	}
+	in, err = r.input(ctx, cluster)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if in.PlatformCA == nil || string(in.PlatformCA.Data["ca.crt"]) != "CA" {
+		t.Fatalf("platform CA %+v", in.PlatformCA)
+	}
+}

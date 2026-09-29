@@ -157,12 +157,13 @@ func sampleAddonInputs(bundle release.Bundle) []AddonInput {
 	cluster := v1alpha1.Cluster{Spec: v1alpha1.ClusterSpec{API: v1alpha1.APISpec{VIP: "10.0.0.10"}}}
 	hosts := []v1alpha1.Host{{ObjectMeta: metav1.ObjectMeta{Name: "sample"}, Spec: v1alpha1.HostSpec{Roles: []string{v1alpha1.RoleCephOSD}, Storage: v1alpha1.HostStorageSpec{Devices: []string{"/dev/sample"}}}}}
 	secret := &corev1.Secret{Data: map[string][]byte{"tls.crt": []byte("crt"), "tls.key": []byte("key")}}
+	ca := &corev1.Secret{Data: map[string][]byte{"ca.crt": []byte("ca"), "tls.crt": []byte("ca"), "tls.key": []byte("key")}}
 	letsEncrypt := withSettings(catalogDefaults(), map[string]string{"platform.tls-mode": "LetsEncrypt", "letsencrypt.email": "ops@example.com"})
 	custom := withSettings(catalogDefaults(), map[string]string{"platform.tls-mode": "Custom", "platform.custom-tls": "sample"})
 	return []AddonInput{
-		{Cluster: cluster, Hosts: hosts, Settings: catalogDefaults(), Bundle: bundle},
-		{Cluster: cluster, Hosts: hosts, Settings: letsEncrypt, Bundle: bundle},
-		{Cluster: cluster, Hosts: hosts, Settings: custom, Bundle: bundle, CustomTLS: secret},
+		{Cluster: cluster, Hosts: hosts, Settings: catalogDefaults(), Bundle: bundle, PlatformCA: ca},
+		{Cluster: cluster, Hosts: hosts, Settings: letsEncrypt, Bundle: bundle, PlatformCA: ca},
+		{Cluster: cluster, Hosts: hosts, Settings: custom, Bundle: bundle, CustomTLS: secret, PlatformCA: ca},
 	}
 }
 

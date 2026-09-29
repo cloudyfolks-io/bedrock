@@ -1,0 +1,10 @@
+apiVersion: cert-manager.io/v1
+kind: ClusterIssuer
+metadata:
+  name: bedrock-ca
+  labels:
+    bedrock.cloudyfolks.io/kind: ClusterIssuer
+    bedrock.cloudyfolks.io/name: bedrock-ca
+spec:
+  ca:
+    secretName: bedrock-ca
