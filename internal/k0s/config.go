@@ -7,10 +7,11 @@ import (
 var DefaultDisabledComponents = []string{"konnectivity-server", "metrics-server", "helm"}
 
 type Config struct {
-	VIP         string
-	SANs        []string
-	PodCIDR     string
-	ServiceCIDR string
+	VIP          string
+	SANs         []string
+	PodCIDR      string
+	ServiceCIDR  string
+	APIExtraArgs map[string]string
 }
 
 func RenderConfig(c Config) ([]byte, error) {
@@ -22,10 +23,7 @@ func RenderConfig(c Config) ([]byte, error) {
 			"api": map[string]any{
 				"externalAddress": c.VIP,
 				"sans":            c.SANs,
-				"extraArgs": map[string]any{
-					"default-not-ready-toleration-seconds":   "30",
-					"default-unreachable-toleration-seconds": "30",
-				},
+				"extraArgs":       apiExtraArgs(c.APIExtraArgs),
 			},
 			"network": map[string]any{
 				"provider":               "custom",
@@ -44,4 +42,15 @@ func RenderConfig(c Config) ([]byte, error) {
 		},
 	}
 	return sigyaml.Marshal(doc)
+}
+
+func apiExtraArgs(extra map[string]string) map[string]any {
+	args := map[string]any{
+		"default-not-ready-toleration-seconds":   "30",
+		"default-unreachable-toleration-seconds": "30",
+	}
+	for name, value := range extra {
+		args[name] = value
+	}
+	return args
 }
