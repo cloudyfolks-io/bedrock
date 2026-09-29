@@ -9,7 +9,9 @@ import (
 	"encoding/base32"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io/fs"
+	"net"
 	"net/http"
 	"net/url"
 	"os"
@@ -266,6 +268,7 @@ func testAdminPasswordAndTOTP(t *testing.T, e env) adminLogin {
 	ch = c.acknowledgeRecoveryCodes(t, ch)
 	requireChallenge(t, "admin: after acknowledging the recovery codes", ch, "done")
 	requireSessionBound(t, e, ch.Redirect)
+	requireClientAddress(t, e, v1alpha1.UserObjectName(v1alpha1.UserAdmin))
 	tokens := tokensFrom(t, e, tokenRequest(t, e, codeForm(clientE2EOIDC, verifier, c.finishLogin(t, ch))))
 	amr := claimStrings(jwtPayload(t, tokens.AccessToken)["amr"])
 	if !slices.Contains(amr, "pwd") || !slices.Contains(amr, "otp") {
@@ -298,6 +301,75 @@ func requireSessionBound(t *testing.T, e env, redirect string) {
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusUnauthorized {
 		t.Fatalf("authorize callback without the session cookie: status %d, want 401", resp.StatusCode)
+	}
+}
+
+func latestSession(sessions []v1alpha1.Session, userRef string) (v1alpha1.Session, bool) {
+	var latest v1alpha1.Session
+	found := false
+	for _, session := range sessions {
+		if session.Spec.UserRef != userRef {
+			continue
+		}
+		if !found || session.Spec.AuthTime.After(latest.Spec.AuthTime.Time) {
+			latest, found = session, true
+		}
+	}
+	return latest, found
+}
+
+func checkClientAddress(recorded string, join *net.IPNet, own net.IP) error {
+	seen := net.ParseIP(recorded)
+	switch {
+	case seen == nil:
+		return fmt.Errorf("session client IP %q is not an IP address", recorded)
+	case join.Contains(seen):
+		return fmt.Errorf("session client IP %s is in the join CIDR %s: the ingress path masquerades clients", seen, join)
+	case !seen.Equal(own):
+		return fmt.Errorf("session client IP %s differs from the source address %s of the test client", seen, own)
+	}
+	return nil
+}
+
+func joinNetwork(t *testing.T, e env) *net.IPNet {
+	t.Helper()
+	var cluster v1alpha1.Cluster
+	if err := e.k8s.Get(context.Background(), client.ObjectKey{Name: v1alpha1.ClusterName}, &cluster); err != nil {
+		t.Fatalf("get cluster: %v", err)
+	}
+	_, network, err := net.ParseCIDR(cluster.Spec.JoinCIDR)
+	if err != nil {
+		t.Fatalf("cluster join CIDR %q: %v", cluster.Spec.JoinCIDR, err)
+	}
+	return network
+}
+
+func sourceAddress(t *testing.T, e env) net.IP {
+	t.Helper()
+	conn, err := net.DialTimeout("tcp", net.JoinHostPort(hostOf(t, e.issuer), "443"), requestTimeout)
+	if err != nil {
+		t.Fatalf("dial %s: %v", e.issuer, err)
+	}
+	defer conn.Close()
+	local, ok := conn.LocalAddr().(*net.TCPAddr)
+	if !ok {
+		t.Fatalf("dial %s: local address %v is not TCP", e.issuer, conn.LocalAddr())
+	}
+	return local.IP
+}
+
+func requireClientAddress(t *testing.T, e env, userRef string) {
+	t.Helper()
+	var sessions v1alpha1.SessionList
+	if err := e.k8s.List(context.Background(), &sessions, client.InNamespace(release.SystemNamespace)); err != nil {
+		t.Fatalf("list sessions: %v", err)
+	}
+	session, found := latestSession(sessions.Items, userRef)
+	if !found {
+		t.Fatalf("no session for user %s after the login", userRef)
+	}
+	if err := checkClientAddress(session.Spec.ClientIP, joinNetwork(t, e), sourceAddress(t, e)); err != nil {
+		t.Fatal(err)
 	}
 }
 
