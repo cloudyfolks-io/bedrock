@@ -4,7 +4,7 @@ import { Alert, Button, Card, OtpField } from "@bedrock/design";
 import * as api from "../api";
 import { errorDescriptor } from "../errorMessages";
 import { otpauthSVG } from "../qr";
-import { useAnswer } from "../useAnswer";
+import { useAnswer, useFocusFirstField, useFocusOnError } from "../useAnswer";
 import type { ScreenProps } from "../screens";
 
 export function TotpEnroll({ challenge, onChallenge }: ScreenProps) {
@@ -12,6 +12,8 @@ export function TotpEnroll({ challenge, onChallenge }: ScreenProps) {
   const [svg, setSvg] = useState("");
   const [code, setCode] = useState("");
   const { error, submit, fail } = useAnswer(onChallenge);
+  const fieldRef = useFocusFirstField();
+  const errorRef = useFocusOnError(error !== null);
   const codes = challenge.recoveryCodes;
 
   useEffect(() => {
@@ -20,7 +22,11 @@ export function TotpEnroll({ challenge, onChallenge }: ScreenProps) {
     }
   }, [challenge.enroll]);
 
-  const errorAlert = error ? <Alert tone="error">{t(errorDescriptor(error))}</Alert> : null;
+  const errorAlert = error ? (
+    <div ref={errorRef}>
+      <Alert tone="error">{t(errorDescriptor(error))}</Alert>
+    </div>
+  ) : null;
 
   if (codes) {
     return (
@@ -58,12 +64,14 @@ export function TotpEnroll({ challenge, onChallenge }: ScreenProps) {
           submit(api.answer({ type: "totp-enroll", code }, challenge.csrf ?? ""));
         }}
       >
-        <OtpField
-          length={6}
-          value={code}
-          onChange={setCode}
-          label={t({ id: "login.enroll.codeLabel", message: "Enter the 6-digit code" })}
-        />
+        <div ref={fieldRef}>
+          <OtpField
+            length={6}
+            value={code}
+            onChange={setCode}
+            label={t({ id: "login.enroll.codeLabel", message: "Enter the 6-digit code" })}
+          />
+        </div>
         <Button variant="primary" type="submit">
           {t({ id: "login.enroll.submit", message: "Verify" })}
         </Button>

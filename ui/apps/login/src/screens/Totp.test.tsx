@@ -26,10 +26,11 @@ describe("Totp", () => {
   });
 
   for (const locale of locales) {
-    it(`renders in ${locale} and submits six typed digits with the CSRF token`, async () => {
+    it(`renders in ${locale}, focuses the first digit and submits six typed digits with the CSRF token`, async () => {
       renderWithLocale(<Totp challenge={challenge} onChallenge={() => {}} />, locale);
       expect(document.documentElement.dir).toBe(dirOf(locale));
       expect(screen.getByText(titles[locale])).not.toBeNull();
+      expect(document.activeElement).toBe(screen.getByLabelText(codeLabels[locale]));
       const clipboardData = { getData: () => "123456" };
       fireEvent.paste(screen.getByLabelText(codeLabels[locale]), { clipboardData });
       fireEvent.click(screen.getByText(submits[locale]));
@@ -39,4 +40,15 @@ describe("Totp", () => {
       expect(screen.getByText(useRecovery[locale])).not.toBeNull();
     });
   }
+
+  it("shows a mapped error and moves focus to it", async () => {
+    vi.mocked(api.answer).mockResolvedValueOnce({ type: "error", error: { code: "invalid_code" } });
+    renderWithLocale(<Totp challenge={challenge} onChallenge={() => {}} />, "en");
+    const clipboardData = { getData: () => "000000" };
+    fireEvent.paste(screen.getByLabelText(codeLabels.en), { clipboardData });
+    fireEvent.click(screen.getByText(submits.en));
+    const alert = await screen.findByRole("alert");
+    expect(alert.textContent).toBe("That code is not correct.");
+    await waitFor(() => expect(document.activeElement).toBe(alert));
+  });
 });

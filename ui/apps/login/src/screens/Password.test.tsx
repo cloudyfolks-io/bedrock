@@ -25,17 +25,20 @@ describe("Password", () => {
   });
 
   for (const locale of locales) {
-    it(`renders in ${locale}, submits with the CSRF token and shows a mapped error`, async () => {
+    it(`renders in ${locale}, focuses the field, submits with the CSRF token and shows a mapped error`, async () => {
       vi.mocked(api.answer).mockResolvedValueOnce({ type: "error", error: { code: "invalid_credentials" } });
       renderWithLocale(<Password challenge={challenge} onChallenge={() => {}} />, locale);
       expect(document.documentElement.dir).toBe(dirOf(locale));
       expect(screen.getByText(titles[locale])).not.toBeNull();
+      expect(document.activeElement).toBe(screen.getByLabelText(labels[locale]));
       fireEvent.change(screen.getByLabelText(labels[locale]), { target: { value: "hunter2" } });
       fireEvent.click(screen.getByText(submits[locale]));
       await waitFor(() => {
         expect(api.answer).toHaveBeenCalledWith({ type: "password", password: "hunter2" }, challenge.csrf);
       });
-      expect(await screen.findByRole("alert")).toHaveProperty("textContent", invalidCredentials[locale]);
+      const alert = await screen.findByRole("alert");
+      expect(alert).toHaveProperty("textContent", invalidCredentials[locale]);
+      await waitFor(() => expect(document.activeElement).toBe(alert));
     });
   }
 });

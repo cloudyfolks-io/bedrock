@@ -1,4 +1,5 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import type { RefObject } from "react";
 import type { Challenge } from "./types";
 
 export interface UseAnswer {
@@ -25,4 +26,31 @@ export function useAnswer(onChallenge: (next: Challenge) => void): UseAnswer {
   };
 
   return { error, submit, fail };
+}
+
+export function useFocusFirstField(): RefObject<HTMLDivElement | null> {
+  const ref = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    ref.current?.querySelector<HTMLElement>("input, textarea")?.focus();
+  }, []);
+
+  return ref;
+}
+
+export function useFocusOnError(active: boolean): RefObject<HTMLDivElement | null> {
+  const ref = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!active) {
+      return;
+    }
+    const alert = ref.current?.querySelector<HTMLElement>('[role="alert"]');
+    if (alert) {
+      alert.tabIndex = -1;
+      alert.focus();
+    }
+  }, [active]);
+
+  return ref;
 }
