@@ -9,10 +9,14 @@ import (
 )
 
 func Install(ctx context.Context, c client.Client, bundle Bundle, vars map[string]string, gates Gates, interval, groupTimeout time.Duration, report func(group Group, err error)) error {
-	return InstallGroups(ctx, c, bundle, vars, gates, interval, groupTimeout, report, func(context.Context, Group) error { return nil })
+	return InstallGroups(ctx, c, bundle, vars, gates, interval, groupTimeout, report, SkipHook, SkipHook)
 }
 
-func InstallGroups(ctx context.Context, c client.Client, bundle Bundle, vars map[string]string, gates Gates, interval, groupTimeout time.Duration, report func(group Group, err error), after func(ctx context.Context, group Group) error) error {
+func SkipHook(context.Context, Group) error {
+	return nil
+}
+
+func InstallGroups(ctx context.Context, c client.Client, bundle Bundle, vars map[string]string, gates Gates, interval, groupTimeout time.Duration, report func(group Group, err error), before, after func(ctx context.Context, group Group) error) error {
 	bundle, err := Substitute(bundle, vars)
 	if err != nil {
 		return err
@@ -24,7 +28,10 @@ func InstallGroups(ctx context.Context, c client.Client, bundle Bundle, vars map
 	applier := Applier{Client: c}
 	for _, group := range bundle.Groups {
 		groupCtx, cancel := groupContext(ctx, groupTimeout)
-		err := applier.Apply(groupCtx, group)
+		err := before(groupCtx, group)
+		if err == nil {
+			err = applier.Apply(groupCtx, group)
+		}
 		if err == nil {
 			err = WaitGroup(groupCtx, c, gates, group, interval)
 		}

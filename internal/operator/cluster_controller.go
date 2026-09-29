@@ -114,7 +114,7 @@ func (r *ClusterReconciler) install(ctx context.Context, generation int64, vars 
 			ctrl.LoggerFrom(ctx).Error(err, "write component status", "component", group.Name)
 		}
 	}
-	err := release.Install(ctx, r.Client, r.Bundle, vars, r.Gates, r.Interval, r.GroupTimeout, report)
+	err := release.InstallGroups(ctx, r.Client, r.Bundle, vars, r.Gates, r.Interval, r.GroupTimeout, report, authnBootstrapHook(r.Client), release.SkipHook)
 	if err != nil {
 		if ctx.Err() != nil {
 			return err

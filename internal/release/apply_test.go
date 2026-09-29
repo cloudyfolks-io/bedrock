@@ -169,7 +169,7 @@ func TestInstallGroupsRunsTheHookAfterEachGate(t *testing.T) {
 		events = append(events, "after "+group.Name)
 		return nil
 	}
-	if err := InstallGroups(ctx, c, bundle, nil, Gates{}, 200*time.Millisecond, time.Minute, report, after); err != nil {
+	if err := InstallGroups(ctx, c, bundle, nil, Gates{}, 200*time.Millisecond, time.Minute, report, SkipHook, after); err != nil {
 		t.Fatal(err)
 	}
 	want := []string{"after crds", "report crds", "after bedrock", "report bedrock"}
@@ -185,9 +185,61 @@ func TestInstallGroupsRunsTheHookAfterEachGate(t *testing.T) {
 		}
 		return nil
 	}
-	err = InstallGroups(ctx, c, bundle, nil, Gates{}, 200*time.Millisecond, time.Minute, report, stop)
+	err = InstallGroups(ctx, c, bundle, nil, Gates{}, 200*time.Millisecond, time.Minute, report, SkipHook, stop)
 	if err == nil || err.Error() != "group crds: ovs-ovn on node-a: timeout" || !slices.Equal(failed, []string{"crds ovs-ovn on node-a: timeout"}) {
 		t.Fatalf("err %v reports %v", err, failed)
+	}
+}
+
+func TestInstallGroupsRunsTheBeforeHookBeforeEachApply(t *testing.T) {
+	c, _ := startTestEnv(t)
+	ctx := context.Background()
+	bundle, err := Load(os.DirFS("testdata/good"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := c.Create(ctx, &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: SystemNamespace}}); err != nil {
+		t.Fatal(err)
+	}
+	var events []string
+	report := func(group Group, err error) { events = append(events, "report "+group.Name) }
+	before := func(ctx context.Context, group Group) error {
+		var alpha corev1.ConfigMap
+		if err := c.Get(ctx, client.ObjectKey{Namespace: "release-test", Name: "alpha"}, &alpha); group.Name == "bedrock" && !errors.IsNotFound(err) {
+			return fmt.Errorf("the before hook must run before the group is applied: %v", err)
+		}
+		if _, ok := ctx.Deadline(); !ok {
+			return errors.NewBadRequest("the hook must run inside the group timeout")
+		}
+		events = append(events, "before "+group.Name)
+		return nil
+	}
+	if err := InstallGroups(ctx, c, bundle, nil, Gates{}, 200*time.Millisecond, time.Minute, report, before, SkipHook); err != nil {
+		t.Fatal(err)
+	}
+	want := []string{"before crds", "report crds", "before bedrock", "report bedrock"}
+	if !slices.Equal(events, want) {
+		t.Fatalf("events %v, want %v", events, want)
+	}
+
+	var failed []string
+	report = func(group Group, err error) { failed = append(failed, fmt.Sprintf("%s %v", group.Name, err)) }
+	stop := func(_ context.Context, group Group) error {
+		if group.Name == "bedrock" {
+			return fmt.Errorf("platform CA missing")
+		}
+		return nil
+	}
+	if err := c.Delete(ctx, &corev1.ConfigMap{ObjectMeta: metav1.ObjectMeta{Namespace: "release-test", Name: "alpha"}}); err != nil {
+		t.Fatal(err)
+	}
+	err = InstallGroups(ctx, c, bundle, nil, Gates{}, 200*time.Millisecond, time.Minute, report, stop, SkipHook)
+	if err == nil || err.Error() != "group bedrock: platform CA missing" || !slices.Equal(failed, []string{"crds <nil>", "bedrock platform CA missing"}) {
+		t.Fatalf("err %v reports %v", err, failed)
+	}
+	var alpha corev1.ConfigMap
+	if err := c.Get(ctx, client.ObjectKey{Namespace: "release-test", Name: "alpha"}, &alpha); !errors.IsNotFound(err) {
+		t.Fatalf("a failed before hook must not apply its group: %v", err)
 	}
 }
 

@@ -51,7 +51,7 @@ func components(ctx context.Context, env upgradeEnv, cluster v1alpha1.Cluster) (
 			ctrl.LoggerFrom(ctx).Error(err, "write component status", "component", group.Name)
 		}
 	}
-	err = release.InstallGroups(ctx, env.Client, env.Bundle, vars, env.Gates, env.PollInterval, env.GroupTimeout, report, componentHook(env, cluster))
+	err = release.InstallGroups(ctx, env.Client, env.Bundle, vars, env.Gates, env.PollInterval, env.GroupTimeout, report, authnBootstrapHook(env.Client), componentHook(env, cluster))
 	switch {
 	case err != nil && ctx.Err() != nil:
 		return phaseResult{}, err

@@ -2,6 +2,7 @@ package operator
 
 import (
 	"context"
+	"crypto/rand"
 	"fmt"
 	"strings"
 	"time"
@@ -80,6 +81,9 @@ func (r *AddonReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 	}
 	if cluster.Status.Version == "" || upgrading(cluster.Status) {
 		return ctrl.Result{RequeueAfter: r.Interval}, nil
+	}
+	if err := ensureAuthnMaterial(ctx, r.Client, rand.Reader, time.Now()); err != nil {
+		return ctrl.Result{}, err
 	}
 	input, err := r.input(ctx, cluster)
 	if err != nil {
