@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	coordinationv1 "k8s.io/api/coordination/v1"
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -161,5 +162,36 @@ func TestAgentReadsAuthnFiles(t *testing.T) {
 	var other corev1.ConfigMap
 	if err := node.Get(ctx, client.ObjectKey{Namespace: "bedrock-system", Name: "other-config"}, &other); !apierrors.IsForbidden(err) {
 		t.Fatalf("a node must not read any other object in bedrock-system, got %v", err)
+	}
+}
+
+func TestAgentHoldsOnlyTheRestartLease(t *testing.T) {
+	admin, cfg := StartTestEnv(t)
+	ctx := context.Background()
+	if err := admin.Create(ctx, &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "bedrock-system"}}); err != nil {
+		t.Fatal(err)
+	}
+	applyManifest(t, ctx, admin, filepath.Join("..", "..", "manifests", "90-bedrock", "agent-rbac.yaml"))
+	other := &coordinationv1.Lease{ObjectMeta: metav1.ObjectMeta{Name: "bedrock-operator", Namespace: "bedrock-system"}}
+	if err := admin.Create(ctx, other); err != nil {
+		t.Fatal(err)
+	}
+	node := impersonateAs(t, cfg, "system:node:x", []string{"system:nodes", "system:authenticated"})
+	var lease coordinationv1.Lease
+	if err := node.Get(ctx, client.ObjectKey{Namespace: "bedrock-system", Name: "bedrock-authn-apiserver-restart"}, &lease); err != nil {
+		t.Fatalf("the release must ship the restart lease and a node must read it: %v", err)
+	}
+	holder := "x"
+	lease.Spec.HolderIdentity = &holder
+	if err := node.Update(ctx, &lease); err != nil {
+		t.Fatalf("a node must take the restart lease: %v", err)
+	}
+	var taken coordinationv1.Lease
+	if err := node.Get(ctx, client.ObjectKeyFromObject(other), &taken); !apierrors.IsForbidden(err) {
+		t.Fatalf("a node must not read another lease, got %v", err)
+	}
+	fresh := &coordinationv1.Lease{ObjectMeta: metav1.ObjectMeta{Name: "fresh", Namespace: "bedrock-system"}}
+	if err := node.Create(ctx, fresh); !apierrors.IsForbidden(err) {
+		t.Fatalf("a node must not create leases, got %v", err)
 	}
 }

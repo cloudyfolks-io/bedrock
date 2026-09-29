@@ -110,24 +110,33 @@ func apiserverStartTime(root string) (time.Time, bool) {
 	if !ok {
 		return time.Time{}, false
 	}
+	dir, ok := apiserverProcessDir(root)
+	if !ok {
+		return time.Time{}, false
+	}
+	ticks, ok := startTicks(filepath.Join(dir, "stat"))
+	if !ok {
+		return time.Time{}, false
+	}
+	return boot.Add(time.Duration(ticks) * clockTick), true
+}
+
+func apiserverProcessDir(root string) (string, bool) {
 	binary, err := os.Stat(filepath.Join(root, k0sDataDir, "bin", apiserverProcess))
 	if err != nil {
-		return time.Time{}, false
+		return "", false
 	}
 	entries, err := os.ReadDir(filepath.Join(root, "proc"))
 	if err != nil {
-		return time.Time{}, false
+		return "", false
 	}
 	for _, entry := range entries {
 		dir := filepath.Join(root, "proc", entry.Name())
-		if !isPID(entry.Name()) || processName(dir) != apiserverProcess || !runsBinary(dir, binary) {
-			continue
-		}
-		if ticks, ok := startTicks(filepath.Join(dir, "stat")); ok {
-			return boot.Add(time.Duration(ticks) * clockTick), true
+		if isPID(entry.Name()) && processName(dir) == apiserverProcess && runsBinary(dir, binary) {
+			return dir, true
 		}
 	}
-	return time.Time{}, false
+	return "", false
 }
 
 func runsBinary(dir string, binary os.FileInfo) bool {

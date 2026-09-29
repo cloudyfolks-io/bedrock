@@ -245,11 +245,12 @@ func k0sConfigNewerThanAPIServer(root string, service k0sService) bool {
 		return false
 	}
 	start, ok := apiserverStartTime(root)
-	if !ok {
-		return false
-	}
+	return ok && configNewerThan(root, start)
+}
+
+func configNewerThan(root string, apiserverStart time.Time) bool {
 	info, err := os.Stat(filepath.Join(root, k0sConfigFile))
-	return err == nil && info.ModTime().After(start.Add(apiserverStartSlack))
+	return err == nil && info.ModTime().After(apiserverStart.Add(apiserverStartSlack))
 }
 
 func withAuthnArgs(k0sYAML []byte) ([]byte, bool, error) {
