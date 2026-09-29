@@ -1,0 +1,134 @@
+apiVersion: bedrock.cloudyfolks.io/v1alpha1
+kind: Group
+metadata:
+  name: ops
+  namespace: bedrock-system
+spec:
+  description: Operations staff, mapped from the LDAP and Dex e2e fixtures
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: corp-ldap-bind
+  namespace: bedrock-system
+  labels:
+    bedrock.cloudyfolks.io/authn: "true"
+type: Opaque
+stringData:
+  bindPassword: reader-e2e-pw
+---
+apiVersion: bedrock.cloudyfolks.io/v1alpha1
+kind: IdentityProvider
+metadata:
+  name: corp-ldap
+  namespace: bedrock-system
+spec:
+  type: ldap
+  displayName: Corp LDAP
+  secretRef: corp-ldap-bind
+  caBundle: "${LDAP_CA_BUNDLE}"
+  ldap:
+    url: ldaps://openldap.authn-e2e.svc:636
+    bindDN: cn=reader,dc=bedrock,dc=test
+    userSearch:
+      baseDN: ou=people,dc=bedrock,dc=test
+      usernameAttribute: uid
+      displayNameAttribute: cn
+      emailAttribute: mail
+    groupSearch:
+      baseDN: ou=groups,dc=bedrock,dc=test
+      memberAttribute: member
+      nameAttribute: cn
+  groupMapping:
+    - external: platform-ops
+      group: ops
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: dex-client
+  namespace: bedrock-system
+  labels:
+    bedrock.cloudyfolks.io/authn: "true"
+type: Opaque
+stringData:
+  clientSecret: dex-bedrock-client-secret
+---
+apiVersion: bedrock.cloudyfolks.io/v1alpha1
+kind: IdentityProvider
+metadata:
+  name: dex
+  namespace: bedrock-system
+spec:
+  type: oidc
+  displayName: Dex
+  secretRef: dex-client
+  caBundle: "${DEX_CA_BUNDLE}"
+  oidc:
+    issuer: https://dex.${BEDROCK_HOST}
+    clientID: bedrock
+    usernameClaim: email
+  groupMapping:
+    - external: dex-ops
+      group: ops
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: team-a
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: ops-edit
+  namespace: team-a
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: edit
+subjects:
+  - kind: Group
+    name: bedrock:ops
+    apiGroup: rbac.authorization.k8s.io
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: e2e-exchange-client
+  namespace: bedrock-system
+  labels:
+    bedrock.cloudyfolks.io/authn: "true"
+type: Opaque
+stringData:
+  clientSecret: e2e-exchange-client-secret
+---
+apiVersion: bedrock.cloudyfolks.io/v1alpha1
+kind: OAuthClient
+metadata:
+  name: e2e-exchange
+  namespace: bedrock-system
+spec:
+  clientID: e2e-exchange
+  public: false
+  redirectURIs: []
+  grantTypes:
+    - urn:ietf:params:oauth:grant-type:token-exchange
+  secretRef: e2e-exchange-client
+  tokenExchange:
+    audiences:
+      - dadehat-test
+---
+apiVersion: bedrock.cloudyfolks.io/v1alpha1
+kind: OAuthClient
+metadata:
+  name: e2e-oidc
+  namespace: bedrock-system
+spec:
+  clientID: e2e-oidc
+  public: true
+  redirectURIs:
+    - http://127.0.0.1/callback
+  grantTypes:
+    - authorization_code
+    - refresh_token
+  requireSecondFactor: true

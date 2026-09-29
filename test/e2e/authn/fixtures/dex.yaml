@@ -1,0 +1,116 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: dex-config
+  namespace: authn-e2e
+data:
+  config.yaml: |
+    issuer: https://dex.${BEDROCK_HOST}
+    storage:
+      type: memory
+    web:
+      http: 0.0.0.0:5556
+    oauth2:
+      skipApprovalScreen: true
+    staticClients:
+      - id: bedrock
+        name: Bedrock
+        secret: dex-bedrock-client-secret
+        redirectURIs:
+          - https://sso.${BEDROCK_HOST}/api/v1/login/providers/dex/callback
+    enablePasswordDB: true
+    staticPasswords:
+      - email: carol@example.test
+        username: carol
+        userID: 6b3b1f7e-8f8a-4a0a-9a8e-3a6b6e9b6a10
+        hash: "$2a$10$5MyguJ8WH97VvU.mk/luvuik89WbqkpZ1n3tBmMbxBupfJEo.qnZm"
+        groups:
+          - dex-ops
+---
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: dex-tls
+  namespace: authn-e2e
+spec:
+  secretName: dex-tls
+  dnsNames:
+    - dex.${BEDROCK_HOST}
+  issuerRef:
+    kind: ClusterIssuer
+    name: bedrock-ca
+  privateKey:
+    rotationPolicy: Always
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: dex
+  namespace: authn-e2e
+  labels:
+    app: dex
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: dex
+  template:
+    metadata:
+      labels:
+        app: dex
+    spec:
+      containers:
+        - name: dex
+          image: ghcr.io/dexidp/dex:v2.45.1
+          imagePullPolicy: IfNotPresent
+          args: ["dex", "serve", "/etc/dex/cfg/config.yaml"]
+          ports:
+            - containerPort: 5556
+          readinessProbe:
+            tcpSocket:
+              port: 5556
+            initialDelaySeconds: 5
+            periodSeconds: 5
+          resources:
+            requests:
+              cpu: 20m
+              memory: 64Mi
+            limits:
+              memory: 128Mi
+          volumeMounts:
+            - name: config
+              mountPath: /etc/dex/cfg
+      volumes:
+        - name: config
+          configMap:
+            name: dex-config
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: dex
+  namespace: authn-e2e
+spec:
+  selector:
+    app: dex
+  ports:
+    - name: http
+      port: 5556
+      targetPort: 5556
+---
+apiVersion: traefik.io/v1alpha1
+kind: IngressRoute
+metadata:
+  name: dex
+  namespace: authn-e2e
+spec:
+  entryPoints:
+    - websecure
+  routes:
+    - kind: Rule
+      match: Host(`dex.${BEDROCK_HOST}`)
+      services:
+        - name: dex
+          port: 5556
+  tls:
+    secretName: dex-tls

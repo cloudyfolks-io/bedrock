@@ -1,0 +1,155 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: authn-e2e
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: openldap-bootstrap-ldif
+  namespace: authn-e2e
+data:
+  10-bedrock.ldif: |
+    dn: ou=people,dc=bedrock,dc=test
+    objectClass: organizationalUnit
+    ou: people
+
+    dn: ou=groups,dc=bedrock,dc=test
+    objectClass: organizationalUnit
+    ou: groups
+
+    dn: cn=reader,dc=bedrock,dc=test
+    objectClass: organizationalRole
+    objectClass: simpleSecurityObject
+    cn: reader
+    userPassword: reader-e2e-pw
+
+    dn: uid=alice,ou=people,dc=bedrock,dc=test
+    objectClass: inetOrgPerson
+    uid: alice
+    cn: Alice Anderson
+    sn: Anderson
+    mail: alice@bedrock.test
+    userPassword: alice-e2e-pw
+
+    dn: uid=bob,ou=people,dc=bedrock,dc=test
+    objectClass: inetOrgPerson
+    uid: bob
+    cn: Bob Baker
+    sn: Baker
+    mail: bob@bedrock.test
+    userPassword: bob-e2e-pw
+
+    dn: cn=platform-ops,ou=groups,dc=bedrock,dc=test
+    objectClass: groupOfNames
+    cn: platform-ops
+    member: uid=alice,ou=people,dc=bedrock,dc=test
+
+    dn: cn=readers,ou=groups,dc=bedrock,dc=test
+    objectClass: groupOfNames
+    cn: readers
+    member: uid=bob,ou=people,dc=bedrock,dc=test
+---
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: openldap-tls
+  namespace: authn-e2e
+spec:
+  secretName: openldap-tls
+  dnsNames:
+    - openldap.authn-e2e.svc
+    - openldap.authn-e2e.svc.cluster.local
+  issuerRef:
+    kind: ClusterIssuer
+    name: bedrock-ca
+  privateKey:
+    rotationPolicy: Always
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: openldap
+  namespace: authn-e2e
+  labels:
+    app: openldap
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: openldap
+  template:
+    metadata:
+      labels:
+        app: openldap
+    spec:
+      containers:
+        - name: openldap
+          image: docker.io/osixia/openldap:1.5.0
+          imagePullPolicy: IfNotPresent
+          env:
+            - name: LDAP_ORGANISATION
+              value: Bedrock Test
+            - name: LDAP_DOMAIN
+              value: bedrock.test
+            - name: LDAP_ADMIN_PASSWORD
+              value: openldap-admin-e2e-pw
+            - name: LDAP_CONFIG_PASSWORD
+              value: openldap-config-e2e-pw
+            - name: LDAP_TLS
+              value: "true"
+            - name: LDAP_TLS_CRT_FILENAME
+              value: tls.crt
+            - name: LDAP_TLS_KEY_FILENAME
+              value: tls.key
+            - name: LDAP_TLS_CA_CRT_FILENAME
+              value: ca.crt
+            - name: LDAP_TLS_VERIFY_CLIENT
+              value: never
+            - name: LDAP_REMOVE_CONFIG_AFTER_SETUP
+              value: "true"
+          ports:
+            - containerPort: 389
+            - containerPort: 636
+          readinessProbe:
+            tcpSocket:
+              port: 636
+            initialDelaySeconds: 10
+            periodSeconds: 5
+          livenessProbe:
+            tcpSocket:
+              port: 636
+            initialDelaySeconds: 30
+            periodSeconds: 10
+          resources:
+            requests:
+              cpu: 50m
+              memory: 128Mi
+            limits:
+              memory: 256Mi
+          volumeMounts:
+            - name: bootstrap-ldif
+              mountPath: /container/service/slapd/assets/config/bootstrap/ldif/custom
+            - name: tls
+              mountPath: /container/service/slapd/assets/certs
+              readOnly: true
+      volumes:
+        - name: bootstrap-ldif
+          configMap:
+            name: openldap-bootstrap-ldif
+        - name: tls
+          secret:
+            secretName: openldap-tls
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: openldap
+  namespace: authn-e2e
+spec:
+  selector:
+    app: openldap
+  ports:
+    - name: ldaps
+      port: 636
+      targetPort: 636
