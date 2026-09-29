@@ -6,3 +6,120 @@ msgstr ""
 "Content-Transfer-Encoding: 8bit\n"
 "X-Generator: @lingui/cli\n"
 "Language: fa\n"
+
+msgid "login.username.title"
+msgstr "ورود"
+
+msgid "login.username.label"
+msgstr "نام کاربری"
+
+msgid "login.username.continue"
+msgstr "ادامه"
+
+msgid "login.password.title"
+msgstr "رمز عبور خود را وارد کنید"
+
+msgid "login.password.label"
+msgstr "رمز عبور"
+
+msgid "login.password.submit"
+msgstr "ورود"
+
+msgid "login.totp.title"
+msgstr "کد برنامه احراز هویت خود را وارد کنید"
+
+msgid "login.totp.label"
+msgstr "کد تأیید"
+
+msgid "login.totp.submit"
+msgstr "تأیید"
+
+msgid "login.totp.useRecovery"
+msgstr "در عوض از کد بازیابی استفاده کنید"
+
+msgid "login.recovery.title"
+msgstr "یک کد بازیابی وارد کنید"
+
+msgid "login.recovery.label"
+msgstr "کد بازیابی"
+
+msgid "login.recovery.submit"
+msgstr "تأیید"
+
+msgid "login.enroll.title"
+msgstr "برنامه احراز هویت خود را تنظیم کنید"
+
+msgid "login.enroll.scan"
+msgstr "این کد را با برنامه احراز هویت خود اسکن کنید"
+
+msgid "login.enroll.secretLabel"
+msgstr "یا این کلید را به‌صورت دستی وارد کنید"
+
+msgid "login.enroll.codeLabel"
+msgstr "کد ۶ رقمی را وارد کنید"
+
+msgid "login.enroll.submit"
+msgstr "تأیید"
+
+msgid "login.enroll.recoveryCodes"
+msgstr "این کدهای بازیابی را ذخیره کنید"
+
+msgid "login.enroll.recoveryCodesHint"
+msgstr "هر کد فقط یک‌بار کار می‌کند. آن‌ها را در جایی امن نگه دارید."
+
+msgid "login.enroll.copy"
+msgstr "رونوشت"
+
+msgid "login.enroll.continue"
+msgstr "ادامه"
+
+msgid "login.providers.title"
+msgstr "روش ورود خود را انتخاب کنید"
+
+msgid "login.device.enterCode"
+msgstr "کدی را که روی دستگاه شما نشان داده شده وارد کنید"
+
+msgid "login.device.codeLabel"
+msgstr "کد دستگاه"
+
+msgid "login.device.submit"
+msgstr "ادامه"
+
+msgid "login.device.confirm"
+msgstr "ورود برای این دستگاه تأیید شود؟"
+
+msgid "login.device.approve"
+msgstr "تأیید"
+
+msgid "login.device.deny"
+msgstr "رد"
+
+msgid "login.done"
+msgstr "ورود انجام شد. در حال هدایت…"
+
+msgid "login.error.title"
+msgstr "ورود ناموفق بود"
+
+msgid "login.error.retry"
+msgstr "دوباره امتحان کنید"
+
+msgid "login.error.invalid_credentials"
+msgstr "نام کاربری یا رمز عبور نادرست است."
+
+msgid "login.error.locked"
+msgstr "این حساب موقتاً قفل شده است. بعداً دوباره امتحان کنید."
+
+msgid "login.error.rate_limited"
+msgstr "تلاش‌های بیش از حد. کمی صبر کنید و دوباره امتحان کنید."
+
+msgid "login.error.invalid_code"
+msgstr "این کد نادرست است."
+
+msgid "login.error.provider_error"
+msgstr "ارائه‌دهنده هویت نتوانست ورود را کامل کند."
+
+msgid "login.error.disabled"
+msgstr "این حساب غیرفعال است."
+
+msgid "login.error.unknown"
+msgstr "خطایی رخ داد. دوباره امتحان کنید."

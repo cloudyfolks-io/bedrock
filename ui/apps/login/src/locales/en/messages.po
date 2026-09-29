@@ -6,3 +6,120 @@ msgstr ""
 "Content-Transfer-Encoding: 8bit\n"
 "X-Generator: @lingui/cli\n"
 "Language: en\n"
+
+msgid "login.username.title"
+msgstr "Sign in"
+
+msgid "login.username.label"
+msgstr "Username"
+
+msgid "login.username.continue"
+msgstr "Continue"
+
+msgid "login.password.title"
+msgstr "Enter your password"
+
+msgid "login.password.label"
+msgstr "Password"
+
+msgid "login.password.submit"
+msgstr "Sign in"
+
+msgid "login.totp.title"
+msgstr "Enter your authenticator code"
+
+msgid "login.totp.label"
+msgstr "Authentication code"
+
+msgid "login.totp.submit"
+msgstr "Verify"
+
+msgid "login.totp.useRecovery"
+msgstr "Use a recovery code instead"
+
+msgid "login.recovery.title"
+msgstr "Enter a recovery code"
+
+msgid "login.recovery.label"
+msgstr "Recovery code"
+
+msgid "login.recovery.submit"
+msgstr "Verify"
+
+msgid "login.enroll.title"
+msgstr "Set up your authenticator"
+
+msgid "login.enroll.scan"
+msgstr "Scan this code with your authenticator app"
+
+msgid "login.enroll.secretLabel"
+msgstr "Or enter this key manually"
+
+msgid "login.enroll.codeLabel"
+msgstr "Enter the 6-digit code"
+
+msgid "login.enroll.submit"
+msgstr "Verify"
+
+msgid "login.enroll.recoveryCodes"
+msgstr "Save these recovery codes"
+
+msgid "login.enroll.recoveryCodesHint"
+msgstr "Each code works once. Store them somewhere safe."
+
+msgid "login.enroll.copy"
+msgstr "Copy"
+
+msgid "login.enroll.continue"
+msgstr "Continue"
+
+msgid "login.providers.title"
+msgstr "Choose how to sign in"
+
+msgid "login.device.enterCode"
+msgstr "Enter the code shown on your device"
+
+msgid "login.device.codeLabel"
+msgstr "Device code"
+
+msgid "login.device.submit"
+msgstr "Continue"
+
+msgid "login.device.confirm"
+msgstr "Confirm sign-in for this device?"
+
+msgid "login.device.approve"
+msgstr "Approve"
+
+msgid "login.device.deny"
+msgstr "Deny"
+
+msgid "login.done"
+msgstr "Signed in. Redirecting…"
+
+msgid "login.error.title"
+msgstr "Sign-in failed"
+
+msgid "login.error.retry"
+msgstr "Try again"
+
+msgid "login.error.invalid_credentials"
+msgstr "That username or password is not correct."
+
+msgid "login.error.locked"
+msgstr "This account is temporarily locked. Try again later."
+
+msgid "login.error.rate_limited"
+msgstr "Too many attempts. Wait a moment and try again."
+
+msgid "login.error.invalid_code"
+msgstr "That code is not correct."
+
+msgid "login.error.provider_error"
+msgstr "The identity provider could not complete sign-in."
+
+msgid "login.error.disabled"
+msgstr "This account is disabled."
+
+msgid "login.error.unknown"
+msgstr "Something went wrong. Try again."

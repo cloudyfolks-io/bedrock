@@ -1,4 +1,6 @@
-import type { ComponentType } from "react";
+import { describe, expect, it } from "vitest";
+import fixtures from "./fixtures/challenges.json";
+import { screenFor } from "./screens";
 import { Username } from "./screens/Username";
 import { Password } from "./screens/Password";
 import { Totp } from "./screens/Totp";
@@ -8,14 +10,9 @@ import { Providers } from "./screens/Providers";
 import { DeviceConfirm } from "./screens/DeviceConfirm";
 import { Done } from "./screens/Done";
 import { ErrorScreen } from "./screens/ErrorScreen";
-import type { Challenge, ChallengeType } from "./types";
+import type { Challenge } from "./types";
 
-export interface ScreenProps {
-  challenge: Challenge;
-  onChallenge: (next: Challenge) => void;
-}
-
-const registry: Record<ChallengeType, ComponentType<ScreenProps>> = {
+const expected: Record<string, unknown> = {
   username: Username,
   password: Password,
   totp: Totp,
@@ -28,6 +25,10 @@ const registry: Record<ChallengeType, ComponentType<ScreenProps>> = {
   error: ErrorScreen,
 };
 
-export function screenFor(challenge: Challenge): ComponentType<ScreenProps> {
-  return registry[challenge.type];
-}
+describe("screenFor", () => {
+  for (const fixture of fixtures as Array<{ name: string; challenge: Challenge }>) {
+    it(`maps ${fixture.name} to its component`, () => {
+      expect(screenFor(fixture.challenge)).toBe(expected[fixture.challenge.type]);
+    });
+  }
+});

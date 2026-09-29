@@ -1,4 +1,5 @@
 import type { LinguiConfig } from "@lingui/conf";
+import { formatter } from "@lingui/format-po";
 
 const config: LinguiConfig = {
   locales: ["en", "fa", "ar"],
@@ -9,7 +10,7 @@ const config: LinguiConfig = {
       include: ["<rootDir>/src"],
     },
   ],
-  format: "po",
+  format: formatter({ explicitIdAsDefault: true }),
 };
 
 export default config;

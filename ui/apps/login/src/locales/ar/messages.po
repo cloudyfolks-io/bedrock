@@ -6,3 +6,120 @@ msgstr ""
 "Content-Transfer-Encoding: 8bit\n"
 "X-Generator: @lingui/cli\n"
 "Language: ar\n"
+
+msgid "login.username.title"
+msgstr "تسجيل الدخول"
+
+msgid "login.username.label"
+msgstr "اسم المستخدم"
+
+msgid "login.username.continue"
+msgstr "متابعة"
+
+msgid "login.password.title"
+msgstr "أدخل كلمة المرور الخاصة بك"
+
+msgid "login.password.label"
+msgstr "كلمة المرور"
+
+msgid "login.password.submit"
+msgstr "تسجيل الدخول"
+
+msgid "login.totp.title"
+msgstr "أدخل رمز تطبيق المصادقة"
+
+msgid "login.totp.label"
+msgstr "رمز التحقق"
+
+msgid "login.totp.submit"
+msgstr "تحقق"
+
+msgid "login.totp.useRecovery"
+msgstr "استخدم رمز الاسترداد بدلاً من ذلك"
+
+msgid "login.recovery.title"
+msgstr "أدخل رمز الاسترداد"
+
+msgid "login.recovery.label"
+msgstr "رمز الاسترداد"
+
+msgid "login.recovery.submit"
+msgstr "تحقق"
+
+msgid "login.enroll.title"
+msgstr "إعداد تطبيق المصادقة"
+
+msgid "login.enroll.scan"
+msgstr "امسح هذا الرمز باستخدام تطبيق المصادقة"
+
+msgid "login.enroll.secretLabel"
+msgstr "أو أدخل هذا المفتاح يدويًا"
+
+msgid "login.enroll.codeLabel"
+msgstr "أدخل الرمز المكوّن من 6 أرقام"
+
+msgid "login.enroll.submit"
+msgstr "تحقق"
+
+msgid "login.enroll.recoveryCodes"
+msgstr "احفظ رموز الاسترداد هذه"
+
+msgid "login.enroll.recoveryCodesHint"
+msgstr "يعمل كل رمز مرة واحدة فقط. احتفظ بها في مكان آمن."
+
+msgid "login.enroll.copy"
+msgstr "نسخ"
+
+msgid "login.enroll.continue"
+msgstr "متابعة"
+
+msgid "login.providers.title"
+msgstr "اختر طريقة تسجيل الدخول"
+
+msgid "login.device.enterCode"
+msgstr "أدخل الرمز الظاهر على جهازك"
+
+msgid "login.device.codeLabel"
+msgstr "رمز الجهاز"
+
+msgid "login.device.submit"
+msgstr "متابعة"
+
+msgid "login.device.confirm"
+msgstr "هل تريد تأكيد تسجيل الدخول لهذا الجهاز؟"
+
+msgid "login.device.approve"
+msgstr "موافقة"
+
+msgid "login.device.deny"
+msgstr "رفض"
+
+msgid "login.done"
+msgstr "تم تسجيل الدخول. جارٍ إعادة التوجيه…"
+
+msgid "login.error.title"
+msgstr "فشل تسجيل الدخول"
+
+msgid "login.error.retry"
+msgstr "حاول مرة أخرى"
+
+msgid "login.error.invalid_credentials"
+msgstr "اسم المستخدم أو كلمة المرور غير صحيحة."
+
+msgid "login.error.locked"
+msgstr "هذا الحساب مقفل مؤقتًا. حاول مرة أخرى لاحقًا."
+
+msgid "login.error.rate_limited"
+msgstr "عدد كبير جدًا من المحاولات. انتظر قليلاً ثم حاول مرة أخرى."
+
+msgid "login.error.invalid_code"
+msgstr "هذا الرمز غير صحيح."
+
+msgid "login.error.provider_error"
+msgstr "تعذّر على مزوّد الهوية إتمام تسجيل الدخول."
+
+msgid "login.error.disabled"
+msgstr "هذا الحساب معطّل."
+
+msgid "login.error.unknown"
+msgstr "حدث خطأ ما. حاول مرة أخرى."
