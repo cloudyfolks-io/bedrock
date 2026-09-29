@@ -19,7 +19,12 @@ export function OtpField({ length, value, onChange, label }: OtpFieldProps) {
   };
 
   const handleChange = (index: number) => (event: ChangeEvent<HTMLInputElement>) => {
-    const digit = event.target.value.replace(/\D/g, "").slice(-1);
+    const raw = event.target.value;
+    if (!raw) {
+      setDigit(index, "");
+      return;
+    }
+    const digit = raw.replace(/\D/g, "").slice(-1);
     if (!digit) {
       return;
     }
@@ -31,6 +36,7 @@ export function OtpField({ length, value, onChange, label }: OtpFieldProps) {
 
   const handleKeyDown = (index: number) => (event: KeyboardEvent<HTMLInputElement>) => {
     if (event.key === "Backspace" && !digits[index] && index > 0) {
+      setDigit(index - 1, "");
       inputs.current[index - 1]?.focus();
     }
   };

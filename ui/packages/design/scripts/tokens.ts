@@ -179,7 +179,7 @@ ${colorProperties(tokens, "light")}
 ${scaleProperties("space", tokens.space)}
 ${scaleProperties("radius", tokens.radius)}
   --br-font-family: ${tokens.font.family};
-${scaleProperties("font", { "size-sm": tokens.font.sizeSm, "size-md": tokens.font.sizeMd, "size-lg": tokens.font.sizeLg, "weight-regular": tokens.font.weightRegular, "weight-medium": tokens.font.weightMedium, "weight-bold": tokens.font.weightBold }).replace(/--br-font-size-size-/g, "--br-font-size-").replace(/--br-font-weight-weight-/g, "--br-font-weight-")}
+${scaleProperties("font", { "size-sm": tokens.font.sizeSm, "size-md": tokens.font.sizeMd, "size-lg": tokens.font.sizeLg, "weight-regular": tokens.font.weightRegular, "weight-medium": tokens.font.weightMedium, "weight-bold": tokens.font.weightBold })}
 }
 
 @media (prefers-color-scheme: dark) {
