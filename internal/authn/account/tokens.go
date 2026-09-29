@@ -48,7 +48,7 @@ func NewToken(user string, description string, scopes []string, expiresAt *metav
 }
 
 func createToken(w http.ResponseWriter, r *http.Request, deps Deps, who caller) {
-	body, err := decodeJSON[tokenBody](r)
+	body, err := decodeJSON[tokenBody](w, r)
 	if err != nil {
 		writeDecodeError(w, err)
 		return

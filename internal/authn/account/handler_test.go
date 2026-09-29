@@ -395,3 +395,14 @@ func TestInternalErrorLogsTheCause(t *testing.T) {
 		t.Fatal("the session cookie or the CSRF token reached the log")
 	}
 }
+
+func TestOversizedBodyClosesTheConnection(t *testing.T) {
+	h := newHarness(t)
+	alice := createUser(t, h, "alice", "")
+	cookie := loginAs(t, h, alice)
+	csrf := accountOf(t, h, cookie).CSRF
+	resp := call(t, h, http.MethodPost, "/api/v1/account/tokens", cookie, csrf, map[string]string{"description": strings.Repeat("a", maxBody)})
+	if code := errorOf(t, resp, http.StatusBadRequest); code != "invalid_request" || !resp.Close {
+		t.Fatalf("an oversized body must fail and close the connection: %q close=%v", code, resp.Close)
+	}
+}

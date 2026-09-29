@@ -176,7 +176,7 @@ func changePassword(w http.ResponseWriter, r *http.Request, deps Deps, who calle
 		writeError(w, http.StatusConflict, "not_local")
 		return
 	}
-	body, err := decodeJSON[passwordBody](r)
+	body, err := decodeJSON[passwordBody](w, r)
 	if err != nil {
 		writeDecodeError(w, err)
 		return
@@ -228,7 +228,7 @@ func beginTOTP(w http.ResponseWriter, r *http.Request, deps Deps, who caller) {
 }
 
 func verifyTOTP(w http.ResponseWriter, r *http.Request, deps Deps, who caller) {
-	body, err := decodeJSON[codeBody](r)
+	body, err := decodeJSON[codeBody](w, r)
 	if err != nil {
 		writeDecodeError(w, err)
 		return
@@ -487,13 +487,13 @@ func clientKey(name string) client.ObjectKey {
 	return client.ObjectKey{Namespace: release.SystemNamespace, Name: name}
 }
 
-func decodeJSON[T any](r *http.Request) (T, error) {
+func decodeJSON[T any](w http.ResponseWriter, r *http.Request) (T, error) {
 	var body T
 	mediaType, _, err := mime.ParseMediaType(r.Header.Get("Content-Type"))
 	if err != nil || mediaType != "application/json" {
 		return body, errUnsupportedMedia
 	}
-	err = json.NewDecoder(io.LimitReader(r.Body, maxBody)).Decode(&body)
+	err = json.NewDecoder(http.MaxBytesReader(w, r.Body, maxBody)).Decode(&body)
 	return body, err
 }
 
