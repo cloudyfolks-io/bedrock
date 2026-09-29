@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -242,6 +243,83 @@ func TestSweepContinuesPastAFailingKind(t *testing.T) {
 	}
 }
 
+func TestSweepKeepsAYoungOrphanSigningKey(t *testing.T) {
+	c, _ := startTestEnv(t)
+	ctx := context.Background()
+	now := time.Now().UTC()
+	orphan := &v1alpha1.SigningKey{
+		ObjectMeta: objectMeta("k-20260928t120000z"),
+		Spec:       v1alpha1.SigningKeySpec{Algorithm: v1alpha1.AlgorithmES256, SecretRef: "k-20260928t120000z", NotBefore: metav1.NewTime(now), RetireAfter: metav1.NewTime(now.Add(keys.Lifetime))},
+	}
+	create(t, c, orphan)
+
+	swept, err := Sweep(ctx, c, now.Add(9*time.Minute))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if swept.SigningKeys != 0 {
+		t.Fatalf("an orphan younger than 10 minutes must be kept, got %+v", swept)
+	}
+	if !present(t, c, orphan) {
+		t.Fatal("a young orphan SigningKey must stay")
+	}
+}
+
+func TestSweepDeletesAnOldOrphanSigningKey(t *testing.T) {
+	c, _ := startTestEnv(t)
+	ctx := context.Background()
+	now := time.Now().UTC()
+	orphan := &v1alpha1.SigningKey{
+		ObjectMeta: objectMeta("k-20260928t120000z"),
+		Spec:       v1alpha1.SigningKeySpec{Algorithm: v1alpha1.AlgorithmES256, SecretRef: "k-20260928t120000z", NotBefore: metav1.NewTime(now), RetireAfter: metav1.NewTime(now.Add(keys.Lifetime))},
+	}
+	create(t, c, orphan)
+
+	swept, err := Sweep(ctx, c, now.Add(11*time.Minute))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if swept.SigningKeys != 1 {
+		t.Fatalf("an orphan older than 10 minutes must be deleted, got %+v", swept)
+	}
+	if present(t, c, orphan) {
+		t.Fatal("an old orphan SigningKey must be swept")
+	}
+}
+
+func TestSweepDeletesAnOldSigningKeyWithAnUndecodableSecret(t *testing.T) {
+	c, _ := startTestEnv(t)
+	ctx := context.Background()
+	now := time.Now().UTC()
+	key, err := keys.Generate(rand.Reader, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := keys.Save(ctx, c, key); err != nil {
+		t.Fatal(err)
+	}
+	var sec corev1.Secret
+	if err := c.Get(ctx, objectKey(key.ID), &sec); err != nil {
+		t.Fatal(err)
+	}
+	sec.Data["key.pem"] = []byte("not a pem block")
+	if err := c.Update(ctx, &sec); err != nil {
+		t.Fatal(err)
+	}
+
+	swept, err := Sweep(ctx, c, now.Add(11*time.Minute))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if swept.SigningKeys != 1 {
+		t.Fatalf("a signing key with an undecodable secret older than 10 minutes must be deleted, got %+v", swept)
+	}
+	var gone v1alpha1.SigningKey
+	if err := c.Get(ctx, objectKey(key.ID), &gone); !apierrors.IsNotFound(err) {
+		t.Fatalf("the SigningKey must be deleted, err %v", err)
+	}
+}
+
 func TestRotateCreatesFirstKeyNow(t *testing.T) {
 	c, _ := startTestEnv(t)
 	ctx := context.Background()
@@ -300,20 +378,22 @@ func TestRotateIsIdempotent(t *testing.T) {
 	if err := c.List(ctx, &list, client.InNamespace("bedrock-system")); err != nil || len(list.Items) != 2 {
 		t.Fatalf("two rotations twice must give two keys, got %d, err %v", len(list.Items), err)
 	}
+}
+
+func TestRotateOnAlreadyExistsReturnsNilAndDeletesNothing(t *testing.T) {
+	c, _ := startTestEnv(t)
+	ctx := context.Background()
 	orphan := &v1alpha1.SigningKey{
-		ObjectMeta: objectMeta("k-20261127t120000z"),
-		Spec:       v1alpha1.SigningKeySpec{Algorithm: v1alpha1.AlgorithmES256, SecretRef: "k-20261127t120000z", NotBefore: metav1.NewTime(t0.Add(60 * day)), RetireAfter: metav1.NewTime(t0.Add(90 * day))},
+		ObjectMeta: objectMeta("k-20260928t120000z"),
+		Spec:       v1alpha1.SigningKeySpec{Algorithm: v1alpha1.AlgorithmES256, SecretRef: "k-20260928t120000z", NotBefore: metav1.NewTime(t0), RetireAfter: metav1.NewTime(t0.Add(keys.Lifetime))},
 	}
 	create(t, c, orphan)
-	if err := Rotate(ctx, c, rand.Reader, t0.Add(59*day)); !apierrors.IsAlreadyExists(err) {
-		t.Fatalf("a key left without its Secret must fail the save once, got %v", err)
+	if err := Rotate(ctx, c, rand.Reader, t0.Add(500*time.Millisecond)); err != nil {
+		t.Fatalf("an AlreadyExists from Save must not be an error, another replica already won: %v", err)
 	}
-	if err := Rotate(ctx, c, rand.Reader, t0.Add(59*day)); err != nil {
-		t.Fatalf("the next rotation must save the key: %v", err)
-	}
-	loaded, err := keys.Load(ctx, c)
-	if err != nil || len(loaded) != 3 {
-		t.Fatalf("keys %v, err %v", loaded, err)
+	var got v1alpha1.SigningKey
+	if err := c.Get(ctx, objectKey(orphan.Name), &got); err != nil {
+		t.Fatalf("Rotate must not delete the existing SigningKey on AlreadyExists: %v", err)
 	}
 }
 

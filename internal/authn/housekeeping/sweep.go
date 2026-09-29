@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"io"
-	"slices"
 	"time"
 
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -19,10 +18,7 @@ import (
 
 const pendingCredentialLifetime = time.Hour
 
-const (
-	rotateRaceAttempts = 10
-	rotateRaceBackoff  = 20 * time.Millisecond
-)
+const orphanSigningKeyAge = 10 * time.Minute
 
 type Swept struct {
 	AuthRequests, AuthCodes, RefreshTokens, Sessions, DeviceRequests, APITokens, SigningKeys, PendingCredentials int
@@ -49,16 +45,9 @@ func Sweep(ctx context.Context, c client.Client, now time.Time) (Swept, error) {
 		*step.count = count
 		errs = errors.Join(errs, err)
 	}
-	loaded, err := keys.Load(ctx, c)
-	if err != nil {
-		return swept, errors.Join(errs, err)
-	}
-	for _, key := range keys.Expired(loaded, now) {
-		if err := keys.Delete(ctx, c, key); err != nil {
-			return swept, errors.Join(errs, err)
-		}
-		swept.SigningKeys++
-	}
+	signingKeys, err := sweepSigningKeys(ctx, c, now)
+	swept.SigningKeys = signingKeys
+	errs = errors.Join(errs, err)
 	return swept, errs
 }
 
@@ -76,36 +65,53 @@ func Rotate(ctx context.Context, c client.Client, random io.Reader, now time.Tim
 		return err
 	}
 	err = keys.Save(ctx, c, key)
-	if err == nil {
+	if apierrors.IsAlreadyExists(err) {
 		return nil
 	}
-	if !apierrors.IsAlreadyExists(err) {
-		return err
-	}
-	won, waitErr := waitForSavedKey(ctx, c, key.ID)
-	if waitErr != nil {
-		return errors.Join(err, waitErr)
-	}
-	if won {
-		return nil
-	}
-	return errors.Join(err, keys.Delete(ctx, c, key))
+	return err
 }
 
-func waitForSavedKey(ctx context.Context, c client.Client, id string) (bool, error) {
-	for attempt := 0; attempt < rotateRaceAttempts; attempt++ {
-		loaded, err := keys.Load(ctx, c)
-		if err != nil {
-			return false, err
-		}
-		if slices.ContainsFunc(loaded, func(key keys.Key) bool { return key.ID == id }) {
-			return true, nil
-		}
-		if attempt < rotateRaceAttempts-1 {
-			time.Sleep(rotateRaceBackoff)
-		}
+func sweepSigningKeys(ctx context.Context, c client.Client, now time.Time) (int, error) {
+	var errs error
+	count := 0
+	loaded, err := keys.Load(ctx, c)
+	if err != nil {
+		errs = errors.Join(errs, err)
 	}
-	return false, nil
+	for _, key := range keys.Expired(loaded, now) {
+		if err := keys.Delete(ctx, c, key); err != nil {
+			errs = errors.Join(errs, err)
+			continue
+		}
+		count++
+	}
+	var list v1alpha1.SigningKeyList
+	if err := c.List(ctx, &list, client.InNamespace(release.SystemNamespace)); err != nil {
+		return count, errors.Join(errs, err)
+	}
+	for _, item := range list.Items {
+		if now.Before(item.CreationTimestamp.Add(orphanSigningKeyAge)) {
+			continue
+		}
+		usable, err := keys.Usable(ctx, c, item)
+		if err != nil {
+			errs = errors.Join(errs, err)
+			continue
+		}
+		if usable {
+			continue
+		}
+		uid := item.GetUID()
+		if err := c.Delete(ctx, &item, client.Preconditions{UID: &uid}); err != nil {
+			if apierrors.IsNotFound(err) || apierrors.IsConflict(err) {
+				continue
+			}
+			errs = errors.Join(errs, err)
+			continue
+		}
+		count++
+	}
+	return count, errs
 }
 
 func deleteMatching(ctx context.Context, c client.Client, list client.ObjectList, match func(client.Object) bool) (int, error) {

@@ -153,6 +153,41 @@ func TestLoadSkipsUndecodableSecret(t *testing.T) {
 	}
 }
 
+func TestUsableReportsSecretPresenceAndDecodability(t *testing.T) {
+	c := startTestEnv(t)
+	ctx := context.Background()
+	key, err := Generate(rand.Reader, t0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := Save(ctx, c, key); err != nil {
+		t.Fatal(err)
+	}
+	var signing v1alpha1.SigningKey
+	if err := c.Get(ctx, objectKey(key.ID), &signing); err != nil {
+		t.Fatal(err)
+	}
+	if usable, err := Usable(ctx, c, signing); err != nil || !usable {
+		t.Fatalf("a saved key must be usable, got %v, err %v", usable, err)
+	}
+
+	orphan := v1alpha1.SigningKey{
+		ObjectMeta: metav1.ObjectMeta{Name: "k-20261028t120000z", Namespace: release.SystemNamespace},
+		Spec:       v1alpha1.SigningKeySpec{Algorithm: v1alpha1.AlgorithmES256, SecretRef: "k-20261028t120000z", NotBefore: metav1.NewTime(t0.Add(Lifetime)), RetireAfter: metav1.NewTime(t0.Add(2 * Lifetime))},
+	}
+	if err := c.Create(ctx, &orphan); err != nil {
+		t.Fatal(err)
+	}
+	if usable, err := Usable(ctx, c, orphan); err != nil || usable {
+		t.Fatalf("a key without its Secret must not be usable, got %v, err %v", usable, err)
+	}
+
+	corruptSecret(t, c, key.ID)
+	if usable, err := Usable(ctx, c, signing); err != nil || usable {
+		t.Fatalf("a key with an undecodable Secret must not be usable, got %v, err %v", usable, err)
+	}
+}
+
 func TestNextNotBeforeHealsAfterOnlyKeyIsUndecodable(t *testing.T) {
 	c := startTestEnv(t)
 	ctx := context.Background()

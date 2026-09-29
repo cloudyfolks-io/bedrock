@@ -30,21 +30,36 @@ func Load(ctx context.Context, c client.Reader) ([]Key, error) {
 	}
 	loaded := make([]Key, 0, len(list.Items))
 	for _, item := range list.Items {
-		var stored corev1.Secret
-		err := c.Get(ctx, client.ObjectKey{Namespace: release.SystemNamespace, Name: item.Spec.SecretRef}, &stored)
-		if apierrors.IsNotFound(err) {
-			continue
-		}
+		key, ok, err := resolve(ctx, c, item)
 		if err != nil {
 			return nil, err
 		}
-		private, err := decodePrivateKey(stored.Data[secretKey])
-		if err != nil {
-			continue
+		if ok {
+			loaded = append(loaded, key)
 		}
-		loaded = append(loaded, Key{ID: item.Name, Private: private, NotBefore: item.Spec.NotBefore.Time, RetireAfter: item.Spec.RetireAfter.Time})
 	}
 	return loaded, nil
+}
+
+func Usable(ctx context.Context, c client.Reader, item v1alpha1.SigningKey) (bool, error) {
+	_, ok, err := resolve(ctx, c, item)
+	return ok, err
+}
+
+func resolve(ctx context.Context, c client.Reader, item v1alpha1.SigningKey) (Key, bool, error) {
+	var stored corev1.Secret
+	err := c.Get(ctx, client.ObjectKey{Namespace: release.SystemNamespace, Name: item.Spec.SecretRef}, &stored)
+	if apierrors.IsNotFound(err) {
+		return Key{}, false, nil
+	}
+	if err != nil {
+		return Key{}, false, err
+	}
+	private, err := decodePrivateKey(stored.Data[secretKey])
+	if err != nil {
+		return Key{}, false, nil
+	}
+	return Key{ID: item.Name, Private: private, NotBefore: item.Spec.NotBefore.Time, RetireAfter: item.Spec.RetireAfter.Time}, true, nil
 }
 
 func Save(ctx context.Context, c client.Client, key Key) error {
