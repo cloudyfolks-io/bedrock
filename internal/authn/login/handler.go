@@ -225,8 +225,7 @@ func callback(w http.ResponseWriter, r *http.Request, deps Deps) {
 		return
 	}
 	ClearCookie(w, CookieUpstream)
-	given := methods.Answer{Type: v1alpha1.MethodOIDC, Provider: r.PathValue("name"), Code: r.URL.Query().Get("code")}
-	step, updated, err := runMethod(r.Context(), deps, request, flowOf(r, deps, withUpstream(request, upstream.Value)), v1alpha1.MethodOIDC, given)
+	step, updated, err := upstreamAnswer(r, deps, request, upstream.Value)
 	if err != nil {
 		internal(w)
 		return
@@ -237,6 +236,16 @@ func callback(w http.ResponseWriter, r *http.Request, deps Deps) {
 		return
 	}
 	http.Redirect(w, r, afterUpstream(challenge, request.Name), http.StatusSeeOther)
+}
+
+func upstreamAnswer(r *http.Request, deps Deps, request v1alpha1.AuthRequest, upstream string) (Step, v1alpha1.AuthRequest, error) {
+	query := r.URL.Query()
+	flow := flowOf(r, deps, withUpstream(request, upstream))
+	if query.Has("error") || query.Get("code") == "" {
+		return afterResult(r.Context(), deps, request, v1alpha1.MethodOIDC, methods.Result{Failure: methods.FailureProviderError}, flow.Now)
+	}
+	given := methods.Answer{Type: v1alpha1.MethodOIDC, Provider: r.PathValue("name"), Code: query.Get("code")}
+	return runMethod(r.Context(), deps, request, flow, v1alpha1.MethodOIDC, given)
 }
 
 func dispatch(r *http.Request, deps Deps, request v1alpha1.AuthRequest, given methods.Answer) (Step, v1alpha1.AuthRequest, error) {

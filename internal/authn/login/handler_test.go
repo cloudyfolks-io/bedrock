@@ -565,3 +565,43 @@ func markEnrolled(t *testing.T, h harness, key client.ObjectKey) {
 		t.Errorf("enroll %s: %v", key.Name, err)
 	}
 }
+
+func TestUpstreamCallbackRefusesADenial(t *testing.T) {
+	h := newHarness(t, methods.NewRateLimiter(100, time.Minute))
+	create(t, h.client, &v1alpha1.IdentityProvider{
+		ObjectMeta: metav1.ObjectMeta{Name: "dex", Namespace: release.SystemNamespace},
+		Spec: v1alpha1.IdentityProviderSpec{
+			Type:        v1alpha1.MethodOIDC,
+			DisplayName: "Dadehat SSO",
+			OIDC:        &v1alpha1.OIDCProvider{Issuer: "https://dex.example.test", ClientID: "bedrock"},
+			SecretRef:   "dex-client",
+		},
+	})
+	browser := newBrowser(t, h.server)
+	id, first := startLogin(t, h, browser)
+	csrf := first.CSRF
+	for _, query := range []string{"error=access_denied&error_description=denied", "", "code=", "code=abc&error=server_error"} {
+		redirect := answerWith(t, h, browser, csrf, methods.Answer{Type: answerProvider, Provider: "dex"})
+		if redirect.Type != methods.ChallengeRedirect {
+			t.Fatalf("redirect %+v", redirect)
+		}
+		resp := get(t, browser, h.server.URL+"/api/v1/login/providers/dex/callback?"+query+"&state="+url.QueryEscape(id))
+		if resp.StatusCode != http.StatusSeeOther || resp.Header.Get("Location") != "/login/?authRequest="+id {
+			t.Fatalf("callback %q: %d %q", query, resp.StatusCode, resp.Header.Get("Location"))
+		}
+		if cleared := cookieNamed(resp.Cookies(), CookieUpstream); cleared == nil || cleared.MaxAge >= 0 {
+			t.Fatalf("callback %q must clear the upstream cookie: %+v", query, cleared)
+		}
+		if stored := storedRequest(t, h.client, id); stored.Status.Login.Step != methods.ChallengeProviders || stored.Status.Login.Error != methods.FailureProviderError || stored.Status.Done {
+			t.Fatalf("callback %q: %+v", query, stored.Status)
+		}
+		current := challengeOf(t, get(t, browser, h.server.URL+"/api/v1/login/challenge"))
+		if current.Type != methods.ChallengeProviders || current.Error == nil || current.Error.Code != methods.FailureProviderError {
+			t.Fatalf("challenge after %q: %+v", query, current)
+		}
+		csrf = current.CSRF
+	}
+	if _, completes := h.upstream.calls(); len(completes) != 0 {
+		t.Fatalf("a denial must not reach the method: %+v", completes)
+	}
+}
