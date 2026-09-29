@@ -191,7 +191,7 @@ func changePassword(w http.ResponseWriter, r *http.Request, deps Deps, who calle
 		return
 	}
 	if result.Subject == nil {
-		writeError(w, http.StatusForbidden, failureOf(result))
+		refuse(w, failureOf(result))
 		return
 	}
 	if err := methods.SetPassword(r.Context(), deps.Client, deps.Random, who.user, body.New); err != nil {
@@ -239,7 +239,7 @@ func verifyTOTP(w http.ResponseWriter, r *http.Request, deps Deps, who caller) {
 		return
 	}
 	if result.Subject == nil {
-		writeError(w, http.StatusForbidden, failureOf(result))
+		refuse(w, failureOf(result))
 		return
 	}
 	answerRecoveryCodes(w, r, deps, who)
@@ -284,7 +284,7 @@ func newRecoveryCodes(w http.ResponseWriter, r *http.Request, deps Deps, who cal
 
 func answerRecoveryCodes(w http.ResponseWriter, r *http.Request, deps Deps, who caller) {
 	if !deps.Limiter.Allow(login.ClientIP(r), deps.Clock()) {
-		writeError(w, http.StatusForbidden, methods.FailureRateLimited)
+		refuse(w, methods.FailureRateLimited)
 		return
 	}
 	enrollment, err := enroll(r.Context(), deps, who, v1alpha1.MethodRecovery)
@@ -469,6 +469,14 @@ func failureOf(result methods.Result) string {
 		return result.Failure
 	}
 	return methods.FailureInvalidCredentials
+}
+
+func refuse(w http.ResponseWriter, failure string) {
+	if failure == methods.FailureRateLimited {
+		writeError(w, http.StatusTooManyRequests, failure)
+		return
+	}
+	writeError(w, http.StatusForbidden, failure)
 }
 
 func validID(id string) bool {

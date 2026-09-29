@@ -598,7 +598,7 @@ func TestRateLimitCountsEachPasswordLoginOnce(t *testing.T) {
 	}
 	csrf := accountCSRF(t, server, first)
 	resp := accountPost(t, server, first, csrf, "/api/v1/account/password", `{"current":"`+password+`","new":"another horse battery staple"}`)
-	if code := readJSON[map[string]string](t, resp, http.StatusForbidden)["error"]; code != methods.FailureRateLimited {
+	if code := readJSON[map[string]string](t, resp, http.StatusTooManyRequests)["error"]; code != methods.FailureRateLimited {
 		t.Fatalf("the account API shares the login budget: %q", code)
 	}
 }
@@ -616,17 +616,17 @@ func TestOneRateLimiterServesLoginAndAccount(t *testing.T) {
 		t.Fatalf("login %+v", done)
 	}
 	csrf := accountCSRF(t, server, browser)
-	change := func() string {
+	change := func(status int) string {
 		t.Helper()
 		resp := accountPost(t, server, browser, csrf, "/api/v1/account/password", `{"current":"wrong horse battery staple","new":"another horse battery staple"}`)
-		return readJSON[map[string]string](t, resp, http.StatusForbidden)["error"]
+		return readJSON[map[string]string](t, resp, status)["error"]
 	}
 	for attempt := 2; attempt <= attemptsPerMinute; attempt++ {
-		if code := change(); code != methods.FailureInvalidCredentials {
+		if code := change(http.StatusForbidden); code != methods.FailureInvalidCredentials {
 			t.Fatalf("attempt %d: %q", attempt, code)
 		}
 	}
-	if code := change(); code != methods.FailureRateLimited {
+	if code := change(http.StatusTooManyRequests); code != methods.FailureRateLimited {
 		t.Fatalf("the login must count against the account API: %q", code)
 	}
 	limited := passwordLogin(t, server, newBrowser(t, server), "admin", password)

@@ -198,8 +198,25 @@ func TestNewRecoveryCodesCountsAgainstTheRateLimit(t *testing.T) {
 	cookie := loginAs(t, h, alice)
 	csrf := accountOf(t, h, cookie).CSRF
 	enrollTOTP(t, h, cookie, csrf)
-	if code := errorOf(t, call(t, h, http.MethodPost, "/api/v1/account/recovery-codes", cookie, csrf, nil), http.StatusForbidden); code != methods.FailureRateLimited {
+	if code := errorOf(t, call(t, h, http.MethodPost, "/api/v1/account/recovery-codes", cookie, csrf, nil), http.StatusTooManyRequests); code != methods.FailureRateLimited {
 		t.Fatalf("recovery code generation must count against the per-IP limiter: %q", code)
+	}
+}
+
+func TestRateLimitedAccountChecksAnswerTooManyRequests(t *testing.T) {
+	h := newHarnessWithLimiter(t, methods.NewRateLimiter(2, time.Minute))
+	alice := createUser(t, h, "alice", "")
+	cookie := loginAs(t, h, alice)
+	csrf := accountOf(t, h, cookie).CSRF
+	enrollTOTP(t, h, cookie, csrf)
+	checks := map[string]any{
+		"/api/v1/account/totp/verify": map[string]string{"code": "000000"},
+		"/api/v1/account/password":    map[string]string{"current": testPassword, "new": "another horse battery staple"},
+	}
+	for target, body := range checks {
+		if code := errorOf(t, call(t, h, http.MethodPost, target, cookie, csrf, body), http.StatusTooManyRequests); code != methods.FailureRateLimited {
+			t.Fatalf("%s: %q", target, code)
+		}
 	}
 }
 
