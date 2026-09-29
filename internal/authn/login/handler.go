@@ -285,7 +285,7 @@ func runMethod(ctx context.Context, deps Deps, request v1alpha1.AuthRequest, flo
 	if err != nil {
 		return Step{}, request, err
 	}
-	if !deps.Limiter.Allow(flow.ClientIP, flow.Now) {
+	if !deps.Limiter.Allow(AttemptKey(flow.ClientIP, attemptUser(request)), flow.Now) {
 		return afterResult(ctx, deps, request, name, methods.Result{Failure: methods.FailureRateLimited}, flow.Now)
 	}
 	user, err := methodUser(ctx, deps, request)
@@ -297,6 +297,17 @@ func runMethod(ctx context.Context, deps Deps, request v1alpha1.AuthRequest, flo
 		return Step{}, request, err
 	}
 	return afterResult(ctx, deps, request, name, result, flow.Now)
+}
+
+func AttemptKey(clientIP, username string) string {
+	return clientIP + "|" + username
+}
+
+func attemptUser(request v1alpha1.AuthRequest) string {
+	if request.Status.Login.Username != "" {
+		return request.Status.Login.Username
+	}
+	return request.Status.Subject
 }
 
 func afterResult(ctx context.Context, deps Deps, request v1alpha1.AuthRequest, name string, result methods.Result, now time.Time) (Step, v1alpha1.AuthRequest, error) {

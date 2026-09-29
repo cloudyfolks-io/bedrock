@@ -277,7 +277,7 @@ func newRecoveryCodes(w http.ResponseWriter, r *http.Request, deps Deps, who cal
 }
 
 func answerRecoveryCodes(w http.ResponseWriter, r *http.Request, deps Deps, who caller) {
-	if !deps.Limiter.Allow(login.ClientIP(r), deps.Clock()) {
+	if !deps.Limiter.Allow(login.AttemptKey(login.ClientIP(r), who.user.Spec.Username), deps.Clock()) {
 		refuse(w, methods.FailureRateLimited)
 		return
 	}
@@ -392,7 +392,7 @@ func complete(r *http.Request, deps Deps, who caller, name string, given methods
 		return methods.Result{}, err
 	}
 	flow := methods.Flow{ClientIP: login.ClientIP(r), Now: deps.Clock()}
-	if !deps.Limiter.Allow(flow.ClientIP, flow.Now) {
+	if !deps.Limiter.Allow(login.AttemptKey(flow.ClientIP, who.user.Spec.Username), flow.Now) {
 		return methods.Result{Failure: methods.FailureRateLimited}, nil
 	}
 	return method.Complete(r.Context(), flow, who.user, given)

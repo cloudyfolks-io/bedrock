@@ -603,6 +603,37 @@ func TestRateLimitCountsEachPasswordLoginOnce(t *testing.T) {
 	}
 }
 
+func TestCredentialBudgetIsPerUserAndAddress(t *testing.T) {
+	c, cfg := startTestEnv(t)
+	seedCluster(t, c)
+	saveSigningKey(t, c, time.Now().Add(-time.Minute))
+	createCLIClient(t, c)
+	password := "correct horse battery staple"
+	createUser(t, c, "admin", password)
+	createUser(t, c, "operator", password)
+	server := newTestServer(t, cfg, time.Now)
+	for attempt := 1; attempt <= attemptsPerMinute; attempt++ {
+		if done := passwordLogin(t, server, newBrowser(t, server), "admin", "wrong horse battery staple"); done.Error == nil || done.Error.Code != methods.FailureInvalidCredentials {
+			t.Fatalf("wrong admin password %d: %+v", attempt, done)
+		}
+	}
+	if limited := passwordLogin(t, server, newBrowser(t, server), "admin", password); limited.Error == nil || limited.Error.Code != methods.FailureRateLimited {
+		t.Fatalf("admin after %d attempts: %+v", attemptsPerMinute, limited)
+	}
+	operator := newBrowser(t, server)
+	if done := passwordLogin(t, server, operator, "operator", password); done.Type != methods.ChallengeDone {
+		t.Fatalf("another user from the same address must keep its own budget: %+v", done)
+	}
+	csrf := accountCSRF(t, server, operator)
+	resp := accountPost(t, server, operator, csrf, "/api/v1/account/password", `{"current":"wrong horse battery staple","new":"another horse battery staple"}`)
+	if code := readJSON[map[string]string](t, resp, http.StatusForbidden)["error"]; code != methods.FailureInvalidCredentials {
+		t.Fatalf("the account check of another user: %q", code)
+	}
+	if limited := passwordLogin(t, server, newBrowser(t, server), "admin", password); limited.Error == nil || limited.Error.Code != methods.FailureRateLimited {
+		t.Fatalf("admin must stay limited: %+v", limited)
+	}
+}
+
 func TestOneRateLimiterServesLoginAndAccount(t *testing.T) {
 	c, cfg := startTestEnv(t)
 	seedCluster(t, c)
