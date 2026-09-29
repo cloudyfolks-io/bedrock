@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 
@@ -83,11 +84,11 @@ func TestAuthnRoleGrantsTheCookieKeySecretAccess(t *testing.T) {
 		for _, r := range rules {
 			rule, _ := r.(map[string]any)
 			resources, _, _ := unstructured.NestedStringSlice(rule, "resources")
-			if !containsString(resources, "secrets") {
+			if !slices.Contains(resources, "secrets") {
 				continue
 			}
 			verbs, _, _ := unstructured.NestedStringSlice(rule, "verbs")
-			if containsString(verbs, "create") && containsString(verbs, "get") {
+			if slices.Contains(verbs, "create") && slices.Contains(verbs, "get") {
 				return
 			}
 		}
@@ -113,11 +114,24 @@ func TestAuthnSecretPolicyAcceptsTheAuthnLabel(t *testing.T) {
 	t.Fatal("the secret ValidatingAdmissionPolicy must require the bedrock.cloudyfolks.io/authn label bedrock-authn writes on its cookie key")
 }
 
-func containsString(values []string, target string) bool {
-	for _, value := range values {
-		if value == target {
-			return true
+func TestAuthnDeploymentMemoryBudgetBoundsArgon2Checks(t *testing.T) {
+	objects := authnManifest(t, "30-deployment.yaml")
+	containers, _, _ := unstructured.NestedSlice(objects[0].Object, "spec", "template", "spec", "containers")
+	container, _ := containers[0].(map[string]any)
+	limit, _, _ := unstructured.NestedString(container, "resources", "limits", "memory")
+	request, _, _ := unstructured.NestedString(container, "resources", "requests", "memory")
+	if limit != "1Gi" || request != "128Mi" {
+		t.Fatalf("memory request %q, limit %q", request, limit)
+	}
+	env, _, _ := unstructured.NestedSlice(container, "env")
+	var gomemlimit string
+	for _, e := range env {
+		entry, _ := e.(map[string]any)
+		if entry["name"] == "GOMEMLIMIT" {
+			gomemlimit, _ = entry["value"].(string)
 		}
 	}
-	return false
+	if gomemlimit != "900MiB" {
+		t.Fatalf("GOMEMLIMIT %q, want 900MiB so the GC keeps the heap under the 1Gi cgroup limit", gomemlimit)
+	}
 }

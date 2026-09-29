@@ -16,6 +16,7 @@ spec:
         app: bedrock-authn
     spec:
       serviceAccountName: bedrock-authn
+      priorityClassName: system-cluster-critical
       securityContext:
         runAsNonRoot: true
         runAsUser: 65532
@@ -40,6 +41,8 @@ spec:
               valueFrom:
                 fieldRef:
                   fieldPath: metadata.name
+            - name: GOMEMLIMIT
+              value: "900MiB"
           ports:
             - name: https
               containerPort: 8443
@@ -67,9 +70,9 @@ spec:
           resources:
             requests:
               cpu: 50m
-              memory: 64Mi
+              memory: 128Mi
             limits:
-              memory: 512Mi
+              memory: 1Gi
           volumeMounts:
             - name: tls
               mountPath: /tls

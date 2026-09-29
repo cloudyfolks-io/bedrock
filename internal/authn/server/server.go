@@ -38,22 +38,25 @@ import (
 )
 
 const (
-	pathAuthorize      = "/oauth/v2/authorize"
-	pathAuthorizeDone  = pathAuthorize + "/callback"
-	pathToken          = "/oauth/v2/token"
-	pathDevice         = "/oauth/v2/device_authorization"
-	pathIntrospect     = "/oauth/v2/introspect"
-	pathRevoke         = "/oauth/v2/revoke"
-	pathKeys           = "/oauth/v2/keys"
-	pathEndSession     = "/oidc/v1/end_session"
-	pathUserinfo       = "/oidc/v1/userinfo"
-	pathWebhook        = "/webhook/v1/tokenreview"
-	pathHealthz        = "/healthz"
-	pathReadyz         = "/readyz"
-	pathCluster        = "/api/v1/cluster"
-	pathLogin          = "/api/v1/login/"
-	pathLoginChallenge = pathLogin + "challenge"
-	pathAccount        = "/api/v1/account"
+	pathAuthorize         = "/oauth/v2/authorize"
+	pathAuthorizeDone     = pathAuthorize + "/callback"
+	pathToken             = "/oauth/v2/token"
+	pathDevice            = "/oauth/v2/device_authorization"
+	pathIntrospect        = "/oauth/v2/introspect"
+	pathRevoke            = "/oauth/v2/revoke"
+	pathKeys              = "/oauth/v2/keys"
+	pathEndSession        = "/oidc/v1/end_session"
+	pathUserinfo          = "/oidc/v1/userinfo"
+	pathWebhook           = "/webhook/v1/tokenreview"
+	pathHealthz           = "/healthz"
+	pathReadyz            = "/readyz"
+	pathCluster           = "/api/v1/cluster"
+	pathLogin             = "/api/v1/login/"
+	pathLoginChallenge    = pathLogin + "challenge"
+	pathLoginAnswer       = pathLogin + "answer"
+	pathAccount           = "/api/v1/account"
+	pathAccountPassword   = pathAccount + "/password"
+	pathAccountTOTPVerify = pathAccount + "/totp/verify"
 
 	cookieKeySecret   = "bedrock-authn-cookie-key"
 	cookieKeyField    = "key"
@@ -136,7 +139,8 @@ func New(ctx context.Context, cfg Config) (http.Handler, error) {
 		return nil, err
 	}
 	withIssuer := op.NewIssuerInterceptor(issuerFromRequest).Handler
-	loginHandler := refuseCrossSite(withIssuer(login.Handler(login.Deps{
+	credentials := newCredentialGate(credentialGateSlots, credentialGateWait)
+	loginHandler := refuseCrossSite(withIssuer(credentials.middleware(isLoginAnswer, login.Handler(login.Deps{
 		Store:    st,
 		Client:   direct,
 		Methods:  registry,
@@ -146,8 +150,8 @@ func New(ctx context.Context, cfg Config) (http.Handler, error) {
 		Limiter:  limiter,
 		Callback: op.AuthCallbackURL(provider),
 		LDAPDial: methods.DialLDAP,
-	})))
-	accountHandler := refuseCrossSite(withIssuer(account.Handler(account.Deps{
+	}))))
+	accountHandler := refuseCrossSite(withIssuer(credentials.middleware(isAccountCredentialCheck, account.Handler(account.Deps{
 		Store:    st,
 		Client:   direct,
 		Methods:  registry,
@@ -155,7 +159,7 @@ func New(ctx context.Context, cfg Config) (http.Handler, error) {
 		Random:   cfg.Random,
 		Clock:    cfg.Clock,
 		Limiter:  limiter,
-	})))
+	}))))
 	mux := http.NewServeMux()
 	mux.Handle(pathLogin, loginHandler)
 	mux.Handle(pathAccount, accountHandler)
