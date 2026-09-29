@@ -75,6 +75,8 @@ spec:
                     - secretRef
                     type: object
                 type: object
+              joinCIDR:
+                type: string
               maintenanceWindow:
                 type: string
               nodeConcurrency:

@@ -49,7 +49,7 @@ func TestRenderAuthnObjects(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if out.SkipReason != "" || len(out.Objects) != 5 {
+	if out.SkipReason != "" || len(out.Objects) != 6 {
 		t.Fatalf("rendered %+v", out)
 	}
 	for _, obj := range out.Objects {
@@ -80,6 +80,7 @@ func TestRenderAuthnObjects(t *testing.T) {
 	if match != "Host(`sso.lab.example`)" || service["name"] != "bedrock-authn" || service["port"] != int64(443) || service["scheme"] != "https" || service["serversTransport"] != "bedrock-authn" {
 		t.Fatalf("route %+v", routes[0])
 	}
+	assertAuthnNetworkPolicy(t, out.Objects, "100.64.0.0/16")
 	cli := findObject(out.Objects, "OAuthClient", "bedrock-cli")
 	public, _, _ := unstructured.NestedBool(cli.Object, "spec", "public")
 	redirects, _, _ := unstructured.NestedStringSlice(cli.Object, "spec", "redirectURIs")
@@ -110,6 +111,55 @@ func TestRenderAuthnObjects(t *testing.T) {
 	if len(out.Probes) != 1 || out.Probes[0].GVK.Kind != "Deployment" || out.Probes[0].Key.Name != "bedrock-authn" || out.Probes[0].Key.Namespace != release.SystemNamespace {
 		t.Fatalf("probes %+v", out.Probes)
 	}
+}
+
+func assertAuthnNetworkPolicy(t *testing.T, objects []*unstructured.Unstructured, wantCIDR string) {
+	t.Helper()
+	policy := findObject(objects, "NetworkPolicy", "bedrock-authn")
+	if policy == nil || policy.GetAPIVersion() != "networking.k8s.io/v1" {
+		t.Fatalf("objects %+v", objects)
+	}
+	podSelector, _, _ := unstructured.NestedStringMap(policy.Object, "spec", "podSelector", "matchLabels")
+	types, _, _ := unstructured.NestedStringSlice(policy.Object, "spec", "policyTypes")
+	if podSelector["app"] != "bedrock-authn" || len(types) != 1 || types[0] != "Ingress" {
+		t.Fatalf("networkpolicy spec %+v", policy.Object["spec"])
+	}
+	ingress, _, _ := unstructured.NestedSlice(policy.Object, "spec", "ingress")
+	if len(ingress) != 2 {
+		t.Fatalf("ingress rules %+v", ingress)
+	}
+	traefikRule := ingress[0].(map[string]any)
+	from, _, _ := unstructured.NestedSlice(traefikRule, "from")
+	peer := from[0].(map[string]any)
+	namespaceSelector, _, _ := unstructured.NestedStringMap(peer, "namespaceSelector", "matchLabels")
+	podPeerSelector, _, _ := unstructured.NestedStringMap(peer, "podSelector", "matchLabels")
+	if namespaceSelector["kubernetes.io/metadata.name"] != "traefik" || podPeerSelector["app.kubernetes.io/name"] != "traefik" {
+		t.Fatalf("traefik peer %+v", peer)
+	}
+	probeRule := ingress[1].(map[string]any)
+	probeFrom, _, _ := unstructured.NestedSlice(probeRule, "from")
+	probePeer := probeFrom[0].(map[string]any)
+	cidr, _, _ := unstructured.NestedString(probePeer, "ipBlock", "cidr")
+	if cidr != wantCIDR {
+		t.Fatalf("kubelet probe ipBlock cidr %q, want %q", cidr, wantCIDR)
+	}
+	for _, rule := range []map[string]any{traefikRule, probeRule} {
+		ports, _, _ := unstructured.NestedSlice(rule, "ports")
+		port := ports[0].(map[string]any)
+		if port["protocol"] != "TCP" || port["port"] != "https" {
+			t.Fatalf("rule port %+v", port)
+		}
+	}
+}
+
+func TestRenderAuthnNetworkPolicyUsesTheClusterJoinCIDR(t *testing.T) {
+	custom := authnInput("lab.example", "SelfSigned")
+	custom.Cluster.Spec.JoinCIDR = "100.99.0.0/16"
+	out, err := RenderAuthn(custom)
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertAuthnNetworkPolicy(t, out.Objects, "100.99.0.0/16")
 }
 
 func TestAuthnAddonFollowsPlatformHost(t *testing.T) {

@@ -78,6 +78,8 @@ type ClusterSpec struct {
 	Encryption EncryptionSpec `json:"encryption,omitempty"`
 	// +optional
 	Upgrade UpgradeSpec `json:"upgrade,omitempty"`
+	// +optional
+	JoinCIDR string `json:"joinCIDR,omitempty"`
 }
 
 type ComponentStatus struct {

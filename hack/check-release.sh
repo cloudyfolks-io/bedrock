@@ -49,7 +49,6 @@ grep -q 'kind: ValidatingAdmissionPolicy' "$dir/manifests/90-bedrock/bedrock.yam
 grep -q 'name: bedrock-authn' "$dir/manifests/85-authn/authn.yaml"
 grep -q 'kind: ServersTransport' "$dir/manifests/85-authn/authn.yaml"
 grep -q 'kind: PodDisruptionBudget' "$dir/manifests/85-authn/authn.yaml"
-grep -q 'kind: NetworkPolicy' "$dir/manifests/85-authn/authn.yaml"
 grep -q 'secretName: bedrock-ca' "$dir/manifests/85-authn/authn.yaml"
 ! grep -rq 'ghcr.io/cloudyfolks-io/bedrock:dev' "$dir/manifests" || test "$(grep '^version:' "$dir/release.yaml")" = "version: dev"
 grep -q '^images:' "$dir/release.yaml"

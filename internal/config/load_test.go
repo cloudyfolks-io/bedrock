@@ -73,7 +73,7 @@ func TestToObjects(t *testing.T) {
 		t.Fatal(err)
 	}
 	cluster := ToCluster(cfg)
-	if cluster.Name != v1alpha1.ClusterName || cluster.Spec.DesiredVersion != "v0.1.0" || cluster.Spec.API.VIP != "10.0.10.10" {
+	if cluster.Name != v1alpha1.ClusterName || cluster.Spec.DesiredVersion != "v0.1.0" || cluster.Spec.API.VIP != "10.0.10.10" || cluster.Spec.JoinCIDR != "100.64.0.0/16" {
 		t.Fatalf("cluster %+v", cluster.Spec)
 	}
 	host := ToHost(cfg, "node-1")

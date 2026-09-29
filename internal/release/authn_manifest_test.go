@@ -73,56 +73,6 @@ func authnManifest(t *testing.T, file string) []*unstructured.Unstructured {
 	return objects
 }
 
-func TestAuthnNetworkPolicyAllowsOnlyTraefikAndKubeletProbes(t *testing.T) {
-	objects := authnManifest(t, "45-networkpolicy.yaml")
-	if len(objects) != 1 || objects[0].GetKind() != "NetworkPolicy" {
-		t.Fatalf("45-networkpolicy.yaml holds %d objects", len(objects))
-	}
-	policy := objects[0].Object
-	if objects[0].GetNamespace() != "bedrock-system" {
-		t.Fatalf("namespace %q", objects[0].GetNamespace())
-	}
-	selector, _, _ := unstructured.NestedStringMap(policy, "spec", "podSelector", "matchLabels")
-	if selector["app"] != "bedrock-authn" {
-		t.Fatalf("podSelector %v", selector)
-	}
-	types, _, _ := unstructured.NestedStringSlice(policy, "spec", "policyTypes")
-	if !reflect.DeepEqual(types, []string{"Ingress"}) {
-		t.Fatalf("policyTypes %v", types)
-	}
-	ingress, _, _ := unstructured.NestedSlice(policy, "spec", "ingress")
-	if len(ingress) != 2 {
-		t.Fatalf("ingress rules %d, want 2", len(ingress))
-	}
-	traefikRule, _ := ingress[0].(map[string]any)
-	from, _ := traefikRule["from"].([]any)
-	peer, _ := from[0].(map[string]any)
-	namespaceSelector, _ := peer["namespaceSelector"].(map[string]any)
-	nsLabels, _, _ := unstructured.NestedStringMap(namespaceSelector, "matchLabels")
-	if nsLabels["kubernetes.io/metadata.name"] != "traefik" {
-		t.Fatalf("traefik namespaceSelector %v", nsLabels)
-	}
-	podSelector, _ := peer["podSelector"].(map[string]any)
-	podLabels, _, _ := unstructured.NestedStringMap(podSelector, "matchLabels")
-	if podLabels["app.kubernetes.io/name"] != "traefik" {
-		t.Fatalf("traefik podSelector %v", podLabels)
-	}
-	probeRule, _ := ingress[1].(map[string]any)
-	probeFrom, _ := probeRule["from"].([]any)
-	probePeer, _ := probeFrom[0].(map[string]any)
-	ipBlock, _ := probePeer["ipBlock"].(map[string]any)
-	if ipBlock["cidr"] != "100.64.0.0/16" {
-		t.Fatalf("kubelet probe ipBlock %v, want the kube-ovn join subnet", ipBlock)
-	}
-	raw, err := os.ReadFile(filepath.Join("..", "..", "manifests", "85-authn", "45-networkpolicy.yaml"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if strings.Contains(string(raw), "0.0.0.0/0") {
-		t.Fatal("the authn NetworkPolicy must not open ingress to the whole network: only Traefik may forward login traffic")
-	}
-}
-
 func TestAuthnRoleGrantsTheCookieKeySecretAccess(t *testing.T) {
 	objects := authnManifest(t, "10-rbac.yaml")
 	for _, obj := range objects {

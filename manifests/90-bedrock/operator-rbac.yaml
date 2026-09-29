@@ -213,6 +213,7 @@ rules:
   - networking.k8s.io
   resources:
   - ingressclasses
+  - networkpolicies
   verbs:
   - create
   - delete
@@ -225,6 +226,18 @@ rules:
   - nmstate.io
   resources:
   - nmstates
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - update
+  - watch
+- apiGroups:
+  - policy
+  resources:
+  - poddisruptionbudgets
   verbs:
   - create
   - delete
@@ -312,6 +325,7 @@ rules:
   - traefik.io
   resources:
   - ingressroutes
+  - serverstransports
   - tlsstores
   verbs:
   - create

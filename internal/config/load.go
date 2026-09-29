@@ -147,6 +147,7 @@ func ToCluster(cfg v1alpha1.ClusterConfig) v1alpha1.Cluster {
 			API:             cfg.Spec.API,
 			NodeConcurrency: 1,
 			Registry:        v1alpha1.RegistrySpec{Mirror: cfg.Spec.Registry.Mirror},
+			JoinCIDR:        cfg.Spec.Network.Fabric.JoinCIDR,
 		},
 	}
 }

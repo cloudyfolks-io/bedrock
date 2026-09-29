@@ -15,13 +15,15 @@ import (
 )
 
 const (
-	authnName          = "bedrock-authn"
-	cliClientID        = "bedrock-cli"
-	consoleClientID    = "bedrock-console"
-	consoleSecretName  = "bedrock-console-client"
-	traefikAPIVersion  = "traefik.io/v1alpha1"
-	authnServicePort   = int64(443)
-	authnPlatformCAKey = "ca.crt"
+	authnName            = "bedrock-authn"
+	cliClientID          = "bedrock-cli"
+	consoleClientID      = "bedrock-console"
+	consoleSecretName    = "bedrock-console-client"
+	traefikAPIVersion    = "traefik.io/v1alpha1"
+	authnServicePort     = int64(443)
+	authnPlatformCAKey   = "ca.crt"
+	authnServingPort     = "https"
+	authnDefaultJoinCIDR = "100.64.0.0/16"
 )
 
 var authnAddon = Addon{Name: "authn", Condition: v1alpha1.ConditionAuthnReady, Render: RenderAuthn}
@@ -56,7 +58,7 @@ func RenderAuthn(in AddonInput) (Rendered, error) {
 	if err != nil {
 		return Rendered{}, err
 	}
-	objects := append([]*unstructured.Unstructured{authnIngressRoute(host)}, BuiltinClients(host)...)
+	objects := append([]*unstructured.Unstructured{authnIngressRoute(host), authnNetworkPolicy(joinCIDR(in.Cluster))}, BuiltinClients(host)...)
 	objects = append(objects, authnConfigMap(authentication), authnWebhookSecret(webhook))
 	probe := Probe{GVK: authnDeploymentGVK, Key: client.ObjectKey{Namespace: release.SystemNamespace, Name: authnName}, Gate: release.DefaultGate}
 	return Rendered{Objects: objects, Probes: []Probe{probe}}, nil
@@ -90,6 +92,34 @@ func BuiltinClients(host string) []*unstructured.Unstructured {
 			"secretRef":    consoleSecretName,
 		}}),
 	}
+}
+
+func joinCIDR(cluster v1alpha1.Cluster) string {
+	if cluster.Spec.JoinCIDR == "" {
+		return authnDefaultJoinCIDR
+	}
+	return cluster.Spec.JoinCIDR
+}
+
+func authnNetworkPolicy(cidr string) *unstructured.Unstructured {
+	toPort := map[string]any{"protocol": "TCP", "port": authnServingPort}
+	return authnObject("networking.k8s.io/v1", "NetworkPolicy", authnName, map[string]any{"spec": map[string]any{
+		"podSelector": map[string]any{"matchLabels": map[string]any{"app": authnName}},
+		"policyTypes": []any{"Ingress"},
+		"ingress": []any{
+			map[string]any{
+				"from": []any{map[string]any{
+					"namespaceSelector": map[string]any{"matchLabels": map[string]any{"kubernetes.io/metadata.name": traefikNamespace}},
+					"podSelector":       map[string]any{"matchLabels": map[string]any{"app.kubernetes.io/name": "traefik"}},
+				}},
+				"ports": []any{toPort},
+			},
+			map[string]any{
+				"from":  []any{map[string]any{"ipBlock": map[string]any{"cidr": cidr}}},
+				"ports": []any{toPort},
+			},
+		},
+	}})
 }
 
 func authnIngressRoute(host string) *unstructured.Unstructured {
