@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"mime"
 	"net/http"
 	"net/url"
@@ -96,12 +97,12 @@ func start(w http.ResponseWriter, r *http.Request, deps Deps) {
 	}
 	value, err := newLoginCookie(deps.Random, request.Name)
 	if err != nil {
-		internal(w)
+		internal(w, r, err)
 		return
 	}
 	bound, err := deps.Store.SaveLogin(r.Context(), request.Name, bindCookie(secret.SHA256Hex(value)))
 	if err != nil {
-		internal(w)
+		internal(w, r, err)
 		return
 	}
 	if !isBound(bound, value) {
@@ -111,7 +112,7 @@ func start(w http.ResponseWriter, r *http.Request, deps Deps) {
 	SetCookie(w, CookieLogin, value, request.Spec.ExpiresAt.Sub(deps.Clock()))
 	facts, err := loadFacts(r.Context(), deps, bound, nil)
 	if err != nil {
-		internal(w)
+		internal(w, r, err)
 		return
 	}
 	respond(w, r, deps, bound, Start(facts))
@@ -145,28 +146,28 @@ func startDevice(w http.ResponseWriter, r *http.Request, deps Deps) {
 	}
 	id, err := secret.FromAlphabet(deps.Random, requestIDAlphabet, requestIDLength)
 	if err != nil {
-		internal(w)
+		internal(w, r, err)
 		return
 	}
 	value, err := newLoginCookie(deps.Random, id)
 	if err != nil {
-		internal(w)
+		internal(w, r, err)
 		return
 	}
 	request := deviceAuthRequest(id, device, store.NormalizeUserCode(body.UserCode))
 	if err := deps.Client.Create(ctx, &request, client.FieldOwner(v1alpha1.AuthnFieldManager)); err != nil {
-		internal(w)
+		internal(w, r, err)
 		return
 	}
 	bound, err := deps.Store.SaveLogin(ctx, id, bindCookie(secret.SHA256Hex(value)))
 	if err != nil {
-		internal(w)
+		internal(w, r, err)
 		return
 	}
 	SetCookie(w, CookieLogin, value, device.Spec.ExpiresAt.Sub(now))
 	facts, err := loadFacts(ctx, deps, bound, nil)
 	if err != nil {
-		internal(w)
+		internal(w, r, err)
 		return
 	}
 	respond(w, r, deps, bound, Start(facts))
@@ -183,7 +184,7 @@ func current(w http.ResponseWriter, r *http.Request, deps Deps) {
 func resumeLogin(w http.ResponseWriter, r *http.Request, deps Deps, request v1alpha1.AuthRequest) {
 	facts, err := subjectFacts(r.Context(), deps, request)
 	if err != nil {
-		internal(w)
+		internal(w, r, err)
 		return
 	}
 	respond(w, r, deps, request, resume(request.Status.Login, facts))
@@ -208,7 +209,7 @@ func answer(w http.ResponseWriter, r *http.Request, deps Deps) {
 	case errors.Is(err, errUnexpectedAnswer):
 		writeError(w, http.StatusBadRequest, "unexpected_answer")
 	case err != nil:
-		internal(w)
+		internal(w, r, err)
 	default:
 		respond(w, r, deps, updated, step)
 	}
@@ -227,12 +228,12 @@ func callback(w http.ResponseWriter, r *http.Request, deps Deps) {
 	ClearCookie(w, CookieUpstream)
 	step, updated, err := upstreamAnswer(r, deps, request, upstream.Value)
 	if err != nil {
-		internal(w)
+		internal(w, r, err)
 		return
 	}
 	challenge, err := commit(w, r, deps, updated, step)
 	if err != nil {
-		writeCommitError(w, err)
+		writeCommitError(w, r, err)
 		return
 	}
 	http.Redirect(w, r, afterUpstream(challenge, request.Name), http.StatusSeeOther)
@@ -315,7 +316,7 @@ func afterResult(ctx context.Context, deps Deps, request v1alpha1.AuthRequest, n
 func respond(w http.ResponseWriter, r *http.Request, deps Deps, request v1alpha1.AuthRequest, step Step) {
 	challenge, err := commit(w, r, deps, request, step)
 	if err != nil {
-		writeCommitError(w, err)
+		writeCommitError(w, r, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, challenge)
@@ -906,17 +907,18 @@ func writeError(w http.ResponseWriter, status int, code string) {
 	writeJSON(w, status, map[string]string{"error": code})
 }
 
-func writeCommitError(w http.ResponseWriter, err error) {
+func writeCommitError(w http.ResponseWriter, r *http.Request, err error) {
 	switch {
 	case errors.Is(err, errLoginDone):
 		writeJSON(w, http.StatusOK, expired())
 	case errors.Is(err, errLoginChanged):
 		writeError(w, http.StatusForbidden, "csrf")
 	default:
-		internal(w)
+		internal(w, r, err)
 	}
 }
 
-func internal(w http.ResponseWriter) {
+func internal(w http.ResponseWriter, r *http.Request, err error) {
+	slog.ErrorContext(r.Context(), "login request failed", "method", r.Method, "path", r.URL.Path, "error", err)
 	writeError(w, http.StatusInternalServerError, "internal")
 }

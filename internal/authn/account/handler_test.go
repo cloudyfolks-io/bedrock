@@ -1,11 +1,17 @@
 package account
 
 import (
+	"bytes"
 	"context"
+	"crypto/rand"
 	"encoding/base32"
+	"errors"
+	"log/slog"
 	"net/http"
+	"net/http/httptest"
 	"reflect"
 	"slices"
+	"strings"
 	"testing"
 	"time"
 
@@ -14,6 +20,7 @@ import (
 	"github.com/cloudyfolks-io/bedrock/api/v1alpha1"
 	"github.com/cloudyfolks-io/bedrock/internal/authn/login"
 	"github.com/cloudyfolks-io/bedrock/internal/authn/methods"
+	"github.com/cloudyfolks-io/bedrock/internal/authn/policy"
 	"github.com/cloudyfolks-io/bedrock/internal/authn/secret"
 	"github.com/cloudyfolks-io/bedrock/internal/release"
 )
@@ -340,5 +347,39 @@ func TestLogoutClearsCookie(t *testing.T) {
 	noContent(t, call(t, h, http.MethodDelete, "/api/v1/account/sessions/"+secret.SHA256Hex(second), second, secondCSRF, nil))
 	if code := errorOf(t, call(t, h, http.MethodGet, "/api/v1/account", second, "", nil), http.StatusUnauthorized); code != "no_session" {
 		t.Fatalf("after revoking the current session: %q", code)
+	}
+}
+
+func TestInternalErrorLogsTheCause(t *testing.T) {
+	var logs bytes.Buffer
+	previous := slog.Default()
+	slog.SetDefault(slog.New(slog.NewTextHandler(&logs, nil)))
+	t.Cleanup(func() { slog.SetDefault(previous) })
+	h := newHarness(t)
+	failing := Handler(Deps{
+		Store:   h.store,
+		Client:  h.client,
+		Methods: h.registry,
+		Settings: func(context.Context) (policy.Settings, error) {
+			return policy.Settings{}, errors.New("settings are unreadable")
+		},
+		Random: rand.Reader,
+		Clock:  time.Now,
+	})
+	server := httptest.NewTLSServer(failing)
+	t.Cleanup(server.Close)
+	broken := harness{client: h.client, store: h.store, registry: h.registry, server: server}
+	alice := createUser(t, broken, "alice", "")
+	cookie := loginAs(t, broken, alice)
+	csrf := accountOf(t, broken, cookie).CSRF
+	if code := errorOf(t, call(t, broken, http.MethodDelete, "/api/v1/account/totp", cookie, csrf, nil), http.StatusInternalServerError); code != "internal" {
+		t.Fatalf("unreadable settings: %q", code)
+	}
+	written := logs.String()
+	if !strings.Contains(written, "path=/api/v1/account/totp") || !strings.Contains(written, "settings are unreadable") {
+		t.Fatalf("the cause is missing from the log: %s", written)
+	}
+	if strings.Contains(written, cookie) || strings.Contains(written, csrf) {
+		t.Fatal("the session cookie or the CSRF token reached the log")
 	}
 }

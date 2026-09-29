@@ -6,10 +6,12 @@ import (
 	"crypto/rand"
 	"encoding/json"
 	"errors"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
 	"reflect"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -345,5 +347,31 @@ func TestWebhookTouchesLastUsedOncePerMinute(t *testing.T) {
 		if got := lastUsed(); !got.Equal(step.want) {
 			t.Fatalf("at %v: lastUsed %v, want %v", step.at, got, step.want)
 		}
+	}
+}
+
+func TestWebhookLogsWhyTheBearerIsUnavailable(t *testing.T) {
+	var logs bytes.Buffer
+	previous := slog.Default()
+	slog.SetDefault(slog.New(slog.NewTextHandler(&logs, nil)))
+	t.Cleanup(func() { slog.SetDefault(previous) })
+	c := startTestEnv(t)
+	_, token := seed(t, c)
+	broken := serve(t, c, c, time.Now, func(context.Context) (string, error) {
+		return "", errors.New("secret bedrock-authn-webhook-token not found")
+	})
+	if status, _ := review(t, broken, "Bearer "+testBearer, token); status != http.StatusServiceUnavailable {
+		t.Fatalf("unreadable bearer: status %d, want 503", status)
+	}
+	empty := serve(t, c, c, time.Now, func(context.Context) (string, error) { return "", nil })
+	if status, _ := review(t, empty, "Bearer "+testBearer, token); status != http.StatusServiceUnavailable {
+		t.Fatalf("empty bearer: status %d, want 503", status)
+	}
+	written := logs.String()
+	if !strings.Contains(written, "bedrock-authn-webhook-token not found") || !strings.Contains(written, "webhook bearer is empty") {
+		t.Fatalf("the causes are missing from the log: %s", written)
+	}
+	if strings.Contains(written, testBearer) || strings.Contains(written, token) {
+		t.Fatal("a bearer or a token reached the log")
 	}
 }

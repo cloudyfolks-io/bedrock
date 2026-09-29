@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"mime"
 	"net/http"
 	"slices"
@@ -33,7 +34,10 @@ const (
 	maxBody           = 64 << 10
 )
 
-var errUnsupportedMedia = errors.New("account: body is not application/json")
+var (
+	errUnsupportedMedia = errors.New("account: body is not application/json")
+	errNoTOTPEnrollment = errors.New("account: the TOTP method enrolled nothing")
+)
 
 type Deps struct {
 	Store    *store.Store
@@ -155,12 +159,12 @@ func denySession(w http.ResponseWriter) {
 func show(w http.ResponseWriter, r *http.Request, deps Deps, who caller) {
 	subject, err := deps.Store.Subject(r.Context(), who.user.Name)
 	if err != nil {
-		internal(w)
+		internal(w, r, err)
 		return
 	}
 	var credentials v1alpha1.CredentialList
 	if err := deps.Client.List(r.Context(), &credentials, client.InNamespace(release.SystemNamespace), client.MatchingFields{"spec.userRef": who.user.Name}); err != nil {
-		internal(w)
+		internal(w, r, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, accountView{User: viewUser(who.user, subject.Groups), Methods: viewMethods(credentials.Items), CSRF: csrfFor(who.cookie)})
@@ -182,7 +186,7 @@ func changePassword(w http.ResponseWriter, r *http.Request, deps Deps, who calle
 	}
 	result, err := complete(r, deps, who, v1alpha1.MethodPassword, methods.Answer{Type: methods.ChallengePassword, Username: who.user.Spec.Username, Password: body.Current})
 	if err != nil {
-		internal(w)
+		internal(w, r, err)
 		return
 	}
 	if result.Subject == nil {
@@ -190,7 +194,7 @@ func changePassword(w http.ResponseWriter, r *http.Request, deps Deps, who calle
 		return
 	}
 	if err := methods.SetPassword(r.Context(), deps.Client, deps.Random, who.user, body.New); err != nil {
-		internal(w)
+		internal(w, r, err)
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
@@ -199,7 +203,7 @@ func changePassword(w http.ResponseWriter, r *http.Request, deps Deps, who calle
 func beginTOTP(w http.ResponseWriter, r *http.Request, deps Deps, who caller) {
 	enrolled, err := hasEnrolled(r.Context(), deps.Client, who.user.Name, v1alpha1.MethodTOTP)
 	if err != nil {
-		internal(w)
+		internal(w, r, err)
 		return
 	}
 	if enrolled {
@@ -207,12 +211,16 @@ func beginTOTP(w http.ResponseWriter, r *http.Request, deps Deps, who caller) {
 		return
 	}
 	if err := deleteCredential(r.Context(), deps.Client, who.user.Name, v1alpha1.MethodTOTP); err != nil {
-		internal(w)
+		internal(w, r, err)
 		return
 	}
 	enrollment, err := enroll(r.Context(), deps, who, v1alpha1.MethodTOTP)
-	if err != nil || enrollment.TOTP == nil {
-		internal(w)
+	if err != nil {
+		internal(w, r, err)
+		return
+	}
+	if enrollment.TOTP == nil {
+		internal(w, r, errNoTOTPEnrollment)
 		return
 	}
 	writeJSON(w, http.StatusOK, enrollment.TOTP)
@@ -226,7 +234,7 @@ func verifyTOTP(w http.ResponseWriter, r *http.Request, deps Deps, who caller) {
 	}
 	result, err := complete(r, deps, who, v1alpha1.MethodTOTP, methods.Answer{Type: methods.ChallengeTOTP, Code: body.Code})
 	if err != nil {
-		internal(w)
+		internal(w, r, err)
 		return
 	}
 	if result.Subject == nil {
@@ -239,12 +247,12 @@ func verifyTOTP(w http.ResponseWriter, r *http.Request, deps Deps, who caller) {
 func removeTOTP(w http.ResponseWriter, r *http.Request, deps Deps, who caller) {
 	settings, err := deps.Settings(r.Context())
 	if err != nil {
-		internal(w)
+		internal(w, r, err)
 		return
 	}
 	groups, err := deps.Store.Groups(r.Context())
 	if err != nil {
-		internal(w)
+		internal(w, r, err)
 		return
 	}
 	if policy.SecondFactorRequired(settings, who.user, groups, v1alpha1.OAuthClient{}) {
@@ -253,7 +261,7 @@ func removeTOTP(w http.ResponseWriter, r *http.Request, deps Deps, who caller) {
 	}
 	for _, method := range []string{v1alpha1.MethodTOTP, v1alpha1.MethodRecovery} {
 		if err := deleteCredential(r.Context(), deps.Client, who.user.Name, method); err != nil {
-			internal(w)
+			internal(w, r, err)
 			return
 		}
 	}
@@ -263,7 +271,7 @@ func removeTOTP(w http.ResponseWriter, r *http.Request, deps Deps, who caller) {
 func newRecoveryCodes(w http.ResponseWriter, r *http.Request, deps Deps, who caller) {
 	enrolled, err := hasEnrolled(r.Context(), deps.Client, who.user.Name, v1alpha1.MethodTOTP)
 	if err != nil {
-		internal(w)
+		internal(w, r, err)
 		return
 	}
 	if !enrolled {
@@ -276,7 +284,7 @@ func newRecoveryCodes(w http.ResponseWriter, r *http.Request, deps Deps, who cal
 func answerRecoveryCodes(w http.ResponseWriter, r *http.Request, deps Deps, who caller) {
 	enrollment, err := enroll(r.Context(), deps, who, v1alpha1.MethodRecovery)
 	if err != nil {
-		internal(w)
+		internal(w, r, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string][]string{"recoveryCodes": enrollment.RecoveryCodes})
@@ -285,7 +293,7 @@ func answerRecoveryCodes(w http.ResponseWriter, r *http.Request, deps Deps, who 
 func listSessions(w http.ResponseWriter, r *http.Request, deps Deps, who caller) {
 	var sessions v1alpha1.SessionList
 	if err := deps.Client.List(r.Context(), &sessions, client.InNamespace(release.SystemNamespace), client.MatchingFields{"spec.userRef": who.user.Name}); err != nil {
-		internal(w)
+		internal(w, r, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, viewSessions(sessions.Items, who.session.Name, deps.Clock()))
@@ -294,7 +302,7 @@ func listSessions(w http.ResponseWriter, r *http.Request, deps Deps, who caller)
 func revokeSession(w http.ResponseWriter, r *http.Request, deps Deps, who caller) {
 	session, found, err := ownSession(r.Context(), deps.Client, who, r.PathValue("id"))
 	if err != nil {
-		internal(w)
+		internal(w, r, err)
 		return
 	}
 	if !found {
@@ -302,7 +310,7 @@ func revokeSession(w http.ResponseWriter, r *http.Request, deps Deps, who caller
 		return
 	}
 	if err := endSession(r.Context(), deps.Client, session); err != nil {
-		internal(w)
+		internal(w, r, err)
 		return
 	}
 	if session.Name == who.session.Name {
@@ -313,7 +321,7 @@ func revokeSession(w http.ResponseWriter, r *http.Request, deps Deps, who caller
 
 func logout(w http.ResponseWriter, r *http.Request, deps Deps, who caller) {
 	if err := endSession(r.Context(), deps.Client, who.session); err != nil {
-		internal(w)
+		internal(w, r, err)
 		return
 	}
 	login.ClearCookie(w, login.CookieSession)
@@ -499,6 +507,7 @@ func writeError(w http.ResponseWriter, status int, code string) {
 	writeJSON(w, status, map[string]string{"error": code})
 }
 
-func internal(w http.ResponseWriter) {
+func internal(w http.ResponseWriter, r *http.Request, err error) {
+	slog.ErrorContext(r.Context(), "account request failed", "method", r.Method, "path", r.URL.Path, "error", err)
 	writeError(w, http.StatusInternalServerError, "internal")
 }

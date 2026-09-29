@@ -63,12 +63,12 @@ func createToken(w http.ResponseWriter, r *http.Request, deps Deps, who caller) 
 	}
 	token, err := secret.NewAPIToken(deps.Random)
 	if err != nil {
-		internal(w)
+		internal(w, r, err)
 		return
 	}
 	object := NewToken(who.user.Name, body.Description, body.Scopes, body.ExpiresAt, token)
 	if err := deps.Client.Create(r.Context(), &object, client.FieldOwner(v1alpha1.AuthnFieldManager)); err != nil {
-		internal(w)
+		internal(w, r, err)
 		return
 	}
 	writeJSON(w, http.StatusCreated, map[string]string{"id": object.Name, "token": token})
@@ -77,7 +77,7 @@ func createToken(w http.ResponseWriter, r *http.Request, deps Deps, who caller) 
 func listTokens(w http.ResponseWriter, r *http.Request, deps Deps, who caller) {
 	var tokens v1alpha1.APITokenList
 	if err := deps.Client.List(r.Context(), &tokens, client.InNamespace(release.SystemNamespace), client.MatchingFields{"spec.userRef": who.user.Name}); err != nil {
-		internal(w)
+		internal(w, r, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, viewTokens(tokens.Items))
@@ -96,11 +96,11 @@ func revokeToken(w http.ResponseWriter, r *http.Request, deps Deps, who caller) 
 		writeError(w, http.StatusNotFound, "not_found")
 		return
 	case err != nil:
-		internal(w)
+		internal(w, r, err)
 		return
 	}
 	if err := client.IgnoreNotFound(deps.Client.Delete(r.Context(), &token)); err != nil {
-		internal(w)
+		internal(w, r, err)
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)

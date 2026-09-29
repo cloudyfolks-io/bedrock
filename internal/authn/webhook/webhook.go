@@ -3,6 +3,8 @@ package webhook
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"log/slog"
 	"net/http"
 	"slices"
 	"strings"
@@ -19,6 +21,8 @@ import (
 	"github.com/cloudyfolks-io/bedrock/internal/ssa"
 )
 
+var errEmptyBearer = errors.New("webhook bearer is empty")
+
 const (
 	touchInterval = time.Minute
 	maxBody       = 1 << 20
@@ -32,8 +36,12 @@ func Handler(reader client.Reader, writer client.Client, clock func() time.Time,
 			return
 		}
 		want, err := bearer(r.Context())
-		if err != nil || want == "" {
-			http.Error(w, "webhook bearer unavailable", http.StatusServiceUnavailable)
+		if err != nil {
+			bearerUnavailable(w, r, err)
+			return
+		}
+		if want == "" {
+			bearerUnavailable(w, r, errEmptyBearer)
 			return
 		}
 		if !authorized(r.Header.Get("Authorization"), want) {
@@ -51,6 +59,11 @@ func Handler(reader client.Reader, writer client.Client, clock func() time.Time,
 			Status:   lookup(r.Context(), reader, writer, request.Spec.Token, clock()),
 		})
 	})
+}
+
+func bearerUnavailable(w http.ResponseWriter, r *http.Request, err error) {
+	slog.ErrorContext(r.Context(), "webhook bearer unavailable", "error", err)
+	http.Error(w, "webhook bearer unavailable", http.StatusServiceUnavailable)
 }
 
 func Review(token v1alpha1.APIToken, user v1alpha1.User, groups []string, now time.Time) authenticationv1.TokenReviewStatus {

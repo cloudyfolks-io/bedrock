@@ -1,8 +1,10 @@
 package login
 
 import (
+	"bytes"
 	"context"
 	"encoding/base32"
+	"log/slog"
 	"net/http"
 	"net/url"
 	"reflect"
@@ -615,5 +617,38 @@ func TestLoginRefusesALargeBody(t *testing.T) {
 	}
 	if code := errorOf(t, send(t, browser, http.MethodPost, h.server.URL+"/api/v1/login/device", "", map[string]string{"userCode": large["authRequest"]}, nil), http.StatusBadRequest); code != "invalid_request" {
 		t.Fatalf("large device body: %q", code)
+	}
+}
+
+func TestInternalErrorLogsTheCause(t *testing.T) {
+	var logs bytes.Buffer
+	previous := slog.Default()
+	slog.SetDefault(slog.New(slog.NewTextHandler(&logs, nil)))
+	t.Cleanup(func() { slog.SetDefault(previous) })
+	h := newHarness(t, methods.NewRateLimiter(100, time.Minute))
+	browser := newBrowser(t, h.server)
+	_, first := startLogin(t, h, browser)
+	if err := h.client.Delete(context.Background(), &v1alpha1.OAuthClient{ObjectMeta: metav1.ObjectMeta{Name: "bedrock-cli", Namespace: release.SystemNamespace}}); err != nil {
+		t.Fatal(err)
+	}
+	resp := send(t, browser, http.MethodPost, h.server.URL+"/api/v1/login/answer", first.CSRF, methods.Answer{Type: methods.ChallengeUsername, Username: "alice"}, nil)
+	if code := errorOf(t, resp, http.StatusInternalServerError); code != "internal" {
+		t.Fatalf("missing client: %q", code)
+	}
+	written := logs.String()
+	if !strings.Contains(written, `path=/api/v1/login/answer`) || !strings.Contains(written, "not found") {
+		t.Fatalf("the cause is missing from the log: %s", written)
+	}
+	loginURL, err := url.Parse(h.server.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, cookie := range browser.Jar.Cookies(loginURL) {
+		if strings.Contains(written, cookie.Value) {
+			t.Fatalf("the cookie %s reached the log", cookie.Name)
+		}
+	}
+	if strings.Contains(written, first.CSRF) {
+		t.Fatal("the CSRF token reached the log")
 	}
 }
