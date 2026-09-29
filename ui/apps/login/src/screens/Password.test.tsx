@@ -41,4 +41,16 @@ describe("Password", () => {
       await waitFor(() => expect(document.activeElement).toBe(alert));
     });
   }
+
+  it("submits successfully and hands the next challenge to onChallenge", async () => {
+    const onChallenge = vi.fn();
+    vi.mocked(api.answer).mockResolvedValueOnce({ type: "totp", csrf: "csrf-3", username: "alice" });
+    renderWithLocale(<Password challenge={challenge} onChallenge={onChallenge} />, "en");
+    fireEvent.change(screen.getByLabelText(labels.en), { target: { value: "hunter2" } });
+    fireEvent.click(screen.getByText(submits.en));
+    await waitFor(() => {
+      expect(onChallenge).toHaveBeenCalledWith({ type: "totp", csrf: "csrf-3", username: "alice" });
+    });
+    expect(screen.queryByRole("alert")).toBeNull();
+  });
 });

@@ -51,4 +51,12 @@ describe("Totp", () => {
     expect(alert.textContent).toBe("That code is not correct.");
     await waitFor(() => expect(document.activeElement).toBe(alert));
   });
+
+  it("relabels the challenge as recovery locally without calling the API", () => {
+    const onChallenge = vi.fn();
+    renderWithLocale(<Totp challenge={challenge} onChallenge={onChallenge} />, "en");
+    fireEvent.click(screen.getByText(useRecovery.en));
+    expect(onChallenge).toHaveBeenCalledWith({ ...challenge, type: "recovery" });
+    expect(api.answer).not.toHaveBeenCalled();
+  });
 });
