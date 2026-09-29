@@ -246,6 +246,24 @@ func TestWriteKubeconfigFalseDisablesWrite(t *testing.T) {
 	}
 }
 
+func TestWriteKubeconfigPathAfterASpaceIsRefused(t *testing.T) {
+	home := t.TempDir()
+	path := filepath.Join(t.TempDir(), "custom", "kubeconfig")
+	deps := LoginDeps{Home: home, HTTP: func(string) (*http.Client, error) { t.Fatal("must not reach the server"); return nil, nil }, Open: func(string) error { t.Fatal("must not open a browser"); return nil }, Now: time.Now}
+	var stdout, stderr bytes.Buffer
+	if code := RunLogin(context.Background(), []string{"--server", "https://sso.test", "--write-kubeconfig", path}, deps, &stdout, &stderr); code != 2 {
+		t.Fatalf("exit %d stderr %q", code, stderr.String())
+	}
+	if !strings.Contains(stderr.String(), path) || !strings.Contains(stderr.String(), "--write-kubeconfig=<path>") {
+		t.Fatalf("stderr %q", stderr.String())
+	}
+	for _, written := range []string{path, filepath.Join(home, ".kube", "config")} {
+		if _, err := os.Stat(written); !os.IsNotExist(err) {
+			t.Fatalf("nothing may be written to %s: %v", written, err)
+		}
+	}
+}
+
 func TestWriteKubeconfigExplicitPath(t *testing.T) {
 	op := newFakeOP(t, successTokens("alice"))
 	home := t.TempDir()

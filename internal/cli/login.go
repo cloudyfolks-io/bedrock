@@ -196,6 +196,10 @@ func RunLogin(ctx context.Context, args []string, deps LoginDeps, stdout, stderr
 	if err := flags.Parse(args); err != nil {
 		return 2
 	}
+	if flags.NArg() > 0 {
+		fmt.Fprintf(stderr, "unexpected argument %q; to name the kubeconfig path, use --write-kubeconfig=<path>\n", flags.Arg(0))
+		return 2
+	}
 	if *server == "" {
 		fmt.Fprintln(stderr, "--server is required")
 		return 2
