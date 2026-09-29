@@ -91,10 +91,7 @@ VERSION=$version VIP=$vip IFACE=$iface EMULATION=$emulation envsubst < hack/e2e/
 cat "$workdir/cluster.yaml"
 
 run_init() {
-  local rc=0
-  (umask 077 && "$@" >"$workdir/init.log") || rc=$?
-  grep -v '^admin password: ' "$workdir/init.log"
-  return "$rc"
+  "$@" | (umask 077 && tee "$workdir/init.log") | grep --line-buffered -v '^admin password: '
 }
 
 if [ -n "${BUNDLE:-}" ]; then
