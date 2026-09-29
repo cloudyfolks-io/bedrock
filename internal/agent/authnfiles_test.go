@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -73,13 +74,34 @@ func authnDeps(t *testing.T, now time.Time) Deps {
 
 func fakeAPIServer(t *testing.T, root string, start time.Time) {
 	t.Helper()
-	boot := start.Add(-time.Hour).Truncate(time.Second)
-	ticks := int64(start.Sub(boot) / (10 * time.Millisecond))
-	writeFixtureFile(t, filepath.Join(root, "proc", "stat"), fmt.Sprintf("cpu 1 2 3 4\nbtime %d\nprocesses 9\n", boot.Unix()))
+	binary := filepath.Join(root, "var", "lib", "k0s", "bin", "kube-apiserver")
+	writeFixtureFile(t, binary, "kube-apiserver")
 	writeFixtureFile(t, filepath.Join(root, "proc", "1", "comm"), "systemd\n")
 	writeFixtureFile(t, filepath.Join(root, "proc", "1", "stat"), "1 (systemd) S "+strings.Repeat("0 ", 18)+"1\n")
-	writeFixtureFile(t, filepath.Join(root, "proc", "4242", "comm"), "kube-apiserver\n")
-	writeFixtureFile(t, filepath.Join(root, "proc", "4242", "stat"), fmt.Sprintf("4242 (kube-apiserver) S %s%d 0 0\n", strings.Repeat("0 ", 18), ticks))
+	fakeProcess(t, root, 4242, start, binary)
+}
+
+func fakeTenantAPIServer(t *testing.T, root string, pid int, start time.Time) {
+	t.Helper()
+	binary := filepath.Join(root, "tenant", strconv.Itoa(pid), "kube-apiserver")
+	writeFixtureFile(t, binary, "kube-apiserver")
+	fakeProcess(t, root, pid, start, binary)
+}
+
+func fakeProcess(t *testing.T, root string, pid int, start time.Time, exe string) {
+	t.Helper()
+	boot := time.Unix(946684800, 0)
+	ticks := int64(start.Sub(boot) / (10 * time.Millisecond))
+	dir := filepath.Join(root, "proc", strconv.Itoa(pid))
+	writeFixtureFile(t, filepath.Join(root, "proc", "stat"), fmt.Sprintf("cpu 1 2 3 4\nbtime %d\nprocesses 9\n", boot.Unix()))
+	writeFixtureFile(t, filepath.Join(dir, "comm"), "kube-apiserver\n")
+	writeFixtureFile(t, filepath.Join(dir, "stat"), fmt.Sprintf("%d (kube-apiserver) S %s%d 0 0\n", pid, strings.Repeat("0 ", 18), ticks))
+	if err := os.RemoveAll(filepath.Join(dir, "exe")); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(exe, filepath.Join(dir, "exe")); err != nil {
+		t.Fatal(err)
+	}
 }
 
 func TestSyncWritesFilesWithMode0600(t *testing.T) {
@@ -262,5 +284,37 @@ func TestAgentReportsWebhookRestartPending(t *testing.T) {
 	}
 	if status := getHost(t, node).Status.Authn; status.WebhookRestartPending {
 		t.Fatalf("a restarted kube-apiserver has read the new webhook file: %+v", status)
+	}
+}
+
+func TestAPIServerStartTimeIgnoresTenantAPIServers(t *testing.T) {
+	root := t.TempDir()
+	start := time.Now().Add(-10 * time.Minute).Truncate(10 * time.Millisecond)
+	fakeTenantAPIServer(t, root, 1000, start.Add(-time.Hour))
+	fakeTenantAPIServer(t, root, 3000, start.Add(time.Hour))
+	writeFixtureFile(t, filepath.Join(root, "var", "lib", "k0s", "bin", "kube-apiserver"), "kube-apiserver")
+	if _, ok := apiserverStartTime(root); ok {
+		t.Fatal("tenant kube-apiservers are not the one k0s runs")
+	}
+	fakeAPIServer(t, root, start)
+	got, ok := apiserverStartTime(root)
+	if !ok || !got.Equal(start) {
+		t.Fatalf("start %v %v, want %v", got, ok, start)
+	}
+	path := filepath.Join(root, "etc", "bedrock", "authn", "webhook.kubeconfig")
+	writeFixtureFile(t, path, "w")
+	for _, tc := range []struct {
+		modified time.Time
+		pending  bool
+	}{
+		{start.Add(-time.Minute), false},
+		{start.Add(time.Minute), true},
+	} {
+		if err := os.Chtimes(path, tc.modified, tc.modified); err != nil {
+			t.Fatal(err)
+		}
+		if got := restartPending(root); got != tc.pending {
+			t.Fatalf("modified %v: pending %v, want %v", tc.modified.Sub(start), got, tc.pending)
+		}
 	}
 }

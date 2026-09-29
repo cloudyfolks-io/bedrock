@@ -437,6 +437,7 @@ func TestK0sUpdateLeavesControllersWithoutAuthnFiles(t *testing.T) {
 	fake.running = newK0s
 	config := filepath.Join(env.Deps.Root, "etc/k0s/k0s.yaml")
 	writeFixtureFile(t, config, "apiVersion: k0s.k0sproject.io/v1beta1\n")
+	fakeAPIServer(t, env.Deps.Root, time.Now().Add(-time.Hour))
 	outcome, err := k0sUpdate(context.Background(), env)
 	if err != nil || outcome.Message != "k0s already at v1.36.3+k0s.0" {
 		t.Fatalf("outcome %+v %v", outcome, err)
@@ -477,6 +478,7 @@ func TestK0sUpdateRestartsWhenKubeAPIServerPredatesTheConfig(t *testing.T) {
 		t.Fatal("a failed restart must fail the step")
 	}
 	fakeAPIServer(t, root, time.Now().Add(-time.Hour))
+	fakeTenantAPIServer(t, root, 3000, time.Now().Add(time.Hour))
 	fake.restartErr, fake.calls = nil, nil
 	outcome, err := k0sUpdate(context.Background(), env)
 	if err != nil {
@@ -486,6 +488,7 @@ func TestK0sUpdateRestartsWhenKubeAPIServerPredatesTheConfig(t *testing.T) {
 		t.Fatalf("a kube-apiserver older than its config must restart: %+v %v", outcome, fake.calls)
 	}
 	fakeAPIServer(t, root, time.Now().Add(time.Minute))
+	fakeTenantAPIServer(t, root, 1000, time.Now().Add(-2*time.Hour))
 	fake.calls = nil
 	outcome, err = k0sUpdate(context.Background(), env)
 	if err != nil {

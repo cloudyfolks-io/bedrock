@@ -231,7 +231,7 @@ func authnFilesPresent(root string) bool {
 }
 
 func k0sConfigNewerThanAPIServer(root string, service k0sService) bool {
-	if service.Unit != k0sControllerUnit {
+	if service.Unit != k0sControllerUnit || !authnFilesPresent(root) {
 		return false
 	}
 	start, ok := apiserverStartTime(root)
