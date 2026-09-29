@@ -118,6 +118,18 @@ spec:
                       type: object
                     type: array
                 type: object
+              authn:
+                properties:
+                  hash:
+                    type: string
+                  message:
+                    type: string
+                  webhookRestartPending:
+                    type: boolean
+                  writtenAt:
+                    format: date-time
+                    type: string
+                type: object
               checks:
                 properties:
                   certificatesNotAfter:

@@ -175,6 +175,17 @@ type RestoreStatus struct {
 	CompletedAt metav1.Time `json:"completedAt"`
 }
 
+type AuthnFilesStatus struct {
+	// +optional
+	Hash string `json:"hash,omitempty"`
+	// +optional
+	WrittenAt *metav1.Time `json:"writtenAt,omitempty"`
+	// +optional
+	WebhookRestartPending bool `json:"webhookRestartPending,omitempty"`
+	// +optional
+	Message string `json:"message,omitempty"`
+}
+
 type HostStatus struct {
 	// +optional
 	ObservedGeneration int64 `json:"observedGeneration,omitempty"`
@@ -200,6 +211,8 @@ type HostStatus struct {
 	Checks *HostChecks `json:"checks,omitempty"`
 	// +optional
 	Restore *RestoreStatus `json:"restore,omitempty"`
+	// +optional
+	Authn *AuthnFilesStatus `json:"authn,omitempty"`
 }
 
 // +kubebuilder:object:root=true

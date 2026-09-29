@@ -15,6 +15,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	"github.com/cloudyfolks-io/bedrock/api/v1alpha1"
+	"github.com/cloudyfolks-io/bedrock/internal/authn/apiserver"
 	"github.com/cloudyfolks-io/bedrock/internal/host"
 	"github.com/cloudyfolks-io/bedrock/internal/hostconfig"
 	"github.com/cloudyfolks-io/bedrock/internal/maintenance"
@@ -43,6 +44,7 @@ type Deps struct {
 	K0sTimeout   time.Duration
 	K0sPoll      time.Duration
 	ProbeTimeout time.Duration
+	AuthnOwner   apiserver.Owner
 }
 
 func Run(ctx context.Context, c client.WithWatch, deps Deps) error {
@@ -150,6 +152,7 @@ func Tick(ctx context.Context, c client.Client, deps Deps) error {
 		Checks:       hostChecks(ctx, deps),
 		Depot:        bounded(ctx, deps.ProbeTimeout, func(probeCtx context.Context) *v1alpha1.DepotStatus { return depotStatus(probeCtx, c, deps) }),
 		Restore:      readRestoreMarker(deps.Root),
+		Authn:        syncAuthnFiles(ctx, c, deps, current),
 	}
 	if invErr != nil {
 		next.Inventory = current.Status.Inventory

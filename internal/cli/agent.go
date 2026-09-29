@@ -17,6 +17,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	"github.com/cloudyfolks-io/bedrock/internal/agent"
+	"github.com/cloudyfolks-io/bedrock/internal/authn/apiserver"
 	"github.com/cloudyfolks-io/bedrock/internal/depot"
 	"github.com/cloudyfolks-io/bedrock/internal/host"
 	"github.com/cloudyfolks-io/bedrock/internal/hostconfig"
@@ -106,6 +107,7 @@ func runAgent(ctx context.Context, o agentOptions, deps agentDeps, stderr io.Wri
 		K0sTimeout:   agent.K0sRestartTimeout,
 		K0sPoll:      agent.K0sRestartPoll,
 		ProbeTimeout: agent.FactProbeTimeout,
+		AuthnOwner:   apiserver.APIServerOwner(),
 	}
 	for {
 		changed, err := runUntilKubeconfigChanges(ctx, o, deps, loopDeps, stderr)

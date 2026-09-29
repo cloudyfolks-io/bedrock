@@ -20,6 +20,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client/interceptor"
 
 	"github.com/cloudyfolks-io/bedrock/api/v1alpha1"
+	"github.com/cloudyfolks-io/bedrock/internal/authn/apiserver"
 	"github.com/cloudyfolks-io/bedrock/internal/host"
 	"github.com/cloudyfolks-io/bedrock/internal/hostconfig"
 	"github.com/cloudyfolks-io/bedrock/internal/maintenance"
@@ -31,7 +32,7 @@ func fakeInventory(ctx context.Context, _ host.Exec, _ string) (v1alpha1.Invento
 }
 
 func newDeps(exec *host.FakeExec, now time.Time) Deps {
-	return Deps{Exec: exec, Root: "/nonexistent", Node: "node-a", Now: func() time.Time { return now }, Interval: time.Hour, Inventory: fakeInventory, Apply: hostconfig.Apply, Packages: pkgmgr.Manager{Exec: exec, Family: "apt", Root: "/nonexistent"}, Version: "test", Hostname: func() (string, error) { return "node-a", nil }, DiskSpace: func(string) (host.Space, error) { return host.Space{}, nil }, HTTP: &http.Client{}, ProbeTimeout: time.Minute}
+	return Deps{Exec: exec, Root: "/nonexistent", Node: "node-a", Now: func() time.Time { return now }, Interval: time.Hour, Inventory: fakeInventory, Apply: hostconfig.Apply, Packages: pkgmgr.Manager{Exec: exec, Family: "apt", Root: "/nonexistent"}, Version: "test", Hostname: func() (string, error) { return "node-a", nil }, DiskSpace: func(string) (host.Space, error) { return host.Space{}, nil }, HTTP: &http.Client{}, ProbeTimeout: time.Minute, AuthnOwner: apiserver.KeepOwner}
 }
 
 func createHost(t *testing.T, name string, managed bool, window string) {

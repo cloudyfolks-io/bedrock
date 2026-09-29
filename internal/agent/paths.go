@@ -9,4 +9,5 @@ const (
 	k0sImagesDir     = "var/lib/k0s/images"
 	airgapFile       = "k0s-airgap.tar"
 	adminKubeconfig  = "var/lib/k0s/pki/admin.conf"
+	authnDir         = "etc/bedrock/authn"
 )
