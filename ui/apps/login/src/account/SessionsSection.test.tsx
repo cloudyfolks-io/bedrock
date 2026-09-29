@@ -2,6 +2,7 @@ import { fireEvent, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import * as api from "../api";
 import { dirOf, locales } from "../i18n";
+import { expectedMessage } from "../test/expectedMessage";
 import { renderWithLocale } from "../test/renderWithLocale";
 import { SessionsSection } from "./SessionsSection";
 
@@ -18,9 +19,6 @@ vi.mock("../api", () => ({
   },
 }));
 
-const currents = { en: "This device", fa: "این دستگاه", ar: "هذا الجهاز" };
-const logouts = { en: "Sign out", fa: "خروج از سیستم", ar: "تسجيل الخروج" };
-
 describe("SessionsSection", () => {
   beforeEach(() => {
     vi.mocked(api.listSessions).mockReset();
@@ -35,8 +33,8 @@ describe("SessionsSection", () => {
     it(`marks the current session in ${locale} and logs out with the CSRF token`, async () => {
       renderWithLocale(<SessionsSection csrf="csrf-acct" onSessionExpired={() => {}} />, locale);
       expect(document.documentElement.dir).toBe(dirOf(locale));
-      expect(await screen.findByText(currents[locale])).not.toBeNull();
-      fireEvent.click(screen.getByText(logouts[locale]));
+      expect(await screen.findByText(expectedMessage(locale, "account.sessions.current"))).not.toBeNull();
+      fireEvent.click(screen.getByText(expectedMessage(locale, "account.sessions.logout")));
       await waitFor(() => {
         expect(api.logout).toHaveBeenCalledWith("csrf-acct");
       });

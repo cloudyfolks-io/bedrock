@@ -2,6 +2,7 @@ import { screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import * as api from "../api";
 import { dirOf, locales } from "../i18n";
+import { expectedMessage } from "../test/expectedMessage";
 import { renderWithLocale } from "../test/renderWithLocale";
 import { Account } from "./Account";
 
@@ -33,10 +34,6 @@ const account = {
   csrf: "csrf-acct",
 };
 
-const titles = { en: "Account", fa: "حساب کاربری", ar: "الحساب" };
-const signedOutTitles = { en: "You are signed out", fa: "شما از سیستم خارج شده‌اید", ar: "لقد تم تسجيل خروجك" };
-const signedOutLinks = { en: "Start a new sign-in", fa: "شروع ورود دوباره", ar: "بدء تسجيل دخول جديد" };
-
 describe("Account", () => {
   beforeEach(() => {
     vi.mocked(api.account).mockReset();
@@ -46,15 +43,15 @@ describe("Account", () => {
     it(`renders the account page in ${locale}`, async () => {
       vi.mocked(api.account).mockResolvedValue(account);
       renderWithLocale(<Account />, locale);
-      expect(await screen.findByText(titles[locale])).not.toBeNull();
+      expect(await screen.findByText(expectedMessage(locale, "account.title"))).not.toBeNull();
       expect(document.documentElement.dir).toBe(dirOf(locale));
     });
 
     it(`shows a sign-in link in ${locale} on a failed fetch`, async () => {
       vi.mocked(api.account).mockRejectedValue(new Error("unauthenticated"));
       renderWithLocale(<Account />, locale);
-      expect(await screen.findByText(signedOutTitles[locale])).not.toBeNull();
-      const link = screen.getByText(signedOutLinks[locale]) as HTMLAnchorElement;
+      expect(await screen.findByText(expectedMessage(locale, "account.signedOut.title"))).not.toBeNull();
+      const link = screen.getByText(expectedMessage(locale, "account.signedOut.link")) as HTMLAnchorElement;
       expect(link.getAttribute("href")).toBe("/login/");
     });
   }

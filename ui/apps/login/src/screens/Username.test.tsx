@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import * as api from "../api";
 import fixtures from "../fixtures/challenges.json";
 import { dirOf, locales } from "../i18n";
+import { expectedMessage } from "../test/expectedMessage";
 import { renderWithLocale } from "../test/renderWithLocale";
 import type { Challenge } from "../types";
 import { Username } from "./Username";
@@ -13,9 +14,6 @@ vi.mock("../api", async () => {
 });
 
 const challenge = fixtures.find((f) => f.name === "username")!.challenge as Challenge;
-const titles = { en: "Sign in", fa: "ورود", ar: "تسجيل الدخول" };
-const labels = { en: "Username", fa: "نام کاربری", ar: "اسم المستخدم" };
-const buttons = { en: "Continue", fa: "ادامه", ar: "متابعة" };
 
 describe("Username", () => {
   beforeEach(() => {
@@ -27,9 +25,9 @@ describe("Username", () => {
     it(`renders in ${locale} and submits with the CSRF token`, async () => {
       renderWithLocale(<Username challenge={challenge} onChallenge={() => {}} />, locale);
       expect(document.documentElement.dir).toBe(dirOf(locale));
-      expect(screen.getByText(titles[locale])).not.toBeNull();
-      fireEvent.change(screen.getByLabelText(labels[locale]), { target: { value: "alice" } });
-      fireEvent.click(screen.getByText(buttons[locale]));
+      expect(screen.getByText(expectedMessage(locale, "login.username.title"))).not.toBeNull();
+      fireEvent.change(screen.getByLabelText(expectedMessage(locale, "login.username.label")), { target: { value: "alice" } });
+      fireEvent.click(screen.getByText(expectedMessage(locale, "login.username.continue")));
       await waitFor(() => {
         expect(api.answer).toHaveBeenCalledWith({ type: "username", username: "alice" }, challenge.csrf);
       });

@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import * as api from "../api";
 import fixtures from "../fixtures/challenges.json";
 import { dirOf, locales } from "../i18n";
+import { expectedMessage } from "../test/expectedMessage";
 import { renderWithLocale } from "../test/renderWithLocale";
 import type { Challenge } from "../types";
 import { Totp } from "./Totp";
@@ -13,14 +14,6 @@ vi.mock("../api", async () => {
 });
 
 const challenge = fixtures.find((f) => f.name === "totp")!.challenge as Challenge;
-const titles = { en: "Enter your authenticator code", fa: "کد برنامه احراز هویت خود را وارد کنید", ar: "أدخل رمز تطبيق المصادقة" };
-const codeLabels = { en: "Authentication code 1", fa: "کد تأیید 1", ar: "رمز التحقق 1" };
-const submits = { en: "Verify", fa: "تأیید", ar: "تحقق" };
-const useRecovery = {
-  en: "Use a recovery code instead",
-  fa: "در عوض از کد بازیابی استفاده کنید",
-  ar: "استخدم رمز الاسترداد بدلاً من ذلك",
-};
 
 describe("Totp", () => {
   beforeEach(() => {
@@ -32,43 +25,46 @@ describe("Totp", () => {
     it(`renders in ${locale}, focuses the first digit and submits six typed digits with the CSRF token`, async () => {
       renderWithLocale(<Totp challenge={challenge} onChallenge={() => {}} />, locale);
       expect(document.documentElement.dir).toBe(dirOf(locale));
-      expect(screen.getByText(titles[locale])).not.toBeNull();
-      expect(document.activeElement).toBe(screen.getByLabelText(codeLabels[locale]));
+      expect(screen.getByText(expectedMessage(locale, "login.totp.title"))).not.toBeNull();
+      const codeLabel = `${expectedMessage(locale, "login.totp.label")} 1`;
+      expect(document.activeElement).toBe(screen.getByLabelText(codeLabel));
       const clipboardData = { getData: () => "123456" };
-      fireEvent.paste(screen.getByLabelText(codeLabels[locale]), { clipboardData });
-      fireEvent.click(screen.getByText(submits[locale]));
+      fireEvent.paste(screen.getByLabelText(codeLabel), { clipboardData });
+      fireEvent.click(screen.getByText(expectedMessage(locale, "login.totp.submit")));
       await waitFor(() => {
         expect(api.answer).toHaveBeenCalledWith({ type: "totp", code: "123456" }, challenge.csrf);
       });
-      expect(screen.getByText(useRecovery[locale])).not.toBeNull();
+      expect(screen.getByText(expectedMessage(locale, "login.totp.useRecovery"))).not.toBeNull();
     });
   }
 
   it("shows a mapped error and moves focus to it", async () => {
     vi.mocked(api.answer).mockResolvedValueOnce({ type: "error", error: { code: "invalid_code" } });
     renderWithLocale(<Totp challenge={challenge} onChallenge={() => {}} />, "en");
+    const codeLabel = `${expectedMessage("en", "login.totp.label")} 1`;
     const clipboardData = { getData: () => "000000" };
-    fireEvent.paste(screen.getByLabelText(codeLabels.en), { clipboardData });
-    fireEvent.click(screen.getByText(submits.en));
+    fireEvent.paste(screen.getByLabelText(codeLabel), { clipboardData });
+    fireEvent.click(screen.getByText(expectedMessage("en", "login.totp.submit")));
     const alert = await screen.findByRole("alert");
-    expect(alert.textContent).toBe("That code is not correct.");
+    expect(alert.textContent).toBe(expectedMessage("en", "login.error.invalid_code"));
     await waitFor(() => expect(document.activeElement).toBe(alert));
   });
 
   it("maps a rate-limited rejection to the existing rate-limit message", async () => {
     vi.mocked(api.answer).mockRejectedValueOnce(new api.ApiError("rate_limited"));
     renderWithLocale(<Totp challenge={challenge} onChallenge={() => {}} />, "en");
+    const codeLabel = `${expectedMessage("en", "login.totp.label")} 1`;
     const clipboardData = { getData: () => "000000" };
-    fireEvent.paste(screen.getByLabelText(codeLabels.en), { clipboardData });
-    fireEvent.click(screen.getByText(submits.en));
+    fireEvent.paste(screen.getByLabelText(codeLabel), { clipboardData });
+    fireEvent.click(screen.getByText(expectedMessage("en", "login.totp.submit")));
     const alert = await screen.findByRole("alert");
-    expect(alert.textContent).toBe("Too many attempts. Wait a moment and try again.");
+    expect(alert.textContent).toBe(expectedMessage("en", "login.error.rate_limited"));
   });
 
   it("relabels the challenge as recovery locally without calling the API", () => {
     const onChallenge = vi.fn();
     renderWithLocale(<Totp challenge={challenge} onChallenge={onChallenge} />, "en");
-    fireEvent.click(screen.getByText(useRecovery.en));
+    fireEvent.click(screen.getByText(expectedMessage("en", "login.totp.useRecovery")));
     expect(onChallenge).toHaveBeenCalledWith({ ...challenge, type: "recovery" });
     expect(api.answer).not.toHaveBeenCalled();
   });

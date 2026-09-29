@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import * as api from "../api";
 import fixtures from "../fixtures/challenges.json";
 import { dirOf, locales } from "../i18n";
+import { expectedMessage } from "../test/expectedMessage";
 import { renderWithLocale } from "../test/renderWithLocale";
 import type { Challenge } from "../types";
 import { Password } from "./Password";
@@ -13,14 +14,6 @@ vi.mock("../api", async () => {
 });
 
 const challenge = fixtures.find((f) => f.name === "password")!.challenge as Challenge;
-const titles = { en: "Enter your password", fa: "رمز عبور خود را وارد کنید", ar: "أدخل كلمة المرور الخاصة بك" };
-const labels = { en: "Password", fa: "رمز عبور", ar: "كلمة المرور" };
-const submits = { en: "Sign in", fa: "ورود", ar: "تسجيل الدخول" };
-const invalidCredentials = {
-  en: "That username or password is not correct.",
-  fa: "نام کاربری یا رمز عبور نادرست است.",
-  ar: "اسم المستخدم أو كلمة المرور غير صحيحة.",
-};
 
 describe("Password", () => {
   beforeEach(() => {
@@ -32,15 +25,16 @@ describe("Password", () => {
       vi.mocked(api.answer).mockResolvedValueOnce({ type: "error", error: { code: "invalid_credentials" } });
       renderWithLocale(<Password challenge={challenge} onChallenge={() => {}} />, locale);
       expect(document.documentElement.dir).toBe(dirOf(locale));
-      expect(screen.getByText(titles[locale])).not.toBeNull();
-      expect(document.activeElement).toBe(screen.getByLabelText(labels[locale]));
-      fireEvent.change(screen.getByLabelText(labels[locale]), { target: { value: "hunter2" } });
-      fireEvent.click(screen.getByText(submits[locale]));
+      expect(screen.getByText(expectedMessage(locale, "login.password.title"))).not.toBeNull();
+      const field = screen.getByLabelText(expectedMessage(locale, "login.password.label"));
+      expect(document.activeElement).toBe(field);
+      fireEvent.change(field, { target: { value: "hunter2" } });
+      fireEvent.click(screen.getByText(expectedMessage(locale, "login.password.submit")));
       await waitFor(() => {
         expect(api.answer).toHaveBeenCalledWith({ type: "password", password: "hunter2" }, challenge.csrf);
       });
       const alert = await screen.findByRole("alert");
-      expect(alert).toHaveProperty("textContent", invalidCredentials[locale]);
+      expect(alert).toHaveProperty("textContent", expectedMessage(locale, "login.error.invalid_credentials"));
       await waitFor(() => expect(document.activeElement).toBe(alert));
     });
   }
@@ -49,8 +43,8 @@ describe("Password", () => {
     const onChallenge = vi.fn();
     vi.mocked(api.answer).mockResolvedValueOnce({ type: "totp", csrf: "csrf-3", username: "alice" });
     renderWithLocale(<Password challenge={challenge} onChallenge={onChallenge} />, "en");
-    fireEvent.change(screen.getByLabelText(labels.en), { target: { value: "hunter2" } });
-    fireEvent.click(screen.getByText(submits.en));
+    fireEvent.change(screen.getByLabelText(expectedMessage("en", "login.password.label")), { target: { value: "hunter2" } });
+    fireEvent.click(screen.getByText(expectedMessage("en", "login.password.submit")));
     await waitFor(() => {
       expect(onChallenge).toHaveBeenCalledWith({ type: "totp", csrf: "csrf-3", username: "alice" });
     });
@@ -60,9 +54,9 @@ describe("Password", () => {
   it("maps a rate-limited rejection to the existing rate-limit message", async () => {
     vi.mocked(api.answer).mockRejectedValueOnce(new api.ApiError("rate_limited"));
     renderWithLocale(<Password challenge={challenge} onChallenge={() => {}} />, "en");
-    fireEvent.change(screen.getByLabelText(labels.en), { target: { value: "hunter2" } });
-    fireEvent.click(screen.getByText(submits.en));
+    fireEvent.change(screen.getByLabelText(expectedMessage("en", "login.password.label")), { target: { value: "hunter2" } });
+    fireEvent.click(screen.getByText(expectedMessage("en", "login.password.submit")));
     const alert = await screen.findByRole("alert");
-    expect(alert.textContent).toBe("Too many attempts. Wait a moment and try again.");
+    expect(alert.textContent).toBe(expectedMessage("en", "login.error.rate_limited"));
   });
 });

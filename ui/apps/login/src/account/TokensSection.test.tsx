@@ -2,6 +2,7 @@ import { fireEvent, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import * as api from "../api";
 import { dirOf, locales } from "../i18n";
+import { expectedMessage } from "../test/expectedMessage";
 import { renderWithLocale } from "../test/renderWithLocale";
 import { TokensSection } from "./TokensSection";
 
@@ -18,9 +19,6 @@ vi.mock("../api", () => ({
   },
 }));
 
-const descriptionLabels = { en: "Description", fa: "توضیحات", ar: "الوصف" };
-const creates = { en: "Create token", fa: "ساخت توکن", ar: "إنشاء رمز" };
-
 describe("TokensSection", () => {
   beforeEach(() => {
     vi.mocked(api.listTokens).mockReset();
@@ -33,8 +31,8 @@ describe("TokensSection", () => {
     it(`creates a token in ${locale}, shows it once with the CSRF token`, async () => {
       renderWithLocale(<TokensSection csrf="csrf-acct" onSessionExpired={() => {}} />, locale);
       expect(document.documentElement.dir).toBe(dirOf(locale));
-      fireEvent.change(screen.getByLabelText(descriptionLabels[locale]), { target: { value: "laptop" } });
-      fireEvent.click(screen.getByText(creates[locale]));
+      fireEvent.change(screen.getByLabelText(expectedMessage(locale, "account.tokens.descriptionLabel")), { target: { value: "laptop" } });
+      fireEvent.click(screen.getByText(expectedMessage(locale, "account.tokens.create")));
       await waitFor(() => {
         expect(api.createToken).toHaveBeenCalledWith("laptop", [], null, "csrf-acct");
       });
@@ -46,8 +44,8 @@ describe("TokensSection", () => {
     vi.mocked(api.createToken).mockRejectedValue(new api.ApiError("no_session"));
     const onSessionExpired = vi.fn();
     renderWithLocale(<TokensSection csrf="csrf-acct" onSessionExpired={onSessionExpired} />, "en");
-    fireEvent.change(screen.getByLabelText(descriptionLabels.en), { target: { value: "laptop" } });
-    fireEvent.click(screen.getByText(creates.en));
+    fireEvent.change(screen.getByLabelText(expectedMessage("en", "account.tokens.descriptionLabel")), { target: { value: "laptop" } });
+    fireEvent.click(screen.getByText(expectedMessage("en", "account.tokens.create")));
     await waitFor(() => {
       expect(onSessionExpired).toHaveBeenCalledTimes(1);
     });
