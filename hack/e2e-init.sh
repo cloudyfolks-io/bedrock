@@ -8,6 +8,7 @@ release_dir=${RELEASE_DIR:-dist/release}
 arch=${ARCH:-$(uname -m | sed 's/x86_64/amd64/;s/aarch64/arm64/')}
 emulation=${EMULATION:-true}
 workdir=$(mktemp -d)
+admin_password_file=${ADMIN_PASSWORD_FILE:-/var/lib/bedrock/e2e-admin-password}
 export KUBECONFIG=/var/lib/k0s/pki/admin.conf
 
 dump() {
@@ -93,15 +94,19 @@ if [ -n "${BUNDLE:-}" ]; then
   mkdir -p /etc/k0s/containerd.d/certs.d/_default
   printf '[plugins."io.containerd.cri.v1.images".registry]\nconfig_path = "/etc/k0s/containerd.d/certs.d"\n' > /etc/k0s/containerd.d/cri-registry.toml
   printf 'server = "https://127.0.0.1:1"\n' > /etc/k0s/containerd.d/certs.d/_default/hosts.toml
-  "$bin" init -f "$workdir/cluster.yaml" --bundle "$BUNDLE" --timeout 45m
+  "$bin" init -f "$workdir/cluster.yaml" --bundle "$BUNDLE" --timeout 45m | tee "$workdir/init.log"
   test -f /var/lib/k0s/images/k0s-airgap.tar
   test "$(ls /var/lib/k0s/images/*.tar | wc -l)" -ge 3
   sha256sum /usr/local/bin/k0s | awk '{print "sha256:"$1}' | grep -qx "$(awk -v arch="$arch:" '$1 == arch {print $2}' "$release_dir/release.yaml")"
 else
   mkdir -p "$workdir/preload"
   docker save "$image" -o "$workdir/preload/bedrock.tar"
-  "$bin" init -f "$workdir/cluster.yaml" --release-dir "$release_dir" --images-dir "$workdir/preload" --timeout 45m
+  "$bin" init -f "$workdir/cluster.yaml" --release-dir "$release_dir" --images-dir "$workdir/preload" --timeout 45m | tee "$workdir/init.log"
 fi
+
+grep '^admin password: ' "$workdir/init.log" | sed 's/^admin password: //' >"$admin_password_file"
+chmod 0600 "$admin_password_file"
+export ADMIN_PASSWORD_FILE="$admin_password_file"
 
 kubectl get nodes -o wide
 kubectl wait --for=condition=Ready node --all --timeout=300s
