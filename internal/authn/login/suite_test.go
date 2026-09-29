@@ -180,7 +180,7 @@ func newHarness(t *testing.T, limiter *methods.RateLimiter) harness {
 	})
 	upstream := &fakeUpstream{}
 	registry := methods.NewRegistry(
-		methods.NewPassword(c, rand.Reader, methods.NewRateLimiter(100, time.Minute), settings),
+		methods.NewPassword(c, rand.Reader, settings),
 		methods.NewTOTP(c, rand.Reader, func(context.Context) (string, error) { return "https://sso.example.test", nil }),
 		methods.NewRecovery(c, rand.Reader),
 		upstream,

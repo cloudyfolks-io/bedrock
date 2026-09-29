@@ -49,7 +49,7 @@ func TestPasswordLogin(t *testing.T) {
 	if err := SetPassword(context.Background(), c, rand.Reader, user, "s3cret-passphrase"); err != nil {
 		t.Fatal(err)
 	}
-	method := NewPassword(c, rand.Reader, NewRateLimiter(10, time.Minute), fixedSettings(5))
+	method := NewPassword(c, rand.Reader, fixedSettings(5))
 	now := time.Now()
 	flow := Flow{ClientIP: "10.0.0.1", Now: now}
 
@@ -79,7 +79,7 @@ func TestPasswordLockoutAfterThreshold(t *testing.T) {
 	if err := SetPassword(context.Background(), c, rand.Reader, user, "s3cret-passphrase"); err != nil {
 		t.Fatal(err)
 	}
-	method := NewPassword(c, rand.Reader, NewRateLimiter(100, time.Minute), fixedSettings(3))
+	method := NewPassword(c, rand.Reader, fixedSettings(3))
 	now := time.Now()
 	for i := 0; i < 2; i++ {
 		flow := Flow{ClientIP: "10.0.0.2", Now: now.Add(time.Duration(i) * time.Second)}
@@ -121,7 +121,7 @@ func TestPasswordLockedUserSameAnswerAsUnknownUser(t *testing.T) {
 	if err := SetPassword(context.Background(), c, rand.Reader, user, "s3cret-passphrase"); err != nil {
 		t.Fatal(err)
 	}
-	method := NewPassword(c, rand.Reader, NewRateLimiter(100, time.Minute), fixedSettings(1))
+	method := NewPassword(c, rand.Reader, fixedSettings(1))
 	now := time.Now()
 	if _, err := method.Complete(context.Background(), Flow{ClientIP: "10.0.0.10", Now: now}, refetchUser(t, c, user), Answer{Password: "wrong"}); err != nil {
 		t.Fatal(err)
@@ -153,7 +153,7 @@ func TestPasswordLockoutIgnoresCase(t *testing.T) {
 	if err := SetPassword(context.Background(), c, rand.Reader, user, "s3cret-passphrase"); err != nil {
 		t.Fatal(err)
 	}
-	method := NewPassword(c, rand.Reader, NewRateLimiter(100, time.Minute), fixedSettings(3))
+	method := NewPassword(c, rand.Reader, fixedSettings(3))
 	now := time.Now()
 	for i, raw := range []string{"Carol", " carol ", "CAROL"} {
 		normalized, err := v1alpha1.NormalizeUsername(raw)
@@ -183,7 +183,7 @@ func TestSetPasswordTwiceRotatesTheHash(t *testing.T) {
 	if err := SetPassword(context.Background(), c, rand.Reader, user, "second-passphrase"); err != nil {
 		t.Fatal(err)
 	}
-	method := NewPassword(c, rand.Reader, NewRateLimiter(10, time.Minute), fixedSettings(5))
+	method := NewPassword(c, rand.Reader, fixedSettings(5))
 	now := time.Now()
 
 	stale, err := method.Complete(context.Background(), Flow{ClientIP: "10.0.0.7", Now: now}, refetchUser(t, c, user), Answer{Password: "first-passphrase"})
@@ -209,7 +209,7 @@ func TestPasswordCaseInsensitiveLookupSharesLockout(t *testing.T) {
 	if err := SetPassword(context.Background(), c, rand.Reader, user, "s3cret-passphrase"); err != nil {
 		t.Fatal(err)
 	}
-	method := NewPassword(c, rand.Reader, NewRateLimiter(100, time.Minute), fixedSettings(3))
+	method := NewPassword(c, rand.Reader, fixedSettings(3))
 	now := time.Now()
 	for i, raw := range []string{"Dave", " DAVE ", "dave"} {
 		normalized, err := v1alpha1.NormalizeUsername(raw)
@@ -239,7 +239,7 @@ func TestPasswordConcurrentFailuresDoNotDropCounts(t *testing.T) {
 		t.Fatal(err)
 	}
 	const attempts = 10
-	method := NewPassword(c, rand.Reader, NewRateLimiter(1000, time.Minute), fixedSettings(attempts+5))
+	method := NewPassword(c, rand.Reader, fixedSettings(attempts+5))
 	now := time.Now()
 	flow := Flow{ClientIP: "10.0.0.9", Now: now}
 
@@ -266,7 +266,7 @@ func TestPasswordConcurrentFailuresDoNotDropCounts(t *testing.T) {
 
 func TestPasswordUnknownUserSameFailure(t *testing.T) {
 	c, _ := startTestEnv(t)
-	method := NewPassword(c, rand.Reader, NewRateLimiter(100, time.Minute), fixedSettings(5))
+	method := NewPassword(c, rand.Reader, fixedSettings(5))
 	flow := Flow{ClientIP: "10.0.0.4", Now: time.Now()}
 	result, err := method.Complete(context.Background(), flow, v1alpha1.User{}, Answer{Password: "anything"})
 	if err != nil {

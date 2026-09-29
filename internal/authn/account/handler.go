@@ -46,6 +46,7 @@ type Deps struct {
 	Settings func(context.Context) (policy.Settings, error)
 	Random   io.Reader
 	Clock    func() time.Time
+	Limiter  *methods.RateLimiter
 }
 
 type caller struct {
@@ -392,7 +393,11 @@ func complete(r *http.Request, deps Deps, who caller, name string, given methods
 	if err != nil {
 		return methods.Result{}, err
 	}
-	return method.Complete(r.Context(), methods.Flow{ClientIP: login.ClientIP(r), Now: deps.Clock()}, who.user, given)
+	flow := methods.Flow{ClientIP: login.ClientIP(r), Now: deps.Clock()}
+	if !deps.Limiter.Allow(flow.ClientIP, flow.Now) {
+		return methods.Result{Failure: methods.FailureRateLimited}, nil
+	}
+	return method.Complete(r.Context(), flow, who.user, given)
 }
 
 func enroll(ctx context.Context, deps Deps, who caller, name string) (methods.Enrollment, error) {

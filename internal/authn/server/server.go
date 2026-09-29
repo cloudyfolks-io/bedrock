@@ -121,7 +121,7 @@ func New(ctx context.Context, cfg Config) (http.Handler, error) {
 		Keys:     (&keyCache{reader: direct, clock: cfg.Clock}).load,
 	})
 	registry := methods.NewRegistry(
-		methods.NewPassword(direct, cfg.Random, limiter, settings),
+		methods.NewPassword(direct, cfg.Random, settings),
 		methods.NewTOTP(direct, cfg.Random, issuerOf(settings)),
 		methods.NewRecovery(direct, cfg.Random),
 		methods.NewLDAP(direct, methods.DialLDAP),
@@ -154,6 +154,7 @@ func New(ctx context.Context, cfg Config) (http.Handler, error) {
 		Settings: settings,
 		Random:   cfg.Random,
 		Clock:    cfg.Clock,
+		Limiter:  limiter,
 	})))
 	mux := http.NewServeMux()
 	mux.Handle(pathLogin, loginHandler)

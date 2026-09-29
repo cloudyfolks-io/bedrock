@@ -26,12 +26,11 @@ var conflictRetryBackoff = wait.Backoff{Steps: 20, Duration: 20 * time.Milliseco
 type passwordMethod struct {
 	client   client.Client
 	random   io.Reader
-	limiter  *RateLimiter
 	settings func(context.Context) (policy.Settings, error)
 }
 
-func NewPassword(c client.Client, random io.Reader, limiter *RateLimiter, settings func(context.Context) (policy.Settings, error)) Method {
-	return passwordMethod{client: c, random: random, limiter: limiter, settings: settings}
+func NewPassword(c client.Client, random io.Reader, settings func(context.Context) (policy.Settings, error)) Method {
+	return passwordMethod{client: c, random: random, settings: settings}
 }
 
 func (m passwordMethod) Name() string { return v1alpha1.MethodPassword }
@@ -43,9 +42,6 @@ func (m passwordMethod) Begin(ctx context.Context, flow Flow, user v1alpha1.User
 }
 
 func (m passwordMethod) Complete(ctx context.Context, flow Flow, user v1alpha1.User, answer Answer) (Result, error) {
-	if !m.limiter.Allow(flow.ClientIP, flow.Now) {
-		return Result{Failure: FailureRateLimited}, nil
-	}
 	settings, err := m.settings(ctx)
 	if err != nil {
 		return Result{}, err

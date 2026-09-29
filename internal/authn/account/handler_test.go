@@ -363,8 +363,9 @@ func TestInternalErrorLogsTheCause(t *testing.T) {
 		Settings: func(context.Context) (policy.Settings, error) {
 			return policy.Settings{}, errors.New("settings are unreadable")
 		},
-		Random: rand.Reader,
-		Clock:  time.Now,
+		Random:  rand.Reader,
+		Clock:   time.Now,
+		Limiter: methods.NewRateLimiter(100, time.Minute),
 	})
 	server := httptest.NewTLSServer(failing)
 	t.Cleanup(server.Close)

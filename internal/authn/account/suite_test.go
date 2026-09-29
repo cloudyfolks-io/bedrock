@@ -82,11 +82,11 @@ func newHarness(t *testing.T) harness {
 		Keys:     func(context.Context) ([]keys.Key, error) { return nil, nil },
 	})
 	registry := methods.NewRegistry(
-		methods.NewPassword(c, rand.Reader, methods.NewRateLimiter(100, time.Minute), settings),
+		methods.NewPassword(c, rand.Reader, settings),
 		methods.NewTOTP(c, rand.Reader, func(context.Context) (string, error) { return "https://sso.example.test", nil }),
 		methods.NewRecovery(c, rand.Reader),
 	)
-	server := httptest.NewTLSServer(Handler(Deps{Store: st, Client: c, Methods: registry, Settings: settings, Random: rand.Reader, Clock: time.Now}))
+	server := httptest.NewTLSServer(Handler(Deps{Store: st, Client: c, Methods: registry, Settings: settings, Random: rand.Reader, Clock: time.Now, Limiter: methods.NewRateLimiter(100, time.Minute)}))
 	t.Cleanup(server.Close)
 	return harness{client: c, store: st, registry: registry, server: server}
 }

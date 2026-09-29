@@ -5,6 +5,7 @@ import (
 	"context"
 	"crypto/rand"
 	"crypto/sha256"
+	"encoding/base32"
 	"encoding/base64"
 	"encoding/json"
 	"io"
@@ -560,6 +561,48 @@ func TestCrossSiteRequestsAreRefused(t *testing.T) {
 	}
 }
 
+func accountCSRF(t *testing.T, server *httptest.Server, browser *http.Client) string {
+	t.Helper()
+	return readJSON[struct {
+		CSRF string `json:"csrf"`
+	}](t, request(t, browser, server, http.MethodGet, "sso."+testHost, "/api/v1/account", nil, nil), http.StatusOK).CSRF
+}
+
+func accountPost(t *testing.T, server *httptest.Server, browser *http.Client, csrf, target, body string) *http.Response {
+	t.Helper()
+	header := http.Header{"Content-Type": {"application/json"}, "X-Csrf-Token": {csrf}}
+	return request(t, browser, server, http.MethodPost, "sso."+testHost, target, strings.NewReader(body), header)
+}
+
+func TestRateLimitCountsEachPasswordLoginOnce(t *testing.T) {
+	c, cfg := startTestEnv(t)
+	seedCluster(t, c)
+	saveSigningKey(t, c, time.Now().Add(-time.Minute))
+	createCLIClient(t, c)
+	password := "correct horse battery staple"
+	createUser(t, c, "admin", password)
+	server := newTestServer(t, cfg, time.Now)
+	first := newBrowser(t, server)
+	for attempt := 1; attempt <= attemptsPerMinute; attempt++ {
+		browser := first
+		if attempt > 1 {
+			browser = newBrowser(t, server)
+		}
+		if done := passwordLogin(t, server, browser, "admin", password); done.Type != methods.ChallengeDone {
+			t.Fatalf("password login %d of %d per minute: %+v", attempt, attemptsPerMinute, done)
+		}
+	}
+	limited := passwordLogin(t, server, newBrowser(t, server), "admin", password)
+	if limited.Error == nil || limited.Error.Code != methods.FailureRateLimited {
+		t.Fatalf("login %d: %+v", attemptsPerMinute+1, limited)
+	}
+	csrf := accountCSRF(t, server, first)
+	resp := accountPost(t, server, first, csrf, "/api/v1/account/password", `{"current":"`+password+`","new":"another horse battery staple"}`)
+	if code := readJSON[map[string]string](t, resp, http.StatusForbidden)["error"]; code != methods.FailureRateLimited {
+		t.Fatalf("the account API shares the login budget: %q", code)
+	}
+}
+
 func TestOneRateLimiterServesLoginAndAccount(t *testing.T) {
 	c, cfg := startTestEnv(t)
 	seedCluster(t, c)
@@ -568,33 +611,68 @@ func TestOneRateLimiterServesLoginAndAccount(t *testing.T) {
 	password := "correct horse battery staple"
 	createUser(t, c, "admin", password)
 	server := newTestServer(t, cfg, time.Now)
-	host := "sso." + testHost
 	browser := newBrowser(t, server)
 	if done := passwordLogin(t, server, browser, "admin", password); done.Type != methods.ChallengeDone {
 		t.Fatalf("login %+v", done)
 	}
-	csrf := readJSON[struct {
-		CSRF string `json:"csrf"`
-	}](t, request(t, browser, server, http.MethodGet, host, "/api/v1/account", nil, nil), http.StatusOK).CSRF
+	csrf := accountCSRF(t, server, browser)
 	change := func() string {
 		t.Helper()
-		header := http.Header{"Content-Type": {"application/json"}}
-		header.Set("X-CSRF-Token", csrf)
-		body := strings.NewReader(`{"current":"wrong horse battery staple","new":"another horse battery staple"}`)
-		return readJSON[map[string]string](t, request(t, browser, server, http.MethodPost, host, "/api/v1/account/password", body, header), http.StatusForbidden)["error"]
+		resp := accountPost(t, server, browser, csrf, "/api/v1/account/password", `{"current":"wrong horse battery staple","new":"another horse battery staple"}`)
+		return readJSON[map[string]string](t, resp, http.StatusForbidden)["error"]
 	}
-	loginHits := 2
-	for attempt := 1; attempt <= attemptsPerMinute-loginHits; attempt++ {
+	for attempt := 2; attempt <= attemptsPerMinute; attempt++ {
 		if code := change(); code != methods.FailureInvalidCredentials {
 			t.Fatalf("attempt %d: %q", attempt, code)
 		}
 	}
 	if code := change(); code != methods.FailureRateLimited {
-		t.Fatalf("the login attempts must count against the account API: %q", code)
+		t.Fatalf("the login must count against the account API: %q", code)
 	}
 	limited := passwordLogin(t, server, newBrowser(t, server), "admin", password)
 	if limited.Error == nil || limited.Error.Code != methods.FailureRateLimited {
 		t.Fatalf("the account attempts must count against the login API: %+v", limited)
+	}
+}
+
+func TestSecondFactorGuessesAreRateLimited(t *testing.T) {
+	c, cfg := startTestEnv(t)
+	seedCluster(t, c)
+	saveSigningKey(t, c, time.Now().Add(-time.Minute))
+	createCLIClient(t, c)
+	password := "correct horse battery staple"
+	createUser(t, c, "admin", password)
+	server := newTestServer(t, cfg, time.Now)
+	enroller := newBrowser(t, server)
+	if done := passwordLogin(t, server, enroller, "admin", password); done.Type != methods.ChallengeDone {
+		t.Fatalf("login %+v", done)
+	}
+	csrf := accountCSRF(t, server, enroller)
+	enrollment := readJSON[methods.TOTPEnrollment](t, accountPost(t, server, enroller, csrf, "/api/v1/account/totp", "{}"), http.StatusOK)
+	seed, err := base32.StdEncoding.WithPadding(base32.NoPadding).DecodeString(enrollment.Secret)
+	if err != nil {
+		t.Fatal(err)
+	}
+	step := methods.TOTPStep(time.Now())
+	code := methods.TOTPCode(seed, step)
+	valid := []string{methods.TOTPCode(seed, step-1), code, methods.TOTPCode(seed, step+1), methods.TOTPCode(seed, step+2)}
+	guess := "000000"
+	if slices.Contains(valid, guess) {
+		guess = "111111"
+	}
+	readJSON[map[string][]string](t, accountPost(t, server, enroller, csrf, "/api/v1/account/totp/verify", `{"code":"`+code+`"}`), http.StatusOK)
+	browser := newBrowser(t, server)
+	challenge := passwordLogin(t, server, browser, "admin", password)
+	if challenge.Type != methods.ChallengeTOTP {
+		t.Fatalf("second factor challenge %+v", challenge)
+	}
+	used := 3
+	for attempt := used + 1; attempt <= attemptsPerMinute+1; attempt++ {
+		challenge, _ = postJSON(t, browser, server, "/api/v1/login/answer", challenge.CSRF, methods.Answer{Type: methods.ChallengeTOTP, Code: guess})
+		limited := challenge.Error != nil && challenge.Error.Code == methods.FailureRateLimited
+		if challenge.Type != methods.ChallengeTOTP || limited != (attempt > attemptsPerMinute) {
+			t.Fatalf("TOTP guess at attempt %d: %+v", attempt, challenge)
+		}
 	}
 }
 
