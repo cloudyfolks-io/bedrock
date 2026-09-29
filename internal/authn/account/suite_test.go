@@ -69,6 +69,11 @@ func startTestEnv(t *testing.T) client.Client {
 
 func newHarness(t *testing.T) harness {
 	t.Helper()
+	return newHarnessWithLimiter(t, methods.NewRateLimiter(100, time.Minute))
+}
+
+func newHarnessWithLimiter(t *testing.T, limiter *methods.RateLimiter) harness {
+	t.Helper()
 	c := startTestEnv(t)
 	settings := func(context.Context) (policy.Settings, error) {
 		return policy.Settings{SessionTTL: 12 * time.Hour, RefreshTTL: 720 * time.Hour, LockoutThreshold: 5, Host: "example.test", TLSMode: "SelfSigned"}, nil
@@ -86,7 +91,7 @@ func newHarness(t *testing.T) harness {
 		methods.NewTOTP(c, rand.Reader, func(context.Context) (string, error) { return "https://sso.example.test", nil }),
 		methods.NewRecovery(c, rand.Reader),
 	)
-	server := httptest.NewTLSServer(Handler(Deps{Store: st, Client: c, Methods: registry, Settings: settings, Random: rand.Reader, Clock: time.Now, Limiter: methods.NewRateLimiter(100, time.Minute)}))
+	server := httptest.NewTLSServer(Handler(Deps{Store: st, Client: c, Methods: registry, Settings: settings, Random: rand.Reader, Clock: time.Now, Limiter: limiter}))
 	t.Cleanup(server.Close)
 	return harness{client: c, store: st, registry: registry, server: server}
 }

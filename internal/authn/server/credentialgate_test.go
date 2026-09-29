@@ -155,17 +155,20 @@ func TestCredentialGateRoutePredicates(t *testing.T) {
 	}{
 		{"login answer", http.MethodPost, pathLoginAnswer, true, false},
 		{"login answer wrong method", http.MethodGet, pathLoginAnswer, false, false},
-		{"login challenge", http.MethodGet, pathLoginChallenge, false, false},
+		{"login challenge", http.MethodGet, pathLoginChallenge, true, false},
+		{"login challenge wrong method", http.MethodPost, pathLoginChallenge, false, false},
 		{"account password", http.MethodPost, pathAccountPassword, false, true},
 		{"account totp verify", http.MethodPost, pathAccountTOTPVerify, false, true},
+		{"account recovery codes", http.MethodPost, pathAccountRecoveryCodes, false, true},
+		{"account recovery codes wrong method", http.MethodGet, pathAccountRecoveryCodes, false, false},
 		{"account show", http.MethodGet, pathAccount, false, false},
 		{"account totp begin", http.MethodPost, pathAccount + "/totp", false, false},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			r := httptest.NewRequest(tc.method, tc.path, nil)
-			if got := isLoginAnswer(r); got != tc.login {
-				t.Fatalf("isLoginAnswer(%s %s) = %v, want %v", tc.method, tc.path, got, tc.login)
+			if got := isLoginCredentialCheck(r); got != tc.login {
+				t.Fatalf("isLoginCredentialCheck(%s %s) = %v, want %v", tc.method, tc.path, got, tc.login)
 			}
 			if got := isAccountCredentialCheck(r); got != tc.acct {
 				t.Fatalf("isAccountCredentialCheck(%s %s) = %v, want %v", tc.method, tc.path, got, tc.acct)

@@ -283,6 +283,10 @@ func newRecoveryCodes(w http.ResponseWriter, r *http.Request, deps Deps, who cal
 }
 
 func answerRecoveryCodes(w http.ResponseWriter, r *http.Request, deps Deps, who caller) {
+	if !deps.Limiter.Allow(login.ClientIP(r), deps.Clock()) {
+		writeError(w, http.StatusForbidden, methods.FailureRateLimited)
+		return
+	}
 	enrollment, err := enroll(r.Context(), deps, who, v1alpha1.MethodRecovery)
 	if err != nil {
 		internal(w, r, err)

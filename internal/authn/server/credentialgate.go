@@ -41,10 +41,25 @@ func (g credentialGate) middleware(matches func(*http.Request) bool, next http.H
 	})
 }
 
-func isLoginAnswer(r *http.Request) bool {
-	return r.Method == http.MethodPost && r.URL.Path == pathLoginAnswer
+func isLoginCredentialCheck(r *http.Request) bool {
+	switch {
+	case r.Method == http.MethodPost && r.URL.Path == pathLoginAnswer:
+		return true
+	case r.Method == http.MethodGet && r.URL.Path == pathLoginChallenge:
+		return true
+	default:
+		return false
+	}
 }
 
 func isAccountCredentialCheck(r *http.Request) bool {
-	return r.Method == http.MethodPost && (r.URL.Path == pathAccountPassword || r.URL.Path == pathAccountTOTPVerify)
+	if r.Method != http.MethodPost {
+		return false
+	}
+	switch r.URL.Path {
+	case pathAccountPassword, pathAccountTOTPVerify, pathAccountRecoveryCodes:
+		return true
+	default:
+		return false
+	}
 }

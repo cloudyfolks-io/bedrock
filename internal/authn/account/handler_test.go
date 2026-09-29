@@ -192,6 +192,17 @@ func TestNewRecoveryCodes(t *testing.T) {
 	}
 }
 
+func TestNewRecoveryCodesCountsAgainstTheRateLimit(t *testing.T) {
+	h := newHarnessWithLimiter(t, methods.NewRateLimiter(2, time.Minute))
+	alice := createUser(t, h, "alice", "")
+	cookie := loginAs(t, h, alice)
+	csrf := accountOf(t, h, cookie).CSRF
+	enrollTOTP(t, h, cookie, csrf)
+	if code := errorOf(t, call(t, h, http.MethodPost, "/api/v1/account/recovery-codes", cookie, csrf, nil), http.StatusForbidden); code != methods.FailureRateLimited {
+		t.Fatalf("recovery code generation must count against the per-IP limiter: %q", code)
+	}
+}
+
 func TestCreateListRevokeToken(t *testing.T) {
 	h := newHarness(t)
 	alice := createUser(t, h, "alice", "")

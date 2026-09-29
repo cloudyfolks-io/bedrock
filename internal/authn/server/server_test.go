@@ -666,7 +666,7 @@ func TestSecondFactorGuessesAreRateLimited(t *testing.T) {
 	if challenge.Type != methods.ChallengeTOTP {
 		t.Fatalf("second factor challenge %+v", challenge)
 	}
-	used := 3
+	used := 4
 	for attempt := used + 1; attempt <= attemptsPerMinute+1; attempt++ {
 		challenge, _ = postJSON(t, browser, server, "/api/v1/login/answer", challenge.CSRF, methods.Answer{Type: methods.ChallengeTOTP, Code: guess})
 		limited := challenge.Error != nil && challenge.Error.Code == methods.FailureRateLimited

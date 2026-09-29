@@ -38,25 +38,26 @@ import (
 )
 
 const (
-	pathAuthorize         = "/oauth/v2/authorize"
-	pathAuthorizeDone     = pathAuthorize + "/callback"
-	pathToken             = "/oauth/v2/token"
-	pathDevice            = "/oauth/v2/device_authorization"
-	pathIntrospect        = "/oauth/v2/introspect"
-	pathRevoke            = "/oauth/v2/revoke"
-	pathKeys              = "/oauth/v2/keys"
-	pathEndSession        = "/oidc/v1/end_session"
-	pathUserinfo          = "/oidc/v1/userinfo"
-	pathWebhook           = "/webhook/v1/tokenreview"
-	pathHealthz           = "/healthz"
-	pathReadyz            = "/readyz"
-	pathCluster           = "/api/v1/cluster"
-	pathLogin             = "/api/v1/login/"
-	pathLoginChallenge    = pathLogin + "challenge"
-	pathLoginAnswer       = pathLogin + "answer"
-	pathAccount           = "/api/v1/account"
-	pathAccountPassword   = pathAccount + "/password"
-	pathAccountTOTPVerify = pathAccount + "/totp/verify"
+	pathAuthorize            = "/oauth/v2/authorize"
+	pathAuthorizeDone        = pathAuthorize + "/callback"
+	pathToken                = "/oauth/v2/token"
+	pathDevice               = "/oauth/v2/device_authorization"
+	pathIntrospect           = "/oauth/v2/introspect"
+	pathRevoke               = "/oauth/v2/revoke"
+	pathKeys                 = "/oauth/v2/keys"
+	pathEndSession           = "/oidc/v1/end_session"
+	pathUserinfo             = "/oidc/v1/userinfo"
+	pathWebhook              = "/webhook/v1/tokenreview"
+	pathHealthz              = "/healthz"
+	pathReadyz               = "/readyz"
+	pathCluster              = "/api/v1/cluster"
+	pathLogin                = "/api/v1/login/"
+	pathLoginChallenge       = pathLogin + "challenge"
+	pathLoginAnswer          = pathLogin + "answer"
+	pathAccount              = "/api/v1/account"
+	pathAccountPassword      = pathAccount + "/password"
+	pathAccountTOTPVerify    = pathAccount + "/totp/verify"
+	pathAccountRecoveryCodes = pathAccount + "/recovery-codes"
 
 	cookieKeySecret   = "bedrock-authn-cookie-key"
 	cookieKeyField    = "key"
@@ -140,7 +141,7 @@ func New(ctx context.Context, cfg Config) (http.Handler, error) {
 	}
 	withIssuer := op.NewIssuerInterceptor(issuerFromRequest).Handler
 	credentials := newCredentialGate(credentialGateSlots, credentialGateWait)
-	loginHandler := refuseCrossSite(withIssuer(credentials.middleware(isLoginAnswer, login.Handler(login.Deps{
+	loginHandler := refuseCrossSite(withIssuer(credentials.middleware(isLoginCredentialCheck, login.Handler(login.Deps{
 		Store:    st,
 		Client:   direct,
 		Methods:  registry,
