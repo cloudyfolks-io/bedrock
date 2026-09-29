@@ -7,7 +7,10 @@ import { renderWithLocale } from "../test/renderWithLocale";
 import type { Challenge } from "../types";
 import { Recovery } from "./Recovery";
 
-vi.mock("../api", () => ({ answer: vi.fn() }));
+vi.mock("../api", async () => {
+  const actual = await vi.importActual<typeof import("../api")>("../api");
+  return { ...actual, answer: vi.fn() };
+});
 
 const challenge = fixtures.find((f) => f.name === "recovery")!.challenge as Challenge;
 const titles = { en: "Enter a recovery code", fa: "یک کد بازیابی وارد کنید", ar: "أدخل رمز الاسترداد" };

@@ -7,7 +7,10 @@ import { renderWithLocale } from "../test/renderWithLocale";
 import type { Challenge } from "../types";
 import { Password } from "./Password";
 
-vi.mock("../api", () => ({ answer: vi.fn() }));
+vi.mock("../api", async () => {
+  const actual = await vi.importActual<typeof import("../api")>("../api");
+  return { ...actual, answer: vi.fn() };
+});
 
 const challenge = fixtures.find((f) => f.name === "password")!.challenge as Challenge;
 const titles = { en: "Enter your password", fa: "رمز عبور خود را وارد کنید", ar: "أدخل كلمة المرور الخاصة بك" };
@@ -52,5 +55,14 @@ describe("Password", () => {
       expect(onChallenge).toHaveBeenCalledWith({ type: "totp", csrf: "csrf-3", username: "alice" });
     });
     expect(screen.queryByRole("alert")).toBeNull();
+  });
+
+  it("maps a rate-limited rejection to the existing rate-limit message", async () => {
+    vi.mocked(api.answer).mockRejectedValueOnce(new api.ApiError("rate_limited"));
+    renderWithLocale(<Password challenge={challenge} onChallenge={() => {}} />, "en");
+    fireEvent.change(screen.getByLabelText(labels.en), { target: { value: "hunter2" } });
+    fireEvent.click(screen.getByText(submits.en));
+    const alert = await screen.findByRole("alert");
+    expect(alert.textContent).toBe("Too many attempts. Wait a moment and try again.");
   });
 });

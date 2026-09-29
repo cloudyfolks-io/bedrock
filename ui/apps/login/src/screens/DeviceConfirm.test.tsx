@@ -7,7 +7,10 @@ import { renderWithLocale } from "../test/renderWithLocale";
 import type { Challenge } from "../types";
 import { DeviceConfirm } from "./DeviceConfirm";
 
-vi.mock("../api", () => ({ answer: vi.fn() }));
+vi.mock("../api", async () => {
+  const actual = await vi.importActual<typeof import("../api")>("../api");
+  return { ...actual, answer: vi.fn() };
+});
 
 const challenge = fixtures.find((f) => f.name === "device-confirm")!.challenge as Challenge;
 const titles = { en: "Confirm sign-in for this device?", fa: "ورود برای این دستگاه تأیید شود؟", ar: "هل تريد تأكيد تسجيل الدخول لهذا الجهاز؟" };

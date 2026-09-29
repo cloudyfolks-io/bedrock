@@ -5,7 +5,10 @@ import { dirOf, locales } from "../i18n";
 import { renderWithLocale } from "../test/renderWithLocale";
 import { DeviceEntry } from "./DeviceEntry";
 
-vi.mock("../api", () => ({ startDevice: vi.fn() }));
+vi.mock("../api", async () => {
+  const actual = await vi.importActual<typeof import("../api")>("../api");
+  return { ...actual, startDevice: vi.fn() };
+});
 
 const titles = { en: "Enter the code shown on your device", fa: "کدی را که روی دستگاه شما نشان داده شده وارد کنید", ar: "أدخل الرمز الظاهر على جهازك" };
 const labels = { en: "Device code", fa: "کد دستگاه", ar: "رمز الجهاز" };

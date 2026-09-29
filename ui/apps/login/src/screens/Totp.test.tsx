@@ -7,7 +7,10 @@ import { renderWithLocale } from "../test/renderWithLocale";
 import type { Challenge } from "../types";
 import { Totp } from "./Totp";
 
-vi.mock("../api", () => ({ answer: vi.fn() }));
+vi.mock("../api", async () => {
+  const actual = await vi.importActual<typeof import("../api")>("../api");
+  return { ...actual, answer: vi.fn() };
+});
 
 const challenge = fixtures.find((f) => f.name === "totp")!.challenge as Challenge;
 const titles = { en: "Enter your authenticator code", fa: "کد برنامه احراز هویت خود را وارد کنید", ar: "أدخل رمز تطبيق المصادقة" };
@@ -50,6 +53,16 @@ describe("Totp", () => {
     const alert = await screen.findByRole("alert");
     expect(alert.textContent).toBe("That code is not correct.");
     await waitFor(() => expect(document.activeElement).toBe(alert));
+  });
+
+  it("maps a rate-limited rejection to the existing rate-limit message", async () => {
+    vi.mocked(api.answer).mockRejectedValueOnce(new api.ApiError("rate_limited"));
+    renderWithLocale(<Totp challenge={challenge} onChallenge={() => {}} />, "en");
+    const clipboardData = { getData: () => "000000" };
+    fireEvent.paste(screen.getByLabelText(codeLabels.en), { clipboardData });
+    fireEvent.click(screen.getByText(submits.en));
+    const alert = await screen.findByRole("alert");
+    expect(alert.textContent).toBe("Too many attempts. Wait a moment and try again.");
   });
 
   it("relabels the challenge as recovery locally without calling the API", () => {

@@ -8,7 +8,10 @@ import { renderWithLocale } from "../test/renderWithLocale";
 import type { Challenge } from "../types";
 import { TotpEnroll } from "./TotpEnroll";
 
-vi.mock("../api", () => ({ answer: vi.fn() }));
+vi.mock("../api", async () => {
+  const actual = await vi.importActual<typeof import("../api")>("../api");
+  return { ...actual, answer: vi.fn() };
+});
 vi.mock("../qr", () => ({ otpauthSVG: vi.fn() }));
 
 const enrollChallenge = fixtures.find((f) => f.name === "totp-enroll")!.challenge as Challenge;

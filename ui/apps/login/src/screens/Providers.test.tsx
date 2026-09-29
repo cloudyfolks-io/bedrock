@@ -7,7 +7,10 @@ import { renderWithLocale } from "../test/renderWithLocale";
 import type { Challenge } from "../types";
 import { Providers } from "./Providers";
 
-vi.mock("../api", () => ({ answer: vi.fn() }));
+vi.mock("../api", async () => {
+  const actual = await vi.importActual<typeof import("../api")>("../api");
+  return { ...actual, answer: vi.fn() };
+});
 
 const challenge = fixtures.find((f) => f.name === "providers")!.challenge as Challenge;
 const titles = { en: "Choose how to sign in", fa: "روش ورود خود را انتخاب کنید", ar: "اختر طريقة تسجيل الدخول" };

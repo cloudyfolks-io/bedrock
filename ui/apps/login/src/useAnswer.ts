@@ -1,17 +1,22 @@
 import { useEffect, useRef, useState } from "react";
 import type { RefObject } from "react";
+import { ApiError } from "./api";
 import type { Challenge } from "./types";
 
 export interface UseAnswer {
   error: string | null;
   submit: (promise: Promise<Challenge>) => void;
-  fail: () => void;
+  fail: (reason?: unknown) => void;
+}
+
+function codeFromRejection(reason: unknown): string {
+  return reason instanceof ApiError ? reason.code : "unknown";
 }
 
 export function useAnswer(onChallenge: (next: Challenge) => void): UseAnswer {
   const [error, setError] = useState<string | null>(null);
 
-  const fail = () => setError("unknown");
+  const fail = (reason?: unknown) => setError(codeFromRejection(reason));
 
   const submit = (promise: Promise<Challenge>) => {
     promise
