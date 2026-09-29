@@ -23,6 +23,7 @@ func Commands() map[string]Command {
 		"upgrade":           upgradeCommand,
 		"restart-workloads": restartWorkloadsCommand,
 		"authn":             authnCommand,
+		"login":             loginCommand,
 	}
 }
 
