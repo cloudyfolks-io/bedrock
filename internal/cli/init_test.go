@@ -3,10 +3,12 @@ package cli
 import (
 	"bytes"
 	"context"
+	"crypto/rand"
 	"fmt"
 	"io/fs"
 	"os"
 	"path/filepath"
+	"reflect"
 	goruntime "runtime"
 	"strings"
 	"testing"
@@ -16,10 +18,14 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
+	"k8s.io/client-go/tools/clientcmd"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 	"sigs.k8s.io/controller-runtime/pkg/envtest"
+	sigyaml "sigs.k8s.io/yaml"
 
 	"github.com/cloudyfolks-io/bedrock/api/v1alpha1"
+	"github.com/cloudyfolks-io/bedrock/internal/authn/apiserver"
 	"github.com/cloudyfolks-io/bedrock/internal/host"
 	"github.com/cloudyfolks-io/bedrock/internal/k0s"
 	"github.com/cloudyfolks-io/bedrock/internal/release"
@@ -614,5 +620,276 @@ func TestKubeVIPDataEnablesServicesMode(t *testing.T) {
 	data := kubeVIPData("10.0.0.250", "eth0")
 	if data["svc_enable"] != "true" || data["cp_enable"] != "true" || data["address"] != "10.0.0.250" {
 		t.Fatalf("data %+v", data)
+	}
+}
+
+type initRun struct {
+	c    client.Client
+	root string
+	deps InitDeps
+	args []string
+}
+
+func prepareInit(t *testing.T) initRun {
+	t.Helper()
+	c, newClient := startEnv(t)
+	root, e := fakeHost(t)
+	configPath := filepath.Join(root, "cluster.yaml")
+	if err := os.WriteFile(configPath, []byte(initConfig), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+	if err := client.IgnoreAlreadyExists(c.Create(ctx, &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "kube-system"}})); err != nil {
+		t.Fatal(err)
+	}
+	master := &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: "node-1", Labels: map[string]string{"fabric/role": "master"}}}
+	if err := c.Create(ctx, master); err != nil {
+		t.Fatal(err)
+	}
+	master.Status.Addresses = []corev1.NodeAddress{{Type: corev1.NodeInternalIP, Address: "10.0.10.11"}}
+	if err := c.Status().Update(ctx, master); err != nil {
+		t.Fatal(err)
+	}
+	go func() {
+		for {
+			var cluster v1alpha1.Cluster
+			if err := c.Get(ctx, client.ObjectKey{Name: v1alpha1.ClusterName}, &cluster); err == nil && cluster.Status.Version == "" {
+				cluster.Status.Version = "v0.1.0-test"
+				_ = c.Status().Update(ctx, &cluster)
+				return
+			}
+			time.Sleep(100 * time.Millisecond)
+		}
+	}()
+	dataDir := filepath.Join(root, "var", "lib", "k0s")
+	installArgs := k0s.InstallArgs(k0s.InstallOptions{
+		Role: "controller", Force: true, ConfigPath: filepath.Join(root, "etc", "k0s", "k0s.yaml"), EnableWorker: true, NoTaints: true, DynamicConfig: true,
+		Labels:            roles.Labels([]string{"control-plane", "ceph-osd", "fabric-gateway"}),
+		KubeletExtraArgs:  []string{"--node-status-update-frequency=4s"},
+		DataDir:           dataDir,
+		KubeletRootDir:    k0s.DefaultKubeletRootDir,
+		DisableComponents: k0s.DefaultDisabledComponents,
+	})
+	e.Responses["/usr/local/bin/k0s "+strings.Join(installArgs, " ")] = ""
+	e.Errors["/usr/local/bin/k0s status --data-dir "+dataDir] = &host.ExitError{Code: 1}
+	deps := InitDeps{
+		Exec:       e,
+		Uid:        0,
+		FreeBytes:  func(string) (uint64, error) { return 100 << 30, nil },
+		Stat:       func(string) (fs.FileInfo, error) { return devInfo{fs.ModeDevice}, nil },
+		Root:       root,
+		NewClient:  newClient,
+		Executable: fakeExecutable(t),
+	}
+	args := []string{"-f", configPath, "--release-dir", filepath.Join("..", "release", "testdata", "good"), "--k0s-bin", "/usr/local/bin/k0s", "--data-dir", dataDir, "--timeout", "30s"}
+	return initRun{c: c, root: root, deps: deps, args: args}
+}
+
+func runPreparedInit(t *testing.T, run initRun) string {
+	t.Helper()
+	var out, errOut bytes.Buffer
+	if code := RunInit(context.Background(), run.args, run.deps, &out, &errOut); code != 0 {
+		t.Fatalf("exit %d\nstdout %s\nstderr %s", code, out.String(), errOut.String())
+	}
+	return out.String()
+}
+
+func readInitFile(t *testing.T, path string) string {
+	t.Helper()
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return string(raw)
+}
+
+func TestInitWritesAuthnFilesBeforeK0s(t *testing.T) {
+	run := prepareInit(t)
+	present := false
+	run.deps.Exec = filesAtStart{FakeExec: run.deps.Exec.(*host.FakeExec), paths: authnPaths(run.root), present: &present}
+	runPreparedInit(t, run)
+	if !present {
+		t.Fatal("the authn files must exist before k0s starts")
+	}
+	for _, path := range authnPaths(run.root) {
+		if info, err := os.Stat(path); err != nil || info.Mode().Perm() != 0o600 {
+			t.Fatalf("%s mode %v %v", path, info, err)
+		}
+	}
+	ca := readInitFile(t, filepath.Join(run.root, "var", "lib", "bedrock", "authn", "ca.crt"))
+	var doc map[string]any
+	if err := sigyaml.Unmarshal([]byte(readInitFile(t, authnPaths(run.root)[0])), &doc); err != nil {
+		t.Fatal(err)
+	}
+	issuer := doc["jwt"].([]any)[0].(map[string]any)["issuer"].(map[string]any)
+	if issuer["url"] != "https://sso.10-0-10-10.sslip.io" || issuer["certificateAuthority"] != ca {
+		t.Fatalf("issuer %v", issuer)
+	}
+}
+
+func TestInitKeepsExistingCA(t *testing.T) {
+	run := prepareInit(t)
+	runPreparedInit(t, run)
+	bootstrap := filepath.Join(run.root, "var", "lib", "bedrock", "authn")
+	firstKey := readInitFile(t, filepath.Join(bootstrap, "ca.key"))
+	firstAuthentication := readInitFile(t, authnPaths(run.root)[0])
+	firstWebhook := readInitFile(t, authnPaths(run.root)[1])
+	if info, err := os.Stat(bootstrap); err != nil || info.Mode().Perm() != 0o700 {
+		t.Fatalf("bootstrap dir %v %v", info, err)
+	}
+	runPreparedInit(t, run)
+	if readInitFile(t, filepath.Join(bootstrap, "ca.key")) != firstKey || readInitFile(t, authnPaths(run.root)[0]) != firstAuthentication || readInitFile(t, authnPaths(run.root)[1]) != firstWebhook {
+		t.Fatal("a second init must keep the CA and the bearer")
+	}
+	var ca corev1.Secret
+	if err := run.c.Get(context.Background(), client.ObjectKey{Namespace: "cert-manager", Name: "bedrock-ca"}, &ca); err != nil {
+		t.Fatal(err)
+	}
+	if string(ca.Data["tls.key"]) != firstKey {
+		t.Fatal("the Secret must hold the kept CA key")
+	}
+}
+
+func TestInitCreatesAuthnSecrets(t *testing.T) {
+	run := prepareInit(t)
+	stdout := runPreparedInit(t, run)
+	ctx := context.Background()
+	bootstrap := filepath.Join(run.root, "var", "lib", "bedrock", "authn")
+	var ca corev1.Secret
+	if err := run.c.Get(ctx, client.ObjectKey{Namespace: "cert-manager", Name: "bedrock-ca"}, &ca); err != nil {
+		t.Fatal(err)
+	}
+	if ca.Type != corev1.SecretTypeTLS || string(ca.Data["ca.crt"]) != readInitFile(t, filepath.Join(bootstrap, "ca.crt")) || string(ca.Data["tls.key"]) != readInitFile(t, filepath.Join(bootstrap, "ca.key")) {
+		t.Fatalf("CA secret %s %v", ca.Type, ca.Labels)
+	}
+	var token corev1.Secret
+	if err := run.c.Get(ctx, client.ObjectKey{Namespace: "bedrock-system", Name: "bedrock-authn-webhook-token"}, &token); err != nil {
+		t.Fatal(err)
+	}
+	if token.Labels["bedrock.cloudyfolks.io/authn"] != "true" || len(token.Data["token"]) != 32 {
+		t.Fatalf("token secret labels %v length %d", token.Labels, len(token.Data["token"]))
+	}
+	config, err := clientcmd.Load([]byte(readInitFile(t, authnPaths(run.root)[1])))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if config.AuthInfos["kube-apiserver"].Token != string(token.Data["token"]) {
+		t.Fatal("the webhook file and the Secret must hold the same bearer")
+	}
+	if strings.Contains(stdout, string(token.Data["token"])) || strings.Contains(stdout, "PRIVATE KEY") {
+		t.Fatal("init must not print the bearer or the CA key")
+	}
+	for _, name := range []string{"ca.crt", "ca.key", "webhook-token"} {
+		if info, err := os.Stat(filepath.Join(bootstrap, name)); err != nil || info.Mode().Perm() != 0o600 {
+			t.Fatalf("%s mode %v %v", name, info, err)
+		}
+	}
+}
+
+func TestK0sConfigHasAuthnArgs(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "etc", "k0s", "k0s.yaml")
+	var cfg v1alpha1.ClusterConfig
+	cfg.Spec.API.VIP = "10.0.10.10"
+	cfg.Spec.Network.Fabric.PodCIDR = "10.16.0.0/16"
+	cfg.Spec.Network.Fabric.ServiceCIDR = "10.96.0.0/12"
+	if err := writeK0sConfig(path, cfg); err != nil {
+		t.Fatal(err)
+	}
+	var doc map[string]any
+	if err := sigyaml.Unmarshal([]byte(readInitFile(t, path)), &doc); err != nil {
+		t.Fatal(err)
+	}
+	args := doc["spec"].(map[string]any)["api"].(map[string]any)["extraArgs"].(map[string]any)
+	for name, value := range apiserver.Args() {
+		if args[name] != value {
+			t.Fatalf("extraArgs %v lack %s=%s", args, name, value)
+		}
+	}
+	if args["default-not-ready-toleration-seconds"] != "30" {
+		t.Fatalf("existing extraArgs must stay: %v", args)
+	}
+}
+
+func TestAuthnFileInputsByMode(t *testing.T) {
+	in := apiserver.Inputs{Host: "lab.example", CA: []byte("CA"), Bearer: "b"}
+	if got := authnFileInputs("SelfSigned", in); !reflect.DeepEqual(got, in) {
+		t.Fatalf("SelfSigned %+v", got)
+	}
+	for _, mode := range []string{"LetsEncrypt", "Custom"} {
+		if got := authnFileInputs(mode, in); got.CA != nil || got.Host != "lab.example" || got.Bearer != "b" {
+			t.Fatalf("%s %+v", mode, got)
+		}
+	}
+}
+
+func TestLoadOrBootstrapAuthnKeepsSavedMaterial(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "var", "lib", "bedrock", "authn")
+	now := time.Date(2026, 9, 29, 0, 0, 0, 0, time.UTC)
+	first, firstKey, err := loadOrBootstrapAuthn(dir, rand.Reader, now, "lab.example")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(first.CA) == 0 || len(firstKey) == 0 || len(first.Bearer) != 32 || first.Host != "lab.example" {
+		t.Fatalf("bootstrap %+v", first)
+	}
+	if info, err := os.Stat(dir); err != nil || info.Mode().Perm() != 0o700 {
+		t.Fatalf("dir %v %v", info, err)
+	}
+	second, secondKey, err := loadOrBootstrapAuthn(dir, rand.Reader, now, "other.example")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(second.CA, first.CA) || !bytes.Equal(secondKey, firstKey) || second.Bearer != first.Bearer || second.Host != "other.example" {
+		t.Fatal("a saved CA and bearer must be kept")
+	}
+}
+
+func TestLoadOrBootstrapAuthnRefusesIncompleteMaterial(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "authn")
+	if _, _, err := loadOrBootstrapAuthn(dir, rand.Reader, time.Now(), "lab.example"); err != nil {
+		t.Fatal(err)
+	}
+	cert := readInitFile(t, filepath.Join(dir, "ca.crt"))
+	if err := os.Remove(filepath.Join(dir, "ca.key")); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := loadOrBootstrapAuthn(dir, rand.Reader, time.Now(), "lab.example"); err == nil || !strings.Contains(err.Error(), "ca.key") {
+		t.Fatalf("a partial bootstrap dir must not be replaced: %v", err)
+	}
+	if readInitFile(t, filepath.Join(dir, "ca.crt")) != cert {
+		t.Fatal("the saved CA must stay")
+	}
+	if err := os.WriteFile(filepath.Join(dir, "ca.key"), []byte("not a key"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := loadOrBootstrapAuthn(dir, rand.Reader, time.Now(), "lab.example"); err == nil {
+		t.Fatal("a CA key that does not match the certificate must be refused")
+	}
+}
+
+func TestCreateAuthnSecretsRefusesOtherMaterial(t *testing.T) {
+	scheme := runtime.NewScheme()
+	if err := clientgoscheme.AddToScheme(scheme); err != nil {
+		t.Fatal(err)
+	}
+	c := fake.NewClientBuilder().WithScheme(scheme).Build()
+	ctx := context.Background()
+	if err := createAuthnSecrets(ctx, c, []byte("cert"), []byte("key"), "bearer"); err != nil {
+		t.Fatal(err)
+	}
+	if err := createAuthnSecrets(ctx, c, []byte("cert"), []byte("key"), "bearer"); err != nil {
+		t.Fatalf("the same material is kept: %v", err)
+	}
+	err := createAuthnSecrets(ctx, c, []byte("other-cert"), []byte("other-key"), "bearer")
+	if err == nil || !strings.Contains(err.Error(), "cert-manager/bedrock-ca") || strings.Contains(err.Error(), "other-key") {
+		t.Fatalf("another CA must be refused: %v", err)
+	}
+	err = createAuthnSecrets(ctx, c, []byte("cert"), []byte("key"), "other-bearer")
+	if err == nil || !strings.Contains(err.Error(), "bedrock-system/bedrock-authn-webhook-token") || strings.Contains(err.Error(), "other-bearer") {
+		t.Fatalf("another bearer must be refused: %v", err)
+	}
+	var ca corev1.Secret
+	if err := c.Get(ctx, client.ObjectKey{Namespace: "cert-manager", Name: "bedrock-ca"}, &ca); err != nil || string(ca.Data["tls.key"]) != "key" {
+		t.Fatalf("the CA Secret must stay: %v", err)
 	}
 }

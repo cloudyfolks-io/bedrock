@@ -1,7 +1,10 @@
 package cli
 
 import (
+	"bytes"
 	"context"
+	"crypto/rand"
+	"crypto/tls"
 	"flag"
 	"fmt"
 	"io"
@@ -20,6 +23,8 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	"github.com/cloudyfolks-io/bedrock/api/v1alpha1"
+	"github.com/cloudyfolks-io/bedrock/internal/authn/apiserver"
+	"github.com/cloudyfolks-io/bedrock/internal/authn/secret"
 	"github.com/cloudyfolks-io/bedrock/internal/config"
 	"github.com/cloudyfolks-io/bedrock/internal/host"
 	"github.com/cloudyfolks-io/bedrock/internal/k0s"
@@ -27,10 +32,19 @@ import (
 	"github.com/cloudyfolks-io/bedrock/internal/preflight"
 	"github.com/cloudyfolks-io/bedrock/internal/release"
 	"github.com/cloudyfolks-io/bedrock/internal/roles"
+	"github.com/cloudyfolks-io/bedrock/internal/settings"
 	"github.com/cloudyfolks-io/bedrock/internal/ssa"
 )
 
 const initFieldOwner = "bedrock-init"
+
+const (
+	authnBootstrapDir   = "var/lib/bedrock/authn"
+	bootstrapCACert     = "ca.crt"
+	bootstrapCAKey      = "ca.key"
+	bootstrapBearer     = "webhook-token"
+	webhookBearerLength = 32
+)
 
 type InitDeps struct {
 	Exec       host.Exec
@@ -179,6 +193,12 @@ func RunInit(ctx context.Context, args []string, deps InitDeps, stdout, stderr i
 		return fail(stderr, err)
 	}
 
+	step(stdout, "authn bootstrap")
+	authnInputs, caKey, err := loadOrBootstrapAuthn(filepath.Join(deps.Root, authnBootstrapDir), rand.Reader, time.Now(), settings.PlatformHost(cfg.Spec.API.VIP, cfg.Spec.Platform.Host))
+	if err != nil {
+		return fail(stderr, err)
+	}
+
 	if o.imagesDir != "" {
 		step(stdout, "preloading images from %s", o.imagesDir)
 		n, err := release.PreloadImages(o.imagesDir, filepath.Join(o.dataDir, "images"))
@@ -189,13 +209,20 @@ func RunInit(ctx context.Context, args []string, deps InitDeps, stdout, stderr i
 	}
 
 	step(stdout, "installing k0s controller")
-	if !k0sClient.Running(ctx) {
+	running := k0sClient.Running(ctx)
+	if !running {
 		if err := k0sClient.Install(ctx, k0s.InstallOptions{
 			Role: "controller", Force: true, ConfigPath: configPath, EnableWorker: true, NoTaints: true, DynamicConfig: true,
 			Labels: roles.Labels(cfg.Spec.Roles), KubeletExtraArgs: []string{"--node-status-update-frequency=4s"}, DataDir: o.dataDir, KubeletRootDir: k0s.DefaultKubeletRootDir, DisableComponents: k0s.DefaultDisabledComponents,
 		}); err != nil {
 			return fail(stderr, err)
 		}
+	}
+	step(stdout, "writing authn files")
+	if err := writeAuthnFiles(deps.Root, authnFileInputs(cfg.Spec.Platform.TLSMode, authnInputs)); err != nil {
+		return fail(stderr, err)
+	}
+	if !running {
 		if err := k0sClient.Start(ctx); err != nil {
 			return fail(stderr, err)
 		}
@@ -219,6 +246,11 @@ func RunInit(ctx context.Context, args []string, deps InitDeps, stdout, stderr i
 	}
 	step(stdout, "configuring kube-vip")
 	if err := applyKubeVIPConfig(ctx, c, cfg.Spec.API.VIP, cfg.Spec.Network.ManagementInterface); err != nil {
+		return fail(stderr, err)
+	}
+
+	step(stdout, "authn secrets")
+	if err := createAuthnSecrets(ctx, c, authnInputs.CA, caKey, authnInputs.Bearer); err != nil {
 		return fail(stderr, err)
 	}
 
@@ -379,11 +411,8 @@ func removeBundleDir(dir string) {
 }
 
 func writeK0sConfig(path string, cfg v1alpha1.ClusterConfig) error {
-	sans := []string{cfg.Spec.API.VIP}
-	if cfg.Spec.Platform.Host != "" {
-		sans = append(sans, "api."+cfg.Spec.Platform.Host)
-	}
-	raw, err := k0s.RenderConfig(k0s.Config{VIP: cfg.Spec.API.VIP, SANs: sans, PodCIDR: cfg.Spec.Network.Fabric.PodCIDR, ServiceCIDR: cfg.Spec.Network.Fabric.ServiceCIDR})
+	sans := []string{cfg.Spec.API.VIP, "api." + settings.PlatformHost(cfg.Spec.API.VIP, cfg.Spec.Platform.Host)}
+	raw, err := k0s.RenderConfig(k0s.Config{VIP: cfg.Spec.API.VIP, SANs: sans, PodCIDR: cfg.Spec.Network.Fabric.PodCIDR, ServiceCIDR: cfg.Spec.Network.Fabric.ServiceCIDR, APIExtraArgs: apiserver.Args()})
 	if err != nil {
 		return err
 	}
@@ -465,4 +494,160 @@ func waitClusterVersion(ctx context.Context, c client.Client, version string) er
 		case <-ticker.C:
 		}
 	}
+}
+
+func bootstrapAuthn(random io.Reader, now time.Time, host string) (apiserver.Inputs, []byte, error) {
+	certPEM, keyPEM, err := apiserver.NewCA(random, now)
+	if err != nil {
+		return apiserver.Inputs{}, nil, err
+	}
+	bearer, err := secret.Base62(random, webhookBearerLength)
+	if err != nil {
+		return apiserver.Inputs{}, nil, err
+	}
+	return apiserver.Inputs{Host: host, CA: certPEM, Bearer: bearer}, keyPEM, nil
+}
+
+func loadOrBootstrapAuthn(dir string, random io.Reader, now time.Time, host string) (apiserver.Inputs, []byte, error) {
+	missing, err := missingBootstrapFiles(dir)
+	if err != nil {
+		return apiserver.Inputs{}, nil, err
+	}
+	switch len(missing) {
+	case 0:
+		return readAuthnBootstrap(dir, host)
+	case len(bootstrapFiles()):
+		fresh, key, err := bootstrapAuthn(random, now, host)
+		if err != nil {
+			return apiserver.Inputs{}, nil, err
+		}
+		if err := saveAuthnBootstrap(dir, fresh, key); err != nil {
+			return apiserver.Inputs{}, nil, err
+		}
+		return fresh, key, nil
+	default:
+		return apiserver.Inputs{}, nil, fmt.Errorf("authn bootstrap %s lacks %s, restore it from Secrets %s/%s and %s/%s", dir, strings.Join(missing, ", "), apiserver.CASecretNamespace, apiserver.CASecretName, release.SystemNamespace, apiserver.TokenSecretName)
+	}
+}
+
+func bootstrapFiles() []string {
+	return []string{bootstrapCACert, bootstrapCAKey, bootstrapBearer}
+}
+
+func missingBootstrapFiles(dir string) ([]string, error) {
+	var missing []string
+	for _, name := range bootstrapFiles() {
+		_, err := os.Stat(filepath.Join(dir, name))
+		if os.IsNotExist(err) {
+			missing = append(missing, name)
+			continue
+		}
+		if err != nil {
+			return nil, err
+		}
+	}
+	return missing, nil
+}
+
+func readAuthnBootstrap(dir, host string) (apiserver.Inputs, []byte, error) {
+	cert, err := os.ReadFile(filepath.Join(dir, bootstrapCACert))
+	if err != nil {
+		return apiserver.Inputs{}, nil, err
+	}
+	key, err := os.ReadFile(filepath.Join(dir, bootstrapCAKey))
+	if err != nil {
+		return apiserver.Inputs{}, nil, err
+	}
+	bearer, err := os.ReadFile(filepath.Join(dir, bootstrapBearer))
+	if err != nil {
+		return apiserver.Inputs{}, nil, err
+	}
+	if _, err := tls.X509KeyPair(cert, key); err != nil {
+		return apiserver.Inputs{}, nil, fmt.Errorf("authn bootstrap %s: %s does not match %s: %w", dir, bootstrapCAKey, bootstrapCACert, err)
+	}
+	if len(bearer) == 0 {
+		return apiserver.Inputs{}, nil, fmt.Errorf("authn bootstrap %s: %s is empty", dir, bootstrapBearer)
+	}
+	return apiserver.Inputs{Host: host, CA: cert, Bearer: string(bearer)}, key, nil
+}
+
+func saveAuthnBootstrap(dir string, in apiserver.Inputs, key []byte) error {
+	if err := os.MkdirAll(filepath.Dir(dir), 0o755); err != nil {
+		return err
+	}
+	staging, err := os.MkdirTemp(filepath.Dir(dir), "."+filepath.Base(dir)+".")
+	if err != nil {
+		return err
+	}
+	defer os.RemoveAll(staging)
+	for name, content := range map[string][]byte{bootstrapCACert: in.CA, bootstrapCAKey: key, bootstrapBearer: []byte(in.Bearer)} {
+		if err := os.WriteFile(filepath.Join(staging, name), content, 0o600); err != nil {
+			return err
+		}
+	}
+	return os.Rename(staging, dir)
+}
+
+func authnFileInputs(mode string, in apiserver.Inputs) apiserver.Inputs {
+	if mode == "SelfSigned" {
+		return in
+	}
+	return apiserver.Inputs{Host: in.Host, Bearer: in.Bearer}
+}
+
+func writeAuthnFiles(root string, in apiserver.Inputs) error {
+	authentication, err := apiserver.AuthenticationConfig(in)
+	if err != nil {
+		return err
+	}
+	webhook, err := apiserver.WebhookKubeconfig(in)
+	if err != nil {
+		return err
+	}
+	return installAuthnFiles(root, map[string][]byte{apiserver.AuthenticationFile: authentication, apiserver.WebhookFile: webhook})
+}
+
+func installAuthnFiles(root string, files map[string][]byte) error {
+	_, err := apiserver.WriteFiles(filepath.Join(root, apiserver.Dir), files, apiserver.APIServerOwner())
+	return err
+}
+
+func createAuthnSecrets(ctx context.Context, c client.Client, caCert, caKey []byte, bearer string) error {
+	for _, name := range []string{apiserver.CASecretNamespace, release.SystemNamespace} {
+		if err := client.IgnoreAlreadyExists(c.Create(ctx, &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: name}}, client.FieldOwner(initFieldOwner))); err != nil {
+			return err
+		}
+	}
+	token := &corev1.Secret{
+		ObjectMeta: metav1.ObjectMeta{
+			Namespace: release.SystemNamespace,
+			Name:      apiserver.TokenSecretName,
+			Labels:    map[string]string{v1alpha1.LabelAuthn: "true", v1alpha1.LabelKind: "WebhookToken", v1alpha1.LabelName: apiserver.TokenSecretName},
+		},
+		Type: corev1.SecretTypeOpaque,
+		Data: map[string][]byte{"token": []byte(bearer)},
+	}
+	for _, desired := range []*corev1.Secret{apiserver.CASecret(caCert, caKey), token} {
+		if err := ensureAuthnSecret(ctx, c, desired); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func ensureAuthnSecret(ctx context.Context, c client.Client, desired *corev1.Secret) error {
+	err := c.Create(ctx, desired.DeepCopy(), client.FieldOwner(initFieldOwner))
+	if !errors.IsAlreadyExists(err) {
+		return err
+	}
+	var existing corev1.Secret
+	if err := c.Get(ctx, client.ObjectKeyFromObject(desired), &existing); err != nil {
+		return err
+	}
+	for key, value := range desired.Data {
+		if !bytes.Equal(existing.Data[key], value) {
+			return fmt.Errorf("secret %s/%s holds other authn material than %s, restore that directory from the Secret", desired.Namespace, desired.Name, filepath.Join("/", authnBootstrapDir))
+		}
+	}
+	return nil
 }

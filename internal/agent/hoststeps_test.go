@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"reflect"
 	"runtime"
 	"slices"
 	"strings"
@@ -13,6 +14,7 @@ import (
 	"time"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	sigyaml "sigs.k8s.io/yaml"
 
 	"github.com/cloudyfolks-io/bedrock/api/v1alpha1"
 	"github.com/cloudyfolks-io/bedrock/internal/host"
@@ -350,5 +352,146 @@ func TestK0sUpdateRejectsABadStagedBinary(t *testing.T) {
 				t.Fatalf("a bad staged binary must change nothing: calls %v", fake.calls)
 			}
 		})
+	}
+}
+
+func extraArgsOf(t *testing.T, raw []byte) map[string]any {
+	t.Helper()
+	var doc map[string]any
+	if err := sigyaml.Unmarshal(raw, &doc); err != nil {
+		t.Fatal(err)
+	}
+	return doc["spec"].(map[string]any)["api"].(map[string]any)["extraArgs"].(map[string]any)
+}
+
+func TestWithAuthnArgs(t *testing.T) {
+	old := []byte("apiVersion: k0s.k0sproject.io/v1beta1\nkind: ClusterConfig\nspec:\n  api:\n    externalAddress: 10.0.10.10\n    extraArgs:\n      default-not-ready-toleration-seconds: \"30\"\n      authentication-token-webhook-cache-ttl: 10s\n  telemetry:\n    enabled: false\n")
+	added, changed, err := withAuthnArgs(old)
+	if err != nil || !changed {
+		t.Fatalf("changed %v err %v", changed, err)
+	}
+	want := map[string]any{
+		"default-not-ready-toleration-seconds":     "30",
+		"authentication-token-webhook-cache-ttl":   "10s",
+		"authentication-config":                    "/etc/bedrock/authn/authentication.yaml",
+		"authentication-token-webhook-config-file": "/etc/bedrock/authn/webhook.kubeconfig",
+		"authentication-token-webhook-version":     "v1",
+	}
+	if got := extraArgsOf(t, added); !reflect.DeepEqual(got, want) {
+		t.Fatalf("extraArgs %v", got)
+	}
+	var doc map[string]any
+	if err := sigyaml.Unmarshal(added, &doc); err != nil {
+		t.Fatal(err)
+	}
+	if doc["spec"].(map[string]any)["api"].(map[string]any)["externalAddress"] != "10.0.10.10" || doc["spec"].(map[string]any)["telemetry"] == nil {
+		t.Fatalf("other settings must stay: %s", added)
+	}
+	again, changed, err := withAuthnArgs(added)
+	if err != nil || changed || string(again) != string(added) {
+		t.Fatalf("a second pass must change nothing: %v %v", changed, err)
+	}
+	bare, changed, err := withAuthnArgs([]byte("apiVersion: k0s.k0sproject.io/v1beta1\nkind: ClusterConfig\n"))
+	if err != nil || !changed || len(extraArgsOf(t, bare)) != 4 {
+		t.Fatalf("a config without api gains the four flags: %s %v", bare, err)
+	}
+	empty, changed, err := withAuthnArgs(nil)
+	if err != nil || !changed || len(extraArgsOf(t, empty)) != 4 {
+		t.Fatalf("an empty config gains the four flags: %s %v", empty, err)
+	}
+}
+
+func TestK0sUpdateAddsAuthnArgs(t *testing.T) {
+	env, fake := k0sStepEnv(t, "k0s-authn-a", v1alpha1.RoleControlPlane)
+	root := env.Deps.Root
+	writeFixtureFile(t, filepath.Join(root, "usr/local/bin/k0s"), "new k0s")
+	fake.running = newK0s
+	config := filepath.Join(root, "etc/k0s/k0s.yaml")
+	writeFixtureFile(t, config, "apiVersion: k0s.k0sproject.io/v1beta1\nkind: ClusterConfig\nspec:\n  api:\n    extraArgs:\n      default-not-ready-toleration-seconds: \"30\"\n")
+	writeFixtureFile(t, filepath.Join(root, "etc/bedrock/authn/authentication.yaml"), "a")
+	writeFixtureFile(t, filepath.Join(root, "etc/bedrock/authn/webhook.kubeconfig"), "w")
+	outcome, err := k0sUpdate(context.Background(), env)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(fake.calls) == 0 || fake.calls[0] != "systemctl restart --no-block k0scontroller.service" || outcome.Message != "k0s v1.36.3+k0s.0 installed, restarted k0scontroller.service" {
+		t.Fatalf("a controller that gained the flags must restart: %+v %v", outcome, fake.calls)
+	}
+	args := extraArgsOf(t, []byte(readFixtureFile(t, config)))
+	if args["authentication-config"] != "/etc/bedrock/authn/authentication.yaml" || args["default-not-ready-toleration-seconds"] != "30" {
+		t.Fatalf("extraArgs %v", args)
+	}
+	fake.calls = nil
+	outcome, err = k0sUpdate(context.Background(), env)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := []string{statusCall, statusCall, readyzCall(root)}; outcome.Message != "k0s already at v1.36.3+k0s.0" || !slices.Equal(fake.calls, want) {
+		t.Fatalf("a second run must not restart: %+v %v", outcome, fake.calls)
+	}
+}
+
+func TestK0sUpdateLeavesControllersWithoutAuthnFiles(t *testing.T) {
+	env, fake := k0sStepEnv(t, "k0s-authn-b", v1alpha1.RoleControlPlane)
+	writeFixtureFile(t, filepath.Join(env.Deps.Root, "usr/local/bin/k0s"), "new k0s")
+	fake.running = newK0s
+	config := filepath.Join(env.Deps.Root, "etc/k0s/k0s.yaml")
+	writeFixtureFile(t, config, "apiVersion: k0s.k0sproject.io/v1beta1\n")
+	outcome, err := k0sUpdate(context.Background(), env)
+	if err != nil || outcome.Message != "k0s already at v1.36.3+k0s.0" {
+		t.Fatalf("outcome %+v %v", outcome, err)
+	}
+	if readFixtureFile(t, config) != "apiVersion: k0s.k0sproject.io/v1beta1\n" {
+		t.Fatal("flags pointing at missing files would stop kube-apiserver")
+	}
+}
+
+func TestK0sUpdateLeavesWorkerConfig(t *testing.T) {
+	env, fake := k0sStepEnv(t, "k0s-authn-d", v1alpha1.RoleWorkload)
+	root := env.Deps.Root
+	writeFixtureFile(t, filepath.Join(root, "usr/local/bin/k0s"), "new k0s")
+	fake.running = newK0s
+	config := filepath.Join(root, "etc/k0s/k0s.yaml")
+	writeFixtureFile(t, config, "apiVersion: k0s.k0sproject.io/v1beta1\n")
+	writeFixtureFile(t, filepath.Join(root, "etc/bedrock/authn/authentication.yaml"), "a")
+	writeFixtureFile(t, filepath.Join(root, "etc/bedrock/authn/webhook.kubeconfig"), "w")
+	outcome, err := k0sUpdate(context.Background(), env)
+	if err != nil || outcome.Message != "k0s already at v1.36.3+k0s.0" || slices.Contains(fake.calls, "systemctl restart --no-block k0sworker.service") {
+		t.Fatalf("outcome %+v %v %v", outcome, err, fake.calls)
+	}
+	if readFixtureFile(t, config) != "apiVersion: k0s.k0sproject.io/v1beta1\n" {
+		t.Fatal("a worker keeps its k0s config")
+	}
+}
+
+func TestK0sUpdateRestartsWhenKubeAPIServerPredatesTheConfig(t *testing.T) {
+	env, fake := k0sStepEnv(t, "k0s-authn-c", v1alpha1.RoleControlPlane)
+	root := env.Deps.Root
+	writeFixtureFile(t, filepath.Join(root, "usr/local/bin/k0s"), "new k0s")
+	fake.running = newK0s
+	writeFixtureFile(t, filepath.Join(root, "etc/k0s/k0s.yaml"), "apiVersion: k0s.k0sproject.io/v1beta1\n")
+	writeFixtureFile(t, filepath.Join(root, "etc/bedrock/authn/authentication.yaml"), "a")
+	writeFixtureFile(t, filepath.Join(root, "etc/bedrock/authn/webhook.kubeconfig"), "w")
+	fake.restartErr = errors.New("unit busy")
+	if _, err := k0sUpdate(context.Background(), env); err == nil {
+		t.Fatal("a failed restart must fail the step")
+	}
+	fakeAPIServer(t, root, time.Now().Add(-time.Hour))
+	fake.restartErr, fake.calls = nil, nil
+	outcome, err := k0sUpdate(context.Background(), env)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(fake.calls) == 0 || fake.calls[0] != "systemctl restart --no-block k0scontroller.service" || outcome.Message != "k0s v1.36.3+k0s.0 installed, restarted k0scontroller.service" {
+		t.Fatalf("a kube-apiserver older than its config must restart: %+v %v", outcome, fake.calls)
+	}
+	fakeAPIServer(t, root, time.Now().Add(time.Minute))
+	fake.calls = nil
+	outcome, err = k0sUpdate(context.Background(), env)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := []string{statusCall, statusCall, readyzCall(root)}; outcome.Message != "k0s already at v1.36.3+k0s.0" || !slices.Equal(fake.calls, want) {
+		t.Fatalf("a kube-apiserver newer than its config must not restart: %+v %v", outcome, fake.calls)
 	}
 }

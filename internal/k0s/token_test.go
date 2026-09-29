@@ -19,3 +19,25 @@ func TestTokenRoundTrip(t *testing.T) {
 		t.Fatal("garbage must fail")
 	}
 }
+
+func TestTokenCarriesAuthnFiles(t *testing.T) {
+	in := Token{Version: "v0.3.0", Roles: []string{"control-plane"}, K0sToken: "abc", AuthnFiles: map[string][]byte{"authentication.yaml": []byte("a"), "webhook.kubeconfig": []byte("w")}}
+	encoded, err := EncodeToken(in)
+	if err != nil {
+		t.Fatal(err)
+	}
+	out, err := DecodeToken(encoded)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(out.AuthnFiles["authentication.yaml"]) != "a" || string(out.AuthnFiles["webhook.kubeconfig"]) != "w" {
+		t.Fatalf("authn files %v", out.AuthnFiles)
+	}
+	worker, err := EncodeToken(Token{Version: "v0.3.0", Roles: []string{"workload"}, K0sToken: "abc"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if decoded, err := DecodeToken(worker); err != nil || decoded.AuthnFiles != nil {
+		t.Fatalf("a worker token has no authn files: %v %v", decoded.AuthnFiles, err)
+	}
+}

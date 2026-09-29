@@ -75,8 +75,9 @@ func controlPlaneJoinToken(t *testing.T) string {
 	t.Helper()
 	token, err := k0s.EncodeToken(k0s.Token{
 		Version: "v0.1.0-test", Roles: []string{"control-plane"}, K0sToken: "tok",
-		K0sConfig: []byte("apiVersion: k0s.k0sproject.io/v1beta1\nkind: ClusterConfig\n"),
-		VIP:       "10.0.10.10", K0sVersion: "1.36.3+k0s.0", SupportedOS: []string{"ubuntu-24.04"},
+		K0sConfig:  []byte("apiVersion: k0s.k0sproject.io/v1beta1\nkind: ClusterConfig\n"),
+		AuthnFiles: map[string][]byte{"authentication.yaml": []byte("authn-config"), "webhook.kubeconfig": []byte("webhook-config")},
+		VIP:        "10.0.10.10", K0sVersion: "1.36.3+k0s.0", SupportedOS: []string{"ubuntu-24.04"},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -253,5 +254,107 @@ func TestRunJoinWritesMirror(t *testing.T) {
 	}
 	if !strings.Contains(string(got), "https://m.example") {
 		t.Fatalf("hosts.toml %q", got)
+	}
+}
+
+type filesAtStart struct {
+	*host.FakeExec
+	paths   []string
+	present *bool
+}
+
+func (f filesAtStart) Run(ctx context.Context, name string, args ...string) (string, error) {
+	if strings.HasSuffix(strings.TrimSpace(name+" "+strings.Join(args, " ")), "k0s start") {
+		*f.present = allExist(f.paths)
+	}
+	return f.FakeExec.Run(ctx, name, args...)
+}
+
+func allExist(paths []string) bool {
+	for _, path := range paths {
+		if _, err := os.Stat(path); err != nil {
+			return false
+		}
+	}
+	return true
+}
+
+func authnPaths(root string) []string {
+	return []string{filepath.Join(root, "etc", "bedrock", "authn", "authentication.yaml"), filepath.Join(root, "etc", "bedrock", "authn", "webhook.kubeconfig")}
+}
+
+func TestJoinWritesAuthnFiles(t *testing.T) {
+	root, e := fakeHost(t)
+	dataDir := filepath.Join(root, "var", "lib", "k0s")
+	e.Errors["/usr/local/bin/k0s status --data-dir "+dataDir] = &host.ExitError{Code: 1}
+	installArgs := k0s.InstallArgs(k0s.InstallOptions{
+		Role: "controller", Force: true, ConfigPath: filepath.Join(root, "etc", "k0s", "k0s.yaml"), TokenFile: filepath.Join(root, "etc", "k0s", "join-token"),
+		EnableWorker: true, NoTaints: true, DynamicConfig: true, Labels: roles.Labels([]string{"control-plane"}),
+		KubeletExtraArgs: []string{"--node-status-update-frequency=4s"}, DataDir: dataDir, KubeletRootDir: k0s.DefaultKubeletRootDir, DisableComponents: k0s.DefaultDisabledComponents,
+	})
+	e.Responses["/usr/local/bin/k0s "+strings.Join(installArgs, " ")] = ""
+	present := false
+	exec := filesAtStart{FakeExec: e, paths: authnPaths(root), present: &present}
+	deps := InitDeps{Exec: exec, Uid: 0, FreeBytes: func(string) (uint64, error) { return 100 << 30, nil }, Root: root, Executable: fakeExecutable(t)}
+	var out, errOut bytes.Buffer
+	code := RunJoin(context.Background(), []string{"--token", controlPlaneJoinToken(t), "--data-dir", dataDir, "--k0s-bin", "/usr/local/bin/k0s"}, deps, &out, &errOut)
+	if code != 0 {
+		t.Fatalf("exit %d\nstdout %s\nstderr %s", code, out.String(), errOut.String())
+	}
+	if !present {
+		t.Fatal("the authn files must exist before k0s starts")
+	}
+	for path, want := range map[string]string{authnPaths(root)[0]: "authn-config", authnPaths(root)[1]: "webhook-config"} {
+		got, err := os.ReadFile(path)
+		if err != nil || string(got) != want {
+			t.Fatalf("%s = %q %v", path, got, err)
+		}
+		if info, err := os.Stat(path); err != nil || info.Mode().Perm() != 0o600 {
+			t.Fatalf("%s mode %v %v", path, info, err)
+		}
+	}
+}
+
+func TestJoinRefusesControllerTokenWithoutAuthnFiles(t *testing.T) {
+	root, e := fakeHost(t)
+	dataDir := filepath.Join(root, "var", "lib", "k0s")
+	e.Errors["/usr/local/bin/k0s status --data-dir "+dataDir] = &host.ExitError{Code: 1}
+	token, err := k0s.EncodeToken(k0s.Token{
+		Version: "v0.1.0-test", Roles: []string{"control-plane"}, K0sToken: "tok",
+		K0sConfig: []byte("apiVersion: k0s.k0sproject.io/v1beta1\nkind: ClusterConfig\n"),
+		VIP:       "10.0.10.10", K0sVersion: "1.36.3+k0s.0", SupportedOS: []string{"ubuntu-24.04"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	deps := InitDeps{Exec: e, Uid: 0, FreeBytes: func(string) (uint64, error) { return 100 << 30, nil }, Root: root, Executable: fakeExecutable(t)}
+	var out, errOut bytes.Buffer
+	code := RunJoin(context.Background(), []string{"--token", token, "--data-dir", dataDir, "--k0s-bin", "/usr/local/bin/k0s"}, deps, &out, &errOut)
+	if code != 1 || !strings.Contains(errOut.String(), "authentication.yaml") {
+		t.Fatalf("exit %d stderr %s", code, errOut.String())
+	}
+	if _, err := os.Stat(filepath.Join(root, "etc", "k0s", "k0s.yaml")); !os.IsNotExist(err) {
+		t.Fatal("k0s.yaml must not be written without the authn files")
+	}
+	for _, call := range e.Calls {
+		if strings.Contains(call, "k0s install") {
+			t.Fatal("k0s must not be installed without the authn files")
+		}
+	}
+}
+
+func TestCheckAuthnFilesRefusesOtherNames(t *testing.T) {
+	complete := map[string][]byte{"authentication.yaml": []byte("a"), "webhook.kubeconfig": []byte("w")}
+	if err := checkAuthnFiles(complete); err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{"../../usr/local/bin/k0s", "ca.key"} {
+		files := map[string][]byte{"authentication.yaml": []byte("a"), "webhook.kubeconfig": []byte("w"), name: []byte("x")}
+		if err := checkAuthnFiles(files); err == nil || !strings.Contains(err.Error(), name) {
+			t.Fatalf("a token file named %q must be refused: %v", name, err)
+		}
+	}
+	if err := checkAuthnFiles(map[string][]byte{"authentication.yaml": []byte("a"), "webhook.kubeconfig": nil}); err == nil || !strings.Contains(err.Error(), "webhook.kubeconfig") {
+		t.Fatalf("an empty webhook file must be refused: %v", err)
 	}
 }

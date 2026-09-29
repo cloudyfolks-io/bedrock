@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/cloudyfolks-io/bedrock/api/v1alpha1"
+	"github.com/cloudyfolks-io/bedrock/internal/authn/apiserver"
 	"github.com/cloudyfolks-io/bedrock/internal/host"
 	"github.com/cloudyfolks-io/bedrock/internal/k0s"
 	"github.com/cloudyfolks-io/bedrock/internal/preflight"
@@ -127,6 +128,9 @@ func RunJoin(ctx context.Context, args []string, deps InitDeps, stdout, stderr i
 		if len(token.K0sConfig) == 0 {
 			return fail(stderr, fmt.Errorf("join: token has no k0s config for a control-plane join"))
 		}
+		if err := checkAuthnFiles(token.AuthnFiles); err != nil {
+			return fail(stderr, err)
+		}
 		configPath := filepath.Join(deps.Root, "etc", "k0s", "k0s.yaml")
 		if err := os.WriteFile(configPath, token.K0sConfig, 0o600); err != nil {
 			return fail(stderr, err)
@@ -141,6 +145,11 @@ func RunJoin(ctx context.Context, args []string, deps InitDeps, stdout, stderr i
 		opts.Force = true
 		if err := k0sClient.Install(ctx, opts); err != nil {
 			return fail(stderr, err)
+		}
+		if controlPlane {
+			if err := installAuthnFiles(deps.Root, token.AuthnFiles); err != nil {
+				return fail(stderr, err)
+			}
 		}
 		if err := k0sClient.Start(ctx); err != nil {
 			return fail(stderr, err)
@@ -159,4 +168,18 @@ func RunJoin(ctx context.Context, args []string, deps InitDeps, stdout, stderr i
 	fmt.Fprintf(stdout, "joined as %s\n", strings.Join(nodeRoles, ","))
 	removeBundleDir(bundleDir)
 	return 0
+}
+
+func checkAuthnFiles(files map[string][]byte) error {
+	for name := range files {
+		if name != apiserver.AuthenticationFile && name != apiserver.WebhookFile {
+			return fmt.Errorf("join: token carries an unexpected authn file %q", name)
+		}
+	}
+	for _, name := range []string{apiserver.AuthenticationFile, apiserver.WebhookFile} {
+		if len(files[name]) == 0 {
+			return fmt.Errorf("join: token has no %s for a control-plane join, create a new one with bedrock token create", name)
+		}
+	}
+	return nil
 }

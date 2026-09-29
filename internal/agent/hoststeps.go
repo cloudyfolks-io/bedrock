@@ -3,14 +3,17 @@ package agent
 import (
 	"context"
 	"fmt"
+	"maps"
 	"os"
 	"path/filepath"
 	"runtime"
 	"time"
 
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	sigyaml "sigs.k8s.io/yaml"
 
 	"github.com/cloudyfolks-io/bedrock/api/v1alpha1"
+	"github.com/cloudyfolks-io/bedrock/internal/authn/apiserver"
 	"github.com/cloudyfolks-io/bedrock/internal/depot"
 	"github.com/cloudyfolks-io/bedrock/internal/host"
 	"github.com/cloudyfolks-io/bedrock/internal/k0s"
@@ -62,7 +65,10 @@ func reboot(ctx context.Context, env StepEnv) (Outcome, error) {
 	return Outcome{Message: "reboot pending", Reboot: true}, nil
 }
 
-const k0sStatusReads = 6
+const (
+	k0sStatusReads = 6
+	k0sConfigFile  = "etc/k0s/k0s.yaml"
+)
 
 type k0sProbe func(ctx context.Context, env StepEnv) string
 
@@ -82,9 +88,14 @@ func k0sUpdate(ctx context.Context, env StepEnv) (Outcome, error) {
 	if err != nil {
 		return Outcome{}, err
 	}
+	reconfigured, err := ensureAuthnArgs(env.Deps.Root, service)
+	if err != nil {
+		return Outcome{}, err
+	}
+	restart := reconfigured || k0sConfigNewerThanAPIServer(env.Deps.Root, service)
 	installed := filepath.Join(env.Deps.Root, k0s.DefaultBinary)
 	current := hasChecksum(installed, checksum)
-	if current && settledK0sVersion(ctx, env) == version {
+	if current && !restart && settledK0sVersion(ctx, env) == version {
 		if err := awaitK0s(ctx, env, service.Probes); err != nil {
 			return Outcome{}, err
 		}
@@ -189,4 +200,83 @@ func lastObservation(previous, current string, deadline error) string {
 		return previous
 	}
 	return current
+}
+
+func ensureAuthnArgs(root string, service k0sService) (bool, error) {
+	if service.Unit != k0sControllerUnit || !authnFilesPresent(root) {
+		return false, nil
+	}
+	path := filepath.Join(root, k0sConfigFile)
+	current, err := os.ReadFile(path)
+	if err != nil {
+		return false, err
+	}
+	next, changed, err := withAuthnArgs(current)
+	if err != nil || !changed {
+		return false, err
+	}
+	if _, err := host.ReplaceFile(path, string(next), 0o600); err != nil {
+		return false, err
+	}
+	return true, nil
+}
+
+func authnFilesPresent(root string) bool {
+	for _, name := range []string{apiserver.AuthenticationFile, apiserver.WebhookFile} {
+		if _, err := os.Stat(filepath.Join(root, authnDir, name)); err != nil {
+			return false
+		}
+	}
+	return true
+}
+
+func k0sConfigNewerThanAPIServer(root string, service k0sService) bool {
+	if service.Unit != k0sControllerUnit {
+		return false
+	}
+	start, ok := apiserverStartTime(root)
+	if !ok {
+		return false
+	}
+	info, err := os.Stat(filepath.Join(root, k0sConfigFile))
+	return err == nil && info.ModTime().After(start.Add(apiserverStartSlack))
+}
+
+func withAuthnArgs(k0sYAML []byte) ([]byte, bool, error) {
+	var decoded map[string]any
+	if err := sigyaml.Unmarshal(k0sYAML, &decoded); err != nil {
+		return nil, false, err
+	}
+	doc := map[string]any{}
+	maps.Copy(doc, decoded)
+	spec := childMap(doc, "spec")
+	api := childMap(spec, "api")
+	args := childMap(api, "extraArgs")
+	changed := false
+	for name, value := range apiserver.Args() {
+		if _, ok := args[name]; ok {
+			continue
+		}
+		args[name] = value
+		changed = true
+	}
+	if !changed {
+		return k0sYAML, false, nil
+	}
+	api["extraArgs"] = args
+	spec["api"] = api
+	doc["spec"] = spec
+	out, err := sigyaml.Marshal(doc)
+	if err != nil {
+		return nil, false, err
+	}
+	return out, true, nil
+}
+
+func childMap(parent map[string]any, key string) map[string]any {
+	child, ok := parent[key].(map[string]any)
+	if !ok {
+		return map[string]any{}
+	}
+	return child
 }

@@ -6,11 +6,13 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"strings"
 
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	"github.com/cloudyfolks-io/bedrock/api/v1alpha1"
+	"github.com/cloudyfolks-io/bedrock/internal/authn/apiserver"
 	"github.com/cloudyfolks-io/bedrock/internal/host"
 	"github.com/cloudyfolks-io/bedrock/internal/k0s"
 )
@@ -45,7 +47,7 @@ func tokenCommand(args []string, stdout, stderr io.Writer) int {
 	if err != nil {
 		return fail(stderr, err)
 	}
-	token, err := buildToken(context.Background(), c, k0s.Client{Exec: host.RealExec{}, Binary: *k0sBin}, nodeRoles, *expiry, "/etc/k0s/k0s.yaml")
+	token, err := buildToken(context.Background(), c, k0s.Client{Exec: host.RealExec{}, Binary: *k0sBin}, nodeRoles, *expiry, "/etc/k0s/k0s.yaml", apiserver.Dir)
 	if err != nil {
 		return fail(stderr, err)
 	}
@@ -57,7 +59,7 @@ func tokenCommand(args []string, stdout, stderr io.Writer) int {
 	return 0
 }
 
-func buildToken(ctx context.Context, c client.Client, k0sClient k0s.Client, nodeRoles []string, expiry, k0sConfigPath string) (k0s.Token, error) {
+func buildToken(ctx context.Context, c client.Client, k0sClient k0s.Client, nodeRoles []string, expiry, k0sConfigPath, authnDir string) (k0s.Token, error) {
 	var cluster v1alpha1.Cluster
 	if err := c.Get(ctx, client.ObjectKey{Name: v1alpha1.ClusterName}, &cluster); err != nil {
 		return k0s.Token{}, err
@@ -71,6 +73,7 @@ func buildToken(ctx context.Context, c client.Client, k0sClient k0s.Client, node
 	}
 	k0sRole := "worker"
 	var k0sConfig []byte
+	var authnFiles map[string][]byte
 	if hasRole(nodeRoles, v1alpha1.RoleControlPlane) {
 		k0sRole = "controller"
 		raw, err := os.ReadFile(k0sConfigPath)
@@ -78,10 +81,27 @@ func buildToken(ctx context.Context, c client.Client, k0sClient k0s.Client, node
 			return k0s.Token{}, err
 		}
 		k0sConfig = raw
+		files, err := readAuthnFiles(authnDir)
+		if err != nil {
+			return k0s.Token{}, err
+		}
+		authnFiles = files
 	}
 	k0sToken, err := k0sClient.CreateToken(ctx, k0sRole, expiry)
 	if err != nil {
 		return k0s.Token{}, err
 	}
-	return k0s.Token{Version: rel.Spec.Version, Roles: nodeRoles, K0sToken: k0sToken, K0sConfig: k0sConfig, VIP: cluster.Spec.API.VIP, Image: rel.Spec.Image, K0sVersion: rel.Spec.K0sVersion, K0sChecksums: rel.Spec.K0sChecksums, SupportedOS: rel.Spec.SupportedOS, Mirror: cluster.Spec.Registry.Mirror}, nil
+	return k0s.Token{Version: rel.Spec.Version, Roles: nodeRoles, K0sToken: k0sToken, K0sConfig: k0sConfig, AuthnFiles: authnFiles, VIP: cluster.Spec.API.VIP, Image: rel.Spec.Image, K0sVersion: rel.Spec.K0sVersion, K0sChecksums: rel.Spec.K0sChecksums, SupportedOS: rel.Spec.SupportedOS, Mirror: cluster.Spec.Registry.Mirror}, nil
+}
+
+func readAuthnFiles(dir string) (map[string][]byte, error) {
+	files := map[string][]byte{}
+	for _, name := range []string{apiserver.AuthenticationFile, apiserver.WebhookFile} {
+		raw, err := os.ReadFile(filepath.Join(dir, name))
+		if err != nil {
+			return nil, fmt.Errorf("controller token needs %s: %w", name, err)
+		}
+		files[name] = raw
+	}
+	return files, nil
 }
