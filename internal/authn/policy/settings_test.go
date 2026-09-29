@@ -52,3 +52,20 @@ func TestIssuer(t *testing.T) {
 		t.Fatalf("Issuer = %q", got)
 	}
 }
+
+func TestParseSettingsEmptyValuesUseDefaults(t *testing.T) {
+	values := map[string]string{}
+	for key := range defaultValues() {
+		values[key] = ""
+	}
+	for _, input := range []map[string]string{values, {}} {
+		got, err := ParseSettings(input, "10.0.0.250")
+		if err != nil {
+			t.Fatal(err)
+		}
+		want := Settings{RequireSecondFactor: false, SessionTTL: 12 * time.Hour, RefreshTTL: 720 * time.Hour, LockoutThreshold: 5, Host: "10-0-0-250.sslip.io", TLSMode: "SelfSigned"}
+		if got != want {
+			t.Fatalf("ParseSettings empty values = %+v, want %+v", got, want)
+		}
+	}
+}

@@ -22,19 +22,19 @@ type Settings struct {
 }
 
 func ParseSettings(values map[string]string, vip string) (Settings, error) {
-	requireSecondFactor, err := strconv.ParseBool(values["authn.require-second-factor"])
+	requireSecondFactor, err := strconv.ParseBool(settingValue(values, "authn.require-second-factor"))
 	if err != nil {
 		return Settings{}, fmt.Errorf("authn.require-second-factor: %w", err)
 	}
-	sessionTTL, err := time.ParseDuration(values["authn.session-ttl"])
+	sessionTTL, err := time.ParseDuration(settingValue(values, "authn.session-ttl"))
 	if err != nil {
 		return Settings{}, fmt.Errorf("authn.session-ttl: %w", err)
 	}
-	refreshTTL, err := time.ParseDuration(values["authn.refresh-ttl"])
+	refreshTTL, err := time.ParseDuration(settingValue(values, "authn.refresh-ttl"))
 	if err != nil {
 		return Settings{}, fmt.Errorf("authn.refresh-ttl: %w", err)
 	}
-	lockoutThreshold, err := strconv.Atoi(values["authn.lockout-threshold"])
+	lockoutThreshold, err := strconv.Atoi(settingValue(values, "authn.lockout-threshold"))
 	if err != nil {
 		return Settings{}, fmt.Errorf("authn.lockout-threshold: %w", err)
 	}
@@ -43,9 +43,17 @@ func ParseSettings(values map[string]string, vip string) (Settings, error) {
 		SessionTTL:          sessionTTL,
 		RefreshTTL:          refreshTTL,
 		LockoutThreshold:    lockoutThreshold,
-		Host:                settings.PlatformHost(vip, values["platform.host"]),
-		TLSMode:             values["platform.tls-mode"],
+		Host:                settings.PlatformHost(vip, settingValue(values, "platform.host")),
+		TLSMode:             settingValue(values, "platform.tls-mode"),
 	}, nil
+}
+
+func settingValue(values map[string]string, key string) string {
+	if value := values[key]; value != "" {
+		return value
+	}
+	def, _ := settings.Lookup(key)
+	return def.Default
 }
 
 func ReadSettings(ctx context.Context, c client.Reader) (Settings, error) {
@@ -53,14 +61,9 @@ func ReadSettings(ctx context.Context, c client.Reader) (Settings, error) {
 	if err := c.List(ctx, &list); err != nil {
 		return Settings{}, err
 	}
-	values := map[string]string{}
-	for _, def := range settings.Catalog() {
-		values[def.Key] = def.Default
-	}
+	values := make(map[string]string, len(list.Items))
 	for _, setting := range list.Items {
-		if setting.Spec.Value != "" {
-			values[setting.Name] = setting.Spec.Value
-		}
+		values[setting.Name] = setting.Spec.Value
 	}
 	var cluster v1alpha1.Cluster
 	if err := c.Get(ctx, client.ObjectKey{Name: v1alpha1.ClusterName}, &cluster); err != nil {
