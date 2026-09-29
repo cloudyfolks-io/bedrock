@@ -213,6 +213,119 @@ func TestKubeconfigMergeKeepsOtherContexts(t *testing.T) {
 	}
 }
 
+func TestWriteKubeconfigExplicitTrueUsesDefaultPath(t *testing.T) {
+	op := newFakeOP(t, successTokens("alice"))
+	home := t.TempDir()
+	deps := LoginDeps{Home: home, HTTP: func(string) (*http.Client, error) { return op.Client(), nil }, Open: func(string) error { t.Fatal("must not open a browser"); return nil }, Now: time.Now}
+	var stdout, stderr bytes.Buffer
+	if code := RunLogin(context.Background(), []string{"--server", op.URL, "--write-kubeconfig=true"}, deps, &stdout, &stderr); code != 0 {
+		t.Fatalf("exit %d stderr %q", code, stderr.String())
+	}
+	defaultPath := filepath.Join(home, ".kube", "config")
+	if _, err := os.Stat(defaultPath); err != nil {
+		t.Fatalf("expected kubeconfig at default path: %v", err)
+	}
+}
+
+func TestWriteKubeconfigFalseDisablesWrite(t *testing.T) {
+	op := newFakeOP(t, successTokens("alice"))
+	home := t.TempDir()
+	deps := LoginDeps{Home: home, HTTP: func(string) (*http.Client, error) { return op.Client(), nil }, Open: func(string) error { t.Fatal("must not open a browser"); return nil }, Now: time.Now}
+	var stdout, stderr bytes.Buffer
+	if code := RunLogin(context.Background(), []string{"--server", op.URL, "--write-kubeconfig=false"}, deps, &stdout, &stderr); code != 0 {
+		t.Fatalf("exit %d stderr %q", code, stderr.String())
+	}
+	if stdout.String() != "logged in as alice\n" {
+		t.Fatalf("stdout %q", stdout.String())
+	}
+	if _, err := os.Stat(filepath.Join(home, ".kube", "config")); !os.IsNotExist(err) {
+		t.Fatalf("expected no kubeconfig written, stat err %v", err)
+	}
+	if _, err := os.Stat("false"); !os.IsNotExist(err) {
+		t.Fatal("must not write a file literally named false")
+	}
+}
+
+func TestWriteKubeconfigExplicitPath(t *testing.T) {
+	op := newFakeOP(t, successTokens("alice"))
+	home := t.TempDir()
+	path := filepath.Join(t.TempDir(), "custom", "kubeconfig")
+	deps := LoginDeps{Home: home, HTTP: func(string) (*http.Client, error) { return op.Client(), nil }, Open: func(string) error { t.Fatal("must not open a browser"); return nil }, Now: time.Now}
+	var stdout, stderr bytes.Buffer
+	if code := RunLogin(context.Background(), []string{"--server", op.URL, "--write-kubeconfig=" + path}, deps, &stdout, &stderr); code != 0 {
+		t.Fatalf("exit %d stderr %q", code, stderr.String())
+	}
+	if _, err := os.Stat(path); err != nil {
+		t.Fatalf("expected kubeconfig at %s: %v", path, err)
+	}
+}
+
+func TestWriteKubeconfigModeIsPrivate(t *testing.T) {
+	op := newFakeOP(t, successTokens("alice"))
+	home := t.TempDir()
+	deps := LoginDeps{Home: home, HTTP: func(string) (*http.Client, error) { return op.Client(), nil }, Open: func(string) error { t.Fatal("must not open a browser"); return nil }, Now: time.Now}
+	var stdout, stderr bytes.Buffer
+	if code := RunLogin(context.Background(), []string{"--server", op.URL, "--write-kubeconfig"}, deps, &stdout, &stderr); code != 0 {
+		t.Fatalf("exit %d stderr %q", code, stderr.String())
+	}
+	info, err := os.Stat(filepath.Join(home, ".kube", "config"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if info.Mode().Perm() != 0o600 {
+		t.Fatalf("mode %v", info.Mode().Perm())
+	}
+}
+
+func TestWriteKubeconfigFollowsSymlink(t *testing.T) {
+	op := newFakeOP(t, successTokens("alice"))
+	home := t.TempDir()
+	realPath := filepath.Join(t.TempDir(), "config")
+	existing := clientcmdapi.NewConfig()
+	existing.Clusters["other"] = &clientcmdapi.Cluster{Server: "https://other.example.com"}
+	existing.Contexts["other"] = &clientcmdapi.Context{Cluster: "other"}
+	existing.CurrentContext = "other"
+	if err := clientcmd.WriteToFile(*existing, realPath); err != nil {
+		t.Fatal(err)
+	}
+	kubeconfigPath := filepath.Join(home, ".kube", "config")
+	if err := os.MkdirAll(filepath.Dir(kubeconfigPath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(realPath, kubeconfigPath); err != nil {
+		t.Fatal(err)
+	}
+	deps := LoginDeps{Home: home, HTTP: func(string) (*http.Client, error) { return op.Client(), nil }, Open: func(string) error { t.Fatal("must not open a browser"); return nil }, Now: time.Now}
+	var stdout, stderr bytes.Buffer
+	if code := RunLogin(context.Background(), []string{"--server", op.URL, "--write-kubeconfig"}, deps, &stdout, &stderr); code != 0 {
+		t.Fatalf("exit %d stderr %q", code, stderr.String())
+	}
+	linkInfo, err := os.Lstat(kubeconfigPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if linkInfo.Mode()&os.ModeSymlink == 0 {
+		t.Fatal("the kubeconfig path must remain a symlink")
+	}
+	target, err := os.Readlink(kubeconfigPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if target != realPath {
+		t.Fatalf("symlink target changed to %q", target)
+	}
+	merged, err := clientcmd.LoadFromFile(realPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := merged.Contexts["other"]; !ok {
+		t.Fatal("the merge must keep the other context")
+	}
+	if _, ok := merged.Contexts["bedrock"]; !ok {
+		t.Fatal("the merge must add the bedrock context")
+	}
+}
+
 func TestExecCredentialRefreshes(t *testing.T) {
 	op := newFakeOP(t, successTokens("alice"))
 	home := t.TempDir()

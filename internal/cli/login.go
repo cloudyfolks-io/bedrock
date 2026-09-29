@@ -79,8 +79,15 @@ type optionalPath struct {
 func (p *optionalPath) String() string { return p.value }
 
 func (p *optionalPath) Set(value string) error {
-	p.set = true
-	if value != "true" {
+	switch value {
+	case "false":
+		p.set = false
+		p.value = ""
+	case "true":
+		p.set = true
+		p.value = ""
+	default:
+		p.set = true
 		p.value = value
 	}
 	return nil
@@ -95,7 +102,7 @@ func absolutePath(path string) (string, error) {
 	return filepath.Abs(path)
 }
 
-func atomicWriteFile(path string, data []byte, perm os.FileMode) error {
+func atomicWriteFile(path string, data []byte) error {
 	dir := filepath.Dir(path)
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return err
@@ -114,15 +121,22 @@ func atomicWriteFile(path string, data []byte, perm os.FileMode) error {
 		os.Remove(tempPath)
 		return err
 	}
-	if err := os.Chmod(tempPath, perm); err != nil {
-		os.Remove(tempPath)
-		return err
-	}
 	if err := os.Rename(tempPath, path); err != nil {
 		os.Remove(tempPath)
 		return err
 	}
 	return nil
+}
+
+func resolveSymlink(path string) (string, error) {
+	resolved, err := filepath.EvalSymlinks(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return path, nil
+		}
+		return "", err
+	}
+	return resolved, nil
 }
 
 func writeKubeconfigFile(ctx context.Context, c *http.Client, issuer, caFile, path string) error {
@@ -142,7 +156,11 @@ func writeKubeconfigFile(ctx context.Context, c *http.Client, issuer, caFile, pa
 	if err != nil {
 		return err
 	}
-	existing, err := clientcmd.LoadFromFile(path)
+	target, err := resolveSymlink(path)
+	if err != nil {
+		return err
+	}
+	existing, err := clientcmd.LoadFromFile(target)
 	if os.IsNotExist(err) {
 		existing = clientcmdapi.NewConfig()
 	} else if err != nil {
@@ -162,7 +180,7 @@ func writeKubeconfigFile(ctx context.Context, c *http.Client, issuer, caFile, pa
 	if err != nil {
 		return err
 	}
-	return atomicWriteFile(path, merged, 0o600)
+	return atomicWriteFile(target, merged)
 }
 
 func RunLogin(ctx context.Context, args []string, deps LoginDeps, stdout, stderr io.Writer) int {
@@ -173,7 +191,7 @@ func RunLogin(ctx context.Context, args []string, deps LoginDeps, stdout, stderr
 	browser := flags.Bool("browser", false, "use the loopback authorization code flow instead of the device flow")
 	caFile := flags.String("ca-file", "", "additional CA certificate for the authn server")
 	var writeKubeconfig optionalPath
-	flags.Var(&writeKubeconfig, "write-kubeconfig", "write a kubeconfig for the cluster, optionally =<path> (default ~/.kube/config)")
+	flags.Var(&writeKubeconfig, "write-kubeconfig", "write a kubeconfig for the cluster, optionally =<path> (default ~/.kube/config, =false to skip)")
 	execCredential := flags.Bool("exec-credential", false, "print an ExecCredential instead of logging in interactively")
 	if err := flags.Parse(args); err != nil {
 		return 2
