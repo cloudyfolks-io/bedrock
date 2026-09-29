@@ -65,6 +65,8 @@ func AfterMethod(state v1alpha1.LoginState, method string, result methods.Result
 		return next(primaryDone(state, method, Required(facts, method, result.Subject.AMR)), facts)
 	case len(state.Required) == 0 || !isSecondFactor(method):
 		return failed(state, methods.FailureInvalidCredentials)
+	case state.Step == methods.ChallengeTOTPEnroll && method != v1alpha1.MethodTOTP:
+		return failed(state, methods.FailureInvalidCredentials)
 	case state.Step == methods.ChallengeTOTPEnroll:
 		return recoveryCodesStep(factorDone(state, method))
 	}

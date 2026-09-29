@@ -414,3 +414,38 @@ func TestCompletedLoginCannotBeAdvancedAgain(t *testing.T) {
 		t.Fatalf("a completed login must not accept a further factor: %+v", viaTOTP)
 	}
 }
+
+func TestRecoveryCannotCompleteAFreshEnrollment(t *testing.T) {
+	alice := localUser("alice")
+	facts := Facts{User: alice, Settings: policy.Settings{RequireSecondFactor: true}, Enrolled: []string{v1alpha1.MethodPassword, v1alpha1.MethodRecovery}}
+	step := afterPassword(t, facts)
+	if step.Challenge.Type != methods.ChallengeTOTPEnroll || step.State.Step != methods.ChallengeTOTPEnroll {
+		t.Fatalf("setup: %+v, want totp-enroll for a user with no totp credential", step)
+	}
+	refused := AfterMethod(step.State, v1alpha1.MethodRecovery, passed(alice, "otp"), facts)
+	if refused.Complete || refused.Challenge.Type != methods.ChallengeErrorType {
+		t.Fatalf("a recovery code must not complete a fresh totp enrollment: %+v", refused)
+	}
+	stillEnrolling := AfterMethod(step.State, v1alpha1.MethodTOTP, failedWith(methods.FailureInvalidCode), facts)
+	if stillEnrolling.Challenge.Type != methods.ChallengeTOTPEnroll || stillEnrolling.State.Step != methods.ChallengeTOTPEnroll {
+		t.Fatalf("only a totp answer belongs on the enroll step: %+v", stillEnrolling)
+	}
+}
+
+func TestErroredLoginCannotAdvance(t *testing.T) {
+	alice := localUser("alice")
+	facts := Facts{User: alice, Enrolled: []string{v1alpha1.MethodPassword}}
+	cases := map[string]v1alpha1.LoginState{
+		"disabled error": failed(v1alpha1.LoginState{Step: methods.ChallengePassword, Username: "alice"}, methods.FailureDisabled).State,
+		"expired error":  failed(v1alpha1.LoginState{Step: methods.ChallengeDeviceConfirm}, errorExpired).State,
+	}
+	for name, errored := range cases {
+		if errored.Step != methods.ChallengeErrorType {
+			t.Fatalf("%s: setup %+v, want the error step", name, errored)
+		}
+		step := AfterMethod(errored, v1alpha1.MethodPassword, passed(alice, "pwd"), facts)
+		if step.Complete || step.Challenge.Type != methods.ChallengeErrorType {
+			t.Fatalf("%s: an errored login must not advance: %+v", name, step)
+		}
+	}
+}
