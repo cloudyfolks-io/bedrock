@@ -4,17 +4,17 @@ import { I18nProvider } from "@lingui/react";
 import { LanguageMenu, ThemeProvider } from "@bedrock/design";
 import { Account } from "./account/Account";
 import * as api from "./api";
-import { activate, pickLocale, readStoredLocale, type Locale } from "./i18n";
+import { activate, locales, pickLocale, readStoredLocale, type Locale } from "./i18n";
 import { authRequestFromLocation, routeFor } from "./router";
 import { DeviceEntry } from "./screens/DeviceEntry";
 import { screenFor } from "./screens";
 import type { Challenge } from "./types";
 
-const languageOptions = [
-  { value: "en", label: "English" },
-  { value: "fa", label: "فارسی" },
-  { value: "ar", label: "العربية" },
-];
+export function languageLabel(locale: Locale): string {
+  return new Intl.DisplayNames([locale], { type: "language" }).of(locale) ?? locale;
+}
+
+const languageOptions = locales.map((locale) => ({ value: locale, label: languageLabel(locale) }));
 
 function loadChallenge(search: string): Promise<Challenge> {
   const authRequest = authRequestFromLocation(search);
