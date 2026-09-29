@@ -366,6 +366,72 @@ func TestTOTPEnrollRefusesWhenConfirmedAfterItsRead(t *testing.T) {
 	}
 }
 
+func TestTOTPEnrollAnnotatesNewCredentialWithTheEnrollmentTime(t *testing.T) {
+	c, _ := startTestEnv(t)
+	user := createUser(t, c, "kim")
+	method := NewTOTP(c, rand.Reader, fixedIssuer("sso.example.test"))
+
+	before := time.Now()
+	if _, err := method.Enroll(context.Background(), user, Answer{}); err != nil {
+		t.Fatal(err)
+	}
+	after := time.Now()
+
+	name := v1alpha1.CredentialName(user.Name, v1alpha1.MethodTOTP)
+	var cred v1alpha1.Credential
+	if err := c.Get(context.Background(), client.ObjectKey{Namespace: "bedrock-system", Name: name}, &cred); err != nil {
+		t.Fatal(err)
+	}
+	writtenAt, err := time.Parse(time.RFC3339Nano, cred.Annotations[v1alpha1.AnnotationEnrollWriteAt])
+	if err != nil {
+		t.Fatalf("a new credential must carry a parseable enrollment-time annotation: %v", err)
+	}
+	if writtenAt.Before(before.Add(-time.Second)) || writtenAt.After(after.Add(time.Second)) {
+		t.Fatalf("enrollment-time annotation %v must be near the call, between %v and %v", writtenAt, before, after)
+	}
+}
+
+func TestTOTPEnrollAnnotatesReEnrollmentWithTheEnrollmentTime(t *testing.T) {
+	c, _ := startTestEnv(t)
+	user := createUser(t, c, "lena")
+	method := NewTOTP(c, rand.Reader, fixedIssuer("sso.example.test"))
+
+	if _, err := method.Enroll(context.Background(), user, Answer{}); err != nil {
+		t.Fatal(err)
+	}
+	name := v1alpha1.CredentialName(user.Name, v1alpha1.MethodTOTP)
+	var first v1alpha1.Credential
+	if err := c.Get(context.Background(), client.ObjectKey{Namespace: "bedrock-system", Name: name}, &first); err != nil {
+		t.Fatal(err)
+	}
+	firstWrite, err := time.Parse(time.RFC3339Nano, first.Annotations[v1alpha1.AnnotationEnrollWriteAt])
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	time.Sleep(time.Millisecond)
+	before := time.Now()
+	if _, err := method.Enroll(context.Background(), user, Answer{}); err != nil {
+		t.Fatal(err)
+	}
+	after := time.Now()
+
+	var second v1alpha1.Credential
+	if err := c.Get(context.Background(), client.ObjectKey{Namespace: "bedrock-system", Name: name}, &second); err != nil {
+		t.Fatal(err)
+	}
+	secondWrite, err := time.Parse(time.RFC3339Nano, second.Annotations[v1alpha1.AnnotationEnrollWriteAt])
+	if err != nil {
+		t.Fatalf("a re-enrolled credential must carry a parseable enrollment-time annotation: %v", err)
+	}
+	if !secondWrite.After(firstWrite) {
+		t.Fatalf("re-enrollment must refresh the annotation, first %v second %v", firstWrite, secondWrite)
+	}
+	if secondWrite.Before(before.Add(-time.Second)) || secondWrite.After(after.Add(time.Second)) {
+		t.Fatalf("re-enrollment annotation %v must be near the second call, between %v and %v", secondWrite, before, after)
+	}
+}
+
 func TestTOTPCompleteRejectsAMalformedStoredSeed(t *testing.T) {
 	c, _ := startTestEnv(t)
 	user := createUser(t, c, "harper")
