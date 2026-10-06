@@ -106,6 +106,7 @@ func DialLDAP(ctx context.Context, provider v1alpha1.IdentityProvider, caBundle 
 	if err != nil {
 		return nil, err
 	}
+	tlsConfig.ServerName = parsed.Hostname()
 	timeout := ldapDialTimeout(ctx)
 	dialer := &net.Dialer{Timeout: timeout}
 	outcome := make(chan ldapDialOutcome, 1)

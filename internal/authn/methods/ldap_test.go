@@ -15,6 +15,7 @@ import (
 	"testing"
 	"time"
 
+	ber "github.com/go-asn1-ber/asn1-ber"
 	"github.com/go-ldap/ldap/v3"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -180,6 +181,55 @@ func selfSignedServerCert(t *testing.T, host string) (tls.Certificate, []byte) {
 		t.Fatal(err)
 	}
 	return cert, certPEM
+}
+
+func serveStartTLSHandshake(listener net.Listener, cert tls.Certificate) {
+	raw, err := listener.Accept()
+	if err != nil {
+		return
+	}
+	packet, err := ber.ReadPacket(raw)
+	if err != nil {
+		raw.Close()
+		return
+	}
+	messageID := packet.Children[0].Value.(int64)
+	response := ber.Encode(ber.ClassUniversal, ber.TypeConstructed, ber.TagSequence, nil, "LDAP Response")
+	response.AppendChild(ber.NewInteger(ber.ClassUniversal, ber.TypePrimitive, ber.TagInteger, messageID, "MessageID"))
+	extended := ber.Encode(ber.ClassApplication, ber.TypeConstructed, ldap.ApplicationExtendedResponse, nil, "Extended Response")
+	extended.AppendChild(ber.NewInteger(ber.ClassUniversal, ber.TypePrimitive, ber.TagEnumerated, 0, "resultCode"))
+	extended.AppendChild(ber.NewString(ber.ClassUniversal, ber.TypePrimitive, ber.TagOctetString, "", "matchedDN"))
+	extended.AppendChild(ber.NewString(ber.ClassUniversal, ber.TypePrimitive, ber.TagOctetString, "", "diagnosticMessage"))
+	response.AppendChild(extended)
+	if _, err := raw.Write(response.Bytes()); err != nil {
+		raw.Close()
+		return
+	}
+	tlsConn := tls.Server(raw, &tls.Config{Certificates: []tls.Certificate{cert}})
+	defer tlsConn.Close()
+	if err := tlsConn.Handshake(); err != nil {
+		return
+	}
+}
+
+func TestDialLDAPStartTLSSucceedsWithTheServerName(t *testing.T) {
+	cert, certPEM := selfSignedServerCert(t, "127.0.0.1")
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer listener.Close()
+	go serveStartTLSHandshake(listener, cert)
+
+	provider := v1alpha1.IdentityProvider{Spec: v1alpha1.IdentityProviderSpec{LDAP: &v1alpha1.LDAPProvider{
+		URL:      "ldap://" + listener.Addr().String(),
+		StartTLS: true,
+	}}}
+	conn, err := DialLDAP(context.Background(), provider, certPEM)
+	if err != nil {
+		t.Fatalf("StartTLS must succeed once the TLS config carries the server name: %v", err)
+	}
+	conn.Close()
 }
 
 func TestDialLDAPCancelsAPendingOperationWhenTheContextIsCancelled(t *testing.T) {
