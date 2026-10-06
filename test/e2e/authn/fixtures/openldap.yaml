@@ -87,6 +87,8 @@ spec:
         - name: openldap
           image: docker.io/osixia/openldap:1.5.0
           imagePullPolicy: IfNotPresent
+          args:
+            - --copy-service
           env:
             - name: LDAP_ORGANISATION
               value: Bedrock Test
