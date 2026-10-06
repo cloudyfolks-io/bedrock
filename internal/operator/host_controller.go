@@ -3,6 +3,7 @@ package operator
 import (
 	"context"
 	"slices"
+	"time"
 
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
@@ -22,6 +23,16 @@ type HostReconciler struct {
 }
 
 func (r *HostReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
+	requeue, err := r.reconcileAuthnRestart(ctx, time.Now())
+	if err != nil {
+		return ctrl.Result{}, err
+	}
+	result, err := r.reconcileHost(ctx, req)
+	result.RequeueAfter = requeue
+	return result, err
+}
+
+func (r *HostReconciler) reconcileHost(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	var host v1alpha1.Host
 	err := r.Client.Get(ctx, req.NamespacedName, &host)
 	if errors.IsNotFound(err) {

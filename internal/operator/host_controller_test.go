@@ -224,3 +224,61 @@ func TestHostReconcileRendersMirrorFromCluster(t *testing.T) {
 		t.Fatalf("labels %v", got.Labels)
 	}
 }
+
+func TestHostReconcileGrantsOneAuthnRestartAtATime(t *testing.T) {
+	c, cfg := StartTestEnv(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+
+	mgr, err := ctrl.NewManager(cfg, testManagerOptions(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := (&HostReconciler{Client: mgr.GetClient()}).SetupWithManager(mgr); err != nil {
+		t.Fatal(err)
+	}
+	go func() { _ = mgr.Start(ctx) }()
+
+	for _, name := range []string{"cp-a", "cp-b"} {
+		host := &v1alpha1.Host{ObjectMeta: metav1.ObjectMeta{Name: name}, Spec: v1alpha1.HostSpec{Roles: []string{v1alpha1.RoleControlPlane}}}
+		if err := c.Create(ctx, host); err != nil {
+			t.Fatal(err)
+		}
+	}
+	setPending := func(name string, pending bool) {
+		t.Helper()
+		waitFor(t, func() bool {
+			var host v1alpha1.Host
+			if err := c.Get(ctx, client.ObjectKey{Name: name}, &host); err != nil {
+				return false
+			}
+			host.Status.Authn = &v1alpha1.AuthnFilesStatus{WebhookRestartPending: pending}
+			return c.Status().Update(ctx, &host) == nil
+		})
+	}
+	granted := func(name string) bool {
+		var host v1alpha1.Host
+		if err := c.Get(ctx, client.ObjectKey{Name: name}, &host); err != nil {
+			return false
+		}
+		return v1alpha1.AuthnRestartGrantFresh(host, time.Now())
+	}
+
+	setPending("cp-a", true)
+	setPending("cp-b", true)
+	waitFor(t, func() bool { return granted("cp-a") })
+	time.Sleep(time.Second)
+	if granted("cp-b") {
+		t.Fatal("a second host must wait for the first grant")
+	}
+
+	setPending("cp-a", false)
+	waitFor(t, func() bool { return !granted("cp-a") && granted("cp-b") })
+	var first v1alpha1.Host
+	if err := c.Get(ctx, client.ObjectKey{Name: "cp-a"}, &first); err != nil {
+		t.Fatal(err)
+	}
+	if _, held := first.Annotations[v1alpha1.AnnotationAuthnRestart]; held {
+		t.Fatal("the grant of a host that restarted must be removed")
+	}
+}
