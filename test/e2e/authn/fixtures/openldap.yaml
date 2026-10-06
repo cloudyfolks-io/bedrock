@@ -49,6 +49,15 @@ data:
     objectClass: groupOfNames
     cn: readers
     member: uid=bob,ou=people,dc=bedrock,dc=test
+  dhparam.pem: |
+    -----BEGIN DH PARAMETERS-----
+    MIIBDAKCAQEArOi1cwEIp6KCaMcGQXQ+bkmSWwD1BEw+OW8M8ianqxzr7AJs6JJO
+    0RiOJAZs1jU6mDBeznhThrhaGbLfyCTmB2ACZDI4K3bkze6o0YFu7VA07Lxsp6OA
+    nWKCwtnuOAg2ePW1FNkhqtHhigmigaL1Cvug2TTi6Z68h7UQgyEXkRFV1wpkVTsr
+    uwaAZIrOrztytj/If4DARqj8jHp0GIKUte5S7C2nrce9XOtI/eVSyp1WNiOTwCXM
+    rx5XG0u80dm+N61HKf6un23s6IqAKScnvpNK2n0gEhXHzlreAW3Z+QpjMo8mDcCt
+    vlE7MCf+XLAG0p7KF+gexrnFkakDIi1D1wIBAgICAOE=
+    -----END DH PARAMETERS-----
 ---
 apiVersion: cert-manager.io/v1
 kind: Certificate
@@ -134,7 +143,20 @@ spec:
               mountPath: /container/service/slapd/assets/config/bootstrap/ldif/custom/10-bedrock.ldif
               subPath: 10-bedrock.ldif
             - name: tls
-              mountPath: /container/service/slapd/assets/certs
+              mountPath: /container/service/slapd/assets/certs/tls.crt
+              subPath: tls.crt
+              readOnly: true
+            - name: tls
+              mountPath: /container/service/slapd/assets/certs/tls.key
+              subPath: tls.key
+              readOnly: true
+            - name: tls
+              mountPath: /container/service/slapd/assets/certs/ca.crt
+              subPath: ca.crt
+              readOnly: true
+            - name: bootstrap-ldif
+              mountPath: /container/service/slapd/assets/certs/dhparam.pem
+              subPath: dhparam.pem
               readOnly: true
       volumes:
         - name: bootstrap-ldif
