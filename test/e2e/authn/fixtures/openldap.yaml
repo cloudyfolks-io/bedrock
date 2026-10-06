@@ -131,7 +131,8 @@ spec:
               memory: 256Mi
           volumeMounts:
             - name: bootstrap-ldif
-              mountPath: /container/service/slapd/assets/config/bootstrap/ldif/custom
+              mountPath: /container/service/slapd/assets/config/bootstrap/ldif/custom/10-bedrock.ldif
+              subPath: 10-bedrock.ldif
             - name: tls
               mountPath: /container/service/slapd/assets/certs
               readOnly: true
