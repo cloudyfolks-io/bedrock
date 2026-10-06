@@ -278,6 +278,27 @@ This command prints a new password once, clears any lock on the user,
 and revokes the user's refresh tokens and sessions. It refuses LDAP and
 OIDC users, because their password lives upstream, not in Bedrock.
 
+## Upgrade from an earlier release
+
+A cluster from a release without Bedrock authn has no `admin` user after
+the upgrade. The operator creates the platform CA and the webhook token.
+The agent on each controller then adds the kube-apiserver flags and
+restarts `k0scontroller`, one controller at a time.
+
+1. Wait until the upgrade is complete.
+2. On one controller, run this command once:
+
+   ```sh
+   bedrock authn create-admin
+   ```
+
+3. Keep the password. The command prints it only one time.
+4. Sign in as `admin` with `bedrock login --server https://sso.<host>`.
+
+If `admin` already has a password, the command prints `admin exists` and
+changes nothing. To get a new password, use
+`bedrock authn reset-password admin`.
+
 ## Changing `platform.host`
 
 kube-apiserver reloads `authentication.yaml` on every change, so a new
