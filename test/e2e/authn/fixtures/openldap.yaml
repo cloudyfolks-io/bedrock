@@ -9,6 +9,11 @@ metadata:
   name: openldap-bootstrap-ldif
   namespace: authn-e2e
 data:
+  05-reader-acl.ldif: |
+    dn: olcDatabase={1}mdb,cn=config
+    changetype: modify
+    add: olcAccess
+    olcAccess: {2}to * by dn.exact="cn=reader,dc=bedrock,dc=test" read by * break
   10-bedrock.ldif: |
     dn: ou=people,dc=bedrock,dc=test
     objectClass: organizationalUnit
@@ -139,6 +144,9 @@ spec:
             limits:
               memory: 256Mi
           volumeMounts:
+            - name: bootstrap-ldif
+              mountPath: /container/service/slapd/assets/config/bootstrap/ldif/custom/05-reader-acl.ldif
+              subPath: 05-reader-acl.ldif
             - name: bootstrap-ldif
               mountPath: /container/service/slapd/assets/config/bootstrap/ldif/custom/10-bedrock.ldif
               subPath: 10-bedrock.ldif
