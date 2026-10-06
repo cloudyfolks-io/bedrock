@@ -60,6 +60,10 @@ dump() {
     for pod in $(kubectl -n kube-system get pods -o name 2>/dev/null | grep -E 'fabric|ovn|ovs' || true); do
       echo "--- $pod"; kubectl -n kube-system logs "$pod" --tail=100 --all-containers || true
     done
+    echo "--- fabric-controller errors"
+    kubectl -n kube-system logs deployment/fabric-controller --all-containers 2>/dev/null | grep -E '^[EW][0-9]' | head -80 || true
+    echo "--- ovn NB_Global options"
+    kubectl -n kube-system exec deployment/ovn-central -- ovn-nbctl get NB_Global . options 2>&1 || true
     echo "--- restarted containers"
     kubectl get pods -A --no-headers 2>/dev/null | awk '$5 != "0" {print $1, $2}' | while read -r ns pod; do
       echo "--- $ns/$pod"
