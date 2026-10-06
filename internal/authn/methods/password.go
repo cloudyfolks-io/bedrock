@@ -128,7 +128,7 @@ func SetPassword(ctx context.Context, c client.Client, random io.Reader, user v1
 	if apierrors.IsNotFound(err) {
 		cred = v1alpha1.Credential{
 			TypeMeta:   metav1.TypeMeta{APIVersion: v1alpha1.GroupVersion.String(), Kind: "Credential"},
-			ObjectMeta: metav1.ObjectMeta{Namespace: release.SystemNamespace, Name: name, Labels: map[string]string{v1alpha1.LabelKind: "Credential", v1alpha1.LabelName: labelValue(name)}},
+			ObjectMeta: metav1.ObjectMeta{Namespace: release.SystemNamespace, Name: name, Labels: map[string]string{v1alpha1.LabelKind: "Credential", v1alpha1.LabelName: v1alpha1.LabelValue(name)}},
 			Spec:       v1alpha1.CredentialSpec{UserRef: user.Name, Method: v1alpha1.MethodPassword, SecretRef: name},
 		}
 		if err := c.Create(ctx, &cred, client.FieldOwner(v1alpha1.AuthnFieldManager)); err != nil {

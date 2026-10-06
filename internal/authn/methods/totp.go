@@ -143,7 +143,7 @@ func (m totpMethod) Enroll(ctx context.Context, user v1alpha1.User, input Answer
 			ObjectMeta: metav1.ObjectMeta{
 				Namespace:   release.SystemNamespace,
 				Name:        name,
-				Labels:      map[string]string{v1alpha1.LabelKind: "Credential", v1alpha1.LabelName: labelValue(name)},
+				Labels:      map[string]string{v1alpha1.LabelKind: "Credential", v1alpha1.LabelName: v1alpha1.LabelValue(name)},
 				Annotations: map[string]string{v1alpha1.AnnotationEnrollWriteAt: enrollWriteAt(time.Now())},
 			},
 			Spec: v1alpha1.CredentialSpec{UserRef: user.Name, Method: v1alpha1.MethodTOTP, SecretRef: name},

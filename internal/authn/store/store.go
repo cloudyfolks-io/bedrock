@@ -24,7 +24,6 @@ const (
 	idTokenLifetime     = time.Hour
 	audienceBedrock     = "bedrock"
 	scopeGroups         = "groups"
-	maxLabelValue       = 63
 	liveAuthRequests    = 5000
 	liveDeviceRequests  = 1000
 	liveKey             = "live"
@@ -99,7 +98,7 @@ func objectKey(name string) client.ObjectKey {
 }
 
 func objectLabels(kind, name string) map[string]string {
-	return map[string]string{v1alpha1.LabelKind: kind, v1alpha1.LabelName: name[:min(len(name), maxLabelValue)]}
+	return map[string]string{v1alpha1.LabelKind: kind, v1alpha1.LabelName: v1alpha1.LabelValue(name)}
 }
 
 func due(expiresAt metav1.Time, now time.Time) bool {
