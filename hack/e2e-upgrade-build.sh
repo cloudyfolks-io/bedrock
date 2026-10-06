@@ -26,6 +26,36 @@ build() {
   cp -r dist/release "dist/release-$version"
 }
 
-build "$VERSION_A" "$K0S_A" ""
+worktree_a=""
+
+remove_worktree() {
+  if [ -n "$worktree_a" ]; then
+    git worktree remove --force "$worktree_a" || rm -rf "$worktree_a"
+    git worktree prune
+  fi
+}
+trap remove_worktree EXIT
+
+build_from_ref() {
+  local ref=$1 version=$2 k0s=$3 repo
+  repo=$(pwd)
+  worktree_a=$(mktemp -d)
+  git worktree add --detach "$worktree_a" "$ref"
+  mkdir -p "$worktree_a/dist" "$repo/dist/cache"
+  ln -s "$repo/dist/cache" "$worktree_a/dist/cache"
+  (cd "$worktree_a" && build "$version" "$k0s" "")
+  cp "$worktree_a"/dist/bedrock-"$version"-* dist/
+  rm -rf "dist/release-$version"
+  cp -r "$worktree_a/dist/release-$version" "dist/release-$version"
+  cp "$worktree_a/hack/e2e-init.sh" "dist/e2e-init-$version.sh"
+  remove_worktree
+  worktree_a=""
+}
+
+if [ -n "${VERSION_A_REF:-}" ]; then
+  build_from_ref "$VERSION_A_REF" "$VERSION_A" "$K0S_A"
+else
+  build "$VERSION_A" "$K0S_A" ""
+fi
 build "$VERSION_B" "$K0S_B" "$VERSION_A"
 ls -l dist/bedrock-*-bundle-"$arch".tar.zst dist/bedrock-*-linux-"$arch"
