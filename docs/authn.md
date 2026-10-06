@@ -56,12 +56,22 @@ status field, `status.lockedUntil`. Clear a lock with
 `bedrock authn reset-password`.
 
 `bedrock-authn` also rate-limits credential checks. Each replica allows
-10 attempts per minute for each client IP. Each replica also runs at
-most 4 credential checks at once. This limit covers two login requests:
-the login step answer, and the login challenge request. This limit
-also covers three account requests: an account password change, an
-account TOTP check and account recovery-code generation. Past either
-limit, the answer is `rate_limited`. This answer never names the
+10 attempts per minute for each pair of client address and username.
+Each replica also runs at most 4 credential checks at once. This limit
+covers two login requests: the login step answer, and the login
+challenge request. This limit also covers three account requests: an
+account password change, an account TOTP check and account
+recovery-code generation. A sign-in allows at most 5 wrong TOTP or
+recovery codes. After the fifth wrong code, start the sign-in again.
+
+Each replica allows 30 sign-in starts per minute for each client
+address. A sign-in start is a request to `/oauth/v2/authorize` or to
+`/oauth/v2/device_authorization`. When an LDAP provider is on, each
+replica allows 30 username steps per minute for each client address.
+Each replica keeps at most 5000 open sign-ins and 1000 open device
+sign-ins. Past that number, a new sign-in gets the answer
+`temporarily_unavailable`. Past any other limit, the answer is
+`rate_limited` with HTTP status 429. This answer never names the
 account or the check that was slow.
 
 TOTP follows RFC 6238. A TOTP code has six digits and changes every
