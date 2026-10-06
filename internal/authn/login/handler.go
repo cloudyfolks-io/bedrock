@@ -38,6 +38,7 @@ var (
 	errUnexpectedAnswer = errors.New("login: unexpected answer")
 	errLoginDone        = errors.New("login: the auth request is done")
 	errLoginChanged     = errors.New("login: the login state changed meanwhile")
+	errLookupLimited    = errors.New("login: too many directory lookups from this address")
 )
 
 type Deps struct {
@@ -48,6 +49,7 @@ type Deps struct {
 	Random   io.Reader
 	Clock    func() time.Time
 	Limiter  *methods.RateLimiter
+	Lookups  *methods.RateLimiter
 	Callback func(ctx context.Context, id string) string
 	LDAPDial methods.LDAPDialer
 }
@@ -252,7 +254,10 @@ func dispatch(r *http.Request, deps Deps, request v1alpha1.AuthRequest, given me
 	switch {
 	case state.Step == methods.ChallengeUsername && given.Type == methods.ChallengeUsername:
 		username := usernameOf(given.Username)
-		facts, err := usernameFacts(ctx, deps, request, username)
+		facts, err := usernameFacts(ctx, deps, flow, request, username)
+		if errors.Is(err, errLookupLimited) {
+			return usernameLimited(facts), request, nil
+		}
 		return AfterUsername(state, username, facts), request, err
 	case (state.Step == methods.ChallengeUsername || state.Step == methods.ChallengeProviders) && given.Type == answerProvider:
 		facts, err := loadFacts(ctx, deps, request, nil)
@@ -565,23 +570,32 @@ func subjectFacts(ctx context.Context, deps Deps, request v1alpha1.AuthRequest) 
 	return loadFacts(ctx, deps, request, &user)
 }
 
-func usernameFacts(ctx context.Context, deps Deps, request v1alpha1.AuthRequest, username string) (Facts, error) {
+func usernameFacts(ctx context.Context, deps Deps, flow methods.Flow, request v1alpha1.AuthRequest, username string) (Facts, error) {
 	user, err := userByUsername(ctx, deps.Client, username)
 	if err != nil {
 		return Facts{}, err
 	}
-	if user.Name != "" {
-		return loadFacts(ctx, deps, request, &user)
-	}
-	facts, err := loadFacts(ctx, deps, request, nil)
-	if err != nil || !slices.ContainsFunc(facts.Providers, isLDAP) {
+	facts, err := loadFacts(ctx, deps, request, known(user))
+	switch {
+	case err != nil, !slices.ContainsFunc(facts.Providers, isLDAP):
 		return facts, err
+	case !deps.Lookups.Allow(flow.ClientIP, flow.Now):
+		return facts, errLookupLimited
+	case user.Name != "":
+		return facts, nil
 	}
 	provider, found, err := methods.LDAPProviderFor(ctx, deps.Client, deps.LDAPDial, username)
 	if err != nil || !found {
 		return facts, err
 	}
 	return withLDAPProvider(facts, provider), nil
+}
+
+func known(user v1alpha1.User) *v1alpha1.User {
+	if user.Name == "" {
+		return nil
+	}
+	return &user
 }
 
 func methodUser(ctx context.Context, deps Deps, request v1alpha1.AuthRequest) (v1alpha1.User, error) {

@@ -39,6 +39,13 @@ func Start(facts Facts) Step {
 	}
 }
 
+func usernameLimited(facts Facts) Step {
+	step := Start(facts)
+	step.State.Error = methods.FailureRateLimited
+	step.Challenge.Error = challengeError(methods.FailureRateLimited)
+	return step
+}
+
 func AfterUsername(_ v1alpha1.LoginState, username string, facts Facts) Step {
 	primary, provider := primaryFor(facts)
 	return Step{

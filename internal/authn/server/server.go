@@ -66,6 +66,7 @@ const (
 	keysTTL           = 30 * time.Second
 	attemptsPerMinute = 10
 	startsPerMinute   = 30
+	lookupsPerMinute  = 30
 	upstreamTimeout   = 15 * time.Second
 	clusterCAConfig   = "kube-root-ca.crt"
 	apiServerPort     = "6443"
@@ -152,6 +153,7 @@ func New(ctx context.Context, cfg Config) (http.Handler, error) {
 		Random:   cfg.Random,
 		Clock:    cfg.Clock,
 		Limiter:  limiter,
+		Lookups:  methods.NewRateLimiter(lookupsPerMinute, time.Minute),
 		Callback: op.AuthCallbackURL(provider),
 		LDAPDial: methods.DialLDAP,
 	}))))

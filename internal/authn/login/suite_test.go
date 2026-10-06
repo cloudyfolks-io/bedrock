@@ -12,6 +12,7 @@ import (
 	"net/http/httptest"
 	"path/filepath"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -35,13 +36,16 @@ import (
 const testPassword = "correct horse battery staple"
 
 type harness struct {
-	client   client.Client
-	store    *store.Store
-	server   *httptest.Server
-	upstream *fakeUpstream
-	reader   *hookClient
-	handler  *hookClient
+	client    client.Client
+	store     *store.Store
+	server    *httptest.Server
+	upstream  *fakeUpstream
+	reader    *hookClient
+	handler   *hookClient
+	ldapDials *atomic.Int64
 }
+
+var errNoDirectory = errors.New("no directory in tests")
 
 type hookClient struct {
 	client.Client
@@ -166,7 +170,13 @@ func testSettings() policy.Settings {
 
 func newHarness(t *testing.T, limiter *methods.RateLimiter) harness {
 	t.Helper()
+	return newHarnessWithLookups(t, limiter, methods.NewRateLimiter(100, time.Minute))
+}
+
+func newHarnessWithLookups(t *testing.T, limiter, lookups *methods.RateLimiter) harness {
+	t.Helper()
 	c := startTestEnv(t)
+	dials := &atomic.Int64{}
 	settings := func(context.Context) (policy.Settings, error) { return testSettings(), nil }
 	reader := &hookClient{Client: c}
 	handlerClient := &hookClient{Client: c}
@@ -193,7 +203,12 @@ func newHarness(t *testing.T, limiter *methods.RateLimiter) harness {
 		Random:   rand.Reader,
 		Clock:    time.Now,
 		Limiter:  limiter,
+		Lookups:  lookups,
 		Callback: func(_ context.Context, id string) string { return "/oauth/v2/authorize/callback?id=" + id },
+		LDAPDial: func(context.Context, v1alpha1.IdentityProvider, []byte) (methods.LDAPConn, error) {
+			dials.Add(1)
+			return nil, errNoDirectory
+		},
 	}))
 	t.Cleanup(server.Close)
 	create(t, c, &v1alpha1.OAuthClient{
@@ -205,7 +220,7 @@ func newHarness(t *testing.T, limiter *methods.RateLimiter) harness {
 			GrantTypes:   []string{v1alpha1.GrantAuthorizationCode, v1alpha1.GrantRefreshToken, v1alpha1.GrantDeviceCode},
 		},
 	})
-	return harness{client: c, store: st, server: server, upstream: upstream, reader: reader, handler: handlerClient}
+	return harness{client: c, store: st, server: server, upstream: upstream, reader: reader, handler: handlerClient, ldapDials: dials}
 }
 
 func create(t *testing.T, c client.Client, objects ...client.Object) {

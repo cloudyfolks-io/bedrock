@@ -13,6 +13,7 @@ import (
 	"testing"
 	"time"
 
+	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
@@ -365,6 +366,51 @@ func TestRateLimitPerClientIP(t *testing.T) {
 	other := challengeOf(t, send(t, browser, http.MethodPost, target, csrf, wrong, from("198.51.100.9")))
 	if other.Error == nil || other.Error.Code != methods.FailureInvalidCredentials {
 		t.Fatalf("another client IP has its own budget: %+v", other)
+	}
+}
+
+func TestUsernameLookupsAreRateLimitedPerClientIP(t *testing.T) {
+	h := newHarnessWithLookups(t, methods.NewRateLimiter(100, time.Minute), methods.NewRateLimiter(2, time.Minute))
+	createLocalUser(t, h.client, "alice")
+	create(t, h.client,
+		&corev1.Secret{ObjectMeta: metav1.ObjectMeta{Name: "corp-bind", Namespace: release.SystemNamespace}, Data: map[string][]byte{"bindPassword": []byte("bind")}},
+		&v1alpha1.IdentityProvider{
+			ObjectMeta: metav1.ObjectMeta{Name: "corp", Namespace: release.SystemNamespace},
+			Spec: v1alpha1.IdentityProviderSpec{
+				Type:      v1alpha1.MethodLDAP,
+				SecretRef: "corp-bind",
+				LDAP: &v1alpha1.LDAPProvider{
+					URL:        "ldaps://ldap.example.test",
+					BindDN:     "cn=reader",
+					UserSearch: v1alpha1.LDAPUserSearch{BaseDN: "ou=people", UsernameAttribute: "uid"},
+				},
+			},
+		},
+	)
+	from := func(ip string) http.Header { return http.Header{"X-Forwarded-For": []string{ip}} }
+	lookup := func(username, ip string) methods.Challenge {
+		t.Helper()
+		browser := newBrowser(t, h.server)
+		_, first := startLogin(t, h, browser)
+		return challengeOf(t, send(t, browser, http.MethodPost, h.server.URL+"/api/v1/login/answer", first.CSRF, methods.Answer{Type: methods.ChallengeUsername, Username: username}, from(ip)))
+	}
+	for _, username := range []string{"ghost", "alice"} {
+		if step := lookup(username, "203.0.113.7"); step.Type != methods.ChallengePassword || step.Error != nil {
+			t.Fatalf("%s: %+v", username, step)
+		}
+	}
+	limited := lookup("phantom", "203.0.113.7")
+	if limited.Type != methods.ChallengeUsername || limited.Error == nil || limited.Error.Code != methods.FailureRateLimited || limited.CSRF == "" {
+		t.Fatalf("the third lookup from one address: %+v", limited)
+	}
+	if dials := h.ldapDials.Load(); dials != 1 {
+		t.Fatalf("LDAP dials %d, want 1: a limited lookup must not reach the directory", dials)
+	}
+	if step := lookup("phantom", "198.51.100.9"); step.Type != methods.ChallengePassword || step.Error != nil {
+		t.Fatalf("another address has its own budget: %+v", step)
+	}
+	if dials := h.ldapDials.Load(); dials != 2 {
+		t.Fatalf("LDAP dials %d, want 2", dials)
 	}
 }
 
