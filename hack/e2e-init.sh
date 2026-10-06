@@ -16,6 +16,11 @@ dump() {
   if [ "$status" -ne 0 ]; then
     echo "--- k0s status"
     /usr/local/bin/k0s status || true
+    echo "--- k0scontroller journal"
+    journalctl -u k0scontroller --no-pager -n 150 2>/dev/null || true
+    echo "--- authn files"
+    ls -la /etc/bedrock/authn /var/lib/bedrock/authn 2>&1 || true
+    grep -n authentication /etc/k0s/k0s.yaml || true
     echo "--- nodes"
     kubectl get nodes -o wide || true
     echo "--- pods"
