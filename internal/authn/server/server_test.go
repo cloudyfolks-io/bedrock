@@ -707,6 +707,64 @@ func TestSecondFactorGuessesAreRateLimited(t *testing.T) {
 	}
 }
 
+func authorizeQuery() url.Values {
+	return url.Values{
+		"client_id":             {"bedrock-cli"},
+		"redirect_uri":          {testRedirect},
+		"response_type":         {"code"},
+		"scope":                 {"openid offline_access"},
+		"state":                 {"s1"},
+		"code_challenge":        {"E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM"},
+		"code_challenge_method": {"S256"},
+	}
+}
+
+func TestFlowStartsAreRateLimitedPerClientIP(t *testing.T) {
+	c, cfg := startTestEnv(t)
+	seedCluster(t, c)
+	saveSigningKey(t, c, time.Now().Add(-time.Minute))
+	createCLIClient(t, c)
+	password := "correct horse battery staple"
+	createUser(t, c, "admin", password)
+	server := newTestServer(t, cfg, time.Now)
+	host := "sso." + testHost
+	browser := newBrowser(t, server)
+	authorize := request(t, browser, server, http.MethodGet, host, "/oauth/v2/authorize?"+authorizeQuery().Encode(), nil, nil)
+	loginURL, err := url.Parse(authorize.Header.Get("Location"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	step, _ := postJSON(t, browser, server, "/api/v1/login/start", "", map[string]string{"authRequest": loginURL.Query().Get("authRequest")})
+	step, _ = postJSON(t, browser, server, "/api/v1/login/answer", step.CSRF, methods.Answer{Type: methods.ChallengeUsername, Username: "admin"})
+	anonymous := noRedirects(server, nil)
+	for attempt := 2; attempt <= startsPerMinute; attempt++ {
+		if resp := request(t, anonymous, server, http.MethodGet, host, "/oauth/v2/authorize?"+authorizeQuery().Encode(), nil, nil); resp.StatusCode != http.StatusFound {
+			t.Fatalf("authorize %d of %d: %d", attempt, startsPerMinute, resp.StatusCode)
+		}
+	}
+	limited := request(t, anonymous, server, http.MethodGet, host, "/oauth/v2/authorize?"+authorizeQuery().Encode(), nil, nil)
+	if code := readJSON[map[string]string](t, limited, http.StatusTooManyRequests)["error"]; code != methods.FailureRateLimited {
+		t.Fatalf("authorize over the budget: %q", code)
+	}
+	formHeader := http.Header{"Content-Type": {"application/x-www-form-urlencoded"}}
+	device := request(t, anonymous, server, http.MethodPost, host, "/oauth/v2/device_authorization", strings.NewReader(url.Values{"client_id": {"bedrock-cli"}, "scope": {"openid"}}.Encode()), formHeader)
+	if code := readJSON[map[string]string](t, device, http.StatusTooManyRequests)["error"]; code != methods.FailureRateLimited {
+		t.Fatalf("device authorization over the budget: %q", code)
+	}
+	callback := request(t, anonymous, server, http.MethodGet, host, "/oauth/v2/authorize/callback", nil, nil)
+	if code := readJSON[map[string]string](t, callback, http.StatusBadRequest)["error"]; code != "invalid_request" {
+		t.Fatalf("the authorize callback is outside the budget: %q", code)
+	}
+	elsewhere := request(t, anonymous, server, http.MethodGet, host, "/oauth/v2/authorize?"+authorizeQuery().Encode(), nil, http.Header{"X-Forwarded-For": {"198.51.100.9"}})
+	if elsewhere.StatusCode != http.StatusFound {
+		t.Fatalf("another address has its own budget: %d", elsewhere.StatusCode)
+	}
+	done, _ := postJSON(t, browser, server, "/api/v1/login/answer", step.CSRF, methods.Answer{Type: methods.ChallengePassword, Password: password})
+	if done.Type != methods.ChallengeDone {
+		t.Fatalf("the flow budget must not spend the credential budget: %+v", done)
+	}
+}
+
 func TestConfigCannotCarryACachedReader(t *testing.T) {
 	reader := reflect.TypeFor[client.Reader]()
 	config := reflect.TypeFor[Config]()

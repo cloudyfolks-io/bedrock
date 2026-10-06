@@ -65,6 +65,7 @@ const (
 	cookieKeyLength   = 32
 	keysTTL           = 30 * time.Second
 	attemptsPerMinute = 10
+	startsPerMinute   = 30
 	upstreamTimeout   = 15 * time.Second
 	clusterCAConfig   = "kube-root-ca.crt"
 	apiServerPort     = "6443"
@@ -117,6 +118,7 @@ func New(ctx context.Context, cfg Config) (http.Handler, error) {
 	settings := func(ctx context.Context) (policy.Settings, error) { return policy.ReadSettings(ctx, direct) }
 	host := hostOf(settings)
 	limiter := methods.NewRateLimiter(attemptsPerMinute, time.Minute)
+	starts := methods.NewRateLimiter(startsPerMinute, time.Minute)
 	st := store.New(store.Config{
 		Client:   direct,
 		Reader:   direct,
@@ -172,6 +174,8 @@ func New(ctx context.Context, cfg Config) (http.Handler, error) {
 	mux.HandleFunc("GET "+pathHealthz, healthz)
 	mux.Handle("GET "+pathReadyz, readyz(st))
 	mux.Handle(pathAuthorizeDone, sessionBound(direct, provider))
+	mux.Handle(pathAuthorize, limitByClientIP(starts, cfg.Clock, provider))
+	mux.Handle(pathDevice, limitByClientIP(starts, cfg.Clock, provider))
 	mux.Handle("/", provider)
 	return HostGuard(host, mux), nil
 }
