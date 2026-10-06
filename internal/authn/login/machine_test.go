@@ -309,6 +309,45 @@ func TestFailureKeepsTheStep(t *testing.T) {
 	}
 }
 
+func TestSecondFactorGuessesEndTheLogin(t *testing.T) {
+	alice := localUser("alice")
+	facts := Facts{User: alice, Enrolled: []string{v1alpha1.MethodTOTP, v1alpha1.MethodRecovery}}
+	step := afterPassword(t, facts)
+	limited := AfterMethod(step.State, v1alpha1.MethodTOTP, failedWith(methods.FailureRateLimited), facts)
+	if limited.State.Failures != 0 {
+		t.Fatalf("a rate-limited answer is not a guess: %+v", limited.State)
+	}
+	for guess := int32(1); guess < maxSecondFactorGuesses; guess++ {
+		if guess == 3 {
+			step = toRecovery(step.State)
+		}
+		method := v1alpha1.MethodTOTP
+		if step.State.Step == methods.ChallengeRecovery {
+			method = v1alpha1.MethodRecovery
+		}
+		step = AfterMethod(step.State, method, failedWith(methods.FailureInvalidCode), facts)
+		if step.Challenge.Error == nil || step.Challenge.Error.Code != methods.FailureInvalidCode || step.State.Failures != guess || step.Challenge.Type == methods.ChallengeErrorType {
+			t.Fatalf("guess %d: %+v", guess, step)
+		}
+	}
+	last := AfterMethod(step.State, v1alpha1.MethodRecovery, failedWith(methods.FailureInvalidCode), facts)
+	if last.Complete || last.Challenge.Type != methods.ChallengeErrorType || last.Challenge.Error == nil || last.Challenge.Error.Code != errorExpired || last.State.Step != methods.ChallengeErrorType {
+		t.Fatalf("guess %d must end the login: %+v", maxSecondFactorGuesses, last)
+	}
+}
+
+func TestEnrollmentCodesAreNotCountedAsGuesses(t *testing.T) {
+	client := v1alpha1.OAuthClient{Spec: v1alpha1.OAuthClientSpec{RequireSecondFactor: true}}
+	facts := Facts{User: localUser("alice"), Client: client}
+	step := afterPassword(t, facts)
+	for attempt := 0; attempt < maxSecondFactorGuesses; attempt++ {
+		step = AfterMethod(step.State, v1alpha1.MethodTOTP, failedWith(methods.FailureInvalidCode), facts)
+	}
+	if step.Challenge.Type != methods.ChallengeTOTPEnroll || step.State.Failures != 0 {
+		t.Fatalf("the enrollment step shows the secret, so its codes are no guesses: %+v", step)
+	}
+}
+
 func TestResumeRepeatsTheChallenge(t *testing.T) {
 	providers := []v1alpha1.IdentityProvider{oidcProvider("dex", "Dadehat SSO")}
 	cases := []struct {

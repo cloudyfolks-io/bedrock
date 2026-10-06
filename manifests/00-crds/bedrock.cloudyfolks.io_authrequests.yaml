@@ -169,6 +169,10 @@ spec:
                     type: string
                   error:
                     type: string
+                  failures:
+                    format: int32
+                    minimum: 0
+                    type: integer
                   primary:
                     type: string
                   provider:

@@ -3,6 +3,7 @@ package login
 import (
 	"bytes"
 	"context"
+	"crypto/rand"
 	"encoding/base32"
 	"log/slog"
 	"net/http"
@@ -366,6 +367,62 @@ func TestRateLimitPerClientIP(t *testing.T) {
 	other := challengeOf(t, send(t, browser, http.MethodPost, target, csrf, wrong, from("198.51.100.9")))
 	if other.Error == nil || other.Error.Code != methods.FailureInvalidCredentials {
 		t.Fatalf("another client IP has its own budget: %+v", other)
+	}
+}
+
+func TestFiveWrongSecondFactorAnswersEndTheLogin(t *testing.T) {
+	h := newHarness(t, methods.NewRateLimiter(100, time.Minute))
+	user := createLocalUser(t, h.client, "alice")
+	ctx := context.Background()
+	totp := methods.NewTOTP(h.client, rand.Reader, func(context.Context) (string, error) { return "https://sso.example.test", nil })
+	enrollment, err := totp.Enroll(ctx, *user, methods.Answer{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	seed, err := base32.StdEncoding.WithPadding(base32.NoPadding).DecodeString(enrollment.TOTP.Secret)
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now()
+	if result, err := totp.Complete(ctx, methods.Flow{Now: now}, *user, methods.Answer{Code: methods.TOTPCode(seed, methods.TOTPStep(now))}); err != nil || result.Subject == nil {
+		t.Fatalf("confirm the enrollment: %+v %v", result, err)
+	}
+	step := methods.TOTPStep(now)
+	valid := []string{methods.TOTPCode(seed, step-1), methods.TOTPCode(seed, step), methods.TOTPCode(seed, step+1), methods.TOTPCode(seed, step+2)}
+	guess := "000000"
+	if slices.Contains(valid, guess) {
+		guess = "111111"
+	}
+	browser := newBrowser(t, h.server)
+	_, first := startLogin(t, h, browser)
+	password := answerWith(t, h, browser, first.CSRF, methods.Answer{Type: methods.ChallengeUsername, Username: "alice"})
+	challenge := answerWith(t, h, browser, password.CSRF, methods.Answer{Type: methods.ChallengePassword, Password: testPassword})
+	if challenge.Type != methods.ChallengeTOTP {
+		t.Fatalf("second factor %+v", challenge)
+	}
+	answers := []methods.Answer{
+		{Type: methods.ChallengeTOTP, Code: guess},
+		{Type: methods.ChallengeTOTP, Code: guess},
+		{Type: methods.ChallengeRecovery},
+		{Type: methods.ChallengeRecovery, Code: "aaaaa-bbbbb"},
+		{Type: methods.ChallengeRecovery, Code: "ccccc-ddddd"},
+	}
+	for index, given := range answers {
+		challenge = answerWith(t, h, browser, challenge.CSRF, given)
+		if given.Code != "" && (challenge.Error == nil || challenge.Error.Code != methods.FailureInvalidCode) {
+			t.Fatalf("answer %d: %+v", index+1, challenge)
+		}
+	}
+	ended := answerWith(t, h, browser, challenge.CSRF, methods.Answer{Type: methods.ChallengeRecovery, Code: "eeeee-fffff"})
+	if ended.Type != methods.ChallengeErrorType || ended.Error == nil || ended.Error.Code != errorExpired {
+		t.Fatalf("the fifth wrong answer must end the login: %+v", ended)
+	}
+	right := methods.Answer{Type: methods.ChallengeTOTP, Code: methods.TOTPCode(seed, methods.TOTPStep(time.Now()))}
+	if code := errorOf(t, send(t, browser, http.MethodPost, h.server.URL+"/api/v1/login/answer", ended.CSRF, right, nil), http.StatusBadRequest); code != "unexpected_answer" {
+		t.Fatalf("a right code after the end: %q", code)
+	}
+	if reloaded := challengeOf(t, get(t, browser, h.server.URL+"/api/v1/login/challenge")); reloaded.Type != methods.ChallengeErrorType {
+		t.Fatalf("a reload must keep the end: %+v", reloaded)
 	}
 }
 

@@ -9,9 +9,10 @@ import (
 )
 
 const (
-	stepRecoveryCodes = "recovery-codes"
-	answerProvider    = "providers"
-	errorExpired      = "expired"
+	stepRecoveryCodes      = "recovery-codes"
+	answerProvider         = "providers"
+	errorExpired           = "expired"
+	maxSecondFactorGuesses = 5
 )
 
 type Facts struct {
@@ -60,6 +61,8 @@ func AfterMethod(state v1alpha1.LoginState, method string, result methods.Result
 		return failed(state, methods.FailureDisabled)
 	case result.Failure != "" && method == v1alpha1.MethodOIDC:
 		return providersStep(facts, result.Failure)
+	case result.Failure == methods.FailureInvalidCode && isGuessStep(state.Step):
+		return guessed(state, facts)
 	case result.Failure != "":
 		return retry(state, result.Failure, facts)
 	case result.Challenge != nil:
@@ -162,6 +165,15 @@ func retry(state v1alpha1.LoginState, code string, facts Facts) Step {
 	return Step{State: current, Challenge: challenge}
 }
 
+func guessed(state v1alpha1.LoginState, facts Facts) Step {
+	counted := at(state, state.Step)
+	counted.Failures = state.Failures + 1
+	if counted.Failures >= maxSecondFactorGuesses {
+		return failed(counted, errorExpired)
+	}
+	return retry(counted, methods.FailureInvalidCode, facts)
+}
+
 func next(state v1alpha1.LoginState, facts Facts) Step {
 	switch {
 	case facts.User != nil && facts.User.Spec.Disabled:
@@ -223,6 +235,7 @@ func primaryDone(state v1alpha1.LoginState, method string, required []string) v1
 		Completed: []string{method},
 		Required:  required,
 		CSRFHash:  state.CSRFHash,
+		Failures:  state.Failures,
 	}
 }
 
@@ -242,6 +255,7 @@ func at(state v1alpha1.LoginState, step string) v1alpha1.LoginState {
 		Completed: slices.Clone(state.Completed),
 		Required:  slices.Clone(state.Required),
 		CSRFHash:  state.CSRFHash,
+		Failures:  state.Failures,
 	}
 }
 
@@ -283,6 +297,10 @@ func secondFactors(enrolled []string) []string {
 		return []string{v1alpha1.MethodTOTP, v1alpha1.MethodRecovery}
 	}
 	return []string{v1alpha1.MethodTOTP}
+}
+
+func isGuessStep(step string) bool {
+	return step == methods.ChallengeTOTP || step == methods.ChallengeRecovery
 }
 
 func isSecondFactor(method string) bool {

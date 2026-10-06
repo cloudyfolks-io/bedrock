@@ -25,6 +25,9 @@ type LoginState struct {
 	Upstream string `json:"upstream,omitempty"`
 	// +optional
 	Error string `json:"error,omitempty"`
+	// +optional
+	// +kubebuilder:validation:Minimum=0
+	Failures int32 `json:"failures,omitempty"`
 }
 
 // +kubebuilder:validation:XValidation:rule="self == oldSelf",message="spec is immutable"

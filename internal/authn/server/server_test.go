@@ -817,14 +817,27 @@ func TestSecondFactorGuessesAreRateLimited(t *testing.T) {
 	if challenge.Type != methods.ChallengeTOTP {
 		t.Fatalf("second factor challenge %+v", challenge)
 	}
-	used := 4
-	for attempt := used + 1; attempt <= attemptsPerMinute+1; attempt++ {
-		challenge, _ = postJSON(t, browser, server, "/api/v1/login/answer", challenge.CSRF, methods.Answer{Type: methods.ChallengeTOTP, Code: guess})
-		limited := challenge.Error != nil && challenge.Error.Code == methods.FailureRateLimited
-		if challenge.Type != methods.ChallengeTOTP || limited != (attempt > attemptsPerMinute) {
-			t.Fatalf("TOTP guess at attempt %d: %+v", attempt, challenge)
+	attempt := 4
+	guessIn := func(browser *http.Client, challenge methods.Challenge, guesses int) methods.Challenge {
+		t.Helper()
+		for range guesses {
+			attempt++
+			challenge, _ = postJSON(t, browser, server, "/api/v1/login/answer", challenge.CSRF, methods.Answer{Type: methods.ChallengeTOTP, Code: guess})
+			limited := challenge.Error != nil && challenge.Error.Code == methods.FailureRateLimited
+			if challenge.Type != methods.ChallengeTOTP || limited != (attempt > attemptsPerMinute) {
+				t.Fatalf("TOTP guess at attempt %d: %+v", attempt, challenge)
+			}
 		}
+		return challenge
 	}
+	guessIn(browser, challenge, 4)
+	again := newBrowser(t, server)
+	challenge = passwordLogin(t, server, again, "admin", password)
+	attempt++
+	if challenge.Type != methods.ChallengeTOTP {
+		t.Fatalf("second login %+v", challenge)
+	}
+	guessIn(again, challenge, attemptsPerMinute+1-attempt)
 }
 
 func authorizeQuery() url.Values {
