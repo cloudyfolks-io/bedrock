@@ -305,7 +305,7 @@ func runMethod(ctx context.Context, deps Deps, request v1alpha1.AuthRequest, flo
 }
 
 func AttemptKey(clientIP, username string) string {
-	return clientIP + "|" + username
+	return clientIP + "|" + secret.SHA256Hex(username)
 }
 
 func attemptUser(request v1alpha1.AuthRequest) string {
