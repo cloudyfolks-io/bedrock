@@ -287,7 +287,7 @@ func RunInit(ctx context.Context, args []string, deps InitDeps, stdout, stderr i
 	}
 
 	step(stdout, "bootstrap admin")
-	password, _, err := createAdmin(ctx, c, rand.Reader)
+	password, err := createAdmin(ctx, c, rand.Reader)
 	if err != nil {
 		return fail(stderr, err)
 	}
@@ -768,7 +768,7 @@ func restoreAuthnBootstrap(dir string, ca, token corev1.Secret) error {
 	return saveAuthnBootstrap(dir, apiserver.Inputs{CA: cert, Bearer: bearer}, key)
 }
 
-func createAdmin(ctx context.Context, c client.Client, random io.Reader) (string, bool, error) {
+func createAdmin(ctx context.Context, c client.Client, random io.Reader) (string, error) {
 	name := v1alpha1.UserObjectName(v1alpha1.UserAdmin)
 	admin := v1alpha1.User{
 		ObjectMeta: metav1.ObjectMeta{Namespace: release.SystemNamespace, Name: name, Labels: map[string]string{v1alpha1.LabelKind: "User", v1alpha1.LabelName: name}},
@@ -776,28 +776,28 @@ func createAdmin(ctx context.Context, c client.Client, random io.Reader) (string
 	}
 	createErr := c.Create(ctx, &admin, client.FieldOwner(v1alpha1.AuthnFieldManager))
 	if createErr != nil && !errors.IsAlreadyExists(createErr) {
-		return "", false, createErr
+		return "", createErr
 	}
 	if errors.IsAlreadyExists(createErr) {
 		if err := c.Get(ctx, client.ObjectKeyFromObject(&admin), &admin); err != nil {
-			return "", false, err
+			return "", err
 		}
 		hasCredential, err := adminHasCredential(ctx, c, name)
 		if err != nil {
-			return "", false, err
+			return "", err
 		}
 		if hasCredential {
-			return "", false, nil
+			return "", nil
 		}
 	}
 	password, err := generatedPassword(random)
 	if err != nil {
-		return "", false, err
+		return "", err
 	}
 	if err := methods.SetPassword(ctx, c, random, admin, password); err != nil {
-		return "", false, fmt.Errorf("admin created without a password, run bedrock authn reset-password admin: %w", err)
+		return "", fmt.Errorf("admin created without a password, run bedrock authn reset-password admin: %w", err)
 	}
-	return password, true, nil
+	return password, nil
 }
 
 func adminLine(password string) string {

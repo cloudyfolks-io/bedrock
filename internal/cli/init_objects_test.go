@@ -106,9 +106,9 @@ func TestCreateAdminOnce(t *testing.T) {
 	if err := c.Create(ctx, &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: release.SystemNamespace}}); err != nil {
 		t.Fatal(err)
 	}
-	password, created, err := createAdmin(ctx, c, rand.Reader)
-	if err != nil || !created || len(password) != 20 {
-		t.Fatalf("password length %d created %v err %v", len(password), created, err)
+	password, err := createAdmin(ctx, c, rand.Reader)
+	if err != nil || len(password) != 20 {
+		t.Fatalf("password length %d err %v", len(password), err)
 	}
 	var admin v1alpha1.User
 	if err := c.Get(ctx, client.ObjectKey{Namespace: release.SystemNamespace, Name: "admin"}, &admin); err != nil {
@@ -121,9 +121,9 @@ func TestCreateAdminOnce(t *testing.T) {
 	if ok, err := secret.Verify(hash, password); err != nil || !ok {
 		t.Fatalf("the printed password must match the stored hash: %v %v", ok, err)
 	}
-	again, created, err := createAdmin(ctx, c, rand.Reader)
-	if err != nil || created || again != "" {
-		t.Fatalf("a second init must leave the admin alone: %q %v %v", again, created, err)
+	again, err := createAdmin(ctx, c, rand.Reader)
+	if err != nil || again != "" {
+		t.Fatalf("a second init must leave the admin alone: %q %v", again, err)
 	}
 	if storedPasswordHash(t, c, "admin") != hash {
 		t.Fatal("the admin password must not change on a second init")
@@ -144,17 +144,17 @@ func TestCreateAdminRepairsAMissingCredential(t *testing.T) {
 	if err := c.Create(ctx, half); err != nil {
 		t.Fatal(err)
 	}
-	password, created, err := createAdmin(ctx, c, rand.Reader)
-	if err != nil || !created || len(password) != 20 {
-		t.Fatalf("a half-created admin must be repaired: length %d created %v err %v", len(password), created, err)
+	password, err := createAdmin(ctx, c, rand.Reader)
+	if err != nil || len(password) != 20 {
+		t.Fatalf("a half-created admin must be repaired: length %d err %v", len(password), err)
 	}
 	hash := storedPasswordHash(t, c, "admin")
 	if ok, err := secret.Verify(hash, password); err != nil || !ok {
 		t.Fatalf("the repaired password must match the stored hash: %v %v", ok, err)
 	}
-	again, created, err := createAdmin(ctx, c, rand.Reader)
-	if err != nil || created || again != "" {
-		t.Fatalf("a repaired admin must not be repaired twice: %q %v %v", again, created, err)
+	again, err := createAdmin(ctx, c, rand.Reader)
+	if err != nil || again != "" {
+		t.Fatalf("a repaired admin must not be repaired twice: %q %v", again, err)
 	}
 	if storedPasswordHash(t, c, "admin") != hash {
 		t.Fatal("the repaired password must not change again")

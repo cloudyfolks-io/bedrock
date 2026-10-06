@@ -241,7 +241,7 @@ func RunCreateAdmin(ctx context.Context, args []string, newClient func(string) (
 	if err != nil {
 		return fail(stderr, err)
 	}
-	password, _, err := createAdmin(ctx, c, random)
+	password, err := createAdmin(ctx, c, random)
 	if err != nil {
 		return fail(stderr, err)
 	}
