@@ -156,6 +156,9 @@ func (s *Store) CreateAuthRequest(ctx context.Context, req *oidc.AuthRequest, _ 
 	if pkceMissing(oauth, req) {
 		return nil, oidc.ErrInvalidRequest().WithDescription("this client must use PKCE with S256")
 	}
+	if !s.created.auth.Allow(liveKey, s.clock()) {
+		return nil, temporarilyUnavailable()
+	}
 	id, err := secret.FromAlphabet(s.random, authRequestAlphabet, authRequestIDLength)
 	if err != nil {
 		return nil, err

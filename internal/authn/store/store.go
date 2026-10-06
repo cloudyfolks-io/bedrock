@@ -6,6 +6,7 @@ import (
 	"io"
 	"time"
 
+	"github.com/zitadel/oidc/v3/pkg/oidc"
 	"github.com/zitadel/oidc/v3/pkg/op"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -13,6 +14,7 @@ import (
 
 	"github.com/cloudyfolks-io/bedrock/api/v1alpha1"
 	"github.com/cloudyfolks-io/bedrock/internal/authn/keys"
+	"github.com/cloudyfolks-io/bedrock/internal/authn/methods"
 	"github.com/cloudyfolks-io/bedrock/internal/authn/policy"
 	"github.com/cloudyfolks-io/bedrock/internal/release"
 )
@@ -23,6 +25,9 @@ const (
 	audienceBedrock     = "bedrock"
 	scopeGroups         = "groups"
 	maxLabelValue       = 63
+	liveAuthRequests    = 5000
+	liveDeviceRequests  = 1000
+	liveKey             = "live"
 )
 
 var (
@@ -51,6 +56,12 @@ type Store struct {
 	clock    Clock
 	settings func(context.Context) (policy.Settings, error)
 	keys     func(context.Context) ([]keys.Key, error)
+	created  createdRequests
+}
+
+type createdRequests struct {
+	auth   *methods.RateLimiter
+	device *methods.RateLimiter
 }
 
 func New(cfg Config) *Store {
@@ -61,7 +72,15 @@ func New(cfg Config) *Store {
 		clock:    cfg.Clock,
 		settings: cfg.Settings,
 		keys:     cfg.Keys,
+		created: createdRequests{
+			auth:   methods.NewRateLimiter(liveAuthRequests, authRequestLifetime),
+			device: methods.NewRateLimiter(liveDeviceRequests, deviceLifetime),
+		},
 	}
+}
+
+func temporarilyUnavailable() *oidc.Error {
+	return &oidc.Error{ErrorType: "temporarily_unavailable", Description: "too many sign-ins are in progress, try again later"}
 }
 
 type notFoundError struct{ kind string }

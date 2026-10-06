@@ -51,6 +51,9 @@ func NormalizeUserCode(input string) string {
 }
 
 func (s *Store) StoreDeviceAuthorization(ctx context.Context, clientID, deviceCode, userCode string, expires time.Time, scopes []string) error {
+	if !s.created.device.Allow(liveKey, s.clock()) {
+		return temporarilyUnavailable()
+	}
 	hash := secret.SHA256Hex(NormalizeUserCode(userCode))
 	live, err := s.liveDevices(ctx, hash)
 	if err != nil {
