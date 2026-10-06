@@ -11,6 +11,8 @@ image_b_file=$(printf '%s' "$image_b" | sed -E 's/[^A-Za-z0-9._-]/_/g').tar
 bundle_b=dist/bedrock-$VERSION_B-bundle-$arch.tar.zst
 cli_b=dist/bedrock-$VERSION_B-linux-$arch
 abort_in=${ABORT_IN:-}
+init_a=${INIT_A:-hack/e2e-init.sh}
+assert_authn=${ASSERT_AUTHN:-}
 workdir=$(mktemp -d)
 export KUBECONFIG=/var/lib/k0s/pki/admin.conf
 
@@ -49,13 +51,22 @@ dump() {
     dmesg | grep -i -E 'oom|out of memory' | tail -20 || true
     echo "--- vmis"
     kubectl get vmi -A -o wide || true
+    if [ -n "$assert_authn" ]; then
+      echo "--- authn"
+      kubectl -n bedrock-system get deploy/bedrock-authn -o wide || true
+      kubectl -n bedrock-system logs deploy/bedrock-authn --tail=100 --all-containers || true
+      kubectl -n traefik get certificate platform-tls -o yaml || true
+      kubectl get host "$(hostname | tr '[:upper:]' '[:lower:]')" -o jsonpath='{.status.authn}' || true
+      grep -n authentication /etc/k0s/k0s.yaml || true
+      ls -l /etc/bedrock/authn || true
+    fi
   fi
   rm -rf "$workdir"
 }
 trap dump EXIT
 
 BUNDLE=dist/bedrock-$VERSION_A-bundle-$arch.tar.zst VERSION=$VERSION_A IMAGE=$image_a \
-  BIN=dist/bedrock-$VERSION_A-linux-$arch RELEASE_DIR=dist/release-$VERSION_A ARCH=$arch hack/e2e-init.sh
+  BIN=dist/bedrock-$VERSION_A-linux-$arch RELEASE_DIR=dist/release-$VERSION_A ARCH=$arch bash "$init_a"
 
 node=$(hostname | tr '[:upper:]' '[:lower:]')
 test "$(kubectl get host "$node" -o jsonpath='{.spec.management.enabled}')" != "true"
@@ -160,6 +171,96 @@ tail -1 "$workdir/upgrade.log" | grep -qx "cluster upgraded to $VERSION_B"
 for phase in ControlPlane Components Workers Verify; do
   grep -q "^phase $phase: " "$workdir/upgrade.log"
 done
+if [ -n "$assert_authn" ]; then
+  apiserver_has_authn() {
+    local pid
+    pid=$(pgrep -o -x kube-apiserver || true)
+    [ -n "$pid" ] && tr '\0' '\n' <"/proc/$pid/cmdline" | grep -q '^--authentication-config=' && kubectl get --raw=/readyz >/dev/null 2>&1
+  }
+  restarted=0
+  for _ in $(seq 1 120); do
+    if apiserver_has_authn; then
+      restarted=1
+      break
+    fi
+    sleep 10
+  done
+  test "$restarted" -eq 1
+  grep -q 'authentication-config: /etc/bedrock/authn/authentication.yaml' /etc/k0s/k0s.yaml
+  test -s /etc/bedrock/authn/authentication.yaml
+  test -s /etc/bedrock/authn/webhook.kubeconfig
+  kubectl wait --for=condition=Ready node --all --timeout=300s
+  kubectl get cluster cluster -o jsonpath='{.status.components[?(@.name=="authn")].available}' | grep -qx true
+  kubectl -n bedrock-system rollout status deployment/bedrock-authn --timeout=300s
+  kubectl -n cert-manager get secret bedrock-ca -o jsonpath='{.metadata.labels.bedrock\.cloudyfolks\.io/kind}' | grep -qx PlatformCA
+  kubectl -n bedrock-system get secret bedrock-authn-webhook-token -o jsonpath='{.metadata.labels.bedrock\.cloudyfolks\.io/authn}' | grep -qx true
+  issuer=""
+  for _ in $(seq 1 60); do
+    issuer=$(kubectl -n traefik get certificate platform-tls -o jsonpath='{.spec.issuerRef.name}' 2>/dev/null || true)
+    if [ "$issuer" = bedrock-ca ]; then break; fi
+    sleep 10
+  done
+  test "$issuer" = bedrock-ca
+  kubectl -n traefik wait --for=condition=Ready certificate/platform-tls --timeout=300s
+  kubectl -n cert-manager get secret bedrock-ca -o jsonpath='{.data.ca\.crt}' | base64 -d >"$workdir/bedrock-ca.crt"
+  vip=$(kubectl get cluster cluster -o jsonpath='{.spec.api.vip}')
+  platform_host=$(echo "$vip" | tr '.' '-').sslip.io
+  served=0
+  for _ in $(seq 1 60); do
+    if curl -sf -m 10 --cacert "$workdir/bedrock-ca.crt" --resolve "sso.$platform_host:443:$vip" "https://sso.$platform_host/.well-known/openid-configuration" >"$workdir/discovery.json"; then
+      served=1
+      break
+    fi
+    sleep 5
+  done
+  test "$served" -eq 1
+  grep -q "https://sso.$platform_host" "$workdir/discovery.json"
+  kubectl apply -f - <<'USER'
+apiVersion: bedrock.cloudyfolks.io/v1alpha1
+kind: User
+metadata:
+  name: admin
+  namespace: bedrock-system
+  labels:
+    bedrock.cloudyfolks.io/kind: User
+    bedrock.cloudyfolks.io/name: admin
+spec:
+  username: admin
+  displayName: Administrator
+  groups: [bedrock-admins]
+  methods: [password]
+USER
+  (umask 077 && "$cli_b" authn reset-password admin >"$workdir/admin-password")
+  grep -q '^password: ' "$workdir/admin-password"
+  token=$(python3 -c 'import secrets, string; print("brk_" + "".join(secrets.choice(string.ascii_letters + string.digits) for _ in range(40)))')
+  token_name=$(printf '%s' "$token" | sha256sum | awk '{print $1}')
+  kubectl apply -f - <<TOKEN
+apiVersion: bedrock.cloudyfolks.io/v1alpha1
+kind: APIToken
+metadata:
+  name: $token_name
+  namespace: bedrock-system
+  labels:
+    bedrock.cloudyfolks.io/kind: APIToken
+    bedrock.cloudyfolks.io/name: ${token_name:0:63}
+spec:
+  userRef: admin
+  description: e2e upgrade
+TOKEN
+  whoami=""
+  for _ in $(seq 1 30); do
+    whoami=$(kubectl --kubeconfig /dev/null --server "https://$vip:6443" --certificate-authority /var/lib/k0s/pki/ca.crt --token "$token" auth whoami -o jsonpath='{.status.userInfo.username} {.status.userInfo.groups}' 2>/dev/null || true)
+    case "$whoami" in "bedrock:admin "*) break ;; esac
+    sleep 10
+  done
+  case "$whoami" in
+  "bedrock:admin "*bedrock:bedrock-admins*) ;;
+  *)
+    echo "kubectl auth whoami with a Bedrock API token answered: $whoami" >&2
+    exit 1
+    ;;
+  esac
+fi
 kubectl get cluster cluster -o jsonpath='{.status.version}' | grep -qx "$VERSION_B"
 kubectl get cluster cluster -o jsonpath='{.status.phase}' | grep -qx Idle
 kubectl get cluster cluster -o jsonpath='{.status.conditions[?(@.type=="Available")].reason}' | grep -qx Upgraded
