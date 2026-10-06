@@ -33,7 +33,7 @@ func EnableAuthnArgs(ctx context.Context, c client.Client, deps Deps) error {
 	if _, err := ensureAuthnArgs(deps.Root, service); err != nil {
 		return err
 	}
-	if !authnRestartWanted(deps.Root, service) {
+	if wanted, _ := authnRestartWanted(deps.Root, service); !wanted {
 		return nil
 	}
 	if !v1alpha1.AuthnRestartGrantFresh(own, deps.Now()) {
@@ -50,17 +50,27 @@ func nodeUpgrading(ctx context.Context, c client.Client, node string) (bool, err
 	return len(list.Items) > 0, nil
 }
 
-func authnRestartWanted(root string, service k0sService) bool {
+func authnRestartWanted(root string, service k0sService) (wanted, known bool) {
+	if service.Unit != k0sControllerUnit {
+		return false, true
+	}
 	dir, ok := apiserverProcessDir(root)
-	if !ok || service.Unit != k0sControllerUnit {
-		return false
+	if !ok {
+		return false, false
 	}
 	start, ok := apiserverStartTime(root)
 	if !ok {
-		return false
+		return false, false
 	}
 	firstEnablement := !hasFlag(dir, authnConfigFlag) && k0sConfigNewerThanAPIServer(root, service)
-	return firstEnablement || webhookRestartPending(root, start)
+	return firstEnablement || webhookRestartPending(root, start), true
+}
+
+func restartPendingStatus(wanted, known, previous bool) bool {
+	if !known {
+		return previous
+	}
+	return wanted
 }
 
 func hasFlag(dir, flag string) bool {

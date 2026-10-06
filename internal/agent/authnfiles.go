@@ -43,13 +43,18 @@ func syncAuthnFiles(ctx context.Context, c client.Client, deps Deps, current v1a
 	next := v1alpha1.AuthnFilesStatus{
 		Hash:                  apiserver.Hash(files[apiserver.AuthenticationFile], files[apiserver.WebhookFile]),
 		WrittenAt:             previous.WrittenAt,
-		WebhookRestartPending: authnRestartWanted(deps.Root, service),
+		WebhookRestartPending: pendingOf(previous, deps.Root, service),
 	}
 	if written {
 		now := metav1.NewTime(deps.Now())
 		next.WrittenAt = &now
 	}
 	return &next
+}
+
+func pendingOf(previous v1alpha1.AuthnFilesStatus, root string, service k0sService) bool {
+	wanted, known := authnRestartWanted(root, service)
+	return restartPendingStatus(wanted, known, previous.WebhookRestartPending)
 }
 
 func previousAuthn(status *v1alpha1.AuthnFilesStatus) v1alpha1.AuthnFilesStatus {
@@ -61,7 +66,7 @@ func previousAuthn(status *v1alpha1.AuthnFilesStatus) v1alpha1.AuthnFilesStatus 
 
 func keptAuthn(previous v1alpha1.AuthnFilesStatus, root string, service k0sService, message string) *v1alpha1.AuthnFilesStatus {
 	previous.Message = message
-	previous.WebhookRestartPending = authnRestartWanted(root, service)
+	previous.WebhookRestartPending = pendingOf(previous, root, service)
 	return &previous
 }
 

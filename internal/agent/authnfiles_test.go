@@ -314,8 +314,37 @@ func TestAPIServerStartTimeIgnoresTenantAPIServers(t *testing.T) {
 		if err := os.Chtimes(path, tc.modified, tc.modified); err != nil {
 			t.Fatal(err)
 		}
-		if got := authnRestartWanted(root, controllerService()); got != tc.pending {
+		if got, _ := authnRestartWanted(root, controllerService()); got != tc.pending {
 			t.Fatalf("modified %v: pending %v, want %v", tc.modified.Sub(start), got, tc.pending)
+		}
+	}
+}
+
+func TestSyncKeepsRestartPendingWhileKubeAPIServerIsUnknown(t *testing.T) {
+	putAuthnSources(t, "lab.example")
+	for _, previous := range []bool{true, false} {
+		deps := authnDeps(t, time.Now())
+		current := hostWithRole("cp-unknown-status", v1alpha1.RoleControlPlane)
+		current.Status.Authn = &v1alpha1.AuthnFilesStatus{WebhookRestartPending: previous}
+		status := syncAuthnFiles(context.Background(), k8sClient, deps, current)
+		if status == nil || status.WebhookRestartPending != previous {
+			t.Fatalf("no kube-apiserver process keeps pending at %v: %+v", previous, status)
+		}
+	}
+}
+
+func TestRestartPendingStatus(t *testing.T) {
+	cases := []struct {
+		wanted, known, previous, want bool
+	}{
+		{true, true, false, true},
+		{false, true, true, false},
+		{false, false, true, true},
+		{false, false, false, false},
+	}
+	for _, tc := range cases {
+		if got := restartPendingStatus(tc.wanted, tc.known, tc.previous); got != tc.want {
+			t.Fatalf("%+v: got %v", tc, got)
 		}
 	}
 }

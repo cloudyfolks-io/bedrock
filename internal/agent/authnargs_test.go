@@ -287,15 +287,32 @@ func TestAuthnRestartWanted(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			f := newAuthnArgsFixture(t, "cp-wanted-"+strings.ReplaceAll(strings.SplitN(name, ":", 2)[0], " ", "-"), v1alpha1.RoleControlPlane)
 			tc.change(t, f)
-			if got := authnRestartWanted(f.deps.Root, controllerService()); got != tc.want {
-				t.Fatalf("got %v, want %v", got, tc.want)
+			wanted, known := authnRestartWanted(f.deps.Root, controllerService())
+			if wanted != tc.want || !known {
+				t.Fatalf("wanted %v known %v, want %v known true", wanted, known, tc.want)
 			}
 		})
 	}
 	f := newAuthnArgsFixture(t, "wk-wanted", v1alpha1.RoleWorkload)
 	touch(t, filepath.Join(f.deps.Root, "etc/bedrock/authn/webhook.kubeconfig"), time.Now())
-	if authnRestartWanted(f.deps.Root, k0sServiceOf(hostWithRole("wk", v1alpha1.RoleWorkload))) {
+	if wanted, _ := authnRestartWanted(f.deps.Root, k0sServiceOf(hostWithRole("wk", v1alpha1.RoleWorkload))); wanted {
 		t.Fatal("a worker never restarts for authn")
+	}
+}
+
+func TestAuthnRestartWantedIsUnknownWithoutAKubeAPIServer(t *testing.T) {
+	f := newAuthnArgsFixture(t, "cp-unknown-state", v1alpha1.RoleControlPlane)
+	if err := os.RemoveAll(filepath.Join(f.deps.Root, "proc")); err != nil {
+		t.Fatal(err)
+	}
+	if wanted, known := authnRestartWanted(f.deps.Root, controllerService()); wanted || known {
+		t.Fatalf("wanted %v known %v, want both false", wanted, known)
+	}
+	if err := EnableAuthnArgs(context.Background(), k8sClient, f.restartsWithFlags(t)); err != nil {
+		t.Fatal(err)
+	}
+	if f.restarts() != 0 {
+		t.Fatalf("an unknown state never restarts, even with a fresh grant: %v", f.exec.Calls)
 	}
 }
 
