@@ -215,23 +215,9 @@ if [ -n "$assert_authn" ]; then
   done
   test "$served" -eq 1
   grep -q "https://sso.$platform_host" "$workdir/discovery.json"
-  kubectl apply -f - <<'USER'
-apiVersion: bedrock.cloudyfolks.io/v1alpha1
-kind: User
-metadata:
-  name: admin
-  namespace: bedrock-system
-  labels:
-    bedrock.cloudyfolks.io/kind: User
-    bedrock.cloudyfolks.io/name: admin
-spec:
-  username: admin
-  displayName: Administrator
-  groups: [bedrock-admins]
-  methods: [password]
-USER
-  (umask 077 && "$cli_b" authn reset-password admin >"$workdir/admin-password")
-  grep -q '^password: ' "$workdir/admin-password"
+  (umask 077 && "$cli_b" authn create-admin >"$workdir/create-admin")
+  grep -q '^admin password: ' "$workdir/create-admin"
+  "$cli_b" authn create-admin | grep -qx 'admin exists'
   token=$(python3 -c 'import secrets, string; print("brk_" + "".join(secrets.choice(string.ascii_letters + string.digits) for _ in range(40)))')
   token_name=$(printf '%s' "$token" | sha256sum | awk '{print $1}')
   kubectl apply -f - <<TOKEN
