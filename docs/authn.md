@@ -294,8 +294,12 @@ OIDC users, because their password lives upstream, not in Bedrock.
 
 A cluster from a release without Bedrock authn has no `admin` user after
 the upgrade. The operator creates the platform CA and the webhook token.
-The agent on each controller then adds the kube-apiserver flags and
-restarts `k0scontroller`, one controller at a time.
+The agent on each controller then adds the kube-apiserver flags. Then
+the agent waits for a restart grant from the operator. The operator
+gives one grant at a time, so only one `k0scontroller` restarts at a
+time. A grant is the annotation `bedrock.cloudyfolks.io/authn-restart` on
+the `Host`. It holds the grant time and lasts 15 minutes. The operator
+removes it when the restart is done or the time is over.
 
 1. Wait until the upgrade is complete.
 2. On one controller, run this command once:
@@ -316,7 +320,8 @@ changes nothing. To get a new password, use
 kube-apiserver reloads `authentication.yaml` on every change, so a new
 `platform.host` value takes effect for token verification at once.
 kube-apiserver reads `webhook.kubeconfig` only when it starts. A change
-there needs a rolling restart of `k0scontroller`. Until that restart,
+there needs a rolling restart of `k0scontroller`. The operator grants
+the restarts one at a time. Until that restart,
 `Host.status.authn.webhookRestartPending` is `true` on the affected
 controllers, and `brk_` API tokens on those controllers keep using the
 previous webhook URL. JWT access tokens are not affected, because their

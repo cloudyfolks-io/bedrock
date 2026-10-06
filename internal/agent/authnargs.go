@@ -2,32 +2,19 @@ package agent
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
 	"slices"
 	"strings"
-	"time"
 
-	coordinationv1 "k8s.io/api/coordination/v1"
-	apierrors "k8s.io/apimachinery/pkg/api/errors"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/fields"
-	"k8s.io/utils/ptr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	"github.com/cloudyfolks-io/bedrock/api/v1alpha1"
-	"github.com/cloudyfolks-io/bedrock/internal/release"
 )
 
-const (
-	authnRestartLease    = "bedrock-authn-apiserver-restart"
-	authnRestartDuration = 15 * time.Minute
-	authnConfigFlag      = "--authentication-config"
-)
-
-var authnRestartLeaseKey = client.ObjectKey{Namespace: release.SystemNamespace, Name: authnRestartLease}
+const authnConfigFlag = "--authentication-config"
 
 func EnableAuthnArgs(ctx context.Context, c client.Client, deps Deps) error {
 	var own v1alpha1.Host
@@ -48,12 +35,10 @@ func EnableAuthnArgs(ctx context.Context, c client.Client, deps Deps) error {
 	if !authnRestartNeeded(deps.Root, service) {
 		return nil
 	}
-	held, err := acquireRestartLease(ctx, c, deps.Node, deps.Now())
-	if err != nil || !held {
-		return err
+	if !v1alpha1.AuthnRestartGrantFresh(own, deps.Now()) {
+		return nil
 	}
-	restarted := restartForAuthn(ctx, deps)
-	return errors.Join(restarted, releaseRestartLease(ctx, c, deps))
+	return restartForAuthn(ctx, deps)
 }
 
 func nodeUpgrading(ctx context.Context, c client.Client, node string) (bool, error) {
@@ -102,56 +87,5 @@ func authnRestartProblem(ctx context.Context, deps Deps) string {
 	}
 	return bounded(ctx, deps.ProbeTimeout, func(probeCtx context.Context) string {
 		return apiProblem(probeCtx, deps.Exec, deps.Root, "/readyz")
-	})
-}
-
-func acquireRestartLease(ctx context.Context, c client.Client, holder string, now time.Time) (bool, error) {
-	var lease coordinationv1.Lease
-	if err := c.Get(ctx, authnRestartLeaseKey, &lease); err != nil {
-		return false, fmt.Errorf("lease %s: %w", authnRestartLeaseKey, err)
-	}
-	if !leaseFree(lease, holder, now) {
-		return false, nil
-	}
-	claimed := claimLease(lease, holder, now)
-	err := c.Update(ctx, &claimed)
-	if apierrors.IsConflict(err) {
-		return false, nil
-	}
-	return err == nil, err
-}
-
-func leaseFree(lease coordinationv1.Lease, holder string, now time.Time) bool {
-	current := ptr.Deref(lease.Spec.HolderIdentity, "")
-	if current == "" || current == holder || lease.Spec.RenewTime == nil || lease.Spec.LeaseDurationSeconds == nil {
-		return true
-	}
-	return now.After(lease.Spec.RenewTime.Add(time.Duration(*lease.Spec.LeaseDurationSeconds) * time.Second))
-}
-
-func claimLease(lease coordinationv1.Lease, holder string, now time.Time) coordinationv1.Lease {
-	claimed := *lease.DeepCopy()
-	stamp := metav1.NewMicroTime(now)
-	claimed.Spec.HolderIdentity = ptr.To(holder)
-	claimed.Spec.AcquireTime = &stamp
-	claimed.Spec.RenewTime = &stamp
-	claimed.Spec.LeaseDurationSeconds = ptr.To(int32(authnRestartDuration / time.Second))
-	return claimed
-}
-
-func releaseRestartLease(ctx context.Context, c client.Client, deps Deps) error {
-	return retryCall(ctx, restartAttempts, deps.K0sPoll, func() error {
-		var lease coordinationv1.Lease
-		if err := c.Get(ctx, authnRestartLeaseKey, &lease); err != nil {
-			return err
-		}
-		if ptr.Deref(lease.Spec.HolderIdentity, "") != deps.Node {
-			return nil
-		}
-		released := *lease.DeepCopy()
-		released.Spec.HolderIdentity = nil
-		released.Spec.AcquireTime = nil
-		released.Spec.RenewTime = nil
-		return c.Update(ctx, &released)
 	})
 }

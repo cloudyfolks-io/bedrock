@@ -10,15 +10,12 @@ import (
 	"testing"
 	"time"
 
-	coordinationv1 "k8s.io/api/coordination/v1"
-	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/utils/ptr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	"github.com/cloudyfolks-io/bedrock/api/v1alpha1"
 	"github.com/cloudyfolks-io/bedrock/internal/host"
-	"github.com/cloudyfolks-io/bedrock/internal/release"
 )
 
 const (
@@ -40,9 +37,9 @@ func (h restartHost) Run(ctx context.Context, name string, args ...string) (stri
 }
 
 type authnArgsFixture struct {
-	deps  Deps
-	exec  *host.FakeExec
-	lease client.ObjectKey
+	deps Deps
+	exec *host.FakeExec
+	node string
 }
 
 func apiserverCmdline(t *testing.T, root string, args ...string) {
@@ -50,30 +47,10 @@ func apiserverCmdline(t *testing.T, root string, args ...string) {
 	writeFixtureFile(t, filepath.Join(root, "proc", "4242", "cmdline"), strings.Join(append([]string{"kube-apiserver"}, args...), "\x00")+"\x00")
 }
 
-func restartLease(t *testing.T) client.ObjectKey {
-	t.Helper()
-	ctx := context.Background()
-	if err := client.IgnoreAlreadyExists(k8sClient.Create(ctx, &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: release.SystemNamespace}})); err != nil {
-		t.Fatal(err)
-	}
-	lease := &coordinationv1.Lease{ObjectMeta: metav1.ObjectMeta{Namespace: release.SystemNamespace, Name: authnRestartLease}}
-	if err := client.IgnoreAlreadyExists(k8sClient.Create(ctx, lease)); err != nil {
-		t.Fatal(err)
-	}
-	key := client.ObjectKeyFromObject(lease)
-	t.Cleanup(func() {
-		var current coordinationv1.Lease
-		if err := k8sClient.Get(context.Background(), key, &current); err == nil {
-			current.Spec = coordinationv1.LeaseSpec{}
-			_ = k8sClient.Update(context.Background(), &current)
-		}
-	})
-	return key
-}
-
 func newAuthnArgsFixture(t *testing.T, node, role string) authnArgsFixture {
 	t.Helper()
 	h := hostWithRole(node, role)
+	h.Annotations = map[string]string{v1alpha1.AnnotationAuthnRestart: time.Now().UTC().Format(time.RFC3339)}
 	if err := k8sClient.Create(context.Background(), &h); err != nil {
 		t.Fatal(err)
 	}
@@ -94,7 +71,7 @@ func newAuthnArgsFixture(t *testing.T, node, role string) authnArgsFixture {
 	writeFixtureFile(t, filepath.Join(root, "etc/bedrock/authn/webhook.kubeconfig"), "w")
 	fakeAPIServer(t, root, time.Now().Add(-time.Hour))
 	apiserverCmdline(t, root, "--etcd-servers=https://127.0.0.1:2379")
-	return authnArgsFixture{deps: deps, exec: exec, lease: restartLease(t)}
+	return authnArgsFixture{deps: deps, exec: exec, node: node}
 }
 
 func touch(t *testing.T, path string, when time.Time) {
@@ -124,13 +101,19 @@ func (f authnArgsFixture) restarts() int {
 	return count
 }
 
-func holder(t *testing.T, key client.ObjectKey) string {
+func (f authnArgsFixture) setGrant(t *testing.T, value *string) {
 	t.Helper()
-	var lease coordinationv1.Lease
-	if err := k8sClient.Get(context.Background(), key, &lease); err != nil {
+	var current v1alpha1.Host
+	if err := k8sClient.Get(context.Background(), client.ObjectKey{Name: f.node}, &current); err != nil {
 		t.Fatal(err)
 	}
-	return ptr.Deref(lease.Spec.HolderIdentity, "")
+	current.Annotations = map[string]string{}
+	if value != nil {
+		current.Annotations[v1alpha1.AnnotationAuthnRestart] = *value
+	}
+	if err := k8sClient.Update(context.Background(), &current); err != nil {
+		t.Fatal(err)
+	}
 }
 
 func TestEnableAuthnArgsRestartsTheControllerOnce(t *testing.T) {
@@ -145,9 +128,6 @@ func TestEnableAuthnArgsRestartsTheControllerOnce(t *testing.T) {
 	}
 	if f.restarts() != 1 || !slices.Contains(f.exec.Calls, readyzCall(deps.Root)) {
 		t.Fatalf("one restart and a readyz wait: %v", f.exec.Calls)
-	}
-	if got := holder(t, f.lease); got != "" {
-		t.Fatalf("the lease must be released, held by %q", got)
 	}
 	if err := EnableAuthnArgs(context.Background(), k8sClient, deps); err != nil {
 		t.Fatal(err)
@@ -180,9 +160,6 @@ func TestEnableAuthnArgsRetriesAFailedRestartOnALaterTick(t *testing.T) {
 	if err := EnableAuthnArgs(context.Background(), k8sClient, f.deps); err == nil || !strings.Contains(err.Error(), "unit busy") {
 		t.Fatalf("error %v", err)
 	}
-	if got := holder(t, f.lease); got != "" {
-		t.Fatalf("a failed restart must release the lease, held by %q", got)
-	}
 	delete(f.exec.Errors, restartCall)
 	if err := EnableAuthnArgs(context.Background(), k8sClient, f.deps); err == nil || !strings.Contains(err.Error(), "kube-apiserver did not restart within 300ms") {
 		t.Fatalf("a restart that never brings a new kube-apiserver times out: %v", err)
@@ -196,38 +173,33 @@ func TestEnableAuthnArgsRetriesAFailedRestartOnALaterTick(t *testing.T) {
 	}
 }
 
-func TestEnableAuthnArgsWaitsForTheLease(t *testing.T) {
-	f := newAuthnArgsFixture(t, "cp-args-lease", v1alpha1.RoleControlPlane)
-	ctx := context.Background()
-	var lease coordinationv1.Lease
-	if err := k8sClient.Get(ctx, f.lease, &lease); err != nil {
-		t.Fatal(err)
+func TestEnableAuthnArgsWaitsForTheOperatorGrant(t *testing.T) {
+	stale := time.Now().Add(-v1alpha1.AuthnRestartGrantLifetime - time.Minute).UTC().Format(time.RFC3339)
+	cases := map[string]*string{
+		"no grant":         nil,
+		"stale grant":      &stale,
+		"unparsable grant": ptr.To("soon"),
 	}
-	now := metav1.NewMicroTime(time.Now())
-	lease.Spec = coordinationv1.LeaseSpec{HolderIdentity: ptr.To("cp-other"), RenewTime: &now, LeaseDurationSeconds: ptr.To(int32(900))}
-	if err := k8sClient.Update(ctx, &lease); err != nil {
-		t.Fatal(err)
-	}
-	deps := f.restartsWithFlags(t)
-	if err := EnableAuthnArgs(ctx, k8sClient, deps); err != nil {
-		t.Fatal(err)
-	}
-	if f.restarts() != 0 || holder(t, f.lease) != "cp-other" {
-		t.Fatalf("another controller holds the lease: %v", f.exec.Calls)
-	}
-	if err := k8sClient.Get(ctx, f.lease, &lease); err != nil {
-		t.Fatal(err)
-	}
-	stale := metav1.NewMicroTime(time.Now().Add(-time.Hour))
-	lease.Spec.RenewTime = &stale
-	if err := k8sClient.Update(ctx, &lease); err != nil {
-		t.Fatal(err)
-	}
-	if err := EnableAuthnArgs(ctx, k8sClient, deps); err != nil {
-		t.Fatal(err)
-	}
-	if f.restarts() != 1 || holder(t, f.lease) != "" {
-		t.Fatalf("an expired lease is taken over: %v", f.exec.Calls)
+	for name, grant := range cases {
+		t.Run(name, func(t *testing.T) {
+			f := newAuthnArgsFixture(t, "cp-args-"+strings.ReplaceAll(name, " ", "-"), v1alpha1.RoleControlPlane)
+			f.setGrant(t, grant)
+			deps := f.restartsWithFlags(t)
+			if err := EnableAuthnArgs(context.Background(), k8sClient, deps); err != nil {
+				t.Fatal(err)
+			}
+			if f.restarts() != 0 {
+				t.Fatalf("a controller restarts only on a fresh grant: %v", f.exec.Calls)
+			}
+			fresh := time.Now().UTC().Format(time.RFC3339)
+			f.setGrant(t, &fresh)
+			if err := EnableAuthnArgs(context.Background(), k8sClient, deps); err != nil {
+				t.Fatal(err)
+			}
+			if f.restarts() != 1 {
+				t.Fatalf("a fresh grant allows the restart: %v", f.exec.Calls)
+			}
+		})
 	}
 }
 
