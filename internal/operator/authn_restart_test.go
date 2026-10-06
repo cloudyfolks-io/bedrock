@@ -51,13 +51,23 @@ func TestAuthnRestartGrants(t *testing.T) {
 		"a fresh grant on a pending host blocks a second grant": {
 			hosts: []v1alpha1.Host{restartHost("a", true, ""), restartHost("b", true, "1m")},
 		},
-		"an expired grant on a pending host is revoked and the lowest pending host is granted, which may be itself": {
-			hosts:  []v1alpha1.Host{restartHost("a", true, "16m"), restartHost("b", true, "")},
-			grant:  "a",
+		"a stuck lowest host expires with two others pending: the next name is granted": {
+			hosts:  []v1alpha1.Host{restartHost("a", true, "16m"), restartHost("b", true, ""), restartHost("c", true, "")},
+			grant:  "b",
 			revoke: []string{"a"},
 		},
-		"an expired grant on a pending host is revoked and the next pending host is granted": {
-			hosts:  []v1alpha1.Host{restartHost("a", false, ""), restartHost("b", true, "20m"), restartHost("c", true, "")},
+		"a stuck middle host expires: the next name is granted": {
+			hosts:  []v1alpha1.Host{restartHost("a", true, ""), restartHost("b", true, "20m"), restartHost("c", true, "")},
+			grant:  "c",
+			revoke: []string{"b"},
+		},
+		"the highest stuck host expires: the grant wraps to the lowest name": {
+			hosts:  []v1alpha1.Host{restartHost("a", true, ""), restartHost("b", true, ""), restartHost("c", true, "16m")},
+			grant:  "a",
+			revoke: []string{"c"},
+		},
+		"a single stuck host expires: it is granted again": {
+			hosts:  []v1alpha1.Host{restartHost("a", false, ""), restartHost("b", true, "16m")},
 			grant:  "b",
 			revoke: []string{"b"},
 		},

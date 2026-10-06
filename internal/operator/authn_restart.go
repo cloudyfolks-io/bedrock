@@ -22,7 +22,7 @@ func authnRestartHolds(host v1alpha1.Host, now time.Time) bool {
 }
 
 func authnRestartGrants(hosts []v1alpha1.Host, now time.Time) (string, []string) {
-	var revoke, waiting []string
+	var revoke, waiting, expired []string
 	holding := false
 	for _, host := range hosts {
 		_, annotated := host.Annotations[v1alpha1.AnnotationAuthnRestart]
@@ -31,6 +31,9 @@ func authnRestartGrants(hosts []v1alpha1.Host, now time.Time) (string, []string)
 			holding = true
 		case authnRestartPending(host):
 			waiting = append(waiting, host.Name)
+			if annotated {
+				expired = append(expired, host.Name)
+			}
 		}
 		if annotated && !authnRestartHolds(host, now) {
 			revoke = append(revoke, host.Name)
@@ -40,7 +43,18 @@ func authnRestartGrants(hosts []v1alpha1.Host, now time.Time) (string, []string)
 	if holding || len(waiting) == 0 {
 		return "", revoke
 	}
-	return slices.Min(waiting), revoke
+	return nextAuthnRestart(waiting, expired), revoke
+}
+
+func nextAuthnRestart(waiting, expired []string) string {
+	slices.Sort(waiting)
+	if len(expired) > 0 {
+		after := slices.Max(expired)
+		if i := slices.IndexFunc(waiting, func(name string) bool { return name > after }); i >= 0 {
+			return waiting[i]
+		}
+	}
+	return waiting[0]
 }
 
 func authnRestartRequeue(hosts []v1alpha1.Host, grant string, now time.Time) time.Duration {
