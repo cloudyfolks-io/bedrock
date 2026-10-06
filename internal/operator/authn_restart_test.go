@@ -118,3 +118,20 @@ func TestAuthnRestartRequeue(t *testing.T) {
 		t.Fatalf("nothing granted needs no requeue, got %s", got)
 	}
 }
+
+func TestAuthnRestartPatches(t *testing.T) {
+	grant, err := grantAuthnRestartPatch(restartNow).Data(&v1alpha1.Host{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(grant) != `{"metadata":{"annotations":{"bedrock.cloudyfolks.io/authn-restart":"2026-10-07T12:00:00Z"}}}` {
+		t.Fatalf("grant patch %s", grant)
+	}
+	revoke, err := revokeAuthnRestartPatch().Data(&v1alpha1.Host{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(revoke) != `{"metadata":{"annotations":{"bedrock.cloudyfolks.io/authn-restart":null}}}` {
+		t.Fatalf("revoke patch %s", revoke)
+	}
+}

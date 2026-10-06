@@ -2,7 +2,7 @@ package operator
 
 import (
 	"context"
-	"encoding/json"
+	"fmt"
 	"slices"
 	"time"
 
@@ -94,19 +94,23 @@ func (r *HostReconciler) reconcileAuthnRestart(ctx context.Context, now time.Tim
 	return authnRestartRequeue(hosts.Items, grant, now), nil
 }
 
+func grantAuthnRestartPatch(at time.Time) client.Patch {
+	return client.RawPatch(types.MergePatchType, fmt.Appendf(nil, `{"metadata":{"annotations":{%q:%q}}}`, v1alpha1.AnnotationAuthnRestart, at.UTC().Format(time.RFC3339)))
+}
+
+func revokeAuthnRestartPatch() client.Patch {
+	return client.RawPatch(types.MergePatchType, fmt.Appendf(nil, `{"metadata":{"annotations":{%q:null}}}`, v1alpha1.AnnotationAuthnRestart))
+}
+
 func (r *HostReconciler) grantAuthnRestart(ctx context.Context, name string, at time.Time) error {
-	return r.patchAuthnRestart(ctx, name, at.UTC().Format(time.RFC3339))
+	return r.patchHost(ctx, name, grantAuthnRestartPatch(at))
 }
 
 func (r *HostReconciler) revokeAuthnRestart(ctx context.Context, name string) error {
-	return r.patchAuthnRestart(ctx, name, nil)
+	return r.patchHost(ctx, name, revokeAuthnRestartPatch())
 }
 
-func (r *HostReconciler) patchAuthnRestart(ctx context.Context, name string, annotation any) error {
-	body, err := json.Marshal(map[string]any{"metadata": map[string]any{"annotations": map[string]any{v1alpha1.AnnotationAuthnRestart: annotation}}})
-	if err != nil {
-		return err
-	}
+func (r *HostReconciler) patchHost(ctx context.Context, name string, patch client.Patch) error {
 	host := &v1alpha1.Host{ObjectMeta: metav1.ObjectMeta{Name: name}}
-	return client.IgnoreNotFound(r.Client.Patch(ctx, host, client.RawPatch(types.MergePatchType, body), client.FieldOwner(v1alpha1.OperatorFieldManager)))
+	return client.IgnoreNotFound(r.Client.Patch(ctx, host, patch, client.FieldOwner(v1alpha1.OperatorFieldManager)))
 }
