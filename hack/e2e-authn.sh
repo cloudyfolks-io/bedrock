@@ -44,7 +44,7 @@ k0s ctr --namespace k8s.io images import dist/cache/e2e-authn/dex.tar
 kubectl apply -f test/e2e/authn/fixtures/openldap.yaml
 BEDROCK_HOST=$host envsubst '${BEDROCK_HOST}' <test/e2e/authn/fixtures/dex.yaml | kubectl apply -f -
 dex_ip=$(kubectl -n authn-e2e get svc dex -o jsonpath='{.spec.clusterIP}')
-printf '%s sso.%s\n%s dex.authn-e2e.svc\n' "$vip" "$host" "$dex_ip" >>/etc/hosts
+printf '%s sso.%s api.%s\n%s dex.authn-e2e.svc\n' "$vip" "$host" "$host" "$dex_ip" >>/etc/hosts
 
 for _ in $(seq 1 30); do
   ca_bundle_b64=$(kubectl get secret -n cert-manager bedrock-ca -o jsonpath='{.data.ca\.crt}' 2>/dev/null || true)
