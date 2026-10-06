@@ -74,3 +74,9 @@ const (
 	FailureProviderError      = "provider_error"
 	FailureDisabled           = "disabled"
 )
+
+const maxLabelValue = 63
+
+func labelValue(name string) string {
+	return name[:min(len(name), maxLabelValue)]
+}

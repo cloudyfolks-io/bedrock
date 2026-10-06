@@ -9,6 +9,12 @@ import (
 	"github.com/cloudyfolks-io/bedrock/internal/release"
 )
 
+const maxLabelValue = 63
+
+func labelValue(name string) string {
+	return name[:min(len(name), maxLabelValue)]
+}
+
 func Object(owner client.Object, name string, data map[string][]byte) *corev1.Secret {
 	gvk := owner.GetObjectKind().GroupVersionKind()
 	return &corev1.Secret{
@@ -18,7 +24,7 @@ func Object(owner client.Object, name string, data map[string][]byte) *corev1.Se
 			Labels: map[string]string{
 				v1alpha1.LabelAuthn: "true",
 				v1alpha1.LabelKind:  gvk.Kind,
-				v1alpha1.LabelName:  owner.GetName(),
+				v1alpha1.LabelName:  labelValue(owner.GetName()),
 			},
 			OwnerReferences: []metav1.OwnerReference{
 				*metav1.NewControllerRef(owner, gvk),

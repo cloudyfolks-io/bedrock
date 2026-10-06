@@ -1,6 +1,7 @@
 package secret
 
 import (
+	"strings"
 	"testing"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -34,5 +35,20 @@ func TestSecretObjectLabelsAndOwner(t *testing.T) {
 	}
 	if string(got.Data["seed"]) != "seed-bytes" {
 		t.Fatalf("data = %+v", got.Data)
+	}
+}
+
+func TestObjectTruncatesALongOwnerNameLabel(t *testing.T) {
+	longName := strings.Repeat("a", 60) + "-recovery"
+	owner := &v1alpha1.Credential{
+		TypeMeta:   metav1.TypeMeta{APIVersion: v1alpha1.GroupVersion.String(), Kind: "Credential"},
+		ObjectMeta: metav1.ObjectMeta{Name: longName, UID: "11111111-1111-1111-1111-111111111111"},
+	}
+	got := Object(owner, longName, map[string][]byte{"codes": []byte("hash")})
+	if len(got.Labels[v1alpha1.LabelName]) != 63 {
+		t.Fatalf("label %s = %q, want 63 characters", v1alpha1.LabelName, got.Labels[v1alpha1.LabelName])
+	}
+	if got.Labels[v1alpha1.LabelName] != longName[:63] {
+		t.Fatalf("label %s = %q, want the first 63 characters of %q", v1alpha1.LabelName, got.Labels[v1alpha1.LabelName], longName)
 	}
 }

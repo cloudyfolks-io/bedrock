@@ -135,7 +135,7 @@ func (m recoveryMethod) Enroll(ctx context.Context, user v1alpha1.User, input An
 	case apierrors.IsNotFound(err):
 		cred = v1alpha1.Credential{
 			TypeMeta:   metav1.TypeMeta{APIVersion: v1alpha1.GroupVersion.String(), Kind: "Credential"},
-			ObjectMeta: metav1.ObjectMeta{Namespace: release.SystemNamespace, Name: name, Labels: map[string]string{v1alpha1.LabelKind: "Credential", v1alpha1.LabelName: name}},
+			ObjectMeta: metav1.ObjectMeta{Namespace: release.SystemNamespace, Name: name, Labels: map[string]string{v1alpha1.LabelKind: "Credential", v1alpha1.LabelName: labelValue(name)}},
 			Spec:       v1alpha1.CredentialSpec{UserRef: user.Name, Method: v1alpha1.MethodRecovery, SecretRef: name},
 		}
 		if err := m.client.Create(ctx, &cred, client.FieldOwner(v1alpha1.AuthnFieldManager)); err != nil {

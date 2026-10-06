@@ -47,9 +47,12 @@ func (m passwordMethod) Complete(ctx context.Context, flow Flow, user v1alpha1.U
 		return Result{}, err
 	}
 	locked := user.Name != "" && Locked(user.Status, flow.Now)
-	hash, known, err := m.hashForVerify(ctx, user, locked)
-	if err != nil {
-		return Result{}, err
+	hash, known := dummyHash, false
+	if !locked {
+		hash, known, err = m.currentHash(ctx, user)
+		if err != nil {
+			return Result{}, err
+		}
 	}
 	verified, err := secret.Verify(hash, answer.Password)
 	if err != nil {
@@ -71,13 +74,6 @@ func (m passwordMethod) Complete(ctx context.Context, flow Flow, user v1alpha1.U
 
 func (m passwordMethod) Enroll(ctx context.Context, user v1alpha1.User, input Answer) (Enrollment, error) {
 	return Enrollment{}, errors.New("methods: password has no enrollment step, use SetPassword")
-}
-
-func (m passwordMethod) hashForVerify(ctx context.Context, user v1alpha1.User, locked bool) (string, bool, error) {
-	if locked {
-		return dummyHash, false, nil
-	}
-	return m.currentHash(ctx, user)
 }
 
 func (m passwordMethod) currentHash(ctx context.Context, user v1alpha1.User) (string, bool, error) {
@@ -132,7 +128,7 @@ func SetPassword(ctx context.Context, c client.Client, random io.Reader, user v1
 	if apierrors.IsNotFound(err) {
 		cred = v1alpha1.Credential{
 			TypeMeta:   metav1.TypeMeta{APIVersion: v1alpha1.GroupVersion.String(), Kind: "Credential"},
-			ObjectMeta: metav1.ObjectMeta{Namespace: release.SystemNamespace, Name: name, Labels: map[string]string{v1alpha1.LabelKind: "Credential", v1alpha1.LabelName: name}},
+			ObjectMeta: metav1.ObjectMeta{Namespace: release.SystemNamespace, Name: name, Labels: map[string]string{v1alpha1.LabelKind: "Credential", v1alpha1.LabelName: labelValue(name)}},
 			Spec:       v1alpha1.CredentialSpec{UserRef: user.Name, Method: v1alpha1.MethodPassword, SecretRef: name},
 		}
 		if err := c.Create(ctx, &cred, client.FieldOwner(v1alpha1.AuthnFieldManager)); err != nil {

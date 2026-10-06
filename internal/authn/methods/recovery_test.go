@@ -56,6 +56,20 @@ func TestRecoveryCodeNormalizes(t *testing.T) {
 	}
 }
 
+func TestRecoveryEnrollWorksForALongUsername(t *testing.T) {
+	c, _ := startTestEnv(t)
+	username := strings.Repeat("a", 60)
+	user := createUser(t, c, username)
+	method := NewRecovery(c, rand.Reader)
+	enrollment, err := method.Enroll(context.Background(), user, Answer{})
+	if err != nil {
+		t.Fatalf("enrollment for a %d-character username must not fail on an over-long label: %v", len(username), err)
+	}
+	if len(enrollment.RecoveryCodes) != 10 {
+		t.Fatalf("len(RecoveryCodes) = %d", len(enrollment.RecoveryCodes))
+	}
+}
+
 func TestRecoveryCodeWorksOnce(t *testing.T) {
 	c, _ := startTestEnv(t)
 	user := createUser(t, c, "frank")
