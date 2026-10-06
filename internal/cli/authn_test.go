@@ -323,3 +323,61 @@ func TestResetPasswordUnknownUser(t *testing.T) {
 		t.Fatalf("two usernames: exit %d", code)
 	}
 }
+
+func adminPasswordOf(t *testing.T, out string) string {
+	t.Helper()
+	match := regexp.MustCompile(`^admin password: ([0-9A-Za-z]{20})\n$`).FindStringSubmatch(out)
+	if match == nil {
+		t.Fatalf("stdout %q", out)
+	}
+	return match[1]
+}
+
+func TestCreateAdmin(t *testing.T) {
+	c, newClient := resetEnv(t)
+	ctx := context.Background()
+	var out, errOut bytes.Buffer
+	if code := RunCreateAdmin(ctx, []string{"--kubeconfig", "/unused/admin.conf"}, newClient, rand.Reader, &out, &errOut); code != 0 {
+		t.Fatalf("exit %d stderr %s", code, errOut.String())
+	}
+	password := adminPasswordOf(t, out.String())
+	var admin v1alpha1.User
+	if err := c.Get(ctx, client.ObjectKey{Namespace: release.SystemNamespace, Name: v1alpha1.UserAdmin}, &admin); err != nil {
+		t.Fatal(err)
+	}
+	if admin.Spec.Username != v1alpha1.UserAdmin || len(admin.Spec.Groups) != 1 || admin.Spec.Groups[0] != v1alpha1.GroupAdmins || len(admin.Spec.Methods) != 1 || admin.Spec.Methods[0] != v1alpha1.MethodPassword {
+		t.Fatalf("admin spec %+v", admin.Spec)
+	}
+	hash := storedPasswordHash(t, c, v1alpha1.UserAdmin)
+	if ok, err := secret.Verify(hash, password); err != nil || !ok {
+		t.Fatalf("the printed password must verify: %v %v", ok, err)
+	}
+	out.Reset()
+	if code := RunCreateAdmin(ctx, nil, newClient, rand.Reader, &out, &errOut); code != 0 || out.String() != "admin exists\n" {
+		t.Fatalf("a second run prints no password: exit %d stdout %q", code, out.String())
+	}
+	if storedPasswordHash(t, c, v1alpha1.UserAdmin) != hash {
+		t.Fatal("a second run must keep the password")
+	}
+}
+
+func TestCreateAdminRepairsAHalfCreatedAdmin(t *testing.T) {
+	c, newClient := resetEnv(t)
+	createTestUser(t, c, v1alpha1.UserSpec{Username: v1alpha1.UserAdmin, Groups: []string{v1alpha1.GroupAdmins}, Methods: []string{v1alpha1.MethodPassword}})
+	var out, errOut bytes.Buffer
+	if code := RunCreateAdmin(context.Background(), nil, newClient, rand.Reader, &out, &errOut); code != 0 {
+		t.Fatalf("exit %d stderr %s", code, errOut.String())
+	}
+	password := adminPasswordOf(t, out.String())
+	if ok, err := secret.Verify(storedPasswordHash(t, c, v1alpha1.UserAdmin), password); err != nil || !ok {
+		t.Fatalf("an admin without a credential gets a password: %v %v", ok, err)
+	}
+}
+
+func TestCreateAdminUsage(t *testing.T) {
+	_, newClient := resetEnv(t)
+	var out, errOut bytes.Buffer
+	if code := RunCreateAdmin(context.Background(), []string{"alice"}, newClient, rand.Reader, &out, &errOut); code != 2 || !strings.Contains(errOut.String(), "usage: bedrock authn create-admin") || out.Len() != 0 {
+		t.Fatalf("exit %d stdout %q stderr %q", code, out.String(), errOut.String())
+	}
+}

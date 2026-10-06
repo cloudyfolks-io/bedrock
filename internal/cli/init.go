@@ -287,15 +287,11 @@ func RunInit(ctx context.Context, args []string, deps InitDeps, stdout, stderr i
 	}
 
 	step(stdout, "bootstrap admin")
-	password, created, err := createAdmin(ctx, c, rand.Reader)
+	password, _, err := createAdmin(ctx, c, rand.Reader)
 	if err != nil {
 		return fail(stderr, err)
 	}
-	if created {
-		fmt.Fprintf(stdout, "admin password: %s\n", password)
-	} else {
-		fmt.Fprintln(stdout, "admin exists")
-	}
+	fmt.Fprintln(stdout, adminLine(password))
 
 	step(stdout, "waiting for the operator")
 	if err := waitClusterVersion(ctx, c, bundle.Spec.Version); err != nil {
@@ -802,6 +798,13 @@ func createAdmin(ctx context.Context, c client.Client, random io.Reader) (string
 		return "", false, fmt.Errorf("admin created without a password, run bedrock authn reset-password admin: %w", err)
 	}
 	return password, true, nil
+}
+
+func adminLine(password string) string {
+	if password == "" {
+		return "admin exists"
+	}
+	return "admin password: " + password
 }
 
 func adminHasCredential(ctx context.Context, c client.Client, name string) (bool, error) {

@@ -57,6 +57,8 @@ type serveOptions struct {
 func authnCommand(args []string, stdout, stderr io.Writer) int {
 	if len(args) == 0 {
 		fmt.Fprintln(stderr, "usage: bedrock authn serve [--listen :8443] [--tls-cert /tls/tls.crt] [--tls-key /tls/tls.key] [--ui-dir <dir>]")
+		fmt.Fprintln(stderr, resetPasswordUsage)
+		fmt.Fprintln(stderr, createAdminUsage)
 		return 2
 	}
 	switch args[0] {
@@ -65,6 +67,8 @@ func authnCommand(args []string, stdout, stderr io.Writer) int {
 		return RunAuthnServe(ctrl.SetupSignalHandler(), args[1:], AuthnDeps{RestConfig: ctrl.GetConfig, Listen: net.Listen}, stdout, stderr)
 	case "reset-password":
 		return RunResetPassword(context.Background(), args[1:], newClusterClient, rand.Reader, stdout, stderr)
+	case "create-admin":
+		return RunCreateAdmin(context.Background(), args[1:], newClusterClient, rand.Reader, stdout, stderr)
 	}
 	fmt.Fprintf(stderr, "unknown authn command: %s\n", args[0])
 	return 2
@@ -217,7 +221,33 @@ func tunedRestConfig(cfg *rest.Config) *rest.Config {
 	return tuned
 }
 
-const resetPasswordUsage = "usage: bedrock authn reset-password <username> [--kubeconfig PATH]"
+const (
+	resetPasswordUsage = "usage: bedrock authn reset-password <username> [--kubeconfig PATH]"
+	createAdminUsage   = "usage: bedrock authn create-admin [--kubeconfig PATH]"
+)
+
+func RunCreateAdmin(ctx context.Context, args []string, newClient func(string) (client.Client, error), random io.Reader, stdout, stderr io.Writer) int {
+	flags := flag.NewFlagSet("authn create-admin", flag.ContinueOnError)
+	flags.SetOutput(stderr)
+	kubeconfig := flags.String("kubeconfig", "/var/lib/k0s/pki/admin.conf", "admin kubeconfig")
+	if err := flags.Parse(args); err != nil {
+		return 2
+	}
+	if flags.NArg() != 0 {
+		fmt.Fprintln(stderr, createAdminUsage)
+		return 2
+	}
+	c, err := newClient(*kubeconfig)
+	if err != nil {
+		return fail(stderr, err)
+	}
+	password, _, err := createAdmin(ctx, c, random)
+	if err != nil {
+		return fail(stderr, err)
+	}
+	fmt.Fprintln(stdout, adminLine(password))
+	return 0
+}
 
 func RunResetPassword(ctx context.Context, args []string, newClient func(string) (client.Client, error), random io.Reader, stdout, stderr io.Writer) int {
 	flags := flag.NewFlagSet("authn reset-password", flag.ContinueOnError)
