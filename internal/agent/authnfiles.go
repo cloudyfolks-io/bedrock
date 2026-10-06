@@ -31,18 +31,19 @@ func syncAuthnFiles(ctx context.Context, c client.Client, deps Deps, current v1a
 		return nil
 	}
 	previous := previousAuthn(current.Status.Authn)
+	service := k0sServiceOf(current)
 	files, err := authnSources(ctx, c)
 	if err != nil {
-		return keptAuthn(previous, deps.Root, err.Error())
+		return keptAuthn(previous, deps.Root, service, err.Error())
 	}
 	written, err := apiserver.WriteFiles(filepath.Join(deps.Root, authnDir), files, deps.AuthnOwner)
 	if err != nil {
-		return keptAuthn(previous, deps.Root, err.Error())
+		return keptAuthn(previous, deps.Root, service, err.Error())
 	}
 	next := v1alpha1.AuthnFilesStatus{
 		Hash:                  apiserver.Hash(files[apiserver.AuthenticationFile], files[apiserver.WebhookFile]),
 		WrittenAt:             previous.WrittenAt,
-		WebhookRestartPending: restartPending(deps.Root),
+		WebhookRestartPending: authnRestartWanted(deps.Root, service),
 	}
 	if written {
 		now := metav1.NewTime(deps.Now())
@@ -58,9 +59,9 @@ func previousAuthn(status *v1alpha1.AuthnFilesStatus) v1alpha1.AuthnFilesStatus 
 	return *status.DeepCopy()
 }
 
-func keptAuthn(previous v1alpha1.AuthnFilesStatus, root, message string) *v1alpha1.AuthnFilesStatus {
+func keptAuthn(previous v1alpha1.AuthnFilesStatus, root string, service k0sService, message string) *v1alpha1.AuthnFilesStatus {
 	previous.Message = message
-	previous.WebhookRestartPending = restartPending(root)
+	previous.WebhookRestartPending = authnRestartWanted(root, service)
 	return &previous
 }
 
@@ -93,11 +94,6 @@ func sourceError(name string, err error) error {
 
 func waitingFor(name string) error {
 	return fmt.Errorf("waiting for %s", name)
-}
-
-func restartPending(root string) bool {
-	start, ok := apiserverStartTime(root)
-	return ok && webhookRestartPending(root, start)
 }
 
 func webhookRestartPending(root string, apiserverStart time.Time) bool {

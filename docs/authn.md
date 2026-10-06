@@ -320,8 +320,9 @@ changes nothing. To get a new password, use
 kube-apiserver reloads `authentication.yaml` on every change, so a new
 `platform.host` value takes effect for token verification at once.
 kube-apiserver reads `webhook.kubeconfig` only when it starts. A change
-there needs a rolling restart of `k0scontroller`. The operator grants
-the restarts one at a time. Until that restart,
+there needs a restart of `k0scontroller`. The operator grants the
+restarts one at a time, and the agent on each controller restarts
+`k0scontroller` when it holds a grant. Until that restart,
 `Host.status.authn.webhookRestartPending` is `true` on the affected
 controllers, and `brk_` API tokens on those controllers keep using the
 previous webhook URL. JWT access tokens are not affected, because their

@@ -12,6 +12,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	"github.com/cloudyfolks-io/bedrock/api/v1alpha1"
+	"github.com/cloudyfolks-io/bedrock/internal/authn/apiserver"
 )
 
 const authnConfigFlag = "--authentication-config"
@@ -32,7 +33,7 @@ func EnableAuthnArgs(ctx context.Context, c client.Client, deps Deps) error {
 	if _, err := ensureAuthnArgs(deps.Root, service); err != nil {
 		return err
 	}
-	if !authnRestartNeeded(deps.Root, service) {
+	if !authnRestartWanted(deps.Root, service) {
 		return nil
 	}
 	if !v1alpha1.AuthnRestartGrantFresh(own, deps.Now()) {
@@ -49,9 +50,17 @@ func nodeUpgrading(ctx context.Context, c client.Client, node string) (bool, err
 	return len(list.Items) > 0, nil
 }
 
-func authnRestartNeeded(root string, service k0sService) bool {
+func authnRestartWanted(root string, service k0sService) bool {
 	dir, ok := apiserverProcessDir(root)
-	return ok && !hasFlag(dir, authnConfigFlag) && k0sConfigNewerThanAPIServer(root, service)
+	if !ok || service.Unit != k0sControllerUnit {
+		return false
+	}
+	start, ok := apiserverStartTime(root)
+	if !ok {
+		return false
+	}
+	firstEnablement := !hasFlag(dir, authnConfigFlag) && k0sConfigNewerThanAPIServer(root, service)
+	return firstEnablement || webhookRestartPending(root, start)
 }
 
 func hasFlag(dir, flag string) bool {
@@ -84,6 +93,9 @@ func authnRestartProblem(ctx context.Context, deps Deps) string {
 	}
 	if configNewerThan(deps.Root, start) {
 		return "kube-apiserver still runs from before " + k0sConfigFile
+	}
+	if webhookRestartPending(deps.Root, start) {
+		return "kube-apiserver still runs from before " + apiserver.WebhookFile
 	}
 	return bounded(ctx, deps.ProbeTimeout, func(probeCtx context.Context) string {
 		return apiProblem(probeCtx, deps.Exec, deps.Root, "/readyz")

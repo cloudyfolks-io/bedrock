@@ -252,6 +252,7 @@ func TestAgentReportsWebhookRestartPending(t *testing.T) {
 	deps := authnDeps(t, time.Now())
 	deps.Node = node
 	fakeAPIServer(t, deps.Root, time.Now().Add(-time.Hour))
+	apiserverCmdline(t, deps.Root, "--authentication-config=/etc/bedrock/authn/authentication.yaml")
 	webhookPath := filepath.Join(deps.Root, "etc", "bedrock", "authn", "webhook.kubeconfig")
 	if err := Tick(ctx, k8sClient, deps); err != nil {
 		t.Fatal(err)
@@ -313,7 +314,7 @@ func TestAPIServerStartTimeIgnoresTenantAPIServers(t *testing.T) {
 		if err := os.Chtimes(path, tc.modified, tc.modified); err != nil {
 			t.Fatal(err)
 		}
-		if got := restartPending(root); got != tc.pending {
+		if got := authnRestartWanted(root, controllerService()); got != tc.pending {
 			t.Fatalf("modified %v: pending %v, want %v", tc.modified.Sub(start), got, tc.pending)
 		}
 	}

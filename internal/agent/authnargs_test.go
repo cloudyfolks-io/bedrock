@@ -69,6 +69,7 @@ func newAuthnArgsFixture(t *testing.T, node, role string) authnArgsFixture {
 	touch(t, filepath.Join(root, "etc/k0s/k0s.yaml"), old)
 	writeFixtureFile(t, filepath.Join(root, "etc/bedrock/authn/authentication.yaml"), "a")
 	writeFixtureFile(t, filepath.Join(root, "etc/bedrock/authn/webhook.kubeconfig"), "w")
+	touch(t, filepath.Join(root, "etc/bedrock/authn/webhook.kubeconfig"), old)
 	fakeAPIServer(t, root, time.Now().Add(-time.Hour))
 	apiserverCmdline(t, root, "--etcd-servers=https://127.0.0.1:2379")
 	return authnArgsFixture{deps: deps, exec: exec, node: node}
@@ -245,5 +246,97 @@ func TestEnableAuthnArgsLeavesOtherHosts(t *testing.T) {
 				t.Fatalf("no restart: %v", f.exec.Calls)
 			}
 		})
+	}
+}
+
+func controllerService() k0sService {
+	return k0sServiceOf(hostWithRole("any", v1alpha1.RoleControlPlane))
+}
+
+func (f authnArgsFixture) runsWithFlagAndConfig(t *testing.T) {
+	t.Helper()
+	withArgs, _, err := withAuthnArgs([]byte(plainConfig))
+	if err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(f.deps.Root, "etc/k0s/k0s.yaml")
+	writeFixtureFile(t, path, string(withArgs))
+	touch(t, path, time.Now().Add(-2*time.Hour))
+	apiserverCmdline(t, f.deps.Root, "--authentication-config=/etc/bedrock/authn/authentication.yaml")
+}
+
+func TestAuthnRestartWanted(t *testing.T) {
+	cases := map[string]struct {
+		change func(t *testing.T, f authnArgsFixture)
+		want   bool
+	}{
+		"first enablement: flag missing and config newer": {func(t *testing.T, f authnArgsFixture) {
+			touch(t, filepath.Join(f.deps.Root, "etc/k0s/k0s.yaml"), time.Now())
+		}, true},
+		"flag missing and config older": {func(*testing.T, authnArgsFixture) {}, false},
+		"flag present and webhook file newer": {func(t *testing.T, f authnArgsFixture) {
+			f.runsWithFlagAndConfig(t)
+			touch(t, filepath.Join(f.deps.Root, "etc/bedrock/authn/webhook.kubeconfig"), time.Now())
+		}, true},
+		"flag present and nothing newer": {func(t *testing.T, f authnArgsFixture) {
+			f.runsWithFlagAndConfig(t)
+			touch(t, filepath.Join(f.deps.Root, "etc/bedrock/authn/webhook.kubeconfig"), time.Now().Add(-2*time.Hour))
+		}, false},
+	}
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			f := newAuthnArgsFixture(t, "cp-wanted-"+strings.ReplaceAll(strings.SplitN(name, ":", 2)[0], " ", "-"), v1alpha1.RoleControlPlane)
+			tc.change(t, f)
+			if got := authnRestartWanted(f.deps.Root, controllerService()); got != tc.want {
+				t.Fatalf("got %v, want %v", got, tc.want)
+			}
+		})
+	}
+	f := newAuthnArgsFixture(t, "wk-wanted", v1alpha1.RoleWorkload)
+	touch(t, filepath.Join(f.deps.Root, "etc/bedrock/authn/webhook.kubeconfig"), time.Now())
+	if authnRestartWanted(f.deps.Root, k0sServiceOf(hostWithRole("wk", v1alpha1.RoleWorkload))) {
+		t.Fatal("a worker never restarts for authn")
+	}
+}
+
+func TestEnableAuthnArgsRestartsForAChangedWebhook(t *testing.T) {
+	f := newAuthnArgsFixture(t, "cp-args-webhook", v1alpha1.RoleControlPlane)
+	f.runsWithFlagAndConfig(t)
+	touch(t, filepath.Join(f.deps.Root, "etc/bedrock/authn/webhook.kubeconfig"), time.Now())
+	deps := f.restartsWithFlags(t)
+	f.setGrant(t, nil)
+	if err := EnableAuthnArgs(context.Background(), k8sClient, deps); err != nil {
+		t.Fatal(err)
+	}
+	if f.restarts() != 0 {
+		t.Fatalf("no grant, no restart: %v", f.exec.Calls)
+	}
+	fresh := time.Now().UTC().Format(time.RFC3339)
+	f.setGrant(t, &fresh)
+	if err := EnableAuthnArgs(context.Background(), k8sClient, deps); err != nil {
+		t.Fatal(err)
+	}
+	if f.restarts() != 1 {
+		t.Fatalf("a changed webhook file restarts with a grant: %v", f.exec.Calls)
+	}
+	if err := EnableAuthnArgs(context.Background(), k8sClient, deps); err != nil {
+		t.Fatal(err)
+	}
+	if f.restarts() != 1 {
+		t.Fatalf("a kube-apiserver started after the webhook file restarts no more: %v", f.exec.Calls)
+	}
+}
+
+func TestAuthnRestartProblemWaitsForTheWebhookFile(t *testing.T) {
+	f := newAuthnArgsFixture(t, "cp-problem-webhook", v1alpha1.RoleControlPlane)
+	f.runsWithFlagAndConfig(t)
+	webhook := filepath.Join(f.deps.Root, "etc/bedrock/authn/webhook.kubeconfig")
+	touch(t, webhook, time.Now())
+	if got := authnRestartProblem(context.Background(), f.deps); !strings.Contains(got, "webhook.kubeconfig") {
+		t.Fatalf("a kube-apiserver older than the webhook file has not restarted: %q", got)
+	}
+	touch(t, webhook, time.Now().Add(-2*time.Hour))
+	if got := authnRestartProblem(context.Background(), f.deps); got != "" {
+		t.Fatalf("a kube-apiserver newer than every file has restarted: %q", got)
 	}
 }
