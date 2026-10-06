@@ -424,6 +424,126 @@ func TestServerLogsNoSecrets(t *testing.T) {
 	}
 }
 
+func TestServerLogsNoFactorClientOrTokenSecrets(t *testing.T) {
+	logs := captureLogs(t)
+	c, cfg := startTestEnv(t)
+	seedCluster(t, c)
+	saveSigningKey(t, c, time.Now().Add(-time.Minute))
+	createCLIClient(t, c)
+	password := "correct horse battery staple"
+	createUser(t, c, "admin", password)
+	clientSecret := "billing-client-secret-0123456789abcdef"
+	wrongSecret := "billing-client-secret-not-the-right-one"
+	if err := c.Create(context.Background(), &corev1.Secret{ObjectMeta: metav1.ObjectMeta{Name: "billing-client", Namespace: release.SystemNamespace}, Data: map[string][]byte{"clientSecret": []byte(clientSecret)}}); err != nil {
+		t.Fatal(err)
+	}
+	if err := c.Create(context.Background(), &v1alpha1.OAuthClient{
+		ObjectMeta: metav1.ObjectMeta{Name: "billing", Namespace: release.SystemNamespace},
+		Spec: v1alpha1.OAuthClientSpec{
+			ClientID:      "billing",
+			GrantTypes:    []string{v1alpha1.GrantTokenExchange},
+			TokenExchange: &v1alpha1.TokenExchange{Audiences: []string{"billing-api"}},
+			SecretRef:     "billing-client",
+		},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	server := newTestServer(t, cfg, time.Now)
+	host := "sso." + testHost
+	secrets := []string{password, clientSecret, wrongSecret, testBearer}
+	enroller := newBrowser(t, server)
+	if done := passwordLogin(t, server, enroller, "admin", password); done.Type != methods.ChallengeDone {
+		t.Fatalf("login %+v", done)
+	}
+	csrf := accountCSRF(t, server, enroller)
+	enrollment := readJSON[methods.TOTPEnrollment](t, accountPost(t, server, enroller, csrf, "/api/v1/account/totp", "{}"), http.StatusOK)
+	seed, err := base32.StdEncoding.WithPadding(base32.NoPadding).DecodeString(enrollment.Secret)
+	if err != nil {
+		t.Fatal(err)
+	}
+	step := methods.TOTPStep(time.Now())
+	valid := []string{methods.TOTPCode(seed, step-1), methods.TOTPCode(seed, step), methods.TOTPCode(seed, step+1), methods.TOTPCode(seed, step+2)}
+	guess := "000000"
+	if slices.Contains(valid, guess) {
+		guess = "111111"
+	}
+	secrets = append(append(secrets, enrollment.Secret, enrollment.OTPAuthURL, guess, "zzzzz-zzzzz"), valid...)
+	readJSON[map[string]string](t, accountPost(t, server, enroller, csrf, "/api/v1/account/totp/verify", `{"code":"`+guess+`"}`), http.StatusForbidden)
+	codes := readJSON[map[string][]string](t, accountPost(t, server, enroller, csrf, "/api/v1/account/totp/verify", `{"code":"`+methods.TOTPCode(seed, step)+`"}`), http.StatusOK)["recoveryCodes"]
+	if len(codes) == 0 {
+		t.Fatal("no recovery codes")
+	}
+	secrets = append(secrets, codes...)
+	created := readJSON[map[string]string](t, accountPost(t, server, enroller, csrf, "/api/v1/account/tokens", `{"description":"ci"}`), http.StatusCreated)
+	apiToken := created["token"]
+	wrongToken := "brk_" + strings.Repeat("Z", 40)
+	secrets = append(secrets, apiToken, wrongToken)
+	browser := newBrowser(t, server)
+	challenge := passwordLogin(t, server, browser, "admin", password)
+	if challenge.Type != methods.ChallengeTOTP {
+		t.Fatalf("second factor %+v", challenge)
+	}
+	challenge, _ = postJSON(t, browser, server, "/api/v1/login/answer", challenge.CSRF, methods.Answer{Type: methods.ChallengeTOTP, Code: guess})
+	challenge, _ = postJSON(t, browser, server, "/api/v1/login/answer", challenge.CSRF, methods.Answer{Type: methods.ChallengeRecovery, Code: "zzzzz-zzzzz"})
+	done, _ := postJSON(t, browser, server, "/api/v1/login/answer", challenge.CSRF, methods.Answer{Type: methods.ChallengeRecovery, Code: codes[0]})
+	if done.Type != methods.ChallengeDone {
+		t.Fatalf("recovery login %+v", done)
+	}
+	callbackURL, err := url.Parse(done.Redirect)
+	if err != nil {
+		t.Fatal(err)
+	}
+	callback := request(t, browser, server, http.MethodGet, host, callbackURL.RequestURI(), nil, nil)
+	location, err := url.Parse(callback.Header.Get("Location"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	formHeader := http.Header{"Content-Type": {"application/x-www-form-urlencoded"}}
+	tokens := readJSON[map[string]any](t, request(t, server.Client(), server, http.MethodPost, host, "/oauth/v2/token", strings.NewReader(url.Values{"grant_type": {"authorization_code"}, "code": {location.Query().Get("code")}, "redirect_uri": {testRedirect}, "client_id": {"bedrock-cli"}, "code_verifier": {"dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk"}}.Encode()), formHeader), http.StatusOK)
+	access, _ := tokens["access_token"].(string)
+	secrets = append(secrets, access)
+	confidential := func(secret string) http.Header {
+		header := formHeader.Clone()
+		header.Set("Authorization", "Basic "+base64.StdEncoding.EncodeToString([]byte("billing:"+secret)))
+		return header
+	}
+	exchange := url.Values{"grant_type": {v1alpha1.GrantTokenExchange}, "subject_token": {access}, "subject_token_type": {"urn:ietf:params:oauth:token-type:access_token"}, "audience": {"billing-api"}}
+	exchanged := readJSON[map[string]any](t, request(t, server.Client(), server, http.MethodPost, host, "/oauth/v2/token", strings.NewReader(exchange.Encode()), confidential(clientSecret)), http.StatusOK)
+	exchangedToken, _ := exchanged["access_token"].(string)
+	if exchangedToken == "" {
+		t.Fatalf("exchange %v", exchanged)
+	}
+	secrets = append(secrets, exchangedToken)
+	if resp := request(t, server.Client(), server, http.MethodPost, host, "/oauth/v2/token", strings.NewReader(exchange.Encode()), confidential(wrongSecret)); resp.StatusCode == http.StatusOK {
+		t.Fatal("a wrong client secret must be refused")
+	}
+	introspection := readJSON[map[string]any](t, request(t, server.Client(), server, http.MethodPost, host, "/oauth/v2/introspect", strings.NewReader(url.Values{"token": {access}}.Encode()), confidential(clientSecret)), http.StatusOK)
+	if introspection["active"] != true {
+		t.Fatalf("introspection %v", introspection)
+	}
+	review := func(bearer, token string) *http.Response {
+		body := `{"apiVersion":"authentication.k8s.io/v1","kind":"TokenReview","spec":{"token":"` + token + `"}}`
+		return request(t, server.Client(), server, http.MethodPost, host, "/webhook/v1/tokenreview", strings.NewReader(body), http.Header{"Content-Type": {"application/json"}, "Authorization": {"Bearer " + bearer}})
+	}
+	accepted := readJSON[map[string]any](t, review(testBearer, apiToken), http.StatusOK)
+	if status, _ := accepted["status"].(map[string]any); status["authenticated"] != true {
+		t.Fatalf("token review %v", accepted)
+	}
+	readJSON[map[string]any](t, review(testBearer, wrongToken), http.StatusOK)
+	if resp := review(wrongSecret, apiToken); resp.StatusCode != http.StatusUnauthorized {
+		t.Fatalf("a wrong webhook bearer: %d", resp.StatusCode)
+	}
+	written := logs.String()
+	if written == "" {
+		t.Fatal("the flows must log something")
+	}
+	for index, value := range secrets {
+		if value != "" && strings.Contains(written, value) {
+			t.Fatalf("secret %d reached the log", index)
+		}
+	}
+}
+
 func jwtClaims(t *testing.T, token string) map[string]any {
 	t.Helper()
 	parts := strings.Split(token, ".")
