@@ -15,15 +15,7 @@ import (
 	"github.com/cloudyfolks-io/bedrock/internal/authn/methods"
 	"github.com/cloudyfolks-io/bedrock/internal/authn/policy"
 	"github.com/cloudyfolks-io/bedrock/internal/authn/secret"
-	"github.com/cloudyfolks-io/bedrock/internal/release"
 )
-
-func apiToken(user, value string) *v1alpha1.APIToken {
-	return &v1alpha1.APIToken{
-		ObjectMeta: metav1.ObjectMeta{Name: secret.SHA256Hex(value), Namespace: release.SystemNamespace},
-		Spec:       v1alpha1.APITokenSpec{UserRef: user, Scopes: []string{"kubernetes"}, Description: "test token"},
-	}
-}
 
 func TestSessionByCookie(t *testing.T) {
 	c := startTestEnv(t)
@@ -169,43 +161,5 @@ func TestSessionByCookieIgnoresAConflictOnLastSeen(t *testing.T) {
 	}
 	if persisted.Status.LastSeen == nil || !persisted.Status.LastSeen.Time.Equal(racerSeen) {
 		t.Fatalf("the racing writer's lastSeen must survive the conflict, got %v", persisted.Status.LastSeen)
-	}
-}
-
-func TestRevokeUser(t *testing.T) {
-	c := startTestEnv(t)
-	ctx := context.Background()
-	create(t, c, testUser("alice"), testUser("bob"), apiToken("alice", "brk_alice"), apiToken("bob", "brk_bob"))
-	s := newTestStore(c, testNow, testSettings(), nil)
-	aliceToken := issue(t, s, loginRequest("alice", "bedrock-cli"))
-	bobToken := issue(t, s, loginRequest("bob", "bedrock-cli"))
-	aliceCookie, err := s.CreateSession(ctx, methods.Subject{User: *testUser("alice")}, "browser", "192.0.2.10")
-	if err != nil {
-		t.Fatal(err)
-	}
-	bobCookie, err := s.CreateSession(ctx, methods.Subject{User: *testUser("bob")}, "browser", "192.0.2.11")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := s.RevokeUser(ctx, "alice"); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := s.TokenRequestByRefreshToken(ctx, aliceToken); !isNotFound(err) {
-		t.Fatalf("alice's refresh token must be gone, got %v", err)
-	}
-	if _, err := s.SessionByCookie(ctx, aliceCookie); !isNotFound(err) {
-		t.Fatalf("alice's session must be gone, got %v", err)
-	}
-	if err := c.Get(ctx, objectKey(secret.SHA256Hex("brk_alice")), &v1alpha1.APIToken{}); !isNotFound(err) {
-		t.Fatalf("alice's API token must be gone, got %v", err)
-	}
-	if _, err := s.TokenRequestByRefreshToken(ctx, bobToken); err != nil {
-		t.Fatalf("bob's refresh token must stay: %v", err)
-	}
-	if _, err := s.SessionByCookie(ctx, bobCookie); err != nil {
-		t.Fatalf("bob's session must stay: %v", err)
-	}
-	if err := c.Get(ctx, objectKey(secret.SHA256Hex("brk_bob")), &v1alpha1.APIToken{}); err != nil {
-		t.Fatalf("bob's API token must stay: %v", err)
 	}
 }

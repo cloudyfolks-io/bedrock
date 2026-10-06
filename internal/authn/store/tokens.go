@@ -314,12 +314,3 @@ func (s *Store) TerminateSession(ctx context.Context, userID, clientID string) e
 	}
 	return s.client.DeleteAllOf(ctx, &v1alpha1.Session{}, client.InNamespace(release.SystemNamespace), byUser)
 }
-
-func (s *Store) RevokeUser(ctx context.Context, user string) error {
-	byUser := []client.DeleteAllOfOption{client.InNamespace(release.SystemNamespace), client.MatchingFields{fieldUserRef: user}}
-	return errors.Join(
-		s.client.DeleteAllOf(ctx, &v1alpha1.RefreshToken{}, byUser...),
-		s.client.DeleteAllOf(ctx, &v1alpha1.Session{}, byUser...),
-		s.client.DeleteAllOf(ctx, &v1alpha1.APIToken{}, byUser...),
-	)
-}
