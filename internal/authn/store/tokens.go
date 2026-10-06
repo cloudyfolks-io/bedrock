@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"errors"
+	"log/slog"
 	"slices"
 	"strings"
 	"time"
@@ -233,9 +234,10 @@ func reused(errs ...error) error {
 func (s *Store) revokeFamily(ctx context.Context, family string) error {
 	selector := []client.DeleteAllOfOption{client.InNamespace(release.SystemNamespace), client.MatchingLabels{v1alpha1.LabelFamily: family}}
 	if err := s.client.DeleteAllOf(ctx, &v1alpha1.RefreshToken{}, selector...); err != nil {
+		slog.ErrorContext(ctx, "refresh token family revocation failed", "error", err)
 		return err
 	}
-	return s.client.DeleteAllOf(ctx, &v1alpha1.RefreshToken{}, selector...)
+	return nil
 }
 
 func (s *Store) refreshToken(ctx context.Context, token string) (v1alpha1.RefreshToken, error) {
