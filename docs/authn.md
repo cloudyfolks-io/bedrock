@@ -64,8 +64,8 @@ account password change, an account TOTP check and account
 recovery-code generation. A sign-in allows at most 5 wrong TOTP or
 recovery codes. After the fifth wrong code, start the sign-in again.
 
-Each replica allows 30 sign-in starts per minute for each client
-address. A sign-in start is a request to `/oauth/v2/authorize` or to
+Each replica allows 600 sign-in starts per minute for each client
+address, as Traefik sees it. A sign-in start is a request to `/oauth/v2/authorize` or to
 `/oauth/v2/device_authorization`. When an LDAP provider is on, each
 replica allows 30 username steps per minute for each client address.
 Each replica keeps at most 5000 open sign-ins and 1000 open device

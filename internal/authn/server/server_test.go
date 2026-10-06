@@ -852,6 +852,14 @@ func authorizeQuery() url.Values {
 	}
 }
 
+const flowStartBudget = 600
+
+func TestIPOnlyBudgetsAreSixHundredPerMinute(t *testing.T) {
+	if startsPerMinute != flowStartBudget || lookupsPerMinute != flowStartBudget {
+		t.Fatalf("starts %d and lookups %d per minute, want %d", startsPerMinute, lookupsPerMinute, flowStartBudget)
+	}
+}
+
 func TestFlowStartsAreRateLimitedPerClientIP(t *testing.T) {
 	c, cfg := startTestEnv(t)
 	seedCluster(t, c)
@@ -859,7 +867,8 @@ func TestFlowStartsAreRateLimitedPerClientIP(t *testing.T) {
 	createCLIClient(t, c)
 	password := "correct horse battery staple"
 	createUser(t, c, "admin", password)
-	server := newTestServer(t, cfg, time.Now)
+	clock := &testClock{now: time.Now()}
+	server := newTestServer(t, cfg, clock.Now)
 	host := "sso." + testHost
 	browser := newBrowser(t, server)
 	authorize := request(t, browser, server, http.MethodGet, host, "/oauth/v2/authorize?"+authorizeQuery().Encode(), nil, nil)
@@ -870,9 +879,9 @@ func TestFlowStartsAreRateLimitedPerClientIP(t *testing.T) {
 	step, _ := postJSON(t, browser, server, "/api/v1/login/start", "", map[string]string{"authRequest": loginURL.Query().Get("authRequest")})
 	step, _ = postJSON(t, browser, server, "/api/v1/login/answer", step.CSRF, methods.Answer{Type: methods.ChallengeUsername, Username: "admin"})
 	anonymous := noRedirects(server, nil)
-	for attempt := 2; attempt <= startsPerMinute; attempt++ {
+	for attempt := 2; attempt <= flowStartBudget; attempt++ {
 		if resp := request(t, anonymous, server, http.MethodGet, host, "/oauth/v2/authorize?"+authorizeQuery().Encode(), nil, nil); resp.StatusCode != http.StatusFound {
-			t.Fatalf("authorize %d of %d: %d", attempt, startsPerMinute, resp.StatusCode)
+			t.Fatalf("authorize %d of %d: %d", attempt, flowStartBudget, resp.StatusCode)
 		}
 	}
 	limited := request(t, anonymous, server, http.MethodGet, host, "/oauth/v2/authorize?"+authorizeQuery().Encode(), nil, nil)

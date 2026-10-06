@@ -65,8 +65,8 @@ const (
 	cookieKeyLength   = 32
 	keysTTL           = 30 * time.Second
 	attemptsPerMinute = 10
-	startsPerMinute   = 30
-	lookupsPerMinute  = 30
+	startsPerMinute   = 600
+	lookupsPerMinute  = 600
 	upstreamTimeout   = 15 * time.Second
 	clusterCAConfig   = "kube-root-ca.crt"
 	apiServerPort     = "6443"
