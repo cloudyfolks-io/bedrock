@@ -461,6 +461,44 @@ func TestLDAPGroupsFromSearch(t *testing.T) {
 	}
 }
 
+func TestLDAPSearchesGroupsAsTheServiceAccount(t *testing.T) {
+	c, _ := startTestEnv(t)
+	provider := createLDAPProvider(t, c, "groupacl-ldap", "service-secret")
+	provider.Spec.LDAP.MemberOfAttribute = ""
+	provider.Spec.LDAP.GroupSearch = &v1alpha1.LDAPGroupSearch{BaseDN: "ou=groups,dc=example,dc=test", MemberAttribute: "member", NameAttribute: "cn"}
+	provider.Spec.GroupMapping = []v1alpha1.GroupMapping{{External: "qa", Group: "testers"}}
+	if err := c.Update(context.Background(), &provider); err != nil {
+		t.Fatal(err)
+	}
+	userEntry := ldap.NewEntry("uid=judy,ou=people,dc=example,dc=test", map[string][]string{"uid": {"judy"}})
+	groupEntry := ldap.NewEntry("cn=qa,ou=groups,dc=example,dc=test", map[string][]string{"cn": {"qa"}})
+	bound := ""
+	conn := &fakeLDAPConn{
+		bind: func(dn, password string) error {
+			bound = dn
+			return nil
+		},
+		search: func(req *ldap.SearchRequest) (*ldap.SearchResult, error) {
+			if req.BaseDN != "ou=groups,dc=example,dc=test" {
+				return &ldap.SearchResult{Entries: []*ldap.Entry{userEntry}}, nil
+			}
+			if bound != provider.Spec.LDAP.BindDN {
+				return nil, &ldap.Error{ResultCode: ldap.LDAPResultNoSuchObject}
+			}
+			return &ldap.SearchResult{Entries: []*ldap.Entry{groupEntry}}, nil
+		},
+	}
+	method := NewLDAP(c, fixedDialer(conn))
+	request := loginRequestFor(provider.Name, "judy")
+	result, err := method.Complete(context.Background(), Flow{AuthRequest: request, Now: time.Now()}, v1alpha1.User{}, Answer{Password: "anything"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Subject == nil || len(result.Subject.User.Spec.Groups) != 1 || result.Subject.User.Spec.Groups[0] != "testers" {
+		t.Fatalf("result = %+v", result)
+	}
+}
+
 func TestLDAPProvisionsAndUpdatesTheUser(t *testing.T) {
 	c, _ := startTestEnv(t)
 	provider := createLDAPProvider(t, c, "provision-ldap", "service-secret")

@@ -208,6 +208,9 @@ func (m ldapMethod) authenticate(ctx context.Context, provider v1alpha1.Identity
 	if err := conn.Bind(entry.DN, password); err != nil {
 		return ExternalIdentity{}, false, nil
 	}
+	if err := conn.Bind(provider.Spec.LDAP.BindDN, bindPassword); err != nil {
+		return ExternalIdentity{}, false, err
+	}
 	groups, err := ldapGroupsFor(conn, provider, entry)
 	if err != nil {
 		return ExternalIdentity{}, false, err

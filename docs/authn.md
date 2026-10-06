@@ -145,7 +145,9 @@ filter. It then binds again as the user, with the password from
 sign-in. A search that finds no entry, or more than one, fails the
 same way as a wrong password.
 
-Groups come from `groupSearch`. When `memberOfAttribute` is set
+Groups come from `groupSearch`. `bedrock-authn` binds as the service
+account again before it searches for groups, so the user does not need
+read access to the group entries. When `memberOfAttribute` is set
 instead, groups come from that attribute on the user's own entry.
 `groupMapping` turns an external group name into a Bedrock group. An
 LDAP group missing from `groupMapping` grants no Bedrock membership.
