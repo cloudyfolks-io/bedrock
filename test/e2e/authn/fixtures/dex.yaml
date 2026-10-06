@@ -5,11 +5,13 @@ metadata:
   namespace: authn-e2e
 data:
   config.yaml: |
-    issuer: https://dex.${BEDROCK_HOST}
+    issuer: https://dex.authn-e2e.svc:5556
     storage:
       type: memory
     web:
-      http: 0.0.0.0:5556
+      https: 0.0.0.0:5556
+      tlsCert: /etc/dex/tls/tls.crt
+      tlsKey: /etc/dex/tls/tls.key
     oauth2:
       skipApprovalScreen: true
     staticClients:
@@ -35,7 +37,8 @@ metadata:
 spec:
   secretName: dex-tls
   dnsNames:
-    - dex.${BEDROCK_HOST}
+    - dex.authn-e2e.svc
+    - dex.authn-e2e.svc.cluster.local
   issuerRef:
     kind: ClusterIssuer
     name: bedrock-ca
@@ -80,10 +83,16 @@ spec:
           volumeMounts:
             - name: config
               mountPath: /etc/dex/cfg
+            - name: tls
+              mountPath: /etc/dex/tls
+              readOnly: true
       volumes:
         - name: config
           configMap:
             name: dex-config
+        - name: tls
+          secret:
+            secretName: dex-tls
 ---
 apiVersion: v1
 kind: Service
@@ -94,23 +103,6 @@ spec:
   selector:
     app: dex
   ports:
-    - name: http
+    - name: https
       port: 5556
       targetPort: 5556
----
-apiVersion: traefik.io/v1alpha1
-kind: IngressRoute
-metadata:
-  name: dex
-  namespace: authn-e2e
-spec:
-  entryPoints:
-    - websecure
-  routes:
-    - kind: Rule
-      match: Host(`dex.${BEDROCK_HOST}`)
-      services:
-        - name: dex
-          port: 5556
-  tls:
-    secretName: dex-tls

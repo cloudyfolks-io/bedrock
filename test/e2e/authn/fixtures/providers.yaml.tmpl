@@ -65,7 +65,7 @@ spec:
   secretRef: dex-client
   caBundle: "${DEX_CA_BUNDLE}"
   oidc:
-    issuer: https://dex.${BEDROCK_HOST}
+    issuer: https://dex.authn-e2e.svc:5556
     clientID: bedrock
     usernameClaim: email
   groupMapping:
