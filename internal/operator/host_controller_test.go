@@ -24,7 +24,7 @@ func TestHostReconcilerLabelsNode(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := (&HostReconciler{Client: mgr.GetClient()}).SetupWithManager(mgr); err != nil {
+	if err := (&HostReconciler{Client: mgr.GetClient(), APIReader: mgr.GetAPIReader()}).SetupWithManager(mgr); err != nil {
 		t.Fatal(err)
 	}
 	go func() { _ = mgr.Start(ctx) }()
@@ -80,7 +80,7 @@ func TestHostReconcilerWithoutNode(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := (&HostReconciler{Client: mgr.GetClient()}).SetupWithManager(mgr); err != nil {
+	if err := (&HostReconciler{Client: mgr.GetClient(), APIReader: mgr.GetAPIReader()}).SetupWithManager(mgr); err != nil {
 		t.Fatal(err)
 	}
 	go func() { _ = mgr.Start(ctx) }()
@@ -106,7 +106,7 @@ func TestHostReconcilerCreatesHostFromNodeLabels(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := (&HostReconciler{Client: mgr.GetClient()}).SetupWithManager(mgr); err != nil {
+	if err := (&HostReconciler{Client: mgr.GetClient(), APIReader: mgr.GetAPIReader()}).SetupWithManager(mgr); err != nil {
 		t.Fatal(err)
 	}
 	go func() { _ = mgr.Start(ctx) }()
@@ -147,7 +147,7 @@ func TestHostReconcileRendersHostConfigAndManagedLabel(t *testing.T) {
 	if err := c.Create(ctx, host); err != nil {
 		t.Fatal(err)
 	}
-	r := &HostReconciler{Client: c}
+	r := &HostReconciler{Client: c, APIReader: c}
 	if _, err := r.Reconcile(ctx, ctrl.Request{NamespacedName: types.NamespacedName{Name: "hc-node"}}); err != nil {
 		t.Fatal(err)
 	}
@@ -205,7 +205,7 @@ func TestHostReconcileRendersMirrorFromCluster(t *testing.T) {
 	if err := c.Create(ctx, host); err != nil {
 		t.Fatal(err)
 	}
-	r := &HostReconciler{Client: c}
+	r := &HostReconciler{Client: c, APIReader: c}
 	if _, err := r.Reconcile(ctx, ctrl.Request{NamespacedName: types.NamespacedName{Name: "mirror-node"}}); err != nil {
 		t.Fatal(err)
 	}
@@ -226,20 +226,11 @@ func TestHostReconcileRendersMirrorFromCluster(t *testing.T) {
 }
 
 func TestHostReconcileGrantsOneAuthnRestartAtATime(t *testing.T) {
-	c, cfg := StartTestEnv(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	t.Cleanup(cancel)
-
-	mgr, err := ctrl.NewManager(cfg, testManagerOptions(t))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := (&HostReconciler{Client: mgr.GetClient()}).SetupWithManager(mgr); err != nil {
-		t.Fatal(err)
-	}
-	go func() { _ = mgr.Start(ctx) }()
-
-	for _, name := range []string{"cp-a", "cp-b"} {
+	c, _ := StartTestEnv(t)
+	ctx := context.Background()
+	r := &HostReconciler{Client: c, APIReader: c}
+	names := []string{"cp-a", "cp-b"}
+	for _, name := range names {
 		host := &v1alpha1.Host{ObjectMeta: metav1.ObjectMeta{Name: name}, Spec: v1alpha1.HostSpec{Roles: []string{v1alpha1.RoleControlPlane}}}
 		if err := c.Create(ctx, host); err != nil {
 			t.Fatal(err)
@@ -247,38 +238,46 @@ func TestHostReconcileGrantsOneAuthnRestartAtATime(t *testing.T) {
 	}
 	setPending := func(name string, pending bool) {
 		t.Helper()
-		waitFor(t, func() bool {
-			var host v1alpha1.Host
-			if err := c.Get(ctx, client.ObjectKey{Name: name}, &host); err != nil {
-				return false
+		var host v1alpha1.Host
+		if err := c.Get(ctx, client.ObjectKey{Name: name}, &host); err != nil {
+			t.Fatal(err)
+		}
+		host.Status.Authn = &v1alpha1.AuthnFilesStatus{WebhookRestartPending: pending}
+		if err := c.Status().Update(ctx, &host); err != nil {
+			t.Fatal(err)
+		}
+	}
+	reconcileAll := func() {
+		t.Helper()
+		for _, name := range names {
+			if _, err := r.Reconcile(ctx, ctrl.Request{NamespacedName: types.NamespacedName{Name: name}}); err != nil {
+				t.Fatal(err)
 			}
-			host.Status.Authn = &v1alpha1.AuthnFilesStatus{WebhookRestartPending: pending}
-			return c.Status().Update(ctx, &host) == nil
-		})
+		}
 	}
 	granted := func(name string) bool {
 		var host v1alpha1.Host
 		if err := c.Get(ctx, client.ObjectKey{Name: name}, &host); err != nil {
-			return false
+			t.Fatal(err)
 		}
 		return v1alpha1.AuthnRestartGrantFresh(host, time.Now())
 	}
 
 	setPending("cp-a", true)
 	setPending("cp-b", true)
-	waitFor(t, func() bool { return granted("cp-a") })
-	time.Sleep(time.Second)
-	if granted("cp-b") {
-		t.Fatal("a second host must wait for the first grant")
+	reconcileAll()
+	reconcileAll()
+	if !granted("cp-a") || granted("cp-b") {
+		t.Fatalf("exactly the lowest pending host holds the grant: a=%v b=%v", granted("cp-a"), granted("cp-b"))
 	}
 
 	setPending("cp-a", false)
-	waitFor(t, func() bool { return !granted("cp-a") && granted("cp-b") })
+	reconcileAll()
 	var first v1alpha1.Host
 	if err := c.Get(ctx, client.ObjectKey{Name: "cp-a"}, &first); err != nil {
 		t.Fatal(err)
 	}
-	if _, held := first.Annotations[v1alpha1.AnnotationAuthnRestart]; held {
-		t.Fatal("the grant of a host that restarted must be removed")
+	if _, held := first.Annotations[v1alpha1.AnnotationAuthnRestart]; held || !granted("cp-b") {
+		t.Fatalf("the grant moves to the next host when the first restarted: %v", first.Annotations)
 	}
 }

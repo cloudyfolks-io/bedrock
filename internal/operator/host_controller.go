@@ -2,11 +2,12 @@ package operator
 
 import (
 	"context"
+	"errors"
 	"slices"
 	"time"
 
 	corev1 "k8s.io/api/core/v1"
-	"k8s.io/apimachinery/pkg/api/errors"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	ctrl "sigs.k8s.io/controller-runtime"
@@ -19,23 +20,21 @@ import (
 )
 
 type HostReconciler struct {
-	Client client.Client
+	Client    client.Client
+	APIReader client.Reader
 }
 
 func (r *HostReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
-	requeue, err := r.reconcileAuthnRestart(ctx, time.Now())
-	if err != nil {
-		return ctrl.Result{}, err
-	}
-	result, err := r.reconcileHost(ctx, req)
+	result, hostErr := r.reconcileHost(ctx, req)
+	requeue, grantErr := r.reconcileAuthnRestart(ctx, time.Now())
 	result.RequeueAfter = requeue
-	return result, err
+	return result, errors.Join(hostErr, grantErr)
 }
 
 func (r *HostReconciler) reconcileHost(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	var host v1alpha1.Host
 	err := r.Client.Get(ctx, req.NamespacedName, &host)
-	if errors.IsNotFound(err) {
+	if apierrors.IsNotFound(err) {
 		return ctrl.Result{}, r.createHostFromNode(ctx, req.Name)
 	}
 	if err != nil {
@@ -43,7 +42,7 @@ func (r *HostReconciler) reconcileHost(ctx context.Context, req ctrl.Request) (c
 	}
 	var node corev1.Node
 	err = r.Client.Get(ctx, client.ObjectKey{Name: host.Name}, &node)
-	if errors.IsNotFound(err) {
+	if apierrors.IsNotFound(err) {
 		next := hostStatus(host, nil, metav1.ConditionFalse, "NodeMissing", "no Node with this name")
 		return ctrl.Result{}, r.updateStatus(ctx, host, next)
 	}

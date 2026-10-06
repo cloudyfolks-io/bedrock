@@ -12,23 +12,23 @@ import (
 
 var restartNow = time.Date(2026, 10, 7, 12, 0, 0, 0, time.UTC)
 
-func restartHost(name string, pending bool, grantedAgo string) v1alpha1.Host {
-	host := v1alpha1.Host{ObjectMeta: metav1.ObjectMeta{Name: name}}
-	if pending {
-		host.Status.Authn = &v1alpha1.AuthnFilesStatus{WebhookRestartPending: true}
-	}
-	switch grantedAgo {
-	case "":
-	case "unparsable":
-		host.Annotations = map[string]string{v1alpha1.AnnotationAuthnRestart: "soon"}
-	default:
-		ago, err := time.ParseDuration(grantedAgo)
-		if err != nil {
-			panic(err)
-		}
-		host.Annotations = map[string]string{v1alpha1.AnnotationAuthnRestart: restartNow.Add(-ago).Format(time.RFC3339)}
-	}
+func idleHost(name string) v1alpha1.Host {
+	return v1alpha1.Host{ObjectMeta: metav1.ObjectMeta{Name: name}}
+}
+
+func pendingHost(name string) v1alpha1.Host {
+	host := idleHost(name)
+	host.Status.Authn = &v1alpha1.AuthnFilesStatus{WebhookRestartPending: true}
 	return host
+}
+
+func grantedWith(host v1alpha1.Host, value string) v1alpha1.Host {
+	host.Annotations = map[string]string{v1alpha1.AnnotationAuthnRestart: value}
+	return host
+}
+
+func grantedAgo(host v1alpha1.Host, ago time.Duration) v1alpha1.Host {
+	return grantedWith(host, restartNow.Add(-ago).Format(time.RFC3339))
 }
 
 func TestAuthnRestartGrants(t *testing.T) {
@@ -38,55 +38,55 @@ func TestAuthnRestartGrants(t *testing.T) {
 		revoke []string
 	}{
 		"no pending hosts": {
-			hosts: []v1alpha1.Host{restartHost("a", false, ""), restartHost("b", false, "")},
+			hosts: []v1alpha1.Host{idleHost("a"), idleHost("b")},
 		},
 		"one pending host is granted": {
-			hosts: []v1alpha1.Host{restartHost("a", false, ""), restartHost("b", true, "")},
+			hosts: []v1alpha1.Host{idleHost("a"), pendingHost("b")},
 			grant: "b",
 		},
 		"two pending hosts grant the lowest name": {
-			hosts: []v1alpha1.Host{restartHost("c", true, ""), restartHost("a", true, ""), restartHost("b", false, "")},
+			hosts: []v1alpha1.Host{pendingHost("c"), pendingHost("a"), idleHost("b")},
 			grant: "a",
 		},
 		"a fresh grant on a pending host blocks a second grant": {
-			hosts: []v1alpha1.Host{restartHost("a", true, ""), restartHost("b", true, "1m")},
+			hosts: []v1alpha1.Host{pendingHost("a"), grantedAgo(pendingHost("b"), 1*time.Minute)},
 		},
 		"a stuck lowest host expires with two others pending: the next name is granted": {
-			hosts:  []v1alpha1.Host{restartHost("a", true, "16m"), restartHost("b", true, ""), restartHost("c", true, "")},
+			hosts:  []v1alpha1.Host{grantedAgo(pendingHost("a"), 16*time.Minute), pendingHost("b"), pendingHost("c")},
 			grant:  "b",
 			revoke: []string{"a"},
 		},
 		"a stuck middle host expires: the next name is granted": {
-			hosts:  []v1alpha1.Host{restartHost("a", true, ""), restartHost("b", true, "20m"), restartHost("c", true, "")},
+			hosts:  []v1alpha1.Host{pendingHost("a"), grantedAgo(pendingHost("b"), 20*time.Minute), pendingHost("c")},
 			grant:  "c",
 			revoke: []string{"b"},
 		},
 		"the highest stuck host expires: the grant wraps to the lowest name": {
-			hosts:  []v1alpha1.Host{restartHost("a", true, ""), restartHost("b", true, ""), restartHost("c", true, "16m")},
+			hosts:  []v1alpha1.Host{pendingHost("a"), pendingHost("b"), grantedAgo(pendingHost("c"), 16*time.Minute)},
 			grant:  "a",
 			revoke: []string{"c"},
 		},
 		"a single stuck host expires: it is granted again": {
-			hosts:  []v1alpha1.Host{restartHost("a", false, ""), restartHost("b", true, "16m")},
+			hosts:  []v1alpha1.Host{idleHost("a"), grantedAgo(pendingHost("b"), 16*time.Minute)},
 			grant:  "b",
 			revoke: []string{"b"},
 		},
 		"a grant on a host that is no longer pending is revoked and the next pending host is granted": {
-			hosts:  []v1alpha1.Host{restartHost("a", false, "1m"), restartHost("b", true, "")},
+			hosts:  []v1alpha1.Host{grantedAgo(idleHost("a"), 1*time.Minute), pendingHost("b")},
 			grant:  "b",
 			revoke: []string{"a"},
 		},
 		"a grant on a host that is no longer pending is revoked with nothing else pending": {
-			hosts:  []v1alpha1.Host{restartHost("a", false, "1m")},
+			hosts:  []v1alpha1.Host{grantedAgo(idleHost("a"), 1*time.Minute)},
 			revoke: []string{"a"},
 		},
 		"an unparsable grant is revoked": {
-			hosts:  []v1alpha1.Host{restartHost("a", true, "unparsable"), restartHost("b", false, "unparsable")},
+			hosts:  []v1alpha1.Host{grantedWith(pendingHost("a"), "soon"), grantedWith(idleHost("b"), "soon")},
 			grant:  "a",
 			revoke: []string{"a", "b"},
 		},
 		"revokes are sorted by name": {
-			hosts:  []v1alpha1.Host{restartHost("c", false, "1m"), restartHost("a", false, "1m")},
+			hosts:  []v1alpha1.Host{grantedAgo(idleHost("c"), 1*time.Minute), grantedAgo(idleHost("a"), 1*time.Minute)},
 			revoke: []string{"a", "c"},
 		},
 	}
@@ -107,14 +107,14 @@ func TestAuthnRestartGrants(t *testing.T) {
 }
 
 func TestAuthnRestartRequeue(t *testing.T) {
-	hosts := []v1alpha1.Host{restartHost("a", true, "5m"), restartHost("b", true, "")}
+	hosts := []v1alpha1.Host{grantedAgo(pendingHost("a"), 5*time.Minute), pendingHost("b")}
 	if got := authnRestartRequeue(hosts, "", restartNow); got != v1alpha1.AuthnRestartGrantLifetime-5*time.Minute {
 		t.Fatalf("remaining lifetime of the active grant, got %s", got)
 	}
-	if got := authnRestartRequeue([]v1alpha1.Host{restartHost("a", true, "")}, "a", restartNow); got != v1alpha1.AuthnRestartGrantLifetime {
+	if got := authnRestartRequeue([]v1alpha1.Host{pendingHost("a")}, "a", restartNow); got != v1alpha1.AuthnRestartGrantLifetime {
 		t.Fatalf("a new grant lasts the full lifetime, got %s", got)
 	}
-	if got := authnRestartRequeue([]v1alpha1.Host{restartHost("a", false, "")}, "", restartNow); got != 0 {
+	if got := authnRestartRequeue([]v1alpha1.Host{idleHost("a")}, "", restartNow); got != 0 {
 		t.Fatalf("nothing granted needs no requeue, got %s", got)
 	}
 }

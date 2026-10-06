@@ -77,30 +77,36 @@ func authnRestartRequeue(hosts []v1alpha1.Host, grant string, now time.Time) tim
 
 func (r *HostReconciler) reconcileAuthnRestart(ctx context.Context, now time.Time) (time.Duration, error) {
 	var hosts v1alpha1.HostList
-	if err := r.Client.List(ctx, &hosts); err != nil {
+	if err := r.APIReader.List(ctx, &hosts); err != nil {
 		return 0, err
 	}
 	grant, revoke := authnRestartGrants(hosts.Items, now)
 	for _, name := range revoke {
-		if err := r.annotateAuthnRestart(ctx, name, nil); err != nil {
+		if err := r.revokeAuthnRestart(ctx, name); err != nil {
 			return 0, err
 		}
 	}
 	if grant != "" {
-		stamp := now.UTC().Format(time.RFC3339)
-		if err := r.annotateAuthnRestart(ctx, grant, &stamp); err != nil {
+		if err := r.grantAuthnRestart(ctx, grant, now); err != nil {
 			return 0, err
 		}
 	}
 	return authnRestartRequeue(hosts.Items, grant, now), nil
 }
 
-func (r *HostReconciler) annotateAuthnRestart(ctx context.Context, name string, value *string) error {
-	body, err := json.Marshal(map[string]any{"metadata": map[string]any{"annotations": map[string]*string{v1alpha1.AnnotationAuthnRestart: value}}})
+func (r *HostReconciler) grantAuthnRestart(ctx context.Context, name string, at time.Time) error {
+	return r.patchAuthnRestart(ctx, name, at.UTC().Format(time.RFC3339))
+}
+
+func (r *HostReconciler) revokeAuthnRestart(ctx context.Context, name string) error {
+	return r.patchAuthnRestart(ctx, name, nil)
+}
+
+func (r *HostReconciler) patchAuthnRestart(ctx context.Context, name string, annotation any) error {
+	body, err := json.Marshal(map[string]any{"metadata": map[string]any{"annotations": map[string]any{v1alpha1.AnnotationAuthnRestart: annotation}}})
 	if err != nil {
 		return err
 	}
 	host := &v1alpha1.Host{ObjectMeta: metav1.ObjectMeta{Name: name}}
-	patch := client.RawPatch(types.MergePatchType, body)
-	return client.IgnoreNotFound(r.Client.Patch(ctx, host, patch, client.FieldOwner(v1alpha1.OperatorFieldManager)))
+	return client.IgnoreNotFound(r.Client.Patch(ctx, host, client.RawPatch(types.MergePatchType, body), client.FieldOwner(v1alpha1.OperatorFieldManager)))
 }
