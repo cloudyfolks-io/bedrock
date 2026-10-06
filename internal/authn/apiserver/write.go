@@ -16,6 +16,7 @@ const (
 	APIServerUser = "kube-apiserver"
 	fileMode      = 0o600
 	dirMode       = 0o700
+	parentMode    = 0o755
 )
 
 type Owner func(path string) error
@@ -40,6 +41,9 @@ func APIServerOwner() Owner {
 }
 
 func WriteFiles(dir string, files map[string][]byte, owner Owner) (bool, error) {
+	if err := traversableParent(filepath.Dir(dir)); err != nil {
+		return false, err
+	}
 	if err := os.MkdirAll(dir, dirMode); err != nil {
 		return false, err
 	}
@@ -55,6 +59,13 @@ func WriteFiles(dir string, files map[string][]byte, owner Owner) (bool, error) 
 		changed = changed || written
 	}
 	return changed, nil
+}
+
+func traversableParent(parent string) error {
+	if err := os.MkdirAll(parent, parentMode); err != nil {
+		return err
+	}
+	return os.Chmod(parent, parentMode)
 }
 
 func writeFile(path string, content []byte, owner Owner) (bool, error) {

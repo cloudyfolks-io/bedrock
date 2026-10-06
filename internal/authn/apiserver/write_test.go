@@ -96,3 +96,17 @@ func TestWriteFilesOwnerFailureLeavesOldFileLive(t *testing.T) {
 		t.Fatalf("no temporary file may stay after an owner failure: %v %v", entries, err)
 	}
 }
+
+func TestWriteFilesKeepsTheParentTraversable(t *testing.T) {
+	parent := filepath.Join(t.TempDir(), "etc", "bedrock")
+	if err := os.MkdirAll(parent, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := WriteFiles(filepath.Join(parent, "authn"), map[string][]byte{AuthenticationFile: []byte("a")}, KeepOwner); err != nil {
+		t.Fatal(err)
+	}
+	info, err := os.Stat(parent)
+	if err != nil || info.Mode().Perm() != 0o755 {
+		t.Fatalf("parent mode %v %v", info, err)
+	}
+}
