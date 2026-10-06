@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/base32"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -31,6 +32,19 @@ func (h *hookClient) Get(ctx context.Context, key client.ObjectKey, obj client.O
 		hook()
 	}
 	return err
+}
+
+func TestOTPAuthURLUsesTheBareHostAsIssuer(t *testing.T) {
+	otpauthURL := OTPAuthURL("https://sso.example.test", "admin", []byte("12345678901234567890"))
+	if !strings.Contains(otpauthURL, "issuer=sso.example.test") {
+		t.Fatalf("otpauth URL must carry the bare host as issuer, got %q", otpauthURL)
+	}
+	if !strings.Contains(otpauthURL, "totp/sso.example.test:admin") {
+		t.Fatalf("otpauth URL label must be the bare host and the username, got %q", otpauthURL)
+	}
+	if strings.Contains(otpauthURL, "https") {
+		t.Fatalf("otpauth URL must not carry the scheme, got %q", otpauthURL)
+	}
 }
 
 func TestTOTPCodeMatchesRFC6238Vectors(t *testing.T) {

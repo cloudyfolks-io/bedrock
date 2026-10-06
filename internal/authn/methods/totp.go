@@ -59,13 +59,22 @@ func MatchTOTP(seed []byte, code string, now time.Time, lastStep int64) (int64, 
 }
 
 func OTPAuthURL(issuer, username string, seed []byte) string {
+	display := displayIssuer(issuer)
 	values := url.Values{}
 	values.Set("secret", base32Seed(seed))
-	values.Set("issuer", issuer)
+	values.Set("issuer", display)
 	values.Set("algorithm", "SHA1")
 	values.Set("digits", "6")
 	values.Set("period", "30")
-	return fmt.Sprintf("otpauth://totp/%s?%s", url.PathEscape(issuer+":"+username), values.Encode())
+	return fmt.Sprintf("otpauth://totp/%s?%s", url.PathEscape(display+":"+username), values.Encode())
+}
+
+func displayIssuer(issuer string) string {
+	parsed, err := url.Parse(issuer)
+	if err != nil || parsed.Host == "" {
+		return issuer
+	}
+	return parsed.Host
 }
 
 type totpMethod struct {
@@ -134,7 +143,7 @@ func (m totpMethod) Enroll(ctx context.Context, user v1alpha1.User, input Answer
 			ObjectMeta: metav1.ObjectMeta{
 				Namespace:   release.SystemNamespace,
 				Name:        name,
-				Labels:      map[string]string{v1alpha1.LabelKind: "Credential", v1alpha1.LabelName: name},
+				Labels:      map[string]string{v1alpha1.LabelKind: "Credential", v1alpha1.LabelName: labelValue(name)},
 				Annotations: map[string]string{v1alpha1.AnnotationEnrollWriteAt: enrollWriteAt(time.Now())},
 			},
 			Spec: v1alpha1.CredentialSpec{UserRef: user.Name, Method: v1alpha1.MethodTOTP, SecretRef: name},
