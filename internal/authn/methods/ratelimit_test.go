@@ -42,3 +42,45 @@ func TestRateLimiterSweepsStaleKeysBeyondBound(t *testing.T) {
 		t.Fatalf("stale keys beyond the bound must be swept, got %d keys", len(limiter.hits))
 	}
 }
+
+func TestRateLimiterSweepsAtMostOncePerWindow(t *testing.T) {
+	start := time.Date(2026, 9, 28, 12, 0, 0, 0, time.UTC)
+	limiter := NewRateLimiter(1, time.Minute)
+	limiter.Allow("first", start)
+	limiter.Allow("middle", start.Add(30*time.Second))
+	limiter.Allow("probe", start.Add(61*time.Second))
+	if _, kept := limiter.hits["first"]; kept {
+		t.Fatal("the sweep after one window must remove the stale key")
+	}
+	if _, kept := limiter.hits["middle"]; !kept {
+		t.Fatal("a key inside the window must stay")
+	}
+	limiter.Allow("late", start.Add(100*time.Second))
+	if _, kept := limiter.hits["middle"]; !kept {
+		t.Fatal("a second sweep inside the same window must not happen")
+	}
+	limiter.Allow("later", start.Add(122*time.Second))
+	if _, kept := limiter.hits["middle"]; kept {
+		t.Fatal("the next window must sweep the stale key")
+	}
+}
+
+func TestRateLimiterCapsTheNumberOfKeys(t *testing.T) {
+	start := time.Date(2026, 9, 28, 12, 0, 0, 0, time.UTC)
+	limiter := NewRateLimiter(1, time.Minute)
+	for i := 0; i < rateLimiterMaxKeys+1000; i++ {
+		limiter.Allow(fmt.Sprintf("flood-%d", i), start)
+	}
+	if len(limiter.hits) > rateLimiterMaxKeys {
+		t.Fatalf("keys = %d, want at most %d", len(limiter.hits), rateLimiterMaxKeys)
+	}
+	if limiter.Allow("one-more", start) {
+		t.Fatal("a new key must be refused while the map is full")
+	}
+	if limiter.Allow("flood-0", start) {
+		t.Fatal("a known key keeps its own limit while the map is full")
+	}
+	if !limiter.Allow("after-the-window", start.Add(2*time.Minute)) {
+		t.Fatal("the map must accept new keys once the stale keys are swept")
+	}
+}
