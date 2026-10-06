@@ -11,6 +11,7 @@ import (
 	"testing"
 
 	corev1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -169,5 +170,14 @@ func TestBedrockAuthnServiceAccountRBAC(t *testing.T) {
 	}}
 	if err := authn.Delete(ctx, credentialSecret); err != nil {
 		t.Fatalf("the bedrock-authn service account must delete a Credential Secret: %v", err)
+	}
+}
+
+func TestBedrockAuthnServiceAccountCannotDeleteAPITokensByCollection(t *testing.T) {
+	_, cfg := startAuthnRBACEnv(t)
+	authn := authnServiceAccountClient(t, cfg)
+	err := authn.DeleteAllOf(context.Background(), &v1alpha1.APIToken{}, client.InNamespace(release.SystemNamespace))
+	if !apierrors.IsForbidden(err) {
+		t.Fatalf("nothing deletes API tokens by collection, so the role must not allow it: %v", err)
 	}
 }

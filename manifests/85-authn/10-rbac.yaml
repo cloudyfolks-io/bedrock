@@ -44,7 +44,7 @@ rules:
     resources: [settings, clusters]
     verbs: [get, list, watch]
   - apiGroups: [bedrock.cloudyfolks.io]
-    resources: [apitokens, refreshtokens, sessions]
+    resources: [refreshtokens, sessions]
     verbs: [deletecollection]
 ---
 apiVersion: rbac.authorization.k8s.io/v1
