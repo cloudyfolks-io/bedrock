@@ -765,6 +765,72 @@ func TestFlowStartsAreRateLimitedPerClientIP(t *testing.T) {
 	}
 }
 
+func audienceOf(claims map[string]any) []string {
+	if single, ok := claims["aud"].(string); ok {
+		return []string{single}
+	}
+	return stringsOf(claims["aud"])
+}
+
+func checkTokenAudiences(t *testing.T, flow string, tokens map[string]any) {
+	t.Helper()
+	access, _ := tokens["access_token"].(string)
+	idToken, _ := tokens["id_token"].(string)
+	if access == "" || idToken == "" {
+		t.Fatalf("%s tokens %v", flow, tokens)
+	}
+	if got := audienceOf(jwtClaims(t, access)); !reflect.DeepEqual(got, []string{"bedrock", "bedrock-cli"}) {
+		t.Fatalf("%s access token audience %v", flow, got)
+	}
+	if got := audienceOf(jwtClaims(t, idToken)); !reflect.DeepEqual(got, []string{"bedrock-cli"}) {
+		t.Fatalf("%s ID token audience %v", flow, got)
+	}
+}
+
+func TestIDTokensNameOnlyTheClient(t *testing.T) {
+	c, cfg := startTestEnv(t)
+	seedCluster(t, c)
+	saveSigningKey(t, c, time.Now().Add(-time.Minute))
+	createCLIClient(t, c)
+	password := "correct horse battery staple"
+	createUser(t, c, "admin", password)
+	server := newTestServer(t, cfg, time.Now)
+	host := "sso." + testHost
+	formHeader := http.Header{"Content-Type": {"application/x-www-form-urlencoded"}}
+	token := func(form url.Values) map[string]any {
+		t.Helper()
+		return readJSON[map[string]any](t, request(t, server.Client(), server, http.MethodPost, host, "/oauth/v2/token", strings.NewReader(form.Encode()), formHeader), http.StatusOK)
+	}
+	browser := newBrowser(t, server)
+	done := passwordLogin(t, server, browser, "admin", password)
+	callbackURL, err := url.Parse(done.Redirect)
+	if err != nil {
+		t.Fatal(err)
+	}
+	callback := request(t, browser, server, http.MethodGet, host, callbackURL.RequestURI(), nil, nil)
+	location, err := url.Parse(callback.Header.Get("Location"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	code := token(url.Values{"grant_type": {"authorization_code"}, "code": {location.Query().Get("code")}, "redirect_uri": {testRedirect}, "client_id": {"bedrock-cli"}, "code_verifier": {"dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk"}})
+	checkTokenAudiences(t, "code", code)
+	refresh, _ := code["refresh_token"].(string)
+	checkTokenAudiences(t, "refresh", token(url.Values{"grant_type": {"refresh_token"}, "refresh_token": {refresh}, "client_id": {"bedrock-cli"}}))
+	device := readJSON[map[string]any](t, request(t, server.Client(), server, http.MethodPost, host, "/oauth/v2/device_authorization", strings.NewReader(url.Values{"client_id": {"bedrock-cli"}, "scope": {"openid offline_access"}}.Encode()), formHeader), http.StatusOK)
+	userCode, _ := device["user_code"].(string)
+	deviceCode, _ := device["device_code"].(string)
+	approver := newBrowser(t, server)
+	step, _ := postJSON(t, approver, server, "/api/v1/login/device", "", map[string]string{"userCode": userCode})
+	step, _ = postJSON(t, approver, server, "/api/v1/login/answer", step.CSRF, methods.Answer{Type: methods.ChallengeUsername, Username: "admin"})
+	step, _ = postJSON(t, approver, server, "/api/v1/login/answer", step.CSRF, methods.Answer{Type: methods.ChallengePassword, Password: password})
+	approve := true
+	step, _ = postJSON(t, approver, server, "/api/v1/login/answer", step.CSRF, methods.Answer{Type: methods.ChallengeDeviceConfirm, Approve: &approve})
+	if step.Type != methods.ChallengeDone {
+		t.Fatalf("device approval %+v", step)
+	}
+	checkTokenAudiences(t, "device", token(url.Values{"grant_type": {"urn:ietf:params:oauth:grant-type:device_code"}, "device_code": {deviceCode}, "client_id": {"bedrock-cli"}}))
+}
+
 func TestConfigCannotCarryACachedReader(t *testing.T) {
 	reader := reflect.TypeFor[client.Reader]()
 	config := reflect.TypeFor[Config]()

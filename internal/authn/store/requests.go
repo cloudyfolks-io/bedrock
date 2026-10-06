@@ -46,6 +46,28 @@ func (r AuthRequest) GetAudience() []string {
 	return []string{audienceBedrock, r.Object.Spec.ClientID}
 }
 
+type idTokenAuthRequest struct{ AuthRequest }
+
+func (r idTokenAuthRequest) GetAudience() []string { return []string{r.GetClientID()} }
+
+type idTokenRefreshRequest struct{ *RefreshTokenRequest }
+
+func (r idTokenRefreshRequest) GetAudience() []string { return []string{r.GetClientID()} }
+
+type idTokenRequest struct{ op.IDTokenRequest }
+
+func (r idTokenRequest) GetAudience() []string { return []string{r.GetClientID()} }
+
+func ForIDToken(request op.IDTokenRequest) op.IDTokenRequest {
+	switch typed := request.(type) {
+	case AuthRequest:
+		return idTokenAuthRequest{typed}
+	case *RefreshTokenRequest:
+		return idTokenRefreshRequest{typed}
+	}
+	return idTokenRequest{request}
+}
+
 func (r AuthRequest) GetAuthTime() time.Time {
 	if r.Object.Status.AuthTime == nil {
 		return time.Time{}

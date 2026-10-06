@@ -176,6 +176,7 @@ func New(ctx context.Context, cfg Config) (http.Handler, error) {
 	mux.HandleFunc("GET "+pathHealthz, healthz)
 	mux.Handle("GET "+pathReadyz, readyz(st))
 	mux.Handle(pathAuthorizeDone, sessionBound(direct, provider))
+	mux.Handle(pathToken, withIssuer(tokenHandler(provider)))
 	mux.Handle(pathAuthorize, limitByClientIP(starts, cfg.Clock, provider))
 	mux.Handle(pathDevice, limitByClientIP(starts, cfg.Clock, provider))
 	mux.Handle("/", provider)
