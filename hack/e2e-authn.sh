@@ -68,14 +68,17 @@ kubectl -n bedrock-system get networkpolicy bedrock-authn -o jsonpath='{.spec.po
 kubectl -n bedrock-system rollout status deployment/bedrock-authn --timeout=180s
 
 for _ in $(seq 1 30); do
-  if kubectl run ldap-check --rm -i --restart=Never --image=docker.io/osixia/openldap:1.5.0 --env=LDAPTLS_REQCERT=never --command -- \
-    ldapsearch -H ldaps://openldap.authn-e2e.svc:636 -D cn=reader,dc=bedrock,dc=test -w reader-e2e-pw \
+  if kubectl -n authn-e2e exec deploy/openldap -- env LDAPTLS_CACERT=/container/service/slapd/assets/certs/ca.crt \
+    ldapsearch -x -H ldaps://openldap.authn-e2e.svc:636 -D cn=reader,dc=bedrock,dc=test -w reader-e2e-pw \
     -b ou=people,dc=bedrock,dc=test "(uid=alice)" -o ldif-wrap=no >"$workdir/ldapsearch.out" 2>"$workdir/ldapsearch.err"; then
     break
   fi
   sleep 5
 done
-grep -q '^dn: uid=alice,ou=people,dc=bedrock,dc=test$' "$workdir/ldapsearch.out"
+grep -q '^dn: uid=alice,ou=people,dc=bedrock,dc=test$' "$workdir/ldapsearch.out" || {
+  cat "$workdir/ldapsearch.err" "$workdir/ldapsearch.out"
+  false
+}
 
 for _ in $(seq 1 30); do
   if curl -sk -m 10 "https://dex.$host/.well-known/openid-configuration" >"$workdir/dex.out" 2>"$workdir/dex.err"; then
