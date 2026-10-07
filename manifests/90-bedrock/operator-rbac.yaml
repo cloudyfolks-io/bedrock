@@ -101,6 +101,10 @@ rules:
   - credentials/status
   - devicerequests
   - devicerequests/status
+  - dnszones
+  - dnszones/status
+  - elasticips
+  - elasticips/status
   - groups
   - groups/status
   - hostconfigs
@@ -111,6 +115,8 @@ rules:
   - identityproviders/status
   - images
   - images/status
+  - loadbalancers
+  - loadbalancers/status
   - networks
   - networks/status
   - nodeupgrades
@@ -123,6 +129,8 @@ rules:
   - refreshtokens/status
   - releases
   - releases/status
+  - securitygroups
+  - securitygroups/status
   - sessions
   - sessions/status
   - settings
@@ -131,6 +139,8 @@ rules:
   - signingkeys/status
   - sshkeys
   - sshkeys/status
+  - subnets
+  - subnets/status
   - tenants
   - tenants/status
   - users
