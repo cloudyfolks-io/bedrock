@@ -120,8 +120,12 @@ func bedrockResources() []string {
 		"sessions", "sessions/status",
 		"settings", "settings/status",
 		"signingkeys", "signingkeys/status",
+		"sshkeys", "sshkeys/status",
 		"tenants", "tenants/status",
 		"users", "users/status",
+		"virtualmachines", "virtualmachines/status",
+		"volumes", "volumes/status",
+		"volumesnapshots", "volumesnapshots/status",
 	}
 }
 
