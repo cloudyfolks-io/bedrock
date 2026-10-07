@@ -67,6 +67,9 @@ func Run(ctx context.Context, cfg *rest.Config, scheme *runtime.Scheme, opts Run
 	if err := (&AddonReconciler{Client: mgr.GetClient(), Bundle: bundle, Addons: DefaultAddons(), Interval: DefaultAddonInterval, ReadyInterval: DefaultAddonReadyInterval}).SetupWithManager(mgr); err != nil {
 		return err
 	}
+	if err := setupAreas(mgr, bundle); err != nil {
+		return err
+	}
 	if err := mgr.Add(seeder{client: mgr.GetClient()}); err != nil {
 		return err
 	}

@@ -37,7 +37,7 @@ func OperatorRole(bundle release.Bundle) (rbacv1.ClusterRole, error) {
 	return rbacv1.ClusterRole{
 		TypeMeta:   metav1.TypeMeta{APIVersion: rbacv1.SchemeGroupVersion.String(), Kind: "ClusterRole"},
 		ObjectMeta: metav1.ObjectMeta{Name: operatorDeployment, Labels: map[string]string{release.ComponentLabel: "bedrock"}},
-		Rules:      mergeRules(append(rules, fixedRules()...)),
+		Rules:      mergeRules(slices.Concat(rules, fixedRules(), areaRules())),
 	}, nil
 }
 
