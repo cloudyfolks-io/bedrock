@@ -1,0 +1,115 @@
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  annotations:
+    controller-gen.kubebuilder.io/version: v0.20.1
+    helm.sh/resource-policy: keep
+  name: ippools.fabric.cloudyfolks.io
+spec:
+  group: fabric.cloudyfolks.io
+  names:
+    kind: IPPool
+    listKind: IPPoolList
+    plural: ippools
+    shortNames:
+    - ippool
+    singular: ippool
+  scope: Cluster
+  versions:
+  - additionalPrinterColumns:
+    - jsonPath: .spec.subnet
+      name: Subnet
+      type: string
+    - jsonPath: .spec.enableAddressSet
+      name: enableAddressSet
+      type: boolean
+    - jsonPath: .spec.ips
+      name: IPs
+      type: string
+    - jsonPath: .status.v4UsingIPs
+      name: V4Used
+      type: number
+    - jsonPath: .status.v4AvailableIPs
+      name: V4Available
+      type: number
+    - jsonPath: .status.v6UsingIPs
+      name: V6Used
+      type: number
+    - jsonPath: .status.v6AvailableIPs
+      name: V6Available
+      type: number
+    name: v1
+    schema:
+      openAPIV3Schema:
+        properties:
+          apiVersion:
+            type: string
+          kind:
+            type: string
+          metadata:
+            type: object
+          spec:
+            properties:
+              enableAddressSet:
+                default: false
+                type: boolean
+              ips:
+                items:
+                  type: string
+                type: array
+              namespaces:
+                items:
+                  type: string
+                type: array
+              subnet:
+                type: string
+            required:
+            - ips
+            - subnet
+            type: object
+          status:
+            properties:
+              conditions:
+                items:
+                  properties:
+                    lastTransitionTime:
+                      format: date-time
+                      type: string
+                    lastUpdateTime:
+                      format: date-time
+                      type: string
+                    message:
+                      type: string
+                    observedGeneration:
+                      format: int64
+                      type: integer
+                    reason:
+                      type: string
+                    status:
+                      type: string
+                    type:
+                      type: string
+                  type: object
+                type: array
+              v4AvailableIPRange:
+                type: string
+              v4AvailableIPs:
+                type: number
+              v4UsingIPRange:
+                type: string
+              v4UsingIPs:
+                type: number
+              v6AvailableIPRange:
+                type: string
+              v6AvailableIPs:
+                type: number
+              v6UsingIPRange:
+                type: string
+              v6UsingIPs:
+                type: number
+            type: object
+        type: object
+    served: true
+    storage: true
+    subresources:
+      status: {}

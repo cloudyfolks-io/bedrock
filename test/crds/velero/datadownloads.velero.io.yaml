@@ -1,0 +1,141 @@
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  annotations:
+    controller-gen.kubebuilder.io/version: v0.16.5
+  name: datadownloads.velero.io
+spec:
+  group: velero.io
+  names:
+    kind: DataDownload
+    listKind: DataDownloadList
+    plural: datadownloads
+    singular: datadownload
+  scope: Namespaced
+  versions:
+  - additionalPrinterColumns:
+    - jsonPath: .status.phase
+      name: Status
+      type: string
+    - jsonPath: .status.startTimestamp
+      name: Started
+      type: date
+    - format: int64
+      jsonPath: .status.progress.bytesDone
+      name: Bytes Done
+      type: integer
+    - format: int64
+      jsonPath: .status.progress.totalBytes
+      name: Total Bytes
+      type: integer
+    - jsonPath: .spec.backupStorageLocation
+      name: Storage Location
+      type: string
+    - jsonPath: .metadata.creationTimestamp
+      name: Age
+      type: date
+    - jsonPath: .status.node
+      name: Node
+      type: string
+    name: v2alpha1
+    schema:
+      openAPIV3Schema:
+        properties:
+          apiVersion:
+            type: string
+          kind:
+            type: string
+          metadata:
+            type: object
+          spec:
+            properties:
+              backupStorageLocation:
+                type: string
+              cancel:
+                type: boolean
+              dataMoverConfig:
+                additionalProperties:
+                  type: string
+                type: object
+              datamover:
+                type: string
+              nodeOS:
+                enum:
+                - auto
+                - linux
+                - windows
+                type: string
+              operationTimeout:
+                type: string
+              snapshotID:
+                type: string
+              snapshotSize:
+                format: int64
+                type: integer
+              sourceNamespace:
+                type: string
+              targetVolume:
+                properties:
+                  namespace:
+                    type: string
+                  pv:
+                    type: string
+                  pvc:
+                    type: string
+                required:
+                - namespace
+                - pv
+                - pvc
+                type: object
+            required:
+            - backupStorageLocation
+            - operationTimeout
+            - snapshotID
+            - sourceNamespace
+            - targetVolume
+            type: object
+          status:
+            properties:
+              acceptedByNode:
+                type: string
+              acceptedTimestamp:
+                format: date-time
+                nullable: true
+                type: string
+              completionTimestamp:
+                format: date-time
+                nullable: true
+                type: string
+              message:
+                type: string
+              node:
+                type: string
+              phase:
+                enum:
+                - New
+                - Accepted
+                - Prepared
+                - InProgress
+                - Canceling
+                - Canceled
+                - Completed
+                - Failed
+                type: string
+              progress:
+                properties:
+                  bytesDone:
+                    format: int64
+                    type: integer
+                  totalBytes:
+                    format: int64
+                    type: integer
+                type: object
+              startTimestamp:
+                format: date-time
+                nullable: true
+                type: string
+            type: object
+        type: object
+    served: true
+    storage: true
+    subresources: {}

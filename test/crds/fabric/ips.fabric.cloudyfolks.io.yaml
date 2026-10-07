@@ -1,0 +1,83 @@
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  annotations:
+    controller-gen.kubebuilder.io/version: v0.20.1
+    helm.sh/resource-policy: keep
+  name: ips.fabric.cloudyfolks.io
+spec:
+  group: fabric.cloudyfolks.io
+  names:
+    kind: IP
+    listKind: IPList
+    plural: ips
+    shortNames:
+    - ip
+    singular: ip
+  scope: Cluster
+  versions:
+  - additionalPrinterColumns:
+    - jsonPath: .spec.v4IpAddress
+      name: V4IP
+      type: string
+    - jsonPath: .spec.v6IpAddress
+      name: V6IP
+      type: string
+    - jsonPath: .spec.macAddress
+      name: Mac
+      type: string
+    - jsonPath: .spec.nodeName
+      name: Node
+      type: string
+    - jsonPath: .spec.subnet
+      name: Subnet
+      type: string
+    name: v1
+    schema:
+      openAPIV3Schema:
+        properties:
+          apiVersion:
+            type: string
+          kind:
+            type: string
+          metadata:
+            type: object
+          spec:
+            properties:
+              attachIps:
+                items:
+                  type: string
+                type: array
+              attachMacs:
+                items:
+                  type: string
+                type: array
+              attachSubnets:
+                items:
+                  type: string
+                type: array
+              containerID:
+                type: string
+              ipAddress:
+                type: string
+              macAddress:
+                type: string
+              namespace:
+                type: string
+              nodeName:
+                type: string
+              podName:
+                type: string
+              podType:
+                type: string
+              subnet:
+                type: string
+              v4IpAddress:
+                type: string
+              v6IpAddress:
+                type: string
+            type: object
+        type: object
+    served: true
+    storage: true
+    subresources: {}

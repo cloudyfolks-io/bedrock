@@ -1,0 +1,263 @@
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  annotations:
+    controller-gen.kubebuilder.io/version: v0.20.1
+    helm.sh/resource-policy: keep
+  name: vpcs.fabric.cloudyfolks.io
+spec:
+  group: fabric.cloudyfolks.io
+  names:
+    kind: Vpc
+    listKind: VpcList
+    plural: vpcs
+    shortNames:
+    - vpc
+    singular: vpc
+  scope: Cluster
+  versions:
+  - additionalPrinterColumns:
+    - jsonPath: .status.enableExternal
+      name: EnableExternal
+      type: boolean
+    - jsonPath: .status.enableBfd
+      name: EnableBfd
+      type: boolean
+    - jsonPath: .status.standby
+      name: Standby
+      type: boolean
+    - jsonPath: .status.subnets
+      name: Subnets
+      type: string
+    - jsonPath: .status.extraExternalSubnets
+      name: ExtraExternalSubnets
+      type: string
+    - jsonPath: .spec.namespaces
+      name: Namespaces
+      type: string
+    - jsonPath: .status.defaultLogicalSwitch
+      name: DefaultSubnet
+      type: string
+    - jsonPath: .metadata.creationTimestamp
+      name: Age
+      type: date
+    name: v1
+    schema:
+      openAPIV3Schema:
+        properties:
+          apiVersion:
+            type: string
+          kind:
+            type: string
+          metadata:
+            type: object
+          spec:
+            properties:
+              bfdPort:
+                properties:
+                  enabled:
+                    default: false
+                    type: boolean
+                  ip:
+                    type: string
+                  nodeSelector:
+                    properties:
+                      matchExpressions:
+                        items:
+                          properties:
+                            key:
+                              type: string
+                            operator:
+                              type: string
+                            values:
+                              items:
+                                type: string
+                              type: array
+                              x-kubernetes-list-type: atomic
+                          required:
+                          - key
+                          - operator
+                          type: object
+                        type: array
+                        x-kubernetes-list-type: atomic
+                      matchLabels:
+                        additionalProperties:
+                          type: string
+                        type: object
+                    type: object
+                    x-kubernetes-map-type: atomic
+                type: object
+              defaultSubnet:
+                type: string
+              dynamicRouting:
+                properties:
+                  enabled:
+                    default: false
+                    type: boolean
+                  externalSubnet:
+                    type: string
+                  localOnly:
+                    type: boolean
+                  maintainVrf:
+                    type: boolean
+                  redistribute:
+                    items:
+                      enum:
+                      - connected
+                      - connected-as-host
+                      - static
+                      - nat
+                      - lb
+                      type: string
+                    type: array
+                    x-kubernetes-list-type: set
+                  vrfId:
+                    format: int64
+                    maximum: 4294967295
+                    minimum: 1
+                    type: integer
+                    x-kubernetes-validations:
+                    - message: vrfId 253, 254 and 255 are reserved by the host routing tables
+                      rule: self < 253 || self > 255
+                  vrfName:
+                    maxLength: 15
+                    pattern: ^[^/\s]+$
+                    type: string
+                type: object
+                x-kubernetes-validations:
+                - message: redistribute must be set explicitly when dynamic routing is enabled
+                  rule: '!self.enabled || (has(self.redistribute) && self.redistribute.size() > 0)'
+                - message: vrfId must be set when dynamic routing is enabled
+                  rule: '!self.enabled || has(self.vrfId)'
+              enableBfd:
+                type: boolean
+              enableExternal:
+                type: boolean
+              extraExternalSubnets:
+                items:
+                  type: string
+                type: array
+              namespaces:
+                items:
+                  type: string
+                type: array
+              policyRoutes:
+                items:
+                  properties:
+                    action:
+                      type: string
+                    match:
+                      type: string
+                    nextHopIP:
+                      type: string
+                    priority:
+                      type: integer
+                  type: object
+                type: array
+              staticRoutes:
+                items:
+                  properties:
+                    bfdId:
+                      type: string
+                    cidr:
+                      type: string
+                    ecmpMode:
+                      type: string
+                    nextHopIP:
+                      type: string
+                    policy:
+                      type: string
+                    routeTable:
+                      type: string
+                  type: object
+                type: array
+              vpcPeerings:
+                items:
+                  properties:
+                    localConnectIP:
+                      type: string
+                    remoteVpc:
+                      type: string
+                  type: object
+                type: array
+            type: object
+            x-kubernetes-validations:
+            - message: dynamic routing requires enableExternal
+              rule: '!has(self.dynamicRouting) || !self.dynamicRouting.enabled || (has(self.enableExternal) && self.enableExternal)'
+          status:
+            properties:
+              bfdPort:
+                properties:
+                  ip:
+                    type: string
+                  name:
+                    type: string
+                  nodes:
+                    items:
+                      type: string
+                    type: array
+                type: object
+              conditions:
+                items:
+                  properties:
+                    lastTransitionTime:
+                      format: date-time
+                      type: string
+                    lastUpdateTime:
+                      format: date-time
+                      type: string
+                    message:
+                      type: string
+                    observedGeneration:
+                      format: int64
+                      type: integer
+                    reason:
+                      type: string
+                    status:
+                      type: string
+                    type:
+                      type: string
+                  type: object
+                type: array
+              default:
+                type: boolean
+              defaultLogicalSwitch:
+                type: string
+              enableBfd:
+                type: boolean
+              enableExternal:
+                type: boolean
+              extraExternalSubnets:
+                items:
+                  type: string
+                type: array
+              router:
+                type: string
+              sctpLoadBalancer:
+                type: string
+              sctpSessionLoadBalancer:
+                type: string
+              standby:
+                type: boolean
+              subnets:
+                items:
+                  type: string
+                type: array
+              tcpLoadBalancer:
+                type: string
+              tcpSessionLoadBalancer:
+                type: string
+              udpLoadBalancer:
+                type: string
+              udpSessionLoadBalancer:
+                type: string
+              vpcPeerings:
+                items:
+                  type: string
+                type: array
+            type: object
+        type: object
+    served: true
+    storage: true
+    subresources:
+      status: {}

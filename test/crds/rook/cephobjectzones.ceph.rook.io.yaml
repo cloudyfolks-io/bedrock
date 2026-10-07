@@ -1,0 +1,465 @@
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  annotations:
+    controller-gen.kubebuilder.io/version: v0.19.0
+    helm.sh/resource-policy: keep
+  name: cephobjectzones.ceph.rook.io
+spec:
+  group: ceph.rook.io
+  names:
+    kind: CephObjectZone
+    listKind: CephObjectZoneList
+    plural: cephobjectzones
+    shortNames:
+    - cephoz
+    singular: cephobjectzone
+  scope: Namespaced
+  versions:
+  - additionalPrinterColumns:
+    - jsonPath: .status.phase
+      name: Phase
+      type: string
+    - jsonPath: .metadata.creationTimestamp
+      name: Age
+      type: date
+    name: v1
+    schema:
+      openAPIV3Schema:
+        properties:
+          apiVersion:
+            type: string
+          kind:
+            type: string
+          metadata:
+            type: object
+          spec:
+            properties:
+              customEndpoints:
+                items:
+                  type: string
+                nullable: true
+                type: array
+              dataPool:
+                nullable: true
+                properties:
+                  application:
+                    type: string
+                  compressionMode:
+                    enum:
+                    - none
+                    - passive
+                    - aggressive
+                    - force
+                    - ''
+                    nullable: true
+                    type: string
+                  crushRoot:
+                    nullable: true
+                    type: string
+                  deviceClass:
+                    nullable: true
+                    type: string
+                  enableCrushUpdates:
+                    nullable: true
+                    type: boolean
+                  enableRBDStats:
+                    type: boolean
+                  erasureCoded:
+                    properties:
+                      algorithm:
+                        enum:
+                        - isa
+                        - jerasure
+                        type: string
+                      codingChunks:
+                        minimum: 0
+                        type: integer
+                      crushNumFailureDomains:
+                        format: int32
+                        minimum: 1
+                        type: integer
+                      crushOSDsPerFailureDomain:
+                        format: int32
+                        minimum: 1
+                        type: integer
+                      dataChunks:
+                        minimum: 0
+                        type: integer
+                      stripeUnit:
+                        anyOf:
+                        - type: integer
+                        - type: string
+                        enum:
+                        - 4Ki
+                        - 16Ki
+                        - 64Ki
+                        - 256Ki
+                        - 1Mi
+                        pattern: ^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$
+                        x-kubernetes-int-or-string: true
+                    required:
+                    - codingChunks
+                    - dataChunks
+                    type: object
+                    x-kubernetes-validations:
+                    - message: crushNumFailureDomains and crushOSDsPerFailureDomain must be specified together
+                      rule: has(self.crushNumFailureDomains) == has(self.crushOSDsPerFailureDomain)
+                  failureDomain:
+                    type: string
+                  mirroring:
+                    properties:
+                      enabled:
+                        type: boolean
+                      mode:
+                        enum:
+                        - pool
+                        - image
+                        - init-only
+                        type: string
+                      peers:
+                        nullable: true
+                        properties:
+                          secretNames:
+                            items:
+                              type: string
+                            type: array
+                        type: object
+                      snapshotSchedules:
+                        items:
+                          properties:
+                            interval:
+                              type: string
+                            path:
+                              type: string
+                            startTime:
+                              type: string
+                          type: object
+                        type: array
+                    type: object
+                  parameters:
+                    additionalProperties:
+                      type: string
+                    nullable: true
+                    type: object
+                    x-kubernetes-preserve-unknown-fields: true
+                  quotas:
+                    nullable: true
+                    properties:
+                      maxBytes:
+                        format: int64
+                        type: integer
+                      maxObjects:
+                        format: int64
+                        type: integer
+                      maxSize:
+                        pattern: ^[0-9]+[\.]?[0-9]*([KMGTPE]i|[kMGTPE])?$
+                        type: string
+                    type: object
+                  replicated:
+                    properties:
+                      hybridStorage:
+                        nullable: true
+                        properties:
+                          primaryDeviceClass:
+                            minLength: 1
+                            type: string
+                          secondaryDeviceClass:
+                            minLength: 1
+                            type: string
+                        required:
+                        - primaryDeviceClass
+                        - secondaryDeviceClass
+                        type: object
+                      replicasPerFailureDomain:
+                        minimum: 1
+                        type: integer
+                      requireSafeReplicaSize:
+                        type: boolean
+                      size:
+                        minimum: 0
+                        type: integer
+                      subFailureDomain:
+                        type: string
+                      targetSizeRatio:
+                        minimum: 0
+                        type: number
+                    required:
+                    - size
+                    type: object
+                  statusCheck:
+                    properties:
+                      mirror:
+                        nullable: true
+                        properties:
+                          disabled:
+                            type: boolean
+                          interval:
+                            type: string
+                          timeout:
+                            type: string
+                        type: object
+                    type: object
+                    x-kubernetes-preserve-unknown-fields: true
+                type: object
+              metadataPool:
+                nullable: true
+                properties:
+                  application:
+                    type: string
+                  compressionMode:
+                    enum:
+                    - none
+                    - passive
+                    - aggressive
+                    - force
+                    - ''
+                    nullable: true
+                    type: string
+                  crushRoot:
+                    nullable: true
+                    type: string
+                  deviceClass:
+                    nullable: true
+                    type: string
+                  enableCrushUpdates:
+                    nullable: true
+                    type: boolean
+                  enableRBDStats:
+                    type: boolean
+                  erasureCoded:
+                    properties:
+                      algorithm:
+                        enum:
+                        - isa
+                        - jerasure
+                        type: string
+                      codingChunks:
+                        minimum: 0
+                        type: integer
+                      crushNumFailureDomains:
+                        format: int32
+                        minimum: 1
+                        type: integer
+                      crushOSDsPerFailureDomain:
+                        format: int32
+                        minimum: 1
+                        type: integer
+                      dataChunks:
+                        minimum: 0
+                        type: integer
+                      stripeUnit:
+                        anyOf:
+                        - type: integer
+                        - type: string
+                        enum:
+                        - 4Ki
+                        - 16Ki
+                        - 64Ki
+                        - 256Ki
+                        - 1Mi
+                        pattern: ^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$
+                        x-kubernetes-int-or-string: true
+                    required:
+                    - codingChunks
+                    - dataChunks
+                    type: object
+                    x-kubernetes-validations:
+                    - message: crushNumFailureDomains and crushOSDsPerFailureDomain must be specified together
+                      rule: has(self.crushNumFailureDomains) == has(self.crushOSDsPerFailureDomain)
+                  failureDomain:
+                    type: string
+                  mirroring:
+                    properties:
+                      enabled:
+                        type: boolean
+                      mode:
+                        enum:
+                        - pool
+                        - image
+                        - init-only
+                        type: string
+                      peers:
+                        nullable: true
+                        properties:
+                          secretNames:
+                            items:
+                              type: string
+                            type: array
+                        type: object
+                      snapshotSchedules:
+                        items:
+                          properties:
+                            interval:
+                              type: string
+                            path:
+                              type: string
+                            startTime:
+                              type: string
+                          type: object
+                        type: array
+                    type: object
+                  parameters:
+                    additionalProperties:
+                      type: string
+                    nullable: true
+                    type: object
+                    x-kubernetes-preserve-unknown-fields: true
+                  quotas:
+                    nullable: true
+                    properties:
+                      maxBytes:
+                        format: int64
+                        type: integer
+                      maxObjects:
+                        format: int64
+                        type: integer
+                      maxSize:
+                        pattern: ^[0-9]+[\.]?[0-9]*([KMGTPE]i|[kMGTPE])?$
+                        type: string
+                    type: object
+                  replicated:
+                    properties:
+                      hybridStorage:
+                        nullable: true
+                        properties:
+                          primaryDeviceClass:
+                            minLength: 1
+                            type: string
+                          secondaryDeviceClass:
+                            minLength: 1
+                            type: string
+                        required:
+                        - primaryDeviceClass
+                        - secondaryDeviceClass
+                        type: object
+                      replicasPerFailureDomain:
+                        minimum: 1
+                        type: integer
+                      requireSafeReplicaSize:
+                        type: boolean
+                      size:
+                        minimum: 0
+                        type: integer
+                      subFailureDomain:
+                        type: string
+                      targetSizeRatio:
+                        minimum: 0
+                        type: number
+                    required:
+                    - size
+                    type: object
+                  statusCheck:
+                    properties:
+                      mirror:
+                        nullable: true
+                        properties:
+                          disabled:
+                            type: boolean
+                          interval:
+                            type: string
+                          timeout:
+                            type: string
+                        type: object
+                    type: object
+                    x-kubernetes-preserve-unknown-fields: true
+                type: object
+              preservePoolsOnDelete:
+                default: true
+                type: boolean
+              sharedPools:
+                nullable: true
+                properties:
+                  dataPoolName:
+                    type: string
+                    x-kubernetes-validations:
+                    - message: object store shared data pool is immutable
+                      rule: self == oldSelf
+                  metadataPoolName:
+                    type: string
+                    x-kubernetes-validations:
+                    - message: object store shared metadata pool is immutable
+                      rule: self == oldSelf
+                  poolPlacements:
+                    items:
+                      properties:
+                        dataNonECPoolName:
+                          type: string
+                        dataPoolName:
+                          minLength: 1
+                          type: string
+                        default:
+                          type: boolean
+                        metadataPoolName:
+                          minLength: 1
+                          type: string
+                        name:
+                          minLength: 1
+                          pattern: ^[a-zA-Z0-9._/-]+$
+                          type: string
+                        storageClasses:
+                          items:
+                            properties:
+                              dataPoolName:
+                                minLength: 1
+                                type: string
+                              name:
+                                minLength: 1
+                                pattern: ^[a-zA-Z0-9._/-]+$
+                                type: string
+                            required:
+                            - dataPoolName
+                            - name
+                            type: object
+                          maxItems: 10
+                          type: array
+                      required:
+                      - dataPoolName
+                      - metadataPoolName
+                      - name
+                      type: object
+                    type: array
+                  preserveRadosNamespaceDataOnDelete:
+                    type: boolean
+                type: object
+              zoneGroup:
+                type: string
+            required:
+            - zoneGroup
+            type: object
+          status:
+            properties:
+              conditions:
+                items:
+                  properties:
+                    lastHeartbeatTime:
+                      format: date-time
+                      type: string
+                    lastTransitionTime:
+                      format: date-time
+                      type: string
+                    message:
+                      type: string
+                    reason:
+                      type: string
+                    status:
+                      type: string
+                    type:
+                      type: string
+                  type: object
+                type: array
+              observedGeneration:
+                format: int64
+                type: integer
+              phase:
+                type: string
+            type: object
+            x-kubernetes-preserve-unknown-fields: true
+        required:
+        - metadata
+        - spec
+        type: object
+    served: true
+    storage: true
+    subresources:
+      status: {}

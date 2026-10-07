@@ -1,0 +1,326 @@
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  annotations:
+    controller-gen.kubebuilder.io/version: v0.20.1
+    helm.sh/resource-policy: keep
+  name: subnets.fabric.cloudyfolks.io
+spec:
+  group: fabric.cloudyfolks.io
+  names:
+    kind: Subnet
+    listKind: SubnetList
+    plural: subnets
+    shortNames:
+    - subnet
+    singular: subnet
+  scope: Cluster
+  versions:
+  - additionalPrinterColumns:
+    - jsonPath: .spec.provider
+      name: Provider
+      type: string
+    - jsonPath: .spec.vpc
+      name: Vpc
+      type: string
+    - jsonPath: .spec.vlan
+      name: Vlan
+      type: string
+    - jsonPath: .spec.protocol
+      name: Protocol
+      type: string
+    - jsonPath: .spec.cidrBlock
+      name: CIDR
+      type: string
+    - jsonPath: .spec.private
+      name: Private
+      type: boolean
+    - jsonPath: .spec.natOutgoing
+      name: NAT
+      type: boolean
+    - jsonPath: .spec.default
+      name: Default
+      type: boolean
+    - jsonPath: .spec.gatewayType
+      name: GatewayType
+      type: string
+    - jsonPath: .status.v4usingIPs
+      name: V4Used
+      type: number
+    - jsonPath: .status.v4availableIPs
+      name: V4Available
+      type: number
+    - jsonPath: .status.v6usingIPs
+      name: V6Used
+      type: number
+    - jsonPath: .status.v6availableIPs
+      name: V6Available
+      type: number
+    - jsonPath: .spec.excludeIps
+      name: ExcludeIPs
+      type: string
+    - jsonPath: .status.u2oInterconnectionIP
+      name: U2OInterconnectionIP
+      type: string
+    name: v1
+    schema:
+      openAPIV3Schema:
+        properties:
+          apiVersion:
+            type: string
+          kind:
+            type: string
+          metadata:
+            type: object
+          spec:
+            properties:
+              acls:
+                items:
+                  properties:
+                    action:
+                      type: string
+                    direction:
+                      type: string
+                    match:
+                      type: string
+                    priority:
+                      type: integer
+                  type: object
+                type: array
+              allowEWTraffic:
+                type: boolean
+              allowSubnets:
+                items:
+                  type: string
+                type: array
+              cidrBlock:
+                type: string
+              default:
+                type: boolean
+              dhcpV4Options:
+                type: string
+              dhcpV6Options:
+                type: string
+              disableGatewayCheck:
+                type: boolean
+              disableInterConnection:
+                type: boolean
+              enableDHCP:
+                type: boolean
+              enableEcmp:
+                type: boolean
+              enableExternalLBAddress:
+                type: boolean
+              enableIPv6RA:
+                type: boolean
+              enableLb:
+                type: boolean
+              enableMulticastSnoop:
+                type: boolean
+              excludeIps:
+                items:
+                  type: string
+                type: array
+              externalEgressGateway:
+                type: string
+              gateway:
+                type: string
+              gatewayNode:
+                type: string
+              gatewayNodeSelectors:
+                items:
+                  properties:
+                    matchExpressions:
+                      items:
+                        properties:
+                          key:
+                            type: string
+                          operator:
+                            type: string
+                          values:
+                            items:
+                              type: string
+                            type: array
+                            x-kubernetes-list-type: atomic
+                        required:
+                        - key
+                        - operator
+                        type: object
+                      type: array
+                      x-kubernetes-list-type: atomic
+                    matchLabels:
+                      additionalProperties:
+                        type: string
+                      type: object
+                  type: object
+                  x-kubernetes-map-type: atomic
+                type: array
+              gatewayType:
+                type: string
+              ipv6RAConfigs:
+                type: string
+              logicalGateway:
+                type: boolean
+              mtu:
+                format: int32
+                type: integer
+              namespaceSelectors:
+                items:
+                  properties:
+                    matchExpressions:
+                      items:
+                        properties:
+                          key:
+                            type: string
+                          operator:
+                            type: string
+                          values:
+                            items:
+                              type: string
+                            type: array
+                            x-kubernetes-list-type: atomic
+                        required:
+                        - key
+                        - operator
+                        type: object
+                      type: array
+                      x-kubernetes-list-type: atomic
+                    matchLabels:
+                      additionalProperties:
+                        type: string
+                      type: object
+                  type: object
+                  x-kubernetes-map-type: atomic
+                type: array
+              namespaces:
+                items:
+                  type: string
+                type: array
+              natOutgoing:
+                type: boolean
+              natOutgoingPolicyRules:
+                items:
+                  properties:
+                    action:
+                      type: string
+                    match:
+                      properties:
+                        dstIPs:
+                          type: string
+                        srcIPs:
+                          type: string
+                      type: object
+                  type: object
+                type: array
+              nodeNetwork:
+                type: string
+              policyRoutingPriority:
+                format: int32
+                type: integer
+              policyRoutingTableID:
+                format: int32
+                type: integer
+              private:
+                type: boolean
+              protocol:
+                type: string
+              provider:
+                type: string
+              routeTable:
+                type: string
+              u2oFeatures:
+                properties:
+                  overlayOnlyRouting:
+                    type: boolean
+                type: object
+              u2oInterconnection:
+                type: boolean
+              u2oInterconnectionIP:
+                type: string
+              vips:
+                items:
+                  type: string
+                type: array
+              vlan:
+                type: string
+              vpc:
+                type: string
+            type: object
+          status:
+            properties:
+              activateGateway:
+                type: string
+              conditions:
+                items:
+                  properties:
+                    lastTransitionTime:
+                      format: date-time
+                      type: string
+                    lastUpdateTime:
+                      format: date-time
+                      type: string
+                    message:
+                      type: string
+                    observedGeneration:
+                      format: int64
+                      type: integer
+                    reason:
+                      type: string
+                    status:
+                      type: string
+                    type:
+                      type: string
+                  type: object
+                type: array
+              dhcpV4OptionsUUID:
+                type: string
+              dhcpV6OptionsUUID:
+                type: string
+              mcastQuerierIP:
+                type: string
+              mcastQuerierMAC:
+                type: string
+              natOutgoingPolicyRules:
+                items:
+                  properties:
+                    action:
+                      type: string
+                    match:
+                      properties:
+                        dstIPs:
+                          type: string
+                        srcIPs:
+                          type: string
+                      type: object
+                    ruleID:
+                      type: string
+                  type: object
+                type: array
+              u2oInterconnectionIP:
+                type: string
+              u2oInterconnectionMAC:
+                type: string
+              u2oInterconnectionVPC:
+                type: string
+              v4availableIPrange:
+                type: string
+              v4availableIPs:
+                type: number
+              v4usingIPrange:
+                type: string
+              v4usingIPs:
+                type: number
+              v6availableIPrange:
+                type: string
+              v6availableIPs:
+                type: number
+              v6usingIPrange:
+                type: string
+              v6usingIPs:
+                type: number
+            type: object
+        type: object
+    served: true
+    storage: true
+    subresources:
+      status: {}

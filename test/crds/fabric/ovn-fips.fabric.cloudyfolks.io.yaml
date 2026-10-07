@@ -1,0 +1,117 @@
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  annotations:
+    controller-gen.kubebuilder.io/version: v0.20.1
+    helm.sh/resource-policy: keep
+  name: ovn-fips.fabric.cloudyfolks.io
+spec:
+  group: fabric.cloudyfolks.io
+  names:
+    kind: OvnFip
+    listKind: OvnFipList
+    plural: ovn-fips
+    shortNames:
+    - ofip
+    singular: ovn-fip
+  scope: Cluster
+  versions:
+  - additionalPrinterColumns:
+    - jsonPath: .status.vpc
+      name: Vpc
+      type: string
+    - jsonPath: .spec.type
+      name: Type
+      type: string
+    - jsonPath: .status.v4Eip
+      name: V4Eip
+      type: string
+    - jsonPath: .status.v6Eip
+      name: V6Eip
+      type: string
+    - jsonPath: .status.v4Ip
+      name: V4Ip
+      type: string
+    - jsonPath: .status.v6Ip
+      name: V6Ip
+      type: string
+    - jsonPath: .status.ready
+      name: Ready
+      type: boolean
+    - jsonPath: .spec.ipType
+      name: IpType
+      type: string
+    - jsonPath: .spec.ipName
+      name: IpName
+      type: string
+    name: v1
+    schema:
+      openAPIV3Schema:
+        properties:
+          apiVersion:
+            type: string
+          kind:
+            type: string
+          metadata:
+            type: object
+          spec:
+            properties:
+              ipName:
+                type: string
+              ipType:
+                type: string
+              ovnEip:
+                type: string
+              type:
+                type: string
+              v4Ip:
+                type: string
+              v6Ip:
+                type: string
+              vpc:
+                type: string
+            type: object
+          status:
+            properties:
+              conditions:
+                items:
+                  properties:
+                    lastTransitionTime:
+                      format: date-time
+                      type: string
+                    lastUpdateTime:
+                      format: date-time
+                      type: string
+                    message:
+                      type: string
+                    observedGeneration:
+                      format: int64
+                      type: integer
+                    reason:
+                      type: string
+                    status:
+                      type: string
+                    type:
+                      type: string
+                  type: object
+                type: array
+              macAddress:
+                type: string
+              ready:
+                type: boolean
+              v4Eip:
+                type: string
+              v4Ip:
+                type: string
+              v6Eip:
+                type: string
+              v6Ip:
+                type: string
+              vpc:
+                type: string
+            type: object
+        type: object
+    served: true
+    storage: true
+    subresources:
+      status: {}

@@ -1,0 +1,48 @@
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  annotations:
+    controller-gen.kubebuilder.io/version: v0.16.3
+  name: aaqjobqueueconfigs.aaq.kubevirt.io
+spec:
+  group: aaq.kubevirt.io
+  names:
+    kind: AAQJobQueueConfig
+    listKind: AAQJobQueueConfigList
+    plural: aaqjobqueueconfigs
+    shortNames:
+    - aaqjqc
+    - aaqjqcs
+    singular: aaqjobqueueconfig
+  scope: Namespaced
+  versions:
+  - name: v1alpha1
+    schema:
+      openAPIV3Schema:
+        properties:
+          apiVersion:
+            type: string
+          kind:
+            type: string
+          metadata:
+            type: object
+          spec:
+            type: object
+          status:
+            properties:
+              controllerLock:
+                additionalProperties:
+                  type: boolean
+                type: object
+              podsInJobQueue:
+                items:
+                  type: string
+                type: array
+            type: object
+        required:
+        - spec
+        type: object
+    served: true
+    storage: true
+    subresources:
+      status: {}

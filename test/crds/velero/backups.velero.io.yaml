@@ -1,0 +1,379 @@
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  annotations:
+    controller-gen.kubebuilder.io/version: v0.16.5
+  name: backups.velero.io
+spec:
+  group: velero.io
+  names:
+    kind: Backup
+    listKind: BackupList
+    plural: backups
+    singular: backup
+  scope: Namespaced
+  versions:
+  - name: v1
+    schema:
+      openAPIV3Schema:
+        properties:
+          apiVersion:
+            type: string
+          kind:
+            type: string
+          metadata:
+            type: object
+          spec:
+            properties:
+              csiSnapshotTimeout:
+                type: string
+              datamover:
+                type: string
+              defaultVolumesToFsBackup:
+                nullable: true
+                type: boolean
+              defaultVolumesToRestic:
+                nullable: true
+                type: boolean
+              excludedClusterScopedResources:
+                items:
+                  type: string
+                nullable: true
+                type: array
+              excludedNamespaceScopedResources:
+                items:
+                  type: string
+                nullable: true
+                type: array
+              excludedNamespaces:
+                items:
+                  type: string
+                nullable: true
+                type: array
+              excludedResources:
+                items:
+                  type: string
+                nullable: true
+                type: array
+              hooks:
+                properties:
+                  resources:
+                    items:
+                      properties:
+                        excludedNamespaces:
+                          items:
+                            type: string
+                          nullable: true
+                          type: array
+                        excludedResources:
+                          items:
+                            type: string
+                          nullable: true
+                          type: array
+                        includedNamespaces:
+                          items:
+                            type: string
+                          nullable: true
+                          type: array
+                        includedResources:
+                          items:
+                            type: string
+                          nullable: true
+                          type: array
+                        labelSelector:
+                          nullable: true
+                          properties:
+                            matchExpressions:
+                              items:
+                                properties:
+                                  key:
+                                    type: string
+                                  operator:
+                                    type: string
+                                  values:
+                                    items:
+                                      type: string
+                                    type: array
+                                    x-kubernetes-list-type: atomic
+                                required:
+                                - key
+                                - operator
+                                type: object
+                              type: array
+                              x-kubernetes-list-type: atomic
+                            matchLabels:
+                              additionalProperties:
+                                type: string
+                              type: object
+                          type: object
+                          x-kubernetes-map-type: atomic
+                        name:
+                          type: string
+                        post:
+                          items:
+                            properties:
+                              exec:
+                                properties:
+                                  command:
+                                    items:
+                                      type: string
+                                    minItems: 1
+                                    type: array
+                                  container:
+                                    type: string
+                                  onError:
+                                    enum:
+                                    - Continue
+                                    - Fail
+                                    type: string
+                                  timeout:
+                                    type: string
+                                required:
+                                - command
+                                type: object
+                            required:
+                            - exec
+                            type: object
+                          type: array
+                        pre:
+                          items:
+                            properties:
+                              exec:
+                                properties:
+                                  command:
+                                    items:
+                                      type: string
+                                    minItems: 1
+                                    type: array
+                                  container:
+                                    type: string
+                                  onError:
+                                    enum:
+                                    - Continue
+                                    - Fail
+                                    type: string
+                                  timeout:
+                                    type: string
+                                required:
+                                - command
+                                type: object
+                            required:
+                            - exec
+                            type: object
+                          type: array
+                      required:
+                      - name
+                      type: object
+                    nullable: true
+                    type: array
+                type: object
+              includeClusterResources:
+                nullable: true
+                type: boolean
+              includedClusterScopedResources:
+                items:
+                  type: string
+                nullable: true
+                type: array
+              includedNamespaceScopedResources:
+                items:
+                  type: string
+                nullable: true
+                type: array
+              includedNamespaces:
+                items:
+                  type: string
+                nullable: true
+                type: array
+              includedResources:
+                items:
+                  type: string
+                nullable: true
+                type: array
+              itemOperationTimeout:
+                type: string
+              labelSelector:
+                nullable: true
+                properties:
+                  matchExpressions:
+                    items:
+                      properties:
+                        key:
+                          type: string
+                        operator:
+                          type: string
+                        values:
+                          items:
+                            type: string
+                          type: array
+                          x-kubernetes-list-type: atomic
+                      required:
+                      - key
+                      - operator
+                      type: object
+                    type: array
+                    x-kubernetes-list-type: atomic
+                  matchLabels:
+                    additionalProperties:
+                      type: string
+                    type: object
+                type: object
+                x-kubernetes-map-type: atomic
+              metadata:
+                properties:
+                  labels:
+                    additionalProperties:
+                      type: string
+                    type: object
+                type: object
+              orLabelSelectors:
+                items:
+                  properties:
+                    matchExpressions:
+                      items:
+                        properties:
+                          key:
+                            type: string
+                          operator:
+                            type: string
+                          values:
+                            items:
+                              type: string
+                            type: array
+                            x-kubernetes-list-type: atomic
+                        required:
+                        - key
+                        - operator
+                        type: object
+                      type: array
+                      x-kubernetes-list-type: atomic
+                    matchLabels:
+                      additionalProperties:
+                        type: string
+                      type: object
+                  type: object
+                  x-kubernetes-map-type: atomic
+                nullable: true
+                type: array
+              orderedResources:
+                additionalProperties:
+                  type: string
+                nullable: true
+                type: object
+              resourcePolicy:
+                properties:
+                  apiGroup:
+                    type: string
+                  kind:
+                    type: string
+                  name:
+                    type: string
+                required:
+                - kind
+                - name
+                type: object
+                x-kubernetes-map-type: atomic
+              snapshotMoveData:
+                nullable: true
+                type: boolean
+              snapshotVolumes:
+                nullable: true
+                type: boolean
+              storageLocation:
+                type: string
+              ttl:
+                type: string
+              uploaderConfig:
+                nullable: true
+                properties:
+                  parallelFilesUpload:
+                    type: integer
+                type: object
+              volumeGroupSnapshotLabelKey:
+                type: string
+              volumeSnapshotLocations:
+                items:
+                  type: string
+                type: array
+            type: object
+          status:
+            properties:
+              backupItemOperationsAttempted:
+                type: integer
+              backupItemOperationsCompleted:
+                type: integer
+              backupItemOperationsFailed:
+                type: integer
+              completionTimestamp:
+                format: date-time
+                nullable: true
+                type: string
+              csiVolumeSnapshotsAttempted:
+                type: integer
+              csiVolumeSnapshotsCompleted:
+                type: integer
+              errors:
+                type: integer
+              expiration:
+                format: date-time
+                nullable: true
+                type: string
+              failureReason:
+                type: string
+              formatVersion:
+                type: string
+              hookStatus:
+                nullable: true
+                properties:
+                  hooksAttempted:
+                    type: integer
+                  hooksFailed:
+                    type: integer
+                type: object
+              phase:
+                enum:
+                - New
+                - Queued
+                - ReadyToStart
+                - FailedValidation
+                - InProgress
+                - WaitingForPluginOperations
+                - WaitingForPluginOperationsPartiallyFailed
+                - Finalizing
+                - FinalizingPartiallyFailed
+                - Completed
+                - PartiallyFailed
+                - Failed
+                - Deleting
+                type: string
+              progress:
+                nullable: true
+                properties:
+                  itemsBackedUp:
+                    type: integer
+                  totalItems:
+                    type: integer
+                type: object
+              queuePosition:
+                type: integer
+              startTimestamp:
+                format: date-time
+                nullable: true
+                type: string
+              validationErrors:
+                items:
+                  type: string
+                nullable: true
+                type: array
+              version:
+                type: integer
+              volumeSnapshotsAttempted:
+                type: integer
+              volumeSnapshotsCompleted:
+                type: integer
+              warnings:
+                type: integer
+            type: object
+        type: object
+    served: true
+    storage: true

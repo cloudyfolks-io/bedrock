@@ -1,0 +1,104 @@
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  annotations:
+    controller-gen.kubebuilder.io/version: v0.20.1
+    helm.sh/resource-policy: keep
+  name: ovn-snat-rules.fabric.cloudyfolks.io
+spec:
+  group: fabric.cloudyfolks.io
+  names:
+    kind: OvnSnatRule
+    listKind: OvnSnatRuleList
+    plural: ovn-snat-rules
+    shortNames:
+    - osnat
+    singular: ovn-snat-rule
+  scope: Cluster
+  versions:
+  - additionalPrinterColumns:
+    - jsonPath: .status.vpc
+      name: Vpc
+      type: string
+    - jsonPath: .status.v4Eip
+      name: V4Eip
+      type: string
+    - jsonPath: .status.v6Eip
+      name: V6Eip
+      type: string
+    - jsonPath: .status.v4IpCidr
+      name: V4IpCidr
+      type: string
+    - jsonPath: .status.v6IpCidr
+      name: V6IpCidr
+      type: string
+    - jsonPath: .status.ready
+      name: Ready
+      type: boolean
+    name: v1
+    schema:
+      openAPIV3Schema:
+        properties:
+          apiVersion:
+            type: string
+          kind:
+            type: string
+          metadata:
+            type: object
+          spec:
+            properties:
+              ipName:
+                type: string
+              ovnEip:
+                type: string
+              v4IpCidr:
+                type: string
+              v6IpCidr:
+                type: string
+              vpc:
+                type: string
+              vpcSubnet:
+                type: string
+            type: object
+          status:
+            properties:
+              conditions:
+                items:
+                  properties:
+                    lastTransitionTime:
+                      format: date-time
+                      type: string
+                    lastUpdateTime:
+                      format: date-time
+                      type: string
+                    message:
+                      type: string
+                    observedGeneration:
+                      format: int64
+                      type: integer
+                    reason:
+                      type: string
+                    status:
+                      type: string
+                    type:
+                      type: string
+                  type: object
+                type: array
+              ready:
+                type: boolean
+              v4Eip:
+                type: string
+              v4IpCidr:
+                type: string
+              v6Eip:
+                type: string
+              v6IpCidr:
+                type: string
+              vpc:
+                type: string
+            type: object
+        type: object
+    served: true
+    storage: true
+    subresources:
+      status: {}

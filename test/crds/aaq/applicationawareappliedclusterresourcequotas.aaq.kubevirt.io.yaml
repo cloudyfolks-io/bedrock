@@ -1,0 +1,167 @@
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  annotations:
+    controller-gen.kubebuilder.io/version: v0.16.3
+  name: applicationawareappliedclusterresourcequotas.aaq.kubevirt.io
+spec:
+  group: aaq.kubevirt.io
+  names:
+    kind: ApplicationAwareAppliedClusterResourceQuota
+    listKind: ApplicationAwareAppliedClusterResourceQuotaList
+    plural: applicationawareappliedclusterresourcequotas
+    shortNames:
+    - aacrq
+    - aacrqs
+    singular: applicationawareappliedclusterresourcequota
+  scope: Namespaced
+  versions:
+  - name: v1alpha1
+    schema:
+      openAPIV3Schema:
+        properties:
+          apiVersion:
+            type: string
+          kind:
+            type: string
+          metadata:
+            type: object
+          spec:
+            properties:
+              quota:
+                properties:
+                  hard:
+                    additionalProperties:
+                      anyOf:
+                      - type: integer
+                      - type: string
+                      pattern: ^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$
+                      x-kubernetes-int-or-string: true
+                    type: object
+                  scopeSelector:
+                    properties:
+                      matchExpressions:
+                        items:
+                          properties:
+                            operator:
+                              type: string
+                            scopeName:
+                              type: string
+                            values:
+                              items:
+                                type: string
+                              type: array
+                              x-kubernetes-list-type: atomic
+                          required:
+                          - operator
+                          - scopeName
+                          type: object
+                        type: array
+                        x-kubernetes-list-type: atomic
+                    type: object
+                    x-kubernetes-map-type: atomic
+                  scopes:
+                    items:
+                      type: string
+                    type: array
+                    x-kubernetes-list-type: atomic
+                type: object
+              selector:
+                properties:
+                  annotations:
+                    additionalProperties:
+                      type: string
+                    nullable: true
+                    type: object
+                  labels:
+                    nullable: true
+                    properties:
+                      matchExpressions:
+                        items:
+                          properties:
+                            key:
+                              type: string
+                            operator:
+                              type: string
+                            values:
+                              items:
+                                type: string
+                              type: array
+                              x-kubernetes-list-type: atomic
+                          required:
+                          - key
+                          - operator
+                          type: object
+                        type: array
+                        x-kubernetes-list-type: atomic
+                      matchLabels:
+                        additionalProperties:
+                          type: string
+                        type: object
+                    type: object
+                    x-kubernetes-map-type: atomic
+                type: object
+            required:
+            - quota
+            - selector
+            type: object
+          status:
+            properties:
+              namespaces:
+                items:
+                  properties:
+                    namespace:
+                      type: string
+                    status:
+                      properties:
+                        hard:
+                          additionalProperties:
+                            anyOf:
+                            - type: integer
+                            - type: string
+                            pattern: ^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$
+                            x-kubernetes-int-or-string: true
+                          type: object
+                        used:
+                          additionalProperties:
+                            anyOf:
+                            - type: integer
+                            - type: string
+                            pattern: ^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$
+                            x-kubernetes-int-or-string: true
+                          type: object
+                      type: object
+                  required:
+                  - namespace
+                  - status
+                  type: object
+                nullable: true
+                type: array
+              total:
+                properties:
+                  hard:
+                    additionalProperties:
+                      anyOf:
+                      - type: integer
+                      - type: string
+                      pattern: ^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$
+                      x-kubernetes-int-or-string: true
+                    type: object
+                  used:
+                    additionalProperties:
+                      anyOf:
+                      - type: integer
+                      - type: string
+                      pattern: ^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$
+                      x-kubernetes-int-or-string: true
+                    type: object
+                type: object
+            required:
+            - total
+            type: object
+        required:
+        - metadata
+        - spec
+        type: object
+    served: true
+    storage: true
