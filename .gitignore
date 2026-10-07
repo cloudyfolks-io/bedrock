@@ -4,6 +4,8 @@
 /ui/dist/
 /internal/authn/server/ui/dist/*
 !/internal/authn/server/ui/dist/.keep
+/internal/proxy/ui/dist/*
+!/internal/proxy/ui/dist/.keep
 *.test
 coverage.out
 /.superpowers/
