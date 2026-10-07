@@ -121,7 +121,7 @@ jobs:
       - run: make bundle VERSION=dev IMAGE=localhost:5000/bedrock:dev PIN_DIGESTS=1
       - run: docker rm -f registry
       - run: CGO_ENABLED=0 go test -c -tags e2e -o dist/e2e-authn-amd64.test ./test/e2e/authn
-      - run: hack/e2e-authn-images.sh
+      - run: make crane && CRANE=$(go env GOPATH)/bin/crane hack/e2e-authn-images.sh
       - run: sudo -E env "PATH=$PATH" KUBECONFIG=/var/lib/k0s/pki/admin.conf BUNDLE=dist/bedrock-dev-bundle-amd64.tar.zst IMAGE=localhost:5000/bedrock:dev hack/e2e-init.sh
       - run: sudo -E env "PATH=$PATH" BEDROCK_BIN=dist/bedrock-dev-linux-amd64 E2E_TEST=dist/e2e-authn-amd64.test hack/e2e-authn.sh
   e2e-upgrade:

@@ -70,8 +70,9 @@ bundle: build release
 e2e-bundle: bundle
 	BUNDLE=dist/bedrock-$(VERSION)-bundle-$(BUNDLE_ARCH).tar.zst hack/e2e-init.sh
 
-e2e-authn: bundle
+e2e-authn: bundle crane
 	CGO_ENABLED=0 $(GO) test -c -tags e2e -o dist/e2e-authn.test ./test/e2e/authn
+	CRANE=$(CRANE) hack/e2e-authn-images.sh
 	BUNDLE=dist/bedrock-$(VERSION)-bundle-$(BUNDLE_ARCH).tar.zst hack/e2e-init.sh
 	E2E_TEST=dist/e2e-authn.test hack/e2e-authn.sh
 
