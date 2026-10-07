@@ -86,6 +86,8 @@ rules:
 - apiGroups:
   - bedrock.cloudyfolks.io
   resources:
+  - addons
+  - addons/status
   - apitokens
   - apitokens/status
   - authcodes

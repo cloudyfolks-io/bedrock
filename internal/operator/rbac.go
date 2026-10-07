@@ -98,6 +98,7 @@ func fixedRules() []rbacv1.PolicyRule {
 
 func bedrockResources() []string {
 	return []string{
+		"addons", "addons/status",
 		"apitokens", "apitokens/status",
 		"authcodes", "authcodes/status",
 		"authrequests", "authrequests/status",
