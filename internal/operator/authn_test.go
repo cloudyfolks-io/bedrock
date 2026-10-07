@@ -243,12 +243,16 @@ func TestAuthnAddonFollowsPlatformHost(t *testing.T) {
 	if redirects[0] != "https://console.new.example/oauth/callback" {
 		t.Fatalf("console redirect %v", redirects)
 	}
-	sslip, err := RenderAuthn(authnInput("", "SelfSigned"))
+}
+
+func TestAuthnAddonDegradesWithoutHost(t *testing.T) {
+	out, err := RenderAuthn(authnInput("", "SelfSigned"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if authentication, _ := renderedAuthnFiles(t, sslip); !strings.Contains(authentication, "https://sso.10-0-0-250.sslip.io") {
-		t.Fatalf("an empty platform.host falls back to the VIP host:\n%s", authentication)
+	want := `platform.host is not set; set it with: kubectl patch setting platform.host --type merge -p '{"spec":{"value":"<domain>"}}'`
+	if out.SkipReason != "PlatformHostNotSet" || out.SkipMessage != want || len(out.Objects) != 0 || len(out.Probes) != 0 {
+		t.Fatalf("rendered %+v", out)
 	}
 }
 

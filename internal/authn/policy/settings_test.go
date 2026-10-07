@@ -15,12 +15,26 @@ func defaultValues() map[string]string {
 	return values
 }
 
+func valuesWithHost() map[string]string {
+	values := defaultValues()
+	values["platform.host"] = "cloud.example.com"
+	return values
+}
+
+func TestParseSettingsRefusesWithoutHost(t *testing.T) {
+	for _, input := range []map[string]string{defaultValues(), {}, {"platform.host": ""}} {
+		if _, err := ParseSettings(input); err == nil || err.Error() != "platform.host is not set" {
+			t.Fatalf("ParseSettings = %v", err)
+		}
+	}
+}
+
 func TestParseSettingsDefaults(t *testing.T) {
-	got, err := ParseSettings(defaultValues(), "10.0.0.250")
+	got, err := ParseSettings(valuesWithHost())
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := Settings{RequireSecondFactor: false, SessionTTL: 12 * time.Hour, RefreshTTL: 720 * time.Hour, LockoutThreshold: 5, Host: "10-0-0-250.sslip.io", TLSMode: "SelfSigned"}
+	want := Settings{RequireSecondFactor: false, SessionTTL: 12 * time.Hour, RefreshTTL: 720 * time.Hour, LockoutThreshold: 5, Host: "cloud.example.com", TLSMode: "SelfSigned"}
 	if got != want {
 		t.Fatalf("ParseSettings defaults = %+v, want %+v", got, want)
 	}
@@ -34,7 +48,7 @@ func TestParseSettingsOverrides(t *testing.T) {
 	values["authn.lockout-threshold"] = "3"
 	values["platform.host"] = "sso.example.com"
 	values["platform.tls-mode"] = "Custom"
-	got, err := ParseSettings(values, "10.0.0.250")
+	got, err := ParseSettings(values)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -45,25 +59,24 @@ func TestParseSettingsOverrides(t *testing.T) {
 }
 
 func TestIssuer(t *testing.T) {
-	if got := Issuer(Settings{Host: "10-0-0-250.sslip.io"}); got != "https://sso.10-0-0-250.sslip.io" {
-		t.Fatalf("Issuer = %q", got)
-	}
 	if got := Issuer(Settings{Host: "cloud.example.com"}); got != "https://sso.cloud.example.com" {
 		t.Fatalf("Issuer = %q", got)
 	}
 }
 
 func TestParseSettingsEmptyValuesUseDefaults(t *testing.T) {
-	values := map[string]string{}
+	values := map[string]string{"platform.host": "cloud.example.com"}
 	for key := range defaultValues() {
-		values[key] = ""
+		if key != "platform.host" {
+			values[key] = ""
+		}
 	}
-	for _, input := range []map[string]string{values, {}} {
-		got, err := ParseSettings(input, "10.0.0.250")
+	for _, input := range []map[string]string{values, {"platform.host": "cloud.example.com"}} {
+		got, err := ParseSettings(input)
 		if err != nil {
 			t.Fatal(err)
 		}
-		want := Settings{RequireSecondFactor: false, SessionTTL: 12 * time.Hour, RefreshTTL: 720 * time.Hour, LockoutThreshold: 5, Host: "10-0-0-250.sslip.io", TLSMode: "SelfSigned"}
+		want := Settings{RequireSecondFactor: false, SessionTTL: 12 * time.Hour, RefreshTTL: 720 * time.Hour, LockoutThreshold: 5, Host: "cloud.example.com", TLSMode: "SelfSigned"}
 		if got != want {
 			t.Fatalf("ParseSettings empty values = %+v, want %+v", got, want)
 		}

@@ -199,8 +199,9 @@ func TestIssuerFollowsPlatformHost(t *testing.T) {
 		t.Fatalf("moved discovery %v", moved)
 	}
 	setSetting(t, c, "platform.host", "")
-	if issuer := discoveryOf(t, server, "sso.10-0-0-10.sslip.io")["issuer"]; issuer != "https://sso.10-0-0-10.sslip.io" {
-		t.Fatalf("an empty platform.host follows the VIP: %v", issuer)
+	unset := request(t, server.Client(), server, http.MethodGet, "sso.other.test", "/.well-known/openid-configuration", nil, nil)
+	if unset.StatusCode == http.StatusOK {
+		t.Fatalf("an empty platform.host must not serve an issuer: %d", unset.StatusCode)
 	}
 }
 

@@ -35,7 +35,10 @@ func DefaultAddons() []Addon {
 }
 
 func RenderPlatform(in AddonInput) (Rendered, error) {
-	host := settings.PlatformHost(in.Cluster.Spec.API.VIP, in.Settings["platform.host"])
+	host := in.Settings["platform.host"]
+	if host == "" {
+		return platformHostMissing(), nil
+	}
 	mode := in.Settings["platform.tls-mode"]
 	if mode == "" {
 		mode = "SelfSigned"
@@ -65,6 +68,10 @@ func RenderPlatform(in AddonInput) (Rendered, error) {
 		return Rendered{Objects: append(objects, secret), Probes: []Probe{probe}}, nil
 	}
 	return Rendered{}, fmt.Errorf("platform.tls-mode %q is not supported", mode)
+}
+
+func platformHostMissing() Rendered {
+	return Rendered{SkipReason: "PlatformHostNotSet", SkipMessage: "platform.host is not set; set it with: " + settings.PlatformHostPatchCommand}
 }
 
 func clusterIssuer(name string, spec map[string]any) *unstructured.Unstructured {

@@ -12,7 +12,6 @@ import (
 	"github.com/cloudyfolks-io/bedrock/internal/authn/apiserver"
 	"github.com/cloudyfolks-io/bedrock/internal/config"
 	"github.com/cloudyfolks-io/bedrock/internal/release"
-	"github.com/cloudyfolks-io/bedrock/internal/settings"
 )
 
 const (
@@ -36,6 +35,9 @@ func RenderAuthn(in AddonInput) (Rendered, error) {
 	if !in.AuthnInstalled {
 		return Rendered{SkipReason: "AuthnNotInstalled", SkipMessage: fmt.Sprintf("deployment %s/%s not found", release.SystemNamespace, authnName)}, nil
 	}
+	if in.Settings["platform.host"] == "" {
+		return platformHostMissing(), nil
+	}
 	if in.WebhookToken == "" {
 		return Rendered{SkipReason: "WaitingForWebhookToken", SkipMessage: fmt.Sprintf("secret %s/%s not found", release.SystemNamespace, apiserver.TokenSecretName)}, nil
 	}
@@ -50,7 +52,7 @@ func RenderAuthn(in AddonInput) (Rendered, error) {
 	if err != nil {
 		return Rendered{}, err
 	}
-	host := settings.PlatformHost(in.Cluster.Spec.API.VIP, in.Settings["platform.host"])
+	host := in.Settings["platform.host"]
 	files := apiserver.Inputs{Host: host, CA: ca, Bearer: in.WebhookToken}
 	authentication, err := apiserver.AuthenticationConfig(files)
 	if err != nil {

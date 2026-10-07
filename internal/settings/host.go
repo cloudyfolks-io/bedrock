@@ -1,10 +1,3 @@
 package settings
 
-import "strings"
-
-func PlatformHost(vip, host string) string {
-	if host != "" {
-		return host
-	}
-	return strings.ReplaceAll(vip, ".", "-") + ".sslip.io"
-}
+const PlatformHostPatchCommand = `kubectl patch setting platform.host --type merge -p '{"spec":{"value":"<domain>"}}'`

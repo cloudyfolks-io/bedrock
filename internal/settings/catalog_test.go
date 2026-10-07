@@ -117,11 +117,9 @@ func TestDurationValidator(t *testing.T) {
 	}
 }
 
-func TestPlatformHostFallsBackToVIP(t *testing.T) {
-	if got := PlatformHost("10.0.0.250", ""); got != "10-0-0-250.sslip.io" {
-		t.Fatalf("PlatformHost = %q", got)
-	}
-	if got := PlatformHost("10.0.0.250", "cloud.example.com"); got != "cloud.example.com" {
-		t.Fatalf("PlatformHost = %q", got)
+func TestPlatformHostHasNoDefault(t *testing.T) {
+	def, ok := Lookup("platform.host")
+	if !ok || def.Default != "" || def.Description != "Public domain of the platform. Required." {
+		t.Fatalf("platform.host = %+v", def)
 	}
 }

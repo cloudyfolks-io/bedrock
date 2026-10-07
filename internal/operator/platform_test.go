@@ -15,7 +15,7 @@ import (
 )
 
 func platformInput(values map[string]string) AddonInput {
-	settings := map[string]string{"platform.host": "", "platform.tls-mode": "SelfSigned", "letsencrypt.email": "", "letsencrypt.solver": "http01", "platform.custom-tls": ""}
+	settings := map[string]string{"platform.host": "cloud.example.com", "platform.tls-mode": "SelfSigned", "letsencrypt.email": "", "letsencrypt.solver": "http01", "platform.custom-tls": ""}
 	for k, v := range values {
 		settings[k] = v
 	}
@@ -48,7 +48,7 @@ func TestRenderPlatformSelfSigned(t *testing.T) {
 	secret, _, _ := unstructured.NestedString(cert.Object, "spec", "secretName")
 	issuerName, _, _ := unstructured.NestedString(cert.Object, "spec", "issuerRef", "name")
 	issuerKind, _, _ := unstructured.NestedString(cert.Object, "spec", "issuerRef", "kind")
-	want := []string{"10-0-0-250.sslip.io", "console.10-0-0-250.sslip.io", "sso.10-0-0-250.sslip.io", "api.10-0-0-250.sslip.io", "upload.10-0-0-250.sslip.io"}
+	want := []string{"cloud.example.com", "console.cloud.example.com", "sso.cloud.example.com", "api.cloud.example.com", "upload.cloud.example.com"}
 	if len(names) != 5 || secret != "platform-tls" || issuerName != "bedrock-ca" || issuerKind != "ClusterIssuer" {
 		t.Fatalf("certificate spec %+v", cert.Object["spec"])
 	}
@@ -192,6 +192,20 @@ func TestRenderPlatformWaitsForTheCA(t *testing.T) {
 	out, err = RenderPlatform(in)
 	if err != nil || out.SkipReason != "" {
 		t.Fatalf("LetsEncrypt does not need the Bedrock CA: %+v %v", out, err)
+	}
+}
+
+func TestRenderPlatformDegradesWithoutHost(t *testing.T) {
+	for _, mode := range []string{"SelfSigned", "LetsEncrypt", "Custom"} {
+		in := platformInput(map[string]string{"platform.host": "", "platform.tls-mode": mode, "letsencrypt.email": "ops@example.com", "platform.custom-tls": "my-tls"})
+		out, err := RenderPlatform(in)
+		if err != nil {
+			t.Fatal(err)
+		}
+		want := `platform.host is not set; set it with: kubectl patch setting platform.host --type merge -p '{"spec":{"value":"<domain>"}}'`
+		if out.SkipReason != "PlatformHostNotSet" || out.SkipMessage != want || len(out.Objects) != 0 || len(out.Probes) != 0 {
+			t.Fatalf("%s rendered %+v", mode, out)
+		}
 	}
 }
 

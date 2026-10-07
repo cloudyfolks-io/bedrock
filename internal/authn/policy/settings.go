@@ -2,6 +2,7 @@ package policy
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strconv"
 	"time"
@@ -21,7 +22,11 @@ type Settings struct {
 	TLSMode             string
 }
 
-func ParseSettings(values map[string]string, vip string) (Settings, error) {
+func ParseSettings(values map[string]string) (Settings, error) {
+	host := settingValue(values, "platform.host")
+	if host == "" {
+		return Settings{}, errors.New("platform.host is not set")
+	}
 	requireSecondFactor, err := strconv.ParseBool(settingValue(values, "authn.require-second-factor"))
 	if err != nil {
 		return Settings{}, fmt.Errorf("authn.require-second-factor: %w", err)
@@ -43,7 +48,7 @@ func ParseSettings(values map[string]string, vip string) (Settings, error) {
 		SessionTTL:          sessionTTL,
 		RefreshTTL:          refreshTTL,
 		LockoutThreshold:    lockoutThreshold,
-		Host:                settings.PlatformHost(vip, settingValue(values, "platform.host")),
+		Host:                host,
 		TLSMode:             settingValue(values, "platform.tls-mode"),
 	}, nil
 }
@@ -65,11 +70,7 @@ func ReadSettings(ctx context.Context, c client.Reader) (Settings, error) {
 	for _, setting := range list.Items {
 		values[setting.Name] = setting.Spec.Value
 	}
-	var cluster v1alpha1.Cluster
-	if err := c.Get(ctx, client.ObjectKey{Name: v1alpha1.ClusterName}, &cluster); err != nil {
-		return Settings{}, err
-	}
-	return ParseSettings(values, cluster.Spec.API.VIP)
+	return ParseSettings(values)
 }
 
 func Issuer(s Settings) string {
