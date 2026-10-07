@@ -6,6 +6,7 @@ import (
 	"net/netip"
 	"os"
 	"path/filepath"
+	"regexp"
 	"slices"
 	"strconv"
 
@@ -20,6 +21,8 @@ const (
 	defaultServiceCIDR = "10.96.0.0/12"
 	DefaultJoinCIDR    = "100.64.0.0/16"
 )
+
+var dnsName = regexp.MustCompile(`^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?(\.[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?)+$`)
 
 func Load(path string) (v1alpha1.ClusterConfig, error) {
 	raw, err := os.ReadFile(path)
@@ -97,6 +100,9 @@ func Validate(cfg v1alpha1.ClusterConfig) error {
 	if !slices.Contains([]string{"arp", "bgp"}, s.API.VIPMode) {
 		return fmt.Errorf("spec.api.vipMode must be arp or bgp")
 	}
+	if err := validatePlatformHost(s.Platform.Host); err != nil {
+		return err
+	}
 	if s.Network.ManagementInterface == "" {
 		return fmt.Errorf("spec.network.managementInterface is required")
 	}
@@ -135,6 +141,16 @@ func Validate(cfg v1alpha1.ClusterConfig) error {
 	}
 	if !slices.Contains(s.Roles, v1alpha1.RoleCephOSD) {
 		return fmt.Errorf("the first node must carry the ceph-osd role")
+	}
+	return nil
+}
+
+func validatePlatformHost(host string) error {
+	if host == "" {
+		return fmt.Errorf("spec.platform.host is required: set the domain of the platform, for example cloud.example.com")
+	}
+	if _, err := netip.ParseAddr(host); err == nil || len(host) > 253 || !dnsName.MatchString(host) {
+		return fmt.Errorf("spec.platform.host %q is not a valid DNS name", host)
 	}
 	return nil
 }

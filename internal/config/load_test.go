@@ -3,6 +3,7 @@ package config
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"sigs.k8s.io/yaml"
@@ -81,7 +82,7 @@ func TestToObjects(t *testing.T) {
 		t.Fatalf("host %+v", host.Spec)
 	}
 	settings := ToSettings(cfg)
-	want := map[string]string{"platform.tls-mode": "SelfSigned", "storage.replicas": "1", "kata.enabled": "true", "platform.host": ""}
+	want := map[string]string{"platform.tls-mode": "SelfSigned", "storage.replicas": "1", "kata.enabled": "true", "platform.host": "cloud.example.com"}
 	for _, s := range settings {
 		if v, ok := want[s.Name]; ok && s.Spec.Value != v {
 			t.Fatalf("setting %s = %q, want %q", s.Name, s.Spec.Value, v)
@@ -156,4 +157,48 @@ func writeConfigWithBundle(t *testing.T, base []byte, dir, bundle string) string
 		t.Fatal(err)
 	}
 	return path
+}
+
+func TestValidatePlatformHost(t *testing.T) {
+	cases := []struct {
+		name string
+		host string
+		want string
+	}{
+		{"empty", "", "spec.platform.host is required: set the domain of the platform, for example cloud.example.com"},
+		{"one label", "localhost", `spec.platform.host "localhost" is not a valid DNS name`},
+		{"ip address", "192.168.5.250", `spec.platform.host "192.168.5.250" is not a valid DNS name`},
+		{"upper case", "UPPER.example.com", `spec.platform.host "UPPER.example.com" is not a valid DNS name`},
+		{"leading dash", "-a.example.com", `spec.platform.host "-a.example.com" is not a valid DNS name`},
+		{"trailing dash", "a-.example.com", `spec.platform.host "a-.example.com" is not a valid DNS name`},
+		{"empty label", "a..example.com", `spec.platform.host "a..example.com" is not a valid DNS name`},
+		{"trailing dot", "example.com.", `spec.platform.host "example.com." is not a valid DNS name`},
+		{"long label", strings.Repeat("a", 64) + ".example.com", `spec.platform.host "` + strings.Repeat("a", 64) + `.example.com" is not a valid DNS name`},
+		{"long name", strings.Repeat("a.", 127) + "aa", `spec.platform.host "` + strings.Repeat("a.", 127) + `aa" is not a valid DNS name`},
+		{"underscore", "a_b.example.com", `spec.platform.host "a_b.example.com" is not a valid DNS name`},
+		{"valid", "cloud.example.com", ""},
+		{"reserved tld", "e2e.bedrock.test", ""},
+		{"short", "a-b.c", ""},
+		{"longest label", strings.Repeat("a", 63) + ".example.com", ""},
+		{"longest name", strings.Repeat("a.", 125) + "aaa", ""},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			cfg, err := Load(filepath.Join("testdata", "single-node.yaml"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			cfg.Spec.Platform.Host = tc.host
+			err = Validate(cfg)
+			if tc.want == "" {
+				if err != nil {
+					t.Fatalf("Validate = %v", err)
+				}
+				return
+			}
+			if err == nil || err.Error() != tc.want {
+				t.Fatalf("Validate = %v, want %s", err, tc.want)
+			}
+		})
+	}
 }

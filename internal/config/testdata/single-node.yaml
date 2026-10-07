@@ -6,6 +6,8 @@ spec:
   version: v0.1.0
   api:
     vip: 10.0.10.10
+  platform:
+    host: cloud.example.com
   network:
     managementInterface: bond0
     fabric:

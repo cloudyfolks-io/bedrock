@@ -82,7 +82,7 @@ func duration(min time.Duration) func(string) error {
 
 func Catalog() []Definition {
 	return []Definition{
-		{"platform.host", "", "Public host name of the platform. Empty means the VIP under sslip.io.", free},
+		{"platform.host", "", "Public domain of the platform. Required.", free},
 		{"platform.tls-mode", "SelfSigned", "Certificate source for the platform endpoints.", oneOf("SelfSigned", "LetsEncrypt", "Custom")},
 		{"platform.additional-ca", "", "PEM bundle of extra CAs trusted for outbound connections.", free},
 		{"platform.custom-tls", "", "Secret name in bedrock-system holding the custom certificate.", free},

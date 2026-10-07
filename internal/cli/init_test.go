@@ -42,6 +42,8 @@ spec:
   version: v0.1.0-test
   api:
     vip: 10.0.10.10
+  platform:
+    host: cloud.example.com
   network:
     managementInterface: bond0.10
   storage:
@@ -57,6 +59,8 @@ spec:
   version: v0.1.0-test
   api:
     vip: 10.0.10.10
+  platform:
+    host: cloud.example.com
   network:
     managementInterface: bond0.10
   storage:
@@ -724,7 +728,7 @@ func TestInitWritesAuthnFilesBeforeK0s(t *testing.T) {
 		t.Fatal(err)
 	}
 	issuer := doc["jwt"].([]any)[0].(map[string]any)["issuer"].(map[string]any)
-	if issuer["url"] != "https://sso.10-0-10-10.sslip.io" || issuer["certificateAuthority"] != ca {
+	if issuer["url"] != "https://sso.cloud.example.com" || issuer["certificateAuthority"] != ca {
 		t.Fatalf("issuer %v", issuer)
 	}
 }
@@ -873,7 +877,7 @@ func TestInitRefusesOtherBootstrapOnARunningCluster(t *testing.T) {
 	if err := os.RemoveAll(bootstrap); err != nil {
 		t.Fatal(err)
 	}
-	if _, _, err := loadOrBootstrapAuthn(bootstrap, rand.Reader, time.Now(), "10-0-10-10.sslip.io"); err != nil {
+	if _, _, err := loadOrBootstrapAuthn(bootstrap, rand.Reader, time.Now(), "cloud.example.com"); err != nil {
 		t.Fatal(err)
 	}
 	markRunning(run)

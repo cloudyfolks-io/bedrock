@@ -33,7 +33,6 @@ import (
 	"github.com/cloudyfolks-io/bedrock/internal/preflight"
 	"github.com/cloudyfolks-io/bedrock/internal/release"
 	"github.com/cloudyfolks-io/bedrock/internal/roles"
-	"github.com/cloudyfolks-io/bedrock/internal/settings"
 	"github.com/cloudyfolks-io/bedrock/internal/ssa"
 )
 
@@ -181,7 +180,7 @@ func RunInit(ctx context.Context, args []string, deps InitDeps, stdout, stderr i
 			return fail(stderr, err)
 		}
 	}
-	authnInputs, caKey, err := loadOrBootstrapAuthn(bootstrapDir, rand.Reader, time.Now(), settings.PlatformHost(cfg.Spec.API.VIP, cfg.Spec.Platform.Host))
+	authnInputs, caKey, err := loadOrBootstrapAuthn(bootstrapDir, rand.Reader, time.Now(), cfg.Spec.Platform.Host)
 	if err != nil {
 		return fail(stderr, err)
 	}
@@ -425,7 +424,7 @@ func removeBundleDir(dir string) {
 }
 
 func writeK0sConfig(path string, cfg v1alpha1.ClusterConfig) error {
-	sans := []string{cfg.Spec.API.VIP, "api." + settings.PlatformHost(cfg.Spec.API.VIP, cfg.Spec.Platform.Host)}
+	sans := []string{cfg.Spec.API.VIP, "api." + cfg.Spec.Platform.Host}
 	raw, err := k0s.RenderConfig(k0s.Config{VIP: cfg.Spec.API.VIP, SANs: sans, PodCIDR: cfg.Spec.Network.Fabric.PodCIDR, ServiceCIDR: cfg.Spec.Network.Fabric.ServiceCIDR, APIExtraArgs: apiserver.Args()})
 	if err != nil {
 		return err

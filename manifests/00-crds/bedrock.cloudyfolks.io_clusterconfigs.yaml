@@ -119,6 +119,8 @@ spec:
                     - LetsEncrypt
                     - Custom
                     type: string
+                required:
+                - host
                 type: object
               registry:
                 properties:

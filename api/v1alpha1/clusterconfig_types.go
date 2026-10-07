@@ -5,8 +5,7 @@ import (
 )
 
 type PlatformSpec struct {
-	// +optional
-	Host string `json:"host,omitempty"`
+	Host string `json:"host"`
 	// +kubebuilder:validation:Enum=SelfSigned;LetsEncrypt;Custom
 	// +optional
 	TLSMode string `json:"tlsMode,omitempty"`
