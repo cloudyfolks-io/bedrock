@@ -21,8 +21,18 @@ spec:
 ```
 
 The domain is required. Bedrock does not choose a domain for you. The
-domain must be a valid DNS name with at least two labels. It can be
-unregistered. For example, `e2e.bedrock.test` is valid.
+domain must follow these rules:
+
+- It uses only lowercase letters, digits and hyphens, with dots between
+  the labels.
+- It has at least two labels.
+- Each label has 1 to 63 characters. A label does not start or end with
+  a hyphen.
+- It has at most 253 characters.
+- It is not an IP address.
+
+The domain does not need to be registered. For example,
+`e2e.bedrock.test` is valid.
 
 Bedrock serves these names under the domain: `sso.`, `api.`, `console.`
 and `upload.`. The domain itself is also served. Point all of them at the
