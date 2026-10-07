@@ -200,8 +200,8 @@ func TestIssuerFollowsPlatformHost(t *testing.T) {
 	}
 	setSetting(t, c, "platform.host", "")
 	unset := request(t, server.Client(), server, http.MethodGet, "sso.other.test", "/.well-known/openid-configuration", nil, nil)
-	if unset.StatusCode == http.StatusOK {
-		t.Fatalf("an empty platform.host must not serve an issuer: %d", unset.StatusCode)
+	if code := readJSON[map[string]string](t, unset, http.StatusServiceUnavailable)["error"]; code != "settings_unavailable" {
+		t.Fatalf("an empty platform.host must answer settings_unavailable: %q", code)
 	}
 }
 
