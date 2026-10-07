@@ -12,6 +12,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	"github.com/cloudyfolks-io/bedrock/api/v1alpha1"
+	"github.com/cloudyfolks-io/bedrock/internal/dnsname"
 )
 
 type Definition struct {
@@ -48,6 +49,13 @@ func intMin(minimum int) func(string) error {
 	}
 }
 
+func domainName(v string) error {
+	if v == "" || dnsname.Valid(v) {
+		return nil
+	}
+	return fmt.Errorf("value %q is not a valid DNS name", v)
+}
+
 func boolean(v string) error {
 	if v == "" {
 		return nil
@@ -82,7 +90,7 @@ func duration(min time.Duration) func(string) error {
 
 func Catalog() []Definition {
 	return []Definition{
-		{"platform.host", "", "Public domain of the platform. Required.", free},
+		{"platform.host", "", "Public domain of the platform. Required.", domainName},
 		{"platform.tls-mode", "SelfSigned", "Certificate source for the platform endpoints.", oneOf("SelfSigned", "LetsEncrypt", "Custom")},
 		{"platform.additional-ca", "", "PEM bundle of extra CAs trusted for outbound connections.", free},
 		{"platform.custom-tls", "", "Secret name in bedrock-system holding the custom certificate.", free},

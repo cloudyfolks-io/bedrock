@@ -1,6 +1,8 @@
 package settings
 
 import (
+	"fmt"
+	"strings"
 	"testing"
 	"time"
 
@@ -42,6 +44,36 @@ func TestValidateTLSMode(t *testing.T) {
 	}
 	if err := def.Validate("Plain"); err == nil {
 		t.Fatal("Plain must be invalid")
+	}
+}
+
+func TestValidatePlatformHost(t *testing.T) {
+	def, _ := Lookup("platform.host")
+	cases := []struct {
+		value string
+		valid bool
+	}{
+		{"", true},
+		{"cloud.example.com", true},
+		{"e2e.bedrock.test", true},
+		{"a-b.c", true},
+		{"localhost", false},
+		{"192.168.5.250", false},
+		{"UPPER.example.com", false},
+		{"-a.example.com", false},
+		{"a..example.com", false},
+		{"https://cloud.example.com", false},
+		{"cloud.example.com:443", false},
+		{strings.Repeat("a", 64) + ".example.com", false},
+	}
+	for _, c := range cases {
+		err := def.Validate(c.value)
+		if c.valid && err != nil {
+			t.Fatalf("%q must be valid: %v", c.value, err)
+		}
+		if !c.valid && (err == nil || err.Error() != fmt.Sprintf("value %q is not a valid DNS name", c.value)) {
+			t.Fatalf("%q: %v", c.value, err)
+		}
 	}
 }
 

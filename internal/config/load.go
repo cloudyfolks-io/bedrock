@@ -6,7 +6,6 @@ import (
 	"net/netip"
 	"os"
 	"path/filepath"
-	"regexp"
 	"slices"
 	"strconv"
 
@@ -14,6 +13,7 @@ import (
 	"sigs.k8s.io/yaml"
 
 	"github.com/cloudyfolks-io/bedrock/api/v1alpha1"
+	"github.com/cloudyfolks-io/bedrock/internal/dnsname"
 )
 
 const (
@@ -21,8 +21,6 @@ const (
 	defaultServiceCIDR = "10.96.0.0/12"
 	DefaultJoinCIDR    = "100.64.0.0/16"
 )
-
-var dnsName = regexp.MustCompile(`^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?(\.[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?)+$`)
 
 func Load(path string) (v1alpha1.ClusterConfig, error) {
 	raw, err := os.ReadFile(path)
@@ -149,7 +147,7 @@ func validatePlatformHost(host string) error {
 	if host == "" {
 		return fmt.Errorf("spec.platform.host is required: set the domain of the platform, for example cloud.example.com")
 	}
-	if _, err := netip.ParseAddr(host); err == nil || len(host) > 253 || !dnsName.MatchString(host) {
+	if !dnsname.Valid(host) {
 		return fmt.Errorf("spec.platform.host %q is not a valid DNS name", host)
 	}
 	return nil
