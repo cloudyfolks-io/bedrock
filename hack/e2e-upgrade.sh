@@ -13,6 +13,7 @@ cli_b=dist/bedrock-$VERSION_B-linux-$arch
 abort_in=${ABORT_IN:-}
 init_a=${INIT_A:-hack/e2e-init.sh}
 assert_authn=${ASSERT_AUTHN:-}
+export PLATFORM_HOST=${PLATFORM_HOST:-e2e.bedrock.test}
 workdir=$(mktemp -d)
 export KUBECONFIG=/var/lib/k0s/pki/admin.conf
 
@@ -204,7 +205,8 @@ if [ -n "$assert_authn" ]; then
   kubectl -n traefik wait --for=condition=Ready certificate/platform-tls --timeout=300s
   kubectl -n cert-manager get secret bedrock-ca -o jsonpath='{.data.ca\.crt}' | base64 -d >"$workdir/bedrock-ca.crt"
   vip=$(kubectl get cluster cluster -o jsonpath='{.spec.api.vip}')
-  platform_host=$(echo "$vip" | tr '.' '-').sslip.io
+  platform_host=$(kubectl get setting platform.host -o jsonpath='{.spec.value}')
+  test "$platform_host" = "$PLATFORM_HOST"
   printf '%s sso.%s api.%s\n' "$vip" "$platform_host" "$platform_host" >>/etc/hosts
   served=0
   for _ in $(seq 1 60); do

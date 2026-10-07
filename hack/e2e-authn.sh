@@ -36,7 +36,8 @@ trap dump EXIT
 test -f "$admin_password_file"
 test -x "$test_bin"
 vip=$(kubectl get cluster cluster -o jsonpath='{.spec.api.vip}')
-host=$(echo "$vip" | tr '.' '-').sslip.io
+host=$(kubectl get setting platform.host -o jsonpath='{.spec.value}')
+test -n "$host"
 
 k0s ctr --namespace k8s.io images import dist/cache/e2e-authn/openldap.tar
 k0s ctr --namespace k8s.io images import dist/cache/e2e-authn/dex.tar

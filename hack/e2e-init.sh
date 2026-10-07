@@ -7,6 +7,7 @@ bin=${BIN:-bin/bedrock}
 release_dir=${RELEASE_DIR:-dist/release}
 arch=${ARCH:-$(uname -m | sed 's/x86_64/amd64/;s/aarch64/arm64/')}
 emulation=${EMULATION:-true}
+platform_host=${PLATFORM_HOST:-e2e.bedrock.test}
 workdir=$(mktemp -d)
 admin_password_file=${ADMIN_PASSWORD_FILE:-/var/lib/bedrock/e2e-admin-password}
 export KUBECONFIG=/var/lib/k0s/pki/admin.conf
@@ -96,7 +97,7 @@ nodeip=$(ip -json -4 addr show dev "$iface" | python3 -c 'import json,sys; print
 vip=$(echo "$nodeip" | awk -F. '{printf "%s.%s.%s.250", $1, $2, $3}')
 if [ "$vip" = "$nodeip" ]; then vip=$(echo "$nodeip" | awk -F. '{printf "%s.%s.%s.251", $1, $2, $3}'); fi
 
-VERSION=$version VIP=$vip IFACE=$iface EMULATION=$emulation envsubst < hack/e2e/cluster.yaml.tmpl > "$workdir/cluster.yaml"
+VERSION=$version VIP=$vip IFACE=$iface EMULATION=$emulation PLATFORM_HOST=$platform_host envsubst < hack/e2e/cluster.yaml.tmpl > "$workdir/cluster.yaml"
 cat "$workdir/cluster.yaml"
 
 run_init() {
@@ -198,6 +199,7 @@ kubectl -n kube-system rollout status daemonset/kured --timeout=180s
 kubectl patch host "$node" --type=merge -p '{"spec":{"management":{"enabled":false}}}'
 kubectl get host "$(hostname | tr '[:upper:]' '[:lower:]')" -o jsonpath='{.spec.roles}' | grep -q ceph-osd
 kubectl get setting storage.replicas -o jsonpath='{.spec.value}' | grep -qx 1
+kubectl get setting platform.host -o jsonpath='{.spec.value}' | grep -qx "$platform_host"
 token=$("$bin" token create --roles workload --expiry 10m)
 test -n "$token"
 echo "$token" | python3 -c 'import base64,json,sys; t=sys.stdin.read().strip(); t+="="*(-len(t)%4); json.loads(base64.urlsafe_b64decode(t))["k0sToken"]'
