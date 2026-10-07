@@ -93,6 +93,8 @@ rules:
   - authrequests
   - authrequests/status
   - clusterconfigs
+  - clusterimages
+  - clusterimages/status
   - clusters
   - clusters/status
   - credentials
@@ -107,6 +109,8 @@ rules:
   - hosts/status
   - identityproviders
   - identityproviders/status
+  - images
+  - images/status
   - networks
   - networks/status
   - nodeupgrades
