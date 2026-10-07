@@ -11,6 +11,17 @@ Status: pre-release. Follow the milestones in the GitHub project.
     make build
     make test
 
+## Platform domain
+
+`bedrock init` needs a platform domain in `cluster.yaml`:
+
+    spec:
+      platform:
+        host: cloud.example.com
+
+The domain is required. It does not need to be registered. See
+`docs/authn.md` for the names Bedrock serves under it.
+
 ## Identity
 
 Read `docs/authn.md` for users, groups, LDAP and OIDC, API tokens,

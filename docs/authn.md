@@ -5,6 +5,30 @@ Sign in once at `https://sso.<platform.host>/login/`. Use the token
 from sign-in with `kubectl`. Other Dadehat services also accept this
 token.
 
+## Platform domain
+
+Every cluster needs a platform domain. Set it in `cluster.yaml` before
+`bedrock init`:
+
+```yaml
+apiVersion: bedrock.cloudyfolks.io/v1alpha1
+kind: ClusterConfig
+metadata:
+  name: lab
+spec:
+  platform:
+    host: cloud.example.com
+```
+
+The domain is required. Bedrock does not choose a domain for you. The
+domain must be a valid DNS name with at least two labels. It can be
+unregistered. For example, `e2e.bedrock.test` is valid.
+
+Bedrock serves these names under the domain: `sso.`, `api.`, `console.`
+and `upload.`. The domain itself is also served. Point all of them at the
+cluster VIP. Use your own DNS, or add lines to `/etc/hosts` on each
+client.
+
 ## Users and groups
 
 A `User` object holds a username, a display name and an email. It also
@@ -316,6 +340,18 @@ changes nothing. To get a new password, use
 `bedrock authn reset-password admin`.
 
 ## Changing `platform.host`
+
+Change the value with this command:
+
+```sh
+kubectl patch setting platform.host --type merge -p '{"spec":{"value":"<domain>"}}'
+```
+
+A cluster that was installed before the domain became required can have
+an empty `platform.host`. For such a cluster, the platform and authn
+components report `PlatformHostNotSet` and render nothing. Run the
+command above to fix it. `bedrock upgrade` refuses to start until
+`platform.host` is set.
 
 kube-apiserver reloads `authentication.yaml` on every change, so a new
 `platform.host` value takes effect for token verification at once.
