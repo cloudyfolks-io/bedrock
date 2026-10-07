@@ -210,7 +210,7 @@ func (s *Store) rotate(ctx context.Context, previous, next v1alpha1.RefreshToken
 	used.Status.UsedAt = &metav1.Time{Time: now}
 	err := s.client.Status().Update(ctx, used, authnOwner())
 	if apierrors.IsConflict(err) || apierrors.IsNotFound(err) {
-		return reused(s.revokeFamily(ctx, previous.Spec.Family))
+		return reused(s.revokeFamily(ctx, previous))
 	}
 	if err != nil {
 		return err
@@ -222,7 +222,7 @@ func (s *Store) rotate(ctx context.Context, previous, next v1alpha1.RefreshToken
 		if !apierrors.IsNotFound(err) {
 			return err
 		}
-		return reused(client.IgnoreNotFound(s.client.Delete(ctx, &next)), s.revokeFamily(ctx, previous.Spec.Family))
+		return reused(client.IgnoreNotFound(s.client.Delete(ctx, &next)), s.revokeFamily(ctx, previous))
 	}
 	return nil
 }
@@ -231,8 +231,12 @@ func reused(errs ...error) error {
 	return oidc.ErrInvalidGrant().WithDescription("refresh token was already used").WithParent(errors.Join(append([]error{errRefreshReused}, errs...)...))
 }
 
-func (s *Store) revokeFamily(ctx context.Context, family string) error {
-	selector := []client.DeleteAllOfOption{client.InNamespace(release.SystemNamespace), client.MatchingLabels{v1alpha1.LabelFamily: family}}
+func (s *Store) revokeFamily(ctx context.Context, trigger v1alpha1.RefreshToken) error {
+	if err := client.IgnoreNotFound(s.client.Delete(ctx, &trigger)); err != nil {
+		slog.ErrorContext(ctx, "refresh token family revocation failed", "error", err)
+		return err
+	}
+	selector := []client.DeleteAllOfOption{client.InNamespace(release.SystemNamespace), client.MatchingLabels{v1alpha1.LabelFamily: trigger.Spec.Family}}
 	if err := s.client.DeleteAllOf(ctx, &v1alpha1.RefreshToken{}, selector...); err != nil {
 		slog.ErrorContext(ctx, "refresh token family revocation failed", "error", err)
 		return err
@@ -257,7 +261,7 @@ func (s *Store) TokenRequestByRefreshToken(ctx context.Context, token string) (o
 		return nil, err
 	}
 	if stored.Status.UsedAt != nil {
-		return nil, errors.Join(errRefreshReused, s.revokeFamily(ctx, stored.Spec.Family))
+		return nil, errors.Join(errRefreshReused, s.revokeFamily(ctx, stored))
 	}
 	if _, err := s.Subject(ctx, stored.Spec.UserRef); err != nil {
 		return nil, err
@@ -292,7 +296,7 @@ func (s *Store) RevokeToken(ctx context.Context, tokenOrTokenID, userID, clientI
 	if stored.Spec.ClientID != clientID || (userID != "" && stored.Spec.UserRef != userID) {
 		return oidc.ErrInvalidClient().WithDescription("the token was issued to another client")
 	}
-	if err := s.revokeFamily(ctx, stored.Spec.Family); err != nil {
+	if err := s.revokeFamily(ctx, stored); err != nil {
 		return oidc.ErrServerError().WithParent(err)
 	}
 	return nil

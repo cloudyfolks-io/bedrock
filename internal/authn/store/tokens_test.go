@@ -241,6 +241,47 @@ func TestRefreshRotationRejectsAStaleRead(t *testing.T) {
 	}
 }
 
+type deleteOrderClient struct {
+	client.Client
+	calls []string
+}
+
+func (d *deleteOrderClient) Delete(ctx context.Context, obj client.Object, opts ...client.DeleteOption) error {
+	d.calls = append(d.calls, "delete "+obj.GetName())
+	return d.Client.Delete(ctx, obj, opts...)
+}
+
+func (d *deleteOrderClient) DeleteAllOf(ctx context.Context, obj client.Object, opts ...client.DeleteAllOfOption) error {
+	d.calls = append(d.calls, "delete family")
+	return d.Client.DeleteAllOf(ctx, obj, opts...)
+}
+
+func TestFamilyRevocationDeletesTheReusedTokenFirst(t *testing.T) {
+	c := startTestEnv(t)
+	ctx := context.Background()
+	create(t, c, testUser("alice"))
+	s := newTestStore(c, testNow, testSettings(), nil)
+	token := issue(t, s, loginRequest("alice", "bedrock-cli"))
+	if _, err := refresh(ctx, s, token); err != nil {
+		t.Fatal(err)
+	}
+	calls := &deleteOrderClient{Client: c}
+	recorded := New(Config{
+		Client:   calls,
+		Reader:   c,
+		Random:   rand.Reader,
+		Clock:    func() time.Time { return testNow },
+		Settings: func(context.Context) (policy.Settings, error) { return testSettings(), nil },
+	})
+	if _, err := recorded.TokenRequestByRefreshToken(ctx, token); !errors.Is(err, errRefreshReused) {
+		t.Fatalf("a used refresh token must fail as reused, got %v", err)
+	}
+	want := []string{"delete " + secret.SHA256Hex(token), "delete family"}
+	if !reflect.DeepEqual(calls.calls, want) {
+		t.Fatalf("revocation calls = %v, want %v", calls.calls, want)
+	}
+}
+
 type failAfterNthRefreshTokenGet struct {
 	client.Client
 	failOn int
