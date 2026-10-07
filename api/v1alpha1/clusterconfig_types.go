@@ -34,7 +34,7 @@ type FabricSpec struct {
 	ProviderNetworks []ProviderNetworkSpec `json:"providerNetworks,omitempty"`
 }
 
-type NetworkSpec struct {
+type ClusterNetworkSpec struct {
 	ManagementInterface string `json:"managementInterface"`
 	// +optional
 	StorageVlan int32 `json:"storageVlan,omitempty"`
@@ -75,9 +75,9 @@ type ClusterConfigSpec struct {
 	Version string  `json:"version"`
 	API     APISpec `json:"api"`
 	// +optional
-	Platform PlatformSpec `json:"platform,omitempty"`
-	Network  NetworkSpec  `json:"network"`
-	Storage  StorageSpec  `json:"storage"`
+	Platform PlatformSpec       `json:"platform,omitempty"`
+	Network  ClusterNetworkSpec `json:"network"`
+	Storage  StorageSpec        `json:"storage"`
 	// +optional
 	Virtualization VirtualizationSpec `json:"virtualization,omitempty"`
 	// +optional
