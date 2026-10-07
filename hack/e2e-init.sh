@@ -199,7 +199,7 @@ kubectl -n kube-system rollout status daemonset/kured --timeout=180s
 kubectl patch host "$node" --type=merge -p '{"spec":{"management":{"enabled":false}}}'
 kubectl get host "$(hostname | tr '[:upper:]' '[:lower:]')" -o jsonpath='{.spec.roles}' | grep -q ceph-osd
 kubectl get setting storage.replicas -o jsonpath='{.spec.value}' | grep -qx 1
-kubectl get setting platform.host -o jsonpath='{.spec.value}' | grep -qx "$platform_host"
+kubectl get setting platform.host -o jsonpath='{.spec.value}' | grep -qxF "$platform_host"
 token=$("$bin" token create --roles workload --expiry 10m)
 test -n "$token"
 echo "$token" | python3 -c 'import base64,json,sys; t=sys.stdin.read().strip(); t+="="*(-len(t)%4); json.loads(base64.urlsafe_b64decode(t))["k0sToken"]'
