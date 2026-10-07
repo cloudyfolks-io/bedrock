@@ -24,6 +24,7 @@ import (
 	"github.com/cloudyfolks-io/bedrock/api/v1alpha1"
 	"github.com/cloudyfolks-io/bedrock/internal/depot"
 	"github.com/cloudyfolks-io/bedrock/internal/release"
+	"github.com/cloudyfolks-io/bedrock/internal/settings"
 )
 
 const upgradeUsage = "usage: bedrock upgrade --to vX.Y.Z [--bundle FILE]... [--yes]\n       bedrock upgrade resume\n       bedrock upgrade abort [--yes]"
@@ -118,6 +119,9 @@ func RunUpgrade(ctx context.Context, o upgradeOptions, deps UpgradeDeps, stdout,
 	if running := cluster.Spec.DesiredVersion; running != cluster.Status.Version && running != o.to {
 		return fail(stderr, fmt.Errorf("an upgrade to %s is in progress: finish or abort it first", running))
 	}
+	if err := requirePlatformHost(ctx, c); err != nil {
+		return fail(stderr, err)
+	}
 	since, err := requestUpgrade(ctx, c, cluster, o, deps, stdout)
 	if err != nil {
 		return fail(stderr, err)
@@ -127,6 +131,17 @@ func RunUpgrade(ctx context.Context, o upgradeOptions, deps UpgradeDeps, stdout,
 	}
 	fmt.Fprintf(stdout, "cluster upgraded to %s\n", o.to)
 	return 0
+}
+
+func requirePlatformHost(ctx context.Context, c client.Client) error {
+	var host v1alpha1.Setting
+	if err := c.Get(ctx, client.ObjectKey{Name: "platform.host"}, &host); client.IgnoreNotFound(err) != nil {
+		return err
+	}
+	if host.Spec.Value == "" {
+		return fmt.Errorf("the cluster has no platform.host; set it before the upgrade: %s", settings.PlatformHostPatchCommand)
+	}
+	return nil
 }
 
 func requestUpgrade(ctx context.Context, c client.Client, cluster v1alpha1.Cluster, o upgradeOptions, deps UpgradeDeps, stdout io.Writer) (int64, error) {

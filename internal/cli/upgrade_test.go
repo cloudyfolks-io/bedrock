@@ -58,7 +58,8 @@ func upgradeClient(t *testing.T, running string, arches ...string) client.Client
 		t.Fatal(err)
 	}
 	cluster := &v1alpha1.Cluster{ObjectMeta: metav1.ObjectMeta{Name: v1alpha1.ClusterName}, Spec: v1alpha1.ClusterSpec{DesiredVersion: running}, Status: v1alpha1.ClusterStatus{Version: running, Phase: v1alpha1.PhaseIdle}}
-	objects := []client.Object{cluster}
+	platformHost := &v1alpha1.Setting{ObjectMeta: metav1.ObjectMeta{Name: "platform.host"}, Spec: v1alpha1.SettingSpec{Value: "cloud.example.com"}}
+	objects := []client.Object{cluster, platformHost}
 	var bundles []v1alpha1.DepotBundle
 	for i, arch := range arches {
 		name := "node-" + arch
@@ -111,6 +112,48 @@ func TestUpgradeRefusesTheRunningVersion(t *testing.T) {
 	code := RunUpgrade(context.Background(), upgradeOptions{to: "v0.3.0", root: t.TempDir(), timeout: time.Second}, upgradeDeps(upgradeClient(t, "v0.3.0", "amd64"), ""), &stdout, &stderr)
 	if code == 0 || !strings.Contains(stderr.String(), "the cluster already runs v0.3.0") {
 		t.Fatalf("exit %d stderr %q", code, stderr.String())
+	}
+}
+
+func TestUpgradeRefusesWithoutPlatformHost(t *testing.T) {
+	withVersion(t, "v0.3.0")
+	want := `the cluster has no platform.host; set it before the upgrade: kubectl patch setting platform.host --type merge -p '{"spec":{"value":"<domain>"}}'`
+	cases := map[string]func(t *testing.T, c client.Client){
+		"empty value": func(t *testing.T, c client.Client) {
+			var setting v1alpha1.Setting
+			if err := c.Get(context.Background(), client.ObjectKey{Name: "platform.host"}, &setting); err != nil {
+				t.Fatal(err)
+			}
+			setting.Spec.Value = ""
+			if err := c.Update(context.Background(), &setting); err != nil {
+				t.Fatal(err)
+			}
+		},
+		"missing setting": func(t *testing.T, c client.Client) {
+			setting := &v1alpha1.Setting{ObjectMeta: metav1.ObjectMeta{Name: "platform.host"}}
+			if err := c.Delete(context.Background(), setting); err != nil {
+				t.Fatal(err)
+			}
+		},
+	}
+	for name, unset := range cases {
+		t.Run(name, func(t *testing.T) {
+			c := upgradeClient(t, "v0.2.0", "amd64")
+			unset(t, c)
+			root := t.TempDir()
+			var stdout, stderr bytes.Buffer
+			code := RunUpgrade(context.Background(), upgradeOptions{to: "v0.3.0", bundles: []string{writeUpgradeBundle(t, "v0.3.0", "amd64")}, root: root, timeout: time.Second}, upgradeDeps(c, ""), &stdout, &stderr)
+			if code != 1 || strings.TrimSpace(stderr.String()) != want {
+				t.Fatalf("exit %d stderr %q", code, stderr.String())
+			}
+			if entries, _ := os.ReadDir(root); len(entries) != 0 {
+				t.Fatalf("nothing may be staged: %v", entries)
+			}
+			var cluster v1alpha1.Cluster
+			if err := c.Get(context.Background(), client.ObjectKey{Name: v1alpha1.ClusterName}, &cluster); err != nil || cluster.Spec.DesiredVersion != "v0.2.0" {
+				t.Fatalf("cluster %+v %v", cluster.Spec, err)
+			}
+		})
 	}
 }
 
@@ -304,7 +347,10 @@ func scriptOperator(c client.Client, statuses ...v1alpha1.ClusterStatus) client.
 			return err
 		}
 		cluster, ok := obj.(*v1alpha1.Cluster)
-		if step := int(reads.Add(1)) - 2; ok && step >= 0 {
+		if !ok {
+			return nil
+		}
+		if step := int(reads.Add(1)) - 2; step >= 0 {
 			cluster.Status = statuses[min(step, len(statuses)-1)]
 		}
 		return nil
