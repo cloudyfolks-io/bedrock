@@ -107,10 +107,14 @@ rules:
   - hosts/status
   - identityproviders
   - identityproviders/status
+  - networks
+  - networks/status
   - nodeupgrades
   - nodeupgrades/status
   - oauthclients
   - oauthclients/status
+  - projects
+  - projects/status
   - refreshtokens
   - refreshtokens/status
   - releases
@@ -121,6 +125,8 @@ rules:
   - settings/status
   - signingkeys
   - signingkeys/status
+  - tenants
+  - tenants/status
   - users
   - users/status
   verbs:

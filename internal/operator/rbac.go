@@ -109,13 +109,16 @@ func bedrockResources() []string {
 		"hostconfigs", "hostconfigs/status",
 		"hosts", "hosts/status",
 		"identityproviders", "identityproviders/status",
+		"networks", "networks/status",
 		"nodeupgrades", "nodeupgrades/status",
 		"oauthclients", "oauthclients/status",
+		"projects", "projects/status",
 		"refreshtokens", "refreshtokens/status",
 		"releases", "releases/status",
 		"sessions", "sessions/status",
 		"settings", "settings/status",
 		"signingkeys", "signingkeys/status",
+		"tenants", "tenants/status",
 		"users", "users/status",
 	}
 }

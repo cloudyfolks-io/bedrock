@@ -17,6 +17,18 @@ const (
 	LabelKind = "bedrock.cloudyfolks.io/kind"
 	LabelName = "bedrock.cloudyfolks.io/name"
 
+	LabelTenant  = "bedrock.cloudyfolks.io/tenant"
+	LabelProject = "bedrock.cloudyfolks.io/project"
+
+	TenancyFieldManager       = "bedrock-tenancy"
+	ImagesFieldManager        = "bedrock-images"
+	ComputeFieldManager       = "bedrock-compute"
+	NetworkFieldManager       = "bedrock-network"
+	BackupFieldManager        = "bedrock-backup"
+	ObjectStorageFieldManager = "bedrock-objectstorage"
+	AddonsFieldManager        = "bedrock-addons"
+	ProxyFieldManager         = "bedrock-proxy"
+
 	LabelAuthn        = "bedrock.cloudyfolks.io/authn"
 	LabelFamily       = "bedrock.cloudyfolks.io/family"
 	AuthnFieldManager = "bedrock-authn"
