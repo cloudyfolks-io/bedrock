@@ -205,6 +205,7 @@ if [ -n "$assert_authn" ]; then
   kubectl -n cert-manager get secret bedrock-ca -o jsonpath='{.data.ca\.crt}' | base64 -d >"$workdir/bedrock-ca.crt"
   vip=$(kubectl get cluster cluster -o jsonpath='{.spec.api.vip}')
   platform_host=$(echo "$vip" | tr '.' '-').sslip.io
+  printf '%s sso.%s api.%s\n' "$vip" "$platform_host" "$platform_host" >>/etc/hosts
   served=0
   for _ in $(seq 1 60); do
     if curl -sf -m 10 --cacert "$workdir/bedrock-ca.crt" --resolve "sso.$platform_host:443:$vip" "https://sso.$platform_host/.well-known/openid-configuration" >"$workdir/discovery.json"; then
