@@ -123,6 +123,10 @@ rules:
   - nodeupgrades/status
   - oauthclients
   - oauthclients/status
+  - objectstoragebuckets
+  - objectstoragebuckets/status
+  - objectstorageusers
+  - objectstorageusers/status
   - projects
   - projects/status
   - refreshtokens
@@ -145,6 +149,10 @@ rules:
   - tenants/status
   - users
   - users/status
+  - virtualmachinebackups
+  - virtualmachinebackups/status
+  - virtualmachinerestores
+  - virtualmachinerestores/status
   - virtualmachines
   - virtualmachines/status
   - volumes
