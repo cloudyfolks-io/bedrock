@@ -2,6 +2,7 @@ package compute
 
 import (
 	"context"
+	"errors"
 	"reflect"
 	"strings"
 	"testing"
@@ -610,6 +611,40 @@ func TestVMRefusesAForeignKubeVirtMachine(t *testing.T) {
 	requireReason(t, getVM(t, c, ns, "web-1"), "NameConflict")
 	after := requirePresent(t, c, kubeVirtVMGVK, ns, "web-1")
 	if got, _, _ := unstructured.NestedString(after.Object, "spec", "runStrategy"); got != "Halted" || len(after.GetOwnerReferences()) != 0 {
+		t.Fatalf("the foreign machine changed: %+v", after.Object)
+	}
+}
+
+func foreignKubeVirtMachine(ns, name string) *unstructured.Unstructured {
+	foreign := emptyOf(kubeVirtVMGVK)
+	foreign.SetNamespace(ns)
+	foreign.SetName(name)
+	controller := true
+	foreign.SetOwnerReferences([]metav1.OwnerReference{{APIVersion: v1alpha1.GroupVersion.String(), Kind: "VirtualMachine", Name: "other", UID: "another-uid", Controller: &controller}})
+	foreign.Object["spec"] = map[string]any{"runStrategy": "Halted", "template": map[string]any{"spec": map[string]any{"domain": map[string]any{"devices": map[string]any{}}}}}
+	return foreign
+}
+
+func TestKubeVirtVMOwnerGuard(t *testing.T) {
+	c, _ := startEnv(t)
+	ns := seedPlatform(t, c)
+	createObject(t, c, foreignKubeVirtMachine(ns, "web-1"))
+	createVM(t, c, ns, "web-1", noMutation)
+	vm := getVM(t, c, ns, "web-1")
+	vm.UID = "web-1-uid"
+	desired := emptyOf(kubeVirtVMGVK)
+	desired.SetNamespace(ns)
+	desired.SetName("web-1")
+	desired.SetOwnerReferences([]metav1.OwnerReference{OwnerRef(vm)})
+	var conflict nameConflict
+	if err := guardOwnership(context.Background(), c, kubeVirtVMGVK, desired); !errors.As(err, &conflict) {
+		t.Fatalf("guard error %v", err)
+	}
+	reconcileVM(t, newVMReconciler(c), ns, "web-1")
+	requireReason(t, getVM(t, c, ns, "web-1"), "NameConflict")
+	after := requirePresent(t, c, kubeVirtVMGVK, ns, "web-1")
+	refs := after.GetOwnerReferences()
+	if got, _, _ := unstructured.NestedString(after.Object, "spec", "runStrategy"); got != "Halted" || len(refs) != 1 || refs[0].UID != "another-uid" {
 		t.Fatalf("the foreign machine changed: %+v", after.Object)
 	}
 }
