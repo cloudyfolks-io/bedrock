@@ -6,6 +6,19 @@ metadata:
   name: bedrock-operator
 rules:
 - apiGroups:
+  - aaq.kubevirt.io
+  resources:
+  - aaqs
+  - applicationawareresourcequotas
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - update
+  - watch
+- apiGroups:
   - admissionregistration.k8s.io
   resources:
   - mutatingwebhookconfigurations
@@ -61,6 +74,7 @@ rules:
   - apps
   resources:
   - controllerrevisions
+  - daemonsets
   verbs:
   - get
   - list
@@ -172,9 +186,62 @@ rules:
   - update
   - watch
 - apiGroups:
+  - bedrock.cloudyfolks.io
+  resources:
+  - elasticips
+  verbs:
+  - get
+  - list
+  - watch
+- apiGroups:
+  - bedrock.cloudyfolks.io
+  resources:
+  - securitygroups/finalizers
+  - subnets/finalizers
+  - virtualmachines/finalizers
+  - volumes/finalizers
+  - volumesnapshots/finalizers
+  verbs:
+  - update
+- apiGroups:
   - cdi.kubevirt.io
   resources:
   - cdis
+  - dataimportcrons
+  - datasources
+  - datavolumes
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - update
+  - watch
+- apiGroups:
+  - cdi.kubevirt.io
+  resources:
+  - datavolumes
+  verbs:
+  - create
+  - get
+  - list
+  - watch
+- apiGroups:
+  - cdi.kubevirt.io
+  resources:
+  - datavolumes
+  verbs:
+  - delete
+  - list
+- apiGroups:
+  - ceph.rook.io
+  resources:
+  - cephblockpools
+  - cephclusters
+  - cephfilesystems
+  - cephobjectstores
+  - cephobjectstoreusers
   verbs:
   - create
   - delete
@@ -186,16 +253,10 @@ rules:
 - apiGroups:
   - ceph.rook.io
   resources:
-  - cephblockpools
-  - cephclusters
-  - cephfilesystems
+  - cephobjectstores
   verbs:
-  - create
-  - delete
   - get
   - list
-  - patch
-  - update
   - watch
 - apiGroups:
   - cert-manager.io
@@ -236,11 +297,115 @@ rules:
   - update
   - watch
 - apiGroups:
+  - fabric.cloudyfolks.io
+  resources:
+  - bgp-confs
+  - dns-zones
+  - ovn-eips
+  - ovn-fips
+  - provider-networks
+  - router-lb-rules
+  - security-groups
+  - subnets
+  - switch-lb-rules
+  - vips
+  - vlans
+  - vpcs
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - update
+  - watch
+- apiGroups:
+  - fabric.cloudyfolks.io
+  resources:
+  - security-groups
+  verbs:
+  - get
+- apiGroups:
+  - fabric.cloudyfolks.io
+  resources:
+  - ips
+  verbs:
+  - get
+  - list
+  - watch
+- apiGroups:
+  - instancetype.kubevirt.io
+  resources:
+  - virtualmachineclusterinstancetypes
+  - virtualmachineclusterpreferences
+  verbs:
+  - get
+- apiGroups:
+  - k8s.cni.cncf.io
+  resources:
+  - network-attachment-definitions
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - update
+  - watch
+- apiGroups:
+  - kubevirt.io
+  resources:
+  - virtualmachines
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+- apiGroups:
   - kubevirt.io
   resources:
   - kubevirts
-  - virtualmachineinstances
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - update
+  - watch
+- apiGroups:
+  - kubevirt.io
+  resources:
   - virtualmachines
+  verbs:
+  - create
+  - get
+  - list
+  - patch
+  - watch
+- apiGroups:
+  - kubevirt.io
+  resources:
+  - virtualmachineinstances
+  verbs:
+  - get
+  - list
+- apiGroups:
+  - kubevirt.io
+  resources:
+  - virtualmachineinstances
+  verbs:
+  - get
+  - list
+  - watch
+- apiGroups:
+  - monitoring.coreos.com
+  resources:
+  - alertmanagers
+  - prometheuses
+  - prometheusrules
+  - servicemonitors
   verbs:
   - create
   - delete
@@ -278,6 +443,18 @@ rules:
   - node.k8s.io
   resources:
   - runtimeclasses
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - update
+  - watch
+- apiGroups:
+  - objectbucket.io
+  resources:
+  - objectbucketclaims
   verbs:
   - create
   - delete
@@ -342,6 +519,25 @@ rules:
   - update
   - watch
 - apiGroups:
+  - snapshot.kubevirt.io
+  resources:
+  - virtualmachinesnapshots
+  verbs:
+  - delete
+  - list
+- apiGroups:
+  - snapshot.storage.k8s.io
+  resources:
+  - volumesnapshots
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - update
+  - watch
+- apiGroups:
   - snapshot.storage.k8s.io
   resources:
   - volumesnapshotclasses
@@ -349,10 +545,22 @@ rules:
   - create
   - delete
   - get
-  - list
   - patch
-  - update
+- apiGroups:
+  - snapshot.storage.k8s.io
+  resources:
+  - volumesnapshots
+  verbs:
+  - create
+  - get
+  - list
   - watch
+- apiGroups:
+  - snapshot.storage.k8s.io
+  resources:
+  - volumesnapshotclasses
+  verbs:
+  - list
 - apiGroups:
   - storage.k8s.io
   resources:
@@ -361,22 +569,25 @@ rules:
   - create
   - delete
   - get
-  - list
   - patch
-  - update
-  - watch
 - apiGroups:
   - storage.k8s.io
   resources:
   - storageclasses
   verbs:
-  - get
   - list
   - watch
+- apiGroups:
+  - subresources.kubevirt.io
+  resources:
+  - virtualmachineinstances/guestosinfo
+  verbs:
+  - get
 - apiGroups:
   - traefik.io
   resources:
   - ingressroutes
+  - middlewares
   - serverstransports
   - tlsstores
   verbs:
@@ -388,6 +599,39 @@ rules:
   - update
   - watch
 - apiGroups:
+  - velero.io
+  resources:
+  - backupstoragelocations
+  - restores
+  - schedules
+  verbs:
+  - create
+  - delete
+  - get
+  - patch
+- apiGroups:
+  - velero.io
+  resources:
+  - deletebackuprequests
+  verbs:
+  - create
+  - delete
+  - list
+- apiGroups:
+  - velero.io
+  resources:
+  - backups
+  verbs:
+  - create
+  - get
+  - list
+- apiGroups:
+  - velero.io
+  resources:
+  - datauploads
+  verbs:
+  - list
+- apiGroups:
   - ""
   resources:
   - pods/eviction
@@ -397,7 +641,6 @@ rules:
   - ""
   resources:
   - configmaps
-  - secrets
   - serviceaccounts
   - services
   verbs:
@@ -408,6 +651,15 @@ rules:
   - patch
   - update
   - watch
+- apiGroups:
+  - ""
+  resources:
+  - secrets
+  verbs:
+  - create
+  - delete
+  - get
+  - patch
 - apiGroups:
   - ""
   resources:
@@ -429,6 +681,14 @@ rules:
 - apiGroups:
   - ""
   resources:
+  - secrets
+  verbs:
+  - create
+  - get
+  - patch
+- apiGroups:
+  - ""
+  resources:
   - events
   verbs:
   - create
@@ -445,10 +705,35 @@ rules:
 - apiGroups:
   - ""
   resources:
+  - persistentvolumeclaims
+  verbs:
+  - delete
+  - list
+- apiGroups:
+  - ""
+  resources:
   - nodes
   verbs:
   - get
   - list
   - patch
   - update
+  - watch
+- apiGroups:
+  - ""
+  resources:
+  - namespaces
+  - persistentvolumeclaims
+  verbs:
+  - get
+  - list
+  - watch
+- apiGroups:
+  - ""
+  resources:
+  - persistentvolumeclaims
+  - pods
+  verbs:
+  - list
+  - patch
   - watch
