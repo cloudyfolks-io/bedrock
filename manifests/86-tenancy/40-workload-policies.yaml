@@ -35,6 +35,12 @@ spec:
     - expression: "!has(variables.podSpec.nodeName)"
       message: "spec.nodeName is not allowed in a project"
       reason: Forbidden
+    - expression: "variables.podSpec.containers.all(c, !has(c.securityContext) || !has(c.securityContext.capabilities) || !has(c.securityContext.capabilities.add) || c.securityContext.capabilities.add.all(a, a == 'NET_BIND_SERVICE')) && (!has(variables.podSpec.initContainers) || variables.podSpec.initContainers.all(c, !has(c.securityContext) || !has(c.securityContext.capabilities) || !has(c.securityContext.capabilities.add) || c.securityContext.capabilities.add.all(a, a == 'NET_BIND_SERVICE')))"
+      message: "added capabilities other than NET_BIND_SERVICE are not allowed in a project"
+      reason: Forbidden
+    - expression: "variables.podSpec.containers.all(c, !has(c.securityContext) || !has(c.securityContext.procMount) || c.securityContext.procMount == 'Default') && (!has(variables.podSpec.initContainers) || variables.podSpec.initContainers.all(c, !has(c.securityContext) || !has(c.securityContext.procMount) || c.securityContext.procMount == 'Default'))"
+      message: "an unmasked procMount is not allowed in a project"
+      reason: Forbidden
 ---
 apiVersion: admissionregistration.k8s.io/v1
 kind: ValidatingAdmissionPolicyBinding
@@ -66,7 +72,11 @@ spec:
       - apiGroups: [apps]
         apiVersions: [v1]
         operations: [CREATE, UPDATE]
-        resources: [deployments]
+        resources: [deployments, replicasets, statefulsets, daemonsets]
+      - apiGroups: [batch]
+        apiVersions: [v1]
+        operations: [CREATE, UPDATE]
+        resources: [jobs]
   matchConditions:
     - name: bedrock-identity
       expression: "request.userInfo.username.startsWith('bedrock:')"
@@ -89,6 +99,12 @@ spec:
     - expression: "!has(variables.podSpec.nodeName)"
       message: "spec.nodeName is not allowed in a project"
       reason: Forbidden
+    - expression: "variables.podSpec.containers.all(c, !has(c.securityContext) || !has(c.securityContext.capabilities) || !has(c.securityContext.capabilities.add) || c.securityContext.capabilities.add.all(a, a == 'NET_BIND_SERVICE')) && (!has(variables.podSpec.initContainers) || variables.podSpec.initContainers.all(c, !has(c.securityContext) || !has(c.securityContext.capabilities) || !has(c.securityContext.capabilities.add) || c.securityContext.capabilities.add.all(a, a == 'NET_BIND_SERVICE')))"
+      message: "added capabilities other than NET_BIND_SERVICE are not allowed in a project"
+      reason: Forbidden
+    - expression: "variables.podSpec.containers.all(c, !has(c.securityContext) || !has(c.securityContext.procMount) || c.securityContext.procMount == 'Default') && (!has(variables.podSpec.initContainers) || variables.podSpec.initContainers.all(c, !has(c.securityContext) || !has(c.securityContext.procMount) || c.securityContext.procMount == 'Default'))"
+      message: "an unmasked procMount is not allowed in a project"
+      reason: Forbidden
 ---
 apiVersion: admissionregistration.k8s.io/v1
 kind: ValidatingAdmissionPolicyBinding
@@ -99,6 +115,66 @@ metadata:
     bedrock.cloudyfolks.io/name: bedrock-tenant-deployments
 spec:
   policyName: bedrock-tenant-deployments
+  validationActions: [Deny]
+  matchResources:
+    namespaceSelector:
+      matchExpressions:
+        - key: bedrock.cloudyfolks.io/tenant
+          operator: Exists
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicy
+metadata:
+  name: bedrock-tenant-cronjobs
+  labels:
+    bedrock.cloudyfolks.io/kind: ValidatingAdmissionPolicy
+    bedrock.cloudyfolks.io/name: bedrock-tenant-cronjobs
+spec:
+  failurePolicy: Fail
+  matchConstraints:
+    resourceRules:
+      - apiGroups: [batch]
+        apiVersions: [v1]
+        operations: [CREATE, UPDATE]
+        resources: [cronjobs]
+  matchConditions:
+    - name: bedrock-identity
+      expression: "request.userInfo.username.startsWith('bedrock:')"
+  variables:
+    - name: podSpec
+      expression: "object.spec.jobTemplate.spec.template.spec"
+  validations:
+    - expression: "!(has(variables.podSpec.hostNetwork) && variables.podSpec.hostNetwork) && !(has(variables.podSpec.hostPID) && variables.podSpec.hostPID) && !(has(variables.podSpec.hostIPC) && variables.podSpec.hostIPC)"
+      message: "host namespaces are not allowed in a project"
+      reason: Forbidden
+    - expression: "!has(variables.podSpec.volumes) || variables.podSpec.volumes.all(v, !has(v.hostPath))"
+      message: "hostPath volumes are not allowed in a project"
+      reason: Forbidden
+    - expression: "variables.podSpec.containers.all(c, !has(c.securityContext) || !has(c.securityContext.privileged) || !c.securityContext.privileged) && (!has(variables.podSpec.initContainers) || variables.podSpec.initContainers.all(c, !has(c.securityContext) || !has(c.securityContext.privileged) || !c.securityContext.privileged))"
+      message: "privileged containers are not allowed in a project"
+      reason: Forbidden
+    - expression: "variables.podSpec.containers.all(c, !has(c.ports) || c.ports.all(p, !has(p.hostPort) || p.hostPort == 0)) && (!has(variables.podSpec.initContainers) || variables.podSpec.initContainers.all(c, !has(c.ports) || c.ports.all(p, !has(p.hostPort) || p.hostPort == 0)))"
+      message: "host ports are not allowed in a project"
+      reason: Forbidden
+    - expression: "!has(variables.podSpec.nodeName)"
+      message: "spec.nodeName is not allowed in a project"
+      reason: Forbidden
+    - expression: "variables.podSpec.containers.all(c, !has(c.securityContext) || !has(c.securityContext.capabilities) || !has(c.securityContext.capabilities.add) || c.securityContext.capabilities.add.all(a, a == 'NET_BIND_SERVICE')) && (!has(variables.podSpec.initContainers) || variables.podSpec.initContainers.all(c, !has(c.securityContext) || !has(c.securityContext.capabilities) || !has(c.securityContext.capabilities.add) || c.securityContext.capabilities.add.all(a, a == 'NET_BIND_SERVICE')))"
+      message: "added capabilities other than NET_BIND_SERVICE are not allowed in a project"
+      reason: Forbidden
+    - expression: "variables.podSpec.containers.all(c, !has(c.securityContext) || !has(c.securityContext.procMount) || c.securityContext.procMount == 'Default') && (!has(variables.podSpec.initContainers) || variables.podSpec.initContainers.all(c, !has(c.securityContext) || !has(c.securityContext.procMount) || c.securityContext.procMount == 'Default'))"
+      message: "an unmasked procMount is not allowed in a project"
+      reason: Forbidden
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicyBinding
+metadata:
+  name: bedrock-tenant-cronjobs
+  labels:
+    bedrock.cloudyfolks.io/kind: ValidatingAdmissionPolicyBinding
+    bedrock.cloudyfolks.io/name: bedrock-tenant-cronjobs
+spec:
+  policyName: bedrock-tenant-cronjobs
   validationActions: [Deny]
   matchResources:
     namespaceSelector:

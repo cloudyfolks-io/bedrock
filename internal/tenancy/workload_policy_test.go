@@ -6,10 +6,12 @@ import (
 	"testing"
 
 	appsv1 "k8s.io/api/apps/v1"
+	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
 	rbacv1 "k8s.io/api/rbac/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/client-go/rest"
 	"k8s.io/utils/ptr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
@@ -51,6 +53,7 @@ func keep(*corev1.PodSpec) {}
 
 type workloadWorld struct {
 	admin, eddie, kubevirt client.Client
+	cfg                    *rest.Config
 }
 
 func newWorkloadWorld(t *testing.T) workloadWorld {
@@ -63,7 +66,7 @@ func newWorkloadWorld(t *testing.T) workloadWorld {
 		namespaceNamed("plain", nil),
 		editorIn("acme-shop", "bedrock:eddie"), editorIn("plain", "bedrock:eddie"), editorIn("acme-shop", kubevirtHandler),
 	)
-	world := workloadWorld{admin: admin, eddie: actingAs(t, cfg, "bedrock:eddie"), kubevirt: actingAs(t, cfg, kubevirtHandler)}
+	world := workloadWorld{cfg: cfg, admin: admin, eddie: actingAs(t, cfg, "bedrock:eddie"), kubevirt: actingAs(t, cfg, kubevirtHandler)}
 	probe := func() error {
 		return denyCreate(admin, world.eddie, plainPod("probe", "acme-shop", func(s *corev1.PodSpec) { s.HostNetwork = true }))()
 	}
@@ -179,4 +182,84 @@ func TestPolicyIgnoresNonBedrockIdentities(t *testing.T) {
 	mustCreate(t, w.kubevirt, plainPod("launcher", "acme-shop", func(s *corev1.PodSpec) {
 		s.Volumes = []corev1.Volume{{Name: "host", VolumeSource: corev1.VolumeSource{HostPath: &corev1.HostPathVolumeSource{Path: "/var/run"}}}}
 	}))
+}
+
+func withCapabilities(add ...corev1.Capability) func(*corev1.PodSpec) {
+	return func(s *corev1.PodSpec) {
+		s.Containers[0].SecurityContext = &corev1.SecurityContext{Capabilities: &corev1.Capabilities{Add: add}}
+	}
+}
+
+func withUnmaskedProc(s *corev1.PodSpec) {
+	unmasked := corev1.UnmaskedProcMount
+	s.HostUsers = ptr.To(false)
+	s.Containers[0].SecurityContext = &corev1.SecurityContext{ProcMount: &unmasked}
+}
+
+func TestEditorPodWithExtraCapabilitiesIsDenied(t *testing.T) {
+	w := newWorkloadWorld(t)
+	for _, name := range []string{"SYS_ADMIN", "NET_ADMIN", "SYS_MODULE", "SYS_PTRACE", "ALL"} {
+		pod := plainPod("cap-"+strings.ToLower(strings.ReplaceAll(name, "_", "-")), "acme-shop", withCapabilities(corev1.Capability(name)))
+		requireDenied(t, w.eddie.Create(context.Background(), pod), "added capabilities other than NET_BIND_SERVICE")
+	}
+	mustCreate(t, w.eddie, plainPod("bind", "acme-shop", withCapabilities("NET_BIND_SERVICE")))
+}
+
+func TestEditorInitContainerWithExtraCapabilitiesIsDenied(t *testing.T) {
+	w := newWorkloadWorld(t)
+	pod := plainPod("init-cap", "acme-shop", func(s *corev1.PodSpec) {
+		s.InitContainers = []corev1.Container{{Name: "init", Image: pauseImage, SecurityContext: &corev1.SecurityContext{Capabilities: &corev1.Capabilities{Add: []corev1.Capability{"NET_ADMIN"}}}}}
+	})
+	requireDenied(t, w.eddie.Create(context.Background(), pod), "added capabilities other than NET_BIND_SERVICE")
+}
+
+func TestEditorPodWithUnmaskedProcMountIsDenied(t *testing.T) {
+	w := newWorkloadWorld(t)
+	requireDenied(t, w.eddie.Create(context.Background(), plainPod("unmasked", "acme-shop", withUnmaskedProc)), "unmasked procMount")
+}
+
+func TestEditorDeploymentTemplateWithExtraCapabilitiesIsDenied(t *testing.T) {
+	w := newWorkloadWorld(t)
+	requireDenied(t, w.eddie.Create(context.Background(), deploymentWith("cap", "acme-shop", withCapabilities("SYS_ADMIN"))), "added capabilities other than NET_BIND_SERVICE")
+	requireDenied(t, w.eddie.Create(context.Background(), deploymentWith("proc", "acme-shop", withUnmaskedProc)), "unmasked procMount")
+}
+
+func TestEditorDeploymentUpdateCannotAddCapabilities(t *testing.T) {
+	w := newWorkloadWorld(t)
+	deployment := deploymentWith("grow-cap", "acme-shop", keep)
+	mustCreate(t, w.eddie, deployment)
+	withCapabilities("SYS_ADMIN")(&deployment.Spec.Template.Spec)
+	requireDenied(t, w.eddie.Update(context.Background(), deployment), "added capabilities other than NET_BIND_SERVICE")
+	withUnmaskedProc(&deployment.Spec.Template.Spec)
+	requireDenied(t, w.eddie.Update(context.Background(), deployment), "unmasked procMount")
+}
+
+func TestOtherWorkloadKindsAreHardenedToo(t *testing.T) {
+	w := newWorkloadWorld(t)
+	mustCreate(t, w.admin, &rbacv1.ClusterRoleBinding{
+		ObjectMeta: metav1.ObjectMeta{Name: "bedrock-root"},
+		RoleRef:    rbacv1.RoleRef{APIGroup: rbacv1.GroupName, Kind: "ClusterRole", Name: "cluster-admin"},
+		Subjects:   []rbacv1.Subject{{APIGroup: rbacv1.GroupName, Kind: "User", Name: "bedrock:root"}},
+	})
+	root := actingAs(t, w.cfg, "bedrock:root")
+	labels := map[string]string{"app": "x"}
+	template := func(change func(*corev1.PodSpec)) corev1.PodTemplateSpec {
+		return corev1.PodTemplateSpec{ObjectMeta: metav1.ObjectMeta{Labels: labels}, Spec: podSpecWith(change)}
+	}
+	hostile := withCapabilities("SYS_ADMIN")
+	objects := []client.Object{
+		&appsv1.StatefulSet{ObjectMeta: metav1.ObjectMeta{Name: "sts", Namespace: "acme-shop"}, Spec: appsv1.StatefulSetSpec{ServiceName: "x", Selector: &metav1.LabelSelector{MatchLabels: labels}, Template: template(hostile)}},
+		&appsv1.DaemonSet{ObjectMeta: metav1.ObjectMeta{Name: "ds", Namespace: "acme-shop"}, Spec: appsv1.DaemonSetSpec{Selector: &metav1.LabelSelector{MatchLabels: labels}, Template: template(hostile)}},
+		&appsv1.ReplicaSet{ObjectMeta: metav1.ObjectMeta{Name: "rs", Namespace: "acme-shop"}, Spec: appsv1.ReplicaSetSpec{Selector: &metav1.LabelSelector{MatchLabels: labels}, Template: template(hostile)}},
+		&batchv1.Job{ObjectMeta: metav1.ObjectMeta{Name: "job", Namespace: "acme-shop"}, Spec: batchv1.JobSpec{Template: withNever(template(hostile))}},
+		&batchv1.CronJob{ObjectMeta: metav1.ObjectMeta{Name: "cron", Namespace: "acme-shop"}, Spec: batchv1.CronJobSpec{Schedule: "* * * * *", JobTemplate: batchv1.JobTemplateSpec{Spec: batchv1.JobSpec{Template: withNever(template(hostile))}}}},
+	}
+	for _, obj := range objects {
+		requireDenied(t, root.Create(context.Background(), obj), "added capabilities other than NET_BIND_SERVICE")
+	}
+}
+
+func withNever(template corev1.PodTemplateSpec) corev1.PodTemplateSpec {
+	template.Spec.RestartPolicy = corev1.RestartPolicyNever
+	return template
 }
