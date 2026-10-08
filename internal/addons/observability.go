@@ -153,7 +153,7 @@ func (r *ObservabilityReconciler) applyAudit(ctx context.Context, level string) 
 func (r *ObservabilityReconciler) applyAlertmanager(ctx context.Context, webhookURL string) error {
 	if err := validWebhookURL(webhookURL); err != nil {
 		r.reportWebhook(ctx, metav1.ConditionFalse, "InvalidURL", err.Error())
-		return nil
+		return r.ensureAlertmanagerConfig(ctx)
 	}
 	secret, err := AlertmanagerSecret(webhookURL)
 	if err != nil {
@@ -163,6 +163,22 @@ func (r *ObservabilityReconciler) applyAlertmanager(ctx context.Context, webhook
 		return fmt.Errorf("alertmanager config in namespace %s: %w", monitoringNamespace, err)
 	}
 	r.reportWebhook(ctx, metav1.ConditionTrue, "Applied", "the webhook is in the Alertmanager configuration")
+	return nil
+}
+
+func (r *ObservabilityReconciler) ensureAlertmanagerConfig(ctx context.Context) error {
+	var existing corev1.Secret
+	err := r.Client.Get(ctx, types.NamespacedName{Namespace: monitoringNamespace, Name: alertmanagerSecret}, &existing)
+	if err == nil || !apierrors.IsNotFound(err) {
+		return err
+	}
+	secret, err := AlertmanagerSecret("")
+	if err != nil {
+		return fmt.Errorf("alertmanager config: %w", err)
+	}
+	if err := ssa.Apply(ctx, r.Client, secret, v1alpha1.AddonsFieldManager); err != nil {
+		return fmt.Errorf("alertmanager config in namespace %s: %w", monitoringNamespace, err)
+	}
 	return nil
 }
 

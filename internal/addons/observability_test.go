@@ -288,3 +288,22 @@ func TestObservabilityKeepsTheLastValidWebhookForAnInvalidURL(t *testing.T) {
 		t.Fatalf("condition %+v", got)
 	}
 }
+
+func TestObservabilityAppliesTheNullRouteWhenTheFirstURLIsInvalid(t *testing.T) {
+	r, c := newObservability(t)
+	setSetting(t, c, "alertmanager.webhook-url", "hooks.example.test/alert?token=s3cr3t-token")
+	if err := runObservability(t, r); err != nil {
+		t.Fatal(err)
+	}
+	var secret corev1.Secret
+	if err := c.Get(context.Background(), client.ObjectKey{Namespace: "monitoring", Name: "bedrock-alertmanager-config"}, &secret); err != nil {
+		t.Fatalf("Alertmanager has no config: %v", err)
+	}
+	config := string(secret.Data["alertmanager.yaml"])
+	if strings.Contains(config, "s3cr3t-token") || strings.Contains(config, "bedrock-webhook") || !strings.Contains(config, "receiver: \"null\"") {
+		t.Fatalf("config %s", config)
+	}
+	if got := webhookCondition(t, c); got.Status != metav1.ConditionFalse || got.Reason != "InvalidURL" {
+		t.Fatalf("condition %+v", got)
+	}
+}
