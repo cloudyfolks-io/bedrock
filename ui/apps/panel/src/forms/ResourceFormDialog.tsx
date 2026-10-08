@@ -71,6 +71,7 @@ export function CreateResourceDialog({ def, onClose, initialSpec }: CreateProps)
   const toast = useToast();
   const queryClient = useQueryClient();
   const project = useCurrentProject();
+  const kind = def.kind;
   const { document, form } = useDocumentSchema(def);
   const [name, setName] = useState("");
   const [errors, setErrors] = useState<WriteErrors>(noErrors);
@@ -112,7 +113,7 @@ export function CreateResourceDialog({ def, onClose, initialSpec }: CreateProps)
           onClose();
         }
       }}
-      title={t({ id: "forms.create.title", message: `Create ${def.kind}` })}
+      title={t({ id: "forms.create.title", message: `Create ${kind}` })}
       description={i18n._(def.title)}
     >
       {document.isPending ? <Spinner /> : null}
@@ -235,6 +236,7 @@ function EditBody({ def, object, onClose }: EditProps) {
 
 export function EditResourceDialog({ def, object, onClose }: EditProps) {
   const { t } = useLingui();
+  const { name } = object.metadata;
   return (
     <Dialog
       open
@@ -243,7 +245,7 @@ export function EditResourceDialog({ def, object, onClose }: EditProps) {
           onClose();
         }
       }}
-      title={t({ id: "forms.edit.title", message: `Edit ${object.metadata.name}` })}
+      title={t({ id: "forms.edit.title", message: `Edit ${name}` })}
     >
       <EditBody def={def} object={object} onClose={onClose} />
     </Dialog>

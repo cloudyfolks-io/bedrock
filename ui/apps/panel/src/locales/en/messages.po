@@ -370,6 +370,114 @@ msgstr "Name"
 msgid "forms.schema.error"
 msgstr "The form schema did not load."
 
+msgid "hostDetail.applied"
+msgstr "Applied configuration"
+
+msgid "hostDetail.class"
+msgstr "Class"
+
+msgid "hostDetail.cores"
+msgstr "Cores"
+
+msgid "hostDetail.cpu"
+msgstr "CPU"
+
+msgid "hostDetail.cpuModel"
+msgstr "Model"
+
+msgid "hostDetail.device"
+msgstr "Device"
+
+msgid "hostDetail.disk.inUseBy"
+msgstr "In use by"
+
+msgid "hostDetail.disk.path"
+msgstr "Path"
+
+msgid "hostDetail.disk.serial"
+msgstr "Serial"
+
+msgid "hostDetail.disks"
+msgstr "Disks"
+
+msgid "hostDetail.driver"
+msgstr "Driver"
+
+msgid "hostDetail.editRoles"
+msgstr "Edit roles"
+
+msgid "hostDetail.firmware"
+msgstr "Firmware and system"
+
+msgid "hostDetail.kernel"
+msgstr "Kernel"
+
+msgid "hostDetail.link"
+msgstr "Link"
+
+msgid "hostDetail.linkDown"
+msgstr "Down"
+
+msgid "hostDetail.linkUp"
+msgstr "Up"
+
+msgid "hostDetail.maintenance"
+msgstr "Maintenance mode"
+
+msgid "hostDetail.maintenance.confirm"
+msgstr "Enter maintenance"
+
+msgid "hostDetail.maintenance.description"
+msgstr "Virtual machines on this host migrate away. Ceph sets noout for its disks. The host stays out of scheduling until you turn the mode off."
+
+msgid "hostDetail.maintenance.title"
+msgstr "Enter maintenance mode"
+
+msgid "hostDetail.memory"
+msgstr "Memory"
+
+msgid "hostDetail.nics"
+msgstr "Network interfaces"
+
+msgid "hostDetail.pci"
+msgstr "PCI devices"
+
+msgid "hostDetail.roles"
+msgstr "Roles"
+
+msgid "hostDetail.sockets"
+msgstr "Sockets"
+
+msgid "hostDetail.speed"
+msgstr "Speed"
+
+msgid "hostDetail.step"
+msgstr "Step"
+
+msgid "hostDetail.tab.inventory"
+msgstr "Inventory"
+
+msgid "hostDetail.tab.metrics"
+msgstr "Metrics"
+
+msgid "hostDetail.tab.overview"
+msgstr "Overview"
+
+msgid "hostDetail.threads"
+msgstr "Threads"
+
+msgid "hostDetail.vendor"
+msgstr "Vendor"
+
+msgid "hostDetail.version"
+msgstr "Kubernetes version"
+
+msgid "hostDetail.window"
+msgstr "Maintenance window"
+
+msgid "hosts.help"
+msgstr "Hosts join the cluster with the command"
+
 msgid "list.actions.header"
 msgstr "Actions"
 
@@ -399,6 +507,9 @@ msgstr "No match"
 
 msgid "list.row.actions"
 msgstr "Actions for {0}"
+
+msgid "metrics.placeholder"
+msgstr "Metrics"
 
 msgid "nav.item.addons"
 msgstr "Addons"
@@ -489,6 +600,114 @@ msgstr "The panel could not read your session."
 
 msgid "session.gate.error.title"
 msgstr "Sign in did not work"
+
+msgid "settings.applied"
+msgstr "Applied"
+
+msgid "settings.col.key"
+msgstr "Setting"
+
+msgid "settings.desc.additionalCa"
+msgstr "PEM bundle of extra CAs trusted for outbound connections."
+
+msgid "settings.desc.alertWebhook"
+msgstr "Webhook that receives alerts."
+
+msgid "settings.desc.auditLevel"
+msgstr "Audit level for read requests."
+
+msgid "settings.desc.authnLockout"
+msgstr "Failed password attempts before lockout."
+
+msgid "settings.desc.authnRefreshTtl"
+msgstr "Refresh token lifetime."
+
+msgid "settings.desc.authnSecondFactor"
+msgstr "Require a second factor for every login."
+
+msgid "settings.desc.authnSessionTtl"
+msgstr "Login session cookie lifetime."
+
+msgid "settings.desc.backupCredentials"
+msgstr "Secret name in bedrock-system holding backup credentials."
+
+msgid "settings.desc.backupEtcd"
+msgstr "Cron schedule for etcd snapshots."
+
+msgid "settings.desc.backupTarget"
+msgstr "Backup target URL, s3:// or nfs://."
+
+msgid "settings.desc.customTls"
+msgstr "Secret name in bedrock-system holding the custom certificate."
+
+msgid "settings.desc.imagesKeep"
+msgstr "Catalog image versions to keep."
+
+msgid "settings.desc.imagesRefresh"
+msgstr "Cron schedule for catalog image refresh."
+
+msgid "settings.desc.kataEnabled"
+msgstr "Kata runtime addon."
+
+msgid "settings.desc.letsencryptEmail"
+msgstr "Account email for Let's Encrypt."
+
+msgid "settings.desc.letsencryptSolver"
+msgstr "ACME challenge solver."
+
+msgid "settings.desc.lokiEnabled"
+msgstr "Loki and Alloy addon."
+
+msgid "settings.desc.lokiRetention"
+msgstr "Log retention in days when Loki is enabled."
+
+msgid "settings.desc.migrationNetwork"
+msgstr "VLAN id of the dedicated live migration network."
+
+msgid "settings.desc.migrationParallel"
+msgstr "Parallel live migrations per cluster."
+
+msgid "settings.desc.networkDns"
+msgstr "DNS servers handed to tenant subnets."
+
+msgid "settings.desc.networkEipMode"
+msgstr "How elastic IPs reach the network."
+
+msgid "settings.desc.networkProviders"
+msgstr "Provider networks for elastic IPs."
+
+msgid "settings.desc.overcommitCpu"
+msgstr "CPU overcommit ratio."
+
+msgid "settings.desc.overcommitMemory"
+msgstr "Memory overcommit ratio."
+
+msgid "settings.desc.platformHost"
+msgstr "Public domain of the platform. Required."
+
+msgid "settings.desc.storageNetwork"
+msgstr "VLAN id of the dedicated storage network."
+
+msgid "settings.desc.storageReplicas"
+msgstr "Ceph pool replica count."
+
+msgid "settings.desc.tlsMode"
+msgstr "Certificate source for the platform endpoints."
+
+msgid "settings.desc.virtEmulation"
+msgstr "Run virtual machines with software emulation on hosts without KVM."
+
+msgid "settings.host.description"
+msgstr "Sign-in cookies and certificates change with the host name. Users must sign in again on the new name."
+
+msgid "settings.host.title"
+msgstr "Change the platform host"
+
+msgid "settings.pending"
+msgstr "Pending"
+
+msgid "settings.usesDefault"
+msgstr "Uses the default"
 
 msgid "shell.breadcrumb.label"
 msgstr "Breadcrumb"

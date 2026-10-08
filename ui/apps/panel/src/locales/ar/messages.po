@@ -370,6 +370,114 @@ msgstr "الاسم"
 msgid "forms.schema.error"
 msgstr "تعذر تحميل مخطط النموذج."
 
+msgid "hostDetail.applied"
+msgstr "الإعداد المطبق"
+
+msgid "hostDetail.class"
+msgstr "الفئة"
+
+msgid "hostDetail.cores"
+msgstr "النوى"
+
+msgid "hostDetail.cpu"
+msgstr "المعالج"
+
+msgid "hostDetail.cpuModel"
+msgstr "الطراز"
+
+msgid "hostDetail.device"
+msgstr "الجهاز"
+
+msgid "hostDetail.disk.inUseBy"
+msgstr "مستخدم بواسطة"
+
+msgid "hostDetail.disk.path"
+msgstr "المسار"
+
+msgid "hostDetail.disk.serial"
+msgstr "الرقم التسلسلي"
+
+msgid "hostDetail.disks"
+msgstr "الأقراص"
+
+msgid "hostDetail.driver"
+msgstr "برنامج التشغيل"
+
+msgid "hostDetail.editRoles"
+msgstr "تعديل الأدوار"
+
+msgid "hostDetail.firmware"
+msgstr "البرنامج الثابت والنظام"
+
+msgid "hostDetail.kernel"
+msgstr "النواة"
+
+msgid "hostDetail.link"
+msgstr "الارتباط"
+
+msgid "hostDetail.linkDown"
+msgstr "منقطع"
+
+msgid "hostDetail.linkUp"
+msgstr "متصل"
+
+msgid "hostDetail.maintenance"
+msgstr "وضع الصيانة"
+
+msgid "hostDetail.maintenance.confirm"
+msgstr "الدخول في الصيانة"
+
+msgid "hostDetail.maintenance.description"
+msgstr "تُرحَّل الأجهزة الافتراضية من هذا المضيف. يضبط Ceph الخيار noout لأقراصه. يبقى المضيف خارج الجدولة حتى توقف هذا الوضع."
+
+msgid "hostDetail.maintenance.title"
+msgstr "الدخول في وضع الصيانة"
+
+msgid "hostDetail.memory"
+msgstr "الذاكرة"
+
+msgid "hostDetail.nics"
+msgstr "واجهات الشبكة"
+
+msgid "hostDetail.pci"
+msgstr "أجهزة PCI"
+
+msgid "hostDetail.roles"
+msgstr "الأدوار"
+
+msgid "hostDetail.sockets"
+msgstr "المقابس"
+
+msgid "hostDetail.speed"
+msgstr "السرعة"
+
+msgid "hostDetail.step"
+msgstr "الخطوة"
+
+msgid "hostDetail.tab.inventory"
+msgstr "الجرد"
+
+msgid "hostDetail.tab.metrics"
+msgstr "المقاييس"
+
+msgid "hostDetail.tab.overview"
+msgstr "نظرة عامة"
+
+msgid "hostDetail.threads"
+msgstr "الخيوط"
+
+msgid "hostDetail.vendor"
+msgstr "الشركة المصنعة"
+
+msgid "hostDetail.version"
+msgstr "إصدار كوبرنتس"
+
+msgid "hostDetail.window"
+msgstr "نافذة الصيانة"
+
+msgid "hosts.help"
+msgstr "تنضم المضيفات إلى العنقود بالأمر"
+
 msgid "list.actions.header"
 msgstr "الإجراءات"
 
@@ -399,6 +507,9 @@ msgstr "لا توجد نتائج"
 
 msgid "list.row.actions"
 msgstr "إجراءات لـ {0}"
+
+msgid "metrics.placeholder"
+msgstr "المقاييس"
 
 msgid "nav.item.addons"
 msgstr "الإضافات"
@@ -489,6 +600,114 @@ msgstr "تعذر على اللوحة قراءة جلستك."
 
 msgid "session.gate.error.title"
 msgstr "تعذر تسجيل الدخول"
+
+msgid "settings.applied"
+msgstr "مطبق"
+
+msgid "settings.col.key"
+msgstr "الإعداد"
+
+msgid "settings.desc.additionalCa"
+msgstr "حزمة PEM لجهات CA إضافية موثوقة للاتصالات الصادرة."
+
+msgid "settings.desc.alertWebhook"
+msgstr "خطاف الويب الذي يستقبل التنبيهات."
+
+msgid "settings.desc.auditLevel"
+msgstr "مستوى التدقيق لطلبات القراءة."
+
+msgid "settings.desc.authnLockout"
+msgstr "عدد محاولات كلمة المرور الفاشلة قبل القفل."
+
+msgid "settings.desc.authnRefreshTtl"
+msgstr "مدة صلاحية رمز التحديث."
+
+msgid "settings.desc.authnSecondFactor"
+msgstr "اشتراط عامل ثانٍ لكل تسجيل دخول."
+
+msgid "settings.desc.authnSessionTtl"
+msgstr "مدة صلاحية ملف تعريف جلسة الدخول."
+
+msgid "settings.desc.backupCredentials"
+msgstr "اسم Secret في bedrock-system الذي يحمل بيانات اعتماد النسخ الاحتياطي."
+
+msgid "settings.desc.backupEtcd"
+msgstr "جدول cron للقطات etcd."
+
+msgid "settings.desc.backupTarget"
+msgstr "عنوان وجهة النسخ الاحتياطي، s3:// أو nfs://."
+
+msgid "settings.desc.customTls"
+msgstr "اسم Secret في bedrock-system الذي يحمل الشهادة المخصصة."
+
+msgid "settings.desc.imagesKeep"
+msgstr "عدد إصدارات صور الفهرس المحتفظ بها."
+
+msgid "settings.desc.imagesRefresh"
+msgstr "جدول cron لتحديث صور الفهرس."
+
+msgid "settings.desc.kataEnabled"
+msgstr "إضافة Kata runtime."
+
+msgid "settings.desc.letsencryptEmail"
+msgstr "بريد حساب Let's Encrypt."
+
+msgid "settings.desc.letsencryptSolver"
+msgstr "طريقة حل تحدي ACME."
+
+msgid "settings.desc.lokiEnabled"
+msgstr "إضافة Loki وAlloy."
+
+msgid "settings.desc.lokiRetention"
+msgstr "مدة الاحتفاظ بالسجلات بالأيام عند تفعيل Loki."
+
+msgid "settings.desc.migrationNetwork"
+msgstr "معرّف VLAN لشبكة الترحيل المباشر المخصصة."
+
+msgid "settings.desc.migrationParallel"
+msgstr "عدد عمليات الترحيل المباشر المتوازية لكل عنقود."
+
+msgid "settings.desc.networkDns"
+msgstr "خوادم DNS الممنوحة للشبكات الفرعية للمستأجرين."
+
+msgid "settings.desc.networkEipMode"
+msgstr "كيفية وصول عناوين IP المرنة إلى الشبكة."
+
+msgid "settings.desc.networkProviders"
+msgstr "شبكات المزود لعناوين IP المرنة."
+
+msgid "settings.desc.overcommitCpu"
+msgstr "نسبة الحجز الزائد للمعالج."
+
+msgid "settings.desc.overcommitMemory"
+msgstr "نسبة الحجز الزائد للذاكرة."
+
+msgid "settings.desc.platformHost"
+msgstr "النطاق العام للمنصة. مطلوب."
+
+msgid "settings.desc.storageNetwork"
+msgstr "معرّف VLAN لشبكة التخزين المخصصة."
+
+msgid "settings.desc.storageReplicas"
+msgstr "عدد نسخ مجمع Ceph."
+
+msgid "settings.desc.tlsMode"
+msgstr "مصدر الشهادات لنقاط وصول المنصة."
+
+msgid "settings.desc.virtEmulation"
+msgstr "تشغيل الأجهزة الافتراضية بالمحاكاة البرمجية على مضيفات بلا KVM."
+
+msgid "settings.host.description"
+msgstr "تتغير ملفات تعريف الارتباط والشهادات مع اسم المضيف. يجب على المستخدمين تسجيل الدخول مجددًا بالاسم الجديد."
+
+msgid "settings.host.title"
+msgstr "تغيير مضيف المنصة"
+
+msgid "settings.pending"
+msgstr "قيد الانتظار"
+
+msgid "settings.usesDefault"
+msgstr "يستخدم القيمة الافتراضية"
 
 msgid "shell.breadcrumb.label"
 msgstr "مسار الصفحة"

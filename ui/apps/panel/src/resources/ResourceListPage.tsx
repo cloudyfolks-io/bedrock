@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useMemo, useState, type ReactNode } from "react";
 import { Link } from "react-router";
 import { useLingui } from "@lingui/react/macro";
 import { Button, MenuButton, Table, TableBody, TableCell, TableHead, TableHeaderCell, TableRow, TextField } from "@bedrock/design";
@@ -55,7 +55,7 @@ function LiveIndicator({ live }: { live: LiveState }) {
   );
 }
 
-function ListBody({ def, namespace, project }: { def: ResourceDef; namespace: string | undefined; project: Project | undefined }) {
+function ListBody({ def, namespace, project, help }: { def: ResourceDef; namespace: string | undefined; project: Project | undefined; help: ReactNode }) {
   const { t, i18n } = useLingui();
   const { locale } = useLocale();
   const query = useLiveList(refOf(def), namespace === undefined ? {} : { namespace });
@@ -88,7 +88,12 @@ function ListBody({ def, namespace, project }: { def: ResourceDef; namespace: st
   );
 
   const breadcrumbs = project ? [{ label: project.displayName || project.name }, { label: title }] : undefined;
-  const header = <PageHeader title={title} {...(breadcrumbs ? { breadcrumbs } : {})} actions={createButton} />;
+  const header = (
+    <>
+      <PageHeader title={title} {...(breadcrumbs ? { breadcrumbs } : {})} actions={createButton} />
+      {help}
+    </>
+  );
 
   if (query.isPending) {
     return (
@@ -194,12 +199,12 @@ function ListBody({ def, namespace, project }: { def: ResourceDef; namespace: st
   );
 }
 
-export function ResourceListPage({ def }: { def: ResourceDef }) {
+export function ResourceListPage({ def, help = null }: { def: ResourceDef; help?: ReactNode }) {
   const projects = useProjects();
   const name = useCurrentProjectName();
   const project = projects.data?.find((candidate) => candidate.name === name);
   if (def.perspective === "admin") {
-    return <ListBody def={def} namespace={undefined} project={undefined} />;
+    return <ListBody def={def} namespace={undefined} project={undefined} help={help} />;
   }
   if (projects.isPending) {
     return <Spinner />;
@@ -207,5 +212,5 @@ export function ResourceListPage({ def }: { def: ResourceDef }) {
   if (!project) {
     return <NotFoundPage />;
   }
-  return <ListBody def={def} namespace={def.scope === "Namespaced" ? project.namespace : undefined} project={project} />;
+  return <ListBody def={def} namespace={def.scope === "Namespaced" ? project.namespace : undefined} project={project} help={help} />;
 }

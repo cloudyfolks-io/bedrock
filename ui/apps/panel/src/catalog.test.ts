@@ -49,3 +49,51 @@ describe("source messages", () => {
     expect(used.size).toBeGreaterThan(50);
   });
 });
+
+function poMessages(locale: string): Record<string, string> {
+  const text = readFileSync(join(import.meta.dirname, "locales", locale, "messages.po"), "utf8");
+  return Object.fromEntries([...text.matchAll(/msgid "([^"]+)"\nmsgstr "((?:\\.|[^"\\])*)"/g)].map((match) => [match[1] ?? "", match[2] ?? ""]));
+}
+
+function catalogVariables(message: string): string[] {
+  return [...new Set([...message.matchAll(/\{(\w+)(?=[,}])/g)].map((match) => match[1] ?? ""))].sort();
+}
+
+function sourceVariables(template: string): string[] {
+  let positional = 0;
+  const names = [...template.matchAll(/\$\{([^}]*)\}/g)].map((match) => {
+    const expression = (match[1] ?? "").trim();
+    if (/^[A-Za-z_$][\w$]*$/.test(expression)) {
+      return expression;
+    }
+    const name = String(positional);
+    positional += 1;
+    return name;
+  });
+  return [...new Set(names)].sort();
+}
+
+describe("placeholders", () => {
+  it("TestCatalogPlaceholdersMatchTheSource", () => {
+    const catalogs = Object.fromEntries(["en", "fa", "ar"].map((locale) => [locale, poMessages(locale)]));
+    const problems: string[] = [];
+    let scanned = 0;
+    for (const file of sourceFiles(import.meta.dirname)) {
+      const source = readFileSync(file, "utf8");
+      for (const match of source.matchAll(/\bid:\s*"([a-z][A-Za-z0-9.]*)",\s*message:\s*`([^`]*)`/g)) {
+        const id = match[1] ?? "";
+        const expected = sourceVariables(match[2] ?? "");
+        scanned += expected.length > 0 ? 1 : 0;
+        for (const [locale, messages] of Object.entries(catalogs)) {
+          const actual = catalogVariables(messages[id] ?? "");
+          const plural = (messages[id] ?? "").includes("plural,");
+          if (!plural && JSON.stringify(actual) !== JSON.stringify(expected)) {
+            problems.push(`${locale} ${id}: source ${expected.join(",")} catalog ${actual.join(",")}`);
+          }
+        }
+      }
+    }
+    expect(problems).toEqual([]);
+    expect(scanned).toBeGreaterThan(5);
+  });
+});

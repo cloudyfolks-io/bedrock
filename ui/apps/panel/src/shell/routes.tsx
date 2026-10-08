@@ -1,3 +1,4 @@
+import { lazy, type ReactElement } from "react";
 import { Navigate, Outlet, Route, Routes, useParams } from "react-router";
 import { useLingui } from "@lingui/react/macro";
 import { useProjects } from "../api/projects";
@@ -7,11 +8,32 @@ import { AccountPage } from "../pages/AccountPage";
 import { NotFoundPage } from "../pages/NotFoundPage";
 import { ResourceDetailPage } from "../resources/ResourceDetailPage";
 import { ResourceListPage } from "../resources/ResourceListPage";
-import { primaryDefinitionsFor } from "../resources/registry";
+import { primaryDefinitionsFor, type ResourceDef } from "../resources/registry";
 import { readStored, writeStored } from "../storage";
 import { useEffect } from "react";
 import { AdminOnly } from "./context";
 import { Shell } from "./Shell";
+
+const HostsPage = lazy(() => import("../pages/admin/HostsPage"));
+const HostDetailPage = lazy(() => import("../pages/admin/HostDetailPage"));
+const SettingsPage = lazy(() => import("../pages/admin/SettingsPage"));
+
+const listPages: Record<string, (def: ResourceDef) => ReactElement> = {
+  "admin/hosts": () => <HostsPage />,
+  "admin/settings": () => <SettingsPage />,
+};
+
+const detailPages: Record<string, (def: ResourceDef) => ReactElement> = {
+  "admin/hosts": () => <HostDetailPage />,
+};
+
+function listPage(def: ResourceDef): ReactElement {
+  return (listPages[`${def.perspective}/${def.path}`] ?? ((candidate) => <ResourceListPage def={candidate} />))(def);
+}
+
+function detailPage(def: ResourceDef): ReactElement {
+  return (detailPages[`${def.perspective}/${def.path}`] ?? ((candidate) => <ResourceDetailPage def={candidate} />))(def);
+}
 
 function HomeRedirect() {
   return <Navigate to={readStored("perspective") === "admin" ? "/admin" : "/p"} replace />;
@@ -67,8 +89,8 @@ export function AppRoutes() {
         >
           <Route index element={<Navigate to="/admin/hosts" replace />} />
           {primaryDefinitionsFor("admin").flatMap((def) => [
-            <Route key={def.path} path={def.path} element={<ResourceListPage def={def} />} />,
-            <Route key={`${def.path}/:name`} path={`${def.path}/:name`} element={<ResourceDetailPage def={def} />} />,
+            <Route key={def.path} path={def.path} element={listPage(def)} />,
+            <Route key={`${def.path}/:name`} path={`${def.path}/:name`} element={detailPage(def)} />,
           ])}
         </Route>
         <Route path="p">
@@ -76,8 +98,8 @@ export function AppRoutes() {
           <Route path=":project" element={<ProjectScope />}>
             <Route index element={<Navigate to="vms" replace />} />
             {primaryDefinitionsFor("project").flatMap((def) => [
-              <Route key={def.path} path={def.path} element={<ResourceListPage def={def} />} />,
-              <Route key={`${def.path}/:name`} path={`${def.path}/:name`} element={<ResourceDetailPage def={def} />} />,
+              <Route key={def.path} path={def.path} element={listPage(def)} />,
+              <Route key={`${def.path}/:name`} path={`${def.path}/:name`} element={detailPage(def)} />,
             ])}
           </Route>
         </Route>

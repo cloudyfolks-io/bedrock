@@ -370,6 +370,114 @@ msgstr "نام"
 msgid "forms.schema.error"
 msgstr "طرح فرم بارگذاری نشد."
 
+msgid "hostDetail.applied"
+msgstr "پیکربندی اعمال‌شده"
+
+msgid "hostDetail.class"
+msgstr "رده"
+
+msgid "hostDetail.cores"
+msgstr "هسته‌ها"
+
+msgid "hostDetail.cpu"
+msgstr "پردازنده"
+
+msgid "hostDetail.cpuModel"
+msgstr "مدل"
+
+msgid "hostDetail.device"
+msgstr "دستگاه"
+
+msgid "hostDetail.disk.inUseBy"
+msgstr "مورد استفاده"
+
+msgid "hostDetail.disk.path"
+msgstr "مسیر"
+
+msgid "hostDetail.disk.serial"
+msgstr "شماره سریال"
+
+msgid "hostDetail.disks"
+msgstr "دیسک‌ها"
+
+msgid "hostDetail.driver"
+msgstr "درایور"
+
+msgid "hostDetail.editRoles"
+msgstr "ویرایش نقش‌ها"
+
+msgid "hostDetail.firmware"
+msgstr "میان‌افزار و سیستم"
+
+msgid "hostDetail.kernel"
+msgstr "هسته سیستم"
+
+msgid "hostDetail.link"
+msgstr "اتصال"
+
+msgid "hostDetail.linkDown"
+msgstr "قطع"
+
+msgid "hostDetail.linkUp"
+msgstr "برقرار"
+
+msgid "hostDetail.maintenance"
+msgstr "حالت نگهداری"
+
+msgid "hostDetail.maintenance.confirm"
+msgstr "ورود به نگهداری"
+
+msgid "hostDetail.maintenance.description"
+msgstr "ماشین‌های مجازی این میزبان منتقل می‌شوند. Ceph برای دیسک‌های آن noout تنظیم می‌کند. میزبان تا خاموش شدن این حالت از زمان‌بندی خارج می‌ماند."
+
+msgid "hostDetail.maintenance.title"
+msgstr "ورود به حالت نگهداری"
+
+msgid "hostDetail.memory"
+msgstr "حافظه"
+
+msgid "hostDetail.nics"
+msgstr "کارت‌های شبکه"
+
+msgid "hostDetail.pci"
+msgstr "دستگاه‌های PCI"
+
+msgid "hostDetail.roles"
+msgstr "نقش‌ها"
+
+msgid "hostDetail.sockets"
+msgstr "سوکت‌ها"
+
+msgid "hostDetail.speed"
+msgstr "سرعت"
+
+msgid "hostDetail.step"
+msgstr "گام"
+
+msgid "hostDetail.tab.inventory"
+msgstr "موجودی"
+
+msgid "hostDetail.tab.metrics"
+msgstr "سنجه‌ها"
+
+msgid "hostDetail.tab.overview"
+msgstr "نمای کلی"
+
+msgid "hostDetail.threads"
+msgstr "رشته‌ها"
+
+msgid "hostDetail.vendor"
+msgstr "سازنده"
+
+msgid "hostDetail.version"
+msgstr "نسخه کوبرنتیس"
+
+msgid "hostDetail.window"
+msgstr "بازه نگهداری"
+
+msgid "hosts.help"
+msgstr "میزبان‌ها با این دستور به خوشه می‌پیوندند"
+
 msgid "list.actions.header"
 msgstr "عملیات"
 
@@ -399,6 +507,9 @@ msgstr "موردی یافت نشد"
 
 msgid "list.row.actions"
 msgstr "عملیات برای {0}"
+
+msgid "metrics.placeholder"
+msgstr "سنجه‌ها"
 
 msgid "nav.item.addons"
 msgstr "افزونه‌ها"
@@ -489,6 +600,114 @@ msgstr "پنل نتوانست نشست شما را بخواند."
 
 msgid "session.gate.error.title"
 msgstr "ورود انجام نشد"
+
+msgid "settings.applied"
+msgstr "اعمال شد"
+
+msgid "settings.col.key"
+msgstr "تنظیم"
+
+msgid "settings.desc.additionalCa"
+msgstr "بسته PEM از CAهای اضافی مورد اعتماد برای اتصال‌های خروجی."
+
+msgid "settings.desc.alertWebhook"
+msgstr "وب‌هوکی که هشدارها را دریافت می‌کند."
+
+msgid "settings.desc.auditLevel"
+msgstr "سطح ممیزی برای درخواست‌های خواندن."
+
+msgid "settings.desc.authnLockout"
+msgstr "تعداد تلاش ناموفق رمز عبور تا قفل شدن."
+
+msgid "settings.desc.authnRefreshTtl"
+msgstr "عمر توکن تازه‌سازی."
+
+msgid "settings.desc.authnSecondFactor"
+msgstr "الزام عامل دوم برای هر ورود."
+
+msgid "settings.desc.authnSessionTtl"
+msgstr "عمر کوکی نشست ورود."
+
+msgid "settings.desc.backupCredentials"
+msgstr "نام Secret در bedrock-system با اعتبارنامه پشتیبان."
+
+msgid "settings.desc.backupEtcd"
+msgstr "زمان‌بندی cron برای اسنپ‌شات etcd."
+
+msgid "settings.desc.backupTarget"
+msgstr "نشانی مقصد پشتیبان، s3:// یا nfs://."
+
+msgid "settings.desc.customTls"
+msgstr "نام Secret در bedrock-system که گواهی سفارشی را نگه می‌دارد."
+
+msgid "settings.desc.imagesKeep"
+msgstr "تعداد نسخه‌های نگه‌داشته‌شده تصاویر کاتالوگ."
+
+msgid "settings.desc.imagesRefresh"
+msgstr "زمان‌بندی cron برای به‌روزرسانی تصاویر کاتالوگ."
+
+msgid "settings.desc.kataEnabled"
+msgstr "افزونه Kata runtime."
+
+msgid "settings.desc.letsencryptEmail"
+msgstr "ایمیل حساب Let's Encrypt."
+
+msgid "settings.desc.letsencryptSolver"
+msgstr "روش حل چالش ACME."
+
+msgid "settings.desc.lokiEnabled"
+msgstr "افزونه Loki و Alloy."
+
+msgid "settings.desc.lokiRetention"
+msgstr "مدت نگهداری گزارش‌ها به روز، وقتی Loki فعال است."
+
+msgid "settings.desc.migrationNetwork"
+msgstr "شناسه VLAN شبکه اختصاصی انتقال زنده."
+
+msgid "settings.desc.migrationParallel"
+msgstr "تعداد انتقال زنده موازی در هر خوشه."
+
+msgid "settings.desc.networkDns"
+msgstr "سرورهای DNS که به زیرشبکه‌های مستأجر داده می‌شود."
+
+msgid "settings.desc.networkEipMode"
+msgstr "نحوه رسیدن آی‌پی‌های شناور به شبکه."
+
+msgid "settings.desc.networkProviders"
+msgstr "شبکه‌های ارائه‌دهنده برای آی‌پی‌های شناور."
+
+msgid "settings.desc.overcommitCpu"
+msgstr "نسبت بیش‌تخصیص پردازنده."
+
+msgid "settings.desc.overcommitMemory"
+msgstr "نسبت بیش‌تخصیص حافظه."
+
+msgid "settings.desc.platformHost"
+msgstr "دامنه عمومی پلتفرم. الزامی."
+
+msgid "settings.desc.storageNetwork"
+msgstr "شناسه VLAN شبکه اختصاصی ذخیره‌سازی."
+
+msgid "settings.desc.storageReplicas"
+msgstr "تعداد نسخه‌های استخر Ceph."
+
+msgid "settings.desc.tlsMode"
+msgstr "منبع گواهی برای نقاط دسترسی پلتفرم."
+
+msgid "settings.desc.virtEmulation"
+msgstr "اجرای ماشین‌های مجازی با شبیه‌سازی نرم‌افزاری روی میزبان‌های بدون KVM."
+
+msgid "settings.host.description"
+msgstr "کوکی‌های ورود و گواهی‌ها با نام میزبان تغییر می‌کنند. کاربران باید با نام جدید دوباره وارد شوند."
+
+msgid "settings.host.title"
+msgstr "تغییر میزبان پلتفرم"
+
+msgid "settings.pending"
+msgstr "در انتظار"
+
+msgid "settings.usesDefault"
+msgstr "از مقدار پیش‌فرض استفاده می‌کند"
 
 msgid "shell.breadcrumb.label"
 msgstr "مسیر صفحه"
