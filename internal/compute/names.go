@@ -40,6 +40,7 @@ const (
 	ReasonSSHKeyNotReady         = "SSHKeyNotReady"
 	ReasonVolumeNotFound         = "VolumeNotFound"
 	ReasonVolumeInUse            = "VolumeInUse"
+	ReasonVolumeNotUsable        = "VolumeNotUsable"
 	ReasonRestoreInProgress      = "RestoreInProgress"
 	ReasonApplyFailed            = "ApplyFailed"
 	ReasonNameConflict           = "NameConflict"

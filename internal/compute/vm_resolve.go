@@ -261,9 +261,42 @@ func (r *VirtualMachineReconciler) stepVolumes(ctx context.Context, vm v1alpha1.
 		if owner := VolumeOwner(vms.Items, disk.VolumeRef); owner != vm.Name {
 			return in, gateOf(ReasonVolumeInUse, "the volume %q is used by %q", disk.VolumeRef, owner), nil
 		}
+		if gate, err := r.usable(ctx, volume); err != nil || gate != nil {
+			return in, gate, err
+		}
 		in.Volumes = append(slices.Clone(in.Volumes), ResolvedVolume{Name: disk.VolumeRef, Bus: effectiveBus(disk, volume)})
 	}
 	return in, nil, nil
+}
+
+func (r *VirtualMachineReconciler) usable(ctx context.Context, volume v1alpha1.Volume) (*Gate, error) {
+	unusable := gateOf(ReasonVolumeNotUsable, "the volume %q is not ready to attach", volume.Name)
+	if !meta.IsStatusConditionTrue(volume.Status.Conditions, v1alpha1.ConditionReady) {
+		return unusable, nil
+	}
+	claim := emptyOf(dataVolumeGVK)
+	err := r.Client.Get(ctx, client.ObjectKeyFromObject(&volume), claim)
+	if notFound(err) {
+		return unusable, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	if controllerUID(claim) != volume.UID {
+		return unusable, nil
+	}
+	var pvc corev1.PersistentVolumeClaim
+	err = r.Client.Get(ctx, client.ObjectKeyFromObject(&volume), &pvc)
+	if apierrors.IsNotFound(err) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	if owner := controllerUID(&pvc); owner != "" && owner != claim.GetUID() && owner != volume.UID {
+		return unusable, nil
+	}
+	return nil, nil
 }
 
 func effectiveBus(disk v1alpha1.VMDisk, volume v1alpha1.Volume) string {

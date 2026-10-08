@@ -127,6 +127,9 @@ func seedPlatform(t *testing.T, c client.Client) string {
 	ensureUnstructured(t, c, fabricGroupGVK, DefaultFabricGroup(ns), map[string]any{})
 	createSSHKey(t, c, ns, "alice", metav1.ConditionTrue)
 	createVolume(t, c, ns, "data1")
+	reconcileVolume(t, c, ns, "data1")
+	setDataVolumePhase(t, c, ns, "data1", "Succeeded")
+	reconcileVolume(t, c, ns, "data1")
 	return ns
 }
 

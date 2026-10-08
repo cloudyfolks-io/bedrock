@@ -575,3 +575,41 @@ func emptyNamed(gvk schema.GroupVersionKind, name string) *unstructured.Unstruct
 	obj.SetName(name)
 	return obj
 }
+
+func TestVMDoesNotAttachAClaimOfAnotherOwner(t *testing.T) {
+	c, _ := startEnv(t)
+	for _, claim := range []string{"a-root", "a-cdrom-0"} {
+		ns := seedPlatform(t, c)
+		r := newVMReconciler(c)
+		createVM(t, c, ns, "a", func(vm *v1alpha1.VirtualMachine) {
+			vm.Spec.Disks = nil
+			vm.Spec.CDROMs = []v1alpha1.VMCDROM{{ImageRef: "install-iso"}}
+		})
+		reconcileVM(t, r, ns, "a")
+		newVolume(t, c, ns, claim, func(v *v1alpha1.Volume) {})
+		createVM(t, c, ns, "b", func(vm *v1alpha1.VirtualMachine) { vm.Spec.Disks = []v1alpha1.VMDisk{{VolumeRef: claim}} })
+		reconcileVM(t, r, ns, "b")
+		requireReason(t, getVM(t, c, ns, "b"), "VolumeNotUsable")
+		reconcileVolume(t, c, ns, claim)
+		reconcileVM(t, r, ns, "b")
+		requireReason(t, getVM(t, c, ns, "b"), "VolumeNotUsable")
+		requireAbsent(t, c, kubeVirtVMGVK, ns, "b")
+	}
+}
+
+func TestVMRefusesAForeignKubeVirtMachine(t *testing.T) {
+	c, _ := startEnv(t)
+	ns := seedPlatform(t, c)
+	foreign := emptyOf(kubeVirtVMGVK)
+	foreign.SetNamespace(ns)
+	foreign.SetName("web-1")
+	foreign.Object["spec"] = map[string]any{"runStrategy": "Halted", "template": map[string]any{"spec": map[string]any{"domain": map[string]any{"devices": map[string]any{}}}}}
+	createObject(t, c, foreign)
+	createVM(t, c, ns, "web-1", noMutation)
+	reconcileVM(t, newVMReconciler(c), ns, "web-1")
+	requireReason(t, getVM(t, c, ns, "web-1"), "NameConflict")
+	after := requirePresent(t, c, kubeVirtVMGVK, ns, "web-1")
+	if got, _, _ := unstructured.NestedString(after.Object, "spec", "runStrategy"); got != "Halted" || len(after.GetOwnerReferences()) != 0 {
+		t.Fatalf("the foreign machine changed: %+v", after.Object)
+	}
+}
