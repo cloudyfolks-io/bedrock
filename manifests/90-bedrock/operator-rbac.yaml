@@ -181,7 +181,6 @@ rules:
   - cdi.kubevirt.io
   resources:
   - cdis
-  - datavolumes
   verbs:
   - create
   - delete
@@ -193,8 +192,9 @@ rules:
 - apiGroups:
   - cdi.kubevirt.io
   resources:
-  - datasources
+  - datavolumes
   verbs:
+  - create
   - get
   - list
   - watch
@@ -251,14 +251,18 @@ rules:
   - update
   - watch
 - apiGroups:
+  - fabric.cloudyfolks.io
+  resources:
+  - security-groups
+  verbs:
+  - get
+- apiGroups:
   - instancetype.kubevirt.io
   resources:
   - virtualmachineclusterinstancetypes
   - virtualmachineclusterpreferences
   verbs:
   - get
-  - list
-  - watch
 - apiGroups:
   - kubevirt.io
   resources:
@@ -276,7 +280,16 @@ rules:
 - apiGroups:
   - kubevirt.io
   resources:
-  - virtualmachineinstancemigrations
+  - virtualmachines
+  verbs:
+  - create
+  - get
+  - list
+  - patch
+  - watch
+- apiGroups:
+  - kubevirt.io
+  resources:
   - virtualmachineinstances
   verbs:
   - get
@@ -368,30 +381,34 @@ rules:
   - virtualmachinesnapshots
   verbs:
   - delete
-  - get
   - list
-  - watch
 - apiGroups:
   - snapshot.storage.k8s.io
   resources:
   - volumesnapshotclasses
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - update
+  - watch
+- apiGroups:
+  - snapshot.storage.k8s.io
+  resources:
   - volumesnapshots
   verbs:
   - create
-  - delete
   - get
   - list
-  - patch
-  - update
   - watch
 - apiGroups:
   - snapshot.storage.k8s.io
   resources:
   - volumesnapshotclasses
   verbs:
-  - get
   - list
-  - watch
 - apiGroups:
   - storage.k8s.io
   resources:
@@ -410,6 +427,13 @@ rules:
   - storageclasses
   verbs:
   - get
+  - list
+  - watch
+- apiGroups:
+  - storage.k8s.io
+  resources:
+  - storageclasses
+  verbs:
   - list
   - watch
 - apiGroups:
@@ -474,6 +498,14 @@ rules:
 - apiGroups:
   - ""
   resources:
+  - secrets
+  verbs:
+  - create
+  - get
+  - patch
+- apiGroups:
+  - ""
+  resources:
   - events
   verbs:
   - create
@@ -503,7 +535,6 @@ rules:
   - persistentvolumeclaims
   - pods
   verbs:
-  - get
   - list
   - patch
   - watch
