@@ -59,7 +59,7 @@ func migrationName(t *testing.T, body []byte) string {
 		Migration string `json:"migration"`
 	}
 	if err := json.Unmarshal(body, &answer); err != nil || answer.Migration == "" {
-		t.Fatalf("migrate answer %q holds no migration name: %v", body, err)
+		t.Fatalf("migrate answer %q holds no migration name: %v", printable(body), err)
 	}
 	return answer.Migration
 }
@@ -154,7 +154,7 @@ func TestProxyActions(t *testing.T) {
 		status, body = e.bearer(t, who.owner, http.MethodGet, e.apiURL(e.vmPath("snapshot")))
 		requireStatus(t, "list snapshots", status, http.StatusOK, body)
 		if !strings.Contains(string(body), e.snapshotsOfVM()[0]) {
-			t.Fatalf("snapshot list %s lacks %s", body, e.snapshotsOfVM()[0])
+			t.Fatalf("snapshot list %s lacks %s", printable(body), e.snapshotsOfVM()[0])
 		}
 	})
 }

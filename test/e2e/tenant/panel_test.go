@@ -91,7 +91,7 @@ func decode[T any](t *testing.T, what string, data []byte) T {
 	t.Helper()
 	var out T
 	if err := json.Unmarshal(data, &out); err != nil {
-		t.Fatalf("decode %s: %v: %s", what, err, data)
+		t.Fatalf("decode %s: %v: %s", what, err, printable(data))
 	}
 	return out
 }
@@ -102,7 +102,7 @@ func requireSession(t *testing.T, e env, c *loginClient) sessionAnswer {
 	requireStatus(t, "session", status, http.StatusOK, body)
 	session := decode[sessionAnswer](t, "session", body)
 	if session.User.Name != "admin" || !session.Admin || len(session.CSRF) != 43 || session.Host != e.host {
-		t.Fatalf("session = %+v, want admin, admin true, a 43 character csrf and host %s", session, e.host)
+		t.Fatalf("session of %q: admin %v, csrf length %d, host %q; want admin, true, 43 and %s", session.User.Name, session.Admin, len(session.CSRF), session.Host, e.host)
 	}
 	return session
 }
@@ -114,7 +114,7 @@ func requireAuthz(t *testing.T, e env, c *loginClient, csrf string) {
 	requireStatus(t, "authz", status, http.StatusOK, data)
 	answer := decode[authzAnswer](t, "authz", data)
 	if len(answer.Results) != 2 || !answer.Results[0].Allowed || !answer.Results[1].Allowed {
-		t.Fatalf("authz answer %s, want both allowed for admin", data)
+		t.Fatalf("authz answer %s, want both allowed for admin", printable(data))
 	}
 }
 
@@ -123,7 +123,7 @@ func requireCSRFGuard(t *testing.T, e env, c *loginClient, csrf, value string) {
 	patch := `{"spec":{"value":"` + value + `"}}`
 	status, body := c.request(t, e, http.MethodPatch, settingsPath+"/"+settingName, "", "application/merge-patch+json", patch)
 	if status != http.StatusForbidden || !strings.Contains(string(body), `"csrf"`) {
-		t.Fatalf("patch without csrf: status %d: %s, want 403 csrf", status, body)
+		t.Fatalf("patch without csrf: status %d: %s, want 403 csrf", status, printable(body))
 	}
 	status, body = c.request(t, e, http.MethodPatch, settingsPath+"/"+settingName, csrf, "application/merge-patch+json", patch)
 	requireStatus(t, "patch with csrf", status, http.StatusOK, body)
@@ -179,7 +179,7 @@ func listResourceVersion(t *testing.T, e env, c *loginClient) string {
 		} `json:"metadata"`
 	}](t, "settings list", body)
 	if list.Metadata.ResourceVersion == "" {
-		t.Fatalf("settings list carries no resourceVersion: %s", body)
+		t.Fatalf("settings list carries no resourceVersion: %s", printable(body))
 	}
 	return list.Metadata.ResourceVersion
 }

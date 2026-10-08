@@ -10,6 +10,7 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"regexp"
 	"testing"
 	"time"
 
@@ -67,6 +68,18 @@ func certPool(t *testing.T, caFile string) *x509.CertPool {
 
 func trustingTransport(roots *x509.CertPool) *http.Transport {
 	return &http.Transport{TLSClientConfig: &tls.Config{MinVersion: tls.VersionTLS12, RootCAs: roots}}
+}
+
+const maxPrintedBody = 512
+
+var secretValue = regexp.MustCompile(`("(?:access_token|refresh_token|id_token|token)"\s*:\s*)"[^"]*"`)
+
+func printable(body []byte) string {
+	text := secretValue.ReplaceAllString(string(body), `$1"[redacted]"`)
+	if len(text) > maxPrintedBody {
+		return text[:maxPrintedBody] + "..."
+	}
+	return text
 }
 
 func noRedirects(*http.Request, []*http.Request) error {
@@ -138,7 +151,7 @@ func (e env) send(t *testing.T, req *http.Request) (int, []byte) {
 func requireStatus(t *testing.T, what string, got, want int, body []byte) {
 	t.Helper()
 	if got != want {
-		t.Fatalf("%s: status %d, want %d: %s", what, got, want, body)
+		t.Fatalf("%s: status %d, want %d: %s", what, got, want, printable(body))
 	}
 }
 

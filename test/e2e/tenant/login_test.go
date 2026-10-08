@@ -95,7 +95,7 @@ func redirectLocation(t *testing.T, step string, resp *http.Response) *url.URL {
 	defer resp.Body.Close()
 	if resp.StatusCode/100 != 3 {
 		body, _ := io.ReadAll(resp.Body)
-		t.Fatalf("%s: want a redirect from %s, got %d: %s", step, resp.Request.URL, resp.StatusCode, body)
+		t.Fatalf("%s: want a redirect from %s, got %d: %s", step, resp.Request.URL, resp.StatusCode, printable(body))
 	}
 	loc, err := resp.Location()
 	if err != nil {
@@ -129,11 +129,11 @@ func (c *loginClient) call(t *testing.T, method, path, csrf string, body any) ch
 	defer resp.Body.Close()
 	data, _ := io.ReadAll(resp.Body)
 	if resp.StatusCode >= 400 {
-		t.Fatalf("%s %s: status %d: %s", method, path, resp.StatusCode, data)
+		t.Fatalf("%s %s: status %d: %s", method, path, resp.StatusCode, printable(data))
 	}
 	var out challenge
 	if err := json.Unmarshal(data, &out); err != nil {
-		t.Fatalf("decode %s: %v: %s", path, err, data)
+		t.Fatalf("decode %s: %v: %s", path, err, printable(data))
 	}
 	return out
 }
