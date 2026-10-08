@@ -62,7 +62,7 @@ func TestRenderProxyObjects(t *testing.T) {
 	want := []string{
 		"Host(`console.lab.example`) && !Path(`/healthz`) && !Path(`/readyz`)",
 		"Host(`api.lab.example`) && !Path(`/healthz`) && !Path(`/readyz`)",
-		"Host(`lab.example`)",
+		"Host(`lab.example`) && !Path(`/healthz`) && !Path(`/readyz`)",
 	}
 	got := proxyMatches(t, route)
 	if strings.Join(got, "\n") != strings.Join(want, "\n") {

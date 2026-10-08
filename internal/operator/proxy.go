@@ -59,7 +59,7 @@ func proxyIngressRoute(host string) *unstructured.Unstructured {
 	matches := []string{
 		"Host(`console." + host + "`)" + excluded,
 		"Host(`api." + host + "`)" + excluded,
-		"Host(`" + host + "`)",
+		"Host(`" + host + "`)" + excluded,
 	}
 	routes := make([]any, 0, len(matches))
 	for _, match := range matches {
