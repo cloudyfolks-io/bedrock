@@ -25,6 +25,7 @@ import (
 )
 
 const (
+	catalogRetry      = time.Minute
 	applyFailureRetry = 30 * time.Second
 	launcherPodLabel  = "vm.kubevirt.io/name"
 )
@@ -55,10 +56,28 @@ func (r *VirtualMachineReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 	if err != nil {
 		return ctrl.Result{}, err
 	}
-	if err := r.writeStatus(ctx, vm, done.Gate); err != nil {
+	obs, err := r.observe(ctx, vm)
+	if err != nil {
+		return ctrl.Result{}, err
+	}
+	expiring, err := r.pruneSnapshots(ctx, vm)
+	if err != nil {
+		return ctrl.Result{}, err
+	}
+	if err := r.writeStatus(ctx, vm, done.Gate, obs); err != nil {
 		logf.FromContext(ctx).Error(err, "write the virtual machine status")
 	}
-	return ctrl.Result{RequeueAfter: done.RequeueAfter}, nil
+	return ctrl.Result{RequeueAfter: requeueAfter(done, obs, expiring)}, nil
+}
+
+func requeueAfter(done outcome, obs observation, expiring bool) time.Duration {
+	if done.RequeueAfter > 0 {
+		return done.RequeueAfter
+	}
+	if expiring || obs.Phase == v1alpha1.VMPhaseRunning || obs.Phase == v1alpha1.VMPhaseMigrating {
+		return observeInterval
+	}
+	return 0
 }
 
 func (r *VirtualMachineReconciler) converge(ctx context.Context, vm v1alpha1.VirtualMachine) (outcome, error) {
@@ -78,9 +97,16 @@ func (r *VirtualMachineReconciler) converge(ctx context.Context, vm v1alpha1.Vir
 	}
 	in, gate, err := r.resolve(ctx, vm, labels)
 	if err != nil || gate != nil {
-		return outcome{Gate: gate}, err
+		return outcome{Gate: gate, RequeueAfter: catalogRetryFor(gate)}, err
 	}
 	return r.apply(ctx, in)
+}
+
+func catalogRetryFor(gate *Gate) time.Duration {
+	if gate != nil && (gate.Reason == ReasonInstanceTypeNotFound || gate.Reason == ReasonPreferenceNotFound) {
+		return catalogRetry
+	}
+	return 0
 }
 
 func (r *VirtualMachineReconciler) apply(ctx context.Context, in RenderInput) (outcome, error) {
@@ -254,19 +280,32 @@ func mergeConditions(old, desired []metav1.Condition, now time.Time) []metav1.Co
 	return out
 }
 
-func (r *VirtualMachineReconciler) writeStatus(ctx context.Context, vm v1alpha1.VirtualMachine, gate *Gate) error {
+func (r *VirtualMachineReconciler) writeStatus(ctx context.Context, vm v1alpha1.VirtualMachine, gate *Gate, obs observation) error {
 	return retry.RetryOnConflict(retry.DefaultRetry, func() error {
 		var current v1alpha1.VirtualMachine
 		if err := r.Client.Get(ctx, client.ObjectKeyFromObject(&vm), &current); err != nil {
 			return client.IgnoreNotFound(err)
 		}
 		desired := current.DeepCopy()
-		desired.Status.ObservedGeneration = current.Generation
-		conditions := Conditions(current.Generation, current.Status.Phase, current.Spec.Running, gate, ObservedVM{})
-		desired.Status.Conditions = mergeConditions(current.Status.Conditions, conditions, r.now())
+		desired.Status = statusOf(current, gate, obs, r.now())
 		if equality.Semantic.DeepEqual(current.Status, desired.Status) {
 			return nil
 		}
 		return r.Client.Status().Update(ctx, desired, client.FieldOwner(v1alpha1.ComputeFieldManager))
 	})
+}
+
+func statusOf(vm v1alpha1.VirtualMachine, gate *Gate, obs observation, now time.Time) v1alpha1.VirtualMachineStatus {
+	status := v1alpha1.VirtualMachineStatus{
+		CommonStatus: v1alpha1.CommonStatus{ObservedGeneration: vm.Generation},
+		Phase:        obs.Phase,
+		Node:         obs.Node,
+		Addresses:    obs.Addresses,
+		ElasticIP:    obs.ElasticIP,
+		GuestAgent:   obs.GuestAgent,
+		Console:      ConsoleFor(obs.Phase, vm.Namespace, vm.Name),
+	}
+	conditions := Conditions(vm.Generation, obs.Phase, vm.Spec.Running, gate, obs.KubeVirt)
+	status.Conditions = mergeConditions(vm.Status.Conditions, conditions, now)
+	return status
 }
