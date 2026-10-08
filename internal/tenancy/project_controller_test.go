@@ -3,6 +3,7 @@ package tenancy
 import (
 	"context"
 	"reflect"
+	"sync"
 	"testing"
 
 	corev1 "k8s.io/api/core/v1"
@@ -261,4 +262,47 @@ func TestProjectDoesNotProvisionUnderADeletingTenant(t *testing.T) {
 	if getInto(t, c, "acme-shop", &corev1.Namespace{}) {
 		t.Fatal("namespace created for a deleting tenant")
 	}
+}
+
+func TestSimultaneousProjectsShareOneCeilingSlot(t *testing.T) {
+	c, _ := projectWorld(t)
+	tenant := tenantWith("acme", "10.100.0.0/16")
+	tenant.Spec.Quota.Projects = ptr.To(int32(1))
+	mustCreate(t, c, tenant)
+	var group sync.WaitGroup
+	for _, name := range []string{"one", "two"} {
+		group.Add(1)
+		go func() {
+			defer group.Done()
+			if err := c.Create(context.Background(), projectFor(name, "acme")); err != nil {
+				t.Error(err)
+			}
+		}()
+	}
+	group.Wait()
+	waitFor(t, func() bool {
+		one, two := fetchProject(t, c, "one"), fetchProject(t, c, "two")
+		return one != nil && two != nil && (one.Status.Namespace != "" || two.Status.Namespace != "") &&
+			(hasCondition(ConditionAdmitted, metav1.ConditionFalse, ReasonProjectQuotaExceeded)(one) || hasCondition(ConditionAdmitted, metav1.ConditionFalse, ReasonProjectQuotaExceeded)(two))
+	})
+	namespaces := 0
+	for _, name := range []string{"one", "two"} {
+		if getInto(t, c, "acme-"+name, &corev1.Namespace{}) {
+			namespaces++
+		}
+	}
+	if namespaces != 1 {
+		t.Fatalf("namespaces = %d, want 1", namespaces)
+	}
+}
+
+func TestConflictedProjectDoesNotHoldACeilingSlot(t *testing.T) {
+	c, _ := projectWorld(t)
+	tenant := tenantWith("acme", "10.100.0.0/16")
+	tenant.Spec.Quota.Projects = ptr.To(int32(1))
+	mustCreate(t, c, namespaceNamed("acme-a-stuck", map[string]string{"team": "x"}), tenant, projectFor("a-stuck", "acme"))
+	projectReady(t, c, "a-stuck", hasCondition(ConditionNamespaceReady, metav1.ConditionFalse, ReasonNamespaceConflict))
+	mustCreate(t, c, projectFor("b-free", "acme"))
+	waitFor(t, func() bool { return getInto(t, c, "acme-b-free", &corev1.Namespace{}) })
+	projectReady(t, c, "b-free", hasCondition(ConditionAdmitted, metav1.ConditionTrue, ReasonAdmitted))
 }

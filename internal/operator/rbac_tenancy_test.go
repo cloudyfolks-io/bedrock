@@ -10,6 +10,7 @@ import (
 	rbacv1 "k8s.io/api/rbac/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/client-go/rest"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -117,8 +118,7 @@ func TestOperatorRoleDrivesTenancy(t *testing.T) {
 	quota := &unstructured.Unstructured{}
 	quota.SetGroupVersionKind(tenancy.QuotaGVK)
 	exists := func(obj client.Object, key client.ObjectKey) bool { return admin.Get(ctx, key, obj) == nil }
-	deadline := time.Now().Add(60 * time.Second)
-	for time.Now().Before(deadline) {
+	settled := func(context.Context) (bool, error) {
 		ready := exists(&corev1.Namespace{}, client.ObjectKey{Name: "acme-shop"}) &&
 			exists(&v1alpha1.Subnet{}, client.ObjectKey{Namespace: "acme-shop", Name: tenancy.DefaultSubnetName}) &&
 			exists(quota, client.ObjectKey{Namespace: "acme-shop", Name: tenancy.QuotaName}) &&
@@ -126,18 +126,14 @@ func TestOperatorRoleDrivesTenancy(t *testing.T) {
 			exists(&rbacv1.RoleBinding{}, client.ObjectKey{Namespace: "acme-shop", Name: v1alpha1.RoleProjectEditor}) &&
 			exists(&rbacv1.ClusterRole{}, client.ObjectKey{Name: v1alpha1.TenantOwnerClusterRole("acme")}) &&
 			exists(&rbacv1.ClusterRoleBinding{}, client.ObjectKey{Name: v1alpha1.TenantOwnerClusterRole("acme")})
-		if ready {
-			break
+		if !ready || admin.Get(ctx, client.ObjectKeyFromObject(tenant), tenant) != nil || admin.Get(ctx, client.ObjectKeyFromObject(project), project) != nil {
+			return false, nil
 		}
-		time.Sleep(200 * time.Millisecond)
+		return len(tenant.Status.Conditions) > 0 && len(project.Status.Conditions) > 0, nil
 	}
-	if !exists(&corev1.Namespace{}, client.ObjectKey{Name: "acme-shop"}) {
-		t.Fatal("the operator identity did not create the namespace")
+	if err := wait.PollUntilContextTimeout(ctx, 200*time.Millisecond, 60*time.Second, true, settled); err != nil {
+		t.Fatalf("the operator identity did not create every object: %v", err)
 	}
-	if !exists(quota, client.ObjectKey{Namespace: "acme-shop", Name: tenancy.QuotaName}) || !exists(&rbacv1.RoleBinding{}, client.ObjectKey{Namespace: "acme-shop", Name: v1alpha1.RoleProjectEditor}) || !exists(&rbacv1.ClusterRoleBinding{}, client.ObjectKey{Name: v1alpha1.TenantOwnerClusterRole("acme")}) {
-		t.Fatal("the operator identity could not create every object")
-	}
-	time.Sleep(2 * time.Second)
 	for _, check := range []struct {
 		obj        client.Object
 		conditions func() []metav1.Condition
