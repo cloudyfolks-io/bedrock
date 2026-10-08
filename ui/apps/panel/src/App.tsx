@@ -1,8 +1,5 @@
-import { useEffect } from "react";
-import { i18n } from "@lingui/core";
-import { I18nProvider } from "@lingui/react";
 import { useLingui } from "@lingui/react/macro";
-import { activate, pickLocale, readStoredLocale } from "./i18n";
+import { LocaleProvider } from "./LocaleProvider";
 
 function Title() {
   const { t } = useLingui();
@@ -10,13 +7,9 @@ function Title() {
 }
 
 export function App() {
-  useEffect(() => {
-    activate(pickLocale(readStoredLocale(), navigator.languages));
-  }, []);
-
   return (
-    <I18nProvider i18n={i18n}>
+    <LocaleProvider>
       <Title />
-    </I18nProvider>
+    </LocaleProvider>
   );
 }

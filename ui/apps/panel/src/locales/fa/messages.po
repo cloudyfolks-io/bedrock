@@ -9,3 +9,27 @@ msgstr ""
 
 msgid "app.title"
 msgstr "بدراک"
+
+msgid "common.action.cancel"
+msgstr "انصراف"
+
+msgid "common.action.close"
+msgstr "بستن"
+
+msgid "common.action.create"
+msgstr "ایجاد"
+
+msgid "common.action.delete"
+msgstr "حذف"
+
+msgid "common.action.edit"
+msgstr "ویرایش"
+
+msgid "common.action.retry"
+msgstr "تلاش دوباره"
+
+msgid "common.action.save"
+msgstr "ذخیره"
+
+msgid "common.count.vms"
+msgstr "{count, plural, one {# ماشین مجازی} other {# ماشین مجازی}}"

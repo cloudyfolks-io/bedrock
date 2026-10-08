@@ -9,3 +9,27 @@ msgstr ""
 
 msgid "app.title"
 msgstr "بيدروك"
+
+msgid "common.action.cancel"
+msgstr "إلغاء"
+
+msgid "common.action.close"
+msgstr "إغلاق"
+
+msgid "common.action.create"
+msgstr "إنشاء"
+
+msgid "common.action.delete"
+msgstr "حذف"
+
+msgid "common.action.edit"
+msgstr "تعديل"
+
+msgid "common.action.retry"
+msgstr "إعادة المحاولة"
+
+msgid "common.action.save"
+msgstr "حفظ"
+
+msgid "common.count.vms"
+msgstr "{count, plural, zero {لا توجد أجهزة افتراضية} one {جهاز افتراضي واحد} two {جهازان افتراضيان} few {# أجهزة افتراضية} many {# جهازًا افتراضيًا} other {# جهاز افتراضي}}"

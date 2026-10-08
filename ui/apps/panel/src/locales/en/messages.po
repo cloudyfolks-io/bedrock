@@ -9,3 +9,27 @@ msgstr ""
 
 msgid "app.title"
 msgstr "Bedrock"
+
+msgid "common.action.cancel"
+msgstr "Cancel"
+
+msgid "common.action.close"
+msgstr "Close"
+
+msgid "common.action.create"
+msgstr "Create"
+
+msgid "common.action.delete"
+msgstr "Delete"
+
+msgid "common.action.edit"
+msgstr "Edit"
+
+msgid "common.action.retry"
+msgstr "Retry"
+
+msgid "common.action.save"
+msgstr "Save"
+
+msgid "common.count.vms"
+msgstr "{count, plural, one {# virtual machine} other {# virtual machines}}"
