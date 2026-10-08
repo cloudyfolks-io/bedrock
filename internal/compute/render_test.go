@@ -90,7 +90,7 @@ func TestRenderDisksAndVolumes(t *testing.T) {
 		map[string]any{"name": "rootdisk", "dataVolume": map[string]any{"name": "web-1-root"}},
 		map[string]any{"name": "cdrom-0", "dataVolume": map[string]any{"name": "web-1-cdrom-0"}},
 		map[string]any{"name": "vol-5b41362bc82b7f3d56ed", "persistentVolumeClaim": map[string]any{"claimName": "data1", "hotpluggable": true}},
-		map[string]any{"name": "cloudinit", "cloudInitNoCloud": map[string]any{"userDataSecretRef": map[string]any{"name": "web-1-cloudinit"}}},
+		map[string]any{"name": "cloudinit", "cloudInitNoCloud": map[string]any{"secretRef": map[string]any{"name": "web-1-cloudinit"}}},
 	}
 	if got := list(t, spec, "volumes"); !reflect.DeepEqual(got, wantVolumes) {
 		t.Fatalf("volumes %+v", got)

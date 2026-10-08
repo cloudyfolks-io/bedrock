@@ -275,7 +275,7 @@ func volumesOf(vm v1alpha1.VirtualMachine, volumes []ResolvedVolume, cdroms int,
 			"persistentVolumeClaim": map[string]any{"claimName": volume.Name, "hotpluggable": true},
 		})
 	}
-	noCloud := map[string]any{"userDataSecretRef": map[string]any{"name": CloudInitSecretName(vm.Name)}}
+	noCloud := map[string]any{"secretRef": map[string]any{"name": CloudInitSecretName(vm.Name)}}
 	if hasNetworkData {
 		noCloud["networkDataSecretRef"] = map[string]any{"name": CloudInitSecretName(vm.Name)}
 	}
