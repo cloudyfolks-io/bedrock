@@ -79,6 +79,8 @@ func TestOperatorRoleCarriesTheAddonRules(t *testing.T) {
 	}
 	for _, check := range []struct{ group, resource, verb string }{
 		{"node.k8s.io", "runtimeclasses", "create"},
+		{"", "secrets", "create"},
+		{"", "secrets", "patch"},
 		{"apps", "statefulsets", "delete"},
 		{"bedrock.cloudyfolks.io", "addons/finalizers", "update"},
 	} {
