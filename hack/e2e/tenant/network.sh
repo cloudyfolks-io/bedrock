@@ -159,9 +159,9 @@ network_isolation() {
   local pause
   pause=$(k0s ctr --namespace k8s.io images ls -q | grep '/pause:' | head -1)
   isolated_pod_manifest "$pause" k8s.v1.cni.cncf.io/networks other-ns/default |
-    expect_refused "a pod may attach only to networks of its own namespace" kubectl --as=bedrock:e2e-user --as-group=system:masters -n "$NS" apply -f -
+    expect_refused "only the platform may set network selection annotations" kubectl --as=bedrock:e2e-user --as-group=system:masters -n "$NS" apply -f -
   isolated_pod_manifest "$pause" fabric.cloudyfolks.io/logical_switch default |
-    expect_refused "only the platform may set it" kubectl --as=bedrock:e2e-user --as-group=system:masters -n "$NS" apply -f -
+    expect_refused "only the platform may set network selection annotations" kubectl --as=bedrock:e2e-user --as-group=system:masters -n "$NS" apply -f -
   expect_equal Running "$(kubectl -n "$NS" get virtualmachine vm1 -o jsonpath='{.status.phase}')" "vm1 under the pod policy"
 }
 
