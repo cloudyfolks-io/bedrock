@@ -215,3 +215,20 @@ assert_storage_ready() {
   done
   kubectl get volumesnapshotclass block
 }
+
+provider_underlay_up() {
+  if ip link show bdrpub0 >/dev/null 2>&1; then
+    return
+  fi
+  ip link add bdrpub0 type veth peer name bdrpub0p
+  ip link set bdrpub0 up
+  ip netns add bdrext
+  ip link set bdrpub0p netns bdrext
+  ip -n bdrext link set lo up
+  ip -n bdrext link set bdrpub0p up
+  ip -n bdrext addr add 192.0.2.250/24 dev bdrpub0p
+}
+
+provider_network_entry() {
+  echo "{name: $1, interface: bdrpub0, cidr: 192.0.2.0/24, gateway: 192.0.2.1}"
+}

@@ -53,6 +53,8 @@ dump() {
     kubectl -n rook-ceph get pods -o wide || true
     kubectl -n rook-ceph get cephcluster -o yaml || true
     lsblk || true
+    ip -br addr show bdrpub0 || true
+    ip -n bdrext -br addr show || true
     kubectl -n kubevirt get pods -o wide || true
     kubectl -n cdi get pods -o wide || true
     kubectl -n traefik get pods,svc -o wide || true
@@ -106,7 +108,13 @@ if [ -n "${E2E_OSD_DEVICE:-}" ]; then
   test -b "$osd_device"
 fi
 
-VERSION=$version VIP=$vip IFACE=$iface EMULATION=$emulation PLATFORM_HOST=$platform_host OSD_DEVICES=$(flow_list "$osd_device") envsubst < hack/e2e/cluster.yaml.tmpl > "$workdir/cluster.yaml"
+provider_entry=""
+if [ -n "${E2E_PROVIDER_NETWORK:-}" ]; then
+  provider_underlay_up
+  provider_entry=$(provider_network_entry "$E2E_PROVIDER_NETWORK")
+fi
+
+VERSION=$version VIP=$vip IFACE=$iface EMULATION=$emulation PLATFORM_HOST=$platform_host OSD_DEVICES=$(flow_list "$osd_device") PROVIDER_NETWORKS=$(flow_list "$provider_entry") envsubst < hack/e2e/cluster.yaml.tmpl > "$workdir/cluster.yaml"
 cat "$workdir/cluster.yaml"
 
 run_init() {
