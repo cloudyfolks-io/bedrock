@@ -24,6 +24,7 @@ interface AuthzStore {
   accessOf(check: Check): Access;
   subscribe(listener: () => void): () => void;
   version(): number;
+  dispose(): void;
 }
 
 function chunk<T>(items: T[], size: number): T[][] {
@@ -37,6 +38,8 @@ function createAuthzStore(http: Http): AuthzStore {
   let queued = new Map<string, Check>();
   let scheduled = false;
   let counter = 0;
+  let disposed = false;
+  const timers = new Set<ReturnType<typeof setTimeout>>();
   const listeners = new Set<() => void>();
 
   function notify(): void {
@@ -44,18 +47,30 @@ function createAuthzStore(http: Http): AuthzStore {
     listeners.forEach((listener) => listener());
   }
 
+  function later(action: () => void, delay: number): void {
+    const timer = setTimeout(() => {
+      timers.delete(timer);
+      action();
+    }, delay);
+    timers.add(timer);
+  }
+
+  function schedule(): void {
+    if (!scheduled) {
+      scheduled = true;
+      queueMicrotask(() => later(flush, 0));
+    }
+  }
+
   function retry(checks: Check[]): void {
     checks.forEach((check) => {
       const key = checkKey(check);
       const attempt = (failures.get(key) ?? 0) + 1;
       failures.set(key, attempt);
-      setTimeout(() => {
+      later(() => {
         inflight.delete(key);
         queued.set(key, check);
-        if (!scheduled) {
-          scheduled = true;
-          queueMicrotask(() => setTimeout(flush, 0));
-        }
+        schedule();
       }, Math.min(30_000, 1000 * 2 ** (attempt - 1)));
     });
   }
@@ -65,6 +80,9 @@ function createAuthzStore(http: Http): AuthzStore {
       .request<{ results: { allowed: boolean }[] }>("POST", "/proxy/v1/authz", { body: { checks } })
       .then((answer) => answer.results.map((result) => (result.allowed ? ("allowed" as const) : ("denied" as const))))
       .catch(() => undefined);
+    if (disposed) {
+      return;
+    }
     if (!outcome) {
       retry(checks);
       return;
@@ -94,10 +112,7 @@ function createAuthzStore(http: Http): AuthzStore {
       }
       inflight.add(key);
       queued.set(key, check);
-      if (!scheduled) {
-        scheduled = true;
-        queueMicrotask(() => setTimeout(flush, 0));
-      }
+      schedule();
     },
     accessOf: (check) => results.get(checkKey(check))?.access ?? "pending",
     subscribe(listener) {
@@ -105,6 +120,12 @@ function createAuthzStore(http: Http): AuthzStore {
       return () => listeners.delete(listener);
     },
     version: () => counter,
+    dispose() {
+      disposed = true;
+      timers.forEach((timer) => clearTimeout(timer));
+      timers.clear();
+      listeners.clear();
+    },
   };
 }
 
@@ -114,6 +135,7 @@ export function AuthzProvider({ children }: { children: ReactNode }) {
   const http = useHttp();
   const user = useSession().data?.user.name;
   const store = useMemo(() => createAuthzStore(http), [http, user]);
+  useEffect(() => () => store.dispose(), [store]);
   return <AuthzContext.Provider value={store}>{children}</AuthzContext.Provider>;
 }
 

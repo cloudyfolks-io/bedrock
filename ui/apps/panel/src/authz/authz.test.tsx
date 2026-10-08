@@ -156,4 +156,33 @@ describe("authz", () => {
     expect(await screen.findByText("can-create", undefined, { timeout: 4000 })).toBeTruthy();
     expect(calls).toBeGreaterThanOrEqual(2);
   });
+
+  it("TestNoRetryTimerSurvivesUnmount", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "queueMicrotask"] });
+    const view = renderPanel(
+      <Can check={create}>
+        <span>can-create</span>
+      </Can>,
+      { api: { "POST /proxy/v1/authz": { status: 502, body: { error: "upstream_unavailable" } } } },
+    );
+    const started: { id: unknown; delay: unknown }[] = [];
+    const realSet = globalThis.setTimeout;
+    const setSpy = vi.spyOn(globalThis, "setTimeout").mockImplementation(((handler: () => void, delay?: number) => {
+      const id = realSet(handler, delay);
+      started.push({ id, delay });
+      return id;
+    }) as unknown as typeof setTimeout);
+    const clearSpy = vi.spyOn(globalThis, "clearTimeout");
+    for (let tick = 0; tick < 3; tick += 1) {
+      await vi.advanceTimersByTimeAsync(100);
+    }
+    expect(authzCalls(view.api.calls)).toHaveLength(1);
+    const retry = started.find((entry) => entry.delay === 1000);
+    expect(retry).toBeTruthy();
+    view.unmount();
+    expect(clearSpy).toHaveBeenCalledWith(retry?.id);
+    setSpy.mockRestore();
+    await vi.advanceTimersByTimeAsync(120_000);
+    expect(authzCalls(view.api.calls)).toHaveLength(1);
+  });
 });
