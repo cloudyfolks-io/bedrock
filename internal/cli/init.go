@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"io"
 	"io/fs"
+	"maps"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -23,6 +24,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	"github.com/cloudyfolks-io/bedrock/api/v1alpha1"
+	"github.com/cloudyfolks-io/bedrock/internal/audit"
 	"github.com/cloudyfolks-io/bedrock/internal/authn/apiserver"
 	"github.com/cloudyfolks-io/bedrock/internal/authn/methods"
 	"github.com/cloudyfolks-io/bedrock/internal/authn/secret"
@@ -33,6 +35,7 @@ import (
 	"github.com/cloudyfolks-io/bedrock/internal/preflight"
 	"github.com/cloudyfolks-io/bedrock/internal/release"
 	"github.com/cloudyfolks-io/bedrock/internal/roles"
+	"github.com/cloudyfolks-io/bedrock/internal/settings"
 	"github.com/cloudyfolks-io/bedrock/internal/ssa"
 )
 
@@ -224,8 +227,11 @@ func RunInit(ctx context.Context, args []string, deps InitDeps, stdout, stderr i
 			return fail(stderr, err)
 		}
 	}
-	step(stdout, "writing authn files")
+	step(stdout, "writing authn and audit files")
 	if err := writeAuthnFiles(deps.Root, authnFileInputs(cfg.Spec.Platform.TLSMode, authnInputs)); err != nil {
+		return fail(stderr, err)
+	}
+	if err := installAuditFiles(deps.Root); err != nil {
 		return fail(stderr, err)
 	}
 	if !running {
@@ -425,7 +431,7 @@ func removeBundleDir(dir string) {
 
 func writeK0sConfig(path string, cfg v1alpha1.ClusterConfig) error {
 	sans := []string{cfg.Spec.API.VIP, "api." + cfg.Spec.Platform.Host}
-	raw, err := k0s.RenderConfig(k0s.Config{VIP: cfg.Spec.API.VIP, SANs: sans, PodCIDR: cfg.Spec.Network.Fabric.PodCIDR, ServiceCIDR: cfg.Spec.Network.Fabric.ServiceCIDR, APIExtraArgs: apiserver.Args()})
+	raw, err := k0s.RenderConfig(k0s.Config{VIP: cfg.Spec.API.VIP, SANs: sans, PodCIDR: cfg.Spec.Network.Fabric.PodCIDR, ServiceCIDR: cfg.Spec.Network.Fabric.ServiceCIDR, APIExtraArgs: apiExtraArgs()})
 	if err != nil {
 		return err
 	}
@@ -433,6 +439,13 @@ func writeK0sConfig(path string, cfg v1alpha1.ClusterConfig) error {
 		return err
 	}
 	return os.WriteFile(path, raw, 0o600)
+}
+
+func apiExtraArgs() map[string]string {
+	args := map[string]string{}
+	maps.Copy(args, apiserver.Args())
+	maps.Copy(args, audit.Args())
+	return args
 }
 
 func hasRole(list []string, role string) bool {
@@ -654,6 +667,24 @@ func writeAuthnFiles(root string, in apiserver.Inputs) error {
 
 func installAuthnFiles(root string, files map[string][]byte) error {
 	_, err := apiserver.WriteFiles(filepath.Join(root, apiserver.Dir), files, apiserver.APIServerOwner())
+	return err
+}
+
+func installAuditFiles(root string) error {
+	owner := apiserver.APIServerOwner()
+	if _, err := apiserver.WriteFiles(filepath.Join(root, audit.LogDir), nil, owner); err != nil {
+		return err
+	}
+	policyPath := filepath.Join(root, audit.Dir, audit.PolicyFile)
+	if _, err := os.Stat(policyPath); err == nil {
+		return nil
+	}
+	level, _ := settings.Lookup("audit.level")
+	policy, err := audit.Policy(level.Default)
+	if err != nil {
+		return err
+	}
+	_, err = apiserver.WriteFiles(filepath.Join(root, audit.Dir), map[string][]byte{audit.PolicyFile: policy}, owner)
 	return err
 }
 

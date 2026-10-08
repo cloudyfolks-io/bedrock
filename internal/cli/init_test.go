@@ -26,6 +26,7 @@ import (
 	sigyaml "sigs.k8s.io/yaml"
 
 	"github.com/cloudyfolks-io/bedrock/api/v1alpha1"
+	"github.com/cloudyfolks-io/bedrock/internal/audit"
 	"github.com/cloudyfolks-io/bedrock/internal/authn/apiserver"
 	"github.com/cloudyfolks-io/bedrock/internal/host"
 	"github.com/cloudyfolks-io/bedrock/internal/k0s"
@@ -731,6 +732,70 @@ func TestInitWritesAuthnFilesBeforeK0s(t *testing.T) {
 	if issuer["url"] != "https://sso.cloud.example.com" || issuer["certificateAuthority"] != ca {
 		t.Fatalf("issuer %v", issuer)
 	}
+}
+
+func TestInitStartsWithAuditEnabled(t *testing.T) {
+	run := prepareInit(t)
+	present := false
+	policy := filepath.Join(run.root, "etc", "bedrock", "audit", "policy.yaml")
+	run.deps.Exec = filesAtStart{FakeExec: run.deps.Exec.(*host.FakeExec), paths: []string{policy, filepath.Join(run.root, "var", "log", "bedrock", "audit")}, present: &present}
+	runPreparedInit(t, run)
+	if !present {
+		t.Fatal("the audit files must exist before k0s starts")
+	}
+	info, err := os.Stat(policy)
+	if err != nil || info.Mode().Perm() != 0o600 {
+		t.Fatalf("policy %v %v", info, err)
+	}
+	want, err := audit.Policy("Metadata")
+	if err != nil || readInitFile(t, policy) != string(want) {
+		t.Fatalf("the policy must be the default level: %v", err)
+	}
+	if dir, err := os.Stat(filepath.Join(run.root, "var", "log", "bedrock", "audit")); err != nil || !dir.IsDir() {
+		t.Fatalf("log directory %v %v", dir, err)
+	}
+	args := initExtraArgs(t, run)
+	if len(args) < 8 {
+		t.Fatalf("extraArgs %v", args)
+	}
+	for name, value := range audit.Args() {
+		if args[name] != value {
+			t.Errorf("%s = %v, want %s", name, args[name], value)
+		}
+	}
+}
+
+func TestInitKeepsAnEditedAuditPolicy(t *testing.T) {
+	run := prepareInit(t)
+	runPreparedInit(t, run)
+	policy := filepath.Join(run.root, "etc", "bedrock", "audit", "policy.yaml")
+	if err := os.WriteFile(policy, []byte("edited"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	runPreparedInit(t, run)
+	if readInitFile(t, policy) != "edited" {
+		t.Fatal("a second init must not reset the audit policy")
+	}
+}
+
+func TestInitKeepsTheAuthnArgs(t *testing.T) {
+	run := prepareInit(t)
+	runPreparedInit(t, run)
+	args := initExtraArgs(t, run)
+	for name, value := range apiserver.Args() {
+		if args[name] != value {
+			t.Errorf("%s = %v, want %s", name, args[name], value)
+		}
+	}
+}
+
+func initExtraArgs(t *testing.T, run initRun) map[string]any {
+	t.Helper()
+	var doc map[string]any
+	if err := sigyaml.Unmarshal([]byte(readInitFile(t, filepath.Join(run.root, "etc", "k0s", "k0s.yaml"))), &doc); err != nil {
+		t.Fatal(err)
+	}
+	return doc["spec"].(map[string]any)["api"].(map[string]any)["extraArgs"].(map[string]any)
 }
 
 func TestInitKeepsExistingCA(t *testing.T) {
