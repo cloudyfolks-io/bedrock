@@ -89,7 +89,7 @@ func duration(min time.Duration) func(string) error {
 }
 
 func Catalog() []Definition {
-	return []Definition{
+	return slices.Concat([]Definition{
 		{"platform.host", "", "Public domain of the platform. Required.", domainName},
 		{"platform.tls-mode", "SelfSigned", "Certificate source for the platform endpoints.", oneOf("SelfSigned", "LetsEncrypt", "Custom")},
 		{"platform.additional-ca", "", "PEM bundle of extra CAs trusted for outbound connections.", free},
@@ -116,7 +116,7 @@ func Catalog() []Definition {
 		{"authn.session-ttl", "12h", "Login session cookie lifetime.", duration(5 * time.Minute)},
 		{"authn.refresh-ttl", "720h", "Refresh token lifetime.", duration(time.Hour)},
 		{"authn.lockout-threshold", "5", "Failed password attempts before lockout.", intMin(1)},
-	}
+	}, networkDefinitions())
 }
 
 func Lookup(key string) (Definition, bool) {
