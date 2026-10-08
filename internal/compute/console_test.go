@@ -21,11 +21,13 @@ type fakeConsoleUpstream struct {
 	headers []http.Header
 	paths   []string
 	Server  *httptest.Server
+	Done    chan struct{}
+	HangUp  chan struct{}
 }
 
 func newFakeConsoleUpstream(t *testing.T) *fakeConsoleUpstream {
 	t.Helper()
-	fake := &fakeConsoleUpstream{}
+	fake := &fakeConsoleUpstream{Done: make(chan struct{}, 8), HangUp: make(chan struct{})}
 	fake.Server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		fake.mu.Lock()
 		fake.headers = append(fake.headers, r.Header.Clone())
@@ -38,7 +40,17 @@ func newFakeConsoleUpstream(t *testing.T) *fakeConsoleUpstream {
 		defer conn.Close()
 		_, _ = buffered.WriteString("HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Protocol: " + r.Header.Get("Sec-WebSocket-Protocol") + "\r\n\r\n")
 		_ = buffered.Flush()
+		finished := make(chan struct{})
+		go func() {
+			select {
+			case <-fake.HangUp:
+				_ = conn.Close()
+			case <-finished:
+			}
+		}()
 		_, _ = io.Copy(conn, buffered)
+		close(finished)
+		fake.Done <- struct{}{}
 	}))
 	t.Cleanup(fake.Server.Close)
 	return fake
@@ -241,5 +253,34 @@ func TestConsoleUpstreamDown(t *testing.T) {
 	body, _ := io.ReadAll(resp.Body)
 	if resp.StatusCode != http.StatusBadGateway || !strings.Contains(string(body), `"kind":"Status"`) || strings.Contains(string(body), "127.0.0.1") {
 		t.Fatalf("status %d body %s", resp.StatusCode, body)
+	}
+}
+
+func TestConsoleClosesUpstreamWhenClientCloses(t *testing.T) {
+	rig := newConsoleRig(t, "Running", false)
+	resp, reader, conn := rig.dial(t, upgradeHeaders())
+	if resp.StatusCode != http.StatusSwitchingProtocols {
+		t.Fatalf("status %d", resp.StatusCode)
+	}
+	requireEcho(t, reader, conn)
+	_ = conn.Close()
+	select {
+	case <-rig.upstream.Done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("the upstream connection stays open after the client closed")
+	}
+}
+
+func TestConsoleClosesClientWhenUpstreamCloses(t *testing.T) {
+	rig := newConsoleRig(t, "Running", false)
+	resp, reader, conn := rig.dial(t, upgradeHeaders())
+	if resp.StatusCode != http.StatusSwitchingProtocols {
+		t.Fatalf("status %d", resp.StatusCode)
+	}
+	requireEcho(t, reader, conn)
+	close(rig.upstream.HangUp)
+	_ = conn.SetReadDeadline(time.Now().Add(5 * time.Second))
+	if _, err := reader.ReadByte(); err != io.EOF {
+		t.Fatalf("the client connection must end with EOF, got %v", err)
 	}
 }
