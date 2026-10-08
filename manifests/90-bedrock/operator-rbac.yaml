@@ -48,6 +48,7 @@ rules:
   resources:
   - daemonsets
   - deployments
+  - statefulsets
   verbs:
   - create
   - delete
@@ -87,6 +88,7 @@ rules:
   - bedrock.cloudyfolks.io
   resources:
   - addons
+  - addons/finalizers
   - addons/status
   - apitokens
   - apitokens/status
@@ -182,20 +184,11 @@ rules:
   - update
   - watch
 - apiGroups:
-  - cdi.kubevirt.io
-  resources:
-  - datavolumes
-  verbs:
-  - delete
-  - list
-- apiGroups:
   - ceph.rook.io
   resources:
   - cephblockpools
   - cephclusters
   - cephfilesystems
-  - cephobjectstores
-  - cephobjectstoreusers
   verbs:
   - create
   - delete
@@ -203,14 +196,6 @@ rules:
   - list
   - patch
   - update
-  - watch
-- apiGroups:
-  - ceph.rook.io
-  resources:
-  - cephobjectstores
-  verbs:
-  - get
-  - list
   - watch
 - apiGroups:
   - cert-manager.io
@@ -290,9 +275,9 @@ rules:
   - update
   - watch
 - apiGroups:
-  - objectbucket.io
+  - node.k8s.io
   resources:
-  - objectbucketclaims
+  - runtimeclasses
   verbs:
   - create
   - delete
@@ -403,39 +388,6 @@ rules:
   - update
   - watch
 - apiGroups:
-  - velero.io
-  resources:
-  - backupstoragelocations
-  - restores
-  - schedules
-  verbs:
-  - create
-  - delete
-  - get
-  - patch
-- apiGroups:
-  - velero.io
-  resources:
-  - deletebackuprequests
-  verbs:
-  - create
-  - delete
-  - list
-- apiGroups:
-  - velero.io
-  resources:
-  - backups
-  verbs:
-  - create
-  - get
-  - list
-- apiGroups:
-  - velero.io
-  resources:
-  - datauploads
-  verbs:
-  - list
-- apiGroups:
   - ""
   resources:
   - pods/eviction
@@ -490,13 +442,6 @@ rules:
   - get
   - list
   - watch
-- apiGroups:
-  - ""
-  resources:
-  - persistentvolumeclaims
-  verbs:
-  - delete
-  - list
 - apiGroups:
   - ""
   resources:

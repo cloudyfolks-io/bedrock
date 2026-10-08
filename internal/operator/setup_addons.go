@@ -7,6 +7,6 @@ import (
 	"github.com/cloudyfolks-io/bedrock/internal/release"
 )
 
-func setupAddons(mgr ctrl.Manager, _ release.Bundle) error {
-	return addons.SetupWithManager(mgr)
+func setupAddons(mgr ctrl.Manager, bundle release.Bundle) error {
+	return addons.SetupWithManager(mgr, bundle)
 }
