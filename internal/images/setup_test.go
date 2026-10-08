@@ -9,6 +9,7 @@ import (
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/client-go/rest"
 	"k8s.io/utils/ptr"
 	ctrl "sigs.k8s.io/controller-runtime"
@@ -182,16 +183,14 @@ func TestManagerReconcilesAnImage(t *testing.T) {
 	if err := c.Create(ctx, img); err != nil {
 		t.Fatal(err)
 	}
-	deadline := time.Now().Add(30 * time.Second)
-	for {
-		var got v1alpha1.Image
-		err := c.Get(ctx, client.ObjectKeyFromObject(img), &got)
-		if err == nil && got.Status.Phase == "Pending" && !isGone(c, DataVolumeGVK, "acme-web", "rocky-import") {
-			return
+	var got v1alpha1.Image
+	err := wait.PollUntilContextTimeout(ctx, 500*time.Millisecond, 30*time.Second, true, func(ctx context.Context) (bool, error) {
+		if err := c.Get(ctx, client.ObjectKeyFromObject(img), &got); err != nil {
+			return false, nil
 		}
-		if time.Now().After(deadline) {
-			t.Fatalf("image was not reconciled: %v %+v", err, got.Status)
-		}
-		time.Sleep(500 * time.Millisecond)
+		return got.Status.Phase == "Pending" && !isGone(c, DataVolumeGVK, "acme-web", "rocky-import"), nil
+	})
+	if err != nil {
+		t.Fatalf("image was not reconciled: %v %+v", err, got.Status)
 	}
 }
