@@ -135,4 +135,25 @@ describe("authz", () => {
     view.queryClient.setQueryData(["session"], { ...view.queryClient.getQueryData<object>(["session"]), user: { name: "other", displayName: "O", email: "o@x", groups: [] } });
     await waitFor(() => expect(authzCalls(view.api.calls)).toHaveLength(2));
   });
+
+  it("TestFailedAuthzIsNotCachedAsDenied fails closed and retries", async () => {
+    let calls = 0;
+    renderPanel(
+      <Can check={create}>
+        <span>can-create</span>
+      </Can>,
+      {
+        api: {
+          "POST /proxy/v1/authz": () => {
+            calls += 1;
+            return calls === 1 ? { status: 502, body: { error: "upstream_unavailable" } } : { body: { results: [{ allowed: true }] } };
+          },
+        },
+      },
+    );
+    await waitFor(() => expect(calls).toBe(1));
+    expect(screen.queryByText("can-create")).toBeNull();
+    expect(await screen.findByText("can-create", undefined, { timeout: 4000 })).toBeTruthy();
+    expect(calls).toBeGreaterThanOrEqual(2);
+  });
 });

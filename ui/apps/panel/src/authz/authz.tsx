@@ -31,8 +31,9 @@ function chunk<T>(items: T[], size: number): T[][] {
 }
 
 function createAuthzStore(http: Http): AuthzStore {
-  let results = new Map<string, Result>();
-  let inflight = new Set<string>();
+  const results = new Map<string, Result>();
+  const failures = new Map<string, number>();
+  const inflight = new Set<string>();
   let queued = new Map<string, Check>();
   let scheduled = false;
   let counter = 0;
@@ -43,17 +44,35 @@ function createAuthzStore(http: Http): AuthzStore {
     listeners.forEach((listener) => listener());
   }
 
-  async function send(checks: Check[], generation: Map<string, Result>): Promise<void> {
+  function retry(checks: Check[]): void {
+    checks.forEach((check) => {
+      const key = checkKey(check);
+      const attempt = (failures.get(key) ?? 0) + 1;
+      failures.set(key, attempt);
+      setTimeout(() => {
+        inflight.delete(key);
+        queued.set(key, check);
+        if (!scheduled) {
+          scheduled = true;
+          queueMicrotask(() => setTimeout(flush, 0));
+        }
+      }, Math.min(30_000, 1000 * 2 ** (attempt - 1)));
+    });
+  }
+
+  async function send(checks: Check[]): Promise<void> {
     const outcome = await http
       .request<{ results: { allowed: boolean }[] }>("POST", "/proxy/v1/authz", { body: { checks } })
       .then((answer) => answer.results.map((result) => (result.allowed ? ("allowed" as const) : ("denied" as const))))
-      .catch(() => checks.map(() => "denied" as const));
-    if (generation !== results) {
+      .catch(() => undefined);
+    if (!outcome) {
+      retry(checks);
       return;
     }
     checks.forEach((check, index) => {
       const key = checkKey(check);
       inflight.delete(key);
+      failures.delete(key);
       results.set(key, { access: outcome[index] ?? "denied", fetchedAt: Date.now() });
     });
     notify();
@@ -63,8 +82,7 @@ function createAuthzStore(http: Http): AuthzStore {
     scheduled = false;
     const batch = [...queued.values()];
     queued = new Map();
-    const generation = results;
-    chunk(batch, chunkSize).forEach((part) => void send(part, generation));
+    chunk(batch, chunkSize).forEach((part) => void send(part));
   }
 
   return {
