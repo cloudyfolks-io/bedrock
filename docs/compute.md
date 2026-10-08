@@ -218,6 +218,7 @@ Run `kubectl describe virtualmachine <name>` and read the condition `Ready`.
 | `SSHKeyNotReady` | An SSHKey is missing or not valid. | Check the SSHKey condition. |
 | `VolumeNotFound` | A Volume does not exist. | Create the Volume. |
 | `VolumeInUse` | Another VM uses the Volume. | Remove the Volume from one VM. |
+| `VolumeNotUsable` | The Volume is not ready, or its claim belongs to another object. | Wait for the Volume condition `Ready`, or rename the Volume. |
 | `RestoreInProgress` | A restore holds the object. | Wait until the restore ends. |
 | `ApplyFailed` | The cluster refused an object. | Ask an administrator to read the operator log. The operator tries again in 30 seconds. |
 | `NameConflict` | An object of another owner has a name that the operator needs. | Rename your Volume, Secret or snapshot. |
