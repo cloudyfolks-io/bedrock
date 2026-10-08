@@ -22,13 +22,7 @@ func buildAddon(t *testing.T, names ...string) (release.Bundle, string) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	selected := cfg.Components[:0:0]
-	for _, component := range cfg.Components {
-		if slices.Contains(names, component.Name) {
-			selected = append(selected, component)
-		}
-	}
-	cfg.Components = selected
+	cfg.Components = componentsNamed(cfg.Components, names...)
 	out := t.TempDir()
 	opts := release.BuildOptions{Version: "v9.9.9", Image: "ghcr.io/cloudyfolks-io/bedrock:v9.9.9", Out: out, Helm: "helm", Root: filepath.Join("..", ".."), CacheDir: t.TempDir()}
 	if err := release.Build(cfg, opts); err != nil {
@@ -41,10 +35,19 @@ func buildAddon(t *testing.T, names ...string) (release.Bundle, string) {
 	return bundle, out
 }
 
+func componentsNamed(all []release.ComponentConfig, names ...string) []release.ComponentConfig {
+	selected := all[:0:0]
+	for _, component := range all {
+		if slices.Contains(names, component.Name) {
+			selected = append(selected, component)
+		}
+	}
+	return selected
+}
+
 func lokiObjects(t *testing.T) []*unstructured.Unstructured {
 	t.Helper()
-	bundle, _ := buildAddon(t, "loki")
-	return bundle.Addons["loki"]
+	return testBundle.Addons["loki"]
 }
 
 func find(t *testing.T, objects []*unstructured.Unstructured, kind, name string) *unstructured.Unstructured {
