@@ -159,3 +159,11 @@ func TestPrometheusStackListsTheConfigReloader(t *testing.T) {
 		t.Fatalf("images %s", raw)
 	}
 }
+
+func TestPrometheusStackCreatesTheNamespaceBeforeAnythingInIt(t *testing.T) {
+	bundle, _ := buildStack(t)
+	objects := groupObjects(bundle, "kube-prometheus-stack")
+	if len(objects) == 0 || objects[0].GetKind() != "Namespace" || objects[0].GetName() != "monitoring" {
+		t.Fatalf("first object is %s %s", objects[0].GetKind(), objects[0].GetName())
+	}
+}

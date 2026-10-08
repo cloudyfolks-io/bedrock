@@ -306,7 +306,7 @@ func mergeImages(images, extra []string) []string {
 }
 
 func renderComponent(component ComponentConfig, dirs map[string]string, opts BuildOptions) ([]rendered, error) {
-	var objects []*unstructured.Unstructured
+	objects := namespaceFirst(component)
 	for _, dir := range component.Dirs {
 		loaded, err := loadObjects(os.DirFS(opts.Root), dir, component.Name)
 		if err != nil {
@@ -325,12 +325,16 @@ func renderComponent(component ComponentConfig, dirs map[string]string, opts Bui
 				return nil, err
 			}
 		}
-		if component.Namespace != "" && component.Namespace != "kube-system" {
-			templated = append([]*unstructured.Unstructured{namespaceObject(component.Namespace)}, templated...)
-		}
 		objects = append(objects, templated...)
 	}
 	return placeCRDs(component, dirs, objects)
+}
+
+func namespaceFirst(component ComponentConfig) []*unstructured.Unstructured {
+	if component.Chart == "" || component.Namespace == "" || component.Namespace == "kube-system" {
+		return nil
+	}
+	return []*unstructured.Unstructured{namespaceObject(component.Namespace)}
 }
 
 func placeCRDs(component ComponentConfig, dirs map[string]string, objects []*unstructured.Unstructured) ([]rendered, error) {
