@@ -10,6 +10,7 @@ import (
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/client/interceptor"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	"github.com/cloudyfolks-io/bedrock/api/v1alpha1"
@@ -308,5 +309,39 @@ func TestNetworkDeletionIgnoresSubnetsOfOtherTenants(t *testing.T) {
 	var gone v1alpha1.Network
 	if err := f.c.Get(context.Background(), client.ObjectKey{Name: f.network.Name}, &gone); !apierrors.IsNotFound(err) {
 		t.Fatalf("a foreign Subnet must not block the deletion: %v", err)
+	}
+}
+
+func TestNetworkReconcilerReadsVrfIDsFromTheAPI(t *testing.T) {
+	c := cleanEnv(t)
+	_, cfg := testEnv(t)
+	scheme, err := testScheme()
+	if err != nil {
+		t.Fatal(err)
+	}
+	watching, err := client.NewWithWatch(cfg, client.Options{Scheme: scheme})
+	if err != nil {
+		t.Fatal(err)
+	}
+	blind := interceptor.NewClient(watching, interceptor.Funcs{List: func(ctx context.Context, cl client.WithWatch, list client.ObjectList, opts ...client.ListOption) error {
+		if _, isNetworks := list.(*v1alpha1.NetworkList); isNetworks {
+			return nil
+		}
+		if u, isUnstructured := list.(*unstructured.UnstructuredList); isUnstructured && u.GetKind() == "VpcList" {
+			return nil
+		}
+		return cl.List(ctx, list, opts...)
+	}})
+	bgpSettings(t)
+	first, second := createExternalNetwork(t, c), createExternalNetwork(t, c)
+	reconciler := &NetworkReconciler{Client: blind, Reader: c}
+	for _, name := range []string{first.Name, second.Name} {
+		if _, err := reconciler.Reconcile(context.Background(), reconcile.Request{NamespacedName: types.NamespacedName{Name: name}}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	a, b := getNetwork(t, c, first.Name).Annotations[AnnotationVrfID], getNetwork(t, c, second.Name).Annotations[AnnotationVrfID]
+	if a == "" || b == "" || a == b {
+		t.Fatalf("ids %q %q", a, b)
 	}
 }

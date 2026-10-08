@@ -25,6 +25,14 @@ const remainingSubnetsShown = 3
 
 type NetworkReconciler struct {
 	Client client.Client
+	Reader client.Reader
+}
+
+func (r *NetworkReconciler) live() client.Reader {
+	if r.Reader != nil {
+		return r.Reader
+	}
+	return r.Client
 }
 
 func (r *NetworkReconciler) Reconcile(ctx context.Context, req reconcile.Request) (reconcile.Result, error) {
@@ -94,7 +102,7 @@ func (r *NetworkReconciler) vrfID(ctx context.Context, network *v1alpha1.Network
 	if err != nil {
 		return 0, err
 	}
-	return id, r.recordVrfID(ctx, network, id)
+	return r.recordVrfID(ctx, network, id)
 }
 
 func (r *NetworkReconciler) usedVrfIDs(ctx context.Context) ([]uint32, error) {
@@ -109,7 +117,7 @@ func (r *NetworkReconciler) usedVrfIDs(ctx context.Context) ([]uint32, error) {
 		}
 	}
 	var networks v1alpha1.NetworkList
-	if err := r.Client.List(ctx, &networks); err != nil {
+	if err := r.live().List(ctx, &networks); err != nil {
 		return nil, err
 	}
 	for _, n := range networks.Items {
@@ -120,15 +128,21 @@ func (r *NetworkReconciler) usedVrfIDs(ctx context.Context) ([]uint32, error) {
 	return used, nil
 }
 
-func (r *NetworkReconciler) recordVrfID(ctx context.Context, network *v1alpha1.Network, id uint32) error {
-	return retry.RetryOnConflict(retry.DefaultRetry, func() error {
-		if err := r.Client.Get(ctx, client.ObjectKeyFromObject(network), network); err != nil {
+func (r *NetworkReconciler) recordVrfID(ctx context.Context, network *v1alpha1.Network, id uint32) (uint32, error) {
+	claimed := id
+	err := retry.RetryOnConflict(retry.DefaultRetry, func() error {
+		if err := r.live().Get(ctx, client.ObjectKeyFromObject(network), network); err != nil {
 			return err
+		}
+		if recorded, err := strconv.ParseUint(network.Annotations[AnnotationVrfID], 10, 32); err == nil {
+			claimed = uint32(recorded)
+			return nil
 		}
 		before := network.DeepCopy()
 		network.Annotations = withAnnotation(network.Annotations, AnnotationVrfID, strconv.FormatUint(uint64(id), 10))
 		return r.Client.Patch(ctx, network, client.MergeFromWithOptions(before, client.MergeFromWithOptimisticLock{}), client.FieldOwner(v1alpha1.NetworkFieldManager))
 	})
+	return claimed, err
 }
 
 func withAnnotation(annotations map[string]string, key, value string) map[string]string {
@@ -280,6 +294,7 @@ func (r *NetworkReconciler) finalize(ctx context.Context, network *v1alpha1.Netw
 	}
 	gone, err := r.deleteOwnedVpc(ctx, network)
 	if err != nil {
+		ctrl.LoggerFrom(ctx).Error(err, "delete the Vpc of the Network", "network", network.Name)
 		return reconcile.Result{RequeueAfter: terminatingRequeue}, nil
 	}
 	if !gone {
