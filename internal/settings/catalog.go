@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"math"
+	"net/url"
 	"slices"
 	"strconv"
 	"time"
@@ -74,6 +75,20 @@ func domainName(v string) error {
 	return fmt.Errorf("value %q is not a valid DNS name", v)
 }
 
+func httpURL(v string) error {
+	if v == "" {
+		return nil
+	}
+	parsed, err := url.Parse(v)
+	if err != nil {
+		return err
+	}
+	if (parsed.Scheme != "http" && parsed.Scheme != "https") || parsed.Host == "" {
+		return fmt.Errorf("value %q is not an http or https URL with a host", v)
+	}
+	return nil
+}
+
 func boolean(v string) error {
 	if v == "" {
 		return nil
@@ -132,10 +147,11 @@ func Catalog() []Definition {
 		{"backup.target", "", "Backup target URL: s3://<endpoint>[:<port>]/<bucket>[/<prefix>][?region=<region>][&insecure=true]. nfs:// is not supported.", backupTarget},
 		{"backup.credentials-secret", "", "Secret name in bedrock-system holding backup credentials.", free},
 		{"backup.etcd-schedule", "0 2 * * *", "Cron schedule for etcd snapshots, five fields, UTC, at most once per slot.", cronSchedule},
-		{"audit.level", "Metadata", "Audit level for read requests.", oneOf("Metadata", "RequestResponse")},
+		{"audit.level", "Metadata", "Audit level for read requests. Writes on Bedrock kinds always use RequestResponse.", oneOf("Metadata", "RequestResponse")},
 		{"loki.retention-days", "14", "Log retention in days when Loki is enabled.", intMin(1)},
-		{"kata.enabled", "true", "Kata runtime addon.", boolean},
-		{"loki.enabled", "false", "Loki and Alloy addon.", boolean},
+		{"kata.enabled", "true", "Initial state of the kata addon. Change the Addon object after install.", boolean},
+		{"loki.enabled", "false", "Initial state of the loki addon. Change the Addon object after install.", boolean},
+		{"alertmanager.webhook-url", "", "Webhook that receives Alertmanager notifications.", httpURL},
 		{"images.refresh-schedule", "0 3 * * *", "Cron schedule for catalog image refresh.", free},
 		{"images.keep", "3", "Catalog image versions to keep.", intMin(1)},
 		{"authn.require-second-factor", "false", "Require a second factor for every login.", boolean},

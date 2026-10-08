@@ -212,3 +212,43 @@ func TestBackupTargetSettingHidesCredentials(t *testing.T) {
 		t.Fatalf("got %v", err)
 	}
 }
+
+func TestAlertmanagerWebhookURLValidation(t *testing.T) {
+	def, ok := Lookup("alertmanager.webhook-url")
+	if !ok {
+		t.Fatal("missing alertmanager.webhook-url")
+	}
+	for _, valid := range []string{"", "https://hooks.example.test/alert", "http://10.0.0.5:9000/x"} {
+		if err := def.Validate(valid); err != nil {
+			t.Errorf("%q: %v", valid, err)
+		}
+	}
+	for _, invalid := range []string{"ftp://hooks.example.test", "https://", "hooks.example.test", "not a url"} {
+		if err := def.Validate(invalid); err == nil {
+			t.Errorf("%q passed", invalid)
+		}
+	}
+}
+
+func TestCatalogHasTheObservabilityKeys(t *testing.T) {
+	want := map[string]string{"audit.level": "Metadata", "loki.retention-days": "14", "kata.enabled": "true", "loki.enabled": "false", "alertmanager.webhook-url": ""}
+	for key, value := range want {
+		def, ok := Lookup(key)
+		if !ok || def.Default != value {
+			t.Errorf("%s: got %q, want %q", key, def.Default, value)
+		}
+	}
+}
+
+func TestCatalogDescriptionsNameTheAddonObject(t *testing.T) {
+	for _, key := range []string{"kata.enabled", "loki.enabled"} {
+		def, _ := Lookup(key)
+		if !strings.Contains(def.Description, "Addon") {
+			t.Errorf("%s: %q", key, def.Description)
+		}
+	}
+	def, _ := Lookup("audit.level")
+	if !strings.Contains(def.Description, "RequestResponse") {
+		t.Errorf("audit.level: %q", def.Description)
+	}
+}
