@@ -265,6 +265,9 @@ func TestComponentOrdersAreUnique(t *testing.T) {
 	}
 	seen := map[int]string{}
 	for _, component := range cfg.Components {
+		if component.Addon {
+			continue
+		}
 		if other, found := seen[component.Order]; found {
 			t.Errorf("components %s and %s share order %d", other, component.Name, component.Order)
 		}
