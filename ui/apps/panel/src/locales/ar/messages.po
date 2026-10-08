@@ -325,6 +325,27 @@ msgstr "ابدأ الجهاز لفتح وحدة التحكم"
 msgid "console.placeholder"
 msgstr "وحدة التحكم"
 
+msgid "credentials.copied"
+msgstr "تم نسخ {name}"
+
+msgid "credentials.copy"
+msgstr "نسخ {name}"
+
+msgid "credentials.description"
+msgstr "أبقِ هذه القيم خاصة."
+
+msgid "credentials.error"
+msgstr "تعذر تحميل بيانات الاعتماد."
+
+msgid "credentials.hide"
+msgstr "إخفاء {name}"
+
+msgid "credentials.reveal"
+msgstr "إظهار {name}"
+
+msgid "credentials.title"
+msgstr "بيانات الاعتماد"
+
 msgid "detail.conditions.message"
 msgstr "الرسالة"
 
@@ -345,6 +366,27 @@ msgstr "تم حذف هذا الكائن"
 
 msgid "detail.spec.title"
 msgstr "المواصفات"
+
+msgid "eip.attach.confirm"
+msgstr "إرفاق"
+
+msgid "eip.attach.kind"
+msgstr "نوع الهدف"
+
+msgid "eip.attach.lb"
+msgstr "موازن الحمل"
+
+msgid "eip.attach.target"
+msgstr "الهدف"
+
+msgid "eip.attach.title"
+msgstr "إرفاق {0}"
+
+msgid "eip.attach.vm"
+msgstr "واجهة شبكة جهاز افتراضي"
+
+msgid "eip.detach"
+msgstr "فصل"
 
 msgid "forms.array.addItem"
 msgstr "إضافة عنصر"
@@ -670,6 +712,12 @@ msgstr "التخزين"
 msgid "nav.section.tenancy"
 msgstr "المستأجرون"
 
+msgid "networks.forbidden.description"
+msgstr "تتبع الشبكات المستأجر. تبقى الشبكات الفرعية لمشروعك تعمل."
+
+msgid "networks.forbidden.title"
+msgstr "لا يمكنك عرض الشبكات"
+
 msgid "session.gate.error.body"
 msgstr "تعذر على اللوحة قراءة جلستك."
 
@@ -783,6 +831,24 @@ msgstr "قيد الانتظار"
 
 msgid "settings.usesDefault"
 msgstr "يستخدم القيمة الافتراضية"
+
+msgid "sg.editRules"
+msgstr "تعديل القواعد"
+
+msgid "sg.openSsh"
+msgstr "مفتوح للإنترنت"
+
+msgid "sg.ports"
+msgstr "المنافذ"
+
+msgid "sg.protocol"
+msgstr "البروتوكول"
+
+msgid "sg.source"
+msgstr "CIDR أو مجموعة أمان"
+
+msgid "sg.summary"
+msgstr "الملخص"
 
 msgid "shell.breadcrumb.label"
 msgstr "مسار الصفحة"
@@ -1024,14 +1090,26 @@ msgstr "مراحل الترقية"
 msgid "upgrades.window"
 msgstr "نافذة الصيانة"
 
+msgid "users.showCredentials"
+msgstr "عرض بيانات الاعتماد"
+
 msgid "validate.cron"
 msgstr "استخدم جدول cron من خمسة حقول، مثل 0 2 * * *"
+
+msgid "validate.ip"
+msgstr "أدخل عنوان IPv4 أو IPv6 صالحًا"
+
+msgid "validate.policyJson"
+msgstr "يجب أن تكون السياسة JSON صالحًا"
 
 msgid "validate.privateKey"
 msgstr "هذا مفتاح خاص. لا تلصقه هنا أبدًا. الصق المفتاح العام."
 
 msgid "validate.publicKey"
 msgstr "يبدأ المفتاح العام بـ ssh-ed25519 أو ssh-rsa أو ecdsa-sha2-"
+
+msgid "validate.ruleSource"
+msgstr "حدد CIDR أو مجموعة أمان وليس كليهما"
 
 msgid "vmDetail.bus"
 msgstr "الناقل"

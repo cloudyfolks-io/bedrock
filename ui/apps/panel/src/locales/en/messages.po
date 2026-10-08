@@ -325,6 +325,27 @@ msgstr "Start the VM to open the console"
 msgid "console.placeholder"
 msgstr "Console"
 
+msgid "credentials.copied"
+msgstr "{name} copied"
+
+msgid "credentials.copy"
+msgstr "Copy {name}"
+
+msgid "credentials.description"
+msgstr "Keep these values private."
+
+msgid "credentials.error"
+msgstr "The credentials did not load."
+
+msgid "credentials.hide"
+msgstr "Hide {name}"
+
+msgid "credentials.reveal"
+msgstr "Show {name}"
+
+msgid "credentials.title"
+msgstr "Access credentials"
+
 msgid "detail.conditions.message"
 msgstr "Message"
 
@@ -345,6 +366,27 @@ msgstr "This object was deleted"
 
 msgid "detail.spec.title"
 msgstr "Specification"
+
+msgid "eip.attach.confirm"
+msgstr "Attach"
+
+msgid "eip.attach.kind"
+msgstr "Target type"
+
+msgid "eip.attach.lb"
+msgstr "Load balancer"
+
+msgid "eip.attach.target"
+msgstr "Target"
+
+msgid "eip.attach.title"
+msgstr "Attach {0}"
+
+msgid "eip.attach.vm"
+msgstr "Virtual machine network interface"
+
+msgid "eip.detach"
+msgstr "Detach"
 
 msgid "forms.array.addItem"
 msgstr "Add item"
@@ -670,6 +712,12 @@ msgstr "Storage"
 msgid "nav.section.tenancy"
 msgstr "Tenancy"
 
+msgid "networks.forbidden.description"
+msgstr "Networks belong to the tenant. Subnets of your project still work."
+
+msgid "networks.forbidden.title"
+msgstr "You cannot list networks"
+
 msgid "session.gate.error.body"
 msgstr "The panel could not read your session."
 
@@ -783,6 +831,24 @@ msgstr "Pending"
 
 msgid "settings.usesDefault"
 msgstr "Uses the default"
+
+msgid "sg.editRules"
+msgstr "Edit rules"
+
+msgid "sg.openSsh"
+msgstr "Open to the internet"
+
+msgid "sg.ports"
+msgstr "Ports"
+
+msgid "sg.protocol"
+msgstr "Protocol"
+
+msgid "sg.source"
+msgstr "CIDR or security group"
+
+msgid "sg.summary"
+msgstr "Summary"
 
 msgid "shell.breadcrumb.label"
 msgstr "Breadcrumb"
@@ -1024,14 +1090,26 @@ msgstr "Upgrade phases"
 msgid "upgrades.window"
 msgstr "Maintenance window"
 
+msgid "users.showCredentials"
+msgstr "Show credentials"
+
 msgid "validate.cron"
 msgstr "Use a cron schedule with five fields, for example 0 2 * * *"
+
+msgid "validate.ip"
+msgstr "Enter a valid IPv4 or IPv6 address"
+
+msgid "validate.policyJson"
+msgstr "The policy must be valid JSON"
 
 msgid "validate.privateKey"
 msgstr "This is a private key. Never paste it here. Paste the public key."
 
 msgid "validate.publicKey"
 msgstr "A public key starts with ssh-ed25519, ssh-rsa or ecdsa-sha2-"
+
+msgid "validate.ruleSource"
+msgstr "Set a CIDR or a security group, not both"
 
 msgid "vmDetail.bus"
 msgstr "Bus"

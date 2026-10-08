@@ -11,7 +11,8 @@ import { Spinner } from "../components/Spinner";
 import { useCurrentProject } from "../shell/context";
 import { refOf, type ResourceDef } from "../resources/registry";
 import { causesToErrors, splitCauses, type Cause } from "./errors";
-import { markReadonly, toFormSchema } from "./schema";
+import { applyRefOptions, markReadonly, toFormSchema } from "./schema";
+import { useRefOptions } from "./refOptions";
 import { CreateForm, EditForm } from "./SchemaForm";
 import type { ErrorSchema } from "@rjsf/utils";
 
@@ -80,6 +81,7 @@ export function CreateResourceDialog({ def, onClose, initialSpec, lockedPaths = 
   const handle = useWriteHandling();
   const ref = refOf(def);
   const namespace = def.scope === "Namespaced" ? project?.namespace : undefined;
+  const refOptions = useRefOptions(def, namespace, project?.tenant);
 
   async function submit(spec: Record<string, unknown>) {
     const problems = def.validate?.(spec) ?? [];
@@ -143,7 +145,7 @@ export function CreateResourceDialog({ def, onClose, initialSpec, lockedPaths = 
             {...(errors.nameError ? { error: errors.nameError } : {})}
           />
           <CreateForm
-            schema={form.schema}
+            schema={applyRefOptions(form.schema, refOptions)}
             uiSchema={markReadonly({ ...form.uiSchema, ...def.uiSchema }, lockedPaths)}
             formData={initialSpec}
             onSubmit={(spec) => void submit(spec)}
@@ -172,6 +174,8 @@ function EditBody({ def, object, onClose }: EditProps) {
   const { document, form } = useDocumentSchema(def);
   const ref = refOf(def);
   const { namespace, name } = object.metadata;
+  const project = useCurrentProject();
+  const refOptions = useRefOptions(def, namespace, project?.tenant);
   const latest = useQuery({
     queryKey: ["edit", ...objectKey(ref, namespace, name)],
     queryFn: () => kubeClient(http).get(ref, namespace, name),
@@ -230,7 +234,7 @@ function EditBody({ def, object, onClose }: EditProps) {
       ) : null}
       {ready ? (
         <EditForm
-          schema={form.schema}
+          schema={applyRefOptions(form.schema, refOptions)}
           uiSchema={{ ...form.uiSchema, ...def.uiSchema }}
           immutable={form.immutable}
           formData={(latest.data?.spec ?? {}) as Record<string, unknown>}

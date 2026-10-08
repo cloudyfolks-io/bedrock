@@ -62,11 +62,14 @@ interface ListExtras {
   itemFilter?: (object: KubeObject) => boolean;
   readOnly?: boolean;
   embedded?: boolean;
+  forbidden?: ReactNode;
+  createSpec?: Record<string, unknown>;
+  lockedPaths?: string[];
   rowItems?: (object: KubeObject) => { id: string; label: string; onSelect: () => void; disabled?: boolean }[];
   children?: ReactNode;
 }
 
-function ListBody({ def, namespace, project, help = null, toolbar = null, actions = null, itemFilter, readOnly = false, embedded = false, rowItems: extraRowItems, children = null }: { def: ResourceDef; namespace: string | undefined; project: Project | undefined } & ListExtras) {
+function ListBody({ def, namespace, project, help = null, toolbar = null, actions = null, itemFilter, readOnly = false, embedded = false, forbidden, createSpec, lockedPaths, rowItems: extraRowItems, children = null }: { def: ResourceDef; namespace: string | undefined; project: Project | undefined } & ListExtras) {
   const { t, i18n } = useLingui();
   const { locale } = useLocale();
   const query = useLiveList(refOf(def), namespace === undefined ? {} : { namespace });
@@ -123,7 +126,7 @@ function ListBody({ def, namespace, project, help = null, toolbar = null, action
     return (
       <>
         {header}
-        <EmptyState title={t({ id: "list.forbidden.title", message: "You cannot view this" })} description={t({ id: "list.forbidden.description", message: "Ask a project owner for access." })} />
+        {forbidden ?? <EmptyState title={t({ id: "list.forbidden.title", message: "You cannot view this" })} description={t({ id: "list.forbidden.description", message: "Ask a project owner for access." })} />}
       </>
     );
   }
@@ -214,7 +217,7 @@ function ListBody({ def, namespace, project, help = null, toolbar = null, action
       )}
       {runner.dialogs}
       {children}
-      {creating ? <LazyCreateDialog def={def} onClose={() => setCreating(false)} /> : null}
+      {creating ? <LazyCreateDialog def={def} {...(createSpec ? { initialSpec: createSpec } : {})} {...(lockedPaths ? { lockedPaths } : {})} onClose={() => setCreating(false)} /> : null}
       {editing ? <LazyEditDialog def={def} object={editing} onClose={() => setEditing(undefined)} /> : null}
     </>
   );

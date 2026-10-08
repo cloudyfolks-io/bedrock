@@ -165,3 +165,19 @@ function setAt(ui: UiSchema, keys: string[], leaf: UiSchema): UiSchema {
   const child = (ui[key] ?? {}) as UiSchema;
   return { ...ui, [key]: setAt(child, rest, leaf) };
 }
+
+function withEnum(schema: RJSFSchema, keys: readonly string[], names: readonly string[]): RJSFSchema {
+  const [head, ...rest] = keys;
+  if (head === undefined) {
+    return { ...schema, enum: [...names] };
+  }
+  if (head === "*") {
+    return schema.items && typeof schema.items === "object" && !Array.isArray(schema.items) ? { ...schema, items: withEnum(schema.items as RJSFSchema, rest, names) } : schema;
+  }
+  const child = schema.properties?.[head];
+  return child && typeof child === "object" ? { ...schema, properties: { ...schema.properties, [head]: withEnum(child, rest, names) } } : schema;
+}
+
+export function applyRefOptions(schema: RJSFSchema, options: Record<string, readonly string[]>): RJSFSchema {
+  return Object.entries(options).reduce((current, [path, names]) => (names.length > 0 ? withEnum(current, path.split("."), names) : current), schema);
+}

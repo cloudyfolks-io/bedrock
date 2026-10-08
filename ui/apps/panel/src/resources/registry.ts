@@ -6,7 +6,7 @@ import { bedrockGroup } from "../stream/protocol";
 import { columnsByPlural, type ColumnDef } from "./columns";
 import type { UiSchema } from "@rjsf/utils";
 import { actionStates, type VmAction } from "./vmActionStates";
-import { validateBackup, validateSshKey, type SpecValidator } from "./validators";
+import { validateBackup, validateBucket, validateDnsZone, validateSecurityGroup, validateSshKey, type SpecValidator } from "./validators";
 
 export type Section = "Infrastructure" | "Platform" | "Tenancy" | "Catalog" | "Compute" | "Storage" | "Networking" | "Object storage";
 export type Perspective = "admin" | "project";
@@ -39,6 +39,7 @@ export interface ResourceDef {
   createPath?: string;
   validate?: SpecValidator;
   uiSchema?: UiSchema;
+  refFields?: Record<string, string>;
 }
 
 const always = () => true;
@@ -89,6 +90,7 @@ interface Row {
   createPath?: string;
   validate?: SpecValidator;
   uiSchema?: UiSchema;
+  refFields?: Record<string, string>;
 }
 
 const t = {
@@ -114,7 +116,7 @@ const t = {
   objectUsers: msg({ id: "nav.item.objectUsers", message: "Object storage users" }),
 };
 
-function row(r: Omit<Row, "actions" | "createPath" | "validate" | "uiSchema"> & { actions?: ActionDef[]; createPath?: string; validate?: SpecValidator; uiSchema?: UiSchema }): Row {
+function row(r: Omit<Row, "actions" | "createPath" | "validate" | "uiSchema" | "refFields"> & { actions?: ActionDef[]; createPath?: string; validate?: SpecValidator; uiSchema?: UiSchema; refFields?: Record<string, string> }): Row {
   return { actions: [], ...r };
 }
 
@@ -135,12 +137,12 @@ const rows: Row[] = [
   row({ kind: "Image", plural: "images", scope: "Namespaced", perspective: "project", section: "Storage", path: "images", title: t.images, create: true, edit: false, actions: [del("simple")] }),
   row({ kind: "VirtualMachineBackup", plural: "virtualmachinebackups", scope: "Namespaced", perspective: "project", section: "Storage", path: "backups", title: t.backups, create: true, edit: true, actions: [del("simple")], validate: validateBackup }),
   row({ kind: "VirtualMachineRestore", plural: "virtualmachinerestores", scope: "Namespaced", perspective: "project", section: "Storage", path: "backups", title: t.backups, create: false, edit: false, actions: [del("simple")] }),
-  row({ kind: "Subnet", plural: "subnets", scope: "Namespaced", perspective: "project", section: "Networking", path: "subnets", title: t.subnets, create: true, edit: true, actions: [del("simple")] }),
+  row({ kind: "Subnet", plural: "subnets", scope: "Namespaced", perspective: "project", section: "Networking", path: "subnets", title: t.subnets, create: true, edit: true, actions: [del("simple")], refFields: { networkRef: "networks" } }),
   row({ kind: "ElasticIP", plural: "elasticips", scope: "Namespaced", perspective: "project", section: "Networking", path: "elastic-ips", title: t.elasticIps, create: true, edit: true, actions: [del("typed")] }),
-  row({ kind: "LoadBalancer", plural: "loadbalancers", scope: "Namespaced", perspective: "project", section: "Networking", path: "load-balancers", title: t.loadBalancers, create: true, edit: true, actions: [del("simple")] }),
-  row({ kind: "DNSZone", plural: "dnszones", scope: "Namespaced", perspective: "project", section: "Networking", path: "dns-zones", title: t.dnsZones, create: true, edit: true, actions: [del("simple")] }),
-  row({ kind: "SecurityGroup", plural: "securitygroups", scope: "Namespaced", perspective: "project", section: "Networking", path: "security-groups", title: t.securityGroups, create: true, edit: true, actions: [del("simple")] }),
-  row({ kind: "ObjectStorageBucket", plural: "objectstoragebuckets", scope: "Namespaced", perspective: "project", section: "Object storage", path: "buckets", title: t.buckets, create: true, edit: true, actions: [del("typed")] }),
+  row({ kind: "LoadBalancer", plural: "loadbalancers", scope: "Namespaced", perspective: "project", section: "Networking", path: "load-balancers", title: t.loadBalancers, create: true, edit: true, actions: [del("simple")], refFields: { "listeners.*.targets.*.vmRef": "virtualmachines" } }),
+  row({ kind: "DNSZone", plural: "dnszones", scope: "Namespaced", perspective: "project", section: "Networking", path: "dns-zones", title: t.dnsZones, create: true, edit: true, actions: [del("simple")], validate: validateDnsZone }),
+  row({ kind: "SecurityGroup", plural: "securitygroups", scope: "Namespaced", perspective: "project", section: "Networking", path: "security-groups", title: t.securityGroups, create: true, edit: true, actions: [del("simple")], validate: validateSecurityGroup }),
+  row({ kind: "ObjectStorageBucket", plural: "objectstoragebuckets", scope: "Namespaced", perspective: "project", section: "Object storage", path: "buckets", title: t.buckets, create: true, edit: true, actions: [del("typed")], validate: validateBucket, uiSchema: { policy: { "ui:widget": "textarea" } }, refFields: { userRef: "objectstorageusers" } }),
   row({ kind: "ObjectStorageUser", plural: "objectstorageusers", scope: "Namespaced", perspective: "project", section: "Object storage", path: "object-users", title: t.objectUsers, create: true, edit: true, actions: [del("typed")] }),
 ];
 
@@ -161,6 +163,7 @@ export const definitions: ResourceDef[] = rows.map((r) => ({
   ...(r.createPath === undefined ? {} : { createPath: r.createPath }),
   ...(r.validate === undefined ? {} : { validate: r.validate }),
   ...(r.uiSchema === undefined ? {} : { uiSchema: r.uiSchema }),
+  ...(r.refFields === undefined ? {} : { refFields: r.refFields }),
 }));
 
 export const notShown: readonly string[] = ["HostConfig", "ClusterConfig", "NodeUpgrade"];

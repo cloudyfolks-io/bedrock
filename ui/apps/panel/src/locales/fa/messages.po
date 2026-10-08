@@ -325,6 +325,27 @@ msgstr "برای باز کردن کنسول ماشین را روشن کنید"
 msgid "console.placeholder"
 msgstr "کنسول"
 
+msgid "credentials.copied"
+msgstr "{name} کپی شد"
+
+msgid "credentials.copy"
+msgstr "کپی {name}"
+
+msgid "credentials.description"
+msgstr "این مقادیر را خصوصی نگه دارید."
+
+msgid "credentials.error"
+msgstr "اعتبارنامه‌ها بارگذاری نشدند."
+
+msgid "credentials.hide"
+msgstr "پنهان‌کردن {name}"
+
+msgid "credentials.reveal"
+msgstr "نمایش {name}"
+
+msgid "credentials.title"
+msgstr "اعتبارنامه‌های دسترسی"
+
 msgid "detail.conditions.message"
 msgstr "پیام"
 
@@ -345,6 +366,27 @@ msgstr "این شیء حذف شد"
 
 msgid "detail.spec.title"
 msgstr "مشخصات"
+
+msgid "eip.attach.confirm"
+msgstr "اتصال"
+
+msgid "eip.attach.kind"
+msgstr "نوع هدف"
+
+msgid "eip.attach.lb"
+msgstr "توزیع‌کننده بار"
+
+msgid "eip.attach.target"
+msgstr "هدف"
+
+msgid "eip.attach.title"
+msgstr "اتصال {0}"
+
+msgid "eip.attach.vm"
+msgstr "کارت شبکه ماشین مجازی"
+
+msgid "eip.detach"
+msgstr "جداسازی"
 
 msgid "forms.array.addItem"
 msgstr "افزودن مورد"
@@ -670,6 +712,12 @@ msgstr "ذخیره‌سازی"
 msgid "nav.section.tenancy"
 msgstr "مستأجری"
 
+msgid "networks.forbidden.description"
+msgstr "شبکه‌ها به مستأجر تعلق دارند. زیرشبکه‌های پروژه شما همچنان کار می‌کنند."
+
+msgid "networks.forbidden.title"
+msgstr "شما اجازه فهرست‌کردن شبکه‌ها را ندارید"
+
 msgid "session.gate.error.body"
 msgstr "پنل نتوانست نشست شما را بخواند."
 
@@ -783,6 +831,24 @@ msgstr "در انتظار"
 
 msgid "settings.usesDefault"
 msgstr "از مقدار پیش‌فرض استفاده می‌کند"
+
+msgid "sg.editRules"
+msgstr "ویرایش قوانین"
+
+msgid "sg.openSsh"
+msgstr "باز برای اینترنت"
+
+msgid "sg.ports"
+msgstr "پورت‌ها"
+
+msgid "sg.protocol"
+msgstr "پروتکل"
+
+msgid "sg.source"
+msgstr "CIDR یا گروه امنیتی"
+
+msgid "sg.summary"
+msgstr "خلاصه"
 
 msgid "shell.breadcrumb.label"
 msgstr "مسیر صفحه"
@@ -1024,14 +1090,26 @@ msgstr "مراحل ارتقا"
 msgid "upgrades.window"
 msgstr "بازه نگهداری"
 
+msgid "users.showCredentials"
+msgstr "نمایش اعتبارنامه‌ها"
+
 msgid "validate.cron"
 msgstr "از زمان‌بندی cron با پنج فیلد استفاده کنید، مثلاً 0 2 * * *"
+
+msgid "validate.ip"
+msgstr "نشانی IPv4 یا IPv6 معتبر وارد کنید"
+
+msgid "validate.policyJson"
+msgstr "سیاست باید JSON معتبر باشد"
 
 msgid "validate.privateKey"
 msgstr "این یک کلید خصوصی است. هرگز آن را اینجا نچسبانید. کلید عمومی را بچسبانید."
 
 msgid "validate.publicKey"
 msgstr "کلید عمومی با ssh-ed25519، ssh-rsa یا ecdsa-sha2- شروع می‌شود"
+
+msgid "validate.ruleSource"
+msgstr "یا CIDR یا گروه امنیتی را تنظیم کنید، نه هر دو"
 
 msgid "vmDetail.bus"
 msgstr "گذرگاه"

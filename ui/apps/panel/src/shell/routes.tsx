@@ -25,6 +25,10 @@ const VolumesPage = lazy(() => import("../pages/project/VolumesPage"));
 const SnapshotsPage = lazy(() => import("../pages/project/SnapshotsPage"));
 const ImagesPage = lazy(() => import("../pages/project/ImagesPage"));
 const BackupsPage = lazy(() => import("../pages/project/BackupsPage"));
+const NetworksPage = lazy(() => import("../pages/project/NetworksPage"));
+const ElasticIpsPage = lazy(() => import("../pages/project/ElasticIpsPage"));
+const ObjectUsersPage = lazy(() => import("../pages/project/ObjectUsersPage"));
+const SecurityGroupDetailPage = lazy(() => import("../pages/project/SecurityGroupDetailPage"));
 const SettingsPage = lazy(() => import("../pages/admin/SettingsPage"));
 
 const listPages: Record<string, (def: ResourceDef) => ReactElement> = {
@@ -37,12 +41,16 @@ const listPages: Record<string, (def: ResourceDef) => ReactElement> = {
   "project/snapshots": () => <SnapshotsPage />,
   "project/images": () => <ImagesPage />,
   "project/backups": () => <BackupsPage />,
+  "project/networks": () => <NetworksPage />,
+  "project/elastic-ips": () => <ElasticIpsPage />,
+  "project/object-users": () => <ObjectUsersPage />,
 };
 
 const detailPages: Record<string, (def: ResourceDef) => ReactElement> = {
   "admin/hosts": () => <HostDetailPage />,
   "admin/tenants": () => <TenantDetailPage />,
   "project/vms": () => <VmDetailPage />,
+  "project/security-groups": () => <SecurityGroupDetailPage />,
 };
 
 function listPage(def: ResourceDef): ReactElement {
