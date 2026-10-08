@@ -46,7 +46,7 @@ func newTestOIDC(t *testing.T) (*OIDC, *fakeAuthn) {
 	return newOIDCFor(fake, &mutableHost{value: "lab.example"}, fakeClientSecret), fake
 }
 
-func login(t *testing.T, o *OIDC, fake *fakeAuthn) (Tokens, string) {
+func signIn(t *testing.T, o *OIDC, fake *fakeAuthn) (Tokens, string) {
 	t.Helper()
 	verifier, challenge, err := PKCE(strings.NewReader(strings.Repeat("v", 64)))
 	if err != nil {
@@ -109,7 +109,7 @@ func TestPKCEChallengeMatchesTheVerifier(t *testing.T) {
 func TestExchangeReturnsTokensAndIdentity(t *testing.T) {
 	o, fake := newTestOIDC(t)
 	before := time.Now()
-	tokens, _ := login(t, o, fake)
+	tokens, _ := signIn(t, o, fake)
 	if tokens.Access == "" || tokens.Refresh == "" {
 		t.Fatalf("tokens %+v", tokens)
 	}
@@ -154,7 +154,7 @@ func clearFlags(f *fakeAuthn) {
 
 func TestClientAuthenticatesWithTheSecret(t *testing.T) {
 	o, fake := newTestOIDC(t)
-	login(t, o, fake)
+	signIn(t, o, fake)
 	if fake.LastBasic() != "bedrock-console" {
 		t.Fatalf("basic user %q", fake.LastBasic())
 	}
@@ -171,7 +171,7 @@ func TestClientAuthenticatesWithTheSecret(t *testing.T) {
 
 func TestRefreshReturnsRotatedToken(t *testing.T) {
 	o, fake := newTestOIDC(t)
-	first, _ := login(t, o, fake)
+	first, _ := signIn(t, o, fake)
 	second, err := o.Refresh(context.Background(), first.Refresh)
 	if err != nil {
 		t.Fatal(err)
@@ -186,7 +186,7 @@ func TestRefreshReturnsRotatedToken(t *testing.T) {
 
 func TestRefreshWithoutIDTokenKeepsTheIdentityEmpty(t *testing.T) {
 	o, fake := newTestOIDC(t)
-	first, _ := login(t, o, fake)
+	first, _ := signIn(t, o, fake)
 	fake.mutate(func(f *fakeAuthn) { f.noIDRefresh = true })
 	second, err := o.Refresh(context.Background(), first.Refresh)
 	if err != nil || second.Identity.SessionName != "" || second.Access == "" {
@@ -203,7 +203,7 @@ func TestRefreshInvalidGrantMapsToErrInvalidGrant(t *testing.T) {
 
 func TestRefreshServerErrorIsNotInvalidGrant(t *testing.T) {
 	o, fake := newTestOIDC(t)
-	first, _ := login(t, o, fake)
+	first, _ := signIn(t, o, fake)
 	fake.mutate(func(f *fakeAuthn) { f.failStatus = http.StatusServiceUnavailable })
 	_, err := o.Refresh(context.Background(), first.Refresh)
 	if err == nil || errors.Is(err, ErrInvalidGrant) {
@@ -213,7 +213,7 @@ func TestRefreshServerErrorIsNotInvalidGrant(t *testing.T) {
 
 func TestRevokeCallsTheEndpoint(t *testing.T) {
 	o, fake := newTestOIDC(t)
-	first, _ := login(t, o, fake)
+	first, _ := signIn(t, o, fake)
 	if err := o.Revoke(context.Background(), first.Refresh); err != nil {
 		t.Fatal(err)
 	}
