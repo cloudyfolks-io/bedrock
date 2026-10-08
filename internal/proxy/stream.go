@@ -31,6 +31,7 @@ type StreamOptions struct {
 	PingInterval time.Duration
 	PongWait     time.Duration
 	SendQueue    int
+	WriteWait    time.Duration
 }
 
 type streamHub struct {
@@ -96,6 +97,9 @@ func streamDefaults(opts StreamOptions) StreamOptions {
 	}
 	if opts.SendQueue == 0 {
 		opts.SendQueue = sendQueue
+	}
+	if opts.WriteWait == 0 {
+		opts.WriteWait = writeWait
 	}
 	return opts
 }
@@ -198,18 +202,18 @@ func (c *streamConn) write(done chan<- struct{}) {
 	for {
 		select {
 		case frame := <-c.out:
-			_ = c.ws.SetWriteDeadline(time.Now().Add(writeWait))
+			_ = c.ws.SetWriteDeadline(time.Now().Add(c.hub.opts.WriteWait))
 			if err := c.ws.WriteJSON(frame); err != nil {
 				c.cancel()
 				_ = c.ws.Close()
 				return
 			}
 		case <-ticker.C:
-			_ = c.ws.WriteControl(websocket.PingMessage, nil, time.Now().Add(writeWait))
+			_ = c.ws.WriteControl(websocket.PingMessage, nil, time.Now().Add(c.hub.opts.WriteWait))
 		case request := <-c.closing:
 			c.cancel()
 			if request.code != 0 {
-				_ = c.ws.WriteControl(websocket.CloseMessage, websocket.FormatCloseMessage(request.code, request.text), time.Now().Add(writeWait))
+				_ = c.ws.WriteControl(websocket.CloseMessage, websocket.FormatCloseMessage(request.code, request.text), time.Now().Add(c.hub.opts.WriteWait))
 			}
 			_ = c.ws.Close()
 			return
