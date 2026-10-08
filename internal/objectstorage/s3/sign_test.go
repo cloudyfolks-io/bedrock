@@ -73,3 +73,9 @@ func TestSignSortsAndEncodesTheQuery(t *testing.T) {
 		t.Fatalf("query %q", got)
 	}
 }
+
+func TestSignSortsQueryByKeyThenValue(t *testing.T) {
+	if got := canonicalQuery("a-b=1&a=2&a=1"); got != "a=1&a=2&a-b=1" {
+		t.Fatalf("query %q", got)
+	}
+}

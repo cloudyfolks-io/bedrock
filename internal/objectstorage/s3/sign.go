@@ -1,10 +1,12 @@
 package s3
 
 import (
+	"cmp"
 	"crypto/hmac"
 	"crypto/sha256"
 	"encoding/hex"
 	"net/url"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -84,13 +86,19 @@ func canonicalQuery(raw string) string {
 	if raw == "" {
 		return ""
 	}
-	pairs := []string{}
+	pairs := [][2]string{}
 	for _, part := range strings.Split(raw, "&") {
 		key, value, _ := strings.Cut(part, "=")
-		pairs = append(pairs, uriEncode(unescape(key))+"="+uriEncode(unescape(value)))
+		pairs = append(pairs, [2]string{uriEncode(unescape(key)), uriEncode(unescape(value))})
 	}
-	sort.Strings(pairs)
-	return strings.Join(pairs, "&")
+	slices.SortFunc(pairs, func(a, b [2]string) int {
+		return cmp.Or(cmp.Compare(a[0], b[0]), cmp.Compare(a[1], b[1]))
+	})
+	joined := make([]string, 0, len(pairs))
+	for _, pair := range pairs {
+		joined = append(joined, pair[0]+"="+pair[1])
+	}
+	return strings.Join(joined, "&")
 }
 
 func unescape(value string) string {
