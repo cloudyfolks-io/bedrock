@@ -17,6 +17,8 @@ const (
 	SecurityGroupProtocolUDP  = "udp"
 )
 
+// +kubebuilder:validation:XValidation:rule="isCIDR(self.cidr) && cidr(self.cidr).ip().family() == 4 && string(cidr(self.cidr).masked()) == self.cidr && cidr(self.cidr).prefixLength() >= 16 && cidr(self.cidr).prefixLength() <= 28",message="cidr must be an IPv4 network address with a prefix from 16 to 28"
+// +kubebuilder:validation:XValidation:rule="!has(self.gateway) || size(self.gateway) == 0 || (isIP(self.gateway) && cidr(self.cidr).containsIP(self.gateway))",message="gateway must be an address inside cidr"
 type SubnetSpec struct {
 	// +kubebuilder:validation:MinLength=1
 	// +kubebuilder:validation:XValidation:rule="self == oldSelf",message="networkRef is immutable"
@@ -48,6 +50,7 @@ type SubnetStatus struct {
 // +kubebuilder:subresource:status
 // +kubebuilder:printcolumn:name="Network",type=string,JSONPath=`.spec.networkRef`
 // +kubebuilder:printcolumn:name="CIDR",type=string,JSONPath=`.spec.cidr`
+// +kubebuilder:validation:XValidation:rule="self.metadata.name.size() <= 63 && self.metadata.name.matches('^[a-z0-9]([-a-z0-9]*[a-z0-9])?$')",message="the name must be a DNS label"
 type Subnet struct {
 	metav1.TypeMeta   `json:",inline"`
 	metav1.ObjectMeta `json:"metadata,omitempty"`
@@ -72,6 +75,8 @@ type ElasticIPTarget struct {
 	SubnetRef string `json:"subnetRef,omitempty"`
 }
 
+// +kubebuilder:validation:XValidation:rule="self.providerNetwork == oldSelf.providerNetwork",message="providerNetwork is immutable"
+// +kubebuilder:validation:XValidation:rule="has(self.address) == has(oldSelf.address) && (!has(self.address) || self.address == oldSelf.address)",message="address is immutable"
 type ElasticIPSpec struct {
 	// +kubebuilder:validation:MinLength=1
 	ProviderNetwork string `json:"providerNetwork"`
@@ -265,6 +270,7 @@ type SecurityGroupStatus struct {
 // +kubebuilder:object:root=true
 // +kubebuilder:resource:scope=Namespaced
 // +kubebuilder:subresource:status
+// +kubebuilder:validation:XValidation:rule="self.metadata.name.size() <= 63 && self.metadata.name.matches('^[a-z0-9]([-a-z0-9]*[a-z0-9])?$')",message="the name must be a DNS label"
 type SecurityGroup struct {
 	metav1.TypeMeta   `json:",inline"`
 	metav1.ObjectMeta `json:"metadata,omitempty"`

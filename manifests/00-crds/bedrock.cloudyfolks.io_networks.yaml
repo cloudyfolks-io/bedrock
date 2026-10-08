@@ -133,12 +133,41 @@ spec:
               observedGeneration:
                 format: int64
                 type: integer
+              subnets:
+                items:
+                  properties:
+                    cidr:
+                      maxLength: 43
+                      type: string
+                    name:
+                      maxLength: 63
+                      type: string
+                    namespace:
+                      maxLength: 63
+                      type: string
+                  required:
+                  - cidr
+                  - name
+                  - namespace
+                  type: object
+                maxItems: 512
+                type: array
+                x-kubernetes-list-map-keys:
+                - namespace
+                - name
+                x-kubernetes-list-type: map
               vpc:
                 type: string
             type: object
         required:
         - spec
         type: object
+        x-kubernetes-validations:
+        - message: the name must be a DNS label of at most 30 characters
+          rule: self.metadata.name.size() <= 30 && self.metadata.name.matches('^[a-z0-9]([-a-z0-9]*[a-z0-9])?$')
+        - message: the name is reserved for the Fabric underlay
+          rule: '!self.metadata.name.startsWith(''provider-'') && self.metadata.name
+            != ''ovn-cluster'''
     served: true
     storage: true
     subresources:

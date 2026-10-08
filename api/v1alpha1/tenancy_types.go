@@ -152,10 +152,25 @@ type NetworkSpec struct {
 	EnableExternal bool `json:"enableExternal,omitempty"`
 }
 
+type NetworkSubnetStatus struct {
+	// +kubebuilder:validation:MaxLength=63
+	Namespace string `json:"namespace"`
+	// +kubebuilder:validation:MaxLength=63
+	Name string `json:"name"`
+	// +kubebuilder:validation:MaxLength=43
+	CIDR string `json:"cidr"`
+}
+
 type NetworkStatus struct {
 	CommonStatus `json:",inline"`
 	// +optional
 	VPC string `json:"vpc,omitempty"`
+	// +optional
+	// +listType=map
+	// +listMapKey=namespace
+	// +listMapKey=name
+	// +kubebuilder:validation:MaxItems=512
+	Subnets []NetworkSubnetStatus `json:"subnets,omitempty"`
 }
 
 // +kubebuilder:object:root=true
@@ -164,6 +179,8 @@ type NetworkStatus struct {
 // +kubebuilder:printcolumn:name="Tenant",type=string,JSONPath=`.spec.tenantRef`
 // +kubebuilder:printcolumn:name="CIDR",type=string,JSONPath=`.spec.cidr`
 // +kubebuilder:printcolumn:name="VPC",type=string,JSONPath=`.status.vpc`
+// +kubebuilder:validation:XValidation:rule="self.metadata.name.size() <= 30 && self.metadata.name.matches('^[a-z0-9]([-a-z0-9]*[a-z0-9])?$')",message="the name must be a DNS label of at most 30 characters"
+// +kubebuilder:validation:XValidation:rule="!self.metadata.name.startsWith('provider-') && self.metadata.name != 'ovn-cluster'",message="the name is reserved for the Fabric underlay"
 type Network struct {
 	metav1.TypeMeta   `json:",inline"`
 	metav1.ObjectMeta `json:"metadata,omitempty"`

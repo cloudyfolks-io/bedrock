@@ -75,6 +75,12 @@ spec:
             required:
             - providerNetwork
             type: object
+            x-kubernetes-validations:
+            - message: providerNetwork is immutable
+              rule: self.providerNetwork == oldSelf.providerNetwork
+            - message: address is immutable
+              rule: has(self.address) == has(oldSelf.address) && (!has(self.address)
+                || self.address == oldSelf.address)
           status:
             properties:
               address:

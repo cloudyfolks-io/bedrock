@@ -78,6 +78,15 @@ spec:
             - cidr
             - networkRef
             type: object
+            x-kubernetes-validations:
+            - message: cidr must be an IPv4 network address with a prefix from 16
+                to 28
+              rule: isCIDR(self.cidr) && cidr(self.cidr).ip().family() == 4 && string(cidr(self.cidr).masked())
+                == self.cidr && cidr(self.cidr).prefixLength() >= 16 && cidr(self.cidr).prefixLength()
+                <= 28
+            - message: gateway must be an address inside cidr
+              rule: '!has(self.gateway) || size(self.gateway) == 0 || (isIP(self.gateway)
+                && cidr(self.cidr).containsIP(self.gateway))'
           status:
             properties:
               conditions:
@@ -146,6 +155,9 @@ spec:
         required:
         - spec
         type: object
+        x-kubernetes-validations:
+        - message: the name must be a DNS label
+          rule: self.metadata.name.size() <= 63 && self.metadata.name.matches('^[a-z0-9]([-a-z0-9]*[a-z0-9])?$')
     served: true
     storage: true
     subresources:
