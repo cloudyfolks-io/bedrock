@@ -13,6 +13,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	"github.com/cloudyfolks-io/bedrock/api/v1alpha1"
+	"github.com/cloudyfolks-io/bedrock/internal/backup/target"
 	"github.com/cloudyfolks-io/bedrock/internal/dnsname"
 )
 
@@ -48,6 +49,14 @@ func intMin(minimum int) func(string) error {
 		}
 		return nil
 	}
+}
+
+func backupTarget(v string) error {
+	if v == "" {
+		return nil
+	}
+	_, err := target.Parse(v)
+	return err
 }
 
 func domainName(v string) error {
@@ -112,7 +121,7 @@ func Catalog() []Definition {
 		{"virt.emulation", "false", "Run virtual machines with software emulation on hosts without KVM.", boolean},
 		{"overcommit.cpu", "4", "CPU overcommit ratio.", intMin(1)},
 		{"overcommit.memory", "1.0", "Memory overcommit ratio of at least 0.1.", floatMin(0.1)},
-		{"backup.target", "", "Backup target URL, s3:// or nfs://.", free},
+		{"backup.target", "", "Backup target URL: s3://<endpoint>[:<port>]/<bucket>[/<prefix>][?region=<region>][&insecure=true]. nfs:// is not supported.", backupTarget},
 		{"backup.credentials-secret", "", "Secret name in bedrock-system holding backup credentials.", free},
 		{"backup.etcd-schedule", "0 2 * * *", "Cron schedule for etcd snapshots.", free},
 		{"audit.level", "Metadata", "Audit level for read requests.", oneOf("Metadata", "RequestResponse")},

@@ -169,3 +169,21 @@ func TestOvercommitMemoryValidator(t *testing.T) {
 		}
 	}
 }
+
+func TestBackupTargetSettingRefusesNFS(t *testing.T) {
+	def, ok := Lookup("backup.target")
+	if !ok {
+		t.Fatal("backup.target missing")
+	}
+	if err := def.Validate("nfs://nas/export"); err == nil || !strings.Contains(err.Error(), "nfs targets are not supported") {
+		t.Fatalf("nfs: got %v", err)
+	}
+	for _, ok := range []string{"", "s3://s3.example.com/bkt"} {
+		if err := def.Validate(ok); err != nil {
+			t.Fatalf("%q: %v", ok, err)
+		}
+	}
+	if err := def.Validate("s3://u:p@h/b"); err == nil {
+		t.Fatal("credentials in URL must fail")
+	}
+}
