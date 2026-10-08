@@ -1,0 +1,75 @@
+{
+  "apiVersion": "bedrock.cloudyfolks.io/v1alpha1",
+  "kind": "ImageList",
+  "metadata": {
+    "resourceVersion": "100"
+  },
+  "items": [
+    {
+      "apiVersion": "bedrock.cloudyfolks.io/v1alpha1",
+      "kind": "Image",
+      "metadata": {
+        "name": "custom-disk",
+        "uid": "uid-image-custom-disk",
+        "resourceVersion": "100",
+        "creationTimestamp": "2026-10-01T10:00:00Z",
+        "namespace": "acme-web"
+      },
+      "spec": {
+        "type": "disk",
+        "os": {
+          "family": "debian",
+          "version": "12"
+        },
+        "source": {
+          "http": {
+            "url": "https://example.test/debian.qcow2"
+          }
+        }
+      },
+      "status": {
+        "phase": "Ready",
+        "digest": "sha256:cccc3333dddd4444",
+        "sizeBytes": 3221225472,
+        "conditions": [
+          {
+            "type": "Ready",
+            "status": "True",
+            "reason": "Ready",
+            "message": "",
+            "lastTransitionTime": "2026-10-01T10:00:00Z"
+          }
+        ]
+      }
+    },
+    {
+      "apiVersion": "bedrock.cloudyfolks.io/v1alpha1",
+      "kind": "Image",
+      "metadata": {
+        "name": "installer",
+        "uid": "uid-image-installer",
+        "resourceVersion": "100",
+        "creationTimestamp": "2026-10-01T10:00:00Z",
+        "namespace": "acme-web"
+      },
+      "spec": {
+        "type": "iso",
+        "source": {
+          "upload": {}
+        }
+      },
+      "status": {
+        "phase": "WaitingForUpload",
+        "conditions": [
+          {
+            "type": "Ready",
+            "status": "False",
+            "reason": "WaitingForUpload",
+            "message": "waiting for the file",
+            "lastTransitionTime": "2026-10-01T10:00:00Z"
+          }
+        ]
+      }
+    }
+  ]
+}

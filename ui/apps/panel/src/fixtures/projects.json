@@ -1,0 +1,100 @@
+{
+  "apiVersion": "bedrock.cloudyfolks.io/v1alpha1",
+  "kind": "ProjectList",
+  "metadata": {
+    "resourceVersion": "100"
+  },
+  "items": [
+    {
+      "apiVersion": "bedrock.cloudyfolks.io/v1alpha1",
+      "kind": "Project",
+      "metadata": {
+        "name": "db",
+        "uid": "uid-project-db",
+        "resourceVersion": "100",
+        "creationTimestamp": "2026-10-01T10:00:00Z"
+      },
+      "spec": {
+        "displayName": "Database",
+        "tenantRef": "acme",
+        "members": [
+          {
+            "ref": {
+              "kind": "User",
+              "name": "alice"
+            },
+            "role": "owner"
+          }
+        ]
+      },
+      "status": {
+        "namespace": "acme-db",
+        "subnet": "default",
+        "conditions": [
+          {
+            "type": "Ready",
+            "status": "True",
+            "reason": "Ready",
+            "message": "",
+            "lastTransitionTime": "2026-10-01T10:00:00Z"
+          }
+        ]
+      }
+    },
+    {
+      "apiVersion": "bedrock.cloudyfolks.io/v1alpha1",
+      "kind": "Project",
+      "metadata": {
+        "name": "web",
+        "uid": "uid-project-web",
+        "resourceVersion": "100",
+        "creationTimestamp": "2026-10-01T10:00:00Z"
+      },
+      "spec": {
+        "displayName": "Web",
+        "tenantRef": "acme",
+        "members": [
+          {
+            "ref": {
+              "kind": "User",
+              "name": "alice"
+            },
+            "role": "owner"
+          },
+          {
+            "ref": {
+              "kind": "Group",
+              "name": "web-devs"
+            },
+            "role": "editor"
+          }
+        ],
+        "quota": {
+          "vms": 10,
+          "cpu": "16",
+          "memory": "64Gi",
+          "storage": "1Ti"
+        }
+      },
+      "status": {
+        "namespace": "acme-web",
+        "subnet": "default",
+        "usage": {
+          "vms": 3,
+          "cpu": "6",
+          "memory": "24Gi",
+          "storage": "200Gi"
+        },
+        "conditions": [
+          {
+            "type": "Ready",
+            "status": "True",
+            "reason": "Ready",
+            "message": "",
+            "lastTransitionTime": "2026-10-01T10:00:00Z"
+          }
+        ]
+      }
+    }
+  ]
+}

@@ -13,8 +13,215 @@ msgstr "التنزيلات"
 msgid "account.title"
 msgstr "الحساب"
 
+msgid "action.error.failed"
+msgstr "فشل الإجراء"
+
+msgid "action.error.forbidden"
+msgstr "غير مسموح لك بهذا الإجراء"
+
+msgid "action.migrate"
+msgstr "ترحيل"
+
+msgid "action.restart"
+msgstr "إعادة التشغيل"
+
+msgid "action.snapshot"
+msgstr "لقطة"
+
+msgid "action.start"
+msgstr "بدء"
+
+msgid "action.stop"
+msgstr "إيقاف"
+
 msgid "app.title"
 msgstr "بيدروك"
+
+msgid "col.address"
+msgstr "العنوان"
+
+msgid "col.addresses"
+msgstr "العناوين"
+
+msgid "col.age"
+msgstr "العمر"
+
+msgid "col.attachedTo"
+msgstr "متصل بـ"
+
+msgid "col.backup"
+msgstr "النسخة الاحتياطية"
+
+msgid "col.backupTarget"
+msgstr "الوجهة"
+
+msgid "col.buckets"
+msgstr "حصة الحاويات"
+
+msgid "col.cidr"
+msgstr "CIDR"
+
+msgid "col.default"
+msgstr "الافتراضي"
+
+msgid "col.desiredVersion"
+msgstr "الإصدار المطلوب"
+
+msgid "col.dhcp"
+msgstr "DHCP"
+
+msgid "col.digest"
+msgstr "البصمة"
+
+msgid "col.displayName"
+msgstr "الاسم المعروض"
+
+msgid "col.dnsZone"
+msgstr "نطاق DNS"
+
+msgid "col.egress"
+msgstr "قواعد الخروج"
+
+msgid "col.elasticIp"
+msgstr "IP مرن"
+
+msgid "col.enabled"
+msgstr "مفعّل"
+
+msgid "col.endpoint"
+msgstr "نقطة الوصول"
+
+msgid "col.external"
+msgstr "خارجي"
+
+msgid "col.gateway"
+msgstr "البوابة"
+
+msgid "col.image"
+msgstr "الصورة"
+
+msgid "col.ingress"
+msgstr "قواعد الدخول"
+
+msgid "col.instanceType"
+msgstr "نوع النسخة"
+
+msgid "col.k0sVersion"
+msgstr "إصدار k0s"
+
+msgid "col.keep"
+msgstr "الاحتفاظ بعدد"
+
+msgid "col.keyType"
+msgstr "نوع المفتاح"
+
+msgid "col.listeners"
+msgstr "المستمعون"
+
+msgid "col.maintenance"
+msgstr "الصيانة"
+
+msgid "col.members"
+msgstr "الأعضاء"
+
+msgid "col.name"
+msgstr "الاسم"
+
+msgid "col.namespace"
+msgstr "مساحة الأسماء"
+
+msgid "col.network"
+msgstr "الشبكة"
+
+msgid "col.node"
+msgstr "العقدة"
+
+msgid "col.os"
+msgstr "نظام التشغيل"
+
+msgid "col.owners"
+msgstr "المالكون"
+
+msgid "col.phase"
+msgstr "المرحلة"
+
+msgid "col.projects"
+msgstr "حصة المشاريع"
+
+msgid "col.providerNetwork"
+msgstr "شبكة المزود"
+
+msgid "col.quota"
+msgstr "الحصة"
+
+msgid "col.records"
+msgstr "السجلات"
+
+msgid "col.replace"
+msgstr "استبدال"
+
+msgid "col.retention"
+msgstr "الاحتفاظ"
+
+msgid "col.roles"
+msgstr "الأدوار"
+
+msgid "col.schedule"
+msgstr "الجدول"
+
+msgid "col.size"
+msgstr "الحجم"
+
+msgid "col.source"
+msgstr "المصدر"
+
+msgid "col.status"
+msgstr "الحالة"
+
+msgid "col.storageClass"
+msgstr "فئة التخزين"
+
+msgid "col.target"
+msgstr "الهدف"
+
+msgid "col.targetName"
+msgstr "اسم الاستعادة"
+
+msgid "col.tenant"
+msgstr "المستأجر"
+
+msgid "col.type"
+msgstr "النوع"
+
+msgid "col.user"
+msgstr "المستخدم"
+
+msgid "col.value"
+msgstr "القيمة"
+
+msgid "col.version"
+msgstr "الإصدار"
+
+msgid "col.versioning"
+msgstr "إصدارات الملفات"
+
+msgid "col.versions"
+msgstr "الإصدارات"
+
+msgid "col.vm"
+msgstr "الجهاز الافتراضي"
+
+msgid "col.volume"
+msgstr "القرص"
+
+msgid "col.vpc"
+msgstr "الشبكة الخاصة"
+
+msgid "col.vpcCidr"
+msgstr "CIDR للشبكة الخاصة"
+
+msgid "col.zone"
+msgstr "النطاق"
 
 msgid "common.action.cancel"
 msgstr "إلغاء"
@@ -40,8 +247,80 @@ msgstr "حفظ"
 msgid "common.count.vms"
 msgstr "{count, plural, zero {لا توجد أجهزة افتراضية} one {جهاز افتراضي واحد} two {جهازان افتراضيان} few {# أجهزة افتراضية} many {# جهازًا افتراضيًا} other {# جهاز افتراضي}}"
 
+msgid "common.live.connecting"
+msgstr "جارٍ الاتصال"
+
+msgid "common.live.live"
+msgstr "مباشر"
+
+msgid "common.live.paused"
+msgstr "متوقف مؤقتًا"
+
 msgid "common.state.loading"
 msgstr "جارٍ التحميل"
+
+msgid "confirm.delete.description"
+msgstr "لا يمكن التراجع عن هذا. اكتب الاسم {name} للتأكيد."
+
+msgid "confirm.delete.input"
+msgstr "الاسم"
+
+msgid "confirm.delete.title"
+msgstr "حذف {kind}"
+
+msgid "confirm.simple.description"
+msgstr "{0}: {1}"
+
+msgid "detail.conditions.message"
+msgstr "الرسالة"
+
+msgid "detail.conditions.reason"
+msgstr "السبب"
+
+msgid "detail.conditions.status"
+msgstr "الحالة"
+
+msgid "detail.conditions.title"
+msgstr "الشروط"
+
+msgid "detail.conditions.type"
+msgstr "النوع"
+
+msgid "detail.deleted.title"
+msgstr "تم حذف هذا الكائن"
+
+msgid "detail.spec.title"
+msgstr "المواصفات"
+
+msgid "list.actions.header"
+msgstr "الإجراءات"
+
+msgid "list.empty.description"
+msgstr "تظهر هنا الكائنات من هذا النوع."
+
+msgid "list.empty.title"
+msgstr "لا شيء هنا بعد"
+
+msgid "list.error.title"
+msgstr "تعذر تحميل القائمة"
+
+msgid "list.filter.label"
+msgstr "تصفية حسب الاسم"
+
+msgid "list.forbidden.description"
+msgstr "اطلب الوصول من مالك المشروع."
+
+msgid "list.forbidden.title"
+msgstr "لا يمكنك عرض هذا"
+
+msgid "list.noMatch.description"
+msgstr "لا يوجد كائن بهذا الاسم."
+
+msgid "list.noMatch.title"
+msgstr "لا توجد نتائج"
+
+msgid "list.row.actions"
+msgstr "إجراءات لـ {0}"
 
 msgid "nav.item.addons"
 msgstr "الإضافات"
@@ -198,3 +477,84 @@ msgstr "قائمة المستخدم"
 
 msgid "shell.userMenu.signOut"
 msgstr "تسجيل الخروج"
+
+msgid "status.condition.none"
+msgstr "بلا حالة"
+
+msgid "status.condition.notReady"
+msgstr "غير جاهز"
+
+msgid "status.condition.ready"
+msgstr "جاهز"
+
+msgid "status.condition.unknown"
+msgstr "غير معروف"
+
+msgid "status.phase.available"
+msgstr "متاح"
+
+msgid "status.phase.backup"
+msgstr "النسخ الاحتياطي"
+
+msgid "status.phase.completed"
+msgstr "اكتمل"
+
+msgid "status.phase.components"
+msgstr "المكونات"
+
+msgid "status.phase.controlPlane"
+msgstr "مستوى التحكم"
+
+msgid "status.phase.failed"
+msgstr "فشل"
+
+msgid "status.phase.idle"
+msgstr "خامل"
+
+msgid "status.phase.importing"
+msgstr "قيد الاستيراد"
+
+msgid "status.phase.inProgress"
+msgstr "قيد التنفيذ"
+
+msgid "status.phase.inUse"
+msgstr "قيد الاستخدام"
+
+msgid "status.phase.migrating"
+msgstr "قيد الترحيل"
+
+msgid "status.phase.pending"
+msgstr "قيد الانتظار"
+
+msgid "status.phase.preflight"
+msgstr "الفحص المسبق"
+
+msgid "status.phase.preload"
+msgstr "التحميل المسبق"
+
+msgid "status.phase.ready"
+msgstr "جاهز"
+
+msgid "status.phase.resizing"
+msgstr "قيد تغيير الحجم"
+
+msgid "status.phase.running"
+msgstr "قيد التشغيل"
+
+msgid "status.phase.starting"
+msgstr "قيد البدء"
+
+msgid "status.phase.stopped"
+msgstr "متوقف"
+
+msgid "status.phase.stopping"
+msgstr "قيد الإيقاف"
+
+msgid "status.phase.verify"
+msgstr "التحقق"
+
+msgid "status.phase.waitingForUpload"
+msgstr "بانتظار الرفع"
+
+msgid "status.phase.workers"
+msgstr "العمال"

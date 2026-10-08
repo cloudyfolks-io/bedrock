@@ -1,0 +1,61 @@
+{
+  "apiVersion": "bedrock.cloudyfolks.io/v1alpha1",
+  "kind": "ReleaseList",
+  "metadata": {
+    "resourceVersion": "100"
+  },
+  "items": [
+    {
+      "apiVersion": "bedrock.cloudyfolks.io/v1alpha1",
+      "kind": "Release",
+      "metadata": {
+        "name": "v0.1.0",
+        "uid": "uid-release-v0.1.0",
+        "resourceVersion": "100",
+        "creationTimestamp": "2026-10-01T10:00:00Z"
+      },
+      "spec": {
+        "version": "v0.1.0",
+        "k0sVersion": "v1.36.0+k0s.0",
+        "image": "ghcr.io/cloudyfolks-io/bedrock:v0.1.0",
+        "components": [
+          {
+            "name": "kube-ovn",
+            "version": "v1.14.0",
+            "image": "ghcr.io/kubeovn/kube-ovn:v1.14.0"
+          }
+        ],
+        "upgradeFrom": [
+          "v0.0.9"
+        ]
+      },
+      "status": {}
+    },
+    {
+      "apiVersion": "bedrock.cloudyfolks.io/v1alpha1",
+      "kind": "Release",
+      "metadata": {
+        "name": "v0.2.0",
+        "uid": "uid-release-v0.2.0",
+        "resourceVersion": "100",
+        "creationTimestamp": "2026-10-01T10:00:00Z"
+      },
+      "spec": {
+        "version": "v0.2.0",
+        "k0sVersion": "v1.36.1+k0s.0",
+        "image": "ghcr.io/cloudyfolks-io/bedrock:v0.2.0",
+        "components": [
+          {
+            "name": "kube-ovn",
+            "version": "v1.14.1",
+            "image": "ghcr.io/kubeovn/kube-ovn:v1.14.1"
+          }
+        ],
+        "upgradeFrom": [
+          "v0.1.0"
+        ]
+      },
+      "status": {}
+    }
+  ]
+}

@@ -1,0 +1,186 @@
+{
+  "apiVersion": "bedrock.cloudyfolks.io/v1alpha1",
+  "kind": "VirtualMachineList",
+  "metadata": {
+    "resourceVersion": "100"
+  },
+  "items": [
+    {
+      "apiVersion": "bedrock.cloudyfolks.io/v1alpha1",
+      "kind": "VirtualMachine",
+      "metadata": {
+        "name": "db-1",
+        "uid": "uid-virtualmachine-db-1",
+        "resourceVersion": "100",
+        "creationTimestamp": "2026-10-01T10:00:00Z",
+        "namespace": "acme-web"
+      },
+      "spec": {
+        "instanceType": "u1.large",
+        "preference": "ubuntu",
+        "image": {
+          "name": "ubuntu-24-04",
+          "scope": "cluster"
+        },
+        "rootDisk": {
+          "sizeGi": 40,
+          "storageClass": "block"
+        },
+        "disks": [
+          {
+            "volumeRef": "data-1",
+            "bus": "virtio"
+          }
+        ],
+        "networks": [
+          {
+            "subnetRef": "default",
+            "securityGroups": [
+              "web"
+            ]
+          }
+        ],
+        "sshKeys": [
+          "laptop"
+        ],
+        "running": false
+      },
+      "status": {
+        "phase": "Stopped",
+        "conditions": [
+          {
+            "type": "Ready",
+            "status": "False",
+            "reason": "Stopped",
+            "message": "",
+            "lastTransitionTime": "2026-10-01T10:00:00Z"
+          }
+        ]
+      }
+    },
+    {
+      "apiVersion": "bedrock.cloudyfolks.io/v1alpha1",
+      "kind": "VirtualMachine",
+      "metadata": {
+        "name": "old",
+        "uid": "uid-virtualmachine-old",
+        "resourceVersion": "100",
+        "creationTimestamp": "2026-10-01T10:00:00Z",
+        "namespace": "acme-web"
+      },
+      "spec": {
+        "instanceType": "u1.small",
+        "preference": "ubuntu",
+        "image": {
+          "name": "ubuntu-24-04",
+          "scope": "cluster"
+        },
+        "rootDisk": {
+          "sizeGi": 40,
+          "storageClass": "block"
+        },
+        "disks": [
+          {
+            "volumeRef": "data-1",
+            "bus": "virtio"
+          }
+        ],
+        "networks": [
+          {
+            "subnetRef": "default",
+            "securityGroups": [
+              "web"
+            ]
+          }
+        ],
+        "sshKeys": [
+          "laptop"
+        ],
+        "running": false
+      },
+      "status": {
+        "phase": "Failed",
+        "conditions": [
+          {
+            "type": "Ready",
+            "status": "False",
+            "reason": "Failed",
+            "message": "",
+            "lastTransitionTime": "2026-10-01T10:00:00Z"
+          }
+        ]
+      }
+    },
+    {
+      "apiVersion": "bedrock.cloudyfolks.io/v1alpha1",
+      "kind": "VirtualMachine",
+      "metadata": {
+        "name": "web-1",
+        "uid": "uid-virtualmachine-web-1",
+        "resourceVersion": "100",
+        "creationTimestamp": "2026-10-01T10:00:00Z",
+        "namespace": "acme-web"
+      },
+      "spec": {
+        "instanceType": "u1.medium",
+        "preference": "ubuntu",
+        "image": {
+          "name": "ubuntu-24-04",
+          "scope": "cluster"
+        },
+        "rootDisk": {
+          "sizeGi": 40,
+          "storageClass": "block"
+        },
+        "disks": [
+          {
+            "volumeRef": "data-1",
+            "bus": "virtio"
+          }
+        ],
+        "networks": [
+          {
+            "subnetRef": "default",
+            "securityGroups": [
+              "web"
+            ]
+          }
+        ],
+        "sshKeys": [
+          "laptop"
+        ],
+        "running": true
+      },
+      "status": {
+        "phase": "Running",
+        "conditions": [
+          {
+            "type": "Ready",
+            "status": "True",
+            "reason": "Running",
+            "message": "",
+            "lastTransitionTime": "2026-10-01T10:00:00Z"
+          }
+        ],
+        "node": "host-01",
+        "addresses": [
+          {
+            "ip": "10.100.0.5",
+            "mac": "52:54:00:12:34:56",
+            "subnet": "default"
+          }
+        ],
+        "guestAgent": {
+          "hostname": "web-1",
+          "os": "Ubuntu 24.04",
+          "version": "7.1"
+        },
+        "console": {
+          "vncPath": "/apis/bedrock.cloudyfolks.io/v1alpha1/namespaces/acme-web/virtualmachines/web-1/console/vnc",
+          "serialPath": "/apis/bedrock.cloudyfolks.io/v1alpha1/namespaces/acme-web/virtualmachines/web-1/console/serial"
+        },
+        "elasticIP": "web-ip"
+      }
+    }
+  ]
+}

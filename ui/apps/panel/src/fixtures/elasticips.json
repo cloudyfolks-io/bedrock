@@ -1,0 +1,40 @@
+{
+  "apiVersion": "bedrock.cloudyfolks.io/v1alpha1",
+  "kind": "ElasticIPList",
+  "metadata": {
+    "resourceVersion": "100"
+  },
+  "items": [
+    {
+      "apiVersion": "bedrock.cloudyfolks.io/v1alpha1",
+      "kind": "ElasticIP",
+      "metadata": {
+        "name": "web-ip",
+        "uid": "uid-elasticip-web-ip",
+        "resourceVersion": "100",
+        "creationTimestamp": "2026-10-01T10:00:00Z",
+        "namespace": "acme-web"
+      },
+      "spec": {
+        "providerNetwork": "external",
+        "target": {
+          "kind": "VirtualMachine",
+          "name": "web-1",
+          "subnetRef": "default"
+        }
+      },
+      "status": {
+        "address": "203.0.113.10",
+        "conditions": [
+          {
+            "type": "Ready",
+            "status": "True",
+            "reason": "Ready",
+            "message": "",
+            "lastTransitionTime": "2026-10-01T10:00:00Z"
+          }
+        ]
+      }
+    }
+  ]
+}

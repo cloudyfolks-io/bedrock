@@ -1,0 +1,52 @@
+{
+  "apiVersion": "bedrock.cloudyfolks.io/v1alpha1",
+  "kind": "LoadBalancerList",
+  "metadata": {
+    "resourceVersion": "100"
+  },
+  "items": [
+    {
+      "apiVersion": "bedrock.cloudyfolks.io/v1alpha1",
+      "kind": "LoadBalancer",
+      "metadata": {
+        "name": "web-lb",
+        "uid": "uid-loadbalancer-web-lb",
+        "resourceVersion": "100",
+        "creationTimestamp": "2026-10-01T10:00:00Z",
+        "namespace": "acme-web"
+      },
+      "spec": {
+        "elasticIPRef": "web-ip",
+        "listeners": [
+          {
+            "port": 443,
+            "protocol": "TCP",
+            "targets": [
+              {
+                "vmRef": "web-1",
+                "port": 8443
+              }
+            ],
+            "healthCheck": {
+              "intervalSeconds": 10,
+              "timeoutSeconds": 3,
+              "successThreshold": 2,
+              "failureThreshold": 3
+            }
+          }
+        ]
+      },
+      "status": {
+        "conditions": [
+          {
+            "type": "Ready",
+            "status": "True",
+            "reason": "Ready",
+            "message": "",
+            "lastTransitionTime": "2026-10-01T10:00:00Z"
+          }
+        ]
+      }
+    }
+  ]
+}

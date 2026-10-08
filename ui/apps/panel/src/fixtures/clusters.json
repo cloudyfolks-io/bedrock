@@ -1,0 +1,91 @@
+{
+  "apiVersion": "bedrock.cloudyfolks.io/v1alpha1",
+  "kind": "ClusterList",
+  "metadata": {
+    "resourceVersion": "100"
+  },
+  "items": [
+    {
+      "apiVersion": "bedrock.cloudyfolks.io/v1alpha1",
+      "kind": "Cluster",
+      "metadata": {
+        "name": "cluster",
+        "uid": "uid-cluster-cluster",
+        "resourceVersion": "100",
+        "creationTimestamp": "2026-10-01T10:00:00Z"
+      },
+      "spec": {
+        "api": {
+          "vip": "10.0.0.10",
+          "vipMode": "arp"
+        },
+        "desiredVersion": "v0.1.0",
+        "maintenanceWindow": "Sun 02:00-04:00",
+        "nodeConcurrency": 1
+      },
+      "status": {
+        "phase": "Workers",
+        "version": "v0.0.9",
+        "conditions": [
+          {
+            "type": "Available",
+            "status": "True",
+            "reason": "Ready",
+            "message": "",
+            "lastTransitionTime": "2026-10-01T10:00:00Z"
+          },
+          {
+            "type": "Progressing",
+            "status": "True",
+            "reason": "Upgrading",
+            "message": "workers are upgrading",
+            "lastTransitionTime": "2026-10-01T10:00:00Z"
+          },
+          {
+            "type": "Degraded",
+            "status": "False",
+            "reason": "NotDegraded",
+            "message": "",
+            "lastTransitionTime": "2026-10-01T10:00:00Z"
+          },
+          {
+            "type": "UpgradeBlocked",
+            "status": "False",
+            "reason": "NotBlocked",
+            "message": "",
+            "lastTransitionTime": "2026-10-01T10:00:00Z"
+          }
+        ],
+        "upgrade": {
+          "attempt": 1,
+          "from": "v0.0.9",
+          "to": "v0.1.0",
+          "startedAt": "2026-10-01T10:00:00Z",
+          "phaseStartedAt": "2026-10-01T10:00:00Z"
+        },
+        "components": [
+          {
+            "name": "kube-ovn",
+            "version": "v1.14.0",
+            "available": true,
+            "degraded": false
+          },
+          {
+            "name": "rook-ceph",
+            "version": "v1.17.0",
+            "available": true,
+            "degraded": false,
+            "message": ""
+          }
+        ],
+        "backups": [
+          {
+            "time": "2026-10-01T10:00:00Z",
+            "location": "s3://backups/etcd",
+            "digest": "sha256:0123456789abcdef"
+          }
+        ]
+      }
+    }
+  ]
+}

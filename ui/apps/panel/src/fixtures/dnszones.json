@@ -1,0 +1,48 @@
+{
+  "apiVersion": "bedrock.cloudyfolks.io/v1alpha1",
+  "kind": "DNSZoneList",
+  "metadata": {
+    "resourceVersion": "100"
+  },
+  "items": [
+    {
+      "apiVersion": "bedrock.cloudyfolks.io/v1alpha1",
+      "kind": "DNSZone",
+      "metadata": {
+        "name": "internal",
+        "uid": "uid-dnszone-internal",
+        "resourceVersion": "100",
+        "creationTimestamp": "2026-10-01T10:00:00Z",
+        "namespace": "acme-web"
+      },
+      "spec": {
+        "zone": "web.internal",
+        "records": [
+          {
+            "name": "app",
+            "ips": [
+              "10.100.0.5"
+            ]
+          },
+          {
+            "name": "v6",
+            "ips": [
+              "fd00::5"
+            ]
+          }
+        ]
+      },
+      "status": {
+        "conditions": [
+          {
+            "type": "Ready",
+            "status": "True",
+            "reason": "Ready",
+            "message": "",
+            "lastTransitionTime": "2026-10-01T10:00:00Z"
+          }
+        ]
+      }
+    }
+  ]
+}

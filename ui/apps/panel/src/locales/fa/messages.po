@@ -13,8 +13,215 @@ msgstr "دریافت‌ها"
 msgid "account.title"
 msgstr "حساب کاربری"
 
+msgid "action.error.failed"
+msgstr "عملیات ناموفق بود"
+
+msgid "action.error.forbidden"
+msgstr "شما اجازه انجام این کار را ندارید"
+
+msgid "action.migrate"
+msgstr "انتقال"
+
+msgid "action.restart"
+msgstr "راه‌اندازی مجدد"
+
+msgid "action.snapshot"
+msgstr "اسنپ‌شات"
+
+msgid "action.start"
+msgstr "شروع"
+
+msgid "action.stop"
+msgstr "توقف"
+
 msgid "app.title"
 msgstr "بدراک"
+
+msgid "col.address"
+msgstr "نشانی"
+
+msgid "col.addresses"
+msgstr "نشانی‌ها"
+
+msgid "col.age"
+msgstr "سن"
+
+msgid "col.attachedTo"
+msgstr "متصل به"
+
+msgid "col.backup"
+msgstr "پشتیبان"
+
+msgid "col.backupTarget"
+msgstr "مقصد"
+
+msgid "col.buckets"
+msgstr "سهمیه سطل"
+
+msgid "col.cidr"
+msgstr "CIDR"
+
+msgid "col.default"
+msgstr "پیش‌فرض"
+
+msgid "col.desiredVersion"
+msgstr "نسخه مطلوب"
+
+msgid "col.dhcp"
+msgstr "DHCP"
+
+msgid "col.digest"
+msgstr "چکیده"
+
+msgid "col.displayName"
+msgstr "نام نمایشی"
+
+msgid "col.dnsZone"
+msgstr "ناحیه DNS"
+
+msgid "col.egress"
+msgstr "قوانین خروجی"
+
+msgid "col.elasticIp"
+msgstr "آی‌پی شناور"
+
+msgid "col.enabled"
+msgstr "فعال"
+
+msgid "col.endpoint"
+msgstr "نقطه دسترسی"
+
+msgid "col.external"
+msgstr "خارجی"
+
+msgid "col.gateway"
+msgstr "دروازه"
+
+msgid "col.image"
+msgstr "تصویر"
+
+msgid "col.ingress"
+msgstr "قوانین ورودی"
+
+msgid "col.instanceType"
+msgstr "نوع نمونه"
+
+msgid "col.k0sVersion"
+msgstr "نسخه k0s"
+
+msgid "col.keep"
+msgstr "نگهداری تعداد"
+
+msgid "col.keyType"
+msgstr "نوع کلید"
+
+msgid "col.listeners"
+msgstr "شنودکننده‌ها"
+
+msgid "col.maintenance"
+msgstr "نگهداری"
+
+msgid "col.members"
+msgstr "اعضا"
+
+msgid "col.name"
+msgstr "نام"
+
+msgid "col.namespace"
+msgstr "فضای نام"
+
+msgid "col.network"
+msgstr "شبکه"
+
+msgid "col.node"
+msgstr "گره"
+
+msgid "col.os"
+msgstr "سیستم‌عامل"
+
+msgid "col.owners"
+msgstr "مالکان"
+
+msgid "col.phase"
+msgstr "مرحله"
+
+msgid "col.projects"
+msgstr "سهمیه پروژه"
+
+msgid "col.providerNetwork"
+msgstr "شبکه ارائه‌دهنده"
+
+msgid "col.quota"
+msgstr "سهمیه"
+
+msgid "col.records"
+msgstr "رکوردها"
+
+msgid "col.replace"
+msgstr "جایگزینی"
+
+msgid "col.retention"
+msgstr "نگهداشت"
+
+msgid "col.roles"
+msgstr "نقش‌ها"
+
+msgid "col.schedule"
+msgstr "زمان‌بندی"
+
+msgid "col.size"
+msgstr "اندازه"
+
+msgid "col.source"
+msgstr "منبع"
+
+msgid "col.status"
+msgstr "وضعیت"
+
+msgid "col.storageClass"
+msgstr "کلاس ذخیره‌سازی"
+
+msgid "col.target"
+msgstr "هدف"
+
+msgid "col.targetName"
+msgstr "نام بازیابی"
+
+msgid "col.tenant"
+msgstr "مستأجر"
+
+msgid "col.type"
+msgstr "نوع"
+
+msgid "col.user"
+msgstr "کاربر"
+
+msgid "col.value"
+msgstr "مقدار"
+
+msgid "col.version"
+msgstr "نسخه"
+
+msgid "col.versioning"
+msgstr "نسخه‌گذاری"
+
+msgid "col.versions"
+msgstr "نسخه‌ها"
+
+msgid "col.vm"
+msgstr "ماشین مجازی"
+
+msgid "col.volume"
+msgstr "حجم"
+
+msgid "col.vpc"
+msgstr "شبکه خصوصی"
+
+msgid "col.vpcCidr"
+msgstr "CIDR شبکه خصوصی"
+
+msgid "col.zone"
+msgstr "ناحیه"
 
 msgid "common.action.cancel"
 msgstr "انصراف"
@@ -40,8 +247,80 @@ msgstr "ذخیره"
 msgid "common.count.vms"
 msgstr "{count, plural, one {# ماشین مجازی} other {# ماشین مجازی}}"
 
+msgid "common.live.connecting"
+msgstr "در حال اتصال"
+
+msgid "common.live.live"
+msgstr "زنده"
+
+msgid "common.live.paused"
+msgstr "متوقف‌شده"
+
 msgid "common.state.loading"
 msgstr "در حال بارگذاری"
+
+msgid "confirm.delete.description"
+msgstr "این کار قابل بازگشت نیست. برای تأیید نام {name} را بنویسید."
+
+msgid "confirm.delete.input"
+msgstr "نام"
+
+msgid "confirm.delete.title"
+msgstr "حذف {kind}"
+
+msgid "confirm.simple.description"
+msgstr "{0}: {1}"
+
+msgid "detail.conditions.message"
+msgstr "پیام"
+
+msgid "detail.conditions.reason"
+msgstr "دلیل"
+
+msgid "detail.conditions.status"
+msgstr "وضعیت"
+
+msgid "detail.conditions.title"
+msgstr "شرایط"
+
+msgid "detail.conditions.type"
+msgstr "نوع"
+
+msgid "detail.deleted.title"
+msgstr "این شیء حذف شد"
+
+msgid "detail.spec.title"
+msgstr "مشخصات"
+
+msgid "list.actions.header"
+msgstr "عملیات"
+
+msgid "list.empty.description"
+msgstr "اشیای این نوع اینجا نمایش داده می‌شوند."
+
+msgid "list.empty.title"
+msgstr "هنوز چیزی اینجا نیست"
+
+msgid "list.error.title"
+msgstr "فهرست بارگذاری نشد"
+
+msgid "list.filter.label"
+msgstr "فیلتر بر اساس نام"
+
+msgid "list.forbidden.description"
+msgstr "از مالک پروژه دسترسی بخواهید."
+
+msgid "list.forbidden.title"
+msgstr "شما اجازه دیدن این را ندارید"
+
+msgid "list.noMatch.description"
+msgstr "هیچ شیئی این نام را ندارد."
+
+msgid "list.noMatch.title"
+msgstr "موردی یافت نشد"
+
+msgid "list.row.actions"
+msgstr "عملیات برای {0}"
 
 msgid "nav.item.addons"
 msgstr "افزونه‌ها"
@@ -198,3 +477,84 @@ msgstr "منوی کاربر"
 
 msgid "shell.userMenu.signOut"
 msgstr "خروج"
+
+msgid "status.condition.none"
+msgstr "بدون وضعیت"
+
+msgid "status.condition.notReady"
+msgstr "آماده نیست"
+
+msgid "status.condition.ready"
+msgstr "آماده"
+
+msgid "status.condition.unknown"
+msgstr "نامشخص"
+
+msgid "status.phase.available"
+msgstr "در دسترس"
+
+msgid "status.phase.backup"
+msgstr "پشتیبان‌گیری"
+
+msgid "status.phase.completed"
+msgstr "کامل شد"
+
+msgid "status.phase.components"
+msgstr "اجزا"
+
+msgid "status.phase.controlPlane"
+msgstr "کنترل‌پلین"
+
+msgid "status.phase.failed"
+msgstr "ناموفق"
+
+msgid "status.phase.idle"
+msgstr "بیکار"
+
+msgid "status.phase.importing"
+msgstr "در حال دریافت"
+
+msgid "status.phase.inProgress"
+msgstr "در حال انجام"
+
+msgid "status.phase.inUse"
+msgstr "در حال استفاده"
+
+msgid "status.phase.migrating"
+msgstr "در حال انتقال"
+
+msgid "status.phase.pending"
+msgstr "در انتظار"
+
+msgid "status.phase.preflight"
+msgstr "بررسی اولیه"
+
+msgid "status.phase.preload"
+msgstr "پیش‌بارگذاری"
+
+msgid "status.phase.ready"
+msgstr "آماده"
+
+msgid "status.phase.resizing"
+msgstr "در حال تغییر اندازه"
+
+msgid "status.phase.running"
+msgstr "در حال اجرا"
+
+msgid "status.phase.starting"
+msgstr "در حال شروع"
+
+msgid "status.phase.stopped"
+msgstr "متوقف"
+
+msgid "status.phase.stopping"
+msgstr "در حال توقف"
+
+msgid "status.phase.verify"
+msgstr "تأیید"
+
+msgid "status.phase.waitingForUpload"
+msgstr "منتظر بارگذاری"
+
+msgid "status.phase.workers"
+msgstr "کارگرها"

@@ -859,6 +859,44 @@ const shellRules = `
 }
 `;
 
+const listRules = `
+.br-toolbar {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: var(--br-space-md);
+  margin-block-end: var(--br-space-md);
+}
+
+.br-live {
+  font-size: var(--br-font-size-sm);
+  color: var(--br-color-text-muted);
+}
+
+.br-live[data-live="live"] {
+  color: var(--br-color-success);
+}
+
+.br-live[data-live="paused"] {
+  color: var(--br-color-warning);
+}
+
+.br-chips {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: var(--br-space-xs);
+}
+
+.br-code-block {
+  font-family: var(--br-font-mono);
+  background-color: var(--br-color-surface);
+  border-radius: var(--br-radius-md);
+  padding: var(--br-space-md);
+  overflow: auto;
+  text-align: start;
+}
+`;
+
 export function renderTokens(tokens: Tokens): string {
   return `:root {
 ${colorProperties(tokens, "light")}
@@ -880,7 +918,7 @@ ${colorProperties(tokens, "dark")}
 :root[data-theme="dark"] {
 ${colorProperties(tokens, "dark")}
 }
-${componentRules}${dataRules}${overlayRules}${stateRules}${shellRules}`;
+${componentRules}${dataRules}${overlayRules}${stateRules}${shellRules}${listRules}`;
 }
 
 function main(): void {

@@ -1,0 +1,60 @@
+{
+  "apiVersion": "bedrock.cloudyfolks.io/v1alpha1",
+  "kind": "AddonList",
+  "metadata": {
+    "resourceVersion": "100"
+  },
+  "items": [
+    {
+      "apiVersion": "bedrock.cloudyfolks.io/v1alpha1",
+      "kind": "Addon",
+      "metadata": {
+        "name": "kata",
+        "uid": "uid-addon-kata",
+        "resourceVersion": "100",
+        "creationTimestamp": "2026-10-01T10:00:00Z"
+      },
+      "spec": {
+        "enabled": true
+      },
+      "status": {
+        "conditions": [
+          {
+            "type": "Ready",
+            "status": "True",
+            "reason": "Ready",
+            "message": "",
+            "lastTransitionTime": "2026-10-01T10:00:00Z"
+          }
+        ]
+      }
+    },
+    {
+      "apiVersion": "bedrock.cloudyfolks.io/v1alpha1",
+      "kind": "Addon",
+      "metadata": {
+        "name": "loki",
+        "uid": "uid-addon-loki",
+        "resourceVersion": "100",
+        "creationTimestamp": "2026-10-01T10:00:00Z"
+      },
+      "spec": {
+        "enabled": false,
+        "values": {
+          "retention": "14d"
+        }
+      },
+      "status": {
+        "conditions": [
+          {
+            "type": "Ready",
+            "status": "False",
+            "reason": "PreflightFailed",
+            "message": "kata needs nested virtualization",
+            "lastTransitionTime": "2026-10-01T10:00:00Z"
+          }
+        ]
+      }
+    }
+  ]
+}

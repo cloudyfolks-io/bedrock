@@ -2,7 +2,7 @@ import type { ReactNode } from "react";
 import { Button as BaseButton } from "@base-ui/react/button";
 
 interface ButtonProps {
-  variant: "primary" | "secondary";
+  variant: "primary" | "secondary" | "danger";
   type?: "button" | "submit";
   disabled?: boolean;
   onClick?: () => void;

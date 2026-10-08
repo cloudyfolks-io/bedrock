@@ -1,0 +1,41 @@
+{
+  "apiVersion": "bedrock.cloudyfolks.io/v1alpha1",
+  "kind": "ObjectStorageBucketList",
+  "metadata": {
+    "resourceVersion": "100"
+  },
+  "items": [
+    {
+      "apiVersion": "bedrock.cloudyfolks.io/v1alpha1",
+      "kind": "ObjectStorageBucket",
+      "metadata": {
+        "name": "assets",
+        "uid": "uid-objectstoragebucket-assets",
+        "resourceVersion": "100",
+        "creationTimestamp": "2026-10-01T10:00:00Z",
+        "namespace": "acme-web"
+      },
+      "spec": {
+        "userRef": "app",
+        "versioning": true,
+        "quota": {
+          "bytes": "100Gi",
+          "objects": 1000000
+        }
+      },
+      "status": {
+        "bucketName": "acme-web-assets",
+        "endpoint": "https://s3.lab.example.test",
+        "conditions": [
+          {
+            "type": "Ready",
+            "status": "True",
+            "reason": "Ready",
+            "message": "",
+            "lastTransitionTime": "2026-10-01T10:00:00Z"
+          }
+        ]
+      }
+    }
+  ]
+}

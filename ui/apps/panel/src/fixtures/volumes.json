@@ -1,0 +1,70 @@
+{
+  "apiVersion": "bedrock.cloudyfolks.io/v1alpha1",
+  "kind": "VolumeList",
+  "metadata": {
+    "resourceVersion": "100"
+  },
+  "items": [
+    {
+      "apiVersion": "bedrock.cloudyfolks.io/v1alpha1",
+      "kind": "Volume",
+      "metadata": {
+        "name": "data-1",
+        "uid": "uid-volume-data-1",
+        "resourceVersion": "100",
+        "creationTimestamp": "2026-10-01T10:00:00Z",
+        "namespace": "acme-web"
+      },
+      "spec": {
+        "sizeGi": 100,
+        "storageClass": "block",
+        "bus": "virtio"
+      },
+      "status": {
+        "phase": "InUse",
+        "attachedTo": "web-1",
+        "actualSizeGi": 100,
+        "conditions": [
+          {
+            "type": "Ready",
+            "status": "True",
+            "reason": "Ready",
+            "message": "",
+            "lastTransitionTime": "2026-10-01T10:00:00Z"
+          }
+        ]
+      }
+    },
+    {
+      "apiVersion": "bedrock.cloudyfolks.io/v1alpha1",
+      "kind": "Volume",
+      "metadata": {
+        "name": "scratch",
+        "uid": "uid-volume-scratch",
+        "resourceVersion": "100",
+        "creationTimestamp": "2026-10-01T10:00:00Z",
+        "namespace": "acme-web"
+      },
+      "spec": {
+        "sizeGi": 20,
+        "storageClass": "block",
+        "source": {
+          "snapshotRef": "data-1-snap"
+        }
+      },
+      "status": {
+        "phase": "Available",
+        "actualSizeGi": 20,
+        "conditions": [
+          {
+            "type": "Ready",
+            "status": "True",
+            "reason": "Ready",
+            "message": "",
+            "lastTransitionTime": "2026-10-01T10:00:00Z"
+          }
+        ]
+      }
+    }
+  ]
+}

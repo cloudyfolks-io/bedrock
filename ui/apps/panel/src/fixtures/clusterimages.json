@@ -1,0 +1,93 @@
+{
+  "apiVersion": "bedrock.cloudyfolks.io/v1alpha1",
+  "kind": "ClusterImageList",
+  "metadata": {
+    "resourceVersion": "100"
+  },
+  "items": [
+    {
+      "apiVersion": "bedrock.cloudyfolks.io/v1alpha1",
+      "kind": "ClusterImage",
+      "metadata": {
+        "name": "ubuntu-24-04",
+        "uid": "uid-clusterimage-ubuntu-24-04",
+        "resourceVersion": "100",
+        "creationTimestamp": "2026-10-01T10:00:00Z"
+      },
+      "spec": {
+        "type": "disk",
+        "os": {
+          "family": "ubuntu",
+          "version": "24.04",
+          "preference": "ubuntu"
+        },
+        "sizeGi": 10,
+        "source": {
+          "registry": {
+            "image": "registry.example.test/ubuntu:24.04"
+          }
+        },
+        "refresh": {
+          "schedule": "0 3 * * *",
+          "keep": 3
+        }
+      },
+      "status": {
+        "phase": "Ready",
+        "digest": "sha256:aaaa1111bbbb2222",
+        "dataSource": "ubuntu-24-04-v1",
+        "sizeBytes": 10737418240,
+        "versions": [
+          {
+            "digest": "sha256:aaaa1111bbbb2222",
+            "dataSource": "ubuntu-24-04-v1",
+            "time": "2026-10-01T10:00:00Z"
+          }
+        ],
+        "conditions": [
+          {
+            "type": "Ready",
+            "status": "True",
+            "reason": "Ready",
+            "message": "",
+            "lastTransitionTime": "2026-10-01T10:00:00Z"
+          }
+        ]
+      }
+    },
+    {
+      "apiVersion": "bedrock.cloudyfolks.io/v1alpha1",
+      "kind": "ClusterImage",
+      "metadata": {
+        "name": "virtio-win",
+        "uid": "uid-clusterimage-virtio-win",
+        "resourceVersion": "100",
+        "creationTimestamp": "2026-10-01T10:00:00Z"
+      },
+      "spec": {
+        "type": "iso",
+        "os": {
+          "family": "windows",
+          "version": "virtio"
+        },
+        "source": {
+          "http": {
+            "url": "https://example.test/virtio-win.iso"
+          }
+        }
+      },
+      "status": {
+        "phase": "Importing",
+        "conditions": [
+          {
+            "type": "Ready",
+            "status": "False",
+            "reason": "Importing",
+            "message": "45 percent",
+            "lastTransitionTime": "2026-10-01T10:00:00Z"
+          }
+        ]
+      }
+    }
+  ]
+}

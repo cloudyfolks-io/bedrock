@@ -1,0 +1,90 @@
+{
+  "apiVersion": "bedrock.cloudyfolks.io/v1alpha1",
+  "kind": "TenantList",
+  "metadata": {
+    "resourceVersion": "100"
+  },
+  "items": [
+    {
+      "apiVersion": "bedrock.cloudyfolks.io/v1alpha1",
+      "kind": "Tenant",
+      "metadata": {
+        "name": "acme",
+        "uid": "uid-tenant-acme",
+        "resourceVersion": "100",
+        "creationTimestamp": "2026-10-01T10:00:00Z"
+      },
+      "spec": {
+        "displayName": "Acme Corp",
+        "network": {
+          "vpcCIDR": "10.100.0.0/16"
+        },
+        "owners": [
+          {
+            "kind": "User",
+            "name": "alice"
+          }
+        ],
+        "quota": {
+          "cpu": "64",
+          "memory": "256Gi",
+          "storage": "4Ti",
+          "projects": 5,
+          "elasticIPs": 4
+        }
+      },
+      "status": {
+        "vpc": "acme",
+        "usage": {
+          "cpu": "12",
+          "memory": "48Gi",
+          "storage": "500Gi",
+          "projects": 2,
+          "elasticIPs": 1
+        },
+        "conditions": [
+          {
+            "type": "Ready",
+            "status": "True",
+            "reason": "Ready",
+            "message": "",
+            "lastTransitionTime": "2026-10-01T10:00:00Z"
+          }
+        ]
+      }
+    },
+    {
+      "apiVersion": "bedrock.cloudyfolks.io/v1alpha1",
+      "kind": "Tenant",
+      "metadata": {
+        "name": "beta",
+        "uid": "uid-tenant-beta",
+        "resourceVersion": "100",
+        "creationTimestamp": "2026-10-01T10:00:00Z"
+      },
+      "spec": {
+        "displayName": "Beta Ltd",
+        "network": {
+          "vpcCIDR": "10.101.0.0/16"
+        },
+        "owners": [
+          {
+            "kind": "Group",
+            "name": "beta-admins"
+          }
+        ]
+      },
+      "status": {
+        "conditions": [
+          {
+            "type": "Ready",
+            "status": "True",
+            "reason": "Ready",
+            "message": "",
+            "lastTransitionTime": "2026-10-01T10:00:00Z"
+          }
+        ]
+      }
+    }
+  ]
+}

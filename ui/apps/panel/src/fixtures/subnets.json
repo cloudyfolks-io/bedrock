@@ -1,0 +1,41 @@
+{
+  "apiVersion": "bedrock.cloudyfolks.io/v1alpha1",
+  "kind": "SubnetList",
+  "metadata": {
+    "resourceVersion": "100"
+  },
+  "items": [
+    {
+      "apiVersion": "bedrock.cloudyfolks.io/v1alpha1",
+      "kind": "Subnet",
+      "metadata": {
+        "name": "default",
+        "uid": "uid-subnet-default",
+        "resourceVersion": "100",
+        "creationTimestamp": "2026-10-01T10:00:00Z",
+        "namespace": "acme-web"
+      },
+      "spec": {
+        "cidr": "10.100.0.0/24",
+        "networkRef": "acme",
+        "gateway": "10.100.0.1",
+        "dhcp": true,
+        "excludeIPs": [
+          "10.100.0.2"
+        ],
+        "dnsZoneRef": "internal"
+      },
+      "status": {
+        "conditions": [
+          {
+            "type": "Ready",
+            "status": "True",
+            "reason": "Ready",
+            "message": "",
+            "lastTransitionTime": "2026-10-01T10:00:00Z"
+          }
+        ]
+      }
+    }
+  ]
+}

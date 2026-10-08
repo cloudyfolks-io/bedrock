@@ -1,3 +1,5 @@
+import { readdirSync, readFileSync, statSync } from "node:fs";
+import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { messages as ar } from "./locales/ar/messages.po";
 import { messages as en } from "./locales/en/messages.po";
@@ -21,5 +23,29 @@ describe("catalogs", () => {
         expect(catalog[id], `${id} equals its id`).not.toBe(id);
       }
     }
+  });
+});
+
+function sourceFiles(directory: string): string[] {
+  return readdirSync(directory).flatMap((entry) => {
+    const path = join(directory, entry);
+    if (statSync(path).isDirectory()) {
+      return entry === "locales" || entry === "fixtures" ? [] : sourceFiles(path);
+    }
+    return /\.(ts|tsx)$/.test(entry) && !/\.test\.tsx?$/.test(entry) ? [path] : [];
+  });
+}
+
+describe("source messages", () => {
+  it("TestEverySourceMessageHasACatalogEntry", () => {
+    const used = new Set<string>();
+    for (const file of sourceFiles(import.meta.dirname)) {
+      for (const match of readFileSync(file, "utf8").matchAll(/\bid:\s*"([a-z][A-Za-z0-9]*(?:\.[a-z][A-Za-z0-9]*)+)"/g)) {
+        used.add(match[1] ?? "");
+      }
+    }
+    const missing = [...used].filter((id) => !(id in en));
+    expect(missing).toEqual([]);
+    expect(used.size).toBeGreaterThan(50);
   });
 });

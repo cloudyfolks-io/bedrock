@@ -1,0 +1,38 @@
+{
+  "apiVersion": "bedrock.cloudyfolks.io/v1alpha1",
+  "kind": "VirtualMachineRestoreList",
+  "metadata": {
+    "resourceVersion": "100"
+  },
+  "items": [
+    {
+      "apiVersion": "bedrock.cloudyfolks.io/v1alpha1",
+      "kind": "VirtualMachineRestore",
+      "metadata": {
+        "name": "web-1-restore",
+        "uid": "uid-virtualmachinerestore-web-1-restore",
+        "resourceVersion": "100",
+        "creationTimestamp": "2026-10-01T10:00:00Z",
+        "namespace": "acme-web"
+      },
+      "spec": {
+        "backupRef": "web-1-nightly",
+        "backupID": "bk-001",
+        "targetName": "web-1",
+        "replace": true
+      },
+      "status": {
+        "phase": "InProgress",
+        "conditions": [
+          {
+            "type": "Ready",
+            "status": "False",
+            "reason": "Restoring",
+            "message": "",
+            "lastTransitionTime": "2026-10-01T10:00:00Z"
+          }
+        ]
+      }
+    }
+  ]
+}

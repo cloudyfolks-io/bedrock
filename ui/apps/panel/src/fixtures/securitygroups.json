@@ -1,0 +1,51 @@
+{
+  "apiVersion": "bedrock.cloudyfolks.io/v1alpha1",
+  "kind": "SecurityGroupList",
+  "metadata": {
+    "resourceVersion": "100"
+  },
+  "items": [
+    {
+      "apiVersion": "bedrock.cloudyfolks.io/v1alpha1",
+      "kind": "SecurityGroup",
+      "metadata": {
+        "name": "web",
+        "uid": "uid-securitygroup-web",
+        "resourceVersion": "100",
+        "creationTimestamp": "2026-10-01T10:00:00Z",
+        "namespace": "acme-web"
+      },
+      "spec": {
+        "ingress": [
+          {
+            "protocol": "tcp",
+            "port": 22,
+            "cidr": "10.0.0.0/8"
+          },
+          {
+            "protocol": "tcp",
+            "port": 443,
+            "cidr": "0.0.0.0/0"
+          }
+        ],
+        "egress": [
+          {
+            "protocol": "all",
+            "cidr": "0.0.0.0/0"
+          }
+        ]
+      },
+      "status": {
+        "conditions": [
+          {
+            "type": "Ready",
+            "status": "True",
+            "reason": "Ready",
+            "message": "",
+            "lastTransitionTime": "2026-10-01T10:00:00Z"
+          }
+        ]
+      }
+    }
+  ]
+}

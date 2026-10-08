@@ -1,0 +1,37 @@
+{
+  "apiVersion": "bedrock.cloudyfolks.io/v1alpha1",
+  "kind": "VolumeSnapshotList",
+  "metadata": {
+    "resourceVersion": "100"
+  },
+  "items": [
+    {
+      "apiVersion": "bedrock.cloudyfolks.io/v1alpha1",
+      "kind": "VolumeSnapshot",
+      "metadata": {
+        "name": "data-1-snap",
+        "uid": "uid-volumesnapshot-data-1-snap",
+        "resourceVersion": "100",
+        "creationTimestamp": "2026-10-01T10:00:00Z",
+        "namespace": "acme-web"
+      },
+      "spec": {
+        "volumeRef": "data-1",
+        "retention": "168h"
+      },
+      "status": {
+        "phase": "Ready",
+        "sizeBytes": 107374182400,
+        "conditions": [
+          {
+            "type": "Ready",
+            "status": "True",
+            "reason": "Ready",
+            "message": "",
+            "lastTransitionTime": "2026-10-01T10:00:00Z"
+          }
+        ]
+      }
+    }
+  ]
+}

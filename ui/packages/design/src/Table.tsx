@@ -26,8 +26,8 @@ export function TableRow({ selected, children }: { selected?: boolean; children:
 }
 
 interface TableHeaderCellProps {
-  sort?: "ascending" | "descending" | "none";
-  onSort?: () => void;
+  sort?: "ascending" | "descending" | "none" | undefined;
+  onSort?: (() => void) | undefined;
   children: ReactNode;
 }
 

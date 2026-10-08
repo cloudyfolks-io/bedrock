@@ -1,0 +1,94 @@
+{
+  "apiVersion": "bedrock.cloudyfolks.io/v1alpha1",
+  "kind": "SettingList",
+  "metadata": {
+    "resourceVersion": "100"
+  },
+  "items": [
+    {
+      "apiVersion": "bedrock.cloudyfolks.io/v1alpha1",
+      "kind": "Setting",
+      "metadata": {
+        "name": "platform.host",
+        "uid": "uid-setting-platform.host",
+        "resourceVersion": "100",
+        "creationTimestamp": "2026-10-01T10:00:00Z"
+      },
+      "spec": {
+        "value": "lab.example.test"
+      },
+      "status": {
+        "applied": "lab.example.test",
+        "default": ""
+      }
+    },
+    {
+      "apiVersion": "bedrock.cloudyfolks.io/v1alpha1",
+      "kind": "Setting",
+      "metadata": {
+        "name": "authn.session-ttl",
+        "uid": "uid-setting-authn.session-ttl",
+        "resourceVersion": "100",
+        "creationTimestamp": "2026-10-01T10:00:00Z"
+      },
+      "spec": {
+        "value": ""
+      },
+      "status": {
+        "applied": "12h",
+        "default": "12h"
+      }
+    },
+    {
+      "apiVersion": "bedrock.cloudyfolks.io/v1alpha1",
+      "kind": "Setting",
+      "metadata": {
+        "name": "kata.enabled",
+        "uid": "uid-setting-kata.enabled",
+        "resourceVersion": "100",
+        "creationTimestamp": "2026-10-01T10:00:00Z"
+      },
+      "spec": {
+        "value": "true"
+      },
+      "status": {
+        "applied": "true",
+        "default": "true"
+      }
+    },
+    {
+      "apiVersion": "bedrock.cloudyfolks.io/v1alpha1",
+      "kind": "Setting",
+      "metadata": {
+        "name": "platform.tls-mode",
+        "uid": "uid-setting-platform.tls-mode",
+        "resourceVersion": "100",
+        "creationTimestamp": "2026-10-01T10:00:00Z"
+      },
+      "spec": {
+        "value": "SelfSigned"
+      },
+      "status": {
+        "applied": "SelfSigned",
+        "default": "SelfSigned"
+      }
+    },
+    {
+      "apiVersion": "bedrock.cloudyfolks.io/v1alpha1",
+      "kind": "Setting",
+      "metadata": {
+        "name": "platform.additional-ca",
+        "uid": "uid-setting-platform.additional-ca",
+        "resourceVersion": "100",
+        "creationTimestamp": "2026-10-01T10:00:00Z"
+      },
+      "spec": {
+        "value": ""
+      },
+      "status": {
+        "applied": "",
+        "default": ""
+      }
+    }
+  ]
+}

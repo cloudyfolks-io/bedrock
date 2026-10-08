@@ -13,8 +13,215 @@ msgstr "Downloads"
 msgid "account.title"
 msgstr "Account"
 
+msgid "action.error.failed"
+msgstr "The action failed"
+
+msgid "action.error.forbidden"
+msgstr "You are not allowed to do this"
+
+msgid "action.migrate"
+msgstr "Migrate"
+
+msgid "action.restart"
+msgstr "Restart"
+
+msgid "action.snapshot"
+msgstr "Snapshot"
+
+msgid "action.start"
+msgstr "Start"
+
+msgid "action.stop"
+msgstr "Stop"
+
 msgid "app.title"
 msgstr "Bedrock"
+
+msgid "col.address"
+msgstr "Address"
+
+msgid "col.addresses"
+msgstr "Addresses"
+
+msgid "col.age"
+msgstr "Age"
+
+msgid "col.attachedTo"
+msgstr "Attached to"
+
+msgid "col.backup"
+msgstr "Backup"
+
+msgid "col.backupTarget"
+msgstr "Target"
+
+msgid "col.buckets"
+msgstr "Bucket quota"
+
+msgid "col.cidr"
+msgstr "CIDR"
+
+msgid "col.default"
+msgstr "Default"
+
+msgid "col.desiredVersion"
+msgstr "Desired version"
+
+msgid "col.dhcp"
+msgstr "DHCP"
+
+msgid "col.digest"
+msgstr "Digest"
+
+msgid "col.displayName"
+msgstr "Display name"
+
+msgid "col.dnsZone"
+msgstr "DNS zone"
+
+msgid "col.egress"
+msgstr "Egress rules"
+
+msgid "col.elasticIp"
+msgstr "Elastic IP"
+
+msgid "col.enabled"
+msgstr "Enabled"
+
+msgid "col.endpoint"
+msgstr "Endpoint"
+
+msgid "col.external"
+msgstr "External"
+
+msgid "col.gateway"
+msgstr "Gateway"
+
+msgid "col.image"
+msgstr "Image"
+
+msgid "col.ingress"
+msgstr "Ingress rules"
+
+msgid "col.instanceType"
+msgstr "Instance type"
+
+msgid "col.k0sVersion"
+msgstr "k0s version"
+
+msgid "col.keep"
+msgstr "Keep"
+
+msgid "col.keyType"
+msgstr "Key type"
+
+msgid "col.listeners"
+msgstr "Listeners"
+
+msgid "col.maintenance"
+msgstr "Maintenance"
+
+msgid "col.members"
+msgstr "Members"
+
+msgid "col.name"
+msgstr "Name"
+
+msgid "col.namespace"
+msgstr "Namespace"
+
+msgid "col.network"
+msgstr "Network"
+
+msgid "col.node"
+msgstr "Node"
+
+msgid "col.os"
+msgstr "OS"
+
+msgid "col.owners"
+msgstr "Owners"
+
+msgid "col.phase"
+msgstr "Phase"
+
+msgid "col.projects"
+msgstr "Project quota"
+
+msgid "col.providerNetwork"
+msgstr "Provider network"
+
+msgid "col.quota"
+msgstr "Quota"
+
+msgid "col.records"
+msgstr "Records"
+
+msgid "col.replace"
+msgstr "Replace"
+
+msgid "col.retention"
+msgstr "Retention"
+
+msgid "col.roles"
+msgstr "Roles"
+
+msgid "col.schedule"
+msgstr "Schedule"
+
+msgid "col.size"
+msgstr "Size"
+
+msgid "col.source"
+msgstr "Source"
+
+msgid "col.status"
+msgstr "Status"
+
+msgid "col.storageClass"
+msgstr "Storage class"
+
+msgid "col.target"
+msgstr "Target"
+
+msgid "col.targetName"
+msgstr "Restored name"
+
+msgid "col.tenant"
+msgstr "Tenant"
+
+msgid "col.type"
+msgstr "Type"
+
+msgid "col.user"
+msgstr "User"
+
+msgid "col.value"
+msgstr "Value"
+
+msgid "col.version"
+msgstr "Version"
+
+msgid "col.versioning"
+msgstr "Versioning"
+
+msgid "col.versions"
+msgstr "Versions"
+
+msgid "col.vm"
+msgstr "Virtual machine"
+
+msgid "col.volume"
+msgstr "Volume"
+
+msgid "col.vpc"
+msgstr "VPC"
+
+msgid "col.vpcCidr"
+msgstr "VPC CIDR"
+
+msgid "col.zone"
+msgstr "Zone"
 
 msgid "common.action.cancel"
 msgstr "Cancel"
@@ -40,8 +247,80 @@ msgstr "Save"
 msgid "common.count.vms"
 msgstr "{count, plural, one {# virtual machine} other {# virtual machines}}"
 
+msgid "common.live.connecting"
+msgstr "Connecting"
+
+msgid "common.live.live"
+msgstr "Live"
+
+msgid "common.live.paused"
+msgstr "Paused"
+
 msgid "common.state.loading"
 msgstr "Loading"
+
+msgid "confirm.delete.description"
+msgstr "This cannot be undone. Type the name {name} to confirm."
+
+msgid "confirm.delete.input"
+msgstr "Name"
+
+msgid "confirm.delete.title"
+msgstr "Delete {kind}"
+
+msgid "confirm.simple.description"
+msgstr "{0}: {1}"
+
+msgid "detail.conditions.message"
+msgstr "Message"
+
+msgid "detail.conditions.reason"
+msgstr "Reason"
+
+msgid "detail.conditions.status"
+msgstr "Status"
+
+msgid "detail.conditions.title"
+msgstr "Conditions"
+
+msgid "detail.conditions.type"
+msgstr "Type"
+
+msgid "detail.deleted.title"
+msgstr "This object was deleted"
+
+msgid "detail.spec.title"
+msgstr "Specification"
+
+msgid "list.actions.header"
+msgstr "Actions"
+
+msgid "list.empty.description"
+msgstr "Objects of this kind appear here."
+
+msgid "list.empty.title"
+msgstr "Nothing here yet"
+
+msgid "list.error.title"
+msgstr "The list did not load"
+
+msgid "list.filter.label"
+msgstr "Filter by name"
+
+msgid "list.forbidden.description"
+msgstr "Ask a project owner for access."
+
+msgid "list.forbidden.title"
+msgstr "You cannot view this"
+
+msgid "list.noMatch.description"
+msgstr "No object has this name."
+
+msgid "list.noMatch.title"
+msgstr "No match"
+
+msgid "list.row.actions"
+msgstr "Actions for {0}"
 
 msgid "nav.item.addons"
 msgstr "Addons"
@@ -198,3 +477,84 @@ msgstr "User menu"
 
 msgid "shell.userMenu.signOut"
 msgstr "Sign out"
+
+msgid "status.condition.none"
+msgstr "No status"
+
+msgid "status.condition.notReady"
+msgstr "Not ready"
+
+msgid "status.condition.ready"
+msgstr "Ready"
+
+msgid "status.condition.unknown"
+msgstr "Unknown"
+
+msgid "status.phase.available"
+msgstr "Available"
+
+msgid "status.phase.backup"
+msgstr "Backup"
+
+msgid "status.phase.completed"
+msgstr "Completed"
+
+msgid "status.phase.components"
+msgstr "Components"
+
+msgid "status.phase.controlPlane"
+msgstr "Control plane"
+
+msgid "status.phase.failed"
+msgstr "Failed"
+
+msgid "status.phase.idle"
+msgstr "Idle"
+
+msgid "status.phase.importing"
+msgstr "Importing"
+
+msgid "status.phase.inProgress"
+msgstr "In progress"
+
+msgid "status.phase.inUse"
+msgstr "In use"
+
+msgid "status.phase.migrating"
+msgstr "Migrating"
+
+msgid "status.phase.pending"
+msgstr "Pending"
+
+msgid "status.phase.preflight"
+msgstr "Preflight"
+
+msgid "status.phase.preload"
+msgstr "Preload"
+
+msgid "status.phase.ready"
+msgstr "Ready"
+
+msgid "status.phase.resizing"
+msgstr "Resizing"
+
+msgid "status.phase.running"
+msgstr "Running"
+
+msgid "status.phase.starting"
+msgstr "Starting"
+
+msgid "status.phase.stopped"
+msgstr "Stopped"
+
+msgid "status.phase.stopping"
+msgstr "Stopping"
+
+msgid "status.phase.verify"
+msgstr "Verify"
+
+msgid "status.phase.waitingForUpload"
+msgstr "Waiting for upload"
+
+msgid "status.phase.workers"
+msgstr "Workers"

@@ -1,0 +1,39 @@
+{
+  "apiVersion": "bedrock.cloudyfolks.io/v1alpha1",
+  "kind": "ObjectStorageUserList",
+  "metadata": {
+    "resourceVersion": "100"
+  },
+  "items": [
+    {
+      "apiVersion": "bedrock.cloudyfolks.io/v1alpha1",
+      "kind": "ObjectStorageUser",
+      "metadata": {
+        "name": "app",
+        "uid": "uid-objectstorageuser-app",
+        "resourceVersion": "100",
+        "creationTimestamp": "2026-10-01T10:00:00Z",
+        "namespace": "acme-web"
+      },
+      "spec": {
+        "displayName": "App user",
+        "quota": {
+          "buckets": 5,
+          "bytes": "500Gi"
+        }
+      },
+      "status": {
+        "credentialsSecret": "object-user-app",
+        "conditions": [
+          {
+            "type": "Ready",
+            "status": "True",
+            "reason": "Ready",
+            "message": "",
+            "lastTransitionTime": "2026-10-01T10:00:00Z"
+          }
+        ]
+      }
+    }
+  ]
+}

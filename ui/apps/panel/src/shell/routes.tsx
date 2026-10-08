@@ -1,18 +1,17 @@
 import { Navigate, Outlet, Route, Routes, useParams } from "react-router";
 import { useLingui } from "@lingui/react/macro";
-import { msg } from "@lingui/core/macro";
-import type { MessageDescriptor } from "@lingui/core";
 import { useProjects } from "../api/projects";
 import { EmptyState } from "../components/EmptyState";
 import { Spinner } from "../components/Spinner";
 import { AccountPage } from "../pages/AccountPage";
 import { NotFoundPage } from "../pages/NotFoundPage";
-import { PlaceholderPage } from "../pages/PlaceholderPage";
+import { ResourceDetailPage } from "../resources/ResourceDetailPage";
+import { ResourceListPage } from "../resources/ResourceListPage";
+import { primaryDefinitionsFor } from "../resources/registry";
 import { readStored, writeStored } from "../storage";
 import { useEffect } from "react";
 import { AdminOnly } from "./context";
 import { Shell } from "./Shell";
-import { navigationFor } from "./navigation";
 
 function HomeRedirect() {
   return <Navigate to={readStored("perspective") === "admin" ? "/admin" : "/p"} replace />;
@@ -53,20 +52,6 @@ function ProjectScope() {
   return known ? <Outlet /> : <NotFoundPage />;
 }
 
-interface PagePath {
-  path: string;
-  title: MessageDescriptor;
-}
-
-function pagesOf(perspective: "admin" | "project"): PagePath[] {
-  return navigationFor(perspective, ":project").flatMap((section) => section.items.map((item) => ({ path: item.id, title: item.label })));
-}
-
-const detailPaths: Record<"admin" | "project", string[]> = {
-  admin: ["hosts", "tenants", "cluster-images"],
-  project: ["vms", "volumes", "images"],
-};
-
 export function AppRoutes() {
   return (
     <Routes>
@@ -81,23 +66,19 @@ export function AppRoutes() {
           }
         >
           <Route index element={<Navigate to="/admin/hosts" replace />} />
-          {pagesOf("admin").map((page) => (
-            <Route key={page.path} path={page.path} element={<PlaceholderPage title={page.title} />} />
-          ))}
-          {detailPaths.admin.map((path) => (
-            <Route key={path} path={`${path}/:name`} element={<PlaceholderPage title={msg({ id: "shell.detail.title", message: "Details" })} />} />
-          ))}
+          {primaryDefinitionsFor("admin").flatMap((def) => [
+            <Route key={def.path} path={def.path} element={<ResourceListPage def={def} />} />,
+            <Route key={`${def.path}/:name`} path={`${def.path}/:name`} element={<ResourceDetailPage def={def} />} />,
+          ])}
         </Route>
         <Route path="p">
           <Route index element={<ProjectIndex />} />
           <Route path=":project" element={<ProjectScope />}>
             <Route index element={<Navigate to="vms" replace />} />
-            {pagesOf("project").map((page) => (
-              <Route key={page.path} path={page.path} element={<PlaceholderPage title={page.title} />} />
-            ))}
-            {detailPaths.project.map((path) => (
-              <Route key={path} path={`${path}/:name`} element={<PlaceholderPage title={msg({ id: "shell.detail.title", message: "Details" })} />} />
-            ))}
+            {primaryDefinitionsFor("project").flatMap((def) => [
+              <Route key={def.path} path={def.path} element={<ResourceListPage def={def} />} />,
+              <Route key={`${def.path}/:name`} path={`${def.path}/:name`} element={<ResourceDetailPage def={def} />} />,
+            ])}
           </Route>
         </Route>
         <Route path="account" element={<AccountPage />} />

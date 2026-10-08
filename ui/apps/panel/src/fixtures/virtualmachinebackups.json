@@ -1,0 +1,46 @@
+{
+  "apiVersion": "bedrock.cloudyfolks.io/v1alpha1",
+  "kind": "VirtualMachineBackupList",
+  "metadata": {
+    "resourceVersion": "100"
+  },
+  "items": [
+    {
+      "apiVersion": "bedrock.cloudyfolks.io/v1alpha1",
+      "kind": "VirtualMachineBackup",
+      "metadata": {
+        "name": "web-1-nightly",
+        "uid": "uid-virtualmachinebackup-web-1-nightly",
+        "resourceVersion": "100",
+        "creationTimestamp": "2026-10-01T10:00:00Z",
+        "namespace": "acme-web"
+      },
+      "spec": {
+        "vmRef": "web-1",
+        "target": "s3://backups/vms",
+        "schedule": "0 2 * * *",
+        "keep": 7
+      },
+      "status": {
+        "phase": "Completed",
+        "lastBackup": "2026-10-01T10:00:00Z",
+        "backups": [
+          {
+            "id": "bk-001",
+            "time": "2026-10-01T10:00:00Z",
+            "sizeBytes": 21474836480
+          }
+        ],
+        "conditions": [
+          {
+            "type": "Ready",
+            "status": "True",
+            "reason": "Ready",
+            "message": "",
+            "lastTransitionTime": "2026-10-01T10:00:00Z"
+          }
+        ]
+      }
+    }
+  ]
+}
