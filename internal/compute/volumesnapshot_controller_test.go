@@ -149,7 +149,7 @@ func TestVolumeSnapshotStatus(t *testing.T) {
 	must(t, c.Status().Update(context.Background(), csi))
 	reconcileSnapshot(t, r, ns)
 	snapshot = requireSnapshotReason(t, c, ns, "Failed")
-	if snapshot.Status.Phase != "Failed" || meta.FindStatusCondition(snapshot.Status.Conditions, v1alpha1.ConditionReady).Message != "driver down" {
+	if snapshot.Status.Phase != "Failed" || meta.FindStatusCondition(snapshot.Status.Conditions, v1alpha1.ConditionReady).Message != "the storage driver could not create the snapshot" {
 		t.Fatalf("status %+v", snapshot.Status)
 	}
 }

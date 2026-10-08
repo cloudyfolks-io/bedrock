@@ -16,6 +16,7 @@ import (
 	"k8s.io/client-go/util/retry"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	logf "sigs.k8s.io/controller-runtime/pkg/log"
 
 	"github.com/cloudyfolks-io/bedrock/api/v1alpha1"
 )
@@ -169,7 +170,8 @@ func (r *VolumeSnapshotReconciler) observe(ctx context.Context, snapshot v1alpha
 		return snapshotOutcome{}, err
 	}
 	if message, _, _ := unstructured.NestedString(csi.Object, "status", "error", "message"); message != "" {
-		return snapshotOutcome{Phase: v1alpha1.VolumeSnapshotPhaseFailed, Message: message}, nil
+		logf.FromContext(ctx).Info("the storage driver reported a snapshot error", "snapshot", client.ObjectKeyFromObject(&snapshot), "message", message)
+		return snapshotOutcome{Phase: v1alpha1.VolumeSnapshotPhaseFailed, Message: "the storage driver could not create the snapshot"}, nil
 	}
 	if ready, _, _ := unstructured.NestedBool(csi.Object, "status", "readyToUse"); ready {
 		restore, _, _ := unstructured.NestedString(csi.Object, "status", "restoreSize")
