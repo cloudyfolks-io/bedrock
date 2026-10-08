@@ -8,6 +8,7 @@ import (
 
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
@@ -15,6 +16,8 @@ import (
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	sigyaml "sigs.k8s.io/yaml"
+
+	"github.com/cloudyfolks-io/bedrock/api/v1alpha1"
 )
 
 func TestAuditConfigMapFollowsTheSetting(t *testing.T) {
@@ -235,5 +238,53 @@ func TestObservabilityDoesNotWaitForTheMonitoringNamespace(t *testing.T) {
 	var config corev1.ConfigMap
 	if err := c.Get(context.Background(), client.ObjectKey{Namespace: "bedrock-system", Name: "bedrock-audit-policy"}, &config); err != nil {
 		t.Fatalf("the audit ConfigMap is missing: %v", err)
+	}
+}
+
+func webhookCondition(t *testing.T, c client.Client) metav1.Condition {
+	t.Helper()
+	var setting v1alpha1.Setting
+	if err := c.Get(context.Background(), client.ObjectKey{Name: "alertmanager.webhook-url"}, &setting); err != nil {
+		t.Fatal(err)
+	}
+	found := meta.FindStatusCondition(setting.Status.Conditions, "AlertmanagerWebhook")
+	if found == nil {
+		t.Fatal("no AlertmanagerWebhook condition")
+	}
+	return *found
+}
+
+func TestObservabilityKeepsTheLastValidWebhookForAnInvalidURL(t *testing.T) {
+	r, c := newObservability(t)
+	ctx := context.Background()
+	setSetting(t, c, "alertmanager.webhook-url", "https://hooks.example.test/alert")
+	if err := runObservability(t, r); err != nil {
+		t.Fatal(err)
+	}
+	if got := webhookCondition(t, c); got.Status != metav1.ConditionTrue {
+		t.Fatalf("condition %+v", got)
+	}
+	var setting v1alpha1.Setting
+	if err := c.Get(ctx, client.ObjectKey{Name: "alertmanager.webhook-url"}, &setting); err != nil {
+		t.Fatal(err)
+	}
+	setting.Spec.Value = "hooks.example.test/alert?token=s3cr3t-token"
+	if err := c.Update(ctx, &setting); err != nil {
+		t.Fatal(err)
+	}
+	if err := runObservability(t, r); err != nil {
+		t.Fatal(err)
+	}
+	var secret corev1.Secret
+	if err := c.Get(ctx, client.ObjectKey{Namespace: "monitoring", Name: "bedrock-alertmanager-config"}, &secret); err != nil {
+		t.Fatal(err)
+	}
+	config := string(secret.Data["alertmanager.yaml"])
+	if !strings.Contains(config, "https://hooks.example.test/alert") || strings.Contains(config, "s3cr3t-token") {
+		t.Fatalf("the last valid config was not kept: %s", config)
+	}
+	got := webhookCondition(t, c)
+	if got.Status != metav1.ConditionFalse || got.Reason != "InvalidURL" || strings.Contains(got.Message, "s3cr3t-token") {
+		t.Fatalf("condition %+v", got)
 	}
 }

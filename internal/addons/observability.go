@@ -10,15 +10,18 @@ import (
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/client-go/util/retry"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/handler"
+	"sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 	sigyaml "sigs.k8s.io/yaml"
 
 	"github.com/cloudyfolks-io/bedrock/api/v1alpha1"
 	"github.com/cloudyfolks-io/bedrock/internal/audit"
 	"github.com/cloudyfolks-io/bedrock/internal/release"
+	"github.com/cloudyfolks-io/bedrock/internal/settings"
 	"github.com/cloudyfolks-io/bedrock/internal/ssa"
 )
 
@@ -27,6 +30,8 @@ const (
 	alertmanagerSecret  = "bedrock-alertmanager-config"
 	alertmanagerKey     = "alertmanager.yaml"
 	grafanaAdminSecret  = "bedrock-grafana-admin"
+	webhookSetting      = "alertmanager.webhook-url"
+	conditionWebhook    = "AlertmanagerWebhook"
 	passwordLength      = 24
 	passwordAlphabet    = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789"
 )
@@ -131,7 +136,7 @@ func (r *ObservabilityReconciler) Reconcile(ctx context.Context, _ ctrl.Request)
 	}
 	err = errors.Join(
 		r.applyAudit(ctx, values["audit.level"]),
-		r.applyAlertmanager(ctx, values["alertmanager.webhook-url"]),
+		r.applyAlertmanager(ctx, values[webhookSetting]),
 		r.ensureGrafanaAdmin(ctx),
 	)
 	return ctrl.Result{RequeueAfter: DefaultReadyInterval}, err
@@ -146,6 +151,10 @@ func (r *ObservabilityReconciler) applyAudit(ctx context.Context, level string) 
 }
 
 func (r *ObservabilityReconciler) applyAlertmanager(ctx context.Context, webhookURL string) error {
+	if err := validWebhookURL(webhookURL); err != nil {
+		r.reportWebhook(ctx, metav1.ConditionFalse, "InvalidURL", err.Error())
+		return nil
+	}
 	secret, err := AlertmanagerSecret(webhookURL)
 	if err != nil {
 		return fmt.Errorf("alertmanager config: %w", err)
@@ -153,7 +162,27 @@ func (r *ObservabilityReconciler) applyAlertmanager(ctx context.Context, webhook
 	if err := ssa.Apply(ctx, r.Client, secret, v1alpha1.AddonsFieldManager); err != nil {
 		return fmt.Errorf("alertmanager config in namespace %s: %w", monitoringNamespace, err)
 	}
+	r.reportWebhook(ctx, metav1.ConditionTrue, "Applied", "the webhook is in the Alertmanager configuration")
 	return nil
+}
+
+func validWebhookURL(webhookURL string) error {
+	def, _ := settings.Lookup(webhookSetting)
+	return def.Validate(webhookURL)
+}
+
+func (r *ObservabilityReconciler) reportWebhook(ctx context.Context, status metav1.ConditionStatus, reason, message string) {
+	err := retry.RetryOnConflict(retry.DefaultRetry, func() error {
+		var setting v1alpha1.Setting
+		if err := r.Client.Get(ctx, client.ObjectKey{Name: webhookSetting}, &setting); err != nil {
+			return client.IgnoreNotFound(err)
+		}
+		v1alpha1.SetCondition(&setting.Status.Conditions, metav1.Condition{Type: conditionWebhook, Status: status, Reason: reason, Message: message, ObservedGeneration: setting.Generation})
+		return r.Client.Status().Update(ctx, &setting, client.FieldOwner(v1alpha1.AddonsFieldManager))
+	})
+	if err != nil {
+		log.FromContext(ctx).Error(err, "write webhook condition")
+	}
 }
 
 func (r *ObservabilityReconciler) ensureGrafanaAdmin(ctx context.Context) error {
