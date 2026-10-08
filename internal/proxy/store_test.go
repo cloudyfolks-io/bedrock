@@ -10,6 +10,8 @@ import (
 	"time"
 
 	corev1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	"github.com/cloudyfolks-io/bedrock/api/v1alpha1"
@@ -153,7 +155,7 @@ func TestCompleteRefreshClearsTheClaim(t *testing.T) {
 		t.Fatal(err)
 	}
 	rec.Access, rec.Refresh = "access-2", "refresh-2"
-	if err := store.CompleteRefresh(ctx, hash, rec); err != nil {
+	if err := store.CompleteRefresh(ctx, hash, "pod-a", rec); err != nil {
 		t.Fatal(err)
 	}
 	got, err := store.Session(ctx, hash)
@@ -253,5 +255,70 @@ func TestSweepDeletesExpiredRecords(t *testing.T) {
 	}
 	if err := testClient.Get(ctx, client.ObjectKeyFromObject(other), other); err != nil {
 		t.Fatalf("unrelated secret gone: %v", err)
+	}
+}
+
+func TestCompleteRefreshRequiresTheClaim(t *testing.T) {
+	store, clock := newTestStore(t)
+	ctx := context.Background()
+	hash := hashOf("claim-owner")
+	if err := store.CreateSession(ctx, hash, sampleRecord(clock.Now())); err != nil {
+		t.Fatal(err)
+	}
+	rec, err := store.ClaimRefresh(ctx, hash, "pod-a", clock.Now().Add(15*time.Second))
+	if err != nil {
+		t.Fatal(err)
+	}
+	clock.Advance(16 * time.Second)
+	if _, err := store.ClaimRefresh(ctx, hash, "pod-b", clock.Now().Add(15*time.Second)); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.CompleteRefresh(ctx, hash, "pod-a", rec); !errors.Is(err, ErrClaimed) {
+		t.Fatalf("completion by a former holder: %v", err)
+	}
+	if err := store.CompleteRefresh(ctx, hash, "pod-b", rec); err != nil {
+		t.Fatalf("completion by the holder: %v", err)
+	}
+}
+
+type conflictingUpdates struct {
+	client.Client
+	remaining atomic.Int32
+}
+
+func (c *conflictingUpdates) Update(ctx context.Context, obj client.Object, opts ...client.UpdateOption) error {
+	if c.remaining.Add(-1) >= 0 {
+		return apierrors.NewConflict(schema.GroupResource{Resource: "secrets"}, obj.GetName(), errors.New("injected"))
+	}
+	return c.Client.Update(ctx, obj, opts...)
+}
+
+func TestCompleteRefreshRetriesWriteFailures(t *testing.T) {
+	_, clock := newTestStore(t)
+	flaky := &conflictingUpdates{Client: testClient}
+	store := NewStore(flaky, clock.Now)
+	ctx := context.Background()
+	hash := hashOf("claim-retry")
+	if err := store.CreateSession(ctx, hash, sampleRecord(clock.Now())); err != nil {
+		t.Fatal(err)
+	}
+	rec, err := store.ClaimRefresh(ctx, hash, "pod-a", clock.Now().Add(15*time.Second))
+	if err != nil {
+		t.Fatal(err)
+	}
+	rec.Refresh = "rotated"
+	flaky.remaining.Store(5)
+	if err := store.CompleteRefresh(ctx, hash, "pod-a", rec); err != nil {
+		t.Fatalf("CompleteRefresh gave up: %v", err)
+	}
+	got, err := store.Session(ctx, hash)
+	if err != nil || got.Refresh != "rotated" {
+		t.Fatalf("stored %+v, %v", got, err)
+	}
+}
+
+func TestClaimOutlivesTheAuthnTimeout(t *testing.T) {
+	if claimLife < 2*oidcTimeout {
+		t.Fatalf("claim life %s is shorter than twice the authn timeout %s", claimLife, oidcTimeout)
 	}
 }

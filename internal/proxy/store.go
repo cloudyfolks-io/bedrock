@@ -12,6 +12,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/selection"
+	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/client-go/util/retry"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
@@ -29,6 +30,8 @@ const (
 	kindLogin      = "ProxyLogin"
 	labelNameChars = 32
 )
+
+var completeBackoff = wait.Backoff{Steps: 8, Duration: 100 * time.Millisecond, Factor: 2, Jitter: 0.1, Cap: 5 * time.Second}
 
 var (
 	ErrNotFound = errors.New("proxy record not found")
@@ -102,14 +105,21 @@ func (s *Store) ClaimRefresh(ctx context.Context, cookieHash, holder string, unt
 	return claimed, nil
 }
 
-func (s *Store) CompleteRefresh(ctx context.Context, cookieHash string, rec Record) error {
-	return retry.RetryOnConflict(retry.DefaultRetry, func() error {
-		secret, _, err := s.readSession(ctx, cookieHash)
+func (s *Store) CompleteRefresh(ctx context.Context, cookieHash, holder string, rec Record) error {
+	return retry.OnError(completeBackoff, retryableWrite, func() error {
+		secret, current, err := s.readSession(ctx, cookieHash)
 		if err != nil {
 			return err
 		}
+		if current.Claim == nil || current.Claim.Holder != holder {
+			return ErrClaimed
+		}
 		return s.writeSession(ctx, secret, withClaim(rec, nil))
 	})
+}
+
+func retryableWrite(err error) bool {
+	return !errors.Is(err, ErrNotFound) && !errors.Is(err, ErrClaimed)
 }
 
 func (s *Store) ReleaseClaim(ctx context.Context, cookieHash string) error {

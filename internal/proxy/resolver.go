@@ -21,7 +21,8 @@ const (
 	recordCacheTTL    = 5 * time.Second
 	sessionCheckTTL   = 15 * time.Second
 	refreshMargin     = 60 * time.Second
-	claimLife         = 15 * time.Second
+	claimLife         = 3 * oidcTimeout
+	missCacheLife     = 3 * time.Second
 	claimPollEvery    = 200 * time.Millisecond
 	claimPollFor      = 10 * time.Second
 	refreshWriteLimit = 20 * time.Second
@@ -60,10 +61,11 @@ type Resolver struct {
 	holder string
 	mu     sync.Mutex
 	cache  map[string]cachedRecord
+	misses map[string]time.Time
 }
 
 func NewResolver(store *Store, oidc *OIDC, reader client.Reader, clock func() time.Time, holder string) *Resolver {
-	return &Resolver{store: store, oidc: oidc, reader: reader, clock: clock, holder: holder, cache: map[string]cachedRecord{}}
+	return &Resolver{store: store, oidc: oidc, reader: reader, clock: clock, holder: holder, cache: map[string]cachedRecord{}, misses: map[string]time.Time{}}
 }
 
 func (r *Resolver) Resolve(ctx context.Context, cookieValue string) (Principal, error) {
@@ -100,13 +102,18 @@ func (r *Resolver) Resolve(ctx context.Context, cookieValue string) (Principal, 
 func (r *Resolver) load(ctx context.Context, hash string) (cachedRecord, error) {
 	r.mu.Lock()
 	entry, found := r.cache[hash]
+	missedAt, missed := r.misses[hash]
 	r.mu.Unlock()
 	if found && r.clock().Sub(entry.fetchedAt) < recordCacheTTL {
 		return entry, nil
 	}
+	if missed && r.clock().Sub(missedAt) < missCacheLife {
+		return cachedRecord{}, ErrUnauthenticated
+	}
 	rec, err := r.store.Session(ctx, hash)
 	if errors.Is(err, ErrNotFound) {
 		r.forget(hash)
+		r.rememberMiss(hash)
 		return cachedRecord{}, ErrUnauthenticated
 	}
 	if err != nil {
@@ -141,13 +148,13 @@ func (r *Resolver) checkAuthn(ctx context.Context, hash string, rec Record) erro
 }
 
 func (r *Resolver) refreshed(ctx context.Context, hash string) (Record, error) {
-	deadline := time.Now().Add(claimPollFor)
-	for {
+	deadline := r.clock().Add(claimPollFor)
+	for polls := 0; ; polls++ {
 		rec, err := r.claimAndRefresh(ctx, hash)
 		if !errors.Is(err, ErrClaimed) {
 			return rec, err
 		}
-		if time.Now().After(deadline) {
+		if r.clock().After(deadline) || polls >= int(claimPollFor/claimPollEvery) {
 			return Record{}, ErrUpstream
 		}
 		select {
@@ -192,7 +199,7 @@ func (r *Resolver) claimAndRefresh(ctx context.Context, hash string) (Record, er
 		return Record{}, ErrUpstream
 	}
 	next := withTokens(claimed, tokens)
-	if err := r.store.CompleteRefresh(work, hash, next); err != nil {
+	if err := r.store.CompleteRefresh(work, hash, r.holder, next); err != nil {
 		slog.ErrorContext(ctx, "store the refreshed tokens", "error", err)
 		return Record{}, ErrUpstream
 	}
@@ -236,6 +243,26 @@ func (r *Resolver) forget(hash string) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	delete(r.cache, hash)
+}
+
+func (r *Resolver) Forget(cookieValue string) {
+	r.forget(secret.SHA256Hex(cookieValue))
+}
+
+func (r *Resolver) rememberMiss(hash string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if len(r.misses) >= cachePruneAbove {
+		cutoff := r.clock().Add(-missCacheLife)
+		for key, at := range r.misses {
+			if at.Before(cutoff) {
+				delete(r.misses, key)
+			}
+		}
+	}
+	if len(r.misses) < cachePruneAbove {
+		r.misses[hash] = r.clock()
+	}
 }
 
 func withTokens(rec Record, tokens Tokens) Record {

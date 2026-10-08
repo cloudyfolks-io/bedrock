@@ -285,6 +285,9 @@ func TestNewRoutesEveryHost(t *testing.T) {
 	if _, err := fx.store.Session(context.Background(), secret.SHA256Hex(session.Value)); err == nil {
 		t.Fatal("record survived the logout")
 	}
+	if after := fx.call(t, http.MethodGet, "console.lab.example", PathSession, cookieHeader(session, nil), nil); after.StatusCode != http.StatusUnauthorized {
+		t.Fatalf("session endpoint right after the logout: %d", after.StatusCode)
+	}
 }
 
 func TestNoTokenInURLsOrLogs(t *testing.T) {

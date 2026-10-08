@@ -185,11 +185,12 @@ func TestLiveClaimOfAnotherHolderMakesTheResolverWait(t *testing.T) {
 	cookie := fx.seedRecord(t, rec)
 	hash := secret.SHA256Hex(cookie)
 	before := fx.fake.Calls("token:refresh_token")
+	baseline := fx.reads.reads.Load()
 	go func() {
-		time.Sleep(300 * time.Millisecond)
+		waitUntilTrue(func() bool { return fx.reads.reads.Load() >= baseline+3 })
 		done := rec
 		done.Access, done.AccessExpiry, done.Refresh = "from-other-pod", fx.clock.Now().Add(time.Hour), "refresh-from-other-pod"
-		_ = fx.store.CompleteRefresh(context.Background(), hash, done)
+		_ = fx.store.CompleteRefresh(context.Background(), hash, "other-pod", done)
 	}()
 	got, err := fx.resolver("proxy-a").Resolve(context.Background(), cookie)
 	if err != nil || got.Access != "from-other-pod" {
@@ -305,5 +306,47 @@ func TestResolveNeverLogsTokens(t *testing.T) {
 		if strings.Contains(logs.String(), sensitive) {
 			t.Fatalf("log holds %q: %s", sensitive, logs.String())
 		}
+	}
+}
+
+func waitUntilTrue(condition func() bool) {
+	for deadline := time.Now().Add(10 * time.Second); time.Now().Before(deadline) && !condition(); time.Sleep(10 * time.Millisecond) {
+	}
+}
+
+func TestResolveCachesUnknownCookiesBriefly(t *testing.T) {
+	fx := newResolverFixture(t)
+	resolver := fx.resolver("proxy-a")
+	for i := 0; i < 2; i++ {
+		if _, err := resolver.Resolve(context.Background(), "unknown-cookie-value"); !errors.Is(err, ErrUnauthenticated) {
+			t.Fatal(err)
+		}
+	}
+	reads := fx.reads.reads.Load()
+	if _, err := resolver.Resolve(context.Background(), "unknown-cookie-value"); !errors.Is(err, ErrUnauthenticated) || fx.reads.reads.Load() != reads {
+		t.Fatalf("the third lookup read the Secret again: %d -> %d", reads, fx.reads.reads.Load())
+	}
+	fx.clock.Advance(4 * time.Second)
+	if _, err := resolver.Resolve(context.Background(), "unknown-cookie-value"); !errors.Is(err, ErrUnauthenticated) || fx.reads.reads.Load() == reads {
+		t.Fatal("the miss was not looked up again after the cache time")
+	}
+}
+
+func TestForgetEvictsTheCachedRecord(t *testing.T) {
+	fx := newResolverFixture(t)
+	cookie, _ := fx.seed(t, time.Hour)
+	resolver := fx.resolver("proxy-a")
+	if _, err := resolver.Resolve(context.Background(), cookie); err != nil {
+		t.Fatal(err)
+	}
+	if err := fx.store.DeleteSession(context.Background(), secret.SHA256Hex(cookie)); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := resolver.Resolve(context.Background(), cookie); err != nil {
+		t.Fatalf("the cache must still answer: %v", err)
+	}
+	resolver.Forget(cookie)
+	if _, err := resolver.Resolve(context.Background(), cookie); !errors.Is(err, ErrUnauthenticated) {
+		t.Fatalf("after Forget: %v", err)
 	}
 }

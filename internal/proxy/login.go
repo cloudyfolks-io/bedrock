@@ -29,13 +29,15 @@ const (
 )
 
 type LoginDeps struct {
-	Store   *Store
-	OIDC    *OIDC
-	Reader  client.Reader
-	Random  io.Reader
-	Clock   func() time.Time
-	Limiter *methods.RateLimiter
-	Host    func(context.Context) (string, error)
+	Store     *Store
+	OIDC      *OIDC
+	Reader    client.Reader
+	Random    io.Reader
+	Clock     func() time.Time
+	Limiter   *methods.RateLimiter
+	Callbacks *methods.RateLimiter
+	Evict     func(cookieValue string)
+	Host      func(context.Context) (string, error)
 }
 
 func LoginHandlers(d LoginDeps) (http.Handler, http.Handler, http.Handler) {
@@ -72,6 +74,10 @@ func (d LoginDeps) start(w http.ResponseWriter, r *http.Request) {
 }
 
 func (d LoginDeps) callback(w http.ResponseWriter, r *http.Request) {
+	if !d.Callbacks.Allow(login.ClientIP(r), d.Clock()) {
+		httpjson.WriteError(w, http.StatusTooManyRequests, "rate_limited")
+		return
+	}
 	if r.URL.Query().Get("error") != "" {
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		w.Header().Set("Cache-Control", "no-store")
@@ -135,13 +141,16 @@ func (d LoginDeps) logout(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusNoContent)
 		return
 	}
+	d.Evict(cookie.Value)
 	hash := secret.SHA256Hex(cookie.Value)
 	if rec, err := d.Store.Session(r.Context(), hash); err == nil {
 		if err := d.OIDC.Revoke(r.Context(), rec.Refresh); err != nil {
 			slog.WarnContext(r.Context(), "revoke the refresh token", "error", err)
 		}
 	}
-	if err := d.Store.DeleteSession(r.Context(), hash); err != nil {
+	err = d.Store.DeleteSession(r.Context(), hash)
+	d.Evict(cookie.Value)
+	if err != nil {
 		upstreamFailure(w, r, "delete the session", err)
 		return
 	}

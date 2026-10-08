@@ -98,7 +98,8 @@ func New(ctx context.Context, cfg Config) (http.Handler, error) {
 	resolver := NewResolver(store, oidc, privileged, cfg.Clock, cfg.PodName)
 	start, callback, logout := LoginHandlers(LoginDeps{
 		Store: store, OIDC: oidc, Reader: privileged, Random: cfg.Random, Clock: cfg.Clock, Host: host,
-		Limiter: methods.NewRateLimiter(loginsPerMinute, time.Minute),
+		Limiter: methods.NewRateLimiter(loginsPerMinute, time.Minute), Callbacks: methods.NewRateLimiter(loginsPerMinute, time.Minute),
+		Evict: resolver.Forget,
 	})
 	if cfg.Subresources == nil {
 		cfg.Subresources = NewSubresources()

@@ -39,13 +39,15 @@ func newLoginFixture(t *testing.T) *loginFixture {
 	host := &mutableHost{value: "lab.example"}
 	store := NewStore(c, time.Now)
 	start, callback, logout := LoginHandlers(LoginDeps{
-		Store:   store,
-		OIDC:    newOIDCFor(fake, host, fakeClientSecret),
-		Reader:  c,
-		Random:  rand.Reader,
-		Clock:   time.Now,
-		Limiter: methods.NewRateLimiter(30, time.Minute),
-		Host:    host.Get,
+		Store:     store,
+		OIDC:      newOIDCFor(fake, host, fakeClientSecret),
+		Reader:    c,
+		Random:    rand.Reader,
+		Clock:     time.Now,
+		Limiter:   methods.NewRateLimiter(30, time.Minute),
+		Callbacks: methods.NewRateLimiter(30, time.Minute),
+		Evict:     func(string) {},
+		Host:      host.Get,
 	})
 	return &loginFixture{fake: fake, store: store, start: start, callback: callback, logout: logout}
 }
@@ -299,5 +301,30 @@ func TestLogoutWithoutSessionIsNoContent(t *testing.T) {
 	fx.logout.ServeHTTP(out, req)
 	if out.Code != http.StatusNoContent {
 		t.Fatalf("status %d", out.Code)
+	}
+}
+
+func TestCallbackIsRateLimited(t *testing.T) {
+	fx := newLoginFixture(t)
+	for i := 0; i < 30; i++ {
+		req := httptest.NewRequest(http.MethodGet, "/oauth/callback?code=c&state=s", nil)
+		rec := httptest.NewRecorder()
+		fx.callback.ServeHTTP(rec, req)
+		if rec.Code != http.StatusBadRequest {
+			t.Fatalf("callback %d answered %d", i, rec.Code)
+		}
+	}
+	req := httptest.NewRequest(http.MethodGet, "/oauth/callback?code=c&state=s", nil)
+	rec := httptest.NewRecorder()
+	fx.callback.ServeHTTP(rec, req)
+	if rec.Code != http.StatusTooManyRequests {
+		t.Fatalf("31st callback answered %d", rec.Code)
+	}
+	other := httptest.NewRequest(http.MethodGet, "/oauth/callback?code=c&state=s", nil)
+	other.RemoteAddr = "192.0.2.77:1000"
+	rec = httptest.NewRecorder()
+	fx.callback.ServeHTTP(rec, other)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("other client answered %d", rec.Code)
 	}
 }
