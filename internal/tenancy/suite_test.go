@@ -48,8 +48,13 @@ func startEnv(t *testing.T) (client.Client, *rest.Config) {
 	return startEnvWithPaths(t, testenv.CRDPaths())
 }
 
+var envSlots = make(chan struct{}, 3)
+
 func startEnvWithPaths(t *testing.T, paths []string) (client.Client, *rest.Config) {
 	t.Helper()
+	t.Parallel()
+	envSlots <- struct{}{}
+	t.Cleanup(func() { <-envSlots })
 	env := &envtest.Environment{CRDDirectoryPaths: paths, ErrorIfCRDPathMissing: true}
 	env.ControlPlane.GetAPIServer().Configure().Append("disable-admission-plugins", "TaintNodesByCondition")
 	cfg, err := env.Start()
