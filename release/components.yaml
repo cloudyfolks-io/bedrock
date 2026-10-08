@@ -129,3 +129,6 @@ components:
   - name: bedrock
     order: 90
     dirs: [manifests/90-bedrock]
+  - name: catalog
+    order: 92
+    dirs: [manifests/92-catalog]

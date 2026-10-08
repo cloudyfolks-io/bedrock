@@ -1,0 +1,16 @@
+apiVersion: bedrock.cloudyfolks.io/v1alpha1
+kind: ClusterImage
+metadata:
+  name: virtio-win
+  labels:
+    bedrock.cloudyfolks.io/component: catalog
+  annotations:
+    bedrock.cloudyfolks.io/target-image: ghcr.io/cloudyfolks-io/images/virtio-win:v1.9.0
+spec:
+  type: iso
+  os:
+    family: virtio-win
+  source:
+    registry:
+      image: quay.io/kubevirt/virtio-container-disk:v1.9.0
+  sizeGi: 2

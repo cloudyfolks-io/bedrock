@@ -1,0 +1,18 @@
+apiVersion: bedrock.cloudyfolks.io/v1alpha1
+kind: ClusterImage
+metadata:
+  name: almalinux-9
+  labels:
+    bedrock.cloudyfolks.io/component: catalog
+  annotations:
+    bedrock.cloudyfolks.io/target-image: ghcr.io/cloudyfolks-io/images/almalinux:9
+spec:
+  type: disk
+  os:
+    family: almalinux
+    version: "9"
+    preference: rhel.9
+  source:
+    registry:
+      image: quay.io/containerdisks/almalinux:9
+  sizeGi: 10

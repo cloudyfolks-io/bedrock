@@ -1,0 +1,18 @@
+apiVersion: bedrock.cloudyfolks.io/v1alpha1
+kind: ClusterImage
+metadata:
+  name: fedora-43
+  labels:
+    bedrock.cloudyfolks.io/component: catalog
+  annotations:
+    bedrock.cloudyfolks.io/target-image: ghcr.io/cloudyfolks-io/images/fedora:43
+spec:
+  type: disk
+  os:
+    family: fedora
+    version: "43"
+    preference: fedora
+  source:
+    registry:
+      image: quay.io/containerdisks/fedora:43
+  sizeGi: 10

@@ -1,0 +1,18 @@
+apiVersion: bedrock.cloudyfolks.io/v1alpha1
+kind: ClusterImage
+metadata:
+  name: ubuntu-26.04
+  labels:
+    bedrock.cloudyfolks.io/component: catalog
+  annotations:
+    bedrock.cloudyfolks.io/target-image: ghcr.io/cloudyfolks-io/images/ubuntu:26.04
+spec:
+  type: disk
+  os:
+    family: ubuntu
+    version: "26.04"
+    preference: ubuntu
+  source:
+    registry:
+      image: quay.io/containerdisks/ubuntu:26.04
+  sizeGi: 10

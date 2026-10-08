@@ -1,0 +1,19 @@
+apiVersion: bedrock.cloudyfolks.io/v1alpha1
+kind: ClusterImage
+metadata:
+  name: rocky-9
+  labels:
+    bedrock.cloudyfolks.io/component: catalog
+  annotations:
+    bedrock.cloudyfolks.io/target-image: ghcr.io/cloudyfolks-io/images/rocky:9
+spec:
+  type: disk
+  os:
+    family: rocky
+    version: "9"
+    preference: rhel.9
+  source:
+    http:
+      url: https://dl.rockylinux.org/pub/rocky/9/images/x86_64/Rocky-9-GenericCloud-Base-9.8-20260525.0.x86_64.qcow2
+      checksum: sha256:92c206cc6f790c61583247eefe87890f8828420662c17cacf247cec78ab4eec8
+  sizeGi: 10

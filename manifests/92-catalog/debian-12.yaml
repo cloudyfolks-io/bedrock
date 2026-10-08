@@ -1,0 +1,18 @@
+apiVersion: bedrock.cloudyfolks.io/v1alpha1
+kind: ClusterImage
+metadata:
+  name: debian-12
+  labels:
+    bedrock.cloudyfolks.io/component: catalog
+  annotations:
+    bedrock.cloudyfolks.io/target-image: ghcr.io/cloudyfolks-io/images/debian:12
+spec:
+  type: disk
+  os:
+    family: debian
+    version: "12"
+    preference: debian
+  source:
+    registry:
+      image: quay.io/containerdisks/debian:12
+  sizeGi: 10
