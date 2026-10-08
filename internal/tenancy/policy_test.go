@@ -100,6 +100,19 @@ func TestOwnerCannotCreateAnotherTenantsNetwork(t *testing.T) {
 	}
 }
 
+func TestOwnerCannotSquatAnotherTenantsNetworkName(t *testing.T) {
+	_, alice := ownershipWorld(t)
+	ctx := context.Background()
+	err := alice.Create(ctx, networkFor("globex", "acme"))
+	if !apierrors.IsForbidden(err) || !strings.Contains(err.Error(), "must be named acme or start with acme-") {
+		t.Fatalf("err = %v", err)
+	}
+	if err := alice.Create(ctx, networkFor("acmelab", "acme")); !apierrors.IsForbidden(err) {
+		t.Fatalf("a name that only starts with the tenant was accepted: %v", err)
+	}
+	mustCreate(t, alice, networkFor("acme", "acme"), networkFor("acme-lab", "acme"))
+}
+
 func TestOwnerReadsOnlyItsNamedProjects(t *testing.T) {
 	admin, alice := ownershipWorld(t)
 	mustCreate(t, admin, projectFor("web", "acme"))

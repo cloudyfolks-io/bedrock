@@ -26,6 +26,9 @@ spec:
     - expression: "request.operation != 'UPDATE' || authorizer.group('bedrock.cloudyfolks.io').resource('tenants').name(oldObject.spec.tenantRef).check('manage').allowed()"
       messageExpression: "'the user may not manage tenant ' + oldObject.spec.tenantRef"
       reason: Forbidden
+    - expression: "request.resource.resource != 'networks' || request.operation == 'DELETE' || object.metadata.name == variables.tenantRef || object.metadata.name.startsWith(variables.tenantRef + '-')"
+      messageExpression: "'a network of tenant ' + variables.tenantRef + ' must be named ' + variables.tenantRef + ' or start with ' + variables.tenantRef + '-'"
+      reason: Forbidden
 ---
 apiVersion: admissionregistration.k8s.io/v1
 kind: ValidatingAdmissionPolicyBinding
