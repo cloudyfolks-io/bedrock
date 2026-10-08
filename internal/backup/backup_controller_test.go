@@ -501,3 +501,26 @@ func TestBackupDeletionWithoutVelero(t *testing.T) {
 	err := c.Get(context.Background(), client.ObjectKeyFromObject(vmb), &v1alpha1.VirtualMachineBackup{})
 	requireGone(t, err)
 }
+
+func TestBackupScheduleRejectedByVelero(t *testing.T) {
+	setLocation(t, "Available")
+	createVM(t, "invalid-vm")
+	createVMB(t, "invalid", v1alpha1.VirtualMachineBackupSpec{VMRef: "invalid-vm", Schedule: "0 2 * * *"})
+	r := newBackupReconciler(testNow)
+	reconcileVMB(t, r, "invalid")
+	requireReady(t, getVMB(t, "invalid"), metav1.ConditionTrue, ReasonScheduled)
+	schedule, err := getVelero(t, "Schedule", VeleroName("vmb", projectNamespace, "invalid"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	schedule.Object["status"] = map[string]any{"phase": "FailedValidation", "validationErrors": []any{"bad cron"}}
+	if err := k8sClient.Update(context.Background(), schedule); err != nil {
+		t.Fatal(err)
+	}
+	reconcileVMB(t, r, "invalid")
+	vmb := getVMB(t, "invalid")
+	requireReady(t, vmb, metav1.ConditionFalse, ReasonScheduleInvalid)
+	if !strings.Contains(vmb.Status.Conditions[0].Message, "bad cron") {
+		t.Fatalf("message %q", vmb.Status.Conditions[0].Message)
+	}
+}

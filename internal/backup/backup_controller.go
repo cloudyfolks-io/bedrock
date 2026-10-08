@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"slices"
+	"strings"
 	"time"
 
 	corev1 "k8s.io/api/core/v1"
@@ -235,7 +236,10 @@ func (r *BackupReconciler) drive(ctx context.Context, vmb *v1alpha1.VirtualMachi
 	}
 	condition := oneShotReady(phase, newestRaw(infos))
 	if desired.GetKind() == "Schedule" {
-		condition = scheduledReady(phase, newestRaw(infos))
+		condition, err = r.scheduleCondition(ctx, desired, phase, newestRaw(infos))
+		if err != nil {
+			return ctrl.Result{}, err
+		}
 	}
 	r.writeStatus(ctx, vmb, observedStatus(*vmb, summary, phase, condition))
 	return ctrl.Result{RequeueAfter: requeueFor(phase)}, nil
@@ -338,6 +342,18 @@ func requeueFor(phase string) time.Duration {
 		return requeueBusy
 	}
 	return requeueIdle
+}
+
+func (r *BackupReconciler) scheduleCondition(ctx context.Context, desired *unstructured.Unstructured, phase, rawPhase string) (metav1.Condition, error) {
+	live := veleroStub("Schedule", desired.GetName())
+	if err := r.Client.Get(ctx, client.ObjectKeyFromObject(live), live); err != nil {
+		return metav1.Condition{}, err
+	}
+	if schedulePhase, _, _ := unstructured.NestedString(live.Object, "status", "phase"); schedulePhase == "FailedValidation" {
+		problems, _, _ := unstructured.NestedStringSlice(live.Object, "status", "validationErrors")
+		return notReady(ReasonScheduleInvalid, "Velero rejected the schedule: "+strings.Join(problems, "; ")), nil
+	}
+	return scheduledReady(phase, rawPhase), nil
 }
 
 func notReady(reason, message string) metav1.Condition {
