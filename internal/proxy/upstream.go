@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"net/url"
 
+	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/client-go/rest"
 )
@@ -50,6 +51,10 @@ func (u *Upstream) RESTConfig(token string) *rest.Config {
 		BearerToken: token,
 		UserAgent:   proxyUserAgent,
 		QPS:         -1,
+		ContentConfig: rest.ContentConfig{
+			ContentType:        runtime.ContentTypeJSON,
+			AcceptContentTypes: runtime.ContentTypeJSON,
+		},
 	}
 }
 
