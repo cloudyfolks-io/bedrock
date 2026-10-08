@@ -140,7 +140,8 @@ The answer lists one result for each check in the same order.
 `GET /proxy/v1/projects` returns the projects that the user can see.
 A user sees a project when the user can list projects in the cluster.
 A user also sees a project when the user can list virtual machines in the namespace of the project.
-The proxy checks at most 500 projects.
+The proxy reads the projects in pages of 500 and checks every project.
+It keeps each access answer for 30 seconds.
 
 `GET /proxy/v1/session` returns the user, the groups, the CSRF token, the end time and the platform host.
 It never returns a token.
@@ -222,10 +223,12 @@ The table is in `internal/proxy/metrics.go`.
 | Frames in the send queue | 1024 |
 | Checks in one batch | 100 |
 | Reviews in parallel | 8 |
-| Projects probed | 500 |
+| Cached access answers | 20000, 30 seconds each |
+| Stream connections in total | 2000 |
+| Queued stream bytes for each connection | 8 MiB |
 | Query range | 31 days |
 | Points in one query | 1500 |
-| Login starts for each client address | 30 for each minute |
+| Login starts and callbacks for each client address | 30 for each minute |
 
 ## Security rules
 
