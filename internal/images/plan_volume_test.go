@@ -282,3 +282,17 @@ func TestDecideVolumeTakesANewSnapshotForANewSourceHash(t *testing.T) {
 		t.Fatal("the new snapshot must not reuse the old name")
 	}
 }
+
+func TestDecideVolumeReportsASnapshotError(t *testing.T) {
+	s := httpSubject()
+	broken := goldenSnapshot(s, "uid:abc", false, time.Minute)
+	broken.Object["status"] = map[string]any{"readyToUse": false, "error": map[string]any{"message": "volume snapshot class missing"}}
+	plan := Decide(s, World{Snapshots: []unstructured.Unstructured{broken}}, testNow)
+	r := plan.Result
+	if r.Phase != "Failed" || r.Reason != "SnapshotFailed" || r.Message != "volume snapshot class missing" {
+		t.Fatalf("result %+v", r)
+	}
+	if plan.Requeue != 5*time.Minute {
+		t.Fatalf("a bad snapshot must back off: %v", plan.Requeue)
+	}
+}

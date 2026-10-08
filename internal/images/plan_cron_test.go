@@ -145,3 +145,16 @@ func TestDecideDispatchesByUsesCron(t *testing.T) {
 		t.Fatalf("scheduled %v plain %v", scheduled, plain)
 	}
 }
+
+func TestDecideCronReportsASnapshotError(t *testing.T) {
+	broken := namedSnapshot("ubuntu-1a2b3c4d5e6f", false)
+	broken.Object["status"] = map[string]any{"readyToUse": false, "error": map[string]any{"message": "driver failed"}}
+	world := World{
+		Cron:      cronWithStatus("ubuntu-1a2b3c4d5e6f", "sha256:1a2b", condition("UpToDate", "True", "")),
+		Snapshots: []unstructured.Unstructured{broken},
+	}
+	plan := Decide(cronSubject(), world, testNow)
+	if plan.Result.Phase != "Failed" || plan.Result.Reason != "SnapshotFailed" || plan.Result.Message != "driver failed" || plan.Requeue != 5*time.Minute {
+		t.Fatalf("plan %+v %v", plan.Result, plan.Requeue)
+	}
+}

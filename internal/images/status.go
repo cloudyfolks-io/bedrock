@@ -29,6 +29,8 @@ const (
 	ReasonSnapshotFormatUnavailable = "SnapshotFormatUnavailable"
 	ReasonCatalogNamespaceMissing   = "CatalogNamespaceMissing"
 	ReasonUploadNotSupported        = "UploadNotSupported"
+	ReasonSnapshotFailed            = "SnapshotFailed"
+	ReasonApplyFailed               = "ApplyFailed"
 	ReasonImportFailed              = "ImportFailed"
 )
 
@@ -122,6 +124,11 @@ func DigestOfClaim(spec v1alpha1.ImageSpec, claim *corev1.PersistentVolumeClaim)
 		return http.Checksum
 	}
 	return "uid:" + string(claim.UID)
+}
+
+func SnapshotError(snapshot *unstructured.Unstructured) string {
+	message, _, _ := unstructured.NestedString(snapshot.Object, "status", "error", "message")
+	return message
 }
 
 func SnapshotReady(snapshot *unstructured.Unstructured) bool {

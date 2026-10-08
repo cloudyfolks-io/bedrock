@@ -2,6 +2,7 @@ package images
 
 import (
 	"context"
+	"errors"
 	"time"
 
 	corev1 "k8s.io/api/core/v1"
@@ -44,11 +45,10 @@ func (r *ImageReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 	tenant, project := tenantOf(namespace)
 	now := r.Now()
 	plan, err := reconcileSubject(ctx, r.Client, SubjectOfImage(img, tenant, project), img.Status, now)
-	if err != nil {
+	if plan.Result.Phase == "" {
 		return ctrl.Result{}, err
 	}
-	err = writeStatus(ctx, r.Client, &img, imageStatus, plan.Result, now)
-	return ctrl.Result{RequeueAfter: plan.Requeue}, err
+	return ctrl.Result{RequeueAfter: plan.Requeue}, errors.Join(err, writeStatus(ctx, r.Client, &img, imageStatus, plan.Result, now))
 }
 
 func (r *ClusterImageReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
@@ -61,11 +61,10 @@ func (r *ClusterImageReconciler) Reconcile(ctx context.Context, req ctrl.Request
 	}
 	now := r.Now()
 	plan, err := reconcileSubject(ctx, r.Client, SubjectOfClusterImage(img), img.Status, now)
-	if err != nil {
+	if plan.Result.Phase == "" {
 		return ctrl.Result{}, err
 	}
-	err = writeStatus(ctx, r.Client, &img, clusterImageStatus, plan.Result, now)
-	return ctrl.Result{RequeueAfter: plan.Requeue}, err
+	return ctrl.Result{RequeueAfter: plan.Requeue}, errors.Join(err, writeStatus(ctx, r.Client, &img, clusterImageStatus, plan.Result, now))
 }
 
 func imageStatus(img *v1alpha1.Image) *v1alpha1.ImageStatus {

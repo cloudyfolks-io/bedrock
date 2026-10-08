@@ -43,7 +43,12 @@ func reconcileSubject(ctx context.Context, c client.Client, s Subject, prev v1al
 	}
 	plan := Decide(s, world, now)
 	plan.Result.AdditionalCAConflict = conflict
-	return plan, Execute(ctx, c, plan)
+	if err := Execute(ctx, c, plan); err != nil {
+		failure := Result{Phase: v1alpha1.ImagePhaseFailed, Reason: ReasonApplyFailed, Message: err.Error(), AdditionalCAConflict: conflict}
+		plan.Result = keepPrevious(failure, prev)
+		return plan, err
+	}
+	return plan, nil
 }
 
 func catalogNamespaceExists(ctx context.Context, c client.Reader) (bool, error) {

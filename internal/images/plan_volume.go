@@ -13,6 +13,8 @@ import (
 	"github.com/cloudyfolks-io/bedrock/api/v1alpha1"
 )
 
+const snapshotFailureBackoff = 5 * time.Minute
+
 func decideVolume(s Subject, w World) Plan {
 	spec := s.Spec
 	hash := SourceHash(spec)
@@ -28,6 +30,8 @@ func decideVolume(s Subject, w World) Plan {
 		return failed(ReasonUploadNotSupported, "a cluster image cannot take an upload")
 	case current != nil && SnapshotReady(current):
 		return decideGolden(s, w, *current)
+	case current != nil && SnapshotError(current) != "":
+		return snapshotFailed(current)
 	case current != nil:
 		return pending(v1alpha1.ImagePhaseImporting, ReasonSnapshotting, "", 10*time.Second)
 	case spec.Source.VolumeRef != nil && w.SourceClaim == nil:
@@ -190,6 +194,12 @@ func roundUpGi(quantity resource.Quantity) int32 {
 
 func ptrTime(t metav1.Time) *metav1.Time {
 	return &t
+}
+
+func snapshotFailed(snapshot *unstructured.Unstructured) Plan {
+	plan := failed(ReasonSnapshotFailed, SnapshotError(snapshot))
+	plan.Requeue = snapshotFailureBackoff
+	return plan
 }
 
 func failed(reason, message string) Plan {

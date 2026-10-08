@@ -25,6 +25,11 @@ func decideCron(s Subject, w World, now time.Time) Plan {
 	if w.DataVolume != nil && w.DataVolume.GetName() == dataVolume {
 		plan.Result.Progress = percentOf(w.DataVolume)
 	}
+	if snapshot != nil && !SnapshotReady(snapshot) && SnapshotError(snapshot) != "" {
+		plan.Result = snapshotFailed(snapshot).Result
+		plan.Requeue = snapshotFailureBackoff
+		return plan
+	}
 	if snapshot == nil || !SnapshotReady(snapshot) {
 		return plan
 	}

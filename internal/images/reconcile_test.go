@@ -2,15 +2,21 @@ package images
 
 import (
 	"context"
+	"errors"
+	"strings"
 	"testing"
 	"time"
 
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/apimachinery/pkg/runtime"
+	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/client/interceptor"
 
 	"github.com/cloudyfolks-io/bedrock/api/v1alpha1"
+	"github.com/cloudyfolks-io/bedrock/internal/testenv"
 )
 
 type loop struct {
@@ -230,5 +236,36 @@ func TestTenantOfReadsTheNamespaceLabels(t *testing.T) {
 	tenant, project = tenantOf(corev1.Namespace{})
 	if tenant != "" || project != "" {
 		t.Fatalf("%q %q", tenant, project)
+	}
+}
+
+func TestReconcileReportsAFailedApply(t *testing.T) {
+	c, cfg := startEnvWithCRDs(t, testenv.CRDPaths())
+	watching, err := client.NewWithWatch(cfg, client.Options{Scheme: testScheme(t)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	denying := interceptor.NewClient(watching, interceptor.Funcs{
+		Apply: func(context.Context, client.WithWatch, runtime.ApplyConfiguration, ...client.ApplyOption) error {
+			return errors.New("admission webhook denied the request")
+		},
+	})
+	tenantNamespace(t, c, "acme-web")
+	img := httpImage("rocky", "acme-web")
+	if err := c.Create(context.Background(), img); err != nil {
+		t.Fatal(err)
+	}
+
+	r := &ImageReconciler{Client: denying, Now: fixedNow}
+	if _, err := r.Reconcile(context.Background(), ctrl.Request{NamespacedName: client.ObjectKeyFromObject(img)}); err == nil {
+		t.Fatal("the failure must be returned for a back off")
+	}
+	var got v1alpha1.Image
+	if err := c.Get(context.Background(), client.ObjectKeyFromObject(img), &got); err != nil {
+		t.Fatal(err)
+	}
+	cond := got.Status.Conditions[0]
+	if got.Status.Phase != "Failed" || cond.Status != metav1.ConditionFalse || cond.Reason != "ApplyFailed" || !strings.Contains(cond.Message, "admission webhook denied") {
+		t.Fatalf("status %+v", got.Status)
 	}
 }
