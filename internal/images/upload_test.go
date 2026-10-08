@@ -27,12 +27,20 @@ type tokenRecorder struct {
 	mu       sync.Mutex
 	requests []*unstructured.Unstructured
 	failWith error
+	attempts int
+	writes   int
 }
 
 func (r *tokenRecorder) count() int {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	return len(r.requests)
+}
+
+func (r *tokenRecorder) countWrite() {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.writes++
 }
 
 func uploadClient(t *testing.T, recorder *tokenRecorder, objects ...client.Object) client.Client {
@@ -45,11 +53,31 @@ func uploadClient(t *testing.T, recorder *tokenRecorder, objects ...client.Objec
 			}
 			recorder.mu.Lock()
 			defer recorder.mu.Unlock()
+			recorder.attempts++
+			if err := unstructured.SetNestedField(request.Object, "tok-123", "status", "token"); err != nil {
+				return err
+			}
 			if recorder.failWith != nil {
 				return recorder.failWith
 			}
 			recorder.requests = append(recorder.requests, request.DeepCopy())
-			return unstructured.SetNestedField(request.Object, "tok-123", "status", "token")
+			return nil
+		},
+		Update: func(ctx context.Context, c client.WithWatch, obj client.Object, opts ...client.UpdateOption) error {
+			recorder.countWrite()
+			return c.Update(ctx, obj, opts...)
+		},
+		Patch: func(ctx context.Context, c client.WithWatch, obj client.Object, patch client.Patch, opts ...client.PatchOption) error {
+			recorder.countWrite()
+			return c.Patch(ctx, obj, patch, opts...)
+		},
+		SubResourceUpdate: func(ctx context.Context, c client.Client, subResource string, obj client.Object, opts ...client.SubResourceUpdateOption) error {
+			recorder.countWrite()
+			return c.SubResource(subResource).Update(ctx, obj, opts...)
+		},
+		SubResourcePatch: func(ctx context.Context, c client.Client, subResource string, obj client.Object, patch client.Patch, opts ...client.SubResourcePatchOption) error {
+			recorder.countWrite()
+			return c.SubResource(subResource).Patch(ctx, obj, patch, opts...)
 		},
 	}).Build()
 }
@@ -174,24 +202,45 @@ func TestUploadReportsAnUploadServiceFailure(t *testing.T) {
 }
 
 func TestUploadNeverStoresOrLogsTheToken(t *testing.T) {
-	recorder := &tokenRecorder{}
-	c := uploadClient(t, recorder, uploadImage("WaitingForUpload"), hostSetting("cloud.example.com"))
-	var logged strings.Builder
-	ctx := log.IntoContext(context.Background(), zap.New(zap.WriteTo(&logged), zap.UseDevMode(true)))
+	cases := map[string]struct {
+		failWith error
+		status   int
+	}{
+		"success": {nil, http.StatusOK},
+		"failure": {errors.New("webhook denied"), http.StatusBadGateway},
+	}
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			recorder := &tokenRecorder{failWith: tc.failWith}
+			c := uploadClient(t, recorder, uploadImage("WaitingForUpload"), hostSetting("cloud.example.com"))
+			var logged strings.Builder
+			ctx := log.IntoContext(context.Background(), zap.New(zap.WriteTo(&logged), zap.UseDevMode(true)))
 
-	if response := callUpload(ctx, c, http.MethodPost); response.Code != http.StatusOK {
-		t.Fatalf("status %d", response.Code)
-	}
-	var stored v1alpha1.Image
-	if err := c.Get(ctx, client.ObjectKey{Namespace: "acme-web", Name: "disk"}, &stored); err != nil {
-		t.Fatal(err)
-	}
-	content, err := json.Marshal(stored)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if strings.Contains(string(content), "tok-123") || strings.Contains(logged.String(), "tok-123") {
-		t.Fatalf("the token leaked: %s %s", content, logged.String())
+			response := callUpload(ctx, c, http.MethodPost)
+			if response.Code != tc.status {
+				t.Fatalf("status %d %s", response.Code, response.Body)
+			}
+			if tc.failWith != nil && logged.Len() == 0 {
+				t.Fatal("the failure must be logged")
+			}
+			if tc.failWith != nil && strings.Contains(response.Body.String(), "tok-123") {
+				t.Fatalf("the failure answer leaks the token: %s", response.Body)
+			}
+			var stored v1alpha1.Image
+			if err := c.Get(ctx, client.ObjectKey{Namespace: "acme-web", Name: "disk"}, &stored); err != nil {
+				t.Fatal(err)
+			}
+			content, err := json.Marshal(stored)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if strings.Contains(string(content), "tok-123") || strings.Contains(logged.String(), "tok-123") {
+				t.Fatalf("the token leaked: %s %s", content, logged.String())
+			}
+			if recorder.attempts != 1 || recorder.writes != 0 {
+				t.Fatalf("token requests %d, writes %d", recorder.attempts, recorder.writes)
+			}
+		})
 	}
 }
 
