@@ -1,0 +1,171 @@
+package fabric
+
+import (
+	"reflect"
+	"testing"
+
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+)
+
+func spec(t *testing.T, u *unstructured.Unstructured) map[string]any {
+	t.Helper()
+	got, _, err := unstructured.NestedMap(u.Object, "spec")
+	if err != nil {
+		t.Fatal(err)
+	}
+	return got
+}
+
+func equal(t *testing.T, got, want map[string]any) {
+	t.Helper()
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("got  %#v\nwant %#v", got, want)
+	}
+}
+
+func TestVpcBuildsPrivateSpec(t *testing.T) {
+	u := Vpc(Meta{Name: "acme"}, VpcSpec{})
+	equal(t, spec(t, u), map[string]any{})
+	if u.GetKind() != "Vpc" || u.GetAPIVersion() != "fabric.cloudyfolks.io/v1" || u.GetName() != "acme" {
+		t.Fatalf("unexpected identity %v", u.Object)
+	}
+}
+
+func TestVpcBuildsL2Spec(t *testing.T) {
+	u := Vpc(Meta{Name: "acme"}, VpcSpec{EnableExternal: true, ExtraExternalSubnets: []string{"provider-public"}, DefaultRoute: &StaticRoute{CIDR: "0.0.0.0/0", NextHop: "192.0.2.1"}})
+	equal(t, spec(t, u), map[string]any{
+		"enableExternal":       true,
+		"extraExternalSubnets": []any{"provider-public"},
+		"staticRoutes":         []any{map[string]any{"policy": "policyDst", "cidr": "0.0.0.0/0", "nextHopIP": "192.0.2.1"}},
+	})
+}
+
+func TestVpcBuildsBGPSpec(t *testing.T) {
+	u := Vpc(Meta{Name: "acme"}, VpcSpec{EnableExternal: true, ExtraExternalSubnets: []string{"provider-transit"}, Dynamic: &DynamicRouting{VrfID: 1000, ExternalSubnet: "provider-transit", Redistribute: []string{"nat", "lb"}}})
+	equal(t, spec(t, u)["dynamicRouting"].(map[string]any), map[string]any{"enabled": true, "redistribute": []any{"nat", "lb"}, "vrfId": int64(1000), "externalSubnet": "provider-transit"})
+}
+
+func TestSubnetBuild(t *testing.T) {
+	u := Subnet(Meta{Name: "s"}, SubnetSpec{Vpc: "acme", CIDR: "10.100.1.0/24", Gateway: "10.100.1.1", Provider: "default.t1-prod.fabric", ExcludeIPs: []string{"10.100.1.2..10.100.1.5"}, DHCP: true, DHCPOptions: "dns_server=1.1.1.1;8.8.8.8"})
+	equal(t, spec(t, u), map[string]any{
+		"vpc": "acme", "protocol": "IPv4", "cidrBlock": "10.100.1.0/24", "gateway": "10.100.1.1",
+		"excludeIps": []any{"10.100.1.2..10.100.1.5"}, "provider": "default.t1-prod.fabric",
+		"gatewayType": "distributed", "natOutgoing": false, "private": false, "disableGatewayCheck": true,
+		"enableDHCP": true, "dhcpV4Options": "dns_server=1.1.1.1;8.8.8.8",
+	})
+}
+
+func TestUnderlaySubnetBuild(t *testing.T) {
+	u := Subnet(Meta{Name: "provider-public"}, SubnetSpec{CIDR: "192.0.2.0/24", Gateway: "192.0.2.1", Vlan: "public"})
+	equal(t, spec(t, u), map[string]any{"protocol": "IPv4", "cidrBlock": "192.0.2.0/24", "gateway": "192.0.2.1", "vlan": "public"})
+}
+
+func TestOverlaySubnetBuild(t *testing.T) {
+	u := Subnet(Meta{Name: "provider-pool"}, SubnetSpec{CIDR: "198.51.100.0/24", Gateway: "198.51.100.1", Vlan: "ignored", Provider: "ignored", Overlay: true})
+	equal(t, spec(t, u), map[string]any{"protocol": "IPv4", "cidrBlock": "198.51.100.0/24", "gateway": "198.51.100.1"})
+}
+
+func TestOvnEipBuildWithAndWithoutAddress(t *testing.T) {
+	equal(t, spec(t, OvnEip(Meta{Name: "e"}, "provider-public", "")), map[string]any{"externalSubnet": "provider-public", "type": "nat"})
+	equal(t, spec(t, OvnEip(Meta{Name: "e"}, "provider-public", "192.0.2.9")), map[string]any{"externalSubnet": "provider-public", "type": "nat", "v4Ip": "192.0.2.9"})
+}
+
+func TestOvnFipBuild(t *testing.T) {
+	equal(t, spec(t, OvnFip(Meta{Name: "f"}, "e", "vm.ns.default")), map[string]any{"ovnEip": "e", "ipName": "vm.ns.default"})
+}
+
+func TestRouterLBRuleBuild(t *testing.T) {
+	ports := []RouterLBPort{{Name: "tcp-80", Port: 80, TargetPort: 8080, Protocol: "TCP"}}
+	with := RouterLBRule(Meta{Name: "r", Annotations: map[string]string{"a": "b"}}, "e", "acme", "ns", []string{"10.0.0.2"}, ports, true)
+	if _, found := with.GetAnnotations()[AnnotationServiceHealthCheck]; found || with.GetAnnotations()["a"] != "b" {
+		t.Fatalf("unexpected annotations %v", with.GetAnnotations())
+	}
+	without := RouterLBRule(Meta{Name: "r"}, "e", "acme", "ns", []string{"10.0.0.2"}, ports, false)
+	if without.GetAnnotations()[AnnotationServiceHealthCheck] != "false" {
+		t.Fatalf("unexpected annotations %v", without.GetAnnotations())
+	}
+	equal(t, spec(t, without), map[string]any{
+		"ovnEip": "e", "vpc": "acme", "namespace": "ns", "endpoints": []any{"10.0.0.2"},
+		"ports": []any{map[string]any{"name": "tcp-80", "port": int64(80), "targetPort": int64(8080), "protocol": "TCP"}},
+	})
+}
+
+func TestDNSZoneBuild(t *testing.T) {
+	u := DNSZone(Meta{Name: "z"}, "acme", []DNSRecord{{Name: "db.internal.e2e", IPs: []string{"10.0.0.5"}}})
+	equal(t, spec(t, u), map[string]any{"vpc": "acme", "records": []any{map[string]any{"name": "db.internal.e2e", "ips": []any{"10.0.0.5"}}}})
+}
+
+func TestSecurityGroupBuild(t *testing.T) {
+	ingress := []SGRule{{IPVersion: "ipv4", Protocol: "tcp", RemoteType: "address", RemoteAddress: "0.0.0.0/0", Policy: "allow", Priority: 100, PortMin: 443, PortMax: 443}}
+	egress := []SGRule{{IPVersion: "ipv4", Protocol: "all", RemoteType: "securityGroup", RemoteSecurityGroup: "db", Policy: "allow", Priority: 100}}
+	u := SecurityGroup(Meta{Name: "g"}, ingress, egress)
+	equal(t, spec(t, u), map[string]any{
+		"allowSameGroupTraffic": false,
+		"ingressRules":          []any{map[string]any{"ipVersion": "ipv4", "protocol": "tcp", "priority": int64(100), "remoteType": "address", "remoteAddress": "0.0.0.0/0", "policy": "allow", "portRangeMin": int64(443), "portRangeMax": int64(443)}},
+		"egressRules":           []any{map[string]any{"ipVersion": "ipv4", "protocol": "all", "priority": int64(100), "remoteType": "securityGroup", "remoteSecurityGroup": "db", "policy": "allow"}},
+	})
+	if _, found := spec(t, SecurityGroup(Meta{Name: "g"}, nil, nil))["ingressRules"]; found {
+		t.Fatal("empty rules must be omitted")
+	}
+}
+
+func TestProviderNetworkBuild(t *testing.T) {
+	u := ProviderNetwork(Meta{Name: "public"}, "bond0", map[string]string{LabelExternalGateway: "true"})
+	equal(t, spec(t, u), map[string]any{"defaultInterface": "bond0", "nodeSelector": map[string]any{"matchLabels": map[string]any{LabelExternalGateway: "true"}}})
+}
+
+func TestVlanBuild(t *testing.T) {
+	equal(t, spec(t, Vlan(Meta{Name: "public"}, 0, "public")), map[string]any{"id": int64(0), "provider": "public"})
+}
+
+func TestBgpConfBuild(t *testing.T) {
+	u := BgpConf(Meta{Name: "bedrock"}, 65001, "10.0.0.9", []BgpPeer{{Address: "10.0.0.1", ASN: 65000}, {Address: "10.0.0.2", ASN: 65001}}, map[string]string{LabelExternalGateway: "true"})
+	got := spec(t, u)
+	if got["localASN"] != int64(65001) || got["routerId"] != "10.0.0.9" || got["peerASN"] != int64(65000) || len(got["peers"].([]any)) != 2 || !reflect.DeepEqual(got["neighbours"], []any{"10.0.0.1", "10.0.0.2"}) {
+		t.Fatalf("unexpected spec %#v", got)
+	}
+}
+
+func TestSubnetUsedAddressesAcceptsNumberTypes(t *testing.T) {
+	for _, value := range []any{int64(3), float64(3), "3"} {
+		u := &unstructured.Unstructured{Object: map[string]any{"status": map[string]any{"v4usingIPs": value}}}
+		if got := SubnetUsedAddresses(u); got != 3 {
+			t.Fatalf("%T gave %d", value, got)
+		}
+	}
+	if SubnetUsedAddresses(&unstructured.Unstructured{Object: map[string]any{}}) != 0 {
+		t.Fatal("missing count must be zero")
+	}
+}
+
+func TestSubnetReadyReadsTheReadyCondition(t *testing.T) {
+	ready := &unstructured.Unstructured{Object: map[string]any{"status": map[string]any{"conditions": []any{map[string]any{"type": "Ready", "status": "True"}}}}}
+	failed := &unstructured.Unstructured{Object: map[string]any{"status": map[string]any{"conditions": []any{map[string]any{"type": "Ready", "status": "False", "message": "no gateway"}}}}}
+	if !SubnetReady(ready) || SubnetReady(failed) || SubnetReady(&unstructured.Unstructured{Object: map[string]any{}}) {
+		t.Fatal("unexpected readiness")
+	}
+	if SubnetErrorMessage(failed) != "no gateway" || SubnetErrorMessage(ready) != "" {
+		t.Fatal("unexpected error message")
+	}
+}
+
+func TestVpcStandby(t *testing.T) {
+	if !VpcStandby(&unstructured.Unstructured{Object: map[string]any{"status": map[string]any{"standby": true}}}) || VpcStandby(&unstructured.Unstructured{Object: map[string]any{}}) {
+		t.Fatal("unexpected standby")
+	}
+}
+
+func TestEipAddress(t *testing.T) {
+	u := &unstructured.Unstructured{Object: map[string]any{"status": map[string]any{"v4Ip": "192.0.2.9", "ready": true}}}
+	if EipAddress(u) != "192.0.2.9" || !EipReady(u) || EipAddress(&unstructured.Unstructured{Object: map[string]any{}}) != "" {
+		t.Fatal("unexpected eip")
+	}
+}
+
+func TestIPOwner(t *testing.T) {
+	u := &unstructured.Unstructured{Object: map[string]any{"spec": map[string]any{"namespace": "ns", "podName": "vm", "subnet": "s", "v4IpAddress": "10.0.0.5"}}}
+	namespace, pod, subnet := IPOwner(u)
+	if namespace != "ns" || pod != "vm" || subnet != "s" || IPAddress(u) != "10.0.0.5" {
+		t.Fatal("unexpected owner")
+	}
+}

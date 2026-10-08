@@ -1,0 +1,67 @@
+package network
+
+import "slices"
+
+const (
+	ReasonVpcReady                      = "VpcReady"
+	ReasonVpcPending                    = "VpcPending"
+	ReasonFabricConflict                = "FabricConflict"
+	ReasonTerminating                   = "Terminating"
+	ReasonConnected                     = "Connected"
+	ReasonPending                       = "Pending"
+	ReasonNoProviderNetwork             = "NoProviderNetwork"
+	ReasonBGPNotConfigured              = "BGPNotConfigured"
+	ReasonApplied                       = "Applied"
+	ReasonNetworkNotFound               = "NetworkNotFound"
+	ReasonNetworkNotAllowed             = "NetworkNotAllowed"
+	ReasonNetworkNotReady               = "NetworkNotReady"
+	ReasonCIDROutsideNetwork            = "CIDROutsideNetwork"
+	ReasonCIDROverlap                   = "CIDROverlap"
+	ReasonGatewayInvalid                = "GatewayInvalid"
+	ReasonExcludeIPsInvalid             = "ExcludeIPsInvalid"
+	ReasonNamespaceNotLabeled           = "NamespaceNotLabeled"
+	ReasonFabricNotReady                = "FabricNotReady"
+	ReasonInUse                         = "InUse"
+	ReasonReserved                      = "Reserved"
+	ReasonAttached                      = "Attached"
+	ReasonUnknownProviderNetwork        = "UnknownProviderNetwork"
+	ReasonUnsupported                   = "Unsupported"
+	ReasonAddressOutsideProviderNetwork = "AddressOutsideProviderNetwork"
+	ReasonAddressReserved               = "AddressReserved"
+	ReasonAddressInUse                  = "AddressInUse"
+	ReasonAllocating                    = "Allocating"
+	ReasonTargetNotFound                = "TargetNotFound"
+	ReasonTargetMismatch                = "TargetMismatch"
+	ReasonWaitingForAddress             = "WaitingForAddress"
+	ReasonNetworkNotExternal            = "NetworkNotExternal"
+	ReasonExternalNotConnected          = "ExternalNotConnected"
+	ReasonFRRAgentMissing               = "FRRAgentMissing"
+	ReasonProgrammed                    = "Programmed"
+	ReasonElasticIPNotFound             = "ElasticIPNotFound"
+	ReasonElasticIPNotReady             = "ElasticIPNotReady"
+	ReasonNoTargets                     = "NoTargets"
+	ReasonTargetNetworkMismatch         = "TargetNetworkMismatch"
+	ReasonTargetPortsDiffer             = "TargetPortsDiffer"
+	ReasonNotAttached                   = "NotAttached"
+	ReasonInvalidRecords                = "InvalidRecords"
+	ReasonRefNotFound                   = "RefNotFound"
+	ReasonInvalidRules                  = "InvalidRules"
+)
+
+var AllReasons = sortedReasons([]string{
+	ReasonVpcReady, ReasonVpcPending, ReasonFabricConflict, ReasonTerminating, ReasonConnected, ReasonPending,
+	ReasonNoProviderNetwork, ReasonBGPNotConfigured, ReasonApplied, ReasonNetworkNotFound, ReasonNetworkNotAllowed,
+	ReasonNetworkNotReady, ReasonCIDROutsideNetwork, ReasonCIDROverlap, ReasonGatewayInvalid, ReasonExcludeIPsInvalid,
+	ReasonNamespaceNotLabeled, ReasonFabricNotReady, ReasonInUse, ReasonReserved, ReasonAttached,
+	ReasonUnknownProviderNetwork, ReasonUnsupported, ReasonAddressOutsideProviderNetwork, ReasonAddressReserved,
+	ReasonAddressInUse, ReasonAllocating, ReasonTargetNotFound, ReasonTargetMismatch, ReasonWaitingForAddress,
+	ReasonNetworkNotExternal, ReasonExternalNotConnected, ReasonFRRAgentMissing, ReasonProgrammed,
+	ReasonElasticIPNotFound, ReasonElasticIPNotReady, ReasonNoTargets, ReasonTargetNetworkMismatch,
+	ReasonTargetPortsDiffer, ReasonNotAttached, ReasonInvalidRecords, ReasonRefNotFound, ReasonInvalidRules,
+})
+
+func sortedReasons(reasons []string) []string {
+	out := slices.Clone(reasons)
+	slices.Sort(out)
+	return slices.Compact(out)
+}
