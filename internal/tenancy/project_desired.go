@@ -110,7 +110,7 @@ func ProjectStatus(in ProjectObservation) v1alpha1.ProjectStatus {
 	steps := stepConditions(generation, in, admitted)
 	ready := firstNotTrue(generation, readinessChain(generation, admitted, steps)...)
 	observed := append(append([]metav1.Condition{admitted}, steps...), ready)
-	progressing := flagged(generation, v1alpha1.ConditionProgressing, ReasonSettled, observed, ReasonWaitingForSubnet, ReasonNamespaceTerminating, ReasonQuotaCRDMissing)
+	progressing := flagged(generation, v1alpha1.ConditionProgressing, ReasonSettled, observed, ReasonWaitingForSubnet, ReasonNamespaceTerminating, ReasonQuotaUnavailable)
 	degraded := flagged(generation, v1alpha1.ConditionDegraded, ReasonHealthy, observed, ReasonApplyFailed, ReasonNamespaceConflict, ReasonCIDRExhausted, ReasonTenantQuotaExceeded)
 	return v1alpha1.ProjectStatus{
 		CommonStatus: v1alpha1.CommonStatus{

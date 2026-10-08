@@ -21,8 +21,8 @@ func quotaStep(decision Decision, applyErr error) Step {
 	switch {
 	case !decision.QuotaAllowed:
 		return Step{Reason: decision.Reason, Message: decision.Message}
-	case applyErr != nil && isQuotaCRDMissing(applyErr):
-		return Step{Reason: ReasonQuotaCRDMissing, Message: "the ApplicationAwareResourceQuota CRD is not installed yet"}
+	case applyErr != nil && isQuotaUnavailable(applyErr):
+		return Step{Reason: ReasonQuotaUnavailable, Message: "the ApplicationAwareResourceQuota CRD is not installed yet"}
 	case applyErr != nil:
 		return failedStep(applyErr)
 	}
@@ -36,27 +36,31 @@ func accessStep(err error) Step {
 	return Step{Ready: true, Reason: ReasonBound}
 }
 
-func isQuotaCRDMissing(err error) bool {
+func isQuotaUnavailable(err error) bool {
 	return meta.IsNoMatchError(err) || apierrors.IsNotFound(err)
 }
 
-func (r *ProjectReconciler) ensureQuota(ctx context.Context, project v1alpha1.Project, decision Decision) (Step, corev1.ResourceList) {
+func accessWithheld() Step {
+	return Step{Reason: ReasonQuotaUnavailable, Message: "member access waits until the project quota is enforced"}
+}
+
+func (r *ProjectReconciler) ensureQuota(ctx context.Context, project v1alpha1.Project, decision Decision) (Step, corev1.ResourceList, bool) {
 	var applyErr error
 	if decision.QuotaAllowed {
 		applyErr = ssa.Apply(ctx, r.Client, WithOwner(DesiredQuota(project), &project, projectGVK), v1alpha1.TenancyFieldManager)
 	}
-	step := quotaStep(decision, applyErr)
-	return step, r.usedQuota(ctx, project)
+	used, enforced := r.usedQuota(ctx, project)
+	return quotaStep(decision, applyErr), used, enforced
 }
 
-func (r *ProjectReconciler) usedQuota(ctx context.Context, project v1alpha1.Project) corev1.ResourceList {
+func (r *ProjectReconciler) usedQuota(ctx context.Context, project v1alpha1.Project) (corev1.ResourceList, bool) {
 	existing := &unstructured.Unstructured{}
 	existing.SetGroupVersionKind(QuotaGVK)
 	key := client.ObjectKey{Namespace: v1alpha1.ProjectNamespace(project.Spec.TenantRef, project.Name), Name: QuotaName}
 	if err := r.Reader.Get(ctx, key, existing); err != nil {
-		return nil
+		return nil, false
 	}
-	return parseUsed(existing)
+	return parseUsed(existing), true
 }
 
 func parseUsed(quota *unstructured.Unstructured) corev1.ResourceList {

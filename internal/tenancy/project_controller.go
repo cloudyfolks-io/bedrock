@@ -69,8 +69,12 @@ func (r *ProjectReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 	observation.Namespace = r.ensureNamespace(ctx, project)
 	if observation.Namespace.Ready {
 		observation.SubnetCIDR, observation.Subnet = r.ensureSubnet(ctx, project, tenant)
-		observation.Quota, observation.Used = r.ensureQuota(ctx, project, decision)
-		observation.Access = r.ensureAccess(ctx, project, tenant)
+		var enforced bool
+		observation.Quota, observation.Used, enforced = r.ensureQuota(ctx, project, decision)
+		observation.Access = accessWithheld()
+		if enforced {
+			observation.Access = r.ensureAccess(ctx, project, tenant)
+		}
 	}
 	r.writeStatus(ctx, observation)
 	return ctrl.Result{RequeueAfter: Interval}, applyFailures(observation)

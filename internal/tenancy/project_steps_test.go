@@ -86,16 +86,23 @@ func TestProjectReadsUsageFromTheQuota(t *testing.T) {
 	}
 }
 
-func TestProjectReportsAMissingQuotaCRD(t *testing.T) {
+func TestProjectGrantsNoAccessWithoutTheQuota(t *testing.T) {
 	c, cfg := startEnvWithoutAAQ(t)
 	startManager(t, cfg, func(mgr ctrl.Manager) error {
 		return (&ProjectReconciler{Client: mgr.GetClient(), Reader: mgr.GetAPIReader()}).SetupWithManager(mgr)
 	})
-	mustCreate(t, c, tenantWith("acme", "10.100.0.0/16"), fullQuotaProject("shop", "acme"))
-	projectReady(t, c, "shop", hasCondition(ConditionQuotaReady, metav1.ConditionFalse, ReasonQuotaCRDMissing))
+	project := membersProject()
+	project.Spec.Quota.CPU = quantity("4")
+	mustCreate(t, c, aliceTenant(), project)
+	setSubnetReady(t, c, "acme-shop", metav1.ConditionTrue, "")
+	projectReady(t, c, "shop", hasCondition(ConditionQuotaReady, metav1.ConditionFalse, ReasonQuotaUnavailable))
+	projectReady(t, c, "shop", hasCondition(ConditionAccessReady, metav1.ConditionFalse, ReasonQuotaUnavailable))
+	projectReady(t, c, "shop", hasCondition(v1alpha1.ConditionReady, metav1.ConditionFalse, ReasonQuotaUnavailable))
 	projectReady(t, c, "shop", hasCondition(v1alpha1.ConditionProgressing, metav1.ConditionTrue, ""))
-	projectReady(t, c, "shop", hasCondition(v1alpha1.ConditionReady, metav1.ConditionFalse, ""))
-	waitFor(t, func() bool { return subnetOf(t, c, "acme-shop") != nil })
+	bindings := &rbacv1.RoleBindingList{}
+	if err := c.List(context.Background(), bindings, client.InNamespace("acme-shop")); err != nil || len(bindings.Items) != 0 {
+		t.Fatalf("bindings = %v, %v", bindings.Items, err)
+	}
 	policy := DesiredNetworkPolicy(*fetchProject(t, c, "shop"))
 	if err := c.Get(context.Background(), client.ObjectKey{Namespace: "acme-shop", Name: policy.Name}, &policy); err != nil {
 		t.Fatal(err)

@@ -38,7 +38,7 @@ const (
 	ReasonWaitingForSubnet     = "WaitingForSubnet"
 	ReasonCIDRExhausted        = "CIDRExhausted"
 	ReasonApplied              = "Applied"
-	ReasonQuotaCRDMissing      = "QuotaCRDMissing"
+	ReasonQuotaUnavailable     = "QuotaUnavailable"
 	ReasonQuotaRequired        = "QuotaRequired"
 	ReasonPending              = "Pending"
 )

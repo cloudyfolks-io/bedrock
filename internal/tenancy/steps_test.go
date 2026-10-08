@@ -19,7 +19,7 @@ func TestQuotaStep(t *testing.T) {
 		{"applied", allowed, nil, Step{Ready: true, Reason: ReasonApplied}},
 		{"denied", denied, nil, Step{Reason: ReasonTenantQuotaExceeded, Message: "no cpu left"}},
 		{"denied beats a failed apply", denied, errors.New("boom"), Step{Reason: ReasonTenantQuotaExceeded, Message: "no cpu left"}},
-		{"missing crd", allowed, &meta.NoKindMatchError{}, Step{Reason: ReasonQuotaCRDMissing, Message: "the ApplicationAwareResourceQuota CRD is not installed yet"}},
+		{"missing crd", allowed, &meta.NoKindMatchError{}, Step{Reason: ReasonQuotaUnavailable, Message: "the ApplicationAwareResourceQuota CRD is not installed yet"}},
 		{"apply error", allowed, errors.New("boom"), Step{Reason: ReasonApplyFailed, Message: "boom"}},
 	}
 	for _, c := range cases {
