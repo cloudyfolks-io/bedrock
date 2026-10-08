@@ -228,7 +228,7 @@ func TestConsoleSerial(t *testing.T) {
 	t.Run("the owner reaches the guest login prompt", func(t *testing.T) {
 		conn, resp, err := dialSerial(e, who.owner, "", path)
 		if err != nil {
-			t.Fatalf("console handshake: %v (response %v)", err, resp)
+			t.Fatalf("console handshake: %v (status %d)", err, statusOf(resp))
 		}
 		defer conn.Close()
 		if conn.Subprotocol() != serialSubprotocol {

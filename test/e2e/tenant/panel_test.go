@@ -188,7 +188,7 @@ func requireStreamEvent(t *testing.T, e env, c *loginClient, previous string) {
 	t.Helper()
 	conn, resp, err := c.dialStream(e, e.consoleURL(""))
 	if err != nil {
-		t.Fatalf("stream handshake: %v (response %v)", err, resp)
+		t.Fatalf("stream handshake: %v (status %d)", err, statusOf(resp))
 	}
 	defer conn.Close()
 	if hello := readFrame(t, conn, eventTimeout); hello.Type != "hello" {

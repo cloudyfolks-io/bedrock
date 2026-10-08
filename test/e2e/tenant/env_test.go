@@ -72,7 +72,7 @@ func trustingTransport(roots *x509.CertPool) *http.Transport {
 
 const maxPrintedBody = 512
 
-var secretValue = regexp.MustCompile(`("(?:access_token|refresh_token|id_token|token)"\s*:\s*)"[^"]*"`)
+var secretValue = regexp.MustCompile(`(?i)("[^"]*(?:token|csrf|secret|password|otpauthurl)[^"]*"\s*:\s*)"(?:[^"\\]|\\.)*"`)
 
 func printable(body []byte) string {
 	text := secretValue.ReplaceAllString(string(body), `$1"[redacted]"`)
@@ -80,6 +80,13 @@ func printable(body []byte) string {
 		return text[:maxPrintedBody] + "..."
 	}
 	return text
+}
+
+func statusOf(resp *http.Response) int {
+	if resp == nil {
+		return 0
+	}
+	return resp.StatusCode
 }
 
 func noRedirects(*http.Request, []*http.Request) error {
