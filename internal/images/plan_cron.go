@@ -1,15 +1,12 @@
 package images
 
 import (
-	"time"
-
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 
 	"github.com/cloudyfolks-io/bedrock/api/v1alpha1"
 )
 
-func decideCron(s Subject, w World, now time.Time) Plan {
+func decideCron(s Subject, w World) Plan {
 	plan := Plan{Apply: []*unstructured.Unstructured{DataImportCron(s)}}
 	if w.DataVolume != nil && w.DataVolume.GetName() == ImportName(s.Name) {
 		plan.Delete = append(plan.Delete, w.DataVolume.DeepCopy())
@@ -34,11 +31,14 @@ func decideCron(s Subject, w World, now time.Time) Plan {
 		return plan
 	}
 
-	latest := v1alpha1.ImageVersion{Digest: digest, Time: importTime(w.Cron, now), DataSource: dataVolume}
-	versions := MergeVersions(w.Prev.Versions, &latest, namesOf(w.Snapshots), Keep(s.Spec))
-	kept := dataSourcesOf(versions)
-	plan.Apply = append(plan.Apply, versionDataSources(s, versions)...)
-	plan.Delete = append(plan.Delete, staleDataSources(w.DataSources, kept, s.Name)...)
+	kept := retain(w.Snapshots, dataVolume, snapshotOf(alias), Keep(s.Spec))
+	versions := versionsOf(kept, Keep(s.Spec), cronDigests(w, dataVolume, digest))
+	stale, blocked := staleDataSources(w, s, namesOf(kept))
+	plan.Apply = append(plan.Apply, versionDataSources(s, readyOnly(kept))...)
+	plan.Delete = append(plan.Delete, stale...)
+	if blocked {
+		plan.Requeue = pruneRetry
+	}
 	plan.Result.Versions = versions
 	if plan.Result.Phase == v1alpha1.ImagePhaseReady {
 		plan.Result.Digest = digest
@@ -46,6 +46,20 @@ func decideCron(s Subject, w World, now time.Time) Plan {
 		plan.Result.DataSource = s.Name
 	}
 	return plan
+}
+
+func cronDigests(w World, current, currentDigest string) func(unstructured.Unstructured) string {
+	return func(snapshot unstructured.Unstructured) string {
+		if snapshot.GetName() == current {
+			return currentDigest
+		}
+		for _, version := range w.Prev.Versions {
+			if version.DataSource == snapshot.GetName() {
+				return version.Digest
+			}
+		}
+		return snapshot.GetName()
+	}
 }
 
 func orEmpty(obj *unstructured.Unstructured) *unstructured.Unstructured {
@@ -62,12 +76,4 @@ func findNamed(objects []unstructured.Unstructured, name string) *unstructured.U
 		}
 	}
 	return nil
-}
-
-func importTime(cron *unstructured.Unstructured, now time.Time) *metav1.Time {
-	text, _, _ := unstructured.NestedString(cron.Object, "status", "lastImportTimestamp")
-	if parsed, err := time.Parse(time.RFC3339, text); err == nil {
-		return &metav1.Time{Time: parsed}
-	}
-	return &metav1.Time{Time: now}
 }

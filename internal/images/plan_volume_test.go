@@ -158,35 +158,163 @@ func TestDecideVolumeReplacesAStaleDataVolume(t *testing.T) {
 	}
 }
 
-func TestDecideVolumeKeepsOldVersionsUpToKeep(t *testing.T) {
+func digests(versions []v1alpha1.ImageVersion) []string {
+	out := make([]string, 0, len(versions))
+	for _, v := range versions {
+		out = append(out, v.Digest)
+	}
+	return out
+}
+
+func snapshotWithSource(s Subject, label string, age time.Duration) unstructured.Unstructured {
+	other := ubuntuSubject(httpSpec("https://example.com/" + label))
+	other.Owner = s.Owner
+	return goldenSnapshot(other, "uid:"+label, true, age)
+}
+
+func snapshotDataSource(name, snapshot string) unstructured.Unstructured {
+	ds := namedObject("DataSource", name)
+	ds.Object["spec"] = map[string]any{"source": map[string]any{"snapshot": map[string]any{"name": snapshot, "namespace": "acme-web"}}}
+	return ds
+}
+
+type retentionWorld struct {
+	s         Subject
+	snapshots []unstructured.Unstructured
+	current   unstructured.Unstructured
+}
+
+func newRetentionWorld() retentionWorld {
 	s := httpSubject()
-	older := func(url, digest string, age time.Duration) unstructured.Unstructured {
-		return goldenSnapshot(ubuntuSubject(httpSpec(url)), digest, true, age)
+	return retentionWorld{
+		s: s,
+		snapshots: []unstructured.Unstructured{
+			snapshotWithSource(s, "one", 5*time.Hour),
+			snapshotWithSource(s, "two", 4*time.Hour),
+			snapshotWithSource(s, "three", 3*time.Hour),
+			snapshotWithSource(s, "four", 2*time.Hour),
+			goldenSnapshot(s, "uid:current", true, time.Minute),
+		},
 	}
-	current := goldenSnapshot(s, "uid:4", true, time.Minute)
-	snaps := []unstructured.Unstructured{
-		older("https://example.com/1", "uid:1", 4*time.Hour),
-		older("https://example.com/2", "uid:2", 3*time.Hour),
-		older("https://example.com/3", "uid:3", 2*time.Hour),
-		current,
-	}
-	var prev []v1alpha1.ImageVersion
-	for _, snap := range []unstructured.Unstructured{snaps[2], snaps[1], snaps[0]} {
-		prev = append(prev, v1alpha1.ImageVersion{Digest: snap.GetAnnotations()[AnnotationDigest], DataSource: snap.GetName()})
-	}
+}
+
+func aliasPointingAt(snapshot string) unstructured.Unstructured {
+	alias := dataSourceNamed("ubuntu", true)
+	alias.Object["spec"] = map[string]any{"source": map[string]any{"snapshot": map[string]any{"name": snapshot, "namespace": "acme-web"}}}
+	return alias
+}
+
+func (r retentionWorld) world(extra ...func(*World)) World {
+	alias := aliasPointingAt(r.snapshots[2].GetName())
 	world := World{
-		Snapshots:   snaps,
-		DataSources: []unstructured.Unstructured{dataSourceNamed("ubuntu", true), dataSourceNamed(snaps[0].GetName(), true)},
-		Prev:        v1alpha1.ImageStatus{Versions: append([]v1alpha1.ImageVersion{{Digest: "uid:4", DataSource: current.GetName()}}, prev...)},
+		Snapshots:      r.snapshots,
+		DataSources:    []unstructured.Unstructured{alias},
+		AllDataSources: []unstructured.Unstructured{alias},
 	}
-	plan := Decide(s, world, testNow)
-	wantDelete := []string{"DataSource/" + snaps[0].GetName(), "VolumeSnapshot/" + snaps[0].GetName()}
-	slices.Sort(wantDelete)
-	if got := namesAndKinds(plan.Delete); !slices.Equal(got, wantDelete) {
-		t.Fatalf("delete %v, want %v", got, wantDelete)
+	for _, mutate := range extra {
+		mutate(&world)
 	}
-	if got := digests(plan.Result.Versions); !slices.Equal(got, []string{"uid:4", "uid:3", "uid:2"}) {
+	return world
+}
+
+func deletedSnapshots(plan Plan) []string {
+	var names []string
+	for _, obj := range plan.Delete {
+		if obj.GetKind() == "VolumeSnapshot" {
+			names = append(names, obj.GetName())
+		}
+	}
+	slices.Sort(names)
+	return names
+}
+
+func TestDecideVolumeWithAnEmptyStatusPrunesOnlyWhatIsFree(t *testing.T) {
+	r := newRetentionWorld()
+	plan := Decide(r.s, r.world(), testNow)
+
+	want := []string{r.snapshots[0].GetName(), r.snapshots[1].GetName()}
+	slices.Sort(want)
+	if got := deletedSnapshots(plan); !slices.Equal(got, want) {
+		t.Fatalf("deleted %v, want %v", got, want)
+	}
+	for _, kept := range []int{2, 3, 4} {
+		if slices.Contains(deletedSnapshots(plan), r.snapshots[kept].GetName()) {
+			t.Fatalf("snapshot %s is in the keep set", r.snapshots[kept].GetName())
+		}
+	}
+	if got := digests(plan.Result.Versions); !slices.Equal(got, []string{"uid:current", "uid:four", "uid:three"}) {
 		t.Fatalf("versions %v", got)
+	}
+}
+
+func TestDecideVolumeKeepsASnapshotThatADataVolumeReferences(t *testing.T) {
+	r := newRetentionWorld()
+	consumer := namedObject("DataVolume", "vm-root")
+	consumer.Object["spec"] = map[string]any{"source": map[string]any{"snapshot": map[string]any{"name": r.snapshots[1].GetName(), "namespace": "acme-web"}}}
+	plan := Decide(r.s, r.world(func(w *World) { w.DataVolumes = []unstructured.Unstructured{consumer} }), testNow)
+
+	if got := deletedSnapshots(plan); !slices.Equal(got, []string{r.snapshots[0].GetName()}) {
+		t.Fatalf("deleted %v", got)
+	}
+	if plan.Requeue != 30*time.Second {
+		t.Fatalf("a blocked delete must requeue: %v", plan.Requeue)
+	}
+}
+
+func TestDecideVolumeKeepsASnapshotThatADataSourceReferences(t *testing.T) {
+	r := newRetentionWorld()
+	pinned := snapshotDataSource("pinned", r.snapshots[0].GetName())
+	plan := Decide(r.s, r.world(func(w *World) { w.AllDataSources = append(w.AllDataSources, pinned) }), testNow)
+	if got := deletedSnapshots(plan); !slices.Equal(got, []string{r.snapshots[1].GetName()}) {
+		t.Fatalf("deleted %v", got)
+	}
+}
+
+func TestDecideVolumeKeepsASnapshotThatAClaimReferences(t *testing.T) {
+	r := newRetentionWorld()
+	restored := claim("restored", "")
+	restored.Namespace = "acme-web"
+	restored.Spec.DataSource = &corev1.TypedLocalObjectReference{Kind: "VolumeSnapshot", Name: r.snapshots[0].GetName()}
+	plan := Decide(r.s, r.world(func(w *World) { w.Claims = []corev1.PersistentVolumeClaim{*restored} }), testNow)
+	if got := deletedSnapshots(plan); !slices.Equal(got, []string{r.snapshots[1].GetName()}) {
+		t.Fatalf("deleted %v", got)
+	}
+}
+
+func TestDecideVolumeDeletesTheVersionDataSourceBeforeItsSnapshot(t *testing.T) {
+	r := newRetentionWorld()
+	oldest := r.snapshots[0].GetName()
+	version := snapshotDataSource(oldest, oldest)
+	version.SetLabels(r.s.Labels)
+	withVersion := func(w *World) {
+		w.DataSources = append(w.DataSources, version)
+		w.AllDataSources = append(w.AllDataSources, version)
+	}
+
+	first := Decide(r.s, r.world(withVersion), testNow)
+	if got := deletedSnapshots(first); slices.Contains(got, oldest) {
+		t.Fatalf("the snapshot must stay while its DataSource exists: %v", got)
+	}
+	if !slices.Contains(namesAndKinds(first.Delete), "DataSource/"+oldest) {
+		t.Fatalf("the version DataSource must go first: %v", namesAndKinds(first.Delete))
+	}
+
+	second := Decide(r.s, r.world(), testNow)
+	if !slices.Contains(deletedSnapshots(second), oldest) {
+		t.Fatalf("the snapshot must go once nothing references it: %v", deletedSnapshots(second))
+	}
+}
+
+func TestDecideVolumeNeverDeletesTheAliasTarget(t *testing.T) {
+	r := newRetentionWorld()
+	oldest := r.snapshots[0].GetName()
+	plan := Decide(r.s, r.world(func(w *World) {
+		alias := aliasPointingAt(oldest)
+		w.DataSources = []unstructured.Unstructured{alias}
+		w.AllDataSources = []unstructured.Unstructured{alias}
+	}), testNow)
+	if slices.Contains(deletedSnapshots(plan), oldest) || len(deletedSnapshots(plan)) != 0 {
+		t.Fatalf("deleted %v", deletedSnapshots(plan))
 	}
 }
 

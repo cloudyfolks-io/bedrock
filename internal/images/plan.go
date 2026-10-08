@@ -17,7 +17,11 @@ type World struct {
 	SourceClaim  *corev1.PersistentVolumeClaim
 	Snapshots    []unstructured.Unstructured
 	DataSources  []unstructured.Unstructured
-	Prev         v1alpha1.ImageStatus
+
+	AllDataSources []unstructured.Unstructured
+	DataVolumes    []unstructured.Unstructured
+	Claims         []corev1.PersistentVolumeClaim
+	Prev           v1alpha1.ImageStatus
 }
 
 type Plan struct {
@@ -28,7 +32,7 @@ type Plan struct {
 }
 
 func Decide(s Subject, w World, now time.Time) Plan {
-	plan := decideByMode(s, w, now)
+	plan := decideByMode(s, w)
 	plan.Result = keepPrevious(plan.Result, w.Prev)
 	if plan.Requeue == 0 {
 		plan.Requeue = requeueOf(plan.Result.Phase)
@@ -59,9 +63,9 @@ func requeueOf(phase string) time.Duration {
 	}
 }
 
-func decideByMode(s Subject, w World, now time.Time) Plan {
+func decideByMode(s Subject, w World) Plan {
 	if UsesCron(s.Spec) {
-		return decideCron(s, w, now)
+		return decideCron(s, w)
 	}
 	return decideVolume(s, w)
 }

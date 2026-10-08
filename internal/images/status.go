@@ -145,36 +145,6 @@ func RestoreBytes(snapshot *unstructured.Unstructured) int64 {
 	return quantity.Value()
 }
 
-func MergeVersions(prev []v1alpha1.ImageVersion, latest *v1alpha1.ImageVersion, alive map[string]bool, keep int32) []v1alpha1.ImageVersion {
-	ordered := make([]v1alpha1.ImageVersion, 0, len(prev)+1)
-	if latest != nil {
-		ordered = append(ordered, firstWithDigest(prev, *latest))
-	}
-	for _, version := range prev {
-		if !slices.ContainsFunc(ordered, func(have v1alpha1.ImageVersion) bool { return have.Digest == version.Digest }) {
-			ordered = append(ordered, version)
-		}
-	}
-	merged := make([]v1alpha1.ImageVersion, 0, len(ordered))
-	for _, version := range ordered {
-		if alive[version.DataSource] {
-			merged = append(merged, *version.DeepCopy())
-		}
-	}
-	if keep > 0 && len(merged) > int(keep) {
-		merged = merged[:keep]
-	}
-	return merged
-}
-
-func firstWithDigest(versions []v1alpha1.ImageVersion, latest v1alpha1.ImageVersion) v1alpha1.ImageVersion {
-	index := slices.IndexFunc(versions, func(have v1alpha1.ImageVersion) bool { return have.Digest == latest.Digest })
-	if index < 0 {
-		return latest
-	}
-	return versions[index]
-}
-
 func BuildStatus(prev v1alpha1.ImageStatus, generation int64, r Result, now metav1.Time) v1alpha1.ImageStatus {
 	status := *prev.DeepCopy()
 	status.ObservedGeneration = generation

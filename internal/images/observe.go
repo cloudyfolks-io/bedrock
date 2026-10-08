@@ -5,6 +5,7 @@ import (
 	"slices"
 
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -56,7 +57,25 @@ func Observe(ctx context.Context, c client.Reader, s Subject, prev v1alpha1.Imag
 	if world.DataSources, err = observeDataSources(ctx, c, s); err != nil {
 		return World{}, err
 	}
+	if world.AllDataSources, err = listLabelled(ctx, c, DataSourceGVK, s.Namespace, nil); err != nil {
+		return World{}, err
+	}
+	if world.DataVolumes, err = listLabelled(ctx, c, DataVolumeGVK, consumerNamespace(s), nil); err != nil {
+		return World{}, err
+	}
+	var claims corev1.PersistentVolumeClaimList
+	if err := c.List(ctx, &claims, client.InNamespace(s.Namespace)); err != nil {
+		return World{}, err
+	}
+	world.Claims = claims.Items
 	return world, nil
+}
+
+func consumerNamespace(s Subject) string {
+	if s.Kind == KindClusterImage {
+		return metav1.NamespaceAll
+	}
+	return s.Namespace
 }
 
 func importNameOf(s Subject, cron *unstructured.Unstructured) string {

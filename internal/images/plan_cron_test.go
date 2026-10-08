@@ -56,7 +56,7 @@ func TestDecideCronReadyWhenTheLatestImportIsSnapshotted(t *testing.T) {
 	if r.Phase != "Ready" || r.Digest != "sha256:1a2b3c4d5e6f0000" || r.SizeBytes != 10737418240 || r.DataSource != "ubuntu" {
 		t.Fatalf("result %+v", r)
 	}
-	if len(r.Versions) != 1 || r.Versions[0].DataSource != "ubuntu-1a2b3c4d5e6f" || r.Versions[0].Time.UTC().Hour() != 3 {
+	if len(r.Versions) != 1 || r.Versions[0].DataSource != "ubuntu-1a2b3c4d5e6f" {
 		t.Fatalf("versions %+v", r.Versions)
 	}
 }

@@ -2,7 +2,6 @@ package images
 
 import (
 	"fmt"
-	"slices"
 	"time"
 
 	corev1 "k8s.io/api/core/v1"
@@ -18,7 +17,7 @@ const snapshotFailureBackoff = 5 * time.Minute
 func decideVolume(s Subject, w World) Plan {
 	spec := s.Spec
 	hash := SourceHash(spec)
-	current := newestWithHash(w.Snapshots, hash)
+	current := newestWithHash(ownedSnapshots(w.Snapshots, s.Owner.UID), hash)
 	switch {
 	case w.Cron != nil:
 		return Plan{
@@ -74,23 +73,31 @@ func decideImport(s Subject, w World) Plan {
 }
 
 func decideGolden(s Subject, w World, current unstructured.Unstructured) Plan {
-	latest := v1alpha1.ImageVersion{
-		Digest:     current.GetAnnotations()[AnnotationDigest],
-		Time:       ptrTime(current.GetCreationTimestamp()),
-		DataSource: current.GetName(),
-	}
-	versions := MergeVersions(w.Prev.Versions, &latest, namesOf(w.Snapshots), Keep(s.Spec))
-	kept := dataSourcesOf(versions)
+	owned := ownedSnapshots(w.Snapshots, s.Owner.UID)
+	target := snapshotOf(findNamed(w.DataSources, s.Name))
+	kept := retain(owned, current.GetName(), target, Keep(s.Spec))
+	versions := versionsOf(kept, Keep(s.Spec), annotatedDigest)
 
-	plan := Plan{Apply: versionDataSources(s, versions)}
+	plan := Plan{Apply: versionDataSources(s, readyOnly(kept))}
 	plan.Apply = append(plan.Apply, DataSource(s, s.Name, current.GetName()))
-	plan.Delete = staleObjects(w, kept, s.Name)
+	reference := findNamed(owned, target)
+	if reference == nil {
+		reference = &current
+	}
+	stale, blocked := prune(s, w, owned, kept, reference)
+	if w.DataVolume != nil {
+		stale = append(stale, w.DataVolume.DeepCopy())
+	}
+	plan.Delete = stale
+	if blocked {
+		plan.Requeue = pruneRetry
+	}
 
 	if aliasReady(w.DataSources, s.Name) {
 		plan.Result = Result{
 			Phase:      v1alpha1.ImagePhaseReady,
 			Reason:     ReasonImported,
-			Digest:     latest.Digest,
+			Digest:     annotatedDigest(current),
 			SizeBytes:  RestoreBytes(&current),
 			DataSource: s.Name,
 			Versions:   versions,
@@ -101,35 +108,12 @@ func decideGolden(s Subject, w World, current unstructured.Unstructured) Plan {
 	return plan
 }
 
-func versionDataSources(s Subject, versions []v1alpha1.ImageVersion) []*unstructured.Unstructured {
-	objects := make([]*unstructured.Unstructured, 0, len(versions)+1)
-	for _, version := range versions {
-		objects = append(objects, DataSource(s, version.DataSource, version.DataSource))
+func versionDataSources(s Subject, snapshots []unstructured.Unstructured) []*unstructured.Unstructured {
+	objects := make([]*unstructured.Unstructured, 0, len(snapshots)+1)
+	for _, snapshot := range snapshots {
+		objects = append(objects, DataSource(s, snapshot.GetName(), snapshot.GetName()))
 	}
 	return objects
-}
-
-func staleObjects(w World, kept []string, alias string) []*unstructured.Unstructured {
-	var stale []*unstructured.Unstructured
-	if w.DataVolume != nil {
-		stale = append(stale, w.DataVolume.DeepCopy())
-	}
-	for _, snapshot := range w.Snapshots {
-		if !slices.Contains(kept, snapshot.GetName()) {
-			stale = append(stale, snapshot.DeepCopy())
-		}
-	}
-	return append(stale, staleDataSources(w.DataSources, kept, alias)...)
-}
-
-func staleDataSources(sources []unstructured.Unstructured, kept []string, alias string) []*unstructured.Unstructured {
-	var stale []*unstructured.Unstructured
-	for _, source := range sources {
-		if source.GetName() != alias && !slices.Contains(kept, source.GetName()) {
-			stale = append(stale, source.DeepCopy())
-		}
-	}
-	return stale
 }
 
 func newestWithHash(snapshots []unstructured.Unstructured, hash string) *unstructured.Unstructured {
@@ -152,22 +136,6 @@ func newer(a, b *unstructured.Unstructured) bool {
 		return a.GetName() > b.GetName()
 	}
 	return timeA.After(timeB)
-}
-
-func namesOf(objects []unstructured.Unstructured) map[string]bool {
-	names := make(map[string]bool, len(objects))
-	for _, object := range objects {
-		names[object.GetName()] = true
-	}
-	return names
-}
-
-func dataSourcesOf(versions []v1alpha1.ImageVersion) []string {
-	names := make([]string, 0, len(versions))
-	for _, version := range versions {
-		names = append(names, version.DataSource)
-	}
-	return names
 }
 
 func aliasReady(sources []unstructured.Unstructured, alias string) bool {

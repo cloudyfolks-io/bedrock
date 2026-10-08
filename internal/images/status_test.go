@@ -1,7 +1,6 @@
 package images
 
 import (
-	"slices"
 	"testing"
 	"time"
 
@@ -179,49 +178,6 @@ func TestSnapshotReadyAndRestoreBytes(t *testing.T) {
 	empty := &unstructured.Unstructured{Object: map[string]any{}}
 	if SnapshotReady(empty) || RestoreBytes(empty) != 0 {
 		t.Fatal("an empty snapshot is not ready and has no size")
-	}
-}
-
-func version(digest, dataSource string, minute int) v1alpha1.ImageVersion {
-	at := metav1.NewTime(time.Date(2026, 10, 8, 12, minute, 0, 0, time.UTC))
-	return v1alpha1.ImageVersion{Digest: digest, Time: &at, DataSource: dataSource}
-}
-
-func digests(versions []v1alpha1.ImageVersion) []string {
-	out := make([]string, 0, len(versions))
-	for _, v := range versions {
-		out = append(out, v.Digest)
-	}
-	return out
-}
-
-func TestMergeVersions(t *testing.T) {
-	alive := map[string]bool{"a": true, "b": true, "c": true, "d": true}
-	prev := []v1alpha1.ImageVersion{version("sha:b", "b", 2), version("sha:a", "a", 1)}
-	newest := version("sha:c", "c", 3)
-
-	if got := digests(MergeVersions(prev, &newest, alive, 3)); !slices.Equal(got, []string{"sha:c", "sha:b", "sha:a"}) {
-		t.Fatalf("newest first: %v", got)
-	}
-
-	repeated := version("sha:a", "a", 9)
-	merged := MergeVersions(prev, &repeated, alive, 3)
-	if got := digests(merged); !slices.Equal(got, []string{"sha:a", "sha:b"}) || merged[0].Time.Minute() != 1 {
-		t.Fatalf("repeated digest keeps its first time: %v", merged)
-	}
-
-	if got := digests(MergeVersions(prev, &newest, map[string]bool{"c": true, "a": true}, 3)); !slices.Equal(got, []string{"sha:c", "sha:a"}) {
-		t.Fatalf("dead data source dropped: %v", got)
-	}
-
-	if got := digests(MergeVersions(prev, &newest, alive, 2)); !slices.Equal(got, []string{"sha:c", "sha:b"}) {
-		t.Fatalf("truncated: %v", got)
-	}
-
-	merged = MergeVersions(prev, nil, alive, 3)
-	merged[0].Digest = "changed"
-	if prev[0].Digest != "sha:b" {
-		t.Fatal("the result must not alias the input")
 	}
 }
 
