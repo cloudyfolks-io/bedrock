@@ -13,6 +13,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	"github.com/cloudyfolks-io/bedrock/api/v1alpha1"
+	"github.com/cloudyfolks-io/bedrock/internal/images"
 )
 
 type resolveStep func(ctx context.Context, vm v1alpha1.VirtualMachine, in RenderInput) (RenderInput, *Gate, error)
@@ -84,7 +85,7 @@ func lookupImage(ctx context.Context, c client.Client, namespace string, ref v1a
 	if err := c.Get(ctx, client.ObjectKey{Name: ref.Name}, &img); err != nil {
 		return ResolvedImage{}, nil, imageLookupGate(err, ref.Name), ignoreNotFound(err)
 	}
-	return resolveFound(img.Spec, img.Status, catalogNamespace, wantType)
+	return resolveFound(img.Spec, img.Status, images.CatalogNamespace, wantType)
 }
 
 func resolveFound(spec v1alpha1.ImageSpec, status v1alpha1.ImageStatus, namespace, wantType string) (ResolvedImage, *v1alpha1.ImageOS, *Gate, error) {

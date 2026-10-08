@@ -7,6 +7,7 @@ import (
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 
 	"github.com/cloudyfolks-io/bedrock/api/v1alpha1"
+	"github.com/cloudyfolks-io/bedrock/internal/images"
 )
 
 const (
@@ -125,7 +126,7 @@ func CDROMClaim(vm v1alpha1.VirtualMachine, labels map[string]string, index int,
 		Namespace:   vm.Namespace,
 		Name:        CDROMClaimName(vm.Name, index),
 		Labels:      labels,
-		Annotations: map[string]string{annotationClaimAdoption: "true", annotationAttach: attachReadOnly},
+		Annotations: map[string]string{annotationClaimAdoption: "true", images.AnnotationAttach: images.AttachReadOnly},
 		Owner:       OwnerRef(vm),
 		SizeGi:      max(1, image.SizeGi),
 	}, sourceRefOf(image))
