@@ -188,7 +188,7 @@ func TestEtcdSnapshotFailureLeavesNoPartialArchive(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "etcd unavailable") {
 		t.Fatalf("error %v", err)
 	}
-	if entries, _ := os.ReadDir(filepath.Join(deps.Root, backupDir)); len(entries) != 0 {
+	if entries, _ := os.ReadDir(filepath.Join(deps.Root, backupDir)); len(entries) != 1 || entries[0].Name() != snapshotFailureFile {
 		t.Fatalf("leftovers %v", entries)
 	}
 }
@@ -246,5 +246,60 @@ func TestUpgradeBackupLeavesNoPartialFile(t *testing.T) {
 	dir := filepath.Join(env.Deps.Root, backupDir)
 	if partials, _ := filepath.Glob(filepath.Join(dir, "*.partial")); len(partials) != 0 {
 		t.Fatalf("partial files %v", partials)
+	}
+}
+
+func TestEtcdBackoffDoublesUpToTheInterval(t *testing.T) {
+	cases := []struct {
+		attempts int
+		interval time.Duration
+		want     time.Duration
+	}{
+		{1, 24 * time.Hour, time.Minute},
+		{2, 24 * time.Hour, 2 * time.Minute},
+		{3, 24 * time.Hour, 4 * time.Minute},
+		{12, 24 * time.Hour, 24 * time.Hour},
+		{5, time.Hour, 16 * time.Minute},
+		{8, time.Hour, time.Hour},
+		{500, time.Hour, time.Hour},
+	}
+	for _, tc := range cases {
+		if got := etcdBackoff(tc.attempts, tc.interval); got != tc.want {
+			t.Fatalf("attempts %d: got %s want %s", tc.attempts, got, tc.want)
+		}
+	}
+}
+
+func TestEtcdSnapshotWaitsAfterAFailure(t *testing.T) {
+	createControlPlaneHost(t, "node-a", v1alpha1.RoleControlPlane)
+	exec := &fakeK0sBackup{err: errors.New("etcd unavailable")}
+	start := at("2026-10-08T02:30:00Z")
+	deps := snapshotDeps(t, exec, start)
+	at := func(offset time.Duration) { deps.Now = func() time.Time { return start.Add(offset) } }
+	if err := RunEtcdSnapshots(context.Background(), k8sClient, deps); err == nil {
+		t.Fatal("the first failure must be reported")
+	}
+	at(30 * time.Second)
+	if err := RunEtcdSnapshots(context.Background(), k8sClient, deps); err != nil || len(exec.calls) != 1 {
+		t.Fatalf("must wait one minute: %v, calls %v", err, exec.calls)
+	}
+	at(61 * time.Second)
+	if err := RunEtcdSnapshots(context.Background(), k8sClient, deps); err == nil || len(exec.calls) != 2 {
+		t.Fatalf("must retry after the wait: %v, calls %v", err, exec.calls)
+	}
+	at(61*time.Second + 90*time.Second)
+	if err := RunEtcdSnapshots(context.Background(), k8sClient, deps); err != nil || len(exec.calls) != 2 {
+		t.Fatalf("must wait two minutes now: %v, calls %v", err, exec.calls)
+	}
+	exec.err = nil
+	at(61*time.Second + 121*time.Second)
+	if err := RunEtcdSnapshots(context.Background(), k8sClient, deps); err != nil {
+		t.Fatal(err)
+	}
+	if got := snapshotFiles(t, deps, ".etcd-snapshot-failure"); len(got) != 0 {
+		t.Fatalf("a success must clear the failure marker: %v", got)
+	}
+	if len(snapshotFiles(t, deps, "etcd-*.tar.gz")) != 1 {
+		t.Fatal("the snapshot must exist after the retry")
 	}
 }

@@ -2,6 +2,10 @@ package agent
 
 import (
 	"context"
+	"errors"
+	"fmt"
+	"io/fs"
+	"os"
 	"path/filepath"
 	"slices"
 	"time"
@@ -18,6 +22,10 @@ const (
 	etcdSnapshotPattern = "etcd-*.tar.gz"
 	keptEtcdSnapshots   = 7
 	etcdScheduleKey     = "backup.etcd-schedule"
+
+	snapshotFailureFile  = ".etcd-snapshot-failure"
+	firstSnapshotBackoff = time.Minute
+	maxBackoffDoublings  = 20
 )
 
 func RunEtcdSnapshots(ctx context.Context, c client.Client, deps Deps) error {
@@ -36,8 +44,54 @@ func RunEtcdSnapshots(ctx context.Context, c client.Client, deps Deps) error {
 	if err != nil || !due {
 		return err
 	}
+	dir := filepath.Join(deps.Root, backupDir)
+	interval, err := schedule.MinInterval(expr, deps.Now())
+	if err != nil {
+		return err
+	}
+	failedAt, attempts := readSnapshotFailure(dir)
+	if attempts > 0 && deps.Now().Before(failedAt.Add(etcdBackoff(attempts, interval))) {
+		return nil
+	}
 	name := "etcd-" + deps.Now().UTC().Format(stampLayout) + ".tar.gz"
-	_, _, err = writeBackup(ctx, deps, name, etcdSnapshotPattern, keptEtcdSnapshots)
+	if _, _, err := writeBackup(ctx, deps, name, etcdSnapshotPattern, keptEtcdSnapshots); err != nil {
+		return errors.Join(err, recordSnapshotFailure(dir, deps.Now(), attempts+1))
+	}
+	return clearSnapshotFailure(dir)
+}
+
+func etcdBackoff(attempts int, interval time.Duration) time.Duration {
+	if attempts > maxBackoffDoublings {
+		return interval
+	}
+	return min(firstSnapshotBackoff<<(attempts-1), interval)
+}
+
+func readSnapshotFailure(dir string) (time.Time, int) {
+	raw, err := os.ReadFile(filepath.Join(dir, snapshotFailureFile))
+	if err != nil {
+		return time.Time{}, 0
+	}
+	var seconds int64
+	var attempts int
+	if _, err := fmt.Sscanf(string(raw), "%d %d", &seconds, &attempts); err != nil {
+		return time.Time{}, 0
+	}
+	return time.Unix(seconds, 0), attempts
+}
+
+func recordSnapshotFailure(dir string, at time.Time, attempts int) error {
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		return err
+	}
+	return os.WriteFile(filepath.Join(dir, snapshotFailureFile), []byte(fmt.Sprintf("%d %d", at.Unix(), attempts)), 0o600)
+}
+
+func clearSnapshotFailure(dir string) error {
+	err := os.Remove(filepath.Join(dir, snapshotFailureFile))
+	if errors.Is(err, fs.ErrNotExist) {
+		return nil
+	}
 	return err
 }
 
