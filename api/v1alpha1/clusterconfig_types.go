@@ -18,6 +18,9 @@ type ProviderNetworkSpec struct {
 	Vlan    int32  `json:"vlan,omitempty"`
 	CIDR    string `json:"cidr"`
 	Gateway string `json:"gateway"`
+	// +optional
+	// +listType=set
+	ExcludeIPs []string `json:"excludeIPs,omitempty"`
 }
 
 type FabricSpec struct {

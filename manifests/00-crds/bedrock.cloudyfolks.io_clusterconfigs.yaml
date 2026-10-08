@@ -79,6 +79,11 @@ spec:
                           properties:
                             cidr:
                               type: string
+                            excludeIPs:
+                              items:
+                                type: string
+                              type: array
+                              x-kubernetes-list-type: set
                             gateway:
                               type: string
                             interface:

@@ -14,6 +14,7 @@ import (
 
 	"github.com/cloudyfolks-io/bedrock/api/v1alpha1"
 	"github.com/cloudyfolks-io/bedrock/internal/dnsname"
+	"github.com/cloudyfolks-io/bedrock/internal/settings"
 )
 
 const (
@@ -123,6 +124,9 @@ func Validate(cfg v1alpha1.ClusterConfig) error {
 			return fmt.Errorf("provider network %s gateway: %w", pn.Name, err)
 		}
 	}
+	if err := settings.ValidateProviderNetworks(s.Network.Fabric.ProviderNetworks); err != nil {
+		return fmt.Errorf("spec.network.fabric.providerNetworks: %w", err)
+	}
 	if s.Storage.Replicas < 1 {
 		return fmt.Errorf("spec.storage.replicas must be at least 1")
 	}
@@ -180,14 +184,16 @@ func ToHost(cfg v1alpha1.ClusterConfig, nodeName string) v1alpha1.Host {
 
 func ToSettings(cfg v1alpha1.ClusterConfig) []v1alpha1.Setting {
 	values := map[string]string{
-		"platform.host":     cfg.Spec.Platform.Host,
-		"platform.tls-mode": cfg.Spec.Platform.TLSMode,
-		"storage.replicas":  strconv.Itoa(int(cfg.Spec.Storage.Replicas)),
-		"storage.network":   vlanValue(cfg.Spec.Network.StorageVlan),
-		"migration.network": vlanValue(cfg.Spec.Network.MigrationVlan),
-		"virt.emulation":    strconv.FormatBool(cfg.Spec.Virtualization.Emulation),
-		"kata.enabled":      strconv.FormatBool(cfg.Spec.Addons["kata"]),
-		"loki.enabled":      strconv.FormatBool(cfg.Spec.Addons["loki"]),
+		"platform.host":             cfg.Spec.Platform.Host,
+		"platform.tls-mode":         cfg.Spec.Platform.TLSMode,
+		"storage.replicas":          strconv.Itoa(int(cfg.Spec.Storage.Replicas)),
+		"storage.network":           vlanValue(cfg.Spec.Network.StorageVlan),
+		"migration.network":         vlanValue(cfg.Spec.Network.MigrationVlan),
+		"virt.emulation":            strconv.FormatBool(cfg.Spec.Virtualization.Emulation),
+		"kata.enabled":              strconv.FormatBool(cfg.Spec.Addons["kata"]),
+		"loki.enabled":              strconv.FormatBool(cfg.Spec.Addons["loki"]),
+		"network.eip-mode":          cfg.Spec.Network.Fabric.EIPMode,
+		"network.provider-networks": providerNetworksValue(cfg),
 	}
 	keys := make([]string, 0, len(values))
 	for k := range values {
@@ -202,6 +208,11 @@ func ToSettings(cfg v1alpha1.ClusterConfig) []v1alpha1.Setting {
 		})
 	}
 	return out
+}
+
+func providerNetworksValue(cfg v1alpha1.ClusterConfig) string {
+	value, _ := settings.EncodeProviderNetworks(cfg.Spec.Network.Fabric.ProviderNetworks)
+	return value
 }
 
 func vlanValue(vlan int32) string {

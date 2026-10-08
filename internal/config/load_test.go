@@ -202,3 +202,48 @@ func TestValidatePlatformHost(t *testing.T) {
 		})
 	}
 }
+
+func TestToSettingsCarriesProviderNetworks(t *testing.T) {
+	cfg, err := Load(filepath.Join("testdata", "single-node.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := map[string]string{}
+	for _, s := range ToSettings(cfg) {
+		got[s.Name] = s.Spec.Value
+	}
+	want := `[{"name":"public","interface":"bond0","vlan":100,"cidr":"91.246.31.0/24","gateway":"91.246.31.1"}]`
+	if got["network.eip-mode"] != "l2" || got["network.provider-networks"] != want {
+		t.Fatalf("settings %v", got)
+	}
+}
+
+func TestToSettingsWithoutProviderNetworks(t *testing.T) {
+	for _, s := range ToSettings(v1alpha1.ClusterConfig{}) {
+		if s.Name == "network.provider-networks" && s.Spec.Value != "" {
+			t.Fatalf("value %q", s.Spec.Value)
+		}
+	}
+}
+
+func TestValidateRejectsDuplicateProviderNetworkNames(t *testing.T) {
+	cfg, err := Load(filepath.Join("testdata", "single-node.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg.Spec.Network.Fabric.ProviderNetworks = append(cfg.Spec.Network.Fabric.ProviderNetworks, cfg.Spec.Network.Fabric.ProviderNetworks[0])
+	if err := Validate(cfg); err == nil {
+		t.Fatal("duplicate provider network names must be refused")
+	}
+}
+
+func TestValidateRejectsExcludeIPsOutsideTheCIDR(t *testing.T) {
+	cfg, err := Load(filepath.Join("testdata", "single-node.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg.Spec.Network.Fabric.ProviderNetworks[0].ExcludeIPs = []string{"10.0.0.1"}
+	if err := Validate(cfg); err == nil {
+		t.Fatal("excludeIPs outside the cidr must be refused")
+	}
+}
