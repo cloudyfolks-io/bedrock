@@ -206,7 +206,7 @@ func TestAgentBackupRBACManifest(t *testing.T) {
 	if err := sigyaml.Unmarshal([]byte(documents[0]), &role); err != nil {
 		t.Fatal(err)
 	}
-	if len(role.Rules) != 1 || !slices.Equal(role.Rules[0].Resources, []string{"settings"}) || !slices.Equal(role.Rules[0].Verbs, []string{"get", "list", "watch"}) || !slices.Equal(role.Rules[0].APIGroups, []string{"bedrock.cloudyfolks.io"}) {
+	if len(role.Rules) != 1 || !slices.Equal(role.Rules[0].Resources, []string{"settings"}) || !slices.Equal(role.Rules[0].Verbs, []string{"get"}) || !slices.Equal(role.Rules[0].ResourceNames, []string{"backup.etcd-schedule"}) || !slices.Equal(role.Rules[0].APIGroups, []string{"bedrock.cloudyfolks.io"}) {
 		t.Fatalf("rules %+v", role.Rules)
 	}
 	var binding rbacv1.ClusterRoleBinding
@@ -215,5 +215,36 @@ func TestAgentBackupRBACManifest(t *testing.T) {
 	}
 	if binding.RoleRef.Name != role.Name || len(binding.Subjects) != 1 || binding.Subjects[0].Kind != "Group" || binding.Subjects[0].Name != "system:nodes" {
 		t.Fatalf("binding %+v", binding)
+	}
+}
+
+func TestEtcdSnapshotIgnoresAndRemovesPartialFiles(t *testing.T) {
+	createControlPlaneHost(t, "node-a", v1alpha1.RoleControlPlane)
+	exec := &fakeK0sBackup{}
+	deps := snapshotDeps(t, exec, at("2026-10-08T02:30:00Z"))
+	stale := filepath.Join(deps.Root, backupDir, "etcd-20261008T020000Z.tar.gz.partial")
+	writeFixtureFile(t, stale, "truncated")
+	if err := RunEtcdSnapshots(context.Background(), k8sClient, deps); err != nil {
+		t.Fatal(err)
+	}
+	if len(exec.calls) != 1 {
+		t.Fatalf("a partial file must not count as a snapshot: %v", exec.calls)
+	}
+	if _, err := os.Stat(stale); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("stale partial file remains: %v", err)
+	}
+	if got := snapshotFiles(t, deps, "*"); !slices.Equal(got, []string{"etcd-20261008T023000Z.tar.gz"}) {
+		t.Fatalf("files %v", got)
+	}
+}
+
+func TestUpgradeBackupLeavesNoPartialFile(t *testing.T) {
+	env := backupEnv(t, &fakeK0sBackup{})
+	if _, err := backup(context.Background(), env); err != nil {
+		t.Fatal(err)
+	}
+	dir := filepath.Join(env.Deps.Root, backupDir)
+	if partials, _ := filepath.Glob(filepath.Join(dir, "*.partial")); len(partials) != 0 {
+		t.Fatalf("partial files %v", partials)
 	}
 }

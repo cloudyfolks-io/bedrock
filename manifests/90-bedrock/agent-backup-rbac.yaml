@@ -7,7 +7,8 @@ metadata:
 rules:
   - apiGroups: [bedrock.cloudyfolks.io]
     resources: [settings]
-    verbs: [get, list, watch]
+    resourceNames: [backup.etcd-schedule]
+    verbs: [get]
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding
