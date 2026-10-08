@@ -109,3 +109,7 @@ func IPAddress(u *unstructured.Unstructured) string {
 func IPOwner(u *unstructured.Unstructured) (namespace, podName, subnet string) {
 	return text(u, "spec", "namespace"), text(u, "spec", "podName"), text(u, "spec", "subnet")
 }
+
+func SecurityGroupProgrammed(u *unstructured.Unstructured) bool {
+	return text(u, "status", "portGroup") != ""
+}
