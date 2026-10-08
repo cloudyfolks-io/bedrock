@@ -53,6 +53,9 @@ func UserData(userData string, keys []string) (string, error) {
 	if len(text) > maxUserDataBytes {
 		return "", fmt.Errorf("the user data with the SSH keys is larger than %d bytes", maxUserDataBytes)
 	}
+	if err := checkResult(text); err != nil {
+		return "", err
+	}
 	return text, nil
 }
 
@@ -87,6 +90,32 @@ func checkCloudConfig(userData string) error {
 		return ErrUserDataNotMapping
 	}
 	return checkRoot(root)
+}
+
+func checkResult(text string) error {
+	decoder := goyaml.NewDecoder(strings.NewReader(text))
+	var root goyaml.Node
+	if err := decoder.Decode(&root); err != nil {
+		return invalidYAML(err)
+	}
+	var second goyaml.Node
+	if err := decoder.Decode(&second); !errors.Is(err, io.EOF) {
+		return ErrUserDataNotMapping
+	}
+	if len(root.Content) == 0 || root.Content[0].Kind != goyaml.MappingNode {
+		return ErrUserDataNotMapping
+	}
+	count := 0
+	doc := root.Content[0]
+	for index := 0; index+1 < len(doc.Content); index += 2 {
+		if doc.Content[index].Value == keysField {
+			count++
+		}
+	}
+	if count != 1 {
+		return ErrUserDataNotMapping
+	}
+	return nil
 }
 
 func checkRoot(root goyaml.Node) error {

@@ -87,6 +87,16 @@ func TestUserDataRefusesDocumentsItCannotExtend(t *testing.T) {
 	}
 }
 
+func TestUserDataRefusesAResultThatIsNotOneMapping(t *testing.T) {
+	keys := []string{"ssh-ed25519 AAAAk1"}
+	for _, in := range []string{"#cloud-config\na: 1\n...\n", "#cloud-config\n  a: 1\n  b: 2\n"} {
+		got, err := UserData(in, keys)
+		if err == nil {
+			t.Errorf("%q was accepted as %q", in, got)
+		}
+	}
+}
+
 func TestUserDataKeysCannotInjectYAML(t *testing.T) {
 	for _, key := range []string{"ssh-ed25519 AAAA\nruncmd:\n- rm -rf /", "ssh-ed25519 AAAA: x"} {
 		if _, err := UserData("", []string{key}); err == nil {
