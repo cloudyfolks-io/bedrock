@@ -18,7 +18,7 @@ var authnPlurals = []string{
 
 func proxyManifest(t *testing.T, file string) []*unstructured.Unstructured {
 	t.Helper()
-	raw, err := os.ReadFile(filepath.Join("..", "..", "manifests", "90-bedrock", file))
+	raw, err := os.ReadFile(filepath.Join("..", "..", "manifests", "88-proxy", file))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -32,7 +32,7 @@ func proxyManifest(t *testing.T, file string) []*unstructured.Unstructured {
 func allProxyObjects(t *testing.T) []*unstructured.Unstructured {
 	t.Helper()
 	var objects []*unstructured.Unstructured
-	for _, file := range []string{"proxy-00-namespace.yaml", "proxy-10-rbac.yaml", "proxy-20-workload.yaml"} {
+	for _, file := range []string{"00-namespace.yaml", "10-rbac.yaml", "20-workload.yaml"} {
 		objects = append(objects, proxyManifest(t, file)...)
 	}
 	return objects
@@ -113,8 +113,8 @@ func bedrockKinds(t *testing.T) []crdKind {
 
 func TestProxyDeploymentImageIsRewritten(t *testing.T) {
 	image := "ghcr.io/cloudyfolks-io/bedrock:v9.9.9"
-	objects := proxyManifest(t, "proxy-20-workload.yaml")
-	rewritten := rewriteBedrockImage([]rendered{{group: "90-bedrock", file: "proxy-20-workload.yaml", objects: objects}}, image)
+	objects := proxyManifest(t, "20-workload.yaml")
+	rewritten := rewriteBedrockImage([]rendered{{group: "88-proxy", file: "20-workload.yaml", objects: objects}}, image)
 	deployment := findObject(t, rewritten[0].objects, "Deployment", "bedrock-proxy")
 	containers, _, _ := unstructured.NestedSlice(deployment.Object, "spec", "template", "spec", "containers")
 	container, _ := containers[0].(map[string]any)
@@ -125,7 +125,7 @@ func TestProxyDeploymentImageIsRewritten(t *testing.T) {
 }
 
 func TestProxyWorkloadHardening(t *testing.T) {
-	objects := proxyManifest(t, "proxy-20-workload.yaml")
+	objects := proxyManifest(t, "20-workload.yaml")
 	deployment := findObject(t, objects, "Deployment", "bedrock-proxy")
 	replicas, _, _ := unstructured.NestedInt64(deployment.Object, "spec", "replicas")
 	template := []string{"spec", "template", "spec"}
@@ -155,7 +155,7 @@ func TestProxyWorkloadHardening(t *testing.T) {
 }
 
 func TestProxyMountsTLSAndOnlyTheAuthnCA(t *testing.T) {
-	deployment := findObject(t, proxyManifest(t, "proxy-20-workload.yaml"), "Deployment", "bedrock-proxy")
+	deployment := findObject(t, proxyManifest(t, "20-workload.yaml"), "Deployment", "bedrock-proxy")
 	volumes, _, _ := unstructured.NestedSlice(deployment.Object, "spec", "template", "spec", "volumes")
 	byName := map[string]map[string]any{}
 	for _, item := range volumes {
@@ -173,7 +173,7 @@ func TestProxyMountsTLSAndOnlyTheAuthnCA(t *testing.T) {
 }
 
 func TestProxyNamespaceComesFirst(t *testing.T) {
-	objects, err := loadObjects(os.DirFS(filepath.Join("..", "..", "manifests")), "90-bedrock", "bedrock")
+	objects, err := loadObjects(os.DirFS(filepath.Join("..", "..", "manifests")), "88-proxy", "proxy")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -194,7 +194,7 @@ func TestProxyNamespaceComesFirst(t *testing.T) {
 }
 
 func TestProxyBaseRoleHoldsNoAuthnKindsAndNoBroadWrites(t *testing.T) {
-	objects := proxyManifest(t, "proxy-10-rbac.yaml")
+	objects := proxyManifest(t, "10-rbac.yaml")
 	base := rulesOf(findObject(t, objects, "ClusterRole", "bedrock-proxy-base"))
 	group := "bedrock.cloudyfolks.io"
 	for _, kind := range bedrockKinds(t) {
@@ -239,7 +239,7 @@ func TestProxyBaseRoleHoldsNoAuthnKindsAndNoBroadWrites(t *testing.T) {
 }
 
 func TestProxyRolesAreScopedAndHaveNoWildcards(t *testing.T) {
-	objects := proxyManifest(t, "proxy-10-rbac.yaml")
+	objects := proxyManifest(t, "10-rbac.yaml")
 	for _, obj := range objects {
 		for _, rule := range rulesOf(obj) {
 			for _, list := range [][]string{rule.groups, rule.resources, rule.verbs} {
@@ -263,7 +263,7 @@ func TestProxyRolesAreScopedAndHaveNoWildcards(t *testing.T) {
 }
 
 func TestProxyClusterRoleAggregates(t *testing.T) {
-	objects := proxyManifest(t, "proxy-10-rbac.yaml")
+	objects := proxyManifest(t, "10-rbac.yaml")
 	aggregate := findObject(t, objects, "ClusterRole", "bedrock-proxy")
 	selectors, _, _ := unstructured.NestedSlice(aggregate.Object, "aggregationRule", "clusterRoleSelectors")
 	selector, _ := selectors[0].(map[string]any)
@@ -286,7 +286,7 @@ func TestProxyClusterRoleAggregates(t *testing.T) {
 }
 
 func TestProxyBindingsPointAtTheirRoles(t *testing.T) {
-	objects := proxyManifest(t, "proxy-10-rbac.yaml")
+	objects := proxyManifest(t, "10-rbac.yaml")
 	for _, name := range []string{"bedrock-proxy-store", "bedrock-proxy"} {
 		obj := findObject(t, objects, "RoleBinding", name)
 		role, _, _ := unstructured.NestedString(obj.Object, "roleRef", "name")
@@ -297,7 +297,7 @@ func TestProxyBindingsPointAtTheirRoles(t *testing.T) {
 }
 
 func TestProxyServersTransportAndCertificate(t *testing.T) {
-	objects := proxyManifest(t, "proxy-20-workload.yaml")
+	objects := proxyManifest(t, "20-workload.yaml")
 	transport := findObject(t, objects, "ServersTransport", "bedrock-proxy")
 	serverName, _, _ := unstructured.NestedString(transport.Object, "spec", "serverName")
 	roots, _, _ := unstructured.NestedSlice(transport.Object, "spec", "rootCAs")
@@ -320,7 +320,7 @@ func TestProxyObjectsCarryTheGroupComponentLabel(t *testing.T) {
 		if obj.GetNamespace() == "" && obj.GetKind() != "Namespace" && !strings.HasPrefix(obj.GetKind(), "Cluster") {
 			t.Errorf("%s %s has no namespace", obj.GetKind(), obj.GetName())
 		}
-		if obj.GetLabels()["bedrock.cloudyfolks.io/component"] != "bedrock" {
+		if obj.GetLabels()["bedrock.cloudyfolks.io/component"] != "proxy" {
 			t.Errorf("%s %s labels %v", obj.GetKind(), obj.GetName(), obj.GetLabels())
 		}
 	}

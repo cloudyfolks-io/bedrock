@@ -18,7 +18,7 @@ import (
 
 func proxyBaseRole(t *testing.T) rbacv1.ClusterRole {
 	t.Helper()
-	raw, err := os.ReadFile(filepath.Join("..", "..", "manifests", "90-bedrock", "proxy-10-rbac.yaml"))
+	raw, err := os.ReadFile(filepath.Join("..", "..", "manifests", "88-proxy", "10-rbac.yaml"))
 	if err != nil {
 		t.Fatal(err)
 	}

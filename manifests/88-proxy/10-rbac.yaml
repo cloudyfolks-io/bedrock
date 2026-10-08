@@ -4,7 +4,7 @@ metadata:
   name: bedrock-proxy
   namespace: bedrock-system
   labels:
-    bedrock.cloudyfolks.io/component: bedrock
+    bedrock.cloudyfolks.io/component: proxy
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: Role
@@ -12,7 +12,7 @@ metadata:
   name: bedrock-proxy-store
   namespace: bedrock-proxy
   labels:
-    bedrock.cloudyfolks.io/component: bedrock
+    bedrock.cloudyfolks.io/component: proxy
 rules:
   - apiGroups: [""]
     resources: [secrets]
@@ -24,7 +24,7 @@ metadata:
   name: bedrock-proxy-store
   namespace: bedrock-proxy
   labels:
-    bedrock.cloudyfolks.io/component: bedrock
+    bedrock.cloudyfolks.io/component: proxy
 roleRef:
   apiGroup: rbac.authorization.k8s.io
   kind: Role
@@ -40,7 +40,7 @@ metadata:
   name: bedrock-proxy
   namespace: bedrock-system
   labels:
-    bedrock.cloudyfolks.io/component: bedrock
+    bedrock.cloudyfolks.io/component: proxy
 rules:
   - apiGroups: [""]
     resources: [secrets]
@@ -60,7 +60,7 @@ metadata:
   name: bedrock-proxy
   namespace: bedrock-system
   labels:
-    bedrock.cloudyfolks.io/component: bedrock
+    bedrock.cloudyfolks.io/component: proxy
 roleRef:
   apiGroup: rbac.authorization.k8s.io
   kind: Role
@@ -75,7 +75,7 @@ kind: ClusterRole
 metadata:
   name: bedrock-proxy-base
   labels:
-    bedrock.cloudyfolks.io/component: bedrock
+    bedrock.cloudyfolks.io/component: proxy
     bedrock.cloudyfolks.io/aggregate-to-proxy: "true"
 rules:
   - apiGroups: [bedrock.cloudyfolks.io]
@@ -121,7 +121,7 @@ kind: ClusterRole
 metadata:
   name: bedrock-proxy
   labels:
-    bedrock.cloudyfolks.io/component: bedrock
+    bedrock.cloudyfolks.io/component: proxy
 aggregationRule:
   clusterRoleSelectors:
     - matchLabels:
@@ -132,7 +132,7 @@ kind: ClusterRoleBinding
 metadata:
   name: bedrock-proxy
   labels:
-    bedrock.cloudyfolks.io/component: bedrock
+    bedrock.cloudyfolks.io/component: proxy
 roleRef:
   apiGroup: rbac.authorization.k8s.io
   kind: ClusterRole

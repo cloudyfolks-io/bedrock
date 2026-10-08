@@ -3,4 +3,4 @@ kind: Namespace
 metadata:
   name: bedrock-proxy
   labels:
-    bedrock.cloudyfolks.io/component: bedrock
+    bedrock.cloudyfolks.io/component: proxy

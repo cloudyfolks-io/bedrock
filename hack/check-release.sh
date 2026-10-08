@@ -5,7 +5,7 @@ dir=${1:-dist/release}
 
 test -f "$dir/release.yaml"
 test -f "$dir/images.txt"
-for group in 00-crds 10-kube-vip 20-fabric 25-multus 30-nmstate 40-rook 41-rook-csi 50-kubevirt 52-aaq 55-velero 60-cert-manager 65-traefik 70-monitoring 71-kube-prometheus-stack 80-kured 86-tenancy 90-bedrock 92-catalog; do
+for group in 00-crds 10-kube-vip 20-fabric 25-multus 30-nmstate 40-rook 41-rook-csi 50-kubevirt 52-aaq 55-velero 60-cert-manager 65-traefik 70-monitoring 71-kube-prometheus-stack 80-kured 86-tenancy 88-proxy 90-bedrock 92-catalog; do
   test -d "$dir/manifests/$group"
 done
 grep -q 'kind: CustomResourceDefinition' "$dir/manifests/00-crds/cert-manager-crds.yaml"

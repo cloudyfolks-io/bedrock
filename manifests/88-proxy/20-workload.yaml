@@ -4,7 +4,7 @@ metadata:
   name: bedrock-proxy
   namespace: bedrock-system
   labels:
-    bedrock.cloudyfolks.io/component: bedrock
+    bedrock.cloudyfolks.io/component: proxy
 spec:
   replicas: 2
   selector:
@@ -97,7 +97,7 @@ metadata:
   name: bedrock-proxy
   namespace: bedrock-system
   labels:
-    bedrock.cloudyfolks.io/component: bedrock
+    bedrock.cloudyfolks.io/component: proxy
 spec:
   selector:
     app: bedrock-proxy
@@ -113,7 +113,7 @@ metadata:
   name: bedrock-proxy
   namespace: bedrock-system
   labels:
-    bedrock.cloudyfolks.io/component: bedrock
+    bedrock.cloudyfolks.io/component: proxy
 spec:
   maxUnavailable: 1
   selector:
@@ -126,7 +126,7 @@ metadata:
   name: bedrock-proxy-tls
   namespace: bedrock-system
   labels:
-    bedrock.cloudyfolks.io/component: bedrock
+    bedrock.cloudyfolks.io/component: proxy
 spec:
   secretName: bedrock-proxy-tls
   commonName: bedrock-proxy.bedrock-system.svc
@@ -148,7 +148,7 @@ metadata:
   name: bedrock-proxy
   namespace: bedrock-system
   labels:
-    bedrock.cloudyfolks.io/component: bedrock
+    bedrock.cloudyfolks.io/component: proxy
 spec:
   serverName: bedrock-proxy.bedrock-system.svc
   rootCAs:

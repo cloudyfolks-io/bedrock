@@ -114,6 +114,9 @@ components:
   - name: tenancy
     order: 86
     dirs: [manifests/86-tenancy]
+  - name: proxy
+    order: 88
+    dirs: [manifests/88-proxy]
   - name: monitoring
     order: 70
     chart: charts/metrics-server
