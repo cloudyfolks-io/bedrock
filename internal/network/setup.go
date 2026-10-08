@@ -40,5 +40,5 @@ func SetupWithManager(mgr ctrl.Manager) error {
 			return err
 		}
 	}
-	return mgr.Add(&Sweeper{Client: c})
+	return mgr.Add(&Sweeper{Client: c, Reader: mgr.GetAPIReader()})
 }

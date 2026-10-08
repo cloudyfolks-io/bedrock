@@ -7,6 +7,8 @@ import (
 	"slices"
 	"time"
 
+	corev1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
@@ -40,28 +42,44 @@ type OwnerKey struct {
 }
 
 type Orphan struct {
-	GVK  schema.GroupVersionKind
-	Name string
+	GVK   schema.GroupVersionKind
+	Name  string
+	Owner OwnerKey
+	UID   types.UID
 }
 
-func isOrphan(u *unstructured.Unstructured, owners map[OwnerKey]types.UID, now time.Time, minAge time.Duration) bool {
+func ownerOfManaged(u *unstructured.Unstructured) (OwnerKey, types.UID, bool) {
 	labels := u.GetLabels()
-	if labels[LabelManaged] != "true" || labels[LabelComponent] == ComponentUnderlay {
-		return false
+	if key, uid, ok := OwnerOf(u); ok {
+		return OwnerKey{Kind: labels[v1alpha1.LabelKind], Namespace: key.Namespace, Name: key.Name}, uid, true
 	}
-	key, uid, ok := OwnerOf(u)
-	if !ok || now.Sub(u.GetCreationTimestamp().Time) < minAge {
-		return false
+	if labels[v1alpha1.LabelKind] == "Namespace" && u.GetName() == DefaultSecurityGroupName(labels[v1alpha1.LabelName]) {
+		return OwnerKey{Kind: "Namespace", Name: labels[v1alpha1.LabelName]}, "", true
 	}
-	live, found := owners[OwnerKey{Kind: labels[v1alpha1.LabelKind], Namespace: key.Namespace, Name: key.Name}]
-	return !found || live != uid
+	return OwnerKey{}, "", false
+}
+
+func isOrphan(u *unstructured.Unstructured, owners map[OwnerKey]types.UID, now time.Time, minAge time.Duration) (Orphan, bool) {
+	labels := u.GetLabels()
+	if labels[LabelManaged] != "true" || labels[LabelComponent] == ComponentUnderlay || now.Sub(u.GetCreationTimestamp().Time) < minAge {
+		return Orphan{}, false
+	}
+	key, uid, ok := ownerOfManaged(u)
+	if !ok {
+		return Orphan{}, false
+	}
+	live, found := owners[key]
+	if found && (uid == "" || live == uid) {
+		return Orphan{}, false
+	}
+	return Orphan{GVK: u.GroupVersionKind(), Name: u.GetName(), Owner: key, UID: uid}, true
 }
 
 func FindOrphans(objects []*unstructured.Unstructured, owners map[OwnerKey]types.UID, now time.Time, minAge time.Duration) []Orphan {
 	var orphans []Orphan
 	for _, u := range objects {
-		if isOrphan(u, owners, now, minAge) {
-			orphans = append(orphans, Orphan{GVK: u.GroupVersionKind(), Name: u.GetName()})
+		if orphan, found := isOrphan(u, owners, now, minAge); found {
+			orphans = append(orphans, orphan)
 		}
 	}
 	slices.SortStableFunc(orphans, func(a, b Orphan) int {
@@ -72,9 +90,17 @@ func FindOrphans(objects []*unstructured.Unstructured, owners map[OwnerKey]types
 
 type Sweeper struct {
 	Client   client.Client
+	Reader   client.Reader
 	Interval time.Duration
 	MinAge   time.Duration
 	Now      func() time.Time
+}
+
+func (s *Sweeper) live() client.Reader {
+	if s.Reader != nil {
+		return s.Reader
+	}
+	return s.Client
 }
 
 func (s *Sweeper) interval() time.Duration {
@@ -122,11 +148,34 @@ func (s *Sweeper) SweepOnce(ctx context.Context) error {
 	}
 	var first error
 	for _, orphan := range FindOrphans(objects, owners, s.now(), s.minAge()) {
-		if err := deleteObject(ctx, s.Client, orphan.GVK, orphan.Name); err != nil && first == nil {
+		gone, err := s.ownerGone(ctx, orphan)
+		if err == nil && gone {
+			err = deleteObject(ctx, s.Client, orphan.GVK, orphan.Name)
+		}
+		if err != nil && first == nil {
 			first = err
 		}
 	}
 	return first
+}
+
+func ownerGVK(kind string) schema.GroupVersionKind {
+	if kind == "Namespace" {
+		return schema.GroupVersionKind{Version: "v1", Kind: kind}
+	}
+	return v1alpha1.GroupVersion.WithKind(kind)
+}
+
+func (s *Sweeper) ownerGone(ctx context.Context, orphan Orphan) (bool, error) {
+	owner := newObject(ownerGVK(orphan.Owner.Kind), orphan.Owner.Name)
+	err := s.live().Get(ctx, client.ObjectKey{Namespace: orphan.Owner.Namespace, Name: orphan.Owner.Name}, owner)
+	if apierrors.IsNotFound(err) {
+		return true, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	return orphan.UID != "" && owner.GetUID() != orphan.UID, nil
 }
 
 func (s *Sweeper) managedObjects(ctx context.Context) ([]*unstructured.Unstructured, error) {
@@ -152,7 +201,9 @@ func (s *Sweeper) owners(ctx context.Context) (map[OwnerKey]types.UID, error) {
 	var balancers v1alpha1.LoadBalancerList
 	var zones v1alpha1.DNSZoneList
 	var groups v1alpha1.SecurityGroupList
+	var namespaces corev1.NamespaceList
 	err := errors.Join(
+		s.Client.List(ctx, &namespaces),
 		s.Client.List(ctx, &networks), s.Client.List(ctx, &subnets), s.Client.List(ctx, &eips),
 		s.Client.List(ctx, &balancers), s.Client.List(ctx, &zones), s.Client.List(ctx, &groups),
 	)
@@ -163,6 +214,9 @@ func (s *Sweeper) owners(ctx context.Context) (map[OwnerKey]types.UID, error) {
 		for _, o := range objects {
 			owners[OwnerKey{Kind: kind, Namespace: o.GetNamespace(), Name: o.GetName()}] = o.GetUID()
 		}
+	}
+	for i := range namespaces.Items {
+		record("Namespace", &namespaces.Items[i])
 	}
 	for i := range networks.Items {
 		record("Network", &networks.Items[i])

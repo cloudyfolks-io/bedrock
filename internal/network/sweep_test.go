@@ -189,3 +189,105 @@ func TestSweeperContinuesAfterARefusedDelete(t *testing.T) {
 		t.Fatalf("the other orphan must still be deleted: %v", err)
 	}
 }
+
+func defaultGroupOf(namespace string, created time.Time) *unstructured.Unstructured {
+	group := DefaultSecurityGroup(namespace, ObjectLabels("Namespace", namespace, "t1", "prod"))
+	group.SetCreationTimestamp(metav1.NewTime(created))
+	return group
+}
+
+func TestFindOrphansSweepsTheDefaultGroupOfAGoneNamespace(t *testing.T) {
+	old := sweepEpoch.Add(-time.Hour)
+	groups := []*unstructured.Unstructured{defaultGroupOf("gone", old), defaultGroupOf("alive", old)}
+	owners := map[OwnerKey]types.UID{{Kind: "Namespace", Name: "alive"}: "uid"}
+	got := FindOrphans(groups, owners, sweepEpoch, time.Minute)
+	if len(got) != 1 || got[0].Name != DefaultSecurityGroupName("gone") {
+		t.Fatalf("orphans %+v", got)
+	}
+}
+
+func watchingClient(t *testing.T, funcs interceptor.Funcs) client.Client {
+	t.Helper()
+	_, cfg := testEnv(t)
+	scheme, err := testScheme()
+	if err != nil {
+		t.Fatal(err)
+	}
+	watching, err := client.NewWithWatch(cfg, client.Options{Scheme: scheme})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return interceptor.NewClient(watching, funcs)
+}
+
+func afterTwoMinutes() time.Time { return time.Now().Add(2 * time.Minute) }
+
+func TestSweeperDeletesTheDefaultGroupOfAGoneNamespace(t *testing.T) {
+	c := cleanEnv(t)
+	alive := newNamespace(t, unique(t, "acme"), "prod")
+	gone := unique(t, "gone")
+	for _, ns := range []string{alive, gone} {
+		group := defaultGroupOf(ns, time.Now())
+		group.SetCreationTimestamp(metav1.Time{})
+		if err := c.Create(context.Background(), group); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := (&Sweeper{Client: c, Now: afterTwoMinutes}).SweepOnce(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := getObject(context.Background(), c, fabric.SecurityGroupGVK, DefaultSecurityGroupName(gone)); !apierrors.IsNotFound(err) {
+		t.Fatalf("the group of a gone namespace must be deleted: %v", err)
+	}
+	if _, err := getObject(context.Background(), c, fabric.SecurityGroupGVK, DefaultSecurityGroupName(alive)); err != nil {
+		t.Fatalf("the group of a live namespace must stay: %v", err)
+	}
+}
+
+func TestSweeperDeletesNothingWhenAListFails(t *testing.T) {
+	c := cleanEnv(t)
+	eip, fip := orphanFixture(t, c, "deleted", "old-uid")
+	failing := watchingClient(t, interceptor.Funcs{List: func(ctx context.Context, cl client.WithWatch, list client.ObjectList, opts ...client.ListOption) error {
+		if _, isGroups := list.(*v1alpha1.SecurityGroupList); isGroups {
+			return errors.New("the API server is unavailable")
+		}
+		return cl.List(ctx, list, opts...)
+	}})
+	if err := (&Sweeper{Client: failing, Now: afterTwoMinutes}).SweepOnce(context.Background()); err == nil {
+		t.Fatal("the failure must be reported")
+	}
+	for _, u := range []*unstructured.Unstructured{eip, fip} {
+		if _, err := getObject(context.Background(), c, u.GroupVersionKind(), u.GetName()); err != nil {
+			t.Fatalf("%s must stay: %v", u.GetKind(), err)
+		}
+	}
+}
+
+func TestSweeperConfirmsTheOwnerWithALiveRead(t *testing.T) {
+	c := cleanEnv(t)
+	ns := newNamespace(t, unique(t, "acme"), "prod")
+	live := elasticIPOf(ns, "live", "")
+	requireAccepted(t, c, live)
+	kept, _ := orphanFixture(t, c, "live", string(live.UID))
+	kept.SetAnnotations(map[string]string{AnnotationOwnerNamespace: ns, AnnotationOwnerName: "live", AnnotationOwnerUID: string(live.UID)})
+	if err := c.Update(context.Background(), kept); err != nil {
+		t.Fatal(err)
+	}
+	dropped, _ := orphanFixture(t, c, "deleted", "old-uid")
+	stale := watchingClient(t, interceptor.Funcs{List: func(ctx context.Context, cl client.WithWatch, list client.ObjectList, opts ...client.ListOption) error {
+		if _, isEIPs := list.(*v1alpha1.ElasticIPList); isEIPs {
+			return nil
+		}
+		return cl.List(ctx, list, opts...)
+	}})
+	sweeper := &Sweeper{Client: stale, Reader: c, Now: afterTwoMinutes}
+	if err := sweeper.SweepOnce(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := getObject(context.Background(), c, fabric.OvnEipGVK, kept.GetName()); err != nil {
+		t.Fatalf("a stale list must not delete an object with a live owner: %v", err)
+	}
+	if _, err := getObject(context.Background(), c, fabric.OvnEipGVK, dropped.GetName()); !apierrors.IsNotFound(err) {
+		t.Fatalf("an object whose owner is gone must be deleted: %v", err)
+	}
+}
