@@ -127,6 +127,7 @@ components:
     namespace: monitoring
     values: release/values/kube-prometheus-stack.yaml
     crdsToGroup: crds
+    dirs: [manifests/71-kube-prometheus-stack]
     extraImages:
       - quay.io/prometheus-operator/prometheus-config-reloader:v0.94.1
   - name: kured

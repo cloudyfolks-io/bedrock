@@ -1,0 +1,31 @@
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: bedrock-metering
+  namespace: monitoring
+spec:
+  groups:
+    - name: bedrock.metering
+      interval: 1m
+      rules:
+        - record: bedrock:project_vm_running:count
+          expr: |-
+            count (max by (namespace, name) (kubevirt_vmi_info{phase=~"(?i)running"}) * on (namespace) group_left (tenant, project) label_replace(label_replace(kube_namespace_labels{label_bedrock_cloudyfolks_io_project!=""}, "tenant", "$1", "label_bedrock_cloudyfolks_io_tenant", "(.*)"), "project", "$1", "label_bedrock_cloudyfolks_io_project", "(.*)")) by (tenant, project)
+        - record: bedrock:project_vm_vcpu:sum
+          expr: |-
+            sum (count by (namespace, name) (max by (namespace, name, id) (kubevirt_vmi_vcpu_seconds_total)) * on (namespace) group_left (tenant, project) label_replace(label_replace(kube_namespace_labels{label_bedrock_cloudyfolks_io_project!=""}, "tenant", "$1", "label_bedrock_cloudyfolks_io_tenant", "(.*)"), "project", "$1", "label_bedrock_cloudyfolks_io_project", "(.*)")) by (tenant, project)
+        - record: bedrock:project_vm_memory_bytes:sum
+          expr: |-
+            sum (max by (namespace, name) (kubevirt_vmi_memory_domain_bytes) * on (namespace) group_left (tenant, project) label_replace(label_replace(kube_namespace_labels{label_bedrock_cloudyfolks_io_project!=""}, "tenant", "$1", "label_bedrock_cloudyfolks_io_tenant", "(.*)"), "project", "$1", "label_bedrock_cloudyfolks_io_project", "(.*)")) by (tenant, project)
+        - record: bedrock:project_volume_requested_bytes:sum
+          expr: |-
+            sum (kube_persistentvolumeclaim_resource_requests_storage_bytes * on (namespace) group_left (tenant, project) label_replace(label_replace(kube_namespace_labels{label_bedrock_cloudyfolks_io_project!=""}, "tenant", "$1", "label_bedrock_cloudyfolks_io_tenant", "(.*)"), "project", "$1", "label_bedrock_cloudyfolks_io_project", "(.*)")) by (tenant, project)
+        - record: bedrock:project_vm_cpu_usage_cores:rate5m
+          expr: |-
+            sum (rate(kubevirt_vmi_cpu_usage_seconds_total[5m]) * on (namespace) group_left (tenant, project) label_replace(label_replace(kube_namespace_labels{label_bedrock_cloudyfolks_io_project!=""}, "tenant", "$1", "label_bedrock_cloudyfolks_io_tenant", "(.*)"), "project", "$1", "label_bedrock_cloudyfolks_io_project", "(.*)")) by (tenant, project)
+        - record: bedrock:project_vm_network_receive_bytes:rate5m
+          expr: |-
+            sum (rate(kubevirt_vmi_network_receive_bytes_total[5m]) * on (namespace) group_left (tenant, project) label_replace(label_replace(kube_namespace_labels{label_bedrock_cloudyfolks_io_project!=""}, "tenant", "$1", "label_bedrock_cloudyfolks_io_tenant", "(.*)"), "project", "$1", "label_bedrock_cloudyfolks_io_project", "(.*)")) by (tenant, project)
+        - record: bedrock:project_vm_network_transmit_bytes:rate5m
+          expr: |-
+            sum (rate(kubevirt_vmi_network_transmit_bytes_total[5m]) * on (namespace) group_left (tenant, project) label_replace(label_replace(kube_namespace_labels{label_bedrock_cloudyfolks_io_project!=""}, "tenant", "$1", "label_bedrock_cloudyfolks_io_tenant", "(.*)"), "project", "$1", "label_bedrock_cloudyfolks_io_project", "(.*)")) by (tenant, project)
