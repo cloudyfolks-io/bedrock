@@ -1,0 +1,57 @@
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicy
+metadata:
+  name: bedrock-network-attachments
+  labels:
+    bedrock.cloudyfolks.io/component: network
+spec:
+  failurePolicy: Fail
+  matchConstraints:
+    namespaceSelector:
+      matchExpressions:
+        - key: bedrock.cloudyfolks.io/tenant
+          operator: Exists
+    resourceRules:
+      - apiGroups: [""]
+        apiVersions: [v1]
+        operations: [CREATE, UPDATE]
+        resources: [pods]
+  matchConditions:
+    - name: requester-is-not-trusted
+      expression: >-
+        !(request.userInfo.username in [
+        'system:serviceaccount:kube-system:ovn',
+        'system:serviceaccount:kube-system:fabric-cni',
+        'system:serviceaccount:kubevirt:kubevirt-controller',
+        'system:serviceaccount:bedrock-system:bedrock-operator'])
+  variables:
+    - name: annotations
+      expression: "has(object.metadata.annotations) ? object.metadata.annotations : {}"
+    - name: previous
+      expression: "oldObject != null && has(oldObject.metadata.annotations) ? oldObject.metadata.annotations : {}"
+  validations:
+    - expression: >-
+        ['k8s.v1.cni.cncf.io/networks', 'v1.multus-cni.io/default-network'].all(k,
+        !(k in variables.annotations) ||
+        (k in variables.previous && variables.previous[k] == variables.annotations[k]) ||
+        (!variables.annotations[k].contains('"namespace"') &&
+        variables.annotations[k].split(',').all(item, !item.contains('/') || item.startsWith(namespaceObject.metadata.name + '/'))))
+      message: "a pod may attach only to networks of its own namespace"
+      reason: Forbidden
+    - expression: >-
+        !variables.annotations.exists(k,
+        !(k in variables.previous && variables.previous[k] == variables.annotations[k]) &&
+        ['fabric.cloudyfolks.io/logical_switch', 'fabric.cloudyfolks.io/security_groups', 'fabric.cloudyfolks.io/ip_pool',
+        'fabric.cloudyfolks.io/logical_router', 'fabric.cloudyfolks.io/vpc'].exists(suffix, k.endsWith(suffix)))
+      message: "the annotation selects a Fabric object; only the platform may set it"
+      reason: Forbidden
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicyBinding
+metadata:
+  name: bedrock-network-attachments
+  labels:
+    bedrock.cloudyfolks.io/component: network
+spec:
+  policyName: bedrock-network-attachments
+  validationActions: [Deny]
