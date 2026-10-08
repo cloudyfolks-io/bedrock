@@ -26,7 +26,11 @@ func RenderVirtualization(in AddonInput) (Rendered, error) {
 	if err != nil {
 		return Rendered{}, fmt.Errorf("virt.emulation: %w", err)
 	}
-	objects := []*unstructured.Unstructured{kubeVirt(emulation), cdi()}
+	tuning, err := parseTuning(in.Settings)
+	if err != nil {
+		return Rendered{}, err
+	}
+	objects := []*unstructured.Unstructured{kubeVirt(emulation, tuning), cdi()}
 	probes := []Probe{
 		{GVK: kubeVirtGVK, Key: client.ObjectKey{Namespace: kubevirtNamespace, Name: "kubevirt"}, Gate: release.PhaseGate("Deployed")},
 		{GVK: cdiGVK, Key: client.ObjectKey{Name: "cdi"}, Gate: release.PhaseGate("Deployed")},
@@ -41,10 +45,20 @@ func boolSetting(value string) (bool, error) {
 	return strconv.ParseBool(value)
 }
 
-func kubeVirt(emulation bool) *unstructured.Unstructured {
+func kubeVirt(emulation bool, tuning kubeVirtTuning) *unstructured.Unstructured {
 	return object("kubevirt.io/v1", "KubeVirt", kubevirtNamespace, "kubevirt", map[string]any{
-		"imagePullPolicy":        "IfNotPresent",
-		"configuration":          map[string]any{"developerConfiguration": map[string]any{"useEmulation": emulation}},
+		"imagePullPolicy": "IfNotPresent",
+		"configuration": map[string]any{
+			"commonInstancetypesDeployment": map[string]any{"enabled": true},
+			"vmStateStorageClass":           "filesystem",
+			"migrations":                    map[string]any{"parallelMigrationsPerCluster": tuning.ParallelMigrations},
+			"developerConfiguration": map[string]any{
+				"useEmulation":       emulation,
+				"featureGates":       []any{"CPUManager", "HostDevices"},
+				"cpuAllocationRatio": tuning.CPUAllocationRatio,
+				"memoryOvercommit":   tuning.MemoryOvercommit,
+			},
+		},
 		"workloadUpdateStrategy": map[string]any{"workloadUpdateMethods": []any{"LiveMigrate", "Evict"}},
 	})
 }
