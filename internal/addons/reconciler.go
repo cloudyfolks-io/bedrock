@@ -13,6 +13,7 @@ import (
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/client-go/util/retry"
 	ctrl "sigs.k8s.io/controller-runtime"
+	"sigs.k8s.io/controller-runtime/pkg/builder"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	"sigs.k8s.io/controller-runtime/pkg/handler"
@@ -315,7 +316,7 @@ func (r *Reconciler) SetupWithManager(mgr ctrl.Manager) error {
 	return ctrl.NewControllerManagedBy(mgr).
 		Named("addon").
 		For(&v1alpha1.Addon{}).
-		Watches(&v1alpha1.Host{}, everyAddon).
-		Watches(&v1alpha1.Setting{}, everyAddon).
+		Watches(&v1alpha1.Host{}, everyAddon, builder.WithPredicates(hostPreflightPredicate())).
+		Watches(&v1alpha1.Setting{}, everyAddon, builder.WithPredicates(readSettingPredicate())).
 		Complete(r)
 }

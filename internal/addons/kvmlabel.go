@@ -8,6 +8,7 @@ import (
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/types"
 	ctrl "sigs.k8s.io/controller-runtime"
+	"sigs.k8s.io/controller-runtime/pkg/builder"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/handler"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
@@ -62,7 +63,7 @@ func (r *KVMLabeler) SetupWithManager(mgr ctrl.Manager) error {
 	})
 	return ctrl.NewControllerManagedBy(mgr).
 		Named("addon-kvm-label").
-		For(&v1alpha1.Host{}).
-		Watches(&corev1.Node{}, nodeToHost).
+		For(&v1alpha1.Host{}, builder.WithPredicates(hostKVMPredicate())).
+		Watches(&corev1.Node{}, nodeToHost, builder.WithPredicates(nodeKVMLabelPredicate())).
 		Complete(r)
 }
