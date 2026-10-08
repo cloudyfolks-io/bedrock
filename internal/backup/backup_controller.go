@@ -81,7 +81,7 @@ func (r *BackupReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctr
 	if refusal != nil {
 		return r.refuse(ctx, vmb, *refusal, 0)
 	}
-	if refusal, err = r.locationReady(ctx); err != nil {
+	if refusal, err = locationState(ctx, r.Client); err != nil {
 		return ctrl.Result{}, err
 	}
 	if refusal != nil {
@@ -157,10 +157,10 @@ func (r *BackupReconciler) scopeOf(ctx context.Context, vmb *v1alpha1.VirtualMac
 	return scope, nil, nil
 }
 
-func (r *BackupReconciler) locationReady(ctx context.Context) (*refusal, error) {
+func locationState(ctx context.Context, c client.Reader) (*refusal, error) {
 	location := &unstructured.Unstructured{}
 	location.SetGroupVersionKind(locationGVK)
-	err := r.Client.Get(ctx, types.NamespacedName{Namespace: VeleroNamespace, Name: LocationName}, location)
+	err := c.Get(ctx, types.NamespacedName{Namespace: VeleroNamespace, Name: LocationName}, location)
 	switch {
 	case meta.IsNoMatchError(err):
 		return &refusal{Reason: ReasonVeleroNotInstalled, Message: "Velero is not installed"}, nil

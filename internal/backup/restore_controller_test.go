@@ -173,6 +173,29 @@ func setRestoreStatus(t *testing.T, vmr string, status map[string]any) {
 	}
 }
 
+func readyForRestore(t *testing.T, fx restoreFixture) {
+	t.Helper()
+	setLocation(t, "Available")
+	createFixtureBackup(t, fx.backupID, fx.vmb, "Completed", "2026-10-08T02:05:00Z")
+}
+
+func requireUnderlyingIntact(t *testing.T, fx restoreFixture) {
+	t.Helper()
+	if got := underlyingCount(t, fx); got != 4 {
+		t.Fatalf("%d underlying objects left, want 4", got)
+	}
+	list := &unstructured.UnstructuredList{}
+	list.SetGroupVersionKind(kubevirtVMListGVK)
+	if err := k8sClient.List(context.Background(), list, client.InNamespace(projectNamespace), client.MatchingLabels(v1alpha1.TenantLabels("VirtualMachine", fx.vm, "acme", "prod"))); err != nil {
+		t.Fatal(err)
+	}
+	for _, item := range list.Items {
+		if item.GetDeletionTimestamp() != nil {
+			t.Fatalf("%s is being deleted", item.GetName())
+		}
+	}
+}
+
 func requireNoRestore(t *testing.T, vmr string) {
 	t.Helper()
 	_, err := getVelero(t, "Restore", restoreName(vmr))
@@ -235,6 +258,7 @@ func TestRestoreRefusesAnExistingTarget(t *testing.T) {
 
 func TestRestoreReplaceHoldsDeletesThenRestores(t *testing.T) {
 	fx := fixtureOf("replace")
+	readyForRestore(t, fx)
 	createVM(t, fx.vm, fx.volume)
 	createKubeVirtObjects(t, fx)
 	createVMBWithBackups(t, projectNamespace, fx)
@@ -272,6 +296,7 @@ func TestRestoreReplaceHoldsDeletesThenRestores(t *testing.T) {
 
 func TestRestoreReleasesTheHoldOnSuccess(t *testing.T) {
 	fx := fixtureOf("success")
+	readyForRestore(t, fx)
 	createVM(t, fx.vm, fx.volume)
 	createVMBWithBackups(t, projectNamespace, fx)
 	createVMR(t, "success-restore", projectNamespace, v1alpha1.VirtualMachineRestoreSpec{BackupRef: fx.vmb, BackupID: fx.backupID, Replace: true})
@@ -298,6 +323,7 @@ func TestRestoreReleasesTheHoldOnSuccess(t *testing.T) {
 
 func TestRestoreReleasesTheHoldOnFailure(t *testing.T) {
 	fx := fixtureOf("failure")
+	readyForRestore(t, fx)
 	createVM(t, fx.vm, fx.volume)
 	createVMBWithBackups(t, projectNamespace, fx)
 	createVMR(t, "failure-restore", projectNamespace, v1alpha1.VirtualMachineRestoreSpec{BackupRef: fx.vmb, BackupID: fx.backupID, Replace: true})
@@ -321,6 +347,7 @@ func TestRestoreReleasesTheHoldOnFailure(t *testing.T) {
 
 func TestRestoreDeletionReleasesTheHold(t *testing.T) {
 	fx := fixtureOf("deleted")
+	readyForRestore(t, fx)
 	createVM(t, fx.vm, fx.volume)
 	createVMBWithBackups(t, projectNamespace, fx)
 	createVMR(t, "deleted-restore", projectNamespace, v1alpha1.VirtualMachineRestoreSpec{BackupRef: fx.vmb, BackupID: fx.backupID, Replace: true})
@@ -344,6 +371,7 @@ func TestRestoreDeletionReleasesTheHold(t *testing.T) {
 
 func TestRestoreSameNameAfterDeletion(t *testing.T) {
 	fx := fixtureOf("recover")
+	readyForRestore(t, fx)
 	ensureProject(t)
 	createVMBWithBackups(t, projectNamespace, fx)
 	createVMR(t, "recover-restore", projectNamespace, v1alpha1.VirtualMachineRestoreSpec{BackupRef: fx.vmb, BackupID: fx.backupID, TargetName: fx.vm})
@@ -382,4 +410,56 @@ func TestHoldHelpers(t *testing.T) {
 	if WithHold(nil, "r1")[HoldAnnotation] != "r1" {
 		t.Fatal("nil annotations")
 	}
+}
+
+func TestRestoreReplaceNeedsTheVeleroBackup(t *testing.T) {
+	fx := fixtureOf("nobackup")
+	setLocation(t, "Available")
+	createVM(t, fx.vm, fx.volume)
+	createKubeVirtObjects(t, fx)
+	createVMBWithBackups(t, projectNamespace, fx)
+	createVMR(t, "nobackup-restore", projectNamespace, v1alpha1.VirtualMachineRestoreSpec{BackupRef: fx.vmb, BackupID: fx.backupID, Replace: true})
+	r := newRestoreReconciler()
+	reconcileVMR(t, r, projectNamespace, "nobackup-restore")
+	requireRestoreState(t, getVMR(t, "nobackup-restore"), v1alpha1.RestorePhaseFailed, metav1.ConditionFalse, RestoreReasonBackupNotFound)
+	requireUnderlyingIntact(t, fx)
+	requireNoRestore(t, "nobackup-restore")
+	if hold := holdOf(t, &v1alpha1.VirtualMachine{ObjectMeta: metav1.ObjectMeta{Name: fx.vm, Namespace: projectNamespace}}); hold != "" {
+		t.Fatalf("hold %q", hold)
+	}
+}
+
+func TestRestoreReplaceNeedsACompletedVeleroBackup(t *testing.T) {
+	fx := fixtureOf("running")
+	setLocation(t, "Available")
+	createFixtureBackup(t, fx.backupID, fx.vmb, "Deleting", "")
+	createVM(t, fx.vm, fx.volume)
+	createKubeVirtObjects(t, fx)
+	createVMBWithBackups(t, projectNamespace, fx)
+	createVMR(t, "running-restore", projectNamespace, v1alpha1.VirtualMachineRestoreSpec{BackupRef: fx.vmb, BackupID: fx.backupID, Replace: true})
+	r := newRestoreReconciler()
+	reconcileVMR(t, r, projectNamespace, "running-restore")
+	requireRestoreState(t, getVMR(t, "running-restore"), v1alpha1.RestorePhaseFailed, metav1.ConditionFalse, RestoreReasonBackupNotFound)
+	requireUnderlyingIntact(t, fx)
+}
+
+func TestRestoreReplaceWaitsForTheLocation(t *testing.T) {
+	fx := fixtureOf("nolocation")
+	setLocation(t, "Unavailable")
+	createFixtureBackup(t, fx.backupID, fx.vmb, "Completed", "2026-10-08T02:05:00Z")
+	createVM(t, fx.vm, fx.volume)
+	createKubeVirtObjects(t, fx)
+	createVMBWithBackups(t, projectNamespace, fx)
+	createVMR(t, "nolocation-restore", projectNamespace, v1alpha1.VirtualMachineRestoreSpec{BackupRef: fx.vmb, BackupID: fx.backupID, Replace: true})
+	r := newRestoreReconciler()
+	result := reconcileVMR(t, r, projectNamespace, "nolocation-restore")
+	requireRestoreState(t, getVMR(t, "nolocation-restore"), v1alpha1.RestorePhasePending, metav1.ConditionFalse, ReasonTargetUnavailable)
+	if result.RequeueAfter != 30*time.Second {
+		t.Fatalf("requeue %v", result.RequeueAfter)
+	}
+	requireUnderlyingIntact(t, fx)
+	requireNoRestore(t, "nolocation-restore")
+	setLocation(t, "Available")
+	reconcileVMR(t, r, projectNamespace, "nolocation-restore")
+	requireRestoreState(t, getVMR(t, "nolocation-restore"), v1alpha1.RestorePhaseInProgress, metav1.ConditionFalse, RestoreReasonPreparing)
 }

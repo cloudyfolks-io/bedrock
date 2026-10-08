@@ -177,6 +177,9 @@ func (r *RestoreReconciler) start(ctx context.Context, vmr *v1alpha1.VirtualMach
 	if !vmr.Spec.Replace && exists {
 		return halt(v1alpha1.RestorePhasePending, RestoreReasonTargetExists, "virtual machine "+vm+" exists; use replace to overwrite it", requeueInstalling), nil
 	}
+	if halted, err := r.preconditions(ctx, backupID); err != nil || halted != nil {
+		return orZero(halted), err
+	}
 	if vmr.Spec.Replace {
 		gone, err := r.prepare(ctx, vmr, scope, bedrockVM)
 		if err != nil || !gone {
@@ -184,6 +187,31 @@ func (r *RestoreReconciler) start(ctx context.Context, vmr *v1alpha1.VirtualMach
 		}
 	}
 	return r.launch(ctx, vmr, scope, backupID)
+}
+
+func (r *RestoreReconciler) preconditions(ctx context.Context, backupID string) (*stop, error) {
+	why, err := locationState(ctx, r.Client)
+	if err != nil {
+		return nil, err
+	}
+	if why != nil {
+		next := halt(v1alpha1.RestorePhasePending, why.Reason, why.Message, requeueInstalling)
+		return &next, nil
+	}
+	backup := veleroStub("Backup", backupID)
+	err = r.Client.Get(ctx, client.ObjectKeyFromObject(backup), backup)
+	if apierrors.IsNotFound(err) {
+		next := halt(v1alpha1.RestorePhaseFailed, RestoreReasonBackupNotFound, "Velero backup "+backupID+" does not exist", 0)
+		return &next, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	if phase, _, _ := unstructured.NestedString(backup.Object, "status", "phase"); phase != phaseCompleted {
+		next := halt(v1alpha1.RestorePhaseFailed, RestoreReasonBackupNotFound, "Velero backup "+backupID+" is in phase "+phase+", not Completed", 0)
+		return &next, nil
+	}
+	return nil, nil
 }
 
 func (r *RestoreReconciler) launch(ctx context.Context, vmr *v1alpha1.VirtualMachineRestore, scope Scope, backupID string) (stop, error) {
