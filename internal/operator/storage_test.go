@@ -1,9 +1,12 @@
 package operator
 
 import (
+	"os"
+	"reflect"
 	"testing"
 
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	sigyaml "sigs.k8s.io/yaml"
 
 	"github.com/cloudyfolks-io/bedrock/api/v1alpha1"
 	"github.com/cloudyfolks-io/bedrock/internal/release"
@@ -216,5 +219,113 @@ func TestCephGate(t *testing.T) {
 	_ = unstructured.SetNestedField(obj.Object, "HEALTH_OK", "status", "ceph", "health")
 	if r := cephGate(obj); !r.Ready {
 		t.Fatalf("readiness %+v", r)
+	}
+}
+
+func TestRenderStorageIncludesTheObjectStore(t *testing.T) {
+	cases := []struct {
+		name      string
+		hosts     []v1alpha1.Host
+		replicas  string
+		size      int64
+		safe      bool
+		instances int64
+	}{
+		{"single", []v1alpha1.Host{osdHost("a", "/dev/sdb")}, "1", 1, false, 1},
+		{"pair", []v1alpha1.Host{osdHost("a", "/dev/sdb"), osdHost("b", "/dev/sdb")}, "3", 3, true, 2},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			out, err := RenderStorage(storageInput(tc.hosts, tc.replicas))
+			if err != nil {
+				t.Fatal(err)
+			}
+			store := findObject(out.Objects, "CephObjectStore", "bedrock-rgw")
+			if store == nil || store.GetNamespace() != "rook-ceph" || store.GetAPIVersion() != "ceph.rook.io/v1" {
+				t.Fatalf("store %+v", store)
+			}
+			pool := map[string]any{"failureDomain": "host", "replicated": map[string]any{"size": tc.size, "requireSafeReplicaSize": tc.safe}}
+			want := map[string]any{
+				"metadataPool":           pool,
+				"dataPool":               pool,
+				"preservePoolsOnDelete":  true,
+				"allowUsersInNamespaces": []any{"*"},
+				"gateway":                map[string]any{"port": int64(80), "instances": tc.instances},
+			}
+			if !reflect.DeepEqual(store.Object["spec"], want) {
+				t.Fatalf("spec %+v", store.Object["spec"])
+			}
+		})
+	}
+}
+
+func TestRenderStorageIncludesTheBucketClass(t *testing.T) {
+	out, err := RenderStorage(storageInput([]v1alpha1.Host{osdHost("a", "/dev/sdb")}, "1"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	class := findObject(out.Objects, "StorageClass", "bucket")
+	if class == nil {
+		t.Fatal("no bucket class")
+	}
+	want := map[string]any{
+		"apiVersion":    "storage.k8s.io/v1",
+		"kind":          "StorageClass",
+		"metadata":      map[string]any{"name": "bucket", "labels": map[string]any{"aws-s3/object": ""}},
+		"provisioner":   "rook-ceph.ceph.rook.io/bucket",
+		"parameters":    map[string]any{"objectStoreName": "bedrock-rgw", "objectStoreNamespace": "rook-ceph"},
+		"reclaimPolicy": "Delete",
+	}
+	if !reflect.DeepEqual(class.Object, want) {
+		t.Fatalf("class %+v", class.Object)
+	}
+}
+
+func TestRenderStorageKeepsTheOtherObjects(t *testing.T) {
+	out, err := RenderStorage(storageInput([]v1alpha1.Host{osdHost("a", "/dev/sdb")}, "1"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, key := range [][2]string{
+		{"CephCluster", "rook-ceph"}, {"CephBlockPool", "bedrock-block"}, {"CephFilesystem", "bedrock-fs"},
+		{"StorageClass", "block"}, {"StorageClass", "block-retain"}, {"StorageClass", "filesystem"}, {"VolumeSnapshotClass", "block"},
+	} {
+		if findObject(out.Objects, key[0], key[1]) == nil {
+			t.Fatalf("missing %v", key)
+		}
+	}
+	if len(out.Probes) != 1 || out.Probes[0].GVK.Kind != "CephCluster" {
+		t.Fatalf("probes %+v", out.Probes)
+	}
+}
+
+func TestOperatorRoleCoversTheObjectStore(t *testing.T) {
+	role, err := OperatorRole(rbacBundle(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !allows(role, "ceph.rook.io", "cephobjectstores", "patch") || !allows(role, "storage.k8s.io", "storageclasses", "patch") {
+		t.Fatalf("rules %+v", role.Rules)
+	}
+}
+
+func TestRookValuesAllowOnlyTheBucketFields(t *testing.T) {
+	raw, err := os.ReadFile("../../release/values/rook.yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var values map[string]any
+	if err := sigyaml.Unmarshal(raw, &values); err != nil {
+		t.Fatal(err)
+	}
+	want := map[string]any{
+		"crds":                           map[string]any{"enabled": true},
+		"csi":                            map[string]any{"installCsiOperator": true},
+		"enableDiscoveryDaemon":          false,
+		"monitoring":                     map[string]any{"enabled": false},
+		"obcAllowAdditionalConfigFields": "bucketMaxObjects,bucketMaxSize,bucketOwner",
+	}
+	if !reflect.DeepEqual(values, want) {
+		t.Fatalf("values %+v", values)
 	}
 }
