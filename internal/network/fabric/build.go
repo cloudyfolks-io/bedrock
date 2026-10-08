@@ -169,6 +169,19 @@ func RouterLBRuleWithoutHealthCheck(m Meta, eip, vpc, namespace string, endpoint
 	return routerLBRule(silenced, eip, vpc, namespace, endpoints, ports)
 }
 
+func Vip(m Meta, namespace, subnet string) *unstructured.Unstructured {
+	return object(VipGVK, m, map[string]any{"namespace": namespace, "subnet": subnet, "type": "switch_lb_vip"})
+}
+
+func SwitchLBRule(m Meta, vip, namespace string, endpoints []string, ports []RouterLBPort) *unstructured.Unstructured {
+	rendered := make([]any, len(ports))
+	for i, p := range ports {
+		rendered[i] = map[string]any{"name": p.Name, "port": int64(p.Port), "targetPort": int64(p.TargetPort), "protocol": p.Protocol}
+	}
+	spec := map[string]any{"vip": vip, "namespace": namespace, "selector": anys(nil), "endpoints": anys(endpoints), "ports": rendered}
+	return object(SwitchLBRuleGVK, m, spec)
+}
+
 func DNSZone(m Meta, vpc string, records []DNSRecord) *unstructured.Unstructured {
 	rendered := make([]any, len(records))
 	for i, r := range records {

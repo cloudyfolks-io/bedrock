@@ -118,3 +118,11 @@ func EipFailed(u *unstructured.Unstructured) bool {
 	status, _ := condition(u, "Ready")
 	return status == "False" && EipAddress(u) == ""
 }
+
+func VipAddress(u *unstructured.Unstructured) string {
+	return text(u, "status", "v4ip")
+}
+
+func SwitchLBRuleService(u *unstructured.Unstructured) string {
+	return text(u, "status", "service")
+}

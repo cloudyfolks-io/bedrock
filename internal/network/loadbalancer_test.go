@@ -115,3 +115,32 @@ func TestUnsupportedKindMessage(t *testing.T) {
 		t.Fatalf("violation %+v", v)
 	}
 }
+
+func TestInternalRulesOnePerListener(t *testing.T) {
+	in := InternalInput{Namespace: "ns", Name: "lb", Vip: "10.0.0.200", Labels: map[string]string{"l": "v"}, Annotations: map[string]string{"a": "v"}, Listeners: []Listener{
+		{Port: 80, Protocol: "TCP", TargetPort: 8080, Endpoints: []string{"10.0.0.9", "10.0.0.10"}},
+		{Port: 53, Protocol: "UDP", TargetPort: 5353, Endpoints: []string{"10.0.0.2"}},
+	}}
+	rules := InternalRules(in)
+	if len(rules) != 2 || rules[0].GetKind() != "SwitchLBRule" || rules[0].GetName() != ListenerRuleName("ns", "lb", 80, "TCP") {
+		t.Fatalf("rules %v", rules)
+	}
+	spec, _, _ := unstructured.NestedMap(rules[0].Object, "spec")
+	endpoints, _, _ := unstructured.NestedStringSlice(rules[0].Object, "spec", "endpoints")
+	if spec["vip"] != "10.0.0.200" || spec["namespace"] != "ns" || !slices.IsSorted(endpoints) || len(endpoints) != 2 {
+		t.Fatalf("spec %v", spec)
+	}
+	if rules[0].GetLabels()["l"] != "v" || rules[0].GetAnnotations()["a"] != "v" {
+		t.Fatal("labels and annotations must be carried")
+	}
+}
+
+func TestInternalVipUsesTheLoadBalancerIdentity(t *testing.T) {
+	vip := InternalVip(InternalInput{Namespace: "ns", Name: "lb", Labels: map[string]string{"l": "v"}}, "ns-default-0123")
+	if vip.GetName() != FabricName("ns", "lb") || vip.GetKind() != "Vip" {
+		t.Fatalf("vip %v", vip.Object)
+	}
+	if subnet, _, _ := unstructured.NestedString(vip.Object, "spec", "subnet"); subnet != "ns-default-0123" {
+		t.Fatalf("subnet %q", subnet)
+	}
+}

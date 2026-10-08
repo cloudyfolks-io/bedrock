@@ -33,6 +33,7 @@ The section "How to read conditions" lists every reason.
 | `LoadBalancer` listener | `RouterLBRule` | one rule for each listener |
 | `DNSZone` | `DNSZone` | one for each Network of the Subnets that name the zone |
 | `SecurityGroup` | `SecurityGroup` | a short name made from namespace and name |
+| `LoadBalancer` without an ElasticIP | `Vip` and `SwitchLBRule` | one `Vip`, and one rule for each listener |
 | `SecurityGroup` | `NetworkPolicy` | `bedrock-sg-<name>` |
 | project namespace | `SecurityGroup` | `default-<namespace>` |
 
@@ -167,7 +168,10 @@ When `healthCheck` is set, Fabric health checks are on.
 When it is not set, they are off.
 The other health check fields are not used.
 
-A LoadBalancer without `elasticIPRef` is not supported.
+A LoadBalancer without `elasticIPRef` is an internal balancer.
+It becomes one Fabric `SwitchLBRule` for each listener and one Fabric `Vip`.
+The `Vip` is an address of the Subnet of the targets, and Fabric allocates it.
+All targets of an internal LoadBalancer must use one Subnet.
 
 ## DNS zones
 
@@ -277,7 +281,7 @@ Then take the action in the table.
 - A health check is on or off. The other health check fields are not used.
 - L2 mode has one default route, to the first provider network.
 - You cannot change the elastic IP mode on a cluster that has ElasticIPs.
-- A LoadBalancer needs an ElasticIP.
+- An internal LoadBalancer has no health checks.
 
 ## Inspect Fabric
 

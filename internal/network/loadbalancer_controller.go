@@ -9,8 +9,10 @@ import (
 
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
@@ -27,6 +29,13 @@ type LoadBalancerReconciler struct {
 type resolvedTargets struct {
 	addresses map[string]string
 	vpc       string
+	subnets   []string
+}
+
+type targetInfo struct {
+	vpc     string
+	subnet  string
+	address string
 }
 
 func (r *LoadBalancerReconciler) Reconcile(ctx context.Context, req reconcile.Request) (reconcile.Result, error) {
@@ -77,6 +86,9 @@ func (r *LoadBalancerReconciler) program(ctx context.Context, lb v1alpha1.LoadBa
 	if tenant == "" || project == "" {
 		return refused(lb, &Violation{Reason: ReasonNamespaceNotLabeled, Message: "the namespace has no tenant and project labels; only project namespaces hold load balancers"})
 	}
+	if lb.Spec.ElasticIPRef == "" {
+		return r.programInternal(ctx, lb, tenant, project)
+	}
 	if v := missingKind(r.Kinds, "RouterLBRule"); v != nil {
 		return refused(lb, v)
 	}
@@ -110,9 +122,6 @@ func (r *LoadBalancerReconciler) program(ctx context.Context, lb v1alpha1.LoadBa
 }
 
 func (r *LoadBalancerReconciler) elasticIP(ctx context.Context, lb v1alpha1.LoadBalancer) (v1alpha1.ElasticIP, *Violation, error) {
-	if lb.Spec.ElasticIPRef == "" {
-		return v1alpha1.ElasticIP{}, &Violation{Reason: ReasonUnsupported, Message: "a LoadBalancer without elasticIPRef is not supported yet; set elasticIPRef"}, nil
-	}
 	var eip v1alpha1.ElasticIP
 	err := r.Client.Get(ctx, client.ObjectKey{Namespace: lb.Namespace, Name: lb.Spec.ElasticIPRef}, &eip)
 	if apierrors.IsNotFound(err) {
@@ -138,16 +147,19 @@ func (r *LoadBalancerReconciler) resolve(ctx context.Context, lb v1alpha1.LoadBa
 	}
 	resolved := resolvedTargets{addresses: map[string]string{}}
 	for _, name := range targetNames(lb) {
-		vpc, address, v, err := r.resolveTarget(ctx, lb, name, ips)
+		info, v, err := r.resolveTarget(ctx, lb, name, ips)
 		if err != nil || v != nil {
 			return resolvedTargets{}, v, err
 		}
-		if resolved.vpc != "" && resolved.vpc != vpc {
+		if resolved.vpc != "" && resolved.vpc != info.vpc {
 			return resolvedTargets{}, &Violation{Reason: ReasonTargetNetworkMismatch, Message: "all targets of a LoadBalancer must be on one Network"}, nil
 		}
-		resolved.vpc = vpc
-		if address != "" {
-			resolved.addresses[name] = address
+		resolved.vpc = info.vpc
+		if !slices.Contains(resolved.subnets, info.subnet) {
+			resolved.subnets = append(resolved.subnets, info.subnet)
+		}
+		if info.address != "" {
+			resolved.addresses[name] = info.address
 		}
 	}
 	return resolved, nil, nil
@@ -166,35 +178,35 @@ func targetNames(lb v1alpha1.LoadBalancer) []string {
 	return names
 }
 
-func (r *LoadBalancerReconciler) resolveTarget(ctx context.Context, lb v1alpha1.LoadBalancer, name string, ips []*unstructured.Unstructured) (vpc, address string, v *Violation, err error) {
+func (r *LoadBalancerReconciler) resolveTarget(ctx context.Context, lb v1alpha1.LoadBalancer, name string, ips []*unstructured.Unstructured) (info targetInfo, v *Violation, err error) {
 	var vm v1alpha1.VirtualMachine
 	if err = r.Client.Get(ctx, client.ObjectKey{Namespace: lb.Namespace, Name: name}, &vm); err != nil || len(vm.Spec.Networks) == 0 {
 		if err == nil || apierrors.IsNotFound(err) {
-			return "", "", &Violation{Reason: ReasonTargetNotFound, Message: fmt.Sprintf("the VirtualMachine %q does not exist or has no interface", name)}, nil
+			return targetInfo{}, &Violation{Reason: ReasonTargetNotFound, Message: fmt.Sprintf("the VirtualMachine %q does not exist or has no interface", name)}, nil
 		}
-		return "", "", nil, err
+		return targetInfo{}, nil, err
 	}
 	nic := vm.Spec.Networks[0]
 	var subnet v1alpha1.Subnet
 	if err = r.Client.Get(ctx, client.ObjectKey{Namespace: lb.Namespace, Name: nic.SubnetRef}, &subnet); err != nil {
 		if apierrors.IsNotFound(err) {
-			return "", "", &Violation{Reason: ReasonTargetNotFound, Message: fmt.Sprintf("the Subnet %q of the VirtualMachine %q does not exist", nic.SubnetRef, name)}, nil
+			return targetInfo{}, &Violation{Reason: ReasonTargetNotFound, Message: fmt.Sprintf("the Subnet %q of the VirtualMachine %q does not exist", nic.SubnetRef, name)}, nil
 		}
-		return "", "", nil, err
+		return targetInfo{}, nil, err
 	}
 	var network v1alpha1.Network
 	err = r.Client.Get(ctx, client.ObjectKey{Name: subnet.Spec.NetworkRef}, &network)
 	if err != nil && !apierrors.IsNotFound(err) {
-		return "", "", nil, err
+		return targetInfo{}, nil, err
 	}
 	if err != nil || network.Status.VPC == "" {
-		return "", "", &Violation{Reason: ReasonFabricNotReady, Message: fmt.Sprintf("the Network %q has no Vpc yet", subnet.Spec.NetworkRef)}, nil
+		return targetInfo{}, &Violation{Reason: ReasonFabricNotReady, Message: fmt.Sprintf("the Network %q has no Vpc yet", subnet.Spec.NetworkRef)}, nil
 	}
-	ipName, found := FindIP(ips, lb.Namespace, name, FabricName(lb.Namespace, nic.SubnetRef))
-	if found {
-		address = ipAddress(ips, ipName)
+	info = targetInfo{vpc: network.Status.VPC, subnet: nic.SubnetRef}
+	if ipName, found := FindIP(ips, lb.Namespace, name, FabricName(lb.Namespace, nic.SubnetRef)); found {
+		info.address = ipAddress(ips, ipName)
 	}
-	return network.Status.VPC, address, nil, nil
+	return info, nil, nil
 }
 
 func ipAddress(ips []*unstructured.Unstructured, name string) string {
@@ -206,24 +218,32 @@ func ipAddress(ips []*unstructured.Unstructured, name string) string {
 	return ""
 }
 
-func (r *LoadBalancerReconciler) apply(ctx context.Context, lb v1alpha1.LoadBalancer, rules []*unstructured.Unstructured, missing []string) (metav1.Condition, time.Duration, error) {
+func objectKey(u *unstructured.Unstructured) string {
+	return u.GetKind() + "/" + u.GetName()
+}
+
+func isRule(u *unstructured.Unstructured) bool {
+	return u.GetKind() == fabric.RouterLBRuleGVK.Kind || u.GetKind() == fabric.SwitchLBRuleGVK.Kind
+}
+
+func (r *LoadBalancerReconciler) apply(ctx context.Context, lb v1alpha1.LoadBalancer, objects []*unstructured.Unstructured, missing []string) (metav1.Condition, time.Duration, error) {
 	wanted := map[string]bool{}
-	for _, rule := range rules {
-		if existing, err := getObject(ctx, r.Client, fabric.RouterLBRuleGVK, rule.GetName()); err == nil && !ownedBy(existing, &lb) {
-			return refused(lb, &Violation{Reason: ReasonFabricConflict, Message: fmt.Sprintf("a Fabric RouterLBRule named %s belongs to another owner", rule.GetName())})
+	for _, object := range objects {
+		if existing, err := getObject(ctx, r.Client, object.GroupVersionKind(), object.GetName()); err == nil && !ownedBy(existing, &lb) {
+			return refused(lb, &Violation{Reason: ReasonFabricConflict, Message: fmt.Sprintf("a Fabric %s named %s belongs to another owner", object.GetKind(), object.GetName())})
 		}
-		if err := ssa.Apply(ctx, r.Client, rule, v1alpha1.NetworkFieldManager); err != nil {
+		if err := ssa.Apply(ctx, r.Client, object, v1alpha1.NetworkFieldManager); err != nil {
 			return metav1.Condition{}, 0, err
 		}
-		wanted[rule.GetName()] = true
+		wanted[objectKey(object)] = true
 	}
-	owned, err := r.ownedRules(ctx, &lb)
+	owned, err := r.ownedObjects(ctx, &lb)
 	if err != nil {
 		return metav1.Condition{}, 0, err
 	}
-	for _, rule := range owned {
-		if !wanted[rule.GetName()] {
-			if err := client.IgnoreNotFound(r.Client.Delete(ctx, rule)); err != nil {
+	for _, object := range owned {
+		if !wanted[objectKey(object)] {
+			if err := client.IgnoreNotFound(r.Client.Delete(ctx, object)); err != nil {
 				return metav1.Condition{}, 0, err
 			}
 		}
@@ -231,8 +251,11 @@ func (r *LoadBalancerReconciler) apply(ctx context.Context, lb v1alpha1.LoadBala
 	if len(missing) > 0 {
 		return refused(lb, &Violation{Reason: ReasonWaitingForAddress, Message: fmt.Sprintf("the VirtualMachines %s have no address yet", strings.Join(missing, ", "))})
 	}
-	for name := range wanted {
-		observed, err := getObject(ctx, r.Client, fabric.RouterLBRuleGVK, name)
+	for _, object := range objects {
+		if !isRule(object) {
+			continue
+		}
+		observed, err := getObject(ctx, r.Client, object.GroupVersionKind(), object.GetName())
 		if err != nil {
 			return metav1.Condition{}, 0, err
 		}
@@ -243,16 +266,80 @@ func (r *LoadBalancerReconciler) apply(ctx context.Context, lb v1alpha1.LoadBala
 	return trueCondition(v1alpha1.ConditionReady, lb.Generation, ReasonProgrammed), 0, nil
 }
 
-func (r *LoadBalancerReconciler) ownedRules(ctx context.Context, lb *v1alpha1.LoadBalancer) ([]*unstructured.Unstructured, error) {
-	rules, err := listObjects(ctx, r.Client, fabric.RouterLBRuleGVK)
-	if err != nil {
-		return nil, err
+var balancerKinds = []schema.GroupVersionKind{fabric.RouterLBRuleGVK, fabric.SwitchLBRuleGVK, fabric.VipGVK}
+
+func (r *LoadBalancerReconciler) ownedObjects(ctx context.Context, lb *v1alpha1.LoadBalancer) ([]*unstructured.Unstructured, error) {
+	var owned []*unstructured.Unstructured
+	for _, gvk := range balancerKinds {
+		objects, err := listObjects(ctx, r.Client, gvk)
+		if meta.IsNoMatchError(err) {
+			continue
+		}
+		if err != nil {
+			return nil, err
+		}
+		owned = append(owned, slices.DeleteFunc(objects, func(o *unstructured.Unstructured) bool { return !ownedBy(o, lb) })...)
 	}
-	return slices.DeleteFunc(rules, func(rule *unstructured.Unstructured) bool { return !ownedBy(rule, lb) }), nil
+	return owned, nil
+}
+
+func (r *LoadBalancerReconciler) programInternal(ctx context.Context, lb v1alpha1.LoadBalancer, tenant, project string) (metav1.Condition, time.Duration, error) {
+	for _, kind := range []string{"SwitchLBRule", "Vip"} {
+		if v := missingKind(r.Kinds, kind); v != nil {
+			return refused(lb, v)
+		}
+	}
+	targets, v, err := r.resolve(ctx, lb)
+	if err != nil || v != nil {
+		if err != nil {
+			return metav1.Condition{}, 0, err
+		}
+		return refused(lb, v)
+	}
+	if len(targets.subnets) > 1 {
+		return refused(lb, &Violation{Reason: ReasonTargetNetworkMismatch, Message: "all targets of an internal LoadBalancer must use one Subnet"})
+	}
+	listeners, missing, v := BuildListeners(lb.Spec.Listeners, targets.addresses)
+	if v != nil {
+		return refused(lb, v)
+	}
+	withEndpoints := slices.DeleteFunc(slices.Clone(listeners), func(l Listener) bool { return len(l.Endpoints) == 0 })
+	if len(withEndpoints) == 0 {
+		return refused(lb, &Violation{Reason: ReasonNoTargets, Message: "no target has an address yet"})
+	}
+	in := InternalInput{Namespace: lb.Namespace, Name: lb.Name, Labels: ObjectLabels("LoadBalancer", lb.Name, tenant, project), Annotations: OwnerAnnotations(&lb), Listeners: withEndpoints}
+	vip := InternalVip(in, FabricName(lb.Namespace, targets.subnets[0]))
+	address, v, err := r.allocateVip(ctx, lb, vip)
+	if err != nil || v != nil {
+		if err != nil {
+			return metav1.Condition{}, 0, err
+		}
+		return refused(lb, v)
+	}
+	in.Vip = address
+	return r.apply(ctx, lb, append([]*unstructured.Unstructured{vip}, InternalRules(in)...), missing)
+}
+
+func (r *LoadBalancerReconciler) allocateVip(ctx context.Context, lb v1alpha1.LoadBalancer, vip *unstructured.Unstructured) (string, *Violation, error) {
+	if existing, err := getObject(ctx, r.Client, fabric.VipGVK, vip.GetName()); err == nil && !ownedBy(existing, &lb) {
+		return "", &Violation{Reason: ReasonFabricConflict, Message: fmt.Sprintf("a Fabric Vip named %s belongs to another owner", vip.GetName())}, nil
+	}
+	if err := ssa.Apply(ctx, r.Client, vip, v1alpha1.NetworkFieldManager); err != nil {
+		return "", nil, err
+	}
+	observed, err := getObject(ctx, r.Client, fabric.VipGVK, vip.GetName())
+	if err != nil {
+		return "", nil, err
+	}
+	address := fabric.VipAddress(observed)
+	if address == "" {
+		return "", &Violation{Reason: ReasonFabricNotReady, Message: "waiting for Fabric to allocate the virtual address"}, nil
+	}
+	return address, nil, nil
 }
 
 func (r *LoadBalancerReconciler) finalize(ctx context.Context, lb *v1alpha1.LoadBalancer) (reconcile.Result, error) {
-	owned, err := r.ownedRules(ctx, lb)
+	owned, err := r.ownedObjects(ctx, lb)
 	if err != nil {
 		return reconcile.Result{}, err
 	}
@@ -261,7 +348,7 @@ func (r *LoadBalancerReconciler) finalize(ctx context.Context, lb *v1alpha1.Load
 			return reconcile.Result{}, err
 		}
 	}
-	remaining, err := r.ownedRules(ctx, lb)
+	remaining, err := r.ownedObjects(ctx, lb)
 	if err != nil || len(remaining) > 0 {
 		return reconcile.Result{RequeueAfter: waitRequeue}, err
 	}

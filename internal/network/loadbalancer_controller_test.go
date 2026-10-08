@@ -116,10 +116,114 @@ func TestLoadBalancerRequiresAnExistingElasticIP(t *testing.T) {
 	requireLB(t, f.c, f.namespace, "lb1", metav1.ConditionFalse, ReasonElasticIPNotFound)
 }
 
-func TestLoadBalancerWithoutElasticIPRefIsUnsupported(t *testing.T) {
-	f := newExternalFixture(t)
-	requireAccepted(t, f.c, loadBalancerFor(f.namespace, "lb1", ""))
+func newInternalFixture(t *testing.T) externalFixture {
+	t.Helper()
+	f := newPrivateFixture(t)
+	f.addVM(t, "vm1", "", "10.100.1.5")
+	f.addVM(t, "vm2", "", "10.100.1.6")
+	lb := loadBalancerFor(f.namespace, "lb1", "")
+	lb.Spec.Listeners = []v1alpha1.LoadBalancerListener{{Port: 80, Protocol: "TCP", Targets: []v1alpha1.LoadBalancerTarget{{VMRef: "vm1", Port: 8080}, {VMRef: "vm2", Port: 8080}}}}
+	requireAccepted(t, f.c, lb)
+	return f
+}
+
+func switchRulesOf(t *testing.T, c client.Client, name string) []*unstructured.Unstructured {
+	t.Helper()
+	rules, err := listObjects(context.Background(), c, fabric.SwitchLBRuleGVK, client.MatchingLabels{v1alpha1.LabelKind: "LoadBalancer", v1alpha1.LabelName: name})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return rules
+}
+
+func TestLoadBalancerWithoutElasticIPRefProgramsAnInternalVip(t *testing.T) {
+	f := newInternalFixture(t)
+	ctx := context.Background()
+	if result := reconcileLoadBalancer(t, f.c, f.namespace, "lb1", knowsEverything); result.RequeueAfter != waitRequeue {
+		t.Fatalf("result %+v", result)
+	}
+	requireLB(t, f.c, f.namespace, "lb1", metav1.ConditionFalse, ReasonFabricNotReady)
+	vip, err := getObject(ctx, f.c, fabric.VipGVK, FabricName(f.namespace, "lb1"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if subnet, _, _ := unstructured.NestedString(vip.Object, "spec", "subnet"); subnet != FabricName(f.namespace, "default") {
+		t.Fatalf("subnet %q", subnet)
+	}
+	if len(switchRulesOf(t, f.c, "lb1")) != 0 || len(rulesOf(t, f.c, "lb1")) != 0 {
+		t.Fatal("no rule before the virtual address exists")
+	}
+	if err := fabrictest.MarkVipAllocated(ctx, f.c, vip.GetName(), "10.100.1.200"); err != nil {
+		t.Fatal(err)
+	}
 	reconcileLoadBalancer(t, f.c, f.namespace, "lb1", knowsEverything)
+	rules := switchRulesOf(t, f.c, "lb1")
+	if len(rules) != 1 || !slices.Equal(endpointsOf(rules[0]), []string{"10.100.1.5", "10.100.1.6"}) {
+		t.Fatalf("rules %v", rules)
+	}
+	if address, _, _ := unstructured.NestedString(rules[0].Object, "spec", "vip"); address != "10.100.1.200" {
+		t.Fatalf("vip %q", address)
+	}
+	requireLB(t, f.c, f.namespace, "lb1", metav1.ConditionFalse, ReasonFabricNotReady)
+	if err := fabrictest.MarkSwitchLBRuleProgrammed(ctx, f.c, rules[0].GetName(), "ns/slr"); err != nil {
+		t.Fatal(err)
+	}
+	reconcileLoadBalancer(t, f.c, f.namespace, "lb1", knowsEverything)
+	requireLB(t, f.c, f.namespace, "lb1", metav1.ConditionTrue, ReasonProgrammed)
+}
+
+func TestLoadBalancerInternalNeedsOneSubnet(t *testing.T) {
+	f := newInternalFixture(t)
+	ctx := context.Background()
+	requireAccepted(t, f.c, policySubnet(f.namespace, "other", f.network.Name, "10.100.2.0/24"))
+	vm := virtualMachineUsing(f.namespace, "vm3")
+	vm.Spec.Networks[0].SubnetRef = "other"
+	requireAccepted(t, f.c, vm)
+	if err := fabrictest.CreateIP(ctx, f.c, "vm3."+f.namespace+".other", f.namespace, "vm3", FabricName(f.namespace, "other"), "10.100.2.5"); err != nil {
+		t.Fatal(err)
+	}
+	var lb v1alpha1.LoadBalancer
+	if err := f.c.Get(ctx, client.ObjectKey{Namespace: f.namespace, Name: "lb1"}, &lb); err != nil {
+		t.Fatal(err)
+	}
+	lb.Spec.Listeners[0].Targets = append(lb.Spec.Listeners[0].Targets, v1alpha1.LoadBalancerTarget{VMRef: "vm3", Port: 8080})
+	if err := f.c.Update(ctx, &lb); err != nil {
+		t.Fatal(err)
+	}
+	reconcileLoadBalancer(t, f.c, f.namespace, "lb1", knowsEverything)
+	requireLB(t, f.c, f.namespace, "lb1", metav1.ConditionFalse, ReasonTargetNetworkMismatch)
+}
+
+func TestLoadBalancerInternalDeletionRemovesTheVipAndRules(t *testing.T) {
+	f := newInternalFixture(t)
+	ctx := context.Background()
+	reconcileLoadBalancer(t, f.c, f.namespace, "lb1", knowsEverything)
+	if err := fabrictest.MarkVipAllocated(ctx, f.c, FabricName(f.namespace, "lb1"), "10.100.1.200"); err != nil {
+		t.Fatal(err)
+	}
+	reconcileLoadBalancer(t, f.c, f.namespace, "lb1", knowsEverything)
+	var lb v1alpha1.LoadBalancer
+	if err := f.c.Get(ctx, client.ObjectKey{Namespace: f.namespace, Name: "lb1"}, &lb); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.c.Delete(ctx, &lb); err != nil {
+		t.Fatal(err)
+	}
+	reconcileLoadBalancer(t, f.c, f.namespace, "lb1", knowsEverything)
+	if len(switchRulesOf(t, f.c, "lb1")) != 0 {
+		t.Fatal("the rules must be deleted")
+	}
+	if _, err := getObject(ctx, f.c, fabric.VipGVK, FabricName(f.namespace, "lb1")); !apierrors.IsNotFound(err) {
+		t.Fatalf("the Vip must be deleted: %v", err)
+	}
+	if err := f.c.Get(ctx, client.ObjectKeyFromObject(&lb), &v1alpha1.LoadBalancer{}); !apierrors.IsNotFound(err) {
+		t.Fatalf("the finalizer must be gone: %v", err)
+	}
+}
+
+func TestLoadBalancerInternalNeedsTheSwitchKinds(t *testing.T) {
+	f := newInternalFixture(t)
+	reconcileLoadBalancer(t, f.c, f.namespace, "lb1", func(gk schema.GroupKind) bool { return gk.Kind != "SwitchLBRule" })
 	requireLB(t, f.c, f.namespace, "lb1", metav1.ConditionFalse, ReasonUnsupported)
 }
 

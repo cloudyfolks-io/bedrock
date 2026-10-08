@@ -23,4 +23,6 @@ var (
 	VlanGVK            = gvk("Vlan")
 	IPGVK              = gvk("IP")
 	BgpConfGVK         = gvk("BgpConf")
+	VipGVK             = gvk("Vip")
+	SwitchLBRuleGVK    = gvk("SwitchLBRule")
 )

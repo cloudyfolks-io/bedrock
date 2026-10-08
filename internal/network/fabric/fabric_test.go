@@ -169,3 +169,24 @@ func TestIPOwner(t *testing.T) {
 		t.Fatal("unexpected owner")
 	}
 }
+
+func TestVipBuild(t *testing.T) {
+	equal(t, spec(t, Vip(Meta{Name: "v"}, "ns", "ns-default-0123")), map[string]any{"namespace": "ns", "subnet": "ns-default-0123", "type": "switch_lb_vip"})
+}
+
+func TestSwitchLBRuleBuild(t *testing.T) {
+	ports := []RouterLBPort{{Name: "tcp-80", Port: 80, TargetPort: 8080, Protocol: "TCP"}}
+	u := SwitchLBRule(Meta{Name: "r"}, "10.0.0.200", "ns", []string{"10.0.0.2"}, ports)
+	equal(t, spec(t, u), map[string]any{
+		"vip": "10.0.0.200", "namespace": "ns", "selector": []any{}, "endpoints": []any{"10.0.0.2"},
+		"ports": []any{map[string]any{"name": "tcp-80", "port": int64(80), "targetPort": int64(8080), "protocol": "TCP"}},
+	})
+}
+
+func TestVipAndSwitchRuleReaders(t *testing.T) {
+	vip := &unstructured.Unstructured{Object: map[string]any{"status": map[string]any{"v4ip": "10.0.0.200"}}}
+	rule := &unstructured.Unstructured{Object: map[string]any{"status": map[string]any{"service": "ns/slr-r"}}}
+	if VipAddress(vip) != "10.0.0.200" || SwitchLBRuleService(rule) != "ns/slr-r" || VipAddress(rule) != "" {
+		t.Fatal("unexpected readers")
+	}
+}

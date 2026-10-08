@@ -141,6 +141,8 @@ func (r *LoadBalancerReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	return ctrl.NewControllerManagedBy(mgr).Named("network-loadbalancer").
 		For(&v1alpha1.LoadBalancer{}).
 		Watches(fabricObject("RouterLBRule"), ownerAnnotationHandler(), builder.WithPredicates(managedOnly())).
+		Watches(fabricObject("SwitchLBRule"), ownerAnnotationHandler(), builder.WithPredicates(managedOnly())).
+		Watches(fabricObject("Vip"), ownerAnnotationHandler(), builder.WithPredicates(managedOnly())).
 		Watches(&v1alpha1.ElasticIP{}, handler.EnqueueRequestsFromMapFunc(inNamespaceOf(balancers))).
 		Watches(fabricObject("IP"), handler.EnqueueRequestsFromMapFunc(ofIP)).
 		Watches(&v1alpha1.VirtualMachine{}, handler.EnqueueRequestsFromMapFunc(inNamespaceOf(balancers))).

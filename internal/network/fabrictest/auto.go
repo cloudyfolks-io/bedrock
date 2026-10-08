@@ -53,6 +53,10 @@ func step(ctx context.Context, c client.Client) {
 	each(ctx, c, fabric.RouterLBRuleGVK, func(u *unstructured.Unstructured) {
 		_ = MarkRouterLBRuleProgrammed(ctx, c, u.GetName(), "rlr-"+u.GetName())
 	})
+	each(ctx, c, fabric.SwitchLBRuleGVK, func(u *unstructured.Unstructured) {
+		_ = MarkSwitchLBRuleProgrammed(ctx, c, u.GetName(), "slr-"+u.GetName())
+	})
+	allocateVips(ctx, c)
 	each(ctx, c, fabric.DNSZoneGVK, func(u *unstructured.Unstructured) { _ = MarkDNSZoneReady(ctx, c, u.GetName()) })
 	each(ctx, c, fabric.SecurityGroupGVK, func(u *unstructured.Unstructured) { _ = MarkSecurityGroupProgrammed(ctx, c, u.GetName()) })
 }
@@ -127,4 +131,25 @@ func excluded(ranges []string, addr netip.Addr) bool {
 		}
 	}
 	return false
+}
+
+func allocateVips(ctx context.Context, c client.Client) {
+	used := map[netip.Addr]bool{}
+	each(ctx, c, fabric.VipGVK, func(u *unstructured.Unstructured) {
+		if addr, err := netip.ParseAddr(fabric.VipAddress(u)); err == nil {
+			used[addr] = true
+		}
+	})
+	each(ctx, c, fabric.VipGVK, func(u *unstructured.Unstructured) {
+		if fabric.VipAddress(u) != "" {
+			return
+		}
+		subnet, _, _ := unstructured.NestedString(u.Object, "spec", "subnet")
+		if address := nextFree(ctx, c, subnet, used); address != "" {
+			if addr, err := netip.ParseAddr(address); err == nil {
+				used[addr] = true
+			}
+			_ = MarkVipAllocated(ctx, c, u.GetName(), address)
+		}
+	})
 }

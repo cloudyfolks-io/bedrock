@@ -79,3 +79,26 @@ func routerRule(l Listener, meta fabric.Meta, in ListenerInput, endpoints []stri
 	}
 	return fabric.RouterLBRuleWithoutHealthCheck(meta, in.EIP, in.Vpc, in.Namespace, endpoints, ports)
 }
+
+type InternalInput struct {
+	Namespace   string
+	Name        string
+	Vip         string
+	Labels      map[string]string
+	Annotations map[string]string
+	Listeners   []Listener
+}
+
+func InternalRules(in InternalInput) []*unstructured.Unstructured {
+	rules := make([]*unstructured.Unstructured, len(in.Listeners))
+	for i, l := range in.Listeners {
+		meta := fabric.Meta{Name: ListenerRuleName(in.Namespace, in.Name, l.Port, l.Protocol), Labels: maps.Clone(in.Labels), Annotations: maps.Clone(in.Annotations)}
+		ports := []fabric.RouterLBPort{{Name: strings.ToLower(l.Protocol) + "-" + fmt.Sprint(l.Port), Port: l.Port, TargetPort: l.TargetPort, Protocol: l.Protocol}}
+		rules[i] = fabric.SwitchLBRule(meta, in.Vip, in.Namespace, slices.Sorted(slices.Values(l.Endpoints)), ports)
+	}
+	return rules
+}
+
+func InternalVip(in InternalInput, subnet string) *unstructured.Unstructured {
+	return fabric.Vip(fabric.Meta{Name: FabricName(in.Namespace, in.Name), Labels: maps.Clone(in.Labels), Annotations: maps.Clone(in.Annotations)}, in.Namespace, subnet)
+}

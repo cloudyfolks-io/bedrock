@@ -67,6 +67,22 @@ func MarkEipRefused(ctx context.Context, c client.Client, name, message string) 
 	})
 }
 
+func MarkVipAllocated(ctx context.Context, c client.Client, name, address string) error {
+	u := &unstructured.Unstructured{}
+	u.SetGroupVersionKind(fabric.VipGVK)
+	if err := c.Get(ctx, client.ObjectKey{Name: name}, u); err != nil {
+		return err
+	}
+	u.Object["status"] = map[string]any{"v4ip": address, "type": "switch_lb_vip"}
+	return c.Update(ctx, u)
+}
+
+func MarkSwitchLBRuleProgrammed(ctx context.Context, c client.Client, name, service string) error {
+	return updateStatus(ctx, c, fabric.SwitchLBRuleGVK, name, func(status, _ map[string]any) {
+		status["service"] = service
+	})
+}
+
 func MarkFipReady(ctx context.Context, c client.Client, name string) error {
 	return updateStatus(ctx, c, fabric.OvnFipGVK, name, func(status, _ map[string]any) {
 		status["ready"] = true
