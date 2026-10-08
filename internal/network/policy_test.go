@@ -10,6 +10,7 @@ import (
 	admissionregistrationv1 "k8s.io/api/admissionregistration/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/util/wait"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/yaml"
 
@@ -55,14 +56,12 @@ func installPolicy(t *testing.T, c client.Client, path string, probe func() bool
 
 func waitUntil(t *testing.T, timeout time.Duration, condition func() bool) {
 	t.Helper()
-	deadline := time.Now().Add(timeout)
-	for time.Now().Before(deadline) {
-		if condition() {
-			return
-		}
-		time.Sleep(200 * time.Millisecond)
+	err := wait.PollUntilContextTimeout(context.Background(), 200*time.Millisecond, timeout, true, func(context.Context) (bool, error) {
+		return condition(), nil
+	})
+	if err != nil {
+		t.Fatal("condition not met in time")
 	}
-	t.Fatal("condition not met in time")
 }
 
 type subnetPolicyFixture struct {

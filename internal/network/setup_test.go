@@ -9,6 +9,7 @@ import (
 
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/client-go/rest"
 	"k8s.io/utils/ptr"
 	ctrl "sigs.k8s.io/controller-runtime"
@@ -101,14 +102,12 @@ func putSetting(t *testing.T, c client.Client, key, value string) {
 
 func eventually(t *testing.T, timeout time.Duration, what string, condition func() bool) {
 	t.Helper()
-	deadline := time.Now().Add(timeout)
-	for time.Now().Before(deadline) {
-		if condition() {
-			return
-		}
-		time.Sleep(250 * time.Millisecond)
+	err := wait.PollUntilContextTimeout(context.Background(), 250*time.Millisecond, timeout, true, func(context.Context) (bool, error) {
+		return condition(), nil
+	})
+	if err != nil {
+		t.Fatalf("not within %s: %s", timeout, what)
 	}
-	t.Fatalf("not within %s: %s", timeout, what)
 }
 
 func isReady(c client.Client, obj client.Object) bool {
