@@ -10,11 +10,16 @@ interface TextFieldProps {
   value: string;
   onChange: (value: string) => void;
   error?: string;
+  readOnly?: boolean | undefined;
+  disabled?: boolean | undefined;
+  required?: boolean | undefined;
+  placeholder?: string | undefined;
+  dir?: "ltr" | "rtl" | "auto" | undefined;
 }
 
-export function TextField({ label, name, type = "text", autoComplete, value, onChange, error }: TextFieldProps) {
+export function TextField({ label, name, type = "text", autoComplete, value, onChange, error, readOnly, disabled, required, placeholder, dir }: TextFieldProps) {
   return (
-    <Field.Root className="br-field" invalid={Boolean(error)}>
+    <Field.Root className="br-field" invalid={Boolean(error)} disabled={disabled}>
       <Field.Label className="br-field-label">{label}</Field.Label>
       <Field.Control
         render={
@@ -23,6 +28,10 @@ export function TextField({ label, name, type = "text", autoComplete, value, onC
             type={type}
             autoComplete={autoComplete}
             value={value}
+            readOnly={readOnly}
+            required={required}
+            placeholder={placeholder}
+            dir={dir}
             onChange={(event: ChangeEvent<HTMLInputElement>) => onChange(event.target.value)}
             className="br-field-input"
           />

@@ -8,9 +8,11 @@ interface NumberFieldProps {
   max?: number;
   step?: number;
   error?: string;
+  readOnly?: boolean | undefined;
+  disabled?: boolean | undefined;
 }
 
-export function NumberField({ label, value, onValueChange, min, max, step, error }: NumberFieldProps) {
+export function NumberField({ label, value, onValueChange, min, max, step, error, readOnly, disabled }: NumberFieldProps) {
   return (
     <BaseNumberField.Root
       className="br-field"
@@ -19,6 +21,8 @@ export function NumberField({ label, value, onValueChange, min, max, step, error
       min={min}
       max={max}
       step={step}
+      readOnly={readOnly}
+      disabled={disabled}
     >
       <span className="br-field-label">{label}</span>
       <BaseNumberField.Group className="br-number">

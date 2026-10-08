@@ -6,9 +6,11 @@ interface TextareaProps {
   onChange: (value: string) => void;
   rows?: number;
   error?: string;
+  readOnly?: boolean | undefined;
+  disabled?: boolean | undefined;
 }
 
-function AreaField({ label, value, onChange, rows, error, className, code }: TextareaProps & { className: string; code: boolean }) {
+function AreaField({ label, value, onChange, rows, error, className, code, readOnly, disabled }: TextareaProps & { className: string; code: boolean }) {
   const id = useId();
   const errorId = useId();
   return (
@@ -21,6 +23,8 @@ function AreaField({ label, value, onChange, rows, error, className, code }: Tex
         className={className}
         value={value}
         rows={rows ?? 4}
+        readOnly={readOnly}
+        disabled={disabled}
         dir={code ? "ltr" : undefined}
         spellCheck={code ? false : undefined}
         aria-invalid={error ? true : undefined}

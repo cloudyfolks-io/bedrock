@@ -1,4 +1,4 @@
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import { useParams } from "react-router";
 import { useLingui } from "@lingui/react/macro";
 import { Button, Table, TableBody, TableCell, TableHead, TableHeaderCell, TableRow } from "@bedrock/design";
@@ -12,6 +12,7 @@ import { PageHeader } from "../components/PageHeader";
 import { Spinner } from "../components/Spinner";
 import { StatusBadge } from "../components/StatusBadge";
 import { NotFoundPage } from "../pages/NotFoundPage";
+import { LazyEditDialog } from "../forms/LazyDialogs";
 import { useCurrentProjectName } from "../shell/context";
 import { useLiveObject } from "../stream/live";
 import { refOf, type ResourceDef } from "./registry";
@@ -49,9 +50,11 @@ function DetailBody({ def, namespace, name, projectName }: { def: ResourceDef; n
   const { t, i18n } = useLingui();
   const query = useLiveObject(refOf(def), namespace, name);
   const runner = useActionRunner(def);
+  const [editing, setEditing] = useState(false);
   const checks = useMemo<Check[]>(
-    () =>
-      def.actions.map((action) => ({
+    () => [
+      { verb: "update", group: def.group, resource: def.plural, name, ...(namespace === undefined ? {} : { namespace }) },
+      ...def.actions.map((action) => ({
         verb: action.verb,
         group: def.group,
         resource: def.plural,
@@ -59,6 +62,7 @@ function DetailBody({ def, namespace, name, projectName }: { def: ResourceDef; n
         ...(action.subresource === undefined ? {} : { subresource: action.subresource }),
         ...(namespace === undefined ? {} : { namespace }),
       })),
+    ],
     [def, namespace, name],
   );
   const access = useCans(checks);
@@ -82,7 +86,7 @@ function DetailBody({ def, namespace, name, projectName }: { def: ResourceDef; n
   const object: KubeObject = query.data;
   const conditions = Array.isArray(object.status?.conditions) ? (object.status.conditions as Condition[]) : [];
   const buttons = def.actions.flatMap((action, index) =>
-    access[index] === "allowed" ? [{ action, enabled: action.enabledWhen(object) }] : [],
+    access[index + 1] === "allowed" ? [{ action, enabled: action.enabledWhen(object) }] : [],
   );
 
   return (
@@ -90,11 +94,20 @@ function DetailBody({ def, namespace, name, projectName }: { def: ResourceDef; n
       <PageHeader
         title={name}
         breadcrumbs={crumbs}
-        actions={buttons.map(({ action, enabled }) => (
-          <Button key={action.id} variant={action.kind === "delete" ? "danger" : "secondary"} disabled={!enabled} onClick={() => runner.request(action, object)}>
-            {i18n._(action.label)}
-          </Button>
-        ))}
+        actions={
+          <>
+            {def.edit && access[0] === "allowed" ? (
+              <Button variant="secondary" onClick={() => setEditing(true)}>
+                {t({ id: "common.action.edit", message: "Edit" })}
+              </Button>
+            ) : null}
+            {buttons.map(({ action, enabled }) => (
+              <Button key={action.id} variant={action.kind === "delete" ? "danger" : "secondary"} disabled={!enabled} onClick={() => runner.request(action, object)}>
+                {i18n._(action.label)}
+              </Button>
+            ))}
+          </>
+        }
       />
       <section className="br-stack">
         <StatusBadge obj={object} />
@@ -107,6 +120,7 @@ function DetailBody({ def, namespace, name, projectName }: { def: ResourceDef; n
         </pre>
       </section>
       {runner.dialogs}
+      {editing ? <LazyEditDialog def={def} object={object} onClose={() => setEditing(false)} /> : null}
     </>
   );
 }

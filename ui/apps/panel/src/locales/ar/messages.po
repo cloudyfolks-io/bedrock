@@ -292,6 +292,84 @@ msgstr "تم حذف هذا الكائن"
 msgid "detail.spec.title"
 msgstr "المواصفات"
 
+msgid "forms.array.addItem"
+msgstr "إضافة عنصر"
+
+msgid "forms.array.remove"
+msgstr "إزالة"
+
+msgid "forms.array.removeItem"
+msgstr "إزالة العنصر {0}"
+
+msgid "forms.conflict.message"
+msgstr "قام شخص آخر بتغيير هذا الكائن. أعد التحميل للمتابعة. تبقى تعديلاتك في النموذج."
+
+msgid "forms.conflict.reload"
+msgstr "إعادة التحميل"
+
+msgid "forms.create.done"
+msgstr "تم إنشاء {name}"
+
+msgid "forms.create.title"
+msgstr "إنشاء {kind}"
+
+msgid "forms.edit.done"
+msgstr "تم حفظ {name}"
+
+msgid "forms.edit.title"
+msgstr "تعديل {name}"
+
+msgid "forms.error.enum"
+msgstr "اختر أحد الخيارات"
+
+msgid "forms.error.format"
+msgstr "الصيغة غير صالحة"
+
+msgid "forms.error.maxItems"
+msgstr "عدد العناصر كبير جدًا"
+
+msgid "forms.error.maxLength"
+msgstr "النص طويل جدًا"
+
+msgid "forms.error.maximum"
+msgstr "القيمة كبيرة جدًا"
+
+msgid "forms.error.minItems"
+msgstr "أضف المزيد من العناصر"
+
+msgid "forms.error.minLength"
+msgstr "النص قصير جدًا"
+
+msgid "forms.error.minimum"
+msgstr "القيمة صغيرة جدًا"
+
+msgid "forms.error.pattern"
+msgstr "الصيغة غير صالحة"
+
+msgid "forms.error.required"
+msgstr "هذا الحقل مطلوب"
+
+msgid "forms.error.type"
+msgstr "نوع القيمة غير صحيح"
+
+msgid "forms.error.uniqueItems"
+msgstr "يجب أن تكون العناصر مختلفة"
+
+msgid "forms.json.invalid"
+msgstr "هذا JSON غير صالح"
+
+msgid "forms.name.exists"
+msgstr "يوجد كائن بهذا الاسم بالفعل"
+
+msgid "forms.name.invalid"
+msgstr "استخدم أحرفًا صغيرة وأرقامًا وشرطات. ابدأ وانتهِ بحرف أو رقم."
+
+msgid "forms.name.label"
+msgstr "الاسم"
+
+msgid "forms.schema.error"
+msgstr "تعذر تحميل مخطط النموذج."
+
 msgid "list.actions.header"
 msgstr "الإجراءات"
 

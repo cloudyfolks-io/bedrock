@@ -13,9 +13,10 @@ interface SelectProps {
   options: SelectOption[];
   placeholder?: string;
   error?: string;
+  disabled?: boolean | undefined;
 }
 
-export function Select({ label, value, onValueChange, options, placeholder, error }: SelectProps) {
+export function Select({ label, value, onValueChange, options, placeholder, error, disabled }: SelectProps) {
   const labelId = useId();
   const errorId = useId();
   return (
@@ -25,6 +26,7 @@ export function Select({ label, value, onValueChange, options, placeholder, erro
       </span>
       <BaseSelect.Root
         items={options}
+        disabled={disabled}
         value={value === "" ? null : value}
         onValueChange={(next) => onValueChange(next === null ? "" : String(next))}
       >

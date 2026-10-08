@@ -292,6 +292,84 @@ msgstr "این شیء حذف شد"
 msgid "detail.spec.title"
 msgstr "مشخصات"
 
+msgid "forms.array.addItem"
+msgstr "افزودن مورد"
+
+msgid "forms.array.remove"
+msgstr "حذف"
+
+msgid "forms.array.removeItem"
+msgstr "حذف مورد {0}"
+
+msgid "forms.conflict.message"
+msgstr "شخص دیگری این شیء را تغییر داد. برای ادامه بارگذاری مجدد کنید. ویرایش‌های شما در فرم می‌ماند."
+
+msgid "forms.conflict.reload"
+msgstr "بارگذاری مجدد"
+
+msgid "forms.create.done"
+msgstr "{name} ایجاد شد"
+
+msgid "forms.create.title"
+msgstr "ایجاد {kind}"
+
+msgid "forms.edit.done"
+msgstr "{name} ذخیره شد"
+
+msgid "forms.edit.title"
+msgstr "ویرایش {name}"
+
+msgid "forms.error.enum"
+msgstr "یکی از گزینه‌ها را انتخاب کنید"
+
+msgid "forms.error.format"
+msgstr "قالب معتبر نیست"
+
+msgid "forms.error.maxItems"
+msgstr "تعداد موارد زیاد است"
+
+msgid "forms.error.maxLength"
+msgstr "متن خیلی بلند است"
+
+msgid "forms.error.maximum"
+msgstr "مقدار خیلی بزرگ است"
+
+msgid "forms.error.minItems"
+msgstr "موارد بیشتری اضافه کنید"
+
+msgid "forms.error.minLength"
+msgstr "متن خیلی کوتاه است"
+
+msgid "forms.error.minimum"
+msgstr "مقدار خیلی کوچک است"
+
+msgid "forms.error.pattern"
+msgstr "قالب معتبر نیست"
+
+msgid "forms.error.required"
+msgstr "این فیلد الزامی است"
+
+msgid "forms.error.type"
+msgstr "نوع مقدار درست نیست"
+
+msgid "forms.error.uniqueItems"
+msgstr "موارد باید متفاوت باشند"
+
+msgid "forms.json.invalid"
+msgstr "این JSON معتبر نیست"
+
+msgid "forms.name.exists"
+msgstr "شیئی با این نام از قبل وجود دارد"
+
+msgid "forms.name.invalid"
+msgstr "از حروف کوچک، ارقام و خط تیره استفاده کنید. با حرف یا رقم شروع و پایان دهید."
+
+msgid "forms.name.label"
+msgstr "نام"
+
+msgid "forms.schema.error"
+msgstr "طرح فرم بارگذاری نشد."
+
 msgid "list.actions.header"
 msgstr "عملیات"
 

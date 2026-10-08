@@ -16,6 +16,7 @@ import { useLiveList, type LiveState } from "../stream/live";
 import { refOf, type ResourceDef } from "./registry";
 import { useActionRunner } from "./useActionRunner";
 import type { ColumnContext } from "./columns";
+import { LazyCreateDialog, LazyEditDialog } from "../forms/LazyDialogs";
 
 type SortState = { id: string; direction: "ascending" | "descending" };
 
@@ -63,7 +64,8 @@ function ListBody({ def, namespace, project }: { def: ResourceDef; namespace: st
   const runner = useActionRunner(def);
   const [filter, setFilter] = useState("");
   const [sort, setSort] = useState<SortState>({ id: "name", direction: "ascending" });
-  const [, setCreating] = useState(false);
+  const [creating, setCreating] = useState(false);
+  const [editing, setEditing] = useState<KubeObject | undefined>();
   const canCreate = def.create && access[0] === "allowed";
   const context: ColumnContext = { locale, now: new Date(), detailPath: detailPathFor(def, project) };
   const title = i18n._(def.title);
@@ -134,7 +136,8 @@ function ListBody({ def, namespace, project }: { def: ResourceDef; namespace: st
           ]
         : [],
     );
-    return actionItems;
+    const editItem = def.edit && access[1] === "allowed" ? [{ id: "edit", label: t({ id: "common.action.edit", message: "Edit" }), tone: "neutral" as const, onSelect: () => setEditing(object) }] : [];
+    return [...editItem, ...actionItems];
   }
 
   const empty = (query.data?.items.length ?? 0) === 0;
@@ -185,6 +188,8 @@ function ListBody({ def, namespace, project }: { def: ResourceDef; namespace: st
         </Table>
       )}
       {runner.dialogs}
+      {creating ? <LazyCreateDialog def={def} onClose={() => setCreating(false)} /> : null}
+      {editing ? <LazyEditDialog def={def} object={editing} onClose={() => setEditing(undefined)} /> : null}
     </>
   );
 }

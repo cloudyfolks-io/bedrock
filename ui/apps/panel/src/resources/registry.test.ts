@@ -3,6 +3,7 @@ import { loadCrds } from "../test/crds";
 import { navigationFor } from "../shell/navigation";
 import { authnKinds, definitions, definitionFor, definitionsFor, notShown, primaryDefinitionsFor } from "./registry";
 import { readdirSync, readFileSync } from "node:fs";
+import { customizeValidator } from "@rjsf/validator-ajv8";
 import { resolve } from "node:path";
 
 const crds = loadCrds();
@@ -62,6 +63,19 @@ describe("registry", () => {
     for (const def of definitions) {
       expect(def.columns.length).toBeGreaterThan(0);
       expect(def.columns.length).toBeLessThanOrEqual(6);
+    }
+  });
+
+  it("TestFixturesMatchCRDSchemas", () => {
+    const validator = customizeValidator({ ajvOptionsOverrides: { strict: false } });
+    const directory = resolve(import.meta.dirname, "../fixtures");
+    for (const file of readdirSync(directory).filter((entry) => entry.endsWith(".json"))) {
+      const list = JSON.parse(readFileSync(resolve(directory, file), "utf8")) as { items: { kind: string; metadata: { name: string } }[] };
+      for (const item of list.items) {
+        const crd = crds.find((candidate) => candidate.kind === item.kind);
+        const errors = validator.validateFormData(item, crd?.schema as never).errors.map((error) => `${error.property} ${error.message}`);
+        expect(errors, `${file} ${item.metadata.name}`).toEqual([]);
+      }
     }
   });
 
