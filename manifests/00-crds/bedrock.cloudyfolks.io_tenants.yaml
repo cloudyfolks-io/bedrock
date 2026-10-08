@@ -54,6 +54,10 @@ spec:
                     x-kubernetes-validations:
                     - message: vpcCIDR must be a CIDR
                       rule: isCIDR(self)
+                    - message: vpcCIDR must be IPv4 with a prefix length of at most
+                        24
+                      rule: '!isCIDR(self) || (cidr(self).ip().family() == 4 && cidr(self).prefixLength()
+                        <= 24)'
                     - message: vpcCIDR is immutable
                       rule: self == oldSelf
                 required:
@@ -211,8 +215,8 @@ spec:
         x-kubernetes-validations:
         - message: the name must have at most 30 characters
           rule: self.metadata.name.size() <= 30
-        - message: the name must be a DNS label
-          rule: self.metadata.name.matches('^[a-z0-9]([-a-z0-9]*[a-z0-9])?$')
+        - message: the name must be lowercase letters and digits only
+          rule: self.metadata.name.matches('^[a-z0-9]+$')
     served: true
     storage: true
     subresources:

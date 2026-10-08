@@ -29,6 +29,7 @@ type TenantQuota struct {
 type TenantNetworkSpec struct {
 	// +kubebuilder:validation:MaxLength=43
 	// +kubebuilder:validation:XValidation:rule="isCIDR(self)",message="vpcCIDR must be a CIDR"
+	// +kubebuilder:validation:XValidation:rule="!isCIDR(self) || (cidr(self).ip().family() == 4 && cidr(self).prefixLength() <= 24)",message="vpcCIDR must be IPv4 with a prefix length of at most 24"
 	// +kubebuilder:validation:XValidation:rule="self == oldSelf",message="vpcCIDR is immutable"
 	VPCCIDR string `json:"vpcCIDR"`
 }
@@ -58,7 +59,7 @@ type TenantStatus struct {
 // +kubebuilder:printcolumn:name="Display Name",type=string,JSONPath=`.spec.displayName`
 // +kubebuilder:printcolumn:name="VPC",type=string,JSONPath=`.status.vpc`
 // +kubebuilder:validation:XValidation:rule="self.metadata.name.size() <= 30",message="the name must have at most 30 characters"
-// +kubebuilder:validation:XValidation:rule="self.metadata.name.matches('^[a-z0-9]([-a-z0-9]*[a-z0-9])?$')",message="the name must be a DNS label"
+// +kubebuilder:validation:XValidation:rule="self.metadata.name.matches('^[a-z0-9]+$')",message="the name must be lowercase letters and digits only"
 type Tenant struct {
 	metav1.TypeMeta   `json:",inline"`
 	metav1.ObjectMeta `json:"metadata,omitempty"`
@@ -94,7 +95,7 @@ type ProjectMember struct {
 type ProjectSpec struct {
 	// +kubebuilder:validation:MinLength=1
 	// +kubebuilder:validation:MaxLength=30
-	// +kubebuilder:validation:Pattern=`^[a-z0-9]([-a-z0-9]*[a-z0-9])?$`
+	// +kubebuilder:validation:Pattern=`^[a-z0-9]+$`
 	// +kubebuilder:validation:XValidation:rule="self == oldSelf",message="tenantRef is immutable"
 	TenantRef string `json:"tenantRef"`
 	// +optional
@@ -140,7 +141,7 @@ type ProjectList struct {
 type NetworkSpec struct {
 	// +kubebuilder:validation:MinLength=1
 	// +kubebuilder:validation:MaxLength=30
-	// +kubebuilder:validation:Pattern=`^[a-z0-9]([-a-z0-9]*[a-z0-9])?$`
+	// +kubebuilder:validation:Pattern=`^[a-z0-9]+$`
 	// +kubebuilder:validation:XValidation:rule="self == oldSelf",message="tenantRef is immutable"
 	TenantRef string `json:"tenantRef"`
 	// +kubebuilder:validation:MaxLength=43

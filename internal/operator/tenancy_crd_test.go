@@ -49,7 +49,7 @@ func TestTenantValidation(t *testing.T) {
 	badOwner.Spec.Owners = []v1alpha1.SubjectRef{{Kind: "Robot", Name: "r2"}}
 	createInvalid(t, c, badOwner, "Unsupported value")
 
-	createInvalid(t, c, validTenant("Acme"), "the name must be a DNS label")
+	createInvalid(t, c, validTenant("Acme"), "the name must be lowercase letters and digits only")
 	createInvalid(t, c, validTenant(strings.Repeat("a", 31)), "the name must have at most 30 characters")
 	createValid(t, c, validTenant(strings.Repeat("a", 30)))
 }
