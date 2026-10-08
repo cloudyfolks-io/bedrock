@@ -2,16 +2,23 @@ package backup
 
 import (
 	"context"
+	"strings"
 	"testing"
 	"time"
 
+	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/client-go/tools/record"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/client/fake"
+	"sigs.k8s.io/controller-runtime/pkg/client/interceptor"
 
 	"github.com/cloudyfolks-io/bedrock/api/v1alpha1"
 )
@@ -108,7 +115,7 @@ func createVMB(t *testing.T, name string, spec v1alpha1.VirtualMachineBackupSpec
 }
 
 func newBackupReconciler(now time.Time) *BackupReconciler {
-	return &BackupReconciler{Client: k8sClient, Now: func() time.Time { return now }}
+	return &BackupReconciler{Client: k8sClient, Now: func() time.Time { return now }, Recorder: record.NewFakeRecorder(20)}
 }
 
 func reconcileVMB(t *testing.T, r *BackupReconciler, name string) ctrl.Result {
@@ -156,7 +163,7 @@ func listVelero(t *testing.T, kind string, labels map[string]string) []unstructu
 	return list.Items
 }
 
-var testNow = time.Date(2026, 10, 8, 12, 0, 0, 0, time.UTC)
+var testNow = time.Now().UTC()
 
 func TestBackupOneShotCreatesOneVeleroBackup(t *testing.T) {
 	setLocation(t, "Available")
@@ -352,4 +359,145 @@ func TestBackupFailedOneShotIsNotRetried(t *testing.T) {
 	if got := getVMB(t, "fail").Status.Phase; got != v1alpha1.BackupPhaseFailed {
 		t.Fatalf("phase after delete %q", got)
 	}
+}
+
+func deleteRequestFor(t *testing.T, backupName string) error {
+	t.Helper()
+	_, err := getVelero(t, "DeleteBackupRequest", VeleroName("del", projectNamespace, backupName))
+	return err
+}
+
+func TestBackupPrunesBeyondKeep(t *testing.T) {
+	setLocation(t, "Available")
+	createVM(t, "prune-vm")
+	createVMB(t, "prune", v1alpha1.VirtualMachineBackupSpec{VMRef: "prune-vm", Schedule: "0 2 * * *", Keep: 2})
+	for i, day := range []string{"05", "06", "07", "08"} {
+		createFixtureBackup(t, "prune-2026100"+string(rune('1'+i)), "prune", "Completed", "2026-10-"+day+"T02:05:00Z")
+	}
+	r := newBackupReconciler(testNow)
+	reconcileVMB(t, r, "prune")
+	for _, old := range []string{"prune-20261001", "prune-20261002"} {
+		if err := deleteRequestFor(t, old); err != nil {
+			t.Fatalf("delete request for %s: %v", old, err)
+		}
+	}
+	for _, kept := range []string{"prune-20261003", "prune-20261004"} {
+		requireGone(t, deleteRequestFor(t, kept))
+	}
+	vmb := getVMB(t, "prune")
+	if len(vmb.Status.Backups) != 2 || vmb.Status.Backups[0].ID != "prune-20261004" || vmb.Status.Backups[1].ID != "prune-20261003" {
+		t.Fatalf("status backups %+v", vmb.Status.Backups)
+	}
+	reconcileVMB(t, r, "prune")
+	if len(getVMB(t, "prune").Status.Backups) != 2 {
+		t.Fatal("second reconcile changed the list")
+	}
+}
+
+func TestBackupPruneIgnoresOneShots(t *testing.T) {
+	setLocation(t, "Available")
+	createVM(t, "keep1-vm")
+	createVMB(t, "keep1", v1alpha1.VirtualMachineBackupSpec{VMRef: "keep1-vm", Keep: 1})
+	r := newBackupReconciler(testNow)
+	reconcileVMB(t, r, "keep1")
+	created, err := getVelero(t, "Backup", VeleroName("vmb", projectNamespace, "keep1"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	created.Object["status"] = map[string]any{"phase": "Completed", "completionTimestamp": "2026-10-08T02:05:00Z"}
+	if err := k8sClient.Update(context.Background(), created); err != nil {
+		t.Fatal(err)
+	}
+	createFixtureBackup(t, "keep1-extra", "keep1", "Completed", "2026-10-07T02:05:00Z")
+	reconcileVMB(t, r, "keep1")
+	requireGone(t, deleteRequestFor(t, "keep1-extra"))
+	requireGone(t, deleteRequestFor(t, created.GetName()))
+}
+
+func TestBackupDeletionDeletesTheScheduleAndBackups(t *testing.T) {
+	setLocation(t, "Available")
+	createVM(t, "del-vm")
+	createVMB(t, "del", v1alpha1.VirtualMachineBackupSpec{VMRef: "del-vm", Schedule: "0 2 * * *"})
+	createFixtureBackup(t, "del-20261007", "del", "Completed", "2026-10-07T02:05:00Z")
+	createFixtureBackup(t, "del-20261008", "del", "Completed", "2026-10-08T02:05:00Z")
+	r := newBackupReconciler(testNow)
+	reconcileVMB(t, r, "del")
+	if _, err := getVelero(t, "Schedule", VeleroName("vmb", projectNamespace, "del")); err != nil {
+		t.Fatal(err)
+	}
+	if err := k8sClient.Delete(context.Background(), getVMB(t, "del")); err != nil {
+		t.Fatal(err)
+	}
+	result := reconcileVMB(t, r, "del")
+	if result.RequeueAfter != 10*time.Second {
+		t.Fatalf("requeue %v", result.RequeueAfter)
+	}
+	_, err := getVelero(t, "Schedule", VeleroName("vmb", projectNamespace, "del"))
+	requireGone(t, err)
+	for _, id := range []string{"del-20261007", "del-20261008"} {
+		if err := deleteRequestFor(t, id); err != nil {
+			t.Fatalf("delete request for %s: %v", id, err)
+		}
+	}
+	vmb := getVMB(t, "del")
+	if len(vmb.Finalizers) != 1 {
+		t.Fatalf("finalizers %v", vmb.Finalizers)
+	}
+	requireReady(t, vmb, metav1.ConditionFalse, ReasonDeleting)
+	for _, id := range []string{"del-20261007", "del-20261008"} {
+		backup, err := getVelero(t, "Backup", id)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := k8sClient.Delete(context.Background(), backup); err != nil {
+			t.Fatal(err)
+		}
+	}
+	reconcileVMB(t, r, "del")
+	err = k8sClient.Get(context.Background(), types.NamespacedName{Namespace: projectNamespace, Name: "del"}, &v1alpha1.VirtualMachineBackup{})
+	requireGone(t, err)
+}
+
+func TestBackupDeletionTimesOut(t *testing.T) {
+	setLocation(t, "Available")
+	createVM(t, "late-vm")
+	createVMB(t, "late", v1alpha1.VirtualMachineBackupSpec{VMRef: "late-vm", Schedule: "0 2 * * *"})
+	createFixtureBackup(t, "late-20261008", "late", "Completed", "2026-10-08T02:05:00Z")
+	r := newBackupReconciler(testNow)
+	reconcileVMB(t, r, "late")
+	if err := k8sClient.Delete(context.Background(), getVMB(t, "late")); err != nil {
+		t.Fatal(err)
+	}
+	recorder := record.NewFakeRecorder(10)
+	late := &BackupReconciler{Client: k8sClient, Now: func() time.Time { return time.Now().Add(11 * time.Minute) }, Recorder: recorder}
+	reconcileVMB(t, late, "late")
+	err := k8sClient.Get(context.Background(), types.NamespacedName{Namespace: projectNamespace, Name: "late"}, &v1alpha1.VirtualMachineBackup{})
+	requireGone(t, err)
+	events := drainEvents(recorder)
+	if len(events) != 1 || !strings.Contains(events[0], "BackupsLeftBehind") || !strings.Contains(events[0], "1") {
+		t.Fatalf("events %v", events)
+	}
+}
+
+func TestBackupDeletionWithoutVelero(t *testing.T) {
+	scheme := runtime.NewScheme()
+	if err := corev1.AddToScheme(scheme); err != nil {
+		t.Fatal(err)
+	}
+	if err := v1alpha1.AddToScheme(scheme); err != nil {
+		t.Fatal(err)
+	}
+	now := metav1.NewTime(testNow)
+	vmb := &v1alpha1.VirtualMachineBackup{ObjectMeta: metav1.ObjectMeta{Name: "gone", Namespace: projectNamespace, Finalizers: []string{BackupFinalizer}, DeletionTimestamp: &now}, Spec: v1alpha1.VirtualMachineBackupSpec{VMRef: "web", Target: "default"}}
+	namespace := &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: projectNamespace, Labels: projectLabels}}
+	missing := func(context.Context, client.WithWatch, client.Object, ...client.DeleteOption) error {
+		return &meta.NoKindMatchError{GroupKind: schema.GroupKind{Group: "velero.io", Kind: "Schedule"}}
+	}
+	c := fake.NewClientBuilder().WithScheme(scheme).WithObjects(vmb, namespace).WithStatusSubresource(vmb).WithInterceptorFuncs(interceptor.Funcs{Delete: missing}).Build()
+	r := &BackupReconciler{Client: c, Now: func() time.Time { return testNow }, Recorder: record.NewFakeRecorder(10)}
+	if _, err := r.Reconcile(context.Background(), ctrl.Request{NamespacedName: client.ObjectKeyFromObject(vmb)}); err != nil {
+		t.Fatal(err)
+	}
+	err := c.Get(context.Background(), client.ObjectKeyFromObject(vmb), &v1alpha1.VirtualMachineBackup{})
+	requireGone(t, err)
 }

@@ -3,6 +3,7 @@ package backup
 import (
 	"context"
 	"errors"
+	"slices"
 	"time"
 
 	corev1 "k8s.io/api/core/v1"
@@ -12,6 +13,7 @@ import (
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/client-go/tools/record"
 	"k8s.io/client-go/util/retry"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -38,18 +40,23 @@ const (
 	ReasonBackupFailed           = "BackupFailed"
 	ReasonDeleting               = "Deleting"
 
-	requeueBusy = 15 * time.Second
+	requeueBusy      = 15 * time.Second
+	requeueDeleting  = 10 * time.Second
+	deletionTimeout  = 10 * time.Minute
+	ReasonLeftBehind = "BackupsLeftBehind"
 )
 
 var (
-	backupListGVK     = schema.GroupVersionKind{Group: "velero.io", Version: "v1", Kind: "BackupList"}
-	dataUploadListGVK = schema.GroupVersionKind{Group: "velero.io", Version: "v2alpha1", Kind: "DataUploadList"}
-	locationGVK       = schema.GroupVersionKind{Group: "velero.io", Version: "v1", Kind: "BackupStorageLocation"}
+	backupListGVK        = schema.GroupVersionKind{Group: "velero.io", Version: "v1", Kind: "BackupList"}
+	dataUploadListGVK    = schema.GroupVersionKind{Group: "velero.io", Version: "v2alpha1", Kind: "DataUploadList"}
+	locationGVK          = schema.GroupVersionKind{Group: "velero.io", Version: "v1", Kind: "BackupStorageLocation"}
+	deleteRequestListGVK = schema.GroupVersionKind{Group: "velero.io", Version: "v1", Kind: "DeleteBackupRequestList"}
 )
 
 type BackupReconciler struct {
-	Client client.Client
-	Now    func() time.Time
+	Client   client.Client
+	Now      func() time.Time
+	Recorder record.EventRecorder
 }
 
 func (r *BackupReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
@@ -214,6 +221,12 @@ func (r *BackupReconciler) drive(ctx context.Context, vmb *v1alpha1.VirtualMachi
 	infos, err := r.infosOf(ctx, backups)
 	if err != nil {
 		return ctrl.Result{}, err
+	}
+	if desired.GetKind() == "Schedule" {
+		infos, err = r.prune(ctx, vmb, scope, infos)
+		if err != nil {
+			return r.veleroFailure(ctx, vmb, err)
+		}
 	}
 	summary := Summarize(infos)
 	phase := summary.Phase
@@ -386,8 +399,96 @@ func (r *BackupReconciler) writeStatus(ctx context.Context, vmb *v1alpha1.Virtua
 	}
 }
 
+func (r *BackupReconciler) prune(ctx context.Context, vmb *v1alpha1.VirtualMachineBackup, scope Scope, infos []BackupInfo) ([]BackupInfo, error) {
+	deleting, err := r.pendingDeletions(ctx, scope)
+	if err != nil {
+		return nil, err
+	}
+	live := withoutIDs(infos, deleting)
+	doomed := Prune(live, KeepOf(*vmb))
+	for _, id := range doomed {
+		if err := r.requestDeletion(ctx, scope, id); err != nil {
+			return nil, err
+		}
+	}
+	return withoutIDs(live, doomed), nil
+}
+
+func (r *BackupReconciler) pendingDeletions(ctx context.Context, scope Scope) ([]string, error) {
+	labels := map[string]string{v1alpha1.LabelKind: "DeleteBackupRequest", v1alpha1.LabelTenant: scope.Tenant, v1alpha1.LabelProject: scope.Project}
+	requests, err := r.listVelero(ctx, deleteRequestListGVK, labels)
+	if err != nil {
+		return nil, err
+	}
+	names := make([]string, 0, len(requests))
+	for _, request := range requests {
+		name, _, _ := unstructured.NestedString(request.Object, "spec", "backupName")
+		names = append(names, name)
+	}
+	return names, nil
+}
+
+func (r *BackupReconciler) requestDeletion(ctx context.Context, scope Scope, backupName string) error {
+	return client.IgnoreAlreadyExists(r.Client.Create(ctx, DeleteBackupRequest(scope, backupName), client.FieldOwner(v1alpha1.BackupFieldManager)))
+}
+
+func withoutIDs(infos []BackupInfo, ids []string) []BackupInfo {
+	kept := make([]BackupInfo, 0, len(infos))
+	for _, info := range infos {
+		if !slices.Contains(ids, info.ID) {
+			kept = append(kept, info)
+		}
+	}
+	return kept
+}
+
 func (r *BackupReconciler) finalize(ctx context.Context, vmb *v1alpha1.VirtualMachineBackup) (ctrl.Result, error) {
-	return ctrl.Result{}, nil
+	if !controllerutil.ContainsFinalizer(vmb, BackupFinalizer) {
+		return ctrl.Result{}, nil
+	}
+	remaining, err := r.removeVeleroObjects(ctx, vmb)
+	if meta.IsNoMatchError(err) {
+		return ctrl.Result{}, r.releaseFinalizer(ctx, vmb)
+	}
+	if err != nil {
+		return ctrl.Result{}, err
+	}
+	if remaining == 0 {
+		return ctrl.Result{}, r.releaseFinalizer(ctx, vmb)
+	}
+	if r.Now().Sub(vmb.DeletionTimestamp.Time) > deletionTimeout {
+		r.Recorder.Eventf(vmb, corev1.EventTypeWarning, ReasonLeftBehind, "%d Velero backups remain after the deletion timeout", remaining)
+		return ctrl.Result{}, r.releaseFinalizer(ctx, vmb)
+	}
+	r.writeStatus(ctx, vmb, refusedStatus(*vmb, refusal{Reason: ReasonDeleting, Message: "the Velero backups are being deleted"}))
+	return ctrl.Result{RequeueAfter: requeueDeleting}, nil
+}
+
+func (r *BackupReconciler) removeVeleroObjects(ctx context.Context, vmb *v1alpha1.VirtualMachineBackup) (int, error) {
+	scope, refused, err := r.scopeOf(ctx, vmb)
+	if err != nil || refused != nil {
+		return 0, err
+	}
+	schedule := veleroStub("Schedule", VeleroName("vmb", scope.Namespace, vmb.Name))
+	if err := client.IgnoreNotFound(r.Client.Delete(ctx, schedule)); err != nil {
+		return 0, err
+	}
+	backups, err := r.listVelero(ctx, backupListGVK, v1alpha1.TenantLabels("VirtualMachineBackup", vmb.Name, scope.Tenant, scope.Project))
+	if err != nil {
+		return 0, err
+	}
+	for _, backup := range backups {
+		if err := r.requestDeletion(ctx, scope, backup.GetName()); err != nil {
+			return 0, err
+		}
+	}
+	return len(backups), nil
+}
+
+func (r *BackupReconciler) releaseFinalizer(ctx context.Context, vmb *v1alpha1.VirtualMachineBackup) error {
+	before := vmb.DeepCopy()
+	controllerutil.RemoveFinalizer(vmb, BackupFinalizer)
+	return client.IgnoreNotFound(r.Client.Patch(ctx, vmb, client.MergeFrom(before), client.FieldOwner(v1alpha1.BackupFieldManager)))
 }
 
 func (r *BackupReconciler) SetupWithManager(mgr ctrl.Manager) error {
