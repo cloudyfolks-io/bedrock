@@ -221,7 +221,7 @@ func ensureAuthnArgs(root string, service k0sService) (bool, error) {
 	if err != nil {
 		return false, err
 	}
-	next, changed, err := withAuthnArgs(current)
+	next, changed, err := withAPIServerArgs(current, apiserver.Args())
 	if err != nil || !changed {
 		return false, err
 	}
@@ -253,7 +253,7 @@ func configNewerThan(root string, apiserverStart time.Time) bool {
 	return err == nil && info.ModTime().After(apiserverStart.Add(apiserverStartSlack))
 }
 
-func withAuthnArgs(k0sYAML []byte) ([]byte, bool, error) {
+func withAPIServerArgs(k0sYAML []byte, wanted map[string]string) ([]byte, bool, error) {
 	var decoded map[string]any
 	if err := sigyaml.Unmarshal(k0sYAML, &decoded); err != nil {
 		return nil, false, err
@@ -264,7 +264,7 @@ func withAuthnArgs(k0sYAML []byte) ([]byte, bool, error) {
 	api := childMap(spec, "api")
 	args := childMap(api, "extraArgs")
 	changed := false
-	for name, value := range apiserver.Args() {
+	for name, value := range wanted {
 		if _, ok := args[name]; ok {
 			continue
 		}

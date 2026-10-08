@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"maps"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -17,6 +18,8 @@ import (
 	sigyaml "sigs.k8s.io/yaml"
 
 	"github.com/cloudyfolks-io/bedrock/api/v1alpha1"
+	"github.com/cloudyfolks-io/bedrock/internal/audit"
+	"github.com/cloudyfolks-io/bedrock/internal/authn/apiserver"
 	"github.com/cloudyfolks-io/bedrock/internal/host"
 	"github.com/cloudyfolks-io/bedrock/internal/pkgmgr"
 	"github.com/cloudyfolks-io/bedrock/internal/release"
@@ -366,7 +369,7 @@ func extraArgsOf(t *testing.T, raw []byte) map[string]any {
 
 func TestWithAuthnArgs(t *testing.T) {
 	old := []byte("apiVersion: k0s.k0sproject.io/v1beta1\nkind: ClusterConfig\nspec:\n  api:\n    externalAddress: 10.0.10.10\n    extraArgs:\n      default-not-ready-toleration-seconds: \"30\"\n      authentication-token-webhook-cache-ttl: 10s\n  telemetry:\n    enabled: false\n")
-	added, changed, err := withAuthnArgs(old)
+	added, changed, err := withAPIServerArgs(old, apiserver.Args())
 	if err != nil || !changed {
 		t.Fatalf("changed %v err %v", changed, err)
 	}
@@ -387,15 +390,15 @@ func TestWithAuthnArgs(t *testing.T) {
 	if doc["spec"].(map[string]any)["api"].(map[string]any)["externalAddress"] != "10.0.10.10" || doc["spec"].(map[string]any)["telemetry"] == nil {
 		t.Fatalf("other settings must stay: %s", added)
 	}
-	again, changed, err := withAuthnArgs(added)
+	again, changed, err := withAPIServerArgs(added, apiserver.Args())
 	if err != nil || changed || string(again) != string(added) {
 		t.Fatalf("a second pass must change nothing: %v %v", changed, err)
 	}
-	bare, changed, err := withAuthnArgs([]byte("apiVersion: k0s.k0sproject.io/v1beta1\nkind: ClusterConfig\n"))
+	bare, changed, err := withAPIServerArgs([]byte("apiVersion: k0s.k0sproject.io/v1beta1\nkind: ClusterConfig\n"), apiserver.Args())
 	if err != nil || !changed || len(extraArgsOf(t, bare)) != 4 {
 		t.Fatalf("a config without api gains the four flags: %s %v", bare, err)
 	}
-	empty, changed, err := withAuthnArgs(nil)
+	empty, changed, err := withAPIServerArgs(nil, apiserver.Args())
 	if err != nil || !changed || len(extraArgsOf(t, empty)) != 4 {
 		t.Fatalf("an empty config gains the four flags: %s %v", empty, err)
 	}
@@ -496,5 +499,28 @@ func TestK0sUpdateRestartsWhenKubeAPIServerPredatesTheConfig(t *testing.T) {
 	}
 	if want := []string{statusCall, statusCall, readyzCall(root)}; outcome.Message != "k0s already at v1.36.3+k0s.0" || !slices.Equal(fake.calls, want) {
 		t.Fatalf("a kube-apiserver newer than its config must not restart: %+v %v", outcome, fake.calls)
+	}
+}
+
+func TestWithAPIServerArgsMergesBothFlagSets(t *testing.T) {
+	merged := map[string]string{}
+	maps.Copy(merged, apiserver.Args())
+	maps.Copy(merged, audit.Args())
+	out, changed, err := withAPIServerArgs([]byte(plainConfig), merged)
+	if err != nil || !changed {
+		t.Fatalf("changed %v err %v", changed, err)
+	}
+	args := extraArgsOf(t, out)
+	for name, value := range merged {
+		if args[name] != value {
+			t.Errorf("%s = %v, want %s", name, args[name], value)
+		}
+	}
+	if args["default-not-ready-toleration-seconds"] != "30" {
+		t.Errorf("a user flag was lost: %v", args)
+	}
+	again, changed, err := withAPIServerArgs(out, merged)
+	if err != nil || changed || string(again) != string(out) {
+		t.Fatalf("a second merge must change nothing: %v %v", changed, err)
 	}
 }

@@ -15,6 +15,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	"github.com/cloudyfolks-io/bedrock/api/v1alpha1"
+	"github.com/cloudyfolks-io/bedrock/internal/authn/apiserver"
 	"github.com/cloudyfolks-io/bedrock/internal/host"
 )
 
@@ -255,7 +256,7 @@ func controllerService() k0sService {
 
 func (f authnArgsFixture) runsWithFlagAndConfig(t *testing.T) {
 	t.Helper()
-	withArgs, _, err := withAuthnArgs([]byte(plainConfig))
+	withArgs, _, err := withAPIServerArgs([]byte(plainConfig), apiserver.Args())
 	if err != nil {
 		t.Fatal(err)
 	}
