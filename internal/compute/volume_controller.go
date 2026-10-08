@@ -39,14 +39,6 @@ func (r *VolumeReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctr
 	if err := r.Client.Get(ctx, req.NamespacedName, &volume); err != nil {
 		return ctrl.Result{}, client.IgnoreNotFound(err)
 	}
-	var ns corev1.Namespace
-	if err := r.Client.Get(ctx, client.ObjectKey{Name: volume.Namespace}, &ns); err != nil {
-		return ctrl.Result{}, err
-	}
-	labels, inProject := OwnerLabels("Volume", volume.Name, ns)
-	if !inProject {
-		return ctrl.Result{}, r.writeStatus(ctx, volume, volumeOutcome{Gate: gateOf(ReasonNotInProject, "the namespace is not a project namespace")})
-	}
 	var vms v1alpha1.VirtualMachineList
 	if err := r.Client.List(ctx, &vms, client.InNamespace(volume.Namespace)); err != nil {
 		return ctrl.Result{}, err
@@ -55,19 +47,54 @@ func (r *VolumeReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctr
 	if !volume.DeletionTimestamp.IsZero() {
 		return ctrl.Result{}, r.release(ctx, volume, owner)
 	}
+	var ns corev1.Namespace
+	if err := r.Client.Get(ctx, client.ObjectKey{Name: volume.Namespace}, &ns); err != nil {
+		return ctrl.Result{}, err
+	}
+	labels, inProject := OwnerLabels("Volume", volume.Name, ns)
+	if !inProject {
+		return ctrl.Result{}, r.writeStatus(ctx, volume, volumeOutcome{Gate: gateOf(ReasonNotInProject, "the namespace is not a project namespace")})
+	}
 	if holder, held := volume.Annotations[AnnotationRestoreHold]; held {
 		return ctrl.Result{}, r.writeStatus(ctx, volume, volumeOutcome{Gate: gateOf(ReasonRestoreInProgress, "the restore %q holds the volume", holder)})
 	}
-	if controllerutil.AddFinalizer(&volume, FinalizerVolumeInUse) {
-		if err := r.Client.Update(ctx, &volume, client.FieldOwner(v1alpha1.ComputeFieldManager)); err != nil {
-			return ctrl.Result{}, err
-		}
+	volume, err := r.addFinalizer(ctx, volume)
+	if err != nil {
+		return ctrl.Result{}, err
 	}
 	done, err := r.converge(ctx, volume, labels, owner)
 	if err != nil {
 		return ctrl.Result{}, err
 	}
 	return ctrl.Result{}, r.writeStatus(ctx, volume, done)
+}
+
+func (r *VolumeReconciler) addFinalizer(ctx context.Context, volume v1alpha1.Volume) (v1alpha1.Volume, error) {
+	if controllerutil.ContainsFinalizer(&volume, FinalizerVolumeInUse) {
+		return volume, nil
+	}
+	err := retry.RetryOnConflict(retry.DefaultRetry, func() error {
+		if err := r.Client.Get(ctx, client.ObjectKeyFromObject(&volume), &volume); err != nil {
+			return err
+		}
+		if !controllerutil.AddFinalizer(&volume, FinalizerVolumeInUse) {
+			return nil
+		}
+		return r.Client.Update(ctx, &volume, client.FieldOwner(v1alpha1.ComputeFieldManager))
+	})
+	return volume, err
+}
+
+func (r *VolumeReconciler) removeFinalizer(ctx context.Context, volume v1alpha1.Volume) error {
+	return retry.RetryOnConflict(retry.DefaultRetry, func() error {
+		if err := r.Client.Get(ctx, client.ObjectKeyFromObject(&volume), &volume); err != nil {
+			return client.IgnoreNotFound(err)
+		}
+		if !controllerutil.RemoveFinalizer(&volume, FinalizerVolumeInUse) {
+			return nil
+		}
+		return client.IgnoreNotFound(r.Client.Update(ctx, &volume, client.FieldOwner(v1alpha1.ComputeFieldManager)))
+	})
 }
 
 func (r *VolumeReconciler) release(ctx context.Context, volume v1alpha1.Volume, owner string) error {
@@ -77,8 +104,7 @@ func (r *VolumeReconciler) release(ctx context.Context, volume v1alpha1.Volume, 
 	if owner != "" {
 		return r.writeStatus(ctx, volume, volumeOutcome{Gate: gateOf(ReasonInUse, "the virtual machine %q uses the volume", owner), AttachedTo: owner, Phase: v1alpha1.VolumePhaseInUse})
 	}
-	controllerutil.RemoveFinalizer(&volume, FinalizerVolumeInUse)
-	return client.IgnoreNotFound(r.Client.Update(ctx, &volume, client.FieldOwner(v1alpha1.ComputeFieldManager)))
+	return r.removeFinalizer(ctx, volume)
 }
 
 func (r *VolumeReconciler) converge(ctx context.Context, volume v1alpha1.Volume, labels map[string]string, owner string) (volumeOutcome, error) {

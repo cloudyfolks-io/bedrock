@@ -349,3 +349,19 @@ func TestActualSizeGi(t *testing.T) {
 		t.Fatal("sizes differ")
 	}
 }
+
+func TestVolumeDeletionIgnoresChangedNamespaceLabels(t *testing.T) {
+	c, _ := startEnv(t)
+	ns := uniqueNamespace(t, c)
+	newVolume(t, c, ns, "data1", func(v *v1alpha1.Volume) {})
+	reconcileVolume(t, c, ns, "data1")
+	var namespace corev1.Namespace
+	must(t, c.Get(context.Background(), client.ObjectKey{Name: ns}, &namespace))
+	namespace.Labels = nil
+	must(t, c.Update(context.Background(), &namespace))
+	must(t, c.Delete(context.Background(), &v1alpha1.Volume{ObjectMeta: metav1.ObjectMeta{Namespace: ns, Name: "data1"}}))
+	reconcileVolume(t, c, ns, "data1")
+	if err := c.Get(context.Background(), client.ObjectKey{Namespace: ns, Name: "data1"}, &v1alpha1.Volume{}); !apierrors.IsNotFound(err) {
+		t.Fatalf("the volume must be gone: %v", err)
+	}
+}
