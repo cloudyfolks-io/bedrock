@@ -1,0 +1,27 @@
+upgradeCRDs: false
+cleanUpCRDs: false
+backupsEnabled: false
+snapshotsEnabled: false
+deployNodeAgent: true
+credentials:
+  useSecret: false
+configuration:
+  features: EnableCSI
+  uploaderType: kopia
+  defaultSnapshotMoveData: true
+  defaultVolumesToFsBackup: false
+  backupStorageLocation: []
+  volumeSnapshotLocation: []
+initContainers:
+  - name: velero-plugin-for-aws
+    image: docker.io/velero/velero-plugin-for-aws:v1.14.4
+    imagePullPolicy: IfNotPresent
+    volumeMounts:
+      - mountPath: /target
+        name: plugins
+  - name: kubevirt-velero-plugin
+    image: quay.io/kubevirt/kubevirt-velero-plugin:v0.9.1
+    imagePullPolicy: IfNotPresent
+    volumeMounts:
+      - mountPath: /target
+        name: plugins
