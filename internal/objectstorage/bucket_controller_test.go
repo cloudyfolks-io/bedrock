@@ -412,3 +412,34 @@ func TestBucketQuotaChangeIsReported(t *testing.T) {
 		t.Fatalf("bucketMaxSize %q", size)
 	}
 }
+
+func TestBucketReportsAnUnavailableStoreAsNotReady(t *testing.T) {
+	fresh(t)
+	store, url := newFakeStore(t, answerEverythingWith(503))
+	r := bucketReconciler(url)
+	boundBucket(t, r, nil, v1alpha1.ObjectStorageBucketSpec{UserRef: "app", Versioning: true})
+	reconcileBucket(t, r, "acme-prod", "data")
+	requireBucketReason(t, "acme-prod", "data", metav1.ConditionFalse, "StoreNotReady")
+	if len(store.take()) == 0 {
+		t.Fatal("the store was not called")
+	}
+}
+
+func TestBucketReportsAnUnreachableStoreAsNotReady(t *testing.T) {
+	fresh(t)
+	_, url := newFakeStore(t, answerEverythingWith(200))
+	r := bucketReconciler(url)
+	boundBucket(t, r, nil, v1alpha1.ObjectStorageBucketSpec{UserRef: "app", Policy: examplePolicy})
+	r.Endpoint = "http://127.0.0.1:1"
+	reconcileBucket(t, r, "acme-prod", "data")
+	requireBucketReason(t, "acme-prod", "data", metav1.ConditionFalse, "StoreNotReady")
+}
+
+func TestBucketKeepsClientErrorsAsRefusals(t *testing.T) {
+	fresh(t)
+	_, url := newFakeStore(t, answerEverythingWith(403))
+	r := bucketReconciler(url)
+	boundBucket(t, r, nil, v1alpha1.ObjectStorageBucketSpec{UserRef: "app", Versioning: true})
+	reconcileBucket(t, r, "acme-prod", "data")
+	requireBucketReason(t, "acme-prod", "data", metav1.ConditionFalse, "VersioningFailed")
+}

@@ -28,6 +28,15 @@ type Client struct {
 	Now  func() time.Time
 }
 
+type UnavailableError struct{ message string }
+
+func (e *UnavailableError) Error() string { return e.message }
+
+func IsUnavailable(err error) bool {
+	var unavailable *UnavailableError
+	return errors.As(err, &unavailable)
+}
+
 type call struct {
 	operation, method, endpoint, region, bucket, query string
 	creds                                              Credentials
@@ -120,12 +129,12 @@ func (c *Client) do(ctx context.Context, in call) (answer, error) {
 	}
 	response, err := c.client().Do(request)
 	if err != nil {
-		return answer{}, fmt.Errorf("s3 %s %s: store unreachable", in.operation, in.bucket)
+		return answer{}, &UnavailableError{message: fmt.Sprintf("s3 %s %s: store unreachable", in.operation, in.bucket)}
 	}
 	defer response.Body.Close()
 	body, err := io.ReadAll(io.LimitReader(response.Body, 1<<20))
 	if err != nil {
-		return answer{}, fmt.Errorf("s3 %s %s: answer cannot be read", in.operation, in.bucket)
+		return answer{}, &UnavailableError{message: fmt.Sprintf("s3 %s %s: answer cannot be read", in.operation, in.bucket)}
 	}
 	return answer{status: response.StatusCode, code: errorCode(response.StatusCode, body), body: body}, nil
 }
@@ -161,5 +170,9 @@ func failure(got answer, bucket, operation string) error {
 	if got.status >= http.StatusOK && got.status < http.StatusMultipleChoices {
 		return nil
 	}
-	return fmt.Errorf("s3 %s %s: %d %s", operation, bucket, got.status, got.code)
+	message := fmt.Sprintf("s3 %s %s: %d %s", operation, bucket, got.status, got.code)
+	if got.status >= http.StatusInternalServerError {
+		return &UnavailableError{message: message}
+	}
+	return errors.New(message)
 }

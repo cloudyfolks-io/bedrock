@@ -152,12 +152,19 @@ func (r *BucketReconciler) applyS3(ctx context.Context, bucket *v1alpha1.ObjectS
 		return outcome{reason: "PolicyInvalid", message: err.Error(), requeue: steadyRequeue}, nil
 	}
 	if failed, err := r.applyVersioning(ctx, bucket, creds, name); failed != nil || err != nil {
-		return outcome{reason: "VersioningFailed", message: messageOf(failed), requeue: pendingRequeue}, err
+		return outcome{reason: failureReason(failed, "VersioningFailed"), message: messageOf(failed), requeue: pendingRequeue}, err
 	}
 	if failed, err := r.applyPolicy(ctx, bucket, creds, name); failed != nil || err != nil {
-		return outcome{reason: "PolicyRejected", message: messageOf(failed), requeue: pendingRequeue}, err
+		return outcome{reason: failureReason(failed, "PolicyRejected"), message: messageOf(failed), requeue: pendingRequeue}, err
 	}
 	return outcome{reason: reasonBound, requeue: steadyRequeue}, nil
+}
+
+func failureReason(err error, refused string) string {
+	if s3.IsUnavailable(err) {
+		return reasonStoreNotReady
+	}
+	return refused
 }
 
 func messageOf(err error) string {
