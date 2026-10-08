@@ -143,7 +143,6 @@ vm_provision() {
 #!/bin/sh
 set -e
 sysctl -w fs.inotify.max_user_instances=8192 fs.inotify.max_user_watches=1048576 vm.max_map_count=262144
-apt-get install -y -qq jq >/dev/null
 cat >/usr/local/bin/kubectl <<'KUBECTL'
 #!/bin/sh
 exec /usr/local/bin/k0s kubectl "$@"
@@ -311,6 +310,7 @@ run_e2e_tenant() {
   CGO_ENABLED=0 GOOS=linux GOARCH="$arch" go test -c -tags e2e -o "dist/e2e-tenant-$arch.test" ./test/e2e/tenant
   ARCH="$arch" hack/e2e-tenant-images.sh
   vm_osd=1 vm_up
+  in_vm "" "apt-get update -qq && apt-get install -y -qq jq"
   in_vm "KUBECONFIG=/var/lib/k0s/pki/admin.conf BUNDLE=dist/bedrock-dev-bundle-$arch.tar.zst IMAGE=localhost:$port/bedrock:dev BIN=dist/bedrock-dev-linux-$arch ARCH=$arch EMULATION=$(emulation_flag) E2E_OSD_DEVICE=blank E2E_PROVIDER_NETWORK=public" hack/e2e-init.sh
   in_vm "BEDROCK_BIN=dist/bedrock-dev-linux-$arch E2E_TEST=dist/e2e-tenant-$arch.test" hack/e2e-tenant.sh
   rm -f "dist/bedrock-dev-bundle-$arch.tar.zst"
