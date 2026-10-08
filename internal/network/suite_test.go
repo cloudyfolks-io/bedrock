@@ -12,6 +12,7 @@ import (
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/util/flowcontrol"
@@ -19,6 +20,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/envtest"
 
 	"github.com/cloudyfolks-io/bedrock/api/v1alpha1"
+	"github.com/cloudyfolks-io/bedrock/internal/network/fabric"
 	"github.com/cloudyfolks-io/bedrock/internal/testenv"
 )
 
@@ -114,3 +116,43 @@ func setSetting(t *testing.T, key, value string) {
 	}
 	t.Cleanup(func() { _ = c.Delete(ctx, &v1alpha1.Setting{ObjectMeta: metav1.ObjectMeta{Name: key}}) })
 }
+
+var purgedBedrockKinds = []string{"Network", "Subnet", "ElasticIP", "LoadBalancer", "DNSZone", "SecurityGroup", "VirtualMachine"}
+
+var purgedFabricKinds = []schema.GroupVersionKind{
+	fabric.OvnFipGVK, fabric.OvnEipGVK, fabric.RouterLBRuleGVK, fabric.DNSZoneGVK, fabric.SecurityGroupGVK,
+	fabric.SubnetGVK, fabric.VpcGVK, fabric.VlanGVK, fabric.ProviderNetworkGVK, fabric.BgpConfGVK, fabric.IPGVK,
+}
+
+func purgeKind(ctx context.Context, c client.Client, gvk schema.GroupVersionKind) {
+	items, err := listObjects(ctx, c, gvk)
+	if err != nil {
+		return
+	}
+	for _, item := range items {
+		if len(item.GetFinalizers()) > 0 {
+			item.SetFinalizers(nil)
+			_ = c.Update(ctx, item)
+		}
+		_ = c.Delete(ctx, item)
+	}
+}
+
+func cleanEnv(t *testing.T) client.Client {
+	t.Helper()
+	c, _ := testEnv(t)
+	t.Cleanup(func() {
+		ctx := context.Background()
+		for _, kind := range purgedBedrockKinds {
+			purgeKind(ctx, c, v1alpha1.GroupVersion.WithKind(kind))
+		}
+		for _, gvk := range purgedFabricKinds {
+			purgeKind(ctx, c, gvk)
+		}
+		purgeKind(ctx, c, schema.GroupVersionKind{Group: "k8s.cni.cncf.io", Version: "v1", Kind: "NetworkAttachmentDefinition"})
+		purgeKind(ctx, c, networkPolicyGVK)
+	})
+	return c
+}
+
+var networkPolicyGVK = schema.GroupVersionKind{Group: "networking.k8s.io", Version: "v1", Kind: "NetworkPolicy"}
