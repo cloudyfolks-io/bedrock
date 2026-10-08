@@ -10,7 +10,7 @@ import ImagesPage from "./ImagesPage";
 
 const projects = { projects: [{ name: "web", displayName: "Web", tenant: "acme", namespace: "acme-web" }] };
 const api = "/apis/bedrock.cloudyfolks.io/v1alpha1/namespaces/acme-web";
-const grant = { url: "https://upload.lab.example.test/v1beta1/upload-async", token: "tok-secret-1", expiresAt: "2026-10-08T13:00:00Z" };
+const grant = { url: "https://upload.e2e.bedrock.test/v1beta1/upload-async", token: "tok-secret-1", expiresAt: "2026-10-08T13:00:00Z" };
 
 function render(upload: () => { status?: number; body?: unknown } = () => ({ body: grant })) {
   return renderPanel(
@@ -107,4 +107,16 @@ describe("ImageUpload", () => {
     expect(await within(dialog).findByText("image is not waiting for upload")).toBeTruthy();
     expect(FakeXhr.instances).toHaveLength(0);
   });
+
+  it.each(["https://evil.test/v1beta1/upload-async", "https://upload.e2e.bedrock.test.evil/v1beta1/upload-async", "http://upload.e2e.bedrock.test/v1beta1/upload-async", "https://upload.e2e.bedrock.test:8443/v1beta1/upload-async", "https://user@upload.e2e.bedrock.test/x"])(
+    "refuses to send the token to %s",
+    async (url) => {
+      const user = userEvent.setup();
+      render(() => ({ body: { ...grant, url } }));
+      const dialog = await openUpload(user);
+      await user.click(within(dialog).getByRole("button", { name: "Upload" }));
+      expect(await within(dialog).findByText(/not on this platform/)).toBeTruthy();
+      expect(FakeXhr.instances).toHaveLength(0);
+    },
+  );
 });

@@ -610,6 +610,9 @@ msgstr "Catalog"
 msgid "images.tab.project"
 msgstr "Project images"
 
+msgid "images.upload.badUrl"
+msgstr "The upload address is not on this platform. The upload was stopped."
+
 msgid "images.upload.done"
 msgstr "Upload finished"
 

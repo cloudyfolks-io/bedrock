@@ -61,7 +61,7 @@ describe("IsoWizard", () => {
 
   it("uploads a new ISO and selects it", async () => {
     const user = userEvent.setup();
-    const grant = { url: "https://upload.lab.example.test/v1beta1/upload-async", token: "tok", expiresAt: "2026-10-09T00:00:00Z" };
+    const grant = { url: "https://upload.e2e.bedrock.test/v1beta1/upload-async", token: "tok", expiresAt: "2026-10-09T00:00:00Z" };
     renderWizard(<IsoWizard />, path, {
       api: {
         [`GET ${ns}/images`]: { body: imageList() },

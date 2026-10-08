@@ -6,7 +6,8 @@ import { useHttp } from "../../api/HttpProvider";
 import { listKey } from "../../api/kube";
 import type { KubeObject } from "../../api/types";
 import { definitionFor, refOf } from "../../resources/registry";
-import { requestUploadToken, uploadFile } from "./imageUpload";
+import { useSession } from "../../api/session";
+import { isUploadUrl, requestUploadToken, uploadFile } from "./imageUpload";
 
 export function ImageUpload({ image, onClose, onUploaded }: { image: KubeObject; onClose: () => void; onUploaded?: () => void }) {
   const { t } = useLingui();
@@ -14,6 +15,7 @@ export function ImageUpload({ image, onClose, onUploaded }: { image: KubeObject;
   const toast = useToast();
   const queryClient = useQueryClient();
   const def = definitionFor("images");
+  const host = useSession().data?.host ?? "";
   const [file, setFile] = useState<File | undefined>();
   const [progress, setProgress] = useState<{ loaded: number; total: number } | undefined>();
   const [error, setError] = useState<string | undefined>();
@@ -30,6 +32,10 @@ export function ImageUpload({ image, onClose, onUploaded }: { image: KubeObject;
     controller.current = abort;
     try {
       const grant = await requestUploadToken(http, image.metadata.namespace, image.metadata.name);
+      if (!isUploadUrl(grant.url, host)) {
+        setError(t({ id: "images.upload.badUrl", message: "The upload address is not on this platform. The upload was stopped." }));
+        return;
+      }
       await uploadFile(grant.url, grant.token, file, (loaded, total) => setProgress({ loaded, total }), abort.signal);
       toast.show({ tone: "success", title: t({ id: "images.upload.done", message: "Upload finished" }) });
       if (def) {

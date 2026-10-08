@@ -610,6 +610,9 @@ msgstr "کاتالوگ"
 msgid "images.tab.project"
 msgstr "تصاویر پروژه"
 
+msgid "images.upload.badUrl"
+msgstr "نشانی بارگذاری متعلق به این پلتفرم نیست. بارگذاری متوقف شد."
+
 msgid "images.upload.done"
 msgstr "بارگذاری تمام شد"
 

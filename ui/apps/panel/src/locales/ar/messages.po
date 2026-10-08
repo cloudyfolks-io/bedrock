@@ -610,6 +610,9 @@ msgstr "الفهرس"
 msgid "images.tab.project"
 msgstr "صور المشروع"
 
+msgid "images.upload.badUrl"
+msgstr "عنوان الرفع ليس على هذه المنصة. تم إيقاف الرفع."
+
 msgid "images.upload.done"
 msgstr "اكتمل الرفع"
 
