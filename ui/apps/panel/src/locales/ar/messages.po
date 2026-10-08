@@ -1176,3 +1176,120 @@ msgstr "الحجم الجديد (GiB)"
 
 msgid "volumes.expand.title"
 msgstr "توسيع {0}"
+
+msgid "wizard.back"
+msgstr "السابق"
+
+msgid "wizard.create"
+msgstr "إنشاء جهاز افتراضي"
+
+msgid "wizard.error.duplicate"
+msgstr "يوجد جهاز افتراضي بهذا الاسم بالفعل"
+
+msgid "wizard.error.image"
+msgstr "اختر صورة"
+
+msgid "wizard.error.iso"
+msgstr "اختر صورة ISO"
+
+msgid "wizard.error.name"
+msgstr "استخدم أحرفًا صغيرة وأرقامًا وشرطات. ابدأ وانتهِ بحرف أو رقم."
+
+msgid "wizard.error.rootDisk"
+msgstr "أدخل حجم القرص الجذري بـ GiB"
+
+msgid "wizard.error.rootDiskSmall"
+msgstr "القرص الجذري أصغر من الصورة"
+
+msgid "wizard.error.size"
+msgstr "اختر نوع النسخة"
+
+msgid "wizard.error.subnet"
+msgstr "اختر شبكة فرعية"
+
+msgid "wizard.error.userData"
+msgstr "يجب أن تبدأ بيانات cloud-init بـ #cloud-config أو #!"
+
+msgid "wizard.extraVolumes"
+msgstr "إرفاق أقراص موجودة"
+
+msgid "wizard.image"
+msgstr "الصورة"
+
+msgid "wizard.iso"
+msgstr "ISO التثبيت"
+
+msgid "wizard.iso.title"
+msgstr "تثبيت جهاز افتراضي من ISO"
+
+msgid "wizard.leave.confirm"
+msgstr "تجاهل"
+
+msgid "wizard.leave.description"
+msgstr "لم يتم إنشاء الجهاز الافتراضي بعد."
+
+msgid "wizard.leave.title"
+msgstr "هل تريد تجاهل تغييراتك؟"
+
+msgid "wizard.next"
+msgstr "التالي"
+
+msgid "wizard.noAccess"
+msgstr "لا يمكنك إنشاء أجهزة افتراضية هنا"
+
+msgid "wizard.osPreference"
+msgstr "تفضيل نظام التشغيل"
+
+msgid "wizard.rootDisk"
+msgstr "حجم القرص الجذري (GiB)"
+
+msgid "wizard.secureBoot"
+msgstr "الإقلاع الآمن"
+
+msgid "wizard.startAfter"
+msgstr "البدء بعد الإنشاء"
+
+msgid "wizard.step.access"
+msgstr "الوصول"
+
+msgid "wizard.step.basics"
+msgstr "الأساسيات"
+
+msgid "wizard.step.disks"
+msgstr "الأقراص"
+
+msgid "wizard.step.firmware"
+msgstr "البرنامج الثابت"
+
+msgid "wizard.step.image"
+msgstr "الصورة"
+
+msgid "wizard.step.iso"
+msgstr "ISO"
+
+msgid "wizard.step.network"
+msgstr "الشبكة"
+
+msgid "wizard.step.review"
+msgstr "المراجعة"
+
+msgid "wizard.step.size"
+msgstr "الحجم"
+
+msgid "wizard.steps"
+msgstr "الخطوات"
+
+msgid "wizard.title"
+msgstr "إنشاء جهاز افتراضي"
+
+msgid "wizard.uploadIso"
+msgstr "رفع ISO جديد"
+
+msgid "wizard.uploadIso.waiting"
+msgstr "جارٍ تجهيز الرفع"
+
+msgid "wizard.userData"
+msgstr "بيانات مستخدم cloud-init"
+
+msgid "wizard.virtioWin"
+msgstr "إرفاق برامج تشغيل virtio-win"

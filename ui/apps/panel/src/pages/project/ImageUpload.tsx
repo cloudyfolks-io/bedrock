@@ -8,7 +8,7 @@ import type { KubeObject } from "../../api/types";
 import { definitionFor, refOf } from "../../resources/registry";
 import { requestUploadToken, uploadFile } from "./imageUpload";
 
-export function ImageUpload({ image, onClose }: { image: KubeObject; onClose: () => void }) {
+export function ImageUpload({ image, onClose, onUploaded }: { image: KubeObject; onClose: () => void; onUploaded?: () => void }) {
   const { t } = useLingui();
   const http = useHttp();
   const toast = useToast();
@@ -35,6 +35,7 @@ export function ImageUpload({ image, onClose }: { image: KubeObject; onClose: ()
       if (def) {
         void queryClient.invalidateQueries({ queryKey: listKey(refOf(def), image.metadata.namespace, {}) });
       }
+      onUploaded?.();
       onClose();
     } catch (reason) {
       if (!(reason instanceof DOMException && reason.name === "AbortError")) {

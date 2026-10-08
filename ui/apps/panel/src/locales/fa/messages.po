@@ -1176,3 +1176,120 @@ msgstr "اندازه جدید (گیبی‌بایت)"
 
 msgid "volumes.expand.title"
 msgstr "افزایش اندازه {0}"
+
+msgid "wizard.back"
+msgstr "بازگشت"
+
+msgid "wizard.create"
+msgstr "ایجاد ماشین مجازی"
+
+msgid "wizard.error.duplicate"
+msgstr "ماشین مجازی‌ای با این نام از قبل وجود دارد"
+
+msgid "wizard.error.image"
+msgstr "یک تصویر انتخاب کنید"
+
+msgid "wizard.error.iso"
+msgstr "یک تصویر ISO انتخاب کنید"
+
+msgid "wizard.error.name"
+msgstr "از حروف کوچک، ارقام و خط تیره استفاده کنید. با حرف یا رقم شروع و پایان دهید."
+
+msgid "wizard.error.rootDisk"
+msgstr "اندازه دیسک ریشه را به گیبی‌بایت وارد کنید"
+
+msgid "wizard.error.rootDiskSmall"
+msgstr "دیسک ریشه از تصویر کوچک‌تر است"
+
+msgid "wizard.error.size"
+msgstr "یک نوع نمونه انتخاب کنید"
+
+msgid "wizard.error.subnet"
+msgstr "یک زیرشبکه انتخاب کنید"
+
+msgid "wizard.error.userData"
+msgstr "داده cloud-init باید با #cloud-config یا #! شروع شود"
+
+msgid "wizard.extraVolumes"
+msgstr "اتصال حجم‌های موجود"
+
+msgid "wizard.image"
+msgstr "تصویر"
+
+msgid "wizard.iso"
+msgstr "ISO نصب"
+
+msgid "wizard.iso.title"
+msgstr "نصب ماشین مجازی از ISO"
+
+msgid "wizard.leave.confirm"
+msgstr "حذف تغییرات"
+
+msgid "wizard.leave.description"
+msgstr "ماشین مجازی هنوز ایجاد نشده است."
+
+msgid "wizard.leave.title"
+msgstr "تغییرات شما حذف شود؟"
+
+msgid "wizard.next"
+msgstr "بعدی"
+
+msgid "wizard.noAccess"
+msgstr "شما اجازه ایجاد ماشین مجازی اینجا را ندارید"
+
+msgid "wizard.osPreference"
+msgstr "ترجیح سیستم‌عامل"
+
+msgid "wizard.rootDisk"
+msgstr "اندازه دیسک ریشه (گیبی‌بایت)"
+
+msgid "wizard.secureBoot"
+msgstr "راه‌اندازی امن"
+
+msgid "wizard.startAfter"
+msgstr "شروع پس از ایجاد"
+
+msgid "wizard.step.access"
+msgstr "دسترسی"
+
+msgid "wizard.step.basics"
+msgstr "مبانی"
+
+msgid "wizard.step.disks"
+msgstr "دیسک‌ها"
+
+msgid "wizard.step.firmware"
+msgstr "میان‌افزار"
+
+msgid "wizard.step.image"
+msgstr "تصویر"
+
+msgid "wizard.step.iso"
+msgstr "ISO"
+
+msgid "wizard.step.network"
+msgstr "شبکه"
+
+msgid "wizard.step.review"
+msgstr "بررسی"
+
+msgid "wizard.step.size"
+msgstr "اندازه"
+
+msgid "wizard.steps"
+msgstr "گام‌ها"
+
+msgid "wizard.title"
+msgstr "ایجاد ماشین مجازی"
+
+msgid "wizard.uploadIso"
+msgstr "بارگذاری ISO جدید"
+
+msgid "wizard.uploadIso.waiting"
+msgstr "در حال آماده‌سازی بارگذاری"
+
+msgid "wizard.userData"
+msgstr "داده کاربر cloud-init"
+
+msgid "wizard.virtioWin"
+msgstr "اتصال درایورهای virtio-win"

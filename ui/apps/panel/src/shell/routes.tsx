@@ -29,6 +29,8 @@ const NetworksPage = lazy(() => import("../pages/project/NetworksPage"));
 const ElasticIpsPage = lazy(() => import("../pages/project/ElasticIpsPage"));
 const ObjectUsersPage = lazy(() => import("../pages/project/ObjectUsersPage"));
 const SecurityGroupDetailPage = lazy(() => import("../pages/project/SecurityGroupDetailPage"));
+const VmWizard = lazy(() => import("../wizard/VmWizard"));
+const IsoWizard = lazy(() => import("../wizard/IsoWizard"));
 const SettingsPage = lazy(() => import("../pages/admin/SettingsPage"));
 
 const listPages: Record<string, (def: ResourceDef) => ReactElement> = {
@@ -123,6 +125,8 @@ export function AppRoutes() {
           <Route index element={<ProjectIndex />} />
           <Route path=":project" element={<ProjectScope />}>
             <Route index element={<Navigate to="vms" replace />} />
+            <Route path="vms/new" element={<VmWizard />} />
+            <Route path="vms/new-iso" element={<IsoWizard />} />
             {primaryDefinitionsFor("project").flatMap((def) => [
               <Route key={def.path} path={def.path} element={listPage(def)} />,
               <Route key={`${def.path}/:name`} path={`${def.path}/:name`} element={detailPage(def)} />,

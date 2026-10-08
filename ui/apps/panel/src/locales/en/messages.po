@@ -1176,3 +1176,120 @@ msgstr "New size (GiB)"
 
 msgid "volumes.expand.title"
 msgstr "Expand {0}"
+
+msgid "wizard.back"
+msgstr "Back"
+
+msgid "wizard.create"
+msgstr "Create virtual machine"
+
+msgid "wizard.error.duplicate"
+msgstr "A virtual machine with this name already exists"
+
+msgid "wizard.error.image"
+msgstr "Choose an image"
+
+msgid "wizard.error.iso"
+msgstr "Choose an ISO image"
+
+msgid "wizard.error.name"
+msgstr "Use lowercase letters, digits and hyphens. Start and end with a letter or digit."
+
+msgid "wizard.error.rootDisk"
+msgstr "Enter a root disk size in GiB"
+
+msgid "wizard.error.rootDiskSmall"
+msgstr "The root disk is smaller than the image"
+
+msgid "wizard.error.size"
+msgstr "Choose an instance type"
+
+msgid "wizard.error.subnet"
+msgstr "Choose a subnet"
+
+msgid "wizard.error.userData"
+msgstr "Cloud-init data must start with #cloud-config or #!"
+
+msgid "wizard.extraVolumes"
+msgstr "Attach existing volumes"
+
+msgid "wizard.image"
+msgstr "Image"
+
+msgid "wizard.iso"
+msgstr "Installation ISO"
+
+msgid "wizard.iso.title"
+msgstr "Install a virtual machine from an ISO"
+
+msgid "wizard.leave.confirm"
+msgstr "Discard"
+
+msgid "wizard.leave.description"
+msgstr "The virtual machine is not created yet."
+
+msgid "wizard.leave.title"
+msgstr "Discard your changes?"
+
+msgid "wizard.next"
+msgstr "Next"
+
+msgid "wizard.noAccess"
+msgstr "You cannot create virtual machines here"
+
+msgid "wizard.osPreference"
+msgstr "Operating system preference"
+
+msgid "wizard.rootDisk"
+msgstr "Root disk size (GiB)"
+
+msgid "wizard.secureBoot"
+msgstr "Secure boot"
+
+msgid "wizard.startAfter"
+msgstr "Start after creation"
+
+msgid "wizard.step.access"
+msgstr "Access"
+
+msgid "wizard.step.basics"
+msgstr "Basics"
+
+msgid "wizard.step.disks"
+msgstr "Disks"
+
+msgid "wizard.step.firmware"
+msgstr "Firmware"
+
+msgid "wizard.step.image"
+msgstr "Image"
+
+msgid "wizard.step.iso"
+msgstr "ISO"
+
+msgid "wizard.step.network"
+msgstr "Network"
+
+msgid "wizard.step.review"
+msgstr "Review"
+
+msgid "wizard.step.size"
+msgstr "Size"
+
+msgid "wizard.steps"
+msgstr "Steps"
+
+msgid "wizard.title"
+msgstr "Create a virtual machine"
+
+msgid "wizard.uploadIso"
+msgstr "Upload a new ISO"
+
+msgid "wizard.uploadIso.waiting"
+msgstr "Preparing the upload"
+
+msgid "wizard.userData"
+msgstr "Cloud-init user data"
+
+msgid "wizard.virtioWin"
+msgstr "Attach the virtio-win drivers"
