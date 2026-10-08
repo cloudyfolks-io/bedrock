@@ -1,0 +1,53 @@
+defaultRules:
+  rules:
+    etcd: false
+    kubeControllerManager: false
+    kubeProxy: false
+    kubeSchedulerAlerting: false
+    kubeSchedulerRecording: false
+    windows: false
+kubeEtcd:
+  enabled: false
+kubeScheduler:
+  enabled: false
+kubeControllerManager:
+  enabled: false
+kubeProxy:
+  enabled: false
+prometheusOperator:
+  admissionWebhooks:
+    enabled: false
+  tls:
+    enabled: false
+alertmanager:
+  alertmanagerSpec:
+    useExistingSecret: true
+    configSecret: bedrock-alertmanager-config
+prometheus:
+  prometheusSpec:
+    retention: 15d
+    retentionSize: 45GB
+    ruleSelectorNilUsesHelmValues: false
+    serviceMonitorSelectorNilUsesHelmValues: false
+    podMonitorSelectorNilUsesHelmValues: false
+    probeSelectorNilUsesHelmValues: false
+    resources:
+      requests:
+        cpu: 200m
+        memory: 512Mi
+    storageSpec:
+      volumeClaimTemplate:
+        spec:
+          storageClassName: block
+          accessModes: [ReadWriteOnce]
+          resources:
+            requests:
+              storage: 50Gi
+grafana:
+  testFramework:
+    enabled: false
+  admin:
+    existingSecret: bedrock-grafana-admin
+kube-state-metrics:
+  metricLabelsAllowlist:
+    - namespaces=[bedrock.cloudyfolks.io/tenant,bedrock.cloudyfolks.io/project]

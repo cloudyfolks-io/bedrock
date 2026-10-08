@@ -120,6 +120,15 @@ components:
     version: 3.13.1
     namespace: kube-system
     values: release/values/metrics-server.yaml
+  - name: kube-prometheus-stack
+    order: 71
+    chart: charts/kube-prometheus-stack
+    version: 92.1.0
+    namespace: monitoring
+    values: release/values/kube-prometheus-stack.yaml
+    crdsToGroup: crds
+    extraImages:
+      - quay.io/prometheus-operator/prometheus-config-reloader:v0.94.1
   - name: kured
     order: 80
     chart: charts/kured
