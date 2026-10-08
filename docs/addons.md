@@ -188,7 +188,8 @@ sets the policy from the Setting `audit.level`.
 | Reads by nodes | Not logged |
 | Secrets, ConfigMaps, TokenReviews | `Metadata` |
 | The kinds `apitokens`, `authcodes`, `authrequests`, `credentials`, `devicerequests`, `refreshtokens`, `sessions`, `signingkeys` and all `*/status` of the Bedrock group | `Metadata` |
-| Writes on Bedrock kinds | `RequestResponse` |
+| All requests on Settings | `Metadata`, because a Setting can hold a webhook URL with a token |
+| Writes on other Bedrock kinds | `RequestResponse` |
 | Other reads | The Setting `audit.level` |
 | Everything else | `Metadata` |
 

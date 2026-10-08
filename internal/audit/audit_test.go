@@ -51,14 +51,14 @@ func TestPolicyLevels(t *testing.T) {
 		{"get", "", "secrets", "RequestResponse", auditv1.LevelMetadata},
 		{"create", "", "configmaps", "RequestResponse", auditv1.LevelMetadata},
 		{"create", "authentication.k8s.io", "tokenreviews", "RequestResponse", auditv1.LevelMetadata},
-		{"create", bedrock, "settings", "Metadata", auditv1.LevelRequestResponse},
+		{"create", bedrock, "settings", "Metadata", auditv1.LevelMetadata},
 		{"delete", bedrock, "users", "Metadata", auditv1.LevelRequestResponse},
 		{"create", bedrock, "credentials", "Metadata", auditv1.LevelMetadata},
 		{"create", bedrock, "refreshtokens", "Metadata", auditv1.LevelMetadata},
 		{"create", bedrock, "signingkeys", "Metadata", auditv1.LevelMetadata},
 		{"update", bedrock, "hosts/status", "Metadata", auditv1.LevelMetadata},
 		{"get", bedrock, "settings", "Metadata", auditv1.LevelMetadata},
-		{"get", bedrock, "settings", "RequestResponse", auditv1.LevelRequestResponse},
+		{"get", bedrock, "users", "RequestResponse", auditv1.LevelRequestResponse},
 		{"create", "apps", "deployments", "RequestResponse", auditv1.LevelMetadata},
 		{"get", "", "events", "Metadata", auditv1.LevelNone},
 		{"update", "coordination.k8s.io", "leases", "Metadata", auditv1.LevelNone},
@@ -104,18 +104,23 @@ func TestArgsRotateAt100MBKeep10(t *testing.T) {
 	}
 }
 
-func TestPolicyKeepsTheWebhookSettingAtMetadata(t *testing.T) {
+func TestPolicyKeepsEverySettingRequestAtMetadata(t *testing.T) {
+	verbs := []string{"create", "update", "patch", "delete", "deletecollection", "get", "list", "watch"}
 	for _, level := range []string{"Metadata", "RequestResponse"} {
-		for _, verb := range []string{"get", "list", "patch", "update", "create", "delete"} {
-			attrs := authorizer.AttributesRecord{Verb: verb, APIGroup: "bedrock.cloudyfolks.io", Resource: "settings", Name: "alertmanager.webhook-url", ResourceRequest: true, User: &user.DefaultInfo{Name: "admin"}}
-			if got := evaluator(t, level).EvaluatePolicyRule(attrs).Level; got != auditv1.LevelMetadata {
-				t.Errorf("%s with read level %s: got %s", verb, level, got)
+		for _, verb := range verbs {
+			for _, name := range []string{"", "alertmanager.webhook-url", "images.keep"} {
+				for _, subresource := range []string{"", "status"} {
+					attrs := authorizer.AttributesRecord{Verb: verb, APIGroup: "bedrock.cloudyfolks.io", Resource: "settings", Subresource: subresource, Name: name, ResourceRequest: true, User: &user.DefaultInfo{Name: "admin"}}
+					if got := evaluator(t, level).EvaluatePolicyRule(attrs).Level; got != auditv1.LevelMetadata {
+						t.Errorf("%s %q/%s with read level %s: got %s", verb, name, subresource, level, got)
+					}
+				}
 			}
 		}
 	}
-	other := authorizer.AttributesRecord{Verb: "patch", APIGroup: "bedrock.cloudyfolks.io", Resource: "settings", Name: "images.keep", ResourceRequest: true, User: &user.DefaultInfo{Name: "admin"}}
+	other := authorizer.AttributesRecord{Verb: "patch", APIGroup: "bedrock.cloudyfolks.io", Resource: "users", Name: "alice", ResourceRequest: true, User: &user.DefaultInfo{Name: "admin"}}
 	if got := evaluator(t, "Metadata").EvaluatePolicyRule(other).Level; got != auditv1.LevelRequestResponse {
-		t.Errorf("another setting: got %s", got)
+		t.Errorf("another Bedrock kind: got %s", got)
 	}
 }
 

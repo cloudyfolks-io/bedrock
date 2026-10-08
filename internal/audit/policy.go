@@ -41,7 +41,7 @@ func rules(readLevel string) []map[string]any {
 			{"group": "authentication.k8s.io", "resources": []string{"tokenreviews"}},
 			{"group": bedrockGroup, "resources": secretBearingKinds},
 		}},
-		{"level": "Metadata", "resources": []map[string]any{{"group": bedrockGroup, "resources": []string{"settings"}, "resourceNames": []string{"alertmanager.webhook-url"}}}},
+		{"level": "Metadata", "resources": []map[string]any{{"group": bedrockGroup, "resources": []string{"settings", "settings/status"}}}},
 		{"level": "RequestResponse", "resources": []map[string]any{{"group": bedrockGroup}}, "verbs": writeVerbs},
 		{"level": readLevel, "verbs": readVerbs},
 		{"level": "Metadata"},
