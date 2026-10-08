@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	rbacv1 "k8s.io/api/rbac/v1"
+	apiextensionsv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/utils/ptr"
@@ -274,4 +275,45 @@ func TestProjectRequeuesForUsage(t *testing.T) {
 	if err != nil || result.RequeueAfter != Interval {
 		t.Fatalf("result = %+v, err = %v", result, err)
 	}
+}
+
+func nudge(t *testing.T, c client.Client, name string) {
+	t.Helper()
+	waitFor(t, func() bool {
+		project := fetchProject(t, c, name)
+		project.Spec.DisplayName += "x"
+		return c.Update(context.Background(), project) == nil
+	})
+}
+
+func TestAccessIsRevokedWhenTheQuotaDisappearsAndReturnsWithIt(t *testing.T) {
+	c, _ := projectWorld(t)
+	project := membersProject()
+	project.Spec.Quota.CPU = quantity("4")
+	mustCreate(t, c, aliceTenant(), project)
+	waitFor(t, func() bool {
+		return roleBindingNamed(c, "bedrock-project-owner") != nil && quotaObject(t, c, "acme-shop") != nil
+	})
+	crd := &apiextensionsv1.CustomResourceDefinition{}
+	if err := c.Get(context.Background(), client.ObjectKey{Name: "applicationawareresourcequotas.aaq.kubevirt.io"}, crd); err != nil {
+		t.Fatal(err)
+	}
+	restored := &apiextensionsv1.CustomResourceDefinition{ObjectMeta: metav1.ObjectMeta{Name: crd.Name, Annotations: crd.Annotations}, Spec: crd.Spec}
+	if err := c.Delete(context.Background(), crd); err != nil {
+		t.Fatal(err)
+	}
+	waitFor(t, func() bool {
+		nudge(t, c, "shop")
+		return roleBindingNamed(c, "bedrock-project-owner") == nil && roleBindingNamed(c, "bedrock-project-editor") == nil
+	})
+	projectReady(t, c, "shop", hasCondition(ConditionAccessReady, metav1.ConditionFalse, ReasonQuotaUnavailable))
+	projectReady(t, c, "shop", hasCondition(ConditionQuotaReady, metav1.ConditionFalse, ReasonQuotaUnavailable))
+	if err := c.Create(context.Background(), restored); err != nil {
+		t.Fatal(err)
+	}
+	waitFor(t, func() bool {
+		nudge(t, c, "shop")
+		return roleBindingNamed(c, "bedrock-project-owner") != nil && roleBindingNamed(c, "bedrock-project-viewer") != nil
+	})
+	projectReady(t, c, "shop", hasCondition(ConditionAccessReady, metav1.ConditionTrue, ReasonBound))
 }

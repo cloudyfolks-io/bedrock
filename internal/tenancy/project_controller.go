@@ -69,12 +69,9 @@ func (r *ProjectReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 	observation.Namespace = r.ensureNamespace(ctx, project)
 	if observation.Namespace.Ready {
 		observation.SubnetCIDR, observation.Subnet = r.ensureSubnet(ctx, project, tenant)
-		var enforced bool
-		observation.Quota, observation.Used, enforced = r.ensureQuota(ctx, project, decision)
-		observation.Access = accessWithheld()
-		if enforced {
-			observation.Access = r.ensureAccess(ctx, project, tenant)
-		}
+		var state quotaState
+		observation.Quota, observation.Used, state = r.ensureQuota(ctx, project, decision)
+		observation.Access = r.accessFor(ctx, project, tenant, state)
 	}
 	r.writeStatus(ctx, observation)
 	return ctrl.Result{RequeueAfter: Interval}, applyFailures(observation)
@@ -228,4 +225,14 @@ func (r *ProjectReconciler) SetupWithManager(mgr ctrl.Manager) error {
 		Watches(&v1alpha1.Tenant{}, handler.EnqueueRequestsFromMapFunc(r.projectsOfTenantObject)).
 		Watches(&v1alpha1.Project{}, handler.EnqueueRequestsFromMapFunc(r.waitingSiblingsOf)).
 		Complete(r)
+}
+
+func (r *ProjectReconciler) accessFor(ctx context.Context, project v1alpha1.Project, tenant v1alpha1.Tenant, state quotaState) Step {
+	switch state {
+	case quotaPresent:
+		return r.ensureAccess(ctx, project, tenant)
+	case quotaAbsent:
+		return r.withholdAccess(ctx, project)
+	}
+	return accessWithheld()
 }

@@ -40,27 +40,46 @@ func isQuotaUnavailable(err error) bool {
 	return meta.IsNoMatchError(err) || apierrors.IsNotFound(err)
 }
 
+type quotaState int
+
+const (
+	quotaPresent quotaState = iota
+	quotaAbsent
+	quotaUnknown
+)
+
 func accessWithheld() Step {
 	return Step{Reason: ReasonQuotaUnavailable, Message: "member access waits until the project quota is enforced"}
 }
 
-func (r *ProjectReconciler) ensureQuota(ctx context.Context, project v1alpha1.Project, decision Decision) (Step, corev1.ResourceList, bool) {
+func (r *ProjectReconciler) ensureQuota(ctx context.Context, project v1alpha1.Project, decision Decision) (Step, corev1.ResourceList, quotaState) {
 	var applyErr error
 	if decision.QuotaAllowed {
 		applyErr = ssa.Apply(ctx, r.Client, WithOwner(DesiredQuota(project), &project, projectGVK), v1alpha1.TenancyFieldManager)
 	}
-	used, enforced := r.usedQuota(ctx, project)
-	return quotaStep(decision, applyErr), used, enforced
+	used, state := r.usedQuota(ctx, project)
+	return quotaStep(decision, applyErr), used, state
 }
 
-func (r *ProjectReconciler) usedQuota(ctx context.Context, project v1alpha1.Project) (corev1.ResourceList, bool) {
+func (r *ProjectReconciler) usedQuota(ctx context.Context, project v1alpha1.Project) (corev1.ResourceList, quotaState) {
 	existing := &unstructured.Unstructured{}
 	existing.SetGroupVersionKind(QuotaGVK)
 	key := client.ObjectKey{Namespace: v1alpha1.ProjectNamespace(project.Spec.TenantRef, project.Name), Name: QuotaName}
-	if err := r.Reader.Get(ctx, key, existing); err != nil {
-		return nil, false
+	err := r.Reader.Get(ctx, key, existing)
+	switch {
+	case err == nil:
+		return parseUsed(existing), quotaPresent
+	case isQuotaUnavailable(err):
+		return nil, quotaAbsent
 	}
-	return parseUsed(existing), true
+	return nil, quotaUnknown
+}
+
+func (r *ProjectReconciler) withholdAccess(ctx context.Context, project v1alpha1.Project) Step {
+	if err := r.deleteStaleBindings(ctx, project, nil); err != nil {
+		return failedStep(err)
+	}
+	return accessWithheld()
 }
 
 func parseUsed(quota *unstructured.Unstructured) corev1.ResourceList {
