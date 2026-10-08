@@ -15,7 +15,7 @@ Each job starts a real single-node cluster and checks the product from the outsi
 
 ## Run a job
 
-Use the local runner on a Linux host with KVM.
+Use the local runner on a Linux host. The host needs a writable `/dev/kvm`, Lima, Docker, Go, Helm and kind.
 
 ```
 hack/local-ci.sh e2e-tenant
@@ -89,7 +89,7 @@ The job script imports the tarballs into containerd with `k0s ctr`.
 
 The VM image is the cirros containerDisk from the release bundle.
 The Fabric image of the release is the pod image for network probes.
-KubeVirt runs in emulation, because the VM has no `/dev/kvm` or does not use it.
+The tenant job does not need KVM inside the VM. KubeVirt runs in emulation there.
 
 The catalog images are too large for the e2e cluster.
 `hack/e2e-release-config.sh` removes the `catalog` component from the release config.
