@@ -64,7 +64,7 @@ func (r *VirtualMachineReconciler) stepRootImage(ctx context.Context, vm v1alpha
 	if vm.Spec.Image == nil {
 		return in, nil, nil
 	}
-	image, imageOS, gate, err := r.imageNamed(ctx, vm.Namespace, *vm.Spec.Image, v1alpha1.ImageTypeDisk)
+	image, imageOS, gate, err := lookupImage(ctx, r.Client, vm.Namespace, *vm.Spec.Image, v1alpha1.ImageTypeDisk)
 	if err != nil || gate != nil {
 		return in, gate, err
 	}
@@ -72,16 +72,16 @@ func (r *VirtualMachineReconciler) stepRootImage(ctx context.Context, vm v1alpha
 	return in, nil, nil
 }
 
-func (r *VirtualMachineReconciler) imageNamed(ctx context.Context, namespace string, ref v1alpha1.ImageRef, wantType string) (ResolvedImage, *v1alpha1.ImageOS, *Gate, error) {
+func lookupImage(ctx context.Context, c client.Client, namespace string, ref v1alpha1.ImageRef, wantType string) (ResolvedImage, *v1alpha1.ImageOS, *Gate, error) {
 	if ref.Scope == v1alpha1.ImageScopeProject {
 		var img v1alpha1.Image
-		if err := r.Client.Get(ctx, client.ObjectKey{Namespace: namespace, Name: ref.Name}, &img); err != nil {
+		if err := c.Get(ctx, client.ObjectKey{Namespace: namespace, Name: ref.Name}, &img); err != nil {
 			return ResolvedImage{}, nil, imageLookupGate(err, ref.Name), ignoreNotFound(err)
 		}
 		return resolveFound(img.Spec, img.Status, namespace, wantType)
 	}
 	var img v1alpha1.ClusterImage
-	if err := r.Client.Get(ctx, client.ObjectKey{Name: ref.Name}, &img); err != nil {
+	if err := c.Get(ctx, client.ObjectKey{Name: ref.Name}, &img); err != nil {
 		return ResolvedImage{}, nil, imageLookupGate(err, ref.Name), ignoreNotFound(err)
 	}
 	return resolveFound(img.Spec, img.Status, catalogNamespace, wantType)
@@ -128,11 +128,11 @@ func (r *VirtualMachineReconciler) stepCDROMs(ctx context.Context, vm v1alpha1.V
 }
 
 func (r *VirtualMachineReconciler) isoNamed(ctx context.Context, namespace, name string) (ResolvedImage, *Gate, error) {
-	image, _, gate, err := r.imageNamed(ctx, namespace, v1alpha1.ImageRef{Name: name, Scope: v1alpha1.ImageScopeProject}, v1alpha1.ImageTypeISO)
+	image, _, gate, err := lookupImage(ctx, r.Client, namespace, v1alpha1.ImageRef{Name: name, Scope: v1alpha1.ImageScopeProject}, v1alpha1.ImageTypeISO)
 	if gate == nil || gate.Reason != ReasonImageNotFound {
 		return image, gate, err
 	}
-	image, _, gate, err = r.imageNamed(ctx, namespace, v1alpha1.ImageRef{Name: name, Scope: v1alpha1.ImageScopeCluster}, v1alpha1.ImageTypeISO)
+	image, _, gate, err = lookupImage(ctx, r.Client, namespace, v1alpha1.ImageRef{Name: name, Scope: v1alpha1.ImageScopeCluster}, v1alpha1.ImageTypeISO)
 	return image, gate, err
 }
 

@@ -128,34 +128,34 @@ func (r *VirtualMachineReconciler) applyRendered(ctx context.Context, in RenderI
 	}
 	claims := append([]*unstructured.Unstructured{rendered.RootClaim}, rendered.CDROMClaims...)
 	for _, claim := range claims {
-		if err := r.createIfAbsent(ctx, claim); err != nil {
+		if err := createIfAbsent(ctx, r.Client, claim); err != nil {
 			return fmt.Errorf("create the claim %s: %w", claim.GetName(), err)
 		}
 	}
-	if err := r.growClaim(ctx, vm.Namespace, RootClaimName(vm.Name), vm.Spec.RootDisk.SizeGi); err != nil {
+	if err := growClaim(ctx, r.Client, vm.Namespace, RootClaimName(vm.Name), vm.Spec.RootDisk.SizeGi); err != nil {
 		return fmt.Errorf("grow the root claim: %w", err)
 	}
 	if err := ssa.Apply(ctx, r.Client, rendered.VirtualMachine, v1alpha1.ComputeFieldManager); err != nil {
 		return fmt.Errorf("apply the KubeVirt virtual machine: %w", err)
 	}
 	for _, claim := range claims {
-		if err := r.labelClaim(ctx, vm.Namespace, claim.GetName(), in.Labels); err != nil {
+		if err := labelClaim(ctx, r.Client, vm.Namespace, claim.GetName(), in.Labels); err != nil {
 			return fmt.Errorf("label the claim %s: %w", claim.GetName(), err)
 		}
 	}
 	return r.syncLauncherPods(ctx, vm, in.NICs)
 }
 
-func (r *VirtualMachineReconciler) createIfAbsent(ctx context.Context, obj *unstructured.Unstructured) error {
+func createIfAbsent(ctx context.Context, c client.Client, obj *unstructured.Unstructured) error {
 	existing := emptyOf(obj.GroupVersionKind())
-	err := r.Client.Get(ctx, client.ObjectKeyFromObject(obj), existing)
+	err := c.Get(ctx, client.ObjectKeyFromObject(obj), existing)
 	if err == nil {
 		return nil
 	}
 	if !apierrors.IsNotFound(err) {
 		return err
 	}
-	if err := r.Client.Create(ctx, obj.DeepCopy(), client.FieldOwner(v1alpha1.ComputeFieldManager)); err != nil && !apierrors.IsAlreadyExists(err) {
+	if err := c.Create(ctx, obj.DeepCopy(), client.FieldOwner(v1alpha1.ComputeFieldManager)); err != nil && !apierrors.IsAlreadyExists(err) {
 		return err
 	}
 	return nil
@@ -169,9 +169,9 @@ func rawMergePatch(body map[string]any) (client.Patch, error) {
 	return client.RawPatch(types.MergePatchType, data), nil
 }
 
-func (r *VirtualMachineReconciler) growClaim(ctx context.Context, namespace, name string, sizeGi int32) error {
+func growClaim(ctx context.Context, c client.Client, namespace, name string, sizeGi int32) error {
 	var pvc corev1.PersistentVolumeClaim
-	if err := r.Client.Get(ctx, client.ObjectKey{Namespace: namespace, Name: name}, &pvc); err != nil {
+	if err := c.Get(ctx, client.ObjectKey{Namespace: namespace, Name: name}, &pvc); err != nil {
 		return client.IgnoreNotFound(err)
 	}
 	requested := pvc.Spec.Resources.Requests[corev1.ResourceStorage]
@@ -183,7 +183,7 @@ func (r *VirtualMachineReconciler) growClaim(ctx context.Context, namespace, nam
 	if err != nil {
 		return err
 	}
-	return r.Client.Patch(ctx, &pvc, patch, client.FieldOwner(v1alpha1.ComputeFieldManager))
+	return c.Patch(ctx, &pvc, patch, client.FieldOwner(v1alpha1.ComputeFieldManager))
 }
 
 func missingLabels(have, want map[string]string) map[string]any {
@@ -196,9 +196,9 @@ func missingLabels(have, want map[string]string) map[string]any {
 	return missing
 }
 
-func (r *VirtualMachineReconciler) labelClaim(ctx context.Context, namespace, name string, labels map[string]string) error {
+func labelClaim(ctx context.Context, c client.Client, namespace, name string, labels map[string]string) error {
 	var pvc corev1.PersistentVolumeClaim
-	if err := r.Client.Get(ctx, client.ObjectKey{Namespace: namespace, Name: name}, &pvc); err != nil {
+	if err := c.Get(ctx, client.ObjectKey{Namespace: namespace, Name: name}, &pvc); err != nil {
 		return client.IgnoreNotFound(err)
 	}
 	missing := missingLabels(pvc.Labels, labels)
@@ -209,7 +209,7 @@ func (r *VirtualMachineReconciler) labelClaim(ctx context.Context, namespace, na
 	if err != nil {
 		return err
 	}
-	return r.Client.Patch(ctx, &pvc, patch, client.FieldOwner(v1alpha1.ComputeFieldManager))
+	return c.Patch(ctx, &pvc, patch, client.FieldOwner(v1alpha1.ComputeFieldManager))
 }
 
 func (r *VirtualMachineReconciler) syncLauncherPods(ctx context.Context, vm v1alpha1.VirtualMachine, nics []NIC) error {
