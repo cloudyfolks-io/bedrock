@@ -34,6 +34,18 @@ msgstr "Start"
 msgid "action.stop"
 msgstr "Stop"
 
+msgid "addons.enabled"
+msgstr "Enabled"
+
+msgid "addons.off"
+msgstr "Off"
+
+msgid "addons.on"
+msgstr "On"
+
+msgid "addons.saveValues"
+msgstr "Save values"
+
 msgid "app.title"
 msgstr "Bedrock"
 
@@ -256,8 +268,14 @@ msgstr "Live"
 msgid "common.live.paused"
 msgstr "Paused"
 
+msgid "common.no"
+msgstr "No"
+
 msgid "common.state.loading"
 msgstr "Loading"
+
+msgid "common.yes"
+msgstr "Yes"
 
 msgid "confirm.delete.description"
 msgstr "This cannot be undone. Type the name {name} to confirm."
@@ -855,3 +873,90 @@ msgstr "Waiting for upload"
 
 msgid "status.phase.workers"
 msgstr "Workers"
+
+msgid "tenantDetail.createProject"
+msgstr "Create project"
+
+msgid "tenantDetail.deleteProject"
+msgstr "Delete {0}"
+
+msgid "tenantDetail.editProject"
+msgstr "Edit {0}"
+
+msgid "tenantDetail.memoryQuota"
+msgstr "Memory quota"
+
+msgid "tenantDetail.noQuota"
+msgstr "No quota is set."
+
+msgid "tenantDetail.projects"
+msgstr "Projects"
+
+msgid "tenantDetail.quota"
+msgstr "Quota use"
+
+msgid "upgrades.abort"
+msgstr "Abort"
+
+msgid "upgrades.abort.description"
+msgstr "Type abort to stop the failed upgrade."
+
+msgid "upgrades.abort.title"
+msgstr "Abort the upgrade"
+
+msgid "upgrades.available"
+msgstr "Available"
+
+msgid "upgrades.backup.location"
+msgstr "Location"
+
+msgid "upgrades.backup.time"
+msgstr "Time"
+
+msgid "upgrades.backups"
+msgstr "Upgrade backups"
+
+msgid "upgrades.components"
+msgstr "Components"
+
+msgid "upgrades.concurrency"
+msgstr "Node concurrency"
+
+msgid "upgrades.degraded"
+msgstr "Degraded"
+
+msgid "upgrades.editSettings"
+msgstr "Edit upgrade settings"
+
+msgid "upgrades.resume"
+msgstr "Resume"
+
+msgid "upgrades.start.button"
+msgstr "Start upgrade"
+
+msgid "upgrades.start.description"
+msgstr "Upgrade the cluster to {target}."
+
+msgid "upgrades.start.title"
+msgstr "Start an upgrade"
+
+msgid "upgrades.step.active"
+msgstr "In progress"
+
+msgid "upgrades.step.done"
+msgstr "Done"
+
+msgid "upgrades.step.failed"
+msgstr "Failed"
+
+msgid "upgrades.step.pending"
+msgstr "Pending"
+
+msgid "upgrades.target"
+msgstr "Target version"
+
+msgid "upgrades.timeline"
+msgstr "Upgrade phases"
+
+msgid "upgrades.window"
+msgstr "Maintenance window"

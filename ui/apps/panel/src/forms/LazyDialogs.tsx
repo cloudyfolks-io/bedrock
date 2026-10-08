@@ -5,7 +5,7 @@ import type { ResourceDef } from "../resources/registry";
 const Create = lazy(() => import("./ResourceFormDialog").then((module) => ({ default: module.CreateResourceDialog })));
 const Edit = lazy(() => import("./ResourceFormDialog").then((module) => ({ default: module.EditResourceDialog })));
 
-export function LazyCreateDialog(props: { def: ResourceDef; onClose: () => void; initialSpec?: Record<string, unknown> }) {
+export function LazyCreateDialog(props: { def: ResourceDef; onClose: () => void; initialSpec?: Record<string, unknown>; lockedPaths?: string[] }) {
   return (
     <Suspense fallback={null}>
       <Create {...props} />

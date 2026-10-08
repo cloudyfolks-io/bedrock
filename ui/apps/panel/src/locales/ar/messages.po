@@ -34,6 +34,18 @@ msgstr "بدء"
 msgid "action.stop"
 msgstr "إيقاف"
 
+msgid "addons.enabled"
+msgstr "مفعّل"
+
+msgid "addons.off"
+msgstr "متوقف"
+
+msgid "addons.on"
+msgstr "قيد التشغيل"
+
+msgid "addons.saveValues"
+msgstr "حفظ القيم"
+
 msgid "app.title"
 msgstr "بيدروك"
 
@@ -256,8 +268,14 @@ msgstr "مباشر"
 msgid "common.live.paused"
 msgstr "متوقف مؤقتًا"
 
+msgid "common.no"
+msgstr "لا"
+
 msgid "common.state.loading"
 msgstr "جارٍ التحميل"
+
+msgid "common.yes"
+msgstr "نعم"
 
 msgid "confirm.delete.description"
 msgstr "لا يمكن التراجع عن هذا. اكتب الاسم {name} للتأكيد."
@@ -855,3 +873,90 @@ msgstr "بانتظار الرفع"
 
 msgid "status.phase.workers"
 msgstr "العمال"
+
+msgid "tenantDetail.createProject"
+msgstr "إنشاء مشروع"
+
+msgid "tenantDetail.deleteProject"
+msgstr "حذف {0}"
+
+msgid "tenantDetail.editProject"
+msgstr "تعديل {0}"
+
+msgid "tenantDetail.memoryQuota"
+msgstr "حصة الذاكرة"
+
+msgid "tenantDetail.noQuota"
+msgstr "لم يتم تحديد حصة."
+
+msgid "tenantDetail.projects"
+msgstr "المشاريع"
+
+msgid "tenantDetail.quota"
+msgstr "استخدام الحصة"
+
+msgid "upgrades.abort"
+msgstr "إلغاء الترقية"
+
+msgid "upgrades.abort.description"
+msgstr "اكتب abort لإيقاف الترقية الفاشلة."
+
+msgid "upgrades.abort.title"
+msgstr "إلغاء الترقية"
+
+msgid "upgrades.available"
+msgstr "متاح"
+
+msgid "upgrades.backup.location"
+msgstr "الموقع"
+
+msgid "upgrades.backup.time"
+msgstr "الوقت"
+
+msgid "upgrades.backups"
+msgstr "نسخ الترقية الاحتياطية"
+
+msgid "upgrades.components"
+msgstr "المكونات"
+
+msgid "upgrades.concurrency"
+msgstr "تزامن العقد"
+
+msgid "upgrades.degraded"
+msgstr "متدهور"
+
+msgid "upgrades.editSettings"
+msgstr "تعديل إعدادات الترقية"
+
+msgid "upgrades.resume"
+msgstr "استئناف"
+
+msgid "upgrades.start.button"
+msgstr "بدء الترقية"
+
+msgid "upgrades.start.description"
+msgstr "ترقية العنقود إلى {target}."
+
+msgid "upgrades.start.title"
+msgstr "بدء ترقية"
+
+msgid "upgrades.step.active"
+msgstr "قيد التنفيذ"
+
+msgid "upgrades.step.done"
+msgstr "تم"
+
+msgid "upgrades.step.failed"
+msgstr "فشل"
+
+msgid "upgrades.step.pending"
+msgstr "قيد الانتظار"
+
+msgid "upgrades.target"
+msgstr "الإصدار المستهدف"
+
+msgid "upgrades.timeline"
+msgstr "مراحل الترقية"
+
+msgid "upgrades.window"
+msgstr "نافذة الصيانة"

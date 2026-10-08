@@ -16,15 +16,21 @@ import { Shell } from "./Shell";
 
 const HostsPage = lazy(() => import("../pages/admin/HostsPage"));
 const HostDetailPage = lazy(() => import("../pages/admin/HostDetailPage"));
+const UpgradesPage = lazy(() => import("../pages/admin/UpgradesPage"));
+const AddonsPage = lazy(() => import("../pages/admin/AddonsPage"));
+const TenantDetailPage = lazy(() => import("../pages/admin/TenantDetailPage"));
 const SettingsPage = lazy(() => import("../pages/admin/SettingsPage"));
 
 const listPages: Record<string, (def: ResourceDef) => ReactElement> = {
   "admin/hosts": () => <HostsPage />,
   "admin/settings": () => <SettingsPage />,
+  "admin/upgrades": () => <UpgradesPage />,
+  "admin/addons": () => <AddonsPage />,
 };
 
 const detailPages: Record<string, (def: ResourceDef) => ReactElement> = {
   "admin/hosts": () => <HostDetailPage />,
+  "admin/tenants": () => <TenantDetailPage />,
 };
 
 function listPage(def: ResourceDef): ReactElement {

@@ -2,15 +2,17 @@ import { useState } from "react";
 import { useLingui } from "@lingui/react/macro";
 import { AlertDialog, Button, Dialog, TextField } from "@bedrock/design";
 
-interface ConfirmDeleteProps {
-  name: string;
-  kind: string;
+interface ConfirmTypedProps {
+  word: string;
+  title: string;
+  description: string;
+  confirmLabel: string;
   open: boolean;
   onConfirm: () => void;
   onCancel: () => void;
 }
 
-function DeleteBody({ name, kind, onConfirm, onCancel }: Omit<ConfirmDeleteProps, "open">) {
+function TypedBody({ word, title, description, confirmLabel, onConfirm, onCancel }: Omit<ConfirmTypedProps, "open">) {
   const { t } = useLingui();
   const [typed, setTyped] = useState("");
   return (
@@ -21,11 +23,11 @@ function DeleteBody({ name, kind, onConfirm, onCancel }: Omit<ConfirmDeleteProps
           onCancel();
         }
       }}
-      title={t({ id: "confirm.delete.title", message: `Delete ${kind}` })}
-      description={t({ id: "confirm.delete.description", message: `This cannot be undone. Type the name ${name} to confirm.` })}
+      title={title}
+      description={description}
       actions={
-        <Button variant="danger" disabled={typed !== name} onClick={onConfirm}>
-          {t({ id: "common.action.delete", message: "Delete" })}
+        <Button variant="danger" disabled={typed !== word} onClick={onConfirm}>
+          {confirmLabel}
         </Button>
       }
     >
@@ -34,8 +36,31 @@ function DeleteBody({ name, kind, onConfirm, onCancel }: Omit<ConfirmDeleteProps
   );
 }
 
-export function ConfirmDeleteDialog(props: ConfirmDeleteProps) {
-  return props.open ? <DeleteBody name={props.name} kind={props.kind} onConfirm={props.onConfirm} onCancel={props.onCancel} /> : null;
+export function ConfirmTypedDialog(props: ConfirmTypedProps) {
+  return props.open ? <TypedBody {...props} /> : null;
+}
+
+interface ConfirmDeleteProps {
+  name: string;
+  kind: string;
+  open: boolean;
+  onConfirm: () => void;
+  onCancel: () => void;
+}
+
+export function ConfirmDeleteDialog({ name, kind, open, onConfirm, onCancel }: ConfirmDeleteProps) {
+  const { t } = useLingui();
+  return (
+    <ConfirmTypedDialog
+      word={name}
+      title={t({ id: "confirm.delete.title", message: `Delete ${kind}` })}
+      description={t({ id: "confirm.delete.description", message: `This cannot be undone. Type the name ${name} to confirm.` })}
+      confirmLabel={t({ id: "common.action.delete", message: "Delete" })}
+      open={open}
+      onConfirm={onConfirm}
+      onCancel={onCancel}
+    />
+  );
 }
 
 interface ConfirmSimpleProps {

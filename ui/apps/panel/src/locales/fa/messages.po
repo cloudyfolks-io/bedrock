@@ -34,6 +34,18 @@ msgstr "شروع"
 msgid "action.stop"
 msgstr "توقف"
 
+msgid "addons.enabled"
+msgstr "فعال"
+
+msgid "addons.off"
+msgstr "خاموش"
+
+msgid "addons.on"
+msgstr "روشن"
+
+msgid "addons.saveValues"
+msgstr "ذخیره مقادیر"
+
 msgid "app.title"
 msgstr "بدراک"
 
@@ -256,8 +268,14 @@ msgstr "زنده"
 msgid "common.live.paused"
 msgstr "متوقف‌شده"
 
+msgid "common.no"
+msgstr "خیر"
+
 msgid "common.state.loading"
 msgstr "در حال بارگذاری"
+
+msgid "common.yes"
+msgstr "بله"
 
 msgid "confirm.delete.description"
 msgstr "این کار قابل بازگشت نیست. برای تأیید نام {name} را بنویسید."
@@ -855,3 +873,90 @@ msgstr "منتظر بارگذاری"
 
 msgid "status.phase.workers"
 msgstr "کارگرها"
+
+msgid "tenantDetail.createProject"
+msgstr "ایجاد پروژه"
+
+msgid "tenantDetail.deleteProject"
+msgstr "حذف {0}"
+
+msgid "tenantDetail.editProject"
+msgstr "ویرایش {0}"
+
+msgid "tenantDetail.memoryQuota"
+msgstr "سهمیه حافظه"
+
+msgid "tenantDetail.noQuota"
+msgstr "سهمیه‌ای تنظیم نشده است."
+
+msgid "tenantDetail.projects"
+msgstr "پروژه‌ها"
+
+msgid "tenantDetail.quota"
+msgstr "مصرف سهمیه"
+
+msgid "upgrades.abort"
+msgstr "لغو"
+
+msgid "upgrades.abort.description"
+msgstr "برای توقف ارتقای ناموفق abort را بنویسید."
+
+msgid "upgrades.abort.title"
+msgstr "لغو ارتقا"
+
+msgid "upgrades.available"
+msgstr "در دسترس"
+
+msgid "upgrades.backup.location"
+msgstr "مکان"
+
+msgid "upgrades.backup.time"
+msgstr "زمان"
+
+msgid "upgrades.backups"
+msgstr "پشتیبان‌های ارتقا"
+
+msgid "upgrades.components"
+msgstr "اجزا"
+
+msgid "upgrades.concurrency"
+msgstr "همزمانی گره‌ها"
+
+msgid "upgrades.degraded"
+msgstr "تضعیف‌شده"
+
+msgid "upgrades.editSettings"
+msgstr "ویرایش تنظیمات ارتقا"
+
+msgid "upgrades.resume"
+msgstr "ادامه"
+
+msgid "upgrades.start.button"
+msgstr "شروع ارتقا"
+
+msgid "upgrades.start.description"
+msgstr "خوشه را به {target} ارتقا دهید."
+
+msgid "upgrades.start.title"
+msgstr "شروع ارتقا"
+
+msgid "upgrades.step.active"
+msgstr "در حال انجام"
+
+msgid "upgrades.step.done"
+msgstr "انجام شد"
+
+msgid "upgrades.step.failed"
+msgstr "ناموفق"
+
+msgid "upgrades.step.pending"
+msgstr "در انتظار"
+
+msgid "upgrades.target"
+msgstr "نسخه هدف"
+
+msgid "upgrades.timeline"
+msgstr "مراحل ارتقا"
+
+msgid "upgrades.window"
+msgstr "بازه نگهداری"

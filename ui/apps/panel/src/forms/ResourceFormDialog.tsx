@@ -11,7 +11,7 @@ import { Spinner } from "../components/Spinner";
 import { useCurrentProject } from "../shell/context";
 import { refOf, type ResourceDef } from "../resources/registry";
 import { causesToErrors, splitCauses, type Cause } from "./errors";
-import { toFormSchema } from "./schema";
+import { markReadonly, toFormSchema } from "./schema";
 import { CreateForm, EditForm } from "./SchemaForm";
 import type { ErrorSchema } from "@rjsf/utils";
 
@@ -63,9 +63,10 @@ interface CreateProps {
   def: ResourceDef;
   onClose: () => void;
   initialSpec?: Record<string, unknown>;
+  lockedPaths?: string[];
 }
 
-export function CreateResourceDialog({ def, onClose, initialSpec }: CreateProps) {
+export function CreateResourceDialog({ def, onClose, initialSpec, lockedPaths = [] }: CreateProps) {
   const { t, i18n } = useLingui();
   const http = useHttp();
   const toast = useToast();
@@ -138,7 +139,7 @@ export function CreateResourceDialog({ def, onClose, initialSpec }: CreateProps)
           />
           <CreateForm
             schema={form.schema}
-            uiSchema={form.uiSchema}
+            uiSchema={markReadonly(form.uiSchema, lockedPaths)}
             formData={initialSpec}
             onSubmit={(spec) => void submit(spec)}
             extraErrors={errors.extraErrors}

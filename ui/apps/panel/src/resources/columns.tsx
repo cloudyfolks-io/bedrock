@@ -95,6 +95,13 @@ const gi = (id: string, label: MessageDescriptor, path: string): ColumnDef => ({
   sortValue: (object) => Number(valueAt(object, path) ?? 0),
 });
 
+const typeBadge: ColumnDef = {
+  id: "type",
+  label: msg({ id: "col.type", message: "Type" }),
+  render: (object) => (textAt(object, "spec.type") ? <Badge tone="info">{textAt(object, "spec.type")}</Badge> : dash),
+  sortValue: (object) => textAt(object, "spec.type"),
+};
+
 const roles: ColumnDef = {
   id: "roles",
   label: msg({ id: "col.roles", message: "Roles" }),
@@ -223,7 +230,7 @@ export const columnsByPlural: Record<string, ColumnDef[]> = {
   projects: [name, text("displayName", L.displayName, "spec.displayName"), text("tenant", L.tenant, "spec.tenantRef"), ltrText("namespace", L.namespace, "status.namespace"), count("members", L.members, memberCount), age],
   clusterimages: [
     name,
-    text("type", L.type, "spec.type"),
+    typeBadge,
     { id: "os", label: L.os, render: (object) => osSummary(object) || dash, sortValue: osSummary },
     phase,
     sizeBytes("size", L.size, "status.sizeBytes"),
@@ -238,7 +245,7 @@ export const columnsByPlural: Record<string, ColumnDef[]> = {
   ],
   volumes: [name, phase, gi("size", L.size, "spec.sizeGi"), text("storageClass", L.storageClass, "spec.storageClass"), text("attachedTo", L.attachedTo, "status.attachedTo"), { id: "source", label: L.source, render: (object) => sourceSummary(object) || dash, sortValue: sourceSummary }],
   volumesnapshots: [name, text("volume", L.volume, "spec.volumeRef"), phase, text("retention", L.retention, "spec.retention"), age],
-  images: [name, text("type", L.type, "spec.type"), phase, { id: "os", label: L.os, render: (object) => osSummary(object) || dash, sortValue: osSummary }, sizeBytes("size", L.size, "status.sizeBytes"), ltrText("digest", L.digest, "status.digest")],
+  images: [name, typeBadge, phase, { id: "os", label: L.os, render: (object) => osSummary(object) || dash, sortValue: osSummary }, sizeBytes("size", L.size, "status.sizeBytes"), ltrText("digest", L.digest, "status.digest")],
   virtualmachinebackups: [name, text("vm", L.vm, "spec.vmRef"), text("target", L.backupTarget, "spec.target"), ltrText("schedule", L.schedule, "spec.schedule"), text("keep", L.keep, "spec.keep"), phase],
   virtualmachinerestores: [name, text("backup", L.backup, "spec.backupRef"), text("targetName", L.targetName, "spec.targetName"), flag("replace", L.replace, "spec.replace"), phase, age],
   subnets: [name, text("network", L.network, "spec.networkRef"), ltrText("cidr", L.cidr, "spec.cidr"), ltrText("gateway", L.gateway, "spec.gateway"), flag("dhcp", L.dhcp, "spec.dhcp"), text("dnsZone", L.dnsZone, "spec.dnsZoneRef")],

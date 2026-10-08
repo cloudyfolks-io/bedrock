@@ -54,3 +54,25 @@ export function formatQuantity(text: string): string {
   }
   return `${match[1]} ${suffix}B`;
 }
+
+const quantityUnits: Record<string, number> = {
+  Ki: 1024,
+  Mi: 1024 ** 2,
+  Gi: 1024 ** 3,
+  Ti: 1024 ** 4,
+  Pi: 1024 ** 5,
+  k: 1e3,
+  M: 1e6,
+  G: 1e9,
+  T: 1e12,
+  P: 1e15,
+  m: 1e-3,
+};
+
+export function parseQuantity(text: string): number {
+  const match = quantityPattern.exec(text);
+  if (!match?.[1]) {
+    return Number.NaN;
+  }
+  return Number(match[1]) * (match[2] ? (quantityUnits[match[2]] ?? 1) : 1);
+}

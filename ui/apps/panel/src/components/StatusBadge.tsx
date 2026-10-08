@@ -34,7 +34,7 @@ const phaseTones: Record<string, Tone> = {
   Failed: "danger",
 };
 
-const phaseMessages: Record<string, MessageDescriptor> = {
+export const phaseMessages: Record<string, MessageDescriptor> = {
   Running: msg({ id: "status.phase.running", message: "Running" }),
   Ready: msg({ id: "status.phase.ready", message: "Ready" }),
   Available: msg({ id: "status.phase.available", message: "Available" }),

@@ -59,3 +59,14 @@ describe("formatQuantity", () => {
     expect(formatQuantity("lots")).toBe("lots");
   });
 });
+
+import { parseQuantity } from "./format";
+
+describe("parseQuantity", () => {
+  it("reads Kubernetes quantities as numbers", () => {
+    expect(parseQuantity("64")).toBe(64);
+    expect(parseQuantity("256Gi")).toBe(256 * 1024 ** 3);
+    expect(parseQuantity("500m")).toBe(0.5);
+    expect(Number.isNaN(parseQuantity("lots"))).toBe(true);
+  });
+});
