@@ -170,11 +170,17 @@ rules:
   - update
   - watch
 - apiGroups:
+  - bedrock.cloudyfolks.io
+  resources:
+  - virtualmachines/finalizers
+  - volumes/finalizers
+  - volumesnapshots/finalizers
+  verbs:
+  - update
+- apiGroups:
   - cdi.kubevirt.io
   resources:
   - cdis
-  - dataimportcrons
-  - datasources
   - datavolumes
   verbs:
   - create
@@ -183,6 +189,14 @@ rules:
   - list
   - patch
   - update
+  - watch
+- apiGroups:
+  - cdi.kubevirt.io
+  resources:
+  - datasources
+  verbs:
+  - get
+  - list
   - watch
 - apiGroups:
   - ceph.rook.io
@@ -237,6 +251,15 @@ rules:
   - update
   - watch
 - apiGroups:
+  - instancetype.kubevirt.io
+  resources:
+  - virtualmachineclusterinstancetypes
+  - virtualmachineclusterpreferences
+  verbs:
+  - get
+  - list
+  - watch
+- apiGroups:
   - kubevirt.io
   resources:
   - kubevirts
@@ -249,6 +272,15 @@ rules:
   - list
   - patch
   - update
+  - watch
+- apiGroups:
+  - kubevirt.io
+  resources:
+  - virtualmachineinstancemigrations
+  - virtualmachineinstances
+  verbs:
+  - get
+  - list
   - watch
 - apiGroups:
   - networking.k8s.io
@@ -331,6 +363,15 @@ rules:
   - update
   - watch
 - apiGroups:
+  - snapshot.kubevirt.io
+  resources:
+  - virtualmachinesnapshots
+  verbs:
+  - delete
+  - get
+  - list
+  - watch
+- apiGroups:
   - snapshot.storage.k8s.io
   resources:
   - volumesnapshotclasses
@@ -344,6 +385,14 @@ rules:
   - update
   - watch
 - apiGroups:
+  - snapshot.storage.k8s.io
+  resources:
+  - volumesnapshotclasses
+  verbs:
+  - get
+  - list
+  - watch
+- apiGroups:
   - storage.k8s.io
   resources:
   - storageclasses
@@ -364,10 +413,15 @@ rules:
   - list
   - watch
 - apiGroups:
+  - subresources.kubevirt.io
+  resources:
+  - virtualmachineinstances/guestosinfo
+  verbs:
+  - get
+- apiGroups:
   - traefik.io
   resources:
   - ingressroutes
-  - middlewares
   - serverstransports
   - tlsstores
   verbs:
@@ -446,9 +500,10 @@ rules:
 - apiGroups:
   - ""
   resources:
-  - namespaces
   - persistentvolumeclaims
+  - pods
   verbs:
   - get
   - list
+  - patch
   - watch
