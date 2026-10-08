@@ -163,3 +163,14 @@ func securityGroupLister(c client.Reader) func(context.Context, ...client.ListOp
 func everything(list func(context.Context, ...client.ListOption) []reconcile.Request) handler.MapFunc {
 	return func(ctx context.Context, _ client.Object) []reconcile.Request { return list(ctx) }
 }
+
+func AddressWaiters(all []v1alpha1.ElasticIP, gone v1alpha1.ElasticIP) []reconcile.Request {
+	var requests []reconcile.Request
+	for _, other := range all {
+		sameAddress := other.Spec.Address != "" && (other.Spec.Address == gone.Spec.Address || other.Spec.Address == gone.Status.Address)
+		if other.UID != gone.UID && other.Spec.ProviderNetwork == gone.Spec.ProviderNetwork && sameAddress {
+			requests = append(requests, requestOf(other.Namespace, other.Name))
+		}
+	}
+	return requests
+}

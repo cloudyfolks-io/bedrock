@@ -117,6 +117,13 @@ func (r *ElasticIPReconciler) SetupWithManager(mgr ctrl.Manager) error {
 		Watches(&v1alpha1.VirtualMachine{}, handler.EnqueueRequestsFromMapFunc(inNamespaceOf(eips))).
 		Watches(&v1alpha1.Subnet{}, handler.EnqueueRequestsFromMapFunc(inNamespaceOf(eips))).
 		Watches(&v1alpha1.Network{}, handler.EnqueueRequestsFromMapFunc(everything(eips))).
+		Watches(&v1alpha1.ElasticIP{}, handler.EnqueueRequestsFromMapFunc(func(ctx context.Context, obj client.Object) []reconcile.Request {
+			var list v1alpha1.ElasticIPList
+			if err := c.List(ctx, &list); err != nil {
+				return nil
+			}
+			return AddressWaiters(list.Items, *obj.(*v1alpha1.ElasticIP))
+		})).
 		Watches(&v1alpha1.LoadBalancer{}, handler.EnqueueRequestsFromMapFunc(inNamespaceOf(eips))).
 		Watches(&appsv1.DaemonSet{}, handler.EnqueueRequestsFromMapFunc(everything(eips)), builder.WithPredicates(predicate.NewPredicateFuncs(func(obj client.Object) bool {
 			return obj.GetNamespace() == frrNamespace && obj.GetName() == frrName

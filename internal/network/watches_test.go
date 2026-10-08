@@ -85,3 +85,28 @@ func TestGroupsOfVirtualMachineListsEveryGroup(t *testing.T) {
 		t.Fatalf("requests %v", got)
 	}
 }
+
+func elasticIPAt(namespace, name, provider, address string) v1alpha1.ElasticIP {
+	return v1alpha1.ElasticIP{ObjectMeta: metav1.ObjectMeta{Namespace: namespace, Name: name, UID: types.UID(namespace + name)}, Spec: v1alpha1.ElasticIPSpec{ProviderNetwork: provider, Address: address}}
+}
+
+func TestAddressWaitersSelectsElasticIPsAskingForTheSameAddress(t *testing.T) {
+	gone := elasticIPAt("a", "old", "public", "192.0.2.50")
+	all := []v1alpha1.ElasticIP{
+		gone, elasticIPAt("b", "young", "public", "192.0.2.50"), elasticIPAt("c", "other-address", "public", "192.0.2.51"),
+		elasticIPAt("d", "other-network", "backup", "192.0.2.50"), elasticIPAt("e", "floating", "public", ""),
+	}
+	got := AddressWaiters(all, gone)
+	if len(got) != 1 || got[0] != request("b", "young") {
+		t.Fatalf("requests %v", got)
+	}
+}
+
+func TestAddressWaitersUsesTheAllocatedAddressOfTheGoneElasticIP(t *testing.T) {
+	gone := elasticIPAt("a", "old", "public", "")
+	gone.Status.Address = "192.0.2.60"
+	got := AddressWaiters([]v1alpha1.ElasticIP{elasticIPAt("b", "young", "public", "192.0.2.60")}, gone)
+	if len(got) != 1 {
+		t.Fatalf("requests %v", got)
+	}
+}
