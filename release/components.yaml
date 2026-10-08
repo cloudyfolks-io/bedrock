@@ -84,6 +84,15 @@ components:
       - quay.io/kubevirt/cdi-uploadserver:v1.66.1
       - quay.io/kubevirt/cdi-uploadproxy:v1.66.1
       - quay.io/kubevirt/cirros-container-disk-demo:v1.9.0
+  - name: aaq
+    order: 52
+    version: v1.8.0
+    dirs: [manifests/52-aaq]
+    crdsToGroup: crds
+    keepTags: true
+    extraImages:
+      - quay.io/kubevirt/aaq-controller:v1.8.0
+      - quay.io/kubevirt/aaq-server:v1.8.0
   - name: cert-manager
     order: 60
     chart: charts/cert-manager
