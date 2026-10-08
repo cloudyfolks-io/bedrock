@@ -93,6 +93,7 @@ dump_workloads() {
   kubectl get addons -o yaml || true
   echo "--- events"
   kubectl get events -A --sort-by=.lastTimestamp | tail -150 || true
+  kubectl -n default get events --field-selector involvedObject.kind=Setting || true
 }
 
 dump() {
