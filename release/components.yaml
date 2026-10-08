@@ -140,6 +140,9 @@ components:
     namespace: kube-system
     values: release/values/kata.yaml
     noHooks: true
+  - name: loki
+    addon: true
+    dirs: [manifests/addons/loki]
   - name: bedrock
     order: 90
     dirs: [manifests/90-bedrock]
