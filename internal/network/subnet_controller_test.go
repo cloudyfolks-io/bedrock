@@ -116,10 +116,25 @@ func TestSubnetReconcilerCreatesFabricSubnetAndAttachment(t *testing.T) {
 	if err := fabrictest.MarkSubnetReady(context.Background(), f.c, fabricSubnet.GetName()); err != nil {
 		t.Fatal(err)
 	}
+	if result := reconcileSubnet(t, f.c, f.namespace, "default"); result.RequeueAfter != waitRequeue {
+		t.Fatalf("result %+v", result)
+	}
+	requireSubnetReason(t, f.c, f.namespace, "default", metav1.ConditionFalse, ReasonWaitingForDefaultSecurityGroup)
+	reconcileDefaultGroup(t, f.c, f.namespace)
+	requireSubnetReasonAfter(t, f, ReasonWaitingForDefaultSecurityGroup)
+	if err := fabrictest.MarkSecurityGroupProgrammed(context.Background(), f.c, DefaultSecurityGroupName(f.namespace)); err != nil {
+		t.Fatal(err)
+	}
 	if result := reconcileSubnet(t, f.c, f.namespace, "default"); result.RequeueAfter != 0 {
 		t.Fatalf("result %+v", result)
 	}
 	requireSubnetReason(t, f.c, f.namespace, "default", metav1.ConditionTrue, ReasonApplied)
+}
+
+func requireSubnetReasonAfter(t *testing.T, f subnetFixture, reason string) {
+	t.Helper()
+	reconcileSubnet(t, f.c, f.namespace, "default")
+	requireSubnetReason(t, f.c, f.namespace, "default", metav1.ConditionFalse, reason)
 }
 
 func TestSubnetReconcilerWaitsForTheNetwork(t *testing.T) {

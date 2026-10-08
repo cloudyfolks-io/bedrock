@@ -52,6 +52,16 @@ func (r *SubnetReconciler) SetupWithManager(mgr ctrl.Manager) error {
 		})).
 		Watches(fabricObject("Subnet"), ownerAnnotationHandler(), builder.WithPredicates(managedOnly())).
 		Watches(newObject(attachmentGVK, ""), handler.EnqueueRequestForOwner(mgr.GetScheme(), mgr.GetRESTMapper(), &v1alpha1.Subnet{}, handler.OnlyControllerOwner())).
+		Watches(fabricObject("SecurityGroup"), handler.EnqueueRequestsFromMapFunc(func(ctx context.Context, obj client.Object) []reconcile.Request {
+			if obj.GetLabels()[v1alpha1.LabelKind] != "Namespace" {
+				return nil
+			}
+			var subnets v1alpha1.SubnetList
+			if err := c.List(ctx, &subnets, client.InNamespace(obj.GetLabels()[v1alpha1.LabelName])); err != nil {
+				return nil
+			}
+			return requestsFrom(subnets.Items)
+		}), builder.WithPredicates(managedOnly())).
 		Complete(r)
 }
 

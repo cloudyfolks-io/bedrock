@@ -65,6 +65,13 @@ func (r *SubnetReconciler) Reconcile(ctx context.Context, req reconcile.Request)
 		}
 		return r.publish(ctx, subnet, falseCondition(v1alpha1.ConditionReady, subnet.Generation, ReasonFabricNotReady, message), waitRequeue)
 	}
+	defaults, err := getObject(ctx, r.Client, fabric.SecurityGroupGVK, DefaultSecurityGroupName(subnet.Namespace))
+	if err != nil && !apierrors.IsNotFound(err) {
+		return reconcile.Result{}, err
+	}
+	if err != nil || !fabric.SecurityGroupProgrammed(defaults) {
+		return r.publish(ctx, subnet, falseCondition(v1alpha1.ConditionReady, subnet.Generation, ReasonWaitingForDefaultSecurityGroup, "waiting for Fabric to program the default security group of the namespace"), waitRequeue)
+	}
 	return r.publish(ctx, subnet, trueCondition(v1alpha1.ConditionReady, subnet.Generation, ReasonApplied), 0)
 }
 
