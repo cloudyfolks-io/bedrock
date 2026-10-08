@@ -193,19 +193,20 @@ describe("Multiplexer", () => {
     expect(socket.framesOf("subscribe")).toHaveLength(2);
   });
 
-  it("cancels a pending unavailable retry when the socket closes and resubscribes once after hello", () => {
-    const mux = make();
+  it("cancels a pending unavailable retry when the socket closes", () => {
+    const draws = [1, 0];
+    const mux = make(() => draws.shift() ?? 0);
     mux.acquire(vmSub, handlers());
     const first = connect(sockets);
     const id = String(first.framesOf("subscribe")[0]?.id);
     first.receive({ type: "error", id, code: "unavailable", message: "later" });
     first.close(1013);
-    vi.advanceTimersByTime(1000);
+    vi.advanceTimersByTime(500);
     const second = connect(sockets);
     expect(second.framesOf("subscribe")).toHaveLength(1);
     vi.advanceTimersByTime(60000);
-    expect(first.framesOf("subscribe")).toHaveLength(1);
     expect(second.framesOf("subscribe")).toHaveLength(1);
+    expect(first.framesOf("subscribe")).toHaveLength(1);
   });
 
   it("TestSessionEndedCloseCode4401", () => {
