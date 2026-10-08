@@ -1,4 +1,4 @@
-import { createContext, useContext, useMemo, type ReactNode } from "react";
+import { createContext, useContext, useEffect, useMemo, type ReactNode } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { createHttp, type Http } from "./http";
 import type { Session } from "./types";
@@ -21,6 +21,15 @@ export function HttpProvider({ children }: { children: ReactNode }) {
         },
       }),
     [queryClient],
+  );
+  useEffect(
+    () =>
+      queryClient.getQueryCache().subscribe((event) => {
+        if (event.query.queryKey[0] === sessionKey[0] && event.query.state.status === "success") {
+          http.resetUnauthenticated();
+        }
+      }),
+    [queryClient, http],
   );
   return <HttpContext.Provider value={http}>{children}</HttpContext.Provider>;
 }

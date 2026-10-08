@@ -83,7 +83,7 @@ export function SessionGate({ children }: { children: ReactNode }) {
     assign(loginUrl(returnTo));
   }, [unauthenticated, assign, returnTo]);
 
-  if (query.data) {
+  if (query.data && !unauthenticated) {
     return <>{children}</>;
   }
   if (unauthenticated && blocked) {

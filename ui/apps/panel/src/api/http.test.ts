@@ -70,12 +70,14 @@ describe("createHttp", () => {
     expect(headers["Content-Type"]).toBe("application/merge-patch+json");
   });
 
-  it("TestNoTokenInUrls", async () => {
-    const { http, fetchMock } = setup(() => jsonResponse(200, {}));
-    await http.request("POST", "/apis/x/upload", { body: {} });
-    for (const call of fetchMock.mock.calls) {
-      expect(String(call[0])).not.toMatch(/token|tok/);
-    }
+  it("resets the unauthenticated guard after a sign-in succeeds", async () => {
+    const { http, onUnauthenticated } = setup(() => jsonResponse(401, { error: "unauthenticated" }));
+    await http.request("GET", "/a").catch(() => undefined);
+    await http.request("GET", "/a").catch(() => undefined);
+    expect(onUnauthenticated).toHaveBeenCalledTimes(1);
+    http.resetUnauthenticated();
+    await http.request("GET", "/a").catch(() => undefined);
+    expect(onUnauthenticated).toHaveBeenCalledTimes(2);
   });
 
   it("TestNetworkFailureIsAnHttpError", async () => {

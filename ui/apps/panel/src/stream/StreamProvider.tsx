@@ -26,7 +26,7 @@ export function StreamProvider({ createSocket, children }: StreamProviderProps) 
       new Multiplexer({
         url: streamUrl(window.location),
         createSocket: createSocket ?? browserSocket,
-        onSessionEnded: () => queryClient.removeQueries({ queryKey: sessionKey }),
+        onSessionEnded: () => queryClient.invalidateQueries({ queryKey: sessionKey }),
       }),
     [createSocket, queryClient],
   );

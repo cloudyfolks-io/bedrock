@@ -1,11 +1,11 @@
 import { act, screen, waitFor } from "@testing-library/react";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import type { KubeObject } from "../api/types";
 import type { ResourceRef } from "../api/kube";
 import { applyEvent, useLiveList, useLiveObject } from "./live";
-import { sessionKey } from "../api/HttpProvider";
+import { SessionGate } from "../api/session";
 import { createFakeSockets, type FakeSocket } from "../test/fakeSocket";
-import { renderPanel } from "../test/renderPanel";
+import { defaultSession, renderPanel } from "../test/renderPanel";
 
 const vms: ResourceRef = { group: "bedrock.cloudyfolks.io", version: "v1alpha1", plural: "virtualmachines", namespaced: true };
 const listPath = "GET /apis/bedrock.cloudyfolks.io/v1alpha1/namespaces/web/virtualmachines";
@@ -158,13 +158,33 @@ describe("useLiveList", () => {
     expect(screen.getByText("web-1:Running")).toBeTruthy();
   });
 
-  it("TestSessionEndedClearsTheGate", async () => {
-    const { sockets, view } = setup();
+  it("TestSessionEndedClearsTheGate sends the user to sign in", async () => {
+    const sockets = createFakeSockets();
+    const assign = vi.fn();
+    let sessionCalls = 0;
+    renderPanel(
+      <SessionGate>
+        <List namespace="web" />
+      </SessionGate>,
+      {
+        socket: sockets,
+        session: null,
+        assign,
+        api: {
+          "GET /proxy/v1/session": () => {
+            sessionCalls += 1;
+            return sessionCalls === 1 ? { body: defaultSession } : { status: 401, body: { error: "unauthenticated" } };
+          },
+          [listPath]: { body: { items: [vm("web-1")], metadata: { resourceVersion: "100" } } },
+        },
+      },
+    );
     await screen.findByText("web-1:Running");
     const socket = await openStream(sockets);
-    expect(view.queryClient.getQueryData(sessionKey)).toBeTruthy();
     act(() => socket.close(4401));
-    expect(view.queryClient.getQueryData(sessionKey)).toBeUndefined();
+    await waitFor(() => expect(assign).toHaveBeenCalledTimes(1));
+    expect(assign.mock.calls[0]?.[0]).toMatch(/^\/oauth\/login\?returnTo=/);
+    expect(screen.queryByText("web-1:Running")).toBeNull();
   });
 });
 

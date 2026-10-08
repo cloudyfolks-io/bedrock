@@ -34,6 +34,7 @@ export interface RequestOptions {
 
 export interface Http {
   request<T>(method: string, path: string, options?: RequestOptions): Promise<T>;
+  resetUnauthenticated(): void;
 }
 
 export interface HttpDeps {
@@ -102,5 +103,10 @@ export function createHttp(deps: HttpDeps): Http {
     return (text === "" ? undefined : parseJson(text)) as T;
   }
 
-  return { request };
+  return {
+    request,
+    resetUnauthenticated: () => {
+      unauthenticatedReported = false;
+    },
+  };
 }
