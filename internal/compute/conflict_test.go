@@ -129,3 +129,29 @@ func TestVMDoesNotPruneSnapshotsDuringARestore(t *testing.T) {
 	reconcileVM(t, r, ns, "web-1")
 	requireAbsent(t, c, vmSnapshotGVK, ns, "past")
 }
+
+func TestCreateRaceChecksTheOwner(t *testing.T) {
+	base, plain := watchClient(t)
+	ns := uniqueNamespace(t, plain)
+	racing := interceptor.NewClient(base, interceptor.Funcs{
+		Create: func(ctx context.Context, c client.WithWatch, obj client.Object, opts ...client.CreateOption) error {
+			foreign := obj.DeepCopyObject().(client.Object)
+			foreign.SetOwnerReferences(nil)
+			if err := c.Create(ctx, foreign); err != nil {
+				return err
+			}
+			return apierrors.NewAlreadyExists(schema.GroupResource{Resource: "datavolumes"}, obj.GetName())
+		},
+	})
+	vm := fixtureVM(ns, "web-1")
+	vm.UID = "vm-uid"
+	claim := RootClaim(vm, map[string]string{}, nil)
+	err := createIfAbsent(context.Background(), racing, claim)
+	var conflict nameConflict
+	if !errors.As(err, &conflict) {
+		t.Fatalf("error %v, want a name conflict", err)
+	}
+	if refs := requirePresent(t, plain, dataVolumeGVK, ns, "web-1-root").GetOwnerReferences(); len(refs) != 0 {
+		t.Fatalf("owner %+v", refs)
+	}
+}
