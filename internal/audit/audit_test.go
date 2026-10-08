@@ -103,3 +103,18 @@ func TestArgsRotateAt100MBKeep10(t *testing.T) {
 		t.Errorf("got %v", Args())
 	}
 }
+
+func TestPolicyKeepsTheWebhookSettingAtMetadata(t *testing.T) {
+	for _, level := range []string{"Metadata", "RequestResponse"} {
+		for _, verb := range []string{"get", "list", "patch", "update", "create", "delete"} {
+			attrs := authorizer.AttributesRecord{Verb: verb, APIGroup: "bedrock.cloudyfolks.io", Resource: "settings", Name: "alertmanager.webhook-url", ResourceRequest: true, User: &user.DefaultInfo{Name: "admin"}}
+			if got := evaluator(t, level).EvaluatePolicyRule(attrs).Level; got != auditv1.LevelMetadata {
+				t.Errorf("%s with read level %s: got %s", verb, level, got)
+			}
+		}
+	}
+	other := authorizer.AttributesRecord{Verb: "patch", APIGroup: "bedrock.cloudyfolks.io", Resource: "settings", Name: "images.keep", ResourceRequest: true, User: &user.DefaultInfo{Name: "admin"}}
+	if got := evaluator(t, "Metadata").EvaluatePolicyRule(other).Level; got != auditv1.LevelRequestResponse {
+		t.Errorf("another setting: got %s", got)
+	}
+}
