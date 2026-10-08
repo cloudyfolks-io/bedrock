@@ -143,6 +143,8 @@ spec:
                   imagesBytes:
                     format: int64
                     type: integer
+                  kvm:
+                    type: boolean
                   timeSynced:
                     type: boolean
                   varLibFreeBytes:

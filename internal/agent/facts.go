@@ -32,7 +32,14 @@ func hostChecks(ctx context.Context, deps Deps) *v1alpha1.HostChecks {
 		EtcdMembers:          bounded(ctx, deps.ProbeTimeout, func(c context.Context) int32 { return etcdMembers(c, deps.Exec, deps.Root) }),
 		EtcdHealthy:          bounded(ctx, deps.ProbeTimeout, func(c context.Context) bool { return etcdHealthy(c, deps.Exec, deps.Root) }),
 		ImagesBytes:          imagesBytes(deps.Root),
+		KVM:                  kvmPresent(deps.Root),
 	}
+}
+
+func kvmPresent(root string) *bool {
+	_, err := os.Stat(filepath.Join(root, "dev", "kvm"))
+	present := err == nil
+	return &present
 }
 
 func probedK0sVersion(ctx context.Context, deps Deps) string {

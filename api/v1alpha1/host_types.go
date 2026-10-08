@@ -167,6 +167,8 @@ type HostChecks struct {
 	// +optional
 	EtcdHealthy bool `json:"etcdHealthy,omitempty"`
 	// +optional
+	KVM *bool `json:"kvm,omitempty"`
+	// +optional
 	ImagesBytes int64 `json:"imagesBytes,omitempty"`
 }
 
