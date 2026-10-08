@@ -22,9 +22,9 @@ func TestUserDataIsVerbatimWithoutKeys(t *testing.T) {
 	}
 }
 
-const richUserData = `#cloud-config
-# keep this comment
-hostname: web-1
+const keptComment = "# keep this comment"
+
+const richUserData = "#cloud-config\n" + keptComment + "\n" + `hostname: web-1
 write_files:
   - path: /etc/motd
     permissions: 0644
@@ -47,7 +47,7 @@ func TestUserDataKeepsTheTenantBytes(t *testing.T) {
 	if got != want {
 		t.Fatalf("user data changed:\n%s", got)
 	}
-	for _, kept := range []string{"permissions: 0644", "# keep this comment", "    content: |\n      line one\n        indented line", "&defaults", "<<: *defaults"} {
+	for _, kept := range []string{"permissions: 0644", keptComment, "    content: |\n      line one\n        indented line", "&defaults", "<<: *defaults"} {
 		if !strings.Contains(got, kept) {
 			t.Errorf("%q was lost", kept)
 		}
