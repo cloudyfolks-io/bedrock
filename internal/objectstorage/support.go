@@ -59,7 +59,7 @@ func updateStatus[T client.Object](ctx context.Context, c client.Client, obj T, 
 			return err
 		}
 		mutate(latest)
-		return c.Status().Update(ctx, latest)
+		return c.Status().Update(ctx, latest, client.FieldOwner(v1alpha1.ObjectStorageFieldManager))
 	})
 }
 

@@ -266,3 +266,16 @@ func TestUserOutsideAProjectNamespace(t *testing.T) {
 	reconcileUser(t, unlabeledNamespace, "app")
 	requireUserReason(t, unlabeledNamespace, "app", metav1.ConditionFalse, "NamespaceNotProject")
 }
+
+func TestUserStatusIsWrittenByTheAreaManager(t *testing.T) {
+	fresh(t)
+	createStore(t, "Ready")
+	createUser(t, "acme-prod", "app", v1alpha1.ObjectStorageUserSpec{})
+	reconcileUser(t, "acme-prod", "app")
+	for _, entry := range readUser(t, "acme-prod", "app").ManagedFields {
+		if entry.Subresource == "status" && entry.Manager == v1alpha1.ObjectStorageFieldManager {
+			return
+		}
+	}
+	t.Fatalf("managed fields %+v", readUser(t, "acme-prod", "app").ManagedFields)
+}
