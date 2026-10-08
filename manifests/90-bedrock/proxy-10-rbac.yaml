@@ -16,7 +16,7 @@ metadata:
 rules:
   - apiGroups: [""]
     resources: [secrets]
-    verbs: [create, get, list, update, patch, delete]
+    verbs: [create, get, list, update, delete]
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding
@@ -79,85 +79,41 @@ metadata:
     bedrock.cloudyfolks.io/aggregate-to-proxy: "true"
 rules:
   - apiGroups: [bedrock.cloudyfolks.io]
-    resources:
-      - addons
-      - addons/status
-      - clusterconfigs
-      - clusterimages
-      - clusterimages/status
-      - clusters
-      - clusters/status
-      - dnszones
-      - dnszones/status
-      - elasticips
-      - elasticips/status
-      - hostconfigs
-      - hostconfigs/status
-      - hosts
-      - hosts/status
-      - images
-      - images/status
-      - loadbalancers
-      - loadbalancers/status
-      - networks
-      - networks/status
-      - nodeupgrades
-      - nodeupgrades/status
-      - objectstoragebuckets
-      - objectstoragebuckets/status
-      - objectstorageusers
-      - objectstorageusers/status
-      - projects
-      - projects/status
-      - releases
-      - releases/status
-      - securitygroups
-      - securitygroups/status
-      - settings
-      - settings/status
-      - sshkeys
-      - sshkeys/status
-      - subnets
-      - subnets/status
-      - tenants
-      - tenants/status
-      - virtualmachinebackups
-      - virtualmachinebackups/status
-      - virtualmachinerestores
-      - virtualmachinerestores/status
-      - virtualmachines
-      - virtualmachines/status
-      - volumes
-      - volumes/status
-      - volumesnapshots
-      - volumesnapshots/status
-    verbs: [get, list, watch, patch, update]
-  - apiGroups: [kubevirt.io]
-    resources: [virtualmachines, virtualmachineinstances]
-    verbs: [get, list, watch, patch, update]
+    resources: [settings]
+    resourceNames: [platform.host]
+    verbs: [get]
+  - apiGroups: [bedrock.cloudyfolks.io]
+    resources: [projects]
+    verbs: [list]
+  - apiGroups: [bedrock.cloudyfolks.io]
+    resources: [virtualmachines]
+    verbs: [get, patch]
+  - apiGroups: [""]
+    resources: [namespaces]
+    verbs: [get]
   - apiGroups: [kubevirt.io]
     resources: [virtualmachineinstancemigrations]
-    verbs: [create, get, list]
+    verbs: [create]
+  - apiGroups: [snapshot.kubevirt.io]
+    resources: [virtualmachinesnapshots]
+    verbs: [create, list]
   - apiGroups: [subresources.kubevirt.io]
-    resources: [virtualmachines/start, virtualmachines/stop, virtualmachines/restart, virtualmachines/migrate]
+    resources: [virtualmachines/restart]
     verbs: [update]
   - apiGroups: [subresources.kubevirt.io]
-    resources: [virtualmachineinstances/vnc, virtualmachineinstances/console]
+    resources: [virtualmachineinstances/vnc]
     verbs: [get]
-  - apiGroups: [snapshot.kubevirt.io]
-    resources: [virtualmachinesnapshots, virtualmachinerestores]
-    verbs: [create, get, list, watch, delete]
-  - apiGroups: [cdi.kubevirt.io]
-    resources: [datavolumes]
-    verbs: [get, list, watch]
+  - apiGroups: [subresources.kubevirt.io]
+    resources: [virtualmachineinstances/console]
+    verbs: [get]
   - apiGroups: [upload.cdi.kubevirt.io]
     resources: [uploadtokenrequests]
     verbs: [create]
-  - apiGroups: [snapshot.storage.k8s.io]
-    resources: [volumesnapshots]
-    verbs: [get, list, create, delete]
-  - apiGroups: [""]
-    resources: [persistentvolumeclaims, events]
+  - apiGroups: [bedrock.cloudyfolks.io]
+    resources: [images]
+    verbs: [get]
+  - apiGroups: [bedrock.cloudyfolks.io]
+    resources: [settings]
     verbs: [get, list]
 ---
 apiVersion: rbac.authorization.k8s.io/v1

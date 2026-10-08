@@ -193,20 +193,38 @@ func TestProxyNamespaceComesFirst(t *testing.T) {
 	}
 }
 
-func TestProxyBaseRoleCoversTenantKindsNotAuthnKinds(t *testing.T) {
+func TestProxyBaseRoleHoldsNoAuthnKindsAndNoBroadWrites(t *testing.T) {
 	objects := proxyManifest(t, "proxy-10-rbac.yaml")
 	base := rulesOf(findObject(t, objects, "ClusterRole", "bedrock-proxy-base"))
 	group := "bedrock.cloudyfolks.io"
 	for _, kind := range bedrockKinds(t) {
-		authn := slices.Contains(authnPlurals, kind.plural)
-		for _, verb := range []string{"get", "list", "watch", "patch", "update"} {
-			if allows(base, group, kind.plural, verb) == authn {
-				t.Errorf("%s %s: allowed %v, authn kind %v", verb, kind.plural, !authn, authn)
-			}
-			if kind.hasStatus && allows(base, group, kind.plural+"/status", verb) == authn {
-				t.Errorf("%s %s/status: allowed %v, authn kind %v", verb, kind.plural, !authn, authn)
+		if !slices.Contains(authnPlurals, kind.plural) {
+			continue
+		}
+		for _, verb := range []string{"get", "list", "watch", "patch", "update", "create", "delete"} {
+			if allows(base, group, kind.plural, verb) {
+				t.Errorf("the base role allows %s on the authn kind %s", verb, kind.plural)
 			}
 		}
+	}
+	for _, kind := range bedrockKinds(t) {
+		for _, resource := range []string{kind.plural, kind.plural + "/status"} {
+			for _, verb := range []string{"watch", "update", "delete", "deletecollection"} {
+				if allows(base, group, resource, verb) {
+					t.Errorf("the base role allows %s on %s", verb, resource)
+				}
+			}
+		}
+	}
+	for _, resource := range []string{"hosts", "hostconfigs", "clusters", "clusterconfigs", "nodeupgrades", "releases", "addons", "tenants"} {
+		for _, verb := range []string{"get", "list", "patch"} {
+			if allows(base, group, resource, verb) {
+				t.Errorf("the base role allows %s on %s", verb, resource)
+			}
+		}
+	}
+	if !allows(base, group, "projects", "list") || !allows(base, group, "settings", "get") {
+		t.Error("the base role needs projects list and settings get for the proxy itself")
 	}
 	local := rulesOf(findObject(t, objects, "Role", "bedrock-proxy"))
 	for _, plural := range []string{"sessions", "users"} {
@@ -214,29 +232,31 @@ func TestProxyBaseRoleCoversTenantKindsNotAuthnKinds(t *testing.T) {
 			t.Errorf("Role bedrock-proxy must allow only get on %s", plural)
 		}
 	}
+	store := rulesOf(findObject(t, objects, "Role", "bedrock-proxy-store"))
+	if allows(store, "", "secrets", "patch") || !allows(store, "", "secrets", "update") {
+		t.Error("the store role must not patch Secrets and must update them")
+	}
+}
+
+var handlerRuleInputs = [][3]string{
+	{"bedrock.cloudyfolks.io", "virtualmachines", "get"},
+	{"bedrock.cloudyfolks.io", "virtualmachines", "patch"},
+	{"", "namespaces", "get"},
+	{"kubevirt.io", "virtualmachineinstancemigrations", "create"},
+	{"snapshot.kubevirt.io", "virtualmachinesnapshots", "create"},
+	{"snapshot.kubevirt.io", "virtualmachinesnapshots", "list"},
+	{"subresources.kubevirt.io", "virtualmachines/restart", "update"},
+	{"subresources.kubevirt.io", "virtualmachineinstances/vnc", "get"},
+	{"subresources.kubevirt.io", "virtualmachineinstances/console", "get"},
+	{"upload.cdi.kubevirt.io", "uploadtokenrequests", "create"},
+	{"bedrock.cloudyfolks.io", "images", "get"},
+	{"bedrock.cloudyfolks.io", "settings", "get"},
+	{"bedrock.cloudyfolks.io", "settings", "list"},
 }
 
 func TestProxyBaseRoleCoversTheHandlerRules(t *testing.T) {
 	base := rulesOf(findObject(t, proxyManifest(t, "proxy-10-rbac.yaml"), "ClusterRole", "bedrock-proxy-base"))
-	wants := [][3]string{
-		{"kubevirt.io", "virtualmachineinstancemigrations", "create"},
-		{"kubevirt.io", "virtualmachines", "patch"},
-		{"snapshot.kubevirt.io", "virtualmachinesnapshots", "create"},
-		{"snapshot.kubevirt.io", "virtualmachinerestores", "delete"},
-		{"subresources.kubevirt.io", "virtualmachines/restart", "update"},
-		{"subresources.kubevirt.io", "virtualmachines/migrate", "update"},
-		{"subresources.kubevirt.io", "virtualmachineinstances/vnc", "get"},
-		{"subresources.kubevirt.io", "virtualmachineinstances/console", "get"},
-		{"cdi.kubevirt.io", "datavolumes", "watch"},
-		{"upload.cdi.kubevirt.io", "uploadtokenrequests", "create"},
-		{"snapshot.storage.k8s.io", "volumesnapshots", "create"},
-		{"", "persistentvolumeclaims", "get"},
-		{"", "events", "list"},
-		{"bedrock.cloudyfolks.io", "images", "get"},
-		{"bedrock.cloudyfolks.io", "settings", "get"},
-		{"bedrock.cloudyfolks.io", "projects", "list"},
-	}
-	for _, want := range wants {
+	for _, want := range handlerRuleInputs {
 		if !allows(base, want[0], want[1], want[2]) {
 			t.Errorf("base role lacks %s %s %s", want[0], want[1], want[2])
 		}
