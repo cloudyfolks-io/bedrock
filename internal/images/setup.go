@@ -10,7 +10,11 @@ import (
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	ctrl "sigs.k8s.io/controller-runtime"
+	"sigs.k8s.io/controller-runtime/pkg/builder"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/handler"
+	"sigs.k8s.io/controller-runtime/pkg/predicate"
+	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	"github.com/cloudyfolks-io/bedrock/api/v1alpha1"
 )
@@ -80,10 +84,48 @@ func SetupWithManager(mgr ctrl.Manager) error {
 		}
 		return err
 	}
-	if err := ownedKinds(ctrl.NewControllerManagedBy(mgr).Named("image").For(&v1alpha1.Image{})).Complete(&ImageReconciler{Client: mgr.GetClient(), Now: time.Now}); err != nil {
+	images := ownedKinds(ctrl.NewControllerManagedBy(mgr).Named("image").For(&v1alpha1.Image{})).
+		Watches(&v1alpha1.Setting{}, handler.EnqueueRequestsFromMapFunc(enqueueImages(mgr.GetClient())), builder.WithPredicates(platformSettings()))
+	if err := images.Complete(&ImageReconciler{Client: mgr.GetClient(), Now: time.Now}); err != nil {
 		return err
 	}
-	return ownedKinds(ctrl.NewControllerManagedBy(mgr).Named("clusterimage").For(&v1alpha1.ClusterImage{})).Complete(&ClusterImageReconciler{Client: mgr.GetClient(), Now: time.Now})
+	clusterImages := ownedKinds(ctrl.NewControllerManagedBy(mgr).Named("clusterimage").For(&v1alpha1.ClusterImage{})).
+		Watches(&v1alpha1.Setting{}, handler.EnqueueRequestsFromMapFunc(enqueueClusterImages(mgr.GetClient())), builder.WithPredicates(platformSettings()))
+	return clusterImages.Complete(&ClusterImageReconciler{Client: mgr.GetClient(), Now: time.Now})
+}
+
+func platformSettings() predicate.Predicate {
+	return predicate.NewPredicateFuncs(func(obj client.Object) bool {
+		return obj.GetName() == settingAdditionalCA || obj.GetName() == settingPlatformHost
+	})
+}
+
+func enqueueImages(c client.Reader) handler.MapFunc {
+	return func(ctx context.Context, _ client.Object) []reconcile.Request {
+		var list v1alpha1.ImageList
+		if err := c.List(ctx, &list); err != nil {
+			return nil
+		}
+		requests := make([]reconcile.Request, 0, len(list.Items))
+		for _, img := range list.Items {
+			requests = append(requests, reconcile.Request{NamespacedName: client.ObjectKeyFromObject(&img)})
+		}
+		return requests
+	}
+}
+
+func enqueueClusterImages(c client.Reader) handler.MapFunc {
+	return func(ctx context.Context, _ client.Object) []reconcile.Request {
+		var list v1alpha1.ClusterImageList
+		if err := c.List(ctx, &list); err != nil {
+			return nil
+		}
+		requests := make([]reconcile.Request, 0, len(list.Items))
+		for _, img := range list.Items {
+			requests = append(requests, reconcile.Request{NamespacedName: client.ObjectKeyFromObject(&img)})
+		}
+		return requests
+	}
 }
 
 func ownedKinds(builder *ctrl.Builder) *ctrl.Builder {

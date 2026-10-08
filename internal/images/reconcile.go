@@ -24,6 +24,14 @@ func reconcileSubject(ctx context.Context, c client.Client, s Subject, prev v1al
 			return pending(v1alpha1.ImagePhasePending, ReasonCatalogNamespaceMissing, "namespace "+CatalogNamespace+" does not exist", 30*time.Second), nil
 		}
 	}
+	pem, err := AdditionalCAPEM(ctx, c)
+	if err != nil {
+		return Plan{}, err
+	}
+	if err := EnsureAdditionalCA(ctx, c, s.Namespace, pem); err != nil {
+		return Plan{}, err
+	}
+	s.ExtraCA = pem != ""
 	host, err := PlatformHost(ctx, c)
 	if err != nil {
 		return Plan{}, err

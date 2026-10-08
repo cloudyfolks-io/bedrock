@@ -14,10 +14,13 @@ import (
 	"github.com/cloudyfolks-io/bedrock/api/v1alpha1"
 )
 
-const labelDataImportCron = "cdi.kubevirt.io/dataImportCron"
+const (
+	labelDataImportCron = "cdi.kubevirt.io/dataImportCron"
+	settingPlatformHost = "platform.host"
+)
 
 func PlatformHost(ctx context.Context, c client.Reader) (string, error) {
-	return settingValue(ctx, c, "platform.host")
+	return settingValue(ctx, c, settingPlatformHost)
 }
 
 func settingValue(ctx context.Context, c client.Reader, name string) (string, error) {
