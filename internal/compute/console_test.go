@@ -156,7 +156,14 @@ func TestConsoleSerialUsesConsoleSubresource(t *testing.T) {
 }
 
 func TestConsoleStripsCallerCredentials(t *testing.T) {
-	rig := newConsoleRig(t, "Running", false)
+	for _, serial := range []bool{false, true} {
+		requireCredentialsStripped(t, serial)
+	}
+}
+
+func requireCredentialsStripped(t *testing.T, serial bool) {
+	t.Helper()
+	rig := newConsoleRig(t, "Running", serial)
 	headers := upgradeHeaders()
 	headers["Authorization"] = "Bearer user-token"
 	headers["Cookie"] = "session=secret"
