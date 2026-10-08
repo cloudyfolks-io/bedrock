@@ -1,6 +1,7 @@
 package tenancy
 
 import (
+	"errors"
 	"net/netip"
 
 	corev1 "k8s.io/api/core/v1"
@@ -201,4 +202,14 @@ func stepOrPending(generation int64, conditionType string, steps []metav1.Condit
 		}
 	}
 	return conditionOn(generation, conditionType, metav1.ConditionFalse, ReasonPending, "step not evaluated yet")
+}
+
+func applyFailures(in ProjectObservation) error {
+	failed := []error{}
+	for _, step := range []Step{in.Namespace, in.Subnet, in.Quota, in.Access} {
+		if step.Reason == ReasonApplyFailed {
+			failed = append(failed, errors.New(step.Message))
+		}
+	}
+	return errors.Join(failed...)
 }
