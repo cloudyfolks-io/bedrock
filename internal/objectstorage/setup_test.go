@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"k8s.io/apimachinery/pkg/api/meta"
+	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/utils/ptr"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -37,17 +37,14 @@ func TestSetupRegistersTheControllers(t *testing.T) {
 		<-done
 	})
 	createUser(t, "acme-prod", "app", v1alpha1.ObjectStorageUserSpec{})
-	deadline := time.Now().Add(30 * time.Second)
-	for time.Now().Before(deadline) {
+	err = wait.PollUntilContextTimeout(ctx, 100*time.Millisecond, 30*time.Second, true, func(ctx context.Context) (bool, error) {
 		var user v1alpha1.ObjectStorageUser
-		err := testClient.Get(ctx, client.ObjectKey{Namespace: "acme-prod", Name: "app"}, &user)
-		if err == nil && controllerutil.ContainsFinalizer(&user, UserFinalizer) {
-			return
+		if err := testClient.Get(ctx, client.ObjectKey{Namespace: "acme-prod", Name: "app"}, &user); err != nil {
+			return false, client.IgnoreNotFound(err)
 		}
-		if err != nil && !meta.IsNoMatchError(err) {
-			t.Log(err)
-		}
-		time.Sleep(200 * time.Millisecond)
+		return controllerutil.ContainsFinalizer(&user, UserFinalizer), nil
+	})
+	if err != nil {
+		t.Fatalf("the user never got its finalizer: %v", err)
 	}
-	t.Fatal("the user never got its finalizer")
 }
