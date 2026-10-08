@@ -126,7 +126,7 @@ func (r *ElasticIPReconciler) addressTaken(ctx context.Context, eip v1alpha1.Ela
 	for _, other := range all.Items {
 		sameAddress := other.Spec.Address == eip.Spec.Address || other.Status.Address == eip.Spec.Address
 		if other.UID != eip.UID && other.Spec.ProviderNetwork == eip.Spec.ProviderNetwork && sameAddress && olderThan(other, eip) {
-			return &Violation{Reason: ReasonAddressInUse, Message: fmt.Sprintf("the address %s belongs to the ElasticIP %s/%s", eip.Spec.Address, other.Namespace, other.Name)}, nil
+			return &Violation{Reason: ReasonAddressInUse, Message: fmt.Sprintf("the address %s is already assigned", eip.Spec.Address)}, nil
 		}
 	}
 	return nil, nil
