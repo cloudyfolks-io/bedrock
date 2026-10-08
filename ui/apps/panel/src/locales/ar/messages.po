@@ -13,6 +13,9 @@ msgstr "التنزيلات"
 msgid "account.title"
 msgstr "الحساب"
 
+msgid "action.done"
+msgstr "تم"
+
 msgid "action.error.failed"
 msgstr "فشل الإجراء"
 
@@ -193,6 +196,9 @@ msgstr "الحالة"
 msgid "col.storageClass"
 msgstr "فئة التخزين"
 
+msgid "col.subnet"
+msgstr "الشبكة الفرعية"
+
 msgid "col.target"
 msgstr "الهدف"
 
@@ -288,6 +294,12 @@ msgstr "حذف {kind}"
 
 msgid "confirm.simple.description"
 msgstr "{0}: {1}"
+
+msgid "console.notRunning"
+msgstr "ابدأ الجهاز لفتح وحدة التحكم"
+
+msgid "console.placeholder"
+msgstr "وحدة التحكم"
 
 msgid "detail.conditions.message"
 msgstr "الرسالة"
@@ -960,3 +972,54 @@ msgstr "مراحل الترقية"
 
 msgid "upgrades.window"
 msgstr "نافذة الصيانة"
+
+msgid "vmDetail.bus"
+msgstr "الناقل"
+
+msgid "vmDetail.firmware"
+msgstr "البرنامج الثابت"
+
+msgid "vmDetail.guestAgent"
+msgstr "وكيل الضيف"
+
+msgid "vmDetail.hostname"
+msgstr "اسم المضيف"
+
+msgid "vmDetail.networks"
+msgstr "توصيلات الشبكة"
+
+msgid "vmDetail.preference"
+msgstr "التفضيل"
+
+msgid "vmDetail.rootDisk"
+msgstr "القرص الجذري"
+
+msgid "vmDetail.securityGroups"
+msgstr "مجموعات الأمان"
+
+msgid "vmDetail.tab.console"
+msgstr "وحدة التحكم"
+
+msgid "vmDetail.tab.disks"
+msgstr "الأقراص"
+
+msgid "vmDetail.tab.metrics"
+msgstr "المقاييس"
+
+msgid "vmDetail.tab.networks"
+msgstr "الشبكات"
+
+msgid "vmDetail.tab.overview"
+msgstr "نظرة عامة"
+
+msgid "vmDetail.volumes"
+msgstr "الأقراص المرفقة"
+
+msgid "vms.filter.all"
+msgstr "كل المراحل"
+
+msgid "vms.filter.phase"
+msgstr "المرحلة"
+
+msgid "vms.installIso"
+msgstr "التثبيت من ISO"

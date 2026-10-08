@@ -13,6 +13,9 @@ msgstr "Downloads"
 msgid "account.title"
 msgstr "Account"
 
+msgid "action.done"
+msgstr "Done"
+
 msgid "action.error.failed"
 msgstr "The action failed"
 
@@ -193,6 +196,9 @@ msgstr "Status"
 msgid "col.storageClass"
 msgstr "Storage class"
 
+msgid "col.subnet"
+msgstr "Subnet"
+
 msgid "col.target"
 msgstr "Target"
 
@@ -288,6 +294,12 @@ msgstr "Delete {kind}"
 
 msgid "confirm.simple.description"
 msgstr "{0}: {1}"
+
+msgid "console.notRunning"
+msgstr "Start the VM to open the console"
+
+msgid "console.placeholder"
+msgstr "Console"
 
 msgid "detail.conditions.message"
 msgstr "Message"
@@ -960,3 +972,54 @@ msgstr "Upgrade phases"
 
 msgid "upgrades.window"
 msgstr "Maintenance window"
+
+msgid "vmDetail.bus"
+msgstr "Bus"
+
+msgid "vmDetail.firmware"
+msgstr "Firmware"
+
+msgid "vmDetail.guestAgent"
+msgstr "Guest agent"
+
+msgid "vmDetail.hostname"
+msgstr "Hostname"
+
+msgid "vmDetail.networks"
+msgstr "Network attachments"
+
+msgid "vmDetail.preference"
+msgstr "Preference"
+
+msgid "vmDetail.rootDisk"
+msgstr "Root disk"
+
+msgid "vmDetail.securityGroups"
+msgstr "Security groups"
+
+msgid "vmDetail.tab.console"
+msgstr "Console"
+
+msgid "vmDetail.tab.disks"
+msgstr "Disks"
+
+msgid "vmDetail.tab.metrics"
+msgstr "Metrics"
+
+msgid "vmDetail.tab.networks"
+msgstr "Networks"
+
+msgid "vmDetail.tab.overview"
+msgstr "Overview"
+
+msgid "vmDetail.volumes"
+msgstr "Attached volumes"
+
+msgid "vms.filter.all"
+msgstr "All phases"
+
+msgid "vms.filter.phase"
+msgstr "Phase"
+
+msgid "vms.installIso"
+msgstr "Install from ISO"

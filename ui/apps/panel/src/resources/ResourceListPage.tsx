@@ -55,7 +55,14 @@ function LiveIndicator({ live }: { live: LiveState }) {
   );
 }
 
-function ListBody({ def, namespace, project, help }: { def: ResourceDef; namespace: string | undefined; project: Project | undefined; help: ReactNode }) {
+interface ListExtras {
+  help?: ReactNode;
+  toolbar?: ReactNode;
+  actions?: ReactNode | ((context: { canCreate: boolean; project: Project | undefined }) => ReactNode);
+  itemFilter?: (object: KubeObject) => boolean;
+}
+
+function ListBody({ def, namespace, project, help = null, toolbar = null, actions = null, itemFilter }: { def: ResourceDef; namespace: string | undefined; project: Project | undefined } & ListExtras) {
   const { t, i18n } = useLingui();
   const { locale } = useLocale();
   const query = useLiveList(refOf(def), namespace === undefined ? {} : { namespace });
@@ -74,8 +81,8 @@ function ListBody({ def, namespace, project, help }: { def: ResourceDef; namespa
     const all = query.data?.items ?? [];
     const scoped = def.perspective === "project" && def.scope === "Cluster" && project ? all.filter((item) => item.spec?.tenantRef === project.tenant) : all;
     const needle = filter.trim().toLowerCase();
-    return scoped.filter((item) => item.metadata.name.toLowerCase().includes(needle)).sort((left, right) => compare(left, right, sort, def));
-  }, [query.data, filter, sort, def, project]);
+    return scoped.filter((item) => itemFilter?.(item) ?? true).filter((item) => item.metadata.name.toLowerCase().includes(needle)).sort((left, right) => compare(left, right, sort, def));
+  }, [query.data, filter, sort, def, project, itemFilter]);
 
   const createButton = !canCreate ? null : def.createPath && project ? (
     <Link className="br-button br-button--primary" to={`/p/${project.name}/${def.createPath}`}>
@@ -90,7 +97,7 @@ function ListBody({ def, namespace, project, help }: { def: ResourceDef; namespa
   const breadcrumbs = project ? [{ label: project.displayName || project.name }, { label: title }] : undefined;
   const header = (
     <>
-      <PageHeader title={title} {...(breadcrumbs ? { breadcrumbs } : {})} actions={createButton} />
+      <PageHeader title={title} {...(breadcrumbs ? { breadcrumbs } : {})} actions={<>{typeof actions === "function" ? actions({ canCreate, project }) : actions}{createButton}</>} />
       {help}
     </>
   );
@@ -151,6 +158,7 @@ function ListBody({ def, namespace, project, help }: { def: ResourceDef; namespa
       {header}
       <div className="br-toolbar">
         <TextField label={t({ id: "list.filter.label", message: "Filter by name" })} name="filter" value={filter} onChange={setFilter} />
+        {toolbar}
         <LiveIndicator live={query.live} />
       </div>
       {empty ? (
@@ -199,12 +207,12 @@ function ListBody({ def, namespace, project, help }: { def: ResourceDef; namespa
   );
 }
 
-export function ResourceListPage({ def, help = null }: { def: ResourceDef; help?: ReactNode }) {
+export function ResourceListPage({ def, ...extras }: { def: ResourceDef } & ListExtras) {
   const projects = useProjects();
   const name = useCurrentProjectName();
   const project = projects.data?.find((candidate) => candidate.name === name);
   if (def.perspective === "admin") {
-    return <ListBody def={def} namespace={undefined} project={undefined} help={help} />;
+    return <ListBody def={def} namespace={undefined} project={undefined} {...extras} />;
   }
   if (projects.isPending) {
     return <Spinner />;
@@ -212,5 +220,5 @@ export function ResourceListPage({ def, help = null }: { def: ResourceDef; help?
   if (!project) {
     return <NotFoundPage />;
   }
-  return <ListBody def={def} namespace={def.scope === "Namespaced" ? project.namespace : undefined} project={project} help={help} />;
+  return <ListBody def={def} namespace={def.scope === "Namespaced" ? project.namespace : undefined} project={project} {...extras} />;
 }

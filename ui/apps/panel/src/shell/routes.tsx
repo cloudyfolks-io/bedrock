@@ -19,6 +19,8 @@ const HostDetailPage = lazy(() => import("../pages/admin/HostDetailPage"));
 const UpgradesPage = lazy(() => import("../pages/admin/UpgradesPage"));
 const AddonsPage = lazy(() => import("../pages/admin/AddonsPage"));
 const TenantDetailPage = lazy(() => import("../pages/admin/TenantDetailPage"));
+const VmsPage = lazy(() => import("../pages/project/VmsPage"));
+const VmDetailPage = lazy(() => import("../pages/project/VmDetailPage"));
 const SettingsPage = lazy(() => import("../pages/admin/SettingsPage"));
 
 const listPages: Record<string, (def: ResourceDef) => ReactElement> = {
@@ -26,11 +28,13 @@ const listPages: Record<string, (def: ResourceDef) => ReactElement> = {
   "admin/settings": () => <SettingsPage />,
   "admin/upgrades": () => <UpgradesPage />,
   "admin/addons": () => <AddonsPage />,
+  "project/vms": () => <VmsPage />,
 };
 
 const detailPages: Record<string, (def: ResourceDef) => ReactElement> = {
   "admin/hosts": () => <HostDetailPage />,
   "admin/tenants": () => <TenantDetailPage />,
+  "project/vms": () => <VmDetailPage />,
 };
 
 function listPage(def: ResourceDef): ReactElement {

@@ -13,6 +13,9 @@ msgstr "دریافت‌ها"
 msgid "account.title"
 msgstr "حساب کاربری"
 
+msgid "action.done"
+msgstr "انجام شد"
+
 msgid "action.error.failed"
 msgstr "عملیات ناموفق بود"
 
@@ -193,6 +196,9 @@ msgstr "وضعیت"
 msgid "col.storageClass"
 msgstr "کلاس ذخیره‌سازی"
 
+msgid "col.subnet"
+msgstr "زیرشبکه"
+
 msgid "col.target"
 msgstr "هدف"
 
@@ -288,6 +294,12 @@ msgstr "حذف {kind}"
 
 msgid "confirm.simple.description"
 msgstr "{0}: {1}"
+
+msgid "console.notRunning"
+msgstr "برای باز کردن کنسول ماشین را روشن کنید"
+
+msgid "console.placeholder"
+msgstr "کنسول"
 
 msgid "detail.conditions.message"
 msgstr "پیام"
@@ -960,3 +972,54 @@ msgstr "مراحل ارتقا"
 
 msgid "upgrades.window"
 msgstr "بازه نگهداری"
+
+msgid "vmDetail.bus"
+msgstr "گذرگاه"
+
+msgid "vmDetail.firmware"
+msgstr "میان‌افزار"
+
+msgid "vmDetail.guestAgent"
+msgstr "عامل مهمان"
+
+msgid "vmDetail.hostname"
+msgstr "نام میزبان"
+
+msgid "vmDetail.networks"
+msgstr "اتصال‌های شبکه"
+
+msgid "vmDetail.preference"
+msgstr "ترجیح"
+
+msgid "vmDetail.rootDisk"
+msgstr "دیسک ریشه"
+
+msgid "vmDetail.securityGroups"
+msgstr "گروه‌های امنیتی"
+
+msgid "vmDetail.tab.console"
+msgstr "کنسول"
+
+msgid "vmDetail.tab.disks"
+msgstr "دیسک‌ها"
+
+msgid "vmDetail.tab.metrics"
+msgstr "سنجه‌ها"
+
+msgid "vmDetail.tab.networks"
+msgstr "شبکه‌ها"
+
+msgid "vmDetail.tab.overview"
+msgstr "نمای کلی"
+
+msgid "vmDetail.volumes"
+msgstr "حجم‌های متصل"
+
+msgid "vms.filter.all"
+msgstr "همه مرحله‌ها"
+
+msgid "vms.filter.phase"
+msgstr "مرحله"
+
+msgid "vms.installIso"
+msgstr "نصب از ISO"

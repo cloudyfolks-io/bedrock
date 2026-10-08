@@ -50,7 +50,7 @@ export function useActionRunner(def: ResourceDef): ActionRunner {
     busy.current.add(key);
     try {
       const message = await perform(action, object);
-      toast.show({ tone: "success", title: i18n._(action.label), ...(message ? { description: message } : {}) });
+      toast.show({ tone: "success", title: i18n._(action.label), description: message ?? t({ id: "action.done", message: "Done" }) });
       void queryClient.invalidateQueries({ queryKey: listKey(ref, object.metadata.namespace, {}) });
       void queryClient.invalidateQueries({ queryKey: objectKey(ref, object.metadata.namespace, object.metadata.name) });
     } catch (error) {
