@@ -3,6 +3,7 @@ package audit
 import (
 	"fmt"
 
+	auditpolicy "k8s.io/apiserver/pkg/audit/policy"
 	sigyaml "sigs.k8s.io/yaml"
 )
 
@@ -45,4 +46,9 @@ func rules(readLevel string) []map[string]any {
 		{"level": readLevel, "verbs": readVerbs},
 		{"level": "Metadata"},
 	}
+}
+
+func Validate(policy []byte) error {
+	_, err := auditpolicy.LoadPolicyFromBytes(policy)
+	return err
 }

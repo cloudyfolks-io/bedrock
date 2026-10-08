@@ -2,6 +2,7 @@ package agent
 
 import (
 	"context"
+	"fmt"
 	"path/filepath"
 	"strings"
 
@@ -21,6 +22,9 @@ func syncAuditFiles(ctx context.Context, c client.Client, deps Deps, current v1a
 	policy, err := auditPolicySource(ctx, c)
 	if err != nil {
 		return err
+	}
+	if err := audit.Validate(policy); err != nil {
+		return fmt.Errorf("invalid policy in %s: %w", audit.ConfigMapName, err)
 	}
 	if _, err := apiserver.WriteFiles(filepath.Join(deps.Root, audit.LogDir), nil, deps.AuthnOwner); err != nil {
 		return err

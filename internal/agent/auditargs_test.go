@@ -167,7 +167,7 @@ func TestAuditPolicyChangeIsReportedInTheHostStatus(t *testing.T) {
 	if status := getHost(t, f.node).Status.Authn; status == nil || status.WebhookRestartPending {
 		t.Fatalf("old files are not pending: %+v", status)
 	}
-	putAuditPolicy(t, "policy-v2")
+	putAuditPolicy(t, validPolicy(t, "RequestResponse"))
 	if err := Tick(ctx, k8sClient, f.deps); err != nil {
 		t.Fatal(err)
 	}

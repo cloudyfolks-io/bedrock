@@ -44,7 +44,7 @@ func putAuthnSources(t *testing.T, platformHost string) (authentication, webhook
 	authentication, webhook = renderedAuthn(t, platformHost)
 	cm := &corev1.ConfigMap{ObjectMeta: metav1.ObjectMeta{Namespace: release.SystemNamespace, Name: apiserver.ConfigMapName}, Data: map[string]string{apiserver.AuthenticationFile: string(authentication)}}
 	secret := &corev1.Secret{ObjectMeta: metav1.ObjectMeta{Namespace: release.SystemNamespace, Name: apiserver.SecretName}, Data: map[string][]byte{apiserver.WebhookFile: webhook}}
-	auditPolicy := &corev1.ConfigMap{ObjectMeta: metav1.ObjectMeta{Namespace: release.SystemNamespace, Name: audit.ConfigMapName}, Data: map[string]string{audit.PolicyFile: "policy"}}
+	auditPolicy := &corev1.ConfigMap{ObjectMeta: metav1.ObjectMeta{Namespace: release.SystemNamespace, Name: audit.ConfigMapName}, Data: map[string]string{audit.PolicyFile: validPolicy(t, "Metadata")}}
 	for _, obj := range []client.Object{cm, secret, auditPolicy} {
 		err := k8sClient.Create(ctx, obj)
 		if client.IgnoreAlreadyExists(err) != nil {

@@ -118,3 +118,17 @@ func TestPolicyKeepsTheWebhookSettingAtMetadata(t *testing.T) {
 		t.Errorf("another setting: got %s", got)
 	}
 }
+
+func TestValidateAcceptsBothLevelsAndRefusesGarbage(t *testing.T) {
+	for _, level := range []string{"Metadata", "RequestResponse"} {
+		raw, err := Policy(level)
+		if err != nil || Validate(raw) != nil {
+			t.Errorf("%s: %v", level, err)
+		}
+	}
+	for _, raw := range []string{"", "rules: [not a policy", "apiVersion: audit.k8s.io/v1\nkind: Policy\nrules:\n  - level: Bogus\n"} {
+		if Validate([]byte(raw)) == nil {
+			t.Errorf("%q accepted", raw)
+		}
+	}
+}

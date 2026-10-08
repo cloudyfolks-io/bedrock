@@ -55,14 +55,14 @@ func policyPath(root string) string {
 }
 
 func TestSyncAuditFilesWritesThePolicy(t *testing.T) {
-	putAuditPolicy(t, "policy-v1")
+	putAuditPolicy(t, validPolicy(t, "Metadata"))
 	deps := authnDeps(t, time.Now())
 	if err := syncAuditFiles(context.Background(), k8sClient, deps, auditHost(v1alpha1.RoleControlPlane)); err != nil {
 		t.Fatal(err)
 	}
 	path := policyPath(deps.Root)
-	if readFixtureFile(t, path) != "policy-v1" {
-		t.Fatalf("policy %q", readFixtureFile(t, path))
+	if readFixtureFile(t, path) != validPolicy(t, "Metadata") {
+		t.Fatal("the policy file differs from the ConfigMap")
 	}
 	info, err := os.Stat(path)
 	if err != nil || info.Mode().Perm() != 0o600 {
@@ -101,7 +101,7 @@ func TestSyncAuditFilesWaitsForTheConfigMap(t *testing.T) {
 }
 
 func TestSyncAuditFilesCreatesTheLogDirectory(t *testing.T) {
-	putAuditPolicy(t, "policy-v1")
+	putAuditPolicy(t, validPolicy(t, "Metadata"))
 	deps := authnDeps(t, time.Now())
 	if err := syncAuditFiles(context.Background(), k8sClient, deps, auditHost(v1alpha1.RoleControlPlane)); err != nil {
 		t.Fatal(err)
@@ -113,7 +113,7 @@ func TestSyncAuditFilesCreatesTheLogDirectory(t *testing.T) {
 }
 
 func TestSyncAuditFilesSkipsWorkers(t *testing.T) {
-	putAuditPolicy(t, "policy-v1")
+	putAuditPolicy(t, validPolicy(t, "Metadata"))
 	deps := authnDeps(t, time.Now())
 	if err := syncAuditFiles(context.Background(), k8sClient, deps, auditHost(v1alpha1.RoleWorkload)); err != nil {
 		t.Fatal(err)
@@ -134,5 +134,34 @@ func TestWithAuditMessageAddsAPrefixedError(t *testing.T) {
 	}
 	if clean := withAuditMessage(status, nil); clean != status {
 		t.Fatal("no error must keep the status")
+	}
+}
+
+func validPolicy(t *testing.T, level string) string {
+	t.Helper()
+	policy, err := audit.Policy(level)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return string(policy)
+}
+
+func TestSyncAuditFilesRefusesAnInvalidPolicy(t *testing.T) {
+	putAuditPolicy(t, "rules: [not a policy")
+	deps := authnDeps(t, time.Now())
+	writeFixtureFile(t, policyPath(deps.Root), validPolicy(t, "Metadata"))
+	err := syncAuditFiles(context.Background(), k8sClient, deps, auditHost(v1alpha1.RoleControlPlane))
+	if err == nil || !strings.Contains(err.Error(), "invalid policy") {
+		t.Fatalf("error %v", err)
+	}
+	if readFixtureFile(t, policyPath(deps.Root)) != validPolicy(t, "Metadata") {
+		t.Fatal("the current policy file must stay")
+	}
+	putAuditPolicy(t, "apiVersion: audit.k8s.io/v1\nkind: Policy\nrules:\n  - level: Bogus\n")
+	if err := syncAuditFiles(context.Background(), k8sClient, deps, auditHost(v1alpha1.RoleControlPlane)); err == nil {
+		t.Fatal("a policy with an unknown level was accepted")
+	}
+	if got := withAuditMessage(&v1alpha1.AuthnFilesStatus{}, err); got.Message == "" {
+		t.Fatal("the error must reach the host status message")
 	}
 }
