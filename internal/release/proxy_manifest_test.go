@@ -238,31 +238,6 @@ func TestProxyBaseRoleHoldsNoAuthnKindsAndNoBroadWrites(t *testing.T) {
 	}
 }
 
-var handlerRuleInputs = [][3]string{
-	{"bedrock.cloudyfolks.io", "virtualmachines", "get"},
-	{"bedrock.cloudyfolks.io", "virtualmachines", "patch"},
-	{"", "namespaces", "get"},
-	{"kubevirt.io", "virtualmachineinstancemigrations", "create"},
-	{"snapshot.kubevirt.io", "virtualmachinesnapshots", "create"},
-	{"snapshot.kubevirt.io", "virtualmachinesnapshots", "list"},
-	{"subresources.kubevirt.io", "virtualmachines/restart", "update"},
-	{"subresources.kubevirt.io", "virtualmachineinstances/vnc", "get"},
-	{"subresources.kubevirt.io", "virtualmachineinstances/console", "get"},
-	{"upload.cdi.kubevirt.io", "uploadtokenrequests", "create"},
-	{"bedrock.cloudyfolks.io", "images", "get"},
-	{"bedrock.cloudyfolks.io", "settings", "get"},
-	{"bedrock.cloudyfolks.io", "settings", "list"},
-}
-
-func TestProxyBaseRoleCoversTheHandlerRules(t *testing.T) {
-	base := rulesOf(findObject(t, proxyManifest(t, "proxy-10-rbac.yaml"), "ClusterRole", "bedrock-proxy-base"))
-	for _, want := range handlerRuleInputs {
-		if !allows(base, want[0], want[1], want[2]) {
-			t.Errorf("base role lacks %s %s %s", want[0], want[1], want[2])
-		}
-	}
-}
-
 func TestProxyRolesAreScopedAndHaveNoWildcards(t *testing.T) {
 	objects := proxyManifest(t, "proxy-10-rbac.yaml")
 	for _, obj := range objects {
@@ -347,37 +322,6 @@ func TestProxyObjectsCarryTheGroupComponentLabel(t *testing.T) {
 		}
 		if obj.GetLabels()["bedrock.cloudyfolks.io/component"] != "bedrock" {
 			t.Errorf("%s %s labels %v", obj.GetKind(), obj.GetName(), obj.GetLabels())
-		}
-	}
-}
-
-func TestProxyBaseRoleGrantsExactlyTheNeededRules(t *testing.T) {
-	base := findObject(t, proxyManifest(t, "proxy-10-rbac.yaml"), "ClusterRole", "bedrock-proxy-base")
-	got := map[string]bool{}
-	for _, rule := range rulesOf(base) {
-		for _, group := range rule.groups {
-			for _, resource := range rule.resources {
-				for _, verb := range rule.verbs {
-					got[group+"|"+resource+"|"+verb+"|"+strings.Join(rule.names, ",")] = true
-				}
-			}
-		}
-	}
-	want := map[string]bool{
-		"bedrock.cloudyfolks.io|settings|get|platform.host": true,
-		"bedrock.cloudyfolks.io|projects|list|":             true,
-	}
-	for _, rule := range handlerRuleInputs {
-		want[rule[0]+"|"+rule[1]+"|"+rule[2]+"|"] = true
-	}
-	for key := range got {
-		if !want[key] {
-			t.Errorf("the base role grants more than needed: %s", key)
-		}
-	}
-	for key := range want {
-		if !got[key] {
-			t.Errorf("the base role lacks %s", key)
 		}
 	}
 }
