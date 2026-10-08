@@ -78,14 +78,20 @@ spec:
                     - name
                     type: object
                   snapshotRef:
+                    maxLength: 253
+                    pattern: ^[a-z0-9]([-a-z0-9.]*[a-z0-9])?$
                     type: string
                   volumeRef:
+                    maxLength: 253
+                    pattern: ^[a-z0-9]([-a-z0-9.]*[a-z0-9])?$
                     type: string
                 type: object
                 x-kubernetes-validations:
                 - message: at most one source must be set
                   rule: '[has(self.image), has(self.snapshotRef), has(self.volumeRef)].filter(set,
                     set).size() <= 1'
+                - message: image.name must be a DNS subdomain
+                  rule: '!has(self.image) || self.image.name.matches(''^[a-z0-9]([-a-z0-9.]*[a-z0-9])?$'')'
               storageClass:
                 type: string
                 x-kubernetes-validations:

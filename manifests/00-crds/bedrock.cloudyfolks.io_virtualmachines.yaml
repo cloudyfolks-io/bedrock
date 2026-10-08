@@ -51,47 +51,63 @@ spec:
                 items:
                   properties:
                     imageRef:
+                      maxLength: 253
                       minLength: 1
+                      pattern: ^[a-z0-9]([-a-z0-9.]*[a-z0-9])?$
                       type: string
                   required:
                   - imageRef
                   type: object
+                maxItems: 4
                 type: array
                 x-kubernetes-list-type: atomic
               cloudInit:
                 properties:
                   networkData:
+                    maxLength: 65536
                     type: string
                   secretRef:
+                    maxLength: 253
+                    pattern: ^[a-z0-9]([-a-z0-9.]*[a-z0-9])?$
                     type: string
                   userData:
+                    maxLength: 65536
                     type: string
                 type: object
+                x-kubernetes-validations:
+                - message: secretRef excludes userData and networkData
+                  rule: '!has(self.secretRef) || (!has(self.userData) && !has(self.networkData))'
               cpu:
                 properties:
                   dedicated:
                     type: boolean
                   model:
+                    pattern: ^[A-Za-z0-9._-]{1,64}$
                     type: string
                 type: object
               disks:
                 items:
                   properties:
                     bus:
-                      default: virtio
                       enum:
                       - virtio
                       - sata
                       - scsi
                       type: string
                     volumeRef:
+                      maxLength: 253
                       minLength: 1
+                      pattern: ^[a-z0-9]([-a-z0-9.]*[a-z0-9])?$
                       type: string
                   required:
                   - volumeRef
                   type: object
+                maxItems: 24
                 type: array
                 x-kubernetes-list-type: atomic
+                x-kubernetes-validations:
+                - message: a volume can be listed once
+                  rule: self.all(a, self.exists_one(b, b.volumeRef == a.volumeRef))
               evictionStrategy:
                 enum:
                 - LiveMigrate
@@ -115,11 +131,14 @@ spec:
                 items:
                   properties:
                     claimRef:
+                      maxLength: 253
                       minLength: 1
+                      pattern: ^[A-Za-z0-9]([-A-Za-z0-9._/]*[A-Za-z0-9])?$
                       type: string
                   required:
                   - claimRef
                   type: object
+                maxItems: 8
                 type: array
                 x-kubernetes-list-type: atomic
               image:
@@ -143,23 +162,34 @@ spec:
                 items:
                   properties:
                     elasticIPRef:
+                      maxLength: 63
+                      pattern: ^[a-z0-9]([-a-z0-9]*[a-z0-9])?$
                       type: string
                     macAddress:
                       pattern: ^([0-9a-fA-F]{2}:){5}[0-9a-fA-F]{2}$
                       type: string
                     securityGroups:
                       items:
+                        maxLength: 63
+                        pattern: ^[a-z0-9]([-a-z0-9]*[a-z0-9])?$
                         type: string
+                      maxItems: 8
                       type: array
                       x-kubernetes-list-type: set
                     subnetRef:
+                      maxLength: 63
                       minLength: 1
+                      pattern: ^[a-z0-9]([-a-z0-9]*[a-z0-9])?$
                       type: string
                   required:
                   - subnetRef
                   type: object
+                maxItems: 8
                 type: array
                 x-kubernetes-list-type: atomic
+                x-kubernetes-validations:
+                - message: a subnet can be attached once
+                  rule: self.all(a, self.exists_one(b, b.subnetRef == a.subnetRef))
               preference:
                 type: string
               rootDisk:
@@ -168,8 +198,14 @@ spec:
                     format: int32
                     minimum: 1
                     type: integer
+                    x-kubernetes-validations:
+                    - message: rootDisk.sizeGi can only grow
+                      rule: self >= oldSelf
                   storageClass:
                     type: string
+                    x-kubernetes-validations:
+                    - message: rootDisk.storageClass is immutable
+                      rule: self == oldSelf
                 required:
                 - sizeGi
                 type: object
@@ -1104,13 +1140,19 @@ spec:
                 type: object
               sshKeys:
                 items:
+                  maxLength: 253
+                  pattern: ^[a-z0-9]([-a-z0-9.]*[a-z0-9])?$
                   type: string
+                maxItems: 16
                 type: array
                 x-kubernetes-list-type: set
             required:
             - instanceType
             - rootDisk
             type: object
+            x-kubernetes-validations:
+            - message: image.name must be a DNS subdomain
+              rule: '!has(self.image) || self.image.name.matches(''^[a-z0-9]([-a-z0-9.]*[a-z0-9])?$'')'
           status:
             properties:
               addresses:
@@ -1223,6 +1265,11 @@ spec:
         required:
         - spec
         type: object
+        x-kubernetes-validations:
+        - message: the name must have at most 52 characters
+          rule: self.metadata.name.size() <= 52
+        - message: the name must be a DNS label
+          rule: self.metadata.name.matches('^[a-z0-9]([-a-z0-9]*[a-z0-9])?$')
     served: true
     storage: true
     subresources:

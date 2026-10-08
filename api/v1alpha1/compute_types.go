@@ -34,31 +34,43 @@ const (
 
 type VMRootDisk struct {
 	// +kubebuilder:validation:Minimum=1
+	// +kubebuilder:validation:XValidation:rule="self >= oldSelf",message="rootDisk.sizeGi can only grow"
 	SizeGi int32 `json:"sizeGi"`
+	// +kubebuilder:validation:XValidation:rule="self == oldSelf",message="rootDisk.storageClass is immutable"
 	// +optional
 	StorageClass string `json:"storageClass,omitempty"`
 }
 
 type VMDisk struct {
 	// +kubebuilder:validation:MinLength=1
+	// +kubebuilder:validation:MaxLength=253
+	// +kubebuilder:validation:Pattern=`^[a-z0-9]([-a-z0-9.]*[a-z0-9])?$`
 	VolumeRef string `json:"volumeRef"`
 	// +kubebuilder:validation:Enum=virtio;sata;scsi
-	// +kubebuilder:default=virtio
 	// +optional
 	Bus string `json:"bus,omitempty"`
 }
 
 type VMCDROM struct {
 	// +kubebuilder:validation:MinLength=1
+	// +kubebuilder:validation:MaxLength=253
+	// +kubebuilder:validation:Pattern=`^[a-z0-9]([-a-z0-9.]*[a-z0-9])?$`
 	ImageRef string `json:"imageRef"`
 }
 
 type VMNetwork struct {
 	// +kubebuilder:validation:MinLength=1
+	// +kubebuilder:validation:MaxLength=63
+	// +kubebuilder:validation:Pattern=`^[a-z0-9]([-a-z0-9]*[a-z0-9])?$`
 	SubnetRef string `json:"subnetRef"`
+	// +kubebuilder:validation:MaxItems=8
+	// +kubebuilder:validation:items:MaxLength=63
+	// +kubebuilder:validation:items:Pattern=`^[a-z0-9]([-a-z0-9]*[a-z0-9])?$`
 	// +optional
 	// +listType=set
 	SecurityGroups []string `json:"securityGroups,omitempty"`
+	// +kubebuilder:validation:MaxLength=63
+	// +kubebuilder:validation:Pattern=`^[a-z0-9]([-a-z0-9]*[a-z0-9])?$`
 	// +optional
 	ElasticIPRef string `json:"elasticIPRef,omitempty"`
 	// +kubebuilder:validation:Pattern=`^([0-9a-fA-F]{2}:){5}[0-9a-fA-F]{2}$`
@@ -66,17 +78,24 @@ type VMNetwork struct {
 	MACAddress string `json:"macAddress,omitempty"`
 }
 
+// +kubebuilder:validation:XValidation:rule="!has(self.secretRef) || (!has(self.userData) && !has(self.networkData))",message="secretRef excludes userData and networkData"
 type VMCloudInit struct {
+	// +kubebuilder:validation:MaxLength=65536
 	// +optional
 	UserData string `json:"userData,omitempty"`
+	// +kubebuilder:validation:MaxLength=65536
 	// +optional
 	NetworkData string `json:"networkData,omitempty"`
+	// +kubebuilder:validation:MaxLength=253
+	// +kubebuilder:validation:Pattern=`^[a-z0-9]([-a-z0-9.]*[a-z0-9])?$`
 	// +optional
 	SecretRef string `json:"secretRef,omitempty"`
 }
 
 type VMHostDevice struct {
 	// +kubebuilder:validation:MinLength=1
+	// +kubebuilder:validation:MaxLength=253
+	// +kubebuilder:validation:Pattern=`^[A-Za-z0-9]([-A-Za-z0-9._/]*[A-Za-z0-9])?$`
 	ClaimRef string `json:"claimRef"`
 }
 
@@ -93,6 +112,7 @@ type VMFirmware struct {
 type VMCPU struct {
 	// +optional
 	Dedicated bool `json:"dedicated,omitempty"`
+	// +kubebuilder:validation:Pattern=`^[A-Za-z0-9._-]{1,64}$`
 	// +optional
 	Model string `json:"model,omitempty"`
 }
@@ -104,6 +124,7 @@ type VMScheduling struct {
 	Affinity *corev1.Affinity `json:"affinity,omitempty"`
 }
 
+// +kubebuilder:validation:XValidation:rule="!has(self.image) || self.image.name.matches('^[a-z0-9]([-a-z0-9.]*[a-z0-9])?$')",message="image.name must be a DNS subdomain"
 type VirtualMachineSpec struct {
 	// +kubebuilder:validation:MinLength=1
 	InstanceType string `json:"instanceType"`
@@ -112,17 +133,25 @@ type VirtualMachineSpec struct {
 	// +optional
 	Image    *ImageRef  `json:"image,omitempty"`
 	RootDisk VMRootDisk `json:"rootDisk"`
+	// +kubebuilder:validation:MaxItems=24
+	// +kubebuilder:validation:XValidation:rule="self.all(a, self.exists_one(b, b.volumeRef == a.volumeRef))",message="a volume can be listed once"
 	// +optional
 	// +listType=atomic
 	Disks []VMDisk `json:"disks,omitempty"`
+	// +kubebuilder:validation:MaxItems=4
 	// +optional
 	// +listType=atomic
 	CDROMs []VMCDROM `json:"cdroms,omitempty"`
+	// +kubebuilder:validation:MaxItems=8
+	// +kubebuilder:validation:XValidation:rule="self.all(a, self.exists_one(b, b.subnetRef == a.subnetRef))",message="a subnet can be attached once"
 	// +optional
 	// +listType=atomic
 	Networks []VMNetwork `json:"networks,omitempty"`
 	// +optional
 	CloudInit *VMCloudInit `json:"cloudInit,omitempty"`
+	// +kubebuilder:validation:MaxItems=16
+	// +kubebuilder:validation:items:MaxLength=253
+	// +kubebuilder:validation:items:Pattern=`^[a-z0-9]([-a-z0-9.]*[a-z0-9])?$`
 	// +optional
 	// +listType=set
 	SSHKeys []string `json:"sshKeys,omitempty"`
@@ -132,6 +161,7 @@ type VirtualMachineSpec struct {
 	// +kubebuilder:validation:Enum=LiveMigrate;LiveMigrateIfPossible;None
 	// +optional
 	EvictionStrategy string `json:"evictionStrategy,omitempty"`
+	// +kubebuilder:validation:MaxItems=8
 	// +optional
 	// +listType=atomic
 	HostDevices []VMHostDevice `json:"hostDevices,omitempty"`
@@ -187,6 +217,8 @@ type VirtualMachineStatus struct {
 // +kubebuilder:object:root=true
 // +kubebuilder:resource:scope=Namespaced
 // +kubebuilder:subresource:status
+// +kubebuilder:validation:XValidation:rule="self.metadata.name.size() <= 52",message="the name must have at most 52 characters"
+// +kubebuilder:validation:XValidation:rule="self.metadata.name.matches('^[a-z0-9]([-a-z0-9]*[a-z0-9])?$')",message="the name must be a DNS label"
 // +kubebuilder:printcolumn:name="Type",type=string,JSONPath=`.spec.instanceType`
 // +kubebuilder:printcolumn:name="Phase",type=string,JSONPath=`.status.phase`
 // +kubebuilder:printcolumn:name="Node",type=string,JSONPath=`.status.node`
@@ -205,11 +237,16 @@ type VirtualMachineList struct {
 }
 
 // +kubebuilder:validation:XValidation:rule="[has(self.image), has(self.snapshotRef), has(self.volumeRef)].filter(set, set).size() <= 1",message="at most one source must be set"
+// +kubebuilder:validation:XValidation:rule="!has(self.image) || self.image.name.matches('^[a-z0-9]([-a-z0-9.]*[a-z0-9])?$')",message="image.name must be a DNS subdomain"
 type VolumeDataSource struct {
 	// +optional
 	Image *ImageRef `json:"image,omitempty"`
+	// +kubebuilder:validation:MaxLength=253
+	// +kubebuilder:validation:Pattern=`^[a-z0-9]([-a-z0-9.]*[a-z0-9])?$`
 	// +optional
 	SnapshotRef string `json:"snapshotRef,omitempty"`
+	// +kubebuilder:validation:MaxLength=253
+	// +kubebuilder:validation:Pattern=`^[a-z0-9]([-a-z0-9.]*[a-z0-9])?$`
 	// +optional
 	VolumeRef string `json:"volumeRef,omitempty"`
 }
@@ -261,6 +298,9 @@ type VolumeList struct {
 
 type VolumeSnapshotSpec struct {
 	// +kubebuilder:validation:MinLength=1
+	// +kubebuilder:validation:MaxLength=253
+	// +kubebuilder:validation:Pattern=`^[a-z0-9]([-a-z0-9.]*[a-z0-9])?$`
+	// +kubebuilder:validation:XValidation:rule="self == oldSelf",message="volumeRef is immutable"
 	VolumeRef string `json:"volumeRef"`
 	// +optional
 	Retention *metav1.Duration `json:"retention,omitempty"`
@@ -296,6 +336,7 @@ type VolumeSnapshotList struct {
 type SSHKeySpec struct {
 	// +kubebuilder:validation:MinLength=1
 	// +kubebuilder:validation:MaxLength=16384
+	// +kubebuilder:validation:Pattern=`^[^\r\n]+$`
 	PublicKey string `json:"publicKey"`
 }
 

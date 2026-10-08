@@ -40,6 +40,7 @@ spec:
               publicKey:
                 maxLength: 16384
                 minLength: 1
+                pattern: ^[^\r\n]+$
                 type: string
             required:
             - publicKey
