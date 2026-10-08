@@ -168,19 +168,46 @@ as_user() {
   kubectl --as="bedrock:$user" "$@"
 }
 
+state_dir() {
+  echo "${E2E_STATE_DIR:-/run/bedrock-e2e}"
+}
+
+state_write() {
+  mkdir -p "$(state_dir)"
+  printf '%s\n' "$2" >"$(state_dir)/$1"
+}
+
+state_read() {
+  cat "$(state_dir)/$1" 2>/dev/null || true
+}
+
+state_clear() {
+  rm -f "$(state_dir)/$1"
+}
+
 disk_is_blank() {
-  local disk=$1
+  local disk=$1 out
+  command -v lsblk wipefs findmnt >/dev/null || return 1
   [ -b "$disk" ] || return 1
-  [ -z "$(lsblk -dno PTTYPE "$disk")" ] || return 1
-  [ -z "$(lsblk -dno FSTYPE "$disk")" ] || return 1
-  [ "$(lsblk -nro NAME "$disk" | wc -l)" -eq 1 ] || return 1
-  [ -z "$(wipefs -n "$disk")" ] || return 1
-  [ -z "$(findmnt -rn -S "$disk")" ] || return 1
+  out=$(lsblk -bdno SIZE "$disk") || return 1
+  [ "${out:-0}" -gt 0 ] || return 1
+  out=$(lsblk -dno PTTYPE "$disk") || return 1
+  [ -z "$out" ] || return 1
+  out=$(lsblk -dno FSTYPE "$disk") || return 1
+  [ -z "$out" ] || return 1
+  out=$(lsblk -nro NAME "$disk") || return 1
+  [ "$(printf '%s\n' "$out" | wc -l)" -eq 1 ] || return 1
+  out=$(lsblk -nro MOUNTPOINTS "$disk") || return 1
+  [ -z "$out" ] || return 1
+  out=$(wipefs -n "$disk") || return 1
+  [ -z "$out" ] || return 1
+  ! findmnt -rn -S "$disk" >/dev/null
 }
 
 blank_disks() {
-  local disk
-  for disk in $(lsblk -dnpo NAME,TYPE,RO | awk '$2 == "disk" && $3 == 0 {print $1}'); do
+  local listing disk
+  listing=$(lsblk -bdnpo NAME,TYPE,RO,SIZE) || return 1
+  for disk in $(printf '%s\n' "$listing" | awk '$2 == "disk" && $3 == 0 && $4 > 0 {print $1}'); do
     if disk_is_blank "$disk"; then
       echo "$disk"
     fi
@@ -189,8 +216,8 @@ blank_disks() {
 
 osd_device_blank() {
   local candidates count
-  candidates=$(blank_disks)
-  count=$(echo "$candidates" | grep -c . || true)
+  candidates=$(blank_disks) || return 1
+  count=$(printf '%s\n' "$candidates" | grep -c . || true)
   if [ "$count" -ne 1 ]; then
     echo "want exactly one blank disk, found $count: $candidates" >&2
     return 1
@@ -211,21 +238,33 @@ osd_image() {
 }
 
 osd_loop_remove() {
-  local image loop
-  image=$(osd_image)
-  for loop in $(losetup -j "$image" -O NAME -n 2>/dev/null); do
+  local loop image
+  loop=$(state_read loop)
+  image=$(state_read image)
+  if [ -n "$loop" ]; then
     losetup -d "$loop" || true
-  done
-  rm -f "$image"
+  fi
+  if [ -n "$image" ]; then
+    rm -f "$image"
+  fi
+  state_clear loop
+  state_clear image
 }
 
 osd_device_loop() {
-  local image
+  local image loop
   image=$(osd_image)
   osd_loop_remove
+  if [ -e "$image" ]; then
+    echo "$image exists and this run did not create it" >&2
+    return 1
+  fi
   mkdir -p "$(dirname "$image")"
   truncate -s "${E2E_OSD_LOOP_GIB:-40}G" "$image"
-  losetup -f --show "$image"
+  state_write image "$image"
+  loop=$(losetup -f --show "$image")
+  state_write loop "$loop"
+  echo "$loop"
 }
 
 resolve_osd_device() {
@@ -260,12 +299,17 @@ assert_storage_ready() {
 }
 
 underlay_remove() {
-  if ip link show bdrpub0 >/dev/null 2>&1 && ! ip -d link show bdrpub0 | grep -qw veth; then
-    echo "bdrpub0 exists and is not a veth" >&2
-    return 1
+  local veth netns
+  veth=$(state_read veth)
+  netns=$(state_read netns)
+  if [ -n "$netns" ]; then
+    ip netns del "$netns" 2>/dev/null || true
   fi
-  ip netns del bdrext 2>/dev/null || true
-  ip link del bdrpub0 2>/dev/null || true
+  if [ -n "$veth" ]; then
+    ip link del "$veth" 2>/dev/null || true
+  fi
+  state_clear veth
+  state_clear netns
 }
 
 underlay_is_ready() {
@@ -275,9 +319,15 @@ underlay_is_ready() {
 
 provider_underlay_up() {
   underlay_remove
-  ip link add bdrpub0 type veth peer name bdrpub0p
-  ip link set bdrpub0 up
+  if ip link show bdrpub0 >/dev/null 2>&1 || ip netns list | grep -qw bdrext; then
+    echo "bdrpub0 or bdrext exists and this run did not create it" >&2
+    return 1
+  fi
   ip netns add bdrext
+  state_write netns bdrext
+  ip link add bdrpub0 type veth peer name bdrpub0p
+  state_write veth bdrpub0
+  ip link set bdrpub0 up
   ip link set bdrpub0p netns bdrext
   ip -n bdrext link set lo up
   ip -n bdrext link set bdrpub0p up
@@ -286,7 +336,7 @@ provider_underlay_up() {
 }
 
 e2e_cleanup() {
-  underlay_remove || true
+  underlay_remove
   osd_loop_remove
 }
 
