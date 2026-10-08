@@ -173,6 +173,23 @@ func TestElasticIPRequestedAddressIsPassedToFabric(t *testing.T) {
 	}
 }
 
+func TestElasticIPReportsAnAddressThatFabricRefuses(t *testing.T) {
+	f := newExternalFixture(t)
+	f.createEIP(t, "ip1", "91.246.31.50", nil)
+	reconcileElasticIP(t, f.c, f.namespace, "ip1")
+	if err := fabrictest.MarkEipRefused(context.Background(), f.c, FabricName(f.namespace, "ip1"), "address 91.246.31.50 is used by tenant x"); err != nil {
+		t.Fatal(err)
+	}
+	if result := reconcileElasticIP(t, f.c, f.namespace, "ip1"); result.RequeueAfter != waitRequeue {
+		t.Fatalf("result %+v", result)
+	}
+	requireEIP(t, f.c, f.namespace, "ip1", metav1.ConditionFalse, ReasonFabricNotReady)
+	got := meta.FindStatusCondition(getElasticIP(t, f.c, f.namespace, "ip1").Status.Conditions, v1alpha1.ConditionReady)
+	if got.Message != "Fabric refused the request for this address" {
+		t.Fatalf("the Fabric text must not reach the tenant: %q", got.Message)
+	}
+}
+
 func TestElasticIPUnknownProviderNetwork(t *testing.T) {
 	f := newExternalFixture(t)
 	eip := elasticIPOf(f.namespace, "ip1", "")

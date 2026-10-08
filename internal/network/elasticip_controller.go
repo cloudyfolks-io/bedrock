@@ -75,7 +75,7 @@ func stopped(eip v1alpha1.ElasticIP, address string, v *Violation) outcome {
 
 func requeueFor(v *Violation) time.Duration {
 	switch v.Reason {
-	case ReasonExternalNotConnected, ReasonWaitingForAddress, ReasonFRRAgentMissing, ReasonAllocating:
+	case ReasonExternalNotConnected, ReasonWaitingForAddress, ReasonFRRAgentMissing, ReasonAllocating, ReasonFabricNotReady:
 		return waitRequeue
 	}
 	return 0
@@ -150,6 +150,9 @@ func (r *ElasticIPReconciler) reserve(ctx context.Context, eip v1alpha1.ElasticI
 		return outcome{}, err
 	}
 	address := fabric.EipAddress(observed)
+	if address == "" && fabric.EipFailed(observed) {
+		return stopped(eip, eip.Status.Address, &Violation{Reason: ReasonFabricNotReady, Message: "Fabric refused the request for this address"}), nil
+	}
 	if address == "" {
 		return stopped(eip, eip.Status.Address, &Violation{Reason: ReasonAllocating, Message: "waiting for Fabric to allocate an address"}), nil
 	}

@@ -61,6 +61,12 @@ func MarkEipAllocated(ctx context.Context, c client.Client, name, address string
 	})
 }
 
+func MarkEipRefused(ctx context.Context, c client.Client, name, message string) error {
+	return updateStatus(ctx, c, fabric.OvnEipGVK, name, func(status, _ map[string]any) {
+		status["conditions"] = []any{map[string]any{"type": "Ready", "status": "False", "reason": "Refused", "message": message, "lastTransitionTime": "2026-01-01T00:00:00Z"}}
+	})
+}
+
 func MarkFipReady(ctx context.Context, c client.Client, name string) error {
 	return updateStatus(ctx, c, fabric.OvnFipGVK, name, func(status, _ map[string]any) {
 		status["ready"] = true

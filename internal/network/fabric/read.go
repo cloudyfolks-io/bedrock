@@ -113,3 +113,8 @@ func IPOwner(u *unstructured.Unstructured) (namespace, podName, subnet string) {
 func SecurityGroupProgrammed(u *unstructured.Unstructured) bool {
 	return text(u, "status", "portGroup") != ""
 }
+
+func EipFailed(u *unstructured.Unstructured) bool {
+	status, _ := condition(u, "Ready")
+	return status == "False" && EipAddress(u) == ""
+}
