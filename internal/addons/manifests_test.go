@@ -171,7 +171,7 @@ func TestAlloyReadsEverySource(t *testing.T) {
 		readOnly, _ := entry["readOnly"].(bool)
 		mounts[entry["mountPath"].(string)] = readOnly
 	}
-	for _, path := range []string{"/var/log", "/run/log", "/etc/machine-id"} {
+	for _, path := range []string{"/var/log", "/var/log/journal", "/run/log/journal", "/etc/machine-id"} {
 		if !mounts[path] {
 			t.Errorf("%s is not mounted read-only", path)
 		}
@@ -230,6 +230,22 @@ func TestAddonManifestsHaveNoComments(t *testing.T) {
 		}
 		if commentLine.Match(raw) {
 			t.Errorf("%s has a comment line", file)
+		}
+	}
+}
+
+func TestAlloyReadsPersistentAndVolatileJournals(t *testing.T) {
+	spec := podSpec(t, find(t, lokiObjects(t), "DaemonSet", "alloy"))
+	types := map[string]string{}
+	for _, item := range spec["volumes"].([]any) {
+		volume := item.(map[string]any)
+		if hostPath, ok := volume["hostPath"].(map[string]any); ok {
+			types[hostPath["path"].(string)] = hostPath["type"].(string)
+		}
+	}
+	for _, path := range []string{"/var/log/journal", "/run/log/journal"} {
+		if types[path] != "DirectoryOrCreate" {
+			t.Errorf("%s has type %q", path, types[path])
 		}
 	}
 }
