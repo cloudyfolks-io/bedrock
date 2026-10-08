@@ -126,6 +126,7 @@ jobs:
       - run: sudo -E env "PATH=$PATH" BEDROCK_BIN=dist/bedrock-dev-linux-amd64 E2E_TEST=dist/e2e-authn-amd64.test hack/e2e-authn.sh
   e2e-tenant:
     runs-on: ubuntu-latest
+    timeout-minutes: 120
     needs: test
     steps:
       - uses: actions/checkout@v5
