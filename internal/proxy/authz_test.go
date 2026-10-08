@@ -16,6 +16,7 @@ import (
 	rbacv1 "k8s.io/api/rbac/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/client-go/kubernetes"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	"github.com/cloudyfolks-io/bedrock/api/v1alpha1"
@@ -245,16 +246,47 @@ func TestProjectsEndpointShortcutForClusterWideList(t *testing.T) {
 	}
 }
 
-func TestProjectsEndpointCapsTheProbe(t *testing.T) {
-	capped := newReviewAPI(t, func(a authorizationv1.ResourceAttributes) bool { return a.Resource != "projects" })
+func TestProjectsEndpointListsEveryProjectAndCachesReviews(t *testing.T) {
+	api := newReviewAPI(t, func(a authorizationv1.ResourceAttributes) bool { return a.Resource != "projects" })
 	projects := make([]client.Object, 600)
 	for i := range projects {
 		projects[i] = projectNamed("p"+strconv.Itoa(1000+i), "ns-"+strconv.Itoa(i))
 	}
-	got := getProjects(t, asCaller(ProjectsHandler(capped.upstream(t), fakeReader(t, projects...)), "caller-token"))
-	if probeCount(capped) != maxProbed || len(got.Projects) != maxProbed {
-		t.Fatalf("probes %d, projects %d", probeCount(capped), len(got.Projects))
+	handler := asCaller(ProjectsHandler(api.upstream(t), fakeReader(t, projects...)), "caller-token")
+	got := getProjects(t, handler)
+	if len(got.Projects) != 600 || probeCount(api) != 600 {
+		t.Fatalf("probes %d, projects %d", probeCount(api), len(got.Projects))
 	}
+	reviews := len(api.reviews())
+	again := getProjects(t, handler)
+	if len(again.Projects) != 600 || len(api.reviews()) != reviews {
+		t.Fatalf("second call: %d projects, %d new reviews", len(again.Projects), len(api.reviews())-reviews)
+	}
+	other := asCaller(ProjectsHandler(api.upstream(t), fakeReader(t, projects...)), "another-token")
+	getProjects(t, other)
+	if len(api.reviews()) == reviews {
+		t.Fatal("a second token must not reuse cached reviews of the first")
+	}
+}
+
+func TestVisibleProjectsDoesNotReorderItsInput(t *testing.T) {
+	api := newReviewAPI(t, func(a authorizationv1.ResourceAttributes) bool { return a.Resource != "projects" })
+	input := []v1alpha1.Project{*projectNamed("zulu", "ns-z"), *projectNamed("alpha", "ns-a")}
+	reviews, err := kubernetesFor(t, api, "caller-token")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := visibleProjects(context.Background(), newReviewCache(time.Now).forToken(reviews, "caller-token"), input); err != nil {
+		t.Fatal(err)
+	}
+	if input[0].Name != "zulu" || input[1].Name != "alpha" {
+		t.Fatalf("input reordered: %s, %s", input[0].Name, input[1].Name)
+	}
+}
+
+func kubernetesFor(t *testing.T, api *reviewAPI, token string) (kubernetes.Interface, error) {
+	t.Helper()
+	return kubernetes.NewForConfig(api.upstream(t).RESTConfig(token))
 }
 
 func TestProjectsAreSortedByName(t *testing.T) {
