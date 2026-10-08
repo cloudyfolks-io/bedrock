@@ -178,7 +178,7 @@ func reviewOne(ctx context.Context, reviews kubernetes.Interface, attributes aut
 
 func (c *identityCache) userOf(ctx context.Context, reviews kubernetes.Interface, caller Caller) (User, error) {
 	if caller.Principal != nil {
-		return User{Name: caller.Principal.Subject, Groups: caller.Principal.Groups}, nil
+		return authnUser(*caller.Principal), nil
 	}
 	key := secret.SHA256Hex(caller.Token)
 	c.mu.Lock()
@@ -199,6 +199,14 @@ func (c *identityCache) userOf(ctx context.Context, reviews kubernetes.Interface
 		c.prune()
 	}
 	return user, nil
+}
+
+func authnUser(principal Principal) User {
+	groups := make([]string, 0, len(principal.Groups))
+	for _, group := range principal.Groups {
+		groups = append(groups, v1alpha1.AuthnPrefix+group)
+	}
+	return User{Name: v1alpha1.AuthnPrefix + principal.Subject, Groups: groups}
 }
 
 func (c *identityCache) prune() {

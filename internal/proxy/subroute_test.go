@@ -298,7 +298,7 @@ func TestHandlerReceivesCallerIdentity(t *testing.T) {
 	cookieCaller := Caller{Token: "cookie-access", Principal: &Principal{Subject: "alice", Groups: []string{"ops"}}}
 	req := httptest.NewRequest(http.MethodPost, vmStart, nil)
 	do(router, req.WithContext(WithCaller(req.Context(), cookieCaller)))
-	if called.user.Name != "alice" || len(called.user.Groups) != 1 || called.user.Groups[0] != "ops" || api.whoami != 0 {
+	if called.user.Name != "bedrock:alice" || len(called.user.Groups) != 1 || called.user.Groups[0] != "bedrock:ops" || api.whoami != 0 {
 		t.Fatalf("cookie caller: %+v, %d reviews", called.user, api.whoami)
 	}
 	bearer := asCaller(router, "bearer-token")
@@ -329,5 +329,18 @@ func TestHandlerErrorsAreNotRewritten(t *testing.T) {
 	}
 	if rec := do(router, httptest.NewRequest(http.MethodPost, base+"restart", nil)); rec.Code != http.StatusConflict || rec.Body.String() != "from handler" {
 		t.Errorf("restart: %d %s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestHandlerSeesOneIdentityFormOnBothPaths(t *testing.T) {
+	_, _, called, _, router, _ := routerFixture(t, allowAll)
+	cookieCaller := Caller{Token: "cookie-access", Principal: &Principal{Subject: "alice", Groups: []string{"ops"}}}
+	req := httptest.NewRequest(http.MethodPost, vmStart, nil)
+	do(router, req.WithContext(WithCaller(req.Context(), cookieCaller)))
+	cookieUser := called.user
+	do(asCaller(router, "bearer-token"), httptest.NewRequest(http.MethodPost, vmStart, nil))
+	bearerUser := called.user
+	if cookieUser.Name != bearerUser.Name || strings.Join(cookieUser.Groups, ",") != strings.Join(bearerUser.Groups, ",") {
+		t.Fatalf("cookie %+v, bearer %+v", cookieUser, bearerUser)
 	}
 }
