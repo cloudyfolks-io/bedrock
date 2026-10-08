@@ -92,7 +92,11 @@ func k0sUpdate(ctx context.Context, env StepEnv) (Outcome, error) {
 	if err != nil {
 		return Outcome{}, err
 	}
-	restart := reconfigured || k0sConfigNewerThanAPIServer(env.Deps.Root, service)
+	auditReconfigured, err := ensureAuditArgs(env.Deps.Root, service)
+	if err != nil {
+		return Outcome{}, err
+	}
+	restart := reconfigured || auditReconfigured || k0sConfigNewerThanAPIServer(env.Deps.Root, service)
 	installed := filepath.Join(env.Deps.Root, k0s.DefaultBinary)
 	current := hasChecksum(installed, checksum)
 	if current && !restart && settledK0sVersion(ctx, env) == version {
@@ -216,12 +220,16 @@ func ensureAuthnArgs(root string, service k0sService) (bool, error) {
 	if service.Unit != k0sControllerUnit || !authnFilesPresent(root) {
 		return false, nil
 	}
+	return mergeAPIServerArgs(root, apiserver.Args())
+}
+
+func mergeAPIServerArgs(root string, wanted map[string]string) (bool, error) {
 	path := filepath.Join(root, k0sConfigFile)
 	current, err := os.ReadFile(path)
 	if err != nil {
 		return false, err
 	}
-	next, changed, err := withAPIServerArgs(current, apiserver.Args())
+	next, changed, err := withAPIServerArgs(current, wanted)
 	if err != nil || !changed {
 		return false, err
 	}
@@ -241,7 +249,7 @@ func authnFilesPresent(root string) bool {
 }
 
 func k0sConfigNewerThanAPIServer(root string, service k0sService) bool {
-	if service.Unit != k0sControllerUnit || !authnFilesPresent(root) {
+	if service.Unit != k0sControllerUnit || !(authnFilesPresent(root) || auditFilesPresent(root)) {
 		return false
 	}
 	start, ok := apiserverStartTime(root)

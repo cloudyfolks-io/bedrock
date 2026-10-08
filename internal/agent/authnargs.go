@@ -12,6 +12,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	"github.com/cloudyfolks-io/bedrock/api/v1alpha1"
+	"github.com/cloudyfolks-io/bedrock/internal/audit"
 	"github.com/cloudyfolks-io/bedrock/internal/authn/apiserver"
 )
 
@@ -23,7 +24,7 @@ func EnableAuthnArgs(ctx context.Context, c client.Client, deps Deps) error {
 		return client.IgnoreNotFound(err)
 	}
 	service := k0sServiceOf(own)
-	if service.Unit != k0sControllerUnit || !authnFilesPresent(deps.Root) {
+	if service.Unit != k0sControllerUnit || !(authnFilesPresent(deps.Root) || auditFilesPresent(deps.Root)) {
 		return nil
 	}
 	upgrading, err := nodeUpgrading(ctx, c, deps.Node)
@@ -31,6 +32,9 @@ func EnableAuthnArgs(ctx context.Context, c client.Client, deps Deps) error {
 		return err
 	}
 	if _, err := ensureAuthnArgs(deps.Root, service); err != nil {
+		return err
+	}
+	if _, err := ensureAuditArgs(deps.Root, service); err != nil {
 		return err
 	}
 	if wanted, _ := authnRestartWanted(deps.Root, service); !wanted {
@@ -62,8 +66,9 @@ func authnRestartWanted(root string, service k0sService) (wanted, known bool) {
 	if !ok {
 		return false, false
 	}
-	firstEnablement := !hasFlag(dir, authnConfigFlag) && k0sConfigNewerThanAPIServer(root, service)
-	return firstEnablement || webhookRestartPending(root, start), true
+	flagsMissing := (authnFilesPresent(root) && !hasFlag(dir, authnConfigFlag)) || (auditFilesPresent(root) && !hasFlag(dir, auditPolicyFlag))
+	firstEnablement := flagsMissing && k0sConfigNewerThanAPIServer(root, service)
+	return firstEnablement || webhookRestartPending(root, start) || auditRestartPending(root, start), true
 }
 
 func restartPendingStatus(wanted, known, previous bool) bool {
@@ -106,6 +111,9 @@ func authnRestartProblem(ctx context.Context, deps Deps) string {
 	}
 	if webhookRestartPending(deps.Root, start) {
 		return "kube-apiserver still runs from before " + apiserver.WebhookFile
+	}
+	if auditRestartPending(deps.Root, start) {
+		return "kube-apiserver still runs from before " + audit.PolicyFile
 	}
 	return bounded(ctx, deps.ProbeTimeout, func(probeCtx context.Context) string {
 		return apiProblem(probeCtx, deps.Exec, deps.Root, "/readyz")
