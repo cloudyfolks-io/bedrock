@@ -53,6 +53,7 @@ type VirtualMachineBackupStatus struct {
 // +kubebuilder:printcolumn:name="VM",type=string,JSONPath=`.spec.vmRef`
 // +kubebuilder:printcolumn:name="Schedule",type=string,JSONPath=`.spec.schedule`
 // +kubebuilder:printcolumn:name="Phase",type=string,JSONPath=`.status.phase`
+// +kubebuilder:validation:XValidation:rule="self.metadata.name.size() <= 63",message="the name must have at most 63 characters"
 type VirtualMachineBackup struct {
 	metav1.TypeMeta   `json:",inline"`
 	metav1.ObjectMeta `json:"metadata,omitempty"`
@@ -91,6 +92,7 @@ type VirtualMachineRestoreStatus struct {
 // +kubebuilder:subresource:status
 // +kubebuilder:printcolumn:name="Backup",type=string,JSONPath=`.spec.backupRef`
 // +kubebuilder:printcolumn:name="Phase",type=string,JSONPath=`.status.phase`
+// +kubebuilder:validation:XValidation:rule="self.metadata.name.size() <= 63",message="the name must have at most 63 characters"
 type VirtualMachineRestore struct {
 	metav1.TypeMeta   `json:",inline"`
 	metav1.ObjectMeta `json:"metadata,omitempty"`

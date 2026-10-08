@@ -549,3 +549,21 @@ func TestBackupRetriesAFailedDeleteRequest(t *testing.T) {
 		t.Fatalf("the request must be created again: %v", err)
 	}
 }
+
+func TestBackupNamesAreLimitedTo63Characters(t *testing.T) {
+	ensureProject(t)
+	ctx := context.Background()
+	long := strings.Repeat("a", 64)
+	vmb := &v1alpha1.VirtualMachineBackup{ObjectMeta: metav1.ObjectMeta{Name: long, Namespace: projectNamespace}, Spec: v1alpha1.VirtualMachineBackupSpec{VMRef: "web", Target: "default"}}
+	if err := k8sClient.Create(ctx, vmb); !apierrors.IsInvalid(err) {
+		t.Fatalf("a 64 character backup name must be invalid, got %v", err)
+	}
+	vmr := &v1alpha1.VirtualMachineRestore{ObjectMeta: metav1.ObjectMeta{Name: long, Namespace: projectNamespace}, Spec: v1alpha1.VirtualMachineRestoreSpec{BackupRef: "daily", Replace: true}}
+	if err := k8sClient.Create(ctx, vmr); !apierrors.IsInvalid(err) {
+		t.Fatalf("a 64 character restore name must be invalid, got %v", err)
+	}
+	vmb.Name = strings.Repeat("b", 63)
+	if err := k8sClient.Create(ctx, vmb); err != nil {
+		t.Fatalf("a 63 character name must be valid: %v", err)
+	}
+}
