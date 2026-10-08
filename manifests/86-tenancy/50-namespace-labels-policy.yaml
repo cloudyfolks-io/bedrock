@@ -1,0 +1,44 @@
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicy
+metadata:
+  name: bedrock-tenant-namespace-labels
+  labels:
+    bedrock.cloudyfolks.io/kind: ValidatingAdmissionPolicy
+    bedrock.cloudyfolks.io/name: bedrock-tenant-namespace-labels
+spec:
+  failurePolicy: Fail
+  matchConstraints:
+    resourceRules:
+      - apiGroups: [""]
+        apiVersions: [v1]
+        operations: [CREATE, UPDATE]
+        resources: [namespaces]
+  matchConditions:
+    - name: not-the-operator
+      expression: "request.userInfo.username != 'system:serviceaccount:bedrock-system:bedrock-operator'"
+    - name: tenant-labels-involved
+      expression: "(has(object.metadata.labels) && ('bedrock.cloudyfolks.io/tenant' in object.metadata.labels || 'bedrock.cloudyfolks.io/project' in object.metadata.labels)) || (request.operation == 'UPDATE' && has(oldObject.metadata.labels) && ('bedrock.cloudyfolks.io/tenant' in oldObject.metadata.labels || 'bedrock.cloudyfolks.io/project' in oldObject.metadata.labels))"
+  variables:
+    - name: newTenant
+      expression: "has(object.metadata.labels) && 'bedrock.cloudyfolks.io/tenant' in object.metadata.labels ? object.metadata.labels['bedrock.cloudyfolks.io/tenant'] : ''"
+    - name: newProject
+      expression: "has(object.metadata.labels) && 'bedrock.cloudyfolks.io/project' in object.metadata.labels ? object.metadata.labels['bedrock.cloudyfolks.io/project'] : ''"
+    - name: oldTenant
+      expression: "request.operation == 'UPDATE' && has(oldObject.metadata.labels) && 'bedrock.cloudyfolks.io/tenant' in oldObject.metadata.labels ? oldObject.metadata.labels['bedrock.cloudyfolks.io/tenant'] : ''"
+    - name: oldProject
+      expression: "request.operation == 'UPDATE' && has(oldObject.metadata.labels) && 'bedrock.cloudyfolks.io/project' in oldObject.metadata.labels ? oldObject.metadata.labels['bedrock.cloudyfolks.io/project'] : ''"
+  validations:
+    - expression: "variables.newTenant == variables.oldTenant && variables.newProject == variables.oldProject"
+      message: "only the operator may set or change the tenant and project labels of a namespace"
+      reason: Forbidden
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicyBinding
+metadata:
+  name: bedrock-tenant-namespace-labels
+  labels:
+    bedrock.cloudyfolks.io/kind: ValidatingAdmissionPolicyBinding
+    bedrock.cloudyfolks.io/name: bedrock-tenant-namespace-labels
+spec:
+  policyName: bedrock-tenant-namespace-labels
+  validationActions: [Deny]

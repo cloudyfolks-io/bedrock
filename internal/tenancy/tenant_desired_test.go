@@ -2,6 +2,7 @@ package tenancy
 
 import (
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 
@@ -195,3 +196,21 @@ func TestTenantStatusWithinQuota(t *testing.T) {
 type errTest string
 
 func (e errTest) Error() string { return string(e) }
+
+func TestOwnerRoleTouchesNoPlatformKinds(t *testing.T) {
+	role := OwnerRole(acmeTenant(), []string{"web"}, []string{"acme"})
+	forbiddenResources := []string{"namespaces", "roles", "rolebindings", "clusterroles", "clusterrolebindings", "secrets"}
+	forbiddenVerbs := []string{"bind", "escalate", "impersonate", "*"}
+	for _, rule := range role.Rules {
+		for _, resource := range rule.Resources {
+			if slices.Contains(forbiddenResources, resource) {
+				t.Fatalf("rule %+v touches %s", rule, resource)
+			}
+		}
+		for _, verb := range rule.Verbs {
+			if slices.Contains(forbiddenVerbs, verb) {
+				t.Fatalf("rule %+v grants %s", rule, verb)
+			}
+		}
+	}
+}

@@ -5,6 +5,7 @@ import (
 	"strings"
 	"testing"
 
+	corev1 "k8s.io/api/core/v1"
 	rbacv1 "k8s.io/api/rbac/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -210,4 +211,69 @@ func TestProjectQuotaPolicyDeniesAtTheCeiling(t *testing.T) {
 		t.Fatal(err)
 	}
 	waitFor(t, func() bool { return admin.Create(ctx, projectFor("p-full", "full")) == nil })
+}
+
+func TestNamespaceTenantLabelsBelongToTheOperator(t *testing.T) {
+	admin, cfg := startEnv(t)
+	const operator = "system:serviceaccount:bedrock-system:bedrock-operator"
+	mustCreate(t, admin,
+		&rbacv1.ClusterRole{ObjectMeta: metav1.ObjectMeta{Name: "namespaces"}, Rules: []rbacv1.PolicyRule{{APIGroups: []string{""}, Resources: []string{"namespaces"}, Verbs: []string{"create", "update", "patch", "get"}}}},
+		&rbacv1.ClusterRoleBinding{
+			ObjectMeta: metav1.ObjectMeta{Name: "namespaces"},
+			RoleRef:    rbacv1.RoleRef{APIGroup: rbacv1.GroupName, Kind: "ClusterRole", Name: "namespaces"},
+			Subjects: []rbacv1.Subject{
+				{APIGroup: rbacv1.GroupName, Kind: "User", Name: operator},
+				{APIGroup: rbacv1.GroupName, Kind: "User", Name: "bedrock:alice"},
+			},
+		},
+		namespaceNamed("acme-shop", map[string]string{v1alpha1.LabelTenant: "acme", v1alpha1.LabelProject: "shop"}),
+		namespaceNamed("plain", nil),
+	)
+	applyFile(t, admin, manifestPath("86-tenancy", "50-namespace-labels-policy.yaml"))
+	ctx := context.Background()
+	alice := actingAs(t, cfg, "bedrock:alice")
+	retag := func(c client.Client, name string, labels map[string]string) error {
+		namespace := &corev1.Namespace{}
+		if err := c.Get(ctx, client.ObjectKey{Name: name}, namespace); err != nil {
+			return err
+		}
+		namespace.Labels = labels
+		return c.Update(ctx, namespace)
+	}
+	probe := namespaceNamed("probe", map[string]string{v1alpha1.LabelTenant: "acme"})
+	if err := eventuallyForbidden(t, denyCreate(admin, alice, probe)); err == nil {
+		t.Fatal("the namespace label policy never denied")
+	}
+	denied := []struct {
+		name   string
+		actor  client.Client
+		target string
+		labels map[string]string
+	}{
+		{"alice moves the namespace", alice, "acme-shop", map[string]string{v1alpha1.LabelTenant: "globex", v1alpha1.LabelProject: "shop"}},
+		{"alice removes the labels", alice, "acme-shop", map[string]string{}},
+		{"alice labels a plain namespace", alice, "plain", map[string]string{v1alpha1.LabelTenant: "acme"}},
+		{"admin removes the project label", admin, "acme-shop", map[string]string{v1alpha1.LabelTenant: "acme"}},
+	}
+	for _, d := range denied {
+		if err := retag(d.actor, d.target, d.labels); !apierrors.IsForbidden(err) {
+			t.Errorf("%s: err = %v", d.name, err)
+		}
+	}
+	if err := alice.Create(ctx, namespaceNamed("forged", map[string]string{v1alpha1.LabelTenant: "acme"})); !apierrors.IsForbidden(err) {
+		t.Errorf("create with a tenant label: err = %v", err)
+	}
+	if err := retag(alice, "plain", map[string]string{"team": "x"}); err != nil {
+		t.Errorf("unrelated labels were blocked: %v", err)
+	}
+	if err := retag(admin, "acme-shop", map[string]string{v1alpha1.LabelTenant: "acme", v1alpha1.LabelProject: "shop", "team": "x"}); err != nil {
+		t.Errorf("keeping the tenant labels was blocked: %v", err)
+	}
+	operatorClient := actingAs(t, cfg, operator)
+	if err := retag(operatorClient, "acme-shop", map[string]string{v1alpha1.LabelTenant: "acme", v1alpha1.LabelProject: "renamed"}); err != nil {
+		t.Errorf("the operator was blocked: %v", err)
+	}
+	if err := operatorClient.Create(ctx, namespaceNamed("acme-new", map[string]string{v1alpha1.LabelTenant: "acme"})); err != nil {
+		t.Errorf("the operator could not create: %v", err)
+	}
 }
