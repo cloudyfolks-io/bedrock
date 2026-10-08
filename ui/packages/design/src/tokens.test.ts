@@ -58,3 +58,22 @@ describe("renderTokens", () => {
     }
   });
 });
+
+describe("new tokens", () => {
+  it("TestEveryNewTokenIsRendered", () => {
+    const css = renderTokens(tokens as Tokens);
+    const lightBlock = css.slice(css.indexOf(":root {"), css.indexOf("}") + 1);
+    const darkBlock = css.slice(css.indexOf('[data-theme="dark"]'));
+    const mediaBlock = css.slice(css.indexOf("@media"), css.indexOf('[data-theme="dark"]'));
+    const colors = ["surface-raised", "surface-hover", "success", "success-surface", "warning", "warning-surface", "info", "info-surface", "overlay", "focus-ring", "chart-1", "chart-2", "chart-3", "chart-4"];
+    for (const name of colors) {
+      const property = `--br-color-${name}:`;
+      expect(lightBlock).toContain(property);
+      expect(mediaBlock).toContain(property);
+      expect(darkBlock).toContain(property);
+    }
+    for (const property of ["--br-shadow-sm", "--br-shadow-md", "--br-shadow-lg", "--br-size-sidebar", "--br-size-topbar", "--br-size-content", "--br-font-mono", "--br-font-size-xl"]) {
+      expect(lightBlock).toContain(property);
+    }
+  });
+});

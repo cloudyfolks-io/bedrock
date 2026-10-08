@@ -6,19 +6,26 @@ function systemTheme(): Theme {
   return window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
 }
 
-export function ThemeProvider({ children }: { children: ReactNode }) {
-  const [theme, setTheme] = useState<Theme>(systemTheme);
+interface ThemeProviderProps {
+  theme?: Theme;
+  children: ReactNode;
+}
+
+export function ThemeProvider({ theme, children }: ThemeProviderProps) {
+  const [system, setSystem] = useState<Theme>(systemTheme);
 
   useEffect(() => {
     const media = window.matchMedia("(prefers-color-scheme: dark)");
-    const handleChange = (event: MediaQueryListEvent) => setTheme(event.matches ? "dark" : "light");
+    const handleChange = (event: MediaQueryListEvent) => setSystem(event.matches ? "dark" : "light");
     media.addEventListener("change", handleChange);
     return () => media.removeEventListener("change", handleChange);
   }, []);
 
+  const effective = theme ?? system;
+
   useEffect(() => {
-    document.documentElement.dataset.theme = theme;
-  }, [theme]);
+    document.documentElement.dataset.theme = effective;
+  }, [effective]);
 
   return <>{children}</>;
 }

@@ -9,7 +9,7 @@ export default defineConfig({
         test: {
           name: "node",
           environment: "node",
-          include: ["src/tokens.test.ts"],
+          include: ["src/tokens.test.ts", "src/tokens.contrast.test.ts"],
         },
       },
       {
@@ -18,7 +18,7 @@ export default defineConfig({
           name: "jsdom",
           environment: "jsdom",
           globals: true,
-          include: ["src/components.test.tsx"],
+          include: ["src/components.test.tsx", "src/panelComponents.test.tsx", "src/overlays.test.tsx"],
         },
       },
     ],
