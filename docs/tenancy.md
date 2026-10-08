@@ -76,6 +76,8 @@ Only a cluster administrator can migrate a VM.
 The owners of a tenant are owners of every project of the tenant.
 The operator creates the RoleBindings only after it applies the project quota.
 Without the quota component, the project has no member access.
+If the quota object or its CRD disappears later, the operator removes the RoleBindings.
+It creates them again when the quota is back.
 
 ## Create a project
 
@@ -183,6 +185,7 @@ A project user with the prefix `bedrock:` cannot create a Pod or Deployment with
 - A privileged container or init container.
 - Added capabilities other than `NET_BIND_SERVICE`.
 - A `procMount` other than `Default`.
+- Ephemeral containers with added capabilities or privileges.
 - A `hostPort`.
 - `spec.nodeName`.
 
@@ -198,6 +201,8 @@ The Tenant has a finalizer.
 The operator first deletes the Projects and waits until they and their namespaces are gone.
 Then it deletes the Networks and waits until they are gone.
 Then it deletes the owner role and releases the finalizer.
+While it waits, the Tenant condition `Ready` is False with the reason `WaitingForProjects`, `WaitingForNamespaces` or `WaitingForNetwork`.
+The message gives the count of objects that remain.
 
 ## Conditions
 
