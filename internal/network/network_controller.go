@@ -313,7 +313,3 @@ func (r *NetworkReconciler) deleteOwnedVpc(ctx context.Context, network *v1alpha
 	present, err := exists(ctx, r.Client, fabric.VpcGVK, vpc.GetName())
 	return !present, err
 }
-
-func (r *NetworkReconciler) SetupWithManager(mgr ctrl.Manager) error {
-	return ctrl.NewControllerManagedBy(mgr).Named("network-network").For(&v1alpha1.Network{}).Complete(r)
-}

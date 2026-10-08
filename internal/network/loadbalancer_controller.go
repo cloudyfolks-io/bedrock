@@ -11,7 +11,6 @@ import (
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
-	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
@@ -267,8 +266,4 @@ func (r *LoadBalancerReconciler) finalize(ctx context.Context, lb *v1alpha1.Load
 		return reconcile.Result{RequeueAfter: waitRequeue}, err
 	}
 	return reconcile.Result{}, releaseFinalizer(ctx, r.Client, lb)
-}
-
-func (r *LoadBalancerReconciler) SetupWithManager(mgr ctrl.Manager) error {
-	return ctrl.NewControllerManagedBy(mgr).Named("network-loadbalancer").For(&v1alpha1.LoadBalancer{}).Complete(r)
 }

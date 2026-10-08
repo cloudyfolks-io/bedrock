@@ -10,7 +10,6 @@ import (
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
-	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
@@ -182,8 +181,4 @@ func (r *DNSZoneReconciler) finalize(ctx context.Context, zone *v1alpha1.DNSZone
 		return reconcile.Result{RequeueAfter: waitRequeue}, err
 	}
 	return reconcile.Result{}, releaseFinalizer(ctx, r.Client, zone)
-}
-
-func (r *DNSZoneReconciler) SetupWithManager(mgr ctrl.Manager) error {
-	return ctrl.NewControllerManagedBy(mgr).Named("network-dnszone").For(&v1alpha1.DNSZone{}).Complete(r)
 }

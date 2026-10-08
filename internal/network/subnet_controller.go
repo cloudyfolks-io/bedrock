@@ -9,7 +9,6 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/types"
-	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
@@ -211,8 +210,4 @@ func (r *SubnetReconciler) deleteOwned(ctx context.Context, subnet *v1alpha1.Sub
 		nadPresent = err == nil
 	}
 	return fabricPresent || nadPresent, nil
-}
-
-func (r *SubnetReconciler) SetupWithManager(mgr ctrl.Manager) error {
-	return ctrl.NewControllerManagedBy(mgr).Named("network-subnet").For(&v1alpha1.Subnet{}).Complete(r)
 }

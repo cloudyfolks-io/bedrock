@@ -11,7 +11,6 @@ import (
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/utils/ptr"
-	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
@@ -254,12 +253,4 @@ func (r *DefaultGroupReconciler) deleteDefault(ctx context.Context, namespace st
 		return nil
 	}
 	return deleteObject(ctx, r.Client, fabric.SecurityGroupGVK, existing.GetName())
-}
-
-func (r *SecurityGroupReconciler) SetupWithManager(mgr ctrl.Manager) error {
-	return ctrl.NewControllerManagedBy(mgr).Named("network-securitygroup").For(&v1alpha1.SecurityGroup{}).Complete(r)
-}
-
-func (r *DefaultGroupReconciler) SetupWithManager(mgr ctrl.Manager) error {
-	return ctrl.NewControllerManagedBy(mgr).Named("network-defaultgroup").For(&corev1.Namespace{}).Complete(r)
 }

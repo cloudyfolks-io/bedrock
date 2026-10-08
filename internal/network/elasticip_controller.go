@@ -12,7 +12,6 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
-	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
@@ -352,8 +351,4 @@ func (r *ElasticIPReconciler) finalize(ctx context.Context, eip *v1alpha1.Elasti
 		}
 	}
 	return reconcile.Result{}, releaseFinalizer(ctx, r.Client, eip)
-}
-
-func (r *ElasticIPReconciler) SetupWithManager(mgr ctrl.Manager) error {
-	return ctrl.NewControllerManagedBy(mgr).Named("network-elasticip").For(&v1alpha1.ElasticIP{}).Complete(r)
 }

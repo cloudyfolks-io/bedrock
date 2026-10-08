@@ -38,6 +38,7 @@ func TestMain(m *testing.M) {
 	if envServer != nil {
 		_ = envServer.Stop()
 	}
+	stopChainEnv()
 	os.Exit(code)
 }
 
@@ -49,23 +50,25 @@ func testScheme() (*runtime.Scheme, error) {
 	return scheme, v1alpha1.AddToScheme(scheme)
 }
 
+func startEnv(paths []string) (*envtest.Environment, client.Client, *rest.Config, error) {
+	scheme, err := testScheme()
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	server := &envtest.Environment{CRDDirectoryPaths: paths, ErrorIfCRDPathMissing: true}
+	cfg, err := server.Start()
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	cfg.RateLimiter = flowcontrol.NewFakeAlwaysRateLimiter()
+	c, err := client.New(cfg, client.Options{Scheme: scheme})
+	return server, c, cfg, err
+}
+
 func testEnv(t *testing.T) (client.Client, *rest.Config) {
 	t.Helper()
 	envOnce.Do(func() {
-		scheme, err := testScheme()
-		if err != nil {
-			envErr = err
-			return
-		}
-		envServer = &envtest.Environment{CRDDirectoryPaths: testenv.CRDPaths(), ErrorIfCRDPathMissing: true}
-		cfg, err := envServer.Start()
-		if err != nil {
-			envErr = err
-			return
-		}
-		cfg.RateLimiter = flowcontrol.NewFakeAlwaysRateLimiter()
-		envConfig = cfg
-		envClient, envErr = client.New(cfg, client.Options{Scheme: scheme})
+		envServer, envClient, envConfig, envErr = startEnv(testenv.CRDPaths())
 	})
 	if envErr != nil {
 		t.Fatal(envErr)
@@ -81,6 +84,11 @@ func unique(t *testing.T, prefix string) string {
 func newNamespace(t *testing.T, tenant, project string) string {
 	t.Helper()
 	c, _ := testEnv(t)
+	return newNamespaceIn(t, c, tenant, project)
+}
+
+func newNamespaceIn(t *testing.T, c client.Client, tenant, project string) string {
+	t.Helper()
 	name := tenant + "-" + project
 	ns := &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: name, Labels: map[string]string{v1alpha1.LabelTenant: tenant, v1alpha1.LabelProject: project}}}
 	if err := c.Create(context.Background(), ns); err != nil {
