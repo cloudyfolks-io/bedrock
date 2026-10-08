@@ -1,0 +1,187 @@
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: bedrock-proxy
+  namespace: bedrock-system
+  labels:
+    bedrock.cloudyfolks.io/component: bedrock
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: bedrock-proxy-store
+  namespace: bedrock-proxy
+  labels:
+    bedrock.cloudyfolks.io/component: bedrock
+rules:
+  - apiGroups: [""]
+    resources: [secrets]
+    verbs: [create, get, list, update, patch, delete]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: bedrock-proxy-store
+  namespace: bedrock-proxy
+  labels:
+    bedrock.cloudyfolks.io/component: bedrock
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: bedrock-proxy-store
+subjects:
+  - kind: ServiceAccount
+    name: bedrock-proxy
+    namespace: bedrock-system
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: bedrock-proxy
+  namespace: bedrock-system
+  labels:
+    bedrock.cloudyfolks.io/component: bedrock
+rules:
+  - apiGroups: [""]
+    resources: [secrets]
+    resourceNames: [bedrock-console-client]
+    verbs: [get]
+  - apiGroups: [""]
+    resources: [configmaps]
+    resourceNames: [kube-root-ca.crt, bedrock-platform-ca]
+    verbs: [get]
+  - apiGroups: [bedrock.cloudyfolks.io]
+    resources: [sessions, users]
+    verbs: [get]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: bedrock-proxy
+  namespace: bedrock-system
+  labels:
+    bedrock.cloudyfolks.io/component: bedrock
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: bedrock-proxy
+subjects:
+  - kind: ServiceAccount
+    name: bedrock-proxy
+    namespace: bedrock-system
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: bedrock-proxy-base
+  labels:
+    bedrock.cloudyfolks.io/component: bedrock
+    bedrock.cloudyfolks.io/aggregate-to-proxy: "true"
+rules:
+  - apiGroups: [bedrock.cloudyfolks.io]
+    resources:
+      - addons
+      - addons/status
+      - clusterconfigs
+      - clusterimages
+      - clusterimages/status
+      - clusters
+      - clusters/status
+      - dnszones
+      - dnszones/status
+      - elasticips
+      - elasticips/status
+      - hostconfigs
+      - hostconfigs/status
+      - hosts
+      - hosts/status
+      - images
+      - images/status
+      - loadbalancers
+      - loadbalancers/status
+      - networks
+      - networks/status
+      - nodeupgrades
+      - nodeupgrades/status
+      - objectstoragebuckets
+      - objectstoragebuckets/status
+      - objectstorageusers
+      - objectstorageusers/status
+      - projects
+      - projects/status
+      - releases
+      - releases/status
+      - securitygroups
+      - securitygroups/status
+      - settings
+      - settings/status
+      - sshkeys
+      - sshkeys/status
+      - subnets
+      - subnets/status
+      - tenants
+      - tenants/status
+      - virtualmachinebackups
+      - virtualmachinebackups/status
+      - virtualmachinerestores
+      - virtualmachinerestores/status
+      - virtualmachines
+      - virtualmachines/status
+      - volumes
+      - volumes/status
+      - volumesnapshots
+      - volumesnapshots/status
+    verbs: [get, list, watch, patch, update]
+  - apiGroups: [kubevirt.io]
+    resources: [virtualmachines, virtualmachineinstances]
+    verbs: [get, list, watch, patch, update]
+  - apiGroups: [kubevirt.io]
+    resources: [virtualmachineinstancemigrations]
+    verbs: [create, get, list]
+  - apiGroups: [subresources.kubevirt.io]
+    resources: [virtualmachines/start, virtualmachines/stop, virtualmachines/restart, virtualmachines/migrate]
+    verbs: [update]
+  - apiGroups: [subresources.kubevirt.io]
+    resources: [virtualmachineinstances/vnc, virtualmachineinstances/console]
+    verbs: [get]
+  - apiGroups: [snapshot.kubevirt.io]
+    resources: [virtualmachinesnapshots, virtualmachinerestores]
+    verbs: [create, get, list, watch, delete]
+  - apiGroups: [cdi.kubevirt.io]
+    resources: [datavolumes]
+    verbs: [get, list, watch]
+  - apiGroups: [upload.cdi.kubevirt.io]
+    resources: [uploadtokenrequests]
+    verbs: [create]
+  - apiGroups: [snapshot.storage.k8s.io]
+    resources: [volumesnapshots]
+    verbs: [get, list, create, delete]
+  - apiGroups: [""]
+    resources: [persistentvolumeclaims, events]
+    verbs: [get, list]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: bedrock-proxy
+  labels:
+    bedrock.cloudyfolks.io/component: bedrock
+aggregationRule:
+  clusterRoleSelectors:
+    - matchLabels:
+        bedrock.cloudyfolks.io/aggregate-to-proxy: "true"
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: bedrock-proxy
+  labels:
+    bedrock.cloudyfolks.io/component: bedrock
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: bedrock-proxy
+subjects:
+  - kind: ServiceAccount
+    name: bedrock-proxy
+    namespace: bedrock-system

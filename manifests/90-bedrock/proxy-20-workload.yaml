@@ -1,0 +1,155 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: bedrock-proxy
+  namespace: bedrock-system
+  labels:
+    bedrock.cloudyfolks.io/component: bedrock
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: bedrock-proxy
+  template:
+    metadata:
+      labels:
+        app: bedrock-proxy
+    spec:
+      serviceAccountName: bedrock-proxy
+      priorityClassName: system-cluster-critical
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        runAsGroup: 65532
+        seccompProfile:
+          type: RuntimeDefault
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+            - weight: 100
+              podAffinityTerm:
+                topologyKey: kubernetes.io/hostname
+                labelSelector:
+                  matchLabels:
+                    app: bedrock-proxy
+      containers:
+        - name: proxy
+          image: ghcr.io/cloudyfolks-io/bedrock:dev
+          args: ["proxy", "serve", "--prometheus-url=http://prometheus-operated.monitoring.svc:9090"]
+          env:
+            - name: POD_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+            - name: GOMEMLIMIT
+              value: "450MiB"
+          ports:
+            - name: https
+              containerPort: 8443
+              protocol: TCP
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: https
+              scheme: HTTPS
+            periodSeconds: 5
+            failureThreshold: 3
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: https
+              scheme: HTTPS
+            initialDelaySeconds: 10
+            periodSeconds: 10
+            failureThreshold: 3
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          resources:
+            requests:
+              cpu: 50m
+              memory: 128Mi
+            limits:
+              memory: 512Mi
+          volumeMounts:
+            - name: tls
+              mountPath: /tls
+              readOnly: true
+            - name: authn-ca
+              mountPath: /authn-ca
+              readOnly: true
+      volumes:
+        - name: tls
+          secret:
+            secretName: bedrock-proxy-tls
+        - name: authn-ca
+          secret:
+            secretName: bedrock-authn-tls
+            items:
+              - key: ca.crt
+                path: ca.crt
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: bedrock-proxy
+  namespace: bedrock-system
+  labels:
+    bedrock.cloudyfolks.io/component: bedrock
+spec:
+  selector:
+    app: bedrock-proxy
+  ports:
+    - name: https
+      port: 443
+      targetPort: https
+      protocol: TCP
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: bedrock-proxy
+  namespace: bedrock-system
+  labels:
+    bedrock.cloudyfolks.io/component: bedrock
+spec:
+  maxUnavailable: 1
+  selector:
+    matchLabels:
+      app: bedrock-proxy
+---
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: bedrock-proxy-tls
+  namespace: bedrock-system
+  labels:
+    bedrock.cloudyfolks.io/component: bedrock
+spec:
+  secretName: bedrock-proxy-tls
+  commonName: bedrock-proxy.bedrock-system.svc
+  dnsNames:
+    - bedrock-proxy.bedrock-system.svc
+    - bedrock-proxy.bedrock-system.svc.cluster.local
+  privateKey:
+    algorithm: ECDSA
+    size: 256
+    rotationPolicy: Always
+  issuerRef:
+    group: cert-manager.io
+    kind: ClusterIssuer
+    name: bedrock-ca
+---
+apiVersion: traefik.io/v1alpha1
+kind: ServersTransport
+metadata:
+  name: bedrock-proxy
+  namespace: bedrock-system
+  labels:
+    bedrock.cloudyfolks.io/component: bedrock
+spec:
+  serverName: bedrock-proxy.bedrock-system.svc
+  rootCAs:
+    - secret: bedrock-proxy-tls
