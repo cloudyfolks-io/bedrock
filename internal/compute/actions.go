@@ -4,6 +4,8 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	"net/url"
+	"path"
 	"sort"
 	"time"
 
@@ -199,12 +201,22 @@ func Restart(ctx context.Context, d Deps, c client.Client, key client.ObjectKey)
 	return accepted(), nil
 }
 
-func kubeVirtSubresourceURL(cfg *rest.Config, key client.ObjectKey, action string) (string, error) {
+func kubeVirtURL(cfg *rest.Config, elements ...string) (*url.URL, error) {
 	base, _, err := rest.DefaultServerURL(cfg.Host, cfg.APIPath, schema.GroupVersion{}, rest.IsConfigTransportTLS(*cfg))
+	if err != nil {
+		return nil, err
+	}
+	joined := *base
+	joined.Path = path.Join(append([]string{"/", base.Path}, elements...)...)
+	return &joined, nil
+}
+
+func kubeVirtSubresourceURL(cfg *rest.Config, key client.ObjectKey, action string) (string, error) {
+	target, err := kubeVirtURL(cfg, "apis", "subresources.kubevirt.io", "v1", "namespaces", key.Namespace, "virtualmachines", key.Name, action)
 	if err != nil {
 		return "", err
 	}
-	return base.JoinPath("apis", "subresources.kubevirt.io", "v1", "namespaces", key.Namespace, "virtualmachines", key.Name, action).String(), nil
+	return target.String(), nil
 }
 
 func Migrate(ctx context.Context, _ Deps, c client.Client, key client.ObjectKey) (Result, error) {
