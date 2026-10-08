@@ -43,7 +43,7 @@ func Run(ctx context.Context, cfg *rest.Config, scheme *runtime.Scheme, opts Run
 		LeaderElection:          true,
 		LeaderElectionID:        "bedrock-operator",
 		LeaderElectionNamespace: "bedrock-system",
-		Client:                  client.Options{Cache: &client.CacheOptions{DisableFor: []client.Object{&corev1.ConfigMap{}}}},
+		Client:                  client.Options{Cache: &client.CacheOptions{DisableFor: []client.Object{&corev1.ConfigMap{}, &corev1.Secret{}}}},
 	})
 	if err != nil {
 		return err
