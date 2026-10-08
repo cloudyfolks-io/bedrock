@@ -125,6 +125,8 @@ spec:
             x-kubernetes-validations:
             - message: refresh needs a registry source
               rule: '!has(self.refresh) || has(self.source.registry)'
+            - message: refresh is not allowed for an iso image
+              rule: '!has(self.refresh) || !has(self.type) || self.type != "iso"'
           status:
             properties:
               conditions:

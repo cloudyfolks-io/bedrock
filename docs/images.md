@@ -46,6 +46,7 @@ The default for `keep` is 3.
 A schedule needs a registry that the cluster can reach.
 It does not work offline.
 Only a registry source can have `refresh`.
+An `iso` image cannot have `refresh`.
 
 ```yaml
 apiVersion: bedrock.cloudyfolks.io/v1alpha1

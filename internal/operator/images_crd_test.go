@@ -86,3 +86,16 @@ func TestImageStatusProgress(t *testing.T) {
 		t.Fatalf("progress must be writable through the status subresource: %v", err)
 	}
 }
+
+func TestImageRefreshRefusedForISO(t *testing.T) {
+	c, _ := StartTestEnv(t)
+
+	iso := registryImageSpec()
+	iso.Type = v1alpha1.ImageTypeISO
+	createInvalid(t, c, &v1alpha1.Image{ObjectMeta: metav1.ObjectMeta{Name: "iso-refresh", Namespace: "default"}, Spec: iso}, "refresh is not allowed for an iso image")
+	createInvalid(t, c, &v1alpha1.ClusterImage{ObjectMeta: metav1.ObjectMeta{Name: "iso-refresh"}, Spec: iso}, "refresh is not allowed for an iso image")
+
+	iso.Refresh = nil
+	createValid(t, c, &v1alpha1.Image{ObjectMeta: metav1.ObjectMeta{Name: "iso-plain", Namespace: "default"}, Spec: iso})
+	createValid(t, c, &v1alpha1.ClusterImage{ObjectMeta: metav1.ObjectMeta{Name: "iso-plain"}, Spec: iso})
+}

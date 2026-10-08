@@ -82,6 +82,7 @@ type ImageRefresh struct {
 }
 
 // +kubebuilder:validation:XValidation:rule="!has(self.refresh) || has(self.source.registry)",message="refresh needs a registry source"
+// +kubebuilder:validation:XValidation:rule="!has(self.refresh) || !has(self.type) || self.type != \"iso\"",message="refresh is not allowed for an iso image"
 type ImageSpec struct {
 	// +kubebuilder:validation:Enum=disk;iso
 	// +kubebuilder:default=disk
