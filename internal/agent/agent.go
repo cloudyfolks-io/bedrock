@@ -59,6 +59,9 @@ func Run(ctx context.Context, c client.WithWatch, deps Deps) error {
 		if err := RunUpgrades(ctx, c, deps, Steps()); err != nil {
 			fmt.Fprintf(os.Stderr, "agent: upgrade: %v\n", err)
 		}
+		if err := RunEtcdSnapshots(ctx, c, deps); err != nil {
+			fmt.Fprintf(os.Stderr, "agent: etcd snapshot: %v\n", err)
+		}
 		if err := EnableAuthnArgs(ctx, c, deps); err != nil {
 			fmt.Fprintf(os.Stderr, "agent: authn flags: %v\n", err)
 		}
