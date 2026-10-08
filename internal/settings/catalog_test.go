@@ -155,3 +155,17 @@ func TestPlatformHostHasNoDefault(t *testing.T) {
 		t.Fatalf("platform.host = %+v", def)
 	}
 }
+
+func TestOvercommitMemoryValidator(t *testing.T) {
+	def, _ := Lookup("overcommit.memory")
+	for _, value := range []string{"", "0.1", "1.0", "2.5"} {
+		if err := def.Validate(value); err != nil {
+			t.Errorf("%q must be valid: %v", value, err)
+		}
+	}
+	for _, value := range []string{"0.05", "-1", "x", "NaN", "Inf"} {
+		if err := def.Validate(value); err == nil {
+			t.Errorf("%q must be invalid", value)
+		}
+	}
+}

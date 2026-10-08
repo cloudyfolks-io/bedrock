@@ -3,6 +3,7 @@ package settings
 import (
 	"context"
 	"fmt"
+	"math"
 	"slices"
 	"strconv"
 	"time"
@@ -64,12 +65,20 @@ func boolean(v string) error {
 	return err
 }
 
-func float(v string) error {
-	if v == "" {
+func floatMin(minimum float64) func(string) error {
+	return func(v string) error {
+		if v == "" {
+			return nil
+		}
+		parsed, err := strconv.ParseFloat(v, 64)
+		if err != nil {
+			return err
+		}
+		if math.IsInf(parsed, 0) || !(parsed >= minimum) {
+			return fmt.Errorf("must be a number of at least %v", minimum)
+		}
 		return nil
 	}
-	_, err := strconv.ParseFloat(v, 64)
-	return err
 }
 
 func duration(min time.Duration) func(string) error {
@@ -102,7 +111,7 @@ func Catalog() []Definition {
 		{"migration.parallel", "2", "Parallel live migrations per cluster.", intMin(1)},
 		{"virt.emulation", "false", "Run virtual machines with software emulation on hosts without KVM.", boolean},
 		{"overcommit.cpu", "4", "CPU overcommit ratio.", intMin(1)},
-		{"overcommit.memory", "1.0", "Memory overcommit ratio.", float},
+		{"overcommit.memory", "1.0", "Memory overcommit ratio of at least 0.1.", floatMin(0.1)},
 		{"backup.target", "", "Backup target URL, s3:// or nfs://.", free},
 		{"backup.credentials-secret", "", "Secret name in bedrock-system holding backup credentials.", free},
 		{"backup.etcd-schedule", "0 2 * * *", "Cron schedule for etcd snapshots.", free},
