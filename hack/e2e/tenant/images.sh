@@ -24,7 +24,7 @@ IMAGE
   expect_equal True "$(condition_status clusterimage cirros Ready)" "cirros Ready condition"
   wait_not_empty 60 -n bedrock-images get datasource cirros -o jsonpath='{.spec.source.snapshot.name}'
   wait_condition 300 cluster cluster UploadReady True
-  expect_equal 'Host(`upload.'"$HOST"'`)' "$(kubectl -n cdi get ingressroute bedrock-upload -o jsonpath='{.spec.routes[0].match}')" "upload route"
+  expect_equal 'Host(`upload.'"$HOST"'`) && PathPrefix(`/v1beta1/upload`)' "$(kubectl -n cdi get ingressroute bedrock-upload -o jsonpath='{.spec.routes[0].match}')" "upload route"
   expect_equal snapshot "$(kubectl get storageprofile block -o jsonpath='{.status.dataImportCronSourceFormat}')" "block storage profile source format"
 }
 
