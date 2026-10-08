@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+source "$(dirname "${BASH_SOURCE[0]}")/e2e/lib.sh"
+
 : "${VERSION_A:?}" "${VERSION_B:?}" "${K0S_A:?}" "${K0S_B:?}"
 registry=${REGISTRY:-localhost:5000}
 arch=${ARCH:-$(uname -m | sed 's/x86_64/amd64/;s/aarch64/arm64/')}
@@ -207,7 +209,7 @@ if [ -n "$assert_authn" ]; then
   vip=$(kubectl get cluster cluster -o jsonpath='{.spec.api.vip}')
   platform_host=$(kubectl get setting platform.host -o jsonpath='{.spec.value}')
   test "$platform_host" = "$PLATFORM_HOST"
-  printf '%s sso.%s api.%s\n' "$vip" "$platform_host" "$platform_host" >>/etc/hosts
+  pin_hosts "$vip" "$platform_host"
   served=0
   for _ in $(seq 1 60); do
     if curl -sf -m 10 --cacert "$workdir/bedrock-ca.crt" --resolve "sso.$platform_host:443:$vip" "https://sso.$platform_host/.well-known/openid-configuration" >"$workdir/discovery.json"; then
