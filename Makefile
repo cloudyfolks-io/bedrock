@@ -19,8 +19,9 @@ UPGRADE_FROM ?=
 .PHONY: build test lint generate crds envtest-assets e2e-kind e2e-init e2e-bundle e2e-authn controller-gen release crane bundle binaries rbac local-ci ui
 
 ui:
-	cd ui && pnpm install --frozen-lockfile && pnpm -r test && pnpm -r typecheck && pnpm --filter login build
+	cd ui && pnpm install --frozen-lockfile && pnpm -r test && pnpm -r typecheck && pnpm --filter login build && pnpm --filter panel build
 	touch internal/authn/server/ui/dist/.keep
+	touch internal/proxy/ui/dist/.keep
 
 build: ui
 	CGO_ENABLED=0 $(GO) build -trimpath -ldflags "-X github.com/cloudyfolks-io/bedrock/internal/cli.Version=$(VERSION)" -o $(BIN) ./cmd/bedrock
