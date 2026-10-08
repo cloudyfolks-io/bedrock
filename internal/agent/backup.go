@@ -17,40 +17,51 @@ import (
 	"github.com/cloudyfolks-io/bedrock/internal/release"
 )
 
-const keptBackups = 3
+const (
+	keptBackups          = 3
+	stampLayout          = "20060102T150405Z"
+	upgradeBackupPattern = "bedrock-*.tar.gz"
+)
 
 var ovnDatabases = []string{"ovnnb_db.db", "ovnsb_db.db"}
 
 func backup(ctx context.Context, env StepEnv) (Outcome, error) {
-	deps := env.Deps
+	name := fmt.Sprintf("bedrock-%s-%s.tar.gz", env.Upgrade.Spec.From, env.Deps.Now().UTC().Format(stampLayout))
+	path, sum, err := writeBackup(ctx, env.Deps, name, upgradeBackupPattern, keptBackups)
+	if err != nil {
+		return Outcome{}, err
+	}
+	return Outcome{Message: path + " " + sum}, nil
+}
+
+func writeBackup(ctx context.Context, deps Deps, name, pattern string, keep int) (string, string, error) {
 	dir := filepath.Join(deps.Root, backupDir)
 	if err := os.MkdirAll(dir, 0o700); err != nil {
-		return Outcome{}, err
+		return "", "", err
 	}
 	work, err := os.MkdirTemp(dir, ".work-")
 	if err != nil {
-		return Outcome{}, err
+		return "", "", err
 	}
 	defer os.RemoveAll(work)
 	if _, err := deps.Exec.Run(ctx, k0s.DefaultBinary, "backup", "--save-path", work); err != nil {
-		return Outcome{}, err
+		return "", "", err
 	}
 	if err := copyOVN(filepath.Join(deps.Root, ovnDir), filepath.Join(work, "ovn")); err != nil {
-		return Outcome{}, err
+		return "", "", err
 	}
-	name := fmt.Sprintf("bedrock-%s-%s.tar.gz", env.Upgrade.Spec.From, deps.Now().UTC().Format("20060102T150405Z"))
 	archive := filepath.Join(dir, name)
 	if err := writeArchive(work, archive); err != nil {
-		return Outcome{}, errors.Join(err, os.Remove(archive))
+		return "", "", errors.Join(err, os.Remove(archive))
 	}
 	sum, err := release.FileSHA256(archive)
 	if err != nil {
-		return Outcome{}, err
+		return "", "", err
 	}
-	if err := keepNewest(dir, keptBackups); err != nil {
-		return Outcome{}, err
+	if err := keepNewest(dir, pattern, keep); err != nil {
+		return "", "", err
 	}
-	return Outcome{Message: filepath.Join("/", backupDir, name) + " " + sum}, nil
+	return filepath.Join("/", backupDir, name), sum, nil
 }
 
 func copyOVN(src, dest string) error {
@@ -111,8 +122,8 @@ func addToArchive(writer *tar.Writer, base, path string) error {
 	return err
 }
 
-func keepNewest(dir string, keep int) error {
-	archives, err := filepath.Glob(filepath.Join(dir, "bedrock-*.tar.gz"))
+func keepNewest(dir, pattern string, keep int) error {
+	archives, err := filepath.Glob(filepath.Join(dir, pattern))
 	if err != nil {
 		return err
 	}
