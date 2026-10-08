@@ -6,6 +6,18 @@ metadata:
   name: bedrock-operator
 rules:
 - apiGroups:
+  - aaq.kubevirt.io
+  resources:
+  - applicationawareresourcequotas
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - update
+  - watch
+- apiGroups:
   - admissionregistration.k8s.io
   resources:
   - mutatingwebhookconfigurations
@@ -168,6 +180,14 @@ rules:
   - list
   - patch
   - update
+  - watch
+- apiGroups:
+  - bedrock.cloudyfolks.io
+  resources:
+  - elasticips
+  verbs:
+  - get
+  - list
   - watch
 - apiGroups:
   - cdi.kubevirt.io
