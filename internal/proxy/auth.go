@@ -96,6 +96,9 @@ func Authenticate(auth Authenticator, next http.Handler) http.Handler {
 			writeAuthError(w, r, err)
 			return
 		}
+		if caller.Principal != nil {
+			noteUser(r.Context(), caller.Principal.Subject)
+		}
 		next.ServeHTTP(w, r.WithContext(WithCaller(r.Context(), caller)))
 	})
 }

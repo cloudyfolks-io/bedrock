@@ -24,6 +24,7 @@ import (
 const tokenFileContent = `token-admin,admin,uid-admin,"system:masters"
 token-alice,bedrock:alice,uid-alice,"bedrock:ops"
 token-bob,bedrock:bob,uid-bob
+jwt.shaped.alice,bedrock:alice,uid-alice-jwt,"bedrock:ops"
 `
 
 var (

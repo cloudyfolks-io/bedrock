@@ -69,6 +69,8 @@ type fakeAuthn struct {
 	noSID       bool
 	badSig      bool
 	noIDRefresh bool
+	accessToken string
+	uris        []string
 }
 
 func generateCA(t *testing.T) (*x509.Certificate, *ecdsa.PrivateKey, []byte) {
@@ -143,7 +145,12 @@ func newFakeAuthn(t *testing.T) *fakeAuthn {
 	mux.HandleFunc("/oauth/v2/keys", f.keys)
 	mux.HandleFunc("/oauth/v2/token", f.token)
 	mux.HandleFunc("/oauth/v2/revoke", f.revoke)
-	f.server = httptest.NewUnstartedServer(mux)
+	f.server = httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		f.mu.Lock()
+		f.uris = append(f.uris, r.URL.RequestURI())
+		f.mu.Unlock()
+		mux.ServeHTTP(w, r)
+	}))
 	f.server.TLS = &tls.Config{Certificates: []tls.Certificate{serverCertificate(t, ca, caKey, fakeAuthnServerName)}}
 	f.server.StartTLS()
 	t.Cleanup(f.server.Close)
@@ -168,6 +175,12 @@ func (f *fakeAuthn) ReuseErrors() int {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	return f.reuseErrors
+}
+
+func (f *fakeAuthn) URIs() []string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]string{}, f.uris...)
 }
 
 func (f *fakeAuthn) Revoked() []string {
@@ -310,6 +323,11 @@ func (f *fakeAuthn) grantRefresh(w http.ResponseWriter, r *http.Request) {
 }
 
 func (f *fakeAuthn) respondTokens(w http.ResponseWriter, access, refresh, nonce string, expiresIn int, withID bool) {
+	f.mu.Lock()
+	if f.accessToken != "" {
+		access = f.accessToken
+	}
+	f.mu.Unlock()
 	body := map[string]any{"access_token": access, "token_type": "Bearer", "expires_in": expiresIn, "refresh_token": refresh}
 	if withID {
 		idToken, err := f.idToken(nonce)
