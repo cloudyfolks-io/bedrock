@@ -2,6 +2,8 @@ package images
 
 import (
 	"context"
+	"errors"
+	"fmt"
 
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -9,7 +11,6 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	"github.com/cloudyfolks-io/bedrock/api/v1alpha1"
-	"github.com/cloudyfolks-io/bedrock/internal/ssa"
 )
 
 const settingAdditionalCA = "platform.additional-ca"
@@ -18,8 +19,23 @@ func AdditionalCAPEM(ctx context.Context, c client.Reader) (string, error) {
 	return settingValue(ctx, c, settingAdditionalCA)
 }
 
+var ErrForeignConfigMap = errors.New("a ConfigMap that Bedrock does not manage has the same name")
+
 func ApplyAdditionalCA(ctx context.Context, c client.Client, namespace, pem string) error {
-	return ssa.Apply(ctx, c, additionalCAConfigMap(namespace, pem), v1alpha1.ImagesFieldManager)
+	var existing corev1.ConfigMap
+	err := c.Get(ctx, client.ObjectKey{Namespace: namespace, Name: AdditionalCAConfigMap}, &existing)
+	switch {
+	case apierrors.IsNotFound(err):
+		return c.Create(ctx, additionalCAConfigMap(namespace, pem), client.FieldOwner(v1alpha1.ImagesFieldManager))
+	case err != nil:
+		return err
+	case !ownedByImages(existing):
+		return fmt.Errorf("configmap %s/%s: %w", namespace, AdditionalCAConfigMap, ErrForeignConfigMap)
+	case existing.Data[AdditionalCAKey] == pem:
+		return nil
+	}
+	existing.Data = map[string]string{AdditionalCAKey: pem}
+	return c.Update(ctx, &existing, client.FieldOwner(v1alpha1.ImagesFieldManager))
 }
 
 func RemoveAdditionalCA(ctx context.Context, c client.Client, namespace string) error {
@@ -64,9 +80,13 @@ func ownedByImages(cm corev1.ConfigMap) bool {
 	return true
 }
 
-func syncAdditionalCA(ctx context.Context, c client.Client, namespace, pem string) error {
+func syncAdditionalCA(ctx context.Context, c client.Client, namespace, pem string) (string, error) {
 	if pem == "" {
-		return RemoveAdditionalCA(ctx, c, namespace)
+		return "", RemoveAdditionalCA(ctx, c, namespace)
 	}
-	return ApplyAdditionalCA(ctx, c, namespace, pem)
+	err := ApplyAdditionalCA(ctx, c, namespace, pem)
+	if errors.Is(err, ErrForeignConfigMap) {
+		return err.Error(), nil
+	}
+	return "", err
 }

@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/meta"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
@@ -13,6 +14,8 @@ import (
 )
 
 const (
+	ConditionAdditionalCA           = "AdditionalCAReady"
+	ReasonForeignConfigMap          = "ForeignConfigMap"
 	ReasonImported                  = "Imported"
 	ReasonImportScheduled           = "ImportScheduled"
 	ReasonWaitingForUpload          = "WaitingForUpload"
@@ -39,6 +42,8 @@ type Result struct {
 	DataSource string
 	UploadURL  string
 	Versions   []v1alpha1.ImageVersion
+
+	AdditionalCAConflict string
 }
 
 var importingPhases = []string{
@@ -174,6 +179,18 @@ func BuildStatus(prev v1alpha1.ImageStatus, generation int64, r Result, now meta
 	status.UploadURL = r.UploadURL
 	status.Versions = slices.Clone(r.Versions)
 	v1alpha1.SetCondition(&status.Conditions, readyCondition(generation, r, now))
+	if r.AdditionalCAConflict == "" {
+		meta.RemoveStatusCondition(&status.Conditions, ConditionAdditionalCA)
+		return status
+	}
+	v1alpha1.SetCondition(&status.Conditions, metav1.Condition{
+		Type:               ConditionAdditionalCA,
+		Status:             metav1.ConditionFalse,
+		Reason:             ReasonForeignConfigMap,
+		Message:            r.AdditionalCAConflict,
+		ObservedGeneration: generation,
+		LastTransitionTime: now,
+	})
 	return status
 }
 

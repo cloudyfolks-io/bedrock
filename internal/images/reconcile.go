@@ -28,10 +28,11 @@ func reconcileSubject(ctx context.Context, c client.Client, s Subject, prev v1al
 	if err != nil {
 		return Plan{}, err
 	}
-	if err := syncAdditionalCA(ctx, c, s.Namespace, pem); err != nil {
+	conflict, err := syncAdditionalCA(ctx, c, s.Namespace, pem)
+	if err != nil {
 		return Plan{}, err
 	}
-	s.ExtraCA = pem != ""
+	s.ExtraCA = pem != "" && conflict == ""
 	host, err := PlatformHost(ctx, c)
 	if err != nil {
 		return Plan{}, err
@@ -41,6 +42,7 @@ func reconcileSubject(ctx context.Context, c client.Client, s Subject, prev v1al
 		return Plan{}, err
 	}
 	plan := Decide(s, world, now)
+	plan.Result.AdditionalCAConflict = conflict
 	return plan, Execute(ctx, c, plan)
 }
 

@@ -112,3 +112,50 @@ func TestAdditionalCAPEMReadsTheSetting(t *testing.T) {
 		t.Fatalf("set: %q %v", got, err)
 	}
 }
+
+func TestAdditionalCAIsNotForcedOverAForeignConfigMap(t *testing.T) {
+	c := startEnv(t)
+	tenantNamespace(t, c, "acme-web")
+	foreign := &corev1.ConfigMap{ObjectMeta: metav1.ObjectMeta{Name: "platform-additional-ca", Namespace: "acme-web"}, Data: map[string]string{"ca.crt": "mine"}}
+	if err := c.Create(context.Background(), foreign); err != nil {
+		t.Fatal(err)
+	}
+	setAdditionalCA(t, c, testPEM)
+	s := imageSubject(httpSpec("https://example.com/rocky.qcow2"), "rocky")
+	l := &loop{t: t, c: c}
+
+	plan := l.pass(s)
+	if cm, err := additionalCAIn(c, "acme-web"); err != nil || cm.Data["ca.crt"] != "mine" {
+		t.Fatalf("the foreign config map changed: %v %v", cm, err)
+	}
+	if plan.Result.AdditionalCAConflict == "" {
+		t.Fatal("the conflict must be reported")
+	}
+	var found bool
+	for _, cond := range l.status.Conditions {
+		if cond.Type == "AdditionalCAReady" && cond.Status == metav1.ConditionFalse && cond.Reason == "ForeignConfigMap" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("conditions %+v", l.status.Conditions)
+	}
+	dv := fetch(t, c, DataVolumeGVK, "acme-web", "rocky-import")
+	if _, has := dv.Object["spec"].(map[string]any)["source"].(map[string]any)["http"].(map[string]any)["certConfigMap"]; has {
+		t.Fatal("the import must not use the foreign config map")
+	}
+}
+
+func TestAdditionalCAUpdatesAManagedConfigMap(t *testing.T) {
+	c := startEnv(t)
+	tenantNamespace(t, c, "acme-web")
+	if err := ApplyAdditionalCA(context.Background(), c, "acme-web", "one"); err != nil {
+		t.Fatal(err)
+	}
+	if err := ApplyAdditionalCA(context.Background(), c, "acme-web", "two"); err != nil {
+		t.Fatal(err)
+	}
+	if cm, err := additionalCAIn(c, "acme-web"); err != nil || cm.Data["ca.crt"] != "two" {
+		t.Fatalf("config map %v %v", cm, err)
+	}
+}
