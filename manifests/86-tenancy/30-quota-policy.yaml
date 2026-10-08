@@ -1,0 +1,40 @@
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicy
+metadata:
+  name: bedrock-tenant-project-quota
+  labels:
+    bedrock.cloudyfolks.io/kind: ValidatingAdmissionPolicy
+    bedrock.cloudyfolks.io/name: bedrock-tenant-project-quota
+spec:
+  failurePolicy: Fail
+  paramKind:
+    apiVersion: bedrock.cloudyfolks.io/v1alpha1
+    kind: Tenant
+  matchConstraints:
+    resourceRules:
+      - apiGroups: [bedrock.cloudyfolks.io]
+        apiVersions: [v1alpha1]
+        operations: [CREATE]
+        resources: [projects]
+  validations:
+    - expression: >-
+        params.metadata.name != object.spec.tenantRef ||
+        !has(params.spec.quota) || !has(params.spec.quota.projects) ||
+        !has(params.status) || !has(params.status.usage) || !has(params.status.usage.projects) ||
+        params.status.usage.projects < params.spec.quota.projects
+      messageExpression: "'tenant ' + object.spec.tenantRef + ' has reached its project quota of ' + string(params.spec.quota.projects)"
+      reason: Forbidden
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicyBinding
+metadata:
+  name: bedrock-tenant-project-quota
+  labels:
+    bedrock.cloudyfolks.io/kind: ValidatingAdmissionPolicyBinding
+    bedrock.cloudyfolks.io/name: bedrock-tenant-project-quota
+spec:
+  policyName: bedrock-tenant-project-quota
+  validationActions: [Deny]
+  paramRef:
+    selector: {}
+    parameterNotFoundAction: Allow

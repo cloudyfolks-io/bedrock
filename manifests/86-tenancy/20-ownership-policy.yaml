@@ -1,0 +1,39 @@
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicy
+metadata:
+  name: bedrock-tenant-ownership
+  labels:
+    bedrock.cloudyfolks.io/kind: ValidatingAdmissionPolicy
+    bedrock.cloudyfolks.io/name: bedrock-tenant-ownership
+spec:
+  failurePolicy: Fail
+  matchConstraints:
+    resourceRules:
+      - apiGroups: [bedrock.cloudyfolks.io]
+        apiVersions: [v1alpha1]
+        operations: [CREATE, UPDATE, DELETE]
+        resources: [projects, networks]
+  matchConditions:
+    - name: bedrock-identity
+      expression: "request.userInfo.username.startsWith('bedrock:')"
+  variables:
+    - name: tenantRef
+      expression: "request.operation == 'DELETE' ? oldObject.spec.tenantRef : object.spec.tenantRef"
+  validations:
+    - expression: "authorizer.group('bedrock.cloudyfolks.io').resource('tenants').name(variables.tenantRef).check('manage').allowed()"
+      messageExpression: "'the user may not manage tenant ' + variables.tenantRef"
+      reason: Forbidden
+    - expression: "request.operation != 'UPDATE' || authorizer.group('bedrock.cloudyfolks.io').resource('tenants').name(oldObject.spec.tenantRef).check('manage').allowed()"
+      messageExpression: "'the user may not manage tenant ' + oldObject.spec.tenantRef"
+      reason: Forbidden
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicyBinding
+metadata:
+  name: bedrock-tenant-ownership
+  labels:
+    bedrock.cloudyfolks.io/kind: ValidatingAdmissionPolicyBinding
+    bedrock.cloudyfolks.io/name: bedrock-tenant-ownership
+spec:
+  policyName: bedrock-tenant-ownership
+  validationActions: [Deny]
