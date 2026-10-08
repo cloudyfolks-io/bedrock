@@ -74,6 +74,8 @@ No project role can migrate a VM.
 Only a cluster administrator can migrate a VM.
 
 The owners of a tenant are owners of every project of the tenant.
+The operator creates the RoleBindings only after it applies the project quota.
+Without the quota component, the project has no member access.
 
 ## Create a project
 
@@ -111,6 +113,10 @@ The operator creates these objects:
 - A RoleBinding for each role that has subjects.
 - A NetworkPolicy `default`.
 
+If the tenant limits `cpu`, `memory` or `storage`, the project must set that resource.
+A project that leaves it out gets no namespace.
+The condition `Admitted` then shows the reason `QuotaRequired`.
+
 The operator never takes a namespace that it did not create.
 If the namespace exists, the condition `NamespaceReady` shows the reason `NamespaceConflict`.
 Rename the project to fix this.
@@ -138,6 +144,7 @@ The field `status.usage` shows measured use.
 For a project the use comes from the quota object.
 For a tenant the use is the sum over its projects.
 
+A project in `NamespaceConflict` does not use a project slot.
 The operator provisions projects in creation order.
 A project over a ceiling gets no namespace.
 The operator never removes a project that already exists, when an administrator lowers a ceiling.
@@ -174,16 +181,23 @@ A project user with the prefix `bedrock:` cannot create a Pod or Deployment with
 - `hostNetwork`, `hostPID` or `hostIPC`.
 - A `hostPath` volume.
 - A privileged container or init container.
+- Added capabilities other than `NET_BIND_SERVICE`.
+- A `procMount` other than `Default`.
 - A `hostPort`.
 - `spec.nodeName`.
 
 The rule applies only in namespaces with the label `bedrock.cloudyfolks.io/tenant`.
+It covers Pods and the pod templates of Deployments, ReplicaSets, StatefulSets, DaemonSets, Jobs and CronJobs.
+Only the operator can set or change the labels `bedrock.cloudyfolks.io/tenant` and `bedrock.cloudyfolks.io/project` on a namespace.
 
 ## Deletion
 
 Delete a Project to remove its namespace and all objects in it.
 Delete a Tenant to remove its Projects, its Network and its owner role.
-Kubernetes garbage collection runs the removal through owner references.
+The Tenant has a finalizer.
+The operator first deletes the Projects and waits until they and their namespaces are gone.
+Then it deletes the Networks and waits until they are gone.
+Then it deletes the owner role and releases the finalizer.
 
 ## Conditions
 
@@ -205,12 +219,14 @@ The Project has these conditions.
 | Admitted | TenantNotFound | Create the tenant. |
 | Admitted | ProjectQuotaExceeded | Raise `quota.projects` of the tenant. |
 | Admitted | TenantQuotaExceeded | Lower a project quota or raise the tenant ceiling. |
+| Admitted | QuotaRequired | Set the resource that the tenant limits in the project quota. |
 | NamespaceReady | NamespaceConflict | Rename the project. |
 | NamespaceReady | NamespaceTerminating | Wait until the old namespace is gone. |
 | NamespaceReady | ApplyFailed | Read the message and fix the cause. |
 | SubnetReady | WaitingForSubnet | Wait for the network controller. |
 | SubnetReady | CIDRExhausted | Use a larger `vpcCIDR` for new tenants. |
-| QuotaReady | QuotaCRDMissing | Check that the quota component runs. |
+| QuotaReady | QuotaUnavailable | Check that the quota component runs. |
+| AccessReady | QuotaUnavailable | Wait until the project quota is enforced. |
 | QuotaReady | TenantQuotaExceeded | Lower the project quota or raise the tenant ceiling. |
 | AccessReady | ApplyFailed | Read the message and fix the cause. |
 | Ready | Ready | None. |
@@ -222,6 +238,7 @@ The conditions `Progressing` and `Degraded` show a wait or a fault.
 - An owner cannot list all projects. Use the panel to list them.
 - An owner creates a project with `kubectl create`. The command `kubectl apply` reads the object first, and the owner role reads only existing projects.
 - Project names are unique in the cluster.
+- A network of a tenant is named like the tenant or starts with the tenant name and a hyphen.
 - The quota component must run in the cluster.
 - Only IPv4 is possible.
 - The prefix of `vpcCIDR` is at most 24.
