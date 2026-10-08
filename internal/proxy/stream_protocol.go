@@ -10,6 +10,9 @@ const (
 	maxSubscriptions      = 64
 	maxConnectionsPerUser = 8
 	sendQueue             = 1024
+	sendBytes             = 8 << 20
+	maxStreamConnections  = 2000
+	frameOverhead         = 64
 	pingInterval          = 25 * time.Second
 	pongWait              = 60 * time.Second
 	writeWait             = 10 * time.Second
@@ -26,11 +29,13 @@ const (
 )
 
 var (
-	defaultBackoff = []time.Duration{time.Second, 2 * time.Second, 4 * time.Second}
-	idPattern      = regexp.MustCompile(`^[A-Za-z0-9._-]{1,64}$`)
-	namePattern    = regexp.MustCompile(`^[a-z0-9]{1,63}$`)
-	nsPattern      = regexp.MustCompile(`^([a-z0-9]([-a-z0-9]*[a-z0-9])?)?$`)
-	versionPattern = regexp.MustCompile(`^[A-Za-z0-9._-]{1,64}$`)
+	defaultBackoff  = []time.Duration{time.Second, 2 * time.Second, 4 * time.Second}
+	idPattern       = regexp.MustCompile(`^[A-Za-z0-9._-]{1,64}$`)
+	namePattern     = regexp.MustCompile(`^[a-z0-9]{1,63}$`)
+	nsPattern       = regexp.MustCompile(`^([a-z0-9]([-a-z0-9]*[a-z0-9])?)?$`)
+	versionPattern  = regexp.MustCompile(`^[a-z0-9]([-a-z0-9]*[a-z0-9])?$`)
+	groupPattern    = regexp.MustCompile(`^[a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*$`)
+	revisionPattern = regexp.MustCompile(`^[A-Za-z0-9._-]{1,64}$`)
 )
 
 type ClientFrame struct {
@@ -66,8 +71,8 @@ func errorFrame(id, code, message string) ServerFrame {
 }
 
 func validSubscription(f ClientFrame) bool {
-	return idPattern.MatchString(f.ID) && versionPattern.MatchString(f.Version) && namePattern.MatchString(f.Resource) &&
-		nsPattern.MatchString(f.Namespace) && versionPattern.MatchString(f.ResourceVersion) &&
+	return idPattern.MatchString(f.ID) && groupPattern.MatchString(f.Group) && versionPattern.MatchString(f.Version) && namePattern.MatchString(f.Resource) &&
+		nsPattern.MatchString(f.Namespace) && revisionPattern.MatchString(f.ResourceVersion) &&
 		len(f.LabelSelector) <= 1024 && len(f.FieldSelector) <= 1024
 }
 

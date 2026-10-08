@@ -121,7 +121,7 @@ func TestStreamSlowConsumerIsClosed(t *testing.T) {
 	big := strings.Repeat("x", 200<<10)
 	emitted := make(chan struct{})
 	var once sync.Once
-	front, _, _ := fakeStream(t, func(w http.ResponseWriter, r *http.Request) {
+	front, _, _, hub := fakeStreamHub(t, func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		for i := 0; i < 300 && r.Context().Err() == nil; i++ {
 			flushed(w, strings.Replace(watchLine("ADDED", "big", "50"), `"managedFields"`, `"note":"`+big+`","managedFields"`, 1))
@@ -139,7 +139,7 @@ func TestStreamSlowConsumerIsClosed(t *testing.T) {
 	case <-time.After(60 * time.Second):
 		t.Fatal("the upstream did not finish writing")
 	}
-	time.Sleep(300 * time.Millisecond)
+	waitUntil(t, "the proxy to evict the slow client", func() bool { return hub.overloads.Load() > 0 })
 	if code := closeCode(t, slow); code != CloseOverloaded {
 		t.Fatalf("close code %d", code)
 	}

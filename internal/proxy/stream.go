@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"net/http"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/gorilla/websocket"
@@ -23,23 +24,27 @@ import (
 )
 
 type StreamOptions struct {
-	Context      context.Context
-	Clock        func() time.Time
-	WatchTimeout time.Duration
-	Backoff      []time.Duration
-	SessionCheck time.Duration
-	PingInterval time.Duration
-	PongWait     time.Duration
-	SendQueue    int
-	WriteWait    time.Duration
+	Context        context.Context
+	Clock          func() time.Time
+	WatchTimeout   time.Duration
+	Backoff        []time.Duration
+	SessionCheck   time.Duration
+	PingInterval   time.Duration
+	PongWait       time.Duration
+	SendQueue      int
+	WriteWait      time.Duration
+	SendBytes      int64
+	MaxConnections int
 }
 
 type streamHub struct {
-	upstream *Upstream
-	sessions SessionSource
-	opts     StreamOptions
-	mu       sync.Mutex
-	users    map[string]int
+	upstream  *Upstream
+	sessions  SessionSource
+	opts      StreamOptions
+	mu        sync.Mutex
+	users     map[string]int
+	total     int
+	overloads atomic.Int32
 }
 
 type closeRequest struct {
@@ -62,6 +67,7 @@ type streamConn struct {
 	ctx     context.Context
 	cancel  context.CancelFunc
 	out     chan ServerFrame
+	queued  atomic.Int64
 	closing chan closeRequest
 	wg      sync.WaitGroup
 	mu      sync.Mutex
@@ -69,8 +75,11 @@ type streamConn struct {
 }
 
 func StreamHandler(u *Upstream, sessions SessionSource, opts StreamOptions) http.Handler {
-	hub := &streamHub{upstream: u, sessions: sessions, opts: streamDefaults(opts), users: map[string]int{}}
-	return http.HandlerFunc(hub.serve)
+	return http.HandlerFunc(newStreamHub(u, sessions, opts).serve)
+}
+
+func newStreamHub(u *Upstream, sessions SessionSource, opts StreamOptions) *streamHub {
+	return &streamHub{upstream: u, sessions: sessions, opts: streamDefaults(opts), users: map[string]int{}}
 }
 
 func streamDefaults(opts StreamOptions) StreamOptions {
@@ -98,6 +107,12 @@ func streamDefaults(opts StreamOptions) StreamOptions {
 	if opts.SendQueue == 0 {
 		opts.SendQueue = sendQueue
 	}
+	if opts.SendBytes == 0 {
+		opts.SendBytes = sendBytes
+	}
+	if opts.MaxConnections == 0 {
+		opts.MaxConnections = maxStreamConnections
+	}
 	if opts.WriteWait == 0 {
 		opts.WriteWait = writeWait
 	}
@@ -112,8 +127,12 @@ func (h *streamHub) serve(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	subject := caller.Principal.Subject
-	if !h.acquire(subject) {
+	switch h.acquire(subject) {
+	case acquireUserLimit:
 		httpjson.WriteError(w, http.StatusTooManyRequests, "rate_limited")
+		return
+	case acquireGlobalLimit:
+		httpjson.WriteError(w, http.StatusServiceUnavailable, "rate_limited")
 		return
 	}
 	defer h.release(subject)
@@ -130,19 +149,32 @@ func (h *streamHub) serve(w http.ResponseWriter, r *http.Request) {
 	conn.run(*caller.Principal)
 }
 
-func (h *streamHub) acquire(subject string) bool {
+type acquireResult int
+
+const (
+	acquired acquireResult = iota
+	acquireUserLimit
+	acquireGlobalLimit
+)
+
+func (h *streamHub) acquire(subject string) acquireResult {
 	h.mu.Lock()
 	defer h.mu.Unlock()
+	if h.total >= h.opts.MaxConnections {
+		return acquireGlobalLimit
+	}
 	if h.users[subject] >= maxConnectionsPerUser {
-		return false
+		return acquireUserLimit
 	}
 	h.users[subject]++
-	return true
+	h.total++
+	return acquired
 }
 
 func (h *streamHub) release(subject string) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
+	h.total--
 	if h.users[subject]--; h.users[subject] <= 0 {
 		delete(h.users, subject)
 	}
@@ -168,12 +200,27 @@ func (c *streamConn) close(code int, text string) {
 	}
 }
 
+func frameSize(f ServerFrame) int64 {
+	return int64(len(f.Object) + len(f.ID) + len(f.Message) + len(f.Event) + len(f.ResourceVersion) + frameOverhead)
+}
+
 func (c *streamConn) enqueue(frame ServerFrame) {
+	size := frameSize(frame)
+	if len(c.out) > 0 && c.queued.Load()+size > c.hub.opts.SendBytes {
+		c.overloaded()
+		return
+	}
 	select {
 	case c.out <- frame:
+		c.queued.Add(size)
 	default:
-		c.close(CloseOverloaded, "client reads too slowly")
+		c.overloaded()
 	}
+}
+
+func (c *streamConn) overloaded() {
+	c.hub.overloads.Add(1)
+	c.close(CloseOverloaded, "client reads too slowly")
 }
 
 func (c *streamConn) emit(sub *subscription, frame ServerFrame) {
@@ -202,6 +249,7 @@ func (c *streamConn) write(done chan<- struct{}) {
 	for {
 		select {
 		case frame := <-c.out:
+			c.queued.Add(-frameSize(frame))
 			_ = c.ws.SetWriteDeadline(time.Now().Add(c.hub.opts.WriteWait))
 			if err := c.ws.WriteJSON(frame); err != nil {
 				c.cancel()

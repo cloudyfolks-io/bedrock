@@ -58,10 +58,17 @@ func principalWithToken(subject, token string) Principal {
 
 func newStreamServer(t *testing.T, u *Upstream, sessions SessionSource, opts StreamOptions) *httptest.Server {
 	t.Helper()
-	chain := Authenticate(CookieAuth(sessions), RequireOrigin(labHost, StreamHandler(u, sessions, opts)))
+	front, _ := newStreamServerHub(t, u, sessions, opts)
+	return front
+}
+
+func newStreamServerHub(t *testing.T, u *Upstream, sessions SessionSource, opts StreamOptions) (*httptest.Server, *streamHub) {
+	t.Helper()
+	hub := newStreamHub(u, sessions, opts)
+	chain := Authenticate(CookieAuth(sessions), RequireOrigin(labHost, http.HandlerFunc(hub.serve)))
 	front := httptest.NewServer(Dispatch(labHost, Routes{Console: chain, API: http.NotFoundHandler(), Health: http.NotFoundHandler()}))
 	t.Cleanup(front.Close)
-	return front
+	return front, hub
 }
 
 func dialStream(front *httptest.Server, origin, cookie string) (*websocket.Conn, *http.Response, error) {
@@ -212,11 +219,18 @@ func realStream(t *testing.T, opts StreamOptions) (*httptest.Server, *flipSessio
 
 func fakeStream(t *testing.T, handler http.HandlerFunc, opts StreamOptions) (*httptest.Server, *fakeAPI, *flipSessions) {
 	t.Helper()
+	front, api, sessions, _ := fakeStreamHub(t, handler, opts)
+	return front, api, sessions
+}
+
+func fakeStreamHub(t *testing.T, handler http.HandlerFunc, opts StreamOptions) (*httptest.Server, *fakeAPI, *flipSessions, *streamHub) {
+	t.Helper()
 	api := newFakeAPI(t, handler)
 	sessions := newFlipSessions()
 	sessions.set("alice", principalWithToken("alice", "tok-1"), nil)
 	sessions.set("bob", principalWithToken("bob", "tok-bob"), nil)
-	return newStreamServer(t, api.upstream(t), sessions, opts), api, sessions
+	front, hub := newStreamServerHub(t, api.upstream(t), sessions, opts)
+	return front, api, sessions, hub
 }
 
 func newSetting(t *testing.T, name string) *v1alpha1.Setting {
@@ -459,4 +473,84 @@ func TestStreamPingPong(t *testing.T) {
 	case <-time.After(5 * time.Second):
 		t.Fatal("the server sent no ping")
 	}
+}
+
+func TestStreamRefusesVersionsThatEscapeTheGroup(t *testing.T) {
+	front, api, _ := fakeStream(t, holdOpen, StreamOptions{})
+	conn := openStream(t, front, "alice")
+	expectFrame(t, conn, "hello")
+	for i, version := range []string{"..", ".", "a..b", "v1/x", "V1", "-v1", "v1alpha1/../x"} {
+		frame := settingsFrame("v"+strconv.Itoa(i), "1")
+		frame.Version = version
+		send(t, conn, frame)
+		if answer := expectFrame(t, conn, "error"); answer.Code != "invalid" {
+			t.Fatalf("version %q: %+v", version, answer)
+		}
+	}
+	frame := settingsFrame("g", "1")
+	frame.Group = "bedrock.cloudyfolks.io/../x"
+	send(t, conn, frame)
+	if answer := expectFrame(t, conn, "error"); answer.Code != "resource_not_allowed" {
+		t.Fatalf("group: %+v", answer)
+	}
+	if len(watchRequests(api)) != 0 {
+		t.Fatal("a refused subscription reached the API server")
+	}
+}
+
+func TestStreamEvictsWhenQueuedBytesPassTheLimit(t *testing.T) {
+	hub := newStreamHub(nil, nil, StreamOptions{SendBytes: 1000})
+	conn := &streamConn{hub: hub, out: make(chan ServerFrame, 100), closing: make(chan closeRequest, 1)}
+	small := ServerFrame{Type: "event", Object: make([]byte, 300)}
+	for i := 0; i < 2; i++ {
+		conn.enqueue(small)
+	}
+	select {
+	case request := <-conn.closing:
+		t.Fatalf("closed too early: %+v", request)
+	default:
+	}
+	for i := 0; i < 5; i++ {
+		conn.enqueue(small)
+	}
+	select {
+	case request := <-conn.closing:
+		if request.code != CloseOverloaded {
+			t.Fatalf("close code %d", request.code)
+		}
+	default:
+		t.Fatal("the byte limit did not evict the client")
+	}
+	if hub.overloads.Load() == 0 {
+		t.Fatal("no overload was counted")
+	}
+	huge := &streamConn{hub: hub, out: make(chan ServerFrame, 100), closing: make(chan closeRequest, 1)}
+	huge.enqueue(ServerFrame{Type: "event", Object: make([]byte, 5000)})
+	select {
+	case request := <-huge.closing:
+		t.Fatalf("a single frame on an empty queue must pass: %+v", request)
+	default:
+	}
+}
+
+func TestStreamCapsAllConnections(t *testing.T) {
+	front, _, sessions := fakeStream(t, holdOpen, StreamOptions{MaxConnections: 2})
+	sessions.set("carol", principalWithToken("carol", "tok-c"), nil)
+	first := openStream(t, front, "alice")
+	expectFrame(t, first, "hello")
+	second := openStream(t, front, "bob")
+	expectFrame(t, second, "hello")
+	_, resp, err := dialStream(front, consoleOrigin, "carol")
+	if err == nil || resp == nil || resp.StatusCode != http.StatusServiceUnavailable {
+		t.Fatalf("third connection: %v %v", resp, err)
+	}
+	_ = first.Close()
+	waitUntil(t, "a free slot", func() bool {
+		conn, _, err := dialStream(front, consoleOrigin, "carol")
+		if err != nil {
+			return false
+		}
+		_ = conn.Close()
+		return true
+	})
 }
