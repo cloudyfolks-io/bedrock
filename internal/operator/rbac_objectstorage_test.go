@@ -18,8 +18,6 @@ func TestOperatorRoleCoversObjectStorage(t *testing.T) {
 		{"objectbucket.io", "objectbucketclaims", "patch"},
 		{"", "configmaps", "get"},
 		{"", "secrets", "get"},
-		{"", "secrets", "list"},
-		{"", "secrets", "watch"},
 		{"", "namespaces", "get"},
 		{"", "namespaces", "list"},
 		{"", "namespaces", "watch"},

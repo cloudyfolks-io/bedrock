@@ -163,7 +163,6 @@ func TestOperatorRoleCoversAuthnAddon(t *testing.T) {
 		{"bedrock.cloudyfolks.io", "oauthclients", "patch"},
 		{"", "configmaps", "patch"},
 		{"", "secrets", "patch"},
-		{"", "secrets", "watch"},
 		{"apps", "deployments", "get"},
 		{"apps", "deployments", "list"},
 		{"apps", "deployments", "watch"},

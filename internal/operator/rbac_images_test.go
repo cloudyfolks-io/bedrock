@@ -34,8 +34,10 @@ func TestOperatorRoleCoversImages(t *testing.T) {
 			}
 		}
 	}
-	if allows(role, "", "persistentvolumeclaims", "delete") {
-		t.Error("claims are read only for the image controllers")
+	for _, rule := range imagesRules() {
+		if slices.Contains(rule.Resources, "persistentvolumeclaims") && slices.Contains(rule.Verbs, "delete") {
+			t.Error("claims are read only for the image controllers")
+		}
 	}
 }
 

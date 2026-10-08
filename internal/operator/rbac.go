@@ -66,7 +66,22 @@ func verbsFor(kind schema.GroupKind) []string {
 	if neverDeleted(kind) {
 		return standardVerbsWithoutDelete()
 	}
+	if appliedOnly(kind) {
+		return appliedVerbs()
+	}
 	return standardVerbs()
+}
+
+func appliedOnly(kind schema.GroupKind) bool {
+	return slices.Contains([]schema.GroupKind{
+		{Kind: "Secret"},
+		{Group: "storage.k8s.io", Kind: "StorageClass"},
+		{Group: "snapshot.storage.k8s.io", Kind: "VolumeSnapshotClass"},
+	}, kind)
+}
+
+func appliedVerbs() []string {
+	return []string{"create", "delete", "get", "patch"}
 }
 
 func neverDeleted(kind schema.GroupKind) bool {
@@ -89,8 +104,8 @@ func fixedRules() []rbacv1.PolicyRule {
 		{APIGroups: []string{"coordination.k8s.io"}, Resources: []string{"leases"}, Verbs: standardVerbs()},
 		{APIGroups: []string{"apps"}, Resources: []string{"controllerrevisions"}, Verbs: read},
 		{APIGroups: []string{"apps"}, Resources: []string{"deployments"}, Verbs: []string{"get", "patch"}},
-		{APIGroups: []string{"storage.k8s.io"}, Resources: []string{"storageclasses"}, Verbs: read},
-		{APIGroups: []string{vmGVK.Group}, Resources: []string{"virtualmachineinstances", "virtualmachines"}, Verbs: standardVerbs()},
+		{APIGroups: []string{vmGVK.Group}, Resources: []string{"virtualmachineinstances"}, Verbs: []string{"get", "list"}},
+		{APIGroups: []string{vmGVK.Group}, Resources: []string{"virtualmachines"}, Verbs: []string{"create", "delete", "get", "list", "patch"}},
 		{APIGroups: []string{rbacv1.GroupName}, Resources: []string{"clusterrolebindings", "clusterroles", "rolebindings", "roles"}, Verbs: []string{"bind", "escalate"}},
 		{APIGroups: []string{rbacv1.GroupName}, Resources: []string{"clusterroles"}, Verbs: []string{"patch"}},
 	}
