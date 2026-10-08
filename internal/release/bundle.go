@@ -3,6 +3,7 @@ package release
 import (
 	"bufio"
 	"bytes"
+	"errors"
 	"fmt"
 	"io"
 	"io/fs"
@@ -25,9 +26,12 @@ const (
 	releaseFile    = "release.yaml"
 	imagesFile     = "images.txt"
 	manifestsDir   = "manifests"
+	addonsDir      = "addons"
 )
 
 var GroupDirPattern = regexp.MustCompile(`^([0-9]{2})-([a-z0-9-]+)$`)
+
+var AddonNamePattern = regexp.MustCompile(`^[a-z0-9-]+$`)
 
 type Group struct {
 	Order   int
@@ -39,6 +43,7 @@ type Bundle struct {
 	Spec   v1alpha1.ReleaseSpec
 	Groups []Group
 	Images []string
+	Addons map[string][]*unstructured.Unstructured
 }
 
 func Load(fsys fs.FS) (Bundle, error) {
@@ -50,11 +55,15 @@ func Load(fsys fs.FS) (Bundle, error) {
 	if err != nil {
 		return Bundle{}, err
 	}
+	addons, err := loadAddons(fsys)
+	if err != nil {
+		return Bundle{}, err
+	}
 	images, err := loadImages(fsys)
 	if err != nil {
 		return Bundle{}, err
 	}
-	return Bundle{Spec: spec, Groups: groups, Images: images}, nil
+	return Bundle{Spec: spec, Groups: groups, Images: images, Addons: addons}, nil
 }
 
 func loadSpec(fsys fs.FS) (v1alpha1.ReleaseSpec, error) {
@@ -79,7 +88,7 @@ func loadGroups(fsys fs.FS) ([]Group, error) {
 	}
 	groups := make([]Group, 0, len(entries))
 	for _, entry := range entries {
-		if !entry.IsDir() {
+		if !entry.IsDir() || entry.Name() == addonsDir {
 			continue
 		}
 		match := GroupDirPattern.FindStringSubmatch(entry.Name())
@@ -95,6 +104,32 @@ func loadGroups(fsys fs.FS) ([]Group, error) {
 	}
 	sort.SliceStable(groups, func(i, j int) bool { return groups[i].Order < groups[j].Order })
 	return groups, nil
+}
+
+func loadAddons(fsys fs.FS) (map[string][]*unstructured.Unstructured, error) {
+	dir := path.Join(manifestsDir, addonsDir)
+	entries, err := fs.ReadDir(fsys, dir)
+	if errors.Is(err, fs.ErrNotExist) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	addons := map[string][]*unstructured.Unstructured{}
+	for _, entry := range entries {
+		if !entry.IsDir() {
+			continue
+		}
+		if !AddonNamePattern.MatchString(entry.Name()) {
+			return nil, fmt.Errorf("addon directory %q must match %s", entry.Name(), AddonNamePattern)
+		}
+		objects, err := loadObjects(fsys, path.Join(dir, entry.Name()), entry.Name())
+		if err != nil {
+			return nil, err
+		}
+		addons[entry.Name()] = objects
+	}
+	return addons, nil
 }
 
 func loadObjects(fsys fs.FS, dir, component string) ([]*unstructured.Unstructured, error) {

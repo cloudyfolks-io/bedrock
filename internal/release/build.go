@@ -30,6 +30,8 @@ type ComponentConfig struct {
 	Image       string   `json:"image,omitempty"`
 	ExtraImages []string `json:"extraImages,omitempty"`
 	KeepTags    bool     `json:"keepTags,omitempty"`
+	Addon       bool     `json:"addon,omitempty"`
+	NoHooks     bool     `json:"noHooks,omitempty"`
 }
 
 type BuildConfig struct {
@@ -66,11 +68,18 @@ func LoadBuildConfig(path string) (BuildConfig, error) {
 		return BuildConfig{}, fmt.Errorf("parse %s: %w", path, err)
 	}
 	for _, component := range cfg.Components {
-		if !GroupDirPattern.MatchString(fmt.Sprintf("%02d-%s", component.Order, component.Name)) {
+		if !validComponentName(component) {
 			return BuildConfig{}, fmt.Errorf("component %q has an invalid name or order", component.Name)
 		}
 	}
 	return cfg, nil
+}
+
+func validComponentName(component ComponentConfig) bool {
+	if component.Addon {
+		return AddonNamePattern.MatchString(component.Name)
+	}
+	return GroupDirPattern.MatchString(fmt.Sprintf("%02d-%s", component.Order, component.Name))
 }
 
 type rendered struct {
@@ -80,6 +89,9 @@ type rendered struct {
 }
 
 func groupDir(component ComponentConfig) string {
+	if component.Addon {
+		return addonsDir + "/" + component.Name
+	}
 	return fmt.Sprintf("%02d-%s", component.Order, component.Name)
 }
 
@@ -143,10 +155,15 @@ func Build(cfg BuildConfig, opts BuildOptions) error {
 	if err := writeManifests(cfg, files, opts.Out); err != nil {
 		return err
 	}
-	groups, err := loadGroups(os.DirFS(opts.Out))
+	builtGroups, err := loadGroups(os.DirFS(opts.Out))
 	if err != nil {
 		return err
 	}
+	builtAddons, err := loadAddons(os.DirFS(opts.Out))
+	if err != nil {
+		return err
+	}
+	groups := append(builtGroups, addonGroups(builtAddons)...)
 	images := sortedImages(mergeImages(ImagesOf(groups), extraImagesOf(cfg)))
 	spec := v1alpha1.ReleaseSpec{
 		Version:     opts.Version,
@@ -224,6 +241,14 @@ func keepTagGroups(cfg BuildConfig) map[string]struct{} {
 		if component.KeepTags {
 			groups[groupDir(component)] = struct{}{}
 		}
+	}
+	return groups
+}
+
+func addonGroups(addons map[string][]*unstructured.Unstructured) []Group {
+	groups := make([]Group, 0, len(addons))
+	for name, objects := range addons {
+		groups = append(groups, Group{Name: name, Objects: objects})
 	}
 	return groups
 }
@@ -329,6 +354,9 @@ func helmTemplate(component ComponentConfig, opts BuildOptions) ([]*unstructured
 	if component.Values != "" {
 		args = append(args, "-f", filepath.Join(opts.Root, component.Values))
 	}
+	if component.NoHooks {
+		args = append(args, "--no-hooks")
+	}
 	cmd := exec.Command(opts.Helm, args...)
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout, cmd.Stderr = &stdout, &stderr
@@ -418,7 +446,7 @@ func writeManifests(cfg BuildConfig, files []rendered, out string) error {
 		return err
 	}
 	for _, component := range cfg.Components {
-		if err := os.MkdirAll(filepath.Join(out, manifestsDir, fmt.Sprintf("%02d-%s", component.Order, component.Name)), 0o755); err != nil {
+		if err := os.MkdirAll(filepath.Join(out, manifestsDir, groupDir(component)), 0o755); err != nil {
 			return err
 		}
 	}

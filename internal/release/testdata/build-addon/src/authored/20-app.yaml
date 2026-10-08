@@ -1,0 +1,17 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: authored
+  namespace: kube-system
+spec:
+  selector:
+    matchLabels:
+      app: authored
+  template:
+    metadata:
+      labels:
+        app: authored
+    spec:
+      containers:
+        - name: authored
+          image: quay.io/example/authored:2

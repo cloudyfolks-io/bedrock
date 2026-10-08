@@ -1,0 +1,16 @@
+k0sVersion: v1.36.3+k0s.0
+supportedOS: [ubuntu-24.04]
+upgradeFrom: []
+components:
+  - name: base
+    order: 90
+    dirs: [manifests/90-base]
+  - name: demo
+    addon: true
+    chart: chart
+    version: 1.0.0
+    namespace: kube-system
+    noHooks: true
+  - name: authored
+    addon: true
+    dirs: [src/authored]

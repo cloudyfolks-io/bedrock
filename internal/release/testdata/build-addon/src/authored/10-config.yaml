@@ -1,0 +1,7 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: authored
+  namespace: kube-system
+data:
+  size: ${BEDROCK_AUTHORED_SIZE}
