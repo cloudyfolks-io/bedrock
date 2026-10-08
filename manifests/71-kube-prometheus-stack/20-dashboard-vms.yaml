@@ -1,0 +1,338 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: bedrock-dashboard-vms
+  namespace: monitoring
+  labels:
+    grafana_dashboard: "1"
+data:
+  bedrock-vms.json: |
+    {
+      "uid": "bedrock-vms",
+      "title": "Bedrock / Virtual machines",
+      "schemaVersion": 39,
+      "version": 1,
+      "editable": false,
+      "tags": [
+        "bedrock"
+      ],
+      "time": {
+        "from": "now-6h",
+        "to": "now"
+      },
+      "refresh": "1m",
+      "templating": {
+        "list": [
+          {
+            "name": "project",
+            "label": "project",
+            "type": "query",
+            "datasource": {
+              "type": "prometheus",
+              "uid": "prometheus"
+            },
+            "query": {
+              "query": "label_values(kube_namespace_labels{label_bedrock_cloudyfolks_io_project!=\"\"}, label_bedrock_cloudyfolks_io_project)",
+              "refId": "var-project"
+            },
+            "refresh": 2,
+            "multi": true,
+            "includeAll": true,
+            "current": {
+              "text": "All",
+              "value": "$__all"
+            }
+          },
+          {
+            "name": "vm",
+            "label": "vm",
+            "type": "query",
+            "datasource": {
+              "type": "prometheus",
+              "uid": "prometheus"
+            },
+            "query": {
+              "query": "query_result(max by (name) (kubevirt_vmi_info * on (namespace) group_left (project) label_replace(kube_namespace_labels{label_bedrock_cloudyfolks_io_project=~\"$project\"}, \"project\", \"$1\", \"label_bedrock_cloudyfolks_io_project\", \"(.*)\")))",
+              "refId": "var-vm"
+            },
+            "refresh": 2,
+            "multi": true,
+            "includeAll": true,
+            "current": {
+              "text": "All",
+              "value": "$__all"
+            },
+            "regex": "/name=\"([^\"]+)\"/"
+          }
+        ]
+      },
+      "panels": [
+        {
+          "id": 1,
+          "title": "Running VMs",
+          "type": "stat",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "gridPos": {
+            "x": 0,
+            "y": 0,
+            "w": 6,
+            "h": 5
+          },
+          "targets": [
+            {
+              "expr": "count (max by (namespace, name) (kubevirt_vmi_info{phase=~\"(?i)running\", name=~\"$vm\"}) * on (namespace) group_left (project) label_replace(kube_namespace_labels{label_bedrock_cloudyfolks_io_project=~\"$project\"}, \"project\", \"$1\", \"label_bedrock_cloudyfolks_io_project\", \"(.*)\"))",
+              "legendFormat": "running",
+              "refId": "A",
+              "datasource": {
+                "type": "prometheus",
+                "uid": "prometheus"
+              }
+            }
+          ]
+        },
+        {
+          "id": 2,
+          "title": "VMs per phase",
+          "type": "timeseries",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "gridPos": {
+            "x": 6,
+            "y": 0,
+            "w": 18,
+            "h": 5
+          },
+          "targets": [
+            {
+              "expr": "count by (phase) (kubevirt_vmi_info{name=~\"$vm\"} * on (namespace) group_left (project) label_replace(kube_namespace_labels{label_bedrock_cloudyfolks_io_project=~\"$project\"}, \"project\", \"$1\", \"label_bedrock_cloudyfolks_io_project\", \"(.*)\"))",
+              "legendFormat": "{{phase}}",
+              "refId": "A",
+              "datasource": {
+                "type": "prometheus",
+                "uid": "prometheus"
+              }
+            }
+          ]
+        },
+        {
+          "id": 3,
+          "title": "CPU usage per VM",
+          "type": "timeseries",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "gridPos": {
+            "x": 0,
+            "y": 5,
+            "w": 12,
+            "h": 8
+          },
+          "targets": [
+            {
+              "expr": "sum by (namespace, name) (rate(kubevirt_vmi_cpu_usage_seconds_total{name=~\"$vm\"}[5m]) * on (namespace) group_left (project) label_replace(kube_namespace_labels{label_bedrock_cloudyfolks_io_project=~\"$project\"}, \"project\", \"$1\", \"label_bedrock_cloudyfolks_io_project\", \"(.*)\"))",
+              "legendFormat": "{{namespace}}/{{name}}",
+              "refId": "A",
+              "datasource": {
+                "type": "prometheus",
+                "uid": "prometheus"
+              }
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "short"
+            },
+            "overrides": []
+          }
+        },
+        {
+          "id": 4,
+          "title": "vCPU delay per VM",
+          "type": "timeseries",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "gridPos": {
+            "x": 12,
+            "y": 5,
+            "w": 12,
+            "h": 8
+          },
+          "targets": [
+            {
+              "expr": "sum by (namespace, name) (rate(kubevirt_vmi_vcpu_delay_seconds_total{name=~\"$vm\"}[5m]) * on (namespace) group_left (project) label_replace(kube_namespace_labels{label_bedrock_cloudyfolks_io_project=~\"$project\"}, \"project\", \"$1\", \"label_bedrock_cloudyfolks_io_project\", \"(.*)\"))",
+              "legendFormat": "{{namespace}}/{{name}}",
+              "refId": "A",
+              "datasource": {
+                "type": "prometheus",
+                "uid": "prometheus"
+              }
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "s"
+            },
+            "overrides": []
+          }
+        },
+        {
+          "id": 5,
+          "title": "Memory",
+          "type": "timeseries",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "gridPos": {
+            "x": 0,
+            "y": 13,
+            "w": 12,
+            "h": 8
+          },
+          "targets": [
+            {
+              "expr": "max by (namespace, name) (kubevirt_vmi_memory_domain_bytes{name=~\"$vm\"} * on (namespace) group_left (project) label_replace(kube_namespace_labels{label_bedrock_cloudyfolks_io_project=~\"$project\"}, \"project\", \"$1\", \"label_bedrock_cloudyfolks_io_project\", \"(.*)\"))",
+              "legendFormat": "domain {{namespace}}/{{name}}",
+              "refId": "A",
+              "datasource": {
+                "type": "prometheus",
+                "uid": "prometheus"
+              }
+            },
+            {
+              "expr": "max by (namespace, name) (kubevirt_vmi_memory_resident_bytes{name=~\"$vm\"} * on (namespace) group_left (project) label_replace(kube_namespace_labels{label_bedrock_cloudyfolks_io_project=~\"$project\"}, \"project\", \"$1\", \"label_bedrock_cloudyfolks_io_project\", \"(.*)\"))",
+              "legendFormat": "resident {{namespace}}/{{name}}",
+              "refId": "B",
+              "datasource": {
+                "type": "prometheus",
+                "uid": "prometheus"
+              }
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "bytes"
+            },
+            "overrides": []
+          }
+        },
+        {
+          "id": 6,
+          "title": "Network",
+          "type": "timeseries",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "gridPos": {
+            "x": 12,
+            "y": 13,
+            "w": 12,
+            "h": 8
+          },
+          "targets": [
+            {
+              "expr": "sum by (namespace, name) (rate(kubevirt_vmi_network_receive_bytes_total{name=~\"$vm\"}[5m]) * on (namespace) group_left (project) label_replace(kube_namespace_labels{label_bedrock_cloudyfolks_io_project=~\"$project\"}, \"project\", \"$1\", \"label_bedrock_cloudyfolks_io_project\", \"(.*)\"))",
+              "legendFormat": "receive {{namespace}}/{{name}}",
+              "refId": "A",
+              "datasource": {
+                "type": "prometheus",
+                "uid": "prometheus"
+              }
+            },
+            {
+              "expr": "sum by (namespace, name) (rate(kubevirt_vmi_network_transmit_bytes_total{name=~\"$vm\"}[5m]) * on (namespace) group_left (project) label_replace(kube_namespace_labels{label_bedrock_cloudyfolks_io_project=~\"$project\"}, \"project\", \"$1\", \"label_bedrock_cloudyfolks_io_project\", \"(.*)\"))",
+              "legendFormat": "transmit {{namespace}}/{{name}}",
+              "refId": "B",
+              "datasource": {
+                "type": "prometheus",
+                "uid": "prometheus"
+              }
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "Bps"
+            },
+            "overrides": []
+          }
+        },
+        {
+          "id": 7,
+          "title": "Storage",
+          "type": "timeseries",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "gridPos": {
+            "x": 0,
+            "y": 21,
+            "w": 12,
+            "h": 8
+          },
+          "targets": [
+            {
+              "expr": "sum by (namespace, name) (rate(kubevirt_vmi_storage_read_traffic_bytes_total{name=~\"$vm\"}[5m]) * on (namespace) group_left (project) label_replace(kube_namespace_labels{label_bedrock_cloudyfolks_io_project=~\"$project\"}, \"project\", \"$1\", \"label_bedrock_cloudyfolks_io_project\", \"(.*)\"))",
+              "legendFormat": "read {{namespace}}/{{name}}",
+              "refId": "A",
+              "datasource": {
+                "type": "prometheus",
+                "uid": "prometheus"
+              }
+            },
+            {
+              "expr": "sum by (namespace, name) (rate(kubevirt_vmi_storage_write_traffic_bytes_total{name=~\"$vm\"}[5m]) * on (namespace) group_left (project) label_replace(kube_namespace_labels{label_bedrock_cloudyfolks_io_project=~\"$project\"}, \"project\", \"$1\", \"label_bedrock_cloudyfolks_io_project\", \"(.*)\"))",
+              "legendFormat": "write {{namespace}}/{{name}}",
+              "refId": "B",
+              "datasource": {
+                "type": "prometheus",
+                "uid": "prometheus"
+              }
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "Bps"
+            },
+            "overrides": []
+          }
+        },
+        {
+          "id": 8,
+          "title": "Virtual machines",
+          "type": "table",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "gridPos": {
+            "x": 12,
+            "y": 21,
+            "w": 12,
+            "h": 8
+          },
+          "targets": [
+            {
+              "expr": "kubevirt_vmi_info{name=~\"$vm\"} * on (namespace) group_left (project) label_replace(kube_namespace_labels{label_bedrock_cloudyfolks_io_project=~\"$project\"}, \"project\", \"$1\", \"label_bedrock_cloudyfolks_io_project\", \"(.*)\")",
+              "legendFormat": "",
+              "instant": true,
+              "format": "table",
+              "refId": "A",
+              "datasource": {
+                "type": "prometheus",
+                "uid": "prometheus"
+              }
+            }
+          ]
+        }
+      ]
+    }

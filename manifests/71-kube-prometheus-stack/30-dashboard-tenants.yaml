@@ -1,0 +1,331 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: bedrock-dashboard-tenants
+  namespace: monitoring
+  labels:
+    grafana_dashboard: "1"
+data:
+  bedrock-tenants.json: |
+    {
+      "uid": "bedrock-tenants",
+      "title": "Bedrock / Tenants and projects",
+      "schemaVersion": 39,
+      "version": 1,
+      "editable": false,
+      "tags": [
+        "bedrock"
+      ],
+      "time": {
+        "from": "now-6h",
+        "to": "now"
+      },
+      "refresh": "1m",
+      "templating": {
+        "list": []
+      },
+      "panels": [
+        {
+          "id": 9,
+          "title": "Running VMs",
+          "type": "stat",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "gridPos": {
+            "x": 0,
+            "y": 0,
+            "w": 6,
+            "h": 4
+          },
+          "targets": [
+            {
+              "expr": "sum(bedrock:project_vm_running:count)",
+              "legendFormat": "running",
+              "refId": "A",
+              "datasource": {
+                "type": "prometheus",
+                "uid": "prometheus"
+              }
+            }
+          ]
+        },
+        {
+          "id": 10,
+          "title": "vCPUs",
+          "type": "stat",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "gridPos": {
+            "x": 6,
+            "y": 0,
+            "w": 6,
+            "h": 4
+          },
+          "targets": [
+            {
+              "expr": "sum(bedrock:project_vm_vcpu:sum)",
+              "legendFormat": "vcpus",
+              "refId": "A",
+              "datasource": {
+                "type": "prometheus",
+                "uid": "prometheus"
+              }
+            }
+          ]
+        },
+        {
+          "id": 11,
+          "title": "Memory",
+          "type": "stat",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "gridPos": {
+            "x": 12,
+            "y": 0,
+            "w": 6,
+            "h": 4
+          },
+          "targets": [
+            {
+              "expr": "sum(bedrock:project_vm_memory_bytes:sum)",
+              "legendFormat": "memory",
+              "refId": "A",
+              "datasource": {
+                "type": "prometheus",
+                "uid": "prometheus"
+              }
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "bytes"
+            },
+            "overrides": []
+          }
+        },
+        {
+          "id": 12,
+          "title": "Volume bytes",
+          "type": "stat",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "gridPos": {
+            "x": 18,
+            "y": 0,
+            "w": 6,
+            "h": 4
+          },
+          "targets": [
+            {
+              "expr": "sum(bedrock:project_volume_requested_bytes:sum)",
+              "legendFormat": "volumes",
+              "refId": "A",
+              "datasource": {
+                "type": "prometheus",
+                "uid": "prometheus"
+              }
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "bytes"
+            },
+            "overrides": []
+          }
+        },
+        {
+          "id": 13,
+          "title": "Projects",
+          "type": "stat",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "gridPos": {
+            "x": 0,
+            "y": 4,
+            "w": 6,
+            "h": 4
+          },
+          "targets": [
+            {
+              "expr": "count(kube_namespace_labels{label_bedrock_cloudyfolks_io_project!=\"\"})",
+              "legendFormat": "projects",
+              "refId": "A",
+              "datasource": {
+                "type": "prometheus",
+                "uid": "prometheus"
+              }
+            }
+          ]
+        },
+        {
+          "id": 14,
+          "title": "Usage by project",
+          "type": "table",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "gridPos": {
+            "x": 0,
+            "y": 8,
+            "w": 24,
+            "h": 9
+          },
+          "targets": [
+            {
+              "expr": "bedrock:project_vm_running:count",
+              "legendFormat": "bedrock:project_vm_running:count",
+              "instant": true,
+              "format": "table",
+              "refId": "A",
+              "datasource": {
+                "type": "prometheus",
+                "uid": "prometheus"
+              }
+            },
+            {
+              "expr": "bedrock:project_vm_vcpu:sum",
+              "legendFormat": "bedrock:project_vm_vcpu:sum",
+              "instant": true,
+              "format": "table",
+              "refId": "B",
+              "datasource": {
+                "type": "prometheus",
+                "uid": "prometheus"
+              }
+            },
+            {
+              "expr": "bedrock:project_vm_memory_bytes:sum",
+              "legendFormat": "bedrock:project_vm_memory_bytes:sum",
+              "instant": true,
+              "format": "table",
+              "refId": "C",
+              "datasource": {
+                "type": "prometheus",
+                "uid": "prometheus"
+              }
+            },
+            {
+              "expr": "bedrock:project_volume_requested_bytes:sum",
+              "legendFormat": "bedrock:project_volume_requested_bytes:sum",
+              "instant": true,
+              "format": "table",
+              "refId": "D",
+              "datasource": {
+                "type": "prometheus",
+                "uid": "prometheus"
+              }
+            },
+            {
+              "expr": "bedrock:project_vm_cpu_usage_cores:rate5m",
+              "legendFormat": "bedrock:project_vm_cpu_usage_cores:rate5m",
+              "instant": true,
+              "format": "table",
+              "refId": "E",
+              "datasource": {
+                "type": "prometheus",
+                "uid": "prometheus"
+              }
+            },
+            {
+              "expr": "bedrock:project_vm_network_receive_bytes:rate5m",
+              "legendFormat": "bedrock:project_vm_network_receive_bytes:rate5m",
+              "instant": true,
+              "format": "table",
+              "refId": "F",
+              "datasource": {
+                "type": "prometheus",
+                "uid": "prometheus"
+              }
+            },
+            {
+              "expr": "bedrock:project_vm_network_transmit_bytes:rate5m",
+              "legendFormat": "bedrock:project_vm_network_transmit_bytes:rate5m",
+              "instant": true,
+              "format": "table",
+              "refId": "G",
+              "datasource": {
+                "type": "prometheus",
+                "uid": "prometheus"
+              }
+            }
+          ],
+          "transformations": [
+            {
+              "id": "merge",
+              "options": {}
+            }
+          ]
+        },
+        {
+          "id": 15,
+          "title": "Top 10 projects by CPU",
+          "type": "bargauge",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "gridPos": {
+            "x": 0,
+            "y": 17,
+            "w": 12,
+            "h": 8
+          },
+          "targets": [
+            {
+              "expr": "topk(10, bedrock:project_vm_cpu_usage_cores:rate5m)",
+              "legendFormat": "{{tenant}}/{{project}}",
+              "instant": true,
+              "refId": "A",
+              "datasource": {
+                "type": "prometheus",
+                "uid": "prometheus"
+              }
+            }
+          ]
+        },
+        {
+          "id": 16,
+          "title": "Top 10 projects by network transmit",
+          "type": "bargauge",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "gridPos": {
+            "x": 12,
+            "y": 17,
+            "w": 12,
+            "h": 8
+          },
+          "targets": [
+            {
+              "expr": "topk(10, bedrock:project_vm_network_transmit_bytes:rate5m)",
+              "legendFormat": "{{tenant}}/{{project}}",
+              "instant": true,
+              "refId": "A",
+              "datasource": {
+                "type": "prometheus",
+                "uid": "prometheus"
+              }
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "Bps"
+            },
+            "overrides": []
+          }
+        }
+      ]
+    }

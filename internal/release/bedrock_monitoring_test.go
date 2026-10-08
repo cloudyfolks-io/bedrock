@@ -135,3 +135,105 @@ func TestMeteringRulesReachTheBuiltStack(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+func dashboardPanels(t *testing.T, name string) (map[string]any, []any) {
+	t.Helper()
+	config := objectNamed(sourceObjects(t), "ConfigMap", name)
+	if config == nil {
+		t.Fatalf("missing ConfigMap %s", name)
+	}
+	if config.GetLabels()["grafana_dashboard"] != "1" || config.GetNamespace() != "monitoring" {
+		t.Fatalf("%s labels %v", name, config.GetLabels())
+	}
+	data, _, _ := unstructured.NestedStringMap(config.Object, "data")
+	if len(data) != 1 {
+		t.Fatalf("%s data keys %d", name, len(data))
+	}
+	for _, raw := range data {
+		var parsed map[string]any
+		if err := json.Unmarshal([]byte(raw), &parsed); err != nil {
+			t.Fatalf("%s: %v", name, err)
+		}
+		return parsed, parsed["panels"].([]any)
+	}
+	return nil, nil
+}
+
+func dashboardExprs(t *testing.T) []string {
+	t.Helper()
+	var exprs []string
+	for _, name := range []string{"bedrock-dashboard-vms", "bedrock-dashboard-tenants"} {
+		parsed, panels := dashboardPanels(t, name)
+		for _, item := range panels {
+			for _, target := range item.(map[string]any)["targets"].([]any) {
+				exprs = append(exprs, target.(map[string]any)["expr"].(string))
+			}
+		}
+		templating, _ := parsed["templating"].(map[string]any)
+		variables, _ := templating["list"].([]any)
+		for _, item := range variables {
+			exprs = append(exprs, item.(map[string]any)["query"].(map[string]any)["query"].(string))
+		}
+	}
+	return exprs
+}
+
+func TestDashboardsAreValidAndLabelled(t *testing.T) {
+	want := map[string]string{"bedrock-dashboard-vms": "bedrock-vms", "bedrock-dashboard-tenants": "bedrock-tenants"}
+	seen := map[string]bool{}
+	for name, uid := range want {
+		parsed, panels := dashboardPanels(t, name)
+		if parsed["uid"] != uid || seen[uid] {
+			t.Errorf("%s uid %v", name, parsed["uid"])
+		}
+		seen[uid] = true
+		if title, _ := parsed["title"].(string); !strings.HasPrefix(title, "Bedrock / ") {
+			t.Errorf("%s title %q", name, title)
+		}
+		if parsed["schemaVersion"].(float64) < 39 || parsed["refresh"] != "1m" || parsed["time"].(map[string]any)["from"] != "now-6h" {
+			t.Errorf("%s time settings", name)
+		}
+		for _, item := range panels {
+			panel := item.(map[string]any)
+			if panel["datasource"].(map[string]any)["uid"] != "prometheus" {
+				t.Errorf("%s panel %v datasource", name, panel["title"])
+			}
+			for _, target := range panel["targets"].([]any) {
+				entry := target.(map[string]any)
+				if expr, _ := entry["expr"].(string); expr == "" {
+					t.Errorf("%s panel %v has an empty expr", name, panel["title"])
+				}
+				if entry["datasource"].(map[string]any)["uid"] != "prometheus" {
+					t.Errorf("%s panel %v target datasource", name, panel["title"])
+				}
+			}
+		}
+	}
+}
+
+func TestDashboardsUseKnownMetrics(t *testing.T) {
+	allowed := append(slices.Clone(sourceMetrics), meteringSeries...)
+	allowed = append(allowed,
+		"kubevirt_vmi_vcpu_delay_seconds_total",
+		"kubevirt_vmi_memory_resident_bytes",
+		"kubevirt_vmi_storage_read_traffic_bytes_total",
+		"kubevirt_vmi_storage_write_traffic_bytes_total",
+		"kube_namespace_status_phase",
+	)
+	identifier := regexp.MustCompile(`\b(?:kubevirt_|kube_)[a-z0-9_]+|\bbedrock:[a-z0-9_:]+`)
+	for _, expr := range dashboardExprs(t) {
+		for _, metric := range identifier.FindAllString(expr, -1) {
+			if !slices.Contains(allowed, metric) {
+				t.Errorf("unknown metric %s in %s", metric, expr)
+			}
+		}
+	}
+}
+
+func TestDashboardsSelectProjectsThroughTheNamespaceLabels(t *testing.T) {
+	for _, expr := range dashboardExprs(t) {
+		if strings.Contains(expr, "namespace=") || strings.Contains(expr, "namespace=~") {
+			t.Errorf("namespace name matcher in %s", expr)
+		}
+	}
+}
