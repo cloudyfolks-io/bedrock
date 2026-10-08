@@ -21,6 +21,10 @@ const AddonsPage = lazy(() => import("../pages/admin/AddonsPage"));
 const TenantDetailPage = lazy(() => import("../pages/admin/TenantDetailPage"));
 const VmsPage = lazy(() => import("../pages/project/VmsPage"));
 const VmDetailPage = lazy(() => import("../pages/project/VmDetailPage"));
+const VolumesPage = lazy(() => import("../pages/project/VolumesPage"));
+const SnapshotsPage = lazy(() => import("../pages/project/SnapshotsPage"));
+const ImagesPage = lazy(() => import("../pages/project/ImagesPage"));
+const BackupsPage = lazy(() => import("../pages/project/BackupsPage"));
 const SettingsPage = lazy(() => import("../pages/admin/SettingsPage"));
 
 const listPages: Record<string, (def: ResourceDef) => ReactElement> = {
@@ -29,6 +33,10 @@ const listPages: Record<string, (def: ResourceDef) => ReactElement> = {
   "admin/upgrades": () => <UpgradesPage />,
   "admin/addons": () => <AddonsPage />,
   "project/vms": () => <VmsPage />,
+  "project/volumes": () => <VolumesPage />,
+  "project/snapshots": () => <SnapshotsPage />,
+  "project/images": () => <ImagesPage />,
+  "project/backups": () => <BackupsPage />,
 };
 
 const detailPages: Record<string, (def: ResourceDef) => ReactElement> = {

@@ -52,6 +52,30 @@ msgstr "Save values"
 msgid "app.title"
 msgstr "Bedrock"
 
+msgid "backups.history"
+msgstr "Backups of {0}"
+
+msgid "backups.restore.confirm"
+msgstr "Restore"
+
+msgid "backups.restore.done"
+msgstr "Restore started"
+
+msgid "backups.restore.id"
+msgstr "Backup"
+
+msgid "backups.restore.replace"
+msgstr "Replace the existing machine"
+
+msgid "backups.restore.target"
+msgstr "The restored machine is named"
+
+msgid "backups.restore.title"
+msgstr "Restore {0}"
+
+msgid "backups.restore.typed"
+msgstr "Type {vmRef} to confirm"
+
 msgid "col.address"
 msgstr "Address"
 
@@ -508,6 +532,27 @@ msgstr "Maintenance window"
 msgid "hosts.help"
 msgstr "Hosts join the cluster with the command"
 
+msgid "images.tab.catalog"
+msgstr "Catalog"
+
+msgid "images.tab.project"
+msgstr "Project images"
+
+msgid "images.upload.done"
+msgstr "Upload finished"
+
+msgid "images.upload.file"
+msgstr "Disk image file"
+
+msgid "images.upload.progress"
+msgstr "Upload progress"
+
+msgid "images.upload.start"
+msgstr "Upload"
+
+msgid "images.upload.title"
+msgstr "Upload {0}"
+
 msgid "list.actions.header"
 msgstr "Actions"
 
@@ -805,6 +850,12 @@ msgstr "User menu"
 msgid "shell.userMenu.signOut"
 msgstr "Sign out"
 
+msgid "snapshots.restore.done"
+msgstr "Volume {name} created"
+
+msgid "snapshots.restore.title"
+msgstr "Restore to a new volume"
+
 msgid "status.condition.none"
 msgstr "No status"
 
@@ -973,6 +1024,15 @@ msgstr "Upgrade phases"
 msgid "upgrades.window"
 msgstr "Maintenance window"
 
+msgid "validate.cron"
+msgstr "Use a cron schedule with five fields, for example 0 2 * * *"
+
+msgid "validate.privateKey"
+msgstr "This is a private key. Never paste it here. Paste the public key."
+
+msgid "validate.publicKey"
+msgstr "A public key starts with ssh-ed25519, ssh-rsa or ecdsa-sha2-"
+
 msgid "vmDetail.bus"
 msgstr "Bus"
 
@@ -1023,3 +1083,18 @@ msgstr "Phase"
 
 msgid "vms.installIso"
 msgstr "Install from ISO"
+
+msgid "volumes.expand.confirm"
+msgstr "Expand"
+
+msgid "volumes.expand.description"
+msgstr "A volume can only grow."
+
+msgid "volumes.expand.error"
+msgstr "Choose a size above {current} GiB"
+
+msgid "volumes.expand.size"
+msgstr "New size (GiB)"
+
+msgid "volumes.expand.title"
+msgstr "Expand {0}"

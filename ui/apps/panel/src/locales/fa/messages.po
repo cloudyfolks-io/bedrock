@@ -52,6 +52,30 @@ msgstr "ذخیره مقادیر"
 msgid "app.title"
 msgstr "بدراک"
 
+msgid "backups.history"
+msgstr "پشتیبان‌های {0}"
+
+msgid "backups.restore.confirm"
+msgstr "بازیابی"
+
+msgid "backups.restore.done"
+msgstr "بازیابی شروع شد"
+
+msgid "backups.restore.id"
+msgstr "پشتیبان"
+
+msgid "backups.restore.replace"
+msgstr "جایگزینی ماشین موجود"
+
+msgid "backups.restore.target"
+msgstr "ماشین بازیابی‌شده با این نام است"
+
+msgid "backups.restore.title"
+msgstr "بازیابی {0}"
+
+msgid "backups.restore.typed"
+msgstr "برای تأیید {vmRef} را بنویسید"
+
 msgid "col.address"
 msgstr "نشانی"
 
@@ -508,6 +532,27 @@ msgstr "بازه نگهداری"
 msgid "hosts.help"
 msgstr "میزبان‌ها با این دستور به خوشه می‌پیوندند"
 
+msgid "images.tab.catalog"
+msgstr "کاتالوگ"
+
+msgid "images.tab.project"
+msgstr "تصاویر پروژه"
+
+msgid "images.upload.done"
+msgstr "بارگذاری تمام شد"
+
+msgid "images.upload.file"
+msgstr "فایل تصویر دیسک"
+
+msgid "images.upload.progress"
+msgstr "پیشرفت بارگذاری"
+
+msgid "images.upload.start"
+msgstr "بارگذاری"
+
+msgid "images.upload.title"
+msgstr "بارگذاری {0}"
+
 msgid "list.actions.header"
 msgstr "عملیات"
 
@@ -805,6 +850,12 @@ msgstr "منوی کاربر"
 msgid "shell.userMenu.signOut"
 msgstr "خروج"
 
+msgid "snapshots.restore.done"
+msgstr "حجم {name} ایجاد شد"
+
+msgid "snapshots.restore.title"
+msgstr "بازیابی به حجم جدید"
+
 msgid "status.condition.none"
 msgstr "بدون وضعیت"
 
@@ -973,6 +1024,15 @@ msgstr "مراحل ارتقا"
 msgid "upgrades.window"
 msgstr "بازه نگهداری"
 
+msgid "validate.cron"
+msgstr "از زمان‌بندی cron با پنج فیلد استفاده کنید، مثلاً 0 2 * * *"
+
+msgid "validate.privateKey"
+msgstr "این یک کلید خصوصی است. هرگز آن را اینجا نچسبانید. کلید عمومی را بچسبانید."
+
+msgid "validate.publicKey"
+msgstr "کلید عمومی با ssh-ed25519، ssh-rsa یا ecdsa-sha2- شروع می‌شود"
+
 msgid "vmDetail.bus"
 msgstr "گذرگاه"
 
@@ -1023,3 +1083,18 @@ msgstr "مرحله"
 
 msgid "vms.installIso"
 msgstr "نصب از ISO"
+
+msgid "volumes.expand.confirm"
+msgstr "افزایش اندازه"
+
+msgid "volumes.expand.description"
+msgstr "حجم فقط می‌تواند بزرگ‌تر شود."
+
+msgid "volumes.expand.error"
+msgstr "اندازه‌ای بیش از {current} گیبی‌بایت انتخاب کنید"
+
+msgid "volumes.expand.size"
+msgstr "اندازه جدید (گیبی‌بایت)"
+
+msgid "volumes.expand.title"
+msgstr "افزایش اندازه {0}"

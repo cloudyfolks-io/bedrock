@@ -52,6 +52,30 @@ msgstr "حفظ القيم"
 msgid "app.title"
 msgstr "بيدروك"
 
+msgid "backups.history"
+msgstr "النسخ الاحتياطية لـ {0}"
+
+msgid "backups.restore.confirm"
+msgstr "استعادة"
+
+msgid "backups.restore.done"
+msgstr "بدأت الاستعادة"
+
+msgid "backups.restore.id"
+msgstr "النسخة الاحتياطية"
+
+msgid "backups.restore.replace"
+msgstr "استبدال الجهاز الحالي"
+
+msgid "backups.restore.target"
+msgstr "اسم الجهاز المستعاد هو"
+
+msgid "backups.restore.title"
+msgstr "استعادة {0}"
+
+msgid "backups.restore.typed"
+msgstr "اكتب {vmRef} للتأكيد"
+
 msgid "col.address"
 msgstr "العنوان"
 
@@ -508,6 +532,27 @@ msgstr "نافذة الصيانة"
 msgid "hosts.help"
 msgstr "تنضم المضيفات إلى العنقود بالأمر"
 
+msgid "images.tab.catalog"
+msgstr "الفهرس"
+
+msgid "images.tab.project"
+msgstr "صور المشروع"
+
+msgid "images.upload.done"
+msgstr "اكتمل الرفع"
+
+msgid "images.upload.file"
+msgstr "ملف صورة القرص"
+
+msgid "images.upload.progress"
+msgstr "تقدم الرفع"
+
+msgid "images.upload.start"
+msgstr "رفع"
+
+msgid "images.upload.title"
+msgstr "رفع {0}"
+
 msgid "list.actions.header"
 msgstr "الإجراءات"
 
@@ -805,6 +850,12 @@ msgstr "قائمة المستخدم"
 msgid "shell.userMenu.signOut"
 msgstr "تسجيل الخروج"
 
+msgid "snapshots.restore.done"
+msgstr "تم إنشاء القرص {name}"
+
+msgid "snapshots.restore.title"
+msgstr "الاستعادة إلى قرص جديد"
+
 msgid "status.condition.none"
 msgstr "بلا حالة"
 
@@ -973,6 +1024,15 @@ msgstr "مراحل الترقية"
 msgid "upgrades.window"
 msgstr "نافذة الصيانة"
 
+msgid "validate.cron"
+msgstr "استخدم جدول cron من خمسة حقول، مثل 0 2 * * *"
+
+msgid "validate.privateKey"
+msgstr "هذا مفتاح خاص. لا تلصقه هنا أبدًا. الصق المفتاح العام."
+
+msgid "validate.publicKey"
+msgstr "يبدأ المفتاح العام بـ ssh-ed25519 أو ssh-rsa أو ecdsa-sha2-"
+
 msgid "vmDetail.bus"
 msgstr "الناقل"
 
@@ -1023,3 +1083,18 @@ msgstr "المرحلة"
 
 msgid "vms.installIso"
 msgstr "التثبيت من ISO"
+
+msgid "volumes.expand.confirm"
+msgstr "توسيع"
+
+msgid "volumes.expand.description"
+msgstr "يمكن للقرص أن يكبر فقط."
+
+msgid "volumes.expand.error"
+msgstr "اختر حجمًا أكبر من {current} GiB"
+
+msgid "volumes.expand.size"
+msgstr "الحجم الجديد (GiB)"
+
+msgid "volumes.expand.title"
+msgstr "توسيع {0}"

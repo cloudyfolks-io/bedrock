@@ -4,7 +4,9 @@ import type { ResourceRef } from "../api/kube";
 import type { KubeObject } from "../api/types";
 import { bedrockGroup } from "../stream/protocol";
 import { columnsByPlural, type ColumnDef } from "./columns";
+import type { UiSchema } from "@rjsf/utils";
 import { actionStates, type VmAction } from "./vmActionStates";
+import { validateBackup, validateSshKey, type SpecValidator } from "./validators";
 
 export type Section = "Infrastructure" | "Platform" | "Tenancy" | "Catalog" | "Compute" | "Storage" | "Networking" | "Object storage";
 export type Perspective = "admin" | "project";
@@ -35,6 +37,8 @@ export interface ResourceDef {
   create: boolean;
   edit: boolean;
   createPath?: string;
+  validate?: SpecValidator;
+  uiSchema?: UiSchema;
 }
 
 const always = () => true;
@@ -83,6 +87,8 @@ interface Row {
   edit: boolean;
   actions: ActionDef[];
   createPath?: string;
+  validate?: SpecValidator;
+  uiSchema?: UiSchema;
 }
 
 const t = {
@@ -108,7 +114,7 @@ const t = {
   objectUsers: msg({ id: "nav.item.objectUsers", message: "Object storage users" }),
 };
 
-function row(r: Omit<Row, "actions" | "createPath"> & { actions?: ActionDef[]; createPath?: string }): Row {
+function row(r: Omit<Row, "actions" | "createPath" | "validate" | "uiSchema"> & { actions?: ActionDef[]; createPath?: string; validate?: SpecValidator; uiSchema?: UiSchema }): Row {
   return { actions: [], ...r };
 }
 
@@ -123,11 +129,11 @@ const rows: Row[] = [
   row({ kind: "ClusterImage", plural: "clusterimages", scope: "Cluster", perspective: "admin", section: "Catalog", path: "cluster-images", title: t.clusterImages, create: true, edit: true, actions: [del("simple")] }),
   row({ kind: "Network", plural: "networks", scope: "Cluster", perspective: "project", section: "Networking", path: "networks", title: t.networks, create: true, edit: true, actions: [del("typed")] }),
   row({ kind: "VirtualMachine", plural: "virtualmachines", scope: "Namespaced", perspective: "project", section: "Compute", path: "vms", title: t.vms, create: true, edit: true, actions: vmActions, createPath: "vms/new" }),
-  row({ kind: "SSHKey", plural: "sshkeys", scope: "Namespaced", perspective: "project", section: "Compute", path: "ssh-keys", title: t.sshKeys, create: true, edit: false, actions: [del("simple")] }),
+  row({ kind: "SSHKey", plural: "sshkeys", scope: "Namespaced", perspective: "project", section: "Compute", path: "ssh-keys", title: t.sshKeys, create: true, edit: false, actions: [del("simple")], validate: validateSshKey, uiSchema: { publicKey: { "ui:widget": "textarea" } } }),
   row({ kind: "Volume", plural: "volumes", scope: "Namespaced", perspective: "project", section: "Storage", path: "volumes", title: t.volumes, create: true, edit: true, actions: [del("typed")] }),
   row({ kind: "VolumeSnapshot", plural: "volumesnapshots", scope: "Namespaced", perspective: "project", section: "Storage", path: "snapshots", title: t.snapshots, create: true, edit: false, actions: [del("simple")] }),
   row({ kind: "Image", plural: "images", scope: "Namespaced", perspective: "project", section: "Storage", path: "images", title: t.images, create: true, edit: false, actions: [del("simple")] }),
-  row({ kind: "VirtualMachineBackup", plural: "virtualmachinebackups", scope: "Namespaced", perspective: "project", section: "Storage", path: "backups", title: t.backups, create: true, edit: true, actions: [del("simple")] }),
+  row({ kind: "VirtualMachineBackup", plural: "virtualmachinebackups", scope: "Namespaced", perspective: "project", section: "Storage", path: "backups", title: t.backups, create: true, edit: true, actions: [del("simple")], validate: validateBackup }),
   row({ kind: "VirtualMachineRestore", plural: "virtualmachinerestores", scope: "Namespaced", perspective: "project", section: "Storage", path: "backups", title: t.backups, create: false, edit: false, actions: [del("simple")] }),
   row({ kind: "Subnet", plural: "subnets", scope: "Namespaced", perspective: "project", section: "Networking", path: "subnets", title: t.subnets, create: true, edit: true, actions: [del("simple")] }),
   row({ kind: "ElasticIP", plural: "elasticips", scope: "Namespaced", perspective: "project", section: "Networking", path: "elastic-ips", title: t.elasticIps, create: true, edit: true, actions: [del("typed")] }),
@@ -153,6 +159,8 @@ export const definitions: ResourceDef[] = rows.map((r) => ({
   create: r.create,
   edit: r.edit,
   ...(r.createPath === undefined ? {} : { createPath: r.createPath }),
+  ...(r.validate === undefined ? {} : { validate: r.validate }),
+  ...(r.uiSchema === undefined ? {} : { uiSchema: r.uiSchema }),
 }));
 
 export const notShown: readonly string[] = ["HostConfig", "ClusterConfig", "NodeUpgrade"];

@@ -82,6 +82,11 @@ export function CreateResourceDialog({ def, onClose, initialSpec, lockedPaths = 
   const namespace = def.scope === "Namespaced" ? project?.namespace : undefined;
 
   async function submit(spec: Record<string, unknown>) {
+    const problems = def.validate?.(spec) ?? [];
+    if (problems.length > 0) {
+      setErrors({ ...noErrors, extraErrors: causesToErrors(problems.map((problem) => ({ field: problem.field, message: i18n._(problem.message) }))) });
+      return;
+    }
     if (!dnsLabel.test(name) || name.length > 63) {
       setErrors({ ...noErrors, nameError: t({ id: "forms.name.invalid", message: "Use lowercase letters, digits and hyphens. Start and end with a letter or digit." }) });
       return;
@@ -139,7 +144,7 @@ export function CreateResourceDialog({ def, onClose, initialSpec, lockedPaths = 
           />
           <CreateForm
             schema={form.schema}
-            uiSchema={markReadonly(form.uiSchema, lockedPaths)}
+            uiSchema={markReadonly({ ...form.uiSchema, ...def.uiSchema }, lockedPaths)}
             formData={initialSpec}
             onSubmit={(spec) => void submit(spec)}
             extraErrors={errors.extraErrors}
@@ -160,7 +165,7 @@ interface EditProps {
 }
 
 function EditBody({ def, object, onClose }: EditProps) {
-  const { t } = useLingui();
+  const { t, i18n } = useLingui();
   const http = useHttp();
   const toast = useToast();
   const queryClient = useQueryClient();
@@ -179,6 +184,11 @@ function EditBody({ def, object, onClose }: EditProps) {
   const handle = useWriteHandling();
 
   async function submit(spec: Record<string, unknown>) {
+    const problems = def.validate?.(spec) ?? [];
+    if (problems.length > 0) {
+      setErrors({ ...noErrors, extraErrors: causesToErrors(problems.map((problem) => ({ field: problem.field, message: i18n._(problem.message) }))) });
+      return;
+    }
     const base = latest.data ?? object;
     const body: KubeObject = { apiVersion: `${def.group}/${def.version}`, kind: def.kind, metadata: base.metadata, spec };
     setBusy(true);
@@ -221,7 +231,7 @@ function EditBody({ def, object, onClose }: EditProps) {
       {ready ? (
         <EditForm
           schema={form.schema}
-          uiSchema={form.uiSchema}
+          uiSchema={{ ...form.uiSchema, ...def.uiSchema }}
           immutable={form.immutable}
           formData={(latest.data?.spec ?? {}) as Record<string, unknown>}
           onSubmit={(spec) => void submit(spec)}

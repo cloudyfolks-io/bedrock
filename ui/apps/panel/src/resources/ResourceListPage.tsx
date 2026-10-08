@@ -60,9 +60,13 @@ interface ListExtras {
   toolbar?: ReactNode;
   actions?: ReactNode | ((context: { canCreate: boolean; project: Project | undefined }) => ReactNode);
   itemFilter?: (object: KubeObject) => boolean;
+  readOnly?: boolean;
+  embedded?: boolean;
+  rowItems?: (object: KubeObject) => { id: string; label: string; onSelect: () => void; disabled?: boolean }[];
+  children?: ReactNode;
 }
 
-function ListBody({ def, namespace, project, help = null, toolbar = null, actions = null, itemFilter }: { def: ResourceDef; namespace: string | undefined; project: Project | undefined } & ListExtras) {
+function ListBody({ def, namespace, project, help = null, toolbar = null, actions = null, itemFilter, readOnly = false, embedded = false, rowItems: extraRowItems, children = null }: { def: ResourceDef; namespace: string | undefined; project: Project | undefined } & ListExtras) {
   const { t, i18n } = useLingui();
   const { locale } = useLocale();
   const query = useLiveList(refOf(def), namespace === undefined ? {} : { namespace });
@@ -73,8 +77,8 @@ function ListBody({ def, namespace, project, help = null, toolbar = null, action
   const [sort, setSort] = useState<SortState>({ id: "name", direction: "ascending" });
   const [creating, setCreating] = useState(false);
   const [editing, setEditing] = useState<KubeObject | undefined>();
-  const canCreate = def.create && access[0] === "allowed";
-  const context: ColumnContext = { locale, now: new Date(), detailPath: detailPathFor(def, project) };
+  const canCreate = !readOnly && def.create && access[0] === "allowed";
+  const context: ColumnContext = { locale, now: new Date(), detailPath: readOnly ? () => undefined : detailPathFor(def, project), ...(project ? { project: project.name } : {}) };
   const title = i18n._(def.title);
 
   const items = useMemo(() => {
@@ -95,7 +99,12 @@ function ListBody({ def, namespace, project, help = null, toolbar = null, action
   );
 
   const breadcrumbs = project ? [{ label: project.displayName || project.name }, { label: title }] : undefined;
-  const header = (
+  const header = embedded ? (
+    <div className="br-page-title-row">
+      <h2>{title}</h2>
+      {createButton}
+    </div>
+  ) : (
     <>
       <PageHeader title={title} {...(breadcrumbs ? { breadcrumbs } : {})} actions={<>{typeof actions === "function" ? actions({ canCreate, project }) : actions}{createButton}</>} />
       {help}
@@ -148,8 +157,11 @@ function ListBody({ def, namespace, project, help = null, toolbar = null, action
           ]
         : [],
     );
+    if (readOnly) {
+      return [];
+    }
     const editItem = def.edit && access[1] === "allowed" ? [{ id: "edit", label: t({ id: "common.action.edit", message: "Edit" }), tone: "neutral" as const, onSelect: () => setEditing(object) }] : [];
-    return [...editItem, ...actionItems];
+    return [...editItem, ...(extraRowItems?.(object).map((entry) => ({ ...entry, tone: "neutral" as const })) ?? []), ...actionItems];
   }
 
   const empty = (query.data?.items.length ?? 0) === 0;
@@ -201,6 +213,7 @@ function ListBody({ def, namespace, project, help = null, toolbar = null, action
         </Table>
       )}
       {runner.dialogs}
+      {children}
       {creating ? <LazyCreateDialog def={def} onClose={() => setCreating(false)} /> : null}
       {editing ? <LazyEditDialog def={def} object={editing} onClose={() => setEditing(undefined)} /> : null}
     </>

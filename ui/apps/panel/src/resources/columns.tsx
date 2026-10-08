@@ -15,6 +15,7 @@ export interface ColumnContext {
   locale: Locale;
   now: Date;
   detailPath: (object: KubeObject) => string | undefined;
+  project?: string;
 }
 
 export interface ColumnDef {
@@ -243,7 +244,7 @@ export const columnsByPlural: Record<string, ColumnDef[]> = {
     { id: "keyType", label: L.keyType, render: (object) => textAt(object, "spec.publicKey").split(" ")[0] || dash, sortValue: (object) => textAt(object, "spec.publicKey").split(" ")[0] ?? "" },
     age,
   ],
-  volumes: [name, phase, gi("size", L.size, "spec.sizeGi"), text("storageClass", L.storageClass, "spec.storageClass"), text("attachedTo", L.attachedTo, "status.attachedTo"), { id: "source", label: L.source, render: (object) => sourceSummary(object) || dash, sortValue: sourceSummary }],
+  volumes: [name, phase, gi("size", L.size, "spec.sizeGi"), text("storageClass", L.storageClass, "spec.storageClass"), { id: "attachedTo", label: L.attachedTo, render: (object, context) => (textAt(object, "status.attachedTo") ? (context.project ? <Link to={`/p/${context.project}/vms/${textAt(object, "status.attachedTo")}`}>{textAt(object, "status.attachedTo")}</Link> : textAt(object, "status.attachedTo")) : dash), sortValue: (object) => textAt(object, "status.attachedTo") }, { id: "source", label: L.source, render: (object) => sourceSummary(object) || dash, sortValue: sourceSummary }],
   volumesnapshots: [name, text("volume", L.volume, "spec.volumeRef"), phase, text("retention", L.retention, "spec.retention"), age],
   images: [name, typeBadge, phase, { id: "os", label: L.os, render: (object) => osSummary(object) || dash, sortValue: osSummary }, sizeBytes("size", L.size, "status.sizeBytes"), ltrText("digest", L.digest, "status.digest")],
   virtualmachinebackups: [name, text("vm", L.vm, "spec.vmRef"), text("target", L.backupTarget, "spec.target"), ltrText("schedule", L.schedule, "spec.schedule"), text("keep", L.keep, "spec.keep"), phase],
