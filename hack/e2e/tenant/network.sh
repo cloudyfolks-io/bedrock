@@ -4,6 +4,7 @@ fabric_by_label() {
 }
 
 network_underlay() {
+  underlay_is_ready
   wait_jsonpath 180 true get providernetworks.fabric.cloudyfolks.io public -o jsonpath='{.status.ready}'
   expect_equal 0 "$(kubectl get vlans.fabric.cloudyfolks.io public -o jsonpath='{.spec.id}')" "vlan id"
   expect_equal "192.0.2.0/24 public" "$(kubectl get subnets.fabric.cloudyfolks.io provider-public -o jsonpath='{.spec.cidrBlock} {.spec.vlan}')" "provider subnet"

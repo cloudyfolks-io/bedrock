@@ -168,18 +168,61 @@ as_user() {
   kubectl --as="bedrock:$user" "$@"
 }
 
-osd_device_blank() {
+disk_is_blank() {
+  local disk=$1
+  [ -b "$disk" ] || return 1
+  [ -z "$(lsblk -dno PTTYPE "$disk")" ] || return 1
+  [ -z "$(lsblk -dno FSTYPE "$disk")" ] || return 1
+  [ "$(lsblk -nro NAME "$disk" | wc -l)" -eq 1 ] || return 1
+  [ -z "$(wipefs -n "$disk")" ] || return 1
+  [ -z "$(findmnt -rn -S "$disk")" ] || return 1
+}
+
+blank_disks() {
   local disk
-  for disk in $(lsblk -dnpo NAME,TYPE,RO,FSTYPE | awk '$2 == "disk" && $3 == 0 && NF == 3 {print $1}'); do
-    if [ "$(lsblk -nro NAME "$disk" | wc -l)" -eq 1 ]; then
+  for disk in $(lsblk -dnpo NAME,TYPE,RO | awk '$2 == "disk" && $3 == 0 {print $1}'); do
+    if disk_is_blank "$disk"; then
       echo "$disk"
-      return
     fi
   done
 }
 
+osd_device_blank() {
+  local candidates count
+  candidates=$(blank_disks)
+  count=$(echo "$candidates" | grep -c . || true)
+  if [ "$count" -ne 1 ]; then
+    echo "want exactly one blank disk, found $count: $candidates" >&2
+    return 1
+  fi
+  echo "$candidates"
+}
+
+osd_device_path() {
+  if ! disk_is_blank "$1"; then
+    echo "$1 is not a blank disk" >&2
+    return 1
+  fi
+  echo "$1"
+}
+
+osd_image() {
+  echo "${E2E_OSD_IMAGE:-/var/lib/bedrock/e2e-osd.img}"
+}
+
+osd_loop_remove() {
+  local image loop
+  image=$(osd_image)
+  for loop in $(losetup -j "$image" -O NAME -n 2>/dev/null); do
+    losetup -d "$loop" || true
+  done
+  rm -f "$image"
+}
+
 osd_device_loop() {
-  local image=${E2E_OSD_IMAGE:-/var/lib/bedrock/e2e-osd.img}
+  local image
+  image=$(osd_image)
+  osd_loop_remove
   mkdir -p "$(dirname "$image")"
   truncate -s "${E2E_OSD_LOOP_GIB:-40}G" "$image"
   losetup -f --show "$image"
@@ -190,7 +233,7 @@ resolve_osd_device() {
   "") ;;
   blank) osd_device_blank ;;
   loop) osd_device_loop ;;
-  *) echo "$E2E_OSD_DEVICE" ;;
+  *) osd_device_path "$E2E_OSD_DEVICE" ;;
   esac
 }
 
@@ -216,10 +259,22 @@ assert_storage_ready() {
   kubectl get volumesnapshotclass block
 }
 
-provider_underlay_up() {
-  if ip link show bdrpub0 >/dev/null 2>&1; then
-    return
+underlay_remove() {
+  if ip link show bdrpub0 >/dev/null 2>&1 && ! ip -d link show bdrpub0 | grep -qw veth; then
+    echo "bdrpub0 exists and is not a veth" >&2
+    return 1
   fi
+  ip netns del bdrext 2>/dev/null || true
+  ip link del bdrpub0 2>/dev/null || true
+}
+
+underlay_is_ready() {
+  ip -d link show bdrpub0 | grep -qw veth &&
+    ip -n bdrext -4 addr show dev bdrpub0p | grep -qw 192.0.2.250/24
+}
+
+provider_underlay_up() {
+  underlay_remove
   ip link add bdrpub0 type veth peer name bdrpub0p
   ip link set bdrpub0 up
   ip netns add bdrext
@@ -227,6 +282,12 @@ provider_underlay_up() {
   ip -n bdrext link set lo up
   ip -n bdrext link set bdrpub0p up
   ip -n bdrext addr add 192.0.2.250/24 dev bdrpub0p
+  underlay_is_ready
+}
+
+e2e_cleanup() {
+  underlay_remove || true
+  osd_loop_remove
 }
 
 provider_network_entry() {

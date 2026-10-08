@@ -84,6 +84,9 @@ dump() {
     echo "--- kernel oom"
     dmesg 2>/dev/null | grep -iE 'oom|killed process' | tail -20 || true
     journalctl -u k0scontroller --no-pager -n 200 || true
+    if [ -n "${E2E_OSD_DEVICE:-}${E2E_PROVIDER_NETWORK:-}" ]; then
+      e2e_cleanup
+    fi
   fi
   rm -rf "$workdir"
 }

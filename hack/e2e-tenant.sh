@@ -101,6 +101,7 @@ dump() {
     dump_cluster
     dump_workloads
   fi
+  e2e_cleanup
   rm -rf "$workdir"
 }
 trap dump EXIT
