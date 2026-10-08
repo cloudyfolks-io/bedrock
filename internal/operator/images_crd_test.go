@@ -63,3 +63,26 @@ func TestImageKindsValidation(t *testing.T) {
 	two.Spec.Source.HTTP = &v1alpha1.ImageHTTPSource{URL: "https://example.com/disk.qcow2"}
 	createInvalid(t, c, two, "exactly one source must be set")
 }
+
+func TestImageRefreshNeedsRegistry(t *testing.T) {
+	c, _ := StartTestEnv(t)
+
+	httpSpec := v1alpha1.ImageSpec{Source: v1alpha1.ImageSource{HTTP: &v1alpha1.ImageHTTPSource{URL: "https://example.com/disk.qcow2"}}}
+	withRefresh := httpSpec
+	withRefresh.Refresh = &v1alpha1.ImageRefresh{Schedule: "0 3 * * *"}
+
+	createInvalid(t, c, &v1alpha1.Image{ObjectMeta: metav1.ObjectMeta{Name: "http-refresh", Namespace: "default"}, Spec: withRefresh}, "refresh needs a registry source")
+	createValid(t, c, &v1alpha1.Image{ObjectMeta: metav1.ObjectMeta{Name: "http-plain", Namespace: "default"}, Spec: httpSpec})
+	createValid(t, c, &v1alpha1.Image{ObjectMeta: metav1.ObjectMeta{Name: "registry-refresh", Namespace: "default"}, Spec: registryImageSpec()})
+}
+
+func TestImageStatusProgress(t *testing.T) {
+	c, _ := StartTestEnv(t)
+
+	catalog := &v1alpha1.ClusterImage{ObjectMeta: metav1.ObjectMeta{Name: "progress"}, Spec: registryImageSpec()}
+	createValid(t, c, catalog)
+	catalog.Status.Progress = "42.5%"
+	if err := c.Status().Update(context.Background(), catalog); err != nil {
+		t.Fatalf("progress must be writable through the status subresource: %v", err)
+	}
+}

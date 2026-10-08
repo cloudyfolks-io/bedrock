@@ -34,6 +34,7 @@ const (
 	ConditionVirtualizationReady = "VirtualizationReady"
 	ConditionPlatformReady       = "PlatformReady"
 	ConditionAuthnReady          = "AuthnReady"
+	ConditionUploadReady         = "UploadReady"
 )
 
 type APISpec struct {

@@ -122,6 +122,9 @@ spec:
             required:
             - source
             type: object
+            x-kubernetes-validations:
+            - message: refresh needs a registry source
+              rule: '!has(self.refresh) || has(self.source.registry)'
           status:
             properties:
               conditions:
@@ -197,6 +200,8 @@ spec:
                 - Importing
                 - Ready
                 - Failed
+                type: string
+              progress:
                 type: string
               sizeBytes:
                 format: int64

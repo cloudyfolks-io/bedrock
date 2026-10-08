@@ -81,6 +81,7 @@ type ImageRefresh struct {
 	Keep int32 `json:"keep,omitempty"`
 }
 
+// +kubebuilder:validation:XValidation:rule="!has(self.refresh) || has(self.source.registry)",message="refresh needs a registry source"
 type ImageSpec struct {
 	// +kubebuilder:validation:Enum=disk;iso
 	// +kubebuilder:default=disk
@@ -116,6 +117,8 @@ type ImageStatus struct {
 	SizeBytes int64 `json:"sizeBytes,omitempty"`
 	// +optional
 	DataSource string `json:"dataSource,omitempty"`
+	// +optional
+	Progress string `json:"progress,omitempty"`
 	// +optional
 	UploadURL string `json:"uploadURL,omitempty"`
 	// +optional
