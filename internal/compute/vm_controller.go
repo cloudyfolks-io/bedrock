@@ -63,12 +63,15 @@ func (r *VirtualMachineReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 	if err != nil {
 		return ctrl.Result{}, err
 	}
-	expiring, err := r.pruneSnapshots(ctx, vm)
-	if err != nil {
-		return ctrl.Result{}, err
+	expiring := false
+	if _, held := vm.Annotations[AnnotationRestoreHold]; !held {
+		expiring, err = r.pruneSnapshots(ctx, vm)
+		if err != nil {
+			return ctrl.Result{}, err
+		}
 	}
 	if err := r.writeStatus(ctx, vm, done.Gate, obs); err != nil {
-		logf.FromContext(ctx).Error(err, "write the virtual machine status")
+		return ctrl.Result{}, fmt.Errorf("write the virtual machine status: %w", err)
 	}
 	return ctrl.Result{RequeueAfter: requeueAfter(done, obs, expiring)}, nil
 }
