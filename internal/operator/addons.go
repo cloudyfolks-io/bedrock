@@ -42,6 +42,7 @@ type AddonInput struct {
 	CustomCA       []byte
 	WebhookToken   string
 	AuthnInstalled bool
+	UploadProxyCA  []byte
 }
 
 type Probe struct {
@@ -131,7 +132,11 @@ func (r *AddonReconciler) input(ctx context.Context, cluster v1alpha1.Cluster) (
 	if err != nil {
 		return AddonInput{}, err
 	}
-	input := AddonInput{Cluster: cluster, Hosts: hosts.Items, Settings: values, Bundle: r.Bundle, PlatformCA: platformCA, WebhookToken: string(secretData(token, WebhookTokenKey)), AuthnInstalled: installed}
+	uploadProxyCA, err := optionalConfigMapData(ctx, r.Client, client.ObjectKey{Namespace: uploadNamespace, Name: uploadProxyCAConfigMap}, uploadProxyCAKey)
+	if err != nil {
+		return AddonInput{}, err
+	}
+	input := AddonInput{Cluster: cluster, Hosts: hosts.Items, Settings: values, Bundle: r.Bundle, PlatformCA: platformCA, WebhookToken: string(secretData(token, WebhookTokenKey)), AuthnInstalled: installed, UploadProxyCA: uploadProxyCA}
 	if values["platform.tls-mode"] != "Custom" || values["platform.custom-tls"] == "" {
 		return input, nil
 	}
@@ -154,6 +159,18 @@ func optionalSecret(ctx context.Context, c client.Reader, key client.ObjectKey) 
 		return nil, err
 	}
 	return &secret, nil
+}
+
+func optionalConfigMapData(ctx context.Context, c client.Reader, key client.ObjectKey, field string) ([]byte, error) {
+	var configMap corev1.ConfigMap
+	err := c.Get(ctx, key, &configMap)
+	if errors.IsNotFound(err) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return []byte(configMap.Data[field]), nil
 }
 
 func secretData(secret *corev1.Secret, key string) []byte {

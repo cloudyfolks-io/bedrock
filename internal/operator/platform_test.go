@@ -140,7 +140,7 @@ func TestRenderPlatformRejectsUnknownMode(t *testing.T) {
 
 func TestDefaultAddonsOrder(t *testing.T) {
 	addons := DefaultAddons()
-	if len(addons) != 4 || addons[0].Name != "storage" || addons[1].Name != "virtualization" || addons[2].Name != "platform" || addons[3].Name != "authn" {
+	if len(addons) != 5 || addons[0].Name != "storage" || addons[1].Name != "virtualization" || addons[2].Name != "platform" || addons[3].Name != "authn" || addons[4].Name != "upload" {
 		t.Fatalf("addons %+v", addons)
 	}
 	if addons[3].Condition != "AuthnReady" {

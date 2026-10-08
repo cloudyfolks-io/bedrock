@@ -16,7 +16,9 @@ func TestOperatorRoleCoversImages(t *testing.T) {
 		{"cdi.kubevirt.io", "datasources"},
 		{"cdi.kubevirt.io", "dataimportcrons"},
 		{"snapshot.storage.k8s.io", "volumesnapshots"},
+		{"traefik.io", "ingressroutes"},
 		{"traefik.io", "middlewares"},
+		{"traefik.io", "serverstransports"},
 		{"", "configmaps"},
 	} {
 		for _, verb := range full {
