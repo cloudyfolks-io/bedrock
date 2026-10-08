@@ -18,9 +18,11 @@ import (
 )
 
 const (
-	authnGroup         = "authn"
-	WebhookTokenKey    = "token"
-	webhookTokenLength = 32
+	authnGroup             = "authn"
+	WebhookTokenKey        = "token"
+	webhookTokenLength     = 32
+	consoleSecretLength    = 32
+	ConsoleClientSecretKey = "clientSecret"
 )
 
 func NewWebhookToken(random io.Reader) (string, error) {
@@ -46,7 +48,28 @@ func ensureAuthnMaterial(ctx context.Context, c client.Client, random io.Reader,
 		return err
 	}
 	tokenKey := client.ObjectKey{Namespace: release.SystemNamespace, Name: apiserver.TokenSecretName}
-	return createIfAbsent(ctx, c, tokenKey, func() (*corev1.Secret, error) { return newWebhookTokenSecret(random) })
+	if err := createIfAbsent(ctx, c, tokenKey, func() (*corev1.Secret, error) { return newWebhookTokenSecret(random) }); err != nil {
+		return err
+	}
+	consoleKey := client.ObjectKey{Namespace: release.SystemNamespace, Name: ConsoleSecretName}
+	return createIfAbsent(ctx, c, consoleKey, func() (*corev1.Secret, error) { return ConsoleClientSecret(random) })
+}
+
+func ConsoleClientSecret(random io.Reader) (*corev1.Secret, error) {
+	value, err := secret.Base62(random, consoleSecretLength)
+	if err != nil {
+		return nil, err
+	}
+	return &corev1.Secret{
+		TypeMeta: metav1.TypeMeta{APIVersion: "v1", Kind: "Secret"},
+		ObjectMeta: metav1.ObjectMeta{
+			Namespace: release.SystemNamespace,
+			Name:      ConsoleSecretName,
+			Labels:    map[string]string{v1alpha1.LabelAuthn: "true", v1alpha1.LabelKind: "ConsoleClientSecret", v1alpha1.LabelName: ConsoleSecretName},
+		},
+		Type: corev1.SecretTypeOpaque,
+		Data: map[string][]byte{ConsoleClientSecretKey: []byte(value)},
+	}, nil
 }
 
 func newCASecret(random io.Reader, now time.Time) (*corev1.Secret, error) {

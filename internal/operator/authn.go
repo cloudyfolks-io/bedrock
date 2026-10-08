@@ -17,8 +17,8 @@ import (
 const (
 	authnName          = "bedrock-authn"
 	cliClientID        = "bedrock-cli"
-	consoleClientID    = "bedrock-console"
-	consoleSecretName  = "bedrock-console-client"
+	ConsoleClientID    = "bedrock-console"
+	ConsoleSecretName  = "bedrock-console-client"
 	traefikAPIVersion  = "traefik.io/v1alpha1"
 	authnServicePort   = int64(443)
 	authnPlatformCAKey = "ca.crt"
@@ -88,12 +88,12 @@ func BuiltinClients(host string) []*unstructured.Unstructured {
 			"redirectURIs": []any{"http://127.0.0.1/callback"},
 			"grantTypes":   []any{v1alpha1.GrantAuthorizationCode, v1alpha1.GrantRefreshToken, v1alpha1.GrantDeviceCode},
 		}}),
-		authnObject(v1alpha1.GroupVersion.String(), "OAuthClient", consoleClientID, map[string]any{"spec": map[string]any{
-			"clientID":     consoleClientID,
+		authnObject(v1alpha1.GroupVersion.String(), "OAuthClient", ConsoleClientID, map[string]any{"spec": map[string]any{
+			"clientID":     ConsoleClientID,
 			"public":       false,
 			"redirectURIs": []any{"https://console." + host + "/oauth/callback"},
 			"grantTypes":   []any{v1alpha1.GrantAuthorizationCode, v1alpha1.GrantRefreshToken},
-			"secretRef":    consoleSecretName,
+			"secretRef":    ConsoleSecretName,
 		}}),
 	}
 }
