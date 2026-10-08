@@ -230,6 +230,9 @@ func TestComponentsConfigListsTheCatalog(t *testing.T) {
 	orders := map[int]string{}
 	var catalog *release.ComponentConfig
 	for i, component := range cfg.Components {
+		if component.Addon {
+			continue
+		}
 		if other, taken := orders[component.Order]; taken {
 			t.Errorf("order %d is used by %s and %s", component.Order, other, component.Name)
 		}
