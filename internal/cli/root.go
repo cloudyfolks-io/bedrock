@@ -24,6 +24,7 @@ func Commands() map[string]Command {
 		"restart-workloads": restartWorkloadsCommand,
 		"authn":             authnCommand,
 		"login":             loginCommand,
+		"proxy":             proxyCommand,
 	}
 }
 
