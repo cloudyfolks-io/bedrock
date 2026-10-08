@@ -16,34 +16,31 @@ spec:
         apiVersions: [v1]
         operations: [CREATE, UPDATE]
         resources: [pods]
-  matchConditions:
-    - name: requester-is-not-trusted
-      expression: >-
-        !(request.userInfo.username in [
-        'system:serviceaccount:kube-system:ovn',
-        'system:serviceaccount:kube-system:fabric-cni',
-        'system:serviceaccount:kubevirt:kubevirt-controller',
-        'system:serviceaccount:bedrock-system:bedrock-operator'])
   variables:
     - name: annotations
       expression: "has(object.metadata.annotations) ? object.metadata.annotations : {}"
     - name: previous
       expression: "oldObject != null && has(oldObject.metadata.annotations) ? oldObject.metadata.annotations : {}"
+    - name: added
+      expression: >-
+        variables.annotations.filter(k,
+        (k.startsWith('k8s.v1.cni.cncf.io/') || k.startsWith('v1.multus-cni.io/') || k.startsWith('ovn.kubernetes.io/') || k.contains('cloudyfolks.io/')) &&
+        (!(k in variables.previous) || variables.previous[k] != variables.annotations[k]))
+    - name: removed
+      expression: >-
+        variables.previous.filter(k,
+        (k.startsWith('k8s.v1.cni.cncf.io/') || k.startsWith('v1.multus-cni.io/') || k.startsWith('ovn.kubernetes.io/') || k.contains('cloudyfolks.io/')) &&
+        !(k in variables.annotations))
   validations:
     - expression: >-
-        ['k8s.v1.cni.cncf.io/networks', 'v1.multus-cni.io/default-network'].all(k,
-        !(k in variables.annotations) ||
-        (k in variables.previous && variables.previous[k] == variables.annotations[k]) ||
-        (!variables.annotations[k].contains('"namespace"') &&
-        variables.annotations[k].split(',').all(item, !item.contains('/') || item.startsWith(namespaceObject.metadata.name + '/'))))
-      message: "a pod may attach only to networks of its own namespace"
-      reason: Forbidden
-    - expression: >-
-        !variables.annotations.exists(k,
-        !(k in variables.previous && variables.previous[k] == variables.annotations[k]) &&
-        ['fabric.cloudyfolks.io/logical_switch', 'fabric.cloudyfolks.io/security_groups', 'fabric.cloudyfolks.io/ip_pool',
-        'fabric.cloudyfolks.io/logical_router', 'fabric.cloudyfolks.io/vpc'].exists(suffix, k.endsWith(suffix)))
-      message: "the annotation selects a Fabric object; only the platform may set it"
+        request.userInfo.username in [
+        'system:serviceaccount:kubevirt:kubevirt-controller',
+        'system:serviceaccount:kube-system:ovn',
+        'system:serviceaccount:kube-system:fabric-cni',
+        'system:serviceaccount:kube-system:multus',
+        'system:serviceaccount:bedrock-system:bedrock-operator'] ||
+        (size(variables.added) == 0 && size(variables.removed) == 0)
+      message: "only the platform may set network selection annotations"
       reason: Forbidden
 ---
 apiVersion: admissionregistration.k8s.io/v1

@@ -61,7 +61,7 @@ func newPodPolicyFixture(t *testing.T) podPolicyFixture {
 		ns:       ns,
 	}
 	probe := func() bool {
-		pod := podFor(ns, unique(t, "probe"), map[string]string{"fabric.cloudyfolks.io/logical_switch": "x"})
+		pod := podFor(ns, unique(t, "probe"), map[string]string{"ovn.kubernetes.io/logical_switch": "x"})
 		err := f.alice.Create(context.Background(), pod)
 		if err == nil {
 			_ = f.admin.Delete(context.Background(), pod)
@@ -72,14 +72,16 @@ func newPodPolicyFixture(t *testing.T) podPolicyFixture {
 	return f
 }
 
-func requirePodDenied(t *testing.T, c client.Client, pod *corev1.Pod, fragment string) {
+const platformOnly = "only the platform may set network selection annotations"
+
+func requirePodDenied(t *testing.T, c client.Client, pod *corev1.Pod) {
 	t.Helper()
 	err := c.Create(context.Background(), pod)
 	if err == nil {
 		t.Fatalf("pod %v must be denied", pod.Annotations)
 	}
-	if !strings.Contains(err.Error(), fragment) {
-		t.Fatalf("error %q must contain %q", err, fragment)
+	if !strings.Contains(err.Error(), platformOnly) {
+		t.Fatalf("error %q must contain %q", err, platformOnly)
 	}
 }
 
@@ -90,59 +92,100 @@ func requirePodAllowed(t *testing.T, c client.Client, pod *corev1.Pod) {
 	}
 }
 
-func TestPodPolicyDeniesAnAttachmentToAnotherNamespace(t *testing.T) {
+func TestPodPolicyDeniesNetworkSelectionByTenants(t *testing.T) {
 	f := newPodPolicyFixture(t)
-	const own = "a-own"
-	denied := func(name string, annotations map[string]string) {
-		requirePodDenied(t, f.alice, podFor(f.ns, unique(t, name), annotations), "a pod may attach only to networks of its own namespace")
+	for _, value := range []string{
+		"pp-b/default",
+		f.ns + "/default",
+		"default",
+		`[{"name":"default","namespace":"pp-b"}]`,
+		`[{"name":"default","Namespace":"pp-b"}]`,
+		`[{"name":"default","NAMESPACE":"pp-b"}]`,
+		`[{"name":"default","namespac\u0065":"pp-b"}]`,
+		`  [{"name":"default"}]`,
+	} {
+		requirePodDenied(t, f.alice, podFor(f.ns, unique(t, "n"), map[string]string{"k8s.v1.cni.cncf.io/networks": value}))
 	}
-	denied("a", map[string]string{"k8s.v1.cni.cncf.io/networks": "pp-b/default"})
-	denied("b", map[string]string{"k8s.v1.cni.cncf.io/networks": `[{"name":"default","namespace":"pp-b"}]`})
-	denied("c", map[string]string{"v1.multus-cni.io/default-network": "pp-b/x"})
-	denied("d", map[string]string{"k8s.v1.cni.cncf.io/networks": f.ns + "/default,other/x"})
-	for _, value := range []string{f.ns + "/default", "default", f.ns + "/default@net1"} {
-		requirePodAllowed(t, f.alice, podFor(f.ns, unique(t, own), map[string]string{"k8s.v1.cni.cncf.io/networks": value}))
-	}
+	requirePodDenied(t, f.alice, podFor(f.ns, unique(t, "d"), map[string]string{"v1.multus-cni.io/default-network": "pp-b/x"}))
+	requirePodDenied(t, f.alice, podFor(f.ns, unique(t, "s"), map[string]string{"k8s.v1.cni.cncf.io/network-status": "[]"}))
 }
 
-func TestPodPolicyDeniesFabricSubnetAndSecurityGroupSelection(t *testing.T) {
+func TestPodPolicyDeniesFabricAnnotationsByTenants(t *testing.T) {
 	f := newPodPolicyFixture(t)
 	for _, key := range []string{
-		"fabric.cloudyfolks.io/logical_switch", "default.pp-a.fabric.cloudyfolks.io/logical_switch",
-		"default.pp-a.fabric.cloudyfolks.io/security_groups", "fabric.cloudyfolks.io/ip_pool",
-		"fabric.cloudyfolks.io/logical_router", "fabric.cloudyfolks.io/vpc",
+		"ovn.kubernetes.io/logical_switch", "ovn.kubernetes.io/security_groups",
+		"fabric.cloudyfolks.io/logical_switch", "fabric.cloudyfolks.io/vpc",
+		"default.pp-a.fabric.cloudyfolks.io/logical_switch", "default.pp-a.fabric.cloudyfolks.io/security_groups",
+		"default.pp-a.fabric.cloudyfolks.io/port_security", "default.pp-a.fabric.cloudyfolks.io/mac_address",
+		"default.pp-a.fabric.cloudyfolks.io/ip_address", "default.pp-a.provider-network.cloudyfolks.io/interface",
 	} {
-		requirePodDenied(t, f.alice, podFor(f.ns, unique(t, "p"), map[string]string{key: "x"}), "only the platform may set it")
+		requirePodDenied(t, f.alice, podFor(f.ns, unique(t, "p"), map[string]string{key: "x"}))
 	}
-	requirePodAllowed(t, f.alice, podFor(f.ns, unique(t, "ok"), map[string]string{"default.pp-a.fabric.cloudyfolks.io/port_security": "true"}))
 }
 
-func TestPodPolicyAllowsTrustedRequesters(t *testing.T) {
+func TestPodPolicyDeniesTenantControllers(t *testing.T) {
 	f := newPodPolicyFixture(t)
-	annotations := map[string]string{"fabric.cloudyfolks.io/logical_switch": "s", "k8s.v1.cni.cncf.io/networks": "elsewhere/net"}
-	requirePodAllowed(t, f.platform, podFor(f.ns, unique(t, "kv"), annotations))
 	_, cfg := testEnv(t)
-	ovn := impersonating(t, cfg, "system:serviceaccount:kube-system:ovn", "system:masters")
-	requirePodAllowed(t, ovn, podFor(f.ns, unique(t, "ovn"), annotations))
+	for _, user := range []string{"system:serviceaccount:kube-system:replicaset-controller", "system:serviceaccount:kube-system:job-controller"} {
+		c := impersonating(t, cfg, user, "system:masters")
+		requirePodDenied(t, c, podFor(f.ns, unique(t, "rs"), map[string]string{"k8s.v1.cni.cncf.io/networks": "pp-b/default"}))
+	}
 }
 
-func TestPodPolicyIgnoresUnchangedAnnotationsOnUpdate(t *testing.T) {
+func TestPodPolicyAllowsPlatformIdentities(t *testing.T) {
+	f := newPodPolicyFixture(t)
+	_, cfg := testEnv(t)
+	annotations := map[string]string{"ovn.kubernetes.io/logical_switch": "s", "k8s.v1.cni.cncf.io/networks": "elsewhere/net", "x.cloudyfolks.io/ip_address": "10.0.0.1"}
+	requirePodAllowed(t, f.platform, podFor(f.ns, unique(t, "kv"), annotations))
+	for _, user := range []string{
+		"system:serviceaccount:kube-system:ovn", "system:serviceaccount:kube-system:fabric-cni",
+		"system:serviceaccount:kube-system:multus", "system:serviceaccount:bedrock-system:bedrock-operator",
+	} {
+		requirePodAllowed(t, impersonating(t, cfg, user, "system:masters"), podFor(f.ns, unique(t, "pl"), annotations))
+	}
+}
+
+func TestPodPolicyDeniesChangesByTenantsOnUpdate(t *testing.T) {
 	f := newPodPolicyFixture(t)
 	ctx := context.Background()
 	name := unique(t, "held")
-	requirePodAllowed(t, f.platform, podFor(f.ns, name, map[string]string{"fabric.cloudyfolks.io/logical_switch": "s"}))
-	var pod corev1.Pod
-	if err := f.alice.Get(ctx, client.ObjectKey{Namespace: f.ns, Name: name}, &pod); err != nil {
-		t.Fatal(err)
+	requirePodAllowed(t, f.platform, podFor(f.ns, name, map[string]string{"ovn.kubernetes.io/logical_switch": "s", "app": "x"}))
+	get := func() corev1.Pod {
+		var pod corev1.Pod
+		if err := f.alice.Get(ctx, client.ObjectKey{Namespace: f.ns, Name: name}, &pod); err != nil {
+			t.Fatal(err)
+		}
+		return pod
 	}
-	pod.Labels = map[string]string{"relabeled": "yes"}
-	if err := f.alice.Update(ctx, &pod); err != nil {
+	relabeled := get()
+	relabeled.Labels = map[string]string{"relabeled": "yes"}
+	if err := f.alice.Update(ctx, &relabeled); err != nil {
 		t.Fatalf("an unchanged annotation must be ignored: %v", err)
 	}
-	pod.Annotations["fabric.cloudyfolks.io/security_groups"] = "other"
-	err := f.alice.Update(ctx, &pod)
-	if err == nil || !strings.Contains(err.Error(), "only the platform may set it") {
-		t.Fatalf("a new forbidden annotation must be denied: %v", err)
+	added := get()
+	added.Annotations["k8s.v1.cni.cncf.io/networks"] = "pp-b/default"
+	if err := f.alice.Update(ctx, &added); err == nil || !strings.Contains(err.Error(), platformOnly) {
+		t.Fatalf("an added selection must be denied: %v", err)
+	}
+	changed := get()
+	changed.Annotations["ovn.kubernetes.io/logical_switch"] = "other"
+	if err := f.alice.Update(ctx, &changed); err == nil || !strings.Contains(err.Error(), platformOnly) {
+		t.Fatalf("a changed selection must be denied: %v", err)
+	}
+	removed := get()
+	delete(removed.Annotations, "ovn.kubernetes.io/logical_switch")
+	if err := f.alice.Update(ctx, &removed); err == nil || !strings.Contains(err.Error(), platformOnly) {
+		t.Fatalf("a removed selection must be denied: %v", err)
+	}
+	plain := get()
+	plain.Annotations["app"] = "y"
+	if err := f.alice.Update(ctx, &plain); err != nil {
+		t.Fatalf("other annotations stay free: %v", err)
+	}
+	platform := get()
+	platform.Annotations["ovn.kubernetes.io/logical_switch"] = "other"
+	if err := f.platform.Update(ctx, &platform); err != nil {
+		t.Fatalf("the platform may change the selection: %v", err)
 	}
 }
 
@@ -153,11 +196,11 @@ func TestPodPolicyIgnoresNamespacesWithoutTheTenantLabel(t *testing.T) {
 		t.Fatal(err)
 	}
 	withServiceAccount(t, f.admin, bare)
-	requirePodAllowed(t, f.alice, podFor(bare, unique(t, "p"), map[string]string{"fabric.cloudyfolks.io/logical_switch": "x", "k8s.v1.cni.cncf.io/networks": "other/net"}))
+	requirePodAllowed(t, f.alice, podFor(bare, unique(t, "p"), map[string]string{"ovn.kubernetes.io/logical_switch": "x", "k8s.v1.cni.cncf.io/networks": "other/net"}))
 }
 
 func TestPodPolicyAllowsPlainPods(t *testing.T) {
 	f := newPodPolicyFixture(t)
 	requirePodAllowed(t, f.alice, podFor(f.ns, unique(t, "plain"), nil))
-	requirePodAllowed(t, f.alice, podFor(f.ns, unique(t, "labeled"), map[string]string{"app": "web"}))
+	requirePodAllowed(t, f.alice, podFor(f.ns, unique(t, "labeled"), map[string]string{"app": "web", "prometheus.io/scrape": "true", "kubernetes.io/change-cause": "x"}))
 }
