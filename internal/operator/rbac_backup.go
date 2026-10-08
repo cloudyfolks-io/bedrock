@@ -6,9 +6,11 @@ import (
 
 func backupRules() []rbacv1.PolicyRule {
 	return []rbacv1.PolicyRule{
-		{APIGroups: []string{"velero.io"}, Resources: []string{"backups", "backupstoragelocations", "deletebackuprequests", "restores", "schedules"}, Verbs: []string{"create", "delete", "get", "list", "patch", "update", "watch"}},
-		{APIGroups: []string{"velero.io"}, Resources: []string{"datauploads"}, Verbs: []string{"get", "list", "watch"}},
-		{APIGroups: []string{"cdi.kubevirt.io"}, Resources: []string{"datavolumes"}, Verbs: []string{"delete", "get", "list", "watch"}},
-		{APIGroups: []string{""}, Resources: []string{"persistentvolumeclaims"}, Verbs: []string{"delete", "get", "list", "watch"}},
+		{APIGroups: []string{"velero.io"}, Resources: []string{"backupstoragelocations", "restores", "schedules"}, Verbs: []string{"create", "delete", "get", "patch"}},
+		{APIGroups: []string{"velero.io"}, Resources: []string{"backups"}, Verbs: []string{"create", "get", "list"}},
+		{APIGroups: []string{"velero.io"}, Resources: []string{"deletebackuprequests"}, Verbs: []string{"create", "delete", "list"}},
+		{APIGroups: []string{"velero.io"}, Resources: []string{"datauploads"}, Verbs: []string{"list"}},
+		{APIGroups: []string{"cdi.kubevirt.io"}, Resources: []string{"datavolumes"}, Verbs: []string{"delete", "list"}},
+		{APIGroups: []string{""}, Resources: []string{"persistentvolumeclaims"}, Verbs: []string{"delete", "list"}},
 	}
 }

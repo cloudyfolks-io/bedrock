@@ -187,9 +187,7 @@ rules:
   - datavolumes
   verbs:
   - delete
-  - get
   - list
-  - watch
 - apiGroups:
   - ceph.rook.io
   resources:
@@ -385,27 +383,36 @@ rules:
 - apiGroups:
   - velero.io
   resources:
-  - backups
   - backupstoragelocations
-  - deletebackuprequests
   - restores
   - schedules
   verbs:
   - create
   - delete
   - get
-  - list
   - patch
-  - update
-  - watch
+- apiGroups:
+  - velero.io
+  resources:
+  - deletebackuprequests
+  verbs:
+  - create
+  - delete
+  - list
+- apiGroups:
+  - velero.io
+  resources:
+  - backups
+  verbs:
+  - create
+  - get
+  - list
 - apiGroups:
   - velero.io
   resources:
   - datauploads
   verbs:
-  - get
   - list
-  - watch
 - apiGroups:
   - ""
   resources:
@@ -455,13 +462,19 @@ rules:
 - apiGroups:
   - ""
   resources:
-  - persistentvolumeclaims
   - pods
   verbs:
   - delete
   - get
   - list
   - watch
+- apiGroups:
+  - ""
+  resources:
+  - persistentvolumeclaims
+  verbs:
+  - delete
+  - list
 - apiGroups:
   - ""
   resources:

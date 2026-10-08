@@ -11,7 +11,12 @@ func TestOperatorRoleCoversBackup(t *testing.T) {
 		{"velero.io", "backups", "create"},
 		{"velero.io", "schedules", "patch"},
 		{"velero.io", "restores", "delete"},
-		{"velero.io", "backupstoragelocations", "update"},
+		{"velero.io", "backupstoragelocations", "patch"},
+		{"velero.io", "backupstoragelocations", "delete"},
+		{"velero.io", "backups", "get"},
+		{"velero.io", "deletebackuprequests", "delete"},
+		{"", "secrets", "delete"},
+		{"", "configmaps", "delete"},
 		{"velero.io", "deletebackuprequests", "create"},
 		{"velero.io", "datauploads", "list"},
 		{"cdi.kubevirt.io", "datavolumes", "delete"},
@@ -23,7 +28,15 @@ func TestOperatorRoleCoversBackup(t *testing.T) {
 			t.Errorf("role must allow %s %s/%s", rule.verb, rule.group, rule.resource)
 		}
 	}
-	if allows(role, "velero.io", "datauploads", "delete") {
-		t.Error("role must not delete datauploads")
+	for _, rule := range []struct{ group, resource, verb string }{
+		{"velero.io", "datauploads", "delete"},
+		{"velero.io", "backups", "delete"},
+		{"velero.io", "backups", "patch"},
+		{"velero.io", "schedules", "watch"},
+		{"velero.io", "restores", "watch"},
+	} {
+		if allows(role, rule.group, rule.resource, rule.verb) {
+			t.Errorf("role must not allow %s %s/%s", rule.verb, rule.group, rule.resource)
+		}
 	}
 }
