@@ -1,0 +1,46 @@
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicy
+metadata:
+  name: bedrock-network-subnets
+  labels:
+    bedrock.cloudyfolks.io/component: network
+spec:
+  failurePolicy: Fail
+  paramKind:
+    apiVersion: bedrock.cloudyfolks.io/v1alpha1
+    kind: Network
+  matchConstraints:
+    resourceRules:
+      - apiGroups: [bedrock.cloudyfolks.io]
+        apiVersions: [v1alpha1]
+        operations: [CREATE, UPDATE]
+        resources: [subnets]
+  validations:
+    - expression: "object.spec.networkRef != params.metadata.name || cidr(params.spec.cidr).containsCIDR(object.spec.cidr)"
+      message: "the Subnet cidr must be inside the cidr of its Network"
+      reason: Invalid
+    - expression: >-
+        object.spec.networkRef != params.metadata.name || !has(params.status) || !has(params.status.subnets) ||
+        !params.status.subnets.exists(s, !(s.namespace == object.metadata.namespace && s.name == object.metadata.name) &&
+        (cidr(s.cidr).containsCIDR(object.spec.cidr) || cidr(object.spec.cidr).containsCIDR(s.cidr)))
+      message: "the Subnet cidr overlaps another Subnet of the same Network"
+      reason: Invalid
+    - expression: >-
+        object.spec.networkRef != params.metadata.name ||
+        (has(namespaceObject.metadata.labels) && 'bedrock.cloudyfolks.io/tenant' in namespaceObject.metadata.labels &&
+        namespaceObject.metadata.labels['bedrock.cloudyfolks.io/tenant'] == params.spec.tenantRef)
+      message: "the Subnet names a Network of another tenant"
+      reason: Forbidden
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicyBinding
+metadata:
+  name: bedrock-network-subnets
+  labels:
+    bedrock.cloudyfolks.io/component: network
+spec:
+  policyName: bedrock-network-subnets
+  validationActions: [Deny]
+  paramRef:
+    selector: {}
+    parameterNotFoundAction: Allow
