@@ -252,6 +252,8 @@ rules:
   - router-lb-rules
   - security-groups
   - subnets
+  - switch-lb-rules
+  - vips
   - vlans
   - vpcs
   verbs:
