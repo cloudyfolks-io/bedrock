@@ -126,7 +126,7 @@ func assertAuthnNetworkPolicy(t *testing.T, objects []*unstructured.Unstructured
 		t.Fatalf("networkpolicy spec %+v", policy.Object["spec"])
 	}
 	ingress, _, _ := unstructured.NestedSlice(policy.Object, "spec", "ingress")
-	if len(ingress) != 2 {
+	if len(ingress) != 3 {
 		t.Fatalf("ingress rules %+v", ingress)
 	}
 	traefikRule, ok := ingress[0].(map[string]any)

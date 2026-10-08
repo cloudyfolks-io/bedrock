@@ -10,7 +10,11 @@ import (
 	"strings"
 	"testing"
 
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/client-go/rest"
+
+	"github.com/cloudyfolks-io/bedrock/internal/operator"
+	"github.com/cloudyfolks-io/bedrock/internal/proxy"
 )
 
 func TestProxyServeFlags(t *testing.T) {
@@ -68,5 +72,26 @@ func TestProxyCommandNeedsServe(t *testing.T) {
 	var stdout, stderr bytes.Buffer
 	if code := proxyCommand(nil, &stdout, &stderr); code != 2 || !strings.Contains(stderr.String(), "usage: bedrock proxy serve") {
 		t.Fatalf("exit %d, stderr %q", code, stderr.String())
+	}
+}
+
+func TestConsoleClientMatchesTheProxy(t *testing.T) {
+	var console *unstructured.Unstructured
+	for _, obj := range operator.BuiltinClients("lab.example") {
+		if obj.GetKind() == "OAuthClient" && obj.GetName() == proxy.ConsoleClientID {
+			console = obj
+		}
+	}
+	if console == nil {
+		t.Fatalf("no built-in client %s", proxy.ConsoleClientID)
+	}
+	secretRef, _, _ := unstructured.NestedString(console.Object, "spec", "secretRef")
+	redirects, _, _ := unstructured.NestedStringSlice(console.Object, "spec", "redirectURIs")
+	clientID, _, _ := unstructured.NestedString(console.Object, "spec", "clientID")
+	if clientID != proxy.ConsoleClientID || secretRef != proxy.ConsoleSecretName || len(redirects) != 1 || redirects[0] != "https://console.lab.example"+proxy.PathCallback {
+		t.Fatalf("client %v", console.Object["spec"])
+	}
+	if operator.ConsoleClientID != proxy.ConsoleClientID || operator.ConsoleSecretName != proxy.ConsoleSecretName {
+		t.Fatal("the operator and proxy constants differ")
 	}
 }

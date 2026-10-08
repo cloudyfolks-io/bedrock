@@ -43,6 +43,7 @@ type AddonInput struct {
 	WebhookToken   string
 	AuthnInstalled bool
 	UploadProxyCA  []byte
+	ProxyInstalled bool
 }
 
 type Probe struct {
@@ -136,7 +137,11 @@ func (r *AddonReconciler) input(ctx context.Context, cluster v1alpha1.Cluster) (
 	if err != nil {
 		return AddonInput{}, err
 	}
-	input := AddonInput{Cluster: cluster, Hosts: hosts.Items, Settings: values, Bundle: r.Bundle, PlatformCA: platformCA, WebhookToken: string(secretData(token, WebhookTokenKey)), AuthnInstalled: installed, UploadProxyCA: uploadProxyCA}
+	proxyInstalled, err := deploymentExists(ctx, r.Client, client.ObjectKey{Namespace: release.SystemNamespace, Name: ProxyName})
+	if err != nil {
+		return AddonInput{}, err
+	}
+	input := AddonInput{Cluster: cluster, Hosts: hosts.Items, Settings: values, Bundle: r.Bundle, PlatformCA: platformCA, WebhookToken: string(secretData(token, WebhookTokenKey)), AuthnInstalled: installed, UploadProxyCA: uploadProxyCA, ProxyInstalled: proxyInstalled}
 	if values["platform.tls-mode"] != "Custom" || values["platform.custom-tls"] == "" {
 		return input, nil
 	}

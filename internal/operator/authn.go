@@ -122,6 +122,13 @@ func authnNetworkPolicy(cidr string) *unstructured.Unstructured {
 				"from":  []any{map[string]any{"ipBlock": map[string]any{"cidr": cidr}}},
 				"ports": []any{toPort},
 			},
+			map[string]any{
+				"from": []any{map[string]any{
+					"namespaceSelector": map[string]any{"matchLabels": map[string]any{"kubernetes.io/metadata.name": release.SystemNamespace}},
+					"podSelector":       map[string]any{"matchLabels": map[string]any{"app": ProxyName}},
+				}},
+				"ports": []any{toPort},
+			},
 		},
 	}})
 }
