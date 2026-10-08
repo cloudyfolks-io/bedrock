@@ -4,6 +4,10 @@ service:
   annotations:
     kube-vip.io/loadbalancerIPs: "${BEDROCK_VIP}"
 ports:
+  websecure:
+    transport:
+      respondingTimeouts:
+        readTimeout: 2h
   web:
     http:
       redirections:
