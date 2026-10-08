@@ -233,7 +233,11 @@ func (r *BackupReconciler) drive(ctx context.Context, vmb *v1alpha1.VirtualMachi
 	if len(infos) == 0 && !isFresh(vmb) {
 		phase = vmb.Status.Phase
 	}
-	r.writeStatus(ctx, vmb, observedStatus(*vmb, summary, phase, newestRaw(infos), vmb.Spec.Schedule != ""))
+	condition := oneShotReady(phase, newestRaw(infos))
+	if desired.GetKind() == "Schedule" {
+		condition = scheduledReady(phase, newestRaw(infos))
+	}
+	r.writeStatus(ctx, vmb, observedStatus(*vmb, summary, phase, condition))
 	return ctrl.Result{RequeueAfter: requeueFor(phase)}, nil
 }
 
@@ -336,19 +340,40 @@ func requeueFor(phase string) time.Duration {
 	return requeueIdle
 }
 
-func readyCondition(phase string, scheduled bool, rawPhase string) metav1.Condition {
-	switch {
-	case phase == v1alpha1.BackupPhaseFailed:
-		return metav1.Condition{Type: v1alpha1.ConditionReady, Status: metav1.ConditionFalse, Reason: ReasonBackupFailed, Message: "Velero backup ended in phase " + rawPhase}
-	case phase == v1alpha1.BackupPhaseInProgress:
-		return metav1.Condition{Type: v1alpha1.ConditionReady, Status: metav1.ConditionFalse, Reason: ReasonInProgress, Message: "a backup is running"}
-	case scheduled:
-		return metav1.Condition{Type: v1alpha1.ConditionReady, Status: metav1.ConditionTrue, Reason: ReasonScheduled, Message: "the schedule is applied"}
-	case phase == v1alpha1.BackupPhaseCompleted:
-		return metav1.Condition{Type: v1alpha1.ConditionReady, Status: metav1.ConditionTrue, Reason: ReasonCompleted, Message: "the backup is complete"}
+func notReady(reason, message string) metav1.Condition {
+	return metav1.Condition{Type: v1alpha1.ConditionReady, Status: metav1.ConditionFalse, Reason: reason, Message: message}
+}
+
+func ready(reason, message string) metav1.Condition {
+	return metav1.Condition{Type: v1alpha1.ConditionReady, Status: metav1.ConditionTrue, Reason: reason, Message: message}
+}
+
+func runningCondition(phase, rawPhase string) (metav1.Condition, bool) {
+	switch phase {
+	case v1alpha1.BackupPhaseFailed:
+		return notReady(ReasonBackupFailed, "Velero backup ended in phase "+rawPhase), true
+	case v1alpha1.BackupPhaseInProgress:
+		return notReady(ReasonInProgress, "a backup is running"), true
 	default:
-		return metav1.Condition{Type: v1alpha1.ConditionReady, Status: metav1.ConditionFalse, Reason: ReasonInProgress, Message: "the backup is starting"}
+		return metav1.Condition{}, false
 	}
+}
+
+func scheduledReady(phase, rawPhase string) metav1.Condition {
+	if condition, running := runningCondition(phase, rawPhase); running {
+		return condition
+	}
+	return ready(ReasonScheduled, "the schedule is applied")
+}
+
+func oneShotReady(phase, rawPhase string) metav1.Condition {
+	if condition, running := runningCondition(phase, rawPhase); running {
+		return condition
+	}
+	if phase == v1alpha1.BackupPhaseCompleted {
+		return ready(ReasonCompleted, "the backup is complete")
+	}
+	return notReady(ReasonInProgress, "the backup is starting")
 }
 
 func recordsOf(infos []BackupInfo) []v1alpha1.VMBackupRecord {
@@ -359,7 +384,7 @@ func recordsOf(infos []BackupInfo) []v1alpha1.VMBackupRecord {
 	return records
 }
 
-func observedStatus(vmb v1alpha1.VirtualMachineBackup, summary Summary, phase, rawPhase string, scheduled bool) v1alpha1.VirtualMachineBackupStatus {
+func observedStatus(vmb v1alpha1.VirtualMachineBackup, summary Summary, phase string, condition metav1.Condition) v1alpha1.VirtualMachineBackupStatus {
 	status := *vmb.Status.DeepCopy()
 	status.ObservedGeneration = vmb.Generation
 	status.Phase = phase
@@ -369,7 +394,7 @@ func observedStatus(vmb v1alpha1.VirtualMachineBackup, summary Summary, phase, r
 		last := metav1.NewTime(summary.Last)
 		status.LastBackup = &last
 	}
-	v1alpha1.SetCondition(&status.Conditions, readyCondition(phase, scheduled, rawPhase))
+	v1alpha1.SetCondition(&status.Conditions, condition)
 	return status
 }
 
