@@ -67,10 +67,15 @@ func LoadBuildConfig(path string) (BuildConfig, error) {
 	if err := sigyaml.UnmarshalStrict(raw, &cfg); err != nil {
 		return BuildConfig{}, fmt.Errorf("parse %s: %w", path, err)
 	}
+	seen := map[string]struct{}{}
 	for _, component := range cfg.Components {
 		if !validComponentName(component) {
 			return BuildConfig{}, fmt.Errorf("component %q has an invalid name or order", component.Name)
 		}
+		if _, duplicate := seen[component.Name]; duplicate {
+			return BuildConfig{}, fmt.Errorf("component %q is listed twice", component.Name)
+		}
+		seen[component.Name] = struct{}{}
 	}
 	return cfg, nil
 }

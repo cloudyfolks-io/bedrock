@@ -169,3 +169,23 @@ func TestBuildReportsTheAddonComponentImage(t *testing.T) {
 		t.Fatalf("components %+v", bundle.Spec.Components)
 	}
 }
+
+func TestLoadBuildConfigRejectsDuplicateComponentNames(t *testing.T) {
+	cases := map[string]string{
+		"two groups":      "k0sVersion: v1\ncomponents:\n  - name: demo\n    order: 10\n  - name: demo\n    order: 20\n",
+		"group and addon": "k0sVersion: v1\ncomponents:\n  - name: monitoring\n    order: 70\n  - name: monitoring\n    addon: true\n",
+		"two addons":      "k0sVersion: v1\ncomponents:\n  - name: demo\n    addon: true\n  - name: demo\n    addon: true\n",
+	}
+	for name, content := range cases {
+		path := filepath.Join(t.TempDir(), "components.yaml")
+		if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := LoadBuildConfig(path); err == nil || !strings.Contains(err.Error(), "listed twice") {
+			t.Errorf("%s: error %v", name, err)
+		}
+	}
+	if _, err := LoadBuildConfig(filepath.Join("..", "..", "release", "components.yaml")); err != nil {
+		t.Fatalf("the real components file: %v", err)
+	}
+}
