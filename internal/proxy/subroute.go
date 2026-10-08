@@ -163,12 +163,17 @@ func parseSubresourcePath(path, rawPath string) (subresourceTarget, bool) {
 }
 
 func reviewAccess(ctx context.Context, reviews kubernetes.Interface, attributes authorizationv1.ResourceAttributes) (bool, error) {
+	result, err := reviewOne(ctx, reviews, attributes)
+	return result.Allowed, err
+}
+
+func reviewOne(ctx context.Context, reviews kubernetes.Interface, attributes authorizationv1.ResourceAttributes) (accessResult, error) {
 	review := &authorizationv1.SelfSubjectAccessReview{Spec: authorizationv1.SelfSubjectAccessReviewSpec{ResourceAttributes: &attributes}}
 	answer, err := reviews.AuthorizationV1().SelfSubjectAccessReviews().Create(ctx, review, metav1.CreateOptions{})
 	if err != nil {
-		return false, err
+		return accessResult{}, err
 	}
-	return answer.Status.Allowed, nil
+	return accessResult{Allowed: answer.Status.Allowed, Reason: answer.Status.Reason}, nil
 }
 
 func (c *identityCache) userOf(ctx context.Context, reviews kubernetes.Interface, caller Caller) (User, error) {
