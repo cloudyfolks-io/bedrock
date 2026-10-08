@@ -4,6 +4,7 @@ import (
 	"context"
 	"reflect"
 	"testing"
+	"time"
 
 	rbacv1 "k8s.io/api/rbac/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -282,4 +283,84 @@ func TestTenantReactsToProjectChanges(t *testing.T) {
 	waitFor(t, func() bool { return getInto(t, c, "acme", tenant) && tenant.Status.Usage.Projects != nil })
 	mustCreate(t, c, projectFor("web", "acme"))
 	waitFor(t, func() bool { return getInto(t, c, "acme", tenant) && *tenant.Status.Usage.Projects == 1 })
+}
+
+func withFinalizer(obj client.Object, name string) client.Object {
+	obj.SetFinalizers([]string{name})
+	return obj
+}
+
+func holdFinalizer(t *testing.T, c client.Client, obj client.Object) {
+	t.Helper()
+	waitFor(t, func() bool {
+		if !getInto(t, c, obj.GetName(), obj) {
+			return false
+		}
+		obj.SetFinalizers(append(obj.GetFinalizers(), "test/hold"))
+		return c.Update(context.Background(), obj) == nil
+	})
+}
+
+func releaseHold(t *testing.T, c client.Client, obj client.Object) {
+	t.Helper()
+	waitFor(t, func() bool {
+		if !getInto(t, c, obj.GetName(), obj) {
+			return true
+		}
+		obj.SetFinalizers(nil)
+		return c.Update(context.Background(), obj) == nil
+	})
+}
+
+func isDeleting(t *testing.T, c client.Client, name string, obj client.Object) bool {
+	return getInto(t, c, name, obj) && obj.GetDeletionTimestamp() != nil
+}
+
+func TestTenantDeletionRemovesEverythingInOrder(t *testing.T) {
+	c, _ := tenantWorld(t)
+	tenant := acmeWithOwners(defaultOwners()...)
+	mustCreate(t, c, tenant, withFinalizer(projectFor("web", "acme"), "test/hold"))
+	network, role := &v1alpha1.Network{}, &rbacv1.ClusterRole{}
+	waitFor(t, func() bool {
+		return getInto(t, c, "acme", network) && getInto(t, c, "tenant:acme:owner", role) && getInto(t, c, "acme", tenant) && len(tenant.Finalizers) == 1
+	})
+	holdFinalizer(t, c, network)
+	if err := c.Delete(context.Background(), tenant); err != nil {
+		t.Fatal(err)
+	}
+	web := &v1alpha1.Project{}
+	waitFor(t, func() bool { return isDeleting(t, c, "web", web) })
+	requireNever(t, 1500*time.Millisecond, func() bool {
+		return isDeleting(t, c, "acme", &v1alpha1.Network{}) || !getInto(t, c, "tenant:acme:owner", &rbacv1.ClusterRole{})
+	})
+	releaseHold(t, c, web)
+	waitFor(t, func() bool { return isDeleting(t, c, "acme", network) })
+	requireNever(t, 1500*time.Millisecond, func() bool {
+		return !getInto(t, c, "tenant:acme:owner", &rbacv1.ClusterRole{}) || !getInto(t, c, "acme", &v1alpha1.Tenant{})
+	})
+	releaseHold(t, c, network)
+	waitFor(t, func() bool {
+		return !getInto(t, c, "tenant:acme:owner", &rbacv1.ClusterRole{}) && !getInto(t, c, "tenant:acme:owner", &rbacv1.ClusterRoleBinding{}) && !getInto(t, c, "acme", &v1alpha1.Tenant{})
+	})
+}
+
+func TestTenantWaitsForProjectNamespaces(t *testing.T) {
+	c, _ := tenantWorld(t)
+	tenant := acmeWithOwners(defaultOwners()...)
+	mustCreate(t, c, tenant)
+	waitFor(t, func() bool { return getInto(t, c, "acme", tenant) && len(tenant.Finalizers) == 1 })
+	namespace := namespaceNamed("acme-web", map[string]string{v1alpha1.LabelTenant: "acme"})
+	mustCreate(t, c, namespace)
+	if err := c.Delete(context.Background(), tenant); err != nil {
+		t.Fatal(err)
+	}
+	requireNever(t, 1500*time.Millisecond, func() bool { return isDeleting(t, c, "acme", &v1alpha1.Network{}) })
+	if err := c.Delete(context.Background(), namespace); err != nil {
+		t.Fatal(err)
+	}
+	if err := c.Get(context.Background(), client.ObjectKeyFromObject(namespace), namespace); err == nil {
+		namespace.Spec.Finalizers = nil
+		_ = c.SubResource("finalize").Update(context.Background(), namespace)
+	}
+	waitFor(t, func() bool { return !getInto(t, c, "acme", &v1alpha1.Tenant{}) })
 }

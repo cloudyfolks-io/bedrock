@@ -248,3 +248,17 @@ func TestProjectMustSetEveryCeilingedResource(t *testing.T) {
 		}
 	}
 }
+
+func TestProjectDoesNotProvisionUnderADeletingTenant(t *testing.T) {
+	c, _ := projectWorld(t)
+	tenant := withFinalizer(tenantWith("acme", "10.100.0.0/16"), "test/hold").(*v1alpha1.Tenant)
+	mustCreate(t, c, tenant)
+	if err := c.Delete(context.Background(), tenant); err != nil {
+		t.Fatal(err)
+	}
+	mustCreate(t, c, projectFor("shop", "acme"))
+	projectReady(t, c, "shop", hasCondition(ConditionAdmitted, metav1.ConditionFalse, ReasonTenantNotFound))
+	if getInto(t, c, "acme-shop", &corev1.Namespace{}) {
+		t.Fatal("namespace created for a deleting tenant")
+	}
+}

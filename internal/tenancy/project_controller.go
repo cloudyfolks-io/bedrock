@@ -46,7 +46,7 @@ func (r *ProjectReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 		return ctrl.Result{}, nil
 	}
 	tenant, err := r.tenantOf(ctx, project)
-	if apierrors.IsNotFound(err) {
+	if apierrors.IsNotFound(err) || (err == nil && !tenant.DeletionTimestamp.IsZero()) {
 		r.writeStatus(ctx, ProjectObservation{Project: project, SubnetCIDR: project.Status.Subnet})
 		return ctrl.Result{}, nil
 	}

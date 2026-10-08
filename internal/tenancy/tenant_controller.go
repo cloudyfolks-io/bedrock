@@ -3,12 +3,16 @@ package tenancy
 import (
 	"context"
 	"errors"
+	"time"
 
+	corev1 "k8s.io/api/core/v1"
 	rbacv1 "k8s.io/api/rbac/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/client-go/util/retry"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	"sigs.k8s.io/controller-runtime/pkg/handler"
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
 
@@ -17,6 +21,11 @@ import (
 )
 
 var tenantGVK = v1alpha1.GroupVersion.WithKind("Tenant")
+
+const (
+	tenantFinalizer  = "bedrock.cloudyfolks.io/tenancy"
+	teardownInterval = 2 * time.Second
+)
 
 type TenantReconciler struct {
 	Client client.Client
@@ -29,7 +38,11 @@ func (r *TenantReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctr
 		return ctrl.Result{}, client.IgnoreNotFound(err)
 	}
 	if !tenant.DeletionTimestamp.IsZero() {
-		return ctrl.Result{}, nil
+		return r.teardown(ctx, tenant)
+	}
+	tenant, err := r.holdFinalizer(ctx, tenant)
+	if err != nil {
+		return ctrl.Result{}, err
 	}
 	projects, networks, listErr := r.listOfTenant(ctx, tenant.Name)
 	if listErr != nil {
@@ -108,4 +121,102 @@ func (r *TenantReconciler) SetupWithManager(mgr ctrl.Manager) error {
 		Owns(&rbacv1.ClusterRole{}).
 		Owns(&rbacv1.ClusterRoleBinding{}).
 		Complete(r)
+}
+
+func (r *TenantReconciler) holdFinalizer(ctx context.Context, tenant v1alpha1.Tenant) (v1alpha1.Tenant, error) {
+	if controllerutil.ContainsFinalizer(&tenant, tenantFinalizer) {
+		return tenant, nil
+	}
+	var fresh v1alpha1.Tenant
+	err := retry.RetryOnConflict(retry.DefaultRetry, func() error {
+		fresh = v1alpha1.Tenant{}
+		if err := r.Reader.Get(ctx, client.ObjectKeyFromObject(&tenant), &fresh); err != nil {
+			return err
+		}
+		base := fresh.DeepCopy()
+		if !controllerutil.AddFinalizer(&fresh, tenantFinalizer) {
+			return nil
+		}
+		return r.Client.Patch(ctx, &fresh, client.MergeFromWithOptions(base, client.MergeFromWithOptimisticLock{}), client.FieldOwner(v1alpha1.TenancyFieldManager))
+	})
+	return fresh, err
+}
+
+func (r *TenantReconciler) releaseFinalizer(ctx context.Context, tenant v1alpha1.Tenant) error {
+	return retry.RetryOnConflict(retry.DefaultRetry, func() error {
+		var fresh v1alpha1.Tenant
+		if err := r.Reader.Get(ctx, client.ObjectKeyFromObject(&tenant), &fresh); err != nil {
+			return client.IgnoreNotFound(err)
+		}
+		base := fresh.DeepCopy()
+		if !controllerutil.RemoveFinalizer(&fresh, tenantFinalizer) {
+			return nil
+		}
+		return r.Client.Patch(ctx, &fresh, client.MergeFromWithOptions(base, client.MergeFromWithOptimisticLock{}), client.FieldOwner(v1alpha1.TenancyFieldManager))
+	})
+}
+
+func (r *TenantReconciler) teardown(ctx context.Context, tenant v1alpha1.Tenant) (ctrl.Result, error) {
+	if !controllerutil.ContainsFinalizer(&tenant, tenantFinalizer) {
+		return ctrl.Result{}, nil
+	}
+	pending, err := r.removeProjects(ctx, tenant)
+	if err != nil || pending {
+		return waitOrFail(err)
+	}
+	pending, err = r.removeNetworks(ctx, tenant)
+	if err != nil || pending {
+		return waitOrFail(err)
+	}
+	if err := r.removeOwnerAccess(ctx, tenant); err != nil {
+		return ctrl.Result{}, err
+	}
+	return ctrl.Result{}, r.releaseFinalizer(ctx, tenant)
+}
+
+func waitOrFail(err error) (ctrl.Result, error) {
+	if err != nil {
+		return ctrl.Result{}, err
+	}
+	return ctrl.Result{RequeueAfter: teardownInterval}, nil
+}
+
+func (r *TenantReconciler) removeProjects(ctx context.Context, tenant v1alpha1.Tenant) (bool, error) {
+	var projects v1alpha1.ProjectList
+	if err := r.Reader.List(ctx, &projects); err != nil {
+		return false, err
+	}
+	owned := projectsOfTenant(tenant.Name, projects.Items)
+	deleteErrs := []error{}
+	for _, project := range owned {
+		if project.DeletionTimestamp.IsZero() {
+			deleteErrs = append(deleteErrs, client.IgnoreNotFound(r.Client.Delete(ctx, &project)))
+		}
+	}
+	var namespaces corev1.NamespaceList
+	listErr := r.Reader.List(ctx, &namespaces, client.MatchingLabels{v1alpha1.LabelTenant: tenant.Name})
+	return len(owned) > 0 || len(namespaces.Items) > 0, errors.Join(append(deleteErrs, listErr)...)
+}
+
+func (r *TenantReconciler) removeNetworks(ctx context.Context, tenant v1alpha1.Tenant) (bool, error) {
+	var networks v1alpha1.NetworkList
+	if err := r.Reader.List(ctx, &networks); err != nil {
+		return false, err
+	}
+	owned := networksOfTenant(tenant.Name, networks.Items)
+	deleteErrs := []error{}
+	for _, network := range owned {
+		if network.DeletionTimestamp.IsZero() {
+			deleteErrs = append(deleteErrs, client.IgnoreNotFound(r.Client.Delete(ctx, &network)))
+		}
+	}
+	return len(owned) > 0, errors.Join(deleteErrs...)
+}
+
+func (r *TenantReconciler) removeOwnerAccess(ctx context.Context, tenant v1alpha1.Tenant) error {
+	role, binding := OwnerRole(tenant, nil, nil), OwnerBinding(tenant)
+	return errors.Join(
+		client.IgnoreNotFound(r.Client.Delete(ctx, &role)),
+		client.IgnoreNotFound(r.Client.Delete(ctx, &binding)),
+	)
 }

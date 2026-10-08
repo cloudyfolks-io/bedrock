@@ -15,6 +15,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/apimachinery/pkg/util/yaml"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
 	"k8s.io/client-go/rest"
@@ -66,14 +67,22 @@ func startEnvWithPaths(t *testing.T, paths []string) (client.Client, *rest.Confi
 
 func waitFor(t *testing.T, ok func() bool) {
 	t.Helper()
-	deadline := time.Now().Add(15 * time.Second)
-	for time.Now().Before(deadline) {
-		if ok() {
-			return
-		}
-		time.Sleep(100 * time.Millisecond)
+	err := wait.PollUntilContextTimeout(context.Background(), 100*time.Millisecond, 15*time.Second, true, func(context.Context) (bool, error) {
+		return ok(), nil
+	})
+	if err != nil {
+		t.Fatal("condition not met within 15s")
 	}
-	t.Fatal("condition not met within 15s")
+}
+
+func requireNever(t *testing.T, window time.Duration, violated func() bool) {
+	t.Helper()
+	_ = wait.PollUntilContextTimeout(context.Background(), 100*time.Millisecond, window, true, func(context.Context) (bool, error) {
+		if violated() {
+			t.Fatal("a forbidden state was reached")
+		}
+		return false, nil
+	})
 }
 
 func actingAs(t *testing.T, cfg *rest.Config, user string, groups ...string) client.Client {
