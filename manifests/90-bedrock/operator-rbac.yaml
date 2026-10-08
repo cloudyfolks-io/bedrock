@@ -173,10 +173,6 @@ rules:
 - apiGroups:
   - bedrock.cloudyfolks.io
   resources:
-  - dnszones/finalizers
-  - elasticips/finalizers
-  - loadbalancers/finalizers
-  - networks/finalizers
   - securitygroups/finalizers
   - subnets/finalizers
   verbs:

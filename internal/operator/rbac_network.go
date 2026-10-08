@@ -19,7 +19,7 @@ func networkRules() []rbacv1.PolicyRule {
 		{APIGroups: []string{"apps"}, Resources: []string{"daemonsets"}, Verbs: read},
 		{
 			APIGroups: []string{"bedrock.cloudyfolks.io"},
-			Resources: []string{"dnszones/finalizers", "elasticips/finalizers", "loadbalancers/finalizers", "networks/finalizers", "securitygroups/finalizers", "subnets/finalizers"},
+			Resources: []string{"securitygroups/finalizers", "subnets/finalizers"},
 			Verbs:     []string{"update"},
 		},
 	}

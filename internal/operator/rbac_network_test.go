@@ -43,9 +43,17 @@ func TestNetworkRulesNeverUseWildcards(t *testing.T) {
 	}
 }
 
-func TestNetworkRulesCoverFinalizersOfEveryNetworkKind(t *testing.T) {
-	for _, resource := range []string{"networks", "subnets", "elasticips", "loadbalancers", "dnszones", "securitygroups"} {
+func TestNetworkRulesCoverTheFinalizersOfOwnerReferences(t *testing.T) {
+	for _, resource := range []string{"subnets", "securitygroups"} {
 		if got := verbsOn(networkRules(), "bedrock.cloudyfolks.io", resource+"/finalizers"); !slices.Equal(got, []string{"update"}) {
+			t.Fatalf("%s/finalizers: %v", resource, got)
+		}
+	}
+}
+
+func TestNetworkRulesSkipFinalizersThatNothingNeeds(t *testing.T) {
+	for _, resource := range []string{"networks", "elasticips", "loadbalancers", "dnszones"} {
+		if got := verbsOn(networkRules(), "bedrock.cloudyfolks.io", resource+"/finalizers"); len(got) != 0 {
 			t.Fatalf("%s/finalizers: %v", resource, got)
 		}
 	}
