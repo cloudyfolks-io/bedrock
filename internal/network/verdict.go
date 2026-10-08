@@ -25,7 +25,7 @@ type Violation struct {
 	Message string
 }
 
-func (f SubnetFacts) key() types.NamespacedName {
+func factsKey(f SubnetFacts) types.NamespacedName {
 	return types.NamespacedName{Namespace: f.Namespace, Name: f.Name}
 }
 
@@ -41,11 +41,11 @@ func VerdictsFor(networkCIDR string, subnets []SubnetFacts) map[types.Namespaced
 	for _, subnet := range ordered {
 		prefix, err := netip.ParsePrefix(subnet.CIDR)
 		if err != nil || networkErr != nil || !network.Contains(prefix.Addr()) || prefix.Bits() < network.Bits() {
-			verdicts[subnet.key()] = &Violation{Reason: ReasonCIDROutsideNetwork, Message: fmt.Sprintf("the Subnet cidr must be inside the cidr of its Network %s", networkCIDR)}
+			verdicts[factsKey(subnet)] = &Violation{Reason: ReasonCIDROutsideNetwork, Message: "the Subnet cidr must be inside the cidr of its Network"}
 			continue
 		}
-		verdicts[subnet.key()] = overlapWith(prefix, winners)
-		if verdicts[subnet.key()] == nil {
+		verdicts[factsKey(subnet)] = overlapWith(prefix, winners)
+		if verdicts[factsKey(subnet)] == nil {
 			winners = append(winners, subnet)
 		}
 	}
@@ -56,14 +56,14 @@ func overlapWith(prefix netip.Prefix, winners []SubnetFacts) *Violation {
 	for _, winner := range winners {
 		other, _ := netip.ParsePrefix(winner.CIDR)
 		if prefix.Overlaps(other) {
-			return &Violation{Reason: ReasonCIDROverlap, Message: fmt.Sprintf("the Subnet cidr overlaps %s/%s %s", winner.Namespace, winner.Name, winner.CIDR)}
+			return &Violation{Reason: ReasonCIDROverlap, Message: "the Subnet cidr overlaps another Subnet of the same Network"}
 		}
 	}
 	return nil
 }
 
 func AcceptedSubnets(subnets []SubnetFacts, verdicts map[types.NamespacedName]*Violation) []SubnetFacts {
-	accepted := slices.DeleteFunc(slices.Clone(subnets), func(s SubnetFacts) bool { return verdicts[s.key()] != nil })
+	accepted := slices.DeleteFunc(slices.Clone(subnets), func(s SubnetFacts) bool { return verdicts[factsKey(s)] != nil })
 	slices.SortFunc(accepted, func(a, b SubnetFacts) int {
 		return cmp.Or(cmp.Compare(a.Namespace, b.Namespace), cmp.Compare(a.Name, b.Name))
 	})
@@ -119,7 +119,7 @@ func CheckExcludeIPs(cidr string, excludes []string) *Violation {
 
 func NetworkAllowed(namespaceTenant string, network v1alpha1.Network) *Violation {
 	if namespaceTenant == "" || namespaceTenant != network.Spec.TenantRef {
-		return &Violation{Reason: ReasonNetworkNotAllowed, Message: "the Network belongs to another tenant"}
+		return &Violation{Reason: ReasonNetworkNotOwned, Message: "the Network belongs to another tenant"}
 	}
 	return nil
 }

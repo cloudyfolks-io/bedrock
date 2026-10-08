@@ -262,3 +262,44 @@ func TestNetworkReconcilerIgnoresForeignVpcs(t *testing.T) {
 		t.Fatalf("a foreign Vpc must survive: %v", err)
 	}
 }
+
+type foreignFixture struct {
+	c         client.Client
+	network   v1alpha1.Network
+	namespace string
+	intruder  string
+}
+
+func newForeignFixture(t *testing.T) foreignFixture {
+	t.Helper()
+	c := cleanEnv(t)
+	tenant := unique(t, "zz")
+	network := networkOf(unique(t, "net"), tenant, "10.100.0.0/16")
+	requireAccepted(t, c, network)
+	f := foreignFixture{c: c, network: *network, namespace: newNamespace(t, tenant, "prod"), intruder: newNamespace(t, unique(t, "aa"), "prod")}
+	requireAccepted(t, c, policySubnet(f.intruder, "intruder", network.Name, "10.100.1.0/24"))
+	return f
+}
+
+func TestNetworkReconcilerIgnoresSubnetsOfOtherTenants(t *testing.T) {
+	f := newForeignFixture(t)
+	requireAccepted(t, f.c, policySubnet(f.namespace, "mine", f.network.Name, "10.100.1.0/24"))
+	reconcileNetwork(t, f.c, f.network.Name)
+	got := getNetwork(t, f.c, f.network.Name).Status.Subnets
+	if len(got) != 1 || got[0].Namespace != f.namespace {
+		t.Fatalf("status subnets %+v", got)
+	}
+}
+
+func TestNetworkDeletionIgnoresSubnetsOfOtherTenants(t *testing.T) {
+	f := newForeignFixture(t)
+	reconcileNetwork(t, f.c, f.network.Name)
+	if err := f.c.Delete(context.Background(), &f.network); err != nil {
+		t.Fatal(err)
+	}
+	reconcileNetwork(t, f.c, f.network.Name)
+	var gone v1alpha1.Network
+	if err := f.c.Get(context.Background(), client.ObjectKey{Name: f.network.Name}, &gone); !apierrors.IsNotFound(err) {
+		t.Fatalf("a foreign Subnet must not block the deletion: %v", err)
+	}
+}

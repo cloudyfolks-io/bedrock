@@ -6,6 +6,7 @@ import (
 	"strconv"
 	"strings"
 
+	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -200,7 +201,7 @@ func containsString(list []string, value string) bool {
 }
 
 func (r *NetworkReconciler) acceptedSubnets(ctx context.Context, network v1alpha1.Network) ([]v1alpha1.NetworkSubnetStatus, error) {
-	facts, err := r.subnetFacts(ctx, network.Name)
+	facts, err := ownedSubnetFacts(ctx, r.Client, network)
 	if err != nil {
 		return nil, err
 	}
@@ -212,14 +213,27 @@ func (r *NetworkReconciler) acceptedSubnets(ctx context.Context, network v1alpha
 	return out, nil
 }
 
-func (r *NetworkReconciler) subnetFacts(ctx context.Context, network string) ([]SubnetFacts, error) {
+func ownedSubnetFacts(ctx context.Context, c client.Reader, network v1alpha1.Network) ([]SubnetFacts, error) {
 	var subnets v1alpha1.SubnetList
-	if err := r.Client.List(ctx, &subnets); err != nil {
+	if err := c.List(ctx, &subnets); err != nil {
 		return nil, err
 	}
+	tenants := map[string]string{}
 	var facts []SubnetFacts
 	for _, s := range subnets.Items {
-		if s.Spec.NetworkRef == network {
+		if s.Spec.NetworkRef != network.Name {
+			continue
+		}
+		tenant, known := tenants[s.Namespace]
+		if !known {
+			var namespace corev1.Namespace
+			if err := c.Get(ctx, client.ObjectKey{Name: s.Namespace}, &namespace); client.IgnoreNotFound(err) != nil {
+				return nil, err
+			}
+			tenant = namespace.Labels[v1alpha1.LabelTenant]
+			tenants[s.Namespace] = tenant
+		}
+		if NetworkAllowed(tenant, network) == nil {
 			facts = append(facts, SubnetFacts{Namespace: s.Namespace, Name: s.Name, CIDR: s.Spec.CIDR, Created: s.CreationTimestamp.Time})
 		}
 	}
@@ -255,7 +269,7 @@ func externalSettled(conditions []metav1.Condition) bool {
 }
 
 func (r *NetworkReconciler) finalize(ctx context.Context, network *v1alpha1.Network) (reconcile.Result, error) {
-	facts, err := r.subnetFacts(ctx, network.Name)
+	facts, err := ownedSubnetFacts(ctx, r.Client, *network)
 	if err != nil {
 		return reconcile.Result{}, err
 	}

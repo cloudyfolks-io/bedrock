@@ -198,7 +198,7 @@ func TestSubnetReconcilerRejectsANetworkOfAnotherTenant(t *testing.T) {
 	foreign := newNamespace(t, unique(t, "other"), "prod")
 	requireAccepted(t, f.c, policySubnet(foreign, "default", f.network.Name, "10.100.1.0/24"))
 	reconcileSubnet(t, f.c, foreign, "default")
-	requireSubnetReason(t, f.c, foreign, "default", metav1.ConditionFalse, ReasonNetworkNotAllowed)
+	requireSubnetReason(t, f.c, foreign, "default", metav1.ConditionFalse, ReasonNetworkNotOwned)
 	requireNoFabricSubnet(t, f.c, foreign, "default")
 }
 
@@ -301,4 +301,19 @@ func TestSubnetTwoNamespacesSameNameGetDifferentFabricSubnets(t *testing.T) {
 	if errA != nil || errB != nil || a.GetName() == b.GetName() {
 		t.Fatalf("Fabric Subnets %v %v", errA, errB)
 	}
+}
+
+func TestSubnetReconcilerIgnoresSubnetsOfOtherTenantsForOverlap(t *testing.T) {
+	c := cleanEnv(t)
+	tenant := unique(t, "zz")
+	network := readyNetwork(t, c, tenant)
+	mine := newNamespace(t, tenant, "prod")
+	intruder := newNamespace(t, unique(t, "aa"), "prod")
+	requireAccepted(t, c, policySubnet(intruder, "intruder", network.Name, "10.100.1.0/24"))
+	requireAccepted(t, c, policySubnet(mine, "mine", network.Name, "10.100.1.0/24"))
+	reconcileSubnet(t, c, intruder, "intruder")
+	reconcileSubnet(t, c, mine, "mine")
+	requireSubnetReason(t, c, intruder, "intruder", metav1.ConditionFalse, ReasonNetworkNotOwned)
+	requireNoFabricSubnet(t, c, intruder, "intruder")
+	requireSubnetReason(t, c, mine, "mine", metav1.ConditionFalse, ReasonFabricNotReady)
 }

@@ -77,37 +77,38 @@ func (r *DNSZoneReconciler) program(ctx context.Context, zone v1alpha1.DNSZone) 
 	if v != nil {
 		return zoneRefused(zone, v.Reason, v.Message)
 	}
-	vpcs, err := r.attachedVpcs(ctx, zone)
+	vpcs, attached, err := r.attachedVpcs(ctx, zone, tenant)
 	if err != nil {
 		return metav1.Condition{}, 0, err
 	}
-	return r.apply(ctx, zone, tenant, project, records, vpcs)
+	return r.apply(ctx, zone, tenant, project, records, vpcs, attached)
 }
 
-func (r *DNSZoneReconciler) attachedVpcs(ctx context.Context, zone v1alpha1.DNSZone) (map[string]string, error) {
+func (r *DNSZoneReconciler) attachedVpcs(ctx context.Context, zone v1alpha1.DNSZone, tenant string) (map[string]string, int, error) {
 	var subnets v1alpha1.SubnetList
 	if err := r.Client.List(ctx, &subnets, client.InNamespace(zone.Namespace)); err != nil {
-		return nil, err
+		return nil, 0, err
 	}
 	vpcs := map[string]string{}
+	attached := 0
 	for _, name := range NetworksOf(zone.Namespace, zone.Name, subnets.Items) {
 		var network v1alpha1.Network
 		err := r.Client.Get(ctx, client.ObjectKey{Name: name}, &network)
 		if err != nil && !apierrors.IsNotFound(err) {
-			return nil, err
+			return nil, 0, err
 		}
+		if err == nil && NetworkAllowed(tenant, network) != nil {
+			continue
+		}
+		attached++
 		if err == nil && network.Status.VPC != "" {
 			vpcs[name] = network.Status.VPC
 		}
 	}
-	return vpcs, nil
+	return vpcs, attached, nil
 }
 
-func (r *DNSZoneReconciler) apply(ctx context.Context, zone v1alpha1.DNSZone, tenant, project string, records []fabric.DNSRecord, vpcs map[string]string) (metav1.Condition, time.Duration, error) {
-	attached, err := r.attachedNetworkCount(ctx, zone)
-	if err != nil {
-		return metav1.Condition{}, 0, err
-	}
+func (r *DNSZoneReconciler) apply(ctx context.Context, zone v1alpha1.DNSZone, tenant, project string, records []fabric.DNSRecord, vpcs map[string]string, attached int) (metav1.Condition, time.Duration, error) {
 	wanted := map[string]bool{}
 	for network, vpc := range vpcs {
 		name := DNSZoneName(zone.Namespace, zone.Name, network)
@@ -139,14 +140,6 @@ func (r *DNSZoneReconciler) apply(ctx context.Context, zone v1alpha1.DNSZone, te
 		}
 	}
 	return trueCondition(v1alpha1.ConditionReady, zone.Generation, ReasonProgrammed), 0, nil
-}
-
-func (r *DNSZoneReconciler) attachedNetworkCount(ctx context.Context, zone v1alpha1.DNSZone) (int, error) {
-	var subnets v1alpha1.SubnetList
-	if err := r.Client.List(ctx, &subnets, client.InNamespace(zone.Namespace)); err != nil {
-		return 0, err
-	}
-	return len(NetworksOf(zone.Namespace, zone.Name, subnets.Items)), nil
 }
 
 func (r *DNSZoneReconciler) ownedZones(ctx context.Context, zone *v1alpha1.DNSZone) ([]*unstructured.Unstructured, error) {

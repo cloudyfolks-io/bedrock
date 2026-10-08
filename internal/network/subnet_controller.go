@@ -95,7 +95,7 @@ func (r *SubnetReconciler) check(ctx context.Context, subnet v1alpha1.Subnet) (S
 	if v := NetworkAllowed(tenant, network); v != nil {
 		return SubnetInput{}, v, nil
 	}
-	facts, err := (&NetworkReconciler{Client: r.Client}).subnetFacts(ctx, network.Name)
+	facts, err := ownedSubnetFacts(ctx, r.Client, network)
 	if err != nil {
 		return SubnetInput{}, nil, err
 	}

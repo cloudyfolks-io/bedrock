@@ -203,3 +203,21 @@ func TestDNSZoneDeletionRemovesFabricZones(t *testing.T) {
 		t.Fatalf("the finalizer must be gone: %v", err)
 	}
 }
+
+func TestDNSZoneIgnoresSubnetsOfOtherTenants(t *testing.T) {
+	c := cleanEnv(t)
+	owner := unique(t, "acme")
+	network := networkOf(unique(t, "net"), owner, "10.100.0.0/16")
+	requireAccepted(t, c, network)
+	reconcileNetwork(t, c, network.Name)
+	intruder := newNamespace(t, unique(t, "evil"), "prod")
+	subnet := policySubnet(intruder, "intruder", network.Name, "10.100.1.0/24")
+	subnet.Spec.DNSZoneRef = "poison"
+	requireAccepted(t, c, subnet)
+	requireAccepted(t, c, zoneFor(intruder, "poison", dbRecord))
+	reconcileDNSZone(t, c, intruder, "poison", knowsEverything)
+	requireZone(t, c, intruder, "poison", metav1.ConditionFalse, ReasonNotAttached)
+	if len(fabricZones(t, c, "poison")) != 0 {
+		t.Fatal("a foreign Subnet must not reach the Vpc of another tenant")
+	}
+}

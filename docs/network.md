@@ -95,10 +95,11 @@ DHCP in the guest comes from the Fabric Subnet.
 The router option is the gateway.
 The DNS servers come from the Setting `network.dns-servers`.
 
-A tenant pod cannot attach to a network of another namespace.
-A tenant pod cannot select a Fabric Subnet or a Fabric security group with an annotation.
-The admission policy `bedrock-network-attachments` refuses both.
-KubeVirt, Fabric and the Bedrock operator are not subject to the policy.
+Only the platform may add, change or remove network selection annotations on a pod.
+The annotations are all keys with the prefix `k8s.v1.cni.cncf.io/`, `v1.multus-cni.io/` or `ovn.kubernetes.io/`, and all keys with the text `cloudyfolks.io/`.
+The admission policy `bedrock-network-attachments` refuses every other identity in a project namespace.
+The allowed identities are the service accounts `kubevirt-controller` (namespace `kubevirt`), `ovn`, `fabric-cni` and `multus` (namespace `kube-system`) and `bedrock-operator` (namespace `bedrock-system`).
+A tenant user, a Deployment and a Job cannot attach a pod to a network.
 
 ## Networks and external access
 
@@ -228,6 +229,7 @@ Then take the action in the table.
 | `Applied` | The Subnet is programmed. No action. |
 | `Attached` | The ElasticIP is attached to its target. No action. |
 | `BGPNotConfigured` | Bgp mode misses a Setting. Set the keys that the message names. |
+| `CIDRReserved` | The Subnet CIDR overlaps a provider network, the join subnet or a management range. Use another CIDR. |
 | `CIDROutsideNetwork` | The Subnet CIDR is not inside the Network CIDR. Use another CIDR. |
 | `CIDROverlap` | An older Subnet overlaps this one. Use another CIDR. |
 | `Connected` | The external connection works. No action. |
@@ -243,7 +245,7 @@ Then take the action in the table.
 | `InvalidRecords` | A DNS record has a bad name or address. Fix the record. |
 | `InvalidRules` | A security group rule is wrong. Use one of cidr and securityGroupRef, valid ports and a known protocol. |
 | `NamespaceNotLabeled` | The namespace is not a project namespace. Create the object in a project namespace. |
-| `NetworkNotAllowed` | The Network belongs to another tenant. Use a Network of your tenant. |
+| `NetworkNotOwned` | The Network belongs to another tenant. Use a Network of your tenant. |
 | `NetworkNotExternal` | The Network has no external connection. Set `enableExternal` on the Network. |
 | `NetworkNotFound` | The Network does not exist. Fix `networkRef`. |
 | `NetworkNotReady` | The Network is not ready. Wait. |
@@ -255,6 +257,7 @@ Then take the action in the table.
 | `RefNotFound` | A rule names a security group that does not exist. Create it or fix the rule. |
 | `Reserved` | The ElasticIP holds an address and has no target. No action. |
 | `TargetMismatch` | The target does not point back to this object. Fix the reference. |
+| `TargetInUse` | An older ElasticIP already uses this VM interface. Delete one of the two ElasticIPs. |
 | `TargetNetworkMismatch` | The targets are on more than one Network. Use targets of one Network. |
 | `TargetNotFound` | The target does not exist. Fix the target. |
 | `TargetPortsDiffer` | A listener has targets with different ports. Use one port. |
@@ -263,6 +266,7 @@ Then take the action in the table.
 | `Unsupported` | A Fabric kind is missing, a rule needs IPv6, or the request cannot be done. Read the message. |
 | `VpcPending` | Fabric has not finished the Vpc. Wait. |
 | `VpcReady` | The Vpc works. No action. |
+| `WaitingForDefaultSecurityGroup` | Fabric has not programmed the default security group of the namespace yet. Wait. |
 | `WaitingForAddress` | A VM has no address yet. Wait for the VM to start. |
 
 ## Limits

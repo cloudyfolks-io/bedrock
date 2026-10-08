@@ -66,8 +66,8 @@ func TestVerdictsRejectOverlapKeepingTheOlder(t *testing.T) {
 			if loser == nil || loser.Reason != ReasonCIDROverlap || loser.Message == "" {
 				t.Fatalf("unexpected verdict %v", loser)
 			}
-			if want := "a/old " + cidrs[0]; !strings.Contains(loser.Message, want) {
-				t.Fatalf("message %q must name %q", loser.Message, want)
+			if strings.Contains(loser.Message, "a/old") || strings.Contains(loser.Message, cidrs[0]) {
+				t.Fatalf("message %q must not name the winner", loser.Message)
 			}
 		})
 	}
@@ -169,7 +169,7 @@ func TestNetworkAllowed(t *testing.T) {
 	}
 	for _, label := range []string{"other", ""} {
 		v := NetworkAllowed(label, network)
-		if v == nil || v.Reason != ReasonNetworkNotAllowed || v.Message != "the Network belongs to another tenant" {
+		if v == nil || v.Reason != ReasonNetworkNotOwned || v.Message != "the Network belongs to another tenant" {
 			t.Fatalf("label %q: %v", label, v)
 		}
 	}
