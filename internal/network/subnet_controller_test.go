@@ -332,3 +332,37 @@ func TestSubnetReconcilerIgnoresSubnetsOfOtherTenantsForOverlap(t *testing.T) {
 	requireNoFabricSubnet(t, c, intruder, "intruder")
 	requireSubnetReason(t, c, mine, "mine", metav1.ConditionFalse, ReasonFabricNotReady)
 }
+
+func reservedFixture(t *testing.T, cidr string) subnetFixture {
+	t.Helper()
+	c := cleanEnv(t)
+	publicSettings(t)
+	tenant := unique(t, "acme")
+	network := networkOf(unique(t, "net"), tenant, cidr)
+	requireAccepted(t, c, network)
+	reconcileNetwork(t, c, network.Name)
+	if err := fabrictest.MarkVpcStandby(context.Background(), c, network.Name); err != nil {
+		t.Fatal(err)
+	}
+	reconcileNetwork(t, c, network.Name)
+	return subnetFixture{c: c, tenant: tenant, network: *network, namespace: newNamespace(t, tenant, "prod")}
+}
+
+func TestSubnetReconcilerRejectsProviderNetworkRanges(t *testing.T) {
+	f := reservedFixture(t, "91.246.0.0/16")
+	f.create(t, f.namespace, "clash", "91.246.31.0/24")
+	f.create(t, f.namespace, "fine", "91.246.40.0/24")
+	reconcileSubnet(t, f.c, f.namespace, "clash")
+	reconcileSubnet(t, f.c, f.namespace, "fine")
+	requireSubnetReason(t, f.c, f.namespace, "clash", metav1.ConditionFalse, ReasonCIDRReserved)
+	requireNoFabricSubnet(t, f.c, f.namespace, "clash")
+	requireSubnetReason(t, f.c, f.namespace, "fine", metav1.ConditionFalse, ReasonFabricNotReady)
+}
+
+func TestSubnetReconcilerRejectsTheJoinSubnet(t *testing.T) {
+	f := reservedFixture(t, "100.64.0.0/16")
+	f.create(t, f.namespace, "clash", "100.64.1.0/24")
+	reconcileSubnet(t, f.c, f.namespace, "clash")
+	requireSubnetReason(t, f.c, f.namespace, "clash", metav1.ConditionFalse, ReasonCIDRReserved)
+	requireNoFabricSubnet(t, f.c, f.namespace, "clash")
+}

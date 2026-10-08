@@ -272,6 +272,7 @@ Then take the action in the table.
 ## Limits
 
 - Only IPv4 works.
+- A Subnet CIDR must not overlap a provider network, the join subnet, the API address or a node address. The operator does not check the pod and service ranges, because tenant VPCs are isolated. The management range is known only as single addresses.
 - A VM without an ElasticIP has no route to the internet.
 - A health check is on or off. The other health check fields are not used.
 - L2 mode has one default route, to the first provider network.

@@ -1,6 +1,7 @@
 package network
 
 import (
+	"cmp"
 	"context"
 	"fmt"
 	"time"
@@ -15,6 +16,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 
 	"github.com/cloudyfolks-io/bedrock/api/v1alpha1"
+	"github.com/cloudyfolks-io/bedrock/internal/config"
 	"github.com/cloudyfolks-io/bedrock/internal/network/fabric"
 	"github.com/cloudyfolks-io/bedrock/internal/ssa"
 )
@@ -110,6 +112,17 @@ func (r *SubnetReconciler) check(ctx context.Context, subnet v1alpha1.Subnet) (S
 	if v := VerdictsFor(network.Spec.CIDR, facts)[key]; v != nil {
 		return SubnetInput{}, v, nil
 	}
+	cfg, err := LoadConfig(ctx, r.Client)
+	if err != nil {
+		return SubnetInput{}, nil, err
+	}
+	reserved, err := r.reservedRanges(ctx, cfg)
+	if err != nil {
+		return SubnetInput{}, nil, err
+	}
+	if v := ReservedOverlap(subnet.Spec.CIDR, reserved); v != nil {
+		return SubnetInput{}, v, nil
+	}
 	if v := GatewayViolation(subnet.Spec.CIDR, subnet.Spec.Gateway); v != nil {
 		return SubnetInput{}, v, nil
 	}
@@ -119,11 +132,32 @@ func (r *SubnetReconciler) check(ctx context.Context, subnet v1alpha1.Subnet) (S
 	if !v1alpha1.IsConditionTrue(network.Status.Conditions, v1alpha1.ConditionReady) {
 		return SubnetInput{}, &Violation{Reason: ReasonNetworkNotReady, Message: fmt.Sprintf("the Network %q is not ready yet", network.Name)}, nil
 	}
-	cfg, err := LoadConfig(ctx, r.Client)
-	if err != nil {
-		return SubnetInput{}, nil, err
-	}
 	return SubnetInput{Subnet: subnet, Network: network, Tenant: tenant, Project: project, DNSServers: cfg.DNSServers}, nil, nil
+}
+
+func (r *SubnetReconciler) reservedRanges(ctx context.Context, cfg Config) ([]ReservedRange, error) {
+	join, vip := config.DefaultJoinCIDR, ""
+	var cluster v1alpha1.Cluster
+	err := r.Client.Get(ctx, client.ObjectKey{Name: v1alpha1.ClusterName}, &cluster)
+	if err != nil && !apierrors.IsNotFound(err) {
+		return nil, err
+	}
+	if err == nil {
+		join, vip = cmp.Or(cluster.Spec.JoinCIDR, join), cluster.Spec.API.VIP
+	}
+	var nodes corev1.NodeList
+	if err := r.Client.List(ctx, &nodes); err != nil {
+		return nil, err
+	}
+	var addresses []string
+	for _, node := range nodes.Items {
+		for _, a := range node.Status.Addresses {
+			if a.Type == corev1.NodeInternalIP {
+				addresses = append(addresses, a.Address)
+			}
+		}
+	}
+	return ReservedRanges(cfg, join, vip, addresses), nil
 }
 
 func (r *SubnetReconciler) conflicts(ctx context.Context, desired, attachment *unstructured.Unstructured, subnet v1alpha1.Subnet) (bool, error) {
