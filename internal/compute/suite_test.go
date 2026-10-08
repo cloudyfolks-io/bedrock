@@ -96,12 +96,16 @@ func newProjectNamespace(t *testing.T, c client.Client, name string) {
 	}
 }
 
+func uniqueNamespaceSuffix() string {
+	namespaceMu.Lock()
+	defer namespaceMu.Unlock()
+	namespaceSeq++
+	return strconv.Itoa(namespaceSeq)
+}
+
 func uniqueNamespace(t *testing.T, c client.Client) string {
 	t.Helper()
-	namespaceMu.Lock()
-	namespaceSeq++
-	name := "acme-web-" + strconv.Itoa(namespaceSeq)
-	namespaceMu.Unlock()
+	name := "acme-web-" + uniqueNamespaceSuffix()
 	newProjectNamespace(t, c, name)
 	return name
 }
