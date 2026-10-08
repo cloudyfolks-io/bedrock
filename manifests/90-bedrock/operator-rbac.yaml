@@ -6,18 +6,6 @@ metadata:
   name: bedrock-operator
 rules:
 - apiGroups:
-  - aaq.kubevirt.io
-  resources:
-  - applicationawareresourcequotas
-  verbs:
-  - create
-  - delete
-  - get
-  - list
-  - patch
-  - update
-  - watch
-- apiGroups:
   - admissionregistration.k8s.io
   resources:
   - mutatingwebhookconfigurations
@@ -72,6 +60,7 @@ rules:
   - apps
   resources:
   - controllerrevisions
+  - daemonsets
   verbs:
   - get
   - list
@@ -184,11 +173,14 @@ rules:
 - apiGroups:
   - bedrock.cloudyfolks.io
   resources:
-  - elasticips
+  - dnszones/finalizers
+  - elasticips/finalizers
+  - loadbalancers/finalizers
+  - networks/finalizers
+  - securitygroups/finalizers
+  - subnets/finalizers
   verbs:
-  - get
-  - list
-  - watch
+  - update
 - apiGroups:
   - cdi.kubevirt.io
   resources:
@@ -245,6 +237,47 @@ rules:
   resources:
   - drivers
   - operatorconfigs
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - update
+  - watch
+- apiGroups:
+  - fabric.cloudyfolks.io
+  resources:
+  - bgp-confs
+  - dns-zones
+  - ovn-eips
+  - ovn-fips
+  - provider-networks
+  - router-lb-rules
+  - security-groups
+  - subnets
+  - vlans
+  - vpcs
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - update
+  - watch
+- apiGroups:
+  - fabric.cloudyfolks.io
+  resources:
+  - ips
+  verbs:
+  - get
+  - list
+  - watch
+- apiGroups:
+  - k8s.cni.cncf.io
+  resources:
+  - network-attachment-definitions
   verbs:
   - create
   - delete
@@ -457,4 +490,12 @@ rules:
   - list
   - patch
   - update
+  - watch
+- apiGroups:
+  - ""
+  resources:
+  - namespaces
+  verbs:
+  - get
+  - list
   - watch
