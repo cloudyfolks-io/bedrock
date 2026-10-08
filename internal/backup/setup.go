@@ -11,7 +11,7 @@ const eventSource = "bedrock-backup"
 func SetupWithManager(mgr ctrl.Manager) error {
 	recorder := mgr.GetEventRecorderFor(eventSource)
 	reconcilers := []interface{ SetupWithManager(ctrl.Manager) error }{
-		&TargetReconciler{Client: mgr.GetClient(), Recorder: recorder},
+		&TargetReconciler{Client: mgr.GetClient(), APIReader: mgr.GetAPIReader(), Recorder: recorder},
 		&BackupReconciler{Client: mgr.GetClient(), Now: time.Now, Recorder: recorder},
 		&RestoreReconciler{Client: mgr.GetClient(), Now: time.Now},
 	}

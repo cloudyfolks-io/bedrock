@@ -58,8 +58,14 @@ func setCredentialsSecret(t *testing.T, data map[string]string) {
 	}
 }
 
+const (
+	testAccessKey  = "AKIAIOSFODNN7EXAMPLE"
+	testSecretKey  = "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY"
+	testRepoPasswd = "repository-password-0123456789"
+)
+
 func validCredentials() map[string]string {
-	return map[string]string{"access-key-id": "AK", "secret-access-key": "SK", "repository-password": "RP"}
+	return map[string]string{"access-key-id": testAccessKey, "secret-access-key": testSecretKey, "repository-password": testRepoPasswd}
 }
 
 func resetTargetState(t *testing.T) {
@@ -81,7 +87,7 @@ func resetTargetState(t *testing.T) {
 
 func newTargetReconciler() (*TargetReconciler, *record.FakeRecorder) {
 	recorder := record.NewFakeRecorder(50)
-	return &TargetReconciler{Client: k8sClient, Recorder: recorder}, recorder
+	return &TargetReconciler{Client: k8sClient, APIReader: k8sClient, Recorder: recorder}, recorder
 }
 
 func reconcileTarget(t *testing.T, r *TargetReconciler) ctrl.Result {
@@ -143,14 +149,14 @@ func TestTargetRendersTheLocation(t *testing.T) {
 	if err := k8sClient.Get(context.Background(), client.ObjectKey{Namespace: VeleroNamespace, Name: CredentialsSecretName}, credentials); err != nil {
 		t.Fatal(err)
 	}
-	if string(credentials.Data[CredentialsKey]) != "[default]\naws_access_key_id=AK\naws_secret_access_key=SK\n" {
+	if string(credentials.Data[CredentialsKey]) != "[default]\naws_access_key_id="+testAccessKey+"\naws_secret_access_key="+testSecretKey+"\n" {
 		t.Fatalf("credentials %q", credentials.Data[CredentialsKey])
 	}
 	repository := &corev1.Secret{}
 	if err := k8sClient.Get(context.Background(), client.ObjectKey{Namespace: VeleroNamespace, Name: RepositorySecretName}, repository); err != nil {
 		t.Fatal(err)
 	}
-	if string(repository.Data[RepositoryKey]) != "RP" {
+	if string(repository.Data[RepositoryKey]) != testRepoPasswd {
 		t.Fatalf("repository %q", repository.Data[RepositoryKey])
 	}
 	class := &unstructured.Unstructured{}
@@ -207,7 +213,7 @@ func TestTargetKeepsTheLocationOnBadCredentials(t *testing.T) {
 		t.Fatal("location changed")
 	}
 	repository := &corev1.Secret{}
-	if err := k8sClient.Get(context.Background(), client.ObjectKey{Namespace: VeleroNamespace, Name: RepositorySecretName}, repository); err != nil || string(repository.Data[RepositoryKey]) != "RP" {
+	if err := k8sClient.Get(context.Background(), client.ObjectKey{Namespace: VeleroNamespace, Name: RepositorySecretName}, repository); err != nil || string(repository.Data[RepositoryKey]) != testRepoPasswd {
 		t.Fatalf("repository secret changed: %v", err)
 	}
 	events := drainEvents(recorder)
@@ -267,7 +273,7 @@ func TestTargetEventsHideSecretValues(t *testing.T) {
 	setSetting(t, "backup.target", "nfs://nas/export")
 	reconcileTarget(t, r)
 	for _, event := range drainEvents(recorder) {
-		for _, secret := range []string{"AK", "SK", "RP"} {
+		for _, secret := range []string{testAccessKey, testSecretKey, testRepoPasswd} {
 			if strings.Contains(event, secret) {
 				t.Fatalf("event %q leaks %s", event, secret)
 			}
@@ -286,20 +292,71 @@ func TestTargetWithoutVeleroCRDsRequeues(t *testing.T) {
 	objects := []client.Object{
 		&v1alpha1.Setting{ObjectMeta: metav1.ObjectMeta{Name: "backup.target"}, Spec: v1alpha1.SettingSpec{Value: e2eTarget}},
 		&v1alpha1.Setting{ObjectMeta: metav1.ObjectMeta{Name: "backup.credentials-secret"}, Spec: v1alpha1.SettingSpec{Value: e2eSecretName}},
-		&corev1.Secret{ObjectMeta: metav1.ObjectMeta{Name: e2eSecretName, Namespace: SystemNamespace}, Data: map[string][]byte{"access-key-id": []byte("AK"), "secret-access-key": []byte("SK"), "repository-password": []byte("RP")}},
+		&corev1.Secret{ObjectMeta: metav1.ObjectMeta{Name: e2eSecretName, Namespace: SystemNamespace}, Data: map[string][]byte{"access-key-id": []byte(testAccessKey), "secret-access-key": []byte(testSecretKey), "repository-password": []byte(testRepoPasswd)}},
 	}
 	missing := func(context.Context, client.WithWatch, runtime.ApplyConfiguration, ...client.ApplyOption) error {
 		return &meta.NoKindMatchError{GroupKind: schema.GroupKind{Group: "velero.io", Kind: "BackupStorageLocation"}}
 	}
 	c := fake.NewClientBuilder().WithScheme(scheme).WithObjects(objects...).WithInterceptorFuncs(interceptor.Funcs{Apply: missing}).Build()
 	recorder := record.NewFakeRecorder(10)
-	r := &TargetReconciler{Client: c, Recorder: recorder}
+	r := &TargetReconciler{Client: c, APIReader: c, Recorder: recorder}
 	result, err := r.Reconcile(context.Background(), ctrl.Request{})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if result.RequeueAfter != 30*time.Second {
 		t.Fatalf("requeue %v", result.RequeueAfter)
+	}
+	if events := drainEvents(recorder); len(events) != 0 {
+		t.Fatalf("events %v", events)
+	}
+}
+
+func TestTargetEventsHideCredentialsInTheURL(t *testing.T) {
+	resetTargetState(t)
+	setSetting(t, "backup.target", "s3://"+testAccessKey+":"+testSecretKey+"@seaweedfs.backup-e2e.svc:8333/bedrock-backups")
+	setSetting(t, "backup.credentials-secret", e2eSecretName)
+	setCredentialsSecret(t, validCredentials())
+	r, recorder := newTargetReconciler()
+	reconcileTarget(t, r)
+	events := drainEvents(recorder)
+	if len(events) != 1 || !strings.Contains(events[0], ReasonTargetInvalid) {
+		t.Fatalf("events %v", events)
+	}
+	if strings.Contains(events[0], testAccessKey) || strings.Contains(events[0], "wJalrXUtnFEMI") {
+		t.Fatalf("event leaks the URL: %s", events[0])
+	}
+	setting := &v1alpha1.Setting{}
+	if err := k8sClient.Get(context.Background(), client.ObjectKey{Name: "backup.target"}, setting); err != nil {
+		t.Fatal(err)
+	}
+	for _, condition := range setting.Status.Conditions {
+		if strings.Contains(condition.Message, testAccessKey) || strings.Contains(condition.Message, "wJalrXUtnFEMI") {
+			t.Fatalf("condition leaks the URL: %s", condition.Message)
+		}
+	}
+}
+
+func TestTargetReadsCredentialsThroughTheAPIReader(t *testing.T) {
+	resetTargetState(t)
+	setSetting(t, "backup.target", e2eTarget)
+	setSetting(t, "backup.credentials-secret", e2eSecretName)
+	setCredentialsSecret(t, validCredentials())
+	watching, err := client.NewWithWatch(cfg, client.Options{Scheme: scheme})
+	if err != nil {
+		t.Fatal(err)
+	}
+	noSecretInformer := interceptor.Funcs{Get: func(ctx context.Context, c client.WithWatch, key client.ObjectKey, obj client.Object, opts ...client.GetOption) error {
+		if _, isSecret := obj.(*corev1.Secret); isSecret && key.Namespace == SystemNamespace {
+			return errors.NewNotFound(corev1.Resource("secrets"), key.Name)
+		}
+		return c.Get(ctx, key, obj, opts...)
+	}}
+	recorder := record.NewFakeRecorder(10)
+	r := &TargetReconciler{Client: interceptor.NewClient(watching, noSecretInformer), APIReader: k8sClient, Recorder: recorder}
+	reconcileTarget(t, r)
+	if _, err := getVelero(t, "BackupStorageLocation", LocationName); err != nil {
+		t.Fatalf("the location needs the credentials from the API reader: %v", err)
 	}
 	if events := drainEvents(recorder); len(events) != 0 {
 		t.Fatalf("events %v", events)

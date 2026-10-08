@@ -49,8 +49,9 @@ const (
 var requiredCredentialKeys = []string{keyAccessKeyID, keySecretAccessKey, keyRepositoryPass}
 
 type TargetReconciler struct {
-	Client   client.Client
-	Recorder record.EventRecorder
+	Client    client.Client
+	APIReader client.Reader
+	Recorder  record.EventRecorder
 }
 
 func (r *TargetReconciler) Reconcile(ctx context.Context, _ ctrl.Request) (ctrl.Result, error) {
@@ -102,7 +103,7 @@ func (r *TargetReconciler) credentialsSecret(ctx context.Context, name string) (
 		return nil, CredentialsSettingKey + " is empty", nil
 	}
 	secret := &corev1.Secret{}
-	err := r.Client.Get(ctx, types.NamespacedName{Namespace: SystemNamespace, Name: name}, secret)
+	err := r.APIReader.Get(ctx, types.NamespacedName{Namespace: SystemNamespace, Name: name}, secret)
 	if apierrors.IsNotFound(err) {
 		return nil, fmt.Sprintf("secret %s/%s does not exist", SystemNamespace, name), nil
 	}
@@ -207,14 +208,9 @@ func backupSettingNames(obj client.Object) bool {
 	return slices.Contains([]string{TargetSettingKey, CredentialsSettingKey}, obj.GetName())
 }
 
-func inSystemNamespace(obj client.Object) bool {
-	return obj.GetNamespace() == SystemNamespace
-}
-
 func (r *TargetReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	return ctrl.NewControllerManagedBy(mgr).
 		Named("backup-target").
 		Watches(&v1alpha1.Setting{}, handler.EnqueueRequestsFromMapFunc(toSingleRequest), builder.WithPredicates(predicate.NewPredicateFuncs(backupSettingNames))).
-		Watches(&corev1.Secret{}, handler.EnqueueRequestsFromMapFunc(toSingleRequest), builder.WithPredicates(predicate.NewPredicateFuncs(inSystemNamespace))).
 		Complete(r)
 }
