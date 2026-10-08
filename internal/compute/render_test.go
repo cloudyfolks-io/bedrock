@@ -11,6 +11,7 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 
 	"github.com/cloudyfolks-io/bedrock/api/v1alpha1"
+	"github.com/cloudyfolks-io/bedrock/internal/network"
 )
 
 func renderFixture() RenderInput {
@@ -131,7 +132,7 @@ func TestRenderNetworks(t *testing.T) {
 	if auto, _, _ := unstructured.NestedBool(spec, "domain", "devices", "autoattachPodInterface"); auto {
 		t.Fatal("autoattachPodInterface must be false")
 	}
-	annotations, labels := PodNetworkMetadata(in.NICs)
+	annotations, labels := network.PodNetworkMetadata(in.NICs)
 	gotAnnotations, _, _ := unstructured.NestedStringMap(out.VirtualMachine.Object, "spec", "template", "metadata", "annotations")
 	gotLabels, _, _ := unstructured.NestedStringMap(out.VirtualMachine.Object, "spec", "template", "metadata", "labels")
 	if !reflect.DeepEqual(gotAnnotations, annotations) || !reflect.DeepEqual(gotLabels, mergeLabels(in.Labels, labels)) {

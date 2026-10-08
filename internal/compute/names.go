@@ -1,10 +1,7 @@
 package compute
 
 import (
-	"crypto/sha256"
-	"encoding/hex"
 	"fmt"
-	"strings"
 
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -15,10 +12,7 @@ import (
 const (
 	AnnotationRestoreHold = "bedrock.cloudyfolks.io/restore-hold"
 	AnnotationExpiresAt   = "bedrock.cloudyfolks.io/expires-at"
-	LabelSecurityGroup    = "sg.bedrock.cloudyfolks.io/"
 	DefaultSubnetName     = "default"
-	fabricNameLimit       = 63
-	fabricHashLength      = 12
 )
 
 const (
@@ -68,30 +62,6 @@ func CloudInitSecretName(vm string) string {
 
 func CDROMClaimName(vm string, index int) string {
 	return fmt.Sprintf("%s-cdrom-%d", vm, index)
-}
-
-func AttachmentProvider(namespace, subnet string) string {
-	return subnet + "." + namespace + ".fabric"
-}
-
-func DefaultFabricGroup(namespace string) string {
-	return "default-" + namespace
-}
-
-func FabricName(namespace, name string) string {
-	joined := strings.Map(fabricRune, strings.ToLower(namespace+"-"+name))
-	if len(joined) > fabricNameLimit-fabricHashLength-1 {
-		joined = joined[:fabricNameLimit-fabricHashLength-1]
-	}
-	sum := sha256.Sum256([]byte(namespace + "/" + name))
-	return strings.TrimRight(joined, "-") + "-" + hex.EncodeToString(sum[:])[:fabricHashLength]
-}
-
-func fabricRune(r rune) rune {
-	if (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') || r == '-' {
-		return r
-	}
-	return '-'
 }
 
 func OwnerLabels(kind, name string, ns corev1.Namespace) (map[string]string, bool) {

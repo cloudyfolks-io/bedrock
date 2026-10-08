@@ -18,6 +18,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client/interceptor"
 
 	"github.com/cloudyfolks-io/bedrock/api/v1alpha1"
+	"github.com/cloudyfolks-io/bedrock/internal/network"
 )
 
 func noMutation(*v1alpha1.VirtualMachine) {}
@@ -57,7 +58,7 @@ func TestVMRendersUnderlyingObjects(t *testing.T) {
 	}
 	annotations, _, _ := unstructured.NestedStringMap(kubeVirt.Object, "spec", "template", "metadata", "annotations")
 	labels, _, _ := unstructured.NestedStringMap(kubeVirt.Object, "spec", "template", "metadata", "labels")
-	if annotations["default."+ns+".fabric.cloudyfolks.io/port_security"] != "true" || annotations["default."+ns+".fabric.cloudyfolks.io/security_groups"] != FabricName(ns, "web") || labels["sg.bedrock.cloudyfolks.io/web"] != "true" {
+	if annotations["default."+ns+".fabric.cloudyfolks.io/port_security"] != "true" || annotations["default."+ns+".fabric.cloudyfolks.io/security_groups"] != network.FabricName(ns, "web") || labels["sg.bedrock.cloudyfolks.io/web"] != "true" {
 		t.Errorf("annotations %+v labels %+v", annotations, labels)
 	}
 	requireReason(t, vm, "Starting")
@@ -441,7 +442,7 @@ func TestRunningPodGetsSecurityGroupChange(t *testing.T) {
 		return pod
 	}
 	live := get("launcher-web-1")
-	if live.Annotations[key] != FabricName(ns, "web") || live.Labels["sg.bedrock.cloudyfolks.io/web"] != "true" {
+	if live.Annotations[key] != network.FabricName(ns, "web") || live.Labels["sg.bedrock.cloudyfolks.io/web"] != "true" {
 		t.Fatalf("live pod %+v %+v", live.Annotations, live.Labels)
 	}
 	if _, found := live.Labels["sg.bedrock.cloudyfolks.io/old"]; found {
@@ -547,7 +548,7 @@ func TestVolumeRefusesAClaimOfAnotherOwner(t *testing.T) {
 func TestVMWaitsForTheDefaultSecurityGroup(t *testing.T) {
 	c, _ := startEnv(t)
 	ns := seedPlatform(t, c)
-	must(t, c.Delete(context.Background(), emptyNamed(fabricGroupGVK, DefaultFabricGroup(ns))))
+	must(t, c.Delete(context.Background(), emptyNamed(fabricGroupGVK, network.DefaultSecurityGroupName(ns))))
 	createVM(t, c, ns, "web-1", func(vm *v1alpha1.VirtualMachine) { vm.Spec.Networks[0].SecurityGroups = nil })
 	r := newVMReconciler(c)
 	result := reconcileVM(t, r, ns, "web-1")
@@ -557,7 +558,7 @@ func TestVMWaitsForTheDefaultSecurityGroup(t *testing.T) {
 		t.Fatalf("network %+v requeue %s", network, result.RequeueAfter)
 	}
 	requireAbsent(t, c, kubeVirtVMGVK, ns, "web-1")
-	ensureUnstructured(t, c, fabricGroupGVK, DefaultFabricGroup(ns), map[string]any{})
+	ensureUnstructured(t, c, fabricGroupGVK, network.DefaultSecurityGroupName(ns), map[string]any{})
 	reconcileVM(t, r, ns, "web-1")
 	requirePresent(t, c, kubeVirtVMGVK, ns, "web-1")
 }
@@ -565,7 +566,7 @@ func TestVMWaitsForTheDefaultSecurityGroup(t *testing.T) {
 func TestVMWithNamedGroupsNeedsNoDefaultGroup(t *testing.T) {
 	c, _ := startEnv(t)
 	ns := seedPlatform(t, c)
-	must(t, c.Delete(context.Background(), emptyNamed(fabricGroupGVK, DefaultFabricGroup(ns))))
+	must(t, c.Delete(context.Background(), emptyNamed(fabricGroupGVK, network.DefaultSecurityGroupName(ns))))
 	createVM(t, c, ns, "web-1", noMutation)
 	reconcileVM(t, newVMReconciler(c), ns, "web-1")
 	requirePresent(t, c, kubeVirtVMGVK, ns, "web-1")

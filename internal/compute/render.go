@@ -12,6 +12,7 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 
 	"github.com/cloudyfolks-io/bedrock/api/v1alpha1"
+	"github.com/cloudyfolks-io/bedrock/internal/network"
 )
 
 const diskKeyLength = 20
@@ -92,7 +93,7 @@ func schedulingAffinity(scheduling *v1alpha1.VMScheduling) *corev1.Affinity {
 
 func kubeVirtVM(in RenderInput, affinity *corev1.Affinity) (*unstructured.Unstructured, error) {
 	vm := in.VirtualMachine
-	podAnnotations, podLabels := PodNetworkMetadata(in.NICs)
+	podAnnotations, podLabels := network.PodNetworkMetadata(in.NICs)
 	templateLabels := mergeLabels(in.Labels, podLabels)
 	templateSpec := map[string]any{
 		"evictionStrategy": evictionStrategyOf(vm.Spec.EvictionStrategy),
@@ -244,7 +245,7 @@ func interfacesOf(nics []NIC) []any {
 }
 
 func networksOf(nics []NIC) []any {
-	attachments := Attachments(nics)
+	attachments := network.Attachments(nics)
 	out := make([]any, 0, len(nics))
 	for index, nic := range nics {
 		multus := map[string]any{"networkName": attachments[index]}

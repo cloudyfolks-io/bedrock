@@ -14,6 +14,7 @@ import (
 
 	"github.com/cloudyfolks-io/bedrock/api/v1alpha1"
 	"github.com/cloudyfolks-io/bedrock/internal/images"
+	"github.com/cloudyfolks-io/bedrock/internal/network"
 )
 
 type resolveStep func(ctx context.Context, vm v1alpha1.VirtualMachine, in RenderInput) (RenderInput, *Gate, error)
@@ -192,7 +193,7 @@ func (r *VirtualMachineReconciler) stepDefaultGroup(ctx context.Context, vm v1al
 	if !slices.ContainsFunc(in.NICs, func(nic NIC) bool { return len(nic.SecurityGroups) == 0 }) {
 		return in, nil, nil
 	}
-	name := DefaultFabricGroup(vm.Namespace)
+	name := network.DefaultSecurityGroupName(vm.Namespace)
 	err := r.Client.Get(ctx, client.ObjectKey{Name: name}, emptyOf(fabricGroupGVK))
 	if notFound(err) {
 		return in, gateOf(ReasonWaitingForDefaultGroup, "the default security group %q does not exist yet", name), nil

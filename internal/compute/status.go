@@ -10,6 +10,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	"github.com/cloudyfolks-io/bedrock/api/v1alpha1"
+	"github.com/cloudyfolks-io/bedrock/internal/network"
 )
 
 type Gate struct{ Reason, Message string }
@@ -66,7 +67,7 @@ func AddressesOf(pods []corev1.Pod, nodeName, namespace string, subnets []string
 	}
 	var out []v1alpha1.VMAddress
 	for _, subnet := range subnets {
-		prefix := AttachmentProvider(namespace, subnet) + ".cloudyfolks.io/"
+		prefix := network.SubnetProvider(namespace, subnet) + ".cloudyfolks.io/"
 		ips := pod.Annotations[prefix+"ip_address"]
 		if ips == "" {
 			continue

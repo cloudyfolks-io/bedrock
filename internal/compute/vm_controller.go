@@ -23,6 +23,7 @@ import (
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
 
 	"github.com/cloudyfolks-io/bedrock/api/v1alpha1"
+	"github.com/cloudyfolks-io/bedrock/internal/network"
 	"github.com/cloudyfolks-io/bedrock/internal/ssa"
 )
 
@@ -285,7 +286,7 @@ func (r *VirtualMachineReconciler) syncLauncherPods(ctx context.Context, vm v1al
 	if err := r.Client.List(ctx, &pods, client.InNamespace(vm.Namespace), client.MatchingLabels{launcherPodLabel: vm.Name}); err != nil {
 		return err
 	}
-	annotations, labels := PodNetworkMetadata(nics)
+	annotations, labels := network.PodNetworkMetadata(nics)
 	for index := range pods.Items {
 		pod := &pods.Items[index]
 		if !pod.DeletionTimestamp.IsZero() {
@@ -310,7 +311,7 @@ func podMetadataPatch(pod corev1.Pod, annotations, labels map[string]string) map
 	changedAnnotations := missingLabels(pod.Annotations, annotations)
 	changedLabels := missingLabels(pod.Labels, labels)
 	for key := range pod.Labels {
-		if _, wanted := labels[key]; !wanted && strings.HasPrefix(key, LabelSecurityGroup) {
+		if _, wanted := labels[key]; !wanted && strings.HasPrefix(key, network.SecurityGroupLabel("")) {
 			changedLabels[key] = nil
 		}
 	}

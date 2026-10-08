@@ -9,6 +9,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	"github.com/cloudyfolks-io/bedrock/api/v1alpha1"
+	"github.com/cloudyfolks-io/bedrock/internal/network"
 )
 
 func TestPhase(t *testing.T) {
@@ -57,7 +58,7 @@ func launcherPod(node string, annotations map[string]string) corev1.Pod {
 }
 
 func addressAnnotations(subnet, ip, mac string) map[string]string {
-	prefix := AttachmentProvider("acme-web", subnet) + ".cloudyfolks.io/"
+	prefix := network.SubnetProvider("acme-web", subnet) + ".cloudyfolks.io/"
 	out := map[string]string{prefix + "ip_address": ip}
 	if mac != "" {
 		out[prefix+"mac_address"] = mac

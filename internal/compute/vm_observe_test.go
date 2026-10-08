@@ -13,6 +13,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	"github.com/cloudyfolks-io/bedrock/api/v1alpha1"
+	"github.com/cloudyfolks-io/bedrock/internal/network"
 )
 
 func setKubeVirtStatus(t *testing.T, c client.Client, ns, name string, status map[string]any) {
@@ -103,7 +104,7 @@ func TestVMStatusFromKubeVirt(t *testing.T) {
 }
 
 func addressAnnotationsIn(ns, subnet, ip, mac string) map[string]string {
-	prefix := AttachmentProvider(ns, subnet) + ".cloudyfolks.io/"
+	prefix := network.SubnetProvider(ns, subnet) + ".cloudyfolks.io/"
 	return map[string]string{prefix + "ip_address": ip, prefix + "mac_address": mac}
 }
 
