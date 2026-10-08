@@ -1,0 +1,41 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: s3-roundtrip
+  namespace: objectstorage-e2e
+spec:
+  backoffLimit: 0
+  template:
+    spec:
+      restartPolicy: Never
+      containers:
+        - name: aws
+          image: docker.io/amazon/aws-cli:2.37.10
+          imagePullPolicy: IfNotPresent
+          env:
+            - name: AWS_ACCESS_KEY_ID
+              value: ${ACCESS_KEY}
+            - name: AWS_SECRET_ACCESS_KEY
+              value: ${SECRET_KEY}
+            - name: AWS_DEFAULT_REGION
+              value: us-east-1
+            - name: AWS_EC2_METADATA_DISABLED
+              value: "true"
+            - name: ENDPOINT
+              value: ${ENDPOINT}
+            - name: BUCKET
+              value: ${BUCKET}
+            - name: WANT_VERSIONING
+              value: "${WANT_VERSIONING}"
+          command:
+            - sh
+            - -ec
+            - |
+              aws configure set default.s3.addressing_style path
+              echo hello-object-storage > /tmp/put.txt
+              aws --endpoint-url "$ENDPOINT" s3 cp /tmp/put.txt "s3://$BUCKET/hello.txt"
+              aws --endpoint-url "$ENDPOINT" s3 cp "s3://$BUCKET/hello.txt" /tmp/get.txt
+              cmp /tmp/put.txt /tmp/get.txt
+              if [ "$WANT_VERSIONING" = true ]; then
+                aws --endpoint-url "$ENDPOINT" s3api get-bucket-versioning --bucket "$BUCKET" | grep -q Enabled
+              fi

@@ -1,0 +1,62 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: backup-e2e
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: seaweedfs-s3
+  namespace: backup-e2e
+stringData:
+  s3.json: '{"identities":[{"name":"e2e","credentials":[{"accessKey":"e2e-access-key","secretKey":"e2e-secret-key"}],"actions":["Admin","Read","Write","List","Tagging"]}]}'
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: seaweedfs
+  namespace: backup-e2e
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: seaweedfs
+  template:
+    metadata:
+      labels:
+        app: seaweedfs
+    spec:
+      containers:
+        - name: seaweedfs
+          image: docker.io/chrislusf/seaweedfs:4.48
+          imagePullPolicy: IfNotPresent
+          args: ["mini", "-dir=/data", "-s3.config=/etc/seaweedfs/s3.json"]
+          ports:
+            - containerPort: 8333
+            - containerPort: 9333
+          readinessProbe:
+            tcpSocket:
+              port: 8333
+          volumeMounts:
+            - name: data
+              mountPath: /data
+            - name: s3
+              mountPath: /etc/seaweedfs
+      volumes:
+        - name: data
+          emptyDir: {}
+        - name: s3
+          secret:
+            secretName: seaweedfs-s3
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: seaweedfs
+  namespace: backup-e2e
+spec:
+  selector:
+    app: seaweedfs
+  ports:
+    - name: s3
+      port: 8333

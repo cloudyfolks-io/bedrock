@@ -1,0 +1,27 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: make-bucket
+  namespace: backup-e2e
+spec:
+  backoffLimit: 20
+  template:
+    spec:
+      restartPolicy: Never
+      containers:
+        - name: aws
+          image: docker.io/amazon/aws-cli:2.37.10
+          imagePullPolicy: IfNotPresent
+          env:
+            - name: AWS_ACCESS_KEY_ID
+              value: e2e-access-key
+            - name: AWS_SECRET_ACCESS_KEY
+              value: e2e-secret-key
+            - name: AWS_DEFAULT_REGION
+              value: us-east-1
+            - name: AWS_EC2_METADATA_DISABLED
+              value: "true"
+          command:
+            - sh
+            - -c
+            - until aws --endpoint-url http://seaweedfs.backup-e2e.svc:8333 s3 mb s3://bedrock-backups; do sleep 3; done

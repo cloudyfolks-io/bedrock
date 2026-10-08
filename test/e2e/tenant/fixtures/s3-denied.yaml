@@ -1,0 +1,34 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: s3-denied
+  namespace: objectstorage-e2e
+spec:
+  backoffLimit: 0
+  template:
+    spec:
+      restartPolicy: Never
+      containers:
+        - name: aws
+          image: docker.io/amazon/aws-cli:2.37.10
+          imagePullPolicy: IfNotPresent
+          env:
+            - name: AWS_ACCESS_KEY_ID
+              value: ${ACCESS_KEY}
+            - name: AWS_SECRET_ACCESS_KEY
+              value: ${SECRET_KEY}
+            - name: AWS_DEFAULT_REGION
+              value: us-east-1
+            - name: AWS_EC2_METADATA_DISABLED
+              value: "true"
+            - name: ENDPOINT
+              value: ${ENDPOINT}
+            - name: BUCKET
+              value: ${BUCKET}
+          command:
+            - sh
+            - -c
+            - |
+              aws configure set default.s3.addressing_style path
+              out=$(aws --endpoint-url "$ENDPOINT" s3 ls "s3://$BUCKET" 2>&1) && exit 1
+              echo "$out" | grep -q AccessDenied
