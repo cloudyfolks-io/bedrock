@@ -554,3 +554,37 @@ func TestStreamCapsAllConnections(t *testing.T) {
 		return true
 	})
 }
+
+func TestStreamSharesOneByteBudgetAcrossConnections(t *testing.T) {
+	hub := newStreamHub(nil, nil, StreamOptions{SendBytes: 1 << 20, GlobalSendBytes: 1000})
+	newConn := func() *streamConn {
+		return &streamConn{hub: hub, out: make(chan ServerFrame, 100), closing: make(chan closeRequest, 1)}
+	}
+	first, second := newConn(), newConn()
+	frame := ServerFrame{Type: "event", Object: make([]byte, 236)}
+	for i := 0; i < 3; i++ {
+		first.enqueue(frame)
+	}
+	select {
+	case request := <-first.closing:
+		t.Fatalf("the first client closed too early: %+v", request)
+	default:
+	}
+	second.enqueue(frame)
+	select {
+	case request := <-second.closing:
+		if request.code != CloseOverloaded {
+			t.Fatalf("close code %d", request.code)
+		}
+	default:
+		t.Fatal("the sender that passes the budget was not evicted")
+	}
+	select {
+	case request := <-first.closing:
+		t.Fatalf("an unrelated client was evicted: %+v", request)
+	default:
+	}
+	if hub.globalQueued.Load() != 900 {
+		t.Fatalf("global bytes %d", hub.globalQueued.Load())
+	}
+}

@@ -230,8 +230,9 @@ The table is in `internal/proxy/metrics.go`.
 | Checks in one batch | 100 |
 | Reviews in parallel | 8 |
 | Cached access answers | 20000, 30 seconds each |
-| Stream connections in total | 2000 |
-| Queued stream bytes for each connection | 8 MiB |
+| Stream connections in total | 1024 |
+| Queued stream bytes for each connection | 4 MiB |
+| Queued stream bytes in total | 128 MiB |
 | Query range | 31 days |
 | Points in one query | 1500 |
 | Login starts and callbacks for each client address | 30 for each minute |

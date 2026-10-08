@@ -350,3 +350,34 @@ func TestProxyObjectsCarryTheGroupComponentLabel(t *testing.T) {
 		}
 	}
 }
+
+func TestProxyBaseRoleGrantsExactlyTheNeededRules(t *testing.T) {
+	base := findObject(t, proxyManifest(t, "proxy-10-rbac.yaml"), "ClusterRole", "bedrock-proxy-base")
+	got := map[string]bool{}
+	for _, rule := range rulesOf(base) {
+		for _, group := range rule.groups {
+			for _, resource := range rule.resources {
+				for _, verb := range rule.verbs {
+					got[group+"|"+resource+"|"+verb+"|"+strings.Join(rule.names, ",")] = true
+				}
+			}
+		}
+	}
+	want := map[string]bool{
+		"bedrock.cloudyfolks.io|settings|get|platform.host": true,
+		"bedrock.cloudyfolks.io|projects|list|":             true,
+	}
+	for _, rule := range handlerRuleInputs {
+		want[rule[0]+"|"+rule[1]+"|"+rule[2]+"|"] = true
+	}
+	for key := range got {
+		if !want[key] {
+			t.Errorf("the base role grants more than needed: %s", key)
+		}
+	}
+	for key := range want {
+		if !got[key] {
+			t.Errorf("the base role lacks %s", key)
+		}
+	}
+}

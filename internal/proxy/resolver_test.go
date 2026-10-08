@@ -14,7 +14,9 @@ import (
 	"time"
 
 	corev1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	"github.com/cloudyfolks-io/bedrock/api/v1alpha1"
@@ -397,5 +399,52 @@ func TestCookieKeyIsCreatedOnceAndReused(t *testing.T) {
 	}
 	if NewCookieSigner([]byte("another-key-another-key-another!")).Verify(first.Sign("id-1")) {
 		t.Fatal("a signature verified under another key")
+	}
+}
+
+type blindFirstGet struct {
+	client.Client
+	blinded atomic.Bool
+}
+
+func (b *blindFirstGet) Get(ctx context.Context, key client.ObjectKey, obj client.Object, opts ...client.GetOption) error {
+	if key.Name == CookieKeySecret && b.blinded.CompareAndSwap(false, true) {
+		return apierrors.NewNotFound(schema.GroupResource{Resource: "secrets"}, key.Name)
+	}
+	return b.Client.Get(ctx, key, obj, opts...)
+}
+
+func replaceCookieKey(t *testing.T, key []byte) {
+	t.Helper()
+	ctx := context.Background()
+	stored := &corev1.Secret{ObjectMeta: metav1.ObjectMeta{Namespace: StoreNamespace, Name: CookieKeySecret}}
+	if err := testClient.Delete(ctx, stored); err != nil && !apierrors.IsNotFound(err) {
+		t.Fatal(err)
+	}
+	stored.Data = map[string][]byte{"key": key}
+	if err := testClient.Create(ctx, stored); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = testClient.Delete(ctx, &corev1.Secret{ObjectMeta: stored.ObjectMeta}) })
+}
+
+func TestCookieKeyCreateRaceReadsTheWinner(t *testing.T) {
+	startEnv(t)
+	winner := []byte("winner-key-winner-key-winner-key")
+	replaceCookieKey(t, winner)
+	loaded, err := LoadCookieSigner(context.Background(), &blindFirstGet{Client: testClient}, rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !loaded.Verify(NewCookieSigner(winner).Sign("id-1")) {
+		t.Fatal("the loser did not adopt the key of the winner")
+	}
+}
+
+func TestCookieKeyRefusesAShortKey(t *testing.T) {
+	startEnv(t)
+	replaceCookieKey(t, []byte("short"))
+	if _, err := LoadCookieSigner(context.Background(), testClient, rand.Reader); err == nil || !strings.Contains(err.Error(), "short key") {
+		t.Fatalf("error = %v", err)
 	}
 }

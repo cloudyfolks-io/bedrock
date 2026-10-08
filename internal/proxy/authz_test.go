@@ -301,3 +301,30 @@ func TestProjectsAreSortedByName(t *testing.T) {
 		t.Fatalf("names %v", names)
 	}
 }
+
+func TestReviewCacheEvictsTheOldestEntry(t *testing.T) {
+	clock := newFakeClock()
+	cache := newSizedReviewCache(clock.Now, 3)
+	for _, key := range []string{"a", "b", "c"} {
+		cache.put(key, accessResult{Allowed: true})
+	}
+	if _, found := cache.get("a"); !found {
+		t.Fatal("a is missing")
+	}
+	cache.put("d", accessResult{Allowed: true})
+	if _, found := cache.get("b"); found {
+		t.Fatal("the least recently used entry b stayed")
+	}
+	for _, key := range []string{"a", "c", "d"} {
+		if _, found := cache.get(key); !found {
+			t.Fatalf("%s was dropped", key)
+		}
+	}
+	if cache.order.Len() != 3 || len(cache.entries) != 3 {
+		t.Fatalf("size %d / %d", cache.order.Len(), len(cache.entries))
+	}
+	clock.Advance(reviewCacheTTL + time.Second)
+	if _, found := cache.get("a"); found {
+		t.Fatal("an expired entry was served")
+	}
+}

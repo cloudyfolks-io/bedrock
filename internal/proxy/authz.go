@@ -1,6 +1,7 @@
 package proxy
 
 import (
+	"container/list"
 	"context"
 	"fmt"
 	"net/http"
@@ -233,18 +234,25 @@ type reviewer interface {
 }
 
 type reviewEntry struct {
+	key     string
 	result  accessResult
 	expires time.Time
 }
 
 type reviewCache struct {
 	clock   func() time.Time
+	max     int
 	mu      sync.Mutex
-	entries map[string]reviewEntry
+	order   *list.List
+	entries map[string]*list.Element
 }
 
 func newReviewCache(clock func() time.Time) *reviewCache {
-	return &reviewCache{clock: clock, entries: map[string]reviewEntry{}}
+	return newSizedReviewCache(clock, reviewCacheMax)
+}
+
+func newSizedReviewCache(clock func() time.Time, max int) *reviewCache {
+	return &reviewCache{clock: clock, max: max, order: list.New(), entries: map[string]*list.Element{}}
 }
 
 type cachedReviewer struct {
@@ -287,25 +295,33 @@ func (r cachedReviewer) key(attribute authorizationv1.ResourceAttributes) string
 func (c *reviewCache) get(key string) (accessResult, bool) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	entry, found := c.entries[key]
-	if !found || !c.clock().Before(entry.expires) {
+	element, found := c.entries[key]
+	if !found {
 		return accessResult{}, false
 	}
+	entry := element.Value.(reviewEntry)
+	if !c.clock().Before(entry.expires) {
+		c.order.Remove(element)
+		delete(c.entries, key)
+		return accessResult{}, false
+	}
+	c.order.MoveToFront(element)
 	return entry.result, true
 }
 
 func (c *reviewCache) put(key string, result accessResult) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	if len(c.entries) >= reviewCacheMax {
-		now := c.clock()
-		for existing, entry := range c.entries {
-			if !now.Before(entry.expires) {
-				delete(c.entries, existing)
-			}
-		}
+	entry := reviewEntry{key: key, result: result, expires: c.clock().Add(reviewCacheTTL)}
+	if element, found := c.entries[key]; found {
+		element.Value = entry
+		c.order.MoveToFront(element)
+		return
 	}
-	if len(c.entries) < reviewCacheMax {
-		c.entries[key] = reviewEntry{result: result, expires: c.clock().Add(reviewCacheTTL)}
+	c.entries[key] = c.order.PushFront(entry)
+	if c.order.Len() > c.max {
+		oldest := c.order.Back()
+		c.order.Remove(oldest)
+		delete(c.entries, oldest.Value.(reviewEntry).key)
 	}
 }

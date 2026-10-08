@@ -24,27 +24,29 @@ import (
 )
 
 type StreamOptions struct {
-	Context        context.Context
-	Clock          func() time.Time
-	WatchTimeout   time.Duration
-	Backoff        []time.Duration
-	SessionCheck   time.Duration
-	PingInterval   time.Duration
-	PongWait       time.Duration
-	SendQueue      int
-	WriteWait      time.Duration
-	SendBytes      int64
-	MaxConnections int
+	Context         context.Context
+	Clock           func() time.Time
+	WatchTimeout    time.Duration
+	Backoff         []time.Duration
+	SessionCheck    time.Duration
+	PingInterval    time.Duration
+	PongWait        time.Duration
+	SendQueue       int
+	WriteWait       time.Duration
+	SendBytes       int64
+	GlobalSendBytes int64
+	MaxConnections  int
 }
 
 type streamHub struct {
-	upstream  *Upstream
-	sessions  SessionSource
-	opts      StreamOptions
-	mu        sync.Mutex
-	users     map[string]int
-	total     int
-	overloads atomic.Int32
+	upstream     *Upstream
+	sessions     SessionSource
+	opts         StreamOptions
+	mu           sync.Mutex
+	users        map[string]int
+	total        int
+	overloads    atomic.Int32
+	globalQueued atomic.Int64
 }
 
 type closeRequest struct {
@@ -109,6 +111,9 @@ func streamDefaults(opts StreamOptions) StreamOptions {
 	}
 	if opts.SendBytes == 0 {
 		opts.SendBytes = sendBytes
+	}
+	if opts.GlobalSendBytes == 0 {
+		opts.GlobalSendBytes = globalSendBytes
 	}
 	if opts.MaxConnections == 0 {
 		opts.MaxConnections = maxStreamConnections
@@ -189,6 +194,7 @@ func (c *streamConn) run(principal Principal) {
 	go c.watchShutdown()
 	c.read()
 	<-writerDone
+	c.hub.globalQueued.Add(-c.queued.Swap(0))
 	c.cancel()
 	c.wg.Wait()
 }
@@ -206,13 +212,14 @@ func frameSize(f ServerFrame) int64 {
 
 func (c *streamConn) enqueue(frame ServerFrame) {
 	size := frameSize(frame)
-	if len(c.out) > 0 && c.queued.Load()+size > c.hub.opts.SendBytes {
+	if len(c.out) > 0 && c.queued.Load()+size > c.hub.opts.SendBytes || c.hub.globalQueued.Load()+size > c.hub.opts.GlobalSendBytes {
 		c.overloaded()
 		return
 	}
 	select {
 	case c.out <- frame:
 		c.queued.Add(size)
+		c.hub.globalQueued.Add(size)
 	default:
 		c.overloaded()
 	}
@@ -250,6 +257,7 @@ func (c *streamConn) write(done chan<- struct{}) {
 		select {
 		case frame := <-c.out:
 			c.queued.Add(-frameSize(frame))
+			c.hub.globalQueued.Add(-frameSize(frame))
 			_ = c.ws.SetWriteDeadline(time.Now().Add(c.hub.opts.WriteWait))
 			if err := c.ws.WriteJSON(frame); err != nil {
 				c.cancel()

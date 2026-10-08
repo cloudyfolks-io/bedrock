@@ -10,8 +10,9 @@ const (
 	maxSubscriptions      = 64
 	maxConnectionsPerUser = 8
 	sendQueue             = 1024
-	sendBytes             = 8 << 20
-	maxStreamConnections  = 2000
+	sendBytes             = 4 << 20
+	globalSendBytes       = 128 << 20
+	maxStreamConnections  = 1024
 	frameOverhead         = 64
 	pingInterval          = 25 * time.Second
 	pongWait              = 60 * time.Second
