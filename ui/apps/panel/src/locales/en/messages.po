@@ -33,3 +33,12 @@ msgstr "Save"
 
 msgid "common.count.vms"
 msgstr "{count, plural, one {# virtual machine} other {# virtual machines}}"
+
+msgid "common.state.loading"
+msgstr "Loading"
+
+msgid "session.gate.error.body"
+msgstr "The panel could not read your session."
+
+msgid "session.gate.error.title"
+msgstr "Sign in did not work"

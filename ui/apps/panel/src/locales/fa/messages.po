@@ -33,3 +33,12 @@ msgstr "ذخیره"
 
 msgid "common.count.vms"
 msgstr "{count, plural, one {# ماشین مجازی} other {# ماشین مجازی}}"
+
+msgid "common.state.loading"
+msgstr "در حال بارگذاری"
+
+msgid "session.gate.error.body"
+msgstr "پنل نتوانست نشست شما را بخواند."
+
+msgid "session.gate.error.title"
+msgstr "ورود انجام نشد"

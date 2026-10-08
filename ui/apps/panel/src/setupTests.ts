@@ -1,7 +1,10 @@
-import { afterEach } from "vitest";
+import { afterEach, vi } from "vitest";
 import { cleanup } from "@testing-library/react";
 
-afterEach(cleanup);
+afterEach(() => {
+  cleanup();
+  vi.unstubAllGlobals();
+});
 
 if (typeof window.matchMedia !== "function") {
   window.matchMedia = ((query: string) => ({

@@ -1,10 +1,11 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { readStored, storedKeys, writeStored } from "./storage";
+import { readSession, readStored, removeSession, sessionKeys, storedKeys, writeSession, writeStored } from "./storage";
 
 describe("storage", () => {
   afterEach(() => {
     vi.restoreAllMocks();
     localStorage.clear();
+    sessionStorage.clear();
   });
 
   it("TestOnlyTheDocumentedKeysExist", () => {
@@ -14,6 +15,14 @@ describe("storage", () => {
       "bedrock.panel.project",
       "bedrock.panel.theme",
     ]);
+  });
+
+  it("keeps one session key for the sign-in guard", () => {
+    expect(Object.values(sessionKeys)).toEqual(["bedrock.panel.signin"]);
+    writeSession("signin", "1");
+    expect(readSession("signin")).toBe("1");
+    removeSession("signin");
+    expect(readSession("signin")).toBeNull();
   });
 
   it("round trips a value under the documented key", () => {

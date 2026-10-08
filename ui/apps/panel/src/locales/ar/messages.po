@@ -33,3 +33,12 @@ msgstr "حفظ"
 
 msgid "common.count.vms"
 msgstr "{count, plural, zero {لا توجد أجهزة افتراضية} one {جهاز افتراضي واحد} two {جهازان افتراضيان} few {# أجهزة افتراضية} many {# جهازًا افتراضيًا} other {# جهاز افتراضي}}"
+
+msgid "common.state.loading"
+msgstr "جارٍ التحميل"
+
+msgid "session.gate.error.body"
+msgstr "تعذر على اللوحة قراءة جلستك."
+
+msgid "session.gate.error.title"
+msgstr "تعذر تسجيل الدخول"

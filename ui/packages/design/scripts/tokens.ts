@@ -634,6 +634,60 @@ const overlayRules = `
 }
 `;
 
+const stateRules = `
+.br-visually-hidden {
+  position: absolute;
+  inline-size: 1px;
+  block-size: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+.br-spinner {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--br-space-xl);
+}
+
+.br-spinner-dot {
+  inline-size: 1.5rem;
+  block-size: 1.5rem;
+  border-radius: 50%;
+  border: 3px solid var(--br-color-border);
+  border-block-start-color: var(--br-color-primary);
+  animation: br-spin 0.8s linear infinite;
+}
+
+@keyframes br-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.br-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--br-space-sm);
+  padding: var(--br-space-xl);
+  text-align: center;
+  color: var(--br-color-text-muted);
+  font-family: var(--br-font-family);
+}
+
+.br-empty-title {
+  margin: 0;
+  font-size: var(--br-font-size-lg);
+  color: var(--br-color-text);
+}
+
+.br-empty-description {
+  margin: 0;
+}
+`;
+
 export function renderTokens(tokens: Tokens): string {
   return `:root {
 ${colorProperties(tokens, "light")}
@@ -655,7 +709,7 @@ ${colorProperties(tokens, "dark")}
 :root[data-theme="dark"] {
 ${colorProperties(tokens, "dark")}
 }
-${componentRules}${dataRules}${overlayRules}`;
+${componentRules}${dataRules}${overlayRules}${stateRules}`;
 }
 
 function main(): void {
