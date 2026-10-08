@@ -3,6 +3,7 @@ package backup
 import (
 	"context"
 	"errors"
+	"fmt"
 	"slices"
 	"strings"
 	"time"
@@ -462,11 +463,28 @@ func (r *BackupReconciler) pendingDeletions(ctx context.Context, scope Scope) ([
 		return nil, err
 	}
 	names := make([]string, 0, len(requests))
-	for _, request := range requests {
-		name, _, _ := unstructured.NestedString(request.Object, "spec", "backupName")
-		names = append(names, name)
+	var failed []string
+	for i := range requests {
+		name, _, _ := unstructured.NestedString(requests[i].Object, "spec", "backupName")
+		if !deletionFailed(requests[i]) {
+			names = append(names, name)
+			continue
+		}
+		if err := client.IgnoreNotFound(r.Client.Delete(ctx, &requests[i])); err != nil {
+			return nil, err
+		}
+		failed = append(failed, name)
+	}
+	if len(failed) > 0 {
+		return nil, fmt.Errorf("deletion of backups %s failed in Velero; the requests are removed and retried", strings.Join(failed, ", "))
 	}
 	return names, nil
+}
+
+func deletionFailed(request unstructured.Unstructured) bool {
+	phase, _, _ := unstructured.NestedString(request.Object, "status", "phase")
+	problems, _, _ := unstructured.NestedSlice(request.Object, "status", "errors")
+	return phase == "Processed" && len(problems) > 0
 }
 
 func (r *BackupReconciler) requestDeletion(ctx context.Context, scope Scope, backupName string) error {
@@ -508,6 +526,9 @@ func (r *BackupReconciler) finalize(ctx context.Context, vmb *v1alpha1.VirtualMa
 func (r *BackupReconciler) removeVeleroObjects(ctx context.Context, vmb *v1alpha1.VirtualMachineBackup) (int, error) {
 	scope, refused, err := r.scopeOf(ctx, vmb)
 	if err != nil || refused != nil {
+		return 0, err
+	}
+	if _, err := r.pendingDeletions(ctx, scope); err != nil {
 		return 0, err
 	}
 	schedule := veleroStub("Schedule", VeleroName("vmb", scope.Namespace, vmb.Name))

@@ -524,3 +524,28 @@ func TestBackupScheduleRejectedByVelero(t *testing.T) {
 		t.Fatalf("message %q", vmb.Status.Conditions[0].Message)
 	}
 }
+
+func TestBackupRetriesAFailedDeleteRequest(t *testing.T) {
+	setLocation(t, "Available")
+	createVM(t, "retry-vm")
+	createVMB(t, "retry", v1alpha1.VirtualMachineBackupSpec{VMRef: "retry-vm", Schedule: "0 2 * * *", Keep: 1})
+	createFixtureBackup(t, "retry-20261007", "retry", "Completed", "2026-10-07T02:05:00Z")
+	createFixtureBackup(t, "retry-20261008", "retry", "Completed", "2026-10-08T02:05:00Z")
+	failed := DeleteBackupRequest(fixtureScope, "retry-20261007")
+	failed.Object["status"] = map[string]any{"phase": "Processed", "errors": []any{"object store unreachable"}}
+	if err := k8sClient.Create(context.Background(), failed); err != nil {
+		t.Fatal(err)
+	}
+	r := newBackupReconciler(testNow)
+	_, err := r.Reconcile(context.Background(), ctrl.Request{NamespacedName: types.NamespacedName{Namespace: projectNamespace, Name: "retry"}})
+	if err == nil || !strings.Contains(err.Error(), "retry-20261007") {
+		t.Fatalf("a failed request must give an error, got %v", err)
+	}
+	if err := deleteRequestFor(t, "retry-20261007"); !apierrors.IsNotFound(err) {
+		t.Fatalf("the failed request must be removed: %v", err)
+	}
+	reconcileVMB(t, r, "retry")
+	if err := deleteRequestFor(t, "retry-20261007"); err != nil {
+		t.Fatalf("the request must be created again: %v", err)
+	}
+}
