@@ -60,7 +60,7 @@ func TestReconcileDrivesAnHTTPImageToReady(t *testing.T) {
 	if plan := l.pass(s); plan.Result.Phase != "Importing" || plan.Result.Reason != "Snapshotting" {
 		t.Fatalf("pass 2 %+v", plan.Result)
 	}
-	golden := GoldenName("rocky", digest)
+	golden := goldenNameOf(s, digest)
 	snapshot := fetch(t, c, VolumeSnapshotGVK, "acme-web", golden)
 	if got := nested(t, snapshot, "spec", "volumeSnapshotClassName"); got != "block" {
 		t.Fatalf("class %v", got)
@@ -108,7 +108,7 @@ func TestReconcileDrivesARegistryImageOffline(t *testing.T) {
 
 	simulateImportSucceeded(t, c, "acme-web", "cirros-import")
 	l.pass(s)
-	golden := GoldenName("cirros", "sha256:ebdb8d8b9b480f6ee7664ed3fdde8428767664f507d98f94090edeff04d7ebf2")
+	golden := goldenNameOf(s, "sha256:ebdb8d8b9b480f6ee7664ed3fdde8428767664f507d98f94090edeff04d7ebf2")
 	markSnapshotReady(t, c, "acme-web", golden, "10Gi")
 	l.pass(s)
 	markDataSourceReady(t, c, "acme-web", "cirros")

@@ -51,7 +51,7 @@ func GoldenSnapshot(s Subject, claim, digest string) *unstructured.Unstructured 
 		AnnotationSourceHash: SourceHash(s.Spec),
 		AnnotationDigest:     digest,
 	})
-	return object(VolumeSnapshotGVK, s, GoldenName(s.Name, digest), annotations, map[string]any{
+	return object(VolumeSnapshotGVK, s, goldenNameOf(s, digest), annotations, map[string]any{
 		"volumeSnapshotClassName": SnapshotClass,
 		"source":                  map[string]any{"persistentVolumeClaimName": claim},
 	})

@@ -64,7 +64,7 @@ func TestObserveFindsTheWorld(t *testing.T) {
 	if world.Cron == nil || world.DataVolume == nil || world.ImportClaim == nil || world.PlatformHost != "cloud.example.com" || world.Prev.Phase != "Pending" {
 		t.Fatalf("world %+v", world)
 	}
-	if got := objectNames(world.Snapshots); !slices.Equal(got, []string{"ubuntu-cdi000000000", GoldenName("ubuntu", "sha256:bedrock")}) {
+	if got := objectNames(world.Snapshots); !slices.Equal(got, []string{"ubuntu-cdi000000000", goldenNameOf(s, "sha256:bedrock")}) {
 		t.Fatalf("snapshots %v", got)
 	}
 	if got := objectNames(world.DataSources); !slices.Equal(got, []string{"ubuntu", "ubuntu-version"}) {

@@ -37,6 +37,10 @@ func GoldenName(image, digest string) string {
 	return image + "-" + hex.EncodeToString(sum[:])[:12]
 }
 
+func goldenNameOf(s Subject, digest string) string {
+	return GoldenName(s.Name, digest+"@"+SourceHash(s.Spec))
+}
+
 func SourceHash(spec v1alpha1.ImageSpec) string {
 	content, err := json.Marshal(struct {
 		Type   string               `json:"type"`

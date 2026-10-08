@@ -90,7 +90,7 @@ func TestDecideVolumeWaitsWhileImporting(t *testing.T) {
 func TestDecideVolumeSnapshotsASucceededImport(t *testing.T) {
 	s := httpSubject()
 	plan := Decide(s, World{DataVolume: dataVolume(s, "Succeeded", ""), ImportClaim: claim("abc", "")}, testNow)
-	want := GoldenName("ubuntu", "uid:abc")
+	want := goldenNameOf(s, "uid:abc")
 	if got := namesAndKinds(plan.Apply); !slices.Equal(got, []string{"VolumeSnapshot/" + want}) {
 		t.Fatalf("apply %v", got)
 	}
@@ -259,5 +259,26 @@ func TestDecideKeepsThePreviousDataSourceWhileReimporting(t *testing.T) {
 	r := plan.Result
 	if r.Reason != "SourceChanged" || r.DataSource != "ubuntu" || r.Digest != "uid:old" || r.SizeBytes != 5 || len(r.Versions) != 1 {
 		t.Fatalf("result %+v", r)
+	}
+}
+
+func TestDecideVolumeTakesANewSnapshotForANewSourceHash(t *testing.T) {
+	small := ubuntuSubject(httpSpec("https://example.com/a.qcow2"))
+	bigSpec := httpSpec("https://example.com/a.qcow2")
+	bigSpec.SizeGi = 20
+	big := ubuntuSubject(bigSpec)
+	existing := goldenSnapshot(small, "uid:same", true, time.Hour)
+
+	world := World{
+		Snapshots:   []unstructured.Unstructured{existing},
+		DataVolume:  dataVolume(big, "Succeeded", ""),
+		ImportClaim: claim("same", ""),
+	}
+	plan := Decide(big, world, testNow)
+	if got := namesAndKinds(plan.Apply); !slices.Equal(got, []string{"VolumeSnapshot/" + goldenNameOf(big, "uid:same")}) {
+		t.Fatalf("apply %v", got)
+	}
+	if goldenNameOf(big, "uid:same") == existing.GetName() {
+		t.Fatal("the new snapshot must not reuse the old name")
 	}
 }

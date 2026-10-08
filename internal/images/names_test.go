@@ -127,3 +127,17 @@ func TestDataSourceKeys(t *testing.T) {
 		t.Fatalf("key %v %v", key, ok)
 	}
 }
+
+func TestGoldenNameOfFollowsTheSourceHash(t *testing.T) {
+	small := ubuntuSubject(httpSpec("https://example.com/a.qcow2"))
+	bigSpec := httpSpec("https://example.com/a.qcow2")
+	bigSpec.SizeGi = 20
+	big := ubuntuSubject(bigSpec)
+
+	if goldenNameOf(small, "sha256:same") != goldenNameOf(small, "sha256:same") {
+		t.Fatal("the same source and digest must give the same name")
+	}
+	if goldenNameOf(small, "sha256:same") == goldenNameOf(big, "sha256:same") {
+		t.Fatal("the same digest with another source hash must take a new snapshot")
+	}
+}

@@ -219,7 +219,7 @@ func TestISOIsMarkedReadOnly(t *testing.T) {
 func TestGoldenSnapshot(t *testing.T) {
 	s := ubuntuSubject(registrySpec("quay.io/containerdisks/ubuntu:24.04"))
 	snap := GoldenSnapshot(s, "ubuntu-import", "sha256:abc")
-	if snap.GetName() != GoldenName("ubuntu", "sha256:abc") || snap.GetAPIVersion() != "snapshot.storage.k8s.io/v1" {
+	if snap.GetName() != goldenNameOf(s, "sha256:abc") || snap.GetAPIVersion() != "snapshot.storage.k8s.io/v1" {
 		t.Fatalf("snapshot %s %s", snap.GetAPIVersion(), snap.GetName())
 	}
 	if got := nested(t, snap, "spec", "volumeSnapshotClassName"); got != "block" {
@@ -236,7 +236,7 @@ func TestGoldenSnapshot(t *testing.T) {
 
 func TestDataSourceForASnapshot(t *testing.T) {
 	s := ubuntuSubject(registrySpec("quay.io/containerdisks/ubuntu:24.04"))
-	golden := GoldenName("ubuntu", "sha256:abc")
+	golden := goldenNameOf(s, "sha256:abc")
 	for _, name := range []string{"ubuntu", golden} {
 		ds := DataSource(s, name, golden)
 		want := map[string]any{"snapshot": map[string]any{"name": golden, "namespace": "acme-web"}}
