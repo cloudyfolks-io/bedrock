@@ -204,3 +204,11 @@ func TestEtcdScheduleSetting(t *testing.T) {
 		}
 	}
 }
+
+func TestBackupTargetSettingHidesCredentials(t *testing.T) {
+	def, _ := Lookup("backup.target")
+	err := def.Validate("s3://AKIAIOSFODNN7EXAMPLE:wJalrXUtnFEMI/K7MDENG@host/bucket")
+	if err == nil || strings.Contains(err.Error(), "AKIAIOSFODNN7EXAMPLE") || strings.Contains(err.Error(), "wJalrXUtnFEMI") {
+		t.Fatalf("got %v", err)
+	}
+}

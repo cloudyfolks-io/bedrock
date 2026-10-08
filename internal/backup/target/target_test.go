@@ -63,3 +63,16 @@ func TestS3URL(t *testing.T) {
 		t.Fatalf("got %s", got)
 	}
 }
+
+func TestParseErrorsHideTheInput(t *testing.T) {
+	const key, secret = "AKIAIOSFODNN7EXAMPLE", "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY"
+	for _, raw := range []string{"s3://" + key + ":" + secret + "@host/bucket", "s3://host:" + secret + "/bucket", "s3://" + key + ":" + secret + "@host/b?x=1"} {
+		_, err := Parse(raw)
+		if err == nil {
+			t.Fatalf("%s must fail", raw)
+		}
+		if strings.Contains(err.Error(), key) || strings.Contains(err.Error(), secret) {
+			t.Fatalf("error leaks the input: %v", err)
+		}
+	}
+}

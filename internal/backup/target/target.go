@@ -28,7 +28,7 @@ func Parse(raw string) (Target, error) {
 	}
 	u, err := url.Parse(raw)
 	if err != nil {
-		return Target{}, fmt.Errorf("backup target is not a URL: %w", err)
+		return Target{}, errors.New("backup target is not a valid URL: check the host, port and path")
 	}
 	if err := checkShape(u); err != nil {
 		return Target{}, err
