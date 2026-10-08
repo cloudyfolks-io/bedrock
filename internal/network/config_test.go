@@ -49,7 +49,7 @@ func TestParseConfigBGP(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := BGP{LocalASN: 65001, RouterID: "10.0.0.9", Peers: []Peer{{"10.0.0.1", 65000}, {"10.0.0.2", 65001}}, Transit: "transit"}
+	want := BGP{LocalASN: 65001, RouterID: "10.0.0.9", Peers: []Peer{{Address: "10.0.0.1", ASN: 65000}, {Address: "10.0.0.2", ASN: 65001}}, Transit: "transit"}
 	if cfg.EIPMode != "bgp" || !slices.Equal(cfg.BGP.Peers, want.Peers) || cfg.BGP.LocalASN != want.LocalASN || cfg.BGP.RouterID != want.RouterID || cfg.BGP.Transit != want.Transit {
 		t.Fatalf("unexpected bgp %+v", cfg.BGP)
 	}
