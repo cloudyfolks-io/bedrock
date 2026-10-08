@@ -17,11 +17,11 @@ import (
 	"github.com/cloudyfolks-io/bedrock/internal/ssa"
 )
 
-func quotaStep(decision Decision, applyErr error, crdMissing bool) Step {
+func quotaStep(decision Decision, applyErr error) Step {
 	switch {
 	case !decision.QuotaAllowed:
-		return Step{Reason: ReasonTenantQuotaExceeded, Message: decision.Message}
-	case crdMissing:
+		return Step{Reason: decision.Reason, Message: decision.Message}
+	case applyErr != nil && isQuotaCRDMissing(applyErr):
 		return Step{Reason: ReasonQuotaCRDMissing, Message: "the ApplicationAwareResourceQuota CRD is not installed yet"}
 	case applyErr != nil:
 		return failedStep(applyErr)
@@ -45,7 +45,7 @@ func (r *ProjectReconciler) ensureQuota(ctx context.Context, project v1alpha1.Pr
 	if decision.QuotaAllowed {
 		applyErr = ssa.Apply(ctx, r.Client, WithOwner(DesiredQuota(project), &project, projectGVK), v1alpha1.TenancyFieldManager)
 	}
-	step := quotaStep(decision, applyErr, applyErr != nil && isQuotaCRDMissing(applyErr))
+	step := quotaStep(decision, applyErr)
 	return step, r.usedQuota(ctx, project)
 }
 
