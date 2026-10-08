@@ -60,7 +60,6 @@ rules:
   - apps
   resources:
   - controllerrevisions
-  - daemonsets
   verbs:
   - get
   - list
@@ -171,16 +170,12 @@ rules:
   - update
   - watch
 - apiGroups:
-  - bedrock.cloudyfolks.io
-  resources:
-  - securitygroups/finalizers
-  - subnets/finalizers
-  verbs:
-  - update
-- apiGroups:
   - cdi.kubevirt.io
   resources:
   - cdis
+  - dataimportcrons
+  - datasources
+  - datavolumes
   verbs:
   - create
   - delete
@@ -233,49 +228,6 @@ rules:
   resources:
   - drivers
   - operatorconfigs
-  verbs:
-  - create
-  - delete
-  - get
-  - list
-  - patch
-  - update
-  - watch
-- apiGroups:
-  - fabric.cloudyfolks.io
-  resources:
-  - bgp-confs
-  - dns-zones
-  - ovn-eips
-  - ovn-fips
-  - provider-networks
-  - router-lb-rules
-  - security-groups
-  - subnets
-  - switch-lb-rules
-  - vips
-  - vlans
-  - vpcs
-  verbs:
-  - create
-  - delete
-  - get
-  - list
-  - patch
-  - update
-  - watch
-- apiGroups:
-  - fabric.cloudyfolks.io
-  resources:
-  - ips
-  verbs:
-  - get
-  - list
-  - watch
-- apiGroups:
-  - k8s.cni.cncf.io
-  resources:
-  - network-attachment-definitions
   verbs:
   - create
   - delete
@@ -382,6 +334,7 @@ rules:
   - snapshot.storage.k8s.io
   resources:
   - volumesnapshotclasses
+  - volumesnapshots
   verbs:
   - create
   - delete
@@ -414,6 +367,7 @@ rules:
   - traefik.io
   resources:
   - ingressroutes
+  - middlewares
   - serverstransports
   - tlsstores
   verbs:
@@ -493,6 +447,7 @@ rules:
   - ""
   resources:
   - namespaces
+  - persistentvolumeclaims
   verbs:
   - get
   - list
