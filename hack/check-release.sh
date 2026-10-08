@@ -5,7 +5,7 @@ dir=${1:-dist/release}
 
 test -f "$dir/release.yaml"
 test -f "$dir/images.txt"
-for group in 00-crds 10-kube-vip 20-fabric 25-multus 30-nmstate 40-rook 41-rook-csi 50-kubevirt 60-cert-manager 65-traefik 70-monitoring 80-kured 90-bedrock 92-catalog; do
+for group in 00-crds 10-kube-vip 20-fabric 25-multus 30-nmstate 40-rook 41-rook-csi 50-kubevirt 52-aaq 55-velero 60-cert-manager 65-traefik 70-monitoring 71-kube-prometheus-stack 80-kured 86-tenancy 90-bedrock 92-catalog; do
   test -d "$dir/manifests/$group"
 done
 grep -q 'kind: CustomResourceDefinition' "$dir/manifests/00-crds/cert-manager-crds.yaml"
@@ -61,4 +61,18 @@ grep -q 'quay.io/containerdisks/debian:13' "$dir/images.txt"
 grep -q 'quay.io/containerdisks/almalinux:9' "$dir/images.txt"
 grep -q 'quay.io/containerdisks/fedora:43' "$dir/images.txt"
 grep -q 'quay.io/kubevirt/virtio-container-disk:v1.9.0' "$dir/images.txt"
+grep -q 'name: velero' "$dir/manifests/55-velero/velero.yaml"
+grep -q 'name: node-agent' "$dir/manifests/55-velero/velero.yaml"
+grep -q 'name: backups.velero.io' "$dir/manifests/00-crds/velero-crds.yaml"
+grep -q 'name: datauploads.velero.io' "$dir/manifests/00-crds/velero-crds.yaml"
+grep -q 'docker.io/velero/velero-plugin-for-aws:v1.14.4' "$dir/images.txt"
+grep -q 'quay.io/kubevirt/kubevirt-velero-plugin:v0.9.1' "$dir/images.txt"
+grep -q 'ROOK_OBC_ALLOW_ADDITIONAL_CONFIG_FIELDS: maxObjects,maxSize,bucketMaxObjects,bucketMaxSize,bucketOwner' "$dir/manifests/40-rook/rook.yaml"
+test -d "$dir/manifests/addons/kata"
+test -d "$dir/manifests/addons/loki"
+grep -q 'name: kata-deploy' "$dir/manifests/addons/kata/kata.yaml"
+grep -q 'name: alloy' "$dir/manifests/addons/loki/"*.yaml
+grep -q 'name: prometheuses.monitoring.coreos.com' "$dir/manifests/00-crds/kube-prometheus-stack-crds.yaml"
+grep -q 'grafana/loki:3.7.8' "$dir/images.txt"
+grep -q 'quay.io/kubevirt/aaq-operator:v1.8.0' "$dir/images.txt"
 echo "check-release passed"
