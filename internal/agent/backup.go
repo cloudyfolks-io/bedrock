@@ -21,6 +21,7 @@ const (
 	keptBackups          = 3
 	stampLayout          = "20060102T150405Z"
 	upgradeBackupPattern = "bedrock-*.tar.gz"
+	partialSuffix        = ".partial"
 )
 
 var ovnDatabases = []string{"ovnnb_db.db", "ovnsb_db.db"}
@@ -39,6 +40,9 @@ func writeBackup(ctx context.Context, deps Deps, name, pattern string, keep int)
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return "", "", err
 	}
+	if err := removePartials(dir); err != nil {
+		return "", "", err
+	}
 	work, err := os.MkdirTemp(dir, ".work-")
 	if err != nil {
 		return "", "", err
@@ -51,8 +55,12 @@ func writeBackup(ctx context.Context, deps Deps, name, pattern string, keep int)
 		return "", "", err
 	}
 	archive := filepath.Join(dir, name)
-	if err := writeArchive(work, archive); err != nil {
-		return "", "", errors.Join(err, os.Remove(archive))
+	partial := archive + partialSuffix
+	if err := writeArchive(work, partial); err != nil {
+		return "", "", errors.Join(err, os.Remove(partial))
+	}
+	if err := os.Rename(partial, archive); err != nil {
+		return "", "", errors.Join(err, os.Remove(partial))
 	}
 	sum, err := release.FileSHA256(archive)
 	if err != nil {
@@ -93,7 +101,7 @@ func writeArchive(src, dest string) error {
 		}
 		return addToArchive(writer, src, path)
 	})
-	return errors.Join(walkErr, writer.Close(), gz.Close(), file.Close())
+	return errors.Join(walkErr, writer.Close(), gz.Close(), file.Sync(), file.Close())
 }
 
 func addToArchive(writer *tar.Writer, base, path string) error {
@@ -139,4 +147,17 @@ func keepNewest(dir, pattern string, keep int) error {
 func backupStamp(path string) string {
 	name := strings.TrimSuffix(filepath.Base(path), ".tar.gz")
 	return name[strings.LastIndex(name, "-")+1:]
+}
+
+func removePartials(dir string) error {
+	partials, err := filepath.Glob(filepath.Join(dir, "*"+partialSuffix))
+	if err != nil {
+		return err
+	}
+	for _, partial := range partials {
+		if err := os.Remove(partial); err != nil {
+			return err
+		}
+	}
+	return nil
 }
