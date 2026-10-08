@@ -16,6 +16,9 @@ import (
 const (
 	storageNamespace   = "rook-ceph"
 	blockPoolName      = "bedrock-block"
+	objectStoreName    = "bedrock-rgw"
+	bucketClassName    = "bucket"
+	bucketProvisioner  = "rook-ceph.ceph.rook.io/bucket"
 	filesystemName     = "bedrock-fs"
 	rbdProvisioner     = "rook-ceph.rbd.csi.ceph.com"
 	cephfsProvisioner  = "rook-ceph.cephfs.csi.ceph.com"
@@ -48,6 +51,8 @@ func RenderStorage(in AddonInput) (Rendered, error) {
 		blockStorageClass("block-retain", "Retain", false),
 		filesystemStorageClass(),
 		blockSnapshotClass(),
+		cephObjectStore(replicas, len(hosts)),
+		bucketStorageClass(),
 	}
 	probe := Probe{GVK: cephClusterGVK, Key: client.ObjectKey{Namespace: storageNamespace, Name: storageNamespace}, Gate: cephGate}
 	return Rendered{Objects: objects, Probes: []Probe{probe}}, nil
@@ -144,6 +149,33 @@ func cephFilesystem(replicas int, standby bool) *unstructured.Unstructured {
 		"preserveFilesystemOnDelete": true,
 		"metadataServer":             map[string]any{"activeCount": int64(1), "activeStandby": standby},
 	})
+}
+
+func cephObjectStore(replicas, hosts int) *unstructured.Unstructured {
+	instances := int64(1)
+	if hosts > 1 {
+		instances = 2
+	}
+	return object("ceph.rook.io/v1", "CephObjectStore", storageNamespace, objectStoreName, map[string]any{
+		"metadataPool":           map[string]any{"failureDomain": cephFailureDomain, "replicated": replicated(replicas)},
+		"dataPool":               map[string]any{"failureDomain": cephFailureDomain, "replicated": replicated(replicas)},
+		"preservePoolsOnDelete":  true,
+		"allowUsersInNamespaces": []any{"*"},
+		"gateway":                map[string]any{"port": int64(80), "instances": instances},
+	})
+}
+
+func bucketStorageClass() *unstructured.Unstructured {
+	obj := &unstructured.Unstructured{Object: map[string]any{
+		"apiVersion":    "storage.k8s.io/v1",
+		"kind":          "StorageClass",
+		"metadata":      map[string]any{"name": bucketClassName},
+		"provisioner":   bucketProvisioner,
+		"parameters":    map[string]any{"objectStoreName": objectStoreName, "objectStoreNamespace": storageNamespace},
+		"reclaimPolicy": "Delete",
+	}}
+	obj.SetLabels(map[string]string{"aws-s3/object": ""})
+	return obj
 }
 
 func csiSecrets(prefix string) map[string]any {
