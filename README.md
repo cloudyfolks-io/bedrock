@@ -36,3 +36,17 @@ See `docs/authn.md` for the names Bedrock serves under it.
 
 Read `docs/authn.md` for users, groups, LDAP and OIDC, API tokens,
 `bedrock login` and token exchange.
+
+## Documentation
+
+- [Authentication](docs/authn.md): users, groups, tokens and login.
+- [Tenancy](docs/tenancy.md): tenants, projects, roles and quota.
+- [Images](docs/images.md): images, uploads and the catalog.
+- [Compute](docs/compute.md): virtual machines, volumes, snapshots, SSH keys and consoles.
+- [Network](docs/network.md): Fabric networks, subnets, elastic IPs, load balancers, DNS zones and security groups.
+- [Backup](docs/backup.md): back up and restore VMs, etcd snapshots.
+- [Object storage](docs/object-storage.md): S3 users and buckets on the shared Ceph object store.
+- [Proxy and panel API](docs/proxy.md): the edge service for the panel and the API.
+- [Panel](docs/panel.md): the web console.
+- [Addons, audit and monitoring](docs/addons.md): optional addons, audit log and metering.
+- [End-to-end jobs](docs/e2e.md): how the e2e jobs run and what they prove.
