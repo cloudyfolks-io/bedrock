@@ -53,12 +53,33 @@ Set `E2E_OSD_DEVICE` to give the cluster a device.
 | Value | Result |
 | --- | --- |
 | empty | No device. The cluster keeps `NoDevices`. |
-| `blank` | The first whole disk without a file system and without partitions. The local runner adds a second 60 GiB disk to the Lima VM for this. |
+| `blank` | The one blank disk of the host. The job fails when no blank disk exists or when more than one exists. The local runner adds a second 60 GiB disk to the Lima VM for this. |
 | `loop` | A loop device on a sparse file. GitHub uses this value. `E2E_OSD_LOOP_GIB` sets the size, 40 GiB by default. |
-| a path | That block device. |
+| a path | That block device. The device must pass the blank check. |
+
+A disk is blank when all of these are true.
+
+- It is a block device with a size above zero.
+- It has no partition table, no file system signature and no partition.
+- It is not mounted.
+- The tools `lsblk`, `wipefs` and `findmnt` run without an error.
+
+If one check cannot run, the disk is not blank.
+The scripts never write to a disk.
 
 When a device exists, `hack/e2e-init.sh` waits for `StorageReady` to be true.
 It then checks the StorageClasses `block`, `block-retain` and `filesystem` and the VolumeSnapshotClass `block`.
+
+## Cleanup and teardown
+
+Each job run writes markers into the directory `/run/bedrock-e2e`.
+The markers name the loop device, the image file, the veth and the network namespace that the run created.
+The cleanup removes only the objects that the markers name.
+The scripts do not delete an image file that they did not create.
+If the file at `E2E_OSD_IMAGE` exists before the run, the run stops.
+`hack/e2e-init.sh` runs the cleanup when it fails.
+`hack/e2e-tenant.sh` runs the cleanup when it ends.
+To tear down by hand, run `source hack/e2e/lib.sh && e2e_cleanup` as root.
 
 ## Provider network
 
