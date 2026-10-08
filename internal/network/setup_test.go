@@ -8,6 +8,7 @@ import (
 	"time"
 
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/client-go/rest"
@@ -233,5 +234,58 @@ func TestManagerSweepsOrphansAfterAForcedFinalizerRemoval(t *testing.T) {
 	eventually(t, 30*time.Second, "the OvnEip is swept", func() bool {
 		_, err := getObject(ctx, c, fabric.OvnEipGVK, name)
 		return apierrors.IsNotFound(err)
+	})
+}
+
+func ensureProviderSetting(t *testing.T, c client.Client, ctx context.Context) {
+	t.Helper()
+	if err := c.Get(ctx, client.ObjectKey{Name: "network.provider-networks"}, &v1alpha1.Setting{}); apierrors.IsNotFound(err) {
+		putSetting(t, c, "network.provider-networks", `[{"name":"public","interface":"bond0","cidr":"192.0.2.0/24","gateway":"192.0.2.1"}]`)
+	}
+}
+
+func reasonOf(c client.Client, eip *v1alpha1.ElasticIP) string {
+	if err := c.Get(context.Background(), client.ObjectKeyFromObject(eip), eip); err != nil {
+		return ""
+	}
+	if cond := meta.FindStatusCondition(eip.Status.Conditions, v1alpha1.ConditionReady); cond != nil {
+		return cond.Reason
+	}
+	return ""
+}
+
+func TestManagerRetriesElasticIPsWhenTheHolderIsDeleted(t *testing.T) {
+	c, ctx := startChain(t)
+	ensureProviderSetting(t, c, ctx)
+	older, younger := newNamespaceIn(t, c, "waitaddr", "aa"), newNamespaceIn(t, c, "waitaddr", "bb")
+	holder := elasticIPOf(older, "holder", "192.0.2.80")
+	waiter := elasticIPOf(younger, "waiter", "192.0.2.80")
+	requireAccepted(t, c, holder)
+	eventually(t, 60*time.Second, "the holder is reserved", func() bool { return isReady(c, holder) })
+	requireAccepted(t, c, waiter)
+	eventually(t, 60*time.Second, "the waiter reports AddressInUse", func() bool { return reasonOf(c, waiter) == ReasonAddressInUse })
+	if err := c.Delete(ctx, holder); err != nil {
+		t.Fatal(err)
+	}
+	eventually(t, 60*time.Second, "the waiter takes the address", func() bool { return isReady(c, waiter) })
+}
+
+func TestManagerRetriesElasticIPsWhenTheTargetHolderIsDeleted(t *testing.T) {
+	c, ctx := startChain(t)
+	ensureProviderSetting(t, c, ctx)
+	ns := newNamespaceIn(t, c, "waittarget", "net")
+	requireAccepted(t, c, virtualMachineUsing(ns, "vm1"))
+	holder, waiter := elasticIPOf(ns, "a-holder", ""), elasticIPOf(ns, "b-waiter", "")
+	holder.Spec.Target, waiter.Spec.Target = vmTarget("vm1"), vmTarget("vm1")
+	requireAccepted(t, c, holder)
+	eventually(t, 60*time.Second, "the holder is processed", func() bool { return reasonOf(c, holder) != "" && reasonOf(c, holder) != ReasonAllocating })
+	requireAccepted(t, c, waiter)
+	eventually(t, 60*time.Second, "the waiter reports TargetInUse", func() bool { return reasonOf(c, waiter) == ReasonTargetInUse })
+	if err := c.Delete(ctx, holder); err != nil {
+		t.Fatal(err)
+	}
+	eventually(t, 60*time.Second, "the waiter leaves TargetInUse", func() bool {
+		reason := reasonOf(c, waiter)
+		return reason != "" && reason != ReasonTargetInUse
 	})
 }

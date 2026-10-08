@@ -164,6 +164,24 @@ func everything(list func(context.Context, ...client.ListOption) []reconcile.Req
 	return func(ctx context.Context, _ client.Object) []reconcile.Request { return list(ctx) }
 }
 
+func TargetWaiters(all []v1alpha1.ElasticIP, gone v1alpha1.ElasticIP) []reconcile.Request {
+	if gone.Spec.Target == nil {
+		return nil
+	}
+	var requests []reconcile.Request
+	for _, other := range all {
+		sameTarget := other.Spec.Target != nil && other.Spec.Target.Kind == gone.Spec.Target.Kind && other.Spec.Target.Name == gone.Spec.Target.Name
+		if other.UID != gone.UID && other.Namespace == gone.Namespace && sameTarget {
+			requests = append(requests, requestOf(other.Namespace, other.Name))
+		}
+	}
+	return requests
+}
+
+func HolderWaiters(all []v1alpha1.ElasticIP, gone v1alpha1.ElasticIP) []reconcile.Request {
+	return append(AddressWaiters(all, gone), TargetWaiters(all, gone)...)
+}
+
 func AddressWaiters(all []v1alpha1.ElasticIP, gone v1alpha1.ElasticIP) []reconcile.Request {
 	var requests []reconcile.Request
 	for _, other := range all {

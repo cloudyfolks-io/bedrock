@@ -122,7 +122,7 @@ func (r *ElasticIPReconciler) SetupWithManager(mgr ctrl.Manager) error {
 			if err := c.List(ctx, &list); err != nil {
 				return nil
 			}
-			return AddressWaiters(list.Items, *obj.(*v1alpha1.ElasticIP))
+			return HolderWaiters(list.Items, *obj.(*v1alpha1.ElasticIP))
 		})).
 		Watches(&v1alpha1.LoadBalancer{}, handler.EnqueueRequestsFromMapFunc(inNamespaceOf(eips))).
 		Watches(&appsv1.DaemonSet{}, handler.EnqueueRequestsFromMapFunc(everything(eips)), builder.WithPredicates(predicate.NewPredicateFuncs(func(obj client.Object) bool {

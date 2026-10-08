@@ -110,3 +110,18 @@ func TestAddressWaitersUsesTheAllocatedAddressOfTheGoneElasticIP(t *testing.T) {
 		t.Fatalf("requests %v", got)
 	}
 }
+
+func TestTargetWaitersSelectsElasticIPsOnTheSameTarget(t *testing.T) {
+	gone := elasticIPAt("a", "old", "public", "")
+	gone.Spec.Target = &v1alpha1.ElasticIPTarget{Kind: "VirtualMachine", Name: "vm1"}
+	same := elasticIPAt("a", "young", "public", "")
+	same.Spec.Target = &v1alpha1.ElasticIPTarget{Kind: "VirtualMachine", Name: "vm1"}
+	other := elasticIPAt("a", "other", "public", "")
+	other.Spec.Target = &v1alpha1.ElasticIPTarget{Kind: "VirtualMachine", Name: "vm2"}
+	elsewhere := elasticIPAt("b", "elsewhere", "public", "")
+	elsewhere.Spec.Target = &v1alpha1.ElasticIPTarget{Kind: "VirtualMachine", Name: "vm1"}
+	got := HolderWaiters([]v1alpha1.ElasticIP{gone, same, other, elsewhere, elasticIPAt("a", "bare", "public", "")}, gone)
+	if len(got) != 1 || got[0] != request("a", "young") {
+		t.Fatalf("requests %v", got)
+	}
+}
