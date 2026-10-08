@@ -43,10 +43,17 @@ func requireCondition(t *testing.T, conditions []metav1.Condition, conditionType
 	}
 }
 
-func createNetwork(t *testing.T, c client.Client, external bool) v1alpha1.Network {
+func createNetwork(t *testing.T, c client.Client) v1alpha1.Network {
 	t.Helper()
 	network := networkOf(unique(t, "net"), "acme", "10.100.0.0/16")
-	network.Spec.EnableExternal = external
+	requireAccepted(t, c, network)
+	return *network
+}
+
+func createExternalNetwork(t *testing.T, c client.Client) v1alpha1.Network {
+	t.Helper()
+	network := networkOf(unique(t, "net"), "acme", "10.100.0.0/16")
+	network.Spec.EnableExternal = true
 	requireAccepted(t, c, network)
 	return *network
 }
@@ -74,7 +81,7 @@ func vpcOf(t *testing.T, c client.Client, name string) *unstructured.Unstructure
 
 func TestNetworkReconcilerCreatesVpc(t *testing.T) {
 	c := cleanEnv(t)
-	network := createNetwork(t, c, false)
+	network := createNetwork(t, c)
 	result := reconcileNetwork(t, c, network.Name)
 	if result.RequeueAfter != waitRequeue {
 		t.Fatalf("result %+v", result)
@@ -107,7 +114,7 @@ func TestNetworkReconcilerCreatesVpc(t *testing.T) {
 func TestNetworkReconcilerRendersL2External(t *testing.T) {
 	c := cleanEnv(t)
 	publicSettings(t)
-	network := createNetwork(t, c, true)
+	network := createExternalNetwork(t, c)
 	reconcileNetwork(t, c, network.Name)
 	vpc := vpcOf(t, c, network.Name)
 	external, _, _ := unstructured.NestedBool(vpc.Object, "spec", "enableExternal")
@@ -130,14 +137,14 @@ func TestNetworkReconcilerRendersL2External(t *testing.T) {
 
 func TestNetworkReconcilerReportsNoProviderNetwork(t *testing.T) {
 	c := cleanEnv(t)
-	network := createNetwork(t, c, true)
+	network := createExternalNetwork(t, c)
 	reconcileNetwork(t, c, network.Name)
 	requireCondition(t, getNetwork(t, c, network.Name).Status.Conditions, ConditionExternalReady, metav1.ConditionFalse, ReasonNoProviderNetwork)
 }
 
 func TestNetworkReconcilerWithoutExternalHasNoExternalCondition(t *testing.T) {
 	c := cleanEnv(t)
-	network := createNetwork(t, c, false)
+	network := createNetwork(t, c)
 	reconcileNetwork(t, c, network.Name)
 	if meta.FindStatusCondition(getNetwork(t, c, network.Name).Status.Conditions, ConditionExternalReady) != nil {
 		t.Fatal("a private Network has no ExternalReady condition")
@@ -153,8 +160,8 @@ func vrfOf(t *testing.T, c client.Client, name string) int64 {
 func TestNetworkReconcilerBGPKeepsTheVrfIDStable(t *testing.T) {
 	c := cleanEnv(t)
 	bgpSettings(t)
-	first := createNetwork(t, c, true)
-	second := createNetwork(t, c, true)
+	first := createExternalNetwork(t, c)
+	second := createExternalNetwork(t, c)
 	reconcileNetwork(t, c, first.Name)
 	reconcileNetwork(t, c, second.Name)
 	a, b := vrfOf(t, c, first.Name), vrfOf(t, c, second.Name)
@@ -174,7 +181,7 @@ func TestNetworkReconcilerBGPSkipsIDsUsedByForeignVpcs(t *testing.T) {
 	if err := c.Create(context.Background(), foreign); err != nil {
 		t.Fatal(err)
 	}
-	network := createNetwork(t, c, true)
+	network := createExternalNetwork(t, c)
 	reconcileNetwork(t, c, network.Name)
 	if got := vrfOf(t, c, network.Name); got != 1001 {
 		t.Fatalf("id %d", got)
@@ -183,7 +190,7 @@ func TestNetworkReconcilerBGPSkipsIDsUsedByForeignVpcs(t *testing.T) {
 
 func TestNetworkReconcilerReportsFabricConflict(t *testing.T) {
 	c := cleanEnv(t)
-	network := createNetwork(t, c, false)
+	network := createNetwork(t, c)
 	foreign := fabric.Vpc(fabric.Meta{Name: network.Name, Annotations: map[string]string{AnnotationOwnerName: "someone", AnnotationOwnerUID: "other-uid"}}, fabric.VpcSpec{EnableExternal: true, ExtraExternalSubnets: []string{"x"}})
 	if err := c.Create(context.Background(), foreign); err != nil {
 		t.Fatal(err)
@@ -197,7 +204,7 @@ func TestNetworkReconcilerReportsFabricConflict(t *testing.T) {
 
 func TestNetworkReconcilerListsAcceptedSubnetsInStatus(t *testing.T) {
 	c := cleanEnv(t)
-	network := createNetwork(t, c, false)
+	network := createNetwork(t, c)
 	ns := newNamespace(t, "acme", unique(t, "p"))
 	for _, s := range []*v1alpha1.Subnet{
 		policySubnet(ns, "a-old", network.Name, "10.100.1.0/24"),
@@ -217,7 +224,7 @@ func TestNetworkReconcilerListsAcceptedSubnetsInStatus(t *testing.T) {
 func TestNetworkDeletionWaitsForSubnets(t *testing.T) {
 	c := cleanEnv(t)
 	ctx := context.Background()
-	network := createNetwork(t, c, false)
+	network := createNetwork(t, c)
 	ns := newNamespace(t, "acme", unique(t, "p"))
 	subnet := policySubnet(ns, "keep", network.Name, "10.100.1.0/24")
 	requireAccepted(t, c, subnet)
@@ -252,7 +259,7 @@ func TestNetworkReconcilerIgnoresForeignVpcs(t *testing.T) {
 	if err := c.Create(context.Background(), foreign); err != nil {
 		t.Fatal(err)
 	}
-	network := createNetwork(t, c, false)
+	network := createNetwork(t, c)
 	reconcileNetwork(t, c, network.Name)
 	if err := c.Delete(context.Background(), &network); err != nil {
 		t.Fatal(err)

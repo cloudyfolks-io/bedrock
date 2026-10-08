@@ -95,7 +95,7 @@ func (r *ElasticIPReconciler) decide(ctx context.Context, eip v1alpha1.ElasticIP
 	if err != nil {
 		return outcome{}, err
 	}
-	provider, found := cfg.Provider(eip.Spec.ProviderNetwork)
+	provider, found := ProviderOf(cfg, eip.Spec.ProviderNetwork)
 	if !found {
 		return stopped(eip, known, &Violation{Reason: ReasonUnknownProviderNetwork, Message: fmt.Sprintf("the provider network %q is not in network.provider-networks", eip.Spec.ProviderNetwork)}), nil
 	}
@@ -231,6 +231,12 @@ func (r *ElasticIPReconciler) attachVM(ctx context.Context, eip v1alpha1.Elastic
 	if nic.ElasticIPRef != "" && nic.ElasticIPRef != eip.Name {
 		return r.refuse(ctx, eip, address, ReasonTargetMismatch, fmt.Sprintf("the interface of the VirtualMachine %q names the ElasticIP %q", vm.Name, nic.ElasticIPRef))
 	}
+	if taken, err := r.interfaceTaken(ctx, eip, vm, nic); err != nil || taken {
+		if err != nil {
+			return outcome{}, err
+		}
+		return r.refuse(ctx, eip, address, ReasonTargetInUse, "another ElasticIP uses this interface")
+	}
 	path, err := r.externalPath(ctx, eip, cfg, nic)
 	if err != nil || path != nil {
 		if err != nil {
@@ -239,6 +245,23 @@ func (r *ElasticIPReconciler) attachVM(ctx context.Context, eip v1alpha1.Elastic
 		return stopped(eip, address, path), nil
 	}
 	return r.attachAddress(ctx, eip, meta, address, vm, nic)
+}
+
+func (r *ElasticIPReconciler) interfaceTaken(ctx context.Context, eip v1alpha1.ElasticIP, vm v1alpha1.VirtualMachine, nic v1alpha1.VMNetwork) (bool, error) {
+	var all v1alpha1.ElasticIPList
+	if err := r.Client.List(ctx, &all, client.InNamespace(eip.Namespace)); err != nil {
+		return false, err
+	}
+	for _, other := range all.Items {
+		target := other.Spec.Target
+		if other.UID == eip.UID || target == nil || target.Kind != v1alpha1.ElasticIPTargetVirtualMachine || target.Name != vm.Name || !olderThan(other, eip) {
+			continue
+		}
+		if otherNic, found := pickInterface(vm, *target); found && otherNic.SubnetRef == nic.SubnetRef {
+			return true, nil
+		}
+	}
+	return false, nil
 }
 
 func (r *ElasticIPReconciler) externalPath(ctx context.Context, eip v1alpha1.ElasticIP, cfg Config, nic v1alpha1.VMNetwork) (*Violation, error) {

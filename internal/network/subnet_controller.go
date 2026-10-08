@@ -214,41 +214,37 @@ func (r *SubnetReconciler) finalize(ctx context.Context, subnet *v1alpha1.Subnet
 			return r.publish(ctx, *subnet, falseCondition(v1alpha1.ConditionReady, subnet.Generation, ReasonInUse, message), terminatingRequeue)
 		}
 	}
-	remaining, err := r.deleteOwned(ctx, subnet, name, owned)
+	attachmentLeft, err := r.deleteAttachment(ctx, subnet)
 	if err != nil {
 		return reconcile.Result{}, err
 	}
-	if remaining {
+	fabricLeft := false
+	if owned {
+		if fabricLeft, err = r.deleteFabricSubnet(ctx, name); err != nil {
+			return reconcile.Result{}, err
+		}
+	}
+	if attachmentLeft || fabricLeft {
 		return reconcile.Result{RequeueAfter: terminatingRequeue}, nil
 	}
 	return reconcile.Result{}, releaseFinalizer(ctx, r.Client, subnet)
 }
 
-func (r *SubnetReconciler) deleteOwned(ctx context.Context, subnet *v1alpha1.Subnet, fabricName string, ownsFabric bool) (bool, error) {
+func (r *SubnetReconciler) deleteAttachment(ctx context.Context, subnet *v1alpha1.Subnet) (bool, error) {
 	nad, err := r.attachment(ctx, *subnet)
-	nadOwned := err == nil && controlledBy(nad, subnet.UID)
-	if nadOwned {
-		if err := client.IgnoreNotFound(r.Client.Delete(ctx, nad)); err != nil {
-			return false, err
-		}
+	if err != nil || !controlledBy(nad, subnet.UID) {
+		return false, client.IgnoreNotFound(err)
 	}
-	if ownsFabric {
-		if err := deleteObject(ctx, r.Client, fabric.SubnetGVK, fabricName); err != nil {
-			return false, err
-		}
+	if err := client.IgnoreNotFound(r.Client.Delete(ctx, nad)); err != nil {
+		return false, err
 	}
-	fabricPresent := false
-	if ownsFabric {
-		present, err := exists(ctx, r.Client, fabric.SubnetGVK, fabricName)
-		if err != nil {
-			return false, err
-		}
-		fabricPresent = present
+	_, err = r.attachment(ctx, *subnet)
+	return err == nil, client.IgnoreNotFound(err)
+}
+
+func (r *SubnetReconciler) deleteFabricSubnet(ctx context.Context, name string) (bool, error) {
+	if err := deleteObject(ctx, r.Client, fabric.SubnetGVK, name); err != nil {
+		return false, err
 	}
-	nadPresent := false
-	if nadOwned {
-		_, err := r.attachment(ctx, *subnet)
-		nadPresent = err == nil
-	}
-	return fabricPresent || nadPresent, nil
+	return exists(ctx, r.Client, fabric.SubnetGVK, name)
 }

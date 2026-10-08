@@ -92,7 +92,7 @@ func LoadConfig(ctx context.Context, c client.Reader) (Config, error) {
 	return ParseConfig(values)
 }
 
-func (c Config) Provider(name string) (v1alpha1.ProviderNetworkSpec, bool) {
+func ProviderOf(c Config, name string) (v1alpha1.ProviderNetworkSpec, bool) {
 	index := slices.IndexFunc(c.ProviderNetworks, func(pn v1alpha1.ProviderNetworkSpec) bool { return pn.Name == name })
 	if index < 0 {
 		return v1alpha1.ProviderNetworkSpec{}, false
@@ -100,7 +100,7 @@ func (c Config) Provider(name string) (v1alpha1.ProviderNetworkSpec, bool) {
 	return c.ProviderNetworks[index], true
 }
 
-func (c Config) MissingBGPSettings() []string {
+func MissingBGPSettings(c Config) []string {
 	var missing []string
 	if c.BGP.LocalASN == 0 {
 		missing = append(missing, keyBGPLocalASN)
@@ -111,7 +111,7 @@ func (c Config) MissingBGPSettings() []string {
 	if c.BGP.Transit == "" {
 		return append(missing, keyBGPTransit)
 	}
-	if _, found := c.Provider(c.BGP.Transit); !found {
+	if _, found := ProviderOf(c, c.BGP.Transit); !found {
 		missing = append(missing, keyBGPTransit+"="+c.BGP.Transit+" (not a provider network)")
 	}
 	return missing

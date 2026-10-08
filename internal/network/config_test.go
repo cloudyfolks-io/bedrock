@@ -29,11 +29,11 @@ func TestParseConfigProviderNetworks(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	pn, ok := cfg.Provider("public")
+	pn, ok := ProviderOf(cfg, "public")
 	if !ok || pn.Interface != "bond0" || pn.Vlan != 100 || pn.ExcludeIPs[0] != "91.246.31.2..91.246.31.10" {
 		t.Fatalf("unexpected provider network %+v", pn)
 	}
-	if _, ok := cfg.Provider("missing"); ok {
+	if _, ok := ProviderOf(cfg, "missing"); ok {
 		t.Fatal("unknown provider network found")
 	}
 	if !slices.Equal(cfg.DNSServers, []string{"1.1.1.1", "8.8.8.8"}) {
@@ -71,14 +71,14 @@ func TestParseConfigRejectsInvalid(t *testing.T) {
 func TestMissingBGPSettings(t *testing.T) {
 	cfg, _ := ParseConfig(map[string]string{"network.eip-mode": "bgp"})
 	want := []string{"network.bgp.local-asn", "network.bgp.peers", "network.bgp.transit-network"}
-	if got := cfg.MissingBGPSettings(); !slices.Equal(got, want) {
+	if got := MissingBGPSettings(cfg); !slices.Equal(got, want) {
 		t.Fatalf("missing %v", got)
 	}
 	cfg, _ = ParseConfig(map[string]string{
 		"network.eip-mode": "bgp", "network.bgp.local-asn": "65001", "network.bgp.peers": "10.0.0.1@65000",
 		"network.bgp.transit-network": "ghost", "network.provider-networks": publicNetworks,
 	})
-	got := cfg.MissingBGPSettings()
+	got := MissingBGPSettings(cfg)
 	if len(got) != 1 || got[0] != "network.bgp.transit-network=ghost (not a provider network)" {
 		t.Fatalf("missing %v", got)
 	}
@@ -86,7 +86,7 @@ func TestMissingBGPSettings(t *testing.T) {
 		"network.eip-mode": "bgp", "network.bgp.local-asn": "65001", "network.bgp.peers": "10.0.0.1@65000",
 		"network.bgp.transit-network": "public", "network.provider-networks": publicNetworks,
 	})
-	if got := cfg.MissingBGPSettings(); len(got) != 0 {
+	if got := MissingBGPSettings(cfg); len(got) != 0 {
 		t.Fatalf("missing %v", got)
 	}
 }

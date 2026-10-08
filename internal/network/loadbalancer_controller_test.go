@@ -55,7 +55,7 @@ func endpointsOf(rule *unstructured.Unstructured) []string {
 
 func newLBFixture(t *testing.T) externalFixture {
 	t.Helper()
-	f := newExternalFixture(t, true, true)
+	f := newExternalFixture(t)
 	f.addVM(t, "vm1", "", "10.100.1.5")
 	f.addVM(t, "vm2", "", "10.100.1.6")
 	lb := loadBalancerFor(f.namespace, "lb1", "ip1")
@@ -110,21 +110,21 @@ func TestLoadBalancerProgramsRouterRules(t *testing.T) {
 }
 
 func TestLoadBalancerRequiresAnExistingElasticIP(t *testing.T) {
-	f := newExternalFixture(t, true, true)
+	f := newExternalFixture(t)
 	requireAccepted(t, f.c, loadBalancerFor(f.namespace, "lb1", "ghost"))
 	reconcileLoadBalancer(t, f.c, f.namespace, "lb1", knowsEverything)
 	requireLB(t, f.c, f.namespace, "lb1", metav1.ConditionFalse, ReasonElasticIPNotFound)
 }
 
 func TestLoadBalancerWithoutElasticIPRefIsUnsupported(t *testing.T) {
-	f := newExternalFixture(t, true, true)
+	f := newExternalFixture(t)
 	requireAccepted(t, f.c, loadBalancerFor(f.namespace, "lb1", ""))
 	reconcileLoadBalancer(t, f.c, f.namespace, "lb1", knowsEverything)
 	requireLB(t, f.c, f.namespace, "lb1", metav1.ConditionFalse, ReasonUnsupported)
 }
 
 func TestLoadBalancerRequiresTheElasticIPToTargetIt(t *testing.T) {
-	f := newExternalFixture(t, true, true)
+	f := newExternalFixture(t)
 	requireAccepted(t, f.c, loadBalancerFor(f.namespace, "lb1", "ip1"))
 	f.createEIP(t, "ip1", "", nil)
 	reconcileElasticIP(t, f.c, f.namespace, "ip1")
@@ -135,7 +135,7 @@ func TestLoadBalancerRequiresTheElasticIPToTargetIt(t *testing.T) {
 }
 
 func TestLoadBalancerWaitsForTheElasticIP(t *testing.T) {
-	f := newExternalFixture(t, true, true)
+	f := newExternalFixture(t)
 	requireAccepted(t, f.c, loadBalancerFor(f.namespace, "lb1", "ip1"))
 	f.createEIP(t, "ip1", "", lbTarget("lb1"))
 	if result := reconcileLoadBalancer(t, f.c, f.namespace, "lb1", knowsEverything); result.RequeueAfter != waitRequeue {
@@ -188,7 +188,7 @@ func TestLoadBalancerRejectsMissingTargetVM(t *testing.T) {
 }
 
 func TestLoadBalancerProgramsTheTargetsThatHaveAnAddress(t *testing.T) {
-	f := newExternalFixture(t, true, true)
+	f := newExternalFixture(t)
 	f.addVM(t, "vm1", "", "10.100.1.5")
 	requireAccepted(t, f.c, virtualMachineUsing(f.namespace, "vm2"))
 	lb := loadBalancerFor(f.namespace, "lb1", "ip1")
@@ -209,7 +209,7 @@ func TestLoadBalancerProgramsTheTargetsThatHaveAnAddress(t *testing.T) {
 }
 
 func TestLoadBalancerWithoutAnyAddressHasNoTargets(t *testing.T) {
-	f := newExternalFixture(t, true, true)
+	f := newExternalFixture(t)
 	requireAccepted(t, f.c, virtualMachineUsing(f.namespace, "vm1"))
 	lb := loadBalancerFor(f.namespace, "lb1", "ip1")
 	lb.Spec.Listeners[0].Targets = []v1alpha1.LoadBalancerTarget{{VMRef: "vm1", Port: 80}}

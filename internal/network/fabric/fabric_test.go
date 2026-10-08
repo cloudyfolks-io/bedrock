@@ -61,7 +61,7 @@ func TestUnderlaySubnetBuild(t *testing.T) {
 }
 
 func TestOverlaySubnetBuild(t *testing.T) {
-	u := Subnet(Meta{Name: "provider-pool"}, SubnetSpec{CIDR: "198.51.100.0/24", Gateway: "198.51.100.1", Vlan: "ignored", Provider: "ignored", Overlay: true})
+	u := Subnet(Meta{Name: "provider-pool"}, SubnetSpec{CIDR: "198.51.100.0/24", Gateway: "198.51.100.1"})
 	equal(t, spec(t, u), map[string]any{"protocol": "IPv4", "cidrBlock": "198.51.100.0/24", "gateway": "198.51.100.1"})
 }
 
@@ -76,11 +76,11 @@ func TestOvnFipBuild(t *testing.T) {
 
 func TestRouterLBRuleBuild(t *testing.T) {
 	ports := []RouterLBPort{{Name: "tcp-80", Port: 80, TargetPort: 8080, Protocol: "TCP"}}
-	with := RouterLBRule(Meta{Name: "r", Annotations: map[string]string{"a": "b"}}, "e", "acme", "ns", []string{"10.0.0.2"}, ports, true)
+	with := RouterLBRule(Meta{Name: "r", Annotations: map[string]string{"a": "b"}}, "e", "acme", "ns", []string{"10.0.0.2"}, ports)
 	if _, found := with.GetAnnotations()[AnnotationServiceHealthCheck]; found || with.GetAnnotations()["a"] != "b" {
 		t.Fatalf("unexpected annotations %v", with.GetAnnotations())
 	}
-	without := RouterLBRule(Meta{Name: "r"}, "e", "acme", "ns", []string{"10.0.0.2"}, ports, false)
+	without := RouterLBRuleWithoutHealthCheck(Meta{Name: "r"}, "e", "acme", "ns", []string{"10.0.0.2"}, ports)
 	if without.GetAnnotations()[AnnotationServiceHealthCheck] != "false" {
 		t.Fatalf("unexpected annotations %v", without.GetAnnotations())
 	}

@@ -37,7 +37,6 @@ type SubnetSpec struct {
 	Vpc, CIDR, Gateway, Provider, Vlan, DHCPOptions string
 	ExcludeIPs                                      []string
 	DHCP                                            bool
-	Overlay                                         bool
 }
 
 type RouterLBPort struct {
@@ -120,11 +119,9 @@ func Subnet(m Meta, s SubnetSpec) *unstructured.Unstructured {
 	if s.DHCP {
 		spec["enableDHCP"] = true
 	}
-	if !s.Overlay {
-		set(spec, "vlan", s.Vlan)
-		set(spec, "provider", s.Provider)
-	}
-	if !s.Overlay && s.Provider != "" {
+	set(spec, "vlan", s.Vlan)
+	set(spec, "provider", s.Provider)
+	if s.Provider != "" {
 		spec["gatewayType"] = "distributed"
 		spec["natOutgoing"] = false
 		spec["private"] = false
@@ -149,21 +146,27 @@ func OvnFip(m Meta, eip, ipName string) *unstructured.Unstructured {
 	return object(OvnFipGVK, m, map[string]any{"ovnEip": eip, "ipName": ipName})
 }
 
-func RouterLBRule(m Meta, eip, vpc, namespace string, endpoints []string, ports []RouterLBPort, healthCheck bool) *unstructured.Unstructured {
+func routerLBRule(m Meta, eip, vpc, namespace string, endpoints []string, ports []RouterLBPort) *unstructured.Unstructured {
 	rendered := make([]any, len(ports))
 	for i, p := range ports {
 		rendered[i] = map[string]any{"name": p.Name, "port": int64(p.Port), "targetPort": int64(p.TargetPort), "protocol": p.Protocol}
 	}
-	annotated := m
-	annotated.Annotations = maps.Clone(m.Annotations)
-	if !healthCheck {
-		if annotated.Annotations == nil {
-			annotated.Annotations = map[string]string{}
-		}
-		annotated.Annotations[AnnotationServiceHealthCheck] = "false"
-	}
 	spec := map[string]any{"ovnEip": eip, "vpc": vpc, "namespace": namespace, "endpoints": anys(endpoints), "ports": rendered}
-	return object(RouterLBRuleGVK, annotated, spec)
+	return object(RouterLBRuleGVK, m, spec)
+}
+
+func RouterLBRule(m Meta, eip, vpc, namespace string, endpoints []string, ports []RouterLBPort) *unstructured.Unstructured {
+	return routerLBRule(m, eip, vpc, namespace, endpoints, ports)
+}
+
+func RouterLBRuleWithoutHealthCheck(m Meta, eip, vpc, namespace string, endpoints []string, ports []RouterLBPort) *unstructured.Unstructured {
+	silenced := m
+	silenced.Annotations = maps.Clone(m.Annotations)
+	if silenced.Annotations == nil {
+		silenced.Annotations = map[string]string{}
+	}
+	silenced.Annotations[AnnotationServiceHealthCheck] = "false"
+	return routerLBRule(silenced, eip, vpc, namespace, endpoints, ports)
 }
 
 func DNSZone(m Meta, vpc string, records []DNSRecord) *unstructured.Unstructured {

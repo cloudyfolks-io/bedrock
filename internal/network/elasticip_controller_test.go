@@ -26,28 +26,52 @@ type externalFixture struct {
 	namespace string
 }
 
-func newExternalFixture(t *testing.T, external, routerPort bool) externalFixture {
+func buildFixture(t *testing.T, network *v1alpha1.Network, afterStandby func(*testing.T, client.Client, string)) externalFixture {
 	t.Helper()
 	c := cleanEnv(t)
 	publicSettings(t)
-	tenant := unique(t, "acme")
-	network := networkOf(unique(t, "net"), tenant, "10.100.0.0/16")
-	network.Spec.EnableExternal = external
+	tenant := network.Spec.TenantRef
 	requireAccepted(t, c, network)
 	reconcileNetwork(t, c, network.Name)
-	ctx := context.Background()
-	if err := fabrictest.MarkVpcStandby(ctx, c, network.Name); err != nil {
+	if err := fabrictest.MarkVpcStandby(context.Background(), c, network.Name); err != nil {
 		t.Fatal(err)
 	}
-	if routerPort {
-		if err := fabrictest.CreateRouterPort(ctx, c, network.Name, "provider-public", "91.246.31.11"); err != nil {
-			t.Fatal(err)
-		}
-	}
+	afterStandby(t, c, network.Name)
 	reconcileNetwork(t, c, network.Name)
 	f := externalFixture{c: c, tenant: tenant, network: *network, namespace: newNamespace(t, tenant, "prod")}
 	requireAccepted(t, c, policySubnet(f.namespace, "default", network.Name, "10.100.1.0/24"))
 	return f
+}
+
+func attachRouterPort(t *testing.T, c client.Client, vpc string) {
+	t.Helper()
+	if err := fabrictest.CreateRouterPort(context.Background(), c, vpc, "provider-public", "91.246.31.11"); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func withoutRouterPort(*testing.T, client.Client, string) {}
+
+func externalNetwork(t *testing.T) *v1alpha1.Network {
+	t.Helper()
+	network := networkOf(unique(t, "net"), unique(t, "acme"), "10.100.0.0/16")
+	network.Spec.EnableExternal = true
+	return network
+}
+
+func newExternalFixture(t *testing.T) externalFixture {
+	t.Helper()
+	return buildFixture(t, externalNetwork(t), attachRouterPort)
+}
+
+func newDisconnectedFixture(t *testing.T) externalFixture {
+	t.Helper()
+	return buildFixture(t, externalNetwork(t), withoutRouterPort)
+}
+
+func newPrivateFixture(t *testing.T) externalFixture {
+	t.Helper()
+	return buildFixture(t, networkOf(unique(t, "net"), unique(t, "acme"), "10.100.0.0/16"), withoutRouterPort)
 }
 
 func (f externalFixture) addVM(t *testing.T, name, backReference, address string) {
@@ -118,7 +142,7 @@ func allocate(t *testing.T, f externalFixture, name, address string) {
 }
 
 func TestElasticIPReserveAllocatesAnAddress(t *testing.T) {
-	f := newExternalFixture(t, true, true)
+	f := newExternalFixture(t)
 	f.createEIP(t, "ip1", "", nil)
 	if result := reconcileElasticIP(t, f.c, f.namespace, "ip1"); result.RequeueAfter != waitRequeue {
 		t.Fatalf("result %+v", result)
@@ -137,7 +161,7 @@ func TestElasticIPReserveAllocatesAnAddress(t *testing.T) {
 }
 
 func TestElasticIPRequestedAddressIsPassedToFabric(t *testing.T) {
-	f := newExternalFixture(t, true, true)
+	f := newExternalFixture(t)
 	f.createEIP(t, "ip1", "91.246.31.50", nil)
 	reconcileElasticIP(t, f.c, f.namespace, "ip1")
 	eip, err := eipObject(f.c, f.namespace, "ip1")
@@ -150,7 +174,7 @@ func TestElasticIPRequestedAddressIsPassedToFabric(t *testing.T) {
 }
 
 func TestElasticIPUnknownProviderNetwork(t *testing.T) {
-	f := newExternalFixture(t, true, true)
+	f := newExternalFixture(t)
 	eip := elasticIPOf(f.namespace, "ip1", "")
 	eip.Spec.ProviderNetwork = "ghost"
 	requireAccepted(t, f.c, eip)
@@ -162,21 +186,21 @@ func TestElasticIPUnknownProviderNetwork(t *testing.T) {
 }
 
 func TestElasticIPRejectsAddressOutsideTheProviderNetwork(t *testing.T) {
-	f := newExternalFixture(t, true, true)
+	f := newExternalFixture(t)
 	f.createEIP(t, "ip1", "198.51.100.5", nil)
 	reconcileElasticIP(t, f.c, f.namespace, "ip1")
 	requireEIP(t, f.c, f.namespace, "ip1", metav1.ConditionFalse, ReasonAddressOutsideProviderNetwork)
 }
 
 func TestElasticIPRejectsTheGatewayAddress(t *testing.T) {
-	f := newExternalFixture(t, true, true)
+	f := newExternalFixture(t)
 	f.createEIP(t, "ip1", "91.246.31.1", nil)
 	reconcileElasticIP(t, f.c, f.namespace, "ip1")
 	requireEIP(t, f.c, f.namespace, "ip1", metav1.ConditionFalse, ReasonAddressReserved)
 }
 
 func TestElasticIPDuplicateAddressKeepsTheOlder(t *testing.T) {
-	f := newExternalFixture(t, true, true)
+	f := newExternalFixture(t)
 	second := newNamespace(t, f.tenant, "zz")
 	f.createEIP(t, "ip1", "91.246.31.50", nil)
 	eip := elasticIPOf(second, "ip2", "91.246.31.50")
@@ -197,7 +221,7 @@ func TestElasticIPDuplicateAddressKeepsTheOlder(t *testing.T) {
 }
 
 func TestElasticIPAttachCreatesFipOnTheVMAddress(t *testing.T) {
-	f := newExternalFixture(t, true, true)
+	f := newExternalFixture(t)
 	f.addVM(t, "vm1", "", "10.100.1.5")
 	f.createEIP(t, "ip1", "", vmTarget("vm1"))
 	reconcileElasticIP(t, f.c, f.namespace, "ip1")
@@ -222,7 +246,7 @@ func TestElasticIPAttachCreatesFipOnTheVMAddress(t *testing.T) {
 }
 
 func TestElasticIPWaitsForTheVMAddress(t *testing.T) {
-	f := newExternalFixture(t, true, true)
+	f := newExternalFixture(t)
 	requireAccepted(t, f.c, virtualMachineUsing(f.namespace, "vm1"))
 	f.createEIP(t, "ip1", "", vmTarget("vm1"))
 	reconcileElasticIP(t, f.c, f.namespace, "ip1")
@@ -235,7 +259,7 @@ func TestElasticIPWaitsForTheVMAddress(t *testing.T) {
 }
 
 func TestElasticIPFollowsATargetChange(t *testing.T) {
-	f := newExternalFixture(t, true, true)
+	f := newExternalFixture(t)
 	f.addVM(t, "a", "", "10.100.1.5")
 	f.addVM(t, "b", "", "10.100.1.6")
 	eip := f.createEIP(t, "ip1", "", vmTarget("a"))
@@ -261,7 +285,7 @@ func TestElasticIPFollowsATargetChange(t *testing.T) {
 }
 
 func TestElasticIPDetachKeepsTheAddress(t *testing.T) {
-	f := newExternalFixture(t, true, true)
+	f := newExternalFixture(t)
 	f.addVM(t, "vm1", "", "10.100.1.5")
 	f.createEIP(t, "ip1", "", vmTarget("vm1"))
 	reconcileElasticIP(t, f.c, f.namespace, "ip1")
@@ -284,7 +308,7 @@ func TestElasticIPDetachKeepsTheAddress(t *testing.T) {
 }
 
 func TestElasticIPTargetVMDeletedReleasesTheFip(t *testing.T) {
-	f := newExternalFixture(t, true, true)
+	f := newExternalFixture(t)
 	f.addVM(t, "vm1", "", "10.100.1.5")
 	f.createEIP(t, "ip1", "", vmTarget("vm1"))
 	reconcileElasticIP(t, f.c, f.namespace, "ip1")
@@ -302,7 +326,7 @@ func TestElasticIPTargetVMDeletedReleasesTheFip(t *testing.T) {
 }
 
 func TestElasticIPVMBackReferenceMismatch(t *testing.T) {
-	f := newExternalFixture(t, true, true)
+	f := newExternalFixture(t)
 	f.addVM(t, "vm1", "other", "10.100.1.5")
 	f.createEIP(t, "ip1", "", vmTarget("vm1"))
 	reconcileElasticIP(t, f.c, f.namespace, "ip1")
@@ -326,7 +350,7 @@ func getVM(t *testing.T, c client.Client, namespace, name string) v1alpha1.Virtu
 }
 
 func TestElasticIPVMEmptyBackReferenceIsFine(t *testing.T) {
-	f := newExternalFixture(t, true, true)
+	f := newExternalFixture(t)
 	f.addVM(t, "vm1", "", "10.100.1.5")
 	f.createEIP(t, "ip1", "", vmTarget("vm1"))
 	reconcileElasticIP(t, f.c, f.namespace, "ip1")
@@ -338,7 +362,7 @@ func TestElasticIPVMEmptyBackReferenceIsFine(t *testing.T) {
 }
 
 func TestElasticIPVMBackReferenceToItselfIsFine(t *testing.T) {
-	f := newExternalFixture(t, true, true)
+	f := newExternalFixture(t)
 	f.addVM(t, "vm1", "ip1", "10.100.1.5")
 	f.createEIP(t, "ip1", "", vmTarget("vm1"))
 	reconcileElasticIP(t, f.c, f.namespace, "ip1")
@@ -349,8 +373,25 @@ func TestElasticIPVMBackReferenceToItselfIsFine(t *testing.T) {
 	}
 }
 
+func TestElasticIPRefusesASecondElasticIPOnTheSameInterface(t *testing.T) {
+	f := newExternalFixture(t)
+	f.addVM(t, "vm1", "", "10.100.1.5")
+	f.createEIP(t, "ip1", "", vmTarget("vm1"))
+	f.createEIP(t, "ip2", "", vmTarget("vm1"))
+	for _, name := range []string{"ip1", "ip2"} {
+		reconcileElasticIP(t, f.c, f.namespace, name)
+		allocate(t, f, name, map[string]string{"ip1": "91.246.31.20", "ip2": "91.246.31.21"}[name])
+		reconcileElasticIP(t, f.c, f.namespace, name)
+	}
+	if _, err := fipObject(f.c, f.namespace, "ip1"); err != nil {
+		t.Fatalf("the older ElasticIP keeps the interface: %v", err)
+	}
+	requireEIP(t, f.c, f.namespace, "ip2", metav1.ConditionFalse, ReasonTargetInUse)
+	requireNoFip(t, f.c, f.namespace, "ip2")
+}
+
 func TestElasticIPNetworkNotExternal(t *testing.T) {
-	f := newExternalFixture(t, false, false)
+	f := newPrivateFixture(t)
 	f.addVM(t, "vm1", "", "10.100.1.5")
 	f.createEIP(t, "ip1", "", vmTarget("vm1"))
 	reconcileElasticIP(t, f.c, f.namespace, "ip1")
@@ -361,7 +402,7 @@ func TestElasticIPNetworkNotExternal(t *testing.T) {
 }
 
 func TestElasticIPExternalNotConnected(t *testing.T) {
-	f := newExternalFixture(t, true, false)
+	f := newDisconnectedFixture(t)
 	f.addVM(t, "vm1", "", "10.100.1.5")
 	f.createEIP(t, "ip1", "", vmTarget("vm1"))
 	reconcileElasticIP(t, f.c, f.namespace, "ip1")
@@ -447,7 +488,7 @@ func lbTarget(name string) *v1alpha1.ElasticIPTarget {
 }
 
 func TestElasticIPLoadBalancerTarget(t *testing.T) {
-	f := newExternalFixture(t, true, true)
+	f := newExternalFixture(t)
 	requireAccepted(t, f.c, loadBalancerFor(f.namespace, "lb1", "ip1"))
 	f.createEIP(t, "ip1", "", lbTarget("lb1"))
 	reconcileElasticIP(t, f.c, f.namespace, "ip1")
@@ -458,7 +499,7 @@ func TestElasticIPLoadBalancerTarget(t *testing.T) {
 }
 
 func TestElasticIPLoadBalancerTargetMismatch(t *testing.T) {
-	f := newExternalFixture(t, true, true)
+	f := newExternalFixture(t)
 	requireAccepted(t, f.c, loadBalancerFor(f.namespace, "lb1", "someone-else"))
 	f.createEIP(t, "ip1", "", lbTarget("lb1"))
 	reconcileElasticIP(t, f.c, f.namespace, "ip1")
@@ -468,7 +509,7 @@ func TestElasticIPLoadBalancerTargetMismatch(t *testing.T) {
 }
 
 func TestElasticIPLoadBalancerTargetMissing(t *testing.T) {
-	f := newExternalFixture(t, true, true)
+	f := newExternalFixture(t)
 	f.createEIP(t, "ip1", "", lbTarget("ghost"))
 	reconcileElasticIP(t, f.c, f.namespace, "ip1")
 	allocate(t, f, "ip1", "91.246.31.20")
@@ -477,7 +518,7 @@ func TestElasticIPLoadBalancerTargetMissing(t *testing.T) {
 }
 
 func TestElasticIPReportsFabricConflict(t *testing.T) {
-	f := newExternalFixture(t, true, true)
+	f := newExternalFixture(t)
 	f.createEIP(t, "ip1", "", nil)
 	foreign := fabric.OvnEip(fabric.Meta{Name: FabricName(f.namespace, "ip1"), Annotations: map[string]string{AnnotationOwnerName: "x", AnnotationOwnerUID: "foreign"}}, "provider-public", "")
 	if err := f.c.Create(context.Background(), foreign); err != nil {
@@ -498,7 +539,7 @@ func TestElasticIPRequiresLabeledNamespace(t *testing.T) {
 }
 
 func TestElasticIPDeletionOrdersFipBeforeEip(t *testing.T) {
-	f := newExternalFixture(t, true, true)
+	f := newExternalFixture(t)
 	ctx := context.Background()
 	f.addVM(t, "vm1", "", "10.100.1.5")
 	eip := f.createEIP(t, "ip1", "", vmTarget("vm1"))

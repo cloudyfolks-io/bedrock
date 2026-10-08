@@ -67,7 +67,15 @@ func ListenerRules(in ListenerInput) []*unstructured.Unstructured {
 	for i, l := range in.Listeners {
 		meta := fabric.Meta{Name: ListenerRuleName(in.Namespace, in.Name, l.Port, l.Protocol), Labels: maps.Clone(in.Labels), Annotations: maps.Clone(in.Annotations)}
 		ports := []fabric.RouterLBPort{{Name: strings.ToLower(l.Protocol) + "-" + fmt.Sprint(l.Port), Port: l.Port, TargetPort: l.TargetPort, Protocol: l.Protocol}}
-		rules[i] = fabric.RouterLBRule(meta, in.EIP, in.Vpc, in.Namespace, slices.Sorted(slices.Values(l.Endpoints)), ports, l.HealthCheck)
+		endpoints := slices.Sorted(slices.Values(l.Endpoints))
+		rules[i] = routerRule(l, meta, in, endpoints, ports)
 	}
 	return rules
+}
+
+func routerRule(l Listener, meta fabric.Meta, in ListenerInput, endpoints []string, ports []fabric.RouterLBPort) *unstructured.Unstructured {
+	if l.HealthCheck {
+		return fabric.RouterLBRule(meta, in.EIP, in.Vpc, in.Namespace, endpoints, ports)
+	}
+	return fabric.RouterLBRuleWithoutHealthCheck(meta, in.EIP, in.Vpc, in.Namespace, endpoints, ports)
 }

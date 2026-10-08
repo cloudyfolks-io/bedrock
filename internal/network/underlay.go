@@ -26,13 +26,16 @@ func providerObjects(pn v1alpha1.ProviderNetworkSpec) []*unstructured.Unstructur
 	return []*unstructured.Unstructured{
 		fabric.ProviderNetwork(underlayMeta("ProviderNetwork", pn.Name), pn.Interface, gatewayNodes()),
 		fabric.Vlan(underlayMeta("Vlan", pn.Name), int(pn.Vlan), pn.Name),
-		externalSubnet(pn, false),
+		externalVlanSubnet(pn),
 	}
 }
 
-func externalSubnet(pn v1alpha1.ProviderNetworkSpec, overlay bool) *unstructured.Unstructured {
-	name := ExternalSubnetName(pn.Name)
-	return fabric.Subnet(underlayMeta("Subnet", name), fabric.SubnetSpec{CIDR: pn.CIDR, Gateway: pn.Gateway, Vlan: pn.Name, ExcludeIPs: pn.ExcludeIPs, Overlay: overlay})
+func externalVlanSubnet(pn v1alpha1.ProviderNetworkSpec) *unstructured.Unstructured {
+	return fabric.Subnet(underlayMeta("Subnet", ExternalSubnetName(pn.Name)), fabric.SubnetSpec{CIDR: pn.CIDR, Gateway: pn.Gateway, Vlan: pn.Name, ExcludeIPs: pn.ExcludeIPs})
+}
+
+func externalOverlaySubnet(pn v1alpha1.ProviderNetworkSpec) *unstructured.Unstructured {
+	return fabric.Subnet(underlayMeta("Subnet", ExternalSubnetName(pn.Name)), fabric.SubnetSpec{CIDR: pn.CIDR, Gateway: pn.Gateway, ExcludeIPs: pn.ExcludeIPs})
 }
 
 func bgpConf(cfg Config) *unstructured.Unstructured {
@@ -65,9 +68,9 @@ func renderBGP(cfg Config) ([]*unstructured.Unstructured, []string) {
 			objects = append(objects, providerObjects(pn)...)
 			continue
 		}
-		objects = append(objects, externalSubnet(pn, true))
+		objects = append(objects, externalOverlaySubnet(pn))
 	}
-	if missing := cfg.MissingBGPSettings(); len(missing) > 0 {
+	if missing := MissingBGPSettings(cfg); len(missing) > 0 {
 		return objects, []string{fmt.Sprintf("BGP mode needs these settings before the BgpConf is rendered: %s", strings.Join(missing, ", "))}
 	}
 	return append(objects, bgpConf(cfg)), nil

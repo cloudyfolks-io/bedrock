@@ -54,10 +54,10 @@ func planL2(in VpcInput) (fabric.VpcSpec, External) {
 }
 
 func planBGP(in VpcInput) (fabric.VpcSpec, External) {
-	if missing := in.Config.MissingBGPSettings(); len(missing) > 0 {
+	if missing := MissingBGPSettings(in.Config); len(missing) > 0 {
 		return fabric.VpcSpec{}, External{Requested: true, Reason: ReasonBGPNotConfigured, Message: "BGP mode needs these settings: " + strings.Join(missing, ", ")}
 	}
-	transit, _ := in.Config.Provider(in.Config.BGP.Transit)
+	transit, _ := ProviderOf(in.Config, in.Config.BGP.Transit)
 	subnet := ExternalSubnetName(transit.Name)
 	return fabric.VpcSpec{
 		EnableExternal:       true,
