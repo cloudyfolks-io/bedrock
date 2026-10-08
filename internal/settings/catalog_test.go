@@ -187,3 +187,20 @@ func TestBackupTargetSettingRefusesNFS(t *testing.T) {
 		t.Fatal("credentials in URL must fail")
 	}
 }
+
+func TestEtcdScheduleSetting(t *testing.T) {
+	def, ok := Lookup("backup.etcd-schedule")
+	if !ok {
+		t.Fatal("backup.etcd-schedule missing")
+	}
+	for _, valid := range []string{"", "0 2 * * *"} {
+		if err := def.Validate(valid); err != nil {
+			t.Fatalf("%q: %v", valid, err)
+		}
+	}
+	for _, invalid := range []string{"@daily", "every day"} {
+		if err := def.Validate(invalid); err == nil {
+			t.Fatalf("%q must fail", invalid)
+		}
+	}
+}

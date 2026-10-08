@@ -13,6 +13,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	"github.com/cloudyfolks-io/bedrock/api/v1alpha1"
+	"github.com/cloudyfolks-io/bedrock/internal/backup/schedule"
 	"github.com/cloudyfolks-io/bedrock/internal/backup/target"
 	"github.com/cloudyfolks-io/bedrock/internal/dnsname"
 )
@@ -57,6 +58,13 @@ func backupTarget(v string) error {
 	}
 	_, err := target.Parse(v)
 	return err
+}
+
+func cronSchedule(v string) error {
+	if v == "" {
+		return nil
+	}
+	return schedule.Validate(v)
 }
 
 func domainName(v string) error {
@@ -123,7 +131,7 @@ func Catalog() []Definition {
 		{"overcommit.memory", "1.0", "Memory overcommit ratio of at least 0.1.", floatMin(0.1)},
 		{"backup.target", "", "Backup target URL: s3://<endpoint>[:<port>]/<bucket>[/<prefix>][?region=<region>][&insecure=true]. nfs:// is not supported.", backupTarget},
 		{"backup.credentials-secret", "", "Secret name in bedrock-system holding backup credentials.", free},
-		{"backup.etcd-schedule", "0 2 * * *", "Cron schedule for etcd snapshots.", free},
+		{"backup.etcd-schedule", "0 2 * * *", "Cron schedule for etcd snapshots, five fields, UTC, at most once per slot.", cronSchedule},
 		{"audit.level", "Metadata", "Audit level for read requests.", oneOf("Metadata", "RequestResponse")},
 		{"loki.retention-days", "14", "Log retention in days when Loki is enabled.", intMin(1)},
 		{"kata.enabled", "true", "Kata runtime addon.", boolean},
