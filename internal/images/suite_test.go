@@ -101,7 +101,7 @@ func isGone(c client.Client, gvk schema.GroupVersionKind, namespace, name string
 	return apierrors.IsNotFound(c.Get(context.Background(), client.ObjectKey{Namespace: namespace, Name: name}, obj))
 }
 
-func writeStatus(t *testing.T, c client.Client, gvk schema.GroupVersionKind, namespace, name string, status map[string]any) {
+func patchStatus(t *testing.T, c client.Client, gvk schema.GroupVersionKind, namespace, name string, status map[string]any) {
 	t.Helper()
 	obj := fetch(t, c, gvk, namespace, name)
 	obj.Object["status"] = status
@@ -110,7 +110,7 @@ func writeStatus(t *testing.T, c client.Client, gvk schema.GroupVersionKind, nam
 	}
 }
 
-func writeObjectStatus(t *testing.T, c client.Client, gvk schema.GroupVersionKind, namespace, name string, status map[string]any) {
+func patchObjectStatus(t *testing.T, c client.Client, gvk schema.GroupVersionKind, namespace, name string, status map[string]any) {
 	t.Helper()
 	obj := fetch(t, c, gvk, namespace, name)
 	obj.Object["status"] = status
@@ -121,18 +121,18 @@ func writeObjectStatus(t *testing.T, c client.Client, gvk schema.GroupVersionKin
 
 func simulateImportSucceeded(t *testing.T, c client.Client, namespace, name string) *corev1.PersistentVolumeClaim {
 	t.Helper()
-	writeStatus(t, c, DataVolumeGVK, namespace, name, map[string]any{"phase": "Succeeded"})
+	patchStatus(t, c, DataVolumeGVK, namespace, name, map[string]any{"phase": "Succeeded"})
 	return createClaim(t, c, namespace, name, "10Gi")
 }
 
 func markSnapshotReady(t *testing.T, c client.Client, namespace, name, size string) {
 	t.Helper()
-	writeStatus(t, c, VolumeSnapshotGVK, namespace, name, map[string]any{"readyToUse": true, "restoreSize": size})
+	patchStatus(t, c, VolumeSnapshotGVK, namespace, name, map[string]any{"readyToUse": true, "restoreSize": size})
 }
 
 func markDataSourceReady(t *testing.T, c client.Client, namespace, name string) {
 	t.Helper()
-	writeObjectStatus(t, c, DataSourceGVK, namespace, name, map[string]any{
+	patchObjectStatus(t, c, DataSourceGVK, namespace, name, map[string]any{
 		"conditions": []any{map[string]any{"type": "Ready", "status": "True", "reason": "Ready", "message": "", "lastTransitionTime": time.Now().UTC().Format(time.RFC3339)}},
 	})
 }

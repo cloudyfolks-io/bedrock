@@ -132,7 +132,7 @@ func TestReconcileScheduledImageGetsVersionDataSources(t *testing.T) {
 		t.Fatalf("managed data source %v", got)
 	}
 
-	writeObjectStatus(t, c, DataImportCronGVK, "acme-web", "ubuntu", map[string]any{
+	patchObjectStatus(t, c, DataImportCronGVK, "acme-web", "ubuntu", map[string]any{
 		"currentImports": []any{map[string]any{"DataVolumeName": "ubuntu-1a2b3c4d5e6f", "Digest": "sha256:1a2b3c4d5e6f0000"}},
 		"conditions":     []any{map[string]any{"type": "UpToDate", "status": "True", "reason": "UpToDate", "message": "", "lastTransitionTime": time.Now().UTC().Format(time.RFC3339)}},
 	})

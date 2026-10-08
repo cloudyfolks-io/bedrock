@@ -91,7 +91,7 @@ func TestObserveUsesTheCronImportDataVolume(t *testing.T) {
 	s := ubuntuSubject(registrySpec("quay.io/containerdisks/ubuntu:24.04"))
 	s.Spec.Refresh = &v1alpha1.ImageRefresh{Schedule: "0 3 * * *"}
 	applyAll(t, c, DataImportCron(s))
-	writeObjectStatus(t, c, DataImportCronGVK, "acme-web", "ubuntu", map[string]any{
+	patchObjectStatus(t, c, DataImportCronGVK, "acme-web", "ubuntu", map[string]any{
 		"currentImports": []any{map[string]any{"DataVolumeName": "ubuntu-1a2b3c4d5e6f", "Digest": "sha256:1a2b"}},
 	})
 	imported := ImportDataVolume(s, 10)
