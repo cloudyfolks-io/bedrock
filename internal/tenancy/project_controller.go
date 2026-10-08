@@ -39,7 +39,7 @@ type ProjectReconciler struct {
 
 func (r *ProjectReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	var project v1alpha1.Project
-	if err := r.Client.Get(ctx, req.NamespacedName, &project); err != nil {
+	if err := r.Reader.Get(ctx, req.NamespacedName, &project); err != nil {
 		return ctrl.Result{}, client.IgnoreNotFound(err)
 	}
 	if !project.DeletionTimestamp.IsZero() {
@@ -86,23 +86,25 @@ func (r *ProjectReconciler) referenceTenant(ctx context.Context, project v1alpha
 	if hasReferenceTo(project.OwnerReferences, tenant.UID) {
 		return project, nil
 	}
-	updated := project
+	var fresh v1alpha1.Project
 	err := retry.RetryOnConflict(retry.DefaultRetry, func() error {
-		if err := r.Reader.Get(ctx, client.ObjectKeyFromObject(&project), &updated); err != nil {
+		fresh = v1alpha1.Project{}
+		if err := r.Reader.Get(ctx, client.ObjectKeyFromObject(&project), &fresh); err != nil {
 			return err
 		}
-		if hasReferenceTo(updated.OwnerReferences, tenant.UID) {
+		if hasReferenceTo(fresh.OwnerReferences, tenant.UID) {
 			return nil
 		}
-		updated.OwnerReferences = append(updated.OwnerReferences, metav1.OwnerReference{
+		base := fresh.DeepCopy()
+		fresh.OwnerReferences = append(fresh.OwnerReferences, metav1.OwnerReference{
 			APIVersion: tenantGVK.GroupVersion().String(),
 			Kind:       tenantGVK.Kind,
 			Name:       tenant.Name,
 			UID:        tenant.UID,
 		})
-		return r.Client.Update(ctx, &updated, client.FieldOwner(v1alpha1.TenancyFieldManager))
+		return r.Client.Patch(ctx, &fresh, client.MergeFromWithOptions(base, client.MergeFromWithOptimisticLock{}), client.FieldOwner(v1alpha1.TenancyFieldManager))
 	})
-	return updated, err
+	return fresh, err
 }
 
 func hasReferenceTo(references []metav1.OwnerReference, uid types.UID) bool {

@@ -6,6 +6,7 @@ import (
 	"net/netip"
 
 	"k8s.io/apimachinery/pkg/api/meta"
+	"k8s.io/client-go/util/retry"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	"github.com/cloudyfolks-io/bedrock/api/v1alpha1"
@@ -67,29 +68,50 @@ func (r *ProjectReconciler) ensureSubnet(ctx context.Context, project v1alpha1.P
 }
 
 func (r *ProjectReconciler) claimSubnet(ctx context.Context, project v1alpha1.Project, tenant v1alpha1.Tenant) (string, Step, bool) {
-	vpc, err := netip.ParsePrefix(tenant.Spec.Network.VPCCIDR)
+	var claimed string
+	var blocked Step
+	err := retry.RetryOnConflict(retry.DefaultRetry, func() error {
+		var err error
+		claimed, blocked, err = r.claimOnce(ctx, client.ObjectKeyFromObject(&project), tenant)
+		return err
+	})
 	if err != nil {
 		return "", failedStep(err), false
+	}
+	return claimed, blocked, claimed != ""
+}
+
+func (r *ProjectReconciler) claimOnce(ctx context.Context, key client.ObjectKey, tenant v1alpha1.Tenant) (string, Step, error) {
+	var fresh v1alpha1.Project
+	if err := r.Reader.Get(ctx, key, &fresh); err != nil {
+		return "", Step{}, err
+	}
+	if fresh.Status.Subnet != "" {
+		return fresh.Status.Subnet, Step{}, nil
+	}
+	vpc, err := netip.ParsePrefix(tenant.Spec.Network.VPCCIDR)
+	if err != nil {
+		return "", Step{}, err
 	}
 	var subnets v1alpha1.SubnetList
 	var projects v1alpha1.ProjectList
 	if err := errors.Join(r.Reader.List(ctx, &subnets), r.Reader.List(ctx, &projects)); err != nil {
-		return "", failedStep(err), false
+		return "", Step{}, err
 	}
 	next, err := NextFreeSubnet(vpc, usedCIDRs(tenant.Name, subnets.Items, projects.Items))
 	if errors.Is(err, ErrNoFreeSubnet) {
-		return "", Step{Reason: ReasonCIDRExhausted, Message: err.Error()}, false
+		return "", Step{Reason: ReasonCIDRExhausted, Message: err.Error()}, nil
 	}
 	if err != nil {
-		return "", failedStep(err), false
+		return "", Step{}, err
 	}
-	claimed := project.DeepCopy()
-	claimed.Status.Subnet = next.String()
-	patch := client.MergeFrom(project.DeepCopy())
-	if err := r.Client.Status().Patch(ctx, claimed, patch, client.FieldOwner(v1alpha1.TenancyFieldManager)); err != nil {
-		return "", failedStep(err), false
+	base := fresh.DeepCopy()
+	fresh.Status.Subnet = next.String()
+	patch := client.MergeFromWithOptions(base, client.MergeFromWithOptimisticLock{})
+	if err := r.Client.Status().Patch(ctx, &fresh, patch, client.FieldOwner(v1alpha1.TenancyFieldManager)); err != nil {
+		return "", Step{}, err
 	}
-	return next.String(), Step{}, true
+	return next.String(), Step{}, nil
 }
 
 func (r *ProjectReconciler) observeSubnet(ctx context.Context, desired v1alpha1.Subnet) *v1alpha1.Subnet {

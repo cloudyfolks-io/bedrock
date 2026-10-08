@@ -184,3 +184,87 @@ func TestProjectMirrorsTheSubnetCondition(t *testing.T) {
 	setSubnetReady(t, c, "acme-web", metav1.ConditionTrue, "")
 	projectReady(t, c, "web", hasCondition(ConditionSubnetReady, metav1.ConditionTrue, ReasonReady))
 }
+
+func TestStaleCachedProjectChangesNothing(t *testing.T) {
+	admin, cfg := startEnv(t)
+	watching, err := client.NewWithWatch(cfg, client.Options{Scheme: newScheme(t)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	mustCreate(t, admin, tenantWith("acme", "10.100.0.0/16"), projectFor("web", "acme"))
+	live := &ProjectReconciler{Client: admin, Reader: admin}
+	ctx := context.Background()
+	request := func(name string) reconcile.Request {
+		return reconcile.Request{NamespacedName: client.ObjectKey{Name: name}}
+	}
+	if _, err := live.Reconcile(ctx, request("web")); err != nil {
+		t.Fatal(err)
+	}
+	stale := fetchProject(t, admin, "web")
+	stale.Status = v1alpha1.ProjectStatus{}
+	mustCreate(t, admin, projectFor("data", "acme"))
+	if _, err := live.Reconcile(ctx, request("data")); err != nil {
+		t.Fatal(err)
+	}
+	before := subnetOf(t, admin, "acme-web")
+	cidr := fetchProject(t, admin, "web").Status.Subnet
+	lagging := interceptor.NewClient(watching, interceptor.Funcs{
+		Get: func(ctx context.Context, c client.WithWatch, key client.ObjectKey, obj client.Object, opts ...client.GetOption) error {
+			if project, ok := obj.(*v1alpha1.Project); ok {
+				stale.DeepCopyInto(project)
+				return nil
+			}
+			return c.Get(ctx, key, obj, opts...)
+		},
+	})
+	reconciler := &ProjectReconciler{Client: lagging, Reader: admin}
+	if _, err := reconciler.Reconcile(ctx, request("web")); err != nil {
+		t.Fatal(err)
+	}
+	after := fetchProject(t, admin, "web")
+	if after.Status.Subnet != cidr || after.Status.Namespace != "acme-web" {
+		t.Fatalf("status = %+v, want subnet %s", after.Status, cidr)
+	}
+	if got := subnetOf(t, admin, "acme-web"); got.Spec.CIDR != before.Spec.CIDR || got.ResourceVersion != before.ResourceVersion {
+		t.Fatalf("subnet rewritten: %+v", got.Spec)
+	}
+	if other := fetchProject(t, admin, "data").Status.Subnet; other == cidr {
+		t.Fatalf("both projects hold %s", cidr)
+	}
+}
+
+func TestSubnetClaimUsesTheLiveProject(t *testing.T) {
+	admin, _ := startEnv(t)
+	mustCreate(t, admin, tenantWith("acme", "10.100.0.0/16"), projectFor("web", "acme"))
+	reconciler := &ProjectReconciler{Client: admin, Reader: admin}
+	web := fetchProject(t, admin, "web")
+	tenant := &v1alpha1.Tenant{}
+	getInto(t, admin, "acme", tenant)
+	first, _, ok := reconciler.claimSubnet(context.Background(), *web, *tenant)
+	again, _, againOK := reconciler.claimSubnet(context.Background(), *web, *tenant)
+	if !ok || !againOK || first != again || first != "10.100.0.0/24" {
+		t.Fatalf("claims %q %v and %q %v", first, ok, again, againOK)
+	}
+}
+
+func TestReferenceTenantDoesNotRestoreRemovedLabels(t *testing.T) {
+	admin, _ := startEnv(t)
+	tenant := tenantWith("acme", "10.100.0.0/16")
+	labelled := projectFor("web", "acme")
+	labelled.Labels = map[string]string{"stale": "yes"}
+	mustCreate(t, admin, tenant, labelled)
+	stale := fetchProject(t, admin, "web")
+	live := fetchProject(t, admin, "web")
+	live.Labels = nil
+	if err := admin.Update(context.Background(), live); err != nil {
+		t.Fatal(err)
+	}
+	reconciler := &ProjectReconciler{Client: admin, Reader: admin}
+	if _, err := reconciler.referenceTenant(context.Background(), *stale, *tenant); err != nil {
+		t.Fatal(err)
+	}
+	after := fetchProject(t, admin, "web")
+	if _, found := after.Labels["stale"]; found || len(after.OwnerReferences) != 1 {
+		t.Fatalf("project = %+v", after.ObjectMeta)
+	}
+}
