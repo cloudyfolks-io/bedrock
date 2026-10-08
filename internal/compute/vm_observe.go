@@ -200,7 +200,6 @@ func (r *VirtualMachineReconciler) SetupWithManager(mgr ctrl.Manager) error {
 		For(&v1alpha1.VirtualMachine{}).
 		Owns(emptyOf(kubeVirtVMGVK)).
 		Owns(emptyOf(dataVolumeGVK)).
-		Owns(&corev1.Secret{}).
 		Watches(emptyOf(kubeVirtVMIGVK), handler.EnqueueRequestsFromMapFunc(sameName)).
 		Watches(&corev1.Pod{}, handler.EnqueueRequestsFromMapFunc(launcherOwner)).
 		Watches(&v1alpha1.Subnet{}, handler.EnqueueRequestsFromMapFunc(r.referrers("subnet/"))).

@@ -2,17 +2,21 @@ package compute
 
 import (
 	"context"
+	"fmt"
 	"strings"
 	"sync"
 	"testing"
 	"time"
 
 	"github.com/go-logr/logr/funcr"
+	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/client-go/rest"
 	"k8s.io/utils/ptr"
 	ctrl "sigs.k8s.io/controller-runtime"
+	"sigs.k8s.io/controller-runtime/pkg/cache"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/config"
 	"sigs.k8s.io/controller-runtime/pkg/metrics/server"
@@ -44,9 +48,57 @@ func (l *logLines) matching(text string) int {
 	return count
 }
 
+type recordingCache struct {
+	cache.Cache
+	mu    sync.Mutex
+	kinds []string
+}
+
+func (r *recordingCache) record(obj any) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.kinds = append(r.kinds, fmt.Sprintf("%T", obj))
+}
+
+func (r *recordingCache) GetInformer(ctx context.Context, obj client.Object, opts ...cache.InformerGetOption) (cache.Informer, error) {
+	r.record(obj)
+	return r.Cache.GetInformer(ctx, obj, opts...)
+}
+
+func (r *recordingCache) Get(ctx context.Context, key client.ObjectKey, obj client.Object, opts ...client.GetOption) error {
+	r.record(obj)
+	return r.Cache.Get(ctx, key, obj, opts...)
+}
+
+func (r *recordingCache) List(ctx context.Context, list client.ObjectList, opts ...client.ListOption) error {
+	r.record(list)
+	return r.Cache.List(ctx, list, opts...)
+}
+
+func (r *recordingCache) recorded(kind string) bool {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	for _, seen := range r.kinds {
+		if strings.Contains(seen, kind) {
+			return true
+		}
+	}
+	return false
+}
+
 func startManager(t *testing.T, cfg *rest.Config, lines *logLines) {
 	t.Helper()
+	startRecordedManager(t, cfg, lines, &recordingCache{})
+}
+
+func startRecordedManager(t *testing.T, cfg *rest.Config, lines *logLines, recorder *recordingCache) {
+	t.Helper()
 	mgr, err := ctrl.NewManager(cfg, ctrl.Options{
+		NewCache: func(cfg *rest.Config, opts cache.Options) (cache.Cache, error) {
+			inner, err := cache.New(cfg, opts)
+			recorder.Cache = inner
+			return recorder, err
+		},
 		Scheme:     testScheme(t),
 		Metrics:    server.Options{BindAddress: "0"},
 		Controller: config.Controller{SkipNameValidation: ptr.To(true)},
@@ -68,14 +120,12 @@ func startManager(t *testing.T, cfg *rest.Config, lines *logLines) {
 
 func eventually(t *testing.T, what string, check func() bool) {
 	t.Helper()
-	deadline := time.Now().Add(30 * time.Second)
-	for time.Now().Before(deadline) {
-		if check() {
-			return
-		}
-		time.Sleep(200 * time.Millisecond)
+	err := wait.PollUntilContextTimeout(context.Background(), 200*time.Millisecond, 30*time.Second, true, func(context.Context) (bool, error) {
+		return check(), nil
+	})
+	if err != nil {
+		t.Fatalf("timeout waiting for %s", what)
 	}
-	t.Fatalf("timeout waiting for %s", what)
 }
 
 func TestSetupStartsControllers(t *testing.T) {
@@ -112,18 +162,31 @@ func TestSetupStartsControllers(t *testing.T) {
 	})
 }
 
+func TestSetupRegistersNoSecretWatch(t *testing.T) {
+	c, cfg := startFreshEnv(t, testenv.CRDPaths())
+	recorder := &recordingCache{}
+	startRecordedManager(t, cfg, &logLines{}, recorder)
+	ns := seedPlatform(t, c)
+	createObject(t, c, &corev1.Secret{ObjectMeta: metav1.ObjectMeta{Namespace: ns, Name: "init"}, Data: map[string][]byte{"userdata": []byte("#cloud-config\n")}})
+	createVM(t, c, ns, "web-1", func(vm *v1alpha1.VirtualMachine) { vm.Spec.CloudInit = &v1alpha1.VMCloudInit{SecretRef: "init"} })
+	eventually(t, "the cloud-init Secret", func() bool {
+		return c.Get(context.Background(), client.ObjectKey{Namespace: ns, Name: "web-1-cloudinit"}, &corev1.Secret{}) == nil
+	})
+	eventually(t, "the informers", func() bool { return recorder.recorded("v1.Pod") })
+	if recorder.recorded("v1.Secret") {
+		t.Fatalf("a compute controller reads or watches Secrets through the cache: %v", recorder.kinds)
+	}
+}
+
 func TestSetupSkipsWithoutKubeVirtCRDs(t *testing.T) {
 	c, cfg := startFreshEnv(t, testenv.CRDPaths()[:1])
 	lines := &logLines{}
 	startManager(t, cfg, lines)
 	ns := uniqueNamespace(t, c)
 	createVM(t, c, ns, "web-1", noMutation)
-	time.Sleep(2 * time.Second)
+	eventually(t, "the skip log line", func() bool { return lines.matching("kubevirt.io/v1, Kind=VirtualMachine") == 1 })
 	vm := getVM(t, c, ns, "web-1")
 	if len(vm.Status.Conditions) != 0 || vm.Status.Phase != "" {
 		t.Fatalf("status %+v", vm.Status)
-	}
-	if lines.matching("kubevirt.io/v1, Kind=VirtualMachine") != 1 {
-		t.Fatalf("log lines %v", lines.lines)
 	}
 }

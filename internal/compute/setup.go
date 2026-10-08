@@ -40,7 +40,7 @@ func SetupWithManager(mgr ctrl.Manager) error {
 		mgr.GetLogger().WithName("compute").Info("the compute controllers stay idle until the operator restarts with the kind served", "kind", gvk.String())
 		return nil
 	}
-	vms := &VirtualMachineReconciler{Client: mgr.GetClient(), Scheme: mgr.GetScheme(), GuestInfo: guestInfoFrom(mgr.GetConfig()), Now: time.Now}
+	vms := &VirtualMachineReconciler{Client: mgr.GetClient(), Secrets: mgr.GetAPIReader(), Scheme: mgr.GetScheme(), GuestInfo: guestInfoFrom(mgr.GetConfig()), Now: time.Now}
 	for _, setup := range []func(ctrl.Manager) error{
 		vms.SetupWithManager,
 		(&VolumeReconciler{Client: mgr.GetClient()}).SetupWithManager,

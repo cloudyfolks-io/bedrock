@@ -34,6 +34,7 @@ type GuestInfoFunc func(ctx context.Context, namespace, name string) (v1alpha1.V
 
 type VirtualMachineReconciler struct {
 	Client    client.Client
+	Secrets   client.Reader
 	Scheme    *runtime.Scheme
 	GuestInfo GuestInfoFunc
 	Now       func() time.Time
@@ -100,6 +101,13 @@ func (r *VirtualMachineReconciler) converge(ctx context.Context, vm v1alpha1.Vir
 		return outcome{Gate: gate, RequeueAfter: catalogRetryFor(gate)}, err
 	}
 	return r.apply(ctx, in)
+}
+
+func (r *VirtualMachineReconciler) secretReader() client.Reader {
+	if r.Secrets != nil {
+		return r.Secrets
+	}
+	return r.Client
 }
 
 func catalogRetryFor(gate *Gate) time.Duration {

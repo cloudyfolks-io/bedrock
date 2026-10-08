@@ -210,7 +210,7 @@ func (r *VirtualMachineReconciler) stepCloudInit(ctx context.Context, vm v1alpha
 	var referenced *corev1.Secret
 	if vm.Spec.CloudInit != nil && vm.Spec.CloudInit.SecretRef != "" {
 		var secret corev1.Secret
-		err := r.Client.Get(ctx, client.ObjectKey{Namespace: vm.Namespace, Name: vm.Spec.CloudInit.SecretRef}, &secret)
+		err := r.secretReader().Get(ctx, client.ObjectKey{Namespace: vm.Namespace, Name: vm.Spec.CloudInit.SecretRef}, &secret)
 		if err != nil && !notFound(err) {
 			return in, nil, err
 		}
