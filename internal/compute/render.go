@@ -71,7 +71,7 @@ func Render(in RenderInput) (Rendered, error) {
 	for index, image := range in.CDROMs {
 		claims = append(claims, CDROMClaim(vm, in.Labels, index, image))
 	}
-	kubeVirt, err := kubeVirtVM(in, affinity, in.NetworkData != "")
+	kubeVirt, err := kubeVirtVM(in, affinity)
 	if err != nil {
 		return Rendered{}, err
 	}
@@ -90,7 +90,7 @@ func schedulingAffinity(scheduling *v1alpha1.VMScheduling) *corev1.Affinity {
 	return scheduling.Affinity
 }
 
-func kubeVirtVM(in RenderInput, affinity *corev1.Affinity, hasNetworkData bool) (*unstructured.Unstructured, error) {
+func kubeVirtVM(in RenderInput, affinity *corev1.Affinity) (*unstructured.Unstructured, error) {
 	vm := in.VirtualMachine
 	podAnnotations, podLabels := PodNetworkMetadata(in.NICs)
 	templateLabels := mergeLabels(in.Labels, podLabels)
@@ -98,7 +98,7 @@ func kubeVirtVM(in RenderInput, affinity *corev1.Affinity, hasNetworkData bool) 
 		"evictionStrategy": evictionStrategyOf(vm.Spec.EvictionStrategy),
 		"domain":           domainOf(in),
 		"networks":         networksOf(in.NICs),
-		"volumes":          volumesOf(vm, in.Volumes, len(in.CDROMs), hasNetworkData),
+		"volumes":          volumesOf(vm, in.Volumes, len(in.CDROMs), in.NetworkData),
 	}
 	if vm.Spec.Scheduling != nil && len(vm.Spec.Scheduling.NodeSelector) > 0 {
 		templateSpec["nodeSelector"] = stringMap(vm.Spec.Scheduling.NodeSelector)
@@ -264,7 +264,7 @@ func hostDevicesOf(devices []v1alpha1.VMHostDevice) []any {
 	return out
 }
 
-func volumesOf(vm v1alpha1.VirtualMachine, volumes []ResolvedVolume, cdroms int, hasNetworkData bool) []any {
+func volumesOf(vm v1alpha1.VirtualMachine, volumes []ResolvedVolume, cdroms int, networkData string) []any {
 	out := []any{map[string]any{"name": "rootdisk", "dataVolume": map[string]any{"name": RootClaimName(vm.Name)}}}
 	for index := 0; index < cdroms; index++ {
 		out = append(out, map[string]any{"name": cdromDiskName(index), "dataVolume": map[string]any{"name": CDROMClaimName(vm.Name, index)}})
@@ -275,9 +275,13 @@ func volumesOf(vm v1alpha1.VirtualMachine, volumes []ResolvedVolume, cdroms int,
 			"persistentVolumeClaim": map[string]any{"claimName": volume.Name, "hotpluggable": true},
 		})
 	}
-	noCloud := map[string]any{"secretRef": map[string]any{"name": CloudInitSecretName(vm.Name)}}
-	if hasNetworkData {
-		noCloud["networkDataSecretRef"] = map[string]any{"name": CloudInitSecretName(vm.Name)}
+	return append(out, cloudInitVolume(vm.Name, networkData))
+}
+
+func cloudInitVolume(vm, networkData string) map[string]any {
+	noCloud := map[string]any{"secretRef": map[string]any{"name": CloudInitSecretName(vm)}}
+	if networkData != "" {
+		noCloud["networkDataSecretRef"] = map[string]any{"name": CloudInitSecretName(vm)}
 	}
-	return append(out, map[string]any{"name": "cloudinit", "cloudInitNoCloud": noCloud})
+	return map[string]any{"name": "cloudinit", "cloudInitNoCloud": noCloud}
 }
