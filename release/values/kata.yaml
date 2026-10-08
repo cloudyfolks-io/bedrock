@@ -1,0 +1,18 @@
+k8sDistribution: k0s
+imagePullPolicy: IfNotPresent
+nodeSelector:
+  bedrock.cloudyfolks.io/kvm: "true"
+snapshotter:
+  setup: []
+shims:
+  disableAll: true
+  qemu:
+    enabled: true
+defaultShim:
+  amd64: qemu
+  arm64: qemu
+runtimeClasses:
+  createDefault: true
+  defaultName: kata
+node-feature-discovery:
+  enabled: false

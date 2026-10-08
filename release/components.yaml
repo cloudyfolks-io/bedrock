@@ -133,6 +133,13 @@ components:
     namespace: velero
     values: release/values/velero.yaml
     crdsToGroup: crds
+  - name: kata
+    addon: true
+    chart: charts/kata-deploy
+    version: 4.2.0
+    namespace: kube-system
+    values: release/values/kata.yaml
+    noHooks: true
   - name: bedrock
     order: 90
     dirs: [manifests/90-bedrock]
