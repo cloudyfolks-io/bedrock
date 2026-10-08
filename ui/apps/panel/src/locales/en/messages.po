@@ -7,6 +7,12 @@ msgstr ""
 "X-Generator: @lingui/cli\n"
 "Language: en\n"
 
+msgid "account.downloads.title"
+msgstr "Downloads"
+
+msgid "account.title"
+msgstr "Account"
+
 msgid "app.title"
 msgstr "Bedrock"
 
@@ -37,8 +43,158 @@ msgstr "{count, plural, one {# virtual machine} other {# virtual machines}}"
 msgid "common.state.loading"
 msgstr "Loading"
 
+msgid "nav.item.addons"
+msgstr "Addons"
+
+msgid "nav.item.backups"
+msgstr "Backups"
+
+msgid "nav.item.buckets"
+msgstr "Buckets"
+
+msgid "nav.item.clusterImages"
+msgstr "Catalog images"
+
+msgid "nav.item.dnsZones"
+msgstr "DNS zones"
+
+msgid "nav.item.elasticIps"
+msgstr "Elastic IPs"
+
+msgid "nav.item.hosts"
+msgstr "Hosts"
+
+msgid "nav.item.images"
+msgstr "Images"
+
+msgid "nav.item.loadBalancers"
+msgstr "Load balancers"
+
+msgid "nav.item.networks"
+msgstr "Networks"
+
+msgid "nav.item.objectUsers"
+msgstr "Object storage users"
+
+msgid "nav.item.securityGroups"
+msgstr "Security groups"
+
+msgid "nav.item.settings"
+msgstr "Settings"
+
+msgid "nav.item.snapshots"
+msgstr "Snapshots"
+
+msgid "nav.item.sshKeys"
+msgstr "SSH keys"
+
+msgid "nav.item.subnets"
+msgstr "Subnets"
+
+msgid "nav.item.tenants"
+msgstr "Tenants"
+
+msgid "nav.item.upgrades"
+msgstr "Upgrades"
+
+msgid "nav.item.vms"
+msgstr "Virtual machines"
+
+msgid "nav.item.volumes"
+msgstr "Volumes"
+
+msgid "nav.section.catalog"
+msgstr "Catalog"
+
+msgid "nav.section.compute"
+msgstr "Compute"
+
+msgid "nav.section.infrastructure"
+msgstr "Infrastructure"
+
+msgid "nav.section.networking"
+msgstr "Networking"
+
+msgid "nav.section.objectStorage"
+msgstr "Object storage"
+
+msgid "nav.section.platform"
+msgstr "Platform"
+
+msgid "nav.section.storage"
+msgstr "Storage"
+
+msgid "nav.section.tenancy"
+msgstr "Tenancy"
+
 msgid "session.gate.error.body"
 msgstr "The panel could not read your session."
 
 msgid "session.gate.error.title"
 msgstr "Sign in did not work"
+
+msgid "shell.breadcrumb.label"
+msgstr "Breadcrumb"
+
+msgid "shell.detail.title"
+msgstr "Details"
+
+msgid "shell.language.label"
+msgstr "Language"
+
+msgid "shell.nav.label"
+msgstr "Main navigation"
+
+msgid "shell.notFound.body"
+msgstr "This page does not exist, or you cannot see it."
+
+msgid "shell.notFound.title"
+msgstr "Page not found"
+
+msgid "shell.perspective.admin"
+msgstr "Admin"
+
+msgid "shell.perspective.label"
+msgstr "Perspective"
+
+msgid "shell.perspective.project"
+msgstr "Projects"
+
+msgid "shell.project.label"
+msgstr "Project"
+
+msgid "shell.project.none.description"
+msgstr "You are not a member of any project yet."
+
+msgid "shell.project.none.title"
+msgstr "No projects"
+
+msgid "shell.skip"
+msgstr "Skip to content"
+
+msgid "shell.theme.dark"
+msgstr "Dark"
+
+msgid "shell.theme.label"
+msgstr "Theme"
+
+msgid "shell.theme.light"
+msgstr "Light"
+
+msgid "shell.theme.system"
+msgstr "System"
+
+msgid "shell.userMenu.account"
+msgstr "Account"
+
+msgid "shell.userMenu.ca"
+msgstr "Download CA certificate"
+
+msgid "shell.userMenu.kubeconfig"
+msgstr "Download kubeconfig"
+
+msgid "shell.userMenu.label"
+msgstr "User menu"
+
+msgid "shell.userMenu.signOut"
+msgstr "Sign out"

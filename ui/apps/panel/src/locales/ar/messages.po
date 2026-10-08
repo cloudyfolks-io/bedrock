@@ -7,6 +7,12 @@ msgstr ""
 "X-Generator: @lingui/cli\n"
 "Language: ar\n"
 
+msgid "account.downloads.title"
+msgstr "التنزيلات"
+
+msgid "account.title"
+msgstr "الحساب"
+
 msgid "app.title"
 msgstr "بيدروك"
 
@@ -37,8 +43,158 @@ msgstr "{count, plural, zero {لا توجد أجهزة افتراضية} one {ج
 msgid "common.state.loading"
 msgstr "جارٍ التحميل"
 
+msgid "nav.item.addons"
+msgstr "الإضافات"
+
+msgid "nav.item.backups"
+msgstr "النسخ الاحتياطية"
+
+msgid "nav.item.buckets"
+msgstr "الحاويات"
+
+msgid "nav.item.clusterImages"
+msgstr "صور الفهرس"
+
+msgid "nav.item.dnsZones"
+msgstr "نطاقات DNS"
+
+msgid "nav.item.elasticIps"
+msgstr "عناوين IP المرنة"
+
+msgid "nav.item.hosts"
+msgstr "المضيفون"
+
+msgid "nav.item.images"
+msgstr "الصور"
+
+msgid "nav.item.loadBalancers"
+msgstr "موازنات الحمل"
+
+msgid "nav.item.networks"
+msgstr "الشبكات"
+
+msgid "nav.item.objectUsers"
+msgstr "مستخدمو تخزين الكائنات"
+
+msgid "nav.item.securityGroups"
+msgstr "مجموعات الأمان"
+
+msgid "nav.item.settings"
+msgstr "الإعدادات"
+
+msgid "nav.item.snapshots"
+msgstr "اللقطات"
+
+msgid "nav.item.sshKeys"
+msgstr "مفاتيح SSH"
+
+msgid "nav.item.subnets"
+msgstr "الشبكات الفرعية"
+
+msgid "nav.item.tenants"
+msgstr "المستأجرون"
+
+msgid "nav.item.upgrades"
+msgstr "الترقيات"
+
+msgid "nav.item.vms"
+msgstr "الأجهزة الافتراضية"
+
+msgid "nav.item.volumes"
+msgstr "الأقراص"
+
+msgid "nav.section.catalog"
+msgstr "الفهرس"
+
+msgid "nav.section.compute"
+msgstr "الحوسبة"
+
+msgid "nav.section.infrastructure"
+msgstr "البنية التحتية"
+
+msgid "nav.section.networking"
+msgstr "الشبكات"
+
+msgid "nav.section.objectStorage"
+msgstr "تخزين الكائنات"
+
+msgid "nav.section.platform"
+msgstr "المنصة"
+
+msgid "nav.section.storage"
+msgstr "التخزين"
+
+msgid "nav.section.tenancy"
+msgstr "المستأجرون"
+
 msgid "session.gate.error.body"
 msgstr "تعذر على اللوحة قراءة جلستك."
 
 msgid "session.gate.error.title"
 msgstr "تعذر تسجيل الدخول"
+
+msgid "shell.breadcrumb.label"
+msgstr "مسار الصفحة"
+
+msgid "shell.detail.title"
+msgstr "التفاصيل"
+
+msgid "shell.language.label"
+msgstr "اللغة"
+
+msgid "shell.nav.label"
+msgstr "التنقل الرئيسي"
+
+msgid "shell.notFound.body"
+msgstr "هذه الصفحة غير موجودة أو لا يمكنك رؤيتها."
+
+msgid "shell.notFound.title"
+msgstr "الصفحة غير موجودة"
+
+msgid "shell.perspective.admin"
+msgstr "المدير"
+
+msgid "shell.perspective.label"
+msgstr "المنظور"
+
+msgid "shell.perspective.project"
+msgstr "المشاريع"
+
+msgid "shell.project.label"
+msgstr "المشروع"
+
+msgid "shell.project.none.description"
+msgstr "لست عضوًا في أي مشروع بعد."
+
+msgid "shell.project.none.title"
+msgstr "لا توجد مشاريع"
+
+msgid "shell.skip"
+msgstr "انتقل إلى المحتوى"
+
+msgid "shell.theme.dark"
+msgstr "داكن"
+
+msgid "shell.theme.label"
+msgstr "المظهر"
+
+msgid "shell.theme.light"
+msgstr "فاتح"
+
+msgid "shell.theme.system"
+msgstr "النظام"
+
+msgid "shell.userMenu.account"
+msgstr "الحساب"
+
+msgid "shell.userMenu.ca"
+msgstr "تنزيل شهادة CA"
+
+msgid "shell.userMenu.kubeconfig"
+msgstr "تنزيل kubeconfig"
+
+msgid "shell.userMenu.label"
+msgstr "قائمة المستخدم"
+
+msgid "shell.userMenu.signOut"
+msgstr "تسجيل الخروج"

@@ -2,7 +2,8 @@ import { render } from "@testing-library/react";
 import type { ReactElement } from "react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { MemoryRouter } from "react-router";
-import { ThemeProvider, ToastProvider } from "@bedrock/design";
+import { ToastProvider } from "@bedrock/design";
+import { ThemeChoiceProvider } from "../theme";
 import { HttpProvider, sessionKey } from "../api/HttpProvider";
 import type { Session } from "../api/types";
 import type { Locale } from "../i18n";
@@ -51,7 +52,7 @@ export function renderPanel(node: ReactElement, options: RenderOptions = {}): Pa
   const wrap = (content: ReactElement) => (
     <QueryClientProvider client={queryClient}>
       <LocaleProvider initial={options.locale ?? "en"}>
-        <ThemeProvider>
+        <ThemeChoiceProvider>
           <ToastProvider>
             <MemoryRouter initialEntries={[options.route ?? "/"]}>
               <LocationProvider actions={{ assign }}>
@@ -63,7 +64,7 @@ export function renderPanel(node: ReactElement, options: RenderOptions = {}): Pa
               </LocationProvider>
             </MemoryRouter>
           </ToastProvider>
-        </ThemeProvider>
+        </ThemeChoiceProvider>
       </LocaleProvider>
     </QueryClientProvider>
   );

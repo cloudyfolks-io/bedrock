@@ -7,6 +7,12 @@ msgstr ""
 "X-Generator: @lingui/cli\n"
 "Language: fa\n"
 
+msgid "account.downloads.title"
+msgstr "دریافت‌ها"
+
+msgid "account.title"
+msgstr "حساب کاربری"
+
 msgid "app.title"
 msgstr "بدراک"
 
@@ -37,8 +43,158 @@ msgstr "{count, plural, one {# ماشین مجازی} other {# ماشین مجا
 msgid "common.state.loading"
 msgstr "در حال بارگذاری"
 
+msgid "nav.item.addons"
+msgstr "افزونه‌ها"
+
+msgid "nav.item.backups"
+msgstr "پشتیبان‌ها"
+
+msgid "nav.item.buckets"
+msgstr "سطل‌ها"
+
+msgid "nav.item.clusterImages"
+msgstr "تصاویر کاتالوگ"
+
+msgid "nav.item.dnsZones"
+msgstr "ناحیه‌های DNS"
+
+msgid "nav.item.elasticIps"
+msgstr "آی‌پی‌های شناور"
+
+msgid "nav.item.hosts"
+msgstr "میزبان‌ها"
+
+msgid "nav.item.images"
+msgstr "تصاویر"
+
+msgid "nav.item.loadBalancers"
+msgstr "توزیع‌کننده‌های بار"
+
+msgid "nav.item.networks"
+msgstr "شبکه‌ها"
+
+msgid "nav.item.objectUsers"
+msgstr "کاربران ذخیره‌سازی شیء"
+
+msgid "nav.item.securityGroups"
+msgstr "گروه‌های امنیتی"
+
+msgid "nav.item.settings"
+msgstr "تنظیمات"
+
+msgid "nav.item.snapshots"
+msgstr "اسنپ‌شات‌ها"
+
+msgid "nav.item.sshKeys"
+msgstr "کلیدهای SSH"
+
+msgid "nav.item.subnets"
+msgstr "زیرشبکه‌ها"
+
+msgid "nav.item.tenants"
+msgstr "مستأجرها"
+
+msgid "nav.item.upgrades"
+msgstr "ارتقاها"
+
+msgid "nav.item.vms"
+msgstr "ماشین‌های مجازی"
+
+msgid "nav.item.volumes"
+msgstr "حجم‌ها"
+
+msgid "nav.section.catalog"
+msgstr "کاتالوگ"
+
+msgid "nav.section.compute"
+msgstr "محاسبه"
+
+msgid "nav.section.infrastructure"
+msgstr "زیرساخت"
+
+msgid "nav.section.networking"
+msgstr "شبکه"
+
+msgid "nav.section.objectStorage"
+msgstr "ذخیره‌سازی شیء"
+
+msgid "nav.section.platform"
+msgstr "پلتفرم"
+
+msgid "nav.section.storage"
+msgstr "ذخیره‌سازی"
+
+msgid "nav.section.tenancy"
+msgstr "مستأجری"
+
 msgid "session.gate.error.body"
 msgstr "پنل نتوانست نشست شما را بخواند."
 
 msgid "session.gate.error.title"
 msgstr "ورود انجام نشد"
+
+msgid "shell.breadcrumb.label"
+msgstr "مسیر صفحه"
+
+msgid "shell.detail.title"
+msgstr "جزئیات"
+
+msgid "shell.language.label"
+msgstr "زبان"
+
+msgid "shell.nav.label"
+msgstr "پیمایش اصلی"
+
+msgid "shell.notFound.body"
+msgstr "این صفحه وجود ندارد یا اجازه دیدن آن را ندارید."
+
+msgid "shell.notFound.title"
+msgstr "صفحه پیدا نشد"
+
+msgid "shell.perspective.admin"
+msgstr "مدیر"
+
+msgid "shell.perspective.label"
+msgstr "نما"
+
+msgid "shell.perspective.project"
+msgstr "پروژه‌ها"
+
+msgid "shell.project.label"
+msgstr "پروژه"
+
+msgid "shell.project.none.description"
+msgstr "شما هنوز عضو هیچ پروژه‌ای نیستید."
+
+msgid "shell.project.none.title"
+msgstr "پروژه‌ای نیست"
+
+msgid "shell.skip"
+msgstr "پرش به محتوا"
+
+msgid "shell.theme.dark"
+msgstr "تیره"
+
+msgid "shell.theme.label"
+msgstr "پوسته"
+
+msgid "shell.theme.light"
+msgstr "روشن"
+
+msgid "shell.theme.system"
+msgstr "سیستم"
+
+msgid "shell.userMenu.account"
+msgstr "حساب کاربری"
+
+msgid "shell.userMenu.ca"
+msgstr "دریافت گواهی CA"
+
+msgid "shell.userMenu.kubeconfig"
+msgstr "دریافت kubeconfig"
+
+msgid "shell.userMenu.label"
+msgstr "منوی کاربر"
+
+msgid "shell.userMenu.signOut"
+msgstr "خروج"
