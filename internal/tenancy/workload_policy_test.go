@@ -15,7 +15,7 @@ import (
 )
 
 const pauseImage = "registry.k8s.io/pause:3.10"
-const handler = "system:serviceaccount:kubevirt:kubevirt-handler"
+const kubevirtHandler = "system:serviceaccount:kubevirt:kubevirt-kubevirtHandler"
 
 func editorIn(namespace, user string) *rbacv1.RoleBinding {
 	return &rbacv1.RoleBinding{
@@ -61,9 +61,9 @@ func newWorkloadWorld(t *testing.T) workloadWorld {
 	mustCreate(t, admin,
 		namespaceNamed("acme-shop", map[string]string{"bedrock.cloudyfolks.io/tenant": "acme"}),
 		namespaceNamed("plain", nil),
-		editorIn("acme-shop", "bedrock:eddie"), editorIn("plain", "bedrock:eddie"), editorIn("acme-shop", handler),
+		editorIn("acme-shop", "bedrock:eddie"), editorIn("plain", "bedrock:eddie"), editorIn("acme-shop", kubevirtHandler),
 	)
-	world := workloadWorld{admin: admin, eddie: actingAs(t, cfg, "bedrock:eddie"), kubevirt: actingAs(t, cfg, handler)}
+	world := workloadWorld{admin: admin, eddie: actingAs(t, cfg, "bedrock:eddie"), kubevirt: actingAs(t, cfg, kubevirtHandler)}
 	probe := func() error {
 		return denyCreate(admin, world.eddie, plainPod("probe", "acme-shop", func(s *corev1.PodSpec) { s.HostNetwork = true }))()
 	}

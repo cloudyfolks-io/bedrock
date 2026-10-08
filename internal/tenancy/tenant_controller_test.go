@@ -8,6 +8,7 @@ import (
 	rbacv1 "k8s.io/api/rbac/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/rest"
+	"k8s.io/utils/ptr"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
@@ -64,7 +65,7 @@ func TestTenantCreatesNetworkRoleAndBinding(t *testing.T) {
 	waitFor(t, func() bool {
 		return getInto(t, c, "tenant:acme:owner", role) && getInto(t, c, "tenant:acme:owner", binding)
 	})
-	if len(role.Rules) != 2 || controllerReferenceUID(role.OwnerReferences, "Tenant") != string(tenant.UID) {
+	if len(role.Rules) < 2 || controllerReferenceUID(role.OwnerReferences, "Tenant") != string(tenant.UID) {
 		t.Fatalf("role = %+v", role)
 	}
 	if binding.RoleRef.Name != "tenant:acme:owner" || controllerReferenceUID(binding.OwnerReferences, "Tenant") != string(tenant.UID) {
@@ -175,4 +176,110 @@ func TestTenantRequeuesForUsage(t *testing.T) {
 	if err != nil || result.RequeueAfter != Interval {
 		t.Fatalf("result = %+v, err = %v", result, err)
 	}
+}
+
+func projectNamesRule(role *rbacv1.ClusterRole, resource string) []string {
+	for _, rule := range role.Rules {
+		if len(rule.ResourceNames) > 0 && len(rule.Resources) == 1 && rule.Resources[0] == resource {
+			return rule.ResourceNames
+		}
+	}
+	return nil
+}
+
+func TestOwnerRoleListsProjectsAndNetworksByName(t *testing.T) {
+	c, _ := tenantWorld(t)
+	mustCreate(t, c, acmeWithOwners(defaultOwners()...), projectFor("web", "acme"), projectFor("data", "acme"), projectFor("rival", "other"), networkFor("acme-lab", "acme"))
+	role := &rbacv1.ClusterRole{}
+	waitFor(t, func() bool {
+		return getInto(t, c, "tenant:acme:owner", role) &&
+			reflect.DeepEqual(projectNamesRule(role, "projects"), []string{"data", "web"}) &&
+			reflect.DeepEqual(projectNamesRule(role, "networks"), []string{"acme", "acme-lab"})
+	})
+	if err := c.Delete(context.Background(), projectFor("data", "acme")); err != nil {
+		t.Fatal(err)
+	}
+	waitFor(t, func() bool {
+		return getInto(t, c, "tenant:acme:owner", role) && reflect.DeepEqual(projectNamesRule(role, "projects"), []string{"web"})
+	})
+}
+
+func setProjectUsage(t *testing.T, c client.Client, name string, usage v1alpha1.ProjectQuota) {
+	t.Helper()
+	waitFor(t, func() bool {
+		project := &v1alpha1.Project{}
+		if !getInto(t, c, name, project) {
+			return false
+		}
+		project.Status.Usage = usage
+		return c.Status().Update(context.Background(), project) == nil
+	})
+}
+
+func TestTenantUsageSumsProjectUsage(t *testing.T) {
+	c, _ := tenantWorld(t)
+	mustCreate(t, c, acmeWithOwners(defaultOwners()...), projectFor("web", "acme"), projectFor("data", "acme"))
+	setProjectUsage(t, c, "web", v1alpha1.ProjectQuota{CPU: quantity("2"), Memory: quantity("4Gi")})
+	setProjectUsage(t, c, "data", v1alpha1.ProjectQuota{CPU: quantity("3")})
+	tenant := &v1alpha1.Tenant{}
+	waitFor(t, func() bool {
+		usage := tenant.Status.Usage
+		return getInto(t, c, "acme", tenant) && usage.CPU != nil && usage.CPU.String() == "5" && usage.Memory.String() == "4Gi" && *usage.Projects == 2
+	})
+}
+
+func TestTenantCountsElasticIPs(t *testing.T) {
+	c, _ := startEnv(t)
+	mustCreate(t, c, namespaceNamed("acme-web", nil), namespaceNamed("other-web", nil))
+	mustCreate(t, c, elasticIPIn("one", "acme-web"), elasticIPIn("two", "acme-web"), elasticIPIn("three", "other-web"))
+	reconciler := &TenantReconciler{Client: c, Reader: c}
+	mustCreate(t, c, acmeWithOwners(defaultOwners()...), projectFor("web", "acme"))
+	if _, err := reconciler.Reconcile(context.Background(), reconcile.Request{NamespacedName: client.ObjectKey{Name: "acme"}}); err != nil {
+		t.Fatal(err)
+	}
+	tenant := &v1alpha1.Tenant{}
+	waitFor(t, func() bool { return getInto(t, c, "acme", tenant) && tenant.Status.Usage.ElasticIPs != nil })
+	if *tenant.Status.Usage.ElasticIPs != 2 {
+		t.Fatalf("elasticIPs = %d", *tenant.Status.Usage.ElasticIPs)
+	}
+}
+
+func TestTenantReportsProjectsOverQuota(t *testing.T) {
+	c, _ := tenantWorld(t)
+	tenant := acmeWithOwners(defaultOwners()...)
+	tenant.Spec.Quota.Projects = ptr.To(int32(1))
+	mustCreate(t, c, tenant, projectFor("web", "acme"), projectFor("data", "acme"))
+	waitFor(t, func() bool {
+		return getInto(t, c, "acme", tenant) && conditionReason(tenant.Status.Conditions, ConditionWithinQuota) == ReasonProjectsOverQuota
+	})
+}
+
+func TestTenantReportsAllocationOverQuota(t *testing.T) {
+	c, _ := tenantWorld(t)
+	tenant := acmeWithOwners(defaultOwners()...)
+	tenant.Spec.Quota.CPU = quantity("8")
+	web, data := projectFor("web", "acme"), projectFor("data", "acme")
+	web.Spec.Quota.CPU, data.Spec.Quota.CPU = quantity("5"), quantity("4")
+	mustCreate(t, c, tenant, web, data)
+	waitFor(t, func() bool {
+		return getInto(t, c, "acme", tenant) && conditionReason(tenant.Status.Conditions, ConditionWithinQuota) == ReasonAllocationOverQuota
+	})
+}
+
+func conditionReason(conditions []metav1.Condition, conditionType string) string {
+	for _, condition := range conditions {
+		if condition.Type == conditionType {
+			return condition.Reason
+		}
+	}
+	return ""
+}
+
+func TestTenantReactsToProjectChanges(t *testing.T) {
+	c, _ := tenantWorld(t)
+	tenant := acmeWithOwners(defaultOwners()...)
+	mustCreate(t, c, tenant)
+	waitFor(t, func() bool { return getInto(t, c, "acme", tenant) && tenant.Status.Usage.Projects != nil })
+	mustCreate(t, c, projectFor("web", "acme"))
+	waitFor(t, func() bool { return getInto(t, c, "acme", tenant) && *tenant.Status.Usage.Projects == 1 })
 }
