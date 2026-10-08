@@ -54,8 +54,7 @@ func serveConsole(d Deps, ctx context.Context, c client.Client, key client.Objec
 		Rewrite: func(pr *httputil.ProxyRequest) {
 			pr.Out.URL = target
 			pr.Out.Host = target.Host
-			pr.Out.Header.Del("Authorization")
-			pr.Out.Header.Del("Cookie")
+			pr.Out.Header = handshakeHeaders(pr.In.Header)
 		},
 		FlushInterval: -1,
 		Transport:     transport,
@@ -64,6 +63,25 @@ func serveConsole(d Deps, ctx context.Context, c client.Client, key client.Objec
 		},
 	}
 	proxy.ServeHTTP(w, r)
+}
+
+var handshakeHeaderNames = []string{
+	"Connection",
+	"Upgrade",
+	"Sec-Websocket-Key",
+	"Sec-Websocket-Version",
+	"Sec-Websocket-Protocol",
+	"Sec-Websocket-Extensions",
+}
+
+func handshakeHeaders(in http.Header) http.Header {
+	out := http.Header{}
+	for _, name := range handshakeHeaderNames {
+		if values := in.Values(name); len(values) > 0 {
+			out[name] = append([]string(nil), values...)
+		}
+	}
+	return out
 }
 
 func checkConsoleRequest(r *http.Request) error {

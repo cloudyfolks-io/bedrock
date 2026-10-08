@@ -148,6 +148,13 @@ func TestConsoleStripsCallerCredentials(t *testing.T) {
 	headers := upgradeHeaders()
 	headers["Authorization"] = "Bearer user-token"
 	headers["Cookie"] = "session=secret"
+	headers["Impersonate-User"] = "system:admin"
+	headers["Impersonate-Group"] = "system:masters"
+	headers["Impersonate-Extra-Scopes"] = "all"
+	headers["X-Remote-User"] = "admin"
+	headers["X-Remote-Group"] = "system:masters"
+	headers["X-Forwarded-For"] = "203.0.113.9"
+	headers["X-Custom"] = "value"
 	resp, _, _ := rig.dial(t, headers)
 	if resp.StatusCode != http.StatusSwitchingProtocols || resp.Header.Get("Sec-WebSocket-Protocol") != "plain.kubevirt.io" {
 		t.Fatalf("status %d headers %v", resp.StatusCode, resp.Header)
@@ -155,6 +162,15 @@ func TestConsoleStripsCallerCredentials(t *testing.T) {
 	seen, _ := rig.upstream.seen()
 	if len(seen) != 1 || seen[0].Get("Authorization") != "Bearer proxy-token" || seen[0].Get("Cookie") != "" || seen[0].Get("Sec-WebSocket-Protocol") != "plain.kubevirt.io" {
 		t.Fatalf("upstream headers %v", seen)
+	}
+	allowed := map[string]bool{
+		"Authorization": true, "Upgrade": true, "Connection": true, "Sec-Websocket-Key": true, "Sec-Websocket-Version": true,
+		"Sec-Websocket-Protocol": true, "User-Agent": true, "Accept-Encoding": true,
+	}
+	for name := range seen[0] {
+		if !allowed[name] {
+			t.Errorf("the header %s reached the upstream", name)
+		}
 	}
 }
 
