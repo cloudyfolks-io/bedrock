@@ -75,7 +75,7 @@ metadata:
 spec:
   entryPoints: [websecure]
   routes:
-    - match: Host(` + "`upload.cloud.example.com`" + `)
+    - match: Host(` + "`upload.cloud.example.com`" + `) && PathPrefix(` + "`/v1beta1/upload`" + `)
       kind: Rule
       middlewares:
         - name: bedrock-upload-cors
@@ -146,7 +146,7 @@ func TestUploadAddonFollowsPlatformHost(t *testing.T) {
 	cors := findObject(second.Objects, "Middleware", "bedrock-upload-cors")
 	routes, _, _ := unstructured.NestedSlice(route.Object, "spec", "routes")
 	origins, _, _ := unstructured.NestedStringSlice(cors.Object, "spec", "headers", "accessControlAllowOriginList")
-	if routes[0].(map[string]any)["match"] != "Host(`upload.b.example.com`)" || len(origins) != 1 || origins[0] != "https://console.b.example.com" {
+	if routes[0].(map[string]any)["match"] != "Host(`upload.b.example.com`) && PathPrefix(`/v1beta1/upload`)" || len(origins) != 1 || origins[0] != "https://console.b.example.com" {
 		t.Fatalf("route %v origins %v", routes, origins)
 	}
 }

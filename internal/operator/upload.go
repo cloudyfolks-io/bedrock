@@ -17,6 +17,7 @@ const (
 	uploadTransportName    = "bedrock-upload"
 	uploadCORSName         = "bedrock-upload-cors"
 	uploadRouteName        = "bedrock-upload"
+	uploadPathPrefix       = "/v1beta1/upload"
 )
 
 var uploadAddon = Addon{Name: "upload", Condition: v1alpha1.ConditionUploadReady, Render: RenderUpload}
@@ -65,7 +66,7 @@ func uploadCORSMiddleware(host string) *unstructured.Unstructured {
 func uploadIngressRoute(host string) *unstructured.Unstructured {
 	service := map[string]any{"name": uploadProxyName, "port": int64(443), "scheme": "https", "serversTransport": uploadTransportName}
 	route := map[string]any{
-		"match":       "Host(`upload." + host + "`)",
+		"match":       "Host(`upload." + host + "`) && PathPrefix(`" + uploadPathPrefix + "`)",
 		"kind":        "Rule",
 		"middlewares": []any{map[string]any{"name": uploadCORSName}},
 		"services":    []any{service},
