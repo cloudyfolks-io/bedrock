@@ -3,6 +3,7 @@ package proxy
 import (
 	"bytes"
 	"context"
+	"crypto/rand"
 	"errors"
 	"log/slog"
 	"strconv"
@@ -43,6 +44,7 @@ type resolverFixture struct {
 	subject string
 	sid     string
 	seeded  atomic.Int32
+	signer  *CookieSigner
 }
 
 func newResolverFixture(t *testing.T) *resolverFixture {
@@ -63,13 +65,13 @@ func newResolverFixture(t *testing.T) *resolverFixture {
 	fake.mutate(func(f *fakeAuthn) { f.identity.Subject = subject })
 	reads := &secretReads{Client: c}
 	return &resolverFixture{
-		clock: clock, fake: fake, store: NewStore(reads, clock.Now), reads: reads, subject: subject, sid: sid,
+		clock: clock, fake: fake, store: NewStore(reads, clock.Now), reads: reads, subject: subject, sid: sid, signer: NewCookieSigner([]byte("0123456789abcdef0123456789abcdef")),
 		oidc: newOIDCFor(fake, &mutableHost{value: "lab.example"}, fakeClientSecret),
 	}
 }
 
 func (fx *resolverFixture) resolver(holder string) *Resolver {
-	return NewResolver(fx.store, fx.oidc, fx.reads.Client, fx.clock.Now, holder)
+	return NewResolver(fx.store, fx.oidc, fx.reads.Client, fx.clock.Now, holder, fx.signer)
 }
 
 func (fx *resolverFixture) seed(t *testing.T, accessLife time.Duration) (string, Record) {
@@ -85,7 +87,7 @@ func (fx *resolverFixture) seed(t *testing.T, accessLife time.Duration) (string,
 
 func (fx *resolverFixture) seedRecord(t *testing.T, rec Record) string {
 	t.Helper()
-	cookie := "cookie-" + fx.subject + "-" + strconv.Itoa(int(fx.seeded.Add(1)))
+	cookie := fx.signer.Sign("cookie-" + fx.subject + "-" + strconv.Itoa(int(fx.seeded.Add(1))))
 	if err := fx.store.CreateSession(context.Background(), secret.SHA256Hex(cookie), rec); err != nil {
 		t.Fatal(err)
 	}
@@ -318,16 +320,16 @@ func TestResolveCachesUnknownCookiesBriefly(t *testing.T) {
 	fx := newResolverFixture(t)
 	resolver := fx.resolver("proxy-a")
 	for i := 0; i < 2; i++ {
-		if _, err := resolver.Resolve(context.Background(), "unknown-cookie-value"); !errors.Is(err, ErrUnauthenticated) {
+		if _, err := resolver.Resolve(context.Background(), fx.signer.Sign("unknown-cookie-value")); !errors.Is(err, ErrUnauthenticated) {
 			t.Fatal(err)
 		}
 	}
 	reads := fx.reads.reads.Load()
-	if _, err := resolver.Resolve(context.Background(), "unknown-cookie-value"); !errors.Is(err, ErrUnauthenticated) || fx.reads.reads.Load() != reads {
+	if _, err := resolver.Resolve(context.Background(), fx.signer.Sign("unknown-cookie-value")); !errors.Is(err, ErrUnauthenticated) || fx.reads.reads.Load() != reads {
 		t.Fatalf("the third lookup read the Secret again: %d -> %d", reads, fx.reads.reads.Load())
 	}
 	fx.clock.Advance(4 * time.Second)
-	if _, err := resolver.Resolve(context.Background(), "unknown-cookie-value"); !errors.Is(err, ErrUnauthenticated) || fx.reads.reads.Load() == reads {
+	if _, err := resolver.Resolve(context.Background(), fx.signer.Sign("unknown-cookie-value")); !errors.Is(err, ErrUnauthenticated) || fx.reads.reads.Load() == reads {
 		t.Fatal("the miss was not looked up again after the cache time")
 	}
 }
@@ -348,5 +350,52 @@ func TestForgetEvictsTheCachedRecord(t *testing.T) {
 	resolver.Forget(cookie)
 	if _, err := resolver.Resolve(context.Background(), cookie); !errors.Is(err, ErrUnauthenticated) {
 		t.Fatalf("after Forget: %v", err)
+	}
+}
+
+func TestResolveRefusesUnsignedCookiesWithoutAnyRead(t *testing.T) {
+	fx := newResolverFixture(t)
+	resolver := fx.resolver("proxy-a")
+	cookie, _ := fx.seed(t, time.Hour)
+	id, mac, _ := strings.Cut(cookie, ".")
+	otherKey := NewCookieSigner([]byte("ffffffffffffffffffffffffffffffff"))
+	cases := map[string]string{
+		"random value":   "random-cookie-value-without-a-mac",
+		"bad mac":        id + "." + strings.Repeat("0", len(mac)),
+		"id only":        id,
+		"empty mac":      id + ".",
+		"not hex":        id + ".zz",
+		"before the key": otherKey.Sign(id),
+	}
+	reads := fx.reads.reads.Load()
+	for name, value := range cases {
+		if _, err := resolver.Resolve(context.Background(), value); !errors.Is(err, ErrUnauthenticated) {
+			t.Errorf("%s: %v", name, err)
+		}
+	}
+	if fx.reads.reads.Load() != reads {
+		t.Fatalf("rejected cookies caused %d Secret reads", fx.reads.reads.Load()-reads)
+	}
+	if _, err := resolver.Resolve(context.Background(), cookie); err != nil {
+		t.Fatalf("the signed cookie must resolve: %v", err)
+	}
+}
+
+func TestCookieKeyIsCreatedOnceAndReused(t *testing.T) {
+	c := startEnv(t)
+	ctx := context.Background()
+	first, err := LoadCookieSigner(ctx, c, rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := LoadCookieSigner(ctx, c, rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !second.Verify(first.Sign("id-1")) {
+		t.Fatal("the second load did not read the stored key")
+	}
+	if NewCookieSigner([]byte("another-key-another-key-another!")).Verify(first.Sign("id-1")) {
+		t.Fatal("a signature verified under another key")
 	}
 }

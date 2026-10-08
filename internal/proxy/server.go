@@ -95,11 +95,15 @@ func New(ctx context.Context, cfg Config) (http.Handler, error) {
 		AuthnCA:         cfg.AuthnCA,
 		Clock:           cfg.Clock,
 	})
-	resolver := NewResolver(store, oidc, privileged, cfg.Clock, cfg.PodName)
+	signer, err := LoadCookieSigner(ctx, privileged, cfg.Random)
+	if err != nil {
+		return nil, err
+	}
+	resolver := NewResolver(store, oidc, privileged, cfg.Clock, cfg.PodName, signer)
 	start, callback, logout := LoginHandlers(LoginDeps{
 		Store: store, OIDC: oidc, Reader: privileged, Random: cfg.Random, Clock: cfg.Clock, Host: host,
 		Limiter: methods.NewRateLimiter(loginsPerMinute, time.Minute), Callbacks: methods.NewRateLimiter(loginsPerMinute, time.Minute),
-		Evict: resolver.Forget,
+		Evict: resolver.Forget, Signer: signer,
 	})
 	if cfg.Subresources == nil {
 		cfg.Subresources = NewSubresources()

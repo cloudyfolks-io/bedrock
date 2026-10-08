@@ -47,6 +47,7 @@ func newLoginFixture(t *testing.T) *loginFixture {
 		Limiter:   methods.NewRateLimiter(30, time.Minute),
 		Callbacks: methods.NewRateLimiter(30, time.Minute),
 		Evict:     func(string) {},
+		Signer:    NewCookieSigner([]byte("0123456789abcdef0123456789abcdef")),
 		Host:      host.Get,
 	})
 	return &loginFixture{fake: fake, store: store, start: start, callback: callback, logout: logout}
@@ -159,7 +160,7 @@ func TestCallbackCreatesSession(t *testing.T) {
 		t.Fatalf("callback %d %q", done.Code, done.Header().Get("Location"))
 	}
 	session := cookieNamed(done.Result(), CookieSession)
-	if session == nil || len(session.Value) != 43 || !session.HttpOnly || !session.Secure || session.SameSite != http.SameSiteLaxMode ||
+	if session == nil || len(session.Value) != 43+1+64 || !session.HttpOnly || !session.Secure || session.SameSite != http.SameSiteLaxMode ||
 		session.Path != "/" || session.Domain != "" || session.MaxAge < int((12*time.Hour-time.Minute).Seconds()) || session.MaxAge > int((12*time.Hour).Seconds()) {
 		t.Fatalf("session cookie %+v", session)
 	}

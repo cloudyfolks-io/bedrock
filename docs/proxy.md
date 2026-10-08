@@ -60,6 +60,12 @@ The user can sign in again at the next visit without a password while that sessi
 The session cookie is `__Host-bedrock_console`.
 It is `HttpOnly`, `Secure` and `SameSite=Lax`.
 It has no `Domain`.
+The cookie value is an id, a dot, and an HMAC-SHA256 of the id.
+The proxy checks the HMAC before it reads any record.
+A cookie with a bad or missing HMAC is anonymous and costs no API call.
+The key is in the Secret `cookie-key` in the namespace `bedrock-proxy`.
+The proxy creates the key once.
+If you delete the Secret or change the key, every user signs out.
 The login cookie is `__Host-bedrock_oauth`.
 It lives for 10 minutes.
 

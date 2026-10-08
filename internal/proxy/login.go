@@ -37,6 +37,7 @@ type LoginDeps struct {
 	Limiter   *methods.RateLimiter
 	Callbacks *methods.RateLimiter
 	Evict     func(cookieValue string)
+	Signer    *CookieSigner
 	Host      func(context.Context) (string, error)
 }
 
@@ -114,11 +115,12 @@ func (d LoginDeps) callback(w http.ResponseWriter, r *http.Request) {
 		upstreamFailure(w, r, "read the authn session", errors.New("session already expired"))
 		return
 	}
-	cookieValue, csrf, err := d.randomPair()
+	cookieID, csrf, err := d.randomPair()
 	if err != nil {
 		httpjson.Internal(w, r, "generate session values", err)
 		return
 	}
+	cookieValue := d.Signer.Sign(cookieID)
 	rec := Record{
 		Subject: tokens.Identity.Subject, DisplayName: tokens.Identity.Name, Email: tokens.Identity.Email,
 		Groups: tokens.Identity.Groups, SessionName: tokens.Identity.SessionName,

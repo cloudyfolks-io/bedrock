@@ -59,17 +59,18 @@ type Resolver struct {
 	reader client.Reader
 	clock  func() time.Time
 	holder string
+	signer *CookieSigner
 	mu     sync.Mutex
 	cache  map[string]cachedRecord
 	misses map[string]time.Time
 }
 
-func NewResolver(store *Store, oidc *OIDC, reader client.Reader, clock func() time.Time, holder string) *Resolver {
-	return &Resolver{store: store, oidc: oidc, reader: reader, clock: clock, holder: holder, cache: map[string]cachedRecord{}, misses: map[string]time.Time{}}
+func NewResolver(store *Store, oidc *OIDC, reader client.Reader, clock func() time.Time, holder string, signer *CookieSigner) *Resolver {
+	return &Resolver{store: store, oidc: oidc, reader: reader, clock: clock, holder: holder, signer: signer, cache: map[string]cachedRecord{}, misses: map[string]time.Time{}}
 }
 
 func (r *Resolver) Resolve(ctx context.Context, cookieValue string) (Principal, error) {
-	if cookieValue == "" {
+	if !r.signer.Verify(cookieValue) {
 		return Principal{}, ErrUnauthenticated
 	}
 	hash := secret.SHA256Hex(cookieValue)
