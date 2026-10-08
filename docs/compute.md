@@ -84,6 +84,7 @@ Each Subnet can be attached once.
 The operator starts a VM only when each Subnet and each security group has the condition `Ready`.
 A VM never starts without its firewall.
 A VM with no security group uses the default group `default-<namespace>` of its project.
+The VM waits until this group exists.
 Port security is on for each interface.
 
 A change of the security groups reaches a running VM at once.
@@ -102,9 +103,12 @@ A key with options or a certificate is refused.
 The operator keeps the key type and the key only.
 The operator drops the comment.
 
-The operator adds the keys to `ssh_authorized_keys` of a `#cloud-config` document.
+The operator adds the keys at the end of a `#cloud-config` document.
+The operator does not change the text of your document.
 The keys apply to the default user of the image.
 User data that is a script cannot be used together with `sshKeys`.
+User data that sets `ssh_authorized_keys` cannot be used together with `sshKeys`.
+User data that is not a block mapping of one document cannot be used together with `sshKeys`.
 The VM then has the reason `InvalidUserData`.
 
 ## Disks
@@ -215,7 +219,9 @@ Run `kubectl describe virtualmachine <name>` and read the condition `Ready`.
 | `VolumeNotFound` | A Volume does not exist. | Create the Volume. |
 | `VolumeInUse` | Another VM uses the Volume. | Remove the Volume from one VM. |
 | `RestoreInProgress` | A restore holds the object. | Wait until the restore ends. |
-| `ApplyFailed` | The cluster refused an object. | Read the message. The operator tries again in 30 seconds. |
+| `ApplyFailed` | The cluster refused an object. | Ask an administrator to read the operator log. The operator tries again in 30 seconds. |
+| `NameConflict` | An object of another owner has a name that the operator needs. | Rename your Volume, Secret or snapshot. |
+| `WaitingForDefaultSecurityGroup` | The default security group of the project does not exist yet. | Wait. The operator checks again in 30 seconds. |
 | `SourceNotReady` | The source of a Volume is not ready. | Check the image, the snapshot or the source Volume. |
 | `ShrinkRefused` | The size is smaller than the claim. | Use a size that is not smaller. |
 | `InUse` | A VM lists the Volume that you delete. | Remove the Volume from the VM. |
