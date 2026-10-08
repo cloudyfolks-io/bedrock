@@ -9,22 +9,9 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
-	"sigs.k8s.io/yaml"
 
 	"github.com/cloudyfolks-io/bedrock/api/v1alpha1"
 )
-
-func parsedCloudConfig(t *testing.T, text string) map[string]any {
-	t.Helper()
-	if !strings.HasPrefix(text, "#cloud-config\n") {
-		t.Fatalf("no header: %q", text)
-	}
-	var out map[string]any
-	if err := yaml.Unmarshal([]byte(text), &out); err != nil {
-		t.Fatal(err)
-	}
-	return out
-}
 
 func TestUserDataIsVerbatimWithoutKeys(t *testing.T) {
 	for _, in := range []string{"#!/bin/bash\necho hi\n", "#cloud-config\n# keep me\nhostname: web-1\n"} {
@@ -35,16 +22,46 @@ func TestUserDataIsVerbatimWithoutKeys(t *testing.T) {
 	}
 }
 
-func TestUserDataAddsKeysToCloudConfig(t *testing.T) {
-	in := "#cloud-config\nhostname: web-1\nssh_authorized_keys:\n  - ssh-ed25519 AAAAexisting\n"
-	got, err := UserData(in, []string{"ssh-ed25519 AAAAk1", "ssh-ed25519 AAAAk2", "ssh-ed25519 AAAAk1"})
+const richUserData = `#cloud-config
+# keep this comment
+hostname: web-1
+write_files:
+  - path: /etc/motd
+    permissions: 0644
+    content: |
+      line one
+        indented line
+      line three
+defaults: &defaults
+  retries: 3
+other:
+  <<: *defaults
+`
+
+func TestUserDataKeepsTheTenantBytes(t *testing.T) {
+	got, err := UserData(richUserData, []string{"ssh-ed25519 AAAAk1", "ssh-ed25519 AAAAk2", "ssh-ed25519 AAAAk1"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	document := parsedCloudConfig(t, got)
-	want := []any{"ssh-ed25519 AAAAexisting", "ssh-ed25519 AAAAk1", "ssh-ed25519 AAAAk2"}
-	if document["hostname"] != "web-1" || !reflect.DeepEqual(document["ssh_authorized_keys"], want) {
-		t.Fatalf("document %+v", document)
+	want := richUserData + "ssh_authorized_keys:\n- ssh-ed25519 AAAAk1\n- ssh-ed25519 AAAAk2\n"
+	if got != want {
+		t.Fatalf("user data changed:\n%s", got)
+	}
+	for _, kept := range []string{"permissions: 0644", "# keep this comment", "    content: |\n      line one\n        indented line", "&defaults", "<<: *defaults"} {
+		if !strings.Contains(got, kept) {
+			t.Errorf("%q was lost", kept)
+		}
+	}
+}
+
+func TestUserDataAddsNewlineBeforeKeys(t *testing.T) {
+	got, err := UserData("#cloud-config\nhostname: web-1", []string{"ssh-ed25519 AAAAk1"})
+	if err != nil || got != "#cloud-config\nhostname: web-1\nssh_authorized_keys:\n- ssh-ed25519 AAAAk1\n" {
+		t.Fatalf("%q %v", got, err)
+	}
+	got, err = UserData("#cloud-config\n# only a comment\n", []string{"ssh-ed25519 AAAAk1"})
+	if err != nil || !strings.HasSuffix(got, "ssh_authorized_keys:\n- ssh-ed25519 AAAAk1\n") {
+		t.Fatalf("%q %v", got, err)
 	}
 }
 
@@ -52,6 +69,21 @@ func TestUserDataGeneratesCloudConfigWhenEmpty(t *testing.T) {
 	got, err := UserData("", []string{"ssh-ed25519 AAAAk1"})
 	if err != nil || got != "#cloud-config\nssh_authorized_keys:\n- ssh-ed25519 AAAAk1\n" {
 		t.Fatalf("got %q, %v", got, err)
+	}
+}
+
+func TestUserDataRefusesDocumentsItCannotExtend(t *testing.T) {
+	keys := []string{"ssh-ed25519 AAAAk1"}
+	cases := map[string]error{
+		"#cloud-config\nssh_authorized_keys:\n  - ssh-ed25519 AAAAexisting\n": ErrUserDataSetsKeys,
+		"#cloud-config\n{hostname: web-1}\n":                                  ErrUserDataNotMapping,
+		"#cloud-config\n- a\n- b\n":                                           ErrUserDataNotMapping,
+		"#cloud-config\nhostname: a\n---\nhostname: b\n":                      ErrUserDataNotMapping,
+	}
+	for in, want := range cases {
+		if _, err := UserData(in, keys); !errors.Is(err, want) {
+			t.Errorf("%q gave %v, want %v", in, err, want)
+		}
 	}
 }
 
@@ -69,12 +101,18 @@ func TestUserDataKeysCannotInjectYAML(t *testing.T) {
 		t.Fatal(err)
 	}
 	got, err := UserData("", []string{hostile})
-	if err != nil {
-		t.Fatal(err)
+	if err != nil || got != "#cloud-config\nssh_authorized_keys:\n- "+hostile+"\n" {
+		t.Fatalf("%q %v", got, err)
 	}
-	document := parsedCloudConfig(t, got)
-	if len(document) != 1 || len(document["ssh_authorized_keys"].([]any)) != 1 {
-		t.Fatalf("document %+v", document)
+}
+
+func TestUserDataErrorsNeverEchoTheContent(t *testing.T) {
+	_, err := UserData("#cloud-config\npassword: topsecret\n  broken: [unclosed topsecret\n", []string{"ssh-ed25519 AAAAk1"})
+	if err == nil || strings.Contains(err.Error(), "topsecret") {
+		t.Fatalf("error %v", err)
+	}
+	if !strings.Contains(err.Error(), "near line") {
+		t.Fatalf("error %v must name the line", err)
 	}
 }
 
@@ -83,12 +121,6 @@ func TestUserDataRefusesScriptsWithKeys(t *testing.T) {
 		if _, err := UserData(in, []string{"ssh-ed25519 AAAAk1"}); !errors.Is(err, ErrUserDataNotCloudConfig) {
 			t.Errorf("%q: %v", in, err)
 		}
-	}
-}
-
-func TestUserDataRefusesNonListKeys(t *testing.T) {
-	if _, err := UserData("#cloud-config\nssh_authorized_keys: \"x\"\n", []string{"ssh-ed25519 AAAAk1"}); err == nil {
-		t.Fatal("a text value must be refused")
 	}
 }
 

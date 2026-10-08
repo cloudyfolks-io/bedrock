@@ -3,13 +3,13 @@ package compute
 import (
 	"errors"
 	"fmt"
+	"io"
 	"regexp"
-	"slices"
 	"strings"
 
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"sigs.k8s.io/yaml"
+	goyaml "sigs.k8s.io/yaml/goyaml.v3"
 
 	"github.com/cloudyfolks-io/bedrock/api/v1alpha1"
 )
@@ -24,7 +24,10 @@ const (
 
 var (
 	ErrUserDataNotCloudConfig = errors.New("user data must be a #cloud-config document when SSH keys are set")
+	ErrUserDataSetsKeys       = errors.New("user data must not set ssh_authorized_keys when SSH keys are listed")
+	ErrUserDataNotMapping     = errors.New("the #cloud-config document must be a block mapping of one document")
 	normalizedKeyPattern      = regexp.MustCompile(`^[a-z0-9@.-]+ [A-Za-z0-9+/=]+$`)
+	yamlLinePattern           = regexp.MustCompile(`line (\d+)`)
 )
 
 func UserData(userData string, keys []string) (string, error) {
@@ -36,68 +39,80 @@ func UserData(userData string, keys []string) (string, error) {
 			return "", errors.New("an SSH key is not in the normalized form")
 		}
 	}
-	document, err := cloudConfigDocument(userData)
-	if err != nil {
-		return "", err
-	}
-	existing, err := existingKeys(document)
-	if err != nil {
-		return "", err
-	}
-	merged := []string{}
-	for _, key := range append(existing, keys...) {
-		if !slices.Contains(merged, key) {
-			merged = append(merged, key)
+	body := cloudConfigHeader + "\n"
+	if strings.TrimSpace(userData) != "" {
+		if err := checkCloudConfig(userData); err != nil {
+			return "", err
+		}
+		body = userData
+		if !strings.HasSuffix(body, "\n") {
+			body += "\n"
 		}
 	}
-	document[keysField] = merged
-	out, err := yaml.Marshal(document)
-	if err != nil {
-		return "", err
-	}
-	text := cloudConfigHeader + "\n" + string(out)
+	text := body + keysBlock(keys)
 	if len(text) > maxUserDataBytes {
 		return "", fmt.Errorf("the user data with the SSH keys is larger than %d bytes", maxUserDataBytes)
 	}
 	return text, nil
 }
 
-func cloudConfigDocument(userData string) (map[string]any, error) {
-	if strings.TrimSpace(userData) == "" {
-		return map[string]any{}, nil
+func keysBlock(keys []string) string {
+	var block strings.Builder
+	block.WriteString(keysField + ":\n")
+	seen := map[string]bool{}
+	for _, key := range keys {
+		if !seen[key] {
+			seen[key] = true
+			block.WriteString("- " + key + "\n")
+		}
 	}
-	first, _, _ := strings.Cut(userData, "\n")
-	if strings.TrimSpace(first) != cloudConfigHeader {
-		return nil, ErrUserDataNotCloudConfig
-	}
-	var document map[string]any
-	if err := yaml.Unmarshal([]byte(userData), &document); err != nil {
-		return nil, fmt.Errorf("the user data is not valid YAML: %w", err)
-	}
-	if document == nil {
-		return map[string]any{}, nil
-	}
-	return document, nil
+	return block.String()
 }
 
-func existingKeys(document map[string]any) ([]string, error) {
-	raw, found := document[keysField]
-	if !found {
-		return nil, nil
+func checkCloudConfig(userData string) error {
+	first, _, _ := strings.Cut(userData, "\n")
+	if strings.TrimSpace(first) != cloudConfigHeader {
+		return ErrUserDataNotCloudConfig
 	}
-	list, ok := raw.([]any)
-	if !ok {
-		return nil, fmt.Errorf("%s must be a list", keysField)
-	}
-	keys := make([]string, 0, len(list))
-	for _, item := range list {
-		key, ok := item.(string)
-		if !ok {
-			return nil, fmt.Errorf("%s must hold text only", keysField)
+	decoder := goyaml.NewDecoder(strings.NewReader(userData))
+	var root goyaml.Node
+	if err := decoder.Decode(&root); err != nil {
+		if errors.Is(err, io.EOF) {
+			return nil
 		}
-		keys = append(keys, key)
+		return invalidYAML(err)
 	}
-	return keys, nil
+	var second goyaml.Node
+	if err := decoder.Decode(&second); !errors.Is(err, io.EOF) {
+		return ErrUserDataNotMapping
+	}
+	return checkRoot(root)
+}
+
+func checkRoot(root goyaml.Node) error {
+	if len(root.Content) == 0 {
+		return nil
+	}
+	doc := root.Content[0]
+	if doc.Kind == goyaml.ScalarNode && doc.Tag == "!!null" {
+		return nil
+	}
+	if doc.Kind != goyaml.MappingNode || doc.Style&goyaml.FlowStyle != 0 {
+		return ErrUserDataNotMapping
+	}
+	for index := 0; index+1 < len(doc.Content); index += 2 {
+		if doc.Content[index].Value == keysField {
+			return ErrUserDataSetsKeys
+		}
+	}
+	return nil
+}
+
+func invalidYAML(err error) error {
+	if match := yamlLinePattern.FindStringSubmatch(err.Error()); match != nil {
+		return fmt.Errorf("the user data is not valid YAML near line %s", match[1])
+	}
+	return errors.New("the user data is not valid YAML")
 }
 
 func CloudInitSources(ci *v1alpha1.VMCloudInit, referenced *corev1.Secret) (string, string, error) {
