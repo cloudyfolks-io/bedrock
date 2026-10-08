@@ -167,3 +167,51 @@ as_user() {
   shift
   kubectl --as="bedrock:$user" "$@"
 }
+
+osd_device_blank() {
+  local disk
+  for disk in $(lsblk -dnpo NAME,TYPE,RO,FSTYPE | awk '$2 == "disk" && $3 == 0 && NF == 3 {print $1}'); do
+    if [ "$(lsblk -nro NAME "$disk" | wc -l)" -eq 1 ]; then
+      echo "$disk"
+      return
+    fi
+  done
+}
+
+osd_device_loop() {
+  local image=${E2E_OSD_IMAGE:-/var/lib/bedrock/e2e-osd.img}
+  mkdir -p "$(dirname "$image")"
+  truncate -s "${E2E_OSD_LOOP_GIB:-40}G" "$image"
+  losetup -f --show "$image"
+}
+
+resolve_osd_device() {
+  case "${E2E_OSD_DEVICE:-}" in
+  "") ;;
+  blank) osd_device_blank ;;
+  loop) osd_device_loop ;;
+  *) echo "$E2E_OSD_DEVICE" ;;
+  esac
+}
+
+flow_list() {
+  if [ "$#" -eq 0 ] || [ -z "$1" ]; then
+    echo '[]'
+  else
+    echo "[$1]"
+  fi
+}
+
+assert_no_storage() {
+  kubectl get cluster cluster -o jsonpath='{.status.conditions[?(@.type=="StorageReady")].reason}' | grep -qx NoDevices
+  ! kubectl get storageclass block 2>/dev/null
+}
+
+assert_storage_ready() {
+  local class
+  kubectl wait --for=condition=StorageReady cluster/cluster --timeout=1800s
+  for class in block block-retain filesystem; do
+    kubectl get storageclass "$class"
+  done
+  kubectl get volumesnapshotclass block
+}

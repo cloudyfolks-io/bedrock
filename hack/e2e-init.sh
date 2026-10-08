@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+source "$(dirname "${BASH_SOURCE[0]}")/e2e/lib.sh"
+
 version=${VERSION:-dev}
 image=${IMAGE:-ghcr.io/cloudyfolks-io/bedrock:$version}
 bin=${BIN:-bin/bedrock}
@@ -49,6 +51,8 @@ dump() {
     kubectl -n bedrock-system logs deploy/bedrock-operator --tail=300 || true
     echo "--- addons"
     kubectl -n rook-ceph get pods -o wide || true
+    kubectl -n rook-ceph get cephcluster -o yaml || true
+    lsblk || true
     kubectl -n kubevirt get pods -o wide || true
     kubectl -n cdi get pods -o wide || true
     kubectl -n traefik get pods,svc -o wide || true
@@ -97,7 +101,12 @@ nodeip=$(ip -json -4 addr show dev "$iface" | python3 -c 'import json,sys; print
 vip=$(echo "$nodeip" | awk -F. '{printf "%s.%s.%s.250", $1, $2, $3}')
 if [ "$vip" = "$nodeip" ]; then vip=$(echo "$nodeip" | awk -F. '{printf "%s.%s.%s.251", $1, $2, $3}'); fi
 
-VERSION=$version VIP=$vip IFACE=$iface EMULATION=$emulation PLATFORM_HOST=$platform_host envsubst < hack/e2e/cluster.yaml.tmpl > "$workdir/cluster.yaml"
+osd_device=$(resolve_osd_device)
+if [ -n "${E2E_OSD_DEVICE:-}" ]; then
+  test -b "$osd_device"
+fi
+
+VERSION=$version VIP=$vip IFACE=$iface EMULATION=$emulation PLATFORM_HOST=$platform_host OSD_DEVICES=$(flow_list "$osd_device") envsubst < hack/e2e/cluster.yaml.tmpl > "$workdir/cluster.yaml"
 cat "$workdir/cluster.yaml"
 
 run_init() {
@@ -150,7 +159,11 @@ kubectl -n kubevirt get kubevirt kubevirt -o jsonpath='{.spec.configuration.deve
 kubectl wait --for=jsonpath='{.status.phase}'=Deployed cdi/cdi --timeout=600s
 kubectl wait --for=condition=VirtualizationReady cluster/cluster --timeout=300s
 kubectl wait --for=condition=PlatformReady cluster/cluster --timeout=300s
-kubectl get cluster cluster -o jsonpath='{.status.conditions[?(@.type=="StorageReady")].reason}' | grep -qx NoDevices
+if [ -n "$osd_device" ]; then
+  assert_storage_ready
+else
+  assert_no_storage
+fi
 kubectl get clusterissuer bedrock-selfsigned -o jsonpath='{.status.conditions[?(@.type=="Ready")].status}' | grep -qx True
 kubectl -n traefik get secret platform-tls -o jsonpath='{.type}' | grep -qx kubernetes.io/tls
 kubectl -n traefik get tlsstore default -o jsonpath='{.spec.defaultCertificate.secretName}' | grep -qx platform-tls
@@ -163,7 +176,6 @@ test "$lb" = "$vip"
 code=$(curl -sk -o /dev/null -w '%{http_code}' -m 10 "https://$vip/")
 test "$code" = "404"
 test "$(kubectl -n nmstate get ds nmstate-handler -o jsonpath='{.status.desiredNumberScheduled}')" = "0"
-kubectl get storageclass block 2>/dev/null && exit 1
 systemctl is-active bedrock-agent.service
 node=$(hostname | tr '[:upper:]' '[:lower:]')
 for _ in $(seq 1 60); do

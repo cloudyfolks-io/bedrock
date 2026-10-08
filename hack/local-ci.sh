@@ -5,11 +5,13 @@ vm=${CI_VM:-bedrock-ci}
 cpus=${CI_CPUS:-12}
 memory=${CI_MEMORY:-24}
 disk=${CI_DISK:-100}
+osd_size=${CI_OSD_GB:-60}
 min_free=${CI_MIN_FREE_GB:-25}
 floor=${CI_FLOOR_GB:-15}
 port=${CI_REGISTRY_PORT:-5001}
 registry_name=${CI_REGISTRY_NAME:-bedrock-ci-registry}
 kind_image=ghcr.io/cloudyfolks-io/bedrock:dev
+osd_disk=$vm-osd
 repo=$(git rev-parse --show-toplevel)
 arch=$(uname -m | sed 's/x86_64/amd64/;s/aarch64/arm64/')
 base_images=(golang:1.27 gcr.io/distroless/static:nonroot registry:3 node:24-bookworm-slim)
@@ -163,6 +165,7 @@ mounts:
 containerd:
   system: false
   user: false
+$(vm_osd_disk_config)
 provision:
 - mode: system
   script: |
@@ -170,8 +173,25 @@ $(vm_provision | sed 's/^/    /')
 CONFIG
 }
 
+vm_osd_disk_config() {
+  if [ -n "${vm_osd:-}" ]; then
+    printf 'additionalDisks:\n- name: %s\n  format: false\n' "$osd_disk"
+  fi
+}
+
+vm_osd_disk_create() {
+  if [ -n "${vm_osd:-}" ]; then
+    limactl disk create "$osd_disk" --size "${osd_size}GiB" --format raw --tty=false
+  fi
+}
+
+vm_osd_disk_delete() {
+  limactl disk delete --force "$osd_disk" >/dev/null 2>&1 || true
+}
+
 vm_up() {
   vm_down
+  vm_osd_disk_create
   vm_config >"$tmp/vm.yaml"
   limactl start --name "$vm" --tty=false "$tmp/vm.yaml"
   if ! wait_ntp; then
@@ -183,6 +203,7 @@ vm_down() {
   if limactl list --quiet 2>/dev/null | grep -qx "$vm"; then
     limactl delete --force "$vm"
   fi
+  vm_osd_disk_delete
 }
 
 vm_shell() {

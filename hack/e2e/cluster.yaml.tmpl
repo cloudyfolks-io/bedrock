@@ -10,6 +10,8 @@ spec:
     host: ${PLATFORM_HOST}
   network:
     managementInterface: ${IFACE}
+  storage:
+    devices: ${OSD_DEVICES}
   virtualization:
     emulation: ${EMULATION}
   roles: [control-plane, ceph-osd, fabric-gateway, workload]
