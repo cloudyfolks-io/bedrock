@@ -5,7 +5,7 @@ dir=${1:-dist/release}
 
 test -f "$dir/release.yaml"
 test -f "$dir/images.txt"
-for group in 00-crds 10-kube-vip 20-fabric 25-multus 30-nmstate 40-rook 41-rook-csi 50-kubevirt 60-cert-manager 65-traefik 70-monitoring 80-kured 90-bedrock; do
+for group in 00-crds 10-kube-vip 20-fabric 25-multus 30-nmstate 40-rook 41-rook-csi 50-kubevirt 60-cert-manager 65-traefik 70-monitoring 80-kured 90-bedrock 92-catalog; do
   test -d "$dir/manifests/$group"
 done
 grep -q 'kind: CustomResourceDefinition' "$dir/manifests/00-crds/cert-manager-crds.yaml"
@@ -55,4 +55,10 @@ grep -q 'name: bedrock:bedrock-admins' "$dir/manifests/85-authn/authn.yaml"
 grep -q '^images:' "$dir/release.yaml"
 grep -q 'quay.io/kubevirt/cirros-container-disk-demo:v1.9.0' "$dir/images.txt"
 awk '/^---$/{doc=""} /^kind: DaemonSet$/{doc="ds"} doc=="ds" && /^  name: ovs-ovn$/{doc="ovs"} doc=="ovs" && /^    type: OnDelete$/{found=1} END{exit found ? 0 : 1}' "$dir/manifests/20-fabric/fabric.yaml"
+grep -q 'kind: ClusterImage' "$dir/manifests/92-catalog/catalog.yaml"
+grep -q 'quay.io/containerdisks/ubuntu:24.04' "$dir/images.txt"
+grep -q 'quay.io/containerdisks/debian:13' "$dir/images.txt"
+grep -q 'quay.io/containerdisks/almalinux:9' "$dir/images.txt"
+grep -q 'quay.io/containerdisks/fedora:43' "$dir/images.txt"
+grep -q 'quay.io/kubevirt/virtio-container-disk:v1.9.0' "$dir/images.txt"
 echo "check-release passed"
