@@ -102,6 +102,9 @@ components:
   - name: authn
     order: 85
     dirs: [manifests/85-authn]
+  - name: tenancy
+    order: 86
+    dirs: [manifests/86-tenancy]
   - name: monitoring
     order: 70
     chart: charts/metrics-server

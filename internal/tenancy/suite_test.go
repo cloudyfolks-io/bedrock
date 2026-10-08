@@ -1,10 +1,20 @@
 package tenancy
 
 import (
+	"bytes"
+	"context"
+	"errors"
+	"io"
+	"os"
+	"path/filepath"
 	"testing"
 	"time"
 
+	corev1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/util/yaml"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/util/flowcontrol"
@@ -59,4 +69,55 @@ func waitFor(t *testing.T, ok func() bool) {
 		time.Sleep(100 * time.Millisecond)
 	}
 	t.Fatal("condition not met within 15s")
+}
+
+func actingAs(t *testing.T, cfg *rest.Config, user string, groups ...string) client.Client {
+	t.Helper()
+	impersonated := rest.CopyConfig(cfg)
+	impersonated.Impersonate = rest.ImpersonationConfig{UserName: user, Groups: groups}
+	c, err := client.New(impersonated, client.Options{Scheme: newScheme(t)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return c
+}
+
+func applyFile(t *testing.T, c client.Client, path string) {
+	t.Helper()
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	decoder := yaml.NewYAMLOrJSONDecoder(bytes.NewReader(raw), 4096)
+	for {
+		var obj unstructured.Unstructured
+		if err := decoder.Decode(&obj); errors.Is(err, io.EOF) {
+			return
+		} else if err != nil {
+			t.Fatal(err)
+		}
+		if len(obj.Object) == 0 {
+			continue
+		}
+		if err := c.Create(context.Background(), &obj); err != nil {
+			t.Fatalf("create %s %s: %v", obj.GetKind(), obj.GetName(), err)
+		}
+	}
+}
+
+func manifestPath(group, file string) string {
+	return filepath.Join("..", "..", "manifests", group, file)
+}
+
+func mustCreate(t *testing.T, c client.Client, objs ...client.Object) {
+	t.Helper()
+	for _, obj := range objs {
+		if err := c.Create(context.Background(), obj); err != nil {
+			t.Fatalf("create %T %s: %v", obj, obj.GetName(), err)
+		}
+	}
+}
+
+func namespaceNamed(name string, labels map[string]string) *corev1.Namespace {
+	return &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: name, Labels: labels}}
 }

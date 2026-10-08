@@ -1,0 +1,131 @@
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: bedrock-project-viewer
+  labels:
+    bedrock.cloudyfolks.io/kind: ClusterRole
+    bedrock.cloudyfolks.io/name: bedrock-project-viewer
+rules:
+  - apiGroups: [bedrock.cloudyfolks.io]
+    resources: [dnszones, elasticips, images, loadbalancers, objectstoragebuckets, objectstorageusers, securitygroups, sshkeys, subnets, virtualmachinebackups, virtualmachinerestores, virtualmachines, volumes, volumesnapshots]
+    verbs: [get, list, watch]
+  - apiGroups: [""]
+    resources: [configmaps, events, pods, pods/log, resourcequotas, services]
+    verbs: [get, list, watch]
+  - apiGroups: [apps]
+    resources: [deployments, replicasets]
+    verbs: [get, list, watch]
+  - apiGroups: [networking.k8s.io]
+    resources: [networkpolicies]
+    verbs: [get, list, watch]
+  - apiGroups: [aaq.kubevirt.io]
+    resources: [applicationawareresourcequotas]
+    verbs: [get, list, watch]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: bedrock-project-editor
+  labels:
+    bedrock.cloudyfolks.io/kind: ClusterRole
+    bedrock.cloudyfolks.io/name: bedrock-project-editor
+rules:
+  - apiGroups: [bedrock.cloudyfolks.io]
+    resources: [dnszones, elasticips, images, loadbalancers, objectstoragebuckets, objectstorageusers, securitygroups, sshkeys, subnets, virtualmachinebackups, virtualmachinerestores, virtualmachines, volumes, volumesnapshots]
+    verbs: [get, list, watch]
+  - apiGroups: [""]
+    resources: [configmaps, events, pods, pods/log, resourcequotas, services]
+    verbs: [get, list, watch]
+  - apiGroups: [apps]
+    resources: [deployments, replicasets]
+    verbs: [get, list, watch]
+  - apiGroups: [networking.k8s.io]
+    resources: [networkpolicies]
+    verbs: [get, list, watch]
+  - apiGroups: [aaq.kubevirt.io]
+    resources: [applicationawareresourcequotas]
+    verbs: [get, list, watch]
+  - apiGroups: [bedrock.cloudyfolks.io]
+    resources: [dnszones, elasticips, images, loadbalancers, objectstoragebuckets, objectstorageusers, securitygroups, sshkeys, subnets, virtualmachinebackups, virtualmachinerestores, virtualmachines, volumes, volumesnapshots]
+    verbs: [create, delete, patch, update]
+  - apiGroups: [bedrock.cloudyfolks.io]
+    resources: [virtualmachines/restart, virtualmachines/snapshot, virtualmachines/start, virtualmachines/stop]
+    verbs: [update]
+  - apiGroups: [bedrock.cloudyfolks.io]
+    resources: [virtualmachines/console/serial, virtualmachines/console/vnc, virtualmachines/snapshot]
+    verbs: [get]
+  - apiGroups: [bedrock.cloudyfolks.io]
+    resources: [images/upload]
+    verbs: [create]
+  - apiGroups: [""]
+    resources: [configmaps, pods, services]
+    verbs: [create, delete, patch, update]
+  - apiGroups: [""]
+    resources: [secrets]
+    verbs: [create, delete, get, list, patch, update, watch]
+  - apiGroups: [""]
+    resources: [pods/exec]
+    verbs: [create, get]
+  - apiGroups: [apps]
+    resources: [deployments]
+    verbs: [create, delete, patch, update]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: bedrock-project-owner
+  labels:
+    bedrock.cloudyfolks.io/kind: ClusterRole
+    bedrock.cloudyfolks.io/name: bedrock-project-owner
+rules:
+  - apiGroups: [bedrock.cloudyfolks.io]
+    resources: [dnszones, elasticips, images, loadbalancers, objectstoragebuckets, objectstorageusers, securitygroups, sshkeys, subnets, virtualmachinebackups, virtualmachinerestores, virtualmachines, volumes, volumesnapshots]
+    verbs: [get, list, watch]
+  - apiGroups: [""]
+    resources: [configmaps, events, pods, pods/log, resourcequotas, services]
+    verbs: [get, list, watch]
+  - apiGroups: [apps]
+    resources: [deployments, replicasets]
+    verbs: [get, list, watch]
+  - apiGroups: [networking.k8s.io]
+    resources: [networkpolicies]
+    verbs: [get, list, watch]
+  - apiGroups: [aaq.kubevirt.io]
+    resources: [applicationawareresourcequotas]
+    verbs: [get, list, watch]
+  - apiGroups: [bedrock.cloudyfolks.io]
+    resources: [dnszones, elasticips, images, loadbalancers, objectstoragebuckets, objectstorageusers, securitygroups, sshkeys, subnets, virtualmachinebackups, virtualmachinerestores, virtualmachines, volumes, volumesnapshots]
+    verbs: [create, delete, patch, update]
+  - apiGroups: [bedrock.cloudyfolks.io]
+    resources: [virtualmachines/restart, virtualmachines/snapshot, virtualmachines/start, virtualmachines/stop]
+    verbs: [update]
+  - apiGroups: [bedrock.cloudyfolks.io]
+    resources: [virtualmachines/console/serial, virtualmachines/console/vnc, virtualmachines/snapshot]
+    verbs: [get]
+  - apiGroups: [bedrock.cloudyfolks.io]
+    resources: [images/upload]
+    verbs: [create]
+  - apiGroups: [""]
+    resources: [configmaps, pods, services]
+    verbs: [create, delete, patch, update]
+  - apiGroups: [""]
+    resources: [secrets]
+    verbs: [create, delete, get, list, patch, update, watch]
+  - apiGroups: [""]
+    resources: [pods/exec]
+    verbs: [create, get]
+  - apiGroups: [apps]
+    resources: [deployments]
+    verbs: [create, delete, patch, update]
+  - apiGroups: [bedrock.cloudyfolks.io]
+    resources: [dnszones, elasticips, images, loadbalancers, objectstoragebuckets, objectstorageusers, securitygroups, sshkeys, subnets, virtualmachinebackups, virtualmachinerestores, virtualmachines, volumes, volumesnapshots]
+    verbs: [deletecollection]
+  - apiGroups: [""]
+    resources: [configmaps, pods, secrets, services]
+    verbs: [deletecollection]
+  - apiGroups: [apps]
+    resources: [deployments]
+    verbs: [deletecollection]
+  - apiGroups: [networking.k8s.io]
+    resources: [networkpolicies]
+    verbs: [create, delete, deletecollection, patch, update]
