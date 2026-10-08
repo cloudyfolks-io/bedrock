@@ -16,7 +16,7 @@ BUNDLE_ARCH ?= amd64
 K0S_VERSION ?=
 UPGRADE_FROM ?=
 
-.PHONY: build test lint generate crds envtest-assets e2e-kind e2e-init e2e-bundle e2e-authn controller-gen release crane bundle binaries rbac local-ci ui
+.PHONY: build test lint generate crds envtest-assets e2e-kind e2e-init e2e-bundle e2e-authn e2e-tenant controller-gen release crane bundle binaries rbac local-ci ui
 
 ui:
 	cd ui && pnpm install --frozen-lockfile && pnpm -r test && pnpm -r typecheck && pnpm --filter login build && pnpm --filter panel build
@@ -76,6 +76,14 @@ e2e-authn: bundle crane
 	CRANE=$(CRANE) hack/e2e-authn-images.sh
 	BUNDLE=dist/bedrock-$(VERSION)-bundle-$(BUNDLE_ARCH).tar.zst hack/e2e-init.sh
 	E2E_TEST=dist/e2e-authn.test hack/e2e-authn.sh
+
+e2e-tenant: crane
+	hack/e2e-release-config.sh release/components.yaml dist/components-e2e.yaml
+	$(MAKE) bundle RELEASE_CONFIG=dist/components-e2e.yaml
+	CGO_ENABLED=0 $(GO) test -c -tags e2e -o dist/e2e-tenant.test ./test/e2e/tenant
+	CRANE=$(CRANE) hack/e2e-tenant-images.sh
+	E2E_OSD_DEVICE=loop E2E_PROVIDER_NETWORK=public BUNDLE=dist/bedrock-$(VERSION)-bundle-$(BUNDLE_ARCH).tar.zst hack/e2e-init.sh
+	E2E_TEST=dist/e2e-tenant.test hack/e2e-tenant.sh
 
 local-ci:
 	hack/local-ci.sh $(JOBS)

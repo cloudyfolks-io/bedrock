@@ -18,7 +18,7 @@ base_images=(golang:1.27 gcr.io/distroless/static:nonroot registry:3 node:24-boo
 version_a=v0.0.0-e2e.1
 upgrade_env="REGISTRY=localhost:$port ARCH=$arch VERSION_A=$version_a VERSION_B=v0.0.0-e2e.2 K0S_A=v1.36.2+k0s.0 K0S_B=v1.36.3+k0s.0"
 main_ref=${CI_MAIN_REF:-fdf03d5}
-known_jobs=(test e2e-kind e2e-bundle e2e-upgrade e2e-upgrade-abort e2e-authn e2e-upgrade-from-main)
+known_jobs=(test e2e-kind e2e-bundle e2e-upgrade e2e-upgrade-abort e2e-authn e2e-tenant e2e-upgrade-from-main)
 vm_path=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 
 if [ "$#" -eq 0 ]; then
@@ -143,6 +143,7 @@ vm_provision() {
 #!/bin/sh
 set -e
 sysctl -w fs.inotify.max_user_instances=8192 fs.inotify.max_user_watches=1048576 vm.max_map_count=262144
+apt-get install -y -qq jq >/dev/null
 cat >/usr/local/bin/kubectl <<'KUBECTL'
 #!/bin/sh
 exec /usr/local/bin/k0s kubectl "$@"
@@ -292,6 +293,26 @@ run_e2e_authn() {
   vm_up
   in_vm "KUBECONFIG=/var/lib/k0s/pki/admin.conf BUNDLE=dist/bedrock-dev-bundle-$arch.tar.zst IMAGE=localhost:$port/bedrock:dev BIN=dist/bedrock-dev-linux-$arch ARCH=$arch EMULATION=$(emulation_flag)" hack/e2e-init.sh
   in_vm "BEDROCK_BIN=dist/bedrock-dev-linux-$arch E2E_TEST=dist/e2e-authn-$arch.test" hack/e2e-authn.sh
+  rm -f "dist/bedrock-dev-bundle-$arch.tar.zst"
+  vm_down
+}
+
+run_e2e_tenant() {
+  local release_config=dist/components-e2e.yaml
+  ensure_images
+  registry_up
+  hack/e2e-release-config.sh release/components.yaml "$release_config"
+  make build release binaries VERSION=dev IMAGE="localhost:$port/bedrock:dev" PIN_DIGESTS=1 RELEASE_CONFIG="$release_config"
+  retry 3 docker build -t "localhost:$port/bedrock:dev" -f Containerfile .
+  retry 3 docker push "localhost:$port/bedrock:dev"
+  make bundle VERSION=dev IMAGE="localhost:$port/bedrock:dev" PIN_DIGESTS=1 BUNDLE_ARCH="$arch" RELEASE_CONFIG="$release_config"
+  registry_down
+  remove_job_images
+  CGO_ENABLED=0 GOOS=linux GOARCH="$arch" go test -c -tags e2e -o "dist/e2e-tenant-$arch.test" ./test/e2e/tenant
+  ARCH="$arch" hack/e2e-tenant-images.sh
+  vm_osd=1 vm_up
+  in_vm "KUBECONFIG=/var/lib/k0s/pki/admin.conf BUNDLE=dist/bedrock-dev-bundle-$arch.tar.zst IMAGE=localhost:$port/bedrock:dev BIN=dist/bedrock-dev-linux-$arch ARCH=$arch EMULATION=$(emulation_flag) E2E_OSD_DEVICE=blank E2E_PROVIDER_NETWORK=public" hack/e2e-init.sh
+  in_vm "BEDROCK_BIN=dist/bedrock-dev-linux-$arch E2E_TEST=dist/e2e-tenant-$arch.test" hack/e2e-tenant.sh
   rm -f "dist/bedrock-dev-bundle-$arch.tar.zst"
   vm_down
 }
