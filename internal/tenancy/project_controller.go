@@ -7,6 +7,7 @@ import (
 
 	corev1 "k8s.io/api/core/v1"
 	networkingv1 "k8s.io/api/networking/v1"
+	rbacv1 "k8s.io/api/rbac/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
@@ -68,6 +69,8 @@ func (r *ProjectReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 	observation.Namespace = r.ensureNamespace(ctx, project)
 	if observation.Namespace.Ready {
 		observation.SubnetCIDR, observation.Subnet = r.ensureSubnet(ctx, project, tenant)
+		observation.Quota, observation.Used = r.ensureQuota(ctx, project, decision)
+		observation.Access = r.ensureAccess(ctx, project, tenant)
 	}
 	r.writeStatus(ctx, observation)
 	return ctrl.Result{RequeueAfter: Interval}, applyFailures(observation)
@@ -215,6 +218,7 @@ func (r *ProjectReconciler) SetupWithManager(mgr ctrl.Manager) error {
 		Owns(&corev1.Namespace{}).
 		Owns(&networkingv1.NetworkPolicy{}).
 		Owns(&v1alpha1.Subnet{}).
+		Owns(&rbacv1.RoleBinding{}).
 		Watches(&v1alpha1.Tenant{}, handler.EnqueueRequestsFromMapFunc(r.projectsOfTenantObject)).
 		Watches(&v1alpha1.Project{}, handler.EnqueueRequestsFromMapFunc(r.waitingSiblingsOf)).
 		Complete(r)

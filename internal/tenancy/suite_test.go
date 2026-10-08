@@ -7,6 +7,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"slices"
 	"testing"
 	"time"
 
@@ -150,4 +151,10 @@ func startManager(t *testing.T, cfg *rest.Config, setup func(ctrl.Manager) error
 		<-done
 	})
 	return ctx
+}
+
+func startEnvWithoutAAQ(t *testing.T) (client.Client, *rest.Config) {
+	t.Helper()
+	paths := slices.DeleteFunc(testenv.CRDPaths(), func(path string) bool { return filepath.Base(path) == "aaq" })
+	return startEnvWithPaths(t, paths)
 }
