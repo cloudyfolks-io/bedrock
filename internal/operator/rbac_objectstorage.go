@@ -5,5 +5,10 @@ import (
 )
 
 func objectStorageRules() []rbacv1.PolicyRule {
-	return nil
+	write := []string{"create", "delete", "get", "list", "patch", "update", "watch"}
+	return []rbacv1.PolicyRule{
+		{APIGroups: []string{"ceph.rook.io"}, Resources: []string{"cephobjectstores"}, Verbs: []string{"get", "list", "watch"}},
+		{APIGroups: []string{"ceph.rook.io"}, Resources: []string{"cephobjectstoreusers"}, Verbs: write},
+		{APIGroups: []string{"objectbucket.io"}, Resources: []string{"objectbucketclaims"}, Verbs: write},
+	}
 }

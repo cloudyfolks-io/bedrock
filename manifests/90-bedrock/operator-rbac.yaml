@@ -194,6 +194,8 @@ rules:
   - cephblockpools
   - cephclusters
   - cephfilesystems
+  - cephobjectstores
+  - cephobjectstoreusers
   verbs:
   - create
   - delete
@@ -201,6 +203,14 @@ rules:
   - list
   - patch
   - update
+  - watch
+- apiGroups:
+  - ceph.rook.io
+  resources:
+  - cephobjectstores
+  verbs:
+  - get
+  - list
   - watch
 - apiGroups:
   - cert-manager.io
@@ -271,6 +281,18 @@ rules:
   - nmstate.io
   resources:
   - nmstates
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - update
+  - watch
+- apiGroups:
+  - objectbucket.io
+  resources:
+  - objectbucketclaims
   verbs:
   - create
   - delete

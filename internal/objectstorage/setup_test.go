@@ -1,0 +1,53 @@
+package objectstorage
+
+import (
+	"context"
+	"testing"
+	"time"
+
+	"k8s.io/apimachinery/pkg/api/meta"
+	"k8s.io/utils/ptr"
+	ctrl "sigs.k8s.io/controller-runtime"
+	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/config"
+	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
+	metricsserver "sigs.k8s.io/controller-runtime/pkg/metrics/server"
+
+	"github.com/cloudyfolks-io/bedrock/api/v1alpha1"
+)
+
+func TestSetupRegistersTheControllers(t *testing.T) {
+	fresh(t)
+	mgr, err := ctrl.NewManager(testConfig, ctrl.Options{
+		Scheme:     testScheme,
+		Metrics:    metricsserver.Options{BindAddress: "0"},
+		Controller: config.Controller{SkipNameValidation: ptr.To(true)},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := SetupWithManager(mgr); err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() { done <- mgr.Start(ctx) }()
+	t.Cleanup(func() {
+		cancel()
+		<-done
+	})
+	createUser(t, "acme-prod", "app", v1alpha1.ObjectStorageUserSpec{})
+	deadline := time.Now().Add(30 * time.Second)
+	for time.Now().Before(deadline) {
+		var user v1alpha1.ObjectStorageUser
+		err := testClient.Get(ctx, client.ObjectKey{Namespace: "acme-prod", Name: "app"}, &user)
+		if err == nil && controllerutil.ContainsFinalizer(&user, UserFinalizer) {
+			return
+		}
+		if err != nil && !meta.IsNoMatchError(err) {
+			t.Log(err)
+		}
+		time.Sleep(200 * time.Millisecond)
+	}
+	t.Fatal("the user never got its finalizer")
+}
