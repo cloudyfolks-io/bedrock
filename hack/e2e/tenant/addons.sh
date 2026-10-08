@@ -70,7 +70,7 @@ addons_grafana_and_alerts() {
   local password
   kubectl -n monitoring get secret bedrock-grafana-admin >/dev/null
   password=$(kubectl -n monitoring get secret bedrock-grafana-admin -o jsonpath='{.data.admin-password}' | base64 -d)
-  retry_until 300 grafana_has_dashboards "$password"
+  GRAFANA_PASSWORD=$password retry_until 300 grafana_has_dashboards
   kubectl patch setting alertmanager.webhook-url --type merge -p '{"spec":{"value":"http://webhook.e2e.test:9000/alerts"}}'
   retry_until 180 alertmanager_has_webhook
   kubectl patch setting alertmanager.webhook-url --type merge -p '{"spec":{"value":""}}'
@@ -79,7 +79,7 @@ addons_grafana_and_alerts() {
 grafana_has_dashboards() {
   local found address
   address=$(kubectl -n monitoring get svc kube-prometheus-stack-grafana -o jsonpath='{.spec.clusterIP}')
-  found=$(curl -sf -m 10 -u "admin:$1" "http://$address/api/search?query=Bedrock" | jq -r '[.[].uid] | sort | join(",")')
+  found=$(curl -sf -m 10 -u "admin:$GRAFANA_PASSWORD" "http://$address/api/search?query=Bedrock" | jq -r '[.[].uid] | sort | join(",")')
   expect_contains "$found" bedrock-tenants "grafana dashboards" && expect_contains "$found" bedrock-vms "grafana dashboards"
 }
 

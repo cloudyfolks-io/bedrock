@@ -24,7 +24,7 @@ retry_until() {
   deadline=$((SECONDS + timeout))
   until "$@" >/dev/null 2>&1; do
     if [ "$SECONDS" -ge "$deadline" ]; then
-      echo "timeout after ${timeout}s: $*" >&2
+      echo "timeout after ${timeout}s: $1" >&2
       return 1
     fi
     sleep 3
