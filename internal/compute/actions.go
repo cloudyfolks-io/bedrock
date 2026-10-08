@@ -17,6 +17,7 @@ import (
 	"k8s.io/apimachinery/pkg/util/validation"
 	"k8s.io/client-go/rest"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	logf "sigs.k8s.io/controller-runtime/pkg/log"
 
 	"github.com/cloudyfolks-io/bedrock/api/v1alpha1"
 )
@@ -92,7 +93,13 @@ func conflict(format string, args ...any) ActionError {
 }
 
 func internalError(err error) ActionError {
-	return ActionError{Code: http.StatusInternalServerError, Reason: metav1.StatusReasonInternalError, Message: err.Error()}
+	logf.Log.WithName("compute").Error(err, "the request failed")
+	return ActionError{Code: http.StatusInternalServerError, Reason: metav1.StatusReasonInternalError, Message: "the request failed; ask an administrator to read the operator log"}
+}
+
+func unreachable(err error) ActionError {
+	logf.Log.WithName("compute").Error(err, "KubeVirt is not reachable")
+	return ActionError{Code: http.StatusBadGateway, Reason: metav1.StatusReasonServiceUnavailable, Message: "KubeVirt did not answer the request"}
 }
 
 func accepted() Result {
@@ -192,11 +199,11 @@ func Restart(ctx context.Context, d Deps, c client.Client, key client.ObjectKey)
 	}
 	resp, err := httpClient.Do(req)
 	if err != nil {
-		return Result{}, ActionError{Code: http.StatusBadGateway, Reason: metav1.StatusReasonServiceUnavailable, Message: err.Error()}
+		return Result{}, unreachable(err)
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode < 200 || resp.StatusCode > 299 {
-		return Result{}, ActionError{Code: http.StatusBadGateway, Reason: metav1.StatusReasonServiceUnavailable, Message: fmt.Sprintf("KubeVirt answered %d to the restart", resp.StatusCode)}
+		return Result{}, unreachable(fmt.Errorf("the restart answered %d", resp.StatusCode))
 	}
 	return accepted(), nil
 }

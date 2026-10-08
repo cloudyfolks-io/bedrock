@@ -59,7 +59,7 @@ func serveConsole(d Deps, ctx context.Context, c client.Client, key client.Objec
 		FlushInterval: -1,
 		Transport:     transport,
 		ErrorHandler: func(w http.ResponseWriter, _ *http.Request, err error) {
-			writeError(w, ActionError{Code: http.StatusBadGateway, Reason: metav1.StatusReasonServiceUnavailable, Message: "the console is not reachable: " + err.Error()})
+			writeError(w, unreachable(err))
 		},
 	}
 	proxy.ServeHTTP(w, r)

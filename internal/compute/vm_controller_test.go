@@ -484,7 +484,11 @@ func TestVMApplyFailureIsReported(t *testing.T) {
 	if result.RequeueAfter != 30*time.Second {
 		t.Fatalf("requeue %s", result.RequeueAfter)
 	}
-	requireReason(t, getVM(t, base, ns, "web-1"), "ApplyFailed")
+	vm := getVM(t, base, ns, "web-1")
+	requireReason(t, vm, "ApplyFailed")
+	if strings.Contains(readyOf(vm).Message, "Invalid") {
+		t.Fatalf("the API error reached the status: %q", readyOf(vm).Message)
+	}
 }
 
 func TestVMRefusesAClaimOfAnotherOwner(t *testing.T) {

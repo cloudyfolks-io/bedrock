@@ -239,7 +239,7 @@ func TestConsoleUpstreamDown(t *testing.T) {
 	rig.upstream.Server.Close()
 	resp, _, _ := rig.dial(t, upgradeHeaders())
 	body, _ := io.ReadAll(resp.Body)
-	if resp.StatusCode != http.StatusBadGateway || !strings.Contains(string(body), `"kind":"Status"`) {
+	if resp.StatusCode != http.StatusBadGateway || !strings.Contains(string(body), `"kind":"Status"`) || strings.Contains(string(body), "127.0.0.1") {
 		t.Fatalf("status %d body %s", resp.StatusCode, body)
 	}
 }

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -208,6 +209,9 @@ func TestActionClientErrorIsReported(t *testing.T) {
 	})
 	_, err = Stop(context.Background(), actionDeps(newFakeKubeVirt(t)), failing, key)
 	requireActionError(t, err, http.StatusInternalServerError)
+	if strings.Contains(err.Error(), "boom") {
+		t.Fatalf("the detail reached the caller: %v", err)
+	}
 	if !getVM(t, base, key.Namespace, key.Name).Spec.Running {
 		t.Fatal("nothing may change")
 	}
@@ -258,5 +262,18 @@ func TestActionErrorStatus(t *testing.T) {
 	status := conflict("busy").Status()
 	if status.Kind != "Status" || status.Code != http.StatusConflict || status.Reason != metav1.StatusReasonConflict || status.Message != "busy" || status.Status != metav1.StatusFailure {
 		t.Fatalf("%+v", status)
+	}
+}
+
+func TestRestartFailureHidesTheUpstream(t *testing.T) {
+	c, _ := startEnv(t)
+	key := actionVM(t, c, "Running")
+	fake := newFakeKubeVirt(t)
+	deps := actionDeps(fake)
+	fake.Server.Close()
+	_, err := Restart(context.Background(), deps, c, key)
+	requireActionError(t, err, http.StatusBadGateway)
+	if strings.Contains(err.Error(), "127.0.0.1") {
+		t.Fatalf("the upstream address reached the caller: %v", err)
 	}
 }

@@ -130,7 +130,8 @@ func (r *VirtualMachineReconciler) apply(ctx context.Context, in RenderInput) (o
 		return outcome{Gate: gateOf(ReasonNameConflict, "%s", conflict.Error()), RequeueAfter: applyFailureRetry}, nil
 	}
 	if apierrors.IsInvalid(err) || apierrors.IsForbidden(err) {
-		return outcome{Gate: gateOf(ReasonApplyFailed, "%s", err.Error()), RequeueAfter: applyFailureRetry}, nil
+		logf.FromContext(ctx).Error(err, "the cluster refused an object of the virtual machine", "virtualMachine", client.ObjectKeyFromObject(&in.VirtualMachine))
+		return outcome{Gate: gateOf(ReasonApplyFailed, "the cluster refused an object of the virtual machine"), RequeueAfter: applyFailureRetry}, nil
 	}
 	return outcome{}, err
 }
