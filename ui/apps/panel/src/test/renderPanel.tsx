@@ -8,7 +8,11 @@ import type { Session } from "../api/types";
 import type { Locale } from "../i18n";
 import { LocaleProvider } from "../LocaleProvider";
 import { LocationProvider } from "../location";
+import { AuthzProvider } from "../authz/authz";
+import { StreamProvider } from "../stream/StreamProvider";
+import type { Check } from "../api/types";
 import { createFakeApi, type FakeApi, type FakeRoute } from "./fakeApi";
+import { createFakeSockets, type FakeSockets } from "./fakeSocket";
 
 export const defaultSession: Session = {
   user: { name: "admin", displayName: "Administrator", email: "admin@example.test", groups: ["bedrock-admins"] },
@@ -24,35 +28,45 @@ export interface RenderOptions {
   session?: Partial<Session> | null;
   api?: Record<string, FakeRoute>;
   assign?: (url: string) => void;
+  socket?: FakeSockets;
+  allow?: (check: Check) => boolean;
 }
 
-export interface PanelRender extends ReturnType<typeof render> {
+export interface PanelRender extends Omit<ReturnType<typeof render>, "rerender"> {
+  rerender: (node: ReactElement) => void;
   api: FakeApi;
+  sockets: FakeSockets;
   queryClient: QueryClient;
 }
 
 export function renderPanel(node: ReactElement, options: RenderOptions = {}): PanelRender {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-  const api = createFakeApi(options.api ?? {});
+  const api = createFakeApi(options.api ?? {}, options.allow ?? (() => true));
+  const sockets = options.socket ?? createFakeSockets();
   api.install();
   if (options.session !== null) {
     queryClient.setQueryData(sessionKey, { ...defaultSession, ...options.session });
   }
   const assign = options.assign ?? (() => {});
-  const result = render(
+  const wrap = (content: ReactElement) => (
     <QueryClientProvider client={queryClient}>
       <LocaleProvider initial={options.locale ?? "en"}>
         <ThemeProvider>
           <ToastProvider>
             <MemoryRouter initialEntries={[options.route ?? "/"]}>
               <LocationProvider actions={{ assign }}>
-                <HttpProvider>{node}</HttpProvider>
+                <HttpProvider>
+                  <StreamProvider createSocket={sockets.create}>
+                    <AuthzProvider>{content}</AuthzProvider>
+                  </StreamProvider>
+                </HttpProvider>
               </LocationProvider>
             </MemoryRouter>
           </ToastProvider>
         </ThemeProvider>
       </LocaleProvider>
-    </QueryClientProvider>,
+    </QueryClientProvider>
   );
-  return { ...result, api, queryClient };
+  const result = render(wrap(node));
+  return { ...result, rerender: (next: ReactElement) => result.rerender(wrap(next)), api, sockets, queryClient };
 }

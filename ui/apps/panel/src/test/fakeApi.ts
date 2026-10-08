@@ -58,11 +58,11 @@ export function createFakeApi(routes: Record<string, FakeRoute>, allow?: (check:
       body: parseBody(init),
     };
     calls.push(request);
-    if (request.method === "POST" && request.path === "/proxy/v1/authz" && allow) {
+    const key = Object.keys(routes).find((pattern) => matches(pattern, request.method, request.path));
+    if (!key && request.method === "POST" && request.path === "/proxy/v1/authz" && allow) {
       const checks = (request.body as { checks: Check[] }).checks;
       return reply({ body: { results: checks.map((check) => ({ allowed: allow(check) })) } });
     }
-    const key = Object.keys(routes).find((pattern) => matches(pattern, request.method, request.path));
     if (!key) {
       return reply({ status: 404, body: { error: "not_found" } });
     }
