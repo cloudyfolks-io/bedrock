@@ -38,6 +38,7 @@ metadata:
   name: once
 spec:
   vmRef: vm1
+  target: default
 BACKUP
   wait_jsonpath 900 Completed -n "$NS" get virtualmachinebackup once -o jsonpath='{.status.phase}'
   id=$(kubectl -n "$NS" get virtualmachinebackup once -o jsonpath='{.status.backups[0].id}')
