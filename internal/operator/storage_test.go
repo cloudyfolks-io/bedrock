@@ -323,7 +323,7 @@ func TestRookValuesAllowOnlyTheBucketFields(t *testing.T) {
 		"csi":                            map[string]any{"installCsiOperator": true},
 		"enableDiscoveryDaemon":          false,
 		"monitoring":                     map[string]any{"enabled": false},
-		"obcAllowAdditionalConfigFields": "bucketMaxObjects,bucketMaxSize,bucketOwner",
+		"obcAllowAdditionalConfigFields": "maxObjects,maxSize,bucketMaxObjects,bucketMaxSize,bucketOwner",
 	}
 	if !reflect.DeepEqual(values, want) {
 		t.Fatalf("values %+v", values)

@@ -5,4 +5,4 @@ csi:
 enableDiscoveryDaemon: false
 monitoring:
   enabled: false
-obcAllowAdditionalConfigFields: "bucketMaxObjects,bucketMaxSize,bucketOwner"
+obcAllowAdditionalConfigFields: "maxObjects,maxSize,bucketMaxObjects,bucketMaxSize,bucketOwner"
