@@ -7,7 +7,7 @@
     "node": ">=24"
   },
   "scripts": {
-    "build": "pnpm --filter login build",
+    "build": "pnpm --filter login build && pnpm --filter panel build",
     "test": "pnpm -r test",
     "lint": "pnpm -r typecheck",
     "typecheck": "pnpm -r typecheck"
