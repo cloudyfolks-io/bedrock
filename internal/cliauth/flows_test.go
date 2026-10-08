@@ -18,6 +18,8 @@ import (
 
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime"
+	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/envtest"
 
@@ -26,8 +28,15 @@ import (
 	"github.com/cloudyfolks-io/bedrock/internal/authn/methods"
 	"github.com/cloudyfolks-io/bedrock/internal/authn/secret"
 	"github.com/cloudyfolks-io/bedrock/internal/authn/server"
-	"github.com/cloudyfolks-io/bedrock/internal/operator"
 )
+
+func testScheme() (*runtime.Scheme, error) {
+	scheme := runtime.NewScheme()
+	if err := clientgoscheme.AddToScheme(scheme); err != nil {
+		return nil, err
+	}
+	return scheme, v1alpha1.AddToScheme(scheme)
+}
 
 type testOP struct {
 	issuer string
@@ -42,7 +51,7 @@ func startTestOP(t *testing.T) testOP {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = env.Stop() })
-	scheme, err := operator.Scheme()
+	scheme, err := testScheme()
 	if err != nil {
 		t.Fatal(err)
 	}
