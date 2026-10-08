@@ -218,10 +218,15 @@ func createIfAbsent(ctx context.Context, c client.Client, obj *unstructured.Unst
 	if !apierrors.IsNotFound(err) {
 		return err
 	}
-	if err := c.Create(ctx, obj.DeepCopy(), client.FieldOwner(v1alpha1.ComputeFieldManager)); err != nil && !apierrors.IsAlreadyExists(err) {
+	err = c.Create(ctx, obj.DeepCopy(), client.FieldOwner(v1alpha1.ComputeFieldManager))
+	if !apierrors.IsAlreadyExists(err) {
 		return err
 	}
-	return nil
+	raced := emptyOf(obj.GroupVersionKind())
+	if err := c.Get(ctx, client.ObjectKeyFromObject(obj), raced); err != nil {
+		return err
+	}
+	return ensureOwned(raced, obj, obj.GetKind())
 }
 
 func rawMergePatch(body map[string]any) (client.Patch, error) {
