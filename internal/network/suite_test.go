@@ -149,7 +149,7 @@ func cleanEnv(t *testing.T) client.Client {
 		for _, gvk := range purgedFabricKinds {
 			purgeKind(ctx, c, gvk)
 		}
-		purgeKind(ctx, c, schema.GroupVersionKind{Group: "k8s.cni.cncf.io", Version: "v1", Kind: "NetworkAttachmentDefinition"})
+		purgeKind(ctx, c, attachmentGVK)
 		purgeKind(ctx, c, networkPolicyGVK)
 	})
 	return c

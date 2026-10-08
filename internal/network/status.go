@@ -1,12 +1,16 @@
 package network
 
 import (
+	"context"
 	"slices"
 	"time"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	ctrl "sigs.k8s.io/controller-runtime"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	"github.com/cloudyfolks-io/bedrock/api/v1alpha1"
+	"github.com/cloudyfolks-io/bedrock/internal/ssa"
 )
 
 const (
@@ -30,4 +34,12 @@ func withCondition(existing []metav1.Condition, cond metav1.Condition) []metav1.
 	conditions := slices.Clone(existing)
 	v1alpha1.SetCondition(&conditions, cond)
 	return conditions
+}
+
+func applyStatus(ctx context.Context, c client.Client, body client.Object) error {
+	if err := ssa.ApplyStatus(ctx, c, body, v1alpha1.NetworkFieldManager); err != nil {
+		ctrl.LoggerFrom(ctx).Error(err, "write the status", "object", client.ObjectKeyFromObject(body).String())
+		return err
+	}
+	return nil
 }
