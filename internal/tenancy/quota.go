@@ -6,7 +6,9 @@ import (
 	"slices"
 
 	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/meta"
 	"k8s.io/apimachinery/pkg/api/resource"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/utils/ptr"
 
 	"github.com/cloudyfolks-io/bedrock/api/v1alpha1"
@@ -41,11 +43,29 @@ func Decide(ceiling v1alpha1.TenantQuota, projects []v1alpha1.Project, name stri
 		if project.Name == name {
 			return decision
 		}
-		if provisioned(project) || decision.Admitted {
-			running = next
-		}
+		running = advance(running, next, project, decision)
 	}
 	return Decision{}
+}
+
+func advance(running, next allocation, project v1alpha1.Project, decision Decision) allocation {
+	switch {
+	case holdsNoSlot(project):
+		return running
+	case decision.Admitted && decision.QuotaAllowed:
+		return next
+	case decision.Admitted:
+		return allocation{count: running.count + 1, cpu: running.cpu, memory: running.memory, storage: running.storage}
+	}
+	return running
+}
+
+func holdsNoSlot(project v1alpha1.Project) bool {
+	if provisioned(project) {
+		return false
+	}
+	condition := meta.FindStatusCondition(project.Status.Conditions, ConditionNamespaceReady)
+	return condition != nil && condition.Status == metav1.ConditionFalse && condition.Reason == ReasonNamespaceConflict
 }
 
 func QuotaHard(quota v1alpha1.ProjectQuota) corev1.ResourceList {
@@ -147,21 +167,41 @@ func boolRank(value bool) int {
 func judge(ceiling v1alpha1.TenantQuota, next allocation, project v1alpha1.Project) Decision {
 	tenant := project.Spec.TenantRef
 	over := overAllocated(ceiling, next)
+	missing := missingRequired(ceiling, project.Spec.Quota)
 	overAllocation := Decision{Reason: ReasonTenantQuotaExceeded, Message: fmt.Sprintf("tenant %s has no %s left to allocate", tenant, over)}
+	required := Decision{Reason: ReasonQuotaRequired, Message: fmt.Sprintf("the project must set %s because tenant %s limits it", missing, tenant)}
 	if provisioned(project) {
-		if over != "" {
+		switch {
+		case missing != "":
+			required.Admitted = true
+			return required
+		case over != "":
 			overAllocation.Admitted = true
 			return overAllocation
 		}
 		return Decision{Admitted: true, QuotaAllowed: true}
 	}
-	if ceiling.Projects != nil && next.count > *ceiling.Projects {
+	switch {
+	case ceiling.Projects != nil && next.count > *ceiling.Projects:
 		return Decision{Reason: ReasonProjectQuotaExceeded, Message: fmt.Sprintf("tenant %s allows %d projects", tenant, *ceiling.Projects)}
-	}
-	if over != "" {
+	case missing != "":
+		return required
+	case over != "":
 		return overAllocation
 	}
 	return Decision{Admitted: true, QuotaAllowed: true}
+}
+
+func missingRequired(ceiling v1alpha1.TenantQuota, quota v1alpha1.ProjectQuota) string {
+	switch {
+	case ceiling.CPU != nil && quota.CPU == nil:
+		return "cpu"
+	case ceiling.Memory != nil && quota.Memory == nil:
+		return "memory"
+	case ceiling.Storage != nil && quota.Storage == nil:
+		return "storage"
+	}
+	return ""
 }
 
 func overAllocated(ceiling v1alpha1.TenantQuota, next allocation) string {

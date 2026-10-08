@@ -39,6 +39,7 @@ const (
 	ReasonCIDRExhausted        = "CIDRExhausted"
 	ReasonApplied              = "Applied"
 	ReasonQuotaCRDMissing      = "QuotaCRDMissing"
+	ReasonQuotaRequired        = "QuotaRequired"
 	ReasonPending              = "Pending"
 )
 

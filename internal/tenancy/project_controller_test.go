@@ -226,3 +226,25 @@ func TestProvisionedProjectSurvivesALoweredCeiling(t *testing.T) {
 		}
 	}
 }
+
+func TestProjectMustSetEveryCeilingedResource(t *testing.T) {
+	c, _ := projectWorld(t)
+	cases := []struct {
+		tenant  string
+		ceiling v1alpha1.TenantQuota
+	}{
+		{"cpucap", v1alpha1.TenantQuota{CPU: quantity("8")}},
+		{"memcap", v1alpha1.TenantQuota{Memory: quantity("16Gi")}},
+		{"diskcap", v1alpha1.TenantQuota{Storage: quantity("200Gi")}},
+	}
+	for _, c2 := range cases {
+		tenant := tenantWith(c2.tenant, "10.100.0.0/16")
+		tenant.Spec.Quota = c2.ceiling
+		mustCreate(t, c, tenant, projectFor("p"+c2.tenant, c2.tenant))
+		projectReady(t, c, "p"+c2.tenant, hasCondition(ConditionAdmitted, metav1.ConditionFalse, ReasonQuotaRequired))
+		projectReady(t, c, "p"+c2.tenant, hasCondition(v1alpha1.ConditionReady, metav1.ConditionFalse, ReasonQuotaRequired))
+		if getInto(t, c, c2.tenant+"-p"+c2.tenant, &corev1.Namespace{}) {
+			t.Fatalf("%s: namespace created without the required quota", c2.tenant)
+		}
+	}
+}

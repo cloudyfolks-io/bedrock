@@ -222,3 +222,66 @@ func TestTenantUsageWithoutProjects(t *testing.T) {
 		t.Fatalf("got %+v", got)
 	}
 }
+
+func TestDecideRequiresEveryCeilingedResource(t *testing.T) {
+	full := v1alpha1.ProjectQuota{CPU: quantity("1"), Memory: quantity("1Gi"), Storage: quantity("1Gi")}
+	cases := []struct {
+		name     string
+		ceiling  v1alpha1.TenantQuota
+		without  func(v1alpha1.ProjectQuota) v1alpha1.ProjectQuota
+		resource string
+	}{
+		{"cpu", v1alpha1.TenantQuota{CPU: quantity("8")}, func(q v1alpha1.ProjectQuota) v1alpha1.ProjectQuota { q.CPU = nil; return q }, "cpu"},
+		{"memory", v1alpha1.TenantQuota{Memory: quantity("16Gi")}, func(q v1alpha1.ProjectQuota) v1alpha1.ProjectQuota { q.Memory = nil; return q }, "memory"},
+		{"storage", v1alpha1.TenantQuota{Storage: quantity("200Gi")}, func(q v1alpha1.ProjectQuota) v1alpha1.ProjectQuota { q.Storage = nil; return q }, "storage"},
+	}
+	for _, c := range cases {
+		missing := []v1alpha1.Project{projectAt("a", 0, c.without(full), "")}
+		got := Decide(c.ceiling, missing, "a")
+		if got.Admitted || got.QuotaAllowed || got.Reason != ReasonQuotaRequired || !strings.Contains(got.Message, c.resource) {
+			t.Fatalf("%s unprovisioned: %+v", c.name, got)
+		}
+		kept := []v1alpha1.Project{projectAt("a", 0, c.without(full), "acme-a")}
+		got = Decide(c.ceiling, kept, "a")
+		if !got.Admitted || got.QuotaAllowed || got.Reason != ReasonQuotaRequired {
+			t.Fatalf("%s provisioned: %+v", c.name, got)
+		}
+		complete := []v1alpha1.Project{projectAt("a", 0, full, "")}
+		if got := Decide(c.ceiling, complete, "a"); !got.Admitted || !got.QuotaAllowed {
+			t.Fatalf("%s complete: %+v", c.name, got)
+		}
+	}
+}
+
+func TestDecideAcceptsUnsetResourcesWithoutCeiling(t *testing.T) {
+	ceiling := v1alpha1.TenantQuota{CPU: quantity("8")}
+	projects := []v1alpha1.Project{projectAt("a", 0, cpuQuota("1"), "")}
+	if got := Decide(ceiling, projects, "a"); !got.Admitted || !got.QuotaAllowed {
+		t.Fatalf("got %+v", got)
+	}
+}
+
+func TestDecideConflictedProjectHoldsNoSlot(t *testing.T) {
+	ceiling := v1alpha1.TenantQuota{Projects: ptr.To(int32(1))}
+	stuck := projectAt("a-stuck", 0, v1alpha1.ProjectQuota{}, "")
+	stuck.Status.Conditions = []metav1.Condition{{Type: ConditionNamespaceReady, Status: metav1.ConditionFalse, Reason: ReasonNamespaceConflict}}
+	projects := []v1alpha1.Project{stuck, projectAt("b-free", time.Second, v1alpha1.ProjectQuota{}, "")}
+	if got := Decide(ceiling, projects, "b-free"); !got.Admitted {
+		t.Fatalf("b-free: %+v", got)
+	}
+}
+
+func TestDecideDeniedProvisionedProjectDoesNotPoisonLaterOnes(t *testing.T) {
+	ceiling := v1alpha1.TenantQuota{CPU: quantity("8")}
+	projects := []v1alpha1.Project{
+		projectAt("a", 0, cpuQuota("4"), "acme-a"),
+		projectAt("b", time.Second, cpuQuota("6"), "acme-b"),
+		projectAt("c", 2*time.Second, cpuQuota("3"), "acme-c"),
+	}
+	if got := Decide(ceiling, projects, "b"); got.QuotaAllowed {
+		t.Fatalf("b: %+v", got)
+	}
+	if got := Decide(ceiling, projects, "c"); !got.QuotaAllowed {
+		t.Fatalf("c: %+v", got)
+	}
+}
