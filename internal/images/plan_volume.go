@@ -18,6 +18,12 @@ func decideVolume(s Subject, w World) Plan {
 	hash := SourceHash(spec)
 	current := newestWithHash(w.Snapshots, hash)
 	switch {
+	case w.Cron != nil:
+		return Plan{
+			Delete:  []*unstructured.Unstructured{w.Cron.DeepCopy()},
+			Result:  Result{Phase: v1alpha1.ImagePhasePending, Reason: ReasonImportScheduled},
+			Requeue: 2 * time.Second,
+		}
 	case s.Kind == KindClusterImage && spec.Source.Upload != nil:
 		return failed(ReasonUploadNotSupported, "a cluster image cannot take an upload")
 	case current != nil && SnapshotReady(current):
@@ -109,7 +115,12 @@ func staleObjects(w World, kept []string, alias string) []*unstructured.Unstruct
 			stale = append(stale, snapshot.DeepCopy())
 		}
 	}
-	for _, source := range w.DataSources {
+	return append(stale, staleDataSources(w.DataSources, kept, alias)...)
+}
+
+func staleDataSources(sources []unstructured.Unstructured, kept []string, alias string) []*unstructured.Unstructured {
+	var stale []*unstructured.Unstructured
+	for _, source := range sources {
 		if source.GetName() != alias && !slices.Contains(kept, source.GetName()) {
 			stale = append(stale, source.DeepCopy())
 		}

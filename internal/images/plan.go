@@ -28,10 +28,7 @@ type Plan struct {
 }
 
 func Decide(s Subject, w World, now time.Time) Plan {
-	plan := decideVolume(s, w)
-	if UsesCron(s.Spec) {
-		plan = decideCron(s, w, now)
-	}
+	plan := decideByMode(s, w, now)
 	plan.Result = keepPrevious(plan.Result, w.Prev)
 	if plan.Requeue == 0 {
 		plan.Requeue = requeueOf(plan.Result.Phase)
@@ -62,6 +59,9 @@ func requeueOf(phase string) time.Duration {
 	}
 }
 
-func decideCron(Subject, World, time.Time) Plan {
-	return Plan{}
+func decideByMode(s Subject, w World, now time.Time) Plan {
+	if UsesCron(s.Spec) {
+		return decideCron(s, w, now)
+	}
+	return decideVolume(s, w)
 }
