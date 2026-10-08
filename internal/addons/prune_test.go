@@ -172,3 +172,25 @@ func TestReEnableAfterPruneAppliesAgain(t *testing.T) {
 		t.Fatal("not applied again")
 	}
 }
+
+func TestPartialApplyIsStillPrunedWhenDisabled(t *testing.T) {
+	r, c := newFixture(t)
+	widget := &unstructured.Unstructured{Object: map[string]any{"apiVersion": "example.test/v1", "kind": "Widget", "metadata": map[string]any{"name": "w", "namespace": "kube-system"}}}
+	bundle := testBundle
+	bundle.Addons = map[string][]*unstructured.Unstructured{"kata": append(append([]*unstructured.Unstructured{}, testBundle.Addons["kata"]...), widget)}
+	r.Bundle = bundle
+	addHost(t, c, "w1", v1alpha1.RoleWorkload, boolPtr(true), true)
+	createAddon(t, c, "kata", true, "")
+	runReconcile(t, r, "kata")
+	if got := condition(t, c, "kata", "Ready"); got.Reason != "MissingCRD" {
+		t.Fatalf("ready %+v", got)
+	}
+	if !exists(c, &appsv1.DaemonSet{}, "kube-system", "kata-deploy") {
+		t.Fatal("the workload was not applied before the failure")
+	}
+	disable(t, c, "kata")
+	runReconcile(t, r, "kata")
+	if exists(c, &appsv1.DaemonSet{}, "kube-system", "kata-deploy") || exists(c, &rbacv1.ClusterRole{}, "", "kata-deploy-role") || exists(c, &corev1.ServiceAccount{}, "kube-system", "kata-deploy-sa") {
+		t.Fatal("an object of the partial apply stayed")
+	}
+}

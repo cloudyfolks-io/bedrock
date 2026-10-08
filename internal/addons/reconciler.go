@@ -3,6 +3,7 @@ package addons
 import (
 	"context"
 	"fmt"
+	"maps"
 	"strings"
 	"time"
 
@@ -139,12 +140,20 @@ func (r *Reconciler) apply(ctx context.Context, def Definition, input gathered) 
 	if err != nil {
 		return outcome{ready: notReady("RenderFailed", err.Error())}
 	}
+	previous, err := readInventory(ctx, r.Client, def.Name)
+	if err != nil {
+		return outcome{ready: notReady("ApplyFailed", "inventory: "+err.Error())}
+	}
+	current := inventoryOf(rendered)
+	if err := writeInventory(ctx, r.Client, def.Name, unionOf(previous, current)); err != nil {
+		return outcome{ready: notReady("ApplyFailed", "inventory: "+err.Error())}
+	}
 	for _, obj := range rendered {
 		if err := ssa.Apply(ctx, r.Client, obj, v1alpha1.AddonsFieldManager); err != nil {
 			return outcome{ready: notReady(applyReason(err), fmt.Sprintf("apply %s %s: %v", obj.GetKind(), obj.GetName(), err))}
 		}
 	}
-	if err := r.record(ctx, def.Name, rendered); err != nil {
+	if err := r.settle(ctx, def.Name, previous, current); err != nil {
 		return outcome{ready: notReady("ApplyFailed", "inventory: "+err.Error())}
 	}
 	if pending := r.pendingWorkloads(ctx, rendered); len(pending) > 0 {
@@ -160,12 +169,14 @@ func applyReason(err error) string {
 	return "ApplyFailed"
 }
 
-func (r *Reconciler) record(ctx context.Context, addon string, rendered []*unstructured.Unstructured) error {
-	previous, err := readInventory(ctx, r.Client, addon)
-	if err != nil {
-		return err
-	}
-	current := inventoryOf(rendered)
+func unionOf(a, b release.Inventory) release.Inventory {
+	union := release.Inventory{}
+	maps.Copy(union, a)
+	maps.Copy(union, b)
+	return union
+}
+
+func (r *Reconciler) settle(ctx context.Context, addon string, previous, current release.Inventory) error {
 	if err := writeInventory(ctx, r.Client, addon, current); err != nil {
 		return err
 	}
