@@ -1,0 +1,107 @@
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicy
+metadata:
+  name: bedrock-tenant-pods
+  labels:
+    bedrock.cloudyfolks.io/kind: ValidatingAdmissionPolicy
+    bedrock.cloudyfolks.io/name: bedrock-tenant-pods
+spec:
+  failurePolicy: Fail
+  matchConstraints:
+    resourceRules:
+      - apiGroups: [""]
+        apiVersions: [v1]
+        operations: [CREATE]
+        resources: [pods]
+  matchConditions:
+    - name: bedrock-identity
+      expression: "request.userInfo.username.startsWith('bedrock:')"
+  variables:
+    - name: podSpec
+      expression: "object.spec"
+  validations:
+    - expression: "!(has(variables.podSpec.hostNetwork) && variables.podSpec.hostNetwork) && !(has(variables.podSpec.hostPID) && variables.podSpec.hostPID) && !(has(variables.podSpec.hostIPC) && variables.podSpec.hostIPC)"
+      message: "host namespaces are not allowed in a project"
+      reason: Forbidden
+    - expression: "!has(variables.podSpec.volumes) || variables.podSpec.volumes.all(v, !has(v.hostPath))"
+      message: "hostPath volumes are not allowed in a project"
+      reason: Forbidden
+    - expression: "variables.podSpec.containers.all(c, !has(c.securityContext) || !has(c.securityContext.privileged) || !c.securityContext.privileged) && (!has(variables.podSpec.initContainers) || variables.podSpec.initContainers.all(c, !has(c.securityContext) || !has(c.securityContext.privileged) || !c.securityContext.privileged))"
+      message: "privileged containers are not allowed in a project"
+      reason: Forbidden
+    - expression: "variables.podSpec.containers.all(c, !has(c.ports) || c.ports.all(p, !has(p.hostPort) || p.hostPort == 0)) && (!has(variables.podSpec.initContainers) || variables.podSpec.initContainers.all(c, !has(c.ports) || c.ports.all(p, !has(p.hostPort) || p.hostPort == 0)))"
+      message: "host ports are not allowed in a project"
+      reason: Forbidden
+    - expression: "!has(variables.podSpec.nodeName)"
+      message: "spec.nodeName is not allowed in a project"
+      reason: Forbidden
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicyBinding
+metadata:
+  name: bedrock-tenant-pods
+  labels:
+    bedrock.cloudyfolks.io/kind: ValidatingAdmissionPolicyBinding
+    bedrock.cloudyfolks.io/name: bedrock-tenant-pods
+spec:
+  policyName: bedrock-tenant-pods
+  validationActions: [Deny]
+  matchResources:
+    namespaceSelector:
+      matchExpressions:
+        - key: bedrock.cloudyfolks.io/tenant
+          operator: Exists
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicy
+metadata:
+  name: bedrock-tenant-deployments
+  labels:
+    bedrock.cloudyfolks.io/kind: ValidatingAdmissionPolicy
+    bedrock.cloudyfolks.io/name: bedrock-tenant-deployments
+spec:
+  failurePolicy: Fail
+  matchConstraints:
+    resourceRules:
+      - apiGroups: [apps]
+        apiVersions: [v1]
+        operations: [CREATE, UPDATE]
+        resources: [deployments]
+  matchConditions:
+    - name: bedrock-identity
+      expression: "request.userInfo.username.startsWith('bedrock:')"
+  variables:
+    - name: podSpec
+      expression: "object.spec.template.spec"
+  validations:
+    - expression: "!(has(variables.podSpec.hostNetwork) && variables.podSpec.hostNetwork) && !(has(variables.podSpec.hostPID) && variables.podSpec.hostPID) && !(has(variables.podSpec.hostIPC) && variables.podSpec.hostIPC)"
+      message: "host namespaces are not allowed in a project"
+      reason: Forbidden
+    - expression: "!has(variables.podSpec.volumes) || variables.podSpec.volumes.all(v, !has(v.hostPath))"
+      message: "hostPath volumes are not allowed in a project"
+      reason: Forbidden
+    - expression: "variables.podSpec.containers.all(c, !has(c.securityContext) || !has(c.securityContext.privileged) || !c.securityContext.privileged) && (!has(variables.podSpec.initContainers) || variables.podSpec.initContainers.all(c, !has(c.securityContext) || !has(c.securityContext.privileged) || !c.securityContext.privileged))"
+      message: "privileged containers are not allowed in a project"
+      reason: Forbidden
+    - expression: "variables.podSpec.containers.all(c, !has(c.ports) || c.ports.all(p, !has(p.hostPort) || p.hostPort == 0)) && (!has(variables.podSpec.initContainers) || variables.podSpec.initContainers.all(c, !has(c.ports) || c.ports.all(p, !has(p.hostPort) || p.hostPort == 0)))"
+      message: "host ports are not allowed in a project"
+      reason: Forbidden
+    - expression: "!has(variables.podSpec.nodeName)"
+      message: "spec.nodeName is not allowed in a project"
+      reason: Forbidden
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicyBinding
+metadata:
+  name: bedrock-tenant-deployments
+  labels:
+    bedrock.cloudyfolks.io/kind: ValidatingAdmissionPolicyBinding
+    bedrock.cloudyfolks.io/name: bedrock-tenant-deployments
+spec:
+  policyName: bedrock-tenant-deployments
+  validationActions: [Deny]
+  matchResources:
+    namespaceSelector:
+      matchExpressions:
+        - key: bedrock.cloudyfolks.io/tenant
+          operator: Exists
