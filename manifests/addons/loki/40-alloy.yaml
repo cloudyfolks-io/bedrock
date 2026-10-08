@@ -86,11 +86,8 @@ spec:
             - name: var-log
               mountPath: /var/log
               readOnly: true
-            - name: var-log-journal
-              mountPath: /var/log/journal
-              readOnly: true
-            - name: run-log-journal
-              mountPath: /run/log/journal
+            - name: run-log
+              mountPath: /run/log
               readOnly: true
             - name: machine-id
               mountPath: /etc/machine-id
@@ -105,19 +102,13 @@ spec:
           hostPath:
             path: /var/log
             type: Directory
-        - name: var-log-journal
+        - name: run-log
           hostPath:
-            path: /var/log/journal
-            type: DirectoryOrCreate
-        - name: run-log-journal
-          hostPath:
-            path: /run/log/journal
-            type: DirectoryOrCreate
+            path: /run/log
+            type: Directory
         - name: machine-id
           hostPath:
             path: /etc/machine-id
             type: File
         - name: state
-          hostPath:
-            path: /var/lib/bedrock/alloy
-            type: DirectoryOrCreate
+          emptyDir: {}

@@ -160,7 +160,8 @@ The compute controller sets it.
 
 Alloy runs as root with only the capability `DAC_READ_SEARCH`. The API
 server writes its audit file with mode `0600`. Alloy needs this capability
-to read it. Alloy keeps its read positions in `/var/lib/bedrock/alloy`.
+to read it. Alloy keeps its read positions in a temporary volume. After a restart of
+an Alloy pod, it reads the audit file again. Loki drops the duplicate lines.
 Neither Loki nor Alloy sends usage data outside the cluster.
 
 The Setting `loki.retention-days` sets how long Loki keeps logs. The

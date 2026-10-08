@@ -24,7 +24,7 @@ func TestAddonsDocNamesEveryContractName(t *testing.T) {
 		"Ready", "Progressing", "Disabled", "PreflightFailed", "PreflightPending", "InvalidValues", "UnknownAddon",
 		"WaitingForCluster", "ApplyFailed", "MissingCRD", "RenderFailed", "Pruning",
 		"Passed", "NoKVM", "WaitingForHosts", ConditionPreflight,
-		audit.Dir + "/" + audit.PolicyFile, audit.LogDir + "/" + audit.LogFile, "/var/lib/bedrock/alloy",
+		audit.Dir + "/" + audit.PolicyFile, audit.LogDir + "/" + audit.LogFile,
 		"monitoring/bedrock-alertmanager-config", "bedrock-grafana-admin", audit.ConfigMapName, LabelKVM,
 		"bedrock-addon-<name>-inventory", "kube-prometheus-stack-prometheus", "bedrock-vms", "bedrock-tenants",
 	}

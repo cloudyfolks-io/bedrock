@@ -171,7 +171,7 @@ func TestAlloyReadsEverySource(t *testing.T) {
 		readOnly, _ := entry["readOnly"].(bool)
 		mounts[entry["mountPath"].(string)] = readOnly
 	}
-	for _, path := range []string{"/var/log", "/var/log/journal", "/run/log/journal", "/etc/machine-id"} {
+	for _, path := range []string{"/var/log", "/run/log", "/etc/machine-id"} {
 		if !mounts[path] {
 			t.Errorf("%s is not mounted read-only", path)
 		}
@@ -234,18 +234,45 @@ func TestAddonManifestsHaveNoComments(t *testing.T) {
 	}
 }
 
-func TestAlloyReadsPersistentAndVolatileJournals(t *testing.T) {
-	spec := podSpec(t, find(t, lokiObjects(t), "DaemonSet", "alloy"))
-	types := map[string]string{}
-	for _, item := range spec["volumes"].([]any) {
-		volume := item.(map[string]any)
-		if hostPath, ok := volume["hostPath"].(map[string]any); ok {
-			types[hostPath["path"].(string)] = hostPath["type"].(string)
+func TestAlloyReadsBothJournalPaths(t *testing.T) {
+	config := configData(t, find(t, lokiObjects(t), "ConfigMap", "alloy"), "config.alloy")
+	for _, path := range []string{`path          = "/var/log/journal"`, `path          = "/run/log/journal"`} {
+		if !strings.Contains(config, path) {
+			t.Errorf("alloy config lacks %s", path)
 		}
 	}
-	for _, path := range []string{"/var/log/journal", "/run/log/journal"} {
-		if types[path] != "DirectoryOrCreate" {
-			t.Errorf("%s has type %q", path, types[path])
+}
+
+func TestLokiHostPathsAreReadOnlyAndNeverCreated(t *testing.T) {
+	for _, name := range []string{Loki} {
+		for _, obj := range testBundle.Addons[name] {
+			if !workloadKinds[obj.GetKind()] {
+				continue
+			}
+			spec := podSpec(t, obj)
+			readOnly := map[string]bool{}
+			for _, container := range spec["containers"].([]any) {
+				mounts, _ := container.(map[string]any)["volumeMounts"].([]any)
+				for _, mount := range mounts {
+					entry := mount.(map[string]any)
+					value, _ := entry["readOnly"].(bool)
+					readOnly[entry["name"].(string)] = value
+				}
+			}
+			volumes, _ := spec["volumes"].([]any)
+			for _, item := range volumes {
+				volume := item.(map[string]any)
+				hostPath, ok := volume["hostPath"].(map[string]any)
+				if !ok {
+					continue
+				}
+				if kind := hostPath["type"]; kind == "DirectoryOrCreate" || kind == "FileOrCreate" {
+					t.Errorf("%s %s: %v creates a host path", obj.GetKind(), obj.GetName(), hostPath["path"])
+				}
+				if name := volume["name"].(string); !readOnly[name] {
+					t.Errorf("%s %s: host path %v is not mounted read-only", obj.GetKind(), obj.GetName(), hostPath["path"])
+				}
+			}
 		}
 	}
 }

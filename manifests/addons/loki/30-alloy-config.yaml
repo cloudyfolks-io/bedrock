@@ -71,7 +71,15 @@ data:
       }
     }
 
-    loki.source.journal "journal" {
+    loki.source.journal "persistent" {
+      path          = "/var/log/journal"
+      forward_to    = [loki.write.loki.receiver]
+      relabel_rules = loki.relabel.journal.rules
+      labels        = { job = "journald", node = coalesce(sys.env("NODE_NAME"), "") }
+    }
+
+    loki.source.journal "volatile" {
+      path          = "/run/log/journal"
       forward_to    = [loki.write.loki.receiver]
       relabel_rules = loki.relabel.journal.rules
       labels        = { job = "journald", node = coalesce(sys.env("NODE_NAME"), "") }
