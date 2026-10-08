@@ -41,10 +41,18 @@ func TestPodNetworkMetadataTwoNICs(t *testing.T) {
 	}
 }
 
-func TestPodNetworkMetadataOmitsEmptyValues(t *testing.T) {
+func TestPodNetworkMetadataBindsTheDefaultGroupWhenNoGroupIsNamed(t *testing.T) {
 	annotations, labels := PodNetworkMetadata([]NIC{{Namespace: "t1-prod", Subnet: "default"}})
-	if len(annotations) != 1 || len(labels) != 0 {
+	prefix := "default.t1-prod.fabric.cloudyfolks.io/"
+	if len(annotations) != 2 || annotations[prefix+"port_security"] != "true" || annotations[prefix+"security_groups"] != "default-t1-prod" || len(labels) != 0 {
 		t.Fatalf("annotations %v labels %v", annotations, labels)
+	}
+}
+
+func TestPodNetworkMetadataOmitsTheMACWhenUnset(t *testing.T) {
+	annotations, _ := PodNetworkMetadata([]NIC{{Namespace: "t1-prod", Subnet: "default"}})
+	if _, found := annotations["default.t1-prod.fabric.cloudyfolks.io/mac_address"]; found {
+		t.Fatal("no MAC, no mac_address key")
 	}
 }
 

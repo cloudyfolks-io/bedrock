@@ -18,17 +18,22 @@ func nicPrefix(nic NIC) string {
 	return SubnetProvider(nic.Namespace, nic.Subnet) + providerAnnotationDomain
 }
 
+func securityGroupNames(nic NIC) string {
+	if len(nic.SecurityGroups) == 0 {
+		return DefaultSecurityGroupName(nic.Namespace)
+	}
+	names := make([]string, len(nic.SecurityGroups))
+	for i, group := range nic.SecurityGroups {
+		names[i] = FabricName(nic.Namespace, group)
+	}
+	slices.Sort(names)
+	return strings.Join(names, ",")
+}
+
 func nicAnnotations(index int, nic NIC) map[string]string {
 	prefix := nicPrefix(nic)
 	annotations := map[string]string{prefix + "port_security": "true"}
-	if len(nic.SecurityGroups) > 0 {
-		names := make([]string, len(nic.SecurityGroups))
-		for i, group := range nic.SecurityGroups {
-			names[i] = FabricName(nic.Namespace, group)
-		}
-		slices.Sort(names)
-		annotations[prefix+"security_groups"] = strings.Join(names, ",")
-	}
+	annotations[prefix+"security_groups"] = securityGroupNames(nic)
 	if nic.MAC != "" {
 		annotations[prefix+"mac_address"] = nic.MAC
 	}
