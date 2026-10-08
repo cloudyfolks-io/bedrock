@@ -103,7 +103,7 @@ func (r *VirtualMachineReconciler) converge(ctx context.Context, vm v1alpha1.Vir
 	}
 	in, gate, err := r.resolve(ctx, vm, labels)
 	if err != nil || gate != nil {
-		return outcome{Gate: gate, RequeueAfter: catalogRetryFor(gate)}, err
+		return outcome{Gate: gate, RequeueAfter: retryFor(gate)}, err
 	}
 	return r.apply(ctx, in)
 }
@@ -115,9 +115,15 @@ func (r *VirtualMachineReconciler) secretReader() client.Reader {
 	return r.Client
 }
 
-func catalogRetryFor(gate *Gate) time.Duration {
-	if gate != nil && (gate.Reason == ReasonInstanceTypeNotFound || gate.Reason == ReasonPreferenceNotFound) {
+func retryFor(gate *Gate) time.Duration {
+	if gate == nil {
+		return 0
+	}
+	switch gate.Reason {
+	case ReasonInstanceTypeNotFound, ReasonPreferenceNotFound:
 		return catalogRetry
+	case ReasonWaitingForDefaultGroup:
+		return applyFailureRetry
 	}
 	return 0
 }

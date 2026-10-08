@@ -542,3 +542,36 @@ func TestVolumeRefusesAClaimOfAnotherOwner(t *testing.T) {
 		t.Fatalf("labels %+v", claim.GetLabels())
 	}
 }
+
+func TestVMWaitsForTheDefaultSecurityGroup(t *testing.T) {
+	c, _ := startEnv(t)
+	ns := seedPlatform(t, c)
+	must(t, c.Delete(context.Background(), emptyNamed(fabricGroupGVK, DefaultFabricGroup(ns))))
+	createVM(t, c, ns, "web-1", func(vm *v1alpha1.VirtualMachine) { vm.Spec.Networks[0].SecurityGroups = nil })
+	r := newVMReconciler(c)
+	result := reconcileVM(t, r, ns, "web-1")
+	vm := getVM(t, c, ns, "web-1")
+	requireReason(t, vm, "WaitingForDefaultSecurityGroup")
+	if network := conditionOf(vm, ConditionNetworkReady); network == nil || network.Status != metav1.ConditionFalse || result.RequeueAfter != 30*time.Second {
+		t.Fatalf("network %+v requeue %s", network, result.RequeueAfter)
+	}
+	requireAbsent(t, c, kubeVirtVMGVK, ns, "web-1")
+	ensureUnstructured(t, c, fabricGroupGVK, DefaultFabricGroup(ns), map[string]any{})
+	reconcileVM(t, r, ns, "web-1")
+	requirePresent(t, c, kubeVirtVMGVK, ns, "web-1")
+}
+
+func TestVMWithNamedGroupsNeedsNoDefaultGroup(t *testing.T) {
+	c, _ := startEnv(t)
+	ns := seedPlatform(t, c)
+	must(t, c.Delete(context.Background(), emptyNamed(fabricGroupGVK, DefaultFabricGroup(ns))))
+	createVM(t, c, ns, "web-1", noMutation)
+	reconcileVM(t, newVMReconciler(c), ns, "web-1")
+	requirePresent(t, c, kubeVirtVMGVK, ns, "web-1")
+}
+
+func emptyNamed(gvk schema.GroupVersionKind, name string) *unstructured.Unstructured {
+	obj := emptyOf(gvk)
+	obj.SetName(name)
+	return obj
+}

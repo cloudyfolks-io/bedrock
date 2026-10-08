@@ -20,7 +20,7 @@ type ObservedVM struct {
 }
 
 var (
-	reasonsBeforeNetwork = []string{ReasonSubnetNotReady, ReasonSecurityGroupNotReady}
+	reasonsBeforeNetwork = []string{ReasonSubnetNotReady, ReasonSecurityGroupNotReady, ReasonWaitingForDefaultGroup}
 	reasonsAfterNetwork  = []string{ReasonSSHKeyNotReady, ReasonInvalidUserData, ReasonVolumeNotFound, ReasonVolumeInUse, ReasonApplyFailed, ReasonNameConflict}
 )
 

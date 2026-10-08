@@ -124,6 +124,7 @@ func seedPlatform(t *testing.T, c client.Client) string {
 	ns := uniqueNamespace(t, c)
 	createSubnet(t, c, ns, "default", metav1.ConditionTrue)
 	createSecurityGroup(t, c, ns, "web", metav1.ConditionTrue)
+	ensureUnstructured(t, c, fabricGroupGVK, DefaultFabricGroup(ns), map[string]any{})
 	createSSHKey(t, c, ns, "alice", metav1.ConditionTrue)
 	createVolume(t, c, ns, "data1")
 	return ns

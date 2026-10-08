@@ -49,7 +49,7 @@ func VolumeOwner(vms []v1alpha1.VirtualMachine, volume string) string {
 
 func (r *VirtualMachineReconciler) resolve(ctx context.Context, vm v1alpha1.VirtualMachine, labels map[string]string) (RenderInput, *Gate, error) {
 	in := RenderInput{VirtualMachine: vm, Labels: labels}
-	steps := []resolveStep{r.stepRootImage, r.stepRootDisk, r.stepCDROMs, r.stepInstanceType, r.stepPreference, r.stepSubnets, r.stepSecurityGroups, r.stepSSHKeys, r.stepCloudInit, r.stepVolumes}
+	steps := []resolveStep{r.stepRootImage, r.stepRootDisk, r.stepCDROMs, r.stepInstanceType, r.stepPreference, r.stepSubnets, r.stepSecurityGroups, r.stepDefaultGroup, r.stepSSHKeys, r.stepCloudInit, r.stepVolumes}
 	for _, step := range steps {
 		next, gate, err := step(ctx, vm, in)
 		if err != nil || gate != nil {
@@ -185,6 +185,18 @@ func (r *VirtualMachineReconciler) stepSecurityGroups(ctx context.Context, vm v1
 		}
 	}
 	return in, nil, nil
+}
+
+func (r *VirtualMachineReconciler) stepDefaultGroup(ctx context.Context, vm v1alpha1.VirtualMachine, in RenderInput) (RenderInput, *Gate, error) {
+	if !slices.ContainsFunc(in.NICs, func(nic NIC) bool { return len(nic.SecurityGroups) == 0 }) {
+		return in, nil, nil
+	}
+	name := DefaultFabricGroup(vm.Namespace)
+	err := r.Client.Get(ctx, client.ObjectKey{Name: name}, emptyOf(fabricGroupGVK))
+	if notFound(err) {
+		return in, gateOf(ReasonWaitingForDefaultGroup, "the default security group %q does not exist yet", name), nil
+	}
+	return in, nil, err
 }
 
 func (r *VirtualMachineReconciler) stepSSHKeys(ctx context.Context, vm v1alpha1.VirtualMachine, in RenderInput) (RenderInput, *Gate, error) {
