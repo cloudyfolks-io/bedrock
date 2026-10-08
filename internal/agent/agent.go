@@ -149,6 +149,10 @@ func Tick(ctx context.Context, c client.Client, deps Deps) error {
 		return inventoryRead{Inventory: inv, Err: err}
 	})
 	invErr := gathered.Err
+	auditErr := syncAuditFiles(ctx, c, deps, current)
+	if auditErr != nil {
+		fmt.Fprintf(os.Stderr, "agent: audit files: %v\n", auditErr)
+	}
 	next := v1alpha1.HostStatus{
 		Inventory:    gathered.Inventory,
 		Applied:      current.Status.Applied,
@@ -158,7 +162,7 @@ func Tick(ctx context.Context, c client.Client, deps Deps) error {
 		Checks:       hostChecks(ctx, deps),
 		Depot:        bounded(ctx, deps.ProbeTimeout, func(probeCtx context.Context) *v1alpha1.DepotStatus { return depotStatus(probeCtx, c, deps) }),
 		Restore:      readRestoreMarker(deps.Root),
-		Authn:        syncAuthnFiles(ctx, c, deps, current),
+		Authn:        withAuditMessage(syncAuthnFiles(ctx, c, deps, current), auditErr),
 	}
 	if invErr != nil {
 		next.Inventory = current.Status.Inventory

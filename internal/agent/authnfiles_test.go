@@ -15,6 +15,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	"github.com/cloudyfolks-io/bedrock/api/v1alpha1"
+	"github.com/cloudyfolks-io/bedrock/internal/audit"
 	"github.com/cloudyfolks-io/bedrock/internal/authn/apiserver"
 	"github.com/cloudyfolks-io/bedrock/internal/host"
 	"github.com/cloudyfolks-io/bedrock/internal/release"
@@ -43,7 +44,8 @@ func putAuthnSources(t *testing.T, platformHost string) (authentication, webhook
 	authentication, webhook = renderedAuthn(t, platformHost)
 	cm := &corev1.ConfigMap{ObjectMeta: metav1.ObjectMeta{Namespace: release.SystemNamespace, Name: apiserver.ConfigMapName}, Data: map[string]string{apiserver.AuthenticationFile: string(authentication)}}
 	secret := &corev1.Secret{ObjectMeta: metav1.ObjectMeta{Namespace: release.SystemNamespace, Name: apiserver.SecretName}, Data: map[string][]byte{apiserver.WebhookFile: webhook}}
-	for _, obj := range []client.Object{cm, secret} {
+	auditPolicy := &corev1.ConfigMap{ObjectMeta: metav1.ObjectMeta{Namespace: release.SystemNamespace, Name: audit.ConfigMapName}, Data: map[string]string{audit.PolicyFile: "policy"}}
+	for _, obj := range []client.Object{cm, secret, auditPolicy} {
 		err := k8sClient.Create(ctx, obj)
 		if client.IgnoreAlreadyExists(err) != nil {
 			t.Fatal(err)
@@ -57,6 +59,7 @@ func putAuthnSources(t *testing.T, platformHost string) (authentication, webhook
 	t.Cleanup(func() {
 		k8sClient.Delete(context.Background(), cm)
 		k8sClient.Delete(context.Background(), secret)
+		k8sClient.Delete(context.Background(), auditPolicy)
 	})
 	return authentication, webhook
 }
@@ -259,6 +262,9 @@ func TestAgentReportsWebhookRestartPending(t *testing.T) {
 	}
 	longAgo := time.Now().Add(-2 * time.Hour)
 	if err := os.Chtimes(webhookPath, longAgo, longAgo); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chtimes(filepath.Join(deps.Root, "etc", "bedrock", "audit", "policy.yaml"), longAgo, longAgo); err != nil {
 		t.Fatal(err)
 	}
 	if err := Tick(ctx, k8sClient, deps); err != nil {
