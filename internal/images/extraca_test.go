@@ -74,7 +74,7 @@ func TestAdditionalCALeavesForeignConfigMaps(t *testing.T) {
 	if err := c.Create(context.Background(), foreign); err != nil {
 		t.Fatal(err)
 	}
-	if err := EnsureAdditionalCA(context.Background(), c, "acme-web", ""); err != nil {
+	if err := RemoveAdditionalCA(context.Background(), c, "acme-web"); err != nil {
 		t.Fatal(err)
 	}
 	if cm, err := additionalCAIn(c, "acme-web"); err != nil || cm.Data["ca.crt"] != "mine" {
@@ -92,7 +92,7 @@ func TestAdditionalCAIsPerNamespace(t *testing.T) {
 		img := ubuntuImage()
 		img.Namespace = namespace
 		img.Spec = httpSpec("https://example.com/a.qcow2")
-		s := SubjectOfImage(img, "acme", "web", false)
+		s := SubjectOfImage(img, "acme", "web")
 		if _, err := reconcileSubject(context.Background(), c, s, v1alpha1.ImageStatus{}, testNow); err != nil {
 			t.Fatal(err)
 		}

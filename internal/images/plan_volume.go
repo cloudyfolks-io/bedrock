@@ -51,7 +51,7 @@ func decideVolume(s Subject, w World) Plan {
 }
 
 func decideImport(s Subject, w World) Plan {
-	result := PhaseOfDataVolume(w.DataVolume, s.Spec.Source.Upload != nil)
+	result := PhaseOfDataVolume(w.DataVolume)
 	switch {
 	case result.Reason == ReasonSnapshotting && w.ImportClaim == nil:
 		return pending(v1alpha1.ImagePhasePending, ReasonClaimNotFound, "the import claim is missing", 0)

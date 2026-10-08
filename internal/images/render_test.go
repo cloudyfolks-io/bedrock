@@ -29,7 +29,7 @@ func fromYAML(t *testing.T, text string) *unstructured.Unstructured {
 func ubuntuSubject(spec v1alpha1.ImageSpec) Subject {
 	img := ubuntuImage()
 	img.Spec = spec
-	return SubjectOfImage(img, "acme", "web", false)
+	return SubjectOfImage(img, "acme", "web")
 }
 
 func registrySpec(image string) v1alpha1.ImageSpec {
@@ -180,19 +180,20 @@ func TestHTTPSourceCertConfigMap(t *testing.T) {
 	spec := v1alpha1.ImageSpec{Source: v1alpha1.ImageSource{HTTP: &v1alpha1.ImageHTTPSource{URL: "https://example.com/d.qcow2"}}}
 	img := ubuntuImage()
 	img.Spec = spec
-	cert := func(s Subject) (any, bool) {
+	cert := func(s Subject, extraCA bool) (any, bool) {
+		s.ExtraCA = extraCA
 		value, found, _ := unstructured.NestedFieldNoCopy(ImportDataVolume(s, 10).Object, "spec", "source", "http", "certConfigMap")
 		return value, found
 	}
 
-	if _, found := cert(SubjectOfImage(img, "acme", "web", false)); found {
+	if _, found := cert(SubjectOfImage(img, "acme", "web"), false); found {
 		t.Fatal("no certConfigMap expected")
 	}
-	if got, _ := cert(SubjectOfImage(img, "acme", "web", true)); got != "platform-additional-ca" {
+	if got, _ := cert(SubjectOfImage(img, "acme", "web"), true); got != "platform-additional-ca" {
 		t.Fatalf("extra CA %v", got)
 	}
 	img.Spec.Source.HTTP.CAConfigMap = "corp-ca"
-	if got, _ := cert(SubjectOfImage(img, "acme", "web", true)); got != "corp-ca" {
+	if got, _ := cert(SubjectOfImage(img, "acme", "web"), true); got != "corp-ca" {
 		t.Fatalf("own CA %v", got)
 	}
 }
@@ -249,7 +250,7 @@ func TestClusterImageObjectsLiveInTheCatalogNamespace(t *testing.T) {
 	catalog := ubuntuImage()
 	cluster := v1alpha1.ClusterImage{ObjectMeta: catalog.ObjectMeta, Spec: registrySpec("quay.io/containerdisks/ubuntu:24.04")}
 	cluster.Namespace = ""
-	s := SubjectOfClusterImage(cluster, false)
+	s := SubjectOfClusterImage(cluster)
 	dv := ImportDataVolume(s, 10)
 	if dv.GetNamespace() != "bedrock-images" || len(dv.GetLabels()) != 2 {
 		t.Fatalf("object %s %v", dv.GetNamespace(), dv.GetLabels())

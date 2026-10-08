@@ -47,7 +47,8 @@ var importingPhases = []string{
 	"PrepClaimInProgress", "RebindInProgress",
 }
 
-func PhaseOfDataVolume(dv *unstructured.Unstructured, upload bool) Result {
+func PhaseOfDataVolume(dv *unstructured.Unstructured) Result {
+	_, upload, _ := unstructured.NestedMap(dv.Object, "spec", "source", "upload")
 	phase, _, _ := unstructured.NestedString(dv.Object, "status", "phase")
 	result := Result{
 		Phase:    v1alpha1.ImagePhasePending,

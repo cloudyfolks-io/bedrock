@@ -43,7 +43,7 @@ func (r *ImageReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 	}
 	tenant, project := tenantOf(namespace)
 	now := r.Now()
-	plan, err := reconcileSubject(ctx, r.Client, SubjectOfImage(img, tenant, project, false), img.Status, now)
+	plan, err := reconcileSubject(ctx, r.Client, SubjectOfImage(img, tenant, project), img.Status, now)
 	if err != nil {
 		return ctrl.Result{}, err
 	}
@@ -60,7 +60,7 @@ func (r *ClusterImageReconciler) Reconcile(ctx context.Context, req ctrl.Request
 		return ctrl.Result{}, nil
 	}
 	now := r.Now()
-	plan, err := reconcileSubject(ctx, r.Client, SubjectOfClusterImage(img, false), img.Status, now)
+	plan, err := reconcileSubject(ctx, r.Client, SubjectOfClusterImage(img), img.Status, now)
 	if err != nil {
 		return ctrl.Result{}, err
 	}

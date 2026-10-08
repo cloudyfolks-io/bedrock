@@ -28,7 +28,7 @@ func reconcileSubject(ctx context.Context, c client.Client, s Subject, prev v1al
 	if err != nil {
 		return Plan{}, err
 	}
-	if err := EnsureAdditionalCA(ctx, c, s.Namespace, pem); err != nil {
+	if err := syncAdditionalCA(ctx, c, s.Namespace, pem); err != nil {
 		return Plan{}, err
 	}
 	s.ExtraCA = pem != ""

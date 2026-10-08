@@ -25,7 +25,7 @@ type Subject struct {
 	ExtraCA   bool
 }
 
-func SubjectOfImage(img v1alpha1.Image, tenant, project string, extraCA bool) Subject {
+func SubjectOfImage(img v1alpha1.Image, tenant, project string) Subject {
 	return Subject{
 		Kind:      KindImage,
 		Name:      img.Name,
@@ -33,11 +33,10 @@ func SubjectOfImage(img v1alpha1.Image, tenant, project string, extraCA bool) Su
 		Labels:    imageLabels(img.Name, tenant, project),
 		Owner:     controllerReference(KindImage, img.Name, img.UID),
 		Spec:      img.Spec,
-		ExtraCA:   extraCA,
 	}
 }
 
-func SubjectOfClusterImage(img v1alpha1.ClusterImage, extraCA bool) Subject {
+func SubjectOfClusterImage(img v1alpha1.ClusterImage) Subject {
 	return Subject{
 		Kind:      KindClusterImage,
 		Name:      img.Name,
@@ -46,9 +45,8 @@ func SubjectOfClusterImage(img v1alpha1.ClusterImage, extraCA bool) Subject {
 			v1alpha1.LabelKind: KindClusterImage,
 			v1alpha1.LabelName: v1alpha1.LabelValue(img.Name),
 		},
-		Owner:   controllerReference(KindClusterImage, img.Name, img.UID),
-		Spec:    img.Spec,
-		ExtraCA: extraCA,
+		Owner: controllerReference(KindClusterImage, img.Name, img.UID),
+		Spec:  img.Spec,
 	}
 }
 

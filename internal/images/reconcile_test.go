@@ -35,7 +35,7 @@ func imageSubject(spec v1alpha1.ImageSpec, name string) Subject {
 	img := ubuntuImage()
 	img.Name = name
 	img.Spec = spec
-	return SubjectOfImage(img, "acme", "web", false)
+	return SubjectOfImage(img, "acme", "web")
 }
 
 func TestReconcileDrivesAnHTTPImageToReady(t *testing.T) {
@@ -167,7 +167,7 @@ func TestReconcileScheduledImageGetsVersionDataSources(t *testing.T) {
 func TestClusterImageWaitsForTheCatalogNamespace(t *testing.T) {
 	c := startEnv(t)
 	img := v1alpha1.ClusterImage{ObjectMeta: metav1.ObjectMeta{Name: "ubuntu-24.04", UID: testUID}, Spec: httpSpec("https://example.com/a.qcow2")}
-	s := SubjectOfClusterImage(img, false)
+	s := SubjectOfClusterImage(img)
 	l := &loop{t: t, c: c}
 
 	plan := l.pass(s)

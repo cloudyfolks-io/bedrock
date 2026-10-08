@@ -18,10 +18,11 @@ func AdditionalCAPEM(ctx context.Context, c client.Reader) (string, error) {
 	return settingValue(ctx, c, settingAdditionalCA)
 }
 
-func EnsureAdditionalCA(ctx context.Context, c client.Client, namespace, pem string) error {
-	if pem != "" {
-		return ssa.Apply(ctx, c, additionalCAConfigMap(namespace, pem), v1alpha1.ImagesFieldManager)
-	}
+func ApplyAdditionalCA(ctx context.Context, c client.Client, namespace, pem string) error {
+	return ssa.Apply(ctx, c, additionalCAConfigMap(namespace, pem), v1alpha1.ImagesFieldManager)
+}
+
+func RemoveAdditionalCA(ctx context.Context, c client.Client, namespace string) error {
 	var existing corev1.ConfigMap
 	if err := c.Get(ctx, client.ObjectKey{Namespace: namespace, Name: AdditionalCAConfigMap}, &existing); err != nil {
 		return client.IgnoreNotFound(err)
@@ -61,4 +62,11 @@ func ownedByImages(cm corev1.ConfigMap) bool {
 		}
 	}
 	return true
+}
+
+func syncAdditionalCA(ctx context.Context, c client.Client, namespace, pem string) error {
+	if pem == "" {
+		return RemoveAdditionalCA(ctx, c, namespace)
+	}
+	return ApplyAdditionalCA(ctx, c, namespace, pem)
 }

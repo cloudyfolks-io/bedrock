@@ -22,7 +22,7 @@ func ubuntuImage() v1alpha1.Image {
 }
 
 func TestSubjectOfImageLabelsAndOwner(t *testing.T) {
-	s := SubjectOfImage(ubuntuImage(), "acme", "web", false)
+	s := SubjectOfImage(ubuntuImage(), "acme", "web")
 	want := map[string]string{
 		"bedrock.cloudyfolks.io/kind":    "Image",
 		"bedrock.cloudyfolks.io/name":    "ubuntu",
@@ -49,7 +49,7 @@ func TestSubjectOfImageLabelsAndOwner(t *testing.T) {
 }
 
 func TestSubjectOfImageWithoutTenantOmitsTheLabels(t *testing.T) {
-	s := SubjectOfImage(ubuntuImage(), "", "", false)
+	s := SubjectOfImage(ubuntuImage(), "", "")
 	if _, found := s.Labels["bedrock.cloudyfolks.io/tenant"]; found {
 		t.Fatalf("labels %v", s.Labels)
 	}
@@ -60,8 +60,8 @@ func TestSubjectOfImageWithoutTenantOmitsTheLabels(t *testing.T) {
 
 func TestSubjectOfClusterImageUsesTheCatalogNamespace(t *testing.T) {
 	img := v1alpha1.ClusterImage{ObjectMeta: metav1.ObjectMeta{Name: "ubuntu-24.04", UID: testUID}, Spec: ubuntuImage().Spec}
-	s := SubjectOfClusterImage(img, true)
-	if s.Namespace != "bedrock-images" || s.Kind != "ClusterImage" || !s.ExtraCA {
+	s := SubjectOfClusterImage(img)
+	if s.Namespace != "bedrock-images" || s.Kind != "ClusterImage" {
 		t.Fatalf("subject %+v", s)
 	}
 	if len(s.Labels) != 2 || s.Labels["bedrock.cloudyfolks.io/kind"] != "ClusterImage" || s.Labels["bedrock.cloudyfolks.io/name"] != "ubuntu-24.04" {

@@ -220,7 +220,7 @@ func TestDecideVolumeUploadWaitsForUpload(t *testing.T) {
 
 func TestDecideVolumeRefusesUploadOnAClusterImage(t *testing.T) {
 	img := v1alpha1.ClusterImage{ObjectMeta: metav1.ObjectMeta{Name: "catalog"}, Spec: v1alpha1.ImageSpec{Source: v1alpha1.ImageSource{Upload: &v1alpha1.ImageUploadSource{}}}}
-	plan := Decide(SubjectOfClusterImage(img, false), World{}, testNow)
+	plan := Decide(SubjectOfClusterImage(img), World{}, testNow)
 	if plan.Result.Phase != "Failed" || plan.Result.Reason != "UploadNotSupported" || len(plan.Apply) != 0 || len(plan.Delete) != 0 {
 		t.Fatalf("plan %+v", plan)
 	}

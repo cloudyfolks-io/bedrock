@@ -62,7 +62,11 @@ func TestPhaseOfDataVolume(t *testing.T) {
 		{"Unknown", false, "Pending", "ImportScheduled"},
 	}
 	for _, tc := range cases {
-		got := PhaseOfDataVolume(dataVolumeIn(tc.phase, ""), tc.upload)
+		dv := dataVolumeIn(tc.phase, "")
+		if tc.upload {
+			dv.Object["spec"] = map[string]any{"source": map[string]any{"upload": map[string]any{}}}
+		}
+		got := PhaseOfDataVolume(dv)
 		if got.Phase != tc.want || got.Reason != tc.reason {
 			t.Errorf("%q upload=%v: got %s/%s, want %s/%s", tc.phase, tc.upload, got.Phase, got.Reason, tc.want, tc.reason)
 		}
@@ -71,14 +75,14 @@ func TestPhaseOfDataVolume(t *testing.T) {
 
 func TestPhaseOfDataVolumeMessageAndProgress(t *testing.T) {
 	failed := dataVolumeIn("Failed", "N/A", condition("Bound", "True", "bound"), condition("Running", "False", "pull denied"))
-	got := PhaseOfDataVolume(failed, false)
+	got := PhaseOfDataVolume(failed)
 	if got.Message != "pull denied" || got.Progress != "" {
 		t.Fatalf("result %+v", got)
 	}
-	if got := PhaseOfDataVolume(dataVolumeIn("ImportInProgress", "42.5%"), false); got.Progress != "42.5%" {
+	if got := PhaseOfDataVolume(dataVolumeIn("ImportInProgress", "42.5%")); got.Progress != "42.5%" {
 		t.Fatalf("progress %q", got.Progress)
 	}
-	if got := PhaseOfDataVolume(dataVolumeIn("ImportInProgress", ""), false); got.Progress != "" {
+	if got := PhaseOfDataVolume(dataVolumeIn("ImportInProgress", "")); got.Progress != "" {
 		t.Fatalf("progress %q", got.Progress)
 	}
 }
