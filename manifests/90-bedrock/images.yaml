@@ -1,0 +1,34 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: bedrock-images
+  labels:
+    bedrock.cloudyfolks.io/component: bedrock
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: bedrock-image-cloner
+  namespace: bedrock-images
+  labels:
+    bedrock.cloudyfolks.io/component: bedrock
+rules:
+  - apiGroups: [cdi.kubevirt.io]
+    resources: [datavolumes/source]
+    verbs: [create]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: bedrock-image-cloner
+  namespace: bedrock-images
+  labels:
+    bedrock.cloudyfolks.io/component: bedrock
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: bedrock-image-cloner
+subjects:
+  - kind: ServiceAccount
+    name: bedrock-operator
+    namespace: bedrock-system

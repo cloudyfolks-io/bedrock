@@ -1,0 +1,25 @@
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: bedrock-catalog-reader
+  labels:
+    bedrock.cloudyfolks.io/component: bedrock
+rules:
+  - apiGroups: [bedrock.cloudyfolks.io]
+    resources: [clusterimages]
+    verbs: [get, list, watch]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: bedrock-catalog-reader
+  labels:
+    bedrock.cloudyfolks.io/component: bedrock
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: bedrock-catalog-reader
+subjects:
+  - apiGroup: rbac.authorization.k8s.io
+    kind: Group
+    name: system:authenticated
