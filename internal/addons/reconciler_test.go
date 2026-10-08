@@ -416,3 +416,48 @@ func TestReconcileSurvivesAStatusWriteFailure(t *testing.T) {
 		t.Fatal("the objects were not applied")
 	}
 }
+
+type failingDelete struct {
+	client.Client
+	name string
+}
+
+func (f failingDelete) Delete(ctx context.Context, obj client.Object, opts ...client.DeleteOption) error {
+	if obj.GetName() == f.name {
+		return apierrors.NewInternalError(context.DeadlineExceeded)
+	}
+	return f.Client.Delete(ctx, obj, opts...)
+}
+
+func TestFailedPruneKeepsTheObjectRecorded(t *testing.T) {
+	r, c := newFixture(t)
+	createAddon(t, c, "loki", true, "")
+	runReconcile(t, r, "loki")
+	ctx := context.Background()
+	if err := c.Create(ctx, &corev1.ConfigMap{ObjectMeta: metav1.ObjectMeta{Namespace: "monitoring", Name: "loki-old"}}); err != nil {
+		t.Fatal(err)
+	}
+	stale := release.RefOf(&unstructured.Unstructured{Object: map[string]any{"apiVersion": "v1", "kind": "ConfigMap", "metadata": map[string]any{"namespace": "monitoring", "name": "loki-old"}}})
+	recorded := inventoryOf(testBundle.Addons["loki"])
+	recorded[stale] = struct{}{}
+	if err := writeInventory(ctx, c, "loki", recorded); err != nil {
+		t.Fatal(err)
+	}
+	r.Client = failingDelete{Client: c, name: "loki-old"}
+	runReconcile(t, r, "loki")
+	got, err := readInventory(ctx, c, "loki")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, kept := got[stale]; !kept {
+		t.Fatal("the inventory forgot an object that was not deleted")
+	}
+	r.Client = c
+	runReconcile(t, r, "loki")
+	if exists(c, &corev1.ConfigMap{}, "monitoring", "loki-old") {
+		t.Fatal("the next reconcile did not delete the stale object")
+	}
+	if got, _ := readInventory(ctx, c, "loki"); len(got) != len(testBundle.Addons["loki"]) {
+		t.Fatalf("inventory %d objects", len(got))
+	}
+}

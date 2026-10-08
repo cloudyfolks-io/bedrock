@@ -146,15 +146,18 @@ func (r *Reconciler) apply(ctx context.Context, def Definition, input gathered) 
 		return outcome{ready: notReady("ApplyFailed", "inventory: "+err.Error())}
 	}
 	current := inventoryOf(rendered)
-	if err := writeInventory(ctx, r.Client, def.Name, unionOf(previous, current)); err != nil {
-		return outcome{ready: notReady("ApplyFailed", "inventory: "+err.Error())}
+	recorded := unionOf(previous, current)
+	if !maps.Equal(recorded, previous) {
+		if err := writeInventory(ctx, r.Client, def.Name, recorded); err != nil {
+			return outcome{ready: notReady("ApplyFailed", "inventory: "+err.Error())}
+		}
 	}
 	for _, obj := range rendered {
 		if err := ssa.Apply(ctx, r.Client, obj, v1alpha1.AddonsFieldManager); err != nil {
 			return outcome{ready: notReady(applyReason(err), fmt.Sprintf("apply %s %s: %v", obj.GetKind(), obj.GetName(), err))}
 		}
 	}
-	if err := r.settle(ctx, def.Name, previous, current); err != nil {
+	if err := r.settle(ctx, def.Name, recorded, current); err != nil {
 		return outcome{ready: notReady("ApplyFailed", "inventory: "+err.Error())}
 	}
 	if pending := r.pendingWorkloads(ctx, rendered); len(pending) > 0 {
@@ -177,11 +180,14 @@ func unionOf(a, b release.Inventory) release.Inventory {
 	return union
 }
 
-func (r *Reconciler) settle(ctx context.Context, addon string, previous, current release.Inventory) error {
-	if err := writeInventory(ctx, r.Client, addon, current); err != nil {
+func (r *Reconciler) settle(ctx context.Context, addon string, recorded, current release.Inventory) error {
+	if err := (release.Applier{Client: r.Client}).Prune(ctx, recorded, current); err != nil {
 		return err
 	}
-	return release.Applier{Client: r.Client}.Prune(ctx, previous, current)
+	if maps.Equal(recorded, current) {
+		return nil
+	}
+	return writeInventory(ctx, r.Client, addon, current)
 }
 
 func (r *Reconciler) pendingWorkloads(ctx context.Context, rendered []*unstructured.Unstructured) []string {
