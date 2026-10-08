@@ -199,3 +199,19 @@ func TestSnapshotExpiry(t *testing.T) {
 		}
 	}
 }
+
+func TestVolumeSnapshotRefusesAForeignCSISnapshot(t *testing.T) {
+	c, _ := startEnv(t)
+	ns, r := snapshotFixture(t, c, "block", rbdProvisioner, nil)
+	foreign := emptyOf(csiSnapshotGVK)
+	foreign.SetNamespace(ns)
+	foreign.SetName("snap1")
+	foreign.Object["spec"] = map[string]any{"source": map[string]any{"persistentVolumeClaimName": "other"}}
+	createObject(t, c, foreign)
+	reconcileSnapshot(t, r, ns)
+	requireSnapshotReason(t, c, ns, "NameConflict")
+	csi := requirePresent(t, c, csiSnapshotGVK, ns, "snap1")
+	if claim, _, _ := unstructured.NestedString(csi.Object, "spec", "source", "persistentVolumeClaimName"); claim != "other" {
+		t.Fatalf("the snapshot changed: %+v", csi.Object)
+	}
+}

@@ -21,7 +21,7 @@ type ObservedVM struct {
 
 var (
 	reasonsBeforeNetwork = []string{ReasonSubnetNotReady, ReasonSecurityGroupNotReady}
-	reasonsAfterNetwork  = []string{ReasonSSHKeyNotReady, ReasonInvalidUserData, ReasonVolumeNotFound, ReasonVolumeInUse, ReasonApplyFailed}
+	reasonsAfterNetwork  = []string{ReasonSSHKeyNotReady, ReasonInvalidUserData, ReasonVolumeNotFound, ReasonVolumeInUse, ReasonApplyFailed, ReasonNameConflict}
 )
 
 func Phase(printableStatus string, desiredRunning bool) string {

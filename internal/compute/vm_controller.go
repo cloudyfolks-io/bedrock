@@ -3,6 +3,7 @@ package compute
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -14,6 +15,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/util/retry"
 	ctrl "sigs.k8s.io/controller-runtime"
@@ -123,6 +125,10 @@ func (r *VirtualMachineReconciler) apply(ctx context.Context, in RenderInput) (o
 		return outcome{Gate: gateOf(ReasonInvalidSpec, "%s", err.Error())}, nil
 	}
 	err = r.applyRendered(ctx, in, rendered)
+	var conflict nameConflict
+	if errors.As(err, &conflict) {
+		return outcome{Gate: gateOf(ReasonNameConflict, "%s", conflict.Error()), RequeueAfter: applyFailureRetry}, nil
+	}
 	if apierrors.IsInvalid(err) || apierrors.IsForbidden(err) {
 		return outcome{Gate: gateOf(ReasonApplyFailed, "%s", err.Error()), RequeueAfter: applyFailureRetry}, nil
 	}
@@ -131,6 +137,9 @@ func (r *VirtualMachineReconciler) apply(ctx context.Context, in RenderInput) (o
 
 func (r *VirtualMachineReconciler) applyRendered(ctx context.Context, in RenderInput, rendered Rendered) error {
 	vm := in.VirtualMachine
+	if err := guardOwnership(ctx, r.Client, schema.GroupVersionKind{Version: "v1", Kind: "Secret"}, rendered.Secret); err != nil {
+		return err
+	}
 	if err := ssa.Apply(ctx, r.Client, rendered.Secret, v1alpha1.ComputeFieldManager); err != nil {
 		return fmt.Errorf("apply the cloud-init secret: %w", err)
 	}
@@ -143,6 +152,9 @@ func (r *VirtualMachineReconciler) applyRendered(ctx context.Context, in RenderI
 	if err := growClaim(ctx, r.Client, vm.Namespace, RootClaimName(vm.Name), vm.Spec.RootDisk.SizeGi); err != nil {
 		return fmt.Errorf("grow the root claim: %w", err)
 	}
+	if err := guardOwnership(ctx, r.Client, kubeVirtVMGVK, rendered.VirtualMachine); err != nil {
+		return err
+	}
 	if err := ssa.Apply(ctx, r.Client, rendered.VirtualMachine, v1alpha1.ComputeFieldManager); err != nil {
 		return fmt.Errorf("apply the KubeVirt virtual machine: %w", err)
 	}
@@ -154,11 +166,44 @@ func (r *VirtualMachineReconciler) applyRendered(ctx context.Context, in RenderI
 	return r.syncLauncherPods(ctx, vm, in.NICs)
 }
 
+type nameConflict struct{ Kind, Name string }
+
+func (e nameConflict) Error() string {
+	return fmt.Sprintf("the name of the %s %q is used by an object that this resource does not own", e.Kind, e.Name)
+}
+
+func controllerUID(obj metav1.Object) types.UID {
+	if ref := metav1.GetControllerOf(obj); ref != nil {
+		return ref.UID
+	}
+	return ""
+}
+
+func ensureOwned(existing, desired metav1.Object, kind string) error {
+	want := controllerUID(desired)
+	if want == "" || controllerUID(existing) != want {
+		return nameConflict{Kind: kind, Name: desired.GetName()}
+	}
+	return nil
+}
+
+func guardOwnership(ctx context.Context, c client.Client, gvk schema.GroupVersionKind, desired metav1.Object) error {
+	existing := emptyOf(gvk)
+	err := c.Get(ctx, client.ObjectKey{Namespace: desired.GetNamespace(), Name: desired.GetName()}, existing)
+	if apierrors.IsNotFound(err) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	return ensureOwned(existing, desired, gvk.Kind)
+}
+
 func createIfAbsent(ctx context.Context, c client.Client, obj *unstructured.Unstructured) error {
 	existing := emptyOf(obj.GroupVersionKind())
 	err := c.Get(ctx, client.ObjectKeyFromObject(obj), existing)
 	if err == nil {
-		return nil
+		return ensureOwned(existing, obj, obj.GetKind())
 	}
 	if !apierrors.IsNotFound(err) {
 		return err

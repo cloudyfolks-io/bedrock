@@ -2,6 +2,7 @@ package compute
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	corev1 "k8s.io/api/core/v1"
@@ -90,6 +91,10 @@ func (r *VolumeReconciler) converge(ctx context.Context, volume v1alpha1.Volume,
 		return volumeOutcome{Gate: gateOf(ReasonSourceNotReady, "%s", err.Error()), AttachedTo: owner}, nil
 	}
 	if err := createIfAbsent(ctx, r.Client, claim); err != nil {
+		var conflict nameConflict
+		if errors.As(err, &conflict) {
+			return volumeOutcome{Gate: gateOf(ReasonNameConflict, "%s", conflict.Error()), AttachedTo: owner}, nil
+		}
 		return volumeOutcome{}, fmt.Errorf("create the claim: %w", err)
 	}
 	var pvc corev1.PersistentVolumeClaim

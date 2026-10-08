@@ -486,3 +486,55 @@ func TestVMApplyFailureIsReported(t *testing.T) {
 	}
 	requireReason(t, getVM(t, base, ns, "web-1"), "ApplyFailed")
 }
+
+func TestVMRefusesAClaimOfAnotherOwner(t *testing.T) {
+	c, _ := startEnv(t)
+	ns := seedPlatform(t, c)
+	newVolume(t, c, ns, "web-1-root", func(v *v1alpha1.Volume) {})
+	volume := reconcileVolume(t, c, ns, "web-1-root")
+	createVM(t, c, ns, "web-1", func(vm *v1alpha1.VirtualMachine) { vm.Spec.Disks = nil })
+	result := reconcileVM(t, newVMReconciler(c), ns, "web-1")
+	requireReason(t, getVM(t, c, ns, "web-1"), "NameConflict")
+	if result.RequeueAfter != 30*time.Second {
+		t.Fatalf("requeue %s", result.RequeueAfter)
+	}
+	claim := requirePresent(t, c, dataVolumeGVK, ns, "web-1-root")
+	refs := claim.GetOwnerReferences()
+	if len(refs) != 1 || refs[0].UID != volume.UID || claim.GetLabels()[v1alpha1.LabelKind] != "Volume" {
+		t.Fatalf("the claim was taken over: %+v", claim.Object["metadata"])
+	}
+	requireAbsent(t, c, kubeVirtVMGVK, ns, "web-1")
+}
+
+func TestVMRefusesAForeignSecretAndMachine(t *testing.T) {
+	c, _ := startEnv(t)
+	ns := seedPlatform(t, c)
+	createObject(t, c, &corev1.Secret{ObjectMeta: metav1.ObjectMeta{Namespace: ns, Name: "web-1-cloudinit"}, Data: map[string][]byte{"userdata": []byte("mine")}})
+	createVM(t, c, ns, "web-1", noMutation)
+	reconcileVM(t, newVMReconciler(c), ns, "web-1")
+	requireReason(t, getVM(t, c, ns, "web-1"), "NameConflict")
+	var secret corev1.Secret
+	must(t, c.Get(context.Background(), client.ObjectKey{Namespace: ns, Name: "web-1-cloudinit"}, &secret))
+	if string(secret.Data["userdata"]) != "mine" || len(secret.ManagedFields) > 1 {
+		t.Fatalf("the Secret changed: %+v", secret.Data)
+	}
+	requireAbsent(t, c, kubeVirtVMGVK, ns, "web-1")
+}
+
+func TestVolumeRefusesAClaimOfAnotherOwner(t *testing.T) {
+	c, _ := startEnv(t)
+	ns := seedPlatform(t, c)
+	createVM(t, c, ns, "a", func(vm *v1alpha1.VirtualMachine) { vm.Spec.Disks = nil })
+	reconcileVM(t, newVMReconciler(c), ns, "a")
+	vm := getVM(t, c, ns, "a")
+	newVolume(t, c, ns, "a-root", func(v *v1alpha1.Volume) {})
+	volume := reconcileVolume(t, c, ns, "a-root")
+	requireVolumeReason(t, volume, "NameConflict")
+	claim := requirePresent(t, c, dataVolumeGVK, ns, "a-root")
+	if refs := claim.GetOwnerReferences(); len(refs) != 1 || refs[0].UID != vm.UID {
+		t.Fatalf("the claim was taken over: %+v", refs)
+	}
+	if claim.GetLabels()[v1alpha1.LabelKind] != "VirtualMachine" {
+		t.Fatalf("labels %+v", claim.GetLabels())
+	}
+}

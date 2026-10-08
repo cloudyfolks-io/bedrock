@@ -42,6 +42,7 @@ const (
 	ReasonVolumeInUse           = "VolumeInUse"
 	ReasonRestoreInProgress     = "RestoreInProgress"
 	ReasonApplyFailed           = "ApplyFailed"
+	ReasonNameConflict          = "NameConflict"
 	ReasonRunning               = "Running"
 	ReasonMigrating             = "Migrating"
 	ReasonStopped               = "Stopped"

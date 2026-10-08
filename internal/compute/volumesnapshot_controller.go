@@ -114,6 +114,10 @@ func (r *VolumeSnapshotReconciler) converge(ctx context.Context, snapshot v1alph
 	}
 	claim := csiSnapshot(snapshot, labels, class)
 	if err := createIfAbsent(ctx, r.Client, claim); err != nil {
+		var conflict nameConflict
+		if errors.As(err, &conflict) {
+			return snapshotOutcome{Gate: gateOf(ReasonNameConflict, "%s", conflict.Error())}, nil
+		}
 		return snapshotOutcome{}, err
 	}
 	return r.observe(ctx, snapshot)
