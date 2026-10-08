@@ -52,7 +52,7 @@ describe("consoles", () => {
   });
 
   it("TestVncConnectsOnMountAndDisconnectsOnUnmount", async () => {
-    const view = renderPanel(<ConsoleTab vm={vm("web-1")} />);
+    const view = renderPanel(<ConsoleTab vm={vm("web-1")} allowVnc allowSerial />);
     await waitFor(() => expect(mocks.createVnc).toHaveBeenCalledTimes(1));
     const [target, url] = mocks.createVnc.mock.calls[0] as [HTMLElement, string];
     expect(target.getAttribute("dir")).toBe("ltr");
@@ -63,7 +63,7 @@ describe("consoles", () => {
 
   it("TestVncStates and reconnect", async () => {
     const user = userEvent.setup();
-    renderPanel(<ConsoleTab vm={vm("web-1")} />);
+    renderPanel(<ConsoleTab vm={vm("web-1")} allowVnc allowSerial />);
     await waitFor(() => expect(mocks.createVnc).toHaveBeenCalledTimes(1));
     expect(screen.getByText("Connecting to the console", { selector: "p[role=status]" })).toBeTruthy();
     act(() => vncHandlers().onConnect());
@@ -78,7 +78,7 @@ describe("consoles", () => {
 
   it("TestVncToolbar", async () => {
     const user = userEvent.setup();
-    renderPanel(<ConsoleTab vm={vm("web-1")} />);
+    renderPanel(<ConsoleTab vm={vm("web-1")} allowVnc allowSerial />);
     await waitFor(() => expect(mocks.createVnc).toHaveBeenCalledTimes(1));
     act(() => vncHandlers().onConnect());
     await user.click(await screen.findByRole("button", { name: "Send Ctrl+Alt+Del" }));
@@ -96,7 +96,7 @@ describe("consoles", () => {
 
   it("TestSerialConnectsAndDisconnects and its states", async () => {
     const user = userEvent.setup();
-    const view = renderPanel(<ConsoleTab vm={vm("web-1")} />);
+    const view = renderPanel(<ConsoleTab vm={vm("web-1")} allowVnc allowSerial />);
     await user.click(await screen.findByRole("tab", { name: "Serial console" }));
     await waitFor(() => expect(mocks.createSerial).toHaveBeenCalledTimes(1));
     act(() => serialHandlers().onOpen());
@@ -108,21 +108,38 @@ describe("consoles", () => {
   });
 
   it("TestConsolesAreLtr in Persian", async () => {
-    renderPanel(<ConsoleTab vm={vm("web-1")} />, { locale: "fa" });
+    renderPanel(<ConsoleTab vm={vm("web-1")} allowVnc allowSerial />, { locale: "fa" });
     await waitFor(() => expect(mocks.createVnc).toHaveBeenCalledTimes(1));
     expect((mocks.createVnc.mock.calls[0]?.[0] as HTMLElement).getAttribute("dir")).toBe("ltr");
     expect(document.documentElement.dir).toBe("rtl");
   });
 
+  it("serves the console while the VM is Migrating", async () => {
+    const migrating = { ...vm("web-1"), status: { ...vm("web-1").status, phase: "Migrating" } };
+    renderPanel(<ConsoleTab vm={migrating} allowVnc allowSerial />);
+    await waitFor(() => expect(mocks.createVnc).toHaveBeenCalledTimes(1));
+    expect(screen.queryByText("Start the VM to open the console")).toBeNull();
+  });
+
+  it("checks console/serial for the serial tab and console/vnc for the VNC tab", async () => {
+    const view = renderPanel(<ConsoleTab vm={vm("web-1")} allowVnc={false} allowSerial />);
+    expect(await screen.findByRole("tab", { name: "Serial console" })).toBeTruthy();
+    expect(screen.queryByRole("tab", { name: "Graphical console" })).toBeNull();
+    view.unmount();
+    renderPanel(<ConsoleTab vm={vm("web-1")} allowVnc allowSerial={false} />);
+    expect(await screen.findByRole("tab", { name: "Graphical console" })).toBeTruthy();
+    expect(screen.queryByRole("tab", { name: "Serial console" })).toBeNull();
+  });
+
   it("TestNoConnectionWhenTheVmIsNotRunning", () => {
-    renderPanel(<ConsoleTab vm={vm("db-1")} />);
+    renderPanel(<ConsoleTab vm={vm("db-1")} allowVnc allowSerial />);
     expect(screen.getByText("Start the VM to open the console")).toBeTruthy();
     expect(mocks.createVnc).not.toHaveBeenCalled();
     expect(mocks.createSerial).not.toHaveBeenCalled();
   });
 
   it("TestSessionEndedDuringConsoleShowsSignIn", async () => {
-    const view = renderPanel(<ConsoleTab vm={vm("web-1")} />);
+    const view = renderPanel(<ConsoleTab vm={vm("web-1")} allowVnc allowSerial />);
     await waitFor(() => expect(mocks.createVnc).toHaveBeenCalledTimes(1));
     expect(view.queryClient.getQueryState(["session"])?.isInvalidated).toBe(false);
     act(() => vncHandlers().onDisconnect(false));

@@ -2,19 +2,18 @@ import { useState } from "react";
 import { useLingui } from "@lingui/react/macro";
 import { Tab, TabList, TabPanel, Tabs } from "@bedrock/design";
 import type { KubeObject } from "../api/types";
-import { textAt } from "../resources/path";
-import { consoleUrl } from "./consoleUrl";
+import { serialUrl, vncUrl } from "./consoleUrl";
 import { SerialConsole } from "./SerialConsole";
 import { useSessionCheck } from "./useConsoleSession";
 import { VncConsole } from "./VncConsole";
 
-export default function ConsoleTab({ vm }: { vm: KubeObject }) {
+export default function ConsoleTab({ vm, allowVnc, allowSerial }: { vm: KubeObject; allowVnc: boolean; allowSerial: boolean }) {
   const { t } = useLingui();
-  const [tab, setTab] = useState("vnc");
+  const [tab, setTab] = useState(allowVnc ? "vnc" : "serial");
   const checkSession = useSessionCheck();
-  const vnc = consoleUrl(vm, "vnc");
-  const serial = consoleUrl(vm, "serial");
-  if (textAt(vm, "status.phase") !== "Running" || (!vnc && !serial)) {
+  const vnc = allowVnc ? vncUrl(vm) : undefined;
+  const serial = allowSerial ? serialUrl(vm) : undefined;
+  if (!vnc && !serial) {
     return <p className="br-help">{t({ id: "console.notRunning", message: "Start the VM to open the console" })}</p>;
   }
   return (

@@ -85,7 +85,9 @@ export default function VmDetailPage() {
     );
   }
   const tab = params.get("tab") ?? "overview";
-  const consoleAllowed = access.console === "allowed";
+  const allowVnc = access.vnc === "allowed";
+  const allowSerial = access.serial === "allowed";
+  const consoleAllowed = allowVnc || allowSerial;
   return (
     <>
       <PageHeader
@@ -107,7 +109,7 @@ export default function VmDetailPage() {
         <TabPanel value="overview"><Overview vm={vm} /></TabPanel>
         <TabPanel value="console">
           <Suspense fallback={<Spinner />}>
-            <ConsoleTab vm={vm} />
+            <ConsoleTab vm={vm} allowVnc={allowVnc} allowSerial={allowSerial} />
           </Suspense>
         </TabPanel>
         <TabPanel value="metrics">

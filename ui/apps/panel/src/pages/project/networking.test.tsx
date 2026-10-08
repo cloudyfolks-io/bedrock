@@ -17,6 +17,7 @@ import type { FakeRoute } from "../../test/fakeApi";
 import { openApiRoutes } from "../../test/openapi";
 import { renderPanel } from "../../test/renderPanel";
 import ElasticIpsPage from "./ElasticIpsPage";
+import LoadBalancersPage from "./LoadBalancersPage";
 import NetworksPage from "./NetworksPage";
 import SecurityGroupDetailPage from "./SecurityGroupDetailPage";
 
@@ -132,11 +133,19 @@ describe("ElasticIpsPage", () => {
 describe("LoadBalancers", () => {
   const lbs = asList(loadbalancers);
 
-  it("shows the listeners summary and the address of the elastic IP", async () => {
-    renderAt("/p/web/load-balancers", generic("loadbalancers"), { [`GET ${ns}/loadbalancers`]: { body: lbs } }, undefined, "/p/:project/load-balancers");
+  it("takes the address from the ElasticIP that targets the load balancer", async () => {
+    const eips = asList(elasticips);
+    const attached = { ...eips, items: [{ ...(eips.items[0] as KubeObject), spec: { providerNetwork: "external", target: { kind: "LoadBalancer", name: "web-lb" } } }] };
+    renderAt("/p/web/load-balancers", <LoadBalancersPage />, { [`GET ${ns}/loadbalancers`]: { body: lbs }, [`GET ${ns}/elasticips`]: { body: attached } }, undefined, "/p/:project/load-balancers");
     const row = (await screen.findByRole("link", { name: "web-lb" })).closest("tr") as HTMLElement;
     expect(within(row).getByText("TCP 443")).toBeTruthy();
-    expect(within(row).getByText("web-ip")).toBeTruthy();
+    await waitFor(() => expect(within(row).getByText("web-ip 203.0.113.10")).toBeTruthy());
+  });
+
+  it("shows a dash when no ElasticIP targets it, even if elasticIPRef is set", async () => {
+    renderAt("/p/web/load-balancers", <LoadBalancersPage />, { [`GET ${ns}/loadbalancers`]: { body: lbs }, [`GET ${ns}/elasticips`]: { body: asList(elasticips) } }, undefined, "/p/:project/load-balancers");
+    const row = (await screen.findByRole("link", { name: "web-lb" })).closest("tr") as HTMLElement;
+    expect(within(row).queryByText(/web-ip/)).toBeNull();
   });
 
   it("TestPortRangeIsValidated", async () => {

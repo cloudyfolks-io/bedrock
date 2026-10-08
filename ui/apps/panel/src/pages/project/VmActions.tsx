@@ -17,7 +17,7 @@ function vmDefinition() {
   return def;
 }
 
-export function useVmAccess(namespace: string | undefined): { actions: Access[]; console: Access } {
+export function useVmAccess(namespace: string | undefined): { actions: Access[]; vnc: Access; serial: Access } {
   const def = vmDefinition();
   const checks = useMemo<Check[]>(() => {
     if (namespace === undefined) {
@@ -27,10 +27,11 @@ export function useVmAccess(namespace: string | undefined): { actions: Access[];
     return [
       ...def.actions.map((action) => ({ ...base, verb: action.verb, ...(action.subresource === undefined ? {} : { subresource: action.subresource }) })),
       { ...base, verb: "get", subresource: "console/vnc" },
+      { ...base, verb: "get", subresource: "console/serial" },
     ];
   }, [def, namespace]);
   const access = useCans(checks);
-  return { actions: access.slice(0, def.actions.length), console: access[def.actions.length] ?? "pending" };
+  return { actions: access.slice(0, def.actions.length), vnc: access[def.actions.length] ?? "pending", serial: access[def.actions.length + 1] ?? "pending" };
 }
 
 export function VmActions({ vm, access }: { vm: KubeObject; access: Access[] }) {

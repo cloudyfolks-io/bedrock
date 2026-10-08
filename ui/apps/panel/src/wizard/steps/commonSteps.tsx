@@ -19,8 +19,12 @@ export interface StepProps<V> {
   errors: Record<string, string>;
 }
 
-function toggle(list: readonly string[], value: string, on: boolean): string[] {
-  return on ? [...list.filter((entry) => entry !== value), value] : list.filter((entry) => entry !== value);
+function withValue(list: readonly string[], value: string): string[] {
+  return [...list.filter((entry) => entry !== value), value];
+}
+
+function withoutValue(list: readonly string[], value: string): string[] {
+  return list.filter((entry) => entry !== value);
 }
 
 export function BasicsStep({ values, set, errors }: StepProps<Common>) {
@@ -56,7 +60,7 @@ export function DisksStep({ values, set, data, errors, extra }: StepProps<Common
         <fieldset className="br-form-object">
           <legend>{t({ id: "wizard.extraVolumes", message: "Attach existing volumes" })}</legend>
           {data.volumes.map((volume) => (
-            <Checkbox key={volume} label={volume} checked={extra.selected.includes(volume)} onCheckedChange={(on) => extra.onChange(toggle(extra.selected, volume, on))} />
+            <Checkbox key={volume} label={volume} checked={extra.selected.includes(volume)} onCheckedChange={(on) => extra.onChange(on ? withValue(extra.selected, volume) : withoutValue(extra.selected, volume))} />
           ))}
         </fieldset>
       ) : null}
@@ -78,7 +82,7 @@ export function NetworkStep({ values, set, data, errors }: StepProps<Common>) {
       <fieldset className="br-form-object">
         <legend>{t({ id: "vmDetail.securityGroups", message: "Security groups" })}</legend>
         {data.securityGroups.map((group) => (
-          <Checkbox key={group} label={group} checked={values.securityGroups.includes(group)} onCheckedChange={(on) => set({ securityGroups: toggle(values.securityGroups, group, on) })} />
+          <Checkbox key={group} label={group} checked={values.securityGroups.includes(group)} onCheckedChange={(on) => set({ securityGroups: on ? withValue(values.securityGroups, group) : withoutValue(values.securityGroups, group) })} />
         ))}
       </fieldset>
     </>

@@ -16,6 +16,7 @@ export interface ColumnContext {
   now: Date;
   detailPath: (object: KubeObject) => string | undefined;
   project?: string;
+  elasticIps?: KubeObject[];
 }
 
 export interface ColumnDef {
@@ -214,6 +215,16 @@ const sourceSummary = (object: KubeObject): string =>
         ? `image ${textAt(object, "spec.source.image.name")}`
         : "";
 
+const lbAddress: ColumnDef = {
+  id: "elasticIp",
+  label: msg({ id: "col.elasticIp", message: "Elastic IP" }),
+  render: (object, context) => {
+    const eip = context.elasticIps?.find((candidate) => textAt(candidate, "spec.target.kind") === "LoadBalancer" && textAt(candidate, "spec.target.name") === object.metadata.name);
+    return eip ? <Ltr>{[eip.metadata.name, textAt(eip, "status.address")].filter((part) => part !== "").join(" ")}</Ltr> : dash;
+  },
+  sortValue: (object) => object.metadata.name,
+};
+
 export const columnsByPlural: Record<string, ColumnDef[]> = {
   hosts: [
     name,
@@ -251,7 +262,7 @@ export const columnsByPlural: Record<string, ColumnDef[]> = {
   virtualmachinerestores: [name, text("backup", L.backup, "spec.backupRef"), text("targetName", L.targetName, "spec.targetName"), flag("replace", L.replace, "spec.replace"), phase, age],
   subnets: [name, text("network", L.network, "spec.networkRef"), ltrText("cidr", L.cidr, "spec.cidr"), ltrText("gateway", L.gateway, "spec.gateway"), flag("dhcp", L.dhcp, "spec.dhcp"), text("dnsZone", L.dnsZone, "spec.dnsZoneRef")],
   elasticips: [name, text("providerNetwork", L.providerNetwork, "spec.providerNetwork"), { ...ltrText("address", L.address, "status.address") }, target, status],
-  loadbalancers: [name, text("elasticIp", L.elasticIp, "spec.elasticIPRef"), { id: "listeners", label: L.listeners, render: (object) => listenersOf(object) || dash, sortValue: listenersOf }, status],
+  loadbalancers: [name, lbAddress, { id: "listeners", label: L.listeners, render: (object) => listenersOf(object) || dash, sortValue: listenersOf }, status],
   dnszones: [name, ltrText("zone", L.zone, "spec.zone"), { id: "records", label: L.records, render: (object) => (<span className="br-records">{(listAt(object, "spec.records") as { name: string; ips: string[] }[]).map((record) => (<Ltr key={record.name}>{`${record.name}: ${record.ips.join(", ")} `}</Ltr>))}</span>), sortValue: (object) => listAt(object, "spec.records").length }, status],
   securitygroups: [name, count("ingress", L.ingress, (object) => listAt(object, "spec.ingress").length), count("egress", L.egress, (object) => listAt(object, "spec.egress").length), status],
   objectstoragebuckets: [
