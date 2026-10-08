@@ -252,3 +252,23 @@ func TestCatalogDescriptionsNameTheAddonObject(t *testing.T) {
 		t.Errorf("audit.level: %q", def.Description)
 	}
 }
+
+func TestHTTPURLErrorsDoNotRepeatTheValue(t *testing.T) {
+	def, _ := Lookup("alertmanager.webhook-url")
+	for _, value := range []string{
+		"ftp://hooks.example.test/alert?token=s3cr3t-token",
+		"hooks.example.test/alert?token=s3cr3t-token",
+		"https:///alert?token=s3cr3t-token",
+		"https://hooks.example.test/al\x07ert?token=s3cr3t-token",
+		"https://hooks.example.test/%zz?token=s3cr3t-token",
+	} {
+		err := def.Validate(value)
+		if err == nil {
+			t.Errorf("%q accepted", value)
+			continue
+		}
+		if strings.Contains(err.Error(), "s3cr3t-token") || strings.Contains(err.Error(), "hooks.example.test") {
+			t.Errorf("the error repeats the value: %v", err)
+		}
+	}
+}

@@ -7,7 +7,9 @@ import (
 	"net/url"
 	"slices"
 	"strconv"
+	"strings"
 	"time"
+	"unicode"
 
 	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -79,12 +81,13 @@ func httpURL(v string) error {
 	if v == "" {
 		return nil
 	}
-	parsed, err := url.Parse(v)
-	if err != nil {
-		return err
+	invalid := fmt.Errorf("value is not an http or https URL with a host and without control characters")
+	if strings.ContainsFunc(v, unicode.IsControl) {
+		return invalid
 	}
-	if (parsed.Scheme != "http" && parsed.Scheme != "https") || parsed.Host == "" {
-		return fmt.Errorf("value %q is not an http or https URL with a host", v)
+	parsed, err := url.Parse(v)
+	if err != nil || (parsed.Scheme != "http" && parsed.Scheme != "https") || parsed.Hostname() == "" {
+		return invalid
 	}
 	return nil
 }
