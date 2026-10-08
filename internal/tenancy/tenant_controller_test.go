@@ -364,3 +364,32 @@ func TestTenantWaitsForProjectNamespaces(t *testing.T) {
 	}
 	waitFor(t, func() bool { return !getInto(t, c, "acme", &v1alpha1.Tenant{}) })
 }
+
+func TestTenantShowsWhatBlocksItsTeardown(t *testing.T) {
+	c, _ := tenantWorld(t)
+	tenant := acmeWithOwners(defaultOwners()...)
+	mustCreate(t, c, tenant, withFinalizer(projectFor("web", "acme"), "test/hold"))
+	network := &v1alpha1.Network{}
+	waitFor(t, func() bool {
+		return getInto(t, c, "acme", network) && getInto(t, c, "acme", tenant) && len(tenant.Finalizers) == 1
+	})
+	holdFinalizer(t, c, network)
+	if err := c.Delete(context.Background(), tenant); err != nil {
+		t.Fatal(err)
+	}
+	waitFor(t, func() bool {
+		return getInto(t, c, "acme", tenant) && conditionReason(tenant.Status.Conditions, v1alpha1.ConditionReady) == ReasonWaitingForProjects
+	})
+	if message := conditionOf(t, tenant.Status.Conditions, v1alpha1.ConditionReady).Message; message != "1 projects remain" {
+		t.Fatalf("message = %q", message)
+	}
+	requireCondition(t, tenant.Status.Conditions, v1alpha1.ConditionReady, metav1.ConditionFalse, ReasonWaitingForProjects)
+	releaseHold(t, c, &v1alpha1.Project{ObjectMeta: metav1.ObjectMeta{Name: "web"}})
+	waitFor(t, func() bool {
+		return getInto(t, c, "acme", tenant) && conditionReason(tenant.Status.Conditions, v1alpha1.ConditionReady) == ReasonWaitingForNetwork
+	})
+	if message := conditionOf(t, tenant.Status.Conditions, v1alpha1.ConditionReady).Message; message != "1 networks remain" {
+		t.Fatalf("message = %q", message)
+	}
+	releaseHold(t, c, network)
+}

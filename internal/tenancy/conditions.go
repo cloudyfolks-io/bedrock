@@ -50,8 +50,10 @@ func withCondition(conditions []metav1.Condition, next metav1.Condition) []metav
 }
 
 const (
-	ReasonSettled = "Settled"
-	ReasonHealthy = "Healthy"
+	ReasonWaitingForProjects   = "WaitingForProjects"
+	ReasonWaitingForNamespaces = "WaitingForNamespaces"
+	ReasonSettled              = "Settled"
+	ReasonHealthy              = "Healthy"
 )
 
 func conditionOn(generation int64, conditionType string, status metav1.ConditionStatus, reason, message string) metav1.Condition {

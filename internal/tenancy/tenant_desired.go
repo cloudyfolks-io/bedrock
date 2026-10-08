@@ -138,3 +138,14 @@ func tenantQuotaCondition(generation int64, tenant v1alpha1.Tenant, projects []v
 	}
 	return conditionOn(generation, ConditionWithinQuota, metav1.ConditionTrue, ReasonWithinQuota, "")
 }
+
+func TerminatingStatus(tenant v1alpha1.Tenant, reason, message string) v1alpha1.TenantStatus {
+	generation := tenant.Generation
+	status := *tenant.Status.DeepCopy()
+	status.ObservedGeneration = generation
+	status.Conditions = withConditions(status.Conditions,
+		conditionOn(generation, v1alpha1.ConditionReady, metav1.ConditionFalse, reason, message),
+		conditionOn(generation, v1alpha1.ConditionProgressing, metav1.ConditionTrue, reason, message),
+	)
+	return status
+}

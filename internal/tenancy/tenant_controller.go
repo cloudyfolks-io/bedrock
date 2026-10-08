@@ -3,6 +3,7 @@ package tenancy
 import (
 	"context"
 	"errors"
+	"fmt"
 	"time"
 
 	corev1 "k8s.io/api/core/v1"
@@ -160,13 +161,22 @@ func (r *TenantReconciler) teardown(ctx context.Context, tenant v1alpha1.Tenant)
 	if !controllerutil.ContainsFinalizer(&tenant, tenantFinalizer) {
 		return ctrl.Result{}, nil
 	}
-	pending, err := r.removeProjects(ctx, tenant)
-	if err != nil || pending {
-		return waitOrFail(err)
+	projects, namespaces, err := r.removeProjects(ctx, tenant)
+	if err != nil {
+		return ctrl.Result{}, err
 	}
-	pending, err = r.removeNetworks(ctx, tenant)
-	if err != nil || pending {
-		return waitOrFail(err)
+	if projects > 0 {
+		return r.waiting(ctx, tenant, ReasonWaitingForProjects, fmt.Sprintf("%d projects remain", projects))
+	}
+	if namespaces > 0 {
+		return r.waiting(ctx, tenant, ReasonWaitingForNamespaces, fmt.Sprintf("%d project namespaces remain", namespaces))
+	}
+	networks, err := r.removeNetworks(ctx, tenant)
+	if err != nil {
+		return ctrl.Result{}, err
+	}
+	if networks > 0 {
+		return r.waiting(ctx, tenant, ReasonWaitingForNetwork, fmt.Sprintf("%d networks remain", networks))
 	}
 	if err := r.removeOwnerAccess(ctx, tenant); err != nil {
 		return ctrl.Result{}, err
@@ -174,17 +184,15 @@ func (r *TenantReconciler) teardown(ctx context.Context, tenant v1alpha1.Tenant)
 	return ctrl.Result{}, r.releaseFinalizer(ctx, tenant)
 }
 
-func waitOrFail(err error) (ctrl.Result, error) {
-	if err != nil {
-		return ctrl.Result{}, err
-	}
+func (r *TenantReconciler) waiting(ctx context.Context, tenant v1alpha1.Tenant, reason, message string) (ctrl.Result, error) {
+	r.writeStatus(ctx, tenant, TerminatingStatus(tenant, reason, message))
 	return ctrl.Result{RequeueAfter: teardownInterval}, nil
 }
 
-func (r *TenantReconciler) removeProjects(ctx context.Context, tenant v1alpha1.Tenant) (bool, error) {
+func (r *TenantReconciler) removeProjects(ctx context.Context, tenant v1alpha1.Tenant) (int, int, error) {
 	var projects v1alpha1.ProjectList
 	if err := r.Reader.List(ctx, &projects); err != nil {
-		return false, err
+		return 0, 0, err
 	}
 	owned := projectsOfTenant(tenant.Name, projects.Items)
 	deleteErrs := []error{}
@@ -195,13 +203,13 @@ func (r *TenantReconciler) removeProjects(ctx context.Context, tenant v1alpha1.T
 	}
 	var namespaces corev1.NamespaceList
 	listErr := r.Reader.List(ctx, &namespaces, client.MatchingLabels{v1alpha1.LabelTenant: tenant.Name})
-	return len(owned) > 0 || len(namespaces.Items) > 0, errors.Join(append(deleteErrs, listErr)...)
+	return len(owned), len(namespaces.Items), errors.Join(append(deleteErrs, listErr)...)
 }
 
-func (r *TenantReconciler) removeNetworks(ctx context.Context, tenant v1alpha1.Tenant) (bool, error) {
+func (r *TenantReconciler) removeNetworks(ctx context.Context, tenant v1alpha1.Tenant) (int, error) {
 	var networks v1alpha1.NetworkList
 	if err := r.Reader.List(ctx, &networks); err != nil {
-		return false, err
+		return 0, err
 	}
 	owned := networksOfTenant(tenant.Name, networks.Items)
 	deleteErrs := []error{}
@@ -210,7 +218,7 @@ func (r *TenantReconciler) removeNetworks(ctx context.Context, tenant v1alpha1.T
 			deleteErrs = append(deleteErrs, client.IgnoreNotFound(r.Client.Delete(ctx, &network)))
 		}
 	}
-	return len(owned) > 0, errors.Join(deleteErrs...)
+	return len(owned), errors.Join(deleteErrs...)
 }
 
 func (r *TenantReconciler) removeOwnerAccess(ctx context.Context, tenant v1alpha1.Tenant) error {
