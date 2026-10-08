@@ -10,8 +10,8 @@ import (
 )
 
 const (
-	firstVrfID = 1000
-	lastVrfID  = 65535
+	firstVrfID  = 1000
+	lastVrfID   = 65535
 	defaultCIDR = "0.0.0.0/0"
 )
 
