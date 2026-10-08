@@ -54,6 +54,7 @@ func keep(*corev1.PodSpec) {}
 type workloadWorld struct {
 	admin, eddie, kubevirt client.Client
 	cfg                    *rest.Config
+	root                   client.Client
 }
 
 func newWorkloadWorld(t *testing.T) workloadWorld {
@@ -66,14 +67,58 @@ func newWorkloadWorld(t *testing.T) workloadWorld {
 		namespaceNamed("plain", nil),
 		editorIn("acme-shop", "bedrock:eddie"), editorIn("plain", "bedrock:eddie"), editorIn("acme-shop", kubevirtHandler),
 	)
-	world := workloadWorld{cfg: cfg, admin: admin, eddie: actingAs(t, cfg, "bedrock:eddie"), kubevirt: actingAs(t, cfg, kubevirtHandler)}
-	probe := func() error {
-		return denyCreate(admin, world.eddie, plainPod("probe", "acme-shop", func(s *corev1.PodSpec) { s.HostNetwork = true }))()
-	}
-	if err := eventuallyForbidden(t, probe); err == nil {
-		t.Fatal("the workload policy never denied")
+	mustCreate(t, admin, &rbacv1.ClusterRoleBinding{
+		ObjectMeta: metav1.ObjectMeta{Name: "bedrock-root"},
+		RoleRef:    rbacv1.RoleRef{APIGroup: rbacv1.GroupName, Kind: "ClusterRole", Name: "cluster-admin"},
+		Subjects:   []rbacv1.Subject{{APIGroup: rbacv1.GroupName, Kind: "User", Name: "bedrock:root"}},
+	})
+	world := workloadWorld{cfg: cfg, admin: admin, eddie: actingAs(t, cfg, "bedrock:eddie"), root: actingAs(t, cfg, "bedrock:root"), kubevirt: actingAs(t, cfg, kubevirtHandler)}
+	hostNetwork := func(s *corev1.PodSpec) { s.HostNetwork = true }
+	for _, probe := range workloadsWith("probe", hostNetwork) {
+		if err := eventuallyForbidden(t, denyCreate(admin, world.root, probe)); err == nil {
+			t.Fatalf("the policy for %T never denied", probe)
+		}
 	}
 	return world
+}
+
+func workloadsWith(name string, change func(*corev1.PodSpec)) []client.Object {
+	labels := map[string]string{"app": name}
+	template := func(restart corev1.RestartPolicy) corev1.PodTemplateSpec {
+		return corev1.PodTemplateSpec{ObjectMeta: metav1.ObjectMeta{Labels: labels}, Spec: func() corev1.PodSpec {
+			spec := podSpecWith(change)
+			spec.RestartPolicy = restart
+			return spec
+		}()}
+	}
+	meta := metav1.ObjectMeta{Name: name, Namespace: "acme-shop"}
+	return []client.Object{
+		plainPod(name, "acme-shop", change),
+		deploymentWith(name, "acme-shop", change),
+		&appsv1.ReplicaSet{ObjectMeta: meta, Spec: appsv1.ReplicaSetSpec{Selector: &metav1.LabelSelector{MatchLabels: labels}, Template: template(corev1.RestartPolicyAlways)}},
+		&appsv1.StatefulSet{ObjectMeta: meta, Spec: appsv1.StatefulSetSpec{ServiceName: "x", Selector: &metav1.LabelSelector{MatchLabels: labels}, Template: template(corev1.RestartPolicyAlways)}},
+		&appsv1.DaemonSet{ObjectMeta: meta, Spec: appsv1.DaemonSetSpec{Selector: &metav1.LabelSelector{MatchLabels: labels}, Template: template(corev1.RestartPolicyAlways)}},
+		&batchv1.Job{ObjectMeta: meta, Spec: batchv1.JobSpec{Template: template(corev1.RestartPolicyNever)}},
+		&batchv1.CronJob{ObjectMeta: meta, Spec: batchv1.CronJobSpec{Schedule: "* * * * *", JobTemplate: batchv1.JobTemplateSpec{Spec: batchv1.JobSpec{Template: template(corev1.RestartPolicyNever)}}}},
+	}
+}
+
+func templateOf(obj client.Object) *corev1.PodSpec {
+	switch typed := obj.(type) {
+	case *appsv1.Deployment:
+		return &typed.Spec.Template.Spec
+	case *appsv1.ReplicaSet:
+		return &typed.Spec.Template.Spec
+	case *appsv1.StatefulSet:
+		return &typed.Spec.Template.Spec
+	case *appsv1.DaemonSet:
+		return &typed.Spec.Template.Spec
+	case *batchv1.Job:
+		return &typed.Spec.Template.Spec
+	case *batchv1.CronJob:
+		return &typed.Spec.JobTemplate.Spec.Template.Spec
+	}
+	return nil
 }
 
 func requireDenied(t *testing.T, err error, message string) {
@@ -234,32 +279,75 @@ func TestEditorDeploymentUpdateCannotAddCapabilities(t *testing.T) {
 	requireDenied(t, w.eddie.Update(context.Background(), deployment), "unmasked procMount")
 }
 
+func hostPathVolume(s *corev1.PodSpec) {
+	s.Volumes = []corev1.Volume{{Name: "host", VolumeSource: corev1.VolumeSource{HostPath: &corev1.HostPathVolumeSource{Path: "/"}}}}
+}
+
 func TestOtherWorkloadKindsAreHardenedToo(t *testing.T) {
 	w := newWorkloadWorld(t)
-	mustCreate(t, w.admin, &rbacv1.ClusterRoleBinding{
-		ObjectMeta: metav1.ObjectMeta{Name: "bedrock-root"},
-		RoleRef:    rbacv1.RoleRef{APIGroup: rbacv1.GroupName, Kind: "ClusterRole", Name: "cluster-admin"},
-		Subjects:   []rbacv1.Subject{{APIGroup: rbacv1.GroupName, Kind: "User", Name: "bedrock:root"}},
-	})
-	root := actingAs(t, w.cfg, "bedrock:root")
-	labels := map[string]string{"app": "x"}
-	template := func(change func(*corev1.PodSpec)) corev1.PodTemplateSpec {
-		return corev1.PodTemplateSpec{ObjectMeta: metav1.ObjectMeta{Labels: labels}, Spec: podSpecWith(change)}
+	cases := []struct {
+		name    string
+		change  func(*corev1.PodSpec)
+		message string
+	}{
+		{"caps", withCapabilities("SYS_ADMIN"), "added capabilities other than NET_BIND_SERVICE"},
+		{"proc", withUnmaskedProc, "unmasked procMount"},
+		{"hostpath", hostPathVolume, "hostPath volumes are not allowed"},
 	}
-	hostile := withCapabilities("SYS_ADMIN")
-	objects := []client.Object{
-		&appsv1.StatefulSet{ObjectMeta: metav1.ObjectMeta{Name: "sts", Namespace: "acme-shop"}, Spec: appsv1.StatefulSetSpec{ServiceName: "x", Selector: &metav1.LabelSelector{MatchLabels: labels}, Template: template(hostile)}},
-		&appsv1.DaemonSet{ObjectMeta: metav1.ObjectMeta{Name: "ds", Namespace: "acme-shop"}, Spec: appsv1.DaemonSetSpec{Selector: &metav1.LabelSelector{MatchLabels: labels}, Template: template(hostile)}},
-		&appsv1.ReplicaSet{ObjectMeta: metav1.ObjectMeta{Name: "rs", Namespace: "acme-shop"}, Spec: appsv1.ReplicaSetSpec{Selector: &metav1.LabelSelector{MatchLabels: labels}, Template: template(hostile)}},
-		&batchv1.Job{ObjectMeta: metav1.ObjectMeta{Name: "job", Namespace: "acme-shop"}, Spec: batchv1.JobSpec{Template: withNever(template(hostile))}},
-		&batchv1.CronJob{ObjectMeta: metav1.ObjectMeta{Name: "cron", Namespace: "acme-shop"}, Spec: batchv1.CronJobSpec{Schedule: "* * * * *", JobTemplate: batchv1.JobTemplateSpec{Spec: batchv1.JobSpec{Template: withNever(template(hostile))}}}},
-	}
-	for _, obj := range objects {
-		requireDenied(t, root.Create(context.Background(), obj), "added capabilities other than NET_BIND_SERVICE")
+	for _, c := range cases {
+		for _, obj := range workloadsWith(c.name, c.change) {
+			requireDenied(t, w.root.Create(context.Background(), obj), c.message)
+		}
 	}
 }
 
-func withNever(template corev1.PodTemplateSpec) corev1.PodTemplateSpec {
-	template.Spec.RestartPolicy = corev1.RestartPolicyNever
-	return template
+func TestOtherWorkloadKindsCannotBeUpdatedIntoHostAccess(t *testing.T) {
+	w := newWorkloadWorld(t)
+	cases := []struct {
+		name    string
+		change  func(*corev1.PodSpec)
+		message string
+	}{
+		{"caps", withCapabilities("SYS_ADMIN"), "added capabilities other than NET_BIND_SERVICE"},
+		{"proc", withUnmaskedProc, "unmasked procMount"},
+		{"hostpath", hostPathVolume, "hostPath volumes are not allowed"},
+	}
+	for _, obj := range workloadsWith("grow", keep) {
+		if _, isJob := obj.(*batchv1.Job); isJob {
+			continue
+		}
+		if _, isPod := obj.(*corev1.Pod); isPod {
+			continue
+		}
+		mustCreate(t, w.admin, obj)
+		for _, c := range cases {
+			updated := obj.DeepCopyObject().(client.Object)
+			c.change(templateOf(updated))
+			requireDenied(t, w.root.Update(context.Background(), updated), c.message)
+		}
+	}
+}
+
+func TestEphemeralContainersAreHardened(t *testing.T) {
+	w := newWorkloadWorld(t)
+	pod := plainPod("debug", "acme-shop", keep)
+	mustCreate(t, w.admin, pod)
+	cases := []struct {
+		name      string
+		container corev1.EphemeralContainer
+		message   string
+	}{
+		{"caps", corev1.EphemeralContainer{EphemeralContainerCommon: corev1.EphemeralContainerCommon{Name: "dbg", Image: pauseImage, SecurityContext: &corev1.SecurityContext{Capabilities: &corev1.Capabilities{Add: []corev1.Capability{"SYS_ADMIN"}}}}}, "added capabilities other than NET_BIND_SERVICE"},
+		{"privileged", corev1.EphemeralContainer{EphemeralContainerCommon: corev1.EphemeralContainerCommon{Name: "dbg", Image: pauseImage, SecurityContext: &corev1.SecurityContext{Privileged: ptr.To(true)}}}, "privileged containers are not allowed"},
+	}
+	for _, c := range cases {
+		debug := pod.DeepCopy()
+		debug.Spec.EphemeralContainers = []corev1.EphemeralContainer{c.container}
+		requireDenied(t, w.root.SubResource("ephemeralcontainers").Update(context.Background(), debug), c.message)
+	}
+	plain := pod.DeepCopy()
+	plain.Spec.EphemeralContainers = []corev1.EphemeralContainer{{EphemeralContainerCommon: corev1.EphemeralContainerCommon{Name: "ok", Image: pauseImage}}}
+	if err := w.root.SubResource("ephemeralcontainers").Update(context.Background(), plain); err != nil {
+		t.Fatalf("a plain ephemeral container was refused: %v", err)
+	}
 }

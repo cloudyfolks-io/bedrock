@@ -11,8 +11,8 @@ spec:
     resourceRules:
       - apiGroups: [""]
         apiVersions: [v1]
-        operations: [CREATE]
-        resources: [pods]
+        operations: [CREATE, UPDATE]
+        resources: [pods, pods/ephemeralcontainers]
   matchConditions:
     - name: bedrock-identity
       expression: "request.userInfo.username.startsWith('bedrock:')"
@@ -26,19 +26,19 @@ spec:
     - expression: "!has(variables.podSpec.volumes) || variables.podSpec.volumes.all(v, !has(v.hostPath))"
       message: "hostPath volumes are not allowed in a project"
       reason: Forbidden
-    - expression: "variables.podSpec.containers.all(c, !has(c.securityContext) || !has(c.securityContext.privileged) || !c.securityContext.privileged) && (!has(variables.podSpec.initContainers) || variables.podSpec.initContainers.all(c, !has(c.securityContext) || !has(c.securityContext.privileged) || !c.securityContext.privileged))"
+    - expression: "variables.podSpec.containers.all(c, !has(c.securityContext) || !has(c.securityContext.privileged) || !c.securityContext.privileged) && (!has(variables.podSpec.initContainers) || variables.podSpec.initContainers.all(c, !has(c.securityContext) || !has(c.securityContext.privileged) || !c.securityContext.privileged)) && (!has(variables.podSpec.ephemeralContainers) || variables.podSpec.ephemeralContainers.all(c, !has(c.securityContext) || !has(c.securityContext.privileged) || !c.securityContext.privileged))"
       message: "privileged containers are not allowed in a project"
       reason: Forbidden
     - expression: "variables.podSpec.containers.all(c, !has(c.ports) || c.ports.all(p, !has(p.hostPort) || p.hostPort == 0)) && (!has(variables.podSpec.initContainers) || variables.podSpec.initContainers.all(c, !has(c.ports) || c.ports.all(p, !has(p.hostPort) || p.hostPort == 0)))"
       message: "host ports are not allowed in a project"
       reason: Forbidden
-    - expression: "!has(variables.podSpec.nodeName)"
+    - expression: "request.operation == 'UPDATE' || !has(variables.podSpec.nodeName)"
       message: "spec.nodeName is not allowed in a project"
       reason: Forbidden
-    - expression: "variables.podSpec.containers.all(c, !has(c.securityContext) || !has(c.securityContext.capabilities) || !has(c.securityContext.capabilities.add) || c.securityContext.capabilities.add.all(a, a == 'NET_BIND_SERVICE')) && (!has(variables.podSpec.initContainers) || variables.podSpec.initContainers.all(c, !has(c.securityContext) || !has(c.securityContext.capabilities) || !has(c.securityContext.capabilities.add) || c.securityContext.capabilities.add.all(a, a == 'NET_BIND_SERVICE')))"
+    - expression: "variables.podSpec.containers.all(c, !has(c.securityContext) || !has(c.securityContext.capabilities) || !has(c.securityContext.capabilities.add) || c.securityContext.capabilities.add.all(a, a == 'NET_BIND_SERVICE')) && (!has(variables.podSpec.initContainers) || variables.podSpec.initContainers.all(c, !has(c.securityContext) || !has(c.securityContext.capabilities) || !has(c.securityContext.capabilities.add) || c.securityContext.capabilities.add.all(a, a == 'NET_BIND_SERVICE'))) && (!has(variables.podSpec.ephemeralContainers) || variables.podSpec.ephemeralContainers.all(c, !has(c.securityContext) || !has(c.securityContext.capabilities) || !has(c.securityContext.capabilities.add) || c.securityContext.capabilities.add.all(a, a == 'NET_BIND_SERVICE')))"
       message: "added capabilities other than NET_BIND_SERVICE are not allowed in a project"
       reason: Forbidden
-    - expression: "variables.podSpec.containers.all(c, !has(c.securityContext) || !has(c.securityContext.procMount) || c.securityContext.procMount == 'Default') && (!has(variables.podSpec.initContainers) || variables.podSpec.initContainers.all(c, !has(c.securityContext) || !has(c.securityContext.procMount) || c.securityContext.procMount == 'Default'))"
+    - expression: "variables.podSpec.containers.all(c, !has(c.securityContext) || !has(c.securityContext.procMount) || c.securityContext.procMount == 'Default') && (!has(variables.podSpec.initContainers) || variables.podSpec.initContainers.all(c, !has(c.securityContext) || !has(c.securityContext.procMount) || c.securityContext.procMount == 'Default')) && (!has(variables.podSpec.ephemeralContainers) || variables.podSpec.ephemeralContainers.all(c, !has(c.securityContext) || !has(c.securityContext.procMount) || c.securityContext.procMount == 'Default'))"
       message: "an unmasked procMount is not allowed in a project"
       reason: Forbidden
 ---
@@ -90,7 +90,7 @@ spec:
     - expression: "!has(variables.podSpec.volumes) || variables.podSpec.volumes.all(v, !has(v.hostPath))"
       message: "hostPath volumes are not allowed in a project"
       reason: Forbidden
-    - expression: "variables.podSpec.containers.all(c, !has(c.securityContext) || !has(c.securityContext.privileged) || !c.securityContext.privileged) && (!has(variables.podSpec.initContainers) || variables.podSpec.initContainers.all(c, !has(c.securityContext) || !has(c.securityContext.privileged) || !c.securityContext.privileged))"
+    - expression: "variables.podSpec.containers.all(c, !has(c.securityContext) || !has(c.securityContext.privileged) || !c.securityContext.privileged) && (!has(variables.podSpec.initContainers) || variables.podSpec.initContainers.all(c, !has(c.securityContext) || !has(c.securityContext.privileged) || !c.securityContext.privileged)) && (!has(variables.podSpec.ephemeralContainers) || variables.podSpec.ephemeralContainers.all(c, !has(c.securityContext) || !has(c.securityContext.privileged) || !c.securityContext.privileged))"
       message: "privileged containers are not allowed in a project"
       reason: Forbidden
     - expression: "variables.podSpec.containers.all(c, !has(c.ports) || c.ports.all(p, !has(p.hostPort) || p.hostPort == 0)) && (!has(variables.podSpec.initContainers) || variables.podSpec.initContainers.all(c, !has(c.ports) || c.ports.all(p, !has(p.hostPort) || p.hostPort == 0)))"
@@ -99,10 +99,10 @@ spec:
     - expression: "!has(variables.podSpec.nodeName)"
       message: "spec.nodeName is not allowed in a project"
       reason: Forbidden
-    - expression: "variables.podSpec.containers.all(c, !has(c.securityContext) || !has(c.securityContext.capabilities) || !has(c.securityContext.capabilities.add) || c.securityContext.capabilities.add.all(a, a == 'NET_BIND_SERVICE')) && (!has(variables.podSpec.initContainers) || variables.podSpec.initContainers.all(c, !has(c.securityContext) || !has(c.securityContext.capabilities) || !has(c.securityContext.capabilities.add) || c.securityContext.capabilities.add.all(a, a == 'NET_BIND_SERVICE')))"
+    - expression: "variables.podSpec.containers.all(c, !has(c.securityContext) || !has(c.securityContext.capabilities) || !has(c.securityContext.capabilities.add) || c.securityContext.capabilities.add.all(a, a == 'NET_BIND_SERVICE')) && (!has(variables.podSpec.initContainers) || variables.podSpec.initContainers.all(c, !has(c.securityContext) || !has(c.securityContext.capabilities) || !has(c.securityContext.capabilities.add) || c.securityContext.capabilities.add.all(a, a == 'NET_BIND_SERVICE'))) && (!has(variables.podSpec.ephemeralContainers) || variables.podSpec.ephemeralContainers.all(c, !has(c.securityContext) || !has(c.securityContext.capabilities) || !has(c.securityContext.capabilities.add) || c.securityContext.capabilities.add.all(a, a == 'NET_BIND_SERVICE')))"
       message: "added capabilities other than NET_BIND_SERVICE are not allowed in a project"
       reason: Forbidden
-    - expression: "variables.podSpec.containers.all(c, !has(c.securityContext) || !has(c.securityContext.procMount) || c.securityContext.procMount == 'Default') && (!has(variables.podSpec.initContainers) || variables.podSpec.initContainers.all(c, !has(c.securityContext) || !has(c.securityContext.procMount) || c.securityContext.procMount == 'Default'))"
+    - expression: "variables.podSpec.containers.all(c, !has(c.securityContext) || !has(c.securityContext.procMount) || c.securityContext.procMount == 'Default') && (!has(variables.podSpec.initContainers) || variables.podSpec.initContainers.all(c, !has(c.securityContext) || !has(c.securityContext.procMount) || c.securityContext.procMount == 'Default')) && (!has(variables.podSpec.ephemeralContainers) || variables.podSpec.ephemeralContainers.all(c, !has(c.securityContext) || !has(c.securityContext.procMount) || c.securityContext.procMount == 'Default'))"
       message: "an unmasked procMount is not allowed in a project"
       reason: Forbidden
 ---
@@ -150,7 +150,7 @@ spec:
     - expression: "!has(variables.podSpec.volumes) || variables.podSpec.volumes.all(v, !has(v.hostPath))"
       message: "hostPath volumes are not allowed in a project"
       reason: Forbidden
-    - expression: "variables.podSpec.containers.all(c, !has(c.securityContext) || !has(c.securityContext.privileged) || !c.securityContext.privileged) && (!has(variables.podSpec.initContainers) || variables.podSpec.initContainers.all(c, !has(c.securityContext) || !has(c.securityContext.privileged) || !c.securityContext.privileged))"
+    - expression: "variables.podSpec.containers.all(c, !has(c.securityContext) || !has(c.securityContext.privileged) || !c.securityContext.privileged) && (!has(variables.podSpec.initContainers) || variables.podSpec.initContainers.all(c, !has(c.securityContext) || !has(c.securityContext.privileged) || !c.securityContext.privileged)) && (!has(variables.podSpec.ephemeralContainers) || variables.podSpec.ephemeralContainers.all(c, !has(c.securityContext) || !has(c.securityContext.privileged) || !c.securityContext.privileged))"
       message: "privileged containers are not allowed in a project"
       reason: Forbidden
     - expression: "variables.podSpec.containers.all(c, !has(c.ports) || c.ports.all(p, !has(p.hostPort) || p.hostPort == 0)) && (!has(variables.podSpec.initContainers) || variables.podSpec.initContainers.all(c, !has(c.ports) || c.ports.all(p, !has(p.hostPort) || p.hostPort == 0)))"
@@ -159,10 +159,10 @@ spec:
     - expression: "!has(variables.podSpec.nodeName)"
       message: "spec.nodeName is not allowed in a project"
       reason: Forbidden
-    - expression: "variables.podSpec.containers.all(c, !has(c.securityContext) || !has(c.securityContext.capabilities) || !has(c.securityContext.capabilities.add) || c.securityContext.capabilities.add.all(a, a == 'NET_BIND_SERVICE')) && (!has(variables.podSpec.initContainers) || variables.podSpec.initContainers.all(c, !has(c.securityContext) || !has(c.securityContext.capabilities) || !has(c.securityContext.capabilities.add) || c.securityContext.capabilities.add.all(a, a == 'NET_BIND_SERVICE')))"
+    - expression: "variables.podSpec.containers.all(c, !has(c.securityContext) || !has(c.securityContext.capabilities) || !has(c.securityContext.capabilities.add) || c.securityContext.capabilities.add.all(a, a == 'NET_BIND_SERVICE')) && (!has(variables.podSpec.initContainers) || variables.podSpec.initContainers.all(c, !has(c.securityContext) || !has(c.securityContext.capabilities) || !has(c.securityContext.capabilities.add) || c.securityContext.capabilities.add.all(a, a == 'NET_BIND_SERVICE'))) && (!has(variables.podSpec.ephemeralContainers) || variables.podSpec.ephemeralContainers.all(c, !has(c.securityContext) || !has(c.securityContext.capabilities) || !has(c.securityContext.capabilities.add) || c.securityContext.capabilities.add.all(a, a == 'NET_BIND_SERVICE')))"
       message: "added capabilities other than NET_BIND_SERVICE are not allowed in a project"
       reason: Forbidden
-    - expression: "variables.podSpec.containers.all(c, !has(c.securityContext) || !has(c.securityContext.procMount) || c.securityContext.procMount == 'Default') && (!has(variables.podSpec.initContainers) || variables.podSpec.initContainers.all(c, !has(c.securityContext) || !has(c.securityContext.procMount) || c.securityContext.procMount == 'Default'))"
+    - expression: "variables.podSpec.containers.all(c, !has(c.securityContext) || !has(c.securityContext.procMount) || c.securityContext.procMount == 'Default') && (!has(variables.podSpec.initContainers) || variables.podSpec.initContainers.all(c, !has(c.securityContext) || !has(c.securityContext.procMount) || c.securityContext.procMount == 'Default')) && (!has(variables.podSpec.ephemeralContainers) || variables.podSpec.ephemeralContainers.all(c, !has(c.securityContext) || !has(c.securityContext.procMount) || c.securityContext.procMount == 'Default'))"
       message: "an unmasked procMount is not allowed in a project"
       reason: Forbidden
 ---
