@@ -66,6 +66,9 @@ func (r *ProjectReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 		return ctrl.Result{}, nil
 	}
 	observation.Namespace = r.ensureNamespace(ctx, project)
+	if observation.Namespace.Ready {
+		observation.SubnetCIDR, observation.Subnet = r.ensureSubnet(ctx, project, tenant)
+	}
 	r.writeStatus(ctx, observation)
 	return ctrl.Result{RequeueAfter: Interval}, applyFailures(observation)
 }
@@ -211,6 +214,7 @@ func (r *ProjectReconciler) SetupWithManager(mgr ctrl.Manager) error {
 		For(&v1alpha1.Project{}).
 		Owns(&corev1.Namespace{}).
 		Owns(&networkingv1.NetworkPolicy{}).
+		Owns(&v1alpha1.Subnet{}).
 		Watches(&v1alpha1.Tenant{}, handler.EnqueueRequestsFromMapFunc(r.projectsOfTenantObject)).
 		Watches(&v1alpha1.Project{}, handler.EnqueueRequestsFromMapFunc(r.waitingSiblingsOf)).
 		Complete(r)
