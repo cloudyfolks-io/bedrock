@@ -655,8 +655,44 @@ msgstr "لا توجد نتائج"
 msgid "list.row.actions"
 msgstr "إجراءات لـ {0}"
 
+msgid "metrics.cpu"
+msgstr "استخدام المعالج"
+
+msgid "metrics.disk"
+msgstr "حركة القرص"
+
+msgid "metrics.memory"
+msgstr "استخدام الذاكرة"
+
+msgid "metrics.network"
+msgstr "حركة الشبكة"
+
 msgid "metrics.placeholder"
 msgstr "المقاييس"
+
+msgid "metrics.range"
+msgstr "النطاق الزمني"
+
+msgid "metrics.range.last1h"
+msgstr "آخر ساعة"
+
+msgid "metrics.range.last24h"
+msgstr "آخر 24 ساعة"
+
+msgid "metrics.range.last6h"
+msgstr "آخر 6 ساعات"
+
+msgid "metrics.range.last7d"
+msgstr "آخر 7 أيام"
+
+msgid "metrics.summary"
+msgstr "{title}: الحد الأدنى {0}، الحد الأقصى {1}، الأخير {2}"
+
+msgid "metrics.unavailable"
+msgstr "المقاييس غير متاحة"
+
+msgid "metrics.volume"
+msgstr "استخدام القرص"
 
 msgid "nav.item.addons"
 msgstr "الإضافات"
@@ -1074,6 +1110,9 @@ msgstr "الوقت"
 
 msgid "upgrades.backups"
 msgstr "نسخ الترقية الاحتياطية"
+
+msgid "upgrades.ceph"
+msgstr "استخدام Ceph"
 
 msgid "upgrades.components"
 msgstr "المكونات"

@@ -112,7 +112,7 @@ export default function VmDetailPage() {
         </TabPanel>
         <TabPanel value="metrics">
           <Suspense fallback={<Spinner />}>
-            <VmMetrics />
+            <VmMetrics vm={vm} />
           </Suspense>
         </TabPanel>
         <TabPanel value="disks"><VmDisksTab vm={vm} project={project.name} /></TabPanel>

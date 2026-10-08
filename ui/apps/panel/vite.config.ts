@@ -23,6 +23,7 @@ export default defineConfig({
           groups: [
             { name: "novnc", test: /node_modules[\\/]@novnc/ },
             { name: "xterm", test: /node_modules[\\/]@xterm/ },
+            { name: "uplot", test: /node_modules[\\/]uplot/ },
           ],
         },
       },

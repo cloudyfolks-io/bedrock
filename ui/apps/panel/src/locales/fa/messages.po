@@ -655,8 +655,44 @@ msgstr "موردی یافت نشد"
 msgid "list.row.actions"
 msgstr "عملیات برای {0}"
 
+msgid "metrics.cpu"
+msgstr "مصرف پردازنده"
+
+msgid "metrics.disk"
+msgstr "ترافیک دیسک"
+
+msgid "metrics.memory"
+msgstr "مصرف حافظه"
+
+msgid "metrics.network"
+msgstr "ترافیک شبکه"
+
 msgid "metrics.placeholder"
 msgstr "سنجه‌ها"
+
+msgid "metrics.range"
+msgstr "بازه زمانی"
+
+msgid "metrics.range.last1h"
+msgstr "ساعت گذشته"
+
+msgid "metrics.range.last24h"
+msgstr "۲۴ ساعت گذشته"
+
+msgid "metrics.range.last6h"
+msgstr "۶ ساعت گذشته"
+
+msgid "metrics.range.last7d"
+msgstr "۷ روز گذشته"
+
+msgid "metrics.summary"
+msgstr "{title}: کمینه {0}، بیشینه {1}، آخرین {2}"
+
+msgid "metrics.unavailable"
+msgstr "سنجه‌ها در دسترس نیستند"
+
+msgid "metrics.volume"
+msgstr "مصرف حجم"
 
 msgid "nav.item.addons"
 msgstr "افزونه‌ها"
@@ -1074,6 +1110,9 @@ msgstr "زمان"
 
 msgid "upgrades.backups"
 msgstr "پشتیبان‌های ارتقا"
+
+msgid "upgrades.ceph"
+msgstr "مصرف Ceph"
 
 msgid "upgrades.components"
 msgstr "اجزا"

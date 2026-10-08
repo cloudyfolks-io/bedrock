@@ -94,8 +94,9 @@ describe("HostDetailPage", () => {
 
   it("has a lazy metrics tab", async () => {
     const user = userEvent.setup();
-    render(host("host-01"));
+    const { api } = render(host("host-01"));
     await user.click(await screen.findByRole("tab", { name: "Metrics" }));
-    expect(await screen.findByText("Metrics", { selector: "p" })).toBeTruthy();
+    expect(await screen.findByRole("heading", { level: 3, name: "CPU use" })).toBeTruthy();
+    await waitFor(() => expect(api.calls.some((call) => call.path === "/proxy/v1/metrics/range" && call.query.get("query") === "host.cpu" && call.query.get("name") === "host-01")).toBe(true));
   });
 });

@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useMemo, useState, type ReactNode } from "react";
 import { useParams } from "react-router";
 import { useLingui } from "@lingui/react/macro";
 import { Button, Table, TableBody, TableCell, TableHead, TableHeaderCell, TableRow } from "@bedrock/design";
@@ -46,7 +46,11 @@ function ConditionsTable({ conditions }: { conditions: Condition[] }) {
   );
 }
 
-function DetailBody({ def, namespace, name, projectName }: { def: ResourceDef; namespace: string | undefined; name: string; projectName: string | undefined }) {
+interface DetailExtras {
+  children?: (object: KubeObject) => ReactNode;
+}
+
+function DetailBody({ def, namespace, name, projectName, children }: { def: ResourceDef; namespace: string | undefined; name: string; projectName: string | undefined } & DetailExtras) {
   const { t, i18n } = useLingui();
   const query = useLiveObject(refOf(def), namespace, name);
   const runner = useActionRunner(def);
@@ -119,13 +123,14 @@ function DetailBody({ def, namespace, name, projectName }: { def: ResourceDef; n
           {JSON.stringify(object.spec ?? {}, null, 2)}
         </pre>
       </section>
+      {children?.(object)}
       {runner.dialogs}
       {editing ? <LazyEditDialog def={def} object={object} onClose={() => setEditing(false)} /> : null}
     </>
   );
 }
 
-export function ResourceDetailPage({ def }: { def: ResourceDef }) {
+export function ResourceDetailPage({ def, children }: { def: ResourceDef } & DetailExtras) {
   const { name = "" } = useParams();
   const projects = useProjects();
   const projectName = useCurrentProjectName();
@@ -138,5 +143,5 @@ export function ResourceDetailPage({ def }: { def: ResourceDef }) {
       return <NotFoundPage />;
     }
   }
-  return <DetailBody def={def} namespace={def.scope === "Namespaced" ? project?.namespace : undefined} name={name} projectName={project?.name} />;
+  return <DetailBody def={def} namespace={def.scope === "Namespaced" ? project?.namespace : undefined} name={name} projectName={project?.name} {...(children ? { children } : {})} />;
 }

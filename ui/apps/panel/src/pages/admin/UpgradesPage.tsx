@@ -14,6 +14,7 @@ import { Ltr } from "../../components/Ltr";
 import { PageHeader } from "../../components/PageHeader";
 import { PhaseBadge, phaseMessages } from "../../components/StatusBadge";
 import { Spinner } from "../../components/Spinner";
+import { MetricChart } from "../../charts/MetricChart";
 import { LazyEditDialog } from "../../forms/LazyDialogs";
 import { listAt, textAt } from "../../resources/path";
 import { definitionFor, refOf, type ResourceDef } from "../../resources/registry";
@@ -197,6 +198,7 @@ export default function UpgradesPage() {
           ))}
         </TableBody>
       </Table>
+      <MetricChart title={t({ id: "upgrades.ceph", message: "Ceph usage" })} queries={["ceph.used", "ceph.capacity"]} unit="bytes" />
       <ConfirmSimpleDialog
         open={starting}
         title={t({ id: "upgrades.start.title", message: "Start an upgrade" })}

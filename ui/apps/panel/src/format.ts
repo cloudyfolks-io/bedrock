@@ -76,3 +76,18 @@ export function parseQuantity(text: string): number {
   }
   return Number(match[1]) * (match[2] ? (quantityUnits[match[2]] ?? 1) : 1);
 }
+
+export type Unit = "bytes" | "bytesPerSecond" | "cores" | "ratio";
+
+export function formatUnit(value: number, unit: Unit, locale: Locale): string {
+  switch (unit) {
+    case "bytes":
+      return formatBytes(value, locale);
+    case "bytesPerSecond":
+      return `${formatBytes(value, locale)}/s`;
+    case "cores":
+      return new Intl.NumberFormat(numberingLocales[locale], { maximumFractionDigits: 2 }).format(value);
+    case "ratio":
+      return new Intl.NumberFormat(numberingLocales[locale], { style: "percent", maximumFractionDigits: 0 }).format(value);
+  }
+}

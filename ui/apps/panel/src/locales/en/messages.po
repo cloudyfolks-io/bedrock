@@ -655,8 +655,44 @@ msgstr "No match"
 msgid "list.row.actions"
 msgstr "Actions for {0}"
 
+msgid "metrics.cpu"
+msgstr "CPU use"
+
+msgid "metrics.disk"
+msgstr "Disk traffic"
+
+msgid "metrics.memory"
+msgstr "Memory use"
+
+msgid "metrics.network"
+msgstr "Network traffic"
+
 msgid "metrics.placeholder"
 msgstr "Metrics"
+
+msgid "metrics.range"
+msgstr "Time range"
+
+msgid "metrics.range.last1h"
+msgstr "Last hour"
+
+msgid "metrics.range.last24h"
+msgstr "Last 24 hours"
+
+msgid "metrics.range.last6h"
+msgstr "Last 6 hours"
+
+msgid "metrics.range.last7d"
+msgstr "Last 7 days"
+
+msgid "metrics.summary"
+msgstr "{title}: minimum {0}, maximum {1}, last {2}"
+
+msgid "metrics.unavailable"
+msgstr "Metrics are not available"
+
+msgid "metrics.volume"
+msgstr "Volume use"
 
 msgid "nav.item.addons"
 msgstr "Addons"
@@ -1074,6 +1110,9 @@ msgstr "Time"
 
 msgid "upgrades.backups"
 msgstr "Upgrade backups"
+
+msgid "upgrades.ceph"
+msgstr "Ceph usage"
 
 msgid "upgrades.components"
 msgstr "Components"
