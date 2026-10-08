@@ -319,11 +319,41 @@ msgstr "حذف {kind}"
 msgid "confirm.simple.description"
 msgstr "{0}: {1}"
 
+msgid "console.ctrlAltDel"
+msgstr "إرسال Ctrl+Alt+Del"
+
+msgid "console.fullscreen"
+msgstr "ملء الشاشة"
+
 msgid "console.notRunning"
 msgstr "ابدأ الجهاز لفتح وحدة التحكم"
 
-msgid "console.placeholder"
-msgstr "وحدة التحكم"
+msgid "console.reconnect"
+msgstr "إعادة الاتصال"
+
+msgid "console.scale"
+msgstr "ملاءمة الحجم"
+
+msgid "console.serial"
+msgstr "وحدة التحكم التسلسلية"
+
+msgid "console.state.connected"
+msgstr "متصل"
+
+msgid "console.state.connecting"
+msgstr "جارٍ الاتصال بوحدة التحكم"
+
+msgid "console.state.disconnected"
+msgstr "انقطع اتصال وحدة التحكم"
+
+msgid "console.state.securityfailure"
+msgstr "رفضت وحدة التحكم الاتصال"
+
+msgid "console.viewOnly"
+msgstr "عرض فقط"
+
+msgid "console.vnc"
+msgstr "وحدة التحكم الرسومية"
 
 msgid "credentials.copied"
 msgstr "تم نسخ {name}"

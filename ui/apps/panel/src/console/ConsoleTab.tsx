@@ -1,6 +1,38 @@
+import { useState } from "react";
 import { useLingui } from "@lingui/react/macro";
+import { Tab, TabList, TabPanel, Tabs } from "@bedrock/design";
+import type { KubeObject } from "../api/types";
+import { textAt } from "../resources/path";
+import { consoleUrl } from "./consoleUrl";
+import { SerialConsole } from "./SerialConsole";
+import { useSessionCheck } from "./useConsoleSession";
+import { VncConsole } from "./VncConsole";
 
-export default function ConsoleTab() {
+export default function ConsoleTab({ vm }: { vm: KubeObject }) {
   const { t } = useLingui();
-  return <p>{t({ id: "console.placeholder", message: "Console" })}</p>;
+  const [tab, setTab] = useState("vnc");
+  const checkSession = useSessionCheck();
+  const vnc = consoleUrl(vm, "vnc");
+  const serial = consoleUrl(vm, "serial");
+  if (textAt(vm, "status.phase") !== "Running" || (!vnc && !serial)) {
+    return <p className="br-help">{t({ id: "console.notRunning", message: "Start the VM to open the console" })}</p>;
+  }
+  return (
+    <Tabs value={tab} onValueChange={setTab}>
+      <TabList>
+        {vnc ? <Tab value="vnc">{t({ id: "console.vnc", message: "Graphical console" })}</Tab> : null}
+        {serial ? <Tab value="serial">{t({ id: "console.serial", message: "Serial console" })}</Tab> : null}
+      </TabList>
+      {vnc ? (
+        <TabPanel value="vnc">
+          <VncConsole url={vnc} onDisconnect={(clean) => (clean ? undefined : checkSession())} />
+        </TabPanel>
+      ) : null}
+      {serial ? (
+        <TabPanel value="serial">
+          <SerialConsole url={serial} onDisconnect={(code) => (code === 4401 ? checkSession() : undefined)} />
+        </TabPanel>
+      ) : null}
+    </Tabs>
+  );
 }

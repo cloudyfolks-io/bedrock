@@ -57,7 +57,7 @@ function entryOf(root: string): string {
 function main(): void {
   const root = fileURLToPath(new URL("../../../../internal/proxy/ui/dist", import.meta.url));
   const files = listFiles(root);
-  const violations = checkBundle({ entry: entryOf(root), files, lazy: [] });
+  const violations = checkBundle({ entry: entryOf(root), files, lazy: ["novnc", "xterm"] });
   for (const violation of violations) {
     console.error(violation);
   }

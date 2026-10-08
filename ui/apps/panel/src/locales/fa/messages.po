@@ -319,11 +319,41 @@ msgstr "حذف {kind}"
 msgid "confirm.simple.description"
 msgstr "{0}: {1}"
 
+msgid "console.ctrlAltDel"
+msgstr "ارسال Ctrl+Alt+Del"
+
+msgid "console.fullscreen"
+msgstr "تمام‌صفحه"
+
 msgid "console.notRunning"
 msgstr "برای باز کردن کنسول ماشین را روشن کنید"
 
-msgid "console.placeholder"
-msgstr "کنسول"
+msgid "console.reconnect"
+msgstr "اتصال دوباره"
+
+msgid "console.scale"
+msgstr "تطبیق با اندازه"
+
+msgid "console.serial"
+msgstr "کنسول سریال"
+
+msgid "console.state.connected"
+msgstr "متصل"
+
+msgid "console.state.connecting"
+msgstr "در حال اتصال به کنسول"
+
+msgid "console.state.disconnected"
+msgstr "کنسول قطع شد"
+
+msgid "console.state.securityfailure"
+msgstr "کنسول اتصال را نپذیرفت"
+
+msgid "console.viewOnly"
+msgstr "فقط مشاهده"
+
+msgid "console.vnc"
+msgstr "کنسول گرافیکی"
 
 msgid "credentials.copied"
 msgstr "{name} کپی شد"

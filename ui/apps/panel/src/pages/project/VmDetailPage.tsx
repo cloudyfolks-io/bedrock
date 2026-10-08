@@ -86,7 +86,6 @@ export default function VmDetailPage() {
   }
   const tab = params.get("tab") ?? "overview";
   const consoleAllowed = access.console === "allowed";
-  const phase = textAt(vm, "status.phase");
   return (
     <>
       <PageHeader
@@ -107,13 +106,9 @@ export default function VmDetailPage() {
         </TabList>
         <TabPanel value="overview"><Overview vm={vm} /></TabPanel>
         <TabPanel value="console">
-          {phase !== "Running" || textAt(vm, "status.console.vncPath") === "" ? (
-            <p className="br-help">{t({ id: "console.notRunning", message: "Start the VM to open the console" })}</p>
-          ) : (
-            <Suspense fallback={<Spinner />}>
-              <ConsoleTab />
-            </Suspense>
-          )}
+          <Suspense fallback={<Spinner />}>
+            <ConsoleTab vm={vm} />
+          </Suspense>
         </TabPanel>
         <TabPanel value="metrics">
           <Suspense fallback={<Spinner />}>

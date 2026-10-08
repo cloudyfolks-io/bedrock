@@ -319,11 +319,41 @@ msgstr "Delete {kind}"
 msgid "confirm.simple.description"
 msgstr "{0}: {1}"
 
+msgid "console.ctrlAltDel"
+msgstr "Send Ctrl+Alt+Del"
+
+msgid "console.fullscreen"
+msgstr "Full screen"
+
 msgid "console.notRunning"
 msgstr "Start the VM to open the console"
 
-msgid "console.placeholder"
-msgstr "Console"
+msgid "console.reconnect"
+msgstr "Reconnect"
+
+msgid "console.scale"
+msgstr "Scale to fit"
+
+msgid "console.serial"
+msgstr "Serial console"
+
+msgid "console.state.connected"
+msgstr "Connected"
+
+msgid "console.state.connecting"
+msgstr "Connecting to the console"
+
+msgid "console.state.disconnected"
+msgstr "The console disconnected"
+
+msgid "console.state.securityfailure"
+msgstr "The console refused the connection"
+
+msgid "console.viewOnly"
+msgstr "View only"
+
+msgid "console.vnc"
+msgstr "Graphical console"
 
 msgid "credentials.copied"
 msgstr "{name} copied"

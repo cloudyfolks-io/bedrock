@@ -17,5 +17,15 @@ export default defineConfig({
     outDir: "../../../internal/proxy/ui/dist",
     emptyOutDir: true,
     target: "esnext",
+    rolldownOptions: {
+      output: {
+        codeSplitting: {
+          groups: [
+            { name: "novnc", test: /node_modules[\\/]@novnc/ },
+            { name: "xterm", test: /node_modules[\\/]@xterm/ },
+          ],
+        },
+      },
+    },
   },
 });
