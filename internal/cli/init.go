@@ -24,6 +24,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	"github.com/cloudyfolks-io/bedrock/api/v1alpha1"
+	"github.com/cloudyfolks-io/bedrock/internal/addons"
 	"github.com/cloudyfolks-io/bedrock/internal/audit"
 	"github.com/cloudyfolks-io/bedrock/internal/authn/apiserver"
 	"github.com/cloudyfolks-io/bedrock/internal/authn/methods"
@@ -39,7 +40,10 @@ import (
 	"github.com/cloudyfolks-io/bedrock/internal/ssa"
 )
 
-const initFieldOwner = "bedrock-init"
+const (
+	initFieldOwner       = "bedrock-init"
+	monitoringStackGroup = "kube-prometheus-stack"
+)
 
 const (
 	authnBootstrapDir       = "var/lib/bedrock/authn"
@@ -278,7 +282,7 @@ func RunInit(ctx context.Context, args []string, deps InitDeps, stdout, stderr i
 	if err != nil {
 		return fail(stderr, err)
 	}
-	if err := release.Install(ctx, c, bundle, vars, release.Gates{}, 2*time.Second, 30*time.Minute, report); err != nil {
+	if err := release.InstallGroups(ctx, c, bundle, vars, release.Gates{}, 2*time.Second, 30*time.Minute, report, grafanaAdminHook(c, rand.Reader), release.SkipHook); err != nil {
 		return fail(stderr, err)
 	}
 
@@ -307,6 +311,18 @@ func RunInit(ctx context.Context, args []string, deps InitDeps, stdout, stderr i
 	fmt.Fprintf(stdout, "join nodes with: bedrock token create --roles %s\n", strings.Join(cfg.Spec.Roles, ","))
 	removeBundleDir(bundleDir)
 	return 0
+}
+
+func grafanaAdminHook(c client.Client, random io.Reader) func(context.Context, release.Group) error {
+	return func(ctx context.Context, group release.Group) error {
+		if group.Name != monitoringStackGroup {
+			return nil
+		}
+		if err := addons.EnsureMonitoringNamespace(ctx, c); err != nil {
+			return err
+		}
+		return addons.EnsureGrafanaAdmin(ctx, c, random)
+	}
 }
 
 func installAgent(ctx context.Context, deps InitDeps, dataDir string) error {

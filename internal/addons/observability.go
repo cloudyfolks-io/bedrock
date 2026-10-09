@@ -202,19 +202,28 @@ func (r *ObservabilityReconciler) reportWebhook(ctx context.Context, status meta
 }
 
 func (r *ObservabilityReconciler) ensureGrafanaAdmin(ctx context.Context) error {
+	return EnsureGrafanaAdmin(ctx, r.Client, r.Random)
+}
+
+func EnsureMonitoringNamespace(ctx context.Context, c client.Client) error {
+	namespace := &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: monitoringNamespace}}
+	return client.IgnoreAlreadyExists(c.Create(ctx, namespace, client.FieldOwner(v1alpha1.AddonsFieldManager)))
+}
+
+func EnsureGrafanaAdmin(ctx context.Context, c client.Client, random io.Reader) error {
 	var existing corev1.Secret
-	err := r.Client.Get(ctx, types.NamespacedName{Namespace: monitoringNamespace, Name: grafanaAdminSecret}, &existing)
+	err := c.Get(ctx, types.NamespacedName{Namespace: monitoringNamespace, Name: grafanaAdminSecret}, &existing)
 	if err == nil {
 		return nil
 	}
 	if !apierrors.IsNotFound(err) {
 		return err
 	}
-	secret, err := GrafanaAdminSecret(r.Random)
+	secret, err := GrafanaAdminSecret(random)
 	if err != nil {
 		return err
 	}
-	if err := r.Client.Create(ctx, secret, client.FieldOwner(v1alpha1.AddonsFieldManager)); client.IgnoreAlreadyExists(err) != nil {
+	if err := c.Create(ctx, secret, client.FieldOwner(v1alpha1.AddonsFieldManager)); client.IgnoreAlreadyExists(err) != nil {
 		return fmt.Errorf("grafana admin secret in namespace %s: %w", monitoringNamespace, err)
 	}
 	return nil
