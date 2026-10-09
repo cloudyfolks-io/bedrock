@@ -16,12 +16,12 @@ retry() {
 }
 
 build() {
-  local version=$1 k0s=$2 from=$3
+  local version=$1 k0s=$2 from=$3 config=$4
   local image=$registry/bedrock:$version
-  make build release VERSION="$version" IMAGE="$image" PIN_DIGESTS=1 K0S_VERSION="$k0s" UPGRADE_FROM="$from"
+  make build release VERSION="$version" IMAGE="$image" PIN_DIGESTS=1 K0S_VERSION="$k0s" UPGRADE_FROM="$from" RELEASE_CONFIG="$config"
   retry 3 docker build --build-arg VERSION="$version" -t "$image" -f Containerfile .
   docker push "$image"
-  make bundle VERSION="$version" IMAGE="$image" PIN_DIGESTS=1 K0S_VERSION="$k0s" UPGRADE_FROM="$from" BUNDLE_ARCH="$arch"
+  make bundle VERSION="$version" IMAGE="$image" PIN_DIGESTS=1 K0S_VERSION="$k0s" UPGRADE_FROM="$from" BUNDLE_ARCH="$arch" RELEASE_CONFIG="$config"
   rm -rf "dist/release-$version"
   cp -r dist/release "dist/release-$version"
 }
@@ -43,7 +43,7 @@ build_from_ref() {
   git worktree add --detach "$worktree_a" "$ref"
   mkdir -p "$worktree_a/dist" "$repo/dist/cache"
   ln -s "$repo/dist/cache" "$worktree_a/dist/cache"
-  (cd "$worktree_a" && build "$version" "$k0s" "")
+  (cd "$worktree_a" && build "$version" "$k0s" "" release/components.yaml)
   cp "$worktree_a"/dist/bedrock-"$version"-* dist/
   rm -rf "dist/release-$version"
   cp -r "$worktree_a/dist/release-$version" "dist/release-$version"
@@ -52,10 +52,11 @@ build_from_ref() {
   worktree_a=""
 }
 
+hack/e2e-release-config.sh release/components.yaml dist/components-e2e.yaml
 if [ -n "${VERSION_A_REF:-}" ]; then
   build_from_ref "$VERSION_A_REF" "$VERSION_A" "$K0S_A"
 else
-  build "$VERSION_A" "$K0S_A" ""
+  build "$VERSION_A" "$K0S_A" "" dist/components-e2e.yaml
 fi
-build "$VERSION_B" "$K0S_B" "$VERSION_A"
+build "$VERSION_B" "$K0S_B" "$VERSION_A" dist/components-e2e.yaml
 ls -l dist/bedrock-*-bundle-"$arch".tar.zst dist/bedrock-*-linux-"$arch"
