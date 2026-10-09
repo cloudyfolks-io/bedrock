@@ -52,15 +52,13 @@ func Run(ctx context.Context, c client.WithWatch, deps Deps) error {
 	defer ticker.Stop()
 	events, stop := ensureWatch(ctx, c, deps.Node)
 	defer func() { stop() }()
+	go snapshotLoop(ctx, c, deps)
 	for {
 		if err := Tick(ctx, c, deps); err != nil {
 			fmt.Fprintf(os.Stderr, "agent: %v\n", err)
 		}
 		if err := RunUpgrades(ctx, c, deps, Steps()); err != nil {
 			fmt.Fprintf(os.Stderr, "agent: upgrade: %v\n", err)
-		}
-		if err := RunEtcdSnapshots(ctx, c, deps); err != nil {
-			fmt.Fprintf(os.Stderr, "agent: etcd snapshot: %v\n", err)
 		}
 		if err := EnableAuthnArgs(ctx, c, deps); err != nil {
 			fmt.Fprintf(os.Stderr, "agent: authn flags: %v\n", err)
@@ -82,6 +80,21 @@ func Run(ctx context.Context, c client.WithWatch, deps Deps) error {
 					events, stop = nil, func() {}
 				}
 			}
+		}
+	}
+}
+
+func snapshotLoop(ctx context.Context, c client.Client, deps Deps) {
+	ticker := time.NewTicker(deps.Interval)
+	defer ticker.Stop()
+	for {
+		if err := RunEtcdSnapshots(ctx, c, deps); err != nil {
+			fmt.Fprintf(os.Stderr, "agent: etcd snapshot: %v\n", err)
+		}
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
 		}
 	}
 }
