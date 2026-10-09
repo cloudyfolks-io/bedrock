@@ -40,7 +40,7 @@ func writeBackup(ctx context.Context, deps Deps, name, pattern string, keep int)
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return "", "", err
 	}
-	if err := removePartials(dir); err != nil {
+	if err := removePartials(dir, pattern); err != nil {
 		return "", "", err
 	}
 	work, err := os.MkdirTemp(dir, ".work-")
@@ -149,8 +149,8 @@ func backupStamp(path string) string {
 	return name[strings.LastIndex(name, "-")+1:]
 }
 
-func removePartials(dir string) error {
-	partials, err := filepath.Glob(filepath.Join(dir, "*"+partialSuffix))
+func removePartials(dir, pattern string) error {
+	partials, err := filepath.Glob(filepath.Join(dir, pattern+partialSuffix))
 	if err != nil {
 		return err
 	}
