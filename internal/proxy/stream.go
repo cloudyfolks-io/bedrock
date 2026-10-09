@@ -194,6 +194,8 @@ func (c *streamConn) run(principal Principal) {
 	go c.watchShutdown()
 	c.read()
 	<-writerDone
+	c.drain()
+	_ = c.ws.Close()
 	c.hub.globalQueued.Add(-c.queued.Swap(0))
 	c.cancel()
 	c.wg.Wait()
@@ -270,10 +272,21 @@ func (c *streamConn) write(done chan<- struct{}) {
 			c.cancel()
 			if request.code != 0 {
 				_ = c.ws.WriteControl(websocket.CloseMessage, websocket.FormatCloseMessage(request.code, request.text), time.Now().Add(c.hub.opts.WriteWait))
+				_ = c.ws.SetReadDeadline(time.Now().Add(c.hub.opts.WriteWait))
 			}
-			_ = c.ws.Close()
 			return
 		}
+	}
+}
+
+func (c *streamConn) drain() {
+	_ = c.ws.SetReadDeadline(time.Now().Add(c.hub.opts.WriteWait))
+	for {
+		_, reader, err := c.ws.NextReader()
+		if err != nil {
+			return
+		}
+		_, _ = io.Copy(io.Discard, reader)
 	}
 }
 

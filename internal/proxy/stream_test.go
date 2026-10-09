@@ -382,7 +382,7 @@ func TestStreamProtocolViolationClosesWith4400(t *testing.T) {
 		conn := openStream(t, front, "alice")
 		expectFrame(t, conn, "hello")
 		if err := conn.WriteMessage(websocket.TextMessage, payload); err != nil {
-			t.Fatal(err)
+			t.Fatalf("%s: %v", name, err)
 		}
 		if code := closeCode(t, conn); code != CloseProtocol {
 			t.Errorf("%s: close code %d", name, code)
