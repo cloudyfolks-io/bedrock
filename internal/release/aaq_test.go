@@ -106,3 +106,15 @@ func TestAAQComponentIsConfigured(t *testing.T) {
 	}
 	t.Fatal("component aaq missing")
 }
+
+func TestAAQPodGateOnlyTouchesGatedNamespaces(t *testing.T) {
+	objects := aaqManifest(t, "20-aaq.yaml")
+	expressions, found, err := unstructured.NestedSlice(objects[0].Object, "spec", "namespaceSelector", "matchExpressions")
+	if err != nil || !found || len(expressions) != 1 {
+		t.Fatalf("matchExpressions %v, found %v, err %v", expressions, found, err)
+	}
+	expression := expressions[0].(map[string]any)
+	if expression["key"] != "application-aware-quota/enable-gating" || expression["operator"] != "Exists" {
+		t.Fatalf("expression = %v", expression)
+	}
+}

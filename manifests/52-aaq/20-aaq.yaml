@@ -4,6 +4,10 @@ metadata:
   name: aaq
 spec:
   imagePullPolicy: IfNotPresent
+  namespaceSelector:
+    matchExpressions:
+      - key: application-aware-quota/enable-gating
+        operator: Exists
   configuration:
     vmiCalculatorConfiguration:
       configName: VirtualResources
