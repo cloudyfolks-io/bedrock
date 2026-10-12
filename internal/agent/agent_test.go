@@ -16,6 +16,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/watch"
+	"k8s.io/client-go/util/retry"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/interceptor"
 
@@ -442,9 +443,12 @@ func createHostConfig(t *testing.T, name string, spec v1alpha1.HostConfigSpec) {
 
 func enableManagement(t *testing.T, name string) {
 	t.Helper()
-	h := getHost(t, name)
-	h.Spec.Management.Enabled = true
-	if err := k8sClient.Update(context.Background(), &h); err != nil {
+	err := retry.RetryOnConflict(retry.DefaultRetry, func() error {
+		h := getHost(t, name)
+		h.Spec.Management.Enabled = true
+		return k8sClient.Update(context.Background(), &h)
+	})
+	if err != nil {
 		t.Fatal(err)
 	}
 }
