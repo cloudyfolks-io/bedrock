@@ -52,7 +52,9 @@ func Run(ctx context.Context, c client.WithWatch, deps Deps) error {
 	defer ticker.Stop()
 	events, stop := ensureWatch(ctx, c, deps.Node)
 	defer func() { stop() }()
-	go snapshotLoop(ctx, c, deps)
+	var snapshots sync.WaitGroup
+	defer snapshots.Wait()
+	snapshots.Go(func() { snapshotLoop(ctx, c, deps) })
 	for {
 		if err := Tick(ctx, c, deps); err != nil {
 			fmt.Fprintf(os.Stderr, "agent: %v\n", err)
