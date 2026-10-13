@@ -357,3 +357,14 @@ func TestRenderStorageMutesOnlyWarningsThatReplicasExplain(t *testing.T) {
 		t.Fatalf("three replicas: %v", got)
 	}
 }
+
+func TestRenderStorageGivesCSIKernelCompatibleKeys(t *testing.T) {
+	out, err := RenderStorage(storageInput([]v1alpha1.Host{osdHost("a", "/dev/sdb")}, "1"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	keyType, _, _ := unstructured.NestedString(findObject(out.Objects, "CephCluster", "rook-ceph").Object, "spec", "security", "cephx", "csi", "keyType")
+	if keyType != "aes" {
+		t.Fatalf("csi key type %q", keyType)
+	}
+}

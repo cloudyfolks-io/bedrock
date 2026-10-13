@@ -126,6 +126,7 @@ func cephCluster(image string, hosts []v1alpha1.Host, mons int64, replicas int) 
 		"mgr":                map[string]any{"count": mgrs, "allowMultiplePerNode": len(hosts) < 2},
 		"dashboard":          map[string]any{"enabled": false},
 		"crashCollector":     map[string]any{"disable": true},
+		"security":           map[string]any{"cephx": map[string]any{"csi": map[string]any{"keyType": "aes"}}},
 		"healthCheck":        map[string]any{"muteHealthWarning": mutedHealthWarnings(replicas)},
 		"storage":            map[string]any{"useAllNodes": false, "useAllDevices": false, "nodes": nodes},
 		"priorityClassNames": map[string]any{"mon": "system-node-critical", "osd": "system-node-critical", "mgr": "system-cluster-critical"},
