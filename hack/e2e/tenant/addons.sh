@@ -36,8 +36,8 @@ addons_kata() {
   fi
   wait_reason 180 addon kata Preflight NoKVM
   wait_reason 60 addon kata Ready PreflightFailed
-  kubectl -n kube-system get daemonset kata-deploy 2>&1 | grep -q NotFound
-  kubectl get runtimeclass kata 2>&1 | grep -q NotFound
+  expect_refused NotFound kubectl -n kube-system get daemonset kata-deploy
+  expect_refused NotFound kubectl get runtimeclass kata
   expect_equal false "$(kubectl get host "$node" -o jsonpath='{.status.checks.kvm}')" "host check kvm"
   expect_equal "" "$(kubectl get node "$node" -o jsonpath='{.metadata.labels.bedrock\.cloudyfolks\.io/kvm}')" "node kvm label"
   expect_equal true "$(kubectl get addon kata -o jsonpath='{.spec.enabled}')" "kata stays enabled"
@@ -45,8 +45,8 @@ addons_kata() {
 
 addons_loki_off() {
   wait_reason 120 addon loki Ready Disabled
-  kubectl -n monitoring get statefulset loki 2>&1 | grep -q NotFound
-  kubectl -n monitoring get daemonset alloy 2>&1 | grep -q NotFound
+  expect_refused NotFound kubectl -n monitoring get statefulset loki
+  expect_refused NotFound kubectl -n monitoring get daemonset alloy
 }
 
 addons_loki_on() {
