@@ -42,7 +42,7 @@ func TestApplyRunsEveryStep(t *testing.T) {
 	if Failed(steps) {
 		t.Fatalf("steps %+v", steps)
 	}
-	for _, name := range []string{"packages", "modules", "sysctls", "units", "containerdMirrors"} {
+	for _, name := range []string{"packages", "modules", "sysctls", "units", "containerdMirrors", "containerdDevices"} {
 		if stateOf(steps, name).State != "Applied" {
 			t.Fatalf("%s: %+v", name, stateOf(steps, name))
 		}

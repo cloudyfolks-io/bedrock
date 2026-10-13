@@ -115,6 +115,10 @@ func mirrorsStep(_ context.Context, deps Deps, spec v1alpha1.HostConfigSpec) (st
 	return "", host.EnsureMirrors(deps.Root, spec.ContainerdMirrors)
 }
 
+func devicesStep(_ context.Context, deps Deps, _ v1alpha1.HostConfigSpec) (string, error) {
+	return "", host.EnsureDeviceOwnership(deps.Root)
+}
+
 func skipStep(message string) func(context.Context, Deps, v1alpha1.HostConfigSpec) (string, error) {
 	return func(context.Context, Deps, v1alpha1.HostConfigSpec) (string, error) {
 		return message, errSkipped

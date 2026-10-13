@@ -78,6 +78,7 @@ func TestRunJoinInstallsWhenNotRunning(t *testing.T) {
 		t.Fatal("expected k0s install to run when not already running")
 	}
 	assertAgentInstalled(t, root, dataDir, executable)
+	assertDeviceOwnership(t, root)
 }
 
 func controlPlaneJoinToken(t *testing.T) string {

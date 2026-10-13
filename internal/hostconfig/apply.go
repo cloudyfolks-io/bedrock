@@ -18,6 +18,7 @@ func steps() []step {
 		{name: "units", run: unitsStep},
 		{name: "nmstate", run: skipStep("applied by the nmstate handler")},
 		{name: "containerdMirrors", run: mirrorsStep},
+		{name: "containerdDevices", run: devicesStep},
 	}
 }
 

@@ -200,6 +200,10 @@ func RunInit(ctx context.Context, args []string, deps InitDeps, stdout, stderr i
 		return fail(stderr, err)
 	}
 
+	step(stdout, "containerd device ownership")
+	if err := host.EnsureDeviceOwnership(deps.Root); err != nil {
+		return fail(stderr, err)
+	}
 	if mirror := cfg.Spec.Registry.Mirror; mirror != "" {
 		step(stdout, "registry mirror %s", mirror)
 		if err := host.EnsureMirror(deps.Root, mirror); err != nil {

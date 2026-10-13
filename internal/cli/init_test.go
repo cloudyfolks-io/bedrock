@@ -267,6 +267,15 @@ func TestRunInitHappyPath(t *testing.T) {
 		t.Fatalf("stdout %s", out.String())
 	}
 	assertAgentInstalled(t, root, dataDir, executable)
+	assertDeviceOwnership(t, root)
+}
+
+func assertDeviceOwnership(t *testing.T, root string) {
+	t.Helper()
+	dropIn, err := os.ReadFile(filepath.Join(root, "etc", "k0s", "containerd.d", "cri-devices.toml"))
+	if err != nil || !strings.Contains(string(dropIn), "device_ownership_from_security_context = true") {
+		t.Fatalf("containerd device ownership drop-in %q %v", dropIn, err)
+	}
 }
 
 func TestRunInitSkipsInstallWhenAlreadyRunning(t *testing.T) {

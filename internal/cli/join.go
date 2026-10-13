@@ -106,6 +106,10 @@ func RunJoin(ctx context.Context, args []string, deps InitDeps, stdout, stderr i
 		}
 	}
 
+	step(stdout, "containerd device ownership")
+	if err := host.EnsureDeviceOwnership(deps.Root); err != nil {
+		return fail(stderr, err)
+	}
 	if token.Mirror != "" {
 		step(stdout, "registry mirror %s", token.Mirror)
 		if err := host.EnsureMirror(deps.Root, token.Mirror); err != nil {
