@@ -2,6 +2,7 @@ package backup
 
 import (
 	"context"
+	"slices"
 	"testing"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -201,4 +202,32 @@ func TestRestoreHoldPausesTheScheduleAndKeepsTheBackups(t *testing.T) {
 		t.Fatal("the schedule must run again when the hold ends")
 	}
 	requireDeleteRequests(t, map[string]bool{"held-20261007": true, "held-20261008": false})
+}
+
+func TestPruneKeepsTheBackupThatARestoreNames(t *testing.T) {
+	setLocation(t, "Available")
+	createVM(t, "pin-vm")
+	createVMB(t, "pin", v1alpha1.VirtualMachineBackupSpec{VMRef: "pin-vm", Schedule: "0 2 * * *", Keep: 1})
+	createFixtureBackup(t, "pin-20261007", "pin", "Completed", "2026-10-07T02:05:00Z")
+	createFixtureBackup(t, "pin-20261008", "pin", "Completed", "2026-10-08T02:05:00Z")
+	createFixtureBackup(t, "pin-20261009", "pin", "Completed", "2026-10-09T02:05:00Z")
+	createVMR(t, "pin-restore", projectNamespace, v1alpha1.VirtualMachineRestoreSpec{BackupRef: "pin", BackupID: "pin-20261007", Replace: true})
+	r := newBackupReconciler(testNow)
+
+	reconcileVMB(t, r, "pin")
+	requireDeleteRequests(t, map[string]bool{"pin-20261007": false, "pin-20261008": true, "pin-20261009": false})
+	ids := []string{}
+	for _, record := range getVMB(t, "pin").Status.Backups {
+		ids = append(ids, record.ID)
+	}
+	if !slices.Equal(ids, []string{"pin-20261009", "pin-20261007"}) {
+		t.Fatalf("status backups %v", ids)
+	}
+
+	vmr := &v1alpha1.VirtualMachineRestore{ObjectMeta: metav1.ObjectMeta{Name: "pin-restore", Namespace: projectNamespace}}
+	if err := k8sClient.Delete(context.Background(), vmr); err != nil {
+		t.Fatal(err)
+	}
+	reconcileVMB(t, r, "pin")
+	requireDeleteRequests(t, map[string]bool{"pin-20261007": true})
 }

@@ -513,7 +513,11 @@ func (r *BackupReconciler) prune(ctx context.Context, vmb *v1alpha1.VirtualMachi
 		return nil, err
 	}
 	live := withoutIDs(infos, deleting)
-	doomed := Prune(live, KeepOf(*vmb))
+	restores := &v1alpha1.VirtualMachineRestoreList{}
+	if err := r.Client.List(ctx, restores, client.InNamespace(vmb.Namespace)); err != nil {
+		return nil, err
+	}
+	doomed := Unpinned(Prune(live, KeepOf(*vmb)), restores.Items)
 	for _, id := range doomed {
 		if err := r.requestDeletion(ctx, scope, id); err != nil {
 			return nil, err

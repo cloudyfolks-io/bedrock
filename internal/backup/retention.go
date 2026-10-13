@@ -4,6 +4,8 @@ import (
 	"slices"
 	"strings"
 	"time"
+
+	"github.com/cloudyfolks-io/bedrock/api/v1alpha1"
 )
 
 type BackupInfo struct {
@@ -43,4 +45,12 @@ func Prune(infos []BackupInfo, keep int) []string {
 		ids = append(ids, done[i].ID)
 	}
 	return ids
+}
+
+func Unpinned(ids []string, restores []v1alpha1.VirtualMachineRestore) []string {
+	return slices.DeleteFunc(slices.Clone(ids), func(id string) bool {
+		return slices.ContainsFunc(restores, func(restore v1alpha1.VirtualMachineRestore) bool {
+			return restore.Spec.BackupID == id
+		})
+	})
 }
