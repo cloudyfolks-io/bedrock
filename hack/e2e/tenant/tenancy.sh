@@ -187,9 +187,10 @@ pod_is_gated() {
 }
 
 tenancy_quota_edges() {
-  as_user alice patch project "$PROJECT" --type merge -p '{"spec":{"quota":{"cpu":"6"}}}'
-  wait_reason 120 project "$PROJECT" QuotaReady TenantQuotaExceeded
-  expect_equal 4 "$(kubectl -n "$NS" get applicationawareresourcequotas.aaq.kubevirt.io project-quota -o jsonpath='{.spec.hard.requests\.cpu}')" "aaq cpu keeps its value"
-  as_user alice patch project "$PROJECT" --type merge -p '{"spec":{"quota":{"cpu":"4"}}}'
-  wait_condition 120 project "$PROJECT" QuotaReady True
+  as_user alice patch project data --type merge -p '{"spec":{"quota":{"cpu":"6"}}}'
+  wait_reason 120 project data QuotaReady TenantQuotaExceeded
+  expect_equal 4 "$(kubectl -n "$TENANT-data" get applicationawareresourcequotas.aaq.kubevirt.io project-quota -o jsonpath='{.spec.hard.requests\.cpu}')" "aaq cpu keeps its value"
+  expect_equal True "$(kubectl get project "$PROJECT" -o jsonpath='{.status.conditions[?(@.type=="QuotaReady")].status}')" "older project keeps its quota"
+  as_user alice patch project data --type merge -p '{"spec":{"quota":{"cpu":"4"}}}'
+  wait_condition 120 project data QuotaReady True
 }
