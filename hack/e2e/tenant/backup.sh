@@ -40,11 +40,11 @@ spec:
   vmRef: vm1
   target: default
 BACKUP
-  wait_jsonpath 900 Completed -n "$NS" get virtualmachinebackup once -o jsonpath='{.status.phase}'
-  id=$(kubectl -n "$NS" get virtualmachinebackup once -o jsonpath='{.status.backups[0].id}')
+  wait_jsonpath 900 Completed -n "$NS" get virtualmachinebackups.bedrock.cloudyfolks.io once -o jsonpath='{.status.phase}'
+  id=$(kubectl -n "$NS" get virtualmachinebackups.bedrock.cloudyfolks.io once -o jsonpath='{.status.backups[0].id}')
   test -n "$id"
-  expect_equal 1 "$(kubectl -n "$NS" get virtualmachinebackup once -o json | jq '.status.backups | length')" "backup entries"
-  wait_not_empty 60 -n "$NS" get virtualmachinebackup once -o jsonpath='{.status.lastBackup}'
+  expect_equal 1 "$(kubectl -n "$NS" get virtualmachinebackups.bedrock.cloudyfolks.io once -o json | jq '.status.backups | length')" "backup entries"
+  wait_not_empty 60 -n "$NS" get virtualmachinebackups.bedrock.cloudyfolks.io once -o jsonpath='{.status.lastBackup}'
   expect_equal Completed "$(kubectl -n velero get backup "$id" -o jsonpath='{.status.phase}')" "velero backup phase"
   expect_equal vm1 "$(kubectl -n "$NS" get virtualmachine vm1 -o jsonpath='{.metadata.labels.bedrock\.cloudyfolks\.io/backup-vm}')" "backup label on the VM"
   retry_until 120 listing_has "$id"
