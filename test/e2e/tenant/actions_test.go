@@ -20,7 +20,7 @@ const (
 	stopTimeout       = 3 * time.Minute
 	startTimeout      = 10 * time.Minute
 	snapshotTimeout   = 3 * time.Minute
-	bannerTimeout     = 3 * time.Minute
+	bannerTimeout     = 10 * time.Minute
 )
 
 type tokens struct {

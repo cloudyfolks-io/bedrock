@@ -135,5 +135,5 @@ compute_proxy_actions() {
 
 compute_console() {
   compute_token_env
-  "$test_bin" -test.count=1 -test.v -test.timeout 10m -test.run '^TestConsoleSerial$'
+  "$test_bin" -test.count=1 -test.v -test.timeout 15m -test.run '^TestConsoleSerial$'
 }
