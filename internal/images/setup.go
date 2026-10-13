@@ -6,8 +6,6 @@ import (
 	"time"
 
 	corev1 "k8s.io/api/core/v1"
-	apierrors "k8s.io/apimachinery/pkg/api/errors"
-	"k8s.io/apimachinery/pkg/api/meta"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	ctrl "sigs.k8s.io/controller-runtime"
@@ -18,6 +16,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	"github.com/cloudyfolks-io/bedrock/api/v1alpha1"
+	"github.com/cloudyfolks-io/bedrock/internal/kinds"
 )
 
 type ImageReconciler struct {
@@ -76,13 +75,10 @@ func clusterImageStatus(img *v1alpha1.ClusterImage) *v1alpha1.ImageStatus {
 }
 
 func SetupWithManager(mgr ctrl.Manager) error {
-	if _, err := mgr.GetRESTMapper().RESTMapping(DataVolumeGVK.GroupKind(), DataVolumeGVK.Version); err != nil {
-		if meta.IsNoMatchError(err) || apierrors.IsNotFound(err) {
-			mgr.GetLogger().WithName("images").Info("images controllers skipped: CDI kinds are not installed")
-			return nil
-		}
-		return err
-	}
+	return kinds.SetupWhenServed(mgr, "images", ownedGVKs, setupControllers)
+}
+
+func setupControllers(mgr ctrl.Manager) error {
 	images := ownedKinds(ctrl.NewControllerManagedBy(mgr).Named("image").For(&v1alpha1.Image{})).
 		Watches(&v1alpha1.Setting{}, handler.EnqueueRequestsFromMapFunc(enqueueImages(mgr.GetClient())), builder.WithPredicates(platformSettings()))
 	if err := images.Complete(&ImageReconciler{Client: mgr.GetClient(), Now: time.Now}); err != nil {
@@ -127,8 +123,10 @@ func enqueueClusterImages(c client.Reader) handler.MapFunc {
 	}
 }
 
+var ownedGVKs = []schema.GroupVersionKind{DataVolumeGVK, DataImportCronGVK, DataSourceGVK, VolumeSnapshotGVK}
+
 func ownedKinds(builder *ctrl.Builder) *ctrl.Builder {
-	for _, gvk := range []schema.GroupVersionKind{DataVolumeGVK, DataImportCronGVK, DataSourceGVK, VolumeSnapshotGVK} {
+	for _, gvk := range ownedGVKs {
 		builder = builder.Owns(unstructuredOf(gvk))
 	}
 	return builder

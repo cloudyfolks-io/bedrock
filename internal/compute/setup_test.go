@@ -19,6 +19,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/cache"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/config"
+	"sigs.k8s.io/controller-runtime/pkg/envtest"
 	"sigs.k8s.io/controller-runtime/pkg/metrics/server"
 
 	"github.com/cloudyfolks-io/bedrock/api/v1alpha1"
@@ -189,4 +190,24 @@ func TestSetupSkipsWithoutKubeVirtCRDs(t *testing.T) {
 	if len(vm.Status.Conditions) != 0 || vm.Status.Phase != "" {
 		t.Fatalf("status %+v", vm.Status)
 	}
+}
+
+func TestSetupRegistersWhenKubeVirtCRDsArrive(t *testing.T) {
+	c, cfg := startFreshEnv(t, testenv.CRDPaths()[:1])
+	lines := &logLines{}
+	startManager(t, cfg, lines)
+	ns := uniqueNamespace(t, c)
+	createObject(t, c, &v1alpha1.SSHKey{ObjectMeta: metav1.ObjectMeta{Namespace: ns, Name: "bob"}, Spec: v1alpha1.SSHKeySpec{PublicKey: ed25519Key(t)}})
+	eventually(t, "the wait log line", func() bool { return lines.matching("the controllers wait until the required kinds are served") == 1 })
+
+	_, err := envtest.InstallCRDs(cfg, envtest.CRDInstallOptions{Paths: testenv.CRDPaths()[1:], ErrorIfPathMissing: true})
+	must(t, err)
+
+	eventually(t, "the SSH key condition", func() bool {
+		var key v1alpha1.SSHKey
+		if err := c.Get(context.Background(), client.ObjectKey{Namespace: ns, Name: "bob"}, &key); err != nil {
+			return false
+		}
+		return v1alpha1.IsConditionTrue(key.Status.Conditions, v1alpha1.ConditionReady)
+	})
 }

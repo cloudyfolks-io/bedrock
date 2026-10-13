@@ -7,12 +7,12 @@ import (
 	"net/http"
 	"time"
 
-	"k8s.io/apimachinery/pkg/api/meta"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/client-go/rest"
 	ctrl "sigs.k8s.io/controller-runtime"
 
 	"github.com/cloudyfolks-io/bedrock/api/v1alpha1"
+	"github.com/cloudyfolks-io/bedrock/internal/kinds"
 )
 
 var requiredKinds = []schema.GroupVersionKind{
@@ -26,20 +26,11 @@ var requiredKinds = []schema.GroupVersionKind{
 	preferenceGVK,
 }
 
-func missingKind(mapper meta.RESTMapper) (schema.GroupVersionKind, bool) {
-	for _, gvk := range requiredKinds {
-		if _, err := mapper.RESTMapping(gvk.GroupKind(), gvk.Version); err != nil {
-			return gvk, true
-		}
-	}
-	return schema.GroupVersionKind{}, false
+func SetupWithManager(mgr ctrl.Manager) error {
+	return kinds.SetupWhenServed(mgr, "compute", requiredKinds, setupControllers)
 }
 
-func SetupWithManager(mgr ctrl.Manager) error {
-	if gvk, missing := missingKind(mgr.GetRESTMapper()); missing {
-		mgr.GetLogger().WithName("compute").Info("the compute controllers stay idle until the operator restarts with the kind served", "kind", gvk.String())
-		return nil
-	}
+func setupControllers(mgr ctrl.Manager) error {
 	vms := &VirtualMachineReconciler{Client: mgr.GetClient(), Secrets: mgr.GetAPIReader(), Scheme: mgr.GetScheme(), GuestInfo: guestInfoFrom(mgr.GetConfig()), Now: time.Now}
 	for _, setup := range []func(ctrl.Manager) error{
 		vms.SetupWithManager,

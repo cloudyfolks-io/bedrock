@@ -17,6 +17,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 	"sigs.k8s.io/controller-runtime/pkg/client/interceptor"
 	"sigs.k8s.io/controller-runtime/pkg/config"
+	"sigs.k8s.io/controller-runtime/pkg/envtest"
 	metricsserver "sigs.k8s.io/controller-runtime/pkg/metrics/server"
 
 	"github.com/cloudyfolks-io/bedrock/api/v1alpha1"
@@ -192,5 +193,36 @@ func TestManagerReconcilesAnImage(t *testing.T) {
 	})
 	if err != nil {
 		t.Fatalf("image was not reconciled: %v %+v", err, got.Status)
+	}
+}
+
+func TestSetupRegistersWhenCDIKindsArrive(t *testing.T) {
+	c, cfg := startEnvWithCRDs(t, testenv.CRDPaths()[:1])
+	mgr := managerFor(t, cfg)
+	if err := SetupWithManager(mgr); err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+	go func() { _ = mgr.Start(ctx) }()
+	tenantNamespace(t, c, "acme-web")
+	img := httpImage("rocky", "acme-web")
+	if err := c.Create(ctx, img); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := envtest.InstallCRDs(cfg, envtest.CRDInstallOptions{Paths: testenv.CRDPaths()[1:], ErrorIfPathMissing: true}); err != nil {
+		t.Fatal(err)
+	}
+
+	var got v1alpha1.Image
+	err := wait.PollUntilContextTimeout(ctx, 500*time.Millisecond, time.Minute, true, func(ctx context.Context) (bool, error) {
+		if err := c.Get(ctx, client.ObjectKeyFromObject(img), &got); err != nil {
+			return false, nil
+		}
+		return got.Status.Phase == "Pending" && !isGone(c, DataVolumeGVK, "acme-web", "rocky-import"), nil
+	})
+	if err != nil {
+		t.Fatalf("image was not reconciled after the CDI kinds arrived: %v %+v", err, got.Status)
 	}
 }
