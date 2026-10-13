@@ -1,0 +1,18 @@
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: bedrock-kubevirt
+  namespace: monitoring
+spec:
+  namespaceSelector:
+    matchNames:
+      - kubevirt
+  selector:
+    matchLabels:
+      prometheus.kubevirt.io: "true"
+  endpoints:
+    - port: metrics
+      scheme: https
+      honorLabels: true
+      tlsConfig:
+        insecureSkipVerify: true

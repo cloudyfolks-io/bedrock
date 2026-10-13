@@ -237,3 +237,20 @@ func TestDashboardsSelectProjectsThroughTheNamespaceLabels(t *testing.T) {
 		}
 	}
 }
+
+func TestKubeVirtServiceMonitorScrapesTheMetricsService(t *testing.T) {
+	monitor := objectNamed(sourceObjects(t), "ServiceMonitor", "bedrock-kubevirt")
+	if monitor == nil {
+		t.Fatal("missing ServiceMonitor bedrock-kubevirt")
+	}
+	selector, _, _ := unstructured.NestedStringMap(monitor.Object, "spec", "selector", "matchLabels")
+	namespaces, _, _ := unstructured.NestedStringSlice(monitor.Object, "spec", "namespaceSelector", "matchNames")
+	endpoints, _, _ := unstructured.NestedSlice(monitor.Object, "spec", "endpoints")
+	if selector["prometheus.kubevirt.io"] != "true" || !slices.Equal(namespaces, []string{"kubevirt"}) || len(endpoints) != 1 {
+		t.Fatalf("selector %v namespaces %v endpoints %v", selector, namespaces, endpoints)
+	}
+	endpoint := endpoints[0].(map[string]any)
+	if endpoint["port"] != "metrics" || endpoint["scheme"] != "https" || endpoint["honorLabels"] != true {
+		t.Fatalf("endpoint %v", endpoint)
+	}
+}
