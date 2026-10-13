@@ -296,7 +296,11 @@ func isFresh(vmb *v1alpha1.VirtualMachineBackup) bool {
 
 func (r *BackupReconciler) ensureVelero(ctx context.Context, vmb *v1alpha1.VirtualMachineBackup, desired *unstructured.Unstructured, labels map[string]string) ([]unstructured.Unstructured, error) {
 	if desired.GetKind() == "Schedule" {
-		if err := ssa.Apply(ctx, r.Client, desired, v1alpha1.BackupFieldManager); err != nil {
+		applied, err := r.skippingWhenResumed(ctx, desired)
+		if err != nil {
+			return nil, err
+		}
+		if err := ssa.Apply(ctx, r.Client, applied, v1alpha1.BackupFieldManager); err != nil {
 			return nil, err
 		}
 		return r.listVelero(ctx, backupListGVK, labels)
@@ -309,6 +313,24 @@ func (r *BackupReconciler) ensureVelero(ctx context.Context, vmb *v1alpha1.Virtu
 		return nil, err
 	}
 	return r.listVelero(ctx, backupListGVK, labels)
+}
+
+func (r *BackupReconciler) skippingWhenResumed(ctx context.Context, desired *unstructured.Unstructured) (*unstructured.Unstructured, error) {
+	if IsPaused(desired) {
+		return desired, nil
+	}
+	live := veleroStub("Schedule", desired.GetName())
+	err := r.Client.Get(ctx, client.ObjectKeyFromObject(live), live)
+	if apierrors.IsNotFound(err) {
+		return desired, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	if IsPaused(live) || skipsOverdue(live) {
+		return SkippingOverdue(desired), nil
+	}
+	return desired, nil
 }
 
 func (r *BackupReconciler) veleroFailure(ctx context.Context, vmb *v1alpha1.VirtualMachineBackup, err error) (ctrl.Result, error) {

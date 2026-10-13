@@ -6,6 +6,8 @@ import (
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/apimachinery/pkg/types"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	"github.com/cloudyfolks-io/bedrock/api/v1alpha1"
 )
@@ -81,18 +83,84 @@ func TestDeletingTheVMKeepsItsBackupsAndPausesTheSchedule(t *testing.T) {
 		t.Fatal("the schedule of a deleted VM must be paused")
 	}
 
-	createFixtureBackup(t, "orphan-20261007", "orphan", "Completed", "2026-10-07T02:05:00Z")
-	createFixtureBackup(t, "orphan-20261008", "orphan", "Completed", "2026-10-08T02:05:00Z")
-	createFixtureBackup(t, "orphan-20261009", "orphan", "Completed", "2026-10-09T02:05:00Z")
+	extras := []string{"orphan-20261007", "orphan-20261008", "orphan-20261009"}
+	for _, id := range extras {
+		createFixtureBackup(t, id, "orphan", "Completed", "2026-10-07T02:05:00Z")
+	}
 	reconcileVMB(t, r, "orphan")
 	requireDeleteRequests(t, map[string]bool{"orphan-20261005": false, "orphan-20261006": false, "orphan-20261007": false})
+	for _, id := range extras {
+		backup, err := getVelero(t, "Backup", id)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := k8sClient.Delete(context.Background(), backup); err != nil {
+			t.Fatal(err)
+		}
+	}
 
 	createVM(t, "orphan-vm")
 	reconcileVMB(t, r, "orphan")
 	if scheduleIsPaused(t, "orphan") {
 		t.Fatal("the schedule must run again when the VM exists again")
 	}
-	requireDeleteRequests(t, map[string]bool{"orphan-20261005": true, "orphan-20261006": true, "orphan-20261007": true, "orphan-20261008": false, "orphan-20261009": false})
+	requireDeleteRequests(t, map[string]bool{"orphan-20261005": false, "orphan-20261006": false})
+	requireVMBIntact(t, "orphan", "orphan-20261005", "orphan-20261006")
+}
+
+func scheduleSkipsImmediately(t *testing.T, vmb string) bool {
+	t.Helper()
+	schedule, err := getVelero(t, "Schedule", VeleroName("vmb", projectNamespace, vmb))
+	if err != nil {
+		t.Fatal(err)
+	}
+	skips, _, _ := unstructured.NestedBool(schedule.Object, "spec", "skipImmediately")
+	return skips
+}
+
+func veleroConsumesTheSkip(t *testing.T, vmb string) {
+	t.Helper()
+	schedule, err := getVelero(t, "Schedule", VeleroName("vmb", projectNamespace, vmb))
+	if err != nil {
+		t.Fatal(err)
+	}
+	patch := client.RawPatch(types.MergePatchType, []byte(`{"spec":{"skipImmediately":false}}`))
+	if err := k8sClient.Patch(context.Background(), schedule, patch, client.FieldOwner("velero")); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestResumingTheScheduleSkipsTheOverdueBackup(t *testing.T) {
+	setLocation(t, "Available")
+	createVM(t, "resume-vm")
+	createVMB(t, "resume", v1alpha1.VirtualMachineBackupSpec{VMRef: "resume-vm", Schedule: "0 2 * * *"})
+	r := newBackupReconciler(testNow)
+	reconcileVMB(t, r, "resume")
+	if scheduleSkipsImmediately(t, "resume") {
+		t.Fatal("a schedule that never paused must not skip")
+	}
+
+	deleteVM(t, "resume-vm")
+	reconcileVMB(t, r, "resume")
+	if !scheduleIsPaused(t, "resume") || scheduleSkipsImmediately(t, "resume") {
+		t.Fatal("a paused schedule has nothing to skip")
+	}
+
+	createVM(t, "resume-vm")
+	reconcileVMB(t, r, "resume")
+	if scheduleIsPaused(t, "resume") || !scheduleSkipsImmediately(t, "resume") {
+		t.Fatal("the resuming apply must unpause the schedule and skip the overdue backup")
+	}
+	reconcileVMB(t, r, "resume")
+	if !scheduleSkipsImmediately(t, "resume") {
+		t.Fatal("the skip stays until Velero has used it")
+	}
+
+	veleroConsumesTheSkip(t, "resume")
+	reconcileVMB(t, r, "resume")
+	if scheduleSkipsImmediately(t, "resume") {
+		t.Fatal("a later apply must not skip a real tick of the schedule")
+	}
 }
 
 func TestDeletingTheVMKeepsAOneShotBackup(t *testing.T) {

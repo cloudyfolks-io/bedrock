@@ -157,6 +157,17 @@ func Paused(obj *unstructured.Unstructured) *unstructured.Unstructured {
 	return paused
 }
 
+func SkippingOverdue(schedule *unstructured.Unstructured) *unstructured.Unstructured {
+	skipping := schedule.DeepCopy()
+	_ = unstructured.SetNestedField(skipping.Object, true, "spec", "skipImmediately")
+	return skipping
+}
+
+func skipsOverdue(schedule *unstructured.Unstructured) bool {
+	skips, _, _ := unstructured.NestedBool(schedule.Object, "spec", "skipImmediately")
+	return skips
+}
+
 func IsPaused(obj *unstructured.Unstructured) bool {
 	paused, _, _ := unstructured.NestedBool(obj.Object, "spec", "paused")
 	return paused
