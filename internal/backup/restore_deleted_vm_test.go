@@ -284,3 +284,42 @@ func TestRestoreOfADeletedVMKeepsTheHoldWhileTheTargetIsUnavailable(t *testing.T
 		t.Fatalf("the VM was created again: %v %s/%s", err, created.UID, resumed.UID)
 	}
 }
+
+func TestRestoreReplaceChecksTheCopyOfTheVM(t *testing.T) {
+	cases := map[string]func(restoreFixture) string{
+		"replacename": func(fx restoreFixture) string {
+			return strings.Replace(snapshotFor(fx), `"name":"`+fx.vm+`"`, `"name":"other"`, 1)
+		},
+		"replacespace": func(fx restoreFixture) string {
+			return strings.Replace(snapshotFor(fx), `"namespace":"`+projectNamespace+`"`, `"namespace":"other"`, 1)
+		},
+	}
+	for name, build := range cases {
+		fx := fixtureOf(name)
+		readyForRestore(t, fx)
+		annotateBackup(t, fx.backupID, map[string]string{VMSnapshotAnnotation: build(fx)})
+		createVM(t, fx.vm, fx.volume)
+		createKubeVirtObjects(t, fx)
+		createVMBWithBackups(t, projectNamespace, fx)
+		createVMR(t, name+"-restore", projectNamespace, v1alpha1.VirtualMachineRestoreSpec{BackupRef: fx.vmb, BackupID: fx.backupID, Replace: true})
+		reconcileVMR(t, newRestoreReconciler(), projectNamespace, name+"-restore")
+		requireRestoreState(t, getVMR(t, name+"-restore"), v1alpha1.RestorePhaseFailed, metav1.ConditionFalse, RestoreReasonSpecInvalid)
+		requireUnderlyingIntact(t, fx)
+		requireNoRestore(t, name+"-restore")
+		if hold := holdOf(t, &v1alpha1.VirtualMachine{ObjectMeta: metav1.ObjectMeta{Name: fx.vm, Namespace: projectNamespace}}); hold != "" {
+			t.Fatalf("%s: hold %q", name, hold)
+		}
+	}
+}
+
+func TestRestoreReplaceAcceptsTheCopyOfTheSameVM(t *testing.T) {
+	fx := fixtureOf("replacesame")
+	readyForRestore(t, fx)
+	annotateBackup(t, fx.backupID, map[string]string{VMSnapshotAnnotation: snapshotFor(fx)})
+	createVM(t, fx.vm, fx.volume)
+	createKubeVirtObjects(t, fx)
+	createVMBWithBackups(t, projectNamespace, fx)
+	createVMR(t, "replacesame-restore", projectNamespace, v1alpha1.VirtualMachineRestoreSpec{BackupRef: fx.vmb, BackupID: fx.backupID, Replace: true})
+	reconcileVMR(t, newRestoreReconciler(), projectNamespace, "replacesame-restore")
+	requireRestoreState(t, getVMR(t, "replacesame-restore"), v1alpha1.RestorePhaseInProgress, metav1.ConditionFalse, RestoreReasonPreparing)
+}

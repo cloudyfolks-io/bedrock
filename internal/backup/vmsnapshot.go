@@ -69,7 +69,7 @@ func SnapshotProblem(size int) *metav1.Condition {
 	}
 }
 
-func VMFromSnapshot(raw, name string) (v1alpha1.VirtualMachine, error) {
+func VMFromSnapshot(raw, namespace, name string) (v1alpha1.VirtualMachine, error) {
 	var parsed vmSnapshot
 	if err := json.Unmarshal([]byte(raw), &parsed); err != nil {
 		return v1alpha1.VirtualMachine{}, fmt.Errorf("the VM snapshot is not valid JSON: %w", err)
@@ -77,11 +77,11 @@ func VMFromSnapshot(raw, name string) (v1alpha1.VirtualMachine, error) {
 	if parsed.APIVersion != v1alpha1.GroupVersion.String() || parsed.Kind != virtualMachineKind {
 		return v1alpha1.VirtualMachine{}, fmt.Errorf("the VM snapshot holds a %s of %s, not a %s of %s", parsed.Kind, parsed.APIVersion, virtualMachineKind, v1alpha1.GroupVersion)
 	}
-	if parsed.Metadata.Name != name {
-		return v1alpha1.VirtualMachine{}, fmt.Errorf("the VM snapshot is for the VM %q, not %q", parsed.Metadata.Name, name)
+	if parsed.Metadata.Name != name || parsed.Metadata.Namespace != namespace {
+		return v1alpha1.VirtualMachine{}, fmt.Errorf("the VM snapshot is for the VM %q in %q, not %q in %q", parsed.Metadata.Name, parsed.Metadata.Namespace, name, namespace)
 	}
 	return v1alpha1.VirtualMachine{
-		ObjectMeta: metav1.ObjectMeta{Name: name, Labels: owned(parsed.Metadata.Labels), Annotations: owned(parsed.Metadata.Annotations)},
+		ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: namespace, Labels: owned(parsed.Metadata.Labels), Annotations: owned(parsed.Metadata.Annotations)},
 		Spec:       parsed.Spec,
 	}, nil
 }

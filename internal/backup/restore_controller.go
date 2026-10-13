@@ -182,6 +182,10 @@ func (r *RestoreReconciler) start(ctx context.Context, vmr *v1alpha1.VirtualMach
 	if err != nil || halted != nil {
 		return orZero(halted), err
 	}
+	restored, halted := vmFromBackup(backup, scope.Namespace, vm)
+	if halted != nil {
+		return *halted, nil
+	}
 	if vmr.Spec.Replace {
 		gone, err := r.prepare(ctx, vmr, scope, bedrockVM)
 		if err != nil || !gone {
@@ -189,7 +193,7 @@ func (r *RestoreReconciler) start(ctx context.Context, vmr *v1alpha1.VirtualMach
 		}
 		return r.launch(ctx, vmr, scope, backupID)
 	}
-	if halted, err := r.recreate(ctx, vmr, scope, vm, backup, bedrockVM); err != nil || halted != nil {
+	if halted, err := r.recreate(ctx, vmr, scope, vm, restored, bedrockVM); err != nil || halted != nil {
 		return orZero(halted), err
 	}
 	return r.launch(ctx, vmr, scope, backupID)
@@ -236,9 +240,22 @@ func (r *RestoreReconciler) preconditions(ctx context.Context, backupID string) 
 	return backup, nil, nil
 }
 
-func (r *RestoreReconciler) recreate(ctx context.Context, vmr *v1alpha1.VirtualMachineRestore, scope Scope, vm string, backup *unstructured.Unstructured, existing *v1alpha1.VirtualMachine) (*stop, error) {
+func vmFromBackup(backup *unstructured.Unstructured, namespace, name string) (*v1alpha1.VirtualMachine, *stop) {
+	snapshot := backup.GetAnnotations()[VMSnapshotAnnotation]
+	if snapshot == "" {
+		return nil, nil
+	}
+	restored, err := VMFromSnapshot(snapshot, namespace, name)
+	if err != nil {
+		next := halt(v1alpha1.RestorePhaseFailed, RestoreReasonSpecInvalid, err.Error(), 0)
+		return nil, &next
+	}
+	return &restored, nil
+}
+
+func (r *RestoreReconciler) recreate(ctx context.Context, vmr *v1alpha1.VirtualMachineRestore, scope Scope, vm string, restored, existing *v1alpha1.VirtualMachine) (*stop, error) {
 	if existing == nil {
-		if halted, err := r.createHeldVM(ctx, vmr, scope, vm, backup); err != nil || halted != nil {
+		if halted, err := r.createHeldVM(ctx, vmr, vm, restored); err != nil || halted != nil {
 			return halted, err
 		}
 	}
@@ -250,20 +267,14 @@ func (r *RestoreReconciler) recreate(ctx context.Context, vmr *v1alpha1.VirtualM
 	return nil, nil
 }
 
-func (r *RestoreReconciler) createHeldVM(ctx context.Context, vmr *v1alpha1.VirtualMachineRestore, scope Scope, vm string, backup *unstructured.Unstructured) (*stop, error) {
-	snapshot := backup.GetAnnotations()[VMSnapshotAnnotation]
-	if snapshot == "" {
+func (r *RestoreReconciler) createHeldVM(ctx context.Context, vmr *v1alpha1.VirtualMachineRestore, vm string, restored *v1alpha1.VirtualMachine) (*stop, error) {
+	if restored == nil {
 		next := halt(v1alpha1.RestorePhaseFailed, RestoreReasonSpecMissing, "the backup has no VM spec because an older release made it; create the VM again and restore with replace", 0)
 		return &next, nil
 	}
-	restored, err := VMFromSnapshot(snapshot, vm)
-	if err != nil {
-		next := halt(v1alpha1.RestorePhaseFailed, RestoreReasonSpecInvalid, err.Error(), 0)
-		return &next, nil
-	}
-	restored.Namespace = scope.Namespace
-	restored.Annotations = WithHold(restored.Annotations, vmr.Name)
-	err = r.Client.Create(ctx, &restored, client.FieldOwner(v1alpha1.BackupFieldManager))
+	held := restored.DeepCopy()
+	held.Annotations = WithHold(held.Annotations, vmr.Name)
+	err := r.Client.Create(ctx, held, client.FieldOwner(v1alpha1.BackupFieldManager))
 	switch {
 	case apierrors.IsAlreadyExists(err):
 		next := targetExists(vm)

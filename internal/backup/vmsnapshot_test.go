@@ -210,19 +210,19 @@ func TestVMFromSnapshotRestoresTheSpecAndTheOwnedMetadata(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	restored, err := VMFromSnapshot(snapshot, "web")
+	restored, err := VMFromSnapshot(snapshot, "acme-prod", "web")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if restored.Name != "web" || restored.Namespace != "" || !reflect.DeepEqual(restored.Spec, vm.Spec) || !reflect.DeepEqual(restored.Labels, vm.Labels) || !reflect.DeepEqual(restored.Annotations, vm.Annotations) {
+	if restored.Name != "web" || restored.Namespace != "acme-prod" || !reflect.DeepEqual(restored.Spec, vm.Spec) || !reflect.DeepEqual(restored.Labels, vm.Labels) || !reflect.DeepEqual(restored.Annotations, vm.Annotations) {
 		t.Fatalf("restored %+v", restored)
 	}
 }
 
 func TestVMFromSnapshotDropsTheKeysThatItDoesNotOwn(t *testing.T) {
-	snapshot := `{"apiVersion":"bedrock.cloudyfolks.io/v1alpha1","kind":"VirtualMachine","metadata":{"name":"web","labels":{"velero.io/exclude-from-backup":"true","team":"x"},` +
+	snapshot := `{"apiVersion":"bedrock.cloudyfolks.io/v1alpha1","kind":"VirtualMachine","metadata":{"name":"web","namespace":"acme-prod","labels":{"velero.io/exclude-from-backup":"true","team":"x"},` +
 		`"annotations":{"bedrock.cloudyfolks.io/restore-hold":"forged","bedrock.cloudyfolks.io/future":"x"}},"spec":{"instanceType":"small","rootDisk":{"sizeGi":10}}}`
-	restored, err := VMFromSnapshot(snapshot, "web")
+	restored, err := VMFromSnapshot(snapshot, "acme-prod", "web")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -234,12 +234,14 @@ func TestVMFromSnapshotDropsTheKeysThatItDoesNotOwn(t *testing.T) {
 func TestVMFromSnapshotRefusesJunk(t *testing.T) {
 	cases := map[string]string{
 		"not json":      "not json",
-		"another name":  `{"apiVersion":"bedrock.cloudyfolks.io/v1alpha1","kind":"VirtualMachine","metadata":{"name":"other"},"spec":{"instanceType":"small","rootDisk":{"sizeGi":10}}}`,
-		"another kind":  `{"apiVersion":"bedrock.cloudyfolks.io/v1alpha1","kind":"Volume","metadata":{"name":"web"},"spec":{}}`,
-		"another group": `{"apiVersion":"kubevirt.io/v1","kind":"VirtualMachine","metadata":{"name":"web"},"spec":{}}`,
+		"another name":  `{"apiVersion":"bedrock.cloudyfolks.io/v1alpha1","kind":"VirtualMachine","metadata":{"name":"other","namespace":"acme-prod"},"spec":{"instanceType":"small","rootDisk":{"sizeGi":10}}}`,
+		"another space": `{"apiVersion":"bedrock.cloudyfolks.io/v1alpha1","kind":"VirtualMachine","metadata":{"name":"web","namespace":"acme-test"},"spec":{"instanceType":"small","rootDisk":{"sizeGi":10}}}`,
+		"no namespace":  `{"apiVersion":"bedrock.cloudyfolks.io/v1alpha1","kind":"VirtualMachine","metadata":{"name":"web"},"spec":{"instanceType":"small","rootDisk":{"sizeGi":10}}}`,
+		"another kind":  `{"apiVersion":"bedrock.cloudyfolks.io/v1alpha1","kind":"Volume","metadata":{"name":"web","namespace":"acme-prod"},"spec":{}}`,
+		"another group": `{"apiVersion":"kubevirt.io/v1","kind":"VirtualMachine","metadata":{"name":"web","namespace":"acme-prod"},"spec":{}}`,
 	}
 	for name, snapshot := range cases {
-		if _, err := VMFromSnapshot(snapshot, "web"); err == nil {
+		if _, err := VMFromSnapshot(snapshot, "acme-prod", "web"); err == nil {
 			t.Errorf("%s: want an error", name)
 		}
 	}
