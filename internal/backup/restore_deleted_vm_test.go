@@ -323,3 +323,20 @@ func TestRestoreReplaceAcceptsTheCopyOfTheSameVM(t *testing.T) {
 	reconcileVMR(t, newRestoreReconciler(), projectNamespace, "replacesame-restore")
 	requireRestoreState(t, getVMR(t, "replacesame-restore"), v1alpha1.RestorePhaseInProgress, metav1.ConditionFalse, RestoreReasonPreparing)
 }
+
+func TestRestoreReplaceRefusesAVMThatAnotherRestoreHolds(t *testing.T) {
+	fx := fixtureOf("busy")
+	readyForRestore(t, fx)
+	createVM(t, fx.vm, fx.volume)
+	createKubeVirtObjects(t, fx)
+	updateVM(t, fx.vm, func(vm *v1alpha1.VirtualMachine) { vm.Annotations = map[string]string{HoldAnnotation: "someone-else"} })
+	createVMBWithBackups(t, projectNamespace, fx)
+	createVMR(t, "busy-restore", projectNamespace, v1alpha1.VirtualMachineRestoreSpec{BackupRef: fx.vmb, BackupID: fx.backupID, Replace: true})
+	reconcileVMR(t, newRestoreReconciler(), projectNamespace, "busy-restore")
+	requireRestoreState(t, getVMR(t, "busy-restore"), v1alpha1.RestorePhasePending, metav1.ConditionFalse, RestoreReasonTargetBusy)
+	requireNoRestore(t, "busy-restore")
+	requireUnderlyingIntact(t, fx)
+	if hold := holdOf(t, &v1alpha1.VirtualMachine{ObjectMeta: metav1.ObjectMeta{Name: fx.vm, Namespace: projectNamespace}}); hold != "someone-else" {
+		t.Fatalf("hold %q", hold)
+	}
+}

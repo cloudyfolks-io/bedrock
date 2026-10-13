@@ -27,6 +27,7 @@ const (
 	RestoreReasonBackupNotFound         = "BackupNotFound"
 	RestoreReasonRenameNotSupported     = "RenameNotSupported"
 	RestoreReasonTargetExists           = "TargetExists"
+	RestoreReasonTargetBusy             = "TargetBusy"
 	RestoreReasonVirtualMachineNotFound = "VirtualMachineNotFound"
 	RestoreReasonSpecMissing            = "VirtualMachineSpecMissing"
 	RestoreReasonSpecInvalid            = "VirtualMachineSpecInvalid"
@@ -200,15 +201,27 @@ func (r *RestoreReconciler) start(ctx context.Context, vmr *v1alpha1.VirtualMach
 }
 
 func refuseTarget(vmr v1alpha1.VirtualMachineRestore, vm string, existing *v1alpha1.VirtualMachine) *stop {
+	if existing == nil {
+		return refuseMissingTarget(vmr, vm)
+	}
+	holder, held := v1alpha1.RestoreHolder(existing)
 	switch {
-	case vmr.Spec.Replace && existing == nil:
-		next := halt(v1alpha1.RestorePhasePending, RestoreReasonVirtualMachineNotFound, "virtual machine "+vm+" does not exist; restore it by name instead", requeueInstalling)
+	case vmr.Spec.Replace && held && holder != vmr.Name:
+		next := halt(v1alpha1.RestorePhasePending, RestoreReasonTargetBusy, "virtual machine "+vm+" is held by the restore "+holder, requeueInstalling)
 		return &next
-	case !vmr.Spec.Replace && existing != nil && existing.Annotations[HoldAnnotation] != vmr.Name:
+	case !vmr.Spec.Replace && (!held || holder != vmr.Name):
 		next := targetExists(vm)
 		return &next
 	}
 	return nil
+}
+
+func refuseMissingTarget(vmr v1alpha1.VirtualMachineRestore, vm string) *stop {
+	if !vmr.Spec.Replace {
+		return nil
+	}
+	next := halt(v1alpha1.RestorePhasePending, RestoreReasonVirtualMachineNotFound, "virtual machine "+vm+" does not exist; restore it by name instead", requeueInstalling)
+	return &next
 }
 
 func targetExists(vm string) stop {
