@@ -4,40 +4,24 @@ package tenant
 
 import (
 	"bytes"
-	"encoding/base32"
 	"encoding/json"
 	"io"
 	"net/http"
 	"net/http/cookiejar"
 	"net/url"
-	"strings"
 	"testing"
-	"time"
-
-	"github.com/cloudyfolks-io/bedrock/internal/authn/methods"
 )
 
 type challenge struct {
-	Type     string          `json:"type"`
-	CSRF     string          `json:"csrf,omitempty"`
-	Redirect string          `json:"redirect,omitempty"`
-	Enroll   *totpEnrollment `json:"enroll,omitempty"`
-}
-
-type totpEnrollment struct {
-	Secret string `json:"secret"`
+	Type     string `json:"type"`
+	CSRF     string `json:"csrf,omitempty"`
+	Redirect string `json:"redirect,omitempty"`
 }
 
 type loginAnswer struct {
 	Type     string `json:"type"`
 	Username string `json:"username,omitempty"`
 	Password string `json:"password,omitempty"`
-	Code     string `json:"code,omitempty"`
-}
-
-type totpState struct {
-	seed []byte
-	step int64
 }
 
 type loginClient struct {
@@ -62,23 +46,6 @@ func newLoginClient(t *testing.T, e env) *loginClient {
 			CheckRedirect: noRedirects,
 		},
 	}
-}
-
-func decodeSeed(t *testing.T, encoded string) []byte {
-	t.Helper()
-	seed, err := base32.StdEncoding.WithPadding(base32.NoPadding).DecodeString(strings.ToUpper(encoded))
-	if err != nil {
-		t.Fatalf("decode totp secret: %v", err)
-	}
-	return seed
-}
-
-func freshTOTP(state totpState) (string, totpState) {
-	for methods.TOTPStep(time.Now()) <= state.step {
-		time.Sleep(time.Second)
-	}
-	step := methods.TOTPStep(time.Now())
-	return methods.TOTPCode(state.seed, step), totpState{seed: state.seed, step: step}
 }
 
 func (c *loginClient) get(t *testing.T, rawURL string) *http.Response {
@@ -174,15 +141,7 @@ func (c *loginClient) signInAsAdmin(t *testing.T, e env, password string) {
 	ch = c.answer(t, ch, loginAnswer{Type: "username", Username: "admin"})
 	requireChallenge(t, "after username", ch, "password")
 	ch = c.answer(t, ch, loginAnswer{Type: "password", Password: password})
-	requireChallenge(t, "after password", ch, "totp-enroll")
-	if ch.Enroll == nil || ch.Enroll.Secret == "" {
-		t.Fatalf("the totp-enroll challenge carries no secret")
-	}
-	code, _ := freshTOTP(totpState{seed: decodeSeed(t, ch.Enroll.Secret)})
-	ch = c.answer(t, ch, loginAnswer{Type: "totp-enroll", Code: code})
-	requireChallenge(t, "after the enrollment code", ch, "totp-enroll")
-	ch = c.answer(t, ch, loginAnswer{Type: "totp-enroll"})
-	requireChallenge(t, "after the recovery codes", ch, "done")
+	requireChallenge(t, "after password", ch, "done")
 	callback := redirectLocation(t, "authorize callback", c.get(t, ch.Redirect))
 	if callback.Host != "console."+e.host || callback.Path != "/oauth/callback" {
 		t.Fatalf("authorize callback redirects to %s, want the console callback", callback)
