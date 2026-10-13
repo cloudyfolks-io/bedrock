@@ -94,3 +94,27 @@ spec:
 REFUSED
   wait_reason 120 virtualmachinerestore missing Ready BackupNotFound -n "$NS"
 }
+
+backup_restore_deleted() {
+  local id
+  kubectl -n "$NS" delete virtualmachines.bedrock.cloudyfolks.io vm1
+  wait_gone 300 -n "$NS" virtualmachines.bedrock.cloudyfolks.io vm1
+  id=$(kubectl -n "$NS" get virtualmachinebackups.bedrock.cloudyfolks.io once -o jsonpath='{.status.backups[0].id}')
+  test -n "$id"
+  kubectl -n "$NS" apply -f - <<RESTORE
+apiVersion: bedrock.cloudyfolks.io/v1alpha1
+kind: VirtualMachineRestore
+metadata:
+  name: recover
+spec:
+  backupRef: once
+  backupID: $id
+  targetName: vm1
+RESTORE
+  wait_jsonpath 1200 Completed -n "$NS" get virtualmachinerestore recover -o jsonpath='{.status.phase}'
+  kubectl -n "$NS" get virtualmachines.bedrock.cloudyfolks.io vm1
+  wait_jsonpath 600 Running -n "$NS" get virtualmachines.bedrock.cloudyfolks.io vm1 -o jsonpath='{.status.phase}'
+  expect_equal "" "$(kubectl -n "$NS" get virtualmachines.bedrock.cloudyfolks.io vm1 -o jsonpath='{.metadata.annotations.bedrock\.cloudyfolks\.io/restore-hold}')" "restore hold on vm1"
+  expect_equal 0 "$(restore_hold_count)" "restore holds"
+  expect_equal Completed "$(kubectl -n velero get restore -l bedrock.cloudyfolks.io/name=recover -o jsonpath='{.items[0].status.phase}')" "velero restore phase"
+}

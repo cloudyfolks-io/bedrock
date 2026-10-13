@@ -184,6 +184,7 @@ steps=(
   backup_target
   backup_once
   backup_restore_replace
+  backup_restore_deleted
   panel_served
   panel_login_and_stream
   metering_usage
