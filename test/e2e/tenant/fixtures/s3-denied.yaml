@@ -30,5 +30,5 @@ spec:
             - -c
             - |
               aws configure set default.s3.addressing_style path
-              out=$(aws --endpoint-url "$ENDPOINT" s3 ls "s3://$BUCKET" 2>&1) && exit 1
-              echo "$out" | grep -q AccessDenied
+              out=$(aws --debug --endpoint-url "$ENDPOINT" s3 ls "s3://$BUCKET" 2>&1) && exit 1
+              echo "$out" | grep -q "<Code>AccessDenied</Code>"
