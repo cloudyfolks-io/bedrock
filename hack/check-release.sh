@@ -28,6 +28,7 @@ grep -q 'name: cephclusters.ceph.rook.io' "$dir/manifests/00-crds/rook-crds.yaml
 grep -q 'name: volumesnapshotclasses.snapshot.storage.k8s.io' "$dir/manifests/00-crds/rook-crds.yaml"
 grep -q 'name: drivers.csi.ceph.io' "$dir/manifests/00-crds/rook-crds.yaml"
 grep -q 'kind: Driver' "$dir/manifests/41-rook-csi/rook-csi.yaml"
+test "$(grep -c 'snapshotPolicy: volumeSnapshot' "$dir/manifests/41-rook-csi/rook-csi.yaml")" -eq 2
 grep -q 'name: virt-operator' "$dir/manifests/50-kubevirt/kubevirt.yaml"
 grep -q 'name: cdi-operator' "$dir/manifests/50-kubevirt/kubevirt.yaml"
 grep -q 'name: kubevirts.kubevirt.io' "$dir/manifests/00-crds/kubevirt-crds.yaml"
