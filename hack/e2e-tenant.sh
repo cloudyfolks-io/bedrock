@@ -102,7 +102,9 @@ dump() {
     dump_cluster
     dump_workloads
   fi
-  e2e_cleanup
+  if [ -z "${E2E_FROM:-}${E2E_ONLY:-}" ]; then
+    e2e_cleanup
+  fi
   rm -rf "$workdir"
 }
 trap dump EXIT
@@ -135,42 +137,66 @@ run_step() {
   echo "=== $1 passed in $((SECONDS - started))s"
 }
 
-run_step addons_seeded
-run_step addons_kata
-run_step addons_loki_off
-run_step addons_loki_on
-run_step addons_invalid_values
-run_step tenancy_users
-run_step tenancy_tenant
-run_step tenancy_projects
-run_step tenancy_workloads
-run_step tenancy_quota_edges
-run_step images_cluster_image
-run_step images_upload
-run_step compute_prepare
-run_step compute_volume
-run_step compute_vm
-run_step compute_hotplug
-run_step compute_snapshot
-run_step compute_proxy_actions
-run_step compute_console
-run_step network_underlay
-run_step network_subnet_rules
-run_step network_security_group
-run_step network_elastic_ip
-run_step network_load_balancer_and_dns
-run_step network_isolation
-run_step objectstorage_user_and_bucket
-run_step objectstorage_roundtrip
-run_step backup_target
-run_step backup_once
-run_step backup_restore_replace
-run_step panel_served
-run_step panel_login_and_stream
-run_step metering_usage
-run_step metering_series
-run_step metering_logs
-run_step addons_grafana_and_alerts
-run_step cascade_project
-run_step cascade_tenant
+select_steps() {
+  local from=${E2E_FROM:-} only=${E2E_ONLY:-} step reached=0
+  for step in "$@"; do
+    if [ -n "$only" ]; then
+      [ "$step" = "$only" ] && echo "$step"
+      continue
+    fi
+    if [ -z "$from" ] || [ "$step" = "$from" ]; then
+      reached=1
+    fi
+    if [ "$reached" -eq 1 ]; then
+      echo "$step"
+    fi
+  done
+}
+
+steps=(
+  addons_seeded
+  addons_kata
+  addons_loki_off
+  addons_loki_on
+  addons_invalid_values
+  tenancy_users
+  tenancy_tenant
+  tenancy_projects
+  tenancy_workloads
+  tenancy_quota_edges
+  images_cluster_image
+  images_upload
+  compute_prepare
+  compute_volume
+  compute_vm
+  compute_hotplug
+  compute_snapshot
+  compute_proxy_actions
+  compute_console
+  network_underlay
+  network_subnet_rules
+  network_security_group
+  network_elastic_ip
+  network_load_balancer_and_dns
+  network_isolation
+  objectstorage_user_and_bucket
+  objectstorage_roundtrip
+  backup_target
+  backup_once
+  backup_restore_replace
+  panel_served
+  panel_login_and_stream
+  metering_usage
+  metering_series
+  metering_logs
+  addons_grafana_and_alerts
+  cascade_project
+  cascade_tenant
+)
+
+selected=$(select_steps "${steps[@]}")
+test -n "$selected"
+for step in $selected; do
+  run_step "$step"
+done
 echo "e2e-tenant passed"
