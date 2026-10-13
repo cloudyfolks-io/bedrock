@@ -106,7 +106,7 @@ func (r *RestoreReconciler) advance(ctx context.Context, vmr *v1alpha1.VirtualMa
 	}
 	backupID, found := resolveBackupID(*vmb, vmr.Spec.BackupID)
 	if !found {
-		return halt(v1alpha1.RestorePhasePending, RestoreReasonBackupNotFound, "backup ID is not in the backup list", requeueInstalling), nil
+		return sourceGone(*vmr, "backup ID is not in the backup list"), nil
 	}
 	vm := vmb.Spec.VMRef
 	if !vmr.Spec.Replace && vmr.Spec.TargetName != vm {
@@ -145,10 +145,17 @@ func (r *RestoreReconciler) resolve(ctx context.Context, vmr *v1alpha1.VirtualMa
 	vmb := &v1alpha1.VirtualMachineBackup{}
 	err := r.Client.Get(ctx, types.NamespacedName{Namespace: vmr.Namespace, Name: vmr.Spec.BackupRef}, vmb)
 	if apierrors.IsNotFound(err) {
-		next := halt(v1alpha1.RestorePhasePending, RestoreReasonBackupNotFound, "backup "+vmr.Spec.BackupRef+" does not exist in this project", requeueInstalling)
+		next := sourceGone(*vmr, "backup "+vmr.Spec.BackupRef+" does not exist in this project")
 		return Scope{}, nil, &next, nil
 	}
 	return scope, vmb, nil, err
+}
+
+func sourceGone(vmr v1alpha1.VirtualMachineRestore, message string) stop {
+	if !vmr.Spec.Replace && vmr.Status.Phase == v1alpha1.RestorePhaseInProgress {
+		return halt(v1alpha1.RestorePhaseFailed, RestoreReasonBackupNotFound, message, 0)
+	}
+	return halt(v1alpha1.RestorePhasePending, RestoreReasonBackupNotFound, message, requeueInstalling)
 }
 
 func resolveBackupID(vmb v1alpha1.VirtualMachineBackup, requested string) (string, bool) {

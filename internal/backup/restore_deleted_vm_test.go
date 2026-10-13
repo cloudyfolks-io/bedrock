@@ -380,3 +380,61 @@ func TestRestoreOfADeletedVMReadsFreshWhenTheCacheIsStale(t *testing.T) {
 		t.Fatalf("the VM changed: %v", err)
 	}
 }
+
+func startedRestoreOfADeletedVM(t *testing.T, prefix string) (restoreFixture, string) {
+	t.Helper()
+	fx := fixtureOf(prefix)
+	prepareDeletedVM(t, fx, snapshotFor(fx))
+	createKubeVirtObjects(t, fx)
+	name := prefix + "-restore"
+	createVMR(t, name, projectNamespace, v1alpha1.VirtualMachineRestoreSpec{BackupRef: fx.vmb, BackupID: fx.backupID, TargetName: fx.vm})
+	reconcileVMR(t, newRestoreReconciler(), projectNamespace, name)
+	requireRestoreState(t, getVMR(t, name), v1alpha1.RestorePhaseInProgress, metav1.ConditionFalse, RestoreReasonPreparing)
+	if hold := holdOf(t, &v1alpha1.VirtualMachine{ObjectMeta: metav1.ObjectMeta{Name: fx.vm, Namespace: projectNamespace}}); hold != name {
+		t.Fatalf("hold %q", hold)
+	}
+	return fx, name
+}
+
+func requireFailedAndReleased(t *testing.T, fx restoreFixture, name string) {
+	t.Helper()
+	reconcileVMR(t, newRestoreReconciler(), projectNamespace, name)
+	requireRestoreState(t, getVMR(t, name), v1alpha1.RestorePhaseFailed, metav1.ConditionFalse, RestoreReasonBackupNotFound)
+	if hold := holdOf(t, &v1alpha1.VirtualMachine{ObjectMeta: metav1.ObjectMeta{Name: fx.vm, Namespace: projectNamespace}}); hold != "" {
+		t.Fatalf("hold %q", hold)
+	}
+}
+
+func TestRestoreOfADeletedVMFailsWhenItsBackupObjectIsDeleted(t *testing.T) {
+	fx, name := startedRestoreOfADeletedVM(t, "gonevmb")
+	vmb := &v1alpha1.VirtualMachineBackup{ObjectMeta: metav1.ObjectMeta{Name: fx.vmb, Namespace: projectNamespace}}
+	if err := k8sClient.Delete(context.Background(), vmb); err != nil {
+		t.Fatal(err)
+	}
+	requireFailedAndReleased(t, fx, name)
+}
+
+func TestRestoreOfADeletedVMFailsWhenTheBackupLeavesTheList(t *testing.T) {
+	fx, name := startedRestoreOfADeletedVM(t, "goneid")
+	vmb := &v1alpha1.VirtualMachineBackup{}
+	if err := k8sClient.Get(context.Background(), types.NamespacedName{Namespace: projectNamespace, Name: fx.vmb}, vmb); err != nil {
+		t.Fatal(err)
+	}
+	vmb.Status.Backups = nil
+	if err := k8sClient.Status().Update(context.Background(), vmb); err != nil {
+		t.Fatal(err)
+	}
+	requireFailedAndReleased(t, fx, name)
+}
+
+func TestRestoreOfADeletedVMFailsWhenTheVeleroBackupIsGone(t *testing.T) {
+	fx, name := startedRestoreOfADeletedVM(t, "gonevelero")
+	backup, err := getVelero(t, "Backup", fx.backupID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := k8sClient.Delete(context.Background(), backup); err != nil {
+		t.Fatal(err)
+	}
+	requireFailedAndReleased(t, fx, name)
+}
