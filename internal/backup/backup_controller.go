@@ -87,18 +87,21 @@ func (r *BackupReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctr
 	if refusal != nil {
 		return r.refuse(ctx, vmb, *refusal, 0)
 	}
-	if refusal, err = locationState(ctx, r.Client); err != nil {
-		return ctrl.Result{}, err
-	}
-	if refusal != nil {
-		return r.refuse(ctx, vmb, *refusal, requeueInstalling)
-	}
 	vm, refusal, err := r.virtualMachine(ctx, vmb)
 	if err != nil {
 		return ctrl.Result{}, err
 	}
 	if refusal != nil {
-		if err := r.pauseSchedule(ctx, desired); err != nil {
+		if err := r.pauseSchedule(ctx, Paused(desired)); err != nil {
+			return ctrl.Result{}, err
+		}
+		return r.refuse(ctx, vmb, *refusal, requeueInstalling)
+	}
+	if refusal, err = locationState(ctx, r.Client); err != nil {
+		return ctrl.Result{}, err
+	}
+	if refusal != nil {
+		if err := r.pauseSchedule(ctx, pausedWhileHeld(*vm, desired)); err != nil {
 			return ctrl.Result{}, err
 		}
 		return r.refuse(ctx, vmb, *refusal, requeueInstalling)
@@ -204,19 +207,19 @@ func (r *BackupReconciler) virtualMachine(ctx context.Context, vmb *v1alpha1.Vir
 	return vm, nil, err
 }
 
-func (r *BackupReconciler) pauseSchedule(ctx context.Context, desired *unstructured.Unstructured) error {
-	if desired.GetKind() != "Schedule" {
+func (r *BackupReconciler) pauseSchedule(ctx context.Context, paused *unstructured.Unstructured) error {
+	if !IsPaused(paused) {
 		return nil
 	}
-	live := veleroStub("Schedule", desired.GetName())
+	live := veleroStub("Schedule", paused.GetName())
 	err := r.Client.Get(ctx, client.ObjectKeyFromObject(live), live)
-	if apierrors.IsNotFound(err) || (err == nil && IsPaused(live)) {
+	if apierrors.IsNotFound(err) || meta.IsNoMatchError(err) || (err == nil && IsPaused(live)) {
 		return nil
 	}
 	if err != nil {
 		return err
 	}
-	return ssa.Apply(ctx, r.Client, Paused(desired), v1alpha1.BackupFieldManager)
+	return ssa.Apply(ctx, r.Client, paused, v1alpha1.BackupFieldManager)
 }
 
 func (r *BackupReconciler) markBackupTargets(ctx context.Context, vm *v1alpha1.VirtualMachine) error {

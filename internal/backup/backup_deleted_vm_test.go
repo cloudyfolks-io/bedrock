@@ -242,3 +242,38 @@ func TestAnEmptyHoldStillPausesTheSchedule(t *testing.T) {
 		t.Fatal("compute treats the key as a hold, so the schedule must pause")
 	}
 }
+
+func TestPauseHappensWhileTheLocationIsUnavailable(t *testing.T) {
+	setLocation(t, "Available")
+	createVM(t, "away-vm")
+	createVMB(t, "away", v1alpha1.VirtualMachineBackupSpec{VMRef: "away-vm", Schedule: "0 2 * * *"})
+	r := newBackupReconciler(testNow)
+	reconcileVMB(t, r, "away")
+	setLocation(t, "Unavailable")
+
+	reconcileVMB(t, r, "away")
+	requireReady(t, getVMB(t, "away"), metav1.ConditionFalse, ReasonTargetUnavailable)
+	if scheduleIsPaused(t, "away") {
+		t.Fatal("a VM that exists and is free keeps its schedule")
+	}
+
+	updateVM(t, "away-vm", func(vm *v1alpha1.VirtualMachine) { vm.Annotations = map[string]string{HoldAnnotation: "some-restore"} })
+	reconcileVMB(t, r, "away")
+	if !scheduleIsPaused(t, "away") {
+		t.Fatal("a held VM pauses the schedule although the location is unavailable")
+	}
+
+	updateVM(t, "away-vm", func(vm *v1alpha1.VirtualMachine) { vm.Annotations = nil })
+	setLocation(t, "Available")
+	reconcileVMB(t, r, "away")
+	if scheduleIsPaused(t, "away") {
+		t.Fatal("the schedule must run again")
+	}
+
+	setLocation(t, "Unavailable")
+	deleteVM(t, "away-vm")
+	reconcileVMB(t, r, "away")
+	if !scheduleIsPaused(t, "away") {
+		t.Fatal("a deleted VM pauses the schedule although the location is unavailable")
+	}
+}
