@@ -179,20 +179,53 @@ func dialSerial(e env, token, origin, path string) (*websocket.Conn, *http.Respo
 	return dialer.Dial("wss://api."+e.host+path, header)
 }
 
+func readFrames(conn *websocket.Conn, done <-chan struct{}) <-chan string {
+	frames := make(chan string)
+	go func() {
+		defer close(frames)
+		for {
+			_, data, err := conn.ReadMessage()
+			if err != nil {
+				return
+			}
+			select {
+			case frames <- string(data):
+			case <-done:
+				return
+			}
+		}
+	}()
+	return frames
+}
+
+func nudge(conn *websocket.Conn) bool {
+	return conn.WriteMessage(websocket.BinaryMessage, []byte("\n")) == nil
+}
+
 func readUntil(conn *websocket.Conn, needle string, timeout time.Duration) (string, bool) {
-	deadline := time.Now().Add(timeout)
+	done := make(chan struct{})
+	defer close(done)
+	frames := readFrames(conn, done)
+	deadline := time.After(timeout)
+	ticker := time.NewTicker(5 * time.Second)
+	defer ticker.Stop()
 	seen := ""
-	for time.Now().Before(deadline) {
-		if err := conn.WriteMessage(websocket.BinaryMessage, []byte("\n")); err != nil {
-			return seen, false
-		}
-		_ = conn.SetReadDeadline(time.Now().Add(5 * time.Second))
-		_, data, err := conn.ReadMessage()
-		if err == nil {
-			seen += string(data)
-		}
-		if strings.Contains(seen, needle) {
-			return seen, true
+	for nudge(conn) {
+		for waiting := true; waiting; {
+			select {
+			case data, open := <-frames:
+				if !open {
+					return seen, false
+				}
+				seen += data
+				if strings.Contains(seen, needle) {
+					return seen, true
+				}
+			case <-ticker.C:
+				waiting = false
+			case <-deadline:
+				return seen, false
+			}
 		}
 	}
 	return seen, false
