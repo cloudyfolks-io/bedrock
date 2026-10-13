@@ -19,6 +19,7 @@ const (
 	HoldAnnotation        = "bedrock.cloudyfolks.io/restore-hold"
 	BackupVMLabel         = "bedrock.cloudyfolks.io/backup-vm"
 	ExcludeFromBackup     = "velero.io/exclude-from-backup"
+	VMSnapshotAnnotation  = "bedrock.cloudyfolks.io/virtual-machine"
 	BackupFinalizer       = "bedrock.cloudyfolks.io/backup"
 	RestoreFinalizer      = "bedrock.cloudyfolks.io/restore"
 	MinScheduleInterval   = time.Hour

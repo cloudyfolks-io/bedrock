@@ -99,7 +99,11 @@ func (r *BackupReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctr
 	if err := r.markBackupTargets(ctx, vm); err != nil {
 		return ctrl.Result{}, err
 	}
-	return r.drive(ctx, vmb, scope, desired)
+	snapshot, err := SnapshotOf(*vm)
+	if err != nil {
+		return ctrl.Result{}, err
+	}
+	return r.drive(ctx, vmb, scope, WithSnapshot(desired, snapshot))
 }
 
 type refusal struct {
