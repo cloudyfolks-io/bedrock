@@ -18,6 +18,7 @@ const (
 	RBDDriver             = "rook-ceph.rbd.csi.ceph.com"
 	HoldAnnotation        = "bedrock.cloudyfolks.io/restore-hold"
 	BackupVMLabel         = "bedrock.cloudyfolks.io/backup-vm"
+	ExcludeFromBackup     = "velero.io/exclude-from-backup"
 	BackupFinalizer       = "bedrock.cloudyfolks.io/backup"
 	RestoreFinalizer      = "bedrock.cloudyfolks.io/restore"
 	MinScheduleInterval   = time.Hour

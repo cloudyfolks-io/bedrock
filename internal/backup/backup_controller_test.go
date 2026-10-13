@@ -185,7 +185,7 @@ func TestBackupOneShotCreatesOneVeleroBackup(t *testing.T) {
 		t.Fatalf("phase %q", vmb.Status.Phase)
 	}
 	vm := &v1alpha1.VirtualMachine{}
-	if err := k8sClient.Get(context.Background(), types.NamespacedName{Namespace: projectNamespace, Name: "oneshot-vm"}, vm); err != nil || vm.Labels[BackupVMLabel] != "oneshot-vm" {
+	if err := k8sClient.Get(context.Background(), types.NamespacedName{Namespace: projectNamespace, Name: "oneshot-vm"}, vm); err != nil || vm.Labels[BackupVMLabel] != "oneshot-vm" || vm.Labels[ExcludeFromBackup] != "true" {
 		t.Fatalf("vm labels %v %v", vm.Labels, err)
 	}
 	volume := &v1alpha1.Volume{}

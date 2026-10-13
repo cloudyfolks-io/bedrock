@@ -190,6 +190,9 @@ func (r *BackupReconciler) markBackupTargets(ctx context.Context, vm *v1alpha1.V
 	if err := r.labelBackupVM(ctx, vm, vm.Name); err != nil {
 		return err
 	}
+	if err := r.keepOutOfVelero(ctx, vm); err != nil {
+		return err
+	}
 	for _, disk := range vm.Spec.Disks {
 		volume := &v1alpha1.Volume{}
 		err := r.Client.Get(ctx, types.NamespacedName{Namespace: vm.Namespace, Name: disk.VolumeRef}, volume)
@@ -204,6 +207,14 @@ func (r *BackupReconciler) markBackupTargets(ctx context.Context, vm *v1alpha1.V
 		}
 	}
 	return nil
+}
+
+func (r *BackupReconciler) keepOutOfVelero(ctx context.Context, vm *v1alpha1.VirtualMachine) error {
+	if vm.GetLabels()[ExcludeFromBackup] == "true" {
+		return nil
+	}
+	patch := client.RawPatch(types.MergePatchType, []byte(`{"metadata":{"labels":{"`+ExcludeFromBackup+`":"true"}}}`))
+	return r.Client.Patch(ctx, vm, patch, client.FieldOwner(v1alpha1.BackupFieldManager))
 }
 
 func (r *BackupReconciler) labelBackupVM(ctx context.Context, obj client.Object, vm string) error {

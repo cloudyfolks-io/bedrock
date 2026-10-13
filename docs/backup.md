@@ -8,10 +8,13 @@ backs up a VM with `VirtualMachineBackup`. A tenant restores a VM with
 
 A backup of a VM contains these objects:
 
-- The Bedrock `VirtualMachine` object and the Bedrock `Volume` objects
-  that the VM uses.
+- The Bedrock `Volume` objects that the VM uses.
 - The KubeVirt VM and its related objects.
 - The data of all disks.
+
+A backup does not contain the Bedrock `VirtualMachine` object. The Velero
+plugin for KubeVirt changes every object named `VirtualMachine` and
+removes the fields that it does not know.
 
 Velero copies the disk data with CSI snapshots. The node agent of Velero
 moves the data to the backup target.
@@ -170,7 +173,8 @@ Bedrock deletes the KubeVirt VM, the data volumes and the claims of the VM.
 Then Velero restores them from the backup. The Bedrock `VirtualMachine`
 object stays as it is.
 
-This example restores a VM after you deleted it:
+This example restores the KubeVirt VM and the disks after you deleted the
+VM. It does not create the Bedrock `VirtualMachine` object again:
 
 ```yaml
 apiVersion: bedrock.cloudyfolks.io/v1alpha1
@@ -192,6 +196,7 @@ annotation when the restore ends, fails or is deleted.
 Remember these limits:
 
 - A restore does not revert the Bedrock `VirtualMachine` spec.
+- A restore does not create a deleted Bedrock `VirtualMachine` again.
 - `targetName` must be the name of the VM that you backed up. A different name
   gives the phase `Failed` and the reason `RenameNotSupported`.
 - `backupID` must be in the list `status.backups` of the named backup.
