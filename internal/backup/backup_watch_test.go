@@ -9,6 +9,8 @@ import (
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/client-go/tools/record"
 	"k8s.io/utils/ptr"
 	ctrl "sigs.k8s.io/controller-runtime"
@@ -26,6 +28,30 @@ func snapshotInstanceType(obj *unstructured.Unstructured) string {
 	}
 	_ = json.Unmarshal([]byte(obj.GetAnnotations()[VMSnapshotAnnotation]), &snapshot)
 	return snapshot.Spec.InstanceType
+}
+
+func waitUntilQuiet(t *testing.T, ctx context.Context, vmb string) {
+	t.Helper()
+	const steady = 10
+	last, unchanged := "", 0
+	err := wait.PollUntilContextTimeout(ctx, 200*time.Millisecond, 30*time.Second, true, func(context.Context) (bool, error) {
+		current := &v1alpha1.VirtualMachineBackup{}
+		if err := k8sClient.Get(ctx, types.NamespacedName{Namespace: projectNamespace, Name: vmb}, current); err != nil {
+			return false, nil
+		}
+		if len(current.Status.Conditions) == 0 {
+			return false, nil
+		}
+		if current.ResourceVersion == last {
+			unchanged++
+		} else {
+			last, unchanged = current.ResourceVersion, 0
+		}
+		return unchanged >= steady, nil
+	})
+	if err != nil {
+		t.Fatalf("the backup %s never settled: %v", vmb, err)
+	}
 }
 
 func TestVirtualMachineChangeQueuesItsBackups(t *testing.T) {
@@ -73,19 +99,16 @@ func TestVirtualMachineChangeRefreshesTheScheduleThroughTheWatch(t *testing.T) {
 		<-done
 	}()
 	waitForInstanceType := func(want string) {
-		deadline := time.Now().Add(30 * time.Second)
-		for time.Now().Before(deadline) {
-			if schedule, err := getVelero(t, "Schedule", VeleroName("vmb", projectNamespace, "live")); err == nil {
-				if snapshotInstanceType(schedule) == want {
-					return
-				}
-			}
-			time.Sleep(200 * time.Millisecond)
+		err := wait.PollUntilContextTimeout(ctx, 200*time.Millisecond, 30*time.Second, true, func(context.Context) (bool, error) {
+			schedule, err := getVelero(t, "Schedule", VeleroName("vmb", projectNamespace, "live"))
+			return err == nil && snapshotInstanceType(schedule) == want, nil
+		})
+		if err != nil {
+			t.Fatalf("the schedule never carried the instance type %q: %v", want, err)
 		}
-		t.Fatalf("the schedule never carried the instance type %q", want)
 	}
 	waitForInstanceType("small")
-	time.Sleep(3 * time.Second)
+	waitUntilQuiet(t, ctx, "live")
 	updateVM(t, "live-vm", func(vm *v1alpha1.VirtualMachine) { vm.Spec.InstanceType = "large" })
 	waitForInstanceType("large")
 }
