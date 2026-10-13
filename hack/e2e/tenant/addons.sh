@@ -62,7 +62,7 @@ addons_invalid_values() {
   kubectl patch addon loki --type merge -p '{"spec":{"values":{"persistence.nothing":"x"}}}'
   wait_reason 120 addon loki Ready InvalidValues
   kubectl -n monitoring get statefulset loki
-  kubectl patch addon loki --type merge -p '{"spec":{"values":{"persistence.size":"2Gi","persistence.storage-class":"block"}}}'
+  kubectl patch addon loki --type merge -p '{"spec":{"values":{"persistence.nothing":null}}}'
   wait_condition 300 addon loki Ready True
 }
 
