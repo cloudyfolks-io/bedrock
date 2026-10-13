@@ -14,7 +14,7 @@ network_underlay() {
   wait_reason 180 network "$TENANT" Ready VpcReady
   wait_reason 180 network "$TENANT" ExternalReady Connected
   expect_equal "$TENANT" "$(kubectl get network "$TENANT" -o jsonpath='{.status.vpc}')" "network vpc"
-  expect_contains "$(kubectl get network "$TENANT" -o jsonpath='{.status.subnets}')" "$NS/default" "network subnets"
+  expect_contains "$(kubectl get network "$TENANT" -o jsonpath='{range .status.subnets[*]}{.namespace}/{.name}{"\n"}{end}')" "$NS/default" "network subnets"
   expect_equal 'true true ["provider-public"]' "$(kubectl get vpcs.fabric.cloudyfolks.io "$TENANT" -o jsonpath='{.status.standby} {.spec.enableExternal} {.spec.extraExternalSubnets}')" "vpc external"
   wait_reason 120 subnet default Ready Applied -n "$NS"
   expect_equal '{"cniVersion":"0.3.0","type":"fabric","server_socket":"/run/openvswitch/fabric-daemon.sock","provider":"default.'"$NS"'.fabric"}' "$(kubectl -n "$NS" get net-attach-def default -o jsonpath='{.spec.config}')" "network attachment"
