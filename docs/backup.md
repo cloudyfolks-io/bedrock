@@ -26,12 +26,18 @@ The copy holds these fields:
 
 - The name and the namespace of the VM.
 - The `spec` of the VM.
-- The labels and the annotations that Bedrock owns. These are the keys with
-  the prefix `bedrock.cloudyfolks.io/` and the label
+- Two labels that Bedrock owns: `bedrock.cloudyfolks.io/backup-vm` and
   `velero.io/exclude-from-backup`.
 
-The copy does not hold the status, the `managedFields`, the uid, the resource
-version, the owner references or the annotation `restore-hold`.
+The copy does not hold any other label or annotation. It does not hold the
+status, the `managedFields`, the uid, the resource version, the owner
+references or the annotation `restore-hold`.
+
+The copy can be at most 200 KiB. If it is larger, Bedrock does not write it.
+The backups go on without the copy. The `VirtualMachineBackup` gets the
+condition `SpecCopied` with the status `False` and the reason
+`VirtualMachineSpecTooLarge`. A backup without the copy cannot restore a
+deleted VM. The condition goes away when the spec is small enough again.
 
 The Secret that `spec.cloudInit.secretRef` names is not part of the backup.
 Keep that Secret. If it is missing after a restore, the VM reports
@@ -182,14 +188,38 @@ deletes a `VirtualMachineBackup` in only two cases:
 
 While the VM does not exist, these rules apply:
 
-- `Ready` is `False` with the reason `VirtualMachineNotFound`.
-- Bedrock pauses the Velero schedule. No new backup starts.
+- Bedrock pauses the Velero schedule. No new backup starts. `Ready` is
+  `False` with the reason `Paused`. The message says that the VM does not
+  exist.
+- A one-shot backup has no schedule. Its `Ready` is `False` with the reason
+  `VirtualMachineNotFound`.
 - Bedrock does not remove old backups.
-- The list `status.backups` keeps its entries.
+- The list `status.backups` keeps its entries. Bedrock does not refresh the
+  list while the VM does not exist.
 
 Bedrock also pauses the schedule and does not remove backups while a restore
-holds the VM. Bedrock starts the schedule again when the VM exists and the
-hold is gone.
+holds the VM. `Ready` is `False` with the reason `Paused`. The message names
+the restore. A one-shot backup that you create while a restore holds the VM
+waits. It has the reason `Paused`. It does not back up a half-restored VM.
+
+Bedrock pauses the schedule even when the backup target is not available.
+
+Bedrock starts the schedule again when the VM exists and the hold is gone. A
+schedule that starts again does not run the backup that it missed. It waits
+for the next time in the cron expression.
+
+Velero removes a backup when its time to live ends. A one-shot backup lives 30
+days. A backup that a schedule makes lives one year. This is also true when
+the VM does not exist. A backup that Velero removed gives `BackupNotFound`
+when you restore it.
+
+Retention keeps the newest backups, as many as `keep`. A
+`VirtualMachineRestore` pins the backup that it names. While the restore
+object exists, in any phase, retention does not delete that backup. To keep
+an old backup, keep a `VirtualMachineRestore` that names it. After a failed
+restore, the next backups of the schedule are backups of the new VM. They
+remove the older backups after `keep` periods. A restore object that names a
+good backup stops this.
 
 A schedule keeps the copy of the VM spec current. When the VM changes,
 Bedrock writes the new copy to the schedule. Each backup that the schedule
@@ -244,15 +274,35 @@ When the Bedrock `VirtualMachine` does not exist, Bedrock does these steps:
    controllers do not change the underlying objects while the annotation is
    present.
 3. It waits until the old KubeVirt VM, data volumes and claims of the VM are
-   gone. The reason is `Preparing`. Bedrock does not delete them. The
-   garbage collector removes them after you delete the VM.
+   gone. The reason is `Preparing`. The message names the objects that
+   remain. It shows five names at most. Bedrock does not delete them. The
+   garbage collector removes them after you delete the VM. Bedrock checks
+   again after 10 seconds. The time grows to 2 minutes. Bedrock has no time
+   limit. It keeps the hold and keeps waiting, because a release lets the
+   compute controllers make empty disks. To stop the wait, delete the
+   objects that the message names, or delete the restore.
 4. It asks Velero to restore the KubeVirt VM, the data volumes, the claims
    and the Secret `<vm>-cloudinit`.
 5. When the restore is complete, it removes the annotation. The compute
    controllers adopt the restored objects.
 
 If the copy is not valid, the restore gets the phase `Failed` and the reason
-`VirtualMachineSpecInvalid`. Bedrock creates nothing in this case.
+`VirtualMachineSpecInvalid`. Bedrock creates nothing in this case. The copy
+must name the same VM and the same namespace as the restore. A copy for
+another VM or namespace also gives `VirtualMachineSpecInvalid`. This is true
+for `replace` too.
+
+A data disk that still exists keeps its data. Velero does not overwrite an
+object that exists. Bedrock waits only for data-disk objects that are being
+deleted. The restore does not bring back the data of a data disk that still
+exists. To bring it back, use `replace: true`.
+
+If the backup stops to exist while the restore waits, the restore gets the
+phase `Failed` and the reason `BackupNotFound`. This happens when you delete
+the `VirtualMachineBackup`, when the backup `id` leaves `status.backups`, or
+when the Velero backup is gone. Bedrock removes the hold. A short problem,
+such as an unavailable backup target, keeps the restore in `Pending`. Bedrock
+keeps the hold in that case.
 
 A restore creates the Bedrock `VirtualMachine` only one time. If the
 controller restarts in the middle of a restore, it continues with the object
@@ -271,6 +321,9 @@ While a restore runs, the VM and its volumes carry the annotation
 `bedrock.cloudyfolks.io/restore-hold`. Bedrock removes the annotation when
 the restore ends, fails or is deleted. If you delete a restore before it
 ends, Bedrock keeps the Bedrock `VirtualMachine` that it created.
+
+A restore with `replace: true` does not take a VM that another restore holds.
+It stays in `Pending` with the reason `TargetBusy`.
 
 Remember these limits:
 
