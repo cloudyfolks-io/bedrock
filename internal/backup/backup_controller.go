@@ -45,6 +45,7 @@ const (
 	ReasonInProgress             = "InProgress"
 	ReasonBackupFailed           = "BackupFailed"
 	ReasonDeleting               = "Deleting"
+	ReasonPaused                 = "Paused"
 
 	requeueBusy      = 15 * time.Second
 	requeueDeleting  = 10 * time.Second
@@ -92,8 +93,12 @@ func (r *BackupReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctr
 		return ctrl.Result{}, err
 	}
 	if refusal != nil {
-		if err := r.pauseSchedule(ctx, Paused(desired)); err != nil {
+		paused, err := r.pauseSchedule(ctx, Paused(desired))
+		if err != nil {
 			return ctrl.Result{}, err
+		}
+		if paused {
+			refusal = pausedRefusal(refusal.Message)
 		}
 		return r.refuse(ctx, vmb, *refusal, requeueInstalling)
 	}
@@ -101,7 +106,7 @@ func (r *BackupReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctr
 		return ctrl.Result{}, err
 	}
 	if refusal != nil {
-		if err := r.pauseSchedule(ctx, pausedWhileHeld(*vm, desired)); err != nil {
+		if _, err := r.pauseSchedule(ctx, pausedWhileHeld(*vm, desired)); err != nil {
 			return ctrl.Result{}, err
 		}
 		return r.refuse(ctx, vmb, *refusal, requeueInstalling)
@@ -113,7 +118,30 @@ func (r *BackupReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctr
 	if err != nil {
 		return ctrl.Result{}, err
 	}
-	return r.drive(ctx, vmb, scope, pausedWhileHeld(*vm, WithSnapshot(desired, snapshot)))
+	return r.drive(ctx, vmb, scope, pausedWhileHeld(*vm, WithSnapshot(desired, snapshot)), holdCause(*vm))
+}
+
+func pausedRefusal(cause string) *refusal {
+	return &refusal{Reason: ReasonPaused, Message: "the schedule is paused because " + cause}
+}
+
+func holdCause(vm v1alpha1.VirtualMachine) string {
+	holder, held := v1alpha1.RestoreHolder(&vm)
+	switch {
+	case !held:
+		return ""
+	case holder == "":
+		return "a restore holds the virtual machine"
+	default:
+		return "the restore " + holder + " holds the virtual machine"
+	}
+}
+
+func whilePaused(condition metav1.Condition, cause string) metav1.Condition {
+	if cause == "" || condition.Reason != ReasonScheduled {
+		return condition
+	}
+	return notReady(ReasonPaused, "the schedule is paused because "+cause)
 }
 
 func pausedWhileHeld(vm v1alpha1.VirtualMachine, desired *unstructured.Unstructured) *unstructured.Unstructured {
@@ -207,19 +235,22 @@ func (r *BackupReconciler) virtualMachine(ctx context.Context, vmb *v1alpha1.Vir
 	return vm, nil, err
 }
 
-func (r *BackupReconciler) pauseSchedule(ctx context.Context, paused *unstructured.Unstructured) error {
+func (r *BackupReconciler) pauseSchedule(ctx context.Context, paused *unstructured.Unstructured) (bool, error) {
 	if !IsPaused(paused) {
-		return nil
+		return false, nil
 	}
 	live := veleroStub("Schedule", paused.GetName())
 	err := r.Client.Get(ctx, client.ObjectKeyFromObject(live), live)
-	if apierrors.IsNotFound(err) || meta.IsNoMatchError(err) || (err == nil && IsPaused(live)) {
-		return nil
+	if apierrors.IsNotFound(err) || meta.IsNoMatchError(err) {
+		return false, nil
 	}
 	if err != nil {
-		return err
+		return false, err
 	}
-	return ssa.Apply(ctx, r.Client, paused, v1alpha1.BackupFieldManager)
+	if IsPaused(live) {
+		return true, nil
+	}
+	return true, ssa.Apply(ctx, r.Client, paused, v1alpha1.BackupFieldManager)
 }
 
 func (r *BackupReconciler) markBackupTargets(ctx context.Context, vm *v1alpha1.VirtualMachine) error {
@@ -261,7 +292,7 @@ func (r *BackupReconciler) labelBackupVM(ctx context.Context, obj client.Object,
 	return r.Client.Patch(ctx, obj, patch, client.FieldOwner(v1alpha1.BackupFieldManager))
 }
 
-func (r *BackupReconciler) drive(ctx context.Context, vmb *v1alpha1.VirtualMachineBackup, scope Scope, desired *unstructured.Unstructured) (ctrl.Result, error) {
+func (r *BackupReconciler) drive(ctx context.Context, vmb *v1alpha1.VirtualMachineBackup, scope Scope, desired *unstructured.Unstructured, heldBy string) (ctrl.Result, error) {
 	labels := v1alpha1.TenantLabels("VirtualMachineBackup", vmb.Name, scope.Tenant, scope.Project)
 	backups, err := r.ensureVelero(ctx, vmb, desired, labels)
 	if err != nil {
@@ -288,6 +319,7 @@ func (r *BackupReconciler) drive(ctx context.Context, vmb *v1alpha1.VirtualMachi
 		if err != nil {
 			return ctrl.Result{}, err
 		}
+		condition = whilePaused(condition, heldBy)
 	}
 	r.writeStatus(ctx, vmb, observedStatus(*vmb, summary, phase, condition))
 	return ctrl.Result{RequeueAfter: requeueFor(phase)}, nil

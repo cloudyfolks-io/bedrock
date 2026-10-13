@@ -3,6 +3,7 @@ package backup
 import (
 	"context"
 	"slices"
+	"strings"
 	"testing"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -75,7 +76,7 @@ func TestDeletingTheVMKeepsItsBackupsAndPausesTheSchedule(t *testing.T) {
 
 	deleteVM(t, "orphan-vm")
 	reconcileVMB(t, r, "orphan")
-	requireReady(t, getVMB(t, "orphan"), metav1.ConditionFalse, ReasonVirtualMachineNotFound)
+	requireReady(t, getVMB(t, "orphan"), metav1.ConditionFalse, ReasonPaused)
 	requireVMBIntact(t, "orphan", "orphan-20261005", "orphan-20261006")
 	if len(getVMB(t, "orphan").Status.Backups) != 2 {
 		t.Fatalf("the backup list changed: %+v", getVMB(t, "orphan").Status.Backups)
@@ -275,5 +276,55 @@ func TestPauseHappensWhileTheLocationIsUnavailable(t *testing.T) {
 	reconcileVMB(t, r, "away")
 	if !scheduleIsPaused(t, "away") {
 		t.Fatal("a deleted VM pauses the schedule although the location is unavailable")
+	}
+}
+
+func requireReadyMessage(t *testing.T, vmb *v1alpha1.VirtualMachineBackup, reason string, parts ...string) {
+	t.Helper()
+	for _, condition := range vmb.Status.Conditions {
+		if condition.Type != v1alpha1.ConditionReady {
+			continue
+		}
+		if condition.Status != metav1.ConditionFalse || condition.Reason != reason {
+			t.Fatalf("Ready=%s/%s, want False/%s", condition.Status, condition.Reason, reason)
+		}
+		for _, part := range parts {
+			if !strings.Contains(condition.Message, part) {
+				t.Fatalf("message %q lacks %q", condition.Message, part)
+			}
+		}
+		return
+	}
+	t.Fatal("no Ready condition")
+}
+
+func TestPausedScheduleShowsWhyItIsPaused(t *testing.T) {
+	setLocation(t, "Available")
+	createVM(t, "why-vm")
+	createVMB(t, "why", v1alpha1.VirtualMachineBackupSpec{VMRef: "why-vm", Schedule: "0 2 * * *"})
+	r := newBackupReconciler(testNow)
+	reconcileVMB(t, r, "why")
+	requireReady(t, getVMB(t, "why"), metav1.ConditionTrue, ReasonScheduled)
+
+	updateVM(t, "why-vm", func(vm *v1alpha1.VirtualMachine) { vm.Annotations = map[string]string{HoldAnnotation: "some-restore"} })
+	reconcileVMB(t, r, "why")
+	requireReadyMessage(t, getVMB(t, "why"), ReasonPaused, "paused", "some-restore")
+
+	updateVM(t, "why-vm", func(vm *v1alpha1.VirtualMachine) { vm.Annotations = nil })
+	reconcileVMB(t, r, "why")
+	requireReady(t, getVMB(t, "why"), metav1.ConditionTrue, ReasonScheduled)
+
+	deleteVM(t, "why-vm")
+	reconcileVMB(t, r, "why")
+	requireReadyMessage(t, getVMB(t, "why"), ReasonPaused, "paused", "why-vm")
+}
+
+func TestScheduleOfAMissingVMWithoutASchedulePausesNothing(t *testing.T) {
+	setLocation(t, "Available")
+	createVMB(t, "never", v1alpha1.VirtualMachineBackupSpec{VMRef: "never-vm", Schedule: "0 2 * * *"})
+	reconcileVMB(t, newBackupReconciler(testNow), "never")
+	requireReady(t, getVMB(t, "never"), metav1.ConditionFalse, ReasonVirtualMachineNotFound)
+	if len(listVelero(t, "Schedule", vmbVeleroLabels("never"))) != 0 {
+		t.Fatal("a schedule of a missing VM must not be created")
 	}
 }
