@@ -44,7 +44,7 @@ func RenderStorage(in AddonInput) (Rendered, error) {
 		return Rendered{}, fmt.Errorf("storage.replicas: %w", err)
 	}
 	objects := []*unstructured.Unstructured{
-		cephCluster(image, hosts, monCount(replicas)),
+		cephCluster(image, hosts, monCount(replicas), replicas),
 		cephBlockPool(replicas),
 		cephFilesystem(replicas, len(hosts) > 1),
 		blockStorageClass("block", "Delete", true),
@@ -106,7 +106,7 @@ func monCount(replicas int) int64 {
 	return 1
 }
 
-func cephCluster(image string, hosts []v1alpha1.Host, mons int64) *unstructured.Unstructured {
+func cephCluster(image string, hosts []v1alpha1.Host, mons int64, replicas int) *unstructured.Unstructured {
 	nodes := make([]any, 0, len(hosts))
 	for _, host := range hosts {
 		devices := make([]any, 0, len(host.Spec.Storage.Devices))
@@ -126,9 +126,24 @@ func cephCluster(image string, hosts []v1alpha1.Host, mons int64) *unstructured.
 		"mgr":                map[string]any{"count": mgrs, "allowMultiplePerNode": len(hosts) < 2},
 		"dashboard":          map[string]any{"enabled": false},
 		"crashCollector":     map[string]any{"disable": true},
+		"healthCheck":        map[string]any{"muteHealthWarning": mutedHealthWarnings(replicas)},
 		"storage":            map[string]any{"useAllNodes": false, "useAllDevices": false, "nodes": nodes},
 		"priorityClassNames": map[string]any{"mon": "system-node-critical", "osd": "system-node-critical", "mgr": "system-cluster-critical"},
 	})
+}
+
+func mutedHealthWarnings(replicas int) map[string]any {
+	muted := map[string]any{
+		"AUTH_INSECURE_KEYS_ALLOWED":   map[string]any{"policy": "mute"},
+		"AUTH_INSECURE_KEYS_CREATABLE": map[string]any{"policy": "mute"},
+	}
+	policy := "unmute"
+	if replicas == 1 {
+		policy = "mute"
+	}
+	muted["POOL_NO_REDUNDANCY"] = map[string]any{"policy": policy}
+	muted["TOO_FEW_OSDS"] = map[string]any{"policy": policy}
+	return muted
 }
 
 func replicated(replicas int) map[string]any {

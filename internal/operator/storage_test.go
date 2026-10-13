@@ -329,3 +329,31 @@ func TestRookValuesAllowOnlyTheBucketFields(t *testing.T) {
 		t.Fatalf("values %+v", values)
 	}
 }
+
+func TestRenderStorageMutesOnlyWarningsThatReplicasExplain(t *testing.T) {
+	policies := func(replicas string) map[string]string {
+		out, err := RenderStorage(storageInput([]v1alpha1.Host{osdHost("a", "/dev/sdb")}, replicas))
+		if err != nil {
+			t.Fatal(err)
+		}
+		muted, _, _ := unstructured.NestedMap(findObject(out.Objects, "CephCluster", "rook-ceph").Object, "spec", "healthCheck", "muteHealthWarning")
+		got := map[string]string{}
+		for check, spec := range muted {
+			got[check], _, _ = unstructured.NestedString(spec.(map[string]any), "policy")
+		}
+		return got
+	}
+	want := map[string]string{
+		"AUTH_INSECURE_KEYS_ALLOWED":   "mute",
+		"AUTH_INSECURE_KEYS_CREATABLE": "mute",
+		"POOL_NO_REDUNDANCY":           "mute",
+		"TOO_FEW_OSDS":                 "mute",
+	}
+	if got := policies("1"); !reflect.DeepEqual(got, want) {
+		t.Fatalf("one replica: %v", got)
+	}
+	want["POOL_NO_REDUNDANCY"], want["TOO_FEW_OSDS"] = "unmute", "unmute"
+	if got := policies("3"); !reflect.DeepEqual(got, want) {
+		t.Fatalf("three replicas: %v", got)
+	}
+}
