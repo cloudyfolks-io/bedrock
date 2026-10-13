@@ -438,3 +438,63 @@ func TestRestoreOfADeletedVMFailsWhenTheVeleroBackupIsGone(t *testing.T) {
 	}
 	requireFailedAndReleased(t, fx, name)
 }
+
+func TestBlockersAreCappedAtFive(t *testing.T) {
+	names := []string{"a/1", "a/2", "a/3", "a/4", "a/5", "a/6", "a/7"}
+	if got := blockerList(names[:5]); got != "a/1, a/2, a/3, a/4, a/5" {
+		t.Fatalf("five names: %q", got)
+	}
+	if got := blockerList(names); got != "a/1, a/2, a/3, a/4, a/5 and 2 more" {
+		t.Fatalf("seven names: %q", got)
+	}
+}
+
+func TestPreparingRequeueBacksOff(t *testing.T) {
+	cases := []struct {
+		age  time.Duration
+		want time.Duration
+	}{
+		{-time.Minute, 10 * time.Second},
+		{30 * time.Second, 10 * time.Second},
+		{2 * time.Minute, 30 * time.Second},
+		{10 * time.Minute, 2 * time.Minute},
+		{72 * time.Hour, 2 * time.Minute},
+	}
+	for _, tc := range cases {
+		if got := preparingRequeue(tc.age); got != tc.want {
+			t.Errorf("age %v: got %v, want %v", tc.age, got, tc.want)
+		}
+	}
+}
+
+func TestRestoreOfADeletedVMNamesTheObjectsItWaitsFor(t *testing.T) {
+	fx := fixtureOf("named")
+	prepareDeletedVM(t, fx, snapshotFor(fx))
+	createKubeVirtObjects(t, fx)
+	createVMR(t, "named-restore", projectNamespace, v1alpha1.VirtualMachineRestoreSpec{BackupRef: fx.vmb, BackupID: fx.backupID, TargetName: fx.vm})
+	reconcileVMR(t, newRestoreReconciler(), projectNamespace, "named-restore")
+	vmr := getVMR(t, "named-restore")
+	requireRestoreState(t, vmr, v1alpha1.RestorePhaseInProgress, metav1.ConditionFalse, RestoreReasonPreparing)
+	message := vmr.Status.Conditions[0].Message
+	for _, want := range []string{"VirtualMachine/" + fx.vm, "DataVolume/" + fx.vm + "-root", "PersistentVolumeClaim/" + fx.vm + "-root"} {
+		if !strings.Contains(message, want) {
+			t.Fatalf("message %q lacks %q", message, want)
+		}
+	}
+}
+
+func TestRestoreOfADeletedVMKeepsWaitingAndSlowsDown(t *testing.T) {
+	fx := fixtureOf("patient")
+	prepareDeletedVM(t, fx, snapshotFor(fx))
+	createKubeVirtObjects(t, fx)
+	createVMR(t, "patient-restore", projectNamespace, v1alpha1.VirtualMachineRestoreSpec{BackupRef: fx.vmb, BackupID: fx.backupID, TargetName: fx.vm})
+	late := &RestoreReconciler{Client: k8sClient, Now: func() time.Time { return time.Now().Add(72 * time.Hour) }}
+	result := reconcileVMR(t, late, projectNamespace, "patient-restore")
+	if result.RequeueAfter != 2*time.Minute {
+		t.Fatalf("requeue %v", result.RequeueAfter)
+	}
+	requireRestoreState(t, getVMR(t, "patient-restore"), v1alpha1.RestorePhaseInProgress, metav1.ConditionFalse, RestoreReasonPreparing)
+	if hold := holdOf(t, &v1alpha1.VirtualMachine{ObjectMeta: metav1.ObjectMeta{Name: fx.vm, Namespace: projectNamespace}}); hold != "patient-restore" {
+		t.Fatalf("the hold must stay: %q", hold)
+	}
+}

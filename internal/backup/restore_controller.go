@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"time"
 
 	corev1 "k8s.io/api/core/v1"
@@ -38,7 +39,8 @@ const (
 	RestoreReasonDeleting               = "Deleting"
 	RestoreReasonCompleted              = "Completed"
 
-	requeuePreparing = 10 * time.Second
+	requeuePreparing  = 10 * time.Second
+	maxListedBlockers = 5
 )
 
 var (
@@ -281,11 +283,29 @@ func (r *RestoreReconciler) recreate(ctx context.Context, vmr *v1alpha1.VirtualM
 		}
 	}
 	left, err := r.leftovers(ctx, scope, vm)
-	if err != nil || left > 0 {
-		next := halt(v1alpha1.RestorePhaseInProgress, RestoreReasonPreparing, "the old objects of the VM are being removed", requeuePreparing)
+	if err != nil || len(left) > 0 {
+		next := halt(v1alpha1.RestorePhaseInProgress, RestoreReasonPreparing, "old objects of the VM remain: "+blockerList(left), preparingRequeue(r.Now().Sub(vmr.CreationTimestamp.Time)))
 		return &next, err
 	}
 	return nil, nil
+}
+
+func blockerList(names []string) string {
+	if len(names) <= maxListedBlockers {
+		return strings.Join(names, ", ")
+	}
+	return fmt.Sprintf("%s and %d more", strings.Join(names[:maxListedBlockers], ", "), len(names)-maxListedBlockers)
+}
+
+func preparingRequeue(age time.Duration) time.Duration {
+	switch {
+	case age < time.Minute:
+		return requeuePreparing
+	case age < 5*time.Minute:
+		return 3 * requeuePreparing
+	default:
+		return 12 * requeuePreparing
+	}
 }
 
 func (r *RestoreReconciler) createHeldVM(ctx context.Context, vmr *v1alpha1.VirtualMachineRestore, namespace, vm string, restored *v1alpha1.VirtualMachine) (*stop, error) {
@@ -326,16 +346,18 @@ func (r *RestoreReconciler) confirmHeld(ctx context.Context, vmr *v1alpha1.Virtu
 	return &next, nil
 }
 
-func (r *RestoreReconciler) leftovers(ctx context.Context, scope Scope, vm string) (int, error) {
-	count := 0
+func (r *RestoreReconciler) leftovers(ctx context.Context, scope Scope, vm string) ([]string, error) {
+	var names []string
 	for _, list := range underlyingLists {
 		items, err := r.listUnderlying(ctx, list, scope.Namespace, v1alpha1.TenantLabels("VirtualMachine", vm, scope.Tenant, scope.Project))
 		if err != nil {
-			return 0, err
+			return nil, err
 		}
-		count += len(items)
+		for i := range items {
+			names = append(names, strings.TrimSuffix(list.Kind, "List")+"/"+items[i].GetName())
+		}
 	}
-	return count, nil
+	return names, nil
 }
 
 func (r *RestoreReconciler) launch(ctx context.Context, vmr *v1alpha1.VirtualMachineRestore, scope Scope, backupID string) (stop, error) {
