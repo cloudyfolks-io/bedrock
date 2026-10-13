@@ -42,8 +42,15 @@ token_authenticates() {
   [ "$(kubectl --kubeconfig /dev/null --server "https://$VIP:6443" --certificate-authority /var/lib/k0s/pki/ca.crt --token "$token" auth whoami -o jsonpath='{.status.userInfo.username}')" = "bedrock:$user" ]
 }
 
-tenancy_users() {
+issue_tokens() {
   local user
+  for user in alice bob carol dana erin admin; do
+    create_token "$user"
+    retry_until 120 token_authenticates "$user"
+  done
+}
+
+tenancy_users() {
   create_user alice
   create_user bob
   create_user carol
@@ -61,10 +68,7 @@ metadata:
 spec:
   members: [dana]
 GROUP
-  for user in alice bob carol dana erin admin; do
-    create_token "$user"
-    retry_until 120 token_authenticates "$user"
-  done
+  issue_tokens
 }
 
 tenancy_tenant() {

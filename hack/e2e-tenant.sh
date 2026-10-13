@@ -196,6 +196,9 @@ steps=(
 
 selected=$(select_steps "${steps[@]}")
 test -n "$selected"
+if [ -n "${E2E_FROM:-}${E2E_ONLY:-}" ] && ! grep -qx tenancy_users <<<"$selected"; then
+  issue_tokens
+fi
 for step in $selected; do
   run_step "$step"
 done
