@@ -19,7 +19,7 @@ panel_served() {
   expect_equal "$body" "$(panel_curl "https://console.$HOST/p/web/vms")" "client route fallback"
   expect_equal 404 "$(panel_curl -o /dev/null -w '%{http_code}' "https://console.$HOST/assets/missing.js")" "missing asset"
   expect_equal 401 "$(panel_curl -o /dev/null -w '%{http_code}' "https://console.$HOST/apis/x")" "anonymous API call"
-  expect_equal ok "$(panel_curl "https://console.$HOST/healthz")" "health check"
+  expect_equal 404 "$(panel_curl -o /dev/null -w '%{http_code}' "https://console.$HOST/healthz")" "health path stays off the public route"
   expect_contains "$(panel_curl -D - -o /dev/null "https://console.$HOST/")" "connect-src 'self' wss://console.$HOST https://upload.$HOST" "content security policy"
   expect_equal 200 "$(panel_curl -o /dev/null -w '%{http_code}' -H "Authorization: Bearer $(cat "$TOKEN_DIR/admin")" "https://api.$HOST/apis/bedrock.cloudyfolks.io/v1alpha1/hosts")" "api pass-through"
   expect_equal 401 "$(panel_curl -o /dev/null -w '%{http_code}' -H 'Authorization: Bearer junk' "https://api.$HOST/apis/bedrock.cloudyfolks.io/v1alpha1/hosts")" "api with a bad token"
