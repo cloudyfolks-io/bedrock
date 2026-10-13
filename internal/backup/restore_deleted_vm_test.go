@@ -11,6 +11,7 @@ import (
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -338,5 +339,44 @@ func TestRestoreReplaceRefusesAVMThatAnotherRestoreHolds(t *testing.T) {
 	requireUnderlyingIntact(t, fx)
 	if hold := holdOf(t, &v1alpha1.VirtualMachine{ObjectMeta: metav1.ObjectMeta{Name: fx.vm, Namespace: projectNamespace}}); hold != "someone-else" {
 		t.Fatalf("hold %q", hold)
+	}
+}
+
+func TestRestoreOfADeletedVMReadsFreshWhenTheCacheIsStale(t *testing.T) {
+	fx := fixtureOf("stale")
+	prepareDeletedVM(t, fx, snapshotFor(fx))
+	createVMR(t, "stale-restore", projectNamespace, v1alpha1.VirtualMachineRestoreSpec{BackupRef: fx.vmb, BackupID: fx.backupID, TargetName: fx.vm})
+	broken := probedRestoreReconciler(t, &restoreProbe{vm: types.NamespacedName{Namespace: projectNamespace, Name: fx.vm}}, func(kind string) error {
+		if kind == "Restore" {
+			return errors.New("the API server is not reachable")
+		}
+		return nil
+	})
+	if _, err := broken.Reconcile(context.Background(), ctrl.Request{NamespacedName: types.NamespacedName{Namespace: projectNamespace, Name: "stale-restore"}}); err == nil {
+		t.Fatal("the failed start must give an error")
+	}
+	created, err := getBedrockVM(t, fx.vm)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	base, err := client.NewWithWatch(cfg, client.Options{Scheme: scheme})
+	if err != nil {
+		t.Fatal(err)
+	}
+	stale := interceptor.NewClient(base, interceptor.Funcs{
+		Get: func(ctx context.Context, c client.WithWatch, key client.ObjectKey, obj client.Object, opts ...client.GetOption) error {
+			if _, isVM := obj.(*v1alpha1.VirtualMachine); isVM {
+				return apierrors.NewNotFound(schema.GroupResource{Group: v1alpha1.GroupVersion.Group, Resource: "virtualmachines"}, key.Name)
+			}
+			return c.Get(ctx, key, obj, opts...)
+		},
+	})
+	r := &RestoreReconciler{Client: stale, APIReader: k8sClient, Now: func() time.Time { return testNow }}
+	reconcileVMR(t, r, projectNamespace, "stale-restore")
+	requireRestoreState(t, getVMR(t, "stale-restore"), v1alpha1.RestorePhaseInProgress, metav1.ConditionFalse, RestoreReasonRestoring)
+	resumed, err := getBedrockVM(t, fx.vm)
+	if err != nil || resumed.UID != created.UID {
+		t.Fatalf("the VM changed: %v", err)
 	}
 }

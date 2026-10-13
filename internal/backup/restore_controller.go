@@ -49,8 +49,9 @@ var (
 )
 
 type RestoreReconciler struct {
-	Client client.Client
-	Now    func() time.Time
+	Client    client.Client
+	APIReader client.Reader
+	Now       func() time.Time
 }
 
 type stop struct {
@@ -268,7 +269,7 @@ func vmFromBackup(backup *unstructured.Unstructured, namespace, name string) (*v
 
 func (r *RestoreReconciler) recreate(ctx context.Context, vmr *v1alpha1.VirtualMachineRestore, scope Scope, vm string, restored, existing *v1alpha1.VirtualMachine) (*stop, error) {
 	if existing == nil {
-		if halted, err := r.createHeldVM(ctx, vmr, vm, restored); err != nil || halted != nil {
+		if halted, err := r.createHeldVM(ctx, vmr, scope.Namespace, vm, restored); err != nil || halted != nil {
 			return halted, err
 		}
 	}
@@ -280,7 +281,7 @@ func (r *RestoreReconciler) recreate(ctx context.Context, vmr *v1alpha1.VirtualM
 	return nil, nil
 }
 
-func (r *RestoreReconciler) createHeldVM(ctx context.Context, vmr *v1alpha1.VirtualMachineRestore, vm string, restored *v1alpha1.VirtualMachine) (*stop, error) {
+func (r *RestoreReconciler) createHeldVM(ctx context.Context, vmr *v1alpha1.VirtualMachineRestore, namespace, vm string, restored *v1alpha1.VirtualMachine) (*stop, error) {
 	if restored == nil {
 		next := halt(v1alpha1.RestorePhaseFailed, RestoreReasonSpecMissing, "the backup has no VM spec because an older release made it; create the VM again and restore with replace", 0)
 		return &next, nil
@@ -290,13 +291,32 @@ func (r *RestoreReconciler) createHeldVM(ctx context.Context, vmr *v1alpha1.Virt
 	err := r.Client.Create(ctx, held, client.FieldOwner(v1alpha1.BackupFieldManager))
 	switch {
 	case apierrors.IsAlreadyExists(err):
-		next := targetExists(vm)
-		return &next, nil
+		return r.confirmHeld(ctx, vmr, namespace, vm)
 	case apierrors.IsInvalid(err):
 		next := halt(v1alpha1.RestorePhaseFailed, RestoreReasonSpecInvalid, "the cluster refused the VM spec of the backup: "+err.Error(), 0)
 		return &next, nil
 	}
 	return nil, err
+}
+
+func (r *RestoreReconciler) reader() client.Reader {
+	if r.APIReader != nil {
+		return r.APIReader
+	}
+	return r.Client
+}
+
+func (r *RestoreReconciler) confirmHeld(ctx context.Context, vmr *v1alpha1.VirtualMachineRestore, namespace, vm string) (*stop, error) {
+	fresh := &v1alpha1.VirtualMachine{}
+	err := r.reader().Get(ctx, types.NamespacedName{Namespace: namespace, Name: vm}, fresh)
+	if err != nil && !apierrors.IsNotFound(err) {
+		return nil, err
+	}
+	if holder, held := v1alpha1.RestoreHolder(fresh); err == nil && held && holder == vmr.Name {
+		return nil, nil
+	}
+	next := targetExists(vm)
+	return &next, nil
 }
 
 func (r *RestoreReconciler) leftovers(ctx context.Context, scope Scope, vm string) (int, error) {

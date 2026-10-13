@@ -13,7 +13,7 @@ func SetupWithManager(mgr ctrl.Manager) error {
 	reconcilers := []interface{ SetupWithManager(ctrl.Manager) error }{
 		&TargetReconciler{Client: mgr.GetClient(), APIReader: mgr.GetAPIReader(), Recorder: recorder},
 		&BackupReconciler{Client: mgr.GetClient(), Now: time.Now, Recorder: recorder},
-		&RestoreReconciler{Client: mgr.GetClient(), Now: time.Now},
+		&RestoreReconciler{Client: mgr.GetClient(), APIReader: mgr.GetAPIReader(), Now: time.Now},
 	}
 	for _, reconciler := range reconcilers {
 		if err := reconciler.SetupWithManager(mgr); err != nil {
