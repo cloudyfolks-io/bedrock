@@ -28,6 +28,8 @@ const (
 	RestoreReasonRenameNotSupported     = "RenameNotSupported"
 	RestoreReasonTargetExists           = "TargetExists"
 	RestoreReasonVirtualMachineNotFound = "VirtualMachineNotFound"
+	RestoreReasonSpecMissing            = "VirtualMachineSpecMissing"
+	RestoreReasonSpecInvalid            = "VirtualMachineSpecInvalid"
 	RestoreReasonPreparing              = "Preparing"
 	RestoreReasonRestoring              = "Restoring"
 	RestoreReasonVeleroNotInstalled     = "VeleroNotInstalled"
@@ -42,6 +44,7 @@ var (
 	kubevirtVMListGVK = schema.GroupVersionKind{Group: "kubevirt.io", Version: "v1", Kind: "VirtualMachineList"}
 	dataVolumeListGVK = schema.GroupVersionKind{Group: "cdi.kubevirt.io", Version: "v1beta1", Kind: "DataVolumeList"}
 	pvcListGVK        = schema.GroupVersionKind{Version: "v1", Kind: "PersistentVolumeClaimList"}
+	underlyingLists   = []schema.GroupVersionKind{kubevirtVMListGVK, dataVolumeListGVK, pvcListGVK}
 )
 
 type RestoreReconciler struct {
@@ -80,7 +83,7 @@ func (r *RestoreReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 
 func (r *RestoreReconciler) conclude(ctx context.Context, vmr *v1alpha1.VirtualMachineRestore, next stop) (ctrl.Result, error) {
 	releases := next.Phase == v1alpha1.RestorePhaseFailed || next.Phase == v1alpha1.RestorePhaseCompleted ||
-		(next.Phase == v1alpha1.RestorePhasePending && vmr.Status.Phase == v1alpha1.RestorePhaseInProgress)
+		(next.Phase == v1alpha1.RestorePhasePending && vmr.Status.Phase == v1alpha1.RestorePhaseInProgress && vmr.Spec.Replace)
 	if releases {
 		if err := r.releaseHold(ctx, vmr); err != nil {
 			return ctrl.Result{}, err
@@ -167,17 +170,16 @@ func (r *RestoreReconciler) getRestore(ctx context.Context, scope Scope, vmr str
 func (r *RestoreReconciler) start(ctx context.Context, vmr *v1alpha1.VirtualMachineRestore, scope Scope, vm, backupID string) (stop, error) {
 	bedrockVM := &v1alpha1.VirtualMachine{}
 	err := r.Client.Get(ctx, types.NamespacedName{Namespace: scope.Namespace, Name: vm}, bedrockVM)
-	exists := err == nil
-	if err != nil && !apierrors.IsNotFound(err) {
+	if apierrors.IsNotFound(err) {
+		bedrockVM = nil
+	} else if err != nil {
 		return stop{}, err
 	}
-	if vmr.Spec.Replace && !exists {
-		return halt(v1alpha1.RestorePhasePending, RestoreReasonVirtualMachineNotFound, "virtual machine "+vm+" does not exist; restore it by name instead", requeueInstalling), nil
+	if halted := refuseTarget(*vmr, vm, bedrockVM); halted != nil {
+		return *halted, nil
 	}
-	if !vmr.Spec.Replace && exists {
-		return halt(v1alpha1.RestorePhasePending, RestoreReasonTargetExists, "virtual machine "+vm+" exists; use replace to overwrite it", requeueInstalling), nil
-	}
-	if halted, err := r.preconditions(ctx, backupID); err != nil || halted != nil {
+	backup, halted, err := r.preconditions(ctx, backupID)
+	if err != nil || halted != nil {
 		return orZero(halted), err
 	}
 	if vmr.Spec.Replace {
@@ -185,33 +187,104 @@ func (r *RestoreReconciler) start(ctx context.Context, vmr *v1alpha1.VirtualMach
 		if err != nil || !gone {
 			return halt(v1alpha1.RestorePhaseInProgress, RestoreReasonPreparing, "the VM objects are being removed", requeuePreparing), err
 		}
+		return r.launch(ctx, vmr, scope, backupID)
+	}
+	if halted, err := r.recreate(ctx, vmr, scope, vm, backup, bedrockVM); err != nil || halted != nil {
+		return orZero(halted), err
 	}
 	return r.launch(ctx, vmr, scope, backupID)
 }
 
-func (r *RestoreReconciler) preconditions(ctx context.Context, backupID string) (*stop, error) {
+func refuseTarget(vmr v1alpha1.VirtualMachineRestore, vm string, existing *v1alpha1.VirtualMachine) *stop {
+	switch {
+	case vmr.Spec.Replace && existing == nil:
+		next := halt(v1alpha1.RestorePhasePending, RestoreReasonVirtualMachineNotFound, "virtual machine "+vm+" does not exist; restore it by name instead", requeueInstalling)
+		return &next
+	case !vmr.Spec.Replace && existing != nil && existing.Annotations[HoldAnnotation] != vmr.Name:
+		next := targetExists(vm)
+		return &next
+	}
+	return nil
+}
+
+func targetExists(vm string) stop {
+	return halt(v1alpha1.RestorePhasePending, RestoreReasonTargetExists, "virtual machine "+vm+" exists; use replace to overwrite it", requeueInstalling)
+}
+
+func (r *RestoreReconciler) preconditions(ctx context.Context, backupID string) (*unstructured.Unstructured, *stop, error) {
 	why, err := locationState(ctx, r.Client)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	if why != nil {
 		next := halt(v1alpha1.RestorePhasePending, why.Reason, why.Message, requeueInstalling)
-		return &next, nil
+		return nil, &next, nil
 	}
 	backup := veleroStub("Backup", backupID)
 	err = r.Client.Get(ctx, client.ObjectKeyFromObject(backup), backup)
 	if apierrors.IsNotFound(err) {
 		next := halt(v1alpha1.RestorePhaseFailed, RestoreReasonBackupNotFound, "Velero backup "+backupID+" does not exist", 0)
-		return &next, nil
+		return nil, &next, nil
 	}
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	if phase, _, _ := unstructured.NestedString(backup.Object, "status", "phase"); phase != phaseCompleted {
 		next := halt(v1alpha1.RestorePhaseFailed, RestoreReasonBackupNotFound, "Velero backup "+backupID+" is in phase "+phase+", not Completed", 0)
-		return &next, nil
+		return nil, &next, nil
+	}
+	return backup, nil, nil
+}
+
+func (r *RestoreReconciler) recreate(ctx context.Context, vmr *v1alpha1.VirtualMachineRestore, scope Scope, vm string, backup *unstructured.Unstructured, existing *v1alpha1.VirtualMachine) (*stop, error) {
+	if existing == nil {
+		if halted, err := r.createHeldVM(ctx, vmr, scope, vm, backup); err != nil || halted != nil {
+			return halted, err
+		}
+	}
+	left, err := r.leftovers(ctx, scope, vm)
+	if err != nil || left > 0 {
+		next := halt(v1alpha1.RestorePhaseInProgress, RestoreReasonPreparing, "the old objects of the VM are being removed", requeuePreparing)
+		return &next, err
 	}
 	return nil, nil
+}
+
+func (r *RestoreReconciler) createHeldVM(ctx context.Context, vmr *v1alpha1.VirtualMachineRestore, scope Scope, vm string, backup *unstructured.Unstructured) (*stop, error) {
+	snapshot := backup.GetAnnotations()[VMSnapshotAnnotation]
+	if snapshot == "" {
+		next := halt(v1alpha1.RestorePhaseFailed, RestoreReasonSpecMissing, "the backup has no VM spec because an older release made it; create the VM again and restore with replace", 0)
+		return &next, nil
+	}
+	restored, err := VMFromSnapshot(snapshot, vm)
+	if err != nil {
+		next := halt(v1alpha1.RestorePhaseFailed, RestoreReasonSpecInvalid, err.Error(), 0)
+		return &next, nil
+	}
+	restored.Namespace = scope.Namespace
+	restored.Annotations = WithHold(restored.Annotations, vmr.Name)
+	err = r.Client.Create(ctx, &restored, client.FieldOwner(v1alpha1.BackupFieldManager))
+	switch {
+	case apierrors.IsAlreadyExists(err):
+		next := targetExists(vm)
+		return &next, nil
+	case apierrors.IsInvalid(err):
+		next := halt(v1alpha1.RestorePhaseFailed, RestoreReasonSpecInvalid, "the cluster refused the VM spec of the backup: "+err.Error(), 0)
+		return &next, nil
+	}
+	return nil, err
+}
+
+func (r *RestoreReconciler) leftovers(ctx context.Context, scope Scope, vm string) (int, error) {
+	count := 0
+	for _, list := range underlyingLists {
+		items, err := r.listUnderlying(ctx, list, scope.Namespace, v1alpha1.TenantLabels("VirtualMachine", vm, scope.Tenant, scope.Project))
+		if err != nil {
+			return 0, err
+		}
+		count += len(items)
+	}
+	return count, nil
 }
 
 func (r *RestoreReconciler) launch(ctx context.Context, vmr *v1alpha1.VirtualMachineRestore, scope Scope, backupID string) (stop, error) {
@@ -232,7 +305,7 @@ func (r *RestoreReconciler) prepare(ctx context.Context, vmr *v1alpha1.VirtualMa
 	}
 	remaining := 0
 	for _, selector := range underlyingSelectors(scope, vm) {
-		for _, list := range []schema.GroupVersionKind{kubevirtVMListGVK, dataVolumeListGVK, pvcListGVK} {
+		for _, list := range underlyingLists {
 			left, err := r.removeAll(ctx, list, scope.Namespace, selector)
 			if err != nil {
 				return false, err
@@ -251,25 +324,30 @@ func underlyingSelectors(scope Scope, vm *v1alpha1.VirtualMachine) []map[string]
 	return selectors
 }
 
-func (r *RestoreReconciler) removeAll(ctx context.Context, list schema.GroupVersionKind, namespace string, labels map[string]string) (int, error) {
+func (r *RestoreReconciler) listUnderlying(ctx context.Context, list schema.GroupVersionKind, namespace string, labels map[string]string) ([]unstructured.Unstructured, error) {
 	items := &unstructured.UnstructuredList{}
 	items.SetGroupVersionKind(list)
 	err := r.Client.List(ctx, items, client.InNamespace(namespace), client.MatchingLabels(labels))
 	if meta.IsNoMatchError(err) {
-		return 0, nil
+		return nil, nil
 	}
+	return items.Items, err
+}
+
+func (r *RestoreReconciler) removeAll(ctx context.Context, list schema.GroupVersionKind, namespace string, labels map[string]string) (int, error) {
+	items, err := r.listUnderlying(ctx, list, namespace, labels)
 	if err != nil {
 		return 0, err
 	}
-	for i := range items.Items {
-		if items.Items[i].GetDeletionTimestamp() != nil {
+	for i := range items {
+		if items[i].GetDeletionTimestamp() != nil {
 			continue
 		}
-		if err := client.IgnoreNotFound(r.Client.Delete(ctx, &items.Items[i], client.PropagationPolicy(metav1.DeletePropagationForeground))); err != nil {
+		if err := client.IgnoreNotFound(r.Client.Delete(ctx, &items[i], client.PropagationPolicy(metav1.DeletePropagationForeground))); err != nil {
 			return 0, err
 		}
 	}
-	return len(items.Items), nil
+	return len(items), nil
 }
 
 func (r *RestoreReconciler) holdAll(ctx context.Context, restore string, vm *v1alpha1.VirtualMachine) error {

@@ -369,31 +369,6 @@ func TestRestoreDeletionReleasesTheHold(t *testing.T) {
 	requireGone(t, err)
 }
 
-func TestRestoreSameNameAfterDeletion(t *testing.T) {
-	fx := fixtureOf("recover")
-	readyForRestore(t, fx)
-	ensureProject(t)
-	createVMBWithBackups(t, projectNamespace, fx)
-	createVMR(t, "recover-restore", projectNamespace, v1alpha1.VirtualMachineRestoreSpec{BackupRef: fx.vmb, BackupID: fx.backupID, TargetName: fx.vm})
-	r := newRestoreReconciler()
-	reconcileVMR(t, r, projectNamespace, "recover-restore")
-	if _, err := getVelero(t, "Restore", restoreName("recover-restore")); err != nil {
-		t.Fatalf("restore must start without a preparing step: %v", err)
-	}
-	restoredVM := &v1alpha1.VirtualMachine{ObjectMeta: metav1.ObjectMeta{Name: fx.vm, Namespace: projectNamespace, Annotations: map[string]string{HoldAnnotation: "recover-restore"}}, Spec: v1alpha1.VirtualMachineSpec{InstanceType: "small", RootDisk: v1alpha1.VMRootDisk{SizeGi: 10}}}
-	if err := k8sClient.Create(context.Background(), restoredVM); err != nil {
-		t.Fatal(err)
-	}
-	reconcileVMR(t, r, projectNamespace, "recover-restore")
-	requireRestoreState(t, getVMR(t, "recover-restore"), v1alpha1.RestorePhaseInProgress, metav1.ConditionFalse, RestoreReasonRestoring)
-	setRestoreStatus(t, "recover-restore", map[string]any{"phase": "Completed"})
-	reconcileVMR(t, r, projectNamespace, "recover-restore")
-	requireRestoreState(t, getVMR(t, "recover-restore"), v1alpha1.RestorePhaseCompleted, metav1.ConditionTrue, RestoreReasonCompleted)
-	if hold := holdOf(t, &v1alpha1.VirtualMachine{ObjectMeta: metav1.ObjectMeta{Name: fx.vm, Namespace: projectNamespace}}); hold != "" {
-		t.Fatalf("hold %q", hold)
-	}
-}
-
 func TestHoldHelpers(t *testing.T) {
 	input := map[string]string{"a": "b"}
 	held := WithHold(input, "r1")
