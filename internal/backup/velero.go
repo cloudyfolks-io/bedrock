@@ -148,6 +148,20 @@ func Schedule(scope Scope, vmb, vm, cron string, ttl time.Duration) *unstructure
 	})
 }
 
+func Paused(obj *unstructured.Unstructured) *unstructured.Unstructured {
+	if obj.GetKind() != "Schedule" {
+		return obj
+	}
+	paused := obj.DeepCopy()
+	_ = unstructured.SetNestedField(paused.Object, true, "spec", "paused")
+	return paused
+}
+
+func IsPaused(obj *unstructured.Unstructured) bool {
+	paused, _, _ := unstructured.NestedBool(obj.Object, "spec", "paused")
+	return paused
+}
+
 func Backup(scope Scope, vmb, vm string, ttl time.Duration) *unstructured.Unstructured {
 	return objectOf("Backup", VeleroName("vmb", scope.Namespace, vmb), vmbObjectLabels(scope, vmb), BackupSpec(scope, vm, ttl))
 }

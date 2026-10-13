@@ -94,6 +94,9 @@ func (r *BackupReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctr
 		return ctrl.Result{}, err
 	}
 	if refusal != nil {
+		if err := r.pauseSchedule(ctx, desired); err != nil {
+			return ctrl.Result{}, err
+		}
 		return r.refuse(ctx, vmb, *refusal, requeueInstalling)
 	}
 	if err := r.markBackupTargets(ctx, vm); err != nil {
@@ -188,6 +191,21 @@ func (r *BackupReconciler) virtualMachine(ctx context.Context, vmb *v1alpha1.Vir
 		return nil, &refusal{Reason: ReasonVirtualMachineNotFound, Message: "virtual machine " + vmb.Spec.VMRef + " does not exist"}, nil
 	}
 	return vm, nil, err
+}
+
+func (r *BackupReconciler) pauseSchedule(ctx context.Context, desired *unstructured.Unstructured) error {
+	if desired.GetKind() != "Schedule" {
+		return nil
+	}
+	live := veleroStub("Schedule", desired.GetName())
+	err := r.Client.Get(ctx, client.ObjectKeyFromObject(live), live)
+	if apierrors.IsNotFound(err) || (err == nil && IsPaused(live)) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	return ssa.Apply(ctx, r.Client, Paused(desired), v1alpha1.BackupFieldManager)
 }
 
 func (r *BackupReconciler) markBackupTargets(ctx context.Context, vm *v1alpha1.VirtualMachine) error {
