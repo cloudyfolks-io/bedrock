@@ -10,11 +10,32 @@ A backup of a VM contains these objects:
 
 - The Bedrock `Volume` objects that the VM uses.
 - The KubeVirt VM and its related objects.
+- The Secret `<vm>-cloudinit`. Bedrock creates it from the cloud-init data of
+  the VM.
 - The data of all disks.
 
-A backup does not contain the Bedrock `VirtualMachine` object. The Velero
-plugin for KubeVirt changes every object named `VirtualMachine` and
-removes the fields that it does not know.
+A backup also holds a copy of the Bedrock `VirtualMachine` spec. Velero cannot
+back up the Bedrock `VirtualMachine` object. The Velero plugin for KubeVirt
+changes every object named `VirtualMachine` and removes the fields that it
+does not know. So Bedrock excludes the object from the backup. Bedrock writes
+the copy to the annotation `bedrock.cloudyfolks.io/virtual-machine` of the
+Velero backup. Velero stores the Velero backup in the backup target. The copy
+stays with the backup.
+
+The copy holds these fields:
+
+- The name and the namespace of the VM.
+- The `spec` of the VM.
+- The labels and the annotations that Bedrock owns. These are the keys with
+  the prefix `bedrock.cloudyfolks.io/` and the label
+  `velero.io/exclude-from-backup`.
+
+The copy does not hold the status, the `managedFields`, the uid, the resource
+version, the owner references or the annotation `restore-hold`.
+
+The Secret that `spec.cloudInit.secretRef` names is not part of the backup.
+Keep that Secret. If it is missing after a restore, the VM reports
+`InvalidUserData` until you create it again.
 
 Velero copies the disk data with CSI snapshots. The node agent of Velero
 moves the data to the backup target.
@@ -150,6 +171,30 @@ entry has an `id`, a `time` and `sizeBytes`.
 When you delete a `VirtualMachineBackup`, Bedrock deletes its schedule and
 its stored backups.
 
+## Backups stay when the VM is deleted
+
+A backup outlives its VM. If you delete the Bedrock `VirtualMachine`, Bedrock
+keeps its `VirtualMachineBackup` objects and its Velero backups. Bedrock
+deletes a `VirtualMachineBackup` in only two cases:
+
+- You delete the `VirtualMachineBackup`.
+- You delete the project namespace.
+
+While the VM does not exist, these rules apply:
+
+- `Ready` is `False` with the reason `VirtualMachineNotFound`.
+- Bedrock pauses the Velero schedule. No new backup starts.
+- Bedrock does not remove old backups.
+- The list `status.backups` keeps its entries.
+
+Bedrock also pauses the schedule and does not remove backups while a restore
+holds the VM. Bedrock starts the schedule again when the VM exists and the
+hold is gone.
+
+A schedule keeps the copy of the VM spec current. When the VM changes,
+Bedrock writes the new copy to the schedule. Each backup that the schedule
+makes gets the copy that was current at that time.
+
 ## Restore a VM
 
 A `VirtualMachineRestore` names a `VirtualMachineBackup` in the same project
@@ -173,8 +218,7 @@ Bedrock deletes the KubeVirt VM, the data volumes and the claims of the VM.
 Then Velero restores them from the backup. The Bedrock `VirtualMachine`
 object stays as it is.
 
-This example restores the KubeVirt VM and the disks after you deleted the
-VM. It does not create the Bedrock `VirtualMachine` object again:
+This example restores a VM after you deleted it:
 
 ```yaml
 apiVersion: bedrock.cloudyfolks.io/v1alpha1
@@ -188,15 +232,50 @@ spec:
   targetName: web
 ```
 
+When the Bedrock `VirtualMachine` does not exist, Bedrock does these steps:
+
+1. It reads the copy of the VM spec from the Velero backup. If the copy is
+   missing, the restore gets the phase `Failed` and the reason
+   `VirtualMachineSpecMissing`. Backups from older releases have no copy.
+   Bedrock creates nothing in this case. Create the VM again by hand. Then
+   restore with `replace: true`.
+2. It creates the Bedrock `VirtualMachine` from the copy. The new object has
+   the annotation `bedrock.cloudyfolks.io/restore-hold`. The compute
+   controllers do not change the underlying objects while the annotation is
+   present.
+3. It waits until the old KubeVirt VM, data volumes and claims of the VM are
+   gone. The reason is `Preparing`. Bedrock does not delete them. The
+   garbage collector removes them after you delete the VM.
+4. It asks Velero to restore the KubeVirt VM, the data volumes, the claims
+   and the Secret `<vm>-cloudinit`.
+5. When the restore is complete, it removes the annotation. The compute
+   controllers adopt the restored objects.
+
+If the copy is not valid, the restore gets the phase `Failed` and the reason
+`VirtualMachineSpecInvalid`. Bedrock creates nothing in this case.
+
+A restore creates the Bedrock `VirtualMachine` only one time. If the
+controller restarts in the middle of a restore, it continues with the object
+that exists.
+
+The restored VM starts at once when the restored spec says `running: true`.
+The spec is the spec that the VM had at the time of the backup. To stop the
+VM, use the normal stop action after the restore.
+
+If the restore fails, Bedrock keeps the Bedrock `VirtualMachine` that it
+created and removes the annotation. The compute controllers then make
+the missing objects from the spec. These objects are new and empty. To try
+again, create a restore with `replace: true`.
+
 While a restore runs, the VM and its volumes carry the annotation
-`bedrock.cloudyfolks.io/restore-hold`. The compute controllers do not change
-the underlying objects while the annotation is present. Bedrock removes the
-annotation when the restore ends, fails or is deleted.
+`bedrock.cloudyfolks.io/restore-hold`. Bedrock removes the annotation when
+the restore ends, fails or is deleted. If you delete a restore before it
+ends, Bedrock keeps the Bedrock `VirtualMachine` that it created.
 
 Remember these limits:
 
-- A restore does not revert the Bedrock `VirtualMachine` spec.
-- A restore does not create a deleted Bedrock `VirtualMachine` again.
+- A restore with `replace` does not revert the Bedrock `VirtualMachine` spec.
+- A restore of a deleted VM needs a backup that has the copy of the VM spec.
 - `targetName` must be the name of the VM that you backed up. A different name
   gives the phase `Failed` and the reason `RenameNotSupported`.
 - `backupID` must be in the list `status.backups` of the named backup.
