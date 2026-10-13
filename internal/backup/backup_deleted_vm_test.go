@@ -328,3 +328,24 @@ func TestScheduleOfAMissingVMWithoutASchedulePausesNothing(t *testing.T) {
 		t.Fatal("a schedule of a missing VM must not be created")
 	}
 }
+
+func TestOneShotWaitsWhileARestoreHoldsTheVM(t *testing.T) {
+	setLocation(t, "Available")
+	createVM(t, "waits-vm")
+	updateVM(t, "waits-vm", func(vm *v1alpha1.VirtualMachine) { vm.Annotations = map[string]string{HoldAnnotation: "some-restore"} })
+	createVMB(t, "waits", v1alpha1.VirtualMachineBackupSpec{VMRef: "waits-vm"})
+	r := newBackupReconciler(testNow)
+
+	reconcileVMB(t, r, "waits")
+	requireReadyMessage(t, getVMB(t, "waits"), ReasonPaused, "waits", "some-restore")
+	if len(listVelero(t, "Backup", vmbVeleroLabels("waits"))) != 0 {
+		t.Fatal("a half-restored VM must not be backed up")
+	}
+
+	updateVM(t, "waits-vm", func(vm *v1alpha1.VirtualMachine) { vm.Annotations = nil })
+	reconcileVMB(t, r, "waits")
+	if len(listVelero(t, "Backup", vmbVeleroLabels("waits"))) != 1 {
+		t.Fatal("the backup must start when the hold ends")
+	}
+	requireReady(t, getVMB(t, "waits"), metav1.ConditionFalse, ReasonInProgress)
+}

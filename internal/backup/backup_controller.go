@@ -294,7 +294,7 @@ func (r *BackupReconciler) labelBackupVM(ctx context.Context, obj client.Object,
 
 func (r *BackupReconciler) drive(ctx context.Context, vmb *v1alpha1.VirtualMachineBackup, scope Scope, desired *unstructured.Unstructured, heldBy string) (ctrl.Result, error) {
 	labels := v1alpha1.TenantLabels("VirtualMachineBackup", vmb.Name, scope.Tenant, scope.Project)
-	backups, err := r.ensureVelero(ctx, vmb, desired, labels)
+	backups, err := r.ensureVelero(ctx, vmb, desired, labels, heldBy)
 	if err != nil {
 		return r.veleroFailure(ctx, vmb, err)
 	}
@@ -314,6 +314,9 @@ func (r *BackupReconciler) drive(ctx context.Context, vmb *v1alpha1.VirtualMachi
 		phase = vmb.Status.Phase
 	}
 	condition := oneShotReady(phase, newestRaw(infos))
+	if heldBy != "" && len(infos) == 0 && isFresh(vmb) {
+		condition = notReady(ReasonPaused, "the backup waits because "+heldBy)
+	}
 	if desired.GetKind() == "Schedule" {
 		condition, err = r.scheduleCondition(ctx, desired, phase, newestRaw(infos))
 		if err != nil {
@@ -329,7 +332,7 @@ func isFresh(vmb *v1alpha1.VirtualMachineBackup) bool {
 	return vmb.Status.Phase == "" || vmb.Status.Phase == v1alpha1.BackupPhasePending
 }
 
-func (r *BackupReconciler) ensureVelero(ctx context.Context, vmb *v1alpha1.VirtualMachineBackup, desired *unstructured.Unstructured, labels map[string]string) ([]unstructured.Unstructured, error) {
+func (r *BackupReconciler) ensureVelero(ctx context.Context, vmb *v1alpha1.VirtualMachineBackup, desired *unstructured.Unstructured, labels map[string]string, heldBy string) ([]unstructured.Unstructured, error) {
 	if desired.GetKind() == "Schedule" {
 		applied, err := r.skippingWhenResumed(ctx, desired)
 		if err != nil {
@@ -341,7 +344,7 @@ func (r *BackupReconciler) ensureVelero(ctx context.Context, vmb *v1alpha1.Virtu
 		return r.listVelero(ctx, backupListGVK, labels)
 	}
 	backups, err := r.listVelero(ctx, backupListGVK, labels)
-	if err != nil || len(backups) > 0 || !isFresh(vmb) {
+	if err != nil || len(backups) > 0 || !isFresh(vmb) || heldBy != "" {
 		return backups, err
 	}
 	if err := client.IgnoreAlreadyExists(r.Client.Create(ctx, desired, client.FieldOwner(v1alpha1.BackupFieldManager))); err != nil {

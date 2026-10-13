@@ -75,9 +75,9 @@ func TestBackupStoresTheVMSpecOnTheVeleroBackup(t *testing.T) {
 		vm.Annotations = map[string]string{"bedrock.cloudyfolks.io/owner": "kept", HoldAnnotation: "another-restore", "note": "dropped"}
 	})
 	setVMStatus(t, "snap-vm", v1alpha1.VirtualMachineStatus{Phase: v1alpha1.VMPhaseRunning, Node: "node-a"})
-	createVMB(t, "snap", v1alpha1.VirtualMachineBackupSpec{VMRef: "snap-vm"})
+	createVMB(t, "snap", v1alpha1.VirtualMachineBackupSpec{VMRef: "snap-vm", Schedule: "0 2 * * *"})
 	reconcileVMB(t, newBackupReconciler(testNow), "snap")
-	backup, err := getVelero(t, "Backup", VeleroName("vmb", projectNamespace, "snap"))
+	backup, err := getVelero(t, "Schedule", VeleroName("vmb", projectNamespace, "snap"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -100,6 +100,20 @@ func TestBackupStoresTheVMSpecOnTheVeleroBackup(t *testing.T) {
 	}
 	if got := decodeSnapshot(t, backup); !reflect.DeepEqual(got, want) {
 		t.Fatalf("snapshot\n got %v\nwant %v", got, want)
+	}
+}
+
+func TestBackupOneShotCarriesTheVMSpec(t *testing.T) {
+	setLocation(t, "Available")
+	createVM(t, "oneshotsnap-vm")
+	createVMB(t, "oneshotsnap", v1alpha1.VirtualMachineBackupSpec{VMRef: "oneshotsnap-vm"})
+	reconcileVMB(t, newBackupReconciler(testNow), "oneshotsnap")
+	backup, err := getVelero(t, "Backup", VeleroName("vmb", projectNamespace, "oneshotsnap"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if snapshotInstanceType(backup) != "small" {
+		t.Fatalf("snapshot %q", backup.GetAnnotations()[VMSnapshotAnnotation])
 	}
 }
 
