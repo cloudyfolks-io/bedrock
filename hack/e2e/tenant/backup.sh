@@ -7,11 +7,15 @@ s3_listing() {
 }
 
 listing_has() {
-  s3_listing | grep -q "$1/"
+  local listing
+  listing=$(s3_listing)
+  grep -q "$1/" <<<"$listing"
 }
 
 listing_lacks() {
-  ! s3_listing | grep -q "$1/"
+  local listing
+  listing=$(s3_listing)
+  ! grep -q "$1/" <<<"$listing"
 }
 
 backup_target() {
