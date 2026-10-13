@@ -344,10 +344,11 @@ func TestRenderStorageMutesOnlyWarningsThatReplicasExplain(t *testing.T) {
 		return got
 	}
 	want := map[string]string{
-		"AUTH_INSECURE_KEYS_ALLOWED":   "mute",
-		"AUTH_INSECURE_KEYS_CREATABLE": "mute",
-		"POOL_NO_REDUNDANCY":           "mute",
-		"TOO_FEW_OSDS":                 "mute",
+		"AUTH_INSECURE_CLIENT_KEY_TYPE": "mute",
+		"AUTH_INSECURE_KEYS_ALLOWED":    "mute",
+		"AUTH_INSECURE_KEYS_CREATABLE":  "mute",
+		"POOL_NO_REDUNDANCY":            "mute",
+		"TOO_FEW_OSDS":                  "mute",
 	}
 	if got := policies("1"); !reflect.DeepEqual(got, want) {
 		t.Fatalf("one replica: %v", got)

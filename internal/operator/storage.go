@@ -135,8 +135,9 @@ func cephCluster(image string, hosts []v1alpha1.Host, mons int64, replicas int) 
 
 func mutedHealthWarnings(replicas int) map[string]any {
 	muted := map[string]any{
-		"AUTH_INSECURE_KEYS_ALLOWED":   map[string]any{"policy": "mute"},
-		"AUTH_INSECURE_KEYS_CREATABLE": map[string]any{"policy": "mute"},
+		"AUTH_INSECURE_CLIENT_KEY_TYPE": map[string]any{"policy": "mute"},
+		"AUTH_INSECURE_KEYS_ALLOWED":    map[string]any{"policy": "mute"},
+		"AUTH_INSECURE_KEYS_CREATABLE":  map[string]any{"policy": "mute"},
 	}
 	policy := "unmute"
 	if replicas == 1 {
