@@ -23,6 +23,8 @@ func TestOperatorRoleCoversBackup(t *testing.T) {
 		{"", "persistentvolumeclaims", "delete"},
 		{"", "secrets", "patch"},
 		{"kubevirt.io", "virtualmachines", "delete"},
+		{"bedrock.cloudyfolks.io", "virtualmachines", "create"},
+		{"bedrock.cloudyfolks.io", "virtualmachines", "watch"},
 	} {
 		if !allows(role, rule.group, rule.resource, rule.verb) {
 			t.Errorf("role must allow %s %s/%s", rule.verb, rule.group, rule.resource)
