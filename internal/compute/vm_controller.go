@@ -65,7 +65,7 @@ func (r *VirtualMachineReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 		return ctrl.Result{}, err
 	}
 	expiring := false
-	if _, held := vm.Annotations[AnnotationRestoreHold]; !held {
+	if _, held := v1alpha1.RestoreHolder(&vm); !held {
 		expiring, err = r.pruneSnapshots(ctx, vm)
 		if err != nil {
 			return ctrl.Result{}, err
@@ -96,7 +96,7 @@ func (r *VirtualMachineReconciler) converge(ctx context.Context, vm v1alpha1.Vir
 	if !ok {
 		return outcome{Gate: gateOf(ReasonNotInProject, "the namespace is not a project namespace")}, nil
 	}
-	if holder, held := vm.Annotations[AnnotationRestoreHold]; held {
+	if holder, held := v1alpha1.RestoreHolder(&vm); held {
 		return outcome{Gate: gateOf(ReasonRestoreInProgress, "the restore %q holds the virtual machine", holder)}, nil
 	}
 	if issues := ValidateVirtualMachine(vm); len(issues) > 0 {

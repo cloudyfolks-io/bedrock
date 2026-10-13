@@ -55,7 +55,7 @@ func (r *VolumeReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctr
 	if !inProject {
 		return ctrl.Result{}, r.writeStatus(ctx, volume, volumeOutcome{Gate: gateOf(ReasonNotInProject, "the namespace is not a project namespace")})
 	}
-	if holder, held := volume.Annotations[AnnotationRestoreHold]; held {
+	if holder, held := v1alpha1.RestoreHolder(&volume); held {
 		return ctrl.Result{}, r.writeStatus(ctx, volume, volumeOutcome{Gate: gateOf(ReasonRestoreInProgress, "the restore %q holds the volume", holder)})
 	}
 	volume, err := r.addFinalizer(ctx, volume)

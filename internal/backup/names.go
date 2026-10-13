@@ -5,6 +5,8 @@ import (
 	"encoding/hex"
 	"strings"
 	"time"
+
+	"github.com/cloudyfolks-io/bedrock/api/v1alpha1"
 )
 
 const (
@@ -16,7 +18,7 @@ const (
 	RepositoryKey         = "repository-password"
 	SnapshotClassName     = "velero-block"
 	RBDDriver             = "rook-ceph.rbd.csi.ceph.com"
-	HoldAnnotation        = "bedrock.cloudyfolks.io/restore-hold"
+	HoldAnnotation        = v1alpha1.AnnotationRestoreHold
 	BackupVMLabel         = "bedrock.cloudyfolks.io/backup-vm"
 	ExcludeFromBackup     = "velero.io/exclude-from-backup"
 	VMSnapshotAnnotation  = "bedrock.cloudyfolks.io/virtual-machine"

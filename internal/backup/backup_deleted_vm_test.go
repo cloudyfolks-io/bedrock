@@ -231,3 +231,14 @@ func TestPruneKeepsTheBackupThatARestoreNames(t *testing.T) {
 	reconcileVMB(t, r, "pin")
 	requireDeleteRequests(t, map[string]bool{"pin-20261007": true})
 }
+
+func TestAnEmptyHoldStillPausesTheSchedule(t *testing.T) {
+	setLocation(t, "Available")
+	createVM(t, "emptyhold-vm")
+	createVMB(t, "emptyhold", v1alpha1.VirtualMachineBackupSpec{VMRef: "emptyhold-vm", Schedule: "0 2 * * *"})
+	updateVM(t, "emptyhold-vm", func(vm *v1alpha1.VirtualMachine) { vm.Annotations = map[string]string{HoldAnnotation: ""} })
+	reconcileVMB(t, newBackupReconciler(testNow), "emptyhold")
+	if !scheduleIsPaused(t, "emptyhold") {
+		t.Fatal("compute treats the key as a hold, so the schedule must pause")
+	}
+}

@@ -114,7 +114,7 @@ func (r *BackupReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctr
 }
 
 func pausedWhileHeld(vm v1alpha1.VirtualMachine, desired *unstructured.Unstructured) *unstructured.Unstructured {
-	if vm.Annotations[HoldAnnotation] == "" {
+	if _, held := v1alpha1.RestoreHolder(&vm); !held {
 		return desired
 	}
 	return Paused(desired)

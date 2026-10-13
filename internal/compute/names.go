@@ -10,7 +10,7 @@ import (
 )
 
 const (
-	AnnotationRestoreHold = "bedrock.cloudyfolks.io/restore-hold"
+	AnnotationRestoreHold = v1alpha1.AnnotationRestoreHold
 	AnnotationExpiresAt   = "bedrock.cloudyfolks.io/expires-at"
 	DefaultSubnetName     = "default"
 )
