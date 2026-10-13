@@ -71,8 +71,8 @@ func TestBackupStoresTheVMSpecOnTheVeleroBackup(t *testing.T) {
 	setLocation(t, "Available")
 	createVM(t, "snap-vm", "snap-data")
 	updateVM(t, "snap-vm", func(vm *v1alpha1.VirtualMachine) {
-		vm.Labels = map[string]string{"bedrock.cloudyfolks.io/note": "kept", "team": "dropped"}
-		vm.Annotations = map[string]string{"bedrock.cloudyfolks.io/owner": "kept", HoldAnnotation: "another-restore", "note": "dropped"}
+		vm.Labels = map[string]string{"bedrock.cloudyfolks.io/future": "dropped", "team": "dropped"}
+		vm.Annotations = map[string]string{"bedrock.cloudyfolks.io/future": "dropped", HoldAnnotation: "another-restore", "note": "dropped"}
 	})
 	setVMStatus(t, "snap-vm", v1alpha1.VirtualMachineStatus{Phase: v1alpha1.VMPhaseRunning, Node: "node-a"})
 	createVMB(t, "snap", v1alpha1.VirtualMachineBackupSpec{VMRef: "snap-vm", Schedule: "0 2 * * *"})
@@ -91,10 +91,7 @@ func TestBackupStoresTheVMSpecOnTheVeleroBackup(t *testing.T) {
 		"metadata": map[string]any{
 			"name":      "snap-vm",
 			"namespace": projectNamespace,
-			"labels":    map[string]any{"bedrock.cloudyfolks.io/note": "kept", BackupVMLabel: "snap-vm", ExcludeFromBackup: "true"},
-			"annotations": map[string]any{
-				"bedrock.cloudyfolks.io/owner": "kept",
-			},
+			"labels":    map[string]any{BackupVMLabel: "snap-vm", ExcludeFromBackup: "true"},
 		},
 		"spec": asMap(t, vm.Spec),
 	}
@@ -174,8 +171,8 @@ func TestSnapshotOfKeepsTheSpecAndTheOwnedMetadata(t *testing.T) {
 	vm := v1alpha1.VirtualMachine{
 		ObjectMeta: metav1.ObjectMeta{
 			Name: "web", Namespace: "acme-prod", UID: "uid-1", ResourceVersion: "42",
-			Labels:          map[string]string{"bedrock.cloudyfolks.io/note": "kept", "team": "dropped"},
-			Annotations:     map[string]string{"bedrock.cloudyfolks.io/owner": "kept", HoldAnnotation: "restore-1", "kubectl.kubernetes.io/last-applied-configuration": "{}"},
+			Labels:          map[string]string{ExcludeFromBackup: "true", "bedrock.cloudyfolks.io/future": "dropped", "team": "dropped"},
+			Annotations:     map[string]string{"bedrock.cloudyfolks.io/future": "dropped", HoldAnnotation: "restore-1", "kubectl.kubernetes.io/last-applied-configuration": "{}"},
 			OwnerReferences: []metav1.OwnerReference{{Name: "someone"}},
 			ManagedFields:   []metav1.ManagedFieldsEntry{{Manager: "kubectl"}},
 		},
@@ -195,8 +192,7 @@ func TestSnapshotOfKeepsTheSpecAndTheOwnedMetadata(t *testing.T) {
 		"kind":       "VirtualMachine",
 		"metadata": map[string]any{
 			"name": "web", "namespace": "acme-prod",
-			"labels":      map[string]any{"bedrock.cloudyfolks.io/note": "kept"},
-			"annotations": map[string]any{"bedrock.cloudyfolks.io/owner": "kept"},
+			"labels": map[string]any{ExcludeFromBackup: "true"},
 		},
 		"spec": asMap(t, vm.Spec),
 	}
@@ -207,7 +203,7 @@ func TestSnapshotOfKeepsTheSpecAndTheOwnedMetadata(t *testing.T) {
 
 func TestVMFromSnapshotRestoresTheSpecAndTheOwnedMetadata(t *testing.T) {
 	vm := v1alpha1.VirtualMachine{
-		ObjectMeta: metav1.ObjectMeta{Name: "web", Namespace: "acme-prod", Labels: map[string]string{ExcludeFromBackup: "true"}, Annotations: map[string]string{"bedrock.cloudyfolks.io/owner": "kept"}},
+		ObjectMeta: metav1.ObjectMeta{Name: "web", Namespace: "acme-prod", Labels: map[string]string{BackupVMLabel: "web", ExcludeFromBackup: "true"}},
 		Spec:       v1alpha1.VirtualMachineSpec{InstanceType: "small", RootDisk: v1alpha1.VMRootDisk{SizeGi: 10}, Disks: []v1alpha1.VMDisk{{VolumeRef: "data"}}, Running: true},
 	}
 	snapshot, err := SnapshotOf(vm)
@@ -220,6 +216,18 @@ func TestVMFromSnapshotRestoresTheSpecAndTheOwnedMetadata(t *testing.T) {
 	}
 	if restored.Name != "web" || restored.Namespace != "" || !reflect.DeepEqual(restored.Spec, vm.Spec) || !reflect.DeepEqual(restored.Labels, vm.Labels) || !reflect.DeepEqual(restored.Annotations, vm.Annotations) {
 		t.Fatalf("restored %+v", restored)
+	}
+}
+
+func TestVMFromSnapshotDropsTheKeysThatItDoesNotOwn(t *testing.T) {
+	snapshot := `{"apiVersion":"bedrock.cloudyfolks.io/v1alpha1","kind":"VirtualMachine","metadata":{"name":"web","labels":{"velero.io/exclude-from-backup":"true","team":"x"},` +
+		`"annotations":{"bedrock.cloudyfolks.io/restore-hold":"forged","bedrock.cloudyfolks.io/future":"x"}},"spec":{"instanceType":"small","rootDisk":{"sizeGi":10}}}`
+	restored, err := VMFromSnapshot(snapshot, "web")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(restored.Labels, map[string]string{ExcludeFromBackup: "true"}) || len(restored.Annotations) != 0 {
+		t.Fatalf("restored %+v", restored.ObjectMeta)
 	}
 }
 

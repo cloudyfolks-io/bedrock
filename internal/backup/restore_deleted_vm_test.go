@@ -21,7 +21,7 @@ import (
 
 func snapshotFor(fx restoreFixture) string {
 	return `{"apiVersion":"bedrock.cloudyfolks.io/v1alpha1","kind":"VirtualMachine","metadata":{"name":"` + fx.vm + `","namespace":"` + projectNamespace +
-		`","labels":{"bedrock.cloudyfolks.io/note":"kept"},"annotations":{"bedrock.cloudyfolks.io/owner":"kept"}},` +
+		`","labels":{"velero.io/exclude-from-backup":"true","team":"dropped"},"annotations":{"bedrock.cloudyfolks.io/restore-hold":"forged","bedrock.cloudyfolks.io/future":"dropped"}},` +
 		`"spec":{"instanceType":"small","rootDisk":{"sizeGi":10},"disks":[{"volumeRef":"` + fx.volume + `"}],"running":true}}`
 }
 
@@ -120,7 +120,7 @@ func TestRestoreOfADeletedVMCreatesTheHeldVMBeforeTheVeleroRestore(t *testing.T)
 		t.Fatal(err)
 	}
 	want := v1alpha1.VirtualMachineSpec{InstanceType: "small", RootDisk: v1alpha1.VMRootDisk{SizeGi: 10}, Disks: []v1alpha1.VMDisk{{VolumeRef: fx.volume}}, Running: true}
-	if !reflect.DeepEqual(vm.Spec, want) || vm.Labels["bedrock.cloudyfolks.io/note"] != "kept" || vm.Annotations["bedrock.cloudyfolks.io/owner"] != "kept" {
+	if !reflect.DeepEqual(vm.Spec, want) || vm.Labels[ExcludeFromBackup] != "true" || vm.Labels["team"] != "" || vm.Annotations["bedrock.cloudyfolks.io/future"] != "" || vm.Annotations[HoldAnnotation] != "recreate-restore" {
 		t.Fatalf("restored VM %+v", vm.ObjectMeta)
 	}
 	requireRestoreState(t, getVMR(t, "recreate-restore"), v1alpha1.RestorePhaseInProgress, metav1.ConditionFalse, RestoreReasonRestoring)
@@ -132,7 +132,7 @@ func TestRestoreOfADeletedVMCreatesTheHeldVMBeforeTheVeleroRestore(t *testing.T)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if after.UID != vm.UID || after.Annotations[HoldAnnotation] != "" || after.Annotations["bedrock.cloudyfolks.io/owner"] != "kept" || probe.vmCreates != 1 {
+	if after.UID != vm.UID || after.Annotations[HoldAnnotation] != "" || after.Labels[ExcludeFromBackup] != "true" || probe.vmCreates != 1 {
 		t.Fatalf("after the restore: uid %s/%s, annotations %v, %d creations", vm.UID, after.UID, after.Annotations, probe.vmCreates)
 	}
 }

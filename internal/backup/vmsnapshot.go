@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"maps"
-	"strings"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
@@ -28,11 +27,12 @@ type vmSnapshot struct {
 	Spec       v1alpha1.VirtualMachineSpec `json:"spec"`
 }
 
+var ownedKeys = []string{BackupVMLabel, ExcludeFromBackup}
+
 func owned(entries map[string]string) map[string]string {
 	kept := map[string]string{}
-	for key, value := range entries {
-		productKey := strings.HasPrefix(key, v1alpha1.GroupVersion.Group+"/") || key == ExcludeFromBackup
-		if productKey && key != HoldAnnotation {
+	for _, key := range ownedKeys {
+		if value, found := entries[key]; found {
 			kept[key] = value
 		}
 	}
@@ -64,7 +64,7 @@ func VMFromSnapshot(raw, name string) (v1alpha1.VirtualMachine, error) {
 		return v1alpha1.VirtualMachine{}, fmt.Errorf("the VM snapshot is for the VM %q, not %q", parsed.Metadata.Name, name)
 	}
 	return v1alpha1.VirtualMachine{
-		ObjectMeta: metav1.ObjectMeta{Name: name, Labels: parsed.Metadata.Labels, Annotations: parsed.Metadata.Annotations},
+		ObjectMeta: metav1.ObjectMeta{Name: name, Labels: owned(parsed.Metadata.Labels), Annotations: owned(parsed.Metadata.Annotations)},
 		Spec:       parsed.Spec,
 	}, nil
 }
