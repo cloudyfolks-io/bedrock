@@ -106,7 +106,14 @@ func (r *BackupReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctr
 	if err != nil {
 		return ctrl.Result{}, err
 	}
-	return r.drive(ctx, vmb, scope, WithSnapshot(desired, snapshot))
+	return r.drive(ctx, vmb, scope, pausedWhileHeld(*vm, WithSnapshot(desired, snapshot)))
+}
+
+func pausedWhileHeld(vm v1alpha1.VirtualMachine, desired *unstructured.Unstructured) *unstructured.Unstructured {
+	if vm.Annotations[HoldAnnotation] == "" {
+		return desired
+	}
+	return Paused(desired)
 }
 
 type refusal struct {
@@ -257,7 +264,7 @@ func (r *BackupReconciler) drive(ctx context.Context, vmb *v1alpha1.VirtualMachi
 	if err != nil {
 		return ctrl.Result{}, err
 	}
-	if desired.GetKind() == "Schedule" {
+	if desired.GetKind() == "Schedule" && !IsPaused(desired) {
 		infos, err = r.prune(ctx, vmb, scope, infos)
 		if err != nil {
 			return r.veleroFailure(ctx, vmb, err)

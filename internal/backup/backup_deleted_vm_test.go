@@ -111,3 +111,26 @@ func TestDeletingTheVMKeepsAOneShotBackup(t *testing.T) {
 		t.Fatal("a one-shot backup needs no schedule")
 	}
 }
+
+func TestRestoreHoldPausesTheScheduleAndKeepsTheBackups(t *testing.T) {
+	setLocation(t, "Available")
+	createVM(t, "held-vm")
+	createVMB(t, "held", v1alpha1.VirtualMachineBackupSpec{VMRef: "held-vm", Schedule: "0 2 * * *", Keep: 1})
+	createFixtureBackup(t, "held-20261007", "held", "Completed", "2026-10-07T02:05:00Z")
+	createFixtureBackup(t, "held-20261008", "held", "Completed", "2026-10-08T02:05:00Z")
+	updateVM(t, "held-vm", func(vm *v1alpha1.VirtualMachine) { vm.Annotations = map[string]string{HoldAnnotation: "some-restore"} })
+	r := newBackupReconciler(testNow)
+
+	reconcileVMB(t, r, "held")
+	if !scheduleIsPaused(t, "held") {
+		t.Fatal("the schedule of a held VM must be paused")
+	}
+	requireDeleteRequests(t, map[string]bool{"held-20261007": false, "held-20261008": false})
+
+	updateVM(t, "held-vm", func(vm *v1alpha1.VirtualMachine) { vm.Annotations = nil })
+	reconcileVMB(t, r, "held")
+	if scheduleIsPaused(t, "held") {
+		t.Fatal("the schedule must run again when the hold ends")
+	}
+	requireDeleteRequests(t, map[string]bool{"held-20261007": true, "held-20261008": false})
+}
