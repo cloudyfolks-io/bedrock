@@ -18,9 +18,13 @@ import (
 	"k8s.io/client-go/tools/record"
 	"k8s.io/client-go/util/retry"
 	ctrl "sigs.k8s.io/controller-runtime"
+	"sigs.k8s.io/controller-runtime/pkg/builder"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
+	"sigs.k8s.io/controller-runtime/pkg/handler"
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
+	"sigs.k8s.io/controller-runtime/pkg/predicate"
+	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	"github.com/cloudyfolks-io/bedrock/api/v1alpha1"
 	"github.com/cloudyfolks-io/bedrock/internal/ssa"
@@ -593,6 +597,26 @@ func (r *BackupReconciler) releaseFinalizer(ctx context.Context, vmb *v1alpha1.V
 	return client.IgnoreNotFound(r.Client.Patch(ctx, vmb, client.MergeFrom(before), client.FieldOwner(v1alpha1.BackupFieldManager)))
 }
 
+func (r *BackupReconciler) backupsOfVM(ctx context.Context, vm client.Object) []reconcile.Request {
+	backups := &v1alpha1.VirtualMachineBackupList{}
+	if err := r.Client.List(ctx, backups, client.InNamespace(vm.GetNamespace())); err != nil {
+		logf.FromContext(ctx).Error(err, "list the backups of a virtual machine")
+		return nil
+	}
+	var requests []reconcile.Request
+	for i := range backups.Items {
+		if backups.Items[i].Spec.VMRef == vm.GetName() {
+			requests = append(requests, reconcile.Request{NamespacedName: client.ObjectKeyFromObject(&backups.Items[i])})
+		}
+	}
+	return requests
+}
+
 func (r *BackupReconciler) SetupWithManager(mgr ctrl.Manager) error {
-	return ctrl.NewControllerManagedBy(mgr).Named("backup-vmb").For(&v1alpha1.VirtualMachineBackup{}).Complete(r)
+	vmChanged := predicate.Or(predicate.GenerationChangedPredicate{}, predicate.AnnotationChangedPredicate{})
+	return ctrl.NewControllerManagedBy(mgr).
+		Named("backup-vmb").
+		For(&v1alpha1.VirtualMachineBackup{}).
+		Watches(&v1alpha1.VirtualMachine{}, handler.EnqueueRequestsFromMapFunc(r.backupsOfVM), builder.WithPredicates(vmChanged)).
+		Complete(r)
 }
