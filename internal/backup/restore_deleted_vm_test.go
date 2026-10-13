@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -497,4 +498,35 @@ func TestRestoreOfADeletedVMKeepsWaitingAndSlowsDown(t *testing.T) {
 	if hold := holdOf(t, &v1alpha1.VirtualMachine{ObjectMeta: metav1.ObjectMeta{Name: fx.vm, Namespace: projectNamespace}}); hold != "patient-restore" {
 		t.Fatalf("the hold must stay: %q", hold)
 	}
+}
+
+func TestRestoreOfADeletedVMWaitsForDataDisksThatAreEnding(t *testing.T) {
+	fx := fixtureOf("datadisk")
+	prepareDeletedVM(t, fx, snapshotFor(fx))
+	createKubeVirtObjects(t, fx)
+	createVMR(t, "datadisk-restore", projectNamespace, v1alpha1.VirtualMachineRestoreSpec{BackupRef: fx.vmb, BackupID: fx.backupID, TargetName: fx.vm})
+	r := newRestoreReconciler()
+	reconcileVMR(t, r, projectNamespace, "datadisk-restore")
+	for _, list := range underlyingLists {
+		if _, err := r.removeAll(context.Background(), list, projectNamespace, v1alpha1.TenantLabels("VirtualMachine", fx.vm, "acme", "prod")); err != nil {
+			t.Fatal(err)
+		}
+	}
+	settleUnderlying(t)
+	disk := &corev1.PersistentVolumeClaim{ObjectMeta: metav1.ObjectMeta{Name: fx.volume, Namespace: projectNamespace}}
+	if err := k8sClient.Delete(context.Background(), disk); err != nil {
+		t.Fatal(err)
+	}
+
+	reconcileVMR(t, r, projectNamespace, "datadisk-restore")
+	vmr := getVMR(t, "datadisk-restore")
+	requireRestoreState(t, vmr, v1alpha1.RestorePhaseInProgress, metav1.ConditionFalse, RestoreReasonPreparing)
+	if !strings.Contains(vmr.Status.Conditions[0].Message, "PersistentVolumeClaim/"+fx.volume) {
+		t.Fatalf("message %q", vmr.Status.Conditions[0].Message)
+	}
+	requireNoRestore(t, "datadisk-restore")
+
+	settleUnderlying(t)
+	reconcileVMR(t, r, projectNamespace, "datadisk-restore")
+	requireRestoreState(t, getVMR(t, "datadisk-restore"), v1alpha1.RestorePhaseInProgress, metav1.ConditionFalse, RestoreReasonRestoring)
 }

@@ -282,7 +282,11 @@ func (r *RestoreReconciler) recreate(ctx context.Context, vmr *v1alpha1.VirtualM
 			return halted, err
 		}
 	}
-	left, err := r.leftovers(ctx, scope, vm)
+	target := existing
+	if target == nil {
+		target = restored
+	}
+	left, err := r.leftovers(ctx, scope, target)
 	if err != nil || len(left) > 0 {
 		next := halt(v1alpha1.RestorePhaseInProgress, RestoreReasonPreparing, "old objects of the VM remain: "+blockerList(left), preparingRequeue(r.Now().Sub(vmr.CreationTimestamp.Time)))
 		return &next, err
@@ -346,15 +350,43 @@ func (r *RestoreReconciler) confirmHeld(ctx context.Context, vmr *v1alpha1.Virtu
 	return &next, nil
 }
 
-func (r *RestoreReconciler) leftovers(ctx context.Context, scope Scope, vm string) ([]string, error) {
-	var names []string
+type oldObject struct {
+	Name        string
+	Terminating bool
+}
+
+func (r *RestoreReconciler) oldObjects(ctx context.Context, namespace string, labels map[string]string) ([]oldObject, error) {
+	var found []oldObject
 	for _, list := range underlyingLists {
-		items, err := r.listUnderlying(ctx, list, scope.Namespace, v1alpha1.TenantLabels("VirtualMachine", vm, scope.Tenant, scope.Project))
+		items, err := r.listUnderlying(ctx, list, namespace, labels)
 		if err != nil {
 			return nil, err
 		}
 		for i := range items {
-			names = append(names, strings.TrimSuffix(list.Kind, "List")+"/"+items[i].GetName())
+			found = append(found, oldObject{Name: strings.TrimSuffix(list.Kind, "List") + "/" + items[i].GetName(), Terminating: items[i].GetDeletionTimestamp() != nil})
+		}
+	}
+	return found, nil
+}
+
+func (r *RestoreReconciler) leftovers(ctx context.Context, scope Scope, vm *v1alpha1.VirtualMachine) ([]string, error) {
+	own, err := r.oldObjects(ctx, scope.Namespace, v1alpha1.TenantLabels("VirtualMachine", vm.Name, scope.Tenant, scope.Project))
+	if err != nil {
+		return nil, err
+	}
+	var names []string
+	for _, object := range own {
+		names = append(names, object.Name)
+	}
+	for _, disk := range vm.Spec.Disks {
+		ending, err := r.oldObjects(ctx, scope.Namespace, v1alpha1.TenantLabels("Volume", disk.VolumeRef, scope.Tenant, scope.Project))
+		if err != nil {
+			return nil, err
+		}
+		for _, object := range ending {
+			if object.Terminating {
+				names = append(names, object.Name)
+			}
 		}
 	}
 	return names, nil
