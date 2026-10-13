@@ -14,6 +14,7 @@ import (
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
+	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/interceptor"
 
@@ -647,5 +648,38 @@ func TestKubeVirtVMOwnerGuard(t *testing.T) {
 	refs := after.GetOwnerReferences()
 	if got, _, _ := unstructured.NestedString(after.Object, "spec", "runStrategy"); got != "Halted" || len(refs) != 1 || refs[0].UID != "another-uid" {
 		t.Fatalf("the foreign machine changed: %+v", after.Object)
+	}
+}
+
+func stripOwners(t *testing.T, c client.Client, obj client.Object) {
+	t.Helper()
+	patch := client.RawPatch(types.MergePatchType, []byte(`{"metadata":{"ownerReferences":null}}`))
+	must(t, c.Patch(context.Background(), obj, patch))
+}
+
+func TestVMAdoptsObjectsThatARestoreLeftWithoutOwner(t *testing.T) {
+	c, _ := startEnv(t)
+	ns := seedPlatform(t, c)
+	createVM(t, c, ns, "web-1", noMutation)
+	r := newVMReconciler(c)
+	reconcileVM(t, r, ns, "web-1")
+	vm := getVM(t, c, ns, "web-1")
+
+	var secret corev1.Secret
+	must(t, c.Get(context.Background(), client.ObjectKey{Namespace: ns, Name: "web-1-cloudinit"}, &secret))
+	stripOwners(t, c, &secret)
+	stripOwners(t, c, requirePresent(t, c, kubeVirtVMGVK, ns, "web-1"))
+	stripOwners(t, c, requirePresent(t, c, dataVolumeGVK, ns, "web-1-root"))
+
+	reconcileVM(t, r, ns, "web-1")
+
+	if got := getVM(t, c, ns, "web-1"); readyOf(got).Reason == "NameConflict" {
+		t.Fatalf("the virtual machine reports %q", readyOf(got).Message)
+	}
+	must(t, c.Get(context.Background(), client.ObjectKey{Namespace: ns, Name: "web-1-cloudinit"}, &secret))
+	for _, obj := range []client.Object{&secret, requirePresent(t, c, kubeVirtVMGVK, ns, "web-1"), requirePresent(t, c, dataVolumeGVK, ns, "web-1-root")} {
+		if refs := obj.GetOwnerReferences(); len(refs) != 1 || refs[0].UID != vm.UID {
+			t.Errorf("%s owners %+v, want the virtual machine %s", obj.GetName(), refs, vm.UID)
+		}
 	}
 }

@@ -190,12 +190,38 @@ func controllerUID(obj metav1.Object) types.UID {
 	return ""
 }
 
+var identityLabels = []string{v1alpha1.LabelKind, v1alpha1.LabelName, v1alpha1.LabelTenant, v1alpha1.LabelProject}
+
+func isOrphanOf(existing, desired metav1.Object) bool {
+	want := desired.GetLabels()
+	if want[v1alpha1.LabelKind] == "" || controllerUID(existing) != "" {
+		return false
+	}
+	for _, key := range identityLabels {
+		if existing.GetLabels()[key] != want[key] {
+			return false
+		}
+	}
+	return true
+}
+
 func ensureOwned(existing, desired metav1.Object, kind string) error {
 	want := controllerUID(desired)
-	if want == "" || controllerUID(existing) != want {
+	if want == "" || (controllerUID(existing) != want && !isOrphanOf(existing, desired)) {
 		return nameConflict{Kind: kind, Name: desired.GetName()}
 	}
 	return nil
+}
+
+func adoptOrphan(ctx context.Context, c client.Client, existing, desired *unstructured.Unstructured) error {
+	if !isOrphanOf(existing, desired) {
+		return nil
+	}
+	patch, err := rawMergePatch(map[string]any{"metadata": map[string]any{"ownerReferences": desired.GetOwnerReferences()}})
+	if err != nil {
+		return err
+	}
+	return c.Patch(ctx, existing, patch, client.FieldOwner(v1alpha1.ComputeFieldManager))
 }
 
 func guardOwnership(ctx context.Context, c client.Client, gvk schema.GroupVersionKind, desired metav1.Object) error {
@@ -214,7 +240,10 @@ func createIfAbsent(ctx context.Context, c client.Client, obj *unstructured.Unst
 	existing := emptyOf(obj.GroupVersionKind())
 	err := c.Get(ctx, client.ObjectKeyFromObject(obj), existing)
 	if err == nil {
-		return ensureOwned(existing, obj, obj.GetKind())
+		if err := ensureOwned(existing, obj, obj.GetKind()); err != nil {
+			return err
+		}
+		return adoptOrphan(ctx, c, existing, obj)
 	}
 	if !apierrors.IsNotFound(err) {
 		return err
@@ -227,7 +256,10 @@ func createIfAbsent(ctx context.Context, c client.Client, obj *unstructured.Unst
 	if err := c.Get(ctx, client.ObjectKeyFromObject(obj), raced); err != nil {
 		return err
 	}
-	return ensureOwned(raced, obj, obj.GetKind())
+	if err := ensureOwned(raced, obj, obj.GetKind()); err != nil {
+		return err
+	}
+	return adoptOrphan(ctx, c, raced, obj)
 }
 
 func rawMergePatch(body map[string]any) (client.Patch, error) {
