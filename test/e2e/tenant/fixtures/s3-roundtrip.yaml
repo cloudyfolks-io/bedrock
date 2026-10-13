@@ -35,7 +35,7 @@ spec:
               echo hello-object-storage > /tmp/put.txt
               aws --endpoint-url "$ENDPOINT" s3 cp /tmp/put.txt "s3://$BUCKET/hello.txt"
               aws --endpoint-url "$ENDPOINT" s3 cp "s3://$BUCKET/hello.txt" /tmp/get.txt
-              cmp /tmp/put.txt /tmp/get.txt
+              test "$(cat /tmp/get.txt)" = "$(cat /tmp/put.txt)"
               if [ "$WANT_VERSIONING" = true ]; then
                 aws --endpoint-url "$ENDPOINT" s3api get-bucket-versioning --bucket "$BUCKET" | grep -q Enabled
               fi
