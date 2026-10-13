@@ -29,6 +29,7 @@ const (
 	ScheduleTTL           = 8760 * time.Hour
 	DefaultKeep           = 7
 	MaxKeep               = 365
+	MaxSnapshotBytes      = 200 * 1024
 
 	nameCut    = 24
 	hashLength = 10

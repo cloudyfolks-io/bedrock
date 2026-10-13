@@ -1,9 +1,11 @@
 package backup
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"maps"
+	"strings"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
@@ -43,13 +45,28 @@ func owned(entries map[string]string) map[string]string {
 }
 
 func SnapshotOf(vm v1alpha1.VirtualMachine) (string, error) {
-	body, err := json.Marshal(vmSnapshot{
+	var body bytes.Buffer
+	encoder := json.NewEncoder(&body)
+	encoder.SetEscapeHTML(false)
+	err := encoder.Encode(vmSnapshot{
 		APIVersion: v1alpha1.GroupVersion.String(),
 		Kind:       virtualMachineKind,
 		Metadata:   vmSnapshotMetadata{Name: vm.Name, Namespace: vm.Namespace, Labels: owned(vm.Labels), Annotations: owned(vm.Annotations)},
 		Spec:       vm.Spec,
 	})
-	return string(body), err
+	return strings.TrimSuffix(body.String(), "\n"), err
+}
+
+func SnapshotProblem(size int) *metav1.Condition {
+	if size <= MaxSnapshotBytes {
+		return nil
+	}
+	return &metav1.Condition{
+		Type:    ConditionSpecCopied,
+		Status:  metav1.ConditionFalse,
+		Reason:  ReasonSpecTooLarge,
+		Message: fmt.Sprintf("the VM spec is %d bytes and the limit is %d; backups go on without the copy, so they cannot restore a deleted VM", size, MaxSnapshotBytes),
+	}
 }
 
 func VMFromSnapshot(raw, name string) (v1alpha1.VirtualMachine, error) {

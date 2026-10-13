@@ -255,3 +255,63 @@ func TestWithSnapshotLeavesTheInputAlone(t *testing.T) {
 		t.Fatalf("output %v", output.Object)
 	}
 }
+
+func TestSnapshotOfDoesNotEscapeHTML(t *testing.T) {
+	vm := v1alpha1.VirtualMachine{
+		ObjectMeta: metav1.ObjectMeta{Name: "web", Namespace: "acme-prod"},
+		Spec:       v1alpha1.VirtualMachineSpec{InstanceType: "small", RootDisk: v1alpha1.VMRootDisk{SizeGi: 10}, CloudInit: &v1alpha1.VMCloudInit{UserData: "a<b>&c"}},
+	}
+	snapshot, err := SnapshotOf(vm)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(snapshot, "a<b>&c") || strings.HasSuffix(snapshot, "\n") {
+		t.Fatalf("snapshot %q", snapshot)
+	}
+}
+
+func TestBackupGoesOnWithoutAnOversizedVMCopy(t *testing.T) {
+	setLocation(t, "Available")
+	createVM(t, "large-vm")
+	large := strings.Repeat(`"`, 65536)
+	updateVM(t, "large-vm", func(vm *v1alpha1.VirtualMachine) {
+		vm.Spec.CloudInit = &v1alpha1.VMCloudInit{UserData: large, NetworkData: large}
+	})
+	createVMB(t, "large", v1alpha1.VirtualMachineBackupSpec{VMRef: "large-vm", Schedule: "0 2 * * *"})
+	r := newBackupReconciler(testNow)
+
+	reconcileVMB(t, r, "large")
+	schedule, err := getVelero(t, "Schedule", VeleroName("vmb", projectNamespace, "large"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, found := schedule.GetAnnotations()[VMSnapshotAnnotation]; found {
+		t.Fatal("an oversized copy must not be written")
+	}
+	vmb := getVMB(t, "large")
+	var problem *metav1.Condition
+	for i := range vmb.Status.Conditions {
+		if vmb.Status.Conditions[i].Type == ConditionSpecCopied {
+			problem = &vmb.Status.Conditions[i]
+		}
+	}
+	if problem == nil || problem.Status != metav1.ConditionFalse || problem.Reason != ReasonSpecTooLarge {
+		t.Fatalf("conditions %+v", vmb.Status.Conditions)
+	}
+	requireReady(t, vmb, metav1.ConditionTrue, ReasonScheduled)
+
+	updateVM(t, "large-vm", func(vm *v1alpha1.VirtualMachine) { vm.Spec.CloudInit = nil })
+	reconcileVMB(t, r, "large")
+	schedule, err = getVelero(t, "Schedule", VeleroName("vmb", projectNamespace, "large"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if schedule.GetAnnotations()[VMSnapshotAnnotation] == "" {
+		t.Fatal("the copy must return when the spec fits")
+	}
+	for _, condition := range getVMB(t, "large").Status.Conditions {
+		if condition.Type == ConditionSpecCopied {
+			t.Fatalf("the condition must go away: %+v", condition)
+		}
+	}
+}

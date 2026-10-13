@@ -46,6 +46,8 @@ const (
 	ReasonBackupFailed           = "BackupFailed"
 	ReasonDeleting               = "Deleting"
 	ReasonPaused                 = "Paused"
+	ReasonSpecTooLarge           = "VirtualMachineSpecTooLarge"
+	ConditionSpecCopied          = "SpecCopied"
 
 	requeueBusy      = 15 * time.Second
 	requeueDeleting  = 10 * time.Second
@@ -118,7 +120,11 @@ func (r *BackupReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctr
 	if err != nil {
 		return ctrl.Result{}, err
 	}
-	return r.drive(ctx, vmb, scope, pausedWhileHeld(*vm, WithSnapshot(desired, snapshot)), holdCause(*vm))
+	problem := SnapshotProblem(len(snapshot))
+	if problem == nil {
+		desired = WithSnapshot(desired, snapshot)
+	}
+	return r.drive(ctx, vmb, scope, pausedWhileHeld(*vm, desired), holdCause(*vm), problem)
 }
 
 func pausedRefusal(cause string) *refusal {
@@ -292,7 +298,7 @@ func (r *BackupReconciler) labelBackupVM(ctx context.Context, obj client.Object,
 	return r.Client.Patch(ctx, obj, patch, client.FieldOwner(v1alpha1.BackupFieldManager))
 }
 
-func (r *BackupReconciler) drive(ctx context.Context, vmb *v1alpha1.VirtualMachineBackup, scope Scope, desired *unstructured.Unstructured, heldBy string) (ctrl.Result, error) {
+func (r *BackupReconciler) drive(ctx context.Context, vmb *v1alpha1.VirtualMachineBackup, scope Scope, desired *unstructured.Unstructured, heldBy string, copyProblem *metav1.Condition) (ctrl.Result, error) {
 	labels := v1alpha1.TenantLabels("VirtualMachineBackup", vmb.Name, scope.Tenant, scope.Project)
 	backups, err := r.ensureVelero(ctx, vmb, desired, labels, heldBy)
 	if err != nil {
@@ -324,7 +330,7 @@ func (r *BackupReconciler) drive(ctx context.Context, vmb *v1alpha1.VirtualMachi
 		}
 		condition = whilePaused(condition, heldBy)
 	}
-	r.writeStatus(ctx, vmb, observedStatus(*vmb, summary, phase, condition))
+	r.writeStatus(ctx, vmb, observedStatus(*vmb, summary, phase, condition, copyProblem))
 	return ctrl.Result{RequeueAfter: requeueFor(phase)}, nil
 }
 
@@ -505,7 +511,7 @@ func recordsOf(infos []BackupInfo) []v1alpha1.VMBackupRecord {
 	return records
 }
 
-func observedStatus(vmb v1alpha1.VirtualMachineBackup, summary Summary, phase string, condition metav1.Condition) v1alpha1.VirtualMachineBackupStatus {
+func observedStatus(vmb v1alpha1.VirtualMachineBackup, summary Summary, phase string, condition metav1.Condition, copyProblem *metav1.Condition) v1alpha1.VirtualMachineBackupStatus {
 	status := *vmb.Status.DeepCopy()
 	status.ObservedGeneration = vmb.Generation
 	status.Phase = phase
@@ -516,6 +522,11 @@ func observedStatus(vmb v1alpha1.VirtualMachineBackup, summary Summary, phase st
 		status.LastBackup = &last
 	}
 	v1alpha1.SetCondition(&status.Conditions, condition)
+	if copyProblem != nil {
+		v1alpha1.SetCondition(&status.Conditions, *copyProblem)
+	} else {
+		meta.RemoveStatusCondition(&status.Conditions, ConditionSpecCopied)
+	}
 	return status
 }
 
