@@ -309,7 +309,7 @@ func TestTickAppliesHostConfigWhenManaged(t *testing.T) {
 	if !v1alpha1.IsConditionTrue(h.Status.Conditions, v1alpha1.ConditionManagementApplied) {
 		t.Fatalf("conditions %+v", h.Status.Conditions)
 	}
-	if h.Status.Applied == nil || h.Status.Applied.Generation != hc.Generation || len(h.Status.Applied.Steps) != 7 {
+	if h.Status.Applied == nil || h.Status.Applied.Generation != hc.Generation || len(h.Status.Applied.Steps) != 8 {
 		t.Fatalf("applied %+v", h.Status.Applied)
 	}
 	calls := len(hostChanges(exec.Calls))
