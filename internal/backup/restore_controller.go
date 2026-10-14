@@ -57,11 +57,12 @@ type RestoreReconciler struct {
 }
 
 type stop struct {
-	Phase   string
-	Reason  string
-	Message string
-	Ready   metav1.ConditionStatus
-	Requeue time.Duration
+	Phase    string
+	Reason   string
+	Message  string
+	Ready    metav1.ConditionStatus
+	Requeue  time.Duration
+	BackupID string
 }
 
 func (r *RestoreReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
@@ -106,7 +107,7 @@ func (r *RestoreReconciler) advance(ctx context.Context, vmr *v1alpha1.VirtualMa
 	if err != nil || next != nil {
 		return orZero(next), err
 	}
-	backupID, found := resolveBackupID(*vmb, vmr.Spec.BackupID)
+	backupID, found := resolveBackupID(*vmb, requestedBackupID(*vmr))
 	if !found {
 		return sourceGone(*vmr, "backup ID is not in the backup list"), nil
 	}
@@ -122,9 +123,22 @@ func (r *RestoreReconciler) advance(ctx context.Context, vmr *v1alpha1.VirtualMa
 		return stop{}, err
 	}
 	if restore != nil {
-		return outcomeOf(restore), nil
+		return withBackupID(outcomeOf(restore), backupID), nil
 	}
-	return r.start(ctx, vmr, scope, vm, backupID)
+	started, err := r.start(ctx, vmr, scope, vm, backupID)
+	return withBackupID(started, backupID), err
+}
+
+func requestedBackupID(vmr v1alpha1.VirtualMachineRestore) string {
+	if vmr.Spec.BackupID != "" {
+		return vmr.Spec.BackupID
+	}
+	return vmr.Status.BackupID
+}
+
+func withBackupID(next stop, backupID string) stop {
+	next.BackupID = backupID
+	return next
 }
 
 func orZero(next *stop) stop {
@@ -571,6 +585,9 @@ func statusAfter(vmr v1alpha1.VirtualMachineRestore, next stop) v1alpha1.Virtual
 	status := *vmr.Status.DeepCopy()
 	status.ObservedGeneration = vmr.Generation
 	status.Phase = next.Phase
+	if next.BackupID != "" {
+		status.BackupID = next.BackupID
+	}
 	v1alpha1.SetCondition(&status.Conditions, metav1.Condition{Type: v1alpha1.ConditionReady, Status: next.Ready, Reason: next.Reason, Message: next.Message})
 	return status
 }

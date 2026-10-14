@@ -11,6 +11,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
@@ -529,4 +530,69 @@ func TestRestoreOfADeletedVMWaitsForDataDisksThatAreEnding(t *testing.T) {
 	settleUnderlying(t)
 	reconcileVMR(t, r, projectNamespace, "datadisk-restore")
 	requireRestoreState(t, getVMR(t, "datadisk-restore"), v1alpha1.RestorePhaseInProgress, metav1.ConditionFalse, RestoreReasonRestoring)
+}
+
+func TestPruneKeepsTheBackupOfAFailedRestoreWithoutAnID(t *testing.T) {
+	fx := fixtureOf("noid")
+	prepareDeletedVM(t, fx, snapshotFor(fx))
+	vmb := &v1alpha1.VirtualMachineBackup{}
+	if err := k8sClient.Get(context.Background(), types.NamespacedName{Namespace: projectNamespace, Name: fx.vmb}, vmb); err != nil {
+		t.Fatal(err)
+	}
+	vmb.Spec.Keep = 1
+	if err := k8sClient.Update(context.Background(), vmb); err != nil {
+		t.Fatal(err)
+	}
+	createVMR(t, "noid-restore", projectNamespace, v1alpha1.VirtualMachineRestoreSpec{BackupRef: fx.vmb, TargetName: fx.vm})
+	r := newRestoreReconciler()
+
+	reconcileVMR(t, r, projectNamespace, "noid-restore")
+	if got := getVMR(t, "noid-restore").Status.BackupID; got != fx.backupID {
+		t.Fatalf("recorded backup id %q, want %q", got, fx.backupID)
+	}
+	setRestoreStatus(t, "noid-restore", map[string]any{"phase": "PartiallyFailed", "failureReason": "boom"})
+	reconcileVMR(t, r, projectNamespace, "noid-restore")
+	requireRestoreState(t, getVMR(t, "noid-restore"), v1alpha1.RestorePhaseFailed, metav1.ConditionFalse, RestoreReasonFailed)
+
+	emptyVMBackup := "vmb-noid-new-20261009020000"
+	createFixtureBackup(t, emptyVMBackup, fx.vmb, "Completed", "2026-10-09T02:05:00Z")
+	reconcileVMB(t, newBackupReconciler(testNow), fx.vmb)
+	requireDeleteRequests(t, map[string]bool{fx.backupID: false, emptyVMBackup: false})
+}
+
+func TestRestoreKeepsTheBackupIDItRecorded(t *testing.T) {
+	fx := fixtureOf("recorded")
+	prepareDeletedVM(t, fx, snapshotFor(fx))
+	createKubeVirtObjects(t, fx)
+	createVMR(t, "recorded-restore", projectNamespace, v1alpha1.VirtualMachineRestoreSpec{BackupRef: fx.vmb, TargetName: fx.vm})
+	r := newRestoreReconciler()
+	reconcileVMR(t, r, projectNamespace, "recorded-restore")
+	requireRestoreState(t, getVMR(t, "recorded-restore"), v1alpha1.RestorePhaseInProgress, metav1.ConditionFalse, RestoreReasonPreparing)
+
+	vmb := &v1alpha1.VirtualMachineBackup{}
+	if err := k8sClient.Get(context.Background(), types.NamespacedName{Namespace: projectNamespace, Name: fx.vmb}, vmb); err != nil {
+		t.Fatal(err)
+	}
+	vmb.Status.Backups = []v1alpha1.VMBackupRecord{{ID: "vmb-recorded-newer", Time: metav1.Now()}, vmb.Status.Backups[0]}
+	if err := k8sClient.Status().Update(context.Background(), vmb); err != nil {
+		t.Fatal(err)
+	}
+	for _, list := range underlyingLists {
+		if _, err := r.removeAll(context.Background(), list, projectNamespace, v1alpha1.TenantLabels("VirtualMachine", fx.vm, "acme", "prod")); err != nil {
+			t.Fatal(err)
+		}
+	}
+	settleUnderlying(t)
+	reconcileVMR(t, r, projectNamespace, "recorded-restore")
+
+	restore, err := getVelero(t, "Restore", restoreName("recorded-restore"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, _, _ := unstructured.NestedString(restore.Object, "spec", "backupName"); got != fx.backupID {
+		t.Fatalf("the Velero restore reads %q, want the recorded %q", got, fx.backupID)
+	}
+	if got := getVMR(t, "recorded-restore").Status.BackupID; got != fx.backupID {
+		t.Fatalf("recorded backup id %q", got)
+	}
 }

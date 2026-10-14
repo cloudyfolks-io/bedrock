@@ -47,10 +47,17 @@ func Prune(infos []BackupInfo, keep int) []string {
 	return ids
 }
 
+func pinnedBackupID(restore v1alpha1.VirtualMachineRestore) string {
+	if restore.Spec.BackupID != "" {
+		return restore.Spec.BackupID
+	}
+	return restore.Status.BackupID
+}
+
 func Unpinned(ids []string, restores []v1alpha1.VirtualMachineRestore) []string {
 	return slices.DeleteFunc(slices.Clone(ids), func(id string) bool {
 		return slices.ContainsFunc(restores, func(restore v1alpha1.VirtualMachineRestore) bool {
-			return restore.Spec.BackupID == id
+			return pinnedBackupID(restore) == id
 		})
 	})
 }
