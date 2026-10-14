@@ -6,6 +6,7 @@ import (
 	"time"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	"github.com/cloudyfolks-io/bedrock/api/v1alpha1"
 )
@@ -37,8 +38,13 @@ func TestBackupKindsValidation(t *testing.T) {
 	}
 	createValid(t, c, restore)
 	restore.Status.Phase = v1alpha1.RestorePhaseInProgress
+	restore.Status.BackupID = "web-nightly-20261008"
 	if err := c.Status().Update(ctx, restore); err != nil {
 		t.Fatalf("status must be writable through the status subresource: %v", err)
+	}
+	stored := &v1alpha1.VirtualMachineRestore{}
+	if err := c.Get(ctx, client.ObjectKeyFromObject(restore), stored); err != nil || stored.Status.BackupID != "web-nightly-20261008" {
+		t.Fatalf("status.backupID must be stored: %q %v", stored.Status.BackupID, err)
 	}
 	restore.Spec.TargetName = "web-other"
 	updateInvalid(t, c, restore, "a restore is immutable")

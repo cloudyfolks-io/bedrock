@@ -85,6 +85,8 @@ type VirtualMachineRestoreStatus struct {
 	CommonStatus `json:",inline"`
 	// +optional
 	Phase string `json:"phase,omitempty"`
+	// +optional
+	BackupID string `json:"backupID,omitempty"`
 }
 
 // +kubebuilder:object:root=true
