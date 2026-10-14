@@ -103,7 +103,22 @@ func halt(phase, reason, message string, requeue time.Duration) stop {
 }
 
 func (r *RestoreReconciler) advance(ctx context.Context, vmr *v1alpha1.VirtualMachineRestore) (stop, error) {
-	scope, vmb, next, err := r.resolve(ctx, vmr)
+	scope, next, err := r.scopeOf(ctx, vmr)
+	if err != nil || next != nil {
+		return orZero(next), err
+	}
+	restore, err := r.getRestore(ctx, scope, vmr.Name)
+	if meta.IsNoMatchError(err) {
+		return halt(v1alpha1.RestorePhasePending, RestoreReasonVeleroNotInstalled, "Velero is not installed", requeueInstalling), nil
+	}
+	if err != nil {
+		return stop{}, err
+	}
+	if restore != nil {
+		backupName, _, _ := unstructured.NestedString(restore.Object, "spec", "backupName")
+		return withBackupID(outcomeOf(restore), backupName), nil
+	}
+	vmb, next, err := r.backupOf(ctx, vmr)
 	if err != nil || next != nil {
 		return orZero(next), err
 	}
@@ -114,16 +129,6 @@ func (r *RestoreReconciler) advance(ctx context.Context, vmr *v1alpha1.VirtualMa
 	vm := vmb.Spec.VMRef
 	if !vmr.Spec.Replace && vmr.Spec.TargetName != vm {
 		return halt(v1alpha1.RestorePhaseFailed, RestoreReasonRenameNotSupported, "restore to a different VM name is not supported; use the name "+vm, 0), nil
-	}
-	restore, err := r.getRestore(ctx, scope, vmr.Name)
-	if meta.IsNoMatchError(err) {
-		return halt(v1alpha1.RestorePhasePending, RestoreReasonVeleroNotInstalled, "Velero is not installed", requeueInstalling), nil
-	}
-	if err != nil {
-		return stop{}, err
-	}
-	if restore != nil {
-		return withBackupID(outcomeOf(restore), backupID), nil
 	}
 	started, err := r.start(ctx, vmr, scope, vm, backupID)
 	return withBackupID(started, backupID), err
@@ -148,23 +153,27 @@ func orZero(next *stop) stop {
 	return *next
 }
 
-func (r *RestoreReconciler) resolve(ctx context.Context, vmr *v1alpha1.VirtualMachineRestore) (Scope, *v1alpha1.VirtualMachineBackup, *stop, error) {
+func (r *RestoreReconciler) scopeOf(ctx context.Context, vmr *v1alpha1.VirtualMachineRestore) (Scope, *stop, error) {
 	ns := &corev1.Namespace{}
 	if err := r.Client.Get(ctx, types.NamespacedName{Name: vmr.Namespace}, ns); err != nil {
-		return Scope{}, nil, nil, err
+		return Scope{}, nil, err
 	}
 	scope, ok := ScopeOf(*ns)
 	if !ok {
 		next := halt(v1alpha1.RestorePhaseFailed, RestoreReasonFailed, "namespace "+vmr.Namespace+" is not a project namespace", 0)
-		return Scope{}, nil, &next, nil
+		return Scope{}, &next, nil
 	}
+	return scope, nil, nil
+}
+
+func (r *RestoreReconciler) backupOf(ctx context.Context, vmr *v1alpha1.VirtualMachineRestore) (*v1alpha1.VirtualMachineBackup, *stop, error) {
 	vmb := &v1alpha1.VirtualMachineBackup{}
 	err := r.Client.Get(ctx, types.NamespacedName{Namespace: vmr.Namespace, Name: vmr.Spec.BackupRef}, vmb)
 	if apierrors.IsNotFound(err) {
 		next := sourceGone(*vmr, "backup "+vmr.Spec.BackupRef+" does not exist in this project")
-		return Scope{}, nil, &next, nil
+		return nil, &next, nil
 	}
-	return scope, vmb, nil, err
+	return vmb, nil, err
 }
 
 func sourceGone(vmr v1alpha1.VirtualMachineRestore, message string) stop {

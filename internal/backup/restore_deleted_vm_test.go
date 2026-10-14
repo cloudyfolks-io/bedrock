@@ -596,3 +596,29 @@ func TestRestoreKeepsTheBackupIDItRecorded(t *testing.T) {
 		t.Fatalf("recorded backup id %q", got)
 	}
 }
+
+func TestRunningVeleroRestoreFinishesWhenTheBackupObjectIsGone(t *testing.T) {
+	fx := fixtureOf("finish")
+	prepareDeletedVM(t, fx, snapshotFor(fx))
+	createVMR(t, "finish-restore", projectNamespace, v1alpha1.VirtualMachineRestoreSpec{BackupRef: fx.vmb, BackupID: fx.backupID, TargetName: fx.vm})
+	r := newRestoreReconciler()
+	reconcileVMR(t, r, projectNamespace, "finish-restore")
+	requireRestoreState(t, getVMR(t, "finish-restore"), v1alpha1.RestorePhaseInProgress, metav1.ConditionFalse, RestoreReasonRestoring)
+
+	vmb := &v1alpha1.VirtualMachineBackup{ObjectMeta: metav1.ObjectMeta{Name: fx.vmb, Namespace: projectNamespace}}
+	if err := k8sClient.Delete(context.Background(), vmb); err != nil {
+		t.Fatal(err)
+	}
+	reconcileVMR(t, r, projectNamespace, "finish-restore")
+	requireRestoreState(t, getVMR(t, "finish-restore"), v1alpha1.RestorePhaseInProgress, metav1.ConditionFalse, RestoreReasonRestoring)
+	if hold := holdOf(t, &v1alpha1.VirtualMachine{ObjectMeta: metav1.ObjectMeta{Name: fx.vm, Namespace: projectNamespace}}); hold != "finish-restore" {
+		t.Fatalf("the hold must stay while Velero restores: %q", hold)
+	}
+
+	setRestoreStatus(t, "finish-restore", map[string]any{"phase": "Completed"})
+	reconcileVMR(t, r, projectNamespace, "finish-restore")
+	requireRestoreState(t, getVMR(t, "finish-restore"), v1alpha1.RestorePhaseCompleted, metav1.ConditionTrue, RestoreReasonCompleted)
+	if hold := holdOf(t, &v1alpha1.VirtualMachine{ObjectMeta: metav1.ObjectMeta{Name: fx.vm, Namespace: projectNamespace}}); hold != "" {
+		t.Fatalf("hold %q", hold)
+	}
+}
