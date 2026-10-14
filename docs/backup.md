@@ -215,11 +215,12 @@ when you restore it.
 
 Retention keeps the newest backups, as many as `keep`. A
 `VirtualMachineRestore` pins the backup that it names. While the restore
-object exists, in any phase, retention does not delete that backup. To keep
-an old backup, keep a `VirtualMachineRestore` that names it. After a failed
-restore, the next backups of the schedule are backups of the new VM. They
-remove the older backups after `keep` periods. A restore object that names a
-good backup stops this.
+object exists and its phase is not `Completed`, retention does not delete that
+backup. A restore in the phase `Failed` keeps its pin until you delete the
+restore object. To keep an old backup, keep a `VirtualMachineRestore` that
+names it. After a failed restore, the next backups of the schedule are
+backups of the new VM. They remove the older backups after `keep` periods. A
+restore object that names a good backup stops this.
 
 A schedule keeps the copy of the VM spec current. When the VM changes,
 Bedrock writes the new copy to the schedule. Each backup that the schedule
@@ -297,12 +298,17 @@ object that exists. Bedrock waits only for data-disk objects that are being
 deleted. The restore does not bring back the data of a data disk that still
 exists. To bring it back, use `replace: true`.
 
-If the backup stops to exist while the restore waits, the restore gets the
-phase `Failed` and the reason `BackupNotFound`. This happens when you delete
-the `VirtualMachineBackup`, when the backup `id` leaves `status.backups`, or
-when the Velero backup is gone. Bedrock removes the hold. A short problem,
-such as an unavailable backup target, keeps the restore in `Pending`. Bedrock
-keeps the hold in that case.
+If the backup stops to exist before Velero starts to restore, the restore
+gets the phase `Failed` and the reason `BackupNotFound`. This happens when you
+delete the `VirtualMachineBackup`, when the backup `id` leaves
+`status.backups`, or when the Velero backup is gone. Bedrock removes the hold.
+If the Velero restore already exists, Bedrock lets it finish and keeps the
+hold until it ends. A short problem, such as an unavailable backup target,
+keeps the restore in `Pending`. Bedrock keeps the hold in that case.
+
+If you leave `backupID` empty, Bedrock picks the newest completed backup when
+it first reads the restore. Bedrock writes the `id` to `status.backupID` and
+uses that `id` from then on. Retention pins that backup in the same way.
 
 A restore creates the Bedrock `VirtualMachine` only one time. If the
 controller restarts in the middle of a restore, it continues with the object
@@ -323,7 +329,9 @@ the restore ends, fails or is deleted. If you delete a restore before it
 ends, Bedrock keeps the Bedrock `VirtualMachine` that it created.
 
 A restore with `replace: true` does not take a VM that another restore holds.
-It stays in `Pending` with the reason `TargetBusy`.
+It stays in `Pending` with the reason `TargetBusy`. If the restore that is
+named in the hold does not exist any more, the hold is old. Bedrock takes it
+over. The condition message says that Bedrock took the hold over.
 
 Remember these limits:
 
