@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"reflect"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -334,6 +335,7 @@ func TestRestoreReplaceRefusesAVMThatAnotherRestoreHolds(t *testing.T) {
 	createKubeVirtObjects(t, fx)
 	updateVM(t, fx.vm, func(vm *v1alpha1.VirtualMachine) { vm.Annotations = map[string]string{HoldAnnotation: "someone-else"} })
 	createVMBWithBackups(t, projectNamespace, fx)
+	createVMR(t, "someone-else", projectNamespace, v1alpha1.VirtualMachineRestoreSpec{BackupRef: fx.vmb, BackupID: fx.backupID, Replace: true})
 	createVMR(t, "busy-restore", projectNamespace, v1alpha1.VirtualMachineRestoreSpec{BackupRef: fx.vmb, BackupID: fx.backupID, Replace: true})
 	reconcileVMR(t, newRestoreReconciler(), projectNamespace, "busy-restore")
 	requireRestoreState(t, getVMR(t, "busy-restore"), v1alpha1.RestorePhasePending, metav1.ConditionFalse, RestoreReasonTargetBusy)
@@ -620,5 +622,28 @@ func TestRunningVeleroRestoreFinishesWhenTheBackupObjectIsGone(t *testing.T) {
 	requireRestoreState(t, getVMR(t, "finish-restore"), v1alpha1.RestorePhaseCompleted, metav1.ConditionTrue, RestoreReasonCompleted)
 	if hold := holdOf(t, &v1alpha1.VirtualMachine{ObjectMeta: metav1.ObjectMeta{Name: fx.vm, Namespace: projectNamespace}}); hold != "" {
 		t.Fatalf("hold %q", hold)
+	}
+}
+
+func TestRestoreReplaceTakesOverTheHoldOfARestoreThatIsGone(t *testing.T) {
+	for i, holder := range []string{"ghost-restore", ""} {
+		fx := fixtureOf("takeover" + strconv.Itoa(i))
+		readyForRestore(t, fx)
+		createVM(t, fx.vm, fx.volume)
+		createKubeVirtObjects(t, fx)
+		updateVM(t, fx.vm, func(vm *v1alpha1.VirtualMachine) { vm.Annotations = map[string]string{HoldAnnotation: holder} })
+		createVMBWithBackups(t, projectNamespace, fx)
+		name := fx.vm + "-restore"
+		createVMR(t, name, projectNamespace, v1alpha1.VirtualMachineRestoreSpec{BackupRef: fx.vmb, BackupID: fx.backupID, Replace: true})
+
+		reconcileVMR(t, newRestoreReconciler(), projectNamespace, name)
+		vmr := getVMR(t, name)
+		requireRestoreState(t, vmr, v1alpha1.RestorePhaseInProgress, metav1.ConditionFalse, RestoreReasonPreparing)
+		if message := vmr.Status.Conditions[0].Message; !strings.Contains(message, "took over") || !strings.Contains(message, holder) {
+			t.Fatalf("holder %q: message %q", holder, message)
+		}
+		if hold := holdOf(t, &v1alpha1.VirtualMachine{ObjectMeta: metav1.ObjectMeta{Name: fx.vm, Namespace: projectNamespace}}); hold != name {
+			t.Fatalf("holder %q: the hold is %q", holder, hold)
+		}
 	}
 }

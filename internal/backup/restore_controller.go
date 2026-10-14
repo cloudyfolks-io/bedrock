@@ -209,7 +209,11 @@ func (r *RestoreReconciler) start(ctx context.Context, vmr *v1alpha1.VirtualMach
 	} else if err != nil {
 		return stop{}, err
 	}
-	if halted := refuseTarget(*vmr, vm, bedrockVM); halted != nil {
+	takeover, err := r.staleHoldNote(ctx, vmr, bedrockVM)
+	if err != nil {
+		return stop{}, err
+	}
+	if halted := refuseTarget(*vmr, vm, targetToCheck(bedrockVM, takeover)); halted != nil {
 		return *halted, nil
 	}
 	backup, halted, err := r.preconditions(ctx, backupID)
@@ -223,14 +227,46 @@ func (r *RestoreReconciler) start(ctx context.Context, vmr *v1alpha1.VirtualMach
 	if vmr.Spec.Replace {
 		gone, err := r.prepare(ctx, vmr, scope, bedrockVM)
 		if err != nil || !gone {
-			return halt(v1alpha1.RestorePhaseInProgress, RestoreReasonPreparing, "the VM objects are being removed", requeuePreparing), err
+			return halt(v1alpha1.RestorePhaseInProgress, RestoreReasonPreparing, takeover+"the VM objects are being removed", requeuePreparing), err
 		}
-		return r.launch(ctx, vmr, scope, backupID)
+		launched, err := r.launch(ctx, vmr, scope, backupID)
+		launched.Message = takeover + launched.Message
+		return launched, err
 	}
 	if halted, err := r.recreate(ctx, vmr, scope, vm, restored, bedrockVM); err != nil || halted != nil {
 		return orZero(halted), err
 	}
 	return r.launch(ctx, vmr, scope, backupID)
+}
+
+func (r *RestoreReconciler) staleHoldNote(ctx context.Context, vmr *v1alpha1.VirtualMachineRestore, existing *v1alpha1.VirtualMachine) (string, error) {
+	if !vmr.Spec.Replace || existing == nil {
+		return "", nil
+	}
+	holder, held := v1alpha1.RestoreHolder(existing)
+	if !held || holder == vmr.Name {
+		return "", nil
+	}
+	if holder == "" {
+		return "took over an empty restore hold; ", nil
+	}
+	err := r.Client.Get(ctx, types.NamespacedName{Namespace: vmr.Namespace, Name: holder}, &v1alpha1.VirtualMachineRestore{})
+	if err == nil {
+		return "", nil
+	}
+	if !apierrors.IsNotFound(err) {
+		return "", err
+	}
+	return "took over the hold of the restore " + holder + ", which does not exist; ", nil
+}
+
+func targetToCheck(existing *v1alpha1.VirtualMachine, takeover string) *v1alpha1.VirtualMachine {
+	if existing == nil || takeover == "" {
+		return existing
+	}
+	cleared := existing.DeepCopy()
+	delete(cleared.Annotations, HoldAnnotation)
+	return cleared
 }
 
 func refuseTarget(vmr v1alpha1.VirtualMachineRestore, vm string, existing *v1alpha1.VirtualMachine) *stop {
