@@ -349,3 +349,28 @@ func TestOneShotWaitsWhileARestoreHoldsTheVM(t *testing.T) {
 	}
 	requireReady(t, getVMB(t, "waits"), metav1.ConditionFalse, ReasonInProgress)
 }
+
+func setVMRPhase(t *testing.T, name, phase string) {
+	t.Helper()
+	vmr := getVMR(t, name)
+	vmr.Status.Phase = phase
+	if err := k8sClient.Status().Update(context.Background(), vmr); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestPruneIgnoresACompletedRestoreButKeepsAFailedOne(t *testing.T) {
+	setLocation(t, "Available")
+	createVM(t, "phase-vm")
+	createVMB(t, "phase", v1alpha1.VirtualMachineBackupSpec{VMRef: "phase-vm", Schedule: "0 2 * * *", Keep: 1})
+	createFixtureBackup(t, "phase-20261007", "phase", "Completed", "2026-10-07T02:05:00Z")
+	createFixtureBackup(t, "phase-20261008", "phase", "Completed", "2026-10-08T02:05:00Z")
+	createFixtureBackup(t, "phase-20261009", "phase", "Completed", "2026-10-09T02:05:00Z")
+	createVMR(t, "phase-done", projectNamespace, v1alpha1.VirtualMachineRestoreSpec{BackupRef: "phase", BackupID: "phase-20261007", Replace: true})
+	createVMR(t, "phase-failed", projectNamespace, v1alpha1.VirtualMachineRestoreSpec{BackupRef: "phase", BackupID: "phase-20261008", Replace: true})
+	setVMRPhase(t, "phase-done", v1alpha1.RestorePhaseCompleted)
+	setVMRPhase(t, "phase-failed", v1alpha1.RestorePhaseFailed)
+
+	reconcileVMB(t, newBackupReconciler(testNow), "phase")
+	requireDeleteRequests(t, map[string]bool{"phase-20261007": true, "phase-20261008": false, "phase-20261009": false})
+}

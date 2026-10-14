@@ -57,7 +57,7 @@ func pinnedBackupID(restore v1alpha1.VirtualMachineRestore) string {
 func Unpinned(ids []string, restores []v1alpha1.VirtualMachineRestore) []string {
 	return slices.DeleteFunc(slices.Clone(ids), func(id string) bool {
 		return slices.ContainsFunc(restores, func(restore v1alpha1.VirtualMachineRestore) bool {
-			return pinnedBackupID(restore) == id
+			return restore.Status.Phase != v1alpha1.RestorePhaseCompleted && pinnedBackupID(restore) == id
 		})
 	})
 }
