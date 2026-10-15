@@ -1,3 +1,4 @@
+allowLoopDevices: true
 crds:
   enabled: true
 csi:

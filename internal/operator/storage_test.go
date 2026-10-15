@@ -309,7 +309,7 @@ func TestOperatorRoleCoversTheObjectStore(t *testing.T) {
 	}
 }
 
-func TestRookValuesAllowOnlyTheBucketFields(t *testing.T) {
+func TestRookValues(t *testing.T) {
 	raw, err := os.ReadFile("../../release/values/rook.yaml")
 	if err != nil {
 		t.Fatal(err)
@@ -319,6 +319,7 @@ func TestRookValuesAllowOnlyTheBucketFields(t *testing.T) {
 		t.Fatal(err)
 	}
 	want := map[string]any{
+		"allowLoopDevices":               true,
 		"crds":                           map[string]any{"enabled": true},
 		"csi":                            map[string]any{"installCsiOperator": true},
 		"enableDiscoveryDaemon":          false,
