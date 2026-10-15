@@ -70,6 +70,9 @@ The scripts never write to a disk.
 When a device exists, `hack/e2e-init.sh` waits for `StorageReady` to be true.
 It then checks the StorageClasses `block`, `block-retain` and `filesystem` and the VolumeSnapshotClass `block`.
 
+The condition `StorageReady` stays false with the reason `OSDsNotUp` until one OSD is up for each listed device.
+The release sets `allowLoopDevices` for the Rook operator, so Rook accepts a loop device that a host lists.
+
 ## Cleanup and teardown
 
 Each job run writes markers into the directory `/run/bedrock-e2e`.
