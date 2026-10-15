@@ -15,6 +15,7 @@ import (
 type Readiness struct {
 	Ready   bool
 	Failed  bool
+	Reason  string
 	Message string
 }
 

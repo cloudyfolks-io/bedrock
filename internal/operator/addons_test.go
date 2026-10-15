@@ -11,6 +11,7 @@ import (
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 
 	"github.com/cloudyfolks-io/bedrock/api/v1alpha1"
 	"github.com/cloudyfolks-io/bedrock/internal/release"
@@ -145,5 +146,26 @@ func TestAddonInputReadsThePlatformCA(t *testing.T) {
 	}
 	if in.PlatformCA == nil || string(in.PlatformCA.Data["ca.crt"]) != "CA" {
 		t.Fatalf("platform CA %+v", in.PlatformCA)
+	}
+}
+
+func TestAddonProbeReportsTheReasonOfTheGate(t *testing.T) {
+	configMap := &corev1.ConfigMap{ObjectMeta: metav1.ObjectMeta{Namespace: release.SystemNamespace, Name: "addon-probe"}}
+	r := &AddonReconciler{Client: fake.NewClientBuilder().WithObjects(configMap).Build()}
+	gvk := schema.GroupVersionKind{Version: "v1", Kind: "ConfigMap"}
+	key := client.ObjectKey{Namespace: release.SystemNamespace, Name: "addon-probe"}
+	named := func(reason string) Probe {
+		gate := func(*unstructured.Unstructured) release.Readiness {
+			return release.Readiness{Reason: reason, Message: "not yet"}
+		}
+		return Probe{GVK: gvk, Key: key, Gate: gate}
+	}
+	addon := Addon{Name: "probe", Condition: "ProbeReady"}
+	cases := map[string]string{"": "Progressing", "OSDsNotUp": "OSDsNotUp"}
+	for reason, want := range cases {
+		cond := r.probe(context.Background(), addon, []Probe{named(reason)})
+		if cond.Status != metav1.ConditionFalse || cond.Reason != want || cond.Message != "not yet" {
+			t.Fatalf("gate reason %q: condition %+v", reason, cond)
+		}
 	}
 }

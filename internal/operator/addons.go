@@ -1,6 +1,7 @@
 package operator
 
 import (
+	"cmp"
 	"context"
 	"crypto/rand"
 	"fmt"
@@ -233,6 +234,7 @@ func (r *AddonReconciler) reconcileAddon(ctx context.Context, addon Addon, input
 
 func (r *AddonReconciler) probe(ctx context.Context, addon Addon, probes []Probe) metav1.Condition {
 	var pending []string
+	var reason string
 	for _, probe := range probes {
 		live := &unstructured.Unstructured{}
 		live.SetGroupVersionKind(probe.GVK)
@@ -250,10 +252,13 @@ func (r *AddonReconciler) probe(ctx context.Context, addon Addon, probes []Probe
 		}
 		if !readiness.Ready {
 			pending = append(pending, readiness.Message)
+			if reason == "" {
+				reason = readiness.Reason
+			}
 		}
 	}
 	if len(pending) > 0 {
-		return addonCondition(addon, metav1.ConditionFalse, "Progressing", strings.Join(pending, "; "))
+		return addonCondition(addon, metav1.ConditionFalse, cmp.Or(reason, "Progressing"), strings.Join(pending, "; "))
 	}
 	return addonCondition(addon, metav1.ConditionTrue, "Ready", "")
 }
