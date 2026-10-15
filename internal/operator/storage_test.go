@@ -206,19 +206,83 @@ func TestRenderStorageIsPure(t *testing.T) {
 	}
 }
 
+func cephClusterWith(phase, health string, upOSDs map[string]any) *unstructured.Unstructured {
+	versions := map[string]any{"mon": map[string]any{"ceph version 20.2.4": int64(1)}}
+	if upOSDs != nil {
+		versions["osd"] = upOSDs
+	}
+	ceph := map[string]any{"versions": versions}
+	if health != "" {
+		ceph["health"] = health
+	}
+	return &unstructured.Unstructured{Object: map[string]any{
+		"metadata": map[string]any{"name": "rook-ceph"},
+		"status":   map[string]any{"phase": phase, "ceph": ceph},
+	}}
+}
+
 func TestCephGate(t *testing.T) {
-	obj := &unstructured.Unstructured{Object: map[string]any{"metadata": map[string]any{"name": "rook-ceph"}, "status": map[string]any{"phase": "Progressing"}}}
-	if r := cephGate(obj); r.Ready || r.Message != "rook-ceph phase Progressing, health unknown" {
-		t.Fatalf("readiness %+v", r)
+	oneOSD := map[string]any{"ceph version 20.2.4": int64(1)}
+	cases := []struct {
+		name    string
+		obj     *unstructured.Unstructured
+		ready   bool
+		message string
+	}{
+		{"progressing", cephClusterWith("Progressing", "", oneOSD), false, "rook-ceph phase Progressing, health unknown"},
+		{"warning", cephClusterWith("Ready", "HEALTH_WARN", oneOSD), false, "rook-ceph phase Ready, health HEALTH_WARN"},
+		{"healthy", cephClusterWith("Ready", "HEALTH_OK", oneOSD), true, ""},
 	}
-	_ = unstructured.SetNestedField(obj.Object, "Ready", "status", "phase")
-	_ = unstructured.SetNestedField(obj.Object, "HEALTH_WARN", "status", "ceph", "health")
-	if r := cephGate(obj); r.Ready || r.Message != "rook-ceph phase Ready, health HEALTH_WARN" {
-		t.Fatalf("readiness %+v", r)
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if r := cephGate(1)(tc.obj); r.Ready != tc.ready || r.Message != tc.message || r.Reason != "" {
+				t.Fatalf("readiness %+v", r)
+			}
+		})
 	}
-	_ = unstructured.SetNestedField(obj.Object, "HEALTH_OK", "status", "ceph", "health")
-	if r := cephGate(obj); !r.Ready {
-		t.Fatalf("readiness %+v", r)
+}
+
+func TestCephGateWaitsForOSDsWhileMutesKeepHealthOK(t *testing.T) {
+	got := cephGate(1)(cephClusterWith("Ready", "HEALTH_OK", nil))
+	want := release.Readiness{Reason: "OSDsNotUp", Message: "rook-ceph has 0 of 1 OSDs up"}
+	if got != want {
+		t.Fatalf("readiness %+v", got)
+	}
+}
+
+func TestCephGateCountsOSDsOfEveryVersion(t *testing.T) {
+	upgrading := map[string]any{"ceph version 20.2.3": int64(1), "ceph version 20.2.4": int64(1)}
+	cases := []struct {
+		want    int
+		ready   bool
+		message string
+	}{
+		{1, true, ""},
+		{2, true, ""},
+		{3, false, "rook-ceph has 2 of 3 OSDs up"},
+	}
+	for _, tc := range cases {
+		got := cephGate(tc.want)(cephClusterWith("Ready", "HEALTH_OK", upgrading))
+		if got.Ready != tc.ready || got.Message != tc.message {
+			t.Fatalf("want %d OSDs: readiness %+v", tc.want, got)
+		}
+	}
+}
+
+func TestRenderStorageGateWantsAnOSDPerDevice(t *testing.T) {
+	storageOnly := osdHost("c", "/dev/sdb")
+	storageOnly.Spec.Roles = []string{v1alpha1.RoleWorkload}
+	hosts := []v1alpha1.Host{osdHost("a", "/dev/sdb", "/dev/sdc"), osdHost("b", "/dev/sdb"), storageOnly, osdHost("d")}
+	out, err := RenderStorage(storageInput(hosts, "3"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	gate := out.Probes[0].Gate
+	if got := gate(cephClusterWith("Ready", "HEALTH_OK", map[string]any{"ceph version 20.2.4": int64(2)})); got.Ready || got.Reason != "OSDsNotUp" {
+		t.Fatalf("two OSDs for three devices: %+v", got)
+	}
+	if got := gate(cephClusterWith("Ready", "HEALTH_OK", map[string]any{"ceph version 20.2.4": int64(3)})); !got.Ready {
+		t.Fatalf("three OSDs for three devices: %+v", got)
 	}
 }
 

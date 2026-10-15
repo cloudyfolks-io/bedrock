@@ -54,7 +54,7 @@ func RenderStorage(in AddonInput) (Rendered, error) {
 		cephObjectStore(replicas, len(hosts)),
 		bucketStorageClass(),
 	}
-	probe := Probe{GVK: cephClusterGVK, Key: client.ObjectKey{Namespace: storageNamespace, Name: storageNamespace}, Gate: cephGate}
+	probe := Probe{GVK: cephClusterGVK, Key: client.ObjectKey{Namespace: storageNamespace, Name: storageNamespace}, Gate: cephGate(deviceCount(hosts))}
 	return Rendered{Objects: objects, Probes: []Probe{probe}}, nil
 }
 
@@ -266,14 +266,38 @@ func object(apiVersion, kind, namespace, name string, spec map[string]any) *unst
 	return &unstructured.Unstructured{Object: map[string]any{"apiVersion": apiVersion, "kind": kind, "metadata": metadata, "spec": spec}}
 }
 
-func cephGate(obj *unstructured.Unstructured) release.Readiness {
-	phase, _, _ := unstructured.NestedString(obj.Object, "status", "phase")
-	health, found, _ := unstructured.NestedString(obj.Object, "status", "ceph", "health")
-	if !found {
-		health = "unknown"
+func deviceCount(hosts []v1alpha1.Host) int {
+	count := 0
+	for _, host := range hosts {
+		count += len(host.Spec.Storage.Devices)
 	}
-	if phase == "Ready" && health == "HEALTH_OK" {
-		return release.Readiness{Ready: true}
+	return count
+}
+
+func upOSDs(cluster *unstructured.Unstructured) int64 {
+	raw, _, _ := unstructured.NestedFieldNoCopy(cluster.Object, "status", "ceph", "versions", "osd")
+	perVersion, _ := raw.(map[string]any)
+	var up int64
+	for _, count := range perVersion {
+		n, _ := count.(int64)
+		up += n
 	}
-	return release.Readiness{Message: fmt.Sprintf("%s phase %s, health %s", obj.GetName(), phase, health)}
+	return up
+}
+
+func cephGate(wantOSDs int) release.Gate {
+	return func(obj *unstructured.Unstructured) release.Readiness {
+		if up := upOSDs(obj); up < int64(wantOSDs) {
+			return release.Readiness{Reason: "OSDsNotUp", Message: fmt.Sprintf("%s has %d of %d OSDs up", obj.GetName(), up, wantOSDs)}
+		}
+		phase, _, _ := unstructured.NestedString(obj.Object, "status", "phase")
+		health, found, _ := unstructured.NestedString(obj.Object, "status", "ceph", "health")
+		if !found {
+			health = "unknown"
+		}
+		if phase == "Ready" && health == "HEALTH_OK" {
+			return release.Readiness{Ready: true}
+		}
+		return release.Readiness{Message: fmt.Sprintf("%s phase %s, health %s", obj.GetName(), phase, health)}
+	}
 }
