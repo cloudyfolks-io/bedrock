@@ -1348,7 +1348,8 @@ func TestRunInitRunningRefusesAnUnnamedEncryptionFile(t *testing.T) {
 	markRunning(run)
 	var out, errOut bytes.Buffer
 	code := RunInit(context.Background(), run.args, run.deps, &out, &errOut)
-	want := encryption.Path(initDataDir(run)) + " exists but k0s.yaml does not name it: init does not enable encryption on an installed node, remove the file"
+	path := encryption.Path(initDataDir(run))
+	want := path + " exists but k0s.yaml does not name it: add encryption-provider-config=" + path + " back to the api extraArgs of k0s.yaml if this node ever ran encrypted, remove the file only if it never did"
 	if code != 1 || !strings.Contains(errOut.String(), want) {
 		t.Fatalf("exit %d stderr %s", code, errOut.String())
 	}

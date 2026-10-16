@@ -30,6 +30,11 @@ node, `bedrock init` stops in these cases:
 - `k0s.yaml` names `encryption.yaml`, and `encryption.yaml` is missing.
 - `encryption.yaml` exists, but `k0s.yaml` does not name it.
 
+If the node ever ran encrypted, add `encryption-provider-config` back to
+the API server `extraArgs` in `k0s.yaml`. Remove `encryption.yaml` only if
+the node never ran encrypted. A removed key makes every encrypted Secret
+unreadable.
+
 To restore a missing `encryption.yaml`, use a k0s backup. The API server
 encrypts the Secret with the same key. On a one-node cluster, nobody can
 read the Secret without the key. On a cluster with more control-plane nodes,

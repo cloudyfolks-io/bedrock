@@ -97,7 +97,7 @@ func chooseEncryption(facts encryptionFacts, generate func() ([]byte, error)) ([
 	case facts.named:
 		return nil, fmt.Errorf("%s is missing but k0s.yaml names it: restore it from Secret %s/%s or a k0s backup", facts.path, encryption.SecretNamespace, encryption.SecretName)
 	case facts.found:
-		return nil, fmt.Errorf("%s exists but k0s.yaml does not name it: init does not enable encryption on an installed node, remove the file", facts.path)
+		return nil, fmt.Errorf("%s exists but k0s.yaml does not name it: add %s=%s back to the api extraArgs of k0s.yaml if this node ever ran encrypted, remove the file only if it never did", facts.path, encryption.ArgName, facts.path)
 	}
 	return nil, nil
 }
