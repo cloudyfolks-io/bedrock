@@ -195,23 +195,18 @@ func RunInit(ctx context.Context, args []string, deps InitDeps, stdout, stderr i
 
 	configPath := filepath.Join(deps.Root, "etc", "k0s", "k0s.yaml")
 	encryptionPath := encryption.Path(o.dataDir)
-	encryptionFile, found, err := readEncryptionFile(encryptionPath)
+	encryptionInput, err := readEncryptionFacts(encryptionPath, configPath, o.dataDir, running)
 	if err != nil {
 		return fail(stderr, err)
 	}
-	if !found && running {
-		if err := requireNoEncryptionArg(configPath, encryptionPath); err != nil {
-			return fail(stderr, err)
-		}
-	}
-	if !found && !running {
-		encryptionFile, err = encryption.NewConfig(rand.Reader, cfg.Spec.Encryption.KMS)
-		if err != nil {
-			return fail(stderr, err)
-		}
+	encryptionFile, err := chooseEncryption(encryptionInput, func() ([]byte, error) {
+		return encryption.NewConfig(rand.Reader, cfg.Spec.Encryption.KMS)
+	})
+	if err != nil {
+		return fail(stderr, err)
 	}
 	if encryptionFile != nil {
-		if err := requireEncryptionSockets(deps.Stat, deps.Root, encryptionFile); err != nil {
+		if err := requireEncryptionSockets(deps.Stat, deps.Root, encryptionPath, encryptionFile); err != nil {
 			return fail(stderr, err)
 		}
 	}

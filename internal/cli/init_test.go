@@ -1333,3 +1333,96 @@ func TestRunInitKMSWritesTheProviderOnly(t *testing.T) {
 	}
 	assertEncryptionSecret(t, run, content)
 }
+
+func makeEtcdDir(t *testing.T, run initRun) {
+	t.Helper()
+	if err := os.MkdirAll(filepath.Join(initDataDir(run), "etcd"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestRunInitRunningRefusesAnUnnamedEncryptionFile(t *testing.T) {
+	run := prepareInit(t)
+	known := writeKnownEncryptionFile(t, run)
+	writeInitK0sConfig(t, run, nil)
+	markRunning(run)
+	var out, errOut bytes.Buffer
+	code := RunInit(context.Background(), run.args, run.deps, &out, &errOut)
+	want := encryption.Path(initDataDir(run)) + " exists but k0s.yaml does not name it: init does not enable encryption on an installed node, remove the file"
+	if code != 1 || !strings.Contains(errOut.String(), want) {
+		t.Fatalf("exit %d stderr %s", code, errOut.String())
+	}
+	if got := readInitFile(t, encryption.Path(initDataDir(run))); got != string(known) {
+		t.Fatalf("init changed the file: %q", got)
+	}
+	if got := encryptionArg(t, run); got != "" {
+		t.Fatalf("k0s.yaml names %q, want none", got)
+	}
+}
+
+func TestRunInitStoppedNodeKeepsLostEncryptionFile(t *testing.T) {
+	run := prepareInit(t)
+	makeEtcdDir(t, run)
+	writeInitK0sConfig(t, run, encryption.Args(initDataDir(run)))
+	var out, errOut bytes.Buffer
+	code := RunInit(context.Background(), run.args, run.deps, &out, &errOut)
+	if code != 1 || !strings.Contains(errOut.String(), "restore it from Secret kube-system/bedrock-secrets-encryption") {
+		t.Fatalf("exit %d stderr %s", code, errOut.String())
+	}
+	assertNoEncryption(t, run)
+}
+
+func TestRunInitStoppedNodeWithoutEncryption(t *testing.T) {
+	run := prepareInit(t)
+	makeEtcdDir(t, run)
+	writeInitK0sConfig(t, run, nil)
+	runPreparedInit(t, run)
+	assertNoEncryption(t, run)
+	if got := encryptionArg(t, run); got != "" {
+		t.Fatalf("k0s.yaml names %q, want none", got)
+	}
+}
+
+func TestRunInitRefusesAnUnusableEncryptionFile(t *testing.T) {
+	for name, content := range map[string]string{"empty": "", "malformed": "resources: ["} {
+		t.Run(name, func(t *testing.T) {
+			run := prepareInit(t)
+			path := encryption.Path(initDataDir(run))
+			if err := os.MkdirAll(filepath.Dir(path), 0o751); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			var out, errOut bytes.Buffer
+			code := RunInit(context.Background(), run.args, run.deps, &out, &errOut)
+			if code != 1 || !strings.Contains(errOut.String(), path) {
+				t.Fatalf("exit %d stderr %s", code, errOut.String())
+			}
+			if got := readInitFile(t, path); got != content {
+				t.Fatalf("init replaced the file: %q", got)
+			}
+			if _, err := encryption.ReadSecret(context.Background(), run.c); !apierrors.IsNotFound(err) {
+				t.Fatalf("the encryption Secret must not exist: %v", err)
+			}
+		})
+	}
+}
+
+func TestRunInitKeepsThePKIDirectoryMode(t *testing.T) {
+	run := prepareInit(t)
+	pki := filepath.Dir(encryption.Path(initDataDir(run)))
+	if err := os.MkdirAll(pki, 0o751); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(pki, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	runPreparedInit(t, run)
+	if info, err := os.Stat(pki); err != nil || info.Mode().Perm() != 0o700 {
+		t.Fatalf("pki dir %v %v", info, err)
+	}
+	if info, err := os.Stat(encryption.Path(initDataDir(run))); err != nil || info.Mode().Perm() != 0o600 {
+		t.Fatalf("encryption file %v %v", info, err)
+	}
+}
