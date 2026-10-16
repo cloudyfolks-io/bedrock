@@ -18,7 +18,8 @@ base_images=(golang:1.27 gcr.io/distroless/static:nonroot registry:3 node:24-boo
 version_a=v0.0.0-e2e.1
 upgrade_env="REGISTRY=localhost:$port ARCH=$arch VERSION_A=$version_a VERSION_B=v0.0.0-e2e.2 K0S_A=v1.36.2+k0s.0 K0S_B=v1.36.3+k0s.0"
 main_ref=${CI_MAIN_REF:-fdf03d5}
-known_jobs=(test e2e-kind e2e-bundle e2e-upgrade e2e-upgrade-abort e2e-authn e2e-tenant e2e-upgrade-from-main)
+authn_ref=${CI_AUTHN_REF:-6363ef5}
+known_jobs=(test e2e-kind e2e-bundle e2e-upgrade e2e-upgrade-abort e2e-authn e2e-tenant e2e-upgrade-from-main e2e-upgrade-from-authn)
 vm_path=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 
 if [ "$#" -eq 0 ]; then
@@ -337,6 +338,7 @@ run_upgrade() {
 run_e2e_upgrade() { run_upgrade "" ""; }
 run_e2e_upgrade_abort() { run_upgrade "" ABORT_IN=ControlPlane; }
 run_e2e_upgrade_from_main() { run_upgrade "VERSION_A_REF=$main_ref" "INIT_A=dist/e2e-init-$version_a.sh ASSERT_AUTHN=1"; }
+run_e2e_upgrade_from_authn() { run_upgrade "VERSION_A_REF=$authn_ref" "INIT_A=dist/e2e-init-$version_a.sh ASSERT_AUTHN=1"; }
 
 cache_size() {
   if [ -d dist/cache ]; then

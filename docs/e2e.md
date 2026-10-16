@@ -11,7 +11,11 @@ Each job starts a real single-node cluster and checks the product from the outsi
 | `e2e-bundle` | `bedrock init` builds a cluster from the offline bundle. |
 | `e2e-authn` | Local, LDAP and OIDC login, tokens and the Kubernetes API webhook. |
 | `e2e-tenant` | Tenants, projects, images, VMs, networks, backups, object storage, the panel and the metering, all together. |
-| `e2e-upgrade`, `e2e-upgrade-abort`, `e2e-upgrade-from-main` | The cluster upgrade and its rollback. |
+| `e2e-upgrade`, `e2e-upgrade-abort`, `e2e-upgrade-from-main`, `e2e-upgrade-from-authn` | The cluster upgrade and its rollback. |
+
+The upgrade jobs `e2e-upgrade-from-main` and `e2e-upgrade-from-authn` start from a build of an older Git ref.
+`CI_MAIN_REF` sets the ref of the first job. The default is `fdf03d5`.
+`CI_AUTHN_REF` sets the ref of the second job. The default is `6363ef5`.
 
 ## Run a job
 
@@ -24,6 +28,19 @@ hack/local-ci.sh e2e-tenant
 The runner builds the release and the bundle, starts a Lima VM, runs `hack/e2e-init.sh` and then the job script.
 The runner deletes the VM at the end.
 
+Without an argument, the runner runs nine jobs in this order.
+The full run takes about 6.5 hours.
+
+1. `test`
+2. `e2e-kind`
+3. `e2e-bundle`
+4. `e2e-upgrade`
+5. `e2e-upgrade-abort`
+6. `e2e-authn`
+7. `e2e-tenant`
+8. `e2e-upgrade-from-main`
+9. `e2e-upgrade-from-authn`
+
 GitHub runs the same jobs from `.github/workflows/ci.yml`.
 The `make e2e-tenant` target runs the tenant job on a host that you prepared.
 
@@ -32,7 +49,7 @@ The `make e2e-tenant` target runs the tenant job on a host that you prepared.
 | File | Purpose |
 | --- | --- |
 | `hack/e2e-init.sh` | Creates the cluster and checks the platform. |
-| `hack/e2e/lib.sh` | Host pins, dump helpers, wait helpers and the OSD and underlay functions. |
+| `hack/e2e/lib.sh` | Host pins, dump helpers, wait helpers, the etcd read and encryption check, and the OSD and underlay functions. |
 | `hack/e2e/cluster.yaml.tmpl` | The `ClusterConfig` of the e2e cluster. |
 | `hack/e2e-release-config.sh` | Writes a release config without the `catalog` component. |
 
@@ -72,6 +89,26 @@ It then checks the StorageClasses `block`, `block-retain` and `filesystem` and t
 
 The condition `StorageReady` stays false with the reason `OSDsNotUp` until one OSD is up for each listed device.
 The release sets `allowLoopDevices` for the Rook operator, so Rook accepts a loop device that a host lists.
+
+## Secrets encryption
+
+A new cluster encrypts Secrets at rest from its first start.
+The jobs check this in three places.
+
+| Job | Check |
+| --- | --- |
+| `hack/e2e-init.sh` | The file `/var/lib/k0s/pki/encryption.yaml` has mode `600` and owner `kube-apiserver`. The directory `/var/lib/k0s/pki` keeps mode `751`. The Secret `kube-system/bedrock-secrets-encryption` is encrypted in etcd. |
+| `hack/e2e-upgrade.sh` | After the upgrade, the script creates the Secret `default/e2e-encryption` and checks that etcd holds it encrypted. The script deletes the Secret. |
+| `hack/e2e-tenant.sh` | The step `encryption_join_fetch` creates a control-plane token. The test `TestJoinFetchesEncryption` fetches the encryption file with the same function as `bedrock join`. The test compares it with the file on the node. |
+
+The function `assert_secret_encrypted` in `hack/e2e/lib.sh` reads the stored value of the Secret from etcd.
+It uses the JSON gateway `https://127.0.0.1:2379/v3/kv/range` and the client certificate of the API server.
+It requires the prefix `k8s:enc:aesgcm:v1:key1:` on the stored value.
+
+The upgrade script checks the encryption only when `/var/lib/k0s/pki/encryption.yaml` exists.
+The jobs `e2e-upgrade-from-main` and `e2e-upgrade-from-authn` start from releases without encryption.
+The upgrade does not add encryption to these clusters, so the jobs skip this check.
+The job `e2e-upgrade-abort` ends at the rollback, before this check.
 
 ## Cleanup and teardown
 
@@ -136,15 +173,16 @@ If a name changes in an area, change it in that file only.
 
 | Area file | Steps |
 | --- | --- |
+| `encryption.sh` | The fetch of the encryption file with a control-plane token. This step runs first. |
 | `addons.sh` | Seeded addons. `kata` is blocked by the preflight when no KVM exists. `loki` is off, then on, then refuses wrong values. Grafana dashboards and the Alertmanager webhook. |
-| `tenancy.sh` | The users and tokens. The tenant `acme` with its Network and owner role. The projects `web` and `data` with quota, roles and policies. Workload and role checks. Quota edges. |
+| `tenancy.sh` | The users and tokens. The tenant `acme` with its Network and owner role. The projects `web` and `data` with quota, the AAQ limit of five VMs, roles and policies. Workload and role checks. Quota edges. |
 | `images.sh` | The ClusterImage `cirros` from the bundle. An image upload through the proxy. |
 | `compute.sh` | An SSH key, a Volume, the SecurityGroup `web` and the VM `vm1`. Hot-plug and expand. A volume snapshot. The proxy actions and the console, which the Go test runs. |
 | `network.sh` | The provider network and the Network status. Subnet rules. The security group on the VM. An ElasticIP in L2 mode with the ARP and ping proof. A LoadBalancer and a DNSZone. Isolation rules. |
 | `objectstorage.sh` | The object store, two users and one bucket. A put and a get from inside the cluster. A denied read by the other user. |
 | `backup.sh` | The SeaweedFS target. A VM backup with one entry. A restore with `replace: true`. A restore of a missing backup. |
 | `panel.sh` | The panel at `console.<host>`, the redirect from the apex, the API host and the Go test for the login and the watch stream. |
-| `metering.sh` | `Project.status.usage` and `Tenant.status.usage`. The metering series in Prometheus with the labels `tenant` and `project`. The serial console lines in Loki. |
+| `metering.sh` | `Project.status.usage` and `Tenant.status.usage`. The AAQ count of used VMs against the VMs in the project. The metering series in Prometheus with the labels `tenant` and `project`. The proxy route `/proxy/v1/metrics/range`, which returns points for the query `vm.cpu`. The serial console lines in Loki. |
 | `cascade.sh` | Delete the projects and the tenant. Check that every underlying object is gone. |
 
 The Go test binary `test/e2e/tenant` holds the checks that need a protocol client.
@@ -155,6 +193,7 @@ The script runs it with `-test.run` for each phase.
 | `TestProxyActions` | Start, stop, restart, migrate and snapshot through the proxy. A user without a role gets 403. |
 | `TestConsoleSerial` | The serial console WebSocket, the origin check and the guest login prompt. |
 | `TestPanelLoginAndStream` | The browserless login of the admin, the session, the access checks, the CSRF guard and the watch stream. |
+| `TestJoinFetchesEncryption` | The fetch of the encryption file with a control-plane join token. The fetched bytes equal the file on the node. |
 
 The shell and the Go test do not repeat each other.
 The shell checks objects with `kubectl`.
@@ -163,7 +202,7 @@ The Go test checks HTTP and WebSocket flows.
 ## Read a failure
 
 When a job fails, the script prints a dump.
-The dump has all Bedrock kinds, the Fabric, KubeVirt, CDI, Velero and Rook kinds, the operator and proxy logs, the launcher logs, the OVN NAT rows, the Velero and SeaweedFS logs and the events.
+The dump has all Bedrock kinds, the Fabric, KubeVirt, CDI, Velero and Rook kinds, the operator and proxy logs, the nmstate pods and logs, the launcher logs, the OVN NAT rows, the Velero and SeaweedFS logs and the events.
 Read the first failing step in the output.
 Then read the objects of that area in the dump.
 
@@ -175,4 +214,5 @@ The tenant job does not check these items.
 - Failover of the gateway chassis, because the cluster has one node.
 - BGP mode of the ElasticIP.
 - The migration of a VM to a second node.
+- A full control-plane join of a second node. The tenant job checks only the fetch of the encryption file.
 - The catalog download of the ClusterImage list.
