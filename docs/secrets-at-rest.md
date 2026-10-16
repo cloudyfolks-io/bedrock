@@ -68,6 +68,9 @@ An expired or deleted token gets nothing, and the join stops. A worker join
 does not get the key. A token from a cluster without encryption joins as
 before.
 
+The join stops before it changes the host if the cluster keeps the file in
+another data directory. Join with the same `--data-dir` as the cluster.
+
 ## Choose KMS v2
 
 Add this to your cluster configuration before `bedrock init`:

@@ -603,6 +603,24 @@ func TestRunJoinFetchesEncryptionFile(t *testing.T) {
 	}
 }
 
+func TestRunJoinRefusesAnotherEncryptionDataDir(t *testing.T) {
+	root, dataDir, e := controllerJoinHost(t)
+	k0sToken, requests := startJoinAPI(t, http.StatusOK, newJoinCA(t))
+	token := encryptionJoinToken(t, []string{"control-plane"}, k0sToken, map[string]string{encryption.ArgName: "/other/pki/encryption.yaml"})
+	var seen []*rest.Config
+	code, stdout, stderr := runJoinWithToken(t, root, dataDir, e, token, configClient(t, &seen))
+	want := "the cluster keeps its encryption config at /other/pki/encryption.yaml, join with --data-dir /other"
+	if code != 1 || !strings.Contains(stderr, want) {
+		t.Fatalf("exit %d\nstdout %s\nstderr %s", code, stdout, stderr)
+	}
+	if requests.Load() != 0 || len(seen) != 0 || len(e.Calls) != 0 {
+		t.Fatalf("join api requests %d, secret clients %d, calls %v", requests.Load(), len(seen), e.Calls)
+	}
+	if _, err := os.Stat(filepath.Join(root, "etc", "k0s", "k0s.yaml")); !os.IsNotExist(err) {
+		t.Fatal("k0s.yaml must not be written")
+	}
+}
+
 func TestRunJoinRefusedByJoinAPI(t *testing.T) {
 	root, dataDir, e := controllerJoinHost(t)
 	k0sToken, _ := startJoinAPI(t, http.StatusUnauthorized, k0s.CA{})

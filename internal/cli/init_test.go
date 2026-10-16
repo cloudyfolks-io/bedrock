@@ -1361,6 +1361,30 @@ func TestRunInitRunningRefusesAnUnnamedEncryptionFile(t *testing.T) {
 	}
 }
 
+func TestRunInitRunningRefusesAnotherEncryptionPath(t *testing.T) {
+	run := prepareInit(t)
+	known := writeKnownEncryptionFile(t, run)
+	other := "/other/pki/encryption.yaml"
+	writeInitK0sConfig(t, run, map[string]string{encryption.ArgName: other})
+	configBefore := readInitFile(t, initK0sConfigPath(run))
+	markRunning(run)
+	var out, errOut bytes.Buffer
+	code := RunInit(context.Background(), run.args, run.deps, &out, &errOut)
+	want := "k0s.yaml names " + other + " as the encryption config, not " + encryption.Path(initDataDir(run))
+	if code != 1 || !strings.Contains(errOut.String(), want) {
+		t.Fatalf("exit %d stderr %s", code, errOut.String())
+	}
+	if got := readInitFile(t, encryption.Path(initDataDir(run))); got != string(known) {
+		t.Fatalf("init changed the file: %q", got)
+	}
+	if got := readInitFile(t, initK0sConfigPath(run)); got != configBefore {
+		t.Fatalf("init changed k0s.yaml: %q", got)
+	}
+	if _, err := encryption.ReadSecret(context.Background(), run.c); !apierrors.IsNotFound(err) {
+		t.Fatalf("the encryption Secret must not exist: %v", err)
+	}
+}
+
 func TestRunInitStoppedNodeKeepsLostEncryptionFile(t *testing.T) {
 	run := prepareInit(t)
 	makeEtcdDir(t, run)

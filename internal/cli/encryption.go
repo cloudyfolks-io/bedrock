@@ -60,7 +60,7 @@ func readEncryptionFacts(path, k0sConfigPath, dataDir string, running bool) (enc
 	if !facts.installed {
 		return facts, nil
 	}
-	facts.named, err = k0sNamesEncryption(k0sConfigPath)
+	facts.named, err = k0sNamesEncryption(k0sConfigPath, path)
 	return facts, err
 }
 
@@ -72,7 +72,7 @@ func dirExists(path string) (bool, error) {
 	return err == nil && info.IsDir(), err
 }
 
-func k0sNamesEncryption(k0sConfigPath string) (bool, error) {
+func k0sNamesEncryption(k0sConfigPath, path string) (bool, error) {
 	current, err := os.ReadFile(k0sConfigPath)
 	if errors.Is(err, fs.ErrNotExist) {
 		return false, nil
@@ -81,7 +81,23 @@ func k0sNamesEncryption(k0sConfigPath string) (bool, error) {
 		return false, err
 	}
 	named, err := k0s.APIExtraArg(current, encryption.ArgName)
-	return named != "", err
+	switch {
+	case err != nil:
+		return false, err
+	case named == "":
+		return false, nil
+	case named != path:
+		return false, fmt.Errorf("k0s.yaml names %s as the encryption config, not %s", named, path)
+	}
+	return true, nil
+}
+
+func requireEncryptionDataDir(k0sConfig []byte, dataDir string) error {
+	named, err := k0s.APIExtraArg(k0sConfig, encryption.ArgName)
+	if err != nil || named == "" || named == encryption.Path(dataDir) {
+		return err
+	}
+	return fmt.Errorf("the cluster keeps its encryption config at %s, join with --data-dir %s", named, filepath.Dir(filepath.Dir(named)))
 }
 
 func chooseEncryption(facts encryptionFacts, generate func() ([]byte, error)) ([]byte, error) {

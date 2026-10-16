@@ -72,6 +72,11 @@ func RunJoin(ctx context.Context, args []string, deps InitDeps, stdout, stderr i
 			return fail(stderr, fmt.Errorf("unknown role %q", role))
 		}
 	}
+	if hasRole(nodeRoles, v1alpha1.RoleControlPlane) {
+		if err := requireEncryptionDataDir(token.K0sConfig, o.dataDir); err != nil {
+			return fail(stderr, err)
+		}
+	}
 	ctx, cancel := context.WithTimeout(ctx, 20*time.Minute)
 	defer cancel()
 
