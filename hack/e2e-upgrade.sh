@@ -221,8 +221,13 @@ if [ -n "$assert_authn" ]; then
   done
   test "$served" -eq 1
   grep -q "https://sso.$platform_host" "$workdir/discovery.json"
+  admin_user=$(kubectl -n bedrock-system get users.bedrock.cloudyfolks.io admin --ignore-not-found -o name)
   (umask 077 && "$cli_b" authn create-admin >"$workdir/create-admin")
-  grep -q '^admin password: ' "$workdir/create-admin"
+  if [ -n "$admin_user" ]; then
+    grep -qx 'admin exists' "$workdir/create-admin"
+  else
+    grep -q '^admin password: ' "$workdir/create-admin"
+  fi
   "$cli_b" authn create-admin | grep -qx 'admin exists'
   token=$(python3 -c 'import secrets, string; print("brk_" + "".join(secrets.choice(string.ascii_letters + string.digits) for _ in range(40)))')
   token_name=$(printf '%s' "$token" | sha256sum | awk '{print $1}')

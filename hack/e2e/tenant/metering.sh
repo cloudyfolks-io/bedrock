@@ -23,7 +23,11 @@ metering_usage() {
   wait_not_empty 120 get tenant "$TENANT" -o jsonpath='{.status.usage.cpu}'
   wait_not_empty 120 get tenant "$TENANT" -o jsonpath='{.status.usage.storage}'
   expect_equal 2 "$(kubectl get tenant "$TENANT" -o jsonpath='{.status.usage.projects}')" "tenant project usage"
-  retry_until 300 aaq_counts_vms
+  retry_until 300 aaq_counts_vms || {
+    kubectl -n "$NS" get applicationawareresourcequotas.aaq.kubevirt.io project-quota -o jsonpath='aaq used={.status.used} hard={.spec.hard}{"\n"}' >&2 || true
+    echo "virtual machines: $(kubectl -n "$NS" get virtualmachines.bedrock.cloudyfolks.io -o name 2>/dev/null | wc -l | tr -d ' ')" >&2
+    return 1
+  }
 }
 
 rules_are_healthy() {
@@ -40,17 +44,26 @@ metering_series() {
   expect_equal 0 "$(series_count '{__name__=~"bedrock:project_.+", namespace="kube-system"}')" "series for a platform namespace"
 }
 
-proxy_range_has_points() {
+proxy_range_request() {
   local now vmi
   now=$(date +%s)
   vmi=$(kubectl -n "$NS" get vmi -o jsonpath='{.items[0].metadata.name}')
-  panel_curl -H "Authorization: Bearer $(cat "$TOKEN_DIR/admin")" "https://api.$HOST/proxy/v1/metrics/range?query=vm.cpu&namespace=$NS&name=$vmi&start=$((now - 900))&end=$now&step=60" |
-    jq -e '.status == "success" and (.data.result | length > 0)'
+  panel_curl -S -w '\n%{http_code}' -H "Authorization: Bearer $(cat "$TOKEN_DIR/admin")" "https://api.$HOST/proxy/v1/metrics/range?query=vm.cpu&namespace=$NS&name=$vmi&start=$((now - 900))&end=$now&step=60"
+}
+
+proxy_range_has_points() {
+  proxy_range_request | sed '$d' | jq -e '.status == "success" and (.data.result | length > 0)'
 }
 
 metering_proxy_range() {
+  local answer body
   expect_equal 9090 "$(kubectl -n monitoring get svc prometheus-operated -o jsonpath='{.spec.ports[?(@.name=="web")].port}')" "prometheus service port"
-  retry_until 300 proxy_range_has_points
+  retry_until 300 proxy_range_has_points || {
+    answer=$(proxy_range_request || true)
+    body=${answer%$'\n'*}
+    echo "proxy answered ${answer##*$'\n'}: ${body:0:500}" >&2
+    return 1
+  }
 }
 
 metering_vm_series() {

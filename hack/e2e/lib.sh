@@ -312,7 +312,7 @@ assert_storage_ready() {
 etcd_value() {
   local key_base64
   key_base64=$(printf '%s' "$1" | base64 | tr -d '\n')
-  curl -sf --cacert /var/lib/k0s/pki/etcd/ca.crt --cert /var/lib/k0s/pki/apiserver-etcd-client.crt --key /var/lib/k0s/pki/apiserver-etcd-client.key \
+  curl -sSf --cacert /var/lib/k0s/pki/etcd/ca.crt --cert /var/lib/k0s/pki/apiserver-etcd-client.crt --key /var/lib/k0s/pki/apiserver-etcd-client.key \
     -X POST -d "{\"key\": \"$key_base64\"}" https://127.0.0.1:2379/v3/kv/range |
     python3 -c 'import base64,json,sys; sys.stdout.buffer.write(base64.b64decode(json.load(sys.stdin)["kvs"][0]["value"]))'
 }
