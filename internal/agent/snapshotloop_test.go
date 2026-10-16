@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	apimeta "k8s.io/apimachinery/pkg/api/meta"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	"github.com/cloudyfolks-io/bedrock/api/v1alpha1"
@@ -27,6 +28,12 @@ func (b blockingBackup) Run(ctx context.Context, name string, args ...string) (s
 		return "", context.Cause(ctx)
 	}
 	return b.FakeExec.Run(ctx, name, args...)
+}
+
+func managementObserved(t *testing.T, name string, generation int64) bool {
+	t.Helper()
+	cond := apimeta.FindStatusCondition(getHost(t, name).Status.Conditions, v1alpha1.ConditionManagementApplied)
+	return cond != nil && cond.ObservedGeneration == generation
 }
 
 func TestRunKeepsReconcilingWhileASnapshotIsRunning(t *testing.T) {
@@ -56,7 +63,7 @@ func TestRunKeepsReconcilingWhileASnapshotIsRunning(t *testing.T) {
 	}
 	enableManagement(t, "node-a")
 	want := getHost(t, "node-a").Generation
-	for requireCondition(t, "node-a", v1alpha1.ConditionManagementApplied).ObservedGeneration != want {
+	for !managementObserved(t, "node-a", want) {
 		if time.Now().After(deadline) {
 			t.Fatal("the loop did not reconcile while the snapshot ran")
 		}
