@@ -1267,7 +1267,7 @@ func TestRunInitRunningLostEncryptionFile(t *testing.T) {
 	markRunning(run)
 	var out, errOut bytes.Buffer
 	code := RunInit(context.Background(), run.args, run.deps, &out, &errOut)
-	if code != 1 || !strings.Contains(errOut.String(), "restore it from Secret kube-system/bedrock-secrets-encryption") {
+	if code != 1 || !strings.Contains(errOut.String(), "restore it from a k0s backup, or read Secret kube-system/bedrock-secrets-encryption through another control-plane node") {
 		t.Fatalf("exit %d stderr %s", code, errOut.String())
 	}
 	assertNoEncryption(t, run)
@@ -1367,7 +1367,7 @@ func TestRunInitStoppedNodeKeepsLostEncryptionFile(t *testing.T) {
 	writeInitK0sConfig(t, run, encryption.Args(initDataDir(run)))
 	var out, errOut bytes.Buffer
 	code := RunInit(context.Background(), run.args, run.deps, &out, &errOut)
-	if code != 1 || !strings.Contains(errOut.String(), "restore it from Secret kube-system/bedrock-secrets-encryption") {
+	if code != 1 || !strings.Contains(errOut.String(), "restore it from a k0s backup, or read Secret kube-system/bedrock-secrets-encryption through another control-plane node") {
 		t.Fatalf("exit %d stderr %s", code, errOut.String())
 	}
 	assertNoEncryption(t, run)

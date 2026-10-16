@@ -68,7 +68,7 @@ func TestChooseEncryption(t *testing.T) {
 		{name: "new node with a file resumes", facts: encryptionFacts{path: path, content: existing, found: true}, want: existing},
 		{name: "new node without a file makes a key", facts: encryptionFacts{path: path}, want: fresh, wantGenerated: true},
 		{name: "installed node names the file and has it", facts: encryptionFacts{path: path, content: existing, found: true, installed: true, named: true}, want: existing},
-		{name: "installed node names a missing file", facts: encryptionFacts{path: path, installed: true, named: true}, wantErr: path + " is missing but k0s.yaml names it: restore it from Secret kube-system/bedrock-secrets-encryption or a k0s backup"},
+		{name: "installed node names a missing file", facts: encryptionFacts{path: path, installed: true, named: true}, wantErr: path + " is missing but k0s.yaml names it: restore it from a k0s backup, or read Secret kube-system/bedrock-secrets-encryption through another control-plane node"},
 		{name: "installed node has a file k0s.yaml does not name", facts: encryptionFacts{path: path, content: existing, found: true, installed: true}, wantErr: path + " exists but k0s.yaml does not name it: add encryption-provider-config=" + path + " back to the api extraArgs of k0s.yaml if this node ever ran encrypted, remove the file only if it never did"},
 		{name: "installed node without encryption", facts: encryptionFacts{path: path, installed: true}},
 		{name: "empty file on a new node", facts: encryptionFacts{path: path, content: []byte{}, found: true}, wantErr: path + " is empty"},

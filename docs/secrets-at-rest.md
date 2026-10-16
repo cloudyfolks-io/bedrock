@@ -35,10 +35,13 @@ the API server `extraArgs` in `k0s.yaml`. Remove `encryption.yaml` only if
 the node never ran encrypted. A removed key makes every encrypted Secret
 unreadable.
 
-To restore a missing `encryption.yaml`, use a k0s backup. The API server
-encrypts the Secret with the same key. On a one-node cluster, nobody can
-read the Secret without the key. On a cluster with more control-plane nodes,
-you can also read the Secret through another control-plane node.
+To restore a missing `encryption.yaml`, use a k0s backup. On a cluster with
+more control-plane nodes, you can also read the Secret through another
+control-plane node. On a one-node cluster, the API server cannot start
+without the file, so nobody can read the Secret.
+
+After you restore the file by hand, set the mode to `0600` and the owner to
+`kube-apiserver`. Or run `bedrock init` again on that node. It sets both.
 
 ## Backups hold the key
 
