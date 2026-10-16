@@ -289,7 +289,7 @@ kubectl get host "$node" -o jsonpath='{.status.k0sVersion}' | grep -qx "$K0S_B"
 kubectl get host "$node" -o jsonpath='{.status.agentVersion}' | grep -qx "$VERSION_B"
 test "$(kubectl -n bedrock-system get deploy/bedrock-operator -o jsonpath='{.spec.template.spec.containers[0].image}')" = "$image_b"
 kubectl -n bedrock-system rollout status deploy/bedrock-operator --timeout=300s
-kubectl -n bedrock-system get events --field-selector involvedObject.name=bedrock-smoke -o name | grep -q .
+test -n "$(kubectl -n bedrock-system get events --field-selector involvedObject.name=bedrock-smoke -o name)"
 kubectl -n bedrock-system wait --for=delete virtualmachine/bedrock-smoke --timeout=300s
 test -z "$(kubectl get nodeupgrades -o name)"
 test ! -e "/var/lib/bedrock/staged/$VERSION_B"
