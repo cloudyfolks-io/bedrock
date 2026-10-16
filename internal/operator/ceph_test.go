@@ -17,6 +17,7 @@ import (
 const cephStatusJSON = `{
   "fsid": "1f0c1e44-7f1e-4b7a-9f53-5d1c0d5c8b21",
   "health": {"status": "HEALTH_OK", "checks": {}, "mutes": []},
+  "osdmap": {"epoch": 12, "num_osds": 1, "num_up_osds": 1, "num_in_osds": 1},
   "pgmap": {
     "pgs_by_state": [{"state_name": "active+clean", "count": 30}, {"state_name": "active+undersized+degraded", "count": 3}],
     "num_pgs": 33,
@@ -29,7 +30,7 @@ func TestParseCephStatus(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got != (cephReport{Health: "HEALTH_OK", PGs: 33, CleanPGs: 30}) {
+	if got != (cephReport{Health: "HEALTH_OK", PGs: 33, CleanPGs: 30, UpOSDs: 1}) {
 		t.Fatalf("report %+v", got)
 	}
 	if _, err := parseCephStatus([]byte(`{"pgmap": {}}`)); err == nil || err.Error() != "ceph status has no health" {
@@ -47,11 +48,13 @@ func TestCephProblems(t *testing.T) {
 		pgs    string
 	}{
 		"skipped":            {cephReport{Skipped: true}, "", ""},
-		"healthy":            {cephReport{Health: "HEALTH_OK", PGs: 33, CleanPGs: 33}, "", ""},
-		"no pools":           {cephReport{Health: "HEALTH_OK"}, "", ""},
-		"warn and clean":     {cephReport{Health: "HEALTH_WARN", PGs: 33, CleanPGs: 33}, "ceph: health is HEALTH_WARN", ""},
-		"ok and not clean":   {cephReport{Health: "HEALTH_OK", PGs: 33, CleanPGs: 30}, "ceph: 3 of 33 PGs are not active+clean", "ceph: 3 of 33 PGs are not active+clean"},
-		"warn and not clean": {cephReport{Health: "HEALTH_WARN", PGs: 33, CleanPGs: 1}, "ceph: health is HEALTH_WARN", "ceph: 32 of 33 PGs are not active+clean"},
+		"healthy":            {cephReport{Health: "HEALTH_OK", PGs: 33, CleanPGs: 33, UpOSDs: 1}, "", ""},
+		"no pools":           {cephReport{Health: "HEALTH_OK", UpOSDs: 1}, "", ""},
+		"no osd up":          {cephReport{Health: "HEALTH_OK"}, "ceph: no OSD is up", ""},
+		"warn and no osd":    {cephReport{Health: "HEALTH_WARN"}, "ceph: health is HEALTH_WARN", ""},
+		"warn and clean":     {cephReport{Health: "HEALTH_WARN", PGs: 33, CleanPGs: 33, UpOSDs: 1}, "ceph: health is HEALTH_WARN", ""},
+		"ok and not clean":   {cephReport{Health: "HEALTH_OK", PGs: 33, CleanPGs: 30, UpOSDs: 1}, "ceph: 3 of 33 PGs are not active+clean", "ceph: 3 of 33 PGs are not active+clean"},
+		"warn and not clean": {cephReport{Health: "HEALTH_WARN", PGs: 33, CleanPGs: 1, UpOSDs: 1}, "ceph: health is HEALTH_WARN", "ceph: 32 of 33 PGs are not active+clean"},
 	}
 	for name, tc := range cases {
 		t.Run(name, func(t *testing.T) {
@@ -126,7 +129,7 @@ func TestReadCeph(t *testing.T) {
 	createRookOperatorPod(t, ctx, c, "rook-ceph-operator-pending", corev1.PodPending)
 	createRookOperatorPod(t, ctx, c, "rook-ceph-operator-running", corev1.PodRunning)
 	got, err := readCeph(ctx, c, fakeExec(cephStatusJSON, nil, &calls))
-	if err != nil || got != (cephReport{Health: "HEALTH_OK", PGs: 33, CleanPGs: 30}) {
+	if err != nil || got != (cephReport{Health: "HEALTH_OK", PGs: 33, CleanPGs: 30, UpOSDs: 1}) {
 		t.Fatalf("report %+v err %v", got, err)
 	}
 	want := recordedExec{storageNamespace, "rook-ceph-operator-running", rookOperatorContainer, []string{"ceph", "status", "--format", "json", "--connect-timeout=10", "--conf=/var/lib/rook/rook-ceph/rook-ceph.config"}}

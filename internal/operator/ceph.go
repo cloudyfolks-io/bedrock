@@ -31,6 +31,7 @@ type cephReport struct {
 	Health   string
 	PGs      int64
 	CleanPGs int64
+	UpOSDs   int64
 }
 
 func cephCommand() []string {
@@ -76,6 +77,9 @@ func parseCephStatus(data []byte) (cephReport, error) {
 		Health struct {
 			Status string `json:"status"`
 		} `json:"health"`
+		OSDMap struct {
+			NumUpOSDs int64 `json:"num_up_osds"`
+		} `json:"osdmap"`
 		PGMap struct {
 			NumPGs  int64 `json:"num_pgs"`
 			ByState []struct {
@@ -96,7 +100,7 @@ func parseCephStatus(data []byte) (cephReport, error) {
 			clean += state.Count
 		}
 	}
-	return cephReport{Health: status.Health.Status, PGs: status.PGMap.NumPGs, CleanPGs: clean}, nil
+	return cephReport{Health: status.Health.Status, PGs: status.PGMap.NumPGs, CleanPGs: clean, UpOSDs: status.OSDMap.NumUpOSDs}, nil
 }
 
 func cephPGProblem(report cephReport) string {
@@ -112,6 +116,9 @@ func cephHealthProblem(report cephReport) string {
 	}
 	if report.Health != cephHealthOK {
 		return fmt.Sprintf("ceph: health is %s", report.Health)
+	}
+	if report.UpOSDs == 0 {
+		return "ceph: no OSD is up"
 	}
 	return cephPGProblem(report)
 }

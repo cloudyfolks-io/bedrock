@@ -61,7 +61,7 @@ func healthyPreflight() preflightInput {
 		Target:  target,
 		Hosts:   healthyEtcd([]v1alpha1.Host{depotHost, healthyHost("node-b")}),
 		Nodes:   []corev1.Node{readyNode("node-a", "amd64"), readyNode("node-b", "arm64")},
-		Ceph:    cephReport{Health: "HEALTH_OK", PGs: 8, CleanPGs: 8},
+		Ceph:    cephReport{Health: "HEALTH_OK", PGs: 8, CleanPGs: 8, UpOSDs: 1},
 		Now:     preflightTime(),
 	}
 }
@@ -242,6 +242,10 @@ func TestPreflightProblems(t *testing.T) {
 			in.Ceph = cephReport{Health: "HEALTH_WARN", PGs: 8, CleanPGs: 8}
 			return in
 		}, "ceph: health is HEALTH_WARN"},
+		"ceph no osd up": {func(in preflightInput) preflightInput {
+			in.Ceph = cephReport{Health: "HEALTH_OK", PGs: 8, CleanPGs: 8}
+			return in
+		}, "ceph: no OSD is up"},
 		"ceph unreadable": {func(in preflightInput) preflightInput {
 			in.CephError = "no running rook-ceph-operator pod in rook-ceph"
 			return in
