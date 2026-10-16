@@ -45,6 +45,7 @@ Read `docs/authn.md` for users, groups, LDAP and OIDC, API tokens,
 - [Compute](docs/compute.md): virtual machines, volumes, snapshots, SSH keys and consoles.
 - [Network](docs/network.md): Fabric networks, subnets, elastic IPs, load balancers, DNS zones and security groups.
 - [Backup](docs/backup.md): back up and restore VMs, etcd snapshots.
+- [Secrets at rest](docs/secrets-at-rest.md): Secret encryption, the key file and KMS v2.
 - [Object storage](docs/object-storage.md): S3 users and buckets on the shared Ceph object store.
 - [Proxy and panel API](docs/proxy.md): the edge service for the panel and the API.
 - [Panel](docs/panel.md): the web console.
