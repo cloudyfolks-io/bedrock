@@ -210,6 +210,43 @@ func TestObservabilityAppliesAfterASettingChange(t *testing.T) {
 	}
 }
 
+func removeMonitoringNamespace(t *testing.T, c client.Client) {
+	t.Helper()
+	ctx := context.Background()
+	t.Cleanup(func() {
+		_ = c.Create(ctx, &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "monitoring"}})
+	})
+	namespace := &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "monitoring"}}
+	if err := c.Delete(ctx, namespace); err != nil {
+		t.Fatal(err)
+	}
+	if err := c.Get(ctx, client.ObjectKeyFromObject(namespace), namespace); err != nil {
+		t.Fatal(err)
+	}
+	namespace.Spec.Finalizers = nil
+	if err := c.SubResource("finalize").Update(ctx, namespace); err != nil {
+		t.Fatal(err)
+	}
+	if err := c.Get(ctx, client.ObjectKeyFromObject(namespace), namespace); !apierrors.IsNotFound(err) {
+		t.Fatalf("namespace monitoring is still there: %v", err)
+	}
+}
+
+func TestObservabilityCreatesMonitoringNamespace(t *testing.T) {
+	r, c := newObservability(t)
+	removeMonitoringNamespace(t, c)
+	if err := runObservability(t, r); err != nil {
+		t.Fatal(err)
+	}
+	var namespace corev1.Namespace
+	if err := c.Get(context.Background(), client.ObjectKey{Name: "monitoring"}, &namespace); err != nil {
+		t.Fatalf("namespace monitoring: %v", err)
+	}
+	if grafanaPassword(t, c) == "" {
+		t.Fatal("the Grafana admin Secret has no password")
+	}
+}
+
 type missingMonitoring struct{ client.Client }
 
 type namespaced interface{ GetNamespace() *string }

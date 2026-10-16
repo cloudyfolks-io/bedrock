@@ -72,6 +72,14 @@ func TestAddonRulesCoverTheAddonKind(t *testing.T) {
 	}
 }
 
+func TestAddonRulesLetTheReconcilerCreateTheMonitoringNamespace(t *testing.T) {
+	for _, verb := range []string{"get", "create"} {
+		if !ruleAllows("", "namespaces", verb) {
+			t.Errorf("no %s on namespaces", verb)
+		}
+	}
+}
+
 func TestOperatorRoleCarriesTheAddonRules(t *testing.T) {
 	role, err := OperatorRole(rbacBundle(t))
 	if err != nil {

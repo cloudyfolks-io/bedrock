@@ -130,6 +130,9 @@ type ObservabilityReconciler struct {
 }
 
 func (r *ObservabilityReconciler) Reconcile(ctx context.Context, _ ctrl.Request) (ctrl.Result, error) {
+	if err := EnsureMonitoringNamespace(ctx, r.Client); err != nil {
+		return ctrl.Result{}, err
+	}
 	values, err := settingValues(ctx, r.Client)
 	if err != nil {
 		return ctrl.Result{}, err
