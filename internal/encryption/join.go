@@ -24,7 +24,7 @@ const (
 	joinOrganization = "system:masters"
 	joinAPIPort      = "6443"
 	joinValidity     = 10 * time.Minute
-	joinBackdate     = time.Minute
+	joinBackdate     = 5 * time.Minute
 	joinSerialBits   = 128
 )
 

@@ -89,7 +89,7 @@ func TestJoinClientConfig(t *testing.T) {
 	if want := now.Add(10 * time.Minute).Truncate(time.Second); !cert.NotAfter.Equal(want) {
 		t.Fatalf("not after %s, want %s", cert.NotAfter, want)
 	}
-	if want := now.Add(-time.Minute).Truncate(time.Second); !cert.NotBefore.Equal(want) {
+	if want := now.Add(-5 * time.Minute).Truncate(time.Second); !cert.NotBefore.Equal(want) {
 		t.Fatalf("not before %s, want %s", cert.NotBefore, want)
 	}
 	if !slices.Equal(cert.ExtKeyUsage, []x509.ExtKeyUsage{x509.ExtKeyUsageClientAuth}) {
