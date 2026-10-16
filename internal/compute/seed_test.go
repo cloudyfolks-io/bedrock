@@ -13,6 +13,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
+	"k8s.io/client-go/util/retry"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
@@ -38,6 +39,18 @@ func createObject(t *testing.T, c client.Client, obj client.Object) {
 	must(t, c.Create(context.Background(), obj))
 }
 
+func updateStatus[T client.Object](t *testing.T, c client.Client, obj T, mutate func(T)) {
+	t.Helper()
+	ctx := context.Background()
+	must(t, retry.RetryOnConflict(retry.DefaultRetry, func() error {
+		if err := c.Get(ctx, client.ObjectKeyFromObject(obj), obj); err != nil {
+			return err
+		}
+		mutate(obj)
+		return c.Status().Update(ctx, obj)
+	}))
+}
+
 func createSubnet(t *testing.T, c client.Client, namespace, name string, ready metav1.ConditionStatus) {
 	t.Helper()
 	subnet := &v1alpha1.Subnet{
@@ -45,16 +58,14 @@ func createSubnet(t *testing.T, c client.Client, namespace, name string, ready m
 		Spec:       v1alpha1.SubnetSpec{NetworkRef: "acme", CIDR: "10.100.0.0/24"},
 	}
 	createObject(t, c, subnet)
-	subnet.Status.Conditions = readyConditions(ready)
-	must(t, c.Status().Update(context.Background(), subnet))
+	updateStatus(t, c, subnet, func(s *v1alpha1.Subnet) { s.Status.Conditions = readyConditions(ready) })
 }
 
 func createSecurityGroup(t *testing.T, c client.Client, namespace, name string, ready metav1.ConditionStatus) {
 	t.Helper()
 	group := &v1alpha1.SecurityGroup{ObjectMeta: metav1.ObjectMeta{Namespace: namespace, Name: name}}
 	createObject(t, c, group)
-	group.Status.Conditions = readyConditions(ready)
-	must(t, c.Status().Update(context.Background(), group))
+	updateStatus(t, c, group, func(g *v1alpha1.SecurityGroup) { g.Status.Conditions = readyConditions(ready) })
 }
 
 func createSSHKey(t *testing.T, c client.Client, namespace, name string, ready metav1.ConditionStatus) {
@@ -64,8 +75,7 @@ func createSSHKey(t *testing.T, c client.Client, namespace, name string, ready m
 		Spec:       v1alpha1.SSHKeySpec{PublicKey: ed25519Key(t) + " " + name + "@laptop"},
 	}
 	createObject(t, c, key)
-	key.Status.Conditions = readyConditions(ready)
-	must(t, c.Status().Update(context.Background(), key))
+	updateStatus(t, c, key, func(k *v1alpha1.SSHKey) { k.Status.Conditions = readyConditions(ready) })
 }
 
 func createVolume(t *testing.T, c client.Client, namespace, name string) *v1alpha1.Volume {
@@ -96,8 +106,9 @@ func ensureClusterImage(t *testing.T, c client.Client, name, imageType, dataSour
 	} else {
 		must(t, err)
 	}
-	image.Status.Phase, image.Status.DataSource, image.Status.SizeBytes = phase, dataSource, sizeBytes
-	must(t, c.Status().Update(ctx, image))
+	updateStatus(t, c, image, func(i *v1alpha1.ClusterImage) {
+		i.Status.Phase, i.Status.DataSource, i.Status.SizeBytes = phase, dataSource, sizeBytes
+	})
 }
 
 func ensureUnstructured(t *testing.T, c client.Client, gvk schema.GroupVersionKind, name string, spec map[string]any) {
@@ -219,8 +230,9 @@ func createPVC(t *testing.T, c client.Client, namespace, name string, gi int64, 
 		},
 	}
 	createObject(t, c, pvc)
-	pvc.Status.Phase = corev1.ClaimBound
-	pvc.Status.Capacity = corev1.ResourceList{corev1.ResourceStorage: quantity}
-	must(t, c.Status().Update(context.Background(), pvc))
+	updateStatus(t, c, pvc, func(p *corev1.PersistentVolumeClaim) {
+		p.Status.Phase = corev1.ClaimBound
+		p.Status.Capacity = corev1.ResourceList{corev1.ResourceStorage: quantity}
+	})
 	return pvc
 }
