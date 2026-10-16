@@ -2,20 +2,31 @@ package cli
 
 import (
 	"bytes"
+	"compress/gzip"
 	"context"
 	"crypto/rand"
+	"crypto/x509"
+	"encoding/base64"
+	"encoding/json"
+	"encoding/pem"
+	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
 	"k8s.io/apimachinery/pkg/runtime"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
+	"k8s.io/client-go/rest"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 
 	"github.com/cloudyfolks-io/bedrock/internal/authn/apiserver"
+	"github.com/cloudyfolks-io/bedrock/internal/encryption"
 	"github.com/cloudyfolks-io/bedrock/internal/host"
 	"github.com/cloudyfolks-io/bedrock/internal/k0s"
 	"github.com/cloudyfolks-io/bedrock/internal/operator"
@@ -369,13 +380,18 @@ func TestCheckAuthnFilesRefusesOtherNames(t *testing.T) {
 	}
 }
 
-func clusterWith(t *testing.T, objects ...client.Object) func(string) (client.Client, error) {
+func fakeCluster(t *testing.T, objects ...client.Object) client.WithWatch {
 	t.Helper()
 	scheme := runtime.NewScheme()
 	if err := clientgoscheme.AddToScheme(scheme); err != nil {
 		t.Fatal(err)
 	}
-	c := fake.NewClientBuilder().WithScheme(scheme).WithObjects(objects...).Build()
+	return fake.NewClientBuilder().WithScheme(scheme).WithObjects(objects...).Build()
+}
+
+func clusterWith(t *testing.T, objects ...client.Object) func(string) (client.Client, error) {
+	t.Helper()
+	c := fakeCluster(t, objects...)
 	return func(string) (client.Client, error) { return c, nil }
 }
 
@@ -452,5 +468,237 @@ func TestJoinRefusesOtherAuthnBootstrap(t *testing.T) {
 	}
 	if after, err := os.ReadFile(filepath.Join(dir, "ca.key")); err != nil || string(after) != string(before) {
 		t.Fatal("the host material must stay")
+	}
+}
+
+func startJoinAPI(t *testing.T, status int, ca k0s.CA) (string, *atomic.Int32) {
+	t.Helper()
+	requests := &atomic.Int32{}
+	srv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests.Add(1)
+		if status != http.StatusOK {
+			http.Error(w, "invalid token", status)
+			return
+		}
+		_ = json.NewEncoder(w).Encode(map[string][]byte{"cert": ca.Cert, "key": ca.Key})
+	}))
+	t.Cleanup(srv.Close)
+	kubeconfig := fmt.Sprintf("apiVersion: v1\nkind: Config\nclusters:\n- name: k0s\n  cluster:\n    server: %s\n    certificate-authority-data: %s\ncontexts:\n- name: k0s\n  context:\n    cluster: k0s\n    user: controller-join\ncurrent-context: k0s\nusers:\n- name: controller-join\n  user:\n    token: abcdef.0123456789abcdef\n",
+		srv.URL, base64.StdEncoding.EncodeToString(pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: srv.Certificate().Raw})))
+	var zipped bytes.Buffer
+	writer := gzip.NewWriter(&zipped)
+	if _, err := writer.Write([]byte(kubeconfig)); err != nil {
+		t.Fatal(err)
+	}
+	if err := writer.Close(); err != nil {
+		t.Fatal(err)
+	}
+	return base64.StdEncoding.EncodeToString(zipped.Bytes()), requests
+}
+
+func newJoinCA(t *testing.T) k0s.CA {
+	t.Helper()
+	certPEM, keyPEM, err := apiserver.NewCA(rand.Reader, time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	return k0s.CA{Cert: certPEM, Key: keyPEM}
+}
+
+var testEncryptionKey = bytes.Repeat([]byte{7}, 32)
+
+func testEncryptionContent(t *testing.T) []byte {
+	t.Helper()
+	content, err := encryption.NewConfig(bytes.NewReader(testEncryptionKey), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return content
+}
+
+func encryptionJoinToken(t *testing.T, nodeRoles []string, k0sToken string, apiArgs map[string]string) string {
+	t.Helper()
+	config, err := k0s.RenderConfig(k0s.Config{VIP: "10.0.10.10", SANs: []string{"10.0.10.10"}, PodCIDR: "10.16.0.0/16", ServiceCIDR: "10.96.0.0/12", APIExtraArgs: apiArgs})
+	if err != nil {
+		t.Fatal(err)
+	}
+	token, err := k0s.EncodeToken(k0s.Token{
+		Version: "v0.1.0-test", Roles: nodeRoles, K0sToken: k0sToken, K0sConfig: config,
+		AuthnFiles: map[string][]byte{"authentication.yaml": []byte("authn-config"), "webhook.kubeconfig": []byte("webhook-config")},
+		VIP:        "10.0.10.10", K0sVersion: "1.36.3+k0s.0", SupportedOS: []string{"ubuntu-24.04"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return token
+}
+
+func configClient(t *testing.T, seen *[]*rest.Config, objects ...client.Object) func(*rest.Config) (client.Client, error) {
+	t.Helper()
+	c := fakeCluster(t, objects...)
+	return func(config *rest.Config) (client.Client, error) {
+		*seen = append(*seen, config)
+		return c, nil
+	}
+}
+
+func runJoinWithToken(t *testing.T, root, dataDir string, exec host.Exec, token string, newConfigClient func(*rest.Config) (client.Client, error)) (int, string, string) {
+	t.Helper()
+	deps := InitDeps{Exec: exec, Uid: 0, FreeBytes: func(string) (uint64, error) { return 100 << 30, nil }, Root: root, Executable: fakeExecutable(t), NewClient: clusterWith(t), NewConfigClient: newConfigClient}
+	var out, errOut bytes.Buffer
+	code := RunJoin(context.Background(), []string{"--token", token, "--data-dir", dataDir, "--k0s-bin", "/usr/local/bin/k0s"}, deps, &out, &errOut)
+	return code, out.String(), errOut.String()
+}
+
+func k0sInstallCalled(e *host.FakeExec) bool {
+	for _, call := range e.Calls {
+		if strings.Contains(call, "k0s install") {
+			return true
+		}
+	}
+	return false
+}
+
+func TestRunJoinFetchesEncryptionFile(t *testing.T) {
+	root, dataDir, e := controllerJoinHost(t)
+	content := testEncryptionContent(t)
+	k0sToken, requests := startJoinAPI(t, http.StatusOK, newJoinCA(t))
+	token := encryptionJoinToken(t, []string{"control-plane"}, k0sToken, encryption.Args(dataDir))
+	path := encryption.Path(dataDir)
+	present := false
+	var seen []*rest.Config
+	code, stdout, stderr := runJoinWithToken(t, root, dataDir, filesAtStart{FakeExec: e, paths: []string{path}, present: &present}, token, configClient(t, &seen, encryption.Secret(content)))
+	if code != 0 {
+		t.Fatalf("exit %d\nstdout %s\nstderr %s", code, stdout, stderr)
+	}
+	if !present {
+		t.Fatal("the encryption file must exist before k0s starts")
+	}
+	got, err := os.ReadFile(path)
+	if err != nil || !bytes.Equal(got, content) {
+		t.Fatalf("encryption file %q %v, want %q", got, err, content)
+	}
+	if info, err := os.Stat(path); err != nil || info.Mode().Perm() != 0o600 {
+		t.Fatalf("encryption file %v %v", info, err)
+	}
+	if info, err := os.Stat(filepath.Dir(path)); err != nil || info.Mode().Perm() != 0o751 {
+		t.Fatalf("pki dir %v %v", info, err)
+	}
+	if !strings.Contains(stdout, "==> secrets encryption\n") {
+		t.Fatalf("stdout lacks the encryption step: %s", stdout)
+	}
+	if requests.Load() != 1 || len(seen) != 1 {
+		t.Fatalf("join api requests %d, secret clients %d", requests.Load(), len(seen))
+	}
+	if seen[0].Host != "https://10.0.10.10:6443" {
+		t.Fatalf("secret read host %q", seen[0].Host)
+	}
+	block, _ := pem.Decode(seen[0].CertData)
+	cert, err := x509.ParseCertificate(block.Bytes)
+	if err != nil || cert.Subject.CommonName != encryption.JoinUser {
+		t.Fatalf("join certificate %v %v", cert, err)
+	}
+}
+
+func TestJoinTokenHoldsNoEncryptionKey(t *testing.T) {
+	_, dataDir, _ := controllerJoinHost(t)
+	encoded := encryptionJoinToken(t, []string{"control-plane"}, "k0s-token", encryption.Args(dataDir))
+	token, err := k0s.DecodeToken(encoded)
+	if err != nil {
+		t.Fatal(err)
+	}
+	key := base64.StdEncoding.EncodeToString(testEncryptionKey)
+	if bytes.Contains(token.K0sConfig, []byte(key)) || bytes.Contains(token.K0sConfig, testEncryptionContent(t)) {
+		t.Fatalf("k0s config holds the key: %s", token.K0sConfig)
+	}
+	for name, file := range token.AuthnFiles {
+		if bytes.Contains(file, []byte(key)) {
+			t.Fatalf("%s holds the key", name)
+		}
+	}
+}
+
+func TestRunJoinRefusedByJoinAPI(t *testing.T) {
+	root, dataDir, e := controllerJoinHost(t)
+	k0sToken, _ := startJoinAPI(t, http.StatusUnauthorized, k0s.CA{})
+	token := encryptionJoinToken(t, []string{"control-plane"}, k0sToken, encryption.Args(dataDir))
+	var seen []*rest.Config
+	code, stdout, stderr := runJoinWithToken(t, root, dataDir, e, token, configClient(t, &seen))
+	if code != 1 || !strings.Contains(stderr, "fetch the cluster CA") || !strings.Contains(stderr, "401") {
+		t.Fatalf("exit %d\nstdout %s\nstderr %s", code, stdout, stderr)
+	}
+	if k0sInstallCalled(e) || len(seen) != 0 {
+		t.Fatalf("k0s must not be installed after a refused join: calls %v", e.Calls)
+	}
+	if _, err := os.Stat(filepath.Join(root, "etc", "k0s", "k0s.yaml")); !os.IsNotExist(err) {
+		t.Fatal("k0s.yaml must not be written after a refused join")
+	}
+}
+
+func TestRunJoinMissingEncryptionSecret(t *testing.T) {
+	root, dataDir, e := controllerJoinHost(t)
+	k0sToken, _ := startJoinAPI(t, http.StatusOK, newJoinCA(t))
+	token := encryptionJoinToken(t, []string{"control-plane"}, k0sToken, encryption.Args(dataDir))
+	var seen []*rest.Config
+	code, stdout, stderr := runJoinWithToken(t, root, dataDir, e, token, configClient(t, &seen))
+	if code != 1 || !strings.Contains(stderr, "kube-system/bedrock-secrets-encryption") {
+		t.Fatalf("exit %d\nstdout %s\nstderr %s", code, stdout, stderr)
+	}
+	if k0sInstallCalled(e) {
+		t.Fatalf("k0s must not be installed without the encryption secret: calls %v", e.Calls)
+	}
+	if _, err := os.Stat(encryption.Path(dataDir)); !os.IsNotExist(err) {
+		t.Fatalf("no encryption file may exist: %v", err)
+	}
+}
+
+func TestRunJoinWithoutEncryption(t *testing.T) {
+	root, dataDir, e := controllerJoinHost(t)
+	k0sToken, requests := startJoinAPI(t, http.StatusOK, newJoinCA(t))
+	token := encryptionJoinToken(t, []string{"control-plane"}, k0sToken, nil)
+	code, stdout, stderr := runJoinWithToken(t, root, dataDir, e, token, nil)
+	if code != 0 {
+		t.Fatalf("exit %d\nstdout %s\nstderr %s", code, stdout, stderr)
+	}
+	if requests.Load() != 0 {
+		t.Fatalf("join api requests %d, want none", requests.Load())
+	}
+	if _, err := os.Stat(encryption.Path(dataDir)); !os.IsNotExist(err) {
+		t.Fatalf("no encryption file may exist: %v", err)
+	}
+}
+
+func TestRunJoinWorkerSkipsEncryption(t *testing.T) {
+	root, e := fakeHost(t)
+	dataDir := filepath.Join(root, "var", "lib", "k0s")
+	e.Errors["/usr/local/bin/k0s status --data-dir "+dataDir] = &host.ExitError{Code: 1}
+	installArgs := k0s.InstallArgs(k0s.InstallOptions{Role: "worker", Force: true, TokenFile: filepath.Join(root, "etc", "k0s", "join-token"), Labels: roles.Labels([]string{"workload"}), KubeletExtraArgs: []string{"--node-status-update-frequency=4s"}, DataDir: dataDir, KubeletRootDir: k0s.DefaultKubeletRootDir})
+	e.Responses["/usr/local/bin/k0s "+strings.Join(installArgs, " ")] = ""
+	k0sToken, requests := startJoinAPI(t, http.StatusOK, newJoinCA(t))
+	token := encryptionJoinToken(t, []string{"workload"}, k0sToken, encryption.Args(dataDir))
+	code, stdout, stderr := runJoinWithToken(t, root, dataDir, e, token, nil)
+	if code != 0 {
+		t.Fatalf("exit %d\nstdout %s\nstderr %s", code, stdout, stderr)
+	}
+	if requests.Load() != 0 {
+		t.Fatalf("join api requests %d, want none", requests.Load())
+	}
+	if _, err := os.Stat(encryption.Path(dataDir)); !os.IsNotExist(err) {
+		t.Fatalf("no encryption file may exist: %v", err)
+	}
+}
+
+func TestRunJoinRunningNodeSkipsEncryptionFetch(t *testing.T) {
+	root, e := fakeHost(t)
+	dataDir := filepath.Join(root, "var", "lib", "k0s")
+	e.Responses["/usr/local/bin/k0s status --data-dir "+dataDir] = ""
+	k0sToken, requests := startJoinAPI(t, http.StatusUnauthorized, k0s.CA{})
+	token := encryptionJoinToken(t, []string{"control-plane"}, k0sToken, encryption.Args(dataDir))
+	code, stdout, stderr := runJoinWithToken(t, root, dataDir, e, token, nil)
+	if code != 0 {
+		t.Fatalf("exit %d\nstdout %s\nstderr %s", code, stdout, stderr)
+	}
+	if requests.Load() != 0 {
+		t.Fatalf("join api requests %d, want none", requests.Load())
 	}
 }

@@ -11,8 +11,12 @@ import (
 	"strings"
 	"time"
 
+	"k8s.io/client-go/rest"
+	"sigs.k8s.io/controller-runtime/pkg/client"
+
 	"github.com/cloudyfolks-io/bedrock/api/v1alpha1"
 	"github.com/cloudyfolks-io/bedrock/internal/authn/apiserver"
+	"github.com/cloudyfolks-io/bedrock/internal/encryption"
 	"github.com/cloudyfolks-io/bedrock/internal/host"
 	"github.com/cloudyfolks-io/bedrock/internal/k0s"
 	"github.com/cloudyfolks-io/bedrock/internal/preflight"
@@ -32,7 +36,7 @@ type joinOptions struct {
 }
 
 func joinCommand(args []string, stdout, stderr io.Writer) int {
-	deps := InitDeps{Exec: host.RealExec{}, Uid: os.Getuid(), FreeBytes: host.FreeBytes, Stat: os.Stat, Root: "/", NewClient: newClusterClient, Executable: os.Executable}
+	deps := InitDeps{Exec: host.RealExec{}, Uid: os.Getuid(), FreeBytes: host.FreeBytes, Stat: os.Stat, Root: "/", NewClient: newClusterClient, NewConfigClient: func(c *rest.Config) (client.Client, error) { return client.New(c, client.Options{}) }, Executable: os.Executable}
 	return RunJoin(context.Background(), args, deps, stdout, stderr)
 }
 
@@ -127,6 +131,8 @@ func RunJoin(ctx context.Context, args []string, deps InitDeps, stdout, stderr i
 	defer os.Remove(tokenPath)
 
 	controlPlane := hasRole(nodeRoles, v1alpha1.RoleControlPlane)
+	running := k0sClient.Running(ctx)
+	var encryptionFile []byte
 	opts := k0s.InstallOptions{Role: "worker", TokenFile: tokenPath, Labels: roles.Labels(nodeRoles), KubeletExtraArgs: []string{"--node-status-update-frequency=4s"}, DataDir: o.dataDir, KubeletRootDir: k0s.DefaultKubeletRootDir}
 	if controlPlane {
 		if len(token.K0sConfig) == 0 {
@@ -134,6 +140,12 @@ func RunJoin(ctx context.Context, args []string, deps InitDeps, stdout, stderr i
 		}
 		if err := checkAuthnFiles(token.AuthnFiles); err != nil {
 			return fail(stderr, err)
+		}
+		if !running {
+			encryptionFile, err = fetchJoinEncryption(ctx, stdout, deps, token, o.dataDir)
+			if err != nil {
+				return fail(stderr, err)
+			}
 		}
 		configPath := filepath.Join(deps.Root, "etc", "k0s", "k0s.yaml")
 		if err := os.WriteFile(configPath, token.K0sConfig, 0o600); err != nil {
@@ -145,7 +157,7 @@ func RunJoin(ctx context.Context, args []string, deps InitDeps, stdout, stderr i
 		opts = k0s.InstallOptions{Role: "controller", ConfigPath: configPath, TokenFile: tokenPath, EnableWorker: true, NoTaints: true, DynamicConfig: true, Labels: roles.Labels(nodeRoles), KubeletExtraArgs: []string{"--node-status-update-frequency=4s"}, DataDir: o.dataDir, KubeletRootDir: k0s.DefaultKubeletRootDir, DisableComponents: k0s.DefaultDisabledComponents}
 	}
 	step(stdout, "installing k0s %s", opts.Role)
-	if !k0sClient.Running(ctx) {
+	if !running {
 		opts.Force = true
 		if err := k0sClient.Install(ctx, opts); err != nil {
 			return fail(stderr, err)
@@ -153,6 +165,11 @@ func RunJoin(ctx context.Context, args []string, deps InitDeps, stdout, stderr i
 		if controlPlane {
 			if err := installAuthnFiles(deps.Root, token.AuthnFiles); err != nil {
 				return fail(stderr, err)
+			}
+			if encryptionFile != nil {
+				if err := installEncryptionFile(encryption.Path(o.dataDir), encryptionFile); err != nil {
+					return fail(stderr, err)
+				}
 			}
 		}
 		if err := k0sClient.Start(ctx); err != nil {

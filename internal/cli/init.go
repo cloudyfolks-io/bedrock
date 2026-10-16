@@ -19,6 +19,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/clientcmd"
 	"k8s.io/client-go/util/retry"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -55,14 +56,15 @@ const (
 )
 
 type InitDeps struct {
-	Exec       host.Exec
-	Uid        int
-	FreeBytes  func(string) (uint64, error)
-	Stat       func(string) (fs.FileInfo, error)
-	Root       string
-	FromImage  func(ctx context.Context, ref, arch, dest string) error
-	NewClient  func(kubeconfig string) (client.Client, error)
-	Executable func() (string, error)
+	Exec            host.Exec
+	Uid             int
+	FreeBytes       func(string) (uint64, error)
+	Stat            func(string) (fs.FileInfo, error)
+	Root            string
+	FromImage       func(ctx context.Context, ref, arch, dest string) error
+	NewClient       func(kubeconfig string) (client.Client, error)
+	NewConfigClient func(*rest.Config) (client.Client, error)
+	Executable      func() (string, error)
 }
 
 type initOptions struct {
@@ -103,7 +105,7 @@ func parseInitFlags(args []string, stderr io.Writer) (initOptions, error) {
 }
 
 func initCommand(args []string, stdout, stderr io.Writer) int {
-	deps := InitDeps{Exec: host.RealExec{}, Uid: os.Getuid(), FreeBytes: host.FreeBytes, Stat: os.Stat, Root: "/", FromImage: release.FromImage, NewClient: newClusterClient, Executable: os.Executable}
+	deps := InitDeps{Exec: host.RealExec{}, Uid: os.Getuid(), FreeBytes: host.FreeBytes, Stat: os.Stat, Root: "/", FromImage: release.FromImage, NewClient: newClusterClient, NewConfigClient: func(c *rest.Config) (client.Client, error) { return client.New(c, client.Options{}) }, Executable: os.Executable}
 	return RunInit(context.Background(), args, deps, stdout, stderr)
 }
 

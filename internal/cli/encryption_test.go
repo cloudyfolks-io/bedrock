@@ -2,11 +2,21 @@ package cli
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"io/fs"
+	"net/http"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
+
+	"k8s.io/client-go/rest"
+	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/client/interceptor"
+
+	"github.com/cloudyfolks-io/bedrock/internal/encryption"
+	"github.com/cloudyfolks-io/bedrock/internal/k0s"
 )
 
 func TestRequireSockets(t *testing.T) {
@@ -85,5 +95,62 @@ func TestChooseEncryption(t *testing.T) {
 				t.Fatalf("generated %v, want %v", generated, tc.wantGenerated)
 			}
 		})
+	}
+}
+
+func TestFetchEncryptionFile(t *testing.T) {
+	content := testEncryptionContent(t)
+	k0sToken, _ := startJoinAPI(t, http.StatusOK, newJoinCA(t))
+	var seen []*rest.Config
+	got, err := FetchEncryptionFile(context.Background(), k0s.Token{K0sToken: k0sToken, VIP: "10.0.10.10"}, configClient(t, &seen, encryption.Secret(content)))
+	if err != nil || !bytes.Equal(got, content) {
+		t.Fatalf("got %q %v, want %q", got, err, content)
+	}
+	if len(seen) != 1 || seen[0].Host != "https://10.0.10.10:6443" {
+		t.Fatalf("secret clients %v", seen)
+	}
+}
+
+func TestFetchEncryptionFileNamesTheFailedStage(t *testing.T) {
+	refused, _ := startJoinAPI(t, http.StatusUnauthorized, k0s.CA{})
+	granted, _ := startJoinAPI(t, http.StatusOK, newJoinCA(t))
+	var seen []*rest.Config
+	cases := []struct {
+		name      string
+		k0sToken  string
+		newClient func(*rest.Config) (client.Client, error)
+		wantErr   string
+	}{
+		{name: "join api refuses", k0sToken: refused, newClient: configClient(t, &seen), wantErr: "fetch the cluster CA: k0s join api answered 401: invalid token"},
+		{name: "token is not a k0s token", k0sToken: "tok", newClient: configClient(t, &seen), wantErr: "fetch the cluster CA: "},
+		{name: "client cannot be built", k0sToken: granted, newClient: func(*rest.Config) (client.Client, error) { return nil, errors.New("no client") }, wantErr: "read the encryption config: no client"},
+		{name: "secret is missing", k0sToken: granted, newClient: configClient(t, &seen), wantErr: "read the encryption config: read secret kube-system/bedrock-secrets-encryption: "},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := FetchEncryptionFile(context.Background(), k0s.Token{K0sToken: tc.k0sToken, VIP: "10.0.10.10"}, tc.newClient)
+			if err == nil || !strings.HasPrefix(err.Error(), tc.wantErr) || got != nil {
+				t.Fatalf("got %q %v, want error starting with %q", got, err, tc.wantErr)
+			}
+		})
+	}
+}
+
+func TestFetchEncryptionFileBoundsTheSecretRead(t *testing.T) {
+	k0sToken, _ := startJoinAPI(t, http.StatusOK, newJoinCA(t))
+	var remaining time.Duration
+	reading := interceptor.NewClient(fakeCluster(t, encryption.Secret(testEncryptionContent(t))), interceptor.Funcs{Get: func(ctx context.Context, inner client.WithWatch, key client.ObjectKey, obj client.Object, opts ...client.GetOption) error {
+		deadline, ok := ctx.Deadline()
+		if ok {
+			remaining = time.Until(deadline)
+		}
+		return inner.Get(ctx, key, obj, opts...)
+	}})
+	_, err := FetchEncryptionFile(context.Background(), k0s.Token{K0sToken: k0sToken, VIP: "10.0.10.10"}, func(*rest.Config) (client.Client, error) { return reading, nil })
+	if err != nil {
+		t.Fatal(err)
+	}
+	if remaining <= 25*time.Second || remaining > 30*time.Second {
+		t.Fatalf("secret read deadline in %v, want about 30s", remaining)
 	}
 }

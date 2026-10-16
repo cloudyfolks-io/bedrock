@@ -5,11 +5,14 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"io/fs"
 	"os"
 	"path/filepath"
+	"time"
 
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/client-go/rest"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	"github.com/cloudyfolks-io/bedrock/internal/authn/apiserver"
@@ -17,7 +20,10 @@ import (
 	"github.com/cloudyfolks-io/bedrock/internal/k0s"
 )
 
-const pkiDirMode = 0o751
+const (
+	pkiDirMode       = 0o751
+	joinFetchTimeout = 30 * time.Second
+)
 
 type encryptionFacts struct {
 	path      string
@@ -125,4 +131,46 @@ func ensureEncryptionSecret(ctx context.Context, c client.Client, path string, c
 		return fmt.Errorf("secret %s/%s holds another encryption config than %s", encryption.SecretNamespace, encryption.SecretName, path)
 	}
 	return nil
+}
+
+func FetchEncryptionFile(ctx context.Context, token k0s.Token, newClient func(*rest.Config) (client.Client, error)) ([]byte, error) {
+	ctx, cancel := context.WithTimeout(ctx, joinFetchTimeout)
+	defer cancel()
+	ca, err := k0s.FetchCA(ctx, token.K0sToken)
+	if err != nil {
+		return nil, fmt.Errorf("fetch the cluster CA: %w", err)
+	}
+	content, err := readEncryptionSecret(ctx, ca, token.VIP, newClient)
+	if err != nil {
+		return nil, fmt.Errorf("read the encryption config: %w", err)
+	}
+	return content, nil
+}
+
+func readEncryptionSecret(ctx context.Context, ca k0s.CA, vip string, newClient func(*rest.Config) (client.Client, error)) ([]byte, error) {
+	config, err := encryption.JoinClientConfig(ca, vip, time.Now())
+	if err != nil {
+		return nil, err
+	}
+	c, err := newClient(config)
+	if err != nil {
+		return nil, err
+	}
+	return encryption.ReadSecret(ctx, c)
+}
+
+func fetchJoinEncryption(ctx context.Context, stdout io.Writer, deps InitDeps, token k0s.Token, dataDir string) ([]byte, error) {
+	named, err := k0s.APIExtraArg(token.K0sConfig, encryption.ArgName)
+	if err != nil || named == "" {
+		return nil, err
+	}
+	step(stdout, "secrets encryption")
+	content, err := FetchEncryptionFile(ctx, token, deps.NewConfigClient)
+	if err != nil {
+		return nil, err
+	}
+	if err := requireEncryptionSockets(deps.Stat, deps.Root, encryption.Path(dataDir), content); err != nil {
+		return nil, err
+	}
+	return content, nil
 }
