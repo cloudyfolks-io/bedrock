@@ -594,27 +594,12 @@ func TestRunJoinFetchesEncryptionFile(t *testing.T) {
 		t.Fatalf("secret read host %q", seen[0].Host)
 	}
 	block, _ := pem.Decode(seen[0].CertData)
+	if block == nil {
+		t.Fatalf("join client certificate is not PEM: %q", seen[0].CertData)
+	}
 	cert, err := x509.ParseCertificate(block.Bytes)
 	if err != nil || cert.Subject.CommonName != encryption.JoinUser {
 		t.Fatalf("join certificate %v %v", cert, err)
-	}
-}
-
-func TestJoinTokenHoldsNoEncryptionKey(t *testing.T) {
-	_, dataDir, _ := controllerJoinHost(t)
-	encoded := encryptionJoinToken(t, []string{"control-plane"}, "k0s-token", encryption.Args(dataDir))
-	token, err := k0s.DecodeToken(encoded)
-	if err != nil {
-		t.Fatal(err)
-	}
-	key := base64.StdEncoding.EncodeToString(testEncryptionKey)
-	if bytes.Contains(token.K0sConfig, []byte(key)) || bytes.Contains(token.K0sConfig, testEncryptionContent(t)) {
-		t.Fatalf("k0s config holds the key: %s", token.K0sConfig)
-	}
-	for name, file := range token.AuthnFiles {
-		if bytes.Contains(file, []byte(key)) {
-			t.Fatalf("%s holds the key", name)
-		}
 	}
 }
 

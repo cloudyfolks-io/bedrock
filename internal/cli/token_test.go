@@ -3,17 +3,20 @@ package cli
 import (
 	"bytes"
 	"context"
+	"encoding/base64"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
+	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 
 	"github.com/cloudyfolks-io/bedrock/api/v1alpha1"
+	"github.com/cloudyfolks-io/bedrock/internal/encryption"
 	"github.com/cloudyfolks-io/bedrock/internal/host"
 	"github.com/cloudyfolks-io/bedrock/internal/k0s"
 )
@@ -60,10 +63,13 @@ func TestBuildTokenCarriesMirror(t *testing.T) {
 	}
 }
 
-func tokenClient(t *testing.T) client.Client {
+func tokenClient(t *testing.T, extra ...client.Object) client.Client {
 	t.Helper()
 	scheme := runtime.NewScheme()
 	if err := v1alpha1.AddToScheme(scheme); err != nil {
+		t.Fatal(err)
+	}
+	if err := corev1.AddToScheme(scheme); err != nil {
 		t.Fatal(err)
 	}
 	cluster := &v1alpha1.Cluster{
@@ -72,7 +78,7 @@ func tokenClient(t *testing.T) client.Client {
 		Status:     v1alpha1.ClusterStatus{Version: "v0.1.0-test"},
 	}
 	rel := &v1alpha1.Release{ObjectMeta: metav1.ObjectMeta{Name: "v0.1.0-test"}, Spec: v1alpha1.ReleaseSpec{Version: "v0.1.0-test", K0sVersion: "v1.36.3+k0s.0"}}
-	return fake.NewClientBuilder().WithScheme(scheme).WithObjects(cluster, rel).WithStatusSubresource(cluster).Build()
+	return fake.NewClientBuilder().WithScheme(scheme).WithObjects(append([]client.Object{cluster, rel}, extra...)...).WithStatusSubresource(cluster).Build()
 }
 
 func TestControllerTokenCarriesAuthnFiles(t *testing.T) {
@@ -109,5 +115,64 @@ func TestControllerTokenCarriesAuthnFiles(t *testing.T) {
 	}
 	if _, err := buildToken(context.Background(), c, k0sClient, []string{v1alpha1.RoleControlPlane}, "1h", k0sConfig, t.TempDir()); err == nil || !strings.Contains(err.Error(), "authentication.yaml") {
 		t.Fatalf("a controller without the files cannot make a controller token: %v", err)
+	}
+}
+
+func TestControllerTokenHoldsNoEncryptionKey(t *testing.T) {
+	content := testEncryptionContent(t)
+	dir := t.TempDir()
+	dataDir := filepath.Join(dir, "k0s")
+	k0sConfig, err := k0s.RenderConfig(k0s.Config{VIP: "10.0.10.10", SANs: []string{"10.0.10.10"}, PodCIDR: "10.16.0.0/16", ServiceCIDR: "10.96.0.0/12", APIExtraArgs: encryption.Args(dataDir)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	k0sConfigPath := filepath.Join(dir, "k0s.yaml")
+	authnDir := filepath.Join(dir, "authn")
+	for _, path := range []string{authnDir, filepath.Dir(encryption.Path(dataDir))} {
+		if err := os.MkdirAll(path, 0o700); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for path, file := range map[string][]byte{
+		k0sConfigPath: k0sConfig,
+		filepath.Join(authnDir, "authentication.yaml"): []byte("authn-config"),
+		filepath.Join(authnDir, "webhook.kubeconfig"):  []byte("webhook-config"),
+		encryption.Path(dataDir):                       content,
+	} {
+		if err := os.WriteFile(path, file, 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	e := &host.FakeExec{Responses: map[string]string{"/usr/local/bin/k0s token create --role controller --expiry 1h": "tok\n"}}
+	token, err := buildToken(context.Background(), tokenClient(t, encryption.Secret(content)), k0s.Client{Exec: e, Binary: "/usr/local/bin/k0s"}, []string{v1alpha1.RoleControlPlane}, "1h", k0sConfigPath, authnDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	encoded, err := k0s.EncodeToken(token)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rawJSON, err := base64.RawURLEncoding.DecodeString(encoded)
+	if err != nil {
+		t.Fatal(err)
+	}
+	decoded, err := k0s.DecodeToken(encoded)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if named, err := k0s.APIExtraArg(decoded.K0sConfig, encryption.ArgName); err != nil || named != encryption.Path(dataDir) {
+		t.Fatalf("the token config must name the encryption file: %q %v", named, err)
+	}
+	haystacks := map[string][]byte{"encoded token": []byte(encoded), "token json": rawJSON, "k0s config": decoded.K0sConfig, "k0s token": []byte(decoded.K0sToken)}
+	for name, file := range decoded.AuthnFiles {
+		haystacks["authn file "+name] = file
+	}
+	needles := map[string][]byte{"encryption config": content, "base64 key": []byte(base64.StdEncoding.EncodeToString(testEncryptionKey)), "key bytes": testEncryptionKey}
+	for haystackName, haystack := range haystacks {
+		for needleName, needle := range needles {
+			if bytes.Contains(haystack, needle) {
+				t.Fatalf("%s holds the %s", haystackName, needleName)
+			}
+		}
 	}
 }
