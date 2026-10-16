@@ -128,6 +128,7 @@ tenancy_projects() {
   expect_equal 10.100.0.0/24 "$(kubectl get project "$PROJECT" -o jsonpath='{.status.subnet}')" "project status subnet"
   kubectl -n "$NS" get applicationawareresourcequotas.aaq.kubevirt.io project-quota -o jsonpath='{.spec.hard}' | grep -q 'requests.cpu'
   expect_equal 4 "$(kubectl -n "$NS" get applicationawareresourcequotas.aaq.kubevirt.io project-quota -o jsonpath='{.spec.hard.requests\.cpu}')" "aaq cpu"
+  expect_equal 5 "$(kubectl -n "$NS" get applicationawareresourcequotas.aaq.kubevirt.io project-quota -o json | python3 -c 'import json,sys; print(json.load(sys.stdin)["spec"]["hard"]["count/virtualmachines.bedrock.cloudyfolks.io"])')" "aaq vm count limit"
   kubectl -n "$NS" get rolebinding bedrock-project-owner bedrock-project-editor bedrock-project-viewer
   kubectl -n "$NS" get networkpolicy default
   project_manifest data '[]' '{cpu: "4", memory: 8Gi, storage: 100Gi}' | as_user alice create -f -

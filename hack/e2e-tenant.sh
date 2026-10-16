@@ -191,6 +191,7 @@ steps=(
   panel_login_and_stream
   metering_usage
   metering_series
+  metering_proxy_range
   metering_logs
   addons_grafana_and_alerts
   cascade_project
