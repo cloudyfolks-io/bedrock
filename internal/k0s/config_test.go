@@ -58,3 +58,25 @@ func TestRenderConfigMergesAPIExtraArgs(t *testing.T) {
 		t.Fatalf("no authn flags without APIExtraArgs: %s", plain)
 	}
 }
+
+func TestAPIExtraArg(t *testing.T) {
+	withArg, err := RenderConfig(Config{APIExtraArgs: map[string]string{"encryption-provider-config": "/x"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := APIExtraArg(withArg, "encryption-provider-config")
+	if err != nil || got != "/x" {
+		t.Fatalf("got %q err %v", got, err)
+	}
+	plain, err := RenderConfig(Config{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err = APIExtraArg(plain, "encryption-provider-config")
+	if err != nil || got != "" {
+		t.Fatalf("got %q err %v", got, err)
+	}
+	if _, err := APIExtraArg([]byte("{"), "encryption-provider-config"); err == nil {
+		t.Fatal("want parse error")
+	}
+}

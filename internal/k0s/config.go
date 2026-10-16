@@ -1,6 +1,8 @@
 package k0s
 
 import (
+	"fmt"
+
 	sigyaml "sigs.k8s.io/yaml"
 )
 
@@ -53,4 +55,20 @@ func apiExtraArgs(extra map[string]string) map[string]any {
 		args[name] = value
 	}
 	return args
+}
+
+type configExtraArgs struct {
+	Spec struct {
+		API struct {
+			ExtraArgs map[string]string `json:"extraArgs"`
+		} `json:"api"`
+	} `json:"spec"`
+}
+
+func APIExtraArg(config []byte, name string) (string, error) {
+	var doc configExtraArgs
+	if err := sigyaml.Unmarshal(config, &doc); err != nil {
+		return "", fmt.Errorf("parse k0s config: %w", err)
+	}
+	return doc.Spec.API.ExtraArgs[name], nil
 }
