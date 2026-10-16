@@ -54,6 +54,7 @@ dump() {
     dmesg | grep -i -E 'oom|out of memory' | tail -20 || true
     echo "--- vmis"
     kubectl get vmi -A -o wide || true
+    dump_nmstate
     if [ -n "$assert_authn" ]; then
       echo "--- authn"
       kubectl -n bedrock-system get deploy/bedrock-authn -o wide || true
@@ -278,5 +279,10 @@ kubectl wait --for=condition=Ready node --all --timeout=300s
 grep -qx 'server = "https://127.0.0.1:1"' /etc/k0s/containerd.d/certs.d/_default/hosts.toml
 if kubectl get pods -A -o jsonpath='{range .items[*]}{.status.containerStatuses[*].state.waiting.reason}{"\n"}{end}' | grep -qE 'ImagePullBackOff|ErrImagePull'; then
   exit 1
+fi
+if [ -f /var/lib/k0s/pki/encryption.yaml ]; then
+  kubectl -n default create secret generic e2e-encryption --from-literal=a=b
+  assert_secret_encrypted default e2e-encryption
+  kubectl -n default delete secret e2e-encryption
 fi
 echo "e2e-upgrade passed"

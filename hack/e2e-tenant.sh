@@ -88,6 +88,7 @@ dump_workloads() {
   kubectl -n rook-ceph logs deploy/rook-ceph-operator --tail=150 || true
   kubectl -n objectstorage-e2e get jobs,pods -o wide || true
   kubectl -n objectstorage-e2e logs -l job-name --tail=50 --prefix || true
+  dump_nmstate
   echo "--- monitoring and logging"
   kubectl -n monitoring get pods,pvc,addons -o wide || true
   kubectl get addons -o yaml || true
@@ -126,7 +127,7 @@ install -m 0755 "$bin" /usr/local/bin/bedrock
 k0s ctr --namespace k8s.io images import "$cache/seaweedfs.tar"
 k0s ctr --namespace k8s.io images import "$cache/aws-cli.tar"
 
-for step_file in addons tenancy images compute network objectstorage backup panel metering cascade; do
+for step_file in encryption addons tenancy images compute network objectstorage backup panel metering cascade; do
   source "$steps_dir/$step_file.sh"
 done
 
@@ -154,6 +155,7 @@ select_steps() {
 }
 
 steps=(
+  encryption_join_fetch
   addons_seeded
   addons_kata
   addons_loki_off

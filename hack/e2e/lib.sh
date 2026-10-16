@@ -18,6 +18,17 @@ dump_logs() {
   kubectl -n "$namespace" logs -l "$selector" --tail=200 --all-containers --prefix || true
 }
 
+dump_nmstate() {
+  local pod
+  echo "--- nmstate"
+  kubectl -n nmstate get pods,ds,deploy -o wide || true
+  kubectl -n nmstate describe pods || true
+  for pod in $(kubectl -n nmstate get pods -o name 2>/dev/null || true); do
+    kubectl -n nmstate logs "$pod" --all-containers --prefix --tail=100 || true
+    kubectl -n nmstate logs "$pod" --all-containers --prefix --tail=100 --previous || true
+  done
+}
+
 retry_until() {
   local timeout=$1 deadline
   shift
@@ -296,6 +307,18 @@ assert_storage_ready() {
     kubectl get storageclass "$class"
   done
   kubectl get volumesnapshotclass block
+}
+
+etcd_value() {
+  local key_base64
+  key_base64=$(printf '%s' "$1" | base64 | tr -d '\n')
+  curl -sf --cacert /var/lib/k0s/pki/etcd/ca.crt --cert /var/lib/k0s/pki/apiserver-etcd-client.crt --key /var/lib/k0s/pki/apiserver-etcd-client.key \
+    -X POST -d "{\"key\": \"$key_base64\"}" https://127.0.0.1:2379/v3/kv/range |
+    python3 -c 'import base64,json,sys; sys.stdout.buffer.write(base64.b64decode(json.load(sys.stdin)["kvs"][0]["value"]))'
+}
+
+assert_secret_encrypted() {
+  expect_equal 'k8s:enc:aesgcm:v1:key1:' "$(etcd_value "/registry/secrets/$1/$2" | head -c 23)" "secret $1/$2 is encrypted in etcd"
 }
 
 underlay_remove() {

@@ -58,7 +58,7 @@ dump() {
     kubectl -n kubevirt get pods -o wide || true
     kubectl -n cdi get pods -o wide || true
     kubectl -n traefik get pods,svc -o wide || true
-    kubectl -n nmstate get pods,ds -o wide || true
+    dump_nmstate
     kubectl -n kube-system get ds kube-multus-ds -o wide || true
     kubectl -n kubevirt get kubevirt kubevirt -o yaml || true
     kubectl get cdi cdi -o yaml || true
@@ -151,6 +151,9 @@ ip -4 addr show dev "$iface" | grep -q "$vip"
 kubectl -n kube-system rollout status daemonset/kube-vip --timeout=120s
 kubectl get cluster cluster -o jsonpath='{.status.version}' | grep -qx "$version"
 kubectl wait --for=condition=Available cluster/cluster --timeout=120s
+expect_equal '600 kube-apiserver' "$(stat -c '%a %U' /var/lib/k0s/pki/encryption.yaml)" "encryption file mode and owner"
+expect_equal 751 "$(stat -c '%a' /var/lib/k0s/pki)" "pki directory mode"
+assert_secret_encrypted kube-system bedrock-secrets-encryption
 case "$image" in
 localhost:*) test "$(kubectl -n bedrock-system get deploy/bedrock-operator -o jsonpath='{.spec.template.spec.containers[0].image}')" = "$image" ;;
 esac
