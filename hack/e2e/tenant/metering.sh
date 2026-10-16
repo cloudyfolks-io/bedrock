@@ -57,7 +57,7 @@ proxy_range_has_points() {
 
 metering_proxy_range() {
   local answer body
-  expect_equal 9090 "$(kubectl -n monitoring get svc prometheus-operated -o jsonpath='{.spec.ports[?(@.name=="web")].port}')" "prometheus service port"
+  expect_equal 9090 "$(kubectl -n monitoring get svc prometheus-operated -o jsonpath='{.spec.ports[?(@.name=="http-web")].port}')" "prometheus service port"
   retry_until 300 proxy_range_has_points || {
     answer=$(proxy_range_request || true)
     body=${answer%$'\n'*}
