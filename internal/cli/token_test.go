@@ -121,23 +121,19 @@ func TestControllerTokenCarriesAuthnFiles(t *testing.T) {
 func TestControllerTokenHoldsNoEncryptionKey(t *testing.T) {
 	content := testEncryptionContent(t)
 	dir := t.TempDir()
-	dataDir := filepath.Join(dir, "k0s")
-	k0sConfig, err := k0s.RenderConfig(k0s.Config{VIP: "10.0.10.10", SANs: []string{"10.0.10.10"}, PodCIDR: "10.16.0.0/16", ServiceCIDR: "10.96.0.0/12", APIExtraArgs: encryption.Args(dataDir)})
+	k0sConfig, err := k0s.RenderConfig(k0s.Config{VIP: "10.0.10.10", SANs: []string{"10.0.10.10"}, PodCIDR: "10.16.0.0/16", ServiceCIDR: "10.96.0.0/12", APIExtraArgs: encryption.Args()})
 	if err != nil {
 		t.Fatal(err)
 	}
 	k0sConfigPath := filepath.Join(dir, "k0s.yaml")
 	authnDir := filepath.Join(dir, "authn")
-	for _, path := range []string{authnDir, filepath.Dir(encryption.Path(dataDir))} {
-		if err := os.MkdirAll(path, 0o700); err != nil {
-			t.Fatal(err)
-		}
+	if err := os.MkdirAll(authnDir, 0o700); err != nil {
+		t.Fatal(err)
 	}
 	for path, file := range map[string][]byte{
 		k0sConfigPath: k0sConfig,
 		filepath.Join(authnDir, "authentication.yaml"): []byte("authn-config"),
 		filepath.Join(authnDir, "webhook.kubeconfig"):  []byte("webhook-config"),
-		encryption.Path(dataDir):                       content,
 	} {
 		if err := os.WriteFile(path, file, 0o600); err != nil {
 			t.Fatal(err)
@@ -160,7 +156,7 @@ func TestControllerTokenHoldsNoEncryptionKey(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if named, err := k0s.APIExtraArg(decoded.K0sConfig, encryption.ArgName); err != nil || named != encryption.Path(dataDir) {
+	if named, err := k0s.APIExtraArg(decoded.K0sConfig, encryption.ArgName); err != nil || named != encryption.File {
 		t.Fatalf("the token config must name the encryption file: %q %v", named, err)
 	}
 	haystacks := map[string][]byte{"encoded token": []byte(encoded), "token json": rawJSON, "k0s config": decoded.K0sConfig, "k0s token": []byte(decoded.K0sToken)}

@@ -151,8 +151,8 @@ ip -4 addr show dev "$iface" | grep -q "$vip"
 kubectl -n kube-system rollout status daemonset/kube-vip --timeout=120s
 kubectl get cluster cluster -o jsonpath='{.status.version}' | grep -qx "$version"
 kubectl wait --for=condition=Available cluster/cluster --timeout=120s
-expect_equal '600 kube-apiserver' "$(stat -c '%a %U' /var/lib/k0s/pki/encryption.yaml)" "encryption file mode and owner"
-expect_equal 751 "$(stat -c '%a' /var/lib/k0s/pki)" "pki directory mode"
+expect_equal '600 kube-apiserver' "$(stat -c '%a %U' /etc/bedrock/encryption/encryption.yaml)" "encryption file mode and owner"
+expect_equal '700 kube-apiserver' "$(stat -c '%a %U' /etc/bedrock/encryption)" "encryption directory mode and owner"
 assert_secret_encrypted kube-system bedrock-secrets-encryption
 case "$image" in
 localhost:*) test "$(kubectl -n bedrock-system get deploy/bedrock-operator -o jsonpath='{.spec.template.spec.containers[0].image}')" = "$image" ;;

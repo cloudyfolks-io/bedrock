@@ -563,8 +563,8 @@ func TestRunJoinFetchesEncryptionFile(t *testing.T) {
 	root, dataDir, e := controllerJoinHost(t)
 	content := testEncryptionContent(t)
 	k0sToken, requests := startJoinAPI(t, http.StatusOK, newJoinCA(t))
-	token := encryptionJoinToken(t, []string{"control-plane"}, k0sToken, encryption.Args(dataDir))
-	path := encryption.Path(dataDir)
+	token := encryptionJoinToken(t, []string{"control-plane"}, k0sToken, encryption.Args())
+	path := filepath.Join(root, encryption.File)
 	present := false
 	var seen []*rest.Config
 	code, stdout, stderr := runJoinWithToken(t, root, dataDir, filesAtStart{FakeExec: e, paths: []string{path}, present: &present}, token, configClient(t, &seen, encryption.Secret(content)))
@@ -581,8 +581,8 @@ func TestRunJoinFetchesEncryptionFile(t *testing.T) {
 	if info, err := os.Stat(path); err != nil || info.Mode().Perm() != 0o600 {
 		t.Fatalf("encryption file %v %v", info, err)
 	}
-	if info, err := os.Stat(filepath.Dir(path)); err != nil || info.Mode().Perm() != 0o751 {
-		t.Fatalf("pki dir %v %v", info, err)
+	if info, err := os.Stat(filepath.Dir(path)); err != nil || info.Mode().Perm() != 0o700 {
+		t.Fatalf("encryption dir %v %v", info, err)
 	}
 	if !strings.Contains(stdout, "==> secrets encryption\n") {
 		t.Fatalf("stdout lacks the encryption step: %s", stdout)
@@ -603,13 +603,13 @@ func TestRunJoinFetchesEncryptionFile(t *testing.T) {
 	}
 }
 
-func TestRunJoinRefusesAnotherEncryptionDataDir(t *testing.T) {
+func TestRunJoinRefusesAnotherEncryptionPath(t *testing.T) {
 	root, dataDir, e := controllerJoinHost(t)
 	k0sToken, requests := startJoinAPI(t, http.StatusOK, newJoinCA(t))
-	token := encryptionJoinToken(t, []string{"control-plane"}, k0sToken, map[string]string{encryption.ArgName: "/other/pki/encryption.yaml"})
+	token := encryptionJoinToken(t, []string{"control-plane"}, k0sToken, map[string]string{encryption.ArgName: "/var/lib/k0s/pki/encryption.yaml"})
 	var seen []*rest.Config
 	code, stdout, stderr := runJoinWithToken(t, root, dataDir, e, token, configClient(t, &seen))
-	want := "the cluster keeps its encryption config at /other/pki/encryption.yaml, join with --data-dir /other"
+	want := "the cluster keeps its encryption config at /var/lib/k0s/pki/encryption.yaml, this bedrock version expects /etc/bedrock/encryption/encryption.yaml"
 	if code != 1 || !strings.Contains(stderr, want) {
 		t.Fatalf("exit %d\nstdout %s\nstderr %s", code, stdout, stderr)
 	}
@@ -624,7 +624,7 @@ func TestRunJoinRefusesAnotherEncryptionDataDir(t *testing.T) {
 func TestRunJoinRefusedByJoinAPI(t *testing.T) {
 	root, dataDir, e := controllerJoinHost(t)
 	k0sToken, _ := startJoinAPI(t, http.StatusUnauthorized, k0s.CA{})
-	token := encryptionJoinToken(t, []string{"control-plane"}, k0sToken, encryption.Args(dataDir))
+	token := encryptionJoinToken(t, []string{"control-plane"}, k0sToken, encryption.Args())
 	var seen []*rest.Config
 	code, stdout, stderr := runJoinWithToken(t, root, dataDir, e, token, configClient(t, &seen))
 	if code != 1 || !strings.Contains(stderr, "fetch the cluster CA") || !strings.Contains(stderr, "401") {
@@ -641,7 +641,7 @@ func TestRunJoinRefusedByJoinAPI(t *testing.T) {
 func TestRunJoinMissingEncryptionSecret(t *testing.T) {
 	root, dataDir, e := controllerJoinHost(t)
 	k0sToken, _ := startJoinAPI(t, http.StatusOK, newJoinCA(t))
-	token := encryptionJoinToken(t, []string{"control-plane"}, k0sToken, encryption.Args(dataDir))
+	token := encryptionJoinToken(t, []string{"control-plane"}, k0sToken, encryption.Args())
 	var seen []*rest.Config
 	code, stdout, stderr := runJoinWithToken(t, root, dataDir, e, token, configClient(t, &seen))
 	if code != 1 || !strings.Contains(stderr, "kube-system/bedrock-secrets-encryption") {
@@ -650,7 +650,7 @@ func TestRunJoinMissingEncryptionSecret(t *testing.T) {
 	if k0sInstallCalled(e) {
 		t.Fatalf("k0s must not be installed without the encryption secret: calls %v", e.Calls)
 	}
-	if _, err := os.Stat(encryption.Path(dataDir)); !os.IsNotExist(err) {
+	if _, err := os.Stat(filepath.Join(root, encryption.File)); !os.IsNotExist(err) {
 		t.Fatalf("no encryption file may exist: %v", err)
 	}
 }
@@ -666,7 +666,7 @@ func TestRunJoinWithoutEncryption(t *testing.T) {
 	if requests.Load() != 0 {
 		t.Fatalf("join api requests %d, want none", requests.Load())
 	}
-	if _, err := os.Stat(encryption.Path(dataDir)); !os.IsNotExist(err) {
+	if _, err := os.Stat(filepath.Join(root, encryption.File)); !os.IsNotExist(err) {
 		t.Fatalf("no encryption file may exist: %v", err)
 	}
 }
@@ -678,7 +678,7 @@ func TestRunJoinWorkerSkipsEncryption(t *testing.T) {
 	installArgs := k0s.InstallArgs(k0s.InstallOptions{Role: "worker", Force: true, TokenFile: filepath.Join(root, "etc", "k0s", "join-token"), Labels: roles.Labels([]string{"workload"}), KubeletExtraArgs: []string{"--node-status-update-frequency=4s"}, DataDir: dataDir, KubeletRootDir: k0s.DefaultKubeletRootDir})
 	e.Responses["/usr/local/bin/k0s "+strings.Join(installArgs, " ")] = ""
 	k0sToken, requests := startJoinAPI(t, http.StatusOK, newJoinCA(t))
-	token := encryptionJoinToken(t, []string{"workload"}, k0sToken, encryption.Args(dataDir))
+	token := encryptionJoinToken(t, []string{"workload"}, k0sToken, encryption.Args())
 	code, stdout, stderr := runJoinWithToken(t, root, dataDir, e, token, nil)
 	if code != 0 {
 		t.Fatalf("exit %d\nstdout %s\nstderr %s", code, stdout, stderr)
@@ -686,7 +686,7 @@ func TestRunJoinWorkerSkipsEncryption(t *testing.T) {
 	if requests.Load() != 0 {
 		t.Fatalf("join api requests %d, want none", requests.Load())
 	}
-	if _, err := os.Stat(encryption.Path(dataDir)); !os.IsNotExist(err) {
+	if _, err := os.Stat(filepath.Join(root, encryption.File)); !os.IsNotExist(err) {
 		t.Fatalf("no encryption file may exist: %v", err)
 	}
 }
@@ -696,7 +696,7 @@ func TestRunJoinRunningNodeSkipsEncryptionFetch(t *testing.T) {
 	dataDir := filepath.Join(root, "var", "lib", "k0s")
 	e.Responses["/usr/local/bin/k0s status --data-dir "+dataDir] = ""
 	k0sToken, requests := startJoinAPI(t, http.StatusUnauthorized, k0s.CA{})
-	token := encryptionJoinToken(t, []string{"control-plane"}, k0sToken, encryption.Args(dataDir))
+	token := encryptionJoinToken(t, []string{"control-plane"}, k0sToken, encryption.Args())
 	code, stdout, stderr := runJoinWithToken(t, root, dataDir, e, token, nil)
 	if code != 0 {
 		t.Fatalf("exit %d\nstdout %s\nstderr %s", code, stdout, stderr)

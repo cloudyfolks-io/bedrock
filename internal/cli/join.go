@@ -16,7 +16,6 @@ import (
 
 	"github.com/cloudyfolks-io/bedrock/api/v1alpha1"
 	"github.com/cloudyfolks-io/bedrock/internal/authn/apiserver"
-	"github.com/cloudyfolks-io/bedrock/internal/encryption"
 	"github.com/cloudyfolks-io/bedrock/internal/host"
 	"github.com/cloudyfolks-io/bedrock/internal/k0s"
 	"github.com/cloudyfolks-io/bedrock/internal/preflight"
@@ -73,7 +72,7 @@ func RunJoin(ctx context.Context, args []string, deps InitDeps, stdout, stderr i
 		}
 	}
 	if hasRole(nodeRoles, v1alpha1.RoleControlPlane) {
-		if err := requireEncryptionDataDir(token.K0sConfig, o.dataDir); err != nil {
+		if err := requireEncryptionPath(token.K0sConfig); err != nil {
 			return fail(stderr, err)
 		}
 	}
@@ -147,7 +146,7 @@ func RunJoin(ctx context.Context, args []string, deps InitDeps, stdout, stderr i
 			return fail(stderr, err)
 		}
 		if !running {
-			encryptionFile, err = fetchJoinEncryption(ctx, stdout, deps, token, o.dataDir)
+			encryptionFile, err = fetchJoinEncryption(ctx, stdout, deps, token)
 			if err != nil {
 				return fail(stderr, err)
 			}
@@ -172,7 +171,7 @@ func RunJoin(ctx context.Context, args []string, deps InitDeps, stdout, stderr i
 				return fail(stderr, err)
 			}
 			if encryptionFile != nil {
-				if err := installEncryptionFile(encryption.Path(o.dataDir), encryptionFile); err != nil {
+				if err := installEncryptionFile(deps.Root, encryptionFile); err != nil {
 					return fail(stderr, err)
 				}
 			}

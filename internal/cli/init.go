@@ -196,8 +196,7 @@ func RunInit(ctx context.Context, args []string, deps InitDeps, stdout, stderr i
 	}
 
 	configPath := filepath.Join(deps.Root, "etc", "k0s", "k0s.yaml")
-	encryptionPath := encryption.Path(o.dataDir)
-	encryptionInput, err := readEncryptionFacts(encryptionPath, configPath, o.dataDir, running)
+	encryptionInput, err := readEncryptionFacts(deps.Root, configPath, o.dataDir, running)
 	if err != nil {
 		return fail(stderr, err)
 	}
@@ -208,7 +207,7 @@ func RunInit(ctx context.Context, args []string, deps InitDeps, stdout, stderr i
 		return fail(stderr, err)
 	}
 	if encryptionFile != nil {
-		if err := requireEncryptionSockets(deps.Stat, deps.Root, encryptionPath, encryptionFile); err != nil {
+		if err := requireEncryptionSockets(deps.Stat, deps.Root, encryptionFile); err != nil {
 			return fail(stderr, err)
 		}
 	}
@@ -235,7 +234,7 @@ func RunInit(ctx context.Context, args []string, deps InitDeps, stdout, stderr i
 	step(stdout, "writing k0s.yaml")
 	var encryptionArgs map[string]string
 	if encryptionFile != nil {
-		encryptionArgs = encryption.Args(o.dataDir)
+		encryptionArgs = encryption.Args()
 	}
 	if err := writeK0sConfig(configPath, cfg, encryptionArgs); err != nil {
 		return fail(stderr, err)
@@ -267,8 +266,8 @@ func RunInit(ctx context.Context, args []string, deps InitDeps, stdout, stderr i
 		return fail(stderr, err)
 	}
 	if encryptionFile != nil {
-		step(stdout, "secrets encryption %s", encryptionPath)
-		if err := installEncryptionFile(encryptionPath, encryptionFile); err != nil {
+		step(stdout, "secrets encryption %s", encryption.File)
+		if err := installEncryptionFile(deps.Root, encryptionFile); err != nil {
 			return fail(stderr, err)
 		}
 	}
@@ -304,7 +303,7 @@ func RunInit(ctx context.Context, args []string, deps InitDeps, stdout, stderr i
 		return fail(stderr, err)
 	}
 	if encryptionFile != nil {
-		if err := ensureEncryptionSecret(ctx, c, encryptionPath, encryptionFile); err != nil {
+		if err := ensureEncryptionSecret(ctx, c, encryptionFile); err != nil {
 			return fail(stderr, err)
 		}
 	}

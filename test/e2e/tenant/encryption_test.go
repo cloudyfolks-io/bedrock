@@ -16,8 +16,6 @@ import (
 	"github.com/cloudyfolks-io/bedrock/internal/k0s"
 )
 
-const k0sDataDir = "/var/lib/k0s"
-
 func newPlainClient(config *rest.Config) (client.Client, error) {
 	return client.New(config, client.Options{})
 }
@@ -31,7 +29,7 @@ func TestJoinFetchesEncryption(t *testing.T) {
 	if err != nil {
 		t.Fatalf("fetch the encryption file: %v", err)
 	}
-	stored, err := os.ReadFile(encryption.Path(k0sDataDir))
+	stored, err := os.ReadFile(encryption.File)
 	if err != nil {
 		t.Fatalf("read the encryption file of the node: %v", err)
 	}

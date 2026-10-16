@@ -264,6 +264,26 @@ kubectl get cluster cluster -o jsonpath='{.status.conditions[?(@.type=="Availabl
 kubectl get cluster cluster -o jsonpath='{.status.conditions[?(@.type=="UpgradeBlocked")].reason}' | grep -qx Passed
 kubectl get cluster cluster -o jsonpath='{.status.backups[0].location}' | grep -q "^host:$node:/var/lib/bedrock/backups/bedrock-$VERSION_A-"
 ls /var/lib/bedrock/backups/bedrock-"$VERSION_A"-*.tar.gz
+if [ -f /etc/bedrock/encryption/encryption.yaml ]; then
+  python3 - /var/lib/bedrock/backups/bedrock-"$VERSION_A"-*.tar.gz <<'PY'
+import os
+import sys
+import tarfile
+
+newest = max(sys.argv[1:], key=os.path.getmtime)
+with tarfile.open(newest) as outer:
+    entries = outer.getnames()
+    k0s_backups = [name for name in entries if os.path.basename(name).startswith("k0s_backup_")]
+    for name in k0s_backups:
+        with tarfile.open(fileobj=outer.extractfile(name)) as inner:
+            entries += inner.getnames()
+if not k0s_backups:
+    sys.exit(newest + " holds no k0s backup archive")
+leaks = [name for name in entries if name.endswith("encryption.yaml")]
+if leaks:
+    sys.exit(newest + " holds the encryption key: " + ", ".join(leaks))
+PY
+fi
 /usr/local/bin/k0s version | grep -qx "$K0S_B"
 kubectl get host "$node" -o jsonpath='{.status.k0sVersion}' | grep -qx "$K0S_B"
 kubectl get host "$node" -o jsonpath='{.status.agentVersion}' | grep -qx "$VERSION_B"
@@ -285,7 +305,7 @@ grep -qx 'server = "https://127.0.0.1:1"' /etc/k0s/containerd.d/certs.d/_default
 if kubectl get pods -A -o jsonpath='{range .items[*]}{.status.containerStatuses[*].state.waiting.reason}{"\n"}{end}' | grep -qE 'ImagePullBackOff|ErrImagePull'; then
   exit 1
 fi
-if [ -f /var/lib/k0s/pki/encryption.yaml ]; then
+if [ -f /etc/bedrock/encryption/encryption.yaml ]; then
   kubectl -n default create secret generic e2e-encryption --from-literal=a=b
   assert_secret_encrypted default e2e-encryption
   kubectl -n default delete secret e2e-encryption

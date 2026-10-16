@@ -354,9 +354,10 @@ Each snapshot is a file on the host:
 /var/lib/bedrock/backups/etcd-<stamp>.tar.gz
 ```
 
-The file contains the k0s backup and the OVN databases. The host keeps the
-newest 7 snapshots. Backups of an upgrade (`bedrock-*.tar.gz`) are not
-touched.
+The file contains the k0s backup and the OVN databases. It does not contain
+the encryption key of the Secrets. See [Secrets at rest](secrets-at-rest.md).
+The host keeps the newest 7 snapshots. Backups of an upgrade
+(`bedrock-*.tar.gz`) are not touched.
 
 Snapshots stay on the host. They are not copied to the backup target. To
 protect them from the loss of a disk, copy the files off the host with your

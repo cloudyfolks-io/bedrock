@@ -52,7 +52,7 @@ func WriteFiles(dir string, files map[string][]byte, owner Owner) (bool, error) 
 	}
 	changed := false
 	for _, name := range slices.Sorted(maps.Keys(files)) {
-		written, err := WriteFile(filepath.Join(dir, name), files[name], owner)
+		written, err := writeFile(filepath.Join(dir, name), files[name], owner)
 		if err != nil {
 			return false, err
 		}
@@ -68,7 +68,7 @@ func traversableParent(parent string) error {
 	return os.Chmod(parent, parentMode)
 }
 
-func WriteFile(path string, content []byte, owner Owner) (bool, error) {
+func writeFile(path string, content []byte, owner Owner) (bool, error) {
 	current, err := os.ReadFile(path)
 	if err != nil && !errors.Is(err, fs.ErrNotExist) {
 		return false, err

@@ -115,12 +115,12 @@ func TestSocketPaths(t *testing.T) {
 	}
 }
 
-func TestPathAndArgs(t *testing.T) {
-	if got := Path("/var/lib/k0s"); got != "/var/lib/k0s/pki/encryption.yaml" {
-		t.Fatalf("Path = %q", got)
+func TestFileAndArgs(t *testing.T) {
+	if Dir != "/etc/bedrock/encryption" || File != "/etc/bedrock/encryption/encryption.yaml" {
+		t.Fatalf("Dir = %q, File = %q", Dir, File)
 	}
-	want := map[string]string{"encryption-provider-config": "/var/lib/k0s/pki/encryption.yaml"}
-	if got := Args("/var/lib/k0s"); !maps.Equal(got, want) {
+	want := map[string]string{"encryption-provider-config": "/etc/bedrock/encryption/encryption.yaml"}
+	if got := Args(); !maps.Equal(got, want) {
 		t.Fatalf("Args = %v", got)
 	}
 }

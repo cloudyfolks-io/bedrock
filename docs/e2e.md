@@ -97,15 +97,15 @@ The jobs check this in three places.
 
 | Job | Check |
 | --- | --- |
-| `hack/e2e-init.sh` | The file `/var/lib/k0s/pki/encryption.yaml` has mode `600` and owner `kube-apiserver`. The directory `/var/lib/k0s/pki` keeps mode `751`. The Secret `kube-system/bedrock-secrets-encryption` is encrypted in etcd. |
-| `hack/e2e-upgrade.sh` | After the upgrade, the script creates the Secret `default/e2e-encryption` and checks that etcd holds it encrypted. The script deletes the Secret. |
+| `hack/e2e-init.sh` | The file `/etc/bedrock/encryption/encryption.yaml` has mode `600` and owner `kube-apiserver`. The directory `/etc/bedrock/encryption` has mode `700` and owner `kube-apiserver`. The Secret `kube-system/bedrock-secrets-encryption` is encrypted in etcd. |
+| `hack/e2e-upgrade.sh` | The upgrade backup holds no entry that ends in `encryption.yaml`, in the outer archive and in the k0s backup inside it. After the upgrade, the script creates the Secret `default/e2e-encryption` and checks that etcd holds it encrypted. The script deletes the Secret. |
 | `hack/e2e-tenant.sh` | The step `encryption_join_fetch` creates a control-plane token. The test `TestJoinFetchesEncryption` fetches the encryption file with the same function as `bedrock join`. The test compares it with the file on the node. |
 
 The function `assert_secret_encrypted` in `hack/e2e/lib.sh` reads the stored value of the Secret from etcd.
 It uses the JSON gateway `https://127.0.0.1:2379/v3/kv/range` and the client certificate of the API server.
 It requires the prefix `k8s:enc:aesgcm:v1:key1:` on the stored value.
 
-The upgrade script checks the encryption only when `/var/lib/k0s/pki/encryption.yaml` exists.
+The upgrade script checks the encryption only when `/etc/bedrock/encryption/encryption.yaml` exists.
 The jobs `e2e-upgrade-from-main` and `e2e-upgrade-from-authn` start from releases without encryption.
 The upgrade does not add encryption to these clusters, so the jobs skip this check.
 The job `e2e-upgrade-abort` ends at the rollback, before this check.

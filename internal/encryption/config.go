@@ -5,7 +5,6 @@ import (
 	"encoding/base64"
 	"fmt"
 	"io"
-	"path/filepath"
 	"slices"
 	"strings"
 
@@ -19,7 +18,9 @@ import (
 )
 
 const (
+	Dir             = "/etc/bedrock/encryption"
 	FileName        = "encryption.yaml"
+	File            = Dir + "/" + FileName
 	SecretNamespace = "kube-system"
 	SecretName      = "bedrock-secrets-encryption"
 	SecretKey       = "encryption.yaml"
@@ -34,12 +35,8 @@ const (
 	unixScheme      = "unix://"
 )
 
-func Path(dataDir string) string {
-	return filepath.Join(dataDir, "pki", FileName)
-}
-
-func Args(dataDir string) map[string]string {
-	return map[string]string{ArgName: Path(dataDir)}
+func Args() map[string]string {
+	return map[string]string{ArgName: File}
 }
 
 func NewConfig(random io.Reader, kms *v1alpha1.KMSSpec) ([]byte, error) {

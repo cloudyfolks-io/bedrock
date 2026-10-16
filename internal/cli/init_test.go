@@ -1135,6 +1135,10 @@ func initDataDir(run initRun) string {
 	return filepath.Join(run.root, "var", "lib", "k0s")
 }
 
+func initEncryptionPath(run initRun) string {
+	return filepath.Join(run.root, encryption.File)
+}
+
 func initK0sConfigPath(run initRun) string {
 	return filepath.Join(run.root, "etc", "k0s", "k0s.yaml")
 }
@@ -1168,8 +1172,8 @@ func writeKnownEncryptionFile(t *testing.T, run initRun) []byte {
 	if err != nil {
 		t.Fatal(err)
 	}
-	path := encryption.Path(initDataDir(run))
-	if err := os.MkdirAll(filepath.Dir(path), 0o751); err != nil {
+	path := initEncryptionPath(run)
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(path, known, 0o600); err != nil {
@@ -1180,7 +1184,7 @@ func writeKnownEncryptionFile(t *testing.T, run initRun) []byte {
 
 func assertNoEncryption(t *testing.T, run initRun) {
 	t.Helper()
-	if _, err := os.Stat(encryption.Path(initDataDir(run))); !os.IsNotExist(err) {
+	if _, err := os.Stat(initEncryptionPath(run)); !os.IsNotExist(err) {
 		t.Fatalf("the encryption file must not exist: %v", err)
 	}
 	if _, err := encryption.ReadSecret(context.Background(), run.c); !apierrors.IsNotFound(err) {
@@ -1198,31 +1202,34 @@ func assertEncryptionSecret(t *testing.T, run initRun, want []byte) {
 
 func TestRunInitWritesEncryptionFile(t *testing.T) {
 	run := prepareInit(t)
-	path := encryption.Path(initDataDir(run))
+	path := initEncryptionPath(run)
 	present := false
 	run.deps.Exec = filesAtStart{FakeExec: run.deps.Exec.(*host.FakeExec), paths: []string{path}, present: &present}
 	stdout := runPreparedInit(t, run)
 	if !present {
 		t.Fatal("the encryption file must exist before k0s starts")
 	}
-	if !strings.Contains(stdout, "==> secrets encryption "+path+"\n") {
+	if !strings.Contains(stdout, "==> secrets encryption "+encryption.File+"\n") {
 		t.Fatalf("stdout lacks the encryption step: %s", stdout)
 	}
 	info, err := os.Stat(path)
 	if err != nil || info.Mode().Perm() != 0o600 {
 		t.Fatalf("encryption file %v %v", info, err)
 	}
-	pki, err := os.Stat(filepath.Dir(path))
-	if err != nil || pki.Mode().Perm() != 0o751 {
-		t.Fatalf("pki dir %v %v", pki, err)
+	dir, err := os.Stat(filepath.Dir(path))
+	if err != nil || dir.Mode().Perm() != 0o700 {
+		t.Fatalf("encryption dir %v %v", dir, err)
+	}
+	if _, err := os.Stat(filepath.Join(initDataDir(run), "pki", encryption.FileName)); !os.IsNotExist(err) {
+		t.Fatalf("the key must stay out of the k0s pki directory: %v", err)
 	}
 	content := []byte(readInitFile(t, path))
 	sockets, err := encryption.SocketPaths(content)
 	if err != nil || len(sockets) != 0 || !strings.Contains(string(content), "aesgcm") {
 		t.Fatalf("want an aesgcm config without sockets, got %q %v %v", content, sockets, err)
 	}
-	if got := encryptionArg(t, run); got != path {
-		t.Fatalf("k0s.yaml names %q, want %q", got, path)
+	if got := encryptionArg(t, run); got != encryption.File {
+		t.Fatalf("k0s.yaml names %q, want %q", got, encryption.File)
 	}
 	assertEncryptionSecret(t, run, content)
 }
@@ -1231,7 +1238,7 @@ func TestRunInitKeepsEncryptionKey(t *testing.T) {
 	run := prepareInit(t)
 	known := writeKnownEncryptionFile(t, run)
 	runPreparedInit(t, run)
-	if got := readInitFile(t, encryption.Path(initDataDir(run))); got != string(known) {
+	if got := readInitFile(t, initEncryptionPath(run)); got != string(known) {
 		t.Fatalf("init replaced the key: %q", got)
 	}
 	assertEncryptionSecret(t, run, known)
@@ -1240,11 +1247,11 @@ func TestRunInitKeepsEncryptionKey(t *testing.T) {
 func TestRunInitRerunKeepsTheGeneratedKey(t *testing.T) {
 	run := prepareInit(t)
 	runPreparedInit(t, run)
-	first := readInitFile(t, encryption.Path(initDataDir(run)))
+	first := readInitFile(t, initEncryptionPath(run))
 	runPreparedInit(t, run)
 	markRunning(run)
 	runPreparedInit(t, run)
-	if got := readInitFile(t, encryption.Path(initDataDir(run))); got != first {
+	if got := readInitFile(t, initEncryptionPath(run)); got != first {
 		t.Fatalf("a re-run replaced the key: %q", got)
 	}
 	assertEncryptionSecret(t, run, []byte(first))
@@ -1263,11 +1270,11 @@ func TestRunInitRunningWithoutEncryption(t *testing.T) {
 
 func TestRunInitRunningLostEncryptionFile(t *testing.T) {
 	run := prepareInit(t)
-	writeInitK0sConfig(t, run, encryption.Args(initDataDir(run)))
+	writeInitK0sConfig(t, run, encryption.Args())
 	markRunning(run)
 	var out, errOut bytes.Buffer
 	code := RunInit(context.Background(), run.args, run.deps, &out, &errOut)
-	if code != 1 || !strings.Contains(errOut.String(), "restore it from a k0s backup, or read Secret kube-system/bedrock-secrets-encryption through another control-plane node") {
+	if code != 1 || !strings.Contains(errOut.String(), "copy it from another control-plane node or from your separate key copy, or read Secret kube-system/bedrock-secrets-encryption through another control-plane node") {
 		t.Fatalf("exit %d stderr %s", code, errOut.String())
 	}
 	assertNoEncryption(t, run)
@@ -1326,7 +1333,7 @@ func TestRunInitKMSWritesTheProviderOnly(t *testing.T) {
 	useKMSConfig(t, run)
 	run.deps.Stat = statWithSocket(run, fs.ModeSocket)
 	runPreparedInit(t, run)
-	content := []byte(readInitFile(t, encryption.Path(initDataDir(run))))
+	content := []byte(readInitFile(t, initEncryptionPath(run)))
 	sockets, err := encryption.SocketPaths(content)
 	if err != nil || !reflect.DeepEqual(sockets, []string{"/run/kms/kms.sock"}) || strings.Contains(string(content), "aesgcm") {
 		t.Fatalf("want a kms config on the socket, got %q %v %v", content, sockets, err)
@@ -1348,12 +1355,12 @@ func TestRunInitRunningRefusesAnUnnamedEncryptionFile(t *testing.T) {
 	markRunning(run)
 	var out, errOut bytes.Buffer
 	code := RunInit(context.Background(), run.args, run.deps, &out, &errOut)
-	path := encryption.Path(initDataDir(run))
+	path := encryption.File
 	want := path + " exists but k0s.yaml does not name it: add encryption-provider-config=" + path + " back to the api extraArgs of k0s.yaml if this node ever ran encrypted, remove the file only if it never did"
 	if code != 1 || !strings.Contains(errOut.String(), want) {
 		t.Fatalf("exit %d stderr %s", code, errOut.String())
 	}
-	if got := readInitFile(t, encryption.Path(initDataDir(run))); got != string(known) {
+	if got := readInitFile(t, initEncryptionPath(run)); got != string(known) {
 		t.Fatalf("init changed the file: %q", got)
 	}
 	if got := encryptionArg(t, run); got != "" {
@@ -1364,17 +1371,17 @@ func TestRunInitRunningRefusesAnUnnamedEncryptionFile(t *testing.T) {
 func TestRunInitRunningRefusesAnotherEncryptionPath(t *testing.T) {
 	run := prepareInit(t)
 	known := writeKnownEncryptionFile(t, run)
-	other := "/other/pki/encryption.yaml"
+	other := "/var/lib/k0s/pki/encryption.yaml"
 	writeInitK0sConfig(t, run, map[string]string{encryption.ArgName: other})
 	configBefore := readInitFile(t, initK0sConfigPath(run))
 	markRunning(run)
 	var out, errOut bytes.Buffer
 	code := RunInit(context.Background(), run.args, run.deps, &out, &errOut)
-	want := "k0s.yaml names " + other + " as the encryption config, not " + encryption.Path(initDataDir(run))
+	want := "k0s.yaml names " + other + " as the encryption config, not " + encryption.File
 	if code != 1 || !strings.Contains(errOut.String(), want) {
 		t.Fatalf("exit %d stderr %s", code, errOut.String())
 	}
-	if got := readInitFile(t, encryption.Path(initDataDir(run))); got != string(known) {
+	if got := readInitFile(t, initEncryptionPath(run)); got != string(known) {
 		t.Fatalf("init changed the file: %q", got)
 	}
 	if got := readInitFile(t, initK0sConfigPath(run)); got != configBefore {
@@ -1388,10 +1395,10 @@ func TestRunInitRunningRefusesAnotherEncryptionPath(t *testing.T) {
 func TestRunInitStoppedNodeKeepsLostEncryptionFile(t *testing.T) {
 	run := prepareInit(t)
 	makeEtcdDir(t, run)
-	writeInitK0sConfig(t, run, encryption.Args(initDataDir(run)))
+	writeInitK0sConfig(t, run, encryption.Args())
 	var out, errOut bytes.Buffer
 	code := RunInit(context.Background(), run.args, run.deps, &out, &errOut)
-	if code != 1 || !strings.Contains(errOut.String(), "restore it from a k0s backup, or read Secret kube-system/bedrock-secrets-encryption through another control-plane node") {
+	if code != 1 || !strings.Contains(errOut.String(), "copy it from another control-plane node or from your separate key copy, or read Secret kube-system/bedrock-secrets-encryption through another control-plane node") {
 		t.Fatalf("exit %d stderr %s", code, errOut.String())
 	}
 	assertNoEncryption(t, run)
@@ -1412,8 +1419,8 @@ func TestRunInitRefusesAnUnusableEncryptionFile(t *testing.T) {
 	for name, content := range map[string]string{"empty": "", "malformed": "resources: ["} {
 		t.Run(name, func(t *testing.T) {
 			run := prepareInit(t)
-			path := encryption.Path(initDataDir(run))
-			if err := os.MkdirAll(filepath.Dir(path), 0o751); err != nil {
+			path := initEncryptionPath(run)
+			if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 				t.Fatal(err)
 			}
 			if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
@@ -1421,7 +1428,7 @@ func TestRunInitRefusesAnUnusableEncryptionFile(t *testing.T) {
 			}
 			var out, errOut bytes.Buffer
 			code := RunInit(context.Background(), run.args, run.deps, &out, &errOut)
-			if code != 1 || !strings.Contains(errOut.String(), path) {
+			if code != 1 || !strings.Contains(errOut.String(), encryption.File) {
 				t.Fatalf("exit %d stderr %s", code, errOut.String())
 			}
 			if got := readInitFile(t, path); got != content {
@@ -1431,23 +1438,5 @@ func TestRunInitRefusesAnUnusableEncryptionFile(t *testing.T) {
 				t.Fatalf("the encryption Secret must not exist: %v", err)
 			}
 		})
-	}
-}
-
-func TestRunInitKeepsThePKIDirectoryMode(t *testing.T) {
-	run := prepareInit(t)
-	pki := filepath.Dir(encryption.Path(initDataDir(run)))
-	if err := os.MkdirAll(pki, 0o751); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.Chmod(pki, 0o700); err != nil {
-		t.Fatal(err)
-	}
-	runPreparedInit(t, run)
-	if info, err := os.Stat(pki); err != nil || info.Mode().Perm() != 0o700 {
-		t.Fatalf("pki dir %v %v", info, err)
-	}
-	if info, err := os.Stat(encryption.Path(initDataDir(run))); err != nil || info.Mode().Perm() != 0o600 {
-		t.Fatalf("encryption file %v %v", info, err)
 	}
 }

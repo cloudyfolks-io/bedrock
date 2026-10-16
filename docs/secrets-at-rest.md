@@ -10,12 +10,13 @@ with a local key. You can choose KMS v2 at install.
 The key is in this file on each control-plane node:
 
 ```
-/var/lib/k0s/pki/encryption.yaml
+/etc/bedrock/encryption/encryption.yaml
 ```
 
-The file has mode `0600`. The owner is `kube-apiserver`. It is an
-`EncryptionConfiguration` with one `aesgcm` key, named `key1`. With KMS v2,
-it has one `kms` provider, named `bedrock-kms`, and no key.
+The file has mode `0600`. The directory has mode `0700`. The owner of both
+is `kube-apiserver`. The file is an `EncryptionConfiguration` with one
+`aesgcm` key, named `key1`. With KMS v2, it has one `kms` provider, named
+`bedrock-kms`, and no key.
 
 `bedrock init` also stores a copy of the file in the Secret
 `kube-system/bedrock-secrets-encryption`. The API server encrypts this
@@ -24,9 +25,11 @@ Secret too. Etcd data alone does not give the key.
 `bedrock init` makes a key only on a fresh node. A fresh node has no running
 k0s and no `<data-dir>/etcd`. On an installed node, `bedrock init` never
 changes the encryption. The API server argument `encryption-provider-config`
-in `/etc/k0s/k0s.yaml` shows if the cluster is encrypted. On an installed
-node, `bedrock init` stops in these cases:
+in `/etc/k0s/k0s.yaml` shows if the cluster is encrypted. It must name
+`/etc/bedrock/encryption/encryption.yaml`. On an installed node,
+`bedrock init` stops in these cases:
 
+- `k0s.yaml` names another path than `encryption.yaml`.
 - `k0s.yaml` names `encryption.yaml`, and `encryption.yaml` is missing.
 - `encryption.yaml` exists, but `k0s.yaml` does not name it.
 
@@ -35,23 +38,38 @@ the API server `extraArgs` in `k0s.yaml`. Remove `encryption.yaml` only if
 the node never ran encrypted. A removed key makes every encrypted Secret
 unreadable.
 
-To restore a missing `encryption.yaml`, use a k0s backup. On a cluster with
-more control-plane nodes, you can also read the Secret through another
-control-plane node. On a one-node cluster, the API server cannot start
-without the file, so nobody can read the Secret.
+To restore a missing `encryption.yaml`, copy it from another control-plane
+node or from your separate key copy. On a cluster with more control-plane
+nodes, you can also read the Secret through another control-plane node. On a
+one-node cluster, the API server cannot start without the file, so nobody
+can read the Secret.
 
 After you restore the file by hand, set the mode to `0600` and the owner to
-`kube-apiserver`. Or run `bedrock init` again on that node. It sets both.
+`kube-apiserver`. Set the directory to mode `0700` and the same owner. Or run
+`bedrock init` again on that node. It sets them.
 
-## Backups hold the key
+## Backups do not hold the key
 
-`k0s backup` includes `/var/lib/k0s/pki`, so the archive holds the key. The
-etcd snapshots of `backup.etcd-schedule` contain a k0s backup. The backups of
-`bedrock upgrade` use `k0s backup` too. Each of them holds the key and the
-encrypted data together. Protect each backup like the cluster CA.
+The etcd snapshots and the backups of `bedrock upgrade` do not hold the key.
+This is on purpose. `k0s backup` archives `/var/lib/k0s/pki`, and Bedrock
+keeps the key outside of that directory. A backup alone does not show the
+Secrets.
 
-With KMS v2, the file holds only the endpoint. Back up the keys of the KMS
-service separately. A restore cannot decrypt the Secrets without them.
+Keep a copy of the key apart from the backups, for example in a secrets
+vault. The key never changes, so you do not update the copy. Without the
+copy, you cannot read the Secrets of a restored cluster.
+
+To restore after the loss of all control-plane nodes:
+
+1. Put the key at `/etc/bedrock/encryption/encryption.yaml`. Set the file to
+   mode `0600` and the directory to mode `0700`. The owner of both is
+   `kube-apiserver`. The user exists after `k0s install controller`.
+2. Run `k0s restore` with the backup archive.
+3. Start k0s.
+
+With KMS v2, the KMS service holds the key. The file holds only the
+endpoint. Back up the keys of the KMS service separately. A restore cannot
+decrypt the Secrets without them.
 
 ## Join a control-plane node
 
@@ -67,9 +85,6 @@ steps before it starts k0s:
 An expired or deleted token gets nothing, and the join stops. A worker join
 does not get the key. A token from a cluster without encryption joins as
 before.
-
-The join stops before it changes the host if the cluster keeps the file in
-another data directory. Join with the same `--data-dir` as the cluster.
 
 ## Choose KMS v2
 
