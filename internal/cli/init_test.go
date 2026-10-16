@@ -16,6 +16,7 @@ import (
 	"time"
 
 	corev1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
@@ -28,6 +29,7 @@ import (
 	"github.com/cloudyfolks-io/bedrock/api/v1alpha1"
 	"github.com/cloudyfolks-io/bedrock/internal/audit"
 	"github.com/cloudyfolks-io/bedrock/internal/authn/apiserver"
+	"github.com/cloudyfolks-io/bedrock/internal/encryption"
 	"github.com/cloudyfolks-io/bedrock/internal/host"
 	"github.com/cloudyfolks-io/bedrock/internal/k0s"
 	"github.com/cloudyfolks-io/bedrock/internal/operator"
@@ -1011,7 +1013,7 @@ func TestK0sConfigHasAuthnArgs(t *testing.T) {
 	cfg.Spec.API.VIP = "10.0.10.10"
 	cfg.Spec.Network.Fabric.PodCIDR = "10.16.0.0/16"
 	cfg.Spec.Network.Fabric.ServiceCIDR = "10.96.0.0/12"
-	if err := writeK0sConfig(path, cfg); err != nil {
+	if err := writeK0sConfig(path, cfg, nil); err != nil {
 		t.Fatal(err)
 	}
 	var doc map[string]any
@@ -1125,4 +1127,209 @@ func TestInitPrintsAdminPasswordOnce(t *testing.T) {
 	if strings.Contains(second, "admin password:") || !strings.Contains(second, "admin exists\n") {
 		t.Fatalf("a second init prints no password: %s", second)
 	}
+}
+
+const kmsSocketEndpoint = "unix:///run/kms/kms.sock"
+
+func initDataDir(run initRun) string {
+	return filepath.Join(run.root, "var", "lib", "k0s")
+}
+
+func initK0sConfigPath(run initRun) string {
+	return filepath.Join(run.root, "etc", "k0s", "k0s.yaml")
+}
+
+func encryptionArg(t *testing.T, run initRun) string {
+	t.Helper()
+	arg, err := k0s.APIExtraArg([]byte(readInitFile(t, initK0sConfigPath(run))), encryption.ArgName)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return arg
+}
+
+func writeInitK0sConfig(t *testing.T, run initRun, extra map[string]string) {
+	t.Helper()
+	raw, err := k0s.RenderConfig(k0s.Config{VIP: "10.0.10.10", SANs: []string{"10.0.10.10"}, PodCIDR: "10.16.0.0/16", ServiceCIDR: "10.96.0.0/12", APIExtraArgs: extra})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Dir(initK0sConfigPath(run)), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(initK0sConfigPath(run), raw, 0o600); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func writeKnownEncryptionFile(t *testing.T, run initRun) []byte {
+	t.Helper()
+	known, err := encryption.NewConfig(bytes.NewReader(bytes.Repeat([]byte{9}, 32)), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	path := encryption.Path(initDataDir(run))
+	if err := os.MkdirAll(filepath.Dir(path), 0o751); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, known, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	return known
+}
+
+func assertNoEncryption(t *testing.T, run initRun) {
+	t.Helper()
+	if _, err := os.Stat(encryption.Path(initDataDir(run))); !os.IsNotExist(err) {
+		t.Fatalf("the encryption file must not exist: %v", err)
+	}
+	if _, err := encryption.ReadSecret(context.Background(), run.c); !apierrors.IsNotFound(err) {
+		t.Fatalf("the encryption Secret must not exist: %v", err)
+	}
+}
+
+func assertEncryptionSecret(t *testing.T, run initRun, want []byte) {
+	t.Helper()
+	got, err := encryption.ReadSecret(context.Background(), run.c)
+	if err != nil || !bytes.Equal(got, want) {
+		t.Fatalf("encryption Secret %q %v, want %q", got, err, want)
+	}
+}
+
+func TestRunInitWritesEncryptionFile(t *testing.T) {
+	run := prepareInit(t)
+	path := encryption.Path(initDataDir(run))
+	present := false
+	run.deps.Exec = filesAtStart{FakeExec: run.deps.Exec.(*host.FakeExec), paths: []string{path}, present: &present}
+	stdout := runPreparedInit(t, run)
+	if !present {
+		t.Fatal("the encryption file must exist before k0s starts")
+	}
+	if !strings.Contains(stdout, "==> secrets encryption "+path+"\n") {
+		t.Fatalf("stdout lacks the encryption step: %s", stdout)
+	}
+	info, err := os.Stat(path)
+	if err != nil || info.Mode().Perm() != 0o600 {
+		t.Fatalf("encryption file %v %v", info, err)
+	}
+	pki, err := os.Stat(filepath.Dir(path))
+	if err != nil || pki.Mode().Perm() != 0o751 {
+		t.Fatalf("pki dir %v %v", pki, err)
+	}
+	content := []byte(readInitFile(t, path))
+	sockets, err := encryption.SocketPaths(content)
+	if err != nil || len(sockets) != 0 || !strings.Contains(string(content), "aesgcm") {
+		t.Fatalf("want an aesgcm config without sockets, got %q %v %v", content, sockets, err)
+	}
+	if got := encryptionArg(t, run); got != path {
+		t.Fatalf("k0s.yaml names %q, want %q", got, path)
+	}
+	assertEncryptionSecret(t, run, content)
+}
+
+func TestRunInitKeepsEncryptionKey(t *testing.T) {
+	run := prepareInit(t)
+	known := writeKnownEncryptionFile(t, run)
+	runPreparedInit(t, run)
+	if got := readInitFile(t, encryption.Path(initDataDir(run))); got != string(known) {
+		t.Fatalf("init replaced the key: %q", got)
+	}
+	assertEncryptionSecret(t, run, known)
+}
+
+func TestRunInitRerunKeepsTheGeneratedKey(t *testing.T) {
+	run := prepareInit(t)
+	runPreparedInit(t, run)
+	first := readInitFile(t, encryption.Path(initDataDir(run)))
+	runPreparedInit(t, run)
+	markRunning(run)
+	runPreparedInit(t, run)
+	if got := readInitFile(t, encryption.Path(initDataDir(run))); got != first {
+		t.Fatalf("a re-run replaced the key: %q", got)
+	}
+	assertEncryptionSecret(t, run, []byte(first))
+}
+
+func TestRunInitRunningWithoutEncryption(t *testing.T) {
+	run := prepareInit(t)
+	writeInitK0sConfig(t, run, nil)
+	markRunning(run)
+	runPreparedInit(t, run)
+	assertNoEncryption(t, run)
+	if got := encryptionArg(t, run); got != "" {
+		t.Fatalf("k0s.yaml names %q, want none", got)
+	}
+}
+
+func TestRunInitRunningLostEncryptionFile(t *testing.T) {
+	run := prepareInit(t)
+	writeInitK0sConfig(t, run, encryption.Args(initDataDir(run)))
+	markRunning(run)
+	var out, errOut bytes.Buffer
+	code := RunInit(context.Background(), run.args, run.deps, &out, &errOut)
+	if code != 1 || !strings.Contains(errOut.String(), "restore it from Secret kube-system/bedrock-secrets-encryption") {
+		t.Fatalf("exit %d stderr %s", code, errOut.String())
+	}
+	assertNoEncryption(t, run)
+}
+
+func TestRunInitSecretMismatch(t *testing.T) {
+	run := prepareInit(t)
+	if err := run.c.Create(context.Background(), encryption.Secret([]byte("other"))); err != nil {
+		t.Fatal(err)
+	}
+	var out, errOut bytes.Buffer
+	code := RunInit(context.Background(), run.args, run.deps, &out, &errOut)
+	if code != 1 || !strings.Contains(errOut.String(), "holds another encryption config") {
+		t.Fatalf("exit %d stderr %s", code, errOut.String())
+	}
+	assertEncryptionSecret(t, run, []byte("other"))
+}
+
+func useKMSConfig(t *testing.T, run initRun) {
+	t.Helper()
+	if err := os.WriteFile(run.args[1], []byte(initConfig+"  encryption:\n    kms:\n      endpoint: "+kmsSocketEndpoint+"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func statWithSocket(run initRun, mode fs.FileMode) func(string) (fs.FileInfo, error) {
+	socket := filepath.Join(run.root, "run", "kms", "kms.sock")
+	others := run.deps.Stat
+	return func(path string) (fs.FileInfo, error) {
+		if path != socket {
+			return others(path)
+		}
+		if mode == 0 {
+			return nil, fs.ErrNotExist
+		}
+		return devInfo{mode}, nil
+	}
+}
+
+func TestRunInitKMSNeedsSocket(t *testing.T) {
+	run := prepareInit(t)
+	useKMSConfig(t, run)
+	run.deps.Stat = statWithSocket(run, 0)
+	var out, errOut bytes.Buffer
+	code := RunInit(context.Background(), run.args, run.deps, &out, &errOut)
+	if code != 1 || !strings.Contains(errOut.String(), "kms plugin socket /run/kms/kms.sock is missing") {
+		t.Fatalf("exit %d stderr %s", code, errOut.String())
+	}
+	if slices.Contains(run.deps.Exec.(*host.FakeExec).Calls, "/usr/local/bin/k0s start") {
+		t.Fatal("k0s must not start without the KMS socket")
+	}
+}
+
+func TestRunInitKMSWritesTheProviderOnly(t *testing.T) {
+	run := prepareInit(t)
+	useKMSConfig(t, run)
+	run.deps.Stat = statWithSocket(run, fs.ModeSocket)
+	runPreparedInit(t, run)
+	content := []byte(readInitFile(t, encryption.Path(initDataDir(run))))
+	sockets, err := encryption.SocketPaths(content)
+	if err != nil || !reflect.DeepEqual(sockets, []string{"/run/kms/kms.sock"}) || strings.Contains(string(content), "aesgcm") {
+		t.Fatalf("want a kms config on the socket, got %q %v %v", content, sockets, err)
+	}
+	assertEncryptionSecret(t, run, content)
 }

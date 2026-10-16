@@ -30,6 +30,7 @@ import (
 	"github.com/cloudyfolks-io/bedrock/internal/authn/methods"
 	"github.com/cloudyfolks-io/bedrock/internal/authn/secret"
 	"github.com/cloudyfolks-io/bedrock/internal/config"
+	"github.com/cloudyfolks-io/bedrock/internal/encryption"
 	"github.com/cloudyfolks-io/bedrock/internal/host"
 	"github.com/cloudyfolks-io/bedrock/internal/k0s"
 	"github.com/cloudyfolks-io/bedrock/internal/operator"
@@ -192,6 +193,29 @@ func RunInit(ctx context.Context, args []string, deps InitDeps, stdout, stderr i
 		return fail(stderr, err)
 	}
 
+	configPath := filepath.Join(deps.Root, "etc", "k0s", "k0s.yaml")
+	encryptionPath := encryption.Path(o.dataDir)
+	encryptionFile, found, err := readEncryptionFile(encryptionPath)
+	if err != nil {
+		return fail(stderr, err)
+	}
+	if !found && running {
+		if err := requireNoEncryptionArg(configPath, encryptionPath); err != nil {
+			return fail(stderr, err)
+		}
+	}
+	if !found && !running {
+		encryptionFile, err = encryption.NewConfig(rand.Reader, cfg.Spec.Encryption.KMS)
+		if err != nil {
+			return fail(stderr, err)
+		}
+	}
+	if encryptionFile != nil {
+		if err := requireEncryptionSockets(deps.Stat, deps.Root, encryptionFile); err != nil {
+			return fail(stderr, err)
+		}
+	}
+
 	step(stdout, "vip %s on %s", cfg.Spec.API.VIP, cfg.Spec.Network.ManagementInterface)
 	if err := host.EnsureAddress(ctx, deps.Exec, cfg.Spec.API.VIP, cfg.Spec.Network.ManagementInterface); err != nil {
 		return fail(stderr, err)
@@ -212,8 +236,11 @@ func RunInit(ctx context.Context, args []string, deps InitDeps, stdout, stderr i
 	}
 
 	step(stdout, "writing k0s.yaml")
-	configPath := filepath.Join(deps.Root, "etc", "k0s", "k0s.yaml")
-	if err := writeK0sConfig(configPath, cfg); err != nil {
+	var encryptionArgs map[string]string
+	if encryptionFile != nil {
+		encryptionArgs = encryption.Args(o.dataDir)
+	}
+	if err := writeK0sConfig(configPath, cfg, encryptionArgs); err != nil {
 		return fail(stderr, err)
 	}
 
@@ -241,6 +268,12 @@ func RunInit(ctx context.Context, args []string, deps InitDeps, stdout, stderr i
 	}
 	if err := installAuditFiles(deps.Root); err != nil {
 		return fail(stderr, err)
+	}
+	if encryptionFile != nil {
+		step(stdout, "secrets encryption %s", encryptionPath)
+		if err := installEncryptionFile(encryptionPath, encryptionFile); err != nil {
+			return fail(stderr, err)
+		}
 	}
 	if !running {
 		if err := k0sClient.Start(ctx); err != nil {
@@ -272,6 +305,11 @@ func RunInit(ctx context.Context, args []string, deps InitDeps, stdout, stderr i
 	step(stdout, "authn secrets")
 	if err := createAuthnSecrets(ctx, c, authnInputs.CA, caKey, authnInputs.Bearer); err != nil {
 		return fail(stderr, err)
+	}
+	if encryptionFile != nil {
+		if err := ensureEncryptionSecret(ctx, c, encryptionPath, encryptionFile); err != nil {
+			return fail(stderr, err)
+		}
 	}
 
 	step(stdout, "installing release %s", bundle.Spec.Version)
@@ -449,9 +487,9 @@ func removeBundleDir(dir string) {
 	}
 }
 
-func writeK0sConfig(path string, cfg v1alpha1.ClusterConfig) error {
+func writeK0sConfig(path string, cfg v1alpha1.ClusterConfig, extra map[string]string) error {
 	sans := []string{cfg.Spec.API.VIP, "api." + cfg.Spec.Platform.Host}
-	raw, err := k0s.RenderConfig(k0s.Config{VIP: cfg.Spec.API.VIP, SANs: sans, PodCIDR: cfg.Spec.Network.Fabric.PodCIDR, ServiceCIDR: cfg.Spec.Network.Fabric.ServiceCIDR, APIExtraArgs: apiExtraArgs()})
+	raw, err := k0s.RenderConfig(k0s.Config{VIP: cfg.Spec.API.VIP, SANs: sans, PodCIDR: cfg.Spec.Network.Fabric.PodCIDR, ServiceCIDR: cfg.Spec.Network.Fabric.ServiceCIDR, APIExtraArgs: apiExtraArgs(extra)})
 	if err != nil {
 		return err
 	}
@@ -461,10 +499,11 @@ func writeK0sConfig(path string, cfg v1alpha1.ClusterConfig) error {
 	return os.WriteFile(path, raw, 0o600)
 }
 
-func apiExtraArgs() map[string]string {
+func apiExtraArgs(extra map[string]string) map[string]string {
 	args := map[string]string{}
 	maps.Copy(args, apiserver.Args())
 	maps.Copy(args, audit.Args())
+	maps.Copy(args, extra)
 	return args
 }
 
