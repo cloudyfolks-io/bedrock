@@ -616,6 +616,7 @@ func (in *ClusterConfigSpec) DeepCopyInto(out *ClusterConfigSpec) {
 	in.Storage.DeepCopyInto(&out.Storage)
 	out.Virtualization = in.Virtualization
 	out.Registry = in.Registry
+	in.Encryption.DeepCopyInto(&out.Encryption)
 	if in.Addons != nil {
 		in, out := &in.Addons, &out.Addons
 		*out = make(map[string]bool, len(*in))

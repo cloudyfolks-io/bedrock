@@ -54,6 +54,17 @@ spec:
                 required:
                 - vip
                 type: object
+              encryption:
+                properties:
+                  kms:
+                    properties:
+                      endpoint:
+                        pattern: ^unix:///.+
+                        type: string
+                    required:
+                    - endpoint
+                    type: object
+                type: object
               host:
                 properties:
                   maintenanceWindow:

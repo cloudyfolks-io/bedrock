@@ -3,6 +3,7 @@ package config
 import (
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -245,5 +246,54 @@ func TestValidateRejectsExcludeIPsOutsideTheCIDR(t *testing.T) {
 	cfg.Spec.Network.Fabric.ProviderNetworks[0].ExcludeIPs = []string{"10.0.0.1"}
 	if err := Validate(cfg); err == nil {
 		t.Fatal("excludeIPs outside the cidr must be refused")
+	}
+}
+
+func TestValidateKMSEndpoint(t *testing.T) {
+	cases := []struct {
+		name     string
+		endpoint string
+		want     string
+	}{
+		{"tcp", "tcp://1.2.3.4:1", "encryption.kms.endpoint must be unix:///<absolute socket path>"},
+		{"relative", "unix://run/kms.sock", "encryption.kms.endpoint must be unix:///<absolute socket path>"},
+		{"parent segment", "unix:///run/../kms.sock", "encryption.kms.endpoint must be unix:///<absolute socket path>"},
+		{"root only", "unix:///", "encryption.kms.endpoint must be unix:///<absolute socket path>"},
+		{"valid", "unix:///run/kms/kms.sock", ""},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			cfg, err := Load(filepath.Join("testdata", "single-node.yaml"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			cfg.Spec.Encryption.KMS = &v1alpha1.KMSSpec{Endpoint: tc.endpoint}
+			err = Validate(cfg)
+			if tc.want == "" {
+				if err != nil {
+					t.Fatalf("Validate = %v", err)
+				}
+				return
+			}
+			if err == nil || !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("Validate = %v, want %s", err, tc.want)
+			}
+		})
+	}
+}
+
+func TestToClusterCopiesEncryption(t *testing.T) {
+	cfg, err := Load(filepath.Join("testdata", "single-node.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg.Spec.Encryption.KMS = &v1alpha1.KMSSpec{Endpoint: "unix:///run/kms/kms.sock"}
+	cluster := ToCluster(cfg)
+	if !reflect.DeepEqual(cluster.Spec.Encryption, cfg.Spec.Encryption) {
+		t.Fatalf("encryption %+v, want %+v", cluster.Spec.Encryption, cfg.Spec.Encryption)
+	}
+	cfg.Spec.Encryption.KMS.Endpoint = "unix:///run/kms/other.sock"
+	if cluster.Spec.Encryption.KMS.Endpoint != "unix:///run/kms/kms.sock" {
+		t.Fatal("ToCluster must not share the KMS spec with its input")
 	}
 }

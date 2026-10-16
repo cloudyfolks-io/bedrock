@@ -51,8 +51,8 @@ type RegistrySpec struct {
 }
 
 type KMSSpec struct {
-	Endpoint  string `json:"endpoint"`
-	SecretRef string `json:"secretRef"`
+	// +kubebuilder:validation:Pattern=`^unix:///.+`
+	Endpoint string `json:"endpoint"`
 }
 
 type EncryptionSpec struct {
@@ -66,6 +66,7 @@ type UpgradeSpec struct {
 	Action string `json:"action,omitempty"`
 }
 
+// +kubebuilder:validation:XValidation:rule="(has(self.encryption) && has(self.encryption.kms)) == (has(oldSelf.encryption) && has(oldSelf.encryption.kms)) && (!(has(self.encryption) && has(self.encryption.kms)) || self.encryption.kms == oldSelf.encryption.kms)",message="encryption.kms is set at install and is immutable"
 type ClusterSpec struct {
 	DesiredVersion string  `json:"desiredVersion"`
 	API            APISpec `json:"api"`

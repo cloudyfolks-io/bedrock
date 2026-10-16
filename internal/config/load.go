@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"slices"
 	"strconv"
+	"strings"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"sigs.k8s.io/yaml"
@@ -102,6 +103,9 @@ func Validate(cfg v1alpha1.ClusterConfig) error {
 	if err := validatePlatformHost(s.Platform.Host); err != nil {
 		return err
 	}
+	if err := validateKMSEndpoint(s.Encryption.KMS); err != nil {
+		return err
+	}
 	if s.Network.ManagementInterface == "" {
 		return fmt.Errorf("spec.network.managementInterface is required")
 	}
@@ -157,6 +161,17 @@ func validatePlatformHost(host string) error {
 	return nil
 }
 
+func validateKMSEndpoint(kms *v1alpha1.KMSSpec) error {
+	if kms == nil {
+		return nil
+	}
+	path, ok := strings.CutPrefix(kms.Endpoint, "unix://")
+	if !ok || path == "/" || !filepath.IsAbs(path) || path != filepath.Clean(path) {
+		return fmt.Errorf("spec.encryption.kms.endpoint must be unix:///<absolute socket path>, got %q", kms.Endpoint)
+	}
+	return nil
+}
+
 func ToCluster(cfg v1alpha1.ClusterConfig) v1alpha1.Cluster {
 	return v1alpha1.Cluster{
 		ObjectMeta: metav1.ObjectMeta{Name: v1alpha1.ClusterName, Labels: map[string]string{v1alpha1.LabelKind: "Cluster", v1alpha1.LabelName: v1alpha1.ClusterName}},
@@ -165,6 +180,7 @@ func ToCluster(cfg v1alpha1.ClusterConfig) v1alpha1.Cluster {
 			API:             cfg.Spec.API,
 			NodeConcurrency: 1,
 			Registry:        v1alpha1.RegistrySpec{Mirror: cfg.Spec.Registry.Mirror},
+			Encryption:      *cfg.Spec.Encryption.DeepCopy(),
 			JoinCIDR:        cfg.Spec.Network.Fabric.JoinCIDR,
 		},
 	}

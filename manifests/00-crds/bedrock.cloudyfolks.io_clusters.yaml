@@ -67,12 +67,10 @@ spec:
                   kms:
                     properties:
                       endpoint:
-                        type: string
-                      secretRef:
+                        pattern: ^unix:///.+
                         type: string
                     required:
                     - endpoint
-                    - secretRef
                     type: object
                 type: object
               joinCIDR:
@@ -106,6 +104,11 @@ spec:
             - api
             - desiredVersion
             type: object
+            x-kubernetes-validations:
+            - message: encryption.kms is set at install and is immutable
+              rule: (has(self.encryption) && has(self.encryption.kms)) == (has(oldSelf.encryption)
+                && has(oldSelf.encryption.kms)) && (!(has(self.encryption) && has(self.encryption.kms))
+                || self.encryption.kms == oldSelf.encryption.kms)
           status:
             properties:
               backups:

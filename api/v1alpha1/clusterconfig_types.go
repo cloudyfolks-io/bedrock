@@ -86,6 +86,8 @@ type ClusterConfigSpec struct {
 	// +optional
 	Registry BundleRegistrySpec `json:"registry,omitempty"`
 	// +optional
+	Encryption EncryptionSpec `json:"encryption,omitempty"`
+	// +optional
 	Addons map[string]bool `json:"addons,omitempty"`
 	// +optional
 	Host HostDefaults `json:"host,omitempty"`
