@@ -10,6 +10,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"runtime"
 	"slices"
 	"strings"
 	"testing"
@@ -281,6 +282,122 @@ func TestBackupFailsWhenK0sBackupFails(t *testing.T) {
 	if entries, _ := os.ReadDir(filepath.Join(env.Deps.Root, "var/lib/bedrock/backups")); len(entries) != 0 {
 		t.Fatalf("a failed backup must leave no archive or work dir: %v", entries)
 	}
+}
+
+type failingWriter struct {
+	dst   io.Writer
+	limit int
+	err   error
+}
+
+func (w *failingWriter) Write(p []byte) (int, error) {
+	if w.limit <= 0 {
+		return 0, w.err
+	}
+	n := min(len(p), w.limit)
+	written, err := w.dst.Write(p[:n])
+	w.limit -= written
+	if err != nil {
+		return written, err
+	}
+	if n < len(p) {
+		return written, w.err
+	}
+	return written, nil
+}
+
+type brokenWorkBackup struct {
+	fakeK0sBackup
+	damage func(work string) error
+}
+
+func (b *brokenWorkBackup) Run(ctx context.Context, name string, args ...string) (string, error) {
+	out, err := b.fakeK0sBackup.Run(ctx, name, args...)
+	if err != nil {
+		return out, err
+	}
+	return out, b.damage(args[2])
+}
+
+func requireNoGoroutineLeak(t *testing.T, before int) {
+	t.Helper()
+	deadline := time.Now().Add(2 * time.Second)
+	for runtime.NumGoroutine() > before && time.Now().Before(deadline) {
+		time.Sleep(10 * time.Millisecond)
+	}
+	if after := runtime.NumGoroutine(); after > before {
+		t.Fatalf("%d goroutines before, %d after", before, after)
+	}
+}
+
+func TestBackupLeavesNoFileWhenTheArchiveCannotBePacked(t *testing.T) {
+	damages := map[string]func(work string) error{
+		"dangling link": func(work string) error {
+			return os.Symlink("missing", filepath.Join(work, "dangling"))
+		},
+		"unreadable file": func(work string) error {
+			path := filepath.Join(work, "unreadable")
+			return errors.Join(os.WriteFile(path, []byte("secret"), 0o600), os.Chmod(path, 0))
+		},
+	}
+	for name, damage := range damages {
+		t.Run(name, func(t *testing.T) {
+			if name == "unreadable file" && os.Geteuid() == 0 {
+				t.Skip("root reads every file")
+			}
+			env := backupEnv(t, &fakeK0sBackup{})
+			env.Deps.Exec = &brokenWorkBackup{damage: damage}
+			before := runtime.NumGoroutine()
+			if _, err := backup(context.Background(), env); err == nil {
+				t.Fatal("a backup that cannot pack a file must fail")
+			}
+			if entries, _ := os.ReadDir(filepath.Join(env.Deps.Root, backupDir)); len(entries) != 0 {
+				t.Fatalf("a failed backup must leave no archive, partial file or work dir: %v", entries)
+			}
+			requireNoGoroutineLeak(t, before)
+		})
+	}
+}
+
+func TestSealTarGzStopsWhenTheWriterFails(t *testing.T) {
+	failure := errors.New("disk full")
+	work := restoreWork(t, "ovn/ovnsb_db.db")
+	before := runtime.NumGoroutine()
+	err := sealTarGz(&failingWriter{dst: io.Discard, limit: 70 << 10, err: failure}, work, []age.Recipient{newRecipient(t).Recipient()})
+	if !errors.Is(err, failure) {
+		t.Fatalf("error %v, want %v", err, failure)
+	}
+	requireNoGoroutineLeak(t, before)
+}
+
+func TestSealTarGzStopsWhenAFileCannotBePacked(t *testing.T) {
+	work := restoreWork(t, "ovn/ovnsb_db.db")
+	if err := os.Symlink("missing", filepath.Join(work, "dangling")); err != nil {
+		t.Fatal(err)
+	}
+	before := runtime.NumGoroutine()
+	if err := sealTarGz(io.Discard, work, []age.Recipient{newRecipient(t).Recipient()}); err == nil {
+		t.Fatal("a dangling link must fail the archive")
+	}
+	requireNoGoroutineLeak(t, before)
+}
+
+func TestWriteAtomicLeavesNoFileWhenTheWriterFails(t *testing.T) {
+	failure := errors.New("disk full")
+	dir := t.TempDir()
+	work := restoreWork(t, "ovn/ovnsb_db.db")
+	recipients := []age.Recipient{newRecipient(t).Recipient()}
+	before := runtime.NumGoroutine()
+	err := writeAtomic(filepath.Join(dir, "etcd-20261001T100000Z.tar.gz.age"), func(dst io.Writer) error {
+		return sealTarGz(&failingWriter{dst: dst, limit: 70 << 10, err: failure}, work, recipients)
+	})
+	if !errors.Is(err, failure) {
+		t.Fatalf("error %v, want %v", err, failure)
+	}
+	if got := listNames(t, dir); len(got) != 0 {
+		t.Fatalf("a failed write must leave no .age or .partial file: %v", got)
+	}
+	requireNoGoroutineLeak(t, before)
 }
 
 func TestBackupIsRegistered(t *testing.T) {

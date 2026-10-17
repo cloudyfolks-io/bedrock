@@ -79,12 +79,8 @@ func writeBackup(ctx context.Context, deps Deps, name, prefix string, keep int, 
 		return "", "", err
 	}
 	archive := filepath.Join(dir, name)
-	partial := archive + partialSuffix
-	if err := writeArchive(work, partial, recipients); err != nil {
-		return "", "", errors.Join(err, os.Remove(partial))
-	}
-	if err := os.Rename(partial, archive); err != nil {
-		return "", "", errors.Join(err, os.Remove(partial))
+	if err := writeArchive(work, archive, recipients); err != nil {
+		return "", "", err
 	}
 	sum, err := release.FileSHA256(archive)
 	if err != nil {
@@ -113,7 +109,7 @@ func copyOVN(src, dest string) error {
 }
 
 func writeArchive(src, dest string, recipients []age.Recipient) error {
-	return writeSynced(dest, func(dst io.Writer) error { return sealTarGz(dst, src, recipients) })
+	return writeAtomic(dest, func(dst io.Writer) error { return sealTarGz(dst, src, recipients) })
 }
 
 func writeSynced(dest string, fill func(io.Writer) error) error {

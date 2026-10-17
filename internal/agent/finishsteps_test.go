@@ -363,7 +363,7 @@ func TestRestoreReadsPlaintextArchive(t *testing.T) {
 	}
 }
 
-func requireRestoreRefusedBeforeStop(t *testing.T, env StepEnv, exec *host.FakeExec) {
+func requireRestoreRefusedBeforeStop(t *testing.T, env StepEnv, exec *host.FakeExec) error {
 	t.Helper()
 	_, err := restore(context.Background(), env)
 	if err == nil || !strings.HasPrefix(err.Error(), "open backup "+env.Upgrade.Spec.Backup+": ") {
@@ -381,6 +381,7 @@ func requireRestoreRefusedBeforeStop(t *testing.T, env StepEnv, exec *host.FakeE
 	if _, err := os.Stat(filepath.Join(env.Deps.Root, "var/lib/bedrock/restore.json")); !os.IsNotExist(err) {
 		t.Fatalf("no restore marker may exist: %v", err)
 	}
+	return err
 }
 
 func TestRestoreFailsBeforeStopWithoutHostKey(t *testing.T) {
@@ -441,6 +442,18 @@ func TestRestoreFailsBeforeStopWhenTheArchiveIsMissing(t *testing.T) {
 		t.Fatal(err)
 	}
 	requireRestoreRefusedBeforeStop(t, env, exec)
+}
+
+func TestRestoreFailsBeforeStopWhenTheArchiveHoldsNoK0sBackup(t *testing.T) {
+	exec := &host.FakeExec{}
+	work := t.TempDir()
+	writeFixtureFile(t, filepath.Join(work, "ovn", "ovnnb_db.db"), "nb")
+	env := sealedRestoreEnvFrom(t, exec, work)
+	err := requireRestoreRefusedBeforeStop(t, env, exec)
+	want := "open backup " + sealedBackupPath + ": no k0s backup in the archive"
+	if err.Error() != want {
+		t.Fatalf("error %q, want %q", err, want)
+	}
 }
 
 func TestRestoreWritesTheMarkerBeforeK0sStarts(t *testing.T) {

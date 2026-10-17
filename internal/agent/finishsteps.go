@@ -36,6 +36,8 @@ const (
 
 var k0sRestoreTargets = []string{"etcd", "pki", "manifests", "images", "helmhome"}
 
+var errNoK0sBackup = errors.New("no k0s backup in the archive")
+
 func prune(ctx context.Context, env StepEnv) (Outcome, error) {
 	deps := env.Deps
 	count, err := removeImages(ctx, deps, env.From.Spec.Images, env.Target.Spec.Images)
@@ -245,7 +247,7 @@ func extractK0sBackup(archive, dest, root string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	snapshot, err := readK0sBackup(plain, archive, dest)
+	snapshot, err := readK0sBackup(plain, dest)
 	if err != nil {
 		return "", err
 	}
@@ -273,7 +275,7 @@ func readHostIdentities(root string) ([]age.Identity, error) {
 	return age.ParseIdentities(file)
 }
 
-func readK0sBackup(plain io.Reader, archive, dest string) (string, error) {
+func readK0sBackup(plain io.Reader, dest string) (string, error) {
 	gz, err := gzip.NewReader(plain)
 	if err != nil {
 		return "", err
@@ -282,7 +284,7 @@ func readK0sBackup(plain io.Reader, archive, dest string) (string, error) {
 	for {
 		header, err := reader.Next()
 		if err == io.EOF {
-			return "", fmt.Errorf("%s holds no k0s backup", archive)
+			return "", errNoK0sBackup
 		}
 		if err != nil {
 			return "", err
