@@ -348,20 +348,168 @@ Every control-plane host takes etcd snapshots. The Setting
 `backup.etcd-schedule` sets the time. The default is `0 2 * * *`. The format
 is the same as the schedule of a VM backup, but a short interval is allowed.
 
-Each snapshot is a file on the host:
+Each snapshot is a sealed file on the host:
 
 ```
-/var/lib/bedrock/backups/etcd-<stamp>.tar.gz
+/var/lib/bedrock/backups/etcd-<stamp>.tar.gz.age
 ```
 
 The file contains the k0s backup and the OVN databases. It does not contain
 the encryption key of the Secrets. See [Secrets at rest](secrets-at-rest.md).
 The host keeps the newest 7 snapshots. Backups of an upgrade
-(`bedrock-*.tar.gz`) are not touched.
+(`bedrock-*.tar.gz.age`) are not touched.
 
 Snapshots stay on the host. They are not copied to the backup target. To
 protect them from the loss of a disk, copy the files off the host with your
-own tools. To restore a snapshot, use `k0s restore` with the archive.
+own tools. A copy is safe, because the file is sealed. Read
+[Sealed archives](#sealed-archives) before you rely on a copy.
+
+To restore a snapshot, open the file as the next section shows. Then do
+step 2 of the
+[restore runbook](runbooks/restore-control-plane.md).
+
+## Sealed archives
+
+Every archive that a host writes is sealed. This is true for etcd snapshots
+and for the backups of `bedrock upgrade`. The names end in `.tar.gz.age`:
+
+```
+/var/lib/bedrock/backups/bedrock-<from>-<stamp>.tar.gz.age
+/var/lib/bedrock/backups/etcd-<stamp>.tar.gz.age
+```
+
+An archive holds the keys of the cluster, for example `ca.key`, `sa.key` and
+`etcd/ca.key`. So Bedrock seals each archive. A sealed archive is an
+[age](https://age-encryption.org) file. Two kinds of key open it:
+
+- The host key of the host that wrote the archive.
+- The admin recipients that you set in the Setting
+  `backup.archive-recipients`.
+
+### The host key
+
+The host key is this file:
+
+```
+/etc/bedrock/backup/host.key
+```
+
+The file has mode `0600`. The directory has mode `0700`. The owner of both
+is root. The agent makes the key the first time that it needs it. The key is
+never in an archive. Each control-plane host has its own key.
+
+The host key lets the agent restore an archive while the API server is down.
+This is how the automatic restore of `bedrock upgrade abort` works.
+
+### Set the admin recipients
+
+The host key is on the host. If you lose the host, you lose the host key.
+Set at least one admin recipient. Do these steps:
+
+1. Make an admin key on a machine that is not part of the cluster:
+
+   ```
+   bedrock backup keygen > admin.key
+   ```
+
+   The file holds two lines. The first line is a comment with the public
+   key. The second line is the identity:
+
+   ```
+   # public key: age1...
+   AGE-SECRET-KEY-...
+   ```
+
+2. Keep `admin.key` offline, for example in a secrets vault. Do not put it
+   on the cluster. Do not put it in a Setting.
+3. Set the Setting to the public key:
+
+   ```
+   kubectl patch setting backup.archive-recipients --type merge \
+     -p '{"spec":{"value":"age1..."}}'
+   ```
+
+You can set more than one recipient. Separate them with spaces or new lines.
+The default is empty. With an empty value, only the host key opens an
+archive.
+
+A new value applies to the next archive. A change does not change an archive
+that exists. An old archive keeps its old recipients.
+
+### A value that is not valid
+
+Every field of the value must be an age recipient (`age1...`). Check the
+result:
+
+```
+kubectl get setting backup.archive-recipients -o jsonpath='{.status.conditions}'
+```
+
+These rules apply:
+
+- If the value is not valid, the agent seals the archive to the host key
+  only. The agent writes this line to its log, one time for each archive:
+
+  ```
+  backup.archive-recipients is invalid, sealing <name> to the host key only: <error>
+  ```
+
+  Read the log with `journalctl -u bedrock-agent`. The Setting shows
+  `Ready=False`. Correct the value. The next archive uses the correct value.
+- If you paste a secret key (`AGE-SECRET-KEY-...`), the value is not valid.
+  Bedrock refuses it and does not print it in the condition, in an event or
+  in a log. But the Setting still holds the text. Remove it from the
+  Setting. Make a new admin key, because the pasted key is not secret now.
+- If the agent cannot read the Setting, because of an API error, the backup
+  fails. The agent tries again later. The agent never seals an archive
+  without the admin recipients because of an API error.
+
+### Open an archive
+
+Use `bedrock backup decrypt`:
+
+```
+bedrock backup decrypt --in <archive> --out <file|-> [--identity <key file>]
+```
+
+The default identity is the host key. To use an admin key, add `--identity`:
+
+```
+bedrock backup decrypt --identity admin.key \
+  --in etcd-<stamp>.tar.gz.age --out etcd.tar.gz
+```
+
+The command does not use the cluster. It runs on any machine that has the
+`bedrock` binary and the archive. `--out -` writes the plain archive to
+standard output. An output file has mode `0600`. If the command fails, it
+leaves no output file.
+
+The output is the plain `tar.gz` archive. It holds the keys of the cluster.
+Keep it only as long as you need it. Then delete it.
+
+### Copies of an archive
+
+A copy off the host is safe, because the file is sealed. But without an admin
+recipient, only the host that wrote the archive can open it. If that host is
+lost, nobody can open the copy. Set an admin recipient before you copy
+archives off the host.
+
+If you lose all control-plane hosts, open the archive with the admin
+identity. Then follow [Secrets at rest](secrets-at-rest.md).
+
+### Archives of older releases
+
+Releases before this one wrote plain archives (`*.tar.gz`). When the agent
+starts, it seals each of them. It writes `<name>.age`, and then it removes
+the plain file. The agent also removes old `.work-*` and `.restore-*`
+directories from the backup directory.
+
+The list `status.backups` of the `Cluster` keeps the old path of such an
+archive. The file on disk is then `<path>.age`. The record keeps its old
+digest. That digest is for the plain file, not for the sealed file.
+
+The retention counts plain archives and sealed archives together. A plain
+archive and its sealed copy count as one archive.
 
 ## Limits
 
@@ -372,6 +520,10 @@ own tools. To restore a snapshot, use `k0s restore` with the archive.
 - A restore cannot rename a VM.
 - A schedule fires at most once per hour.
 - Etcd snapshots stay on the host.
+- Without an admin recipient, only the host that wrote an archive can open
+  it.
+- A change of the admin recipients does not change archives that exist.
+  There is no rotation of the host key.
 
 ## Troubleshooting
 

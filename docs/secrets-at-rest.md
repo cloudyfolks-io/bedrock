@@ -55,17 +55,32 @@ This is on purpose. `k0s backup` archives `/var/lib/k0s/pki`, and Bedrock
 keeps the key outside of that directory. A backup alone does not show the
 Secrets.
 
+Each archive is also sealed. Only the host key and the admin recipients open
+it. See [Sealed archives](backup.md#sealed-archives).
+
 Keep a copy of the key apart from the backups, for example in a secrets
 vault. The key never changes, so you do not update the copy. Without the
 copy, you cannot read the Secrets of a restored cluster.
+
+Keep the admin identity apart from the backups too. The host key is lost
+with the host. Without the admin identity, you cannot open an archive after
+the loss of all control-plane nodes.
 
 To restore after the loss of all control-plane nodes:
 
 1. Put the key at `/etc/bedrock/encryption/encryption.yaml`. Set the file to
    mode `0600` and the directory to mode `0700`. The owner of both is
    `kube-apiserver`. The user exists after `k0s install controller`.
-2. Run `k0s restore` with the backup archive.
-3. Start k0s.
+2. Open the backup archive with the admin identity:
+
+   ```sh
+   bedrock backup decrypt --identity admin.key \
+     --in <archive> --out backup.tar.gz
+   ```
+
+   Unpack `backup.tar.gz`. It holds the file `k0s_backup_*.tar.gz`.
+3. Run `k0s restore` with the file `k0s_backup_*.tar.gz`.
+4. Start k0s.
 
 With KMS v2, the KMS service holds the key. The file holds only the
 endpoint. Back up the keys of the KMS service separately. A restore cannot

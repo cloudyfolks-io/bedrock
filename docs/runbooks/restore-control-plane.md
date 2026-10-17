@@ -38,7 +38,9 @@ use the `bedrock` binary of the new version:
   ```
 
   The value is `host:<node>:<path>`. `<node>` is the backup node. `<path>`
-  is the backup archive on that node.
+  is the backup archive on that node. The archive is sealed, and `<path>`
+  ends in `.tar.gz.age`. An archive of an older release is not sealed, and
+  `<path>` ends in `.tar.gz`.
 - When the API does not answer, find the path another way:
   - Look for the line `restoring host:<node>:<path>` that `bedrock upgrade
     abort` printed.
@@ -61,11 +63,18 @@ On the backup node, run this script in a child shell, with `<path>` set to
 the backup archive path. A step failure then stops the script and leaves
 your root shell open.
 
+The script opens the archive with the host key
+`/etc/bedrock/backup/host.key`. If the host key is missing, copy the admin
+identity to the node. Then add `--identity <key file>` to the `bedrock backup
+decrypt` line. For an archive of an older release (`.tar.gz`), remove the
+`bedrock backup decrypt` line, and use `tar -xzf "$BACKUP" -C /root/restore`.
+
 ```sh
 BACKUP=<path> sh -eu <<'EOF'
 install -m 0755 /var/lib/bedrock/previous/k0s /usr/local/bin/k0s
 mkdir -p /root/restore
-tar -xzf "$BACKUP" -C /root/restore
+bedrock backup decrypt --in "$BACKUP" --out /root/restore/backup.tar.gz
+tar -xzf /root/restore/backup.tar.gz -C /root/restore
 HOLD=/var/lib/k0s/.pre-restore-$(date -u +%Y%m%dT%H%M%SZ)
 mkdir -p "$HOLD"
 for dir in etcd pki manifests images helmhome; do
@@ -87,6 +96,9 @@ Backup phase.
 
 The archive also contains the OVN databases `ovnnb_db.db` and `ovnsb_db.db`.
 This procedure does not use them.
+
+The directory `/root/restore` holds the keys of the cluster in plain text.
+Delete it after step 6.
 
 ## 3. Join the other controllers again
 
