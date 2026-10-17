@@ -14,6 +14,7 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"unicode/utf8"
 
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -1211,6 +1212,26 @@ func zoneWithLookalikes(t *testing.T, old string) (string, []string) {
 		t.Fatal(err)
 	}
 	return strings.Replace(zone, `"name": "objectstore"`, `"name": "objectstore", "other_pools": `+string(extra), 1), lookalikes
+}
+
+func TestSafeMessageHasAtMost512Characters(t *testing.T) {
+	cases := map[string]string{
+		"one long line":    strings.Repeat("a", 100000),
+		"three long lines": strings.Repeat("b", 400) + "\n" + strings.Repeat("c", 400) + "\n" + strings.Repeat("d", 400),
+		"wide characters":  strings.Repeat("\u00e9", 600),
+	}
+	for name, in := range cases {
+		t.Run(name, func(t *testing.T) {
+			got := safeMessage(in)
+			if count := utf8.RuneCountInString(got); count != 512 || !utf8.ValidString(got) {
+				t.Fatalf("%d characters, valid %v", count, utf8.ValidString(got))
+			}
+		})
+	}
+	short := strings.Repeat("e", 512)
+	if got := safeMessage(short); got != short {
+		t.Fatalf("a message of 512 characters must stay whole, got %d", len(got))
+	}
 }
 
 func TestZonePoolRewriteRewritesOnlyThePoolNames(t *testing.T) {

@@ -146,6 +146,7 @@ const (
 	rgwRootPool     = ".rgw.root"
 	cephStepTimeout = 2 * time.Minute
 	messageLines    = 3
+	messageRunes    = 512
 
 	zonePoolScript = `set -e
 zone=$(radosgw-admin zone get --rgw-zone="$2" "$3")
@@ -277,7 +278,8 @@ func safeMessage(message string) string {
 			kept = append(kept, line)
 		}
 	}
-	return strings.Join(kept[max(0, len(kept)-messageLines):], "; ")
+	runes := []rune(strings.Join(kept[max(0, len(kept)-messageLines):], "; "))
+	return string(runes[:min(len(runes), messageRunes)])
 }
 
 func adoptNameProblem(pools v1alpha1.AdoptPools) string {
