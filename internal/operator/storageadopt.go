@@ -601,7 +601,7 @@ func findFilesystem(state cephState, old string) (cephFilesystemState, bool) {
 
 func filesystemPlan(state cephState, old string) []renameCommand {
 	fs, found := findFilesystem(state, old)
-	if !found {
+	if old == "" || !found {
 		return nil
 	}
 	renamed := fs.Name != filesystemName
@@ -625,7 +625,7 @@ func filesystemPlan(state cephState, old string) []renameCommand {
 
 func filesystemMoves(state cephState, old string) []poolMove {
 	fs, found := findFilesystem(state, old)
-	if !found {
+	if old == "" || !found {
 		return nil
 	}
 	return filesystemPoolMoves(fs)

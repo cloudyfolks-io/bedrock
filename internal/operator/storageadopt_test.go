@@ -770,6 +770,28 @@ func TestRenamePlan(t *testing.T) {
 	}
 }
 
+func TestRenamePlanLeavesAnExistingBedrockFilesystemAloneForAnEmptyName(t *testing.T) {
+	adopt := adoptSpec()
+	adopt.Pools.Filesystem = ""
+	pending := map[string]any{
+		keyFS:    filesystemEntry("bedrock-fs", "filesystem-data-metadata", "filesystem-data-data0"),
+		keyOldFS: nil,
+		keyNewFS: filesystemFlags(false, true),
+	}
+	state, err := readCephState(context.Background(), cephFixture(t, pending).run, *adopt)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := planNames(renamePlan(state, *adopt))
+	want := slices.Concat(blockRename, rgwIdentityRename, rgwZoneRewrite, rgwPoolRenames)
+	if !slices.Equal(got, want) {
+		t.Fatalf("plan\n%s\nwant\n%s", strings.Join(got, "\n"), strings.Join(want, "\n"))
+	}
+	if conflict := renameConflict(state, *adopt); conflict != "" {
+		t.Fatalf("conflict %q", conflict)
+	}
+}
+
 func TestRenamePlanKeepsTheNamesThatAreAlreadyBedrockNames(t *testing.T) {
 	adopt := adoptSpec()
 	adopt.Pools = v1alpha1.AdoptPools{Block: "bedrock-block", Filesystem: "bedrock-fs", ObjectStore: "bedrock-rgw"}
