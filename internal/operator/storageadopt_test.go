@@ -1203,7 +1203,7 @@ func shellArgs(args []string, dir, zoneGet, zoneSet string) *exec.Cmd {
 func zoneWithLookalikes(t *testing.T, old string) (string, []string) {
 	t.Helper()
 	zone := strings.ReplaceAll(zoneDocument(t), "objectstore.rgw.", old+".rgw.")
-	lookalikes := []string{"x" + old + ".rgw.meta"}
+	lookalikes := []string{"x" + old + ".rgw.meta", old + "2.rgw.meta"}
 	if strings.Contains(old, ".") {
 		lookalikes = append(lookalikes, strings.ReplaceAll(old, ".", "X")+".rgw.meta")
 	}
