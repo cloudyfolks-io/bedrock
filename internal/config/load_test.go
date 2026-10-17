@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	"k8s.io/apimachinery/pkg/runtime"
 	"sigs.k8s.io/yaml"
 
 	"github.com/cloudyfolks-io/bedrock/api/v1alpha1"
@@ -324,6 +325,9 @@ func TestLoadReadsAdopt(t *testing.T) {
 	if adopt.Pools != (v1alpha1.AdoptPools{Block: "storage-block", Filesystem: "filesystem-data", ObjectStore: "objectstore"}) {
 		t.Fatalf("pools %+v", adopt.Pools)
 	}
+	if adopt.Cephx == nil {
+		t.Fatal("cephx is nil")
+	}
 	var cephx map[string]any
 	if err := yaml.Unmarshal(adopt.Cephx.Raw, &cephx); err != nil {
 		t.Fatal(err)
@@ -348,6 +352,7 @@ func TestValidateAdopt(t *testing.T) {
 			c.Spec.Storage.Replicas = 1
 		}, ""},
 		{"no cephx", func(c *v1alpha1.ClusterConfig) { c.Spec.Storage.Adopt.Cephx = nil }, ""},
+		{"empty pool names", func(c *v1alpha1.ClusterConfig) { c.Spec.Storage.Adopt.Pools = v1alpha1.AdoptPools{} }, ""},
 		{"fsid not a uuid", func(c *v1alpha1.ClusterConfig) { c.Spec.Storage.Adopt.FSID = "not-a-uuid" }, "storage.adopt.fsid: not a lowercase UUID"},
 		{"fsid empty", func(c *v1alpha1.ClusterConfig) { c.Spec.Storage.Adopt.FSID = "" }, "storage.adopt.fsid: not a lowercase UUID"},
 		{"fsid uppercase", func(c *v1alpha1.ClusterConfig) {
@@ -376,6 +381,41 @@ func TestValidateAdopt(t *testing.T) {
 		{"device is the directory", func(c *v1alpha1.ClusterConfig) {
 			c.Spec.Storage.Adopt.Hosts[2].Devices[0] = "/dev/disk/by-id/"
 		}, "storage.adopt.hosts[2].devices[0]: not a clean path under /dev/disk/by-id/"},
+		{"monitor id duplicate", func(c *v1alpha1.ClusterConfig) { c.Spec.Storage.Adopt.Monitors[1].ID = "a" }, `storage.adopt.monitors[1].id: duplicate "a"`},
+		{"monitor node duplicate", func(c *v1alpha1.ClusterConfig) { c.Spec.Storage.Adopt.Monitors[2].Node = "node-1" }, `storage.adopt.monitors[2].node: duplicate "node-1"`},
+		{"monitor address duplicate", func(c *v1alpha1.ClusterConfig) { c.Spec.Storage.Adopt.Monitors[2].Address = "10.0.10.11" }, `storage.adopt.monitors[2].address: duplicate "10.0.10.11"`},
+		{"monitor address unspecified", func(c *v1alpha1.ClusterConfig) { c.Spec.Storage.Adopt.Monitors[1].Address = "0.0.0.0" }, "storage.adopt.monitors[1].address: unspecified, loopback or multicast address"},
+		{"monitor address loopback", func(c *v1alpha1.ClusterConfig) { c.Spec.Storage.Adopt.Monitors[1].Address = "127.0.0.1" }, "storage.adopt.monitors[1].address: unspecified, loopback or multicast address"},
+		{"monitor address multicast", func(c *v1alpha1.ClusterConfig) { c.Spec.Storage.Adopt.Monitors[1].Address = "224.0.0.1" }, "storage.adopt.monitors[1].address: unspecified, loopback or multicast address"},
+		{"monitor node uppercase", func(c *v1alpha1.ClusterConfig) { c.Spec.Storage.Adopt.Monitors[1].Node = "Node-2" }, "storage.adopt.monitors[1].node: not a DNS-1123 label"},
+		{"monitor node with a dot", func(c *v1alpha1.ClusterConfig) { c.Spec.Storage.Adopt.Monitors[1].Node = "node-2.lab" }, "storage.adopt.monitors[1].node: not a DNS-1123 label"},
+		{"host node empty", func(c *v1alpha1.ClusterConfig) { c.Spec.Storage.Adopt.Hosts[2].Node = "" }, "storage.adopt.hosts[2].node: empty"},
+		{"host node and monitor node both empty", func(c *v1alpha1.ClusterConfig) {
+			c.Spec.Storage.Adopt.Hosts[2].Node = ""
+			c.Spec.Storage.Adopt.Monitors[2].Node = ""
+		}, "storage.adopt.hosts[2].node: empty"},
+		{"host node duplicate", func(c *v1alpha1.ClusterConfig) { c.Spec.Storage.Adopt.Hosts[1].Node = "node-1" }, `storage.adopt.hosts[1].node: duplicate "node-1"`},
+		{"host node uppercase", func(c *v1alpha1.ClusterConfig) { c.Spec.Storage.Adopt.Hosts[1].Node = "Node-2" }, "storage.adopt.hosts[1].node: not a DNS-1123 label"},
+		{"host node with a dot", func(c *v1alpha1.ClusterConfig) { c.Spec.Storage.Adopt.Hosts[1].Node = "node-2.lab" }, "storage.adopt.hosts[1].node: not a DNS-1123 label"},
+		{"device duplicate in one host", func(c *v1alpha1.ClusterConfig) {
+			hosts := c.Spec.Storage.Adopt.Hosts
+			hosts[0].Devices[1] = hosts[0].Devices[0]
+		}, `storage.adopt.hosts[0].devices[1]: duplicate "/dev/disk/by-id/wwn-0x5002538b10164b70"`},
+		{"device duplicate across hosts", func(c *v1alpha1.ClusterConfig) {
+			hosts := c.Spec.Storage.Adopt.Hosts
+			hosts[1].Devices[0] = hosts[0].Devices[0]
+		}, `storage.adopt.hosts[1].devices[0]: duplicate "/dev/disk/by-id/wwn-0x5002538b10164b70"`},
+		{"storage devices with adopt", func(c *v1alpha1.ClusterConfig) { c.Spec.Storage.Devices = []string{"/dev/nvme1n1"} }, "storage.devices: must be empty when storage.adopt is set"},
+		{"cephx a string", func(c *v1alpha1.ClusterConfig) {
+			c.Spec.Storage.Adopt.Cephx = &runtime.RawExtension{Raw: []byte(`"foo"`)}
+		}, "storage.adopt.cephx: not a JSON object"},
+		{"cephx an array", func(c *v1alpha1.ClusterConfig) {
+			c.Spec.Storage.Adopt.Cephx = &runtime.RawExtension{Raw: []byte(`[1,2]`)}
+		}, "storage.adopt.cephx: not a JSON object"},
+		{"cephx null", func(c *v1alpha1.ClusterConfig) {
+			c.Spec.Storage.Adopt.Cephx = &runtime.RawExtension{Raw: []byte(`null`)}
+		}, "storage.adopt.cephx: not a JSON object"},
+		{"cephx empty", func(c *v1alpha1.ClusterConfig) { c.Spec.Storage.Adopt.Cephx = &runtime.RawExtension{} }, "storage.adopt.cephx: not a JSON object"},
 		{"replicas 1 with 3 hosts", func(c *v1alpha1.ClusterConfig) { c.Spec.Storage.Replicas = 1 }, "storage.replicas must be at least 3 to adopt"},
 		{"replicas 2 with 3 hosts", func(c *v1alpha1.ClusterConfig) { c.Spec.Storage.Replicas = 2 }, "storage.replicas must be at least 3 to adopt"},
 	}
@@ -403,5 +443,35 @@ func TestValidateAdoptDefaultReplicasFailTheFloor(t *testing.T) {
 	err := Validate(WithDefaults(cfg))
 	if err == nil || err.Error() != "storage.replicas must be at least 3 to adopt" {
 		t.Fatalf("Validate = %v", err)
+	}
+}
+
+func TestLoadRefusesScalarCephx(t *testing.T) {
+	base, err := os.ReadFile(filepath.Join("testdata", "adopt.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	scalar := strings.Replace(string(base), "      cephx:\n        daemon:\n          keyType: aes256k\n          keyGeneration: 2\n", "      cephx: foo\n", 1)
+	if scalar == string(base) {
+		t.Fatal("testdata has no cephx block to replace")
+	}
+	path := filepath.Join(t.TempDir(), "cluster.yaml")
+	if err := os.WriteFile(path, []byte(scalar), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Load(path); err == nil || err.Error() != "storage.adopt.cephx: not a JSON object" {
+		t.Fatalf("Load = %v", err)
+	}
+}
+
+func TestToObjectsIgnoreAdopt(t *testing.T) {
+	cfg := loadAdopt(t)
+	plain := *cfg.DeepCopy()
+	plain.Spec.Storage.Adopt = nil
+	if !reflect.DeepEqual(ToCluster(cfg), ToCluster(plain)) {
+		t.Fatalf("ToCluster differs with adopt set: %+v", ToCluster(cfg).Spec)
+	}
+	if !reflect.DeepEqual(ToSettings(cfg), ToSettings(plain)) {
+		t.Fatal("ToSettings differs with adopt set")
 	}
 }

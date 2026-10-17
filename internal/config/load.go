@@ -1,6 +1,7 @@
 package config
 
 import (
+	"encoding/json"
 	"fmt"
 	"net"
 	"net/netip"
@@ -12,6 +13,8 @@ import (
 	"strings"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/util/validation"
 	"sigs.k8s.io/yaml"
 
 	"github.com/cloudyfolks-io/bedrock/api/v1alpha1"
@@ -167,20 +170,63 @@ func validateAdopt(storage v1alpha1.StorageSpec) error {
 	if adopt == nil {
 		return nil
 	}
+	if len(storage.Devices) > 0 {
+		return fmt.Errorf("storage.devices: must be empty when storage.adopt is set")
+	}
 	if !adoptFSID.MatchString(adopt.FSID) {
 		return fmt.Errorf("storage.adopt.fsid: not a lowercase UUID")
 	}
 	if !filepath.IsAbs(adopt.KeyFile) {
 		return fmt.Errorf("storage.adopt.keyFile: not an absolute path")
 	}
-	if err := validateAdoptMonitors(*adopt); err != nil {
+	if err := validateAdoptCephx(adopt.Cephx); err != nil {
 		return err
 	}
-	if err := validateAdoptDevices(adopt.Hosts); err != nil {
+	if err := validateAdoptHosts(adopt.Hosts); err != nil {
+		return err
+	}
+	if err := validateAdoptMonitors(*adopt); err != nil {
 		return err
 	}
 	if len(adopt.Hosts) >= 3 && storage.Replicas < 3 {
 		return fmt.Errorf("storage.replicas must be at least 3 to adopt")
+	}
+	return nil
+}
+
+func validateAdoptCephx(cephx *runtime.RawExtension) error {
+	if cephx == nil {
+		return nil
+	}
+	var object map[string]any
+	if err := json.Unmarshal(cephx.Raw, &object); err != nil || object == nil {
+		return fmt.Errorf("storage.adopt.cephx: not a JSON object")
+	}
+	return nil
+}
+
+func validateAdoptHosts(hosts []v1alpha1.AdoptHost) error {
+	seenDevices := map[string]bool{}
+	for i, host := range hosts {
+		field := fmt.Sprintf("storage.adopt.hosts[%d]", i)
+		if host.Node == "" {
+			return fmt.Errorf("%s.node: empty", field)
+		}
+		if len(validation.IsDNS1123Label(host.Node)) > 0 {
+			return fmt.Errorf("%s.node: not a DNS-1123 label", field)
+		}
+		if slices.ContainsFunc(hosts[:i], func(earlier v1alpha1.AdoptHost) bool { return earlier.Node == host.Node }) {
+			return fmt.Errorf("%s.node: duplicate %q", field, host.Node)
+		}
+		for j, device := range host.Devices {
+			if !strings.HasPrefix(device, adoptDevicePrefix) || filepath.Clean(device) != device {
+				return fmt.Errorf("%s.devices[%d]: not a clean path under %s", field, j, adoptDevicePrefix)
+			}
+			if seenDevices[device] {
+				return fmt.Errorf("%s.devices[%d]: duplicate %q", field, j, device)
+			}
+			seenDevices[device] = true
+		}
 	}
 	return nil
 }
@@ -191,26 +237,39 @@ func validateAdoptMonitors(adopt v1alpha1.AdoptSpec) error {
 	}
 	for i, monitor := range adopt.Monitors {
 		field := fmt.Sprintf("storage.adopt.monitors[%d]", i)
-		if !adoptMonitorID.MatchString(monitor.ID) {
-			return fmt.Errorf("%s.id: not made of lowercase letters", field)
+		if err := validateAdoptMonitor(field, monitor, adopt.Hosts); err != nil {
+			return err
 		}
-		if addr, err := netip.ParseAddr(monitor.Address); err != nil || !addr.Is4() {
-			return fmt.Errorf("%s.address: not an IPv4 address", field)
-		}
-		if !slices.ContainsFunc(adopt.Hosts, func(host v1alpha1.AdoptHost) bool { return host.Node == monitor.Node }) {
-			return fmt.Errorf("%s.node: %q is not in storage.adopt.hosts", field, monitor.Node)
+		for _, earlier := range adopt.Monitors[:i] {
+			switch {
+			case earlier.ID == monitor.ID:
+				return fmt.Errorf("%s.id: duplicate %q", field, monitor.ID)
+			case earlier.Address == monitor.Address:
+				return fmt.Errorf("%s.address: duplicate %q", field, monitor.Address)
+			case earlier.Node == monitor.Node:
+				return fmt.Errorf("%s.node: duplicate %q", field, monitor.Node)
+			}
 		}
 	}
 	return nil
 }
 
-func validateAdoptDevices(hosts []v1alpha1.AdoptHost) error {
-	for i, host := range hosts {
-		for j, device := range host.Devices {
-			if !strings.HasPrefix(device, adoptDevicePrefix) || filepath.Clean(device) != device {
-				return fmt.Errorf("storage.adopt.hosts[%d].devices[%d]: not a clean path under %s", i, j, adoptDevicePrefix)
-			}
-		}
+func validateAdoptMonitor(field string, monitor v1alpha1.AdoptMonitor, hosts []v1alpha1.AdoptHost) error {
+	if !adoptMonitorID.MatchString(monitor.ID) {
+		return fmt.Errorf("%s.id: not made of lowercase letters", field)
+	}
+	addr, err := netip.ParseAddr(monitor.Address)
+	if err != nil || !addr.Is4() {
+		return fmt.Errorf("%s.address: not an IPv4 address", field)
+	}
+	if addr.IsUnspecified() || addr.IsLoopback() || addr.IsMulticast() {
+		return fmt.Errorf("%s.address: unspecified, loopback or multicast address", field)
+	}
+	if len(validation.IsDNS1123Label(monitor.Node)) > 0 {
+		return fmt.Errorf("%s.node: not a DNS-1123 label", field)
+	}
+	if !slices.ContainsFunc(hosts, func(host v1alpha1.AdoptHost) bool { return host.Node == monitor.Node }) {
+		return fmt.Errorf("%s.node: %q is not in storage.adopt.hosts", field, monitor.Node)
 	}
 	return nil
 }
