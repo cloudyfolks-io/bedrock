@@ -87,7 +87,12 @@ func (r *HostReconciler) createHostFromNode(ctx context.Context, name string) er
 	if len(nodeRoles) == 0 {
 		return nil
 	}
-	host := &v1alpha1.Host{ObjectMeta: metav1.ObjectMeta{Name: name, Labels: map[string]string{v1alpha1.LabelKind: "Host", v1alpha1.LabelName: name}}, Spec: v1alpha1.HostSpec{Roles: nodeRoles}}
+	cluster, err := r.cluster(ctx)
+	if err != nil {
+		return err
+	}
+	devices := v1alpha1.AdoptHostDevices(cluster.Spec.Storage.Adopt, name)
+	host := &v1alpha1.Host{ObjectMeta: metav1.ObjectMeta{Name: name, Labels: map[string]string{v1alpha1.LabelKind: "Host", v1alpha1.LabelName: name}}, Spec: v1alpha1.HostSpec{Roles: nodeRoles, Storage: v1alpha1.HostStorageSpec{Devices: devices}}}
 	return client.IgnoreAlreadyExists(r.Client.Create(ctx, host))
 }
 

@@ -2,6 +2,7 @@ package operator
 
 import (
 	"context"
+	"slices"
 	"testing"
 	"time"
 
@@ -279,5 +280,55 @@ func TestHostReconcileGrantsOneAuthnRestartAtATime(t *testing.T) {
 	}
 	if _, held := first.Annotations[v1alpha1.AnnotationAuthnRestart]; held || !granted("cp-b") {
 		t.Fatalf("the grant moves to the next host when the first restarted: %v", first.Annotations)
+	}
+}
+
+func TestHostReconcileGivesAdoptDevicesToACreatedHost(t *testing.T) {
+	c, _ := StartTestEnv(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+
+	adopt := &v1alpha1.AdoptSpec{
+		FSID:     "7e1b4a3c-5d2f-4c8e-9a61-0b3f2d8c4e57",
+		Monitors: []v1alpha1.AdoptMonitor{{ID: "a", Node: "adopt-1", Address: "10.0.10.11"}},
+		Hosts: []v1alpha1.AdoptHost{
+			{Node: "adopt-1", Devices: []string{"/dev/disk/by-id/wwn-0x1", "/dev/disk/by-id/wwn-0x2"}},
+			{Node: "adopt-2", Devices: []string{"/dev/disk/by-id/wwn-0x3"}},
+		},
+		Pools: v1alpha1.AdoptPools{Block: "storage-block", Filesystem: "filesystem-data", ObjectStore: "objectstore"},
+	}
+	cluster := &v1alpha1.Cluster{ObjectMeta: metav1.ObjectMeta{Name: v1alpha1.ClusterName}, Spec: v1alpha1.ClusterSpec{DesiredVersion: "v0.1.0", API: v1alpha1.APISpec{VIP: "10.0.0.10", VIPMode: "arp"}, NodeConcurrency: 1, Storage: v1alpha1.ClusterStorageSpec{Adopt: adopt}}}
+	if err := c.Create(ctx, cluster); err != nil {
+		t.Fatal(err)
+	}
+	nodeRoles := roles.Labels([]string{v1alpha1.RoleCephOSD, v1alpha1.RoleWorkload})
+	for _, name := range []string{"adopt-1", "adopt-2", "other-1"} {
+		if err := c.Create(ctx, &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: name, Labels: nodeRoles}}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	existing := &v1alpha1.Host{ObjectMeta: metav1.ObjectMeta{Name: "adopt-2"}, Spec: v1alpha1.HostSpec{Roles: []string{v1alpha1.RoleCephOSD}}}
+	if err := c.Create(ctx, existing); err != nil {
+		t.Fatal(err)
+	}
+	r := &HostReconciler{Client: c, APIReader: c}
+	for _, name := range []string{"adopt-1", "adopt-2", "other-1"} {
+		if _, err := r.Reconcile(ctx, ctrl.Request{NamespacedName: types.NamespacedName{Name: name}}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	want := map[string][]string{
+		"adopt-1": {"/dev/disk/by-id/wwn-0x1", "/dev/disk/by-id/wwn-0x2"},
+		"adopt-2": nil,
+		"other-1": nil,
+	}
+	for name, devices := range want {
+		var got v1alpha1.Host
+		if err := c.Get(ctx, client.ObjectKey{Name: name}, &got); err != nil {
+			t.Fatalf("%s: %v", name, err)
+		}
+		if !slices.Equal(got.Spec.Storage.Devices, devices) {
+			t.Fatalf("%s: devices %v, want %v", name, got.Spec.Storage.Devices, devices)
+		}
 	}
 }
