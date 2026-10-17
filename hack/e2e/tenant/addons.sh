@@ -84,5 +84,7 @@ grafana_has_dashboards() {
 }
 
 alertmanager_has_webhook() {
-  kubectl -n monitoring get secret bedrock-alertmanager-config -o json | jq -r '.data | map(@base64d) | join("\n")' | grep -q 'http://webhook.e2e.test:9000/alerts'
+  local config
+  config=$(kubectl -n monitoring get secret bedrock-alertmanager-config -o json | jq -r '.data | map(@base64d) | join("\n")')
+  grep -q 'http://webhook.e2e.test:9000/alerts' <<<"$config"
 }

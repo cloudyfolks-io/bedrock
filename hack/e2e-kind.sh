@@ -81,7 +81,8 @@ kubectl wait --for=condition=Available cluster/cluster --timeout=60s
 kubectl -n cert-manager rollout status deployment/cert-manager --timeout=120s
 kubectl -n cert-manager rollout status deployment/cert-manager-webhook --timeout=120s
 kubectl -n kube-system rollout status deployment/monitoring-metrics-server --timeout=120s
-kubectl -n bedrock-system get configmap bedrock-release-inventory -o jsonpath='{.data.objects}' | grep -q cert-manager
+inventory=$(kubectl -n bedrock-system get configmap bedrock-release-inventory -o jsonpath='{.data.objects}')
+grep -q cert-manager <<<"$inventory"
 kubectl get release dev -o jsonpath='{.status.conditions[?(@.type=="Ready")].status}' | grep -q True
 
 node=$(kubectl get nodes -o jsonpath='{.items[0].metadata.name}')

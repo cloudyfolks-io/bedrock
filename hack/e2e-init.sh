@@ -157,7 +157,8 @@ assert_secret_encrypted kube-system bedrock-secrets-encryption
 case "$image" in
 localhost:*) test "$(kubectl -n bedrock-system get deploy/bedrock-operator -o jsonpath='{.spec.template.spec.containers[0].image}')" = "$image" ;;
 esac
-if kubectl get pods -A -o jsonpath='{range .items[*]}{.status.containerStatuses[*].state.waiting.reason}{"\n"}{end}' | grep -qE 'ImagePullBackOff|ErrImagePull'; then
+waiting=$(kubectl get pods -A -o jsonpath='{range .items[*]}{.status.containerStatuses[*].state.waiting.reason}{"\n"}{end}')
+if grep -qE 'ImagePullBackOff|ErrImagePull' <<<"$waiting"; then
   exit 1
 fi
 kubectl -n cert-manager rollout status deployment/cert-manager --timeout=300s
