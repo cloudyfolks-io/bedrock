@@ -191,6 +191,7 @@ import cephfs, hashlib, os, sys
 mode, name = sys.argv[1], sys.argv[2]
 path = "/lab-file"
 fs = cephfs.LibCephFS(conffile="/var/lib/rook/rook-ceph/rook-ceph.config")
+fs.conf_set("client_permissions", "false")
 fs.mount(filesystem_name=name)
 if mode == "write":
     data = b"".join(hashlib.sha256(b"lab-fs-%d" % i).digest() for i in range(32768))
