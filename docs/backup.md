@@ -364,69 +364,74 @@ protect them from the loss of a disk, copy the files off the host with your
 own tools. A copy is safe, because the file is sealed. Read
 [Sealed archives](#sealed-archives) before you rely on a copy.
 
-To restore a snapshot, do these steps on the host. Use the k0s version that
-took the snapshot. If a step fails, stop and do not do the next step. First,
-set the path of the file:
+To restore a snapshot, use the script on the host. Use the k0s version that
+took the snapshot. The script opens and unpacks the archive before it stops
+k0s. If the identity is wrong or the archive is damaged, the script stops and
+k0s keeps running. A step failure stops the script and leaves your root shell
+open.
+
+The script restores one control-plane node. On a cluster with more than one
+control-plane node, stop k0s on the other control-plane nodes before you run
+the script (section 1 of the
+[runbook](runbooks/restore-control-plane.md)). Join them again after the
+script (section 3 of the runbook).
+
+A sealed snapshot ends in `.tar.gz.age`. A snapshot of an older release is
+not sealed and ends in `.tar.gz`. Use the script that fits the file.
+
+For a sealed snapshot, use this script. The host key opens the archive. To
+use an admin identity, add `--identity <key file>` to the `bedrock backup
+decrypt` line.
 
 ```sh
-SNAPSHOT=/var/lib/bedrock/backups/etcd-<stamp>.tar.gz.age
+SNAPSHOT=/var/lib/bedrock/backups/etcd-<stamp>.tar.gz.age sh -eu <<'EOF'
+mkdir -p /root/restore
+bedrock backup decrypt --in "$SNAPSHOT" --out /root/restore/snapshot.tar.gz
+tar -xzf /root/restore/snapshot.tar.gz -C /root/restore
+systemctl stop k0scontroller
+HOLD=/var/lib/k0s/.pre-restore-$(date -u +%Y%m%dT%H%M%SZ)
+mkdir -p "$HOLD"
+for dir in etcd pki manifests images helmhome; do
+  if [ -e "/var/lib/k0s/$dir" ]; then mv "/var/lib/k0s/$dir" "$HOLD/"; fi
+done
+k0s restore --config-out /root/restore/k0s.yaml /root/restore/k0s_backup_*.tar.gz
+systemctl start k0scontroller
+EOF
 ```
 
-1. Stop k0s and make a work directory:
+For a plain snapshot, use this script. It has no decrypt line.
 
-   ```sh
-   systemctl stop k0scontroller
-   mkdir -p /root/restore
-   ```
-
-2. Open the archive. The host key opens it. To use an admin identity, add
-   `--identity <key file>`:
-
-   ```sh
-   bedrock backup decrypt --in "$SNAPSHOT" --out /root/restore/snapshot.tar.gz
-   ```
-
-   A snapshot of an older release that is not sealed yet ends in `.tar.gz`.
-   For such a file, do not do this step. Use `"$SNAPSHOT"` in step 3.
-
-3. Unpack it:
-
-   ```sh
-   tar -xzf /root/restore/snapshot.tar.gz -C /root/restore
-   ```
-
-4. Move the old state aside:
-
-   ```sh
-   HOLD=/var/lib/k0s/.pre-restore-$(date -u +%Y%m%dT%H%M%SZ)
-   mkdir -p "$HOLD"
-   for dir in etcd pki manifests images helmhome; do
-     if [ -e "/var/lib/k0s/$dir" ]; then mv "/var/lib/k0s/$dir" "$HOLD/"; fi
-   done
-   ```
-
-5. Restore the k0s backup in the archive:
-
-   ```sh
-   k0s restore --config-out /root/restore/k0s.yaml /root/restore/k0s_backup_*.tar.gz
-   ```
-
-6. Start k0s:
-
-   ```sh
-   systemctl start k0scontroller
-   ```
-
-7. Delete the plain files. They hold the keys of the cluster:
-
-   ```sh
-   rm -rf /root/restore
-   ```
+```sh
+SNAPSHOT=/var/lib/bedrock/backups/etcd-<stamp>.tar.gz sh -eu <<'EOF'
+mkdir -p /root/restore
+tar -xzf "$SNAPSHOT" -C /root/restore
+systemctl stop k0scontroller
+HOLD=/var/lib/k0s/.pre-restore-$(date -u +%Y%m%dT%H%M%SZ)
+mkdir -p "$HOLD"
+for dir in etcd pki manifests images helmhome; do
+  if [ -e "/var/lib/k0s/$dir" ]; then mv "/var/lib/k0s/$dir" "$HOLD/"; fi
+done
+k0s restore --config-out /root/restore/k0s.yaml /root/restore/k0s_backup_*.tar.gz
+systemctl start k0scontroller
+EOF
+```
 
 The snapshot does not hold the encryption key of the Secrets. On a host that
 lost its disk, put the key at `/etc/bedrock/encryption/encryption.yaml`
-before step 5. See [Secrets at rest](secrets-at-rest.md). Delete `$HOLD` when
-the cluster works.
+before you run the script. See [Secrets at rest](secrets-at-rest.md).
+
+After the script, do sections 4 and 5 of the
+[runbook](runbooks/restore-control-plane.md). They restart the kubelet on
+each worker and run `bedrock restart-workloads`.
+
+Delete the plain files. They hold the keys of the cluster:
+
+```sh
+rm -rf /root/restore
+```
+
+When the cluster works, delete the directory `/var/lib/k0s/.pre-restore-<time>`
+that the script made.
 
 ## Sealed archives
 
