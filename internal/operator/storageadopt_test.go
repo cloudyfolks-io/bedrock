@@ -829,6 +829,24 @@ func TestReadCephStateReadsTheInventoryOnlyAfterTheMonitorsAndOSDsAnswer(t *test
 	}
 }
 
+func TestReadCephStateSkipsTheObjectStoreForAnEmptyName(t *testing.T) {
+	adopt := adoptSpec()
+	adopt.Pools.ObjectStore = ""
+	fake := cephFixture(t)
+	state, err := readCephState(context.Background(), fake.run, *adopt)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, key := range slices.Concat(fake.reads, fake.mutations) {
+		if strings.HasPrefix(key, "radosgw-admin") || strings.HasPrefix(key, "sh ") {
+			t.Fatalf("an empty object store name must not run %q", key)
+		}
+	}
+	if len(state.Realms)+len(state.ZoneGroups)+len(state.Zones)+len(state.ZoneStalePools) != 0 || len(state.Pools) == 0 {
+		t.Fatalf("state %+v", state)
+	}
+}
+
 func TestReadCephStateFailsLoudWithoutTheFlagsOfTheFilesystem(t *testing.T) {
 	fake := cephFixture(t, map[string]any{keyOldFS: map[string]any{"mdsmap": map[string]any{"flags_state": map[string]any{"allow_snaps": true}}}})
 	if _, err := readCephState(context.Background(), fake.run, *adoptSpec()); err == nil {

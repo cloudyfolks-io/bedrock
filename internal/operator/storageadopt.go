@@ -512,6 +512,9 @@ func readFilesystemFlags(ctx context.Context, run runFunc, name string) (bool, b
 }
 
 func readObjectStore(ctx context.Context, run runFunc, adopt v1alpha1.AdoptSpec, state cephState) (cephState, error) {
+	if adopt.Pools.ObjectStore == "" {
+		return state, nil
+	}
 	var realms struct {
 		Realms []string `json:"realms"`
 	}
