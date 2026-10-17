@@ -109,6 +109,12 @@ func TestAdoptedProblems(t *testing.T) {
 	}{
 		{"all good", nil, nil, nil},
 		{"internal pools may differ", []map[string]any{{keyPools: adoptedPools(map[string]int{".mgr": 1, ".rgw.root": 1})}}, nil, nil},
+		{
+			"pools that only look like Bedrock pools",
+			[]map[string]any{{keyPools: slices.Concat(adoptedPools(nil), poolEntries(1, "bedrock-blockx", "bedrock-fsx-data", "bedrock-fs", "bedrock-rgw", "bedrock-rgwx.rgw.meta"))}},
+			nil,
+			nil,
+		},
 		{"an empty host bucket is no problem", []map[string]any{{keyTree: treeOf(hostBucket(-3, "node-1", 0), osdLeaf(0), hostBucket(-9, "retired"))}}, nil, nil},
 		{
 			"a monitor on the old release",
