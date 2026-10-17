@@ -305,8 +305,18 @@ func ToCluster(cfg v1alpha1.ClusterConfig) v1alpha1.Cluster {
 			Registry:        v1alpha1.RegistrySpec{Mirror: cfg.Spec.Registry.Mirror},
 			Encryption:      *cfg.Spec.Encryption.DeepCopy(),
 			JoinCIDR:        cfg.Spec.Network.Fabric.JoinCIDR,
+			Storage:         v1alpha1.ClusterStorageSpec{Adopt: adoptWithoutKeyFile(cfg.Spec.Storage.Adopt)},
 		},
 	}
+}
+
+func adoptWithoutKeyFile(adopt *v1alpha1.AdoptSpec) *v1alpha1.AdoptSpec {
+	if adopt == nil {
+		return nil
+	}
+	out := adopt.DeepCopy()
+	out.KeyFile = ""
+	return out
 }
 
 func ToHost(cfg v1alpha1.ClusterConfig, nodeName string) v1alpha1.Host {
@@ -316,7 +326,7 @@ func ToHost(cfg v1alpha1.ClusterConfig, nodeName string) v1alpha1.Host {
 			Roles:             slices.Clone(cfg.Spec.Roles),
 			Management:        v1alpha1.ManagementSpec{Enabled: cfg.Spec.Host.Management},
 			MaintenanceWindow: cfg.Spec.Host.MaintenanceWindow,
-			Storage:           v1alpha1.HostStorageSpec{Devices: slices.Clone(cfg.Spec.Storage.Devices)},
+			Storage:           v1alpha1.HostStorageSpec{Devices: slices.Concat(cfg.Spec.Storage.Devices, v1alpha1.AdoptHostDevices(cfg.Spec.Storage.Adopt, nodeName))},
 		},
 	}
 }

@@ -464,14 +464,55 @@ func TestLoadRefusesScalarCephx(t *testing.T) {
 	}
 }
 
-func TestToObjectsIgnoreAdopt(t *testing.T) {
+func TestToSettingsIgnoreAdopt(t *testing.T) {
 	cfg := loadAdopt(t)
 	plain := *cfg.DeepCopy()
 	plain.Spec.Storage.Adopt = nil
-	if !reflect.DeepEqual(ToCluster(cfg), ToCluster(plain)) {
-		t.Fatalf("ToCluster differs with adopt set: %+v", ToCluster(cfg).Spec)
-	}
 	if !reflect.DeepEqual(ToSettings(cfg), ToSettings(plain)) {
 		t.Fatal("ToSettings differs with adopt set")
+	}
+	for _, setting := range ToSettings(cfg) {
+		if strings.Contains(setting.Spec.Value, "ceph-keys") || strings.Contains(setting.Name, "adopt") {
+			t.Fatalf("setting %s carries adopt data", setting.Name)
+		}
+	}
+}
+
+func TestToClusterCopiesAdoptWithoutKeyFile(t *testing.T) {
+	cfg := loadAdopt(t)
+	adopt := ToCluster(cfg).Spec.Storage.Adopt
+	if adopt == nil {
+		t.Fatal("adopt is nil")
+	}
+	want := *cfg.Spec.Storage.Adopt.DeepCopy()
+	want.KeyFile = ""
+	if !reflect.DeepEqual(*adopt, want) {
+		t.Fatalf("adopt %+v, want %+v", *adopt, want)
+	}
+	if cfg.Spec.Storage.Adopt.KeyFile != "/root/ceph-keys.yaml" {
+		t.Fatal("ToCluster changed its input")
+	}
+	adopt.Hosts[0].Node = "changed"
+	if cfg.Spec.Storage.Adopt.Hosts[0].Node != "node-1" {
+		t.Fatal("ToCluster shares the adopt hosts with its input")
+	}
+}
+
+func TestToClusterWithoutAdoptHasNone(t *testing.T) {
+	cfg := loadAdopt(t)
+	cfg.Spec.Storage.Adopt = nil
+	if adopt := ToCluster(cfg).Spec.Storage.Adopt; adopt != nil {
+		t.Fatalf("adopt %+v", adopt)
+	}
+}
+
+func TestToHostTakesTheDevicesOfItsAdoptNode(t *testing.T) {
+	cfg := loadAdopt(t)
+	want := []string{"/dev/disk/by-id/wwn-0x5002538b10164b70", "/dev/disk/by-id/wwn-0x5002538b101652a0"}
+	if got := ToHost(cfg, "node-1").Spec.Storage.Devices; !reflect.DeepEqual(got, want) {
+		t.Fatalf("devices %v, want %v", got, want)
+	}
+	if got := ToHost(cfg, "node-9").Spec.Storage.Devices; len(got) != 0 {
+		t.Fatalf("unlisted node got devices %v", got)
 	}
 }

@@ -20,7 +20,7 @@ func preflightResults(ctx context.Context, deps InitDeps, k0sClient k0s.Client, 
 		}
 		return preflight.Run(ctx, deps.Exec, facts, devices, cfg, supportedOS), nil
 	}
-	devices, err := probeAdoptDevices(ctx, deps, adoptDevicePaths(*adopt, facts.Hostname))
+	devices, err := probeAdoptDevices(ctx, deps, v1alpha1.AdoptHostDevices(adopt, facts.Hostname))
 	if err != nil {
 		return nil, err
 	}
@@ -47,15 +47,6 @@ func probeAdoptDevices(ctx context.Context, deps InitDeps, paths []string) ([]ho
 		devices = append(devices, labelled)
 	}
 	return devices, nil
-}
-
-func adoptDevicePaths(adopt v1alpha1.AdoptSpec, hostname string) []string {
-	for _, h := range adopt.Hosts {
-		if h.Node == hostname {
-			return h.Devices
-		}
-	}
-	return nil
 }
 
 func adoptMonitorIDs(adopt v1alpha1.AdoptSpec, hostname string) []string {

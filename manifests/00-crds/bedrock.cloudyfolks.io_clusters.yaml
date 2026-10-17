@@ -91,6 +91,66 @@ spec:
                   mirror:
                     type: string
                 type: object
+              storage:
+                properties:
+                  adopt:
+                    properties:
+                      cephx:
+                        type: object
+                        x-kubernetes-preserve-unknown-fields: true
+                      fsid:
+                        type: string
+                      hosts:
+                        items:
+                          properties:
+                            devices:
+                              items:
+                                type: string
+                              type: array
+                            node:
+                              type: string
+                          required:
+                          - devices
+                          - node
+                          type: object
+                        type: array
+                      keyFile:
+                        type: string
+                      monitors:
+                        items:
+                          properties:
+                            address:
+                              type: string
+                            id:
+                              type: string
+                            node:
+                              type: string
+                          required:
+                          - address
+                          - id
+                          - node
+                          type: object
+                        type: array
+                      pools:
+                        properties:
+                          block:
+                            type: string
+                          filesystem:
+                            type: string
+                          objectStore:
+                            type: string
+                        required:
+                        - block
+                        - filesystem
+                        - objectStore
+                        type: object
+                    required:
+                    - fsid
+                    - hosts
+                    - monitors
+                    - pools
+                    type: object
+                type: object
               upgrade:
                 properties:
                   action:

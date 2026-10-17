@@ -81,10 +81,17 @@ type ClusterSpec struct {
 	Encryption EncryptionSpec `json:"encryption,omitempty"`
 	// +optional
 	Upgrade UpgradeSpec `json:"upgrade,omitempty"`
+	// +optional
+	Storage ClusterStorageSpec `json:"storage,omitempty"`
 	// +kubebuilder:default="100.64.0.0/16"
 	// +kubebuilder:validation:XValidation:rule="self == oldSelf",message="joinCIDR is immutable"
 	// +optional
 	JoinCIDR string `json:"joinCIDR,omitempty"`
+}
+
+type ClusterStorageSpec struct {
+	// +optional
+	Adopt *AdoptSpec `json:"adopt,omitempty"`
 }
 
 type ComponentStatus struct {

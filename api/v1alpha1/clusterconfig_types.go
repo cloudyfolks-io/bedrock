@@ -59,8 +59,9 @@ type StorageSpec struct {
 }
 
 type AdoptSpec struct {
-	FSID     string         `json:"fsid"`
-	KeyFile  string         `json:"keyFile"`
+	FSID string `json:"fsid"`
+	// +optional
+	KeyFile  string         `json:"keyFile,omitempty"`
 	Monitors []AdoptMonitor `json:"monitors"`
 	Hosts    []AdoptHost    `json:"hosts"`
 	Pools    AdoptPools     `json:"pools"`
