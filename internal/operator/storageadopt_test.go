@@ -452,7 +452,7 @@ func TestRenderStorageNeverRendersCleanupPolicy(t *testing.T) {
 		"fresh":         storageInput([]v1alpha1.Host{osdHost("a", "/dev/sdb")}, "1"),
 		"fresh three":   storageInput(adoptHosts(), "3"),
 		"adopt waiting": adoptInput(v1alpha1.ReasonWaitingForQuorum),
-		"adopt renamed": adoptInput(v1alpha1.ReasonAdopted),
+		"adopt adopted": adoptInput(v1alpha1.ReasonAdopted),
 	}
 	for name, in := range inputs {
 		t.Run(name, func(t *testing.T) {
