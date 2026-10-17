@@ -334,6 +334,11 @@ for arg in "$@"; do
     name=${rest%%/*}
     args+=("${arg/,if=virtio,/,if=none,id=$name,}" -device "virtio-blk-pci,drive=$name,serial=$name")
     ;;
+  socket,id=*,fd=*)
+    descriptor=${arg##*,fd=}
+    rest=${arg#socket,}
+    args+=("stream,${rest%,fd=*},server=off,addr.type=fd,addr.str=$descriptor")
+    ;;
   *) args+=("$arg") ;;
   esac
 done
