@@ -39,7 +39,8 @@ trap remove_worktree EXIT
 build_from_ref() {
   local ref=$1 version=$2 k0s=$3 repo
   repo=$(pwd)
-  worktree_a=$(mktemp -d)
+  mkdir -p "$repo/dist"
+  worktree_a=$(mktemp -d "$repo/dist/.ref-XXXXXX")
   git worktree add --detach "$worktree_a" "$ref"
   mkdir -p "$worktree_a/dist" "$repo/dist/cache"
   ln -s "$repo/dist/cache" "$worktree_a/dist/cache"
