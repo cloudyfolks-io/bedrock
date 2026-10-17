@@ -1,0 +1,185 @@
+toolbox:
+  enabled: true
+
+cephImage:
+  repository: quay.io/ceph/ceph
+
+monitoring:
+  enabled: false
+  createPrometheusRules: false
+
+cephClusterSpec:
+  security:
+    cephx:
+      daemon:
+        keyRotationPolicy: KeyGeneration
+        keyGeneration: 2
+        keyType: aes256k
+      csi:
+        keyRotationPolicy: KeyGeneration
+        keyGeneration: 2
+        keepPriorKeyCountMax: 1
+        keyType: aes
+      rbdMirrorPeer:
+        keyRotationPolicy: KeyGeneration
+        keyGeneration: 2
+        keyType: aes256k
+  healthCheck:
+    muteHealthWarning:
+      AUTH_EMERGENCY_CIPHERS_SET:
+        policy: mute
+      AUTH_INSECURE_CLIENT_KEY_TYPE:
+        policy: mute
+      AUTH_INSECURE_KEYS_ALLOWED:
+        policy: mute
+      AUTH_INSECURE_KEYS_CREATABLE:
+        policy: mute
+  monitoring:
+    enabled: false
+  removeOSDsIfOutAndSafeToRemove: true
+  cephConfig:
+    global:
+      osd_pool_default_pg_autoscale_mode: "on"
+      rbd_blocklist_on_break_lock: "false"
+      rbd_blocklist_expire_seconds: "60"
+    mon:
+      mon_osd_blocklist_default_expire: "60"
+  network:
+    provider: host
+  crashCollector:
+    daysToRetain: 30
+  resources:
+    mgr:
+      requests:
+        cpu: "100m"
+        memory: "1Gi"
+    mon:
+      requests:
+        cpu: "100m"
+        memory: "2Gi"
+    osd:
+      requests:
+        cpu: "100m"
+        memory: "1Gi"
+  storage:
+    useAllNodes: false
+    useAllDevices: false
+    nodes:
+      - name: "lima-adoptlab-1"
+        devices:
+          - name: "/dev/disk/by-id/virtio-adoptlab-1-a"
+          - name: "/dev/disk/by-id/virtio-adoptlab-1-b"
+      - name: "lima-adoptlab-2"
+        devices:
+          - name: "/dev/disk/by-id/virtio-adoptlab-2-a"
+          - name: "/dev/disk/by-id/virtio-adoptlab-2-b"
+      - name: "lima-adoptlab-3"
+        devices:
+          - name: "/dev/disk/by-id/virtio-adoptlab-3-a"
+          - name: "/dev/disk/by-id/virtio-adoptlab-3-b"
+
+cephBlockPools:
+  - name: storage-block
+    spec:
+      failureDomain: host
+      replicated:
+        size: 3
+      enableRBDStats: true
+      parameters:
+        bulk: "true"
+    storageClass:
+      enabled: true
+      name: storage-block
+      isDefault: true
+      reclaimPolicy: Delete
+      allowVolumeExpansion: true
+      volumeBindingMode: Immediate
+      parameters:
+        imageFormat: "2"
+        imageFeatures: layering,exclusive-lock,object-map,fast-diff,deep-flatten
+        csi.storage.k8s.io/provisioner-secret-name: rook-csi-rbd-provisioner
+        csi.storage.k8s.io/provisioner-secret-namespace: "rook-ceph"
+        csi.storage.k8s.io/controller-expand-secret-name: rook-csi-rbd-provisioner
+        csi.storage.k8s.io/controller-expand-secret-namespace: "rook-ceph"
+        csi.storage.k8s.io/node-stage-secret-name: rook-csi-rbd-node
+        csi.storage.k8s.io/node-stage-secret-namespace: "rook-ceph"
+        csi.storage.k8s.io/fstype: ext4
+
+cephFileSystems:
+  - name: filesystem-data
+    spec:
+      metadataPool:
+        replicated:
+          size: 3
+      dataPools:
+        - replicated:
+            size: 3
+      metadataServer:
+        activeCount: 1
+        activeStandby: true
+        resources:
+          requests:
+            cpu: "100m"
+            memory: "512Mi"
+          limits:
+            memory: "2Gi"
+    storageClass:
+      enabled: true
+      name: storage-filesystem
+      reclaimPolicy: Delete
+      allowVolumeExpansion: true
+      volumeBindingMode: Immediate
+      parameters:
+        csi.storage.k8s.io/provisioner-secret-name: rook-csi-cephfs-provisioner
+        csi.storage.k8s.io/provisioner-secret-namespace: "rook-ceph"
+        csi.storage.k8s.io/controller-expand-secret-name: rook-csi-cephfs-provisioner
+        csi.storage.k8s.io/controller-expand-secret-namespace: "rook-ceph"
+        csi.storage.k8s.io/node-stage-secret-name: rook-csi-cephfs-node
+        csi.storage.k8s.io/node-stage-secret-namespace: "rook-ceph"
+
+cephFileSystemVolumeSnapshotClass:
+  enabled: false
+
+cephBlockPoolsVolumeSnapshotClass:
+  enabled: false
+
+cephObjectStores:
+  - name: objectstore
+    namespace: rook-ceph
+    spec:
+      metadataPool:
+        failureDomain: host
+        replicated:
+          size: 3
+      dataPool:
+        failureDomain: host
+        replicated:
+          size: 3
+      preservePoolsOnDelete: true
+      gateway:
+        port: 8080
+        instances: 2
+        resources:
+          requests:
+            cpu: "100m"
+            memory: 512Mi
+          limits:
+            cpu: "2"
+            memory: 2Gi
+        rgwConfig:
+          rgw_gc_max_concurrent_io: "20"
+          rgw_override_bucket_index_max_shards: "101"
+          rgw_bucket_quota_ttl: "60"
+          rgw_user_quota_bucket_sync_interval: "60"
+          rgw_user_quota_sync_interval: "60"
+      hosting:
+        dnsNames:
+          - rook-ceph-rgw-objectstore.rook-ceph.svc.cluster.local
+      protocols:
+        enableAPIs: ["s3", "admin", "iam"]
+    storageClass:
+      enabled: true
+      name: storage-bucket
+      reclaimPolicy: Delete
+      parameters:
+        region: us-east-1

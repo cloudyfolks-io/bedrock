@@ -1,0 +1,40 @@
+apiVersion: bedrock.cloudyfolks.io/v1alpha1
+kind: ClusterConfig
+metadata:
+  name: adopt-lab
+spec:
+  version: ${VERSION}
+  api:
+    vip: ${VIP}
+  platform:
+    host: ${PLATFORM_HOST}
+  network:
+    managementInterface: ${IFACE}
+  storage:
+    replicas: 3
+    adopt:
+      fsid: ${FSID}
+      keyFile: ${KEY_FILE}
+      monitors: ${MONITORS}
+      hosts: ${HOSTS}
+      pools:
+        block: storage-block
+        filesystem: filesystem-data
+        objectStore: objectstore
+      cephx:
+        daemon:
+          keyRotationPolicy: KeyGeneration
+          keyGeneration: 2
+          keyType: aes256k
+        csi:
+          keyRotationPolicy: KeyGeneration
+          keyGeneration: 2
+          keepPriorKeyCountMax: 1
+          keyType: aes
+        rbdMirrorPeer:
+          keyRotationPolicy: KeyGeneration
+          keyGeneration: 2
+          keyType: aes256k
+  virtualization:
+    emulation: ${EMULATION}
+  roles: [control-plane, ceph-osd, fabric-gateway, workload]
