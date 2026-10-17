@@ -3,7 +3,9 @@ package host
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"os/exec"
 	"slices"
 	"strings"
 )
@@ -29,11 +31,11 @@ type lvReport struct {
 func LVMCephFSID(ctx context.Context, e Exec, path string) (string, error) {
 	group, err := volumeGroupOf(ctx, e, path)
 	if err != nil || group == "" {
-		return "", err
+		return "", lvmToolError(path, err)
 	}
 	out, err := e.Run(ctx, "lvs", "--readonly", "--reportformat", "json", "-o", "lv_tags", group)
 	if err != nil {
-		return "", err
+		return "", lvmToolError(path, err)
 	}
 	var report lvReport
 	if err := json.Unmarshal([]byte(out), &report); err != nil {
@@ -78,4 +80,11 @@ func appendClusterFSID(fsids []string, tags string) []string {
 		}
 	}
 	return fsids
+}
+
+func lvmToolError(path string, err error) error {
+	if errors.Is(err, exec.ErrNotFound) {
+		return fmt.Errorf("device %s: %s needs lvm2 on the host: install lvm2", path, SignatureLVM)
+	}
+	return err
 }

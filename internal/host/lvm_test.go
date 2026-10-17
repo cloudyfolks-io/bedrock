@@ -3,6 +3,8 @@ package host
 import (
 	"context"
 	"errors"
+	"fmt"
+	"os/exec"
 	"strings"
 	"testing"
 )
@@ -59,14 +61,38 @@ func TestLVMCephFSID(t *testing.T) {
 	}
 }
 
-func TestLVMCephFSIDToolFailures(t *testing.T) {
-	missing := errors.New(`exec: "pvs": executable file not found in $PATH`)
-	e := &FakeExec{Errors: map[string]error{pvsKey: missing}}
-	if _, err := LVMCephFSID(context.Background(), e, "/dev/disk/by-id/wwn-0x1"); err == nil {
-		t.Fatal("missing pvs must be an error")
+const lvm2Missing = "device /dev/disk/by-id/wwn-0x1: LVM2_member needs lvm2 on the host: install lvm2"
+
+func TestLVMCephFSIDNamesLVM2WhenToolsAreMissing(t *testing.T) {
+	notFound := fmt.Errorf(`pvs --readonly: %w: `, exec.ErrNotFound)
+	cases := map[string]*FakeExec{
+		"pvs missing": {Errors: map[string]error{pvsKey: notFound}},
+		"lvs missing": {Responses: map[string]string{pvsKey: lvmPVs}, Errors: map[string]error{lvsKey: fmt.Errorf(`lvs --readonly: %w: `, exec.ErrNotFound)}},
+	}
+	for name, e := range cases {
+		_, err := LVMCephFSID(context.Background(), e, "/dev/disk/by-id/wwn-0x1")
+		if err == nil || err.Error() != lvm2Missing {
+			t.Fatalf("%s: err %v", name, err)
+		}
+	}
+}
+
+func TestRealExecReportsMissingBinaryAsNotFound(t *testing.T) {
+	_, err := RealExec{}.Run(context.Background(), "bedrock-no-such-binary")
+	if !errors.Is(err, exec.ErrNotFound) {
+		t.Fatalf("err %v", err)
+	}
+}
+
+func TestLVMCephFSIDKeepsOtherToolFailures(t *testing.T) {
+	broken := errors.New("pvs: device not found")
+	e := &FakeExec{Errors: map[string]error{pvsKey: broken}}
+	if _, err := LVMCephFSID(context.Background(), e, "/dev/disk/by-id/wwn-0x1"); !errors.Is(err, broken) {
+		t.Fatalf("err %v", err)
 	}
 	e = &FakeExec{Responses: map[string]string{pvsKey: lvmPVs}, Errors: map[string]error{lvsKey: &ExitError{Code: 5}}}
-	if _, err := LVMCephFSID(context.Background(), e, "/dev/disk/by-id/wwn-0x1"); err == nil {
-		t.Fatal("failing lvs must be an error")
+	var exit *ExitError
+	if _, err := LVMCephFSID(context.Background(), e, "/dev/disk/by-id/wwn-0x1"); !errors.As(err, &exit) {
+		t.Fatalf("err %v", err)
 	}
 }

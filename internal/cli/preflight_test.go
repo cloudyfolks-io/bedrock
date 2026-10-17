@@ -3,8 +3,10 @@ package cli
 import (
 	"bytes"
 	"context"
+	"fmt"
 	"io/fs"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -400,5 +402,16 @@ func TestRunJoinAdoptFreshHostChecksPorts(t *testing.T) {
 	code := RunJoin(context.Background(), joinAdoptArgs(t, dataDir, adoptPath), adoptDeps(root, e), &out, &errOut)
 	if code != 1 || !strings.Contains(out.String(), "[fail] adopt-mon-a-port-3300") {
 		t.Fatalf("exit %d\nstdout %s\nstderr %s", code, out.String(), errOut.String())
+	}
+}
+
+func TestPreflightResultsNameLVM2WhenItIsMissing(t *testing.T) {
+	root, e := adoptedHost(t)
+	e.Responses["blkid -p -o value -s TYPE "+osdDisk] = "LVM2_member\n"
+	e.Errors["pvs --readonly --reportformat json -o vg_name "+osdDisk] = fmt.Errorf("pvs --readonly: %w: ", exec.ErrNotFound)
+	_, err := adoptResults(t, root, e, adoptInitConfig)
+	want := "probe " + osdDisk + ": read Ceph label: device " + osdDisk + ": LVM2_member needs lvm2 on the host: install lvm2"
+	if err == nil || err.Error() != want {
+		t.Fatalf("err %v", err)
 	}
 }
