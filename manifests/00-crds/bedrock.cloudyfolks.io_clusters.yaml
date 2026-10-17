@@ -169,6 +169,10 @@ spec:
               rule: (has(self.encryption) && has(self.encryption.kms)) == (has(oldSelf.encryption)
                 && has(oldSelf.encryption.kms)) && (!(has(self.encryption) && has(self.encryption.kms))
                 || self.encryption.kms == oldSelf.encryption.kms)
+            - message: storage.adopt is set at install and is immutable
+              rule: (has(self.storage) && has(self.storage.adopt)) == (has(oldSelf.storage)
+                && has(oldSelf.storage.adopt)) && (!(has(self.storage) && has(self.storage.adopt))
+                || self.storage.adopt == oldSelf.storage.adopt)
           status:
             properties:
               backups:

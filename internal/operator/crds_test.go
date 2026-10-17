@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	"github.com/cloudyfolks-io/bedrock/api/v1alpha1"
@@ -126,4 +127,60 @@ func TestClusterKMSCannotBeAdded(t *testing.T) {
 func TestClusterKMSEndpointPattern(t *testing.T) {
 	c, _ := StartTestEnv(t)
 	createInvalid(t, c, clusterWithEncryption(kmsEncryption("/run/kms.sock")), "should match")
+}
+
+const adoptImmutableMessage = "storage.adopt is set at install and is immutable"
+
+func clusterWithAdopt(adopt *v1alpha1.AdoptSpec) *v1alpha1.Cluster {
+	cluster := clusterWithEncryption(v1alpha1.EncryptionSpec{})
+	cluster.Spec.Storage.Adopt = adopt
+	return cluster
+}
+
+func TestClusterAdoptIsImmutable(t *testing.T) {
+	c, _ := StartTestEnv(t)
+	ctx := context.Background()
+	createValid(t, c, clusterWithAdopt(adoptSpec()))
+
+	changes := map[string]func(*v1alpha1.AdoptSpec){
+		"fsid":   func(adopt *v1alpha1.AdoptSpec) { adopt.FSID = "0f1e2d3c-4b5a-4968-8776-655443322110" },
+		"device": func(adopt *v1alpha1.AdoptSpec) { adopt.Hosts[0].Devices = []string{"/dev/disk/by-id/wwn-0x9"} },
+		"pool":   func(adopt *v1alpha1.AdoptSpec) { adopt.Pools.Block = "other-block" },
+		"cephx": func(adopt *v1alpha1.AdoptSpec) {
+			adopt.Cephx = &runtime.RawExtension{Raw: []byte(`{"daemon":{"keyType":"aes"}}`)}
+		},
+	}
+	for name, change := range changes {
+		t.Run(name, func(t *testing.T) {
+			changed := currentCluster(t, c)
+			change(changed.Spec.Storage.Adopt)
+			updateInvalid(t, c, changed, adoptImmutableMessage)
+		})
+	}
+
+	removed := currentCluster(t, c)
+	removed.Spec.Storage = v1alpha1.ClusterStorageSpec{}
+	updateInvalid(t, c, removed, adoptImmutableMessage)
+
+	kept := currentCluster(t, c)
+	kept.Spec.NodeConcurrency = 2
+	if err := c.Update(ctx, kept); err != nil {
+		t.Fatalf("an update that keeps storage.adopt must pass: %v", err)
+	}
+}
+
+func TestClusterAdoptCannotBeAdded(t *testing.T) {
+	c, _ := StartTestEnv(t)
+	ctx := context.Background()
+	createValid(t, c, clusterWithAdopt(nil))
+
+	added := currentCluster(t, c)
+	added.Spec.Storage.Adopt = adoptSpec()
+	updateInvalid(t, c, added, adoptImmutableMessage)
+
+	concurrency := currentCluster(t, c)
+	concurrency.Spec.NodeConcurrency = 2
+	if err := c.Update(ctx, concurrency); err != nil {
+		t.Fatalf("updating another field must not trip the adopt immutability rule: %v", err)
+	}
 }
