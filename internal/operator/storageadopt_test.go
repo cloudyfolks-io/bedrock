@@ -948,6 +948,57 @@ func TestAdoptStepRefusesNamesThatAreNotCephNames(t *testing.T) {
 	}
 }
 
+func TestAdoptStepStopsOnAnAdoptedNameThatDoesNotExist(t *testing.T) {
+	noObjectStorePools := poolEntries(3, ".mgr", "storage-block", "filesystem-data-metadata", "filesystem-data-data0", ".rgw.root")
+	cases := []struct {
+		name      string
+		mutate    func(*v1alpha1.AdoptSpec)
+		overrides []map[string]any
+		want      string
+	}{
+		{"block pool typo", func(a *v1alpha1.AdoptSpec) { a.Pools.Block = "storage-bloc" }, nil, "adopted block pool storage-bloc not found"},
+		{"filesystem typo", func(a *v1alpha1.AdoptSpec) { a.Pools.Filesystem = "filesystem-dat" }, nil, "adopted filesystem filesystem-dat not found"},
+		{"object store typo", func(a *v1alpha1.AdoptSpec) { a.Pools.ObjectStore = "objectstor" }, nil, "adopted realm objectstor not found"},
+		{"realm", nil, []map[string]any{{keyRealms: nameList("realms")}}, "adopted realm objectstore not found"},
+		{"zonegroup", nil, []map[string]any{{keyZoneGroups: nameList("zonegroups")}}, "adopted zonegroup objectstore not found"},
+		{"zone", nil, []map[string]any{{keyZones: nameList("zones")}}, "adopted zone objectstore not found"},
+		{"object store pools", nil, []map[string]any{{keyPools: noObjectStorePools}}, "adopted object store pools objectstore.rgw.* not found"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			adopt := adoptSpec()
+			if tc.mutate != nil {
+				tc.mutate(adopt)
+			}
+			fake := cephFixture(t, tc.overrides...)
+			got := adoptStep(context.Background(), fake.run, *adopt, 3)
+			if got.Status != metav1.ConditionFalse || got.Reason != v1alpha1.ReasonRenameFailed || got.Message != tc.want {
+				t.Fatalf("condition %+v, want message %q", got, tc.want)
+			}
+			if len(fake.mutations) != 0 {
+				t.Fatalf("ran %v", fake.mutations)
+			}
+		})
+	}
+}
+
+func TestAdoptStepSkipsTheNamesThatAreEmpty(t *testing.T) {
+	adopt := adoptSpec()
+	adopt.Pools = v1alpha1.AdoptPools{}
+	fake := cephFixture(t)
+	got := adoptStep(context.Background(), fake.run, *adopt, 3)
+	if got.Status != metav1.ConditionTrue || got.Reason != v1alpha1.ReasonAdopted || len(fake.mutations) != 0 {
+		t.Fatalf("condition %+v, ran %v", got, fake.mutations)
+	}
+	adopt = adoptSpec()
+	adopt.Pools.Block = ""
+	fake = cephFixture(t)
+	got = adoptStep(context.Background(), fake.run, *adopt, 3)
+	if got.Reason != v1alpha1.ReasonRenaming || slices.Contains(fake.mutations, "ceph osd pool rename storage-block bedrock-block") {
+		t.Fatalf("condition %+v, ran %v", got, fake.mutations)
+	}
+}
+
 func TestSafeMessage(t *testing.T) {
 	cases := []struct{ name, in, want string }{
 		{"plain", "pool does not exist", "pool does not exist"},

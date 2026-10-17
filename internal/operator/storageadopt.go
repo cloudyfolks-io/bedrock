@@ -228,6 +228,9 @@ func adoptStep(ctx context.Context, run runFunc, adopt v1alpha1.AdoptSpec, repli
 	if message := poolSizeProblem(state, adopt, replicas); message != "" {
 		return adoptedCondition(v1alpha1.ReasonPoolSizeTooSmall, message)
 	}
+	if message := missingAdopted(state, adopt); message != "" {
+		return adoptedCondition(v1alpha1.ReasonRenameFailed, message)
+	}
 	plan := renamePlan(state, adopt)
 	if len(plan) == 0 {
 		return adoptedCondition(v1alpha1.ReasonAdopted, "the pools, the CephFS and the RGW realm have the Bedrock names")
@@ -311,6 +314,36 @@ func poolSizeProblem(state cephState, adopt v1alpha1.AdoptSpec, replicas int) st
 		return ""
 	}
 	return fmt.Sprintf("pools larger than the replicas: %s; storage.replicas is %d", strings.Join(large, ", "), replicas)
+}
+
+func missingAdopted(state cephState, adopt v1alpha1.AdoptSpec) string {
+	pools := adopt.Pools
+	hasPool := func(match func(string) bool) bool {
+		return slices.ContainsFunc(state.Pools, func(pool cephPoolState) bool { return match(pool.Name) })
+	}
+	named := func(names []string, old string) bool {
+		return slices.Contains(names, old) || slices.Contains(names, objectStoreName)
+	}
+	_, filesystem := findFilesystem(state, pools.Filesystem)
+	checks := []struct {
+		kind, configured, label string
+		found                   bool
+	}{
+		{"block pool", pools.Block, pools.Block, hasPool(func(name string) bool { return name == pools.Block || name == blockPoolName })},
+		{"filesystem", pools.Filesystem, pools.Filesystem, filesystem},
+		{"realm", pools.ObjectStore, pools.ObjectStore, named(state.Realms, pools.ObjectStore)},
+		{"zonegroup", pools.ObjectStore, pools.ObjectStore, named(state.ZoneGroups, pools.ObjectStore)},
+		{"zone", pools.ObjectStore, pools.ObjectStore, named(state.Zones, pools.ObjectStore)},
+		{"object store pools", pools.ObjectStore, pools.ObjectStore + ".rgw.*", hasPool(func(name string) bool {
+			return strings.HasPrefix(name, pools.ObjectStore+".rgw.") || strings.HasPrefix(name, objectStoreName+".rgw.")
+		})},
+	}
+	for _, check := range checks {
+		if check.configured != "" && !check.found {
+			return fmt.Sprintf("adopted %s %s not found", check.kind, check.label)
+		}
+	}
+	return ""
 }
 
 func adoptedPool(state cephState, adopt v1alpha1.AdoptSpec, name string) bool {
