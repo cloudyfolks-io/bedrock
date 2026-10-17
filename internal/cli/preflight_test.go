@@ -415,3 +415,24 @@ func TestPreflightResultsNameLVM2WhenItIsMissing(t *testing.T) {
 		t.Fatalf("err %v", err)
 	}
 }
+
+func TestRunJoinAdoptRefusesHostOutsideTheAdoptList(t *testing.T) {
+	root, e := adoptedHost(t)
+	e.Responses["hostname"] = "node-9\n"
+	dataDir := filepath.Join(root, "var", "lib", "k0s")
+	adoptPath := adoptConfigFile(t, t.TempDir(), adoptInitConfig)
+	var out, errOut bytes.Buffer
+	code := RunJoin(context.Background(), joinAdoptArgs(t, dataDir, adoptPath), adoptDeps(root, e), &out, &errOut)
+	if code != 1 {
+		t.Fatalf("exit %d\nstdout %s\nstderr %s", code, out.String(), errOut.String())
+	}
+	if !strings.Contains(out.String(), "[fail] adopt-node: this host is node-9, storage.adopt.hosts names no such node") {
+		t.Fatalf("stdout %s", out.String())
+	}
+	if strings.Contains(out.String(), "adopt-mon-") {
+		t.Fatalf("no monitor check may run for an unknown node:\n%s", out.String())
+	}
+	if k0sInstallCalled(e) {
+		t.Fatal("k0s must not be installed when preflight blocks")
+	}
+}
