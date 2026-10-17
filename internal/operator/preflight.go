@@ -1,6 +1,7 @@
 package operator
 
 import (
+	"cmp"
 	"context"
 	"fmt"
 	"slices"
@@ -31,6 +32,7 @@ var (
 )
 
 type preflightInput struct {
+	Cluster   v1alpha1.Cluster
 	Running   string
 	To        string
 	Target    *v1alpha1.Release
@@ -78,6 +80,7 @@ func gatherPreflight(ctx context.Context, env upgradeEnv, cluster v1alpha1.Clust
 	}
 	ceph, cephErr := readCeph(ctx, env.Client, env.Exec)
 	return preflightInput{
+		Cluster:   cluster,
 		Running:   cluster.Status.Version,
 		To:        to,
 		Target:    target,
@@ -121,12 +124,23 @@ func errorText(err error) string {
 }
 
 func preflightProblem(in preflightInput) string {
-	checks := []func(preflightInput) []string{releaseProblems, depotProblems, nodeProblems, spareProblems, hostProblems, etcdProblems, cephProblems, vmProblems}
+	checks := []func(preflightInput) []string{adoptionProblems, releaseProblems, depotProblems, nodeProblems, spareProblems, hostProblems, etcdProblems, cephProblems, vmProblems}
 	var problems []string
 	for _, check := range checks {
 		problems = append(problems, check(in)...)
 	}
 	return strings.Join(problems, "; ")
+}
+
+func adoptionProblems(in preflightInput) []string {
+	if in.Cluster.Spec.Storage.Adopt == nil {
+		return nil
+	}
+	phase := adoptPhase(in.Cluster)
+	if phase == v1alpha1.ReasonAdopted {
+		return nil
+	}
+	return []string{fmt.Sprintf("storage adoption in progress (%s)", cmp.Or(phase, "NotStarted"))}
 }
 
 func etcdProblems(in preflightInput) []string {

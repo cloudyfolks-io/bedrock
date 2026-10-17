@@ -85,6 +85,15 @@ func vm(name string, annotations map[string]any) unstructured.Unstructured {
 	}}
 }
 
+func adoptingCluster(reason string) v1alpha1.Cluster {
+	cluster := v1alpha1.Cluster{}
+	cluster.Spec.Storage.Adopt = adoptSpec()
+	if reason != "" {
+		cluster.Status.Conditions = []metav1.Condition{{Type: v1alpha1.ConditionStorageAdopted, Status: metav1.ConditionFalse, Reason: reason}}
+	}
+	return cluster
+}
+
 func TestPreflightProblems(t *testing.T) {
 	cases := map[string]struct {
 		change func(preflightInput) preflightInput
@@ -264,6 +273,23 @@ func TestPreflightProblems(t *testing.T) {
 			in.VMs = []unstructured.Unstructured{vm("db", map[string]any{allowShutdownAnnotation: "false"})}
 			return in
 		}, "vms: tenant-a/db cannot live-migrate (DisksNotLiveMigratable) and lacks bedrock.cloudyfolks.io/allow-shutdown=true"},
+		"adoption in progress": {func(in preflightInput) preflightInput {
+			in.Cluster = adoptingCluster(v1alpha1.ReasonWaitingForQuorum)
+			return in
+		}, "storage adoption in progress (WaitingForQuorum)"},
+		"adoption not started": {func(in preflightInput) preflightInput {
+			in.Cluster = adoptingCluster("")
+			return in
+		}, "storage adoption in progress (NotStarted)"},
+		"adoption done": {func(in preflightInput) preflightInput {
+			in.Cluster = adoptingCluster(v1alpha1.ReasonAdopted)
+			return in
+		}, ""},
+		"no adopt spec": {func(in preflightInput) preflightInput {
+			in.Cluster = adoptingCluster(v1alpha1.ReasonWaitingForQuorum)
+			in.Cluster.Spec.Storage.Adopt = nil
+			return in
+		}, ""},
 		"two problems": {func(in preflightInput) preflightInput {
 			in.Hosts[0].Status.Checks.TimeSynced = false
 			in.Hosts[1].Status.Checks.TimeSynced = false
