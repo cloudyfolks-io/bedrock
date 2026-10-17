@@ -509,6 +509,9 @@ spec:
     address: $IP
     sans:
     - $IP
+  network:
+    kuberouter:
+      metricsPort: 0
 CONFIG
 k0s install controller --enable-worker --no-taints --config /etc/k0s/k0s.yaml --kubelet-extra-args="--node-ip=$IP"
 k0s start
