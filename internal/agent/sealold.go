@@ -25,13 +25,17 @@ const (
 
 func tidyBackupDir(ctx context.Context, c client.Client, deps Deps) error {
 	return errors.Join(
-		removeStaleWorkDirs(deps.Root, deps.Now().Add(-staleWorkAge)),
+		removeStaleLeftovers(deps.Root, deps.Now().Add(-staleWorkAge)),
 		sealOlderArchives(ctx, c, deps),
 	)
 }
 
+func removeStaleLeftovers(root string, cutoff time.Time) error {
+	return errors.Join(removeStaleWorkDirs(root, cutoff), removeStalePlaintextPartials(root, cutoff))
+}
+
 func sealOlderArchives(ctx context.Context, c client.Client, deps Deps) error {
-	pending, err := plaintextArchives(filepath.Join(deps.Root, backupDir))
+	pending, err := plaintextArchives(filepath.Join(deps.Root, backupDir), "")
 	if err != nil || len(pending) == 0 {
 		return err
 	}
@@ -43,7 +47,7 @@ func sealOlderArchives(ctx context.Context, c client.Client, deps Deps) error {
 }
 
 func sealPlaintextArchives(root string, recipients []age.Recipient) error {
-	plaintext, err := plaintextArchives(filepath.Join(root, backupDir))
+	plaintext, err := plaintextArchives(filepath.Join(root, backupDir), "")
 	if err != nil {
 		return err
 	}
@@ -82,10 +86,10 @@ func sealCopy(plaintext, sealed string, recipients []age.Recipient) error {
 	return writeAtomic(sealed, func(dst io.Writer) error { return seal.Seal(dst, src, recipients) })
 }
 
-func plaintextArchives(dir string) ([]string, error) {
+func plaintextArchives(dir, tail string) ([]string, error) {
 	var paths []string
 	for _, prefix := range []string{upgradeBackupPrefix, etcdSnapshotPrefix} {
-		matches, err := filepath.Glob(filepath.Join(dir, prefix+"*"+archiveSuffix))
+		matches, err := filepath.Glob(filepath.Join(dir, prefix+"*"+archiveSuffix+tail))
 		if err != nil {
 			return nil, err
 		}
@@ -108,6 +112,18 @@ func removeStaleWorkDirs(root string, cutoff time.Time) error {
 		if entry.IsDir() && isWorkDir(entry.Name()) {
 			results = append(results, removeIfOlder(filepath.Join(dir, entry.Name()), cutoff))
 		}
+	}
+	return errors.Join(results...)
+}
+
+func removeStalePlaintextPartials(root string, cutoff time.Time) error {
+	partials, err := plaintextArchives(filepath.Join(root, backupDir), partialSuffix)
+	if err != nil {
+		return err
+	}
+	results := make([]error, 0, len(partials))
+	for _, partial := range partials {
+		results = append(results, removeIfOlder(partial, cutoff))
 	}
 	return errors.Join(results...)
 }

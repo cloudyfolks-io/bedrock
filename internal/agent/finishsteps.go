@@ -240,7 +240,7 @@ func restore(ctx context.Context, env StepEnv) (Outcome, error) {
 func extractK0sBackup(archive, dest, root string) (string, error) {
 	file, err := os.Open(archive)
 	if err != nil {
-		return "", err
+		return "", withoutPath(err)
 	}
 	defer file.Close()
 	plain, err := archiveReader(file, archive, root)
@@ -253,6 +253,14 @@ func extractK0sBackup(archive, dest, root string) (string, error) {
 	}
 	_, err = io.Copy(io.Discard, plain)
 	return snapshot, err
+}
+
+func withoutPath(err error) error {
+	var pathErr *fs.PathError
+	if errors.As(err, &pathErr) {
+		return pathErr.Err
+	}
+	return err
 }
 
 func archiveReader(file io.Reader, archive, root string) (io.Reader, error) {

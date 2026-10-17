@@ -218,6 +218,22 @@ func writeArchiveFiles(t *testing.T, dir string, names ...string) {
 	}
 }
 
+func TestRemoveFilesSkipsAFileThatIsAlreadyGone(t *testing.T) {
+	dir := t.TempDir()
+	writeArchiveFiles(t, dir, "etcd-20260901T100000Z.tar.gz", "etcd-20260902T100000Z.tar.gz")
+	paths := []string{
+		filepath.Join(dir, "etcd-20260901T100000Z.tar.gz"),
+		filepath.Join(dir, "etcd-20260901T100000Z.tar.gz.age"),
+		filepath.Join(dir, "etcd-20260902T100000Z.tar.gz"),
+	}
+	if err := removeFiles(paths); err != nil {
+		t.Fatal(err)
+	}
+	if got := listNames(t, dir); len(got) != 0 {
+		t.Fatalf("files %v", got)
+	}
+}
+
 func TestKeepNewestCountsASealedAndAPlainCopyOnce(t *testing.T) {
 	dir := t.TempDir()
 	writeArchiveFiles(t, dir,

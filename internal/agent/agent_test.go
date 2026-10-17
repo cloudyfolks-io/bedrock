@@ -621,6 +621,7 @@ func TestRunRetriesTheWatchUntilItSucceeds(t *testing.T) {
 	var failures, successes atomic.Int32
 	failures.Store(2)
 	deps := newDeps(&host.FakeExec{}, time.Now())
+	deps.Root = t.TempDir()
 	deps.Interval = 20 * time.Millisecond
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
@@ -672,6 +673,7 @@ func TestRunWaitsATickBeforeRewatching(t *testing.T) {
 	}
 	var calls atomic.Int32
 	deps := newDeps(&host.FakeExec{}, time.Now())
+	deps.Root = t.TempDir()
 	deps.Interval = 50 * time.Millisecond
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan error, 1)

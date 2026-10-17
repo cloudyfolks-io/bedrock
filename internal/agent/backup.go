@@ -202,10 +202,17 @@ func keepNewest(dir, prefix string, keep int) error {
 	}
 	bases := slices.SortedFunc(maps.Keys(files), compareBases)
 	for _, old := range bases[:max(0, len(bases)-keep)] {
-		for _, path := range files[old] {
-			if err := os.Remove(path); err != nil {
-				return err
-			}
+		if err := removeFiles(files[old]); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func removeFiles(paths []string) error {
+	for _, path := range paths {
+		if err := removeIfExists(path); err != nil {
+			return err
 		}
 	}
 	return nil
@@ -244,10 +251,5 @@ func removePartials(dir, prefix string) error {
 	if err != nil {
 		return err
 	}
-	for _, partial := range partials {
-		if err := os.Remove(partial); err != nil {
-			return err
-		}
-	}
-	return nil
+	return removeFiles(partials)
 }

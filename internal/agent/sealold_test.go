@@ -230,6 +230,50 @@ func TestRemoveStaleWorkDirsRemovesOnlyDirsBeforeTheCutoff(t *testing.T) {
 	}
 }
 
+func TestRemoveStaleLeftoversRemovesPlaintextPartialsBeforeTheCutoff(t *testing.T) {
+	root := t.TempDir()
+	dir := backupDirOf(root)
+	cutoff := at("2026-10-08T01:30:00Z")
+	for name, modified := range map[string]time.Time{
+		"bedrock-v0.1.0-20260901T100000Z.tar.gz.partial": cutoff.Add(-time.Minute),
+		"etcd-20260902T100000Z.tar.gz.partial":           cutoff.Add(-time.Hour),
+		"etcd-20260903T100000Z.tar.gz.partial":           cutoff.Add(time.Minute),
+		"etcd-20260904T100000Z.tar.gz.age.partial":       cutoff.Add(-time.Hour),
+		"other-20260905T100000Z.tar.gz.partial":          cutoff.Add(-time.Hour),
+	} {
+		writeFixtureFile(t, filepath.Join(dir, name), "partial")
+		setModTime(t, filepath.Join(dir, name), modified)
+	}
+	if err := removeStaleLeftovers(root, cutoff); err != nil {
+		t.Fatal(err)
+	}
+	want := []string{"etcd-20260903T100000Z.tar.gz.partial", "etcd-20260904T100000Z.tar.gz.age.partial", "other-20260905T100000Z.tar.gz.partial"}
+	if got := listNames(t, dir); !slices.Equal(got, want) {
+		t.Fatalf("files %v, want %v", got, want)
+	}
+}
+
+func TestTidyBackupDirKeepsThePartialFilesOfARunningBackup(t *testing.T) {
+	deps := snapshotDeps(t, &fakeK0sBackup{}, at("2026-10-08T02:30:00Z"))
+	dir := backupDirOf(deps.Root)
+	for name, modified := range map[string]time.Time{
+		"etcd-20261008T023000Z.tar.gz.age.partial":       deps.Now(),
+		"etcd-20261007T023000Z.tar.gz.age.partial":       deps.Now().Add(-2 * time.Hour),
+		"bedrock-v0.1.0-20260901T100000Z.tar.gz.partial": deps.Now().Add(-2 * time.Hour),
+		"etcd-20260902T100000Z.tar.gz.partial":           deps.Now().Add(-10 * time.Minute),
+	} {
+		writeFixtureFile(t, filepath.Join(dir, name), "partial")
+		setModTime(t, filepath.Join(dir, name), modified)
+	}
+	if err := tidyBackupDir(context.Background(), k8sClient, deps); err != nil {
+		t.Fatal(err)
+	}
+	want := []string{"etcd-20260902T100000Z.tar.gz.partial", "etcd-20261007T023000Z.tar.gz.age.partial", "etcd-20261008T023000Z.tar.gz.age.partial"}
+	if got := listNames(t, dir); !slices.Equal(got, want) {
+		t.Fatalf("files %v, want %v", got, want)
+	}
+}
+
 func TestRemoveStaleWorkDirsWithoutABackupDirectory(t *testing.T) {
 	if err := removeStaleWorkDirs(t.TempDir(), time.Now()); err != nil {
 		t.Fatal(err)
@@ -298,23 +342,12 @@ func TestTidyBackupDirCreatesNoHostKeyWithoutPlaintextArchives(t *testing.T) {
 	}
 }
 
-func TestRunSealsOlderArchivesAndRemovesStaleWorkDirsAtStart(t *testing.T) {
+func runInBackground(t *testing.T, deps Deps) func() error {
+	t.Helper()
 	watching, err := client.NewWithWatch(cfg, client.Options{Scheme: k8sClient.Scheme()})
 	if err != nil {
 		t.Fatal(err)
 	}
-	root := t.TempDir()
-	dir := backupDirOf(root)
-	plaintext := filepath.Join(dir, "etcd-20260902T100000Z.tar.gz")
-	writeFixtureFile(t, plaintext, "etcd snapshot")
-	writeFixtureFile(t, filepath.Join(dir, ".work-crashed", "k0s_backup.tar.gz"), "cluster keys")
-	writeFixtureFile(t, filepath.Join(dir, ".restore-crashed", "k0s_backup.tar.gz"), "cluster keys")
-	started := time.Now()
-	for _, name := range []string{".work-crashed", ".restore-crashed"} {
-		setModTime(t, filepath.Join(dir, name), started.Add(-time.Minute))
-	}
-	deps := newDeps(&host.FakeExec{}, started)
-	deps.Root = root
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan error, 1)
 	go func() { done <- Run(ctx, watching, deps) }()
@@ -323,16 +356,43 @@ func TestRunSealsOlderArchivesAndRemovesStaleWorkDirsAtStart(t *testing.T) {
 		return <-done
 	})
 	t.Cleanup(func() { _ = stop() })
+	return stop
+}
+
+func waitFor(t *testing.T, what string, condition func() bool) {
+	t.Helper()
 	deadline := time.Now().Add(10 * time.Second)
-	for {
-		if _, err := os.Stat(plaintext + ".age"); err == nil {
-			break
-		}
+	for !condition() {
 		if time.Now().After(deadline) {
-			t.Fatal("the plaintext archive was never sealed")
+			t.Fatalf("timed out waiting for %s", what)
 		}
 		time.Sleep(20 * time.Millisecond)
 	}
+}
+
+func fileExists(path string) func() bool {
+	return func() bool {
+		_, err := os.Stat(path)
+		return err == nil
+	}
+}
+
+func TestRunSealsOlderArchivesAndRemovesStaleLeftoversAtStart(t *testing.T) {
+	root := t.TempDir()
+	dir := backupDirOf(root)
+	plaintext := filepath.Join(dir, "etcd-20260902T100000Z.tar.gz")
+	writeFixtureFile(t, plaintext, "etcd snapshot")
+	writeFixtureFile(t, filepath.Join(dir, ".work-crashed", "k0s_backup.tar.gz"), "cluster keys")
+	writeFixtureFile(t, filepath.Join(dir, ".restore-crashed", "k0s_backup.tar.gz"), "cluster keys")
+	writeFixtureFile(t, filepath.Join(dir, "bedrock-v0.1.0-20260901T100000Z.tar.gz.partial"), "half of a plaintext archive")
+	started := time.Now()
+	for _, name := range []string{".work-crashed", ".restore-crashed", "bedrock-v0.1.0-20260901T100000Z.tar.gz.partial"} {
+		setModTime(t, filepath.Join(dir, name), started.Add(-time.Minute))
+	}
+	deps := newDeps(&host.FakeExec{}, started)
+	deps.Root = root
+	stop := runInBackground(t, deps)
+	waitFor(t, "the plaintext archive to be sealed", fileExists(plaintext+".age"))
 	if err := stop(); err != nil {
 		t.Fatal(err)
 	}
@@ -342,5 +402,29 @@ func TestRunSealsOlderArchivesAndRemovesStaleWorkDirsAtStart(t *testing.T) {
 	}
 	if got := openSealed(t, plaintext+".age", hostIdentity(t, root)); string(got) != "etcd snapshot" {
 		t.Fatalf("archive opens to %q", got)
+	}
+}
+
+func TestRunMakesTheHostKeyAtStart(t *testing.T) {
+	deps := newDeps(&host.FakeExec{}, time.Now())
+	deps.Root = t.TempDir()
+	stop := runInBackground(t, deps)
+	waitFor(t, "the host key", fileExists(filepath.Join(deps.Root, seal.HostKeyFile)))
+	if err := stop(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestRunGoesOnWhenTheHostKeyCannotBeMade(t *testing.T) {
+	createHost(t, "node-a", false, "")
+	deps := newDeps(&host.FakeExec{}, time.Now())
+	deps.Root = t.TempDir()
+	writeFixtureFile(t, filepath.Join(deps.Root, "etc"), "a file where the key directory must go")
+	stop := runInBackground(t, deps)
+	enableManagement(t, "node-a")
+	want := getHost(t, "node-a").Generation
+	waitFor(t, "the loop to reconcile", func() bool { return managementObserved(t, "node-a", want) })
+	if err := stop(); err != nil {
+		t.Fatal(err)
 	}
 }

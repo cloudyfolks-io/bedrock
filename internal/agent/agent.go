@@ -16,6 +16,7 @@ import (
 
 	"github.com/cloudyfolks-io/bedrock/api/v1alpha1"
 	"github.com/cloudyfolks-io/bedrock/internal/authn/apiserver"
+	"github.com/cloudyfolks-io/bedrock/internal/backup/seal"
 	"github.com/cloudyfolks-io/bedrock/internal/host"
 	"github.com/cloudyfolks-io/bedrock/internal/hostconfig"
 	"github.com/cloudyfolks-io/bedrock/internal/maintenance"
@@ -52,8 +53,11 @@ func Run(ctx context.Context, c client.WithWatch, deps Deps) error {
 	defer ticker.Stop()
 	events, stop := ensureWatch(ctx, c, deps.Node)
 	defer func() { stop() }()
-	if err := removeStaleWorkDirs(deps.Root, deps.Now()); err != nil {
-		fmt.Fprintf(os.Stderr, "agent: stale work dirs: %v\n", err)
+	if err := removeStaleLeftovers(deps.Root, deps.Now()); err != nil {
+		fmt.Fprintf(os.Stderr, "agent: stale backup files: %v\n", err)
+	}
+	if _, err := seal.EnsureHostIdentity(deps.Root); err != nil {
+		logLine(fmt.Sprintf("host backup key: %v", err))
 	}
 	var snapshots sync.WaitGroup
 	defer snapshots.Wait()

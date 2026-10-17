@@ -441,7 +441,11 @@ func TestRestoreFailsBeforeStopWhenTheArchiveIsMissing(t *testing.T) {
 	if err := os.Remove(filepath.Join(env.Deps.Root, sealedBackupPath)); err != nil {
 		t.Fatal(err)
 	}
-	requireRestoreRefusedBeforeStop(t, env, exec)
+	err := requireRestoreRefusedBeforeStop(t, env, exec)
+	want := "open backup " + sealedBackupPath + ": no such file or directory"
+	if err.Error() != want {
+		t.Fatalf("error %q, want %q", err, want)
+	}
 }
 
 func TestRestoreFailsBeforeStopWhenTheArchiveHoldsNoK0sBackup(t *testing.T) {
