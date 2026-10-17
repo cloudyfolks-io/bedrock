@@ -1,15 +1,27 @@
 package operator
 
 import (
+	"context"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"os"
+	"os/exec"
+	"path/filepath"
 	"reflect"
+	"slices"
+	"strings"
 	"testing"
 
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
+	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 
 	"github.com/cloudyfolks-io/bedrock/api/v1alpha1"
+	"github.com/cloudyfolks-io/bedrock/internal/release"
 )
 
 const adoptFSID = "2f3b1c1e-8c5e-4a54-9f41-0c2f6d7a9b10"
@@ -467,6 +479,643 @@ func TestRenderStorageNeverRendersCleanupPolicy(t *testing.T) {
 				if hasKey(obj.Object, "cleanupPolicy") {
 					t.Fatalf("%s %s has a cleanupPolicy", obj.GetKind(), obj.GetName())
 				}
+			}
+		})
+	}
+}
+
+const (
+	keyQuorum     = "ceph quorum_status -f json"
+	keyOSDs       = "ceph osd stat -f json"
+	keyPools      = "ceph osd pool ls detail -f json"
+	keyFS         = "ceph fs ls -f json"
+	keyOldFS      = "ceph fs get filesystem-data -f json"
+	keyNewFS      = "ceph fs get bedrock-fs -f json"
+	keyRealms     = "radosgw-admin realm list"
+	keyZoneGroups = "radosgw-admin zonegroup list"
+	keyZones      = "radosgw-admin zone list"
+	keyOldZone    = "radosgw-admin zone get --rgw-zone=objectstore"
+	keyNewZone    = "radosgw-admin zone get --rgw-zone=bedrock-rgw"
+)
+
+var (
+	blockRename  = []string{"ceph osd pool rename storage-block bedrock-block"}
+	cephFSRename = []string{
+		"ceph fs fail filesystem-data",
+		"ceph fs set filesystem-data refuse_client_session true",
+		"ceph fs rename filesystem-data bedrock-fs --yes-i-really-mean-it",
+		"ceph osd pool rename filesystem-data-metadata bedrock-fs-metadata",
+		"ceph osd pool rename filesystem-data-data0 bedrock-fs-data0",
+		"ceph fs set bedrock-fs joinable true",
+		"ceph fs set bedrock-fs refuse_client_session false",
+	}
+	cephFSFlags = []string{
+		"ceph fs set bedrock-fs joinable true",
+		"ceph fs set bedrock-fs refuse_client_session false",
+	}
+	rgwIdentityRename = []string{
+		"radosgw-admin realm rename --rgw-realm=objectstore --realm-new-name=bedrock-rgw",
+		"radosgw-admin zonegroup rename --rgw-zonegroup=objectstore --zonegroup-new-name=bedrock-rgw",
+		"radosgw-admin zone rename --rgw-zone=objectstore --zone-new-name=bedrock-rgw --rgw-zonegroup=bedrock-rgw",
+	}
+	rgwZoneRewrite = []string{
+		"radosgw-admin zone set --rgw-zone=bedrock-rgw",
+		"radosgw-admin period update --commit --rgw-realm=bedrock-rgw",
+	}
+	rgwPoolRenames = []string{
+		"ceph osd pool rename objectstore.rgw.buckets.data bedrock-rgw.rgw.buckets.data",
+		"ceph osd pool rename objectstore.rgw.buckets.index bedrock-rgw.rgw.buckets.index",
+		"ceph osd pool rename objectstore.rgw.buckets.non-ec bedrock-rgw.rgw.buckets.non-ec",
+		"ceph osd pool rename objectstore.rgw.control bedrock-rgw.rgw.control",
+		"ceph osd pool rename objectstore.rgw.log bedrock-rgw.rgw.log",
+		"ceph osd pool rename objectstore.rgw.meta bedrock-rgw.rgw.meta",
+		"ceph osd pool rename objectstore.rgw.otp bedrock-rgw.rgw.otp",
+	}
+)
+
+type fakeCeph struct {
+	outputs   map[string]json.RawMessage
+	failures  map[string]error
+	reads     []string
+	mutations []string
+}
+
+func commandKey(command []string) string {
+	kept := make([]string, 0, len(command))
+	for _, arg := range command {
+		if !strings.HasPrefix(arg, "--conf=") && !strings.HasPrefix(arg, "--connect-timeout=") {
+			kept = append(kept, arg)
+		}
+	}
+	return strings.Join(kept, " ")
+}
+
+func (f *fakeCeph) run(_ context.Context, command []string) ([]byte, error) {
+	key := commandKey(command)
+	if err := f.failures[key]; err != nil {
+		f.mutations = append(f.mutations, key)
+		return nil, err
+	}
+	if output, found := f.outputs[key]; found {
+		f.reads = append(f.reads, key)
+		return output, nil
+	}
+	f.mutations = append(f.mutations, key)
+	return nil, nil
+}
+
+func cephFixture(t *testing.T, overrides ...map[string]any) *fakeCeph {
+	t.Helper()
+	data, err := os.ReadFile(filepath.Join("testdata", "ceph", "fresh.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	outputs := map[string]json.RawMessage{}
+	if err := json.Unmarshal(data, &outputs); err != nil {
+		t.Fatal(err)
+	}
+	for _, group := range overrides {
+		for key, value := range group {
+			if value == nil {
+				delete(outputs, key)
+				continue
+			}
+			raw, err := json.Marshal(value)
+			if err != nil {
+				t.Fatal(err)
+			}
+			outputs[key] = raw
+		}
+	}
+	return &fakeCeph{outputs: outputs, failures: map[string]error{}}
+}
+
+func poolEntries(size int, names ...string) []map[string]any {
+	pools := make([]map[string]any, 0, len(names))
+	for i, name := range names {
+		pools = append(pools, map[string]any{"pool_id": i + 1, "pool_name": name, "size": size})
+	}
+	return pools
+}
+
+func rgwPoolNames(prefix string) []string {
+	var names []string
+	for _, suffix := range []string{"control", "meta", "log", "buckets.index", "buckets.non-ec", "otp", "buckets.data"} {
+		names = append(names, prefix+".rgw."+suffix)
+	}
+	return names
+}
+
+func clusterPools(block, metadata, data, rgwPrefix string) []map[string]any {
+	names := slices.Concat([]string{".mgr", block, metadata, data, ".rgw.root"}, rgwPoolNames(rgwPrefix))
+	return poolEntries(3, names...)
+}
+
+func filesystemEntry(name, metadata, data string) []map[string]any {
+	return []map[string]any{{"name": name, "metadata_pool": metadata, "data_pools": []string{data}}}
+}
+
+func filesystemFlags(joinable, refuse bool) map[string]any {
+	return map[string]any{"mdsmap": map[string]any{"flags_state": map[string]any{"joinable": joinable, "refuse_client_session": refuse}}}
+}
+
+func nameList(field string, names ...string) map[string]any {
+	return map[string]any{"default_info": "id", field: names}
+}
+
+func zoneDocument(t *testing.T, prefix string) json.RawMessage {
+	t.Helper()
+	fresh := cephFixture(t)
+	return json.RawMessage(strings.ReplaceAll(string(fresh.outputs[keyOldZone]), "objectstore.rgw.", prefix+".rgw."))
+}
+
+func blockDone() map[string]any {
+	return map[string]any{keyPools: clusterPools("bedrock-block", "filesystem-data-metadata", "filesystem-data-data0", "objectstore")}
+}
+
+func filesystemDone() map[string]any {
+	return map[string]any{
+		keyPools: clusterPools("bedrock-block", "bedrock-fs-metadata", "bedrock-fs-data0", "objectstore"),
+		keyFS:    filesystemEntry("bedrock-fs", "bedrock-fs-metadata", "bedrock-fs-data0"),
+		keyOldFS: nil,
+		keyNewFS: filesystemFlags(true, false),
+	}
+}
+
+func identityRenamed(t *testing.T, zonePrefix string) map[string]any {
+	return map[string]any{
+		keyRealms:     nameList("realms", "bedrock-rgw"),
+		keyZoneGroups: nameList("zonegroups", "bedrock-rgw"),
+		keyZones:      nameList("zones", "bedrock-rgw"),
+		keyOldZone:    nil,
+		keyNewZone:    zoneDocument(t, zonePrefix),
+	}
+}
+
+func allDone(t *testing.T) []map[string]any {
+	done := filesystemDone()
+	done[keyPools] = clusterPools("bedrock-block", "bedrock-fs-metadata", "bedrock-fs-data0", "bedrock-rgw")
+	return []map[string]any{done, identityRenamed(t, "bedrock-rgw")}
+}
+
+func planNames(plan []renameCommand) []string {
+	names := make([]string, 0, len(plan))
+	for _, command := range plan {
+		names = append(names, command.Name)
+	}
+	return names
+}
+
+func TestRenamePlan(t *testing.T) {
+	cases := []struct {
+		name      string
+		overrides []map[string]any
+		want      []string
+	}{
+		{"fresh", nil, slices.Concat(blockRename, cephFSRename, rgwIdentityRename, rgwZoneRewrite, rgwPoolRenames)},
+		{"block done", []map[string]any{blockDone()}, slices.Concat(cephFSRename, rgwIdentityRename, rgwZoneRewrite, rgwPoolRenames)},
+		{
+			"CephFS half done",
+			[]map[string]any{{
+				keyPools: clusterPools("bedrock-block", "bedrock-fs-metadata", "filesystem-data-data0", "objectstore"),
+				keyFS:    filesystemEntry("bedrock-fs", "bedrock-fs-metadata", "filesystem-data-data0"),
+				keyOldFS: nil,
+				keyNewFS: filesystemFlags(false, true),
+			}},
+			slices.Concat([]string{"ceph osd pool rename filesystem-data-data0 bedrock-fs-data0"}, cephFSFlags, rgwIdentityRename, rgwZoneRewrite, rgwPoolRenames),
+		},
+		{
+			"CephFS renamed and pools renamed but flags pending",
+			[]map[string]any{filesystemDone(), {keyNewFS: filesystemFlags(false, true)}, identityRenamed(t, "bedrock-rgw"), {keyPools: clusterPools("bedrock-block", "bedrock-fs-metadata", "bedrock-fs-data0", "bedrock-rgw")}},
+			cephFSFlags,
+		},
+		{
+			"RGW zone renamed but pools not",
+			[]map[string]any{filesystemDone(), identityRenamed(t, "objectstore")},
+			slices.Concat(rgwZoneRewrite, rgwPoolRenames),
+		},
+		{
+			"RGW zone rewritten and some pools renamed",
+			[]map[string]any{filesystemDone(), identityRenamed(t, "bedrock-rgw"), {keyPools: poolEntries(3,
+				".mgr", "bedrock-block", "bedrock-fs-metadata", "bedrock-fs-data0", ".rgw.root",
+				"bedrock-rgw.rgw.buckets.data", "bedrock-rgw.rgw.buckets.index",
+				"objectstore.rgw.buckets.non-ec", "objectstore.rgw.control", "objectstore.rgw.log", "objectstore.rgw.meta", "objectstore.rgw.otp")}},
+			rgwPoolRenames[2:],
+		},
+		{"all done", allDone(t), nil},
+		{
+			"no CephFS and no object store",
+			[]map[string]any{{
+				keyPools:      poolEntries(3, ".mgr", "storage-block"),
+				keyFS:         []map[string]any{},
+				keyOldFS:      nil,
+				keyRealms:     nameList("realms"),
+				keyZoneGroups: nameList("zonegroups"),
+				keyZones:      nameList("zones"),
+				keyOldZone:    nil,
+			}},
+			blockRename,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			fake := cephFixture(t, tc.overrides...)
+			state, err := readCephState(context.Background(), fake.run, *adoptSpec())
+			if err != nil {
+				t.Fatal(err)
+			}
+			got := planNames(renamePlan(state, *adoptSpec()))
+			if !slices.Equal(got, tc.want) {
+				t.Fatalf("plan\n%s\nwant\n%s", strings.Join(got, "\n"), strings.Join(tc.want, "\n"))
+			}
+			if len(fake.mutations) != 0 {
+				t.Fatalf("reading the state ran %v", fake.mutations)
+			}
+		})
+	}
+}
+
+func TestRenamePlanKeepsTheNamesThatAreAlreadyBedrockNames(t *testing.T) {
+	adopt := adoptSpec()
+	adopt.Pools = v1alpha1.AdoptPools{Block: "bedrock-block", Filesystem: "bedrock-fs", ObjectStore: "bedrock-rgw"}
+	fake := cephFixture(t, allDone(t)...)
+	state, err := readCephState(context.Background(), fake.run, *adopt)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if plan := renamePlan(state, *adopt); len(plan) != 0 {
+		t.Fatalf("plan %v", planNames(plan))
+	}
+}
+
+func TestReadCephStateReadsTheInventoryOnlyAfterTheMonitorsAndOSDsAnswer(t *testing.T) {
+	cases := map[string]map[string]any{
+		"a monitor is out of quorum": {keyQuorum: map[string]any{"quorum_names": []string{"a", "b"}}},
+		"an OSD is down":             {keyOSDs: map[string]any{"num_up_osds": 3}},
+	}
+	for name, override := range cases {
+		t.Run(name, func(t *testing.T) {
+			fake := cephFixture(t, override)
+			state, err := readCephState(context.Background(), fake.run, *adoptSpec())
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !slices.Equal(fake.reads, []string{keyQuorum, keyOSDs}) || len(state.Pools) != 0 {
+				t.Fatalf("reads %v, pools %v", fake.reads, state.Pools)
+			}
+		})
+	}
+}
+
+func TestReadCephStateFailsLoudWithoutTheFlagsOfTheFilesystem(t *testing.T) {
+	fake := cephFixture(t, map[string]any{keyOldFS: map[string]any{"mdsmap": map[string]any{"flags_state": map[string]any{"allow_snaps": true}}}})
+	if _, err := readCephState(context.Background(), fake.run, *adoptSpec()); err == nil {
+		t.Fatal("a filesystem without the joinable flag must fail the read")
+	}
+}
+
+func executedPlan(plan []renameCommand) []string {
+	keys := make([]string, 0, len(plan))
+	for _, command := range plan {
+		keys = append(keys, commandKey(command.Args))
+	}
+	return keys
+}
+
+func TestAdoptStepGates(t *testing.T) {
+	cases := []struct {
+		name      string
+		overrides []map[string]any
+		replicas  int
+		reason    string
+		message   string
+		reads     int
+	}{
+		{"monitor out of quorum", []map[string]any{{keyQuorum: map[string]any{"quorum_names": []string{"a", "c"}}}}, 3, v1alpha1.ReasonWaitingForQuorum, "monitors not in quorum: b", 2},
+		{"OSD down", []map[string]any{{keyOSDs: map[string]any{"num_up_osds": 3}}}, 3, v1alpha1.ReasonWaitingForOSDs, "3 of 4 OSDs are up", 2},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			fake := cephFixture(t, tc.overrides...)
+			got := adoptStep(context.Background(), fake.run, *adoptSpec(), tc.replicas)
+			if got.Type != v1alpha1.ConditionStorageAdopted || got.Status != metav1.ConditionFalse || got.Reason != tc.reason || got.Message != tc.message {
+				t.Fatalf("condition %+v", got)
+			}
+			if len(fake.reads) != tc.reads || len(fake.mutations) != 0 {
+				t.Fatalf("reads %v, mutations %v", fake.reads, fake.mutations)
+			}
+		})
+	}
+}
+
+func TestAdoptStepRefusesPoolsLargerThanTheReplicas(t *testing.T) {
+	states := map[string][]map[string]any{"fresh": nil, "renamed": allDone(t)}
+	for name, overrides := range states {
+		t.Run(name, func(t *testing.T) {
+			fake := cephFixture(t, overrides...)
+			got := adoptStep(context.Background(), fake.run, *adoptSpec(), 1)
+			if got.Status != metav1.ConditionFalse || got.Reason != v1alpha1.ReasonPoolSizeTooSmall {
+				t.Fatalf("condition %+v", got)
+			}
+			if len(fake.mutations) != 0 {
+				t.Fatalf("a failed size gate ran %v", fake.mutations)
+			}
+			if strings.Contains(got.Message, ".mgr") || !strings.Contains(got.Message, "storage.replicas is 1") {
+				t.Fatalf("message %q", got.Message)
+			}
+		})
+	}
+}
+
+func TestAdoptStepNamesEveryAdoptedPoolThatIsTooLarge(t *testing.T) {
+	fake := cephFixture(t)
+	got := adoptStep(context.Background(), fake.run, *adoptSpec(), 2)
+	for _, pool := range []string{"storage-block (3)", "filesystem-data-metadata (3)", "filesystem-data-data0 (3)", ".rgw.root (3)", "objectstore.rgw.buckets.data (3)"} {
+		if !strings.Contains(got.Message, pool) {
+			t.Fatalf("message %q lacks %s", got.Message, pool)
+		}
+	}
+}
+
+func TestAdoptStepAcceptsPoolsThatFitTheReplicas(t *testing.T) {
+	fake := cephFixture(t, map[string]any{keyPools: poolEntries(1, ".mgr", "storage-block", "filesystem-data-metadata", "filesystem-data-data0", ".rgw.root")})
+	got := adoptStep(context.Background(), fake.run, *adoptSpec(), 1)
+	if got.Reason == v1alpha1.ReasonPoolSizeTooSmall {
+		t.Fatalf("condition %+v", got)
+	}
+}
+
+func TestAdoptStepRunsThePlanInOrder(t *testing.T) {
+	fake := cephFixture(t)
+	state, err := readCephState(context.Background(), cephFixture(t).run, *adoptSpec())
+	if err != nil {
+		t.Fatal(err)
+	}
+	plan := renamePlan(state, *adoptSpec())
+	got := adoptStep(context.Background(), fake.run, *adoptSpec(), 3)
+	if got.Status != metav1.ConditionFalse || got.Reason != v1alpha1.ReasonRenaming {
+		t.Fatalf("condition %+v", got)
+	}
+	if !slices.Equal(fake.mutations, executedPlan(plan)) || len(plan) != 20 {
+		t.Fatalf("ran %d commands:\n%s", len(fake.mutations), strings.Join(fake.mutations, "\n"))
+	}
+}
+
+func TestAdoptStepStopsAtTheFirstFailureWithoutKeyLines(t *testing.T) {
+	fake := cephFixture(t)
+	failing := "ceph fs rename filesystem-data bedrock-fs --yes-i-really-mean-it"
+	fake.failures[failing] = errors.New("command terminated with exit code 1: Error EPERM: CephFS is not offline\nauthenticated with key AQBfake==\nMON KEYRING line")
+	got := adoptStep(context.Background(), fake.run, *adoptSpec(), 3)
+	if got.Status != metav1.ConditionFalse || got.Reason != v1alpha1.ReasonRenameFailed {
+		t.Fatalf("condition %+v", got)
+	}
+	want := failing + ": command terminated with exit code 1: Error EPERM: CephFS is not offline"
+	if got.Message != want {
+		t.Fatalf("message %q, want %q", got.Message, want)
+	}
+	wantRan := []string{
+		"ceph osd pool rename storage-block bedrock-block",
+		"ceph fs fail filesystem-data",
+		"ceph fs set filesystem-data refuse_client_session true",
+		failing,
+	}
+	if !slices.Equal(fake.mutations, wantRan) {
+		t.Fatalf("ran %v", fake.mutations)
+	}
+}
+
+func TestAdoptStepReportsAnUnreadableState(t *testing.T) {
+	fake := cephFixture(t)
+	fake.failures[keyPools] = errors.New("RADOS timed out")
+	got := adoptStep(context.Background(), fake.run, *adoptSpec(), 3)
+	if got.Reason != v1alpha1.ReasonWaitingForQuorum || got.Message != "cannot read the Ceph state: RADOS timed out" {
+		t.Fatalf("condition %+v", got)
+	}
+}
+
+func TestAdoptStepSetsAdoptedWhenNothingIsLeftToRename(t *testing.T) {
+	fake := cephFixture(t, allDone(t)...)
+	got := adoptStep(context.Background(), fake.run, *adoptSpec(), 3)
+	if got.Status != metav1.ConditionTrue || got.Reason != v1alpha1.ReasonAdopted {
+		t.Fatalf("condition %+v", got)
+	}
+	if len(fake.mutations) != 0 {
+		t.Fatalf("ran %v", fake.mutations)
+	}
+}
+
+func TestAdoptStepRefusesNamesThatAreNotCephNames(t *testing.T) {
+	for _, bad := range []string{"", "has space", "semi;colon", "$(id)", "slash/name", "-leading"} {
+		t.Run(bad, func(t *testing.T) {
+			adopt := adoptSpec()
+			adopt.Pools.ObjectStore = bad
+			fake := cephFixture(t)
+			got := adoptStep(context.Background(), fake.run, *adopt, 3)
+			if got.Reason != v1alpha1.ReasonRenameFailed || got.Message != "storage.adopt.pools.objectStore is not a valid Ceph name" {
+				t.Fatalf("condition %+v", got)
+			}
+			if len(fake.reads) != 0 || len(fake.mutations) != 0 {
+				t.Fatalf("reads %v, mutations %v", fake.reads, fake.mutations)
+			}
+		})
+	}
+}
+
+func TestSafeMessage(t *testing.T) {
+	cases := []struct{ name, in, want string }{
+		{"plain", "pool does not exist", "pool does not exist"},
+		{"drops key lines of any case", "first\nkeyring: AQB\nSecond KEY here\nthird", "first; third"},
+		{"keeps the last lines", "one\ntwo\nthree\nfour\nfive", "three; four; five"},
+		{"drops blank lines", "one\n\n  \ntwo\n", "one; two"},
+		{"only key lines", "key\nsecret_key: x", ""},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := safeMessage(tc.in); got != tc.want {
+				t.Fatalf("%q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestZonePoolRewriteRewritesOnlyThePoolNames(t *testing.T) {
+	cases := map[string]string{"objectstore": "objectstore", "dotted store": "my.store"}
+	for name, old := range cases {
+		t.Run(name, func(t *testing.T) {
+			fresh := cephFixture(t)
+			zone := strings.ReplaceAll(string(fresh.outputs[keyOldZone]), "objectstore.rgw.", old+".rgw.")
+			lookalikes := []string{"x" + old + ".rgw.meta"}
+			if strings.Contains(old, ".") {
+				lookalikes = append(lookalikes, strings.ReplaceAll(old, ".", "X")+".rgw.meta")
+			}
+			extra, err := json.Marshal(lookalikes)
+			if err != nil {
+				t.Fatal(err)
+			}
+			input := strings.Replace(zone, `"name": "objectstore"`, `"name": "objectstore", "other_pools": `+string(extra), 1)
+			dir := t.TempDir()
+			zoneGet := filepath.Join(dir, "zone-get.json")
+			zoneSet := filepath.Join(dir, "zone-set.json")
+			if err := os.WriteFile(zoneGet, []byte(input), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			stub := "#!/bin/sh\ncase \"$1 $2\" in\n\"zone get\") cat \"$ZONE_GET\" ;;\n\"zone set\") cat > \"$ZONE_SET\" ;;\nesac\n"
+			if err := os.WriteFile(filepath.Join(dir, "radosgw-admin"), []byte(stub), 0o700); err != nil {
+				t.Fatal(err)
+			}
+			command := zonePoolRewrite(old)
+			run := exec.Command(command.Args[0], command.Args[1:]...)
+			run.Env = append(os.Environ(), "PATH="+dir+":"+os.Getenv("PATH"), "ZONE_GET="+zoneGet, "ZONE_SET="+zoneSet)
+			if out, err := run.CombinedOutput(); err != nil {
+				t.Fatalf("%v: %s", err, out)
+			}
+			data, err := os.ReadFile(zoneSet)
+			if err != nil {
+				t.Fatal(err)
+			}
+			want := strings.ReplaceAll(input, `"`+old+".rgw.", `"bedrock-rgw.rgw.`)
+			if strings.TrimSpace(string(data)) != strings.TrimSpace(want) {
+				t.Fatalf("zone\n%s\nwant\n%s", data, want)
+			}
+			if !strings.Contains(string(data), "ZONESECRET") || strings.Contains(string(data), `"`+old+".rgw.") {
+				t.Fatalf("zone %s", data)
+			}
+			for _, lookalike := range lookalikes {
+				if !strings.Contains(string(data), `"`+lookalike+`"`) {
+					t.Fatalf("lookalike %s changed in %s", lookalike, data)
+				}
+			}
+		})
+	}
+}
+
+func TestZonePoolRewriteStopsWhenTheZoneCannotBeRead(t *testing.T) {
+	dir := t.TempDir()
+	written := filepath.Join(dir, "zone-set.json")
+	stub := "#!/bin/sh\ncase \"$1 $2\" in\n\"zone get\") exit 2 ;;\n\"zone set\") cat > \"$ZONE_SET\" ;;\nesac\n"
+	if err := os.WriteFile(filepath.Join(dir, "radosgw-admin"), []byte(stub), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	command := zonePoolRewrite("objectstore")
+	run := exec.Command(command.Args[0], command.Args[1:]...)
+	run.Env = append(os.Environ(), "PATH="+dir+":"+os.Getenv("PATH"), "ZONE_SET="+written)
+	if err := run.Run(); err == nil {
+		t.Fatal("an unreadable zone must fail the command")
+	}
+	if _, err := os.Stat(written); err == nil {
+		t.Fatal("zone set must not run after a failed zone get")
+	}
+}
+
+func operatorPod(phase corev1.PodPhase) *corev1.Pod {
+	return &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{Name: "rook-ceph-operator-0", Namespace: storageNamespace, Labels: map[string]string{"app": "rook-ceph-operator"}},
+		Status:     corev1.PodStatus{Phase: phase},
+	}
+}
+
+func TestOperatorRunReportsTheExitMessageWithoutTheCommandLine(t *testing.T) {
+	podError := fmt.Errorf("exec ceph fs rename a b in rook-ceph/pod: %w", fmt.Errorf("%w: %s", errors.New("command terminated with exit code 1"), "Error EPERM"))
+	var calls []recordedExec
+	_, err := operatorRun(fakeExec("", podError, &calls), "rook-ceph-operator-0")(context.Background(), []string{"ceph", "fs"})
+	if err == nil || err.Error() != "command terminated with exit code 1: Error EPERM" {
+		t.Fatalf("error %v", err)
+	}
+	if len(calls) != 1 || calls[0].namespace != "rook-ceph" || calls[0].pod != "rook-ceph-operator-0" || calls[0].container != "rook-ceph-operator" || !slices.Equal(calls[0].command, []string{"ceph", "fs"}) {
+		t.Fatalf("calls %+v", calls)
+	}
+	out, err := operatorRun(fakeExec("answer", nil, &calls), "pod")(context.Background(), []string{"ceph"})
+	if err != nil || string(out) != "answer" {
+		t.Fatalf("out %q, error %v", out, err)
+	}
+}
+
+func TestAdvanceAdoptionRunsOnlyInTheStepPhases(t *testing.T) {
+	phases := map[string]bool{
+		"":                                false,
+		v1alpha1.ReasonWaitingForIdentity: false,
+		v1alpha1.ReasonWaitingForHosts:    false,
+		v1alpha1.ReasonWaitingForQuorum:   true,
+		v1alpha1.ReasonWaitingForOSDs:     true,
+		v1alpha1.ReasonRenaming:           true,
+		v1alpha1.ReasonPoolSizeTooSmall:   true,
+		v1alpha1.ReasonRenameFailed:       true,
+		v1alpha1.ReasonAdopted:            false,
+	}
+	for phase, runs := range phases {
+		t.Run("phase "+phase, func(t *testing.T) {
+			c := fake.NewClientBuilder().WithObjects(operatorPod(corev1.PodRunning)).Build()
+			var calls []recordedExec
+			got := advanceAdoption(context.Background(), c, fakeExec("", errors.New("no answer"), &calls), adoptInput(phase))
+			if runs != (len(calls) > 0) || runs != (len(got) == 1) {
+				t.Fatalf("calls %d, conditions %+v", len(calls), got)
+			}
+		})
+	}
+}
+
+func TestAdvanceAdoptionRunsInTheRookOperatorPod(t *testing.T) {
+	c := fake.NewClientBuilder().WithObjects(operatorPod(corev1.PodRunning)).Build()
+	var calls []recordedExec
+	got := advanceAdoption(context.Background(), c, fakeExec("", errors.New("no answer"), &calls), adoptInput(v1alpha1.ReasonWaitingForQuorum))
+	if len(calls) == 0 || calls[0].namespace != "rook-ceph" || calls[0].pod != "rook-ceph-operator-0" || calls[0].container != "rook-ceph-operator" || calls[0].command[0] != "ceph" {
+		t.Fatalf("calls %+v", calls)
+	}
+	if len(got) != 1 || got[0].Type != v1alpha1.ConditionStorageAdopted || got[0].Reason != v1alpha1.ReasonWaitingForQuorum {
+		t.Fatalf("conditions %+v", got)
+	}
+}
+
+func TestAdvanceAdoptionWaitsForTheRookOperatorPod(t *testing.T) {
+	c := fake.NewClientBuilder().WithObjects(operatorPod(corev1.PodPending)).Build()
+	var calls []recordedExec
+	got := advanceAdoption(context.Background(), c, fakeExec("", nil, &calls), adoptInput(v1alpha1.ReasonRenaming))
+	if len(calls) != 0 || len(got) != 1 || got[0].Reason != v1alpha1.ReasonWaitingForQuorum || got[0].Message != "no running rook-ceph-operator pod in rook-ceph" {
+		t.Fatalf("calls %d, conditions %+v", len(calls), got)
+	}
+}
+
+func TestAdvanceAdoptionDoesNothingWithoutAnAdoptSpec(t *testing.T) {
+	in := adoptInput(v1alpha1.ReasonWaitingForQuorum)
+	in.Cluster.Spec.Storage.Adopt = nil
+	var calls []recordedExec
+	if got := advanceAdoption(context.Background(), fake.NewClientBuilder().Build(), fakeExec("", nil, &calls), in); got != nil || len(calls) != 0 {
+		t.Fatalf("calls %d, conditions %+v", len(calls), got)
+	}
+}
+
+func TestAddonReconcilerAdvancesOnlyAfterAnApply(t *testing.T) {
+	c, _ := StartTestEnv(t)
+	ctx := context.Background()
+	if err := c.Create(ctx, &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: release.SystemNamespace}}); err != nil {
+		t.Fatal(err)
+	}
+	var advanced int
+	step := metav1.Condition{Type: "Step", Status: metav1.ConditionFalse, Reason: "Stepped"}
+	advance := func(context.Context, client.Client, execFunc, AddonInput) []metav1.Condition {
+		advanced++
+		return []metav1.Condition{step}
+	}
+	var calls []recordedExec
+	cases := []struct {
+		name   string
+		render func(AddonInput) (Rendered, error)
+		exec   execFunc
+		want   int
+	}{
+		{"applied", probeConfigMap, fakeExec("", nil, &calls), 1},
+		{"skipped", skipAlways, fakeExec("", nil, &calls), 0},
+		{"missing CRD", renderUnknownKind, fakeExec("", nil, &calls), 0},
+		{"no exec", probeConfigMap, nil, 0},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			advanced = 0
+			r := &AddonReconciler{Client: c, Exec: tc.exec}
+			addon := Addon{Name: "step", Condition: "StepReady", Render: tc.render, Advance: advance}
+			_, extra := r.reconcileAddon(ctx, addon, AddonInput{})
+			if advanced != tc.want || (tc.want == 1) != slices.ContainsFunc(extra, func(c metav1.Condition) bool { return c.Type == "Step" }) {
+				t.Fatalf("advanced %d times, extra %+v", advanced, extra)
 			}
 		})
 	}

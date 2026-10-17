@@ -26,7 +26,7 @@ const (
 	storageReplicasKey = "storage.replicas"
 )
 
-var storageAddon = Addon{Name: "storage", Condition: v1alpha1.ConditionStorageReady, Render: RenderStorage}
+var storageAddon = Addon{Name: "storage", Condition: v1alpha1.ConditionStorageReady, Render: RenderStorage, Advance: advanceAdoption}
 
 var cephClusterGVK = schema.GroupVersionKind{Group: "ceph.rook.io", Version: "v1", Kind: "CephCluster"}
 

@@ -2,9 +2,13 @@ package operator
 
 import (
 	"context"
+	"encoding/json"
+	"errors"
 	"fmt"
+	"regexp"
 	"slices"
 	"strings"
+	"time"
 
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/meta"
@@ -79,7 +83,11 @@ func adoptionPending(cluster *unstructured.Unstructured, phase string, condition
 }
 
 func adoptedCondition(reason, message string) metav1.Condition {
-	return metav1.Condition{Type: v1alpha1.ConditionStorageAdopted, Status: metav1.ConditionFalse, Reason: reason, Message: message}
+	status := metav1.ConditionFalse
+	if reason == v1alpha1.ReasonAdopted {
+		status = metav1.ConditionTrue
+	}
+	return metav1.Condition{Type: v1alpha1.ConditionStorageAdopted, Status: status, Reason: reason, Message: message}
 }
 
 func adoptWait(secret *corev1.Secret, adopt v1alpha1.AdoptSpec, hosts []v1alpha1.Host) (string, string) {
@@ -132,4 +140,454 @@ func adoptedHealthWarnings(replicas int) map[string]any {
 	muted := mutedHealthWarnings(replicas)
 	muted["AUTH_EMERGENCY_CIPHERS_SET"] = map[string]any{"policy": "mute"}
 	return muted
+}
+
+const (
+	rgwRootPool     = ".rgw.root"
+	cephStepTimeout = 2 * time.Minute
+	messageLines    = 3
+
+	zonePoolScript = `set -e
+zone=$(radosgw-admin zone get --rgw-zone="$2" "$3")
+printf '%s' "$zone" | sed "s/\"$1\\.rgw\\./\"$2.rgw./g" | radosgw-admin zone set --rgw-zone="$2" --infile=/dev/stdin "$3"`
+)
+
+var (
+	cephNamePattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]*$`)
+	adoptStepPhases = []string{
+		v1alpha1.ReasonWaitingForQuorum,
+		v1alpha1.ReasonWaitingForOSDs,
+		v1alpha1.ReasonRenaming,
+		v1alpha1.ReasonPoolSizeTooSmall,
+		v1alpha1.ReasonRenameFailed,
+	}
+)
+
+type runFunc func(ctx context.Context, command []string) ([]byte, error)
+
+type renameCommand struct {
+	Name string
+	Args []string
+}
+
+type cephPoolState struct {
+	Name string `json:"pool_name"`
+	Size int    `json:"size"`
+}
+
+type cephFilesystemState struct {
+	Name                string   `json:"name"`
+	MetadataPool        string   `json:"metadata_pool"`
+	DataPools           []string `json:"data_pools"`
+	Joinable            bool     `json:"-"`
+	RefuseClientSession bool     `json:"-"`
+}
+
+type cephState struct {
+	Quorum         []string
+	UpOSDs         int
+	Pools          []cephPoolState
+	Filesystems    []cephFilesystemState
+	Realms         []string
+	ZoneGroups     []string
+	Zones          []string
+	ZoneStalePools []string
+}
+
+type poolMove struct {
+	from, to string
+}
+
+func advanceAdoption(ctx context.Context, c client.Client, exec execFunc, in AddonInput) []metav1.Condition {
+	adopt := in.Cluster.Spec.Storage.Adopt
+	if adopt == nil || !slices.Contains(adoptStepPhases, adoptPhase(in.Cluster)) {
+		return nil
+	}
+	replicas, err := replicaCount(in.Settings[storageReplicasKey])
+	if err != nil {
+		return nil
+	}
+	pod, err := rookOperatorPod(ctx, c)
+	if err != nil {
+		return []metav1.Condition{adoptedCondition(v1alpha1.ReasonWaitingForQuorum, safeMessage(err.Error()))}
+	}
+	return []metav1.Condition{adoptStep(ctx, operatorRun(exec, pod), *adopt, replicas)}
+}
+
+func adoptStep(ctx context.Context, run runFunc, adopt v1alpha1.AdoptSpec, replicas int) metav1.Condition {
+	if message := adoptNameProblem(adopt.Pools); message != "" {
+		return adoptedCondition(v1alpha1.ReasonRenameFailed, message)
+	}
+	state, err := readCephState(ctx, run, adopt)
+	if err != nil {
+		return adoptedCondition(v1alpha1.ReasonWaitingForQuorum, "cannot read the Ceph state: "+safeMessage(err.Error()))
+	}
+	if reason, message := healthProblem(state, adopt); reason != "" {
+		return adoptedCondition(reason, message)
+	}
+	if message := poolSizeProblem(state, adopt, replicas); message != "" {
+		return adoptedCondition(v1alpha1.ReasonPoolSizeTooSmall, message)
+	}
+	plan := renamePlan(state, adopt)
+	if len(plan) == 0 {
+		return adoptedCondition(v1alpha1.ReasonAdopted, "the pools, the CephFS and the RGW realm have the Bedrock names")
+	}
+	for _, command := range plan {
+		if _, err := run(ctx, command.Args); err != nil {
+			return adoptedCondition(v1alpha1.ReasonRenameFailed, command.Name+": "+safeMessage(err.Error()))
+		}
+	}
+	return adoptedCondition(v1alpha1.ReasonRenaming, fmt.Sprintf("ran %d rename commands, the next reconcile checks the result", len(plan)))
+}
+
+func operatorRun(exec execFunc, pod string) runFunc {
+	return func(ctx context.Context, command []string) ([]byte, error) {
+		ctx, cancel := context.WithTimeout(ctx, cephStepTimeout)
+		defer cancel()
+		out, err := exec(ctx, storageNamespace, pod, rookOperatorContainer, command)
+		if err != nil {
+			return nil, errors.New(exitMessage(err))
+		}
+		return out, nil
+	}
+}
+
+func exitMessage(err error) string {
+	if inner := errors.Unwrap(err); inner != nil {
+		return inner.Error()
+	}
+	return err.Error()
+}
+
+func safeMessage(message string) string {
+	var kept []string
+	for _, line := range strings.Split(message, "\n") {
+		line = strings.TrimSpace(line)
+		if line != "" && !strings.Contains(strings.ToLower(line), "key") {
+			kept = append(kept, line)
+		}
+	}
+	return strings.Join(kept[max(0, len(kept)-messageLines):], "; ")
+}
+
+func adoptNameProblem(pools v1alpha1.AdoptPools) string {
+	names := []struct{ field, name string }{{"block", pools.Block}, {"filesystem", pools.Filesystem}, {"objectStore", pools.ObjectStore}}
+	for _, entry := range names {
+		if !cephNamePattern.MatchString(entry.name) {
+			return fmt.Sprintf("storage.adopt.pools.%s is not a valid Ceph name", entry.field)
+		}
+	}
+	return ""
+}
+
+func healthProblem(state cephState, adopt v1alpha1.AdoptSpec) (string, string) {
+	var missing []string
+	for _, monitor := range adopt.Monitors {
+		if !slices.Contains(state.Quorum, monitor.ID) {
+			missing = append(missing, monitor.ID)
+		}
+	}
+	if len(missing) > 0 {
+		return v1alpha1.ReasonWaitingForQuorum, "monitors not in quorum: " + strings.Join(missing, ", ")
+	}
+	devices := 0
+	for _, host := range adopt.Hosts {
+		devices += len(host.Devices)
+	}
+	if state.UpOSDs < devices {
+		return v1alpha1.ReasonWaitingForOSDs, fmt.Sprintf("%d of %d OSDs are up", state.UpOSDs, devices)
+	}
+	return "", ""
+}
+
+func poolSizeProblem(state cephState, adopt v1alpha1.AdoptSpec, replicas int) string {
+	var large []string
+	for _, pool := range state.Pools {
+		if pool.Size > replicas && adoptedPool(state, adopt, pool.Name) {
+			large = append(large, fmt.Sprintf("%s (%d)", pool.Name, pool.Size))
+		}
+	}
+	if len(large) == 0 {
+		return ""
+	}
+	return fmt.Sprintf("pools larger than the replicas: %s; storage.replicas is %d", strings.Join(large, ", "), replicas)
+}
+
+func adoptedPool(state cephState, adopt v1alpha1.AdoptSpec, name string) bool {
+	names := []string{adopt.Pools.Block, blockPoolName, rgwRootPool}
+	if fs, found := findFilesystem(state, adopt.Pools.Filesystem); found {
+		names = append(names, fs.MetadataPool)
+		names = append(names, fs.DataPools...)
+	}
+	return slices.Contains(names, name) ||
+		strings.HasPrefix(name, adopt.Pools.ObjectStore+".rgw.") ||
+		strings.HasPrefix(name, objectStoreName+".rgw.")
+}
+
+func cephArgs(args ...string) []string {
+	return slices.Concat([]string{"ceph"}, args, []string{"--connect-timeout=10", rookConfFlag})
+}
+
+func radosgwArgs(args ...string) []string {
+	return slices.Concat([]string{"radosgw-admin"}, args, []string{rookConfFlag})
+}
+
+func cephStep(args ...string) renameCommand {
+	return renameCommand{Name: "ceph " + strings.Join(args, " "), Args: cephArgs(args...)}
+}
+
+func radosgwStep(args ...string) renameCommand {
+	return renameCommand{Name: "radosgw-admin " + strings.Join(args, " "), Args: radosgwArgs(args...)}
+}
+
+func zonePoolRewrite(old string) renameCommand {
+	return renameCommand{
+		Name: "radosgw-admin zone set --rgw-zone=" + objectStoreName,
+		Args: []string{"sh", "-c", zonePoolScript, "sh", strings.ReplaceAll(old, ".", `\.`), objectStoreName, rookConfFlag},
+	}
+}
+
+func readJSON(ctx context.Context, run runFunc, target any, command []string) error {
+	out, err := run(ctx, command)
+	if err != nil {
+		return err
+	}
+	if err := json.Unmarshal(out, target); err != nil {
+		return fmt.Errorf("parse the output of %s: %w", strings.Join(command[:2], " "), err)
+	}
+	return nil
+}
+
+func readCephState(ctx context.Context, run runFunc, adopt v1alpha1.AdoptSpec) (cephState, error) {
+	state, err := readCephHealth(ctx, run)
+	if err != nil {
+		return cephState{}, err
+	}
+	if reason, _ := healthProblem(state, adopt); reason != "" {
+		return state, nil
+	}
+	readers := []func(context.Context, runFunc, v1alpha1.AdoptSpec, cephState) (cephState, error){readPools, readFilesystems, readObjectStore}
+	for _, read := range readers {
+		next, err := read(ctx, run, adopt, state)
+		if err != nil {
+			return cephState{}, err
+		}
+		state = next
+	}
+	return state, nil
+}
+
+func readCephHealth(ctx context.Context, run runFunc) (cephState, error) {
+	var quorum struct {
+		Names []string `json:"quorum_names"`
+	}
+	var osds struct {
+		Up int `json:"num_up_osds"`
+	}
+	if err := readJSON(ctx, run, &quorum, cephArgs("quorum_status", "-f", "json")); err != nil {
+		return cephState{}, err
+	}
+	if err := readJSON(ctx, run, &osds, cephArgs("osd", "stat", "-f", "json")); err != nil {
+		return cephState{}, err
+	}
+	return cephState{Quorum: quorum.Names, UpOSDs: osds.Up}, nil
+}
+
+func readPools(ctx context.Context, run runFunc, _ v1alpha1.AdoptSpec, state cephState) (cephState, error) {
+	if err := readJSON(ctx, run, &state.Pools, cephArgs("osd", "pool", "ls", "detail", "-f", "json")); err != nil {
+		return cephState{}, err
+	}
+	return state, nil
+}
+
+func readFilesystems(ctx context.Context, run runFunc, adopt v1alpha1.AdoptSpec, state cephState) (cephState, error) {
+	if err := readJSON(ctx, run, &state.Filesystems, cephArgs("fs", "ls", "-f", "json")); err != nil {
+		return cephState{}, err
+	}
+	for i, fs := range state.Filesystems {
+		if fs.Name != adopt.Pools.Filesystem && fs.Name != filesystemName {
+			continue
+		}
+		joinable, refuse, err := readFilesystemFlags(ctx, run, fs.Name)
+		if err != nil {
+			return cephState{}, err
+		}
+		state.Filesystems[i].Joinable, state.Filesystems[i].RefuseClientSession = joinable, refuse
+	}
+	return state, nil
+}
+
+func readFilesystemFlags(ctx context.Context, run runFunc, name string) (bool, bool, error) {
+	var detail struct {
+		MDSMap struct {
+			Flags struct {
+				Joinable            *bool `json:"joinable"`
+				RefuseClientSession *bool `json:"refuse_client_session"`
+			} `json:"flags_state"`
+		} `json:"mdsmap"`
+	}
+	if err := readJSON(ctx, run, &detail, cephArgs("fs", "get", name, "-f", "json")); err != nil {
+		return false, false, err
+	}
+	flags := detail.MDSMap.Flags
+	if flags.Joinable == nil || flags.RefuseClientSession == nil {
+		return false, false, fmt.Errorf("ceph fs get %s has no joinable or refuse_client_session flag", name)
+	}
+	return *flags.Joinable, *flags.RefuseClientSession, nil
+}
+
+func readObjectStore(ctx context.Context, run runFunc, adopt v1alpha1.AdoptSpec, state cephState) (cephState, error) {
+	var realms struct {
+		Realms []string `json:"realms"`
+	}
+	var zoneGroups struct {
+		ZoneGroups []string `json:"zonegroups"`
+	}
+	var zones struct {
+		Zones []string `json:"zones"`
+	}
+	if err := readJSON(ctx, run, &realms, radosgwArgs("realm", "list")); err != nil {
+		return cephState{}, err
+	}
+	if err := readJSON(ctx, run, &zoneGroups, radosgwArgs("zonegroup", "list")); err != nil {
+		return cephState{}, err
+	}
+	if err := readJSON(ctx, run, &zones, radosgwArgs("zone", "list")); err != nil {
+		return cephState{}, err
+	}
+	state.Realms, state.ZoneGroups, state.Zones = realms.Realms, zoneGroups.ZoneGroups, zones.Zones
+	zone := slices.IndexFunc([]string{objectStoreName, adopt.Pools.ObjectStore}, func(name string) bool { return slices.Contains(zones.Zones, name) })
+	if zone < 0 {
+		return state, nil
+	}
+	var document any
+	name := []string{objectStoreName, adopt.Pools.ObjectStore}[zone]
+	if err := readJSON(ctx, run, &document, radosgwArgs("zone", "get", "--rgw-zone="+name)); err != nil {
+		return cephState{}, err
+	}
+	state.ZoneStalePools = stringsWithPrefix(document, adopt.Pools.ObjectStore+".rgw.")
+	return state, nil
+}
+
+func stringsWithPrefix(value any, prefix string) []string {
+	var found []string
+	switch typed := value.(type) {
+	case string:
+		if strings.HasPrefix(typed, prefix) {
+			found = append(found, typed)
+		}
+	case map[string]any:
+		for _, child := range typed {
+			found = append(found, stringsWithPrefix(child, prefix)...)
+		}
+	case []any:
+		for _, child := range typed {
+			found = append(found, stringsWithPrefix(child, prefix)...)
+		}
+	}
+	return found
+}
+
+func renamePlan(state cephState, adopt v1alpha1.AdoptSpec) []renameCommand {
+	return slices.Concat(
+		blockPlan(state, adopt.Pools.Block),
+		filesystemPlan(state, adopt.Pools.Filesystem),
+		objectStorePlan(state, adopt.Pools.ObjectStore),
+	)
+}
+
+func poolRename(move poolMove) renameCommand {
+	return cephStep("osd", "pool", "rename", move.from, move.to)
+}
+
+func blockPlan(state cephState, old string) []renameCommand {
+	if old == blockPoolName || !slices.ContainsFunc(state.Pools, func(pool cephPoolState) bool { return pool.Name == old }) {
+		return nil
+	}
+	return []renameCommand{poolRename(poolMove{old, blockPoolName})}
+}
+
+func findFilesystem(state cephState, old string) (cephFilesystemState, bool) {
+	for _, name := range []string{old, filesystemName} {
+		if i := slices.IndexFunc(state.Filesystems, func(fs cephFilesystemState) bool { return fs.Name == name }); i >= 0 {
+			return state.Filesystems[i], true
+		}
+	}
+	return cephFilesystemState{}, false
+}
+
+func filesystemPlan(state cephState, old string) []renameCommand {
+	fs, found := findFilesystem(state, old)
+	if !found {
+		return nil
+	}
+	renamed := fs.Name != filesystemName
+	var plan []renameCommand
+	if renamed {
+		plan = append(plan,
+			cephStep("fs", "fail", fs.Name),
+			cephStep("fs", "set", fs.Name, "refuse_client_session", "true"),
+			cephStep("fs", "rename", fs.Name, filesystemName, "--yes-i-really-mean-it"),
+		)
+	}
+	for _, move := range filesystemPoolMoves(fs) {
+		plan = append(plan, poolRename(move))
+	}
+	if renamed || !fs.Joinable {
+		plan = append(plan, cephStep("fs", "set", filesystemName, "joinable", "true"))
+	}
+	if renamed || fs.RefuseClientSession {
+		plan = append(plan, cephStep("fs", "set", filesystemName, "refuse_client_session", "false"))
+	}
+	return plan
+}
+
+func filesystemPoolMoves(fs cephFilesystemState) []poolMove {
+	moves := []poolMove{{fs.MetadataPool, filesystemName + "-metadata"}}
+	for i, pool := range fs.DataPools {
+		moves = append(moves, poolMove{pool, fmt.Sprintf("%s-data%d", filesystemName, i)})
+	}
+	return slices.DeleteFunc(moves, func(move poolMove) bool { return move.from == move.to })
+}
+
+func objectStorePlan(state cephState, old string) []renameCommand {
+	if old == objectStoreName {
+		return nil
+	}
+	realm := slices.Contains(state.Realms, old)
+	zoneGroup := slices.Contains(state.ZoneGroups, old)
+	zone := slices.Contains(state.Zones, old)
+	rewrite := len(state.ZoneStalePools) > 0
+	var plan []renameCommand
+	if realm {
+		plan = append(plan, radosgwStep("realm", "rename", "--rgw-realm="+old, "--realm-new-name="+objectStoreName))
+	}
+	if zoneGroup {
+		plan = append(plan, radosgwStep("zonegroup", "rename", "--rgw-zonegroup="+old, "--zonegroup-new-name="+objectStoreName))
+	}
+	if zone {
+		plan = append(plan, radosgwStep("zone", "rename", "--rgw-zone="+old, "--zone-new-name="+objectStoreName, "--rgw-zonegroup="+objectStoreName))
+	}
+	if rewrite {
+		plan = append(plan, zonePoolRewrite(old))
+	}
+	if zoneGroup || zone || rewrite {
+		plan = append(plan, radosgwStep("period", "update", "--commit", "--rgw-realm="+objectStoreName))
+	}
+	for _, move := range objectStorePoolMoves(state, old) {
+		plan = append(plan, poolRename(move))
+	}
+	return plan
+}
+
+func objectStorePoolMoves(state cephState, old string) []poolMove {
+	prefix := old + ".rgw."
+	var moves []poolMove
+	for _, pool := range state.Pools {
+		if suffix, found := strings.CutPrefix(pool.Name, prefix); found {
+			moves = append(moves, poolMove{pool.Name, objectStoreName + ".rgw." + suffix})
+		}
+	}
+	slices.SortFunc(moves, func(a, b poolMove) int { return cmpString(a.from, b.from) })
+	return moves
 }

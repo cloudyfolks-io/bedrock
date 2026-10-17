@@ -64,7 +64,7 @@ func Run(ctx context.Context, cfg *rest.Config, scheme *runtime.Scheme, opts Run
 	if err := (&StorageTopologyReconciler{Client: mgr.GetClient()}).SetupWithManager(mgr); err != nil {
 		return err
 	}
-	if err := (&AddonReconciler{Client: mgr.GetClient(), Bundle: bundle, Addons: DefaultAddons(), Interval: DefaultAddonInterval, ReadyInterval: DefaultAddonReadyInterval}).SetupWithManager(mgr); err != nil {
+	if err := (&AddonReconciler{Client: mgr.GetClient(), Bundle: bundle, Addons: DefaultAddons(), Interval: DefaultAddonInterval, ReadyInterval: DefaultAddonReadyInterval, Exec: exec}).SetupWithManager(mgr); err != nil {
 		return err
 	}
 	if err := setupAreas(mgr, bundle); err != nil {

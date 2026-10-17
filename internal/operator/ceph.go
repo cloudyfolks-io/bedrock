@@ -20,6 +20,7 @@ import (
 
 const (
 	rookOperatorContainer = "rook-ceph-operator"
+	rookConfFlag          = "--conf=/var/lib/rook/" + storageNamespace + "/" + storageNamespace + ".config"
 	cephHealthOK          = "HEALTH_OK"
 	cephActiveClean       = "active+clean"
 )
@@ -35,7 +36,7 @@ type cephReport struct {
 }
 
 func cephCommand() []string {
-	return []string{"ceph", "status", "--format", "json", "--connect-timeout=10", "--conf=/var/lib/rook/" + storageNamespace + "/" + storageNamespace + ".config"}
+	return []string{"ceph", "status", "--format", "json", "--connect-timeout=10", rookConfFlag}
 }
 
 func readCeph(ctx context.Context, c client.Client, exec execFunc) (cephReport, error) {

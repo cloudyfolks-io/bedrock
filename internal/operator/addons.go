@@ -5,6 +5,7 @@ import (
 	"context"
 	"crypto/rand"
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 
@@ -66,6 +67,7 @@ type Addon struct {
 	Name      string
 	Condition string
 	Render    func(AddonInput) (Rendered, error)
+	Advance   func(context.Context, client.Client, execFunc, AddonInput) []metav1.Condition
 }
 
 type AddonReconciler struct {
@@ -74,6 +76,7 @@ type AddonReconciler struct {
 	Addons        []Addon
 	Interval      time.Duration
 	ReadyInterval time.Duration
+	Exec          execFunc
 }
 
 func (r *AddonReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
@@ -227,23 +230,34 @@ func (r *AddonReconciler) reconcileAddon(ctx context.Context, addon Addon, input
 	if err != nil {
 		return addonCondition(addon, metav1.ConditionFalse, "RenderFailed", err.Error()), nil
 	}
-	return r.applyRendered(ctx, addon, rendered), rendered.Conditions
+	condition, applied := r.applyRendered(ctx, addon, rendered)
+	if !applied {
+		return condition, rendered.Conditions
+	}
+	return condition, slices.Concat(rendered.Conditions, r.advance(ctx, addon, input))
 }
 
-func (r *AddonReconciler) applyRendered(ctx context.Context, addon Addon, rendered Rendered) metav1.Condition {
+func (r *AddonReconciler) applyRendered(ctx context.Context, addon Addon, rendered Rendered) (metav1.Condition, bool) {
 	if rendered.SkipReason != "" {
-		return addonCondition(addon, metav1.ConditionFalse, rendered.SkipReason, rendered.SkipMessage)
+		return addonCondition(addon, metav1.ConditionFalse, rendered.SkipReason, rendered.SkipMessage), false
 	}
 	for _, obj := range rendered.Objects {
 		err := ssa.Apply(ctx, r.Client, obj, v1alpha1.OperatorFieldManager)
 		if meta.IsNoMatchError(err) {
-			return addonCondition(addon, metav1.ConditionFalse, "MissingCRD", fmt.Sprintf("%s %s: %v", obj.GetKind(), obj.GetName(), err))
+			return addonCondition(addon, metav1.ConditionFalse, "MissingCRD", fmt.Sprintf("%s %s: %v", obj.GetKind(), obj.GetName(), err)), false
 		}
 		if err != nil {
-			return addonCondition(addon, metav1.ConditionFalse, "ApplyFailed", fmt.Sprintf("%s %s: %v", obj.GetKind(), obj.GetName(), err))
+			return addonCondition(addon, metav1.ConditionFalse, "ApplyFailed", fmt.Sprintf("%s %s: %v", obj.GetKind(), obj.GetName(), err)), false
 		}
 	}
-	return r.probe(ctx, addon, rendered.Probes)
+	return r.probe(ctx, addon, rendered.Probes), true
+}
+
+func (r *AddonReconciler) advance(ctx context.Context, addon Addon, input AddonInput) []metav1.Condition {
+	if addon.Advance == nil || r.Exec == nil {
+		return nil
+	}
+	return addon.Advance(ctx, r.Client, r.Exec, input)
 }
 
 func (r *AddonReconciler) probe(ctx context.Context, addon Addon, probes []Probe) metav1.Condition {
