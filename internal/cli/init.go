@@ -136,6 +136,16 @@ func RunInit(ctx context.Context, args []string, deps InitDeps, stdout, stderr i
 		return fail(stderr, err)
 	}
 
+	var identity *rookIdentity
+	if adopt := cfg.Spec.Storage.Adopt; adopt != nil {
+		step(stdout, "adopt key file %s", adopt.KeyFile)
+		loaded, err := loadRookIdentity(*adopt)
+		if err != nil {
+			return fail(stderr, err)
+		}
+		identity = &loaded
+	}
+
 	bundlePath := o.bundle
 	if bundlePath == "" {
 		bundlePath = cfg.Spec.Registry.Bundle
@@ -319,7 +329,7 @@ func RunInit(ctx context.Context, args []string, deps InitDeps, stdout, stderr i
 	if err != nil {
 		return fail(stderr, err)
 	}
-	if err := release.InstallGroups(ctx, c, bundle, vars, release.Gates{}, 2*time.Second, 30*time.Minute, report, grafanaAdminHook(c, rand.Reader), release.SkipHook); err != nil {
+	if err := release.InstallGroups(ctx, c, bundle, vars, release.Gates{}, 2*time.Second, 30*time.Minute, report, grafanaAdminHook(c, rand.Reader), rookIdentityHook(c, identity)); err != nil {
 		return fail(stderr, err)
 	}
 

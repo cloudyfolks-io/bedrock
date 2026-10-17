@@ -58,6 +58,11 @@ spec:
 
 func adoptConfigFile(t *testing.T, root, content string) string {
 	t.Helper()
+	keyPath := filepath.Join(root, "ceph-keys.yaml")
+	if err := os.WriteFile(keyPath, []byte(rookKeyFileContent(labelFSID)), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	content = strings.ReplaceAll(content, "/root/ceph-keys.yaml", keyPath)
 	path := filepath.Join(root, "cluster.yaml")
 	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
 		t.Fatal(err)
