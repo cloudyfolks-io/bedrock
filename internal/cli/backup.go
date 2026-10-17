@@ -6,6 +6,7 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"io/fs"
 	"os"
 	"path/filepath"
 
@@ -85,6 +86,11 @@ func decryptArchive(in, out, identityPath string, stdout io.Writer) error {
 		return err
 	}
 	defer src.Close()
+	if out != stdoutPath {
+		if err := checkDestination(src, out); err != nil {
+			return err
+		}
+	}
 	plain, err := seal.Open(src, identities)
 	if err != nil {
 		return err
@@ -94,6 +100,27 @@ func decryptArchive(in, out, identityPath string, stdout io.Writer) error {
 		return err
 	}
 	return writeFileAtomic(out, plain)
+}
+
+func checkDestination(src *os.File, out string) error {
+	outInfo, err := os.Lstat(out)
+	if errors.Is(err, fs.ErrNotExist) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	if !outInfo.Mode().IsRegular() {
+		return fmt.Errorf("--out %s is not a regular file", out)
+	}
+	srcInfo, err := src.Stat()
+	if err != nil {
+		return err
+	}
+	if os.SameFile(srcInfo, outInfo) {
+		return errors.New("--out is the input archive")
+	}
+	return nil
 }
 
 func readIdentities(path string) ([]age.Identity, error) {

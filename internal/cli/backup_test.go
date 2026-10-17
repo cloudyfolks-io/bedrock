@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"testing"
 
 	"filippo.io/age"
@@ -254,6 +255,119 @@ func TestBackupDecryptNeverEchoesIdentityContent(t *testing.T) {
 	}
 	if strings.Contains(stderr.String(), "SECRETMATERIAL") || !strings.HasPrefix(stderr.String(), "decrypt "+archive+": ") {
 		t.Fatalf("stderr %q", stderr.String())
+	}
+}
+
+type decryptFixture struct {
+	dir, archive, identityPath string
+}
+
+func newDecryptFixture(t *testing.T, plain []byte) decryptFixture {
+	t.Helper()
+	dir := t.TempDir()
+	identity := newTestIdentity(t)
+	fixture := decryptFixture{dir: dir, archive: filepath.Join(dir, "etcd.tar.gz.age"), identityPath: filepath.Join(dir, "admin.key")}
+	writeTestFile(t, fixture.identityPath, seal.KeyFile(identity))
+	sealTestFile(t, fixture.archive, plain, identity)
+	return fixture
+}
+
+func runDecrypt(fixture decryptFixture, out string) (int, string) {
+	var stdout, stderr bytes.Buffer
+	code := RunBackupDecrypt([]string{"--in", fixture.archive, "--out", out, "--identity", fixture.identityPath}, "/", &stdout, &stderr)
+	return code, stderr.String()
+}
+
+func TestBackupDecryptRefusesTheInputArchiveAsOutput(t *testing.T) {
+	fixture := newDecryptFixture(t, []byte("plain archive"))
+	before, err := os.ReadFile(fixture.archive)
+	if err != nil {
+		t.Fatal(err)
+	}
+	hardLink := filepath.Join(fixture.dir, "same.age")
+	if err := os.Link(fixture.archive, hardLink); err != nil {
+		t.Fatal(err)
+	}
+	for _, out := range []string{fixture.archive, hardLink} {
+		code, stderr := runDecrypt(fixture, out)
+		if code != 1 || stderr != "decrypt "+fixture.archive+": --out is the input archive\n" {
+			t.Fatalf("%s: exit %d, stderr %q", out, code, stderr)
+		}
+		if after, err := os.ReadFile(fixture.archive); err != nil || !bytes.Equal(after, before) {
+			t.Fatalf("%s: the archive changed, error %v", out, err)
+		}
+	}
+}
+
+func TestBackupDecryptRefusesAFifoAsOutput(t *testing.T) {
+	fixture := newDecryptFixture(t, []byte("plain archive"))
+	out := filepath.Join(fixture.dir, "out.fifo")
+	if err := syscall.Mkfifo(out, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	code, stderr := runDecrypt(fixture, out)
+	if code != 1 || stderr != "decrypt "+fixture.archive+": --out "+out+" is not a regular file\n" {
+		t.Fatalf("exit %d, stderr %q", code, stderr)
+	}
+	if info, err := os.Lstat(out); err != nil || info.Mode()&os.ModeNamedPipe == 0 {
+		t.Fatalf("the fifo is gone: %v, error %v", info, err)
+	}
+}
+
+func TestBackupDecryptRefusesASymlinkAsOutput(t *testing.T) {
+	fixture := newDecryptFixture(t, []byte("plain archive"))
+	target := filepath.Join(fixture.dir, "target.tar.gz")
+	writeTestFile(t, target, []byte("target"))
+	out := filepath.Join(fixture.dir, "link.tar.gz")
+	if err := os.Symlink(target, out); err != nil {
+		t.Fatal(err)
+	}
+	code, stderr := runDecrypt(fixture, out)
+	if code != 1 || stderr != "decrypt "+fixture.archive+": --out "+out+" is not a regular file\n" {
+		t.Fatalf("exit %d, stderr %q", code, stderr)
+	}
+	if got, err := os.ReadFile(target); err != nil || string(got) != "target" {
+		t.Fatalf("the target changed: %q, error %v", got, err)
+	}
+	if info, err := os.Lstat(out); err != nil || info.Mode()&os.ModeSymlink == 0 {
+		t.Fatalf("the symlink is gone: %v, error %v", info, err)
+	}
+}
+
+func TestBackupDecryptReplacesARegularOutputWithMode0600(t *testing.T) {
+	fixture := newDecryptFixture(t, []byte("plain archive"))
+	out := filepath.Join(fixture.dir, "etcd.tar.gz")
+	if err := os.WriteFile(out, []byte("older"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(out, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if code, stderr := runDecrypt(fixture, out); code != 0 {
+		t.Fatalf("exit %d, stderr %q", code, stderr)
+	}
+	info, err := os.Stat(out)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, err := os.ReadFile(out); err != nil || string(got) != "plain archive" {
+		t.Fatalf("out file %q, error %v", got, err)
+	}
+	if info.Mode().Perm() != 0o600 {
+		t.Fatalf("mode %v", info.Mode().Perm())
+	}
+}
+
+func TestBackupDecryptTruncatedArchiveToStdoutFails(t *testing.T) {
+	fixture := newDecryptFixture(t, bytes.Repeat([]byte("archive-bytes"), 20000))
+	sealed, err := os.ReadFile(fixture.archive)
+	if err != nil {
+		t.Fatal(err)
+	}
+	writeTestFile(t, fixture.archive, sealed[:len(sealed)-100])
+	code, stderr := runDecrypt(fixture, "-")
+	if code != 1 || !strings.HasPrefix(stderr, "decrypt "+fixture.archive+": ") {
+		t.Fatalf("exit %d, stderr %q", code, stderr)
 	}
 }
 

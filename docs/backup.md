@@ -545,6 +545,10 @@ The command does not use the cluster. It runs on any machine that has the
 `bedrock` binary and the archive. An output file has mode `0600`. If the
 command fails, it leaves no output file.
 
+The command replaces an `--out` file that is a regular file. It refuses an
+`--out` that is the input archive. It also refuses an `--out` that exists and
+is not a regular file, for example a link, a pipe, a device or a directory.
+
 `--out -` writes the plain archive to standard output. With `--out -`, a
 failed decrypt can leave partial output on standard output. Check the exit
 code of the command.
