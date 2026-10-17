@@ -211,6 +211,36 @@ func TestAdoptedProblemsReportsEveryReadThatFails(t *testing.T) {
 	}
 }
 
+func TestAdoptedProblemsStopsAtTheFirstFailedRead(t *testing.T) {
+	for i, key := range verifyKeys {
+		t.Run(key, func(t *testing.T) {
+			ceph := adoptedFixture(t)
+			ceph.failures[key] = errors.New("RADOS timed out")
+			problemsOf(t, ceph, nil)
+			if !slices.Equal(ceph.reads, verifyKeys[:i]) || !slices.Equal(ceph.mutations, []string{key}) {
+				t.Fatalf("reads %v, failed attempts %v", ceph.reads, ceph.mutations)
+			}
+		})
+	}
+}
+
+func TestAdoptedProblemsKeepsTheProblemsFoundBeforeAFailedRead(t *testing.T) {
+	ceph := adoptedFixture(t, map[string]any{
+		keyVersions: versionsOf(map[string]map[string]int{"mon": {oldRelease: 3}}),
+		keyPools:    adoptedPools(map[string]int{"bedrock-block": 2}),
+	})
+	ceph.failures[keyTree] = errors.New("RADOS timed out")
+	got := problemsOf(t, ceph, nil)
+	want := []string{
+		"ceph versions: not on release 20: mon 19.2.3 x3",
+		"ceph pools differ from storage.replicas 3: bedrock-block (2)",
+		"cannot read ceph osd tree: RADOS timed out",
+	}
+	if !slices.Equal(got, want) {
+		t.Fatalf("problems %q, want %q", got, want)
+	}
+}
+
 func TestAdoptedProblemsKeepsKeyLinesOutOfTheMessage(t *testing.T) {
 	ceph := adoptedFixture(t)
 	ceph.failures[keyStatus] = errors.New("RADOS timed out\nkey = AQDsecretsecretsecretsecretsecret==")

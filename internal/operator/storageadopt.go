@@ -173,34 +173,47 @@ func adoptedProblems(ctx context.Context, c client.Client, exec execFunc, in Add
 	}
 	run := operatorRun(exec, pod)
 	nodes := osdNodeNames(in.Hosts)
-	return slices.Concat(
-		versionsProblems(ctx, run, image),
-		verified(ctx, run, "ceph osd pool ls detail", cephArgs("osd", "pool", "ls", "detail", "-f", "json"), func(pools []cephPoolState) []string {
-			return poolSizeMismatches(replicas, pools)
-		}),
-		verified(ctx, run, "ceph osd tree", cephArgs("osd", "tree", "-f", "json"), func(tree cephTree) []string {
-			return hostBucketMismatches(nodes, tree)
-		}),
-		statusProblems(ctx, run),
-	)
+	reads := []func() ([]string, error){
+		func() ([]string, error) { return versionsProblems(ctx, run, image) },
+		func() ([]string, error) {
+			return verified(ctx, run, "ceph osd pool ls detail", cephArgs("osd", "pool", "ls", "detail", "-f", "json"), func(pools []cephPoolState) []string {
+				return poolSizeMismatches(replicas, pools)
+			})
+		},
+		func() ([]string, error) {
+			return verified(ctx, run, "ceph osd tree", cephArgs("osd", "tree", "-f", "json"), func(tree cephTree) []string {
+				return hostBucketMismatches(nodes, tree)
+			})
+		},
+		func() ([]string, error) { return statusProblems(ctx, run) },
+	}
+	var problems []string
+	for _, read := range reads {
+		found, err := read()
+		if err != nil {
+			return append(problems, err.Error())
+		}
+		problems = append(problems, found...)
+	}
+	return problems
 }
 
-func verified[T any](ctx context.Context, run runFunc, what string, command []string, check func(T) []string) []string {
+func verified[T any](ctx context.Context, run runFunc, what string, command []string, check func(T) []string) ([]string, error) {
 	var data T
 	if err := readJSON(ctx, run, &data, command); err != nil {
-		return unreadable(what, err)
+		return nil, unreadable(what, err)
 	}
-	return check(data)
+	return check(data), nil
 }
 
-func unreadable(what string, err error) []string {
-	return []string{fmt.Sprintf("cannot read %s: %s", what, safeMessage(err.Error()))}
+func unreadable(what string, err error) error {
+	return fmt.Errorf("cannot read %s: %s", what, safeMessage(err.Error()))
 }
 
-func versionsProblems(ctx context.Context, run runFunc, image string) []string {
+func versionsProblems(ctx context.Context, run runFunc, image string) ([]string, error) {
 	major, tagged := imageMajor(image)
 	if !tagged {
-		return []string{fmt.Sprintf("ceph versions: the image %q has no release tag", image)}
+		return []string{fmt.Sprintf("ceph versions: the image %q has no release tag", image)}, nil
 	}
 	return verified(ctx, run, "ceph versions", cephArgs("versions", "-f", "json"), func(sections map[string]map[string]int) []string {
 		return releaseMismatches(major, sections)
@@ -289,16 +302,16 @@ func hostBucketMismatches(nodes []string, tree cephTree) []string {
 	return []string{"ceph osd tree: host buckets without a ceph-osd node: " + strings.Join(strays, ", ")}
 }
 
-func statusProblems(ctx context.Context, run runFunc) []string {
+func statusProblems(ctx context.Context, run runFunc) ([]string, error) {
 	out, err := run(ctx, cephArgs("status", "-f", "json"))
 	if err != nil {
-		return unreadable("ceph status", err)
+		return nil, unreadable("ceph status", err)
 	}
 	report, err := parseCephStatus(out)
 	if err != nil {
-		return unreadable("ceph status", err)
+		return nil, unreadable("ceph status", err)
 	}
-	return slices.DeleteFunc([]string{cephHealthProblem(report), cephMisplacedProblem(report)}, func(problem string) bool { return problem == "" })
+	return slices.DeleteFunc([]string{cephHealthProblem(report), cephMisplacedProblem(report)}, func(problem string) bool { return problem == "" }), nil
 }
 
 func adoptedGate(gate release.Gate, problems []string) release.Gate {
