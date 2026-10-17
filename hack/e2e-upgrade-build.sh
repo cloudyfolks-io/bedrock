@@ -44,7 +44,7 @@ build_from_ref() {
   git worktree add --detach "$worktree_a" "$ref"
   mkdir -p "$worktree_a/dist" "$repo/dist/cache"
   ln -s "$repo/dist/cache" "$worktree_a/dist/cache"
-  (cd "$worktree_a" && build "$version" "$k0s" "" release/components.yaml)
+  (cd "$worktree_a" && hack/e2e-release-config.sh release/components.yaml dist/components-e2e.yaml && build "$version" "$k0s" "" dist/components-e2e.yaml)
   cp "$worktree_a"/dist/bedrock-"$version"-* dist/
   rm -rf "dist/release-$version"
   cp -r "$worktree_a/dist/release-$version" "dist/release-$version"
