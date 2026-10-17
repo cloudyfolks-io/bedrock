@@ -109,6 +109,25 @@ func TestParseRecipients(t *testing.T) {
 	}
 }
 
+func TestParseRecipientsNeverEchoesSecretKey(t *testing.T) {
+	recipient := newIdentity(t).Recipient().String()
+	secret := newIdentity(t).String()
+
+	for name, key := range map[string]string{"upper": secret, "lower": strings.ToLower(secret)} {
+		_, err := ParseRecipients(recipient + "\n" + key)
+		if err == nil {
+			t.Fatalf("%s: a secret key was accepted", name)
+		}
+		message := strings.ToLower(err.Error())
+		if strings.Contains(message, strings.ToLower(secret)) {
+			t.Fatalf("%s: the error echoes the secret key: %v", name, err)
+		}
+		if err.Error() != "recipient 2 is an age secret key, not a recipient" {
+			t.Fatalf("%s: unexpected error %q", name, err)
+		}
+	}
+}
+
 func TestEnsureHostIdentity(t *testing.T) {
 	root := t.TempDir()
 	path := filepath.Join(root, HostKeyFile)
@@ -140,6 +159,44 @@ func TestEnsureHostIdentity(t *testing.T) {
 	entries, err := os.ReadDir(filepath.Dir(path))
 	if err != nil || len(entries) != 1 {
 		t.Fatalf("directory holds %d entries, error %v", len(entries), err)
+	}
+}
+
+func TestEnsureHostIdentityTightensModes(t *testing.T) {
+	root := t.TempDir()
+	path := filepath.Join(root, HostKeyFile)
+	dir := filepath.Dir(path)
+	existing := newIdentity(t)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(dir, 0o777); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, KeyFile(existing), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(path, 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	identity, err := EnsureHostIdentity(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if identity.String() != existing.String() {
+		t.Fatal("the call returned another identity")
+	}
+	fileInfo, err := os.Stat(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	dirInfo, err := os.Stat(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if fileInfo.Mode().Perm() != 0o600 || dirInfo.Mode().Perm() != 0o700 {
+		t.Fatalf("file mode %v, directory mode %v", fileInfo.Mode().Perm(), dirInfo.Mode().Perm())
 	}
 }
 

@@ -21,12 +21,17 @@ const (
 	fileMode   = 0o600
 	dirMode    = 0o700
 	parentMode = 0o755
+
+	secretKeyPrefix = "AGE-SECRET-KEY-"
 )
 
 func ParseRecipients(value string) ([]age.Recipient, error) {
 	fields := strings.Fields(value)
 	recipients := make([]age.Recipient, 0, len(fields))
-	for _, field := range fields {
+	for index, field := range fields {
+		if strings.HasPrefix(strings.ToUpper(field), secretKeyPrefix) {
+			return nil, fmt.Errorf("recipient %d is an age secret key, not a recipient", index+1)
+		}
 		recipient, err := age.ParseX25519Recipient(field)
 		if err != nil {
 			return nil, fmt.Errorf("recipient %q: %w", field, err)
@@ -57,11 +62,20 @@ func KeyFile(identity *age.X25519Identity) []byte {
 
 func EnsureHostIdentity(root string) (*age.X25519Identity, error) {
 	path := filepath.Join(root, HostKeyFile)
+	if err := ensureDir(filepath.Dir(path)); err != nil {
+		return nil, err
+	}
 	identity, err := readIdentity(path)
 	if errors.Is(err, fs.ErrNotExist) {
 		return createIdentity(path)
 	}
-	return identity, err
+	if err != nil {
+		return nil, err
+	}
+	if err := os.Chmod(path, fileMode); err != nil {
+		return nil, err
+	}
+	return identity, nil
 }
 
 func readIdentity(path string) (*age.X25519Identity, error) {
@@ -100,9 +114,6 @@ func createIdentity(path string) (*age.X25519Identity, error) {
 
 func writeNewFile(path string, data []byte) error {
 	dir := filepath.Dir(path)
-	if err := ensureDir(dir); err != nil {
-		return err
-	}
 	temp, err := os.CreateTemp(dir, ".host.key-*.tmp")
 	if err != nil {
 		return err
@@ -124,7 +135,7 @@ func ensureDir(dir string) error {
 	if err := os.Mkdir(dir, dirMode); err != nil && !errors.Is(err, fs.ErrExist) {
 		return err
 	}
-	return nil
+	return os.Chmod(dir, dirMode)
 }
 
 func fillSynced(file *os.File, data []byte) error {
