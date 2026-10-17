@@ -1183,7 +1183,7 @@ func writeZoneStub(t *testing.T, getScript string) (string, string, string) {
 	dir := t.TempDir()
 	zoneGet := filepath.Join(dir, "zone-get.json")
 	zoneSet := filepath.Join(dir, "zone-set.json")
-	stub := "#!/bin/sh\ncase \"$1 $2\" in\n\"zone get\") " + getScript + " ;;\n\"zone set\") tee \"$ZONE_SET\" ;;\nesac\n"
+	stub := "#!/bin/sh\ncase \"$1 $2\" in\n\"zone get\") " + getScript + " ;;\n\"zone set\") tee \"$ZONE_SET\" ;;\n\"period update\") echo PERIODSTDOUT; echo PERIODSTDERR >&2; exit \"${PERIOD_EXIT:-0}\" ;;\nesac\n"
 	if err := os.WriteFile(filepath.Join(dir, "radosgw-admin"), []byte(stub), 0o700); err != nil {
 		t.Fatal(err)
 	}
@@ -1387,6 +1387,40 @@ func TestAdoptStepFailsWhenThePoolsOfTheZoneCannotBeRead(t *testing.T) {
 	}
 }
 
+func TestPeriodCommitPrintsNothingAndKeepsTheError(t *testing.T) {
+	adopt := adoptSpec()
+	state, err := readCephState(context.Background(), cephFixture(t).run, *adopt)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var commit renameCommand
+	for _, command := range renamePlan(state, *adopt) {
+		if command.Name == "radosgw-admin period update --commit --rgw-realm=bedrock-rgw" {
+			commit = command
+		}
+	}
+	if commit.Name == "" {
+		t.Fatal("the plan has no period commit")
+	}
+	for _, exit := range []string{"0", "3"} {
+		t.Run("exit "+exit, func(t *testing.T) {
+			dir, zoneGet, zoneSet := writeZoneStub(t, `cat "$ZONE_GET"`)
+			t.Setenv("PATH", dir+":"+os.Getenv("PATH"))
+			run := shellArgs(commit.Args, dir, zoneGet, zoneSet)
+			run.Env = append(run.Env, "PERIOD_EXIT="+exit)
+			var stdout, stderr bytes.Buffer
+			run.Stdout, run.Stderr = &stdout, &stderr
+			err := run.Run()
+			if stdout.Len() != 0 {
+				t.Fatalf("the period commit printed %q, the operator must receive nothing", stdout.String())
+			}
+			if (exit == "0") != (err == nil) || !strings.Contains(stderr.String(), "PERIODSTDERR") {
+				t.Fatalf("exit %s: error %v, stderr %q", exit, err, stderr.String())
+			}
+		})
+	}
+}
+
 func TestTheZoneSystemKeyNeverReachesTheOperator(t *testing.T) {
 	fake := cephFixture(t)
 	run, received, zoneSet, _ := withRealShell(t, fake)
@@ -1402,7 +1436,7 @@ func TestTheZoneSystemKeyNeverReachesTheOperator(t *testing.T) {
 		t.Fatalf("condition %+v", got)
 	}
 	for _, out := range *received {
-		for _, secret := range []string{"ZONESECRET", "ZONEACCESS", "system_key", "secret_key"} {
+		for _, secret := range []string{"ZONESECRET", "ZONEACCESS", "system_key", "secret_key", "PERIODSTDOUT"} {
 			if bytes.Contains(out, []byte(secret)) {
 				t.Fatalf("the operator received %s in %q", secret, out)
 			}

@@ -152,6 +152,8 @@ const (
 zone=$(radosgw-admin zone get --rgw-zone="$2" "$3")
 printf '%s' "$zone" | sed "s/\"$1\\.rgw\\./\"$2.rgw./g" | radosgw-admin zone set --rgw-zone="$2" --infile=/dev/stdin "$3" >/dev/null`
 
+	periodCommitScript = `radosgw-admin period update --commit --rgw-realm="$1" "$2" >/dev/null`
+
 	zoneStalePoolsScript = `set -e
 zone=$(radosgw-admin zone get --rgw-zone="$2" "$3")
 printf '%s' "$zone" | grep -o "\"$1\\.rgw\\.[^\"]*\"" || [ $? -eq 1 ]`
@@ -412,6 +414,13 @@ func zonePoolRewrite(old string) renameCommand {
 	}
 }
 
+func periodCommit() renameCommand {
+	return renameCommand{
+		Name: "radosgw-admin period update --commit --rgw-realm=" + objectStoreName,
+		Args: []string{"sh", "-c", periodCommitScript, "period-commit", objectStoreName, rookConfFlag},
+	}
+}
+
 func zoneStalePoolsCommand(old, zone string) []string {
 	return []string{"sh", "-c", zoneStalePoolsScript, "zone-pools", escapedDots(old), zone, rookConfFlag}
 }
@@ -667,7 +676,7 @@ func objectStorePlan(state cephState, old string) []renameCommand {
 		plan = append(plan, zonePoolRewrite(old))
 	}
 	if zoneGroup || zone || rewrite {
-		plan = append(plan, radosgwStep("period", "update", "--commit", "--rgw-realm="+objectStoreName))
+		plan = append(plan, periodCommit())
 	}
 	plan = append(plan, poolRenames(objectStorePoolMoves(state, old))...)
 	return plan
