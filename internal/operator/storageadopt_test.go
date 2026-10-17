@@ -737,6 +737,16 @@ func TestRenamePlan(t *testing.T) {
 				"objectstore.rgw.buckets.non-ec", "objectstore.rgw.control", "objectstore.rgw.log", "objectstore.rgw.meta", "objectstore.rgw.otp")}},
 			rgwPoolRenames[2:],
 		},
+		{
+			"CephFS failed but not renamed",
+			[]map[string]any{blockDone(), {keyOldFS: filesystemFlags(false, true)}},
+			slices.Concat(cephFSRename, rgwIdentityRename, rgwZoneRewrite, rgwPoolRenames),
+		},
+		{
+			"RGW realm renamed but zonegroup not",
+			[]map[string]any{filesystemDone(), {keyRealms: nameList("realms", "bedrock-rgw")}},
+			slices.Concat(rgwIdentityRename[1:], rgwZoneRewrite, rgwPoolRenames),
+		},
 		{"all done", allDone(t), nil},
 		{
 			"no CephFS and no object store",
@@ -983,6 +993,23 @@ func TestAdoptStepStopsAtTheFirstFailureWithoutKeyLines(t *testing.T) {
 	}
 	if !slices.Equal(fake.mutations, wantRan) {
 		t.Fatalf("ran %v", fake.mutations)
+	}
+}
+
+func TestAdoptStepRunsTheSameCommandsAgainAfterAFailure(t *testing.T) {
+	failing := "ceph fs rename filesystem-data bedrock-fs --yes-i-really-mean-it"
+	attempt := func() []string {
+		fake := cephFixture(t)
+		fake.failures[failing] = errors.New("busy")
+		got := adoptStep(context.Background(), fake.run, *adoptSpec(), 3)
+		if got.Reason != v1alpha1.ReasonRenameFailed {
+			t.Fatalf("condition %+v", got)
+		}
+		return fake.mutations
+	}
+	first, second := attempt(), attempt()
+	if len(first) == 0 || !slices.Equal(first, second) {
+		t.Fatalf("first attempt %v, second attempt %v", first, second)
 	}
 }
 
