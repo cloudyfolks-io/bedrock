@@ -9,6 +9,7 @@ import (
 	"time"
 
 	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
@@ -281,5 +282,44 @@ func TestClusterReconcilerInstallsWithoutMasterNodesWhenBundleDoesNotNeedThem(t 
 		if cond.Reason == "WaitingForMasterNodes" {
 			t.Fatal("bundle without the master placeholder must not wait for master nodes")
 		}
+	}
+}
+
+func TestWriteClusterStatusKeepsAnAdoptedReason(t *testing.T) {
+	c, _ := StartTestEnv(t)
+	ctx := context.Background()
+	adopted := metav1.Condition{Type: v1alpha1.ConditionStorageAdopted, Status: metav1.ConditionTrue, Reason: v1alpha1.ReasonAdopted, LastTransitionTime: metav1.Now()}
+	createClusterWithStatus(t, ctx, c, "v1", v1alpha1.ClusterStatus{Version: "v1", Conditions: []metav1.Condition{adopted}})
+	stale := metav1.Condition{Type: v1alpha1.ConditionStorageAdopted, Status: metav1.ConditionFalse, Reason: v1alpha1.ReasonWaitingForQuorum, Message: "stale"}
+	ready := metav1.Condition{Type: v1alpha1.ConditionStorageReady, Status: metav1.ConditionFalse, Reason: "Progressing"}
+	err := writeClusterStatus(ctx, c, func(s *v1alpha1.ClusterStatus) {
+		v1alpha1.SetCondition(&s.Conditions, stale)
+		v1alpha1.SetCondition(&s.Conditions, ready)
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	conditions := getCluster(t, ctx, c).Status.Conditions
+	got := meta.FindStatusCondition(conditions, v1alpha1.ConditionStorageAdopted)
+	if got == nil || got.Status != metav1.ConditionTrue || got.Reason != v1alpha1.ReasonAdopted || got.Message != "" {
+		t.Fatalf("StorageAdopted %+v", got)
+	}
+	if other := meta.FindStatusCondition(conditions, v1alpha1.ConditionStorageReady); other == nil || other.Reason != "Progressing" {
+		t.Fatalf("StorageReady %+v", other)
+	}
+}
+
+func TestWriteClusterStatusMovesAnUnadoptedReason(t *testing.T) {
+	c, _ := StartTestEnv(t)
+	ctx := context.Background()
+	waiting := metav1.Condition{Type: v1alpha1.ConditionStorageAdopted, Status: metav1.ConditionFalse, Reason: v1alpha1.ReasonWaitingForQuorum, LastTransitionTime: metav1.Now()}
+	createClusterWithStatus(t, ctx, c, "v1", v1alpha1.ClusterStatus{Version: "v1", Conditions: []metav1.Condition{waiting}})
+	next := metav1.Condition{Type: v1alpha1.ConditionStorageAdopted, Status: metav1.ConditionTrue, Reason: v1alpha1.ReasonAdopted}
+	if err := writeClusterStatus(ctx, c, func(s *v1alpha1.ClusterStatus) { v1alpha1.SetCondition(&s.Conditions, next) }); err != nil {
+		t.Fatal(err)
+	}
+	got := meta.FindStatusCondition(getCluster(t, ctx, c).Status.Conditions, v1alpha1.ConditionStorageAdopted)
+	if got == nil || got.Reason != v1alpha1.ReasonAdopted {
+		t.Fatalf("StorageAdopted %+v", got)
 	}
 }

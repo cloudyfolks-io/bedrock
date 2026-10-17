@@ -3,10 +3,12 @@ package operator
 import (
 	"context"
 	"fmt"
+	"slices"
 	"time"
 
 	"k8s.io/apimachinery/pkg/api/equality"
 	"k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/client-go/util/retry"
@@ -205,12 +207,24 @@ func writeClusterStatus(ctx context.Context, c client.Client, mutate func(*v1alp
 		next := *current.Status.DeepCopy()
 		next.ObservedGeneration = current.Generation
 		mutate(&next)
+		next.Conditions = keepAdopted(current.Status.Conditions, next.Conditions)
 		if equality.Semantic.DeepEqual(current.Status, next) {
 			return nil
 		}
 		current.Status = next
 		return c.Status().Update(ctx, &current)
 	})
+}
+
+func keepAdopted(live, next []metav1.Condition) []metav1.Condition {
+	adopted := meta.FindStatusCondition(live, v1alpha1.ConditionStorageAdopted)
+	proposed := meta.FindStatusCondition(next, v1alpha1.ConditionStorageAdopted)
+	if adopted == nil || adopted.Reason != v1alpha1.ReasonAdopted || proposed == nil || proposed.Reason == adopted.Reason {
+		return next
+	}
+	kept := slices.Clone(next)
+	meta.SetStatusCondition(&kept, *adopted)
+	return kept
 }
 
 func setCondition(status *v1alpha1.ClusterStatus, conditionType string, value metav1.ConditionStatus, reason, message string, generation int64) {
