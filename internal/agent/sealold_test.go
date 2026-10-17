@@ -275,6 +275,18 @@ func TestTidyBackupDirSealsToTheHostAndTheAdmins(t *testing.T) {
 	}
 }
 
+func TestTidyBackupDirKeepsThePlaintextWhenTheRecipientsCannotBeRead(t *testing.T) {
+	deps := snapshotDeps(t, &fakeK0sBackup{}, at("2026-10-08T02:30:00Z"))
+	plaintext := filepath.Join(backupDirOf(deps.Root), "bedrock-v0.1.0-20260901T100000Z.tar.gz")
+	writeFixtureFile(t, plaintext, "upgrade backup")
+	if err := tidyBackupDir(context.Background(), clientFailingOnRecipients(t, settingReadFailures["timeout"]), deps); err == nil {
+		t.Fatal("an unreadable recipients Setting must be reported")
+	}
+	if got := listNames(t, backupDirOf(deps.Root)); !slices.Equal(got, []string{"bedrock-v0.1.0-20260901T100000Z.tar.gz"}) {
+		t.Fatalf("files %v", got)
+	}
+}
+
 func TestTidyBackupDirCreatesNoHostKeyWithoutPlaintextArchives(t *testing.T) {
 	deps := snapshotDeps(t, &fakeK0sBackup{}, at("2026-10-08T02:30:00Z"))
 	writeFixtureFile(t, filepath.Join(backupDirOf(deps.Root), "etcd-20260902T100000Z.tar.gz.age"), "sealed")

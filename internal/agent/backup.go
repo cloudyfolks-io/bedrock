@@ -52,7 +52,7 @@ func sealRecipients(ctx context.Context, c client.Client, deps Deps, name string
 	if err != nil {
 		return nil, fmt.Errorf("host backup key: %w", err)
 	}
-	return archiveRecipients(ctx, c, identity.Recipient(), name, logLine), nil
+	return archiveRecipients(ctx, c, identity.Recipient(), name, logLine)
 }
 
 func logLine(line string) {
