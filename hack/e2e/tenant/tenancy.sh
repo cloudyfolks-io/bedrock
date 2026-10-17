@@ -166,8 +166,9 @@ DEPLOYMENT
 }
 
 tenancy_workloads() {
-  local pause
-  pause=$(k0s ctr --namespace k8s.io images ls -q | grep '/pause:' | head -1)
+  local images pause
+  images=$(k0s ctr --namespace k8s.io images ls -q)
+  pause=$(grep -m1 '/pause:' <<<"$images")
   test -n "$pause"
   sleeper_manifest sleeper 1 "$pause" | as_user bob -n "$NS" create -f -
   sleeper_manifest big 5 "$pause" | as_user bob -n "$NS" create -f -

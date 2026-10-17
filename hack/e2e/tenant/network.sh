@@ -156,8 +156,9 @@ ZONE
 }
 
 network_isolation() {
-  local pause
-  pause=$(k0s ctr --namespace k8s.io images ls -q | grep '/pause:' | head -1)
+  local images pause
+  images=$(k0s ctr --namespace k8s.io images ls -q)
+  pause=$(grep -m1 '/pause:' <<<"$images")
   isolated_pod_manifest "$pause" k8s.v1.cni.cncf.io/networks other-ns/default |
     expect_refused "only the platform may set network selection annotations" kubectl --as=bedrock:e2e-user --as-group=system:masters -n "$NS" apply -f -
   isolated_pod_manifest "$pause" fabric.cloudyfolks.io/logical_switch default |

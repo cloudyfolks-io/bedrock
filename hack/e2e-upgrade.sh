@@ -349,10 +349,14 @@ def has_marker(stream):
     return False
 
 
+def under_images(name):
+    return "images" in name.split("/")[:-1]
+
+
 def scan(archive):
     for member in archive:
         entries.append(member.name)
-        if not member.isfile():
+        if not member.isfile() or under_images(member.name):
             continue
         stream = archive.extractfile(member)
         if os.path.basename(member.name).startswith("k0s_backup_"):
