@@ -11,11 +11,12 @@ Each job starts a real single-node cluster and checks the product from the outsi
 | `e2e-bundle` | `bedrock init` builds a cluster from the offline bundle. |
 | `e2e-authn` | Local, LDAP and OIDC login, tokens and the Kubernetes API webhook. |
 | `e2e-tenant` | Tenants, projects, images, VMs, networks, backups, object storage, the panel and the metering, all together. |
-| `e2e-upgrade`, `e2e-upgrade-abort`, `e2e-upgrade-from-main`, `e2e-upgrade-from-authn` | The cluster upgrade and its rollback. |
+| `e2e-upgrade`, `e2e-upgrade-abort`, `e2e-upgrade-from-release` | The cluster upgrade and its rollback. The backup archives stay sealed. |
 
-The upgrade jobs `e2e-upgrade-from-main` and `e2e-upgrade-from-authn` start from a build of an older Git ref.
-`CI_MAIN_REF` sets the ref of the first job. The default is `fdf03d5`.
-`CI_AUTHN_REF` sets the ref of the second job. The default is `6363ef5`.
+The job `e2e-upgrade-from-release` starts from a build of a released Git tag.
+`CI_RELEASE_REF` sets the tag. The default is `v0.5.0`.
+This release writes its upgrade backup as a plain archive.
+The new agent seals this archive after the upgrade, and the job checks it.
 
 ## Run a job
 
@@ -28,8 +29,8 @@ hack/local-ci.sh e2e-tenant
 The runner builds the release and the bundle, starts a Lima VM, runs `hack/e2e-init.sh` and then the job script.
 The runner deletes the VM at the end.
 
-Without an argument, the runner runs nine jobs in this order.
-The full run takes about 6.5 hours.
+Without an argument, the runner runs eight jobs in this order.
+The full run takes about 6 hours.
 
 1. `test`
 2. `e2e-kind`
@@ -38,8 +39,7 @@ The full run takes about 6.5 hours.
 5. `e2e-upgrade-abort`
 6. `e2e-authn`
 7. `e2e-tenant`
-8. `e2e-upgrade-from-main`
-9. `e2e-upgrade-from-authn`
+8. `e2e-upgrade-from-release`
 
 GitHub runs the same jobs from `.github/workflows/ci.yml`.
 The `make e2e-tenant` target runs the tenant job on a host that you prepared.
@@ -98,7 +98,7 @@ The jobs check this in three places.
 | Job | Check |
 | --- | --- |
 | `hack/e2e-init.sh` | The file `/etc/bedrock/encryption/encryption.yaml` has mode `600` and owner `kube-apiserver`. The directory `/etc/bedrock/encryption` has mode `700` and owner `kube-apiserver`. The Secret `kube-system/bedrock-secrets-encryption` is encrypted in etcd. |
-| `hack/e2e-upgrade.sh` | The upgrade backup holds no entry that ends in `encryption.yaml`, in the outer archive and in the k0s backup inside it. After the upgrade, the script creates the Secret `default/e2e-encryption` and checks that etcd holds it encrypted. The script deletes the Secret. |
+| `hack/e2e-upgrade.sh` | The script opens the upgrade backup. The opened copy holds no entry that ends in `encryption.yaml`, in the outer archive and in the k0s backup inside it. After the upgrade, the script creates the Secret `default/e2e-encryption` and checks that etcd holds it encrypted. The script deletes the Secret. |
 | `hack/e2e-tenant.sh` | The step `encryption_join_fetch` creates a control-plane token. The test `TestJoinFetchesEncryption` fetches the encryption file with the same function as `bedrock join`. The test compares it with the file on the node. |
 
 The function `assert_secret_encrypted` in `hack/e2e/lib.sh` reads the stored value of the Secret from etcd.
@@ -106,9 +106,35 @@ It uses the JSON gateway `https://127.0.0.1:2379/v3/kv/range` and the client cer
 It requires the prefix `k8s:enc:aesgcm:v1:key1:` on the stored value.
 
 The upgrade script checks the encryption only when `/etc/bedrock/encryption/encryption.yaml` exists.
-The jobs `e2e-upgrade-from-main` and `e2e-upgrade-from-authn` start from releases without encryption.
-The upgrade does not add encryption to these clusters, so the jobs skip this check.
+The job `e2e-upgrade-from-release` starts from a release without encryption.
+The upgrade does not add encryption to this cluster, so the job skips this check.
 The job `e2e-upgrade-abort` ends at the rollback, before this check.
+
+## Sealed backup archives
+
+`hack/e2e-upgrade.sh` proves that the agent seals every backup archive with age.
+Before the upgrade starts, the script does these steps.
+
+1. It makes an admin identity with `bedrock backup keygen`. The script uses the CLI of the new version, because the old version can lack this command.
+2. It sets the Setting `backup.archive-recipients` to the public key of this identity.
+
+The old version can be a release that does not know this Setting.
+The operator of such a release only sets `Ready=False` with the reason `UnknownKey` on the Setting.
+It does not delete the Setting and does not change its value.
+The operator of the new version sets `Ready=True` after the upgrade.
+
+After the upgrade, the script checks these items.
+
+| Check | Why |
+| --- | --- |
+| The newest `bedrock-<version A>-*` archive ends in `.tar.gz.age`, and no plain `bedrock-*.tar.gz` or `etcd-*.tar.gz` file stays in `/var/lib/bedrock/backups`. The script waits up to 10 minutes for this. | The agent seals older plain archives in its snapshot loop, so the seal is not instant. In `e2e-upgrade-from-release`, version A writes a plain archive, and the new agent must seal it. |
+| The file starts with `age-encryption.org/v1`. | The file is an age file. |
+| `bedrock backup decrypt` opens the file with the admin identity, and opens it with the host key. The two copies are equal. | The file is sealed to the recipients of the Setting and to the host key. |
+| `tar -tzf` lists the opened copy, and the leak check of the section "Secrets encryption" runs on it. The script then deletes the copy. | The opened copy is a valid archive. |
+| The script sets `backup.etcd-schedule` to `* * * * *` and waits for a new `etcd-*.tar.gz.age` file. It opens this file with the admin identity and sets the schedule back to the default. | The new agent writes a sealed etcd snapshot, not only seals the old files. |
+
+The job `e2e-upgrade-abort` checks that the archive that stays after the rollback ends in `.tar.gz.age`.
+The old agent restores from this sealed archive with the host key.
 
 ## Cleanup and teardown
 
