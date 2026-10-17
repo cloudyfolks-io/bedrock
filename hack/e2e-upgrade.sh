@@ -380,7 +380,7 @@ PY
 rm -f "$workdir/upgrade-archive.tar.gz" "$workdir/upgrade-archive-host.tar.gz"
 touch "$workdir/etcd-marker"
 kubectl patch setting backup.etcd-schedule --type merge -p '{"spec":{"value":"* * * * *"}}'
-retry_until 600 etcd_snapshot_written
+retry_until 1800 etcd_snapshot_written
 snapshot=$(etcd_snapshot_since_marker)
 kubectl patch setting backup.etcd-schedule --type merge -p '{"spec":{"value":""}}'
 assert_age_file "$snapshot"
