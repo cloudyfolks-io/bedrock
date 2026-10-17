@@ -7,10 +7,11 @@ import (
 	"github.com/cloudyfolks-io/bedrock/api/v1alpha1"
 	"github.com/cloudyfolks-io/bedrock/internal/config"
 	"github.com/cloudyfolks-io/bedrock/internal/host"
+	"github.com/cloudyfolks-io/bedrock/internal/k0s"
 	"github.com/cloudyfolks-io/bedrock/internal/preflight"
 )
 
-func preflightResults(ctx context.Context, deps InitDeps, facts host.Facts, cfg v1alpha1.ClusterConfig, supportedOS []string) ([]preflight.Result, error) {
+func preflightResults(ctx context.Context, deps InitDeps, k0sClient k0s.Client, facts host.Facts, cfg v1alpha1.ClusterConfig, supportedOS []string) ([]preflight.Result, error) {
 	adopt := cfg.Spec.Storage.Adopt
 	if adopt == nil {
 		devices, err := probeDevices(ctx, deps, cfg.Spec.Storage.Devices)
@@ -27,6 +28,7 @@ func preflightResults(ctx context.Context, deps InitDeps, facts host.Facts, cfg 
 	if err != nil {
 		return nil, err
 	}
+	adoptFacts.K0sRunning = k0sClient.Running(ctx)
 	results := preflight.Run(ctx, deps.Exec, facts, devices, cfg, supportedOS)
 	return append(results, preflight.AdoptChecks(*adopt, facts, adoptFacts)...), nil
 }

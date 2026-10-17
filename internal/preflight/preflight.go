@@ -130,6 +130,9 @@ func monitorChecks(fsid string, monitor v1alpha1.AdoptMonitor, adoptFacts host.A
 		check(prefix+"store", true, adoptFacts.MonStores[monitor.ID], fmt.Sprintf("/var/lib/rook/mon-%s/data/store.db not found", monitor.ID)),
 		check(prefix+"config", true, adoptFacts.ConfigFSID == fsid, configMessage(fsid, adoptFacts.ConfigFSID)),
 	}
+	if adoptFacts.K0sRunning {
+		return results
+	}
 	for _, port := range monitorPorts {
 		results = append(results, check(fmt.Sprintf("%sport-%d", prefix, port), true, !slices.Contains(adoptFacts.ListeningPorts, port), fmt.Sprintf("TCP port %d is in use, stop the old monitor first", port)))
 	}

@@ -15,6 +15,7 @@ type AdoptFacts struct {
 	MonStores      map[string]bool
 	ConfigFSID     string
 	ListeningPorts []int
+	K0sRunning     bool
 }
 
 func GatherAdopt(ctx context.Context, e Exec, root string, monitorIDs []string) (AdoptFacts, error) {

@@ -186,3 +186,32 @@ func TestAdoptChecksMonitorProblems(t *testing.T) {
 		}
 	}
 }
+
+func TestAdoptChecksSkipPortsWhenK0sRuns(t *testing.T) {
+	facts := host.AdoptFacts{MonStores: map[string]bool{"a": true}, ConfigFSID: adoptFSID, ListeningPorts: []int{3300, 6789}, K0sRunning: true}
+	results := AdoptChecks(adoptSpec(), goodFactsOn("node-1"), facts)
+	if Blocked(results) || len(results) != 3 {
+		t.Fatalf("results\n%s", Format(results))
+	}
+	for _, name := range []string{"adopt-node", "adopt-mon-a-store", "adopt-mon-a-config"} {
+		if r := resultNamed(t, results, name); !r.OK {
+			t.Fatalf("%s: %+v", name, r)
+		}
+	}
+}
+
+func TestAdoptChecksKeepStoreAndConfigWhenK0sRuns(t *testing.T) {
+	cases := map[string]struct {
+		facts host.AdoptFacts
+		name  string
+	}{
+		"store missing": {host.AdoptFacts{MonStores: map[string]bool{}, ConfigFSID: adoptFSID, K0sRunning: true}, "adopt-mon-a-store"},
+		"other fsid":    {host.AdoptFacts{MonStores: map[string]bool{"a": true}, ConfigFSID: otherFSID, K0sRunning: true}, "adopt-mon-a-config"},
+	}
+	for name, tc := range cases {
+		results := AdoptChecks(adoptSpec(), goodFactsOn("node-1"), tc.facts)
+		if r := resultNamed(t, results, tc.name); r.OK || !r.Fatal {
+			t.Fatalf("%s: %+v", name, r)
+		}
+	}
+}

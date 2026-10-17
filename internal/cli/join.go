@@ -97,7 +97,8 @@ func RunJoin(ctx context.Context, args []string, deps InitDeps, stdout, stderr i
 	cfg.Spec.API.VIP = token.VIP
 	cfg.Spec.Network.ManagementInterface = facts.DefaultInterface
 	cfg.Spec.Storage.Adopt = adopt
-	results, err := preflightResults(ctx, deps, facts, cfg, token.SupportedOS)
+	k0sClient := k0s.Client{Exec: deps.Exec, Binary: o.k0sBin, DataDir: o.dataDir}
+	results, err := preflightResults(ctx, deps, k0sClient, facts, cfg, token.SupportedOS)
 	if err != nil {
 		return fail(stderr, err)
 	}
@@ -115,7 +116,6 @@ func RunJoin(ctx context.Context, args []string, deps InitDeps, stdout, stderr i
 		o.imagesDir = filepath.Join(bundleDir, "images")
 	}
 
-	k0sClient := k0s.Client{Exec: deps.Exec, Binary: o.k0sBin, DataDir: o.dataDir}
 	step(stdout, "k0s %s", token.K0sVersion)
 	bundle := release.Bundle{Spec: v1alpha1.ReleaseSpec{K0sVersion: token.K0sVersion, K0sChecksums: token.K0sChecksums}}
 	if err := ensureK0s(ctx, k0sClient, initOptions{k0sBin: o.k0sBin, k0sBaseURL: o.k0sBaseURL, bundleDir: bundleDir}, bundle, facts.Arch); err != nil {

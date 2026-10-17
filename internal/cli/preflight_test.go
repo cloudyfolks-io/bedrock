@@ -105,7 +105,11 @@ func adoptResults(t *testing.T, root string, e *host.FakeExec, configContent str
 	if err != nil {
 		t.Fatal(err)
 	}
-	return preflightResults(context.Background(), deps, facts, cfg, []string{"ubuntu-24.04"})
+	return preflightResults(context.Background(), deps, testK0sClient(root, e), facts, cfg, []string{"ubuntu-24.04"})
+}
+
+func testK0sClient(root string, e host.Exec) k0s.Client {
+	return k0s.Client{Exec: e, Binary: "/usr/local/bin/k0s", DataDir: filepath.Join(root, "var", "lib", "k0s")}
 }
 
 func resultFor(results []preflight.Result, name string) (preflight.Result, bool) {
@@ -189,7 +193,7 @@ func TestPreflightResultsStopOnMissingDevicePath(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, err = preflightResults(context.Background(), deps, facts, cfg, []string{"ubuntu-24.04"})
+	_, err = preflightResults(context.Background(), deps, testK0sClient(root, e), facts, cfg, []string{"ubuntu-24.04"})
 	if err == nil || !strings.Contains(err.Error(), "probe "+osdDisk) {
 		t.Fatalf("err %v", err)
 	}
@@ -325,5 +329,76 @@ func TestRunJoinAdoptConfigProblems(t *testing.T) {
 		if out.Len() != 0 {
 			t.Fatalf("%s: join must stop before the preflight:\n%s", name, out.String())
 		}
+	}
+}
+
+const monitorPortsBusy = "LISTEN 0 4096 10.0.10.11:3300 0.0.0.0:*\nLISTEN 0 4096 10.0.10.11:6789 0.0.0.0:*\n"
+
+func TestRunInitAdoptRerunSkipsPortChecks(t *testing.T) {
+	root, e := adoptedHost(t)
+	dataDir := filepath.Join(root, "var", "lib", "k0s")
+	e.Responses["ss -H -ltn"] = monitorPortsBusy
+	e.Responses["/usr/local/bin/k0s status --data-dir "+dataDir] = ""
+	e.Responses["blkid -p -o value -s TYPE "+osdDisk] = "xfs\n"
+	configPath := adoptConfigFile(t, root, adoptInitConfig)
+	var out, errOut bytes.Buffer
+	code := RunInit(context.Background(), []string{"-f", configPath, "--release-dir", filepath.Join("..", "release", "testdata", "good"), "--k0s-bin", "/usr/local/bin/k0s", "--data-dir", dataDir}, adoptDeps(root, e), &out, &errOut)
+	if code != 1 {
+		t.Fatalf("exit %d\nstdout %s\nstderr %s", code, out.String(), errOut.String())
+	}
+	if !strings.Contains(out.String(), "[ok] adopt-mon-a-store") || !strings.Contains(out.String(), "[ok] adopt-mon-a-config") {
+		t.Fatalf("store and config checks must still run:\n%s", out.String())
+	}
+	if strings.Contains(out.String(), "adopt-mon-a-port") || strings.Count(out.String(), "[fail]") != 1 {
+		t.Fatalf("a running k0s must skip the port checks, and only the disk may fail:\n%s", out.String())
+	}
+}
+
+func TestRunInitAdoptFreshHostChecksPorts(t *testing.T) {
+	root, e := adoptedHost(t)
+	dataDir := filepath.Join(root, "var", "lib", "k0s")
+	e.Responses["ss -H -ltn"] = monitorPortsBusy
+	e.Errors["/usr/local/bin/k0s status --data-dir "+dataDir] = &host.ExitError{Code: 1}
+	configPath := adoptConfigFile(t, root, adoptInitConfig)
+	var out, errOut bytes.Buffer
+	code := RunInit(context.Background(), []string{"-f", configPath, "--release-dir", filepath.Join("..", "release", "testdata", "good"), "--k0s-bin", "/usr/local/bin/k0s", "--data-dir", dataDir}, adoptDeps(root, e), &out, &errOut)
+	if code != 1 {
+		t.Fatalf("exit %d\nstdout %s\nstderr %s", code, out.String(), errOut.String())
+	}
+	for _, name := range []string{"[fail] adopt-mon-a-port-3300", "[fail] adopt-mon-a-port-6789"} {
+		if !strings.Contains(out.String(), name) {
+			t.Fatalf("missing %s:\n%s", name, out.String())
+		}
+	}
+}
+
+func TestRunJoinAdoptRerunSkipsPortChecks(t *testing.T) {
+	root, e := adoptedHost(t)
+	dataDir := filepath.Join(root, "var", "lib", "k0s")
+	e.Responses["ss -H -ltn"] = monitorPortsBusy
+	e.Responses["/usr/local/bin/k0s status --data-dir "+dataDir] = ""
+	deps := adoptDeps(root, e)
+	deps.Executable = fakeExecutable(t)
+	adoptPath := adoptConfigFile(t, t.TempDir(), adoptInitConfig)
+	var out, errOut bytes.Buffer
+	code := RunJoin(context.Background(), joinAdoptArgs(t, dataDir, adoptPath), deps, &out, &errOut)
+	if code != 0 {
+		t.Fatalf("exit %d\nstdout %s\nstderr %s", code, out.String(), errOut.String())
+	}
+	if !strings.Contains(out.String(), "[ok] adopt-mon-a-store") || strings.Contains(out.String(), "adopt-mon-a-port") {
+		t.Fatalf("stdout %s", out.String())
+	}
+}
+
+func TestRunJoinAdoptFreshHostChecksPorts(t *testing.T) {
+	root, e := adoptedHost(t)
+	dataDir := filepath.Join(root, "var", "lib", "k0s")
+	e.Responses["ss -H -ltn"] = monitorPortsBusy
+	e.Errors["/usr/local/bin/k0s status --data-dir "+dataDir] = &host.ExitError{Code: 1}
+	adoptPath := adoptConfigFile(t, t.TempDir(), adoptInitConfig)
+	var out, errOut bytes.Buffer
+	code := RunJoin(context.Background(), joinAdoptArgs(t, dataDir, adoptPath), adoptDeps(root, e), &out, &errOut)
+	if code != 1 || !strings.Contains(out.String(), "[fail] adopt-mon-a-port-3300") {
+		t.Fatalf("exit %d\nstdout %s\nstderr %s", code, out.String(), errOut.String())
 	}
 }

@@ -166,7 +166,8 @@ func RunInit(ctx context.Context, args []string, deps InitDeps, stdout, stderr i
 	if err != nil {
 		return fail(stderr, err)
 	}
-	results, err := preflightResults(ctx, deps, facts, cfg, bundle.Spec.SupportedOS)
+	k0sClient := k0s.Client{Exec: deps.Exec, Binary: o.k0sBin, DataDir: o.dataDir}
+	results, err := preflightResults(ctx, deps, k0sClient, facts, cfg, bundle.Spec.SupportedOS)
 	if err != nil {
 		return fail(stderr, err)
 	}
@@ -175,7 +176,6 @@ func RunInit(ctx context.Context, args []string, deps InitDeps, stdout, stderr i
 		return fail(stderr, fmt.Errorf("preflight failed"))
 	}
 
-	k0sClient := k0s.Client{Exec: deps.Exec, Binary: o.k0sBin, DataDir: o.dataDir}
 	step(stdout, "k0s %s", bundle.Spec.K0sVersion)
 	if err := ensureK0s(ctx, k0sClient, o, bundle, facts.Arch); err != nil {
 		return fail(stderr, err)
