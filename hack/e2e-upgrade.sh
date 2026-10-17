@@ -18,6 +18,7 @@ assert_authn=${ASSERT_AUTHN:-}
 export PLATFORM_HOST=${PLATFORM_HOST:-e2e.bedrock.test}
 workdir=$(mktemp -d)
 export KUBECONFIG=/var/lib/k0s/pki/admin.conf
+backups=/var/lib/bedrock/backups
 
 dump() {
   local status=$?
@@ -30,6 +31,9 @@ dump() {
     kubectl get nodeupgrades -o yaml || true
     echo "--- hosts"
     kubectl get hosts -o yaml || true
+    echo "--- archive settings"
+    kubectl get setting backup.archive-recipients backup.etcd-schedule -o yaml || true
+    ls -l "$backups" || true
     echo "--- pods"
     kubectl get pods -A -o wide || true
     echo "--- workloads"
@@ -69,6 +73,37 @@ dump() {
 }
 trap dump EXIT
 
+upgrade_archives() {
+  find "$backups" -maxdepth 1 \( -name "bedrock-$VERSION_A-*.tar.gz" -o -name "bedrock-$VERSION_A-*.tar.gz.age" \)
+}
+
+newest_upgrade_archive() {
+  upgrade_archives | sort | tail -n 1
+}
+
+plaintext_archives_gone() {
+  [ -z "$(find "$backups" -maxdepth 1 \( -name 'bedrock-*.tar.gz' -o -name 'etcd-*.tar.gz' \))" ]
+}
+
+upgrade_archive_sealed() {
+  case "$(newest_upgrade_archive)" in
+  *.tar.gz.age) plaintext_archives_gone ;;
+  *) return 1 ;;
+  esac
+}
+
+etcd_snapshot_since_marker() {
+  find "$backups" -maxdepth 1 -name 'etcd-*.tar.gz.age' -newer "$workdir/etcd-marker" | sort | tail -n 1
+}
+
+etcd_snapshot_written() {
+  [ -n "$(etcd_snapshot_since_marker)" ]
+}
+
+assert_age_file() {
+  test "$(head -c 21 "$1")" = age-encryption.org/v1
+}
+
 BUNDLE=dist/bedrock-$VERSION_A-bundle-$arch.tar.zst VERSION=$VERSION_A IMAGE=$image_a \
   BIN=dist/bedrock-$VERSION_A-linux-$arch RELEASE_DIR=dist/release-$VERSION_A ARCH=$arch bash "$init_a"
 
@@ -82,6 +117,27 @@ rm -f "dist/bedrock-$VERSION_A-bundle-$arch.tar.zst"
 df -h / /var/lib
 /usr/local/bin/k0s version | grep -qx "$K0S_A"
 rm -f /var/run/reboot-required /var/run/reboot-required.pkgs
+
+(umask 077 && "$cli_b" backup keygen >"$workdir/admin.key")
+admin_recipient=$(sed -n 's/^# public key: //p' "$workdir/admin.key")
+case "$admin_recipient" in
+age1*) ;;
+*)
+  echo "backup keygen printed no age recipient: $admin_recipient" >&2
+  exit 1
+  ;;
+esac
+kubectl apply -f - <<SETTING
+apiVersion: bedrock.cloudyfolks.io/v1alpha1
+kind: Setting
+metadata:
+  name: backup.archive-recipients
+  labels:
+    bedrock.cloudyfolks.io/kind: Setting
+    bedrock.cloudyfolks.io/name: backup.archive-recipients
+spec:
+  value: "$admin_recipient"
+SETTING
 
 "$cli_b" upgrade --to "$VERSION_B" --bundle "$bundle_b" --yes --timeout 2h > "$workdir/upgrade.log" 2>&1 &
 upgrade=$!
@@ -160,7 +216,8 @@ if [ -n "$abort_in" ]; then
   done
   test -z "$(kubectl get nodeupgrades -o name)"
   test -z "$(find /var/lib/k0s -maxdepth 1 -name '.pre-restore-*')"
-  test "$(find /var/lib/bedrock/backups -maxdepth 1 -name "bedrock-$VERSION_A-*.tar.gz" | wc -l)" -eq 1
+  test "$(upgrade_archives | wc -l)" -eq 1
+  assert_age_file "$(newest_upgrade_archive)"
   kubectl wait --for=condition=Ready node --all --timeout=300s
   grep -qx 'server = "https://127.0.0.1:1"' /etc/k0s/containerd.d/certs.d/_default/hosts.toml
   if kubectl get pods -A -o jsonpath='{range .items[*]}{.status.containerStatuses[*].state.waiting.reason}{"\n"}{end}' | grep -qE 'ImagePullBackOff|ErrImagePull'; then
@@ -263,14 +320,20 @@ kubectl get cluster cluster -o jsonpath='{.status.phase}' | grep -qx Idle
 kubectl get cluster cluster -o jsonpath='{.status.conditions[?(@.type=="Available")].reason}' | grep -qx Upgraded
 kubectl get cluster cluster -o jsonpath='{.status.conditions[?(@.type=="UpgradeBlocked")].reason}' | grep -qx Passed
 kubectl get cluster cluster -o jsonpath='{.status.backups[0].location}' | grep -q "^host:$node:/var/lib/bedrock/backups/bedrock-$VERSION_A-"
-ls /var/lib/bedrock/backups/bedrock-"$VERSION_A"-*.tar.gz
+retry_until 600 upgrade_archive_sealed
+archive=$(newest_upgrade_archive)
+assert_age_file "$archive"
+"$cli_b" backup decrypt --in "$archive" --out "$workdir/upgrade-archive.tar.gz" --identity "$workdir/admin.key"
+"$cli_b" backup decrypt --in "$archive" --out "$workdir/upgrade-archive-host.tar.gz"
+cmp "$workdir/upgrade-archive.tar.gz" "$workdir/upgrade-archive-host.tar.gz"
+tar -tzf "$workdir/upgrade-archive.tar.gz" >/dev/null
 if [ -f /etc/bedrock/encryption/encryption.yaml ]; then
-  python3 - /var/lib/bedrock/backups/bedrock-"$VERSION_A"-*.tar.gz <<'PY'
+  python3 - "$workdir/upgrade-archive.tar.gz" <<'PY'
 import os
 import sys
 import tarfile
 
-newest = max(sys.argv[1:], key=os.path.getmtime)
+newest = sys.argv[1]
 with tarfile.open(newest) as outer:
     entries = outer.getnames()
     k0s_backups = [name for name in entries if os.path.basename(name).startswith("k0s_backup_")]
@@ -284,6 +347,16 @@ if leaks:
     sys.exit(newest + " holds the encryption key: " + ", ".join(leaks))
 PY
 fi
+rm -f "$workdir/upgrade-archive.tar.gz" "$workdir/upgrade-archive-host.tar.gz"
+touch "$workdir/etcd-marker"
+kubectl patch setting backup.etcd-schedule --type merge -p '{"spec":{"value":"* * * * *"}}'
+retry_until 600 etcd_snapshot_written
+snapshot=$(etcd_snapshot_since_marker)
+kubectl patch setting backup.etcd-schedule --type merge -p '{"spec":{"value":""}}'
+assert_age_file "$snapshot"
+"$cli_b" backup decrypt --in "$snapshot" --out "$workdir/etcd-snapshot.tar.gz" --identity "$workdir/admin.key"
+tar -tzf "$workdir/etcd-snapshot.tar.gz" >/dev/null
+rm -f "$workdir/etcd-snapshot.tar.gz"
 /usr/local/bin/k0s version | grep -qx "$K0S_B"
 kubectl get host "$node" -o jsonpath='{.status.k0sVersion}' | grep -qx "$K0S_B"
 kubectl get host "$node" -o jsonpath='{.status.agentVersion}' | grep -qx "$VERSION_B"
