@@ -19,9 +19,9 @@ import (
 )
 
 const (
-	etcdSnapshotPattern = "etcd-*.tar.gz"
-	keptEtcdSnapshots   = 7
-	etcdScheduleKey     = "backup.etcd-schedule"
+	etcdSnapshotPrefix = "etcd-"
+	keptEtcdSnapshots  = 7
+	etcdScheduleKey    = "backup.etcd-schedule"
 
 	snapshotFailureFile  = ".etcd-snapshot-failure"
 	firstSnapshotBackoff = time.Minute
@@ -53,11 +53,19 @@ func RunEtcdSnapshots(ctx context.Context, c client.Client, deps Deps) error {
 	if attempts > 0 && deps.Now().Before(failedAt.Add(etcdBackoff(attempts, interval))) {
 		return nil
 	}
-	name := "etcd-" + deps.Now().UTC().Format(stampLayout) + ".tar.gz"
-	if _, _, err := writeBackup(ctx, deps, name, etcdSnapshotPattern, keptEtcdSnapshots); err != nil {
+	if err := takeSnapshot(ctx, c, deps, etcdSnapshotPrefix+deps.Now().UTC().Format(stampLayout)+sealedSuffix); err != nil {
 		return errors.Join(err, recordSnapshotFailure(dir, deps.Now(), attempts+1))
 	}
 	return clearSnapshotFailure(dir)
+}
+
+func takeSnapshot(ctx context.Context, c client.Client, deps Deps, name string) error {
+	recipients, err := sealRecipients(ctx, c, deps, name)
+	if err != nil {
+		return err
+	}
+	_, _, err = writeBackup(ctx, deps, name, etcdSnapshotPrefix, keptEtcdSnapshots, recipients)
+	return err
 }
 
 func etcdBackoff(attempts int, interval time.Duration) time.Duration {
@@ -109,7 +117,7 @@ func etcdSchedule(ctx context.Context, c client.Client) (string, error) {
 }
 
 func newestEtcdSnapshot(dir string) time.Time {
-	archives, err := filepath.Glob(filepath.Join(dir, etcdSnapshotPattern))
+	archives, err := archivePaths(dir, etcdSnapshotPrefix, "")
 	if err != nil {
 		return time.Time{}
 	}

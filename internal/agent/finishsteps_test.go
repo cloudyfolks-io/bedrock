@@ -2,6 +2,7 @@ package agent
 
 import (
 	"context"
+	"crypto/rand"
 	"encoding/json"
 	"errors"
 	"os"
@@ -11,9 +12,11 @@ import (
 	"testing"
 	"time"
 
+	"filippo.io/age"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	"github.com/cloudyfolks-io/bedrock/api/v1alpha1"
+	"github.com/cloudyfolks-io/bedrock/internal/backup/seal"
 	"github.com/cloudyfolks-io/bedrock/internal/host"
 	"github.com/cloudyfolks-io/bedrock/internal/release"
 )
@@ -240,17 +243,30 @@ func TestPruneWithoutContainersRemovesFilesOnly(t *testing.T) {
 	}
 }
 
-func restoreEnv(t *testing.T, exec *host.FakeExec) StepEnv {
+const (
+	sealedBackupPath    = "/var/lib/bedrock/backups/bedrock-v0.2.0-20261001T100000Z.tar.gz.age"
+	plaintextBackupPath = "/var/lib/bedrock/backups/bedrock-v0.2.0-20261001T100000Z.tar.gz"
+)
+
+func restoreWork(t *testing.T, extra ...string) string {
 	t.Helper()
-	root := t.TempDir()
 	work := t.TempDir()
 	writeFixtureFile(t, filepath.Join(work, "k0s_backup_2026-10-01T10_00_00Z.tar.gz"), "etcd snapshot")
 	writeFixtureFile(t, filepath.Join(work, "ovn", "ovnnb_db.db"), "nb")
-	archive := filepath.Join(root, "var/lib/bedrock/backups/bedrock-v0.2.0-20261001T100000Z.tar.gz")
-	if err := os.MkdirAll(filepath.Dir(archive), 0o700); err != nil {
-		t.Fatal(err)
+	for _, name := range extra {
+		noise := make([]byte, 256<<10)
+		if _, err := rand.Read(noise); err != nil {
+			t.Fatal(err)
+		}
+		writeFixtureFile(t, filepath.Join(work, name), string(noise))
 	}
-	if err := writeArchive(work, archive); err != nil {
+	return work
+}
+
+func restoreEnvAt(t *testing.T, exec *host.FakeExec, backupPath string) StepEnv {
+	t.Helper()
+	root := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(root, "var/lib/bedrock/backups"), 0o700); err != nil {
 		t.Fatal(err)
 	}
 	writeFixtureFile(t, filepath.Join(root, "var/lib/bedrock/previous/k0s"), "old k0s")
@@ -262,7 +278,35 @@ func restoreEnv(t *testing.T, exec *host.FakeExec) StepEnv {
 	deps.Root = root
 	deps.K0sTimeout = time.Second
 	deps.K0sPoll = time.Millisecond
-	return StepEnv{Deps: deps, Client: k8sClient, Upgrade: v1alpha1.NodeUpgrade{Spec: v1alpha1.NodeUpgradeSpec{Node: "node-a", Version: "v0.3.0", From: "v0.2.0", Attempt: 1, Backup: "/var/lib/bedrock/backups/bedrock-v0.2.0-20261001T100000Z.tar.gz"}}}
+	return StepEnv{Deps: deps, Client: k8sClient, Upgrade: v1alpha1.NodeUpgrade{Spec: v1alpha1.NodeUpgradeSpec{Node: "node-a", Version: "v0.3.0", From: "v0.2.0", Attempt: 1, Backup: backupPath}}}
+}
+
+func sealedRestoreEnvFrom(t *testing.T, exec *host.FakeExec, work string) StepEnv {
+	t.Helper()
+	env := restoreEnvAt(t, exec, sealedBackupPath)
+	recipient := hostIdentity(t, env.Deps.Root).Recipient()
+	if err := writeArchive(work, filepath.Join(env.Deps.Root, sealedBackupPath), []age.Recipient{recipient}); err != nil {
+		t.Fatal(err)
+	}
+	return env
+}
+
+func restoreEnv(t *testing.T, exec *host.FakeExec) StepEnv {
+	t.Helper()
+	return sealedRestoreEnvFrom(t, exec, restoreWork(t))
+}
+
+func plaintextRestoreEnv(t *testing.T, exec *host.FakeExec) StepEnv {
+	t.Helper()
+	env := restoreEnvAt(t, exec, plaintextBackupPath)
+	file, err := os.Create(filepath.Join(env.Deps.Root, plaintextBackupPath))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := errors.Join(writeTarGz(file, restoreWork(t)), file.Close()); err != nil {
+		t.Fatal(err)
+	}
+	return env
 }
 
 func TestRestoreRollsBackK0sAndEtcd(t *testing.T) {
@@ -301,6 +345,102 @@ func TestRestoreRollsBackK0sAndEtcd(t *testing.T) {
 	if outcome.Message != "restored "+env.Upgrade.Spec.Backup+", workloads restarted: 0" {
 		t.Fatalf("message %q", outcome.Message)
 	}
+}
+
+func TestRestoreReadsPlaintextArchive(t *testing.T) {
+	env := plaintextRestoreEnv(t, &host.FakeExec{})
+	exec := restoredClusterExec(env.Deps.Root, `{"items":[]}`)
+	env.Deps.Exec = exec
+	outcome, err := restore(context.Background(), env)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(exec.Calls) < 3 || exec.Calls[0] != "systemctl stop k0scontroller.service" || !strings.HasSuffix(exec.Calls[1], "k0s_backup_2026-10-01T10_00_00Z.tar.gz") {
+		t.Fatalf("calls %v", exec.Calls)
+	}
+	if outcome.Message != "restored "+plaintextBackupPath+", workloads restarted: 0" {
+		t.Fatalf("message %q", outcome.Message)
+	}
+}
+
+func requireRestoreRefusedBeforeStop(t *testing.T, env StepEnv, exec *host.FakeExec) {
+	t.Helper()
+	_, err := restore(context.Background(), env)
+	if err == nil || !strings.HasPrefix(err.Error(), "open backup "+env.Upgrade.Spec.Backup+": ") {
+		t.Fatalf("error %v", err)
+	}
+	if len(exec.Calls) != 0 {
+		t.Fatalf("k0s must keep running, calls %v", exec.Calls)
+	}
+	if readFixtureFile(t, filepath.Join(env.Deps.Root, "usr/local/bin/k0s")) != "new k0s" {
+		t.Fatal("the k0s binary must stay")
+	}
+	if _, err := os.Stat(filepath.Join(env.Deps.Root, "var/lib/k0s/etcd/data")); err != nil {
+		t.Fatalf("etcd must stay in place: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(env.Deps.Root, "var/lib/bedrock/restore.json")); !os.IsNotExist(err) {
+		t.Fatalf("no restore marker may exist: %v", err)
+	}
+}
+
+func TestRestoreFailsBeforeStopWithoutHostKey(t *testing.T) {
+	exec := &host.FakeExec{}
+	env := restoreEnv(t, exec)
+	if err := os.Remove(filepath.Join(env.Deps.Root, "etc/bedrock/backup/host.key")); err != nil {
+		t.Fatal(err)
+	}
+	requireRestoreRefusedBeforeStop(t, env, exec)
+	if _, err := os.Stat(filepath.Join(env.Deps.Root, "etc/bedrock/backup/host.key")); !os.IsNotExist(err) {
+		t.Fatalf("a restore must not create a host key: %v", err)
+	}
+}
+
+func TestRestoreFailsBeforeStopWithAnotherHostKey(t *testing.T) {
+	exec := &host.FakeExec{}
+	env := restoreEnv(t, exec)
+	other := newRecipient(t)
+	if err := os.WriteFile(filepath.Join(env.Deps.Root, "etc/bedrock/backup/host.key"), seal.KeyFile(other), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	requireRestoreRefusedBeforeStop(t, env, exec)
+}
+
+func TestRestoreFailsBeforeStopOnACorruptSealedArchive(t *testing.T) {
+	exec := &host.FakeExec{}
+	env := restoreEnv(t, exec)
+	archive := filepath.Join(env.Deps.Root, sealedBackupPath)
+	raw, err := os.ReadFile(archive)
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw[len(raw)-3] ^= 0xff
+	if err := os.WriteFile(archive, raw, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	requireRestoreRefusedBeforeStop(t, env, exec)
+}
+
+func TestRestoreFailsBeforeStopOnATruncatedSealedArchive(t *testing.T) {
+	exec := &host.FakeExec{}
+	env := sealedRestoreEnvFrom(t, exec, restoreWork(t, "ovn/ovnsb_db.db"))
+	archive := filepath.Join(env.Deps.Root, sealedBackupPath)
+	raw, err := os.ReadFile(archive)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(archive, raw[:len(raw)-1000], 0o600); err != nil {
+		t.Fatal(err)
+	}
+	requireRestoreRefusedBeforeStop(t, env, exec)
+}
+
+func TestRestoreFailsBeforeStopWhenTheArchiveIsMissing(t *testing.T) {
+	exec := &host.FakeExec{}
+	env := restoreEnv(t, exec)
+	if err := os.Remove(filepath.Join(env.Deps.Root, sealedBackupPath)); err != nil {
+		t.Fatal(err)
+	}
+	requireRestoreRefusedBeforeStop(t, env, exec)
 }
 
 func TestRestoreWritesTheMarkerBeforeK0sStarts(t *testing.T) {

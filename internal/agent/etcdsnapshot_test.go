@@ -85,13 +85,44 @@ func TestEtcdSnapshotRunsWhenDue(t *testing.T) {
 	if len(exec.calls) != 1 {
 		t.Fatalf("k0s calls %v", exec.calls)
 	}
-	want := []string{"etcd-20261008T023000Z.tar.gz"}
+	want := []string{"etcd-20261008T023000Z.tar.gz.age"}
 	if got := snapshotFiles(t, deps, "*"); !slices.Equal(got, want) {
 		t.Fatalf("files %v, want %v", got, want)
 	}
-	entries := archiveEntries(t, filepath.Join(deps.Root, backupDir, want[0]))
+	entries := archiveEntries(t, filepath.Join(deps.Root, backupDir, want[0]), hostIdentity(t, deps.Root))
 	if !slices.Equal(entries, []string{"k0s_backup_2026-10-01T10_00_00Z.tar.gz", "ovn/ovnnb_db.db", "ovn/ovnsb_db.db"}) {
 		t.Fatalf("entries %v", entries)
+	}
+}
+
+func TestEtcdSnapshotSealsToAdminRecipients(t *testing.T) {
+	createControlPlaneHost(t, "node-a", v1alpha1.RoleControlPlane)
+	admin := newRecipient(t)
+	createSetting(t, archiveRecipientsKey, admin.Recipient().String())
+	deps := snapshotDeps(t, &fakeK0sBackup{}, at("2026-10-08T02:30:00Z"))
+	if err := RunEtcdSnapshots(context.Background(), k8sClient, deps); err != nil {
+		t.Fatal(err)
+	}
+	archive := filepath.Join(deps.Root, backupDir, "etcd-20261008T023000Z.tar.gz.age")
+	want := []string{"k0s_backup_2026-10-01T10_00_00Z.tar.gz"}
+	if got := archiveEntries(t, archive, admin); !slices.Equal(got, want) {
+		t.Fatalf("admin entries %v, want %v", got, want)
+	}
+	if got := archiveEntries(t, archive, hostIdentity(t, deps.Root)); !slices.Equal(got, want) {
+		t.Fatalf("host entries %v, want %v", got, want)
+	}
+}
+
+func TestEtcdSnapshotWithoutAHostKeyFailsAndBacksOff(t *testing.T) {
+	createControlPlaneHost(t, "node-a", v1alpha1.RoleControlPlane)
+	exec := &fakeK0sBackup{}
+	deps := snapshotDeps(t, exec, at("2026-10-08T02:30:00Z"))
+	writeFixtureFile(t, filepath.Join(deps.Root, "etc"), "a file where the key directory must go")
+	if err := RunEtcdSnapshots(context.Background(), k8sClient, deps); err == nil {
+		t.Fatal("a snapshot without a host key must fail")
+	}
+	if got := snapshotFiles(t, deps, "*"); !slices.Equal(got, []string{snapshotFailureFile}) {
+		t.Fatalf("files %v", got)
 	}
 }
 
@@ -112,6 +143,19 @@ func TestEtcdSnapshotDueUsesTheNewestArchive(t *testing.T) {
 	}
 	if len(exec.calls) != 1 {
 		t.Fatalf("the next slot must run: %v", exec.calls)
+	}
+}
+
+func TestEtcdSnapshotDueCountsSealedArchives(t *testing.T) {
+	createControlPlaneHost(t, "node-a", v1alpha1.RoleControlPlane)
+	exec := &fakeK0sBackup{}
+	deps := snapshotDeps(t, exec, at("2026-10-08T02:30:00Z"))
+	writeFixtureFile(t, filepath.Join(deps.Root, backupDir, "etcd-20261008T020000Z.tar.gz.age"), "snapshot")
+	if err := RunEtcdSnapshots(context.Background(), k8sClient, deps); err != nil {
+		t.Fatal(err)
+	}
+	if len(exec.calls) != 0 {
+		t.Fatalf("a sealed snapshot of the same slot exists: %v", exec.calls)
 	}
 }
 
@@ -138,9 +182,32 @@ func TestEtcdSnapshotKeepsSevenNewest(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	got := snapshotFiles(t, deps, "etcd-*.tar.gz")
-	if len(got) != 7 || got[0] != "etcd-20261002T020000Z.tar.gz" || got[6] != "etcd-20261008T020000Z.tar.gz" {
+	got := snapshotFiles(t, deps, "etcd-*")
+	if len(got) != 7 || got[0] != "etcd-20261002T020000Z.tar.gz.age" || got[6] != "etcd-20261008T020000Z.tar.gz.age" {
 		t.Fatalf("snapshots %v", got)
+	}
+}
+
+func TestEtcdSnapshotKeepsSevenNewestOfMixedArchives(t *testing.T) {
+	createControlPlaneHost(t, "node-a", v1alpha1.RoleControlPlane)
+	deps := snapshotDeps(t, &fakeK0sBackup{}, at("2026-10-01T02:00:00Z"))
+	older := []string{"etcd-20260920T020000Z.tar.gz", "etcd-20260921T020000Z.tar.gz.age", "etcd-20260922T020000Z.tar.gz", "etcd-20260923T020000Z.tar.gz.age", "etcd-20260924T020000Z.tar.gz"}
+	for _, name := range older {
+		writeFixtureFile(t, filepath.Join(deps.Root, backupDir, name), "old")
+	}
+	for day := 0; day < 4; day++ {
+		now := at("2026-10-01T02:00:00Z").AddDate(0, 0, day)
+		deps.Now = func() time.Time { return now }
+		if err := RunEtcdSnapshots(context.Background(), k8sClient, deps); err != nil {
+			t.Fatal(err)
+		}
+	}
+	want := []string{
+		"etcd-20260922T020000Z.tar.gz", "etcd-20260923T020000Z.tar.gz.age", "etcd-20260924T020000Z.tar.gz",
+		"etcd-20261001T020000Z.tar.gz.age", "etcd-20261002T020000Z.tar.gz.age", "etcd-20261003T020000Z.tar.gz.age", "etcd-20261004T020000Z.tar.gz.age",
+	}
+	if got := snapshotFiles(t, deps, "etcd-*"); !slices.Equal(got, want) {
+		t.Fatalf("snapshots %v, want %v", got, want)
 	}
 }
 
@@ -163,11 +230,11 @@ func TestEtcdSnapshotKeepsUpgradeBackups(t *testing.T) {
 		t.Fatalf("upgrade backups %v", got)
 	}
 	deps.Now = func() time.Time { return at("2026-10-09T10:00:00Z") }
-	env := StepEnv{Deps: deps, Upgrade: v1alpha1.NodeUpgrade{Spec: v1alpha1.NodeUpgradeSpec{Node: "node-a", Version: "v0.3.0", From: "v0.2.0", Attempt: 1}}}
+	env := StepEnv{Deps: deps, Client: k8sClient, Upgrade: v1alpha1.NodeUpgrade{Spec: v1alpha1.NodeUpgradeSpec{Node: "node-a", Version: "v0.3.0", From: "v0.2.0", Attempt: 1}}}
 	if _, err := backup(context.Background(), env); err != nil {
 		t.Fatal(err)
 	}
-	if got := snapshotFiles(t, deps, "etcd-*.tar.gz"); len(got) != 7 {
+	if got := snapshotFiles(t, deps, "etcd-*.tar.gz.age"); len(got) != 7 {
 		t.Fatalf("an upgrade backup removed snapshots: %v", got)
 	}
 }
@@ -228,17 +295,21 @@ func TestEtcdSnapshotIgnoresAndRemovesPartialFiles(t *testing.T) {
 	exec := &fakeK0sBackup{}
 	deps := snapshotDeps(t, exec, at("2026-10-08T02:30:00Z"))
 	stale := filepath.Join(deps.Root, backupDir, "etcd-20261008T020000Z.tar.gz.partial")
+	staleSealed := filepath.Join(deps.Root, backupDir, "etcd-20261008T020000Z.tar.gz.age.partial")
 	writeFixtureFile(t, stale, "truncated")
+	writeFixtureFile(t, staleSealed, "truncated")
 	if err := RunEtcdSnapshots(context.Background(), k8sClient, deps); err != nil {
 		t.Fatal(err)
 	}
 	if len(exec.calls) != 1 {
 		t.Fatalf("a partial file must not count as a snapshot: %v", exec.calls)
 	}
-	if _, err := os.Stat(stale); !errors.Is(err, os.ErrNotExist) {
-		t.Fatalf("stale partial file remains: %v", err)
+	for _, path := range []string{stale, staleSealed} {
+		if _, err := os.Stat(path); !errors.Is(err, os.ErrNotExist) {
+			t.Fatalf("stale partial file remains: %v", err)
+		}
 	}
-	if got := snapshotFiles(t, deps, "*"); !slices.Equal(got, []string{"etcd-20261008T023000Z.tar.gz"}) {
+	if got := snapshotFiles(t, deps, "*"); !slices.Equal(got, []string{"etcd-20261008T023000Z.tar.gz.age"}) {
 		t.Fatalf("files %v", got)
 	}
 }
@@ -304,7 +375,7 @@ func TestEtcdSnapshotWaitsAfterAFailure(t *testing.T) {
 	if got := snapshotFiles(t, deps, ".etcd-snapshot-failure"); len(got) != 0 {
 		t.Fatalf("a success must clear the failure marker: %v", got)
 	}
-	if len(snapshotFiles(t, deps, "etcd-*.tar.gz")) != 1 {
+	if len(snapshotFiles(t, deps, "etcd-*.tar.gz.age")) != 1 {
 		t.Fatal("the snapshot must exist after the retry")
 	}
 }

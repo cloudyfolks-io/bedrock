@@ -16,9 +16,11 @@ import (
 	"strings"
 	"time"
 
+	"filippo.io/age"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	"github.com/cloudyfolks-io/bedrock/api/v1alpha1"
+	"github.com/cloudyfolks-io/bedrock/internal/backup/seal"
 	"github.com/cloudyfolks-io/bedrock/internal/depot"
 	"github.com/cloudyfolks-io/bedrock/internal/k0s"
 	"github.com/cloudyfolks-io/bedrock/internal/release"
@@ -202,9 +204,9 @@ func restore(ctx context.Context, env StepEnv) (Outcome, error) {
 		return Outcome{}, err
 	}
 	defer os.RemoveAll(work)
-	snapshot, err := extractK0sBackup(filepath.Join(deps.Root, backupPath), work)
+	snapshot, err := extractK0sBackup(filepath.Join(deps.Root, backupPath), work, deps.Root)
 	if err != nil {
-		return Outcome{}, err
+		return Outcome{}, fmt.Errorf("open backup %s: %w", backupPath, err)
 	}
 	if _, err := deps.Exec.Run(ctx, "systemctl", "stop", k0sControllerUnit); err != nil {
 		return Outcome{}, err
@@ -233,13 +235,46 @@ func restore(ctx context.Context, env StepEnv) (Outcome, error) {
 	return Outcome{Message: message}, nil
 }
 
-func extractK0sBackup(archive, dest string) (string, error) {
+func extractK0sBackup(archive, dest, root string) (string, error) {
 	file, err := os.Open(archive)
 	if err != nil {
 		return "", err
 	}
 	defer file.Close()
-	gz, err := gzip.NewReader(file)
+	plain, err := archiveReader(file, archive, root)
+	if err != nil {
+		return "", err
+	}
+	snapshot, err := readK0sBackup(plain, archive, dest)
+	if err != nil {
+		return "", err
+	}
+	_, err = io.Copy(io.Discard, plain)
+	return snapshot, err
+}
+
+func archiveReader(file io.Reader, archive, root string) (io.Reader, error) {
+	if !strings.HasSuffix(archive, seal.Suffix) {
+		return file, nil
+	}
+	identities, err := readHostIdentities(root)
+	if err != nil {
+		return nil, err
+	}
+	return seal.Open(file, identities)
+}
+
+func readHostIdentities(root string) ([]age.Identity, error) {
+	file, err := os.Open(filepath.Join(root, seal.HostKeyFile))
+	if err != nil {
+		return nil, err
+	}
+	defer file.Close()
+	return age.ParseIdentities(file)
+}
+
+func readK0sBackup(plain io.Reader, archive, dest string) (string, error) {
+	gz, err := gzip.NewReader(plain)
 	if err != nil {
 		return "", err
 	}

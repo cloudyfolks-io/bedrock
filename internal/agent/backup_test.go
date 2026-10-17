@@ -4,6 +4,8 @@ import (
 	"archive/tar"
 	"compress/gzip"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"io"
 	"os"
@@ -13,8 +15,10 @@ import (
 	"testing"
 	"time"
 
+	"filippo.io/age"
+
 	"github.com/cloudyfolks-io/bedrock/api/v1alpha1"
-	"github.com/cloudyfolks-io/bedrock/internal/release"
+	"github.com/cloudyfolks-io/bedrock/internal/backup/seal"
 )
 
 type fakeK0sBackup struct {
@@ -38,17 +42,30 @@ func backupEnv(t *testing.T, exec *fakeK0sBackup) StepEnv {
 	deps := newDeps(nil, time.Date(2026, 10, 1, 10, 0, 0, 0, time.UTC))
 	deps.Exec = exec
 	deps.Root = t.TempDir()
-	return StepEnv{Deps: deps, Upgrade: v1alpha1.NodeUpgrade{Spec: v1alpha1.NodeUpgradeSpec{Node: "node-a", Version: "v0.3.0", From: "v0.2.0", Attempt: 1}}}
+	return StepEnv{Deps: deps, Client: k8sClient, Upgrade: v1alpha1.NodeUpgrade{Spec: v1alpha1.NodeUpgradeSpec{Node: "node-a", Version: "v0.3.0", From: "v0.2.0", Attempt: 1}}}
 }
 
-func archiveEntries(t *testing.T, path string) []string {
+func hostIdentity(t *testing.T, root string) *age.X25519Identity {
+	t.Helper()
+	identity, err := seal.EnsureHostIdentity(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return identity
+}
+
+func archiveEntries(t *testing.T, path string, identity age.Identity) []string {
 	t.Helper()
 	file, err := os.Open(path)
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer file.Close()
-	gz, err := gzip.NewReader(file)
+	plain, err := seal.Open(file, []age.Identity{identity})
+	if err != nil {
+		t.Fatal(err)
+	}
+	gz, err := gzip.NewReader(plain)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -75,19 +92,86 @@ func TestBackupArchivesK0sAndOVN(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	hostPath := "/var/lib/bedrock/backups/bedrock-v0.2.0-20261001T100000Z.tar.gz"
+	hostPath := "/var/lib/bedrock/backups/bedrock-v0.2.0-20261001T100000Z.tar.gz.age"
 	archive := filepath.Join(env.Deps.Root, hostPath)
-	sum, err := release.FileSHA256(archive)
+	sealed, err := os.ReadFile(archive)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if outcome.Message != hostPath+" "+sum {
-		t.Fatalf("message %q, want %q", outcome.Message, hostPath+" "+sum)
+	digest := sha256.Sum256(sealed)
+	want := hostPath + " sha256:" + hex.EncodeToString(digest[:])
+	if outcome.Message != want {
+		t.Fatalf("message %q, want %q", outcome.Message, want)
 	}
-	entries := archiveEntries(t, archive)
-	want := []string{"k0s_backup_2026-10-01T10_00_00Z.tar.gz", "ovn/ovnnb_db.db", "ovn/ovnsb_db.db"}
-	if !slices.Equal(entries, want) {
-		t.Fatalf("archive entries %v, want %v", entries, want)
+	entries := archiveEntries(t, archive, hostIdentity(t, env.Deps.Root))
+	wantEntries := []string{"k0s_backup_2026-10-01T10_00_00Z.tar.gz", "ovn/ovnnb_db.db", "ovn/ovnsb_db.db"}
+	if !slices.Equal(entries, wantEntries) {
+		t.Fatalf("archive entries %v, want %v", entries, wantEntries)
+	}
+}
+
+func TestBackupWritesOnlyTheSealedFile(t *testing.T) {
+	env := backupEnv(t, &fakeK0sBackup{})
+	if _, err := backup(context.Background(), env); err != nil {
+		t.Fatal(err)
+	}
+	dir := filepath.Join(env.Deps.Root, backupDir)
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) != 1 || entries[0].Name() != "bedrock-v0.2.0-20261001T100000Z.tar.gz.age" {
+		t.Fatalf("backup dir %v", entries)
+	}
+	raw, err := os.ReadFile(filepath.Join(dir, entries[0].Name()))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.HasPrefix(string(raw), "age-encryption.org/v1\n") {
+		t.Fatalf("the archive is not an age file: %q", raw[:min(len(raw), 24)])
+	}
+	if info, err := entries[0].Info(); err != nil || info.Mode().Perm() != 0o600 {
+		t.Fatalf("mode %v, error %v", info.Mode(), err)
+	}
+}
+
+func TestBackupSealsToAdminRecipients(t *testing.T) {
+	admin := newRecipient(t)
+	createSetting(t, archiveRecipientsKey, admin.Recipient().String())
+	env := backupEnv(t, &fakeK0sBackup{})
+	if _, err := backup(context.Background(), env); err != nil {
+		t.Fatal(err)
+	}
+	archive := filepath.Join(env.Deps.Root, backupDir, "bedrock-v0.2.0-20261001T100000Z.tar.gz.age")
+	want := []string{"k0s_backup_2026-10-01T10_00_00Z.tar.gz"}
+	if got := archiveEntries(t, archive, admin); !slices.Equal(got, want) {
+		t.Fatalf("admin entries %v, want %v", got, want)
+	}
+	if got := archiveEntries(t, archive, hostIdentity(t, env.Deps.Root)); !slices.Equal(got, want) {
+		t.Fatalf("host entries %v, want %v", got, want)
+	}
+}
+
+func TestBackupWithAnInvalidRecipientStaysOpenToTheHost(t *testing.T) {
+	createSetting(t, archiveRecipientsKey, "ssh-ed25519 AAAA")
+	env := backupEnv(t, &fakeK0sBackup{})
+	if _, err := backup(context.Background(), env); err != nil {
+		t.Fatal(err)
+	}
+	archive := filepath.Join(env.Deps.Root, backupDir, "bedrock-v0.2.0-20261001T100000Z.tar.gz.age")
+	if got := archiveEntries(t, archive, hostIdentity(t, env.Deps.Root)); len(got) != 1 {
+		t.Fatalf("entries %v", got)
+	}
+}
+
+func TestBackupFailsWithoutAUsableHostKeyDirectory(t *testing.T) {
+	env := backupEnv(t, &fakeK0sBackup{})
+	writeFixtureFile(t, filepath.Join(env.Deps.Root, "etc"), "a file where the key directory must go")
+	if _, err := backup(context.Background(), env); err == nil {
+		t.Fatal("a backup without a host key must fail")
+	}
+	if entries, _ := os.ReadDir(filepath.Join(env.Deps.Root, backupDir)); len(entries) != 0 {
+		t.Fatalf("a failed backup must leave no archive: %v", entries)
 	}
 }
 
@@ -96,7 +180,7 @@ func TestBackupWithoutOVN(t *testing.T) {
 	if _, err := backup(context.Background(), env); err != nil {
 		t.Fatal(err)
 	}
-	entries := archiveEntries(t, filepath.Join(env.Deps.Root, "/var/lib/bedrock/backups/bedrock-v0.2.0-20261001T100000Z.tar.gz"))
+	entries := archiveEntries(t, filepath.Join(env.Deps.Root, "/var/lib/bedrock/backups/bedrock-v0.2.0-20261001T100000Z.tar.gz.age"), hostIdentity(t, env.Deps.Root))
 	if !slices.Equal(entries, []string{"k0s_backup_2026-10-01T10_00_00Z.tar.gz"}) {
 		t.Fatalf("entries %v", entries)
 	}
@@ -105,8 +189,8 @@ func TestBackupWithoutOVN(t *testing.T) {
 func TestBackupKeepsTheNewestThree(t *testing.T) {
 	env := backupEnv(t, &fakeK0sBackup{})
 	dir := filepath.Join(env.Deps.Root, "var/lib/bedrock/backups")
-	for _, stamp := range []string{"20260901T100000Z", "20260902T100000Z", "20260903T100000Z", "20260904T100000Z"} {
-		writeFixtureFile(t, filepath.Join(dir, "bedrock-v0.1.9-"+stamp+".tar.gz"), "old")
+	for stamp, suffix := range map[string]string{"20260901T100000Z": ".tar.gz", "20260902T100000Z": ".tar.gz.age", "20260903T100000Z": ".tar.gz", "20260904T100000Z": ".tar.gz.age"} {
+		writeFixtureFile(t, filepath.Join(dir, "bedrock-v0.1.9-"+stamp+suffix), "old")
 	}
 	writeFixtureFile(t, filepath.Join(dir, "notes.txt"), "not a backup")
 	if _, err := backup(context.Background(), env); err != nil {
@@ -120,7 +204,7 @@ func TestBackupKeepsTheNewestThree(t *testing.T) {
 	for _, entry := range entries {
 		names = append(names, entry.Name())
 	}
-	want := []string{"bedrock-v0.1.9-20260903T100000Z.tar.gz", "bedrock-v0.1.9-20260904T100000Z.tar.gz", "bedrock-v0.2.0-20261001T100000Z.tar.gz", "notes.txt"}
+	want := []string{"bedrock-v0.1.9-20260903T100000Z.tar.gz", "bedrock-v0.1.9-20260904T100000Z.tar.gz.age", "bedrock-v0.2.0-20261001T100000Z.tar.gz.age", "notes.txt"}
 	if !slices.Equal(names, want) {
 		t.Fatalf("backups %v, want %v", names, want)
 	}
