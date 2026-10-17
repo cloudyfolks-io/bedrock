@@ -273,7 +273,7 @@ func safeMessage(message string) string {
 func adoptNameProblem(pools v1alpha1.AdoptPools) string {
 	names := []struct{ field, name string }{{"block", pools.Block}, {"filesystem", pools.Filesystem}, {"objectStore", pools.ObjectStore}}
 	for _, entry := range names {
-		if !cephNamePattern.MatchString(entry.name) {
+		if entry.name != "" && !cephNamePattern.MatchString(entry.name) {
 			return fmt.Sprintf("storage.adopt.pools.%s is not a valid Ceph name", entry.field)
 		}
 	}
@@ -501,7 +501,7 @@ func poolRename(move poolMove) renameCommand {
 }
 
 func blockPlan(state cephState, old string) []renameCommand {
-	if old == blockPoolName || !slices.ContainsFunc(state.Pools, func(pool cephPoolState) bool { return pool.Name == old }) {
+	if old == "" || old == blockPoolName || !slices.ContainsFunc(state.Pools, func(pool cephPoolState) bool { return pool.Name == old }) {
 		return nil
 	}
 	return []renameCommand{poolRename(poolMove{old, blockPoolName})}
@@ -551,7 +551,7 @@ func filesystemPoolMoves(fs cephFilesystemState) []poolMove {
 }
 
 func objectStorePlan(state cephState, old string) []renameCommand {
-	if old == objectStoreName {
+	if old == "" || old == objectStoreName {
 		return nil
 	}
 	realm := slices.Contains(state.Realms, old)

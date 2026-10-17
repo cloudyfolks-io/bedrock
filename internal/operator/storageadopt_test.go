@@ -748,6 +748,33 @@ func TestRenamePlanKeepsTheNamesThatAreAlreadyBedrockNames(t *testing.T) {
 	}
 }
 
+func TestRenamePlanSkipsTheNamesThatAreEmpty(t *testing.T) {
+	cases := []struct {
+		name  string
+		empty func(*v1alpha1.AdoptPools)
+		want  []string
+	}{
+		{"block", func(pools *v1alpha1.AdoptPools) { pools.Block = "" }, slices.Concat(cephFSRename, rgwIdentityRename, rgwZoneRewrite, rgwPoolRenames)},
+		{"filesystem", func(pools *v1alpha1.AdoptPools) { pools.Filesystem = "" }, slices.Concat(blockRename, rgwIdentityRename, rgwZoneRewrite, rgwPoolRenames)},
+		{"object store", func(pools *v1alpha1.AdoptPools) { pools.ObjectStore = "" }, slices.Concat(blockRename, cephFSRename)},
+		{"all", func(pools *v1alpha1.AdoptPools) { *pools = v1alpha1.AdoptPools{} }, nil},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			adopt := adoptSpec()
+			tc.empty(&adopt.Pools)
+			state, err := readCephState(context.Background(), cephFixture(t).run, *adopt)
+			if err != nil {
+				t.Fatal(err)
+			}
+			got := planNames(renamePlan(state, *adopt))
+			if !slices.Equal(got, tc.want) {
+				t.Fatalf("plan\n%s\nwant\n%s", strings.Join(got, "\n"), strings.Join(tc.want, "\n"))
+			}
+		})
+	}
+}
+
 func TestReadCephStateReadsTheInventoryOnlyAfterTheMonitorsAndOSDsAnswer(t *testing.T) {
 	cases := map[string]map[string]any{
 		"a monitor is out of quorum": {keyQuorum: map[string]any{"quorum_names": []string{"a", "b"}}},
@@ -905,7 +932,7 @@ func TestAdoptStepSetsAdoptedWhenNothingIsLeftToRename(t *testing.T) {
 }
 
 func TestAdoptStepRefusesNamesThatAreNotCephNames(t *testing.T) {
-	for _, bad := range []string{"", "has space", "semi;colon", "$(id)", "slash/name", "-leading"} {
+	for _, bad := range []string{"has space", "semi;colon", "$(id)", "slash/name", "-leading"} {
 		t.Run(bad, func(t *testing.T) {
 			adopt := adoptSpec()
 			adopt.Pools.ObjectStore = bad
