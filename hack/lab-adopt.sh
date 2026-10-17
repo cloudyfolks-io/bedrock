@@ -571,7 +571,7 @@ retry_until 300 curl -s -o /dev/null "http://$endpoint/"
 s3 -X PUT "http://$endpoint/lab-bucket"
 for n in 1 2; do
   gen_data "lab-object-$n" "$((n * 262144))" >"/tmp/lab-object-$n"
-  s3 -X PUT --data-binary "@/tmp/lab-object-$n" "http://$endpoint/lab-bucket/lab-object-$n"
+  s3 -T "/tmp/lab-object-$n" "http://$endpoint/lab-bucket/lab-object-$n"
   echo "STATE:S3_SHA_$n=$(sha_of <"/tmp/lab-object-$n")"
   rm -f "/tmp/lab-object-$n"
 done
