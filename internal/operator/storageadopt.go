@@ -239,7 +239,7 @@ func releaseMismatches(major string, sections map[string]map[string]int) []strin
 		for _, version := range slices.Sorted(maps.Keys(sections[section])) {
 			number, daemonMajor := cephRelease(version)
 			if daemonMajor != major {
-				behind = append(behind, fmt.Sprintf("%s %s x%d", section, number, sections[section][version]))
+				behind = append(behind, section+" "+number)
 			}
 		}
 	}
@@ -265,13 +265,10 @@ func poolSizeMismatches(replicas int, pools []cephPoolState) []string {
 	var off []string
 	for _, pool := range pools {
 		if bedrockPool(pool.Name) && pool.Size != replicas {
-			off = append(off, fmt.Sprintf("%s (%d)", pool.Name, pool.Size))
+			off = append(off, fmt.Sprintf("ceph pool %s size %d, want %d", pool.Name, pool.Size, replicas))
 		}
 	}
-	if len(off) == 0 {
-		return nil
-	}
-	return []string{fmt.Sprintf("ceph pools differ from storage.replicas %d: %s", replicas, strings.Join(off, ", "))}
+	return off
 }
 
 func osdNodeNames(hosts []v1alpha1.Host) []string {
@@ -311,7 +308,7 @@ func statusProblems(ctx context.Context, run runFunc) ([]string, error) {
 	if err != nil {
 		return nil, unreadable("ceph status", err)
 	}
-	return slices.DeleteFunc([]string{cephHealthProblem(report), cephMisplacedProblem(report)}, func(problem string) bool { return problem == "" }), nil
+	return slices.DeleteFunc([]string{cephStableProblem(report), cephMisplacedProblem(report)}, func(problem string) bool { return problem == "" }), nil
 }
 
 func adoptedGate(gate release.Gate, problems []string) release.Gate {

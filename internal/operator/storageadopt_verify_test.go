@@ -76,6 +76,15 @@ func statusWith(health string, extra map[string]any) map[string]any {
 	}
 }
 
+func statusWithUnclean(pgs int) map[string]any {
+	status := statusWith("HEALTH_OK", nil)
+	status["pgmap"] = map[string]any{
+		"pgs_by_state": []map[string]any{{"state_name": "active+clean", "count": 169 - pgs}, {"state_name": "active+remapped+backfilling", "count": pgs}},
+		"num_pgs":      169,
+	}
+	return status
+}
+
 func versionsOf(sections map[string]map[string]int) map[string]any {
 	out := map[string]any{}
 	overall := map[string]int{}
@@ -120,31 +129,31 @@ func TestAdoptedProblems(t *testing.T) {
 			"a monitor on the old release",
 			[]map[string]any{{keyVersions: versionsOf(map[string]map[string]int{"mon": {oldRelease: 3}, "osd": {newRelease: 4}})}},
 			nil,
-			[]string{"ceph versions: not on release 20: mon 19.2.3 x3"},
+			[]string{"ceph versions: not on release 20: mon 19.2.3"},
 		},
 		{
 			"an upgrade that stopped half way",
 			[]map[string]any{{keyVersions: versionsOf(map[string]map[string]int{"mon": {newRelease: 3}, "osd": {newRelease: 3, oldRelease: 1}, "rgw": {oldRelease: 2}})}},
 			nil,
-			[]string{"ceph versions: not on release 20: osd 19.2.3 x1, rgw 19.2.3 x2"},
+			[]string{"ceph versions: not on release 20: osd 19.2.3, rgw 19.2.3"},
 		},
 		{
 			"a version that names no release",
 			[]map[string]any{{keyVersions: versionsOf(map[string]map[string]int{"mon": {"unknown": 1}})}},
 			nil,
-			[]string{"ceph versions: not on release 20: mon unknown x1"},
+			[]string{"ceph versions: not on release 20: mon unknown"},
 		},
 		{
 			"the block pool is too small",
 			[]map[string]any{{keyPools: adoptedPools(map[string]int{"bedrock-block": 2})}},
 			nil,
-			[]string{"ceph pools differ from storage.replicas 3: bedrock-block (2)"},
+			[]string{"ceph pool bedrock-block size 2, want 3"},
 		},
 		{
 			"pools of the filesystem and the object store differ",
 			[]map[string]any{{keyPools: adoptedPools(map[string]int{"bedrock-fs-data0": 4, "bedrock-fs-metadata": 1, "bedrock-rgw.rgw.meta": 2})}},
 			nil,
-			[]string{"ceph pools differ from storage.replicas 3: bedrock-fs-metadata (1), bedrock-fs-data0 (4), bedrock-rgw.rgw.meta (2)"},
+			[]string{"ceph pool bedrock-fs-metadata size 1, want 3", "ceph pool bedrock-fs-data0 size 4, want 3", "ceph pool bedrock-rgw.rgw.meta size 2, want 3"},
 		},
 		{
 			"an OSD sits in a host bucket that is no node",
@@ -159,11 +168,12 @@ func TestAdoptedProblems(t *testing.T) {
 			[]string{"ceph osd tree: host buckets without a ceph-osd node: node-3"},
 		},
 		{"the health is a warning", []map[string]any{{keyStatus: statusWith("HEALTH_WARN", nil)}}, nil, []string{"ceph: health is HEALTH_WARN"}},
+		{"PGs are not clean", []map[string]any{{keyStatus: statusWithUnclean(9)}}, nil, []string{"ceph: PGs are not active+clean"}},
 		{
 			"objects are misplaced",
 			[]map[string]any{{keyStatus: statusWith("HEALTH_OK", map[string]any{"misplaced_objects": 12, "misplaced_total": 7224, "misplaced_ratio": 0.00166})}},
 			nil,
-			[]string{"ceph: 12 objects are misplaced"},
+			[]string{"ceph: misplaced objects remain"},
 		},
 		{
 			"every check fails",
@@ -175,11 +185,11 @@ func TestAdoptedProblems(t *testing.T) {
 			}},
 			nil,
 			[]string{
-				"ceph versions: not on release 20: osd 19.2.3 x4",
-				"ceph pools differ from storage.replicas 3: bedrock-block (1)",
+				"ceph versions: not on release 20: osd 19.2.3",
+				"ceph pool bedrock-block size 1, want 3",
 				"ceph osd tree: host buckets without a ceph-osd node: old-node-9",
 				"ceph: health is HEALTH_WARN",
-				"ceph: 5 objects are misplaced",
+				"ceph: misplaced objects remain",
 			},
 		},
 	}
@@ -211,6 +221,32 @@ func TestAdoptedProblemsReportsEveryReadThatFails(t *testing.T) {
 	}
 }
 
+func TestAdoptedProblemsDoNotChangeWithTheCounts(t *testing.T) {
+	cases := map[string][2]map[string]any{
+		"misplaced objects": {
+			{keyStatus: statusWith("HEALTH_OK", map[string]any{"misplaced_objects": 12})},
+			{keyStatus: statusWith("HEALTH_OK", map[string]any{"misplaced_objects": 7000})},
+		},
+		"PGs that are not clean": {
+			{keyStatus: statusWithUnclean(9)},
+			{keyStatus: statusWithUnclean(90)},
+		},
+		"daemons on the old release": {
+			{keyVersions: versionsOf(map[string]map[string]int{"osd": {oldRelease: 1, newRelease: 3}})},
+			{keyVersions: versionsOf(map[string]map[string]int{"osd": {oldRelease: 3, newRelease: 1}})},
+		},
+	}
+	for name, overrides := range cases {
+		t.Run(name, func(t *testing.T) {
+			first := problemsOf(t, adoptedFixture(t, overrides[0]), nil)
+			second := problemsOf(t, adoptedFixture(t, overrides[1]), nil)
+			if len(first) != 1 || !slices.Equal(first, second) {
+				t.Fatalf("problems %q and %q", first, second)
+			}
+		})
+	}
+}
+
 func TestAdoptedProblemsStopsAtTheFirstFailedRead(t *testing.T) {
 	for i, key := range verifyKeys {
 		t.Run(key, func(t *testing.T) {
@@ -232,8 +268,8 @@ func TestAdoptedProblemsKeepsTheProblemsFoundBeforeAFailedRead(t *testing.T) {
 	ceph.failures[keyTree] = errors.New("RADOS timed out")
 	got := problemsOf(t, ceph, nil)
 	want := []string{
-		"ceph versions: not on release 20: mon 19.2.3 x3",
-		"ceph pools differ from storage.replicas 3: bedrock-block (2)",
+		"ceph versions: not on release 20: mon 19.2.3",
+		"ceph pool bedrock-block size 2, want 3",
 		"cannot read ceph osd tree: RADOS timed out",
 	}
 	if !slices.Equal(got, want) {
@@ -342,13 +378,13 @@ func healthyCephCluster() *unstructured.Unstructured {
 
 func TestAdoptedGateReportsOneMessagePerFailure(t *testing.T) {
 	in := adoptInput(v1alpha1.ReasonAdopted)
-	in.CephProblems = []string{"ceph versions: not on release 20: mon 19.2.3 x3", "ceph: health is HEALTH_WARN"}
+	in.CephProblems = []string{"ceph versions: not on release 20: mon 19.2.3", "ceph: health is HEALTH_WARN"}
 	out, err := RenderStorage(in)
 	if err != nil {
 		t.Fatal(err)
 	}
 	got := out.Probes[0].Gate(healthyCephCluster())
-	want := release.Readiness{Reason: "VerificationFailed", Message: "ceph versions: not on release 20: mon 19.2.3 x3; ceph: health is HEALTH_WARN"}
+	want := release.Readiness{Reason: "VerificationFailed", Message: "ceph versions: not on release 20: mon 19.2.3; ceph: health is HEALTH_WARN"}
 	if got != want {
 		t.Fatalf("readiness %+v, want %+v", got, want)
 	}
@@ -458,7 +494,7 @@ func TestAddonInputReadsTheAdoptedCephClusterOnlyAfterAdopted(t *testing.T) {
 				t.Fatal(err)
 			}
 			if tc.problem != slices.ContainsFunc(in.CephProblems, func(problem string) bool {
-				return strings.HasPrefix(problem, "ceph pools differ from storage.replicas 1:")
+				return problem == "ceph pool bedrock-block size 3, want 1"
 			}) {
 				t.Fatalf("problems %q", in.CephProblems)
 			}

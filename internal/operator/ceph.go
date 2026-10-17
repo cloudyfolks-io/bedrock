@@ -114,10 +114,22 @@ func cephPGProblem(report cephReport) string {
 }
 
 func cephMisplacedProblem(report cephReport) string {
-	if report.Skipped || report.Misplaced == 0 {
+	if report.Misplaced == 0 {
 		return ""
 	}
-	return fmt.Sprintf("ceph: %d objects are misplaced", report.Misplaced)
+	return "ceph: misplaced objects remain"
+}
+
+func cephStableProblem(report cephReport) string {
+	switch {
+	case report.Health != cephHealthOK:
+		return fmt.Sprintf("ceph: health is %s", report.Health)
+	case report.UpOSDs == 0:
+		return "ceph: no OSD is up"
+	case report.CleanPGs != report.PGs:
+		return "ceph: PGs are not " + cephActiveClean
+	}
+	return ""
 }
 
 func cephHealthProblem(report cephReport) string {
