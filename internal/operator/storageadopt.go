@@ -149,7 +149,11 @@ const (
 
 	zonePoolScript = `set -e
 zone=$(radosgw-admin zone get --rgw-zone="$2" "$3")
-printf '%s' "$zone" | sed "s/\"$1\\.rgw\\./\"$2.rgw./g" | radosgw-admin zone set --rgw-zone="$2" --infile=/dev/stdin "$3"`
+printf '%s' "$zone" | sed "s/\"$1\\.rgw\\./\"$2.rgw./g" | radosgw-admin zone set --rgw-zone="$2" --infile=/dev/stdin "$3" >/dev/null`
+
+	zoneStalePoolsScript = `set -e
+zone=$(radosgw-admin zone get --rgw-zone="$2" "$3")
+printf '%s' "$zone" | grep -o "\"$1\\.rgw\\.[^\"]*\"" || true`
 )
 
 var (
@@ -376,8 +380,24 @@ func radosgwStep(args ...string) renameCommand {
 func zonePoolRewrite(old string) renameCommand {
 	return renameCommand{
 		Name: "radosgw-admin zone set --rgw-zone=" + objectStoreName,
-		Args: []string{"sh", "-c", zonePoolScript, "sh", strings.ReplaceAll(old, ".", `\.`), objectStoreName, rookConfFlag},
+		Args: []string{"sh", "-c", zonePoolScript, "zone-rewrite", escapedDots(old), objectStoreName, rookConfFlag},
 	}
+}
+
+func zoneStalePoolsCommand(old, zone string) []string {
+	return []string{"sh", "-c", zoneStalePoolsScript, "zone-pools", escapedDots(old), zone, rookConfFlag}
+}
+
+func escapedDots(name string) string {
+	return strings.ReplaceAll(name, ".", `\.`)
+}
+
+func quotedNames(output []byte) []string {
+	var names []string
+	for _, field := range strings.Fields(string(output)) {
+		names = append(names, strings.Trim(field, `"`))
+	}
+	return names
 }
 
 func readJSON(ctx context.Context, run runFunc, target any, command []string) error {
@@ -489,36 +509,25 @@ func readObjectStore(ctx context.Context, run runFunc, adopt v1alpha1.AdoptSpec,
 		return cephState{}, err
 	}
 	state.Realms, state.ZoneGroups, state.Zones = realms.Realms, zoneGroups.ZoneGroups, zones.Zones
-	zone := slices.IndexFunc([]string{objectStoreName, adopt.Pools.ObjectStore}, func(name string) bool { return slices.Contains(zones.Zones, name) })
-	if zone < 0 {
+	zone := zoneToRead(zones.Zones, adopt.Pools.ObjectStore)
+	if zone == "" {
 		return state, nil
 	}
-	var document any
-	name := []string{objectStoreName, adopt.Pools.ObjectStore}[zone]
-	if err := readJSON(ctx, run, &document, radosgwArgs("zone", "get", "--rgw-zone="+name)); err != nil {
+	out, err := run(ctx, zoneStalePoolsCommand(adopt.Pools.ObjectStore, zone))
+	if err != nil {
 		return cephState{}, err
 	}
-	state.ZoneStalePools = stringsWithPrefix(document, adopt.Pools.ObjectStore+".rgw.")
+	state.ZoneStalePools = quotedNames(out)
 	return state, nil
 }
 
-func stringsWithPrefix(value any, prefix string) []string {
-	var found []string
-	switch typed := value.(type) {
-	case string:
-		if strings.HasPrefix(typed, prefix) {
-			found = append(found, typed)
-		}
-	case map[string]any:
-		for _, child := range typed {
-			found = append(found, stringsWithPrefix(child, prefix)...)
-		}
-	case []any:
-		for _, child := range typed {
-			found = append(found, stringsWithPrefix(child, prefix)...)
+func zoneToRead(zones []string, old string) string {
+	for _, name := range []string{objectStoreName, old} {
+		if slices.Contains(zones, name) {
+			return name
 		}
 	}
-	return found
+	return ""
 }
 
 func renamePlan(state cephState, adopt v1alpha1.AdoptSpec) []renameCommand {

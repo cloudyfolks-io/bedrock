@@ -1,0 +1,40 @@
+{
+  "id": "6c2d9f3b-4e7a-4f18-8b26-7e3d8f9a1c44",
+  "name": "objectstore",
+  "domain_root": "objectstore.rgw.meta:root",
+  "control_pool": "objectstore.rgw.control",
+  "gc_pool": "objectstore.rgw.log:gc",
+  "lc_pool": "objectstore.rgw.log:lc",
+  "log_pool": "objectstore.rgw.log",
+  "intent_log_pool": "objectstore.rgw.log:intent",
+  "usage_log_pool": "objectstore.rgw.log:usage",
+  "roles_pool": "objectstore.rgw.meta:roles",
+  "reshard_pool": "objectstore.rgw.log:reshard",
+  "user_keys_pool": "objectstore.rgw.meta:users.keys",
+  "user_email_pool": "objectstore.rgw.meta:users.email",
+  "user_swift_pool": "objectstore.rgw.meta:users.swift",
+  "user_uid_pool": "objectstore.rgw.meta:users.uid",
+  "otp_pool": "objectstore.rgw.otp",
+  "system_key": {
+    "access_key": "ZONEACCESS",
+    "secret_key": "ZONESECRET"
+  },
+  "placement_pools": [
+    {
+      "key": "default-placement",
+      "val": {
+        "index_pool": "objectstore.rgw.buckets.index",
+        "storage_classes": {
+          "STANDARD": {
+            "data_pool": "objectstore.rgw.buckets.data"
+          }
+        },
+        "data_extra_pool": "objectstore.rgw.buckets.non-ec",
+        "index_type": 0,
+        "inline_data": true
+      }
+    }
+  ],
+  "realm_id": "9a3e5f0c-7d1b-4c58-8d62-1f0e6b7a2c11",
+  "notif_pool": "objectstore.rgw.log:notif"
+}

@@ -1,6 +1,7 @@
 package operator
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -9,6 +10,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"reflect"
+	"regexp"
 	"slices"
 	"strings"
 	"testing"
@@ -494,8 +496,8 @@ const (
 	keyRealms     = "radosgw-admin realm list"
 	keyZoneGroups = "radosgw-admin zonegroup list"
 	keyZones      = "radosgw-admin zone list"
-	keyOldZone    = "radosgw-admin zone get --rgw-zone=objectstore"
-	keyNewZone    = "radosgw-admin zone get --rgw-zone=bedrock-rgw"
+	keyOldZone    = "sh -c zone-pools objectstore objectstore"
+	keyNewZone    = "sh -c zone-pools objectstore bedrock-rgw"
 )
 
 var (
@@ -547,7 +549,22 @@ func commandKey(command []string) string {
 			kept = append(kept, arg)
 		}
 	}
+	if kept[0] == "sh" && len(kept) > 3 {
+		kept = slices.Delete(kept, 2, 3)
+	}
 	return strings.Join(kept, " ")
+}
+
+func zonePoolLines(output []byte) []byte {
+	var names []string
+	if err := json.Unmarshal(output, &names); err != nil {
+		panic(err)
+	}
+	var lines []byte
+	for _, name := range names {
+		lines = append(lines, []byte(`"`+name+`"`+"\n")...)
+	}
+	return lines
 }
 
 func (f *fakeCeph) run(_ context.Context, command []string) ([]byte, error) {
@@ -558,6 +575,9 @@ func (f *fakeCeph) run(_ context.Context, command []string) ([]byte, error) {
 	}
 	if output, found := f.outputs[key]; found {
 		f.reads = append(f.reads, key)
+		if strings.HasPrefix(key, "sh -c zone-pools ") {
+			return zonePoolLines(output), nil
+		}
 		return output, nil
 	}
 	f.mutations = append(f.mutations, key)
@@ -623,10 +643,25 @@ func nameList(field string, names ...string) map[string]any {
 	return map[string]any{"default_info": "id", field: names}
 }
 
-func zoneDocument(t *testing.T, prefix string) json.RawMessage {
+func zoneDocument(t *testing.T) string {
 	t.Helper()
-	fresh := cephFixture(t)
-	return json.RawMessage(strings.ReplaceAll(string(fresh.outputs[keyOldZone]), "objectstore.rgw.", prefix+".rgw."))
+	data, err := os.ReadFile(filepath.Join("testdata", "ceph", "zone.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return string(data)
+}
+
+func zonePoolRefs(t *testing.T, prefix string) []string {
+	t.Helper()
+	if prefix != "objectstore" {
+		return []string{}
+	}
+	var names []string
+	if err := json.Unmarshal(cephFixture(t).outputs[keyOldZone], &names); err != nil {
+		t.Fatal(err)
+	}
+	return names
 }
 
 func blockDone() map[string]any {
@@ -648,7 +683,7 @@ func identityRenamed(t *testing.T, zonePrefix string) map[string]any {
 		keyZoneGroups: nameList("zonegroups", "bedrock-rgw"),
 		keyZones:      nameList("zones", "bedrock-rgw"),
 		keyOldZone:    nil,
-		keyNewZone:    zoneDocument(t, zonePrefix),
+		keyNewZone:    zonePoolRefs(t, zonePrefix),
 	}
 }
 
@@ -1016,36 +1051,59 @@ func TestSafeMessage(t *testing.T) {
 	}
 }
 
+func writeZoneStub(t *testing.T, getScript string) (string, string, string) {
+	t.Helper()
+	dir := t.TempDir()
+	zoneGet := filepath.Join(dir, "zone-get.json")
+	zoneSet := filepath.Join(dir, "zone-set.json")
+	stub := "#!/bin/sh\ncase \"$1 $2\" in\n\"zone get\") " + getScript + " ;;\n\"zone set\") tee \"$ZONE_SET\" ;;\nesac\n"
+	if err := os.WriteFile(filepath.Join(dir, "radosgw-admin"), []byte(stub), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	return dir, zoneGet, zoneSet
+}
+
+func shellCommand(command renameCommand, dir, zoneGet, zoneSet string) *exec.Cmd {
+	return shellArgs(command.Args, dir, zoneGet, zoneSet)
+}
+
+func shellArgs(args []string, dir, zoneGet, zoneSet string) *exec.Cmd {
+	run := exec.Command(args[0], args[1:]...)
+	run.Env = append(os.Environ(), "PATH="+dir+":"+os.Getenv("PATH"), "ZONE_GET="+zoneGet, "ZONE_SET="+zoneSet)
+	return run
+}
+
+func zoneWithLookalikes(t *testing.T, old string) (string, []string) {
+	t.Helper()
+	zone := strings.ReplaceAll(zoneDocument(t), "objectstore.rgw.", old+".rgw.")
+	lookalikes := []string{"x" + old + ".rgw.meta"}
+	if strings.Contains(old, ".") {
+		lookalikes = append(lookalikes, strings.ReplaceAll(old, ".", "X")+".rgw.meta")
+	}
+	extra, err := json.Marshal(lookalikes)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return strings.Replace(zone, `"name": "objectstore"`, `"name": "objectstore", "other_pools": `+string(extra), 1), lookalikes
+}
+
 func TestZonePoolRewriteRewritesOnlyThePoolNames(t *testing.T) {
 	cases := map[string]string{"objectstore": "objectstore", "dotted store": "my.store"}
 	for name, old := range cases {
 		t.Run(name, func(t *testing.T) {
-			fresh := cephFixture(t)
-			zone := strings.ReplaceAll(string(fresh.outputs[keyOldZone]), "objectstore.rgw.", old+".rgw.")
-			lookalikes := []string{"x" + old + ".rgw.meta"}
-			if strings.Contains(old, ".") {
-				lookalikes = append(lookalikes, strings.ReplaceAll(old, ".", "X")+".rgw.meta")
-			}
-			extra, err := json.Marshal(lookalikes)
-			if err != nil {
-				t.Fatal(err)
-			}
-			input := strings.Replace(zone, `"name": "objectstore"`, `"name": "objectstore", "other_pools": `+string(extra), 1)
-			dir := t.TempDir()
-			zoneGet := filepath.Join(dir, "zone-get.json")
-			zoneSet := filepath.Join(dir, "zone-set.json")
+			input, lookalikes := zoneWithLookalikes(t, old)
+			dir, zoneGet, zoneSet := writeZoneStub(t, `cat "$ZONE_GET"`)
 			if err := os.WriteFile(zoneGet, []byte(input), 0o600); err != nil {
 				t.Fatal(err)
 			}
-			stub := "#!/bin/sh\ncase \"$1 $2\" in\n\"zone get\") cat \"$ZONE_GET\" ;;\n\"zone set\") cat > \"$ZONE_SET\" ;;\nesac\n"
-			if err := os.WriteFile(filepath.Join(dir, "radosgw-admin"), []byte(stub), 0o700); err != nil {
-				t.Fatal(err)
+			var stdout, stderr bytes.Buffer
+			run := shellCommand(zonePoolRewrite(old), dir, zoneGet, zoneSet)
+			run.Stdout, run.Stderr = &stdout, &stderr
+			if err := run.Run(); err != nil {
+				t.Fatalf("%v: %s", err, stderr.String())
 			}
-			command := zonePoolRewrite(old)
-			run := exec.Command(command.Args[0], command.Args[1:]...)
-			run.Env = append(os.Environ(), "PATH="+dir+":"+os.Getenv("PATH"), "ZONE_GET="+zoneGet, "ZONE_SET="+zoneSet)
-			if out, err := run.CombinedOutput(); err != nil {
-				t.Fatalf("%v: %s", err, out)
+			if stdout.Len() != 0 {
+				t.Fatalf("the rewrite printed %q, the operator must receive nothing", stdout.String())
 			}
 			data, err := os.ReadFile(zoneSet)
 			if err != nil {
@@ -1068,20 +1126,123 @@ func TestZonePoolRewriteRewritesOnlyThePoolNames(t *testing.T) {
 }
 
 func TestZonePoolRewriteStopsWhenTheZoneCannotBeRead(t *testing.T) {
-	dir := t.TempDir()
-	written := filepath.Join(dir, "zone-set.json")
-	stub := "#!/bin/sh\ncase \"$1 $2\" in\n\"zone get\") exit 2 ;;\n\"zone set\") cat > \"$ZONE_SET\" ;;\nesac\n"
-	if err := os.WriteFile(filepath.Join(dir, "radosgw-admin"), []byte(stub), 0o700); err != nil {
-		t.Fatal(err)
-	}
-	command := zonePoolRewrite("objectstore")
-	run := exec.Command(command.Args[0], command.Args[1:]...)
-	run.Env = append(os.Environ(), "PATH="+dir+":"+os.Getenv("PATH"), "ZONE_SET="+written)
+	dir, zoneGet, zoneSet := writeZoneStub(t, "exit 2")
+	run := shellCommand(zonePoolRewrite("objectstore"), dir, zoneGet, zoneSet)
 	if err := run.Run(); err == nil {
 		t.Fatal("an unreadable zone must fail the command")
 	}
-	if _, err := os.Stat(written); err == nil {
+	if _, err := os.Stat(zoneSet); err == nil {
 		t.Fatal("zone set must not run after a failed zone get")
+	}
+}
+
+func TestZoneStalePoolsCommandPrintsOnlyThePoolNames(t *testing.T) {
+	cases := map[string]string{"objectstore": "objectstore", "dotted store": "my.store"}
+	for name, old := range cases {
+		t.Run(name, func(t *testing.T) {
+			input, _ := zoneWithLookalikes(t, old)
+			dir, zoneGet, zoneSet := writeZoneStub(t, `cat "$ZONE_GET"`)
+			if err := os.WriteFile(zoneGet, []byte(input), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			var stdout bytes.Buffer
+			run := shellArgs(zoneStalePoolsCommand(old, "bedrock-rgw"), dir, zoneGet, zoneSet)
+			run.Stdout = &stdout
+			if err := run.Run(); err != nil {
+				t.Fatal(err)
+			}
+			var want []string
+			for _, ref := range regexp.MustCompile(`"`+regexp.QuoteMeta(old)+`\.rgw\.[^"]*"`).FindAllString(input, -1) {
+				want = append(want, strings.Trim(ref, `"`))
+			}
+			got := quotedNames(stdout.Bytes())
+			if len(want) == 0 || !slices.Equal(got, want) {
+				t.Fatalf("names %v, want %v", got, want)
+			}
+			for _, secret := range []string{"ZONESECRET", "ZONEACCESS", "system_key", "secret_key"} {
+				if strings.Contains(stdout.String(), secret) {
+					t.Fatalf("the output holds %s: %s", secret, stdout.String())
+				}
+			}
+		})
+	}
+}
+
+func TestZoneStalePoolsCommandPrintsNothingWhenNoPoolIsStale(t *testing.T) {
+	dir, zoneGet, zoneSet := writeZoneStub(t, `cat "$ZONE_GET"`)
+	renamed := strings.ReplaceAll(zoneDocument(t), "objectstore.rgw.", "bedrock-rgw.rgw.")
+	if err := os.WriteFile(zoneGet, []byte(renamed), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	var stdout bytes.Buffer
+	run := shellArgs(zoneStalePoolsCommand("objectstore", "bedrock-rgw"), dir, zoneGet, zoneSet)
+	run.Stdout = &stdout
+	if err := run.Run(); err != nil || stdout.Len() != 0 {
+		t.Fatalf("error %v, output %q", err, stdout.String())
+	}
+}
+
+func TestZoneStalePoolsCommandFailsWhenTheZoneCannotBeRead(t *testing.T) {
+	dir, zoneGet, zoneSet := writeZoneStub(t, "exit 2")
+	run := shellArgs(zoneStalePoolsCommand("objectstore", "bedrock-rgw"), dir, zoneGet, zoneSet)
+	if err := run.Run(); err == nil {
+		t.Fatal("an unreadable zone must fail the command")
+	}
+}
+
+func withRealShell(t *testing.T, fake *fakeCeph) (runFunc, *[][]byte, string) {
+	t.Helper()
+	dir, zoneGet, zoneSet := writeZoneStub(t, `cat "$ZONE_GET"`)
+	if err := os.WriteFile(zoneGet, []byte(zoneDocument(t)), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	received := &[][]byte{}
+	run := func(ctx context.Context, command []string) ([]byte, error) {
+		var out []byte
+		var err error
+		if command[0] == "sh" {
+			out, err = shellArgs(command, dir, zoneGet, zoneSet).Output()
+			if command[3] == "zone-pools" {
+				fake.reads = append(fake.reads, commandKey(command))
+			} else {
+				fake.mutations = append(fake.mutations, commandKey(command))
+			}
+		} else {
+			out, err = fake.run(ctx, command)
+		}
+		*received = append(*received, out)
+		return out, err
+	}
+	return run, received, zoneSet
+}
+
+func TestTheZoneSystemKeyNeverReachesTheOperator(t *testing.T) {
+	fake := cephFixture(t)
+	run, received, zoneSet := withRealShell(t, fake)
+	state, err := readCephState(context.Background(), run, *adoptSpec())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Equal(state.ZoneStalePools, zonePoolRefs(t, "objectstore")) {
+		t.Fatalf("stale pools %v", state.ZoneStalePools)
+	}
+	got := adoptStep(context.Background(), run, *adoptSpec(), 3)
+	if got.Reason != v1alpha1.ReasonRenaming {
+		t.Fatalf("condition %+v", got)
+	}
+	for _, out := range *received {
+		for _, secret := range []string{"ZONESECRET", "ZONEACCESS", "system_key", "secret_key"} {
+			if bytes.Contains(out, []byte(secret)) {
+				t.Fatalf("the operator received %s in %q", secret, out)
+			}
+		}
+	}
+	written, err := os.ReadFile(zoneSet)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(written), `"bedrock-rgw.rgw.meta:root"`) || !strings.Contains(string(written), "ZONESECRET") {
+		t.Fatalf("the rewrite did not run in the shell: %s", written)
 	}
 }
 

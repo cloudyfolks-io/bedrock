@@ -1,67 +1,139 @@
 {
-  "ceph quorum_status -f json": {"quorum_names": ["a", "b", "c"], "quorum_leader_name": "a"},
-  "ceph osd stat -f json": {"num_osds": 4, "num_up_osds": 4, "num_in_osds": 4},
+  "ceph quorum_status -f json": {
+    "quorum_names": [
+      "a",
+      "b",
+      "c"
+    ],
+    "quorum_leader_name": "a"
+  },
+  "ceph osd stat -f json": {
+    "num_osds": 4,
+    "num_up_osds": 4,
+    "num_in_osds": 4
+  },
   "ceph osd pool ls detail -f json": [
-    {"pool_id": 1, "pool_name": ".mgr", "size": 3},
-    {"pool_id": 2, "pool_name": "storage-block", "size": 3},
-    {"pool_id": 3, "pool_name": "filesystem-data-metadata", "size": 3},
-    {"pool_id": 4, "pool_name": "filesystem-data-data0", "size": 3},
-    {"pool_id": 5, "pool_name": ".rgw.root", "size": 3},
-    {"pool_id": 6, "pool_name": "objectstore.rgw.control", "size": 3},
-    {"pool_id": 7, "pool_name": "objectstore.rgw.meta", "size": 3},
-    {"pool_id": 8, "pool_name": "objectstore.rgw.log", "size": 3},
-    {"pool_id": 9, "pool_name": "objectstore.rgw.buckets.index", "size": 3},
-    {"pool_id": 10, "pool_name": "objectstore.rgw.buckets.non-ec", "size": 3},
-    {"pool_id": 11, "pool_name": "objectstore.rgw.otp", "size": 3},
-    {"pool_id": 12, "pool_name": "objectstore.rgw.buckets.data", "size": 3}
+    {
+      "pool_id": 1,
+      "pool_name": ".mgr",
+      "size": 3
+    },
+    {
+      "pool_id": 2,
+      "pool_name": "storage-block",
+      "size": 3
+    },
+    {
+      "pool_id": 3,
+      "pool_name": "filesystem-data-metadata",
+      "size": 3
+    },
+    {
+      "pool_id": 4,
+      "pool_name": "filesystem-data-data0",
+      "size": 3
+    },
+    {
+      "pool_id": 5,
+      "pool_name": ".rgw.root",
+      "size": 3
+    },
+    {
+      "pool_id": 6,
+      "pool_name": "objectstore.rgw.control",
+      "size": 3
+    },
+    {
+      "pool_id": 7,
+      "pool_name": "objectstore.rgw.meta",
+      "size": 3
+    },
+    {
+      "pool_id": 8,
+      "pool_name": "objectstore.rgw.log",
+      "size": 3
+    },
+    {
+      "pool_id": 9,
+      "pool_name": "objectstore.rgw.buckets.index",
+      "size": 3
+    },
+    {
+      "pool_id": 10,
+      "pool_name": "objectstore.rgw.buckets.non-ec",
+      "size": 3
+    },
+    {
+      "pool_id": 11,
+      "pool_name": "objectstore.rgw.otp",
+      "size": 3
+    },
+    {
+      "pool_id": 12,
+      "pool_name": "objectstore.rgw.buckets.data",
+      "size": 3
+    }
   ],
   "ceph fs ls -f json": [
     {
       "name": "filesystem-data",
       "metadata_pool": "filesystem-data-metadata",
       "metadata_pool_id": 3,
-      "data_pool_ids": [4],
-      "data_pools": ["filesystem-data-data0"]
+      "data_pool_ids": [
+        4
+      ],
+      "data_pools": [
+        "filesystem-data-data0"
+      ]
     }
   ],
   "ceph fs get filesystem-data -f json": {
     "id": 1,
-    "mdsmap": {"fs_name": "filesystem-data", "flags_state": {"joinable": true, "allow_snaps": true, "refuse_client_session": false}}
-  },
-  "radosgw-admin realm list": {"default_info": "9a3e5f0c-7d1b-4c58-8d62-1f0e6b7a2c11", "realms": ["objectstore"]},
-  "radosgw-admin zonegroup list": {"default_info": "4b1f8e2a-3c6d-4e07-9a15-5d2c7e8f0b33", "zonegroups": ["objectstore"]},
-  "radosgw-admin zone list": {"default_info": "6c2d9f3b-4e7a-4f18-8b26-7e3d8f9a1c44", "zones": ["objectstore"]},
-  "radosgw-admin zone get --rgw-zone=objectstore": {
-    "id": "6c2d9f3b-4e7a-4f18-8b26-7e3d8f9a1c44",
-    "name": "objectstore",
-    "domain_root": "objectstore.rgw.meta:root",
-    "control_pool": "objectstore.rgw.control",
-    "gc_pool": "objectstore.rgw.log:gc",
-    "lc_pool": "objectstore.rgw.log:lc",
-    "log_pool": "objectstore.rgw.log",
-    "intent_log_pool": "objectstore.rgw.log:intent",
-    "usage_log_pool": "objectstore.rgw.log:usage",
-    "roles_pool": "objectstore.rgw.meta:roles",
-    "reshard_pool": "objectstore.rgw.log:reshard",
-    "user_keys_pool": "objectstore.rgw.meta:users.keys",
-    "user_email_pool": "objectstore.rgw.meta:users.email",
-    "user_swift_pool": "objectstore.rgw.meta:users.swift",
-    "user_uid_pool": "objectstore.rgw.meta:users.uid",
-    "otp_pool": "objectstore.rgw.otp",
-    "system_key": {"access_key": "ZONEACCESS", "secret_key": "ZONESECRET"},
-    "placement_pools": [
-      {
-        "key": "default-placement",
-        "val": {
-          "index_pool": "objectstore.rgw.buckets.index",
-          "storage_classes": {"STANDARD": {"data_pool": "objectstore.rgw.buckets.data"}},
-          "data_extra_pool": "objectstore.rgw.buckets.non-ec",
-          "index_type": 0,
-          "inline_data": true
-        }
+    "mdsmap": {
+      "fs_name": "filesystem-data",
+      "flags_state": {
+        "joinable": true,
+        "allow_snaps": true,
+        "refuse_client_session": false
       }
-    ],
-    "realm_id": "9a3e5f0c-7d1b-4c58-8d62-1f0e6b7a2c11",
-    "notif_pool": "objectstore.rgw.log:notif"
-  }
+    }
+  },
+  "radosgw-admin realm list": {
+    "default_info": "9a3e5f0c-7d1b-4c58-8d62-1f0e6b7a2c11",
+    "realms": [
+      "objectstore"
+    ]
+  },
+  "radosgw-admin zonegroup list": {
+    "default_info": "4b1f8e2a-3c6d-4e07-9a15-5d2c7e8f0b33",
+    "zonegroups": [
+      "objectstore"
+    ]
+  },
+  "radosgw-admin zone list": {
+    "default_info": "6c2d9f3b-4e7a-4f18-8b26-7e3d8f9a1c44",
+    "zones": [
+      "objectstore"
+    ]
+  },
+  "sh -c zone-pools objectstore objectstore": [
+    "objectstore.rgw.meta:root",
+    "objectstore.rgw.control",
+    "objectstore.rgw.log:gc",
+    "objectstore.rgw.log:lc",
+    "objectstore.rgw.log",
+    "objectstore.rgw.log:intent",
+    "objectstore.rgw.log:usage",
+    "objectstore.rgw.meta:roles",
+    "objectstore.rgw.log:reshard",
+    "objectstore.rgw.meta:users.keys",
+    "objectstore.rgw.meta:users.email",
+    "objectstore.rgw.meta:users.swift",
+    "objectstore.rgw.meta:users.uid",
+    "objectstore.rgw.otp",
+    "objectstore.rgw.buckets.index",
+    "objectstore.rgw.buckets.data",
+    "objectstore.rgw.buckets.non-ec",
+    "objectstore.rgw.log:notif"
+  ]
 }
