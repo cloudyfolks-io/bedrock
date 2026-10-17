@@ -363,7 +363,7 @@ cleanup() {
   registry_down
   remove_job_images
   rm -f dist/bedrock-*-bundle-*.tar.zst dist/e2e-init-*.sh
-  rm -rf dist/.bundle-* dist/.ref-*
+  rm -rf dist/.bundle-* dist/.ref-* dist/e2e
   rm -rf "$tmp"
   printf '%s' "$summary"
   local i=$ran

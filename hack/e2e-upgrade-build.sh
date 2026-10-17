@@ -49,6 +49,8 @@ build_from_ref() {
   rm -rf "dist/release-$version"
   cp -r "$worktree_a/dist/release-$version" "dist/release-$version"
   cp "$worktree_a/hack/e2e-init.sh" "dist/e2e-init-$version.sh"
+  rm -rf dist/e2e
+  cp -r "$worktree_a/hack/e2e" dist/e2e
   remove_worktree
   worktree_a=""
 }
