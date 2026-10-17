@@ -220,7 +220,8 @@ if [ -n "$abort_in" ]; then
   assert_age_file "$(newest_upgrade_archive)"
   kubectl wait --for=condition=Ready node --all --timeout=300s
   grep -qx 'server = "https://127.0.0.1:1"' /etc/k0s/containerd.d/certs.d/_default/hosts.toml
-  if kubectl get pods -A -o jsonpath='{range .items[*]}{.status.containerStatuses[*].state.waiting.reason}{"\n"}{end}' | grep -qE 'ImagePullBackOff|ErrImagePull'; then
+  waiting=$(kubectl get pods -A -o jsonpath='{range .items[*]}{.status.containerStatuses[*].state.waiting.reason}{"\n"}{end}')
+  if grep -qE 'ImagePullBackOff|ErrImagePull' <<<"$waiting"; then
     exit 1
   fi
   echo "e2e-upgrade abort passed"
@@ -327,26 +328,51 @@ assert_age_file "$archive"
 "$cli_b" backup decrypt --in "$archive" --out "$workdir/upgrade-archive-host.tar.gz"
 cmp "$workdir/upgrade-archive.tar.gz" "$workdir/upgrade-archive-host.tar.gz"
 tar -tzf "$workdir/upgrade-archive.tar.gz" >/dev/null
-if [ -f /etc/bedrock/encryption/encryption.yaml ]; then
-  python3 - "$workdir/upgrade-archive.tar.gz" <<'PY'
+python3 - "$workdir/upgrade-archive.tar.gz" <<'PY'
 import os
 import sys
 import tarfile
 
 newest = sys.argv[1]
+marker = b"AGE-SECRET-KEY-"
+entries = []
+k0s_backups = []
+holders = []
+
+
+def has_marker(stream):
+    tail = b""
+    while chunk := stream.read(1 << 20):
+        if marker in tail + chunk:
+            return True
+        tail = chunk[-(len(marker) - 1):]
+    return False
+
+
+def scan(archive):
+    for member in archive:
+        entries.append(member.name)
+        if not member.isfile():
+            continue
+        stream = archive.extractfile(member)
+        if os.path.basename(member.name).startswith("k0s_backup_"):
+            k0s_backups.append(member.name)
+            with tarfile.open(fileobj=stream) as inner:
+                scan(inner)
+        elif has_marker(stream):
+            holders.append(member.name)
+
+
 with tarfile.open(newest) as outer:
-    entries = outer.getnames()
-    k0s_backups = [name for name in entries if os.path.basename(name).startswith("k0s_backup_")]
-    for name in k0s_backups:
-        with tarfile.open(fileobj=outer.extractfile(name)) as inner:
-            entries += inner.getnames()
+    scan(outer)
 if not k0s_backups:
     sys.exit(newest + " holds no k0s backup archive")
-leaks = [name for name in entries if name.endswith("encryption.yaml")]
+leaks = [name for name in entries if name.endswith("encryption.yaml") or os.path.basename(name) == "host.key"]
 if leaks:
-    sys.exit(newest + " holds the encryption key: " + ", ".join(leaks))
+    sys.exit(newest + " holds a key file: " + ", ".join(leaks))
+if holders:
+    sys.exit(newest + " holds an age secret key: " + ", ".join(holders))
 PY
-fi
 rm -f "$workdir/upgrade-archive.tar.gz" "$workdir/upgrade-archive-host.tar.gz"
 touch "$workdir/etcd-marker"
 kubectl patch setting backup.etcd-schedule --type merge -p '{"spec":{"value":"* * * * *"}}'
@@ -375,7 +401,8 @@ fi
 test "$(kubectl get node "$node" -o jsonpath='{.spec.unschedulable}')" != "true"
 kubectl wait --for=condition=Ready node --all --timeout=300s
 grep -qx 'server = "https://127.0.0.1:1"' /etc/k0s/containerd.d/certs.d/_default/hosts.toml
-if kubectl get pods -A -o jsonpath='{range .items[*]}{.status.containerStatuses[*].state.waiting.reason}{"\n"}{end}' | grep -qE 'ImagePullBackOff|ErrImagePull'; then
+waiting=$(kubectl get pods -A -o jsonpath='{range .items[*]}{.status.containerStatuses[*].state.waiting.reason}{"\n"}{end}')
+if grep -qE 'ImagePullBackOff|ErrImagePull' <<<"$waiting"; then
   exit 1
 fi
 if [ -f /etc/bedrock/encryption/encryption.yaml ]; then
