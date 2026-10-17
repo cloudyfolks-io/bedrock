@@ -52,6 +52,9 @@ func Run(ctx context.Context, c client.WithWatch, deps Deps) error {
 	defer ticker.Stop()
 	events, stop := ensureWatch(ctx, c, deps.Node)
 	defer func() { stop() }()
+	if err := removeStaleWorkDirs(deps.Root, deps.Now()); err != nil {
+		fmt.Fprintf(os.Stderr, "agent: stale work dirs: %v\n", err)
+	}
 	var snapshots sync.WaitGroup
 	defer snapshots.Wait()
 	snapshots.Go(func() { snapshotLoop(ctx, c, deps) })
@@ -90,6 +93,9 @@ func snapshotLoop(ctx context.Context, c client.Client, deps Deps) {
 	ticker := time.NewTicker(deps.Interval)
 	defer ticker.Stop()
 	for {
+		if err := tidyBackupDir(ctx, c, deps); err != nil {
+			fmt.Fprintf(os.Stderr, "agent: backup dir: %v\n", err)
+		}
 		if err := RunEtcdSnapshots(ctx, c, deps); err != nil {
 			fmt.Fprintf(os.Stderr, "agent: etcd snapshot: %v\n", err)
 		}

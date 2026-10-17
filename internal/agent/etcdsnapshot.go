@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"io/fs"
 	"os"
 	"path/filepath"
 	"slices"
@@ -96,11 +95,7 @@ func recordSnapshotFailure(dir string, at time.Time, attempts int) error {
 }
 
 func clearSnapshotFailure(dir string) error {
-	err := os.Remove(filepath.Join(dir, snapshotFailureFile))
-	if errors.Is(err, fs.ErrNotExist) {
-		return nil
-	}
-	return err
+	return removeIfExists(filepath.Join(dir, snapshotFailureFile))
 }
 
 func etcdSchedule(ctx context.Context, c client.Client) (string, error) {

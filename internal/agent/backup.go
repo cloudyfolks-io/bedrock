@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"io"
 	"io/fs"
+	"maps"
 	"os"
 	"path/filepath"
 	"slices"
@@ -66,7 +67,7 @@ func writeBackup(ctx context.Context, deps Deps, name, prefix string, keep int, 
 	if err := removePartials(dir, prefix); err != nil {
 		return "", "", err
 	}
-	work, err := os.MkdirTemp(dir, ".work-")
+	work, err := os.MkdirTemp(dir, workDirPrefix)
 	if err != nil {
 		return "", "", err
 	}
@@ -112,11 +113,34 @@ func copyOVN(src, dest string) error {
 }
 
 func writeArchive(src, dest string, recipients []age.Recipient) error {
+	return writeSynced(dest, func(dst io.Writer) error { return sealTarGz(dst, src, recipients) })
+}
+
+func writeSynced(dest string, fill func(io.Writer) error) error {
 	file, err := os.OpenFile(dest, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o600)
 	if err != nil {
 		return err
 	}
-	return errors.Join(sealTarGz(file, src, recipients), file.Sync(), file.Close())
+	return errors.Join(fill(file), file.Sync(), file.Close())
+}
+
+func writeAtomic(dest string, fill func(io.Writer) error) error {
+	partial := dest + partialSuffix
+	if err := writeSynced(partial, fill); err != nil {
+		return errors.Join(err, removeIfExists(partial))
+	}
+	if err := os.Rename(partial, dest); err != nil {
+		return errors.Join(err, removeIfExists(partial))
+	}
+	return syncDir(filepath.Dir(dest))
+}
+
+func syncDir(dir string) error {
+	handle, err := os.Open(dir)
+	if err != nil {
+		return err
+	}
+	return errors.Join(handle.Sync(), handle.Close())
 }
 
 func sealTarGz(dst io.Writer, src string, recipients []age.Recipient) error {
@@ -175,13 +199,24 @@ func keepNewest(dir, prefix string, keep int) error {
 	if err != nil {
 		return err
 	}
-	slices.SortFunc(archives, func(a, b string) int { return strings.Compare(backupStamp(a), backupStamp(b)) })
-	for _, old := range archives[:max(0, len(archives)-keep)] {
-		if err := os.Remove(old); err != nil {
-			return err
+	files := make(map[string][]string)
+	for _, path := range archives {
+		base := archiveBase(path)
+		files[base] = append(files[base], path)
+	}
+	bases := slices.SortedFunc(maps.Keys(files), compareBases)
+	for _, old := range bases[:max(0, len(bases)-keep)] {
+		for _, path := range files[old] {
+			if err := os.Remove(path); err != nil {
+				return err
+			}
 		}
 	}
 	return nil
+}
+
+func compareBases(a, b string) int {
+	return cmp.Or(strings.Compare(stampOf(a), stampOf(b)), strings.Compare(a, b))
 }
 
 func archivePaths(dir, prefix, tail string) ([]string, error) {
@@ -196,9 +231,16 @@ func archivePaths(dir, prefix, tail string) ([]string, error) {
 	return paths, nil
 }
 
+func archiveBase(path string) string {
+	return strings.TrimSuffix(strings.TrimSuffix(filepath.Base(path), seal.Suffix), archiveSuffix)
+}
+
+func stampOf(base string) string {
+	return base[strings.LastIndex(base, "-")+1:]
+}
+
 func backupStamp(path string) string {
-	name := strings.TrimSuffix(strings.TrimSuffix(filepath.Base(path), seal.Suffix), archiveSuffix)
-	return name[strings.LastIndex(name, "-")+1:]
+	return stampOf(archiveBase(path))
 }
 
 func removePartials(dir, prefix string) error {

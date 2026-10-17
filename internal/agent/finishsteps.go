@@ -199,7 +199,7 @@ func restore(ctx context.Context, env StepEnv) (Outcome, error) {
 	if backupPath == "" {
 		return Outcome{}, errors.New("no backup to restore")
 	}
-	work, err := os.MkdirTemp(filepath.Join(deps.Root, backupDir), ".restore-")
+	work, err := os.MkdirTemp(filepath.Join(deps.Root, backupDir), restoreDirPrefix)
 	if err != nil {
 		return Outcome{}, err
 	}

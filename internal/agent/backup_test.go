@@ -210,6 +210,69 @@ func TestBackupKeepsTheNewestThree(t *testing.T) {
 	}
 }
 
+func writeArchiveFiles(t *testing.T, dir string, names ...string) {
+	t.Helper()
+	for _, name := range names {
+		writeFixtureFile(t, filepath.Join(dir, name), "archive")
+	}
+}
+
+func TestKeepNewestCountsASealedAndAPlainCopyOnce(t *testing.T) {
+	dir := t.TempDir()
+	writeArchiveFiles(t, dir,
+		"bedrock-v0.1.9-20260901T100000Z.tar.gz.age",
+		"bedrock-v0.1.9-20260902T100000Z.tar.gz",
+		"bedrock-v0.1.9-20260902T100000Z.tar.gz.age",
+		"bedrock-v0.1.9-20260903T100000Z.tar.gz.age",
+		"bedrock-v0.1.9-20260904T100000Z.tar.gz.age",
+	)
+	if err := keepNewest(dir, upgradeBackupPrefix, 3); err != nil {
+		t.Fatal(err)
+	}
+	want := []string{
+		"bedrock-v0.1.9-20260902T100000Z.tar.gz",
+		"bedrock-v0.1.9-20260902T100000Z.tar.gz.age",
+		"bedrock-v0.1.9-20260903T100000Z.tar.gz.age",
+		"bedrock-v0.1.9-20260904T100000Z.tar.gz.age",
+	}
+	if got := listNames(t, dir); !slices.Equal(got, want) {
+		t.Fatalf("files %v, want %v", got, want)
+	}
+}
+
+func TestKeepNewestRemovesEveryFileOfAnOldStamp(t *testing.T) {
+	dir := t.TempDir()
+	writeArchiveFiles(t, dir,
+		"etcd-20260901T100000Z.tar.gz",
+		"etcd-20260901T100000Z.tar.gz.age",
+		"etcd-20260902T100000Z.tar.gz",
+		"etcd-20260902T100000Z.tar.gz.age",
+		"etcd-20260903T100000Z.tar.gz.age",
+	)
+	if err := keepNewest(dir, etcdSnapshotPrefix, 1); err != nil {
+		t.Fatal(err)
+	}
+	if got := listNames(t, dir); !slices.Equal(got, []string{"etcd-20260903T100000Z.tar.gz.age"}) {
+		t.Fatalf("files %v", got)
+	}
+}
+
+func TestKeepNewestRemovesTheLowerNameOfTheSameStamp(t *testing.T) {
+	dir := t.TempDir()
+	writeArchiveFiles(t, dir,
+		"bedrock-v0.2.0-20260901T100000Z.tar.gz.age",
+		"bedrock-v0.1.0-20260901T100000Z.tar.gz.age",
+		"bedrock-v0.3.0-20260901T100000Z.tar.gz",
+	)
+	if err := keepNewest(dir, upgradeBackupPrefix, 2); err != nil {
+		t.Fatal(err)
+	}
+	want := []string{"bedrock-v0.2.0-20260901T100000Z.tar.gz.age", "bedrock-v0.3.0-20260901T100000Z.tar.gz"}
+	if got := listNames(t, dir); !slices.Equal(got, want) {
+		t.Fatalf("files %v, want %v", got, want)
+	}
+}
+
 func TestBackupFailsWhenK0sBackupFails(t *testing.T) {
 	env := backupEnv(t, &fakeK0sBackup{err: errors.New("etcd unavailable")})
 	if _, err := backup(context.Background(), env); err == nil || !strings.Contains(err.Error(), "etcd unavailable") {
