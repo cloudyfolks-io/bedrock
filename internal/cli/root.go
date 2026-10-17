@@ -25,6 +25,7 @@ func Commands() map[string]Command {
 		"authn":             authnCommand,
 		"login":             loginCommand,
 		"proxy":             proxyCommand,
+		"backup":            backupCommand,
 	}
 }
 
