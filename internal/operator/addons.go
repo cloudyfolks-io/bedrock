@@ -45,6 +45,7 @@ type AddonInput struct {
 	AuthnInstalled bool
 	UploadProxyCA  []byte
 	ProxyInstalled bool
+	CephMonSecret  *corev1.Secret
 }
 
 type Probe struct {
@@ -58,6 +59,7 @@ type Rendered struct {
 	Probes      []Probe
 	SkipReason  string
 	SkipMessage string
+	Conditions  []metav1.Condition
 }
 
 type Addon struct {
@@ -95,10 +97,14 @@ func (r *AddonReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 	conditions := make([]metav1.Condition, 0, len(r.Addons))
 	allReady := true
 	for _, addon := range r.Addons {
-		condition := r.reconcileAddon(ctx, addon, input)
+		condition, extra := r.reconcileAddon(ctx, addon, input)
 		condition.ObservedGeneration = cluster.Generation
 		allReady = allReady && condition.Status == metav1.ConditionTrue
 		conditions = append(conditions, condition)
+		for _, other := range extra {
+			other.ObservedGeneration = cluster.Generation
+			conditions = append(conditions, other)
+		}
 	}
 	if err := writeClusterStatus(ctx, r.Client, func(s *v1alpha1.ClusterStatus) {
 		for _, condition := range conditions {
@@ -142,7 +148,11 @@ func (r *AddonReconciler) input(ctx context.Context, cluster v1alpha1.Cluster) (
 	if err != nil {
 		return AddonInput{}, err
 	}
-	input := AddonInput{Cluster: cluster, Hosts: hosts.Items, Settings: values, Bundle: r.Bundle, PlatformCA: platformCA, WebhookToken: string(secretData(token, WebhookTokenKey)), AuthnInstalled: installed, UploadProxyCA: uploadProxyCA, ProxyInstalled: proxyInstalled}
+	monSecret, err := adoptedMonSecret(ctx, r.Client, cluster)
+	if err != nil {
+		return AddonInput{}, err
+	}
+	input := AddonInput{Cluster: cluster, Hosts: hosts.Items, Settings: values, Bundle: r.Bundle, PlatformCA: platformCA, WebhookToken: string(secretData(token, WebhookTokenKey)), AuthnInstalled: installed, UploadProxyCA: uploadProxyCA, ProxyInstalled: proxyInstalled, CephMonSecret: monSecret}
 	if values["platform.tls-mode"] != "Custom" || values["platform.custom-tls"] == "" {
 		return input, nil
 	}
@@ -212,11 +222,15 @@ func settingValues(ctx context.Context, c client.Client) (map[string]string, err
 	return values, nil
 }
 
-func (r *AddonReconciler) reconcileAddon(ctx context.Context, addon Addon, input AddonInput) metav1.Condition {
+func (r *AddonReconciler) reconcileAddon(ctx context.Context, addon Addon, input AddonInput) (metav1.Condition, []metav1.Condition) {
 	rendered, err := addon.Render(input)
 	if err != nil {
-		return addonCondition(addon, metav1.ConditionFalse, "RenderFailed", err.Error())
+		return addonCondition(addon, metav1.ConditionFalse, "RenderFailed", err.Error()), nil
 	}
+	return r.applyRendered(ctx, addon, rendered), rendered.Conditions
+}
+
+func (r *AddonReconciler) applyRendered(ctx context.Context, addon Addon, rendered Rendered) metav1.Condition {
 	if rendered.SkipReason != "" {
 		return addonCondition(addon, metav1.ConditionFalse, rendered.SkipReason, rendered.SkipMessage)
 	}

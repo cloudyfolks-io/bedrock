@@ -245,7 +245,7 @@ func waitForAddon(ctx context.Context, env upgradeEnv, cluster v1alpha1.Cluster,
 		if rendered.SkipReason != "" {
 			return true, "", nil
 		}
-		condition := reconciler.reconcileAddon(ctx, addon, input)
+		condition, _ := reconciler.reconcileAddon(ctx, addon, input)
 		if condition.Reason == "Failed" {
 			return false, "", errors.New(condition.Message)
 		}

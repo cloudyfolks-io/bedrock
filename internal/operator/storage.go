@@ -31,20 +31,36 @@ var storageAddon = Addon{Name: "storage", Condition: v1alpha1.ConditionStorageRe
 var cephClusterGVK = schema.GroupVersionKind{Group: "ceph.rook.io", Version: "v1", Kind: "CephCluster"}
 
 func RenderStorage(in AddonInput) (Rendered, error) {
+	if adopt := in.Cluster.Spec.Storage.Adopt; adopt != nil {
+		return renderAdopted(in, *adopt)
+	}
 	hosts := osdHosts(in.Hosts)
 	if len(hosts) == 0 {
 		return Rendered{SkipReason: "NoDevices", SkipMessage: "no host with role ceph-osd lists a storage device"}, nil
 	}
+	image, replicas, err := storageSettings(in)
+	if err != nil {
+		return Rendered{}, err
+	}
+	cluster := cephCluster(image, hosts, monCount(replicas), replicas)
+	objects := slices.Concat([]*unstructured.Unstructured{cluster}, storageObjects(replicas, hosts))
+	return Rendered{Objects: objects, Probes: []Probe{cephClusterProbe(cephGate(deviceCount(hosts)))}}, nil
+}
+
+func storageSettings(in AddonInput) (string, int, error) {
 	image := componentImage(in.Bundle, "rook")
 	if image == "" {
-		return Rendered{}, fmt.Errorf("release does not name the ceph image for component rook")
+		return "", 0, fmt.Errorf("release does not name the ceph image for component rook")
 	}
 	replicas, err := replicaCount(in.Settings[storageReplicasKey])
 	if err != nil {
-		return Rendered{}, fmt.Errorf("storage.replicas: %w", err)
+		return "", 0, fmt.Errorf("storage.replicas: %w", err)
 	}
-	objects := []*unstructured.Unstructured{
-		cephCluster(image, hosts, monCount(replicas), replicas),
+	return image, replicas, nil
+}
+
+func storageObjects(replicas int, hosts []v1alpha1.Host) []*unstructured.Unstructured {
+	return []*unstructured.Unstructured{
 		cephBlockPool(replicas),
 		cephFilesystem(replicas, len(hosts) > 1),
 		blockStorageClass("block", "Delete", true),
@@ -54,8 +70,10 @@ func RenderStorage(in AddonInput) (Rendered, error) {
 		cephObjectStore(replicas, len(hosts)),
 		bucketStorageClass(),
 	}
-	probe := Probe{GVK: cephClusterGVK, Key: client.ObjectKey{Namespace: storageNamespace, Name: storageNamespace}, Gate: cephGate(deviceCount(hosts))}
-	return Rendered{Objects: objects, Probes: []Probe{probe}}, nil
+}
+
+func cephClusterProbe(gate release.Gate) Probe {
+	return Probe{GVK: cephClusterGVK, Key: client.ObjectKey{Namespace: storageNamespace, Name: storageNamespace}, Gate: gate}
 }
 
 func osdHosts(hosts []v1alpha1.Host) []v1alpha1.Host {
@@ -107,6 +125,10 @@ func monCount(replicas int) int64 {
 }
 
 func cephCluster(image string, hosts []v1alpha1.Host, mons int64, replicas int) *unstructured.Unstructured {
+	return object("ceph.rook.io/v1", "CephCluster", storageNamespace, storageNamespace, cephClusterSpec(image, hosts, mons, replicas))
+}
+
+func cephClusterSpec(image string, hosts []v1alpha1.Host, mons int64, replicas int) map[string]any {
 	nodes := make([]any, 0, len(hosts))
 	for _, host := range hosts {
 		devices := make([]any, 0, len(host.Spec.Storage.Devices))
@@ -119,7 +141,7 @@ func cephCluster(image string, hosts []v1alpha1.Host, mons int64, replicas int) 
 	if len(hosts) < 2 {
 		mgrs = 1
 	}
-	return object("ceph.rook.io/v1", "CephCluster", storageNamespace, storageNamespace, map[string]any{
+	return map[string]any{
 		"cephVersion":        map[string]any{"image": image},
 		"dataDirHostPath":    "/var/lib/rook",
 		"mon":                map[string]any{"count": mons, "allowMultiplePerNode": len(hosts) < 3},
@@ -130,7 +152,7 @@ func cephCluster(image string, hosts []v1alpha1.Host, mons int64, replicas int) 
 		"healthCheck":        map[string]any{"muteHealthWarning": mutedHealthWarnings(replicas)},
 		"storage":            map[string]any{"useAllNodes": false, "useAllDevices": false, "nodes": nodes},
 		"priorityClassNames": map[string]any{"mon": "system-node-critical", "osd": "system-node-critical", "mgr": "system-cluster-critical"},
-	})
+	}
 }
 
 func mutedHealthWarnings(replicas int) map[string]any {

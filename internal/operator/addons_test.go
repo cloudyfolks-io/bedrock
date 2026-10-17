@@ -38,6 +38,11 @@ func skipAlways(AddonInput) (Rendered, error) {
 	return Rendered{SkipReason: "NoDevices", SkipMessage: "no host lists a device"}, nil
 }
 
+func skipWithCondition(AddonInput) (Rendered, error) {
+	extra := metav1.Condition{Type: "ExtraState", Status: metav1.ConditionFalse, Reason: "WaitingForThing", Message: "waits for the thing"}
+	return Rendered{SkipReason: "NoDevices", SkipMessage: "no host lists a device", Conditions: []metav1.Condition{extra}}, nil
+}
+
 func renderUnknownKind(AddonInput) (Rendered, error) {
 	obj := &unstructured.Unstructured{Object: map[string]any{"apiVersion": "example.com/v1", "kind": "Widget", "metadata": map[string]any{"name": "w"}}}
 	return Rendered{Objects: []*unstructured.Unstructured{obj}}, nil
@@ -75,6 +80,7 @@ func TestAddonReconcilerAppliesProbesAndSkips(t *testing.T) {
 	addons := []Addon{
 		{Name: "probe", Condition: "ProbeReady", Render: probeConfigMap},
 		{Name: "skip", Condition: "SkipReady", Render: skipAlways},
+		{Name: "extra", Condition: "ExtraReady", Render: skipWithCondition},
 		{Name: "unknown", Condition: "UnknownReady", Render: renderUnknownKind},
 	}
 	if err := (&AddonReconciler{Client: mgr.GetClient(), Addons: addons, Interval: time.Second, ReadyInterval: time.Second}).SetupWithManager(mgr); err != nil {
@@ -107,6 +113,14 @@ func TestAddonReconcilerAppliesProbesAndSkips(t *testing.T) {
 	waitFor(t, func() bool {
 		cond := clusterCondition(t, c, "SkipReady")
 		return cond != nil && cond.Status == metav1.ConditionFalse && cond.Reason == "NoDevices" && cond.Message == "no host lists a device"
+	})
+	waitFor(t, func() bool {
+		cond := clusterCondition(t, c, "ExtraState")
+		return cond != nil && cond.Status == metav1.ConditionFalse && cond.Reason == "WaitingForThing" && cond.Message == "waits for the thing" && cond.ObservedGeneration == cluster.Generation
+	})
+	waitFor(t, func() bool {
+		cond := clusterCondition(t, c, "ExtraReady")
+		return cond != nil && cond.Status == metav1.ConditionFalse && cond.Reason == "NoDevices"
 	})
 	waitFor(t, func() bool {
 		cond := clusterCondition(t, c, "UnknownReady")
@@ -146,6 +160,42 @@ func TestAddonInputReadsThePlatformCA(t *testing.T) {
 	}
 	if in.PlatformCA == nil || string(in.PlatformCA.Data["ca.crt"]) != "CA" {
 		t.Fatalf("platform CA %+v", in.PlatformCA)
+	}
+}
+
+func TestAddonInputReadsTheRookMonSecretOnlyWhenAdopting(t *testing.T) {
+	c, _ := StartTestEnv(t)
+	ctx := context.Background()
+	plain := v1alpha1.Cluster{ObjectMeta: metav1.ObjectMeta{Name: v1alpha1.ClusterName}, Spec: v1alpha1.ClusterSpec{API: v1alpha1.APISpec{VIP: "10.0.0.250"}}}
+	adopting := *plain.DeepCopy()
+	adopting.Spec.Storage.Adopt = adoptSpec()
+	r := &AddonReconciler{Client: c}
+	in, err := r.input(ctx, adopting)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if in.CephMonSecret != nil {
+		t.Fatal("no mon Secret yet")
+	}
+	if err := c.Create(ctx, &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "rook-ceph"}}); err != nil {
+		t.Fatal(err)
+	}
+	if err := c.Create(ctx, &corev1.Secret{ObjectMeta: metav1.ObjectMeta{Namespace: "rook-ceph", Name: "rook-ceph-mon"}, Data: map[string][]byte{"fsid": []byte(adoptFSID)}}); err != nil {
+		t.Fatal(err)
+	}
+	in, err = r.input(ctx, adopting)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if in.CephMonSecret == nil || string(in.CephMonSecret.Data["fsid"]) != adoptFSID {
+		t.Fatalf("mon Secret %+v", in.CephMonSecret)
+	}
+	in, err = r.input(ctx, plain)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if in.CephMonSecret != nil {
+		t.Fatal("a cluster that does not adopt must not read the mon Secret")
 	}
 }
 
