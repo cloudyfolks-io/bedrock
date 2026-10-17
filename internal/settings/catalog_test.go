@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"filippo.io/age"
 	"k8s.io/apimachinery/pkg/util/validation"
 )
 
@@ -199,6 +200,38 @@ func TestEtcdScheduleSetting(t *testing.T) {
 		}
 	}
 	for _, invalid := range []string{"@daily", "every day"} {
+		if err := def.Validate(invalid); err == nil {
+			t.Fatalf("%q must fail", invalid)
+		}
+	}
+}
+
+func TestArchiveRecipientsSetting(t *testing.T) {
+	def, ok := Lookup("backup.archive-recipients")
+	if !ok {
+		t.Fatal("backup.archive-recipients missing")
+	}
+	if def.Default != "" {
+		t.Fatalf("default %q", def.Default)
+	}
+	const description = "age recipients (age1...) that can open every backup archive, separated by spaces or new lines. Keep their identities off the cluster."
+	if def.Description != description {
+		t.Fatalf("description %q", def.Description)
+	}
+	first, err := age.GenerateX25519Identity()
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := age.GenerateX25519Identity()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, valid := range []string{"", first.Recipient().String(), first.Recipient().String() + " " + second.Recipient().String(), first.Recipient().String() + "\n" + second.Recipient().String() + "\n"} {
+		if err := def.Validate(valid); err != nil {
+			t.Fatalf("%q: %v", valid, err)
+		}
+	}
+	for _, invalid := range []string{"age1bad", "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIexample", first.Recipient().String() + " age1bad"} {
 		if err := def.Validate(invalid); err == nil {
 			t.Fatalf("%q must fail", invalid)
 		}

@@ -17,6 +17,7 @@ import (
 
 	"github.com/cloudyfolks-io/bedrock/api/v1alpha1"
 	"github.com/cloudyfolks-io/bedrock/internal/backup/schedule"
+	"github.com/cloudyfolks-io/bedrock/internal/backup/seal"
 	"github.com/cloudyfolks-io/bedrock/internal/backup/target"
 	"github.com/cloudyfolks-io/bedrock/internal/dnsname"
 )
@@ -53,6 +54,11 @@ func intMin(minimum int) func(string) error {
 		}
 		return nil
 	}
+}
+
+func ageRecipients(v string) error {
+	_, err := seal.ParseRecipients(v)
+	return err
 }
 
 func backupTarget(v string) error {
@@ -150,6 +156,7 @@ func Catalog() []Definition {
 		{"backup.target", "", "Backup target URL: s3://<endpoint>[:<port>]/<bucket>[/<prefix>][?region=<region>][&insecure=true]. nfs:// is not supported.", backupTarget},
 		{"backup.credentials-secret", "", "Secret name in bedrock-system holding backup credentials.", free},
 		{"backup.etcd-schedule", "0 2 * * *", "Cron schedule for etcd snapshots, five fields, UTC, at most once per slot.", cronSchedule},
+		{"backup.archive-recipients", "", "age recipients (age1...) that can open every backup archive, separated by spaces or new lines. Keep their identities off the cluster.", ageRecipients},
 		{"audit.level", "Metadata", "Audit level for read requests. Writes on Bedrock kinds always use RequestResponse.", oneOf("Metadata", "RequestResponse")},
 		{"loki.retention-days", "14", "Log retention in days when Loki is enabled.", intMin(1)},
 		{"kata.enabled", "true", "Initial state of the kata addon. Change the Addon object after install.", boolean},
