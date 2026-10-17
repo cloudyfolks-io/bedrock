@@ -42,8 +42,14 @@ func adoptedMonSecret(ctx context.Context, c client.Reader, cluster v1alpha1.Clu
 
 func renderAdopted(in AddonInput, adopt v1alpha1.AdoptSpec) (Rendered, error) {
 	hosts := osdHosts(in.Hosts)
-	if reason, message := adoptWait(in.CephMonSecret, adopt, hosts); reason != "" {
-		return Rendered{SkipReason: reason, SkipMessage: message, Conditions: []metav1.Condition{adoptedCondition(reason, message)}}, nil
+	phase := adoptPhase(in.Cluster)
+	if phase != v1alpha1.ReasonAdopted {
+		if reason, message := adoptWait(in.CephMonSecret, adopt, hosts); reason != "" {
+			return Rendered{SkipReason: reason, SkipMessage: message, Conditions: []metav1.Condition{adoptedCondition(reason, message)}}, nil
+		}
+	}
+	if len(hosts) == 0 {
+		return noDevices(), nil
 	}
 	image, replicas, err := storageSettings(in)
 	if err != nil {
@@ -53,7 +59,7 @@ func renderAdopted(in AddonInput, adopt v1alpha1.AdoptSpec) (Rendered, error) {
 	if err != nil {
 		return Rendered{}, err
 	}
-	switch phase := adoptPhase(in.Cluster); phase {
+	switch phase {
 	case v1alpha1.ReasonAdopted:
 		objects := slices.Concat([]*unstructured.Unstructured{cluster}, storageObjects(replicas, hosts))
 		return Rendered{Objects: objects, Probes: []Probe{cephClusterProbe(cephGate(deviceCount(hosts)))}}, nil

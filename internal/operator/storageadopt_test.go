@@ -287,7 +287,7 @@ func TestRenderStorageAdoptWaitsForIdentity(t *testing.T) {
 		"an empty fsid": monSecret(""),
 	}
 	for name, secret := range secrets {
-		for _, reason := range append(adoptReasons, v1alpha1.ReasonAdopted) {
+		for _, reason := range adoptReasons {
 			t.Run(name+" at phase "+reason, func(t *testing.T) {
 				in := adoptInput(reason)
 				in.CephMonSecret = secret
@@ -304,6 +304,48 @@ func TestRenderStorageAdoptWaitsForIdentity(t *testing.T) {
 				}
 			})
 		}
+	}
+}
+
+func TestRenderStorageAdoptedIsTerminal(t *testing.T) {
+	lostMonitorHost := []v1alpha1.Host{osdHost("node-1", "/dev/disk/by-id/wwn-0x1"), osdHost("node-2", "/dev/disk/by-id/wwn-0x3")}
+	cases := map[string]func(*AddonInput){
+		"no Secret":           func(in *AddonInput) { in.CephMonSecret = nil },
+		"another fsid":        func(in *AddonInput) { in.CephMonSecret = monSecret("0b2f7c1d-1111-4222-8333-944455556666") },
+		"a monitor host lost": func(in *AddonInput) { in.Hosts = lostMonitorHost },
+		"both":                func(in *AddonInput) { in.CephMonSecret, in.Hosts = nil, lostMonitorHost },
+	}
+	fresh, err := RenderStorage(storageInput(lostMonitorHost, "3"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for name, change := range cases {
+		t.Run(name, func(t *testing.T) {
+			in := adoptInput(v1alpha1.ReasonAdopted)
+			change(&in)
+			out, err := RenderStorage(in)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if out.SkipReason != "" || len(out.Conditions) != 0 {
+				t.Fatalf("skip %q conditions %+v", out.SkipReason, out.Conditions)
+			}
+			if !reflect.DeepEqual(renderedKinds(out.Objects), renderedKinds(fresh.Objects)) {
+				t.Fatalf("kinds %v", renderedKinds(out.Objects))
+			}
+		})
+	}
+}
+
+func TestRenderStorageAdoptedWithoutOSDHostsRendersNothing(t *testing.T) {
+	in := adoptInput(v1alpha1.ReasonAdopted)
+	in.Hosts = nil
+	out, err := RenderStorage(in)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if out.SkipReason != "NoDevices" || len(out.Objects) != 0 || len(out.Conditions) != 0 {
+		t.Fatalf("rendered %+v", out)
 	}
 }
 
@@ -334,7 +376,7 @@ func TestRenderStorageAdoptWaitsForMonitorHosts(t *testing.T) {
 		"a host has no disks": {osdHost("node-1", "/dev/disk/by-id/wwn-0x1"), osdHost("node-2", "/dev/disk/by-id/wwn-0x3"), osdHost("node-3")},
 	}
 	for name, hosts := range cases {
-		for _, reason := range append(adoptReasons, v1alpha1.ReasonAdopted) {
+		for _, reason := range adoptReasons {
 			t.Run(name+" at phase "+reason, func(t *testing.T) {
 				in := adoptInput(reason)
 				in.Hosts = hosts

@@ -36,7 +36,7 @@ func RenderStorage(in AddonInput) (Rendered, error) {
 	}
 	hosts := osdHosts(in.Hosts)
 	if len(hosts) == 0 {
-		return Rendered{SkipReason: "NoDevices", SkipMessage: "no host with role ceph-osd lists a storage device"}, nil
+		return noDevices(), nil
 	}
 	image, replicas, err := storageSettings(in)
 	if err != nil {
@@ -45,6 +45,10 @@ func RenderStorage(in AddonInput) (Rendered, error) {
 	cluster := cephCluster(image, hosts, monCount(replicas), replicas)
 	objects := slices.Concat([]*unstructured.Unstructured{cluster}, storageObjects(replicas, hosts))
 	return Rendered{Objects: objects, Probes: []Probe{cephClusterProbe(cephGate(deviceCount(hosts)))}}, nil
+}
+
+func noDevices() Rendered {
+	return Rendered{SkipReason: "NoDevices", SkipMessage: "no host with role ceph-osd lists a storage device"}
 }
 
 func storageSettings(in AddonInput) (string, int, error) {
