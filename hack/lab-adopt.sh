@@ -159,7 +159,7 @@ osd_map() { ceph_op osd tree -f json | jq -r '. as $t | [$t.nodes[] | select(.ty
 crush_hosts() { ceph_op osd tree -f json | jq -r '[.nodes[] | select(.type == "host") | .name] | sort | join(",")'; }
 pool_names() { ceph_op osd pool ls -f json | jq -r 'sort | join(",")'; }
 pool_sizes() { ceph_op osd pool ls detail -f json | jq -r '[.[] | "\(.pool_name):\(.size)"] | sort | join(",")'; }
-health_ok() { [ "$(ceph_op health)" = HEALTH_OK ]; }
+health_ok() { ceph_op status -f json | jq -e '.health.status == "HEALTH_OK"' >/dev/null; }
 diagnose() { kubectl get pods -A -o wide || true; ceph_op status || true; }
 phase_ready() {
   case "$(kubectl -n rook-ceph get "$1" "$2" -o jsonpath='{.status.phase}')" in
@@ -302,7 +302,7 @@ registry_down() {
 }
 
 remove_bundle_images() {
-  docker image ls --filter "reference=localhost:$registry_port/bedrock" --quiet | sort -u | xargs -r docker image rm -f >/dev/null 2>&1 || true
+  docker image rm "localhost:$registry_port/bedrock:dev" >/dev/null 2>&1 || true
 }
 
 bundle_build() {
@@ -917,12 +917,32 @@ check_pool_names() {
 }
 
 check_pool_sizes() {
-  local off
-  off=$(vm_run 1 pool_sizes | tr ',' '\n' | grep -E '^(bedrock-|\.rgw\.root:)' | grep -v ':3$' | tr '\n' ' ' || true)
-  [ -z "$off" ] || {
+  local sizes want off
+  sizes=$(vm_run 1 pool_sizes) || return 1
+  if [ -z "$sizes" ]; then
+    echo "the pool list is empty"
+    return 1
+  fi
+  for want in bedrock-block bedrock-fs-metadata bedrock-fs-data0 bedrock-rgw.rgw.meta bedrock-rgw.rgw.buckets.data .rgw.root; do
+    case ",$sizes," in
+    *",$want:3,"*) ;;
+    *)
+      echo "pool $want does not exist with size 3: $sizes"
+      return 1
+      ;;
+    esac
+  done
+  off=$(tr ',' '\n' <<<"$sizes" | grep -E '^(bedrock-|\.rgw\.root:)' | grep -v ':3$' | tr '\n' ' ' || true)
+  if [ -n "$off" ]; then
     echo "pools with a size other than 3: $off"
     return 1
-  }
+  fi
+  case ",$sizes" in
+  *",storage-block:"* | *",filesystem-data"* | *",objectstore."*)
+    echo "a pool with an old name remains: $sizes"
+    return 1
+    ;;
+  esac
 }
 
 check_rbd_data() {
