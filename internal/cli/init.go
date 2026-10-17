@@ -136,14 +136,15 @@ func RunInit(ctx context.Context, args []string, deps InitDeps, stdout, stderr i
 		return fail(stderr, err)
 	}
 
-	var identity *rookIdentity
-	if adopt := cfg.Spec.Storage.Adopt; adopt != nil {
+	k0sClient := k0s.Client{Exec: deps.Exec, Binary: o.k0sBin, DataDir: o.dataDir}
+	adopt := cfg.Spec.Storage.Adopt
+	var rookSecret *corev1.Secret
+	if adopt != nil && !k0sClient.Running(ctx) {
 		step(stdout, "adopt key file %s", adopt.KeyFile)
-		loaded, err := loadRookIdentity(*adopt)
+		rookSecret, err = loadRookMonSecret(*adopt)
 		if err != nil {
 			return fail(stderr, err)
 		}
-		identity = &loaded
 	}
 
 	bundlePath := o.bundle
@@ -176,7 +177,6 @@ func RunInit(ctx context.Context, args []string, deps InitDeps, stdout, stderr i
 	if err != nil {
 		return fail(stderr, err)
 	}
-	k0sClient := k0s.Client{Exec: deps.Exec, Binary: o.k0sBin, DataDir: o.dataDir}
 	results, err := preflightResults(ctx, deps, k0sClient, facts, cfg, bundle.Spec.SupportedOS)
 	if err != nil {
 		return fail(stderr, err)
@@ -329,7 +329,7 @@ func RunInit(ctx context.Context, args []string, deps InitDeps, stdout, stderr i
 	if err != nil {
 		return fail(stderr, err)
 	}
-	if err := release.InstallGroups(ctx, c, bundle, vars, release.Gates{}, 2*time.Second, 30*time.Minute, report, grafanaAdminHook(c, rand.Reader), rookIdentityHook(c, identity)); err != nil {
+	if err := release.InstallGroups(ctx, c, bundle, vars, release.Gates{}, 2*time.Second, 30*time.Minute, report, grafanaAdminHook(c, rand.Reader), rookIdentityHook(c, adopt, rookSecret)); err != nil {
 		return fail(stderr, err)
 	}
 

@@ -1,7 +1,6 @@
 package cli
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -39,11 +38,6 @@ type rookKeys struct {
 	CephSecret   string `json:"ceph-secret"`
 }
 
-type rookIdentity struct {
-	Secret    *corev1.Secret
-	Endpoints *corev1.ConfigMap
-}
-
 type rookMonNode struct {
 	Name     string
 	Hostname string
@@ -54,12 +48,12 @@ type rookMonMapping struct {
 	Node map[string]rookMonNode `json:"node"`
 }
 
-func loadRookIdentity(adopt v1alpha1.AdoptSpec) (rookIdentity, error) {
+func loadRookMonSecret(adopt v1alpha1.AdoptSpec) (*corev1.Secret, error) {
 	keys, err := readRookKeys(adopt.KeyFile, adopt.FSID)
 	if err != nil {
-		return rookIdentity{}, err
+		return nil, err
 	}
-	return rookIdentity{Secret: rookMonSecret(keys), Endpoints: rookMonEndpoints(adopt.Monitors)}, nil
+	return rookMonSecret(keys), nil
 }
 
 func readRookKeys(path, fsid string) (rookKeys, error) {
@@ -138,7 +132,7 @@ func rookMonSecret(keys rookKeys) *corev1.Secret {
 	}
 }
 
-func rookMonEndpoints(monitors []v1alpha1.AdoptMonitor) *corev1.ConfigMap {
+func rookMonEndpoints(monitors []v1alpha1.AdoptMonitor) (*corev1.ConfigMap, error) {
 	endpoints := make([]string, 0, len(monitors))
 	mapping := rookMonMapping{Node: map[string]rookMonNode{}}
 	maxIndex := 0
@@ -147,7 +141,10 @@ func rookMonEndpoints(monitors []v1alpha1.AdoptMonitor) *corev1.ConfigMap {
 		mapping.Node[monitor.ID] = rookMonNode{Name: monitor.Node, Hostname: monitor.Node, Address: monitor.Address}
 		maxIndex = max(maxIndex, monitorIndex(monitor.ID))
 	}
-	rawMapping, _ := json.Marshal(mapping)
+	rawMapping, err := json.Marshal(mapping)
+	if err != nil {
+		return nil, err
+	}
 	return &corev1.ConfigMap{
 		ObjectMeta: metav1.ObjectMeta{Namespace: rookNamespace, Name: rookMonEndpointsName, Finalizers: []string{rookDisasterFinalizer}},
 		Data: map[string]string{
@@ -155,7 +152,7 @@ func rookMonEndpoints(monitors []v1alpha1.AdoptMonitor) *corev1.ConfigMap {
 			"mapping":  string(rawMapping),
 			"maxMonId": strconv.Itoa(maxIndex),
 		},
-	}
+	}, nil
 }
 
 func monitorIndex(id string) int {
@@ -166,32 +163,57 @@ func monitorIndex(id string) int {
 	return index - 1
 }
 
-func rookIdentityHook(c client.Client, identity *rookIdentity) func(context.Context, release.Group) error {
-	if identity == nil {
+func rookIdentityHook(c client.Client, adopt *v1alpha1.AdoptSpec, preloaded *corev1.Secret) func(context.Context, release.Group) error {
+	if adopt == nil {
 		return release.SkipHook
 	}
 	return func(ctx context.Context, group release.Group) error {
 		if group.Name != rookGroup {
 			return nil
 		}
-		if err := ensureRookMonSecret(ctx, c, identity.Secret); err != nil {
-			return err
-		}
-		return client.IgnoreAlreadyExists(c.Create(ctx, identity.Endpoints.DeepCopy(), client.FieldOwner(initFieldOwner)))
+		return ensureRookIdentity(ctx, c, *adopt, preloaded)
 	}
 }
 
-func ensureRookMonSecret(ctx context.Context, c client.Client, desired *corev1.Secret) error {
-	err := c.Create(ctx, desired.DeepCopy(), client.FieldOwner(initFieldOwner))
-	if !apierrors.IsAlreadyExists(err) {
+func ensureRookIdentity(ctx context.Context, c client.Client, adopt v1alpha1.AdoptSpec, preloaded *corev1.Secret) error {
+	adopted, err := rookSecretAdopted(ctx, c, adopt.FSID)
+	if err != nil {
 		return err
 	}
+	if !adopted {
+		secret, err := rookSecretToWrite(adopt, preloaded)
+		if err != nil {
+			return err
+		}
+		if err := client.IgnoreAlreadyExists(c.Create(ctx, secret.DeepCopy(), client.FieldOwner(initFieldOwner))); err != nil {
+			return err
+		}
+	}
+	endpoints, err := rookMonEndpoints(adopt.Monitors)
+	if err != nil {
+		return err
+	}
+	return client.IgnoreAlreadyExists(c.Create(ctx, endpoints, client.FieldOwner(initFieldOwner)))
+}
+
+func rookSecretToWrite(adopt v1alpha1.AdoptSpec, preloaded *corev1.Secret) (*corev1.Secret, error) {
+	if preloaded != nil {
+		return preloaded, nil
+	}
+	return loadRookMonSecret(adopt)
+}
+
+func rookSecretAdopted(ctx context.Context, c client.Client, fsid string) (bool, error) {
 	var existing corev1.Secret
-	if err := c.Get(ctx, client.ObjectKeyFromObject(desired), &existing); err != nil {
-		return err
+	err := c.Get(ctx, client.ObjectKey{Namespace: rookNamespace, Name: rookMonSecretName}, &existing)
+	if apierrors.IsNotFound(err) {
+		return false, nil
 	}
-	if !bytes.Equal(existing.Data[rookFSIDKey], desired.Data[rookFSIDKey]) {
-		return fmt.Errorf("secret %s/%s holds another fsid than storage.adopt.fsid", desired.Namespace, desired.Name)
+	if err != nil {
+		return false, err
 	}
-	return nil
+	if string(existing.Data[rookFSIDKey]) != fsid {
+		return false, fmt.Errorf("secret %s/%s holds another fsid than storage.adopt.fsid", rookNamespace, rookMonSecretName)
+	}
+	return true, nil
 }

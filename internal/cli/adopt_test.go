@@ -161,8 +161,17 @@ func TestRookMonSecret(t *testing.T) {
 	}
 }
 
+func mustEndpoints(t *testing.T, monitors []v1alpha1.AdoptMonitor) *corev1.ConfigMap {
+	t.Helper()
+	endpoints, err := rookMonEndpoints(monitors)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return endpoints
+}
+
 func TestRookMonEndpoints(t *testing.T) {
-	got := rookMonEndpoints(rookTestMonitors("a", "b", "c"))
+	got := mustEndpoints(t, rookTestMonitors("a", "b", "c"))
 	want := &corev1.ConfigMap{
 		ObjectMeta: metav1.ObjectMeta{Namespace: "rook-ceph", Name: "rook-ceph-mon-endpoints", Finalizers: []string{"ceph.rook.io/disaster-protection"}},
 		Data: map[string]string{
@@ -189,16 +198,23 @@ func TestRookMonEndpointsMaxMonID(t *testing.T) {
 		{[]string{"ab", "b"}, "27"},
 	}
 	for _, tc := range cases {
-		if got := rookMonEndpoints(rookTestMonitors(tc.ids...)).Data["maxMonId"]; got != tc.want {
+		if got := mustEndpoints(t, rookTestMonitors(tc.ids...)).Data["maxMonId"]; got != tc.want {
 			t.Fatalf("ids %v: maxMonId %q, want %q", tc.ids, got, tc.want)
 		}
 	}
 }
 
-func rookTestIdentity(t *testing.T) rookIdentity {
+func rookTestSecret() *corev1.Secret {
+	return rookMonSecret(rookKeys{FSID: labelFSID, MonSecret: monKeySecret, CephUsername: "client.admin", CephSecret: cephKeySecret})
+}
+
+func rookTestAdopt(keyFile string) *v1alpha1.AdoptSpec {
+	return &v1alpha1.AdoptSpec{FSID: labelFSID, KeyFile: keyFile, Monitors: rookTestMonitors("a", "b", "c")}
+}
+
+func missingKeyFile(t *testing.T) string {
 	t.Helper()
-	keys := rookKeys{FSID: labelFSID, MonSecret: monKeySecret, CephUsername: "client.admin", CephSecret: cephKeySecret}
-	return rookIdentity{Secret: rookMonSecret(keys), Endpoints: rookMonEndpoints(rookTestMonitors("a", "b", "c"))}
+	return filepath.Join(t.TempDir(), "none.yaml")
 }
 
 func rookTestClient(t *testing.T, objects ...client.Object) client.Client {
@@ -210,65 +226,68 @@ func rookTestClient(t *testing.T, objects ...client.Object) client.Client {
 	return fake.NewClientBuilder().WithScheme(scheme).WithObjects(objects...).Build()
 }
 
-func getRookObjects(t *testing.T, c client.Client) (corev1.Secret, corev1.ConfigMap, error) {
+func rookObjectExists(c client.Client, obj client.Object, name string) bool {
+	return c.Get(context.Background(), client.ObjectKey{Namespace: "rook-ceph", Name: name}, obj) == nil
+}
+
+func getRookObjects(t *testing.T, c client.Client) (corev1.Secret, corev1.ConfigMap) {
 	t.Helper()
 	var secret corev1.Secret
 	var endpoints corev1.ConfigMap
 	if err := c.Get(context.Background(), client.ObjectKey{Namespace: "rook-ceph", Name: "rook-ceph-mon"}, &secret); err != nil {
-		return secret, endpoints, err
+		t.Fatal(err)
 	}
-	err := c.Get(context.Background(), client.ObjectKey{Namespace: "rook-ceph", Name: "rook-ceph-mon-endpoints"}, &endpoints)
-	return secret, endpoints, err
+	if err := c.Get(context.Background(), client.ObjectKey{Namespace: "rook-ceph", Name: "rook-ceph-mon-endpoints"}, &endpoints); err != nil {
+		t.Fatal(err)
+	}
+	return secret, endpoints
+}
+
+func assertNoRookObjects(t *testing.T, c client.Client) {
+	t.Helper()
+	if rookObjectExists(c, &corev1.Secret{}, "rook-ceph-mon") || rookObjectExists(c, &corev1.ConfigMap{}, "rook-ceph-mon-endpoints") {
+		t.Fatal("a Rook identity object was written")
+	}
 }
 
 func TestRookIdentityHookActsOnlyAfterTheRookGroup(t *testing.T) {
 	c := rookTestClient(t)
-	identity := rookTestIdentity(t)
-	hook := rookIdentityHook(c, &identity)
+	adopt := rookTestAdopt(missingKeyFile(t))
+	hook := rookIdentityHook(c, adopt, rookTestSecret())
 	if err := hook(context.Background(), release.Group{Name: "traefik"}); err != nil {
 		t.Fatal(err)
 	}
-	if _, _, err := getRookObjects(t, c); err == nil {
-		t.Fatal("objects created for another group")
-	}
+	assertNoRookObjects(t, c)
 	if err := hook(context.Background(), release.Group{Name: "rook"}); err != nil {
 		t.Fatal(err)
 	}
-	secret, endpoints, err := getRookObjects(t, c)
-	if err != nil {
-		t.Fatal(err)
-	}
-	want := rookTestIdentity(t)
-	if !reflect.DeepEqual(secret.Data, want.Secret.Data) || secret.Type != "kubernetes.io/rook" || !reflect.DeepEqual(secret.Finalizers, want.Secret.Finalizers) || len(secret.OwnerReferences) != 0 {
+	secret, endpoints := getRookObjects(t, c)
+	want := rookTestSecret()
+	if !reflect.DeepEqual(secret.Data, want.Data) || secret.Type != "kubernetes.io/rook" || !reflect.DeepEqual(secret.Finalizers, want.Finalizers) || len(secret.OwnerReferences) != 0 {
 		t.Fatalf("secret %+v", secret.ObjectMeta)
 	}
-	if !reflect.DeepEqual(endpoints.Data, want.Endpoints.Data) || !reflect.DeepEqual(endpoints.Finalizers, want.Endpoints.Finalizers) || len(endpoints.OwnerReferences) != 0 {
+	wantEndpoints := mustEndpoints(t, adopt.Monitors)
+	if !reflect.DeepEqual(endpoints.Data, wantEndpoints.Data) || !reflect.DeepEqual(endpoints.Finalizers, wantEndpoints.Finalizers) || len(endpoints.OwnerReferences) != 0 {
 		t.Fatalf("configmap %+v", endpoints.ObjectMeta)
 	}
 }
 
-func TestRookIdentityHookWithoutIdentityDoesNothing(t *testing.T) {
+func TestRookIdentityHookWithoutAdoptDoesNothing(t *testing.T) {
 	c := rookTestClient(t)
-	if err := rookIdentityHook(c, nil)(context.Background(), release.Group{Name: "rook"}); err != nil {
+	if err := rookIdentityHook(c, nil, nil)(context.Background(), release.Group{Name: "rook"}); err != nil {
 		t.Fatal(err)
 	}
-	if _, _, err := getRookObjects(t, c); err == nil {
-		t.Fatal("objects created without an adopt spec")
-	}
+	assertNoRookObjects(t, c)
 }
 
 func TestRookIdentityHookKeepsWhatRookChanged(t *testing.T) {
-	identity := rookTestIdentity(t)
 	c := rookTestClient(t)
-	hook := rookIdentityHook(c, &identity)
+	hook := rookIdentityHook(c, rookTestAdopt(missingKeyFile(t)), rookTestSecret())
 	ctx := context.Background()
 	if err := hook(ctx, release.Group{Name: "rook"}); err != nil {
 		t.Fatal(err)
 	}
-	secret, endpoints, err := getRookObjects(t, c)
-	if err != nil {
-		t.Fatal(err)
-	}
+	secret, endpoints := getRookObjects(t, c)
 	secret.Data["ceph-secret"] = []byte("rotated-by-rook")
 	endpoints.Data["maxMonId"] = "3"
 	if err := c.Update(ctx, &secret); err != nil {
@@ -280,10 +299,7 @@ func TestRookIdentityHookKeepsWhatRookChanged(t *testing.T) {
 	if err := hook(ctx, release.Group{Name: "rook"}); err != nil {
 		t.Fatal(err)
 	}
-	secret, endpoints, err = getRookObjects(t, c)
-	if err != nil {
-		t.Fatal(err)
-	}
+	secret, endpoints = getRookObjects(t, c)
 	if string(secret.Data["ceph-secret"]) != "rotated-by-rook" || endpoints.Data["maxMonId"] != "3" {
 		t.Fatal("a second run overwrote the objects")
 	}
@@ -292,30 +308,64 @@ func TestRookIdentityHookKeepsWhatRookChanged(t *testing.T) {
 func TestRookIdentityHookRefusesASecretOfAnotherCluster(t *testing.T) {
 	existing := &corev1.Secret{ObjectMeta: metav1.ObjectMeta{Namespace: "rook-ceph", Name: "rook-ceph-mon"}, Data: map[string][]byte{"fsid": []byte(otherFSID)}}
 	c := rookTestClient(t, existing)
-	identity := rookTestIdentity(t)
-	err := rookIdentityHook(c, &identity)(context.Background(), release.Group{Name: "rook"})
+	err := rookIdentityHook(c, rookTestAdopt(missingKeyFile(t)), rookTestSecret())(context.Background(), release.Group{Name: "rook"})
 	if err == nil || err.Error() != "secret rook-ceph/rook-ceph-mon holds another fsid than storage.adopt.fsid" {
 		t.Fatalf("error %v", err)
 	}
 	assertNoKeyText(t, "hook error", err.Error())
-	var endpoints corev1.ConfigMap
-	if err := c.Get(context.Background(), client.ObjectKey{Namespace: "rook-ceph", Name: "rook-ceph-mon-endpoints"}, &endpoints); err == nil {
+	if rookObjectExists(c, &corev1.ConfigMap{}, "rook-ceph-mon-endpoints") {
 		t.Fatal("the configmap was written after the refusal")
 	}
 }
 
-func TestLoadRookIdentityReadsTheKeyFile(t *testing.T) {
+func TestRookIdentityHookNeedsNoKeyFileWhenTheSecretExists(t *testing.T) {
+	existing := &corev1.Secret{ObjectMeta: metav1.ObjectMeta{Namespace: "rook-ceph", Name: "rook-ceph-mon"}, Data: map[string][]byte{"fsid": []byte(labelFSID), "ceph-secret": []byte("kept-by-rook")}}
+	c := rookTestClient(t, existing)
+	if err := rookIdentityHook(c, rookTestAdopt(missingKeyFile(t)), nil)(context.Background(), release.Group{Name: "rook"}); err != nil {
+		t.Fatal(err)
+	}
+	secret, endpoints := getRookObjects(t, c)
+	if string(secret.Data["ceph-secret"]) != "kept-by-rook" || len(secret.Data) != 2 {
+		t.Fatal("the hook changed the secret")
+	}
+	if want := mustEndpoints(t, rookTestAdopt("").Monitors); !reflect.DeepEqual(endpoints.Data, want.Data) {
+		t.Fatalf("configmap %v", endpoints.Data)
+	}
+}
+
+func TestRookIdentityHookReadsTheKeyFileWhenTheSecretIsAbsent(t *testing.T) {
+	c := rookTestClient(t)
 	path := writeKeyFile(t, 0o600, rookKeyFileContent(labelFSID))
-	adopt := v1alpha1.AdoptSpec{FSID: labelFSID, KeyFile: path, Monitors: rookTestMonitors("a", "b", "c")}
-	got, err := loadRookIdentity(adopt)
+	if err := rookIdentityHook(c, rookTestAdopt(path), nil)(context.Background(), release.Group{Name: "rook"}); err != nil {
+		t.Fatal(err)
+	}
+	secret, _ := getRookObjects(t, c)
+	if !reflect.DeepEqual(secret.Data, rookTestSecret().Data) {
+		t.Fatal("the secret differs from the key file")
+	}
+}
+
+func TestRookIdentityHookStopsWithoutSecretAndKeyFile(t *testing.T) {
+	c := rookTestClient(t)
+	path := missingKeyFile(t)
+	err := rookIdentityHook(c, rookTestAdopt(path), nil)(context.Background(), release.Group{Name: "rook"})
+	if want := "adopt key file " + path + ": no such file or directory"; err == nil || err.Error() != want {
+		t.Fatalf("error %v, want %q", err, want)
+	}
+	assertNoRookObjects(t, c)
+}
+
+func TestLoadRookMonSecretReadsTheKeyFile(t *testing.T) {
+	path := writeKeyFile(t, 0o600, rookKeyFileContent(labelFSID))
+	got, err := loadRookMonSecret(*rookTestAdopt(path))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !reflect.DeepEqual(got, rookTestIdentity(t)) {
-		t.Fatal("identity differs from the key file and the monitors")
+	if !reflect.DeepEqual(got, rookTestSecret()) {
+		t.Fatal("the secret differs from the key file")
 	}
-	adopt.KeyFile = filepath.Join(t.TempDir(), "none.yaml")
-	if _, err := loadRookIdentity(adopt); err == nil || !strings.HasPrefix(err.Error(), "adopt key file "+adopt.KeyFile+": ") {
+	missing := missingKeyFile(t)
+	if _, err := loadRookMonSecret(*rookTestAdopt(missing)); err == nil || !strings.HasPrefix(err.Error(), "adopt key file "+missing+": ") {
 		t.Fatalf("error %v", err)
 	}
 }
@@ -349,8 +399,11 @@ func TestRunInitAdoptStopsBeforeAnyHostChangeOnKeyFileProblem(t *testing.T) {
 		}
 		assertNoKeyText(t, tc.name+" stdout", out.String())
 		assertNoKeyText(t, tc.name+" stderr", errOut.String())
-		if len(e.Calls) != 0 {
-			t.Fatalf("%s: init ran host commands before it read the key file: %v", tc.name, e.Calls)
+		statusCall := k0s.DefaultBinary + " status --data-dir " + filepath.Join(root, "var", "lib", "k0s")
+		for _, call := range e.Calls {
+			if call != statusCall {
+				t.Fatalf("%s: init ran a host command before it read the key file: %s", tc.name, call)
+			}
 		}
 		if _, err := os.Stat(filepath.Join(root, "etc", "k0s", "k0s.yaml")); err == nil {
 			t.Fatalf("%s: init wrote k0s.yaml", tc.name)
@@ -395,15 +448,26 @@ func releaseWithRookGroup(t *testing.T) string {
 	return dir
 }
 
-func TestRunInitAdoptWritesTheIdentityTheClusterAndTheDevices(t *testing.T) {
+type adoptInitRun struct {
+	c       client.Client
+	keyPath string
+	code    int
+	out     string
+	errOut  string
+}
+
+func runAdoptInit(t *testing.T, running bool, prepare func(t *testing.T, c client.Client, keyPath string)) adoptInitRun {
+	t.Helper()
 	c, newClient := startEnv(t)
 	root, e := adoptedHost(t)
 	configPath := adoptConfigFile(t, root, adoptInitConfig)
-	ctx := context.Background()
-	if err := client.IgnoreAlreadyExists(c.Create(ctx, &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "kube-system"}})); err != nil {
-		t.Fatal(err)
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+	for _, name := range []string{"kube-system", "bedrock-system"} {
+		if err := client.IgnoreAlreadyExists(c.Create(ctx, &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: name}})); err != nil {
+			t.Fatal(err)
+		}
 	}
-	_ = c.Create(ctx, &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "bedrock-system"}})
 	master := &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: "node-1", Labels: map[string]string{"fabric/role": "master"}}}
 	if err := c.Create(ctx, master); err != nil {
 		t.Fatal(err)
@@ -413,7 +477,7 @@ func TestRunInitAdoptWritesTheIdentityTheClusterAndTheDevices(t *testing.T) {
 		t.Fatal(err)
 	}
 	go func() {
-		for {
+		for ctx.Err() == nil {
 			var cluster v1alpha1.Cluster
 			if err := c.Get(ctx, client.ObjectKey{Name: v1alpha1.ClusterName}, &cluster); err == nil && cluster.Status.Version == "" {
 				cluster.Status.Version = "v0.1.0-test"
@@ -424,43 +488,74 @@ func TestRunInitAdoptWritesTheIdentityTheClusterAndTheDevices(t *testing.T) {
 		}
 	}()
 	dataDir := filepath.Join(root, "var", "lib", "k0s")
-	installArgs := k0s.InstallArgs(k0s.InstallOptions{
-		Role: "controller", Force: true, ConfigPath: filepath.Join(root, "etc", "k0s", "k0s.yaml"), EnableWorker: true, NoTaints: true, DynamicConfig: true,
-		Labels:            roles.Labels([]string{"control-plane", "ceph-osd", "fabric-gateway"}),
-		KubeletExtraArgs:  []string{"--node-status-update-frequency=4s"},
-		DataDir:           dataDir,
-		KubeletRootDir:    k0s.DefaultKubeletRootDir,
-		DisableComponents: k0s.DefaultDisabledComponents,
-	})
-	e.Responses["/usr/local/bin/k0s "+strings.Join(installArgs, " ")] = ""
-	e.Errors["/usr/local/bin/k0s status --data-dir "+dataDir] = &host.ExitError{Code: 1}
+	statusCall := "/usr/local/bin/k0s status --data-dir " + dataDir
+	if running {
+		e.Responses[statusCall] = ""
+	} else {
+		installArgs := k0s.InstallArgs(k0s.InstallOptions{
+			Role: "controller", Force: true, ConfigPath: filepath.Join(root, "etc", "k0s", "k0s.yaml"), EnableWorker: true, NoTaints: true, DynamicConfig: true,
+			Labels:            roles.Labels([]string{"control-plane", "ceph-osd", "fabric-gateway"}),
+			KubeletExtraArgs:  []string{"--node-status-update-frequency=4s"},
+			DataDir:           dataDir,
+			KubeletRootDir:    k0s.DefaultKubeletRootDir,
+			DisableComponents: k0s.DefaultDisabledComponents,
+		})
+		e.Responses["/usr/local/bin/k0s "+strings.Join(installArgs, " ")] = ""
+		e.Errors[statusCall] = &host.ExitError{Code: 1}
+	}
+	keyPath := filepath.Join(root, "ceph-keys.yaml")
+	if prepare != nil {
+		prepare(t, c, keyPath)
+	}
 	deps := adoptDeps(root, e)
 	deps.NewClient = newClient
 	deps.Executable = fakeExecutable(t)
 	var out, errOut bytes.Buffer
 	code := RunInit(ctx, []string{"-f", configPath, "--release-dir", releaseWithRookGroup(t), "--k0s-bin", "/usr/local/bin/k0s", "--data-dir", dataDir, "--timeout", "30s"}, deps, &out, &errOut)
-	if code != 0 {
-		t.Fatalf("exit %d\nstdout %s\nstderr %s", code, out.String(), errOut.String())
-	}
 	assertNoKeyText(t, "stdout", out.String())
 	assertNoKeyText(t, "stderr", errOut.String())
+	return adoptInitRun{c: c, keyPath: keyPath, code: code, out: out.String(), errOut: errOut.String()}
+}
 
+func createRookSecret(t *testing.T, c client.Client, fsid, cephSecret string) {
+	t.Helper()
+	ctx := context.Background()
+	if err := client.IgnoreAlreadyExists(c.Create(ctx, &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "rook-ceph"}})); err != nil {
+		t.Fatal(err)
+	}
+	secret := &corev1.Secret{ObjectMeta: metav1.ObjectMeta{Namespace: "rook-ceph", Name: "rook-ceph-mon"}, Data: map[string][]byte{"fsid": []byte(fsid), "ceph-secret": []byte(cephSecret)}}
+	if err := c.Create(ctx, secret); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func assertRookSecretHoldsKeyFile(t *testing.T, c client.Client) {
+	t.Helper()
 	var secret corev1.Secret
-	if err := c.Get(ctx, client.ObjectKey{Namespace: "rook-ceph", Name: "rook-ceph-mon"}, &secret); err != nil {
+	if err := c.Get(context.Background(), client.ObjectKey{Namespace: "rook-ceph", Name: "rook-ceph-mon"}, &secret); err != nil {
 		t.Fatal(err)
 	}
 	if string(secret.Data["fsid"]) != labelFSID || string(secret.Data["mon-secret"]) != monKeySecret || string(secret.Data["ceph-secret"]) != cephKeySecret || string(secret.Data["ceph-username"]) != "client.admin" {
 		t.Fatal("the secret does not hold the key file values")
 	}
+}
+
+func TestRunInitAdoptWritesTheIdentityTheClusterAndTheDevices(t *testing.T) {
+	run := runAdoptInit(t, false, nil)
+	if run.code != 0 {
+		t.Fatalf("exit %d\nstdout %s\nstderr %s", run.code, run.out, run.errOut)
+	}
+	ctx := context.Background()
+	assertRookSecretHoldsKeyFile(t, run.c)
 	var endpoints corev1.ConfigMap
-	if err := c.Get(ctx, client.ObjectKey{Namespace: "rook-ceph", Name: "rook-ceph-mon-endpoints"}, &endpoints); err != nil {
+	if err := run.c.Get(ctx, client.ObjectKey{Namespace: "rook-ceph", Name: "rook-ceph-mon-endpoints"}, &endpoints); err != nil {
 		t.Fatal(err)
 	}
 	if endpoints.Data["data"] != "a=10.0.10.11:6789" || endpoints.Data["maxMonId"] != "0" {
 		t.Fatalf("endpoints %v", endpoints.Data)
 	}
 	var cluster v1alpha1.Cluster
-	if err := c.Get(ctx, client.ObjectKey{Name: v1alpha1.ClusterName}, &cluster); err != nil {
+	if err := run.c.Get(ctx, client.ObjectKey{Name: v1alpha1.ClusterName}, &cluster); err != nil {
 		t.Fatal(err)
 	}
 	adopt := cluster.Spec.Storage.Adopt
@@ -468,10 +563,56 @@ func TestRunInitAdoptWritesTheIdentityTheClusterAndTheDevices(t *testing.T) {
 		t.Fatalf("cluster adopt %+v", adopt)
 	}
 	var h v1alpha1.Host
-	if err := c.Get(ctx, client.ObjectKey{Name: "node-1"}, &h); err != nil {
+	if err := run.c.Get(ctx, client.ObjectKey{Name: "node-1"}, &h); err != nil {
 		t.Fatal(err)
 	}
 	if !reflect.DeepEqual(h.Spec.Storage.Devices, []string{osdDisk}) {
 		t.Fatalf("devices %v", h.Spec.Storage.Devices)
 	}
+}
+
+func TestRunInitAdoptRerunNeedsNoKeyFileWhenTheSecretExists(t *testing.T) {
+	run := runAdoptInit(t, true, func(t *testing.T, c client.Client, keyPath string) {
+		mustRemove(t, keyPath)
+		createRookSecret(t, c, labelFSID, "kept-by-rook")
+	})
+	if run.code != 0 {
+		t.Fatalf("exit %d\nstdout %s\nstderr %s", run.code, run.out, run.errOut)
+	}
+	var secret corev1.Secret
+	if err := run.c.Get(context.Background(), client.ObjectKey{Namespace: "rook-ceph", Name: "rook-ceph-mon"}, &secret); err != nil {
+		t.Fatal(err)
+	}
+	if string(secret.Data["ceph-secret"]) != "kept-by-rook" || len(secret.Data) != 2 {
+		t.Fatal("the re-run changed the secret")
+	}
+	var endpoints corev1.ConfigMap
+	if err := run.c.Get(context.Background(), client.ObjectKey{Namespace: "rook-ceph", Name: "rook-ceph-mon-endpoints"}, &endpoints); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestRunInitAdoptRerunNeedsTheKeyFileWhenTheSecretIsAbsent(t *testing.T) {
+	run := runAdoptInit(t, true, func(t *testing.T, c client.Client, keyPath string) { mustRemove(t, keyPath) })
+	if run.code != 1 {
+		t.Fatalf("exit %d\nstdout %s\nstderr %s", run.code, run.out, run.errOut)
+	}
+	if want := "adopt key file " + run.keyPath + ": no such file or directory"; !strings.Contains(run.errOut, want) {
+		t.Fatalf("stderr %q lacks %q", run.errOut, want)
+	}
+	if !strings.Contains(run.out, "group rook failed") {
+		t.Fatalf("a re-run must read the key file at the rook group, stdout %s", run.out)
+	}
+	var secret corev1.Secret
+	if err := run.c.Get(context.Background(), client.ObjectKey{Namespace: "rook-ceph", Name: "rook-ceph-mon"}, &secret); err == nil {
+		t.Fatal("a secret was written without a key file")
+	}
+}
+
+func TestRunInitAdoptRerunWritesTheIdentityWhenTheSecretIsAbsent(t *testing.T) {
+	run := runAdoptInit(t, true, nil)
+	if run.code != 0 {
+		t.Fatalf("exit %d\nstdout %s\nstderr %s", run.code, run.out, run.errOut)
+	}
+	assertRookSecretHoldsKeyFile(t, run.c)
 }
