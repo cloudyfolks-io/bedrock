@@ -10,7 +10,7 @@ root_gb=60
 osd_gb=20
 subnet=192.168.104
 vip=$subnet.250
-iface=lima0
+iface=eth0
 platform_host=adopt-lab.bedrock.test
 registry_port=${LAB_REGISTRY_PORT:-5002}
 registry_name=$prefix-registry
@@ -67,7 +67,8 @@ node_name() {
 }
 
 node_ip() {
-  echo "$subnet.1$1"
+  local name=IP_$1
+  echo "${!name}"
 }
 
 disk_name() {
@@ -355,27 +356,6 @@ cat >/usr/local/bin/kubectl <<'KUBECTL'
 exec /usr/local/bin/k0s kubectl "$@"
 KUBECTL
 chmod +x /usr/local/bin/kubectl
-for _ in $(seq 1 120); do
-  if ip -4 -o addr show dev lima0 | grep -q inet; then
-    break
-  fi
-  sleep 1
-done
-gateway=$(ip -4 route show default dev lima0 | awk 'NR==1 {print $3}')
-cat >/etc/netplan/60-adoptlab.yaml <<NETPLAN
-network:
-  version: 2
-  ethernets:
-    lima0:
-      dhcp4: false
-      addresses: [@IP@/24]
-      routes:
-      - to: default
-        via: ${gateway:-@GATEWAY@}
-        metric: 50
-NETPLAN
-chmod 600 /etc/netplan/60-adoptlab.yaml
-netplan apply
 SCRIPT
 }
 
@@ -408,7 +388,7 @@ $(disk_entries "$id")
 provision:
 - mode: system
   script: |
-$(vm_provision | sed "s/@IP@/$(node_ip "$id")/;s/@GATEWAY@/$subnet.1/" | sed 's/^/    /')
+$(vm_provision | sed 's/^/    /')
 CONFIG
 }
 
@@ -439,8 +419,8 @@ vm_prepare() {
 script_verify_vm() {
   cat <<'SCRIPT'
 test "$(hostname)" = "$EXPECT_HOSTNAME"
-test "$(ip -4 -o addr show dev lima0 | grep -cw "$EXPECT_IP/24")" -ge 1
-test "$(ip -json route show default | jq -r '.[0].dev')" = lima0
+test "$(ip -4 -o addr show dev eth0 | grep -cw "$EXPECT_IP/24")" -ge 1
+test "$(ip -json route show default | jq -r '.[0].dev')" = eth0
 for device in $DEVICES; do
   test -b "$device"
 done
@@ -454,6 +434,25 @@ else
   echo "kvm: no, virtualization.emulation will be true"
 fi
 SCRIPT
+}
+
+discover_ip() {
+  vm_run "$1" "ip -4 -o addr show dev eth0 | awk '{print \$4}' | cut -d/ -f1 | head -n 1"
+}
+
+record_ips() {
+  local id ip
+  for id in "${ids[@]}"; do
+    ip=$(discover_ip "$id")
+    case "$ip" in
+    "$subnet".*) state_set "IP_$id" "$ip" ;;
+    *)
+      echo "$(vm_name "$id") has the address '$ip', not in $subnet.0/24" >&2
+      return 1
+      ;;
+    esac
+  done
+  state_load
 }
 
 verify_vm() {
@@ -470,6 +469,7 @@ stage_up() {
   require_host
   mkdir -p "$lab_dir"
   lab_down
+  rm -f "$state_file"
   guard_host
   bundle_build
   qemu_wrapper_write
@@ -482,6 +482,7 @@ stage_up() {
     log "preparing $(vm_name "$id")"
     vm_prepare "$id"
   done
+  record_ips
   for id in "${ids[@]}"; do
     log "checking $(vm_name "$id")"
     verify_vm "$id"
@@ -1155,7 +1156,7 @@ stage_check() {
 stage_down() {
   lab_down
   remove_bundle_images
-  rm -rf "$lab_dir/export" "$lab_dir/adopt-keys.yaml" "$lab_dir"/rook-*.tar
+  rm -rf "$lab_dir/export" "$lab_dir/adopt-keys.yaml" "$lab_dir/state.env" "$lab_dir"/rook-*.tar
 }
 
 stage_all() {
