@@ -2,9 +2,11 @@ package operator
 
 import (
 	"context"
+	"encoding/json"
 	"testing"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
@@ -168,6 +170,54 @@ func TestClusterAdoptKeepsItsFSID(t *testing.T) {
 	}
 	if got := currentCluster(t, c).Spec.Storage.Adopt; got.Pools.Block != "other-block" || got.FSID != adoptFSID {
 		t.Fatalf("adopt %+v", got)
+	}
+}
+
+func storedClusterWithoutStorage(t *testing.T, c client.Client) *unstructured.Unstructured {
+	t.Helper()
+	stored := &unstructured.Unstructured{Object: map[string]any{
+		"apiVersion": v1alpha1.GroupVersion.String(),
+		"kind":       "Cluster",
+		"metadata":   map[string]any{"name": v1alpha1.ClusterName},
+		"spec":       map[string]any{"desiredVersion": "v0.1.0", "api": map[string]any{"vip": "10.0.0.10"}},
+	}}
+	createValid(t, c, stored)
+	current := &unstructured.Unstructured{}
+	current.SetGroupVersionKind(stored.GroupVersionKind())
+	if err := c.Get(context.Background(), client.ObjectKey{Name: v1alpha1.ClusterName}, current); err != nil {
+		t.Fatal(err)
+	}
+	if _, found, _ := unstructured.NestedMap(current.Object, "spec", "storage"); found {
+		t.Fatal("the stored Cluster must have no storage key")
+	}
+	return current
+}
+
+func TestClusterStoredWithoutStorageCannotGainAdopt(t *testing.T) {
+	c, _ := StartTestEnv(t)
+	ctx := context.Background()
+	current := storedClusterWithoutStorage(t, c)
+
+	raw, err := json.Marshal(adoptSpec())
+	if err != nil {
+		t.Fatal(err)
+	}
+	var adopt map[string]any
+	if err := json.Unmarshal(raw, &adopt); err != nil {
+		t.Fatal(err)
+	}
+	added := current.DeepCopy()
+	if err := unstructured.SetNestedMap(added.Object, map[string]any{"adopt": adopt}, "spec", "storage"); err != nil {
+		t.Fatal(err)
+	}
+	updateInvalid(t, c, added, adoptImmutableMessage)
+
+	concurrency := current.DeepCopy()
+	if err := unstructured.SetNestedField(concurrency.Object, int64(2), "spec", "nodeConcurrency"); err != nil {
+		t.Fatal(err)
+	}
+	if err := c.Update(ctx, concurrency); err != nil {
+		t.Fatalf("updating another field of a Cluster without storage must pass: %v", err)
 	}
 }
 
