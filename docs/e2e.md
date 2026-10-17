@@ -106,8 +106,8 @@ It uses the JSON gateway `https://127.0.0.1:2379/v3/kv/range` and the client cer
 It requires the prefix `k8s:enc:aesgcm:v1:key1:` on the stored value.
 
 The upgrade script checks the encryption only when `/etc/bedrock/encryption/encryption.yaml` exists.
-The job `e2e-upgrade-from-release` starts from a release without encryption.
-The upgrade does not add encryption to this cluster, so the job skips this check.
+The job `e2e-upgrade-from-release` starts from the tag in `CI_RELEASE_REF`.
+The default tag is `v0.5.0`. This release already has encryption, so the job runs this check.
 The job `e2e-upgrade-abort` ends at the rollback, before this check.
 
 ## Sealed backup archives
@@ -134,7 +134,7 @@ After the upgrade, the script checks these items.
 | The script sets `backup.etcd-schedule` to `* * * * *` and waits for a new `etcd-*.tar.gz.age` file. It opens this file with the admin identity and sets the schedule back to the default. | The new agent writes a sealed etcd snapshot, not only seals the old files. |
 
 The job `e2e-upgrade-abort` checks that the archive that stays after the rollback ends in `.tar.gz.age`.
-The old agent restores from this sealed archive with the host key.
+The agent of version A restores from this sealed archive with the host key.
 
 ## Cleanup and teardown
 
