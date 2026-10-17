@@ -103,8 +103,12 @@ func TestParseRecipients(t *testing.T) {
 
 	for _, bad := range []string{"ssh-ed25519", "age1bad"} {
 		value := first.Recipient().String() + "\n" + bad + " AAAAC3NzaC1lZDI1NTE5AAAAIexample"
-		if _, err := ParseRecipients(value); err == nil || !strings.Contains(err.Error(), bad) {
+		_, err := ParseRecipients(value)
+		if err == nil || err.Error() != "recipient 2 is not an age X25519 recipient" {
 			t.Fatalf("%q gave error %v", bad, err)
+		}
+		if strings.Contains(err.Error(), bad) {
+			t.Fatalf("%q: the error echoes the field: %v", bad, err)
 		}
 	}
 }
@@ -112,14 +116,23 @@ func TestParseRecipients(t *testing.T) {
 func TestParseRecipientsNeverEchoesSecretKey(t *testing.T) {
 	recipient := newIdentity(t).Recipient().String()
 	secret := newIdentity(t).String()
+	plugin := "AGE-PLUGIN-EXAMPLE-1QYQSZQGPQYQSZQGPQYQSZQGPQYQSZQGPQYQSZQGPQYQSZQGPQYQSZQGPQYQSZQG"
 
-	for name, key := range map[string]string{"upper": secret, "lower": strings.ToLower(secret)} {
-		_, err := ParseRecipients(recipient + "\n" + key)
+	cases := map[string]struct{ field, key string }{
+		"upper":        {secret, secret},
+		"lower":        {strings.ToLower(secret), secret},
+		"double quote": {`"` + secret + `"`, secret},
+		"single quote": {"'" + secret + "'", secret},
+		"assignment":   {"key=" + secret, secret},
+		"joined":       {"age1bad," + secret, secret},
+		"plugin":       {plugin, plugin},
+	}
+	for name, tc := range cases {
+		_, err := ParseRecipients(recipient + "\n" + tc.field)
 		if err == nil {
 			t.Fatalf("%s: a secret key was accepted", name)
 		}
-		message := strings.ToLower(err.Error())
-		if strings.Contains(message, strings.ToLower(secret)) {
+		if strings.Contains(strings.ToLower(err.Error()), strings.ToLower(tc.key)) {
 			t.Fatalf("%s: the error echoes the secret key: %v", name, err)
 		}
 		if err.Error() != "recipient 2 is an age secret key, not a recipient" {

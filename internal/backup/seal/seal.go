@@ -22,23 +22,29 @@ const (
 	dirMode    = 0o700
 	parentMode = 0o755
 
-	secretKeyPrefix = "AGE-SECRET-KEY-"
+	secretKeyMarker = "AGE-SECRET-KEY-"
+	pluginKeyMarker = "AGE-PLUGIN-"
 )
 
 func ParseRecipients(value string) ([]age.Recipient, error) {
 	fields := strings.Fields(value)
 	recipients := make([]age.Recipient, 0, len(fields))
 	for index, field := range fields {
-		if strings.HasPrefix(strings.ToUpper(field), secretKeyPrefix) {
+		if holdsSecretKey(field) {
 			return nil, fmt.Errorf("recipient %d is an age secret key, not a recipient", index+1)
 		}
 		recipient, err := age.ParseX25519Recipient(field)
 		if err != nil {
-			return nil, fmt.Errorf("recipient %q: %w", field, err)
+			return nil, fmt.Errorf("recipient %d is not an age X25519 recipient", index+1)
 		}
 		recipients = append(recipients, recipient)
 	}
 	return recipients, nil
+}
+
+func holdsSecretKey(field string) bool {
+	upper := strings.ToUpper(field)
+	return strings.Contains(upper, secretKeyMarker) || strings.Contains(upper, pluginKeyMarker)
 }
 
 func Seal(dst io.Writer, src io.Reader, recipients []age.Recipient) error {

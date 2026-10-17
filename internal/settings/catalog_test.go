@@ -232,8 +232,14 @@ func TestArchiveRecipientsSetting(t *testing.T) {
 		}
 	}
 	for _, invalid := range []string{"age1bad", "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIexample", first.Recipient().String() + " age1bad"} {
-		if err := def.Validate(invalid); err == nil {
+		err := def.Validate(invalid)
+		if err == nil {
 			t.Fatalf("%q must fail", invalid)
+		}
+		for _, field := range strings.Fields(invalid) {
+			if strings.Contains(err.Error(), field) {
+				t.Fatalf("%q: the error echoes %q: %v", invalid, field, err)
+			}
 		}
 	}
 }

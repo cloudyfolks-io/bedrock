@@ -71,7 +71,8 @@ func TestArchiveRecipientsInvalidSettingFallsBackToHost(t *testing.T) {
 		t.Fatalf("recipients %v", got)
 	}
 	logged := lines()
-	if len(logged) != 1 || !strings.HasPrefix(logged[0], "backup.archive-recipients is invalid, sealing etcd-1.tar.gz.age to the host key only: ") || !strings.Contains(logged[0], "age1bad") {
+	want := "backup.archive-recipients is invalid, sealing etcd-1.tar.gz.age to the host key only: recipient 1 is not an age X25519 recipient"
+	if len(logged) != 1 || logged[0] != want {
 		t.Fatalf("log %v", logged)
 	}
 }
