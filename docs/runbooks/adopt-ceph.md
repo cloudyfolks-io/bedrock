@@ -109,20 +109,46 @@ Some outputs hold keys. Do not put them in a ticket or in a log.
 
    The zone output holds the system key of the zone. Keep it secret.
 
-8. Save the Kubernetes objects of the old cluster.
+8. Record the data. Section 7, step 4 compares the cluster with these records.
+
+   ```sh
+   ceph df
+   kubectl -n rook-ceph exec deploy/rook-ceph-tools -- rbd ls -l <block pool>
+   kubectl -n rook-ceph exec deploy/rook-ceph-tools -- radosgw-admin bucket list --rgw-zone=<objectstore name> --rgw-zonegroup=<objectstore name>
+   kubectl -n rook-ceph exec deploy/rook-ceph-tools -- radosgw-admin bucket stats --rgw-zone=<objectstore name> --rgw-zonegroup=<objectstore name>
+   ```
+
+   Run `rbd ls -l` for every RBD pool. It lists the images and their sizes.
+   The `bucket stats` output shows the object count and the size of each bucket.
+
+   Record the CephFS tree on a host that is not an adopt host. Do not install packages on an adopt host.
+   The host needs the Ceph kernel client and the `mount.ceph` helper:
+
+   ```sh
+   apt-get install -y ceph-common
+   umask 077
+   ceph auth get-key client.admin > /root/admin.secret
+   mkdir -p /mnt/cephfs
+   mount -t ceph <mon address>:6789:/ /mnt/cephfs -o name=admin,secretfile=/root/admin.secret,mds_namespace=<CephFS name>
+   ls -lR /mnt/cephfs/<path>
+   ```
+
+   List a few paths that you know. Keep the mount until section 4, step 2.
+
+9. Save the Kubernetes objects of the old cluster.
 
    ```sh
    kubectl get pv,pvc,volumesnapshotcontent -A -o yaml > pv-pvc.yaml
    kubectl -n rook-ceph get cephcluster -o yaml > cephcluster.yaml
    ```
 
-9. Make the backup of the old k0s state on every controller.
+10. Make the backup of the old k0s state on every controller.
 
-   ```sh
-   k0s backup --save-path /root/k0s-backup
-   ```
+    ```sh
+    k0s backup --save-path /root/k0s-backup
+    ```
 
-   Copy the archive off the host. The rollback needs it.
+    Copy the archive off the host. The rollback needs it.
 
 ## 2. Export the Rook identity
 
@@ -224,7 +250,20 @@ Do the steps in this order.
 
 1. Stop the clients of Ceph. Stop the VMs and unmap the RBD images.
 
-2. Set `noout` and stop Rook. The Ceph daemons stop cleanly.
+2. Record the checksums of the data while the clients are stopped.
+   Choose a few RBD images and a few CephFS files that you know.
+
+   ```sh
+   kubectl -n rook-ceph exec deploy/rook-ceph-tools -- sh -c 'rbd export --no-progress <pool>/<image> - | sha256sum'
+   sha256sum /mnt/cephfs/<path>/<file>
+   umount /mnt/cephfs
+   rm -f /root/admin.secret
+   ```
+
+   Run the first command for each chosen image and the second for each chosen file.
+   Run the `umount` and `rm` commands on the host with the mount.
+
+3. Set `noout` and stop Rook. The Ceph daemons stop cleanly.
 
    ```sh
    ceph osd set noout
@@ -235,7 +274,7 @@ Do the steps in this order.
 
    Wait until no pod has the status `Running`.
 
-3. Copy `/var/lib/rook` off every host. Do this before any other change to the host.
+4. Copy `/var/lib/rook` off every host. Do this before any other change to the host.
    The mon stores are on the system disk. A host rebuild wipes them.
 
    ```sh
@@ -254,7 +293,7 @@ Do the steps in this order.
    The listing must show the owner and mode of the mon store and of the keyrings.
    Every host that runs a monitor must show its `store.db`.
 
-4. Stop k0s on every host. Do the workers first and the controllers last.
+5. Stop k0s on every host. Do the workers first and the controllers last.
    `k0s reset` removes the Kubernetes state of the old cluster. It keeps `/var/lib/rook` and the disks.
 
    ```sh
@@ -262,7 +301,7 @@ Do the steps in this order.
    k0s reset
    ```
 
-5. Check every host. The preflight of Bedrock refuses a busy port 3300 or 6789 on a fresh node.
+6. Check every host. The preflight of Bedrock refuses a busy port 3300 or 6789 on a fresh node.
 
    ```sh
    ss -ltn | grep -E ':(3300|6789)[[:space:]]'
@@ -278,7 +317,7 @@ Do the steps in this order.
    find /proc/[0-9]*/fd -lname "$(readlink -f /dev/disk/by-id/<disk>)" -print -quit
    ```
 
-6. Prepare every host.
+7. Prepare every host.
 
    - If you rebuild the host OS, put the copy of `/var/lib/rook` back before `bedrock init` or `bedrock join`:
 
@@ -358,10 +397,11 @@ If you change `adopt.pools` after an error, edit the Cluster object: `kubectl ed
 ### Run Ceph commands in the new cluster
 
 Bedrock has no Rook toolbox. The pod `rook-ceph-operator` holds `ceph`, `rbd` and `radosgw-admin`.
-Define these functions on a control-plane host:
+Define these functions on a control-plane host. They use bash function names:
 
 ```sh
 ceph() { kubectl -n rook-ceph exec deploy/rook-ceph-operator -- ceph --conf=/var/lib/rook/rook-ceph/rook-ceph.config "$@"; }
+rbd() { kubectl -n rook-ceph exec deploy/rook-ceph-operator -- rbd --conf=/var/lib/rook/rook-ceph/rook-ceph.config "$@"; }
 radosgw-admin() { kubectl -n rook-ceph exec deploy/rook-ceph-operator -- radosgw-admin --conf=/var/lib/rook/rook-ceph/rook-ceph.config "$@"; }
 ```
 
@@ -433,10 +473,11 @@ for pool in $(ceph osd pool ls | grep '^<old>\.rgw\.'); do ceph osd pool rename 
 
 1. Delete the key file when the cluster shows `StorageAdopted=True`.
    Delete every other copy of the file.
+   Do not delete the key file while the reason is `RenameFailed` or any reason before `Adopted`.
+   The command deletes the file only when the wait succeeds.
 
    ```sh
-   kubectl wait --for=condition=StorageAdopted cluster/cluster --timeout=60m
-   rm -f /root/ceph-keys.yaml
+   kubectl wait --for=condition=StorageAdopted cluster/cluster --timeout=60m && rm -f /root/ceph-keys.yaml
    ```
 
 2. Unset `noout`. All OSDs are up. The flag keeps the health at `HEALTH_WARN`.
@@ -453,17 +494,44 @@ for pool in $(ceph osd pool ls | grep '^<old>\.rgw\.'); do ceph osd pool rename 
    kubectl wait --for=condition=StorageReady cluster/cluster --timeout=60m
    ```
 
-4. Check your data. Compare the images, the files and the objects with the records of step 1.
+4. Check your data. Compare each item with the records of section 1, step 8 and section 4, step 2.
+
+   | Comparison | Command | It must show |
+   | --- | --- | --- |
+   | fsid | `ceph fsid` | The recorded fsid. |
+   | OSD ids | `ceph osd tree` | The same OSD ids on the same hosts. |
+   | Pools | `ceph osd pool ls detail` | The Bedrock pool names, with the recorded sizes. |
+   | Stored data | `ceph df` | At least the recorded stored data in each pool. |
+   | RBD images | `rbd ls -l bedrock-block` | The same images with the same sizes as `rbd ls -l` of the old pool. |
+   | RBD checksums | the `rbd export` command below | The recorded checksum of each chosen image. |
+   | CephFS tree and checksums | the CephFS mount below | The recorded `ls -lR` output and the recorded checksum of each chosen file. |
+   | Buckets | `radosgw-admin bucket list` and `bucket stats` | The same buckets with the same object counts and sizes. |
 
    ```sh
    ceph fsid
    ceph osd tree
    ceph osd pool ls detail
-   ceph status
-   kubectl -n rook-ceph exec deploy/rook-ceph-operator -- rbd --conf=/var/lib/rook/rook-ceph/rook-ceph.config ls bedrock-block
+   ceph df
+   rbd ls -l bedrock-block
+   kubectl -n rook-ceph exec deploy/rook-ceph-operator -- sh -c 'rbd --conf=/var/lib/rook/rook-ceph/rook-ceph.config export --no-progress bedrock-block/<image> - | sha256sum'
+   radosgw-admin bucket list --rgw-zone=bedrock-rgw --rgw-zonegroup=bedrock-rgw
+   radosgw-admin bucket stats --rgw-zone=bedrock-rgw --rgw-zonegroup=bedrock-rgw
    ```
 
-   The fsid and the OSD ids must equal the records. The pools must have the Bedrock names.
+   Run `rbd ls -l` for every RBD pool and the `rbd export` command for each chosen image.
+   For the CephFS comparison, use the host of section 1, step 8. Use the functions of "Run Ceph commands in the new cluster":
+
+   ```sh
+   umask 077
+   ceph auth get-key client.admin > /root/admin.secret
+   mount -t ceph <mon address>:6789:/ /mnt/cephfs -o name=admin,secretfile=/root/admin.secret,mds_namespace=bedrock-fs
+   ls -lR /mnt/cephfs/<path>
+   sha256sum /mnt/cephfs/<path>/<file>
+   umount /mnt/cephfs
+   rm -f /root/admin.secret
+   ```
+
+   A difference is an error. Do not go on to the volume import until you know its cause.
 
 ### Checks of the storage gate
 
@@ -474,7 +542,7 @@ The message names every failed check. Read it with the command of step 6.
 | Message starts with | Meaning | What to do |
 | --- | --- | --- |
 | `ceph versions: not on release` | A daemon runs another Ceph major release than the bundle. | Wait for Rook to finish the daemon roll. Watch `kubectl -n rook-ceph get pods` and run `ceph versions`. If a daemon does not restart, read the log of the operator. Do not go on while a daemon has the old release. |
-| `ceph pool <name> size` | A Bedrock pool has a size that differs from `storage.replicas`. | Find out why. Check `kubectl -n rook-ceph get cephblockpool,cephfilesystem,cephobjectstore`. Fix `storage.replicas` or set the pool size with `ceph osd pool set <name> size <replicas>`. |
+| `ceph pool <name> size` | A Bedrock pool has a size that differs from `storage.replicas`. | Find out why. Check `kubectl -n rook-ceph get cephblockpool,cephfilesystem,cephobjectstore`. If the pool is larger than `storage.replicas`, raise `storage.replicas` to the pool size, or leave the pool as it is and accept the warning. Never lower the size of a pool that holds data, and never run `ceph osd pool set <name> size` with a smaller number. If the pool is smaller, wait for Rook to reconcile it. |
 | `ceph osd tree: host buckets without a ceph-osd node` | A CRUSH host bucket has no Host with the role `ceph-osd` and the same name. Rook would move data to a new bucket. | Make the host name equal the bucket name. If the bucket has the wrong name, rename it with `ceph osd crush rename-bucket <bucket> <node name>`. Do this before more data moves. |
 | `ceph: health is` | Ceph is not `HEALTH_OK`. | Run `ceph health detail`. Fix the cause. A `noout` flag: run `ceph osd unset noout`. A clock skew: fix NTP on the host. |
 | `ceph: no OSD is up` | No OSD runs. | Check the OSD pods, the by-id paths and the logs of the `rook-ceph-osd-prepare` jobs. |
@@ -484,13 +552,30 @@ The message names every failed check. Read it with the command of step 6.
 
 ## Rollback
 
-Choose the case by the last reason of `StorageAdopted`.
-Decide before you start. The two cases differ.
+Decide the case by facts. Do not decide by memory.
+Run these commands on a control-plane host of Bedrock:
+
+```sh
+kubectl -n rook-ceph get cephcluster
+kubectl -n rook-ceph get deployment -l app=rook-ceph-mon
+```
+
+Use case A only when both commands list nothing.
+If the API does not answer, run this command on every adopt host.
+Use case A only when it prints nothing on every host:
+
+```sh
+ps -eo comm= | grep -E '^ceph-mon$'
+```
+
+In any other case, or when you are in doubt, use case B.
+The two cases differ.
 
 ### Case A: the Ceph daemons of Bedrock never ran
 
-This is the case while the reason is `WaitingForIdentity` or `WaitingForHosts`, or while `bedrock init` has not ended.
-No mon pod exists. `/var/lib/rook` and the disks are as you left them.
+Use this case only when the commands above show that no Bedrock mon ever started.
+`/var/lib/rook` and the disks are as you left them.
+Put the copy of `/var/lib/rook` back only in this case.
 
 1. Stop and reset the Bedrock k0s on every host. Do the workers first.
 
@@ -505,7 +590,7 @@ No mon pod exists. `/var/lib/rook` and the disks are as you left them.
    tar --numeric-owner --xattrs --acls -C / -xpf rook-<host>.tar
    ```
 
-3. Start the old k0s cluster. Restore the k0s backup of step 1 on the first controller, or run the code that built the old cluster.
+3. Start the old k0s cluster. Restore the k0s backup of section 1, step 10 on the first controller, or run the code that built the old cluster.
    If you run that code, create the Secret `rook-ceph-mon` and the ConfigMap `rook-ceph-mon-endpoints` from the exports before the CephCluster exists.
 
    ```sh
@@ -514,28 +599,30 @@ No mon pod exists. `/var/lib/rook` and the disks are as you left them.
 
    A restore brings back the Deployments with the replica counts of the backup time.
 
-4. Wait until the mon, mgr and OSD pods run. Then unset `noout` with the toolbox function of step 1.
+4. Wait until the mon, mgr and OSD pods run. Then unset `noout` with the toolbox function of section 1.
 
    ```sh
    ceph osd unset noout
    ceph health detail
    ```
 
-### Case B: the Ceph daemons of Bedrock ran
+### Case B: the Ceph daemons of Bedrock ran, or you are in doubt
 
-This is the case from `WaitingForQuorum` on.
 The mon stores and the OSDs moved on together. The copy of `/var/lib/rook` is older.
 Do not put the old copy over the live stores. Old mon stores with newer OSDs can leave PGs incomplete.
 The old Rook creates an empty pool when a pool of its name is missing. So rename the pools back first.
+Stop Ceph in the same clean way as in "Stop the old cluster". Stop k0s only at the end.
 
-1. Stop both operators. Rook and Bedrock then change nothing.
+1. Stop the clients of Ceph. Stop the VMs and unmap the RBD images.
+
+2. Stop both operators. Rook and Bedrock then change nothing.
 
    ```sh
    kubectl -n bedrock-system scale deployment/bedrock-operator --replicas=0
    kubectl -n rook-ceph scale deployment/rook-ceph-operator --replicas=0
    ```
 
-2. Start the Rook toolbox. It does not need the operator.
+3. Start the Rook toolbox. It does not need the operator.
    Download the file `deploy/examples/toolbox.yaml` of the Rook release first when the cluster has no internet access.
 
    ```sh
@@ -544,28 +631,43 @@ The old Rook creates an empty pool when a pool of its name is missing. So rename
    kubectl -n rook-ceph rollout status deployment/rook-ceph-tools
    ```
 
-3. Rename the pools back, if they have Bedrock names. Use the commands of "Rename by hand" with the old and the new name swapped.
-   Run them in the toolbox:
+4. Define the toolbox functions. Set `noout`.
 
    ```sh
    ceph() { kubectl -n rook-ceph exec deploy/rook-ceph-tools -- ceph "$@"; }
    radosgw-admin() { kubectl -n rook-ceph exec deploy/rook-ceph-tools -- radosgw-admin "$@"; }
+   ceph osd set noout
    ```
+
+5. Rename the pools back, if they have Bedrock names. Use the commands of "Rename by hand" with the old and the new name swapped.
+   The `sh -c` commands of that section use the operator pod and its `--conf` flag.
+   In the toolbox, use the deployment `rook-ceph-tools` and leave out the `--conf` flag.
 
    - `bedrock-block` to the old block pool.
    - `bedrock-fs` to the old CephFS, and its pools `bedrock-fs-metadata` and `bedrock-fs-data0` to the old pool names.
    - `bedrock-rgw` to the old realm, zonegroup and zone, and the pools `bedrock-rgw.rgw.*` to `<old>.rgw.*`.
 
-4. Check the names with `ceph osd pool ls detail`, `ceph fs ls` and `radosgw-admin realm list`.
-5. Stop and reset the Bedrock k0s on every host. Keep `/var/lib/rook` and the disks.
+6. Check the names with `ceph osd pool ls detail`, `ceph fs ls` and `radosgw-admin realm list`.
+
+7. Stop the Ceph daemons. Scale the monitors to 0 last.
+
+   ```sh
+   kubectl -n rook-ceph scale deployment -l app!=rook-ceph-mon --replicas=0
+   kubectl -n rook-ceph scale deployment -l app=rook-ceph-mon --replicas=0
+   kubectl -n rook-ceph get pods
+   ```
+
+   Wait until no pod has the status `Running`.
+
+8. Stop and reset the Bedrock k0s on every host. Do the workers first. Keep `/var/lib/rook` and the disks.
 
    ```sh
    k0s stop
    k0s reset
    ```
 
-6. Start the old k0s cluster as in case A, steps 3 and 4. The old Rook finds the pools with the old names and uses them.
-7. If a mon store is lost, keep the stores of the other monitors and use `kubectl rook-ceph mons restore-quorum`.
+9. Start the old k0s cluster as in case A, steps 3 and 4. The old Rook finds the pools with the old names and uses them.
+10. If a mon store is lost, keep the stores of the other monitors and use `kubectl rook-ceph mons restore-quorum`.
 
 ## Rehearse in the lab
 
