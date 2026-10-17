@@ -12,7 +12,15 @@ import (
 	"github.com/cloudyfolks-io/bedrock/internal/host"
 )
 
-const minFreeBytes = 20 << 30
+const (
+	minFreeBytes   = 20 << 30
+	rookConfigPath = "/var/lib/rook/rook-ceph/rook-ceph.config"
+)
+
+var (
+	monitorPorts   = []int{3300, 6789}
+	cephSignatures = []string{host.SignatureBlueStore, host.SignatureLVM}
+)
 
 type Result struct {
 	Name    string
@@ -38,9 +46,16 @@ func Run(ctx context.Context, e host.Exec, facts host.Facts, devices []host.Devi
 		check("iommu", false, facts.IOMMUGroups > 0, "no IOMMU groups found, hardware passthrough will not work"),
 	}
 	for _, device := range devices {
-		results = append(results, deviceCheck(device))
+		results = append(results, deviceCheck(device, adoptedFSID(cfg)))
 	}
 	return results
+}
+
+func adoptedFSID(cfg v1alpha1.ClusterConfig) string {
+	if cfg.Spec.Storage.Adopt == nil {
+		return ""
+	}
+	return cfg.Spec.Storage.Adopt.FSID
 }
 
 func check(name string, fatal, ok bool, message string) Result {
@@ -81,15 +96,51 @@ func vipFreeCheck(ctx context.Context, e host.Exec, vip string) Result {
 	}
 }
 
-func deviceCheck(device host.Device) Result {
+func deviceCheck(device host.Device, adoptFSID string) Result {
 	name := "device-" + device.Path
-	if !device.Block {
+	labelled := adoptFSID != "" && slices.Contains(cephSignatures, device.Signature) && device.CephFSID != ""
+	switch {
+	case !device.Block:
 		return Result{Name: name, Fatal: true, Message: "not a block device"}
-	}
-	if device.Signature != "" {
+	case labelled && device.CephFSID != adoptFSID:
+		return Result{Name: name, Fatal: true, Message: fmt.Sprintf("Ceph label fsid %s does not match storage.adopt.fsid", device.CephFSID)}
+	case device.Signature != "" && !labelled:
 		return Result{Name: name, Fatal: true, Message: fmt.Sprintf("has a %s signature, wipe it first", device.Signature)}
 	}
 	return Result{Name: name, Fatal: true, OK: true}
+}
+
+func AdoptChecks(adopt v1alpha1.AdoptSpec, facts host.Facts, adoptFacts host.AdoptFacts) []Result {
+	inList := slices.ContainsFunc(adopt.Hosts, func(h v1alpha1.AdoptHost) bool { return h.Node == facts.Hostname })
+	results := []Result{check("adopt-node", true, inList, fmt.Sprintf("this host is %s, storage.adopt.hosts names no such node", facts.Hostname))}
+	if !inList {
+		return results
+	}
+	for _, monitor := range adopt.Monitors {
+		if monitor.Node == facts.Hostname {
+			results = append(results, monitorChecks(adopt.FSID, monitor, adoptFacts)...)
+		}
+	}
+	return results
+}
+
+func monitorChecks(fsid string, monitor v1alpha1.AdoptMonitor, adoptFacts host.AdoptFacts) []Result {
+	prefix := "adopt-mon-" + monitor.ID + "-"
+	results := []Result{
+		check(prefix+"store", true, adoptFacts.MonStores[monitor.ID], fmt.Sprintf("/var/lib/rook/mon-%s/data/store.db not found", monitor.ID)),
+		check(prefix+"config", true, adoptFacts.ConfigFSID == fsid, configMessage(fsid, adoptFacts.ConfigFSID)),
+	}
+	for _, port := range monitorPorts {
+		results = append(results, check(fmt.Sprintf("%sport-%d", prefix, port), true, !slices.Contains(adoptFacts.ListeningPorts, port), fmt.Sprintf("TCP port %d is in use, stop the old monitor first", port)))
+	}
+	return results
+}
+
+func configMessage(want, got string) string {
+	if got == "" {
+		return rookConfigPath + " has no fsid"
+	}
+	return fmt.Sprintf("%s has fsid %s, storage.adopt.fsid is %s", rookConfigPath, got, want)
 }
 
 func Blocked(results []Result) bool {

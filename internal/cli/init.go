@@ -166,11 +166,10 @@ func RunInit(ctx context.Context, args []string, deps InitDeps, stdout, stderr i
 	if err != nil {
 		return fail(stderr, err)
 	}
-	devices, err := probeDevices(ctx, deps, cfg.Spec.Storage.Devices)
+	results, err := preflightResults(ctx, deps, facts, cfg, bundle.Spec.SupportedOS)
 	if err != nil {
 		return fail(stderr, err)
 	}
-	results := preflight.Run(ctx, deps.Exec, facts, devices, cfg, bundle.Spec.SupportedOS)
 	fmt.Fprint(stdout, preflight.Format(results))
 	if preflight.Blocked(results) {
 		return fail(stderr, fmt.Errorf("preflight failed"))

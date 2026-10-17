@@ -3,14 +3,21 @@ package host
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io/fs"
 	"strings"
+)
+
+const (
+	SignatureBlueStore = "ceph_bluestore"
+	SignatureLVM       = "LVM2_member"
 )
 
 type Device struct {
 	Path      string
 	Block     bool
 	Signature string
+	CephFSID  string
 }
 
 func ProbeDevice(ctx context.Context, e Exec, statFn func(string) (fs.FileInfo, error), path string) (Device, error) {
@@ -30,4 +37,24 @@ func ProbeDevice(ctx context.Context, e Exec, statFn func(string) (fs.FileInfo, 
 		return Device{}, err
 	}
 	return Device{Path: path, Block: true, Signature: signature}, nil
+}
+
+func ProbeCephLabel(ctx context.Context, e Exec, device Device) (Device, error) {
+	fsid, err := cephFSID(ctx, e, device)
+	if err != nil {
+		return Device{}, fmt.Errorf("read Ceph label: %w", err)
+	}
+	device.CephFSID = fsid
+	return device, nil
+}
+
+func cephFSID(ctx context.Context, e Exec, device Device) (string, error) {
+	switch device.Signature {
+	case SignatureBlueStore:
+		return BlueStoreFSID(ctx, e, device.Path)
+	case SignatureLVM:
+		return LVMCephFSID(ctx, e, device.Path)
+	default:
+		return "", nil
+	}
 }

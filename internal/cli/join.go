@@ -32,6 +32,7 @@ type joinOptions struct {
 	k0sBaseURL string
 	bundle     string
 	workDir    string
+	adopt      string
 }
 
 func joinCommand(args []string, stdout, stderr io.Writer) int {
@@ -51,6 +52,7 @@ func RunJoin(ctx context.Context, args []string, deps InitDeps, stdout, stderr i
 	flags.StringVar(&o.k0sBaseURL, "k0s-base-url", release.DefaultK0sBaseURL, "k0s download base url")
 	flags.StringVar(&o.bundle, "bundle", "", "install from this bundle archive")
 	flags.StringVar(&o.workDir, "work-dir", "/var/lib/bedrock", "directory for extracted bundles")
+	flags.StringVar(&o.adopt, "adopt-config", "", "cluster configuration file with spec.storage.adopt, to check this host for the adopted Ceph cluster")
 	if err := flags.Parse(args); err != nil {
 		return 2
 	}
@@ -76,6 +78,13 @@ func RunJoin(ctx context.Context, args []string, deps InitDeps, stdout, stderr i
 			return fail(stderr, err)
 		}
 	}
+	var adopt *v1alpha1.AdoptSpec
+	if o.adopt != "" {
+		adopt, err = loadAdoptSpec(o.adopt)
+		if err != nil {
+			return fail(stderr, err)
+		}
+	}
 	ctx, cancel := context.WithTimeout(ctx, 20*time.Minute)
 	defer cancel()
 
@@ -87,7 +96,11 @@ func RunJoin(ctx context.Context, args []string, deps InitDeps, stdout, stderr i
 	var cfg v1alpha1.ClusterConfig
 	cfg.Spec.API.VIP = token.VIP
 	cfg.Spec.Network.ManagementInterface = facts.DefaultInterface
-	results := preflight.Run(ctx, deps.Exec, facts, nil, cfg, token.SupportedOS)
+	cfg.Spec.Storage.Adopt = adopt
+	results, err := preflightResults(ctx, deps, facts, cfg, token.SupportedOS)
+	if err != nil {
+		return fail(stderr, err)
+	}
 	fmt.Fprint(stdout, preflight.Format(results))
 	if preflight.Blocked(results) {
 		return fail(stderr, fmt.Errorf("preflight failed"))
