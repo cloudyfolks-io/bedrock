@@ -235,6 +235,9 @@ func adoptStep(ctx context.Context, run runFunc, adopt v1alpha1.AdoptSpec, repli
 	if message := missingAdopted(state, adopt); message != "" {
 		return adoptedCondition(v1alpha1.ReasonRenameFailed, message)
 	}
+	if message := renameConflict(state, adopt); message != "" {
+		return adoptedCondition(v1alpha1.ReasonRenameFailed, message)
+	}
 	plan := renamePlan(state, adopt)
 	if len(plan) == 0 {
 		return adoptedCondition(v1alpha1.ReasonAdopted, "the pools, the CephFS and the RGW realm have the Bedrock names")
@@ -345,6 +348,25 @@ func missingAdopted(state cephState, adopt v1alpha1.AdoptSpec) string {
 	for _, check := range checks {
 		if check.configured != "" && !check.found {
 			return fmt.Sprintf("adopted %s %s not found", check.kind, check.label)
+		}
+	}
+	return ""
+}
+
+func renameConflict(state cephState, adopt v1alpha1.AdoptSpec) string {
+	fs, found := findFilesystem(state, adopt.Pools.Filesystem)
+	bedrockFilesystem := slices.ContainsFunc(state.Filesystems, func(other cephFilesystemState) bool { return other.Name == filesystemName })
+	if found && fs.Name != filesystemName && bedrockFilesystem {
+		return fmt.Sprintf("adopted filesystem %s target exists", filesystemName)
+	}
+	moves := slices.Concat(
+		blockMoves(state, adopt.Pools.Block),
+		filesystemMoves(state, adopt.Pools.Filesystem),
+		objectStorePoolMoves(state, adopt.Pools.ObjectStore),
+	)
+	for _, move := range moves {
+		if poolExists(state, move.to) {
+			return fmt.Sprintf("adopted pool %s target exists", move.to)
 		}
 	}
 	return ""
@@ -542,11 +564,27 @@ func poolRename(move poolMove) renameCommand {
 	return cephStep("osd", "pool", "rename", move.from, move.to)
 }
 
-func blockPlan(state cephState, old string) []renameCommand {
-	if old == "" || old == blockPoolName || !slices.ContainsFunc(state.Pools, func(pool cephPoolState) bool { return pool.Name == old }) {
+func poolExists(state cephState, name string) bool {
+	return slices.ContainsFunc(state.Pools, func(pool cephPoolState) bool { return pool.Name == name })
+}
+
+func poolRenames(moves []poolMove) []renameCommand {
+	renames := make([]renameCommand, 0, len(moves))
+	for _, move := range moves {
+		renames = append(renames, poolRename(move))
+	}
+	return renames
+}
+
+func blockMoves(state cephState, old string) []poolMove {
+	if old == "" || old == blockPoolName || !poolExists(state, old) {
 		return nil
 	}
-	return []renameCommand{poolRename(poolMove{old, blockPoolName})}
+	return []poolMove{{old, blockPoolName}}
+}
+
+func blockPlan(state cephState, old string) []renameCommand {
+	return poolRenames(blockMoves(state, old))
 }
 
 func findFilesystem(state cephState, old string) (cephFilesystemState, bool) {
@@ -572,9 +610,7 @@ func filesystemPlan(state cephState, old string) []renameCommand {
 			cephStep("fs", "rename", fs.Name, filesystemName, "--yes-i-really-mean-it"),
 		)
 	}
-	for _, move := range filesystemPoolMoves(fs) {
-		plan = append(plan, poolRename(move))
-	}
+	plan = append(plan, poolRenames(filesystemPoolMoves(fs))...)
 	if renamed || !fs.Joinable {
 		plan = append(plan, cephStep("fs", "set", filesystemName, "joinable", "true"))
 	}
@@ -582,6 +618,14 @@ func filesystemPlan(state cephState, old string) []renameCommand {
 		plan = append(plan, cephStep("fs", "set", filesystemName, "refuse_client_session", "false"))
 	}
 	return plan
+}
+
+func filesystemMoves(state cephState, old string) []poolMove {
+	fs, found := findFilesystem(state, old)
+	if !found {
+		return nil
+	}
+	return filesystemPoolMoves(fs)
 }
 
 func filesystemPoolMoves(fs cephFilesystemState) []poolMove {
@@ -616,13 +660,14 @@ func objectStorePlan(state cephState, old string) []renameCommand {
 	if zoneGroup || zone || rewrite {
 		plan = append(plan, radosgwStep("period", "update", "--commit", "--rgw-realm="+objectStoreName))
 	}
-	for _, move := range objectStorePoolMoves(state, old) {
-		plan = append(plan, poolRename(move))
-	}
+	plan = append(plan, poolRenames(objectStorePoolMoves(state, old))...)
 	return plan
 }
 
 func objectStorePoolMoves(state cephState, old string) []poolMove {
+	if old == "" || old == objectStoreName {
+		return nil
+	}
 	prefix := old + ".rgw."
 	var moves []poolMove
 	for _, pool := range state.Pools {

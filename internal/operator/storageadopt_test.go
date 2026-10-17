@@ -1017,6 +1017,65 @@ func TestAdoptStepStopsOnAnAdoptedNameThatDoesNotExist(t *testing.T) {
 	}
 }
 
+func withPools(base []map[string]any, extra ...string) []map[string]any {
+	pools := slices.Clone(base)
+	for i, name := range extra {
+		pools = append(pools, map[string]any{"pool_id": 100 + i, "pool_name": name, "size": 3})
+	}
+	return pools
+}
+
+func TestAdoptStepRefusesARenameTargetThatExists(t *testing.T) {
+	fresh := clusterPools("storage-block", "filesystem-data-metadata", "filesystem-data-data0", "objectstore")
+	cases := []struct {
+		name      string
+		overrides []map[string]any
+		want      string
+	}{
+		{"CephFS metadata pool", []map[string]any{{keyPools: withPools(fresh, "bedrock-fs-metadata")}}, "adopted pool bedrock-fs-metadata target exists"},
+		{"CephFS data pool", []map[string]any{{keyPools: withPools(fresh, "bedrock-fs-data0")}}, "adopted pool bedrock-fs-data0 target exists"},
+		{"block pool", []map[string]any{{keyPools: withPools(fresh, "bedrock-block")}}, "adopted pool bedrock-block target exists"},
+		{"object store pool", []map[string]any{{keyPools: withPools(fresh, "bedrock-rgw.rgw.meta")}}, "adopted pool bedrock-rgw.rgw.meta target exists"},
+		{
+			"filesystem",
+			[]map[string]any{{
+				keyFS: []map[string]any{
+					{"name": "filesystem-data", "metadata_pool": "filesystem-data-metadata", "data_pools": []string{"filesystem-data-data0"}},
+					{"name": "bedrock-fs", "metadata_pool": "other-metadata", "data_pools": []string{"other-data"}},
+				},
+				keyNewFS: filesystemFlags(true, false),
+			}},
+			"adopted filesystem bedrock-fs target exists",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			fake := cephFixture(t, tc.overrides...)
+			got := adoptStep(context.Background(), fake.run, *adoptSpec(), 3)
+			if got.Status != metav1.ConditionFalse || got.Reason != v1alpha1.ReasonRenameFailed || got.Message != tc.want {
+				t.Fatalf("condition %+v, want message %q", got, tc.want)
+			}
+			if len(fake.mutations) != 0 {
+				t.Fatalf("a target that exists must stop the step before any command, ran %v", fake.mutations)
+			}
+		})
+	}
+}
+
+func TestAdoptStepAcceptsATargetThatIsTheObjectAlreadyRenamed(t *testing.T) {
+	halfDone := map[string]any{
+		keyPools: clusterPools("bedrock-block", "bedrock-fs-metadata", "filesystem-data-data0", "objectstore"),
+		keyFS:    filesystemEntry("bedrock-fs", "bedrock-fs-metadata", "filesystem-data-data0"),
+		keyOldFS: nil,
+		keyNewFS: filesystemFlags(false, true),
+	}
+	fake := cephFixture(t, halfDone)
+	got := adoptStep(context.Background(), fake.run, *adoptSpec(), 3)
+	if got.Reason != v1alpha1.ReasonRenaming || !slices.Contains(fake.mutations, "ceph osd pool rename filesystem-data-data0 bedrock-fs-data0") {
+		t.Fatalf("condition %+v, ran %v", got, fake.mutations)
+	}
+}
+
 func TestAdoptStepSkipsTheNamesThatAreEmpty(t *testing.T) {
 	adopt := adoptSpec()
 	adopt.Pools = v1alpha1.AdoptPools{}
