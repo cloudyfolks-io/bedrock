@@ -129,7 +129,7 @@ func TestClusterKMSEndpointPattern(t *testing.T) {
 	createInvalid(t, c, clusterWithEncryption(kmsEncryption("/run/kms.sock")), "should match")
 }
 
-const adoptImmutableMessage = "storage.adopt is set at install and is immutable"
+const adoptImmutableMessage = "storage.adopt cannot be added or removed after install and its fsid is immutable"
 
 func clusterWithAdopt(adopt *v1alpha1.AdoptSpec) *v1alpha1.Cluster {
 	cluster := clusterWithEncryption(v1alpha1.EncryptionSpec{})
@@ -137,15 +137,22 @@ func clusterWithAdopt(adopt *v1alpha1.AdoptSpec) *v1alpha1.Cluster {
 	return cluster
 }
 
-func TestClusterAdoptIsImmutable(t *testing.T) {
+func TestClusterAdoptKeepsItsFSID(t *testing.T) {
 	c, _ := StartTestEnv(t)
 	ctx := context.Background()
 	createValid(t, c, clusterWithAdopt(adoptSpec()))
 
+	fsid := currentCluster(t, c)
+	fsid.Spec.Storage.Adopt.FSID = "0f1e2d3c-4b5a-4968-8776-655443322110"
+	updateInvalid(t, c, fsid, adoptImmutableMessage)
+
+	removed := currentCluster(t, c)
+	removed.Spec.Storage = v1alpha1.ClusterStorageSpec{}
+	updateInvalid(t, c, removed, adoptImmutableMessage)
+
 	changes := map[string]func(*v1alpha1.AdoptSpec){
-		"fsid":   func(adopt *v1alpha1.AdoptSpec) { adopt.FSID = "0f1e2d3c-4b5a-4968-8776-655443322110" },
-		"device": func(adopt *v1alpha1.AdoptSpec) { adopt.Hosts[0].Devices = []string{"/dev/disk/by-id/wwn-0x9"} },
-		"pool":   func(adopt *v1alpha1.AdoptSpec) { adopt.Pools.Block = "other-block" },
+		"block pool": func(adopt *v1alpha1.AdoptSpec) { adopt.Pools.Block = "other-block" },
+		"device":     func(adopt *v1alpha1.AdoptSpec) { adopt.Hosts[0].Devices = []string{"/dev/disk/by-id/wwn-0x9"} },
 		"cephx": func(adopt *v1alpha1.AdoptSpec) {
 			adopt.Cephx = &runtime.RawExtension{Raw: []byte(`{"daemon":{"keyType":"aes"}}`)}
 		},
@@ -154,18 +161,13 @@ func TestClusterAdoptIsImmutable(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			changed := currentCluster(t, c)
 			change(changed.Spec.Storage.Adopt)
-			updateInvalid(t, c, changed, adoptImmutableMessage)
+			if err := c.Update(ctx, changed); err != nil {
+				t.Fatalf("a change of %s must pass: %v", name, err)
+			}
 		})
 	}
-
-	removed := currentCluster(t, c)
-	removed.Spec.Storage = v1alpha1.ClusterStorageSpec{}
-	updateInvalid(t, c, removed, adoptImmutableMessage)
-
-	kept := currentCluster(t, c)
-	kept.Spec.NodeConcurrency = 2
-	if err := c.Update(ctx, kept); err != nil {
-		t.Fatalf("an update that keeps storage.adopt must pass: %v", err)
+	if got := currentCluster(t, c).Spec.Storage.Adopt; got.Pools.Block != "other-block" || got.FSID != adoptFSID {
+		t.Fatalf("adopt %+v", got)
 	}
 }
 

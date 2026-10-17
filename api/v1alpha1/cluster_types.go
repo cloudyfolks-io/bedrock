@@ -77,7 +77,7 @@ type UpgradeSpec struct {
 }
 
 // +kubebuilder:validation:XValidation:rule="(has(self.encryption) && has(self.encryption.kms)) == (has(oldSelf.encryption) && has(oldSelf.encryption.kms)) && (!(has(self.encryption) && has(self.encryption.kms)) || self.encryption.kms == oldSelf.encryption.kms)",message="encryption.kms is set at install and is immutable"
-// +kubebuilder:validation:XValidation:rule="(has(self.storage) && has(self.storage.adopt)) == (has(oldSelf.storage) && has(oldSelf.storage.adopt)) && (!(has(self.storage) && has(self.storage.adopt)) || self.storage.adopt == oldSelf.storage.adopt)",message="storage.adopt is set at install and is immutable"
+// +kubebuilder:validation:XValidation:rule="(has(self.storage) && has(self.storage.adopt)) == (has(oldSelf.storage) && has(oldSelf.storage.adopt)) && (!(has(self.storage) && has(self.storage.adopt)) || self.storage.adopt.fsid == oldSelf.storage.adopt.fsid)",message="storage.adopt cannot be added or removed after install and its fsid is immutable"
 type ClusterSpec struct {
 	DesiredVersion string  `json:"desiredVersion"`
 	API            APISpec `json:"api"`
