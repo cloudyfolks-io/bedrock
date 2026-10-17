@@ -13,9 +13,16 @@ jobs:
       digest: ${{ steps.image.outputs.digest }}
     steps:
       - uses: actions/checkout@v5
+      - run: sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /usr/local/.ghcup /usr/local/share/boost /usr/share/swift /usr/local/share/powershell /opt/hostedtoolcache/CodeQL && docker image prune -af && df -h /
       - uses: actions/setup-go@v6
         with:
           go-version-file: go.mod
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 24
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 12.6.0
       - uses: azure/setup-helm@v4
         with:
           version: v3.19.0
@@ -59,9 +66,16 @@ jobs:
       contents: read
     steps:
       - uses: actions/checkout@v5
+      - run: sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /usr/local/.ghcup /usr/local/share/boost /usr/share/swift /usr/local/share/powershell /opt/hostedtoolcache/CodeQL && docker image prune -af && df -h /
       - uses: actions/setup-go@v6
         with:
           go-version-file: go.mod
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 24
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 12.6.0
       - uses: actions/download-artifact@v8
         with:
           name: assets
