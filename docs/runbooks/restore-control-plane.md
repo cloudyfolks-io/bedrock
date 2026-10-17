@@ -63,11 +63,13 @@ On the backup node, run this script in a child shell, with `<path>` set to
 the backup archive path. A step failure then stops the script and leaves
 your root shell open.
 
-The script opens the archive with the host key
+Use the script that fits the archive. A sealed archive ends in
+`.tar.gz.age`. A plain archive of an older release ends in `.tar.gz`.
+
+For a sealed archive, use this script. It opens the archive with the host key
 `/etc/bedrock/backup/host.key`. If the host key is missing, copy the admin
 identity to the node. Then add `--identity <key file>` to the `bedrock backup
-decrypt` line. For an archive of an older release (`.tar.gz`), remove the
-`bedrock backup decrypt` line, and use `tar -xzf "$BACKUP" -C /root/restore`.
+decrypt` line.
 
 ```sh
 BACKUP=<path> sh -eu <<'EOF'
@@ -75,6 +77,24 @@ install -m 0755 /var/lib/bedrock/previous/k0s /usr/local/bin/k0s
 mkdir -p /root/restore
 bedrock backup decrypt --in "$BACKUP" --out /root/restore/backup.tar.gz
 tar -xzf /root/restore/backup.tar.gz -C /root/restore
+HOLD=/var/lib/k0s/.pre-restore-$(date -u +%Y%m%dT%H%M%SZ)
+mkdir -p "$HOLD"
+for dir in etcd pki manifests images helmhome; do
+  if [ -e "/var/lib/k0s/$dir" ]; then mv "/var/lib/k0s/$dir" "$HOLD/"; fi
+done
+k0s restore --config-out /root/restore/k0s.yaml /root/restore/k0s_backup_*.tar.gz
+printf '{"backup":"%s","completedAt":"%s"}\n' "$BACKUP" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" > /var/lib/bedrock/restore.json
+systemctl start k0scontroller
+EOF
+```
+
+For a plain archive, use this script. It has no decrypt line.
+
+```sh
+BACKUP=<path> sh -eu <<'EOF'
+install -m 0755 /var/lib/bedrock/previous/k0s /usr/local/bin/k0s
+mkdir -p /root/restore
+tar -xzf "$BACKUP" -C /root/restore
 HOLD=/var/lib/k0s/.pre-restore-$(date -u +%Y%m%dT%H%M%SZ)
 mkdir -p "$HOLD"
 for dir in etcd pki manifests images helmhome; do
@@ -96,9 +116,6 @@ Backup phase.
 
 The archive also contains the OVN databases `ovnnb_db.db` and `ovnsb_db.db`.
 This procedure does not use them.
-
-The directory `/root/restore` holds the keys of the cluster in plain text.
-Delete it after step 6.
 
 ## 3. Join the other controllers again
 
@@ -175,3 +192,11 @@ kubectl get cluster cluster -o jsonpath='{.status.conditions[?(@.type=="Progress
 All nodes are `Ready`. The cluster phase is `Idle` at the previous version,
 and the `Progressing` reason is `Aborted`. On each controller,
 `k0s version` shows the previous k0s version.
+
+Then delete the plain files. The directory `/root/restore` holds the keys of
+the cluster in plain text. If you copied an admin identity to a node, delete
+that copy too.
+
+```sh
+rm -rf /root/restore
+```

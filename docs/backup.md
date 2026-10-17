@@ -364,9 +364,69 @@ protect them from the loss of a disk, copy the files off the host with your
 own tools. A copy is safe, because the file is sealed. Read
 [Sealed archives](#sealed-archives) before you rely on a copy.
 
-To restore a snapshot, open the file as the next section shows. Then do
-step 2 of the
-[restore runbook](runbooks/restore-control-plane.md).
+To restore a snapshot, do these steps on the host. Use the k0s version that
+took the snapshot. If a step fails, stop and do not do the next step. First,
+set the path of the file:
+
+```sh
+SNAPSHOT=/var/lib/bedrock/backups/etcd-<stamp>.tar.gz.age
+```
+
+1. Stop k0s and make a work directory:
+
+   ```sh
+   systemctl stop k0scontroller
+   mkdir -p /root/restore
+   ```
+
+2. Open the archive. The host key opens it. To use an admin identity, add
+   `--identity <key file>`:
+
+   ```sh
+   bedrock backup decrypt --in "$SNAPSHOT" --out /root/restore/snapshot.tar.gz
+   ```
+
+   A snapshot of an older release that is not sealed yet ends in `.tar.gz`.
+   For such a file, do not do this step. Use `"$SNAPSHOT"` in step 3.
+
+3. Unpack it:
+
+   ```sh
+   tar -xzf /root/restore/snapshot.tar.gz -C /root/restore
+   ```
+
+4. Move the old state aside:
+
+   ```sh
+   HOLD=/var/lib/k0s/.pre-restore-$(date -u +%Y%m%dT%H%M%SZ)
+   mkdir -p "$HOLD"
+   for dir in etcd pki manifests images helmhome; do
+     if [ -e "/var/lib/k0s/$dir" ]; then mv "/var/lib/k0s/$dir" "$HOLD/"; fi
+   done
+   ```
+
+5. Restore the k0s backup in the archive:
+
+   ```sh
+   k0s restore --config-out /root/restore/k0s.yaml /root/restore/k0s_backup_*.tar.gz
+   ```
+
+6. Start k0s:
+
+   ```sh
+   systemctl start k0scontroller
+   ```
+
+7. Delete the plain files. They hold the keys of the cluster:
+
+   ```sh
+   rm -rf /root/restore
+   ```
+
+The snapshot does not hold the encryption key of the Secrets. On a host that
+lost its disk, put the key at `/etc/bedrock/encryption/encryption.yaml`
+before step 5. See [Secrets at rest](secrets-at-rest.md). Delete `$HOLD` when
+the cluster works.
 
 ## Sealed archives
 
@@ -409,8 +469,10 @@ Set at least one admin recipient. Do these steps:
 1. Make an admin key on a machine that is not part of the cluster:
 
    ```
-   bedrock backup keygen > admin.key
+   (umask 077; bedrock backup keygen > admin.key)
    ```
+
+   This machine needs the `bedrock` binary.
 
    The file holds two lines. The first line is a comment with the public
    key. The second line is the identity:
@@ -433,13 +495,13 @@ You can set more than one recipient. Separate them with spaces or new lines.
 The default is empty. With an empty value, only the host key opens an
 archive.
 
-A new value applies to the next archive. A change does not change an archive
-that exists. An old archive keeps its old recipients.
+A new value applies to the next archive. An archive that exists keeps its
+old recipients.
 
 ### A value that is not valid
 
-Every field of the value must be an age recipient (`age1...`). Check the
-result:
+Every field of the value must be an age recipient (`age1...`). Read the
+condition of the Setting:
 
 ```
 kubectl get setting backup.archive-recipients -o jsonpath='{.status.conditions}'
@@ -457,12 +519,12 @@ These rules apply:
   Read the log with `journalctl -u bedrock-agent`. The Setting shows
   `Ready=False`. Correct the value. The next archive uses the correct value.
 - If you paste a secret key (`AGE-SECRET-KEY-...`), the value is not valid.
-  Bedrock refuses it and does not print it in the condition, in an event or
-  in a log. But the Setting still holds the text. Remove it from the
+  Bedrock does not use it. Bedrock does not print it in the condition, in an
+  event or in a log. The Setting still holds the text. Remove it from the
   Setting. Make a new admin key, because the pasted key is not secret now.
 - If the agent cannot read the Setting, because of an API error, the backup
-  fails. The agent tries again later. The agent never seals an archive
-  without the admin recipients because of an API error.
+  fails. The agent tries again later. An API error never makes the agent seal
+  to the host key only.
 
 ### Open an archive
 
@@ -480,9 +542,12 @@ bedrock backup decrypt --identity admin.key \
 ```
 
 The command does not use the cluster. It runs on any machine that has the
-`bedrock` binary and the archive. `--out -` writes the plain archive to
-standard output. An output file has mode `0600`. If the command fails, it
-leaves no output file.
+`bedrock` binary and the archive. An output file has mode `0600`. If the
+command fails, it leaves no output file.
+
+`--out -` writes the plain archive to standard output. With `--out -`, a
+failed decrypt can leave partial output on standard output. Check the exit
+code of the command.
 
 The output is the plain `tar.gz` archive. It holds the keys of the cluster.
 Keep it only as long as you need it. Then delete it.
@@ -499,10 +564,13 @@ identity. Then follow [Secrets at rest](secrets-at-rest.md).
 
 ### Archives of older releases
 
-Releases before this one wrote plain archives (`*.tar.gz`). When the agent
+Bedrock 0.5 and older wrote plain archives (`*.tar.gz`). When the agent
 starts, it seals each of them. It writes `<name>.age`, and then it removes
-the plain file. The agent also removes old `.work-*` and `.restore-*`
-directories from the backup directory.
+the plain file.
+
+The agent also removes leftover `.work-*` and `.restore-*` directories from
+the backup directory. It removes all of them when it starts. Later, it
+removes only the directories that are older than one hour.
 
 The list `status.backups` of the `Cluster` keeps the old path of such an
 archive. The file on disk is then `<path>.age`. The record keeps its old
