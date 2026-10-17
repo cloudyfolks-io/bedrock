@@ -587,7 +587,12 @@ func (f *fakeCeph) run(_ context.Context, command []string) ([]byte, error) {
 
 func cephFixture(t *testing.T, overrides ...map[string]any) *fakeCeph {
 	t.Helper()
-	data, err := os.ReadFile(filepath.Join("testdata", "ceph", "fresh.json"))
+	return fixtureFrom(t, "fresh.json", overrides...)
+}
+
+func fixtureFrom(t *testing.T, file string, overrides ...map[string]any) *fakeCeph {
+	t.Helper()
+	data, err := os.ReadFile(filepath.Join("testdata", "ceph", file))
 	if err != nil {
 		t.Fatal(err)
 	}

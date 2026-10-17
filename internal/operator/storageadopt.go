@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"regexp"
 	"slices"
 	"strings"
@@ -66,7 +67,7 @@ func renderAdopted(in AddonInput, adopt v1alpha1.AdoptSpec) (Rendered, error) {
 	switch phase {
 	case v1alpha1.ReasonAdopted:
 		objects := slices.Concat([]*unstructured.Unstructured{cluster}, storageObjects(replicas, hosts))
-		return Rendered{Objects: objects, Probes: []Probe{cephClusterProbe(cephGate(deviceCount(hosts)))}}, nil
+		return Rendered{Objects: objects, Probes: []Probe{cephClusterProbe(adoptedGate(cephGate(deviceCount(hosts)), in.CephProblems))}}, nil
 	case "", v1alpha1.ReasonWaitingForIdentity, v1alpha1.ReasonWaitingForHosts:
 		quorum := adoptedCondition(v1alpha1.ReasonWaitingForQuorum, "the CephCluster is rendered and waits for every monitor to join the quorum")
 		return adoptionPending(cluster, v1alpha1.ReasonWaitingForQuorum, quorum), nil
@@ -140,6 +141,178 @@ func adoptedHealthWarnings(replicas int) map[string]any {
 	muted := mutedHealthWarnings(replicas)
 	muted["AUTH_EMERGENCY_CIPHERS_SET"] = map[string]any{"policy": "mute"}
 	return muted
+}
+
+const verificationFailed = "VerificationFailed"
+
+var (
+	cephReleasePattern = regexp.MustCompile(`^ceph version ((\d+)[\d.]*)`)
+	imageTagPattern    = regexp.MustCompile(`^v?(\d+)\.\d+`)
+)
+
+type cephTree struct {
+	Nodes []struct {
+		ID       int    `json:"id"`
+		Name     string `json:"name"`
+		Type     string `json:"type"`
+		Children []int  `json:"children"`
+	} `json:"nodes"`
+}
+
+func adoptedProblems(ctx context.Context, c client.Client, exec execFunc, in AddonInput) []string {
+	if exec == nil || in.Cluster.Spec.Storage.Adopt == nil || adoptPhase(in.Cluster) != v1alpha1.ReasonAdopted {
+		return nil
+	}
+	image, replicas, err := storageSettings(in)
+	if err != nil {
+		return nil
+	}
+	pod, err := rookOperatorPod(ctx, c)
+	if err != nil {
+		return []string{safeMessage(err.Error())}
+	}
+	run := operatorRun(exec, pod)
+	nodes := osdNodeNames(in.Hosts)
+	return slices.Concat(
+		versionsProblems(ctx, run, image),
+		verified(ctx, run, "ceph osd pool ls detail", cephArgs("osd", "pool", "ls", "detail", "-f", "json"), func(pools []cephPoolState) []string {
+			return poolSizeMismatches(replicas, pools)
+		}),
+		verified(ctx, run, "ceph osd tree", cephArgs("osd", "tree", "-f", "json"), func(tree cephTree) []string {
+			return hostBucketMismatches(nodes, tree)
+		}),
+		statusProblems(ctx, run),
+	)
+}
+
+func verified[T any](ctx context.Context, run runFunc, what string, command []string, check func(T) []string) []string {
+	var data T
+	if err := readJSON(ctx, run, &data, command); err != nil {
+		return unreadable(what, err)
+	}
+	return check(data)
+}
+
+func unreadable(what string, err error) []string {
+	return []string{fmt.Sprintf("cannot read %s: %s", what, safeMessage(err.Error()))}
+}
+
+func versionsProblems(ctx context.Context, run runFunc, image string) []string {
+	major, tagged := imageMajor(image)
+	if !tagged {
+		return []string{fmt.Sprintf("ceph versions: the image %q has no release tag", image)}
+	}
+	return verified(ctx, run, "ceph versions", cephArgs("versions", "-f", "json"), func(sections map[string]map[string]int) []string {
+		return releaseMismatches(major, sections)
+	})
+}
+
+func imageMajor(image string) (string, bool) {
+	reference, _, _ := strings.Cut(image, "@")
+	_, tag, found := strings.Cut(reference[strings.LastIndex(reference, "/")+1:], ":")
+	match := imageTagPattern.FindStringSubmatch(tag)
+	if !found || match == nil {
+		return "", false
+	}
+	return match[1], true
+}
+
+func releaseMismatches(major string, sections map[string]map[string]int) []string {
+	var behind []string
+	for _, section := range slices.Sorted(maps.Keys(sections)) {
+		if section == "overall" {
+			continue
+		}
+		for _, version := range slices.Sorted(maps.Keys(sections[section])) {
+			number, daemonMajor := cephRelease(version)
+			if daemonMajor != major {
+				behind = append(behind, fmt.Sprintf("%s %s x%d", section, number, sections[section][version]))
+			}
+		}
+	}
+	if len(behind) == 0 {
+		return nil
+	}
+	return []string{fmt.Sprintf("ceph versions: not on release %s: %s", major, strings.Join(behind, ", "))}
+}
+
+func cephRelease(version string) (string, string) {
+	match := cephReleasePattern.FindStringSubmatch(version)
+	if match == nil {
+		return version, ""
+	}
+	return match[1], match[2]
+}
+
+func bedrockPool(name string) bool {
+	return name == blockPoolName || strings.HasPrefix(name, filesystemName+"-") || strings.HasPrefix(name, objectStoreName+".")
+}
+
+func poolSizeMismatches(replicas int, pools []cephPoolState) []string {
+	var off []string
+	for _, pool := range pools {
+		if bedrockPool(pool.Name) && pool.Size != replicas {
+			off = append(off, fmt.Sprintf("%s (%d)", pool.Name, pool.Size))
+		}
+	}
+	if len(off) == 0 {
+		return nil
+	}
+	return []string{fmt.Sprintf("ceph pools differ from storage.replicas %d: %s", replicas, strings.Join(off, ", "))}
+}
+
+func osdNodeNames(hosts []v1alpha1.Host) []string {
+	var names []string
+	for _, host := range hosts {
+		if slices.Contains(host.Spec.Roles, v1alpha1.RoleCephOSD) {
+			names = append(names, host.Name)
+		}
+	}
+	return names
+}
+
+func hostBucketMismatches(nodes []string, tree cephTree) []string {
+	kinds := map[int]string{}
+	for _, node := range tree.Nodes {
+		kinds[node.ID] = node.Type
+	}
+	var strays []string
+	for _, node := range tree.Nodes {
+		holdsOSD := slices.ContainsFunc(node.Children, func(id int) bool { return kinds[id] == "osd" })
+		if node.Type == "host" && holdsOSD && !slices.Contains(nodes, node.Name) {
+			strays = append(strays, node.Name)
+		}
+	}
+	if len(strays) == 0 {
+		return nil
+	}
+	return []string{"ceph osd tree: host buckets without a ceph-osd node: " + strings.Join(strays, ", ")}
+}
+
+func statusProblems(ctx context.Context, run runFunc) []string {
+	out, err := run(ctx, cephArgs("status", "-f", "json"))
+	if err != nil {
+		return unreadable("ceph status", err)
+	}
+	report, err := parseCephStatus(out)
+	if err != nil {
+		return unreadable("ceph status", err)
+	}
+	return slices.DeleteFunc([]string{cephHealthProblem(report), cephMisplacedProblem(report)}, func(problem string) bool { return problem == "" })
+}
+
+func adoptedGate(gate release.Gate, problems []string) release.Gate {
+	if len(problems) == 0 {
+		return gate
+	}
+	return func(obj *unstructured.Unstructured) release.Readiness {
+		readiness := gate(obj)
+		if readiness.Ready {
+			return release.Readiness{Reason: verificationFailed, Message: strings.Join(problems, "; ")}
+		}
+		readiness.Message = strings.Join(slices.Concat([]string{readiness.Message}, problems), "; ")
+		return readiness
+	}
 }
 
 const (

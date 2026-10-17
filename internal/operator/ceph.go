@@ -28,11 +28,12 @@ const (
 type execFunc func(ctx context.Context, namespace, pod, container string, command []string) ([]byte, error)
 
 type cephReport struct {
-	Skipped  bool
-	Health   string
-	PGs      int64
-	CleanPGs int64
-	UpOSDs   int64
+	Skipped   bool
+	Health    string
+	PGs       int64
+	CleanPGs  int64
+	UpOSDs    int64
+	Misplaced int64
 }
 
 func cephCommand() []string {
@@ -82,8 +83,9 @@ func parseCephStatus(data []byte) (cephReport, error) {
 			NumUpOSDs int64 `json:"num_up_osds"`
 		} `json:"osdmap"`
 		PGMap struct {
-			NumPGs  int64 `json:"num_pgs"`
-			ByState []struct {
+			NumPGs    int64 `json:"num_pgs"`
+			Misplaced int64 `json:"misplaced_objects"`
+			ByState   []struct {
 				Name  string `json:"state_name"`
 				Count int64  `json:"count"`
 			} `json:"pgs_by_state"`
@@ -101,7 +103,7 @@ func parseCephStatus(data []byte) (cephReport, error) {
 			clean += state.Count
 		}
 	}
-	return cephReport{Health: status.Health.Status, PGs: status.PGMap.NumPGs, CleanPGs: clean, UpOSDs: status.OSDMap.NumUpOSDs}, nil
+	return cephReport{Health: status.Health.Status, PGs: status.PGMap.NumPGs, CleanPGs: clean, UpOSDs: status.OSDMap.NumUpOSDs, Misplaced: status.PGMap.Misplaced}, nil
 }
 
 func cephPGProblem(report cephReport) string {
@@ -109,6 +111,13 @@ func cephPGProblem(report cephReport) string {
 		return ""
 	}
 	return fmt.Sprintf("ceph: %d of %d PGs are not %s", report.PGs-report.CleanPGs, report.PGs, cephActiveClean)
+}
+
+func cephMisplacedProblem(report cephReport) string {
+	if report.Skipped || report.Misplaced == 0 {
+		return ""
+	}
+	return fmt.Sprintf("ceph: %d objects are misplaced", report.Misplaced)
 }
 
 func cephHealthProblem(report cephReport) string {
