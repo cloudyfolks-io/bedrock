@@ -154,10 +154,11 @@ printf '%s' "$zone" | sed "s/\"$1\\.rgw\\./\"$2.rgw./g" | radosgw-admin zone set
 
 	zoneStalePoolsScript = `set -e
 zone=$(radosgw-admin zone get --rgw-zone="$2" "$3")
-printf '%s' "$zone" | grep -o "\"$1\\.rgw\\.[^\"]*\"" || true`
+printf '%s' "$zone" | grep -o "\"$1\\.rgw\\.[^\"]*\"" || [ $? -eq 1 ]`
 )
 
 var (
+	errZonePools    = errors.New("cannot read the pools of the zone")
 	cephNamePattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]*$`)
 	adoptStepPhases = []string{
 		v1alpha1.ReasonWaitingForQuorum,
@@ -224,6 +225,9 @@ func adoptStep(ctx context.Context, run runFunc, adopt v1alpha1.AdoptSpec, repli
 		return adoptedCondition(v1alpha1.ReasonRenameFailed, message)
 	}
 	state, err := readCephState(ctx, run, adopt)
+	if errors.Is(err, errZonePools) {
+		return adoptedCondition(v1alpha1.ReasonRenameFailed, safeMessage(err.Error()))
+	}
 	if err != nil {
 		return adoptedCondition(v1alpha1.ReasonWaitingForQuorum, "cannot read the Ceph state: "+safeMessage(err.Error()))
 	}
@@ -542,7 +546,7 @@ func readObjectStore(ctx context.Context, run runFunc, adopt v1alpha1.AdoptSpec,
 	}
 	out, err := run(ctx, zoneStalePoolsCommand(adopt.Pools.ObjectStore, zone))
 	if err != nil {
-		return cephState{}, err
+		return cephState{}, fmt.Errorf("%w: %w", errZonePools, err)
 	}
 	state.ZoneStalePools = quotedNames(out)
 	return state, nil

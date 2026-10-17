@@ -1337,7 +1337,7 @@ func TestZoneStalePoolsCommandFailsWhenTheZoneCannotBeRead(t *testing.T) {
 	}
 }
 
-func withRealShell(t *testing.T, fake *fakeCeph) (runFunc, *[][]byte, string) {
+func withRealShell(t *testing.T, fake *fakeCeph) (runFunc, *[][]byte, string, string) {
 	t.Helper()
 	dir, zoneGet, zoneSet := writeZoneStub(t, `cat "$ZONE_GET"`)
 	if err := os.WriteFile(zoneGet, []byte(zoneDocument(t)), 0o600); err != nil {
@@ -1360,12 +1360,36 @@ func withRealShell(t *testing.T, fake *fakeCeph) (runFunc, *[][]byte, string) {
 		*received = append(*received, out)
 		return out, err
 	}
-	return run, received, zoneSet
+	return run, received, zoneSet, dir
+}
+
+func TestAdoptStepFailsWhenThePoolsOfTheZoneCannotBeRead(t *testing.T) {
+	cases := []struct{ name, tool, script string }{
+		{"grep fails", "grep", "#!/bin/sh\nexit 2\n"},
+		{"grep is missing", "grep", "#!/bin/sh\nexit 127\n"},
+		{"zone get fails", "radosgw-admin", "#!/bin/sh\nexit 2\n"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			fake := cephFixture(t)
+			run, _, _, dir := withRealShell(t, fake)
+			if err := os.WriteFile(filepath.Join(dir, tc.tool), []byte(tc.script), 0o700); err != nil {
+				t.Fatal(err)
+			}
+			got := adoptStep(context.Background(), run, *adoptSpec(), 3)
+			if got.Status != metav1.ConditionFalse || got.Reason != v1alpha1.ReasonRenameFailed || !strings.HasPrefix(got.Message, "cannot read the pools of the zone: ") {
+				t.Fatalf("condition %+v", got)
+			}
+			if len(fake.mutations) != 0 {
+				t.Fatalf("ran %v", fake.mutations)
+			}
+		})
+	}
 }
 
 func TestTheZoneSystemKeyNeverReachesTheOperator(t *testing.T) {
 	fake := cephFixture(t)
-	run, received, zoneSet := withRealShell(t, fake)
+	run, received, zoneSet, _ := withRealShell(t, fake)
 	state, err := readCephState(context.Background(), run, *adoptSpec())
 	if err != nil {
 		t.Fatal(err)
