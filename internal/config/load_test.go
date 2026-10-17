@@ -297,3 +297,111 @@ func TestToClusterCopiesEncryption(t *testing.T) {
 		t.Fatal("ToCluster must not share the KMS spec with its input")
 	}
 }
+
+func loadAdopt(t *testing.T) v1alpha1.ClusterConfig {
+	t.Helper()
+	cfg, err := Load(filepath.Join("testdata", "adopt.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return cfg
+}
+
+func TestLoadReadsAdopt(t *testing.T) {
+	adopt := loadAdopt(t).Spec.Storage.Adopt
+	if adopt == nil {
+		t.Fatal("adopt is nil")
+	}
+	if adopt.FSID != "2f3b1c1e-8c5e-4a54-9f41-0c2f6d7a9b10" || adopt.KeyFile != "/root/ceph-keys.yaml" {
+		t.Fatalf("adopt %+v", adopt)
+	}
+	if len(adopt.Monitors) != 3 || adopt.Monitors[1] != (v1alpha1.AdoptMonitor{ID: "b", Node: "node-2", Address: "10.0.10.12"}) {
+		t.Fatalf("monitors %+v", adopt.Monitors)
+	}
+	if len(adopt.Hosts) != 3 || len(adopt.Hosts[0].Devices) != 2 || adopt.Hosts[2].Node != "node-3" {
+		t.Fatalf("hosts %+v", adopt.Hosts)
+	}
+	if adopt.Pools != (v1alpha1.AdoptPools{Block: "storage-block", Filesystem: "filesystem-data", ObjectStore: "objectstore"}) {
+		t.Fatalf("pools %+v", adopt.Pools)
+	}
+	var cephx map[string]any
+	if err := yaml.Unmarshal(adopt.Cephx.Raw, &cephx); err != nil {
+		t.Fatal(err)
+	}
+	want := map[string]any{"daemon": map[string]any{"keyType": "aes256k", "keyGeneration": float64(2)}}
+	if !reflect.DeepEqual(cephx, want) {
+		t.Fatalf("cephx %v, want %v", cephx, want)
+	}
+}
+
+func TestValidateAdopt(t *testing.T) {
+	cases := []struct {
+		name   string
+		mutate func(*v1alpha1.ClusterConfig)
+		want   string
+	}{
+		{"valid", func(c *v1alpha1.ClusterConfig) {}, ""},
+		{"one host needs no replica floor", func(c *v1alpha1.ClusterConfig) {
+			a := c.Spec.Storage.Adopt
+			a.Monitors = a.Monitors[:1]
+			a.Hosts = a.Hosts[:1]
+			c.Spec.Storage.Replicas = 1
+		}, ""},
+		{"no cephx", func(c *v1alpha1.ClusterConfig) { c.Spec.Storage.Adopt.Cephx = nil }, ""},
+		{"fsid not a uuid", func(c *v1alpha1.ClusterConfig) { c.Spec.Storage.Adopt.FSID = "not-a-uuid" }, "storage.adopt.fsid: not a lowercase UUID"},
+		{"fsid empty", func(c *v1alpha1.ClusterConfig) { c.Spec.Storage.Adopt.FSID = "" }, "storage.adopt.fsid: not a lowercase UUID"},
+		{"fsid uppercase", func(c *v1alpha1.ClusterConfig) {
+			c.Spec.Storage.Adopt.FSID = "2F3B1C1E-8C5E-4A54-9F41-0C2F6D7A9B10"
+		}, "storage.adopt.fsid: not a lowercase UUID"},
+		{"key file relative", func(c *v1alpha1.ClusterConfig) { c.Spec.Storage.Adopt.KeyFile = "ceph-keys.yaml" }, "storage.adopt.keyFile: not an absolute path"},
+		{"key file empty", func(c *v1alpha1.ClusterConfig) { c.Spec.Storage.Adopt.KeyFile = "" }, "storage.adopt.keyFile: not an absolute path"},
+		{"no monitors", func(c *v1alpha1.ClusterConfig) { c.Spec.Storage.Adopt.Monitors = nil }, "storage.adopt.monitors: need 1, 3 or 5 monitors, got 0"},
+		{"two monitors", func(c *v1alpha1.ClusterConfig) {
+			c.Spec.Storage.Adopt.Monitors = c.Spec.Storage.Adopt.Monitors[:2]
+		}, "storage.adopt.monitors: need 1, 3 or 5 monitors, got 2"},
+		{"monitor id with a digit", func(c *v1alpha1.ClusterConfig) { c.Spec.Storage.Adopt.Monitors[0].ID = "a1" }, "storage.adopt.monitors[0].id: not made of lowercase letters"},
+		{"monitor id empty", func(c *v1alpha1.ClusterConfig) { c.Spec.Storage.Adopt.Monitors[2].ID = "" }, "storage.adopt.monitors[2].id: not made of lowercase letters"},
+		{"monitor id uppercase", func(c *v1alpha1.ClusterConfig) { c.Spec.Storage.Adopt.Monitors[1].ID = "B" }, "storage.adopt.monitors[1].id: not made of lowercase letters"},
+		{"monitor address not an address", func(c *v1alpha1.ClusterConfig) { c.Spec.Storage.Adopt.Monitors[1].Address = "10.0.10" }, "storage.adopt.monitors[1].address: not an IPv4 address"},
+		{"monitor address ipv6", func(c *v1alpha1.ClusterConfig) { c.Spec.Storage.Adopt.Monitors[1].Address = "fd00::12" }, "storage.adopt.monitors[1].address: not an IPv4 address"},
+		{"monitor address empty", func(c *v1alpha1.ClusterConfig) { c.Spec.Storage.Adopt.Monitors[0].Address = "" }, "storage.adopt.monitors[0].address: not an IPv4 address"},
+		{"monitor node unknown", func(c *v1alpha1.ClusterConfig) { c.Spec.Storage.Adopt.Monitors[2].Node = "node-9" }, `storage.adopt.monitors[2].node: "node-9" is not in storage.adopt.hosts`},
+		{"device not by-id", func(c *v1alpha1.ClusterConfig) { c.Spec.Storage.Adopt.Hosts[0].Devices[1] = "/dev/sdb" }, "storage.adopt.hosts[0].devices[1]: not a clean path under /dev/disk/by-id/"},
+		{"device by-label", func(c *v1alpha1.ClusterConfig) {
+			c.Spec.Storage.Adopt.Hosts[1].Devices[0] = "/dev/disk/by-label/osd"
+		}, "storage.adopt.hosts[1].devices[0]: not a clean path under /dev/disk/by-id/"},
+		{"device escapes by-id", func(c *v1alpha1.ClusterConfig) {
+			c.Spec.Storage.Adopt.Hosts[2].Devices[0] = "/dev/disk/by-id/../../sda"
+		}, "storage.adopt.hosts[2].devices[0]: not a clean path under /dev/disk/by-id/"},
+		{"device is the directory", func(c *v1alpha1.ClusterConfig) {
+			c.Spec.Storage.Adopt.Hosts[2].Devices[0] = "/dev/disk/by-id/"
+		}, "storage.adopt.hosts[2].devices[0]: not a clean path under /dev/disk/by-id/"},
+		{"replicas 1 with 3 hosts", func(c *v1alpha1.ClusterConfig) { c.Spec.Storage.Replicas = 1 }, "storage.replicas must be at least 3 to adopt"},
+		{"replicas 2 with 3 hosts", func(c *v1alpha1.ClusterConfig) { c.Spec.Storage.Replicas = 2 }, "storage.replicas must be at least 3 to adopt"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			cfg := loadAdopt(t)
+			tc.mutate(&cfg)
+			err := Validate(cfg)
+			if tc.want == "" {
+				if err != nil {
+					t.Fatalf("Validate = %v", err)
+				}
+				return
+			}
+			if err == nil || err.Error() != tc.want {
+				t.Fatalf("Validate = %v, want %s", err, tc.want)
+			}
+		})
+	}
+}
+
+func TestValidateAdoptDefaultReplicasFailTheFloor(t *testing.T) {
+	cfg := loadAdopt(t)
+	cfg.Spec.Storage.Replicas = 0
+	err := Validate(WithDefaults(cfg))
+	if err == nil || err.Error() != "storage.replicas must be at least 3 to adopt" {
+		t.Fatalf("Validate = %v", err)
+	}
+}

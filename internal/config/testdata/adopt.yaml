@@ -1,0 +1,49 @@
+apiVersion: bedrock.cloudyfolks.io/v1alpha1
+kind: ClusterConfig
+metadata:
+  name: lab
+spec:
+  version: v0.1.0
+  api:
+    vip: 10.0.10.10
+  platform:
+    host: cloud.example.com
+  network:
+    managementInterface: bond0
+  storage:
+    replicas: 3
+    adopt:
+      fsid: 2f3b1c1e-8c5e-4a54-9f41-0c2f6d7a9b10
+      keyFile: /root/ceph-keys.yaml
+      monitors:
+        - id: a
+          node: node-1
+          address: 10.0.10.11
+        - id: b
+          node: node-2
+          address: 10.0.10.12
+        - id: c
+          node: node-3
+          address: 10.0.10.13
+      hosts:
+        - node: node-1
+          devices:
+            - /dev/disk/by-id/wwn-0x5002538b10164b70
+            - /dev/disk/by-id/wwn-0x5002538b101652a0
+        - node: node-2
+          devices:
+            - /dev/disk/by-id/wwn-0x5002538b00993b30
+        - node: node-3
+          devices:
+            - /dev/disk/by-id/wwn-0x5002538b0099b010
+      pools:
+        block: storage-block
+        filesystem: filesystem-data
+        objectStore: objectstore
+      cephx:
+        daemon:
+          keyType: aes256k
+          keyGeneration: 2
+  registry:
+    bundle: /opt/bedrock/bundle.tar.zst
+  roles: [control-plane, ceph-osd, fabric-gateway, workload]

@@ -2,6 +2,7 @@ package v1alpha1
 
 import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime"
 )
 
 type PlatformSpec struct {
@@ -53,6 +54,35 @@ type StorageSpec struct {
 	// +kubebuilder:validation:Minimum=1
 	// +optional
 	Replicas int32 `json:"replicas,omitempty"`
+	// +optional
+	Adopt *AdoptSpec `json:"adopt,omitempty"`
+}
+
+type AdoptSpec struct {
+	FSID     string         `json:"fsid"`
+	KeyFile  string         `json:"keyFile"`
+	Monitors []AdoptMonitor `json:"monitors"`
+	Hosts    []AdoptHost    `json:"hosts"`
+	Pools    AdoptPools     `json:"pools"`
+	// +optional
+	Cephx *runtime.RawExtension `json:"cephx,omitempty"`
+}
+
+type AdoptMonitor struct {
+	ID      string `json:"id"`
+	Node    string `json:"node"`
+	Address string `json:"address"`
+}
+
+type AdoptHost struct {
+	Node    string   `json:"node"`
+	Devices []string `json:"devices"`
+}
+
+type AdoptPools struct {
+	Block       string `json:"block"`
+	Filesystem  string `json:"filesystem"`
+	ObjectStore string `json:"objectStore"`
 }
 
 type VirtualizationSpec struct {

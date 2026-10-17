@@ -6,6 +6,7 @@ import (
 	"net/netip"
 	"os"
 	"path/filepath"
+	"regexp"
 	"slices"
 	"strconv"
 	"strings"
@@ -22,6 +23,13 @@ const (
 	defaultPodCIDR     = "10.16.0.0/16"
 	defaultServiceCIDR = "10.96.0.0/12"
 	DefaultJoinCIDR    = "100.64.0.0/16"
+
+	adoptDevicePrefix = "/dev/disk/by-id/"
+)
+
+var (
+	adoptFSID      = regexp.MustCompile(`^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$`)
+	adoptMonitorID = regexp.MustCompile(`^[a-z]+$`)
 )
 
 func Load(path string) (v1alpha1.ClusterConfig, error) {
@@ -134,6 +142,9 @@ func Validate(cfg v1alpha1.ClusterConfig) error {
 	if s.Storage.Replicas < 1 {
 		return fmt.Errorf("spec.storage.replicas must be at least 1")
 	}
+	if err := validateAdopt(s.Storage); err != nil {
+		return err
+	}
 	if len(s.Roles) == 0 {
 		return fmt.Errorf("spec.roles needs at least one role")
 	}
@@ -147,6 +158,59 @@ func Validate(cfg v1alpha1.ClusterConfig) error {
 	}
 	if !slices.Contains(s.Roles, v1alpha1.RoleCephOSD) {
 		return fmt.Errorf("the first node must carry the ceph-osd role")
+	}
+	return nil
+}
+
+func validateAdopt(storage v1alpha1.StorageSpec) error {
+	adopt := storage.Adopt
+	if adopt == nil {
+		return nil
+	}
+	if !adoptFSID.MatchString(adopt.FSID) {
+		return fmt.Errorf("storage.adopt.fsid: not a lowercase UUID")
+	}
+	if !filepath.IsAbs(adopt.KeyFile) {
+		return fmt.Errorf("storage.adopt.keyFile: not an absolute path")
+	}
+	if err := validateAdoptMonitors(*adopt); err != nil {
+		return err
+	}
+	if err := validateAdoptDevices(adopt.Hosts); err != nil {
+		return err
+	}
+	if len(adopt.Hosts) >= 3 && storage.Replicas < 3 {
+		return fmt.Errorf("storage.replicas must be at least 3 to adopt")
+	}
+	return nil
+}
+
+func validateAdoptMonitors(adopt v1alpha1.AdoptSpec) error {
+	if !slices.Contains([]int{1, 3, 5}, len(adopt.Monitors)) {
+		return fmt.Errorf("storage.adopt.monitors: need 1, 3 or 5 monitors, got %d", len(adopt.Monitors))
+	}
+	for i, monitor := range adopt.Monitors {
+		field := fmt.Sprintf("storage.adopt.monitors[%d]", i)
+		if !adoptMonitorID.MatchString(monitor.ID) {
+			return fmt.Errorf("%s.id: not made of lowercase letters", field)
+		}
+		if addr, err := netip.ParseAddr(monitor.Address); err != nil || !addr.Is4() {
+			return fmt.Errorf("%s.address: not an IPv4 address", field)
+		}
+		if !slices.ContainsFunc(adopt.Hosts, func(host v1alpha1.AdoptHost) bool { return host.Node == monitor.Node }) {
+			return fmt.Errorf("%s.node: %q is not in storage.adopt.hosts", field, monitor.Node)
+		}
+	}
+	return nil
+}
+
+func validateAdoptDevices(hosts []v1alpha1.AdoptHost) error {
+	for i, host := range hosts {
+		for j, device := range host.Devices {
+			if !strings.HasPrefix(device, adoptDevicePrefix) || filepath.Clean(device) != device {
+				return fmt.Errorf("storage.adopt.hosts[%d].devices[%d]: not a clean path under %s", i, j, adoptDevicePrefix)
+			}
+		}
 	}
 	return nil
 }
