@@ -123,6 +123,10 @@ state_capture() {
     case "$line" in
     STATE:*)
       key=${line#STATE:}
+      if [ -z "${key#*=}" ]; then
+        echo "empty value for ${key%%=*}" >&2
+        return 1
+      fi
       state_set "${key%%=*}" "${key#*=}"
       ;;
     esac
@@ -562,9 +566,11 @@ script_old_data() {
 for n in 1 2; do
   size=$((n * 16777216))
   gen_data "lab-image-$n" "$size" | op_exec_stdin rbd "$rook_conf" import --no-progress - "storage-block/lab-img$n"
-  echo "STATE:IMG_SHA_$n=$(gen_data "lab-image-$n" "$size" | sha_of)"
+  sum=$(gen_data "lab-image-$n" "$size" | sha_of)
+  echo "STATE:IMG_SHA_$n=$sum"
 done
-echo "STATE:FS_SHA=$(fs_file write filesystem-data)"
+sum=$(fs_file write filesystem-data)
+echo "STATE:FS_SHA=$sum"
 rgw_op --rgw-realm=objectstore --rgw-zonegroup=objectstore --rgw-zone=objectstore user create --uid=lab-user --display-name=lab-user --access-key="$S3_ACCESS" --secret="$S3_SECRET" >/dev/null
 endpoint=$(rgw_service objectstore)
 retry_until 300 curl -s -o /dev/null "http://$endpoint/"
@@ -572,7 +578,8 @@ s3 -X PUT "http://$endpoint/lab-bucket"
 for n in 1 2; do
   gen_data "lab-object-$n" "$((n * 262144))" >"/tmp/lab-object-$n"
   s3 -T "/tmp/lab-object-$n" "http://$endpoint/lab-bucket/lab-object-$n"
-  echo "STATE:S3_SHA_$n=$(sha_of <"/tmp/lab-object-$n")"
+  sum=$(sha_of <"/tmp/lab-object-$n")
+  echo "STATE:S3_SHA_$n=$sum"
   rm -f "/tmp/lab-object-$n"
 done
 rbd_op ls storage-block
@@ -612,10 +619,14 @@ SCRIPT
 
 script_export_facts() {
   cat <<'SCRIPT'
-echo "STATE:FSID=$(ceph_op fsid)"
-echo "STATE:MON_IDS=$(mon_ids)"
-echo "STATE:OSD_MAP=$(osd_map)"
-echo "STATE:OLD_POOLS=$(pool_sizes)"
+fsid=$(ceph_op fsid)
+echo "STATE:FSID=$fsid"
+ids=$(mon_ids)
+echo "STATE:MON_IDS=$ids"
+osds=$(osd_map)
+echo "STATE:OSD_MAP=$osds"
+pools=$(pool_sizes)
+echo "STATE:OLD_POOLS=$pools"
 flags=$(ceph_op fs get filesystem-data -f json | jq -c '.mdsmap.flags_state')
 echo "flags_state of the old CephFS: $flags"
 printf '%s' "$flags" | jq -e 'has("joinable") and has("refuse_client_session")' >/dev/null
