@@ -48,6 +48,7 @@ jobs:
       - run: bin/bedrock bundle build --release dist/release --arch amd64 --out dist/bedrock-${{ github.ref_name }}-bundle-amd64.tar.zst --bedrock-binary dist/bedrock-${{ github.ref_name }}-linux-amd64
       - run: cd dist && sha256sum bedrock-${{ github.ref_name }}-linux-amd64 bedrock-${{ github.ref_name }}-linux-arm64 bedrock-${{ github.ref_name }}-bundle-amd64.tar.zst > SHA256SUMS
       - run: cosign sign-blob --yes --bundle dist/SHA256SUMS.sigstore.json dist/SHA256SUMS
+      - run: cd dist && split -b 1900M -d -a 2 bedrock-${{ github.ref_name }}-bundle-amd64.tar.zst bedrock-${{ github.ref_name }}-bundle-amd64.tar.zst.part && rm bedrock-${{ github.ref_name }}-bundle-amd64.tar.zst
       - uses: actions/upload-artifact@v7
         with:
           name: assets
@@ -84,6 +85,7 @@ jobs:
         with:
           name: release-dir
           path: dist/release
+      - run: cd dist && cat bedrock-${{ github.ref_name }}-bundle-amd64.tar.zst.part* > bedrock-${{ github.ref_name }}-bundle-amd64.tar.zst && sha256sum -c --ignore-missing SHA256SUMS
       - run: make build VERSION=${{ github.ref_name }}
       - run: sudo -E env "PATH=$PATH" KUBECONFIG=/var/lib/k0s/pki/admin.conf VERSION=${{ github.ref_name }} BUNDLE=dist/bedrock-${{ github.ref_name }}-bundle-amd64.tar.zst hack/e2e-init.sh
   publish:
@@ -101,8 +103,15 @@ jobs:
           files: |
             dist/bedrock-${{ github.ref_name }}-linux-amd64
             dist/bedrock-${{ github.ref_name }}-linux-arm64
-            dist/bedrock-${{ github.ref_name }}-bundle-amd64.tar.zst
+            dist/bedrock-${{ github.ref_name }}-bundle-amd64.tar.zst.part*
             dist/SHA256SUMS
             dist/SHA256SUMS.sigstore.json
+          body: |
+            The offline bundle is split in parts below 2 GiB. Join the parts and check the sum before `bedrock init --bundle`:
+
+            ```
+            cat bedrock-${{ github.ref_name }}-bundle-amd64.tar.zst.part* > bedrock-${{ github.ref_name }}-bundle-amd64.tar.zst
+            sha256sum -c --ignore-missing SHA256SUMS
+            ```
           generate_release_notes: true
           fail_on_unmatched_files: true
