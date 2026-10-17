@@ -330,7 +330,8 @@ for arg in "$@"; do
   case "$arg" in
   file=*/_disks/*/datadisk,if=virtio,*)
     rest=${arg#*/_disks/}
-    args+=("$arg,serial=${rest%%/*}")
+    name=${rest%%/*}
+    args+=("${arg/,if=virtio,/,if=none,id=$name,}" -device "virtio-blk-pci,drive=$name,serial=$name")
     ;;
   *) args+=("$arg") ;;
   esac
