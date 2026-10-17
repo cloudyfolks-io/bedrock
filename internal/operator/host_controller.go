@@ -59,11 +59,28 @@ func (r *HostReconciler) reconcileHost(ctx context.Context, req ctrl.Request) (c
 	if err != nil {
 		return ctrl.Result{}, err
 	}
+	host, err = r.ensureAdoptDevices(ctx, host, cluster)
+	if err != nil {
+		return ctrl.Result{}, err
+	}
 	if err := r.ensureHostConfig(ctx, host, cluster); err != nil {
 		return ctrl.Result{}, err
 	}
 	next := hostStatus(host, &node, metav1.ConditionTrue, "RolesApplied", "")
 	return ctrl.Result{}, r.updateStatus(ctx, host, next)
+}
+
+func (r *HostReconciler) ensureAdoptDevices(ctx context.Context, host v1alpha1.Host, cluster v1alpha1.Cluster) (v1alpha1.Host, error) {
+	devices := v1alpha1.AdoptHostDevices(cluster.Spec.Storage.Adopt, host.Name)
+	if len(host.Spec.Storage.Devices) > 0 || len(devices) == 0 {
+		return host, nil
+	}
+	updated := *host.DeepCopy()
+	updated.Spec.Storage.Devices = devices
+	if err := r.Client.Update(ctx, &updated); err != nil {
+		return host, err
+	}
+	return updated, nil
 }
 
 func (r *HostReconciler) allHostRequests(ctx context.Context) []reconcile.Request {

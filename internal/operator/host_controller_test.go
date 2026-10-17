@@ -283,7 +283,7 @@ func TestHostReconcileGrantsOneAuthnRestartAtATime(t *testing.T) {
 	}
 }
 
-func TestHostReconcileGivesAdoptDevicesToACreatedHost(t *testing.T) {
+func TestHostReconcileGivesAdoptDevicesToHostsWithoutDevices(t *testing.T) {
 	c, _ := StartTestEnv(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(cancel)
@@ -294,6 +294,7 @@ func TestHostReconcileGivesAdoptDevicesToACreatedHost(t *testing.T) {
 		Hosts: []v1alpha1.AdoptHost{
 			{Node: "adopt-1", Devices: []string{"/dev/disk/by-id/wwn-0x1", "/dev/disk/by-id/wwn-0x2"}},
 			{Node: "adopt-2", Devices: []string{"/dev/disk/by-id/wwn-0x3"}},
+			{Node: "adopt-3", Devices: []string{"/dev/disk/by-id/wwn-0x4"}},
 		},
 		Pools: v1alpha1.AdoptPools{Block: "storage-block", Filesystem: "filesystem-data", ObjectStore: "objectstore"},
 	}
@@ -302,24 +303,33 @@ func TestHostReconcileGivesAdoptDevicesToACreatedHost(t *testing.T) {
 		t.Fatal(err)
 	}
 	nodeRoles := roles.Labels([]string{v1alpha1.RoleCephOSD, v1alpha1.RoleWorkload})
-	for _, name := range []string{"adopt-1", "adopt-2", "other-1"} {
+	for _, name := range []string{"adopt-1", "adopt-2", "adopt-3", "other-1"} {
 		if err := c.Create(ctx, &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: name, Labels: nodeRoles}}); err != nil {
 			t.Fatal(err)
 		}
 	}
-	existing := &v1alpha1.Host{ObjectMeta: metav1.ObjectMeta{Name: "adopt-2"}, Spec: v1alpha1.HostSpec{Roles: []string{v1alpha1.RoleCephOSD}}}
-	if err := c.Create(ctx, existing); err != nil {
-		t.Fatal(err)
+	hosts := []*v1alpha1.Host{
+		{ObjectMeta: metav1.ObjectMeta{Name: "adopt-2"}, Spec: v1alpha1.HostSpec{Roles: []string{v1alpha1.RoleCephOSD}}},
+		{ObjectMeta: metav1.ObjectMeta{Name: "adopt-3"}, Spec: v1alpha1.HostSpec{Roles: []string{v1alpha1.RoleCephOSD}, Storage: v1alpha1.HostStorageSpec{Devices: []string{"/dev/disk/by-id/manual"}}}},
+		{ObjectMeta: metav1.ObjectMeta{Name: "other-1"}, Spec: v1alpha1.HostSpec{Roles: []string{v1alpha1.RoleCephOSD}}},
+	}
+	for _, host := range hosts {
+		if err := c.Create(ctx, host); err != nil {
+			t.Fatal(err)
+		}
 	}
 	r := &HostReconciler{Client: c, APIReader: c}
-	for _, name := range []string{"adopt-1", "adopt-2", "other-1"} {
-		if _, err := r.Reconcile(ctx, ctrl.Request{NamespacedName: types.NamespacedName{Name: name}}); err != nil {
-			t.Fatal(err)
+	for range 2 {
+		for _, name := range []string{"adopt-1", "adopt-2", "adopt-3", "other-1"} {
+			if _, err := r.Reconcile(ctx, ctrl.Request{NamespacedName: types.NamespacedName{Name: name}}); err != nil {
+				t.Fatal(err)
+			}
 		}
 	}
 	want := map[string][]string{
 		"adopt-1": {"/dev/disk/by-id/wwn-0x1", "/dev/disk/by-id/wwn-0x2"},
-		"adopt-2": nil,
+		"adopt-2": {"/dev/disk/by-id/wwn-0x3"},
+		"adopt-3": {"/dev/disk/by-id/manual"},
 		"other-1": nil,
 	}
 	for name, devices := range want {
