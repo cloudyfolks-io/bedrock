@@ -11,7 +11,7 @@ export interface SettingMeta {
 }
 
 const booleanKeys = new Set(["kata.enabled", "loki.enabled", "authn.require-second-factor", "virt.emulation"]);
-const multilineKeys = new Set(["platform.additional-ca"]);
+const multilineKeys = new Set(["platform.additional-ca", "backup.archive-recipients"]);
 const enums: Record<string, string[]> = {
   "platform.tls-mode": ["SelfSigned", "LetsEncrypt", "Custom"],
   "letsencrypt.solver": ["http01", "dns01"],
@@ -36,6 +36,7 @@ const descriptions: Record<string, MessageDescriptor> = {
   "backup.target": msg({ id: "settings.desc.backupTarget", message: "Backup target URL, s3:// or nfs://." }),
   "backup.credentials-secret": msg({ id: "settings.desc.backupCredentials", message: "Secret name in bedrock-system holding backup credentials." }),
   "backup.etcd-schedule": msg({ id: "settings.desc.backupEtcd", message: "Cron schedule for etcd snapshots." }),
+  "backup.archive-recipients": msg({ id: "settings.desc.backupArchiveRecipients", message: "Age recipients (age1...) that can open every backup archive. Separate them with spaces or new lines. Keep their identities off the cluster." }),
   "audit.level": msg({ id: "settings.desc.auditLevel", message: "Audit level for read requests." }),
   "loki.retention-days": msg({ id: "settings.desc.lokiRetention", message: "Log retention in days when Loki is enabled." }),
   "kata.enabled": msg({ id: "settings.desc.kataEnabled", message: "Kata runtime addon." }),

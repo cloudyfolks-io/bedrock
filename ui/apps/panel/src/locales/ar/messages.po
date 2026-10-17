@@ -820,6 +820,9 @@ msgstr "اشتراط عامل ثانٍ لكل تسجيل دخول."
 msgid "settings.desc.authnSessionTtl"
 msgstr "مدة صلاحية ملف تعريف جلسة الدخول."
 
+msgid "settings.desc.backupArchiveRecipients"
+msgstr "مستلمو age (age1...) الذين يستطيعون فتح كل أرشيف نسخ احتياطي. افصل بينهم بمسافات أو أسطر جديدة. احتفظ بهوياتهم خارج العنقود."
+
 msgid "settings.desc.backupCredentials"
 msgstr "اسم Secret في bedrock-system الذي يحمل بيانات اعتماد النسخ الاحتياطي."
 

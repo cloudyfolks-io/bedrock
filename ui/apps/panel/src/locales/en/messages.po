@@ -820,6 +820,9 @@ msgstr "Require a second factor for every login."
 msgid "settings.desc.authnSessionTtl"
 msgstr "Login session cookie lifetime."
 
+msgid "settings.desc.backupArchiveRecipients"
+msgstr "Age recipients (age1...) that can open every backup archive. Separate them with spaces or new lines. Keep their identities off the cluster."
+
 msgid "settings.desc.backupCredentials"
 msgstr "Secret name in bedrock-system holding backup credentials."
 

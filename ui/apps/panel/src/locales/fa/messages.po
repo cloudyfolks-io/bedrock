@@ -820,6 +820,9 @@ msgstr "الزام عامل دوم برای هر ورود."
 msgid "settings.desc.authnSessionTtl"
 msgstr "عمر کوکی نشست ورود."
 
+msgid "settings.desc.backupArchiveRecipients"
+msgstr "گیرنده‌های age (age1...) که می‌توانند هر بایگانی پشتیبان را باز کنند. آن‌ها را با فاصله یا خط جدید جدا کنید. هویت آن‌ها را بیرون از خوشه نگه دارید."
+
 msgid "settings.desc.backupCredentials"
 msgstr "نام Secret در bedrock-system با اعتبارنامه پشتیبان."
 

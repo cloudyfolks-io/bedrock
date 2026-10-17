@@ -6,7 +6,7 @@ import type { Check, KubeList } from "../../api/types";
 import settings from "../../fixtures/settings.json";
 import { renderPanel } from "../../test/renderPanel";
 import SettingsPage from "./SettingsPage";
-import { groupSettings } from "./settingsCatalog";
+import { groupSettings, settingMeta } from "./settingsCatalog";
 
 const list = settings as unknown as KubeList;
 const path = "/apis/bedrock.cloudyfolks.io/v1alpha1/settings";
@@ -29,6 +29,12 @@ describe("SettingsPage", () => {
     const names = ["authn.session-ttl", "kata.enabled", "platform.host", "network.eip-mode", "zzz.custom", "platform.tls-mode"].map((name) => ({ metadata: { name } }));
     expect(groupSettings(names).map((group) => group.prefix)).toEqual(["platform", "network", "kata", "authn", "zzz"]);
     expect(groupSettings(names)[0]?.items.map((item) => item.metadata.name)).toEqual(["platform.host", "platform.tls-mode"]);
+  });
+
+  it("TestArchiveRecipientsAreMultiline", () => {
+    const meta = settingMeta("backup.archive-recipients");
+    expect(meta.kind).toBe("multiline");
+    expect(meta.description).toBeDefined();
   });
 
   it("shows key, description, default and the applied status", async () => {
