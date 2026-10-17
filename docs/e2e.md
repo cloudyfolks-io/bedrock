@@ -137,6 +137,13 @@ After the upgrade, the script checks these items.
 The job `e2e-upgrade-abort` checks that the archive that stays after the rollback ends in `.tar.gz.age`.
 The agent of version A restores from this sealed archive with the host key.
 
+## Adoption lab
+
+The script `hack/lab-adopt.sh` rehearses the adoption of a Rook Ceph cluster on three Lima VMs.
+It is not a job of the local runner. Run it by hand on a Linux host with about 46 GiB of free RAM.
+Do not run it while a gate runs.
+The runbook `docs/runbooks/adopt-ceph.md` describes the stages.
+
 ## Cleanup and teardown
 
 Each job run writes markers into the directory `/run/bedrock-e2e`.
