@@ -66,7 +66,7 @@ func sealPlaintext(plaintext string, recipients []age.Recipient) error {
 	if err := ensureSealed(plaintext, sealed, recipients); err != nil {
 		return err
 	}
-	return os.Remove(plaintext)
+	return removeIfExists(plaintext)
 }
 
 func ensureSealed(plaintext, sealed string, recipients []age.Recipient) error {

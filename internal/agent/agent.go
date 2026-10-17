@@ -16,7 +16,6 @@ import (
 
 	"github.com/cloudyfolks-io/bedrock/api/v1alpha1"
 	"github.com/cloudyfolks-io/bedrock/internal/authn/apiserver"
-	"github.com/cloudyfolks-io/bedrock/internal/backup/seal"
 	"github.com/cloudyfolks-io/bedrock/internal/host"
 	"github.com/cloudyfolks-io/bedrock/internal/hostconfig"
 	"github.com/cloudyfolks-io/bedrock/internal/maintenance"
@@ -54,9 +53,9 @@ func Run(ctx context.Context, c client.WithWatch, deps Deps) error {
 	events, stop := ensureWatch(ctx, c, deps.Node)
 	defer func() { stop() }()
 	if err := removeStaleLeftovers(deps.Root, deps.Now()); err != nil {
-		fmt.Fprintf(os.Stderr, "agent: stale backup files: %v\n", err)
+		logLine(fmt.Sprintf("stale backup files: %v", err))
 	}
-	if _, err := seal.EnsureHostIdentity(deps.Root); err != nil {
+	if _, err := ensureHostKey(deps.Root, logLine); err != nil {
 		logLine(fmt.Sprintf("host backup key: %v", err))
 	}
 	var snapshots sync.WaitGroup

@@ -30,6 +30,7 @@ const (
 	archiveSuffix       = ".tar.gz"
 	sealedSuffix        = archiveSuffix + seal.Suffix
 	partialSuffix       = ".partial"
+	newHostKeyLine      = "host backup key " + seal.HostKeyFile + " is new; older sealed archives open only with an admin identity"
 )
 
 var ovnDatabases = []string{"ovnnb_db.db", "ovnsb_db.db"}
@@ -48,11 +49,28 @@ func backup(ctx context.Context, env StepEnv) (Outcome, error) {
 }
 
 func sealRecipients(ctx context.Context, c client.Client, deps Deps, name string) ([]age.Recipient, error) {
-	identity, err := seal.EnsureHostIdentity(deps.Root)
+	identity, err := ensureHostKey(deps.Root, logLine)
 	if err != nil {
 		return nil, fmt.Errorf("host backup key: %w", err)
 	}
 	return archiveRecipients(ctx, c, identity.Recipient(), name, logLine)
+}
+
+func ensureHostKey(root string, log func(string)) (*age.X25519Identity, error) {
+	_, statErr := os.Stat(filepath.Join(root, seal.HostKeyFile))
+	identity, err := seal.EnsureHostIdentity(root)
+	if err != nil {
+		return nil, err
+	}
+	if errors.Is(statErr, fs.ErrNotExist) && sealedArchivesExist(root) {
+		log(newHostKeyLine)
+	}
+	return identity, nil
+}
+
+func sealedArchivesExist(root string) bool {
+	matches, err := filepath.Glob(filepath.Join(root, backupDir, "*"+sealedSuffix))
+	return err == nil && len(matches) > 0
 }
 
 func logLine(line string) {

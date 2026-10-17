@@ -169,6 +169,18 @@ func TestSealPlaintextArchivesGoesOnAfterAFailedArchive(t *testing.T) {
 	}
 }
 
+func TestSealPlaintextAcceptsAPlaintextThatIsAlreadyGone(t *testing.T) {
+	dir := backupDirOf(t.TempDir())
+	plaintext := filepath.Join(dir, "etcd-20260902T100000Z.tar.gz")
+	writeFixtureFile(t, plaintext+".age", "sealed")
+	if err := sealPlaintext(plaintext, nil); err != nil {
+		t.Fatal(err)
+	}
+	if got := listNames(t, dir); !slices.Equal(got, []string{"etcd-20260902T100000Z.tar.gz.age"}) {
+		t.Fatalf("files %v", got)
+	}
+}
+
 func TestSealPlaintextArchivesLeavesOtherFilesAlone(t *testing.T) {
 	root := t.TempDir()
 	dir := backupDirOf(root)
@@ -339,6 +351,52 @@ func TestTidyBackupDirCreatesNoHostKeyWithoutPlaintextArchives(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(deps.Root, seal.HostKeyFile)); err == nil {
 		t.Fatal("a host without plaintext archives needs no host key")
+	}
+}
+
+func TestEnsureHostKeyWarnsWhenANewKeyMeetsSealedArchives(t *testing.T) {
+	root := t.TempDir()
+	writeFixtureFile(t, filepath.Join(backupDirOf(root), "etcd-20260902T100000Z.tar.gz.age"), "sealed")
+	log, lines := captureLog()
+	if _, err := ensureHostKey(root, log); err != nil {
+		t.Fatal(err)
+	}
+	want := []string{"host backup key /etc/bedrock/backup/host.key is new; older sealed archives open only with an admin identity"}
+	if !slices.Equal(lines(), want) {
+		t.Fatalf("log %v, want %v", lines(), want)
+	}
+	if _, err := ensureHostKey(root, log); err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Equal(lines(), want) {
+		t.Fatalf("a known key must not log again: %v", lines())
+	}
+}
+
+func TestEnsureHostKeyStaysQuietWhenNothingSealedIsAtRisk(t *testing.T) {
+	cases := map[string]func(t *testing.T, root string){
+		"no archives": func(t *testing.T, root string) {},
+		"plaintext and partial files only": func(t *testing.T, root string) {
+			writeFixtureFile(t, filepath.Join(backupDirOf(root), "etcd-20260902T100000Z.tar.gz"), "plain")
+			writeFixtureFile(t, filepath.Join(backupDirOf(root), "etcd-20260903T100000Z.tar.gz.age.partial"), "half")
+		},
+		"the key exists": func(t *testing.T, root string) {
+			if _, err := seal.EnsureHostIdentity(root); err != nil {
+				t.Fatal(err)
+			}
+			writeFixtureFile(t, filepath.Join(backupDirOf(root), "etcd-20260902T100000Z.tar.gz.age"), "sealed")
+		},
+	}
+	for name, setup := range cases {
+		root := t.TempDir()
+		setup(t, root)
+		log, lines := captureLog()
+		if _, err := ensureHostKey(root, log); err != nil {
+			t.Fatalf("%s: %v", name, err)
+		}
+		if len(lines()) != 0 {
+			t.Fatalf("%s: log %v", name, lines())
+		}
 	}
 }
 
