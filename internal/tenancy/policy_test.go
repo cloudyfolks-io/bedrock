@@ -277,3 +277,76 @@ func TestNamespaceTenantLabelsBelongToTheOperator(t *testing.T) {
 		t.Errorf("the operator could not create: %v", err)
 	}
 }
+
+func vrfPolicyWorld(t *testing.T) (admin, alice, root client.Client) {
+	t.Helper()
+	admin, cfg := startEnv(t)
+	mustCreate(t, admin,
+		&rbacv1.ClusterRole{ObjectMeta: metav1.ObjectMeta{Name: "network-writer"}, Rules: []rbacv1.PolicyRule{{APIGroups: []string{"bedrock.cloudyfolks.io"}, Resources: []string{"networks"}, Verbs: []string{"create", "update", "get"}}}},
+		&rbacv1.ClusterRoleBinding{
+			ObjectMeta: metav1.ObjectMeta{Name: "network-writer"},
+			RoleRef:    rbacv1.RoleRef{APIGroup: rbacv1.GroupName, Kind: "ClusterRole", Name: "network-writer"},
+			Subjects: []rbacv1.Subject{
+				{APIGroup: rbacv1.GroupName, Kind: "User", Name: "bedrock:alice"},
+				{APIGroup: rbacv1.GroupName, Kind: "Group", Name: "bedrock:bedrock-admins"},
+			},
+		},
+	)
+	applyFile(t, admin, manifestPath("86-tenancy", "60-network-vrf-policy.yaml"))
+	alice = actingAs(t, cfg, "bedrock:alice")
+	root = actingAs(t, cfg, "bedrock:root", "bedrock:bedrock-admins", "system:authenticated")
+	if err := eventuallyForbidden(t, denyCreate(admin, alice, networkWithVrf("probe", 1500))); err == nil {
+		t.Fatal("the VRF policy never denied")
+	}
+	return admin, alice, root
+}
+
+func networkWithVrf(name string, id int32) *v1alpha1.Network {
+	network := networkFor(name, "acme")
+	network.Spec.VrfID = ptr.To(id)
+	return network
+}
+
+func TestNonAdminCannotCreateANetworkWithAVrfID(t *testing.T) {
+	_, alice, _ := vrfPolicyWorld(t)
+	err := alice.Create(context.Background(), networkWithVrf("acme-pinned", 1500))
+	if !apierrors.IsForbidden(err) || !strings.Contains(err.Error(), "only an administrator may set or change vrfId") {
+		t.Fatalf("err = %v", err)
+	}
+}
+
+func TestNonAdminCanCreateANetworkWithoutAVrfID(t *testing.T) {
+	_, alice, _ := vrfPolicyWorld(t)
+	mustCreate(t, alice, networkFor("acme-plain", "acme"))
+}
+
+func TestAdminCanSetAVrfID(t *testing.T) {
+	_, _, root := vrfPolicyWorld(t)
+	mustCreate(t, root, networkWithVrf("acme-pinned", 1500))
+	later := networkFor("acme-later", "acme")
+	mustCreate(t, root, later)
+	later.Spec.VrfID = ptr.To(int32(60001))
+	if err := root.Update(context.Background(), later); err != nil {
+		t.Fatalf("an administrator must be able to pin a VRF id later: %v", err)
+	}
+}
+
+func TestNonAdminCannotPinAVrfIDLaterButCanEditOtherFields(t *testing.T) {
+	admin, alice, _ := vrfPolicyWorld(t)
+	ctx := context.Background()
+	plain, pinned := networkFor("acme-plain", "acme"), networkWithVrf("acme-pinned", 1500)
+	mustCreate(t, admin, plain, pinned)
+
+	plain.Spec.VrfID = ptr.To(int32(1600))
+	if err := alice.Update(ctx, plain); !apierrors.IsForbidden(err) {
+		t.Fatalf("pin later err = %v", err)
+	}
+
+	if err := admin.Get(ctx, client.ObjectKey{Name: "acme-pinned"}, pinned); err != nil {
+		t.Fatal(err)
+	}
+	pinned.Spec.EnableExternal = true
+	if err := alice.Update(ctx, pinned); err != nil {
+		t.Fatalf("an unrelated change of a pinned Network must pass: %v", err)
+	}
+}
