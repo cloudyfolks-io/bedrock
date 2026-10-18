@@ -240,9 +240,16 @@ The policy `bedrock-elasticip-pool` reads the label `usability` of the Fabric `S
 
 Set `network.eip-mode` to `l2`.
 OVN answers ARP for the address on the provider network.
-Every Network with `enableExternal` takes one address on each provider network for its router port.
+Every Network with `enableExternal` takes one address on each provider network of the role `tenant` for its router port.
+Provider networks of the roles `platform`, `services` and `transit` are not attached to a Network.
+The default route of a new Network goes to the first `tenant` provider network by name.
+A Network that has no `tenant` provider network gets `ExternalReady=False` with the reason `NoProviderNetwork`.
+A Vpc that already has external subnets keeps them and keeps its default route.
+A new `tenant` provider network is added to it, and a role change does not detach a subnet from it.
 With many tenants this uses many public addresses.
 Use bgp mode to avoid this cost.
+The `fabric-frr` DaemonSet runs on the gateway nodes in L2 mode too, but the operator does not check it, and it does not change `ExternalReady` or the ElasticIP status.
+In L2 mode the agent has no work and stays idle.
 
 ### BGP mode
 
@@ -386,7 +393,7 @@ Then take the action in the table.
 | `NetworkNotFound` | The Network does not exist. Fix `networkRef`. |
 | `NetworkNotReady` | The Network is not ready. Wait. |
 | `NoPoolCapacity` | The ElasticIP names no provider network, and every `tenant` provider network is full or none exists. Add addresses or a `tenant` provider network. The operator checks again every few seconds. |
-| `NoProviderNetwork` | The Network wants an external connection and no provider network exists. Set `network.provider-networks`. |
+| `NoProviderNetwork` | The Network wants an external connection and no provider network exists. In L2 mode a provider network of the role `tenant` must exist. Set `network.provider-networks`. |
 | `NoTargets` | No target has an address yet. Wait for the VMs. |
 | `NotAttached` | No Subnet names this zone in `dnsZoneRef`. Set `dnsZoneRef` on a Subnet. |
 | `Pending` | Fabric has not connected the Network yet. Wait. |
@@ -416,7 +423,7 @@ Then take the action in the table.
 - A Subnet CIDR must not overlap a provider network, the join subnet, a range of `network.reserved-cidrs`, the API address or a node address. The operator does not check the pod and service ranges, because tenant VPCs are isolated. The management range is known only as single addresses.
 - A VM without an ElasticIP has no route to the internet.
 - A health check is on or off. The other health check fields are not used.
-- L2 mode has one default route, to the first provider network.
+- L2 mode has one default route, to the first `tenant` provider network by name.
 - You cannot change the elastic IP mode on a cluster that has ElasticIPs.
 - An internal LoadBalancer has no health checks.
 
