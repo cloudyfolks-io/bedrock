@@ -19,7 +19,8 @@ const (
 	maxInterfaceLength    = 15
 	maxVlan               = 4094
 	rangeSeparator        = ".."
-	minBGPTimer           = time.Second
+	minHoldTime           = 3 * time.Second
+	minKeepaliveTime      = time.Second
 	maxBGPTimer           = 300 * time.Second
 	maxPrefixLength       = 32
 	maxTableID            = 999
@@ -42,15 +43,15 @@ func networkDefinitions() []Definition {
 		{"network.bgp.transit-network", "", "Provider network that carries the router ports in bgp mode.", dnsLabelValue},
 		{"network.dns-servers", "", "Comma list of IPv4 resolvers that DHCP gives to guests.", ipv4ListValue},
 		{"network.bgp.bfd", "true", "Enable BFD on every BGP peer.", boolean},
-		{"network.bgp.hold-time", "9s", "BGP hold time, from 1s to 300s.", durationBetween(minBGPTimer, maxBGPTimer)},
-		{"network.bgp.keepalive-time", "3s", "BGP keepalive time, from 1s to 300s.", durationBetween(minBGPTimer, maxBGPTimer)},
+		{"network.bgp.hold-time", "9s", "BGP hold time in whole seconds, from 3s to 300s. A peer refuses a hold time of 1s or 2s.", wholeSecondsBetween(minHoldTime, maxBGPTimer)},
+		{"network.bgp.keepalive-time", "3s", "BGP keepalive time in whole seconds, from 1s to 300s.", wholeSecondsBetween(minKeepaliveTime, maxBGPTimer)},
 		{"network.bgp.graceful-restart", "true", "Keep the BGP routes while a peer restarts.", boolean},
 		{"network.bgp.advertise-filter", "", "Comma list of <cidr> ge <n> le <n> entries, with the mask length <= ge <= le <= 32. The FRR agent advertises only the matching routes. Empty advertises all routes.", advertiseFilterValue},
 		{"network.bgp.redistribute-tables", "", "Comma list of host routing table ids from 1 to 999 that the FRR agent redistributes. 253, 254 and 255 are reserved. Ids from 1000 up are the VRF ids of the VPCs.", tableIDsValue},
 	}
 }
 
-func durationBetween(minimum, maximum time.Duration) func(string) error {
+func wholeSecondsBetween(minimum, maximum time.Duration) func(string) error {
 	return func(v string) error {
 		if v == "" {
 			return nil
@@ -59,8 +60,8 @@ func durationBetween(minimum, maximum time.Duration) func(string) error {
 		if err != nil {
 			return err
 		}
-		if d < minimum || d > maximum {
-			return fmt.Errorf("value %s outside %s to %s", d, minimum, maximum)
+		if d < minimum || d > maximum || d%time.Second != 0 {
+			return fmt.Errorf("value %s must be whole seconds from %s to %s", d, minimum, maximum)
 		}
 		return nil
 	}

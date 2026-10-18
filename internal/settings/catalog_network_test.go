@@ -115,12 +115,21 @@ func TestBGPBooleanValidation(t *testing.T) {
 }
 
 func TestBGPTimerValidation(t *testing.T) {
-	cases := map[string]bool{
-		"": true, "1s": true, "9s": true, "300s": true, "5m": true, "5m0s": true,
-		"0s": false, "999ms": false, "301s": false, "5m1s": false, "-3s": false, "9": false, "nine": false,
+	shared := map[string]bool{
+		"": true, "3s": true, "9s": true, "300s": true, "5m": true, "5m0s": true,
+		"0s": false, "999ms": false, "1500ms": false, "3500ms": false, "2.5s": false, "301s": false, "5m1s": false, "-3s": false, "9": false, "nine": false,
 	}
-	for _, key := range []string{"network.bgp.hold-time", "network.bgp.keepalive-time"} {
-		for value, valid := range cases {
+	cases := map[string]map[string]bool{
+		"network.bgp.hold-time":      {"1s": false, "2s": false},
+		"network.bgp.keepalive-time": {"1s": true, "2s": true},
+	}
+	for key, own := range cases {
+		for value, valid := range shared {
+			if (validates(t, key, value) == nil) != valid {
+				t.Fatalf("%s %q valid=%v", key, value, valid)
+			}
+		}
+		for value, valid := range own {
 			if (validates(t, key, value) == nil) != valid {
 				t.Fatalf("%s %q valid=%v", key, value, valid)
 			}

@@ -222,8 +222,8 @@ Remove the group from the VM first.
 | `network.bgp.peers` | empty | Comma list of `<ipv4>@<asn>`. |
 | `network.bgp.transit-network` | empty | Provider network that carries the router ports in bgp mode. |
 | `network.bgp.bfd` | `true` | Enable BFD on every BGP peer. |
-| `network.bgp.hold-time` | `9s` | BGP hold time, from `1s` to `300s`. |
-| `network.bgp.keepalive-time` | `3s` | BGP keepalive time, from `1s` to `300s`. |
+| `network.bgp.hold-time` | `9s` | BGP hold time in whole seconds, from `3s` to `300s`. A peer refuses a hold time of `1s` or `2s`. |
+| `network.bgp.keepalive-time` | `3s` | BGP keepalive time in whole seconds, from `1s` to `300s`. |
 | `network.bgp.graceful-restart` | `true` | Keep the BGP routes while a peer restarts. |
 | `network.bgp.advertise-filter` | empty | Comma list of `<cidr> ge <n> le <n>` entries. The mask length must not be more than `ge`, and `ge` must not be more than `le`, which is at most 32. The agent advertises only the matching routes. |
 | `network.bgp.redistribute-tables` | empty | Comma list of host routing table ids from 1 to 999. 253, 254 and 255 are reserved. Ids from 1000 up are the VRF ids of the VPCs, and the agent refuses a host table that equals one of them. |
