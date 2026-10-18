@@ -5,7 +5,10 @@ import (
 	"strings"
 )
 
-const providerAnnotationDomain = ".cloudyfolks.io/"
+const (
+	providerAnnotationDomain = ".cloudyfolks.io/"
+	addressAnnotation        = "ip_address"
+)
 
 type NIC struct {
 	Namespace      string
@@ -17,6 +20,10 @@ type NIC struct {
 
 func nicPrefix(nic NIC) string {
 	return SubnetProvider(nic.Namespace, nic.Subnet) + providerAnnotationDomain
+}
+
+func IsAddressAnnotation(key string) bool {
+	return strings.HasSuffix(key, providerAnnotationDomain+addressAnnotation)
 }
 
 func securityGroupNames(nic NIC) string {
@@ -39,7 +46,7 @@ func nicAnnotations(index int, nic NIC) map[string]string {
 		annotations[prefix+"mac_address"] = nic.MAC
 	}
 	if nic.Address != "" {
-		annotations[prefix+"ip_address"] = nic.Address
+		annotations[prefix+addressAnnotation] = nic.Address
 	}
 	if index > 0 {
 		annotations[prefix+"default_route"] = "false"

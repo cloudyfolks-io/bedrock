@@ -299,3 +299,36 @@ func TestPinnedVMRequeuesUntilItsAddressIsAllocated(t *testing.T) {
 		t.Fatalf("addresses %+v", got)
 	}
 }
+
+func TestRunningPodKeepsItsAddressWhenTheNICIsAttachedAgain(t *testing.T) {
+	c, _ := startEnv(t)
+	ns := seedPlatform(t, c)
+	createSubnet(t, c, ns, "backend", metav1.ConditionTrue)
+	createVM(t, c, ns, "web-1", func(vm *v1alpha1.VirtualMachine) {
+		vm.Spec.Disks = nil
+		vm.Spec.Networks = []v1alpha1.VMNetwork{{SubnetRef: "default", Address: "10.100.0.50", SecurityGroups: []string{"web"}}, {SubnetRef: "backend", SecurityGroups: []string{"web"}}}
+	})
+	r := newVMReconciler(c)
+	launcherPodFor(t, c, ns, "launcher-web-1", "web-1", allocatedAnnotations(ns, "10.100.0.50"), map[string]string{})
+	reconcileVM(t, r, ns, "web-1")
+	reconcileVM(t, r, ns, "web-1")
+	setNetworks := func(networks []v1alpha1.VMNetwork) {
+		vm := getVM(t, c, ns, "web-1")
+		vm.Spec.Networks = networks
+		must(t, c.Update(context.Background(), &vm))
+		reconcileVM(t, r, ns, "web-1")
+	}
+	setNetworks([]v1alpha1.VMNetwork{{SubnetRef: "backend", SecurityGroups: []string{"web"}}})
+	setNetworks([]v1alpha1.VMNetwork{{SubnetRef: "backend", SecurityGroups: []string{"web"}}, {SubnetRef: "default", Address: "10.100.0.77", SecurityGroups: []string{"web"}}})
+	var pod corev1.Pod
+	must(t, c.Get(context.Background(), client.ObjectKey{Namespace: ns, Name: "launcher-web-1"}, &pod))
+	if got := pod.Annotations["default."+ns+".fabric.cloudyfolks.io/ip_address"]; got != "10.100.0.50" {
+		t.Fatalf("the running pod ip_address is %q", got)
+	}
+	if got := getVM(t, c, ns, "web-1").Status.Addresses; len(got) != 1 || got[0].IP != "10.100.0.50" {
+		t.Fatalf("addresses %+v", got)
+	}
+	if pod.Annotations["default."+ns+".fabric.cloudyfolks.io/security_groups"] != network.FabricName(ns, "web") {
+		t.Fatalf("the other annotations still follow the VM: %+v", pod.Annotations)
+	}
+}

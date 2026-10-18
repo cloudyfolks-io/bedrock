@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"strings"
 	"time"
 
@@ -322,6 +323,7 @@ func (r *VirtualMachineReconciler) syncLauncherPods(ctx context.Context, vm v1al
 		return err
 	}
 	annotations, labels := network.PodNetworkMetadata(nics)
+	maps.DeleteFunc(annotations, func(key, _ string) bool { return network.IsAddressAnnotation(key) })
 	for index := range pods.Items {
 		pod := &pods.Items[index]
 		if !pod.DeletionTimestamp.IsZero() {

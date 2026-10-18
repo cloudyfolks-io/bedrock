@@ -75,6 +75,7 @@ Follow these rules.
 5. Add the label `sg.bedrock.cloudyfolks.io/<group>: "true"` for each security group of the VM.
 6. When the security groups of a running VM change, patch the same annotations and labels on the running pod.
    Fabric applies the change at once.
+   Never patch `ip_address` on a pod that exists. A pinned address applies only when the pod starts.
 7. Check a pinned address before the VM starts.
    The address must be inside the Subnet CIDR.
    It must not be the gateway, the network address, the broadcast address or an excluded address.

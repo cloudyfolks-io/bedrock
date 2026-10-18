@@ -64,6 +64,20 @@ func TestPodNetworkMetadataSharesGroupLabelsAcrossNICs(t *testing.T) {
 	}
 }
 
+func TestIsAddressAnnotation(t *testing.T) {
+	cases := map[string]bool{
+		"default.t1-prod.fabric.cloudyfolks.io/ip_address":     true,
+		"default.t1-prod.fabric.cloudyfolks.io/mac_address":    false,
+		"default.t1-prod.fabric.cloudyfolks.io/ip_address.net": false,
+		"ip_address": false,
+	}
+	for key, want := range cases {
+		if got := IsAddressAnnotation(key); got != want {
+			t.Errorf("%s: got %v want %v", key, got, want)
+		}
+	}
+}
+
 func TestAttachments(t *testing.T) {
 	got := Attachments([]NIC{{Namespace: "t1-prod", Subnet: "default"}, {Namespace: "t1-prod", Subnet: "backend"}})
 	if !slices.Equal(got, []string{"t1-prod/default", "t1-prod/backend"}) {

@@ -98,6 +98,8 @@ Without an `address`, Fabric chooses the address.
 The `address` cannot change after you create the VM.
 You cannot add it to an entry later, and you cannot remove it.
 To use another address, remove the entry and add it again with the new address.
+The new address applies when the VM starts again.
+A running VM keeps its address until then.
 
 The operator checks the address before it starts the VM.
 The check fails in these cases:
