@@ -134,6 +134,27 @@ k0s_images_listing() {
   find /var/lib/k0s/images -type f -printf '%P %s\n' | sort
 }
 
+local_pause_image() {
+  local images
+  images=$(/usr/local/bin/k0s ctr --namespace k8s.io images ls -q) || return 1
+  grep -m1 '/pause:' <<<"$images"
+}
+
+node_lease_renewed_since() {
+  local renewed
+  renewed=$(kubectl -n kube-node-lease get lease "$node" -o jsonpath='{.spec.renewTime}') || return 1
+  [ -n "$renewed" ] && [ "$(date -u -d "$renewed" +%s)" -ge "$1" ]
+}
+
+assert_no_image_pull_failures() {
+  local waiting
+  waiting=$(kubectl get pods -A -o jsonpath='{range .items[*]}{.status.containerStatuses[*].state.waiting.reason}{"\n"}{end}')
+  if grep -qE 'ImagePullBackOff|ErrImagePull' <<<"$waiting"; then
+    echo "a pod waits on an image pull" >&2
+    return 1
+  fi
+}
+
 BUNDLE=dist/bedrock-$VERSION_A-bundle-$arch.tar.zst VERSION=$VERSION_A IMAGE=$image_a \
   BIN=dist/bedrock-$VERSION_A-linux-$arch RELEASE_DIR=dist/release-$VERSION_A ARCH=$arch bash "$init_a"
 
@@ -250,10 +271,7 @@ if [ -n "$abort_in" ]; then
   assert_age_file "$(newest_upgrade_archive)"
   kubectl wait --for=condition=Ready node --all --timeout=300s
   grep -qx 'server = "https://127.0.0.1:1"' /etc/k0s/containerd.d/certs.d/_default/hosts.toml
-  waiting=$(kubectl get pods -A -o jsonpath='{range .items[*]}{.status.containerStatuses[*].state.waiting.reason}{"\n"}{end}')
-  if grep -qE 'ImagePullBackOff|ErrImagePull' <<<"$waiting"; then
-    exit 1
-  fi
+  assert_no_image_pull_failures
   echo "e2e-upgrade abort passed"
   exit 0
 fi
@@ -409,6 +427,23 @@ if holders:
 PY
 rm -f "$workdir/upgrade-archive.tar.gz" "$workdir/upgrade-archive-host.tar.gz"
 kubectl -n default create configmap "$restore_marker" --from-literal=state=before-snapshot
+pause_image=$(local_pause_image) || {
+  echo "containerd holds no pause image" >&2
+  exit 1
+}
+kubectl apply -f - <<POD
+apiVersion: v1
+kind: Pod
+metadata:
+  name: $restore_marker
+  namespace: default
+spec:
+  containers:
+    - name: pause
+      image: $pause_image
+      imagePullPolicy: IfNotPresent
+POD
+kubectl -n default wait --for=condition=Ready "pod/$restore_marker" --timeout=300s
 touch "$workdir/etcd-marker"
 kubectl patch setting backup.etcd-schedule --type merge -p '{"spec":{"value":"* * * * *"}}'
 retry_until 600 etcd_snapshot_written
@@ -451,10 +486,7 @@ fi
 test "$(kubectl get node "$node" -o jsonpath='{.spec.unschedulable}')" != "true"
 kubectl wait --for=condition=Ready node --all --timeout=300s
 grep -qx 'server = "https://127.0.0.1:1"' /etc/k0s/containerd.d/certs.d/_default/hosts.toml
-waiting=$(kubectl get pods -A -o jsonpath='{range .items[*]}{.status.containerStatuses[*].state.waiting.reason}{"\n"}{end}')
-if grep -qE 'ImagePullBackOff|ErrImagePull' <<<"$waiting"; then
-  exit 1
-fi
+assert_no_image_pull_failures
 if [ -f /etc/bedrock/encryption/encryption.yaml ]; then
   kubectl -n default create secret generic e2e-encryption --from-literal=a=b
   assert_secret_encrypted default e2e-encryption
@@ -471,13 +503,17 @@ sed -i "1s#^SNAPSHOT=[^ ]*#SNAPSHOT=$snapshot#" "$restore_script"
 images_before=$(k0s_images_listing)
 test -n "$images_before"
 kubectl -n default delete configmap "$restore_marker"
+restore_started=$(date -u +%s)
 bash "$restore_script"
 retry_until 600 kubectl get --raw=/readyz
+retry_until 300 node_lease_renewed_since "$restore_started"
 kubectl wait --for=condition=Ready node --all --timeout=300s
 kubectl -n bedrock-system rollout status deploy/bedrock-operator --timeout=300s
+kubectl -n default wait --for=condition=Ready "pod/$restore_marker" --timeout=300s
 test "$(kubectl -n default get configmap "$restore_marker" -o jsonpath='{.data.state}')" = before-snapshot
+assert_no_image_pull_failures
 images_after=$(k0s_images_listing)
 test -z "$(comm -23 <(printf '%s\n' "$images_before") <(printf '%s\n' "$images_after"))"
-kubectl -n default delete configmap "$restore_marker"
+kubectl -n default delete configmap,pod "$restore_marker"
 rm -rf /root/restore /var/lib/k0s/.pre-restore-*
 echo "e2e-upgrade passed"
