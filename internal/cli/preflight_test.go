@@ -505,3 +505,20 @@ func TestRunJoinAdoptRefusesAK0sThatIsNoBedrockInstall(t *testing.T) {
 	}
 	assertNoHostChange(t, root, e)
 }
+
+func TestPreflightResultsMatchTheHostNameInLowerCase(t *testing.T) {
+	root, e := adoptedHost(t)
+	e.Responses["hostname"] = "Node-1\n"
+	results, err := adoptResults(t, root, e, adoptInitConfig)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if preflight.Blocked(results) {
+		t.Fatalf("an upper case host name must match the node name:\n%s", preflight.Format(results))
+	}
+	for _, name := range []string{"adopt-node", "adopt-mon-a-store", "device-" + osdDisk} {
+		if r, ok := resultFor(results, name); !ok || !r.OK {
+			t.Fatalf("%s: %+v\n%s", name, r, preflight.Format(results))
+		}
+	}
+}

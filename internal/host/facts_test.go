@@ -55,6 +55,16 @@ func TestGather(t *testing.T) {
 	}
 }
 
+func TestGatherLowersTheHostname(t *testing.T) {
+	root := fakeRoot(t, true)
+	e := fakeIP()
+	e.Responses["hostname"] = "Host-01.Example\n"
+	facts, err := Gather(context.Background(), e, root, func(string) (uint64, error) { return 1, nil }, 0)
+	if err != nil || facts.Hostname != "host-01.example" {
+		t.Fatalf("hostname %q err %v", facts.Hostname, err)
+	}
+}
+
 func TestGatherWithoutKVMAndNotRoot(t *testing.T) {
 	root := fakeRoot(t, false)
 	facts, err := Gather(context.Background(), fakeIP(), root, func(string) (uint64, error) { return 1, nil }, 1000)

@@ -75,7 +75,7 @@ func Gather(ctx context.Context, e Exec, root string, freeBytes func(string) (ui
 		return Facts{}, err
 	}
 	return Facts{
-		Hostname:         strings.TrimSpace(hostname),
+		Hostname:         strings.ToLower(strings.TrimSpace(hostname)),
 		OSID:             id,
 		OSVersionID:      version,
 		Arch:             runtime.GOARCH,
