@@ -206,6 +206,8 @@ const L = {
   keyType: msg({ id: "col.keyType", message: "Key type" }),
 };
 
+const poolOf = (object: KubeObject): string => textAt(object, "status.providerNetwork") || textAt(object, "spec.providerNetwork");
+
 const sourceSummary = (object: KubeObject): string =>
   textAt(object, "spec.source.snapshotRef")
     ? `snapshot ${textAt(object, "spec.source.snapshotRef")}`
@@ -261,7 +263,7 @@ export const columnsByPlural: Record<string, ColumnDef[]> = {
   virtualmachinebackups: [name, text("vm", L.vm, "spec.vmRef"), text("target", L.backupTarget, "spec.target"), ltrText("schedule", L.schedule, "spec.schedule"), text("keep", L.keep, "spec.keep"), phase],
   virtualmachinerestores: [name, text("backup", L.backup, "spec.backupRef"), text("targetName", L.targetName, "spec.targetName"), flag("replace", L.replace, "spec.replace"), phase, age],
   subnets: [name, text("network", L.network, "spec.networkRef"), ltrText("cidr", L.cidr, "spec.cidr"), ltrText("gateway", L.gateway, "spec.gateway"), flag("dhcp", L.dhcp, "spec.dhcp"), text("dnsZone", L.dnsZone, "spec.dnsZoneRef")],
-  elasticips: [name, text("providerNetwork", L.providerNetwork, "spec.providerNetwork"), { ...ltrText("address", L.address, "status.address") }, target, status],
+  elasticips: [name, { id: "providerNetwork", label: L.providerNetwork, render: (object) => poolOf(object) || dash, sortValue: poolOf }, { ...ltrText("address", L.address, "status.address") }, target, status],
   loadbalancers: [name, lbAddress, { id: "listeners", label: L.listeners, render: (object) => listenersOf(object) || dash, sortValue: listenersOf }, status],
   dnszones: [name, ltrText("zone", L.zone, "spec.zone"), { id: "records", label: L.records, render: (object) => (<span className="br-records">{(listAt(object, "spec.records") as { name: string; ips: string[] }[]).map((record) => (<Ltr key={record.name}>{`${record.name}: ${record.ips.join(", ")} `}</Ltr>))}</span>), sortValue: (object) => listAt(object, "spec.records").length }, status],
   securitygroups: [name, count("ingress", L.ingress, (object) => listAt(object, "spec.ingress").length), count("egress", L.egress, (object) => listAt(object, "spec.egress").length), status],
