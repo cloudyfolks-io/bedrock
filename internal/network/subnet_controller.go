@@ -40,6 +40,7 @@ func (r *SubnetReconciler) Reconcile(ctx context.Context, req reconcile.Request)
 	if err != nil {
 		return reconcile.Result{}, err
 	}
+	subnet.Status.Conditions = withRangePolicy(subnet.Status.Conditions, subnet.Generation, in.RangeBreach)
 	if violation != nil {
 		return r.publish(ctx, subnet, violationCondition(v1alpha1.ConditionReady, subnet.Generation, violation), retryFor(violation))
 	}
@@ -120,11 +121,15 @@ func (r *SubnetReconciler) check(ctx context.Context, subnet v1alpha1.Subnet) (S
 	if err != nil {
 		return SubnetInput{}, nil, err
 	}
-	if v := ReservedOverlap(subnet.Spec.CIDR, reserved); v != nil {
-		return SubnetInput{}, v, nil
-	}
-	if v := AllowedRangeViolation(subnet.Spec.CIDR, cfg.SubnetAllowedRanges); v != nil {
-		return SubnetInput{}, v, nil
+	breach := cmp.Or(ReservedOverlap(subnet.Spec.CIDR, reserved), AllowedRangeViolation(subnet.Spec.CIDR, cfg.SubnetAllowedRanges))
+	if breach != nil {
+		provisioned, err := r.provisioned(ctx, subnet)
+		if err != nil {
+			return SubnetInput{}, nil, err
+		}
+		if !provisioned {
+			return SubnetInput{}, breach, nil
+		}
 	}
 	if v := GatewayViolation(subnet.Spec.CIDR, subnet.Spec.Gateway); v != nil {
 		return SubnetInput{}, v, nil
@@ -135,7 +140,18 @@ func (r *SubnetReconciler) check(ctx context.Context, subnet v1alpha1.Subnet) (S
 	if !v1alpha1.IsConditionTrue(network.Status.Conditions, v1alpha1.ConditionReady) {
 		return SubnetInput{}, &Violation{Reason: ReasonNetworkNotReady, Message: fmt.Sprintf("the Network %q is not ready yet", network.Name)}, nil
 	}
-	return SubnetInput{Subnet: subnet, Network: network, Tenant: tenant, Project: project, DefaultMTU: cfg.MTU, DefaultDNSServers: cfg.DNSServers}, nil, nil
+	return SubnetInput{Subnet: subnet, Network: network, Tenant: tenant, Project: project, DefaultMTU: cfg.MTU, DefaultDNSServers: cfg.DNSServers, RangeBreach: breach}, nil, nil
+}
+
+func (r *SubnetReconciler) provisioned(ctx context.Context, subnet v1alpha1.Subnet) (bool, error) {
+	existing, err := getObject(ctx, r.Client, fabric.SubnetGVK, FabricName(subnet.Namespace, subnet.Name))
+	if apierrors.IsNotFound(err) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	return ownedBy(existing, &subnet), nil
 }
 
 func (r *SubnetReconciler) reservedRanges(ctx context.Context, cfg Config) ([]ReservedRange, error) {

@@ -50,8 +50,17 @@ func (r *NetworkReconciler) Reconcile(ctx context.Context, req reconcile.Request
 	if err != nil {
 		return r.publish(ctx, &network, notReadyStatus(network, ReasonVpcPending, err.Error()))
 	}
-	if v := NetworkReservedOverlap(network.Spec.Ranges(), SettingReserved(cfg)); v != nil {
-		return r.publish(ctx, &network, notReadyStatus(network, v.Reason, v.Message))
+	breach := NetworkReservedOverlap(network.Spec.Ranges(), SettingReserved(cfg))
+	if breach != nil {
+		provisioned, err := r.provisioned(ctx, &network)
+		if err != nil {
+			return reconcile.Result{}, err
+		}
+		if !provisioned {
+			status := notReadyStatus(network, breach.Reason, breach.Message)
+			status.Conditions = withRangePolicy(status.Conditions, network.Generation, nil)
+			return r.publish(ctx, &network, status)
+		}
 	}
 	vrf, err := r.vrfID(ctx, &network, cfg)
 	if err != nil {
@@ -76,7 +85,19 @@ func (r *NetworkReconciler) Reconcile(ctx context.Context, req reconcile.Request
 	if err != nil {
 		return reconcile.Result{}, err
 	}
+	status.Conditions = withRangePolicy(status.Conditions, network.Generation, breach)
 	return r.publish(ctx, &network, status)
+}
+
+func (r *NetworkReconciler) provisioned(ctx context.Context, network *v1alpha1.Network) (bool, error) {
+	existing, err := getObject(ctx, r.Client, fabric.VpcGVK, VpcName(network.Name))
+	if apierrors.IsNotFound(err) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	return ownedBy(existing, network), nil
 }
 
 func (r *NetworkReconciler) conflicts(ctx context.Context, vpc *unstructured.Unstructured, network *v1alpha1.Network) (bool, error) {

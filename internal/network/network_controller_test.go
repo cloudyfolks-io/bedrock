@@ -147,6 +147,31 @@ func TestNetworkReconcilerRefusesARangeInAReservedRange(t *testing.T) {
 	}
 }
 
+func TestNetworkReconcilerKeepsAProvisionedNetworkInAReservedRange(t *testing.T) {
+	c := cleanEnv(t)
+	setSetting(t, "network.reserved-cidrs", "192.0.2.0/24")
+	network := networkOfRanges(unique(t, "net"), "acme", "10.100.0.0/16", "100.100.0.0/16")
+	requireAccepted(t, c, network)
+	reconcileNetwork(t, c, network.Name)
+	if err := fabrictest.MarkVpcStandby(context.Background(), c, network.Name); err != nil {
+		t.Fatal(err)
+	}
+	reconcileNetwork(t, c, network.Name)
+	requireCondition(t, getNetwork(t, c, network.Name).Status.Conditions, v1alpha1.ConditionReady, metav1.ConditionTrue, ReasonVpcReady)
+
+	setSetting(t, "network.reserved-cidrs", "100.64.0.0/10")
+	reconcileNetwork(t, c, network.Name)
+	got := getNetwork(t, c, network.Name).Status.Conditions
+	requireCondition(t, got, v1alpha1.ConditionReady, metav1.ConditionTrue, ReasonVpcReady)
+	requireCondition(t, got, ConditionRangePolicy, metav1.ConditionFalse, ReasonCIDRReserved)
+
+	setSetting(t, "network.reserved-cidrs", "192.0.2.0/24")
+	reconcileNetwork(t, c, network.Name)
+	if meta.FindStatusCondition(getNetwork(t, c, network.Name).Status.Conditions, ConditionRangePolicy) != nil {
+		t.Fatal("the RangePolicy condition must go when the ranges are fine")
+	}
+}
+
 func TestNetworkReconcilerRendersL2External(t *testing.T) {
 	c := cleanEnv(t)
 	publicSettings(t)

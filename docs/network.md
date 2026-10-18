@@ -14,6 +14,7 @@ The underlay is the `ProviderNetwork`, the `Vlan`, the external `Subnet` and the
 
 Every Bedrock object of this area has a `Ready` condition.
 A `Network` in external mode also has an `ExternalReady` condition.
+A provisioned Network or Subnet that breaks a range Setting also has a `RangePolicy` condition.
 Read the reason of the condition to find the problem.
 The section "How to read conditions" lists every reason.
 
@@ -163,6 +164,23 @@ A Network with a range that overlaps a reserved range gets `Ready=False` with th
 The Subnet reconciler refuses a Subnet outside them with the reason `CIDROutsideAllowedRanges`.
 The admission policy does not read Settings, so only the reconciler makes these two checks.
 
+These checks never stop an object that is already provisioned.
+A Subnet whose Fabric Subnet exists stays `Ready`, and a Network whose Fabric Vpc exists stays `Ready`.
+The object gets the extra condition `RangePolicy=False` with the same reason and message as the refusal.
+The condition goes when the ranges and the Settings agree again.
+A new Subnet or Network is refused as described above.
+
+Before you upgrade, list the ranges that exist and compare them with the two Settings:
+
+```
+kubectl get subnets -A -o custom-columns=NAMESPACE:.metadata.namespace,NAME:.metadata.name,CIDR:.spec.cidr
+kubectl get networks -o custom-columns=NAME:.metadata.name,CIDR:.spec.cidr,CIDRS:.spec.cidrs
+```
+
+After the upgrade, find the objects that the Settings do not allow with `kubectl get subnets,networks -A -o yaml` and look for the condition `RangePolicy`.
+To remove a mismatch, widen a Setting.
+For example, set `network.subnet-allowed-ranges` to `0.0.0.0/0`, or set `network.reserved-cidrs` to a range that no Network uses, such as `192.0.2.0/24`.
+
 A Subnet admission policy checks each new Subnet.
 The CIDR of a Subnet must be inside one of the ranges of its Network.
 The CIDR must not overlap another Subnet of the same Network.
@@ -307,9 +325,9 @@ Then take the action in the table.
 | `Applied` | The Subnet is programmed. No action. |
 | `Attached` | The ElasticIP is attached to its target. No action. |
 | `BGPNotConfigured` | Bgp mode misses a Setting. Set the keys that the message names. |
-| `CIDRReserved` | The Subnet CIDR overlaps a provider network, the join subnet, a management range or a range of `network.reserved-cidrs`. A Network gets this reason when one of its ranges overlaps a range of `network.reserved-cidrs`. Use another CIDR. |
+| `CIDRReserved` | The Subnet CIDR overlaps a provider network, the join subnet, a management range or a range of `network.reserved-cidrs`. A Network gets this reason when one of its ranges overlaps a range of `network.reserved-cidrs`. Use another CIDR. A provisioned Subnet or Network shows the same text in the condition `RangePolicy`, and it stays `Ready`. |
 | `CIDROutsideNetwork` | The Subnet CIDR is not inside any range of the Network. Use another CIDR, or add a range to `cidrs` of the Network. |
-| `CIDROutsideAllowedRanges` | The Subnet CIDR is not inside a range of `network.subnet-allowed-ranges`. Use another CIDR, or ask an administrator to change the Setting. |
+| `CIDROutsideAllowedRanges` | The Subnet CIDR is not inside a range of `network.subnet-allowed-ranges`. Use another CIDR, or ask an administrator to change the Setting. A provisioned Subnet shows the same text in the condition `RangePolicy`, and it stays `Ready`. |
 | `CIDROverlap` | An older Subnet overlaps this one. Use another CIDR. |
 | `Connected` | The external connection works. No action. |
 | `ElasticIPNotFound` | The ElasticIP of the LoadBalancer does not exist. Create it. |

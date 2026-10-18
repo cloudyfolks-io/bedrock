@@ -249,7 +249,91 @@ func TestSubnetReconcilerRejectsCIDROutsideTheAllowedRanges(t *testing.T) {
 
 	setSetting(t, "network.subnet-allowed-ranges", "10.0.0.0/8")
 	reconcileSubnet(t, c, namespace, "private")
-	requireSubnetReason(t, c, namespace, "private", metav1.ConditionFalse, ReasonCIDROutsideAllowedRanges)
+	requireSubnetReason(t, c, namespace, "private", metav1.ConditionFalse, ReasonFabricNotReady)
+	requireRangePolicy(t, c, namespace, "private", ReasonCIDROutsideAllowedRanges)
+	requireAccepted(t, c, policySubnet(namespace, "later", network.Name, "172.16.2.0/24"))
+	reconcileSubnet(t, c, namespace, "later")
+	requireSubnetReason(t, c, namespace, "later", metav1.ConditionFalse, ReasonCIDROutsideAllowedRanges)
+	requireNoFabricSubnet(t, c, namespace, "later")
+}
+
+func provisionSubnet(t *testing.T, c client.Client, namespace, name string) {
+	t.Helper()
+	reconcileSubnet(t, c, namespace, name)
+	if err := fabrictest.MarkSubnetReady(context.Background(), c, FabricName(namespace, name)); err != nil {
+		t.Fatal(err)
+	}
+	reconcileSubnet(t, c, namespace, name)
+	reconcileDefaultGroup(t, c, namespace)
+	if err := fabrictest.MarkSecurityGroupProgrammed(context.Background(), c, DefaultSecurityGroupName(namespace)); err != nil {
+		t.Fatal(err)
+	}
+	reconcileSubnet(t, c, namespace, name)
+	requireSubnetReason(t, c, namespace, name, metav1.ConditionTrue, ReasonApplied)
+}
+
+func requireRangePolicy(t *testing.T, c client.Client, namespace, name, reason string) {
+	t.Helper()
+	got := meta.FindStatusCondition(getSubnet(t, c, namespace, name).Status.Conditions, ConditionRangePolicy)
+	if reason == "" {
+		if got != nil {
+			t.Fatalf("no RangePolicy condition expected: %+v", got)
+		}
+		return
+	}
+	if got == nil || got.Status != metav1.ConditionFalse || got.Reason != reason || got.Message == "" {
+		t.Fatalf("RangePolicy want False/%s, got %+v", reason, got)
+	}
+}
+
+func TestSubnetReconcilerKeepsAProvisionedSubnetInAReservedRange(t *testing.T) {
+	c := cleanEnv(t)
+	setSetting(t, "network.reserved-cidrs", "192.0.2.0/24")
+	setSetting(t, "network.subnet-allowed-ranges", "0.0.0.0/0")
+	tenant := unique(t, "acme")
+	network := readyNetworkOf(t, c, networkOfRanges(unique(t, "net"), tenant, "100.100.0.0/16"))
+	namespace := newNamespace(t, tenant, "prod")
+	requireAccepted(t, c, policySubnet(namespace, "old", network.Name, "100.100.1.0/24"))
+	provisionSubnet(t, c, namespace, "old")
+	requireRangePolicy(t, c, namespace, "old", "")
+
+	setSetting(t, "network.reserved-cidrs", "100.64.0.0/10")
+	requireAccepted(t, c, policySubnet(namespace, "fresh", network.Name, "100.100.2.0/24"))
+	reconcileSubnet(t, c, namespace, "old")
+	reconcileSubnet(t, c, namespace, "fresh")
+	requireSubnetReason(t, c, namespace, "old", metav1.ConditionTrue, ReasonApplied)
+	requireRangePolicy(t, c, namespace, "old", ReasonCIDRReserved)
+	requireSubnetReason(t, c, namespace, "fresh", metav1.ConditionFalse, ReasonCIDRReserved)
+	requireNoFabricSubnet(t, c, namespace, "fresh")
+	requireRangePolicy(t, c, namespace, "fresh", "")
+
+	setSetting(t, "network.reserved-cidrs", "192.0.2.0/24")
+	reconcileSubnet(t, c, namespace, "old")
+	requireSubnetReason(t, c, namespace, "old", metav1.ConditionTrue, ReasonApplied)
+	requireRangePolicy(t, c, namespace, "old", "")
+}
+
+func TestSubnetReconcilerKeepsAProvisionedSubnetOutsideTheAllowedRanges(t *testing.T) {
+	c := cleanEnv(t)
+	setSetting(t, "network.subnet-allowed-ranges", "0.0.0.0/0")
+	tenant := unique(t, "acme")
+	network := readyNetworkOf(t, c, networkOfRanges(unique(t, "net"), tenant, "10.100.0.0/16", "203.0.0.0/16"))
+	namespace := newNamespace(t, tenant, "prod")
+	requireAccepted(t, c, policySubnet(namespace, "old", network.Name, "203.0.1.0/24"))
+	provisionSubnet(t, c, namespace, "old")
+
+	setSetting(t, "network.subnet-allowed-ranges", "10.0.0.0/8")
+	requireAccepted(t, c, policySubnet(namespace, "fresh", network.Name, "203.0.2.0/24"))
+	reconcileSubnet(t, c, namespace, "old")
+	reconcileSubnet(t, c, namespace, "fresh")
+	requireSubnetReason(t, c, namespace, "old", metav1.ConditionTrue, ReasonApplied)
+	requireRangePolicy(t, c, namespace, "old", ReasonCIDROutsideAllowedRanges)
+	requireSubnetReason(t, c, namespace, "fresh", metav1.ConditionFalse, ReasonCIDROutsideAllowedRanges)
+	requireNoFabricSubnet(t, c, namespace, "fresh")
+
+	setSetting(t, "network.subnet-allowed-ranges", "0.0.0.0/0")
+	reconcileSubnet(t, c, namespace, "old")
+	requireRangePolicy(t, c, namespace, "old", "")
 }
 
 func TestSubnetReconcilerRejectsOverlapKeepingTheOlder(t *testing.T) {

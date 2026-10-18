@@ -22,6 +22,7 @@ const (
 	AnnotationOwnerUID       = "bedrock.cloudyfolks.io/owner-uid"
 	AnnotationVrfID          = "network.bedrock.cloudyfolks.io/vrf-id"
 	ConditionExternalReady   = "ExternalReady"
+	ConditionRangePolicy     = "RangePolicy"
 
 	labelValueMax       = 63
 	hashLength          = 12
