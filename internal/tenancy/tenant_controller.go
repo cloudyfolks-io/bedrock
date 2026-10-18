@@ -53,7 +53,7 @@ func (r *TenantReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctr
 	if countErr != nil {
 		return ctrl.Result{}, countErr
 	}
-	networkErr := r.applyNetwork(ctx, tenant)
+	networkErr := r.applyNetwork(ctx, tenant, networks)
 	ownersErr := r.applyOwners(ctx, tenant, projects, networks)
 	observation := TenantObservation{
 		Tenant:     tenant,
@@ -79,8 +79,8 @@ func (r *TenantReconciler) listOfTenant(ctx context.Context, tenant string) ([]v
 	return projectsOfTenant(tenant, projects.Items), networksOfTenant(tenant, networks.Items), nil
 }
 
-func (r *TenantReconciler) applyNetwork(ctx context.Context, tenant v1alpha1.Tenant) error {
-	desired := DesiredNetwork(tenant)
+func (r *TenantReconciler) applyNetwork(ctx context.Context, tenant v1alpha1.Tenant, networks []v1alpha1.Network) error {
+	desired := DesiredNetwork(tenant, defaultNetworkOf(tenant.Name, networks))
 	return ssa.Apply(ctx, r.Client, WithOwner(&desired, &tenant, tenantGVK), v1alpha1.TenancyFieldManager)
 }
 

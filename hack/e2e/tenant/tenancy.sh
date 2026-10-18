@@ -91,7 +91,7 @@ spec:
   network:
     vpcCIDR: 10.100.0.0/16
 TENANT
-  wait_jsonpath 120 10.100.0.0/16 get network "$TENANT" -o jsonpath='{.spec.cidr}'
+  wait_jsonpath 120 10.100.0.0/16 get network "$TENANT" -o jsonpath='{.spec.cidrs[0]}'
   expect_equal Tenant "$(kubectl get network "$TENANT" -o jsonpath='{.metadata.ownerReferences[0].kind}')" "owner of the Network"
   kubectl get clusterrole "tenant:$TENANT:owner"
   expect_equal bedrock:alice "$(kubectl get clusterrolebinding "tenant:$TENANT:owner" -o jsonpath='{.subjects[0].name}')" "tenant owner binding"

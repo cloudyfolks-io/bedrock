@@ -20,12 +20,28 @@ type TenantObservation struct {
 	OwnersErr  error
 }
 
-func DesiredNetwork(tenant v1alpha1.Tenant) v1alpha1.Network {
+func DesiredNetwork(tenant v1alpha1.Tenant, existing *v1alpha1.Network) v1alpha1.Network {
 	return v1alpha1.Network{
 		TypeMeta:   metav1.TypeMeta{APIVersion: v1alpha1.GroupVersion.String(), Kind: "Network"},
 		ObjectMeta: metav1.ObjectMeta{Name: v1alpha1.DefaultNetworkName(tenant.Name), Labels: TenantObjectLabels(tenant)},
-		Spec:       v1alpha1.NetworkSpec{TenantRef: tenant.Name, CIDR: tenant.Spec.Network.VPCCIDR},
+		Spec:       networkSpec(tenant, existing),
 	}
+}
+
+func networkSpec(tenant v1alpha1.Tenant, existing *v1alpha1.Network) v1alpha1.NetworkSpec {
+	vpcCIDR := tenant.Spec.Network.VPCCIDR
+	if existing != nil && existing.Spec.CIDR != "" {
+		return v1alpha1.NetworkSpec{TenantRef: tenant.Name, CIDR: vpcCIDR}
+	}
+	return v1alpha1.NetworkSpec{TenantRef: tenant.Name, CIDRs: []string{vpcCIDR}}
+}
+
+func defaultNetworkOf(tenant string, networks []v1alpha1.Network) *v1alpha1.Network {
+	index := slices.IndexFunc(networks, func(n v1alpha1.Network) bool { return n.Name == v1alpha1.DefaultNetworkName(tenant) })
+	if index < 0 {
+		return nil
+	}
+	return &networks[index]
 }
 
 func OwnerRole(tenant v1alpha1.Tenant, projectNames, networkNames []string) rbacv1.ClusterRole {

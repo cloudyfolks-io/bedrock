@@ -47,14 +47,40 @@ func requireCondition(t *testing.T, conditions []metav1.Condition, conditionType
 }
 
 func TestDesiredNetwork(t *testing.T) {
-	got := DesiredNetwork(acmeTenant())
+	got := DesiredNetwork(acmeTenant(), nil)
 	if got.APIVersion != "bedrock.cloudyfolks.io/v1alpha1" || got.Kind != "Network" || got.Name != "acme" {
 		t.Fatalf("got %+v", got.ObjectMeta)
 	}
 	if !reflect.DeepEqual(got.Labels, v1alpha1.TenantLabels("Tenant", "acme", "acme", "")) {
 		t.Fatalf("labels = %v", got.Labels)
 	}
-	if got.Spec.TenantRef != "acme" || got.Spec.CIDR != "10.100.0.0/16" || got.Spec.EnableExternal || len(got.OwnerReferences) != 0 {
+	if got.Spec.TenantRef != "acme" || got.Spec.CIDR != "" || !slices.Equal(got.Spec.CIDRs, []string{"10.100.0.0/16"}) || got.Spec.EnableExternal || len(got.OwnerReferences) != 0 {
+		t.Fatalf("got %+v", got)
+	}
+}
+
+func TestDesiredNetworkKeepsTheOldCIDROfAnExistingNetwork(t *testing.T) {
+	existing := v1alpha1.Network{ObjectMeta: metav1.ObjectMeta{Name: "acme"}, Spec: v1alpha1.NetworkSpec{TenantRef: "acme", CIDR: "10.100.0.0/16"}}
+	got := DesiredNetwork(acmeTenant(), &existing)
+	if got.Spec.CIDR != "10.100.0.0/16" || len(got.Spec.CIDRs) != 0 || got.Spec.TenantRef != "acme" {
+		t.Fatalf("got %+v", got.Spec)
+	}
+}
+
+func TestDesiredNetworkUsesCIDRsForAMovedNetwork(t *testing.T) {
+	existing := v1alpha1.Network{ObjectMeta: metav1.ObjectMeta{Name: "acme"}, Spec: v1alpha1.NetworkSpec{TenantRef: "acme", CIDRs: []string{"10.100.0.0/16", "172.16.0.0/16"}}}
+	got := DesiredNetwork(acmeTenant(), &existing)
+	if got.Spec.CIDR != "" || !slices.Equal(got.Spec.CIDRs, []string{"10.100.0.0/16"}) {
+		t.Fatalf("got %+v", got.Spec)
+	}
+}
+
+func TestDefaultNetworkOfPicksTheNetworkWithTheTenantName(t *testing.T) {
+	networks := []v1alpha1.Network{{ObjectMeta: metav1.ObjectMeta{Name: "acme-lab"}}, {ObjectMeta: metav1.ObjectMeta{Name: "acme"}}}
+	if got := defaultNetworkOf("acme", networks); got == nil || got.Name != "acme" {
+		t.Fatalf("got %+v", got)
+	}
+	if got := defaultNetworkOf("acme", networks[:1]); got != nil {
 		t.Fatalf("got %+v", got)
 	}
 }

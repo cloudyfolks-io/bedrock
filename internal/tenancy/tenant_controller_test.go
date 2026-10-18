@@ -56,7 +56,7 @@ func TestTenantCreatesNetworkRoleAndBinding(t *testing.T) {
 	mustCreate(t, c, tenant)
 	network := &v1alpha1.Network{}
 	waitFor(t, func() bool { return getInto(t, c, "acme", network) })
-	if network.Spec.TenantRef != "acme" || network.Spec.CIDR != "10.100.0.0/16" || !reflect.DeepEqual(network.Labels, v1alpha1.TenantLabels("Tenant", "acme", "acme", "")) {
+	if network.Spec.TenantRef != "acme" || network.Spec.CIDR != "" || !reflect.DeepEqual(network.Spec.CIDRs, []string{"10.100.0.0/16"}) || !reflect.DeepEqual(network.Labels, v1alpha1.TenantLabels("Tenant", "acme", "acme", "")) {
 		t.Fatalf("network = %+v", network)
 	}
 	if controllerReferenceUID(network.OwnerReferences, "Tenant") != string(tenant.UID) {
@@ -71,6 +71,36 @@ func TestTenantCreatesNetworkRoleAndBinding(t *testing.T) {
 	}
 	if binding.RoleRef.Name != "tenant:acme:owner" || controllerReferenceUID(binding.OwnerReferences, "Tenant") != string(tenant.UID) {
 		t.Fatalf("binding = %+v", binding)
+	}
+}
+
+func TestTenantLeavesAnOldDefaultNetworkWithOnlyCIDR(t *testing.T) {
+	c, _ := tenantWorld(t)
+	old := &v1alpha1.Network{ObjectMeta: metav1.ObjectMeta{Name: "acme"}, Spec: v1alpha1.NetworkSpec{TenantRef: "acme", CIDR: "10.100.0.0/16"}}
+	mustCreate(t, c, old)
+	tenant := acmeWithOwners(defaultOwners()...)
+	mustCreate(t, c, tenant)
+	network := &v1alpha1.Network{}
+	waitFor(t, func() bool {
+		return getInto(t, c, "acme", network) && controllerReferenceUID(network.OwnerReferences, "Tenant") == string(tenant.UID)
+	})
+	if network.Spec.CIDR != "10.100.0.0/16" || len(network.Spec.CIDRs) != 0 {
+		t.Fatalf("the old Network must keep cidr and get no cidrs: %+v", network.Spec)
+	}
+}
+
+func TestTenantKeepsTheRangesOfAMovedDefaultNetwork(t *testing.T) {
+	c, _ := tenantWorld(t)
+	moved := &v1alpha1.Network{ObjectMeta: metav1.ObjectMeta{Name: "acme"}, Spec: v1alpha1.NetworkSpec{TenantRef: "acme", CIDRs: []string{"10.100.0.0/16", "172.16.0.0/16"}}}
+	mustCreate(t, c, moved)
+	tenant := acmeWithOwners(defaultOwners()...)
+	mustCreate(t, c, tenant)
+	network := &v1alpha1.Network{}
+	waitFor(t, func() bool {
+		return getInto(t, c, "acme", network) && controllerReferenceUID(network.OwnerReferences, "Tenant") == string(tenant.UID)
+	})
+	if network.Spec.CIDR != "" || !reflect.DeepEqual(network.Spec.CIDRs, []string{"10.100.0.0/16", "172.16.0.0/16"}) {
+		t.Fatalf("the moved Network must keep both ranges: %+v", network.Spec)
 	}
 }
 
