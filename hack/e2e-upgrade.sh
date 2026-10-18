@@ -19,6 +19,7 @@ export PLATFORM_HOST=${PLATFORM_HOST:-e2e.bedrock.test}
 workdir=$(mktemp -d)
 export KUBECONFIG=/var/lib/k0s/pki/admin.conf
 backups=/var/lib/bedrock/backups
+max_snapshot_bytes=$((512 * 1024 * 1024))
 
 dump() {
   local status=$?
@@ -102,6 +103,13 @@ etcd_snapshot_written() {
 
 assert_age_file() {
   test "$(head -c 21 "$1")" = age-encryption.org/v1
+}
+
+k0s_archive_entries() {
+  local snapshot=$1 member
+  member=$(tar -tzf "$snapshot" | grep -E '(^|/)k0s_backup_[^/]*\.tar\.gz$') || return 1
+  [ "$(printf '%s\n' "$member" | wc -l)" -eq 1 ] || return 1
+  tar -xzOf "$snapshot" "$member" | tar -tz
 }
 
 BUNDLE=dist/bedrock-$VERSION_A-bundle-$arch.tar.zst VERSION=$VERSION_A IMAGE=$image_a \
@@ -380,12 +388,27 @@ PY
 rm -f "$workdir/upgrade-archive.tar.gz" "$workdir/upgrade-archive-host.tar.gz"
 touch "$workdir/etcd-marker"
 kubectl patch setting backup.etcd-schedule --type merge -p '{"spec":{"value":"* * * * *"}}'
-retry_until 1800 etcd_snapshot_written
+retry_until 600 etcd_snapshot_written
 snapshot=$(etcd_snapshot_since_marker)
 kubectl patch setting backup.etcd-schedule --type merge -p '{"spec":{"value":""}}'
 assert_age_file "$snapshot"
+snapshot_bytes=$(stat -c %s "$snapshot")
+snapshot_seconds=$(($(stat -c %Y "$snapshot") - $(stat -c %Y "$workdir/etcd-marker")))
+echo "etcd snapshot $snapshot: $snapshot_bytes bytes, written ${snapshot_seconds}s after the marker"
+if [ "$snapshot_bytes" -ge "$max_snapshot_bytes" ]; then
+  echo "etcd snapshot is $snapshot_bytes bytes, the limit is $max_snapshot_bytes" >&2
+  exit 1
+fi
 "$cli_b" backup decrypt --in "$snapshot" --out "$workdir/etcd-snapshot.tar.gz" --identity "$workdir/admin.key"
 tar -tzf "$workdir/etcd-snapshot.tar.gz" >/dev/null
+snapshot_entries=$(k0s_archive_entries "$workdir/etcd-snapshot.tar.gz") || {
+  echo "$snapshot must hold exactly one k0s backup archive" >&2
+  exit 1
+}
+if grep -Eq '^(\./)?images(/|$)' <<<"$snapshot_entries"; then
+  echo "$snapshot holds an images entry in its k0s archive" >&2
+  exit 1
+fi
 rm -f "$workdir/etcd-snapshot.tar.gz"
 /usr/local/bin/k0s version | grep -qx "$K0S_B"
 kubectl get host "$node" -o jsonpath='{.status.k0sVersion}' | grep -qx "$K0S_B"
