@@ -522,6 +522,7 @@ retry_until 300 container_gone "${restore_container#containerd://}"
 restore_started=$(date -u +%s)
 bash "$restore_script"
 retry_until 600 kubectl get --raw=/readyz
+retry_until 300 kubectl patch setting backup.etcd-schedule --type merge -p '{"spec":{"value":""}}'
 retry_until 300 node_lease_renewed_since "$restore_started"
 kubectl wait --for=condition=Ready node --all --timeout=300s
 kubectl -n bedrock-system rollout status deploy/bedrock-operator --timeout=300s
