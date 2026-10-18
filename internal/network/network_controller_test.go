@@ -10,6 +10,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/utils/ptr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/interceptor"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
@@ -480,5 +481,143 @@ func TestNetworkReconcilerReadsVrfIDsFromTheAPI(t *testing.T) {
 	a, b := getNetwork(t, c, first.Name).Annotations[AnnotationVrfID], getNetwork(t, c, second.Name).Annotations[AnnotationVrfID]
 	if a == "" || b == "" || a == b {
 		t.Fatalf("ids %q %q", a, b)
+	}
+}
+
+func pinnedNetwork(t *testing.T, c client.Client, name string, id int32) v1alpha1.Network {
+	t.Helper()
+	network := networkOf(name, "acme", "10.100.0.0/16")
+	network.Spec.EnableExternal = true
+	network.Spec.VrfID = ptr.To(id)
+	requireAccepted(t, c, network)
+	return *network
+}
+
+func requireNoVpc(t *testing.T, c client.Client, name string) {
+	t.Helper()
+	if _, err := getObject(context.Background(), c, fabric.VpcGVK, name); !apierrors.IsNotFound(err) {
+		t.Fatalf("no Fabric Vpc expected for %s: %v", name, err)
+	}
+}
+
+func TestNetworkReconcilerBGPUsesThePinnedVrfID(t *testing.T) {
+	c := cleanEnv(t)
+	bgpSettings(t)
+	for _, id := range []int32{7, 1500, 60001} {
+		network := pinnedNetwork(t, c, unique(t, "pin"), id)
+		reconcileNetwork(t, c, network.Name)
+		if got := vrfOf(t, c, network.Name); got != int64(id) {
+			t.Fatalf("pinned %d, Vpc has %d", id, got)
+		}
+		if _, recorded := getNetwork(t, c, network.Name).Annotations[AnnotationVrfID]; recorded {
+			t.Fatal("a pinned Network needs no recorded id")
+		}
+	}
+}
+
+func TestNetworkReconcilerBGPAllocatorSkipsPinnedIDs(t *testing.T) {
+	c := cleanEnv(t)
+	bgpSettings(t)
+	pinned := pinnedNetwork(t, c, unique(t, "pin"), 1000)
+	other := pinnedNetwork(t, c, unique(t, "pin"), 1001)
+	free := createExternalNetwork(t, c)
+	reconcileNetwork(t, c, free.Name)
+	if got := vrfOf(t, c, free.Name); got != 1002 {
+		t.Fatalf("id %d, pinned ids %s and %s must be skipped", got, pinned.Name, other.Name)
+	}
+}
+
+func TestNetworkReconcilerRefusesAPinnedVrfIDThatAnotherNetworkHolds(t *testing.T) {
+	c := cleanEnv(t)
+	bgpSettings(t)
+	allocated := createExternalNetwork(t, c)
+	reconcileNetwork(t, c, allocated.Name)
+	held := vrfOf(t, c, allocated.Name)
+
+	late := pinnedNetwork(t, c, unique(t, "pin"), int32(held))
+	reconcileNetwork(t, c, late.Name)
+	got := getNetwork(t, c, late.Name)
+	requireCondition(t, got.Status.Conditions, v1alpha1.ConditionReady, metav1.ConditionFalse, ReasonVRFInUse)
+	if message := meta.FindStatusCondition(got.Status.Conditions, v1alpha1.ConditionReady).Message; !strings.Contains(message, allocated.Name) {
+		t.Fatalf("the message must name the holder: %q", message)
+	}
+	requireNoVpc(t, c, late.Name)
+	if vrfOf(t, c, allocated.Name) != held {
+		t.Fatal("the holder must keep its id")
+	}
+}
+
+func TestNetworkReconcilerTwoNetworksPinningOneIDLeaveTheOlderTheOwner(t *testing.T) {
+	c := cleanEnv(t)
+	bgpSettings(t)
+	older := pinnedNetwork(t, c, "aaa"+unique(t, ""), 2000)
+	newer := pinnedNetwork(t, c, "bbb"+unique(t, ""), 2000)
+	reconcileNetwork(t, c, older.Name)
+	reconcileNetwork(t, c, newer.Name)
+	if got := vrfOf(t, c, older.Name); got != 2000 {
+		t.Fatalf("id %d", got)
+	}
+	requireCondition(t, getNetwork(t, c, newer.Name).Status.Conditions, v1alpha1.ConditionReady, metav1.ConditionFalse, ReasonVRFInUse)
+	requireNoVpc(t, c, newer.Name)
+}
+
+func TestNetworkReconcilerRefusesAPinnedVrfIDThatAForeignVpcHolds(t *testing.T) {
+	c := cleanEnv(t)
+	bgpSettings(t)
+	foreign := fabric.Vpc(fabric.Meta{Name: unique(t, "foreign")}, fabric.VpcSpec{EnableExternal: true, ExtraExternalSubnets: []string{"x"}, Dynamic: &fabric.DynamicRouting{VrfID: 60001, ExternalSubnet: "x", Redistribute: []string{"nat"}}})
+	if err := c.Create(context.Background(), foreign); err != nil {
+		t.Fatal(err)
+	}
+	network := pinnedNetwork(t, c, unique(t, "pin"), 60001)
+	reconcileNetwork(t, c, network.Name)
+	requireCondition(t, getNetwork(t, c, network.Name).Status.Conditions, v1alpha1.ConditionReady, metav1.ConditionFalse, ReasonVRFInUse)
+	requireNoVpc(t, c, network.Name)
+}
+
+func TestNetworkReconcilerRefusesAPinnedVrfIDOfARedistributedHostTable(t *testing.T) {
+	c := cleanEnv(t)
+	bgpSettings(t)
+	setSetting(t, "network.bgp.redistribute-tables", "7,198")
+	network := pinnedNetwork(t, c, unique(t, "pin"), 198)
+	reconcileNetwork(t, c, network.Name)
+	got := getNetwork(t, c, network.Name)
+	requireCondition(t, got.Status.Conditions, v1alpha1.ConditionReady, metav1.ConditionFalse, ReasonVRFReserved)
+	if message := meta.FindStatusCondition(got.Status.Conditions, v1alpha1.ConditionReady).Message; !strings.Contains(message, "redistributed host table") {
+		t.Fatalf("message %q", message)
+	}
+	requireNoVpc(t, c, network.Name)
+
+	setSetting(t, "network.bgp.redistribute-tables", "7")
+	reconcileNetwork(t, c, network.Name)
+	requireCondition(t, getNetwork(t, c, network.Name).Status.Conditions, v1alpha1.ConditionReady, metav1.ConditionFalse, ReasonVpcPending)
+	if got := vrfOf(t, c, network.Name); got != 198 {
+		t.Fatalf("id %d", got)
+	}
+}
+
+func TestNetworkReconcilerKeepsAProvisionedNetworkWithARedistributedVrfID(t *testing.T) {
+	c := cleanEnv(t)
+	bgpSettings(t)
+	network := pinnedNetwork(t, c, unique(t, "pin"), 198)
+	reconcileNetwork(t, c, network.Name)
+	if err := fabrictest.MarkVpcStandby(context.Background(), c, network.Name); err != nil {
+		t.Fatal(err)
+	}
+	reconcileNetwork(t, c, network.Name)
+	requireCondition(t, getNetwork(t, c, network.Name).Status.Conditions, v1alpha1.ConditionReady, metav1.ConditionTrue, ReasonVpcReady)
+
+	setSetting(t, "network.bgp.redistribute-tables", "198")
+	reconcileNetwork(t, c, network.Name)
+	got := getNetwork(t, c, network.Name).Status.Conditions
+	requireCondition(t, got, v1alpha1.ConditionReady, metav1.ConditionTrue, ReasonVpcReady)
+	requireCondition(t, got, ConditionVRFPolicy, metav1.ConditionFalse, ReasonVRFReserved)
+	if vrfOf(t, c, network.Name) != 198 {
+		t.Fatal("the Vpc must keep its id")
+	}
+
+	setSetting(t, "network.bgp.redistribute-tables", "7")
+	reconcileNetwork(t, c, network.Name)
+	if meta.FindStatusCondition(getNetwork(t, c, network.Name).Status.Conditions, ConditionVRFPolicy) != nil {
+		t.Fatal("the VRFPolicy condition must go when the Setting no longer lists the id")
 	}
 }

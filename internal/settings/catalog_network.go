@@ -52,7 +52,7 @@ func networkDefinitions() []Definition {
 		{"network.bgp.keepalive-time", "3s", "BGP keepalive time in whole seconds, from 1s to 300s.", wholeSecondsBetween(minKeepaliveTime, maxBGPTimer)},
 		{"network.bgp.graceful-restart", "true", "Keep the BGP routes while a peer restarts.", boolean},
 		{"network.bgp.advertise-filter", "", "Comma list of <cidr> ge <n> le <n> entries, with the mask length <= ge <= le <= 32. The FRR agent advertises only the matching routes. Empty advertises all routes.", advertiseFilterValue},
-		{"network.bgp.redistribute-tables", "", "Comma list of host routing table ids from 1 to 999 that the FRR agent redistributes. 253, 254 and 255 are reserved. Ids from 1000 up are the VRF ids of the VPCs.", tableIDsValue},
+		{"network.bgp.redistribute-tables", "", "Comma list of host routing table ids from 1 to 999 that the FRR agent redistributes. 253, 254 and 255 are reserved. Ids from 1000 up are the VRF ids of the VPCs. The list must not hold a VRF id that a Network pins in spec.vrfId.", tableIDsValue},
 	}
 }
 

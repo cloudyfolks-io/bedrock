@@ -51,14 +51,18 @@ func (r *NetworkReconciler) Reconcile(ctx context.Context, req reconcile.Request
 		return r.publish(ctx, &network, notReadyStatus(network, ReasonVpcPending, err.Error()))
 	}
 	breach := NetworkReservedOverlap(network.Spec.Ranges(), SettingReserved(cfg))
-	if breach != nil {
+	vrfBreach, err := r.vrfBreach(ctx, &network, cfg)
+	if err != nil {
+		return reconcile.Result{}, err
+	}
+	if breach != nil || vrfBreach != nil {
 		provisioned, err := liveOwnedObject(ctx, r.Client, fabric.VpcGVK, VpcName(network.Name), &network)
 		if err != nil {
 			return reconcile.Result{}, err
 		}
-		if !provisioned {
-			status := notReadyStatus(network, breach.Reason, breach.Message)
-			status.Conditions = withRangePolicy(status.Conditions, network.Generation, nil)
+		if refused := Refusal(breach, vrfBreach, provisioned); refused != nil {
+			status := notReadyStatus(network, refused.Reason, refused.Message)
+			status.Conditions = withVRFPolicy(withRangePolicy(status.Conditions, network.Generation, nil), network.Generation, nil)
 			return r.publish(ctx, &network, status)
 		}
 	}
@@ -85,7 +89,7 @@ func (r *NetworkReconciler) Reconcile(ctx context.Context, req reconcile.Request
 	if err != nil {
 		return reconcile.Result{}, err
 	}
-	status.Conditions = withRangePolicy(status.Conditions, network.Generation, breach)
+	status.Conditions = withVRFPolicy(withRangePolicy(status.Conditions, network.Generation, breach), network.Generation, vrfBreach)
 	return r.publish(ctx, &network, status)
 }
 
@@ -104,10 +108,13 @@ func (r *NetworkReconciler) vrfID(ctx context.Context, network *v1alpha1.Network
 	if cfg.EIPMode != EIPModeBGP || !network.Spec.EnableExternal {
 		return 0, nil
 	}
+	if network.Spec.VrfID != nil {
+		return uint32(*network.Spec.VrfID), nil
+	}
 	if recorded, err := strconv.ParseUint(network.Annotations[AnnotationVrfID], 10, 32); err == nil {
 		return uint32(recorded), nil
 	}
-	used, err := r.usedVrfIDs(ctx)
+	used, err := r.usedVrfIDs(ctx, network)
 	if err != nil {
 		return 0, err
 	}
@@ -118,24 +125,53 @@ func (r *NetworkReconciler) vrfID(ctx context.Context, network *v1alpha1.Network
 	return r.recordVrfID(ctx, network, id)
 }
 
-func (r *NetworkReconciler) usedVrfIDs(ctx context.Context) ([]uint32, error) {
-	var used []uint32
+func (r *NetworkReconciler) vrfBreach(ctx context.Context, network *v1alpha1.Network, cfg Config) (*Violation, error) {
+	if network.Spec.VrfID == nil {
+		return nil, nil
+	}
+	if reserved := VrfReserved(uint32(*network.Spec.VrfID), cfg.BGP.RedistributeTables); reserved != nil {
+		return reserved, nil
+	}
+	var networks v1alpha1.NetworkList
+	if err := r.live().List(ctx, &networks); err != nil {
+		return nil, err
+	}
+	foreign, err := r.vpcVrfIDs(ctx, network)
+	if err != nil {
+		return nil, err
+	}
+	return VrfInUse(*network, networks.Items, foreign), nil
+}
+
+func (r *NetworkReconciler) vpcVrfIDs(ctx context.Context, except *v1alpha1.Network) ([]uint32, error) {
+	var ids []uint32
 	vpcs, err := listObjects(ctx, r.Client, fabric.VpcGVK)
 	if err != nil {
 		return nil, err
 	}
 	for _, vpc := range vpcs {
-		if id, found, _ := unstructured.NestedInt64(vpc.Object, "spec", "dynamicRouting", "vrfId"); found {
-			used = append(used, uint32(id))
+		if ownedBy(vpc, except) {
+			continue
 		}
+		if id, found, _ := unstructured.NestedInt64(vpc.Object, "spec", "dynamicRouting", "vrfId"); found {
+			ids = append(ids, uint32(id))
+		}
+	}
+	return ids, nil
+}
+
+func (r *NetworkReconciler) usedVrfIDs(ctx context.Context, network *v1alpha1.Network) ([]uint32, error) {
+	used, err := r.vpcVrfIDs(ctx, network)
+	if err != nil {
+		return nil, err
 	}
 	var networks v1alpha1.NetworkList
 	if err := r.live().List(ctx, &networks); err != nil {
 		return nil, err
 	}
 	for _, n := range networks.Items {
-		if id, err := strconv.ParseUint(n.Annotations[AnnotationVrfID], 10, 32); err == nil {
-			used = append(used, uint32(id))
+		if id, held := HeldVrfID(n); held {
+			used = append(used, id)
 		}
 	}
 	return used, nil

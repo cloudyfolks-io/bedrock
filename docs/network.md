@@ -232,6 +232,15 @@ The other provider networks hold the elastic IPs.
 The FRR agent advertises the addresses.
 Every Network with `enableExternal` gets `enableBfd` and `dynamicRouting.localOnly` on its Fabric `Vpc`.
 Fabric advertises the NAT and load balancer addresses only from the chassis that holds the port.
+A Network can pin its VRF id with `spec.vrfId`, a number from 1 to 65535 that is not 253, 254 or 255.
+Only a member of the group `bedrock:bedrock-admins` can set it, and nobody can change it after it is set.
+Use it to keep the VRF id of a VPC that moves from another platform.
+Without `vrfId`, the operator picks the lowest free id from 1000 and records it in the annotation `network.bedrock.cloudyfolks.io/vrf-id`.
+The operator never picks an id that a Network pins.
+A Network gets `Ready=False` with the reason `VRFInUse` when another Network or another Fabric `Vpc` holds the id, and the operator does not make its Fabric Vpc.
+When two Networks pin the same id, the older Network keeps it.
+A Network gets `Ready=False` with the reason `VRFReserved` when the id is in `network.bgp.redistribute-tables`.
+A provisioned Network that breaks this rule after a Setting change stays `Ready`, keeps its id, and shows the same text in the condition `VRFPolicy`.
 The agent is the DaemonSet `kube-system/fabric-frr`.
 The release installs it.
 It runs only on the nodes that have the label `fabric.cloudyfolks.io/external-gw=true`.
@@ -309,7 +318,7 @@ Remove the group from the VM first.
 | `network.bgp.keepalive-time` | `3s` | BGP keepalive time in whole seconds, from `1s` to `300s`. |
 | `network.bgp.graceful-restart` | `true` | Keep the BGP routes while a peer restarts. |
 | `network.bgp.advertise-filter` | empty | Comma list of `<cidr> ge <n> le <n>` entries. The mask length must not be more than `ge`, and `ge` must not be more than `le`, which is at most 32. The agent advertises only the matching routes. |
-| `network.bgp.redistribute-tables` | empty | Comma list of host routing table ids from 1 to 999. 253, 254 and 255 are reserved. Ids from 1000 up are the VRF ids of the VPCs, and the agent refuses a host table that equals one of them. |
+| `network.bgp.redistribute-tables` | empty | Comma list of host routing table ids from 1 to 999. 253, 254 and 255 are reserved. Ids from 1000 up are the VRF ids of the VPCs, and the agent refuses a host table that equals one of them. The list must not hold a VRF id that a Network pins in `spec.vrfId`. |
 | `network.dns-servers` | empty | Comma list of IPv4 resolvers that DHCP gives to guests. A Subnet that sets `dnsServers` uses its own list. |
 | `network.reserved-cidrs` | `100.64.0.0/10` | Comma list of IPv4 networks. No Network range and no Subnet can overlap them. They belong to the platform planes. |
 | `network.subnet-allowed-ranges` | `10.0.0.0/8,172.16.0.0/12,192.168.0.0/16` | Comma list of IPv4 networks. Every Subnet must be inside one of them. Use `0.0.0.0/0` to allow every address. |
@@ -372,6 +381,8 @@ Then take the action in the table.
 | `Unsupported` | A Fabric kind is missing, a rule needs IPv6, or the request cannot be done. Read the message. |
 | `VpcPending` | Fabric has not finished the Vpc. Wait. |
 | `VpcReady` | The Vpc works. No action. |
+| `VRFInUse` | Another Network or a Fabric Vpc holds the VRF id that `spec.vrfId` pins. Pin another id, or free the id. |
+| `VRFReserved` | The VRF id that `spec.vrfId` pins is a host table in `network.bgp.redistribute-tables`. Pin another id, or remove the table from the Setting. A provisioned Network shows the same text in the condition `VRFPolicy`, and it stays `Ready`. |
 | `WaitingForDefaultSecurityGroup` | Fabric has not programmed the default security group of the namespace yet. Wait. |
 | `WaitingForAddress` | A VM has no address yet. Wait for the VM to start. |
 

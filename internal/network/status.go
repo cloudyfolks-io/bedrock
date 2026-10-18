@@ -38,12 +38,20 @@ func withCondition(existing []metav1.Condition, cond metav1.Condition) []metav1.
 }
 
 func withRangePolicy(existing []metav1.Condition, generation int64, breach *Violation) []metav1.Condition {
+	return withPolicy(existing, ConditionRangePolicy, generation, breach)
+}
+
+func withVRFPolicy(existing []metav1.Condition, generation int64, breach *Violation) []metav1.Condition {
+	return withPolicy(existing, ConditionVRFPolicy, generation, breach)
+}
+
+func withPolicy(existing []metav1.Condition, conditionType string, generation int64, breach *Violation) []metav1.Condition {
 	conditions := slices.Clone(existing)
 	if breach == nil {
-		meta.RemoveStatusCondition(&conditions, ConditionRangePolicy)
+		meta.RemoveStatusCondition(&conditions, conditionType)
 		return conditions
 	}
-	v1alpha1.SetCondition(&conditions, violationCondition(ConditionRangePolicy, generation, breach))
+	v1alpha1.SetCondition(&conditions, violationCondition(conditionType, generation, breach))
 	return conditions
 }
 

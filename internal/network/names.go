@@ -23,6 +23,7 @@ const (
 	AnnotationVrfID          = "network.bedrock.cloudyfolks.io/vrf-id"
 	ConditionExternalReady   = "ExternalReady"
 	ConditionRangePolicy     = "RangePolicy"
+	ConditionVRFPolicy       = "VRFPolicy"
 
 	labelValueMax       = 63
 	hashLength          = 12

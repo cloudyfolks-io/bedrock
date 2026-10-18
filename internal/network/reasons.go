@@ -51,6 +51,8 @@ const (
 	ReasonWaitingForDefaultSecurityGroup = "WaitingForDefaultSecurityGroup"
 	ReasonCIDRReserved                   = "CIDRReserved"
 	ReasonCIDROutsideAllowedRanges       = "CIDROutsideAllowedRanges"
+	ReasonVRFInUse                       = "VRFInUse"
+	ReasonVRFReserved                    = "VRFReserved"
 )
 
 var AllReasons = sortedReasons([]string{
@@ -64,6 +66,7 @@ var AllReasons = sortedReasons([]string{
 	ReasonElasticIPNotFound, ReasonElasticIPNotReady, ReasonNoTargets, ReasonTargetNetworkMismatch,
 	ReasonTargetPortsDiffer, ReasonNotAttached, ReasonInvalidRecords, ReasonRefNotFound, ReasonInvalidRules,
 	ReasonTargetInUse, ReasonWaitingForDefaultSecurityGroup, ReasonCIDRReserved, ReasonCIDROutsideAllowedRanges,
+	ReasonVRFInUse, ReasonVRFReserved,
 })
 
 func sortedReasons(reasons []string) []string {
