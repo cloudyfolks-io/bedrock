@@ -213,6 +213,45 @@ func TestSubnetReconcilerKeepsAnOldNetworkWithOnlyCIDRWorking(t *testing.T) {
 	requireCondition(t, getNetwork(t, c, network.Name).Status.Conditions, v1alpha1.ConditionReady, metav1.ConditionTrue, ReasonVpcReady)
 }
 
+func TestSubnetReconcilerRejectsCIDRInAReservedRange(t *testing.T) {
+	f := newSubnetFixture(t)
+	setSetting(t, "network.reserved-cidrs", "10.100.5.0/24")
+	f.create(t, f.namespace, "reserved", "10.100.5.128/25")
+	f.create(t, f.namespace, "free", "10.100.6.0/24")
+	reconcileSubnet(t, f.c, f.namespace, "reserved")
+	reconcileSubnet(t, f.c, f.namespace, "free")
+	requireSubnetReason(t, f.c, f.namespace, "reserved", metav1.ConditionFalse, ReasonCIDRReserved)
+	requireNoFabricSubnet(t, f.c, f.namespace, "reserved")
+	got := getSubnet(t, f.c, f.namespace, "reserved").Status.Conditions
+	if message := meta.FindStatusCondition(got, v1alpha1.ConditionReady).Message; !strings.Contains(message, "reserved 10.100.5.0/24") {
+		t.Fatalf("message %q", message)
+	}
+	requireSubnetReason(t, f.c, f.namespace, "free", metav1.ConditionFalse, ReasonFabricNotReady)
+}
+
+func TestSubnetReconcilerRejectsCIDROutsideTheAllowedRanges(t *testing.T) {
+	c := cleanEnv(t)
+	tenant := unique(t, "acme")
+	network := readyNetworkOf(t, c, networkOfRanges(unique(t, "net"), tenant, "10.100.0.0/16", "172.16.0.0/16", "203.0.0.0/16"))
+	namespace := newNamespace(t, tenant, "prod")
+	for name, cidr := range map[string]string{"ten": "10.100.1.0/24", "private": "172.16.1.0/24", "public": "203.0.1.0/24"} {
+		requireAccepted(t, c, policySubnet(namespace, name, network.Name, cidr))
+		reconcileSubnet(t, c, namespace, name)
+	}
+	requireSubnetReason(t, c, namespace, "ten", metav1.ConditionFalse, ReasonFabricNotReady)
+	requireSubnetReason(t, c, namespace, "private", metav1.ConditionFalse, ReasonFabricNotReady)
+	requireSubnetReason(t, c, namespace, "public", metav1.ConditionFalse, ReasonCIDROutsideAllowedRanges)
+	requireNoFabricSubnet(t, c, namespace, "public")
+	got := getSubnet(t, c, namespace, "public").Status.Conditions
+	if message := meta.FindStatusCondition(got, v1alpha1.ConditionReady).Message; !strings.Contains(message, "network.subnet-allowed-ranges") || !strings.Contains(message, "10.0.0.0/8") {
+		t.Fatalf("message %q", message)
+	}
+
+	setSetting(t, "network.subnet-allowed-ranges", "10.0.0.0/8")
+	reconcileSubnet(t, c, namespace, "private")
+	requireSubnetReason(t, c, namespace, "private", metav1.ConditionFalse, ReasonCIDROutsideAllowedRanges)
+}
+
 func TestSubnetReconcilerRejectsOverlapKeepingTheOlder(t *testing.T) {
 	f := newSubnetFixture(t)
 	second := newNamespace(t, f.tenant, "zz")
@@ -457,6 +496,7 @@ func reservedFixture(t *testing.T, cidr string) subnetFixture {
 }
 
 func TestSubnetReconcilerRejectsProviderNetworkRanges(t *testing.T) {
+	setSetting(t, "network.subnet-allowed-ranges", "0.0.0.0/0")
 	f := reservedFixture(t, "91.246.0.0/16")
 	f.create(t, f.namespace, "clash", "91.246.31.0/24")
 	f.create(t, f.namespace, "fine", "91.246.40.0/24")
@@ -468,6 +508,7 @@ func TestSubnetReconcilerRejectsProviderNetworkRanges(t *testing.T) {
 }
 
 func TestSubnetReconcilerRejectsTheJoinSubnet(t *testing.T) {
+	setSetting(t, "network.reserved-cidrs", "192.0.2.0/24")
 	f := reservedFixture(t, "100.64.0.0/16")
 	f.create(t, f.namespace, "clash", "100.64.1.0/24")
 	reconcileSubnet(t, f.c, f.namespace, "clash")

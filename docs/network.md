@@ -155,11 +155,19 @@ To move an older Network to `cidrs`, replace `cidr` with a `cidrs` list that hol
 You can add a range to `cidrs`.
 You cannot remove a range, and you cannot go back to `cidr`.
 
+Two Settings limit the ranges.
+`network.reserved-cidrs` holds the ranges that the platform keeps for its own planes.
+No range of a Network and no Subnet can overlap them.
+A Network with a range that overlaps a reserved range gets `Ready=False` with the reason `CIDRReserved`, and the operator does not make its Fabric Vpc.
+`network.subnet-allowed-ranges` holds the ranges where Subnets can be.
+The Subnet reconciler refuses a Subnet outside them with the reason `CIDROutsideAllowedRanges`.
+The admission policy does not read Settings, so only the reconciler makes these two checks.
+
 A Subnet admission policy checks each new Subnet.
 The CIDR of a Subnet must be inside one of the ranges of its Network.
 The CIDR must not overlap another Subnet of the same Network.
 The Subnet must name a Network of its own tenant.
-The Subnet reconciler makes the same checks.
+The Subnet reconciler makes the same checks, and it also checks the reserved ranges and the allowed ranges.
 When two Subnets overlap, the older Subnet wins.
 
 A Network does not give a VM access to the internet.
@@ -276,6 +284,8 @@ Remove the group from the VM first.
 | `network.bgp.advertise-filter` | empty | Comma list of `<cidr> ge <n> le <n>` entries. The mask length must not be more than `ge`, and `ge` must not be more than `le`, which is at most 32. The agent advertises only the matching routes. |
 | `network.bgp.redistribute-tables` | empty | Comma list of host routing table ids from 1 to 999. 253, 254 and 255 are reserved. Ids from 1000 up are the VRF ids of the VPCs, and the agent refuses a host table that equals one of them. |
 | `network.dns-servers` | empty | Comma list of IPv4 resolvers that DHCP gives to guests. A Subnet that sets `dnsServers` uses its own list. |
+| `network.reserved-cidrs` | `100.64.0.0/10` | Comma list of IPv4 networks. No Network range and no Subnet can overlap them. They belong to the platform planes. |
+| `network.subnet-allowed-ranges` | `10.0.0.0/8,172.16.0.0/12,192.168.0.0/16` | Comma list of IPv4 networks. Every Subnet must be inside one of them. Use `0.0.0.0/0` to allow every address. |
 | `network.mtu` | empty | MTU in bytes, from 576 to 9000, of every Subnet that sets no `mtu`. Empty lets Fabric choose. A running guest learns a new value at its next DHCP lease, and the pod interface of a VM keeps its MTU until the VM restarts. |
 
 `bedrock init` writes `network.eip-mode` and `network.provider-networks` from the cluster configuration.
@@ -297,8 +307,9 @@ Then take the action in the table.
 | `Applied` | The Subnet is programmed. No action. |
 | `Attached` | The ElasticIP is attached to its target. No action. |
 | `BGPNotConfigured` | Bgp mode misses a Setting. Set the keys that the message names. |
-| `CIDRReserved` | The Subnet CIDR overlaps a provider network, the join subnet or a management range. Use another CIDR. |
+| `CIDRReserved` | The Subnet CIDR overlaps a provider network, the join subnet, a management range or a range of `network.reserved-cidrs`. A Network gets this reason when one of its ranges overlaps a range of `network.reserved-cidrs`. Use another CIDR. |
 | `CIDROutsideNetwork` | The Subnet CIDR is not inside any range of the Network. Use another CIDR, or add a range to `cidrs` of the Network. |
+| `CIDROutsideAllowedRanges` | The Subnet CIDR is not inside a range of `network.subnet-allowed-ranges`. Use another CIDR, or ask an administrator to change the Setting. |
 | `CIDROverlap` | An older Subnet overlaps this one. Use another CIDR. |
 | `Connected` | The external connection works. No action. |
 | `ElasticIPNotFound` | The ElasticIP of the LoadBalancer does not exist. Create it. |
@@ -340,7 +351,8 @@ Then take the action in the table.
 ## Limits
 
 - Only IPv4 works.
-- A Subnet CIDR must not overlap a provider network, the join subnet, the API address or a node address. The operator does not check the pod and service ranges, because tenant VPCs are isolated. The management range is known only as single addresses.
+- A Network range is checked only against `network.reserved-cidrs`. A wide range can hold a provider network or the join subnet, and the Subnet check refuses the Subnets that overlap them.
+- A Subnet CIDR must not overlap a provider network, the join subnet, a range of `network.reserved-cidrs`, the API address or a node address. The operator does not check the pod and service ranges, because tenant VPCs are isolated. The management range is known only as single addresses.
 - A VM without an ElasticIP has no route to the internet.
 - A health check is on or off. The other health check fields are not used.
 - L2 mode has one default route, to the first provider network.

@@ -2,6 +2,7 @@ package network
 
 import (
 	"context"
+	"strings"
 	"testing"
 
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -110,6 +111,40 @@ func TestNetworkReconcilerCreatesVpc(t *testing.T) {
 		t.Fatalf("a ready Network needs no requeue: %+v", result)
 	}
 	requireCondition(t, getNetwork(t, c, network.Name).Status.Conditions, v1alpha1.ConditionReady, metav1.ConditionTrue, ReasonVpcReady)
+}
+
+func TestNetworkReconcilerAcceptsEveryPrivateRange(t *testing.T) {
+	c := cleanEnv(t)
+	network := networkOfRanges(unique(t, "net"), "acme", "10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16")
+	requireAccepted(t, c, network)
+	reconcileNetwork(t, c, network.Name)
+	vpcOf(t, c, network.Name)
+	requireCondition(t, getNetwork(t, c, network.Name).Status.Conditions, v1alpha1.ConditionReady, metav1.ConditionFalse, ReasonVpcPending)
+}
+
+func TestNetworkReconcilerRefusesARangeInAReservedRange(t *testing.T) {
+	c := cleanEnv(t)
+	setSetting(t, "network.reserved-cidrs", "100.64.0.0/10,172.16.8.0/24")
+	cases := map[string]*v1alpha1.Network{
+		"cgnat":  networkOfRanges(unique(t, "net"), "acme", "10.100.0.0/16", "100.100.0.0/16"),
+		"inside": networkOfRanges(unique(t, "net"), "acme", "172.16.0.0/16"),
+		"old":    networkOf(unique(t, "net"), "acme", "100.64.0.0/16"),
+	}
+	for name, network := range cases {
+		t.Run(name, func(t *testing.T) {
+			requireAccepted(t, c, network)
+			reconcileNetwork(t, c, network.Name)
+			got := getNetwork(t, c, network.Name)
+			requireCondition(t, got.Status.Conditions, v1alpha1.ConditionReady, metav1.ConditionFalse, ReasonCIDRReserved)
+			message := meta.FindStatusCondition(got.Status.Conditions, v1alpha1.ConditionReady).Message
+			if !strings.Contains(message, "Network cidr") {
+				t.Fatalf("message %q", message)
+			}
+			if _, err := getObject(context.Background(), c, fabric.VpcGVK, network.Name); !apierrors.IsNotFound(err) {
+				t.Fatalf("no Fabric Vpc expected: %v", err)
+			}
+		})
+	}
 }
 
 func TestNetworkReconcilerRendersL2External(t *testing.T) {

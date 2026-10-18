@@ -50,6 +50,9 @@ func (r *NetworkReconciler) Reconcile(ctx context.Context, req reconcile.Request
 	if err != nil {
 		return r.publish(ctx, &network, notReadyStatus(network, ReasonVpcPending, err.Error()))
 	}
+	if v := NetworkReservedOverlap(network.Spec.Ranges(), SettingReserved(cfg)); v != nil {
+		return r.publish(ctx, &network, notReadyStatus(network, v.Reason, v.Message))
+	}
 	vrf, err := r.vrfID(ctx, &network, cfg)
 	if err != nil {
 		return reconcile.Result{}, err

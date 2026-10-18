@@ -13,6 +13,7 @@ func TestNetworkCatalogKeysAndDefaults(t *testing.T) {
 		"network.bgp.peers": "", "network.bgp.transit-network": "", "network.dns-servers": "", "network.mtu": "",
 		"network.bgp.bfd": "true", "network.bgp.hold-time": "9s", "network.bgp.keepalive-time": "3s",
 		"network.bgp.graceful-restart": "true", "network.bgp.advertise-filter": "", "network.bgp.redistribute-tables": "",
+		"network.reserved-cidrs": "100.64.0.0/10", "network.subnet-allowed-ranges": "10.0.0.0/8,172.16.0.0/12,192.168.0.0/16",
 	}
 	for key, def := range want {
 		got, ok := Lookup(key)
@@ -29,6 +30,20 @@ func validates(t *testing.T, key, value string) error {
 		t.Fatalf("missing %s", key)
 	}
 	return def.Validate(value)
+}
+
+func TestSubnetRangeSettingsValidation(t *testing.T) {
+	cases := map[string]bool{
+		"": true, "100.64.0.0/10": true, "10.0.0.0/8,172.16.0.0/12,192.168.0.0/16": true, "0.0.0.0/0": true,
+		"10.0.0.5/8": false, "fd00::/64": false, "nonsense": false, "10.0.0.0/8,": false, ",10.0.0.0/8": false, "10.0.0.0/8, 172.16.0.0/12": false, "10.0.0.0/33": false,
+	}
+	for _, key := range []string{"network.reserved-cidrs", "network.subnet-allowed-ranges"} {
+		for value, valid := range cases {
+			if (validates(t, key, value) == nil) != valid {
+				t.Fatalf("%s %q valid=%v", key, value, valid)
+			}
+		}
+	}
 }
 
 func TestEIPModeValidation(t *testing.T) {

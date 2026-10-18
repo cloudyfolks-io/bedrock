@@ -25,9 +25,19 @@ func TestParseConfigDefaults(t *testing.T) {
 	if cfg.EIPMode != "l2" || len(cfg.ProviderNetworks) != 0 || len(cfg.DNSServers) != 0 || cfg.MTU != 0 {
 		t.Fatalf("unexpected defaults %+v", cfg)
 	}
+	if !slices.Equal(cfg.ReservedCIDRs, []string{"100.64.0.0/10"}) || !slices.Equal(cfg.SubnetAllowedRanges, []string{"10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16"}) {
+		t.Fatalf("unexpected range defaults %v %v", cfg.ReservedCIDRs, cfg.SubnetAllowedRanges)
+	}
 	bgp := cfg.BGP
 	if !bgp.BFD || bgp.HoldTime != 9*time.Second || bgp.KeepaliveTime != 3*time.Second || !bgp.GracefulRestart || len(bgp.AdvertiseFilter) != 0 || len(bgp.RedistributeTables) != 0 {
 		t.Fatalf("unexpected bgp defaults %+v", bgp)
+	}
+}
+
+func TestParseConfigSubnetRanges(t *testing.T) {
+	cfg, err := ParseConfig(map[string]string{"network.reserved-cidrs": "100.64.0.0/10,10.16.0.0/16", "network.subnet-allowed-ranges": "10.0.0.0/8"})
+	if err != nil || !slices.Equal(cfg.ReservedCIDRs, []string{"100.64.0.0/10", "10.16.0.0/16"}) || !slices.Equal(cfg.SubnetAllowedRanges, []string{"10.0.0.0/8"}) {
+		t.Fatalf("reserved %v, allowed %v, error %v", cfg.ReservedCIDRs, cfg.SubnetAllowedRanges, err)
 	}
 }
 
@@ -124,6 +134,8 @@ func TestParseConfigRejectsInvalid(t *testing.T) {
 		{"network.mtu": "575"},
 		{"network.mtu": "9001"},
 		{"network.mtu": "jumbo"},
+		{"network.reserved-cidrs": "100.64.0.1/10"},
+		{"network.subnet-allowed-ranges": "10.0.0.0/8,nonsense"},
 		{"network.bgp.bfd": "maybe"},
 		{"network.bgp.hold-time": "0s"},
 		{"network.bgp.keepalive-time": "301s"},

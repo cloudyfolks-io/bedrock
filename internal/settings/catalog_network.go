@@ -45,6 +45,8 @@ func networkDefinitions() []Definition {
 		{"network.bgp.transit-network", "", "Provider network that carries the router ports in bgp mode.", dnsLabelValue},
 		{"network.dns-servers", "", "Comma list of IPv4 resolvers that DHCP gives to guests. A Subnet that sets dnsServers uses its own list.", ipv4ListValue},
 		{"network.mtu", "", "MTU in bytes, from 576 to 9000, of every Subnet that sets no mtu. Empty lets Fabric choose. Keep it at or below the underlay MTU minus 100. A running guest learns a new value at its next DHCP lease, but the pod interface of a VM keeps its MTU until the VM restarts, so raise it only with a planned VM restart.", intBetween(minMTU, maxMTU)},
+		{"network.reserved-cidrs", "100.64.0.0/10", "Comma list of IPv4 networks that no Subnet and no Network range may overlap. They belong to the platform planes. Empty keeps the default.", cidrListValue},
+		{"network.subnet-allowed-ranges", "10.0.0.0/8,172.16.0.0/12,192.168.0.0/16", "Comma list of IPv4 networks. Every Subnet must be inside one of them. Use 0.0.0.0/0 to allow every address. Empty keeps the default.", cidrListValue},
 		{"network.bgp.bfd", "true", "Enable BFD on every BGP peer.", boolean},
 		{"network.bgp.hold-time", "9s", "BGP hold time in whole seconds, from 3s to 300s. A peer refuses a hold time of 1s or 2s.", wholeSecondsBetween(minHoldTime, maxBGPTimer)},
 		{"network.bgp.keepalive-time", "3s", "BGP keepalive time in whole seconds, from 1s to 300s.", wholeSecondsBetween(minKeepaliveTime, maxBGPTimer)},
@@ -263,6 +265,19 @@ func ipv4ListValue(v string) error {
 	for _, item := range strings.Split(v, ",") {
 		if err := ipv4Value(item); err != nil || item == "" {
 			return fmt.Errorf("value %q is not a comma list of IPv4 addresses", v)
+		}
+	}
+	return nil
+}
+
+func cidrListValue(v string) error {
+	if v == "" {
+		return nil
+	}
+	for _, item := range strings.Split(v, ",") {
+		prefix, err := netip.ParsePrefix(item)
+		if err != nil || !prefix.Addr().Is4() || prefix.Masked() != prefix {
+			return fmt.Errorf("value %q is not a comma list of canonical IPv4 networks", v)
 		}
 	}
 	return nil

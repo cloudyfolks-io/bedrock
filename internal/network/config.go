@@ -26,6 +26,9 @@ const (
 	keyDNSServers      = "network.dns-servers"
 	keyMTU             = "network.mtu"
 
+	keyReservedCIDRs       = "network.reserved-cidrs"
+	keySubnetAllowedRanges = "network.subnet-allowed-ranges"
+
 	keyBGPBFD                = "network.bgp.bfd"
 	keyBGPHoldTime           = "network.bgp.hold-time"
 	keyBGPKeepaliveTime      = "network.bgp.keepalive-time"
@@ -55,6 +58,9 @@ type Config struct {
 	BGP              BGP
 	DNSServers       []string
 	MTU              int
+
+	ReservedCIDRs       []string
+	SubnetAllowedRanges []string
 }
 
 func ParseConfig(values map[string]string) (Config, error) {
@@ -85,6 +91,9 @@ func ParseConfig(values map[string]string) (Config, error) {
 		BGP:              bgp,
 		DNSServers:       splitList(effective[keyDNSServers]),
 		MTU:              mtu,
+
+		ReservedCIDRs:       splitList(effective[keyReservedCIDRs]),
+		SubnetAllowedRanges: splitList(effective[keySubnetAllowedRanges]),
 	}, nil
 }
 
@@ -115,6 +124,7 @@ func parseBGP(effective map[string]string) (BGP, error) {
 var networkKeys = []string{
 	keyEIPMode, keyProviderNetwork, keyBGPLocalASN, keyBGPRouterID, keyBGPPeers, keyBGPTransit, keyDNSServers, keyMTU,
 	keyBGPBFD, keyBGPHoldTime, keyBGPKeepaliveTime, keyBGPGracefulRestart, keyBGPAdvertiseFilter, keyBGPRedistributeTables,
+	keyReservedCIDRs, keySubnetAllowedRanges,
 }
 
 func splitList(value string) []string {

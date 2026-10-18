@@ -123,6 +123,9 @@ func (r *SubnetReconciler) check(ctx context.Context, subnet v1alpha1.Subnet) (S
 	if v := ReservedOverlap(subnet.Spec.CIDR, reserved); v != nil {
 		return SubnetInput{}, v, nil
 	}
+	if v := AllowedRangeViolation(subnet.Spec.CIDR, cfg.SubnetAllowedRanges); v != nil {
+		return SubnetInput{}, v, nil
+	}
 	if v := GatewayViolation(subnet.Spec.CIDR, subnet.Spec.Gateway); v != nil {
 		return SubnetInput{}, v, nil
 	}
