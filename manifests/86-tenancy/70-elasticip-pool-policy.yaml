@@ -1,0 +1,51 @@
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicy
+metadata:
+  name: bedrock-elasticip-pool
+  labels:
+    bedrock.cloudyfolks.io/kind: ValidatingAdmissionPolicy
+    bedrock.cloudyfolks.io/name: bedrock-elasticip-pool
+spec:
+  failurePolicy: Fail
+  paramKind:
+    apiVersion: fabric.cloudyfolks.io/v1
+    kind: Subnet
+  matchConstraints:
+    resourceRules:
+      - apiGroups: [bedrock.cloudyfolks.io]
+        apiVersions: [v1alpha1]
+        operations: [CREATE, UPDATE]
+        resources: [elasticips]
+  matchConditions:
+    - name: bedrock-identity
+      expression: "request.userInfo.username.startsWith('bedrock:')"
+    - name: pool-named
+      expression: "has(object.spec.providerNetwork)"
+  validations:
+    - expression: >-
+        'provider-' + object.spec.providerNetwork != params.metadata.name ||
+        (request.operation == 'UPDATE' && has(oldObject.spec.providerNetwork) && oldObject.spec.providerNetwork == object.spec.providerNetwork) ||
+        'bedrock:bedrock-admins' in request.userInfo.groups
+      message: "only an administrator may name a provider network that is not a tenant pool"
+      reason: Forbidden
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicyBinding
+metadata:
+  name: bedrock-elasticip-pool
+  labels:
+    bedrock.cloudyfolks.io/kind: ValidatingAdmissionPolicyBinding
+    bedrock.cloudyfolks.io/name: bedrock-elasticip-pool
+spec:
+  policyName: bedrock-elasticip-pool
+  validationActions: [Deny]
+  paramRef:
+    selector:
+      matchExpressions:
+        - key: network.bedrock.cloudyfolks.io/component
+          operator: In
+          values: [underlay]
+        - key: usability
+          operator: In
+          values: [private, transit, services]
+    parameterNotFoundAction: Allow
