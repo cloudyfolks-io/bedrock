@@ -162,6 +162,20 @@ Some outputs hold keys. Do not put them in a ticket or in a log.
 
     Copy the archive off the host. The rollback needs it.
 
+11. Record the cephx users and their caps. Do not save the keys.
+
+    ```sh
+    ceph auth ls -f json | jq '.auth_dump |= map(del(.key))' > cephx-users.json
+    jq -r '.auth_dump[] | select(any(.caps[]; test("pool=|fsname="))) | [.entity, (.caps | tostring)] | @tsv' cephx-users.json
+    ```
+
+    Run `jq` on the host that runs `kubectl`.
+    The first command writes the users and their caps without the keys.
+    The second command lists each user that has a cap with `pool=` or `fsname=`.
+    Ceph matches these caps by name. After the rename, the old names match no pool and no file system.
+    A cap with only `namespace=` or `path=` does not change.
+    Keep the list. Section 7, step 5 changes these caps.
+
 ## 2. Export the Rook identity
 
 ### The key file
@@ -566,6 +580,30 @@ kubectl -n rook-ceph exec deploy/rook-ceph-operator -- sh -c 'radosgw-admin --co
 
    A difference is an error. Do not go on to the volume import until you know its cause.
 
+5. Change the cephx caps that name an old pool or an old file system.
+   Do this before a client of the old cluster connects again.
+   Ceph matches `pool=` and `fsname=` in a cap by name. The rename of the pools and of the file system breaks these caps.
+
+   1. List the users with these caps. Use the `ceph` function of "Run Ceph commands in the new cluster".
+      Compare the list with `cephx-users.json` of section 1, step 11.
+
+      ```sh
+      ceph auth ls -f json | jq -r '.auth_dump[] | select(any(.caps[]; test("pool=|fsname="))) | [.entity, (.caps | tostring)] | @tsv'
+      ```
+
+   2. Change each user that names an old pool or an old file system. Use the Bedrock names of the section "What changes".
+      The command `ceph auth caps` replaces all caps of the user. Give every cap type that the record shows:
+
+      ```sh
+      ceph auth caps <entity> mon '<mon caps>' osd '<osd caps with the new pool names>' mds '<mds caps with the new file system name>'
+      ```
+
+      For example, `osd 'allow rw pool=<old block pool>'` becomes `osd 'allow rw pool=bedrock-block'`.
+      The cap `fsname=<old CephFS>` becomes `fsname=bedrock-fs`.
+
+   3. Run the list command of sub-step 1 again. No cap must show an old name.
+      Do not use `ceph auth get` for this check. It prints the key.
+
 ### Checks of the storage gate
 
 After `Adopted`, the condition `StorageReady` runs read-only checks in each reconcile.
@@ -741,3 +779,8 @@ Run `snapshot` after `stop` when you want to repeat `adopt`. Run `rewind` to go 
 The lab files are in `dist/lab/`. They hold lab keys.
 The `down` stage deletes the key file, the exports, the state file and the copies of `/var/lib/rook`.
 The lab uses raw OSDs. It does not run the rollback and it does not mount CephFS with the kernel client.
+The lab does not cover these cases. Do them in the rehearsal on the real hardware:
+
+- OSDs in LVM mode.
+- A rename command that fails, and the retry after it.
+- The change of the cephx caps (section 7, step 5).
