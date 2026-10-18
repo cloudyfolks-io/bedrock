@@ -22,7 +22,7 @@ const (
 	minBGPTimer           = time.Second
 	maxBGPTimer           = 300 * time.Second
 	maxPrefixLength       = 32
-	maxTableID            = 65535
+	maxTableID            = 999
 	firstReservedTableID  = 253
 	lastReservedTableID   = 255
 )
@@ -46,7 +46,7 @@ func networkDefinitions() []Definition {
 		{"network.bgp.keepalive-time", "3s", "BGP keepalive time, from 1s to 300s.", durationBetween(minBGPTimer, maxBGPTimer)},
 		{"network.bgp.graceful-restart", "true", "Keep the BGP routes while a peer restarts.", boolean},
 		{"network.bgp.advertise-filter", "", "Comma list of <cidr> ge <n> le <n> entries, with the mask length <= ge <= le <= 32. The FRR agent advertises only the matching routes. Empty advertises all routes.", advertiseFilterValue},
-		{"network.bgp.redistribute-tables", "", "Comma list of host routing table ids from 1 to 65535 that the FRR agent redistributes. 253, 254 and 255 are reserved.", tableIDsValue},
+		{"network.bgp.redistribute-tables", "", "Comma list of host routing table ids from 1 to 999 that the FRR agent redistributes. 253, 254 and 255 are reserved. Ids from 1000 up are the VRF ids of the VPCs.", tableIDsValue},
 	}
 }
 

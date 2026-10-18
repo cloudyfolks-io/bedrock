@@ -174,7 +174,8 @@ func TestParseAdvertiseFilterNormalizesSpaces(t *testing.T) {
 
 func TestBGPRedistributeTablesValidation(t *testing.T) {
 	cases := map[string]bool{
-		"": true, "1": true, "198": true, "198,200": true, "65535": true, "252": true, "256": true,
+		"": true, "1": true, "198": true, "198,200": true, "999": true, "252": true, "256": true,
+		"1000": false, "1001": false, "65535": false, "198,1000": false,
 		"0": false, "65536": false, "4294967295": false, "-1": false, "x": false, "198,": false, ",198": false, "198,,200": false, "1.5": false,
 		"253": false, "254": false, "255": false, "198,254": false,
 	}

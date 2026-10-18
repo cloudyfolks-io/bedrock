@@ -3,6 +3,7 @@ package network
 import (
 	"context"
 	"slices"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -54,6 +55,17 @@ func TestParseConfigBGPSessionSettings(t *testing.T) {
 				t.Fatalf("unexpected bgp %+v", cfg.BGP)
 			}
 		})
+	}
+}
+
+func TestRedistributeTablesStayBelowTheVrfRange(t *testing.T) {
+	last := strconv.Itoa(firstVrfID - 1)
+	if _, err := ParseConfig(map[string]string{keyBGPRedistributeTables: last}); err != nil {
+		t.Fatalf("table %s must be accepted: %v", last, err)
+	}
+	first := strconv.Itoa(firstVrfID)
+	if _, err := ParseConfig(map[string]string{keyBGPRedistributeTables: first}); err == nil {
+		t.Fatalf("table %s is the first VPC VRF id and must be refused", first)
 	}
 }
 
