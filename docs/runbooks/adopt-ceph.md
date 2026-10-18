@@ -295,10 +295,11 @@ Do the steps in this order.
    ceph osd set noout
    kubectl -n rook-ceph scale deployment/rook-ceph-operator --replicas=0
    kubectl -n rook-ceph scale deployment --all --replicas=0
-   kubectl -n rook-ceph get pods
+   kubectl -n rook-ceph get pods --field-selector=status.phase=Running
    ```
 
-   Wait until no pod has the status `Running`.
+   Wait until the last command lists no pod.
+   A pod with the status `Terminating` is still listed.
 
 4. Copy `/var/lib/rook` off every host. Do this before any other change to the host.
    The mon stores are on the system disk. A host rebuild wipes them.
@@ -328,7 +329,9 @@ Do the steps in this order.
    ```
 
    `k0s reset` can print the line `To ensure a full reset, a node reboot is recommended.`
-   The lab adopted the cluster without a reboot.
+   The lab restarted every host after `k0s reset`, because its `snapshot` stage stops and starts the VMs.
+   The only lab run without a restart stopped at `RenameFailed`. The cause is fixed, but no run proved the adoption without a restart.
+   Restart every host after `k0s reset`.
 
 6. Check every host. The preflight of Bedrock refuses a busy port 3300 or 6789 on a fresh node.
 
@@ -720,17 +723,20 @@ Stop Ceph in the same clean way as in "Stop the old cluster". Stop k0s only at t
 
    ```sh
    kubectl -n rook-ceph scale deployment -l app!=rook-ceph-mon --replicas=0
-   kubectl -n rook-ceph get pods
+   kubectl -n rook-ceph get pods --field-selector=status.phase=Running
    ```
 
-   Wait until only the mon pods have the status `Running`. Then scale the monitors to 0.
+   Wait until the last command lists only mon pods.
+   A pod with the status `Terminating` is still listed.
+   Then scale the monitors to 0.
 
    ```sh
    kubectl -n rook-ceph scale deployment -l app=rook-ceph-mon --replicas=0
-   kubectl -n rook-ceph get pods
+   kubectl -n rook-ceph get pods --field-selector=status.phase=Running
    ```
 
-   Wait until no pod has the status `Running`.
+   Wait until the last command lists no pod.
+   A pod with the status `Terminating` is still listed.
 
 8. Stop and reset the Bedrock k0s on every host. Do the workers first. Keep `/var/lib/rook` and the disks.
 
