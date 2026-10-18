@@ -142,6 +142,7 @@ type ProjectList struct {
 // +kubebuilder:validation:XValidation:rule="!has(oldSelf.cidr) || (has(self.cidr) && self.cidr == oldSelf.cidr) || (has(self.cidrs) && oldSelf.cidr in self.cidrs)",message="cidr can only be replaced by a cidrs list that holds it"
 // +kubebuilder:validation:XValidation:rule="!has(oldSelf.cidrs) || (has(self.cidrs) && oldSelf.cidrs.all(c, c in self.cidrs))",message="cidrs can only be added to"
 // +kubebuilder:validation:XValidation:rule="!has(oldSelf.vrfId) || (has(self.vrfId) && self.vrfId == oldSelf.vrfId)",message="vrfId is immutable once set"
+// +kubebuilder:validation:XValidation:rule="has(oldSelf.vrfId) || !has(self.vrfId)",message="vrfId can only be set when the Network is created"
 type NetworkSpec struct {
 	// +kubebuilder:validation:MinLength=1
 	// +kubebuilder:validation:MaxLength=30

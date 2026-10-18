@@ -328,20 +328,21 @@ func TestAdminCanSetAVrfID(t *testing.T) {
 	later := networkFor("acme-later", "acme")
 	mustCreate(t, root, later)
 	later.Spec.VrfID = ptr.To(int32(60001))
-	if err := root.Update(context.Background(), later); err != nil {
-		t.Fatalf("an administrator must be able to pin a VRF id later: %v", err)
+	if err := root.Update(context.Background(), later); !apierrors.IsInvalid(err) || !strings.Contains(err.Error(), "vrfId can only be set when the Network is created") {
+		t.Fatalf("pin later err = %v", err)
 	}
 }
 
-func TestNonAdminCannotPinAVrfIDLaterButCanEditOtherFields(t *testing.T) {
+func TestNonAdminCannotChangeAVrfIDButCanEditOtherFields(t *testing.T) {
 	admin, alice, _ := vrfPolicyWorld(t)
 	ctx := context.Background()
-	plain, pinned := networkFor("acme-plain", "acme"), networkWithVrf("acme-pinned", 1500)
-	mustCreate(t, admin, plain, pinned)
+	pinned := networkWithVrf("acme-pinned", 1500)
+	mustCreate(t, admin, pinned)
 
-	plain.Spec.VrfID = ptr.To(int32(1600))
-	if err := alice.Update(ctx, plain); !apierrors.IsForbidden(err) {
-		t.Fatalf("pin later err = %v", err)
+	changed := pinned.DeepCopy()
+	changed.Spec.VrfID = ptr.To(int32(1600))
+	if err := alice.Update(ctx, changed); err == nil {
+		t.Fatal("a tenant user must not change a pinned VRF id")
 	}
 
 	if err := admin.Get(ctx, client.ObjectKey{Name: "acme-pinned"}, pinned); err != nil {

@@ -107,6 +107,8 @@ spec:
                 c in self.cidrs))'
             - message: vrfId is immutable once set
               rule: '!has(oldSelf.vrfId) || (has(self.vrfId) && self.vrfId == oldSelf.vrfId)'
+            - message: vrfId can only be set when the Network is created
+              rule: has(oldSelf.vrfId) || !has(self.vrfId)
           status:
             properties:
               conditions:

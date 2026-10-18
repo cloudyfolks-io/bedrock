@@ -261,7 +261,9 @@ The FRR agent advertises the addresses.
 Every Network with `enableExternal` gets `enableBfd` and `dynamicRouting.localOnly` on its Fabric `Vpc`.
 Fabric advertises the NAT and load balancer addresses only from the chassis that holds the port.
 A Network can pin its VRF id with `spec.vrfId`, a number from 1 to 65535 that is not 253, 254 or 255.
-Only a member of the group `bedrock:bedrock-admins` can set it, and nobody can change it after it is set.
+Only a member of the group `bedrock:bedrock-admins` can set it.
+You can set it only when you create the Network.
+Nobody can change or remove it after that.
 Use it to keep the VRF id of a VPC that moves from another platform.
 Without `vrfId`, the operator picks the lowest free id from 1000 and records it in the annotation `network.bedrock.cloudyfolks.io/vrf-id`.
 The operator never picks an id that a Network pins.

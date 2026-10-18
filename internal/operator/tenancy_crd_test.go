@@ -233,7 +233,5 @@ func TestNetworkVrfIDValidation(t *testing.T) {
 	free := networkWith("vrf-later", v1alpha1.NetworkSpec{CIDR: "10.100.0.0/16"})
 	createValid(t, c, free)
 	free.Spec.VrfID = ptr.To(int32(1600))
-	if err := c.Update(ctx, free); err != nil {
-		t.Fatalf("setting vrfId on a Network without one must be accepted: %v", err)
-	}
+	updateInvalid(t, c, free, "vrfId can only be set when the Network is created")
 }
