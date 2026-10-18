@@ -21,8 +21,8 @@ type SubnetInput struct {
 	DefaultDNSServers []string
 }
 
-func DHCPv4Options(gateway string, mtu int, dnsServers []string) string {
-	options := []string{"router=" + gateway}
+func DHCPv4Options(mtu int, dnsServers []string) string {
+	var options []string
 	if mtu > 0 {
 		options = append(options, "mtu="+strconv.Itoa(mtu))
 	}
@@ -56,10 +56,10 @@ func dnsServersOf(subnet v1alpha1.Subnet, fallback []string) []string {
 
 func DesiredFabricSubnet(in SubnetInput) *unstructured.Unstructured {
 	subnet := in.Subnet
-	gateway, mtu := gatewayOf(subnet), mtuOf(subnet, in.DefaultMTU)
+	mtu := mtuOf(subnet, in.DefaultMTU)
 	options := ""
 	if subnet.Spec.DHCP {
-		options = DHCPv4Options(gateway, mtu, dnsServersOf(subnet, in.DefaultDNSServers))
+		options = DHCPv4Options(mtu, dnsServersOf(subnet, in.DefaultDNSServers))
 	}
 	return fabric.Subnet(
 		fabric.Meta{
@@ -70,7 +70,7 @@ func DesiredFabricSubnet(in SubnetInput) *unstructured.Unstructured {
 		fabric.SubnetSpec{
 			Vpc:         VpcName(in.Network.Name),
 			CIDR:        subnet.Spec.CIDR,
-			Gateway:     gateway,
+			Gateway:     gatewayOf(subnet),
 			Provider:    SubnetProvider(subnet.Namespace, subnet.Name),
 			ExcludeIPs:  subnet.Spec.ExcludeIPs,
 			DHCP:        subnet.Spec.DHCP,

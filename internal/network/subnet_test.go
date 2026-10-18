@@ -37,7 +37,7 @@ func TestDesiredFabricSubnet(t *testing.T) {
 		"vpc": "t1", "protocol": "IPv4", "cidrBlock": "10.100.1.0/24", "gateway": "10.100.1.1",
 		"excludeIps": []any{"10.100.1.2..10.100.1.5"}, "provider": "default.t1-prod.fabric",
 		"gatewayType": "distributed", "natOutgoing": false, "private": false, "disableGatewayCheck": true,
-		"enableDHCP": true, "mtu": int64(1500), "dhcpV4Options": "router=10.100.1.1,mtu=1500,dns_server=1.1.1.1;8.8.8.8",
+		"enableDHCP": true, "mtu": int64(1500), "dhcpV4Options": "mtu=1500,dns_server=1.1.1.1;8.8.8.8",
 	}
 	for k, v := range want {
 		if got := spec[k]; !equalValue(got, v) {
@@ -71,8 +71,27 @@ func TestDesiredFabricSubnetDefaultsTheGateway(t *testing.T) {
 	if gateway, _, _ := unstructured.NestedString(u.Object, "spec", "gateway"); gateway != "10.100.1.1" {
 		t.Fatalf("gateway %q", gateway)
 	}
-	if options, _, _ := unstructured.NestedString(u.Object, "spec", "dhcpV4Options"); options != "router=10.100.1.1" {
-		t.Fatalf("no MTU and no DNS servers mean a router option only: %q", options)
+	if options, found, _ := unstructured.NestedString(u.Object, "spec", "dhcpV4Options"); found {
+		t.Fatalf("no MTU and no DNS servers mean no DHCP options: %q", options)
+	}
+}
+
+func TestDesiredFabricSubnetWithoutSettingsAndFieldsHasNoDHCPOptions(t *testing.T) {
+	spec, _, _ := unstructured.NestedMap(DesiredFabricSubnet(subnetInput("", nil)).Object, "spec")
+	for _, key := range []string{"dhcpV4Options", "mtu"} {
+		if _, found := spec[key]; found {
+			t.Fatalf("%s must stay out of the spec: %v", key, spec)
+		}
+	}
+}
+
+func TestDesiredFabricSubnetWithOnlyDNSServersKeepsTheOldOptions(t *testing.T) {
+	spec, _, _ := unstructured.NestedMap(DesiredFabricSubnet(subnetInput("", []string{"1.1.1.1", "8.8.8.8"})).Object, "spec")
+	if spec["dhcpV4Options"] != "dns_server=1.1.1.1;8.8.8.8" {
+		t.Fatalf("spec %v", spec)
+	}
+	if _, found := spec["mtu"]; found {
+		t.Fatalf("no mtu expected: %v", spec)
 	}
 }
 
@@ -81,7 +100,7 @@ func TestDesiredFabricSubnetWithoutAnyMTULeavesItToFabric(t *testing.T) {
 	if _, found := spec["mtu"]; found {
 		t.Fatalf("no mtu expected: %v", spec)
 	}
-	if spec["dhcpV4Options"] != "router=10.100.1.1,dns_server=1.1.1.1" {
+	if spec["dhcpV4Options"] != "dns_server=1.1.1.1" {
 		t.Fatalf("no mtu option expected: %v", spec)
 	}
 }
@@ -90,15 +109,19 @@ func TestDesiredFabricSubnetSubnetMTUNeedsNoSetting(t *testing.T) {
 	in := subnetInput("", nil)
 	in.Subnet.Spec.MTU = ptr.To(int32(1400))
 	spec, _, _ := unstructured.NestedMap(DesiredFabricSubnet(in).Object, "spec")
-	if spec["mtu"] != int64(1400) || spec["dhcpV4Options"] != "router=10.100.1.1,mtu=1400" {
+	if spec["mtu"] != int64(1400) || spec["dhcpV4Options"] != "mtu=1400" {
 		t.Fatalf("spec %v", spec)
 	}
 }
 
-func TestDesiredFabricSubnetKeepsAnExplicitGatewayAsRouter(t *testing.T) {
+func TestDesiredFabricSubnetLeavesTheRouterToFabric(t *testing.T) {
 	u := DesiredFabricSubnet(subnetInput("10.100.1.254", nil))
-	if options, _, _ := unstructured.NestedString(u.Object, "spec", "dhcpV4Options"); options != "router=10.100.1.254" {
-		t.Fatalf("options %q", options)
+	spec, _, _ := unstructured.NestedMap(u.Object, "spec")
+	if spec["gateway"] != "10.100.1.254" {
+		t.Fatalf("gateway %v", spec["gateway"])
+	}
+	if _, found := spec["dhcpV4Options"]; found {
+		t.Fatalf("Fabric derives the router option from the gateway: %v", spec)
 	}
 }
 
@@ -108,7 +131,7 @@ func TestDesiredFabricSubnetSubnetFieldsWinOverTheSettings(t *testing.T) {
 	in.Subnet.Spec.MTU = ptr.To(int32(1400))
 	in.Subnet.Spec.DNSServers = []string{"100.66.0.53", "100.66.0.54"}
 	spec, _, _ := unstructured.NestedMap(DesiredFabricSubnet(in).Object, "spec")
-	if spec["mtu"] != int64(1400) || spec["dhcpV4Options"] != "router=10.100.1.1,mtu=1400,dns_server=100.66.0.53;100.66.0.54" {
+	if spec["mtu"] != int64(1400) || spec["dhcpV4Options"] != "mtu=1400,dns_server=100.66.0.53;100.66.0.54" {
 		t.Fatalf("spec %v", spec)
 	}
 }
@@ -118,7 +141,7 @@ func TestDesiredFabricSubnetFallsBackToTheSettingsForUnsetFields(t *testing.T) {
 	in.DefaultMTU = 9000
 	in.Subnet.Spec.DNSServers = []string{}
 	spec, _, _ := unstructured.NestedMap(DesiredFabricSubnet(in).Object, "spec")
-	if spec["mtu"] != int64(9000) || spec["dhcpV4Options"] != "router=10.100.1.1,mtu=9000,dns_server=1.1.1.1" {
+	if spec["mtu"] != int64(9000) || spec["dhcpV4Options"] != "mtu=9000,dns_server=1.1.1.1" {
 		t.Fatalf("spec %v", spec)
 	}
 }
@@ -126,7 +149,7 @@ func TestDesiredFabricSubnetFallsBackToTheSettingsForUnsetFields(t *testing.T) {
 func TestDesiredFabricSubnetSubnetDNSNeedsNoSetting(t *testing.T) {
 	in := subnetInput("", nil)
 	in.Subnet.Spec.DNSServers = []string{"100.66.0.53"}
-	if options, _, _ := unstructured.NestedString(DesiredFabricSubnet(in).Object, "spec", "dhcpV4Options"); options != "router=10.100.1.1,dns_server=100.66.0.53" {
+	if options, _, _ := unstructured.NestedString(DesiredFabricSubnet(in).Object, "spec", "dhcpV4Options"); options != "dns_server=100.66.0.53" {
 		t.Fatalf("options %q", options)
 	}
 }
@@ -166,20 +189,19 @@ func TestDesiredAttachment(t *testing.T) {
 
 func TestDHCPv4Options(t *testing.T) {
 	cases := map[string]struct {
-		gateway string
 		mtu     int
 		servers []string
 		want    string
 	}{
-		"nothing else": {"10.0.0.1", 0, nil, "router=10.0.0.1"},
-		"only servers": {"10.0.0.1", 0, []string{"1.1.1.1"}, "router=10.0.0.1,dns_server=1.1.1.1"},
-		"no servers":   {"10.0.0.1", 1500, nil, "router=10.0.0.1,mtu=1500"},
-		"one server":   {"10.0.0.1", 1500, []string{"1.1.1.1"}, "router=10.0.0.1,mtu=1500,dns_server=1.1.1.1"},
-		"two servers":  {"10.0.0.1", 9000, []string{"1.1.1.1", "8.8.8.8"}, "router=10.0.0.1,mtu=9000,dns_server=1.1.1.1;8.8.8.8"},
+		"nothing":      {0, nil, ""},
+		"only servers": {0, []string{"1.1.1.1"}, "dns_server=1.1.1.1"},
+		"only mtu":     {1500, nil, "mtu=1500"},
+		"one server":   {1500, []string{"1.1.1.1"}, "mtu=1500,dns_server=1.1.1.1"},
+		"two servers":  {9000, []string{"1.1.1.1", "8.8.8.8"}, "mtu=9000,dns_server=1.1.1.1;8.8.8.8"},
 	}
 	for name, tc := range cases {
 		t.Run(name, func(t *testing.T) {
-			if got := DHCPv4Options(tc.gateway, tc.mtu, tc.servers); got != tc.want {
+			if got := DHCPv4Options(tc.mtu, tc.servers); got != tc.want {
 				t.Fatalf("%q, want %q", got, tc.want)
 			}
 		})
