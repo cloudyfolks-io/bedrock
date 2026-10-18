@@ -140,7 +140,7 @@ The quota of a tenant has three kinds of ceiling.
 
 - `projects` is the maximum count of projects.
 - `cpu`, `memory` and `storage` limit the sum of the project quotas.
-- `elasticIPs` limits the public addresses. The network controller enforces it.
+- `elasticIPs` limits the public addresses. The network controller enforces it. An ElasticIP over the limit reports `QuotaExceeded`. A lowered limit does not remove an ElasticIP that already has an address.
 
 The field `status.usage` shows measured use.
 For a project the use comes from the quota object.

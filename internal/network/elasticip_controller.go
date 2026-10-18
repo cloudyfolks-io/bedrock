@@ -54,7 +54,7 @@ func (r *ElasticIPReconciler) publish(ctx context.Context, eip v1alpha1.ElasticI
 	body := statusBody(eip, v1alpha1.ElasticIPStatus{
 		CommonStatus:    v1alpha1.CommonStatus{ObservedGeneration: eip.Generation, Conditions: withCondition(eip.Status.Conditions, o.condition)},
 		Address:         o.address,
-		ProviderNetwork: cmp.Or(o.pool, PoolOf(eip)),
+		ProviderNetwork: cmp.Or(o.pool, eip.Status.ProviderNetwork),
 	})
 	if err := applyStatus(ctx, r.Client, body); err != nil && o.requeue == 0 {
 		return reconcile.Result{RequeueAfter: waitRequeue}
@@ -95,6 +95,12 @@ func (r *ElasticIPReconciler) decide(ctx context.Context, eip v1alpha1.ElasticIP
 	cfg, err := LoadConfig(ctx, r.Client)
 	if err != nil {
 		return outcome{}, err
+	}
+	if v, err := quotaViolation(ctx, r.Client, eip, tenant); err != nil || v != nil {
+		if err != nil {
+			return outcome{}, err
+		}
+		return stopped(eip, known, v), nil
 	}
 	eip, v, err := r.withPool(ctx, eip, cfg)
 	if err != nil {

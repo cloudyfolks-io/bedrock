@@ -11,6 +11,7 @@ import (
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/builder"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/event"
 	"sigs.k8s.io/controller-runtime/pkg/handler"
 	"sigs.k8s.io/controller-runtime/pkg/predicate"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
@@ -88,6 +89,14 @@ func (r *SecurityGroupReconciler) SetupWithManager(mgr ctrl.Manager) error {
 		Complete(r)
 }
 
+func deletionsOnly() predicate.Predicate {
+	return predicate.Funcs{
+		CreateFunc:  func(event.CreateEvent) bool { return false },
+		UpdateFunc:  func(event.UpdateEvent) bool { return false },
+		GenericFunc: func(event.GenericEvent) bool { return false },
+	}
+}
+
 func hasTenantLabel() predicate.Predicate {
 	return predicate.NewPredicateFuncs(func(obj client.Object) bool { return obj.GetLabels()[v1alpha1.LabelTenant] != "" })
 }
@@ -126,6 +135,16 @@ func (r *ElasticIPReconciler) SetupWithManager(mgr ctrl.Manager) error {
 			}
 			return HolderWaiters(list.Items, *obj.(*v1alpha1.ElasticIP))
 		})).
+		Watches(&v1alpha1.ElasticIP{}, handler.EnqueueRequestsFromMapFunc(func(ctx context.Context, obj client.Object) []reconcile.Request {
+			var namespace corev1.Namespace
+			if err := c.Get(ctx, client.ObjectKey{Name: obj.GetNamespace()}, &namespace); err != nil {
+				return nil
+			}
+			return QuotaWaiters(ctx, c, namespace.Labels[v1alpha1.LabelTenant])
+		}), builder.WithPredicates(deletionsOnly())).
+		Watches(&v1alpha1.Tenant{}, handler.EnqueueRequestsFromMapFunc(func(ctx context.Context, obj client.Object) []reconcile.Request {
+			return QuotaWaiters(ctx, c, obj.GetName())
+		}), builder.WithPredicates(predicate.GenerationChangedPredicate{})).
 		Watches(&v1alpha1.LoadBalancer{}, handler.EnqueueRequestsFromMapFunc(inNamespaceOf(eips))).
 		Watches(&appsv1.DaemonSet{}, handler.EnqueueRequestsFromMapFunc(everything(eips)), builder.WithPredicates(frrAgentOnly())).
 		Complete(r)

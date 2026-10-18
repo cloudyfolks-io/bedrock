@@ -54,6 +54,7 @@ const (
 	ReasonVRFInUse                       = "VRFInUse"
 	ReasonVRFReserved                    = "VRFReserved"
 	ReasonNoPoolCapacity                 = "NoPoolCapacity"
+	ReasonQuotaExceeded                  = "QuotaExceeded"
 )
 
 var AllReasons = sortedReasons([]string{
@@ -68,6 +69,7 @@ var AllReasons = sortedReasons([]string{
 	ReasonTargetPortsDiffer, ReasonNotAttached, ReasonInvalidRecords, ReasonRefNotFound, ReasonInvalidRules,
 	ReasonTargetInUse, ReasonWaitingForDefaultSecurityGroup, ReasonCIDRReserved, ReasonCIDROutsideAllowedRanges,
 	ReasonVRFInUse, ReasonVRFReserved, ReasonNoPoolCapacity,
+	ReasonQuotaExceeded,
 })
 
 func sortedReasons(reasons []string) []string {

@@ -210,6 +210,11 @@ A tie goes to the lower name.
 A full provider network is not a candidate.
 The choice is written to `status.providerNetwork`, and the ElasticIP keeps that network until you delete it.
 When every `tenant` provider network is full, or none exists, the ElasticIP reports `NoPoolCapacity` and the operator creates no Fabric object.
+The tenant field `quota.elasticIPs` limits the ElasticIPs of all projects of the tenant.
+An ElasticIP over the limit reports `QuotaExceeded`, takes no provider network and has no Fabric object.
+The older ElasticIPs go first.
+An ElasticIP that holds an address or a provider network keeps it when the quota is lowered.
+Without `quota.elasticIPs`, the number is not limited.
 Set `spec.target` to attach the address to a VM or to a LoadBalancer.
 Remove `spec.target` to detach it.
 Detach keeps the address.
@@ -385,6 +390,7 @@ Then take the action in the table.
 | `Pending` | Fabric has not connected the Network yet. Wait. |
 | `Programmed` | Fabric has the object. No action. |
 | `RefNotFound` | A rule names a security group that does not exist. Create it or fix the rule. |
+| `QuotaExceeded` | The tenant already has as many ElasticIPs as `quota.elasticIPs` allows. Delete an ElasticIP or raise the quota of the tenant. The operator checks again when the quota or the count changes. |
 | `Reserved` | The ElasticIP holds an address and has no target. No action. |
 | `TargetMismatch` | The target does not point back to this object. Fix the reference. |
 | `TargetInUse` | An older ElasticIP already uses this VM interface. Delete one of the two ElasticIPs. |

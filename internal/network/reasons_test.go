@@ -10,7 +10,7 @@ func TestAllReasonsIsSortedAndUnique(t *testing.T) {
 	if !slices.IsSorted(AllReasons) || len(slices.Compact(slices.Clone(AllReasons))) != len(AllReasons) {
 		t.Fatal("AllReasons must be sorted and unique")
 	}
-	if len(AllReasons) != 51 {
+	if len(AllReasons) != 52 {
 		t.Fatalf("unexpected reason count %d", len(AllReasons))
 	}
 }
