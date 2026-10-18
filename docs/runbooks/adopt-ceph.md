@@ -173,12 +173,12 @@ Some outputs hold keys. Do not put them in a ticket or in a log.
 
     ```sh
     ceph auth ls -f json | jq '.auth_dump |= map(del(.key))' > cephx-users.json
-    jq -r '.auth_dump[] | select(any(.caps[]; test("pool=|fsname="))) | [.entity, (.caps | tostring)] | @tsv' cephx-users.json
+    jq -r '.auth_dump[] | select(any(.caps[]; test("pool=|fsname=|tag cephfs (data|metadata)="))) | [.entity, (.caps | tostring)] | @tsv' cephx-users.json
     ```
 
     Run `jq` on the host that runs `kubectl`.
     The first command writes the users and their caps without the keys.
-    The second command lists each user that has a cap with `pool=` or `fsname=`.
+    The second command lists each user that has a cap with `pool=`, `fsname=`, `tag cephfs data=` or `tag cephfs metadata=`.
     Ceph matches these caps by name. After the rename, the old names match no pool and no file system.
     A cap with only `namespace=` or `path=` does not change.
     Keep the list. Section 7, step 5 changes these caps.
@@ -605,13 +605,14 @@ kubectl -n rook-ceph exec deploy/rook-ceph-operator -- sh -c 'radosgw-admin --co
 
 5. Change the cephx caps that name an old pool or an old file system.
    Do this before a client of the old cluster connects again.
-   Ceph matches `pool=` and `fsname=` in a cap by name. The rename of the pools and of the file system breaks these caps.
+   Ceph matches `pool=`, `fsname=`, `tag cephfs data=` and `tag cephfs metadata=` in a cap by name.
+   The rename of the pools and of the file system breaks these caps.
 
    1. List the users with these caps. Use the `ceph` function of "Run Ceph commands in the new cluster".
       Compare the list with `cephx-users.json` of section 1, step 11.
 
       ```sh
-      ceph auth ls -f json | jq -r '.auth_dump[] | select(any(.caps[]; test("pool=|fsname="))) | [.entity, (.caps | tostring)] | @tsv'
+      ceph auth ls -f json | jq -r '.auth_dump[] | select(any(.caps[]; test("pool=|fsname=|tag cephfs (data|metadata)="))) | [.entity, (.caps | tostring)] | @tsv'
       ```
 
    2. Change each user that names an old pool or an old file system. Use the Bedrock names of the section "What changes".
@@ -623,6 +624,7 @@ kubectl -n rook-ceph exec deploy/rook-ceph-operator -- sh -c 'radosgw-admin --co
 
       For example, `osd 'allow rw pool=<old block pool>'` becomes `osd 'allow rw pool=bedrock-block'`.
       The cap `fsname=<old CephFS>` becomes `fsname=bedrock-fs`.
+      The cap `tag cephfs data=<old CephFS>` becomes `tag cephfs data=bedrock-fs`.
 
    3. Run the list command of sub-step 1 again. No cap must show an old name.
       Do not use `ceph auth get` for this check. It prints the key.
@@ -668,12 +670,18 @@ Use this case only when the commands above show that no Bedrock mon ever started
 `/var/lib/rook` and the disks are as you left them.
 Put the copy of `/var/lib/rook` back only in this case.
 
-1. Stop and reset the Bedrock k0s on every host. Do the workers first.
+1. Remove the Bedrock agent, and stop and reset the Bedrock k0s, on every host. Do the workers first.
 
    ```sh
+   systemctl disable --now bedrock-agent
+   rm -f /etc/systemd/system/bedrock-agent.service
+   systemctl daemon-reload
    k0s stop
    k0s reset
    ```
+
+   The unit `bedrock-agent.service` must not stay on the host.
+   A second adoption attempt takes a host with this unit for a Bedrock install and skips the check for a foreign k0s (`adopt-k0s`).
 
 2. If a host rebuild wiped `/var/lib/rook`, restore the copy of that host:
 
@@ -739,6 +747,19 @@ Stop Ceph in the same clean way as in "Stop the old cluster". Stop k0s only at t
    - `bedrock-rgw` to the old realm, zonegroup and zone, and the pools `bedrock-rgw.rgw.*` to `<old>.rgw.*`.
      Keep the order of the RGW steps: rename the identity, rewrite the zone, rename the pools, and run `period update --commit` last.
 
+   If you did section 7, step 5, restore the cephx caps of each user that you changed there.
+   Use the record `cephx-users.json` of section 1, step 11. Read the old caps of one user:
+
+   ```sh
+   jq -r '.auth_dump[] | select(.entity=="<entity>") | .caps' cephx-users.json
+   ```
+
+   Then set them again with the old names. Give every cap type of the record:
+
+   ```sh
+   ceph auth caps <entity> mon '<old mon caps>' osd '<old osd caps>' mds '<old mds caps>'
+   ```
+
 6. Check the names with `ceph osd pool ls detail`, `ceph fs ls` and `radosgw-admin realm list`.
 
 7. Stop the Ceph daemons. Scale every Deployment except the monitors to 0 first.
@@ -760,12 +781,18 @@ Stop Ceph in the same clean way as in "Stop the old cluster". Stop k0s only at t
    Wait until the last command lists no pod.
    A pod with the status `Terminating` is still listed.
 
-8. Stop and reset the Bedrock k0s on every host. Do the workers first. Keep `/var/lib/rook` and the disks.
+8. Remove the Bedrock agent, and stop and reset the Bedrock k0s, on every host. Do the workers first. Keep `/var/lib/rook` and the disks.
 
    ```sh
+   systemctl disable --now bedrock-agent
+   rm -f /etc/systemd/system/bedrock-agent.service
+   systemctl daemon-reload
    k0s stop
    k0s reset
    ```
+
+   The unit `bedrock-agent.service` must not stay on the host.
+   A second adoption attempt takes a host with this unit for a Bedrock install and skips the check for a foreign k0s (`adopt-k0s`).
 
 9. Start the old k0s cluster as in case A, steps 3 and 4. The old Rook finds the pools with the old names and uses them.
 10. If a mon store is lost, keep the stores of the other monitors and use `kubectl rook-ceph mons restore-quorum`.
