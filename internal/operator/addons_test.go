@@ -1,7 +1,10 @@
 package operator
 
 import (
+	"bytes"
 	"context"
+	"encoding/base64"
+	"encoding/json"
 	"testing"
 	"time"
 
@@ -163,7 +166,7 @@ func TestAddonInputReadsThePlatformCA(t *testing.T) {
 	}
 }
 
-func TestAddonInputReadsTheRookMonSecretOnlyWhenAdopting(t *testing.T) {
+func TestAddonInputReadsTheRookMonFSIDOnlyWhenAdopting(t *testing.T) {
 	c, _ := StartTestEnv(t)
 	ctx := context.Background()
 	plain := v1alpha1.Cluster{ObjectMeta: metav1.ObjectMeta{Name: v1alpha1.ClusterName}, Spec: v1alpha1.ClusterSpec{API: v1alpha1.APISpec{VIP: "10.0.0.250"}}}
@@ -174,27 +177,38 @@ func TestAddonInputReadsTheRookMonSecretOnlyWhenAdopting(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if in.CephMonSecret != nil {
+	if in.CephMonFSID != "" {
 		t.Fatal("no mon Secret yet")
 	}
 	if err := c.Create(ctx, &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "rook-ceph"}}); err != nil {
 		t.Fatal(err)
 	}
-	if err := c.Create(ctx, &corev1.Secret{ObjectMeta: metav1.ObjectMeta{Namespace: "rook-ceph", Name: "rook-ceph-mon"}, Data: map[string][]byte{"fsid": []byte(adoptFSID)}}); err != nil {
+	const monKey, cephKey = "AQBt3W5nAAAAABAAmonSecretThatMustNeverShowUp7A==", "AQDm9kR0Znq2LhAAadminSecretThatMustNeverShowUp0g=="
+	secret := &corev1.Secret{ObjectMeta: metav1.ObjectMeta{Namespace: "rook-ceph", Name: "rook-ceph-mon"}, Data: map[string][]byte{"fsid": []byte(adoptFSID), "mon-secret": []byte(monKey), "ceph-secret": []byte(cephKey)}}
+	if err := c.Create(ctx, secret); err != nil {
 		t.Fatal(err)
 	}
 	in, err = r.input(ctx, adopting)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if in.CephMonSecret == nil || string(in.CephMonSecret.Data["fsid"]) != adoptFSID {
-		t.Fatalf("mon Secret %+v", in.CephMonSecret)
+	if in.CephMonFSID != adoptFSID {
+		t.Fatalf("mon fsid %q", in.CephMonFSID)
+	}
+	encoded, err := json.Marshal(in)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, key := range []string{monKey, cephKey} {
+		if bytes.Contains(encoded, []byte(key)) || bytes.Contains(encoded, []byte(base64.StdEncoding.EncodeToString([]byte(key)))) {
+			t.Fatal("the addon input carries key material of the mon Secret")
+		}
 	}
 	in, err = r.input(ctx, plain)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if in.CephMonSecret != nil {
+	if in.CephMonFSID != "" {
 		t.Fatal("a cluster that does not adopt must not read the mon Secret")
 	}
 }

@@ -46,7 +46,7 @@ type AddonInput struct {
 	AuthnInstalled bool
 	UploadProxyCA  []byte
 	ProxyInstalled bool
-	CephMonSecret  *corev1.Secret
+	CephMonFSID    string
 	CephProblems   []string
 }
 
@@ -152,11 +152,11 @@ func (r *AddonReconciler) input(ctx context.Context, cluster v1alpha1.Cluster) (
 	if err != nil {
 		return AddonInput{}, err
 	}
-	monSecret, err := adoptedMonSecret(ctx, r.Client, cluster)
+	monFSID, err := adoptedMonFSID(ctx, r.Client, cluster)
 	if err != nil {
 		return AddonInput{}, err
 	}
-	input := AddonInput{Cluster: cluster, Hosts: hosts.Items, Settings: values, Bundle: r.Bundle, PlatformCA: platformCA, WebhookToken: string(secretData(token, WebhookTokenKey)), AuthnInstalled: installed, UploadProxyCA: uploadProxyCA, ProxyInstalled: proxyInstalled, CephMonSecret: monSecret}
+	input := AddonInput{Cluster: cluster, Hosts: hosts.Items, Settings: values, Bundle: r.Bundle, PlatformCA: platformCA, WebhookToken: string(secretData(token, WebhookTokenKey)), AuthnInstalled: installed, UploadProxyCA: uploadProxyCA, ProxyInstalled: proxyInstalled, CephMonFSID: monFSID}
 	input.CephProblems = adoptedProblems(ctx, r.Client, r.Exec, input)
 	if values["platform.tls-mode"] != "Custom" || values["platform.custom-tls"] == "" {
 		return input, nil

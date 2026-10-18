@@ -11,7 +11,6 @@ import (
 	"strings"
 	"time"
 
-	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
@@ -38,18 +37,19 @@ func adoptPhase(cluster v1alpha1.Cluster) string {
 	return condition.Reason
 }
 
-func adoptedMonSecret(ctx context.Context, c client.Reader, cluster v1alpha1.Cluster) (*corev1.Secret, error) {
+func adoptedMonFSID(ctx context.Context, c client.Reader, cluster v1alpha1.Cluster) (string, error) {
 	if cluster.Spec.Storage.Adopt == nil {
-		return nil, nil
+		return "", nil
 	}
-	return optionalSecret(ctx, c, client.ObjectKey{Namespace: storageNamespace, Name: rookMonSecretName})
+	secret, err := optionalSecret(ctx, c, client.ObjectKey{Namespace: storageNamespace, Name: rookMonSecretName})
+	return string(secretData(secret, rookFSIDKey)), err
 }
 
 func renderAdopted(in AddonInput, adopt v1alpha1.AdoptSpec) (Rendered, error) {
 	hosts := osdHosts(in.Hosts)
 	phase := adoptPhase(in.Cluster)
 	if phase != v1alpha1.ReasonAdopted {
-		if reason, message := adoptWait(in.CephMonSecret, adopt, osdNodeNames(in.Hosts)); reason != "" {
+		if reason, message := adoptWait(in.CephMonFSID, adopt, osdNodeNames(in.Hosts)); reason != "" {
 			return Rendered{SkipReason: reason, SkipMessage: message, Conditions: []metav1.Condition{adoptedCondition(reason, message)}}, nil
 		}
 	}
@@ -91,8 +91,8 @@ func adoptedCondition(reason, message string) metav1.Condition {
 	return metav1.Condition{Type: v1alpha1.ConditionStorageAdopted, Status: status, Reason: reason, Message: message}
 }
 
-func adoptWait(secret *corev1.Secret, adopt v1alpha1.AdoptSpec, osdNodes []string) (string, string) {
-	if message := identityProblem(secret, adopt.FSID); message != "" {
+func adoptWait(monFSID string, adopt v1alpha1.AdoptSpec, osdNodes []string) (string, string) {
+	if message := identityProblem(monFSID, adopt.FSID); message != "" {
 		return v1alpha1.ReasonWaitingForIdentity, message
 	}
 	if missing := monitorsWithoutHost(adopt.Monitors, osdNodes); len(missing) > 0 {
@@ -101,11 +101,11 @@ func adoptWait(secret *corev1.Secret, adopt v1alpha1.AdoptSpec, osdNodes []strin
 	return "", ""
 }
 
-func identityProblem(secret *corev1.Secret, fsid string) string {
+func identityProblem(monFSID, fsid string) string {
 	switch {
-	case secret == nil:
-		return fmt.Sprintf("Secret %s/%s does not exist", storageNamespace, rookMonSecretName)
-	case string(secret.Data[rookFSIDKey]) != fsid:
+	case monFSID == "":
+		return fmt.Sprintf("Secret %s/%s does not exist or has no fsid", storageNamespace, rookMonSecretName)
+	case monFSID != fsid:
 		return fmt.Sprintf("Secret %s/%s holds another fsid than storage.adopt.fsid", storageNamespace, rookMonSecretName)
 	}
 	return ""

@@ -66,14 +66,12 @@ func adoptHosts() []v1alpha1.Host {
 	}
 }
 
-func monSecret(fsid string) *corev1.Secret {
-	return &corev1.Secret{Data: map[string][]byte{"fsid": []byte(fsid)}}
-}
+const otherAdoptFSID = "0b2f7c1d-1111-4222-8333-944455556666"
 
 func adoptInput(phase string) AddonInput {
 	in := storageInput(adoptHosts(), "3")
 	in.Cluster.Spec.Storage.Adopt = adoptSpec()
-	in.CephMonSecret = monSecret(adoptFSID)
+	in.CephMonFSID = adoptFSID
 	if phase == "" {
 		return in
 	}
@@ -295,17 +293,15 @@ func TestRenderStorageAdoptedRendersTheSameObjectsAsAFreshCluster(t *testing.T) 
 }
 
 func TestRenderStorageAdoptWaitsForIdentity(t *testing.T) {
-	secrets := map[string]*corev1.Secret{
-		"no secret":     nil,
-		"another fsid":  monSecret("0b2f7c1d-1111-4222-8333-944455556666"),
-		"no fsid":       {Data: map[string][]byte{"ceph-username": []byte("client.admin")}},
-		"an empty fsid": monSecret(""),
+	fsids := map[string]string{
+		"no fsid":      "",
+		"another fsid": otherAdoptFSID,
 	}
-	for name, secret := range secrets {
+	for name, fsid := range fsids {
 		for _, reason := range adoptReasons {
 			t.Run(name+" at phase "+reason, func(t *testing.T) {
 				in := adoptInput(reason)
-				in.CephMonSecret = secret
+				in.CephMonFSID = fsid
 				out, err := RenderStorage(in)
 				if err != nil {
 					t.Fatal(err)
@@ -325,10 +321,10 @@ func TestRenderStorageAdoptWaitsForIdentity(t *testing.T) {
 func TestRenderStorageAdoptedIsTerminal(t *testing.T) {
 	lostMonitorHost := []v1alpha1.Host{osdHost("node-1", "/dev/disk/by-id/wwn-0x1"), osdHost("node-2", "/dev/disk/by-id/wwn-0x3")}
 	cases := map[string]func(*AddonInput){
-		"no Secret":           func(in *AddonInput) { in.CephMonSecret = nil },
-		"another fsid":        func(in *AddonInput) { in.CephMonSecret = monSecret("0b2f7c1d-1111-4222-8333-944455556666") },
+		"no fsid":             func(in *AddonInput) { in.CephMonFSID = "" },
+		"another fsid":        func(in *AddonInput) { in.CephMonFSID = otherAdoptFSID },
 		"a monitor host lost": func(in *AddonInput) { in.Hosts = lostMonitorHost },
-		"both":                func(in *AddonInput) { in.CephMonSecret, in.Hosts = nil, lostMonitorHost },
+		"both":                func(in *AddonInput) { in.CephMonFSID, in.Hosts = "", lostMonitorHost },
 	}
 	fresh, err := RenderStorage(storageInput(lostMonitorHost, "3"))
 	if err != nil {
@@ -366,11 +362,11 @@ func TestRenderStorageAdoptedWithoutOSDHostsRendersNothing(t *testing.T) {
 
 func TestRenderStorageAdoptNamesTheIdentityProblem(t *testing.T) {
 	in := adoptInput("")
-	in.CephMonSecret = nil
+	in.CephMonFSID = ""
 	absent, _ := RenderStorage(in)
-	in.CephMonSecret = monSecret("0b2f7c1d-1111-4222-8333-944455556666")
+	in.CephMonFSID = otherAdoptFSID
 	other, _ := RenderStorage(in)
-	if absent.SkipMessage != "Secret rook-ceph/rook-ceph-mon does not exist" {
+	if absent.SkipMessage != "Secret rook-ceph/rook-ceph-mon does not exist or has no fsid" {
 		t.Fatalf("message %q", absent.SkipMessage)
 	}
 	if other.SkipMessage != "Secret rook-ceph/rook-ceph-mon holds another fsid than storage.adopt.fsid" {
@@ -444,7 +440,7 @@ func TestRenderStorageAdoptNamesTheMonitorHostsThatAreMissing(t *testing.T) {
 
 func TestRenderStorageAdoptChecksTheIdentityBeforeTheHosts(t *testing.T) {
 	in := adoptInput("")
-	in.CephMonSecret = nil
+	in.CephMonFSID = ""
 	in.Hosts = nil
 	out, err := RenderStorage(in)
 	if err != nil {
@@ -457,13 +453,13 @@ func TestRenderStorageAdoptChecksTheIdentityBeforeTheHosts(t *testing.T) {
 
 func TestRenderStorageAdoptRendersNoPoolBeforeAdopted(t *testing.T) {
 	poolKinds := []string{"CephBlockPool", "CephFilesystem", "CephObjectStore", "StorageClass", "VolumeSnapshotClass"}
-	secrets := []*corev1.Secret{nil, monSecret(adoptFSID)}
+	fsids := []string{"", adoptFSID}
 	hostSets := [][]v1alpha1.Host{nil, adoptHosts()}
 	for _, reason := range adoptReasons {
-		for _, secret := range secrets {
+		for _, fsid := range fsids {
 			for _, hosts := range hostSets {
 				in := adoptInput(reason)
-				in.CephMonSecret = secret
+				in.CephMonFSID = fsid
 				in.Hosts = hosts
 				out, err := RenderStorage(in)
 				if err != nil {
