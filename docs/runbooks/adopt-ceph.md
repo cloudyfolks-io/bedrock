@@ -37,6 +37,8 @@ It does not read the old StorageClasses.
 - The old cluster shows `HEALTH_OK` and all PGs are `active+clean`.
 - Every adopted pool has a size that is not larger than `storage.replicas`.
   Adoption refuses the other case, because Rook would shrink the pool.
+- Every adopted pool is a replicated pool. Bedrock renders replicated pools only.
+  It does not support an erasure-coded pool of the old cluster.
 - The old cluster uses the host network. The monitor addresses are node addresses.
   The same node addresses must exist on the new hosts.
 - Every host name is a lowercase DNS-1123 label (no dot). The host name must equal the node name of the old cluster.
@@ -79,6 +81,10 @@ Some outputs hold keys. Do not put them in a ticket or in a log.
    ceph fsid
    kubectl -n rook-ceph get configmap rook-ceph-mon-endpoints -o jsonpath='{.data.data}{"\n"}{.data.mapping}{"\n"}'
    ```
+
+   Every monitor address in the first line of the ConfigMap must end with `:6789`.
+   Rook writes the v1 port there. Bedrock writes `6789` into the new ConfigMap for every monitor.
+   If an address ends with another port, stop. Ask the Bedrock team before you go on.
 
 4. Read the OSD tree. Note the host bucket names. They must equal the node names.
 
@@ -380,9 +386,10 @@ Do the steps in this order.
 1. On the first adopt host, run `bedrock init`:
 
    ```sh
-   bedrock init -f cluster.yaml --bundle <bundle>
+   bedrock init -f cluster.yaml --bundle <bundle> --timeout 45m
    ```
 
+   The default timeout is 30 minutes. The lab needed 45 minutes. Use `--timeout 45m` or more.
    The preflight checks the key file, the disk labels and the mon stores.
    It refuses a disk with a Ceph label of another fsid.
    It refuses a disk that has another signature and no Ceph label.
@@ -424,7 +431,7 @@ kubectl get cluster cluster -o jsonpath='{range .status.conditions[*]}{.type}{"\
 | `WaitingForOSDs` | Fewer OSDs are up than `adopt.hosts[].devices` lists. | Check the OSD pods and the logs of the `rook-ceph-osd-prepare` jobs. Check the disk paths. |
 | `Renaming` | Bedrock ran the rename commands. The next check shows the result. | Wait. |
 | `PoolSizeTooSmall` | An adopted pool is larger than `storage.replicas`. Bedrock stops before it runs a rename command. | Raise the setting: `kubectl patch setting storage.replicas --type=merge -p '{"spec":{"value":"3"}}'`. Use at least the pool size. Never lower a pool. |
-| `RenameFailed` | A rename command failed, or a name was not found. The message names the command. | Fix the cause. See "Rename by hand". |
+| `RenameFailed` | A rename command failed, a name was not found, or a target name already exists. The message names the command or the name. | Fix the cause. See "Rename by hand". If the message ends with `target exists`, a pool or a CephFS with the Bedrock name is already there. Do not delete a pool. Find out who created it. Then fix the names by hand. |
 | `Adopted` | The pools, the CephFS and the RGW realm have the Bedrock names. Bedrock renders the pools and the classes. | Do "After the adoption". |
 
 If you change `adopt.pools` after an error, edit the Cluster object: `kubectl edit cluster cluster`.
@@ -610,7 +617,9 @@ kubectl -n rook-ceph exec deploy/rook-ceph-operator -- sh -c 'radosgw-admin --co
 ### Checks of the storage gate
 
 After `Adopted`, the condition `StorageReady` runs read-only checks in each reconcile.
-A failed check keeps `StorageReady` at `False`, with the reason `VerificationFailed`.
+A failed check keeps `StorageReady` at `False`.
+The reason is `VerificationFailed` when the CephCluster is `Ready`, has `HEALTH_OK` and all OSDs are up.
+In any other case, the reason is `OSDsNotUp` or `Progressing`, and the message ends with the failed checks.
 The message names every failed check. Read it with the command of section 6.
 
 | Message starts with | Meaning | What to do |
