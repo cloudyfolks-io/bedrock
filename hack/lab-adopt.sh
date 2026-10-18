@@ -1039,9 +1039,13 @@ check_cephfs_flags() {
 
 script_rgw_period() {
   cat <<'SCRIPT'
+realm=$(rgw_op realm get --rgw-realm=bedrock-rgw)
 period=$(rgw_op period get --rgw-realm=bedrock-rgw)
-printf '%s' "$period" | jq -e '.realm_name == "bedrock-rgw" and ([.period_map.zonegroups[].name] == ["bedrock-rgw"]) and ([.period_map.zonegroups[].zones[].name] == ["bedrock-rgw"])' >/dev/null
-echo "info: the committed RGW period has epoch $(printf '%s' "$period" | jq -r .epoch) and realm $(printf '%s' "$period" | jq -r .realm_name)"
+if ! printf '%s' "$period" | jq -e --argjson realm "$realm" '$realm.name == "bedrock-rgw" and .realm_id == $realm.id and .id == $realm.current_period and ([.period_map.zonegroups[].name] == ["bedrock-rgw"]) and ([.period_map.zonegroups[].zones[].name] == ["bedrock-rgw"])' >/dev/null; then
+  echo "the current period of the realm bedrock-rgw is wrong: $(printf '%s' "$period" | jq -c '{id, realm_id, epoch}') $(printf '%s' "$realm" | jq -c '{id, name, current_period}')"
+  exit 1
+fi
+echo "info: the current RGW period is $(printf '%s' "$period" | jq -r .id) at epoch $(printf '%s' "$period" | jq -r .epoch), realm epoch $(printf '%s' "$period" | jq -r .realm_epoch)"
 rgw_op zone get --rgw-zone=bedrock-rgw | jq -e '([.. | strings | select(startswith("objectstore.rgw."))] | length == 0) and ([.. | strings | select(startswith("bedrock-rgw.rgw."))] | length > 0)' >/dev/null
 SCRIPT
 }
