@@ -81,7 +81,15 @@ func SubnetErrorMessage(u *unstructured.Unstructured) string {
 }
 
 func SubnetUsedAddresses(u *unstructured.Unstructured) int64 {
-	value, found, _ := unstructured.NestedFieldNoCopy(u.Object, "status", "v4usingIPs")
+	return statusNumber(u, "v4usingIPs")
+}
+
+func SubnetAvailableAddresses(u *unstructured.Unstructured) int64 {
+	return statusNumber(u, "v4availableIPs")
+}
+
+func statusNumber(u *unstructured.Unstructured, field string) int64 {
+	value, found, _ := unstructured.NestedFieldNoCopy(u.Object, "status", field)
 	if !found {
 		return 0
 	}

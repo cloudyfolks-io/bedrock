@@ -181,6 +181,28 @@ func TestElasticIPProviderNetworkAndAddressAreImmutable(t *testing.T) {
 	}
 }
 
+func TestElasticIPProviderNetworkIsOptionalButAnAddressNeedsIt(t *testing.T) {
+	c, _ := testEnv(t)
+	ns := newNamespace(t, "crd", unique(t, "p"))
+	open := elasticIPOf(ns, "open", "")
+	open.Spec.ProviderNetwork = ""
+	requireAccepted(t, c, open)
+	pinned := elasticIPOf(ns, "pinned", "192.0.2.60")
+	pinned.Spec.ProviderNetwork = ""
+	requireRejected(t, c, pinned, "address needs providerNetwork")
+
+	named := open.DeepCopy()
+	named.Spec.ProviderNetwork = "public"
+	if err := c.Update(context.Background(), named); err == nil {
+		t.Fatal("providerNetwork must not be set after create")
+	}
+	same := open.DeepCopy()
+	same.Labels = map[string]string{"k": "v"}
+	if err := c.Update(context.Background(), same); err != nil {
+		t.Fatalf("an unchanged update must be accepted: %v", err)
+	}
+}
+
 func TestSecurityGroupNameMustBeADNSLabel(t *testing.T) {
 	c, _ := testEnv(t)
 	ns := newNamespace(t, "crd", unique(t, "p"))

@@ -235,3 +235,12 @@ func TestVipAndSwitchRuleReaders(t *testing.T) {
 		t.Fatal("unexpected readers")
 	}
 }
+
+func TestSubnetAvailableAddressesAcceptsNumberTypes(t *testing.T) {
+	for _, value := range []any{int64(7), float64(7), "7"} {
+		u := &unstructured.Unstructured{Object: map[string]any{"status": map[string]any{"v4availableIPs": value}}}
+		if got := SubnetAvailableAddresses(u); got != 7 {
+			t.Fatalf("%T gave %d", value, got)
+		}
+	}
+}

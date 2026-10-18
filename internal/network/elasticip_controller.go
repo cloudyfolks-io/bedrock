@@ -28,6 +28,7 @@ type ElasticIPReconciler struct {
 type outcome struct {
 	condition metav1.Condition
 	address   string
+	pool      string
 	requeue   time.Duration
 }
 
@@ -50,18 +51,23 @@ func (r *ElasticIPReconciler) Reconcile(ctx context.Context, req reconcile.Reque
 }
 
 func (r *ElasticIPReconciler) publish(ctx context.Context, eip v1alpha1.ElasticIP, o outcome) reconcile.Result {
-	body := &v1alpha1.ElasticIP{
-		TypeMeta:   metav1.TypeMeta{APIVersion: v1alpha1.GroupVersion.String(), Kind: "ElasticIP"},
-		ObjectMeta: metav1.ObjectMeta{Namespace: eip.Namespace, Name: eip.Name},
-		Status: v1alpha1.ElasticIPStatus{
-			CommonStatus: v1alpha1.CommonStatus{ObservedGeneration: eip.Generation, Conditions: withCondition(eip.Status.Conditions, o.condition)},
-			Address:      o.address,
-		},
-	}
+	body := statusBody(eip, v1alpha1.ElasticIPStatus{
+		CommonStatus:    v1alpha1.CommonStatus{ObservedGeneration: eip.Generation, Conditions: withCondition(eip.Status.Conditions, o.condition)},
+		Address:         o.address,
+		ProviderNetwork: cmp.Or(o.pool, PoolOf(eip)),
+	})
 	if err := applyStatus(ctx, r.Client, body); err != nil && o.requeue == 0 {
 		return reconcile.Result{RequeueAfter: waitRequeue}
 	}
 	return reconcile.Result{RequeueAfter: o.requeue}
+}
+
+func statusBody(eip v1alpha1.ElasticIP, status v1alpha1.ElasticIPStatus) *v1alpha1.ElasticIP {
+	return &v1alpha1.ElasticIP{
+		TypeMeta:   metav1.TypeMeta{APIVersion: v1alpha1.GroupVersion.String(), Kind: "ElasticIP"},
+		ObjectMeta: metav1.ObjectMeta{Namespace: eip.Namespace, Name: eip.Name},
+		Status:     status,
+	}
 }
 
 func stopped(eip v1alpha1.ElasticIP, address string, v *Violation) outcome {
@@ -70,7 +76,7 @@ func stopped(eip v1alpha1.ElasticIP, address string, v *Violation) outcome {
 
 func requeueFor(v *Violation) time.Duration {
 	switch v.Reason {
-	case ReasonExternalNotConnected, ReasonWaitingForAddress, ReasonFRRAgentMissing, ReasonAllocating, ReasonFabricNotReady:
+	case ReasonExternalNotConnected, ReasonWaitingForAddress, ReasonFRRAgentMissing, ReasonAllocating, ReasonFabricNotReady, ReasonNoPoolCapacity:
 		return waitRequeue
 	}
 	return 0
@@ -90,9 +96,54 @@ func (r *ElasticIPReconciler) decide(ctx context.Context, eip v1alpha1.ElasticIP
 	if err != nil {
 		return outcome{}, err
 	}
-	provider, found := ProviderOf(cfg, eip.Spec.ProviderNetwork)
+	eip, v, err := r.withPool(ctx, eip, cfg)
+	if err != nil {
+		return outcome{}, err
+	}
+	if v != nil {
+		return stopped(eip, known, v), nil
+	}
+	result, err := r.reserveIn(ctx, eip, cfg, tenant, project)
+	result.pool = PoolOf(eip)
+	return result, err
+}
+
+func (r *ElasticIPReconciler) withPool(ctx context.Context, eip v1alpha1.ElasticIP, cfg Config) (v1alpha1.ElasticIP, *Violation, error) {
+	if PoolOf(eip) != "" {
+		return eip, nil, nil
+	}
+	usage, err := r.tenantPoolUsage(ctx, cfg)
+	if err != nil {
+		return eip, nil, err
+	}
+	name, found := LeastUsed(usage)
 	if !found {
-		return stopped(eip, known, &Violation{Reason: ReasonUnknownProviderNetwork, Message: fmt.Sprintf("the provider network %q is not in network.provider-networks", eip.Spec.ProviderNetwork)}), nil
+		return eip, &Violation{Reason: ReasonNoPoolCapacity, Message: "every tenant provider network is full, or none exists"}, nil
+	}
+	eip.Status.ProviderNetwork = name
+	return eip, nil, applyStatus(ctx, r.Client, statusBody(eip, eip.Status))
+}
+
+func (r *ElasticIPReconciler) tenantPoolUsage(ctx context.Context, cfg Config) ([]PoolUsage, error) {
+	var usage []PoolUsage
+	for _, name := range TenantPoolNames(cfg) {
+		subnet, err := getObject(ctx, r.Client, fabric.SubnetGVK, ExternalSubnetName(name))
+		if apierrors.IsNotFound(err) {
+			continue
+		}
+		if err != nil {
+			return nil, err
+		}
+		usage = append(usage, PoolUsage{Name: name, Using: fabric.SubnetUsedAddresses(subnet), Available: fabric.SubnetAvailableAddresses(subnet)})
+	}
+	return usage, nil
+}
+
+func (r *ElasticIPReconciler) reserveIn(ctx context.Context, eip v1alpha1.ElasticIP, cfg Config, tenant, project string) (outcome, error) {
+	known := eip.Status.Address
+	provider, found := ProviderOf(cfg, PoolOf(eip))
+	if !found {
+		return stopped(eip, known, &Violation{Reason: ReasonUnknownProviderNetwork, Message: fmt.Sprintf("the provider network %q is not in network.provider-networks", PoolOf(eip))}), nil
 	}
 	if v := CheckAddress(provider, eip.Spec.Address); v != nil {
 		return stopped(eip, known, v), nil
@@ -120,7 +171,7 @@ func (r *ElasticIPReconciler) addressTaken(ctx context.Context, eip v1alpha1.Ela
 	}
 	for _, other := range all.Items {
 		sameAddress := other.Spec.Address == eip.Spec.Address || other.Status.Address == eip.Spec.Address
-		if other.UID != eip.UID && other.Spec.ProviderNetwork == eip.Spec.ProviderNetwork && sameAddress && olderThan(other, eip) {
+		if other.UID != eip.UID && PoolOf(other) == PoolOf(eip) && sameAddress && olderThan(other, eip) {
 			return &Violation{Reason: ReasonAddressInUse, Message: fmt.Sprintf("the address %s is already assigned", eip.Spec.Address)}, nil
 		}
 	}
@@ -137,7 +188,7 @@ func (r *ElasticIPReconciler) reserve(ctx context.Context, eip v1alpha1.ElasticI
 		return outcome{}, err
 	}
 	meta := fabric.Meta{Name: name, Labels: ObjectLabels("ElasticIP", eip.Name, tenant, project), Annotations: OwnerAnnotations(&eip)}
-	if err := ssa.Apply(ctx, r.Client, fabric.OvnEip(meta, ExternalSubnetName(eip.Spec.ProviderNetwork), eip.Spec.Address), v1alpha1.NetworkFieldManager); err != nil {
+	if err := ssa.Apply(ctx, r.Client, fabric.OvnEip(meta, ExternalSubnetName(PoolOf(eip)), eip.Spec.Address), v1alpha1.NetworkFieldManager); err != nil {
 		return outcome{}, err
 	}
 	observed, err := getObject(ctx, r.Client, fabric.OvnEipGVK, name)
@@ -290,7 +341,7 @@ func (r *ElasticIPReconciler) externalPath(ctx context.Context, eip v1alpha1.Ela
 }
 
 func (r *ElasticIPReconciler) pathInput(ctx context.Context, eip v1alpha1.ElasticIP, cfg Config, network v1alpha1.Network) (ExternalPathInput, error) {
-	in := ExternalPathInput{Mode: cfg.EIPMode, NetworkExternal: network.Spec.EnableExternal, ProviderNetwork: eip.Spec.ProviderNetwork, Transit: cfg.BGP.Transit}
+	in := ExternalPathInput{Mode: cfg.EIPMode, NetworkExternal: network.Spec.EnableExternal, ProviderNetwork: PoolOf(eip), Transit: cfg.BGP.Transit}
 	vpc, err := getObject(ctx, r.Client, fabric.VpcGVK, VpcName(network.Name))
 	if apierrors.IsNotFound(err) {
 		return in, nil
@@ -300,7 +351,7 @@ func (r *ElasticIPReconciler) pathInput(ctx context.Context, eip v1alpha1.Elasti
 	}
 	routing, _, _ := unstructured.NestedBool(vpc.Object, "spec", "dynamicRouting", "enabled")
 	in.Vpc = ObservedVpc{Standby: fabric.VpcStandby(vpc), ExternalSubnets: fabric.VpcExternalSubnets(vpc), DynamicRouting: routing}
-	port, err := getObject(ctx, r.Client, fabric.OvnEipGVK, vpc.GetName()+"-"+RouterPortSubnet(cfg.EIPMode, eip.Spec.ProviderNetwork, cfg.BGP.Transit))
+	port, err := getObject(ctx, r.Client, fabric.OvnEipGVK, vpc.GetName()+"-"+RouterPortSubnet(cfg.EIPMode, PoolOf(eip), cfg.BGP.Transit))
 	if err == nil {
 		in.RouterPort = ObservedPort{Exists: true, Ready: fabric.EipReady(port), Address: fabric.EipAddress(port)}
 	}

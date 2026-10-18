@@ -204,6 +204,12 @@ A VM without an ElasticIP has no route to the internet.
 
 An `ElasticIP` reserves an address from a provider network.
 The address stays reserved until you delete the ElasticIP.
+`spec.providerNetwork` is optional.
+Without it, the operator takes the `tenant` provider network with the lowest used share, which is `v4usingIPs` divided by the sum of `v4usingIPs` and `v4availableIPs` of its Fabric `Subnet`.
+A tie goes to the lower name.
+A full provider network is not a candidate.
+The choice is written to `status.providerNetwork`, and the ElasticIP keeps that network until you delete it.
+When every `tenant` provider network is full, or none exists, the ElasticIP reports `NoPoolCapacity` and the operator creates no Fabric object.
 Set `spec.target` to attach the address to a VM or to a LoadBalancer.
 Remove `spec.target` to detach it.
 Detach keeps the address.
@@ -214,6 +220,14 @@ Without `subnetRef` the first interface is used.
 The field `elasticIPRef` of a VM interface is a back reference.
 The operator never writes it.
 When it names another ElasticIP, the ElasticIP reports `TargetMismatch`.
+
+### Provider network roles
+
+Each provider network has a `role` in the cluster configuration: `tenant` (the default), `platform`, `transit` or `services`.
+The operator writes the role to the label `usability` of the Fabric `Subnet` `provider-<name>`: `public` for `tenant`, `private` for `platform`, `transit` for `transit` and `services` for `services`.
+A provider network without a role is a `tenant` network.
+Only a member of `bedrock:bedrock-admins` can create an ElasticIP that names a provider network whose `usability` is not `public`.
+The policy `bedrock-elasticip-pool` reads the label `usability` of the Fabric `Subnet` objects.
 
 ### L2 mode
 
@@ -308,7 +322,7 @@ Remove the group from the VM first.
 | Key | Default | Meaning |
 |---|---|---|
 | `network.eip-mode` | `l2` | How elastic IPs reach the physical network: `l2` or `bgp`. |
-| `network.provider-networks` | empty | JSON list of provider networks with name, interface, vlan, cidr, gateway and excludeIPs. |
+| `network.provider-networks` | empty | JSON list of provider networks with name, interface, vlan, cidr, gateway, excludeIPs and role. |
 | `network.bgp.local-asn` | empty | Local AS number of the FRR agent. |
 | `network.bgp.router-id` | empty | BGP router id. |
 | `network.bgp.peers` | empty | Comma list of `<ipv4>@<asn>`. |
@@ -364,6 +378,7 @@ Then take the action in the table.
 | `NetworkNotExternal` | The Network has no external connection. Set `enableExternal` on the Network. |
 | `NetworkNotFound` | The Network does not exist. Fix `networkRef`. |
 | `NetworkNotReady` | The Network is not ready. Wait. |
+| `NoPoolCapacity` | The ElasticIP names no provider network, and every `tenant` provider network is full or none exists. Add addresses or a `tenant` provider network. The operator checks again every few seconds. |
 | `NoProviderNetwork` | The Network wants an external connection and no provider network exists. Set `network.provider-networks`. |
 | `NoTargets` | No target has an address yet. Wait for the VMs. |
 | `NotAttached` | No Subnet names this zone in `dnsZoneRef`. Set `dnsZoneRef` on a Subnet. |

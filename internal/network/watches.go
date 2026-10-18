@@ -196,7 +196,7 @@ func AddressWaiters(all []v1alpha1.ElasticIP, gone v1alpha1.ElasticIP) []reconci
 	var requests []reconcile.Request
 	for _, other := range all {
 		sameAddress := other.Spec.Address != "" && (other.Spec.Address == gone.Spec.Address || other.Spec.Address == gone.Status.Address)
-		if other.UID != gone.UID && other.Spec.ProviderNetwork == gone.Spec.ProviderNetwork && sameAddress {
+		if other.UID != gone.UID && PoolOf(other) == PoolOf(gone) && sameAddress {
 			requests = append(requests, requestOf(other.Namespace, other.Name))
 		}
 	}

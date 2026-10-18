@@ -54,6 +54,13 @@ func SetSubnetUsedAddresses(ctx context.Context, c client.Client, name string, u
 	})
 }
 
+func SetSubnetCapacity(ctx context.Context, c client.Client, name string, using, available int64) error {
+	return updateStatus(ctx, c, fabric.SubnetGVK, name, func(status, _ map[string]any) {
+		status["v4usingIPs"] = using
+		status["v4availableIPs"] = available
+	})
+}
+
 func MarkEipAllocated(ctx context.Context, c client.Client, name, address string) error {
 	return updateStatus(ctx, c, fabric.OvnEipGVK, name, func(status, _ map[string]any) {
 		status["v4Ip"] = address

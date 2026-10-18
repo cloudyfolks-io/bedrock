@@ -84,11 +84,13 @@ type ElasticIPTarget struct {
 	SubnetRef string `json:"subnetRef,omitempty"`
 }
 
-// +kubebuilder:validation:XValidation:rule="self.providerNetwork == oldSelf.providerNetwork",message="providerNetwork is immutable"
+// +kubebuilder:validation:XValidation:rule="has(self.providerNetwork) == has(oldSelf.providerNetwork) && (!has(self.providerNetwork) || self.providerNetwork == oldSelf.providerNetwork)",message="providerNetwork is immutable"
+// +kubebuilder:validation:XValidation:rule="!has(self.address) || has(self.providerNetwork)",message="address needs providerNetwork"
 // +kubebuilder:validation:XValidation:rule="has(self.address) == has(oldSelf.address) && (!has(self.address) || self.address == oldSelf.address)",message="address is immutable"
 type ElasticIPSpec struct {
 	// +kubebuilder:validation:MinLength=1
-	ProviderNetwork string `json:"providerNetwork"`
+	// +optional
+	ProviderNetwork string `json:"providerNetwork,omitempty"`
 	// +kubebuilder:validation:MaxLength=45
 	// +kubebuilder:validation:XValidation:rule="isIP(self)",message="address must be an IP address"
 	// +optional
@@ -101,6 +103,8 @@ type ElasticIPStatus struct {
 	CommonStatus `json:",inline"`
 	// +optional
 	Address string `json:"address,omitempty"`
+	// +optional
+	ProviderNetwork string `json:"providerNetwork,omitempty"`
 }
 
 // +kubebuilder:object:root=true

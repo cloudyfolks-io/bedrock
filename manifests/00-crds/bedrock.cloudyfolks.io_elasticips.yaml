@@ -72,12 +72,13 @@ spec:
                 x-kubernetes-validations:
                 - message: subnetRef selects a VirtualMachine interface
                   rule: '!has(self.subnetRef) || self.kind == ''VirtualMachine'''
-            required:
-            - providerNetwork
             type: object
             x-kubernetes-validations:
             - message: providerNetwork is immutable
-              rule: self.providerNetwork == oldSelf.providerNetwork
+              rule: has(self.providerNetwork) == has(oldSelf.providerNetwork) && (!has(self.providerNetwork)
+                || self.providerNetwork == oldSelf.providerNetwork)
+            - message: address needs providerNetwork
+              rule: '!has(self.address) || has(self.providerNetwork)'
             - message: address is immutable
               rule: has(self.address) == has(oldSelf.address) && (!has(self.address)
                 || self.address == oldSelf.address)
@@ -147,6 +148,8 @@ spec:
               observedGeneration:
                 format: int64
                 type: integer
+              providerNetwork:
+                type: string
             type: object
         required:
         - spec
