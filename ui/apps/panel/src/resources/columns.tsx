@@ -9,7 +9,7 @@ import { PhaseBadge, StatusBadge } from "../components/StatusBadge";
 import { formatBytes, formatQuantity, formatRelative } from "../format";
 import type { Locale } from "../i18n";
 import { listAt, textAt, valueAt } from "./path";
-import { listenersOf, memberCount, osSummary, ownerCount } from "./summaries";
+import { listenersOf, memberCount, networkCidrs, osSummary, ownerCount } from "./summaries";
 
 export interface ColumnContext {
   locale: Locale;
@@ -248,7 +248,7 @@ export const columnsByPlural: Record<string, ColumnDef[]> = {
     sizeBytes("size", L.size, "status.sizeBytes"),
     count("versions", L.versions, (object) => listAt(object, "status.versions").length),
   ],
-  networks: [name, text("tenant", L.tenant, "spec.tenantRef"), ltrText("cidr", L.cidr, "spec.cidr"), flag("external", L.external, "spec.enableExternal"), text("vpc", L.vpc, "status.vpc"), status],
+  networks: [name, text("tenant", L.tenant, "spec.tenantRef"), { id: "cidr", label: L.cidr, render: (object) => (networkCidrs(object) ? <Ltr>{networkCidrs(object)}</Ltr> : dash), sortValue: networkCidrs }, flag("external", L.external, "spec.enableExternal"), text("vpc", L.vpc, "status.vpc"), status],
   virtualmachines: [name, phase, text("node", L.node, "status.node"), addresses, text("instanceType", L.instanceType, "spec.instanceType"), age],
   sshkeys: [
     name,

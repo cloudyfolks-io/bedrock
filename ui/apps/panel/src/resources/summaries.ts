@@ -22,6 +22,11 @@ export function memberCount(object: KubeObject): number {
   return listAt(object, "spec.members").length;
 }
 
+export function networkCidrs(object: KubeObject): string {
+  const cidrs = listAt(object, "spec.cidrs");
+  return cidrs.length > 0 ? cidrs.join(", ") : textAt(object, "spec.cidr");
+}
+
 export function osSummary(object: KubeObject): string {
   return [textAt(object, "spec.os.family"), textAt(object, "spec.os.version")].filter((part) => part !== "").join(" ");
 }

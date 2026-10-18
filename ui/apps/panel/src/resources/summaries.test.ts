@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { cidrSummary, exposesSsh, isIp, listenerSummary, ruleSummary } from "./summaries";
+import { cidrSummary, exposesSsh, isIp, listenerSummary, networkCidrs, ruleSummary } from "./summaries";
 
 describe("summaries", () => {
   it("cidrSummary counts addresses", () => {
@@ -7,6 +7,13 @@ describe("summaries", () => {
     expect(cidrSummary("10.0.0.0/8")).toBe("10.0.0.0/8 (2^24 addresses)".replace("2^24", "16777216"));
     expect(cidrSummary("fd00::/64")).toBe("fd00::/64 (2^64 addresses)");
     expect(cidrSummary("nonsense")).toBe("nonsense");
+  });
+
+  it("networkCidrs lists every range and reads an old cidr as one range", () => {
+    const network = (spec: Record<string, unknown>) => ({ apiVersion: "bedrock.cloudyfolks.io/v1alpha1", kind: "Network", metadata: { name: "acme" }, spec });
+    expect(networkCidrs(network({ cidrs: ["10.0.0.0/16", "172.16.0.0/16"] }))).toBe("10.0.0.0/16, 172.16.0.0/16");
+    expect(networkCidrs(network({ cidr: "10.100.0.0/16" }))).toBe("10.100.0.0/16");
+    expect(networkCidrs(network({}))).toBe("");
   });
 
   it("TestRuleSummary", () => {
