@@ -22,7 +22,7 @@ network_underlay() {
 }
 
 network_subnet_rules() {
-  subnet_manifest bad-outside 10.200.1.0/24 | expect_refused "inside the cidr of its Network" kubectl -n "$NS" apply -f -
+  subnet_manifest bad-outside 10.200.1.0/24 | expect_refused "inside one of the cidrs of its Network" kubectl -n "$NS" apply -f -
   subnet_manifest bad-overlap 10.100.0.0/20 | expect_refused "overlaps another Subnet" kubectl -n "$NS" apply -f -
   subnet_manifest bad-host-bits 10.100.1.5/24 | expect_refused "cidr" kubectl -n "$NS" apply -f -
 }
