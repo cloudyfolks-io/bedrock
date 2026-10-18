@@ -353,6 +353,9 @@ func TestValidateAdopt(t *testing.T) {
 		}, ""},
 		{"no cephx", func(c *v1alpha1.ClusterConfig) { c.Spec.Storage.Adopt.Cephx = nil }, ""},
 		{"empty pool names", func(c *v1alpha1.ClusterConfig) { c.Spec.Storage.Adopt.Pools = v1alpha1.AdoptPools{} }, ""},
+		{"block pool name with a space", func(c *v1alpha1.ClusterConfig) { c.Spec.Storage.Adopt.Pools.Block = "storage block" }, "storage.adopt.pools.block is not a valid Ceph name"},
+		{"filesystem name with a slash", func(c *v1alpha1.ClusterConfig) { c.Spec.Storage.Adopt.Pools.Filesystem = "filesystem/data" }, "storage.adopt.pools.filesystem is not a valid Ceph name"},
+		{"object store name with shell text", func(c *v1alpha1.ClusterConfig) { c.Spec.Storage.Adopt.Pools.ObjectStore = "$(id)" }, "storage.adopt.pools.objectStore is not a valid Ceph name"},
 		{"fsid not a uuid", func(c *v1alpha1.ClusterConfig) { c.Spec.Storage.Adopt.FSID = "not-a-uuid" }, "storage.adopt.fsid: not a lowercase UUID"},
 		{"fsid empty", func(c *v1alpha1.ClusterConfig) { c.Spec.Storage.Adopt.FSID = "" }, "storage.adopt.fsid: not a lowercase UUID"},
 		{"fsid uppercase", func(c *v1alpha1.ClusterConfig) {

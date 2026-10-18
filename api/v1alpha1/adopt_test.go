@@ -34,3 +34,25 @@ func TestAdoptHostDevicesReturnsACopy(t *testing.T) {
 		t.Fatal("the result shares memory with the spec")
 	}
 }
+
+func TestAdoptPoolNameProblem(t *testing.T) {
+	cases := []struct {
+		name  string
+		pools AdoptPools
+		want  string
+	}{
+		{"valid names", AdoptPools{Block: "storage-block", Filesystem: "filesystem-data", ObjectStore: "object.store_1"}, ""},
+		{"empty names", AdoptPools{}, ""},
+		{"space in block", AdoptPools{Block: "has space"}, "storage.adopt.pools.block is not a valid Ceph name"},
+		{"slash in filesystem", AdoptPools{Filesystem: "slash/name"}, "storage.adopt.pools.filesystem is not a valid Ceph name"},
+		{"leading dash in object store", AdoptPools{ObjectStore: "-leading"}, "storage.adopt.pools.objectStore is not a valid Ceph name"},
+		{"shell text", AdoptPools{ObjectStore: "$(id)"}, "storage.adopt.pools.objectStore is not a valid Ceph name"},
+		{"semicolon", AdoptPools{Block: "a;b"}, "storage.adopt.pools.block is not a valid Ceph name"},
+		{"first problem wins", AdoptPools{Block: "ok", Filesystem: "bad name", ObjectStore: "worse name"}, "storage.adopt.pools.filesystem is not a valid Ceph name"},
+	}
+	for _, tc := range cases {
+		if got := AdoptPoolNameProblem(tc.pools); got != tc.want {
+			t.Fatalf("%s: got %q, want %q", tc.name, got, tc.want)
+		}
+	}
+}

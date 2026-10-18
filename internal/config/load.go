@@ -2,6 +2,7 @@ package config
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net"
 	"net/netip"
@@ -178,6 +179,9 @@ func validateAdopt(storage v1alpha1.StorageSpec) error {
 	}
 	if !filepath.IsAbs(adopt.KeyFile) {
 		return fmt.Errorf("storage.adopt.keyFile: not an absolute path")
+	}
+	if message := v1alpha1.AdoptPoolNameProblem(adopt.Pools); message != "" {
+		return errors.New(message)
 	}
 	if err := validateAdoptCephx(adopt.Cephx); err != nil {
 		return err

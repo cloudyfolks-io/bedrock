@@ -344,7 +344,6 @@ printf '%s' "$zone" | grep -o "\"$1\\.rgw\\.[^\"]*\"" || [ $? -eq 1 ]`
 
 var (
 	errZonePools    = errors.New("cannot read the pools of the zone")
-	cephNamePattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]*$`)
 	adoptStepPhases = []string{
 		v1alpha1.ReasonWaitingForQuorum,
 		v1alpha1.ReasonWaitingForOSDs,
@@ -406,7 +405,7 @@ func advanceAdoption(ctx context.Context, c client.Client, exec execFunc, in Add
 }
 
 func adoptStep(ctx context.Context, run runFunc, adopt v1alpha1.AdoptSpec, replicas int) metav1.Condition {
-	if message := adoptNameProblem(adopt.Pools); message != "" {
+	if message := v1alpha1.AdoptPoolNameProblem(adopt.Pools); message != "" {
 		return adoptedCondition(v1alpha1.ReasonRenameFailed, message)
 	}
 	state, err := readCephState(ctx, run, adopt)
@@ -469,16 +468,6 @@ func safeMessage(message string) string {
 	}
 	runes := []rune(strings.Join(kept[max(0, len(kept)-messageLines):], "; "))
 	return string(runes[:min(len(runes), messageRunes)])
-}
-
-func adoptNameProblem(pools v1alpha1.AdoptPools) string {
-	names := []struct{ field, name string }{{"block", pools.Block}, {"filesystem", pools.Filesystem}, {"objectStore", pools.ObjectStore}}
-	for _, entry := range names {
-		if entry.name != "" && !cephNamePattern.MatchString(entry.name) {
-			return fmt.Sprintf("storage.adopt.pools.%s is not a valid Ceph name", entry.field)
-		}
-	}
-	return ""
 }
 
 func healthProblem(state cephState, adopt v1alpha1.AdoptSpec) (string, string) {
