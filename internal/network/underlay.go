@@ -41,9 +41,13 @@ func externalOverlaySubnet(pn v1alpha1.ProviderNetworkSpec) *unstructured.Unstru
 func bgpConf(cfg Config) *unstructured.Unstructured {
 	peers := make([]fabric.BgpPeer, len(cfg.BGP.Peers))
 	for i, p := range cfg.BGP.Peers {
-		peers[i] = fabric.BgpPeer{Address: p.Address, ASN: p.ASN}
+		peers[i] = fabric.BgpPeer{Address: p.Address, ASN: p.ASN, BFD: cfg.BGP.BFD}
 	}
-	return fabric.BgpConf(underlayMeta("BgpConf", bgpConfName), cfg.BGP.LocalASN, cfg.BGP.RouterID, peers, gatewayNodes())
+	return fabric.BgpConf(underlayMeta("BgpConf", bgpConfName), fabric.BgpConfSpec{
+		LocalASN: cfg.BGP.LocalASN, RouterID: cfg.BGP.RouterID, Peers: peers, NodeSelector: gatewayNodes(),
+		HoldTime: cfg.BGP.HoldTime, KeepaliveTime: cfg.BGP.KeepaliveTime, GracefulRestart: cfg.BGP.GracefulRestart,
+		AdvertiseFilter: cfg.BGP.AdvertiseFilter, RedistributeTables: cfg.BGP.RedistributeTables,
+	})
 }
 
 func RenderUnderlay(cfg Config) ([]*unstructured.Unstructured, []string) {

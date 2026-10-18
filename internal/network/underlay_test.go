@@ -1,6 +1,7 @@
 package network
 
 import (
+	"reflect"
 	"slices"
 	"strings"
 	"testing"
@@ -134,6 +135,68 @@ func TestRenderUnderlayBGPConf(t *testing.T) {
 	neighbours, _ := spec["neighbours"].([]any)
 	if len(peers) != 2 || len(neighbours) != 2 || spec["peerASN"] != int64(65000) || spec["localASN"] != int64(65001) || spec["routerId"] != "10.0.0.9" {
 		t.Fatalf("spec %v", spec)
+	}
+}
+
+func bgpConfSpecOf(t *testing.T, values map[string]string) map[string]any {
+	t.Helper()
+	objects, warnings := RenderUnderlay(configOf(t, bgpValues(values)))
+	if len(warnings) != 0 {
+		t.Fatalf("warnings %v", warnings)
+	}
+	spec, _, _ := unstructured.NestedMap(byKindAndName(objects)["BgpConf/bedrock"].Object, "spec")
+	return spec
+}
+
+func peerBFD(spec map[string]any) []any {
+	peers, _ := spec["peers"].([]any)
+	flags := make([]any, len(peers))
+	for i, peer := range peers {
+		flags[i] = peer.(map[string]any)["bfd"]
+	}
+	return flags
+}
+
+func TestRenderUnderlayBGPConfSessionDefaults(t *testing.T) {
+	spec := bgpConfSpecOf(t, nil)
+	if !reflect.DeepEqual(peerBFD(spec), []any{true, true}) || spec["holdTime"] != "9s" || spec["keepaliveTime"] != "3s" || spec["gracefulRestart"] != true {
+		t.Fatalf("spec %v", spec)
+	}
+	for _, key := range []string{"advertiseFilter", "redistributeTables"} {
+		if _, found := spec[key]; found {
+			t.Fatalf("%s must be absent by default: %v", key, spec)
+		}
+	}
+}
+
+func TestRenderUnderlayBGPConfFollowsEachSessionSetting(t *testing.T) {
+	cases := map[string]struct {
+		key, value string
+		check      func(map[string]any) bool
+	}{
+		"bfd off": {"network.bgp.bfd", "false", func(s map[string]any) bool {
+			return reflect.DeepEqual(peerBFD(s), []any{nil, nil}) && s["holdTime"] == "9s"
+		}},
+		"hold time":      {"network.bgp.hold-time", "30s", func(s map[string]any) bool { return s["holdTime"] == "30s" && s["keepaliveTime"] == "3s" }},
+		"keepalive time": {"network.bgp.keepalive-time", "10s", func(s map[string]any) bool { return s["keepaliveTime"] == "10s" && s["holdTime"] == "9s" }},
+		"graceful restart off": {"network.bgp.graceful-restart", "false", func(s map[string]any) bool {
+			_, found := s["gracefulRestart"]
+			return !found && s["holdTime"] == "9s"
+		}},
+		"advertise filter": {"network.bgp.advertise-filter", "91.246.31.0/24 ge 32 le 32", func(s map[string]any) bool {
+			return reflect.DeepEqual(s["advertiseFilter"], []any{"91.246.31.0/24 ge 32 le 32"})
+		}},
+		"redistribute tables": {"network.bgp.redistribute-tables", "198,200", func(s map[string]any) bool {
+			return reflect.DeepEqual(s["redistributeTables"], []any{int64(198), int64(200)})
+		}},
+	}
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			spec := bgpConfSpecOf(t, map[string]string{tc.key: tc.value})
+			if !tc.check(spec) {
+				t.Fatalf("spec %v", spec)
+			}
+		})
 	}
 }
 

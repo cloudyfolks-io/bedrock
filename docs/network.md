@@ -155,6 +155,12 @@ The agent is the DaemonSet `kube-system/fabric-frr`.
 The ElasticIP reports `FRRAgentMissing` until the agent exists.
 Enable `frr` in the values of the Fabric chart to install it.
 
+The Settings `network.bgp.bfd`, `network.bgp.hold-time`, `network.bgp.keepalive-time`, `network.bgp.graceful-restart`, `network.bgp.advertise-filter` and `network.bgp.redistribute-tables` tune the BGP sessions.
+Bedrock writes them to the `BgpConf` named `bedrock`.
+Bedrock updates the `BgpConf` when one of them changes.
+The advertise filter limits the routes that the agent sends to the peers.
+When the filter is empty, the agent sends all routes.
+
 Do not change `network.eip-mode` on a cluster that has ElasticIPs.
 The mode is an install-time choice.
 
@@ -215,6 +221,12 @@ Remove the group from the VM first.
 | `network.bgp.router-id` | empty | BGP router id. |
 | `network.bgp.peers` | empty | Comma list of `<ipv4>@<asn>`. |
 | `network.bgp.transit-network` | empty | Provider network that carries the router ports in bgp mode. |
+| `network.bgp.bfd` | `true` | Enable BFD on every BGP peer. |
+| `network.bgp.hold-time` | `9s` | BGP hold time, from `1s` to `300s`. |
+| `network.bgp.keepalive-time` | `3s` | BGP keepalive time, from `1s` to `300s`. |
+| `network.bgp.graceful-restart` | `true` | Keep the BGP routes while a peer restarts. |
+| `network.bgp.advertise-filter` | empty | Comma list of `<cidr> ge <n> le <n>` entries. The agent advertises only the matching routes. |
+| `network.bgp.redistribute-tables` | empty | Comma list of host routing table ids from 1 to 65535. 253, 254 and 255 are reserved. |
 | `network.dns-servers` | empty | Comma list of IPv4 resolvers that DHCP gives to guests. |
 
 `bedrock init` writes `network.eip-mode` and `network.provider-networks` from the cluster configuration.

@@ -7,6 +7,7 @@ import (
 	"net/netip"
 	"strconv"
 	"strings"
+	"time"
 
 	"k8s.io/apimachinery/pkg/util/validation"
 
@@ -18,6 +19,12 @@ const (
 	maxInterfaceLength    = 15
 	maxVlan               = 4094
 	rangeSeparator        = ".."
+	minBGPTimer           = time.Second
+	maxBGPTimer           = 300 * time.Second
+	maxPrefixLength       = 32
+	maxTableID            = 65535
+	firstReservedTableID  = 253
+	lastReservedTableID   = 255
 )
 
 type BGPPeer struct {
@@ -34,7 +41,89 @@ func networkDefinitions() []Definition {
 		{"network.bgp.peers", "", "Comma list of <ipv4>@<asn> BGP peers.", bgpPeersValue},
 		{"network.bgp.transit-network", "", "Provider network that carries the router ports in bgp mode.", dnsLabelValue},
 		{"network.dns-servers", "", "Comma list of IPv4 resolvers that DHCP gives to guests.", ipv4ListValue},
+		{"network.bgp.bfd", "true", "Enable BFD on every BGP peer.", boolean},
+		{"network.bgp.hold-time", "9s", "BGP hold time, from 1s to 300s.", durationBetween(minBGPTimer, maxBGPTimer)},
+		{"network.bgp.keepalive-time", "3s", "BGP keepalive time, from 1s to 300s.", durationBetween(minBGPTimer, maxBGPTimer)},
+		{"network.bgp.graceful-restart", "true", "Keep the BGP routes while a peer restarts.", boolean},
+		{"network.bgp.advertise-filter", "", "Comma list of <cidr> ge <n> le <n> entries. The FRR agent advertises only the matching routes. Empty advertises all routes.", advertiseFilterValue},
+		{"network.bgp.redistribute-tables", "", "Comma list of host routing table ids from 1 to 65535 that the FRR agent redistributes. 253, 254 and 255 are reserved.", tableIDsValue},
 	}
+}
+
+func durationBetween(minimum, maximum time.Duration) func(string) error {
+	return func(v string) error {
+		if v == "" {
+			return nil
+		}
+		d, err := time.ParseDuration(v)
+		if err != nil {
+			return err
+		}
+		if d < minimum || d > maximum {
+			return fmt.Errorf("value %s outside %s to %s", d, minimum, maximum)
+		}
+		return nil
+	}
+}
+
+func ParseAdvertiseFilter(v string) ([]string, error) {
+	if v == "" {
+		return nil, nil
+	}
+	items := strings.Split(v, ",")
+	entries := make([]string, len(items))
+	for i, item := range items {
+		entry, err := parseFilterEntry(item)
+		if err != nil {
+			return nil, err
+		}
+		entries[i] = entry
+	}
+	return entries, nil
+}
+
+func parseFilterEntry(item string) (string, error) {
+	fields := strings.Fields(item)
+	if len(fields) != 5 || fields[1] != "ge" || fields[3] != "le" {
+		return "", fmt.Errorf("advertise filter entry %q must look like <cidr> ge <n> le <n>", item)
+	}
+	prefix, err := netip.ParsePrefix(fields[0])
+	if err != nil || !prefix.Addr().Is4() || prefix.Masked() != prefix {
+		return "", fmt.Errorf("advertise filter entry %q: cidr must be a canonical IPv4 network", item)
+	}
+	ge, geErr := strconv.ParseUint(fields[2], 10, 8)
+	le, leErr := strconv.ParseUint(fields[4], 10, 8)
+	if geErr != nil || leErr != nil || ge > le || le > maxPrefixLength {
+		return "", fmt.Errorf("advertise filter entry %q: lengths must satisfy 0 <= ge <= le <= %d", item, maxPrefixLength)
+	}
+	return fmt.Sprintf("%s ge %d le %d", prefix, ge, le), nil
+}
+
+func advertiseFilterValue(v string) error {
+	_, err := ParseAdvertiseFilter(v)
+	return err
+}
+
+func ParseTableIDs(v string) ([]uint32, error) {
+	if v == "" {
+		return nil, nil
+	}
+	items := strings.Split(v, ",")
+	ids := make([]uint32, len(items))
+	for i, item := range items {
+		id, err := strconv.ParseUint(item, 10, 32)
+		reserved := id >= firstReservedTableID && id <= lastReservedTableID
+		if err != nil || id < 1 || id > maxTableID || reserved {
+			return nil, fmt.Errorf("table id %q must be an integer from 1 to %d outside %d to %d", item, maxTableID, firstReservedTableID, lastReservedTableID)
+		}
+		ids[i] = uint32(id)
+	}
+	return ids, nil
+}
+
+func tableIDsValue(v string) error {
+	_, err := ParseTableIDs(v)
+	return err
 }
 
 func providerNetworksValue(v string) error {

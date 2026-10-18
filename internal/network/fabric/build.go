@@ -2,6 +2,7 @@ package fabric
 
 import (
 	"maps"
+	"time"
 
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
@@ -60,6 +61,19 @@ type SGRule struct {
 type BgpPeer struct {
 	Address string
 	ASN     uint32
+	BFD     bool
+}
+
+type BgpConfSpec struct {
+	LocalASN           uint32
+	RouterID           string
+	Peers              []BgpPeer
+	NodeSelector       map[string]string
+	HoldTime           time.Duration
+	KeepaliveTime      time.Duration
+	GracefulRestart    bool
+	AdvertiseFilter    []string
+	RedistributeTables []uint32
 }
 
 func object(kind schema.GroupVersionKind, m Meta, spec map[string]any) *unstructured.Unstructured {
@@ -241,17 +255,47 @@ func Vlan(m Meta, id int, provider string) *unstructured.Unstructured {
 	return object(VlanGVK, m, map[string]any{"id": int64(id), "provider": provider})
 }
 
-func BgpConf(m Meta, localASN uint32, routerID string, peers []BgpPeer, nodeSelector map[string]string) *unstructured.Unstructured {
-	rendered := make([]any, len(peers))
-	neighbours := make([]any, len(peers))
-	for i, p := range peers {
-		rendered[i] = map[string]any{"address": p.Address, "asn": int64(p.ASN)}
+func BgpConf(m Meta, s BgpConfSpec) *unstructured.Unstructured {
+	rendered := make([]any, len(s.Peers))
+	neighbours := make([]any, len(s.Peers))
+	for i, p := range s.Peers {
+		peer := map[string]any{"address": p.Address, "asn": int64(p.ASN)}
+		if p.BFD {
+			peer["bfd"] = true
+		}
+		rendered[i] = peer
 		neighbours[i] = p.Address
 	}
-	spec := map[string]any{"localASN": int64(localASN), "peers": rendered, "neighbours": neighbours, "nodeSelector": stringMap(nodeSelector)}
-	set(spec, "routerId", routerID)
-	if len(peers) > 0 {
-		spec["peerASN"] = int64(peers[0].ASN)
+	spec := map[string]any{"localASN": int64(s.LocalASN), "peers": rendered, "neighbours": neighbours, "nodeSelector": stringMap(s.NodeSelector)}
+	set(spec, "routerId", s.RouterID)
+	set(spec, "holdTime", durationText(s.HoldTime))
+	set(spec, "keepaliveTime", durationText(s.KeepaliveTime))
+	if s.GracefulRestart {
+		spec["gracefulRestart"] = true
+	}
+	if len(s.AdvertiseFilter) > 0 {
+		spec["advertiseFilter"] = anys(s.AdvertiseFilter)
+	}
+	if len(s.RedistributeTables) > 0 {
+		spec["redistributeTables"] = int64s(s.RedistributeTables)
+	}
+	if len(s.Peers) > 0 {
+		spec["peerASN"] = int64(s.Peers[0].ASN)
 	}
 	return object(BgpConfGVK, m, spec)
+}
+
+func durationText(d time.Duration) string {
+	if d <= 0 {
+		return ""
+	}
+	return d.String()
+}
+
+func int64s(values []uint32) []any {
+	out := make([]any, len(values))
+	for i, v := range values {
+		out[i] = int64(v)
+	}
+	return out
 }

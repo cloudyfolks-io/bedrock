@@ -3,7 +3,9 @@ package network
 import (
 	"context"
 	"slices"
+	"strings"
 	"testing"
+	"time"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -21,6 +23,45 @@ func TestParseConfigDefaults(t *testing.T) {
 	}
 	if cfg.EIPMode != "l2" || len(cfg.ProviderNetworks) != 0 || len(cfg.DNSServers) != 0 {
 		t.Fatalf("unexpected defaults %+v", cfg)
+	}
+	bgp := cfg.BGP
+	if !bgp.BFD || bgp.HoldTime != 9*time.Second || bgp.KeepaliveTime != 3*time.Second || !bgp.GracefulRestart || len(bgp.AdvertiseFilter) != 0 || len(bgp.RedistributeTables) != 0 {
+		t.Fatalf("unexpected bgp defaults %+v", bgp)
+	}
+}
+
+func TestParseConfigBGPSessionSettings(t *testing.T) {
+	cases := map[string]struct {
+		key, value string
+		check      func(BGP) bool
+	}{
+		"bfd off":              {"network.bgp.bfd", "false", func(b BGP) bool { return !b.BFD && b.HoldTime == 9*time.Second }},
+		"hold time":            {"network.bgp.hold-time", "30s", func(b BGP) bool { return b.HoldTime == 30*time.Second && b.KeepaliveTime == 3*time.Second }},
+		"keepalive time":       {"network.bgp.keepalive-time", "10s", func(b BGP) bool { return b.KeepaliveTime == 10*time.Second && b.HoldTime == 9*time.Second }},
+		"graceful restart off": {"network.bgp.graceful-restart", "false", func(b BGP) bool { return !b.GracefulRestart && b.BFD }},
+		"advertise filter": {"network.bgp.advertise-filter", "91.246.31.0/24 ge 32 le 32,10.0.0.0/8 ge 24 le 32", func(b BGP) bool {
+			return slices.Equal(b.AdvertiseFilter, []string{"91.246.31.0/24 ge 32 le 32", "10.0.0.0/8 ge 24 le 32"})
+		}},
+		"redistribute tables": {"network.bgp.redistribute-tables", "198,200", func(b BGP) bool { return slices.Equal(b.RedistributeTables, []uint32{198, 200}) }},
+	}
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			cfg, err := ParseConfig(map[string]string{tc.key: tc.value})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !tc.check(cfg.BGP) {
+				t.Fatalf("unexpected bgp %+v", cfg.BGP)
+			}
+		})
+	}
+}
+
+func TestEveryNetworkSettingReachesTheSettingsWatch(t *testing.T) {
+	for _, key := range networkKeys {
+		if !strings.HasPrefix(key, settingPrefix) {
+			t.Errorf("%s is outside the %s prefix that the network watches observe", key, settingPrefix)
+		}
 	}
 }
 
@@ -61,6 +102,12 @@ func TestParseConfigRejectsInvalid(t *testing.T) {
 		{"network.provider-networks": "nope"},
 		{"network.bgp.peers": "10.0.0.1"},
 		{"network.dns-servers": "x"},
+		{"network.bgp.bfd": "maybe"},
+		{"network.bgp.hold-time": "0s"},
+		{"network.bgp.keepalive-time": "301s"},
+		{"network.bgp.graceful-restart": "2"},
+		{"network.bgp.advertise-filter": "91.246.31.0/24"},
+		{"network.bgp.redistribute-tables": "0"},
 	} {
 		if _, err := ParseConfig(values); err == nil {
 			t.Fatalf("%v must be refused", values)

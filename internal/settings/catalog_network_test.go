@@ -11,6 +11,8 @@ func TestNetworkCatalogKeysAndDefaults(t *testing.T) {
 	want := map[string]string{
 		"network.eip-mode": "l2", "network.provider-networks": "", "network.bgp.local-asn": "", "network.bgp.router-id": "",
 		"network.bgp.peers": "", "network.bgp.transit-network": "", "network.dns-servers": "",
+		"network.bgp.bfd": "true", "network.bgp.hold-time": "9s", "network.bgp.keepalive-time": "3s",
+		"network.bgp.graceful-restart": "true", "network.bgp.advertise-filter": "", "network.bgp.redistribute-tables": "",
 	}
 	for key, def := range want {
 		got, ok := Lookup(key)
@@ -99,6 +101,93 @@ func TestBGPASNValidation(t *testing.T) {
 func TestTransitNetworkValidation(t *testing.T) {
 	if validates(t, "network.bgp.transit-network", "transit") != nil || validates(t, "network.bgp.transit-network", "Not_A_Label") == nil {
 		t.Fatal("transit must be a DNS label")
+	}
+}
+
+func TestBGPBooleanValidation(t *testing.T) {
+	for _, key := range []string{"network.bgp.bfd", "network.bgp.graceful-restart"} {
+		for value, valid := range map[string]bool{"": true, "true": true, "false": true, "yes": false, "2": false} {
+			if (validates(t, key, value) == nil) != valid {
+				t.Fatalf("%s %q valid=%v", key, value, valid)
+			}
+		}
+	}
+}
+
+func TestBGPTimerValidation(t *testing.T) {
+	cases := map[string]bool{
+		"": true, "1s": true, "9s": true, "300s": true, "5m": true, "5m0s": true,
+		"0s": false, "999ms": false, "301s": false, "5m1s": false, "-3s": false, "9": false, "nine": false,
+	}
+	for _, key := range []string{"network.bgp.hold-time", "network.bgp.keepalive-time"} {
+		for value, valid := range cases {
+			if (validates(t, key, value) == nil) != valid {
+				t.Fatalf("%s %q valid=%v", key, value, valid)
+			}
+		}
+	}
+}
+
+func TestBGPAdvertiseFilterValidation(t *testing.T) {
+	cases := map[string]bool{
+		"": true, "91.246.31.0/24 ge 32 le 32": true, "0.0.0.0/0 ge 0 le 0": true, "10.0.0.0/8 ge 24 le 32": true,
+		"91.246.31.0/24 ge 32 le 32,10.0.0.0/8 ge 24 le 32": true,
+		"91.246.31.0/24":                   false,
+		"91.246.31.0/24 ge 32":             false,
+		"91.246.31.0/24 le 32":             false,
+		"91.246.31.0/24 le 32 ge 32":       false,
+		"91.246.31.0/24 ge 32 le 31":       false,
+		"91.246.31.0/24 ge 32 le 33":       false,
+		"91.246.31.0/24 ge -1 le 32":       false,
+		"91.246.31.0/24 ge x le 32":        false,
+		"91.246.31.0/24 gt 32 le 32":       false,
+		"91.246.31.0/24 ge 32 le 32 ge 32": false,
+		"91.246.31.5/24 ge 32 le 32":       false,
+		"91.246.31.1 ge 32 le 32":          false,
+		"fd00::/64 ge 64 le 128":           false,
+		"bogus ge 1 le 2":                  false,
+		"91.246.31.0/24 ge 32 le 32,":      false,
+		",91.246.31.0/24 ge 32 le 32":      false,
+		"91.246.31.0/24 ge 32 le 32,,":     false,
+		"91.246.31.0/24 ge 32 le 32\nge 1": false,
+	}
+	for value, valid := range cases {
+		if (validates(t, "network.bgp.advertise-filter", value) == nil) != valid {
+			t.Fatalf("advertise-filter %q valid=%v", value, valid)
+		}
+	}
+}
+
+func TestParseAdvertiseFilterNormalizesSpaces(t *testing.T) {
+	entries, err := ParseAdvertiseFilter("91.246.31.0/24  ge 32\tle 32,10.0.0.0/8 ge 24 le 32")
+	if err != nil || len(entries) != 2 || entries[0] != "91.246.31.0/24 ge 32 le 32" || entries[1] != "10.0.0.0/8 ge 24 le 32" {
+		t.Fatal(entries, err)
+	}
+	if entries, err := ParseAdvertiseFilter(""); err != nil || entries != nil {
+		t.Fatal(entries, err)
+	}
+}
+
+func TestBGPRedistributeTablesValidation(t *testing.T) {
+	cases := map[string]bool{
+		"": true, "1": true, "198": true, "198,200": true, "65535": true, "252": true, "256": true,
+		"0": false, "65536": false, "4294967295": false, "-1": false, "x": false, "198,": false, ",198": false, "198,,200": false, "1.5": false,
+		"253": false, "254": false, "255": false, "198,254": false,
+	}
+	for value, valid := range cases {
+		if (validates(t, "network.bgp.redistribute-tables", value) == nil) != valid {
+			t.Fatalf("redistribute-tables %q valid=%v", value, valid)
+		}
+	}
+}
+
+func TestParseTableIDs(t *testing.T) {
+	ids, err := ParseTableIDs("198,200")
+	if err != nil || len(ids) != 2 || ids[0] != 198 || ids[1] != 200 {
+		t.Fatal(ids, err)
+	}
+	if ids, err := ParseTableIDs(""); err != nil || ids != nil {
+		t.Fatal(ids, err)
 	}
 }
 

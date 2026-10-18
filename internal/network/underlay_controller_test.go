@@ -124,3 +124,33 @@ func TestUnderlayReconcilerAppliesTheBgpConf(t *testing.T) {
 		t.Fatalf("spec %v", spec)
 	}
 }
+
+func TestUnderlayReconcilerFollowsTheBgpSessionSettings(t *testing.T) {
+	c, _ := testEnv(t)
+	cleanUnderlay(t, c)
+	for key, value := range bgpValues(nil) {
+		setSetting(t, key, value)
+	}
+	reconcileUnderlay(t, c)
+	spec := bgpConfSpecIn(t, c)
+	if spec["holdTime"] != "9s" || spec["keepaliveTime"] != "3s" || spec["gracefulRestart"] != true || !reflect.DeepEqual(peerBFD(spec), []any{true, true}) {
+		t.Fatalf("defaults %v", spec)
+	}
+	for key, value := range map[string]string{
+		"network.bgp.hold-time": "30s", "network.bgp.keepalive-time": "10s", "network.bgp.graceful-restart": "false", "network.bgp.bfd": "false",
+		"network.bgp.advertise-filter": "91.246.31.0/24 ge 32 le 32", "network.bgp.redistribute-tables": "198",
+	} {
+		setSetting(t, key, value)
+	}
+	reconcileUnderlay(t, c)
+	spec = bgpConfSpecIn(t, c)
+	if spec["holdTime"] != "30s" || spec["keepaliveTime"] != "10s" || !reflect.DeepEqual(peerBFD(spec), []any{nil, nil}) {
+		t.Fatalf("timers and bfd %v", spec)
+	}
+	if _, found := spec["gracefulRestart"]; found {
+		t.Fatalf("graceful restart must go away: %v", spec)
+	}
+	if !reflect.DeepEqual(spec["advertiseFilter"], []any{"91.246.31.0/24 ge 32 le 32"}) || !reflect.DeepEqual(spec["redistributeTables"], []any{int64(198)}) {
+		t.Fatalf("filter and tables %v", spec)
+	}
+}

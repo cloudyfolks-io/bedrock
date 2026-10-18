@@ -3,6 +3,7 @@ package fabric
 import (
 	"reflect"
 	"testing"
+	"time"
 
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 )
@@ -134,12 +135,40 @@ func TestVlanBuild(t *testing.T) {
 }
 
 func TestBgpConfBuild(t *testing.T) {
-	u := BgpConf(Meta{Name: "bedrock"}, 65001, "10.0.0.9", []BgpPeer{{Address: "10.0.0.1", ASN: 65000}, {Address: "10.0.0.2", ASN: 65001}}, map[string]string{LabelExternalGateway: "true"})
+	u := BgpConf(Meta{Name: "bedrock"}, BgpConfSpec{LocalASN: 65001, RouterID: "10.0.0.9", Peers: []BgpPeer{{Address: "10.0.0.1", ASN: 65000}, {Address: "10.0.0.2", ASN: 65001}}, NodeSelector: map[string]string{LabelExternalGateway: "true"}})
 	got := spec(t, u)
 	if got["localASN"] != int64(65001) || got["routerId"] != "10.0.0.9" || got["peerASN"] != int64(65000) || len(got["peers"].([]any)) != 2 || !reflect.DeepEqual(got["neighbours"], []any{"10.0.0.1", "10.0.0.2"}) {
 		t.Fatalf("unexpected spec %#v", got)
 	}
 	equal(t, got["nodeSelector"].(map[string]any), map[string]any{LabelExternalGateway: "true"})
+	for _, key := range []string{"holdTime", "keepaliveTime", "gracefulRestart", "advertiseFilter", "redistributeTables"} {
+		if _, found := got[key]; found {
+			t.Fatalf("%s must be absent: %#v", key, got)
+		}
+	}
+	if _, found := got["peers"].([]any)[0].(map[string]any)["bfd"]; found {
+		t.Fatalf("bfd must be absent: %#v", got)
+	}
+}
+
+func TestBgpConfBuildTuning(t *testing.T) {
+	u := BgpConf(Meta{Name: "bedrock"}, BgpConfSpec{
+		LocalASN: 65001,
+		Peers:    []BgpPeer{{Address: "10.0.0.1", ASN: 65000, BFD: true}, {Address: "10.0.0.2", ASN: 65001}},
+		HoldTime: 9 * time.Second, KeepaliveTime: 3 * time.Second, GracefulRestart: true,
+		AdvertiseFilter:    []string{"91.246.31.0/24 ge 32 le 32"},
+		RedistributeTables: []uint32{198, 200},
+	})
+	got := spec(t, u)
+	peers := got["peers"].([]any)
+	equal(t, peers[0].(map[string]any), map[string]any{"address": "10.0.0.1", "asn": int64(65000), "bfd": true})
+	equal(t, peers[1].(map[string]any), map[string]any{"address": "10.0.0.2", "asn": int64(65001)})
+	if got["holdTime"] != "9s" || got["keepaliveTime"] != "3s" || got["gracefulRestart"] != true {
+		t.Fatalf("unexpected spec %#v", got)
+	}
+	if !reflect.DeepEqual(got["advertiseFilter"], []any{"91.246.31.0/24 ge 32 le 32"}) || !reflect.DeepEqual(got["redistributeTables"], []any{int64(198), int64(200)}) {
+		t.Fatalf("unexpected spec %#v", got)
+	}
 }
 
 func TestSubnetUsedAddressesAcceptsNumberTypes(t *testing.T) {

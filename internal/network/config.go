@@ -5,6 +5,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"time"
 
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
@@ -23,15 +24,28 @@ const (
 	keyBGPPeers        = "network.bgp.peers"
 	keyBGPTransit      = "network.bgp.transit-network"
 	keyDNSServers      = "network.dns-servers"
+
+	keyBGPBFD                = "network.bgp.bfd"
+	keyBGPHoldTime           = "network.bgp.hold-time"
+	keyBGPKeepaliveTime      = "network.bgp.keepalive-time"
+	keyBGPGracefulRestart    = "network.bgp.graceful-restart"
+	keyBGPAdvertiseFilter    = "network.bgp.advertise-filter"
+	keyBGPRedistributeTables = "network.bgp.redistribute-tables"
 )
 
 type Peer = settings.BGPPeer
 
 type BGP struct {
-	LocalASN uint32
-	RouterID string
-	Peers    []Peer
-	Transit  string
+	LocalASN           uint32
+	RouterID           string
+	Peers              []Peer
+	Transit            string
+	BFD                bool
+	HoldTime           time.Duration
+	KeepaliveTime      time.Duration
+	GracefulRestart    bool
+	AdvertiseFilter    []string
+	RedistributeTables []uint32
 }
 
 type Config struct {
@@ -58,20 +72,46 @@ func ParseConfig(values map[string]string) (Config, error) {
 	if err != nil {
 		return Config{}, err
 	}
-	peers, err := settings.ParseBGPPeers(effective[keyBGPPeers])
+	bgp, err := parseBGP(effective)
 	if err != nil {
 		return Config{}, err
 	}
-	asn, _ := strconv.ParseUint(effective[keyBGPLocalASN], 10, 32)
 	return Config{
 		EIPMode:          effective[keyEIPMode],
 		ProviderNetworks: networks,
-		BGP:              BGP{LocalASN: uint32(asn), RouterID: effective[keyBGPRouterID], Peers: peers, Transit: effective[keyBGPTransit]},
+		BGP:              bgp,
 		DNSServers:       splitList(effective[keyDNSServers]),
 	}, nil
 }
 
-var networkKeys = []string{keyEIPMode, keyProviderNetwork, keyBGPLocalASN, keyBGPRouterID, keyBGPPeers, keyBGPTransit, keyDNSServers}
+func parseBGP(effective map[string]string) (BGP, error) {
+	peers, err := settings.ParseBGPPeers(effective[keyBGPPeers])
+	if err != nil {
+		return BGP{}, err
+	}
+	filter, err := settings.ParseAdvertiseFilter(effective[keyBGPAdvertiseFilter])
+	if err != nil {
+		return BGP{}, err
+	}
+	tables, err := settings.ParseTableIDs(effective[keyBGPRedistributeTables])
+	if err != nil {
+		return BGP{}, err
+	}
+	asn, _ := strconv.ParseUint(effective[keyBGPLocalASN], 10, 32)
+	bfd, _ := strconv.ParseBool(effective[keyBGPBFD])
+	graceful, _ := strconv.ParseBool(effective[keyBGPGracefulRestart])
+	hold, _ := time.ParseDuration(effective[keyBGPHoldTime])
+	keepalive, _ := time.ParseDuration(effective[keyBGPKeepaliveTime])
+	return BGP{
+		LocalASN: uint32(asn), RouterID: effective[keyBGPRouterID], Peers: peers, Transit: effective[keyBGPTransit],
+		BFD: bfd, HoldTime: hold, KeepaliveTime: keepalive, GracefulRestart: graceful, AdvertiseFilter: filter, RedistributeTables: tables,
+	}, nil
+}
+
+var networkKeys = []string{
+	keyEIPMode, keyProviderNetwork, keyBGPLocalASN, keyBGPRouterID, keyBGPPeers, keyBGPTransit, keyDNSServers,
+	keyBGPBFD, keyBGPHoldTime, keyBGPKeepaliveTime, keyBGPGracefulRestart, keyBGPAdvertiseFilter, keyBGPRedistributeTables,
+}
 
 func splitList(value string) []string {
 	if value == "" {
