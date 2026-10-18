@@ -60,7 +60,11 @@ func (r *NetworkReconciler) Reconcile(ctx context.Context, req reconcile.Request
 		if err != nil {
 			return reconcile.Result{}, err
 		}
-		if refused := Refusal(breach, vrfBreach, provisioned); refused != nil {
+		refused := RefusalBeforeProvisioning(breach, vrfBreach)
+		if provisioned {
+			refused = RefusalAfterProvisioning(vrfBreach)
+		}
+		if refused != nil {
 			status := notReadyStatus(network, refused.Reason, refused.Message)
 			status.Conditions = withVRFPolicy(withRangePolicy(status.Conditions, network.Generation, nil), network.Generation, nil)
 			return r.publish(ctx, &network, status)

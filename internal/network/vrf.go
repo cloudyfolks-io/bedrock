@@ -1,6 +1,7 @@
 package network
 
 import (
+	"cmp"
 	"fmt"
 	"slices"
 	"strconv"
@@ -41,11 +42,12 @@ func VrfInUse(network v1alpha1.Network, networks []v1alpha1.Network, foreignVpcI
 	return nil
 }
 
-func Refusal(rangeBreach, vrfBreach *Violation, provisioned bool) *Violation {
-	switch {
-	case rangeBreach != nil && !provisioned:
-		return rangeBreach
-	case vrfBreach != nil && (!provisioned || vrfBreach.Reason == ReasonVRFInUse):
+func RefusalBeforeProvisioning(rangeBreach, vrfBreach *Violation) *Violation {
+	return cmp.Or(rangeBreach, vrfBreach)
+}
+
+func RefusalAfterProvisioning(vrfBreach *Violation) *Violation {
+	if vrfBreach != nil && vrfBreach.Reason == ReasonVRFInUse {
 		return vrfBreach
 	}
 	return nil
