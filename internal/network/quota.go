@@ -9,6 +9,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	"github.com/cloudyfolks-io/bedrock/api/v1alpha1"
+	"github.com/cloudyfolks-io/bedrock/internal/network/fabric"
 )
 
 func HoldsAddress(eip v1alpha1.ElasticIP) bool {
@@ -69,6 +70,9 @@ func quotaViolation(ctx context.Context, c client.Reader, eip v1alpha1.ElasticIP
 	limit := owner.Spec.Quota.ElasticIPs
 	if limit == nil {
 		return nil, nil
+	}
+	if provisioned, err := liveOwnedObject(ctx, c, fabric.OvnEipGVK, FabricName(eip.Namespace, eip.Name), &eip); err != nil || provisioned {
+		return nil, err
 	}
 	all, err := tenantElasticIPs(ctx, c, tenant)
 	if err != nil || QuotaAllows(limit, all, eip) {

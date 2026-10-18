@@ -10,6 +10,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	"github.com/cloudyfolks-io/bedrock/api/v1alpha1"
+	"github.com/cloudyfolks-io/bedrock/internal/network/fabrictest"
 )
 
 type quotaFixture struct {
@@ -134,6 +135,32 @@ func TestLoweredQuotaKeepsAProvisionedElasticIP(t *testing.T) {
 	f.request(t, f.prod, "ip3")
 	reconcileElasticIP(t, f.c, f.prod, "ip3")
 	requireWaitingForQuota(t, f.c, f.prod, "ip3")
+}
+
+func TestElasticIPWithAFabricObjectAndNoStatusKeepsWorkingOverTheQuota(t *testing.T) {
+	f := quotaWorld(t, limitOf(2))
+	f.request(t, f.prod, "ip1")
+	f.request(t, f.prod, "ip2")
+	reconcileElasticIP(t, f.c, f.prod, "ip1")
+	reconcileElasticIP(t, f.c, f.prod, "ip2")
+	eip := getElasticIP(t, f.c, f.prod, "ip2")
+	eip.Status = v1alpha1.ElasticIPStatus{}
+	if err := f.c.Status().Update(context.Background(), &eip); err != nil {
+		t.Fatal(err)
+	}
+	f.setLimit(t, limitOf(1))
+	reconcileElasticIP(t, f.c, f.prod, "ip2")
+	if reason := meta.FindStatusCondition(getElasticIP(t, f.c, f.prod, "ip2").Status.Conditions, v1alpha1.ConditionReady).Reason; reason == ReasonQuotaExceeded {
+		t.Fatal("an ElasticIP with a Fabric object must not wait for the quota")
+	}
+	requireProvisioned(t, f.c, f.prod, "ip2")
+	if err := fabrictest.MarkEipAllocated(context.Background(), f.c, FabricName(f.prod, "ip2"), "198.51.100.7"); err != nil {
+		t.Fatal(err)
+	}
+	reconcileElasticIP(t, f.c, f.prod, "ip2")
+	if got := getElasticIP(t, f.c, f.prod, "ip2").Status.Address; got != "198.51.100.7" {
+		t.Fatalf("status address %q", got)
+	}
 }
 
 func TestDeletingAnElasticIPLetsAWaitingOneProceed(t *testing.T) {
