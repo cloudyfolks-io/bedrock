@@ -54,8 +54,26 @@ func TestDesiredNetwork(t *testing.T) {
 	if !reflect.DeepEqual(got.Labels, v1alpha1.TenantLabels("Tenant", "acme", "acme", "")) {
 		t.Fatalf("labels = %v", got.Labels)
 	}
-	if got.Spec.TenantRef != "acme" || got.Spec.CIDR != "" || !slices.Equal(got.Spec.CIDRs, []string{"10.100.0.0/16"}) || got.Spec.EnableExternal || len(got.OwnerReferences) != 0 {
+	if got.Spec.TenantRef != "acme" || got.Spec.CIDR != "" || !slices.Equal(got.Spec.CIDRs, []string{"10.100.0.0/16"}) || !got.Spec.EnableExternal || len(got.OwnerReferences) != 0 {
 		t.Fatalf("got %+v", got)
+	}
+}
+
+func TestDesiredNetworkKeepsAnExistingNetworkUnrouted(t *testing.T) {
+	existing := v1alpha1.Network{ObjectMeta: metav1.ObjectMeta{Name: "acme"}, Spec: v1alpha1.NetworkSpec{TenantRef: "acme", CIDRs: []string{"10.100.0.0/16"}}}
+	if got := DesiredNetwork(acmeTenant(), &existing); got.Spec.EnableExternal {
+		t.Fatalf("an existing unrouted Network must stay unrouted: %+v", got.Spec)
+	}
+	oldCIDR := v1alpha1.Network{ObjectMeta: metav1.ObjectMeta{Name: "acme"}, Spec: v1alpha1.NetworkSpec{TenantRef: "acme", CIDR: "10.100.0.0/16"}}
+	if got := DesiredNetwork(acmeTenant(), &oldCIDR); got.Spec.EnableExternal {
+		t.Fatalf("an old Network must stay unrouted: %+v", got.Spec)
+	}
+}
+
+func TestDesiredNetworkKeepsAnExistingNetworkRouted(t *testing.T) {
+	existing := v1alpha1.Network{ObjectMeta: metav1.ObjectMeta{Name: "acme"}, Spec: v1alpha1.NetworkSpec{TenantRef: "acme", CIDRs: []string{"10.100.0.0/16"}, EnableExternal: true}}
+	if got := DesiredNetwork(acmeTenant(), &existing); !got.Spec.EnableExternal {
+		t.Fatalf("a routed Network must stay routed: %+v", got.Spec)
 	}
 }
 

@@ -30,10 +30,13 @@ func DesiredNetwork(tenant v1alpha1.Tenant, existing *v1alpha1.Network) v1alpha1
 
 func networkSpec(tenant v1alpha1.Tenant, existing *v1alpha1.Network) v1alpha1.NetworkSpec {
 	vpcCIDR := tenant.Spec.Network.VPCCIDR
+	spec := v1alpha1.NetworkSpec{TenantRef: tenant.Name, EnableExternal: existing == nil || existing.Spec.EnableExternal}
 	if existing != nil && existing.Spec.CIDR != "" {
-		return v1alpha1.NetworkSpec{TenantRef: tenant.Name, CIDR: vpcCIDR}
+		spec.CIDR = vpcCIDR
+		return spec
 	}
-	return v1alpha1.NetworkSpec{TenantRef: tenant.Name, CIDRs: []string{vpcCIDR}}
+	spec.CIDRs = []string{vpcCIDR}
+	return spec
 }
 
 func defaultNetworkOf(tenant string, networks []v1alpha1.Network) *v1alpha1.Network {

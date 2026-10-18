@@ -56,6 +56,9 @@ func TestTenantCreatesNetworkRoleAndBinding(t *testing.T) {
 	mustCreate(t, c, tenant)
 	network := &v1alpha1.Network{}
 	waitFor(t, func() bool { return getInto(t, c, "acme", network) })
+	if !network.Spec.EnableExternal {
+		t.Fatalf("a new default Network must be routed: %+v", network.Spec)
+	}
 	if network.Spec.TenantRef != "acme" || network.Spec.CIDR != "" || !reflect.DeepEqual(network.Spec.CIDRs, []string{"10.100.0.0/16"}) || !reflect.DeepEqual(network.Labels, v1alpha1.TenantLabels("Tenant", "acme", "acme", "")) {
 		t.Fatalf("network = %+v", network)
 	}
@@ -71,6 +74,36 @@ func TestTenantCreatesNetworkRoleAndBinding(t *testing.T) {
 	}
 	if binding.RoleRef.Name != "tenant:acme:owner" || controllerReferenceUID(binding.OwnerReferences, "Tenant") != string(tenant.UID) {
 		t.Fatalf("binding = %+v", binding)
+	}
+}
+
+func TestTenantDoesNotRouteAnExistingDefaultNetwork(t *testing.T) {
+	c, _ := tenantWorld(t)
+	existing := &v1alpha1.Network{ObjectMeta: metav1.ObjectMeta{Name: "acme"}, Spec: v1alpha1.NetworkSpec{TenantRef: "acme", CIDRs: []string{"10.100.0.0/16"}}}
+	mustCreate(t, c, existing)
+	tenant := acmeWithOwners(defaultOwners()...)
+	mustCreate(t, c, tenant)
+	network := &v1alpha1.Network{}
+	waitFor(t, func() bool {
+		return getInto(t, c, "acme", network) && controllerReferenceUID(network.OwnerReferences, "Tenant") == string(tenant.UID)
+	})
+	if network.Spec.EnableExternal {
+		t.Fatalf("the existing Network must stay unrouted: %+v", network.Spec)
+	}
+}
+
+func TestTenantKeepsAnExistingRoutedDefaultNetworkRouted(t *testing.T) {
+	c, _ := tenantWorld(t)
+	existing := &v1alpha1.Network{ObjectMeta: metav1.ObjectMeta{Name: "acme"}, Spec: v1alpha1.NetworkSpec{TenantRef: "acme", CIDRs: []string{"10.100.0.0/16"}, EnableExternal: true}}
+	mustCreate(t, c, existing)
+	tenant := acmeWithOwners(defaultOwners()...)
+	mustCreate(t, c, tenant)
+	network := &v1alpha1.Network{}
+	waitFor(t, func() bool {
+		return getInto(t, c, "acme", network) && controllerReferenceUID(network.OwnerReferences, "Tenant") == string(tenant.UID)
+	})
+	if !network.Spec.EnableExternal {
+		t.Fatalf("the existing Network must stay routed: %+v", network.Spec)
 	}
 }
 

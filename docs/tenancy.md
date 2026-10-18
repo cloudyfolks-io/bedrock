@@ -158,6 +158,8 @@ A Pod with `spec.nodeName` fails in a project namespace.
 
 Each tenant has one Network with the name of the tenant.
 The Network holds the field `vpcCIDR` of the tenant as the only entry of `spec.cidrs`.
+A new default Network has `enableExternal: true`, so it is routed.
+The operator does not change `enableExternal` of a default Network that already exists.
 A Network from an older release has `spec.cidr` with the same range.
 The operator keeps `spec.cidr` on that Network and does not change it.
 When an administrator moves the Network to `spec.cidrs`, the operator keeps the ranges of the administrator.
