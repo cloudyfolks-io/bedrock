@@ -24,6 +24,7 @@ const (
 	keyBGPPeers        = "network.bgp.peers"
 	keyBGPTransit      = "network.bgp.transit-network"
 	keyDNSServers      = "network.dns-servers"
+	keyMTU             = "network.mtu"
 
 	keyBGPBFD                = "network.bgp.bfd"
 	keyBGPHoldTime           = "network.bgp.hold-time"
@@ -53,6 +54,7 @@ type Config struct {
 	ProviderNetworks []v1alpha1.ProviderNetworkSpec
 	BGP              BGP
 	DNSServers       []string
+	MTU              int
 }
 
 func ParseConfig(values map[string]string) (Config, error) {
@@ -76,11 +78,13 @@ func ParseConfig(values map[string]string) (Config, error) {
 	if err != nil {
 		return Config{}, err
 	}
+	mtu, _ := strconv.Atoi(effective[keyMTU])
 	return Config{
 		EIPMode:          effective[keyEIPMode],
 		ProviderNetworks: networks,
 		BGP:              bgp,
 		DNSServers:       splitList(effective[keyDNSServers]),
+		MTU:              mtu,
 	}, nil
 }
 
@@ -109,7 +113,7 @@ func parseBGP(effective map[string]string) (BGP, error) {
 }
 
 var networkKeys = []string{
-	keyEIPMode, keyProviderNetwork, keyBGPLocalASN, keyBGPRouterID, keyBGPPeers, keyBGPTransit, keyDNSServers,
+	keyEIPMode, keyProviderNetwork, keyBGPLocalASN, keyBGPRouterID, keyBGPPeers, keyBGPTransit, keyDNSServers, keyMTU,
 	keyBGPBFD, keyBGPHoldTime, keyBGPKeepaliveTime, keyBGPGracefulRestart, keyBGPAdvertiseFilter, keyBGPRedistributeTables,
 }
 

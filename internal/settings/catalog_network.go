@@ -26,6 +26,8 @@ const (
 	maxTableID            = 999
 	firstReservedTableID  = 253
 	lastReservedTableID   = 255
+	minMTU                = 576
+	maxMTU                = 9000
 )
 
 type BGPPeer struct {
@@ -41,13 +43,27 @@ func networkDefinitions() []Definition {
 		{"network.bgp.router-id", "", "BGP router id.", ipv4Value},
 		{"network.bgp.peers", "", "Comma list of <ipv4>@<asn> BGP peers.", bgpPeersValue},
 		{"network.bgp.transit-network", "", "Provider network that carries the router ports in bgp mode.", dnsLabelValue},
-		{"network.dns-servers", "", "Comma list of IPv4 resolvers that DHCP gives to guests.", ipv4ListValue},
+		{"network.dns-servers", "", "Comma list of IPv4 resolvers that DHCP gives to guests. A Subnet that sets dnsServers uses its own list.", ipv4ListValue},
+		{"network.mtu", "1500", "MTU in bytes, from 576 to 9000, of every Subnet that sets no mtu. A running guest learns a new value at its next DHCP lease.", intBetween(minMTU, maxMTU)},
 		{"network.bgp.bfd", "true", "Enable BFD on every BGP peer.", boolean},
 		{"network.bgp.hold-time", "9s", "BGP hold time in whole seconds, from 3s to 300s. A peer refuses a hold time of 1s or 2s.", wholeSecondsBetween(minHoldTime, maxBGPTimer)},
 		{"network.bgp.keepalive-time", "3s", "BGP keepalive time in whole seconds, from 1s to 300s.", wholeSecondsBetween(minKeepaliveTime, maxBGPTimer)},
 		{"network.bgp.graceful-restart", "true", "Keep the BGP routes while a peer restarts.", boolean},
 		{"network.bgp.advertise-filter", "", "Comma list of <cidr> ge <n> le <n> entries, with the mask length <= ge <= le <= 32. The FRR agent advertises only the matching routes. Empty advertises all routes.", advertiseFilterValue},
 		{"network.bgp.redistribute-tables", "", "Comma list of host routing table ids from 1 to 999 that the FRR agent redistributes. 253, 254 and 255 are reserved. Ids from 1000 up are the VRF ids of the VPCs.", tableIDsValue},
+	}
+}
+
+func intBetween(minimum, maximum int) func(string) error {
+	return func(v string) error {
+		if v == "" {
+			return nil
+		}
+		n, err := strconv.Atoi(v)
+		if err != nil || n < minimum || n > maximum {
+			return fmt.Errorf("value %q must be an integer from %d to %d", v, minimum, maximum)
+		}
+		return nil
 	}
 }
 

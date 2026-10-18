@@ -22,7 +22,7 @@ func TestParseConfigDefaults(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if cfg.EIPMode != "l2" || len(cfg.ProviderNetworks) != 0 || len(cfg.DNSServers) != 0 {
+	if cfg.EIPMode != "l2" || len(cfg.ProviderNetworks) != 0 || len(cfg.DNSServers) != 0 || cfg.MTU != 1500 {
 		t.Fatalf("unexpected defaults %+v", cfg)
 	}
 	bgp := cfg.BGP
@@ -94,6 +94,13 @@ func TestParseConfigProviderNetworks(t *testing.T) {
 	}
 }
 
+func TestParseConfigMTU(t *testing.T) {
+	cfg, err := ParseConfig(map[string]string{"network.mtu": "9000"})
+	if err != nil || cfg.MTU != 9000 {
+		t.Fatalf("mtu %d, error %v", cfg.MTU, err)
+	}
+}
+
 func TestParseConfigBGP(t *testing.T) {
 	cfg, err := ParseConfig(map[string]string{
 		"network.eip-mode": "bgp", "network.bgp.local-asn": "65001", "network.bgp.router-id": "10.0.0.9",
@@ -114,6 +121,9 @@ func TestParseConfigRejectsInvalid(t *testing.T) {
 		{"network.provider-networks": "nope"},
 		{"network.bgp.peers": "10.0.0.1"},
 		{"network.dns-servers": "x"},
+		{"network.mtu": "575"},
+		{"network.mtu": "9001"},
+		{"network.mtu": "jumbo"},
 		{"network.bgp.bfd": "maybe"},
 		{"network.bgp.hold-time": "0s"},
 		{"network.bgp.keepalive-time": "301s"},

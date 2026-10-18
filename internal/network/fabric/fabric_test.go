@@ -62,12 +62,12 @@ func TestVpcOmitsBfdAndLocalOnlyByDefault(t *testing.T) {
 }
 
 func TestSubnetBuild(t *testing.T) {
-	u := Subnet(Meta{Name: "s"}, SubnetSpec{Vpc: "acme", CIDR: "10.100.1.0/24", Gateway: "10.100.1.1", Provider: "default.t1-prod.fabric", ExcludeIPs: []string{"10.100.1.2..10.100.1.5"}, DHCP: true, DHCPOptions: "dns_server=1.1.1.1;8.8.8.8"})
+	u := Subnet(Meta{Name: "s"}, SubnetSpec{Vpc: "acme", CIDR: "10.100.1.0/24", Gateway: "10.100.1.1", Provider: "default.t1-prod.fabric", ExcludeIPs: []string{"10.100.1.2..10.100.1.5"}, DHCP: true, DHCPOptions: "router=10.100.1.1,mtu=1500,dns_server=1.1.1.1;8.8.8.8", MTU: 1500})
 	equal(t, spec(t, u), map[string]any{
 		"vpc": "acme", "protocol": "IPv4", "cidrBlock": "10.100.1.0/24", "gateway": "10.100.1.1",
 		"excludeIps": []any{"10.100.1.2..10.100.1.5"}, "provider": "default.t1-prod.fabric",
 		"gatewayType": "distributed", "natOutgoing": false, "private": false, "disableGatewayCheck": true,
-		"enableDHCP": true, "dhcpV4Options": "dns_server=1.1.1.1;8.8.8.8",
+		"enableDHCP": true, "dhcpV4Options": "router=10.100.1.1,mtu=1500,dns_server=1.1.1.1;8.8.8.8", "mtu": int64(1500),
 	})
 }
 

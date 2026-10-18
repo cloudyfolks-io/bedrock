@@ -10,7 +10,7 @@ const publicNetwork = `[{"name":"public","interface":"bond0","vlan":100,"cidr":"
 func TestNetworkCatalogKeysAndDefaults(t *testing.T) {
 	want := map[string]string{
 		"network.eip-mode": "l2", "network.provider-networks": "", "network.bgp.local-asn": "", "network.bgp.router-id": "",
-		"network.bgp.peers": "", "network.bgp.transit-network": "", "network.dns-servers": "",
+		"network.bgp.peers": "", "network.bgp.transit-network": "", "network.dns-servers": "", "network.mtu": "1500",
 		"network.bgp.bfd": "true", "network.bgp.hold-time": "9s", "network.bgp.keepalive-time": "3s",
 		"network.bgp.graceful-restart": "true", "network.bgp.advertise-filter": "", "network.bgp.redistribute-tables": "",
 	}
@@ -87,6 +87,18 @@ func TestIPv4ListValidation(t *testing.T) {
 	}
 	if validates(t, "network.bgp.router-id", "10.0.0.9") != nil || validates(t, "network.bgp.router-id", "x") == nil {
 		t.Fatal("router id must be an IPv4 address")
+	}
+}
+
+func TestMTUValidation(t *testing.T) {
+	cases := map[string]bool{
+		"": true, "576": true, "1500": true, "9000": true,
+		"575": false, "9001": false, "0": false, "-1": false, "1500.5": false, "jumbo": false, " 1500": false,
+	}
+	for value, valid := range cases {
+		if (validates(t, "network.mtu", value) == nil) != valid {
+			t.Fatalf("mtu %q valid=%v", value, valid)
+		}
 	}
 }
 

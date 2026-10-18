@@ -150,6 +150,16 @@ func networkLister(c client.Reader) func(context.Context, ...client.ListOption) 
 	}
 }
 
+func subnetLister(c client.Reader) func(context.Context, ...client.ListOption) []reconcile.Request {
+	return func(ctx context.Context, opts ...client.ListOption) []reconcile.Request {
+		var list v1alpha1.SubnetList
+		if err := c.List(ctx, &list, opts...); err != nil {
+			return nil
+		}
+		return requestsFrom(list.Items)
+	}
+}
+
 func securityGroupLister(c client.Reader) func(context.Context, ...client.ListOption) []reconcile.Request {
 	return func(ctx context.Context, opts ...client.ListOption) []reconcile.Request {
 		var list v1alpha1.SecurityGroupList

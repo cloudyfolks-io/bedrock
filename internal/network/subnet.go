@@ -1,6 +1,7 @@
 package network
 
 import (
+	"strconv"
 	"strings"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -12,18 +13,20 @@ import (
 )
 
 type SubnetInput struct {
-	Subnet     v1alpha1.Subnet
-	Network    v1alpha1.Network
-	Tenant     string
-	Project    string
-	DNSServers []string
+	Subnet            v1alpha1.Subnet
+	Network           v1alpha1.Network
+	Tenant            string
+	Project           string
+	DefaultMTU        int
+	DefaultDNSServers []string
 }
 
-func DHCPv4Options(dnsServers []string) string {
-	if len(dnsServers) == 0 {
-		return ""
+func DHCPv4Options(gateway string, mtu int, dnsServers []string) string {
+	options := []string{"router=" + gateway, "mtu=" + strconv.Itoa(mtu)}
+	if len(dnsServers) > 0 {
+		options = append(options, "dns_server="+strings.Join(dnsServers, ";"))
 	}
-	return "dns_server=" + strings.Join(dnsServers, ";")
+	return strings.Join(options, ",")
 }
 
 func gatewayOf(subnet v1alpha1.Subnet) string {
@@ -34,11 +37,26 @@ func gatewayOf(subnet v1alpha1.Subnet) string {
 	return gateway
 }
 
+func mtuOf(subnet v1alpha1.Subnet, fallback int) int {
+	if subnet.Spec.MTU != nil {
+		return int(*subnet.Spec.MTU)
+	}
+	return fallback
+}
+
+func dnsServersOf(subnet v1alpha1.Subnet, fallback []string) []string {
+	if len(subnet.Spec.DNSServers) > 0 {
+		return subnet.Spec.DNSServers
+	}
+	return fallback
+}
+
 func DesiredFabricSubnet(in SubnetInput) *unstructured.Unstructured {
 	subnet := in.Subnet
+	gateway, mtu := gatewayOf(subnet), mtuOf(subnet, in.DefaultMTU)
 	options := ""
 	if subnet.Spec.DHCP {
-		options = DHCPv4Options(in.DNSServers)
+		options = DHCPv4Options(gateway, mtu, dnsServersOf(subnet, in.DefaultDNSServers))
 	}
 	return fabric.Subnet(
 		fabric.Meta{
@@ -49,11 +67,12 @@ func DesiredFabricSubnet(in SubnetInput) *unstructured.Unstructured {
 		fabric.SubnetSpec{
 			Vpc:         VpcName(in.Network.Name),
 			CIDR:        subnet.Spec.CIDR,
-			Gateway:     gatewayOf(subnet),
+			Gateway:     gateway,
 			Provider:    SubnetProvider(subnet.Namespace, subnet.Name),
 			ExcludeIPs:  subnet.Spec.ExcludeIPs,
 			DHCP:        subnet.Spec.DHCP,
 			DHCPOptions: options,
+			MTU:         mtu,
 		},
 	)
 }

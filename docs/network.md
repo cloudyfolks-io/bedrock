@@ -93,8 +93,20 @@ The network area creates this group for every project namespace.
 It allows all egress and denies all ingress.
 
 DHCP in the guest comes from the Fabric Subnet.
-The router option is the gateway.
-The DNS servers come from the Setting `network.dns-servers`.
+The DHCP options are `router`, `mtu` and `dns_server`.
+The `router` option is the gateway of the Subnet.
+The `mtu` option and the `mtu` of the Fabric Subnet are `spec.mtu` of the Subnet.
+When the Subnet has no `spec.mtu`, they are the Setting `network.mtu`.
+The `dns_server` option is `spec.dnsServers` of the Subnet.
+When the Subnet has no `spec.dnsServers`, it is the Setting `network.dns-servers`.
+When no DNS server is set, the operator does not write the `dns_server` option.
+Fabric joins the DNS servers with `;`.
+`spec.mtu` is from 576 to 9000, and `spec.dnsServers` has at most 4 IPv4 addresses.
+
+A change of `network.mtu` or `network.dns-servers` updates every Subnet that does not set the field.
+A running guest keeps its value until its next DHCP lease, which is 3600 seconds long.
+The pod interface of a VM takes the MTU when the VM pod starts.
+The operator does not restart a VM.
 
 Only the platform may add, change or remove network selection annotations on a pod.
 The annotations are all keys with the prefix `k8s.v1.cni.cncf.io/`, `v1.multus-cni.io/` or `ovn.kubernetes.io/`, and all keys with the text `cloudyfolks.io/`.
@@ -229,7 +241,8 @@ Remove the group from the VM first.
 | `network.bgp.graceful-restart` | `true` | Keep the BGP routes while a peer restarts. |
 | `network.bgp.advertise-filter` | empty | Comma list of `<cidr> ge <n> le <n>` entries. The mask length must not be more than `ge`, and `ge` must not be more than `le`, which is at most 32. The agent advertises only the matching routes. |
 | `network.bgp.redistribute-tables` | empty | Comma list of host routing table ids from 1 to 999. 253, 254 and 255 are reserved. Ids from 1000 up are the VRF ids of the VPCs, and the agent refuses a host table that equals one of them. |
-| `network.dns-servers` | empty | Comma list of IPv4 resolvers that DHCP gives to guests. |
+| `network.dns-servers` | empty | Comma list of IPv4 resolvers that DHCP gives to guests. A Subnet that sets `dnsServers` uses its own list. |
+| `network.mtu` | `1500` | MTU in bytes, from 576 to 9000, of every Subnet that sets no `mtu`. A running guest learns a new value at its next DHCP lease. |
 
 `bedrock init` writes `network.eip-mode` and `network.provider-networks` from the cluster configuration.
 A provider network can have an `excludeIPs` list.

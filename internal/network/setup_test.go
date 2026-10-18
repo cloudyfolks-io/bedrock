@@ -10,6 +10,7 @@ import (
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/client-go/rest"
 	"k8s.io/utils/ptr"
@@ -288,4 +289,33 @@ func TestManagerRetriesElasticIPsWhenTheTargetHolderIsDeleted(t *testing.T) {
 		reason := reasonOf(c, waiter)
 		return reason != "" && reason != ReasonTargetInUse
 	})
+}
+
+func fabricSubnetMTU(c client.Client, namespace, name string) int64 {
+	fabricSubnet, err := fabricSubnetOf(c, namespace, name)
+	if err != nil {
+		return 0
+	}
+	mtu, _, _ := unstructured.NestedInt64(fabricSubnet.Object, "spec", "mtu")
+	return mtu
+}
+
+func TestManagerAppliesAnMTUSettingChangeToAnExistingSubnet(t *testing.T) {
+	c, ctx := startChain(t)
+	ns := newNamespaceIn(t, c, "mtuchain", "net")
+	requireAccepted(t, c, networkOf("mtuchain", "mtuchain", "10.100.0.0/16"))
+	subnet := policySubnet(ns, "default", "mtuchain", "10.100.1.0/24")
+	requireAccepted(t, c, subnet)
+	eventually(t, 60*time.Second, "the Subnet is ready with the default MTU", func() bool {
+		return isReady(c, subnet) && fabricSubnetMTU(c, ns, "default") == 1500
+	})
+	setting := &v1alpha1.Setting{ObjectMeta: metav1.ObjectMeta{Name: "network.mtu"}, Spec: v1alpha1.SettingSpec{Value: "1400"}}
+	requireAccepted(t, c, setting)
+	t.Cleanup(func() { _ = c.Delete(context.Background(), setting) })
+	eventually(t, 30*time.Second, "the Fabric Subnet follows the Setting", func() bool {
+		return fabricSubnetMTU(c, ns, "default") == 1400
+	})
+	if err := c.Get(ctx, client.ObjectKeyFromObject(subnet), subnet); err != nil || subnet.Generation != 1 {
+		t.Fatalf("the Subnet must stay untouched: generation %d, error %v", subnet.Generation, err)
+	}
 }

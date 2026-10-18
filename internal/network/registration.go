@@ -51,6 +51,7 @@ func (r *SubnetReconciler) SetupWithManager(mgr ctrl.Manager) error {
 			}
 			return SubnetsOfNetwork(subnets.Items, obj.GetName())
 		})).
+		Watches(&v1alpha1.Setting{}, handler.EnqueueRequestsFromMapFunc(everything(subnetLister(c))), builder.WithPredicates(settingsOfNetworkArea())).
 		Watches(fabricObject("Subnet"), ownerAnnotationHandler(), builder.WithPredicates(managedOnly())).
 		Watches(newObject(attachmentGVK, ""), handler.EnqueueRequestForOwner(mgr.GetScheme(), mgr.GetRESTMapper(), &v1alpha1.Subnet{}, handler.OnlyControllerOwner())).
 		Watches(fabricObject("SecurityGroup"), handler.EnqueueRequestsFromMapFunc(func(ctx context.Context, obj client.Object) []reconcile.Request {

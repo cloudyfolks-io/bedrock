@@ -40,6 +40,7 @@ type SubnetSpec struct {
 	Vpc, CIDR, Gateway, Provider, Vlan, DHCPOptions string
 	ExcludeIPs                                      []string
 	DHCP                                            bool
+	MTU                                             int
 }
 
 type RouterLBPort struct {
@@ -144,6 +145,9 @@ func Subnet(m Meta, s SubnetSpec) *unstructured.Unstructured {
 	spec := map[string]any{"protocol": "IPv4", "cidrBlock": s.CIDR, "gateway": s.Gateway}
 	set(spec, "vpc", s.Vpc)
 	set(spec, "dhcpV4Options", s.DHCPOptions)
+	if s.MTU > 0 {
+		spec["mtu"] = int64(s.MTU)
+	}
 	if len(s.ExcludeIPs) > 0 {
 		spec["excludeIps"] = anys(s.ExcludeIPs)
 	}

@@ -132,7 +132,7 @@ func (r *SubnetReconciler) check(ctx context.Context, subnet v1alpha1.Subnet) (S
 	if !v1alpha1.IsConditionTrue(network.Status.Conditions, v1alpha1.ConditionReady) {
 		return SubnetInput{}, &Violation{Reason: ReasonNetworkNotReady, Message: fmt.Sprintf("the Network %q is not ready yet", network.Name)}, nil
 	}
-	return SubnetInput{Subnet: subnet, Network: network, Tenant: tenant, Project: project, DNSServers: cfg.DNSServers}, nil, nil
+	return SubnetInput{Subnet: subnet, Network: network, Tenant: tenant, Project: project, DefaultMTU: cfg.MTU, DefaultDNSServers: cfg.DNSServers}, nil, nil
 }
 
 func (r *SubnetReconciler) reservedRanges(ctx context.Context, cfg Config) ([]ReservedRange, error) {
