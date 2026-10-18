@@ -22,7 +22,10 @@ type SubnetInput struct {
 }
 
 func DHCPv4Options(gateway string, mtu int, dnsServers []string) string {
-	options := []string{"router=" + gateway, "mtu=" + strconv.Itoa(mtu)}
+	options := []string{"router=" + gateway}
+	if mtu > 0 {
+		options = append(options, "mtu="+strconv.Itoa(mtu))
+	}
 	if len(dnsServers) > 0 {
 		options = append(options, "dns_server="+strings.Join(dnsServers, ";"))
 	}

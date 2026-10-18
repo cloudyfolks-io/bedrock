@@ -243,8 +243,9 @@ func requireDHCP(t *testing.T, c client.Client, namespace, name string, mtu int6
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got, _, _ := unstructured.NestedInt64(fabricSubnet.Object, "spec", "mtu"); got != mtu {
-		t.Fatalf("mtu %d, want %d", got, mtu)
+	got, found, _ := unstructured.NestedInt64(fabricSubnet.Object, "spec", "mtu")
+	if mtu == 0 && found || mtu != 0 && got != mtu {
+		t.Fatalf("mtu %d (set %v), want %d", got, found, mtu)
 	}
 	if got, _, _ := unstructured.NestedString(fabricSubnet.Object, "spec", "dhcpV4Options"); got != options {
 		t.Fatalf("options %q, want %q", got, options)
@@ -256,14 +257,23 @@ func TestSubnetDNSServersFromSettingsReachDHCP(t *testing.T) {
 	setSetting(t, "network.dns-servers", "1.1.1.1,8.8.8.8")
 	f.create(t, f.namespace, "default", "10.100.1.0/24")
 	reconcileSubnet(t, f.c, f.namespace, "default")
-	requireDHCP(t, f.c, f.namespace, "default", 1500, "router=10.100.1.1,mtu=1500,dns_server=1.1.1.1;8.8.8.8")
+	requireDHCP(t, f.c, f.namespace, "default", 0, "router=10.100.1.1,dns_server=1.1.1.1;8.8.8.8")
 }
 
-func TestSubnetWithoutSettingsGetsRouterAndDefaultMTU(t *testing.T) {
+func TestSubnetWithoutSettingsLeavesTheMTUToFabric(t *testing.T) {
 	f := newSubnetFixture(t)
 	f.create(t, f.namespace, "default", "10.100.1.0/24")
 	reconcileSubnet(t, f.c, f.namespace, "default")
-	requireDHCP(t, f.c, f.namespace, "default", 1500, "router=10.100.1.1,mtu=1500")
+	requireDHCP(t, f.c, f.namespace, "default", 0, "router=10.100.1.1")
+}
+
+func TestSubnetMTUFieldNeedsNoSetting(t *testing.T) {
+	f := newSubnetFixture(t)
+	subnet := policySubnet(f.namespace, "default", f.network.Name, "10.100.1.0/24")
+	subnet.Spec.MTU = ptr.To(int32(1400))
+	requireAccepted(t, f.c, subnet)
+	reconcileSubnet(t, f.c, f.namespace, "default")
+	requireDHCP(t, f.c, f.namespace, "default", 1400, "router=10.100.1.1,mtu=1400")
 }
 
 func TestSubnetMTUSettingReachesTheFabricSubnet(t *testing.T) {
@@ -291,11 +301,14 @@ func TestSubnetFollowsASettingChange(t *testing.T) {
 	f := newSubnetFixture(t)
 	f.create(t, f.namespace, "default", "10.100.1.0/24")
 	reconcileSubnet(t, f.c, f.namespace, "default")
-	requireDHCP(t, f.c, f.namespace, "default", 1500, "router=10.100.1.1,mtu=1500")
+	requireDHCP(t, f.c, f.namespace, "default", 0, "router=10.100.1.1")
 	setSetting(t, "network.mtu", "1400")
 	setSetting(t, "network.dns-servers", "9.9.9.9")
 	reconcileSubnet(t, f.c, f.namespace, "default")
 	requireDHCP(t, f.c, f.namespace, "default", 1400, "router=10.100.1.1,mtu=1400,dns_server=9.9.9.9")
+	setSetting(t, "network.mtu", "")
+	reconcileSubnet(t, f.c, f.namespace, "default")
+	requireDHCP(t, f.c, f.namespace, "default", 0, "router=10.100.1.1,dns_server=9.9.9.9")
 }
 
 func TestSubnetDeletionWaitsForUsedAddresses(t *testing.T) {

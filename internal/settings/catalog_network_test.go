@@ -10,7 +10,7 @@ const publicNetwork = `[{"name":"public","interface":"bond0","vlan":100,"cidr":"
 func TestNetworkCatalogKeysAndDefaults(t *testing.T) {
 	want := map[string]string{
 		"network.eip-mode": "l2", "network.provider-networks": "", "network.bgp.local-asn": "", "network.bgp.router-id": "",
-		"network.bgp.peers": "", "network.bgp.transit-network": "", "network.dns-servers": "", "network.mtu": "1500",
+		"network.bgp.peers": "", "network.bgp.transit-network": "", "network.dns-servers": "", "network.mtu": "",
 		"network.bgp.bfd": "true", "network.bgp.hold-time": "9s", "network.bgp.keepalive-time": "3s",
 		"network.bgp.graceful-restart": "true", "network.bgp.advertise-filter": "", "network.bgp.redistribute-tables": "",
 	}

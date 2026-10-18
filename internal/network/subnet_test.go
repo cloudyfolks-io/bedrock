@@ -21,13 +21,14 @@ func subnetInput(gateway string, dns []string) SubnetInput {
 		Network:           v1alpha1.Network{ObjectMeta: metav1.ObjectMeta{Name: "t1"}},
 		Tenant:            "t1",
 		Project:           "prod",
-		DefaultMTU:        1500,
 		DefaultDNSServers: dns,
 	}
 }
 
 func TestDesiredFabricSubnet(t *testing.T) {
-	u := DesiredFabricSubnet(subnetInput("10.100.1.1", []string{"1.1.1.1", "8.8.8.8"}))
+	in := subnetInput("10.100.1.1", []string{"1.1.1.1", "8.8.8.8"})
+	in.DefaultMTU = 1500
+	u := DesiredFabricSubnet(in)
 	if u.GetName() != FabricName("t1-prod", "default") {
 		t.Fatal(u.GetName())
 	}
@@ -70,14 +71,33 @@ func TestDesiredFabricSubnetDefaultsTheGateway(t *testing.T) {
 	if gateway, _, _ := unstructured.NestedString(u.Object, "spec", "gateway"); gateway != "10.100.1.1" {
 		t.Fatalf("gateway %q", gateway)
 	}
-	if options, _, _ := unstructured.NestedString(u.Object, "spec", "dhcpV4Options"); options != "router=10.100.1.1,mtu=1500" {
-		t.Fatalf("no DNS servers means no dns_server option: %q", options)
+	if options, _, _ := unstructured.NestedString(u.Object, "spec", "dhcpV4Options"); options != "router=10.100.1.1" {
+		t.Fatalf("no MTU and no DNS servers mean a router option only: %q", options)
+	}
+}
+
+func TestDesiredFabricSubnetWithoutAnyMTULeavesItToFabric(t *testing.T) {
+	spec, _, _ := unstructured.NestedMap(DesiredFabricSubnet(subnetInput("", []string{"1.1.1.1"})).Object, "spec")
+	if _, found := spec["mtu"]; found {
+		t.Fatalf("no mtu expected: %v", spec)
+	}
+	if spec["dhcpV4Options"] != "router=10.100.1.1,dns_server=1.1.1.1" {
+		t.Fatalf("no mtu option expected: %v", spec)
+	}
+}
+
+func TestDesiredFabricSubnetSubnetMTUNeedsNoSetting(t *testing.T) {
+	in := subnetInput("", nil)
+	in.Subnet.Spec.MTU = ptr.To(int32(1400))
+	spec, _, _ := unstructured.NestedMap(DesiredFabricSubnet(in).Object, "spec")
+	if spec["mtu"] != int64(1400) || spec["dhcpV4Options"] != "router=10.100.1.1,mtu=1400" {
+		t.Fatalf("spec %v", spec)
 	}
 }
 
 func TestDesiredFabricSubnetKeepsAnExplicitGatewayAsRouter(t *testing.T) {
 	u := DesiredFabricSubnet(subnetInput("10.100.1.254", nil))
-	if options, _, _ := unstructured.NestedString(u.Object, "spec", "dhcpV4Options"); options != "router=10.100.1.254,mtu=1500" {
+	if options, _, _ := unstructured.NestedString(u.Object, "spec", "dhcpV4Options"); options != "router=10.100.1.254" {
 		t.Fatalf("options %q", options)
 	}
 }
@@ -106,13 +126,14 @@ func TestDesiredFabricSubnetFallsBackToTheSettingsForUnsetFields(t *testing.T) {
 func TestDesiredFabricSubnetSubnetDNSNeedsNoSetting(t *testing.T) {
 	in := subnetInput("", nil)
 	in.Subnet.Spec.DNSServers = []string{"100.66.0.53"}
-	if options, _, _ := unstructured.NestedString(DesiredFabricSubnet(in).Object, "spec", "dhcpV4Options"); options != "router=10.100.1.1,mtu=1500,dns_server=100.66.0.53" {
+	if options, _, _ := unstructured.NestedString(DesiredFabricSubnet(in).Object, "spec", "dhcpV4Options"); options != "router=10.100.1.1,dns_server=100.66.0.53" {
 		t.Fatalf("options %q", options)
 	}
 }
 
 func TestDesiredFabricSubnetWithoutDHCP(t *testing.T) {
 	in := subnetInput("", []string{"1.1.1.1"})
+	in.DefaultMTU = 1500
 	in.Subnet.Spec.DHCP = false
 	spec, _, _ := unstructured.NestedMap(DesiredFabricSubnet(in).Object, "spec")
 	if _, found := spec["enableDHCP"]; found {
@@ -150,9 +171,11 @@ func TestDHCPv4Options(t *testing.T) {
 		servers []string
 		want    string
 	}{
-		"no servers":  {"10.0.0.1", 1500, nil, "router=10.0.0.1,mtu=1500"},
-		"one server":  {"10.0.0.1", 1500, []string{"1.1.1.1"}, "router=10.0.0.1,mtu=1500,dns_server=1.1.1.1"},
-		"two servers": {"10.0.0.1", 9000, []string{"1.1.1.1", "8.8.8.8"}, "router=10.0.0.1,mtu=9000,dns_server=1.1.1.1;8.8.8.8"},
+		"nothing else": {"10.0.0.1", 0, nil, "router=10.0.0.1"},
+		"only servers": {"10.0.0.1", 0, []string{"1.1.1.1"}, "router=10.0.0.1,dns_server=1.1.1.1"},
+		"no servers":   {"10.0.0.1", 1500, nil, "router=10.0.0.1,mtu=1500"},
+		"one server":   {"10.0.0.1", 1500, []string{"1.1.1.1"}, "router=10.0.0.1,mtu=1500,dns_server=1.1.1.1"},
+		"two servers":  {"10.0.0.1", 9000, []string{"1.1.1.1", "8.8.8.8"}, "router=10.0.0.1,mtu=9000,dns_server=1.1.1.1;8.8.8.8"},
 	}
 	for name, tc := range cases {
 		t.Run(name, func(t *testing.T) {

@@ -22,7 +22,7 @@ func TestParseConfigDefaults(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if cfg.EIPMode != "l2" || len(cfg.ProviderNetworks) != 0 || len(cfg.DNSServers) != 0 || cfg.MTU != 1500 {
+	if cfg.EIPMode != "l2" || len(cfg.ProviderNetworks) != 0 || len(cfg.DNSServers) != 0 || cfg.MTU != 0 {
 		t.Fatalf("unexpected defaults %+v", cfg)
 	}
 	bgp := cfg.BGP

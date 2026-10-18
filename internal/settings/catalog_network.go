@@ -44,7 +44,7 @@ func networkDefinitions() []Definition {
 		{"network.bgp.peers", "", "Comma list of <ipv4>@<asn> BGP peers.", bgpPeersValue},
 		{"network.bgp.transit-network", "", "Provider network that carries the router ports in bgp mode.", dnsLabelValue},
 		{"network.dns-servers", "", "Comma list of IPv4 resolvers that DHCP gives to guests. A Subnet that sets dnsServers uses its own list.", ipv4ListValue},
-		{"network.mtu", "1500", "MTU in bytes, from 576 to 9000, of every Subnet that sets no mtu. A running guest learns a new value at its next DHCP lease.", intBetween(minMTU, maxMTU)},
+		{"network.mtu", "", "MTU in bytes, from 576 to 9000, of every Subnet that sets no mtu. Empty lets Fabric choose. Keep it at or below the underlay MTU minus 100. A running guest learns a new value at its next DHCP lease.", intBetween(minMTU, maxMTU)},
 		{"network.bgp.bfd", "true", "Enable BFD on every BGP peer.", boolean},
 		{"network.bgp.hold-time", "9s", "BGP hold time in whole seconds, from 3s to 300s. A peer refuses a hold time of 1s or 2s.", wholeSecondsBetween(minHoldTime, maxBGPTimer)},
 		{"network.bgp.keepalive-time", "3s", "BGP keepalive time in whole seconds, from 1s to 300s.", wholeSecondsBetween(minKeepaliveTime, maxBGPTimer)},

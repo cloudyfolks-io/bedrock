@@ -306,8 +306,9 @@ func TestManagerAppliesAnMTUSettingChangeToAnExistingSubnet(t *testing.T) {
 	requireAccepted(t, c, networkOf("mtuchain", "mtuchain", "10.100.0.0/16"))
 	subnet := policySubnet(ns, "default", "mtuchain", "10.100.1.0/24")
 	requireAccepted(t, c, subnet)
-	eventually(t, 60*time.Second, "the Subnet is ready with the default MTU", func() bool {
-		return isReady(c, subnet) && fabricSubnetMTU(c, ns, "default") == 1500
+	eventually(t, 60*time.Second, "the Subnet is ready without an MTU", func() bool {
+		_, err := fabricSubnetOf(c, ns, "default")
+		return isReady(c, subnet) && err == nil && fabricSubnetMTU(c, ns, "default") == 0
 	})
 	setting := &v1alpha1.Setting{ObjectMeta: metav1.ObjectMeta{Name: "network.mtu"}, Spec: v1alpha1.SettingSpec{Value: "1400"}}
 	requireAccepted(t, c, setting)
