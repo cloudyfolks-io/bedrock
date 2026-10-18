@@ -47,6 +47,8 @@ stages, in order:
   stop    set noout, stop Rook, copy /var/lib/rook, run k0s reset
   adopt   run bedrock init and bedrock join, wait for StorageAdopted
   check   run every assertion, print PASS or FAIL for each
+  snapshot  stop the VMs, snapshot every disk, start the VMs; run it after stop
+  rewind    restore the snapshot of every disk and start the VMs again
   down    remove the lab VMs, their disks and the lab secrets
   all     up, old, export, stop, adopt and check; the VMs stay, run down after
 
@@ -1173,6 +1175,50 @@ stage_check() {
   return "$failed"
 }
 
+snapshot_tag=after-stop
+
+vm_disk_files() {
+  local id=$1 letter
+  echo "${LIMA_HOME:-$HOME/.lima}/$(vm_name "$id")/disk"
+  for letter in "${letters[@]}"; do
+    echo "${LIMA_HOME:-$HOME/.lima}/_disks/$(disk_name "$id" "$letter")/datadisk"
+  done
+}
+
+vm_start_existing() {
+  env "$(qemu_variable)=$lab_dir/qemu-serial.sh" limactl start "$(vm_name "$1")" --tty=false
+}
+
+stage_snapshot() {
+  local id file
+  for id in "${ids[@]}"; do
+    limactl stop "$(vm_name "$id")"
+  done
+  for id in "${ids[@]}"; do
+    while IFS= read -r file; do
+      qemu-img snapshot -c "$snapshot_tag" "$file"
+    done < <(vm_disk_files "$id")
+  done
+  for id in "${ids[@]}"; do
+    vm_start_existing "$id"
+  done
+}
+
+stage_rewind() {
+  local id file
+  for id in "${ids[@]}"; do
+    limactl stop --force "$(vm_name "$id")"
+  done
+  for id in "${ids[@]}"; do
+    while IFS= read -r file; do
+      qemu-img snapshot -a "$snapshot_tag" "$file"
+    done < <(vm_disk_files "$id")
+  done
+  for id in "${ids[@]}"; do
+    vm_start_existing "$id"
+  done
+}
+
 stage_down() {
   lab_down
   remove_bundle_images
@@ -1191,7 +1237,7 @@ stage_all() {
 main() {
   cd "$repo"
   case "${1:-}" in
-  up | old | export | stop | adopt | check | down | all) "stage_$1" ;;
+  up | old | export | stop | adopt | check | snapshot | rewind | down | all) "stage_$1" ;;
   *)
     usage >&2
     return 2
