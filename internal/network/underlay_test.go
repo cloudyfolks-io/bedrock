@@ -83,6 +83,30 @@ func TestRenderUnderlayLabelsPoolsByRole(t *testing.T) {
 	}
 }
 
+func TestRenderUnderlayBGPLabelsTheTransitPoolAsTransit(t *testing.T) {
+	for _, role := range []string{"", "tenant", "platform"} {
+		pools := twoNetworks
+		if role != "" {
+			pools = strings.Replace(pools, `"gateway":"192.0.2.1"`, `"gateway":"192.0.2.1","role":"`+role+`"`, 1)
+		}
+		objects, _ := RenderUnderlay(configOf(t, bgpValues(map[string]string{"network.provider-networks": pools})))
+		got := byKindAndName(objects)
+		if label := got["Subnet/provider-transit"].GetLabels()["usability"]; label != "transit" {
+			t.Fatalf("role %q: transit pool usability %q", role, label)
+		}
+		if label := got["Subnet/provider-pool"].GetLabels()["usability"]; label != "public" {
+			t.Fatalf("role %q: tenant pool usability %q", role, label)
+		}
+	}
+}
+
+func TestRenderUnderlayL2KeepsTheRoleOfAPoolNamedLikeTheTransit(t *testing.T) {
+	objects, _ := RenderUnderlay(configOf(t, map[string]string{"network.provider-networks": twoNetworks, "network.bgp.transit-network": "transit"}))
+	if label := byKindAndName(objects)["Subnet/provider-transit"].GetLabels()["usability"]; label != "public" {
+		t.Fatalf("usability %q", label)
+	}
+}
+
 func TestRenderUnderlayLabelsOnlyTheSubnetWithUsability(t *testing.T) {
 	objects, _ := RenderUnderlay(configOf(t, map[string]string{"network.provider-networks": publicNetworks}))
 	for _, o := range objects {

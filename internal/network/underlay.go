@@ -75,6 +75,7 @@ func renderBGP(cfg Config) ([]*unstructured.Unstructured, []string) {
 	var objects []*unstructured.Unstructured
 	for _, pn := range cfg.ProviderNetworks {
 		if pn.Name == cfg.BGP.Transit {
+			pn.Role = v1alpha1.ProviderRoleTransit
 			objects = append(objects, providerObjects(pn)...)
 			continue
 		}
