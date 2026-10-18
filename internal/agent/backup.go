@@ -171,7 +171,10 @@ func sealTarGz(dst io.Writer, src string, recipients []age.Recipient) error {
 }
 
 func writeTarGz(dst io.Writer, src string) error {
-	gz := gzip.NewWriter(dst)
+	gz, err := gzip.NewWriterLevel(dst, gzip.BestSpeed)
+	if err != nil {
+		return err
+	}
 	writer := tar.NewWriter(gz)
 	walkErr := filepath.WalkDir(src, func(path string, entry fs.DirEntry, err error) error {
 		if err != nil || entry.IsDir() {

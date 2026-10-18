@@ -2,6 +2,7 @@ package agent
 
 import (
 	"archive/tar"
+	"bytes"
 	"compress/gzip"
 	"context"
 	"crypto/sha256"
@@ -419,5 +420,25 @@ func TestWriteAtomicLeavesNoFileWhenTheWriterFails(t *testing.T) {
 func TestBackupIsRegistered(t *testing.T) {
 	if _, ok := Steps()[v1alpha1.StepBackup]; !ok {
 		t.Fatal("Steps must include Backup")
+	}
+}
+
+func TestSealTarGzUsesTheFastestGzipLevel(t *testing.T) {
+	identity := newRecipient(t)
+	var sealed bytes.Buffer
+	if err := sealTarGz(&sealed, restoreWork(t), []age.Recipient{identity.Recipient()}); err != nil {
+		t.Fatal(err)
+	}
+	plain, err := seal.Open(&sealed, []age.Identity{identity})
+	if err != nil {
+		t.Fatal(err)
+	}
+	header := make([]byte, 10)
+	if _, err := io.ReadFull(plain, header); err != nil {
+		t.Fatal(err)
+	}
+	const fastestFlag = 4
+	if header[8] != fastestFlag {
+		t.Fatalf("gzip extra flags %d, want %d", header[8], fastestFlag)
 	}
 }
