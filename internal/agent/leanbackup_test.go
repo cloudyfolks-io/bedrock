@@ -348,3 +348,71 @@ func TestDropImagesWritesTheArchiveAtBestSpeed(t *testing.T) {
 		t.Fatalf("gzip extra flags %d, want %d", got, gzipFastestFlag)
 	}
 }
+
+func gzipTarHeaders(t *testing.T, headers []tar.Header) []byte {
+	t.Helper()
+	var buf bytes.Buffer
+	gz := gzip.NewWriter(&buf)
+	writer := tar.NewWriter(gz)
+	for i := range headers {
+		if err := writer.WriteHeader(&headers[i]); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := writer.Write(make([]byte, headers[i].Size)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := errors.Join(writer.Close(), gz.Close()); err != nil {
+		t.Fatal(err)
+	}
+	return buf.Bytes()
+}
+
+func readGzipTarHeaders(t *testing.T, path string) []tar.Header {
+	t.Helper()
+	file, err := os.Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer file.Close()
+	gz, err := gzip.NewReader(file)
+	if err != nil {
+		t.Fatal(err)
+	}
+	reader := tar.NewReader(gz)
+	var headers []tar.Header
+	for {
+		header, err := reader.Next()
+		if err == io.EOF {
+			return headers
+		}
+		if err != nil {
+			t.Fatal(err)
+		}
+		headers = append(headers, *header)
+	}
+}
+
+func TestDropImagesKeepsModeOwnerAndMtimeOfKeptEntries(t *testing.T) {
+	kept := []tar.Header{
+		{Name: "etcd-snapshot.db", Typeflag: tar.TypeReg, Mode: 0o600, Uid: 0, Gid: 0, Size: 8, ModTime: time.Unix(1_600_000_001, 0)},
+		{Name: "pki/", Typeflag: tar.TypeDir, Mode: 0o750, Uid: 998, Gid: 997, ModTime: time.Unix(1_600_000_002, 0)},
+		{Name: "pki/ca.key", Typeflag: tar.TypeReg, Mode: 0o400, Uid: 998, Gid: 997, Size: 4, ModTime: time.Unix(1_600_000_003, 0)},
+		{Name: "k0s.yaml", Typeflag: tar.TypeReg, Mode: 0o644, Uid: 1000, Gid: 1000, Size: 2, ModTime: time.Unix(1_600_000_004, 0)},
+	}
+	dropped := tar.Header{Name: "images/bundle.tar", Typeflag: tar.TypeReg, Mode: 0o644, Size: 16, ModTime: time.Unix(1_500_000_000, 0)}
+	work := t.TempDir()
+	writeFixtureFile(t, filepath.Join(work, k0sArchiveName), string(gzipTarHeaders(t, slices.Concat(kept[:2], []tar.Header{dropped}, kept[2:]))))
+	if err := dropImages(work); err != nil {
+		t.Fatal(err)
+	}
+	got := readGzipTarHeaders(t, filepath.Join(work, k0sArchiveName))
+	if len(got) != len(kept) {
+		t.Fatalf("got %d entries, want %d", len(got), len(kept))
+	}
+	for i, want := range kept {
+		if got[i].Name != want.Name || got[i].Typeflag != want.Typeflag || got[i].Mode != want.Mode || got[i].Uid != want.Uid || got[i].Gid != want.Gid || got[i].Size != want.Size || !got[i].ModTime.Equal(want.ModTime) {
+			t.Fatalf("entry %d: got %+v, want %+v", i, got[i], want)
+		}
+	}
+}
