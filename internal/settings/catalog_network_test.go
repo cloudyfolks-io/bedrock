@@ -143,6 +143,13 @@ func TestBGPBooleanValidation(t *testing.T) {
 	}
 }
 
+func TestBGPBFDDescriptionNamesTheVpcRule(t *testing.T) {
+	def, ok := Lookup("network.bgp.bfd")
+	if !ok || !strings.Contains(def.Description, "BGP peer") || !strings.Contains(def.Description, "Vpc") {
+		t.Fatalf("description %q", def.Description)
+	}
+}
+
 func TestBGPTimerValidation(t *testing.T) {
 	shared := map[string]bool{
 		"": true, "3s": true, "9s": true, "300s": true, "5m": true, "5m0s": true,

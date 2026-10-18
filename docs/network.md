@@ -131,7 +131,7 @@ Geneve adds 100 bytes to every packet between nodes.
 Keep `network.mtu` and `spec.mtu` at or below the MTU of the node NICs minus 100.
 A larger value drops or fragments the packets between nodes.
 A cluster whose node NICs have an MTU of 1500 must leave `network.mtu` empty, or set 1400 or less.
-The ansible role of sub-project D sets 1500 for ir-central-1.
+Set `network.mtu` to 1500 only when the node NICs have an MTU of 1600 or more.
 
 Only the platform may add, change or remove network selection annotations on a pod.
 The annotations are all keys with the prefix `k8s.v1.cni.cncf.io/`, `v1.multus-cni.io/` or `ovn.kubernetes.io/`, and all keys with the text `cloudyfolks.io/`.
@@ -341,7 +341,7 @@ Remove the group from the VM first.
 | `network.bgp.router-id` | empty | BGP router id. |
 | `network.bgp.peers` | empty | Comma list of `<ipv4>@<asn>`. |
 | `network.bgp.transit-network` | empty | Provider network that carries the router ports in bgp mode. |
-| `network.bgp.bfd` | `true` | Enable BFD on every BGP peer. |
+| `network.bgp.bfd` | `true` | Enable BFD on the BGP peers of the FRR agent. The Fabric `Vpc` of a Network in bgp mode always has BFD, and this Setting does not change it. |
 | `network.bgp.hold-time` | `9s` | BGP hold time in whole seconds, from `3s` to `300s`. A peer refuses a hold time of `1s` or `2s`. |
 | `network.bgp.keepalive-time` | `3s` | BGP keepalive time in whole seconds, from `1s` to `300s`. |
 | `network.bgp.graceful-restart` | `true` | Keep the BGP routes while a peer restarts. |
