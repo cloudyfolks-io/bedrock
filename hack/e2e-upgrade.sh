@@ -146,6 +146,18 @@ node_lease_renewed_since() {
   [ -n "$renewed" ] && [ "$(date -u -d "$renewed" +%s)" -ge "$1" ]
 }
 
+container_gone() {
+  local ids
+  ids=$(/usr/local/bin/k0s ctr --namespace k8s.io containers ls -q) || return 1
+  ! grep -qx "$1" <<<"$ids"
+}
+
+pod_started_since() {
+  local started
+  started=$(kubectl -n default get pod "$restore_marker" -o jsonpath='{.status.containerStatuses[0].state.running.startedAt}') || return 1
+  [ -n "$started" ] && [ "$(date -u -d "$started" +%s)" -ge "$1" ]
+}
+
 assert_no_image_pull_failures() {
   local waiting
   waiting=$(kubectl get pods -A -o jsonpath='{range .items[*]}{.status.containerStatuses[*].state.waiting.reason}{"\n"}{end}')
@@ -438,6 +450,7 @@ metadata:
   name: $restore_marker
   namespace: default
 spec:
+  hostNetwork: true
   containers:
     - name: pause
       image: $pause_image
@@ -502,13 +515,17 @@ docs_restore_script_valid "$restore_script" || {
 sed -i "1s#^SNAPSHOT=[^ ]*#SNAPSHOT=$snapshot#" "$restore_script"
 images_before=$(k0s_images_listing)
 test -n "$images_before"
-kubectl -n default delete configmap "$restore_marker"
+restore_container=$(kubectl -n default get pod "$restore_marker" -o jsonpath='{.status.containerStatuses[0].containerID}')
+test -n "$restore_container"
+kubectl -n default delete configmap,pod "$restore_marker"
+retry_until 300 container_gone "${restore_container#containerd://}"
 restore_started=$(date -u +%s)
 bash "$restore_script"
 retry_until 600 kubectl get --raw=/readyz
 retry_until 300 node_lease_renewed_since "$restore_started"
 kubectl wait --for=condition=Ready node --all --timeout=300s
 kubectl -n bedrock-system rollout status deploy/bedrock-operator --timeout=300s
+retry_until 300 pod_started_since "$restore_started"
 kubectl -n default wait --for=condition=Ready "pod/$restore_marker" --timeout=300s
 test "$(kubectl -n default get configmap "$restore_marker" -o jsonpath='{.data.state}')" = before-snapshot
 assert_no_image_pull_failures
