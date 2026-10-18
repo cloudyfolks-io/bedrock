@@ -456,7 +456,36 @@ type adoptInitRun struct {
 	errOut  string
 }
 
-func runAdoptInit(t *testing.T, running bool, prepare func(t *testing.T, c client.Client, keyPath string)) adoptInitRun {
+type k0sScript func(t *testing.T, e *host.FakeExec, root, dataDir string)
+
+func scriptFreshK0s(_ *testing.T, e *host.FakeExec, root, dataDir string) {
+	installArgs := k0s.InstallArgs(k0s.InstallOptions{
+		Role: "controller", Force: true, ConfigPath: filepath.Join(root, "etc", "k0s", "k0s.yaml"), EnableWorker: true, NoTaints: true, DynamicConfig: true,
+		Labels:            roles.Labels([]string{"control-plane", "ceph-osd", "fabric-gateway"}),
+		KubeletExtraArgs:  []string{"--node-status-update-frequency=4s"},
+		DataDir:           dataDir,
+		KubeletRootDir:    k0s.DefaultKubeletRootDir,
+		DisableComponents: k0s.DefaultDisabledComponents,
+	})
+	e.Responses["/usr/local/bin/k0s "+strings.Join(installArgs, " ")] = ""
+	e.Errors["/usr/local/bin/k0s status --data-dir "+dataDir] = &host.ExitError{Code: 1}
+}
+
+func scriptRunningK0s(_ *testing.T, e *host.FakeExec, _, dataDir string) {
+	e.Responses["/usr/local/bin/k0s status --data-dir "+dataDir] = ""
+}
+
+func runFreshAdoptInit(t *testing.T, prepare func(t *testing.T, c client.Client, keyPath string)) adoptInitRun {
+	t.Helper()
+	return runScriptedAdoptInit(t, scriptFreshK0s, prepare)
+}
+
+func runRerunAdoptInit(t *testing.T, prepare func(t *testing.T, c client.Client, keyPath string)) adoptInitRun {
+	t.Helper()
+	return runScriptedAdoptInit(t, scriptRunningK0s, prepare)
+}
+
+func runScriptedAdoptInit(t *testing.T, script k0sScript, prepare func(t *testing.T, c client.Client, keyPath string)) adoptInitRun {
 	t.Helper()
 	c, newClient := startEnv(t)
 	root, e := adoptedHost(t)
@@ -488,21 +517,7 @@ func runAdoptInit(t *testing.T, running bool, prepare func(t *testing.T, c clien
 		}
 	}()
 	dataDir := filepath.Join(root, "var", "lib", "k0s")
-	statusCall := "/usr/local/bin/k0s status --data-dir " + dataDir
-	if running {
-		e.Responses[statusCall] = ""
-	} else {
-		installArgs := k0s.InstallArgs(k0s.InstallOptions{
-			Role: "controller", Force: true, ConfigPath: filepath.Join(root, "etc", "k0s", "k0s.yaml"), EnableWorker: true, NoTaints: true, DynamicConfig: true,
-			Labels:            roles.Labels([]string{"control-plane", "ceph-osd", "fabric-gateway"}),
-			KubeletExtraArgs:  []string{"--node-status-update-frequency=4s"},
-			DataDir:           dataDir,
-			KubeletRootDir:    k0s.DefaultKubeletRootDir,
-			DisableComponents: k0s.DefaultDisabledComponents,
-		})
-		e.Responses["/usr/local/bin/k0s "+strings.Join(installArgs, " ")] = ""
-		e.Errors[statusCall] = &host.ExitError{Code: 1}
-	}
+	script(t, e, root, dataDir)
 	keyPath := filepath.Join(root, "ceph-keys.yaml")
 	if prepare != nil {
 		prepare(t, c, keyPath)
@@ -541,7 +556,7 @@ func assertRookSecretHoldsKeyFile(t *testing.T, c client.Client) {
 }
 
 func TestRunInitAdoptWritesTheIdentityTheClusterAndTheDevices(t *testing.T) {
-	run := runAdoptInit(t, false, nil)
+	run := runFreshAdoptInit(t, nil)
 	if run.code != 0 {
 		t.Fatalf("exit %d\nstdout %s\nstderr %s", run.code, run.out, run.errOut)
 	}
@@ -572,7 +587,7 @@ func TestRunInitAdoptWritesTheIdentityTheClusterAndTheDevices(t *testing.T) {
 }
 
 func TestRunInitAdoptRerunNeedsNoKeyFileWhenTheSecretExists(t *testing.T) {
-	run := runAdoptInit(t, true, func(t *testing.T, c client.Client, keyPath string) {
+	run := runRerunAdoptInit(t, func(t *testing.T, c client.Client, keyPath string) {
 		mustRemove(t, keyPath)
 		createRookSecret(t, c, labelFSID, "kept-by-rook")
 	})
@@ -593,7 +608,7 @@ func TestRunInitAdoptRerunNeedsNoKeyFileWhenTheSecretExists(t *testing.T) {
 }
 
 func TestRunInitAdoptRerunNeedsTheKeyFileWhenTheSecretIsAbsent(t *testing.T) {
-	run := runAdoptInit(t, true, func(t *testing.T, c client.Client, keyPath string) { mustRemove(t, keyPath) })
+	run := runRerunAdoptInit(t, func(t *testing.T, c client.Client, keyPath string) { mustRemove(t, keyPath) })
 	if run.code != 1 {
 		t.Fatalf("exit %d\nstdout %s\nstderr %s", run.code, run.out, run.errOut)
 	}
@@ -610,7 +625,7 @@ func TestRunInitAdoptRerunNeedsTheKeyFileWhenTheSecretIsAbsent(t *testing.T) {
 }
 
 func TestRunInitAdoptRerunWritesTheIdentityWhenTheSecretIsAbsent(t *testing.T) {
-	run := runAdoptInit(t, true, nil)
+	run := runRerunAdoptInit(t, nil)
 	if run.code != 0 {
 		t.Fatalf("exit %d\nstdout %s\nstderr %s", run.code, run.out, run.errOut)
 	}
