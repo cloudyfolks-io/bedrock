@@ -177,7 +177,7 @@ func RunInit(ctx context.Context, args []string, deps InitDeps, stdout, stderr i
 	if err != nil {
 		return fail(stderr, err)
 	}
-	results, err := preflightResults(ctx, deps, k0sClient, facts, cfg, bundle.Spec.SupportedOS)
+	results, err := preflightResults(ctx, deps, k0sClient, preflight.Run, facts, cfg, bundle.Spec.SupportedOS)
 	if err != nil {
 		return fail(stderr, err)
 	}

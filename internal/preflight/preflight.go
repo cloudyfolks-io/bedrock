@@ -30,6 +30,14 @@ type Result struct {
 }
 
 func Run(ctx context.Context, e host.Exec, facts host.Facts, devices []host.Device, cfg v1alpha1.ClusterConfig, supportedOS []string) []Result {
+	return checks(facts, devices, cfg, supportedOS, vipCheck(cfg.Spec.API.VIP, facts.DefaultIP), vipFreeCheck(ctx, e, cfg.Spec.API.VIP))
+}
+
+func RunJoin(_ context.Context, _ host.Exec, facts host.Facts, devices []host.Device, cfg v1alpha1.ClusterConfig, supportedOS []string) []Result {
+	return checks(facts, devices, cfg, supportedOS, vipCheck(cfg.Spec.API.VIP, facts.DefaultIP))
+}
+
+func checks(facts host.Facts, devices []host.Device, cfg v1alpha1.ClusterConfig, supportedOS []string, vipResults ...Result) []Result {
 	osKey := host.OSKey(facts.OSID, facts.OSVersionID)
 	results := []Result{
 		check("root", true, facts.Root, "run as root"),
@@ -41,10 +49,9 @@ func Run(ctx context.Context, e host.Exec, facts host.Facts, devices []host.Devi
 		check("ntp", false, facts.NTPSynced, "clock is not NTP synchronized"),
 		check("disk", false, facts.FreeVarLibBytes >= minFreeBytes, fmt.Sprintf("%d GiB free on /var/lib, at least 20 GiB recommended", facts.FreeVarLibBytes>>30)),
 		check("management-interface", true, slices.Contains(facts.Interfaces, cfg.Spec.Network.ManagementInterface), fmt.Sprintf("interface %s not found", cfg.Spec.Network.ManagementInterface)),
-		vipCheck(cfg.Spec.API.VIP, facts.DefaultIP),
-		vipFreeCheck(ctx, e, cfg.Spec.API.VIP),
-		check("iommu", false, facts.IOMMUGroups > 0, "no IOMMU groups found, hardware passthrough will not work"),
 	}
+	results = append(results, vipResults...)
+	results = append(results, check("iommu", false, facts.IOMMUGroups > 0, "no IOMMU groups found, hardware passthrough will not work"))
 	for _, device := range devices {
 		results = append(results, deviceCheck(device, adoptedFSID(cfg)))
 	}

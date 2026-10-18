@@ -112,7 +112,7 @@ func adoptResults(t *testing.T, root string, e *host.FakeExec, configContent str
 	if err != nil {
 		t.Fatal(err)
 	}
-	return preflightResults(context.Background(), deps, testK0sClient(root, e), facts, cfg, []string{"ubuntu-24.04"})
+	return preflightResults(context.Background(), deps, testK0sClient(root, e), preflight.Run, facts, cfg, []string{"ubuntu-24.04"})
 }
 
 func testK0sClient(root string, e host.Exec) k0s.Client {
@@ -200,7 +200,7 @@ func TestPreflightResultsStopOnMissingDevicePath(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, err = preflightResults(context.Background(), deps, testK0sClient(root, e), facts, cfg, []string{"ubuntu-24.04"})
+	_, err = preflightResults(context.Background(), deps, testK0sClient(root, e), preflight.Run, facts, cfg, []string{"ubuntu-24.04"})
 	if err == nil || !strings.Contains(err.Error(), "probe "+osdDisk) {
 		t.Fatalf("err %v", err)
 	}

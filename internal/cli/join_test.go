@@ -92,6 +92,26 @@ func TestRunJoinInstallsWhenNotRunning(t *testing.T) {
 	assertDeviceOwnership(t, root)
 }
 
+func TestRunJoinAcceptsAVIPThatAnswersPing(t *testing.T) {
+	root, e := fakeHost(t)
+	dataDir := filepath.Join(root, "var", "lib", "k0s")
+	e.Errors["/usr/local/bin/k0s status --data-dir "+dataDir] = &host.ExitError{Code: 1}
+	delete(e.Errors, "ping -c 1 -W 1 10.0.10.10")
+	e.Responses["ping -c 1 -W 1 10.0.10.10"] = ""
+	tokenPath := filepath.Join(root, "etc", "k0s", "join-token")
+	installArgs := k0s.InstallArgs(k0s.InstallOptions{Role: "worker", Force: true, TokenFile: tokenPath, Labels: roles.Labels([]string{"workload"}), KubeletExtraArgs: []string{"--node-status-update-frequency=4s"}, DataDir: dataDir, KubeletRootDir: k0s.DefaultKubeletRootDir})
+	e.Responses["/usr/local/bin/k0s "+strings.Join(installArgs, " ")] = ""
+	deps := InitDeps{Exec: e, Uid: 0, FreeBytes: func(string) (uint64, error) { return 100 << 30, nil }, Root: root, Executable: fakeExecutable(t)}
+	var out, errOut bytes.Buffer
+	code := RunJoin(context.Background(), []string{"--token", joinToken(t), "--data-dir", dataDir, "--k0s-bin", "/usr/local/bin/k0s"}, deps, &out, &errOut)
+	if code != 0 {
+		t.Fatalf("exit %d\nstdout %s\nstderr %s", code, out.String(), errOut.String())
+	}
+	if bytes.Contains(out.Bytes(), []byte("vip-free")) {
+		t.Fatalf("join must not check that the vip is free: %s", out.String())
+	}
+}
+
 func controlPlaneJoinToken(t *testing.T) string {
 	t.Helper()
 	token, err := k0s.EncodeToken(k0s.Token{

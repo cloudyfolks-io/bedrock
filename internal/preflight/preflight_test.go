@@ -131,3 +131,43 @@ func TestRunVIPFreeFailsWhenPingCannotRun(t *testing.T) {
 	}
 	t.Fatalf("expected vip-free to fail when ping cannot run: %s", Format(results))
 }
+
+func TestRunJoinAcceptsAVIPThatAnswersPing(t *testing.T) {
+	e := &host.FakeExec{
+		Responses: map[string]string{
+			"ip -json addr":             "[]",
+			"ping -c 1 -W 1 10.0.10.10": "",
+		},
+	}
+	results := RunJoin(context.Background(), e, goodFacts(), nil, goodConfig(), []string{"ubuntu-24.04"})
+	if Blocked(results) {
+		t.Fatalf("a joining host must not block on the vip of the cluster: %s", Format(results))
+	}
+	for _, r := range results {
+		if r.Name == "vip-free" {
+			t.Fatalf("a joining host must not probe the vip: %s", Format(results))
+		}
+	}
+	for _, call := range e.Calls {
+		if strings.HasPrefix(call, "ping ") {
+			t.Fatalf("a joining host must not ping the vip, ran %q", call)
+		}
+	}
+}
+
+func TestRunJoinKeepsTheOtherChecks(t *testing.T) {
+	facts := goodFacts()
+	facts.Root = false
+	cfg := goodConfig()
+	cfg.Spec.API.VIP = "10.0.10.11"
+	results := RunJoin(context.Background(), &host.FakeExec{}, facts, nil, cfg, []string{"ubuntu-24.04"})
+	failed := map[string]bool{}
+	for _, r := range results {
+		if !r.OK {
+			failed[r.Name] = true
+		}
+	}
+	if !failed["root"] || !failed["vip"] {
+		t.Fatalf("want root and vip to fail: %s", Format(results))
+	}
+}

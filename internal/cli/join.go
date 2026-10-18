@@ -98,7 +98,7 @@ func RunJoin(ctx context.Context, args []string, deps InitDeps, stdout, stderr i
 	cfg.Spec.Network.ManagementInterface = facts.DefaultInterface
 	cfg.Spec.Storage.Adopt = adopt
 	k0sClient := k0s.Client{Exec: deps.Exec, Binary: o.k0sBin, DataDir: o.dataDir}
-	results, err := preflightResults(ctx, deps, k0sClient, facts, cfg, token.SupportedOS)
+	results, err := preflightResults(ctx, deps, k0sClient, preflight.RunJoin, facts, cfg, token.SupportedOS)
 	if err != nil {
 		return fail(stderr, err)
 	}

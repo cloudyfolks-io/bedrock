@@ -11,14 +11,16 @@ import (
 	"github.com/cloudyfolks-io/bedrock/internal/preflight"
 )
 
-func preflightResults(ctx context.Context, deps InitDeps, k0sClient k0s.Client, facts host.Facts, cfg v1alpha1.ClusterConfig, supportedOS []string) ([]preflight.Result, error) {
+type preflightRun func(context.Context, host.Exec, host.Facts, []host.Device, v1alpha1.ClusterConfig, []string) []preflight.Result
+
+func preflightResults(ctx context.Context, deps InitDeps, k0sClient k0s.Client, run preflightRun, facts host.Facts, cfg v1alpha1.ClusterConfig, supportedOS []string) ([]preflight.Result, error) {
 	adopt := cfg.Spec.Storage.Adopt
 	if adopt == nil {
 		devices, err := probeDevices(ctx, deps, cfg.Spec.Storage.Devices)
 		if err != nil {
 			return nil, err
 		}
-		return preflight.Run(ctx, deps.Exec, facts, devices, cfg, supportedOS), nil
+		return run(ctx, deps.Exec, facts, devices, cfg, supportedOS), nil
 	}
 	devices, err := probeAdoptDevices(ctx, deps, v1alpha1.AdoptHostDevices(adopt, facts.Hostname))
 	if err != nil {
@@ -29,7 +31,7 @@ func preflightResults(ctx context.Context, deps InitDeps, k0sClient k0s.Client, 
 		return nil, err
 	}
 	adoptFacts.K0sRunning = k0sClient.Running(ctx)
-	results := preflight.Run(ctx, deps.Exec, facts, devices, cfg, supportedOS)
+	results := run(ctx, deps.Exec, facts, devices, cfg, supportedOS)
 	return append(results, preflight.AdoptChecks(*adopt, facts, adoptFacts)...), nil
 }
 
