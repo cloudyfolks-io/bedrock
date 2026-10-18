@@ -549,7 +549,7 @@ The message names every failed check. Read it with the command of step 6.
 | Message starts with | Meaning | What to do |
 | --- | --- | --- |
 | `ceph versions: not on release` | A daemon runs another Ceph major release than the bundle. | Wait for Rook to finish the daemon roll. Watch `kubectl -n rook-ceph get pods` and run `ceph versions`. If a daemon does not restart, read the log of the operator. Do not go on while a daemon has the old release. |
-| `ceph pool <name> size` | A Bedrock pool has a size that differs from `storage.replicas`. | Find out why. Check `kubectl -n rook-ceph get cephblockpool,cephfilesystem,cephobjectstore`. If the pool is larger than `storage.replicas`, raise `storage.replicas` to the pool size, or leave the pool as it is and accept the warning. Never lower the size of a pool that holds data, and never run `ceph osd pool set <name> size` with a smaller number. If the pool is smaller, wait for Rook to reconcile it. |
+| `ceph pool <name> size` | A Bedrock pool has a size that differs from `storage.replicas`. | Find out why. Check `kubectl -n rook-ceph get cephblockpool,cephfilesystem,cephobjectstore`. If the pool is larger than `storage.replicas`, raise `storage.replicas` to the pool size. Never lower the size of a pool that holds data, and never run `ceph osd pool set <name> size` with a smaller number. If the pool is smaller, wait for Rook to reconcile it. |
 | `ceph osd tree: host buckets without a ceph-osd node` | A CRUSH host bucket has no Host with the role `ceph-osd` and the same name. Rook would move data to a new bucket. | Make the host name equal the bucket name. If the bucket has the wrong name, rename it with `ceph osd crush rename-bucket <bucket> <node name>`. Do this before more data moves. |
 | `ceph: health is` | Ceph is not `HEALTH_OK`. | Run `ceph health detail`. Fix the cause. A `noout` flag: run `ceph osd unset noout`. A clock skew: fix NTP on the host. |
 | `ceph: no OSD is up` | No OSD runs. | Check the OSD pods, the by-id paths and the logs of the `rook-ceph-osd-prepare` jobs. |
@@ -568,13 +568,8 @@ kubectl -n rook-ceph get deployment -l app=rook-ceph-mon
 ```
 
 Use case A only when both commands list nothing.
-If the API does not answer, run this command on every adopt host.
-Use case A only when it prints nothing on every host:
-
-```sh
-ps -eo comm= | grep -E '^ceph-mon$'
-```
-
+If the API does not answer, use case B.
+A host without a running `ceph-mon` process proves nothing, because a stopped Bedrock cluster whose monitors ran shows no process.
 In any other case, or when you are in doubt, use case B.
 The two cases differ.
 
@@ -657,10 +652,16 @@ Stop Ceph in the same clean way as in "Stop the old cluster". Stop k0s only at t
 
 6. Check the names with `ceph osd pool ls detail`, `ceph fs ls` and `radosgw-admin realm list`.
 
-7. Stop the Ceph daemons. Scale the monitors to 0 last.
+7. Stop the Ceph daemons. Scale every Deployment except the monitors to 0 first.
 
    ```sh
    kubectl -n rook-ceph scale deployment -l app!=rook-ceph-mon --replicas=0
+   kubectl -n rook-ceph get pods
+   ```
+
+   Wait until only the mon pods have the status `Running`. Then scale the monitors to 0.
+
+   ```sh
    kubectl -n rook-ceph scale deployment -l app=rook-ceph-mon --replicas=0
    kubectl -n rook-ceph get pods
    ```
