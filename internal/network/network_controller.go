@@ -52,7 +52,7 @@ func (r *NetworkReconciler) Reconcile(ctx context.Context, req reconcile.Request
 	}
 	breach := NetworkReservedOverlap(network.Spec.Ranges(), SettingReserved(cfg))
 	if breach != nil {
-		provisioned, err := r.provisioned(ctx, &network)
+		provisioned, err := liveOwnedObject(ctx, r.Client, fabric.VpcGVK, VpcName(network.Name), &network)
 		if err != nil {
 			return reconcile.Result{}, err
 		}
@@ -87,17 +87,6 @@ func (r *NetworkReconciler) Reconcile(ctx context.Context, req reconcile.Request
 	}
 	status.Conditions = withRangePolicy(status.Conditions, network.Generation, breach)
 	return r.publish(ctx, &network, status)
-}
-
-func (r *NetworkReconciler) provisioned(ctx context.Context, network *v1alpha1.Network) (bool, error) {
-	existing, err := getObject(ctx, r.Client, fabric.VpcGVK, VpcName(network.Name))
-	if apierrors.IsNotFound(err) {
-		return false, nil
-	}
-	if err != nil {
-		return false, err
-	}
-	return ownedBy(existing, network), nil
 }
 
 func (r *NetworkReconciler) conflicts(ctx context.Context, vpc *unstructured.Unstructured, network *v1alpha1.Network) (bool, error) {

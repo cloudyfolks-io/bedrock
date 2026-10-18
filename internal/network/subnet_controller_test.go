@@ -10,6 +10,7 @@ import (
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/utils/ptr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -311,6 +312,63 @@ func TestSubnetReconcilerKeepsAProvisionedSubnetInAReservedRange(t *testing.T) {
 	reconcileSubnet(t, c, namespace, "old")
 	requireSubnetReason(t, c, namespace, "old", metav1.ConditionTrue, ReasonApplied)
 	requireRangePolicy(t, c, namespace, "old", "")
+}
+
+func changeFabricObject(t *testing.T, c client.Client, gvk schema.GroupVersionKind, name string, change func(*unstructured.Unstructured)) {
+	t.Helper()
+	object, err := getObject(context.Background(), c, gvk, name)
+	if err != nil {
+		t.Fatal(err)
+	}
+	change(object)
+	if err := c.Update(context.Background(), object); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func disown(object *unstructured.Unstructured) {
+	annotations := object.GetAnnotations()
+	annotations[AnnotationOwnerUID] = "another-owner"
+	object.SetAnnotations(annotations)
+}
+
+func hold(object *unstructured.Unstructured) {
+	object.SetFinalizers([]string{"test.bedrock.cloudyfolks.io/hold"})
+}
+
+func TestSubnetReconcilerDoesNotKeepASubnetWithoutAUsableFabricSubnet(t *testing.T) {
+	cases := map[string]func(*testing.T, client.Client, string){
+		"owned by another Subnet": func(t *testing.T, c client.Client, name string) {
+			changeFabricObject(t, c, fabric.SubnetGVK, name, disown)
+		},
+		"being deleted": func(t *testing.T, c client.Client, name string) {
+			changeFabricObject(t, c, fabric.SubnetGVK, name, hold)
+			object, err := getObject(context.Background(), c, fabric.SubnetGVK, name)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := c.Delete(context.Background(), object); err != nil {
+				t.Fatal(err)
+			}
+		},
+	}
+	for name, spoil := range cases {
+		t.Run(name, func(t *testing.T) {
+			c := cleanEnv(t)
+			setSetting(t, "network.reserved-cidrs", "192.0.2.0/24")
+			setSetting(t, "network.subnet-allowed-ranges", "0.0.0.0/0")
+			tenant := unique(t, "acme")
+			network := readyNetworkOf(t, c, networkOfRanges(unique(t, "net"), tenant, "100.100.0.0/16"))
+			namespace := newNamespace(t, tenant, "prod")
+			requireAccepted(t, c, policySubnet(namespace, "old", network.Name, "100.100.1.0/24"))
+			reconcileSubnet(t, c, namespace, "old")
+			spoil(t, c, FabricName(namespace, "old"))
+			setSetting(t, "network.reserved-cidrs", "100.64.0.0/10")
+			reconcileSubnet(t, c, namespace, "old")
+			requireSubnetReason(t, c, namespace, "old", metav1.ConditionFalse, ReasonCIDRReserved)
+			requireRangePolicy(t, c, namespace, "old", "")
+		})
+	}
 }
 
 func TestSubnetReconcilerKeepsAProvisionedSubnetOutsideTheAllowedRanges(t *testing.T) {

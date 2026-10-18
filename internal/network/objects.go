@@ -57,3 +57,14 @@ func ownedBy(u *unstructured.Unstructured, owner metav1.Object) bool {
 	_, uid, ok := OwnerOf(u)
 	return ok && uid == owner.GetUID()
 }
+
+func liveOwnedObject(ctx context.Context, c client.Reader, gvk schema.GroupVersionKind, name string, owner metav1.Object) (bool, error) {
+	existing, err := getObject(ctx, c, gvk, name)
+	if apierrors.IsNotFound(err) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	return ownedBy(existing, owner) && existing.GetDeletionTimestamp().IsZero(), nil
+}

@@ -172,6 +172,37 @@ func TestNetworkReconcilerKeepsAProvisionedNetworkInAReservedRange(t *testing.T)
 	}
 }
 
+func TestNetworkReconcilerDoesNotKeepANetworkWithoutAUsableVpc(t *testing.T) {
+	cases := map[string]func(*testing.T, client.Client, string){
+		"owned by another Network": func(t *testing.T, c client.Client, name string) {
+			changeFabricObject(t, c, fabric.VpcGVK, name, disown)
+		},
+		"being deleted": func(t *testing.T, c client.Client, name string) {
+			changeFabricObject(t, c, fabric.VpcGVK, name, hold)
+			if err := c.Delete(context.Background(), vpcOf(t, c, name)); err != nil {
+				t.Fatal(err)
+			}
+		},
+	}
+	for name, spoil := range cases {
+		t.Run(name, func(t *testing.T) {
+			c := cleanEnv(t)
+			setSetting(t, "network.reserved-cidrs", "192.0.2.0/24")
+			network := networkOfRanges(unique(t, "net"), "acme", "10.100.0.0/16", "100.100.0.0/16")
+			requireAccepted(t, c, network)
+			reconcileNetwork(t, c, network.Name)
+			spoil(t, c, network.Name)
+			setSetting(t, "network.reserved-cidrs", "100.64.0.0/10")
+			reconcileNetwork(t, c, network.Name)
+			got := getNetwork(t, c, network.Name).Status.Conditions
+			requireCondition(t, got, v1alpha1.ConditionReady, metav1.ConditionFalse, ReasonCIDRReserved)
+			if meta.FindStatusCondition(got, ConditionRangePolicy) != nil {
+				t.Fatal("a refused Network has no RangePolicy condition")
+			}
+		})
+	}
+}
+
 func TestNetworkReconcilerRendersL2External(t *testing.T) {
 	c := cleanEnv(t)
 	publicSettings(t)
