@@ -471,7 +471,8 @@ func scriptFreshK0s(_ *testing.T, e *host.FakeExec, root, dataDir string) {
 	e.Errors["/usr/local/bin/k0s status --data-dir "+dataDir] = &host.ExitError{Code: 1}
 }
 
-func scriptRunningK0s(_ *testing.T, e *host.FakeExec, _, dataDir string) {
+func scriptRunningK0s(t *testing.T, e *host.FakeExec, root, dataDir string) {
+	installBedrockMarker(t, root, dataDir)
 	e.Responses["/usr/local/bin/k0s status --data-dir "+dataDir] = ""
 }
 

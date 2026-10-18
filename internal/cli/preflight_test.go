@@ -96,6 +96,18 @@ func adoptedHost(t *testing.T) (string, *host.FakeExec) {
 	return root, e
 }
 
+func installBedrockMarker(t *testing.T, root, dataDir string) {
+	t.Helper()
+	unit := filepath.Join(root, "etc", "systemd", "system", "bedrock-agent.service")
+	if err := os.MkdirAll(filepath.Dir(unit), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	content := host.AgentUnit(host.DefaultAgentBinary, filepath.Join(dataDir, "kubelet.conf"))
+	if err := os.WriteFile(unit, []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func adoptDeps(root string, e host.Exec) InitDeps {
 	return InitDeps{Exec: e, Uid: 0, FreeBytes: func(string) (uint64, error) { return 100 << 30, nil }, Stat: func(string) (fs.FileInfo, error) { return devInfo{fs.ModeDevice}, nil }, Root: root}
 }
@@ -344,6 +356,7 @@ const monitorPortsBusy = "LISTEN 0 4096 10.0.10.11:3300 0.0.0.0:*\nLISTEN 0 4096
 func TestRunInitAdoptRerunSkipsPortChecks(t *testing.T) {
 	root, e := adoptedHost(t)
 	dataDir := filepath.Join(root, "var", "lib", "k0s")
+	installBedrockMarker(t, root, dataDir)
 	e.Responses["ss -H -ltn"] = monitorPortsBusy
 	e.Responses["/usr/local/bin/k0s status --data-dir "+dataDir] = ""
 	e.Responses["blkid -p -o value -s TYPE "+osdDisk] = "xfs\n"
@@ -382,6 +395,7 @@ func TestRunInitAdoptFreshHostChecksPorts(t *testing.T) {
 func TestRunJoinAdoptRerunSkipsPortChecks(t *testing.T) {
 	root, e := adoptedHost(t)
 	dataDir := filepath.Join(root, "var", "lib", "k0s")
+	installBedrockMarker(t, root, dataDir)
 	e.Responses["ss -H -ltn"] = monitorPortsBusy
 	e.Responses["/usr/local/bin/k0s status --data-dir "+dataDir] = ""
 	deps := adoptDeps(root, e)
@@ -440,4 +454,54 @@ func TestRunJoinAdoptRefusesHostOutsideTheAdoptList(t *testing.T) {
 	if k0sInstallCalled(e) {
 		t.Fatal("k0s must not be installed when preflight blocks")
 	}
+}
+
+const foreignK0sMessage = "[fail] adopt-k0s: k0s runs but this host is no Bedrock install; stop and reset the old cluster first"
+
+func assertNoHostChange(t *testing.T, root string, e *host.FakeExec) {
+	t.Helper()
+	for _, call := range e.Calls {
+		for _, forbidden := range []string{"k0s install", "k0s start", "systemctl", "ip addr replace", "wipefs", "sgdisk", "mkfs"} {
+			if strings.Contains(call, forbidden) {
+				t.Fatalf("forbidden call %q after a failed preflight", call)
+			}
+		}
+	}
+	for _, path := range []string{filepath.Join("etc", "k0s", "k0s.yaml"), filepath.Join("etc", "systemd", "system", "bedrock-agent.service")} {
+		if _, err := os.Stat(filepath.Join(root, path)); err == nil {
+			t.Fatalf("%s was written after a failed preflight", path)
+		}
+	}
+}
+
+func TestRunInitAdoptRefusesAK0sThatIsNoBedrockInstall(t *testing.T) {
+	root, e := adoptedHost(t)
+	dataDir := filepath.Join(root, "var", "lib", "k0s")
+	e.Responses["/usr/local/bin/k0s status --data-dir "+dataDir] = ""
+	e.Responses["ss -H -ltn"] = monitorPortsBusy
+	configPath := adoptConfigFile(t, root, adoptInitConfig)
+	var out, errOut bytes.Buffer
+	code := RunInit(context.Background(), []string{"-f", configPath, "--release-dir", filepath.Join("..", "release", "testdata", "good"), "--k0s-bin", "/usr/local/bin/k0s", "--data-dir", dataDir}, adoptDeps(root, e), &out, &errOut)
+	if code != 1 || errOut.String() != "preflight failed\n" {
+		t.Fatalf("exit %d\nstdout %s\nstderr %s", code, out.String(), errOut.String())
+	}
+	for _, want := range []string{foreignK0sMessage, "[fail] adopt-mon-a-port-3300", "[fail] adopt-mon-a-port-6789"} {
+		if !strings.Contains(out.String(), want) {
+			t.Fatalf("missing %q:\n%s", want, out.String())
+		}
+	}
+	assertNoHostChange(t, root, e)
+}
+
+func TestRunJoinAdoptRefusesAK0sThatIsNoBedrockInstall(t *testing.T) {
+	root, e := adoptedHost(t)
+	dataDir := filepath.Join(root, "var", "lib", "k0s")
+	e.Responses["/usr/local/bin/k0s status --data-dir "+dataDir] = ""
+	adoptPath := adoptConfigFile(t, t.TempDir(), adoptInitConfig)
+	var out, errOut bytes.Buffer
+	code := RunJoin(context.Background(), joinAdoptArgs(t, dataDir, adoptPath), adoptDeps(root, e), &out, &errOut)
+	if code != 1 || !strings.Contains(out.String(), foreignK0sMessage) {
+		t.Fatalf("exit %d\nstdout %s\nstderr %s", code, out.String(), errOut.String())
+	}
+	assertNoHostChange(t, root, e)
 }

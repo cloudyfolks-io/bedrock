@@ -135,19 +135,19 @@ func TestFormatShowsTheForeignFSID(t *testing.T) {
 
 func TestAdoptChecksAllGood(t *testing.T) {
 	results := AdoptChecks(adoptSpec(), goodFactsOn("node-1"), goodAdoptFacts())
-	for _, name := range []string{"adopt-node", "adopt-mon-a-store", "adopt-mon-a-config", "adopt-mon-a-port-3300", "adopt-mon-a-port-6789"} {
+	for _, name := range []string{"adopt-node", "adopt-k0s", "adopt-mon-a-store", "adopt-mon-a-config", "adopt-mon-a-port-3300", "adopt-mon-a-port-6789"} {
 		if r := resultNamed(t, results, name); !r.OK || !r.Fatal {
 			t.Fatalf("%s: %+v", name, r)
 		}
 	}
-	if len(results) != 5 || Blocked(results) {
+	if len(results) != 6 || Blocked(results) {
 		t.Fatalf("results\n%s", Format(results))
 	}
 }
 
 func TestAdoptChecksNodeWithoutMonitor(t *testing.T) {
 	results := AdoptChecks(adoptSpec(), goodFactsOn("node-3"), host.AdoptFacts{})
-	if len(results) != 1 || Blocked(results) {
+	if len(results) != 2 || Blocked(results) {
 		t.Fatalf("results\n%s", Format(results))
 	}
 }
@@ -187,13 +187,13 @@ func TestAdoptChecksMonitorProblems(t *testing.T) {
 	}
 }
 
-func TestAdoptChecksSkipPortsWhenK0sRuns(t *testing.T) {
-	facts := host.AdoptFacts{MonStores: map[string]bool{"a": true}, ConfigFSID: adoptFSID, ListeningPorts: []int{3300, 6789}, K0sRunning: true}
+func TestAdoptChecksSkipPortsWhenABedrockK0sRuns(t *testing.T) {
+	facts := host.AdoptFacts{MonStores: map[string]bool{"a": true}, ConfigFSID: adoptFSID, ListeningPorts: []int{3300, 6789}, K0sRunning: true, BedrockInstalled: true}
 	results := AdoptChecks(adoptSpec(), goodFactsOn("node-1"), facts)
-	if Blocked(results) || len(results) != 3 {
+	if Blocked(results) || len(results) != 4 {
 		t.Fatalf("results\n%s", Format(results))
 	}
-	for _, name := range []string{"adopt-node", "adopt-mon-a-store", "adopt-mon-a-config"} {
+	for _, name := range []string{"adopt-node", "adopt-k0s", "adopt-mon-a-store", "adopt-mon-a-config"} {
 		if r := resultNamed(t, results, name); !r.OK {
 			t.Fatalf("%s: %+v", name, r)
 		}
@@ -205,13 +205,44 @@ func TestAdoptChecksKeepStoreAndConfigWhenK0sRuns(t *testing.T) {
 		facts host.AdoptFacts
 		name  string
 	}{
-		"store missing": {host.AdoptFacts{MonStores: map[string]bool{}, ConfigFSID: adoptFSID, K0sRunning: true}, "adopt-mon-a-store"},
-		"other fsid":    {host.AdoptFacts{MonStores: map[string]bool{"a": true}, ConfigFSID: otherFSID, K0sRunning: true}, "adopt-mon-a-config"},
+		"store missing": {host.AdoptFacts{MonStores: map[string]bool{}, ConfigFSID: adoptFSID, K0sRunning: true, BedrockInstalled: true}, "adopt-mon-a-store"},
+		"other fsid":    {host.AdoptFacts{MonStores: map[string]bool{"a": true}, ConfigFSID: otherFSID, K0sRunning: true, BedrockInstalled: true}, "adopt-mon-a-config"},
 	}
 	for name, tc := range cases {
 		results := AdoptChecks(adoptSpec(), goodFactsOn("node-1"), tc.facts)
 		if r := resultNamed(t, results, tc.name); r.OK || !r.Fatal {
 			t.Fatalf("%s: %+v", name, r)
 		}
+	}
+}
+
+func TestAdoptChecksRefuseAK0sThatIsNoBedrockInstall(t *testing.T) {
+	facts := host.AdoptFacts{MonStores: map[string]bool{"a": true}, ConfigFSID: adoptFSID, ListeningPorts: []int{3300, 6789}, K0sRunning: true}
+	results := AdoptChecks(adoptSpec(), goodFactsOn("node-1"), facts)
+	r := resultNamed(t, results, "adopt-k0s")
+	if r.OK || !r.Fatal || r.Message != "k0s runs but this host is no Bedrock install; stop and reset the old cluster first" {
+		t.Fatalf("%+v", r)
+	}
+	if !Blocked(results) {
+		t.Fatal("must block")
+	}
+	for _, name := range []string{"adopt-mon-a-port-3300", "adopt-mon-a-port-6789"} {
+		if r := resultNamed(t, results, name); r.OK || !r.Fatal {
+			t.Fatalf("a foreign k0s must keep the port check %s: %+v", name, r)
+		}
+	}
+}
+
+func TestAdoptChecksAcceptAHostWithoutK0s(t *testing.T) {
+	results := AdoptChecks(adoptSpec(), goodFactsOn("node-3"), host.AdoptFacts{BedrockInstalled: true})
+	if r := resultNamed(t, results, "adopt-k0s"); !r.OK {
+		t.Fatalf("%+v", r)
+	}
+}
+
+func TestAdoptChecksRefuseAForeignK0sOnAHostWithoutMonitor(t *testing.T) {
+	results := AdoptChecks(adoptSpec(), goodFactsOn("node-3"), host.AdoptFacts{K0sRunning: true})
+	if r := resultNamed(t, results, "adopt-k0s"); r.OK || !r.Fatal {
+		t.Fatalf("%+v", r)
 	}
 }

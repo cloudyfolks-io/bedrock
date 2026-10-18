@@ -98,3 +98,23 @@ func TestGatherAdoptSocketListFails(t *testing.T) {
 		t.Fatal("missing ss must be an error")
 	}
 }
+
+func TestGatherAdoptFindsTheAgentUnitOfABedrockInstall(t *testing.T) {
+	e := &FakeExec{Responses: map[string]string{"ss -H -ltn": ""}}
+	root := t.TempDir()
+	facts, err := GatherAdopt(context.Background(), e, root, nil)
+	if err != nil || facts.BedrockInstalled {
+		t.Fatalf("facts %+v err %v", facts, err)
+	}
+	unit := filepath.Join(root, "etc", "systemd", "system", "bedrock-agent.service")
+	if err := os.MkdirAll(filepath.Dir(unit), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(unit, []byte("[Unit]\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	facts, err = GatherAdopt(context.Background(), e, root, nil)
+	if err != nil || !facts.BedrockInstalled {
+		t.Fatalf("facts %+v err %v", facts, err)
+	}
+}

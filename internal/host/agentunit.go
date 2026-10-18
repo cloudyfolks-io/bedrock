@@ -33,8 +33,12 @@ func AgentUnit(binary, kubeconfig string) string {
 	return fmt.Sprintf(agentUnitTemplate, binary, kubeconfig)
 }
 
+func agentUnitPath(root string) string {
+	return filepath.Join(root, "etc", "systemd", "system", agentUnitName)
+}
+
 func EnsureAgentUnit(ctx context.Context, e Exec, root, binary, kubeconfig string) error {
-	replaced, err := ReplaceFile(filepath.Join(root, "etc", "systemd", "system", agentUnitName), AgentUnit(binary, kubeconfig), 0o644)
+	replaced, err := ReplaceFile(agentUnitPath(root), AgentUnit(binary, kubeconfig), 0o644)
 	if err != nil {
 		return err
 	}

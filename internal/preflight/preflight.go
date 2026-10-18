@@ -123,6 +123,7 @@ func AdoptChecks(adopt v1alpha1.AdoptSpec, facts host.Facts, adoptFacts host.Ado
 	if !inList {
 		return results
 	}
+	results = append(results, check("adopt-k0s", true, !adoptFacts.K0sRunning || adoptFacts.BedrockInstalled, "k0s runs but this host is no Bedrock install; stop and reset the old cluster first"))
 	for _, monitor := range adopt.Monitors {
 		if monitor.Node == facts.Hostname {
 			results = append(results, monitorChecks(adopt.FSID, monitor, adoptFacts)...)
@@ -137,7 +138,7 @@ func monitorChecks(fsid string, monitor v1alpha1.AdoptMonitor, adoptFacts host.A
 		check(prefix+"store", true, adoptFacts.MonStores[monitor.ID], fmt.Sprintf("/var/lib/rook/mon-%s/data/store.db not found", monitor.ID)),
 		check(prefix+"config", true, adoptFacts.ConfigFSID == fsid, configMessage(fsid, adoptFacts.ConfigFSID)),
 	}
-	if adoptFacts.K0sRunning {
+	if adoptFacts.K0sRunning && adoptFacts.BedrockInstalled {
 		return results
 	}
 	for _, port := range monitorPorts {

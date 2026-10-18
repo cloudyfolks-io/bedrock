@@ -12,10 +12,11 @@ import (
 )
 
 type AdoptFacts struct {
-	MonStores      map[string]bool
-	ConfigFSID     string
-	ListeningPorts []int
-	K0sRunning     bool
+	MonStores        map[string]bool
+	ConfigFSID       string
+	ListeningPorts   []int
+	K0sRunning       bool
+	BedrockInstalled bool
 }
 
 func GatherAdopt(ctx context.Context, e Exec, root string, monitorIDs []string) (AdoptFacts, error) {
@@ -32,7 +33,7 @@ func GatherAdopt(ctx context.Context, e Exec, root string, monitorIDs []string) 
 	if err != nil {
 		return AdoptFacts{}, err
 	}
-	return AdoptFacts{MonStores: stores, ConfigFSID: fsid, ListeningPorts: listeningPorts(out)}, nil
+	return AdoptFacts{MonStores: stores, ConfigFSID: fsid, ListeningPorts: listeningPorts(out), BedrockInstalled: exists(agentUnitPath(root))}, nil
 }
 
 func configFSID(path string) (string, error) {
