@@ -19,7 +19,9 @@ export PLATFORM_HOST=${PLATFORM_HOST:-e2e.bedrock.test}
 workdir=$(mktemp -d)
 export KUBECONFIG=/var/lib/k0s/pki/admin.conf
 backups=/var/lib/bedrock/backups
+docs_backup=$(dirname "${BASH_SOURCE[0]}")/../docs/backup.md
 max_snapshot_bytes=$((512 * 1024 * 1024))
+restore_marker=e2e-etcd-restore
 
 dump() {
   local status=$?
@@ -110,6 +112,26 @@ k0s_archive_entries() {
   member=$(tar -tzf "$snapshot" | grep -E '(^|/)k0s_backup_[^/]*\.tar\.gz$') || return 1
   [ "$(printf '%s\n' "$member" | wc -l)" -eq 1 ] || return 1
   tar -xzOf "$snapshot" "$member" | tar -tz
+}
+
+docs_restore_script() {
+  awk -v intro="$1" '
+    /^## / { in_section = ($0 == "## Etcd snapshots"); armed = 0; next }
+    in_section && index($0, intro) == 1 { armed = 1; next }
+    armed && $0 == "```sh" { inside = 1; next }
+    inside && $0 == "```" { exit }
+    inside { print }
+  ' "$2"
+}
+
+docs_restore_script_valid() {
+  head -n 1 "$1" | grep -Eq "^SNAPSHOT=[^ ]+ sh -eu <<'EOF'\$" &&
+    tail -n 1 "$1" | grep -qx EOF &&
+    grep -q '^k0s restore ' "$1"
+}
+
+k0s_images_listing() {
+  find /var/lib/k0s/images -type f -printf '%P %s\n' | sort
 }
 
 BUNDLE=dist/bedrock-$VERSION_A-bundle-$arch.tar.zst VERSION=$VERSION_A IMAGE=$image_a \
@@ -386,6 +408,7 @@ if holders:
     sys.exit(newest + " holds an age secret key: " + ", ".join(holders))
 PY
 rm -f "$workdir/upgrade-archive.tar.gz" "$workdir/upgrade-archive-host.tar.gz"
+kubectl -n default create configmap "$restore_marker" --from-literal=state=before-snapshot
 touch "$workdir/etcd-marker"
 kubectl patch setting backup.etcd-schedule --type merge -p '{"spec":{"value":"* * * * *"}}'
 retry_until 600 etcd_snapshot_written
@@ -437,4 +460,24 @@ if [ -f /etc/bedrock/encryption/encryption.yaml ]; then
   assert_secret_encrypted default e2e-encryption
   kubectl -n default delete secret e2e-encryption
 fi
+
+restore_script=$workdir/restore-etcd-snapshot.sh
+docs_restore_script "For a sealed snapshot, use this script." "$docs_backup" >"$restore_script"
+docs_restore_script_valid "$restore_script" || {
+  echo "$docs_backup has no sealed snapshot restore script under Etcd snapshots" >&2
+  exit 1
+}
+sed -i "1s#^SNAPSHOT=[^ ]*#SNAPSHOT=$snapshot#" "$restore_script"
+images_before=$(k0s_images_listing)
+test -n "$images_before"
+kubectl -n default delete configmap "$restore_marker"
+bash "$restore_script"
+retry_until 600 kubectl get --raw=/readyz
+kubectl wait --for=condition=Ready node --all --timeout=300s
+kubectl -n bedrock-system rollout status deploy/bedrock-operator --timeout=300s
+test "$(kubectl -n default get configmap "$restore_marker" -o jsonpath='{.data.state}')" = before-snapshot
+images_after=$(k0s_images_listing)
+test -z "$(comm -23 <(printf '%s\n' "$images_before") <(printf '%s\n' "$images_after"))"
+kubectl -n default delete configmap "$restore_marker"
+rm -rf /root/restore /var/lib/k0s/.pre-restore-*
 echo "e2e-upgrade passed"
