@@ -83,12 +83,16 @@ func anys(values []string) []any {
 	return out
 }
 
-func selector(labels map[string]string) map[string]any {
-	match := make(map[string]any, len(labels))
-	for k, v := range labels {
-		match[k] = v
+func stringMap(values map[string]string) map[string]any {
+	out := make(map[string]any, len(values))
+	for k, v := range values {
+		out[k] = v
 	}
-	return map[string]any{"matchLabels": match}
+	return out
+}
+
+func selector(labels map[string]string) map[string]any {
+	return map[string]any{"matchLabels": stringMap(labels)}
 }
 
 func Vpc(m Meta, s VpcSpec) *unstructured.Unstructured {
@@ -244,7 +248,7 @@ func BgpConf(m Meta, localASN uint32, routerID string, peers []BgpPeer, nodeSele
 		rendered[i] = map[string]any{"address": p.Address, "asn": int64(p.ASN)}
 		neighbours[i] = p.Address
 	}
-	spec := map[string]any{"localASN": int64(localASN), "peers": rendered, "neighbours": neighbours, "nodeSelector": selector(nodeSelector)}
+	spec := map[string]any{"localASN": int64(localASN), "peers": rendered, "neighbours": neighbours, "nodeSelector": stringMap(nodeSelector)}
 	set(spec, "routerId", routerID)
 	if len(peers) > 0 {
 		spec["peerASN"] = int64(peers[0].ASN)

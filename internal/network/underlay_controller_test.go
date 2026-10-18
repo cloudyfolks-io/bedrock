@@ -2,10 +2,10 @@ package network
 
 import (
 	"context"
+	"reflect"
 	"testing"
 
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
-	"k8s.io/apimachinery/pkg/runtime/schema"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	"github.com/cloudyfolks-io/bedrock/api/v1alpha1"
@@ -15,7 +15,7 @@ import (
 func underlayObjects(t *testing.T, c client.Client) map[string]*unstructured.Unstructured {
 	t.Helper()
 	out := map[string]*unstructured.Unstructured{}
-	for _, gvk := range []schema.GroupVersionKind{fabric.ProviderNetworkGVK, fabric.VlanGVK, fabric.SubnetGVK} {
+	for _, gvk := range underlayKinds {
 		items, err := listObjects(context.Background(), c, gvk, client.MatchingLabels{LabelComponent: ComponentUnderlay})
 		if err != nil {
 			t.Fatal(err)
@@ -92,5 +92,35 @@ func TestUnderlayReconcilerRendersNothingForEmptySettings(t *testing.T) {
 	}
 	if got := underlayObjects(t, c); len(got) != 0 {
 		t.Fatalf("objects %d", len(got))
+	}
+}
+
+func reconcileUnderlay(t *testing.T, c client.Client) {
+	t.Helper()
+	if _, err := (&UnderlayReconciler{Client: c}).Reconcile(context.Background(), UnderlayRequest); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func bgpConfSpecIn(t *testing.T, c client.Client) map[string]any {
+	t.Helper()
+	conf, err := getObject(context.Background(), c, fabric.BgpConfGVK, bgpConfName)
+	if err != nil {
+		t.Fatal(err)
+	}
+	spec, _, _ := unstructured.NestedMap(conf.Object, "spec")
+	return spec
+}
+
+func TestUnderlayReconcilerAppliesTheBgpConf(t *testing.T) {
+	c, _ := testEnv(t)
+	cleanUnderlay(t, c)
+	for key, value := range bgpValues(nil) {
+		setSetting(t, key, value)
+	}
+	reconcileUnderlay(t, c)
+	spec := bgpConfSpecIn(t, c)
+	if spec["localASN"] != int64(65001) || !reflect.DeepEqual(spec["nodeSelector"], map[string]any{fabric.LabelExternalGateway: "true"}) {
+		t.Fatalf("spec %v", spec)
 	}
 }

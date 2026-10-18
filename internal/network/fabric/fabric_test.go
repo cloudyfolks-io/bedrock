@@ -139,6 +139,7 @@ func TestBgpConfBuild(t *testing.T) {
 	if got["localASN"] != int64(65001) || got["routerId"] != "10.0.0.9" || got["peerASN"] != int64(65000) || len(got["peers"].([]any)) != 2 || !reflect.DeepEqual(got["neighbours"], []any{"10.0.0.1", "10.0.0.2"}) {
 		t.Fatalf("unexpected spec %#v", got)
 	}
+	equal(t, got["nodeSelector"].(map[string]any), map[string]any{LabelExternalGateway: "true"})
 }
 
 func TestSubnetUsedAddressesAcceptsNumberTypes(t *testing.T) {
