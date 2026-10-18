@@ -137,6 +137,12 @@ func TestConditions(t *testing.T) {
 	if r, n := condition(got, v1alpha1.ConditionReady), condition(got, ConditionNetworkReady); r.Status != metav1.ConditionFalse || r.Reason != ReasonSecurityGroupNotReady || n.Status != metav1.ConditionFalse || n.Reason != ReasonSecurityGroupNotReady {
 		t.Errorf("%+v %+v", r, n)
 	}
+	for _, reason := range []string{ReasonAddressOutsideSubnet, ReasonAddressReserved, ReasonAddressInUse} {
+		got = Conditions(1, "Starting", true, &Gate{Reason: reason, Message: "pinned"}, ObservedVM{})
+		if r, n := condition(got, v1alpha1.ConditionReady), condition(got, ConditionNetworkReady); r.Status != metav1.ConditionFalse || r.Reason != reason || n == nil || n.Status != metav1.ConditionFalse || n.Reason != reason {
+			t.Errorf("%s: %+v %+v", reason, r, n)
+		}
+	}
 	got = Conditions(1, "Running", true, &Gate{Reason: ReasonImageNotReady}, ObservedVM{})
 	if condition(got, ConditionNetworkReady) != nil || condition(got, v1alpha1.ConditionReady).Reason != ReasonImageNotReady {
 		t.Errorf("%+v", got)

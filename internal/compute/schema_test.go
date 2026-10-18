@@ -259,3 +259,61 @@ func TestSchemaRefusesBadCPUModel(t *testing.T) {
 		vm.Spec.CPU = &v1alpha1.VMCPU{Model: "host-model"}
 	}))
 }
+
+func TestSchemaRefusesBadNICAddress(t *testing.T) {
+	c, _ := startEnv(t)
+	ns := uniqueNamespace(t, c)
+	cases := map[string]string{
+		"hostname":     "web",
+		"ipv6":         "fd00::5",
+		"ipv4 mapped":  "::ffff:10.0.0.5",
+		"out of range": "10.0.0.256",
+		"prefix":       "10.0.0.5/24",
+		"leading zero": "010.0.0.5",
+		"padded":       " 10.0.0.5",
+	}
+	for label, address := range cases {
+		requireRefused(t, c, label, schemaVM(ns, func(vm *v1alpha1.VirtualMachine) { vm.Spec.Networks[0].Address = address }))
+	}
+	requireAccepted(t, c, schemaVM(ns, func(vm *v1alpha1.VirtualMachine) { vm.Spec.Networks[0].Address = "10.100.0.50" }))
+}
+
+func TestSchemaNICAddressIsImmutable(t *testing.T) {
+	c, _ := startEnv(t)
+	ctx := context.Background()
+	ns := uniqueNamespace(t, c)
+	vm := schemaVM(ns, func(vm *v1alpha1.VirtualMachine) {
+		vm.Spec.Networks = []v1alpha1.VMNetwork{{SubnetRef: "default", Address: "10.100.0.50"}, {SubnetRef: "backend"}, {SubnetRef: "data", Address: "10.102.0.7"}}
+	})
+	requireAccepted(t, c, vm)
+	vm.Spec.Running = false
+	if err := c.Update(ctx, vm); err != nil {
+		t.Fatalf("an update that keeps the addresses: %v", err)
+	}
+	mutations := map[string]func(*v1alpha1.VirtualMachine){
+		"change": func(v *v1alpha1.VirtualMachine) { v.Spec.Networks[0].Address = "10.100.0.51" },
+		"remove": func(v *v1alpha1.VirtualMachine) { v.Spec.Networks[0].Address = "" },
+		"add":    func(v *v1alpha1.VirtualMachine) { v.Spec.Networks[1].Address = "10.101.0.9" },
+		"swap": func(v *v1alpha1.VirtualMachine) {
+			v.Spec.Networks[0].Address, v.Spec.Networks[2].Address = v.Spec.Networks[2].Address, v.Spec.Networks[0].Address
+		},
+	}
+	for label, mutate := range mutations {
+		changed := vm.DeepCopy()
+		mutate(changed)
+		requireUpdateRefused(t, c, label, changed)
+	}
+	reordered := vm.DeepCopy()
+	reordered.Spec.Networks[0], reordered.Spec.Networks[2] = reordered.Spec.Networks[2], reordered.Spec.Networks[0]
+	if err := c.Update(ctx, reordered); err != nil {
+		t.Fatalf("reorder: %v", err)
+	}
+	reordered.Spec.Networks = reordered.Spec.Networks[:2]
+	if err := c.Update(ctx, reordered); err != nil {
+		t.Fatalf("detach a network: %v", err)
+	}
+	reordered.Spec.Networks = append(reordered.Spec.Networks, v1alpha1.VMNetwork{SubnetRef: "default", Address: "10.100.0.77"})
+	if err := c.Update(ctx, reordered); err != nil {
+		t.Fatalf("attach the network again with a new address: %v", err)
+	}
+}

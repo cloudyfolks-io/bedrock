@@ -51,7 +51,7 @@ func VolumeOwner(vms []v1alpha1.VirtualMachine, volume string) string {
 
 func (r *VirtualMachineReconciler) resolve(ctx context.Context, vm v1alpha1.VirtualMachine, labels map[string]string) (RenderInput, *Gate, error) {
 	in := RenderInput{VirtualMachine: vm, Labels: labels}
-	steps := []resolveStep{r.stepRootImage, r.stepRootDisk, r.stepCDROMs, r.stepInstanceType, r.stepPreference, r.stepSubnets, r.stepSecurityGroups, r.stepDefaultGroup, r.stepSSHKeys, r.stepCloudInit, r.stepVolumes}
+	steps := []resolveStep{r.stepRootImage, r.stepRootDisk, r.stepCDROMs, r.stepInstanceType, r.stepPreference, r.stepSubnets, r.stepAddresses, r.stepSecurityGroups, r.stepDefaultGroup, r.stepSSHKeys, r.stepCloudInit, r.stepVolumes}
 	for _, step := range steps {
 		next, gate, err := step(ctx, vm, in)
 		if err != nil || gate != nil {
@@ -168,7 +168,7 @@ func (r *VirtualMachineReconciler) stepSubnets(ctx context.Context, vm v1alpha1.
 		if err != nil {
 			return in, nil, err
 		}
-		in.NICs = append(slices.Clone(in.NICs), NIC{Namespace: vm.Namespace, Subnet: network.SubnetRef, MAC: network.MACAddress, SecurityGroups: slices.Clone(network.SecurityGroups)})
+		in.NICs = append(slices.Clone(in.NICs), NIC{Namespace: vm.Namespace, Subnet: network.SubnetRef, MAC: network.MACAddress, Address: network.Address, SecurityGroups: slices.Clone(network.SecurityGroups)})
 	}
 	return in, nil, nil
 }

@@ -29,6 +29,7 @@ func TestOperatorRoleAllowsCompute(t *testing.T) {
 			{"", "pods", "patch"},
 			{"cdi.kubevirt.io", "datavolumes", "create"},
 			{"fabric.cloudyfolks.io", "security-groups", "get"},
+			{"fabric.cloudyfolks.io", "ips", "list"},
 		} {
 			if !allows(candidate, want.group, want.resource, want.verb) {
 				t.Errorf("the role must allow %s %s/%s (run the release rbac command)", want.verb, want.group, want.resource)

@@ -54,7 +54,8 @@ func TestOperatorRules(t *testing.T) {
 		{"", "pods", "patch"}, {"", "pods", "watch"},
 		{"snapshot.storage.k8s.io", "volumesnapshots", "create"}, {"snapshot.storage.k8s.io", "volumesnapshots", "watch"},
 		{"snapshot.storage.k8s.io", "volumesnapshotclasses", "list"}, {"storage.k8s.io", "storageclasses", "watch"},
-		{"fabric.cloudyfolks.io", "security-groups", "get"}, {"bedrock.cloudyfolks.io", "volumes/finalizers", "update"},
+		{"fabric.cloudyfolks.io", "security-groups", "get"}, {"fabric.cloudyfolks.io", "ips", "list"},
+		{"fabric.cloudyfolks.io", "ips", "get"}, {"fabric.cloudyfolks.io", "ips", "watch"}, {"bedrock.cloudyfolks.io", "volumes/finalizers", "update"},
 	}, []grant{
 		{"", "secrets", "list"}, {"", "secrets", "watch"}, {"", "secrets", "update"}, {"", "secrets", "delete"},
 		{"kubevirt.io", "virtualmachines", "delete"}, {"kubevirt.io", "virtualmachines", "update"},
@@ -63,6 +64,7 @@ func TestOperatorRules(t *testing.T) {
 		{"cdi.kubevirt.io", "datasources", "get"},
 		{"snapshot.storage.k8s.io", "volumesnapshots", "delete"}, {"snapshot.storage.k8s.io", "volumesnapshots", "patch"}, {"snapshot.storage.k8s.io", "volumesnapshots", "update"},
 		{"", "pods", "delete"}, {"", "persistentvolumeclaims", "delete"},
+		{"fabric.cloudyfolks.io", "ips", "create"}, {"fabric.cloudyfolks.io", "ips", "delete"},
 	})
 	for _, rule := range rules {
 		if contains(rule.Resources, "datavolumes/source") || contains(rule.Resources, "*") || contains(rule.Verbs, "*") || contains(rule.APIGroups, "*") {

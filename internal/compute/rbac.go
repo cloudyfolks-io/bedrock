@@ -23,6 +23,7 @@ func OperatorRules() []rbacv1.PolicyRule {
 		rule("snapshot.storage.k8s.io", []string{"volumesnapshotclasses"}, "list"),
 		rule("storage.k8s.io", []string{"storageclasses"}, "list", "watch"),
 		rule("fabric.cloudyfolks.io", []string{"security-groups"}, "get"),
+		rule("fabric.cloudyfolks.io", []string{"ips"}, "get", "list", "watch"),
 		rule("bedrock.cloudyfolks.io", []string{"virtualmachines/finalizers", "volumes/finalizers", "volumesnapshots/finalizers"}, "update"),
 	}
 }

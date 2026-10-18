@@ -76,6 +76,10 @@ type VMNetwork struct {
 	// +kubebuilder:validation:Pattern=`^([0-9a-fA-F]{2}:){5}[0-9a-fA-F]{2}$`
 	// +optional
 	MACAddress string `json:"macAddress,omitempty"`
+	// +kubebuilder:validation:MaxLength=15
+	// +kubebuilder:validation:XValidation:rule="isIP(self) && ip(self).family() == 4",message="address must be an IPv4 address"
+	// +optional
+	Address string `json:"address,omitempty"`
 }
 
 // +kubebuilder:validation:XValidation:rule="!has(self.secretRef) || (!has(self.userData) && !has(self.networkData))",message="secretRef excludes userData and networkData"
@@ -144,6 +148,7 @@ type VirtualMachineSpec struct {
 	CDROMs []VMCDROM `json:"cdroms,omitempty"`
 	// +kubebuilder:validation:MaxItems=8
 	// +kubebuilder:validation:XValidation:rule="self.all(a, self.exists_one(b, b.subnetRef == a.subnetRef))",message="a subnet can be attached once"
+	// +kubebuilder:validation:XValidation:rule="self.all(n, oldSelf.all(o, o.subnetRef != n.subnetRef || (has(o.address) == has(n.address) && (!has(n.address) || n.address == o.address))))",message="address is immutable"
 	// +optional
 	// +listType=atomic
 	Networks []VMNetwork `json:"networks,omitempty"`

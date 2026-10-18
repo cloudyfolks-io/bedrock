@@ -24,7 +24,7 @@ The condition `Ready` shows the reason `NotInProject`.
 | `rootDisk` | `sizeGi` and an optional `storageClass`. |
 | `disks` | List of Volumes with an optional bus. |
 | `cdroms` | List of ISO image names. |
-| `networks` | List of Subnets with security groups and an optional MAC address. |
+| `networks` | List of Subnets with security groups, an optional MAC address and an optional fixed `address`. |
 | `cloudInit` | `userData`, `networkData` or a `secretRef`. |
 | `sshKeys` | Names of SSHKey objects. |
 | `running` | The wanted run state. The default is `true`. |
@@ -89,6 +89,28 @@ Port security is on for each interface.
 
 A change of the security groups reaches a running VM at once.
 A change of the Subnets applies at the next restart.
+
+### Fixed address
+
+An entry of `networks` can have an `address`, an IPv4 address.
+The VM keeps this address in the Subnet, also after a restart.
+Without an `address`, Fabric chooses the address.
+The `address` cannot change after you create the VM.
+You cannot add it to an entry later, and you cannot remove it.
+To use another address, remove the entry and add it again with the new address.
+
+The operator checks the address before it starts the VM.
+The check fails in these cases:
+
+- The address is not in the CIDR of the Subnet.
+- The address is the gateway, the network address, the broadcast address or an address in `excludeIPs`.
+- Another NIC holds the address.
+  This is the pinned address of an older VM, or an address that Fabric gave to another VM or pod of the Subnet.
+
+When a check fails, the VM does not start.
+The conditions `Ready` and `NetworkReady` show the reason.
+After you remove the cause, the VM starts.
+The operator checks `AddressInUse` again every 30 seconds.
 
 ## Cloud-init and SSH keys
 
@@ -214,6 +236,9 @@ Run `kubectl describe virtualmachine <name>` and read the condition `Ready`.
 | `InstanceTypeNotFound` | The instance type does not exist. | List the cluster instance types. |
 | `PreferenceNotFound` | The preference does not exist. | List the cluster preferences. |
 | `SubnetNotReady` | A Subnet is missing or not ready. | Check the Subnet condition. |
+| `AddressOutsideSubnet` | The `address` of a network is not in the CIDR of its Subnet. | Use an address in the CIDR. |
+| `AddressReserved` | The `address` of a network is the gateway, the network address, the broadcast address or an excluded address. | Use another address. |
+| `AddressInUse` | Another VM pins the `address`, or Fabric gave it to another NIC of the Subnet. | Use another address, or free the address. The operator checks again in 30 seconds. |
 | `SecurityGroupNotReady` | A security group is missing or not ready. | Check the security group condition. |
 | `SSHKeyNotReady` | An SSHKey is missing or not valid. | Check the SSHKey condition. |
 | `VolumeNotFound` | A Volume does not exist. | Create the Volume. |

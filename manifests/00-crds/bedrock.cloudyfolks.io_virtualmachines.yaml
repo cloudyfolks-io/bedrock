@@ -161,6 +161,12 @@ spec:
               networks:
                 items:
                   properties:
+                    address:
+                      maxLength: 15
+                      type: string
+                      x-kubernetes-validations:
+                      - message: address must be an IPv4 address
+                        rule: isIP(self) && ip(self).family() == 4
                     elasticIPRef:
                       maxLength: 63
                       pattern: ^[a-z0-9]([-a-z0-9]*[a-z0-9])?$
@@ -190,6 +196,9 @@ spec:
                 x-kubernetes-validations:
                 - message: a subnet can be attached once
                   rule: self.all(a, self.exists_one(b, b.subnetRef == a.subnetRef))
+                - message: address is immutable
+                  rule: self.all(n, oldSelf.all(o, o.subnetRef != n.subnetRef || (has(o.address)
+                    == has(n.address) && (!has(n.address) || n.address == o.address))))
               preference:
                 type: string
               rootDisk:

@@ -336,3 +336,21 @@ func TestRenderCloudInitSecretMatchesUserData(t *testing.T) {
 		t.Fatalf("%q %v", out.Secret.Data["userdata"], err)
 	}
 }
+
+func TestRenderAddsOnlyTheAddressAnnotationForAPinnedNIC(t *testing.T) {
+	auto := mustRender(t, renderFixture())
+	in := renderFixture()
+	in.NICs[0].Address = "10.100.0.50"
+	pinned := mustRender(t, in)
+	key := "default.acme-web.fabric.cloudyfolks.io/ip_address"
+	annotations, _, _ := unstructured.NestedStringMap(pinned.VirtualMachine.Object, "spec", "template", "metadata", "annotations")
+	if annotations[key] != "10.100.0.50" {
+		t.Fatalf("annotations %+v", annotations)
+	}
+	delete(annotations, key)
+	unstructured.RemoveNestedField(pinned.VirtualMachine.Object, "spec", "template", "metadata", "annotations")
+	must(t, unstructured.SetNestedStringMap(pinned.VirtualMachine.Object, annotations, "spec", "template", "metadata", "annotations"))
+	if !reflect.DeepEqual(auto, pinned) {
+		t.Fatalf("a pinned NIC changes more than the annotation:\nauto   %+v\npinned %+v", auto.VirtualMachine.Object, pinned.VirtualMachine.Object)
+	}
+}

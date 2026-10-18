@@ -123,7 +123,7 @@ func retryFor(gate *Gate) time.Duration {
 	switch gate.Reason {
 	case ReasonInstanceTypeNotFound, ReasonPreferenceNotFound:
 		return catalogRetry
-	case ReasonWaitingForDefaultGroup:
+	case ReasonWaitingForDefaultGroup, ReasonAddressInUse:
 		return applyFailureRetry
 	}
 	return 0
