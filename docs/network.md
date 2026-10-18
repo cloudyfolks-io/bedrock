@@ -93,21 +93,23 @@ The network area creates this group for every project namespace.
 It allows all egress and denies all ingress.
 
 DHCP in the guest comes from the Fabric Subnet.
-The DHCP options are `router`, `mtu` and `dns_server`.
-The `router` option is the gateway of the Subnet.
+The operator writes the DHCP options `mtu` and `dns_server`.
+Fabric sets the `router` option to the gateway of the Subnet.
 The `mtu` option and the `mtu` of the Fabric Subnet are `spec.mtu` of the Subnet.
 When the Subnet has no `spec.mtu`, they are the Setting `network.mtu`.
 When both are empty, the operator writes neither, and Fabric chooses the MTU.
 The `dns_server` option is `spec.dnsServers` of the Subnet.
 When the Subnet has no `spec.dnsServers`, it is the Setting `network.dns-servers`.
 When no DNS server is set, the operator does not write the `dns_server` option.
+When the operator writes no option at all, the Fabric Subnet has no `dhcpV4Options`.
 Fabric joins the DNS servers with `;`.
 `spec.mtu` is from 576 to 9000, and `spec.dnsServers` has at most 4 IPv4 addresses.
 
 A change of `network.mtu` or `network.dns-servers` updates every Subnet that does not set the field.
-A running guest keeps its value until its next DHCP lease, which is 3600 seconds long.
-The pod interface of a VM takes the MTU when the VM pod starts.
+A new MTU or DNS server list reaches a running guest at its next DHCP lease, which is 3600 seconds long.
+The pod interface of a VM keeps its MTU until the VM pod is created again, which is a VM restart.
 The operator does not restart a VM.
+Raise the MTU only with a planned VM restart.
 
 When no MTU is set, Fabric gives the guest the DHCP MTU 1400, which is 1500 minus 100.
 It gives the pod interface the MTU of the node NIC minus 100.
@@ -115,7 +117,7 @@ Geneve adds 100 bytes to every packet between nodes.
 Keep `network.mtu` and `spec.mtu` at or below the MTU of the node NICs minus 100.
 A larger value drops or fragments the packets between nodes.
 A cluster whose node NICs have an MTU of 1500 must leave `network.mtu` empty, or set 1400 or less.
-ir-central-1 sets 1500, because its underlay MTU is larger.
+The ansible role of sub-project D sets 1500 for ir-central-1.
 
 Only the platform may add, change or remove network selection annotations on a pod.
 The annotations are all keys with the prefix `k8s.v1.cni.cncf.io/`, `v1.multus-cni.io/` or `ovn.kubernetes.io/`, and all keys with the text `cloudyfolks.io/`.
@@ -251,7 +253,7 @@ Remove the group from the VM first.
 | `network.bgp.advertise-filter` | empty | Comma list of `<cidr> ge <n> le <n>` entries. The mask length must not be more than `ge`, and `ge` must not be more than `le`, which is at most 32. The agent advertises only the matching routes. |
 | `network.bgp.redistribute-tables` | empty | Comma list of host routing table ids from 1 to 999. 253, 254 and 255 are reserved. Ids from 1000 up are the VRF ids of the VPCs, and the agent refuses a host table that equals one of them. |
 | `network.dns-servers` | empty | Comma list of IPv4 resolvers that DHCP gives to guests. A Subnet that sets `dnsServers` uses its own list. |
-| `network.mtu` | empty | MTU in bytes, from 576 to 9000, of every Subnet that sets no `mtu`. Empty lets Fabric choose. A running guest learns a new value at its next DHCP lease. |
+| `network.mtu` | empty | MTU in bytes, from 576 to 9000, of every Subnet that sets no `mtu`. Empty lets Fabric choose. A running guest learns a new value at its next DHCP lease, and the pod interface of a VM keeps its MTU until the VM restarts. |
 
 `bedrock init` writes `network.eip-mode` and `network.provider-networks` from the cluster configuration.
 A provider network can have an `excludeIPs` list.
