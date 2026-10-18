@@ -13,6 +13,7 @@ import (
 
 	"github.com/cloudyfolks-io/bedrock/api/v1alpha1"
 	"github.com/cloudyfolks-io/bedrock/internal/kinds"
+	"github.com/cloudyfolks-io/bedrock/internal/network/fabric"
 )
 
 var requiredKinds = []schema.GroupVersionKind{
@@ -24,7 +25,7 @@ var requiredKinds = []schema.GroupVersionKind{
 	csiSnapshotGVK,
 	instanceTypeGVK,
 	preferenceGVK,
-	fabricIPGVK,
+	fabric.IPGVK,
 }
 
 func SetupWithManager(mgr ctrl.Manager) error {

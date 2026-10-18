@@ -15,7 +15,6 @@ var (
 	dataVolumeGVK        = schema.GroupVersionKind{Group: "cdi.kubevirt.io", Version: "v1beta1", Kind: "DataVolume"}
 	csiSnapshotGVK       = schema.GroupVersionKind{Group: "snapshot.storage.k8s.io", Version: "v1", Kind: "VolumeSnapshot"}
 	fabricGroupGVK       = schema.GroupVersionKind{Group: "fabric.cloudyfolks.io", Version: "v1", Kind: "SecurityGroup"}
-	fabricIPGVK          = schema.GroupVersionKind{Group: "fabric.cloudyfolks.io", Version: "v1", Kind: "IP"}
 	csiSnapshotClassGVK  = schema.GroupVersionKind{Group: "snapshot.storage.k8s.io", Version: "v1", Kind: "VolumeSnapshotClass"}
 )
 
