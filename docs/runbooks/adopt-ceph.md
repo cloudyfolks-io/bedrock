@@ -121,13 +121,20 @@ Some outputs hold keys. Do not put them in a ticket or in a log.
    Run `rbd ls -l` for every RBD pool. It lists the images and their sizes.
    The `bucket stats` output shows the object count and the size of each bucket.
 
-   Record the CephFS tree on a host that is not an adopt host. Do not install packages on an adopt host.
-   The host needs the Ceph kernel client and the `mount.ceph` helper:
+   Record the CephFS tree on a mount host that is not an adopt host. Do not install packages on an adopt host.
+   Make the secret file on a control-plane host of the old cluster and copy only this file to the mount host:
+
+   ```sh
+   umask 077
+   ceph auth get-key client.admin > /root/admin.secret
+   scp /root/admin.secret <mount host>:/root/admin.secret
+   rm -f /root/admin.secret
+   ```
+
+   The mount host needs the Ceph kernel client and the `mount.ceph` helper. Run these commands on the mount host:
 
    ```sh
    apt-get install -y ceph-common
-   umask 077
-   ceph auth get-key client.admin > /root/admin.secret
    mkdir -p /mnt/cephfs
    mount -t ceph <mon address>:6789:/ /mnt/cephfs -o name=admin,secretfile=/root/admin.secret,mds_namespace=<CephFS name>
    ls -lR /mnt/cephfs/<path>
@@ -526,11 +533,19 @@ kubectl -n rook-ceph exec deploy/rook-ceph-operator -- sh -c 'radosgw-admin --co
    ```
 
    Run `rbd ls -l` for every RBD pool and the `rbd export` command for each chosen image.
-   For the CephFS comparison, use the host of section 1, step 8. Use the functions of "Run Ceph commands in the new cluster":
+   For the CephFS comparison, use the mount host of section 1, step 8. That host has no Bedrock kubeconfig.
+   Make the secret file on a control-plane host. Use the functions of "Run Ceph commands in the new cluster". Copy only the secret file to the mount host:
 
    ```sh
    umask 077
    ceph auth get-key client.admin > /root/admin.secret
+   scp /root/admin.secret <mount host>:/root/admin.secret
+   rm -f /root/admin.secret
+   ```
+
+   Then run these commands on the mount host:
+
+   ```sh
    mount -t ceph <mon address>:6789:/ /mnt/cephfs -o name=admin,secretfile=/root/admin.secret,mds_namespace=bedrock-fs
    ls -lR /mnt/cephfs/<path>
    sha256sum /mnt/cephfs/<path>/<file>
