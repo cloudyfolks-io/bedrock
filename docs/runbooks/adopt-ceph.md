@@ -46,6 +46,7 @@ It does not read the old StorageClasses.
   The bundle and its images use about 50 GiB during the install.
   Kubelet evicts pods when less than 10% of the disk is free, and Ceph raises `MON_DISK_LOW` when less than 30% is free on the disk of a monitor.
   A disk with 60 GiB showed both in the lab, and `StorageReady` stayed `False`.
+  The preflight of an adopt install warns when less than 100 GiB is free on `/var/lib`.
 - The new object store listens on port 80 of the host network on every host that runs a gateway. Port 80 is free on these hosts.
 - You have root access on every host, a copy of the bundle, and a backup of the old k0s state.
 - You have a maintenance window. The old cluster stops for the whole procedure.
@@ -268,6 +269,8 @@ Rules for the file:
 
 - `monitors` lists 1, 3 or 5 monitors. The ids are lowercase letters. The addresses are IPv4 addresses.
 - Every monitor node is in `hosts`.
+  A host that holds a monitor and no OSD disk stays in `hosts` with `devices: []`.
+  It must still join with the `ceph-osd` role.
 - `hosts[].devices` lists every OSD disk of the host by `/dev/disk/by-id/` path.
   `storage.devices` must stay empty.
 - `replicas` must be at least 3 when there are 3 or more hosts. It must not be smaller than any adopted pool.
@@ -348,6 +351,8 @@ Do the steps in this order.
    ```
 
    The first two commands must print nothing. The third command must list the mon stores of a host that runs a monitor.
+   The preflight also refuses a host where k0s still runs and the unit `bedrock-agent.service` does not exist.
+   The failed check is `adopt-k0s`. See section 5, step 1.
    Stop the old mon and OSD containers if a command shows them.
    Check that no process holds an OSD disk:
 
@@ -375,6 +380,8 @@ Do the steps in this order.
      ip -4 -o addr show dev <management interface>
      ```
 
+     The preflight checks this too. The failed check is `adopt-mon-<id>-address`.
+
    - Install `lvm2` on each host that has LVM-mode OSDs. The preflight of Bedrock needs it to read the label.
 
      ```sh
@@ -390,12 +397,18 @@ Do the steps in this order.
    ```
 
    The default timeout is 30 minutes. The lab needed 45 minutes. Use `--timeout 45m` or more.
-   The preflight checks the key file, the disk labels and the mon stores.
+   The preflight checks the key file, the disk labels, the mon stores and the monitor addresses.
    It refuses a disk with a Ceph label of another fsid.
    It refuses a disk that has another signature and no Ceph label.
    Nothing wipes a disk in any case.
 
+   If the preflight shows `[fail] adopt-k0s`, a k0s that is not a Bedrock install runs on this host.
+   Do section 4, step 5 on this host.
+   A Bedrock install has the unit `bedrock-agent.service`. `bedrock init` and `bedrock join` write it as their last step.
+   If an earlier run stopped before that step, run `k0s stop` and `k0s reset` on the host. Then run the command again.
+
 2. Make a join token. The roles must include `ceph-osd` for every adopt host.
+   `bedrock join --adopt-config` stops when the host is in `adopt.hosts` and the roles have no `ceph-osd`.
 
    ```sh
    bedrock token create --roles ceph-osd,workload
@@ -425,8 +438,8 @@ kubectl get cluster cluster -o jsonpath='{range .status.conditions[*]}{.type}{"\
 
 | Reason | Meaning | What to do |
 | --- | --- | --- |
-| `WaitingForIdentity` | The Secret `rook-ceph/rook-ceph-mon` does not exist, or it has another fsid. | Check the key file and `storage.adopt.fsid`. Run `bedrock init` again with the right file. |
-| `WaitingForHosts` | A host of a monitor has no `ceph-osd` role or no devices. | Join the host with `--roles ceph-osd,workload` and `--adopt-config`. Check `kubectl get host`. |
+| `WaitingForIdentity` | The Secret `rook-ceph/rook-ceph-mon` does not exist, has no fsid, or has another fsid. | Check the key file and `storage.adopt.fsid`. Run `bedrock init` again with the right file. |
+| `WaitingForHosts` | A host of a monitor has not joined, or it has no `ceph-osd` role. A host without devices is no problem. | Join the host with `--roles ceph-osd,workload` and `--adopt-config`. Check `kubectl get host`. |
 | `WaitingForQuorum` | The CephCluster exists. The monitors are not all in the quorum, or Bedrock cannot read the Ceph state. The message `Error initializing cluster client ... conf_read_file` is normal until the Rook operator writes its config file. | Check the mon pods and the mon stores. See "Monitors do not form a quorum". |
 | `WaitingForOSDs` | Fewer OSDs are up than `adopt.hosts[].devices` lists. | Check the OSD pods and the logs of the `rook-ceph-osd-prepare` jobs. Check the disk paths. |
 | `Renaming` | Bedrock ran the rename commands. The next check shows the result. | Wait. |
