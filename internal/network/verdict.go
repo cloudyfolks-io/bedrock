@@ -7,6 +7,7 @@ import (
 	"slices"
 	"time"
 
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 
 	"github.com/cloudyfolks-io/bedrock/api/v1alpha1"
@@ -29,8 +30,12 @@ func factsKey(f SubnetFacts) types.NamespacedName {
 	return types.NamespacedName{Namespace: f.Namespace, Name: f.Name}
 }
 
+func (f SubnetFacts) object() *metav1.ObjectMeta {
+	return &metav1.ObjectMeta{Namespace: f.Namespace, Name: f.Name, CreationTimestamp: metav1.NewTime(f.Created)}
+}
+
 func compareFacts(a, b SubnetFacts) int {
-	return cmp.Or(a.Created.Compare(b.Created), cmp.Compare(a.Namespace, b.Namespace), cmp.Compare(a.Name, b.Name))
+	return CompareAge(a.object(), b.object())
 }
 
 func insideAny(prefix netip.Prefix, ranges []string) bool {

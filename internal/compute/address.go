@@ -1,7 +1,6 @@
 package compute
 
 import (
-	"cmp"
 	"context"
 	"slices"
 
@@ -11,16 +10,12 @@ import (
 	"github.com/cloudyfolks-io/bedrock/internal/network"
 )
 
-func olderVM(a, b v1alpha1.VirtualMachine) bool {
-	return cmp.Or(a.CreationTimestamp.Time.Compare(b.CreationTimestamp.Time), cmp.Compare(a.Name, b.Name)) < 0
-}
-
 func pinnedBy(vms []v1alpha1.VirtualMachine, vm v1alpha1.VirtualMachine, subnet, address string) (string, bool) {
 	for _, other := range vms {
 		pins := slices.ContainsFunc(other.Spec.Networks, func(n v1alpha1.VMNetwork) bool {
 			return n.SubnetRef == subnet && n.Address == address
 		})
-		if pins && other.Name != vm.Name && olderVM(other, vm) {
+		if pins && other.Name != vm.Name && network.Older(&other, &vm) {
 			return other.Name, true
 		}
 	}

@@ -22,7 +22,7 @@ func QuotaAllows(limit *int32, all []v1alpha1.ElasticIP, eip v1alpha1.ElasticIP)
 	}
 	ahead := int32(0)
 	for _, other := range all {
-		if other.UID != eip.UID && (HoldsAddress(other) || olderThan(other, eip)) {
+		if other.UID != eip.UID && (HoldsAddress(other) || Older(&other, &eip)) {
 			ahead++
 		}
 	}

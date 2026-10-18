@@ -23,13 +23,6 @@ func HeldVrfID(network v1alpha1.Network) (uint32, bool) {
 	return uint32(id), err == nil
 }
 
-func pinnedBefore(a, b v1alpha1.Network) bool {
-	if !a.CreationTimestamp.Equal(&b.CreationTimestamp) {
-		return a.CreationTimestamp.Before(&b.CreationTimestamp)
-	}
-	return a.Name < b.Name
-}
-
 func VrfInUse(network v1alpha1.Network, networks []v1alpha1.Network, foreignVpcIDs []uint32) *Violation {
 	id := uint32(*network.Spec.VrfID)
 	for _, other := range networks {
@@ -37,7 +30,7 @@ func VrfInUse(network v1alpha1.Network, networks []v1alpha1.Network, foreignVpcI
 		if other.Name == network.Name || !ok || held != id {
 			continue
 		}
-		if other.Spec.VrfID != nil && !pinnedBefore(other, network) {
+		if other.Spec.VrfID != nil && !Older(&other, &network) {
 			continue
 		}
 		return &Violation{Reason: ReasonVRFInUse, Message: fmt.Sprintf("the Network %s holds the VRF id %d; pin another id", other.Name, id)}
