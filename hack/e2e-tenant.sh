@@ -176,9 +176,13 @@ steps=(
   compute_proxy_actions
   compute_console
   network_underlay
+  network_frr_agent
   network_subnet_rules
   network_security_group
+  network_guest_parity
   network_elastic_ip
+  network_elastic_ip_pool_choice
+  network_elastic_ip_quota
   network_load_balancer_and_dns
   network_isolation
   objectstorage_user_and_bucket
