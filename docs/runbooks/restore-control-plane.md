@@ -44,8 +44,10 @@ use the `bedrock` binary of the new version:
 - When the API does not answer, find the path another way:
   - Look for the line `restoring host:<node>:<path>` that `bedrock upgrade
     abort` printed.
-  - Or, on the controller, take the newest archive under
-    `/var/lib/bedrock/backups`.
+  - Or, on the controller, take the newest `bedrock-*` archive under
+    `/var/lib/bedrock/backups`. The upgrade writes the `bedrock-*`
+    archives. Do not take an `etcd-*` file. It is a scheduled snapshot. It
+    holds no images, and it can be newer than the upgrade backup.
 - The agent may have already moved the k0s state directories into
   `/var/lib/k0s/.pre-restore-<time>` on that node. Check there first.
 
