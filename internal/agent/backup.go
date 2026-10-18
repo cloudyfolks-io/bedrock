@@ -19,7 +19,6 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	"github.com/cloudyfolks-io/bedrock/internal/backup/seal"
-	"github.com/cloudyfolks-io/bedrock/internal/k0s"
 	"github.com/cloudyfolks-io/bedrock/internal/release"
 )
 
@@ -41,7 +40,7 @@ func backup(ctx context.Context, env StepEnv) (Outcome, error) {
 	if err != nil {
 		return Outcome{}, err
 	}
-	path, sum, err := writeBackup(ctx, env.Deps, name, upgradeBackupPrefix, keptBackups, recipients)
+	path, sum, err := writeBackup(ctx, env.Deps, name, upgradeBackupPrefix, keptBackups, recipients, plainK0sBackup)
 	if err != nil {
 		return Outcome{}, err
 	}
@@ -77,7 +76,7 @@ func logLine(line string) {
 	fmt.Fprintf(os.Stderr, "agent: %s\n", line)
 }
 
-func writeBackup(ctx context.Context, deps Deps, name, prefix string, keep int, recipients []age.Recipient) (string, string, error) {
+func writeBackup(ctx context.Context, deps Deps, name, prefix string, keep int, recipients []age.Recipient, k0sBackup k0sBackupStep) (string, string, error) {
 	dir := filepath.Join(deps.Root, backupDir)
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return "", "", err
@@ -90,7 +89,7 @@ func writeBackup(ctx context.Context, deps Deps, name, prefix string, keep int, 
 		return "", "", err
 	}
 	defer os.RemoveAll(work)
-	if _, err := deps.Exec.Run(ctx, k0s.DefaultBinary, "backup", "--save-path", work); err != nil {
+	if err := k0sBackup(ctx, deps, work); err != nil {
 		return "", "", err
 	}
 	if err := copyOVN(filepath.Join(deps.Root, ovnDir), filepath.Join(work, "ovn")); err != nil {

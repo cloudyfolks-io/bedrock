@@ -63,7 +63,7 @@ func takeSnapshot(ctx context.Context, c client.Client, deps Deps, name string) 
 	if err != nil {
 		return err
 	}
-	_, _, err = writeBackup(ctx, deps, name, etcdSnapshotPrefix, keptEtcdSnapshots, recipients)
+	_, _, err = writeBackup(ctx, deps, name, etcdSnapshotPrefix, keptEtcdSnapshots, recipients, leanK0sBackup)
 	return err
 }
 

@@ -24,8 +24,9 @@ import (
 )
 
 type fakeK0sBackup struct {
-	calls []string
-	err   error
+	calls   []string
+	err     error
+	entries []tarFixture
 }
 
 func (f *fakeK0sBackup) Run(_ context.Context, name string, args ...string) (string, error) {
@@ -34,7 +35,15 @@ func (f *fakeK0sBackup) Run(_ context.Context, name string, args ...string) (str
 		return "", f.err
 	}
 	if name == "/usr/local/bin/k0s" && len(args) == 3 && args[0] == "backup" && args[1] == "--save-path" {
-		return "", os.WriteFile(filepath.Join(args[2], "k0s_backup_2026-10-01T10_00_00Z.tar.gz"), []byte("etcd snapshot"), 0o600)
+		entries := f.entries
+		if entries == nil {
+			entries = k0sFixture
+		}
+		archive, err := gzipTar(entries)
+		if err != nil {
+			return "", err
+		}
+		return "", os.WriteFile(filepath.Join(args[2], k0sArchiveName), archive, 0o600)
 	}
 	return "", errors.New("unexpected command")
 }
