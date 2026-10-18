@@ -14,10 +14,12 @@ import (
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/util/flowcontrol"
+	"sigs.k8s.io/controller-runtime/pkg/cache"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/envtest"
 
 	"github.com/cloudyfolks-io/bedrock/api/v1alpha1"
+	"github.com/cloudyfolks-io/bedrock/internal/network"
 	"github.com/cloudyfolks-io/bedrock/internal/testenv"
 )
 
@@ -26,6 +28,9 @@ var (
 	sharedOnce   sync.Once
 	sharedConfig *rest.Config
 	sharedErr    error
+	sharedCancel context.CancelFunc
+	ipCacheOnce  sync.Once
+	ipCache      cache.Cache
 	namespaceSeq int
 	namespaceMu  sync.Mutex
 )
@@ -77,8 +82,34 @@ func startEnv(t *testing.T) (client.Client, *rest.Config) {
 	return c, rest.CopyConfig(sharedConfig)
 }
 
+func sharedFabricIPs() client.Reader {
+	ipCacheOnce.Do(func() {
+		scheme := runtime.NewScheme()
+		if err := clientgoscheme.AddToScheme(scheme); err != nil {
+			panic(err)
+		}
+		var err error
+		if ipCache, err = cache.New(sharedConfig, cache.Options{Scheme: scheme}); err != nil {
+			panic(err)
+		}
+		if err := network.IndexFabricIPs(context.Background(), ipCache); err != nil {
+			panic(err)
+		}
+		var ctx context.Context
+		ctx, sharedCancel = context.WithCancel(context.Background())
+		go func() { _ = ipCache.Start(ctx) }()
+		if !ipCache.WaitForCacheSync(ctx) {
+			panic("the Fabric IP cache did not sync")
+		}
+	})
+	return ipCache
+}
+
 func TestMain(m *testing.M) {
 	code := m.Run()
+	if sharedCancel != nil {
+		sharedCancel()
+	}
 	if sharedEnv != nil {
 		_ = sharedEnv.Stop()
 	}

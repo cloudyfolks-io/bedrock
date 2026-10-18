@@ -1,9 +1,12 @@
 package network
 
 import (
+	"context"
+	"slices"
 	"testing"
 
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	"github.com/cloudyfolks-io/bedrock/api/v1alpha1"
 	"github.com/cloudyfolks-io/bedrock/internal/network/fabric"
@@ -69,5 +72,54 @@ func TestAddressHeldByAnother(t *testing.T) {
 		if got := AddressHeldByAnother(ips, tc.address, "t1-prod", "web-1"); got != tc.held {
 			t.Errorf("%s: got %v want %v", label, got, tc.held)
 		}
+	}
+}
+
+type recordedIndexer struct {
+	field   string
+	extract client.IndexerFunc
+}
+
+func (r *recordedIndexer) IndexField(_ context.Context, _ client.Object, field string, extract client.IndexerFunc) error {
+	r.field, r.extract = field, extract
+	return nil
+}
+
+func TestFabricIPIndexKeysTheSubnetAndTheAddress(t *testing.T) {
+	var indexer recordedIndexer
+	if err := IndexFabricIPs(context.Background(), &indexer); err != nil {
+		t.Fatal(err)
+	}
+	ip := fabricIP("a", "t1-prod", "web-1", "10.100.0.50")
+	ip.SetLabels(map[string]string{labelFabricSubnet: "s-1"})
+	if got := indexer.extract(ip); !slices.Equal(got, []string{"s-1/10.100.0.50"}) {
+		t.Fatalf("keys %v", got)
+	}
+	if got := indexer.extract(fabricIP("b", "t1-prod", "mac-only", "")); got != nil {
+		t.Fatalf("an IP object with no address has no key: %v", got)
+	}
+}
+
+type listRecorder struct {
+	client.Reader
+	options client.ListOptions
+}
+
+func (l *listRecorder) List(_ context.Context, _ client.ObjectList, opts ...client.ListOption) error {
+	l.options.ApplyOptions(opts)
+	return nil
+}
+
+func TestIPsOfAddressLooksUpTheIndex(t *testing.T) {
+	var indexer recordedIndexer
+	if err := IndexFabricIPs(context.Background(), &indexer); err != nil {
+		t.Fatal(err)
+	}
+	var reader listRecorder
+	if _, err := IPsOfAddress(context.Background(), &reader, "s-1", "10.100.0.50"); err != nil {
+		t.Fatal(err)
+	}
+	if value, exact := reader.options.FieldSelector.RequiresExactMatch(indexer.field); !exact || value != "s-1/10.100.0.50" {
+		t.Fatalf("selector %v", reader.options.FieldSelector)
 	}
 }

@@ -14,6 +14,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	"github.com/cloudyfolks-io/bedrock/api/v1alpha1"
+	"github.com/cloudyfolks-io/bedrock/internal/network"
 )
 
 const (
@@ -193,6 +194,9 @@ func (r *VirtualMachineReconciler) pruneSnapshots(ctx context.Context, vm v1alph
 func (r *VirtualMachineReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	indexer := func(obj client.Object) []string { return Refs(*obj.(*v1alpha1.VirtualMachine)) }
 	if err := mgr.GetFieldIndexer().IndexField(context.Background(), &v1alpha1.VirtualMachine{}, refsIndex, indexer); err != nil {
+		return err
+	}
+	if err := network.IndexFabricIPs(context.Background(), mgr.GetFieldIndexer()); err != nil {
 		return err
 	}
 	return ctrl.NewControllerManagedBy(mgr).

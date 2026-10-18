@@ -71,7 +71,7 @@ func (r *VirtualMachineReconciler) addressGate(ctx context.Context, vm v1alpha1.
 	if other, held := pinnedBy(vms.Items, vm, nic.Subnet, nic.Address); held {
 		return gateOf(ReasonAddressInUse, "the address %s of the subnet %q is pinned by the virtual machine %q", nic.Address, nic.Subnet, other), nil
 	}
-	ips, err := network.SubnetIPs(ctx, r.Client, network.FabricName(vm.Namespace, nic.Subnet))
+	ips, err := network.IPsOfAddress(ctx, r.FabricIPs, network.FabricName(vm.Namespace, nic.Subnet), nic.Address)
 	if err != nil {
 		return nil, err
 	}

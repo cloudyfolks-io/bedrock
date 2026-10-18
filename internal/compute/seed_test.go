@@ -2,6 +2,7 @@ package compute
 
 import (
 	"context"
+	"slices"
 	"testing"
 	"time"
 
@@ -19,6 +20,8 @@ import (
 
 	"github.com/cloudyfolks-io/bedrock/api/v1alpha1"
 	"github.com/cloudyfolks-io/bedrock/internal/network"
+	"github.com/cloudyfolks-io/bedrock/internal/network/fabric"
+	"github.com/cloudyfolks-io/bedrock/internal/network/fabrictest"
 )
 
 var fixedNow = time.Date(2026, 10, 8, 12, 0, 0, 0, time.UTC)
@@ -132,8 +135,14 @@ func seedCatalog(t *testing.T, c client.Client) {
 
 func seedPlatform(t *testing.T, c client.Client) string {
 	t.Helper()
-	seedCatalog(t, c)
 	ns := uniqueNamespace(t, c)
+	seedPlatformIn(t, c, ns)
+	return ns
+}
+
+func seedPlatformIn(t *testing.T, c client.Client, ns string) {
+	t.Helper()
+	seedCatalog(t, c)
 	createSubnet(t, c, ns, "default", metav1.ConditionTrue)
 	createSecurityGroup(t, c, ns, "web", metav1.ConditionTrue)
 	ensureUnstructured(t, c, fabricGroupGVK, network.DefaultSecurityGroupName(ns), map[string]any{})
@@ -142,12 +151,33 @@ func seedPlatform(t *testing.T, c client.Client) string {
 	reconcileVolume(t, c, ns, "data1")
 	setDataVolumePhase(t, c, ns, "data1", "Succeeded")
 	reconcileVolume(t, c, ns, "data1")
-	return ns
+}
+
+func createFabricIP(t *testing.T, c client.Client, name, namespace, pod, subnet, address string) {
+	t.Helper()
+	must(t, fabrictest.CreateIP(context.Background(), c, name, namespace, pod, subnet, address))
+	eventually(t, "the cache to list the Fabric IP "+name, func() bool { return cachedFabricIP(name) })
+}
+
+func deleteFabricIP(t *testing.T, c client.Client, name string) {
+	t.Helper()
+	must(t, c.Delete(context.Background(), emptyNamed(fabric.IPGVK, name)))
+	eventually(t, "the cache to drop the Fabric IP "+name, func() bool { return !cachedFabricIP(name) })
+}
+
+func cachedFabricIP(name string) bool {
+	list := &unstructured.UnstructuredList{}
+	list.SetGroupVersionKind(fabric.IPGVK.GroupVersion().WithKind("IPList"))
+	if err := sharedFabricIPs().List(context.Background(), list); err != nil {
+		return false
+	}
+	return slices.ContainsFunc(list.Items, func(ip unstructured.Unstructured) bool { return ip.GetName() == name })
 }
 
 func newVMReconciler(c client.Client) *VirtualMachineReconciler {
 	return &VirtualMachineReconciler{
-		Client: c,
+		Client:    c,
+		FabricIPs: sharedFabricIPs(),
 		GuestInfo: func(context.Context, string, string) (v1alpha1.VMGuestAgent, error) {
 			return v1alpha1.VMGuestAgent{Version: "5.0.0", OS: "Ubuntu 24.04 LTS", Hostname: "web-1"}, nil
 		},

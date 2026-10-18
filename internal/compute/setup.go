@@ -24,6 +24,7 @@ var requiredKinds = []schema.GroupVersionKind{
 	csiSnapshotGVK,
 	instanceTypeGVK,
 	preferenceGVK,
+	fabricIPGVK,
 }
 
 func SetupWithManager(mgr ctrl.Manager) error {
@@ -31,7 +32,7 @@ func SetupWithManager(mgr ctrl.Manager) error {
 }
 
 func setupControllers(mgr ctrl.Manager) error {
-	vms := &VirtualMachineReconciler{Client: mgr.GetClient(), Secrets: mgr.GetAPIReader(), Scheme: mgr.GetScheme(), GuestInfo: guestInfoFrom(mgr.GetConfig()), Now: time.Now}
+	vms := &VirtualMachineReconciler{Client: mgr.GetClient(), Secrets: mgr.GetAPIReader(), FabricIPs: mgr.GetCache(), Scheme: mgr.GetScheme(), GuestInfo: guestInfoFrom(mgr.GetConfig()), Now: time.Now}
 	for _, setup := range []func(ctrl.Manager) error{
 		vms.SetupWithManager,
 		(&VolumeReconciler{Client: mgr.GetClient()}).SetupWithManager,

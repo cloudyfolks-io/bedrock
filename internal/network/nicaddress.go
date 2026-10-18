@@ -31,8 +31,28 @@ func CheckNICAddress(subnet v1alpha1.Subnet, address string) *Violation {
 	return nil
 }
 
-func SubnetIPs(ctx context.Context, c client.Reader, fabricSubnet string) ([]*unstructured.Unstructured, error) {
-	return listObjects(ctx, c, fabric.IPGVK, client.MatchingLabels{labelFabricSubnet: fabricSubnet})
+const fabricIPAddressField = "network.fabric-ip-address"
+
+func fabricIPAddressKey(fabricSubnet, address string) string {
+	return fabricSubnet + "/" + address
+}
+
+func fabricIPKeys(obj client.Object) []string {
+	ip, ok := obj.(*unstructured.Unstructured)
+	if !ok || fabric.IPAddress(ip) == "" {
+		return nil
+	}
+	return []string{fabricIPAddressKey(ip.GetLabels()[labelFabricSubnet], fabric.IPAddress(ip))}
+}
+
+func IndexFabricIPs(ctx context.Context, indexer client.FieldIndexer) error {
+	ip := &unstructured.Unstructured{}
+	ip.SetGroupVersionKind(fabric.IPGVK)
+	return indexer.IndexField(ctx, ip, fabricIPAddressField, fabricIPKeys)
+}
+
+func IPsOfAddress(ctx context.Context, c client.Reader, fabricSubnet, address string) ([]*unstructured.Unstructured, error) {
+	return listObjects(ctx, c, fabric.IPGVK, client.MatchingFields{fabricIPAddressField: fabricIPAddressKey(fabricSubnet, address)})
 }
 
 func AddressHeldByAnother(ips []*unstructured.Unstructured, address, namespace, vm string) bool {

@@ -13,8 +13,6 @@ import (
 
 	"github.com/cloudyfolks-io/bedrock/api/v1alpha1"
 	"github.com/cloudyfolks-io/bedrock/internal/network"
-	"github.com/cloudyfolks-io/bedrock/internal/network/fabric"
-	"github.com/cloudyfolks-io/bedrock/internal/network/fabrictest"
 )
 
 func pinned(address string) func(*v1alpha1.VirtualMachine) {
@@ -117,8 +115,8 @@ func TestVMRefusesAnAddressThatFabricAllocated(t *testing.T) {
 	c, _ := startEnv(t)
 	ns := seedPlatform(t, c)
 	subnet := network.FabricName(ns, "default")
-	must(t, fabrictest.CreateIP(context.Background(), c, "db-1."+ns, ns, "db-1", subnet, "10.100.0.60"))
-	must(t, fabrictest.CreateIP(context.Background(), c, "web-1."+ns, ns, "web-1", subnet, "10.100.0.61"))
+	createFabricIP(t, c, "db-1."+ns, ns, "db-1", subnet, "10.100.0.60")
+	createFabricIP(t, c, "web-1."+ns, ns, "web-1", subnet, "10.100.0.61")
 	createVM(t, c, ns, "web-1", pinned("10.100.0.60"))
 	createVM(t, c, ns, "web-2", pinned("10.100.0.61"))
 	r := newVMReconciler(c)
@@ -130,7 +128,7 @@ func TestVMRefusesAnAddressThatFabricAllocated(t *testing.T) {
 	requireAbsent(t, c, kubeVirtVMGVK, ns, "web-1")
 	reconcileVM(t, r, ns, "web-2")
 	requireAddressGate(t, getVM(t, c, ns, "web-2"), ReasonAddressInUse)
-	must(t, c.Delete(context.Background(), emptyNamed(fabric.IPGVK, "db-1."+ns)))
+	deleteFabricIP(t, c, "db-1."+ns)
 	reconcileVM(t, r, ns, "web-1")
 	requirePresent(t, c, kubeVirtVMGVK, ns, "web-1")
 }
@@ -138,7 +136,7 @@ func TestVMRefusesAnAddressThatFabricAllocated(t *testing.T) {
 func TestVMKeepsItsOwnFabricAddress(t *testing.T) {
 	c, _ := startEnv(t)
 	ns := seedPlatform(t, c)
-	must(t, fabrictest.CreateIP(context.Background(), c, "web-1."+ns, ns, "web-1", network.FabricName(ns, "default"), "10.100.0.61"))
+	createFabricIP(t, c, "web-1."+ns, ns, "web-1", network.FabricName(ns, "default"), "10.100.0.61")
 	createVM(t, c, ns, "web-1", pinned("10.100.0.61"))
 	r := newVMReconciler(c)
 	reconcileVM(t, r, ns, "web-1")
@@ -243,7 +241,7 @@ func TestVMThatHoldsItsAddressIsNotInConflict(t *testing.T) {
 	if got := getVM(t, c, ns, "web-1").Status.Addresses; len(got) != 1 || got[0].IP != "10.100.0.50" {
 		t.Fatalf("addresses %+v", got)
 	}
-	must(t, fabrictest.CreateIP(context.Background(), c, "launcher."+ns, ns, "virt-launcher-web-1-x7k2p", network.FabricName(ns, "default"), "10.100.0.50"))
+	createFabricIP(t, c, "launcher."+ns, ns, "virt-launcher-web-1-x7k2p", network.FabricName(ns, "default"), "10.100.0.50")
 	reconcileVM(t, r, ns, "web-1")
 	if reason := readyOf(getVM(t, c, ns, "web-1")).Reason; reason == ReasonAddressInUse {
 		t.Fatalf("a VM that holds the address must not conflict with its own Fabric IP: %s", reason)
@@ -258,7 +256,7 @@ func TestVMWhoseRequestFabricRefusedReportsAddressInUse(t *testing.T) {
 	reconcileVM(t, r, ns, "web-1")
 	requireReason(t, getVM(t, c, ns, "web-1"), "Starting")
 	launcherPodFor(t, c, ns, "launcher-web-1", "web-1", requestAnnotations(ns, "10.100.0.50"), map[string]string{})
-	must(t, fabrictest.CreateIP(context.Background(), c, "db-1."+ns, ns, "db-1", network.FabricName(ns, "default"), "10.100.0.50"))
+	createFabricIP(t, c, "db-1."+ns, ns, "db-1", network.FabricName(ns, "default"), "10.100.0.50")
 	for round := 0; round < 3; round++ {
 		result := reconcileVM(t, r, ns, "web-1")
 		vm := getVM(t, c, ns, "web-1")

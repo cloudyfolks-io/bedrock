@@ -39,6 +39,7 @@ type GuestInfoFunc func(ctx context.Context, namespace, name string) (v1alpha1.V
 type VirtualMachineReconciler struct {
 	Client    client.Client
 	Secrets   client.Reader
+	FabricIPs client.Reader
 	Scheme    *runtime.Scheme
 	GuestInfo GuestInfoFunc
 	Now       func() time.Time
