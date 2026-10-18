@@ -267,3 +267,33 @@ func TestAdoptChecksKeepTheAddressCheckWhenABedrockK0sRuns(t *testing.T) {
 		t.Fatalf("%+v", r)
 	}
 }
+
+func TestRunAdoptWarnsBelow100GiBFreeOnVarLib(t *testing.T) {
+	facts := goodFacts()
+	facts.FreeVarLibBytes = 60 << 30
+	results := Run(context.Background(), goodExec(), facts, nil, adoptConfig(), []string{"ubuntu-24.04"})
+	r := resultNamed(t, results, "disk")
+	if r.OK || r.Fatal || r.Message != "60 GiB free on /var/lib, at least 100 GiB recommended" {
+		t.Fatalf("%+v", r)
+	}
+	facts.FreeVarLibBytes = 100 << 30
+	results = Run(context.Background(), goodExec(), facts, nil, adoptConfig(), []string{"ubuntu-24.04"})
+	if r := resultNamed(t, results, "disk"); !r.OK {
+		t.Fatalf("%+v", r)
+	}
+}
+
+func TestRunWithoutAdoptKeepsTheTwentyGiBDiskWarning(t *testing.T) {
+	facts := goodFacts()
+	facts.FreeVarLibBytes = 60 << 30
+	results := Run(context.Background(), goodExec(), facts, nil, goodConfig(), []string{"ubuntu-24.04"})
+	if r := resultNamed(t, results, "disk"); !r.OK {
+		t.Fatalf("%+v", r)
+	}
+	facts.FreeVarLibBytes = 10 << 30
+	results = Run(context.Background(), goodExec(), facts, nil, goodConfig(), []string{"ubuntu-24.04"})
+	r := resultNamed(t, results, "disk")
+	if r.OK || r.Message != "10 GiB free on /var/lib, at least 20 GiB recommended" {
+		t.Fatalf("%+v", r)
+	}
+}

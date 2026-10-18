@@ -13,8 +13,9 @@ import (
 )
 
 const (
-	minFreeBytes   = 20 << 30
-	rookConfigPath = "/var/lib/rook/rook-ceph/rook-ceph.config"
+	minFreeBytes      = 20 << 30
+	minFreeAdoptBytes = 100 << 30
+	rookConfigPath    = "/var/lib/rook/rook-ceph/rook-ceph.config"
 )
 
 var (
@@ -39,6 +40,7 @@ func RunJoin(_ context.Context, _ host.Exec, facts host.Facts, devices []host.De
 
 func checks(facts host.Facts, devices []host.Device, cfg v1alpha1.ClusterConfig, supportedOS []string, vipResults ...Result) []Result {
 	osKey := host.OSKey(facts.OSID, facts.OSVersionID)
+	minFree := minFreeFor(cfg)
 	results := []Result{
 		check("root", true, facts.Root, "run as root"),
 		check("systemd", true, facts.Systemd, "systemd is required"),
@@ -47,7 +49,7 @@ func checks(facts host.Facts, devices []host.Device, cfg v1alpha1.ClusterConfig,
 		check("cgroup-v2", true, facts.CgroupV2, "cgroup v2 is required"),
 		check("kvm", false, facts.KVM, "/dev/kvm not found, virtual machines will not start on this host"),
 		check("ntp", false, facts.NTPSynced, "clock is not NTP synchronized"),
-		check("disk", false, facts.FreeVarLibBytes >= minFreeBytes, fmt.Sprintf("%d GiB free on /var/lib, at least 20 GiB recommended", facts.FreeVarLibBytes>>30)),
+		check("disk", false, facts.FreeVarLibBytes >= minFree, fmt.Sprintf("%d GiB free on /var/lib, at least %d GiB recommended", facts.FreeVarLibBytes>>30, minFree>>30)),
 		check("management-interface", true, slices.Contains(facts.Interfaces, cfg.Spec.Network.ManagementInterface), fmt.Sprintf("interface %s not found", cfg.Spec.Network.ManagementInterface)),
 	}
 	results = append(results, vipResults...)
@@ -56,6 +58,13 @@ func checks(facts host.Facts, devices []host.Device, cfg v1alpha1.ClusterConfig,
 		results = append(results, deviceCheck(device, adoptedFSID(cfg)))
 	}
 	return results
+}
+
+func minFreeFor(cfg v1alpha1.ClusterConfig) uint64 {
+	if cfg.Spec.Storage.Adopt == nil {
+		return minFreeBytes
+	}
+	return minFreeAdoptBytes
 }
 
 func adoptedFSID(cfg v1alpha1.ClusterConfig) string {
