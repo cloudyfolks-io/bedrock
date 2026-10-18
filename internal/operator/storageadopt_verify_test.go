@@ -117,7 +117,13 @@ func TestAdoptedProblems(t *testing.T) {
 		want      []string
 	}{
 		{"all good", nil, nil, nil},
-		{"internal pools may differ", []map[string]any{{keyPools: adoptedPools(map[string]int{".mgr": 1, ".rgw.root": 1})}}, nil, nil},
+		{"the manager pool may differ", []map[string]any{{keyPools: adoptedPools(map[string]int{".mgr": 1})}}, nil, nil},
+		{
+			"the root pool of the object store is too small",
+			[]map[string]any{{keyPools: adoptedPools(map[string]int{".rgw.root": 1})}},
+			nil,
+			[]string{"ceph pool .rgw.root size 1, want 3"},
+		},
 		{
 			"pools that only look like Bedrock pools",
 			[]map[string]any{{keyPools: slices.Concat(adoptedPools(nil), poolEntries(1, "bedrock-blockx", "bedrock-fsx-data", "bedrock-fs", "bedrock-rgw", "bedrock-rgwx.rgw.meta"))}},

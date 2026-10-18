@@ -258,7 +258,7 @@ func cephRelease(version string) (string, string) {
 }
 
 func bedrockPool(name string) bool {
-	return name == blockPoolName || strings.HasPrefix(name, filesystemName+"-") || strings.HasPrefix(name, objectStoreName+".")
+	return name == blockPoolName || name == rgwRootPool || strings.HasPrefix(name, filesystemName+"-") || strings.HasPrefix(name, objectStoreName+".")
 }
 
 func poolSizeMismatches(replicas int, pools []cephPoolState) []string {
