@@ -43,6 +43,22 @@ func VpcExternalSubnets(u *unstructured.Unstructured) []string {
 	return list(u, "status", "extraExternalSubnets")
 }
 
+func VpcSpecExternalSubnets(u *unstructured.Unstructured) []string {
+	return list(u, "spec", "extraExternalSubnets")
+}
+
+func VpcDefaultNextHop(u *unstructured.Unstructured) string {
+	routes, _, _ := unstructured.NestedSlice(u.Object, "spec", "staticRoutes")
+	for _, item := range routes {
+		route, ok := item.(map[string]any)
+		if ok && route["cidr"] == "0.0.0.0/0" {
+			hop, _ := route["nextHopIP"].(string)
+			return hop
+		}
+	}
+	return ""
+}
+
 func VpcSubnets(u *unstructured.Unstructured) []string {
 	return list(u, "status", "subnets")
 }

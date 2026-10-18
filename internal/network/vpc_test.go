@@ -30,10 +30,10 @@ func TestPlanVpcPrivate(t *testing.T) {
 func TestPlanVpcL2External(t *testing.T) {
 	networks := `[{"name":"public","interface":"b","cidr":"91.246.31.0/24","gateway":"91.246.31.1"},{"name":"backup","interface":"b","cidr":"198.51.100.0/24","gateway":"198.51.100.1"}]`
 	spec, ext := PlanVpc(vpcInput(t, true, map[string]string{"network.provider-networks": networks}, 0))
-	if !spec.EnableExternal || !slices.Equal(spec.ExtraExternalSubnets, []string{"provider-public", "provider-backup"}) {
+	if !spec.EnableExternal || !slices.Equal(spec.ExtraExternalSubnets, []string{"provider-backup", "provider-public"}) {
 		t.Fatalf("spec %+v", spec)
 	}
-	if spec.DefaultRoute == nil || spec.DefaultRoute.CIDR != "0.0.0.0/0" || spec.DefaultRoute.NextHop != "91.246.31.1" || spec.Dynamic != nil {
+	if spec.DefaultRoute == nil || spec.DefaultRoute.CIDR != "0.0.0.0/0" || spec.DefaultRoute.NextHop != "198.51.100.1" || spec.Dynamic != nil {
 		t.Fatalf("route %+v", spec.DefaultRoute)
 	}
 	if spec.EnableBfd {
@@ -41,6 +41,54 @@ func TestPlanVpcL2External(t *testing.T) {
 	}
 	if !ext.Requested || ext.Reason != ReasonConnected {
 		t.Fatalf("ext %+v", ext)
+	}
+}
+
+const rolePools = `[
+{"name":"zulu","interface":"b","cidr":"203.0.113.0/24","gateway":"203.0.113.1"},
+{"name":"alpha","role":"platform","interface":"b","cidr":"192.0.2.0/24","gateway":"192.0.2.1"},
+{"name":"bravo","role":"tenant","interface":"b","cidr":"198.51.100.0/24","gateway":"198.51.100.1"},
+{"name":"charlie","role":"services","interface":"b","cidr":"100.100.0.0/24","gateway":"100.100.0.1"},
+{"name":"delta","role":"transit","interface":"b","cidr":"100.101.0.0/24","gateway":"100.101.0.1"}]`
+
+func TestPlanVpcL2AttachesTenantPoolsOnly(t *testing.T) {
+	spec, ext := PlanVpc(vpcInput(t, true, map[string]string{"network.provider-networks": rolePools}, 0))
+	if !slices.Equal(spec.ExtraExternalSubnets, []string{"provider-bravo", "provider-zulu"}) || ext.Reason != ReasonConnected {
+		t.Fatalf("spec %+v ext %+v", spec, ext)
+	}
+	if spec.DefaultRoute == nil || spec.DefaultRoute.NextHop != "198.51.100.1" {
+		t.Fatalf("the default route must follow the first tenant pool by name: %+v", spec.DefaultRoute)
+	}
+}
+
+func TestPlanVpcL2WithoutATenantPool(t *testing.T) {
+	pools := `[{"name":"alpha","role":"platform","interface":"b","cidr":"192.0.2.0/24","gateway":"192.0.2.1"}]`
+	spec, ext := PlanVpc(vpcInput(t, true, map[string]string{"network.provider-networks": pools}, 0))
+	if spec.EnableExternal || ext.Reason != ReasonNoProviderNetwork || !strings.Contains(ext.Message, "tenant") {
+		t.Fatalf("spec %+v ext %+v", spec, ext)
+	}
+}
+
+func TestPlanVpcL2KeepsTheAttachmentsOfAnExistingVpc(t *testing.T) {
+	in := vpcInput(t, true, map[string]string{"network.provider-networks": rolePools}, 0)
+	in.Attached = []string{"provider-zulu", "provider-alpha", "provider-gone"}
+	in.AttachedRoute = "203.0.113.1"
+	spec, _ := PlanVpc(in)
+	if !slices.Equal(spec.ExtraExternalSubnets, []string{"provider-zulu", "provider-alpha", "provider-bravo"}) {
+		t.Fatalf("subnets %v", spec.ExtraExternalSubnets)
+	}
+	if spec.DefaultRoute == nil || spec.DefaultRoute.NextHop != "203.0.113.1" {
+		t.Fatalf("route %+v", spec.DefaultRoute)
+	}
+}
+
+func TestPlanVpcL2DropsTheRouteOfAnExistingVpcWhenNoAttachmentIsConfigured(t *testing.T) {
+	in := vpcInput(t, true, map[string]string{"network.provider-networks": rolePools}, 0)
+	in.Attached = []string{"provider-gone"}
+	in.AttachedRoute = "203.0.113.99"
+	spec, _ := PlanVpc(in)
+	if spec.DefaultRoute == nil || spec.DefaultRoute.NextHop != "198.51.100.1" || !slices.Equal(spec.ExtraExternalSubnets, []string{"provider-bravo", "provider-zulu"}) {
+		t.Fatalf("spec %+v", spec)
 	}
 }
 

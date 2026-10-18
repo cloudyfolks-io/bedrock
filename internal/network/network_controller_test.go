@@ -228,6 +228,63 @@ func TestNetworkReconcilerRendersL2External(t *testing.T) {
 	requireCondition(t, getNetwork(t, c, network.Name).Status.Conditions, ConditionExternalReady, metav1.ConditionTrue, ReasonConnected)
 }
 
+const legacyPools = `[{"name":"public","interface":"b","cidr":"91.246.31.0/24","gateway":"91.246.31.1"},{"name":"backup","interface":"b","cidr":"198.51.100.0/24","gateway":"198.51.100.1"}]`
+
+const rolePoolsAfterUpgrade = `[{"name":"public","interface":"b","cidr":"91.246.31.0/24","gateway":"91.246.31.1"},{"name":"backup","role":"platform","interface":"b","cidr":"198.51.100.0/24","gateway":"198.51.100.1"}]`
+
+func vpcExternalSpec(t *testing.T, c client.Client, name string) ([]string, string) {
+	t.Helper()
+	vpc := vpcOf(t, c, name)
+	return fabric.VpcSpecExternalSubnets(vpc), fabric.VpcDefaultNextHop(vpc)
+}
+
+func TestNetworkReconcilerKeepsTheAttachmentsOfAnExistingVpc(t *testing.T) {
+	c := cleanEnv(t)
+	setSetting(t, "network.provider-networks", legacyPools)
+	network := createExternalNetwork(t, c)
+	legacy := fabric.Vpc(fabric.Meta{Name: VpcName(network.Name), Labels: ObjectLabels("Network", network.Name, network.Spec.TenantRef, ""), Annotations: OwnerAnnotations(&network)}, fabric.VpcSpec{
+		EnableExternal:       true,
+		ExtraExternalSubnets: []string{"provider-public", "provider-backup"},
+		DefaultRoute:         &fabric.StaticRoute{CIDR: "0.0.0.0/0", NextHop: "91.246.31.1"},
+	})
+	if err := c.Create(context.Background(), legacy); err != nil {
+		t.Fatal(err)
+	}
+	setSetting(t, "network.provider-networks", rolePoolsAfterUpgrade)
+	reconcileNetwork(t, c, network.Name)
+	subnets, hop := vpcExternalSpec(t, c, network.Name)
+	if len(subnets) != 2 || subnets[0] != "provider-public" || subnets[1] != "provider-backup" || hop != "91.246.31.1" {
+		t.Fatalf("an existing Vpc must keep its attachments: %v via %s", subnets, hop)
+	}
+}
+
+func TestNetworkReconcilerAttachesTenantPoolsToANewVpc(t *testing.T) {
+	c := cleanEnv(t)
+	setSetting(t, "network.provider-networks", rolePoolsAfterUpgrade)
+	network := createExternalNetwork(t, c)
+	reconcileNetwork(t, c, network.Name)
+	subnets, hop := vpcExternalSpec(t, c, network.Name)
+	if len(subnets) != 1 || subnets[0] != "provider-public" || hop != "91.246.31.1" {
+		t.Fatalf("a new Vpc must attach tenant pools only: %v via %s", subnets, hop)
+	}
+}
+
+func TestNetworkReconcilerL2NeedsNoFRRAgent(t *testing.T) {
+	c := cleanEnv(t)
+	publicSettings(t)
+	network := createExternalNetwork(t, c)
+	reconcileNetwork(t, c, network.Name)
+	ctx := context.Background()
+	if err := fabrictest.MarkVpcStandby(ctx, c, network.Name); err != nil {
+		t.Fatal(err)
+	}
+	if err := fabrictest.CreateRouterPort(ctx, c, network.Name, "provider-public", "91.246.31.5"); err != nil {
+		t.Fatal(err)
+	}
+	reconcileNetwork(t, c, network.Name)
+	requireCondition(t, getNetwork(t, c, network.Name).Status.Conditions, ConditionExternalReady, metav1.ConditionTrue, ReasonConnected)
+}
+
 func bgpConnectedNetwork(t *testing.T, c client.Client) v1alpha1.Network {
 	t.Helper()
 	bgpSettings(t)

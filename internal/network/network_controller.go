@@ -70,7 +70,11 @@ func (r *NetworkReconciler) Reconcile(ctx context.Context, req reconcile.Request
 	if err != nil {
 		return reconcile.Result{}, err
 	}
-	spec, external := PlanVpc(VpcInput{Network: network, Config: cfg, VrfID: vrf})
+	attached, route, err := r.existingAttachment(ctx, &network)
+	if err != nil {
+		return reconcile.Result{}, err
+	}
+	spec, external := PlanVpc(VpcInput{Network: network, Config: cfg, VrfID: vrf, Attached: attached, AttachedRoute: route})
 	vpc := fabric.Vpc(fabric.Meta{Name: VpcName(network.Name), Labels: ObjectLabels("Network", network.Name, network.Spec.TenantRef, ""), Annotations: OwnerAnnotations(&network)}, spec)
 	if conflict, err := r.conflicts(ctx, vpc, &network); err != nil || conflict {
 		if err != nil {
@@ -91,6 +95,17 @@ func (r *NetworkReconciler) Reconcile(ctx context.Context, req reconcile.Request
 	}
 	status.Conditions = withVRFPolicy(withRangePolicy(status.Conditions, network.Generation, breach), network.Generation, vrfBreach)
 	return r.publish(ctx, &network, status)
+}
+
+func (r *NetworkReconciler) existingAttachment(ctx context.Context, network *v1alpha1.Network) ([]string, string, error) {
+	existing, err := getObject(ctx, r.Client, fabric.VpcGVK, VpcName(network.Name))
+	if apierrors.IsNotFound(err) || (err == nil && !ownedBy(existing, network)) {
+		return nil, "", nil
+	}
+	if err != nil {
+		return nil, "", err
+	}
+	return fabric.VpcSpecExternalSubnets(existing), fabric.VpcDefaultNextHop(existing), nil
 }
 
 func (r *NetworkReconciler) conflicts(ctx context.Context, vpc *unstructured.Unstructured, network *v1alpha1.Network) (bool, error) {

@@ -244,3 +244,17 @@ func TestSubnetAvailableAddressesAcceptsNumberTypes(t *testing.T) {
 		}
 	}
 }
+
+func TestVpcReadsItsExternalSpec(t *testing.T) {
+	u := Vpc(Meta{Name: "acme"}, VpcSpec{EnableExternal: true, ExtraExternalSubnets: []string{"provider-a", "provider-b"}, DefaultRoute: &StaticRoute{CIDR: "0.0.0.0/0", NextHop: "192.0.2.1"}})
+	if got := VpcSpecExternalSubnets(u); !reflect.DeepEqual(got, []string{"provider-a", "provider-b"}) {
+		t.Fatalf("subnets %v", got)
+	}
+	if got := VpcDefaultNextHop(u); got != "192.0.2.1" {
+		t.Fatalf("next hop %q", got)
+	}
+	private := Vpc(Meta{Name: "acme"}, VpcSpec{})
+	if len(VpcSpecExternalSubnets(private)) != 0 || VpcDefaultNextHop(private) != "" {
+		t.Fatal("a private Vpc has no external spec")
+	}
+}

@@ -1,6 +1,7 @@
 package network
 
 import (
+	"cmp"
 	"fmt"
 	"slices"
 	"strings"
@@ -19,6 +20,9 @@ type VpcInput struct {
 	Network v1alpha1.Network
 	Config  Config
 	VrfID   uint32
+
+	Attached      []string
+	AttachedRoute string
 }
 
 type External struct {
@@ -41,16 +45,42 @@ func PlanVpc(in VpcInput) (fabric.VpcSpec, External) {
 }
 
 func planL2(in VpcInput) (fabric.VpcSpec, External) {
-	subnets := make([]string, len(in.Config.ProviderNetworks))
-	for i, pn := range in.Config.ProviderNetworks {
+	kept := keptPools(in.Config, in.Attached)
+	pools := slices.Concat(kept, unattachedTenantPools(in.Config, kept))
+	if len(pools) == 0 {
+		return fabric.VpcSpec{}, External{Requested: true, Reason: ReasonNoProviderNetwork, Message: "enableExternal in l2 mode needs a provider network with the role tenant; set network.provider-networks"}
+	}
+	subnets := make([]string, len(pools))
+	for i, pn := range pools {
 		subnets[i] = ExternalSubnetName(pn.Name)
 	}
-	first := in.Config.ProviderNetworks[0]
+	nextHop := pools[0].Gateway
+	if len(kept) > 0 {
+		nextHop = cmp.Or(in.AttachedRoute, nextHop)
+	}
 	return fabric.VpcSpec{
 		EnableExternal:       true,
 		ExtraExternalSubnets: subnets,
-		DefaultRoute:         &fabric.StaticRoute{CIDR: defaultCIDR, NextHop: first.Gateway},
+		DefaultRoute:         &fabric.StaticRoute{CIDR: defaultCIDR, NextHop: nextHop},
 	}, External{Requested: true, Reason: ReasonConnected}
+}
+
+func keptPools(cfg Config, attached []string) []v1alpha1.ProviderNetworkSpec {
+	var kept []v1alpha1.ProviderNetworkSpec
+	for _, subnet := range attached {
+		if i := slices.IndexFunc(cfg.ProviderNetworks, func(pn v1alpha1.ProviderNetworkSpec) bool { return ExternalSubnetName(pn.Name) == subnet }); i >= 0 {
+			kept = append(kept, cfg.ProviderNetworks[i])
+		}
+	}
+	return kept
+}
+
+func unattachedTenantPools(cfg Config, kept []v1alpha1.ProviderNetworkSpec) []v1alpha1.ProviderNetworkSpec {
+	tenants := slices.DeleteFunc(slices.Clone(cfg.ProviderNetworks), func(pn v1alpha1.ProviderNetworkSpec) bool {
+		return !IsTenantPool(pn) || slices.ContainsFunc(kept, func(k v1alpha1.ProviderNetworkSpec) bool { return k.Name == pn.Name })
+	})
+	slices.SortFunc(tenants, func(a, b v1alpha1.ProviderNetworkSpec) int { return strings.Compare(a.Name, b.Name) })
+	return tenants
 }
 
 func planBGP(in VpcInput) (fabric.VpcSpec, External) {
