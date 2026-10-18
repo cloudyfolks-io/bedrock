@@ -109,6 +109,14 @@ A running guest keeps its value until its next DHCP lease, which is 3600 seconds
 The pod interface of a VM takes the MTU when the VM pod starts.
 The operator does not restart a VM.
 
+When no MTU is set, Fabric gives the guest the DHCP MTU 1400, which is 1500 minus 100.
+It gives the pod interface the MTU of the node NIC minus 100.
+Geneve adds 100 bytes to every packet between nodes.
+Keep `network.mtu` and `spec.mtu` at or below the MTU of the node NICs minus 100.
+A larger value drops or fragments the packets between nodes.
+A cluster whose node NICs have an MTU of 1500 must leave `network.mtu` empty, or set 1400 or less.
+ir-central-1 sets 1500, because its underlay MTU is larger.
+
 Only the platform may add, change or remove network selection annotations on a pod.
 The annotations are all keys with the prefix `k8s.v1.cni.cncf.io/`, `v1.multus-cni.io/` or `ovn.kubernetes.io/`, and all keys with the text `cloudyfolks.io/`.
 The admission policy `bedrock-network-attachments` refuses every other identity in a project namespace.
