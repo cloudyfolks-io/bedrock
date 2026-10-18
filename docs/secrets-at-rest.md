@@ -79,8 +79,12 @@ To restore after the loss of all control-plane nodes:
    ```
 
    Unpack `backup.tar.gz`. It holds the file `k0s_backup_*.tar.gz`.
-3. Run `k0s restore` with the file `k0s_backup_*.tar.gz`.
-4. Start k0s.
+3. Put the images back. A scheduled etcd snapshot holds no images. On a
+   rebuilt host, extract the images of the bundle before you restore. The
+   section [Etcd snapshots](backup.md#etcd-snapshots) gives the command and
+   the restore script.
+4. Run `k0s restore` with the file `k0s_backup_*.tar.gz`.
+5. Start k0s.
 
 With KMS v2, the KMS service holds the key. The file holds only the
 endpoint. Back up the keys of the KMS service separately. A restore cannot
