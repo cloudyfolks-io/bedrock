@@ -153,6 +153,15 @@ An older Network has `spec.cidr` with one range instead.
 The operator reads `cidr` as a list with one entry, and it does not change the object.
 Set exactly one of `cidr` and `cidrs`.
 To move an older Network to `cidrs`, replace `cidr` with a `cidrs` list that holds the old range, in one update.
+Use a merge patch:
+
+```
+kubectl patch network <name> --type merge -p '{"spec":{"cidr":null,"cidrs":["<old cidr>","<new range>"]}}'
+```
+
+`kubectl apply` cannot do this move.
+The tenancy controller owns the field `cidr` of the default Network of a tenant, so an apply from another manager cannot remove it.
+Both fields stay set, and the API server refuses the object.
 You can add a range to `cidrs`.
 You cannot remove a range, and you cannot go back to `cidr`.
 

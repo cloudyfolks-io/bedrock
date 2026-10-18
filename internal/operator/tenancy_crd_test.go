@@ -165,6 +165,14 @@ func TestNetworkRangesMigration(t *testing.T) {
 	change.Spec.CIDR = "10.101.0.0/16"
 	updateInvalid(t, c, change, "cidr is immutable")
 
+	touched := old.DeepCopy()
+	touched.Labels = map[string]string{"touched": "yes"}
+	touched.Spec.EnableExternal = true
+	if err := c.Update(ctx, touched); err != nil {
+		t.Fatalf("an update of another field of an old Network must be accepted: %v", err)
+	}
+	old = touched
+
 	migrated := old.DeepCopy()
 	migrated.Spec.CIDR = ""
 	migrated.Spec.CIDRs = []string{"10.100.0.0/16", "172.16.0.0/16"}

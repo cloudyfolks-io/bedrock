@@ -161,6 +161,7 @@ The Network holds the field `vpcCIDR` of the tenant as the only entry of `spec.c
 A Network from an older release has `spec.cidr` with the same range.
 The operator keeps `spec.cidr` on that Network and does not change it.
 When an administrator moves the Network to `spec.cidrs`, the operator keeps the ranges of the administrator.
+The move needs a merge patch that sets `cidrs` and `cidr: null`, as docs/network.md shows.
 The prefix of `vpcCIDR` is at most 24.
 Only IPv4 is possible.
 
