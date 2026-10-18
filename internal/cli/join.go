@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strings"
 	"time"
 
@@ -92,6 +93,11 @@ func RunJoin(ctx context.Context, args []string, deps InitDeps, stdout, stderr i
 	facts, err := host.Gather(ctx, deps.Exec, deps.Root, deps.FreeBytes, deps.Uid)
 	if err != nil {
 		return fail(stderr, err)
+	}
+	if adopt != nil {
+		if err := requireOSDRole(*adopt, facts.Hostname, nodeRoles); err != nil {
+			return fail(stderr, err)
+		}
 	}
 	var cfg v1alpha1.ClusterConfig
 	cfg.Spec.API.VIP = token.VIP
@@ -214,6 +220,14 @@ func RunJoin(ctx context.Context, args []string, deps InitDeps, stdout, stderr i
 	fmt.Fprintf(stdout, "joined as %s\n", strings.Join(nodeRoles, ","))
 	removeBundleDir(bundleDir)
 	return 0
+}
+
+func requireOSDRole(adopt v1alpha1.AdoptSpec, hostname string, nodeRoles []string) error {
+	listed := slices.ContainsFunc(adopt.Hosts, func(h v1alpha1.AdoptHost) bool { return h.Node == hostname })
+	if listed && !hasRole(nodeRoles, v1alpha1.RoleCephOSD) {
+		return fmt.Errorf("join: %s is in storage.adopt.hosts, the token has no %s role, create a token with bedrock token create --roles %s", hostname, v1alpha1.RoleCephOSD, v1alpha1.RoleCephOSD)
+	}
+	return nil
 }
 
 func checkAuthnFiles(files map[string][]byte) error {

@@ -52,8 +52,13 @@ func TestJoinRejectsGarbageToken(t *testing.T) {
 
 func joinToken(t *testing.T) string {
 	t.Helper()
+	return joinTokenWithRoles(t, "workload")
+}
+
+func joinTokenWithRoles(t *testing.T, roles ...string) string {
+	t.Helper()
 	token, err := k0s.EncodeToken(k0s.Token{
-		Version: "v0.1.0-test", Roles: []string{"workload"}, K0sToken: "tok",
+		Version: "v0.1.0-test", Roles: roles, K0sToken: "tok",
 		VIP: "10.0.10.10", K0sVersion: "1.36.3+k0s.0", SupportedOS: []string{"ubuntu-24.04"},
 	})
 	if err != nil {

@@ -280,7 +280,7 @@ func TestRunInitAdoptStopsOnLabelReadFailure(t *testing.T) {
 
 func joinAdoptArgs(t *testing.T, dataDir, adoptPath string) []string {
 	t.Helper()
-	return []string{"--token", joinToken(t), "--data-dir", dataDir, "--k0s-bin", "/usr/local/bin/k0s", "--adopt-config", adoptPath}
+	return []string{"--token", joinTokenWithRoles(t, "ceph-osd"), "--data-dir", dataDir, "--k0s-bin", "/usr/local/bin/k0s", "--adopt-config", adoptPath}
 }
 
 func TestRunJoinAdoptChecksTheHost(t *testing.T) {
@@ -291,7 +291,7 @@ func TestRunJoinAdoptChecksTheHost(t *testing.T) {
 	dataDir := filepath.Join(root, "var", "lib", "k0s")
 	e.Errors["/usr/local/bin/k0s status --data-dir "+dataDir] = &host.ExitError{Code: 1}
 	tokenPath := filepath.Join(root, "etc", "k0s", "join-token")
-	installArgs := k0s.InstallArgs(k0s.InstallOptions{Role: "worker", Force: true, TokenFile: tokenPath, Labels: roles.Labels([]string{"workload"}), KubeletExtraArgs: []string{"--node-status-update-frequency=4s"}, DataDir: dataDir, KubeletRootDir: k0s.DefaultKubeletRootDir})
+	installArgs := k0s.InstallArgs(k0s.InstallOptions{Role: "worker", Force: true, TokenFile: tokenPath, Labels: roles.Labels([]string{"ceph-osd"}), KubeletExtraArgs: []string{"--node-status-update-frequency=4s"}, DataDir: dataDir, KubeletRootDir: k0s.DefaultKubeletRootDir})
 	e.Responses["/usr/local/bin/k0s "+strings.Join(installArgs, " ")] = ""
 	deps := adoptDeps(root, e)
 	deps.Executable = fakeExecutable(t)
@@ -544,5 +544,54 @@ func TestPreflightResultsAcceptAMonitorAddressOnThisHost(t *testing.T) {
 	}
 	if r, ok := resultFor(results, "adopt-mon-a-address"); !ok || !r.OK {
 		t.Fatalf("%+v\n%s", r, preflight.Format(results))
+	}
+}
+
+func TestRunJoinAdoptRefusesAListedHostWithoutTheCephOSDRole(t *testing.T) {
+	root, e := adoptedHost(t)
+	dataDir := filepath.Join(root, "var", "lib", "k0s")
+	adoptPath := adoptConfigFile(t, t.TempDir(), adoptInitConfig)
+	args := []string{"--token", joinTokenWithRoles(t, "workload"), "--data-dir", dataDir, "--k0s-bin", "/usr/local/bin/k0s", "--adopt-config", adoptPath}
+	var out, errOut bytes.Buffer
+	code := RunJoin(context.Background(), args, adoptDeps(root, e), &out, &errOut)
+	want := "join: node-1 is in storage.adopt.hosts, the token has no ceph-osd role, create a token with bedrock token create --roles ceph-osd\n"
+	if code != 1 || errOut.String() != want {
+		t.Fatalf("exit %d\nstdout %s\nstderr %q", code, out.String(), errOut.String())
+	}
+	assertNoHostChange(t, root, e)
+}
+
+func TestRunJoinAdoptAcceptsTheCephOSDRoleFromTheRolesFlag(t *testing.T) {
+	root, e := adoptedHost(t)
+	e.Responses["hostname"] = "node-2\n"
+	e.Responses["blkid -p -o value -s TYPE /dev/disk/by-id/wwn-0x2"] = "ceph_bluestore\n"
+	e.Responses["head -c 4096 /dev/disk/by-id/wwn-0x2"] = e.Responses["head -c 4096 "+osdDisk]
+	dataDir := filepath.Join(root, "var", "lib", "k0s")
+	e.Errors["/usr/local/bin/k0s status --data-dir "+dataDir] = &host.ExitError{Code: 1}
+	tokenPath := filepath.Join(root, "etc", "k0s", "join-token")
+	installArgs := k0s.InstallArgs(k0s.InstallOptions{Role: "worker", Force: true, TokenFile: tokenPath, Labels: roles.Labels([]string{"ceph-osd"}), KubeletExtraArgs: []string{"--node-status-update-frequency=4s"}, DataDir: dataDir, KubeletRootDir: k0s.DefaultKubeletRootDir})
+	e.Responses["/usr/local/bin/k0s "+strings.Join(installArgs, " ")] = ""
+	deps := adoptDeps(root, e)
+	deps.Executable = fakeExecutable(t)
+	adoptPath := adoptConfigFile(t, t.TempDir(), adoptInitConfig)
+	args := []string{"--token", joinTokenWithRoles(t, "workload"), "--roles", "ceph-osd", "--data-dir", dataDir, "--k0s-bin", "/usr/local/bin/k0s", "--adopt-config", adoptPath}
+	var out, errOut bytes.Buffer
+	if code := RunJoin(context.Background(), args, deps, &out, &errOut); code != 0 {
+		t.Fatalf("exit %d\nstdout %s\nstderr %s", code, out.String(), errOut.String())
+	}
+}
+
+func TestRunJoinWithoutAdoptNeedsNoCephOSDRole(t *testing.T) {
+	root, e := adoptedHost(t)
+	dataDir := filepath.Join(root, "var", "lib", "k0s")
+	e.Errors["/usr/local/bin/k0s status --data-dir "+dataDir] = &host.ExitError{Code: 1}
+	tokenPath := filepath.Join(root, "etc", "k0s", "join-token")
+	installArgs := k0s.InstallArgs(k0s.InstallOptions{Role: "worker", Force: true, TokenFile: tokenPath, Labels: roles.Labels([]string{"workload"}), KubeletExtraArgs: []string{"--node-status-update-frequency=4s"}, DataDir: dataDir, KubeletRootDir: k0s.DefaultKubeletRootDir})
+	e.Responses["/usr/local/bin/k0s "+strings.Join(installArgs, " ")] = ""
+	deps := adoptDeps(root, e)
+	deps.Executable = fakeExecutable(t)
+	var out, errOut bytes.Buffer
+	if code := RunJoin(context.Background(), []string{"--token", joinToken(t), "--data-dir", dataDir, "--k0s-bin", "/usr/local/bin/k0s"}, deps, &out, &errOut); code != 0 {
+		t.Fatalf("exit %d\nstdout %s\nstderr %s", code, out.String(), errOut.String())
 	}
 }
