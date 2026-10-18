@@ -2,10 +2,12 @@ package network
 
 import (
 	"context"
+	"strconv"
 	"strings"
 	"testing"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/utils/ptr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	"github.com/cloudyfolks-io/bedrock/api/v1alpha1"
@@ -66,6 +68,46 @@ func TestSubnetGatewayMustBeInsideTheCIDR(t *testing.T) {
 	garbage := subnetOf(ns, "garbage", "10.100.1.0/24")
 	garbage.Spec.Gateway = "not-an-ip"
 	requireRejected(t, c, garbage, "gateway")
+}
+
+func TestSubnetMTUMustBeFrom576To9000(t *testing.T) {
+	c, _ := testEnv(t)
+	ns := newNamespace(t, "crd", unique(t, "p"))
+	requireAccepted(t, c, subnetOf(ns, "unset", "10.100.1.0/24"))
+	for i, mtu := range []int32{576, 1500, 9000} {
+		subnet := subnetOf(ns, "valid-"+strconv.Itoa(i), "10.100."+strconv.Itoa(i+10)+".0/24")
+		subnet.Spec.MTU = ptr.To(mtu)
+		requireAccepted(t, c, subnet)
+	}
+	for i, mtu := range []int32{575, 0, -1, 9001} {
+		subnet := subnetOf(ns, "invalid-"+strconv.Itoa(i), "10.100."+strconv.Itoa(i+20)+".0/24")
+		subnet.Spec.MTU = ptr.To(mtu)
+		requireRejected(t, c, subnet, "mtu")
+	}
+}
+
+func TestSubnetDNSServersMustBeUpToFourIPv4Addresses(t *testing.T) {
+	c, _ := testEnv(t)
+	ns := newNamespace(t, "crd", unique(t, "p"))
+	valid := [][]string{{"100.66.0.53"}, {"1.1.1.1", "8.8.8.8", "9.9.9.9", "100.66.0.53"}}
+	for i, servers := range valid {
+		subnet := subnetOf(ns, "valid-"+strconv.Itoa(i), "10.100."+strconv.Itoa(i+10)+".0/24")
+		subnet.Spec.DNSServers = servers
+		requireAccepted(t, c, subnet)
+	}
+	invalid := [][]string{
+		{"1.1.1.1", "8.8.8.8", "9.9.9.9", "100.66.0.53", "10.0.0.2"},
+		{"fd00::53"},
+		{"1.1.1.1", "fd00::53"},
+		{"dns.example"},
+		{""},
+		{strings.Repeat("1", 46)},
+	}
+	for i, servers := range invalid {
+		subnet := subnetOf(ns, "invalid-"+strconv.Itoa(i), "10.100."+strconv.Itoa(i+20)+".0/24")
+		subnet.Spec.DNSServers = servers
+		requireRejected(t, c, subnet, "dnsServers")
+	}
 }
 
 func TestSubnetNameMustBeADNSLabel(t *testing.T) {

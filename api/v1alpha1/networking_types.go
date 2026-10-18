@@ -39,6 +39,15 @@ type SubnetSpec struct {
 	ExcludeIPs []string `json:"excludeIPs,omitempty"`
 	// +optional
 	DNSZoneRef string `json:"dnsZoneRef,omitempty"`
+	// +kubebuilder:validation:Minimum=576
+	// +kubebuilder:validation:Maximum=9000
+	// +optional
+	MTU *int32 `json:"mtu,omitempty"`
+	// +kubebuilder:validation:MaxItems=4
+	// +kubebuilder:validation:items:MaxLength=45
+	// +kubebuilder:validation:XValidation:rule="self.all(s, isIP(s) && ip(s).family() == 4)",message="dnsServers must be IPv4 addresses"
+	// +optional
+	DNSServers []string `json:"dnsServers,omitempty"`
 }
 
 type SubnetStatus struct {
