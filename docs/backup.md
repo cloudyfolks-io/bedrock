@@ -388,13 +388,18 @@ SNAPSHOT=/var/lib/bedrock/backups/etcd-<stamp>.tar.gz.age sh -eu <<'EOF'
 mkdir -p /root/restore
 bedrock backup decrypt --in "$SNAPSHOT" --out /root/restore/snapshot.tar.gz
 tar -xzf /root/restore/snapshot.tar.gz -C /root/restore
+set -- /root/restore/k0s_backup_*.tar.gz
+[ "$#" -eq 1 ] && [ -e "$1" ] || { echo "error: one k0s archive must be in /root/restore" >&2; exit 1; }
+ENTRIES=$(tar -tzf "$1")
+DIRS="etcd pki manifests helmhome"
+if printf '%s\n' "$ENTRIES" | grep -Eq '^(\./)?images(/|$)'; then DIRS="$DIRS images"; fi
 systemctl stop k0scontroller
 HOLD=/var/lib/k0s/.pre-restore-$(date -u +%Y%m%dT%H%M%SZ)
 mkdir -p "$HOLD"
-for dir in etcd pki manifests images helmhome; do
+for dir in $DIRS; do
   if [ -e "/var/lib/k0s/$dir" ]; then mv "/var/lib/k0s/$dir" "$HOLD/"; fi
 done
-k0s restore --config-out /root/restore/k0s.yaml /root/restore/k0s_backup_*.tar.gz
+k0s restore --config-out /root/restore/k0s.yaml "$1"
 systemctl start k0scontroller
 EOF
 ```
@@ -405,13 +410,18 @@ For a plain snapshot, use this script. It has no decrypt line.
 SNAPSHOT=/var/lib/bedrock/backups/etcd-<stamp>.tar.gz sh -eu <<'EOF'
 mkdir -p /root/restore
 tar -xzf "$SNAPSHOT" -C /root/restore
+set -- /root/restore/k0s_backup_*.tar.gz
+[ "$#" -eq 1 ] && [ -e "$1" ] || { echo "error: one k0s archive must be in /root/restore" >&2; exit 1; }
+ENTRIES=$(tar -tzf "$1")
+DIRS="etcd pki manifests helmhome"
+if printf '%s\n' "$ENTRIES" | grep -Eq '^(\./)?images(/|$)'; then DIRS="$DIRS images"; fi
 systemctl stop k0scontroller
 HOLD=/var/lib/k0s/.pre-restore-$(date -u +%Y%m%dT%H%M%SZ)
 mkdir -p "$HOLD"
-for dir in etcd pki manifests images helmhome; do
+for dir in $DIRS; do
   if [ -e "/var/lib/k0s/$dir" ]; then mv "/var/lib/k0s/$dir" "$HOLD/"; fi
 done
-k0s restore --config-out /root/restore/k0s.yaml /root/restore/k0s_backup_*.tar.gz
+k0s restore --config-out /root/restore/k0s.yaml "$1"
 systemctl start k0scontroller
 EOF
 ```
@@ -419,6 +429,22 @@ EOF
 The snapshot does not hold the encryption key of the Secrets. On a host that
 lost its disk, put the key at `/etc/bedrock/encryption/encryption.yaml`
 before you run the script. See [Secrets at rest](secrets-at-rest.md).
+
+A scheduled etcd snapshot holds no image tarballs. The script keeps the
+directory `/var/lib/k0s/images` on the host. A snapshot of an older release
+and a backup of an upgrade hold the directory `images`. For these archives,
+the script moves the directory aside and restores it from the archive.
+
+On a rebuilt host, put the images back before you run the script. Use the
+bundle of the version that took the snapshot, for the architecture of the
+host:
+
+```sh
+BUNDLE=<bundle path> sh -eu <<'EOF'
+mkdir -p /var/lib/k0s
+tar --zstd -xf "$BUNDLE" -C /var/lib/k0s images
+EOF
+```
 
 After the script, do sections 4 and 5 of the
 [runbook](runbooks/restore-control-plane.md). They restart the kubelet on

@@ -77,12 +77,17 @@ install -m 0755 /var/lib/bedrock/previous/k0s /usr/local/bin/k0s
 mkdir -p /root/restore
 bedrock backup decrypt --in "$BACKUP" --out /root/restore/backup.tar.gz
 tar -xzf /root/restore/backup.tar.gz -C /root/restore
+set -- /root/restore/k0s_backup_*.tar.gz
+[ "$#" -eq 1 ] && [ -e "$1" ] || { echo "error: one k0s archive must be in /root/restore" >&2; exit 1; }
+ENTRIES=$(tar -tzf "$1")
+DIRS="etcd pki manifests helmhome"
+if printf '%s\n' "$ENTRIES" | grep -Eq '^(\./)?images(/|$)'; then DIRS="$DIRS images"; fi
 HOLD=/var/lib/k0s/.pre-restore-$(date -u +%Y%m%dT%H%M%SZ)
 mkdir -p "$HOLD"
-for dir in etcd pki manifests images helmhome; do
+for dir in $DIRS; do
   if [ -e "/var/lib/k0s/$dir" ]; then mv "/var/lib/k0s/$dir" "$HOLD/"; fi
 done
-k0s restore --config-out /root/restore/k0s.yaml /root/restore/k0s_backup_*.tar.gz
+k0s restore --config-out /root/restore/k0s.yaml "$1"
 printf '{"backup":"%s","completedAt":"%s"}\n' "$BACKUP" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" > /var/lib/bedrock/restore.json
 systemctl start k0scontroller
 EOF
@@ -95,12 +100,17 @@ BACKUP=<path> sh -eu <<'EOF'
 install -m 0755 /var/lib/bedrock/previous/k0s /usr/local/bin/k0s
 mkdir -p /root/restore
 tar -xzf "$BACKUP" -C /root/restore
+set -- /root/restore/k0s_backup_*.tar.gz
+[ "$#" -eq 1 ] && [ -e "$1" ] || { echo "error: one k0s archive must be in /root/restore" >&2; exit 1; }
+ENTRIES=$(tar -tzf "$1")
+DIRS="etcd pki manifests helmhome"
+if printf '%s\n' "$ENTRIES" | grep -Eq '^(\./)?images(/|$)'; then DIRS="$DIRS images"; fi
 HOLD=/var/lib/k0s/.pre-restore-$(date -u +%Y%m%dT%H%M%SZ)
 mkdir -p "$HOLD"
-for dir in etcd pki manifests images helmhome; do
+for dir in $DIRS; do
   if [ -e "/var/lib/k0s/$dir" ]; then mv "/var/lib/k0s/$dir" "$HOLD/"; fi
 done
-k0s restore --config-out /root/restore/k0s.yaml /root/restore/k0s_backup_*.tar.gz
+k0s restore --config-out /root/restore/k0s.yaml "$1"
 printf '{"backup":"%s","completedAt":"%s"}\n' "$BACKUP" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" > /var/lib/bedrock/restore.json
 systemctl start k0scontroller
 EOF
@@ -116,6 +126,11 @@ Backup phase.
 
 The archive also contains the OVN databases `ovnnb_db.db` and `ovnsb_db.db`.
 This procedure does not use them.
+
+A scheduled etcd snapshot (`etcd-*`) holds no image tarballs. The script
+keeps the directory `/var/lib/k0s/images` on the host. On a rebuilt host,
+put the images of the bundle back before you run the script. See
+[Etcd snapshots](../backup.md#etcd-snapshots).
 
 ## 3. Join the other controllers again
 
