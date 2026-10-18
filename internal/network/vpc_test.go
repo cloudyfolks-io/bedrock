@@ -36,6 +36,9 @@ func TestPlanVpcL2External(t *testing.T) {
 	if spec.DefaultRoute == nil || spec.DefaultRoute.CIDR != "0.0.0.0/0" || spec.DefaultRoute.NextHop != "91.246.31.1" || spec.Dynamic != nil {
 		t.Fatalf("route %+v", spec.DefaultRoute)
 	}
+	if spec.EnableBfd {
+		t.Fatal("an L2 plan must not enable BFD")
+	}
 	if !ext.Requested || ext.Reason != ReasonConnected {
 		t.Fatalf("ext %+v", ext)
 	}
@@ -53,9 +56,12 @@ func TestPlanVpcBGP(t *testing.T) {
 	if !spec.EnableExternal || !slices.Equal(spec.ExtraExternalSubnets, []string{"provider-transit"}) || ext.Reason != ReasonConnected {
 		t.Fatalf("spec %+v ext %+v", spec, ext)
 	}
-	want := fabric.DynamicRouting{VrfID: 1000, ExternalSubnet: "provider-transit", Redistribute: []string{"nat", "lb"}}
-	if spec.Dynamic == nil || spec.Dynamic.VrfID != want.VrfID || spec.Dynamic.ExternalSubnet != want.ExternalSubnet || !slices.Equal(spec.Dynamic.Redistribute, want.Redistribute) {
+	want := fabric.DynamicRouting{VrfID: 1000, ExternalSubnet: "provider-transit", Redistribute: []string{"nat", "lb"}, LocalOnly: true}
+	if spec.Dynamic == nil || spec.Dynamic.VrfID != want.VrfID || spec.Dynamic.ExternalSubnet != want.ExternalSubnet || !slices.Equal(spec.Dynamic.Redistribute, want.Redistribute) || spec.Dynamic.LocalOnly != want.LocalOnly {
 		t.Fatalf("dynamic %+v", spec.Dynamic)
+	}
+	if !spec.EnableBfd {
+		t.Fatal("a BGP plan must enable BFD")
 	}
 }
 

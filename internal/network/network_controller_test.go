@@ -175,6 +175,19 @@ func TestNetworkReconcilerBGPKeepsTheVrfIDStable(t *testing.T) {
 	}
 }
 
+func TestNetworkReconcilerBGPSetsBfdAndLocalOnly(t *testing.T) {
+	c := cleanEnv(t)
+	bgpSettings(t)
+	network := createExternalNetwork(t, c)
+	reconcileNetwork(t, c, network.Name)
+	vpc := vpcOf(t, c, network.Name)
+	bfd, _, _ := unstructured.NestedBool(vpc.Object, "spec", "enableBfd")
+	localOnly, _, _ := unstructured.NestedBool(vpc.Object, "spec", "dynamicRouting", "localOnly")
+	if !bfd || !localOnly {
+		t.Fatalf("enableBfd %v localOnly %v", bfd, localOnly)
+	}
+}
+
 func TestNetworkReconcilerBGPSkipsIDsUsedByForeignVpcs(t *testing.T) {
 	c := cleanEnv(t)
 	bgpSettings(t)

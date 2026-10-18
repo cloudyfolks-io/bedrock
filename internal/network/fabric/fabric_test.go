@@ -41,8 +41,23 @@ func TestVpcBuildsL2Spec(t *testing.T) {
 }
 
 func TestVpcBuildsBGPSpec(t *testing.T) {
-	u := Vpc(Meta{Name: "acme"}, VpcSpec{EnableExternal: true, ExtraExternalSubnets: []string{"provider-transit"}, Dynamic: &DynamicRouting{VrfID: 1000, ExternalSubnet: "provider-transit", Redistribute: []string{"nat", "lb"}}})
-	equal(t, spec(t, u)["dynamicRouting"].(map[string]any), map[string]any{"enabled": true, "redistribute": []any{"nat", "lb"}, "vrfId": int64(1000), "externalSubnet": "provider-transit"})
+	u := Vpc(Meta{Name: "acme"}, VpcSpec{EnableExternal: true, EnableBfd: true, ExtraExternalSubnets: []string{"provider-transit"}, Dynamic: &DynamicRouting{VrfID: 1000, ExternalSubnet: "provider-transit", Redistribute: []string{"nat", "lb"}, LocalOnly: true}})
+	got := spec(t, u)
+	if got["enableBfd"] != true {
+		t.Fatalf("unexpected spec %#v", got)
+	}
+	equal(t, got["dynamicRouting"].(map[string]any), map[string]any{"enabled": true, "redistribute": []any{"nat", "lb"}, "vrfId": int64(1000), "externalSubnet": "provider-transit", "localOnly": true})
+}
+
+func TestVpcOmitsBfdAndLocalOnlyByDefault(t *testing.T) {
+	u := Vpc(Meta{Name: "acme"}, VpcSpec{EnableExternal: true, Dynamic: &DynamicRouting{VrfID: 1000, ExternalSubnet: "provider-transit", Redistribute: []string{"nat"}}})
+	got := spec(t, u)
+	if _, found := got["enableBfd"]; found {
+		t.Fatalf("unexpected spec %#v", got)
+	}
+	if _, found := got["dynamicRouting"].(map[string]any)["localOnly"]; found {
+		t.Fatalf("unexpected spec %#v", got)
+	}
 }
 
 func TestSubnetBuild(t *testing.T) {

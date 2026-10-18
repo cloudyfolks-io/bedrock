@@ -61,9 +61,10 @@ func planBGP(in VpcInput) (fabric.VpcSpec, External) {
 	subnet := ExternalSubnetName(transit.Name)
 	return fabric.VpcSpec{
 		EnableExternal:       true,
+		EnableBfd:            true,
 		ExtraExternalSubnets: []string{subnet},
 		DefaultRoute:         &fabric.StaticRoute{CIDR: defaultCIDR, NextHop: transit.Gateway},
-		Dynamic:              &fabric.DynamicRouting{VrfID: in.VrfID, ExternalSubnet: subnet, Redistribute: []string{"nat", "lb"}},
+		Dynamic:              &fabric.DynamicRouting{VrfID: in.VrfID, ExternalSubnet: subnet, Redistribute: []string{"nat", "lb"}, LocalOnly: true},
 	}, External{Requested: true, Reason: ReasonConnected}
 }
 

@@ -24,10 +24,12 @@ type DynamicRouting struct {
 	VrfID          uint32
 	ExternalSubnet string
 	Redistribute   []string
+	LocalOnly      bool
 }
 
 type VpcSpec struct {
 	EnableExternal       bool
+	EnableBfd            bool
 	ExtraExternalSubnets []string
 	DefaultRoute         *StaticRoute
 	Dynamic              *DynamicRouting
@@ -98,15 +100,26 @@ func Vpc(m Meta, s VpcSpec) *unstructured.Unstructured {
 	if s.DefaultRoute != nil {
 		spec["staticRoutes"] = []any{map[string]any{"policy": "policyDst", "cidr": s.DefaultRoute.CIDR, "nextHopIP": s.DefaultRoute.NextHop}}
 	}
+	if s.EnableBfd {
+		spec["enableBfd"] = true
+	}
 	if s.Dynamic != nil {
-		spec["dynamicRouting"] = map[string]any{
-			"enabled":        true,
-			"redistribute":   anys(s.Dynamic.Redistribute),
-			"vrfId":          int64(s.Dynamic.VrfID),
-			"externalSubnet": s.Dynamic.ExternalSubnet,
-		}
+		spec["dynamicRouting"] = dynamicRouting(*s.Dynamic)
 	}
 	return object(VpcGVK, m, spec)
+}
+
+func dynamicRouting(d DynamicRouting) map[string]any {
+	routing := map[string]any{
+		"enabled":        true,
+		"redistribute":   anys(d.Redistribute),
+		"vrfId":          int64(d.VrfID),
+		"externalSubnet": d.ExternalSubnet,
+	}
+	if d.LocalOnly {
+		routing["localOnly"] = true
+	}
+	return routing
 }
 
 func Subnet(m Meta, s SubnetSpec) *unstructured.Unstructured {

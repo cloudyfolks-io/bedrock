@@ -149,6 +149,8 @@ Set the Settings `network.bgp.local-asn`, `network.bgp.peers` and `network.bgp.t
 The transit network carries the router ports.
 The other provider networks hold the elastic IPs.
 The FRR agent advertises the addresses.
+Every Network with `enableExternal` gets `enableBfd` and `dynamicRouting.localOnly` on its Fabric `Vpc`.
+Fabric advertises the NAT and load balancer addresses only from the chassis that holds the port.
 The agent is the DaemonSet `kube-system/fabric-frr`.
 The ElasticIP reports `FRRAgentMissing` until the agent exists.
 Enable `frr` in the values of the Fabric chart to install it.
