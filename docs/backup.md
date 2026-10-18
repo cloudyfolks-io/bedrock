@@ -437,12 +437,14 @@ the script moves the directory aside and restores it from the archive.
 
 On a rebuilt host, put the images back before you run the script. Use the
 bundle of the version that took the snapshot, for the architecture of the
-host:
+host. The option `--zstd` of `tar` needs the program `zstd`. Install `zstd`
+on the host first. The option `--no-same-owner` makes root the owner of the
+files:
 
 ```sh
 BUNDLE=<bundle path> sh -eu <<'EOF'
 mkdir -p /var/lib/k0s
-tar --zstd -xf "$BUNDLE" -C /var/lib/k0s images
+tar --zstd --no-same-owner -xf "$BUNDLE" -C /var/lib/k0s images
 EOF
 ```
 
