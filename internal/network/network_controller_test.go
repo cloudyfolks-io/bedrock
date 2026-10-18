@@ -136,6 +136,39 @@ func TestNetworkReconcilerRendersL2External(t *testing.T) {
 	requireCondition(t, getNetwork(t, c, network.Name).Status.Conditions, ConditionExternalReady, metav1.ConditionTrue, ReasonConnected)
 }
 
+func bgpConnectedNetwork(t *testing.T, c client.Client) v1alpha1.Network {
+	t.Helper()
+	bgpSettings(t)
+	network := createExternalNetwork(t, c)
+	reconcileNetwork(t, c, network.Name)
+	ctx := context.Background()
+	if err := fabrictest.MarkVpcStandby(ctx, c, network.Name); err != nil {
+		t.Fatal(err)
+	}
+	if err := fabrictest.CreateRouterPort(ctx, c, network.Name, "provider-transit", "192.0.2.11"); err != nil {
+		t.Fatal(err)
+	}
+	return network
+}
+
+func TestNetworkReconcilerBGPReportsAMissingFRRAgent(t *testing.T) {
+	c := cleanEnv(t)
+	network := bgpConnectedNetwork(t, c)
+	reconcileNetwork(t, c, network.Name)
+	requireCondition(t, getNetwork(t, c, network.Name).Status.Conditions, ConditionExternalReady, metav1.ConditionFalse, ReasonFRRAgentMissing)
+	installFRRAgent(t, c, 0)
+	reconcileNetwork(t, c, network.Name)
+	requireCondition(t, getNetwork(t, c, network.Name).Status.Conditions, ConditionExternalReady, metav1.ConditionFalse, ReasonFRRAgentMissing)
+}
+
+func TestNetworkReconcilerBGPConnectsWithAReadyFRRAgent(t *testing.T) {
+	c := cleanEnv(t)
+	network := bgpConnectedNetwork(t, c)
+	installFRRAgent(t, c, 1)
+	reconcileNetwork(t, c, network.Name)
+	requireCondition(t, getNetwork(t, c, network.Name).Status.Conditions, ConditionExternalReady, metav1.ConditionTrue, ReasonConnected)
+}
+
 func TestNetworkReconcilerReportsNoProviderNetwork(t *testing.T) {
 	c := cleanEnv(t)
 	network := createExternalNetwork(t, c)

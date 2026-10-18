@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"time"
 
-	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -20,11 +19,7 @@ import (
 	"github.com/cloudyfolks-io/bedrock/internal/ssa"
 )
 
-const (
-	frrNamespace = "kube-system"
-	frrName      = "fabric-frr"
-	moveRequeue  = time.Second
-)
+const moveRequeue = time.Second
 
 type ElasticIPReconciler struct {
 	Client client.Client
@@ -291,7 +286,7 @@ func (r *ElasticIPReconciler) externalPath(ctx context.Context, eip v1alpha1.Ela
 	if v := ExternalPath(in); v != nil {
 		return v, nil
 	}
-	return r.fabricAgentGap(ctx, cfg)
+	return frrAgentGap(ctx, r.Client, cfg)
 }
 
 func (r *ElasticIPReconciler) pathInput(ctx context.Context, eip v1alpha1.ElasticIP, cfg Config, network v1alpha1.Network) (ExternalPathInput, error) {
@@ -310,18 +305,6 @@ func (r *ElasticIPReconciler) pathInput(ctx context.Context, eip v1alpha1.Elasti
 		in.RouterPort = ObservedPort{Exists: true, Ready: fabric.EipReady(port), Address: fabric.EipAddress(port)}
 	}
 	return in, client.IgnoreNotFound(err)
-}
-
-func (r *ElasticIPReconciler) fabricAgentGap(ctx context.Context, cfg Config) (*Violation, error) {
-	if cfg.EIPMode != EIPModeBGP {
-		return nil, nil
-	}
-	var agent appsv1.DaemonSet
-	err := r.Client.Get(ctx, client.ObjectKey{Namespace: frrNamespace, Name: frrName}, &agent)
-	if apierrors.IsNotFound(err) {
-		return &Violation{Reason: ReasonFRRAgentMissing, Message: "the fabric-frr agent is not installed; enable frr in the fabric chart values"}, nil
-	}
-	return nil, err
 }
 
 func (r *ElasticIPReconciler) attachAddress(ctx context.Context, eip v1alpha1.ElasticIP, meta fabric.Meta, address string, vm v1alpha1.VirtualMachine, nic v1alpha1.VMNetwork) (outcome, error) {

@@ -4,7 +4,6 @@ import (
 	"context"
 	"testing"
 
-	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
@@ -468,16 +467,10 @@ func TestElasticIPBGPNeedsTheFRRAgent(t *testing.T) {
 	reconcileElasticIP(t, f.c, f.namespace, "ip1")
 	requireEIP(t, f.c, f.namespace, "ip1", metav1.ConditionFalse, ReasonFRRAgentMissing)
 	requireNoFip(t, f.c, f.namespace, "ip1")
-	labels := map[string]string{"app": "frr"}
-	agent := &appsv1.DaemonSet{
-		ObjectMeta: metav1.ObjectMeta{Namespace: "kube-system", Name: "fabric-frr"},
-		Spec: appsv1.DaemonSetSpec{
-			Selector: &metav1.LabelSelector{MatchLabels: labels},
-			Template: corev1.PodTemplateSpec{ObjectMeta: metav1.ObjectMeta{Labels: labels}, Spec: corev1.PodSpec{Containers: []corev1.Container{{Name: "frr", Image: "frr"}}}},
-		},
-	}
-	requireAccepted(t, f.c, agent)
-	t.Cleanup(func() { _ = f.c.Delete(context.Background(), agent) })
+	installFRRAgent(t, f.c, 0)
+	reconcileElasticIP(t, f.c, f.namespace, "ip1")
+	requireEIP(t, f.c, f.namespace, "ip1", metav1.ConditionFalse, ReasonFRRAgentMissing)
+	setFRRAgentReady(t, f.c, 1)
 	reconcileElasticIP(t, f.c, f.namespace, "ip1")
 	if _, err := fipObject(f.c, f.namespace, "ip1"); err != nil {
 		t.Fatalf("with the agent the reconcile continues: %v", err)

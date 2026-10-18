@@ -36,6 +36,7 @@ func (r *NetworkReconciler) SetupWithManager(mgr ctrl.Manager) error {
 			return NetworkOfSubnet(*obj.(*v1alpha1.Subnet))
 		}), builder.WithPredicates(predicate.GenerationChangedPredicate{})).
 		Watches(&v1alpha1.Setting{}, handler.EnqueueRequestsFromMapFunc(everything(networkLister(c))), builder.WithPredicates(settingsOfNetworkArea())).
+		Watches(&appsv1.DaemonSet{}, handler.EnqueueRequestsFromMapFunc(everything(networkLister(c))), builder.WithPredicates(frrAgentOnly())).
 		Complete(r)
 }
 
@@ -125,9 +126,7 @@ func (r *ElasticIPReconciler) SetupWithManager(mgr ctrl.Manager) error {
 			return HolderWaiters(list.Items, *obj.(*v1alpha1.ElasticIP))
 		})).
 		Watches(&v1alpha1.LoadBalancer{}, handler.EnqueueRequestsFromMapFunc(inNamespaceOf(eips))).
-		Watches(&appsv1.DaemonSet{}, handler.EnqueueRequestsFromMapFunc(everything(eips)), builder.WithPredicates(predicate.NewPredicateFuncs(func(obj client.Object) bool {
-			return obj.GetNamespace() == frrNamespace && obj.GetName() == frrName
-		}))).
+		Watches(&appsv1.DaemonSet{}, handler.EnqueueRequestsFromMapFunc(everything(eips)), builder.WithPredicates(frrAgentOnly())).
 		Complete(r)
 }
 

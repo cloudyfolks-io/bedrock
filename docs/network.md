@@ -155,7 +155,7 @@ The agent is the DaemonSet `kube-system/fabric-frr`.
 The release installs it.
 It runs only on the nodes that have the label `fabric.cloudyfolks.io/external-gw=true`.
 Bedrock puts this label on each Host that has the role `fabric-gateway`, and removes it when the role is removed.
-The ElasticIP reports `FRRAgentMissing` until the agent exists.
+The ElasticIP and the `ExternalReady` condition of the Network report `FRRAgentMissing` until one agent pod is ready on a gateway node.
 
 The Settings `network.bgp.bfd`, `network.bgp.hold-time`, `network.bgp.keepalive-time`, `network.bgp.graceful-restart`, `network.bgp.advertise-filter` and `network.bgp.redistribute-tables` tune the BGP sessions.
 Bedrock writes them to the `BgpConf` named `bedrock`.
@@ -257,7 +257,7 @@ Then take the action in the table.
 | `ElasticIPNotReady` | The ElasticIP is not ready. Wait or fix the ElasticIP. |
 | `ExcludeIPsInvalid` | An excluded address or range is wrong. Use addresses inside the CIDR and ascending ranges. |
 | `ExternalNotConnected` | The Vpc has no working external port. Check the Network and the gateway nodes. |
-| `FRRAgentMissing` | The fabric-frr agent is missing. Enable `frr` in the Fabric chart values. |
+| `FRRAgentMissing` | No fabric-frr pod is ready on a gateway node. Give a Host the role `fabric-gateway` and check the DaemonSet `kube-system/fabric-frr`. |
 | `FabricConflict` | A Fabric object with this name belongs to another owner. Rename the Bedrock object. |
 | `FabricNotReady` | Fabric has not finished. Wait. If it stays, read the message. |
 | `GatewayInvalid` | The gateway is outside the CIDR or is the network or broadcast address. Use a usable address. |

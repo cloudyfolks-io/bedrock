@@ -69,7 +69,7 @@ func (r *NetworkReconciler) Reconcile(ctx context.Context, req reconcile.Request
 	if err != nil {
 		return reconcile.Result{}, err
 	}
-	status, err := r.observedStatus(ctx, network, observed, spec, external)
+	status, err := r.observedStatus(ctx, network, observed, spec, external, cfg)
 	if err != nil {
 		return reconcile.Result{}, err
 	}
@@ -154,7 +154,7 @@ func withAnnotation(annotations map[string]string, key, value string) map[string
 	return out
 }
 
-func (r *NetworkReconciler) observedStatus(ctx context.Context, network v1alpha1.Network, vpc *unstructured.Unstructured, spec fabric.VpcSpec, external External) (v1alpha1.NetworkStatus, error) {
+func (r *NetworkReconciler) observedStatus(ctx context.Context, network v1alpha1.Network, vpc *unstructured.Unstructured, spec fabric.VpcSpec, external External, cfg Config) (v1alpha1.NetworkStatus, error) {
 	subnets, err := r.acceptedSubnets(ctx, network)
 	if err != nil {
 		return v1alpha1.NetworkStatus{}, err
@@ -168,7 +168,11 @@ func (r *NetworkReconciler) observedStatus(ctx context.Context, network v1alpha1
 	if !external.Requested {
 		meta.RemoveStatusCondition(&conditions, ConditionExternalReady)
 	} else {
-		conditions = withCondition(conditions, r.externalCondition(ctx, network, vpc, spec, external))
+		condition, err := r.externalCondition(ctx, network, vpc, spec, external, cfg)
+		if err != nil {
+			return v1alpha1.NetworkStatus{}, err
+		}
+		conditions = withCondition(conditions, condition)
 	}
 	return v1alpha1.NetworkStatus{
 		CommonStatus: v1alpha1.CommonStatus{ObservedGeneration: network.Generation, Conditions: conditions},
@@ -177,14 +181,21 @@ func (r *NetworkReconciler) observedStatus(ctx context.Context, network v1alpha1
 	}, nil
 }
 
-func (r *NetworkReconciler) externalCondition(ctx context.Context, network v1alpha1.Network, vpc *unstructured.Unstructured, spec fabric.VpcSpec, external External) metav1.Condition {
+func (r *NetworkReconciler) externalCondition(ctx context.Context, network v1alpha1.Network, vpc *unstructured.Unstructured, spec fabric.VpcSpec, external External, cfg Config) (metav1.Condition, error) {
 	if external.Reason != ReasonConnected {
-		return falseCondition(ConditionExternalReady, network.Generation, external.Reason, external.Message)
+		return falseCondition(ConditionExternalReady, network.Generation, external.Reason, external.Message), nil
 	}
 	if message := r.externalGap(ctx, vpc, spec); message != "" {
-		return falseCondition(ConditionExternalReady, network.Generation, ReasonPending, message)
+		return falseCondition(ConditionExternalReady, network.Generation, ReasonPending, message), nil
 	}
-	return trueCondition(ConditionExternalReady, network.Generation, ReasonConnected)
+	gap, err := frrAgentGap(ctx, r.Client, cfg)
+	if err != nil {
+		return metav1.Condition{}, err
+	}
+	if gap != nil {
+		return falseCondition(ConditionExternalReady, network.Generation, gap.Reason, gap.Message), nil
+	}
+	return trueCondition(ConditionExternalReady, network.Generation, ReasonConnected), nil
 }
 
 func (r *NetworkReconciler) externalGap(ctx context.Context, vpc *unstructured.Unstructured, spec fabric.VpcSpec) string {
