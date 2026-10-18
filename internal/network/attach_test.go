@@ -1,6 +1,7 @@
 package network
 
 import (
+	"maps"
 	"slices"
 	"testing"
 )
@@ -67,5 +68,30 @@ func TestAttachments(t *testing.T) {
 	got := Attachments([]NIC{{Namespace: "t1-prod", Subnet: "default"}, {Namespace: "t1-prod", Subnet: "backend"}})
 	if !slices.Equal(got, []string{"t1-prod/default", "t1-prod/backend"}) {
 		t.Fatalf("attachments %v", got)
+	}
+}
+
+func TestPodNetworkMetadataCarriesTheRequestedAddress(t *testing.T) {
+	annotations, _ := PodNetworkMetadata([]NIC{
+		{Namespace: "t1-prod", Subnet: "default", Address: "10.100.0.50"},
+		{Namespace: "t1-prod", Subnet: "backend", Address: "10.101.0.9"},
+	})
+	if annotations["default.t1-prod.fabric.cloudyfolks.io/ip_address"] != "10.100.0.50" || annotations["backend.t1-prod.fabric.cloudyfolks.io/ip_address"] != "10.101.0.9" {
+		t.Fatalf("annotations %v", annotations)
+	}
+}
+
+func TestPodNetworkMetadataOfAnAutoNICIsUnchanged(t *testing.T) {
+	annotations, labels := PodNetworkMetadata([]NIC{{Namespace: "t1-prod", Subnet: "default", MAC: "02:00:00:00:00:01", SecurityGroups: []string{"web"}}, {Namespace: "t1-prod", Subnet: "backend"}})
+	want := map[string]string{
+		"default.t1-prod.fabric.cloudyfolks.io/port_security":   "true",
+		"default.t1-prod.fabric.cloudyfolks.io/security_groups": FabricName("t1-prod", "web"),
+		"default.t1-prod.fabric.cloudyfolks.io/mac_address":     "02:00:00:00:00:01",
+		"backend.t1-prod.fabric.cloudyfolks.io/port_security":   "true",
+		"backend.t1-prod.fabric.cloudyfolks.io/security_groups": "default-t1-prod",
+		"backend.t1-prod.fabric.cloudyfolks.io/default_route":   "false",
+	}
+	if !maps.Equal(annotations, want) || !maps.Equal(labels, map[string]string{"sg.bedrock.cloudyfolks.io/web": "true"}) {
+		t.Fatalf("annotations %v labels %v", annotations, labels)
 	}
 }

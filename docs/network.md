@@ -67,12 +67,22 @@ Follow these rules.
      When the entry names no security group, the value is `default-<namespace>`.
    - `default.t1-prod.fabric.cloudyfolks.io/mac_address: "<mac>"`.
      Add it only when the entry has a MAC address.
+   - `default.t1-prod.fabric.cloudyfolks.io/ip_address: "<address>"`.
+     Add it only when the entry has a pinned address.
+     Fabric writes the address that it allocated into the same key.
    - `default.t1-prod.fabric.cloudyfolks.io/default_route: "false"`.
      Add it for every entry except the first.
 5. Add the label `sg.bedrock.cloudyfolks.io/<group>: "true"` for each security group of the VM.
 6. When the security groups of a running VM change, patch the same annotations and labels on the running pod.
    Fabric applies the change at once.
-7. After the pod runs, Fabric writes `ip_address`, `mac_address`, `cidr`, `gateway` and `allocated` on the pod.
+7. Check a pinned address before the VM starts.
+   The address must be inside the Subnet CIDR.
+   It must not be the gateway, the network address, the broadcast address or an excluded address.
+   No other VM and no other Fabric IP of the Subnet may hold it.
+   The VM does not start when a check fails.
+   The condition `NetworkReady` names the reason: `AddressOutsideSubnet`, `AddressReserved` or `AddressInUse`.
+   The operator checks `AddressInUse` again after 30 seconds.
+8. After the pod runs, Fabric writes `ip_address`, `mac_address`, `cidr`, `gateway` and `allocated` on the pod.
    The key prefix is the provider.
 
 Example fragment of the pod template of a VM:
@@ -266,9 +276,10 @@ Then take the action in the table.
 
 | Reason | Meaning and action |
 |---|---|
-| `AddressInUse` | An older ElasticIP holds this address. Choose another address. |
+| `AddressInUse` | An older ElasticIP holds this address, or, on a VM, another VM or another Fabric IP in the Subnet holds the pinned address. Choose another address. |
 | `AddressOutsideProviderNetwork` | The address is not in the provider network. Choose an address in its CIDR. |
-| `AddressReserved` | The address is the gateway, the network address, the broadcast address or an excluded address. Choose another one. |
+| `AddressOutsideSubnet` | The pinned address of a VM network is not in the Subnet CIDR. Choose an address in the CIDR. |
+| `AddressReserved` | The address is the gateway, the network address, the broadcast address or an excluded address of the provider network or of the Subnet. Choose another one. |
 | `Allocating` | Fabric has not given an address yet. Wait. |
 | `Applied` | The Subnet is programmed. No action. |
 | `Attached` | The ElasticIP is attached to its target. No action. |

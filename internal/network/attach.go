@@ -11,6 +11,7 @@ type NIC struct {
 	Namespace      string
 	Subnet         string
 	MAC            string
+	Address        string
 	SecurityGroups []string
 }
 
@@ -36,6 +37,9 @@ func nicAnnotations(index int, nic NIC) map[string]string {
 	annotations[prefix+"security_groups"] = securityGroupNames(nic)
 	if nic.MAC != "" {
 		annotations[prefix+"mac_address"] = nic.MAC
+	}
+	if nic.Address != "" {
+		annotations[prefix+"ip_address"] = nic.Address
 	}
 	if index > 0 {
 		annotations[prefix+"default_route"] = "false"

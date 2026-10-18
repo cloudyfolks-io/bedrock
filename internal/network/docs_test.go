@@ -37,7 +37,7 @@ func TestDocsMentionEverySetting(t *testing.T) {
 func TestDocsStatePodContractStrings(t *testing.T) {
 	text := document(t)
 	annotations, labels := PodNetworkMetadata([]NIC{
-		{Namespace: "t1-prod", Subnet: "default", MAC: "02:00:00:00:00:01", SecurityGroups: []string{"web"}},
+		{Namespace: "t1-prod", Subnet: "default", MAC: "02:00:00:00:00:01", Address: "10.100.0.50", SecurityGroups: []string{"web"}},
 		{Namespace: "t1-prod", Subnet: "backend"},
 	})
 	for key := range annotations {

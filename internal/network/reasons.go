@@ -27,6 +27,7 @@ const (
 	ReasonUnknownProviderNetwork         = "UnknownProviderNetwork"
 	ReasonUnsupported                    = "Unsupported"
 	ReasonAddressOutsideProviderNetwork  = "AddressOutsideProviderNetwork"
+	ReasonAddressOutsideSubnet           = "AddressOutsideSubnet"
 	ReasonAddressReserved                = "AddressReserved"
 	ReasonAddressInUse                   = "AddressInUse"
 	ReasonAllocating                     = "Allocating"
@@ -56,7 +57,7 @@ var AllReasons = sortedReasons([]string{
 	ReasonNoProviderNetwork, ReasonBGPNotConfigured, ReasonApplied, ReasonNetworkNotFound, ReasonNetworkNotOwned,
 	ReasonNetworkNotReady, ReasonCIDROutsideNetwork, ReasonCIDROverlap, ReasonGatewayInvalid, ReasonExcludeIPsInvalid,
 	ReasonNamespaceNotLabeled, ReasonFabricNotReady, ReasonInUse, ReasonReserved, ReasonAttached,
-	ReasonUnknownProviderNetwork, ReasonUnsupported, ReasonAddressOutsideProviderNetwork, ReasonAddressReserved,
+	ReasonUnknownProviderNetwork, ReasonUnsupported, ReasonAddressOutsideProviderNetwork, ReasonAddressOutsideSubnet, ReasonAddressReserved,
 	ReasonAddressInUse, ReasonAllocating, ReasonTargetNotFound, ReasonTargetMismatch, ReasonWaitingForAddress,
 	ReasonNetworkNotExternal, ReasonExternalNotConnected, ReasonFRRAgentMissing, ReasonProgrammed,
 	ReasonElasticIPNotFound, ReasonElasticIPNotReady, ReasonNoTargets, ReasonTargetNetworkMismatch,
