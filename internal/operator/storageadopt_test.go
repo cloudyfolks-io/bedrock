@@ -521,11 +521,9 @@ var (
 		"radosgw-admin zonegroup rename --rgw-zonegroup=objectstore --zonegroup-new-name=bedrock-rgw",
 		"radosgw-admin zone rename --rgw-zone=objectstore --zone-new-name=bedrock-rgw --rgw-zonegroup=bedrock-rgw",
 	}
-	rgwZoneRewrite = []string{
-		"radosgw-admin zone set --rgw-zone=bedrock-rgw",
-		"radosgw-admin period update --commit --rgw-realm=bedrock-rgw",
-	}
-	rgwPoolRenames = []string{
+	rgwZoneSet      = []string{"radosgw-admin zone set --rgw-zone=bedrock-rgw"}
+	rgwPeriodCommit = []string{"radosgw-admin period update --commit --rgw-realm=bedrock-rgw"}
+	rgwPoolRenames  = []string{
 		"ceph osd pool rename objectstore.rgw.buckets.data bedrock-rgw.rgw.buckets.data",
 		"ceph osd pool rename objectstore.rgw.buckets.index bedrock-rgw.rgw.buckets.index",
 		"ceph osd pool rename objectstore.rgw.buckets.non-ec bedrock-rgw.rgw.buckets.non-ec",
@@ -713,8 +711,8 @@ func TestRenamePlan(t *testing.T) {
 		overrides []map[string]any
 		want      []string
 	}{
-		{"fresh", nil, slices.Concat(blockRename, cephFSRename, rgwIdentityRename, rgwZoneRewrite, rgwPoolRenames)},
-		{"block done", []map[string]any{blockDone()}, slices.Concat(cephFSRename, rgwIdentityRename, rgwZoneRewrite, rgwPoolRenames)},
+		{"fresh", nil, slices.Concat(blockRename, cephFSRename, rgwIdentityRename, rgwZoneSet, rgwPoolRenames, rgwPeriodCommit)},
+		{"block done", []map[string]any{blockDone()}, slices.Concat(cephFSRename, rgwIdentityRename, rgwZoneSet, rgwPoolRenames, rgwPeriodCommit)},
 		{
 			"CephFS half done",
 			[]map[string]any{{
@@ -723,7 +721,7 @@ func TestRenamePlan(t *testing.T) {
 				keyOldFS: nil,
 				keyNewFS: filesystemFlags(false, true),
 			}},
-			slices.Concat([]string{"ceph osd pool rename filesystem-data-data0 bedrock-fs-data0"}, cephFSFlags, rgwIdentityRename, rgwZoneRewrite, rgwPoolRenames),
+			slices.Concat([]string{"ceph osd pool rename filesystem-data-data0 bedrock-fs-data0"}, cephFSFlags, rgwIdentityRename, rgwZoneSet, rgwPoolRenames, rgwPeriodCommit),
 		},
 		{
 			"CephFS renamed and pools renamed but flags pending",
@@ -733,7 +731,7 @@ func TestRenamePlan(t *testing.T) {
 		{
 			"RGW zone renamed but pools not",
 			[]map[string]any{filesystemDone(), identityRenamed(t, "objectstore")},
-			slices.Concat(rgwZoneRewrite, rgwPoolRenames),
+			slices.Concat(rgwZoneSet, rgwPoolRenames, rgwPeriodCommit),
 		},
 		{
 			"RGW zone rewritten and some pools renamed",
@@ -741,18 +739,19 @@ func TestRenamePlan(t *testing.T) {
 				".mgr", "bedrock-block", "bedrock-fs-metadata", "bedrock-fs-data0", ".rgw.root",
 				"bedrock-rgw.rgw.buckets.data", "bedrock-rgw.rgw.buckets.index",
 				"objectstore.rgw.buckets.non-ec", "objectstore.rgw.control", "objectstore.rgw.log", "objectstore.rgw.meta", "objectstore.rgw.otp")}},
-			rgwPoolRenames[2:],
+			slices.Concat(rgwPoolRenames[2:], rgwPeriodCommit),
 		},
 		{
 			"CephFS failed but not renamed",
 			[]map[string]any{blockDone(), {keyOldFS: filesystemFlags(false, true)}},
-			slices.Concat(cephFSRename, rgwIdentityRename, rgwZoneRewrite, rgwPoolRenames),
+			slices.Concat(cephFSRename, rgwIdentityRename, rgwZoneSet, rgwPoolRenames, rgwPeriodCommit),
 		},
 		{
 			"RGW realm renamed but zonegroup not",
 			[]map[string]any{filesystemDone(), {keyRealms: nameList("realms", "bedrock-rgw")}},
-			slices.Concat(rgwIdentityRename[1:], rgwZoneRewrite, rgwPoolRenames),
+			slices.Concat(rgwIdentityRename[1:], rgwZoneSet, rgwPoolRenames, rgwPeriodCommit),
 		},
+		{"RGW pools renamed and zone rewritten, period state is not read", allDone(t), nil},
 		{"all done", allDone(t), nil},
 		{
 			"no CephFS and no object store",
@@ -799,12 +798,141 @@ func TestRenamePlanLeavesAnExistingBedrockFilesystemAloneForAnEmptyName(t *testi
 		t.Fatal(err)
 	}
 	got := planNames(renamePlan(state, *adopt))
-	want := slices.Concat(blockRename, rgwIdentityRename, rgwZoneRewrite, rgwPoolRenames)
+	want := slices.Concat(blockRename, rgwIdentityRename, rgwZoneSet, rgwPoolRenames, rgwPeriodCommit)
 	if !slices.Equal(got, want) {
 		t.Fatalf("plan\n%s\nwant\n%s", strings.Join(got, "\n"), strings.Join(want, "\n"))
 	}
 	if conflict := renameConflict(state, *adopt); conflict != "" {
 		t.Fatalf("conflict %q", conflict)
+	}
+}
+
+func TestRenamePlanCommitsThePeriodAfterEveryRGWPoolRename(t *testing.T) {
+	state, err := readCephState(context.Background(), cephFixture(t).run, *adoptSpec())
+	if err != nil {
+		t.Fatal(err)
+	}
+	names := planNames(renamePlan(state, *adoptSpec()))
+	commit := slices.Index(names, rgwPeriodCommit[0])
+	zoneSet := slices.Index(names, rgwZoneSet[0])
+	if commit != len(names)-1 {
+		t.Fatalf("the period commit must be the last command, plan\n%s", strings.Join(names, "\n"))
+	}
+	for _, rename := range rgwPoolRenames {
+		position := slices.Index(names, rename)
+		if position < 0 || position > commit || position < zoneSet {
+			t.Fatalf("%q at %d, zone set at %d, period commit at %d", rename, position, zoneSet, commit)
+		}
+	}
+}
+
+type rgwSimulator struct {
+	pools     []string
+	realm     string
+	zoneGroup string
+	zone      string
+	rewritten bool
+	ran       []string
+}
+
+func newRGWSimulator() *rgwSimulator {
+	return &rgwSimulator{
+		pools: slices.Concat([]string{".mgr", ".rgw.root"}, rgwPoolNames("objectstore")),
+		realm: "objectstore", zoneGroup: "objectstore", zone: "objectstore",
+	}
+}
+
+func (s *rgwSimulator) has(pool string) bool {
+	return slices.Contains(s.pools, pool)
+}
+
+func (s *rgwSimulator) json(value any) ([]byte, error) {
+	return json.Marshal(value)
+}
+
+func (s *rgwSimulator) run(_ context.Context, command []string) ([]byte, error) {
+	key := commandKey(command)
+	switch {
+	case key == keyQuorum:
+		return s.json(map[string]any{"quorum_names": []string{"a", "b", "c"}})
+	case key == keyOSDs:
+		return s.json(map[string]any{"num_up_osds": 4})
+	case key == keyPools:
+		var entries []map[string]any
+		for i, pool := range s.pools {
+			entries = append(entries, map[string]any{"pool_id": i + 1, "pool_name": pool, "size": 3})
+		}
+		return s.json(entries)
+	case key == keyFS:
+		return []byte("[]"), nil
+	case key == keyRealms:
+		return s.json(nameList("realms", s.realm))
+	case key == keyZoneGroups:
+		return s.json(nameList("zonegroups", s.zoneGroup))
+	case key == keyZones:
+		return s.json(nameList("zones", s.zone))
+	case strings.HasPrefix(key, "sh -c zone-pools "):
+		if s.rewritten {
+			return nil, nil
+		}
+		var lines []byte
+		for _, pool := range rgwPoolNames("objectstore") {
+			lines = append(lines, []byte(`"`+pool+`"`+"\n")...)
+		}
+		return lines, nil
+	}
+	s.ran = append(s.ran, key)
+	switch {
+	case strings.HasPrefix(key, "ceph osd pool rename "):
+		fields := strings.Fields(key)
+		from, to := fields[4], fields[5]
+		if !s.has(from) || s.has(to) {
+			return nil, fmt.Errorf("Error EEXIST: pool %q already exists or %q is missing", to, from)
+		}
+		s.pools[slices.Index(s.pools, from)] = to
+	case strings.HasPrefix(key, "radosgw-admin realm rename "):
+		s.realm = "bedrock-rgw"
+	case strings.HasPrefix(key, "radosgw-admin zonegroup rename "):
+		s.zoneGroup = "bedrock-rgw"
+	case strings.HasPrefix(key, "radosgw-admin zone rename "):
+		s.zone = "bedrock-rgw"
+	case strings.HasPrefix(key, "sh -c zone-rewrite "):
+		s.rewritten = true
+	case strings.HasPrefix(key, "sh -c period-commit "):
+		if s.rewritten {
+			for _, pool := range rgwPoolNames("bedrock-rgw") {
+				if !s.has(pool) {
+					s.pools = append(s.pools, pool)
+				}
+			}
+		}
+	default:
+		return nil, fmt.Errorf("unexpected command %q", key)
+	}
+	return nil, nil
+}
+
+func TestRGWRenameEndsAdoptedWithoutTheCommitCreatingTargetPools(t *testing.T) {
+	adopt := adoptSpec()
+	adopt.Pools.Block = ""
+	adopt.Pools.Filesystem = ""
+	sim := newRGWSimulator()
+	var got metav1.Condition
+	for attempt := 0; attempt < 3 && got.Reason != v1alpha1.ReasonAdopted; attempt++ {
+		got = adoptStep(context.Background(), sim.run, *adopt, 3)
+		if got.Reason == v1alpha1.ReasonRenameFailed {
+			t.Fatalf("condition %+v after %v", got, sim.ran)
+		}
+	}
+	if got.Reason != v1alpha1.ReasonAdopted {
+		t.Fatalf("condition %+v", got)
+	}
+	want := slices.Concat([]string{".mgr", ".rgw.root"}, rgwPoolNames("bedrock-rgw"))
+	slices.Sort(want)
+	pools := slices.Clone(sim.pools)
+	slices.Sort(pools)
+	if !slices.Equal(pools, want) {
+		t.Fatalf("pools %v, want %v", pools, want)
 	}
 }
 
@@ -827,8 +955,8 @@ func TestRenamePlanSkipsTheNamesThatAreEmpty(t *testing.T) {
 		empty func(*v1alpha1.AdoptPools)
 		want  []string
 	}{
-		{"block", func(pools *v1alpha1.AdoptPools) { pools.Block = "" }, slices.Concat(cephFSRename, rgwIdentityRename, rgwZoneRewrite, rgwPoolRenames)},
-		{"filesystem", func(pools *v1alpha1.AdoptPools) { pools.Filesystem = "" }, slices.Concat(blockRename, rgwIdentityRename, rgwZoneRewrite, rgwPoolRenames)},
+		{"block", func(pools *v1alpha1.AdoptPools) { pools.Block = "" }, slices.Concat(cephFSRename, rgwIdentityRename, rgwZoneSet, rgwPoolRenames, rgwPeriodCommit)},
+		{"filesystem", func(pools *v1alpha1.AdoptPools) { pools.Filesystem = "" }, slices.Concat(blockRename, rgwIdentityRename, rgwZoneSet, rgwPoolRenames, rgwPeriodCommit)},
 		{"object store", func(pools *v1alpha1.AdoptPools) { pools.ObjectStore = "" }, slices.Concat(blockRename, cephFSRename)},
 		{"all", func(pools *v1alpha1.AdoptPools) { *pools = v1alpha1.AdoptPools{} }, nil},
 	}

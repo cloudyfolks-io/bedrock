@@ -858,10 +858,10 @@ func objectStorePlan(state cephState, old string) []renameCommand {
 	if rewrite {
 		plan = append(plan, zonePoolRewrite(old))
 	}
-	if zoneGroup || zone || rewrite {
+	plan = append(plan, poolRenames(objectStorePoolMoves(state, old))...)
+	if len(plan) > 0 {
 		plan = append(plan, periodCommit())
 	}
-	plan = append(plan, poolRenames(objectStorePoolMoves(state, old))...)
 	return plan
 }
 
