@@ -522,3 +522,27 @@ func TestPreflightResultsMatchTheHostNameInLowerCase(t *testing.T) {
 		}
 	}
 }
+
+func TestPreflightResultsRefuseAMonitorAddressThatIsNotOnThisHost(t *testing.T) {
+	root, e := adoptedHost(t)
+	e.Responses["ip -json addr"] = `[{"addr_info":[{"family":"inet","local":"10.0.10.99"}]}]`
+	results, err := adoptResults(t, root, e, adoptInitConfig)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := "[fail] adopt-mon-a-address: monitor address 10.0.10.11 is not an address of this host"
+	if !strings.Contains(preflight.Format(results), want) || !preflight.Blocked(results) {
+		t.Fatalf("results\n%s", preflight.Format(results))
+	}
+}
+
+func TestPreflightResultsAcceptAMonitorAddressOnThisHost(t *testing.T) {
+	root, e := adoptedHost(t)
+	results, err := adoptResults(t, root, e, adoptInitConfig)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if r, ok := resultFor(results, "adopt-mon-a-address"); !ok || !r.OK {
+		t.Fatalf("%+v\n%s", r, preflight.Format(results))
+	}
+}

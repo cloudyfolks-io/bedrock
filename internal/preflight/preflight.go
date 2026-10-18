@@ -136,6 +136,7 @@ func monitorChecks(fsid string, monitor v1alpha1.AdoptMonitor, adoptFacts host.A
 	prefix := "adopt-mon-" + monitor.ID + "-"
 	results := []Result{
 		check(prefix+"store", true, adoptFacts.MonStores[monitor.ID], fmt.Sprintf("/var/lib/rook/mon-%s/data/store.db not found", monitor.ID)),
+		check(prefix+"address", true, adoptFacts.MonAddresses[monitor.ID], fmt.Sprintf("monitor address %s is not an address of this host", monitor.Address)),
 		check(prefix+"config", true, adoptFacts.ConfigFSID == fsid, configMessage(fsid, adoptFacts.ConfigFSID)),
 	}
 	if adoptFacts.K0sRunning && adoptFacts.BedrockInstalled {

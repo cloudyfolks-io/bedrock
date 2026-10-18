@@ -11,19 +11,31 @@ import (
 	"strings"
 )
 
+type AdoptMonitor struct {
+	ID      string
+	Address string
+}
+
 type AdoptFacts struct {
 	MonStores        map[string]bool
+	MonAddresses     map[string]bool
 	ConfigFSID       string
 	ListeningPorts   []int
 	K0sRunning       bool
 	BedrockInstalled bool
 }
 
-func GatherAdopt(ctx context.Context, e Exec, root string, monitorIDs []string) (AdoptFacts, error) {
+func GatherAdopt(ctx context.Context, e Exec, root string, monitors []AdoptMonitor) (AdoptFacts, error) {
 	rook := filepath.Join(root, "var", "lib", "rook")
-	stores := make(map[string]bool, len(monitorIDs))
-	for _, id := range monitorIDs {
-		stores[id] = exists(filepath.Join(rook, "mon-"+id, "data", "store.db"))
+	stores := make(map[string]bool, len(monitors))
+	held := make(map[string]bool, len(monitors))
+	for _, monitor := range monitors {
+		stores[monitor.ID] = exists(filepath.Join(rook, "mon-"+monitor.ID, "data", "store.db"))
+		onHost, err := HasAddress(ctx, e, monitor.Address)
+		if err != nil {
+			return AdoptFacts{}, err
+		}
+		held[monitor.ID] = onHost
 	}
 	fsid, err := configFSID(filepath.Join(rook, "rook-ceph", "rook-ceph.config"))
 	if err != nil {
@@ -33,7 +45,7 @@ func GatherAdopt(ctx context.Context, e Exec, root string, monitorIDs []string) 
 	if err != nil {
 		return AdoptFacts{}, err
 	}
-	return AdoptFacts{MonStores: stores, ConfigFSID: fsid, ListeningPorts: listeningPorts(out), BedrockInstalled: exists(agentUnitPath(root))}, nil
+	return AdoptFacts{MonStores: stores, MonAddresses: held, ConfigFSID: fsid, ListeningPorts: listeningPorts(out), BedrockInstalled: exists(agentUnitPath(root))}, nil
 }
 
 func configFSID(path string) (string, error) {

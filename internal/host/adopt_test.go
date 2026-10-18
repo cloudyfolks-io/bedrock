@@ -39,8 +39,8 @@ func TestGatherAdopt(t *testing.T) {
 		"mon-a/data/store.db/CURRENT": "x",
 		"rook-ceph/rook-ceph.config":  "[global]\nfsid                      = " + sampleFSID + "\nmon_host = 10.0.10.11\n",
 	})
-	e := &FakeExec{Responses: map[string]string{"ss -H -ltn": ssOutput}}
-	facts, err := GatherAdopt(context.Background(), e, root, []string{"a", "b"})
+	e := &FakeExec{Responses: map[string]string{"ss -H -ltn": ssOutput, "ip -json addr": "[]"}}
+	facts, err := GatherAdopt(context.Background(), e, root, []AdoptMonitor{{ID: "a"}, {ID: "b"}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -74,8 +74,8 @@ func TestGatherAdoptConfigVariants(t *testing.T) {
 }
 
 func TestGatherAdoptMissingFiles(t *testing.T) {
-	e := &FakeExec{Responses: map[string]string{"ss -H -ltn": ""}}
-	facts, err := GatherAdopt(context.Background(), e, t.TempDir(), []string{"a"})
+	e := &FakeExec{Responses: map[string]string{"ss -H -ltn": "", "ip -json addr": "[]"}}
+	facts, err := GatherAdopt(context.Background(), e, t.TempDir(), []AdoptMonitor{{ID: "a"}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -116,5 +116,24 @@ func TestGatherAdoptFindsTheAgentUnitOfABedrockInstall(t *testing.T) {
 	facts, err = GatherAdopt(context.Background(), e, root, nil)
 	if err != nil || !facts.BedrockInstalled {
 		t.Fatalf("facts %+v err %v", facts, err)
+	}
+}
+
+func TestGatherAdoptReadsWhichMonitorAddressesTheHostHolds(t *testing.T) {
+	addresses := `[{"ifname":"lo","addr_info":[{"family":"inet","local":"127.0.0.1"}]},{"ifname":"bond0.10","addr_info":[{"family":"inet","local":"10.0.10.11"}]}]`
+	e := &FakeExec{Responses: map[string]string{"ss -H -ltn": "", "ip -json addr": addresses}}
+	facts, err := GatherAdopt(context.Background(), e, t.TempDir(), []AdoptMonitor{{ID: "a", Address: "10.0.10.11"}, {ID: "b", Address: "10.0.10.12"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !facts.MonAddresses["a"] || facts.MonAddresses["b"] {
+		t.Fatalf("monitor addresses %v", facts.MonAddresses)
+	}
+}
+
+func TestGatherAdoptFailsWhenTheAddressesCannotBeRead(t *testing.T) {
+	e := &FakeExec{Responses: map[string]string{"ss -H -ltn": ""}, Errors: map[string]error{"ip -json addr": errors.New("ip: not found")}}
+	if _, err := GatherAdopt(context.Background(), e, t.TempDir(), []AdoptMonitor{{ID: "a", Address: "10.0.10.11"}}); err == nil {
+		t.Fatal("an address list that cannot be read must be an error")
 	}
 }

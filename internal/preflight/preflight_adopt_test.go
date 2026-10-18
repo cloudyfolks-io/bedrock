@@ -38,7 +38,7 @@ func adoptConfig() v1alpha1.ClusterConfig {
 }
 
 func goodAdoptFacts() host.AdoptFacts {
-	return host.AdoptFacts{MonStores: map[string]bool{"a": true}, ConfigFSID: adoptFSID, ListeningPorts: []int{22, 10250}}
+	return host.AdoptFacts{MonStores: map[string]bool{"a": true}, MonAddresses: map[string]bool{"a": true}, ConfigFSID: adoptFSID, ListeningPorts: []int{22, 10250}}
 }
 
 func goodFactsOn(hostname string) host.Facts {
@@ -135,12 +135,12 @@ func TestFormatShowsTheForeignFSID(t *testing.T) {
 
 func TestAdoptChecksAllGood(t *testing.T) {
 	results := AdoptChecks(adoptSpec(), goodFactsOn("node-1"), goodAdoptFacts())
-	for _, name := range []string{"adopt-node", "adopt-k0s", "adopt-mon-a-store", "adopt-mon-a-config", "adopt-mon-a-port-3300", "adopt-mon-a-port-6789"} {
+	for _, name := range []string{"adopt-node", "adopt-k0s", "adopt-mon-a-store", "adopt-mon-a-address", "adopt-mon-a-config", "adopt-mon-a-port-3300", "adopt-mon-a-port-6789"} {
 		if r := resultNamed(t, results, name); !r.OK || !r.Fatal {
 			t.Fatalf("%s: %+v", name, r)
 		}
 	}
-	if len(results) != 6 || Blocked(results) {
+	if len(results) != 7 || Blocked(results) {
 		t.Fatalf("results\n%s", Format(results))
 	}
 }
@@ -188,12 +188,12 @@ func TestAdoptChecksMonitorProblems(t *testing.T) {
 }
 
 func TestAdoptChecksSkipPortsWhenABedrockK0sRuns(t *testing.T) {
-	facts := host.AdoptFacts{MonStores: map[string]bool{"a": true}, ConfigFSID: adoptFSID, ListeningPorts: []int{3300, 6789}, K0sRunning: true, BedrockInstalled: true}
+	facts := host.AdoptFacts{MonStores: map[string]bool{"a": true}, MonAddresses: map[string]bool{"a": true}, ConfigFSID: adoptFSID, ListeningPorts: []int{3300, 6789}, K0sRunning: true, BedrockInstalled: true}
 	results := AdoptChecks(adoptSpec(), goodFactsOn("node-1"), facts)
-	if Blocked(results) || len(results) != 4 {
+	if Blocked(results) || len(results) != 5 {
 		t.Fatalf("results\n%s", Format(results))
 	}
-	for _, name := range []string{"adopt-node", "adopt-k0s", "adopt-mon-a-store", "adopt-mon-a-config"} {
+	for _, name := range []string{"adopt-node", "adopt-k0s", "adopt-mon-a-store", "adopt-mon-a-address", "adopt-mon-a-config"} {
 		if r := resultNamed(t, results, name); !r.OK {
 			t.Fatalf("%s: %+v", name, r)
 		}
@@ -243,6 +243,27 @@ func TestAdoptChecksAcceptAHostWithoutK0s(t *testing.T) {
 func TestAdoptChecksRefuseAForeignK0sOnAHostWithoutMonitor(t *testing.T) {
 	results := AdoptChecks(adoptSpec(), goodFactsOn("node-3"), host.AdoptFacts{K0sRunning: true})
 	if r := resultNamed(t, results, "adopt-k0s"); r.OK || !r.Fatal {
+		t.Fatalf("%+v", r)
+	}
+}
+
+func TestAdoptChecksRefuseAMonitorAddressThatIsNotOnThisHost(t *testing.T) {
+	facts := goodAdoptFacts()
+	facts.MonAddresses = map[string]bool{"a": false}
+	results := AdoptChecks(adoptSpec(), goodFactsOn("node-1"), facts)
+	r := resultNamed(t, results, "adopt-mon-a-address")
+	if r.OK || !r.Fatal || r.Message != "monitor address 10.0.10.11 is not an address of this host" {
+		t.Fatalf("%+v", r)
+	}
+	if !Blocked(results) {
+		t.Fatal("must block")
+	}
+}
+
+func TestAdoptChecksKeepTheAddressCheckWhenABedrockK0sRuns(t *testing.T) {
+	facts := host.AdoptFacts{MonStores: map[string]bool{"a": true}, ConfigFSID: adoptFSID, K0sRunning: true, BedrockInstalled: true}
+	results := AdoptChecks(adoptSpec(), goodFactsOn("node-1"), facts)
+	if r := resultNamed(t, results, "adopt-mon-a-address"); r.OK || !r.Fatal {
 		t.Fatalf("%+v", r)
 	}
 }

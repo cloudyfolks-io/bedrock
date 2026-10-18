@@ -26,7 +26,7 @@ func preflightResults(ctx context.Context, deps InitDeps, k0sClient k0s.Client, 
 	if err != nil {
 		return nil, err
 	}
-	adoptFacts, err := host.GatherAdopt(ctx, deps.Exec, deps.Root, adoptMonitorIDs(*adopt, facts.Hostname))
+	adoptFacts, err := host.GatherAdopt(ctx, deps.Exec, deps.Root, adoptMonitors(*adopt, facts.Hostname))
 	if err != nil {
 		return nil, err
 	}
@@ -51,14 +51,14 @@ func probeAdoptDevices(ctx context.Context, deps InitDeps, paths []string) ([]ho
 	return devices, nil
 }
 
-func adoptMonitorIDs(adopt v1alpha1.AdoptSpec, hostname string) []string {
-	var ids []string
+func adoptMonitors(adopt v1alpha1.AdoptSpec, hostname string) []host.AdoptMonitor {
+	var monitors []host.AdoptMonitor
 	for _, monitor := range adopt.Monitors {
 		if monitor.Node == hostname {
-			ids = append(ids, monitor.ID)
+			monitors = append(monitors, host.AdoptMonitor{ID: monitor.ID, Address: monitor.Address})
 		}
 	}
-	return ids
+	return monitors
 }
 
 func loadAdoptSpec(path string) (*v1alpha1.AdoptSpec, error) {
