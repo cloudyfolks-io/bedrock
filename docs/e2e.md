@@ -132,7 +132,7 @@ After the upgrade, the script checks these items.
 | The file starts with `age-encryption.org/v1`. | The file is an age file. |
 | `bedrock backup decrypt` opens the file with the admin identity, and opens it with the host key. The two copies are equal. | The file is sealed to the recipients of the Setting and to the host key. |
 | `tar -tzf` lists the opened copy, and the leak check of the section "Secrets encryption" runs on it. The script then deletes the copy. | The opened copy is a valid archive. |
-| The script sets `backup.etcd-schedule` to `* * * * *` and waits up to 10 minutes for a new `etcd-*.tar.gz.age` file. It opens this file with the admin identity. It sets the schedule back to the default when the file exists. The restore of the section [Lean etcd snapshots](#lean-etcd-snapshots) brings the value `* * * * *` back, so the script sets the schedule back to the default again after the restore. | The new agent writes a sealed etcd snapshot, not only seals the old files. |
+| The script sets `backup.etcd-schedule` to `* * * * *` and waits up to 30 minutes for a new `etcd-*.tar.gz.age` file. It opens this file with the admin identity. It sets the schedule back to the default when the file exists. The restore of the section [Lean etcd snapshots](#lean-etcd-snapshots) brings the value `* * * * *` back, so the script sets the schedule back to the default again after the restore. | The new agent writes a sealed etcd snapshot, not only seals the old files. |
 
 The job `e2e-upgrade-abort` checks that the archive that stays after the rollback ends in `.tar.gz.age`.
 The agent of version A restores from this sealed archive with the host key.
@@ -145,7 +145,7 @@ An upgrade backup (`bedrock-*`) keeps them.
 
 | Check | Why |
 | --- | --- |
-| The snapshot file is smaller than 512 MiB. The script prints the size in bytes and the seconds between its marker and the file. | The image tarballs are most of the size of a full k0s backup. The printed seconds show how long a snapshot takes. The script waits up to 10 minutes for the file. |
+| The snapshot file is smaller than 512 MiB. The script prints the size in bytes and the seconds between its marker and the file. | The image tarballs are most of the size of a full k0s backup. The printed seconds show how long a snapshot takes. The script waits up to 30 minutes for the file. `k0s backup` still writes the image tarballs to a work directory before the agent removes them, so a snapshot takes several minutes. |
 | The opened snapshot holds exactly one `k0s_backup_*.tar.gz` file. This k0s archive has no entry `images` and no entry under `images/`. | The agent drops the entries of the images from the k0s archive. |
 
 Before the snapshot, the script makes the ConfigMap `default/e2e-etcd-restore` with the value `state=before-snapshot`.
