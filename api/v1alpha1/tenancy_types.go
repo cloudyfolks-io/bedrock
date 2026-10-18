@@ -141,6 +141,7 @@ type ProjectList struct {
 // +kubebuilder:validation:XValidation:rule="has(self.cidr) != has(self.cidrs)",message="set exactly one of cidr and cidrs; cidrs replaces cidr"
 // +kubebuilder:validation:XValidation:rule="!has(oldSelf.cidr) || (has(self.cidr) && self.cidr == oldSelf.cidr) || (has(self.cidrs) && oldSelf.cidr in self.cidrs)",message="cidr can only be replaced by a cidrs list that holds it"
 // +kubebuilder:validation:XValidation:rule="!has(oldSelf.cidrs) || (has(self.cidrs) && oldSelf.cidrs.all(c, c in self.cidrs))",message="cidrs can only be added to"
+// +kubebuilder:validation:XValidation:rule="!has(oldSelf.vrfId) || (has(self.vrfId) && self.vrfId == oldSelf.vrfId)",message="vrfId is immutable once set"
 type NetworkSpec struct {
 	// +kubebuilder:validation:MinLength=1
 	// +kubebuilder:validation:MaxLength=30
@@ -162,6 +163,11 @@ type NetworkSpec struct {
 	CIDRs []string `json:"cidrs,omitempty"`
 	// +optional
 	EnableExternal bool `json:"enableExternal,omitempty"`
+	// +optional
+	// +kubebuilder:validation:Minimum=1
+	// +kubebuilder:validation:Maximum=65535
+	// +kubebuilder:validation:XValidation:rule="self < 253 || self > 255",message="vrfId must not be a host routing table: 253, 254 and 255 are reserved"
+	VrfID *int32 `json:"vrfId,omitempty"`
 }
 
 func (s NetworkSpec) Ranges() []string {

@@ -199,3 +199,41 @@ func TestNetworkRangesMigration(t *testing.T) {
 	back.Spec.CIDR = "10.100.0.0/16"
 	updateInvalid(t, c, back, "cidrs can only be added to")
 }
+
+func TestNetworkVrfIDValidation(t *testing.T) {
+	c, _ := StartTestEnv(t)
+	ctx := context.Background()
+	for _, id := range []int32{1, 7, 252, 256, 1000, 60001, 65535} {
+		createValid(t, c, networkWith(fmt.Sprintf("vrf-ok-%d", id), v1alpha1.NetworkSpec{CIDR: "10.100.0.0/16", VrfID: ptr.To(id)}))
+	}
+	for _, id := range []int32{0, -1, 65536} {
+		createInvalid(t, c, networkWith(fmt.Sprintf("vrf-range-%d", id+1), v1alpha1.NetworkSpec{CIDR: "10.100.0.0/16", VrfID: ptr.To(id)}), "vrfId")
+	}
+	for _, id := range []int32{253, 254, 255} {
+		createInvalid(t, c, networkWith(fmt.Sprintf("vrf-host-%d", id), v1alpha1.NetworkSpec{CIDR: "10.100.0.0/16", VrfID: ptr.To(id)}), "vrfId must not be a host routing table")
+	}
+
+	pinned := networkWith("vrf-pinned", v1alpha1.NetworkSpec{CIDR: "10.100.0.0/16", VrfID: ptr.To(int32(1500))})
+	createValid(t, c, pinned)
+
+	changed := pinned.DeepCopy()
+	changed.Spec.VrfID = ptr.To(int32(1501))
+	updateInvalid(t, c, changed, "vrfId is immutable once set")
+
+	cleared := pinned.DeepCopy()
+	cleared.Spec.VrfID = nil
+	updateInvalid(t, c, cleared, "vrfId is immutable once set")
+
+	touched := pinned.DeepCopy()
+	touched.Spec.EnableExternal = true
+	if err := c.Update(ctx, touched); err != nil {
+		t.Fatalf("an update of another field must be accepted: %v", err)
+	}
+
+	free := networkWith("vrf-later", v1alpha1.NetworkSpec{CIDR: "10.100.0.0/16"})
+	createValid(t, c, free)
+	free.Spec.VrfID = ptr.To(int32(1600))
+	if err := c.Update(ctx, free); err != nil {
+		t.Fatalf("setting vrfId on a Network without one must be accepted: %v", err)
+	}
+}

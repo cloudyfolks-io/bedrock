@@ -84,6 +84,15 @@ spec:
                 x-kubernetes-validations:
                 - message: tenantRef is immutable
                   rule: self == oldSelf
+              vrfId:
+                format: int32
+                maximum: 65535
+                minimum: 1
+                type: integer
+                x-kubernetes-validations:
+                - message: 'vrfId must not be a host routing table: 253, 254 and 255
+                    are reserved'
+                  rule: self < 253 || self > 255
             required:
             - tenantRef
             type: object
@@ -96,6 +105,8 @@ spec:
             - message: cidrs can only be added to
               rule: '!has(oldSelf.cidrs) || (has(self.cidrs) && oldSelf.cidrs.all(c,
                 c in self.cidrs))'
+            - message: vrfId is immutable once set
+              rule: '!has(oldSelf.vrfId) || (has(self.vrfId) && self.vrfId == oldSelf.vrfId)'
           status:
             properties:
               conditions:
