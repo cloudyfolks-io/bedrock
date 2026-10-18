@@ -73,6 +73,8 @@ func TestProviderNetworksValidation(t *testing.T) {
 		"backwards range":   {`[{"name":"a","interface":"b","cidr":"91.246.31.0/24","gateway":"91.246.31.1","excludeIPs":["91.246.31.10..91.246.31.2"]}]`, false},
 		"exclude outside":   {`[{"name":"a","interface":"b","cidr":"91.246.31.0/24","gateway":"91.246.31.1","excludeIPs":["91.246.32.5"]}]`, false},
 		"range end outside": {`[{"name":"a","interface":"b","cidr":"91.246.31.0/24","gateway":"91.246.31.1","excludeIPs":["91.246.31.5..91.246.32.5"]}]`, false},
+		"role platform":     {`[{"name":"a","interface":"b","cidr":"10.0.0.0/24","gateway":"10.0.0.1","role":"platform"}]`, true},
+		"role unknown":      {`[{"name":"a","interface":"b","cidr":"10.0.0.0/24","gateway":"10.0.0.1","role":"public"}]`, false},
 		"single address":    {`[{"name":"a","interface":"b","cidr":"91.246.31.0/24","gateway":"91.246.31.1","excludeIPs":["91.246.31.5"]}]`, true},
 		"not json":          {`public`, false},
 		"unknown field":     {`[{"name":"a","interface":"b","cidr":"10.0.0.0/24","gateway":"10.0.0.1","color":"red"}]`, false},

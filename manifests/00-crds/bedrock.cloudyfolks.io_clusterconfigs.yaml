@@ -101,6 +101,13 @@ spec:
                               type: string
                             name:
                               type: string
+                            role:
+                              enum:
+                              - tenant
+                              - platform
+                              - transit
+                              - services
+                              type: string
                             vlan:
                               format: int32
                               type: integer

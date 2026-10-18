@@ -30,12 +30,18 @@ func providerObjects(pn v1alpha1.ProviderNetworkSpec) []*unstructured.Unstructur
 	}
 }
 
+func poolMeta(pn v1alpha1.ProviderNetworkSpec) fabric.Meta {
+	meta := underlayMeta("Subnet", ExternalSubnetName(pn.Name))
+	meta.Labels[LabelUsability] = Usability(pn.Role)
+	return meta
+}
+
 func externalVlanSubnet(pn v1alpha1.ProviderNetworkSpec) *unstructured.Unstructured {
-	return fabric.Subnet(underlayMeta("Subnet", ExternalSubnetName(pn.Name)), fabric.SubnetSpec{CIDR: pn.CIDR, Gateway: pn.Gateway, Vlan: pn.Name, ExcludeIPs: pn.ExcludeIPs})
+	return fabric.Subnet(poolMeta(pn), fabric.SubnetSpec{CIDR: pn.CIDR, Gateway: pn.Gateway, Vlan: pn.Name, ExcludeIPs: pn.ExcludeIPs})
 }
 
 func externalOverlaySubnet(pn v1alpha1.ProviderNetworkSpec) *unstructured.Unstructured {
-	return fabric.Subnet(underlayMeta("Subnet", ExternalSubnetName(pn.Name)), fabric.SubnetSpec{CIDR: pn.CIDR, Gateway: pn.Gateway, ExcludeIPs: pn.ExcludeIPs})
+	return fabric.Subnet(poolMeta(pn), fabric.SubnetSpec{CIDR: pn.CIDR, Gateway: pn.Gateway, ExcludeIPs: pn.ExcludeIPs})
 }
 
 func bgpConf(cfg Config) *unstructured.Unstructured {

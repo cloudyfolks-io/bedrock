@@ -68,6 +68,30 @@ func TestRenderUnderlayL2(t *testing.T) {
 	}
 }
 
+func TestRenderUnderlayLabelsPoolsByRole(t *testing.T) {
+	roles := map[string]string{"": "public", "tenant": "public", "platform": "private", "transit": "transit", "services": "services"}
+	for role, want := range roles {
+		pn := `{"name":"pool","interface":"bond0","cidr":"198.51.100.0/24","gateway":"198.51.100.1"`
+		if role != "" {
+			pn += `,"role":"` + role + `"`
+		}
+		objects, _ := RenderUnderlay(configOf(t, map[string]string{"network.provider-networks": "[" + pn + "}]"}))
+		subnet := byKindAndName(objects)["Subnet/provider-pool"]
+		if got := subnet.GetLabels()["usability"]; got != want {
+			t.Fatalf("role %q: usability %q, want %q", role, got, want)
+		}
+	}
+}
+
+func TestRenderUnderlayLabelsOnlyTheSubnetWithUsability(t *testing.T) {
+	objects, _ := RenderUnderlay(configOf(t, map[string]string{"network.provider-networks": publicNetworks}))
+	for _, o := range objects {
+		if _, found := o.GetLabels()["usability"]; found != (o.GetKind() == "Subnet") {
+			t.Fatalf("%s has the usability label: %v", o.GetKind(), found)
+		}
+	}
+}
+
 func TestRenderUnderlayVlanZero(t *testing.T) {
 	cfg := configOf(t, map[string]string{"network.provider-networks": `[{"name":"flat","interface":"eth1","cidr":"192.0.2.0/24","gateway":"192.0.2.1"}]`})
 	objects, _ := RenderUnderlay(cfg)

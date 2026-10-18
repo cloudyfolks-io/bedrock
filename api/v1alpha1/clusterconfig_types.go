@@ -12,6 +12,13 @@ type PlatformSpec struct {
 	TLSMode string `json:"tlsMode,omitempty"`
 }
 
+const (
+	ProviderRoleTenant   = "tenant"
+	ProviderRolePlatform = "platform"
+	ProviderRoleTransit  = "transit"
+	ProviderRoleServices = "services"
+)
+
 type ProviderNetworkSpec struct {
 	Name      string `json:"name"`
 	Interface string `json:"interface"`
@@ -22,6 +29,9 @@ type ProviderNetworkSpec struct {
 	// +optional
 	// +listType=set
 	ExcludeIPs []string `json:"excludeIPs,omitempty"`
+	// +kubebuilder:validation:Enum=tenant;platform;transit;services
+	// +optional
+	Role string `json:"role,omitempty"`
 }
 
 type FabricSpec struct {

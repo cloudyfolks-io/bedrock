@@ -220,6 +220,30 @@ func TestToSettingsCarriesProviderNetworks(t *testing.T) {
 	}
 }
 
+func TestToSettingsCarriesTheProviderNetworkRole(t *testing.T) {
+	cfg, err := Load(filepath.Join("testdata", "single-node.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg.Spec.Network.Fabric.ProviderNetworks[0].Role = v1alpha1.ProviderRolePlatform
+	for _, s := range ToSettings(cfg) {
+		if s.Name == "network.provider-networks" && !strings.Contains(s.Spec.Value, `"role":"platform"`) {
+			t.Fatalf("value %q", s.Spec.Value)
+		}
+	}
+}
+
+func TestValidateRejectsAnUnknownProviderNetworkRole(t *testing.T) {
+	cfg, err := Load(filepath.Join("testdata", "single-node.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg.Spec.Network.Fabric.ProviderNetworks[0].Role = "public"
+	if err := Validate(cfg); err == nil {
+		t.Fatal("an unknown role must be refused")
+	}
+}
+
 func TestToSettingsWithoutProviderNetworks(t *testing.T) {
 	for _, s := range ToSettings(v1alpha1.ClusterConfig{}) {
 		if s.Name == "network.provider-networks" && s.Spec.Value != "" {

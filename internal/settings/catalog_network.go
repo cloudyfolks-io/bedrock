@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/netip"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -145,6 +146,8 @@ func tableIDsValue(v string) error {
 	return err
 }
 
+var providerRoles = []string{"", v1alpha1.ProviderRoleTenant, v1alpha1.ProviderRolePlatform, v1alpha1.ProviderRoleTransit, v1alpha1.ProviderRoleServices}
+
 func providerNetworksValue(v string) error {
 	_, err := DecodeProviderNetworks(v)
 	return err
@@ -188,6 +191,9 @@ func ValidateProviderNetworks(list []v1alpha1.ProviderNetworkSpec) error {
 func validateProviderNetwork(pn v1alpha1.ProviderNetworkSpec) error {
 	if err := dnsLabelValue(pn.Name); err != nil || pn.Name == "" || len(pn.Name) > maxProviderNameLength {
 		return fmt.Errorf("name must be a DNS label of at most %d characters", maxProviderNameLength)
+	}
+	if !slices.Contains(providerRoles, pn.Role) {
+		return fmt.Errorf("role must be one of %s", strings.Join(providerRoles[1:], ", "))
 	}
 	if pn.Interface == "" || len(pn.Interface) > maxInterfaceLength {
 		return fmt.Errorf("interface must have 1 to %d characters", maxInterfaceLength)

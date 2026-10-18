@@ -17,6 +17,7 @@ const (
 	LabelManaged             = "network.bedrock.cloudyfolks.io/managed"
 	LabelComponent           = "network.bedrock.cloudyfolks.io/component"
 	ComponentUnderlay        = "underlay"
+	LabelUsability           = "usability"
 	AnnotationOwnerNamespace = "bedrock.cloudyfolks.io/owner-namespace"
 	AnnotationOwnerName      = "bedrock.cloudyfolks.io/owner-name"
 	AnnotationOwnerUID       = "bedrock.cloudyfolks.io/owner-uid"
