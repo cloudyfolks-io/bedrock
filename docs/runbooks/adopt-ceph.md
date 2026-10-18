@@ -40,6 +40,11 @@ It does not read the old StorageClasses.
 - The old cluster uses the host network. The monitor addresses are node addresses.
   The same node addresses must exist on the new hosts.
 - Every host name is a lowercase DNS-1123 label (no dot). The host name must equal the node name of the old cluster.
+- Each host has at least 100 GiB on the system disk. The mon store is on this disk.
+  The bundle and its images use about 50 GiB during the install.
+  Kubelet evicts pods when less than 10% of the disk is free, and Ceph raises `MON_DISK_LOW` when less than 30% is free on the disk of a monitor.
+  A disk with 60 GiB showed both in the lab, and `StorageReady` stayed `False`.
+- The new object store listens on port 80 of the host network on every host that runs a gateway. Port 80 is free on these hosts.
 - You have root access on every host, a copy of the bundle, and a backup of the old k0s state.
 - You have a maintenance window. The old cluster stops for the whole procedure.
 
@@ -255,7 +260,7 @@ Rules for the file:
 This step stops all workloads of the old cluster.
 Do the steps in this order.
 
-1. Stop the clients of Ceph. Stop the VMs and unmap the RBD images.
+1. Stop the clients of Ceph. Stop the VMs, unmap the RBD images, and stop every pod and host that mounts CephFS.
 
 2. Record the checksums of the data while the clients are stopped.
    Choose a few RBD images and a few CephFS files that you know.
@@ -307,6 +312,9 @@ Do the steps in this order.
    k0s stop
    k0s reset
    ```
+
+   `k0s reset` can print the line `To ensure a full reset, a node reboot is recommended.`
+   The lab adopted the cluster without a reboot.
 
 6. Check every host. The preflight of Bedrock refuses a busy port 3300 or 6789 on a fresh node.
 
@@ -382,6 +390,9 @@ Do the steps in this order.
 
 The Cluster condition `StorageAdopted` shows the phase in its reason.
 The condition `StorageReady` shows the same phase until the adoption ends.
+In the lab (3 hosts, 6 OSDs), `Adopted` came 30 to 60 minutes after the last join.
+`WaitingForHosts` can last several minutes after the last host has joined.
+Act only when a reason does not change for 30 minutes.
 
 ```sh
 export KUBECONFIG=/var/lib/k0s/pki/admin.conf
@@ -392,7 +403,7 @@ kubectl get cluster cluster -o jsonpath='{range .status.conditions[*]}{.type}{"\
 | --- | --- | --- |
 | `WaitingForIdentity` | The Secret `rook-ceph/rook-ceph-mon` does not exist, or it has another fsid. | Check the key file and `storage.adopt.fsid`. Run `bedrock init` again with the right file. |
 | `WaitingForHosts` | A host of a monitor has no `ceph-osd` role or no devices. | Join the host with `--roles ceph-osd,workload` and `--adopt-config`. Check `kubectl get host`. |
-| `WaitingForQuorum` | The CephCluster exists. The monitors are not all in the quorum, or Bedrock cannot read the Ceph state. | Check the mon pods and the mon stores. See "Monitors do not form a quorum". |
+| `WaitingForQuorum` | The CephCluster exists. The monitors are not all in the quorum, or Bedrock cannot read the Ceph state. The message `Error initializing cluster client ... conf_read_file` is normal until the Rook operator writes its config file. | Check the mon pods and the mon stores. See "Monitors do not form a quorum". |
 | `WaitingForOSDs` | Fewer OSDs are up than `adopt.hosts[].devices` lists. | Check the OSD pods and the logs of the `rook-ceph-osd-prepare` jobs. Check the disk paths. |
 | `Renaming` | Bedrock ran the rename commands. The next check shows the result. | Wait. |
 | `PoolSizeTooSmall` | An adopted pool is larger than `storage.replicas`. Bedrock stops before it runs a rename command. | Raise the setting: `kubectl patch setting storage.replicas --type=merge -p '{"spec":{"value":"3"}}'`. Use at least the pool size. Never lower a pool. |
@@ -559,7 +570,7 @@ kubectl -n rook-ceph exec deploy/rook-ceph-operator -- sh -c 'radosgw-admin --co
 
 After `Adopted`, the condition `StorageReady` runs read-only checks in each reconcile.
 A failed check keeps `StorageReady` at `False`, with the reason `VerificationFailed`.
-The message names every failed check. Read it with the command of step 6.
+The message names every failed check. Read it with the command of section 6.
 
 | Message starts with | Meaning | What to do |
 | --- | --- | --- |
@@ -706,21 +717,27 @@ hack/lab-adopt.sh up
 hack/lab-adopt.sh old
 hack/lab-adopt.sh export
 hack/lab-adopt.sh stop
+hack/lab-adopt.sh snapshot
 hack/lab-adopt.sh adopt
 hack/lab-adopt.sh check
 hack/lab-adopt.sh down
 ```
 
 `hack/lab-adopt.sh all` runs the stages from `up` to `check`.
+Run `snapshot` after `stop` when you want to repeat `adopt`. Run `rewind` to go back to that point.
 
 | Stage | What it does |
 | --- | --- |
-| `up` | Builds the bundle from the worktree into `dist/`. Starts three Ubuntu 24.04 VMs with fixed addresses and two OSD disks with serial numbers each. |
+| `up` | Builds the bundle from the worktree into `dist/`. Starts three Ubuntu 24.04 VMs (4 vCPU, 14 GiB, 100 GiB root disk) on one Lima user-v2 network, and gives each VM two 20 GiB OSD disks with serial numbers. |
 | `old` | Installs k0s and Rook with the old values in `hack/lab/old-rook-values.yaml`. Writes two RBD images, a CephFS file, and a bucket with two S3 objects. |
 | `export` | Writes the key file and the cluster configuration from `hack/lab/adopt.yaml.tmpl`. Records the fsid, the monitor ids, the OSD ids and the pool sizes. |
-| `stop` | Does step 4 of this runbook: `noout`, Rook scale down, copy of `/var/lib/rook`, `k0s reset`. |
+| `stop` | Does section 4 of this runbook: `noout`, Rook scale down, copy of `/var/lib/rook`, `k0s reset`. |
+| `snapshot` | Stops the VMs, snapshots every disk as `after-stop`, and starts the VMs. |
+| `rewind` | Restores the snapshot of every disk and starts the VMs. The disks are as `stop` left them. |
 | `adopt` | Runs `bedrock init` and `bedrock join --adopt-config` and waits for `Adopted`. Deletes the key file, unsets `noout` and waits for `StorageReady`. |
 | `check` | Prints `PASS` or `FAIL` for each assertion. The exit status is not zero if one fails. |
 | `down` | Removes the lab VMs, their disks and the lab secrets. It does not touch other VMs. |
 
-The lab files are in `dist/lab/`. They hold lab keys. The `down` stage deletes them.
+The lab files are in `dist/lab/`. They hold lab keys.
+The `down` stage deletes the key file, the exports, the state file and the copies of `/var/lib/rook`.
+The lab uses raw OSDs. It does not run the rollback and it does not mount CephFS with the kernel client.
