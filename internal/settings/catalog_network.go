@@ -45,7 +45,7 @@ func networkDefinitions() []Definition {
 		{"network.bgp.hold-time", "9s", "BGP hold time, from 1s to 300s.", durationBetween(minBGPTimer, maxBGPTimer)},
 		{"network.bgp.keepalive-time", "3s", "BGP keepalive time, from 1s to 300s.", durationBetween(minBGPTimer, maxBGPTimer)},
 		{"network.bgp.graceful-restart", "true", "Keep the BGP routes while a peer restarts.", boolean},
-		{"network.bgp.advertise-filter", "", "Comma list of <cidr> ge <n> le <n> entries. The FRR agent advertises only the matching routes. Empty advertises all routes.", advertiseFilterValue},
+		{"network.bgp.advertise-filter", "", "Comma list of <cidr> ge <n> le <n> entries, with the mask length <= ge <= le <= 32. The FRR agent advertises only the matching routes. Empty advertises all routes.", advertiseFilterValue},
 		{"network.bgp.redistribute-tables", "", "Comma list of host routing table ids from 1 to 65535 that the FRR agent redistributes. 253, 254 and 255 are reserved.", tableIDsValue},
 	}
 }
@@ -93,8 +93,8 @@ func parseFilterEntry(item string) (string, error) {
 	}
 	ge, geErr := strconv.ParseUint(fields[2], 10, 8)
 	le, leErr := strconv.ParseUint(fields[4], 10, 8)
-	if geErr != nil || leErr != nil || ge > le || le > maxPrefixLength {
-		return "", fmt.Errorf("advertise filter entry %q: lengths must satisfy 0 <= ge <= le <= %d", item, maxPrefixLength)
+	if geErr != nil || leErr != nil || ge < uint64(prefix.Bits()) || ge > le || le > maxPrefixLength {
+		return "", fmt.Errorf("advertise filter entry %q: lengths must satisfy mask length <= ge <= le <= %d", item, maxPrefixLength)
 	}
 	return fmt.Sprintf("%s ge %d le %d", prefix, ge, le), nil
 }
