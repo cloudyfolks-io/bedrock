@@ -132,10 +132,48 @@ After the upgrade, the script checks these items.
 | The file starts with `age-encryption.org/v1`. | The file is an age file. |
 | `bedrock backup decrypt` opens the file with the admin identity, and opens it with the host key. The two copies are equal. | The file is sealed to the recipients of the Setting and to the host key. |
 | `tar -tzf` lists the opened copy, and the leak check of the section "Secrets encryption" runs on it. The script then deletes the copy. | The opened copy is a valid archive. |
-| The script sets `backup.etcd-schedule` to `* * * * *` and waits for a new `etcd-*.tar.gz.age` file. It opens this file with the admin identity and sets the schedule back to the default. | The new agent writes a sealed etcd snapshot, not only seals the old files. |
+| The script sets `backup.etcd-schedule` to `* * * * *` and waits up to 10 minutes for a new `etcd-*.tar.gz.age` file. It opens this file with the admin identity. It sets the schedule back to the default when the file exists. The restore of the section [Lean etcd snapshots](#lean-etcd-snapshots) brings the value `* * * * *` back, so the script sets the schedule back to the default again after the restore. | The new agent writes a sealed etcd snapshot, not only seals the old files. |
 
 The job `e2e-upgrade-abort` checks that the archive that stays after the rollback ends in `.tar.gz.age`.
 The agent of version A restores from this sealed archive with the host key.
+
+## Lean etcd snapshots
+
+A scheduled etcd snapshot (`etcd-*`) holds no image tarballs.
+An upgrade backup (`bedrock-*`) keeps them.
+`hack/e2e-upgrade.sh` checks a snapshot of the schedule `* * * * *`, and then restores it.
+
+| Check | Why |
+| --- | --- |
+| The snapshot file is smaller than 512 MiB. The script prints the size in bytes and the seconds between its marker and the file. | The image tarballs are most of the size of a full k0s backup. The printed seconds show how long a snapshot takes. The script waits up to 10 minutes for the file. |
+| The opened snapshot holds exactly one `k0s_backup_*.tar.gz` file. This k0s archive has no entry `images` and no entry under `images/`. | The agent drops the entries of the images from the k0s archive. |
+
+Before the snapshot, the script makes the ConfigMap `default/e2e-etcd-restore` with the value `state=before-snapshot`.
+It also starts the Pod `default/e2e-etcd-restore`.
+The Pod uses the host network, the local pause image and `imagePullPolicy: IfNotPresent`.
+It needs no CNI and no image pull.
+
+After the checks of the upgrade, the script restores the snapshot.
+It takes the sealed restore script from the section "Etcd snapshots" of `docs/backup.md`.
+If the section has no such script, the job fails.
+The script does these steps.
+
+1. It saves the list of the files in `/var/lib/k0s/images`, with their sizes.
+2. It deletes the ConfigMap and the Pod. It waits until containerd has no container of the Pod.
+3. It runs the restore script of the documentation with the snapshot.
+4. It waits up to 10 minutes for `/readyz`.
+5. It sets `backup.etcd-schedule` to the default. The restored etcd holds `* * * * *` again. Without this step, the agent takes snapshots one after the other.
+
+Then the script checks these items.
+
+| Check | Why |
+| --- | --- |
+| The Lease of the node renews after the restore starts. | The kubelet works with the restored API server. |
+| The Pod starts after the restore starts, and the ConfigMap has the value `before-snapshot`. | The restore brings back the objects of the snapshot. The kubelet starts the Pod again. |
+| No Pod waits with the reason `ImagePullBackOff` or `ErrImagePull`. | The Pod starts from the images on the host. |
+| Each file of the saved list is still in `/var/lib/k0s/images`, with the same size. | The restore script keeps the directory of the images when the snapshot has no images. |
+
+The script then deletes the ConfigMap, the Pod, `/root/restore` and the directories `/var/lib/k0s/.pre-restore-*`.
 
 ## Adoption lab
 
