@@ -152,8 +152,10 @@ The FRR agent advertises the addresses.
 Every Network with `enableExternal` gets `enableBfd` and `dynamicRouting.localOnly` on its Fabric `Vpc`.
 Fabric advertises the NAT and load balancer addresses only from the chassis that holds the port.
 The agent is the DaemonSet `kube-system/fabric-frr`.
+The release installs it.
+It runs only on the nodes that have the label `fabric.cloudyfolks.io/external-gw=true`.
+Bedrock puts this label on each Host that has the role `fabric-gateway`, and removes it when the role is removed.
 The ElasticIP reports `FRRAgentMissing` until the agent exists.
-Enable `frr` in the values of the Fabric chart to install it.
 
 The Settings `network.bgp.bfd`, `network.bgp.hold-time`, `network.bgp.keepalive-time`, `network.bgp.graceful-restart`, `network.bgp.advertise-filter` and `network.bgp.redistribute-tables` tune the BGP sessions.
 Bedrock writes them to the `BgpConf` named `bedrock`.
