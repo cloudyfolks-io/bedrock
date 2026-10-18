@@ -6,6 +6,7 @@ networking:
   pods:
     cidr:
       v4: 10.16.0.0/16
+    mtu: 1500
   services:
     cidr:
       v4: 10.96.0.0/12
