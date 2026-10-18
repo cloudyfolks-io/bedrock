@@ -63,7 +63,10 @@ func filterImages(dst io.Writer, src io.Reader) error {
 	if err != nil {
 		return err
 	}
-	zipped := gzip.NewWriter(dst)
+	zipped, err := gzip.NewWriterLevel(dst, gzip.BestSpeed)
+	if err != nil {
+		return err
+	}
 	writer := tar.NewWriter(zipped)
 	copyErr := copyEntries(writer, tar.NewReader(unzipped))
 	if copyErr == nil {

@@ -22,7 +22,11 @@ import (
 	"github.com/cloudyfolks-io/bedrock/internal/backup/seal"
 )
 
-const k0sArchiveName = "k0s_backup_2026-10-01T10_00_00Z.tar.gz"
+const (
+	k0sArchiveName       = "k0s_backup_2026-10-01T10_00_00Z.tar.gz"
+	gzipExtraFlagsOffset = 8
+	gzipFastestFlag      = 4
+)
 
 type tarFixture struct {
 	name string
@@ -323,5 +327,24 @@ func TestIsImagesEntry(t *testing.T) {
 		if got := isImagesEntry(name); got != want {
 			t.Fatalf("%q: got %v, want %v", name, got, want)
 		}
+	}
+}
+
+func TestDropImagesWritesTheArchiveAtBestSpeed(t *testing.T) {
+	raw, err := gzipTar(k0sFixture)
+	if err != nil {
+		t.Fatal(err)
+	}
+	work := t.TempDir()
+	writeFixtureFile(t, filepath.Join(work, k0sArchiveName), string(raw))
+	if err := dropImages(work); err != nil {
+		t.Fatal(err)
+	}
+	filtered, err := os.ReadFile(filepath.Join(work, k0sArchiveName))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := filtered[gzipExtraFlagsOffset]; got != gzipFastestFlag {
+		t.Fatalf("gzip extra flags %d, want %d", got, gzipFastestFlag)
 	}
 }
