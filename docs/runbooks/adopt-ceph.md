@@ -460,13 +460,20 @@ Rewrite the pool names in the zone. The command keeps the zone output in the pod
 
 ```sh
 kubectl -n rook-ceph exec deploy/rook-ceph-operator -- sh -c 'set -e; conf=--conf=/var/lib/rook/rook-ceph/rook-ceph.config; zone=$(radosgw-admin "$conf" zone get --rgw-zone=bedrock-rgw); printf "%s" "$zone" | sed "s/\"<old>\\.rgw\\./\"bedrock-rgw.rgw./g" | radosgw-admin "$conf" zone set --rgw-zone=bedrock-rgw --infile=/dev/stdin >/dev/null'
-kubectl -n rook-ceph exec deploy/rook-ceph-operator -- sh -c 'radosgw-admin --conf=/var/lib/rook/rook-ceph/rook-ceph.config period update --commit --rgw-realm=bedrock-rgw >/dev/null'
 ```
 
 Rename the RGW pools:
 
 ```sh
 for pool in $(ceph osd pool ls | grep '^<old>\.rgw\.'); do ceph osd pool rename "$pool" "bedrock-rgw.rgw.${pool#<old>.rgw.}"; done
+```
+
+Commit the period last, after the last pool rename.
+The commit opens the zone pools under their new names.
+It creates an empty pool for each pool that still has the old name, and the rename of that pool then fails.
+
+```sh
+kubectl -n rook-ceph exec deploy/rook-ceph-operator -- sh -c 'radosgw-admin --conf=/var/lib/rook/rook-ceph/rook-ceph.config period update --commit --rgw-realm=bedrock-rgw >/dev/null'
 ```
 
 ## 7. After the adoption
@@ -646,6 +653,7 @@ Stop Ceph in the same clean way as in "Stop the old cluster". Stop k0s only at t
    - `bedrock-block` to the old block pool.
    - `bedrock-fs` to the old CephFS, and its pools `bedrock-fs-metadata` and `bedrock-fs-data0` to the old pool names.
    - `bedrock-rgw` to the old realm, zonegroup and zone, and the pools `bedrock-rgw.rgw.*` to `<old>.rgw.*`.
+     Keep the order of the RGW steps: rename the identity, rewrite the zone, rename the pools, and run `period update --commit` last.
 
 6. Check the names with `ceph osd pool ls detail`, `ceph fs ls` and `radosgw-admin realm list`.
 
