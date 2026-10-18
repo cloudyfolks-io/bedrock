@@ -33,15 +33,21 @@ func compareFacts(a, b SubnetFacts) int {
 	return cmp.Or(a.Created.Compare(b.Created), cmp.Compare(a.Namespace, b.Namespace), cmp.Compare(a.Name, b.Name))
 }
 
-func VerdictsFor(networkCIDR string, subnets []SubnetFacts) map[types.NamespacedName]*Violation {
+func insideAny(prefix netip.Prefix, ranges []string) bool {
+	return slices.ContainsFunc(ranges, func(r string) bool {
+		outer, err := netip.ParsePrefix(r)
+		return err == nil && outer.Contains(prefix.Addr()) && prefix.Bits() >= outer.Bits()
+	})
+}
+
+func VerdictsFor(networkRanges []string, subnets []SubnetFacts) map[types.NamespacedName]*Violation {
 	ordered := slices.SortedFunc(slices.Values(subnets), compareFacts)
-	network, networkErr := netip.ParsePrefix(networkCIDR)
 	verdicts := make(map[types.NamespacedName]*Violation, len(ordered))
 	var winners []SubnetFacts
 	for _, subnet := range ordered {
 		prefix, err := netip.ParsePrefix(subnet.CIDR)
-		if err != nil || networkErr != nil || !network.Contains(prefix.Addr()) || prefix.Bits() < network.Bits() {
-			verdicts[factsKey(subnet)] = &Violation{Reason: ReasonCIDROutsideNetwork, Message: "the Subnet cidr must be inside the cidr of its Network"}
+		if err != nil || !insideAny(prefix, networkRanges) {
+			verdicts[factsKey(subnet)] = &Violation{Reason: ReasonCIDROutsideNetwork, Message: "the Subnet cidr must be inside one of the cidrs of its Network"}
 			continue
 		}
 		verdicts[factsKey(subnet)] = overlapWith(prefix, winners)

@@ -2,10 +2,12 @@ package network
 
 import (
 	"context"
+	"strings"
 	"testing"
 
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/types"
@@ -27,7 +29,11 @@ type subnetFixture struct {
 
 func readyNetwork(t *testing.T, c client.Client, tenant string) v1alpha1.Network {
 	t.Helper()
-	network := networkOf(unique(t, "net"), tenant, "10.100.0.0/16")
+	return readyNetworkOf(t, c, networkOf(unique(t, "net"), tenant, "10.100.0.0/16"))
+}
+
+func readyNetworkOf(t *testing.T, c client.Client, network *v1alpha1.Network) v1alpha1.Network {
+	t.Helper()
 	requireAccepted(t, c, network)
 	reconcileNetwork(t, c, network.Name)
 	if err := fabrictest.MarkVpcStandby(context.Background(), c, network.Name); err != nil {
@@ -165,6 +171,46 @@ func TestSubnetReconcilerRejectsCIDROutsideNetwork(t *testing.T) {
 	reconcileSubnet(t, f.c, f.namespace, "outside")
 	requireSubnetReason(t, f.c, f.namespace, "outside", metav1.ConditionFalse, ReasonCIDROutsideNetwork)
 	requireNoFabricSubnet(t, f.c, f.namespace, "outside")
+}
+
+func TestSubnetReconcilerAcceptsSubnetsInEveryRangeOfTheNetwork(t *testing.T) {
+	c := cleanEnv(t)
+	tenant := unique(t, "acme")
+	network := readyNetworkOf(t, c, networkOfRanges(unique(t, "net"), tenant, "10.100.0.0/16", "172.16.0.0/16", "192.168.0.0/24"))
+	namespace := newNamespace(t, tenant, "prod")
+	for name, cidr := range map[string]string{"ten": "10.100.1.0/24", "private": "172.16.7.0/24", "home": "192.168.0.0/25"} {
+		requireAccepted(t, c, policySubnet(namespace, name, network.Name, cidr))
+		reconcileSubnet(t, c, namespace, name)
+		requireSubnetReason(t, c, namespace, name, metav1.ConditionFalse, ReasonFabricNotReady)
+		if _, err := fabricSubnetOf(c, namespace, name); err != nil {
+			t.Fatalf("%s: %v", name, err)
+		}
+	}
+	requireAccepted(t, c, policySubnet(namespace, "stray", network.Name, "172.17.0.0/24"))
+	reconcileSubnet(t, c, namespace, "stray")
+	requireSubnetReason(t, c, namespace, "stray", metav1.ConditionFalse, ReasonCIDROutsideNetwork)
+	requireNoFabricSubnet(t, c, namespace, "stray")
+	got := getSubnet(t, c, namespace, "stray").Status.Conditions
+	if message := meta.FindStatusCondition(got, v1alpha1.ConditionReady).Message; !strings.Contains(message, "one of the cidrs") {
+		t.Fatalf("message %q", message)
+	}
+}
+
+func TestSubnetReconcilerKeepsAnOldNetworkWithOnlyCIDRWorking(t *testing.T) {
+	c := cleanEnv(t)
+	tenant := unique(t, "acme")
+	network := readyNetworkOf(t, c, networkOf(unique(t, "net"), tenant, "10.100.0.0/16"))
+	if network.Spec.CIDR != "10.100.0.0/16" || len(network.Spec.CIDRs) != 0 {
+		t.Fatalf("the Network must keep its old shape: %+v", network.Spec)
+	}
+	namespace := newNamespace(t, tenant, "prod")
+	requireAccepted(t, c, policySubnet(namespace, "inside", network.Name, "10.100.1.0/24"))
+	requireAccepted(t, c, policySubnet(namespace, "outside", network.Name, "172.16.1.0/24"))
+	reconcileSubnet(t, c, namespace, "inside")
+	reconcileSubnet(t, c, namespace, "outside")
+	requireSubnetReason(t, c, namespace, "inside", metav1.ConditionFalse, ReasonFabricNotReady)
+	requireSubnetReason(t, c, namespace, "outside", metav1.ConditionFalse, ReasonCIDROutsideNetwork)
+	requireCondition(t, getNetwork(t, c, network.Name).Status.Conditions, v1alpha1.ConditionReady, metav1.ConditionTrue, ReasonVpcReady)
 }
 
 func TestSubnetReconcilerRejectsOverlapKeepingTheOlder(t *testing.T) {

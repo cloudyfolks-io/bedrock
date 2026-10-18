@@ -2,6 +2,7 @@ package operator
 
 import (
 	"context"
+	"fmt"
 	"strings"
 	"testing"
 
@@ -116,4 +117,77 @@ func TestNetworkValidation(t *testing.T) {
 	updateInvalid(t, c, &fresh, "tenantRef is immutable")
 
 	createInvalid(t, c, &v1alpha1.Network{ObjectMeta: metav1.ObjectMeta{Name: "bad"}, Spec: v1alpha1.NetworkSpec{TenantRef: "acme", CIDR: "10.0.0.0"}}, "cidr must be a CIDR")
+}
+
+func networkWith(name string, spec v1alpha1.NetworkSpec) *v1alpha1.Network {
+	spec.TenantRef = "acme"
+	return &v1alpha1.Network{ObjectMeta: metav1.ObjectMeta{Name: name}, Spec: spec}
+}
+
+func TestNetworkRangesValidation(t *testing.T) {
+	c, _ := StartTestEnv(t)
+	createValid(t, c, networkWith("ranges-old", v1alpha1.NetworkSpec{CIDR: "10.100.0.0/16"}))
+	createValid(t, c, networkWith("ranges-several", v1alpha1.NetworkSpec{CIDRs: []string{"10.0.0.0/16", "172.16.0.0/16", "192.168.0.0/24"}}))
+	createValid(t, c, networkWith("ranges-wide", v1alpha1.NetworkSpec{CIDRs: []string{"10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16"}}))
+
+	createInvalid(t, c, networkWith("ranges-both", v1alpha1.NetworkSpec{CIDR: "10.100.0.0/16", CIDRs: []string{"10.100.0.0/16"}}), "set exactly one of cidr and cidrs")
+	createInvalid(t, c, networkWith("ranges-none", v1alpha1.NetworkSpec{}), "set exactly one of cidr and cidrs")
+	createInvalid(t, c, networkWith("ranges-nested", v1alpha1.NetworkSpec{CIDRs: []string{"10.0.0.0/16", "10.0.1.0/24"}}), "the cidrs must not overlap each other")
+	createInvalid(t, c, networkWith("ranges-nested-first", v1alpha1.NetworkSpec{CIDRs: []string{"10.0.1.0/24", "10.0.0.0/16"}}), "the cidrs must not overlap each other")
+	createInvalid(t, c, networkWith("ranges-twice", v1alpha1.NetworkSpec{CIDRs: []string{"10.0.0.0/16", "10.0.0.0/16"}}), "Duplicate value")
+	createInvalid(t, c, networkWith("ranges-host-bits", v1alpha1.NetworkSpec{CIDRs: []string{"10.0.0.5/16"}}), "every cidrs entry must be a canonical IPv4 network")
+	createInvalid(t, c, networkWith("ranges-ipv6", v1alpha1.NetworkSpec{CIDRs: []string{"fd00::/64"}}), "every cidrs entry must be a canonical IPv4 network")
+	createInvalid(t, c, networkWith("ranges-text", v1alpha1.NetworkSpec{CIDRs: []string{"nonsense"}}), "every cidrs entry must be a canonical IPv4 network")
+
+	many := make([]string, 9)
+	for i := range many {
+		many[i] = fmt.Sprintf("10.%d.0.0/16", i)
+	}
+	createInvalid(t, c, networkWith("ranges-many", v1alpha1.NetworkSpec{CIDRs: many}), "must have at most 8 items")
+}
+
+func TestNetworkRangesMigration(t *testing.T) {
+	c, _ := StartTestEnv(t)
+	ctx := context.Background()
+	old := networkWith("migrate-old", v1alpha1.NetworkSpec{CIDR: "10.100.0.0/16"})
+	createValid(t, c, old)
+
+	keepBoth := old.DeepCopy()
+	keepBoth.Spec.CIDRs = []string{"10.100.0.0/16"}
+	updateInvalid(t, c, keepBoth, "set exactly one of cidr and cidrs")
+
+	drop := old.DeepCopy()
+	drop.Spec.CIDR = ""
+	drop.Spec.CIDRs = []string{"172.16.0.0/16"}
+	updateInvalid(t, c, drop, "cidr can only be replaced by a cidrs list that holds it")
+
+	change := old.DeepCopy()
+	change.Spec.CIDR = "10.101.0.0/16"
+	updateInvalid(t, c, change, "cidr is immutable")
+
+	migrated := old.DeepCopy()
+	migrated.Spec.CIDR = ""
+	migrated.Spec.CIDRs = []string{"10.100.0.0/16", "172.16.0.0/16"}
+	if err := c.Update(ctx, migrated); err != nil {
+		t.Fatalf("replacing cidr by a list that holds it must be accepted: %v", err)
+	}
+
+	grown := migrated.DeepCopy()
+	grown.Spec.CIDRs = append(grown.Spec.CIDRs, "192.168.0.0/24")
+	if err := c.Update(ctx, grown); err != nil {
+		t.Fatalf("adding a range must be accepted: %v", err)
+	}
+
+	shrunk := grown.DeepCopy()
+	shrunk.Spec.CIDRs = []string{"10.100.0.0/16", "192.168.0.0/24"}
+	updateInvalid(t, c, shrunk, "cidrs can only be added to")
+
+	overlapping := grown.DeepCopy()
+	overlapping.Spec.CIDRs = append(overlapping.Spec.CIDRs, "172.16.4.0/24")
+	updateInvalid(t, c, overlapping, "the cidrs must not overlap each other")
+
+	back := grown.DeepCopy()
+	back.Spec.CIDRs = nil
+	back.Spec.CIDR = "10.100.0.0/16"
+	updateInvalid(t, c, back, "cidrs can only be added to")
 }

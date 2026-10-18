@@ -16,8 +16,11 @@ spec:
         operations: [CREATE, UPDATE]
         resources: [subnets]
   validations:
-    - expression: "object.spec.networkRef != params.metadata.name || cidr(params.spec.cidr).containsCIDR(object.spec.cidr)"
-      message: "the Subnet cidr must be inside the cidr of its Network"
+    - expression: >-
+        object.spec.networkRef != params.metadata.name ||
+        (has(params.spec.cidr) && cidr(params.spec.cidr).containsCIDR(object.spec.cidr)) ||
+        (has(params.spec.cidrs) && params.spec.cidrs.exists(c, cidr(c).containsCIDR(object.spec.cidr)))
+      message: "the Subnet cidr must be inside one of the cidrs of its Network"
       reason: Invalid
     - expression: >-
         object.spec.networkRef != params.metadata.name || !has(params.status) || !has(params.status.subnets) ||

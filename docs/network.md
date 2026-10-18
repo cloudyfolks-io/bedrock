@@ -145,8 +145,18 @@ Set `enableExternal` on the Network to give it an external connection.
 The external connection is a router port on each provider network.
 It also adds a default route to the first provider network.
 
+A Network holds one or more IPv4 ranges in `spec.cidrs`.
+A Network can have at most 8 ranges.
+Each range must be a network address, and the ranges must not overlap each other.
+An older Network has `spec.cidr` with one range instead.
+The operator reads `cidr` as a list with one entry, and it does not change the object.
+Set exactly one of `cidr` and `cidrs`.
+To move an older Network to `cidrs`, replace `cidr` with a `cidrs` list that holds the old range, in one update.
+You can add a range to `cidrs`.
+You cannot remove a range, and you cannot go back to `cidr`.
+
 A Subnet admission policy checks each new Subnet.
-The CIDR of a Subnet must be inside the CIDR of its Network.
+The CIDR of a Subnet must be inside one of the ranges of its Network.
 The CIDR must not overlap another Subnet of the same Network.
 The Subnet must name a Network of its own tenant.
 The Subnet reconciler makes the same checks.
@@ -288,7 +298,7 @@ Then take the action in the table.
 | `Attached` | The ElasticIP is attached to its target. No action. |
 | `BGPNotConfigured` | Bgp mode misses a Setting. Set the keys that the message names. |
 | `CIDRReserved` | The Subnet CIDR overlaps a provider network, the join subnet or a management range. Use another CIDR. |
-| `CIDROutsideNetwork` | The Subnet CIDR is not inside the Network CIDR. Use another CIDR. |
+| `CIDROutsideNetwork` | The Subnet CIDR is not inside any range of the Network. Use another CIDR, or add a range to `cidrs` of the Network. |
 | `CIDROverlap` | An older Subnet overlaps this one. Use another CIDR. |
 | `Connected` | The external connection works. No action. |
 | `ElasticIPNotFound` | The ElasticIP of the LoadBalancer does not exist. Create it. |

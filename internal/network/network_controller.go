@@ -230,7 +230,7 @@ func (r *NetworkReconciler) acceptedSubnets(ctx context.Context, network v1alpha
 	if err != nil {
 		return nil, err
 	}
-	accepted := AcceptedSubnets(facts, VerdictsFor(network.Spec.CIDR, facts))
+	accepted := AcceptedSubnets(facts, VerdictsFor(network.Spec.Ranges(), facts))
 	out := make([]v1alpha1.NetworkSubnetStatus, len(accepted))
 	for i, s := range accepted {
 		out[i] = v1alpha1.NetworkSubnetStatus{Namespace: s.Namespace, Name: s.Name, CIDR: s.CIDR}

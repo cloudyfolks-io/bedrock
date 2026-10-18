@@ -138,18 +138,40 @@ type ProjectList struct {
 	Items           []Project `json:"items"`
 }
 
+// +kubebuilder:validation:XValidation:rule="has(self.cidr) != has(self.cidrs)",message="set exactly one of cidr and cidrs; cidrs replaces cidr"
+// +kubebuilder:validation:XValidation:rule="!has(oldSelf.cidr) || (has(self.cidr) && self.cidr == oldSelf.cidr) || (has(self.cidrs) && oldSelf.cidr in self.cidrs)",message="cidr can only be replaced by a cidrs list that holds it"
+// +kubebuilder:validation:XValidation:rule="!has(oldSelf.cidrs) || (has(self.cidrs) && oldSelf.cidrs.all(c, c in self.cidrs))",message="cidrs can only be added to"
 type NetworkSpec struct {
 	// +kubebuilder:validation:MinLength=1
 	// +kubebuilder:validation:MaxLength=30
 	// +kubebuilder:validation:Pattern=`^[a-z0-9]+$`
 	// +kubebuilder:validation:XValidation:rule="self == oldSelf",message="tenantRef is immutable"
 	TenantRef string `json:"tenantRef"`
+	// +optional
 	// +kubebuilder:validation:MaxLength=43
 	// +kubebuilder:validation:XValidation:rule="isCIDR(self)",message="cidr must be a CIDR"
 	// +kubebuilder:validation:XValidation:rule="self == oldSelf",message="cidr is immutable"
-	CIDR string `json:"cidr"`
+	CIDR string `json:"cidr,omitempty"`
+	// +optional
+	// +listType=set
+	// +kubebuilder:validation:MinItems=1
+	// +kubebuilder:validation:MaxItems=8
+	// +kubebuilder:validation:items:MaxLength=43
+	// +kubebuilder:validation:items:XValidation:rule="isCIDR(self) && cidr(self).ip().family() == 4 && string(cidr(self).masked()) == self",message="every cidrs entry must be a canonical IPv4 network"
+	// +kubebuilder:validation:XValidation:rule="self.all(a, self.all(b, a == b || !isCIDR(a) || !isCIDR(b) || !(cidr(a).containsCIDR(b) || cidr(b).containsCIDR(a))))",message="the cidrs must not overlap each other"
+	CIDRs []string `json:"cidrs,omitempty"`
 	// +optional
 	EnableExternal bool `json:"enableExternal,omitempty"`
+}
+
+func (s NetworkSpec) Ranges() []string {
+	if len(s.CIDRs) > 0 {
+		return s.CIDRs
+	}
+	if s.CIDR != "" {
+		return []string{s.CIDR}
+	}
+	return nil
 }
 
 type NetworkSubnetStatus struct {
@@ -178,6 +200,7 @@ type NetworkStatus struct {
 // +kubebuilder:subresource:status
 // +kubebuilder:printcolumn:name="Tenant",type=string,JSONPath=`.spec.tenantRef`
 // +kubebuilder:printcolumn:name="CIDR",type=string,JSONPath=`.spec.cidr`
+// +kubebuilder:printcolumn:name="CIDRs",type=string,JSONPath=`.spec.cidrs`
 // +kubebuilder:printcolumn:name="VPC",type=string,JSONPath=`.status.vpc`
 // +kubebuilder:validation:XValidation:rule="self.metadata.name.size() <= 30 && self.metadata.name.matches('^[a-z0-9]([-a-z0-9]*[a-z0-9])?$')",message="the name must be a DNS label of at most 30 characters"
 // +kubebuilder:validation:XValidation:rule="!self.metadata.name.startsWith('provider-') && self.metadata.name != 'ovn-cluster'",message="the name is reserved for the Fabric underlay"

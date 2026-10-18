@@ -109,7 +109,7 @@ func (r *SubnetReconciler) check(ctx context.Context, subnet v1alpha1.Subnet) (S
 		return SubnetInput{}, nil, err
 	}
 	key := types.NamespacedName{Namespace: subnet.Namespace, Name: subnet.Name}
-	if v := VerdictsFor(network.Spec.CIDR, facts)[key]; v != nil {
+	if v := VerdictsFor(network.Spec.Ranges(), facts)[key]; v != nil {
 		return SubnetInput{}, v, nil
 	}
 	cfg, err := LoadConfig(ctx, r.Client)

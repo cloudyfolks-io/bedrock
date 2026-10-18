@@ -72,6 +72,7 @@ type subnetPolicyFixture struct {
 	netA   string
 	netB   string
 	netC   string
+	netD   string
 }
 
 func admitted(c client.Client, subnet *v1alpha1.Subnet) bool {
@@ -89,8 +90,8 @@ func newSubnetPolicyFixture(t *testing.T) subnetPolicyFixture {
 	f := subnetPolicyFixture{c: c, tenant: unique(t, "acme"), other: unique(t, "other")}
 	f.p1 = newNamespace(t, f.tenant, "p1")
 	f.p2 = newNamespace(t, f.tenant, "p2")
-	f.netA, f.netB, f.netC = unique(t, "pola"), unique(t, "polb"), unique(t, "polc")
-	for _, n := range []*v1alpha1.Network{networkOf(f.netA, f.tenant, "10.100.0.0/16"), networkOf(f.netB, f.tenant, "10.200.0.0/16"), networkOf(f.netC, f.other, "10.50.0.0/16")} {
+	f.netA, f.netB, f.netC, f.netD = unique(t, "pola"), unique(t, "polb"), unique(t, "polc"), unique(t, "pold")
+	for _, n := range []*v1alpha1.Network{networkOf(f.netA, f.tenant, "10.100.0.0/16"), networkOf(f.netB, f.tenant, "10.200.0.0/16"), networkOf(f.netC, f.other, "10.50.0.0/16"), networkOfRanges(f.netD, f.tenant, "10.60.0.0/16", "172.20.0.0/16")} {
 		requireAccepted(t, c, n)
 	}
 	var a v1alpha1.Network
@@ -126,7 +127,7 @@ func requireDenied(t *testing.T, c client.Client, subnet *v1alpha1.Subnet, fragm
 
 func TestSubnetPolicyDeniesCIDRsOutsideTheNetwork(t *testing.T) {
 	f := newSubnetPolicyFixture(t)
-	requireDenied(t, f.c, policySubnet(f.p2, "outside", f.netA, "10.200.1.0/24"), "inside the cidr of its Network")
+	requireDenied(t, f.c, policySubnet(f.p2, "outside", f.netA, "10.200.1.0/24"), "inside one of the cidrs of its Network")
 }
 
 func TestSubnetPolicyDeniesOverlapWithStatusSubnets(t *testing.T) {
@@ -140,6 +141,13 @@ func TestSubnetPolicyDeniesOverlapWithStatusSubnets(t *testing.T) {
 	if err := f.c.Update(context.Background(), itself); err != nil {
 		t.Fatalf("an update of the Subnet itself must be admitted: %v", err)
 	}
+}
+
+func TestSubnetPolicyAllowsEveryRangeOfTheNetwork(t *testing.T) {
+	f := newSubnetPolicyFixture(t)
+	requireAccepted(t, f.c, policySubnet(f.p2, "first", f.netD, "10.60.1.0/24"))
+	requireAccepted(t, f.c, policySubnet(f.p2, "second", f.netD, "172.20.1.0/24"))
+	requireDenied(t, f.c, policySubnet(f.p2, "outside", f.netD, "192.168.1.0/24"), "inside one of the cidrs of its Network")
 }
 
 func TestSubnetPolicyAllowsOtherNetworks(t *testing.T) {

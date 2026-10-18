@@ -27,6 +27,13 @@ func networkOf(name, tenant, cidr string) *v1alpha1.Network {
 	}
 }
 
+func networkOfRanges(name, tenant string, cidrs ...string) *v1alpha1.Network {
+	return &v1alpha1.Network{
+		ObjectMeta: metav1.ObjectMeta{Name: name},
+		Spec:       v1alpha1.NetworkSpec{TenantRef: tenant, CIDRs: cidrs},
+	}
+}
+
 func requireAccepted(t *testing.T, c client.Client, obj client.Object) {
 	t.Helper()
 	if err := c.Create(context.Background(), obj); err != nil {
