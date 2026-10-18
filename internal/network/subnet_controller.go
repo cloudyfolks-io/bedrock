@@ -36,11 +36,19 @@ func (r *SubnetReconciler) Reconcile(ctx context.Context, req reconcile.Request)
 	if err := ensureFinalizer(ctx, r.Client, &subnet); err != nil {
 		return reconcile.Result{}, err
 	}
-	in, violation, err := r.check(ctx, subnet)
+	cfg, err := LoadConfig(ctx, r.Client)
 	if err != nil {
 		return reconcile.Result{}, err
 	}
-	subnet.Status.Conditions = withRangePolicy(subnet.Status.Conditions, subnet.Generation, in.RangeBreach)
+	policy, refusal, err := r.rangeJudgement(ctx, subnet, cfg)
+	if err != nil {
+		return reconcile.Result{}, err
+	}
+	subnet.Status.Conditions = withRangePolicy(subnet.Status.Conditions, subnet.Generation, policy)
+	in, violation, err := r.check(ctx, subnet, cfg, refusal)
+	if err != nil {
+		return reconcile.Result{}, err
+	}
 	if violation != nil {
 		return r.publish(ctx, subnet, violationCondition(v1alpha1.ConditionReady, subnet.Generation, violation), retryFor(violation))
 	}
@@ -85,7 +93,7 @@ func retryFor(v *Violation) time.Duration {
 	return 0
 }
 
-func (r *SubnetReconciler) check(ctx context.Context, subnet v1alpha1.Subnet) (SubnetInput, *Violation, error) {
+func (r *SubnetReconciler) check(ctx context.Context, subnet v1alpha1.Subnet, cfg Config, rangeRefusal *Violation) (SubnetInput, *Violation, error) {
 	var network v1alpha1.Network
 	err := r.Client.Get(ctx, client.ObjectKey{Name: subnet.Spec.NetworkRef}, &network)
 	if apierrors.IsNotFound(err) {
@@ -113,23 +121,8 @@ func (r *SubnetReconciler) check(ctx context.Context, subnet v1alpha1.Subnet) (S
 	if v := VerdictsFor(network.Spec.Ranges(), facts)[key]; v != nil {
 		return SubnetInput{}, v, nil
 	}
-	cfg, err := LoadConfig(ctx, r.Client)
-	if err != nil {
-		return SubnetInput{}, nil, err
-	}
-	reserved, err := r.reservedRanges(ctx, cfg)
-	if err != nil {
-		return SubnetInput{}, nil, err
-	}
-	breach := cmp.Or(ReservedOverlap(subnet.Spec.CIDR, reserved), AllowedRangeViolation(subnet.Spec.CIDR, cfg.SubnetAllowedRanges))
-	if breach != nil {
-		provisioned, err := liveOwnedObject(ctx, r.Client, fabric.SubnetGVK, FabricName(subnet.Namespace, subnet.Name), &subnet)
-		if err != nil {
-			return SubnetInput{}, nil, err
-		}
-		if !provisioned {
-			return SubnetInput{}, breach, nil
-		}
+	if rangeRefusal != nil {
+		return SubnetInput{}, rangeRefusal, nil
 	}
 	if v := GatewayViolation(subnet.Spec.CIDR, subnet.Spec.Gateway); v != nil {
 		return SubnetInput{}, v, nil
@@ -140,7 +133,26 @@ func (r *SubnetReconciler) check(ctx context.Context, subnet v1alpha1.Subnet) (S
 	if !v1alpha1.IsConditionTrue(network.Status.Conditions, v1alpha1.ConditionReady) {
 		return SubnetInput{}, &Violation{Reason: ReasonNetworkNotReady, Message: fmt.Sprintf("the Network %q is not ready yet", network.Name)}, nil
 	}
-	return SubnetInput{Subnet: subnet, Network: network, Tenant: tenant, Project: project, DefaultMTU: cfg.MTU, DefaultDNSServers: cfg.DNSServers, RangeBreach: breach}, nil, nil
+	return SubnetInput{Subnet: subnet, Network: network, Tenant: tenant, Project: project, DefaultMTU: cfg.MTU, DefaultDNSServers: cfg.DNSServers}, nil, nil
+}
+
+func (r *SubnetReconciler) rangeJudgement(ctx context.Context, subnet v1alpha1.Subnet, cfg Config) (policy, refusal *Violation, err error) {
+	reserved, err := r.reservedRanges(ctx, cfg)
+	if err != nil {
+		return nil, nil, err
+	}
+	breach := cmp.Or(ReservedOverlap(subnet.Spec.CIDR, reserved), AllowedRangeViolation(subnet.Spec.CIDR, cfg.SubnetAllowedRanges))
+	if breach == nil {
+		return nil, nil, nil
+	}
+	provisioned, err := liveOwnedObject(ctx, r.Client, fabric.SubnetGVK, FabricName(subnet.Namespace, subnet.Name), &subnet)
+	if err != nil {
+		return nil, nil, err
+	}
+	if provisioned {
+		return breach, nil, nil
+	}
+	return nil, breach, nil
 }
 
 func (r *SubnetReconciler) reservedRanges(ctx context.Context, cfg Config) ([]ReservedRange, error) {

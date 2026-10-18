@@ -19,7 +19,6 @@ type SubnetInput struct {
 	Project           string
 	DefaultMTU        int
 	DefaultDNSServers []string
-	RangeBreach       *Violation
 }
 
 func DHCPv4Options(mtu int, dnsServers []string) string {

@@ -394,6 +394,28 @@ func TestSubnetReconcilerKeepsAProvisionedSubnetOutsideTheAllowedRanges(t *testi
 	requireRangePolicy(t, c, namespace, "old", "")
 }
 
+func TestSubnetReconcilerKeepsRangePolicyWhileTheNetworkIsNotReady(t *testing.T) {
+	c := cleanEnv(t)
+	setSetting(t, "network.subnet-allowed-ranges", "0.0.0.0/0")
+	tenant := unique(t, "acme")
+	network := readyNetworkOf(t, c, networkOfRanges(unique(t, "net"), tenant, "10.100.0.0/16", "203.0.0.0/16"))
+	namespace := newNamespace(t, tenant, "prod")
+	requireAccepted(t, c, policySubnet(namespace, "old", network.Name, "203.0.1.0/24"))
+	provisionSubnet(t, c, namespace, "old")
+	setSetting(t, "network.subnet-allowed-ranges", "10.0.0.0/8")
+	reconcileSubnet(t, c, namespace, "old")
+	requireRangePolicy(t, c, namespace, "old", ReasonCIDROutsideAllowedRanges)
+
+	current := getNetwork(t, c, network.Name)
+	current.Status.Conditions = withCondition(current.Status.Conditions, falseCondition(v1alpha1.ConditionReady, current.Generation, ReasonVpcPending, "waiting"))
+	if err := c.Status().Update(context.Background(), &current); err != nil {
+		t.Fatal(err)
+	}
+	reconcileSubnet(t, c, namespace, "old")
+	requireSubnetReason(t, c, namespace, "old", metav1.ConditionFalse, ReasonNetworkNotReady)
+	requireRangePolicy(t, c, namespace, "old", ReasonCIDROutsideAllowedRanges)
+}
+
 func TestSubnetReconcilerRejectsOverlapKeepingTheOlder(t *testing.T) {
 	f := newSubnetFixture(t)
 	second := newNamespace(t, f.tenant, "zz")
