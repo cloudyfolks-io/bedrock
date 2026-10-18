@@ -289,7 +289,9 @@ The script writes `ip -o link show eth0`, the address of `eth0` and the `nameser
 The script reads these lines from the container `guest-console-log` of the launcher pod.
 The NIC of the e2e host has MTU 1500, and Fabric gives the guest the MTU 1400 when the Subnet sets none.
 The test Subnet therefore sets 1350, a value that the default cannot give, and the guest must report `mtu 1350`.
-The script deletes `vm2` and the Subnet `parity` at the end, because the backup step expects one VM.
+The script deletes `vm2`, `vm-bad`, their root disks and the Subnet `parity` at the end, because the backup step expects one VM.
+It does this also when a check fails, after it prints the console log of `vm2`.
+The quota step also restores the old quota and deletes its ElasticIPs when a check fails.
 
 The guest has two possible DNS paths: the Fabric DHCP lease, or the `resolv.conf` of the launcher pod.
 The step reads `/etc/resolv.conf` in the guest and expects the two servers of the Subnet.
