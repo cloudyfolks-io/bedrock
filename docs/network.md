@@ -82,6 +82,8 @@ Follow these rules.
    The VM does not start when a check fails.
    The condition `NetworkReady` names the reason: `AddressOutsideSubnet`, `AddressReserved` or `AddressInUse`.
    The operator checks `AddressInUse` again after 30 seconds.
+   An address counts as held by the VM only when Fabric has written `allocated: "true"` for the NIC.
+   While a pinned address is not allocated, the operator checks the VM again every 30 seconds.
 8. After the pod runs, Fabric writes `ip_address`, `mac_address`, `cidr`, `gateway` and `allocated` on the pod.
    The key prefix is the provider.
 

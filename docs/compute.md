@@ -111,6 +111,8 @@ When a check fails, the VM does not start.
 The conditions `Ready` and `NetworkReady` show the reason.
 After you remove the cause, the VM starts.
 The operator checks `AddressInUse` again every 30 seconds.
+Fabric can refuse the address after the VM has started, for example when two pods ask for it at the same time.
+Then the pod has no address, and the VM shows `AddressInUse` after at most 30 seconds.
 
 ## Cloud-init and SSH keys
 

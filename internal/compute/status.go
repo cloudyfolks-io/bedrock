@@ -69,7 +69,7 @@ func AddressesOf(pods []corev1.Pod, nodeName, namespace string, subnets []string
 	for _, subnet := range subnets {
 		prefix := network.SubnetProvider(namespace, subnet) + ".cloudyfolks.io/"
 		ips := pod.Annotations[prefix+"ip_address"]
-		if ips == "" {
+		if ips == "" || pod.Annotations[prefix+"allocated"] != "true" {
 			continue
 		}
 		for _, ip := range strings.Split(ips, ",") {

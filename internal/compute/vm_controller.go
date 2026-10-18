@@ -74,12 +74,15 @@ func (r *VirtualMachineReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 	if err := r.writeStatus(ctx, vm, done.Gate, obs); err != nil {
 		return ctrl.Result{}, fmt.Errorf("write the virtual machine status: %w", err)
 	}
-	return ctrl.Result{RequeueAfter: requeueAfter(done, obs, expiring)}, nil
+	return ctrl.Result{RequeueAfter: requeueAfter(vm, done, obs, expiring)}, nil
 }
 
-func requeueAfter(done outcome, obs observation, expiring bool) time.Duration {
+func requeueAfter(vm v1alpha1.VirtualMachine, done outcome, obs observation, expiring bool) time.Duration {
 	if done.RequeueAfter > 0 {
 		return done.RequeueAfter
+	}
+	if awaitsPinnedAddress(vm, obs) {
+		return applyFailureRetry
 	}
 	if expiring || obs.Phase == v1alpha1.VMPhaseRunning || obs.Phase == v1alpha1.VMPhaseMigrating {
 		return observeInterval

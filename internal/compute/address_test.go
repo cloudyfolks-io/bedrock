@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -221,13 +222,23 @@ func TestPinnedBy(t *testing.T) {
 	}
 }
 
+func requestAnnotations(ns, ip string) map[string]string {
+	return map[string]string{"default." + ns + ".fabric.cloudyfolks.io/ip_address": ip}
+}
+
+func allocatedAnnotations(ns, ip string) map[string]string {
+	annotations := requestAnnotations(ns, ip)
+	annotations["default."+ns+".fabric.cloudyfolks.io/allocated"] = "true"
+	return annotations
+}
+
 func TestVMThatHoldsItsAddressIsNotInConflict(t *testing.T) {
 	c, _ := startEnv(t)
 	ns := seedPlatform(t, c)
 	createVM(t, c, ns, "web-1", pinned("10.100.0.50"))
 	r := newVMReconciler(c)
 	reconcileVM(t, r, ns, "web-1")
-	launcherPodFor(t, c, ns, "launcher-web-1", "web-1", map[string]string{"default." + ns + ".fabric.cloudyfolks.io/ip_address": "10.100.0.50"}, map[string]string{})
+	launcherPodFor(t, c, ns, "launcher-web-1", "web-1", allocatedAnnotations(ns, "10.100.0.50"), map[string]string{})
 	reconcileVM(t, r, ns, "web-1")
 	if got := getVM(t, c, ns, "web-1").Status.Addresses; len(got) != 1 || got[0].IP != "10.100.0.50" {
 		t.Fatalf("addresses %+v", got)
@@ -236,5 +247,55 @@ func TestVMThatHoldsItsAddressIsNotInConflict(t *testing.T) {
 	reconcileVM(t, r, ns, "web-1")
 	if reason := readyOf(getVM(t, c, ns, "web-1")).Reason; reason == ReasonAddressInUse {
 		t.Fatalf("a VM that holds the address must not conflict with its own Fabric IP: %s", reason)
+	}
+}
+
+func TestVMWhoseRequestFabricRefusedReportsAddressInUse(t *testing.T) {
+	c, _ := startEnv(t)
+	ns := seedPlatform(t, c)
+	createVM(t, c, ns, "web-1", pinned("10.100.0.50"))
+	r := newVMReconciler(c)
+	reconcileVM(t, r, ns, "web-1")
+	requireReason(t, getVM(t, c, ns, "web-1"), "Starting")
+	launcherPodFor(t, c, ns, "launcher-web-1", "web-1", requestAnnotations(ns, "10.100.0.50"), map[string]string{})
+	must(t, fabrictest.CreateIP(context.Background(), c, "db-1."+ns, ns, "db-1", network.FabricName(ns, "default"), "10.100.0.50"))
+	for round := 0; round < 3; round++ {
+		result := reconcileVM(t, r, ns, "web-1")
+		vm := getVM(t, c, ns, "web-1")
+		requireAddressGate(t, vm, ReasonAddressInUse)
+		if result.RequeueAfter != 30*time.Second || len(vm.Status.Addresses) != 0 {
+			t.Fatalf("round %d: requeue %s addresses %+v", round, result.RequeueAfter, vm.Status.Addresses)
+		}
+	}
+}
+
+func TestPinnedVMRequeuesUntilItsAddressIsAllocated(t *testing.T) {
+	c, _ := startEnv(t)
+	ns := seedPlatform(t, c)
+	createVM(t, c, ns, "web-1", pinned("10.100.0.50"))
+	createVM(t, c, ns, "halted", func(vm *v1alpha1.VirtualMachine) {
+		pinnedWithoutDisks("10.100.0.51")(vm)
+		vm.Spec.Running = false
+	})
+	r := newVMReconciler(c)
+	if result := reconcileVM(t, r, ns, "web-1"); result.RequeueAfter != 30*time.Second {
+		t.Fatalf("requeue %s", result.RequeueAfter)
+	}
+	if result := reconcileVM(t, r, ns, "halted"); result.RequeueAfter != 0 {
+		t.Fatalf("a stopped VM waits for nothing: requeue %s", result.RequeueAfter)
+	}
+	launcherPodFor(t, c, ns, "launcher-web-1", "web-1", requestAnnotations(ns, "10.100.0.50"), map[string]string{})
+	if result := reconcileVM(t, r, ns, "web-1"); result.RequeueAfter != 30*time.Second {
+		t.Fatalf("a request that Fabric has not allocated: requeue %s", result.RequeueAfter)
+	}
+	var pod corev1.Pod
+	must(t, c.Get(context.Background(), client.ObjectKey{Namespace: ns, Name: "launcher-web-1"}, &pod))
+	pod.Annotations["default."+ns+".fabric.cloudyfolks.io/allocated"] = "true"
+	must(t, c.Update(context.Background(), &pod))
+	if result := reconcileVM(t, r, ns, "web-1"); result.RequeueAfter != 0 {
+		t.Fatalf("an allocated address: requeue %s", result.RequeueAfter)
+	}
+	if got := getVM(t, c, ns, "web-1").Status.Addresses; len(got) != 1 || got[0].IP != "10.100.0.50" {
+		t.Fatalf("addresses %+v", got)
 	}
 }

@@ -105,7 +105,7 @@ func TestVMStatusFromKubeVirt(t *testing.T) {
 
 func addressAnnotationsIn(ns, subnet, ip, mac string) map[string]string {
 	prefix := network.SubnetProvider(ns, subnet) + ".cloudyfolks.io/"
-	return map[string]string{prefix + "ip_address": ip, prefix + "mac_address": mac}
+	return map[string]string{prefix + "ip_address": ip, prefix + "mac_address": mac, prefix + "allocated": "true"}
 }
 
 func TestVMStatusDuringMigration(t *testing.T) {

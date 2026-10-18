@@ -59,7 +59,7 @@ func launcherPod(node string, annotations map[string]string) corev1.Pod {
 
 func addressAnnotations(subnet, ip, mac string) map[string]string {
 	prefix := network.SubnetProvider("acme-web", subnet) + ".cloudyfolks.io/"
-	out := map[string]string{prefix + "ip_address": ip}
+	out := map[string]string{prefix + "ip_address": ip, prefix + "allocated": "true"}
 	if mac != "" {
 		out[prefix+"mac_address"] = mac
 	}
@@ -92,6 +92,19 @@ func TestAddressesOf(t *testing.T) {
 	}
 	if AddressesOf(nil, "node-1", "acme-web", []string{"default"}) != nil {
 		t.Fatal("no pod, no address")
+	}
+}
+
+func TestAddressesOfSkipsAnNICThatIsNotAllocated(t *testing.T) {
+	requested := launcherPod("node-1", map[string]string{network.SubnetProvider("acme-web", "default") + ".cloudyfolks.io/ip_address": "10.100.0.7"})
+	if got := AddressesOf([]corev1.Pod{requested}, "node-1", "acme-web", []string{"default"}); got != nil {
+		t.Fatalf("a request that Fabric has not allocated is no address: %+v", got)
+	}
+	mixed := addressAnnotations("db", "10.101.0.4", "")
+	mixed[network.SubnetProvider("acme-web", "default")+".cloudyfolks.io/ip_address"] = "10.100.0.7"
+	got := AddressesOf([]corev1.Pod{launcherPod("node-1", mixed)}, "node-1", "acme-web", []string{"default", "db"})
+	if len(got) != 1 || got[0].Subnet != "db" {
+		t.Fatalf("only the allocated NIC is listed: %+v", got)
 	}
 }
 

@@ -33,6 +33,14 @@ func holdsAddress(vm v1alpha1.VirtualMachine, nic NIC) bool {
 	})
 }
 
+func awaitsPinnedAddress(vm v1alpha1.VirtualMachine, obs observation) bool {
+	return obs.Phase == v1alpha1.VMPhaseStarting && slices.ContainsFunc(vm.Spec.Networks, func(n v1alpha1.VMNetwork) bool {
+		return n.Address != "" && !slices.ContainsFunc(obs.Addresses, func(a v1alpha1.VMAddress) bool {
+			return a.Subnet == n.SubnetRef && a.IP == n.Address
+		})
+	})
+}
+
 func (r *VirtualMachineReconciler) stepAddresses(ctx context.Context, vm v1alpha1.VirtualMachine, in RenderInput) (RenderInput, *Gate, error) {
 	for _, nic := range in.NICs {
 		if nic.Address == "" {
@@ -68,7 +76,7 @@ func (r *VirtualMachineReconciler) addressGate(ctx context.Context, vm v1alpha1.
 		return nil, err
 	}
 	if network.AddressHeldByAnother(ips, nic.Address, vm.Namespace, vm.Name) {
-		return gateOf(ReasonAddressInUse, "the address %s of the subnet %q is already allocated", nic.Address, nic.Subnet), nil
+		return gateOf(ReasonAddressInUse, "the address %s of the subnet %q is already allocated to another pod", nic.Address, nic.Subnet), nil
 	}
 	return nil, nil
 }
