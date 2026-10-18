@@ -137,7 +137,23 @@ expect_guest_dns() {
   fi
 }
 
-network_guest_parity() {
+parity_cleanup() {
+  if [ "$1" -ne 0 ]; then
+    guest_console_log vm2 >&2 || true
+    kubectl -n "$NS" get virtualmachine vm2 vm-bad -o yaml >&2 || true
+    kubectl -n "$NS" describe pods -l 'kubevirt.io/domain in (vm2,vm-bad)' >&2 || true
+  fi
+  kubectl -n "$NS" delete virtualmachine vm2 vm-bad --ignore-not-found
+  wait_gone 180 virtualmachine vm2 -n "$NS"
+  wait_gone 180 virtualmachine vm-bad -n "$NS"
+  wait_empty 180 -n "$NS" get pods -l 'kubevirt.io/domain in (vm2,vm-bad)'
+  wait_gone 180 datavolume vm2-root -n "$NS"
+  wait_gone 180 datavolume vm-bad-root -n "$NS"
+  kubectl -n "$NS" delete subnet parity --ignore-not-found
+  wait_gone 180 subnet parity -n "$NS"
+}
+
+parity_checks() {
   parity_subnet_manifest | kubectl -n "$NS" apply -f -
   wait_reason 120 subnet parity Ready Applied -n "$NS"
   expect_equal "1350" "$(fabric_by_label subnets Subnet parity -o jsonpath='{.items[0].spec.mtu}')" "fabric subnet mtu"
@@ -156,11 +172,13 @@ network_guest_parity() {
   expect_contains "$(guest_value vm2 LINK)" "mtu 1350" "guest mtu from Subnet mtu"
   expect_equal "10.100.16.50/24" "$(guest_value vm2 ADDR)" "guest address"
   expect_guest_dns "198.51.100.53 198.51.100.54" "$(guest_value vm2 DNS)"
-  kubectl -n "$NS" delete virtualmachine vm2
-  wait_gone 180 virtualmachine vm2 -n "$NS"
-  wait_empty 180 -n "$NS" get pods -l kubevirt.io/domain=vm2
-  kubectl -n "$NS" delete subnet parity
-  wait_gone 180 subnet parity -n "$NS"
+}
+
+network_guest_parity() {
+  (
+    trap 'parity_cleanup "$?"' EXIT
+    parity_checks
+  )
 }
 
 fabric_equals() {
@@ -230,9 +248,13 @@ network_elastic_ip_pool_choice() {
 }
 
 tenant_elastic_ip_count() {
-  local namespace count=0
-  for namespace in $(kubectl get namespaces -l "bedrock.cloudyfolks.io/tenant=$TENANT" -o jsonpath='{.items[*].metadata.name}'); do
-    count=$((count + $(kubectl -n "$namespace" get elasticips -o name | wc -l)))
+  local namespaces namespace names count=0
+  namespaces=$(kubectl get namespaces -l "bedrock.cloudyfolks.io/tenant=$TENANT" -o jsonpath='{.items[*].metadata.name}') || return 1
+  for namespace in $namespaces; do
+    names=$(kubectl -n "$namespace" get elasticips -o name) || return 1
+    if [ -n "$names" ]; then
+      count=$((count + $(wc -l <<<"$names")))
+    fi
   done
   echo "$count"
 }
@@ -241,9 +263,16 @@ set_elastic_ip_quota() {
   kubectl patch tenant "$TENANT" --type merge -p "{\"spec\":{\"quota\":{\"elasticIPs\":${1:-null}}}}"
 }
 
-network_elastic_ip_quota() {
-  local previous count
-  previous=$(kubectl get tenant "$TENANT" -o jsonpath='{.spec.quota.elasticIPs}')
+quota_cleanup() {
+  set_elastic_ip_quota "$1"
+  kubectl -n "$NS" delete elasticip quota-first quota-second ip-auto --ignore-not-found
+  wait_empty 180 get ovn-eips.fabric.cloudyfolks.io -l bedrock.cloudyfolks.io/name=quota-first
+  wait_empty 180 get ovn-eips.fabric.cloudyfolks.io -l bedrock.cloudyfolks.io/name=quota-second
+  wait_empty 180 get ovn-eips.fabric.cloudyfolks.io -l bedrock.cloudyfolks.io/name=ip-auto
+}
+
+quota_checks() {
+  local count
   count=$(tenant_elastic_ip_count)
   set_elastic_ip_quota "$((count + 1))"
   elastic_ip_manifest quota-first | kubectl -n "$NS" apply -f -
@@ -254,10 +283,15 @@ network_elastic_ip_quota() {
   expect_equal "" "$(fabric_by_label ovn-eips ElasticIP quota-second -o name)" "ovn eip of an over-quota elastic ip"
   kubectl -n "$NS" delete elasticip quota-first
   wait_reason 120 elasticip quota-second Ready Reserved -n "$NS"
-  kubectl -n "$NS" delete elasticip quota-second ip-auto
-  set_elastic_ip_quota "$previous"
-  wait_empty 180 get ovn-eips.fabric.cloudyfolks.io -l bedrock.cloudyfolks.io/name=quota-second
-  wait_empty 180 get ovn-eips.fabric.cloudyfolks.io -l bedrock.cloudyfolks.io/name=ip-auto
+}
+
+network_elastic_ip_quota() {
+  local previous
+  previous=$(kubectl get tenant "$TENANT" -o jsonpath='{.spec.quota.elasticIPs}')
+  (
+    trap 'quota_cleanup "$previous"' EXIT
+    quota_checks
+  )
 }
 
 elastic_ip_manifest() {
