@@ -250,7 +250,7 @@ If a name changes in an area, change it in that file only.
 | `tenancy.sh` | The users and tokens. The tenant `acme` with its Network and owner role. The projects `web` and `data` with quota, the AAQ limit of five VMs, roles and policies. Workload and role checks. Quota edges. |
 | `images.sh` | The ClusterImage `cirros` from the bundle. An image upload through the proxy. |
 | `compute.sh` | An SSH key, a Volume, the SecurityGroup `web` and the VM `vm1`. Hot-plug and expand. A volume snapshot. The proxy actions and the console, which the Go test runs. |
-| `network.sh` | The provider network and the Network status. Subnet rules. The security group on the VM. An ElasticIP in L2 mode with the ARP and ping proof. A LoadBalancer and a DNSZone. Isolation rules. |
+| `network.sh` | The provider network and the Network status. The fabric-frr agent. Subnet rules. The security group on the VM. A VM with a pinned address, a Subnet MTU and Subnet DNS servers. An ElasticIP in L2 mode with the ARP and ping proof. An ElasticIP without a provider network. The ElasticIP quota. A LoadBalancer and a DNSZone. Isolation rules. |
 | `objectstorage.sh` | The object store, two users and one bucket. A put and a get from inside the cluster. A denied read by the other user. |
 | `backup.sh` | The SeaweedFS target. A VM backup with one entry. A restore with `replace: true`. A restore of a missing backup. |
 | `panel.sh` | The panel at `console.<host>`, the redirect from the apex, the API host and the Go test for the login and the watch stream. |
@@ -271,6 +271,34 @@ The shell and the Go test do not repeat each other.
 The shell checks objects with `kubectl`.
 The Go test checks HTTP and WebSocket flows.
 
+## Network parity checks
+
+The steps `network_underlay`, `network_frr_agent`, `network_guest_parity`, `network_elastic_ip_pool_choice` and `network_elastic_ip_quota` in `hack/e2e/tenant/network.sh` check the features of `docs/network.md`.
+
+| Step | Check |
+| --- | --- |
+| `network_underlay` | The default Network of the tenant has `enableExternal: true` without a patch. The Fabric `Subnet` `provider-public` has the label `usability=public`. |
+| `network_frr_agent` | The node has the label `fabric.cloudyfolks.io/external-gw=true`. The DaemonSet `fabric-frr` selects this label, has one ready pod, and the pod runs on the node. |
+| `network_guest_parity` | The Subnet `parity` has `mtu: 1350` and two `dnsServers`. The Fabric `Subnet` has `spec.mtu` 1350 and the DHCP options `mtu=1350` and `dns_server=198.51.100.53;198.51.100.54`. A VM that pins the gateway address has `NetworkReady=False` with the reason `AddressReserved`, and it has no pod. A VM that pins `10.100.16.50` runs, and the VM status, the launcher pod annotations `ip_address` and `allocated`, and the guest agree. |
+| `network_elastic_ip_pool_choice` | An ElasticIP with an empty `spec` is `Reserved`, has `status.providerNetwork` set to `public`, and has an address of the pool. |
+| `network_elastic_ip_quota` | The script sets `quota.elasticIPs` to the number of ElasticIPs of the tenant plus one. The first new ElasticIP is `Reserved`. The second has `QuotaExceeded`, no `status.providerNetwork` and no Fabric `OvnEip`. When the first is deleted, the second becomes `Reserved`. The script then sets the quota to its old value. |
+
+The test VM `vm2` has no SSH key.
+Its user data is a shell script, and cirros runs it at boot.
+The script writes `ip -o link show eth0`, the address of `eth0` and the `nameserver` lines of `/etc/resolv.conf` to the serial console, with the prefixes `PARITY-LINK`, `PARITY-ADDR` and `PARITY-DNS`.
+The script reads these lines from the container `guest-console-log` of the launcher pod.
+The NIC of the e2e host has MTU 1500, and Fabric gives the guest the MTU 1400 when the Subnet sets none.
+The test Subnet therefore sets 1350, a value that the default cannot give, and the guest must report `mtu 1350`.
+The script deletes `vm2` and the Subnet `parity` at the end, because the backup step expects one VM.
+
+The guest has two possible DNS paths: the Fabric DHCP lease, or the `resolv.conf` of the launcher pod.
+The step reads `/etc/resolv.conf` in the guest and expects the two servers of the Subnet.
+If the guest reads other servers, the step fails with a message that says the guest does not take its DNS from Fabric DHCP.
+The follow-up is then `dnsPolicy: None` with the same servers on the VM pod.
+
+The step `network_frr_agent` proves that the agent runs.
+It does not prove a BGP session.
+
 ## Read a failure
 
 When a job fails, the script prints a dump.
@@ -284,7 +312,7 @@ The tenant job does not check these items.
 
 - The audit policy restart of the API server.
 - Failover of the gateway chassis, because the cluster has one node.
-- BGP mode of the ElasticIP.
+- BGP mode of the ElasticIP. The e2e cluster runs in L2 mode, so no BGP Network, `BgpConf` or BGP session exists. Only the fabric-frr agent is checked.
 - The migration of a VM to a second node.
 - A full control-plane join of a second node. The tenant job checks only the fetch of the encryption file.
 - The catalog download of the ClusterImage list.

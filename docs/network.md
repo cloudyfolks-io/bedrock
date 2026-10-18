@@ -143,6 +143,8 @@ A tenant user, a Deployment and a Job cannot attach a pod to a network.
 
 A `Network` becomes a Fabric `Vpc`.
 Set `enableExternal` on the Network to give it an external connection.
+The default Network of a new tenant has `enableExternal: true`.
+The operator does not change the value of a Network that already exists.
 The external connection is a router port on each provider network.
 It also adds a default route to the first provider network.
 
