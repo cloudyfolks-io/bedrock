@@ -297,7 +297,7 @@ func readK0sBackup(plain io.Reader, dest string) (string, error) {
 		if err != nil {
 			return "", err
 		}
-		if matched, _ := path.Match("k0s_backup_*.tar.gz", header.Name); !matched {
+		if matched, _ := path.Match(k0sArchivePattern, header.Name); !matched {
 			continue
 		}
 		target := filepath.Join(dest, header.Name)
