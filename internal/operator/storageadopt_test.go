@@ -385,10 +385,9 @@ func TestRenderStorageAdoptWaitsForMonitorHosts(t *testing.T) {
 	noRole := osdHost("node-3", "/dev/disk/by-id/wwn-0x4")
 	noRole.Spec.Roles = []string{v1alpha1.RoleControlPlane}
 	cases := map[string][]v1alpha1.Host{
-		"no host":             nil,
-		"a host is missing":   {osdHost("node-1", "/dev/disk/by-id/wwn-0x1"), osdHost("node-2", "/dev/disk/by-id/wwn-0x3")},
-		"a host has no role":  {osdHost("node-1", "/dev/disk/by-id/wwn-0x1"), osdHost("node-2", "/dev/disk/by-id/wwn-0x3"), noRole},
-		"a host has no disks": {osdHost("node-1", "/dev/disk/by-id/wwn-0x1"), osdHost("node-2", "/dev/disk/by-id/wwn-0x3"), osdHost("node-3")},
+		"no host":            nil,
+		"a host is missing":  {osdHost("node-1", "/dev/disk/by-id/wwn-0x1"), osdHost("node-2", "/dev/disk/by-id/wwn-0x3")},
+		"a host has no role": {osdHost("node-1", "/dev/disk/by-id/wwn-0x1"), osdHost("node-2", "/dev/disk/by-id/wwn-0x3"), noRole},
 	}
 	for name, hosts := range cases {
 		for _, reason := range adoptReasons {
@@ -411,6 +410,26 @@ func TestRenderStorageAdoptWaitsForMonitorHosts(t *testing.T) {
 	}
 }
 
+func TestRenderStorageAdoptAcceptsAMonitorHostWithoutDevices(t *testing.T) {
+	for _, reason := range adoptReasons {
+		t.Run("phase "+reason, func(t *testing.T) {
+			in := adoptInput(reason)
+			in.Hosts = []v1alpha1.Host{osdHost("node-1", "/dev/disk/by-id/wwn-0x1", "/dev/disk/by-id/wwn-0x2"), osdHost("node-2", "/dev/disk/by-id/wwn-0x3"), osdHost("node-3")}
+			out, err := RenderStorage(in)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if out.SkipReason != "" || len(out.Objects) == 0 || out.Objects[0].GetKind() != "CephCluster" {
+				t.Fatalf("rendered %+v", out)
+			}
+			nodes, _, _ := unstructured.NestedSlice(out.Objects[0].Object, "spec", "storage", "nodes")
+			if len(nodes) != 2 {
+				t.Fatalf("storage nodes %v: a host without devices is no storage node", nodes)
+			}
+		})
+	}
+}
+
 func TestRenderStorageAdoptNamesTheMonitorHostsThatAreMissing(t *testing.T) {
 	in := adoptInput("")
 	in.Hosts = []v1alpha1.Host{osdHost("node-2", "/dev/disk/by-id/wwn-0x3")}
@@ -418,7 +437,7 @@ func TestRenderStorageAdoptNamesTheMonitorHostsThatAreMissing(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if out.SkipMessage != "monitor hosts without the ceph-osd role and devices: node-1, node-3" {
+	if out.SkipMessage != "monitor hosts without the ceph-osd role: node-1, node-3" {
 		t.Fatalf("message %q", out.SkipMessage)
 	}
 }

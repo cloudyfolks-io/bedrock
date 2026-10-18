@@ -49,7 +49,7 @@ func renderAdopted(in AddonInput, adopt v1alpha1.AdoptSpec) (Rendered, error) {
 	hosts := osdHosts(in.Hosts)
 	phase := adoptPhase(in.Cluster)
 	if phase != v1alpha1.ReasonAdopted {
-		if reason, message := adoptWait(in.CephMonSecret, adopt, hosts); reason != "" {
+		if reason, message := adoptWait(in.CephMonSecret, adopt, osdNodeNames(in.Hosts)); reason != "" {
 			return Rendered{SkipReason: reason, SkipMessage: message, Conditions: []metav1.Condition{adoptedCondition(reason, message)}}, nil
 		}
 	}
@@ -91,12 +91,12 @@ func adoptedCondition(reason, message string) metav1.Condition {
 	return metav1.Condition{Type: v1alpha1.ConditionStorageAdopted, Status: status, Reason: reason, Message: message}
 }
 
-func adoptWait(secret *corev1.Secret, adopt v1alpha1.AdoptSpec, hosts []v1alpha1.Host) (string, string) {
+func adoptWait(secret *corev1.Secret, adopt v1alpha1.AdoptSpec, osdNodes []string) (string, string) {
 	if message := identityProblem(secret, adopt.FSID); message != "" {
 		return v1alpha1.ReasonWaitingForIdentity, message
 	}
-	if missing := monitorsWithoutHost(adopt.Monitors, hosts); len(missing) > 0 {
-		return v1alpha1.ReasonWaitingForHosts, "monitor hosts without the ceph-osd role and devices: " + strings.Join(missing, ", ")
+	if missing := monitorsWithoutHost(adopt.Monitors, osdNodes); len(missing) > 0 {
+		return v1alpha1.ReasonWaitingForHosts, "monitor hosts without the ceph-osd role: " + strings.Join(missing, ", ")
 	}
 	return "", ""
 }
@@ -111,10 +111,10 @@ func identityProblem(secret *corev1.Secret, fsid string) string {
 	return ""
 }
 
-func monitorsWithoutHost(monitors []v1alpha1.AdoptMonitor, hosts []v1alpha1.Host) []string {
+func monitorsWithoutHost(monitors []v1alpha1.AdoptMonitor, osdNodes []string) []string {
 	var missing []string
 	for _, monitor := range monitors {
-		if !slices.ContainsFunc(hosts, func(host v1alpha1.Host) bool { return host.Name == monitor.Node }) {
+		if !slices.Contains(osdNodes, monitor.Node) {
 			missing = append(missing, monitor.Node)
 		}
 	}
