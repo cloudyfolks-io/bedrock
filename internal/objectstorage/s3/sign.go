@@ -15,17 +15,18 @@ import (
 type Credentials struct{ AccessKey, SecretKey string }
 
 type Request struct {
+	Service                      string
 	Method, Host, Path, RawQuery string
 	Headers                      map[string]string
 	PayloadSHA256                string
 }
 
 const (
-	algorithm     = "AWS4-HMAC-SHA256"
-	service       = "s3"
-	terminator    = "aws4_request"
-	amzDateLayout = "20060102T150405Z"
-	dateLayout    = "20060102"
+	algorithm      = "AWS4-HMAC-SHA256"
+	defaultService = "s3"
+	terminator     = "aws4_request"
+	amzDateLayout  = "20060102T150405Z"
+	dateLayout     = "20060102"
 )
 
 func Sign(r Request, c Credentials, region string, now time.Time) map[string]string {
@@ -33,10 +34,11 @@ func Sign(r Request, c Credentials, region string, now time.Time) map[string]str
 	amzDate := moment.Format(amzDateLayout)
 	headers := signedHeaderValues(r, amzDate)
 	names := sortedKeys(headers)
+	service := serviceOf(r)
 	scope := strings.Join([]string{moment.Format(dateLayout), region, service, terminator}, "/")
 	canonical := canonicalRequest(r, headers, names)
 	toSign := strings.Join([]string{algorithm, amzDate, scope, hexSHA256(canonical)}, "\n")
-	signature := hex.EncodeToString(hmacSHA256(signingKey(c.SecretKey, moment.Format(dateLayout), region), toSign))
+	signature := hex.EncodeToString(hmacSHA256(signingKey(c.SecretKey, moment.Format(dateLayout), region, service), toSign))
 	authorization := algorithm + " Credential=" + c.AccessKey + "/" + scope + ",SignedHeaders=" + strings.Join(names, ";") + ",Signature=" + signature
 	return map[string]string{
 		"Authorization":        authorization,
@@ -125,7 +127,14 @@ func unreserved(b byte) bool {
 	return b >= 'a' && b <= 'z' || b >= 'A' && b <= 'Z' || b >= '0' && b <= '9' || b == '-' || b == '_' || b == '.' || b == '~'
 }
 
-func signingKey(secret, date, region string) []byte {
+func serviceOf(r Request) string {
+	if r.Service == "" {
+		return defaultService
+	}
+	return r.Service
+}
+
+func signingKey(secret, date, region, service string) []byte {
 	key := hmacSHA256([]byte("AWS4"+secret), date)
 	key = hmacSHA256(key, region)
 	key = hmacSHA256(key, service)
