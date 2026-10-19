@@ -1,0 +1,58 @@
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: bedrock-database
+  namespace: monitoring
+spec:
+  groups:
+    - name: bedrock-database
+      rules:
+        - alert: DbaasDiskNearlyFull
+          expr: (kubelet_volume_stats_used_bytes{namespace="bedrock-dbaas"} / kubelet_volume_stats_capacity_bytes{namespace="bedrock-dbaas"} > 0.85) * on(namespace,persistentvolumeclaim) group_left(label_app_kubernetes_io_instance, label_bedrock_cloudyfolks_io_name) max by (namespace,persistentvolumeclaim,label_app_kubernetes_io_instance,label_bedrock_cloudyfolks_io_name) (kube_pod_spec_volumes_persistentvolumeclaims_info{namespace="bedrock-dbaas"} * on(namespace,pod) group_left(label_app_kubernetes_io_instance, label_bedrock_cloudyfolks_io_name) kube_pod_labels{namespace="bedrock-dbaas",label_app_kubernetes_io_managed_by=~"bedrock|percona-server-mysql-operator"})
+          for: 10m
+          labels:
+            severity: warning
+          annotations:
+            summary: A database volume is over 85 percent full.
+            description: >-
+              The volume of the database {{ $labels.label_bedrock_cloudyfolks_io_name }} ({{ $labels.label_app_kubernetes_io_instance }}) is {{ $value | humanizePercentage }} full.
+
+        - alert: DbaasDiskCritical
+          expr: (kubelet_volume_stats_used_bytes{namespace="bedrock-dbaas"} / kubelet_volume_stats_capacity_bytes{namespace="bedrock-dbaas"} > 0.95) * on(namespace,persistentvolumeclaim) group_left(label_app_kubernetes_io_instance, label_bedrock_cloudyfolks_io_name) max by (namespace,persistentvolumeclaim,label_app_kubernetes_io_instance,label_bedrock_cloudyfolks_io_name) (kube_pod_spec_volumes_persistentvolumeclaims_info{namespace="bedrock-dbaas"} * on(namespace,pod) group_left(label_app_kubernetes_io_instance, label_bedrock_cloudyfolks_io_name) kube_pod_labels{namespace="bedrock-dbaas",label_app_kubernetes_io_managed_by=~"bedrock|percona-server-mysql-operator"})
+          for: 5m
+          labels:
+            severity: critical
+          annotations:
+            summary: A database volume is over 95 percent full.
+            description: >-
+              The volume of the database {{ $labels.label_bedrock_cloudyfolks_io_name }} ({{ $labels.label_app_kubernetes_io_instance }}) is {{ $value | humanizePercentage }} full. Writes will fail soon.
+
+        - alert: DbaasPodNotReady
+          expr: (kube_pod_status_ready{namespace="bedrock-dbaas",condition="false"} == 1 unless on(namespace,pod) kube_pod_status_phase{namespace="bedrock-dbaas",phase="Succeeded"} == 1) * on(namespace,pod) group_left(label_app_kubernetes_io_instance, label_bedrock_cloudyfolks_io_name) kube_pod_labels{namespace="bedrock-dbaas",label_app_kubernetes_io_managed_by=~"bedrock|percona-server-mysql-operator"}
+          for: 10m
+          labels:
+            severity: critical
+          annotations:
+            summary: A database pod has not been ready for 10 minutes.
+            description: >-
+              Pod {{ $labels.pod }} of the database {{ $labels.label_bedrock_cloudyfolks_io_name }} ({{ $labels.label_app_kubernetes_io_instance }}) is not ready.
+
+        - alert: DbaasPodRestarting
+          expr: (increase(kube_pod_container_status_restarts_total{namespace="bedrock-dbaas"}[30m]) > 3) * on(namespace,pod) group_left(label_app_kubernetes_io_instance, label_bedrock_cloudyfolks_io_name) kube_pod_labels{namespace="bedrock-dbaas",label_app_kubernetes_io_managed_by=~"bedrock|percona-server-mysql-operator"}
+          for: 5m
+          labels:
+            severity: warning
+          annotations:
+            summary: A database container restarted more than three times in 30 minutes.
+            description: >-
+              Container {{ $labels.container }} in pod {{ $labels.pod }} of the database {{ $labels.label_bedrock_cloudyfolks_io_name }} ({{ $labels.label_app_kubernetes_io_instance }}) is restarting.
+
+        - alert: DbaasValkeyMemoryHigh
+          expr: (redis_memory_used_bytes{namespace="bedrock-dbaas"} / redis_memory_max_bytes{namespace="bedrock-dbaas"} > 0.9 and redis_memory_max_bytes{namespace="bedrock-dbaas"} > 0) * on(namespace,pod) group_left(label_app_kubernetes_io_instance, label_bedrock_cloudyfolks_io_name) kube_pod_labels{namespace="bedrock-dbaas",label_app_kubernetes_io_managed_by=~"bedrock|percona-server-mysql-operator"}
+          for: 10m
+          labels:
+            severity: warning
+          annotations:
+            summary: A Valkey instance uses over 90 percent of its maxmemory.
+            description: >-
+              The Valkey database {{ $labels.label_bedrock_cloudyfolks_io_name }} ({{ $labels.label_app_kubernetes_io_instance }}) is at {{ $value | humanizePercentage }} of maxmemory. Writes return OOM errors at 100 percent.

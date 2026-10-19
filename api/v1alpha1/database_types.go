@@ -17,6 +17,8 @@ const (
 	DatabaseFieldManager = "bedrock-database"
 
 	AnnotationResetPassword = "bedrock.cloudyfolks.io/reset-password"
+	AnnotationRestart       = "bedrock.cloudyfolks.io/restart"
+	AnnotationRefreshImage  = "bedrock.cloudyfolks.io/refresh-image"
 )
 
 // +kubebuilder:validation:XValidation:rule="self == oldSelf",message="restore is immutable"
@@ -35,6 +37,7 @@ type DatabaseBackupSpec struct {
 }
 
 // +kubebuilder:validation:XValidation:rule="self.engine != 'valkey' || !self.backup.enabled",message="a Valkey database has no backups: set backup.enabled to false"
+// +kubebuilder:validation:XValidation:rule="self.engine != 'valkey' || !has(self.restore)",message="a Valkey database has no restore"
 // +kubebuilder:validation:XValidation:rule="has(self.restore) == has(oldSelf.restore)",message="restore is immutable"
 type DatabaseSpec struct {
 	// +kubebuilder:validation:Enum=postgresql;mysql;valkey
@@ -126,6 +129,20 @@ type DatabaseStats struct {
 	SampledAt *metav1.Time `json:"sampledAt,omitempty"`
 }
 
+type DatabaseApplied struct {
+	// +kubebuilder:validation:MaxLength=63
+	Class string `json:"class"`
+	// +kubebuilder:validation:MaxLength=16
+	Version string `json:"version"`
+	// +kubebuilder:validation:Minimum=0
+	StorageGi int32 `json:"storageGi"`
+	// +optional
+	Suspended bool `json:"suspended,omitempty"`
+	// +kubebuilder:validation:MaxLength=253
+	// +optional
+	RestartToken string `json:"restartToken,omitempty"`
+}
+
 type DatabaseStatus struct {
 	CommonStatus `json:",inline"`
 	// +kubebuilder:validation:Enum=Provisioning;Ready;Unhealthy;Suspended;Restoring;Upgrading;Deleting;Failed
@@ -144,6 +161,11 @@ type DatabaseStatus struct {
 	Backup *DatabaseBackupStatus `json:"backup,omitempty"`
 	// +optional
 	Stats *DatabaseStats `json:"stats,omitempty"`
+	// +kubebuilder:validation:MaxLength=1024
+	// +optional
+	Image string `json:"image,omitempty"`
+	// +optional
+	Applied *DatabaseApplied `json:"applied,omitempty"`
 }
 
 // +kubebuilder:object:root=true

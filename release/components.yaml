@@ -168,12 +168,34 @@ components:
       - ghcr.io/cloudnative-pg/postgresql:16.15-minimal-trixie@sha256:f76ba02680a07bdafaa00c81827351b15e671ac11e0e6a0b72f8ee5835cc82c6
       - ghcr.io/cloudnative-pg/postgresql:17.9-minimal-trixie@sha256:3c9f2df53e15f3fff0aee630beffe73936590333b7fd80f2239bf59b22a9852e
       - ghcr.io/cloudnative-pg/postgresql:18.6-minimal-trixie@sha256:0675340b02be838319b9b6f323c206693e519dcd62ec729d539be9f46bb7a2f9
+  - name: percona-ps
+    addon: true
+    chart: charts/ps-operator
+    version: 1.2.0
+    namespace: ps-operator
+    values: release/values/percona-ps.yaml
+    noHooks: true
+    crdsToGroup: crds
+    dirs: [manifests/addons/percona-ps]
+    extraImages:
+      - docker.io/percona/percona-server-mysql-operator:1.2.0@sha256:28bfc38c1d4b642e860fda46aa7a964fc2de11a93a6dd05fcd7de4fd782982c8
+      - docker.io/percona/percona-server:8.4.10-10.1@sha256:01cf1439241e11c5d49312db1b18ee01a5947869c1a1dec18417d88ffaeb5717
+      - docker.io/percona/percona-server:9.7.2-2.1@sha256:ad263f3a9b964131492485d06b8663de343d58c68063abd40a3da07fbf8f3359
+      - docker.io/percona/percona-xtrabackup:8.4.0-6.1@sha256:f4fc511cca67d1ba0aef6752c53bdd25383235cb58f1d28e570adbc4bb67d374
+      - docker.io/percona/percona-xtrabackup:9.7.1@sha256:41bd1636340a436012411b82b98c9d70a54fe600c29424d75749c53ca2e721c7
+      - docker.io/percona/haproxy:2.8.18-1@sha256:726b65930d86f7342eb6bce97a38b9af934c935345e4524afda6b65c2b3213b3
+      - docker.io/percona/percona-toolkit:3.7.1-4@sha256:9ed7a2025946ed326fb26fbfa45b49c81658be5bfe87a0ba5c34441df05e8dde
   - name: loki
     addon: true
     dirs: [manifests/addons/loki]
   - name: bedrock
     order: 90
     dirs: [manifests/90-bedrock]
+    extraImages:
+      - docker.io/valkey/valkey:8.1.10@sha256:640c5e62cea04b6d6f2084232651d0cc70362d31f4f805e7be94dbed6855e8f2
+      - docker.io/valkey/valkey:9.0.6@sha256:63346cb24a61221e76bdf41acce99b3968a9fa83d8122144deab45394b27b4f2
+      - docker.io/valkey/valkey:9.1.2@sha256:418652cfb58ef879d4978c33553735d7147016032d5aefaa14c828e611eb9dfd
+      - docker.io/oliver006/redis_exporter:v1.94.0@sha256:0842ef7110e62b40bbde2d5c11f38c6fbd99f7100c75e3866637c1b335a1eff7
   - name: catalog
     order: 92
     dirs: [manifests/92-catalog]

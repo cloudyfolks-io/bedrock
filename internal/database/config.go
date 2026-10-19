@@ -26,10 +26,11 @@ const (
 	keyVIPRange         = "database.vip-range"
 	keyRetentionDays    = "database.backup.retention-days"
 	keyRetentionDelete  = "database.backup.retention-after-delete"
+	keyBackupMaxAge     = "database.upgrade.backup-max-age"
 	settingPrefix       = "database."
 )
 
-var configKeys = []string{keyEnabled, keyCapacityCPU, keyCapacityMemory, keyCapacityPods, keyMaxUtilization, keySweeperDryRun, keyProvisionTimeout, keyExecTimeout, keyBackupBucket, keyVIPRange, keyRetentionDays, keyRetentionDelete}
+var configKeys = []string{keyEnabled, keyCapacityCPU, keyCapacityMemory, keyCapacityPods, keyMaxUtilization, keySweeperDryRun, keyProvisionTimeout, keyExecTimeout, keyBackupBucket, keyVIPRange, keyRetentionDays, keyRetentionDelete, keyBackupMaxAge}
 
 type Config struct {
 	Enabled              bool
@@ -44,6 +45,7 @@ type Config struct {
 	VIPRange             netip.Prefix
 	RetentionDays        int
 	RetentionAfterDelete time.Duration
+	BackupMaxAge         time.Duration
 }
 
 func ParseConfig(values map[string]string) (Config, error) {
@@ -68,6 +70,7 @@ func ParseConfig(values map[string]string) (Config, error) {
 	retentionDays, _ := strconv.Atoi(effective[keyRetentionDays])
 	vipRange, _ := netip.ParsePrefix(effective[keyVIPRange])
 	retentionAfterDelete, _ := time.ParseDuration(effective[keyRetentionDelete])
+	backupMaxAge, _ := time.ParseDuration(effective[keyBackupMaxAge])
 	return Config{
 		Enabled:              enabled,
 		CapacityCPU:          resource.MustParse(effective[keyCapacityCPU]),
@@ -81,6 +84,7 @@ func ParseConfig(values map[string]string) (Config, error) {
 		VIPRange:             vipRange,
 		RetentionDays:        retentionDays,
 		RetentionAfterDelete: retentionAfterDelete,
+		BackupMaxAge:         backupMaxAge,
 	}, nil
 }
 

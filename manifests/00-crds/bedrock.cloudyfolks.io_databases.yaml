@@ -137,6 +137,8 @@ spec:
             x-kubernetes-validations:
             - message: 'a Valkey database has no backups: set backup.enabled to false'
               rule: self.engine != 'valkey' || !self.backup.enabled
+            - message: a Valkey database has no restore
+              rule: self.engine != 'valkey' || !has(self.restore)
             - message: restore is immutable
               rule: has(self.restore) == has(oldSelf.restore)
           status:
@@ -163,6 +165,28 @@ spec:
                 maxItems: 8
                 type: array
                 x-kubernetes-list-type: atomic
+              applied:
+                properties:
+                  class:
+                    maxLength: 63
+                    type: string
+                  restartToken:
+                    maxLength: 253
+                    type: string
+                  storageGi:
+                    format: int32
+                    minimum: 0
+                    type: integer
+                  suspended:
+                    type: boolean
+                  version:
+                    maxLength: 16
+                    type: string
+                required:
+                - class
+                - storageGi
+                - version
+                type: object
               backup:
                 properties:
                   items:
@@ -265,6 +289,9 @@ spec:
                 x-kubernetes-list-type: map
               credentialsSecret:
                 maxLength: 253
+                type: string
+              image:
+                maxLength: 1024
                 type: string
               instances:
                 format: int32

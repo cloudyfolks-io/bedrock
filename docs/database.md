@@ -186,6 +186,7 @@ The sweeper deletes the prefix and the ConfigMap after `database.backup.retentio
 | `database.backup.bucket` | `bedrock-database-backups` | The bucket of the backups. |
 | `database.backup.retention-days` | `7` | Days of backups. |
 | `database.backup.retention-after-delete` | `168h` | The time that the backups of a deleted database stay. |
+| `database.upgrade.backup-max-age` | `26h` | The age limit of the backup that an upgrade needs. An older backup makes a new pre-upgrade backup. |
 
 ## Reasons
 

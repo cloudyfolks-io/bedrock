@@ -24,7 +24,7 @@ func addonBundle(t *testing.T) release.Bundle {
 	}
 	selected := cfg.Components[:0:0]
 	for _, component := range cfg.Components {
-		if component.Name == "kata" || component.Name == "loki" || component.Name == "cnpg" || component.Name == "crds" {
+		if component.Name == "kata" || component.Name == "loki" || component.Name == "cnpg" || component.Name == "percona-ps" || component.Name == "crds" {
 			selected = append(selected, component)
 		}
 	}

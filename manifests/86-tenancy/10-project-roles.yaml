@@ -22,7 +22,7 @@ rules:
     resources: [applicationawareresourcequotas]
     verbs: [get, list, watch]
   - apiGroups: [bedrock.cloudyfolks.io]
-    resources: [containers/logs]
+    resources: [containers/logs, databases/logs]
     verbs: [get]
 ---
 apiVersion: rbac.authorization.k8s.io/v1
@@ -61,7 +61,7 @@ rules:
     resources: [containers/restart]
     verbs: [update]
   - apiGroups: [bedrock.cloudyfolks.io]
-    resources: [containers/exec, containers/logs]
+    resources: [containers/exec, containers/logs, databases/logs]
     verbs: [get]
   - apiGroups: [bedrock.cloudyfolks.io]
     resources: [images/upload]
@@ -115,7 +115,7 @@ rules:
     resources: [containers/restart]
     verbs: [update]
   - apiGroups: [bedrock.cloudyfolks.io]
-    resources: [containers/exec, containers/logs]
+    resources: [containers/exec, containers/logs, databases/logs]
     verbs: [get]
   - apiGroups: [bedrock.cloudyfolks.io]
     resources: [images/upload]
