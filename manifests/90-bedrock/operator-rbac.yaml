@@ -108,6 +108,18 @@ rules:
   - patch
   - watch
 - apiGroups:
+  - barmancloud.cnpg.io
+  resources:
+  - objectstores
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - update
+  - watch
+- apiGroups:
   - batch
   resources:
   - jobs
@@ -517,6 +529,20 @@ rules:
   - update
   - watch
 - apiGroups:
+  - postgresql.cnpg.io
+  resources:
+  - backups
+  - clusters
+  - scheduledbackups
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - update
+  - watch
+- apiGroups:
   - rbac.authorization.k8s.io
   resources:
   - clusterrolebindings
@@ -682,6 +708,8 @@ rules:
   - ""
   resources:
   - configmaps
+  - persistentvolumeclaims
+  - resourcequotas
   - secrets
   - serviceaccounts
   - services
