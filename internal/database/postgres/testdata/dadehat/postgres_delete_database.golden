@@ -1,0 +1,4 @@
+SET statement_timeout = '30000';
+SET idle_in_transaction_session_timeout = '30000';
+DROP DATABASE IF EXISTS "orders" WITH (FORCE);
+DROP ROLE IF EXISTS "orders_ro", "orders_rw", "orders_all";
