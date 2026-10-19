@@ -240,5 +240,8 @@ func SetupWithManager(mgr ctrl.Manager) error {
 	if err := (&RulesConfigReconciler{Client: mgr.GetClient()}).SetupWithManager(mgr); err != nil {
 		return err
 	}
-	return (&RegistryReconciler{Client: mgr.GetClient()}).SetupWithManager(mgr)
+	if err := (&RegistryReconciler{Client: mgr.GetClient()}).SetupWithManager(mgr); err != nil {
+		return err
+	}
+	return (&CredentialReconciler{Client: mgr.GetClient()}).SetupWithManager(mgr)
 }

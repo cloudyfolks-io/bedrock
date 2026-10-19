@@ -5,6 +5,8 @@ import (
 	"slices"
 	"strings"
 
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+
 	"github.com/cloudyfolks-io/bedrock/api/v1alpha1"
 	"github.com/cloudyfolks-io/bedrock/internal/registry/harbor"
 )
@@ -40,12 +42,12 @@ func reservedName(name string, rules Rules) bool {
 	return slices.ContainsFunc(rules.ReservedPrefixes, func(prefix string) bool { return strings.HasPrefix(name, prefix) })
 }
 
-func approved(reg *v1alpha1.Registry) bool {
-	return reg.Annotations[AnnotationReservedNameApproved] == "true"
+func approved(obj metav1.Object) bool {
+	return obj.GetAnnotations()[AnnotationReservedNameApproved] == "true"
 }
 
-func adopting(reg *v1alpha1.Registry) bool {
-	return reg.Annotations[AnnotationAdopt] == "true"
+func adopting(obj metav1.Object) bool {
+	return obj.GetAnnotations()[AnnotationAdopt] == "true"
 }
 
 func quotaGB(reg *v1alpha1.Registry, rules Rules) int64 {
