@@ -91,37 +91,54 @@ func SubnetGateway(subnet v1alpha1.Subnet) (netip.Addr, error) {
 }
 
 type AddressReader struct {
-	Client client.Client
-	Reader client.Reader
+	Clusters client.Reader
+	IPs      client.Reader
 }
 
-func (r AddressReader) Taken(ctx context.Context, namespace string, subnetName string, own string) ([]netip.Addr, error) {
+func (r AddressReader) Taken(ctx context.Context, cluster v1alpha1.KubernetesCluster, subnetName string) ([]netip.Addr, error) {
 	ips := &unstructured.UnstructuredList{}
 	ips.SetGroupVersionKind(fabric.IPGVK.GroupVersion().WithKind("IPList"))
-	if err := r.Reader.List(ctx, ips, client.MatchingLabels{fabricSubnetLabel: network.FabricName(namespace, subnetName)}); err != nil {
+	if err := r.IPs.List(ctx, ips, client.MatchingLabels{fabricSubnetLabel: network.FabricName(cluster.Namespace, subnetName)}); err != nil {
 		return nil, err
 	}
 	var clusters v1alpha1.KubernetesClusterList
-	if err := r.Client.List(ctx, &clusters, client.InNamespace(namespace)); err != nil {
+	if err := r.Clusters.List(ctx, &clusters, client.InNamespace(cluster.Namespace)); err != nil {
 		return nil, err
 	}
-	return takenAddresses(ips.Items, clusters.Items, own), nil
+	return takenAddresses(ips.Items, clusters.Items, cluster), nil
 }
 
-func takenAddresses(ips []unstructured.Unstructured, clusters []v1alpha1.KubernetesCluster, own string) []netip.Addr {
+func takenAddresses(ips []unstructured.Unstructured, clusters []v1alpha1.KubernetesCluster, own v1alpha1.KubernetesCluster) []netip.Addr {
 	var taken []netip.Addr
 	for index := range ips {
-		if addr, err := netip.ParseAddr(fabric.IPAddress(&ips[index])); err == nil {
-			taken = append(taken, addr)
-		}
-	}
-	for _, cluster := range clusters {
-		if cluster.Name == own {
+		namespace, pod, _ := fabric.IPOwner(&ips[index])
+		if namespace == own.Namespace && pod == ControlPlanePodName(own.Name) {
 			continue
 		}
-		if addr, err := netip.ParseAddr(cluster.Status.ControlPlane.Address); err == nil {
-			taken = append(taken, addr)
+		taken = appendAddress(taken, fabric.IPAddress(&ips[index]))
+	}
+	for _, other := range clusters {
+		if other.Name == own.Name {
+			continue
 		}
+		taken = appendAddress(taken, other.Status.ControlPlane.Address)
 	}
 	return taken
+}
+
+func pinnedAddresses(clusters []v1alpha1.KubernetesCluster, own string) []netip.Addr {
+	var pinned []netip.Addr
+	for _, other := range clusters {
+		if other.Name != own {
+			pinned = appendAddress(pinned, other.Spec.ControlPlane.Address)
+		}
+	}
+	return pinned
+}
+
+func appendAddress(addresses []netip.Addr, text string) []netip.Addr {
+	if addr, err := netip.ParseAddr(text); err == nil {
+		return append(addresses, addr)
+	}
+	return addresses
 }

@@ -128,11 +128,24 @@ func fabricIP(name, subnet, address string) *unstructured.Unstructured {
 	return ip
 }
 
+func podFabricIP(name, subnet, address, namespace, pod string) *unstructured.Unstructured {
+	ip := fabricIP(name, subnet, address)
+	_ = unstructured.SetNestedField(ip.Object, namespace, "spec", "namespace")
+	_ = unstructured.SetNestedField(ip.Object, pod, "spec", "podName")
+	return ip
+}
+
 func clusterWithAddress(name, address string) *v1alpha1.KubernetesCluster {
 	return &v1alpha1.KubernetesCluster{
 		ObjectMeta: metav1.ObjectMeta{Namespace: "t-a-web", Name: name},
 		Status:     v1alpha1.KubernetesClusterStatus{ControlPlane: v1alpha1.KubernetesControlPlaneStatus{Address: address}},
 	}
+}
+
+func pinnedCluster(name, address string) *v1alpha1.KubernetesCluster {
+	cluster := clusterWithAddress(name, "")
+	cluster.Spec.ControlPlane.Address = address
+	return cluster
 }
 
 func addressReader(t *testing.T, objects ...client.Object) AddressReader {
@@ -144,7 +157,7 @@ func addressReader(t *testing.T, objects ...client.Object) AddressReader {
 	scheme.AddKnownTypeWithName(fabric.IPGVK, &unstructured.Unstructured{})
 	scheme.AddKnownTypeWithName(fabric.IPGVK.GroupVersion().WithKind("IPList"), &unstructured.UnstructuredList{})
 	c := fake.NewClientBuilder().WithScheme(scheme).WithObjects(objects...).Build()
-	return AddressReader{Client: c, Reader: c}
+	return AddressReader{Clusters: c, IPs: c}
 }
 
 func TestTakenReadsFabricIPsOfTheSubnetAndOtherClusters(t *testing.T) {
@@ -155,12 +168,15 @@ func TestTakenReadsFabricIPsOfTheSubnetAndOtherClusters(t *testing.T) {
 		clusterWithAddress("other", "10.100.0.13"),
 		clusterWithAddress("own", "10.100.0.14"),
 		clusterWithAddress("unassigned", ""),
+		podFabricIP("ip-own-pod", network.FabricName("t-a-web", "default"), "10.100.0.15", "t-a-web", "kmc-own-0"),
+		podFabricIP("ip-other-pod", network.FabricName("t-a-web", "default"), "10.100.0.17", "t-a-web", "kmc-other-0"),
+		pinnedCluster("pinned", "10.100.0.16"),
 	)
-	taken, err := reader.Taken(context.Background(), "t-a-web", "default", "own")
+	taken, err := reader.Taken(context.Background(), *clusterWithAddress("own", ""), "default")
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := map[netip.Addr]bool{addr("10.100.0.10"): true, addr("10.100.0.11"): true, addr("10.100.0.13"): true}
+	want := map[netip.Addr]bool{addr("10.100.0.10"): true, addr("10.100.0.11"): true, addr("10.100.0.13"): true, addr("10.100.0.17"): true}
 	if len(taken) != len(want) {
 		t.Fatalf("taken %v", taken)
 	}
@@ -173,7 +189,7 @@ func TestTakenReadsFabricIPsOfTheSubnetAndOtherClusters(t *testing.T) {
 
 func TestTakenFeedsNextFreeAddress(t *testing.T) {
 	reader := addressReader(t, fabricIP("ip-a", network.FabricName("t-a-web", "default"), "10.100.0.10"), clusterWithAddress("other", "10.100.0.11"))
-	taken, err := reader.Taken(context.Background(), "t-a-web", "default", "own")
+	taken, err := reader.Taken(context.Background(), *clusterWithAddress("own", ""), "default")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -191,5 +207,13 @@ func TestSubnetGatewayUsesTheSpecThenTheDefault(t *testing.T) {
 	implicit := v1alpha1.Subnet{Spec: v1alpha1.SubnetSpec{CIDR: "10.100.0.0/24"}}
 	if got, err := SubnetGateway(implicit); err != nil || got != addr("10.100.0.1") {
 		t.Fatalf("got %v %v", got, err)
+	}
+}
+
+func TestPinnedAddressesAreTheSpecAddressesOfOtherClusters(t *testing.T) {
+	clusters := []v1alpha1.KubernetesCluster{*pinnedCluster("a", "10.100.0.20"), *pinnedCluster("b", "10.100.0.21"), *pinnedCluster("c", ""), *clusterWithAddress("d", "10.100.0.22")}
+	got := pinnedAddresses(clusters, "a")
+	if len(got) != 1 || got[0] != addr("10.100.0.21") {
+		t.Fatalf("got %v", got)
 	}
 }

@@ -184,10 +184,11 @@ func TestRenderControlPlaneUsesTheSubnetAndGroupsOfTheCluster(t *testing.T) {
 	if !strings.Contains(content, testNamespace+"/nodes") {
 		t.Errorf("subnet missing from %s", content)
 	}
+	wantGroups := network.FabricName(testNamespace, "a") + "," + network.FabricName(testNamespace, "b")
 	sorted := []string{network.FabricName(testNamespace, "a"), network.FabricName(testNamespace, "b")}
 	slices.Sort(sorted)
-	if !strings.Contains(content, strings.Join(sorted, ",")) {
-		t.Errorf("groups %v missing from %s", sorted, content)
+	if !strings.Contains(content, strings.Join(sorted, ",")) && !strings.Contains(content, wantGroups) {
+		t.Errorf("groups missing from %s", content)
 	}
 }
 
@@ -245,8 +246,8 @@ func TestRenderCloudInitSecret(t *testing.T) {
 	if secret.Name != "prod-a-cloudinit" || secret.Namespace != testNamespace {
 		t.Fatalf("secret %s/%s", secret.Namespace, secret.Name)
 	}
-	if secret.StringData["userdata"] != RenderCloudInit("TOKEN123", "v1.36.3+k0s.1") {
-		t.Errorf("userdata %q", secret.StringData["userdata"])
+	if string(secret.Data["userdata"]) != RenderCloudInit("TOKEN123", "v1.36.3+k0s.1") {
+		t.Errorf("userdata %q", secret.Data["userdata"])
 	}
 	if len(secret.OwnerReferences) != 1 || secret.OwnerReferences[0].Name != "prod" || secret.OwnerReferences[0].Kind != "KubernetesCluster" {
 		t.Errorf("owners %+v", secret.OwnerReferences)

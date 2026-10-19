@@ -36,8 +36,8 @@ func RenderCloudInitSecret(cluster v1alpha1.KubernetesCluster, worker, token str
 			OwnerReferences: []metav1.OwnerReference{OwnerRef(cluster)},
 		},
 		Type: corev1.SecretTypeOpaque,
-		StringData: map[string]string{
-			vmUserDataKey: RenderCloudInit(token, cluster.Spec.Version),
+		Data: map[string][]byte{
+			vmUserDataKey: []byte(RenderCloudInit(token, cluster.Spec.Version)),
 		},
 	}
 }
