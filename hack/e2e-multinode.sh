@@ -122,8 +122,23 @@ join_node() {
   vm_run "$id" "$(script_join)" REPO="$repo" BIN="$bedrock_bin" BUNDLE="$bundle" TOKEN="$token"
 }
 
+script_kvm_probe() {
+  cat <<'SCRIPT'
+test -c /dev/kvm
+grep -Eq '(^|[[:space:]])(vmx|svm)([[:space:]]|$)' /proc/cpuinfo
+for file in /sys/module/kvm_intel/parameters/nested /sys/module/kvm_amd/parameters/nested; do
+  if [ -r "$file" ]; then
+    case "$(cat "$file")" in
+    Y | 1) exit 0 ;;
+    esac
+  fi
+done
+exit 1
+SCRIPT
+}
+
 kvm_usable() {
-  vm_run 1 "test -c /dev/kvm && grep -Eq '(^|[[:space:]])(vmx|svm)([[:space:]]|\$)' /proc/cpuinfo"
+  vm_run 1 "$(script_kvm_probe)"
 }
 
 emulation_flag() {
