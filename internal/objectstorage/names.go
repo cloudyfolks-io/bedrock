@@ -18,6 +18,7 @@ const (
 
 	AppliedVersioningAnnotation = "bedrock.cloudyfolks.io/applied-versioning"
 	AppliedPolicyAnnotation     = "bedrock.cloudyfolks.io/applied-policy"
+	OwnedBucketAnnotation       = "bedrock.cloudyfolks.io/owned-bucket"
 	AppliedCORSAnnotation       = "bedrock.cloudyfolks.io/applied-cors"
 
 	ReservedNameApprovedAnnotation = "bedrock.cloudyfolks.io/reserved-name-approved"

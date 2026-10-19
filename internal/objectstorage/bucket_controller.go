@@ -119,15 +119,21 @@ func (r *BucketReconciler) converge(ctx context.Context, bucket *v1alpha1.Object
 	if err != nil || !ready {
 		return bucketState{outcome: accountPending()}, err
 	}
-	state := bucketState{bucketName: name, endpoint: PublicEndpoint(rules, r.Endpoint)}
+	state := bucketState{}
 	state.outcome, err = r.ensureBucket(ctx, account.Root, name)
 	if err != nil || state.reason != "" {
-		state.bucketName, state.endpoint = "", ""
 		return state, err
 	}
+	if err := r.setAnnotation(ctx, bucket, OwnedBucketAnnotation, name); err != nil {
+		return bucketState{}, err
+	}
 	state.outcome, err = r.applyS3(ctx, bucket, account.Root, name, rules)
-	if err != nil || !state.ready() || r.Admin == nil {
+	if err != nil || !state.ready() {
 		return state, err
+	}
+	state.bucketName, state.endpoint = name, PublicEndpoint(rules, r.Endpoint)
+	if r.Admin == nil {
+		return state, nil
 	}
 	state.seen, err = r.observe(ctx, bucket, name)
 	return state, err
@@ -152,10 +158,14 @@ func (r *BucketReconciler) projectRefusal(ctx context.Context, bucket *v1alpha1.
 	if usesName(others, bucket, name) {
 		return blocked(reasonNameTaken, fmt.Sprintf("another bucket of this project uses the name %q", name), steadyRequeue), nil
 	}
-	if bucket.Status.BucketName == "" && rank(others, bucket) >= rules.MaxBuckets {
+	if !ownsBucket(bucket, S3BucketName(bucket)) && rank(others, bucket) >= rules.MaxBuckets {
 		return blocked(reasonBucketLimit, fmt.Sprintf("the project holds %d buckets already", rules.MaxBuckets), steadyRequeue), nil
 	}
 	return bucketState{}, nil
+}
+
+func ownsBucket(bucket *v1alpha1.ObjectStorageBucket, name string) bool {
+	return bucket.Annotations[OwnedBucketAnnotation] == name || bucket.Status.BucketName == name
 }
 
 func comesBefore(a, b *v1alpha1.ObjectStorageBucket) bool {
@@ -177,7 +187,7 @@ func usesName(others []v1alpha1.ObjectStorageBucket, bucket *v1alpha1.ObjectStor
 func rank(others []v1alpha1.ObjectStorageBucket, bucket *v1alpha1.ObjectStorageBucket) int {
 	count := 0
 	for i := range others {
-		if others[i].Status.BucketName != "" || comesBefore(&others[i], bucket) {
+		if ownsBucket(&others[i], S3BucketName(&others[i])) || comesBefore(&others[i], bucket) {
 			count++
 		}
 	}
@@ -185,16 +195,7 @@ func rank(others []v1alpha1.ObjectStorageBucket, bucket *v1alpha1.ObjectStorageB
 }
 
 func (r *BucketReconciler) ensureBucket(ctx context.Context, root s3.Credentials, name string) (outcome, error) {
-	err := r.S3.HeadBucket(ctx, r.Endpoint, Region, root, name)
-	switch {
-	case err == nil:
-		return outcome{}, nil
-	case s3.IsCode(err, s3.AccessDenied):
-		return takenOutcome(name), nil
-	case !s3.IsCode(err, s3.NoSuchBucket):
-		return bucketFailure(err), nil
-	}
-	err = r.S3.CreateBucket(ctx, r.Endpoint, Region, root, name)
+	err := r.S3.CreateBucket(ctx, r.Endpoint, Region, root, name)
 	switch {
 	case err == nil, s3.IsCode(err, s3.BucketAlreadyOwnedByYou):
 		return outcome{}, nil
@@ -362,7 +363,7 @@ func (r *BucketReconciler) finalize(ctx context.Context, bucket *v1alpha1.Object
 
 func (r *BucketReconciler) release(ctx context.Context, bucket *v1alpha1.ObjectStorageBucket) (bucketState, error) {
 	name := S3BucketName(bucket)
-	if bucket.Status.BucketName != name {
+	if !ownsBucket(bucket, name) {
 		return bucketState{}, nil
 	}
 	account, exists, err := r.accountOf(ctx, bucket.Namespace)

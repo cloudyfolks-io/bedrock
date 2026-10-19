@@ -20,6 +20,7 @@ type fakeS3 struct {
 	buckets      map[string]bool
 	foreign      map[string]bool
 	hideFromHead map[string]bool
+	publicHead   map[string]bool
 	objects      map[string][]fakeObject
 	versioning   map[string]string
 	policies     map[string]string
@@ -38,6 +39,7 @@ func newFakeS3(t *testing.T) (*fakeS3, string) {
 		buckets:      map[string]bool{},
 		foreign:      map[string]bool{},
 		hideFromHead: map[string]bool{},
+		publicHead:   map[string]bool{},
 		objects:      map[string][]fakeObject{},
 		versioning:   map[string]string{},
 		policies:     map[string]string{},
@@ -126,6 +128,7 @@ func (f *fakeS3) bucketCall(w http.ResponseWriter, method, bucket string) {
 		switch {
 		case f.hideFromHead[bucket]:
 			w.WriteHeader(http.StatusNotFound)
+		case f.foreign[bucket] && f.publicHead[bucket]:
 		case f.foreign[bucket]:
 			w.WriteHeader(http.StatusForbidden)
 		case !f.buckets[bucket]:
