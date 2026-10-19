@@ -2,6 +2,7 @@ package container
 
 import (
 	"fmt"
+	"strings"
 	"time"
 
 	batchv1 "k8s.io/api/batch/v1"
@@ -12,10 +13,15 @@ import (
 )
 
 const (
-	stuckPodGrace      = 2 * time.Minute
-	jobMissingGrace    = time.Minute
-	ConditionJobExists = "JobExists"
+	stuckPodGrace   = 2 * time.Minute
+	jobMissingGrace = time.Minute
+	maxExitMessage  = 512
+
+	ConditionJobExists       = "JobExists"
+	ConditionRegistryMirrors = "RegistryMirrors"
 )
+
+var pushFailureMarkers = []string{"failed to push", "failed to export", "failed to write image"}
 
 type BuildObservation struct {
 	Job             *batchv1.Job
@@ -53,7 +59,7 @@ func DecideBuild(obs BuildObservation) BuildDecision {
 		case batchv1.JobComplete:
 			return BuildDecision{Phase: v1alpha1.BuildPhaseSucceeded, Reason: ReasonSucceeded, Message: "the image is pushed", StartedAt: started, FinishedAt: firstTime(obs.Job.Status.CompletionTime, condition.LastTransitionTime)}
 		case batchv1.JobFailed:
-			reason, message := failureOf(condition)
+			reason, message := failureOf(condition, obs.Pods)
 			return BuildDecision{Phase: v1alpha1.BuildPhaseFailed, Reason: reason, Message: message, StartedAt: started, FinishedAt: firstTime(nil, condition.LastTransitionTime)}
 		}
 	}
@@ -73,15 +79,63 @@ func decideMissingJob(obs BuildObservation) BuildDecision {
 	return BuildDecision{Phase: v1alpha1.BuildPhasePending, Reason: ReasonStarting, Message: "the build waits for its job"}
 }
 
-func failureOf(condition batchv1.JobCondition) (string, string) {
+func failureOf(condition batchv1.JobCondition, pods []corev1.Pod) (string, string) {
 	if condition.Reason == batchv1.JobReasonDeadlineExceeded {
 		return ReasonTimeout, "the build ran longer than its time limit"
+	}
+	for _, pod := range pods {
+		if reason, message, found := podFailure(pod); found {
+			return reason, message
+		}
 	}
 	message := condition.Message
 	if message == "" {
 		message = "the build failed"
 	}
 	return ReasonFailed, message
+}
+
+func podFailure(pod corev1.Pod) (string, string, bool) {
+	if status, found := containerStatus(pod.Status.InitContainerStatuses, gitCloneContainerName); found && failedExit(status) {
+		return ReasonCloneFailed, exitMessage(status), true
+	}
+	for _, status := range pod.Status.ContainerStatuses {
+		if failedExit(status) {
+			return mainFailureReason(status), exitMessage(status), true
+		}
+	}
+	for _, status := range pod.Status.InitContainerStatuses {
+		if failedExit(status) {
+			return ReasonBuildFailed, exitMessage(status), true
+		}
+	}
+	return "", "", false
+}
+
+func failedExit(status corev1.ContainerStatus) bool {
+	return status.State.Terminated != nil && status.State.Terminated.ExitCode != 0
+}
+
+func mainFailureReason(status corev1.ContainerStatus) string {
+	message := strings.ToLower(status.State.Terminated.Message)
+	for _, marker := range pushFailureMarkers {
+		if strings.Contains(message, marker) {
+			return ReasonPushFailed
+		}
+	}
+	return ReasonBuildFailed
+}
+
+func exitMessage(status corev1.ContainerStatus) string {
+	terminated := status.State.Terminated
+	message := strings.TrimSpace(terminated.Message)
+	if len(message) > maxExitMessage {
+		message = "..." + message[len(message)-maxExitMessage:]
+	}
+	if message == "" {
+		return fmt.Sprintf("container %s exited with code %d", status.Name, terminated.ExitCode)
+	}
+	return fmt.Sprintf("container %s exited with code %d: %s", status.Name, terminated.ExitCode, message)
 }
 
 func stuckPod(pods []corev1.Pod, now time.Time) (string, string, bool) {
@@ -209,6 +263,7 @@ func BuildStatusOf(b v1alpha1.Build, gate *Gate, decision BuildDecision, jobName
 		StartedAt:  b.Status.StartedAt,
 		FinishedAt: b.Status.FinishedAt,
 	}
+	status.Conditions = append(status.Conditions, previousMirrorCondition(b)...)
 	if gate == nil && decision.StartedAt != nil && status.StartedAt == nil {
 		started := metav1.NewTime(*decision.StartedAt)
 		status.StartedAt = &started
@@ -221,6 +276,26 @@ func BuildStatusOf(b v1alpha1.Build, gate *Gate, decision BuildDecision, jobName
 		status.Image = b.Spec.Output.Image
 	}
 	return status
+}
+
+func previousMirrorCondition(b v1alpha1.Build) []metav1.Condition {
+	for _, condition := range b.Status.Conditions {
+		if condition.Type == ConditionRegistryMirrors {
+			return []metav1.Condition{condition}
+		}
+	}
+	return nil
+}
+
+func MirrorCondition(problems []string, generation int64, now time.Time) metav1.Condition {
+	return metav1.Condition{
+		Type:               ConditionRegistryMirrors,
+		Status:             metav1.ConditionFalse,
+		Reason:             ReasonInvalidMirrors,
+		Message:            "ignored entries of the Setting " + SettingBuildMirrors + ": " + strings.Join(problems, "; "),
+		ObservedGeneration: generation,
+		LastTransitionTime: metav1.NewTime(now),
+	}
 }
 
 func firstNonNil(values ...*time.Time) *time.Time {

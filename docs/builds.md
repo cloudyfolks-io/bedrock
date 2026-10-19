@@ -31,7 +31,7 @@ A product that sits on top of Bedrock does these jobs.
 |---|---|
 | `type` | `dockerfile` (the default) builds with BuildKit. `buildpacks` builds with Cloud Native Buildpacks. |
 | `source.git.url` | The `https` URL of the repository. It has at most 512 characters and holds no user name. |
-| `source.git.revision` | A commit, tag or branch. It has no space and at most 255 characters. |
+| `source.git.revision` | A commit, tag or branch. It has no space, does not start with `-` and has at most 255 characters. The clone resolves it to a commit before it checks it out. |
 | `source.git.secretRef` | The name of a Secret with the keys `username` and `token`. Optional. A public repository needs none. |
 | `contextPath` | The directory of the build context in the repository. The default is `.`. It is relative and has no `..`. |
 | `dockerfilePath` | The path of the Dockerfile in the repository. The default is `Dockerfile`. It is relative and has no `..`. Only the type `dockerfile` reads it. |
@@ -76,7 +76,7 @@ The `status` stays when the Job and the pod are gone.
 The operator never makes a Secret.
 Both Secrets are Secrets of the project, and the Build names them.
 
-- The git Secret has the keys `username` and `token`. Only the `git-clone` container reads them, through environment variables. The other containers of the build pod cannot read them. Dockerfile code cannot read the token. The token is not in the clone URL.
+- The git Secret has the keys `username` and `token`. Only the `git-clone` container reads them, through environment variables. The other containers of the build pod cannot read them. Dockerfile code cannot read the token. The token is not in the clone URL. The header with the token is only for the clone URL: a submodule or a redirect to another host does not get it.
 - The push Secret has the type `kubernetes.io/dockerconfigjson`. It is mounted as `config.json` in the directory `/docker-config`. The variable `DOCKER_CONFIG` names the directory. The BuildKit container and the buildpacks phases that write or read the registry get it: `analyzer`, `exporter` and, with `cache.enabled`, `restorer`. The kubelet also uses it as the pull secret of the pod.
 
 ## Network
@@ -101,6 +101,8 @@ A cluster with no KVM cannot run builds.
 
 The Setting `build.registry-mirrors` lists mirrors for the `FROM` lines of a Dockerfile.
 The operator writes the list to a ConfigMap, owned by the Build, and BuildKit reads it as `buildkitd.toml`.
+An entry that is not valid is skipped and the build goes on.
+The condition `RegistryMirrors` of the Build is `False` with the reason `InvalidEntries` and names the entries that were skipped.
 A mirror is for the whole cluster. It is not a field of the Build.
 Buildpacks builds do not use it.
 
@@ -149,6 +151,10 @@ On a cluster with no access to the internet, put them on a registry mirror and s
 ## Reasons
 
 The condition `Ready` of a Build shows one of these reasons.
+The reasons `CloneFailed`, `BuildFailed` and `PushFailed` come from the exit status and the end of the log of the build containers.
+The operator marks a failure as `PushFailed` only when the message of the build tool names a push or export error.
+Other registry errors show as `BuildFailed`.
+The Job and the pod of the Build are found through the owner chain Build, Job, pod. A pod that the Job does not own is ignored, also when it has the same labels.
 A reason that comes from a missing dependency is not final.
 The operator tries again every 30 seconds.
 
@@ -167,7 +173,10 @@ The operator tries again every 30 seconds.
 | `Starting` | The Job exists and the pod has not started. | Wait. |
 | `Running` | The build pod runs. | Read the logs. |
 | `Succeeded` | The image is pushed. | Use the image in `status.image`. |
-| `Failed` | A container of the build exited with an error. | Read the logs. |
+| `Failed` | The Job failed and no container of the pod gave a reason. | Read the logs. |
+| `CloneFailed` | The container `git-clone` exited with an error. The repository or the revision is wrong, or the git server is not reachable. | Read the message and the logs. Check the URL, the revision, the git Secret and the route to the git server. |
+| `BuildFailed` | The build container, or a build phase of buildpacks, exited with an error. | Read the message and the logs. Correct the Dockerfile or the application. |
+| `PushFailed` | The build ended with an error that says the image push failed. | Check the push Secret, the permission on the repository and the route to the registry. |
 | `Timeout` | The build ran longer than its time limit. | Create a new Build with a longer `timeout`, or make the build faster. |
 | `ImagePullFailed` | A pod image stayed unavailable for 2 minutes. The operator deletes the Job. | Read the message. Ask an administrator to check the build image Settings and the registry. |
 | `ContainerConfigError` | The pod could not start a container for 2 minutes, for example a Secret key is missing. The operator deletes the Job. | Read the message and correct the Secret. |
