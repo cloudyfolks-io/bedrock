@@ -235,6 +235,13 @@ func (r Resolver) stepVolumes(ctx context.Context, c v1alpha1.Container, in reso
 		if holder, held := VolumeHolder(mount.VolumeRef, vms.Items, containers.Items); held && holder != (Holder{Kind: Kind, Name: c.Name}) {
 			return in, gateOf(ReasonVolumeInUse, "the volume %q is used by %s", mount.VolumeRef, holder), nil
 		}
+		instance, err := MountingInstance(ctx, r.Client, c.Namespace, mount.VolumeRef)
+		if err != nil {
+			return in, nil, err
+		}
+		if instance != "" {
+			return in, gateOf(ReasonVolumeInUse, "the volume %q is mounted by the instance %s", mount.VolumeRef, instance), nil
+		}
 	}
 	return in, nil, nil
 }

@@ -27,7 +27,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	"github.com/cloudyfolks-io/bedrock/api/v1alpha1"
-	"github.com/cloudyfolks-io/bedrock/internal/compute"
+	"github.com/cloudyfolks-io/bedrock/internal/container"
 	"github.com/cloudyfolks-io/bedrock/internal/ssa"
 )
 
@@ -294,7 +294,7 @@ func (r *BackupReconciler) unlabelDetachedVolumes(ctx context.Context, vm *v1alp
 		if slices.Contains(attached, labeled.Items[index].Name) {
 			continue
 		}
-		mounted, err := compute.MountingInstance(ctx, r.Client, vm.Namespace, labeled.Items[index].Name)
+		mounted, err := container.MountingInstance(ctx, r.Client, vm.Namespace, labeled.Items[index].Name)
 		if err != nil {
 			return err
 		}

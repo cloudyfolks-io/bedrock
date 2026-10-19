@@ -8,6 +8,8 @@ import (
 	"time"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	"github.com/cloudyfolks-io/bedrock/api/v1alpha1"
@@ -331,5 +333,28 @@ func TestVolumeHolderPrefersTheOldestConsumer(t *testing.T) {
 	}
 	if _, held := VolumeHolder("free", []v1alpha1.VirtualMachine{vm}, []v1alpha1.Container{newer, older}); held {
 		t.Fatal("a free volume has no holder")
+	}
+}
+
+func TestResolveVolumeMountedByAnInstance(t *testing.T) {
+	c, _ := startEnv(t)
+	ns := seedPlatform(t, c)
+	createVolume(t, c, ns, "hot", "filesystem")
+	instance := &unstructured.Unstructured{}
+	instance.SetGroupVersionKind(schema.GroupVersionKind{Group: "kubevirt.io", Version: "v1", Kind: "VirtualMachineInstance"})
+	instance.SetNamespace(ns)
+	instance.SetName("vm1")
+	instance.Object["spec"] = map[string]any{
+		"domain":  map[string]any{"devices": map[string]any{}},
+		"volumes": []any{map[string]any{"name": "hot", "persistentVolumeClaim": map[string]any{"claimName": "hot"}}},
+	}
+	createObject(t, c, instance)
+	container := createContainer(t, c, ns, "web", func(s *v1alpha1.ContainerSpec) {
+		s.Volumes = []v1alpha1.ContainerVolume{{VolumeRef: "hot", MountPath: "/data"}}
+	})
+	_, gate := resolveContainer(t, c, container)
+	requireGate(t, gate, ReasonVolumeInUse)
+	if !strings.Contains(gate.Message, "instance vm1") {
+		t.Fatalf("message %q", gate.Message)
 	}
 }

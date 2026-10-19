@@ -48,6 +48,7 @@ func TestOperatorRules(t *testing.T) {
 		{"batch", "jobs", "create"}, {"batch", "jobs", "delete"}, {"batch", "jobs", "get"}, {"batch", "jobs", "list"}, {"batch", "jobs", "watch"},
 		{"", "configmaps", "create"}, {"", "configmaps", "get"}, {"", "configmaps", "patch"},
 		{"", "pods", "list"}, {"", "pods", "watch"},
+		{"kubevirt.io", "virtualmachineinstances", "list"},
 		{"", "secrets", "get"},
 		{"bedrock.cloudyfolks.io", "containers/finalizers", "update"},
 		{"bedrock.cloudyfolks.io", "builds/finalizers", "update"},
