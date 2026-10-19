@@ -94,6 +94,7 @@ func TestRotationRefusals(t *testing.T) {
 		{"upgrade", rotationInput{Action: v1alpha1.EncryptionActionRotate, Upgrading: true, Secret: chain.one}, "upgrade"},
 		{"no secret", rotationInput{Action: v1alpha1.EncryptionActionRotate}, "not encrypted"},
 		{"in progress", rotationInput{Action: v1alpha1.EncryptionActionRotate, Secret: chain.added, Status: phaseStatus(v1alpha1.RotationAddingKey)}, "in progress"},
+		{"two keys already", rotationInput{Action: v1alpha1.EncryptionActionRotate, Secret: chain.added}, "unfinished"},
 		{"revert while idle", rotationInput{Action: v1alpha1.EncryptionActionRevert, Secret: chain.one}, "no rotation"},
 		{"revert too late", rotationInput{Action: v1alpha1.EncryptionActionRevert, Secret: chain.promoted, Status: phaseStatus(v1alpha1.RotationRemovingKey)}, "already removed"},
 	}
@@ -251,12 +252,12 @@ func TestRemovingKeyDropsTheOldKeyThenEnds(t *testing.T) {
 		t.Fatalf("decision %+v", write)
 	}
 	done := encryption.Hash(chain.removed)
-	hosts := []v1alpha1.Host{withGrant(controlPlaneHost("a", done), done), withGrant(controlPlaneHost("b", done), "stale")}
+	hosts := []v1alpha1.Host{withGrant(controlPlaneHost("a", done), done), controlPlaneHost("b", done)}
 	end := nextRotation(rotationInput{Status: status, Secret: chain.removed, Hosts: hosts, Now: rotationNow, Random: rand.Reader})
 	if end.Status.Phase != "" || end.Status.LastRotatedAt == nil || !end.Status.LastRotatedAt.Time.Equal(rotationNow) {
 		t.Fatalf("status %+v", end.Status)
 	}
-	if !slices.Equal(end.Revoke, []string{"a", "b"}) {
+	if !slices.Equal(end.Revoke, []string{"a"}) {
 		t.Fatalf("revoke %v", end.Revoke)
 	}
 }
@@ -264,10 +265,10 @@ func TestRemovingKeyDropsTheOldKeyThenEnds(t *testing.T) {
 func TestStaleGrantsAreRevokedAndTheCurrentOneStays(t *testing.T) {
 	chain := newConfigChain(t)
 	want := encryption.Hash(chain.added)
-	hosts := []v1alpha1.Host{withGrant(controlPlaneHost("a", want), want), withGrant(controlPlaneHost("b", want), "stale")}
+	hosts := []v1alpha1.Host{withGrant(controlPlaneHost("a", want), want), withHandled(withGrant(controlPlaneHost("b", want), "stale"), "stale")}
 	got := nextRotation(rotationInput{Status: phaseStatus(v1alpha1.RotationAddingKey), Secret: chain.added, Hosts: hosts, Now: rotationNow, Random: rand.Reader})
-	if !slices.Equal(got.Revoke, []string{"b"}) {
-		t.Fatalf("revoke %v", got.Revoke)
+	if !slices.Equal(got.Revoke, []string{"b"}) || got.Grant != "" || got.Status.Phase != v1alpha1.RotationAddingKey {
+		t.Fatalf("decision %+v", got)
 	}
 }
 

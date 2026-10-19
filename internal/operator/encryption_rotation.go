@@ -33,6 +33,7 @@ type rotationDecision struct {
 	Revoke      []string
 	Rewrite     bool
 	ClearAction bool
+	Stalled     string
 }
 
 func nextRotation(in rotationInput) rotationDecision {
@@ -69,6 +70,9 @@ func startRotation(in rotationInput) rotationDecision {
 	if err != nil {
 		return refuseAction(in, "rotate refused: "+err.Error())
 	}
+	if len(names) != 1 {
+		return refuseAction(in, fmt.Sprintf("rotate refused: the encryption config has %d keys, so a rotation is unfinished", len(names)))
+	}
 	next, err := encryption.NextKeyName(in.Secret)
 	if err != nil {
 		return refuseAction(in, "rotate refused: "+err.Error())
@@ -91,6 +95,9 @@ func revertRotation(in rotationInput) rotationDecision {
 		return refuseAction(in, "revert refused: the old key is already removed on some hosts")
 	case in.Secret == nil:
 		return refuseAction(in, "revert refused: the encryption Secret is missing")
+	}
+	if busy := unresolvedHost(controlPlaneHosts(in.Hosts)); busy != "" {
+		return stalled(in.Status, fmt.Sprintf("revert waits for host %s to finish applying the encryption config", busy), nil)
 	}
 	status := in.Status
 	status.OldKey, status.NewKey = in.Status.NewKey, in.Status.OldKey
@@ -158,7 +165,28 @@ func controlPlaneHosts(hosts []v1alpha1.Host) []v1alpha1.Host {
 
 func hostConverged(host v1alpha1.Host, hash string) bool {
 	status := host.Status.Encryption
+	grant, granted := hostGrant(host)
+	return status != nil && status.Hash == hash && !status.RestartPending && (!granted || grant == hash)
+}
+
+func hostReports(host v1alpha1.Host, hash string) bool {
+	status := host.Status.Encryption
 	return status != nil && status.Hash == hash && !status.RestartPending
+}
+
+func grantResolved(host v1alpha1.Host) bool {
+	grant, granted := hostGrant(host)
+	status := host.Status.Encryption
+	return !granted || (status != nil && (status.Hash == grant || status.FailedHash == grant || status.HandledGrant == grant))
+}
+
+func unresolvedHost(hosts []v1alpha1.Host) string {
+	for _, host := range hosts {
+		if !grantResolved(host) {
+			return host.Name
+		}
+	}
+	return ""
 }
 
 func hostGrant(host v1alpha1.Host) (string, bool) {
@@ -169,7 +197,7 @@ func hostGrant(host v1alpha1.Host) (string, bool) {
 func staleGrants(hosts []v1alpha1.Host, hash string) []string {
 	var revoke []string
 	for _, host := range hosts {
-		if value, ok := hostGrant(host); ok && value != hash {
+		if value, ok := hostGrant(host); ok && value != hash && grantResolved(host) {
 			revoke = append(revoke, host.Name)
 		}
 	}
@@ -187,14 +215,22 @@ func convergeHosts(in rotationInput) rotationDecision {
 	if len(pending) == 0 {
 		return finishPhase(in, hosts, revoke)
 	}
+	if only := slices.DeleteFunc(slices.Clone(pending), func(host v1alpha1.Host) bool { return slices.Contains(revoke, host.Name) && hostReports(host, hash) }); len(only) == 0 {
+		return rotationDecision{Status: in.Status, Revoke: revoke}
+	}
 	return grantNext(in, hosts, pending, hash, revoke)
 }
 
 func grantNext(in rotationInput, all, pending []v1alpha1.Host, hash string, revoke []string) rotationDecision {
 	for _, host := range pending {
 		if host.Status.Encryption != nil && host.Status.Encryption.FailedHash == hash {
-			return stalled(in.Status, fmt.Sprintf("rotation stalled: host %s failed to apply the encryption config", host.Name), revoke)
+			failed := stalled(in.Status, fmt.Sprintf("rotation stalled: host %s failed to apply the encryption config", host.Name), revoke)
+			failed.Stalled = "HostFailed"
+			return failed
 		}
+	}
+	if busy := unresolvedHost(all); busy != "" {
+		return stalled(in.Status, fmt.Sprintf("waiting for host %s to finish applying the encryption config", busy), revoke)
 	}
 	for _, host := range pending {
 		if value, ok := hostGrant(host); ok && value == hash {
@@ -249,7 +285,7 @@ func grantedHosts(hosts []v1alpha1.Host) []string {
 
 func finishRewrite(status v1alpha1.EncryptionRotationStatus, rewritten int64) v1alpha1.EncryptionRotationStatus {
 	status.Phase = v1alpha1.RotationRemovingKey
-	status.RewrittenSecrets = rewritten
+	status.RewrittenSecrets += rewritten
 	status.Message = ""
 	return status
 }
