@@ -17,6 +17,9 @@ owned_kinds=(
   restores.velero.io
   cephobjectstoreaccounts.ceph.rook.io
   cephobjectstoreusers.ceph.rook.io
+  kubernetesclusters.bedrock.cloudyfolks.io
+  clusters.k0smotron.io
+  jointokenrequests.k0smotron.io
 )
 
 owned_objects_gone() {

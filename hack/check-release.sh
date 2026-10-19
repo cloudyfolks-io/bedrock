@@ -72,6 +72,11 @@ grep -q 'ROOK_OBC_ALLOW_ADDITIONAL_CONFIG_FIELDS: maxObjects,maxSize,bucketMaxOb
 grep -q 'ROOK_CEPH_ALLOW_LOOP_DEVICES: "true"' "$dir/manifests/40-rook/rook.yaml"
 test -d "$dir/manifests/addons/kata"
 test -d "$dir/manifests/addons/loki"
+test -d "$dir/manifests/addons/clusters"
+grep -q 'name: k0smotron-controller-manager' "$dir/manifests/addons/clusters/clusters.yaml"
+grep -q 'name: clusters.k0smotron.io' "$dir/manifests/00-crds/clusters-crds.yaml"
+grep -q 'quay.io/k0sproject/k0smotron:v2.1.0' "$dir/images.txt"
+grep -q 'quay.io/k0sproject/k0s:v1.36.3-k0s.1' "$dir/images.txt"
 grep -q 'name: kata-deploy' "$dir/manifests/addons/kata/kata.yaml"
 grep -q 'name: alloy' "$dir/manifests/addons/loki/"*.yaml
 grep -q 'name: prometheuses.monitoring.coreos.com' "$dir/manifests/00-crds/kube-prometheus-stack-crds.yaml"

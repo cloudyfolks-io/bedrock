@@ -274,6 +274,9 @@ msgstr "شبکه خصوصی"
 msgid "col.vpcCidr"
 msgstr "CIDR شبکه خصوصی"
 
+msgid "col.workers"
+msgstr "گره‌های کارگر"
+
 msgid "col.zone"
 msgstr "ناحیه"
 
@@ -741,6 +744,8 @@ msgstr "تصاویر"
 
 msgid "nav.item.internetGateways"
 msgstr "دروازه‌های اینترنت"
+msgid "nav.item.kubernetesClusters"
+msgstr "خوشه‌های کوبرنتیز"
 
 msgid "nav.item.loadBalancers"
 msgstr "توزیع‌کننده‌های بار"

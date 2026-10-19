@@ -24,6 +24,9 @@ rules:
   - apiGroups: [bedrock.cloudyfolks.io]
     resources: [builds/logs, containers/logs]
     verbs: [get]
+  - apiGroups: [bedrock.cloudyfolks.io]
+    resources: [kubernetesclusters]
+    verbs: [get, list, watch]
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
@@ -78,6 +81,9 @@ rules:
   - apiGroups: [apps]
     resources: [deployments]
     verbs: [create, delete, patch, update]
+  - apiGroups: [bedrock.cloudyfolks.io]
+    resources: [kubernetesclusters]
+    verbs: [create, delete, get, list, patch, update, watch]
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
@@ -144,3 +150,6 @@ rules:
   - apiGroups: [networking.k8s.io]
     resources: [networkpolicies]
     verbs: [create, delete, deletecollection, patch, update]
+  - apiGroups: [bedrock.cloudyfolks.io]
+    resources: [kubernetesclusters]
+    verbs: [create, delete, deletecollection, get, list, patch, update, watch]

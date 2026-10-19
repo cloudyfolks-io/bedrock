@@ -5,9 +5,9 @@ import (
 	"testing"
 )
 
-func TestKnownAddonsAreKataAndLoki(t *testing.T) {
+func TestKnownAddonsAreKataLokiAndClusters(t *testing.T) {
 	known := Known()
-	if len(known) != 2 || known[0].Name != "kata" || known[1].Name != "loki" {
+	if len(known) != 3 || known[0].Name != "kata" || known[1].Name != "loki" || known[2].Name != "clusters" {
 		t.Fatalf("known %+v", known)
 	}
 	if known[0].EnabledSetting != "kata.enabled" || len(known[0].Values) != 0 || known[0].Preflight == nil || known[0].Vars != nil {
@@ -29,6 +29,13 @@ func TestKnownAddonsAreKataAndLoki(t *testing.T) {
 	}
 	if _, ok := Lookup("nothing"); ok {
 		t.Error("Lookup(nothing)")
+	}
+}
+
+func TestClustersAddonHasNoPreflightValuesOrVars(t *testing.T) {
+	def, ok := Lookup(Clusters)
+	if !ok || def.EnabledSetting != "clusters.enabled" || def.Preflight != nil || def.Vars != nil || len(def.Values) != 0 {
+		t.Fatalf("clusters %+v", def)
 	}
 }
 

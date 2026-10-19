@@ -133,6 +133,7 @@ func bedrockResources() []string {
 		"identityproviders", "identityproviders/status",
 		"images", "images/status",
 		"internetgateways", "internetgateways/status",
+		"kubernetesclusters", "kubernetesclusters/status",
 		"loadbalancers", "loadbalancers/status",
 		"networkpeerings", "networkpeerings/status",
 		"networks", "networks/status",

@@ -197,7 +197,25 @@ func (r *SecurityGroupReconciler) usedBy(ctx context.Context, group *v1alpha1.Se
 			users = append(users, "Container/"+container.Name)
 		}
 	}
+	var clusters v1alpha1.KubernetesClusterList
+	if err := r.Client.List(ctx, &clusters, client.InNamespace(group.Namespace)); err != nil {
+		return nil, err
+	}
+	for _, cluster := range clusters.Items {
+		if kubernetesClusterUses(cluster.Spec, group.Name) {
+			users = append(users, "KubernetesCluster/"+cluster.Name)
+		}
+	}
 	return users, nil
+}
+
+func kubernetesClusterUses(spec v1alpha1.KubernetesClusterSpec, group string) bool {
+	if slices.Contains(spec.ControlPlane.SecurityGroups, group) {
+		return true
+	}
+	return slices.ContainsFunc(spec.Workers, func(worker v1alpha1.KubernetesWorker) bool {
+		return slices.Contains(worker.SecurityGroups, group)
+	})
 }
 
 func (r *SecurityGroupReconciler) finalize(ctx context.Context, group *v1alpha1.SecurityGroup) (reconcile.Result, error) {
