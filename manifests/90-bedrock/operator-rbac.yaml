@@ -85,6 +85,7 @@ rules:
   resources:
   - controllerrevisions
   - daemonsets
+  - deployments
   verbs:
   - get
   - list
@@ -106,6 +107,18 @@ rules:
   - get
   - list
   - patch
+  - watch
+- apiGroups:
+  - barmancloud.cnpg.io
+  resources:
+  - objectstores
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - update
   - watch
 - apiGroups:
   - batch
@@ -174,6 +187,12 @@ rules:
   - projects/status
   - refreshtokens
   - refreshtokens/status
+  - registries
+  - registries/finalizers
+  - registries/status
+  - registrycredentials
+  - registrycredentials/finalizers
+  - registrycredentials/status
   - releases
   - releases/status
   - securitygroups
@@ -508,6 +527,19 @@ rules:
   - update
   - watch
 - apiGroups:
+  - postgresql.cnpg.io
+  resources:
+  - clusters
+  - scheduledbackups
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - update
+  - watch
+- apiGroups:
   - rbac.authorization.k8s.io
   resources:
   - clusterrolebindings
@@ -714,6 +746,7 @@ rules:
 - apiGroups:
   - ""
   resources:
+  - namespaces
   - secrets
   verbs:
   - create
