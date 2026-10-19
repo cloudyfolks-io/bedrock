@@ -1,14 +1,14 @@
 # Addons, audit and monitoring
 
 An addon is an optional part of Bedrock. An admin turns an addon on or off
-with an `Addon` object. This page describes the addons `kata` and `loki`,
+with an `Addon` object. This page describes the addons `kata`, `loki` and `clusters`,
 the API server audit log, the monitoring stack and the metering series.
 
 ## Addons
 
 The `Addon` kind has no namespace. The name of the object is the name of
-the addon. Bedrock creates one `Addon` for each addon it knows: `kata` and
-`loki`.
+the addon. Bedrock creates one `Addon` for each addon it knows: `kata`,
+`loki` and `clusters`.
 
 List the addons:
 
@@ -28,7 +28,7 @@ Turn an addon off:
 kubectl patch addon loki --type merge -p '{"spec":{"enabled":false}}'
 ```
 
-The Settings `kata.enabled` and `loki.enabled` set the first state of the
+The Settings `kata.enabled`, `loki.enabled` and `clusters.enabled` set the first state of the
 `Addon` objects when Bedrock creates them. After that, only the `Addon`
 object counts. A change of the Setting does not change a live addon.
 Bedrock never changes `spec.enabled` by itself.
@@ -197,6 +197,35 @@ kubectl -n monitoring delete pvc storage-loki-0
 
 When Loki is on, the Grafana of the monitoring stack gets the data source
 `Loki` from the ConfigMap `loki-datasource`.
+
+## Clusters
+
+The addon `clusters` runs the k0smotron operator, version `v2.1.0`.
+k0smotron makes the control plane of a `KubernetesCluster` as a pod.
+The addon is off by default. The installer for a region turns it on.
+
+The operator runs in the namespace `k0smotron`. Its webhooks use a
+certificate of cert-manager, which Bedrock always installs.
+
+The CustomResourceDefinitions of k0smotron are part of the CRD group of
+the release, not of the addon. They stay when you turn the addon off, so
+no cluster object is lost. Without the addon, no operator reads them.
+A `KubernetesCluster` then shows the reason `AddonDisabled`.
+
+The operator account `system:serviceaccount:k0smotron:k0smotron-controller-manager`
+may make StatefulSets with network annotations. A tenant user may not.
+The control plane pod of a cluster has a fixed address, and the annotations
+carry it.
+
+Two Settings belong to the addon:
+
+| Setting | Default | Meaning |
+|---|---|---|
+| `clusters.enabled` | `false` | First state of the `Addon` object. |
+| `clusters.versions` | `v1.36.3+k0s.1` | Allowed k0s versions, separated by spaces or new lines. The value `any` allows every version of the form `v<major>.<minor>.<patch>+k0s.<n>`. |
+
+The k0s image of the default version is in the offline bundle. Another
+version needs the registry mirror.
 
 ## Audit
 

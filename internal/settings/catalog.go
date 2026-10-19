@@ -20,6 +20,7 @@ import (
 	"github.com/cloudyfolks-io/bedrock/internal/backup/seal"
 	"github.com/cloudyfolks-io/bedrock/internal/backup/target"
 	"github.com/cloudyfolks-io/bedrock/internal/dnsname"
+	"github.com/cloudyfolks-io/bedrock/internal/k0sversion"
 )
 
 type Definition struct {
@@ -54,6 +55,11 @@ func intMin(minimum int) func(string) error {
 		}
 		return nil
 	}
+}
+
+func k0sVersions(v string) error {
+	_, err := k0sversion.ParseAllowed(v)
+	return err
 }
 
 func ageRecipients(v string) error {
@@ -162,6 +168,8 @@ func Catalog() []Definition {
 		{"kata.enabled", "true", "Initial state of the kata addon. Change the Addon object after install.", boolean},
 		{"container.runtime-class", "kata", "RuntimeClass of the pods of Container objects. An empty value keeps the default kata. The value none sets no RuntimeClass: use it only on a cluster with no KVM, because a customer pod then shares the node kernel.", dnsLabelValue},
 		{"loki.enabled", "false", "Initial state of the loki addon. Change the Addon object after install.", boolean},
+		{"clusters.enabled", "false", "Initial state of the clusters addon. Change the Addon object after install.", boolean},
+		{"clusters.versions", "v1.36.3+k0s.1", "k0s versions that a KubernetesCluster may use, separated by spaces or new lines. The value any allows every version that matches v<major>.<minor>.<patch>+k0s.<n>. Only the default version has its k0s image in the offline bundle.", k0sVersions},
 		{"alertmanager.webhook-url", "", "Webhook that receives Alertmanager notifications.", httpURL},
 		{"images.refresh-schedule", "0 3 * * *", "Cron schedule for catalog image refresh.", free},
 		{"images.keep", "3", "Catalog image versions to keep.", intMin(1)},

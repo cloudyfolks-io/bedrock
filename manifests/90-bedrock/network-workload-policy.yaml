@@ -46,7 +46,8 @@ spec:
         request.userInfo.username in [
         'system:serviceaccount:bedrock-system:bedrock-operator',
         'system:serviceaccount:kube-system:deployment-controller',
-        'system:serviceaccount:kube-system:cronjob-controller'] ||
+        'system:serviceaccount:kube-system:cronjob-controller',
+        'system:serviceaccount:k0smotron:k0smotron-controller-manager'] ||
         (size(variables.added) == 0 && size(variables.removed) == 0)
       message: "only the platform may set network selection annotations"
       reason: Forbidden

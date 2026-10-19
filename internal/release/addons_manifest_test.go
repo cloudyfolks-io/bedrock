@@ -144,3 +144,42 @@ func TestKataImageIsInTheImageList(t *testing.T) {
 		t.Fatalf("images %v", bundle.Images)
 	}
 }
+
+func TestClustersAddonShipsTheK0smotronOperator(t *testing.T) {
+	bundle, out := buildReal(t, "clusters")
+	objects := bundle.Addons["clusters"]
+	for kind, name := range map[string]string{
+		"Namespace": "k0smotron", "Deployment": "k0smotron-controller-manager", "ServiceAccount": "k0smotron-controller-manager",
+		"Certificate": "k0smotron-serving-cert", "MutatingWebhookConfiguration": "k0smotron-mutating-webhook-configuration",
+		"ValidatingWebhookConfiguration": "k0smotron-validating-webhook-configuration",
+	} {
+		if objectNamed(objects, kind, name) == nil {
+			t.Errorf("missing %s %s: %v", kind, name, kinds(objects))
+		}
+	}
+	for _, obj := range objects {
+		if obj.GetKind() == "CustomResourceDefinition" {
+			t.Errorf("CRD %s stays in the addon group", obj.GetName())
+		}
+	}
+	crds := 0
+	for _, group := range bundle.Groups {
+		for _, obj := range group.Objects {
+			if group.Name == "crds" && obj.GetKind() == "CustomResourceDefinition" && strings.HasSuffix(obj.GetName(), ".k0smotron.io") {
+				crds++
+			}
+		}
+	}
+	if crds != 2 {
+		t.Errorf("k0smotron.io CRDs in the crds group: %d", crds)
+	}
+	raw, err := os.ReadFile(filepath.Join(out, "images.txt"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, image := range []string{"quay.io/k0sproject/k0smotron:v2.1.0", "quay.io/k0sproject/k0s:v1.36.3-k0s.1"} {
+		if !strings.Contains(string(raw), image) || !slices.Contains(bundle.Images, image) {
+			t.Errorf("image %s is not listed", image)
+		}
+	}
+}

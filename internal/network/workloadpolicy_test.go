@@ -211,3 +211,15 @@ func TestWorkloadPolicyIgnoresNamespacesWithoutTheTenantLabel(t *testing.T) {
 		t.Fatalf("a namespace without the tenant label is out of scope: %v", err)
 	}
 }
+
+func TestWorkloadPolicyAllowsTheK0smotronAccountOnly(t *testing.T) {
+	f := newWorkloadFixture(t)
+	statefulSet := workloadObjects(f.ns, attachedTemplate)["StatefulSet"]
+	k0smotron := impersonating(t, f.cfg, "system:serviceaccount:k0smotron:k0smotron-controller-manager", "system:masters")
+	if err := k0smotron.Create(context.Background(), namedCopy(statefulSet, unique(t, "cp"))); err != nil {
+		t.Fatalf("the k0smotron account must create a StatefulSet with network annotations: %v", err)
+	}
+	requireWorkloadDenied(t, f.alice, namedCopy(statefulSet, unique(t, "tenant")))
+	other := impersonating(t, f.cfg, "system:serviceaccount:k0smotron:other", "system:masters")
+	requireWorkloadDenied(t, other, namedCopy(statefulSet, unique(t, "other")))
+}
