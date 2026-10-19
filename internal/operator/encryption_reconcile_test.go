@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	coordinationv1 "k8s.io/api/coordination/v1"
 	corev1 "k8s.io/api/core/v1"
 	rbacv1 "k8s.io/api/rbac/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -48,6 +49,11 @@ func createControlPlane(t *testing.T, c client.Client, name, hash string, member
 	}
 	node := &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: name}}
 	if err := c.Create(ctx, node); err != nil {
+		t.Fatal(err)
+	}
+	renewed := metav1.NewMicroTime(reported.Time)
+	lease := &coordinationv1.Lease{ObjectMeta: metav1.ObjectMeta{Namespace: nodeLeaseNamespace, Name: name}, Spec: coordinationv1.LeaseSpec{RenewTime: &renewed}}
+	if err := c.Create(ctx, lease); err != nil {
 		t.Fatal(err)
 	}
 	node.Status.Conditions = []corev1.NodeCondition{{Type: corev1.NodeReady, Status: corev1.ConditionTrue, LastHeartbeatTime: reported}}

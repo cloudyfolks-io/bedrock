@@ -59,9 +59,16 @@ func decideRotation(in rotationInput) rotationDecision {
 	for _, node := range in.Nodes {
 		present[node.Name] = true
 	}
+	leased := map[string]bool{}
+	for _, lease := range in.Leases {
+		leased[lease.Name] = true
+	}
 	for _, host := range hosts {
 		if !present[host.Name] {
 			in.Nodes = append(in.Nodes, heartbeatNode(host.Name, 0))
+		}
+		if !leased[host.Name] {
+			in.Leases = append(in.Leases, leaseOf(host.Name, 0))
 		}
 	}
 	return nextRotation(in)

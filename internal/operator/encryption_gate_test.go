@@ -27,10 +27,15 @@ func heartbeatNode(name string, age time.Duration) corev1.Node {
 	return corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: name}, Status: corev1.NodeStatus{Conditions: []corev1.NodeCondition{{Type: corev1.NodeReady, Status: corev1.ConditionTrue, LastHeartbeatTime: beat}}}}
 }
 
+func leaseOf(name string, age time.Duration) coordinationv1.Lease {
+	renewed := metav1.NewMicroTime(rotationNow.Add(-age))
+	return coordinationv1.Lease{ObjectMeta: metav1.ObjectMeta{Name: name}, Spec: coordinationv1.LeaseSpec{RenewTime: &renewed}}
+}
+
 func gateInput(t *testing.T, hosts []v1alpha1.Host, nodes []corev1.Node) rotationInput {
 	t.Helper()
 	chain := newConfigChain(t)
-	return rotationInput{Status: phaseStatus(v1alpha1.RotationAddingKey), Secret: chain.added, Hosts: hosts, Nodes: nodes, Now: rotationNow, Random: rand.Reader}
+	return rotationInput{Status: phaseStatus(v1alpha1.RotationAddingKey), Secret: chain.added, Hosts: hosts, Nodes: nodes, Leases: []coordinationv1.Lease{leaseOf("a", 5*time.Second), leaseOf("b", 5*time.Second), leaseOf("c", 5*time.Second)}, Now: rotationNow, Random: rand.Reader}
 }
 
 func threeFresh(t *testing.T) ([]v1alpha1.Host, []corev1.Node) {
@@ -78,18 +83,32 @@ func TestGateRefusesAControlPlaneHostWithoutANode(t *testing.T) {
 	}
 }
 
-func TestGateRefusesAStaleNodeHeartbeatUnlessALeaseIsFresh(t *testing.T) {
+func TestGateNeedsAFreshNodeLeaseAndIgnoresTheReadyHeartbeat(t *testing.T) {
 	hosts, nodes := threeFresh(t)
-	nodes[2] = heartbeatNode("c", 10*time.Minute)
-	got := nextRotation(gateInput(t, hosts, nodes))
-	if got.Grant != "" || got.Stalled != stalledWaitingForEtcd || !strings.Contains(got.Status.Message, "heartbeat") {
-		t.Fatalf("decision %+v", got)
-	}
-	renewed := metav1.NewMicroTime(rotationNow.Add(-5 * time.Second))
 	input := gateInput(t, hosts, nodes)
-	input.Leases = []coordinationv1.Lease{{ObjectMeta: metav1.ObjectMeta{Name: "c"}, Spec: coordinationv1.LeaseSpec{RenewTime: &renewed}}}
-	if granted := nextRotation(input); granted.Grant == "" {
-		t.Fatalf("a fresh lease must count as a heartbeat: %+v", granted)
+	input.Leases[2] = leaseOf("c", 45*time.Second)
+	got := nextRotation(input)
+	if got.Grant != "" || got.Stalled != stalledWaitingForEtcd || !strings.Contains(got.Status.Message, "lease") {
+		t.Fatalf("a lease of 45 s must stop the grant while the Node is Ready: %+v", got)
+	}
+	input = gateInput(t, hosts, nodes)
+	input.Leases = input.Leases[:2]
+	if got := nextRotation(input); got.Grant != "" || !strings.Contains(got.Status.Message, "lease") {
+		t.Fatalf("a missing lease must stop the grant: %+v", got)
+	}
+}
+
+func TestGateRefusesTimestampsFromTheFuture(t *testing.T) {
+	hosts, nodes := threeFresh(t)
+	hosts[0].Status.ReportedAt = ptrTime(rotationNow.Add(2 * time.Minute))
+	if got := nextRotation(gateInput(t, hosts, nodes)); got.Grant != "" || got.Stalled != stalledWaitingForEtcd {
+		t.Fatalf("a report from the future must stop the grant: %+v", got)
+	}
+	hosts, nodes = threeFresh(t)
+	input := gateInput(t, hosts, nodes)
+	input.Leases[1] = leaseOf("b", -2*time.Minute)
+	if got := nextRotation(input); got.Grant != "" || got.Stalled != stalledWaitingForEtcd {
+		t.Fatalf("a lease from the future must stop the grant: %+v", got)
 	}
 }
 
