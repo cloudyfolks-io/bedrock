@@ -58,6 +58,9 @@ remote_functions() {
 repo=$repo
 bedrock_bin=$bedrock_bin
 bundle=$bundle
+HOST=$platform_host
+VIP=$vip
+PROJECT=web
 cd "\$repo"
 for file in ${remote_files[*]}; do
   . "\$repo/hack/e2e/\$file.sh"
