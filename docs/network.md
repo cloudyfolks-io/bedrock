@@ -249,7 +249,8 @@ Three Settings turn it on:
 
 - `network.services.provider-network` names a provider network with the role `services`.
 - `network.services.identity-range` is an IPv4 network inside the CIDR of that provider network.
-  Put the same range in the `excludeIPs` of the provider network, so Fabric does not give these addresses to router ports.
+  The usable addresses of the range must be inside one `excludeIPs` entry of the provider network, so Fabric does not give them to router ports.
+  If not, the Network gets the reason `ServicesNotConfigured`.
 - `network.services.resolver` is the address of the resolver.
   DHCP gives it to guests when `network.dns-servers` is empty.
 
@@ -269,15 +270,18 @@ For each Network with `enableExternal`, the Network controller does these steps:
 5. It writes three `OvnSnatRule` objects, one for each of `10.0.0.0/8`, `172.16.0.0/12` and `192.168.0.0/16`.
 
 A Network keeps its identity address until you delete the Network.
-If you turn the plane off, the controller deletes the `OvnEip` `<vpc>-services-snat` and the rules.
+The controller deletes the `OvnEip` `<vpc>-services-snat` and the rules only when the Network is no longer external, or when you delete the Network.
+An empty or wrong Setting never deletes them.
+In that case a Network with an identity gets `ExternalReady=False` with the reason `ServicesNotConfigured`.
 The address stays in `status.servicesIdentity`.
 The router port and the entry in `extraExternalSubnets` stay.
 When you delete a Network, the controller deletes these objects before it deletes the Vpc.
 
-The provider network of the services plane has an ACL with the direction `to-lport` and the priority 2000.
+Each provider network with the role `services` has an ACL with the direction `to-lport` and the priority 2000.
 It drops traffic when the source and the destination are both in the provider network and both outside the first /24.
 So guests of different Networks cannot reach each other on the plane, but they can reach the services.
-In bgp mode the services provider network has its own `ProviderNetwork` and `Vlan`, as the transit network has.
+In bgp mode a provider network with the role `services` has its own `ProviderNetwork` and `Vlan`, as the transit network has.
+The ACL, the `ProviderNetwork` and the `Vlan` depend on the role only, so a wrong Setting never removes them.
 
 If a Setting is wrong, the Network gets `ExternalReady=False` with the reason `ServicesNotConfigured`.
 The Vpc keeps its other entries, and the controller does not delete the identity objects.

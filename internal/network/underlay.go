@@ -78,7 +78,7 @@ func renderBGP(cfg Config) ([]*unstructured.Unstructured, []string) {
 		case pn.Name == cfg.BGP.Transit:
 			pn.Role = v1alpha1.ProviderRoleTransit
 			objects = append(objects, providerObjects(cfg, pn)...)
-		case isServicesPool(cfg, pn):
+		case isServicesPool(pn):
 			objects = append(objects, providerObjects(cfg, pn)...)
 		default:
 			objects = append(objects, externalOverlaySubnet(pn))

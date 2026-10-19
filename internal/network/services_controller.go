@@ -19,7 +19,7 @@ import (
 var planeKinds = []schema.GroupVersionKind{fabric.OvnSnatRuleGVK, fabric.OvnEipGVK}
 
 func (r *NetworkReconciler) attachServices(ctx context.Context, network *v1alpha1.Network, cfg Config, external External) (*Violation, error) {
-	if !network.Spec.EnableExternal || cfg.Services.ProviderNetwork == "" {
+	if !network.Spec.EnableExternal {
 		return nil, r.dropServicesIdentity(ctx, network)
 	}
 	if _, configured := ServicesSubnet(cfg); !configured || external.Reason != ReasonConnected {
