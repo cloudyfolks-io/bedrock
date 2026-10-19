@@ -24,7 +24,7 @@ func addonBundle(t *testing.T) release.Bundle {
 	}
 	selected := cfg.Components[:0:0]
 	for _, component := range cfg.Components {
-		if component.Name == "kata" || component.Name == "loki" {
+		if component.Name == "kata" || component.Name == "loki" || component.Name == "cnpg" || component.Name == "crds" {
 			selected = append(selected, component)
 		}
 	}
@@ -53,7 +53,7 @@ func TestAddonRulesCoverTheAddonManifests(t *testing.T) {
 		for _, obj := range objects {
 			kind := obj.GroupVersionKind().GroupKind()
 			resource := resourceOf(kind, nil)
-			for _, verb := range []string{"create", "patch", "delete", "get", "list", "watch"} {
+			for _, verb := range verbsOfAddonObject(kind.Kind) {
 				if !ruleAllows(kind.Group, resource, verb) {
 					t.Errorf("addon %s: no %s on %s/%s", name, verb, kind.Group, resource)
 				}
@@ -127,4 +127,11 @@ func TestAgentCanReadOnlyTheAuditPolicy(t *testing.T) {
 	if err := node.Get(ctx, client.ObjectKey{Namespace: "bedrock-system", Name: "any"}, &secret); !apierrors.IsForbidden(err) {
 		t.Fatalf("a node must not read a Secret, got %v", err)
 	}
+}
+
+func verbsOfAddonObject(kind string) []string {
+	if kind == "Namespace" {
+		return []string{"create", "patch", "get"}
+	}
+	return []string{"create", "patch", "delete", "get", "list", "watch"}
 }
