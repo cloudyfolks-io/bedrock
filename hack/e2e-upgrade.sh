@@ -95,12 +95,32 @@ upgrade_archive_sealed() {
   esac
 }
 
-etcd_snapshot_since_marker() {
-  find "$backups" -maxdepth 1 -name 'etcd-*.tar.gz.age' -newer "$workdir/etcd-marker" | sort | tail -n 1
+etcd_snapshot_started_after_objects() {
+  find "$backups" -maxdepth 1 -name 'etcd-*.tar.gz.age' |
+    awk -v floor="$snapshot_floor" '{ stamp = $0; sub(/.*\/etcd-/, "", stamp); sub(/\.tar\.gz\.age$/, "", stamp); if (stamp > floor) print }' |
+    sort | tail -n 1
 }
 
 etcd_snapshot_written() {
-  [ -n "$(etcd_snapshot_since_marker)" ]
+  [ -n "$(etcd_snapshot_started_after_objects)" ]
+}
+
+created_epoch() {
+  local stamp
+  stamp=$(kubectl -n default get "$1" "$restore_marker" -o jsonpath='{.metadata.creationTimestamp}') || return 1
+  [ -n "$stamp" ] || return 1
+  date -u -d "$stamp" +%s
+}
+
+etcd_schedule_reset_applied() {
+  local applied default
+  applied=$(kubectl get setting backup.etcd-schedule -o jsonpath='{.status.applied}') || return 1
+  default=$(kubectl get setting backup.etcd-schedule -o jsonpath='{.status.default}') || return 1
+  [ -n "$applied" ] && [ "$applied" = "$default" ]
+}
+
+backup_work_idle() {
+  [ -z "$(find "$backups" -maxdepth 1 -name '.work-*')" ]
 }
 
 assert_age_file() {
@@ -457,11 +477,17 @@ spec:
       imagePullPolicy: IfNotPresent
 POD
 kubectl -n default wait --for=condition=Ready "pod/$restore_marker" --timeout=300s
+configmap_created=$(created_epoch configmap)
+pod_created=$(created_epoch pod)
+snapshot_floor=$(date -u -d "@$((configmap_created > pod_created ? configmap_created : pod_created))" +%Y%m%dT%H%M%SZ)
+echo "drill objects created at ${snapshot_floor}, only a snapshot that starts later counts"
 touch "$workdir/etcd-marker"
 kubectl patch setting backup.etcd-schedule --type merge -p '{"spec":{"value":"* * * * *"}}'
 retry_until 1800 etcd_snapshot_written
-snapshot=$(etcd_snapshot_since_marker)
+snapshot=$(etcd_snapshot_started_after_objects)
 kubectl patch setting backup.etcd-schedule --type merge -p '{"spec":{"value":""}}'
+retry_until 300 etcd_schedule_reset_applied
+retry_until 1800 backup_work_idle
 assert_age_file "$snapshot"
 snapshot_bytes=$(stat -c %s "$snapshot")
 snapshot_seconds=$(($(stat -c %Y "$snapshot") - $(stat -c %Y "$workdir/etcd-marker")))
@@ -476,6 +502,10 @@ snapshot_entries=$(k0s_archive_entries "$workdir/etcd-snapshot.tar.gz") || {
   echo "$snapshot must hold exactly one k0s backup archive" >&2
   exit 1
 }
+if ! grep -Eq '^(\./)?etcd-snapshot\.db$' <<<"$snapshot_entries"; then
+  echo "$snapshot holds no etcd-snapshot.db in its k0s archive" >&2
+  exit 1
+fi
 if grep -Eq '^(\./)?images(/|$)' <<<"$snapshot_entries"; then
   echo "$snapshot holds an images entry in its k0s archive" >&2
   exit 1
