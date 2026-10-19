@@ -68,6 +68,9 @@ type KMSSpec struct {
 type EncryptionSpec struct {
 	// +optional
 	KMS *KMSSpec `json:"kms,omitempty"`
+	// +kubebuilder:validation:Enum="";rotate;revert
+	// +optional
+	Action string `json:"action,omitempty"`
 }
 
 type UpgradeSpec struct {
@@ -134,6 +137,21 @@ type UpgradeStatus struct {
 	Message string `json:"message,omitempty"`
 }
 
+type EncryptionRotationStatus struct {
+	// +optional
+	Phase string `json:"phase,omitempty"`
+	// +optional
+	OldKey string `json:"oldKey,omitempty"`
+	// +optional
+	NewKey string `json:"newKey,omitempty"`
+	// +optional
+	RewrittenSecrets int64 `json:"rewrittenSecrets,omitempty"`
+	// +optional
+	LastRotatedAt *metav1.Time `json:"lastRotatedAt,omitempty"`
+	// +optional
+	Message string `json:"message,omitempty"`
+}
+
 type ClusterStatus struct {
 	// +optional
 	ObservedGeneration int64 `json:"observedGeneration,omitempty"`
@@ -149,6 +167,8 @@ type ClusterStatus struct {
 	Backups []BackupRecord `json:"backups,omitempty"`
 	// +optional
 	Upgrade *UpgradeStatus `json:"upgrade,omitempty"`
+	// +optional
+	Encryption *EncryptionRotationStatus `json:"encryption,omitempty"`
 }
 
 // +kubebuilder:object:root=true

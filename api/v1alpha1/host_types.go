@@ -188,6 +188,15 @@ type AuthnFilesStatus struct {
 	Message string `json:"message,omitempty"`
 }
 
+type EncryptionFileStatus struct {
+	// +optional
+	Hash string `json:"hash,omitempty"`
+	// +optional
+	RestartPending bool `json:"restartPending,omitempty"`
+	// +optional
+	FailedHash string `json:"failedHash,omitempty"`
+}
+
 type HostStatus struct {
 	// +optional
 	ObservedGeneration int64 `json:"observedGeneration,omitempty"`
@@ -215,6 +224,8 @@ type HostStatus struct {
 	Restore *RestoreStatus `json:"restore,omitempty"`
 	// +optional
 	Authn *AuthnFilesStatus `json:"authn,omitempty"`
+	// +optional
+	Encryption *EncryptionFileStatus `json:"encryption,omitempty"`
 }
 
 // +kubebuilder:object:root=true

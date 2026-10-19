@@ -236,6 +236,15 @@ spec:
                 required:
                 - url
                 type: object
+              encryption:
+                properties:
+                  failedHash:
+                    type: string
+                  hash:
+                    type: string
+                  restartPending:
+                    type: boolean
+                type: object
               hostname:
                 type: string
               inventory:

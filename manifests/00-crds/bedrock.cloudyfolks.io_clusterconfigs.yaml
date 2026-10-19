@@ -56,6 +56,12 @@ spec:
                 type: object
               encryption:
                 properties:
+                  action:
+                    enum:
+                    - ""
+                    - rotate
+                    - revert
+                    type: string
                   kms:
                     properties:
                       endpoint:
