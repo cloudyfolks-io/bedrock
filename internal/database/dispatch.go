@@ -2,7 +2,6 @@ package database
 
 import (
 	"fmt"
-	"strconv"
 	"time"
 
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
@@ -53,18 +52,10 @@ func EngineRestartPatch(kind, name, now string) (engine.Patch, error) {
 	return engine.Patch{}, fmt.Errorf("unknown engine %q", kind)
 }
 
-func scaleGatePatches(name, projectNamespace string, replicas int) []engine.Patch {
-	body := []byte(`{"spec":{"replicas":` + strconv.Itoa(replicas) + `}}`)
-	return []engine.Patch{
-		{GVK: DeploymentGVK, Namespace: PlatformNamespace, Name: engine.Named(name, "gate"), Body: body},
-		{GVK: DeploymentGVK, Namespace: projectNamespace, Name: engine.Named(name, "proxy"), Body: body},
-	}
-}
-
-func StepPatches(kind string, spec engine.Spec, projectNamespace string, steps []Step, now string) ([]engine.Patch, error) {
+func StepPatches(kind string, spec engine.Spec, steps []Step, now string) ([]engine.Patch, error) {
 	var patches []engine.Patch
 	for _, step := range steps {
-		stepPatches, err := patchesOfStep(kind, spec, projectNamespace, step, now)
+		stepPatches, err := patchesOfStep(kind, spec, step, now)
 		if err != nil {
 			return nil, err
 		}
@@ -73,7 +64,7 @@ func StepPatches(kind string, spec engine.Spec, projectNamespace string, steps [
 	return patches, nil
 }
 
-func patchesOfStep(kind string, spec engine.Spec, projectNamespace string, step Step, now string) ([]engine.Patch, error) {
+func patchesOfStep(kind string, spec engine.Spec, step Step, now string) ([]engine.Patch, error) {
 	switch step {
 	case StepResize, StepGrowStorage, StepUpgrade, StepRefreshImage:
 		return nil, nil
@@ -82,10 +73,10 @@ func patchesOfStep(kind string, spec engine.Spec, projectNamespace string, step 
 		return []engine.Patch{patch}, err
 	case StepSuspend:
 		patch, err := EngineSuspendPatch(kind, spec.Name, true)
-		return append([]engine.Patch{patch}, scaleGatePatches(spec.Name, projectNamespace, 0)...), err
+		return []engine.Patch{patch}, err
 	case StepResume:
 		patch, err := EngineSuspendPatch(kind, spec.Name, false)
-		return append([]engine.Patch{patch}, scaleGatePatches(spec.Name, projectNamespace, 1)...), err
+		return []engine.Patch{patch}, err
 	}
 	return nil, fmt.Errorf("unknown step %q", step)
 }

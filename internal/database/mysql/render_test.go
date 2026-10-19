@@ -135,11 +135,28 @@ func TestRenderEqualsTheDadehatGolden(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		got := objectsJSON(t, mustRender(t, spec))
+		got := objectsJSON(t, withDadehatDifferences(mustRender(t, spec)))
 		if string(want) != string(got) {
 			t.Errorf("%s differs.\n--- got ---\n%s\n--- want ---\n%s", file, got, want)
 		}
 	}
+}
+
+func withDadehatDifferences(objects []*unstructured.Unstructured) []*unstructured.Unstructured {
+	for _, obj := range objects {
+		if obj.GetKind() == RestoreGVK.Kind {
+			obj.SetAPIVersion("ps.percona.com/v1alpha1")
+		}
+		if obj.GetKind() != ClusterGVK.Kind {
+			continue
+		}
+		obj.SetAPIVersion("ps.percona.com/v1alpha1")
+		unstructured.RemoveNestedField(obj.Object, "spec", "proxy", "router")
+		if enabled, found, _ := unstructured.NestedBool(obj.Object, "spec", "proxy", "haproxy", "enabled"); found && !enabled {
+			unstructured.RemoveNestedField(obj.Object, "spec", "proxy")
+		}
+	}
+	return objects
 }
 
 func clusterOf(t *testing.T, objs []*unstructured.Unstructured) map[string]any {
@@ -169,8 +186,8 @@ func TestRenderClusterRules(t *testing.T) {
 			t.Errorf("cluster is missing %s", want)
 		}
 	}
-	if strings.Contains(text, `"pause":true`) || strings.Contains(text, "haproxy") {
-		t.Error("a new single instance cluster must not start paused or carry HAProxy")
+	if strings.Contains(text, `"pause":true`) || !strings.Contains(text, `"proxy":{"haproxy":{"enabled":false},"router":{"enabled":false}}`) {
+		t.Error("a new single instance cluster must not start paused and must switch HAProxy off")
 	}
 }
 
@@ -178,7 +195,7 @@ func TestRenderThreeInstancesUseHAProxyWithItsImage(t *testing.T) {
 	cluster := clusterOf(t, mustRender(t, withInstances(bedrockSpec(), 3)))
 	raw, _ := json.Marshal(cluster["spec"])
 	text := string(raw)
-	for _, want := range []string{`"proxy":{"haproxy":{"enabled":true,"image":"docker.io/percona/haproxy:2.8.18-1@sha256:bb","size":3}}`, `"size":3`} {
+	for _, want := range []string{`"proxy":{"haproxy":{"enabled":true,"image":"docker.io/percona/haproxy:2.8.18-1@sha256:bb","size":3},"router":{"enabled":false}}`, `"size":3`} {
 		if !strings.Contains(text, want) {
 			t.Errorf("spec is missing %s: %s", want, text)
 		}

@@ -63,6 +63,10 @@ func userAllowed(name string) error {
 	return nil
 }
 
+func CheckUser(name string) error { return userAllowed(name) }
+
+func CheckDatabase(name string) error { return databaseAllowed(name) }
+
 func databaseAllowed(name string) error {
 	if !identRe.MatchString(name) {
 		return fmt.Errorf("identifier %q is not allowed", name)

@@ -58,15 +58,15 @@ func TestApplyPlanRestartsAndSuspendsAndResumes(t *testing.T) {
 	createValkeyDeployment(t, c, spec)
 	now := time.Date(2026, 10, 19, 12, 0, 0, 0, time.UTC)
 
-	must(t, ApplyPlan(ctx, c, v1alpha1.DatabaseEngineValkey, spec, "acme-web", Result{Steps: []Step{StepRestart}}, now))
+	must(t, ApplyPlan(ctx, c, v1alpha1.DatabaseEngineValkey, spec, Result{Steps: []Step{StepRestart}}, now))
 	if got := platformDeployment(t, c, uid).Spec.Template.Annotations["kubectl.kubernetes.io/restartedAt"]; got != "2026-10-19T12:00:00Z" {
 		t.Fatalf("restartedAt %q", got)
 	}
-	must(t, ApplyPlan(ctx, c, v1alpha1.DatabaseEngineValkey, spec, "acme-web", Result{Steps: []Step{StepSuspend}}, now))
+	must(t, ApplyPlan(ctx, c, v1alpha1.DatabaseEngineValkey, spec, Result{Steps: []Step{StepSuspend}}, now))
 	if replicas := *platformDeployment(t, c, uid).Spec.Replicas; replicas != 0 {
 		t.Fatalf("suspended replicas %d", replicas)
 	}
-	must(t, ApplyPlan(ctx, c, v1alpha1.DatabaseEngineValkey, spec, "acme-web", Result{Steps: []Step{StepResume}}, now))
+	must(t, ApplyPlan(ctx, c, v1alpha1.DatabaseEngineValkey, spec, Result{Steps: []Step{StepResume}}, now))
 	if replicas := *platformDeployment(t, c, uid).Spec.Replicas; replicas != 1 {
 		t.Fatalf("resumed replicas %d", replicas)
 	}
@@ -82,13 +82,13 @@ func TestApplyPlanKeepsTheRunningImageUntilARefresh(t *testing.T) {
 	catalog := "valkey/valkey:9.1.3@sha256:ccc"
 
 	spec.Image = ImageToApply(running, "9.1", "9.1", catalog, false)
-	must(t, ApplyPlan(ctx, c, v1alpha1.DatabaseEngineValkey, spec, "acme-web", Result{Steps: []Step{StepResize}}, time.Now()))
+	must(t, ApplyPlan(ctx, c, v1alpha1.DatabaseEngineValkey, spec, Result{Steps: []Step{StepResize}}, time.Now()))
 	if got := platformDeployment(t, c, uid).Spec.Template.Spec.Containers[0].Image; got != running {
 		t.Fatalf("a catalog change rolled the database: %s", got)
 	}
 
 	spec.Image = ImageToApply(running, "9.1", "9.1", catalog, true)
-	must(t, ApplyPlan(ctx, c, v1alpha1.DatabaseEngineValkey, spec, "acme-web", Result{Steps: []Step{StepRefreshImage, StepRestart}}, time.Now()))
+	must(t, ApplyPlan(ctx, c, v1alpha1.DatabaseEngineValkey, spec, Result{Steps: []Step{StepRefreshImage, StepRestart}}, time.Now()))
 	if got := platformDeployment(t, c, uid).Spec.Template.Spec.Containers[0].Image; got != catalog {
 		t.Fatalf("the refresh did not apply the catalog image: %s", got)
 	}
@@ -101,8 +101,8 @@ func TestApplyPlanCreatesOnePreUpgradeBackup(t *testing.T) {
 	spec := engineSpecFor(nil)
 	now := time.Date(2026, 10, 19, 12, 0, 0, 0, time.UTC)
 	result := Result{Hold: &Refusal{Reason: ReasonBackupRequired, Message: "m"}, RequestBackup: true}
-	must(t, ApplyPlan(context.Background(), c, v1alpha1.DatabaseEnginePostgreSQL, spec, "ns", result, now))
-	must(t, ApplyPlan(context.Background(), c, v1alpha1.DatabaseEnginePostgreSQL, spec, "ns", result, now))
+	must(t, ApplyPlan(context.Background(), c, v1alpha1.DatabaseEnginePostgreSQL, spec, result, now))
+	must(t, ApplyPlan(context.Background(), c, v1alpha1.DatabaseEnginePostgreSQL, spec, result, now))
 	list := &unstructured.UnstructuredList{}
 	list.SetAPIVersion("postgresql.cnpg.io/v1")
 	list.SetKind("BackupList")
@@ -115,10 +115,10 @@ func TestApplyPlanCreatesOnePreUpgradeBackup(t *testing.T) {
 func TestApplyPlanWithoutBackupAndWithoutStepsChangesNothing(t *testing.T) {
 	scheme := runtime.NewScheme()
 	c := fake.NewClientBuilder().WithScheme(scheme).Build()
-	if err := ApplyPlan(context.Background(), c, v1alpha1.DatabaseEngineValkey, valkeySpec("uid-9"), "ns", Result{}, time.Now()); err != nil {
+	if err := ApplyPlan(context.Background(), c, v1alpha1.DatabaseEngineValkey, valkeySpec("uid-9"), Result{}, time.Now()); err != nil {
 		t.Fatal(err)
 	}
-	if err := ApplyPlan(context.Background(), c, v1alpha1.DatabaseEngineValkey, valkeySpec("uid-9"), "ns", Result{RequestBackup: true}, time.Now()); err == nil {
+	if err := ApplyPlan(context.Background(), c, v1alpha1.DatabaseEngineValkey, valkeySpec("uid-9"), Result{RequestBackup: true}, time.Now()); err == nil {
 		t.Fatal("valkey got a backup")
 	}
 }

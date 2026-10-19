@@ -38,26 +38,6 @@ func TestEnginePatchesRouteByEngine(t *testing.T) {
 	}
 }
 
-func TestSuspendAndResumeScaleTheGateAndTheProxy(t *testing.T) {
-	spec := engineSpecFor(nil)
-	for _, c := range []struct {
-		step     Step
-		replicas string
-	}{{StepSuspend, `"replicas":0`}, {StepResume, `"replicas":1`}} {
-		patches, err := StepPatches(v1alpha1.DatabaseEngineValkey, spec, "acme-web", []Step{c.step}, "")
-		if err != nil || len(patches) != 3 {
-			t.Fatalf("%s: %+v %v", c.step, patches, err)
-		}
-		gate, proxy := patches[1], patches[2]
-		if gate.Name != "uid-1-gate" || gate.Namespace != PlatformNamespace || proxy.Name != "uid-1-proxy" || proxy.Namespace != "acme-web" {
-			t.Errorf("%s: gate %+v proxy %+v", c.step, gate, proxy)
-		}
-		if !strings.Contains(string(gate.Body), c.replicas) || !strings.Contains(string(proxy.Body), c.replicas) {
-			t.Errorf("%s: bodies %s %s", c.step, gate.Body, proxy.Body)
-		}
-	}
-}
-
 func TestSuspendUsesTheEnginePatch(t *testing.T) {
 	cases := map[string]string{
 		v1alpha1.DatabaseEnginePostgreSQL: `cnpg.io/hibernation":"on"`,
@@ -65,7 +45,7 @@ func TestSuspendUsesTheEnginePatch(t *testing.T) {
 		v1alpha1.DatabaseEngineValkey:     `"replicas":0`,
 	}
 	for kind, want := range cases {
-		patches, err := StepPatches(kind, engineSpecFor(nil), "ns", []Step{StepSuspend}, "")
+		patches, err := StepPatches(kind, engineSpecFor(nil), []Step{StepSuspend}, "")
 		if err != nil || !strings.Contains(string(patches[0].Body), want) {
 			t.Errorf("%s: %+v %v", kind, patches, err)
 		}
@@ -79,7 +59,7 @@ func TestRestartUsesTheEnginePatch(t *testing.T) {
 		v1alpha1.DatabaseEngineValkey:     `{"spec":{"template":{"metadata":{"annotations":{"kubectl.kubernetes.io/restartedAt":"now"}}}}}`,
 	}
 	for kind, want := range cases {
-		patches, err := StepPatches(kind, engineSpecFor(nil), "ns", []Step{StepRestart}, "now")
+		patches, err := StepPatches(kind, engineSpecFor(nil), []Step{StepRestart}, "now")
 		if err != nil || len(patches) != 1 || string(patches[0].Body) != want {
 			t.Errorf("%s: %+v %v", kind, patches, err)
 		}
@@ -87,14 +67,14 @@ func TestRestartUsesTheEnginePatch(t *testing.T) {
 }
 
 func TestResizeStepsNeedTheEnginePatchesNotAStepPatch(t *testing.T) {
-	patches, err := StepPatches(v1alpha1.DatabaseEnginePostgreSQL, engineSpecFor(nil), "ns", []Step{StepResize, StepGrowStorage, StepUpgrade, StepRefreshImage}, "")
+	patches, err := StepPatches(v1alpha1.DatabaseEnginePostgreSQL, engineSpecFor(nil), []Step{StepResize, StepGrowStorage, StepUpgrade, StepRefreshImage}, "")
 	if err != nil || len(patches) != 0 {
 		t.Fatalf("patches %+v %v", patches, err)
 	}
 	if !ChangesPatchSteps([]Step{StepRestart, StepUpgrade}) || ChangesPatchSteps([]Step{StepRestart, StepSuspend}) {
 		t.Fatal("ChangesPatchSteps")
 	}
-	if _, err := StepPatches(v1alpha1.DatabaseEnginePostgreSQL, engineSpecFor(nil), "ns", []Step{"Explode"}, ""); err == nil {
+	if _, err := StepPatches(v1alpha1.DatabaseEnginePostgreSQL, engineSpecFor(nil), []Step{"Explode"}, ""); err == nil {
 		t.Fatal("unknown step accepted")
 	}
 }

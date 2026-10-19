@@ -1,6 +1,6 @@
 [
   {
-    "apiVersion": "ps.percona.com/v1alpha1",
+    "apiVersion": "ps.percona.com/v1",
     "kind": "PerconaServerMySQL",
     "metadata": {
       "labels": {
@@ -78,6 +78,14 @@
           }
         }
       },
+      "proxy": {
+        "haproxy": {
+          "enabled": false
+        },
+        "router": {
+          "enabled": false
+        }
+      },
       "secretsName": "0b0c0d0e-1111-4222-8333-444455556666-superuser",
       "toolkit": {
         "image": "docker.io/percona/percona-toolkit:3.7.1-4@sha256:dd"
@@ -89,7 +97,7 @@
     }
   },
   {
-    "apiVersion": "ps.percona.com/v1alpha1",
+    "apiVersion": "ps.percona.com/v1",
     "kind": "PerconaServerMySQLRestore",
     "metadata": {
       "labels": {

@@ -142,6 +142,7 @@ func (r *Reconciler) publish(ctx context.Context, cfg Config, db *v1alpha1.Datab
 		GateReady:        observed.GateReady,
 		EndpointReady:    observed.EndpointReady,
 		Refusal:          observed.Refusal,
+		Upgrading:        observed.Upgrading,
 		Age:              now.Sub(db.CreationTimestamp.Time),
 		ProvisionTimeout: cfg.ProvisionTimeout,
 	})
@@ -156,6 +157,13 @@ func (r *Reconciler) publish(ctx context.Context, cfg Config, db *v1alpha1.Datab
 		status.Phase = verdict.Phase
 		status.Instances = observed.Instances
 		status.Backup = observed.Backup
+		status.Stats = observed.Stats
+		if observed.Image != "" {
+			status.Image = observed.Image
+		}
+		if observed.Applied != nil {
+			status.Applied = observed.Applied
+		}
 		if len(status.Addresses) > 0 {
 			status.CredentialsSecret = AdminCopyName(*db)
 		}

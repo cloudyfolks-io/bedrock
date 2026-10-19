@@ -15,6 +15,7 @@ import (
 
 	"github.com/cloudyfolks-io/bedrock/api/v1alpha1"
 	"github.com/cloudyfolks-io/bedrock/internal/database/engine"
+	"github.com/cloudyfolks-io/bedrock/internal/database/mysql"
 	"github.com/cloudyfolks-io/bedrock/internal/objectstorage"
 	"github.com/cloudyfolks-io/bedrock/internal/objectstorage/s3"
 	"github.com/cloudyfolks-io/bedrock/internal/platform"
@@ -102,8 +103,12 @@ func SizeSampleDue(previous *v1alpha1.DatabaseBackupStatus, now time.Time) bool 
 }
 
 func ListBackups(ctx context.Context, c client.Reader, db v1alpha1.Database) ([]*unstructured.Unstructured, error) {
+	gvk, supported := backupGVK(db.Spec.Engine)
+	if !supported {
+		return nil, nil
+	}
 	list := &unstructured.UnstructuredList{}
-	list.SetGroupVersionKind(BackupGVK.GroupVersion().WithKind("BackupList"))
+	list.SetGroupVersionKind(gvk.GroupVersion().WithKind(gvk.Kind + "List"))
 	err := c.List(ctx, list, client.InNamespace(PlatformNamespace))
 	if meta.IsNoMatchError(err) || apierrors.IsNotFound(err) {
 		return nil, nil
@@ -113,7 +118,7 @@ func ListBackups(ctx context.Context, c client.Reader, db v1alpha1.Database) ([]
 	}
 	var own []*unstructured.Unstructured
 	for i := range list.Items {
-		if cluster, _, _ := unstructured.NestedString(list.Items[i].Object, "spec", "cluster", "name"); cluster == Name(db.UID) {
+		if backupClusterOf(&list.Items[i]) == Name(db.UID) {
 			own = append(own, &list.Items[i])
 		}
 	}
@@ -133,8 +138,8 @@ func BackupStatusOf(backups []*unstructured.Unstructured, now time.Time, sizeByt
 	items := make([]v1alpha1.DatabaseBackupItem, 0, len(backups))
 	var completed []metav1.Time
 	for _, backup := range backups {
-		phase, _, _ := unstructured.NestedString(backup.Object, "status", "phase")
-		item := v1alpha1.DatabaseBackupItem{ID: backup.GetName(), Phase: phase, StartedAt: timeField(backup, "startedAt"), CompletedAt: timeField(backup, "stoppedAt")}
+		item := backupItemOf(backup)
+		phase := item.Phase
 		if phase == backupPhaseCompleted && item.CompletedAt != nil {
 			completed = append(completed, *item.CompletedAt)
 		}
@@ -152,6 +157,23 @@ func BackupStatusOf(backups []*unstructured.Unstructured, now time.Time, sizeByt
 		status.PITRTo = &metav1.Time{Time: now.UTC()}
 	}
 	return status
+}
+
+func backupItemOf(backup *unstructured.Unstructured) v1alpha1.DatabaseBackupItem {
+	if backup.GetKind() != mysql.BackupGVK.Kind {
+		phase, _, _ := unstructured.NestedString(backup.Object, "status", "phase")
+		return v1alpha1.DatabaseBackupItem{ID: backup.GetName(), Phase: phase, StartedAt: timeField(backup, "startedAt"), CompletedAt: timeField(backup, "stoppedAt")}
+	}
+	completed, failed := mysql.BackupState(backup)
+	created := backup.GetCreationTimestamp()
+	item := v1alpha1.DatabaseBackupItem{ID: backup.GetName(), Phase: "running", StartedAt: &created}
+	switch {
+	case failed:
+		item.Phase = "failed"
+	case completed != nil:
+		item.Phase, item.CompletedAt = backupPhaseCompleted, &metav1.Time{Time: completed.UTC()}
+	}
+	return item
 }
 
 func newer(a, b v1alpha1.DatabaseBackupItem) bool {

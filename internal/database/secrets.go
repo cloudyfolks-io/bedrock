@@ -15,6 +15,8 @@ import (
 	"github.com/cloudyfolks-io/bedrock/api/v1alpha1"
 	"github.com/cloudyfolks-io/bedrock/internal/database/credential"
 	"github.com/cloudyfolks-io/bedrock/internal/database/engine"
+	"github.com/cloudyfolks-io/bedrock/internal/database/mysql"
+	"github.com/cloudyfolks-io/bedrock/internal/database/valkey"
 	"github.com/cloudyfolks-io/bedrock/internal/ssa"
 )
 
@@ -41,14 +43,42 @@ func EngineSecret(name string, db v1alpha1.Database, project Project, data map[s
 	return &corev1.Secret{
 		TypeMeta:   metav1.TypeMeta{APIVersion: "v1", Kind: "Secret"},
 		ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: PlatformNamespace, Labels: labels, Annotations: annotations},
-		Type:       corev1.SecretTypeBasicAuth,
+		Type:       secretTypeOf(data),
 		StringData: data,
 	}
 }
 
+func secretTypeOf(data map[string]string) corev1.SecretType {
+	_, named := data["username"]
+	_, keyed := data[passwordKey]
+	if named && keyed {
+		return corev1.SecretTypeBasicAuth
+	}
+	return corev1.SecretTypeOpaque
+}
+
+func superuserData(kind, password string) (map[string]string, error) {
+	var raw map[string][]byte
+	var err error
+	switch kind {
+	case v1alpha1.DatabaseEngineMySQL:
+		raw, err = mysql.Superuser(password)
+	case v1alpha1.DatabaseEngineValkey:
+		raw, err = valkey.Superuser(password)
+	default:
+		return map[string]string{"username": postgresSuperuser, passwordKey: password}, nil
+	}
+	data := make(map[string]string, len(raw))
+	for key, value := range raw {
+		data[key] = string(value)
+	}
+	return data, err
+}
+
 func EnsureEngineSecrets(ctx context.Context, c client.Client, db v1alpha1.Database, project Project) error {
-	if err := createIfAbsent(ctx, c, Suffixed(db.UID, SecretSuperuser), func(password string) *corev1.Secret {
-		return EngineSecret(Suffixed(db.UID, SecretSuperuser), db, project, map[string]string{"username": postgresSuperuser, passwordKey: password}, nil)
+	if err := createIfAbsent(ctx, c, Suffixed(db.UID, SecretSuperuser), func(password string) (*corev1.Secret, error) {
+		data, err := superuserData(db.Spec.Engine, password)
+		return EngineSecret(Suffixed(db.UID, SecretSuperuser), db, project, data, nil), err
 	}); err != nil {
 		return err
 	}
@@ -56,15 +86,15 @@ func EnsureEngineSecrets(ctx context.Context, c client.Client, db v1alpha1.Datab
 	if restored(db) {
 		state = unsynced
 	}
-	return createIfAbsent(ctx, c, Suffixed(db.UID, SecretApp), func(password string) *corev1.Secret {
+	return createIfAbsent(ctx, c, Suffixed(db.UID, SecretApp), func(password string) (*corev1.Secret, error) {
 		return EngineSecret(Suffixed(db.UID, SecretApp), db, project, map[string]string{"username": engine.AdminUser, passwordKey: password}, map[string]string{
 			annotationPasswordSynced: state,
 			annotationResetApplied:   db.Annotations[v1alpha1.AnnotationResetPassword],
-		})
+		}), nil
 	})
 }
 
-func createIfAbsent(ctx context.Context, c client.Client, name string, build func(password string) *corev1.Secret) error {
+func createIfAbsent(ctx context.Context, c client.Client, name string, build func(password string) (*corev1.Secret, error)) error {
 	var existing corev1.Secret
 	err := c.Get(ctx, client.ObjectKey{Namespace: PlatformNamespace, Name: name}, &existing)
 	if err == nil {
@@ -77,7 +107,11 @@ func createIfAbsent(ctx context.Context, c client.Client, name string, build fun
 	if err != nil {
 		return err
 	}
-	return client.IgnoreAlreadyExists(c.Create(ctx, build(password), client.FieldOwner(v1alpha1.DatabaseFieldManager)))
+	secret, err := build(password)
+	if err != nil {
+		return err
+	}
+	return client.IgnoreAlreadyExists(c.Create(ctx, secret, client.FieldOwner(v1alpha1.DatabaseFieldManager)))
 }
 
 type AdminState struct {
@@ -130,8 +164,20 @@ func ResetAdminPassword(ctx context.Context, c client.Client, db v1alpha1.Databa
 }
 
 func AdminURI(password, host string, port int32) string {
-	userinfo := url.UserPassword(engine.AdminUser, password)
-	return (&url.URL{Scheme: "postgresql", User: userinfo, Host: net.JoinHostPort(host, strconv.Itoa(int(port))), Path: "/" + engine.DefaultDatabase}).String()
+	return ConnectionURI(v1alpha1.DatabaseEnginePostgreSQL, engine.AdminUser, password, host, port, engine.DefaultDatabase)
+}
+
+func ConnectionURI(kind, user, password, host string, port int32, database string) string {
+	address := &url.URL{User: url.UserPassword(user, password), Host: net.JoinHostPort(host, strconv.Itoa(int(port)))}
+	switch kind {
+	case v1alpha1.DatabaseEngineMySQL:
+		address.Scheme, address.Path = "mysql", "/"+database
+	case v1alpha1.DatabaseEngineValkey:
+		address.Scheme = "redis"
+	default:
+		address.Scheme, address.Path = "postgresql", "/"+database
+	}
+	return address.String()
 }
 
 func AdminCopyName(db v1alpha1.Database) string { return db.Name + "-" + SuffixAdmin }
@@ -144,16 +190,23 @@ func AdminCopy(db v1alpha1.Database, project Project, password, host string, por
 			Labels:          v1alpha1.TenantLabels(Kind, db.Name, project.Tenant, project.Name),
 			OwnerReferences: []metav1.OwnerReference{*metav1.NewControllerRef(&db, v1alpha1.GroupVersion.WithKind(Kind))},
 		},
-		Type: corev1.SecretTypeOpaque,
-		StringData: map[string]string{
-			"username":  engine.AdminUser,
-			passwordKey: password,
-			"host":      host,
-			"port":      strconv.Itoa(int(port)),
-			"database":  engine.DefaultDatabase,
-			"uri":       AdminURI(password, host, port),
-		},
+		Type:       corev1.SecretTypeOpaque,
+		StringData: adminCopyData(db.Spec.Engine, password, host, port),
 	}
+}
+
+func adminCopyData(kind, password, host string, port int32) map[string]string {
+	data := map[string]string{
+		"username":  engine.AdminUser,
+		passwordKey: password,
+		"host":      host,
+		"port":      strconv.Itoa(int(port)),
+		"uri":       ConnectionURI(kind, engine.AdminUser, password, host, port, engine.DefaultDatabase),
+	}
+	if kind != v1alpha1.DatabaseEngineValkey {
+		data["database"] = engine.DefaultDatabase
+	}
+	return data
 }
 
 func EnsureAdminCopy(ctx context.Context, c client.Client, db v1alpha1.Database, project Project, host string, port int32) error {

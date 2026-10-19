@@ -86,9 +86,9 @@ func TestEngineAddonsAreWatched(t *testing.T) {
 func TestEngineGVKsCoverThePerconaAndValkeyObjects(t *testing.T) {
 	kinds := EngineGVKs()
 	for _, want := range []schema.GroupVersionKind{
-		{Group: "ps.percona.com", Version: "v1alpha1", Kind: "PerconaServerMySQL"},
-		{Group: "ps.percona.com", Version: "v1alpha1", Kind: "PerconaServerMySQLBackup"},
-		{Group: "ps.percona.com", Version: "v1alpha1", Kind: "PerconaServerMySQLRestore"},
+		{Group: "ps.percona.com", Version: "v1", Kind: "PerconaServerMySQL"},
+		{Group: "ps.percona.com", Version: "v1", Kind: "PerconaServerMySQLBackup"},
+		{Group: "ps.percona.com", Version: "v1", Kind: "PerconaServerMySQLRestore"},
 		{Group: "monitoring.coreos.com", Version: "v1", Kind: "PodMonitor"},
 		{Group: "apps", Version: "v1", Kind: "Deployment"},
 		{Version: "v1", Kind: "PersistentVolumeClaim"},

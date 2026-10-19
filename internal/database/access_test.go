@@ -37,8 +37,8 @@ func (f *fakeEngine) run(_ context.Context, script string) (string, error) {
 }
 
 func (f *fakeEngine) factory() EngineFactory {
-	return func(context.Context, v1alpha1.Database) (Engine, error) {
-		return Engine{Run: f.run, Timeout: 2 * time.Minute}, nil
+	return func(_ context.Context, db v1alpha1.Database) (Engine, error) {
+		return Engine{Kind: db.Spec.Engine, Run: f.run, Timeout: 2 * time.Minute}, nil
 	}
 }
 

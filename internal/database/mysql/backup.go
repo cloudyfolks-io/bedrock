@@ -10,7 +10,7 @@ import (
 
 func PreUpgradeBackup(s engine.Spec, name string) *unstructured.Unstructured {
 	return &unstructured.Unstructured{Object: map[string]any{
-		"apiVersion": "ps.percona.com/v1alpha1", "kind": BackupGVK.Kind,
+		"apiVersion": "ps.percona.com/v1", "kind": BackupGVK.Kind,
 		"metadata": map[string]any{"name": name, "namespace": s.Namespace, "labels": engine.Labels(s.Labels)},
 		"spec":     map[string]any{"clusterName": s.Name, "storageName": StorageName},
 	}}

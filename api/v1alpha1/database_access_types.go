@@ -35,6 +35,10 @@ type DatabaseUserSpec struct {
 	// +listType=map
 	// +listMapKey=database
 	Grants []DatabaseGrant `json:"grants,omitempty"`
+	// +kubebuilder:validation:MaxLength=64
+	// +kubebuilder:validation:Pattern=`^[A-Za-z0-9:_.\-]*$`
+	// +optional
+	KeyPrefix string `json:"keyPrefix,omitempty"`
 }
 
 type DatabaseUserStatus struct {

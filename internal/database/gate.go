@@ -87,7 +87,7 @@ func GateObjects(in GateInput) ([]*unstructured.Unstructured, error) {
 	deployment, err := deploymentOf(proxyDeployment{
 		Name: GateName(db.UID), Namespace: PlatformNamespace, Labels: labels, PodLabels: podLabels, Selector: gateSelector(db.UID),
 		PodAnnotations: map[string]string{annotationConfigHash: configHash(config, strconv.FormatInt(in.Revision, 10))},
-		Image:          in.Image, Port: in.Port,
+		Image:          in.Image, Port: in.Port, Suspended: db.Spec.Suspended,
 		Volume: projectedCerts(ServerSecretName(db.UID), CombinedPEMKey, CombinedPEMFile, GateName(db.UID)),
 	})
 	if err != nil {

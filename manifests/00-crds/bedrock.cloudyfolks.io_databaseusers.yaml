@@ -76,6 +76,10 @@ spec:
                 x-kubernetes-list-map-keys:
                 - database
                 x-kubernetes-list-type: map
+              keyPrefix:
+                maxLength: 64
+                pattern: ^[A-Za-z0-9:_.\-]*$
+                type: string
               username:
                 pattern: ^[a-z][a-z0-9_]{1,62}$
                 type: string
