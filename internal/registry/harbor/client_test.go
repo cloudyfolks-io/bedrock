@@ -156,6 +156,14 @@ func TestProjectPathsMarkTheNameAsAName(t *testing.T) {
 	}
 }
 
+func TestRepositoryTotalIsAtLeastThePageLength(t *testing.T) {
+	c, _ := fakeHarbor(t, map[string]route{"GET /api/v2.0/projects/acme/repositories?page=1&page_size=100": {body: `[{"name":"acme/a"},{"name":"acme/b"}]`}})
+	_, total, err := c.ListRepositories(context.Background(), "acme", 1, 100)
+	if err != nil || total != 2 {
+		t.Fatalf("total %d %v", total, err)
+	}
+}
+
 func TestDeleteProjectIgnoresAMissingProject(t *testing.T) {
 	c, _ := fakeHarbor(t, map[string]route{"DELETE /api/v2.0/projects/acme": {status: 404}})
 	if err := c.DeleteProject(context.Background(), "acme"); err != nil {
