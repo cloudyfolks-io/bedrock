@@ -19,20 +19,26 @@ spec:
   matchConditions:
     - name: bedrock-identity
       expression: "request.userInfo.username.startsWith('bedrock:')"
-    - name: name-chosen
-      expression: "has(object.spec.bucketName)"
   variables:
     - name: names
       expression: "params.data.?reservedNames.orValue('').split(',')"
     - name: prefixes
       expression: "params.data.?reservedPrefixes.orValue('').split(',')"
+    - name: approval
+      expression: "object.metadata.?annotations['bedrock.cloudyfolks.io/reserved-name-approved'].orValue('')"
+    - name: approvalBefore
+      expression: "request.operation == 'CREATE' ? '' : oldObject.metadata.?annotations['bedrock.cloudyfolks.io/reserved-name-approved'].orValue('')"
   validations:
     - expression: >-
+        !has(object.spec.bucketName) ||
         'bedrock:bedrock-admins' in request.userInfo.groups ||
         (request.operation == 'UPDATE' && has(oldObject.spec.bucketName) && oldObject.spec.bucketName == object.spec.bucketName) ||
         !(variables.names.exists(n, n != '' && n == object.spec.bucketName) ||
           variables.prefixes.exists(p, p != '' && object.spec.bucketName.startsWith(p)))
       message: "only an administrator may use a reserved bucket name"
+      reason: Forbidden
+    - expression: "variables.approval == variables.approvalBefore || 'bedrock:bedrock-admins' in request.userInfo.groups"
+      message: "only an administrator may change the reserved name approval"
       reason: Forbidden
 ---
 apiVersion: admissionregistration.k8s.io/v1
