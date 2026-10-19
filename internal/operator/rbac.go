@@ -102,7 +102,7 @@ func fixedRules() []rbacv1.PolicyRule {
 		{APIGroups: []string{""}, Resources: []string{"pods/eviction"}, Verbs: []string{"create"}},
 		{APIGroups: []string{""}, Resources: []string{"pods/exec"}, Verbs: []string{"create", "get"}},
 		{APIGroups: []string{""}, Resources: []string{"events"}, Verbs: []string{"create", "patch"}},
-		{APIGroups: []string{"coordination.k8s.io"}, Resources: []string{"leases"}, Verbs: standardVerbs()},
+		{APIGroups: []string{"coordination.k8s.io"}, Resources: []string{"leases"}, Verbs: read},
 		{APIGroups: []string{"apps"}, Resources: []string{"controllerrevisions"}, Verbs: read},
 		{APIGroups: []string{"apps"}, Resources: []string{"deployments"}, Verbs: []string{"get", "patch"}},
 		{APIGroups: []string{vmGVK.Group}, Resources: []string{"virtualmachineinstances"}, Verbs: []string{"get", "list"}},
