@@ -143,6 +143,10 @@ rules:
   - databaseclasses
   - databases
   - databases/status
+  - databaseschemas
+  - databaseschemas/status
+  - databaseusers
+  - databaseusers/status
   - databaseversions
   - devicerequests
   - devicerequests/status

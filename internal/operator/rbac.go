@@ -124,6 +124,8 @@ func bedrockResources() []string {
 		"credentials", "credentials/status",
 		"databaseclasses",
 		"databases", "databases/status",
+		"databaseschemas", "databaseschemas/status",
+		"databaseusers", "databaseusers/status",
 		"databaseversions",
 		"devicerequests", "devicerequests/status",
 		"dnszones", "dnszones/status",
