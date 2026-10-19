@@ -103,6 +103,18 @@ msgstr "الحاويات"
 msgid "col.cidr"
 msgstr "CIDR"
 
+msgid "col.class"
+msgstr "الفئة"
+
+msgid "col.cpu"
+msgstr "المعالج"
+
+msgid "col.database"
+msgstr "قاعدة البيانات"
+
+msgid "col.databaseName"
+msgstr "اسم قاعدة البيانات"
+
 msgid "col.default"
 msgstr "الافتراضي"
 
@@ -133,11 +145,23 @@ msgstr "مفعّل"
 msgid "col.endpoint"
 msgstr "نقطة الوصول"
 
+msgid "col.engine"
+msgstr "المحرك"
+
+msgid "col.eolDate"
+msgstr "نهاية الدعم"
+
 msgid "col.external"
 msgstr "خارجي"
 
 msgid "col.gateway"
 msgstr "البوابة"
+
+msgid "col.grants"
+msgstr "الصلاحيات"
+
+msgid "col.highAvailability"
+msgstr "التوافر العالي"
 
 msgid "col.image"
 msgstr "الصورة"
@@ -163,8 +187,17 @@ msgstr "المستمعون"
 msgid "col.maintenance"
 msgstr "الصيانة"
 
+msgid "col.maxStorage"
+msgstr "أقصى مساحة تخزين"
+
 msgid "col.members"
 msgstr "الأعضاء"
+
+msgid "col.memory"
+msgstr "الذاكرة"
+
+msgid "col.minStorage"
+msgstr "أدنى مساحة تخزين"
 
 msgid "col.name"
 msgstr "الاسم"
@@ -189,6 +222,9 @@ msgstr "الصلاحية"
 
 msgid "col.phase"
 msgstr "المرحلة"
+
+msgid "col.policy"
+msgstr "عند الحذف"
 
 msgid "col.projects"
 msgstr "حصة المشاريع"
@@ -249,6 +285,9 @@ msgstr "النوع"
 
 msgid "col.usage"
 msgstr "المستخدم"
+
+msgid "col.username"
+msgstr "اسم المستخدم"
 
 msgid "col.value"
 msgstr "القيمة"
@@ -724,6 +763,21 @@ msgstr "صور الفهرس"
 msgid "nav.item.containers"
 msgstr "الحاويات"
 
+msgid "nav.item.databaseClasses"
+msgstr "فئات قاعدة البيانات"
+
+msgid "nav.item.databaseSchemas"
+msgstr "مخططات قاعدة البيانات"
+
+msgid "nav.item.databaseUsers"
+msgstr "مستخدمو قاعدة البيانات"
+
+msgid "nav.item.databaseVersions"
+msgstr "إصدارات قاعدة البيانات"
+
+msgid "nav.item.databases"
+msgstr "قواعد البيانات"
+
 msgid "nav.item.dnsZones"
 msgstr "نطاقات DNS"
 
@@ -777,6 +831,9 @@ msgstr "الفهرس"
 
 msgid "nav.section.compute"
 msgstr "الحوسبة"
+
+msgid "nav.section.databases"
+msgstr "قواعد البيانات"
 
 msgid "nav.section.infrastructure"
 msgstr "البنية التحتية"

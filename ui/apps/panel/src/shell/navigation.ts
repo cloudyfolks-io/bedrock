@@ -39,7 +39,11 @@ function adminNavigation(): NavSection[] {
     {
       id: "catalog",
       label: msg({ id: "nav.section.catalog", message: "Catalog" }),
-      items: [item("cluster-images", msg({ id: "nav.item.clusterImages", message: "Catalog images" }), "/admin")],
+      items: [
+        item("cluster-images", msg({ id: "nav.item.clusterImages", message: "Catalog images" }), "/admin"),
+        item("database-versions", msg({ id: "nav.item.databaseVersions", message: "Database versions" }), "/admin"),
+        item("database-classes", msg({ id: "nav.item.databaseClasses", message: "Database classes" }), "/admin"),
+      ],
     },
   ];
 }
@@ -72,6 +76,15 @@ function projectNavigation(project: string): NavSection[] {
         item("load-balancers", msg({ id: "nav.item.loadBalancers", message: "Load balancers" }), base),
         item("dns-zones", msg({ id: "nav.item.dnsZones", message: "DNS zones" }), base),
         item("security-groups", msg({ id: "nav.item.securityGroups", message: "Security groups" }), base),
+      ],
+    },
+    {
+      id: "databases",
+      label: msg({ id: "nav.section.databases", message: "Databases" }),
+      items: [
+        item("databases", msg({ id: "nav.item.databases", message: "Databases" }), base),
+        item("database-users", msg({ id: "nav.item.databaseUsers", message: "Database users" }), base),
+        item("database-schemas", msg({ id: "nav.item.databaseSchemas", message: "Database schemas" }), base),
       ],
     },
     {
