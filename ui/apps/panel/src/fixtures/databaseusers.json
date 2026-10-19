@@ -1,0 +1,80 @@
+{
+  "apiVersion": "bedrock.cloudyfolks.io/v1alpha1",
+  "kind": "DatabaseUserList",
+  "metadata": {
+    "resourceVersion": "100"
+  },
+  "items": [
+    {
+      "apiVersion": "bedrock.cloudyfolks.io/v1alpha1",
+      "kind": "DatabaseUser",
+      "metadata": {
+        "name": "alice",
+        "uid": "uid-dbuser-alice",
+        "resourceVersion": "100",
+        "creationTimestamp": "2026-10-03T10:00:00Z",
+        "namespace": "acme-web"
+      },
+      "spec": {
+        "databaseRef": "orders",
+        "grants": [
+          {
+            "database": "app",
+            "level": "readwrite"
+          },
+          {
+            "database": "shop",
+            "level": "readonly"
+          }
+        ]
+      },
+      "status": {
+        "username": "alice",
+        "credentialsSecret": "alice-db",
+        "appliedGrants": "0123456789abcdef",
+        "conditions": [
+          {
+            "type": "Ready",
+            "status": "True",
+            "reason": "Ready",
+            "message": "the engine matches the object",
+            "lastTransitionTime": "2026-10-03T10:01:00Z"
+          }
+        ]
+      }
+    },
+    {
+      "apiVersion": "bedrock.cloudyfolks.io/v1alpha1",
+      "kind": "DatabaseUser",
+      "metadata": {
+        "name": "reporter",
+        "uid": "uid-dbuser-reporter",
+        "resourceVersion": "101",
+        "creationTimestamp": "2026-10-04T10:00:00Z",
+        "namespace": "acme-web"
+      },
+      "spec": {
+        "databaseRef": "orders",
+        "username": "report_reader",
+        "grants": [
+          {
+            "database": "shop",
+            "level": "readonly"
+          }
+        ]
+      },
+      "status": {
+        "username": "report_reader",
+        "conditions": [
+          {
+            "type": "Ready",
+            "status": "False",
+            "reason": "GrantDatabaseNotFound",
+            "message": "the database shop is neither app nor a ready DatabaseSchema of orders",
+            "lastTransitionTime": "2026-10-04T10:00:00Z"
+          }
+        ]
+      }
+    }
+  ]
+}

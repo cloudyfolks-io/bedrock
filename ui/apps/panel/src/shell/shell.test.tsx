@@ -49,7 +49,7 @@ describe("shell", () => {
     for (const heading of ["Infrastructure", "Platform", "Tenancy", "Catalog"]) {
       expect(within(nav).getByRole("heading", { name: heading })).toBeTruthy();
     }
-    expect(hrefs(nav)).toEqual(["/admin/hosts", "/admin/upgrades", "/admin/settings", "/admin/addons", "/admin/tenants", "/admin/cluster-images"]);
+    expect(hrefs(nav)).toEqual(["/admin/hosts", "/admin/upgrades", "/admin/settings", "/admin/addons", "/admin/tenants", "/admin/cluster-images", "/admin/database-versions", "/admin/database-classes"]);
   });
 
   it("TestNonAdminNeverSeesAdmin", async () => {
@@ -77,11 +77,14 @@ describe("shell", () => {
         "load-balancers",
         "dns-zones",
         "security-groups",
+        "databases",
+        "database-users",
+        "database-schemas",
         "buckets",
         "object-users",
       ].map((path) => `/p/web/${path}`),
     );
-    for (const heading of ["Compute", "Storage", "Networking", "Object storage"]) {
+    for (const heading of ["Compute", "Storage", "Networking", "Databases", "Object storage"]) {
       expect(within(nav).getByRole("heading", { name: heading })).toBeTruthy();
     }
   });

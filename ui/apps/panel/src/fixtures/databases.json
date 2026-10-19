@@ -1,0 +1,101 @@
+{
+  "apiVersion": "bedrock.cloudyfolks.io/v1alpha1",
+  "kind": "DatabaseList",
+  "metadata": {
+    "resourceVersion": "100"
+  },
+  "items": [
+    {
+      "apiVersion": "bedrock.cloudyfolks.io/v1alpha1",
+      "kind": "Database",
+      "metadata": {
+        "name": "orders",
+        "uid": "uid-database-orders",
+        "resourceVersion": "100",
+        "creationTimestamp": "2026-10-01T10:00:00Z",
+        "namespace": "acme-web"
+      },
+      "spec": {
+        "engine": "postgresql",
+        "version": "17",
+        "class": "small",
+        "storageGi": 20,
+        "subnetRef": "default",
+        "allowedCIDRs": [
+          "10.100.0.0/24"
+        ],
+        "backup": {
+          "enabled": true
+        }
+      },
+      "status": {
+        "phase": "Ready",
+        "instances": 1,
+        "credentialsSecret": "orders-admin",
+        "addresses": [
+          {
+            "subnet": "default",
+            "ip": "10.100.0.20",
+            "port": 5432
+          }
+        ],
+        "backup": {
+          "lastAt": "2026-10-19T02:05:00Z",
+          "pitrFrom": "2026-10-12T02:05:00Z",
+          "pitrTo": "2026-10-19T12:00:00Z",
+          "sizeBytes": 734003200,
+          "items": [
+            {
+              "id": "orders-20261019020000",
+              "phase": "completed",
+              "startedAt": "2026-10-19T02:00:00Z",
+              "completedAt": "2026-10-19T02:05:00Z"
+            }
+          ]
+        },
+        "conditions": [
+          {
+            "type": "Ready",
+            "status": "True",
+            "reason": "Ready",
+            "message": "the database accepts connections",
+            "lastTransitionTime": "2026-10-01T10:20:00Z"
+          }
+        ]
+      }
+    },
+    {
+      "apiVersion": "bedrock.cloudyfolks.io/v1alpha1",
+      "kind": "Database",
+      "metadata": {
+        "name": "reports",
+        "uid": "uid-database-reports",
+        "resourceVersion": "101",
+        "creationTimestamp": "2026-10-02T10:00:00Z",
+        "namespace": "acme-web"
+      },
+      "spec": {
+        "engine": "postgresql",
+        "version": "16",
+        "class": "small-ha",
+        "storageGi": 50,
+        "subnetRef": "default",
+        "backup": {
+          "enabled": true
+        }
+      },
+      "status": {
+        "phase": "Provisioning",
+        "conditions": [
+          {
+            "type": "Ready",
+            "status": "False",
+            "reason": "EngineNotReady",
+            "message": "Setting up primary",
+            "lastTransitionTime": "2026-10-02T10:00:00Z"
+          }
+        ]
+      }
+    }
+  ]
+}

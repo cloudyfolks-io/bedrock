@@ -8,7 +8,7 @@ import type { UiSchema } from "@rjsf/utils";
 import { actionStates, type VmAction } from "./vmActionStates";
 import { validateBackup, validateBucket, validateDnsZone, validateSecurityGroup, validateSshKey, type SpecValidator } from "./validators";
 
-export type Section = "Infrastructure" | "Platform" | "Tenancy" | "Catalog" | "Compute" | "Storage" | "Networking" | "Object storage";
+export type Section = "Infrastructure" | "Platform" | "Tenancy" | "Catalog" | "Compute" | "Storage" | "Networking" | "Object storage" | "Databases";
 export type Perspective = "admin" | "project";
 
 export interface ActionDef {
@@ -125,6 +125,11 @@ const t = {
   securityGroups: msg({ id: "nav.item.securityGroups", message: "Security groups" }),
   buckets: msg({ id: "nav.item.buckets", message: "Buckets" }),
   objectUsers: msg({ id: "nav.item.objectUsers", message: "Object storage users" }),
+  databases: msg({ id: "nav.item.databases", message: "Databases" }),
+  databaseUsers: msg({ id: "nav.item.databaseUsers", message: "Database users" }),
+  databaseSchemas: msg({ id: "nav.item.databaseSchemas", message: "Database schemas" }),
+  databaseVersions: msg({ id: "nav.item.databaseVersions", message: "Database versions" }),
+  databaseClasses: msg({ id: "nav.item.databaseClasses", message: "Database classes" }),
 };
 
 function row(r: Omit<Row, "actions" | "createPath" | "validate" | "uiSchema" | "refFields"> & { actions?: ActionDef[]; createPath?: string; validate?: SpecValidator; uiSchema?: UiSchema; refFields?: Record<string, string> }): Row {
@@ -140,6 +145,8 @@ const rows: Row[] = [
   row({ kind: "Tenant", plural: "tenants", scope: "Cluster", perspective: "admin", section: "Tenancy", path: "tenants", title: t.tenants, create: true, edit: true, actions: [del("typed")] }),
   row({ kind: "Project", plural: "projects", scope: "Cluster", perspective: "admin", section: "Tenancy", path: "tenants", title: t.tenants, create: true, edit: true, actions: [del("typed")] }),
   row({ kind: "ClusterImage", plural: "clusterimages", scope: "Cluster", perspective: "admin", section: "Catalog", path: "cluster-images", title: t.clusterImages, create: true, edit: true, actions: [del("simple")] }),
+  row({ kind: "DatabaseVersion", plural: "databaseversions", scope: "Cluster", perspective: "admin", section: "Catalog", path: "database-versions", title: t.databaseVersions, create: true, edit: true, actions: [del("simple")] }),
+  row({ kind: "DatabaseClass", plural: "databaseclasses", scope: "Cluster", perspective: "admin", section: "Catalog", path: "database-classes", title: t.databaseClasses, create: true, edit: true, actions: [del("simple")] }),
   row({ kind: "Network", plural: "networks", scope: "Cluster", perspective: "project", section: "Networking", path: "networks", title: t.networks, create: true, edit: true, actions: [del("typed")] }),
   row({ kind: "VirtualMachine", plural: "virtualmachines", scope: "Namespaced", perspective: "project", section: "Compute", path: "vms", title: t.vms, create: true, edit: true, actions: vmActions, createPath: "vms/new" }),
   row({ kind: "Container", plural: "containers", scope: "Namespaced", perspective: "project", section: "Compute", path: "containers", title: t.containers, create: true, edit: true, actions: [containerRestart, del("simple")], refFields: { "network.subnetRef": "subnets", "network.securityGroups.*": "securitygroups", "volumes.*.volumeRef": "volumes" } }),
@@ -155,6 +162,9 @@ const rows: Row[] = [
   row({ kind: "DNSZone", plural: "dnszones", scope: "Namespaced", perspective: "project", section: "Networking", path: "dns-zones", title: t.dnsZones, create: true, edit: true, actions: [del("simple")], validate: validateDnsZone }),
   row({ kind: "SecurityGroup", plural: "securitygroups", scope: "Namespaced", perspective: "project", section: "Networking", path: "security-groups", title: t.securityGroups, create: true, edit: true, actions: [del("simple")], validate: validateSecurityGroup }),
   row({ kind: "ObjectStorageBucket", plural: "objectstoragebuckets", scope: "Namespaced", perspective: "project", section: "Object storage", path: "buckets", title: t.buckets, create: true, edit: true, actions: [del("typed")], validate: validateBucket, uiSchema: { policy: { "ui:widget": "textarea" } } }),
+  row({ kind: "Database", plural: "databases", scope: "Namespaced", perspective: "project", section: "Databases", path: "databases", title: t.databases, create: true, edit: true, actions: [del("typed")], refFields: { subnetRef: "subnets" } }),
+  row({ kind: "DatabaseUser", plural: "databaseusers", scope: "Namespaced", perspective: "project", section: "Databases", path: "database-users", title: t.databaseUsers, create: true, edit: true, actions: [del("typed")], refFields: { databaseRef: "databases" } }),
+  row({ kind: "DatabaseSchema", plural: "databaseschemas", scope: "Namespaced", perspective: "project", section: "Databases", path: "database-schemas", title: t.databaseSchemas, create: true, edit: true, actions: [del("typed")], refFields: { databaseRef: "databases" } }),
   row({ kind: "ObjectStorageUser", plural: "objectstorageusers", scope: "Namespaced", perspective: "project", section: "Object storage", path: "object-users", title: t.objectUsers, create: true, edit: true, actions: [del("typed")] }),
 ];
 
