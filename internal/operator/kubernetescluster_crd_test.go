@@ -211,6 +211,24 @@ func TestKubernetesClusterImmutableFields(t *testing.T) {
 	}
 }
 
+func TestKubernetesClusterWithoutWorkersCanGainAndLoseThem(t *testing.T) {
+	c, _ := StartTestEnv(t)
+	ctx := context.Background()
+	cluster := validKubernetesCluster("no-workers")
+	cluster.Spec.Workers = nil
+	createValid(t, c, cluster)
+	fresh := getKubernetesCluster(t, c, "no-workers")
+	fresh.Spec.Workers = []v1alpha1.KubernetesWorker{validWorker("a")}
+	if err := c.Update(ctx, fresh); err != nil {
+		t.Fatalf("a cluster without workers must accept a worker: %v", err)
+	}
+	fresh = getKubernetesCluster(t, c, "no-workers")
+	fresh.Spec.Workers = nil
+	if err := c.Update(ctx, fresh); err != nil {
+		t.Fatalf("a cluster must accept the removal of every worker: %v", err)
+	}
+}
+
 func TestKubernetesClusterWorkersAreAMap(t *testing.T) {
 	c, _ := StartTestEnv(t)
 	ctx := context.Background()

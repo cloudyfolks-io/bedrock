@@ -100,7 +100,7 @@ type KubernetesWorker struct {
 	SSHKeys []string `json:"sshKeys,omitempty"`
 }
 
-// +kubebuilder:validation:XValidation:rule="!has(self.workers) || self.workers.all(n, !oldSelf.workers.exists(o, o.name == n.name && (has(o.address) != has(n.address) || (has(n.address) && o.address != n.address))))",message="a worker address is immutable"
+// +kubebuilder:validation:XValidation:rule="!has(self.workers) || !has(oldSelf.workers) || self.workers.all(n, !oldSelf.workers.exists(o, o.name == n.name && (has(o.address) != has(n.address) || (has(n.address) && o.address != n.address))))",message="a worker address is immutable"
 type KubernetesClusterSpec struct {
 	// +kubebuilder:validation:MaxLength=50
 	// +kubebuilder:validation:Pattern=`^v[0-9]+\.[0-9]+\.[0-9]+\+k0s\.[0-9]+$`

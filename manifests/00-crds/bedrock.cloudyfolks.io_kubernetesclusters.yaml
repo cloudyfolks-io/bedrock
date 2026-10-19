@@ -194,9 +194,9 @@ spec:
             type: object
             x-kubernetes-validations:
             - message: a worker address is immutable
-              rule: '!has(self.workers) || self.workers.all(n, !oldSelf.workers.exists(o,
-                o.name == n.name && (has(o.address) != has(n.address) || (has(n.address)
-                && o.address != n.address))))'
+              rule: '!has(self.workers) || !has(oldSelf.workers) || self.workers.all(n,
+                !oldSelf.workers.exists(o, o.name == n.name && (has(o.address) !=
+                has(n.address) || (has(n.address) && o.address != n.address))))'
           status:
             properties:
               conditions:
