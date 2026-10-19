@@ -24,22 +24,29 @@ assert_migrated() {
   test "$(drain_migrations "$namespace" "$vm")" -ge 1
 }
 
-drain_nodes() {
-  local node status=0
-  for node in "$@"; do
-    kubectl drain "$node" --ignore-daemonsets --delete-emptydir-data --timeout=1800s || {
-      status=1
-      break
-    }
-  done
-  for node in "$@"; do
+drain_cycle() {
+  local node=$1
+  kubectl drain "$node" --ignore-daemonsets --delete-emptydir-data --timeout=1800s || {
     kubectl uncordon "$node"
-  done
-  return "$status"
+    return 1
+  }
+  kubectl uncordon "$node"
+  retry_until 3600 health_ok || {
+    ceph_op status >&2
+    return 1
+  }
+  wait_vm_running 600 "$NS" lab-drain-ifp
+  wait_vm_running 600 "$NS" lab-drain-lm
+}
+
+assert_drained() {
+  local node=$1 namespace=$2 vm=$3 start=$4 boot=$5
+  [ "$node" = "$start" ] || return 0
+  assert_migrated "$namespace" "$vm" "$start" "$boot"
 }
 
 check_drain() {
-  local preferred if_possible_node always_node if_possible_boot always_boot nodes
+  local preferred if_possible_node always_node if_possible_boot always_boot nodes node
   preferred=$(lab_node 3)
   drain_vm_manifest lab-drain-ifp LiveMigrateIfPossible "$preferred" | kubectl apply -f -
   drain_vm_manifest lab-drain-lm LiveMigrate "$preferred" | kubectl apply -f -
@@ -51,9 +58,11 @@ check_drain() {
   if_possible_boot=$(guest_boot "$NS" lab-drain-ifp)
   always_boot=$(guest_boot "$NS" lab-drain-lm)
   mapfile -t nodes < <(printf '%s\n' "$if_possible_node" "$always_node" | sort -u)
-  drain_nodes "${nodes[@]}" || return 1
-  assert_migrated "$NS" lab-drain-ifp "$if_possible_node" "$if_possible_boot"
-  assert_migrated "$NS" lab-drain-lm "$always_node" "$always_boot"
+  for node in "${nodes[@]}"; do
+    drain_cycle "$node" || return 1
+    assert_drained "$node" "$NS" lab-drain-ifp "$if_possible_node" "$if_possible_boot"
+    assert_drained "$node" "$NS" lab-drain-lm "$always_node" "$always_boot"
+  done
   echo "info: drain: the LiveMigrateIfPossible VM moved from $if_possible_node to $(vm_node "$NS" lab-drain-ifp) and the LiveMigrate VM from $always_node to $(vm_node "$NS" lab-drain-lm) with no guest restart"
   delete_vms "$NS" lab-drain-ifp lab-drain-lm
   retry_until 3600 health_ok || {
