@@ -378,7 +378,7 @@ func (r *BucketReconciler) release(ctx context.Context, bucket *v1alpha1.ObjectS
 	switch {
 	case s3.IsCode(err, s3.NoSuchBucket):
 		return bucketState{}, nil
-	case s3.IsUnavailable(err):
+	case s3.IsUnavailable(err) || s3.IsCode(err, s3.AccessDenied):
 		return bucketState{outcome: bucketFailure(err)}, nil
 	case err != nil || owner != account.ID:
 		state := blocked(reasonNotOwned, fmt.Sprintf("the bucket %q is not owned by the account of this project, so Bedrock left it alone", name), 0)
