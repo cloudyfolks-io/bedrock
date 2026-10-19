@@ -73,14 +73,17 @@ func ReleaseNamespace(ctx context.Context, c client.Client, namespace string) er
 	return client.IgnoreNotFound(c.Delete(ctx, account))
 }
 
-func (r *NamespaceReconciler) SetupWithManager(mgr ctrl.Manager) error {
-	leaving := predicate.Funcs{
-		CreateFunc:  func(event.CreateEvent) bool { return false },
+func namespaceEvents() predicate.Funcs {
+	return predicate.Funcs{
+		CreateFunc:  func(event.CreateEvent) bool { return true },
 		UpdateFunc:  func(e event.UpdateEvent) bool { return !e.ObjectNew.GetDeletionTimestamp().IsZero() },
 		DeleteFunc:  func(event.DeleteEvent) bool { return true },
 		GenericFunc: func(event.GenericEvent) bool { return false },
 	}
+}
+
+func (r *NamespaceReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	return ctrl.NewControllerManagedBy(mgr).Named("objectstorage-namespace").
-		For(&corev1.Namespace{}, builder.OnlyMetadata, builder.WithPredicates(leaving)).
+		For(&corev1.Namespace{}, builder.OnlyMetadata, builder.WithPredicates(namespaceEvents())).
 		Complete(r)
 }
