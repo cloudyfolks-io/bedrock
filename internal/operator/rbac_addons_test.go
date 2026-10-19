@@ -133,5 +133,8 @@ func verbsOfAddonObject(kind string) []string {
 	if kind == "Namespace" {
 		return []string{"create", "patch", "get"}
 	}
+	if kind == "Secret" {
+		return []string{"create", "patch", "delete", "get"}
+	}
 	return []string{"create", "patch", "delete", "get", "list", "watch"}
 }

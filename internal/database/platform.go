@@ -6,6 +6,7 @@ import (
 
 	corev1 "k8s.io/api/core/v1"
 	networkingv1 "k8s.io/api/networking/v1"
+	rbacv1 "k8s.io/api/rbac/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -55,11 +56,36 @@ func EnginesPolicyObject() *networkingv1.NetworkPolicy {
 	}
 }
 
+const OperatorRoleName = "bedrock-database-operator"
+
+func OperatorRoleObject() *rbacv1.Role {
+	return &rbacv1.Role{
+		TypeMeta:   metav1.TypeMeta{APIVersion: "rbac.authorization.k8s.io/v1", Kind: "Role"},
+		ObjectMeta: metav1.ObjectMeta{Name: OperatorRoleName, Namespace: PlatformNamespace, Labels: platformLabels("Role", OperatorRoleName)},
+		Rules:      []rbacv1.PolicyRule{{APIGroups: []string{""}, Resources: []string{"secrets"}, Verbs: []string{"list"}}},
+	}
+}
+
+func OperatorRoleBindingObject() *rbacv1.RoleBinding {
+	return &rbacv1.RoleBinding{
+		TypeMeta:   metav1.TypeMeta{APIVersion: "rbac.authorization.k8s.io/v1", Kind: "RoleBinding"},
+		ObjectMeta: metav1.ObjectMeta{Name: OperatorRoleName, Namespace: PlatformNamespace, Labels: platformLabels("RoleBinding", OperatorRoleName)},
+		RoleRef:    rbacv1.RoleRef{APIGroup: "rbac.authorization.k8s.io", Kind: "Role", Name: OperatorRoleName},
+		Subjects:   []rbacv1.Subject{{Kind: "ServiceAccount", Name: "bedrock-operator", Namespace: "bedrock-system"}},
+	}
+}
+
 func EnsurePlatform(ctx context.Context, c client.Client, cfg Config) error {
 	if err := ssa.Apply(ctx, c, NamespaceObject(), v1alpha1.DatabaseFieldManager); err != nil {
 		return err
 	}
 	if err := ssa.Apply(ctx, c, QuotaObject(cfg), v1alpha1.DatabaseFieldManager); err != nil {
+		return err
+	}
+	if err := ssa.Apply(ctx, c, OperatorRoleObject(), v1alpha1.DatabaseFieldManager); err != nil {
+		return err
+	}
+	if err := ssa.Apply(ctx, c, OperatorRoleBindingObject(), v1alpha1.DatabaseFieldManager); err != nil {
 		return err
 	}
 	return ssa.Apply(ctx, c, EnginesPolicyObject(), v1alpha1.DatabaseFieldManager)
