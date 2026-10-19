@@ -152,7 +152,7 @@ jobs:
       - run: CGO_ENABLED=0 go test -c -tags e2e -o dist/e2e-tenant-amd64.test ./test/e2e/tenant
       - run: make crane && CRANE=$(go env GOPATH)/bin/crane hack/e2e-tenant-images.sh
       - run: sudo -E env "PATH=$PATH" KUBECONFIG=/var/lib/k0s/pki/admin.conf BUNDLE=dist/bedrock-dev-bundle-amd64.tar.zst IMAGE=localhost:5000/bedrock:dev E2E_OSD_DEVICE=loop E2E_PROVIDER_NETWORK=public hack/e2e-init.sh
-      - run: sudo -E env "PATH=$PATH" BEDROCK_BIN=dist/bedrock-dev-linux-amd64 E2E_TEST=dist/e2e-tenant-amd64.test hack/e2e-tenant.sh
+      - run: sudo -E env "PATH=$PATH" BEDROCK_BIN=dist/bedrock-dev-linux-amd64 E2E_TEST=dist/e2e-tenant-amd64.test E2E_DATABASE_VIP_RANGE=203.0.113.128/26 hack/e2e-tenant.sh
   e2e-upgrade:
     name: ${{ matrix.name }}
     runs-on: ubuntu-latest

@@ -342,7 +342,7 @@ If a name changes in an area, change it in that file only.
 | `build.sh` | The project roles on `builds` and `builds/logs`. A Build with a missing push Secret and a Build with a push Secret of the wrong type, with no Job. A Build in a cluster with no Kata, with no Job. The immutable spec. The deletion of every Build, with no child object and no Secret left. |
 | `clusters.sh` | The proof of the control plane: a hand-made k0smotron `Cluster` with the fields of the `KubernetesCluster` kind. Then the kind itself: the addon off, a cluster, a refused address, suspend and the ordered delete. |
 | `objectstorage.sh` | The object store, two users and one bucket. A put and a get from inside the cluster. A denied read by the other user. |
-| `database.sh` | The database area, when `E2E_DATABASE_VIP_RANGE` is set: a PostgreSQL database with its proxy address, a probe from a VM in the subnet, a user and a logical database, a point-in-time restore into a second database, the role checks for `bedrock-dbaas`, and the cleanup that leaves only the tombstones. |
+| `database.sh` | The database area, which needs `E2E_DATABASE_VIP_RANGE`: a PostgreSQL database with its proxy address, a probe from a VM in the subnet, a user and a logical database, a point-in-time restore into a second database, the role checks for `bedrock-dbaas`, and the cleanup that leaves only the tombstones. |
 | `registry.sh` | The `registry` addon with a host and an alias. A Registry, its quota, retention and name rules. A `pushPull` and a `manage` credential, a token request and a push with the robot login. The two spikes: a new robot secret with `PATCH /robots/{id}` and a `manage` robot that lists and deletes a repository. A forced delete that removes the Harbor project. The addon goes off at the end. |
 | `backup.sh` | The SeaweedFS target. A VM backup with one entry. A restore with `replace: true`. A restore of a missing backup. |
 | `panel.sh` | The panel at `console.<host>`, the redirect from the apex, the API host and the Go test for the login and the watch stream. |
@@ -531,8 +531,9 @@ The tenant job does not check these items.
 ## Database steps
 
 The steps of `hack/e2e/tenant/database.sh` need the services plane and a kube-vip range.
-Set `E2E_DATABASE_VIP_RANGE` to an IPv4 network of that plane, for example `100.66.16.0/21`.
-Without the variable, every database step prints a line and passes.
+Set `E2E_DATABASE_VIP_RANGE` to an IPv4 network inside the services network `203.0.113.0/24`, for example `203.0.113.128/26`.
+The range must not overlap `203.0.113.240/29`. `local-ci.sh` and the CI workflow set it.
+Without the variable, `database_prepare` fails.
 
 | Step | Check |
 | --- | --- |

@@ -312,7 +312,7 @@ run_e2e_tenant() {
   vm_osd=1 vm_up
   in_vm "" "apt-get update -qq && apt-get install -y -qq jq"
   in_vm "KUBECONFIG=/var/lib/k0s/pki/admin.conf BUNDLE=dist/bedrock-dev-bundle-$arch.tar.zst IMAGE=localhost:$port/bedrock:dev BIN=dist/bedrock-dev-linux-$arch ARCH=$arch EMULATION=$(emulation_flag) E2E_OSD_DEVICE=blank E2E_PROVIDER_NETWORK=public" hack/e2e-init.sh
-  in_vm "BEDROCK_BIN=dist/bedrock-dev-linux-$arch E2E_TEST=dist/e2e-tenant-$arch.test" hack/e2e-tenant.sh
+  in_vm "BEDROCK_BIN=dist/bedrock-dev-linux-$arch E2E_TEST=dist/e2e-tenant-$arch.test E2E_DATABASE_VIP_RANGE=203.0.113.128/26" hack/e2e-tenant.sh
   rm -f "dist/bedrock-dev-bundle-$arch.tar.zst"
   vm_down
 }

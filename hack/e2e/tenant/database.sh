@@ -2,10 +2,6 @@ database_class=e2e-small
 database_namespace=bedrock-dbaas
 database_probe_vm=database-probe
 
-database_skipped() {
-  [ -n "$(state_read database-skip)" ]
-}
-
 database_setting() {
   kubectl patch setting "$1" --type merge -p "{\"spec\":{\"value\":\"$2\"}}"
   wait_jsonpath 60 "$2" get setting "$1" -o jsonpath='{.status.applied}'
@@ -60,11 +56,9 @@ CLASS
 
 database_prepare() {
   if [ -z "${E2E_DATABASE_VIP_RANGE:-}" ]; then
-    echo "E2E_DATABASE_VIP_RANGE is not set: skipping the database steps"
-    state_write database-skip 1
-    return 0
+    echo "E2E_DATABASE_VIP_RANGE is not set" >&2
+    return 1
   fi
-  state_clear database-skip
   database_setting database.enabled true
   database_setting database.vip-range "$E2E_DATABASE_VIP_RANGE"
   kubectl patch addon cnpg --type merge -p '{"spec":{"enabled":true}}'
@@ -80,9 +74,6 @@ database_secret_field() {
 }
 
 database_create() {
-  if database_skipped; then
-    return 0
-  fi
   database_manifest orders | kubectl -n "$NS" apply -f -
   wait_jsonpath 1800 Ready -n "$NS" get database orders -o jsonpath='{.status.phase}'
   wait_condition 60 database orders Ready True -n "$NS"
@@ -148,9 +139,6 @@ database_probe_reply() {
 }
 
 database_sslrequest() {
-  if database_skipped; then
-    return 0
-  fi
   local ip
   ip=$(kubectl -n "$NS" get database orders -o jsonpath='{.status.addresses[0].ip}')
   database_probe_vm "$ip" | kubectl -n "$NS" apply -f -
@@ -166,9 +154,6 @@ database_sslrequest() {
 }
 
 database_access() {
-  if database_skipped; then
-    return 0
-  fi
   kubectl -n "$NS" apply -f - <<ACCESS
 apiVersion: bedrock.cloudyfolks.io/v1alpha1
 kind: DatabaseSchema
@@ -229,9 +214,6 @@ RESTORE
 }
 
 database_backup_restore() {
-  if database_skipped; then
-    return 0
-  fi
   local uid target
   uid=$(database_uid orders)
   database_sql orders -c "create table if not exists proof (v text); insert into proof values ('before')" >/dev/null
@@ -261,9 +243,6 @@ database_wait_backup_size() {
 }
 
 database_isolation() {
-  if database_skipped; then
-    return 0
-  fi
   local resource
   for resource in pods pods/exec pods/log secrets services configmaps deployments.apps clusters.postgresql.cnpg.io objectstores.barmancloud.cnpg.io; do
     expect_equal no "$(as_user alice auth can-i get "$resource" -n "$database_namespace" || true)" "alice reading $resource of $database_namespace"
@@ -299,9 +278,6 @@ database_engine_gone() {
 }
 
 database_cleanup() {
-  if database_skipped; then
-    return 0
-  fi
   local first second
   first=$(database_uid orders)
   second=$(database_uid orders-restored)
@@ -388,18 +364,12 @@ database_valkey_cli() {
 }
 
 database_extras_prepare() {
-  if database_skipped; then
-    return 0
-  fi
   database_medium_class_manifest | kubectl apply -f -
   kubectl patch addon percona-ps --type merge -p '{"spec":{"enabled":true}}'
   wait_condition 300 addon percona-ps Ready True
 }
 
 database_mysql_create() {
-  if database_skipped; then
-    return 0
-  fi
   local uid
   database_apply sqldb mysql 8.4 true 5
   database_wait_ready sqldb
@@ -411,9 +381,6 @@ database_mysql_create() {
 }
 
 database_valkey_create() {
-  if database_skipped; then
-    return 0
-  fi
   database_apply cachedb valkey 9.1 false 2
   database_wait_ready cachedb
   wait_not_empty 60 -n "$NS" get secret cachedb-admin -o jsonpath='{.data.password}'
@@ -465,9 +432,6 @@ database_proof_value() {
 }
 
 database_vm_greetings() {
-  if database_skipped; then
-    return 0
-  fi
   database_proof_vm "$(database_address sqldb)" "$(database_address cachedb)" | kubectl -n "$NS" apply -f -
   wait_jsonpath 600 Running -n "$NS" get virtualmachine dbproof-vm -o jsonpath='{.status.phase}'
   retry_until 300 database_proof_reported
@@ -477,9 +441,6 @@ database_vm_greetings() {
 }
 
 database_mysql_access() {
-  if database_skipped; then
-    return 0
-  fi
   local uid
   uid=$(database_uid sqldb)
   kubectl -n "$NS" apply -f - <<ACCESS
@@ -510,9 +471,6 @@ database_mysql_has_user_and_schema() {
 }
 
 database_valkey_access() {
-  if database_skipped; then
-    return 0
-  fi
   local uid password
   uid=$(database_uid cachedb)
   kubectl -n "$NS" apply -f - <<ACCESS
@@ -539,9 +497,6 @@ database_valkey_user_set() {
 }
 
 database_mysql_backup_and_restore() {
-  if database_skipped; then
-    return 0
-  fi
   local uid restored restored_uid
   uid=$(database_uid sqldb)
   database_mysql_query "$uid" <<<"CREATE TABLE app.proof (v int); INSERT INTO app.proof VALUES (42);"
@@ -565,9 +520,6 @@ BACKUP
 }
 
 database_mysql_restore_from_deleted() {
-  if database_skipped; then
-    return 0
-  fi
   local uid restored_uid
   uid=$(state_read database-source-uid)
   kubectl -n "$NS" delete database sqldb sqlrestore
@@ -580,9 +532,6 @@ database_mysql_restore_from_deleted() {
 }
 
 database_mysql_resize() {
-  if database_skipped; then
-    return 0
-  fi
   local uid before
   database_apply sqlresize mysql 8.4 false 5
   database_wait_ready sqlresize
@@ -600,9 +549,6 @@ database_volume_is() {
 }
 
 database_postgres_upgrade() {
-  if database_skipped; then
-    return 0
-  fi
   local uid stamp
   database_apply pgupgrade postgresql 16 true 5
   database_wait_ready pgupgrade
@@ -619,9 +565,6 @@ database_postgres_upgrade() {
 }
 
 database_valkey_suspend_resume_logs() {
-  if database_skipped; then
-    return 0
-  fi
   local uid address password logs
   uid=$(database_uid cachedb)
   address=$(database_address cachedb)
@@ -638,9 +581,6 @@ database_valkey_suspend_resume_logs() {
 }
 
 database_extras_cleanup() {
-  if database_skipped; then
-    return 0
-  fi
   kubectl -n "$NS" delete databaseuser sqluser cacheuser --ignore-not-found
   kubectl -n "$NS" delete databaseschema reports --ignore-not-found
   kubectl -n "$NS" delete database sqlimport sqlresize cachedb pgupgrade --ignore-not-found
