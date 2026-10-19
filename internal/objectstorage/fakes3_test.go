@@ -21,6 +21,7 @@ type fakeS3 struct {
 	foreign      map[string]bool
 	hideFromHead map[string]bool
 	publicHead   map[string]bool
+	aclOwner     map[string]string
 	objects      map[string][]fakeObject
 	versioning   map[string]string
 	policies     map[string]string
@@ -40,6 +41,7 @@ func newFakeS3(t *testing.T) (*fakeS3, string) {
 		foreign:      map[string]bool{},
 		hideFromHead: map[string]bool{},
 		publicHead:   map[string]bool{},
+		aclOwner:     map[string]string{},
 		objects:      map[string][]fakeObject{},
 		versioning:   map[string]string{},
 		policies:     map[string]string{},
@@ -90,7 +92,7 @@ func (f *fakeS3) serve(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	kind := ""
-	for _, candidate := range []string{"versioning", "policy", "cors", "versions", "delete"} {
+	for _, candidate := range []string{"versioning", "policy", "cors", "versions", "delete", "acl"} {
 		if _, found := query[candidate]; found {
 			kind = candidate
 		}
@@ -104,6 +106,8 @@ func (f *fakeS3) serve(w http.ResponseWriter, r *http.Request) {
 	switch kind {
 	case "":
 		f.bucketCall(w, r.Method, bucket)
+	case "acl":
+		f.aclCall(w, bucket)
 	case "versioning":
 		f.versioningCall(w, r.Method, bucket, string(body))
 	case "policy":
@@ -275,4 +279,19 @@ func (f *fakeS3) countCalls(call string) int {
 		}
 	}
 	return count
+}
+
+func (f *fakeS3) aclCall(w http.ResponseWriter, bucket string) {
+	if !f.buckets[bucket] && !f.foreign[bucket] {
+		answerError(w, http.StatusNotFound, "NoSuchBucket")
+		return
+	}
+	owner := "RGW00000000000000001"
+	if f.foreign[bucket] {
+		owner = "RGW99999999999999999"
+	}
+	if set, found := f.aclOwner[bucket]; found {
+		owner = set
+	}
+	io.WriteString(w, "<AccessControlPolicy><Owner><ID>"+owner+"</ID></Owner></AccessControlPolicy>")
 }

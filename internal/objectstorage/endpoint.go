@@ -95,18 +95,20 @@ func certificateNames(rules Rules, issuer string) []any {
 	return names
 }
 
+const adminGuard = "!(Path(`/admin`) || PathPrefix(`/admin/`))"
+
 func routeMatch(rules Rules) string {
 	hosts := publicHosts(rules)
 	matches := make([]string, 0, 2*len(hosts))
 	for _, host := range hosts {
-		matches = append(matches, "Host(`"+host+"`)")
+		matches = append(matches, "(Host(`"+host+"`) && "+adminGuard+")")
 	}
 	if len(rules.PublicAliases) > 0 {
 		for _, host := range hosts {
 			matches = append(matches, "HostRegexp(`^[a-z0-9-]+\\."+strings.ReplaceAll(host, ".", "\\.")+"$`)")
 		}
 	}
-	return "(" + strings.Join(matches, " || ") + ") && !PathPrefix(`/admin`)"
+	return strings.Join(matches, " || ")
 }
 
 func endpointObject(apiVersion, kind string, spec map[string]any) *unstructured.Unstructured {

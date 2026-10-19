@@ -723,8 +723,8 @@ func TestBucketDeletesAnOwnedBucketWhoseSettingsFailed(t *testing.T) {
 	createBucket(t, "acme-prod", "data", v1alpha1.ObjectStorageBucketSpec{Policy: "{}", ForceDestroy: true})
 	settle(t, r, "acme-prod", "data")
 	requireBucketReason(t, "acme-prod", "data", metav1.ConditionFalse, "PolicyInvalid")
-	if readBucket(t, "acme-prod", "data").Status.BucketName != "" {
-		t.Fatal("the name is reported before the settings are applied")
+	if readBucket(t, "acme-prod", "data").Status.BucketName != "acme-prod-data" {
+		t.Fatal("the proven bucket is not recorded in the status")
 	}
 	store.fill("acme-prod-data", 3)
 	deleteBucketObject(t, "acme-prod", "data")
@@ -732,4 +732,89 @@ func TestBucketDeletesAnOwnedBucketWhoseSettingsFailed(t *testing.T) {
 	if store.has("acme-prod-data") || !bucketGone(t, "acme-prod", "data") {
 		t.Fatal("an owned bucket was left behind")
 	}
+}
+
+func TestBucketIgnoresAForgedOwnershipAnnotation(t *testing.T) {
+	fresh(t)
+	store, url := newFakeS3(t)
+	store.foreign["acme-assets"] = true
+	store.publicHead["acme-assets"] = true
+	store.fill("acme-assets", 4)
+	r := bucketReconciler(url)
+	accountReady(t, "acme-prod")
+	createBucket(t, "acme-prod", "data", v1alpha1.ObjectStorageBucketSpec{BucketName: "acme-assets", ForceDestroy: true})
+	bucket := readBucket(t, "acme-prod", "data")
+	bucket.Annotations = map[string]string{"bedrock.cloudyfolks.io/owned-bucket": "acme-assets"}
+	if err := testClient.Update(context.Background(), bucket); err != nil {
+		t.Fatal(err)
+	}
+	settle(t, r, "acme-prod", "data")
+	deleteBucketObject(t, "acme-prod", "data")
+	store.take()
+	reconcileBucket(t, r, "acme-prod", "data")
+	for _, call := range store.take() {
+		if call != "" {
+			t.Fatalf("the store was called: %q", call)
+		}
+	}
+	if !bucketGone(t, "acme-prod", "data") || len(store.objects["acme-assets"]) != 4 {
+		t.Fatal("the delete touched a foreign bucket or blocked")
+	}
+}
+
+func TestForgedAnnotationDoesNotSkipTheBucketLimit(t *testing.T) {
+	fresh(t)
+	_, url := newFakeS3(t)
+	r := bucketReconcilerWith(url, Rules{MaxBuckets: 1})
+	accountReady(t, "acme-prod")
+	createBucket(t, "acme-prod", "one", v1alpha1.ObjectStorageBucketSpec{})
+	settle(t, r, "acme-prod", "one")
+	createBucket(t, "acme-prod", "two", v1alpha1.ObjectStorageBucketSpec{})
+	two := readBucket(t, "acme-prod", "two")
+	two.Annotations = map[string]string{"bedrock.cloudyfolks.io/owned-bucket": "acme-prod-two"}
+	if err := testClient.Update(context.Background(), two); err != nil {
+		t.Fatal(err)
+	}
+	settle(t, r, "acme-prod", "two")
+	requireBucketReason(t, "acme-prod", "two", metav1.ConditionFalse, "BucketLimit")
+}
+
+func TestBucketDeleteRechecksTheAclOwner(t *testing.T) {
+	fresh(t)
+	store, url := newFakeS3(t)
+	r := bucketReconciler(url)
+	accountReady(t, "acme-prod")
+	createBucket(t, "acme-prod", "data", v1alpha1.ObjectStorageBucketSpec{ForceDestroy: true})
+	settle(t, r, "acme-prod", "data")
+	store.fill("acme-prod-data", 3)
+	store.aclOwner["acme-prod-data"] = "RGW99999999999999999"
+	deleteBucketObject(t, "acme-prod", "data")
+	store.take()
+	reconcileBucket(t, r, "acme-prod", "data")
+	for _, call := range store.take() {
+		if call != "GET acl" {
+			t.Fatalf("a destructive call went out: %q", call)
+		}
+	}
+	if !bucketGone(t, "acme-prod", "data") || len(store.objects["acme-prod-data"]) != 3 {
+		t.Fatal("the tenant delete blocked or the bucket was touched")
+	}
+}
+
+func TestBucketDeleteWaitsWhileTheOwnerCheckIsUnavailable(t *testing.T) {
+	fresh(t)
+	store, url := newFakeS3(t)
+	r := bucketReconciler(url)
+	accountReady(t, "acme-prod")
+	createBucket(t, "acme-prod", "data", v1alpha1.ObjectStorageBucketSpec{})
+	settle(t, r, "acme-prod", "data")
+	deleteBucketObject(t, "acme-prod", "data")
+	store.mu.Lock()
+	store.failWith = http.StatusServiceUnavailable
+	store.mu.Unlock()
+	reconcileBucket(t, r, "acme-prod", "data")
+	if bucketGone(t, "acme-prod", "data") {
+		t.Fatal("the finalizer went while the store was down")
+	}
+	requireBucketReason(t, "acme-prod", "data", metav1.ConditionFalse, "StoreNotReady")
 }

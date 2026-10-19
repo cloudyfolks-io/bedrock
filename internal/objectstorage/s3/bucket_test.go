@@ -223,3 +223,23 @@ func TestDeleteObjectsOfNothingMakesNoCall(t *testing.T) {
 		t.Fatal("a request was made")
 	}
 }
+
+func TestGetBucketOwnerReadsTheAclOwner(t *testing.T) {
+	endpoint, requests := bucketServer(t, func(_ bucketRequest, w http.ResponseWriter) {
+		io.WriteString(w, `<AccessControlPolicy><Owner><ID>RGW00000000000000001</ID><DisplayName>x</DisplayName></Owner></AccessControlPolicy>`)
+	})
+	owner, err := testClient().GetBucketOwner(context.Background(), endpoint, "us-east-1", testCredentials, "b")
+	if err != nil || owner != "RGW00000000000000001" {
+		t.Fatalf("owner %q %v", owner, err)
+	}
+	if call := requests()[0]; call.method != "GET" || call.path != "/b" || call.query != "acl" {
+		t.Fatalf("request %+v", call)
+	}
+}
+
+func TestGetBucketOwnerMapsErrors(t *testing.T) {
+	endpoint, _ := bucketServer(t, func(_ bucketRequest, w http.ResponseWriter) { s3Error(w, http.StatusNotFound, NoSuchBucket) })
+	if _, err := testClient().GetBucketOwner(context.Background(), endpoint, "us-east-1", testCredentials, "b"); !IsCode(err, NoSuchBucket) {
+		t.Fatalf("error %v", err)
+	}
+}

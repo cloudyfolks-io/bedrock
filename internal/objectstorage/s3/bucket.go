@@ -70,6 +70,23 @@ func (c *Client) HeadBucket(ctx context.Context, endpoint, region string, creds 
 	return failure(got, bucket, "head-bucket")
 }
 
+func (c *Client) GetBucketOwner(ctx context.Context, endpoint, region string, creds Credentials, bucket string) (string, error) {
+	got, err := c.bucketCall(ctx, "get-acl", http.MethodGet, endpoint, region, creds, bucket, "acl", nil)
+	if err != nil {
+		return "", err
+	}
+	if err := failure(got, bucket, "get-acl"); err != nil {
+		return "", err
+	}
+	var policy struct {
+		Owner string `xml:"Owner>ID"`
+	}
+	if err := xml.Unmarshal(got.body, &policy); err != nil {
+		return "", fmt.Errorf("s3 get-acl %s: unreadable answer", bucket)
+	}
+	return policy.Owner, nil
+}
+
 func (c *Client) PutBucketCors(ctx context.Context, endpoint, region string, creds Credentials, bucket string, origins []string) error {
 	got, err := c.bucketCall(ctx, "put-cors", http.MethodPut, endpoint, region, creds, bucket, "cors", corsBody(origins))
 	if err != nil {
