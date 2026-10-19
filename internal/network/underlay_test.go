@@ -10,7 +10,6 @@ import (
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 
 	"github.com/cloudyfolks-io/bedrock/api/v1alpha1"
-	"github.com/cloudyfolks-io/bedrock/internal/network/fabric"
 )
 
 func configOf(t *testing.T, values map[string]string) Config {
@@ -212,10 +211,11 @@ func TestRenderUnderlayBGPConfSessionDefaults(t *testing.T) {
 	if !reflect.DeepEqual(peerBFD(spec), []any{true, true}) || spec["holdTime"] != "9s" || spec["keepaliveTime"] != "3s" || spec["gracefulRestart"] != true {
 		t.Fatalf("spec %v", spec)
 	}
-	for _, key := range []string{"advertiseFilter", "redistributeTables"} {
-		if _, found := spec[key]; found {
-			t.Fatalf("%s must be absent by default: %v", key, spec)
-		}
+	if !reflect.DeepEqual(advertisedFilter(t, spec), []string{"0.0.0.0/32"}) {
+		t.Fatalf("an empty filter must render the single entry that matches no route: %v", spec)
+	}
+	if _, found := spec["redistributeTables"]; found {
+		t.Fatalf("redistributeTables must be absent by default: %v", spec)
 	}
 }
 
@@ -229,22 +229,26 @@ func advertisedFilter(t *testing.T, spec map[string]any) []string {
 	return filter
 }
 
-func TestRenderUnderlayBGPConfLeavesAnEmptyFilterUnchanged(t *testing.T) {
-	cfg := configOf(t, bgpValues(nil))
-	peers := make([]fabric.BgpPeer, len(cfg.BGP.Peers))
-	for i, p := range cfg.BGP.Peers {
-		peers[i] = fabric.BgpPeer{Address: p.Address, ASN: p.ASN, BFD: cfg.BGP.BFD}
+func TestRenderUnderlayBGPConfAdvertisesNothingWithAnEmptyFilterAndNoElasticIP(t *testing.T) {
+	filter := advertisedFilter(t, bgpConfSpecOf(t, nil))
+	if len(filter) == 0 {
+		t.Fatal("an empty filter makes Fabric advertise every route")
 	}
-	before := fabric.BgpConf(underlayMeta("BgpConf", bgpConfName), fabric.BgpConfSpec{
-		LocalASN: cfg.BGP.LocalASN, RouterID: cfg.BGP.RouterID, Peers: peers, NodeSelector: gatewayNodes(),
-		HoldTime: cfg.BGP.HoldTime, KeepaliveTime: cfg.BGP.KeepaliveTime, GracefulRestart: cfg.BGP.GracefulRestart,
-		AdvertiseFilter: cfg.BGP.AdvertiseFilter, RedistributeTables: cfg.BGP.RedistributeTables,
-	})
-	if got := bgpConf(cfg); !reflect.DeepEqual(got.Object, before.Object) {
-		t.Fatalf("got  %v\nwant %v", got.Object, before.Object)
+	for _, route := range sampleRoutes {
+		if filterMatches(t, filter, netip.MustParsePrefix(route)) {
+			t.Fatalf("%s must not match %v", route, filter)
+		}
 	}
-	if _, found := bgpConfSpecOf(t, nil)["advertiseFilter"]; found {
-		t.Fatal("an empty filter must stay absent")
+}
+
+func TestRenderUnderlayBGPConfKeepsTheElasticIPRoutesWithAnEmptyFilter(t *testing.T) {
+	elasticIPRoutes := []string{"91.246.31.0/24 ge 32 le 32"}
+	fabricMerged := append(advertisedFilter(t, bgpConfSpecOf(t, nil)), elasticIPRoutes...)
+	for _, route := range sampleRoutes {
+		prefix := netip.MustParsePrefix(route)
+		if filterMatches(t, fabricMerged, prefix) != filterMatches(t, elasticIPRoutes, prefix) {
+			t.Fatalf("%s: the merged filter %v differs from the elastic IP routes", route, fabricMerged)
+		}
 	}
 }
 

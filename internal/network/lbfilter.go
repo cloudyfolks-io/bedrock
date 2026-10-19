@@ -76,7 +76,7 @@ func splitAround(entry filterEntry, hole netip.Prefix) []filterEntry {
 
 func FilterWithout(filter []string, hole netip.Prefix) []string {
 	if len(filter) == 0 {
-		return nil
+		return []string{noRoutes}
 	}
 	var kept []string
 	for _, text := range filter {

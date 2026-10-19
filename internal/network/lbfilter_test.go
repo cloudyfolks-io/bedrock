@@ -78,9 +78,15 @@ func TestFilterWithoutDeniesThePlaneInACustomFilter(t *testing.T) {
 	}
 }
 
-func TestFilterWithoutKeepsAnEmptyFilterEmpty(t *testing.T) {
-	if got := FilterWithout(nil, netip.MustParsePrefix("100.69.0.0/24")); len(got) != 0 {
-		t.Fatalf("got %v", got)
+func TestFilterWithoutMatchesNothingForAnEmptyFilter(t *testing.T) {
+	got := FilterWithout(nil, netip.MustParsePrefix("100.69.0.0/24"))
+	if len(got) != 1 {
+		t.Fatalf("an empty filter must not stay empty, got %v", got)
+	}
+	for _, route := range sampleRoutes {
+		if filterMatches(t, got, netip.MustParsePrefix(route)) {
+			t.Fatalf("%s must not match %v", route, got)
+		}
 	}
 }
 
