@@ -71,7 +71,7 @@ func Run(ctx context.Context, c client.WithWatch, deps Deps) error {
 		if err := EnableAuthnArgs(ctx, c, deps); err != nil {
 			fmt.Fprintf(os.Stderr, "agent: authn flags: %v\n", err)
 		}
-		if err := ApplyEncryption(ctx, c, deps); err != nil {
+		if err := ApplyEncryption(ctx, c, deps, func() error { return Tick(ctx, c, deps) }); err != nil {
 			fmt.Fprintf(os.Stderr, "agent: encryption config: %v\n", err)
 		}
 		for ready := false; !ready; {

@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -110,7 +111,7 @@ func newApplyConfigs(t *testing.T) applyConfigs {
 func TestApplyEncryptionWithoutAGrantDoesNothing(t *testing.T) {
 	cfg := newApplyConfigs(t)
 	f := newApplyFixture(t, "cp-enc-nogrant", cfg.one, cfg.added, "")
-	if err := ApplyEncryption(context.Background(), k8sClient, f.deps); err != nil {
+	if err := ApplyEncryption(context.Background(), k8sClient, f.deps, noReport); err != nil {
 		t.Fatal(err)
 	}
 	if len(f.exec.Calls) != 0 || f.file(t) != string(cfg.one) {
@@ -121,7 +122,7 @@ func TestApplyEncryptionWithoutAGrantDoesNothing(t *testing.T) {
 func TestApplyEncryptionIgnoresAGrantForAnotherContent(t *testing.T) {
 	cfg := newApplyConfigs(t)
 	f := newApplyFixture(t, "cp-enc-stale", cfg.one, cfg.added, encryption.Hash(cfg.promoted))
-	if err := ApplyEncryption(context.Background(), k8sClient, f.deps); err != nil {
+	if err := ApplyEncryption(context.Background(), k8sClient, f.deps, noReport); err != nil {
 		t.Fatal(err)
 	}
 	if *f.restart != 0 || f.file(t) != string(cfg.one) {
@@ -132,7 +133,7 @@ func TestApplyEncryptionIgnoresAGrantForAnotherContent(t *testing.T) {
 func TestApplyEncryptionWritesTheFileAndRestartsOnce(t *testing.T) {
 	cfg := newApplyConfigs(t)
 	f := newApplyFixture(t, "cp-enc-apply", cfg.one, cfg.added, encryption.Hash(cfg.added))
-	if err := ApplyEncryption(context.Background(), k8sClient, f.deps); err != nil {
+	if err := ApplyEncryption(context.Background(), k8sClient, f.deps, noReport); err != nil {
 		t.Fatal(err)
 	}
 	info, err := os.Stat(encryptionPath(f.deps.Root))
@@ -142,7 +143,7 @@ func TestApplyEncryptionWritesTheFileAndRestartsOnce(t *testing.T) {
 	if f.file(t) != string(cfg.added) || *f.restart != 1 || len(f.retired(t)) != 0 {
 		t.Fatalf("restarts %d retired %v", *f.restart, f.retired(t))
 	}
-	if err := ApplyEncryption(context.Background(), k8sClient, f.deps); err != nil || *f.restart != 1 {
+	if err := ApplyEncryption(context.Background(), k8sClient, f.deps, noReport); err != nil || *f.restart != 1 {
 		t.Fatalf("a converged host must not restart again: %v restarts %d", err, *f.restart)
 	}
 	if got := syncEncryptionStatus(f.deps, hostWithRole(f.node, v1alpha1.RoleControlPlane)); got.RestartPending || got.Hash != encryption.Hash(cfg.added) {
@@ -153,7 +154,7 @@ func TestApplyEncryptionWritesTheFileAndRestartsOnce(t *testing.T) {
 func TestApplyEncryptionKeepsTheDroppedKeyInRetired(t *testing.T) {
 	cfg := newApplyConfigs(t)
 	f := newApplyFixture(t, "cp-enc-retire", cfg.promoted, cfg.removed, encryption.Hash(cfg.removed))
-	if err := ApplyEncryption(context.Background(), k8sClient, f.deps); err != nil {
+	if err := ApplyEncryption(context.Background(), k8sClient, f.deps, noReport); err != nil {
 		t.Fatal(err)
 	}
 	names := f.retired(t)
@@ -186,7 +187,7 @@ func TestApplyEncryptionRestoresTheOldFileWhenTheAPIServerDoesNotReturn(t *testi
 			fakeAPIServer(t, root, time.Now().Add(time.Hour))
 		}
 	}}
-	err := ApplyEncryption(context.Background(), k8sClient, f.deps)
+	err := ApplyEncryption(context.Background(), k8sClient, f.deps, noReport)
 	if err == nil || !strings.Contains(err.Error(), "did not restart") {
 		t.Fatalf("error %v", err)
 	}
@@ -199,7 +200,7 @@ func TestApplyEncryptionRestoresTheOldFileWhenTheAPIServerDoesNotReturn(t *testi
 	if readEncryptionFailure(root) != encryption.Hash(cfg.removed) {
 		t.Fatalf("failed hash %q", readEncryptionFailure(root))
 	}
-	if err := ApplyEncryption(context.Background(), k8sClient, f.deps); err != nil || attempts != 2 {
+	if err := ApplyEncryption(context.Background(), k8sClient, f.deps, noReport); err != nil || attempts != 2 {
 		t.Fatalf("a failed hash must not run again: %v attempts %d", err, attempts)
 	}
 }
@@ -208,7 +209,7 @@ func TestApplyEncryptionFinishesTheRestartOfAWrittenFile(t *testing.T) {
 	cfg := newApplyConfigs(t)
 	f := newApplyFixture(t, "cp-enc-resume", cfg.added, cfg.added, encryption.Hash(cfg.added))
 	touch(t, encryptionPath(f.deps.Root), time.Now())
-	if err := ApplyEncryption(context.Background(), k8sClient, f.deps); err != nil {
+	if err := ApplyEncryption(context.Background(), k8sClient, f.deps, noReport); err != nil {
 		t.Fatal(err)
 	}
 	if *f.restart != 1 || f.file(t) != string(cfg.added) {
@@ -224,7 +225,7 @@ func TestApplyEncryptionWaitsForTheNodeUpgrade(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { k8sClient.Delete(context.Background(), upgrade) })
-	if err := ApplyEncryption(context.Background(), k8sClient, f.deps); err != nil {
+	if err := ApplyEncryption(context.Background(), k8sClient, f.deps, noReport); err != nil {
 		t.Fatal(err)
 	}
 	if *f.restart != 0 || f.file(t) != string(cfg.one) {
@@ -244,7 +245,7 @@ func TestApplyEncryptionIgnoresWorkers(t *testing.T) {
 	deps.Node = "worker-enc"
 	exec := &host.FakeExec{}
 	deps.Exec = exec
-	if err := ApplyEncryption(context.Background(), k8sClient, deps); err != nil || len(exec.Calls) != 0 {
+	if err := ApplyEncryption(context.Background(), k8sClient, deps, noReport); err != nil || len(exec.Calls) != 0 {
 		t.Fatalf("err %v calls %v", err, exec.Calls)
 	}
 }
@@ -254,7 +255,7 @@ func TestApplyEncryptionDoesNotTrustAnotherNodeToAnswerReadyz(t *testing.T) {
 	f := newApplyFixture(t, "cp-enc-vip", cfg.one, cfg.added, encryption.Hash(cfg.added))
 	delete(f.exec.Responses, localReadyzCall(f.deps.Root))
 	f.exec.Responses[readyzCall(f.deps.Root)] = "ok"
-	err := ApplyEncryption(context.Background(), k8sClient, f.deps)
+	err := ApplyEncryption(context.Background(), k8sClient, f.deps, noReport)
 	if err == nil || !strings.Contains(err.Error(), "did not restart") {
 		t.Fatalf("a readyz answer of the VIP must not count: %v", err)
 	}
@@ -271,16 +272,16 @@ func handledGrant(t *testing.T, f applyFixture) string {
 func TestApplyEncryptionReportsTheGrantItHandled(t *testing.T) {
 	cfg := newApplyConfigs(t)
 	applied := newApplyFixture(t, "cp-enc-handled-ok", cfg.one, cfg.added, encryption.Hash(cfg.added))
-	if err := ApplyEncryption(context.Background(), k8sClient, applied.deps); err != nil || handledGrant(t, applied) != encryption.Hash(cfg.added) {
+	if err := ApplyEncryption(context.Background(), k8sClient, applied.deps, noReport); err != nil || handledGrant(t, applied) != encryption.Hash(cfg.added) {
 		t.Fatalf("applied: %v handled %q", err, handledGrant(t, applied))
 	}
 	stale := newApplyFixture(t, "cp-enc-handled-stale", cfg.one, cfg.added, encryption.Hash(cfg.promoted))
-	if err := ApplyEncryption(context.Background(), k8sClient, stale.deps); err != nil || handledGrant(t, stale) != encryption.Hash(cfg.promoted) {
+	if err := ApplyEncryption(context.Background(), k8sClient, stale.deps, noReport); err != nil || handledGrant(t, stale) != encryption.Hash(cfg.promoted) {
 		t.Fatalf("stale: %v handled %q", err, handledGrant(t, stale))
 	}
 	failed := newApplyFixture(t, "cp-enc-handled-fail", cfg.promoted, cfg.removed, encryption.Hash(cfg.removed))
 	failed.deps.Exec = restartHost{FakeExec: failed.exec, onRestart: func() {}}
-	if err := ApplyEncryption(context.Background(), k8sClient, failed.deps); err == nil || handledGrant(t, failed) != "" {
+	if err := ApplyEncryption(context.Background(), k8sClient, failed.deps, noReport); err == nil || handledGrant(t, failed) != "" {
 		t.Fatalf("a failure is reported by the failed hash only: %v handled %q", err, handledGrant(t, failed))
 	}
 	if got := syncEncryptionStatus(failed.deps, hostWithRole(failed.node, v1alpha1.RoleControlPlane)); got.FailedHash != encryption.Hash(cfg.removed) {
@@ -299,13 +300,13 @@ func TestApplyEncryptionRetriesAfterTheFailureMarkerIsDeleted(t *testing.T) {
 			fakeAPIServer(t, root, time.Now().Add(time.Duration(attempts)*time.Hour))
 		}
 	}}
-	if err := ApplyEncryption(context.Background(), k8sClient, f.deps); err == nil {
+	if err := ApplyEncryption(context.Background(), k8sClient, f.deps, noReport); err == nil {
 		t.Fatal("the first try must fail")
 	}
 	if err := os.Remove(filepath.Join(root, "etc/bedrock/encryption/.apply-failed")); err != nil {
 		t.Fatal(err)
 	}
-	if err := ApplyEncryption(context.Background(), k8sClient, f.deps); err != nil {
+	if err := ApplyEncryption(context.Background(), k8sClient, f.deps, noReport); err != nil {
 		t.Fatalf("the grant must run again: %v", err)
 	}
 	if f.file(t) != string(cfg.removed) {
@@ -326,7 +327,7 @@ func TestApplyEncryptionClearsAStaleHandledGrantWhenItStarts(t *testing.T) {
 		seen = handledGrant(t, f)
 		fakeAPIServer(t, root, time.Now().Add(time.Duration(restarts)*time.Hour))
 	}}
-	if err := ApplyEncryption(context.Background(), k8sClient, f.deps); err != nil {
+	if err := ApplyEncryption(context.Background(), k8sClient, f.deps, noReport); err != nil {
 		t.Fatal(err)
 	}
 	if seen != "" {
@@ -342,10 +343,94 @@ func TestApplyEncryptionDoesNotRecordACancelledApply(t *testing.T) {
 	f := newApplyFixture(t, "cp-enc-cancel", cfg.promoted, cfg.removed, encryption.Hash(cfg.removed))
 	ctx, cancel := context.WithCancel(context.Background())
 	f.deps.Exec = restartHost{FakeExec: f.exec, onRestart: cancel}
-	if err := ApplyEncryption(ctx, k8sClient, f.deps); err == nil {
+	if err := ApplyEncryption(ctx, k8sClient, f.deps, noReport); err == nil {
 		t.Fatal("a cancelled apply must report an error")
 	}
 	if handledGrant(t, f) != "" {
 		t.Fatalf("a cancelled apply is not handled: %q", handledGrant(t, f))
+	}
+}
+
+func noReport() error { return nil }
+
+func TestApplyEncryptionReportsAfterClearingTheHandledGrant(t *testing.T) {
+	cfg := newApplyConfigs(t)
+	grant := encryption.Hash(cfg.removed)
+	f := newApplyFixture(t, "cp-enc-report", cfg.promoted, cfg.removed, grant)
+	writeFixtureFile(t, filepath.Join(f.deps.Root, "etc/bedrock/encryption/.grant-handled"), grant)
+	calls, handledAtReport, restartsAtReport := 0, "x", -1
+	report := func() error {
+		calls++
+		handledAtReport = handledGrant(t, f)
+		restartsAtReport = *f.restart
+		return nil
+	}
+	if err := ApplyEncryption(context.Background(), k8sClient, f.deps, report); err != nil {
+		t.Fatal(err)
+	}
+	if calls != 1 || handledAtReport != "" || restartsAtReport != 0 {
+		t.Fatalf("calls %d handled %q restarts %d", calls, handledAtReport, restartsAtReport)
+	}
+}
+
+func crashedApply(t *testing.T, name string) (applyFixture, applyConfigs) {
+	t.Helper()
+	cfg := newApplyConfigs(t)
+	grant := encryption.Hash(cfg.removed)
+	f := newApplyFixture(t, name, cfg.removed, cfg.removed, grant)
+	dir := filepath.Join(f.deps.Root, "etc/bedrock/encryption")
+	writeFixtureFile(t, filepath.Join(dir, ".apply-in-progress"), grant)
+	writeFixtureFile(t, filepath.Join(dir, ".apply-previous"), string(cfg.promoted))
+	return f, cfg
+}
+
+func TestApplyEncryptionRollsBackACrashedApplyWhenTheAPIDoesNotAnswer(t *testing.T) {
+	f, cfg := crashedApply(t, "cp-enc-crashed")
+	root := f.deps.Root
+	f.exec.Errors = map[string]error{localReadyzCall(root): errors.New("connection refused")}
+	f.deps.Exec = restartHost{FakeExec: f.exec, onRestart: func() {
+		delete(f.exec.Errors, localReadyzCall(root))
+		fakeAPIServer(t, root, time.Now().Add(time.Hour))
+	}}
+	if err := ApplyEncryption(context.Background(), k8sClient, f.deps, noReport); err == nil {
+		t.Fatal("a crashed apply with a dead API must report an error")
+	}
+	if f.file(t) != string(cfg.promoted) {
+		t.Fatal("the previous file must return")
+	}
+	if readEncryptionFailure(root) != encryption.Hash(cfg.removed) || handledGrant(t, f) != "" {
+		t.Fatalf("failed %q handled %q", readEncryptionFailure(root), handledGrant(t, f))
+	}
+	for _, marker := range []string{".apply-in-progress", ".apply-previous"} {
+		if exists(filepath.Join(root, "etc/bedrock/encryption", marker)) {
+			t.Errorf("%s must be gone", marker)
+		}
+	}
+}
+
+func TestApplyEncryptionRecordsACrashedApplyOnlyAfterReadyzPasses(t *testing.T) {
+	f, cfg := crashedApply(t, "cp-enc-crashed-ok")
+	root := f.deps.Root
+	if err := ApplyEncryption(context.Background(), k8sClient, f.deps, noReport); err != nil {
+		t.Fatal(err)
+	}
+	if f.file(t) != string(cfg.removed) || *f.restart != 0 || handledGrant(t, f) != encryption.Hash(cfg.removed) {
+		t.Fatalf("restarts %d handled %q", *f.restart, handledGrant(t, f))
+	}
+	if exists(filepath.Join(root, "etc/bedrock/encryption/.apply-in-progress")) {
+		t.Fatal("the in-progress marker must be gone")
+	}
+}
+
+func TestApplyEncryptionClearsTheProgressMarkersAfterASuccess(t *testing.T) {
+	cfg := newApplyConfigs(t)
+	f := newApplyFixture(t, "cp-enc-markers", cfg.one, cfg.added, encryption.Hash(cfg.added))
+	if err := ApplyEncryption(context.Background(), k8sClient, f.deps, noReport); err != nil {
+		t.Fatal(err)
+	}
+	for _, marker := range []string{".apply-in-progress", ".apply-previous"} {
+		if exists(filepath.Join(f.deps.Root, "etc/bedrock/encryption", marker)) {
+			t.Errorf("%s must be gone", marker)
+		}
 	}
 }
