@@ -157,3 +157,83 @@ func TestRegistryNamePolicyAllowsEverythingWithoutItsRules(t *testing.T) {
 		return err == nil
 	})
 }
+
+const (
+	platformCredentialMessage = "only an administrator may use the name prefix platform-"
+	credentialAdoptMessage    = "only an administrator may set the adopt annotation"
+)
+
+func namedCredential(name string, annotations map[string]string) *v1alpha1.RegistryCredential {
+	return &v1alpha1.RegistryCredential{
+		ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: "t-acme", Annotations: annotations},
+		Spec:       v1alpha1.RegistryCredentialSpec{RegistryRef: v1alpha1.RegistryReference{Name: "images"}, Permission: "pull"},
+	}
+}
+
+func credentialWorld(t *testing.T) (admin, alice, root client.Client) {
+	t.Helper()
+	admin, cfg := startEnv(t)
+	mustCreate(t, admin,
+		&rbacv1.ClusterRole{ObjectMeta: metav1.ObjectMeta{Name: "credential-writer"}, Rules: []rbacv1.PolicyRule{{APIGroups: []string{"bedrock.cloudyfolks.io"}, Resources: []string{"registrycredentials"}, Verbs: []string{"create", "update", "get"}}}},
+		&rbacv1.ClusterRoleBinding{
+			ObjectMeta: metav1.ObjectMeta{Name: "credential-writer"},
+			RoleRef:    rbacv1.RoleRef{APIGroup: rbacv1.GroupName, Kind: "ClusterRole", Name: "credential-writer"},
+			Subjects: []rbacv1.Subject{
+				{APIGroup: rbacv1.GroupName, Kind: "User", Name: "bedrock:alice"},
+				{APIGroup: rbacv1.GroupName, Kind: "Group", Name: "bedrock:bedrock-admins"},
+			},
+		},
+		namespaceNamed("t-acme", nil),
+	)
+	applyFile(t, admin, manifestPath("86-tenancy", "90-registry-names-policy.yaml"))
+	alice = actingAs(t, cfg, "bedrock:alice")
+	root = actingAs(t, cfg, "bedrock:root", "bedrock:bedrock-admins", "system:authenticated")
+	if err := eventuallyForbidden(t, denyCreate(admin, alice, namedCredential("platform-probe", nil))); err == nil {
+		t.Fatal("the credential name policy never denied")
+	}
+	return admin, alice, root
+}
+
+func TestNonAdminCannotMakeAPlatformCredential(t *testing.T) {
+	_, alice, _ := credentialWorld(t)
+	err := alice.Create(context.Background(), namedCredential("platform-builder", nil))
+	if !apierrors.IsForbidden(err) || !strings.Contains(err.Error(), platformCredentialMessage) {
+		t.Fatalf("err = %v", err)
+	}
+}
+
+func TestNonAdminCanMakeOtherCredentials(t *testing.T) {
+	_, alice, _ := credentialWorld(t)
+	mustCreate(t, alice, namedCredential("ci", nil), namedCredential("platformer", nil), namedCredential("my-platform-x", nil))
+}
+
+func TestAdminCanMakeAPlatformCredential(t *testing.T) {
+	_, _, root := credentialWorld(t)
+	mustCreate(t, root, namedCredential("platform-builder", nil))
+}
+
+func TestNonAdminKeepsEditingAPlatformCredential(t *testing.T) {
+	admin, alice, _ := credentialWorld(t)
+	held := namedCredential("platform-held", nil)
+	mustCreate(t, admin, held)
+	held.Labels = map[string]string{"note": "x"}
+	if err := alice.Update(context.Background(), held); err != nil {
+		t.Fatalf("an unrelated change must pass: %v", err)
+	}
+}
+
+func TestNonAdminCannotSetTheCredentialAdoptAnnotation(t *testing.T) {
+	_, alice, root := credentialWorld(t)
+	err := alice.Create(context.Background(), namedCredential("a", map[string]string{"bedrock.cloudyfolks.io/adopt": "true"}))
+	if !apierrors.IsForbidden(err) || !strings.Contains(err.Error(), credentialAdoptMessage) {
+		t.Fatalf("create err = %v", err)
+	}
+	plain := namedCredential("plain", nil)
+	mustCreate(t, alice, plain)
+	plain.Annotations = map[string]string{"bedrock.cloudyfolks.io/adopt": "true"}
+	err = alice.Update(context.Background(), plain)
+	if !apierrors.IsForbidden(err) || !strings.Contains(err.Error(), credentialAdoptMessage) {
+		t.Fatalf("update err = %v", err)
+	}
+	mustCreate(t, root, namedCredential("adopted", map[string]string{"bedrock.cloudyfolks.io/adopt": "true"}))
+}

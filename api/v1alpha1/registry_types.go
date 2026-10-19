@@ -94,6 +94,54 @@ type RegistryList struct {
 	Items           []Registry `json:"items"`
 }
 
+type RegistryReference struct {
+	// +kubebuilder:validation:MinLength=1
+	// +kubebuilder:validation:MaxLength=253
+	Name string `json:"name"`
+}
+
+// +kubebuilder:validation:XValidation:rule="self == oldSelf",message="spec is immutable; create a new credential"
+type RegistryCredentialSpec struct {
+	RegistryRef RegistryReference `json:"registryRef"`
+	// +kubebuilder:validation:Enum=pull;pushPull;manage
+	Permission string `json:"permission"`
+}
+
+type RegistryCredentialStatus struct {
+	CommonStatus `json:",inline"`
+	// +optional
+	SecretName string `json:"secretName,omitempty"`
+	// +optional
+	Username string `json:"username,omitempty"`
+	// +optional
+	RobotName string `json:"robotName,omitempty"`
+	// +optional
+	RobotID int64 `json:"robotID,omitempty"`
+	// +optional
+	SecretReset string `json:"secretReset,omitempty"`
+}
+
+// +kubebuilder:object:root=true
+// +kubebuilder:resource:scope=Namespaced
+// +kubebuilder:subresource:status
+// +kubebuilder:printcolumn:name="Registry",type=string,JSONPath=`.spec.registryRef.name`
+// +kubebuilder:printcolumn:name="Permission",type=string,JSONPath=`.spec.permission`
+// +kubebuilder:printcolumn:name="Secret",type=string,JSONPath=`.status.secretName`
+// +kubebuilder:printcolumn:name="Ready",type=string,JSONPath=`.status.conditions[?(@.type=="Ready")].status`
+type RegistryCredential struct {
+	metav1.TypeMeta   `json:",inline"`
+	metav1.ObjectMeta `json:"metadata,omitempty"`
+	Spec              RegistryCredentialSpec   `json:"spec"`
+	Status            RegistryCredentialStatus `json:"status,omitempty"`
+}
+
+// +kubebuilder:object:root=true
+type RegistryCredentialList struct {
+	metav1.TypeMeta `json:",inline"`
+	metav1.ListMeta `json:"metadata,omitempty"`
+	Items           []RegistryCredential `json:"items"`
+}
+
 func init() {
-	SchemeBuilder.Register(&Registry{}, &RegistryList{})
+	SchemeBuilder.Register(&Registry{}, &RegistryList{}, &RegistryCredential{}, &RegistryCredentialList{})
 }

@@ -113,3 +113,49 @@ func TestRegistryNameIsImmutable(t *testing.T) {
 		t.Fatalf("other fields stay mutable: %v", err)
 	}
 }
+
+func credentialObject(name, registry, permission string) *v1alpha1.RegistryCredential {
+	return &v1alpha1.RegistryCredential{
+		ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: "default"},
+		Spec:       v1alpha1.RegistryCredentialSpec{RegistryRef: v1alpha1.RegistryReference{Name: registry}, Permission: permission},
+	}
+}
+
+func TestRegistryCredentialValidation(t *testing.T) {
+	c, _ := StartTestEnv(t)
+	ctx := context.Background()
+
+	for _, permission := range []string{"pull", "pushPull", "manage"} {
+		credential := credentialObject("ok-"+strings.ToLower(permission), "images", permission)
+		createValid(t, c, credential)
+	}
+	credential := credentialObject("status", "images", "pull")
+	createValid(t, c, credential)
+	credential.Status.SecretName = "status-docker"
+	credential.Status.Username = "robot$acme+status"
+	credential.Status.RobotID = 3
+	credential.Status.RobotName = "status"
+	credential.Status.SecretReset = "one"
+	if err := c.Status().Update(ctx, credential); err != nil {
+		t.Fatalf("status must be writable through the status subresource: %v", err)
+	}
+	createInvalid(t, c, credentialObject("bad-permission", "images", "admin"), "spec.permission")
+	createInvalid(t, c, credentialObject("no-permission", "images", ""), "spec.permission")
+	createInvalid(t, c, credentialObject("no-registry", "", "pull"), "spec.registryRef")
+}
+
+func TestRegistryCredentialSpecIsImmutable(t *testing.T) {
+	c, _ := StartTestEnv(t)
+	ctx := context.Background()
+
+	credential := credentialObject("fixed", "images", "pull")
+	createValid(t, c, credential)
+	credential.Spec.Permission = "manage"
+	updateInvalid(t, c, credential, "spec is immutable")
+	var stored v1alpha1.RegistryCredential
+	if err := c.Get(ctx, client.ObjectKeyFromObject(credential), &stored); err != nil {
+		t.Fatal(err)
+	}
+	stored.Spec.RegistryRef.Name = "other"
+	updateInvalid(t, c, &stored, "spec is immutable")
+}
