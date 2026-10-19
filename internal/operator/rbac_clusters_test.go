@@ -55,7 +55,7 @@ func TestOperatorRoleAllowsKubernetesClusters(t *testing.T) {
 	}
 }
 
-func TestOperatorRoleHasEveryVerbTheClusterControllerUses(t *testing.T) {
+func TestOperatorRoleHasTheHandKeptListOfVerbsTheClusterControllerUses(t *testing.T) {
 	role, err := OperatorRole(rbacBundle(t))
 	if err != nil {
 		t.Fatal(err)

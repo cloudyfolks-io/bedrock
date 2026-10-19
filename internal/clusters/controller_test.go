@@ -607,9 +607,20 @@ func TestAControlPlaneThatIsNotOwnedByTheClusterIsNeverReady(t *testing.T) {
 	h.reconcile("prod")
 	obj, _ := h.k0smotronCluster("prod")
 	obj.SetOwnerReferences(nil)
+	obj.SetUID("uid-unowned")
 	_ = unstructured.SetNestedField(obj.Object, int64(1), "status", "readyReplicas")
 	if err := h.client.Update(context.Background(), obj); err != nil {
 		t.Fatal(err)
+	}
+	owner := []metav1.OwnerReference{{APIVersion: "k0smotron.io/v1beta2", Kind: "Cluster", Name: "prod", UID: "uid-unowned", Controller: ptr.To(true)}}
+	sts := &appsv1.StatefulSet{ObjectMeta: metav1.ObjectMeta{Namespace: fixtureNamespace, Name: "kmc-prod", UID: "sts-unowned", OwnerReferences: owner}}
+	pod := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{Namespace: fixtureNamespace, Name: "kmc-prod-0", OwnerReferences: []metav1.OwnerReference{{APIVersion: "apps/v1", Kind: "StatefulSet", Name: "kmc-prod", UID: "sts-unowned", Controller: ptr.To(true)}}},
+		Status:     readyPodStatus(),
+	}
+	secret := &corev1.Secret{ObjectMeta: metav1.ObjectMeta{Namespace: fixtureNamespace, Name: "prod-kubeconfig", OwnerReferences: owner}}
+	for _, created := range []client.Object{sts, pod, secret} {
+		h.create(created)
 	}
 	view, err := h.r.observeControlPlane(context.Background(), h.cluster("prod"))
 	if err != nil || view.Ready {
