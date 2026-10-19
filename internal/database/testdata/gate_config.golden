@@ -1,0 +1,18 @@
+global
+    maxconn 4096
+defaults
+    mode tcp
+    timeout connect 5s
+    timeout client 1h
+    timeout server 1h
+frontend db
+    bind :5432 ssl crt /certs/server.pem ssl-min-ver TLSv1.2 ca-file /certs/ca.crt verify required
+    tcp-request session reject unless { ssl_c_s_dn(CN) -m str 0b0c0d0e-1111-4222-8333-444455556666 }
+    default_backend engine
+backend engine
+    server db 0b0c0d0e-1111-4222-8333-444455556666-db.bedrock-dbaas.svc.cluster.local:5432 check
+frontend health
+    mode http
+    bind :8404
+    monitor-uri /healthz
+    monitor fail if { nbsrv(engine) lt 1 }

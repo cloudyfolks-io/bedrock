@@ -2,6 +2,7 @@ package database
 
 import (
 	"context"
+	"net/netip"
 	"strconv"
 	"time"
 
@@ -22,12 +23,13 @@ const (
 	keyProvisionTimeout = "database.provision-timeout"
 	keyExecTimeout      = "database.exec-timeout"
 	keyBackupBucket     = "database.backup.bucket"
+	keyVIPRange         = "database.vip-range"
 	keyRetentionDays    = "database.backup.retention-days"
 	keyRetentionDelete  = "database.backup.retention-after-delete"
 	settingPrefix       = "database."
 )
 
-var configKeys = []string{keyEnabled, keyCapacityCPU, keyCapacityMemory, keyCapacityPods, keyMaxUtilization, keySweeperDryRun, keyProvisionTimeout, keyExecTimeout, keyBackupBucket, keyRetentionDays, keyRetentionDelete}
+var configKeys = []string{keyEnabled, keyCapacityCPU, keyCapacityMemory, keyCapacityPods, keyMaxUtilization, keySweeperDryRun, keyProvisionTimeout, keyExecTimeout, keyBackupBucket, keyVIPRange, keyRetentionDays, keyRetentionDelete}
 
 type Config struct {
 	Enabled              bool
@@ -39,6 +41,7 @@ type Config struct {
 	ProvisionTimeout     time.Duration
 	ExecTimeout          time.Duration
 	BackupBucket         string
+	VIPRange             netip.Prefix
 	RetentionDays        int
 	RetentionAfterDelete time.Duration
 }
@@ -63,6 +66,7 @@ func ParseConfig(values map[string]string) (Config, error) {
 	timeout, _ := time.ParseDuration(effective[keyProvisionTimeout])
 	execTimeout, _ := time.ParseDuration(effective[keyExecTimeout])
 	retentionDays, _ := strconv.Atoi(effective[keyRetentionDays])
+	vipRange, _ := netip.ParsePrefix(effective[keyVIPRange])
 	retentionAfterDelete, _ := time.ParseDuration(effective[keyRetentionDelete])
 	return Config{
 		Enabled:              enabled,
@@ -74,6 +78,7 @@ func ParseConfig(values map[string]string) (Config, error) {
 		ProvisionTimeout:     timeout,
 		ExecTimeout:          execTimeout,
 		BackupBucket:         effective[keyBackupBucket],
+		VIPRange:             vipRange,
 		RetentionDays:        retentionDays,
 		RetentionAfterDelete: retentionAfterDelete,
 	}, nil

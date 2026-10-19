@@ -3,6 +3,7 @@ package settings
 import (
 	"fmt"
 	"math"
+	"net/netip"
 	"regexp"
 	"strconv"
 	"time"
@@ -23,11 +24,23 @@ func databaseDefinitions() []Definition {
 		{"database.backup.bucket", "bedrock-database-backups", "Bucket of the object store that holds the backups of all databases, one prefix for each database.", bucketNameValue},
 		{"database.backup.retention-days", "7", "Days of backups and WAL archive that a database keeps, from 1 to 365.", intBetween(1, 365)},
 		{"database.backup.retention-after-delete", "168h", "Time that the backups of a deleted database stay in the bucket before the sweeper removes them.", duration(0)},
+		{"database.vip-range", "", "IPv4 CIDR in the services plane that holds the addresses of the database gates, for example 100.66.16.0/21. Empty refuses every create with the reason VIPRangeMissing.", ipv4CIDRValue},
 		{"database.exec-timeout", "120s", "Time limit of one SQL script that the operator runs in an engine pod.", wholeSecondsBetween(5*time.Second, 10*time.Minute)},
 	}
 }
 
 var bucketNamePattern = regexp.MustCompile(`^[a-z0-9][a-z0-9-]{1,61}[a-z0-9]$`)
+
+func ipv4CIDRValue(v string) error {
+	if v == "" {
+		return nil
+	}
+	prefix, err := netip.ParsePrefix(v)
+	if err != nil || !prefix.Addr().Is4() || prefix.Masked() != prefix || prefix.Bits() > 29 {
+		return fmt.Errorf("value %q is not an IPv4 network of at most /29, like 100.66.16.0/21", v)
+	}
+	return nil
+}
 
 func bucketNameValue(v string) error {
 	if v == "" || bucketNamePattern.MatchString(v) {

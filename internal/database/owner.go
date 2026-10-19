@@ -29,6 +29,7 @@ var (
 	NetworkPolicyGVK   = schema.GroupVersionKind{Group: "networking.k8s.io", Version: "v1", Kind: "NetworkPolicy"}
 	CertificateGVK     = schema.GroupVersionKind{Group: "cert-manager.io", Version: "v1", Kind: "Certificate"}
 	PersistentClaimGVK = schema.GroupVersionKind{Version: "v1", Kind: "PersistentVolumeClaim"}
+	ConfigMapGVK       = schema.GroupVersionKind{Version: "v1", Kind: "ConfigMap"}
 	PodGVK             = schema.GroupVersionKind{Version: "v1", Kind: "Pod"}
 	NamespaceGVK       = schema.GroupVersionKind{Version: "v1", Kind: "Namespace"}
 )
@@ -37,7 +38,7 @@ func EngineGVKs() []schema.GroupVersionKind {
 	return []schema.GroupVersionKind{
 		ScheduledBackupGVK, ClusterGVK, ObjectStoreGVK,
 		DeploymentGVK, ServiceGVK, NetworkPolicyGVK, CertificateGVK, SecretGVK,
-		PodGVK, PersistentClaimGVK,
+		ConfigMapGVK, PodGVK, PersistentClaimGVK,
 	}
 }
 

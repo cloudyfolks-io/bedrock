@@ -1,0 +1,288 @@
+[
+  {
+    "apiVersion": "v1",
+    "data": {
+      "haproxy.cfg": "global\n    maxconn 4096\ndefaults\n    mode tcp\n    timeout connect 5s\n    timeout client 1h\n    timeout server 1h\nfrontend db\n    bind :5432 ssl crt /certs/server.pem ssl-min-ver TLSv1.2 ca-file /certs/ca.crt verify required\n    tcp-request session reject unless { ssl_c_s_dn(CN) -m str 0b0c0d0e-1111-4222-8333-444455556666 }\n    default_backend engine\nbackend engine\n    server db 0b0c0d0e-1111-4222-8333-444455556666-db.bedrock-dbaas.svc.cluster.local:5432 check\nfrontend health\n    mode http\n    bind :8404\n    monitor-uri /healthz\n    monitor fail if { nbsrv(engine) lt 1 }\n"
+    },
+    "kind": "ConfigMap",
+    "metadata": {
+      "annotations": {
+        "bedrock.cloudyfolks.io/owner-namespace": "acme-web",
+        "bedrock.cloudyfolks.io/owner-uid": "0b0c0d0e-1111-4222-8333-444455556666"
+      },
+      "labels": {
+        "app.kubernetes.io/instance": "0b0c0d0e-1111-4222-8333-444455556666",
+        "app.kubernetes.io/managed-by": "bedrock",
+        "bedrock.cloudyfolks.io/kind": "Database",
+        "bedrock.cloudyfolks.io/name": "orders",
+        "bedrock.cloudyfolks.io/project": "web",
+        "bedrock.cloudyfolks.io/tenant": "acme"
+      },
+      "name": "0b0c0d0e-1111-4222-8333-444455556666-gate",
+      "namespace": "bedrock-dbaas"
+    }
+  },
+  {
+    "apiVersion": "cert-manager.io/v1",
+    "kind": "Certificate",
+    "metadata": {
+      "annotations": {
+        "bedrock.cloudyfolks.io/owner-namespace": "acme-web",
+        "bedrock.cloudyfolks.io/owner-uid": "0b0c0d0e-1111-4222-8333-444455556666"
+      },
+      "labels": {
+        "app.kubernetes.io/instance": "0b0c0d0e-1111-4222-8333-444455556666",
+        "app.kubernetes.io/managed-by": "bedrock",
+        "bedrock.cloudyfolks.io/kind": "Database",
+        "bedrock.cloudyfolks.io/name": "orders",
+        "bedrock.cloudyfolks.io/project": "web",
+        "bedrock.cloudyfolks.io/tenant": "acme"
+      },
+      "name": "0b0c0d0e-1111-4222-8333-444455556666-server",
+      "namespace": "bedrock-dbaas"
+    },
+    "spec": {
+      "additionalOutputFormats": [
+        {
+          "type": "CombinedPEM"
+        }
+      ],
+      "commonName": "0b0c0d0e-1111-4222-8333-444455556666",
+      "dnsNames": [
+        "0b0c0d0e-1111-4222-8333-444455556666.dbaas.internal",
+        "localhost"
+      ],
+      "duration": "43800h0m0s",
+      "ipAddresses": [
+        "127.0.0.1"
+      ],
+      "issuerRef": {
+        "group": "cert-manager.io",
+        "kind": "ClusterIssuer",
+        "name": "bedrock-database-ca"
+      },
+      "privateKey": {
+        "algorithm": "ECDSA",
+        "rotationPolicy": "Always",
+        "size": 256
+      },
+      "renewBefore": "8760h0m0s",
+      "secretName": "0b0c0d0e-1111-4222-8333-444455556666-server-tls",
+      "usages": [
+        "digital signature",
+        "key encipherment",
+        "server auth"
+      ]
+    }
+  },
+  {
+    "apiVersion": "apps/v1",
+    "kind": "Deployment",
+    "metadata": {
+      "annotations": {
+        "bedrock.cloudyfolks.io/owner-namespace": "acme-web",
+        "bedrock.cloudyfolks.io/owner-uid": "0b0c0d0e-1111-4222-8333-444455556666"
+      },
+      "labels": {
+        "app.kubernetes.io/instance": "0b0c0d0e-1111-4222-8333-444455556666",
+        "app.kubernetes.io/managed-by": "bedrock",
+        "bedrock.cloudyfolks.io/kind": "Database",
+        "bedrock.cloudyfolks.io/name": "orders",
+        "bedrock.cloudyfolks.io/project": "web",
+        "bedrock.cloudyfolks.io/tenant": "acme"
+      },
+      "name": "0b0c0d0e-1111-4222-8333-444455556666-gate",
+      "namespace": "bedrock-dbaas"
+    },
+    "spec": {
+      "replicas": 1,
+      "selector": {
+        "matchLabels": {
+          "app.kubernetes.io/component": "gate",
+          "app.kubernetes.io/instance": "0b0c0d0e-1111-4222-8333-444455556666"
+        }
+      },
+      "strategy": {
+        "type": "Recreate"
+      },
+      "template": {
+        "metadata": {
+          "annotations": {
+            "bedrock.cloudyfolks.io/config-hash": "fb39525e91b158bc"
+          },
+          "labels": {
+            "app.kubernetes.io/component": "gate",
+            "app.kubernetes.io/instance": "0b0c0d0e-1111-4222-8333-444455556666",
+            "app.kubernetes.io/managed-by": "bedrock",
+            "bedrock.cloudyfolks.io/kind": "Database",
+            "bedrock.cloudyfolks.io/name": "orders",
+            "bedrock.cloudyfolks.io/project": "web",
+            "bedrock.cloudyfolks.io/tenant": "acme"
+          }
+        },
+        "spec": {
+          "automountServiceAccountToken": false,
+          "containers": [
+            {
+              "command": [
+                "haproxy",
+                "-f",
+                "/certs/haproxy.cfg"
+              ],
+              "image": "docker.io/library/haproxy:3.2-alpine@sha256:254e6370f01cd654e0744edf607c67f33777c1b6a9dc0d4b28bcba7171460122",
+              "livenessProbe": {
+                "failureThreshold": 3,
+                "httpGet": {
+                  "path": "/healthz",
+                  "port": 8404
+                },
+                "initialDelaySeconds": 15,
+                "periodSeconds": 10,
+                "timeoutSeconds": 3
+              },
+              "name": "haproxy",
+              "ports": [
+                {
+                  "containerPort": 5432,
+                  "name": "db"
+                }
+              ],
+              "readinessProbe": {
+                "failureThreshold": 3,
+                "httpGet": {
+                  "path": "/healthz",
+                  "port": 8404
+                },
+                "initialDelaySeconds": 2,
+                "periodSeconds": 10,
+                "timeoutSeconds": 3
+              },
+              "resources": {
+                "limits": {
+                  "cpu": "100m",
+                  "memory": "128Mi"
+                },
+                "requests": {
+                  "cpu": "100m",
+                  "memory": "128Mi"
+                }
+              },
+              "securityContext": {
+                "allowPrivilegeEscalation": false,
+                "capabilities": {
+                  "drop": [
+                    "ALL"
+                  ]
+                }
+              },
+              "volumeMounts": [
+                {
+                  "mountPath": "/certs",
+                  "name": "certs",
+                  "readOnly": true
+                }
+              ]
+            }
+          ],
+          "enableServiceLinks": false,
+          "securityContext": {
+            "fsGroup": 1000,
+            "runAsGroup": 1000,
+            "runAsNonRoot": true,
+            "runAsUser": 1000
+          },
+          "volumes": [
+            {
+              "name": "certs",
+              "projected": {
+                "defaultMode": 288,
+                "sources": [
+                  {
+                    "secret": {
+                      "items": [
+                        {
+                          "key": "tls-combined.pem",
+                          "path": "server.pem"
+                        },
+                        {
+                          "key": "ca.crt",
+                          "path": "ca.crt"
+                        }
+                      ],
+                      "name": "0b0c0d0e-1111-4222-8333-444455556666-server-tls"
+                    }
+                  },
+                  {
+                    "configMap": {
+                      "items": [
+                        {
+                          "key": "haproxy.cfg",
+                          "path": "haproxy.cfg"
+                        }
+                      ],
+                      "name": "0b0c0d0e-1111-4222-8333-444455556666-gate"
+                    }
+                  }
+                ]
+              }
+            }
+          ]
+        }
+      }
+    }
+  },
+  {
+    "apiVersion": "networking.k8s.io/v1",
+    "kind": "NetworkPolicy",
+    "metadata": {
+      "annotations": {
+        "bedrock.cloudyfolks.io/owner-namespace": "acme-web",
+        "bedrock.cloudyfolks.io/owner-uid": "0b0c0d0e-1111-4222-8333-444455556666"
+      },
+      "labels": {
+        "app.kubernetes.io/instance": "0b0c0d0e-1111-4222-8333-444455556666",
+        "app.kubernetes.io/managed-by": "bedrock",
+        "bedrock.cloudyfolks.io/kind": "Database",
+        "bedrock.cloudyfolks.io/name": "orders",
+        "bedrock.cloudyfolks.io/project": "web",
+        "bedrock.cloudyfolks.io/tenant": "acme"
+      },
+      "name": "0b0c0d0e-1111-4222-8333-444455556666",
+      "namespace": "bedrock-dbaas"
+    },
+    "spec": {
+      "ingress": [
+        {
+          "from": [
+            {
+              "podSelector": {
+                "matchExpressions": [
+                  {
+                    "key": "app.kubernetes.io/component",
+                    "operator": "In",
+                    "values": [
+                      "gate",
+                      "engine"
+                    ]
+                  }
+                ],
+                "matchLabels": {
+                  "app.kubernetes.io/instance": "0b0c0d0e-1111-4222-8333-444455556666"
+                }
+              }
+            }
+          ]
+        }
+      ],
+      "podSelector": {
+        "matchLabels": {
+          "app.kubernetes.io/component": "engine",
+          "app.kubernetes.io/instance": "0b0c0d0e-1111-4222-8333-444455556666"
+        }
+      },
+      "policyTypes": [
+        "Ingress"
+      ]
+    }
+  }
+]
