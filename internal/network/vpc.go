@@ -84,13 +84,10 @@ func planExternal(in VpcInput) (fabric.VpcSpec, External) {
 
 func planL2(in VpcInput) (fabric.VpcSpec, External) {
 	kept := keptPools(in.Config, in.Attached)
-	pools := slices.Concat(kept, unattachedTenantPools(in.Config, kept))
+	tenants := unattachedTenantPools(in.Config, kept)
+	pools := slices.Concat(kept, tenants)
 	if len(pools) == 0 {
 		return fabric.VpcSpec{}, External{Requested: true, Reason: ReasonNoProviderNetwork, Message: "enableExternal in l2 mode needs a provider network with the role tenant; set network.provider-networks"}
-	}
-	subnets := make([]string, len(pools))
-	for i, pn := range pools {
-		subnets[i] = ExternalSubnetName(pn.Name)
 	}
 	nextHop := pools[0].Gateway
 	if len(kept) > 0 {
@@ -98,9 +95,32 @@ func planL2(in VpcInput) (fabric.VpcSpec, External) {
 	}
 	return fabric.VpcSpec{
 		EnableExternal:       true,
-		ExtraExternalSubnets: subnets,
+		ExtraExternalSubnets: composeExternalSubnets(in.Config, kept, tenants),
 		DefaultRoute:         &fabric.StaticRoute{CIDR: defaultCIDR, NextHop: nextHop},
-	}, External{Requested: true, Reason: ReasonConnected}
+	}, connected(in.Config)
+}
+
+func connected(cfg Config) External {
+	if missing := MissingServicesSettings(cfg); len(missing) > 0 {
+		return External{Requested: true, Reason: ReasonServicesNotConfigured, Message: "the services plane needs these settings: " + strings.Join(missing, ", ")}
+	}
+	return External{Requested: true, Reason: ReasonConnected}
+}
+
+func composeExternalSubnets(cfg Config, kept, planned []v1alpha1.ProviderNetworkSpec) []string {
+	var subnets []string
+	add := func(subnet string) {
+		if !slices.Contains(subnets, subnet) {
+			subnets = append(subnets, subnet)
+		}
+	}
+	for _, pn := range slices.Concat(kept, planned) {
+		add(ExternalSubnetName(pn.Name))
+	}
+	if services, ok := ServicesSubnet(cfg); ok {
+		add(services)
+	}
+	return subnets
 }
 
 func keptPools(cfg Config, attached []string) []v1alpha1.ProviderNetworkSpec {
@@ -130,10 +150,10 @@ func planBGP(in VpcInput) (fabric.VpcSpec, External) {
 	return fabric.VpcSpec{
 		EnableExternal:       true,
 		EnableBfd:            true,
-		ExtraExternalSubnets: []string{subnet},
+		ExtraExternalSubnets: composeExternalSubnets(in.Config, keptPools(in.Config, in.Attached), []v1alpha1.ProviderNetworkSpec{transit}),
 		DefaultRoute:         &fabric.StaticRoute{CIDR: defaultCIDR, NextHop: transit.Gateway},
 		Dynamic:              &fabric.DynamicRouting{VrfID: in.VrfID, ExternalSubnet: subnet, Redistribute: []string{"nat", "lb"}, LocalOnly: true},
-	}, External{Requested: true, Reason: ReasonConnected}
+	}, connected(in.Config)
 }
 
 func NextVrfID(used []uint32) (uint32, error) {

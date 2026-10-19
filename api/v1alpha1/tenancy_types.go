@@ -214,6 +214,9 @@ type NetworkStatus struct {
 	// +listMapKey=name
 	// +kubebuilder:validation:MaxItems=512
 	Subnets []NetworkSubnetStatus `json:"subnets,omitempty"`
+	// +optional
+	// +kubebuilder:validation:MaxLength=45
+	ServicesIdentity string `json:"servicesIdentity,omitempty"`
 }
 
 // +kubebuilder:object:root=true

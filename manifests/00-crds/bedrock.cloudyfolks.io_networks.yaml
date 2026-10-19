@@ -199,6 +199,9 @@ spec:
               observedGeneration:
                 format: int64
                 type: integer
+              servicesIdentity:
+                maxLength: 45
+                type: string
               subnets:
                 items:
                   properties:

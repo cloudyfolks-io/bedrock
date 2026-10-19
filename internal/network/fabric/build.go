@@ -40,9 +40,15 @@ type VpcSpec struct {
 	Dynamic              *DynamicRouting
 }
 
+type ACL struct {
+	Direction, Match, Action string
+	Priority                 int
+}
+
 type SubnetSpec struct {
 	Vpc, CIDR, Gateway, Provider, Vlan, DHCPOptions string
 	ExcludeIPs                                      []string
+	ACLs                                            []ACL
 	DHCP                                            bool
 	MTU                                             int
 }
@@ -182,6 +188,9 @@ func Subnet(m Meta, s SubnetSpec) *unstructured.Unstructured {
 	if s.DHCP {
 		spec["enableDHCP"] = true
 	}
+	if len(s.ACLs) > 0 {
+		spec["acls"] = acls(s.ACLs)
+	}
 	set(spec, "vlan", s.Vlan)
 	set(spec, "provider", s.Provider)
 	if s.Provider != "" {
@@ -191,6 +200,14 @@ func Subnet(m Meta, s SubnetSpec) *unstructured.Unstructured {
 		spec["disableGatewayCheck"] = true
 	}
 	return object(SubnetGVK, m, spec)
+}
+
+func acls(rules []ACL) []any {
+	out := make([]any, len(rules))
+	for i, r := range rules {
+		out[i] = map[string]any{"direction": r.Direction, "priority": int64(r.Priority), "match": r.Match, "action": r.Action}
+	}
+	return out
 }
 
 func set(spec map[string]any, key, value string) {
@@ -203,6 +220,14 @@ func OvnEip(m Meta, externalSubnet, address string) *unstructured.Unstructured {
 	spec := map[string]any{"externalSubnet": externalSubnet, "type": "nat"}
 	set(spec, "v4Ip", address)
 	return object(OvnEipGVK, m, spec)
+}
+
+func OvnEipLRP(m Meta, externalSubnet string) *unstructured.Unstructured {
+	return object(OvnEipGVK, m, map[string]any{"externalSubnet": externalSubnet, "type": "lrp"})
+}
+
+func OvnSnatRule(m Meta, eip, vpc, cidr string) *unstructured.Unstructured {
+	return object(OvnSnatRuleGVK, m, map[string]any{"ovnEip": eip, "vpc": vpc, "v4IpCidr": cidr})
 }
 
 func OvnFip(m Meta, eip, ipName string) *unstructured.Unstructured {

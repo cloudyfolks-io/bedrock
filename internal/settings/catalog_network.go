@@ -16,20 +16,20 @@ import (
 )
 
 const (
-	maxProviderNameLength  = 30
-	maxInterfaceLength     = 15
-	maxVlan                = 4094
-	rangeSeparator         = ".."
-	minHoldTime            = 3 * time.Second
-	minKeepaliveTime       = time.Second
-	maxBGPTimer            = 300 * time.Second
-	maxPrefixLength        = 32
-	maxConnectPrefixLength = 30
-	maxTableID             = 999
-	firstReservedTableID   = 253
-	lastReservedTableID    = 255
-	minMTU                 = 576
-	maxMTU                 = 9000
+	maxProviderNameLength      = 30
+	maxInterfaceLength         = 15
+	maxVlan                    = 4094
+	rangeSeparator             = ".."
+	minHoldTime                = 3 * time.Second
+	minKeepaliveTime           = time.Second
+	maxBGPTimer                = 300 * time.Second
+	maxPrefixLength            = 32
+	maxAllocatablePrefixLength = 30
+	maxTableID                 = 999
+	firstReservedTableID       = 253
+	lastReservedTableID        = 255
+	minMTU                     = 576
+	maxMTU                     = 9000
 )
 
 type BGPPeer struct {
@@ -47,9 +47,12 @@ func networkDefinitions() []Definition {
 		{"network.bgp.transit-network", "", "Provider network that carries the router ports in bgp mode.", dnsLabelValue},
 		{"network.dns-servers", "", "Comma list of IPv4 resolvers that DHCP gives to guests. A Subnet that sets dnsServers uses its own list.", ipv4ListValue},
 		{"network.mtu", "", "MTU in bytes, from 576 to 9000, of every Subnet that sets no mtu. Empty lets Fabric choose. Keep it at or below the underlay MTU minus 100. A running guest learns a new value at its next DHCP lease, but the pod interface of a VM keeps its MTU until the VM restarts, so raise it only with a planned VM restart.", intBetween(minMTU, maxMTU)},
+		{"network.services.provider-network", "", "Name of the provider network with the role services. Every external Network attaches to it, gets a router port on it and a pinned address for source NAT. Empty turns the services plane off.", dnsLabelValue},
+		{"network.services.identity-range", "", "IPv4 network inside the services provider network from which each Network gets one address for source NAT. Keep it in the excludeIPs of the provider network. The prefix must be 30 or shorter.", cidrWithin(maxAllocatablePrefixLength)},
+		{"network.services.resolver", "", "IPv4 address of the resolver on the services plane. DHCP gives it to guests when network.dns-servers is empty.", ipv4Value},
 		{"network.reserved-cidrs", "100.64.0.0/10", "Comma list of IPv4 networks that no Subnet and no Network range may overlap. They belong to the platform planes. Empty keeps the default.", cidrListValue},
 		{"network.subnet-allowed-ranges", "10.0.0.0/8,172.16.0.0/12,192.168.0.0/16", "Comma list of IPv4 networks. Every Subnet must be inside one of them. Use 0.0.0.0/0 to allow every address. Empty keeps the default.", cidrListValue},
-		{"network.peering.range", "169.254.0.0/16", "IPv4 network from which each NetworkPeering without connectCIDR gets a /30 connect network. The prefix must be 30 or shorter. Empty keeps the default.", cidrWithin(maxConnectPrefixLength)},
+		{"network.peering.range", "169.254.0.0/16", "IPv4 network from which each NetworkPeering without connectCIDR gets a /30 connect network. The prefix must be 30 or shorter. Empty keeps the default.", cidrWithin(maxAllocatablePrefixLength)},
 		{"network.bgp.bfd", "true", "Enable BFD on the BGP peers of the FRR agent. The Fabric Vpc of a Network in bgp mode always has BFD, and this Setting does not change it.", boolean},
 		{"network.bgp.hold-time", "9s", "BGP hold time in whole seconds, from 3s to 300s. A peer refuses a hold time of 1s or 2s.", wholeSecondsBetween(minHoldTime, maxBGPTimer)},
 		{"network.bgp.keepalive-time", "3s", "BGP keepalive time in whole seconds, from 1s to 300s.", wholeSecondsBetween(minKeepaliveTime, maxBGPTimer)},
