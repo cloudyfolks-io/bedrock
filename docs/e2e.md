@@ -336,7 +336,7 @@ If a name changes in an area, change it in that file only.
 | `addons.sh` | Seeded addons. `kata` is blocked by the preflight when no KVM exists. `loki` is off, then on, then refuses wrong values. Grafana dashboards and the Alertmanager webhook. |
 | `tenancy.sh` | The users and tokens. The tenant `acme` with its Network and owner role. The projects `web` and `data` with quota, the AAQ limit of five VMs, roles and policies. Workload and role checks. Quota edges. |
 | `images.sh` | The ClusterImage `cirros` from the bundle. An image upload through the proxy. |
-| `compute.sh` | An SSH key, a Volume, the SecurityGroup `web` and the VM `vm1`. Hot-plug and expand. A volume snapshot. The proxy actions and the console, which the Go test runs. |
+| `compute.sh` | An SSH key, a Volume, the SecurityGroup `web` and the VM `vm1`. Hot-plug and expand. A volume snapshot. A custom-size VM with a hot-plugged Volume that the guest reads. A VM that boots from a Volume. The access mode of a block Volume. The proxy actions and the console, which the Go test runs. |
 | `network.sh` | The provider network and the Network status. The fabric-frr agent. Subnet rules. The security group on the VM. A VM with a pinned address, a Subnet MTU and Subnet DNS servers. An ElasticIP in L2 mode with the ARP and ping proof. An ElasticIP without a provider network. The ElasticIP quota. A LoadBalancer and a DNSZone. An InternetGateway, a NetworkPeering, an internal LoadBalancer and the services identity. Isolation rules. |
 | `container.sh` | The proof of the pod network: a hand-made Pod and a hand-made Deployment get the network metadata of a `Container`. Then the kind itself: the runtime gate, replicas, stop and start, a fixed address, autoscale, a Volume, a LoadBalancer target, logs, exec and restart through the proxy, and the cleanup. |
 | `build.sh` | The project roles on `builds` and `builds/logs`. A Build with a missing push Secret and a Build with a push Secret of the wrong type, with no Job. A Build in a cluster with no Kata, with no Job. The immutable spec. The deletion of every Build, with no child object and no Secret left. |
@@ -459,6 +459,21 @@ The cascade step checks that deleting the project leaves no `KubernetesCluster`,
 It makes a `KubernetesCluster` with two workers and waits until both Nodes are Ready.
 It then makes a deployment in the child cluster, reads its log with `kubectl logs`, removes one worker, deletes its stale Node and deletes the cluster.
 The script needs `NS`, `PROJECT` and `LAB_CLUSTER_ADDRESS`.
+
+## Compute parity checks
+
+The steps `compute_size_and_hotplug`, `compute_boot_volume` and `compute_block_access` in `hack/e2e/tenant/compute.sh` check the features of `docs/compute.md`.
+They run after `compute_snapshot`.
+
+| Step | Check |
+| --- | --- |
+| `compute_size_and_hotplug` | The VM `size-vm` has `compute` with 2 cores and 512 MiB, and no instance type. The KubeVirt VM has `domain.cpu.cores` 2 and `domain.memory.guest` `512Mi`. The guest reports 2 processors and a `MemTotal` from 400000 to 524288 KiB. The step then adds the Volume `hot1` to `spec.disks` of the running VM. The guest writes and reads the disk, and the boot id is the same as before. |
+| `compute_boot_volume` | The Volume `boot1` has the source image `cirros`. The VM `boot-vm` has `rootDisk.volumeRef: boot1`, has no `boot-vm-root` claim, and boots. The Volume is `InUse` and `attachedTo` names the VM. After the VM is deleted, the Volume is `Available` and its claim exists. |
+| `compute_block_access` | The claim of the Volume `data1` on the `block` class has the access mode `ReadWriteMany` and the volume mode `Block`. |
+
+The guest of `size-vm` and `boot-vm` runs a script that cirros starts at boot.
+The script prints `COMPUTE-` lines to the serial console, and the step reads them from the container `guest-console-log`.
+The cleanup deletes both VMs and their Volumes, also when a check fails, because the backup step expects one VM.
 
 ## Network parity checks
 
