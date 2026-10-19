@@ -8,6 +8,8 @@ func databaseRules() []rbacv1.PolicyRule {
 	read := []string{"get", "list", "watch"}
 	return []rbacv1.PolicyRule{
 		{APIGroups: []string{"postgresql.cnpg.io"}, Resources: []string{"backups", "clusters", "scheduledbackups"}, Verbs: standardVerbs()},
+		{APIGroups: []string{"ps.percona.com"}, Resources: []string{"perconaservermysqls", "perconaservermysqlbackups", "perconaservermysqlrestores"}, Verbs: standardVerbs()},
+		{APIGroups: []string{"monitoring.coreos.com"}, Resources: []string{"podmonitors"}, Verbs: standardVerbs()},
 		{APIGroups: []string{"barmancloud.cnpg.io"}, Resources: []string{"objectstores"}, Verbs: standardVerbs()},
 		{APIGroups: []string{""}, Resources: []string{"configmaps", "persistentvolumeclaims", "resourcequotas", "serviceaccounts", "services"}, Verbs: standardVerbs()},
 		{APIGroups: []string{""}, Resources: []string{"secrets"}, Verbs: []string{"create", "delete", "get", "patch", "update"}},

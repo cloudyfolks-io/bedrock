@@ -36,7 +36,7 @@ func newDatabase(t testing.TB, c client.Client, namespace, name string, edit fun
 
 func reconcileOnce(t testing.TB, c client.Client, db *v1alpha1.Database) ctrl.Result {
 	t.Helper()
-	result, err := (&Reconciler{Client: c}).Reconcile(context.Background(), ctrl.Request{NamespacedName: client.ObjectKeyFromObject(db)})
+	result, err := (&Reconciler{Client: c, Live: c}).Reconcile(context.Background(), ctrl.Request{NamespacedName: client.ObjectKeyFromObject(db)})
 	must(t, err)
 	return result
 }

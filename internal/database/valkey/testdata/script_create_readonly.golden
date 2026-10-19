@@ -1,0 +1,2 @@
+ACL SETUSER carol reset on #99ace9ac249ad4adce3e97d48cf9e52fd415e937dbe66c07e4c03f954a2d3ac1 resetkeys ~orders:* resetchannels &orders:* -@all +@read +@connection +exists +type +ttl +pttl +scan -@dangerous -@admin
+ACL SAVE

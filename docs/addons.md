@@ -1,14 +1,14 @@
 # Addons, audit and monitoring
 
 An addon is an optional part of Bedrock. An admin turns an addon on or off
-with an `Addon` object. This page describes the addons `kata`, `loki`, `clusters`, `cnpg` and `registry`,
+with an `Addon` object. This page describes the addons `kata`, `loki`, `clusters`, `cnpg`, `registry` and `percona-ps`,
 the API server audit log, the monitoring stack and the metering series.
 
 ## Addons
 
 The `Addon` kind has no namespace. The name of the object is the name of
 the addon. Bedrock creates one `Addon` for each addon it knows: `kata`,
-`loki`, `clusters`, `cnpg` and `registry`.
+`loki`, `clusters`, `cnpg`, `registry` and `percona-ps`.
 
 List the addons:
 
@@ -28,13 +28,13 @@ Turn an addon off:
 kubectl patch addon loki --type merge -p '{"spec":{"enabled":false}}'
 ```
 
-The Settings `kata.enabled`, `loki.enabled`, `clusters.enabled`, `cnpg.enabled` and `registry.enabled` set the first state of the
+The Settings `kata.enabled`, `loki.enabled`, `clusters.enabled`, `cnpg.enabled`, `registry.enabled` and `percona-ps.enabled` set the first state of the
 `Addon` objects when Bedrock creates them. After that, only the `Addon`
 object counts. A change of the Setting does not change a live addon.
 Bedrock never changes `spec.enabled` by itself.
 
 Bedrock applies the addon objects in a namespace. `kata` uses
-`kube-system`. `loki` uses `monitoring`. `cnpg` uses `cnpg`. `registry` uses `bedrock-registry`. Bedrock records the objects of
+`kube-system`. `loki` uses `monitoring`. `cnpg` uses `cnpg`. `registry` uses `bedrock-registry`. `percona-ps` uses `ps-operator`. Bedrock records the objects of
 each addon in the ConfigMap `bedrock-system/bedrock-addon-<name>-inventory`.
 Do not edit this ConfigMap. Bedrock uses it to remove the objects.
 
@@ -49,6 +49,7 @@ An addon can have values. Put them in `spec.values` as flat keys.
 | `loki` | `persistence.storage-class` | `block` | A DNS-1123 subdomain. |
 | `cnpg` | none | | |
 | `registry` | none | | |
+| `percona-ps` | none | | |
 
 An unknown key is an error. The condition `Ready` then shows the reason
 `InvalidValues`. Bedrock changes nothing until you fix the values.
@@ -265,6 +266,30 @@ The condition `RuntimeReady` shows the state of these objects.
 | `registry.webhook-blocked-cidrs` | private, shared, link-local and loopback ranges | Networks that the jobservice cannot reach, so a webhook cannot call into the cluster. |
 | `database.enabled` | `false` | Turns on the database platform. |
 | `database.backup.bucket` | `bedrock-database-backups` | Bucket of the platform database backups. |
+
+## Percona Server for MySQL
+
+The addon `percona-ps` installs the Percona Operator for MySQL in the
+namespace `ps-operator`. The managed MySQL databases of the `Database` kind
+need it. The addon is off by default. The Setting `percona-ps.enabled` sets
+the first state of the `Addon` object.
+
+- The chart `ps-operator` version 1.2.0 installs the operator. The operator
+  image is pinned by digest. The operator watches only the namespace
+  `bedrock-dbaas`.
+- The CRDs are part of the base install. They stay when you turn the addon
+  off, so no database is lost.
+- The release holds the seed `DatabaseVersion` objects `mysql-8.4` and
+  `mysql-9.7`. The server image and the companion images `backup`,
+  `haproxy`, `init` and `toolkit` are pinned by digest.
+- Valkey needs no addon. It works when the Setting `database.enabled` is
+  true.
+
+Turn the addon on:
+
+```
+kubectl patch addon percona-ps --type merge -p '{"spec":{"enabled":true}}'
+```
 
 ## Loki
 

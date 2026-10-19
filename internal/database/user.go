@@ -5,13 +5,10 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
-	"net"
-	"net/url"
 	"slices"
 	"sort"
 	"strconv"
 	"strings"
-	"time"
 
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/equality"
@@ -55,14 +52,6 @@ func UsernameOf(user v1alpha1.DatabaseUser) string {
 
 func UserSecretName(user v1alpha1.DatabaseUser) string { return user.Name + "-db" }
 
-func engineGrants(grants []v1alpha1.DatabaseGrant) []postgres.Grant {
-	out := make([]postgres.Grant, len(grants))
-	for i, grant := range grants {
-		out[i] = postgres.Grant{Database: grant.Database, Level: grant.Level}
-	}
-	return out
-}
-
 func GrantsHash(username string, grants []v1alpha1.DatabaseGrant) string {
 	entries := make([]string, len(grants))
 	for i, grant := range grants {
@@ -77,9 +66,6 @@ func validateUser(user v1alpha1.DatabaseUser) string {
 	username := UsernameOf(user)
 	if !postgres.ValidIdentifier(username) {
 		return "the user name " + username + " must match ^[a-z][a-z0-9_]{1,62}$; set spec.username"
-	}
-	if err := postgres.ReservedRole(username); err != nil {
-		return err.Error()
 	}
 	return ""
 }
@@ -121,6 +107,9 @@ func (r *UserReconciler) converge(ctx context.Context, user *v1alpha1.DatabaseUs
 	if err != nil || blocked != nil {
 		return orBlocked(blocked), err
 	}
+	if problem := userProblem(db.Spec.Engine, *user); problem != "" {
+		return accessOutcome{reason: ReasonInvalidSpec, message: problem, requeue: accessBackoff}, nil
+	}
 	endpoint, found := endpointOf(db)
 	if !found {
 		return accessOutcome{reason: ReasonEndpointPending, message: "the database has no address yet", requeue: accessPending}, nil
@@ -140,7 +129,7 @@ func (r *UserReconciler) converge(ctx context.Context, user *v1alpha1.DatabaseUs
 	if err != nil {
 		return accessOutcome{}, err
 	}
-	state, err := ensureUserSecret(ctx, r.Client, *user, project(db), endpoint)
+	state, err := ensureUserSecret(ctx, r.Client, *user, db.Spec.Engine, project(db), endpoint)
 	if errors.Is(err, errUserSecretTaken) {
 		return accessOutcome{reason: ReasonNameTaken, message: "the Secret " + UserSecretName(*user) + " exists and this user does not own it", requeue: accessBackoff}, nil
 	}
@@ -208,11 +197,6 @@ type userSecretState struct {
 	Synced   bool
 }
 
-func userURI(username, password string, endpoint Endpoint, database string) string {
-	userinfo := url.UserPassword(username, password)
-	return (&url.URL{Scheme: "postgresql", User: userinfo, Host: net.JoinHostPort(endpoint.Host, strconv.Itoa(int(endpoint.Port))), Path: "/" + database}).String()
-}
-
 func connectionDatabase(user v1alpha1.DatabaseUser) string {
 	if len(user.Spec.Grants) == 0 {
 		return engine.DefaultDatabase
@@ -225,20 +209,20 @@ func connectionDatabase(user v1alpha1.DatabaseUser) string {
 	return names[0]
 }
 
-func userSecretData(user v1alpha1.DatabaseUser, password string, endpoint Endpoint) map[string][]byte {
+func userSecretData(user v1alpha1.DatabaseUser, kind, password string, endpoint Endpoint) map[string][]byte {
 	username := UsernameOf(user)
 	return map[string][]byte{
 		"username": []byte(username),
 		"password": []byte(password),
 		"host":     []byte(endpoint.Host),
 		"port":     []byte(strconv.Itoa(int(endpoint.Port))),
-		"uri":      []byte(userURI(username, password, endpoint, connectionDatabase(user))),
+		"uri":      []byte(ConnectionURI(kind, username, password, endpoint.Host, endpoint.Port, connectionDatabase(user))),
 	}
 }
 
 var errUserSecretTaken = errors.New("a Secret of that name exists and the user does not own it")
 
-func ensureUserSecret(ctx context.Context, c client.Client, user v1alpha1.DatabaseUser, project Project, endpoint Endpoint) (userSecretState, error) {
+func ensureUserSecret(ctx context.Context, c client.Client, user v1alpha1.DatabaseUser, kind string, project Project, endpoint Endpoint) (userSecretState, error) {
 	key := client.ObjectKey{Namespace: user.Namespace, Name: UserSecretName(user)}
 	token := user.Annotations[v1alpha1.AnnotationResetPassword]
 	var state userSecretState
@@ -250,7 +234,7 @@ func ensureUserSecret(ctx context.Context, c client.Client, user v1alpha1.Databa
 			if err != nil {
 				return err
 			}
-			created := userSecret(user, project, userSecretData(user, password, endpoint), map[string]string{annotationPasswordSynced: unsynced, annotationResetApplied: token})
+			created := userSecret(user, project, userSecretData(user, kind, password, endpoint), map[string]string{annotationPasswordSynced: unsynced, annotationResetApplied: token})
 			state = userSecretState{Password: password}
 			return c.Create(ctx, created, client.FieldOwner(v1alpha1.DatabaseFieldManager))
 		}
@@ -272,7 +256,7 @@ func ensureUserSecret(ctx context.Context, c client.Client, user v1alpha1.Databa
 			secret.Annotations[annotationPasswordSynced] = unsynced
 			secret.Annotations[annotationResetApplied] = token
 		}
-		secret.Data = userSecretData(user, password, endpoint)
+		secret.Data = userSecretData(user, kind, password, endpoint)
 		state = userSecretState{Password: password, Synced: secret.Annotations[annotationPasswordSynced] == synced}
 		if equality.Semantic.DeepEqual(before.Data, secret.Data) && equality.Semantic.DeepEqual(before.Annotations, secret.Annotations) {
 			return nil
@@ -311,12 +295,10 @@ func markUserPasswordSynced(ctx context.Context, c client.Client, user v1alpha1.
 }
 
 func (r *UserReconciler) syncEngine(ctx context.Context, engineAccess Engine, user *v1alpha1.DatabaseUser, state userSecretState) (accessOutcome, error) {
-	username := UsernameOf(*user)
-	desired := GrantsHash(username, user.Spec.Grants)
-	grants := engineGrants(user.Spec.Grants)
-	timeout := engineAccess.Timeout
+	desired := accountHash(*user)
+	spec := userSpecOf(*user, state.Password)
 	if user.Status.AppliedGrants == "" {
-		if err := r.createRole(ctx, engineAccess, username, state.Password, grants, timeout); err != nil {
+		if err := r.createRole(ctx, engineAccess, spec); err != nil {
 			return accessOutcome{}, err
 		}
 		if err := markUserPasswordSynced(ctx, r.Client, *user); err != nil {
@@ -325,7 +307,7 @@ func (r *UserReconciler) syncEngine(ctx context.Context, engineAccess Engine, us
 		return readyOutcome(), r.recordGrants(ctx, user, desired)
 	}
 	if !state.Synced {
-		if err := resetUserPassword(ctx, engineAccess, username, state.Password, timeout); err != nil {
+		if err := resetAccountPassword(ctx, engineAccess, spec.Name, spec.Password); err != nil {
 			return accessOutcome{}, err
 		}
 		if err := markUserPasswordSynced(ctx, r.Client, *user); err != nil {
@@ -333,7 +315,7 @@ func (r *UserReconciler) syncEngine(ctx context.Context, engineAccess Engine, us
 		}
 	}
 	if user.Status.AppliedGrants != desired {
-		if err := setGrants(ctx, engineAccess, username, grants, timeout); err != nil {
+		if err := setAccountGrants(ctx, engineAccess, spec); err != nil {
 			return accessOutcome{}, err
 		}
 		return readyOutcome(), r.recordGrants(ctx, user, desired)
@@ -348,49 +330,15 @@ func (r *UserReconciler) recordGrants(ctx context.Context, user *v1alpha1.Databa
 	})
 }
 
-func (r *UserReconciler) createRole(ctx context.Context, engineAccess Engine, username, password string, grants []postgres.Grant, timeout time.Duration) error {
-	verifier, err := credential.ScramSHA256(password)
-	if err != nil {
+func (r *UserReconciler) createRole(ctx context.Context, engineAccess Engine, spec engine.UserSpec) error {
+	err := createAccount(ctx, engineAccess, spec)
+	if !engine.IsExists(err) {
 		return err
 	}
-	script, err := postgres.CreateUserScript(username, verifier, grants, timeout)
-	if err != nil {
+	if err := resetAccountPassword(ctx, engineAccess, spec.Name, spec.Password); err != nil {
 		return err
 	}
-	_, err = engineAccess.Run(ctx, script)
-	if !exec.IsKind(err, exec.KindExists) {
-		return err
-	}
-	if err := resetUserPassword(ctx, engineAccess, username, password, timeout); err != nil {
-		return err
-	}
-	return setGrants(ctx, engineAccess, username, grants, timeout)
-}
-
-func resetUserPassword(ctx context.Context, engineAccess Engine, username, password string, timeout time.Duration) error {
-	verifier, err := credential.ScramSHA256(password)
-	if err != nil {
-		return err
-	}
-	script, err := postgres.ResetPasswordScript(username, verifier, timeout)
-	if err != nil {
-		return err
-	}
-	_, err = engineAccess.Run(ctx, script)
-	return err
-}
-
-func setGrants(ctx context.Context, engineAccess Engine, username string, grants []postgres.Grant, timeout time.Duration) error {
-	databases, err := listDatabases(ctx, engineAccess)
-	if err != nil {
-		return err
-	}
-	script, err := postgres.SetGrantsScript(username, databases, grants, timeout)
-	if err != nil {
-		return err
-	}
-	_, err = engineAccess.Run(ctx, script)
-	return err
+	return setAccountGrants(ctx, engineAccess, spec)
 }
 
 func patchUserFinalizer(ctx context.Context, c client.Client, user *v1alpha1.DatabaseUser, change func(client.Object, string) bool) error {
@@ -446,15 +394,9 @@ func (r *UserReconciler) dropRole(ctx context.Context, db v1alpha1.Database, use
 	if err != nil {
 		return accessOutcome{}, err
 	}
-	databases, err := listDatabases(ctx, engineAccess)
-	if err == nil {
-		var script string
-		if script, err = postgres.DeleteUserScript(UsernameOf(user), databases, engineAccess.Timeout); err == nil {
-			_, err = engineAccess.Run(ctx, script)
-		}
-	}
+	err = dropAccount(ctx, engineAccess, UsernameOf(user))
 	switch {
-	case err == nil, exec.IsKind(err, exec.KindNotFound):
+	case err == nil, engine.IsNotFound(err):
 		return readyOutcome(), nil
 	case exec.IsKind(err, exec.KindOwnsObjects):
 		return accessOutcome{reason: ReasonUserOwnsObjects, message: "the user still owns objects that could not be moved", requeue: accessBackoff}, nil

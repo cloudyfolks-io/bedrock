@@ -519,4 +519,16 @@ Without the variable, every database step prints a line and passes.
 | `database_access` | A `DatabaseSchema` and a `DatabaseUser` become `Ready`. An exec in the engine pod shows the roles and the database. |
 | `database_backup_restore` | A backup completes, rows are inserted, a second `Database` restores to a time between two inserts and holds only the earlier rows. |
 | `database_isolation` | The project owner cannot read pods, secrets or CloudNativePG objects of `bedrock-dbaas`, cannot make a certificate and cannot write the catalog. |
+| `database_extras_prepare` | Turns the addon `percona-ps` on and makes the class `e2e-medium`. |
+| `database_mysql_create` | A MySQL `Database` becomes `Ready` with its Secret, its address and no engine pod in the project namespace. |
+| `database_valkey_create` | A Valkey `Database` becomes `Ready` with its Secret and its address. |
+| `database_vm_greetings` | A VM in the subnet reads the MySQL protocol byte `0a` and the Valkey reply `-NOAUTH`. |
+| `database_mysql_access` | A MySQL `DatabaseUser` and `DatabaseSchema` become `Ready` and exist in the engine. |
+| `database_valkey_access` | A Valkey `DatabaseUser` with `keyPrefix` can write inside the prefix and gets `NOPERM` outside it. |
+| `database_mysql_backup_and_restore` | A MySQL backup completes and a second `Database` restores the row. |
+| `database_mysql_restore_from_deleted` | A `Database` restores from the UID of a deleted source through the backup directory. |
+| `database_mysql_resize` | A class change and storage growth keep the proxy address. |
+| `database_postgres_upgrade` | A PostgreSQL upgrade makes a backup first, then a restart with `refresh-image` applies the current digest. |
+| `database_valkey_suspend_resume_logs` | Suspend and resume keep the address and the Secret, and the logs call answers through the proxy. |
+| `database_extras_cleanup` | Deletes the extra databases and the class `e2e-medium`. |
 | `database_cleanup` | Deleting both databases leaves no engine object. Only the two tombstones stay. |

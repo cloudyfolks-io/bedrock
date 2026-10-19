@@ -5,6 +5,7 @@ import "testing"
 func TestDatabaseCatalogKeysAndDefaults(t *testing.T) {
 	want := map[string]string{
 		"cnpg.enabled":                           "false",
+		"percona-ps.enabled":                     "false",
 		"database.enabled":                       "false",
 		"database.capacity.cpu":                  "32",
 		"database.capacity.memory":               "128Gi",
@@ -17,6 +18,7 @@ func TestDatabaseCatalogKeysAndDefaults(t *testing.T) {
 		"database.backup.bucket":                 "bedrock-database-backups",
 		"database.backup.retention-days":         "7",
 		"database.backup.retention-after-delete": "168h",
+		"database.upgrade.backup-max-age":        "26h",
 	}
 	for key, def := range want {
 		got, ok := Lookup(key)
@@ -54,6 +56,9 @@ func TestDatabaseSettingsValidate(t *testing.T) {
 		{"database.max-utilization", "NaN", false},
 		{"database.sweeper-dry-run", "false", true},
 		{"database.sweeper-dry-run", "no way", false},
+		{"database.upgrade.backup-max-age", "48h", true},
+		{"database.upgrade.backup-max-age", "30m", false},
+		{"database.upgrade.backup-max-age", "a day", false},
 		{"database.provision-timeout", "45m", true},
 		{"database.provision-timeout", "30s", false},
 		{"database.provision-timeout", "soon", false},

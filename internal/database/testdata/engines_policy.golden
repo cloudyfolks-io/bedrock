@@ -22,6 +22,7 @@
                   "values": [
                     "bedrock-system",
                     "cnpg",
+                    "ps-operator",
                     "monitoring"
                   ]
                 }
@@ -33,7 +34,7 @@
     ],
     "podSelector": {
       "matchLabels": {
-        "app.kubernetes.io/component": "engine"
+        "bedrock.cloudyfolks.io/database-role": "engine"
       }
     },
     "policyTypes": [

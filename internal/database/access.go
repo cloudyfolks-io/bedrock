@@ -13,6 +13,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	"github.com/cloudyfolks-io/bedrock/api/v1alpha1"
+	"github.com/cloudyfolks-io/bedrock/internal/database/engine"
 	"github.com/cloudyfolks-io/bedrock/internal/database/exec"
 	"github.com/cloudyfolks-io/bedrock/internal/database/postgres"
 )
@@ -28,6 +29,7 @@ const (
 )
 
 type Engine struct {
+	Kind    string
 	Run     Run
 	Timeout time.Duration
 }
@@ -42,8 +44,9 @@ func NewEngineFactory(reader client.Reader, base exec.Runner) EngineFactory {
 		}
 		runner := base
 		runner.Timeout = cfg.ExecTimeout
-		target := postgres.Target(PlatformNamespace, Name(db.UID))
+		target := TargetFor(db.Spec.Engine, Name(db.UID))
 		return Engine{
+			Kind:    db.Spec.Engine,
 			Timeout: cfg.ExecTimeout,
 			Run: func(ctx context.Context, script string) (string, error) {
 				return runner.Run(ctx, Name(db.UID), target, script)
@@ -74,8 +77,6 @@ func resolveDatabase(ctx context.Context, c client.Reader, namespace, name strin
 		return db, nil, err
 	case !db.DeletionTimestamp.IsZero():
 		return db, &accessOutcome{reason: ReasonDatabaseNotReady, message: "the database " + name + " is being deleted", requeue: accessBackoff}, nil
-	case db.Spec.Engine != v1alpha1.DatabaseEnginePostgreSQL:
-		return db, &accessOutcome{reason: ReasonEngineNotAvailable, message: "users and schemas support PostgreSQL only", requeue: accessBackoff}, nil
 	case !meta.IsStatusConditionTrue(db.Status.Conditions, ConditionEngineReady):
 		return db, &accessOutcome{reason: ReasonDatabaseNotReady, message: "the engine of the database " + name + " is not ready", requeue: accessPending}, nil
 	}
@@ -85,7 +86,7 @@ func resolveDatabase(ctx context.Context, c client.Reader, namespace, name strin
 func engineFailure(err error) *accessOutcome {
 	var rejected *exec.CommandError
 	switch {
-	case errors.As(err, &rejected):
+	case errors.As(err, &rejected), errors.Is(err, engine.ErrUnavailable):
 		return &accessOutcome{reason: ReasonEngineRejected, message: rejected.Error(), requeue: accessBackoff}
 	case errors.Is(err, exec.ErrNotReady), errors.Is(err, exec.ErrUnavailable), errors.Is(err, exec.ErrBusy), errors.Is(err, exec.ErrOutputTooLarge):
 		return &accessOutcome{reason: ReasonEngineUnavailable, message: err.Error(), requeue: accessPending}
@@ -93,8 +94,8 @@ func engineFailure(err error) *accessOutcome {
 	return nil
 }
 
-func listDatabases(ctx context.Context, engine Engine) ([]string, error) {
-	output, err := engine.Run(ctx, postgres.ListDatabasesScript(engine.Timeout))
+func listDatabases(ctx context.Context, access Engine) ([]string, error) {
+	output, err := access.Run(ctx, postgres.ListDatabasesScript(access.Timeout))
 	if err != nil {
 		return nil, err
 	}

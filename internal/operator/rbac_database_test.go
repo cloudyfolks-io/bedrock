@@ -117,3 +117,37 @@ func TestOperatorRoleCoversEveryTypeTheDatabaseControllersCache(t *testing.T) {
 		}
 	}
 }
+
+func TestOperatorRoleCoversMySQLValkeyAndEveryWatchedKind(t *testing.T) {
+	role, err := OperatorRole(rbacBundle(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	standard := []string{"create", "get", "list", "patch", "update", "watch", "delete"}
+	for _, resource := range [][2]string{
+		{"ps.percona.com", "perconaservermysqls"},
+		{"ps.percona.com", "perconaservermysqlbackups"},
+		{"ps.percona.com", "perconaservermysqlrestores"},
+		{"monitoring.coreos.com", "podmonitors"},
+	} {
+		for _, verb := range standard {
+			if !allows(role, resource[0], resource[1], verb) {
+				t.Errorf("missing %s on %s/%s", verb, resource[0], resource[1])
+			}
+		}
+	}
+	for _, resource := range [][2]string{
+		{"apps", "deployments"}, {"bedrock.cloudyfolks.io", "securitygroups"}, {"bedrock.cloudyfolks.io", "subnets"},
+		{"bedrock.cloudyfolks.io", "settings"}, {"bedrock.cloudyfolks.io", "addons"}, {"bedrock.cloudyfolks.io", "databases"},
+		{"bedrock.cloudyfolks.io", "databaseusers"}, {"bedrock.cloudyfolks.io", "databaseschemas"},
+	} {
+		for _, verb := range []string{"list", "watch"} {
+			if !allows(role, resource[0], resource[1], verb) {
+				t.Errorf("a watched kind misses %s: %s/%s", verb, resource[0], resource[1])
+			}
+		}
+	}
+	if !allows(role, "storage.k8s.io", "storageclasses", "get") {
+		t.Error("the operator must read the storage class to check volume expansion")
+	}
+}

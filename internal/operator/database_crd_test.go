@@ -77,6 +77,12 @@ func TestDatabaseValkeyHasNoBackups(t *testing.T) {
 	withBackup := newDatabase("cache-backup", "valkey")
 	withBackup.Spec.Backup.Enabled = true
 	createInvalid(t, c, withBackup, "a Valkey database has no backups")
+	withRestore := newDatabase("cache-restore", "valkey")
+	withRestore.Spec.Restore = &v1alpha1.DatabaseRestore{SourceUID: "abc"}
+	createInvalid(t, c, withRestore, "a Valkey database has no restore")
+	mysqlRestore := newDatabase("sql-restore", "mysql")
+	mysqlRestore.Spec.Restore = &v1alpha1.DatabaseRestore{SourceUID: "abc"}
+	createValid(t, c, mysqlRestore)
 	defaulted := newDatabase("cache-default", "valkey")
 	defaulted.Spec.Backup = v1alpha1.DatabaseBackupSpec{}
 	createValid(t, c, defaulted)
@@ -113,14 +119,16 @@ func TestDatabaseImmutableFields(t *testing.T) {
 	}
 }
 
-func TestDatabaseVersionCannotChange(t *testing.T) {
+func TestDatabaseVersionMayChangeAndTheControllerGatesTheUpgrade(t *testing.T) {
 	c, _ := StartTestEnv(t)
 
 	db := newDatabase("orders", "postgresql")
 	createValid(t, c, db)
 	upgraded := db.DeepCopy()
 	upgraded.Spec.Version = "18"
-	updateInvalid(t, c, upgraded, "version cannot change")
+	if err := c.Update(context.Background(), upgraded); err != nil {
+		t.Fatalf("the API accepts a version change and the controller gates it: %v", err)
+	}
 }
 
 func TestDatabaseRestoreIsImmutableOnceSet(t *testing.T) {

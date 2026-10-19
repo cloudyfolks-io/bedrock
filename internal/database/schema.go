@@ -10,7 +10,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 
 	"github.com/cloudyfolks-io/bedrock/api/v1alpha1"
-	"github.com/cloudyfolks-io/bedrock/internal/database/exec"
+	"github.com/cloudyfolks-io/bedrock/internal/database/engine"
 	"github.com/cloudyfolks-io/bedrock/internal/database/postgres"
 	"github.com/cloudyfolks-io/bedrock/internal/network"
 )
@@ -31,9 +31,6 @@ func validateSchema(schema v1alpha1.DatabaseSchema) string {
 	name := SchemaNameOf(schema)
 	if !postgres.ValidIdentifier(name) {
 		return "the database name " + name + " must match ^[a-z][a-z0-9_]{1,62}$; set spec.name"
-	}
-	if postgres.ReservedDatabase(name) {
-		return "the database name " + name + " is reserved"
 	}
 	return ""
 }
@@ -74,6 +71,12 @@ func (r *SchemaReconciler) converge(ctx context.Context, schema *v1alpha1.Databa
 	if err != nil || blocked != nil {
 		return orBlocked(blocked), err
 	}
+	if refusal := SchemaRefusal(db.Spec.Engine); refusal != nil {
+		return accessOutcome{reason: refusal.Reason, message: refusal.Message, requeue: accessBackoff}, nil
+	}
+	if problem := schemaProblem(db.Spec.Engine, SchemaNameOf(*schema)); problem != "" {
+		return accessOutcome{reason: ReasonInvalidSpec, message: problem, requeue: accessBackoff}, nil
+	}
 	if other, err := r.olderOwner(ctx, *schema); err != nil || other != "" {
 		if err != nil {
 			return accessOutcome{}, err
@@ -92,13 +95,9 @@ func (r *SchemaReconciler) converge(ctx context.Context, schema *v1alpha1.Databa
 	if err != nil {
 		return accessOutcome{}, err
 	}
-	script, err := postgres.CreateDatabaseScript(SchemaNameOf(*schema), engineAccess.Timeout)
-	if err != nil {
-		return accessOutcome{}, err
-	}
-	_, err = engineAccess.Run(ctx, script)
-	if exec.IsKind(err, exec.KindExists) {
-		err = r.adoptGroups(ctx, engineAccess, SchemaNameOf(*schema))
+	err = createDatabase(ctx, engineAccess, SchemaNameOf(*schema))
+	if engine.IsExists(err) {
+		err = r.adoptSchema(ctx, engineAccess, SchemaNameOf(*schema))
 	}
 	if err != nil {
 		if failure := engineFailure(err); failure != nil {
@@ -107,6 +106,13 @@ func (r *SchemaReconciler) converge(ctx context.Context, schema *v1alpha1.Databa
 		return accessOutcome{}, err
 	}
 	return readyOutcome(), r.recordName(ctx, schema)
+}
+
+func (r *SchemaReconciler) adoptSchema(ctx context.Context, engineAccess Engine, name string) error {
+	if engineAccess.Kind == v1alpha1.DatabaseEngineMySQL {
+		return nil
+	}
+	return r.adoptGroups(ctx, engineAccess, name)
 }
 
 func (r *SchemaReconciler) adoptGroups(ctx context.Context, engineAccess Engine, name string) error {
@@ -181,11 +187,7 @@ func (r *SchemaReconciler) finalize(ctx context.Context, schema v1alpha1.Databas
 	if err != nil {
 		return ctrl.Result{}, err
 	}
-	script, err := postgres.DeleteDatabaseScript(schema.Status.Name, engineAccess.Timeout)
-	if err != nil {
-		return ctrl.Result{}, err
-	}
-	if _, err := engineAccess.Run(ctx, script); err != nil && !exec.IsKind(err, exec.KindNotFound) {
+	if err := dropDatabase(ctx, engineAccess, schema.Status.Name); err != nil && !engine.IsNotFound(err) {
 		if failure := engineFailure(err); failure != nil {
 			return result(*failure), r.writeStatus(ctx, schema, *failure)
 		}

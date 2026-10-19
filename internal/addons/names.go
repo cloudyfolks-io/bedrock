@@ -8,6 +8,7 @@ const (
 	Clusters             = "clusters"
 	CNPG                 = "cnpg"
 	Registry             = "registry"
+	PerconaPS            = "percona-ps"
 	ConditionPreflight   = "Preflight"
 	LabelKVM             = "bedrock.cloudyfolks.io/kvm"
 	AnnotationConfigHash = "bedrock.cloudyfolks.io/config-hash"

@@ -16,6 +16,7 @@ const (
 	ReasonGateWaiting       = "GateNotReady"
 	ReasonProxyWaiting      = "EndpointNotReady"
 	ReasonProvisionTimedOut = "ProvisionTimeout"
+	ReasonUpgrading         = "Upgrading"
 
 	backupStaleAfter = 36 * time.Hour
 )
@@ -31,6 +32,7 @@ type Observation struct {
 	GateReady        bool
 	EndpointReady    bool
 	Refusal          *Refusal
+	Upgrading        bool
 	Age              time.Duration
 	ProvisionTimeout time.Duration
 }
@@ -49,6 +51,9 @@ func Phase(o Observation) Verdict {
 		return Verdict{Phase: v1alpha1.DatabasePhaseSuspended, Reason: ReasonSuspended, Message: "the database is suspended"}
 	}
 	reason, message := firstProblem(o)
+	if o.Upgrading {
+		return Verdict{Phase: v1alpha1.DatabasePhaseUpgrading, Reason: upgradeReason(reason), Message: message}
+	}
 	if reason == "" {
 		return Verdict{Phase: v1alpha1.DatabasePhaseReady, Reason: ReasonReady, Message: "the database accepts connections"}
 	}
@@ -61,6 +66,13 @@ func Phase(o Observation) Verdict {
 		return Verdict{Phase: v1alpha1.DatabasePhaseRestoring, Reason: reason, Message: message}
 	}
 	return Verdict{Phase: v1alpha1.DatabasePhaseProvisioning, Reason: reason, Message: message}
+}
+
+func upgradeReason(problem string) string {
+	if problem == ReasonBackupRequired {
+		return problem
+	}
+	return ReasonUpgrading
 }
 
 func firstProblem(o Observation) (string, string) {

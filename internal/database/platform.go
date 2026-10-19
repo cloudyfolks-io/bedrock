@@ -15,7 +15,7 @@ import (
 	"github.com/cloudyfolks-io/bedrock/internal/ssa"
 )
 
-var operatorNamespaces = []string{"bedrock-system", "cnpg", "monitoring"}
+var operatorNamespaces = []string{"bedrock-system", "cnpg", "ps-operator", "monitoring"}
 
 func platformLabels(kind, name string) map[string]string {
 	return map[string]string{v1alpha1.LabelKind: kind, v1alpha1.LabelName: name}
@@ -45,7 +45,7 @@ func EnginesPolicyObject() *networkingv1.NetworkPolicy {
 		TypeMeta:   metav1.TypeMeta{APIVersion: "networking.k8s.io/v1", Kind: "NetworkPolicy"},
 		ObjectMeta: metav1.ObjectMeta{Name: EnginesPolicy, Namespace: PlatformNamespace, Labels: platformLabels("NetworkPolicy", EnginesPolicy)},
 		Spec: networkingv1.NetworkPolicySpec{
-			PodSelector: metav1.LabelSelector{MatchLabels: map[string]string{LabelComponent: ComponentEngine}},
+			PodSelector: metav1.LabelSelector{MatchLabels: map[string]string{LabelRole: RoleEngine}},
 			PolicyTypes: []networkingv1.PolicyType{networkingv1.PolicyTypeIngress},
 			Ingress: []networkingv1.NetworkPolicyIngressRule{{From: []networkingv1.NetworkPolicyPeer{{
 				NamespaceSelector: &metav1.LabelSelector{MatchExpressions: []metav1.LabelSelectorRequirement{{

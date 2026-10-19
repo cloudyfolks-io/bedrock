@@ -19,6 +19,7 @@ func addonsRules() []rbacv1.PolicyRule {
 		{APIGroups: []string{rbacv1.GroupName}, Resources: []string{"clusterroles", "clusterrolebindings"}, Verbs: standardVerbs()},
 		{APIGroups: []string{"monitoring.coreos.com"}, Resources: []string{"servicemonitors", "prometheusrules"}, Verbs: standardVerbs()},
 		{APIGroups: []string{"node.k8s.io"}, Resources: []string{"runtimeclasses"}, Verbs: standardVerbs()},
+		{APIGroups: []string{"monitoring.coreos.com"}, Resources: []string{"prometheusrules"}, Verbs: standardVerbs()},
 		{APIGroups: []string{v1alpha1.GroupVersion.Group}, Resources: []string{"addons", "addons/status", "addons/finalizers", "databaseversions", "databaseclasses"}, Verbs: standardVerbs()},
 	}
 }

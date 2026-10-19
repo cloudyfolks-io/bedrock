@@ -154,13 +154,14 @@ func markAppliedVersion(ctx context.Context, c client.Client, db *v1alpha1.Datab
 }
 
 func checkExisting(catalog Catalog, db v1alpha1.Database, cluster *unstructured.Unstructured) *Refusal {
-	if applied := db.Annotations[annotationAppliedVersion]; applied != "" && applied != db.Spec.Version {
+	if applied := db.Annotations[annotationAppliedVersion]; db.Status.Applied == nil && applied != "" && applied != db.Spec.Version {
 		return refusal(ReasonUpgradeNotSupported, "the version of a running database cannot change from %s to %s", applied, db.Spec.Version)
 	}
-	if have, _, _ := unstructured.NestedInt64(cluster.Object, "spec", "instances"); have != 0 && int(have) != Instances(catalog.Class) {
+	postgresql := db.Spec.Engine == v1alpha1.DatabaseEnginePostgreSQL
+	if have, _, _ := unstructured.NestedInt64(cluster.Object, "spec", "instances"); postgresql && have != 0 && int(have) != Instances(catalog.Class) {
 		return refusal(ReasonClassChangeNotSupported, "the class %s changes the number of instances from %d to %d: a class change must keep highAvailability", catalog.Class.Name, have, Instances(catalog.Class))
 	}
-	if size, _, _ := unstructured.NestedString(cluster.Object, "spec", "storage", "size"); size != "" {
+	if size, _, _ := unstructured.NestedString(cluster.Object, "spec", "storage", "size"); postgresql && size != "" {
 		if current, err := resource.ParseQuantity(size); err == nil && int64(db.Spec.StorageGi)*1024*1024*1024 < current.Value() {
 			return refusal(ReasonStorageOutOfRange, "storageGi cannot shrink below %s", size)
 		}

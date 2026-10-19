@@ -89,7 +89,7 @@ func GateObjects(in GateInput) ([]*unstructured.Unstructured, error) {
 	deployment, err := deploymentOf(proxyDeployment{
 		Name: GateName(db.UID), Namespace: PlatformNamespace, Labels: labels, PodLabels: podLabels, Selector: gateSelector(db.UID),
 		PodAnnotations: map[string]string{annotationConfigHash: configHash(config, strconv.FormatInt(in.Revision, 10))},
-		Image:          in.Image, Port: in.Port,
+		Image:          in.Image, Port: in.Port, Suspended: db.Spec.Suspended,
 		Volume: projectedCerts(ServerSecretName(db.UID), CombinedPEMKey, CombinedPEMFile, GateName(db.UID)),
 	})
 	if err != nil {
@@ -112,15 +112,10 @@ func EnginePolicyObject(db v1alpha1.Database) (*unstructured.Unstructured, error
 		TypeMeta:   metav1.TypeMeta{APIVersion: "networking.k8s.io/v1", Kind: "NetworkPolicy"},
 		ObjectMeta: metav1.ObjectMeta{Name: uid, Namespace: PlatformNamespace},
 		Spec: networkingv1.NetworkPolicySpec{
-			PodSelector: metav1.LabelSelector{MatchLabels: map[string]string{LabelInstance: uid, LabelComponent: ComponentEngine}},
+			PodSelector: metav1.LabelSelector{MatchLabels: map[string]string{LabelInstance: uid, LabelRole: RoleEngine}},
 			PolicyTypes: []networkingv1.PolicyType{networkingv1.PolicyTypeIngress},
 			Ingress: []networkingv1.NetworkPolicyIngressRule{{From: []networkingv1.NetworkPolicyPeer{{
-				PodSelector: &metav1.LabelSelector{
-					MatchLabels: map[string]string{LabelInstance: uid},
-					MatchExpressions: []metav1.LabelSelectorRequirement{{
-						Key: LabelComponent, Operator: metav1.LabelSelectorOpIn, Values: []string{ComponentGate, ComponentEngine},
-					}},
-				},
+				PodSelector: &metav1.LabelSelector{MatchLabels: map[string]string{LabelInstance: uid}},
 			}}}},
 		},
 	})

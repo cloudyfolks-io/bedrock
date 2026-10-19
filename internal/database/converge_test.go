@@ -347,18 +347,19 @@ func TestBackupStatusAndHealthComeFromTheBackupObjects(t *testing.T) {
 	}
 }
 
-func TestAVersionChangeOfARunningDatabaseIsRefusedAndNothingIsRendered(t *testing.T) {
+func TestAVersionChangeThatIsNoUpgradeTargetIsRefusedAndNothingIsRendered(t *testing.T) {
 	w := newWorld(t, nil)
 	ctx := context.Background()
 	w.bringUp()
-	if w.db.Annotations[annotationAppliedVersion] != "17" {
-		t.Fatalf("annotations %v", w.db.Annotations)
+	if w.db.Annotations[annotationAppliedVersion] != "17" || w.db.Status.Applied == nil || w.db.Status.Applied.Version != "17" {
+		t.Fatalf("annotations %v applied %+v", w.db.Annotations, w.db.Status.Applied)
 	}
-	w.db.Annotations[annotationAppliedVersion] = "16"
+	w.addVersion(v1alpha1.DatabaseVersionSpec{Engine: "postgresql", Major: "16", Image: strings.Replace(worldPostgresImage, "17.9", "16.15", 1), Port: 5432, Enabled: true})
+	w.db.Spec.Version = "16"
 	must(t, w.c.Update(ctx, w.db))
 	image, _, _ := unstructured.NestedString(w.cluster().Object, "spec", "imageName")
 	w.reconcile()
-	if w.reason() != ReasonUpgradeNotSupported || w.phase() != "Unhealthy" {
+	if w.reason() != ReasonVersionNotAllowed || w.phase() != "Unhealthy" {
 		t.Fatalf("phase %s reason %s", w.phase(), w.reason())
 	}
 	if after, _, _ := unstructured.NestedString(w.cluster().Object, "spec", "imageName"); after != image {

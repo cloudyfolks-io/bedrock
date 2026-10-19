@@ -16,6 +16,7 @@ import (
 	"github.com/cloudyfolks-io/bedrock/api/v1alpha1"
 	"github.com/cloudyfolks-io/bedrock/internal/database/engine"
 	"github.com/cloudyfolks-io/bedrock/internal/database/exec"
+	"github.com/cloudyfolks-io/bedrock/internal/database/mysql"
 	"github.com/cloudyfolks-io/bedrock/internal/database/postgres"
 	"github.com/cloudyfolks-io/bedrock/internal/network"
 	"github.com/cloudyfolks-io/bedrock/internal/objectstorage/s3"
@@ -36,6 +37,10 @@ type Observed struct {
 	Instances     int32
 	Backup        *v1alpha1.DatabaseBackupStatus
 	Refusal       *Refusal
+	Upgrading     bool
+	Image         string
+	Applied       *v1alpha1.DatabaseApplied
+	Stats         *v1alpha1.DatabaseStats
 }
 
 type flow struct {
@@ -47,6 +52,9 @@ type flow struct {
 	pods    Pods
 	port    int
 	exists  bool
+	plan    Result
+	image   string
+	dest    string
 }
 
 func (r *Reconciler) converge(ctx context.Context, cfg Config, project Project, db *v1alpha1.Database) (Observed, error) {
@@ -85,7 +93,7 @@ func (r *Reconciler) prepare(ctx context.Context, in *flow) (*Refusal, error) {
 	} else if refused := checkExisting(catalog, db, cluster); refused != nil {
 		return refused, nil
 	}
-	steps := []func(context.Context, *flow) (*Refusal, error){r.preparePlatform, r.prepareCapacity, r.prepareSubnet, r.preparePods, r.prepareVIPRange, r.prepareBackupStore, r.prepareRestore}
+	steps := []func(context.Context, *flow) (*Refusal, error){r.preparePlatform, r.prepareCapacity, r.prepareSubnet, r.preparePods, r.prepareVIPRange, r.prepareBackupStore, r.prepareRestore, r.prepareOperations}
 	for _, step := range steps {
 		if refused, err := step(ctx, in); err != nil || refused != nil {
 			return refused, err
@@ -95,13 +103,13 @@ func (r *Reconciler) prepare(ctx context.Context, in *flow) (*Refusal, error) {
 }
 
 func (r *Reconciler) clusterOf(ctx context.Context, db v1alpha1.Database) (*unstructured.Unstructured, bool, error) {
-	cluster := &unstructured.Unstructured{}
-	cluster.SetGroupVersionKind(ClusterGVK)
-	err := r.Live.Get(ctx, client.ObjectKey{Namespace: PlatformNamespace, Name: Name(db.UID)}, cluster)
+	primary := &unstructured.Unstructured{}
+	primary.SetGroupVersionKind(primaryGVK(db.Spec.Engine))
+	err := r.Live.Get(ctx, client.ObjectKey{Namespace: PlatformNamespace, Name: Name(db.UID)}, primary)
 	if apierrors.IsNotFound(err) || meta.IsNoMatchError(err) {
 		return nil, false, nil
 	}
-	return cluster, err == nil, err
+	return primary, err == nil, err
 }
 
 func (r *Reconciler) preparePlatform(ctx context.Context, in *flow) (*Refusal, error) {
@@ -187,7 +195,48 @@ func (r *Reconciler) prepareRestore(ctx context.Context, in *flow) (*Refusal, er
 		}
 		return nil, err
 	}
-	return CheckRestore(check), nil
+	if refused := CheckRestore(check); refused != nil || in.db.Spec.Engine != v1alpha1.DatabaseEngineMySQL {
+		return refused, nil
+	}
+	destination, err := r.mysqlDestination(ctx, in.cfg, in.db.Spec.Restore.SourceUID)
+	switch {
+	case errors.Is(err, mysql.ErrNoBackup):
+		return refusal(ReasonRestoreSourceEmpty, "the backup prefix %s/ holds no MySQL backup directory", in.db.Spec.Restore.SourceUID), nil
+	case s3.IsUnavailable(err):
+		return refusal(ReasonBackupStoreFailed, "the object store is not reachable"), nil
+	case err != nil:
+		return nil, err
+	}
+	in.dest = destination
+	return nil, nil
+}
+
+func (r *Reconciler) prepareOperations(ctx context.Context, in *flow) (*Refusal, error) {
+	db := *in.db
+	in.image = imageFor(db, in.catalog.Version.Spec.Image, Result{})
+	if !in.exists || db.Status.Applied == nil {
+		return nil, nil
+	}
+	facts, err := r.operationFacts(ctx, in)
+	if err != nil {
+		return nil, err
+	}
+	in.plan = Plan(*db.Status.Applied, db.Spec, facts, db.Annotations)
+	in.image = imageFor(db, in.catalog.Version.Spec.Image, in.plan)
+	switch {
+	case in.plan.Refusal != nil:
+		return in.plan.Refusal, nil
+	case in.plan.Hold != nil:
+		return in.plan.Hold, r.requestUpgradeBackup(ctx, in)
+	}
+	return nil, nil
+}
+
+func (r *Reconciler) requestUpgradeBackup(ctx context.Context, in *flow) error {
+	if !in.plan.RequestBackup {
+		return nil
+	}
+	return ApplyPlan(ctx, r.Client, in.db.Spec.Engine, r.specOf(in), Result{RequestBackup: true}, r.now())
 }
 
 func (r *Reconciler) apply(ctx context.Context, in *flow) (*Refusal, error) {
@@ -218,7 +267,7 @@ func (r *Reconciler) apply(ctx context.Context, in *flow) (*Refusal, error) {
 func (r *Reconciler) specOf(in *flow) engine.Spec {
 	db := *in.db
 	labels, _ := OwnedMetadata(db, in.project)
-	podLabels := map[string]string{LabelComponent: ComponentEngine}
+	podLabels := map[string]string{LabelComponent: ComponentEngine, LabelRole: RoleEngine}
 	for key, value := range labels {
 		podLabels[key] = value
 	}
@@ -227,7 +276,7 @@ func (r *Reconciler) specOf(in *flow) engine.Spec {
 		Name:         Name(db.UID),
 		Namespace:    PlatformNamespace,
 		Version:      db.Spec.Version,
-		Image:        in.catalog.Version.Spec.Image,
+		Image:        in.image,
 		CPUMilli:     int(class.CPU.MilliValue()),
 		MemoryMi:     int(class.Memory.Value() >> 20),
 		StorageGi:    int(db.Spec.StorageGi),
@@ -236,22 +285,42 @@ func (r *Reconciler) specOf(in *flow) engine.Spec {
 		Labels:       labels,
 		PodLabels:    podLabels,
 		Backup:       BackupSpecOf(in.cfg, r.Store, db.Spec.Backup.Enabled),
-		Restore:      RestoreSpecOf(db),
+		Restore:      restoreOf(db, in.dest),
+		Images:       in.catalog.Version.Spec.Companions,
+		Suspended:    db.Spec.Suspended,
 	}
 }
 
+func restoreOf(db v1alpha1.Database, destination string) *engine.RestoreSpec {
+	restore := RestoreSpecOf(db)
+	if restore != nil {
+		restore.Destination = destination
+	}
+	return restore
+}
+
 func (r *Reconciler) applyEngine(ctx context.Context, in *flow) error {
-	objects, err := postgres.Render(r.specOf(in))
+	spec := r.specOf(in)
+	objects, err := renderFor(in.db.Spec.Engine, spec)
 	if err != nil {
 		return err
 	}
 	for _, obj := range objects {
-		if err := ssa.Apply(ctx, r.Client, Adopt(obj, *in.db, in.project), v1alpha1.DatabaseFieldManager); err != nil {
+		err := ssa.Apply(ctx, r.Client, Adopt(obj, *in.db, in.project), v1alpha1.DatabaseFieldManager)
+		if meta.IsNoMatchError(err) && obj.GroupVersionKind() == PodMonitorGVK {
+			continue
+		}
+		if err != nil {
 			return fmt.Errorf("%s %s: %w", obj.GetKind(), obj.GetName(), err)
 		}
 	}
-	if err := r.applyHibernation(ctx, *in.db); err != nil {
+	if err := ApplyPlan(ctx, r.Client, in.db.Spec.Engine, spec, in.plan, r.now()); err != nil {
 		return err
+	}
+	if in.db.Spec.Engine == v1alpha1.DatabaseEnginePostgreSQL {
+		if err := r.applyHibernation(ctx, *in.db); err != nil {
+			return err
+		}
 	}
 	return markAppliedVersion(ctx, r.Client, in.db)
 }
@@ -399,22 +468,27 @@ func (r *Reconciler) observe(ctx context.Context, in *flow, refused *Refusal) (O
 	if observed.EndpointReady, err = r.readyDeployment(ctx, client.ObjectKey{Namespace: db.Namespace, Name: EndpointName(*db)}); err != nil {
 		return observed, err
 	}
-	cluster := &unstructured.Unstructured{}
-	cluster.SetGroupVersionKind(ClusterGVK)
-	err = r.Live.Get(ctx, client.ObjectKey{Namespace: PlatformNamespace, Name: Name(db.UID)}, cluster)
+	primary := &unstructured.Unstructured{}
+	primary.SetGroupVersionKind(primaryGVK(db.Spec.Engine))
+	err = r.Live.Get(ctx, client.ObjectKey{Namespace: PlatformNamespace, Name: Name(db.UID)}, primary)
+	observed.Stats = db.Status.Stats
 	switch {
 	case apierrors.IsNotFound(err) || meta.IsNoMatchError(err):
 		observed.EngineReason = "the engine objects are not made yet"
 	case err != nil:
 		return observed, err
 	default:
-		health := postgres.Health(cluster)
+		health := healthFor(db.Spec.Engine, primary)
 		observed.EngineReady, observed.EngineReason = health.Ready, health.Reason
-		ready, _, _ := unstructured.NestedInt64(cluster.Object, "status", "readyInstances")
-		observed.Instances = int32(ready)
+		observed.Instances = readyInstances(db.Spec.Engine, primary)
+	}
+	observed.Upgrading = in.plan.Hold != nil || hasStep(in.plan.Steps, StepUpgrade)
+	if refused == nil {
+		observed.Image = in.image
 	}
 	if observed.EngineReady && refused == nil {
 		r.settleEngine(ctx, in, &observed)
+		r.recordApplied(in, primary, &observed)
 	}
 	observed.Backup = r.observeBackup(ctx, in)
 	return observed, nil
@@ -435,11 +509,24 @@ func (r *Reconciler) settleEngine(ctx context.Context, in *flow, observed *Obser
 		observed.EngineReady, observed.EngineReason = false, engineStepReason(err)
 		return
 	}
+	if statsDue(*in.db, r.now()) {
+		observed.Stats = SampleStats(ctx, in.db.Spec.Engine, access.Run, in.db.Status.Stats, r.now())
+	}
 	if address, found := AddressOf(*in.db, in.subnet.Name); found {
 		if err := EnsureAdminCopy(ctx, r.Client, *in.db, in.project, address, int32(in.port)); err != nil {
 			observed.EngineReason = "the admin secret could not be copied"
 		}
 	}
+}
+
+func (r *Reconciler) recordApplied(in *flow, primary *unstructured.Unstructured, observed *Observed) {
+	db := *in.db
+	if hasStep(in.plan.Steps, StepUpgrade) && reportedImage(db.Spec.Engine, primary) != in.image {
+		return
+	}
+	applied := appliedOf(db)
+	observed.Applied = &applied
+	observed.Upgrading = false
 }
 
 func engineStepReason(err error) string {
@@ -470,6 +557,10 @@ func (r *Reconciler) observeBackup(ctx context.Context, in *flow) *v1alpha1.Data
 		size, sampledAt = sampled, at
 	}
 	return BackupStatusOf(backups, r.now(), size, sampledAt)
+}
+
+func statsDue(db v1alpha1.Database, now time.Time) bool {
+	return StatsRequeueIn(db.Status.Stats, now) == 0
 }
 
 func requeueFor(verdict Verdict) time.Duration {

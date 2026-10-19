@@ -84,7 +84,9 @@ dump_workloads() {
   kubectl -n "$S3_NS" logs deploy/seaweedfs --tail=200 || true
   kubectl -n "$S3_NS" logs job/make-bucket --tail=50 || true
   echo "--- databases"
-  kubectl -n bedrock-dbaas get all,clusters.postgresql.cnpg.io,scheduledbackups.postgresql.cnpg.io,backups.postgresql.cnpg.io,objectstores.barmancloud.cnpg.io,certificates.cert-manager.io,networkpolicies,configmaps -o wide || true
+  kubectl -n bedrock-dbaas get all,perconaservermysqls.ps.percona.com,perconaservermysqlbackups.ps.percona.com,clusters.postgresql.cnpg.io,scheduledbackups.postgresql.cnpg.io,backups.postgresql.cnpg.io,objectstores.barmancloud.cnpg.io,certificates.cert-manager.io,networkpolicies,configmaps -o wide || true
+  kubectl -n ps-operator get pods -o wide || true
+  kubectl -n ps-operator logs deploy/percona-ps-ps-operator --tail=150 || true
   kubectl -n cnpg get pods -o wide || true
   kubectl -n cnpg logs deploy/cnpg-cloudnative-pg --tail=150 || true
   kubectl -n cnpg logs deploy/barman-cloud --tail=100 || true
@@ -231,6 +233,18 @@ steps=(
   database_access
   database_backup_restore
   database_isolation
+  database_extras_prepare
+  database_mysql_create
+  database_valkey_create
+  database_vm_greetings
+  database_mysql_access
+  database_valkey_access
+  database_mysql_backup_and_restore
+  database_mysql_restore_from_deleted
+  database_mysql_resize
+  database_postgres_upgrade
+  database_valkey_suspend_resume_logs
+  database_extras_cleanup
   database_cleanup
   registry_enable
   registry_project_and_names
