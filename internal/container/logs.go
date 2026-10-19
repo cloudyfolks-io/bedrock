@@ -135,10 +135,11 @@ func serveLogs(ctx context.Context, d Deps, c client.Client, key client.ObjectKe
 	if err != nil {
 		return err
 	}
-	if _, err := loadContainer(ctx, c, key); err != nil {
+	container, err := loadContainer(ctx, c, key)
+	if err != nil {
 		return err
 	}
-	all, err := podsOf(ctx, c, key)
+	all, err := podsOf(ctx, c, container)
 	if err != nil {
 		return err
 	}

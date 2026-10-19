@@ -41,6 +41,7 @@ func requireExactly(t *testing.T, rules []rbacv1.PolicyRule, want []grant) {
 func TestOperatorRules(t *testing.T) {
 	requireExactly(t, OperatorRules(), []grant{
 		{"apps", "deployments", "create"}, {"apps", "deployments", "get"}, {"apps", "deployments", "list"}, {"apps", "deployments", "patch"}, {"apps", "deployments", "watch"},
+		{"apps", "replicasets", "list"}, {"apps", "replicasets", "watch"},
 		{"autoscaling", "horizontalpodautoscalers", "create"}, {"autoscaling", "horizontalpodautoscalers", "delete"}, {"autoscaling", "horizontalpodautoscalers", "get"},
 		{"autoscaling", "horizontalpodautoscalers", "list"}, {"autoscaling", "horizontalpodautoscalers", "patch"}, {"autoscaling", "horizontalpodautoscalers", "watch"},
 		{"node.k8s.io", "runtimeclasses", "get"}, {"node.k8s.io", "runtimeclasses", "list"}, {"node.k8s.io", "runtimeclasses", "watch"},
@@ -53,6 +54,7 @@ func TestOperatorRules(t *testing.T) {
 func TestProxyRules(t *testing.T) {
 	requireExactly(t, ProxyRules(), []grant{
 		{"bedrock.cloudyfolks.io", "containers", "get"}, {"bedrock.cloudyfolks.io", "containers", "patch"},
+		{"apps", "deployments", "get"}, {"apps", "replicasets", "list"},
 		{"", "pods", "list"},
 		{"", "pods/log", "get"},
 		{"", "pods/exec", "create"},

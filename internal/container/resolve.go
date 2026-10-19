@@ -156,12 +156,12 @@ func heldByOther(ips []*unstructured.Unstructured, address, namespace string, ow
 }
 
 func (r Resolver) podNames(ctx context.Context, c v1alpha1.Container) ([]string, error) {
-	var pods corev1.PodList
-	if err := r.Client.List(ctx, &pods, client.InNamespace(c.Namespace), client.MatchingLabels(SelectorLabels(c.Name))); err != nil {
+	pods, err := network.PodsOfContainer(ctx, r.Client, c)
+	if err != nil {
 		return nil, err
 	}
-	names := make([]string, len(pods.Items))
-	for i, pod := range pods.Items {
+	names := make([]string, len(pods))
+	for i, pod := range pods {
 		names[i] = pod.Name
 	}
 	return names, nil

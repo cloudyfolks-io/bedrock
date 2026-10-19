@@ -29,12 +29,12 @@ func loadContainer(ctx context.Context, c client.Client, key client.ObjectKey) (
 	return container, nil
 }
 
-func podsOf(ctx context.Context, c client.Client, key client.ObjectKey) ([]corev1.Pod, error) {
-	var list corev1.PodList
-	if err := c.List(ctx, &list, client.InNamespace(key.Namespace), client.MatchingLabels(SelectorLabels(key.Name))); err != nil {
+func podsOf(ctx context.Context, c client.Client, container v1alpha1.Container) ([]corev1.Pod, error) {
+	owned, err := network.PodsOfContainer(ctx, c, container)
+	if err != nil {
 		return nil, internalError(err)
 	}
-	pods := slices.DeleteFunc(list.Items, func(pod corev1.Pod) bool { return !pod.DeletionTimestamp.IsZero() })
+	pods := slices.DeleteFunc(owned, func(pod corev1.Pod) bool { return !pod.DeletionTimestamp.IsZero() })
 	slices.SortFunc(pods, func(a, b corev1.Pod) int { return strings.Compare(a.Name, b.Name) })
 	return pods, nil
 }

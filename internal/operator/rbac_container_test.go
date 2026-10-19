@@ -30,6 +30,8 @@ func TestOperatorRoleAllowsContainers(t *testing.T) {
 			{"apps", "deployments", "create"},
 			{"apps", "deployments", "list"},
 			{"apps", "deployments", "watch"},
+			{"apps", "replicasets", "list"},
+			{"apps", "replicasets", "watch"},
 			{"apps", "deployments", "patch"},
 			{"autoscaling", "horizontalpodautoscalers", "create"},
 			{"autoscaling", "horizontalpodautoscalers", "patch"},
