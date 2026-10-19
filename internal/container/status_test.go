@@ -2,6 +2,7 @@ package container
 
 import (
 	"reflect"
+	"strings"
 	"testing"
 	"time"
 
@@ -22,6 +23,13 @@ func TestDecide(t *testing.T) {
 	progressFalse.ProgressingFalse, progressFalse.ProgressMessage = true, "ReplicaSet web-1 has timed out progressing."
 	unsettled := settled(1, 1, 1, 1)
 	unsettled.Settled = false
+	quotaText := `pods "web-1-x" is forbidden: exceeded quota: project-quota, requested: requests.cpu=1, used: requests.cpu=4, limited: requests.cpu=4`
+	quotaRefused := settled(3, 2, 2, 2)
+	quotaRefused.QuotaMessage = quotaText
+	quotaAndDeadline := progressFalse
+	quotaAndDeadline.QuotaMessage = quotaText
+	quotaStopped := settled(0, 0, 0, 0)
+	quotaStopped.QuotaMessage = quotaText
 	cases := []struct {
 		name       string
 		deployment DeploymentStatus
@@ -38,6 +46,9 @@ func TestDecide(t *testing.T) {
 		{"rolling", settled(2, 3, 1, 2), nil, v1alpha1.ContainerPhasePending, ReasonDeploying, "2 of 2 replicas are ready"},
 		{"not observed yet", unsettled, nil, v1alpha1.ContainerPhasePending, ReasonDeploying, "1 of 1 replicas are ready"},
 		{"no deployment yet", DeploymentStatus{Desired: 1}, nil, v1alpha1.ContainerPhasePending, ReasonDeploying, "0 of 1 replicas are ready"},
+		{"quota refused a replica", quotaRefused, nil, v1alpha1.ContainerPhasePending, ReasonQuotaExceeded, `pods "web-1-x" is forbidden: exceeded quota: project-quota, requested: requests.cpu=1, used: requests.cpu=4, limited: requests.cpu=4`},
+		{"quota wins over the progress deadline", quotaAndDeadline, nil, v1alpha1.ContainerPhasePending, ReasonQuotaExceeded, `pods "web-1-x" is forbidden: exceeded quota: project-quota, requested: requests.cpu=1, used: requests.cpu=4, limited: requests.cpu=4`},
+		{"a stopped container ignores the quota", quotaStopped, nil, v1alpha1.ContainerPhaseStopped, ReasonStopped, "the container is stopped"},
 		{"progress deadline", progressFalse, nil, v1alpha1.ContainerPhaseFailed, ReasonFailed, "ReplicaSet web-1 has timed out progressing."},
 		{"progress deadline with a bad image", progressFalse, []PodView{{Name: "a", WaitingReason: "ImagePullBackOff", WaitingMessage: "Back-off pulling image"}}, v1alpha1.ContainerPhaseFailed, ReasonImagePullFailed, "Back-off pulling image"},
 		{"image pull", settled(1, 1, 1, 0), []PodView{{Name: "a", WaitingReason: "ErrImagePull", WaitingMessage: "pull access denied"}}, v1alpha1.ContainerPhasePending, ReasonImagePullFailed, "pull access denied"},
@@ -180,5 +191,27 @@ func TestStatusOfBuildsTheReadyCondition(t *testing.T) {
 				t.Fatalf("transition time kept %v, want %v: %v", kept, tc.kept, condition.LastTransitionTime)
 			}
 		})
+	}
+}
+
+func TestDeploymentStatusOfReadsAQuotaRefusal(t *testing.T) {
+	c := v1alpha1.Container{Spec: v1alpha1.ContainerSpec{Replicas: ptr.To(int32(3))}}
+	refused := &appsv1.Deployment{Status: appsv1.DeploymentStatus{Conditions: []appsv1.DeploymentCondition{
+		{Type: appsv1.DeploymentReplicaFailure, Status: corev1.ConditionTrue, Reason: "FailedCreate", Message: `pods "x" is forbidden: exceeded quota: q`},
+	}}}
+	if got := DeploymentStatusOf(c, refused).QuotaMessage; !strings.Contains(got, "exceeded quota") {
+		t.Fatalf("quota message %q", got)
+	}
+	other := &appsv1.Deployment{Status: appsv1.DeploymentStatus{Conditions: []appsv1.DeploymentCondition{
+		{Type: appsv1.DeploymentReplicaFailure, Status: corev1.ConditionTrue, Reason: "FailedCreate", Message: "some other refusal"},
+	}}}
+	if got := DeploymentStatusOf(c, other).QuotaMessage; got != "" {
+		t.Fatalf("only a quota refusal is surfaced: %q", got)
+	}
+	cleared := &appsv1.Deployment{Status: appsv1.DeploymentStatus{Conditions: []appsv1.DeploymentCondition{
+		{Type: appsv1.DeploymentReplicaFailure, Status: corev1.ConditionFalse, Message: "exceeded quota: q"},
+	}}}
+	if got := DeploymentStatusOf(c, cleared).QuotaMessage; got != "" {
+		t.Fatalf("a cleared failure is not surfaced: %q", got)
 	}
 }

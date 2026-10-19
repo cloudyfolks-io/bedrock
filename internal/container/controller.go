@@ -21,6 +21,7 @@ import (
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
 
 	"github.com/cloudyfolks-io/bedrock/api/v1alpha1"
+	"github.com/cloudyfolks-io/bedrock/internal/network"
 	"github.com/cloudyfolks-io/bedrock/internal/ssa"
 )
 
@@ -197,12 +198,12 @@ func (r *Reconciler) observe(ctx context.Context, c v1alpha1.Container) (Status,
 	case err != nil && !apierrors.IsNotFound(err):
 		return Status{}, err
 	}
-	var pods corev1.PodList
-	if err := r.Client.List(ctx, &pods, client.InNamespace(c.Namespace), client.MatchingLabels(SelectorLabels(c.Name))); err != nil {
+	pods, err := network.PodsOfContainer(ctx, r.Client, c)
+	if err != nil {
 		return Status{}, err
 	}
-	views := make([]PodView, 0, len(pods.Items))
-	for _, pod := range pods.Items {
+	views := make([]PodView, 0, len(pods))
+	for _, pod := range pods {
 		views = append(views, PodViewOf(pod, SubnetName(c.Spec)))
 	}
 	return Decide(DeploymentStatusOf(c, observed), views), nil

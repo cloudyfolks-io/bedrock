@@ -11,6 +11,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
+	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/utils/ptr"
 	ctrl "sigs.k8s.io/controller-runtime"
@@ -345,5 +346,90 @@ func TestReconcileLeavesADeletedContainerAlone(t *testing.T) {
 	ns := seedPlatform(t, c)
 	if result := reconcileContainer(t, newReconciler(c), ns, "absent"); result.RequeueAfter != 0 {
 		t.Fatalf("result %+v", result)
+	}
+}
+
+func TestReconcileShowsAQuotaRefusalAtOnce(t *testing.T) {
+	c, _ := startEnv(t)
+	ns := seedPlatform(t, c)
+	createContainer(t, c, ns, "web", func(s *v1alpha1.ContainerSpec) { s.Replicas = ptr.To(int32(3)) })
+	r := newReconciler(c)
+	reconcileContainer(t, r, ns, "web")
+	deployment := &appsv1.Deployment{ObjectMeta: metav1.ObjectMeta{Namespace: ns, Name: "web"}}
+	updateStatus(t, c, deployment, func(d *appsv1.Deployment) {
+		d.Status.ObservedGeneration = d.Generation
+		d.Status.Conditions = []appsv1.DeploymentCondition{{Type: appsv1.DeploymentReplicaFailure, Status: corev1.ConditionTrue, Reason: "FailedCreate", Message: `pods "web-1-a" is forbidden: exceeded quota: project-quota`}}
+	})
+	reconcileContainer(t, r, ns, "web")
+	got := getContainer(t, c, ns, "web")
+	requireReady(t, got, metav1.ConditionFalse, ReasonQuotaExceeded)
+	if message := readyOf(got).Message; !strings.Contains(message, "project-quota") {
+		t.Fatalf("message %q", message)
+	}
+}
+
+func TestLooselyLabeledPodsDoNotCountForTheContainer(t *testing.T) {
+	c, _ := startEnv(t)
+	ns := seedPlatform(t, c)
+	createContainer(t, c, ns, "web", noMutation)
+	r := newReconciler(c)
+	reconcileContainer(t, r, ns, "web")
+	loose := createLoosePod(t, c, ns, "intruder", "web", nil)
+	updateStatus(t, c, &loose, func(p *corev1.Pod) {
+		p.Status.ContainerStatuses = []corev1.ContainerStatus{{Name: "app", State: corev1.ContainerState{Waiting: &corev1.ContainerStateWaiting{Reason: "ErrImagePull", Message: "denied"}}}}
+	})
+	reconcileContainer(t, r, ns, "web")
+	requireReady(t, getContainer(t, c, ns, "web"), metav1.ConditionFalse, ReasonDeploying)
+}
+
+func TestResourceQuotaRefusesAContainerOverTheCount(t *testing.T) {
+	c, _ := startEnv(t)
+	ns := seedPlatform(t, c)
+	quota := &corev1.ResourceQuota{
+		ObjectMeta: metav1.ObjectMeta{Namespace: ns, Name: "project-quota"},
+		Spec:       corev1.ResourceQuotaSpec{Hard: corev1.ResourceList{"count/containers.bedrock.cloudyfolks.io": resource.MustParse("1")}},
+	}
+	createObject(t, c, quota)
+	createContainer(t, c, ns, "first", noMutation)
+	quota.Status.Hard = quota.Spec.Hard
+	quota.Status.Used = corev1.ResourceList{"count/containers.bedrock.cloudyfolks.io": resource.MustParse("1")}
+	must(t, c.Status().Update(context.Background(), quota))
+	second := fixtureContainer(ns, "second")
+	var err error
+	eventually(t, "the second container to be refused", func() bool {
+		err = c.Create(context.Background(), &second)
+		if err == nil {
+			_ = c.Delete(context.Background(), &second)
+			second = fixtureContainer(ns, "second")
+		}
+		return err != nil
+	})
+	if !apierrors.IsForbidden(err) || !strings.Contains(err.Error(), "exceeded quota") {
+		t.Fatalf("err = %v", err)
+	}
+}
+
+func TestResourceQuotaRefusesAPodOverTheCapacity(t *testing.T) {
+	c, _ := startEnv(t)
+	ns := seedPlatform(t, c)
+	quota := &corev1.ResourceQuota{
+		ObjectMeta: metav1.ObjectMeta{Namespace: ns, Name: "project-quota"},
+		Spec:       corev1.ResourceQuotaSpec{Hard: corev1.ResourceList{corev1.ResourceRequestsCPU: resource.MustParse("1")}},
+	}
+	createObject(t, c, quota)
+	quota.Status.Hard = quota.Spec.Hard
+	quota.Status.Used = corev1.ResourceList{corev1.ResourceRequestsCPU: resource.MustParse("1")}
+	must(t, c.Status().Update(context.Background(), quota))
+	createContainer(t, c, ns, "web", noMutation)
+	reconcileContainer(t, newReconciler(c), ns, "web")
+	deployment := getDeployment(t, c, ns, "web")
+	must(t, c.Create(context.Background(), &corev1.ServiceAccount{ObjectMeta: metav1.ObjectMeta{Namespace: ns, Name: "default"}}))
+	pod := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{Namespace: ns, Name: "web-over"},
+		Spec:       deployment.Spec.Template.Spec,
+	}
+	err := c.Create(context.Background(), pod)
+	if err == nil || !strings.Contains(err.Error(), "exceeded quota") {
+		t.Fatalf("a pod of the container over the capacity quota must be refused: %v", err)
 	}
 }

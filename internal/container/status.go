@@ -33,6 +33,7 @@ type DeploymentStatus struct {
 	Settled          bool
 	ProgressingFalse bool
 	ProgressMessage  string
+	QuotaMessage     string
 }
 
 type PodView struct {
@@ -61,6 +62,10 @@ func Decide(deployment DeploymentStatus, pods []PodView) Status {
 	}
 	if deployment.Desired == 0 {
 		status.Phase, status.Reason, status.Message = v1alpha1.ContainerPhaseStopped, ReasonStopped, "the container is stopped"
+		return status
+	}
+	if deployment.QuotaMessage != "" {
+		status.Phase, status.Reason, status.Message = v1alpha1.ContainerPhasePending, ReasonQuotaExceeded, deployment.QuotaMessage
 		return status
 	}
 	fatal, hasFatal := firstFatal(pods)
@@ -129,6 +134,9 @@ func DeploymentStatusOf(c v1alpha1.Container, deployment *appsv1.Deployment) Dep
 	for _, condition := range deployment.Status.Conditions {
 		if condition.Type == appsv1.DeploymentProgressing && condition.Status == corev1.ConditionFalse {
 			status.ProgressingFalse, status.ProgressMessage = true, condition.Message
+		}
+		if condition.Type == appsv1.DeploymentReplicaFailure && condition.Status == corev1.ConditionTrue && strings.Contains(condition.Message, "exceeded quota") {
+			status.QuotaMessage = condition.Message
 		}
 	}
 	return status

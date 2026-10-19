@@ -306,6 +306,8 @@ The steps of `hack/e2e/tenant/container.sh` use the preloaded busybox image.
 | `container_lifecycle` | A Container with two replicas is `Running` with two addresses and the strategy `RollingUpdate`. Replicas 0 gives `Stopped` with `Ready=True`, and it stays `Stopped`. Replicas 2 starts it again. A Container with `address` and one replica shows the address and uses `Recreate`. `autoscale` makes a HorizontalPodAutoscaler. Removing `autoscale` with `replicas: 0` stops the Container and removes the autoscaler. |
 | `container_volume` | With the storage class `filesystem`, a Container mounts a Volume and the Volume shows `Container/stateful`. A second Container gets `VolumeInUse`. A restart keeps the data. Deleting the Container frees the Volume and keeps the claim. The step skips these checks when no `filesystem` class exists. |
 | `container_load_balancer` | A LoadBalancer with `containerRef` is `Programmed`, and the Fabric load balancer holds the address of each ready pod. |
+| `container_scale_to_zero` | With `replicas: 0` the LoadBalancer has `Idle=True` with the reason `NoReadyPods`, keeps `Ready=True` and has no `RouterLBRule`. With two replicas again the pod addresses are endpoints again and the `Idle` condition is gone. |
+| `container_quota_refusal` | A project quota of `containers` equal to the count refuses a new Container with the text `exceeded quota`. A project CPU quota below the use shows `QuotaExceeded` on a scaled Container. The step restores the quota. |
 | `container_proxy` | The Go test `TestContainerStreams` for logs, exec and restart. |
 | `container_cleanup` | Deleting the Containers removes every Deployment, autoscaler and pod. |
 

@@ -555,3 +555,27 @@ func TestRegisterSubresourcesAddsLogsExecAndRestart(t *testing.T) {
 		t.Fatal("a second registration must fail")
 	}
 }
+
+func TestLogsAndExecIgnoreALooselyLabeledPod(t *testing.T) {
+	c, _ := startEnv(t)
+	ns := seedPlatform(t, c)
+	createContainer(t, c, ns, "web", noMutation)
+	seedReadyPod(t, c, ns, "web-1-a", "web", true)
+	loose := createLoosePod(t, c, ns, "intruder", "web", nil)
+	updateStatus(t, c, &loose, func(p *corev1.Pod) {
+		p.Status.Conditions = []corev1.PodCondition{{Type: corev1.PodReady, Status: corev1.ConditionTrue}}
+	})
+	api := newFakeAPI(t, map[string]string{"web-1-a": "own\n", "intruder": "secret\n"})
+	logs := serveHandler(t, Logs(api.deps()), c, client.ObjectKey{Namespace: ns, Name: "web"})
+	code, body := get(t, logs.URL+"/")
+	if code != http.StatusOK || body != "own\n" {
+		t.Fatalf("the logs must hold only the pod of the container: %d %q", code, body)
+	}
+	if code, _ := get(t, logs.URL+"/?pod=intruder"); code != http.StatusNotFound {
+		t.Fatalf("a labeled pod made directly is not a log source: %d", code)
+	}
+	rig := execRig{proxy: serveHandler(t, Exec(api.deps()), c, client.ObjectKey{Namespace: ns, Name: "web"}), upstream: api, ns: ns}
+	if resp, _, _ := rig.dial(t, "?pod=intruder", upgradeHeaders()); resp.StatusCode != http.StatusNotFound {
+		t.Fatalf("a labeled pod made directly is not an exec target: %d", resp.StatusCode)
+	}
+}

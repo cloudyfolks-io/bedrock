@@ -9,17 +9,20 @@ import (
 	"testing"
 	"time"
 
+	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	nodev1 "k8s.io/api/node/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/wait"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/util/flowcontrol"
 	"k8s.io/client-go/util/retry"
+	"k8s.io/utils/ptr"
 	"sigs.k8s.io/controller-runtime/pkg/cache"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/envtest"
@@ -295,13 +298,57 @@ func podOf(namespace, name, container string) corev1.Pod {
 	}
 }
 
+func ensureOwnerChain(t testing.TB, c client.Client, namespace, container string) *appsv1.ReplicaSet {
+	t.Helper()
+	ctx := context.Background()
+	var owner v1alpha1.Container
+	must(t, c.Get(ctx, client.ObjectKey{Namespace: namespace, Name: container}, &owner))
+	labels := map[string]string{"app": container}
+	template := corev1.PodTemplateSpec{ObjectMeta: metav1.ObjectMeta{Labels: labels}, Spec: corev1.PodSpec{Containers: []corev1.Container{{Name: "app", Image: "registry.test/web:1"}}}}
+	controlled := func(kind string, uid types.UID, name string) []metav1.OwnerReference {
+		return []metav1.OwnerReference{{APIVersion: "x/v1", Kind: kind, Name: name, UID: uid, Controller: ptr.To(true)}}
+	}
+	var deployment appsv1.Deployment
+	err := c.Get(ctx, client.ObjectKey{Namespace: namespace, Name: container}, &deployment)
+	if apierrors.IsNotFound(err) {
+		deployment = appsv1.Deployment{
+			ObjectMeta: metav1.ObjectMeta{Namespace: namespace, Name: container, OwnerReferences: controlled("Container", owner.UID, owner.Name)},
+			Spec:       appsv1.DeploymentSpec{Selector: &metav1.LabelSelector{MatchLabels: labels}, Template: template},
+		}
+		must(t, c.Create(ctx, &deployment))
+	} else {
+		must(t, err)
+	}
+	var set appsv1.ReplicaSet
+	err = c.Get(ctx, client.ObjectKey{Namespace: namespace, Name: container + "-rs"}, &set)
+	if apierrors.IsNotFound(err) {
+		set = appsv1.ReplicaSet{
+			ObjectMeta: metav1.ObjectMeta{Namespace: namespace, Name: container + "-rs", Labels: map[string]string{v1alpha1.LabelKind: "Container", v1alpha1.LabelName: container}, OwnerReferences: controlled("Deployment", deployment.UID, deployment.Name)},
+			Spec:       appsv1.ReplicaSetSpec{Selector: &metav1.LabelSelector{MatchLabels: labels}, Template: template},
+		}
+		must(t, c.Create(ctx, &set))
+	} else {
+		must(t, err)
+	}
+	return &set
+}
+
 func createPod(t testing.TB, c client.Client, namespace, name, container string) corev1.Pod {
+	t.Helper()
+	pod := createLoosePod(t, c, namespace, name, container, ensureOwnerChain(t, c, namespace, container))
+	return pod
+}
+
+func createLoosePod(t testing.TB, c client.Client, namespace, name, container string, set *appsv1.ReplicaSet) corev1.Pod {
 	t.Helper()
 	err := c.Create(context.Background(), &corev1.ServiceAccount{ObjectMeta: metav1.ObjectMeta{Namespace: namespace, Name: "default"}})
 	if err != nil && !apierrors.IsAlreadyExists(err) {
 		t.Fatal(err)
 	}
 	pod := podOf(namespace, name, container)
+	if set != nil {
+		pod.OwnerReferences = []metav1.OwnerReference{{APIVersion: "apps/v1", Kind: "ReplicaSet", Name: set.Name, UID: set.UID, Controller: ptr.To(true)}}
+	}
 	createObject(t, c, &pod)
 	return pod
 }

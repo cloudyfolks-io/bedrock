@@ -19,6 +19,7 @@ const (
 	ReasonPullSecretNotFound     = "PullSecretNotFound"
 	ReasonApplyFailed            = "ApplyFailed"
 	ReasonNameConflict           = "NameConflict"
+	ReasonQuotaExceeded          = "QuotaExceeded"
 	ReasonDeploying              = "Deploying"
 	ReasonRunning                = "Running"
 	ReasonStopped                = "Stopped"
@@ -34,6 +35,6 @@ func Reasons() []string {
 		ReasonSecurityGroupNotReady, ReasonWaitingForDefaultGroup,
 		ReasonVolumeNotFound, ReasonVolumeInUse, ReasonVolumeClassUnsupported,
 		ReasonRuntimeUnavailable, ReasonPullSecretNotFound, ReasonApplyFailed, ReasonNameConflict,
-		ReasonDeploying, ReasonRunning, ReasonStopped, ReasonFailed, ReasonImagePullFailed, ReasonContainerConfigError,
+		ReasonQuotaExceeded, ReasonDeploying, ReasonRunning, ReasonStopped, ReasonFailed, ReasonImagePullFailed, ReasonContainerConfigError,
 	}
 }

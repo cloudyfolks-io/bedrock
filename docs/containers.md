@@ -65,6 +65,10 @@ If an object of the same name exists and the Container does not own it, the reas
 | Deployment | Always. The pod has one container named `app`. The selector is `kind=Container` and `name=<name>`. |
 | HorizontalPodAutoscaler | When the Container has `autoscale`. |
 
+Kata isolates the Containers of a project, and later the Builds.
+A Pod or a Deployment that a project editor makes directly runs with the runtime class that the editor sets.
+The platform adds no policy that forces a runtime class on them.
+
 The operator never sets `hostNetwork`, `hostPID`, `hostIPC`, a `hostPath` volume, a privileged container, `nodeName`, a `hostPort`, added capabilities or `procMount`.
 The pod does not mount a service account token and has no service links.
 
@@ -128,6 +132,9 @@ To stop an autoscaled container, remove `autoscale` and set `replicas: 0`.
 
 `status.addresses` lists the addresses of the ready pods in sorted order.
 `status.replicas` and `status.readyReplicas` count the pods.
+Only pods that the Container owns count. The owner chain is the Container, its Deployment, a ReplicaSet and the pod.
+A pod with the same labels that someone made directly is never a load balancer target, a log source or an exec target.
+When the quota of the project refuses a replica, the condition `Ready` shows `QuotaExceeded` at once.
 
 ## Logs, exec and restart
 
@@ -197,6 +204,7 @@ Run `kubectl describe container <name>` and read the condition `Ready`.
 | `PullSecretNotFound` | A pull Secret does not exist. | Create the Secret or correct `imagePullSecrets`. |
 | `ApplyFailed` | The cluster refused the Deployment or the autoscaler. | Read the operator log. |
 | `NameConflict` | An object of the same name exists and another owner has it. | Rename the Container or delete the other object. |
+| `QuotaExceeded` | The quota of the project refuses a pod of the Container. The message is the text of the quota. | Free quota, lower `replicas` or the requests, or ask for a larger quota. |
 | `Deploying` | The replicas are not all ready. | Wait, or look at the pods. |
 | `Running` | All wanted replicas are ready. | None. |
 | `Stopped` | `replicas` is 0. | Set `replicas` to start. |
