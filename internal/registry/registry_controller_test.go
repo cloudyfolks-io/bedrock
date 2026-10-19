@@ -2,6 +2,7 @@ package registry
 
 import (
 	"context"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -178,6 +179,7 @@ func TestRegistryResumesACreateThatLostItsStatus(t *testing.T) {
 	existing := state.addProject("acme-images", 5)
 	reg := registryFor("images", "acme-images")
 	reg.Status.ProjectName = "acme-images"
+	reg.Status.ProjectMarkedAt = ptr.To(metav1.NewTime(time.Now().Add(-time.Minute)))
 	r, c := registryWorld(t, state, reg)
 	reconcileRegistry(t, r, "images")
 	got := fetchRegistry(t, c, "images")
@@ -576,5 +578,107 @@ func TestRegistryKeepsTheOldUsageWhenTheSummaryFails(t *testing.T) {
 	}
 	if readyCondition(after).Status != metav1.ConditionTrue {
 		t.Errorf("condition %+v", readyCondition(after))
+	}
+}
+
+func TestRegistryDoesNotClaimAProjectThatIsOlderThanItsMarker(t *testing.T) {
+	state := newHarborState(t)
+	foreign := state.addProject("acme-images", 1)
+	foreign.created = time.Now().Add(-time.Hour)
+	reg := registryFor("images", "acme-images")
+	reg.Status.ProjectName = "acme-images"
+	reg.Status.ProjectMarkedAt = ptr.To(metav1.Now())
+	r, c := registryWorld(t, state, reg)
+	reconcileRegistry(t, r, "images")
+	got := fetchRegistry(t, c, "images")
+	if readyCondition(got).Reason != "NameTaken" || got.Status.ProjectID != 0 {
+		t.Fatalf("status %+v", got.Status)
+	}
+	deleteRegistry(t, c, "images")
+	reconcileRegistry(t, r, "images")
+	if !registryGone(c, "images") || state.project("acme-images") == nil {
+		t.Fatal("a foreign project was deleted or the object stayed")
+	}
+}
+
+func TestRegistryDoesNotClaimAProjectWithAnotherID(t *testing.T) {
+	state := newHarborState(t)
+	state.addProject("acme-images", 1)
+	state.addRepos("acme-images", 2)
+	reg := registryFor("images", "acme-images")
+	reg.Spec.ForceDestroy = true
+	reg.Status.ProjectName = "acme-images"
+	reg.Status.ProjectID = 5
+	reg.Status.ProjectMarkedAt = ptr.To(metav1.NewTime(time.Now().Add(-time.Hour)))
+	r, c := registryWorld(t, state, reg)
+	reconcileRegistry(t, r, "images")
+	if got := readyCondition(fetchRegistry(t, c, "images")); got.Reason != "NameTaken" {
+		t.Fatalf("condition %+v", got)
+	}
+	if len(state.project("acme-images").repos) != 2 {
+		t.Fatal("a foreign project was changed")
+	}
+	deleteRegistry(t, c, "images")
+	reconcileRegistry(t, r, "images")
+	if !registryGone(c, "images") || state.project("acme-images") == nil || len(state.project("acme-images").repos) != 2 {
+		t.Fatal("a foreign project was deleted")
+	}
+}
+
+func TestRegistryDoesNotClaimAProjectThatAppearsAfterAFailedCreate(t *testing.T) {
+	state := newHarborState(t)
+	state.failProjectCreate = true
+	r, c := registryWorld(t, state, registryFor("images", "acme-images"))
+	reconcileRegistry(t, r, "images")
+	got := fetchRegistry(t, c, "images")
+	if got.Status.ProjectName != "" || got.Status.ProjectMarkedAt != nil {
+		t.Fatalf("the marker stayed after a failed create: %+v", got.Status)
+	}
+	state.addRepos("acme-images", 0)
+	state.addProject("acme-images", 1)
+	reconcileRegistry(t, r, "images")
+	got = fetchRegistry(t, c, "images")
+	if readyCondition(got).Reason != "NameTaken" || got.Status.ProjectID != 0 {
+		t.Fatalf("status %+v", got.Status)
+	}
+	deleteRegistry(t, c, "images")
+	reconcileRegistry(t, r, "images")
+	if state.project("acme-images") == nil {
+		t.Fatal("the foreign project was deleted")
+	}
+}
+
+func TestRegistryRecordsTheProjectIDAtOnce(t *testing.T) {
+	state := newHarborState(t)
+	r, c := registryWorld(t, state, registryFor("images", "acme-images"))
+	reconcileRegistry(t, r, "images")
+	got := fetchRegistry(t, c, "images")
+	if got.Status.ProjectID != state.project("acme-images").id || got.Status.ProjectMarkedAt == nil {
+		t.Fatalf("status %+v", got.Status)
+	}
+}
+
+func TestRegistryForceDeleteRemovesMoreThanOnePageOfRobotsAndNoForeignRobot(t *testing.T) {
+	state := newHarborState(t)
+	reg := registryFor("images", "acme-images")
+	reg.Spec.ForceDestroy = true
+	r, c := registryWorld(t, state, reg)
+	reconcileRegistry(t, r, "images")
+	own := state.project("acme-images")
+	for i := range 230 {
+		own.robots = append(own.robots, fakeRobot{id: int64(1000 + i), name: "r" + strconv.Itoa(i), created: time.Now()})
+	}
+	other := state.addProject("other-project", 1)
+	other.robots = []fakeRobot{{id: 5000, name: "keep", created: time.Now()}}
+	state.mu.Lock()
+	state.ignoreRobotFilter = true
+	state.mu.Unlock()
+	deleteRegistry(t, c, "images")
+	reconcileRegistry(t, r, "images")
+	if !registryGone(c, "images") || state.project("acme-images") != nil {
+		t.Fatal("the project stayed")
+	}
+	if kept := state.project("other-project"); kept == nil || len(kept.robots) != 1 {
+		t.Fatal("a robot of another project was deleted")
 	}
 }
