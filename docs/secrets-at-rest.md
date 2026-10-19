@@ -174,12 +174,18 @@ old file back and restarts again. It writes the failed hash in
 The operator waits and gives no other node its turn. The condition
 `EncryptionRotationStalled` of the Cluster is `True` with the reason
 `HostFailed`, and the message names the node.
+The operator also waits, with the reason `WaitingForEtcd`, when a
+control-plane Node is not Ready or when etcd reports fewer members than there
+are control-plane nodes. It gives no grant then, so a node that is down never
+costs the quorum.
 
 To go on, do these steps:
 
 1. Read `journalctl -u bedrock-agent` on the node and fix the reason.
 2. Delete `/etc/bedrock/encryption/.apply-failed` on the node. The operator
    keeps the grant, so the agent runs it again on its next round.
+   The agent clears its own mark of the handled grant when the apply starts,
+   so the operator waits for the new result and accepts no `revert` before.
 
 This is the only way in the phase `RemovingKey`, because a revert is refused
 in that phase. In the earlier phases you can also revert the rotation.
