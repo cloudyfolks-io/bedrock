@@ -33,7 +33,9 @@ It does not read the old StorageClasses.
 The classes `block` and `block-retain` create new RBD images with the features `layering`, `exclusive-lock`, `object-map`, `fast-diff` and `deep-flatten`.
 Images that exist already keep their own features, because a volume keeps the features it was created with.
 A Kubernetes StorageClass cannot change its parameters.
-When the operator finds a class with other parameters, it deletes the class and creates it again.
+When the operator finds a class that it manages with other parameters, it deletes the class and creates it again.
+If another tool owns the class, the operator does not delete it and the addon condition shows the error `ApplyFailed`.
+Then delete the class by hand.
 Deleting a class does not change a volume, a claim or a snapshot that uses it.
 New claims wait for a short time while the class is missing.
 

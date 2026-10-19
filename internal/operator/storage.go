@@ -211,12 +211,13 @@ func cephObjectStore(replicas, hosts int) *unstructured.Unstructured {
 
 func bucketStorageClass() *unstructured.Unstructured {
 	obj := &unstructured.Unstructured{Object: map[string]any{
-		"apiVersion":    "storage.k8s.io/v1",
-		"kind":          "StorageClass",
-		"metadata":      map[string]any{"name": bucketClassName},
-		"provisioner":   bucketProvisioner,
-		"parameters":    map[string]any{"objectStoreName": objectStoreName, "objectStoreNamespace": storageNamespace},
-		"reclaimPolicy": "Delete",
+		"apiVersion":        "storage.k8s.io/v1",
+		"kind":              "StorageClass",
+		"metadata":          map[string]any{"name": bucketClassName},
+		"provisioner":       bucketProvisioner,
+		"parameters":        map[string]any{"objectStoreName": objectStoreName, "objectStoreNamespace": storageNamespace},
+		"reclaimPolicy":     "Delete",
+		"volumeBindingMode": "Immediate",
 	}}
 	obj.SetLabels(map[string]string{"aws-s3/object": ""})
 	return obj
