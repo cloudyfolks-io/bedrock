@@ -7,15 +7,14 @@ import (
 )
 
 const (
-	StoreName       = "bedrock-rgw"
-	StoreNamespace  = "rook-ceph"
-	BucketClassName = "bucket"
-	Endpoint        = "http://" + ServiceHost + ":80"
-	Region          = "us-east-1"
-	AccessKeyKey    = "AccessKey"
-	SecretKeyKey    = "SecretKey"
-	EndpointKey     = "Endpoint"
-	MaxPolicyBytes  = 20480
+	StoreName      = "bedrock-rgw"
+	StoreNamespace = "rook-ceph"
+	Endpoint       = "http://" + ServiceHost + ":80"
+	Region         = "us-east-1"
+	AccessKeyKey   = "AccessKey"
+	SecretKeyKey   = "SecretKey"
+	EndpointKey    = "Endpoint"
+	MaxPolicyBytes = 20480
 
 	AppliedVersioningAnnotation = "bedrock.cloudyfolks.io/applied-versioning"
 	AppliedPolicyAnnotation     = "bedrock.cloudyfolks.io/applied-policy"
