@@ -467,7 +467,9 @@ The range comes from `network.load-balancer.cidr` and `network.load-balancer.gat
 The Subnet is distributed, has no outgoing NAT and no DHCP, and has the MTU 1500.
 The gateway is excluded, so no `Vip` takes it.
 Every Network uses the same range, because the planes are separate in each Vpc.
-Keep the range inside `network.reserved-cidrs`, so no Subnet can overlap it.
+Bedrock reserves the range, as it does the ranges of `network.reserved-cidrs`.
+A Network range or a Subnet that overlaps it gets the reason `CIDRReserved`.
+A Network that is provisioned already keeps working and gets the condition `RangePolicy`.
 BGP never advertises the range.
 Set the range before the first Network exists.
 Fabric does not change the range of a Subnet, so a new value stops the reconcile of the Networks that exist.
@@ -558,7 +560,7 @@ Remove the group from the VM or the Container first.
 | `network.bgp.advertise-filter` | empty | Comma list of `<cidr> ge <n> le <n>` entries. The mask length must not be more than `ge`, and `ge` must not be more than `le`, which is at most 32. The agent advertises only the matching routes and the ElasticIP routes. Empty advertises only the ElasticIP routes. |
 | `network.bgp.redistribute-tables` | empty | Comma list of host routing table ids from 1 to 999. 253, 254 and 255 are reserved. Ids from 1000 up are the VRF ids of the VPCs, and the agent refuses a host table that equals one of them. The list must not hold a VRF id that a Network pins in `spec.vrfId`. |
 | `network.dns-servers` | empty | Comma list of IPv4 resolvers that DHCP gives to guests. A Subnet that sets `dnsServers` uses its own list. Empty uses `network.services.resolver`. |
-| `network.load-balancer.cidr` | `100.69.0.0/24` | IPv4 network of the load balancer plane. Every Network gets one hidden Fabric Subnet with this range, and internal load balancers take their virtual addresses there. Keep it inside `network.reserved-cidrs`, and set it before the first Network exists. BGP never advertises it. |
+| `network.load-balancer.cidr` | `100.69.0.0/24` | IPv4 network of the load balancer plane. Every Network gets one hidden Fabric Subnet with this range, and internal load balancers take their virtual addresses there. Bedrock reserves it, so no Network range and no Subnet can overlap it. Set it before the first Network exists. BGP never advertises it. |
 | `network.load-balancer.gateway` | `100.69.0.1` | IPv4 address of the plane gateway. It must be inside `network.load-balancer.cidr` and must not be its network or broadcast address. |
 | `network.peering.range` | `169.254.0.0/16` | IPv4 network from which each NetworkPeering without `connectCIDR` gets a /30 connect network. The prefix must be 30 or shorter. |
 | `network.services.provider-network` | empty | Name of the provider network with the role `services`. Every external Network attaches to it. Empty turns the services plane off. |

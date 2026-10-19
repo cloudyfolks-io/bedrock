@@ -243,6 +243,22 @@ func TestNetworkReconcilerRefusesARangeInAReservedRange(t *testing.T) {
 	}
 }
 
+func TestNetworkReconcilerRefusesARangeThatOverlapsTheLoadBalancerPlane(t *testing.T) {
+	c := cleanEnv(t)
+	setSetting(t, "network.reserved-cidrs", "192.0.2.0/24")
+	network := networkOfRanges(unique(t, "net"), "acme", "10.100.0.0/16", "100.69.0.0/16")
+	requireAccepted(t, c, network)
+	reconcileNetwork(t, c, network.Name)
+	got := getNetwork(t, c, network.Name)
+	requireCondition(t, got.Status.Conditions, v1alpha1.ConditionReady, metav1.ConditionFalse, ReasonCIDRReserved)
+	if message := meta.FindStatusCondition(got.Status.Conditions, v1alpha1.ConditionReady).Message; !strings.Contains(message, "load balancer plane") {
+		t.Fatalf("message %q", message)
+	}
+	if _, err := getObject(context.Background(), c, fabric.VpcGVK, network.Name); !apierrors.IsNotFound(err) {
+		t.Fatalf("no Fabric Vpc expected: %v", err)
+	}
+}
+
 func TestNetworkReconcilerKeepsAProvisionedNetworkInAReservedRange(t *testing.T) {
 	c := cleanEnv(t)
 	setSetting(t, "network.reserved-cidrs", "192.0.2.0/24")

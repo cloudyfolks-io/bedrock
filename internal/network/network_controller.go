@@ -52,7 +52,7 @@ func (r *NetworkReconciler) Reconcile(ctx context.Context, req reconcile.Request
 	if err != nil {
 		return r.publish(ctx, &network, notReadyStatus(network, ReasonVpcPending, err.Error()))
 	}
-	breach := NetworkReservedOverlap(network.Spec.Ranges(), SettingReserved(cfg))
+	breach := NetworkReservedOverlap(network.Spec.Ranges(), append(SettingReserved(cfg), PlaneReserved(cfg)...))
 	vrfBreach, err := r.vrfBreach(ctx, &network, cfg)
 	if err != nil {
 		return reconcile.Result{}, err
