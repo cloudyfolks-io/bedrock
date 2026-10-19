@@ -15,7 +15,7 @@ shims:
     dropIn: |
       [hypervisor.qemu]
       default_memory = 512
-      virtio_fs_extra_args = ["-o", "xattr"]
+      virtio_fs_extra_args = ["--thread-pool-size=1", "--announce-submounts", "--xattr"]
 defaultShim:
   amd64: qemu
   arm64: qemu

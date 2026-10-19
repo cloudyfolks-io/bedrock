@@ -142,7 +142,7 @@ The chart puts it in the ConfigMap `kata-deploy-custom-configs`, and kata-deploy
 | Option | Value | Reason |
 | --- | --- | --- |
 | `default_memory` | 512 | The guest starts with 512 MiB. The shipped default is 2048. |
-| `virtio_fs_extra_args` | `["-o", "xattr"]` | Extended attributes work in a volume that the guest shares with the host, for example an `emptyDir`. Tools that set an attribute, such as an image builder, need this. |
+| `virtio_fs_extra_args` | `["--thread-pool-size=1", "--announce-submounts", "--xattr"]` | The drop-in replaces the list, so it repeats the two stock values. `--xattr` makes extended attributes work in a volume that the guest shares with the host, for example an `emptyDir`. Tools that set an attribute, such as an image builder, need this. |
 
 The Setting `container.runtime-class` has the default `kata`.
 The controller of the `Container` kind uses its value as the `runtimeClassName` of each pod.
