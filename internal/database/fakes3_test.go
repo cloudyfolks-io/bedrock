@@ -15,13 +15,14 @@ import (
 )
 
 type fakeS3 struct {
-	mu       sync.Mutex
-	objects  map[string]int64
-	created  []string
-	listed   []string
-	deletes  []string
-	createAs string
-	failList bool
+	mu         sync.Mutex
+	objects    map[string]int64
+	created    []string
+	listed     []string
+	deletes    []string
+	createAs   string
+	failList   bool
+	failDelete bool
 }
 
 func newFakeS3(t testing.TB) (*fakeS3, BackupStore) {
@@ -51,6 +52,11 @@ func (f *fakeS3) serve(w http.ResponseWriter, r *http.Request) {
 		}
 		f.list(w, r.URL.Query())
 	case r.Method == http.MethodPost:
+		if f.failDelete {
+			w.WriteHeader(http.StatusForbidden)
+			io.WriteString(w, "<Error><Code>AccessDenied</Code></Error>")
+			return
+		}
 		body, _ := io.ReadAll(r.Body)
 		for key := range f.objects {
 			if strings.Contains(string(body), "<Key>"+key+"</Key>") {
@@ -96,4 +102,11 @@ func (f *fakeS3) listCount() int {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	return len(f.listed)
+}
+
+func (f *fakeS3) has(key string) bool {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	_, found := f.objects[key]
+	return found
 }

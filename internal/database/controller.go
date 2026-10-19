@@ -26,6 +26,14 @@ type Gate struct{ Reason, Message string }
 
 type Reconciler struct {
 	Client client.Client
+	Now    func() time.Time
+}
+
+func (r *Reconciler) now() time.Time {
+	if r.Now != nil {
+		return r.Now()
+	}
+	return time.Now()
 }
 
 func (r *Reconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
@@ -90,6 +98,17 @@ func engineAvailable(ctx context.Context, c client.Reader, engine string) (bool,
 func (r *Reconciler) finalize(ctx context.Context, db v1alpha1.Database) (ctrl.Result, error) {
 	if !controllerutil.ContainsFinalizer(&db, Finalizer) {
 		return ctrl.Result{}, nil
+	}
+	cfg, err := LoadConfig(ctx, r.Client)
+	if err != nil {
+		return ctrl.Result{}, err
+	}
+	project, _, err := ProjectOf(ctx, r.Client, db.Namespace)
+	if err != nil {
+		return ctrl.Result{}, err
+	}
+	if err := EnsureTombstone(ctx, r.Client, db, project, cfg.RetentionAfterDelete, r.now()); err != nil {
+		return ctrl.Result{}, fmt.Errorf("leave the tombstone: %w", err)
 	}
 	gone, err := DeleteEngineObjects(ctx, r.Client, db)
 	if err != nil {
