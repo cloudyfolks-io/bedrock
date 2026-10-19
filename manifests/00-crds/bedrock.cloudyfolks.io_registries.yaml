@@ -186,6 +186,9 @@ spec:
               projectID:
                 format: int64
                 type: integer
+              projectMarkedAt:
+                format: date-time
+                type: string
               projectName:
                 type: string
               repositoryCount:

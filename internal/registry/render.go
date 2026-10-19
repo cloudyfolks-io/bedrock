@@ -4,6 +4,7 @@ import (
 	"regexp"
 	"slices"
 	"strings"
+	"time"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
@@ -14,6 +15,7 @@ import (
 const (
 	reasonNameInvalid  = "NameInvalid"
 	reasonNameReserved = "NameReserved"
+	claimSlack         = 5 * time.Second
 )
 
 var projectNamePattern = regexp.MustCompile(`^[a-z0-9][a-z0-9-]{1,28}[a-z0-9]$`)
@@ -40,6 +42,13 @@ func reservedName(name string, rules Rules) bool {
 		return true
 	}
 	return slices.ContainsFunc(rules.ReservedPrefixes, func(prefix string) bool { return strings.HasPrefix(name, prefix) })
+}
+
+func claimed(recordedID, foundID int64, marked *metav1.Time, created time.Time) bool {
+	if recordedID != 0 {
+		return recordedID == foundID
+	}
+	return marked != nil && !created.Before(marked.Add(-claimSlack))
 }
 
 func approved(obj metav1.Object) bool {

@@ -152,36 +152,62 @@ func (r *RegistryReconciler) ensureProject(ctx context.Context, reg *v1alpha1.Re
 	owned := reg.Status.ProjectName == name
 	project, err := hc.GetProject(ctx, name)
 	switch {
-	case err == nil && owned:
+	case err == nil && owned && claimed(reg.Status.ProjectID, project.ID, reg.Status.ProjectMarkedAt, project.Created):
 		return project, false, nil
 	case err == nil && adopting(reg):
-		return project, false, r.recordProject(ctx, reg, name)
+		return project, false, r.adoptProject(ctx, reg, project)
 	case err == nil:
 		return harbor.Project{}, true, nil
 	case !errors.Is(err, harbor.ErrNotFound):
 		return harbor.Project{}, false, err
 	}
+	return r.createProject(ctx, reg, hc, rules, name, owned)
+}
+
+func (r *RegistryReconciler) createProject(ctx context.Context, reg *v1alpha1.Registry, hc *harbor.Client, rules Rules, name string, owned bool) (harbor.Project, bool, error) {
 	if !owned {
-		if err := r.recordProject(ctx, reg, name); err != nil {
+		if err := r.recordProject(ctx, reg, name, 0); err != nil {
 			return harbor.Project{}, false, err
 		}
 	}
-	err = hc.CreateProject(ctx, name, quotaGB(reg, rules))
-	if errors.Is(err, harbor.ErrConflict) && !owned {
-		return harbor.Project{}, true, r.recordProject(ctx, reg, "")
+	err := hc.CreateProject(ctx, name, quotaGB(reg, rules))
+	if errors.Is(err, harbor.ErrConflict) {
+		return harbor.Project{}, true, r.forgetUnlessOwned(ctx, reg, owned)
 	}
-	if err != nil && !errors.Is(err, harbor.ErrConflict) {
+	if err != nil {
+		return harbor.Project{}, false, errors.Join(err, r.forgetUnlessOwned(ctx, reg, owned))
+	}
+	project, err := hc.GetProject(ctx, name)
+	if err != nil {
 		return harbor.Project{}, false, err
 	}
-	project, err = hc.GetProject(ctx, name)
-	return project, false, err
+	return project, false, r.recordProject(ctx, reg, name, project.ID)
 }
 
-func (r *RegistryReconciler) recordProject(ctx context.Context, reg *v1alpha1.Registry, name string) error {
-	if err := r.mutateStatus(ctx, reg, func(status *v1alpha1.RegistryStatus) { status.ProjectName = name }); err != nil {
+func (r *RegistryReconciler) forgetUnlessOwned(ctx context.Context, reg *v1alpha1.Registry, owned bool) error {
+	if owned {
+		return nil
+	}
+	return r.recordProject(ctx, reg, "", 0)
+}
+
+func (r *RegistryReconciler) adoptProject(ctx context.Context, reg *v1alpha1.Registry, project harbor.Project) error {
+	return r.recordProject(ctx, reg, project.Name, project.ID)
+}
+
+func (r *RegistryReconciler) recordProject(ctx context.Context, reg *v1alpha1.Registry, name string, id int64) error {
+	var marked *metav1.Time
+	if name != "" {
+		now := metav1.Now()
+		marked = &now
+	}
+	mutate := func(status *v1alpha1.RegistryStatus) {
+		status.ProjectName, status.ProjectID, status.ProjectMarkedAt = name, id, marked
+	}
+	if err := r.mutateStatus(ctx, reg, mutate); err != nil {
 		return err
 	}
-	reg.Status.ProjectName = name
+	mutate(&reg.Status)
 	return nil
 }
 
@@ -251,6 +277,13 @@ func (r *RegistryReconciler) finalize(ctx context.Context, reg *v1alpha1.Registr
 	}
 	if unavailable != "" {
 		return r.holdDelete(ctx, reg, result{reason: reasonNotAvailable, message: unavailable, requeue: unavailableRequeue})
+	}
+	project, err := hc.GetProject(ctx, name)
+	if errors.Is(err, harbor.ErrNotFound) || (err == nil && !claimed(reg.Status.ProjectID, project.ID, reg.Status.ProjectMarkedAt, project.Created)) {
+		return ctrl.Result{}, r.removeFinalizer(ctx, reg)
+	}
+	if err != nil {
+		return r.holdDelete(ctx, reg, harborOutcome(result{}, err))
 	}
 	out, done, err := r.removeProject(ctx, reg, hc, name)
 	if err != nil {

@@ -6,13 +6,16 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
 	"testing"
+	"time"
 )
 
 type fakeProject struct {
+	created     time.Time
 	id          int64
 	repos       []string
 	quota       int64
@@ -22,10 +25,11 @@ type fakeProject struct {
 }
 
 type fakeRobot struct {
-	id     int64
-	name   string
-	secret string
-	access []any
+	created time.Time
+	id      int64
+	name    string
+	secret  string
+	access  []any
 }
 
 type fakeWebhook struct {
@@ -34,16 +38,19 @@ type fakeWebhook struct {
 }
 
 type harborState struct {
-	mu          sync.Mutex
-	nextID      int64
-	projects    map[string]*fakeProject
-	retentions  map[int64]map[string]any
-	creates     []string
-	deletes     []string
-	robotSets   []string
-	server      *httptest.Server
-	secretSeq   int
-	failSummary bool
+	mu                sync.Mutex
+	nextID            int64
+	projects          map[string]*fakeProject
+	retentions        map[int64]map[string]any
+	creates           []string
+	deletes           []string
+	robotSets         []string
+	server            *httptest.Server
+	secretSeq         int
+	failSummary       bool
+	failProjectCreate bool
+	failRobotCreate   bool
+	ignoreRobotFilter bool
 }
 
 func newHarborState(t *testing.T) *harborState {
@@ -62,7 +69,7 @@ func (s *harborState) newID() int64 {
 func (s *harborState) addProject(name string, quotaGB int64) *fakeProject {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	project := &fakeProject{id: s.newID(), quota: quotaGB * 1024 * 1024 * 1024}
+	project := &fakeProject{id: s.newID(), created: time.Now(), quota: quotaGB * 1024 * 1024 * 1024}
 	s.projects[name] = project
 	return project
 }
@@ -121,8 +128,13 @@ func (s *harborState) projectRoutes(w http.ResponseWriter, r *http.Request, part
 			reply(w, 409, map[string]any{"errors": []map[string]any{{"message": "exists"}}})
 			return
 		}
+		if s.failProjectCreate {
+			s.failProjectCreate = false
+			reply(w, 500, map[string]any{"errors": []map[string]any{{"message": "boom"}}})
+			return
+		}
 		limit, _ := body["storage_limit"].(float64)
-		s.projects[name] = &fakeProject{id: s.newID(), quota: int64(limit)}
+		s.projects[name] = &fakeProject{id: s.newID(), created: time.Now(), quota: int64(limit)}
 		s.creates = append(s.creates, name)
 		reply(w, 201, nil)
 		return
@@ -138,7 +150,7 @@ func (s *harborState) projectRoutes(w http.ResponseWriter, r *http.Request, part
 		if project.retentionID != 0 {
 			metadata["retention_id"] = strconv.FormatInt(project.retentionID, 10)
 		}
-		reply(w, 200, map[string]any{"project_id": project.id, "name": parts[1], "metadata": metadata})
+		reply(w, 200, map[string]any{"project_id": project.id, "name": parts[1], "creation_time": project.created.UTC().Format(time.RFC3339), "metadata": metadata})
 	case len(parts) == 2 && r.Method == http.MethodDelete:
 		if len(project.repos) > 0 {
 			reply(w, 412, map[string]any{"errors": []map[string]any{{"message": "project has repositories"}}})
@@ -260,17 +272,7 @@ func (s *harborState) retentionRoutes(w http.ResponseWriter, r *http.Request, pa
 func (s *harborState) robotRoutes(w http.ResponseWriter, r *http.Request, parts []string, body map[string]any) {
 	switch {
 	case r.Method == http.MethodGet:
-		wanted := strings.TrimPrefix(r.URL.Query().Get("q"), "Level=project,ProjectID=")
-		out := []map[string]any{}
-		for name, project := range s.projects {
-			if strconv.FormatInt(project.id, 10) != wanted {
-				continue
-			}
-			for _, robot := range project.robots {
-				out = append(out, map[string]any{"id": robot.id, "name": "robot$" + name + "+" + robot.name})
-			}
-		}
-		reply(w, 200, out)
+		s.listRobots(w, r)
 	case r.Method == http.MethodPost:
 		s.createRobot(w, body)
 	case r.Method == http.MethodPatch:
@@ -294,11 +296,47 @@ func (s *harborState) robotRoutes(w http.ResponseWriter, r *http.Request, parts 
 	}
 }
 
+func (s *harborState) listRobots(w http.ResponseWriter, r *http.Request) {
+	wanted := strings.TrimPrefix(r.URL.Query().Get("q"), "Level=project,ProjectID=")
+	var all []map[string]any
+	names := make([]string, 0, len(s.projects))
+	for name := range s.projects {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	for _, name := range names {
+		project := s.projects[name]
+		if !s.ignoreRobotFilter && strconv.FormatInt(project.id, 10) != wanted {
+			continue
+		}
+		for _, robot := range project.robots {
+			all = append(all, map[string]any{
+				"id": robot.id, "name": "robot$" + name + "+" + robot.name, "creation_time": robot.created.UTC().Format(time.RFC3339),
+				"permissions": []map[string]any{{"kind": "project", "namespace": name}},
+			})
+		}
+	}
+	page, _ := strconv.Atoi(r.URL.Query().Get("page"))
+	size, _ := strconv.Atoi(r.URL.Query().Get("page_size"))
+	from := min((page-1)*size, len(all))
+	to := min(from+size, len(all))
+	out := all[from:to]
+	if out == nil {
+		out = []map[string]any{}
+	}
+	reply(w, 200, out)
+}
+
 func (s *harborState) createRobot(w http.ResponseWriter, body map[string]any) {
 	permissions, _ := body["permissions"].([]any)
 	grant, _ := permissions[0].(map[string]any)
 	projectName, _ := grant["namespace"].(string)
 	name, _ := body["name"].(string)
+	if s.failRobotCreate {
+		s.failRobotCreate = false
+		reply(w, 500, map[string]any{"errors": []map[string]any{{"message": "boom"}}})
+		return
+	}
 	project := s.projects[projectName]
 	if project == nil {
 		reply(w, 400, map[string]any{"errors": []map[string]any{{"message": "no project"}}})
@@ -311,7 +349,7 @@ func (s *harborState) createRobot(w http.ResponseWriter, body map[string]any) {
 		}
 	}
 	s.secretSeq++
-	robot := fakeRobot{id: s.newID(), name: name, secret: "secret-" + strconv.Itoa(s.secretSeq), access: grant["access"].([]any)}
+	robot := fakeRobot{created: time.Now(), id: s.newID(), name: name, secret: "secret-" + strconv.Itoa(s.secretSeq), access: grant["access"].([]any)}
 	project.robots = append(project.robots, robot)
 	reply(w, 201, map[string]any{"id": robot.id, "name": "robot$" + projectName + "+" + name, "secret": robot.secret})
 }

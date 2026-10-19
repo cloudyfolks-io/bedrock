@@ -4,11 +4,14 @@ import (
 	"context"
 	"encoding/base64"
 	"slices"
+	"strconv"
 	"testing"
+	"time"
 
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/utils/ptr"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
@@ -285,8 +288,9 @@ func TestCredentialResumesACreateThatLostItsStatus(t *testing.T) {
 	state := newHarborState(t)
 	credential := credentialFor("ci", "pull")
 	credential.Status.RobotName = "ci"
+	credential.Status.RobotMarkedAt = ptr.To(metav1.NewTime(time.Now().Add(-time.Minute)))
 	r, c := credentialWorld(t, state, credential)
-	state.project("acme-images").robots = []fakeRobot{{id: 700, name: "ci", secret: "lost"}}
+	state.project("acme-images").robots = []fakeRobot{{id: 700, name: "ci", secret: "lost", created: time.Now()}}
 	reconcileCredential(t, r, "ci")
 	got := fetchCredential(t, c, "ci")
 	if credentialReady(got).Status != metav1.ConditionTrue || got.Status.RobotID != 700 || len(state.project("acme-images").robots) != 1 {
@@ -345,5 +349,111 @@ func TestCredentialOfARegistryEnqueuesItsCredentials(t *testing.T) {
 	}
 	if !slices.Equal(names, []string{"ci"}) {
 		t.Errorf("requests %v", names)
+	}
+}
+
+func TestCredentialDoesNotClaimARobotOlderThanItsMarker(t *testing.T) {
+	state := newHarborState(t)
+	credential := credentialFor("ci", "pull")
+	credential.Status.RobotName = "ci"
+	credential.Status.RobotMarkedAt = ptr.To(metav1.Now())
+	r, c := credentialWorld(t, state, credential)
+	state.project("acme-images").robots = []fakeRobot{{id: 700, name: "ci", secret: "theirs", created: time.Now().Add(-time.Hour)}}
+	reconcileCredential(t, r, "ci")
+	got := fetchCredential(t, c, "ci")
+	if credentialReady(got).Reason != "NameTaken" || got.Status.RobotID != 0 || len(state.robotSets) != 0 {
+		t.Fatalf("status %+v sets %v", got.Status, state.robotSets)
+	}
+	if err := c.Delete(context.Background(), got); err != nil {
+		t.Fatal(err)
+	}
+	reconcileCredential(t, r, "ci")
+	if len(state.project("acme-images").robots) != 1 {
+		t.Error("a foreign robot was deleted")
+	}
+}
+
+func TestCredentialDoesNotClaimARobotWithAnotherID(t *testing.T) {
+	state := newHarborState(t)
+	credential := credentialFor("ci", "pull")
+	credential.Status.RobotName = "ci"
+	credential.Status.RobotID = 5
+	credential.Status.RobotMarkedAt = ptr.To(metav1.NewTime(time.Now().Add(-time.Hour)))
+	r, c := credentialWorld(t, state, credential)
+	state.project("acme-images").robots = []fakeRobot{{id: 700, name: "ci", secret: "theirs", created: time.Now()}}
+	reconcileCredential(t, r, "ci")
+	if got := credentialReady(fetchCredential(t, c, "ci")); got.Reason != "NameTaken" || len(state.robotSets) != 0 {
+		t.Fatalf("condition %+v sets %v", got, state.robotSets)
+	}
+}
+
+func TestCredentialDoesNotClaimARobotThatAppearsAfterAFailedCreate(t *testing.T) {
+	state := newHarborState(t)
+	r, c := credentialWorld(t, state, credentialFor("ci", "pull"))
+	state.failRobotCreate = true
+	reconcileCredential(t, r, "ci")
+	got := fetchCredential(t, c, "ci")
+	if got.Status.RobotName != "" || got.Status.RobotMarkedAt != nil {
+		t.Fatalf("the marker stayed after a failed create: %+v", got.Status)
+	}
+	state.project("acme-images").robots = []fakeRobot{{id: 700, name: "ci", secret: "theirs", created: time.Now()}}
+	reconcileCredential(t, r, "ci")
+	if got := credentialReady(fetchCredential(t, c, "ci")); got.Reason != "NameTaken" || len(state.robotSets) != 0 {
+		t.Fatalf("condition %+v sets %v", got, state.robotSets)
+	}
+}
+
+func TestCredentialRecordsTheRobotIDAtOnce(t *testing.T) {
+	state := newHarborState(t)
+	r, c := credentialWorld(t, state, credentialFor("ci", "pull"))
+	reconcileCredential(t, r, "ci")
+	got := fetchCredential(t, c, "ci")
+	if got.Status.RobotID != state.project("acme-images").robots[0].id || got.Status.RobotMarkedAt == nil {
+		t.Fatalf("status %+v", got.Status)
+	}
+}
+
+func TestCredentialFindsItsRobotBeyondTheFirstPageAndIgnoresForeignOnes(t *testing.T) {
+	state := newHarborState(t)
+	r, c := credentialWorld(t, state, credentialFor("ci", "pull"))
+	reconcileCredential(t, r, "ci")
+	own := state.project("acme-images")
+	for i := range 150 {
+		own.robots = append([]fakeRobot{{id: int64(2000 + i), name: "filler" + strconv.Itoa(i), created: time.Now()}}, own.robots...)
+	}
+	other := state.addProject("other-project", 1)
+	other.robots = []fakeRobot{{id: 5000, name: "ci", secret: "theirs", created: time.Now()}}
+	state.mu.Lock()
+	state.ignoreRobotFilter = true
+	state.mu.Unlock()
+	credential := fetchCredential(t, c, "ci")
+	credential.Annotations = map[string]string{AnnotationResetSecret: "now"}
+	if err := c.Update(context.Background(), credential); err != nil {
+		t.Fatal(err)
+	}
+	reconcileCredential(t, r, "ci")
+	got := fetchCredential(t, c, "ci")
+	if credentialReady(got).Status != metav1.ConditionTrue || len(state.robotSets) != 1 || state.robotSets[0] != strconv.FormatInt(got.Status.RobotID, 10) {
+		t.Fatalf("status %+v sets %v", got.Status, state.robotSets)
+	}
+	if other.robots[0].secret != "theirs" {
+		t.Error("a robot of another project got a new secret")
+	}
+}
+
+func TestCredentialDeleteInTheWindowBeforeTheRobotIDWasRecorded(t *testing.T) {
+	state := newHarborState(t)
+	credential := credentialFor("ci", "pull")
+	credential.Finalizers = []string{platform.Finalizer("RegistryCredential")}
+	credential.Status.RobotName = "ci"
+	credential.Status.RobotMarkedAt = ptr.To(metav1.NewTime(time.Now().Add(-time.Minute)))
+	r, c := credentialWorld(t, state, credential)
+	state.project("acme-images").robots = []fakeRobot{{id: 700, name: "ci", created: time.Now()}}
+	if err := c.Delete(context.Background(), fetchCredential(t, c, "ci")); err != nil {
+		t.Fatal(err)
+	}
+	reconcileCredential(t, r, "ci")
+	if len(state.project("acme-images").robots) != 0 {
+		t.Error("the robot of the half made credential leaked")
 	}
 }

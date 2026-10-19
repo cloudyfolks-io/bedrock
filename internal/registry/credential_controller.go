@@ -122,7 +122,7 @@ func (r *CredentialReconciler) ensureRobot(ctx context.Context, credential *v1al
 		return got, result{}, err
 	}
 	switch {
-	case found && owned:
+	case found && owned && claimed(credential.Status.RobotID, robot.ID, credential.Status.RobotMarkedAt, robot.Created):
 		return r.healRobot(ctx, credential, registry, hc, got, robot)
 	case found && adopting(credential):
 		return r.takeOver(ctx, credential, registry, hc, got, robot)
@@ -134,15 +134,18 @@ func (r *CredentialReconciler) ensureRobot(ctx context.Context, credential *v1al
 
 func (r *CredentialReconciler) createRobot(ctx context.Context, credential *v1alpha1.RegistryCredential, registry *v1alpha1.Registry, hc *harbor.Client, got robotFacts, project string, owned bool) (robotFacts, result, error) {
 	if !owned {
-		if err := r.markRobot(ctx, credential, credential.Name); err != nil {
+		if err := r.recordRobot(ctx, credential, credential.Name, 0); err != nil {
 			return got, result{}, err
 		}
 	}
 	robot, secret, err := hc.CreateRobot(ctx, project, credential.Name, credential.Spec.Permission)
-	if errors.Is(err, harbor.ErrConflict) && !owned {
-		return got, result{reason: reasonNameTaken, message: "the Harbor robot " + credential.Name + " exists in the project", requeue: credentialRequeue}, r.markRobot(ctx, credential, "")
+	if errors.Is(err, harbor.ErrConflict) {
+		return got, result{reason: reasonNameTaken, message: "the Harbor robot " + credential.Name + " exists in the project", requeue: credentialRequeue}, r.forgetUnlessOwned(ctx, credential, owned)
 	}
 	if err != nil {
+		return got, result{}, errors.Join(err, r.forgetUnlessOwned(ctx, credential, owned))
+	}
+	if err := r.recordRobot(ctx, credential, credential.Name, robot.ID); err != nil {
 		return got, result{}, err
 	}
 	got.robotName, got.robotID, got.username = credential.Name, robot.ID, robot.Name
@@ -150,8 +153,15 @@ func (r *CredentialReconciler) createRobot(ctx context.Context, credential *v1al
 	return r.writeSecret(ctx, credential, registry, got, secret)
 }
 
+func (r *CredentialReconciler) forgetUnlessOwned(ctx context.Context, credential *v1alpha1.RegistryCredential, owned bool) error {
+	if owned {
+		return nil
+	}
+	return r.recordRobot(ctx, credential, "", 0)
+}
+
 func (r *CredentialReconciler) takeOver(ctx context.Context, credential *v1alpha1.RegistryCredential, registry *v1alpha1.Registry, hc *harbor.Client, got robotFacts, robot harbor.Robot) (robotFacts, result, error) {
-	if err := r.markRobot(ctx, credential, credential.Name); err != nil {
+	if err := r.recordRobot(ctx, credential, credential.Name, robot.ID); err != nil {
 		return got, result{}, err
 	}
 	return r.resetRobot(ctx, credential, registry, hc, got, robot)
@@ -237,7 +247,7 @@ func (r *CredentialReconciler) finalize(ctx context.Context, credential *v1alpha
 	if !controllerutil.ContainsFinalizer(credential, platform.Finalizer("RegistryCredential")) {
 		return ctrl.Result{}, nil
 	}
-	if credential.Status.RobotID == 0 || credential.Status.RobotName != credential.Name {
+	if credential.Status.RobotName != credential.Name {
 		return ctrl.Result{}, r.updateFinalizers(ctx, credential, controllerutil.RemoveFinalizer)
 	}
 	hc, unavailable, err := r.connector().Harbor(ctx)
@@ -245,7 +255,7 @@ func (r *CredentialReconciler) finalize(ctx context.Context, credential *v1alpha
 		return ctrl.Result{}, err
 	}
 	if unavailable == "" {
-		err = hc.DeleteRobot(ctx, credential.Status.RobotID)
+		err = r.deleteOwnRobot(ctx, credential, hc)
 	}
 	if unavailable != "" || err != nil {
 		out := harborOutcome(result{reason: reasonNotAvailable, message: unavailable, requeue: unavailableRequeue}, err)
@@ -257,16 +267,47 @@ func (r *CredentialReconciler) finalize(ctx context.Context, credential *v1alpha
 	return ctrl.Result{}, r.updateFinalizers(ctx, credential, controllerutil.RemoveFinalizer)
 }
 
+func (r *CredentialReconciler) deleteOwnRobot(ctx context.Context, credential *v1alpha1.RegistryCredential, hc *harbor.Client) error {
+	id := credential.Status.RobotID
+	if id == 0 {
+		var registry v1alpha1.Registry
+		err := r.Client.Get(ctx, client.ObjectKey{Namespace: credential.Namespace, Name: credential.Spec.RegistryRef.Name}, &registry)
+		if apierrors.IsNotFound(err) || (err == nil && registry.Status.ProjectName == "") {
+			return nil
+		}
+		if err != nil {
+			return err
+		}
+		robot, found, err := hc.FindRobot(ctx, registry.Status.ProjectName, credential.Name)
+		if err != nil && !errors.Is(err, harbor.ErrNotFound) {
+			return err
+		}
+		if !found || !claimed(0, robot.ID, credential.Status.RobotMarkedAt, robot.Created) {
+			return nil
+		}
+		id = robot.ID
+	}
+	return hc.DeleteRobot(ctx, id)
+}
+
 func statusFacts(credential *v1alpha1.RegistryCredential) robotFacts {
 	status := credential.Status
 	return robotFacts{robotID: status.RobotID, robotName: status.RobotName, username: status.Username, secretReset: status.SecretReset, secretName: status.SecretName}
 }
 
-func (r *CredentialReconciler) markRobot(ctx context.Context, credential *v1alpha1.RegistryCredential, name string) error {
-	if err := r.mutateStatus(ctx, credential, func(status *v1alpha1.RegistryCredentialStatus) { status.RobotName = name }); err != nil {
+func (r *CredentialReconciler) recordRobot(ctx context.Context, credential *v1alpha1.RegistryCredential, name string, id int64) error {
+	var marked *metav1.Time
+	if name != "" {
+		now := metav1.Now()
+		marked = &now
+	}
+	mutate := func(status *v1alpha1.RegistryCredentialStatus) {
+		status.RobotName, status.RobotID, status.RobotMarkedAt = name, id, marked
+	}
+	if err := r.mutateStatus(ctx, credential, mutate); err != nil {
 		return err
 	}
-	credential.Status.RobotName = name
+	mutate(&credential.Status)
 	return nil
 }
 

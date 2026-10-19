@@ -63,6 +63,8 @@ type RegistryStatus struct {
 	// +optional
 	ProjectName string `json:"projectName,omitempty"`
 	// +optional
+	ProjectMarkedAt *metav1.Time `json:"projectMarkedAt,omitempty"`
+	// +optional
 	ProjectID int64 `json:"projectID,omitempty"`
 	// +optional
 	UsedBytes int64 `json:"usedBytes,omitempty"`
@@ -115,6 +117,8 @@ type RegistryCredentialStatus struct {
 	Username string `json:"username,omitempty"`
 	// +optional
 	RobotName string `json:"robotName,omitempty"`
+	// +optional
+	RobotMarkedAt *metav1.Time `json:"robotMarkedAt,omitempty"`
 	// +optional
 	RobotID int64 `json:"robotID,omitempty"`
 	// +optional
