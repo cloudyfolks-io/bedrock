@@ -64,6 +64,12 @@ spec:
                 type: string
               encryption:
                 properties:
+                  action:
+                    enum:
+                    - ""
+                    - rotate
+                    - revert
+                    type: string
                   kms:
                     properties:
                       endpoint:
@@ -272,6 +278,25 @@ spec:
                   - type
                   type: object
                 type: array
+              encryption:
+                properties:
+                  lastRotatedAt:
+                    format: date-time
+                    type: string
+                  message:
+                    type: string
+                  newKey:
+                    type: string
+                  oldKey:
+                    type: string
+                  phase:
+                    type: string
+                  reverting:
+                    type: boolean
+                  rewrittenSecrets:
+                    format: int64
+                    type: integer
+                type: object
               observedGeneration:
                 format: int64
                 type: integer
