@@ -358,3 +358,63 @@ func TestSchemaSizeChangeAndSwitchAreAllowed(t *testing.T) {
 	vm.Spec.Compute, vm.Spec.InstanceType = nil, "u1.medium"
 	must(t, c.Update(context.Background(), vm))
 }
+
+func fromVolume(volume string) func(*v1alpha1.VirtualMachine) {
+	return func(vm *v1alpha1.VirtualMachine) {
+		vm.Spec.Image = nil
+		vm.Spec.RootDisk = v1alpha1.VMRootDisk{VolumeRef: volume}
+	}
+}
+
+func TestSchemaRootDiskFromAVolume(t *testing.T) {
+	c, _ := startEnv(t)
+	ns := uniqueNamespace(t, c)
+	requireAccepted(t, c, schemaVM(ns, fromVolume("boot1")))
+	cases := map[string]func(*v1alpha1.VirtualMachine){
+		"with size":          func(vm *v1alpha1.VirtualMachine) { fromVolume("boot1")(vm); vm.Spec.RootDisk.SizeGi = 20 },
+		"with storage class": func(vm *v1alpha1.VirtualMachine) { fromVolume("boot1")(vm); vm.Spec.RootDisk.StorageClass = "block" },
+		"with image": func(vm *v1alpha1.VirtualMachine) {
+			fromVolume("boot1")(vm)
+			vm.Spec.Image = &v1alpha1.ImageRef{Name: "ubuntu-24.04"}
+		},
+		"also a disk":       func(vm *v1alpha1.VirtualMachine) { fromVolume("data1")(vm) },
+		"foreign name":      fromVolume("a/b"),
+		"no size no volume": func(vm *v1alpha1.VirtualMachine) { vm.Spec.RootDisk = v1alpha1.VMRootDisk{} },
+	}
+	for label, mutate := range cases {
+		requireRefused(t, c, label, schemaVM(ns, mutate))
+	}
+}
+
+func TestSchemaRootVolumeSwapNeedsAStoppedVM(t *testing.T) {
+	c, _ := startEnv(t)
+	ns := uniqueNamespace(t, c)
+	ctx := context.Background()
+	vm := schemaVM(ns, fromVolume("boot1"))
+	requireAccepted(t, c, vm)
+	vm.Spec.RootDisk.VolumeRef = "boot2"
+	if err := c.Update(ctx, vm); !apierrors.IsInvalid(err) || !strings.Contains(err.Error(), "stopped") {
+		t.Fatalf("a swap on a running VM: %v", err)
+	}
+	vm.Spec.Running = false
+	must(t, c.Update(ctx, vm))
+}
+
+func TestSchemaRootDiskModeIsFixed(t *testing.T) {
+	c, _ := startEnv(t)
+	ns := uniqueNamespace(t, c)
+	ctx := context.Background()
+	owned := schemaVM(ns, func(vm *v1alpha1.VirtualMachine) { vm.Spec.Running = false })
+	requireAccepted(t, c, owned)
+	owned.Spec.Image = nil
+	owned.Spec.RootDisk = v1alpha1.VMRootDisk{VolumeRef: "boot1"}
+	if err := c.Update(ctx, owned); !apierrors.IsInvalid(err) {
+		t.Fatalf("owned to volume: %v", err)
+	}
+	booted := schemaVM(ns, func(vm *v1alpha1.VirtualMachine) { fromVolume("boot1")(vm); vm.Spec.Running = false })
+	requireAccepted(t, c, booted)
+	booted.Spec.RootDisk = v1alpha1.VMRootDisk{SizeGi: 20}
+	if err := c.Update(ctx, booted); !apierrors.IsInvalid(err) {
+		t.Fatalf("volume to owned: %v", err)
+	}
+}

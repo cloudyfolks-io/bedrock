@@ -38,7 +38,7 @@ func VolumeOwner(vms []v1alpha1.VirtualMachine, volume string) string {
 	owner := ""
 	var oldest metav1.Time
 	for _, vm := range vms {
-		if !slices.ContainsFunc(vm.Spec.Disks, func(disk v1alpha1.VMDisk) bool { return disk.VolumeRef == volume }) {
+		if !slices.Contains(v1alpha1.VolumeRefs(vm), volume) {
 			continue
 		}
 		older := owner == "" || vm.CreationTimestamp.Before(&oldest) || (vm.CreationTimestamp.Equal(&oldest) && vm.Name < owner)
@@ -51,7 +51,7 @@ func VolumeOwner(vms []v1alpha1.VirtualMachine, volume string) string {
 
 func (r *VirtualMachineReconciler) resolve(ctx context.Context, vm v1alpha1.VirtualMachine, labels map[string]string) (RenderInput, *Gate, error) {
 	in := RenderInput{VirtualMachine: vm, Labels: labels}
-	steps := []resolveStep{r.stepRootImage, r.stepRootDisk, r.stepCompute, r.stepCDROMs, r.stepInstanceType, r.stepPreference, r.stepSubnets, r.stepAddresses, r.stepSecurityGroups, r.stepDefaultGroup, r.stepSSHKeys, r.stepCloudInit, r.stepVolumes}
+	steps := []resolveStep{r.stepRootImage, r.stepRootDisk, r.stepRootVolume, r.stepCompute, r.stepCDROMs, r.stepInstanceType, r.stepPreference, r.stepSubnets, r.stepAddresses, r.stepSecurityGroups, r.stepDefaultGroup, r.stepSSHKeys, r.stepCloudInit, r.stepVolumes}
 	for _, step := range steps {
 		next, gate, err := step(ctx, vm, in)
 		if err != nil || gate != nil {
@@ -115,6 +115,19 @@ func (r *VirtualMachineReconciler) stepRootDisk(_ context.Context, vm v1alpha1.V
 	if issue := RootDiskIssue(vm.Spec.RootDisk.SizeGi, in.RootImage); issue != nil {
 		return in, &Gate{Reason: issue.Reason, Message: issue.Message}, nil
 	}
+	return in, nil, nil
+}
+
+func (r *VirtualMachineReconciler) stepRootVolume(ctx context.Context, vm v1alpha1.VirtualMachine, in RenderInput) (RenderInput, *Gate, error) {
+	ref := vm.Spec.RootDisk.VolumeRef
+	if ref == "" {
+		return in, nil, nil
+	}
+	volume, gate, err := r.attachableVolume(ctx, vm, ref)
+	if err != nil || gate != nil {
+		return in, gate, err
+	}
+	in.RootVolume = &ResolvedVolume{Name: ref, Bus: volume.Spec.Bus}
 	return in, nil, nil
 }
 
@@ -247,31 +260,34 @@ func (r *VirtualMachineReconciler) stepCloudInit(ctx context.Context, vm v1alpha
 }
 
 func (r *VirtualMachineReconciler) stepVolumes(ctx context.Context, vm v1alpha1.VirtualMachine, in RenderInput) (RenderInput, *Gate, error) {
-	if len(vm.Spec.Disks) == 0 {
-		return in, nil, nil
-	}
-	var vms v1alpha1.VirtualMachineList
-	if err := r.Client.List(ctx, &vms, client.InNamespace(vm.Namespace)); err != nil {
-		return in, nil, err
-	}
 	for _, disk := range vm.Spec.Disks {
-		var volume v1alpha1.Volume
-		err := r.Client.Get(ctx, client.ObjectKey{Namespace: vm.Namespace, Name: disk.VolumeRef}, &volume)
-		if notFound(err) {
-			return in, gateOf(ReasonVolumeNotFound, "the volume %q does not exist", disk.VolumeRef), nil
-		}
-		if err != nil {
-			return in, nil, err
-		}
-		if owner := VolumeOwner(vms.Items, disk.VolumeRef); owner != vm.Name {
-			return in, gateOf(ReasonVolumeInUse, "the volume %q is used by %q", disk.VolumeRef, owner), nil
-		}
-		if gate, err := r.usable(ctx, volume); err != nil || gate != nil {
+		volume, gate, err := r.attachableVolume(ctx, vm, disk.VolumeRef)
+		if err != nil || gate != nil {
 			return in, gate, err
 		}
 		in.Volumes = append(slices.Clone(in.Volumes), ResolvedVolume{Name: disk.VolumeRef, Bus: effectiveBus(disk, volume)})
 	}
 	return in, nil, nil
+}
+
+func (r *VirtualMachineReconciler) attachableVolume(ctx context.Context, vm v1alpha1.VirtualMachine, name string) (v1alpha1.Volume, *Gate, error) {
+	var vms v1alpha1.VirtualMachineList
+	if err := r.Client.List(ctx, &vms, client.InNamespace(vm.Namespace)); err != nil {
+		return v1alpha1.Volume{}, nil, err
+	}
+	var volume v1alpha1.Volume
+	err := r.Client.Get(ctx, client.ObjectKey{Namespace: vm.Namespace, Name: name}, &volume)
+	if notFound(err) {
+		return volume, gateOf(ReasonVolumeNotFound, "the volume %q does not exist", name), nil
+	}
+	if err != nil {
+		return volume, nil, err
+	}
+	if owner := VolumeOwner(vms.Items, name); owner != vm.Name {
+		return volume, gateOf(ReasonVolumeInUse, "the volume %q is used by %q", name, owner), nil
+	}
+	gate, err := r.usable(ctx, volume)
+	return volume, gate, err
 }
 
 func (r *VirtualMachineReconciler) usable(ctx context.Context, volume v1alpha1.Volume) (*Gate, error) {

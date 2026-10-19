@@ -48,8 +48,8 @@ func Refs(vm v1alpha1.VirtualMachine) []string {
 	for _, key := range vm.Spec.SSHKeys {
 		keys = append(keys, "sshkey/"+key)
 	}
-	for _, disk := range vm.Spec.Disks {
-		keys = append(keys, "volume/"+disk.VolumeRef)
+	for _, volume := range v1alpha1.VolumeRefs(vm) {
+		keys = append(keys, "volume/"+volume)
 	}
 	sort.Strings(keys)
 	return slices.Compact(keys)

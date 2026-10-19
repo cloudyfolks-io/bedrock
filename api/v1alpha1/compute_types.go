@@ -32,13 +32,20 @@ const (
 	VolumeSnapshotPhaseFailed  = "Failed"
 )
 
+// +kubebuilder:validation:XValidation:rule="has(self.volumeRef) ? (!has(self.sizeGi) && !has(self.storageClass)) : has(self.sizeGi)",message="rootDisk needs sizeGi, or volumeRef without sizeGi and storageClass"
 type VMRootDisk struct {
 	// +kubebuilder:validation:Minimum=1
 	// +kubebuilder:validation:XValidation:rule="self >= oldSelf",message="rootDisk.sizeGi can only grow"
-	SizeGi int32 `json:"sizeGi"`
+	// +optional
+	SizeGi int32 `json:"sizeGi,omitempty"`
 	// +kubebuilder:validation:XValidation:rule="self == oldSelf",message="rootDisk.storageClass is immutable"
 	// +optional
 	StorageClass string `json:"storageClass,omitempty"`
+	// +kubebuilder:validation:MinLength=1
+	// +kubebuilder:validation:MaxLength=253
+	// +kubebuilder:validation:Pattern=`^[a-z0-9]([-a-z0-9.]*[a-z0-9])?$`
+	// +optional
+	VolumeRef string `json:"volumeRef,omitempty"`
 }
 
 type VMDisk struct {
@@ -137,6 +144,10 @@ type VMCompute struct {
 
 // +kubebuilder:validation:XValidation:rule="!has(self.image) || self.image.name.matches('^[a-z0-9]([-a-z0-9.]*[a-z0-9])?$')",message="image.name must be a DNS subdomain"
 // +kubebuilder:validation:XValidation:rule="has(self.compute) != has(self.instanceType)",message="exactly one of compute and instanceType is required"
+// +kubebuilder:validation:XValidation:rule="!has(self.rootDisk.volumeRef) || !has(self.image)",message="image and rootDisk.volumeRef exclude each other"
+// +kubebuilder:validation:XValidation:rule="!has(self.rootDisk.volumeRef) || !has(self.disks) || !self.disks.exists(d, d.volumeRef == self.rootDisk.volumeRef)",message="the root volume cannot also be listed in disks"
+// +kubebuilder:validation:XValidation:rule="has(self.rootDisk.volumeRef) == has(oldSelf.rootDisk.volumeRef)",message="rootDisk.volumeRef cannot be added or removed"
+// +kubebuilder:validation:XValidation:rule="!has(self.rootDisk.volumeRef) || !has(oldSelf.rootDisk.volumeRef) || self.rootDisk.volumeRef == oldSelf.rootDisk.volumeRef || (has(self.running) && !self.running)",message="rootDisk.volumeRef can change only while the virtual machine is stopped"
 type VirtualMachineSpec struct {
 	// +kubebuilder:validation:MinLength=1
 	// +optional

@@ -27,6 +27,7 @@ type RenderInput struct {
 	CDROMs         []ResolvedImage
 	NICs           []NIC
 	SSHKeys        []string
+	RootVolume     *ResolvedVolume
 	Volumes        []ResolvedVolume
 	UserData       string
 	NetworkData    string
@@ -78,10 +79,17 @@ func Render(in RenderInput) (Rendered, error) {
 	}
 	return Rendered{
 		Secret:         &secret,
-		RootClaim:      RootClaim(vm, in.Labels, in.RootImage),
+		RootClaim:      rootClaimOf(in),
 		CDROMClaims:    claims,
 		VirtualMachine: kubeVirt,
 	}, nil
+}
+
+func rootClaimOf(in RenderInput) *unstructured.Unstructured {
+	if in.RootVolume != nil {
+		return nil
+	}
+	return RootClaim(in.VirtualMachine, in.Labels, in.RootImage)
 }
 
 func schedulingAffinity(scheduling *v1alpha1.VMScheduling) *corev1.Affinity {
@@ -99,7 +107,7 @@ func kubeVirtVM(in RenderInput, affinity *corev1.Affinity) (*unstructured.Unstru
 		"evictionStrategy": evictionStrategyOf(vm.Spec.EvictionStrategy),
 		"domain":           domainOf(in),
 		"networks":         networksOf(in.NICs),
-		"volumes":          volumesOf(vm, in.Volumes, len(in.CDROMs), in.NetworkData),
+		"volumes":          volumesOf(in),
 	}
 	if vm.Spec.Scheduling != nil && len(vm.Spec.Scheduling.NodeSelector) > 0 {
 		templateSpec["nodeSelector"] = stringMap(vm.Spec.Scheduling.NodeSelector)
@@ -167,7 +175,7 @@ func stringMap(in map[string]string) map[string]any {
 
 func domainOf(in RenderInput) map[string]any {
 	vm := in.VirtualMachine
-	domain := map[string]any{"devices": devicesOf(vm, in.Volumes, len(in.CDROMs), in.NICs)}
+	domain := map[string]any{"devices": devicesOf(vm, in)}
 	if cpu := cpuOf(vm.Spec.CPU, vm.Spec.Compute); cpu != nil {
 		domain["cpu"] = cpu
 	}
@@ -200,12 +208,12 @@ func cpuOf(cpu *v1alpha1.VMCPU, compute *v1alpha1.VMCompute) map[string]any {
 	return out
 }
 
-func devicesOf(vm v1alpha1.VirtualMachine, volumes []ResolvedVolume, cdroms int, nics []NIC) map[string]any {
+func devicesOf(vm v1alpha1.VirtualMachine, in RenderInput) map[string]any {
 	devices := map[string]any{
 		"autoattachPodInterface": false,
 		"logSerialConsole":       true,
-		"disks":                  disksOf(volumes, cdroms),
-		"interfaces":             interfacesOf(nics),
+		"disks":                  disksOf(in),
+		"interfaces":             interfacesOf(in.NICs),
 	}
 	if vm.Spec.Firmware != nil && vm.Spec.Firmware.TPM {
 		devices["tpm"] = map[string]any{"persistent": true}
@@ -216,16 +224,16 @@ func devicesOf(vm v1alpha1.VirtualMachine, volumes []ResolvedVolume, cdroms int,
 	return devices
 }
 
-func disksOf(volumes []ResolvedVolume, cdroms int) []any {
-	disks := []any{map[string]any{"name": "rootdisk", "disk": map[string]any{}, "bootOrder": int64(1)}}
-	for index := 0; index < cdroms; index++ {
+func disksOf(in RenderInput) []any {
+	disks := []any{map[string]any{"name": "rootdisk", "disk": rootDiskDevice(in.RootVolume), "bootOrder": int64(1)}}
+	for index := 0; index < len(in.CDROMs); index++ {
 		disks = append(disks, map[string]any{
 			"name":      cdromDiskName(index),
 			"cdrom":     map[string]any{"readonly": true},
 			"bootOrder": int64(index + 2),
 		})
 	}
-	for _, volume := range volumes {
+	for _, volume := range in.Volumes {
 		key := DiskKey(volume.Name)
 		disk := map[string]any{}
 		if volume.Bus != "" {
@@ -234,6 +242,13 @@ func disksOf(volumes []ResolvedVolume, cdroms int) []any {
 		disks = append(disks, map[string]any{"name": "vol-" + key, "disk": disk, "serial": key})
 	}
 	return append(disks, map[string]any{"name": "cloudinit", "disk": map[string]any{}})
+}
+
+func rootDiskDevice(volume *ResolvedVolume) map[string]any {
+	if volume == nil || volume.Bus == "" {
+		return map[string]any{}
+	}
+	return map[string]any{"bus": volume.Bus}
 }
 
 func cdromDiskName(index int) string {
@@ -273,18 +288,26 @@ func hostDevicesOf(devices []v1alpha1.VMHostDevice) []any {
 	return out
 }
 
-func volumesOf(vm v1alpha1.VirtualMachine, volumes []ResolvedVolume, cdroms int, networkData string) []any {
-	out := []any{map[string]any{"name": "rootdisk", "dataVolume": map[string]any{"name": RootClaimName(vm.Name)}}}
-	for index := 0; index < cdroms; index++ {
+func rootVolumeOf(in RenderInput) map[string]any {
+	if in.RootVolume != nil {
+		return map[string]any{"name": "rootdisk", "persistentVolumeClaim": map[string]any{"claimName": in.RootVolume.Name}}
+	}
+	return map[string]any{"name": "rootdisk", "dataVolume": map[string]any{"name": RootClaimName(in.VirtualMachine.Name)}}
+}
+
+func volumesOf(in RenderInput) []any {
+	vm := in.VirtualMachine
+	out := []any{rootVolumeOf(in)}
+	for index := 0; index < len(in.CDROMs); index++ {
 		out = append(out, map[string]any{"name": cdromDiskName(index), "dataVolume": map[string]any{"name": CDROMClaimName(vm.Name, index)}})
 	}
-	for _, volume := range volumes {
+	for _, volume := range in.Volumes {
 		out = append(out, map[string]any{
 			"name":                  "vol-" + DiskKey(volume.Name),
 			"persistentVolumeClaim": map[string]any{"claimName": volume.Name, "hotpluggable": true},
 		})
 	}
-	return append(out, cloudInitVolume(vm.Name, networkData))
+	return append(out, cloudInitVolume(vm.Name, in.NetworkData))
 }
 
 func cloudInitVolume(vm, networkData string) map[string]any {

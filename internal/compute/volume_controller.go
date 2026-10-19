@@ -311,9 +311,10 @@ func listedVolumes(_ context.Context, obj client.Object) []reconcile.Request {
 	if !ok {
 		return nil
 	}
-	requests := make([]reconcile.Request, 0, len(vm.Spec.Disks))
-	for _, disk := range vm.Spec.Disks {
-		requests = append(requests, reconcile.Request{NamespacedName: client.ObjectKey{Namespace: vm.Namespace, Name: disk.VolumeRef}})
+	refs := v1alpha1.VolumeRefs(*vm)
+	requests := make([]reconcile.Request, 0, len(refs))
+	for _, ref := range refs {
+		requests = append(requests, reconcile.Request{NamespacedName: client.ObjectKey{Namespace: vm.Namespace, Name: ref}})
 	}
 	return requests
 }

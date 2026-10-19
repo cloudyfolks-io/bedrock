@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"maps"
+	"slices"
 	"strings"
 	"time"
 
@@ -159,14 +160,19 @@ func (r *VirtualMachineReconciler) applyRendered(ctx context.Context, in RenderI
 	if err := ssa.Apply(ctx, r.Client, rendered.Secret, v1alpha1.ComputeFieldManager); err != nil {
 		return fmt.Errorf("apply the cloud-init secret: %w", err)
 	}
-	claims := append([]*unstructured.Unstructured{rendered.RootClaim}, rendered.CDROMClaims...)
+	claims := slices.Clone(rendered.CDROMClaims)
+	if rendered.RootClaim != nil {
+		claims = append([]*unstructured.Unstructured{rendered.RootClaim}, claims...)
+	}
 	for _, claim := range claims {
 		if err := createIfAbsent(ctx, r.Client, claim); err != nil {
 			return fmt.Errorf("create the claim %s: %w", claim.GetName(), err)
 		}
 	}
-	if err := growClaim(ctx, r.Client, vm.Namespace, RootClaimName(vm.Name), vm.Spec.RootDisk.SizeGi); err != nil {
-		return fmt.Errorf("grow the root claim: %w", err)
+	if rendered.RootClaim != nil {
+		if err := growClaim(ctx, r.Client, vm.Namespace, RootClaimName(vm.Name), vm.Spec.RootDisk.SizeGi); err != nil {
+			return fmt.Errorf("grow the root claim: %w", err)
+		}
 	}
 	if err := guardOwnership(ctx, r.Client, kubeVirtVMGVK, rendered.VirtualMachine); err != nil {
 		return err

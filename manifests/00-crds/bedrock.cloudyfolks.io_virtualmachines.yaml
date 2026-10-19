@@ -229,9 +229,17 @@ spec:
                     x-kubernetes-validations:
                     - message: rootDisk.storageClass is immutable
                       rule: self == oldSelf
-                required:
-                - sizeGi
+                  volumeRef:
+                    maxLength: 253
+                    minLength: 1
+                    pattern: ^[a-z0-9]([-a-z0-9.]*[a-z0-9])?$
+                    type: string
                 type: object
+                x-kubernetes-validations:
+                - message: rootDisk needs sizeGi, or volumeRef without sizeGi and
+                    storageClass
+                  rule: 'has(self.volumeRef) ? (!has(self.sizeGi) && !has(self.storageClass))
+                    : has(self.sizeGi)'
               running:
                 default: true
                 type: boolean
@@ -1177,6 +1185,18 @@ spec:
               rule: '!has(self.image) || self.image.name.matches(''^[a-z0-9]([-a-z0-9.]*[a-z0-9])?$'')'
             - message: exactly one of compute and instanceType is required
               rule: has(self.compute) != has(self.instanceType)
+            - message: image and rootDisk.volumeRef exclude each other
+              rule: '!has(self.rootDisk.volumeRef) || !has(self.image)'
+            - message: the root volume cannot also be listed in disks
+              rule: '!has(self.rootDisk.volumeRef) || !has(self.disks) || !self.disks.exists(d,
+                d.volumeRef == self.rootDisk.volumeRef)'
+            - message: rootDisk.volumeRef cannot be added or removed
+              rule: has(self.rootDisk.volumeRef) == has(oldSelf.rootDisk.volumeRef)
+            - message: rootDisk.volumeRef can change only while the virtual machine
+                is stopped
+              rule: '!has(self.rootDisk.volumeRef) || !has(oldSelf.rootDisk.volumeRef)
+                || self.rootDisk.volumeRef == oldSelf.rootDisk.volumeRef || (has(self.running)
+                && !self.running)'
           status:
             properties:
               addresses:

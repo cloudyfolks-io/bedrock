@@ -22,7 +22,7 @@ The condition `Ready` shows the reason `NotInProject`.
 | `compute` | A custom size: `cores` and `memoryMiB`. Use it, or `instanceType`, never both. |
 | `preference` | Name of a cluster preference. The image preference is the default. |
 | `image` | Name and scope (`cluster` or `project`) of the root disk image. |
-| `rootDisk` | `sizeGi` and an optional `storageClass`. |
+| `rootDisk` | `sizeGi` and an optional `storageClass`, or a `volumeRef` to boot from a Volume. |
 | `disks` | List of Volumes with an optional bus. |
 | `cdroms` | List of ISO image names. |
 | `networks` | List of Subnets with security groups, an optional MAC address and an optional fixed `address`. |
@@ -81,7 +81,7 @@ Each object has the Bedrock object as owner, so a delete removes it.
 | Object | Name | Purpose |
 |---|---|---|
 | KubeVirt `VirtualMachine` | `<vm>` | The running machine. |
-| DataVolume | `<vm>-root` | The root disk. |
+| DataVolume | `<vm>-root` | The root disk. The operator creates no root disk when `rootDisk.volumeRef` is set. |
 | DataVolume | `<vm>-cdrom-<index>` | One claim for each ISO. |
 | Secret | `<vm>-cloudinit` | The cloud-init data. |
 | DataVolume | `<volume>` | The disk of a Volume. |
@@ -160,6 +160,30 @@ The VM then has the reason `InvalidUserData`.
 The root disk can grow. It cannot shrink.
 The size of the root disk must be at least the size of the image.
 When you increase `rootDisk.sizeGi`, the operator grows the claim.
+
+### Boot from a Volume
+
+Set `rootDisk.volumeRef` to the name of a Volume of the same project.
+The Volume is the boot disk. The operator creates no `<vm>-root` claim.
+`rootDisk.volumeRef` excludes `rootDisk.sizeGi`, `rootDisk.storageClass` and `image`.
+Set `preference` when the image preference is needed.
+The Volume must have the condition `Ready` and must hold a bootable disk.
+Create it with `source.image` or `source.snapshotRef`.
+The bus of the root disk is the bus of the Volume, or else the choice of the preference.
+
+Only one VM can use a Volume, as a root disk or as a data disk.
+The older VM wins. The other VM has the reason `VolumeInUse`.
+The Volume cannot be both the root disk and a data disk of one VM.
+
+A delete of the VM keeps the Volume.
+The Volume shows `Available` again.
+A VolumeSnapshot of the Volume works at all times.
+
+You can change `rootDisk.volumeRef` only while `running` is `false`.
+This swap gives the VM a different boot disk at the next start.
+You cannot add `rootDisk.volumeRef` to a VM that has an operator root disk.
+You cannot remove it from a VM that has it.
+A backup of the VM includes the root Volume.
 
 A CD-ROM is cloned from an ISO image into a claim of the VM.
 The operator looks for a project image first and then for a cluster image.
@@ -266,7 +290,7 @@ Run `kubectl describe virtualmachine <name>` and read the condition `Ready`.
 | `SecurityGroupNotReady` | A security group is missing or not ready. | Check the security group condition. |
 | `SSHKeyNotReady` | An SSHKey is missing or not valid. | Check the SSHKey condition. |
 | `VolumeNotFound` | A Volume does not exist. | Create the Volume. |
-| `VolumeInUse` | Another VM uses the Volume. | Remove the Volume from one VM. |
+| `VolumeInUse` | Another VM uses the Volume, as a root disk or as a data disk. | Remove the Volume from one VM. |
 | `VolumeNotUsable` | The Volume is not ready, or its claim belongs to another object. | Wait for the Volume condition `Ready`, or rename the Volume. |
 | `RestoreInProgress` | A restore holds the object. | Wait until the restore ends. |
 | `ApplyFailed` | The cluster refused an object. | Ask an administrator to read the operator log. The operator tries again in 30 seconds. |

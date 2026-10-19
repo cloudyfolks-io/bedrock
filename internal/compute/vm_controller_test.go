@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -751,4 +752,170 @@ func TestVMWithAnInstanceTypeIgnoresTheSizeLimits(t *testing.T) {
 	createVM(t, c, ns, "web-1", noMutation)
 	reconcileVM(t, newVMReconciler(c), ns, "web-1")
 	requirePresent(t, c, kubeVirtVMGVK, ns, "web-1")
+}
+
+func readyVolume(t *testing.T, c client.Client, ns, name string) {
+	t.Helper()
+	createVolume(t, c, ns, name)
+	reconcileVolume(t, c, ns, name)
+	setDataVolumePhase(t, c, ns, name, "Succeeded")
+	reconcileVolume(t, c, ns, name)
+}
+
+func bootFrom(volume string) func(*v1alpha1.VirtualMachine) {
+	return func(vm *v1alpha1.VirtualMachine) {
+		vm.Spec.Image = nil
+		vm.Spec.RootDisk = v1alpha1.VMRootDisk{VolumeRef: volume}
+	}
+}
+
+func bootClaimName(t *testing.T, c client.Client, ns, name string) string {
+	t.Helper()
+	volumes, _, _ := unstructured.NestedSlice(requirePresent(t, c, kubeVirtVMGVK, ns, name).Object, "spec", "template", "spec", "volumes")
+	claim, _, _ := unstructured.NestedString(volumes[0].(map[string]any), "persistentVolumeClaim", "claimName")
+	return claim
+}
+
+func TestVMBootsFromAVolume(t *testing.T) {
+	c, _ := startEnv(t)
+	ns := seedPlatform(t, c)
+	readyVolume(t, c, ns, "boot1")
+	createVM(t, c, ns, "web-1", bootFrom("boot1"))
+	reconcileVM(t, newVMReconciler(c), ns, "web-1")
+	requireAbsent(t, c, dataVolumeGVK, ns, "web-1-root")
+	if claim := bootClaimName(t, c, ns, "web-1"); claim != "boot1" {
+		t.Fatalf("root claim %q", claim)
+	}
+	requireReason(t, getVM(t, c, ns, "web-1"), "Starting")
+	volume := reconcileVolume(t, c, ns, "boot1")
+	if volume.Status.AttachedTo != "web-1" || volume.Status.Phase != v1alpha1.VolumePhaseInUse {
+		t.Fatalf("volume status %+v", volume.Status)
+	}
+}
+
+func TestVMRefusesARootVolumeAnotherVMUses(t *testing.T) {
+	c, _ := startEnv(t)
+	ns := seedPlatform(t, c)
+	readyVolume(t, c, ns, "boot1")
+	readyVolume(t, c, ns, "boot2")
+	r := newVMReconciler(c)
+	createVM(t, c, ns, "first", bootFrom("boot1"))
+	createVM(t, c, ns, "second", bootFrom("boot1"))
+	createVM(t, c, ns, "third", func(vm *v1alpha1.VirtualMachine) {
+		bootFrom("boot2")(vm)
+		vm.Spec.Disks = []v1alpha1.VMDisk{{VolumeRef: "boot1"}}
+	})
+	for _, name := range []string{"first", "second", "third"} {
+		reconcileVM(t, r, ns, name)
+	}
+	requirePresent(t, c, kubeVirtVMGVK, ns, "first")
+	for _, name := range []string{"second", "third"} {
+		requireReason(t, getVM(t, c, ns, name), "VolumeInUse")
+		requireAbsent(t, c, kubeVirtVMGVK, ns, name)
+	}
+}
+
+func TestVMRefusesADiskVolumeAsRootOfAnotherVM(t *testing.T) {
+	c, _ := startEnv(t)
+	ns := seedPlatform(t, c)
+	r := newVMReconciler(c)
+	createVM(t, c, ns, "older", noMutation)
+	createVM(t, c, ns, "z-booter", func(vm *v1alpha1.VirtualMachine) {
+		bootFrom("data1")(vm)
+		vm.Spec.Disks = nil
+	})
+	reconcileVM(t, r, ns, "older")
+	reconcileVM(t, r, ns, "z-booter")
+	requireReason(t, getVM(t, c, ns, "z-booter"), "VolumeInUse")
+}
+
+func TestVMWaitsForTheRootVolume(t *testing.T) {
+	c, _ := startEnv(t)
+	ns := seedPlatform(t, c)
+	createVolume(t, c, ns, "pending")
+	r := newVMReconciler(c)
+	createVM(t, c, ns, "ghost-boot", bootFrom("ghost"))
+	createVM(t, c, ns, "pending-boot", bootFrom("pending"))
+	reconcileVM(t, r, ns, "ghost-boot")
+	reconcileVM(t, r, ns, "pending-boot")
+	requireReason(t, getVM(t, c, ns, "ghost-boot"), "VolumeNotFound")
+	requireReason(t, getVM(t, c, ns, "pending-boot"), "VolumeNotUsable")
+	requireAbsent(t, c, kubeVirtVMGVK, ns, "pending-boot")
+}
+
+func TestDeletingTheVMKeepsTheRootVolume(t *testing.T) {
+	c, _ := startEnv(t)
+	ns := seedPlatform(t, c)
+	readyVolume(t, c, ns, "boot1")
+	createVM(t, c, ns, "web-1", bootFrom("boot1"))
+	reconcileVM(t, newVMReconciler(c), ns, "web-1")
+	if volume := reconcileVolume(t, c, ns, "boot1"); volume.Status.AttachedTo != "web-1" {
+		t.Fatalf("volume status %+v", volume.Status)
+	}
+	vm := getVM(t, c, ns, "web-1")
+	claim := requirePresent(t, c, dataVolumeGVK, ns, "boot1")
+	for _, ref := range claim.GetOwnerReferences() {
+		if ref.UID == vm.UID {
+			t.Fatalf("the VM owns the claim of the Volume: %+v", ref)
+		}
+	}
+	must(t, c.Delete(context.Background(), &vm))
+	volume := reconcileVolume(t, c, ns, "boot1")
+	if volume.Status.AttachedTo != "" || volume.Status.Phase != v1alpha1.VolumePhaseAvailable || !volume.DeletionTimestamp.IsZero() {
+		t.Fatalf("volume %+v", volume)
+	}
+	requirePresent(t, c, dataVolumeGVK, ns, "boot1")
+}
+
+func TestSwappingTheRootVolumeMovesTheClaim(t *testing.T) {
+	c, _ := startEnv(t)
+	ns := seedPlatform(t, c)
+	readyVolume(t, c, ns, "boot1")
+	readyVolume(t, c, ns, "boot2")
+	r := newVMReconciler(c)
+	createVM(t, c, ns, "web-1", func(vm *v1alpha1.VirtualMachine) {
+		bootFrom("boot1")(vm)
+		vm.Spec.Running = false
+	})
+	reconcileVM(t, r, ns, "web-1")
+	vm := getVM(t, c, ns, "web-1")
+	vm.Spec.RootDisk.VolumeRef = "boot2"
+	must(t, c.Update(context.Background(), &vm))
+	reconcileVM(t, r, ns, "web-1")
+	if claim := bootClaimName(t, c, ns, "web-1"); claim != "boot2" {
+		t.Fatalf("root claim %q", claim)
+	}
+	if released := reconcileVolume(t, c, ns, "boot1"); released.Status.AttachedTo != "" {
+		t.Fatalf("boot1 %+v", released.Status)
+	}
+	if taken := reconcileVolume(t, c, ns, "boot2"); taken.Status.AttachedTo != "web-1" {
+		t.Fatalf("boot2 %+v", taken.Status)
+	}
+}
+
+func TestRefsAndOwnerCountTheRootVolume(t *testing.T) {
+	vm := fixtureVM("acme-web", "web-1")
+	vm.Spec.Image = nil
+	vm.Spec.RootDisk = v1alpha1.VMRootDisk{VolumeRef: "boot1"}
+	if !slices.Contains(Refs(vm), "volume/boot1") {
+		t.Fatalf("refs %v", Refs(vm))
+	}
+	if got := VolumeOwner([]v1alpha1.VirtualMachine{vm}, "boot1"); got != "web-1" {
+		t.Fatalf("owner %q", got)
+	}
+}
+
+func TestSnapshotOfARootVolume(t *testing.T) {
+	c, _ := startEnv(t)
+	ns, r := snapshotFixture(t, c, "block", rbdProvisioner, nil)
+	createVM(t, c, ns, "web-1", func(vm *v1alpha1.VirtualMachine) {
+		bootFrom("data1")(vm)
+		vm.Spec.Disks = nil
+	})
+	reconcileSnapshot(t, r, ns)
+	requireSnapshotReason(t, c, ns, "Pending")
+	csi := requirePresent(t, c, csiSnapshotGVK, ns, "snap1")
+	if claim, _, _ := unstructured.NestedString(csi.Object, "spec", "source", "persistentVolumeClaimName"); claim != "data1" {
+		t.Fatalf("snapshot source %q", claim)
+	}
 }

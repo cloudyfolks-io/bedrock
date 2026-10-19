@@ -395,3 +395,34 @@ func TestRenderInstanceTypeSetsNoSize(t *testing.T) {
 		t.Fatalf("cpu %+v", cpu)
 	}
 }
+
+func TestRenderRootDiskFromAVolume(t *testing.T) {
+	in := renderFixture()
+	in.VirtualMachine.Spec.Image = nil
+	in.VirtualMachine.Spec.RootDisk = v1alpha1.VMRootDisk{VolumeRef: "boot1"}
+	in.RootImage, in.ImageOS = nil, nil
+	in.RootVolume = &ResolvedVolume{Name: "boot1"}
+	out := mustRender(t, in)
+	if out.RootClaim != nil {
+		t.Fatalf("a root Volume needs no root claim: %+v", out.RootClaim.Object)
+	}
+	spec := templateSpec(t, out)
+	root := list(t, spec, "volumes")[0]
+	if want := map[string]any{"name": "rootdisk", "persistentVolumeClaim": map[string]any{"claimName": "boot1"}}; !reflect.DeepEqual(root, want) {
+		t.Fatalf("root volume %+v", root)
+	}
+	disk := list(t, spec, "domain", "devices", "disks")[0]
+	if want := map[string]any{"name": "rootdisk", "disk": map[string]any{}, "bootOrder": int64(1)}; !reflect.DeepEqual(disk, want) {
+		t.Fatalf("root disk %+v", disk)
+	}
+}
+
+func TestRenderRootVolumeKeepsItsBus(t *testing.T) {
+	in := renderFixture()
+	in.VirtualMachine.Spec.RootDisk = v1alpha1.VMRootDisk{VolumeRef: "boot1"}
+	in.RootVolume = &ResolvedVolume{Name: "boot1", Bus: "sata"}
+	disk := list(t, templateSpec(t, mustRender(t, in)), "domain", "devices", "disks")[0]
+	if want := map[string]any{"name": "rootdisk", "disk": map[string]any{"bus": "sata"}, "bootOrder": int64(1)}; !reflect.DeepEqual(disk, want) {
+		t.Fatalf("root disk %+v", disk)
+	}
+}

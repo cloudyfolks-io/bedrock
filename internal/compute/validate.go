@@ -24,6 +24,7 @@ func ValidateVirtualMachine(vm v1alpha1.VirtualMachine) []Issue {
 	var issues []Issue
 	issues = append(issues, nameIssues(vm.Name)...)
 	issues = append(issues, imageIssues(vm.Spec)...)
+	issues = append(issues, rootDiskIssues(vm.Spec.RootDisk)...)
 	issues = append(issues, diskIssues(vm.Spec.Disks)...)
 	issues = append(issues, cdromIssues(vm.Spec.CDROMs)...)
 	issues = append(issues, networkIssues(vm.Spec.Networks)...)
@@ -63,6 +64,13 @@ func imageIssues(spec v1alpha1.VirtualMachineSpec) []Issue {
 		return nil
 	}
 	return subdomainIssues("spec.image.name", spec.Image.Name)
+}
+
+func rootDiskIssues(root v1alpha1.VMRootDisk) []Issue {
+	if root.VolumeRef == "" {
+		return nil
+	}
+	return subdomainIssues("spec.rootDisk.volumeRef", root.VolumeRef)
 }
 
 func diskIssues(disks []v1alpha1.VMDisk) []Issue {
