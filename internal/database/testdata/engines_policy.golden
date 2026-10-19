@@ -34,7 +34,7 @@
     ],
     "podSelector": {
       "matchLabels": {
-        "app.kubernetes.io/component": "engine"
+        "bedrock.cloudyfolks.io/database-role": "engine"
       }
     },
     "policyTypes": [

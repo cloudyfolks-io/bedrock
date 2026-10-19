@@ -14,6 +14,8 @@ const (
 	ManagedBy       = "bedrock"
 	ComponentGate   = "gate"
 	ComponentEngine = "engine"
+	LabelRole       = "bedrock.cloudyfolks.io/database-role"
+	RoleEngine      = "engine"
 )
 
 func Name(uid types.UID) string {
