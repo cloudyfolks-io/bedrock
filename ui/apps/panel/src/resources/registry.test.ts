@@ -7,7 +7,7 @@ import { customizeValidator } from "@rjsf/validator-ajv8";
 import { resolve } from "node:path";
 
 const crds = loadCrds();
-const sections = ["Infrastructure", "Platform", "Tenancy", "Catalog", "Compute", "Storage", "Networking", "Object storage"];
+const sections = ["Infrastructure", "Platform", "Tenancy", "Catalog", "Compute", "Storage", "Networking", "Object storage", "Registry"];
 const verbs = ["get", "list", "watch", "create", "update", "patch", "delete", "deletecollection"];
 
 function sectionId(section: string): string {

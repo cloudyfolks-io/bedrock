@@ -228,6 +228,11 @@ const L = {
   quota: msg({ id: "col.quota", message: "Quota" }),
   buckets: msg({ id: "col.buckets", message: "Buckets" }),
   keyType: msg({ id: "col.keyType", message: "Key type" }),
+  host: msg({ id: "col.host", message: "Host" }),
+  registry: msg({ id: "col.registry", message: "Registry" }),
+  username: msg({ id: "col.username", message: "Username" }),
+  loginSecret: msg({ id: "col.loginSecret", message: "Login Secret" }),
+  repositories: msg({ id: "col.repositories", message: "Repositories" }),
 };
 
 const poolOf = (object: KubeObject): string => textAt(object, "status.providerNetwork") || textAt(object, "spec.providerNetwork");
@@ -300,5 +305,7 @@ export const columnsByPlural: Record<string, ColumnDef[]> = {
     sizeBytes("usage", L.usage, "status.usage.bytes"),
     status,
   ],
+  registries: [name, ltrText("host", L.host, "status.host"), gi("quota", L.quota, "spec.quotaGB"), sizeBytes("usage", L.usage, "status.usedBytes"), text("repositories", L.repositories, "status.repositoryCount"), status],
+  registrycredentials: [name, text("registry", L.registry, "spec.registryRef.name"), text("permission", L.permission, "spec.permission"), ltrText("username", L.username, "status.username"), ltrText("loginSecret", L.loginSecret, "status.secretName"), status],
   objectstorageusers: [name, text("displayName", L.displayName, "spec.displayName"), text("permission", L.permission, "spec.permission"), count("buckets", L.buckets, (object) => listAt(object, "spec.buckets").length), flag("suspended", L.suspended, "spec.suspended"), status],
 };

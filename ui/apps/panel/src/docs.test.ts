@@ -33,6 +33,8 @@ const routes = [
   "/p/:project/security-groups",
   "/p/:project/buckets",
   "/p/:project/object-users",
+  "/p/:project/registries",
+  "/p/:project/registry-credentials",
   "/account",
 ];
 

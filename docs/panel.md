@@ -60,6 +60,8 @@ The server stays the authority. The panel only hides what the user cannot use.
 | `/p/:project/security-groups` | Security groups |
 | `/p/:project/buckets` | Buckets |
 | `/p/:project/object-users` | Object storage users and their credentials |
+| `/p/:project/registries` | Registries |
+| `/p/:project/registry-credentials` | Registry credentials and their login |
 | `/account` | Language, theme and downloads |
 
 Every other kind with a namespace has a detail page at `/p/:project/<path>/:name`.

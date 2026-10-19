@@ -28,6 +28,7 @@ const BackupsPage = lazy(() => import("../pages/project/BackupsPage"));
 const NetworksPage = lazy(() => import("../pages/project/NetworksPage"));
 const ElasticIpsPage = lazy(() => import("../pages/project/ElasticIpsPage"));
 const ObjectUsersPage = lazy(() => import("../pages/project/ObjectUsersPage"));
+const RegistryCredentialsPage = lazy(() => import("../pages/project/RegistryCredentialsPage"));
 const SecurityGroupDetailPage = lazy(() => import("../pages/project/SecurityGroupDetailPage"));
 const VmWizard = lazy(() => import("../wizard/VmWizard"));
 const IsoWizard = lazy(() => import("../wizard/IsoWizard"));
@@ -49,6 +50,7 @@ const listPages: Record<string, (def: ResourceDef) => ReactElement> = {
   "project/load-balancers": () => <LoadBalancersPage />,
   "project/elastic-ips": () => <ElasticIpsPage />,
   "project/object-users": () => <ObjectUsersPage />,
+  "project/registry-credentials": () => <RegistryCredentialsPage />,
 };
 
 const detailPages: Record<string, (def: ResourceDef) => ReactElement> = {
