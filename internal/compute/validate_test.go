@@ -94,6 +94,23 @@ func TestValidateRefusesDuplicateVolumes(t *testing.T) {
 	}
 }
 
+func TestValidateGuestIdentity(t *testing.T) {
+	vm := validFixture()
+	vm.Spec.Firmware = &v1alpha1.VMFirmware{UUID: "not-a-uuid", Serial: "bad serial"}
+	vm.Spec.Disks[0].Serial = "bad serial"
+	issues := ValidateVirtualMachine(vm)
+	for _, field := range []string{"spec.firmware.uuid", "spec.firmware.serial", "spec.disks[0].serial"} {
+		if !hasField(issues, field) {
+			t.Errorf("%s must be refused: %v", field, issueFields(issues))
+		}
+	}
+	vm.Spec.Firmware = &v1alpha1.VMFirmware{UUID: "6f1f3a52-2f0b-4c1e-9d55-0c6f1d7a9e10", Serial: "SN-0001"}
+	vm.Spec.Disks[0].Serial = "vol0123456789abcdef"
+	if issues := ValidateVirtualMachine(vm); len(issues) != 0 {
+		t.Fatalf("issues %v", issueFields(issues))
+	}
+}
+
 func TestValidateFirmware(t *testing.T) {
 	vm := validFixture()
 	vm.Spec.Firmware = &v1alpha1.VMFirmware{SecureBoot: true}

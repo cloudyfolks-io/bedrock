@@ -3,6 +3,7 @@ package compute
 import (
 	"fmt"
 	"maps"
+	"regexp"
 	"slices"
 
 	"k8s.io/apimachinery/pkg/util/validation"
@@ -10,7 +11,16 @@ import (
 	"github.com/cloudyfolks-io/bedrock/api/v1alpha1"
 )
 
-const maxVMNameLength = 52
+const (
+	maxVMNameLength         = 52
+	maxDiskSerialLength     = 36
+	maxFirmwareSerialLength = 64
+)
+
+var (
+	firmwareUUID     = regexp.MustCompile(`^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$`)
+	serialCharacters = regexp.MustCompile(`^[A-Za-z0-9._-]+$`)
+)
 
 type Issue struct{ Field, Reason, Message string }
 
@@ -79,6 +89,7 @@ func diskIssues(disks []v1alpha1.VMDisk) []Issue {
 	for index, disk := range disks {
 		field := fmt.Sprintf("spec.disks[%d].volumeRef", index)
 		issues = append(issues, subdomainIssues(field, disk.VolumeRef)...)
+		issues = append(issues, serialIssues(fmt.Sprintf("spec.disks[%d].serial", index), disk.Serial, maxDiskSerialLength)...)
 		if seen[disk.VolumeRef] {
 			issues = append(issues, invalid(field, "a volume can be listed once"))
 		}
@@ -135,10 +146,31 @@ func keyIssues(keys []string) []Issue {
 }
 
 func firmwareIssues(firmware *v1alpha1.VMFirmware) []Issue {
-	if firmware != nil && firmware.SecureBoot && !firmware.UEFI {
-		return []Issue{invalid("spec.firmware.secureBoot", "secureBoot requires uefi")}
+	if firmware == nil {
+		return nil
 	}
-	return nil
+	var issues []Issue
+	if firmware.SecureBoot && !firmware.UEFI {
+		issues = append(issues, invalid("spec.firmware.secureBoot", "secureBoot requires uefi"))
+	}
+	if firmware.UUID != "" && !firmwareUUID.MatchString(firmware.UUID) {
+		issues = append(issues, invalid("spec.firmware.uuid", "must be a UUID"))
+	}
+	return append(issues, serialIssues("spec.firmware.serial", firmware.Serial, maxFirmwareSerialLength)...)
+}
+
+func serialIssues(field, serial string, limit int) []Issue {
+	if serial == "" {
+		return nil
+	}
+	var issues []Issue
+	if len(serial) > limit {
+		issues = append(issues, invalid(field, fmt.Sprintf("must have at most %d characters", limit)))
+	}
+	if !serialCharacters.MatchString(serial) {
+		issues = append(issues, invalid(field, "may hold only letters, digits, dot, underscore and dash"))
+	}
+	return issues
 }
 
 func schedulingIssues(scheduling *v1alpha1.VMScheduling) []Issue {

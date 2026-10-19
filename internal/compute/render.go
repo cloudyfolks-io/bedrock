@@ -187,13 +187,33 @@ func domainOf(in RenderInput) map[string]any {
 	if vm.Spec.Compute != nil {
 		domain["memory"] = map[string]any{"guest": fmt.Sprintf("%dMi", vm.Spec.Compute.MemoryMiB)}
 	}
-	if vm.Spec.Firmware != nil && vm.Spec.Firmware.UEFI {
-		domain["firmware"] = map[string]any{"bootloader": map[string]any{"efi": map[string]any{"secureBoot": vm.Spec.Firmware.SecureBoot}}}
+	if firmware := firmwareOf(vm.Spec.Firmware); firmware != nil {
+		domain["firmware"] = firmware
 	}
 	if vm.Spec.Firmware != nil && vm.Spec.Firmware.SecureBoot {
 		domain["features"] = map[string]any{"smm": map[string]any{"enabled": true}}
 	}
 	return domain
+}
+
+func firmwareOf(firmware *v1alpha1.VMFirmware) map[string]any {
+	if firmware == nil {
+		return nil
+	}
+	out := map[string]any{}
+	if firmware.UEFI {
+		out["bootloader"] = map[string]any{"efi": map[string]any{"secureBoot": firmware.SecureBoot}}
+	}
+	if firmware.UUID != "" {
+		out["uuid"] = firmware.UUID
+	}
+	if firmware.Serial != "" {
+		out["serial"] = firmware.Serial
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
 }
 
 func cpuOf(cpu *v1alpha1.VMCPU, compute *v1alpha1.VMCompute) map[string]any {
@@ -244,7 +264,7 @@ func disksOf(in RenderInput) []any {
 		if volume.Bus != "" {
 			disk["bus"] = volume.Bus
 		}
-		disks = append(disks, map[string]any{"name": "vol-" + key, "disk": disk, "serial": key})
+		disks = append(disks, map[string]any{"name": "vol-" + key, "disk": disk, "serial": serialOf(in.VirtualMachine.Spec.Disks, volume.Name, key)})
 	}
 	return append(disks, map[string]any{"name": "cloudinit", "disk": map[string]any{}})
 }
@@ -254,6 +274,15 @@ func rootDiskDevice(volume *ResolvedVolume) map[string]any {
 		return map[string]any{}
 	}
 	return map[string]any{"bus": volume.Bus}
+}
+
+func serialOf(declared []v1alpha1.VMDisk, volume, fallback string) string {
+	for _, disk := range declared {
+		if disk.VolumeRef == volume && disk.Serial != "" {
+			return disk.Serial
+		}
+	}
+	return fallback
 }
 
 func cdromDiskName(index int) string {

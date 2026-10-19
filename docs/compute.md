@@ -23,7 +23,7 @@ The condition `Ready` shows the reason `NotInProject`.
 | `preference` | Name of a cluster preference. The image preference is the default. |
 | `image` | Name and scope (`cluster` or `project`) of the root disk image. |
 | `rootDisk` | `sizeGi` and an optional `storageClass`, or a `volumeRef` to boot from a Volume. |
-| `disks` | List of Volumes with an optional bus. |
+| `disks` | List of Volumes with an optional bus and an optional `serial`. |
 | `cdroms` | List of ISO image names. |
 | `networks` | List of Subnets with security groups, an optional MAC address and an optional fixed `address`. |
 | `cloudInit` | `userData`, `networkData` or a `secretRef`. |
@@ -239,15 +239,94 @@ The request must be a same-origin WebSocket request.
 The proxy removes the credentials of the caller before it calls KubeVirt.
 The VM status shows the console paths in `status.console`.
 
+## Node drains
+
+The Setting `virt.eviction-strategy` is the KubeVirt cluster setting `configuration.evictionStrategy`.
+It decides what a node drain does to a VM that has no `evictionStrategy` of its own.
+The `evictionStrategy` field of a VirtualMachine has priority over the Setting.
+When this field is empty, the operator writes `LiveMigrateIfPossible` into the KubeVirt VM.
+So the Setting does not change the VMs that the operator renders.
+
+| Value | A drain does this to a VM that can migrate | A drain does this to a VM that cannot migrate |
+|---|---|---|
+| `LiveMigrate` | It migrates the VM. | It waits. The drain does not end until the VM can migrate or stops. |
+| `LiveMigrateIfPossible` | It migrates the VM. | It shuts the VM down and the drain continues. |
+| `None` | It shuts the VM down. | It shuts the VM down. |
+
+A kured reboot starts a drain.
+With `LiveMigrate`, one VM that cannot migrate blocks the reboot of its node.
+With `LiveMigrateIfPossible`, the reboot stops this VM.
+Check the condition `LiveMigratable` of a VM before you plan a reboot.
+
+## Volume hot-plug
+
+KubeVirt 1.9.0 has the feature gate `DeclarativeHotplugVolumes` in state Beta.
+KubeVirt enables a Beta gate unless the cluster setting disables it.
+The source is `pkg/virt-config/featuregate/active.go` and `pkg/virt-config/featuregate/feature-gates.go` (function `IsEnabled`) in the KubeVirt repository at the tag `v1.9.0`.
+So the operator does not list this gate in `featureGates`.
+You can add and remove Volumes in `disks` while a VM runs.
+
+## Support containers
+
+The operator sets the limits of the KubeVirt container `guest-console-log` to 100m CPU and 120M memory.
+The KubeVirt default of 15m CPU slows the console log of a VM that writes much output.
+The limits apply to each new launcher pod.
+A running VM keeps its limits until the next start or migration.
+
+## Live migration status
+
+`status.migration` shows the newest KubeVirt migration of the VM.
+It has the fields `name`, `phase`, `startedAt` and `message`.
+The `phase` is the phase of the KubeVirt migration, for example `Running`, `Succeeded` or `Failed`.
+The `message` holds the failure reason of a failed migration.
+The `startedAt` is the creation time of the migration.
+The operator reads only migrations in the namespace of the VM that name the VM.
+The status is empty when the VM has no migration.
+
+## Guest identity
+
+A guest reads its identity from the virtual hardware.
+Windows activation depends on it.
+
+The Settings `virt.smbios.manufacturer`, `virt.smbios.product`, `virt.smbios.family`, `virt.smbios.version` and `virt.smbios.sku` set the SMBIOS values of all guests.
+An empty Setting keeps the KubeVirt value.
+A change of one of these Settings does not restart a running VM.
+The new value applies at the next start of each VM.
+
+`firmware.uuid` and `firmware.serial` set the UUID and the serial number of one VM.
+You cannot change them, add them or remove them after the VM exists.
+Without them KubeVirt derives the UUID from the VM name.
+
+`disks[].serial` sets the serial number of one disk.
+Without it the serial is a fixed value that the operator derives from the Volume name.
+A serial has at most 36 characters.
+It can hold letters, digits, dot, underscore and dash.
+A change applies at the next start of the VM.
+
 ## Settings
 
 | Setting | Effect |
 |---|---|
+| `virt.smbios.manufacturer`, `.product`, `.family`, `.version`, `.sku` | The SMBIOS values of all guests. The default is empty. See Guest identity. |
 | `overcommit.cpu` | The number of vCPUs for each physical thread. The default is 4. |
 | `overcommit.memory` | The memory overcommit ratio. The minimum is 0.1. The default is 1.0. |
 | `compute.max-cores` | The largest `compute.cores` of a VM. The default is 32. |
 | `compute.max-memory-mib` | The largest `compute.memoryMiB` of a VM. The default is 131072. |
 | `migration.parallel` | The number of live migrations at the same time in the cluster. |
+| `migration.parallel-outbound` | The number of outbound live migrations at the same time on one node. The default is 4. |
+| `migration.bandwidth` | The bandwidth limit of one live migration, in bytes per second. The default is `1Gi`. |
+| `migration.completion-timeout-per-gib` | The seconds for each GiB of guest memory before KubeVirt aborts a live migration. The default is 800. |
+| `migration.progress-timeout` | The seconds without progress before KubeVirt aborts a live migration. The default is 150. |
+| `migration.compression` | Empty or `zstd`. The default is empty. |
+| `virt.eviction-strategy` | `LiveMigrate`, `LiveMigrateIfPossible` or `None`. The default is `LiveMigrateIfPossible`. See Node drains. |
+
+The migration Settings change the KubeVirt configuration.
+A running VM is not restarted and not migrated by this change.
+
+With `migration.compression` set to `zstd`, the operator creates the KubeVirt `MigrationPolicy` `bedrock-compression`.
+The policy matches all VMs and compresses the migration traffic with zstd.
+The compression uses CPU on the source node and is an experimental KubeVirt feature.
+When you set the Setting to empty, the operator deletes the policy.
 
 A wrong value stops the render of the KubeVirt object.
 The live object does not change.
