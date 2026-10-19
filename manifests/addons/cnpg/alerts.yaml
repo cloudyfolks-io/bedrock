@@ -1,0 +1,37 @@
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: bedrock-database-postgresql
+  namespace: monitoring
+spec:
+  groups:
+    - name: bedrock-database-postgresql
+      rules:
+        - alert: DbaasReplicationLag
+          expr: (cnpg_pg_replication_lag{namespace="bedrock-dbaas"} > 30) * on(namespace,pod) group_left(label_app_kubernetes_io_instance, label_bedrock_cloudyfolks_io_name) kube_pod_labels{namespace="bedrock-dbaas",label_app_kubernetes_io_managed_by=~"bedrock|percona-server-mysql-operator"}
+          for: 5m
+          labels:
+            severity: warning
+          annotations:
+            summary: A PostgreSQL replica is more than 30 seconds behind.
+            description: >-
+              Pod {{ $labels.pod }} of the database {{ $labels.label_bedrock_cloudyfolks_io_name }} ({{ $labels.label_app_kubernetes_io_instance }}) has a replication lag of {{ $value }} seconds.
+
+        - alert: DbaasBackupStale
+          expr: (time() - cnpg_collector_last_available_backup_timestamp{namespace="bedrock-dbaas"} > 129600) * on(namespace,pod) group_left(label_app_kubernetes_io_instance, label_bedrock_cloudyfolks_io_name) kube_pod_labels{namespace="bedrock-dbaas",label_app_kubernetes_io_managed_by=~"bedrock|percona-server-mysql-operator"}
+          for: 30m
+          labels:
+            severity: warning
+          annotations:
+            summary: A PostgreSQL cluster has no backup newer than 36 hours.
+            description: >-
+              The database {{ $labels.label_bedrock_cloudyfolks_io_name }} ({{ $labels.label_app_kubernetes_io_instance }}) last backed up more than 36 hours ago.
+
+        - alert: DbaasWalArchiveFailing
+          expr: (increase(cnpg_pg_stat_archiver_failed_count{namespace="bedrock-dbaas"}[15m]) > 0) * on(namespace,pod) group_left(label_app_kubernetes_io_instance, label_bedrock_cloudyfolks_io_name) kube_pod_labels{namespace="bedrock-dbaas",label_app_kubernetes_io_managed_by=~"bedrock|percona-server-mysql-operator"}
+          labels:
+            severity: critical
+          annotations:
+            summary: WAL archiving to the object store is failing.
+            description: >-
+              Pod {{ $labels.pod }} of the database {{ $labels.label_bedrock_cloudyfolks_io_name }} ({{ $labels.label_app_kubernetes_io_instance }}) failed to archive WAL in the last 15 minutes. Point-in-time restore is at risk.
