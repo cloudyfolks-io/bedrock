@@ -141,3 +141,20 @@ func TestGoldenNameOfFollowsTheSourceHash(t *testing.T) {
 		t.Fatal("the same digest with another source hash must take a new snapshot")
 	}
 }
+
+func TestNamesOfAUUIDImageAreValid(t *testing.T) {
+	const uuid = "0f8b2c1e-6d4a-4f35-9a7e-3b1c5d2e8f40"
+	names := map[string]string{
+		"catalog": uuid,
+		"import":  ImportName(uuid),
+		"golden":  GoldenName(uuid, "sha256:aaa"),
+	}
+	for kind, name := range names {
+		if errs := validation.IsDNS1123Subdomain(name); len(errs) != 0 {
+			t.Fatalf("%s name %q is invalid: %v", kind, name, errs)
+		}
+		if errs := validation.IsValidLabelValue(name); len(errs) != 0 {
+			t.Fatalf("%s name %q is no valid label value: %v", kind, name, errs)
+		}
+	}
+}

@@ -12,6 +12,8 @@ spec:
     family: debian
     version: "12"
     preference: debian
+    displayName: Debian 12
+    architecture: amd64
   source:
     registry:
       image: quay.io/containerdisks/debian:12

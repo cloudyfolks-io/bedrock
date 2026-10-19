@@ -12,6 +12,8 @@ spec:
     family: almalinux
     version: "10"
     preference: rhel.10
+    displayName: AlmaLinux 10
+    architecture: amd64
   source:
     registry:
       image: quay.io/containerdisks/almalinux:10
