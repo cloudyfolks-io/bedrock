@@ -73,33 +73,41 @@ func (r Resolver) Resolve(ctx context.Context, c v1alpha1.Container, labels map[
 
 func (r Resolver) stepSubnet(ctx context.Context, c v1alpha1.Container, in resolved) (resolved, *Gate, error) {
 	name := SubnetName(c.Spec)
+	subnet, dns, gate, err := r.resolveSubnet(ctx, c.Namespace, name)
+	if err != nil || gate != nil {
+		return in, gate, err
+	}
+	in.subnet = subnet
+	in.NIC = network.NIC{Namespace: c.Namespace, Subnet: name, Address: c.Spec.Network.Address, SecurityGroups: slices.Clone(c.Spec.Network.SecurityGroups)}
+	in.DNSServers = dns
+	return in, nil, nil
+}
+
+func (r Resolver) resolveSubnet(ctx context.Context, namespace, name string) (v1alpha1.Subnet, []string, *Gate, error) {
 	var subnet v1alpha1.Subnet
-	err := r.Client.Get(ctx, client.ObjectKey{Namespace: c.Namespace, Name: name}, &subnet)
+	err := r.Client.Get(ctx, client.ObjectKey{Namespace: namespace, Name: name}, &subnet)
 	if notFound(err) {
-		return in, gateOf(ReasonSubnetNotFound, "the subnet %q does not exist", name), nil
+		return subnet, nil, gateOf(ReasonSubnetNotFound, "the subnet %q does not exist", name), nil
 	}
 	if err != nil {
-		return in, nil, err
+		return subnet, nil, nil, err
 	}
 	if !meta.IsStatusConditionTrue(subnet.Status.Conditions, v1alpha1.ConditionReady) {
-		return in, gateOf(ReasonSubnetNotReady, "the subnet %q is not ready", name), nil
+		return subnet, nil, gateOf(ReasonSubnetNotReady, "the subnet %q is not ready", name), nil
 	}
 	var parent v1alpha1.Network
 	err = r.Client.Get(ctx, client.ObjectKey{Name: subnet.Spec.NetworkRef}, &parent)
 	if err != nil && !notFound(err) {
-		return in, nil, err
+		return subnet, nil, nil, err
 	}
 	if err != nil || parent.Status.VPC == "" {
-		return in, gateOf(ReasonSubnetNotReady, "the network %q of the subnet %q is not ready", subnet.Spec.NetworkRef, name), nil
+		return subnet, nil, gateOf(ReasonSubnetNotReady, "the network %q of the subnet %q is not ready", subnet.Spec.NetworkRef, name), nil
 	}
 	cfg, err := network.LoadConfig(ctx, r.Client)
 	if err != nil {
-		return in, nil, err
+		return subnet, nil, nil, err
 	}
-	in.subnet = subnet
-	in.NIC = network.NIC{Namespace: c.Namespace, Subnet: name, Address: c.Spec.Network.Address, SecurityGroups: slices.Clone(c.Spec.Network.SecurityGroups)}
-	in.DNSServers = dnsServersOf(subnet, cfg.DNSServers)
-	return in, nil, nil
+	return subnet, dnsServersOf(subnet, cfg.DNSServers), nil, nil
 }
 
 func dnsServersOf(subnet v1alpha1.Subnet, fallback []string) []string {
@@ -185,14 +193,19 @@ func (r Resolver) stepDefaultGroup(ctx context.Context, c v1alpha1.Container, in
 	if len(c.Spec.Network.SecurityGroups) > 0 {
 		return in, nil, nil
 	}
-	name := network.DefaultSecurityGroupName(c.Namespace)
+	gate, err := r.defaultGroupGate(ctx, c.Namespace)
+	return in, gate, err
+}
+
+func (r Resolver) defaultGroupGate(ctx context.Context, namespace string) (*Gate, error) {
+	name := network.DefaultSecurityGroupName(namespace)
 	group := &unstructured.Unstructured{}
 	group.SetGroupVersionKind(fabricGroupGVK)
 	err := r.Client.Get(ctx, client.ObjectKey{Name: name}, group)
 	if notFound(err) {
-		return in, gateOf(ReasonWaitingForDefaultGroup, "the default security group %q does not exist yet", name), nil
+		return gateOf(ReasonWaitingForDefaultGroup, "the default security group %q does not exist yet", name), nil
 	}
-	return in, nil, err
+	return nil, err
 }
 
 func (r Resolver) stepVolumes(ctx context.Context, c v1alpha1.Container, in resolved) (resolved, *Gate, error) {

@@ -30,7 +30,10 @@ func SetupWithManager(mgr ctrl.Manager) error {
 
 func setupControllers(mgr ctrl.Manager) error {
 	r := &Reconciler{Client: mgr.GetClient(), Secrets: mgr.GetAPIReader(), FabricIPs: mgr.GetCache(), Scheme: mgr.GetScheme(), Now: time.Now}
-	return r.SetupWithManager(mgr)
+	if err := r.SetupWithManager(mgr); err != nil {
+		return err
+	}
+	return SetupBuildsWithManager(mgr)
 }
 
 func (r *Reconciler) SetupWithManager(mgr ctrl.Manager) error {

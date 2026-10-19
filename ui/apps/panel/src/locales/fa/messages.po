@@ -718,6 +718,9 @@ msgstr "پشتیبان‌ها"
 msgid "nav.item.buckets"
 msgstr "سطل‌ها"
 
+msgid "nav.item.builds"
+msgstr "ساخت‌ها"
+
 msgid "nav.item.clusterImages"
 msgstr "تصاویر کاتالوگ"
 
@@ -1083,6 +1086,9 @@ msgstr "متوقف"
 
 msgid "status.phase.stopping"
 msgstr "در حال توقف"
+
+msgid "status.phase.succeeded"
+msgstr "موفق"
 
 msgid "status.phase.verify"
 msgstr "تأیید"

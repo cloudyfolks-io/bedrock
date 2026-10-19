@@ -20,6 +20,24 @@ describe("elastic IP columns", () => {
 const container = (status: Record<string, unknown>): KubeObject =>
   ({ apiVersion: "bedrock.cloudyfolks.io/v1alpha1", kind: "Container", metadata: { name: "web", namespace: "acme-web" }, spec: { image: "registry.example.test/web:1" }, status }) as KubeObject;
 
+const build = (spec: Record<string, unknown>, status: Record<string, unknown>): KubeObject =>
+  ({ apiVersion: "bedrock.cloudyfolks.io/v1alpha1", kind: "Build", metadata: { name: "shop", namespace: "acme-web" }, spec, status }) as KubeObject;
+
+describe("build columns", () => {
+  const columns = columnsByPlural.builds ?? [];
+
+  it("sorts the phase and the type", () => {
+    expect(columns.find((def) => def.id === "phase")?.sortValue?.(build({}, { phase: "Succeeded" }))).toBe("Succeeded");
+    expect(columns.find((def) => def.id === "type")?.sortValue?.(build({ type: "buildpacks" }, {}))).toBe("buildpacks");
+    expect(columns.find((def) => def.id === "type")?.sortValue?.(build({}, {}))).toBe("");
+  });
+
+  it("shows the output image", () => {
+    const image = columns.find((def) => def.id === "image");
+    expect(image?.sortValue?.(build({ output: { image: "registry.example.test/acme/shop:1" } }, {}))).toBe("registry.example.test/acme/shop:1");
+  });
+});
+
 describe("container columns", () => {
   const columns = columnsByPlural.containers ?? [];
 

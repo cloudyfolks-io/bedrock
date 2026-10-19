@@ -159,6 +159,9 @@ components:
   - name: bedrock
     order: 90
     dirs: [manifests/90-bedrock]
+    extraImages:
+      - alpine/git:v2.54.0
+      - moby/buildkit:v0.31.2
   - name: catalog
     order: 92
     dirs: [manifests/92-catalog]
