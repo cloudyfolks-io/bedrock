@@ -280,8 +280,11 @@ func TestApplyEncryptionReportsTheGrantItHandled(t *testing.T) {
 	}
 	failed := newApplyFixture(t, "cp-enc-handled-fail", cfg.promoted, cfg.removed, encryption.Hash(cfg.removed))
 	failed.deps.Exec = restartHost{FakeExec: failed.exec, onRestart: func() {}}
-	if err := ApplyEncryption(context.Background(), k8sClient, failed.deps); err == nil || handledGrant(t, failed) != encryption.Hash(cfg.removed) {
-		t.Fatalf("failed: %v handled %q", err, handledGrant(t, failed))
+	if err := ApplyEncryption(context.Background(), k8sClient, failed.deps); err == nil || handledGrant(t, failed) != "" {
+		t.Fatalf("a failure is reported by the failed hash only: %v handled %q", err, handledGrant(t, failed))
+	}
+	if got := syncEncryptionStatus(failed.deps, hostWithRole(failed.node, v1alpha1.RoleControlPlane)); got.FailedHash != encryption.Hash(cfg.removed) {
+		t.Fatalf("status %+v", got)
 	}
 }
 
@@ -307,5 +310,42 @@ func TestApplyEncryptionRetriesAfterTheFailureMarkerIsDeleted(t *testing.T) {
 	}
 	if f.file(t) != string(cfg.removed) {
 		t.Fatal("the new file must stay after the retry")
+	}
+}
+
+func TestApplyEncryptionClearsAStaleHandledGrantWhenItStarts(t *testing.T) {
+	cfg := newApplyConfigs(t)
+	grant := encryption.Hash(cfg.removed)
+	f := newApplyFixture(t, "cp-enc-stale-handled", cfg.promoted, cfg.removed, grant)
+	root := f.deps.Root
+	writeFixtureFile(t, filepath.Join(root, "etc/bedrock/encryption/.grant-handled"), grant)
+	seen := ""
+	restarts := 0
+	f.deps.Exec = restartHost{FakeExec: f.exec, onRestart: func() {
+		restarts++
+		seen = handledGrant(t, f)
+		fakeAPIServer(t, root, time.Now().Add(time.Duration(restarts)*time.Hour))
+	}}
+	if err := ApplyEncryption(context.Background(), k8sClient, f.deps); err != nil {
+		t.Fatal(err)
+	}
+	if seen != "" {
+		t.Fatalf("a host that applies again must not report the old handled grant: %q", seen)
+	}
+	if handledGrant(t, f) != grant {
+		t.Fatalf("the handled grant must come back after the apply: %q", handledGrant(t, f))
+	}
+}
+
+func TestApplyEncryptionDoesNotRecordACancelledApply(t *testing.T) {
+	cfg := newApplyConfigs(t)
+	f := newApplyFixture(t, "cp-enc-cancel", cfg.promoted, cfg.removed, encryption.Hash(cfg.removed))
+	ctx, cancel := context.WithCancel(context.Background())
+	f.deps.Exec = restartHost{FakeExec: f.exec, onRestart: cancel}
+	if err := ApplyEncryption(ctx, k8sClient, f.deps); err == nil {
+		t.Fatal("a cancelled apply must report an error")
+	}
+	if handledGrant(t, f) != "" {
+		t.Fatalf("a cancelled apply is not handled: %q", handledGrant(t, f))
 	}
 }
