@@ -2,6 +2,8 @@ package network
 
 import (
 	"context"
+	"fmt"
+	"net/netip"
 	"slices"
 	"strconv"
 	"strings"
@@ -31,6 +33,9 @@ const (
 	keyServicesIdentityRange   = "network.services.identity-range"
 	keyServicesResolver        = "network.services.resolver"
 
+	keyLBCIDR    = "network.load-balancer.cidr"
+	keyLBGateway = "network.load-balancer.gateway"
+
 	keyReservedCIDRs       = "network.reserved-cidrs"
 	keySubnetAllowedRanges = "network.subnet-allowed-ranges"
 
@@ -57,6 +62,11 @@ type BGP struct {
 	RedistributeTables []uint32
 }
 
+type LoadBalancerPlane struct {
+	CIDR    netip.Prefix
+	Gateway netip.Addr
+}
+
 type Config struct {
 	EIPMode          string
 	ProviderNetworks []v1alpha1.ProviderNetworkSpec
@@ -65,6 +75,7 @@ type Config struct {
 	MTU              int
 	PeeringRange     string
 	Services         Services
+	LoadBalancer     LoadBalancerPlane
 
 	ReservedCIDRs       []string
 	SubnetAllowedRanges []string
@@ -92,6 +103,10 @@ func ParseConfig(values map[string]string) (Config, error) {
 		return Config{}, err
 	}
 	mtu, _ := strconv.Atoi(effective[keyMTU])
+	plane, err := parseLoadBalancerPlane(effective)
+	if err != nil {
+		return Config{}, err
+	}
 	return Config{
 		EIPMode:          effective[keyEIPMode],
 		ProviderNetworks: networks,
@@ -100,10 +115,20 @@ func ParseConfig(values map[string]string) (Config, error) {
 		MTU:              mtu,
 		PeeringRange:     effective[keyPeeringRange],
 		Services:         Services{ProviderNetwork: effective[keyServicesProviderNetwork], IdentityRange: effective[keyServicesIdentityRange], Resolver: effective[keyServicesResolver]},
+		LoadBalancer:     plane,
 
 		ReservedCIDRs:       splitList(effective[keyReservedCIDRs]),
 		SubnetAllowedRanges: splitList(effective[keySubnetAllowedRanges]),
 	}, nil
+}
+
+func parseLoadBalancerPlane(effective map[string]string) (LoadBalancerPlane, error) {
+	prefix, _ := netip.ParsePrefix(effective[keyLBCIDR])
+	gateway, _ := netip.ParseAddr(effective[keyLBGateway])
+	if !prefix.Contains(gateway) || isNetworkOrBroadcast(prefix, gateway) {
+		return LoadBalancerPlane{}, fmt.Errorf("the setting %s %q must be a host address inside %s %q", keyLBGateway, effective[keyLBGateway], keyLBCIDR, effective[keyLBCIDR])
+	}
+	return LoadBalancerPlane{CIDR: prefix, Gateway: gateway}, nil
 }
 
 func parseBGP(effective map[string]string) (BGP, error) {
@@ -133,7 +158,7 @@ func parseBGP(effective map[string]string) (BGP, error) {
 var networkKeys = []string{
 	keyEIPMode, keyProviderNetwork, keyBGPLocalASN, keyBGPRouterID, keyBGPPeers, keyBGPTransit, keyDNSServers, keyMTU,
 	keyBGPBFD, keyBGPHoldTime, keyBGPKeepaliveTime, keyBGPGracefulRestart, keyBGPAdvertiseFilter, keyBGPRedistributeTables,
-	keyReservedCIDRs, keySubnetAllowedRanges, keyPeeringRange,
+	keyReservedCIDRs, keySubnetAllowedRanges, keyPeeringRange, keyLBCIDR, keyLBGateway,
 	keyServicesProviderNetwork, keyServicesIdentityRange, keyServicesResolver,
 }
 

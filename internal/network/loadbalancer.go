@@ -100,5 +100,5 @@ func InternalRules(in InternalInput) []*unstructured.Unstructured {
 }
 
 func InternalVip(in InternalInput, subnet string) *unstructured.Unstructured {
-	return fabric.Vip(fabric.Meta{Name: FabricName(in.Namespace, in.Name), Labels: maps.Clone(in.Labels), Annotations: maps.Clone(in.Annotations)}, in.Namespace, subnet)
+	return fabric.Vip(fabric.Meta{Name: InternalVipName(in.Namespace, in.Name), Labels: maps.Clone(in.Labels), Annotations: maps.Clone(in.Annotations)}, in.Namespace, subnet)
 }

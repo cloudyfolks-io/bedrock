@@ -12,6 +12,7 @@ import (
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/client-go/util/retry"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -101,6 +102,12 @@ func (r *NetworkReconciler) Reconcile(ctx context.Context, req reconcile.Request
 	if err := ssa.Apply(ctx, r.Client, vpc, v1alpha1.NetworkFieldManager); err != nil {
 		return reconcile.Result{}, err
 	}
+	if conflict, err := r.applyLBPlane(ctx, &network, cfg); err != nil || conflict {
+		if err != nil {
+			return reconcile.Result{}, err
+		}
+		return r.publish(ctx, &network, notReadyStatus(network, ReasonFabricConflict, fmt.Sprintf("a Fabric Subnet named %s belongs to another owner", LBSubnetName(network.Name))))
+	}
 	observed, err := getObject(ctx, r.Client, fabric.VpcGVK, vpc.GetName())
 	if err != nil {
 		return reconcile.Result{}, err
@@ -120,6 +127,15 @@ func (r *NetworkReconciler) peerLinks(ctx context.Context, network *v1alpha1.Net
 		return nil, err
 	}
 	return PeerLinks(network.Name, peerings.Items, networks.Items), nil
+}
+
+func (r *NetworkReconciler) applyLBPlane(ctx context.Context, network *v1alpha1.Network, cfg Config) (bool, error) {
+	meta := fabric.Meta{Name: LBSubnetName(network.Name), Labels: ObjectLabels("Network", network.Name, network.Spec.TenantRef, ""), Annotations: OwnerAnnotations(network)}
+	subnet := fabric.PlaneSubnet(meta, VpcName(network.Name), cfg.LoadBalancer.CIDR.String(), cfg.LoadBalancer.Gateway.String())
+	if conflict, err := r.conflicts(ctx, subnet, network); err != nil || conflict {
+		return conflict, err
+	}
+	return false, ssa.Apply(ctx, r.Client, subnet, v1alpha1.NetworkFieldManager)
 }
 
 func (r *NetworkReconciler) existingAttachment(ctx context.Context, network *v1alpha1.Network) ([]string, string, error) {
@@ -407,9 +423,9 @@ func (r *NetworkReconciler) finalize(ctx context.Context, network *v1alpha1.Netw
 	if !planeGone {
 		return reconcile.Result{RequeueAfter: terminatingRequeue}, nil
 	}
-	gone, err := r.deleteOwnedVpc(ctx, network)
+	gone, err := r.deleteOwnedFabric(ctx, network)
 	if err != nil {
-		ctrl.LoggerFrom(ctx).Error(err, "delete the Vpc of the Network", "network", network.Name)
+		ctrl.LoggerFrom(ctx).Error(err, "delete the Fabric objects of the Network", "network", network.Name)
 		return reconcile.Result{RequeueAfter: terminatingRequeue}, nil
 	}
 	if !gone {
@@ -440,20 +456,27 @@ func remainingSubnets(facts []SubnetFacts) string {
 	return fmt.Sprintf("%d subnets remain: %s", len(facts), strings.Join(names, ", "))
 }
 
-func (r *NetworkReconciler) deleteOwnedVpc(ctx context.Context, network *v1alpha1.Network) (bool, error) {
-	vpc, err := getObject(ctx, r.Client, fabric.VpcGVK, VpcName(network.Name))
+func (r *NetworkReconciler) deleteOwnedFabric(ctx context.Context, network *v1alpha1.Network) (bool, error) {
+	if gone, err := r.deleteOwned(ctx, network, fabric.SubnetGVK, LBSubnetName(network.Name)); err != nil || !gone {
+		return false, err
+	}
+	return r.deleteOwned(ctx, network, fabric.VpcGVK, VpcName(network.Name))
+}
+
+func (r *NetworkReconciler) deleteOwned(ctx context.Context, network *v1alpha1.Network, gvk schema.GroupVersionKind, name string) (bool, error) {
+	object, err := getObject(ctx, r.Client, gvk, name)
 	if apierrors.IsNotFound(err) {
 		return true, nil
 	}
 	if err != nil {
 		return false, err
 	}
-	if !ownedBy(vpc, network) {
+	if !ownedBy(object, network) {
 		return true, nil
 	}
-	if err := client.IgnoreNotFound(r.Client.Delete(ctx, vpc)); err != nil {
+	if err := client.IgnoreNotFound(r.Client.Delete(ctx, object)); err != nil {
 		return false, err
 	}
-	present, err := exists(ctx, r.Client, fabric.VpcGVK, vpc.GetName())
+	present, err := exists(ctx, r.Client, gvk, name)
 	return !present, err
 }

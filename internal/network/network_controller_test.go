@@ -2,6 +2,7 @@ package network
 
 import (
 	"context"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -112,6 +113,100 @@ func TestNetworkReconcilerCreatesVpc(t *testing.T) {
 		t.Fatalf("a ready Network needs no requeue: %+v", result)
 	}
 	requireCondition(t, getNetwork(t, c, network.Name).Status.Conditions, v1alpha1.ConditionReady, metav1.ConditionTrue, ReasonVpcReady)
+}
+
+func planeSubnetOf(t *testing.T, c client.Client, network string) *unstructured.Unstructured {
+	t.Helper()
+	subnet, err := getObject(context.Background(), c, fabric.SubnetGVK, LBSubnetName(network))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return subnet
+}
+
+func TestNetworkReconcilerCreatesTheLoadBalancerPlaneSubnet(t *testing.T) {
+	c := cleanEnv(t)
+	network := createNetwork(t, c)
+	reconcileNetwork(t, c, network.Name)
+	subnet := planeSubnetOf(t, c, network.Name)
+	want := map[string]any{
+		"protocol": "IPv4", "vpc": network.Name, "cidrBlock": "100.69.0.0/24", "gateway": "100.69.0.1",
+		"gatewayType": "distributed", "natOutgoing": false, "disableGatewayCheck": true,
+		"excludeIps": []any{"100.69.0.1"}, "mtu": int64(1500),
+	}
+	if got, _, _ := unstructured.NestedMap(subnet.Object, "spec"); !reflect.DeepEqual(got, want) {
+		t.Fatalf("spec %v", got)
+	}
+	labels := subnet.GetLabels()
+	if labels[v1alpha1.LabelKind] != "Network" || labels[v1alpha1.LabelName] != network.Name || labels[LabelManaged] != "true" {
+		t.Fatalf("labels %v", labels)
+	}
+	if _, uid, ok := OwnerOf(subnet); !ok || uid != network.UID {
+		t.Fatal("owner annotations are missing")
+	}
+	var subnets v1alpha1.SubnetList
+	if err := c.List(context.Background(), &subnets); err != nil || len(subnets.Items) != 0 {
+		t.Fatalf("the plane has no Bedrock Subnet: %d, %v", len(subnets.Items), err)
+	}
+}
+
+func TestNetworkReconcilerCreatesThePlaneForEveryNetwork(t *testing.T) {
+	c := cleanEnv(t)
+	publicSettings(t)
+	private, external := createNetwork(t, c), createExternalNetwork(t, c)
+	reconcileNetwork(t, c, private.Name)
+	reconcileNetwork(t, c, external.Name)
+	for _, name := range []string{private.Name, external.Name} {
+		if got := nestedString(t, planeSubnetOf(t, c, name), "spec", "vpc"); got != name {
+			t.Fatalf("plane of %s sits in the Vpc %q", name, got)
+		}
+	}
+}
+
+func TestNetworkReconcilerFollowsTheLoadBalancerPlaneSettings(t *testing.T) {
+	c := cleanEnv(t)
+	setSetting(t, "network.load-balancer.cidr", "100.70.0.0/16")
+	setSetting(t, "network.load-balancer.gateway", "100.70.0.1")
+	network := createNetwork(t, c)
+	reconcileNetwork(t, c, network.Name)
+	subnet := planeSubnetOf(t, c, network.Name)
+	if nestedString(t, subnet, "spec", "cidrBlock") != "100.70.0.0/16" || nestedString(t, subnet, "spec", "gateway") != "100.70.0.1" {
+		t.Fatalf("spec %v", subnet.Object["spec"])
+	}
+	if excluded, _, _ := unstructured.NestedStringSlice(subnet.Object, "spec", "excludeIps"); !reflect.DeepEqual(excluded, []string{"100.70.0.1"}) {
+		t.Fatalf("excludeIps %v", excluded)
+	}
+}
+
+func TestNetworkReconcilerKeepsAForeignSubnetOfThePlaneName(t *testing.T) {
+	c := cleanEnv(t)
+	network := createNetwork(t, c)
+	foreign := fabric.PlaneSubnet(fabric.Meta{Name: LBSubnetName(network.Name)}, network.Name, "100.99.0.0/24", "100.99.0.1")
+	if err := c.Create(context.Background(), foreign); err != nil {
+		t.Fatal(err)
+	}
+	reconcileNetwork(t, c, network.Name)
+	if got := nestedString(t, planeSubnetOf(t, c, network.Name), "spec", "cidrBlock"); got != "100.99.0.0/24" {
+		t.Fatalf("a foreign Subnet must stay untouched, cidr %q", got)
+	}
+	requireCondition(t, getNetwork(t, c, network.Name).Status.Conditions, v1alpha1.ConditionReady, metav1.ConditionFalse, ReasonFabricConflict)
+}
+
+func TestNetworkDeletionRemovesThePlaneSubnet(t *testing.T) {
+	c := cleanEnv(t)
+	ctx := context.Background()
+	network := createNetwork(t, c)
+	reconcileNetwork(t, c, network.Name)
+	if err := c.Delete(ctx, &network); err != nil {
+		t.Fatal(err)
+	}
+	reconcileNetwork(t, c, network.Name)
+	if _, err := getObject(ctx, c, fabric.SubnetGVK, LBSubnetName(network.Name)); !apierrors.IsNotFound(err) {
+		t.Fatalf("the plane Subnet must be deleted: %v", err)
+	}
+	if _, err := getObject(ctx, c, fabric.VpcGVK, network.Name); !apierrors.IsNotFound(err) {
+		t.Fatalf("the Vpc must be deleted: %v", err)
+	}
 }
 
 func TestNetworkReconcilerAcceptsEveryPrivateRange(t *testing.T) {

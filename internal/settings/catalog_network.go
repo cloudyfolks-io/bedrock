@@ -53,11 +53,13 @@ func networkDefinitions() []Definition {
 		{"network.reserved-cidrs", "100.64.0.0/10", "Comma list of IPv4 networks that no Subnet and no Network range may overlap. They belong to the platform planes. Empty keeps the default.", cidrListValue},
 		{"network.subnet-allowed-ranges", "10.0.0.0/8,172.16.0.0/12,192.168.0.0/16", "Comma list of IPv4 networks. Every Subnet must be inside one of them. Use 0.0.0.0/0 to allow every address. Empty keeps the default.", cidrListValue},
 		{"network.peering.range", "169.254.0.0/16", "IPv4 network from which each NetworkPeering without connectCIDR gets a /30 connect network. The prefix must be 30 or shorter. Empty keeps the default.", cidrWithin(maxAllocatablePrefixLength)},
+		{"network.load-balancer.cidr", "100.69.0.0/24", "IPv4 network of the load balancer plane. Every Network gets one hidden Fabric Subnet with this range, and internal load balancers take their virtual addresses there. The range repeats in every Network, so keep it inside network.reserved-cidrs, and set it before the first Network exists. Bedrock removes it from network.bgp.advertise-filter, so BGP never advertises it.", cidrValue},
+		{"network.load-balancer.gateway", "100.69.0.1", "IPv4 address of the load balancer plane gateway. It must be inside network.load-balancer.cidr and must not be its network or broadcast address.", ipv4Value},
 		{"network.bgp.bfd", "true", "Enable BFD on the BGP peers of the FRR agent. The Fabric Vpc of a Network in bgp mode always has BFD, and this Setting does not change it.", boolean},
 		{"network.bgp.hold-time", "9s", "BGP hold time in whole seconds, from 3s to 300s. A peer refuses a hold time of 1s or 2s.", wholeSecondsBetween(minHoldTime, maxBGPTimer)},
 		{"network.bgp.keepalive-time", "3s", "BGP keepalive time in whole seconds, from 1s to 300s.", wholeSecondsBetween(minKeepaliveTime, maxBGPTimer)},
 		{"network.bgp.graceful-restart", "true", "Keep the BGP routes while a peer restarts.", boolean},
-		{"network.bgp.advertise-filter", "", "Comma list of <cidr> ge <n> le <n> entries, with the mask length <= ge <= le <= 32. The FRR agent advertises only the matching routes. Empty advertises all routes.", advertiseFilterValue},
+		{"network.bgp.advertise-filter", "", "Comma list of <cidr> ge <n> le <n> entries, with the mask length <= ge <= le <= 32. The FRR agent advertises only the matching routes and the routes of the elastic IPs. Empty advertises only the elastic IP routes.", advertiseFilterValue},
 		{"network.bgp.redistribute-tables", "", "Comma list of host routing table ids from 1 to 999 that the FRR agent redistributes. 253, 254 and 255 are reserved. Ids from 1000 up are the VRF ids of the VPCs. The list must not hold a VRF id that a Network pins in spec.vrfId.", tableIDsValue},
 	}
 }
@@ -277,6 +279,17 @@ func ipv4ListValue(v string) error {
 		if err := ipv4Value(item); err != nil || item == "" {
 			return fmt.Errorf("value %q is not a comma list of IPv4 addresses", v)
 		}
+	}
+	return nil
+}
+
+func cidrValue(v string) error {
+	if v == "" {
+		return nil
+	}
+	prefix, err := netip.ParsePrefix(v)
+	if err != nil || !prefix.Addr().Is4() || prefix.Masked() != prefix {
+		return fmt.Errorf("value %q is not a canonical IPv4 network", v)
 	}
 	return nil
 }
