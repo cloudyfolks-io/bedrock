@@ -5,9 +5,7 @@ import (
 	"testing"
 
 	corev1 "k8s.io/api/core/v1"
-	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
-	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
@@ -124,7 +122,7 @@ func fullCredentials() map[string][]byte {
 
 func TestUserWaitsForTheStore(t *testing.T) {
 	fresh(t)
-	createUser(t, "acme-prod", "app", v1alpha1.ObjectStorageUserSpec{})
+	createUser(t, "acme-prod", "app", v1alpha1.ObjectStorageUserSpec{Permission: "read"})
 	reconcileUser(t, "acme-prod", "app")
 	requireUserReason(t, "acme-prod", "app", metav1.ConditionFalse, "StoreNotInstalled")
 	createStore(t, "Progressing")
@@ -138,8 +136,7 @@ func TestUserWaitsForTheStore(t *testing.T) {
 func TestUserCreatesTheCephUser(t *testing.T) {
 	fresh(t)
 	createStore(t, "Ready")
-	quota := v1alpha1.ObjectStorageUserQuota{Bytes: resource.NewQuantity(1073741824, resource.BinarySI), Buckets: int32Ptr(5)}
-	createUser(t, "acme-prod", "app", v1alpha1.ObjectStorageUserSpec{DisplayName: "App", Quota: quota})
+	createUser(t, "acme-prod", "app", v1alpha1.ObjectStorageUserSpec{DisplayName: "App", Permission: "read"})
 	reconcileUser(t, "acme-prod", "app")
 	rgw, found := getCephUser(t, "acme-prod", "acme-prod.app")
 	if !found {
@@ -147,8 +144,7 @@ func TestUserCreatesTheCephUser(t *testing.T) {
 	}
 	store, _, _ := unstructured.NestedString(rgw.Object, "spec", "store")
 	display, _, _ := unstructured.NestedString(rgw.Object, "spec", "displayName")
-	buckets, _, _ := unstructured.NestedInt64(rgw.Object, "spec", "quotas", "maxBuckets")
-	if store != "bedrock-rgw" || display != "App" || buckets != 5 {
+	if store != "bedrock-rgw" || display != "App" {
 		t.Fatalf("spec %+v", rgw.Object["spec"])
 	}
 	requireUserReason(t, "acme-prod", "app", metav1.ConditionFalse, "UserPending")
@@ -157,7 +153,7 @@ func TestUserCreatesTheCephUser(t *testing.T) {
 func TestUserReportsTheCredentialsSecret(t *testing.T) {
 	fresh(t)
 	createStore(t, "Ready")
-	createUser(t, "acme-prod", "app", v1alpha1.ObjectStorageUserSpec{})
+	createUser(t, "acme-prod", "app", v1alpha1.ObjectStorageUserSpec{Permission: "read"})
 	reconcileUser(t, "acme-prod", "app")
 	rgw, _ := getCephUser(t, "acme-prod", "acme-prod.app")
 	setRookPhase(t, rgw, "Ready")
@@ -188,8 +184,8 @@ func TestUserReportsTheCredentialsSecret(t *testing.T) {
 func TestUserSameNameInTwoProjects(t *testing.T) {
 	fresh(t)
 	createStore(t, "Ready")
-	createUser(t, "acme-prod", "app", v1alpha1.ObjectStorageUserSpec{})
-	createUser(t, "beta-prod", "app", v1alpha1.ObjectStorageUserSpec{})
+	createUser(t, "acme-prod", "app", v1alpha1.ObjectStorageUserSpec{Permission: "read"})
+	createUser(t, "beta-prod", "app", v1alpha1.ObjectStorageUserSpec{Permission: "read"})
 	reconcileUser(t, "acme-prod", "app")
 	reconcileUser(t, "beta-prod", "app")
 	if _, found := getCephUser(t, "acme-prod", "acme-prod.app"); !found {
@@ -203,66 +199,10 @@ func TestUserSameNameInTwoProjects(t *testing.T) {
 	}
 }
 
-func TestUserQuotaChangeIsApplied(t *testing.T) {
-	fresh(t)
-	createStore(t, "Ready")
-	createUser(t, "acme-prod", "app", v1alpha1.ObjectStorageUserSpec{Quota: v1alpha1.ObjectStorageUserQuota{Buckets: int32Ptr(5)}})
-	reconcileUser(t, "acme-prod", "app")
-	user := readUser(t, "acme-prod", "app")
-	user.Spec.Quota.Buckets = int32Ptr(8)
-	if err := testClient.Update(context.Background(), user); err != nil {
-		t.Fatal(err)
-	}
-	reconcileUser(t, "acme-prod", "app")
-	rgw, _ := getCephUser(t, "acme-prod", "acme-prod.app")
-	buckets, _, _ := unstructured.NestedInt64(rgw.Object, "spec", "quotas", "maxBuckets")
-	if buckets != 8 {
-		t.Fatalf("maxBuckets %d", buckets)
-	}
-}
-
-func TestUserRefusesANegativeQuota(t *testing.T) {
-	fresh(t)
-	createStore(t, "Ready")
-	createUser(t, "acme-prod", "app", v1alpha1.ObjectStorageUserSpec{Quota: v1alpha1.ObjectStorageUserQuota{Bytes: resource.NewQuantity(-5, resource.BinarySI)}})
-	reconcileUser(t, "acme-prod", "app")
-	requireUserReason(t, "acme-prod", "app", metav1.ConditionFalse, "QuotaInvalid")
-	if countRook(t, cephObjectStoreUserGVK, "acme-prod") != 0 {
-		t.Fatal("a Rook user exists")
-	}
-}
-
-func TestUserDeletionWaitsForBuckets(t *testing.T) {
-	fresh(t)
-	createStore(t, "Ready")
-	createUser(t, "acme-prod", "app", v1alpha1.ObjectStorageUserSpec{})
-	reconcileUser(t, "acme-prod", "app")
-	createBucket(t, "acme-prod", "data", v1alpha1.ObjectStorageBucketSpec{UserRef: "app"})
-	if err := testClient.Delete(context.Background(), readUser(t, "acme-prod", "app")); err != nil {
-		t.Fatal(err)
-	}
-	reconcileUser(t, "acme-prod", "app")
-	user := readUser(t, "acme-prod", "app")
-	if user.DeletionTimestamp.IsZero() || len(user.Finalizers) != 1 {
-		t.Fatalf("user %+v", user.ObjectMeta)
-	}
-	requireCondition(t, user.Status.Conditions, v1alpha1.ConditionReady, metav1.ConditionFalse, "InUse")
-	bucket := &v1alpha1.ObjectStorageBucket{ObjectMeta: metav1.ObjectMeta{Name: "data", Namespace: "acme-prod"}}
-	if err := testClient.Delete(context.Background(), bucket); err != nil {
-		t.Fatal(err)
-	}
-	reconcileUser(t, "acme-prod", "app")
-	var gone v1alpha1.ObjectStorageUser
-	err := testClient.Get(context.Background(), client.ObjectKey{Namespace: "acme-prod", Name: "app"}, &gone)
-	if !apierrors.IsNotFound(err) {
-		t.Fatalf("user still there: %v", err)
-	}
-}
-
 func TestUserOutsideAProjectNamespace(t *testing.T) {
 	fresh(t)
 	createStore(t, "Ready")
-	createUser(t, unlabeledNamespace, "app", v1alpha1.ObjectStorageUserSpec{})
+	createUser(t, unlabeledNamespace, "app", v1alpha1.ObjectStorageUserSpec{Permission: "read"})
 	reconcileUser(t, unlabeledNamespace, "app")
 	requireUserReason(t, unlabeledNamespace, "app", metav1.ConditionFalse, "NamespaceNotProject")
 }
@@ -270,7 +210,7 @@ func TestUserOutsideAProjectNamespace(t *testing.T) {
 func TestUserStatusIsWrittenByTheAreaManager(t *testing.T) {
 	fresh(t)
 	createStore(t, "Ready")
-	createUser(t, "acme-prod", "app", v1alpha1.ObjectStorageUserSpec{})
+	createUser(t, "acme-prod", "app", v1alpha1.ObjectStorageUserSpec{Permission: "read"})
 	reconcileUser(t, "acme-prod", "app")
 	for _, entry := range readUser(t, "acme-prod", "app").ManagedFields {
 		if entry.Subresource == "status" && entry.Manager == v1alpha1.ObjectStorageFieldManager {

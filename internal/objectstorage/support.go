@@ -22,6 +22,16 @@ const (
 	reasonStoreNotReady     = "StoreNotReady"
 	reasonNamespaceNotProj  = "NamespaceNotProject"
 	reasonQuotaInvalid      = "QuotaInvalid"
+	reasonLegacyUser        = "LegacyUser"
+	reasonLegacyBucket      = "LegacyBucket"
+	reasonNameInvalid       = "NameInvalid"
+	reasonNameReserved      = "NameReserved"
+	reasonNameTaken         = "NameTaken"
+	reasonBucketLimit       = "BucketLimit"
+	reasonNotEmpty          = "NotEmpty"
+	reasonPurgeIncomplete   = "PurgeIncomplete"
+	reasonAccountPending    = "AccountPending"
+	reasonPolicyFailed      = "PolicyFailed"
 
 	pendingRequeue = 10 * time.Second
 	storeRequeue   = 15 * time.Second

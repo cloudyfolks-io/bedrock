@@ -2,7 +2,6 @@ package objectstorage
 
 import (
 	"context"
-	"errors"
 
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -62,18 +61,10 @@ func (r *UserReconciler) finalize(ctx context.Context, user *v1alpha1.ObjectStor
 	if !controllerutil.ContainsFinalizer(user, UserFinalizer) {
 		return ctrl.Result{}, nil
 	}
-	inUse, err := r.hasBuckets(ctx, user)
-	if err != nil {
-		return ctrl.Result{}, err
-	}
-	if inUse {
-		blocked := outcome{reason: "InUse", message: "buckets still name this user in spec.userRef", requeue: pendingRequeue}
-		return r.report(ctx, user, blocked, ""), nil
-	}
 	if err := r.deleteCephUser(ctx, user); err != nil {
 		return ctrl.Result{}, err
 	}
-	err = retry.RetryOnConflict(retry.DefaultRetry, func() error {
+	err := retry.RetryOnConflict(retry.DefaultRetry, func() error {
 		latest := &v1alpha1.ObjectStorageUser{}
 		if err := r.Client.Get(ctx, client.ObjectKeyFromObject(user), latest); err != nil {
 			return client.IgnoreNotFound(err)
@@ -82,19 +73,6 @@ func (r *UserReconciler) finalize(ctx context.Context, user *v1alpha1.ObjectStor
 		return client.IgnoreNotFound(r.Client.Update(ctx, latest, client.FieldOwner(v1alpha1.ObjectStorageFieldManager)))
 	})
 	return ctrl.Result{}, err
-}
-
-func (r *UserReconciler) hasBuckets(ctx context.Context, user *v1alpha1.ObjectStorageUser) (bool, error) {
-	var buckets v1alpha1.ObjectStorageBucketList
-	if err := r.Client.List(ctx, &buckets, client.InNamespace(user.Namespace)); err != nil {
-		return false, err
-	}
-	for _, bucket := range buckets.Items {
-		if bucket.Spec.UserRef == user.Name {
-			return true, nil
-		}
-	}
-	return false, nil
 }
 
 func (r *UserReconciler) deleteCephUser(ctx context.Context, user *v1alpha1.ObjectStorageUser) error {
@@ -121,9 +99,6 @@ func (r *UserReconciler) converge(ctx context.Context, user *v1alpha1.ObjectStor
 		return problem, "", err
 	}
 	desired, err := CephUser(user, tenant, project)
-	if errors.Is(err, ErrQuotaInvalid) {
-		return outcome{reason: reasonQuotaInvalid, message: err.Error(), requeue: steadyRequeue}, "", nil
-	}
 	if err != nil {
 		return outcome{}, "", err
 	}

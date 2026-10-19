@@ -5,30 +5,15 @@ import (
 	"strings"
 	"testing"
 
-	"k8s.io/apimachinery/pkg/api/resource"
 	"k8s.io/apimachinery/pkg/types"
 
 	"github.com/cloudyfolks-io/bedrock/api/v1alpha1"
 )
 
-func quantity(bytes int64) *resource.Quantity {
-	return resource.NewQuantity(bytes, resource.BinarySI)
-}
-
-func int32Ptr(value int32) *int32 { return &value }
-
-func int64Ptr(value int64) *int64 { return &value }
-
 func fixtureUser(spec v1alpha1.ObjectStorageUserSpec) *v1alpha1.ObjectStorageUser {
 	user := &v1alpha1.ObjectStorageUser{Spec: spec}
 	user.Name, user.Namespace, user.UID = "app", "acme-prod", types.UID("uid-1")
 	return user
-}
-
-func fixtureBucket(spec v1alpha1.ObjectStorageBucketSpec) *v1alpha1.ObjectStorageBucket {
-	bucket := &v1alpha1.ObjectStorageBucket{Spec: spec}
-	bucket.Name, bucket.Namespace, bucket.UID = "data", "acme-prod", types.UID("uid-2")
-	return bucket
 }
 
 func ownerOf(kind, name, uid string) []any {
@@ -87,10 +72,7 @@ func TestCredentialsSecretName(t *testing.T) {
 }
 
 func TestCephUser(t *testing.T) {
-	user := fixtureUser(v1alpha1.ObjectStorageUserSpec{
-		DisplayName: "App",
-		Quota:       v1alpha1.ObjectStorageUserQuota{Bytes: quantity(1073741824), Buckets: int32Ptr(5)},
-	})
+	user := fixtureUser(v1alpha1.ObjectStorageUserSpec{DisplayName: "App", Permission: "read"})
 	got, err := CephUser(user, "acme", "prod")
 	if err != nil {
 		t.Fatal(err)
@@ -108,7 +90,6 @@ func TestCephUser(t *testing.T) {
 			"store":            "bedrock-rgw",
 			"clusterNamespace": "rook-ceph",
 			"displayName":      "App",
-			"quotas":           map[string]any{"maxBuckets": int64(5), "maxSize": int64(1073741824)},
 		},
 	}
 	if !reflect.DeepEqual(got.Object, want) {
@@ -117,86 +98,13 @@ func TestCephUser(t *testing.T) {
 }
 
 func TestCephUserDefaults(t *testing.T) {
-	plain, err := CephUser(fixtureUser(v1alpha1.ObjectStorageUserSpec{}), "acme", "prod")
+	plain, err := CephUser(fixtureUser(v1alpha1.ObjectStorageUserSpec{Permission: "read"}), "acme", "prod")
 	if err != nil {
 		t.Fatal(err)
 	}
 	spec := plain.Object["spec"].(map[string]any)
-	if _, found := spec["quotas"]; found || spec["displayName"] != "acme-prod/app" {
+	if spec["displayName"] != "acme-prod/app" {
 		t.Fatalf("spec %+v", spec)
-	}
-	sized, err := CephUser(fixtureUser(v1alpha1.ObjectStorageUserSpec{Quota: v1alpha1.ObjectStorageUserQuota{Bytes: quantity(10)}}), "acme", "prod")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if quotas := sized.Object["spec"].(map[string]any)["quotas"]; !reflect.DeepEqual(quotas, map[string]any{"maxSize": int64(10)}) {
-		t.Fatalf("quotas %+v", quotas)
-	}
-}
-
-func TestQuotaMapping(t *testing.T) {
-	negativeBytes := fixtureUser(v1alpha1.ObjectStorageUserSpec{Quota: v1alpha1.ObjectStorageUserQuota{Bytes: quantity(-1)}})
-	negativeBuckets := fixtureUser(v1alpha1.ObjectStorageUserSpec{Quota: v1alpha1.ObjectStorageUserQuota{Buckets: int32Ptr(-1)}})
-	for _, user := range []*v1alpha1.ObjectStorageUser{negativeBytes, negativeBuckets} {
-		if _, err := CephUser(user, "acme", "prod"); err != ErrQuotaInvalid {
-			t.Fatalf("user error %v", err)
-		}
-	}
-	negativeSize := fixtureBucket(v1alpha1.ObjectStorageBucketSpec{UserRef: "app", Quota: v1alpha1.ObjectStorageBucketQuota{Bytes: quantity(-1)}})
-	negativeObjects := fixtureBucket(v1alpha1.ObjectStorageBucketSpec{UserRef: "app", Quota: v1alpha1.ObjectStorageBucketQuota{Objects: int64Ptr(-1)}})
-	for _, bucket := range []*v1alpha1.ObjectStorageBucket{negativeSize, negativeObjects} {
-		if _, err := BucketClaim(bucket, "acme", "prod"); err != ErrQuotaInvalid {
-			t.Fatalf("bucket error %v", err)
-		}
-	}
-}
-
-func TestBucketClaim(t *testing.T) {
-	bucket := fixtureBucket(v1alpha1.ObjectStorageBucketSpec{
-		UserRef: "app",
-		Quota:   v1alpha1.ObjectStorageBucketQuota{Bytes: quantity(1000), Objects: int64Ptr(50)},
-	})
-	got, err := BucketClaim(bucket, "acme", "prod")
-	if err != nil {
-		t.Fatal(err)
-	}
-	want := map[string]any{
-		"apiVersion": "objectbucket.io/v1alpha1",
-		"kind":       "ObjectBucketClaim",
-		"metadata": map[string]any{
-			"name":            "data",
-			"namespace":       "acme-prod",
-			"labels":          labelsOf("ObjectStorageBucket", "data"),
-			"ownerReferences": ownerOf("ObjectStorageBucket", "data", "uid-2"),
-		},
-		"spec": map[string]any{
-			"generateBucketName": "data",
-			"storageClassName":   "bucket",
-			"additionalConfig":   map[string]any{"bucketOwner": "acme-prod.app", "bucketMaxSize": "1000", "bucketMaxObjects": "50"},
-		},
-	}
-	if !reflect.DeepEqual(got.Object, want) {
-		t.Fatalf("got %+v", got.Object)
-	}
-}
-
-func TestBucketClaimDefaults(t *testing.T) {
-	plain, err := BucketClaim(fixtureBucket(v1alpha1.ObjectStorageBucketSpec{UserRef: "app"}), "acme", "prod")
-	if err != nil {
-		t.Fatal(err)
-	}
-	config := plain.Object["spec"].(map[string]any)["additionalConfig"]
-	if !reflect.DeepEqual(config, map[string]any{"bucketOwner": "acme-prod.app"}) {
-		t.Fatalf("config %+v", config)
-	}
-	long := fixtureBucket(v1alpha1.ObjectStorageBucketSpec{UserRef: "app"})
-	long.Name = strings.Repeat("a", 70)
-	cut, err := BucketClaim(long, "acme", "prod")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if name := cut.Object["spec"].(map[string]any)["generateBucketName"].(string); len(name) != 50 {
-		t.Fatalf("name length %d", len(name))
 	}
 }
 

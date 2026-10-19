@@ -3,14 +3,9 @@ package objectstorage
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"reflect"
 	"time"
 
-	corev1 "k8s.io/api/core/v1"
-	apierrors "k8s.io/apimachinery/pkg/api/errors"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/types"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -18,14 +13,9 @@ import (
 
 	"github.com/cloudyfolks-io/bedrock/api/v1alpha1"
 	"github.com/cloudyfolks-io/bedrock/internal/objectstorage/s3"
-	"github.com/cloudyfolks-io/bedrock/internal/ssa"
 )
 
-const (
-	conditionQuotaApplied = "QuotaApplied"
-	quotaChangeMessage    = "Rook applies the bucket quota when it creates the bucket; delete and create the bucket to change it"
-	ownerChangeMessage    = "the owner of a bucket cannot change; create a new bucket"
-)
+const conditionQuotaApplied = "QuotaApplied"
 
 type BucketReconciler struct {
 	Client   client.Client
@@ -35,9 +25,8 @@ type BucketReconciler struct {
 
 type bucketState struct {
 	outcome
-	bucketName   string
-	endpoint     string
-	quotaChanged bool
+	bucketName string
+	endpoint   string
 }
 
 func (r *BucketReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
@@ -56,95 +45,21 @@ func (r *BucketReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctr
 }
 
 func (r *BucketReconciler) converge(ctx context.Context, bucket *v1alpha1.ObjectStorageBucket) (bucketState, error) {
-	tenant, project, found, err := projectOf(ctx, r.Client, bucket.Namespace)
+	_, _, found, err := projectOf(ctx, r.Client, bucket.Namespace)
 	if err != nil {
 		return bucketState{}, err
 	}
 	if !found {
 		return blocked(reasonNamespaceNotProj, "the namespace carries no tenant and project labels", steadyRequeue), nil
 	}
-	creds, problem, err := r.ownerCredentials(ctx, bucket)
-	if err != nil || problem.reason != "" {
-		return bucketState{outcome: problem}, err
-	}
 	if problem, err := storeProblem(ctx, r.Client); err != nil || problem.reason != "" {
 		return bucketState{outcome: problem}, err
 	}
-	return r.bindClaim(ctx, bucket, tenant, project, creds)
+	return blocked("AccountPending", "the account model is not wired yet", pendingRequeue), nil
 }
 
 func blocked(reason, message string, requeue time.Duration) bucketState {
 	return bucketState{outcome: outcome{reason: reason, message: message, requeue: requeue}}
-}
-
-func (r *BucketReconciler) ownerCredentials(ctx context.Context, bucket *v1alpha1.ObjectStorageBucket) (s3.Credentials, outcome, error) {
-	var user v1alpha1.ObjectStorageUser
-	err := r.Client.Get(ctx, client.ObjectKey{Namespace: bucket.Namespace, Name: bucket.Spec.UserRef}, &user)
-	if apierrors.IsNotFound(err) {
-		return s3.Credentials{}, outcome{reason: "UserNotFound", message: "no ObjectStorageUser " + bucket.Spec.UserRef + " in this namespace", requeue: pendingRequeue}, nil
-	}
-	if err != nil {
-		return s3.Credentials{}, outcome{}, err
-	}
-	notReady := outcome{reason: "UserNotReady", message: "the ObjectStorageUser " + user.Name + " is not ready", requeue: pendingRequeue}
-	if !v1alpha1.IsConditionTrue(user.Status.Conditions, v1alpha1.ConditionReady) || user.Status.CredentialsSecret == "" {
-		return s3.Credentials{}, notReady, nil
-	}
-	var secret corev1.Secret
-	err = r.Client.Get(ctx, client.ObjectKey{Namespace: bucket.Namespace, Name: user.Status.CredentialsSecret}, &secret)
-	if apierrors.IsNotFound(err) {
-		return s3.Credentials{}, notReady, nil
-	}
-	if err != nil {
-		return s3.Credentials{}, outcome{}, err
-	}
-	return s3.Credentials{AccessKey: string(secret.Data[AccessKeyKey]), SecretKey: string(secret.Data[SecretKeyKey])}, outcome{}, nil
-}
-
-func (r *BucketReconciler) bindClaim(ctx context.Context, bucket *v1alpha1.ObjectStorageBucket, tenant, project string, creds s3.Credentials) (bucketState, error) {
-	desired, err := BucketClaim(bucket, tenant, project)
-	if errors.Is(err, ErrQuotaInvalid) {
-		return blocked(reasonQuotaInvalid, err.Error(), steadyRequeue), nil
-	}
-	if err != nil {
-		return bucketState{}, err
-	}
-	claim, exists, err := getRook(ctx, r.Client, objectBucketClaimGVK, client.ObjectKeyFromObject(bucket))
-	if err != nil {
-		return bucketState{}, err
-	}
-	if !exists {
-		if err := ssa.Apply(ctx, r.Client, desired, v1alpha1.ObjectStorageFieldManager); err != nil {
-			return bucketState{}, err
-		}
-		return blocked("ClaimPending", "the object bucket claim is not bound yet", pendingRequeue), nil
-	}
-	if configValue(claim, "bucketOwner") != configValue(desired, "bucketOwner") {
-		state := blocked("OwnerChangeNotSupported", ownerChangeMessage, steadyRequeue)
-		state.quotaChanged = quotaDiffers(claim, desired)
-		return state, nil
-	}
-	state, err := r.bindBucket(ctx, bucket, claim, creds)
-	state.quotaChanged = quotaDiffers(claim, desired)
-	return state, err
-}
-
-func (r *BucketReconciler) bindBucket(ctx context.Context, bucket *v1alpha1.ObjectStorageBucket, claim *unstructured.Unstructured, creds s3.Credentials) (bucketState, error) {
-	if rookPhase(claim) != "Bound" {
-		return blocked("ClaimPending", "the object bucket claim is not bound yet", pendingRequeue), nil
-	}
-	var data corev1.ConfigMap
-	err := r.Client.Get(ctx, client.ObjectKeyFromObject(bucket), &data)
-	if apierrors.IsNotFound(err) || data.Data["BUCKET_NAME"] == "" {
-		return blocked("ClaimPending", "the bucket details are not published yet", pendingRequeue), client.IgnoreNotFound(err)
-	}
-	if err != nil {
-		return bucketState{}, err
-	}
-	name := data.Data["BUCKET_NAME"]
-	state := bucketState{bucketName: name, endpoint: "http://" + data.Data["BUCKET_HOST"] + ":" + data.Data["BUCKET_PORT"]}
-	state.outcome, err = r.applyS3(ctx, bucket, creds, name)
-	return state, err
 }
 
 func (r *BucketReconciler) applyS3(ctx context.Context, bucket *v1alpha1.ObjectStorageBucket, creds s3.Credentials, name string) (outcome, error) {
@@ -255,16 +170,6 @@ func (r *BucketReconciler) setAnnotation(ctx context.Context, bucket *v1alpha1.O
 	return nil
 }
 
-func configValue(claim *unstructured.Unstructured, key string) string {
-	value, _, _ := unstructured.NestedString(claim.Object, "spec", "additionalConfig", key)
-	return value
-}
-
-func quotaDiffers(have, want *unstructured.Unstructured) bool {
-	return configValue(have, "bucketMaxSize") != configValue(want, "bucketMaxSize") ||
-		configValue(have, "bucketMaxObjects") != configValue(want, "bucketMaxObjects")
-}
-
 func (r *BucketReconciler) report(ctx context.Context, bucket *v1alpha1.ObjectStorageBucket, state bucketState) ctrl.Result {
 	err := updateStatus(ctx, r.Client, bucket, func(latest *v1alpha1.ObjectStorageBucket) {
 		latest.Status.ObservedGeneration = latest.Generation
@@ -273,19 +178,11 @@ func (r *BucketReconciler) report(ctx context.Context, bucket *v1alpha1.ObjectSt
 			latest.Status.Endpoint = state.endpoint
 		}
 		v1alpha1.SetCondition(&latest.Status.Conditions, condition(v1alpha1.ConditionReady, state.ready(), state.reason, state.message, latest.Generation))
-		v1alpha1.SetCondition(&latest.Status.Conditions, quotaCondition(state.quotaChanged, latest.Generation))
 	})
 	if err != nil {
 		logf.FromContext(ctx).Info("status write failed", "error", err.Error())
 	}
 	return ctrl.Result{RequeueAfter: state.requeue}
-}
-
-func quotaCondition(changed bool, generation int64) metav1.Condition {
-	if changed {
-		return condition(conditionQuotaApplied, false, "ChangeNotSupported", quotaChangeMessage, generation)
-	}
-	return condition(conditionQuotaApplied, true, "Applied", "", generation)
 }
 
 func (r *BucketReconciler) SetupWithManager(mgr ctrl.Manager) error {

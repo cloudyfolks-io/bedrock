@@ -36,7 +36,7 @@ func TestSetupRegistersTheControllers(t *testing.T) {
 		cancel()
 		<-done
 	})
-	createUser(t, "acme-prod", "app", v1alpha1.ObjectStorageUserSpec{})
+	createUser(t, "acme-prod", "app", v1alpha1.ObjectStorageUserSpec{Permission: "read"})
 	err = wait.PollUntilContextTimeout(ctx, 100*time.Millisecond, 30*time.Second, true, func(ctx context.Context) (bool, error) {
 		var user v1alpha1.ObjectStorageUser
 		if err := testClient.Get(ctx, client.ObjectKey{Namespace: "acme-prod", Name: "app"}, &user); err != nil {
