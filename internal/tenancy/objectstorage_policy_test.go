@@ -96,3 +96,61 @@ func TestBucketNamePolicyAllowsEverythingWithoutItsRules(t *testing.T) {
 		return err == nil
 	})
 }
+
+const approvalAnnotation = "bedrock.cloudyfolks.io/reserved-name-approved"
+const approvalMessage = "only an administrator may change the reserved name approval"
+
+func approvedBucket(name, bucketName string) *v1alpha1.ObjectStorageBucket {
+	bucket := namedBucket(name, bucketName)
+	bucket.Annotations = map[string]string{approvalAnnotation: "true"}
+	return bucket
+}
+
+func TestNonAdminCannotCreateABucketWithTheApproval(t *testing.T) {
+	_, alice, _ := bucketNameWorld(t)
+	for _, bucket := range []*v1alpha1.ObjectStorageBucket{approvedBucket("named", "acme-data"), approvedBucket("generated", "")} {
+		err := alice.Create(context.Background(), bucket)
+		if !apierrors.IsForbidden(err) || !strings.Contains(err.Error(), approvalMessage) {
+			t.Fatalf("%s: err = %v", bucket.Name, err)
+		}
+	}
+}
+
+func TestNonAdminCannotAddChangeOrRemoveTheApproval(t *testing.T) {
+	admin, alice, _ := bucketNameWorld(t)
+	plain := namedBucket("plain", "")
+	approved := approvedBucket("approved", "git-held")
+	mustCreate(t, admin, plain, approved)
+	plain.Annotations = map[string]string{approvalAnnotation: "true"}
+	approved.Annotations = map[string]string{}
+	for _, bucket := range []*v1alpha1.ObjectStorageBucket{plain, approved} {
+		err := alice.Update(context.Background(), bucket)
+		if !apierrors.IsForbidden(err) || !strings.Contains(err.Error(), approvalMessage) {
+			t.Fatalf("%s: err = %v", bucket.Name, err)
+		}
+	}
+	approved.Annotations = map[string]string{approvalAnnotation: "false"}
+	if err := alice.Update(context.Background(), approved); !apierrors.IsForbidden(err) {
+		t.Fatalf("a changed value: err = %v", err)
+	}
+}
+
+func TestNonAdminKeepsOtherAnnotationsAndAnUnchangedApproval(t *testing.T) {
+	admin, alice, _ := bucketNameWorld(t)
+	approved := approvedBucket("approved", "git-held")
+	mustCreate(t, admin, approved)
+	approved.Annotations["team"] = "storage"
+	if err := alice.Update(context.Background(), approved); err != nil {
+		t.Fatalf("an unrelated annotation must pass: %v", err)
+	}
+}
+
+func TestAdminCanSetAndRemoveTheApproval(t *testing.T) {
+	_, _, root := bucketNameWorld(t)
+	bucket := approvedBucket("git", "git-repos")
+	mustCreate(t, root, bucket)
+	bucket.Annotations = map[string]string{}
+	if err := root.Update(context.Background(), bucket); err != nil {
+		t.Fatal(err)
+	}
+}
