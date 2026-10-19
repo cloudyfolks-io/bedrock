@@ -51,6 +51,14 @@ func CreateDatabaseScript(name string, timeout time.Duration) (string, error) {
 	return b.String(), nil
 }
 
+func EnsureGroupsScript(name string, timeout time.Duration) (string, error) {
+	groups, err := ensureGroups(name, timeout)
+	if err != nil {
+		return "", err
+	}
+	return preamble(timeout) + groups, nil
+}
+
 func DeleteDatabaseScript(name string, timeout time.Duration) (string, error) {
 	quoted, err := ident(name)
 	if err != nil {
