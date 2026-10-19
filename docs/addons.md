@@ -150,10 +150,17 @@ Alloy runs on every node. It sends four sources to Loki:
 
 | Source | Labels | Example query |
 |---|---|---|
-| Container logs | `log_source="container"`, `namespace`, `pod`, `container` | `{namespace="kube-system"}` |
+| Container logs | `log_source="container"`, `namespace`, `pod`, `container`, and for project namespaces `tenant`, `project` | `{tenant="acme", project="web"}` |
 | Journald | `job="journald"`, `unit`, `node` | `{job="journald", unit="k0scontroller.service"}` |
-| VM serial consoles | `log_source="vm-serial-console"`, `vm` | `{log_source="vm-serial-console", vm="web-1"}` |
+| VM serial consoles | `log_source="vm-serial-console"`, `vm`, and for project namespaces `tenant`, `project` | `{tenant="acme", project="web", vm="web-1", log_source="vm-serial-console"}` |
 | API server audit | `job="kube-apiserver-audit"`, `node` | `{job="kube-apiserver-audit"} \|= "objectRef"` |
+
+Alloy copies the namespace labels `bedrock.cloudyfolks.io/tenant` and
+`bedrock.cloudyfolks.io/project` to the stream labels `tenant` and
+`project`. Only the operator can set these labels on a namespace. A
+namespace that is not a project has neither label, so no query with
+`tenant` and `project` reaches the logs of `kube-system`, the journal or the
+audit log.
 
 Serial console logs need the flag `logSerialConsole` on the VM instance.
 The compute controller sets it.

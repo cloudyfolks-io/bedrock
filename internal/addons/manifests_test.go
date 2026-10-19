@@ -12,6 +12,7 @@ import (
 
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 
+	"github.com/cloudyfolks-io/bedrock/api/v1alpha1"
 	"github.com/cloudyfolks-io/bedrock/internal/audit"
 	"github.com/cloudyfolks-io/bedrock/internal/release"
 )
@@ -175,6 +176,43 @@ func TestAlloyReadsEverySource(t *testing.T) {
 		if !mounts[path] {
 			t.Errorf("%s is not mounted read-only", path)
 		}
+	}
+}
+
+func namespaceMetaLabel(label string) string {
+	return "__meta_kubernetes_namespace_label_" + regexp.MustCompile(`[^a-zA-Z0-9_]`).ReplaceAllString(label, "_")
+}
+
+func alloyRule(source, target string) *regexp.Regexp {
+	return regexp.MustCompile(`rule \{\s*source_labels\s*=\s*\["` + regexp.QuoteMeta(source) + `"\]\s*target_label\s*=\s*"` + target + `"\s*\}`)
+}
+
+func TestAlloyAttachesNamespaceMetadataToPodTargets(t *testing.T) {
+	config := configData(t, find(t, lokiObjects(t), "ConfigMap", "alloy"), "config.alloy")
+	discovery := strings.Index(config, `discovery.kubernetes "pods" {`)
+	attach := strings.Index(config, "attach_metadata")
+	relabel := strings.Index(config, `discovery.relabel "pods" {`)
+	if discovery < 0 || attach < discovery || relabel < attach {
+		t.Fatalf("attach_metadata is not inside discovery.kubernetes pods: %d %d %d", discovery, attach, relabel)
+	}
+	if !regexp.MustCompile(`attach_metadata \{\s*namespace = true\s*\}`).MatchString(config) {
+		t.Error("attach_metadata does not enable the namespace")
+	}
+	if !strings.Contains(config, `field = "spec.nodeName=" + coalesce(sys.env("NODE_NAME"), "")`) {
+		t.Error("the node selector is gone")
+	}
+}
+
+func TestAlloyLabelsStreamsWithTheNamespaceTenantAndProject(t *testing.T) {
+	config := configData(t, find(t, lokiObjects(t), "ConfigMap", "alloy"), "config.alloy")
+	pods := config[strings.Index(config, `discovery.relabel "pods" {`):strings.Index(config, `local.file_match "pods" {`)]
+	for label, target := range map[string]string{v1alpha1.LabelTenant: "tenant", v1alpha1.LabelProject: "project"} {
+		if !alloyRule(namespaceMetaLabel(label), target).MatchString(pods) {
+			t.Errorf("no relabel rule from namespace label %s to %s", label, target)
+		}
+	}
+	if !alloyRule("__meta_kubernetes_namespace", "namespace").MatchString(pods) {
+		t.Error("the namespace label is gone")
 	}
 }
 

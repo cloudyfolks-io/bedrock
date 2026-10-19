@@ -248,4 +248,9 @@ metering_network_totals() {
 
 metering_logs() {
   retry_until 300 loki_has_lines '{log_source="vm-serial-console"}'
+  retry_until 300 loki_has_lines "{tenant=\"$TENANT\",project=\"$PROJECT\",log_source=\"vm-serial-console\"}"
+  retry_until 300 loki_has_lines "{tenant=\"$TENANT\",project=\"$PROJECT\",log_source=\"container\"}"
+  expect_equal 0 "$(loki_lines '{namespace="kube-system", tenant!=""}')" "kube-system lines under a tenant label"
+  expect_equal 0 "$(loki_lines '{job="journald", tenant!=""}')" "journald lines under a tenant label"
+  expect_equal 0 "$(loki_lines '{job="kube-apiserver-audit", tenant!=""}')" "audit lines under a tenant label"
 }
