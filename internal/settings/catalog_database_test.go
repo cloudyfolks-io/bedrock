@@ -4,15 +4,16 @@ import "testing"
 
 func TestDatabaseCatalogKeysAndDefaults(t *testing.T) {
 	want := map[string]string{
-		"cnpg.enabled":               "false",
-		"percona-ps.enabled":         "false",
-		"database.enabled":           "false",
-		"database.capacity.cpu":      "32",
-		"database.capacity.memory":   "128Gi",
-		"database.capacity.pods":     "150",
-		"database.max-utilization":   "0.9",
-		"database.sweeper-dry-run":   "true",
-		"database.provision-timeout": "30m",
+		"cnpg.enabled":                    "false",
+		"percona-ps.enabled":              "false",
+		"database.enabled":                "false",
+		"database.capacity.cpu":           "32",
+		"database.capacity.memory":        "128Gi",
+		"database.capacity.pods":          "150",
+		"database.max-utilization":        "0.9",
+		"database.sweeper-dry-run":        "true",
+		"database.provision-timeout":      "30m",
+		"database.upgrade.backup-max-age": "26h",
 	}
 	for key, def := range want {
 		got, ok := Lookup(key)
@@ -50,6 +51,9 @@ func TestDatabaseSettingsValidate(t *testing.T) {
 		{"database.max-utilization", "NaN", false},
 		{"database.sweeper-dry-run", "false", true},
 		{"database.sweeper-dry-run", "no way", false},
+		{"database.upgrade.backup-max-age", "48h", true},
+		{"database.upgrade.backup-max-age", "30m", false},
+		{"database.upgrade.backup-max-age", "a day", false},
 		{"database.provision-timeout", "45m", true},
 		{"database.provision-timeout", "30s", false},
 		{"database.provision-timeout", "soon", false},
