@@ -1,0 +1,18 @@
+apiVersion: bedrock.cloudyfolks.io/v1alpha1
+kind: ClusterConfig
+metadata:
+  name: multinode-lab
+spec:
+  version: ${VERSION}
+  api:
+    vip: ${VIP}
+  platform:
+    host: ${PLATFORM_HOST}
+  network:
+    managementInterface: ${IFACE}
+  storage:
+    replicas: 3
+    devices: ${DEVICES}
+  virtualization:
+    emulation: ${EMULATION}
+  roles: [control-plane, ceph-osd, fabric-gateway, workload]
