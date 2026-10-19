@@ -5,6 +5,7 @@ import "time"
 const (
 	Kata                 = "kata"
 	Loki                 = "loki"
+	CNPG                 = "cnpg"
 	ConditionPreflight   = "Preflight"
 	LabelKVM             = "bedrock.cloudyfolks.io/kvm"
 	AnnotationConfigHash = "bedrock.cloudyfolks.io/config-hash"
