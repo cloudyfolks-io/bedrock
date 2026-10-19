@@ -226,10 +226,6 @@ func OvnEipLRP(m Meta, externalSubnet string) *unstructured.Unstructured {
 	return object(OvnEipGVK, m, map[string]any{"externalSubnet": externalSubnet, "type": "lrp"})
 }
 
-func OvnSnatRule(m Meta, eip, vpc, cidr string) *unstructured.Unstructured {
-	return object(OvnSnatRuleGVK, m, map[string]any{"ovnEip": eip, "vpc": vpc, "v4IpCidr": cidr})
-}
-
 func OvnFip(m Meta, eip, ipName string) *unstructured.Unstructured {
 	return object(OvnFipGVK, m, map[string]any{"ovnEip": eip, "ipName": ipName})
 }
