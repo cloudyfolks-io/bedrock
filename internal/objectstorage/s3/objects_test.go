@@ -140,7 +140,9 @@ func TestDeletePrefixStopsOnADeleteFailure(t *testing.T) {
 }
 
 func TestDeletePrefixRefusesAnEmptyOrShortPrefix(t *testing.T) {
-	endpoint, requests := bucketServer(t, func(_ bucketRequest, w http.ResponseWriter) { io.WriteString(w, listing(map[string]int64{"a/x": 1}, false, "")) })
+	endpoint, requests := bucketServer(t, func(_ bucketRequest, w http.ResponseWriter) {
+		io.WriteString(w, listing(map[string]int64{"a/x": 1}, false, ""))
+	})
 	for _, prefix := range []string{"", "/", "a/", "uid", "0b0c0d0e-1111-4222-8333-444455556666"} {
 		if err := testClient().DeletePrefix(context.Background(), endpoint, "us-east-1", testCredentials, "backups", prefix); err == nil {
 			t.Errorf("prefix %q accepted", prefix)
