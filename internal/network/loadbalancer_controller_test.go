@@ -109,6 +109,30 @@ func TestLoadBalancerProgramsRouterRules(t *testing.T) {
 	requireLB(t, f.c, f.namespace, "lb1", metav1.ConditionTrue, ReasonProgrammed)
 }
 
+func TestLoadBalancerTreatsADeletingElasticIPAsGone(t *testing.T) {
+	f := newLBFixture(t)
+	ctx := context.Background()
+	reconcileLoadBalancer(t, f.c, f.namespace, "lb1", knowsEverything)
+	if len(rulesOf(t, f.c, "lb1")) != 2 {
+		t.Fatal("the rules must exist before the ElasticIP goes")
+	}
+	var eip v1alpha1.ElasticIP
+	if err := f.c.Get(ctx, client.ObjectKey{Namespace: f.namespace, Name: "ip1"}, &eip); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.c.Delete(ctx, &eip); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.c.Get(ctx, client.ObjectKeyFromObject(&eip), &eip); err != nil || eip.DeletionTimestamp.IsZero() {
+		t.Fatalf("the ElasticIP must wait for its finalizer: %v", err)
+	}
+	reconcileLoadBalancer(t, f.c, f.namespace, "lb1", knowsEverything)
+	requireLB(t, f.c, f.namespace, "lb1", metav1.ConditionFalse, ReasonElasticIPNotFound)
+	if len(rulesOf(t, f.c, "lb1")) != 0 {
+		t.Fatal("the rules must release the OvnEip")
+	}
+}
+
 func TestLoadBalancerRequiresAnExistingElasticIP(t *testing.T) {
 	f := newExternalFixture(t)
 	requireAccepted(t, f.c, loadBalancerFor(f.namespace, "lb1", "ghost"))

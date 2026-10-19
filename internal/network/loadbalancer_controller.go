@@ -97,6 +97,11 @@ func (r *LoadBalancerReconciler) program(ctx context.Context, lb v1alpha1.LoadBa
 		if err != nil {
 			return metav1.Condition{}, 0, err
 		}
+		if v.Reason == ReasonElasticIPNotFound {
+			if err := r.deleteOwned(ctx, &lb); err != nil {
+				return metav1.Condition{}, 0, err
+			}
+		}
 		return refused(lb, v)
 	}
 	targets, v, err := r.resolve(ctx, lb)
@@ -129,6 +134,9 @@ func (r *LoadBalancerReconciler) elasticIP(ctx context.Context, lb v1alpha1.Load
 	}
 	if err != nil {
 		return eip, nil, err
+	}
+	if !eip.DeletionTimestamp.IsZero() {
+		return eip, &Violation{Reason: ReasonElasticIPNotFound, Message: fmt.Sprintf("the ElasticIP %q is being deleted", lb.Spec.ElasticIPRef)}, nil
 	}
 	target := eip.Spec.Target
 	if target == nil || target.Kind != v1alpha1.ElasticIPTargetLoadBalancer || target.Name != lb.Name {
@@ -345,15 +353,22 @@ func (r *LoadBalancerReconciler) allocateVip(ctx context.Context, lb v1alpha1.Lo
 	return address, nil, nil
 }
 
-func (r *LoadBalancerReconciler) finalize(ctx context.Context, lb *v1alpha1.LoadBalancer) (reconcile.Result, error) {
+func (r *LoadBalancerReconciler) deleteOwned(ctx context.Context, lb *v1alpha1.LoadBalancer) error {
 	owned, err := r.ownedObjects(ctx, lb)
 	if err != nil {
-		return reconcile.Result{}, err
+		return err
 	}
-	for _, rule := range owned {
-		if err := client.IgnoreNotFound(r.Client.Delete(ctx, rule)); err != nil {
-			return reconcile.Result{}, err
+	for _, object := range owned {
+		if err := client.IgnoreNotFound(r.Client.Delete(ctx, object)); err != nil {
+			return err
 		}
+	}
+	return nil
+}
+
+func (r *LoadBalancerReconciler) finalize(ctx context.Context, lb *v1alpha1.LoadBalancer) (reconcile.Result, error) {
+	if err := r.deleteOwned(ctx, lb); err != nil {
+		return reconcile.Result{}, err
 	}
 	remaining, err := r.ownedObjects(ctx, lb)
 	if err != nil || len(remaining) > 0 {
