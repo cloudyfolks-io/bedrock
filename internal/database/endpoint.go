@@ -97,7 +97,7 @@ func ProxyObjects(in ProxyInput) ([]*unstructured.Unstructured, error) {
 		Name: EndpointName(db), Namespace: db.Namespace, Labels: labels, PodLabels: podLabels, Selector: proxySelector(db),
 		PodAnnotations: annotations, OwnerRefs: owners, Image: in.Image, Port: in.Port,
 		Volume:       projectedCerts(EndpointName(db), CombinedPEMKey, TenantPEMFile, EndpointName(db)),
-		RuntimeClass: in.RuntimeClass, DNSServers: in.DNSServers,
+		RuntimeClass: in.RuntimeClass, DNSServers: in.DNSServers, Suspended: db.Spec.Suspended,
 	})
 	if err != nil {
 		return nil, err

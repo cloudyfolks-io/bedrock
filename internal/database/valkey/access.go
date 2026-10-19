@@ -52,6 +52,8 @@ func reserved(name string) error {
 	return nil
 }
 
+func CheckUser(name string) error { return checkUser(name) }
+
 func checkUser(name string) error {
 	if !nameRe.MatchString(name) {
 		return fmt.Errorf("user name %q is not allowed", name)

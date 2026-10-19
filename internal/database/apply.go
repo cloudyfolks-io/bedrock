@@ -34,8 +34,12 @@ func ApplyPatches(ctx context.Context, c client.Client, patches []engine.Patch) 
 	return nil
 }
 
-func ApplyPlan(ctx context.Context, c client.Client, kind string, spec engine.Spec, projectNamespace string, result Result, now time.Time) error {
-	patches, err := StepPatches(kind, spec, projectNamespace, result.Steps, now.UTC().Format(time.RFC3339))
+func ApplyPlan(ctx context.Context, c client.Client, kind string, spec engine.Spec, result Result, now time.Time) error {
+	stamp := result.RestartToken
+	if stamp == "" {
+		stamp = now.UTC().Format(time.RFC3339)
+	}
+	patches, err := StepPatches(kind, spec, result.Steps, stamp)
 	if err != nil {
 		return err
 	}

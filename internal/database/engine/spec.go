@@ -28,6 +28,7 @@ type Spec struct {
 	Images       map[string]string
 	Backup       BackupSpec
 	Restore      *RestoreSpec
+	Suspended    bool
 }
 
 type BackupSpec struct {

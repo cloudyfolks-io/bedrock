@@ -41,6 +41,7 @@ type Result struct {
 	Refusal       *Refusal
 	Hold          *Refusal
 	RequestBackup bool
+	RestartToken  string
 }
 
 func Plan(applied v1alpha1.DatabaseApplied, spec v1alpha1.DatabaseSpec, facts OperationFacts, annotations map[string]string) Result {
@@ -53,6 +54,7 @@ func Plan(applied v1alpha1.DatabaseApplied, spec v1alpha1.DatabaseSpec, facts Op
 	plan := Result{Steps: resizeSteps(applied, spec)}
 	plan = withUpgrade(plan, applied, spec, facts.Upgrade)
 	plan.Steps = append(plan.Steps, restartSteps(applied, annotations)...)
+	plan.RestartToken = annotations[v1alpha1.AnnotationRestart]
 	plan.Steps = append(plan.Steps, suspendSteps(applied, spec)...)
 	return plan
 }

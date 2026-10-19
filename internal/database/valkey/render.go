@@ -167,12 +167,19 @@ func claim(s engine.Spec) *unstructured.Unstructured {
 	}}
 }
 
+func replicas(s engine.Spec) int64 {
+	if s.Suspended {
+		return 0
+	}
+	return 1
+}
+
 func deployment(s engine.Spec) *unstructured.Unstructured {
 	return &unstructured.Unstructured{Object: map[string]any{
 		"apiVersion": "apps/v1", "kind": "Deployment",
 		"metadata": map[string]any{"name": s.Name, "namespace": s.Namespace, "labels": engine.Labels(s.Labels)},
 		"spec": map[string]any{
-			"replicas": int64(1), "strategy": map[string]any{"type": "Recreate"},
+			"replicas": replicas(s), "strategy": map[string]any{"type": "Recreate"},
 			"selector": map[string]any{"matchLabels": engine.Labels(Selector(s.Name))},
 			"template": map[string]any{
 				"metadata": map[string]any{"labels": engine.Labels(s.PodLabels)},

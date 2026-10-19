@@ -140,6 +140,14 @@ type proxyDeployment struct {
 	Volume         corev1.VolumeSource
 	RuntimeClass   string
 	DNSServers     []string
+	Suspended      bool
+}
+
+func replicasOf(p proxyDeployment) int32 {
+	if p.Suspended {
+		return 0
+	}
+	return 1
 }
 
 func deploymentOf(p proxyDeployment) (*unstructured.Unstructured, error) {
@@ -181,7 +189,7 @@ func deploymentOf(p proxyDeployment) (*unstructured.Unstructured, error) {
 		TypeMeta:   metav1.TypeMeta{APIVersion: "apps/v1", Kind: "Deployment"},
 		ObjectMeta: metav1.ObjectMeta{Name: p.Name, Namespace: p.Namespace, Labels: maps.Clone(p.Labels), OwnerReferences: p.OwnerRefs},
 		Spec: appsv1.DeploymentSpec{
-			Replicas: ptr.To(int32(1)),
+			Replicas: ptr.To(replicasOf(p)),
 			Selector: &metav1.LabelSelector{MatchLabels: p.Selector},
 			Strategy: appsv1.DeploymentStrategy{Type: appsv1.RecreateDeploymentStrategyType},
 			Template: corev1.PodTemplateSpec{

@@ -33,9 +33,9 @@ const (
 )
 
 var (
-	ClusterGVK = schema.GroupVersionKind{Group: "ps.percona.com", Version: "v1alpha1", Kind: "PerconaServerMySQL"}
-	BackupGVK  = schema.GroupVersionKind{Group: "ps.percona.com", Version: "v1alpha1", Kind: "PerconaServerMySQLBackup"}
-	RestoreGVK = schema.GroupVersionKind{Group: "ps.percona.com", Version: "v1alpha1", Kind: "PerconaServerMySQLRestore"}
+	ClusterGVK = schema.GroupVersionKind{Group: "ps.percona.com", Version: "v1", Kind: "PerconaServerMySQL"}
+	BackupGVK  = schema.GroupVersionKind{Group: "ps.percona.com", Version: "v1", Kind: "PerconaServerMySQLBackup"}
+	RestoreGVK = schema.GroupVersionKind{Group: "ps.percona.com", Version: "v1", Kind: "PerconaServerMySQLRestore"}
 
 	ErrTargetTimeUnsupported = errors.New("a MySQL restore has no target time")
 	ErrDestinationMissing    = errors.New("a MySQL restore needs the destination of a backup")
@@ -153,7 +153,7 @@ func proxyBlock(s engine.Spec) map[string]any {
 	if image := s.Images[ImageHAProxy]; image != "" {
 		haproxy["image"] = image
 	}
-	return map[string]any{"haproxy": haproxy}
+	return map[string]any{"haproxy": haproxy, "router": map[string]any{"enabled": false}}
 }
 
 func backupBlock(s engine.Spec) map[string]any {
@@ -181,8 +181,12 @@ func clusterSpec(s engine.Spec) map[string]any {
 	}
 	if s.Instances == 1 {
 		spec["unsafeFlags"] = map[string]any{"mysqlSize": true, "proxy": true}
+		spec["proxy"] = map[string]any{"haproxy": map[string]any{"enabled": false}, "router": map[string]any{"enabled": false}}
 	} else {
 		spec["proxy"] = proxyBlock(s)
+	}
+	if s.Suspended {
+		spec["pause"] = true
 	}
 	if image := s.Images[ImageToolkit]; image != "" {
 		spec["toolkit"] = map[string]any{"image": image}
@@ -195,7 +199,7 @@ func clusterSpec(s engine.Spec) map[string]any {
 
 func restoreObject(s engine.Spec) *unstructured.Unstructured {
 	return &unstructured.Unstructured{Object: map[string]any{
-		"apiVersion": "ps.percona.com/v1alpha1", "kind": RestoreGVK.Kind,
+		"apiVersion": "ps.percona.com/v1", "kind": RestoreGVK.Kind,
 		"metadata": map[string]any{"name": engine.Named(s.Name, "restore"), "namespace": s.Namespace, "labels": engine.Labels(s.Labels)},
 		"spec": map[string]any{
 			"clusterName": s.Name,
@@ -215,7 +219,7 @@ func Render(s engine.Spec) ([]*unstructured.Unstructured, error) {
 		return nil, err
 	}
 	out := []*unstructured.Unstructured{{Object: map[string]any{
-		"apiVersion": "ps.percona.com/v1alpha1", "kind": ClusterGVK.Kind,
+		"apiVersion": "ps.percona.com/v1", "kind": ClusterGVK.Kind,
 		"metadata": map[string]any{"name": s.Name, "namespace": s.Namespace, "labels": engine.Labels(s.Labels)},
 		"spec":     clusterSpec(s),
 	}}}
