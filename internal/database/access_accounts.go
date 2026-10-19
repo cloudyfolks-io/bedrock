@@ -60,7 +60,7 @@ func schemaProblem(kind, name string) string {
 	var err error
 	switch kind {
 	case v1alpha1.DatabaseEngineMySQL:
-		err = mysql.CheckDatabase(name)
+		err = mysql.CheckSchema(name)
 	default:
 		if postgres.ReservedDatabase(name) {
 			err = fmt.Errorf("the database name %s is reserved", name)

@@ -152,6 +152,7 @@ func withDadehatDifferences(objects []*unstructured.Unstructured) []*unstructure
 		}
 		obj.SetAPIVersion("ps.percona.com/v1alpha1")
 		unstructured.RemoveNestedField(obj.Object, "spec", "proxy", "router")
+		unstructured.RemoveNestedField(obj.Object, "spec", "proxy", "haproxy", "labels")
 		if enabled, found, _ := unstructured.NestedBool(obj.Object, "spec", "proxy", "haproxy", "enabled"); found && !enabled {
 			unstructured.RemoveNestedField(obj.Object, "spec", "proxy")
 		}
@@ -195,7 +196,7 @@ func TestRenderThreeInstancesUseHAProxyWithItsImage(t *testing.T) {
 	cluster := clusterOf(t, mustRender(t, withInstances(bedrockSpec(), 3)))
 	raw, _ := json.Marshal(cluster["spec"])
 	text := string(raw)
-	for _, want := range []string{`"proxy":{"haproxy":{"enabled":true,"image":"docker.io/percona/haproxy:2.8.18-1@sha256:bb","size":3},"router":{"enabled":false}}`, `"size":3`} {
+	for _, want := range []string{`"haproxy":{"enabled":true,"image":"docker.io/percona/haproxy:2.8.18-1@sha256:bb","labels":`, `"size":3},"router":{"enabled":false}}`, `"size":3`} {
 		if !strings.Contains(text, want) {
 			t.Errorf("spec is missing %s: %s", want, text)
 		}
@@ -392,5 +393,26 @@ func TestGVKsListEveryEngineKind(t *testing.T) {
 	}
 	if strings.Join(kinds, ",") != "PerconaServerMySQL,PerconaServerMySQLBackup,PerconaServerMySQLRestore" {
 		t.Fatalf("kinds %v", kinds)
+	}
+}
+
+func TestEveryMySQLPodKindCarriesTheRoleAndInstanceLabels(t *testing.T) {
+	spec := withInstances(bedrockSpec(), 3)
+	spec.PodLabels = map[string]string{}
+	for key, value := range testPodLabels() {
+		spec.PodLabels[key] = value
+	}
+	spec.PodLabels["bedrock.cloudyfolks.io/database-role"] = "engine"
+	cluster := clusterOf(t, mustRender(t, spec))["spec"].(map[string]any)
+	mysqlLabels := cluster["mysql"].(map[string]any)["labels"].(map[string]any)
+	haproxy := cluster["proxy"].(map[string]any)["haproxy"].(map[string]any)
+	haproxyLabels, _ := haproxy["labels"].(map[string]any)
+	for name, labels := range map[string]map[string]any{"mysql": mysqlLabels, "haproxy": haproxyLabels} {
+		if labels["bedrock.cloudyfolks.io/database-role"] != "engine" || labels["app.kubernetes.io/instance"] != testUID {
+			t.Errorf("%s pods carry %v", name, labels)
+		}
+		if _, set := labels["app.kubernetes.io/component"]; set {
+			t.Errorf("%s pods must leave the component label to the operator: %v", name, labels)
+		}
 	}
 }

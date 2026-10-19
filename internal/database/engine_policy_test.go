@@ -16,6 +16,10 @@ func TestTheEngineNetworkPolicySelectsEveryEngineByRole(t *testing.T) {
 	}
 	one, err := EnginePolicyObject(v1alpha1.Database{ObjectMeta: metav1.ObjectMeta{UID: "u1"}})
 	must(t, err)
+	selector, _, _ := unstructured.NestedStringMap(one.Object, "spec", "podSelector", "matchLabels")
+	if selector[LabelRole] != RoleEngine || selector[LabelInstance] != "u1" || len(selector) != 2 {
+		t.Fatalf("the per-database policy selects %v", selector)
+	}
 	from, _, _ := unstructured.NestedSlice(one.Object, "spec", "ingress")
 	peer := from[0].(map[string]any)["from"].([]any)[0].(map[string]any)["podSelector"].(map[string]any)
 	if labels := peer["matchLabels"].(map[string]any); labels[LabelInstance] != "u1" || len(labels) != 1 || peer["matchExpressions"] != nil {
