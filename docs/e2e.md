@@ -49,7 +49,8 @@ The `make e2e-tenant` target runs the tenant job on a host that you prepared.
 | File | Purpose |
 | --- | --- |
 | `hack/e2e-init.sh` | Creates the cluster and checks the platform. |
-| `hack/e2e/lib.sh` | Host pins, dump helpers, wait helpers, the etcd read and encryption check, and the OSD and underlay functions. |
+| `hack/lab/lib.sh` | The VM, network, disk and bundle code of the two labs. |
+| `hack/e2e/lib.sh` | Host pins, dump helpers, wait helpers, the etcd read and encryption check, the OSD and underlay functions, and the reader of the restore script in docs/backup.md. |
 | `hack/e2e/cluster.yaml.tmpl` | The `ClusterConfig` of the e2e cluster. |
 | `hack/e2e-release-config.sh` | Writes a release config without the `catalog` component. |
 
@@ -181,6 +182,61 @@ The script `hack/lab-adopt.sh` rehearses the adoption of a Rook Ceph cluster on 
 It is not a job of the local runner. Run it by hand on a Linux host with about 46 GiB of free RAM.
 Do not run it while a gate runs.
 The runbook `docs/runbooks/adopt-ceph.md` describes the stages.
+
+## Multi-node lab
+
+The script `hack/e2e-multinode.sh` builds a cluster of three Lima VMs.
+Node 1 runs `bedrock init`. Nodes 2 and 3 run `bedrock join`. All three nodes carry the four roles.
+Ceph has 3 replicas and 6 OSDs.
+It is not a job of the local runner. Run it by hand, or from a nightly job, on a Linux host with KVM and about 46 GiB of free RAM.
+Do not run it while a gate or the adoption lab runs. Both labs use the same network and the same VIP, and the script stops when it finds a VM of the other lab.
+The VM code is in `hack/lab/lib.sh`. The adoption lab uses the same file.
+The checks are in `hack/e2e/multinode/`.
+
+```
+hack/e2e-multinode.sh all
+hack/e2e-multinode.sh down
+```
+
+| Stage | What it does |
+| --- | --- |
+| `up` | Builds the bundle, starts the three VMs, checks the network and the disks. |
+| `install` | Runs `bedrock init` and two `bedrock join`, sets the OSD devices of nodes 2 and 3, waits for the storage. |
+| `tenant` | Creates the tenant `acme`, the projects `web` and `data`, and the cirros image. |
+| `check` | Runs every check and writes `dist/lab-multinode/result.txt`. A failed check also writes `diag-<n>.log` in the same directory. |
+| `snapshot`, `rewind` | Snapshot the VM disks after `tenant`, and go back to them. |
+| `down` | Removes the VMs and their disks. |
+| `all` | Runs `up`, `install`, `tenant` and `check`. The VMs stay. |
+
+The checks run in this order.
+
+| Check | What it proves |
+| --- | --- |
+| Three control-plane nodes | Three Nodes are Ready, three Hosts have the role `control-plane`, etcd has three members, and kube-vip runs on three nodes. |
+| Ceph topology and pool size | Three monitors, six OSDs with two on each host, `HEALTH_OK`, and every replicated pool has size 3. |
+| Block Volume access mode | The PVC of a Volume on the `block` class is `ReadWriteMany` with the mode `Block`. |
+| Live migration keeps IP and MAC | The VM status and the guest show the same IP and MAC after a migration, and the guest does not restart. |
+| Large transfer between hosts | A guest reads 10 MiB from a guest on another host. The guest MTU plus 100 bytes is not more than the MTU of the node NIC. |
+| Pinned address after a migration | A VM with a pinned address keeps it after a migration, and the client reads 10 MiB from it again. |
+| Hot-plugged volume | A Volume that is added to `spec.disks` of a running VM shows in the guest as a SCSI disk, with no restart. The guest writes and reads it. A migration with the disk attached works. |
+| SMBIOS UUID | The UUID in the guest equals the firmware UUID of the VMI. The script records whether one VM name in two namespaces gives one UUID. |
+| Subnet MTU 1500 | The script records whether the 10 MiB read stalls with a Subnet MTU of 1500 on an underlay of 1500. |
+| Drain | `kubectl drain` moves a `LiveMigrateIfPossible` VM and a `LiveMigrate` VM to another node with no guest restart. |
+| Etcd restore with running VMs | The restore follows `docs/runbooks/restore-control-plane.md` with a snapshot of the schedule. Then the cluster checks run again. |
+| Secrets key rotation | Runs only when the Cluster CRD has `spec.encryption.action`. The script creates 2000 Secrets, sets the action `rotate`, and crashes node 3 during `RewritingSecrets`. The rotation must end. The sampled Secrets in etcd must hold one new key name, no `encryption.yaml` may hold the old key, and an archive made before `bedrock backup rotate-key` must still decrypt. |
+
+A check that answers an open question prints lines that start with `info:`. Read them in `result.txt`:
+
+- `Q2`, `Q3`, `Q5` and `Q7` are the open questions of the compute research.
+- `8b` is the MTU rule of the migration program.
+- `restore:` lines list each VM, and tell if its guest restarted. The script samples twice: after the nodes renew their Leases, and again after the taint eviction window of 380 seconds. Read the final sample. The last line gives the number of `TaintManagerEviction` events.
+
+A guest is a cirros VM. Its boot script prints `LAB-` lines to the serial console every 5 seconds. The checks read them from the container `guest-console-log` of the launcher pod, so no guest needs an SSH route.
+
+The variable `LAB_EMULATION` sets the virtualization of the guests: `kvm`, `tcg` or `auto`. The default is `auto`. It probes `/dev/kvm` and the CPU flags inside node 1, and it falls back to `tcg` with an `info:` line when the probe fails. A guest in `tcg` is much slower than a guest with KVM.
+A check that fails writes its full output to `dist/lab-multinode/check-<name>.log`. The script prints the path, and the `info:` lines of the failed check.
+
+The run takes about 2.5 hours. The restore waits for an etcd snapshot, which takes about 11 minutes, and then for Ceph to settle.
 
 ## Cleanup and teardown
 
@@ -315,6 +371,5 @@ The tenant job does not check these items.
 - The audit policy restart of the API server.
 - Failover of the gateway chassis, because the cluster has one node.
 - BGP mode of the ElasticIP. The e2e cluster runs in L2 mode, so no BGP Network, `BgpConf` or BGP session exists. Only the fabric-frr agent is checked.
-- The migration of a VM to a second node.
-- A full control-plane join of a second node. The tenant job checks only the fetch of the encryption file.
+- The migration of a VM to a second node, and a full control-plane join of a second node. The [multi-node lab](#multi-node-lab) checks both.
 - The catalog download of the ClusterImage list.
