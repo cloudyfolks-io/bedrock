@@ -12,6 +12,7 @@ func TestDatabaseCatalogKeysAndDefaults(t *testing.T) {
 		"database.max-utilization":   "0.9",
 		"database.sweeper-dry-run":   "true",
 		"database.provision-timeout": "30m",
+		"database.exec-timeout":      "120s",
 	}
 	for key, def := range want {
 		got, ok := Lookup(key)
@@ -52,6 +53,10 @@ func TestDatabaseSettingsValidate(t *testing.T) {
 		{"database.provision-timeout", "45m", true},
 		{"database.provision-timeout", "30s", false},
 		{"database.provision-timeout", "soon", false},
+		{"database.exec-timeout", "30s", true},
+		{"database.exec-timeout", "1s", false},
+		{"database.exec-timeout", "1500ms", false},
+		{"database.exec-timeout", "11m", false},
 	}
 	for _, c := range cases {
 		def, ok := Lookup(c.key)
