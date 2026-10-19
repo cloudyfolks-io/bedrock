@@ -295,7 +295,7 @@ func TestLoadBalancerInternalPathResolvesContainers(t *testing.T) {
 	requireAccepted(t, f.c, lb)
 	ctx := context.Background()
 	reconcileLoadBalancer(t, f.c, f.namespace, "lb1", knowsEverything)
-	if err := fabrictest.MarkVipAllocated(ctx, f.c, FabricName(f.namespace, "lb1"), "10.100.1.200"); err != nil {
+	if err := fabrictest.MarkVipAllocated(ctx, f.c, InternalVipName(f.namespace, "lb1"), "10.100.1.200"); err != nil {
 		t.Fatal(err)
 	}
 	reconcileLoadBalancer(t, f.c, f.namespace, "lb1", knowsEverything)
@@ -303,7 +303,7 @@ func TestLoadBalancerInternalPathResolvesContainers(t *testing.T) {
 	if len(rules) != 1 || !slices.Equal(endpointsOf(rules[0]), []string{"10.100.1.9"}) {
 		t.Fatalf("rules %v", rules)
 	}
-	if _, err := getObject(ctx, f.c, fabric.VipGVK, FabricName(f.namespace, "lb1")); err != nil {
+	if _, err := getObject(ctx, f.c, fabric.VipGVK, InternalVipName(f.namespace, "lb1")); err != nil {
 		t.Fatal(err)
 	}
 }
