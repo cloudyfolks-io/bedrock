@@ -199,6 +199,9 @@ msgstr "Records"
 msgid "col.replace"
 msgstr "Replace"
 
+msgid "col.replicas"
+msgstr "Replicas"
+
 msgid "col.retention"
 msgstr "Retention"
 
@@ -708,6 +711,9 @@ msgstr "Buckets"
 
 msgid "nav.item.clusterImages"
 msgstr "Catalog images"
+
+msgid "nav.item.containers"
+msgstr "Containers"
 
 msgid "nav.item.dnsZones"
 msgstr "DNS zones"

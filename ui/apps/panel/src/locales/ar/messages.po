@@ -199,6 +199,9 @@ msgstr "السجلات"
 msgid "col.replace"
 msgstr "استبدال"
 
+msgid "col.replicas"
+msgstr "النسخ"
+
 msgid "col.retention"
 msgstr "الاحتفاظ"
 
@@ -708,6 +711,9 @@ msgstr "الحاويات"
 
 msgid "nav.item.clusterImages"
 msgstr "صور الفهرس"
+
+msgid "nav.item.containers"
+msgstr "الحاويات"
 
 msgid "nav.item.dnsZones"
 msgstr "نطاقات DNS"

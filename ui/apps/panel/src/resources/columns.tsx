@@ -119,6 +119,27 @@ const roles: ColumnDef = {
   sortValue: (object) => listAt(object, "spec.roles").join(","),
 };
 
+const containerAddresses: ColumnDef = {
+  id: "addresses",
+  label: msg({ id: "col.addresses", message: "Addresses" }),
+  render: (object) => {
+    const ips = listAt(object, "status.addresses").map((entry) => String(entry)).filter((ip) => ip !== "");
+    return ips.length === 0 ? dash : ips.map((ip) => <Ltr key={ip}>{`${ip} `}</Ltr>);
+  },
+  sortValue: (object) => String(listAt(object, "status.addresses")[0] ?? ""),
+};
+
+const replicas: ColumnDef = {
+  id: "replicas",
+  label: msg({ id: "col.replicas", message: "Replicas" }),
+  render: (object) => (valueAt(object, "status.replicas") === undefined ? dash : `${String(valueAt(object, "status.readyReplicas") ?? 0)}/${String(valueAt(object, "status.replicas"))}`),
+  sortValue: (object) => Number(valueAt(object, "status.readyReplicas") ?? 0),
+};
+
+function holderPath(project: string, holder: string): string {
+  return holder.startsWith("Container/") ? `/p/${project}/containers/${holder.slice("Container/".length)}` : `/p/${project}/vms/${holder}`;
+}
+
 const addresses: ColumnDef = {
   id: "addresses",
   label: msg({ id: "col.addresses", message: "Addresses" }),
@@ -252,12 +273,13 @@ export const columnsByPlural: Record<string, ColumnDef[]> = {
   ],
   networks: [name, text("tenant", L.tenant, "spec.tenantRef"), { id: "cidr", label: L.cidr, render: (object) => (networkCidrs(object) ? <Ltr>{networkCidrs(object)}</Ltr> : dash), sortValue: networkCidrs }, flag("external", L.external, "spec.enableExternal"), text("vpc", L.vpc, "status.vpc"), status],
   virtualmachines: [name, phase, text("node", L.node, "status.node"), addresses, text("instanceType", L.instanceType, "spec.instanceType"), age],
+  containers: [name, phase, ltrText("image", L.image, "spec.image"), replicas, containerAddresses, age],
   sshkeys: [
     name,
     { id: "keyType", label: L.keyType, render: (object) => textAt(object, "spec.publicKey").split(" ")[0] || dash, sortValue: (object) => textAt(object, "spec.publicKey").split(" ")[0] ?? "" },
     age,
   ],
-  volumes: [name, phase, gi("size", L.size, "spec.sizeGi"), text("storageClass", L.storageClass, "spec.storageClass"), { id: "attachedTo", label: L.attachedTo, render: (object, context) => (textAt(object, "status.attachedTo") ? (context.project ? <Link to={`/p/${context.project}/vms/${textAt(object, "status.attachedTo")}`}>{textAt(object, "status.attachedTo")}</Link> : textAt(object, "status.attachedTo")) : dash), sortValue: (object) => textAt(object, "status.attachedTo") }, { id: "source", label: L.source, render: (object) => sourceSummary(object) || dash, sortValue: sourceSummary }],
+  volumes: [name, phase, gi("size", L.size, "spec.sizeGi"), text("storageClass", L.storageClass, "spec.storageClass"), { id: "attachedTo", label: L.attachedTo, render: (object, context) => (textAt(object, "status.attachedTo") ? (context.project ? <Link to={holderPath(context.project, textAt(object, "status.attachedTo"))}>{textAt(object, "status.attachedTo")}</Link> : textAt(object, "status.attachedTo")) : dash), sortValue: (object) => textAt(object, "status.attachedTo") }, { id: "source", label: L.source, render: (object) => sourceSummary(object) || dash, sortValue: sourceSummary }],
   volumesnapshots: [name, text("volume", L.volume, "spec.volumeRef"), phase, text("retention", L.retention, "spec.retention"), age],
   images: [name, typeBadge, phase, { id: "os", label: L.os, render: (object) => osSummary(object) || dash, sortValue: osSummary }, sizeBytes("size", L.size, "status.sizeBytes"), ltrText("digest", L.digest, "status.digest")],
   virtualmachinebackups: [name, text("vm", L.vm, "spec.vmRef"), text("target", L.backupTarget, "spec.target"), ltrText("schedule", L.schedule, "spec.schedule"), text("keep", L.keep, "spec.keep"), phase],

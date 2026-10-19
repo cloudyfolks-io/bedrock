@@ -199,6 +199,9 @@ msgstr "رکوردها"
 msgid "col.replace"
 msgstr "جایگزینی"
 
+msgid "col.replicas"
+msgstr "نسخه‌ها"
+
 msgid "col.retention"
 msgstr "نگهداشت"
 
@@ -708,6 +711,9 @@ msgstr "سطل‌ها"
 
 msgid "nav.item.clusterImages"
 msgstr "تصاویر کاتالوگ"
+
+msgid "nav.item.containers"
+msgstr "کانتینرها"
 
 msgid "nav.item.dnsZones"
 msgstr "ناحیه‌های DNS"
