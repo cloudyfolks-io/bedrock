@@ -56,6 +56,7 @@ func TestOperatorRules(t *testing.T) {
 func TestProxyRules(t *testing.T) {
 	requireExactly(t, ProxyRules(), []grant{
 		{"bedrock.cloudyfolks.io", "containers", "get"}, {"bedrock.cloudyfolks.io", "containers", "patch"},
+		{"bedrock.cloudyfolks.io", "builds", "get"},
 		{"", "pods", "list"},
 		{"", "pods/log", "get"},
 		{"", "pods/exec", "create"},

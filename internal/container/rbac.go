@@ -23,6 +23,7 @@ func OperatorRules() []rbacv1.PolicyRule {
 
 func ProxyRules() []rbacv1.PolicyRule {
 	return []rbacv1.PolicyRule{
+		rule("bedrock.cloudyfolks.io", []string{"builds"}, "get"),
 		rule("bedrock.cloudyfolks.io", []string{"containers"}, "get", "patch"),
 		rule("", []string{"pods"}, "list"),
 		rule("", []string{"pods/log"}, "get"),
