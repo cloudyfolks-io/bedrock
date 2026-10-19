@@ -52,7 +52,7 @@ func bgpConf(cfg Config) *unstructured.Unstructured {
 	return fabric.BgpConf(underlayMeta("BgpConf", bgpConfName), fabric.BgpConfSpec{
 		LocalASN: cfg.BGP.LocalASN, RouterID: cfg.BGP.RouterID, Peers: peers, NodeSelector: gatewayNodes(),
 		HoldTime: cfg.BGP.HoldTime, KeepaliveTime: cfg.BGP.KeepaliveTime, GracefulRestart: cfg.BGP.GracefulRestart,
-		AdvertiseFilter: cfg.BGP.AdvertiseFilter, RedistributeTables: cfg.BGP.RedistributeTables,
+		AdvertiseFilter: FilterWithout(cfg.BGP.AdvertiseFilter, cfg.LoadBalancer.CIDR), RedistributeTables: cfg.BGP.RedistributeTables,
 	})
 }
 

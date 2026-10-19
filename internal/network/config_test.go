@@ -2,6 +2,7 @@ package network
 
 import (
 	"context"
+	"net/netip"
 	"slices"
 	"strconv"
 	"strings"
@@ -31,6 +32,17 @@ func TestParseConfigDefaults(t *testing.T) {
 	bgp := cfg.BGP
 	if !bgp.BFD || bgp.HoldTime != 9*time.Second || bgp.KeepaliveTime != 3*time.Second || !bgp.GracefulRestart || len(bgp.AdvertiseFilter) != 0 || len(bgp.RedistributeTables) != 0 {
 		t.Fatalf("unexpected bgp defaults %+v", bgp)
+	}
+}
+
+func TestParseConfigLoadBalancerPlane(t *testing.T) {
+	cfg, err := ParseConfig(map[string]string{})
+	if err != nil || cfg.LoadBalancer != (LoadBalancerPlane{CIDR: netip.MustParsePrefix("100.69.0.0/24"), Gateway: netip.MustParseAddr("100.69.0.1")}) {
+		t.Fatalf("defaults %+v, error %v", cfg.LoadBalancer, err)
+	}
+	cfg, err = ParseConfig(map[string]string{"network.load-balancer.cidr": "100.70.0.0/16", "network.load-balancer.gateway": "100.70.0.254"})
+	if err != nil || cfg.LoadBalancer != (LoadBalancerPlane{CIDR: netip.MustParsePrefix("100.70.0.0/16"), Gateway: netip.MustParseAddr("100.70.0.254")}) {
+		t.Fatalf("custom %+v, error %v", cfg.LoadBalancer, err)
 	}
 }
 
@@ -142,6 +154,12 @@ func TestParseConfigRejectsInvalid(t *testing.T) {
 		{"network.bgp.graceful-restart": "2"},
 		{"network.bgp.advertise-filter": "91.246.31.0/24"},
 		{"network.bgp.redistribute-tables": "0"},
+		{"network.load-balancer.cidr": "100.69.0.1/24"},
+		{"network.load-balancer.gateway": "nonsense"},
+		{"network.load-balancer.gateway": "100.70.0.1"},
+		{"network.load-balancer.cidr": "100.70.0.0/24"},
+		{"network.load-balancer.cidr": "100.69.0.0/24", "network.load-balancer.gateway": "100.69.0.0"},
+		{"network.load-balancer.cidr": "100.69.0.0/24", "network.load-balancer.gateway": "100.69.0.255"},
 	} {
 		if _, err := ParseConfig(values); err == nil {
 			t.Fatalf("%v must be refused", values)

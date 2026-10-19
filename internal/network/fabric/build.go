@@ -210,6 +210,16 @@ func acls(rules []ACL) []any {
 	return out
 }
 
+const planeSubnetMTU = 1500
+
+func PlaneSubnet(m Meta, vpc, cidr, gateway string) *unstructured.Unstructured {
+	return object(SubnetGVK, m, map[string]any{
+		"protocol": "IPv4", "vpc": vpc, "cidrBlock": cidr, "gateway": gateway,
+		"gatewayType": "distributed", "natOutgoing": false, "disableGatewayCheck": true,
+		"excludeIps": anys([]string{gateway}), "mtu": int64(planeSubnetMTU),
+	})
+}
+
 func set(spec map[string]any, key, value string) {
 	if value != "" {
 		spec[key] = value
@@ -262,7 +272,7 @@ func RouterLBRuleWithoutHealthCheck(m Meta, eip, vpc, namespace string, endpoint
 }
 
 func Vip(m Meta, namespace, subnet string) *unstructured.Unstructured {
-	return object(VipGVK, m, map[string]any{"namespace": namespace, "subnet": subnet, "type": "switch_lb_vip"})
+	return object(VipGVK, m, map[string]any{"namespace": namespace, "subnet": subnet})
 }
 
 func SwitchLBRule(m Meta, vip, namespace string, endpoints []string, ports []RouterLBPort) *unstructured.Unstructured {
