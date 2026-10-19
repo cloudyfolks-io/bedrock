@@ -17,6 +17,6 @@ func OperationReasons() []string {
 		ReasonInstancesUnsupported, ReasonBackupUnsupported, ReasonRestoreUnsupported,
 		ReasonRestoreTimeUnsupported, ReasonUnsupportedForEngine,
 		ReasonClassChangeInvalid, ReasonExpansionNotSupported,
-		ReasonVersionNotAllowed, ReasonBackupRequired,
+		ReasonVersionNotAllowed, ReasonBackupRequired, ReasonUpgrading,
 	}
 }
