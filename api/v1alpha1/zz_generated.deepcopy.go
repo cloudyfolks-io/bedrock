@@ -1700,6 +1700,10 @@ func (in *DatabaseBackupStatus) DeepCopyInto(out *DatabaseBackupStatus) {
 		in, out := &in.PITRTo, &out.PITRTo
 		*out = (*in).DeepCopy()
 	}
+	if in.SizeSampledAt != nil {
+		in, out := &in.SizeSampledAt, &out.SizeSampledAt
+		*out = (*in).DeepCopy()
+	}
 	if in.Items != nil {
 		in, out := &in.Items, &out.Items
 		*out = make([]DatabaseBackupItem, len(*in))
