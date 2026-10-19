@@ -39,13 +39,16 @@ func TestOperatorRoleCoversDatabases(t *testing.T) {
 	}
 	for _, resource := range resources {
 		for _, verb := range standard {
-			if resource[1] == "secrets" && (verb == "list" || verb == "watch") {
+			if resource[1] == "secrets" && verb == "watch" {
 				continue
 			}
 			if !allows(role, resource[0], resource[1], verb) {
 				t.Errorf("missing %s on %s/%s", verb, resource[0], resource[1])
 			}
 		}
+	}
+	if allows(role, "", "secrets", "watch") {
+		t.Error("the role must not watch Secrets")
 	}
 	for _, resource := range []string{"databases/status", "databaseusers/status", "databaseschemas/status"} {
 		if !allows(role, "bedrock.cloudyfolks.io", resource, "update") {
