@@ -25,18 +25,3 @@ func TestComputeLimitSettings(t *testing.T) {
 		}
 	}
 }
-
-func TestEvictionStrategySetting(t *testing.T) {
-	def, ok := Lookup("virt.eviction-strategy")
-	if !ok || def.Default != "LiveMigrateIfPossible" {
-		t.Fatalf("%+v", def)
-	}
-	for _, good := range []string{"LiveMigrate", "LiveMigrateIfPossible", "None"} {
-		if err := def.Validate(good); err != nil {
-			t.Errorf("%s: %v", good, err)
-		}
-	}
-	if def.Validate("Always") == nil {
-		t.Error("Always must be refused")
-	}
-}

@@ -28,6 +28,7 @@ type observation struct {
 	Addresses  []v1alpha1.VMAddress
 	ElasticIP  string
 	GuestAgent *v1alpha1.VMGuestAgent
+	Migration  *v1alpha1.VMMigration
 	KubeVirt   ObservedVM
 }
 
@@ -158,6 +159,13 @@ func (r *VirtualMachineReconciler) observe(ctx context.Context, vm v1alpha1.Virt
 	}
 	obs.ElasticIP = elasticIPFor(ips.Items, vm.Name)
 	obs.GuestAgent = r.guestAgent(ctx, vm, obs.KubeVirt.VMIConditions)
+
+	migrations := &unstructured.UnstructuredList{}
+	migrations.SetGroupVersionKind(kubeVirtMigrationGVK.GroupVersion().WithKind("VirtualMachineInstanceMigrationList"))
+	if err := r.Client.List(ctx, migrations, client.InNamespace(vm.Namespace)); err != nil && !notFound(err) {
+		return obs, err
+	}
+	obs.Migration = LatestMigration(vm, migrations.Items)
 	return obs, nil
 }
 
@@ -205,6 +213,7 @@ func (r *VirtualMachineReconciler) SetupWithManager(mgr ctrl.Manager) error {
 		Owns(emptyOf(kubeVirtVMGVK)).
 		Owns(emptyOf(dataVolumeGVK)).
 		Watches(emptyOf(kubeVirtVMIGVK), handler.EnqueueRequestsFromMapFunc(sameName)).
+		Watches(emptyOf(kubeVirtMigrationGVK), handler.EnqueueRequestsFromMapFunc(migrationOwner)).
 		Watches(&corev1.Pod{}, handler.EnqueueRequestsFromMapFunc(launcherOwner)).
 		Watches(&v1alpha1.Subnet{}, handler.EnqueueRequestsFromMapFunc(r.referrers("subnet/"))).
 		Watches(&v1alpha1.SecurityGroup{}, handler.EnqueueRequestsFromMapFunc(r.referrers("securitygroup/"))).

@@ -56,6 +56,10 @@ type VMDisk struct {
 	// +kubebuilder:validation:Enum=virtio;sata;scsi
 	// +optional
 	Bus string `json:"bus,omitempty"`
+	// +kubebuilder:validation:MaxLength=36
+	// +kubebuilder:validation:Pattern=`^[A-Za-z0-9._-]+$`
+	// +optional
+	Serial string `json:"serial,omitempty"`
 }
 
 type VMCDROM struct {
@@ -118,6 +122,13 @@ type VMFirmware struct {
 	SecureBoot bool `json:"secureBoot,omitempty"`
 	// +optional
 	TPM bool `json:"tpm,omitempty"`
+	// +kubebuilder:validation:Pattern=`^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$`
+	// +optional
+	UUID string `json:"uuid,omitempty"`
+	// +kubebuilder:validation:MaxLength=64
+	// +kubebuilder:validation:Pattern=`^[A-Za-z0-9._-]+$`
+	// +optional
+	Serial string `json:"serial,omitempty"`
 }
 
 type VMCPU struct {
@@ -148,6 +159,8 @@ type VMCompute struct {
 // +kubebuilder:validation:XValidation:rule="!has(self.rootDisk.volumeRef) || !has(self.disks) || !self.disks.exists(d, d.volumeRef == self.rootDisk.volumeRef)",message="the root volume cannot also be listed in disks"
 // +kubebuilder:validation:XValidation:rule="has(self.rootDisk.volumeRef) == has(oldSelf.rootDisk.volumeRef)",message="rootDisk.volumeRef cannot be added or removed"
 // +kubebuilder:validation:XValidation:rule="!has(self.rootDisk.volumeRef) || !has(oldSelf.rootDisk.volumeRef) || self.rootDisk.volumeRef == oldSelf.rootDisk.volumeRef || (has(self.running) && !self.running)",message="rootDisk.volumeRef can change only while the virtual machine is stopped"
+// +kubebuilder:validation:XValidation:rule="(has(self.firmware) && has(self.firmware.uuid)) == (has(oldSelf.firmware) && has(oldSelf.firmware.uuid)) && (!(has(self.firmware) && has(self.firmware.uuid)) || self.firmware.uuid == oldSelf.firmware.uuid)",message="firmware.uuid is immutable"
+// +kubebuilder:validation:XValidation:rule="(has(self.firmware) && has(self.firmware.serial)) == (has(oldSelf.firmware) && has(oldSelf.firmware.serial)) && (!(has(self.firmware) && has(self.firmware.serial)) || self.firmware.serial == oldSelf.firmware.serial)",message="firmware.serial is immutable"
 type VirtualMachineSpec struct {
 	// +kubebuilder:validation:MinLength=1
 	// +optional
@@ -223,6 +236,15 @@ type VMConsole struct {
 	SerialPath string `json:"serialPath,omitempty"`
 }
 
+type VMMigration struct {
+	Name  string `json:"name"`
+	Phase string `json:"phase"`
+	// +optional
+	StartedAt *metav1.Time `json:"startedAt,omitempty"`
+	// +optional
+	Message string `json:"message,omitempty"`
+}
+
 type VirtualMachineStatus struct {
 	CommonStatus `json:",inline"`
 	// +kubebuilder:validation:Enum=Stopped;Starting;Running;Migrating;Stopping;Failed
@@ -239,6 +261,8 @@ type VirtualMachineStatus struct {
 	GuestAgent *VMGuestAgent `json:"guestAgent,omitempty"`
 	// +optional
 	Console *VMConsole `json:"console,omitempty"`
+	// +optional
+	Migration *VMMigration `json:"migration,omitempty"`
 }
 
 // +kubebuilder:object:root=true

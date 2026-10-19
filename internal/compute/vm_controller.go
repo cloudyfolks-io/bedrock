@@ -420,6 +420,7 @@ func statusOf(vm v1alpha1.VirtualMachine, gate *Gate, obs observation, now time.
 		ElasticIP:    obs.ElasticIP,
 		GuestAgent:   obs.GuestAgent,
 		Console:      ConsoleFor(obs.Phase, vm.Namespace, vm.Name),
+		Migration:    obs.Migration,
 	}
 	conditions := Conditions(vm.Generation, obs.Phase, vm.Spec.Running, gate, obs.KubeVirt)
 	status.Conditions = mergeConditions(vm.Status.Conditions, conditions, now)

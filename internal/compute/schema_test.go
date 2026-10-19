@@ -418,3 +418,67 @@ func TestSchemaRootDiskModeIsFixed(t *testing.T) {
 		t.Fatalf("volume to owned: %v", err)
 	}
 }
+
+func TestSchemaRefusesBadGuestIdentity(t *testing.T) {
+	c, _ := startEnv(t)
+	ns := uniqueNamespace(t, c)
+	cases := map[string]func(*v1alpha1.VirtualMachine){
+		"uuid text": func(vm *v1alpha1.VirtualMachine) { vm.Spec.Firmware = &v1alpha1.VMFirmware{UUID: "web-1"} },
+		"uuid short": func(vm *v1alpha1.VirtualMachine) {
+			vm.Spec.Firmware = &v1alpha1.VMFirmware{UUID: "6f1f3a52-2f0b-4c1e-9d55"}
+		},
+		"serial space": func(vm *v1alpha1.VirtualMachine) { vm.Spec.Firmware = &v1alpha1.VMFirmware{Serial: "a b"} },
+		"serial long": func(vm *v1alpha1.VirtualMachine) {
+			vm.Spec.Firmware = &v1alpha1.VMFirmware{Serial: strings.Repeat("a", 65)}
+		},
+		"disk serial": func(vm *v1alpha1.VirtualMachine) { vm.Spec.Disks[0].Serial = "a b" },
+		"disk long":   func(vm *v1alpha1.VirtualMachine) { vm.Spec.Disks[0].Serial = strings.Repeat("a", 37) },
+	}
+	for label, mutate := range cases {
+		requireRefused(t, c, label, schemaVM(ns, mutate))
+	}
+	requireAccepted(t, c, schemaVM(ns, func(vm *v1alpha1.VirtualMachine) {
+		vm.Spec.Firmware = &v1alpha1.VMFirmware{UUID: "6f1f3a52-2f0b-4c1e-9d55-0c6f1d7a9e10", Serial: "SN-0001"}
+		vm.Spec.Disks[0].Serial = "vol0123456789abcdef"
+	}))
+}
+
+func TestSchemaFirmwareIdentityIsImmutable(t *testing.T) {
+	c, _ := startEnv(t)
+	ctx := context.Background()
+	ns := uniqueNamespace(t, c)
+	identified := schemaVM(ns, func(vm *v1alpha1.VirtualMachine) {
+		vm.Spec.Firmware = &v1alpha1.VMFirmware{UEFI: true, UUID: "6f1f3a52-2f0b-4c1e-9d55-0c6f1d7a9e10", Serial: "SN-0001"}
+	})
+	requireAccepted(t, c, identified)
+	identified.Spec.Running = false
+	identified.Spec.Firmware.TPM = true
+	if err := c.Update(ctx, identified); err != nil {
+		t.Fatalf("an update that keeps the identity: %v", err)
+	}
+	for label, mutate := range map[string]func(*v1alpha1.VirtualMachine){
+		"uuid change":   func(v *v1alpha1.VirtualMachine) { v.Spec.Firmware.UUID = "7f1f3a52-2f0b-4c1e-9d55-0c6f1d7a9e10" },
+		"uuid remove":   func(v *v1alpha1.VirtualMachine) { v.Spec.Firmware.UUID = "" },
+		"serial change": func(v *v1alpha1.VirtualMachine) { v.Spec.Firmware.Serial = "SN-0002" },
+		"serial remove": func(v *v1alpha1.VirtualMachine) { v.Spec.Firmware.Serial = "" },
+		"firmware drop": func(v *v1alpha1.VirtualMachine) { v.Spec.Firmware = nil },
+	} {
+		changed := identified.DeepCopy()
+		mutate(changed)
+		requireUpdateRefused(t, c, label, changed)
+	}
+	plain := schemaVM(ns, func(*v1alpha1.VirtualMachine) {})
+	requireAccepted(t, c, plain)
+	for label, firmware := range map[string]*v1alpha1.VMFirmware{
+		"uuid add":   {UUID: "6f1f3a52-2f0b-4c1e-9d55-0c6f1d7a9e10"},
+		"serial add": {Serial: "SN-0001"},
+	} {
+		changed := plain.DeepCopy()
+		changed.Spec.Firmware = firmware
+		requireUpdateRefused(t, c, label, changed)
+	}
+	plain.Spec.Firmware = &v1alpha1.VMFirmware{UEFI: true}
+	if err := c.Update(ctx, plain); err != nil {
+		t.Fatalf("firmware without identity: %v", err)
+	}
+}
