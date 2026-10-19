@@ -177,7 +177,7 @@ delete_vms() {
   local namespace=$1 name
   shift
   for name in "$@"; do
-    kubectl -n "$namespace" delete virtualmachine "$name" --ignore-not-found
+    kubectl -n "$namespace" delete virtualmachine "$name" --ignore-not-found --wait=false
   done
   for name in "$@"; do
     wait_gone 300 virtualmachine "$name" -n "$namespace"
