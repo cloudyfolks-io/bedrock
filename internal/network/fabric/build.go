@@ -181,6 +181,14 @@ func OvnFip(m Meta, eip, ipName string) *unstructured.Unstructured {
 	return object(OvnFipGVK, m, map[string]any{"ovnEip": eip, "ipName": ipName})
 }
 
+func OvnSnatRule(m Meta, eip, vpc, v4Cidr string) *unstructured.Unstructured {
+	return object(OvnSnatRuleGVK, m, map[string]any{"ovnEip": eip, "vpc": vpc, "v4IpCidr": v4Cidr})
+}
+
+func OvnSnatRuleForSubnet(m Meta, eip, vpcSubnet string) *unstructured.Unstructured {
+	return object(OvnSnatRuleGVK, m, map[string]any{"ovnEip": eip, "vpcSubnet": vpcSubnet})
+}
+
 func routerLBRule(m Meta, eip, vpc, namespace string, endpoints []string, ports []RouterLBPort) *unstructured.Unstructured {
 	rendered := make([]any, len(ports))
 	for i, p := range ports {

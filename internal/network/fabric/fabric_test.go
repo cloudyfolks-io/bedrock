@@ -106,6 +106,29 @@ func TestRouterLBRuleBuild(t *testing.T) {
 	})
 }
 
+func TestOvnSnatRuleBuildForACidr(t *testing.T) {
+	u := OvnSnatRule(Meta{Name: "r"}, "e", "acme", "10.0.0.0/8")
+	equal(t, spec(t, u), map[string]any{"ovnEip": "e", "vpc": "acme", "v4IpCidr": "10.0.0.0/8"})
+	if u.GetKind() != "OvnSnatRule" || u.GetAPIVersion() != "fabric.cloudyfolks.io/v1" {
+		t.Fatalf("unexpected identity %v", u.Object)
+	}
+}
+
+func TestOvnSnatRuleBuildForASubnet(t *testing.T) {
+	equal(t, spec(t, OvnSnatRuleForSubnet(Meta{Name: "r"}, "e", "acme-default")), map[string]any{"ovnEip": "e", "vpcSubnet": "acme-default"})
+}
+
+func TestSnatRuleReady(t *testing.T) {
+	u := OvnSnatRule(Meta{Name: "r"}, "e", "acme", "10.0.0.0/8")
+	if SnatRuleReady(u) {
+		t.Fatal("a new rule is not ready")
+	}
+	_ = unstructured.SetNestedField(u.Object, true, "status", "ready")
+	if !SnatRuleReady(u) {
+		t.Fatal("a rule with status.ready is ready")
+	}
+}
+
 func TestDNSZoneBuild(t *testing.T) {
 	u := DNSZone(Meta{Name: "z"}, "acme", []DNSRecord{{Name: "db.internal.e2e", IPs: []string{"10.0.0.5"}}})
 	equal(t, spec(t, u), map[string]any{"vpc": "acme", "records": []any{map[string]any{"name": "db.internal.e2e", "ips": []any{"10.0.0.5"}}}})

@@ -79,6 +79,10 @@ func FipIPName(u *unstructured.Unstructured) string {
 	return text(u, "spec", "ipName")
 }
 
+func SnatRuleReady(u *unstructured.Unstructured) bool {
+	return flag(u, "status", "ready")
+}
+
 func RouterLBRuleService(u *unstructured.Unstructured) string {
 	return text(u, "status", "service")
 }

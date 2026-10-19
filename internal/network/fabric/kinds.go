@@ -25,4 +25,5 @@ var (
 	BgpConfGVK         = gvk("BgpConf")
 	VipGVK             = gvk("Vip")
 	SwitchLBRuleGVK    = gvk("SwitchLBRule")
+	OvnSnatRuleGVK     = gvk("OvnSnatRule")
 )
