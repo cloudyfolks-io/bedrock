@@ -7,6 +7,7 @@ const (
 	ReasonInvalidSpec            = "InvalidSpec"
 	ReasonSubnetNotFound         = "SubnetNotFound"
 	ReasonSubnetNotReady         = "SubnetNotReady"
+	ReasonNoDNSServers           = "NoDNSServers"
 	ReasonAddressOutsideSubnet   = network.ReasonAddressOutsideSubnet
 	ReasonAddressReserved        = network.ReasonAddressReserved
 	ReasonAddressInUse           = network.ReasonAddressInUse
@@ -52,7 +53,7 @@ func Reasons() []string {
 
 func BuildReasons() []string {
 	return []string{
-		ReasonNotInProject, ReasonInvalidSpec, ReasonSubnetNotFound, ReasonSubnetNotReady, ReasonWaitingForDefaultGroup,
+		ReasonNotInProject, ReasonInvalidSpec, ReasonSubnetNotFound, ReasonSubnetNotReady, ReasonNoDNSServers, ReasonWaitingForDefaultGroup,
 		ReasonSecretNotFound, ReasonSecretTypeInvalid, ReasonKataUnavailable, ReasonApplyFailed, ReasonNameConflict,
 		ReasonStarting, ReasonRunning, ReasonSucceeded, ReasonFailed, ReasonCloneFailed, ReasonBuildFailed, ReasonPushFailed, ReasonTimeout,
 		ReasonImagePullFailed, ReasonContainerConfigError, ReasonJobMissing,

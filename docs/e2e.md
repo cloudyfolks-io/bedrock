@@ -409,7 +409,7 @@ The lab script `hack/lab-build.sh` proves the builds that run.
 | Step | Check |
 | --- | --- |
 | `build_roles` | A viewer reads `builds` and `builds/logs` and cannot create a Build. An owner creates a Build and reads its logs. A stranger cannot read the logs. |
-| `build_missing_secret` | A Build with a missing push Secret has `Ready=False` with the reason `SecretNotFound`. A push Secret of the wrong type gives `SecretTypeInvalid`. Neither Build has a Job. |
+| `build_missing_secret` | A Build with a missing push Secret has `Ready=False` with the reason `SecretNotFound`. A push Secret of the wrong type gives `SecretTypeInvalid`. Neither Build has a Job. The step sets `network.dns-servers`, because a Build with no DNS server waits with `NoDNSServers`. `build_cleanup` empties the Setting. |
 | `build_kata_gate` | With no Kata, a Build of each type has the reason `KataUnavailable` and no Job. The step skips this check when the Addon `kata` is `Ready`. |
 | `build_immutable` | A change of the spec of a Build is refused. |
 | `build_cleanup` | Deleting the Builds leaves no Job, no ConfigMap, no pod and no Secret of a Build. |

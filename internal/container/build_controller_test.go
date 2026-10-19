@@ -76,6 +76,7 @@ func seedBuildPlatform(t testing.TB, c client.Client) string {
 	ns := seedPlatform(t, c)
 	createBuildSecrets(t, c, ns)
 	setKataAddon(t, c, metav1.ConditionTrue)
+	setSetting(t, c, "network.dns-servers", "10.100.0.2")
 	return ns
 }
 
@@ -378,6 +379,10 @@ func TestBuildGatesStartNoJob(t *testing.T) {
 			b.Spec.Network.SubnetRef = "slow"
 			return c, b
 		}},
+		{"no dns server", ReasonNoDNSServers, func(t *testing.T, c client.Client, ns string) (client.Client, v1alpha1.Build) {
+			setSetting(t, c, "network.dns-servers", "")
+			return c, fixtureBuild(ns, "gated")
+		}},
 		{"push secret missing", ReasonSecretNotFound, func(t *testing.T, c client.Client, ns string) (client.Client, v1alpha1.Build) {
 			b := fixtureBuild(ns, "gated")
 			b.Spec.Output.PushSecretRef = "absent"
@@ -432,6 +437,7 @@ func TestBuildStartsWhenTheMissingSecretAppears(t *testing.T) {
 	c, _ := startEnv(t)
 	ns := seedPlatform(t, c)
 	setKataAddon(t, c, metav1.ConditionTrue)
+	setSetting(t, c, "network.dns-servers", "10.100.0.2")
 	createBuild(t, c, ns, "late", noBuildMutation)
 	r := newBuildReconciler(c)
 	result := reconcileBuild(t, r, ns, "late")
