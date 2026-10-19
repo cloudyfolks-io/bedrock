@@ -133,6 +133,8 @@ rules:
   - identityproviders/status
   - images
   - images/status
+  - internetgateways
+  - internetgateways/status
   - loadbalancers
   - loadbalancers/status
   - networks
@@ -303,6 +305,7 @@ rules:
   - dns-zones
   - ovn-eips
   - ovn-fips
+  - ovn-snat-rules
   - provider-networks
   - router-lb-rules
   - security-groups

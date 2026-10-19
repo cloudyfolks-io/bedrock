@@ -96,6 +96,10 @@ func DNSZoneName(namespace, zone, network string) string {
 	return shorten(namespace+"-"+zone+"-"+network, strings.Join([]string{namespace, zone, network}, "/"), labelValueMax)
 }
 
+func SnatRuleName(network, scope string) string {
+	return shorten(network+"-igw", network+"/"+scope, labelValueMax)
+}
+
 func ObjectLabels(kind, name, tenant, project string) map[string]string {
 	labels := map[string]string{v1alpha1.LabelKind: kind, v1alpha1.LabelName: name, LabelManaged: "true"}
 	if tenant == "" {

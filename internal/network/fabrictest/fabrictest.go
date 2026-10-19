@@ -96,6 +96,12 @@ func MarkFipReady(ctx context.Context, c client.Client, name string) error {
 	})
 }
 
+func MarkSnatRuleReady(ctx context.Context, c client.Client, name string) error {
+	return updateStatus(ctx, c, fabric.OvnSnatRuleGVK, name, func(status, _ map[string]any) {
+		status["ready"] = true
+	})
+}
+
 func MarkRouterLBRuleProgrammed(ctx context.Context, c client.Client, name, service string) error {
 	return updateStatus(ctx, c, fabric.RouterLBRuleGVK, name, func(status, _ map[string]any) {
 		status["service"] = service

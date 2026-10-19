@@ -34,6 +34,7 @@ func SetupWithManager(mgr ctrl.Manager) error {
 		&DefaultGroupReconciler{Client: c},
 		&ElasticIPReconciler{Client: c},
 		&LoadBalancerReconciler{Client: c, Kinds: known},
+		&InternetGatewayReconciler{Client: c, Kinds: known},
 		&DNSZoneReconciler{Client: c, Kinds: known},
 	} {
 		if err := r.SetupWithManager(mgr); err != nil {

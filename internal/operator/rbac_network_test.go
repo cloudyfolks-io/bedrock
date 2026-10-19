@@ -20,7 +20,7 @@ func verbsOn(rules []rbacv1.PolicyRule, group, resource string) []string {
 
 func TestNetworkRulesGrantEveryFabricKindWeWrite(t *testing.T) {
 	full := []string{"create", "delete", "get", "list", "patch", "update", "watch"}
-	for _, resource := range []string{"vpcs", "subnets", "ovn-eips", "ovn-fips", "router-lb-rules", "switch-lb-rules", "vips", "dns-zones", "security-groups", "provider-networks", "vlans", "bgp-confs"} {
+	for _, resource := range []string{"vpcs", "subnets", "ovn-eips", "ovn-fips", "ovn-snat-rules", "router-lb-rules", "switch-lb-rules", "vips", "dns-zones", "security-groups", "provider-networks", "vlans", "bgp-confs"} {
 		if got := verbsOn(networkRules(), "fabric.cloudyfolks.io", resource); !slices.Equal(got, full) {
 			t.Fatalf("%s: %v", resource, got)
 		}
@@ -52,7 +52,7 @@ func TestNetworkRulesCoverTheFinalizersOfOwnerReferences(t *testing.T) {
 }
 
 func TestNetworkRulesSkipFinalizersThatNothingNeeds(t *testing.T) {
-	for _, resource := range []string{"networks", "elasticips", "loadbalancers", "dnszones"} {
+	for _, resource := range []string{"networks", "elasticips", "loadbalancers", "internetgateways", "dnszones"} {
 		if got := verbsOn(networkRules(), "bedrock.cloudyfolks.io", resource+"/finalizers"); len(got) != 0 {
 			t.Fatalf("%s/finalizers: %v", resource, got)
 		}

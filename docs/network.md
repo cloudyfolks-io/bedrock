@@ -7,7 +7,7 @@ Tenants never touch Fabric objects.
 
 ## What the network area does
 
-A project member creates a `Subnet`, an `ElasticIP`, a `LoadBalancer`, a `DNSZone` or a `SecurityGroup`.
+A project member creates a `Subnet`, an `ElasticIP`, a `LoadBalancer`, an `InternetGateway`, a `DNSZone` or a `SecurityGroup`.
 The operator creates the Fabric objects that make them work.
 The operator also creates the Fabric underlay from Settings.
 The underlay is the `ProviderNetwork`, the `Vlan`, the external `Subnet` and the `BgpConf`.
@@ -32,6 +32,7 @@ The section "How to read conditions" lists every reason.
 | `ElasticIP` | `OvnEip` | a short name made from namespace and name |
 | `ElasticIP` with a VM target | `OvnFip` | the same short name |
 | `LoadBalancer` listener | `RouterLBRule` | one rule for each listener |
+| `InternetGateway` | `OvnSnatRule` | `<network>-igw-<hash>`, one rule for each range of the Network, or one rule for the Subnet |
 | `DNSZone` | `DNSZone` | one for each Network of the Subnets that name the zone |
 | `SecurityGroup` | `SecurityGroup` | a short name made from namespace and name |
 | `LoadBalancer` without an ElasticIP | `Vip` and `SwitchLBRule` | one `Vip`, and one rule for each listener |
@@ -200,7 +201,7 @@ The Subnet reconciler makes the same checks, and it also checks the reserved ran
 When two Subnets overlap, the older Subnet wins.
 
 A Network does not give a VM access to the internet.
-A VM without an ElasticIP has no route to the internet.
+A VM without an ElasticIP has no route to the internet, unless the Network has an InternetGateway.
 
 ## Elastic IPs
 
@@ -217,7 +218,7 @@ An ElasticIP over the limit reports `QuotaExceeded`, takes no provider network a
 The older ElasticIPs go first.
 An ElasticIP that holds an address or a provider network keeps it when the quota is lowered.
 Without `quota.elasticIPs`, the number is not limited.
-Set `spec.target` to attach the address to a VM or to a LoadBalancer.
+Set `spec.target` to attach the address to a VM, to a LoadBalancer or to an InternetGateway.
 Remove `spec.target` to detach it.
 Detach keeps the address.
 
@@ -303,6 +304,39 @@ It becomes one Fabric `SwitchLBRule` for each listener and one Fabric `Vip`.
 The `Vip` is an address of the Subnet of the targets, and Fabric allocates it.
 All targets of an internal LoadBalancer must use one Subnet.
 
+## Internet gateways
+
+An `InternetGateway` gives the VMs of a Network a shared source address for traffic to the internet.
+A VM that has no ElasticIP uses this address.
+A VM that has an ElasticIP keeps using its own address.
+The InternetGateway names a Network in `networkRef` and an ElasticIP in `elasticIPRef`.
+It can also name a Subnet in `subnetRef`.
+The ElasticIP must name the InternetGateway as its target with `kind: InternetGateway`.
+The InternetGateway must name the ElasticIP in `elasticIPRef`.
+An ElasticIP has one target, so an address that serves an InternetGateway cannot serve a VM or a LoadBalancer.
+When the ElasticIP has another target, the InternetGateway reports `TargetMismatch` and has no rules.
+The ElasticIP counts toward `quota.elasticIPs` like any other ElasticIP.
+The Network must be external, and its Vpc must be connected to the provider network of the ElasticIP.
+
+The operator writes one `OvnSnatRule` for each IPv4 range of the Network.
+The rule names the Fabric `OvnEip` of the ElasticIP, the Vpc of the Network and the range in `v4IpCidr`.
+When you add a range to the Network, the operator writes a rule for it.
+When a range leaves the Network, the operator deletes its rule.
+The rule name is `<network>-igw-` and 12 hex characters of a hash of the Network and the range.
+The name does not depend on the order of the ranges.
+With `subnetRef`, the operator writes one rule that names the Fabric `Subnet`, and no rule for the ranges.
+The Subnet must be in the same project and on the same Network.
+Use `subnetRef` when only one Subnet needs the shared address.
+
+A Network has at most one InternetGateway.
+When two InternetGateways name the same Network, the older one works.
+The other one reports `GatewayExists` and writes no rule.
+When the older one is deleted, the other one takes over.
+The InternetGateway reports `Programmed` when Fabric has programmed every rule.
+When the ElasticIP is deleted or changes its target, the operator deletes the rules.
+When you delete the InternetGateway, the operator deletes the rules and then releases the object.
+The sweeper deletes rules whose InternetGateway is gone.
+
 ## DNS zones
 
 A Fabric `DNSZone` applies to a whole VPC.
@@ -378,13 +412,14 @@ Then take the action in the table.
 | `CIDROutsideAllowedRanges` | The Subnet CIDR is not inside a range of `network.subnet-allowed-ranges`. Use another CIDR, or ask an administrator to change the Setting. A provisioned Subnet shows the same text in the condition `RangePolicy`, and it stays `Ready`. |
 | `CIDROverlap` | An older Subnet overlaps this one. Use another CIDR. |
 | `Connected` | The external connection works. No action. |
-| `ElasticIPNotFound` | The ElasticIP of the LoadBalancer does not exist. Create it. |
+| `ElasticIPNotFound` | The ElasticIP of the LoadBalancer or of the InternetGateway does not exist, or it is being deleted. Create it. |
 | `ElasticIPNotReady` | The ElasticIP is not ready. Wait or fix the ElasticIP. |
 | `ExcludeIPsInvalid` | An excluded address or range is wrong. Use addresses inside the CIDR and ascending ranges. |
 | `ExternalNotConnected` | The Vpc has no working external port. Check the Network and the gateway nodes. |
 | `FRRAgentMissing` | No fabric-frr pod is ready on a gateway node. Give a Host the role `fabric-gateway` and check the DaemonSet `kube-system/fabric-frr`. |
 | `FabricConflict` | A Fabric object with this name belongs to another owner. Rename the Bedrock object. |
 | `FabricNotReady` | Fabric has not finished. Wait. If it stays, read the message. |
+| `GatewayExists` | An older InternetGateway already serves this Network. Delete one of the two. |
 | `GatewayInvalid` | The gateway is outside the CIDR or is the network or broadcast address. Use a usable address. |
 | `InUse` | VMs or addresses still use the object. Delete or change them first. |
 | `InvalidRecords` | A DNS record has a bad name or address. Fix the record. |
@@ -400,12 +435,12 @@ Then take the action in the table.
 | `NotAttached` | No Subnet names this zone in `dnsZoneRef`. Set `dnsZoneRef` on a Subnet. |
 | `Pending` | Fabric has not connected the Network yet. Wait. |
 | `Programmed` | Fabric has the object. No action. |
-| `RefNotFound` | A rule names a security group that does not exist. Create it or fix the rule. |
+| `RefNotFound` | A rule names a security group that does not exist, or an InternetGateway names a Subnet that does not exist. Create it or fix the reference. |
 | `QuotaExceeded` | The tenant already has as many ElasticIPs as `quota.elasticIPs` allows. Delete an ElasticIP or raise the quota of the tenant. The operator checks again when the quota or the count changes. |
 | `Reserved` | The ElasticIP holds an address and has no target. No action. |
 | `TargetMismatch` | The target does not point back to this object. Fix the reference. |
 | `TargetInUse` | An older ElasticIP already uses this VM interface. Delete one of the two ElasticIPs. |
-| `TargetNetworkMismatch` | The targets are on more than one Network. Use targets of one Network. |
+| `TargetNetworkMismatch` | The targets are on more than one Network, or the Subnet of an InternetGateway is on another Network. Use targets of one Network. |
 | `TargetNotFound` | The target does not exist. Fix the target. |
 | `TargetPortsDiffer` | A listener has targets with different ports. Use one port. |
 | `Terminating` | The object waits for its children. Delete the children first. |
@@ -423,7 +458,8 @@ Then take the action in the table.
 - Only IPv4 works.
 - A Network range is checked only against `network.reserved-cidrs`. A wide range can hold a provider network or the join subnet, and the Subnet check refuses the Subnets that overlap them.
 - A Subnet CIDR must not overlap a provider network, the join subnet, a range of `network.reserved-cidrs`, the API address or a node address. The operator does not check the pod and service ranges, because tenant VPCs are isolated. The management range is known only as single addresses.
-- A VM without an ElasticIP has no route to the internet.
+- A VM without an ElasticIP has no route to the internet, unless the Network has an InternetGateway.
+- A Network has one InternetGateway.
 - A health check is on or off. The other health check fields are not used.
 - L2 mode has one default route, to the first `tenant` provider network by name.
 - You cannot change the elastic IP mode on a cluster that has ElasticIPs.
@@ -434,7 +470,7 @@ Then take the action in the table.
 List the Fabric objects of Bedrock:
 
 ```
-kubectl get vpcs,subnets,ovn-eips,ovn-fips -l network.bedrock.cloudyfolks.io/managed=true
+kubectl get vpcs,subnets,ovn-eips,ovn-fips,ovn-snat-rules -l network.bedrock.cloudyfolks.io/managed=true
 ```
 
 Read the NAT rules of a Vpc:

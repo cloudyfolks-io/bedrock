@@ -5,8 +5,9 @@ import (
 )
 
 const (
-	ElasticIPTargetVirtualMachine = "VirtualMachine"
-	ElasticIPTargetLoadBalancer   = "LoadBalancer"
+	ElasticIPTargetVirtualMachine  = "VirtualMachine"
+	ElasticIPTargetLoadBalancer    = "LoadBalancer"
+	ElasticIPTargetInternetGateway = "InternetGateway"
 
 	LoadBalancerProtocolTCP = "TCP"
 	LoadBalancerProtocolUDP = "UDP"
@@ -76,7 +77,7 @@ type SubnetList struct {
 
 // +kubebuilder:validation:XValidation:rule="!has(self.subnetRef) || self.kind == 'VirtualMachine'",message="subnetRef selects a VirtualMachine interface"
 type ElasticIPTarget struct {
-	// +kubebuilder:validation:Enum=VirtualMachine;LoadBalancer
+	// +kubebuilder:validation:Enum=VirtualMachine;LoadBalancer;InternetGateway
 	Kind string `json:"kind"`
 	// +kubebuilder:validation:MinLength=1
 	Name string `json:"name"`
@@ -199,6 +200,40 @@ type LoadBalancerList struct {
 	Items           []LoadBalancer `json:"items"`
 }
 
+type InternetGatewaySpec struct {
+	// +kubebuilder:validation:MinLength=1
+	// +kubebuilder:validation:XValidation:rule="self == oldSelf",message="networkRef is immutable"
+	NetworkRef string `json:"networkRef"`
+	// +kubebuilder:validation:MinLength=1
+	ElasticIPRef string `json:"elasticIPRef"`
+	// +kubebuilder:validation:MinLength=1
+	// +optional
+	SubnetRef string `json:"subnetRef,omitempty"`
+}
+
+type InternetGatewayStatus struct {
+	CommonStatus `json:",inline"`
+}
+
+// +kubebuilder:object:root=true
+// +kubebuilder:resource:scope=Namespaced
+// +kubebuilder:subresource:status
+// +kubebuilder:printcolumn:name="Network",type=string,JSONPath=`.spec.networkRef`
+// +kubebuilder:printcolumn:name="Elastic IP",type=string,JSONPath=`.spec.elasticIPRef`
+type InternetGateway struct {
+	metav1.TypeMeta   `json:",inline"`
+	metav1.ObjectMeta `json:"metadata,omitempty"`
+	Spec              InternetGatewaySpec   `json:"spec"`
+	Status            InternetGatewayStatus `json:"status,omitempty"`
+}
+
+// +kubebuilder:object:root=true
+type InternetGatewayList struct {
+	metav1.TypeMeta `json:",inline"`
+	metav1.ListMeta `json:"metadata,omitempty"`
+	Items           []InternetGateway `json:"items"`
+}
+
 type DNSRecord struct {
 	// +kubebuilder:validation:MinLength=1
 	Name string `json:"name"`
@@ -299,5 +334,5 @@ type SecurityGroupList struct {
 }
 
 func init() {
-	SchemeBuilder.Register(&Subnet{}, &SubnetList{}, &ElasticIP{}, &ElasticIPList{}, &LoadBalancer{}, &LoadBalancerList{}, &DNSZone{}, &DNSZoneList{}, &SecurityGroup{}, &SecurityGroupList{})
+	SchemeBuilder.Register(&Subnet{}, &SubnetList{}, &ElasticIP{}, &ElasticIPList{}, &LoadBalancer{}, &LoadBalancerList{}, &InternetGateway{}, &InternetGatewayList{}, &DNSZone{}, &DNSZoneList{}, &SecurityGroup{}, &SecurityGroupList{})
 }

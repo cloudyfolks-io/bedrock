@@ -129,6 +129,8 @@ func isReady(c client.Client, obj client.Object) bool {
 		return v1alpha1.IsConditionTrue(o.Status.Conditions, v1alpha1.ConditionReady)
 	case *v1alpha1.DNSZone:
 		return v1alpha1.IsConditionTrue(o.Status.Conditions, v1alpha1.ConditionReady)
+	case *v1alpha1.InternetGateway:
+		return v1alpha1.IsConditionTrue(o.Status.Conditions, v1alpha1.ConditionReady)
 	}
 	return false
 }
@@ -149,6 +151,9 @@ func TestManagerProgramsTheWholeChain(t *testing.T) {
 	eip1.Spec.Target = vmTarget("vm1")
 	eip2 := elasticIPOf(ns, "eip2", "")
 	eip2.Spec.Target = lbTarget("lb1")
+	eip3 := elasticIPOf(ns, "eip3", "")
+	eip3.Spec.Target = igwTarget("igw1")
+	igw := internetGatewayFor(ns, "igw1", "chain", "eip3")
 	lb := loadBalancerFor(ns, "lb1", "eip2")
 	lb.Spec.Listeners[0].Targets = []v1alpha1.LoadBalancerTarget{{VMRef: "vm1", Port: 8080}}
 	zone := zoneFor(ns, "zone1", dbRecord)
@@ -158,10 +163,10 @@ func TestManagerProgramsTheWholeChain(t *testing.T) {
 	if err := fabrictest.CreateIP(ctx, c, "vm1."+ns+".default", ns, "vm1", FabricName(ns, "default"), "10.100.1.5"); err != nil {
 		t.Fatal(err)
 	}
-	for _, obj := range []client.Object{eip1, eip2, lb, zone} {
+	for _, obj := range []client.Object{eip1, eip2, eip3, igw, lb, zone} {
 		requireAccepted(t, c, obj)
 	}
-	ready := []client.Object{network, def, other, web, eip1, eip2, lb, zone}
+	ready := []client.Object{network, def, other, web, eip1, eip2, eip3, igw, lb, zone}
 	eventually(t, 90*time.Second, "every object is ready", func() bool {
 		for _, obj := range ready {
 			if !isReady(c, obj) {
@@ -173,7 +178,7 @@ func TestManagerProgramsTheWholeChain(t *testing.T) {
 	if prefix := netip.MustParsePrefix("192.0.2.0/24"); !prefix.Contains(netip.MustParseAddr(eip1.Status.Address)) {
 		t.Fatalf("address %q", eip1.Status.Address)
 	}
-	for _, obj := range []client.Object{zone, lb, eip2, eip1, vm, web, def, other, network} {
+	for _, obj := range []client.Object{zone, lb, igw, eip3, eip2, eip1, vm, web, def, other, network} {
 		if err := c.Delete(ctx, obj); err != nil {
 			t.Fatal(err)
 		}
@@ -182,7 +187,7 @@ func TestManagerProgramsTheWholeChain(t *testing.T) {
 		return len(leftovers(t, c, ns)) == 0
 	})
 	eventually(t, 90*time.Second, "every Bedrock object is gone", func() bool {
-		for _, obj := range []client.Object{network, def, other, web, eip1, eip2, lb, zone} {
+		for _, obj := range []client.Object{network, def, other, web, eip1, eip2, eip3, igw, lb, zone} {
 			if err := c.Get(ctx, client.ObjectKeyFromObject(obj), obj); !apierrors.IsNotFound(err) {
 				return false
 			}

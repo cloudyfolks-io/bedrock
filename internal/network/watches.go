@@ -130,6 +130,26 @@ func loadBalancerLister(c client.Reader) func(context.Context, ...client.ListOpt
 	}
 }
 
+func internetGatewayLister(c client.Reader) func(context.Context, ...client.ListOption) []reconcile.Request {
+	return func(ctx context.Context, opts ...client.ListOption) []reconcile.Request {
+		var list v1alpha1.InternetGatewayList
+		if err := c.List(ctx, &list, opts...); err != nil {
+			return nil
+		}
+		return requestsFrom(list.Items)
+	}
+}
+
+func GatewaysOfNetwork(all []v1alpha1.InternetGateway, changed v1alpha1.InternetGateway) []reconcile.Request {
+	var requests []reconcile.Request
+	for _, other := range all {
+		if other.UID != changed.UID && other.Spec.NetworkRef == changed.Spec.NetworkRef {
+			requests = append(requests, requestOf(other.Namespace, other.Name))
+		}
+	}
+	return requests
+}
+
 func dnsZoneLister(c client.Reader) func(context.Context, ...client.ListOption) []reconcile.Request {
 	return func(ctx context.Context, opts ...client.ListOption) []reconcile.Request {
 		var list v1alpha1.DNSZoneList

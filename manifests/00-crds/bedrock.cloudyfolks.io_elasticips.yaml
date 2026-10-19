@@ -59,6 +59,7 @@ spec:
                     enum:
                     - VirtualMachine
                     - LoadBalancer
+                    - InternetGateway
                     type: string
                   name:
                     minLength: 1

@@ -26,12 +26,12 @@ const (
 )
 
 var sweptKinds = []schema.GroupVersionKind{
-	fabric.OvnFipGVK, fabric.RouterLBRuleGVK, fabric.SwitchLBRuleGVK, fabric.DNSZoneGVK, fabric.VipGVK, fabric.OvnEipGVK,
+	fabric.OvnSnatRuleGVK, fabric.OvnFipGVK, fabric.RouterLBRuleGVK, fabric.SwitchLBRuleGVK, fabric.DNSZoneGVK, fabric.VipGVK, fabric.OvnEipGVK,
 	fabric.SecurityGroupGVK, fabric.SubnetGVK, fabric.VpcGVK,
 }
 
 var deletionRank = map[string]int{
-	fabric.OvnFipGVK.Kind: 0, fabric.RouterLBRuleGVK.Kind: 0, fabric.SwitchLBRuleGVK.Kind: 0, fabric.DNSZoneGVK.Kind: 0, fabric.VipGVK.Kind: 1,
+	fabric.OvnSnatRuleGVK.Kind: 0, fabric.OvnFipGVK.Kind: 0, fabric.RouterLBRuleGVK.Kind: 0, fabric.SwitchLBRuleGVK.Kind: 0, fabric.DNSZoneGVK.Kind: 0, fabric.VipGVK.Kind: 1,
 	fabric.OvnEipGVK.Kind: 1, fabric.SecurityGroupGVK.Kind: 2, fabric.SubnetGVK.Kind: 3, fabric.VpcGVK.Kind: 4,
 }
 
@@ -199,13 +199,14 @@ func (s *Sweeper) owners(ctx context.Context) (map[OwnerKey]types.UID, error) {
 	var subnets v1alpha1.SubnetList
 	var eips v1alpha1.ElasticIPList
 	var balancers v1alpha1.LoadBalancerList
+	var gateways v1alpha1.InternetGatewayList
 	var zones v1alpha1.DNSZoneList
 	var groups v1alpha1.SecurityGroupList
 	var namespaces corev1.NamespaceList
 	err := errors.Join(
 		s.Client.List(ctx, &namespaces),
 		s.Client.List(ctx, &networks), s.Client.List(ctx, &subnets), s.Client.List(ctx, &eips),
-		s.Client.List(ctx, &balancers), s.Client.List(ctx, &zones), s.Client.List(ctx, &groups),
+		s.Client.List(ctx, &balancers), s.Client.List(ctx, &gateways), s.Client.List(ctx, &zones), s.Client.List(ctx, &groups),
 	)
 	if err != nil {
 		return nil, err
@@ -229,6 +230,9 @@ func (s *Sweeper) owners(ctx context.Context) (map[OwnerKey]types.UID, error) {
 	}
 	for i := range balancers.Items {
 		record("LoadBalancer", &balancers.Items[i])
+	}
+	for i := range gateways.Items {
+		record("InternetGateway", &gateways.Items[i])
 	}
 	for i := range zones.Items {
 		record("DNSZone", &zones.Items[i])

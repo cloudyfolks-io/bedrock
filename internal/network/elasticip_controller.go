@@ -213,6 +213,8 @@ func (r *ElasticIPReconciler) attach(ctx context.Context, eip v1alpha1.ElasticIP
 		return r.detached(ctx, eip, address, ReasonReserved)
 	case eip.Spec.Target.Kind == v1alpha1.ElasticIPTargetLoadBalancer:
 		return r.attachLoadBalancer(ctx, eip, address)
+	case eip.Spec.Target.Kind == v1alpha1.ElasticIPTargetInternetGateway:
+		return r.attachInternetGateway(ctx, eip, address)
 	}
 	return r.attachVM(ctx, eip, cfg, meta, address)
 }
@@ -246,6 +248,21 @@ func (r *ElasticIPReconciler) attachLoadBalancer(ctx context.Context, eip v1alph
 	}
 	if lb.Spec.ElasticIPRef != eip.Name {
 		return r.refuse(ctx, eip, address, ReasonTargetMismatch, fmt.Sprintf("the LoadBalancer %q uses the ElasticIP %q as its frontend", lb.Name, lb.Spec.ElasticIPRef))
+	}
+	return r.detached(ctx, eip, address, ReasonAttached)
+}
+
+func (r *ElasticIPReconciler) attachInternetGateway(ctx context.Context, eip v1alpha1.ElasticIP, address string) (outcome, error) {
+	var gateway v1alpha1.InternetGateway
+	err := r.Client.Get(ctx, client.ObjectKey{Namespace: eip.Namespace, Name: eip.Spec.Target.Name}, &gateway)
+	if err != nil && !apierrors.IsNotFound(err) {
+		return outcome{}, err
+	}
+	if apierrors.IsNotFound(err) {
+		return r.refuse(ctx, eip, address, ReasonTargetNotFound, fmt.Sprintf("the InternetGateway %q does not exist", eip.Spec.Target.Name))
+	}
+	if gateway.Spec.ElasticIPRef != eip.Name {
+		return r.refuse(ctx, eip, address, ReasonTargetMismatch, fmt.Sprintf("the InternetGateway %q uses the ElasticIP %q as its address", gateway.Name, gateway.Spec.ElasticIPRef))
 	}
 	return r.detached(ctx, eip, address, ReasonAttached)
 }
@@ -326,25 +343,32 @@ func (r *ElasticIPReconciler) externalPath(ctx context.Context, eip v1alpha1.Ela
 	}
 	var network v1alpha1.Network
 	err = r.Client.Get(ctx, client.ObjectKey{Name: subnet.Spec.NetworkRef}, &network)
-	if apierrors.IsNotFound(err) || (err == nil && !v1alpha1.IsConditionTrue(network.Status.Conditions, v1alpha1.ConditionReady)) {
+	if apierrors.IsNotFound(err) {
 		return notConnected(fmt.Sprintf("the Network %q is not ready", subnet.Spec.NetworkRef)), nil
 	}
 	if err != nil {
 		return nil, err
 	}
-	in, err := r.pathInput(ctx, eip, cfg, network)
+	return networkExternalPath(ctx, r.Client, eip, cfg, network)
+}
+
+func networkExternalPath(ctx context.Context, c client.Reader, eip v1alpha1.ElasticIP, cfg Config, network v1alpha1.Network) (*Violation, error) {
+	if !v1alpha1.IsConditionTrue(network.Status.Conditions, v1alpha1.ConditionReady) {
+		return notConnected(fmt.Sprintf("the Network %q is not ready", network.Name)), nil
+	}
+	in, err := pathInput(ctx, c, eip, cfg, network)
 	if err != nil {
 		return nil, err
 	}
 	if v := ExternalPath(in); v != nil {
 		return v, nil
 	}
-	return frrAgentGap(ctx, r.Client, cfg)
+	return frrAgentGap(ctx, c, cfg)
 }
 
-func (r *ElasticIPReconciler) pathInput(ctx context.Context, eip v1alpha1.ElasticIP, cfg Config, network v1alpha1.Network) (ExternalPathInput, error) {
+func pathInput(ctx context.Context, c client.Reader, eip v1alpha1.ElasticIP, cfg Config, network v1alpha1.Network) (ExternalPathInput, error) {
 	in := ExternalPathInput{Mode: cfg.EIPMode, NetworkExternal: network.Spec.EnableExternal, ProviderNetwork: PoolOf(eip), Transit: cfg.BGP.Transit}
-	vpc, err := getObject(ctx, r.Client, fabric.VpcGVK, VpcName(network.Name))
+	vpc, err := getObject(ctx, c, fabric.VpcGVK, VpcName(network.Name))
 	if apierrors.IsNotFound(err) {
 		return in, nil
 	}
@@ -353,7 +377,7 @@ func (r *ElasticIPReconciler) pathInput(ctx context.Context, eip v1alpha1.Elasti
 	}
 	routing, _, _ := unstructured.NestedBool(vpc.Object, "spec", "dynamicRouting", "enabled")
 	in.Vpc = ObservedVpc{Standby: fabric.VpcStandby(vpc), ExternalSubnets: fabric.VpcExternalSubnets(vpc), DynamicRouting: routing}
-	port, err := getObject(ctx, r.Client, fabric.OvnEipGVK, vpc.GetName()+"-"+RouterPortSubnet(cfg.EIPMode, PoolOf(eip), cfg.BGP.Transit))
+	port, err := getObject(ctx, c, fabric.OvnEipGVK, vpc.GetName()+"-"+RouterPortSubnet(cfg.EIPMode, PoolOf(eip), cfg.BGP.Transit))
 	if err == nil {
 		in.RouterPort = ObservedPort{Exists: true, Ready: fabric.EipReady(port), Address: fabric.EipAddress(port)}
 	}

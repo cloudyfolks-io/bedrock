@@ -146,6 +146,7 @@ func (r *ElasticIPReconciler) SetupWithManager(mgr ctrl.Manager) error {
 			return QuotaWaiters(ctx, c, obj.GetName())
 		}), builder.WithPredicates(predicate.GenerationChangedPredicate{})).
 		Watches(&v1alpha1.LoadBalancer{}, handler.EnqueueRequestsFromMapFunc(inNamespaceOf(eips))).
+		Watches(&v1alpha1.InternetGateway{}, handler.EnqueueRequestsFromMapFunc(inNamespaceOf(eips))).
 		Watches(&appsv1.DaemonSet{}, handler.EnqueueRequestsFromMapFunc(everything(eips)), builder.WithPredicates(frrAgentOnly())).
 		Complete(r)
 }
@@ -165,6 +166,25 @@ func (r *LoadBalancerReconciler) SetupWithManager(mgr ctrl.Manager) error {
 		Watches(&v1alpha1.ElasticIP{}, handler.EnqueueRequestsFromMapFunc(inNamespaceOf(balancers))).
 		Watches(fabricObject("IP"), handler.EnqueueRequestsFromMapFunc(ofIP)).
 		Watches(&v1alpha1.VirtualMachine{}, handler.EnqueueRequestsFromMapFunc(inNamespaceOf(balancers))).
+		Complete(r)
+}
+
+func (r *InternetGatewayReconciler) SetupWithManager(mgr ctrl.Manager) error {
+	c := mgr.GetClient()
+	gateways := internetGatewayLister(c)
+	return ctrl.NewControllerManagedBy(mgr).Named("network-internetgateway").
+		For(&v1alpha1.InternetGateway{}).
+		Watches(fabricObject("OvnSnatRule"), ownerAnnotationHandler(), builder.WithPredicates(managedOnly())).
+		Watches(&v1alpha1.ElasticIP{}, handler.EnqueueRequestsFromMapFunc(inNamespaceOf(gateways))).
+		Watches(&v1alpha1.Subnet{}, handler.EnqueueRequestsFromMapFunc(inNamespaceOf(gateways))).
+		Watches(&v1alpha1.Network{}, handler.EnqueueRequestsFromMapFunc(everything(gateways))).
+		Watches(&v1alpha1.InternetGateway{}, handler.EnqueueRequestsFromMapFunc(func(ctx context.Context, obj client.Object) []reconcile.Request {
+			var list v1alpha1.InternetGatewayList
+			if err := c.List(ctx, &list); err != nil {
+				return nil
+			}
+			return GatewaysOfNetwork(list.Items, *obj.(*v1alpha1.InternetGateway))
+		})).
 		Complete(r)
 }
 
