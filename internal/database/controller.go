@@ -5,9 +5,11 @@ import (
 	"fmt"
 	"time"
 
+	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/equality"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/client-go/tools/record"
 	"k8s.io/client-go/util/retry"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -17,16 +19,28 @@ import (
 )
 
 const (
-	gateRequeue   = 30 * time.Second
-	deleteRequeue = 5 * time.Second
-	addonName     = "cnpg"
+	gateRequeue     = 30 * time.Second
+	deleteRequeue   = 5 * time.Second
+	progressRequeue = 10 * time.Second
+	readyRequeue    = time.Minute
+	addonName       = "cnpg"
+
+	ConditionGateReady     = "GateReady"
+	ConditionEndpointReady = "EndpointReady"
+	ConditionBackupHealthy = "BackupHealthy"
 )
 
 type Gate struct{ Reason, Message string }
 
 type Reconciler struct {
-	Client client.Client
-	Now    func() time.Time
+	Client   client.Client
+	Live     client.Reader
+	Images   []string
+	Store    BackupStore
+	Alloc    *Allocator
+	Engine   EngineFactory
+	Recorder record.EventRecorder
+	Now      func() time.Time
 }
 
 func (r *Reconciler) now() time.Time {
@@ -57,13 +71,19 @@ func (r *Reconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Resu
 		return ctrl.Result{}, err
 	}
 	if gate != nil {
-		return ctrl.Result{RequeueAfter: gateRequeue}, r.writeGate(ctx, db, *gate)
+		observed := Observed{Refusal: &Refusal{Reason: gate.Reason, Message: gate.Message}}
+		_, err := r.publish(ctx, cfg, &db, observed)
+		return ctrl.Result{RequeueAfter: gateRequeue}, err
 	}
 	if err := EnsureFinalizer(ctx, r.Client, &db); err != nil {
 		return ctrl.Result{}, err
 	}
-	_ = project
-	return ctrl.Result{}, nil
+	observed, err := r.converge(ctx, cfg, project, &db)
+	if err != nil {
+		return ctrl.Result{}, err
+	}
+	verdict, err := r.publish(ctx, cfg, &db, observed)
+	return ctrl.Result{RequeueAfter: requeueFor(verdict)}, err
 }
 
 func (r *Reconciler) gate(ctx context.Context, cfg Config, db v1alpha1.Database, inProject bool) (*Gate, error) {
@@ -120,12 +140,101 @@ func (r *Reconciler) finalize(ctx context.Context, db v1alpha1.Database) (ctrl.R
 	return ctrl.Result{}, ReleaseFinalizer(ctx, r.Client, &db)
 }
 
-func (r *Reconciler) writeGate(ctx context.Context, db v1alpha1.Database, gate Gate) error {
-	return r.writeStatus(ctx, db, func(status *v1alpha1.DatabaseStatus) {
-		v1alpha1.SetCondition(&status.Conditions, metav1.Condition{
-			Type: v1alpha1.ConditionReady, Status: metav1.ConditionFalse, Reason: gate.Reason, Message: gate.Message, ObservedGeneration: db.Generation,
-		})
+func (r *Reconciler) publish(ctx context.Context, cfg Config, db *v1alpha1.Database, observed Observed) (Verdict, error) {
+	now := r.now()
+	verdict := Phase(Observation{
+		Suspended:        db.Spec.Suspended,
+		Restoring:        db.Spec.Restore != nil,
+		Bootstrapped:     observed.Bootstrapped,
+		ReadyBefore:      db.Annotations[annotationReadyOnce] == "true",
+		EngineReady:      observed.EngineReady,
+		EngineReason:     observed.EngineReason,
+		GateReady:        observed.GateReady,
+		EndpointReady:    observed.EndpointReady,
+		Refusal:          observed.Refusal,
+		Age:              now.Sub(db.CreationTimestamp.Time),
+		ProvisionTimeout: cfg.ProvisionTimeout,
 	})
+	if verdict.Phase == v1alpha1.DatabasePhaseReady && db.Annotations[annotationReadyOnce] != "true" {
+		if err := markReadyOnce(ctx, r.Client, db); err != nil {
+			return verdict, err
+		}
+	}
+	backup := BackupHealth(BackupObservation{Enabled: db.Spec.Backup.Enabled, Age: now.Sub(db.CreationTimestamp.Time), Now: now, Status: observed.Backup})
+	previous := db.Status.Phase
+	err := r.writeStatus(ctx, *db, func(status *v1alpha1.DatabaseStatus) {
+		status.Phase = verdict.Phase
+		status.Instances = observed.Instances
+		status.Backup = observed.Backup
+		if len(status.Addresses) > 0 {
+			status.CredentialsSecret = AdminCopyName(*db)
+		}
+		for _, condition := range conditionsOf(observed, verdict, backup, db.Generation) {
+			v1alpha1.SetCondition(&status.Conditions, condition)
+		}
+	})
+	if err == nil && previous != verdict.Phase {
+		r.emit(*db, verdict)
+	}
+	return verdict, err
+}
+
+func markReadyOnce(ctx context.Context, c client.Client, db *v1alpha1.Database) error {
+	return retry.RetryOnConflict(retry.DefaultRetry, func() error {
+		if err := c.Get(ctx, client.ObjectKeyFromObject(db), db); err != nil {
+			return err
+		}
+		before := db.DeepCopy()
+		if db.Annotations == nil {
+			db.Annotations = map[string]string{}
+		}
+		db.Annotations[annotationReadyOnce] = "true"
+		return c.Patch(ctx, db, client.MergeFromWithOptions(before, client.MergeFromWithOptimisticLock{}), client.FieldOwner(v1alpha1.DatabaseFieldManager))
+	})
+}
+
+func conditionsOf(observed Observed, verdict Verdict, backup BackupVerdict, generation int64) []metav1.Condition {
+	truth := func(ok bool) metav1.ConditionStatus {
+		if ok {
+			return metav1.ConditionTrue
+		}
+		return metav1.ConditionFalse
+	}
+	reasoned := func(ok bool, yes, no, message string) (string, string) {
+		if ok {
+			return yes, message
+		}
+		return no, message
+	}
+	engineReason, engineMessage := reasoned(observed.EngineReady, "EngineHealthy", ReasonEngineWaiting, observed.EngineReason)
+	if observed.EngineReady {
+		engineMessage = "the engine is healthy"
+	}
+	gateReason, _ := reasoned(observed.GateReady, "GateRunning", ReasonGateWaiting, "")
+	endpointReason, _ := reasoned(observed.EndpointReady, "EndpointRunning", ReasonProxyWaiting, "")
+	backupStatus := truth(backup.Healthy)
+	if backup.Unknown {
+		backupStatus = metav1.ConditionUnknown
+	}
+	return []metav1.Condition{
+		{Type: v1alpha1.ConditionReady, Status: truth(verdict.Phase == v1alpha1.DatabasePhaseReady), Reason: verdict.Reason, Message: verdict.Message, ObservedGeneration: generation},
+		{Type: ConditionEngineReady, Status: truth(observed.EngineReady), Reason: engineReason, Message: engineMessage, ObservedGeneration: generation},
+		{Type: ConditionGateReady, Status: truth(observed.GateReady), Reason: gateReason, Message: "the gate deployment of the database", ObservedGeneration: generation},
+		{Type: ConditionEndpointReady, Status: truth(observed.EndpointReady), Reason: endpointReason, Message: "the proxy deployment in the subnet", ObservedGeneration: generation},
+		{Type: ConditionBackupHealthy, Status: backupStatus, Reason: backup.Reason, Message: backup.Message, ObservedGeneration: generation},
+	}
+}
+
+func (r *Reconciler) emit(db v1alpha1.Database, verdict Verdict) {
+	if r.Recorder == nil {
+		return
+	}
+	switch verdict.Phase {
+	case v1alpha1.DatabasePhaseReady:
+		r.Recorder.Event(&db, corev1.EventTypeNormal, v1alpha1.DatabasePhaseReady, verdict.Message)
+	case v1alpha1.DatabasePhaseUnhealthy, v1alpha1.DatabasePhaseFailed:
+		r.Recorder.Event(&db, corev1.EventTypeWarning, verdict.Phase, verdict.Reason+": "+verdict.Message)
+	}
 }
 
 func (r *Reconciler) writeStatus(ctx context.Context, db v1alpha1.Database, change func(*v1alpha1.DatabaseStatus)) error {

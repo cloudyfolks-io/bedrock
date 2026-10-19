@@ -4,6 +4,7 @@ import (
 	"context"
 	"strings"
 
+	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/types"
 	ctrl "sigs.k8s.io/controller-runtime"
@@ -19,7 +20,7 @@ import (
 	"github.com/cloudyfolks-io/bedrock/internal/objectstorage/s3"
 )
 
-func SetupWithManager(mgr ctrl.Manager) error {
+func SetupWithManager(mgr ctrl.Manager, images []string) error {
 	platform := &PlatformReconciler{Client: mgr.GetClient()}
 	if err := platform.SetupWithManager(mgr); err != nil {
 		return err
@@ -34,7 +35,12 @@ func SetupWithManager(mgr ctrl.Manager) error {
 	if err := (&SchemaReconciler{Client: mgr.GetClient(), Engine: engine}).SetupWithManager(mgr); err != nil {
 		return err
 	}
-	return (&Reconciler{Client: mgr.GetClient()}).SetupWithManager(mgr)
+	store := BackupStore{S3: &s3.Client{}, Endpoint: objectstorage.Endpoint, Region: objectstorage.Region}
+	reconciler := &Reconciler{
+		Client: mgr.GetClient(), Live: mgr.GetAPIReader(), Images: images, Store: store, Alloc: &Allocator{}, Engine: engine,
+		Recorder: mgr.GetEventRecorderFor("bedrock-database"),
+	}
+	return reconciler.SetupWithManager(mgr)
 }
 
 const outputLimit = 1 << 20
@@ -101,9 +107,43 @@ func (r *Reconciler) SetupWithManager(mgr ctrl.Manager) error {
 	return ctrl.NewControllerManagedBy(mgr).
 		Named("database").
 		For(&v1alpha1.Database{}).
+		Owns(&appsv1.Deployment{}).
+		Owns(&v1alpha1.SecurityGroup{}).
+		Watches(&appsv1.Deployment{}, handler.EnqueueRequestsFromMapFunc(r.databaseOfInstance), builder.WithPredicates(predicate.NewPredicateFuncs(inPlatformNamespace))).
+		Watches(&v1alpha1.Subnet{}, handler.EnqueueRequestsFromMapFunc(r.databasesOfSubnet)).
 		Watches(&v1alpha1.Setting{}, handler.EnqueueRequestsFromMapFunc(r.allDatabases), builder.WithPredicates(predicate.NewPredicateFuncs(databaseSetting))).
 		Watches(&v1alpha1.Addon{}, handler.EnqueueRequestsFromMapFunc(r.allDatabases), builder.WithPredicates(predicate.NewPredicateFuncs(engineAddon))).
 		Complete(r)
+}
+
+func inPlatformNamespace(obj client.Object) bool { return obj.GetNamespace() == PlatformNamespace }
+
+func (r *Reconciler) databaseOfInstance(ctx context.Context, obj client.Object) []reconcile.Request {
+	uid := obj.GetLabels()[LabelInstance]
+	var list v1alpha1.DatabaseList
+	if uid == "" || r.Client.List(ctx, &list) != nil {
+		return nil
+	}
+	for i := range list.Items {
+		if string(list.Items[i].UID) == uid {
+			return []reconcile.Request{{NamespacedName: client.ObjectKeyFromObject(&list.Items[i])}}
+		}
+	}
+	return nil
+}
+
+func (r *Reconciler) databasesOfSubnet(ctx context.Context, obj client.Object) []reconcile.Request {
+	var list v1alpha1.DatabaseList
+	if err := r.Client.List(ctx, &list, client.InNamespace(obj.GetNamespace())); err != nil {
+		return nil
+	}
+	var requests []reconcile.Request
+	for i := range list.Items {
+		if subnet := list.Items[i].Spec.SubnetRef; subnet == obj.GetName() || subnet == "" && obj.GetName() == "default" {
+			requests = append(requests, reconcile.Request{NamespacedName: client.ObjectKeyFromObject(&list.Items[i])})
+		}
+	}
+	return requests
 }
 
 func databaseSetting(obj client.Object) bool {
