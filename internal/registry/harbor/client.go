@@ -236,7 +236,7 @@ func (c *Client) ListRepositories(ctx context.Context, project string, page, siz
 		return nil, 0, fmt.Errorf("harbor: read repositories of %q: answer is not valid", project)
 	}
 	total, _ := strconv.ParseInt(got.header.Get("X-Total-Count"), 10, 64)
-	return repositories, total, nil
+	return repositories, max(total, int64(len(repositories))), nil
 }
 
 func (c *Client) DeleteRepository(ctx context.Context, project, repository string) error {
