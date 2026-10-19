@@ -174,6 +174,14 @@ Neither Loki nor Alloy sends usage data outside the cluster.
 The Setting `loki.retention-days` sets how long Loki keeps logs. The
 default is `14`. A change of the Setting rolls the Loki pod.
 
+When Loki is on, Prometheus scrapes it through the ServiceMonitor `loki`.
+The PrometheusRule `loki` holds the alert `LokiDiscardsLogs` with the
+severity `warning`. It fires when `loki_discarded_samples_total` rises in 10
+minutes. Loki drops lines when a stream is over a limit, and without this
+alert the loss is silent. The label `reason` names the limit. The addon
+applies these two objects with the others. When the monitoring CRDs are
+missing, the condition `Ready` shows `MissingCRD`.
+
 When you turn Loki off, Bedrock keeps the volume claim `storage-loki-0`.
 The logs stay. To delete the logs, delete the claim:
 

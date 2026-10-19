@@ -27,7 +27,7 @@ func TestAddonsDocNamesEveryContractName(t *testing.T) {
 		"Passed", "NoKVM", "WaitingForHosts", ConditionPreflight,
 		audit.Dir + "/" + audit.PolicyFile, audit.LogDir + "/" + audit.LogFile,
 		"monitoring/bedrock-alertmanager-config", "bedrock-grafana-admin", audit.ConfigMapName, LabelKVM,
-		"bedrock-addon-<name>-inventory", "bedrock-metrics-readers", "kube-prometheus-stack-prometheus", "bedrock-vms", "bedrock-tenants",
+		"bedrock-addon-<name>-inventory", "bedrock-metrics-readers", "LokiDiscardsLogs", "ServiceMonitor", "PrometheusRule", "kube-prometheus-stack-prometheus", "bedrock-vms", "bedrock-tenants",
 	}
 	for _, def := range Known() {
 		required = append(required, def.Name, def.EnabledSetting)
