@@ -42,6 +42,7 @@ metering_series() {
   expect_equal 0 "$(series_count '{__name__=~"bedrock:project_.+", tenant=""}')" "series without a tenant label"
   expect_equal 0 "$(series_count '{__name__=~"bedrock:project_.+", project=""}')" "series without a project label"
   expect_equal 0 "$(series_count '{__name__=~"bedrock:project_.+", namespace="kube-system"}')" "series for a platform namespace"
+  metering_every_series
 }
 
 proxy_range_request() {
@@ -68,6 +69,181 @@ metering_proxy_range() {
 
 metering_vm_series() {
   [ "$(series_value "bedrock:project_vm_running:count{tenant=\"$TENANT\",project=\"$PROJECT\"}")" = 1 ]
+}
+
+metering_series_names() {
+  printf '%s\n' \
+    bedrock:project_vm_running:count \
+    bedrock:project_vm_vcpu:sum \
+    bedrock:project_vm_memory_bytes:sum \
+    bedrock:project_volume_requested_bytes:sum \
+    bedrock:project_vm_cpu_usage_cores:rate5m \
+    bedrock:project_vm_network_receive_bytes:rate5m \
+    bedrock:project_vm_network_transmit_bytes:rate5m \
+    bedrock:project_vm_network_receive_bytes:increase1h \
+    bedrock:project_vm_network_transmit_bytes:increase1h
+}
+
+metering_source_metric_names() {
+  printf '%s\n' \
+    kubevirt_vmi_info \
+    kubevirt_vmi_vcpu_seconds_total \
+    kubevirt_vmi_memory_domain_bytes \
+    kubevirt_vmi_cpu_usage_seconds_total \
+    kubevirt_vmi_network_receive_bytes_total \
+    kubevirt_vmi_network_transmit_bytes_total
+}
+
+project_series_exists() {
+  [ "$(series_count "$1{tenant=\"$TENANT\",project=\"$PROJECT\"}")" -ge 1 ]
+}
+
+source_metric_has_vm_labels() {
+  [ "$(series_count "{__name__=\"$1\",namespace=\"$NS\",name!=\"\"}")" -ge 1 ]
+}
+
+source_metric_has_namespace_label() {
+  [ "$(series_count "{__name__=\"$1\",namespace=\"$NS\"}")" -ge 1 ]
+}
+
+metering_every_series() {
+  local name
+  for name in $(metering_source_metric_names); do
+    retry_until 300 source_metric_has_vm_labels "$name" || {
+      echo "source metric $name has no series with the labels namespace and name for $NS" >&2
+      return 1
+    }
+  done
+  for name in kube_persistentvolumeclaim_resource_requests_storage_bytes kube_namespace_labels; do
+    retry_until 300 source_metric_has_namespace_label "$name" || {
+      echo "source metric $name has no series with the label namespace for $NS" >&2
+      return 1
+    }
+  done
+  for name in $(metering_series_names); do
+    retry_until 600 project_series_exists "$name" || {
+      echo "series $name has no value for $TENANT/$PROJECT" >&2
+      return 1
+    }
+  done
+}
+
+metering_transfer_bytes=67108864
+metering_transfer_port=8000
+metering_transfer_server=10.100.18.10
+
+network_increase() {
+  local value
+  value=$(series_value "bedrock:project_vm_network_$1_bytes:increase1h{tenant=\"$TENANT\",project=\"$PROJECT\"}")
+  echo "${value/null/0}"
+}
+
+network_increase_rose_by() {
+  local direction=$1 before=$2 minimum=$3
+  awk -v now="$(network_increase "$direction")" -v before="$before" -v minimum="$minimum" 'BEGIN { exit !(now - before >= minimum) }'
+}
+
+transfer_subnet_manifest() {
+  cat <<SUBNET
+apiVersion: bedrock.cloudyfolks.io/v1alpha1
+kind: Subnet
+metadata:
+  name: metering
+spec:
+  networkRef: $TENANT
+  cidr: 10.100.18.0/24
+SUBNET
+}
+
+transfer_server_script() {
+  cat <<SCRIPT
+#!/bin/sh
+while true; do
+  dd if=/dev/zero bs=1048576 count=$((metering_transfer_bytes / 1048576)) 2>/dev/null | nc -l -p $metering_transfer_port
+done &
+SCRIPT
+}
+
+transfer_client_script() {
+  cat <<SCRIPT
+#!/bin/sh
+until [ "\$(nc $metering_transfer_server $metering_transfer_port | wc -c)" -eq $metering_transfer_bytes ]; do
+  sleep 2
+done
+echo "METER-DONE" > /dev/console
+SCRIPT
+}
+
+transfer_vm_manifest() {
+  cat <<VM
+apiVersion: bedrock.cloudyfolks.io/v1alpha1
+kind: VirtualMachine
+metadata:
+  name: $1
+spec:
+  instanceType: u1.nano
+  preference: cirros
+  image:
+    name: cirros
+    scope: cluster
+  rootDisk:
+    sizeGi: 2
+  networks:
+    - subnetRef: metering
+      address: $2
+  cloudInit:
+    userData: |
+$($3 | sed 's/^/      /')
+  running: true
+VM
+}
+
+transfer_has_finished() {
+  [[ "$(guest_console_log meter-client)" == *METER-DONE* ]]
+}
+
+transfer_cleanup() {
+  if [ "$1" -ne 0 ]; then
+    guest_console_log meter-client >&2 || true
+    guest_console_log meter-server >&2 || true
+  fi
+  kubectl -n "$NS" delete virtualmachine meter-client meter-server --ignore-not-found
+  wait_gone 180 virtualmachine meter-client -n "$NS"
+  wait_gone 180 virtualmachine meter-server -n "$NS"
+  wait_empty 180 -n "$NS" get pods -l 'kubevirt.io/domain in (meter-client,meter-server)'
+  wait_gone 180 datavolume meter-client-root -n "$NS"
+  wait_gone 180 datavolume meter-server-root -n "$NS"
+  kubectl -n "$NS" delete subnet metering --ignore-not-found
+  wait_gone 180 subnet metering -n "$NS"
+}
+
+transfer_checks() {
+  local received=$1 transmitted=$2 minimum=$((metering_transfer_bytes * 9 / 10))
+  transfer_subnet_manifest | kubectl -n "$NS" apply -f -
+  wait_reason 120 subnet metering Ready Applied -n "$NS"
+  transfer_vm_manifest meter-server "$metering_transfer_server" transfer_server_script | kubectl -n "$NS" apply -f -
+  transfer_vm_manifest meter-client 10.100.18.11 transfer_client_script | kubectl -n "$NS" apply -f -
+  wait_jsonpath 600 Running -n "$NS" get virtualmachine meter-server -o jsonpath='{.status.phase}'
+  wait_jsonpath 600 Running -n "$NS" get virtualmachine meter-client -o jsonpath='{.status.phase}'
+  retry_until 600 transfer_has_finished
+  retry_until 300 network_increase_rose_by receive "$received" "$minimum" || {
+    echo "receive increase1h was $received, now $(network_increase receive), want a rise of $minimum" >&2
+    return 1
+  }
+  retry_until 300 network_increase_rose_by transmit "$transmitted" "$minimum" || {
+    echo "transmit increase1h was $transmitted, now $(network_increase transmit), want a rise of $minimum" >&2
+    return 1
+  }
+}
+
+metering_network_totals() {
+  local received transmitted
+  received=$(network_increase receive)
+  transmitted=$(network_increase transmit)
+  (
+    trap 'transfer_cleanup "$?"' EXIT
+    transfer_checks "$received" "$transmitted"
+  )
 }
 
 metering_logs() {
