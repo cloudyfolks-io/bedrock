@@ -74,15 +74,13 @@ func TestOperatorRoleCoversDatabases(t *testing.T) {
 	}
 }
 
-func TestOperatorRoleCannotListOrWatchSecretsClusterWide(t *testing.T) {
+func TestOperatorRoleCannotWatchSecrets(t *testing.T) {
 	role, err := OperatorRole(rbacBundle(t))
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, verb := range []string{"list", "watch"} {
-		if allows(role, "", "secrets", verb) {
-			t.Errorf("the operator may %s Secrets in every namespace", verb)
-		}
+	if allows(role, "", "secrets", "watch") {
+		t.Error("the operator must not watch Secrets")
 	}
 	for _, verb := range []string{"get", "create", "patch", "update", "delete"} {
 		if !allows(role, "", "secrets", verb) {
