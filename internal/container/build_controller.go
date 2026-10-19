@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 	"time"
 
 	batchv1 "k8s.io/api/batch/v1"
@@ -160,7 +161,7 @@ func (r *BuildReconciler) applyOwnedConfigMap(ctx context.Context, desired *unst
 }
 
 func (r *BuildReconciler) observe(ctx context.Context, b v1alpha1.Build, job *batchv1.Job, jobExists bool) (ctrl.Result, error) {
-	pods, err := r.podsOf(ctx, b)
+	pods, err := r.podsOf(ctx, b, job)
 	if err != nil {
 		return ctrl.Result{}, err
 	}
@@ -182,12 +183,15 @@ func (r *BuildReconciler) report(ctx context.Context, b v1alpha1.Build, gate *Ga
 	return ctrl.Result{RequeueAfter: after}, nil
 }
 
-func (r *BuildReconciler) podsOf(ctx context.Context, b v1alpha1.Build) ([]corev1.Pod, error) {
+func (r *BuildReconciler) podsOf(ctx context.Context, b v1alpha1.Build, job *batchv1.Job) ([]corev1.Pod, error) {
+	if job == nil {
+		return nil, nil
+	}
 	var list corev1.PodList
 	if err := r.Client.List(ctx, &list, client.InNamespace(b.Namespace), client.MatchingLabels(BuildSelectorLabels(b.Name))); err != nil {
 		return nil, err
 	}
-	return list.Items, nil
+	return slices.DeleteFunc(list.Items, func(pod corev1.Pod) bool { return !metav1.IsControlledBy(&pod, job) }), nil
 }
 
 func (r *BuildReconciler) stopJob(ctx context.Context, job *batchv1.Job) error {

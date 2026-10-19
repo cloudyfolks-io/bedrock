@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -222,12 +223,22 @@ func loadBuild(ctx context.Context, c client.Client, key client.ObjectKey) (v1al
 	return build, nil
 }
 
-func newestBuildPod(ctx context.Context, c client.Client, key client.ObjectKey) (*corev1.Pod, error) {
-	var list corev1.PodList
-	if err := c.List(ctx, &list, client.InNamespace(key.Namespace), client.MatchingLabels(BuildSelectorLabels(key.Name))); err != nil {
+func newestBuildPod(ctx context.Context, c client.Client, build v1alpha1.Build) (*corev1.Pod, error) {
+	var job batchv1.Job
+	err := c.Get(ctx, client.ObjectKeyFromObject(&build), &job)
+	if apierrors.IsNotFound(err) || (err == nil && !metav1.IsControlledBy(&job, &build)) {
+		return nil, nil
+	}
+	if err != nil {
 		return nil, internalError(err)
 	}
-	pods := slices.DeleteFunc(list.Items, func(pod corev1.Pod) bool { return !pod.DeletionTimestamp.IsZero() })
+	var list corev1.PodList
+	if err := c.List(ctx, &list, client.InNamespace(build.Namespace), client.MatchingLabels(BuildSelectorLabels(build.Name))); err != nil {
+		return nil, internalError(err)
+	}
+	pods := slices.DeleteFunc(list.Items, func(pod corev1.Pod) bool {
+		return !pod.DeletionTimestamp.IsZero() || !metav1.IsControlledBy(&pod, &job)
+	})
 	if len(pods) == 0 {
 		return nil, nil
 	}
@@ -311,7 +322,7 @@ func awaitBuildPod(ctx context.Context, d Deps, c client.Client, key client.Obje
 		if err != nil {
 			return nil, err
 		}
-		pod, err := newestBuildPod(ctx, c, key)
+		pod, err := newestBuildPod(ctx, c, build)
 		if err != nil {
 			return nil, err
 		}

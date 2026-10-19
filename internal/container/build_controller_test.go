@@ -160,6 +160,62 @@ func failJob(t *testing.T, c client.Client, namespace, name, reason string) {
 	})
 }
 
+func ensureBuildJob(t testing.TB, c client.Client, namespace, build string) batchv1.Job {
+	t.Helper()
+	ctx := context.Background()
+	var job batchv1.Job
+	err := c.Get(ctx, client.ObjectKey{Namespace: namespace, Name: build}, &job)
+	if err == nil {
+		return job
+	}
+	if !apierrors.IsNotFound(err) {
+		t.Fatal(err)
+	}
+	var owner v1alpha1.Build
+	must(t, c.Get(ctx, client.ObjectKey{Namespace: namespace, Name: build}, &owner))
+	job = batchv1.Job{
+		ObjectMeta: metav1.ObjectMeta{Namespace: namespace, Name: build, OwnerReferences: []metav1.OwnerReference{BuildOwnerRef(owner)}},
+		Spec: batchv1.JobSpec{Template: corev1.PodTemplateSpec{Spec: corev1.PodSpec{
+			RestartPolicy: corev1.RestartPolicyNever,
+			Containers:    []corev1.Container{{Name: "x", Image: "registry.test/x:1"}},
+		}}},
+	}
+	must(t, c.Create(ctx, &job))
+	return job
+}
+
+func createServiceAccount(t testing.TB, c client.Client, namespace string) {
+	t.Helper()
+	err := c.Create(context.Background(), &corev1.ServiceAccount{ObjectMeta: metav1.ObjectMeta{Namespace: namespace, Name: "default"}})
+	if err != nil && !apierrors.IsAlreadyExists(err) {
+		t.Fatal(err)
+	}
+}
+
+func jobOwnerRef(job batchv1.Job) metav1.OwnerReference {
+	return metav1.OwnerReference{APIVersion: "batch/v1", Kind: "Job", Name: job.Name, UID: job.UID, Controller: ptr.To(true), BlockOwnerDeletion: ptr.To(true)}
+}
+
+func ownedBuildPod(t testing.TB, c client.Client, namespace, name, build string) corev1.Pod {
+	t.Helper()
+	createServiceAccount(t, c, namespace)
+	job := ensureBuildJob(t, c, namespace, build)
+	pod := podOf(namespace, name, build)
+	pod.Labels = BuildSelectorLabels(build)
+	pod.OwnerReferences = []metav1.OwnerReference{jobOwnerRef(job)}
+	createObject(t, c, &pod)
+	return pod
+}
+
+func forgedBuildPod(t testing.TB, c client.Client, namespace, name, build string) corev1.Pod {
+	t.Helper()
+	createServiceAccount(t, c, namespace)
+	pod := podOf(namespace, name, build)
+	pod.Labels = BuildSelectorLabels(build)
+	createObject(t, c, &pod)
+	return pod
+}
+
 func TestBuildReconcileCreatesTheJob(t *testing.T) {
 	c, _ := startEnv(t)
 	ns := seedBuildPlatform(t, c)
@@ -477,10 +533,7 @@ func TestBuildStuckPodFailsTheBuildAndStopsTheJob(t *testing.T) {
 	createBuild(t, c, ns, "stuck", noBuildMutation)
 	r := newBuildReconciler(c)
 	reconcileBuild(t, r, ns, "stuck")
-	pod := podOf(ns, "stuck-abc", "stuck")
-	pod.Labels = BuildSelectorLabels("stuck")
-	createObject(t, c, &corev1.ServiceAccount{ObjectMeta: metav1.ObjectMeta{Namespace: ns, Name: "default"}})
-	createObject(t, c, &pod)
+	pod := ownedBuildPod(t, c, ns, "stuck-abc", "stuck")
 	updateStatus(t, c, &pod, func(p *corev1.Pod) {
 		p.Status.InitContainerStatuses = []corev1.ContainerStatus{{Name: "git-clone", State: corev1.ContainerState{Waiting: &corev1.ContainerStateWaiting{Reason: "ImagePullBackOff", Message: "back-off pulling"}}}}
 	})
@@ -579,4 +632,39 @@ func TestBuildReconcileCreatesABuildpacksJob(t *testing.T) {
 		t.Fatalf("a buildpacks build has no mirror ConfigMap: %d", len(configMaps.Items))
 	}
 	requireBuildState(t, getBuild(t, c, ns, "cnb"), v1alpha1.BuildPhasePending, ReasonStarting)
+}
+
+func TestBuildForgedPodChangesNeitherTheStatusNorTheJob(t *testing.T) {
+	c, _ := startEnv(t)
+	ns := seedBuildPlatform(t, c)
+	createBuild(t, c, ns, "target", noBuildMutation)
+	r := newBuildReconciler(c)
+	reconcileBuild(t, r, ns, "target")
+	forged := forgedBuildPod(t, c, ns, "target-forged", "target")
+	updateStatus(t, c, &forged, func(p *corev1.Pod) {
+		p.Status.Phase = corev1.PodRunning
+		p.Status.InitContainerStatuses = []corev1.ContainerStatus{{Name: "git-clone", State: corev1.ContainerState{Waiting: &corev1.ContainerStateWaiting{Reason: "ImagePullBackOff", Message: "forged"}}}}
+	})
+	later := &BuildReconciler{Client: c, Now: func() time.Time { return time.Now().Add(10 * time.Minute) }}
+	reconcileBuild(t, later, ns, "target")
+	build := getBuild(t, c, ns, "target")
+	requireBuildState(t, build, v1alpha1.BuildPhasePending, ReasonStarting)
+	getJob(t, c, ns, "target")
+}
+
+func TestBuildPodOfAnotherBuildsJobIsNotCounted(t *testing.T) {
+	c, _ := startEnv(t)
+	ns := seedBuildPlatform(t, c)
+	createBuild(t, c, ns, "mine", noBuildMutation)
+	createBuild(t, c, ns, "other", noBuildMutation)
+	r := newBuildReconciler(c)
+	reconcileBuild(t, r, ns, "mine")
+	reconcileBuild(t, r, ns, "other")
+	foreign := ownedBuildPod(t, c, ns, "other-pod", "other")
+	relabeled := foreign.DeepCopy()
+	relabeled.Labels = BuildSelectorLabels("mine")
+	must(t, c.Update(context.Background(), relabeled))
+	updateStatus(t, c, relabeled, func(p *corev1.Pod) { p.Status.Phase = corev1.PodRunning })
+	reconcileBuild(t, r, ns, "mine")
+	requireBuildState(t, getBuild(t, c, ns, "mine"), v1alpha1.BuildPhasePending, ReasonStarting)
 }

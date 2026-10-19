@@ -13,7 +13,6 @@ import (
 	"time"
 
 	corev1 "k8s.io/api/core/v1"
-	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/rest"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -313,11 +312,10 @@ func (f *fakeBuildAPI) deps() Deps {
 
 func buildPodIn(t *testing.T, c client.Client, namespace, name, build string) corev1.Pod {
 	t.Helper()
-	if err := c.Create(context.Background(), &corev1.ServiceAccount{ObjectMeta: metav1.ObjectMeta{Namespace: namespace, Name: "default"}}); err != nil && !apierrors.IsAlreadyExists(err) {
-		t.Fatal(err)
-	}
+	createServiceAccount(t, c, namespace)
+	job := ensureBuildJob(t, c, namespace, build)
 	pod := corev1.Pod{
-		ObjectMeta: metav1.ObjectMeta{Namespace: namespace, Name: name, Labels: BuildSelectorLabels(build)},
+		ObjectMeta: metav1.ObjectMeta{Namespace: namespace, Name: name, Labels: BuildSelectorLabels(build), OwnerReferences: []metav1.OwnerReference{jobOwnerRef(job)}},
 		Spec: corev1.PodSpec{
 			InitContainers: []corev1.Container{{Name: "git-clone", Image: "registry.test/git:1"}},
 			Containers:     []corev1.Container{{Name: "build", Image: "registry.test/buildkit:1"}},
@@ -482,5 +480,46 @@ func TestRegisterSubresourcesAddsBuildLogs(t *testing.T) {
 	}
 	if _, found := reg.Lookup("builds", "exec"); found {
 		t.Fatal("a build has no exec")
+	}
+}
+
+func TestBuildLogsIgnoreAPodThatTheJobDoesNotOwn(t *testing.T) {
+	c, _ := startEnv(t)
+	ns := seedBuildPlatform(t, c)
+	createBuild(t, c, ns, "shop", noBuildMutation)
+	createBuild(t, c, ns, "other", noBuildMutation)
+	mine := buildPodIn(t, c, ns, "shop-real", "shop")
+	setPodProgress(t, c, &mine, exited(0), runningState(), corev1.PodRunning)
+	time.Sleep(1100 * time.Millisecond)
+	forged := forgedBuildPod(t, c, ns, "shop-forged", "shop")
+	setPodProgress(t, c, &forged, exited(0), runningState(), corev1.PodRunning)
+	foreign := buildPodIn(t, c, ns, "other-pod", "other")
+	relabeled := foreign.DeepCopy()
+	relabeled.Labels = BuildSelectorLabels("shop")
+	must(t, c.Update(context.Background(), relabeled))
+	setPodProgress(t, c, relabeled, exited(0), runningState(), corev1.PodRunning)
+	api := newFakeBuildAPI(t, map[string]string{
+		"shop-real/git-clone": "real clone\n", "shop-real/build": "real build\n",
+		"shop-forged/git-clone": "forged\n", "shop-forged/build": "forged\n",
+		"other-pod/git-clone": "foreign\n", "other-pod/build": "foreign\n",
+	})
+	server := serveHandler(t, BuildLogs(api.deps()), c, client.ObjectKey{Namespace: ns, Name: "shop"})
+	code, body := get(t, server.URL+"/")
+	if code != http.StatusOK || strings.Contains(body, "forged") || strings.Contains(body, "foreign") || !strings.Contains(body, "real build") {
+		t.Fatalf("%d %q", code, body)
+	}
+}
+
+func TestBuildLogsAreGoneWhenOnlyAForgedPodRemains(t *testing.T) {
+	c, _ := startEnv(t)
+	ns := seedBuildPlatform(t, c)
+	build := createBuild(t, c, ns, "old", noBuildMutation)
+	updateStatus(t, c, &build, func(b *v1alpha1.Build) { b.Status.Phase = v1alpha1.BuildPhaseSucceeded })
+	forged := forgedBuildPod(t, c, ns, "old-forged", "old")
+	setPodProgress(t, c, &forged, exited(0), runningState(), corev1.PodRunning)
+	api := newFakeBuildAPI(t, map[string]string{"old-forged/git-clone": "forged\n", "old-forged/build": "forged\n"})
+	server := serveHandler(t, BuildLogs(api.deps()), c, client.ObjectKey{Namespace: ns, Name: "old"})
+	if code, _ := get(t, server.URL+"/"); code != http.StatusGone {
+		t.Fatalf("code %d", code)
 	}
 }
