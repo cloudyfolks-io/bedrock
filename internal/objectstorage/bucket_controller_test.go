@@ -801,6 +801,31 @@ func TestBucketDeleteRechecksTheAclOwner(t *testing.T) {
 	}
 }
 
+func TestBucketDeleteRetriesWhenTheAccountKeyIsRefused(t *testing.T) {
+	fresh(t)
+	store, url := newFakeS3(t)
+	r := bucketReconciler(url)
+	accountReady(t, "acme-prod")
+	createBucket(t, "acme-prod", "data", v1alpha1.ObjectStorageBucketSpec{})
+	settle(t, r, "acme-prod", "data")
+	deleteBucketObject(t, "acme-prod", "data")
+	store.mu.Lock()
+	store.failWith = http.StatusForbidden
+	store.mu.Unlock()
+	reconcileBucket(t, r, "acme-prod", "data")
+	if bucketGone(t, "acme-prod", "data") {
+		t.Fatal("the finalizer went while the account key was refused")
+	}
+	requireBucketReason(t, "acme-prod", "data", metav1.ConditionFalse, "BucketFailed")
+	store.mu.Lock()
+	store.failWith = 0
+	store.mu.Unlock()
+	reconcileBucket(t, r, "acme-prod", "data")
+	if !bucketGone(t, "acme-prod", "data") {
+		t.Fatal("the bucket must be deleted once the key works again")
+	}
+}
+
 func TestBucketDeleteWaitsWhileTheOwnerCheckIsUnavailable(t *testing.T) {
 	fresh(t)
 	store, url := newFakeS3(t)
