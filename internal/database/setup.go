@@ -39,10 +39,6 @@ func databaseSetting(obj client.Object) bool {
 	return strings.HasPrefix(obj.GetName(), settingPrefix)
 }
 
-func engineAddon(obj client.Object) bool {
-	return obj.GetName() == addonName
-}
-
 func (r *Reconciler) allDatabases(ctx context.Context, _ client.Object) []reconcile.Request {
 	var list v1alpha1.DatabaseList
 	if err := r.Client.List(ctx, &list); err != nil {

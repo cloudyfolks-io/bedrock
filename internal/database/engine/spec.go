@@ -25,6 +25,7 @@ type Spec struct {
 	StorageClass string
 	Labels       map[string]string
 	PodLabels    map[string]string
+	Images       map[string]string
 	Backup       BackupSpec
 	Restore      *RestoreSpec
 }
@@ -39,8 +40,9 @@ type BackupSpec struct {
 }
 
 type RestoreSpec struct {
-	SourceUID  string
-	TargetTime *time.Time
+	SourceUID   string
+	TargetTime  *time.Time
+	Destination string
 }
 
 type Health struct {
