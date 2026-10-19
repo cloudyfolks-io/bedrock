@@ -127,7 +127,7 @@ install -m 0755 "$bin" /usr/local/bin/bedrock
 k0s ctr --namespace k8s.io images import "$cache/seaweedfs.tar"
 k0s ctr --namespace k8s.io images import "$cache/aws-cli.tar"
 
-for step_file in encryption addons tenancy images compute network objectstorage backup panel metering cascade; do
+for step_file in encryption addons tenancy images compute network objectstorage objectstorage-iam backup panel metering cascade; do
   source "$steps_dir/$step_file.sh"
 done
 
@@ -185,6 +185,7 @@ steps=(
   network_elastic_ip_quota
   network_load_balancer_and_dns
   network_isolation
+  objectstorage_iam_spike
   objectstorage_user_and_bucket
   objectstorage_roundtrip
   backup_target
