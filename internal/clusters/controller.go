@@ -126,12 +126,14 @@ func (r *Reconciler) converge(ctx context.Context, cluster v1alpha1.KubernetesCl
 	if err != nil || gate != nil {
 		return outcome{Gate: gate, RequeueAfter: retryFor(gate)}, err
 	}
+	address := resolved.Address
 	if resolved.AddressIsNew {
-		if err := r.recordAddress(ctx, cluster, resolved.Address); err != nil {
+		address, err = r.recordAddress(ctx, cluster, resolved.Address)
+		if err != nil {
 			return outcome{}, fmt.Errorf("record the control plane address: %w", err)
 		}
 	}
-	return r.provision(ctx, cluster, labels, resolved.Address)
+	return r.provision(ctx, cluster, labels, address)
 }
 
 func retryFor(gate *Gate) time.Duration {
@@ -145,18 +147,22 @@ func retryFor(gate *Gate) time.Duration {
 	return applyFailureRetry
 }
 
-func (r *Reconciler) recordAddress(ctx context.Context, cluster v1alpha1.KubernetesCluster, address string) error {
-	return retry.RetryOnConflict(retry.DefaultRetry, func() error {
+func (r *Reconciler) recordAddress(ctx context.Context, cluster v1alpha1.KubernetesCluster, address string) (string, error) {
+	recorded := address
+	err := retry.RetryOnConflict(retry.DefaultRetry, func() error {
 		var current v1alpha1.KubernetesCluster
 		if err := r.reader().Get(ctx, client.ObjectKeyFromObject(&cluster), &current); err != nil {
 			return err
 		}
-		if current.Status.ControlPlane.Address != "" {
+		if existing := current.Status.ControlPlane.Address; existing != "" {
+			recorded = existing
 			return nil
 		}
+		recorded = address
 		current.Status.ControlPlane.Address = address
 		return r.Client.Status().Update(ctx, &current, client.FieldOwner(v1alpha1.KubernetesClusterFieldManager))
 	})
+	return recorded, err
 }
 
 type nameConflict struct{ Kind, Name string }

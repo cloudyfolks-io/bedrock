@@ -8,11 +8,13 @@ import (
 	"testing"
 	"time"
 
+	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
+	"k8s.io/utils/ptr"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
@@ -476,18 +478,27 @@ func TestARefusedObjectGivesApplyFailed(t *testing.T) {
 	}
 }
 
-func TestClusterOfPodMapsOnlyK0smotronPods(t *testing.T) {
-	pod := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Namespace: fixtureNamespace, Name: "kmc-prod-0", Labels: map[string]string{"app": "k0smotron", "cluster": "prod"}}}
+func TestClusterOfPodMapsOnlyPodsOfAStatefulSetOfTheCluster(t *testing.T) {
+	owned := []metav1.OwnerReference{{APIVersion: "apps/v1", Kind: "StatefulSet", Name: "kmc-prod", UID: "u", Controller: ptr.To(true)}}
+	labels := map[string]string{"app": "k0smotron", "cluster": "prod"}
+	pod := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Namespace: fixtureNamespace, Name: "kmc-prod-0", Labels: labels, OwnerReferences: owned}}
 	requests := clusterOfPod(context.Background(), pod)
 	if len(requests) != 1 || requests[0].Name != "prod" || requests[0].Namespace != fixtureNamespace {
 		t.Fatalf("requests %v", requests)
+	}
+	forged := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Namespace: fixtureNamespace, Name: "forged", Labels: labels}}
+	if got := clusterOfPod(context.Background(), forged); len(got) != 0 {
+		t.Fatalf("a pod without a StatefulSet owner maps to %v", got)
+	}
+	foreign := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Namespace: fixtureNamespace, Name: "foreign", Labels: labels, OwnerReferences: []metav1.OwnerReference{{APIVersion: "apps/v1", Kind: "StatefulSet", Name: "other", UID: "u", Controller: ptr.To(true)}}}}
+	if got := clusterOfPod(context.Background(), foreign); len(got) != 0 {
+		t.Fatalf("a pod of another StatefulSet maps to %v", got)
 	}
 	other := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Namespace: fixtureNamespace, Name: "x", Labels: map[string]string{"app": "web"}}}
 	if got := clusterOfPod(context.Background(), other); len(got) != 0 {
 		t.Fatalf("requests %v", got)
 	}
 }
-
 func TestUsesFilters(t *testing.T) {
 	cluster := testCluster2("prod")
 	cluster.Spec.Workers = []v1alpha1.KubernetesWorker{testWorker("a")}
@@ -508,5 +519,100 @@ func TestRequeueIntervals(t *testing.T) {
 	}
 	if got := requeueAfter(outcome{}, Observed{ControlPlane: ControlPlaneView{Ready: true}}, false); got != observeInterval {
 		t.Errorf("ready %v", got)
+	}
+}
+
+func TestARecordedAddressIsAlwaysTheRenderedAddress(t *testing.T) {
+	h := newHarness(t)
+	h.create(testCluster2("prod"))
+	stale := h.cluster("prod")
+	fresh := h.cluster("prod")
+	fresh.Status.ControlPlane.Address = "10.100.0.77"
+	if err := h.client.Status().Update(context.Background(), &fresh); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := h.r.converge(context.Background(), stale); err != nil {
+		t.Fatal(err)
+	}
+	obj, found := h.k0smotronCluster("prod")
+	if !found {
+		t.Fatal("no control plane")
+	}
+	address, _, _ := unstructured.NestedString(obj.Object, "spec", "externalAddress")
+	if address != "10.100.0.77" {
+		t.Fatalf("the control plane uses %q, not the recorded address", address)
+	}
+	if got := h.cluster("prod").Status.ControlPlane.Address; got != "10.100.0.77" {
+		t.Fatalf("recorded address %q", got)
+	}
+}
+
+func forgedControlPlane(t *testing.T, mutate func(h *harness)) *harness {
+	t.Helper()
+	h := newHarness(t)
+	h.create(testCluster2("prod"))
+	h.reconcile("prod")
+	obj, _ := h.k0smotronCluster("prod")
+	obj.SetUID("uid-k0s-prod")
+	_ = unstructured.SetNestedField(obj.Object, int64(1), "status", "readyReplicas")
+	if err := h.client.Update(context.Background(), obj); err != nil {
+		t.Fatal(err)
+	}
+	mutate(h)
+	h.reconcile("prod")
+	return h
+}
+
+func readyPodStatus() corev1.PodStatus {
+	return corev1.PodStatus{Conditions: []corev1.PodCondition{{Type: corev1.PodReady, Status: corev1.ConditionTrue}}}
+}
+
+func TestForgedObjectsWithTheRightNamesAndLabelsDoNotMakeTheControlPlaneReady(t *testing.T) {
+	labels := map[string]string{"app": "k0smotron", "cluster": "prod"}
+	cases := map[string]func(h *harness){
+		"pod and secret without owners": func(h *harness) {
+			h.create(&corev1.Pod{ObjectMeta: metav1.ObjectMeta{Namespace: fixtureNamespace, Name: "kmc-prod-0", Labels: labels}, Status: readyPodStatus()})
+			h.create(&corev1.Secret{ObjectMeta: metav1.ObjectMeta{Namespace: fixtureNamespace, Name: "prod-kubeconfig", Labels: labels}})
+			h.create(&appsv1.StatefulSet{ObjectMeta: metav1.ObjectMeta{Namespace: fixtureNamespace, Name: "kmc-prod", Labels: labels}})
+		},
+		"real owners but a forged pod": func(h *harness) {
+			owner := []metav1.OwnerReference{{APIVersion: "k0smotron.io/v1beta2", Kind: "Cluster", Name: "prod", UID: "uid-k0s-prod", Controller: ptr.To(true)}}
+			h.create(&appsv1.StatefulSet{ObjectMeta: metav1.ObjectMeta{Namespace: fixtureNamespace, Name: "kmc-prod", UID: "sts", OwnerReferences: owner}})
+			h.create(&corev1.Pod{ObjectMeta: metav1.ObjectMeta{Namespace: fixtureNamespace, Name: "kmc-prod-0", Labels: labels}, Status: readyPodStatus()})
+			h.create(&corev1.Secret{ObjectMeta: metav1.ObjectMeta{Namespace: fixtureNamespace, Name: "prod-kubeconfig", OwnerReferences: owner}})
+		},
+		"real pod but a forged kubeconfig": func(h *harness) {
+			owner := []metav1.OwnerReference{{APIVersion: "k0smotron.io/v1beta2", Kind: "Cluster", Name: "prod", UID: "uid-k0s-prod", Controller: ptr.To(true)}}
+			h.create(&appsv1.StatefulSet{ObjectMeta: metav1.ObjectMeta{Namespace: fixtureNamespace, Name: "kmc-prod", UID: "sts", OwnerReferences: owner}})
+			h.create(&corev1.Pod{ObjectMeta: metav1.ObjectMeta{Namespace: fixtureNamespace, Name: "kmc-prod-0", OwnerReferences: []metav1.OwnerReference{{APIVersion: "apps/v1", Kind: "StatefulSet", Name: "kmc-prod", UID: "sts", Controller: ptr.To(true)}}}, Status: readyPodStatus()})
+			h.create(&corev1.Secret{ObjectMeta: metav1.ObjectMeta{Namespace: fixtureNamespace, Name: "prod-kubeconfig", Labels: labels}})
+		},
+	}
+	for name, mutate := range cases {
+		t.Run(name, func(t *testing.T) {
+			h := forgedControlPlane(t, mutate)
+			if h.cluster("prod").Status.ControlPlane.Ready {
+				t.Fatal("a forged object made the control plane ready")
+			}
+			if _, found := h.tokenRequest("prod-a"); found {
+				t.Fatal("no worker work on a forged control plane")
+			}
+		})
+	}
+}
+
+func TestAControlPlaneThatIsNotOwnedByTheClusterIsNeverReady(t *testing.T) {
+	h := newHarness(t)
+	h.create(testCluster2("prod"))
+	h.reconcile("prod")
+	obj, _ := h.k0smotronCluster("prod")
+	obj.SetOwnerReferences(nil)
+	_ = unstructured.SetNestedField(obj.Object, int64(1), "status", "readyReplicas")
+	if err := h.client.Update(context.Background(), obj); err != nil {
+		t.Fatal(err)
+	}
+	view, err := h.r.observeControlPlane(context.Background(), h.cluster("prod"))
+	if err != nil || view.Ready {
+		t.Fatalf("view %+v err %v", view, err)
 	}
 }

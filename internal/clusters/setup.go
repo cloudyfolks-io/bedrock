@@ -6,6 +6,7 @@ import (
 	"time"
 
 	corev1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/builder"
@@ -19,7 +20,7 @@ import (
 )
 
 func SetupWithManager(mgr ctrl.Manager) error {
-	r := &Reconciler{Client: mgr.GetClient(), Secrets: mgr.GetAPIReader(), Reader: mgr.GetAPIReader(), FabricIPs: mgr.GetCache(), Scheme: mgr.GetScheme(), Now: time.Now}
+	r := &Reconciler{Client: mgr.GetClient(), Secrets: mgr.GetAPIReader(), Reader: mgr.GetAPIReader(), FabricIPs: mgr.GetAPIReader(), Scheme: mgr.GetScheme(), Now: time.Now}
 	return r.SetupWithManager(mgr)
 }
 
@@ -45,7 +46,8 @@ func (r *Reconciler) SetupWithManager(mgr ctrl.Manager) error {
 
 func clusterOfPod(_ context.Context, obj client.Object) []reconcile.Request {
 	labels := obj.GetLabels()
-	if labels["app"] != "k0smotron" || labels["cluster"] == "" {
+	owner := metav1.GetControllerOf(obj)
+	if labels["app"] != "k0smotron" || labels["cluster"] == "" || owner == nil || owner.Kind != "StatefulSet" || owner.Name != StatefulSetName(labels["cluster"]) {
 		return nil
 	}
 	return []reconcile.Request{{NamespacedName: client.ObjectKey{Namespace: obj.GetNamespace(), Name: labels["cluster"]}}}

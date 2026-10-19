@@ -105,7 +105,18 @@ func (r AddressReader) Taken(ctx context.Context, cluster v1alpha1.KubernetesClu
 	if err := r.Clusters.List(ctx, &clusters, client.InNamespace(cluster.Namespace)); err != nil {
 		return nil, err
 	}
-	return takenAddresses(ips.Items, clusters.Items, cluster), nil
+	var vms v1alpha1.VirtualMachineList
+	if err := r.Clusters.List(ctx, &vms, client.InNamespace(cluster.Namespace)); err != nil {
+		return nil, err
+	}
+	var containers v1alpha1.ContainerList
+	if err := r.Clusters.List(ctx, &containers, client.InNamespace(cluster.Namespace)); err != nil {
+		return nil, err
+	}
+	taken := takenAddresses(ips.Items, clusters.Items, cluster)
+	taken = append(taken, workerPins(clusters.Items, subnetName)...)
+	taken = append(taken, machinePins(vms.Items, containers.Items, subnetName)...)
+	return taken, nil
 }
 
 func takenAddresses(ips []unstructured.Unstructured, clusters []v1alpha1.KubernetesCluster, own v1alpha1.KubernetesCluster) []netip.Addr {
@@ -124,6 +135,40 @@ func takenAddresses(ips []unstructured.Unstructured, clusters []v1alpha1.Kuberne
 		taken = appendAddress(taken, other.Status.ControlPlane.Address)
 	}
 	return taken
+}
+
+func workerPins(clusters []v1alpha1.KubernetesCluster, subnetName string) []netip.Addr {
+	var pinned []netip.Addr
+	for _, cluster := range clusters {
+		if SubnetName(cluster.Spec) != subnetName {
+			continue
+		}
+		for _, worker := range cluster.Spec.Workers {
+			pinned = appendAddress(pinned, worker.Address)
+		}
+	}
+	return pinned
+}
+
+func machinePins(vms []v1alpha1.VirtualMachine, containers []v1alpha1.Container, subnetName string) []netip.Addr {
+	var pinned []netip.Addr
+	for _, vm := range vms {
+		for _, nic := range vm.Spec.Networks {
+			if nic.SubnetRef == subnetName {
+				pinned = appendAddress(pinned, nic.Address)
+			}
+		}
+	}
+	for _, container := range containers {
+		ref := container.Spec.Network.SubnetRef
+		if ref == "" {
+			ref = DefaultSubnet
+		}
+		if ref == subnetName {
+			pinned = appendAddress(pinned, container.Spec.Network.Address)
+		}
+	}
+	return pinned
 }
 
 func pinnedAddresses(clusters []v1alpha1.KubernetesCluster, own string) []netip.Addr {

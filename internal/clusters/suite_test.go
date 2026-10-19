@@ -13,6 +13,7 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/utils/ptr"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
@@ -281,20 +282,22 @@ func (h *harness) makeControlPlaneReady(name string) {
 	if !found {
 		h.t.Fatalf("the control plane %s was not applied", name)
 	}
+	obj.SetUID(types.UID("uid-k0s-" + name))
 	_ = unstructured.SetNestedField(obj.Object, int64(1), "status", "readyReplicas")
 	if err := h.client.Update(ctx, obj); err != nil {
 		h.t.Fatal(err)
 	}
+	k0sOwner := []metav1.OwnerReference{{APIVersion: "k0smotron.io/v1beta2", Kind: "Cluster", Name: name, UID: obj.GetUID(), Controller: ptr.To(true)}}
+	sts := &appsv1.StatefulSet{ObjectMeta: metav1.ObjectMeta{Namespace: fixtureNamespace, Name: StatefulSetName(name), UID: types.UID("uid-sts-" + name), OwnerReferences: k0sOwner}}
 	pod := &corev1.Pod{
-		ObjectMeta: metav1.ObjectMeta{Namespace: fixtureNamespace, Name: ControlPlanePodName(name)},
+		ObjectMeta: metav1.ObjectMeta{Namespace: fixtureNamespace, Name: ControlPlanePodName(name), OwnerReferences: []metav1.OwnerReference{{APIVersion: "apps/v1", Kind: "StatefulSet", Name: sts.Name, UID: sts.UID, Controller: ptr.To(true)}}},
 		Status:     corev1.PodStatus{Conditions: []corev1.PodCondition{{Type: corev1.PodReady, Status: corev1.ConditionTrue}}},
 	}
-	if err := h.client.Create(ctx, pod); client.IgnoreAlreadyExists(err) != nil {
-		h.t.Fatal(err)
-	}
-	secret := &corev1.Secret{ObjectMeta: metav1.ObjectMeta{Namespace: fixtureNamespace, Name: KubeconfigSecretName(name)}, Data: map[string][]byte{"value": []byte("kubeconfig")}}
-	if err := h.client.Create(ctx, secret); client.IgnoreAlreadyExists(err) != nil {
-		h.t.Fatal(err)
+	secret := &corev1.Secret{ObjectMeta: metav1.ObjectMeta{Namespace: fixtureNamespace, Name: KubeconfigSecretName(name), OwnerReferences: k0sOwner}, Data: map[string][]byte{"value": []byte("kubeconfig")}}
+	for _, created := range []client.Object{sts, pod, secret} {
+		if err := h.client.Create(ctx, created); client.IgnoreAlreadyExists(err) != nil {
+			h.t.Fatal(err)
+		}
 	}
 }
 

@@ -31,7 +31,8 @@ func (r *Reconciler) ownedVM(ctx context.Context, cluster v1alpha1.KubernetesClu
 }
 
 func (r *Reconciler) syncWorkers(ctx context.Context, cluster v1alpha1.KubernetesCluster, labels map[string]string) (outcome, error) {
-	if err := r.pruneWorkers(ctx, cluster); err != nil {
+	pruning, err := r.pruneWorkers(ctx, cluster)
+	if err != nil {
 		return outcome{}, err
 	}
 	var pending *v1alpha1.KubernetesWorker
@@ -52,6 +53,9 @@ func (r *Reconciler) syncWorkers(ctx context.Context, cluster v1alpha1.Kubernete
 		}
 	}
 	if pending == nil {
+		if pruning {
+			return outcome{RequeueAfter: deleteRetry}, nil
+		}
 		return outcome{}, nil
 	}
 	waiting, err := r.provisionWorker(ctx, cluster, *pending, labels)

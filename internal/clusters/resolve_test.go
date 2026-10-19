@@ -370,3 +370,46 @@ func TestGroupNamesAreSortedAndUnique(t *testing.T) {
 		}
 	}
 }
+
+func pickAddress(t *testing.T, h *harness, cluster *v1alpha1.KubernetesCluster) string {
+	t.Helper()
+	resolved, gate := resolveCluster(t, h, cluster)
+	if gate != nil {
+		t.Fatalf("gate %+v", gate)
+	}
+	return resolved.Address
+}
+
+func TestTheFreePickAvoidsEveryPinnedAddress(t *testing.T) {
+	vm := &v1alpha1.VirtualMachine{
+		ObjectMeta: metav1.ObjectMeta{Namespace: fixtureNamespace, Name: "vm"},
+		Spec:       v1alpha1.VirtualMachineSpec{InstanceType: "u1.nano", Networks: []v1alpha1.VMNetwork{{SubnetRef: "default", Address: "10.100.0.11"}}},
+	}
+	otherSubnetVM := &v1alpha1.VirtualMachine{
+		ObjectMeta: metav1.ObjectMeta{Namespace: fixtureNamespace, Name: "vm2"},
+		Spec:       v1alpha1.VirtualMachineSpec{InstanceType: "u1.nano", Networks: []v1alpha1.VMNetwork{{SubnetRef: "other", Address: "10.100.0.10"}}},
+	}
+	container := &v1alpha1.Container{
+		ObjectMeta: metav1.ObjectMeta{Namespace: fixtureNamespace, Name: "c"},
+		Spec:       v1alpha1.ContainerSpec{Image: "x", Network: v1alpha1.ContainerNetwork{Address: "10.100.0.12"}},
+	}
+	otherWorkers := testCluster2("other")
+	otherWorkers.Spec.Workers[0].Address = "10.100.0.13"
+	own := testCluster2("prod")
+	own.Spec.Workers[0].Address = "10.100.0.10"
+	h := newHarness(t, vm, otherSubnetVM, container, otherWorkers)
+	h.create(own)
+	if got := pickAddress(t, h, own); got != "10.100.0.14" {
+		t.Fatalf("picked %s: worker pins of this and other clusters, VM pins and container pins of the Subnet are taken", got)
+	}
+}
+
+func TestAPinnedControlPlaneAddressRefusesAWorkerPin(t *testing.T) {
+	own := testCluster2("prod")
+	own.Spec.ControlPlane.Address = "10.100.0.50"
+	own.Spec.Workers[0].Address = "10.100.0.50"
+	h := newHarness(t)
+	h.create(own)
+	_, gate := resolveCluster(t, h, own)
+	requireGate(t, gate, ReasonAddressInUse)
+}

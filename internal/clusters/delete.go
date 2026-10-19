@@ -30,8 +30,8 @@ type deleteStep struct {
 func (r *Reconciler) deleteSteps() []deleteStep {
 	return []deleteStep{
 		{Message: "deleting the worker VMs", Run: r.deleteWorkerVMs},
-		{Message: "removing the token requests and the cloud-init secrets", Run: r.removeTokens},
 		{Message: "deleting the control plane and its volume", Run: r.deleteControlPlane},
+		{Message: "removing the token requests and the cloud-init secrets", Run: r.removeTokens},
 	}
 }
 
@@ -161,7 +161,14 @@ func (r *Reconciler) removeTokens(ctx context.Context, cluster v1alpha1.Kubernet
 	if err != nil {
 		return false, err
 	}
-	for _, worker := range workerNamesOf(cluster, vms) {
+	requests, err := r.listTokenRequests(ctx, cluster)
+	if err != nil {
+		return false, err
+	}
+	for _, worker := range append(workerNamesOf(cluster, vms), requestWorkers(requests)...) {
+		if worker == "" {
+			continue
+		}
 		if err := r.removeWorkerLeftovers(ctx, cluster, worker); err != nil {
 			return false, err
 		}
@@ -170,26 +177,44 @@ func (r *Reconciler) removeTokens(ctx context.Context, cluster v1alpha1.Kubernet
 }
 
 func (r *Reconciler) removeWorkerLeftovers(ctx context.Context, cluster v1alpha1.KubernetesCluster, worker string) error {
-	if err := r.removeTokenRequest(ctx, cluster, worker); err != nil {
+	if err := r.forceDeleteTokenRequest(ctx, cluster, worker); err != nil {
 		return err
 	}
+	return r.deleteCloudInit(ctx, cluster, worker)
+}
+
+func (r *Reconciler) deleteCloudInit(ctx context.Context, cluster v1alpha1.KubernetesCluster, worker string) error {
 	secret := &corev1.Secret{ObjectMeta: metav1.ObjectMeta{Namespace: cluster.Namespace, Name: CloudInitSecretName(cluster.Name, worker)}}
 	return client.IgnoreNotFound(r.Client.Delete(ctx, secret))
 }
 
-func (r *Reconciler) removeTokenRequest(ctx context.Context, cluster v1alpha1.KubernetesCluster, worker string) error {
+func (r *Reconciler) tokenRequest(ctx context.Context, cluster v1alpha1.KubernetesCluster, worker string) (*unstructured.Unstructured, bool, error) {
 	request := &unstructured.Unstructured{}
 	request.SetGroupVersionKind(joinTokenGVK)
 	err := r.Client.Get(ctx, client.ObjectKey{Namespace: cluster.Namespace, Name: WorkerName(cluster.Name, worker)}, request)
 	if apierrors.IsNotFound(err) || notFound(err) {
-		return nil
+		return nil, false, nil
 	}
-	if err != nil {
+	return request, err == nil, err
+}
+
+func (r *Reconciler) deleteTokenRequest(ctx context.Context, cluster v1alpha1.KubernetesCluster, worker string) error {
+	request, found, err := r.tokenRequest(ctx, cluster, worker)
+	if err != nil || !found || !request.GetDeletionTimestamp().IsZero() {
+		return err
+	}
+	return client.IgnoreNotFound(r.Client.Delete(ctx, request))
+}
+
+func (r *Reconciler) forceDeleteTokenRequest(ctx context.Context, cluster v1alpha1.KubernetesCluster, worker string) error {
+	request, found, err := r.tokenRequest(ctx, cluster, worker)
+	if err != nil || !found {
 		return err
 	}
 	if len(request.GetFinalizers()) > 0 {
+		base := request.DeepCopy()
 		request.SetFinalizers(nil)
-		if err := r.Client.Update(ctx, request); client.IgnoreNotFound(err) != nil {
+		if err := r.Client.Patch(ctx, request, client.MergeFrom(base)); client.IgnoreNotFound(err) != nil {
 			return err
 		}
 	}
@@ -247,25 +272,70 @@ func (r *Reconciler) claimGone(ctx context.Context, cluster v1alpha1.KubernetesC
 	return false, err
 }
 
-func (r *Reconciler) pruneWorkers(ctx context.Context, cluster v1alpha1.KubernetesCluster) error {
-	vms, err := r.clusterVMs(ctx, cluster)
-	if err != nil {
-		return err
+func requestWorkers(requests *unstructured.UnstructuredList) []string {
+	names := make([]string, 0, len(requests.Items))
+	for index := range requests.Items {
+		names = append(names, requests.Items[index].GetLabels()[LabelWorker])
 	}
+	return names
+}
+
+func (r *Reconciler) listTokenRequests(ctx context.Context, cluster v1alpha1.KubernetesCluster) (*unstructured.UnstructuredList, error) {
+	requests := &unstructured.UnstructuredList{}
+	requests.SetGroupVersionKind(joinTokenGVK.GroupVersion().WithKind("JoinTokenRequestList"))
+	err := r.Client.List(ctx, requests, client.InNamespace(cluster.Namespace), client.MatchingLabels{LabelCluster: cluster.Name})
+	if err != nil && !notFound(err) {
+		return nil, err
+	}
+	return requests, nil
+}
+
+func (r *Reconciler) staleWorkers(ctx context.Context, cluster v1alpha1.KubernetesCluster, vms []v1alpha1.VirtualMachine) ([]string, error) {
+	requests, err := r.listTokenRequests(ctx, cluster)
+	if err != nil {
+		return nil, err
+	}
+	names := workerNamesOf(v1alpha1.KubernetesCluster{}, vms)
+	names = append(names, requestWorkers(requests)...)
 	wanted := make([]string, len(cluster.Spec.Workers))
 	for i, worker := range cluster.Spec.Workers {
 		wanted[i] = worker.Name
 	}
-	for index := range vms {
-		if slices.Contains(wanted, vms[index].Labels[LabelWorker]) || !vms[index].DeletionTimestamp.IsZero() {
-			continue
-		}
-		if err := client.IgnoreNotFound(r.Client.Delete(ctx, &vms[index])); err != nil {
-			return err
-		}
-		if err := r.removeWorkerLeftovers(ctx, cluster, vms[index].Labels[LabelWorker]); err != nil {
-			return err
-		}
+	slices.Sort(names)
+	names = slices.Compact(slices.DeleteFunc(names, func(name string) bool { return name == "" || slices.Contains(wanted, name) }))
+	return names, nil
+}
+
+func (r *Reconciler) pruneWorkers(ctx context.Context, cluster v1alpha1.KubernetesCluster) (bool, error) {
+	vms, err := r.clusterVMs(ctx, cluster)
+	if err != nil {
+		return false, err
 	}
-	return nil
+	stale, err := r.staleWorkers(ctx, cluster, vms)
+	if err != nil {
+		return false, err
+	}
+	pending := false
+	for _, worker := range stale {
+		waiting, err := r.pruneWorker(ctx, cluster, worker, vms)
+		if err != nil {
+			return false, err
+		}
+		pending = pending || waiting
+	}
+	return pending, nil
+}
+
+func (r *Reconciler) pruneWorker(ctx context.Context, cluster v1alpha1.KubernetesCluster, worker string, vms []v1alpha1.VirtualMachine) (bool, error) {
+	index := slices.IndexFunc(vms, func(vm v1alpha1.VirtualMachine) bool { return vm.Labels[LabelWorker] == worker })
+	if index >= 0 {
+		if vms[index].DeletionTimestamp.IsZero() {
+			return true, client.IgnoreNotFound(r.Client.Delete(ctx, &vms[index]))
+		}
+		return true, nil
+	}
+	if err := r.deleteTokenRequest(ctx, cluster, worker); err != nil {
+		return false, err
+	}
+	return false, r.deleteCloudInit(ctx, cluster, worker)
 }
