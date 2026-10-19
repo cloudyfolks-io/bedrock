@@ -268,10 +268,9 @@ metadata:
   namespace: monitoring
 ---
 apiVersion: rbac.authorization.k8s.io/v1
-kind: Role
+kind: ClusterRole
 metadata:
-  name: metering-reader
-  namespace: monitoring
+  name: e2e-metering-reader
 rules:
   - apiGroups: [""]
     resources: [services/proxy]
@@ -285,8 +284,8 @@ metadata:
   namespace: monitoring
 roleRef:
   apiGroup: rbac.authorization.k8s.io
-  kind: Role
-  name: metering-reader
+  kind: ClusterRole
+  name: e2e-metering-reader
 subjects:
   - kind: ServiceAccount
     name: metering-reader
@@ -344,7 +343,8 @@ reader_probe_finished() {
 
 reader_cleanup() {
   kubectl -n "$NS" delete pod reader-probe --ignore-not-found
-  kubectl -n monitoring delete rolebinding,role,serviceaccount metering-reader --ignore-not-found
+  kubectl -n monitoring delete rolebinding,serviceaccount metering-reader --ignore-not-found
+  kubectl delete clusterrole e2e-metering-reader --ignore-not-found
 }
 
 reader_checks() {
