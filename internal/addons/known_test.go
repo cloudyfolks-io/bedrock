@@ -24,7 +24,7 @@ func TestKnownAddonsAreKataLokiClustersCNPGAndRegistry(t *testing.T) {
 	if defaults["persistence.size"] != "20Gi" || defaults["persistence.storage-class"] != "block" || len(defaults) != 2 {
 		t.Errorf("defaults %v", defaults)
 	}
-	cnpg := known[2]
+	cnpg := known[3]
 	if cnpg.EnabledSetting != "cnpg.enabled" || len(cnpg.Values) != 0 || cnpg.Vars != nil {
 		t.Errorf("cnpg %+v", cnpg)
 	}
