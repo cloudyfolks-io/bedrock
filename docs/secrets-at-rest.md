@@ -15,7 +15,8 @@ The key is in this file on each control-plane node:
 
 The file has mode `0600`. The directory has mode `0700`. The owner of both
 is `kube-apiserver`. The file is an `EncryptionConfiguration` with one
-`aesgcm` key, named `key1`. With KMS v2, it has one `kms` provider, named
+`aesgcm` key, named `key1`. A [rotation](#rotate-the-key) names each new key
+`key2`, `key3` and so on. With KMS v2, it has one `kms` provider, named
 `bedrock-kms`, and no key.
 
 `bedrock init` also stores a copy of the file in the Secret
@@ -59,8 +60,8 @@ Each archive is also sealed. Only the host key and the admin recipients open
 it. See [Sealed archives](backup.md#sealed-archives).
 
 Keep a copy of the key apart from the backups, for example in a secrets
-vault. The key never changes, so you do not update the copy. Without the
-copy, you cannot read the Secrets of a restored cluster.
+vault. Replace the copy after each [key rotation](#rotate-the-key). Without
+a current copy, you cannot read the Secrets of a restored cluster.
 
 Keep the admin identity apart from the backups too. The host key is lost
 with the host. Without the admin identity, you cannot open an archive after
@@ -70,7 +71,9 @@ To restore after the loss of all control-plane nodes:
 
 1. Put the key at `/etc/bedrock/encryption/encryption.yaml`. Set the file to
    mode `0600` and the directory to mode `0700`. The owner of both is
-   `kube-apiserver`. The user exists after `k0s install controller`.
+   `kube-apiserver`. The user exists after `k0s install controller`. If the
+   archive is older than a key rotation, use the key of that time. See
+   [Restore an older snapshot](#restore-an-older-snapshot).
 2. Open the backup archive with the admin identity:
 
    ```sh
@@ -105,6 +108,118 @@ An expired or deleted token gets nothing, and the join stops. A worker join
 does not get the key. A token from a cluster without encryption joins as
 before.
 
+## Rotate the key
+
+Rotate the AES-GCM key when a person who knew it leaves, or after 200,000
+writes. Rotation works only with the default AES-GCM key. With KMS v2, rotate
+the key in your KMS service.
+
+Start a rotation:
+
+```sh
+kubectl patch cluster cluster --type merge \
+  -p '{"spec":{"encryption":{"action":"rotate"}}}'
+```
+
+The operator clears `spec.encryption.action` when it takes the action. Read
+the progress in `status.encryption`:
+
+```sh
+kubectl get cluster cluster -o jsonpath='{.status.encryption}{"\n"}'
+```
+
+The rotation has four phases. In each phase, every control-plane node must
+have the same file before the next phase starts. The first key writes. The
+other keys only read.
+
+| Phase | Keys in the file | Work |
+|---|---|---|
+| `AddingKey` | old, new | Each node adds the new key as the second key and restarts its API server. |
+| `PromotingKey` | new, old | Each node makes the new key first and restarts its API server. |
+| `RewritingSecrets` | new, old | The operator writes every Secret again, so that etcd holds each Secret under the new key. |
+| `RemovingKey` | new | Each node removes the old key and restarts its API server. |
+
+When the last phase ends, `status.encryption.phase` is empty and
+`status.encryption.lastRotatedAt` shows the time.
+
+The operator changes one control-plane node at a time. It starts the next
+node only when all of these are true:
+
+- The earlier nodes have the new file and a running API server.
+- Etcd is healthy on every control-plane node.
+
+During a restart, a cluster with one control-plane node has no API for a short
+time. A cluster with three control-plane nodes keeps its API.
+
+The operator gives a node its turn with the annotation
+`bedrock.cloudyfolks.io/encryption-apply` on the Host. The agent reads the
+new content with the admin kubeconfig of the node, writes the file, restarts
+`k0scontroller` and waits for `/readyz`. A rotation does not start, and it
+does not go on, during an upgrade.
+
+### If a rotation stops
+
+`status.encryption.message` tells the reason. The rotation goes on by itself
+when the reason is gone, also after a restart of the operator or of an agent.
+
+If a node cannot start its API server with the new file, the agent puts the
+old file back and restarts again. It writes the failed hash in
+`/etc/bedrock/encryption/.apply-failed` and does not try that content again.
+The operator waits and gives no other node its turn. Read
+`journalctl -u bedrock-agent` on the node, fix the reason, and then revert the
+rotation.
+
+To undo a rotation, set the action `revert`:
+
+```sh
+kubectl patch cluster cluster --type merge \
+  -p '{"spec":{"encryption":{"action":"revert"}}}'
+```
+
+- In `AddingKey`, the operator removes the new key. No Secret used it.
+- In `PromotingKey` or `RewritingSecrets`, the roles of the keys swap. The
+  rotation goes on to the end with the old key as the new key, and it
+  rewrites all Secrets.
+- In `RemovingKey`, the revert is refused. Some nodes already lost the old
+  key.
+
+### After a rotation
+
+1. Replace your copy of the key (see [Backups do not hold the
+   key](#backups-do-not-hold-the-key)). Replace the copy in a vault, in
+   OpenBao and in your offline storage.
+2. Keep the retired files. See the next section.
+
+### Retired files
+
+When a node removes a key, the agent first keeps the old file in:
+
+```
+/etc/bedrock/encryption/retired/<UTC stamp>.yaml
+```
+
+The file has mode `0600`, and the directory has mode `0700`. The stamp is the
+time of the removal.
+
+The agent deletes a retired file when no archive in
+`/var/lib/bedrock/backups` has a stamp at or before the stamp of the retired
+file. If you copied archives off the host, keep the retired files for as
+long as you keep those copies.
+
+### Restore an older snapshot
+
+A snapshot holds Secrets that are encrypted with the keys of its time. After
+a rotation, the live file does not hold the old key. To restore a snapshot:
+
+1. Find the stamp of the archive in its name.
+2. On each control-plane node, find the retired file with the first stamp at
+   or after the stamp of the archive. If no retired file has such a stamp,
+   use the live file.
+3. Copy that file to `/etc/bedrock/encryption/encryption.yaml`. Set the file
+   to mode `0600` and the directory to mode `0700`. The owner of both is
+   `kube-apiserver`.
+4. Restore the archive as in the steps above.
+
 ## Choose KMS v2
 
 Add this to your cluster configuration before `bedrock init`:
@@ -134,5 +249,9 @@ cannot change after install.
 - A cluster installed before 0.5 is not encrypted. An upgrade does not
   enable encryption. `bedrock init` on such a node does not enable it.
 - You cannot switch between AES-GCM and KMS v2 after install.
-- The AES-GCM key has no rotation yet. Kubernetes says to use a new key after
-  200,000 writes.
+- Rotation works only with AES-GCM. A KMS v2 cluster rotates the key in its
+  KMS service.
+- Bedrock does not read etcd to prove that no Secret uses the old key. It
+  writes every Secret again, and it shows the number in
+  `status.encryption.rewrittenSecrets`.
+- A rotation in the phase `RemovingKey` cannot revert.

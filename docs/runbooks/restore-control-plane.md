@@ -48,6 +48,11 @@ use the `bedrock` binary of the new version:
     `/var/lib/bedrock/backups`. The upgrade writes the `bedrock-*`
     archives. Do not take an `etcd-*` file. It is a scheduled snapshot. It
     holds no images, and it can be newer than the upgrade backup.
+- If you rotated the Secrets key after the time of the archive, the restored
+  etcd holds Secrets that are encrypted with the old key. Before step 2, on
+  each controller, put the key of that time at
+  `/etc/bedrock/encryption/encryption.yaml`. See [Restore an older
+  snapshot](../secrets-at-rest.md#restore-an-older-snapshot).
 - The agent may have already moved the k0s state directories into
   `/var/lib/k0s/.pre-restore-<time>` on that node. Check there first.
 
@@ -69,7 +74,8 @@ Use the script that fits the archive. A sealed archive ends in
 `.tar.gz.age`. A plain archive of an older release ends in `.tar.gz`.
 
 For a sealed archive, use this script. It opens the archive with the host key
-`/etc/bedrock/backup/host.key`. If the host key is missing, copy the admin
+`/etc/bedrock/backup/host.key` and the retired host keys. If the host key is
+missing, copy the admin
 identity to the node. Then add `--identity <key file>` to the `bedrock backup
 decrypt` line.
 

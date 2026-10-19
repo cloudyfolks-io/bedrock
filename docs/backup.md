@@ -501,6 +501,33 @@ never in an archive. Each control-plane host has its own key.
 The host key lets the agent restore an archive while the API server is down.
 This is how the automatic restore of `bedrock upgrade abort` works.
 
+### Rotate the host key
+
+Rotate the host key of one host as root:
+
+```
+bedrock backup rotate-key
+```
+
+The command prints the new public key. It does these steps:
+
+1. It makes a new key.
+2. It keeps the old key in `/etc/bedrock/backup/retired/<UTC stamp>.key`.
+3. It replaces `host.key` in one step, so `host.key` is never missing.
+
+The admin recipients do not change. The agent seals new archives to the new
+host key and to the admin recipients. Old archives stay sealed to the old
+key. The next archive uses the new key, also when the agent runs.
+
+Run the command on each control-plane host. The hosts do not depend on each
+other, so the order does not matter. `bedrock backup decrypt` and the
+automatic restore try the host key first, and then the retired keys.
+
+The agent deletes a retired key when no archive in
+`/var/lib/bedrock/backups` has a stamp at or before the stamp of the retired
+key. If you copied archives off the host, keep the retired key for as long as
+you keep those copies.
+
 ### Set the admin recipients
 
 The host key is on the host. If you lose the host, you lose the host key.
@@ -574,7 +601,8 @@ Use `bedrock backup decrypt`:
 bedrock backup decrypt --in <archive> --out <file|-> [--identity <key file>]
 ```
 
-The default identity is the host key. To use an admin key, add `--identity`:
+The default identities are the host key and the retired host keys. To use an
+admin key, add `--identity`. The command then uses only that file:
 
 ```
 bedrock backup decrypt --identity admin.key \
