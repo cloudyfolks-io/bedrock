@@ -12,6 +12,8 @@ import (
 	"github.com/cloudyfolks-io/bedrock/internal/backup/seal"
 )
 
+const retiredMinAge = 24 * time.Hour
+
 type retiredKind struct {
 	dir    string
 	suffix string
@@ -24,19 +26,19 @@ func retiredKinds(root string) []retiredKind {
 	}
 }
 
-func pruneRetired(root string) error {
+func pruneRetired(root string, now time.Time) error {
 	stamps, err := archiveStamps(filepath.Join(root, backupDir))
 	if err != nil {
 		return err
 	}
 	var results []error
 	for _, kind := range retiredKinds(root) {
-		results = append(results, pruneRetiredKind(kind, stamps))
+		results = append(results, pruneRetiredKind(kind, stamps, now))
 	}
 	return errors.Join(results...)
 }
 
-func pruneRetiredKind(kind retiredKind, stamps []string) error {
+func pruneRetiredKind(kind retiredKind, stamps []string, now time.Time) error {
 	entries, err := os.ReadDir(kind.dir)
 	if errors.Is(err, fs.ErrNotExist) {
 		return nil
@@ -47,11 +49,16 @@ func pruneRetiredKind(kind retiredKind, stamps []string) error {
 	var results []error
 	for _, entry := range entries {
 		stamp, isRetired := strings.CutSuffix(entry.Name(), kind.suffix)
-		if isRetired && validStamp(stamp) && !neededBy(stamp, stamps) {
+		if isRetired && validStamp(stamp) && !youngerThanOneCycle(stamp, now) && !neededBy(stamp, stamps) {
 			results = append(results, removeIfExists(filepath.Join(kind.dir, entry.Name())))
 		}
 	}
 	return errors.Join(results...)
+}
+
+func youngerThanOneCycle(stamp string, now time.Time) bool {
+	retired, _ := time.Parse(stampLayout, stamp)
+	return now.Sub(retired) < retiredMinAge
 }
 
 func neededBy(retiredStamp string, stamps []string) bool {

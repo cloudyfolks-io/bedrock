@@ -8,6 +8,8 @@ import (
 	"time"
 )
 
+var afterRetirement = time.Date(2026, 10, 20, 0, 0, 0, 0, time.UTC)
+
 const (
 	retiredStamp = "20261005T000000Z"
 	olderStamp   = "20261001T100000Z"
@@ -45,7 +47,7 @@ func TestPruneRetiredKeepsFilesWhileAnOlderArchiveExists(t *testing.T) {
 		root := newRetiredRoot(t)
 		writeFixtureFile(t, filepath.Join(root, backupDir, archive), "x")
 		writeFixtureFile(t, filepath.Join(root, backupDir, "etcd-"+newerStamp+".tar.gz.age"), "x")
-		if err := pruneRetired(root); err != nil {
+		if err := pruneRetired(root, afterRetirement); err != nil {
 			t.Fatalf("%s: %v", name, err)
 		}
 		key, config := retiredPaths(root)
@@ -59,7 +61,7 @@ func TestPruneRetiredDeletesFilesWhenOnlyNewerArchivesRemain(t *testing.T) {
 	root := newRetiredRoot(t)
 	writeFixtureFile(t, filepath.Join(root, backupDir, "etcd-"+newerStamp+".tar.gz.age"), "x")
 	writeFixtureFile(t, filepath.Join(root, backupDir, "bedrock-v0.2.0-"+newerStamp+".tar.gz.age"), "x")
-	if err := pruneRetired(root); err != nil {
+	if err := pruneRetired(root, afterRetirement); err != nil {
 		t.Fatal(err)
 	}
 	key, config := retiredPaths(root)
@@ -70,7 +72,7 @@ func TestPruneRetiredDeletesFilesWhenOnlyNewerArchivesRemain(t *testing.T) {
 
 func TestPruneRetiredDeletesFilesWhenNoArchiveExists(t *testing.T) {
 	root := newRetiredRoot(t)
-	if err := pruneRetired(root); err != nil {
+	if err := pruneRetired(root, afterRetirement); err != nil {
 		t.Fatal(err)
 	}
 	key, config := retiredPaths(root)
@@ -87,7 +89,7 @@ func TestPruneRetiredLeavesOtherFilesAlone(t *testing.T) {
 		writeFixtureFile(t, path, "keep")
 	}
 	writeFixtureFile(t, filepath.Join(root, backupDir, "readme-without-a-stamp.tar.gz.age"), "x")
-	if err := pruneRetired(root); err != nil {
+	if err := pruneRetired(root, afterRetirement); err != nil {
 		t.Fatal(err)
 	}
 	for _, path := range []string{filepath.Join(keyDir, "notes.txt"), filepath.Join(keyDir, "garbage.key"), filepath.Join(configDir, "notes.txt"), filepath.Join(root, "etc/bedrock/backup/host.key"), filepath.Join(root, "etc/bedrock/encryption/encryption.yaml")} {
@@ -98,7 +100,7 @@ func TestPruneRetiredLeavesOtherFilesAlone(t *testing.T) {
 }
 
 func TestPruneRetiredWithoutDirectoriesIsNotAnError(t *testing.T) {
-	if err := pruneRetired(t.TempDir()); err != nil {
+	if err := pruneRetired(t.TempDir(), afterRetirement); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -112,5 +114,23 @@ func TestTidyBackupDirPrunesRetiredFiles(t *testing.T) {
 	key, config := retiredPaths(deps.Root)
 	if exists(key) || exists(config) {
 		t.Fatal("the tidy step must prune the retired files")
+	}
+}
+
+func TestPruneRetiredKeepsAYoungFileForOneArchiveCycle(t *testing.T) {
+	root := newRetiredRoot(t)
+	stamp, _ := time.Parse(stampLayout, retiredStamp)
+	if err := pruneRetired(root, stamp.Add(retiredMinAge-time.Minute)); err != nil {
+		t.Fatal(err)
+	}
+	key, config := retiredPaths(root)
+	if !exists(key) || !exists(config) {
+		t.Fatal("a file that is younger than one archive cycle must stay, an archive can be in the making")
+	}
+	if err := pruneRetired(root, stamp.Add(retiredMinAge+time.Minute)); err != nil {
+		t.Fatal(err)
+	}
+	if exists(key) || exists(config) {
+		t.Fatal("an old file with no archive must go")
 	}
 }
