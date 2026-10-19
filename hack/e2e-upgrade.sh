@@ -123,6 +123,17 @@ backup_work_idle() {
   [ -z "$(find "$backups" -maxdepth 1 -name '.work-*')" ]
 }
 
+print_restore_state() {
+  echo "--- state after the restore"
+  kubectl -n default get cm,pod -o wide || true
+  kubectl get setting backup.etcd-schedule -o jsonpath='backup.etcd-schedule={.spec.value}{"\n"}' || true
+  { tar -tzf /root/restore/k0s_backup_*.tar.gz | sed -n 1,30p; } || true
+  ls -la /var/lib/k0s || true
+  kubectl describe node "$node" | sed -n '/^Taints:/,/^Unschedulable:/p' || true
+  kubectl get events -A --field-selector reason=TaintManagerEviction || true
+  kubectl get pods -A --sort-by=.metadata.creationTimestamp -o wide | tail -n 15 || true
+}
+
 assert_age_file() {
   test "$(head -c 21 "$1")" = age-encryption.org/v1
 }
@@ -471,6 +482,8 @@ metadata:
   namespace: default
 spec:
   hostNetwork: true
+  tolerations:
+    - operator: Exists
   containers:
     - name: pause
       image: $pause_image
@@ -481,6 +494,7 @@ configmap_created=$(created_epoch configmap)
 pod_created=$(created_epoch pod)
 snapshot_floor=$(date -u -d "@$((configmap_created > pod_created ? configmap_created : pod_created))" +%Y%m%dT%H%M%SZ)
 echo "drill objects created at ${snapshot_floor}, only a snapshot that starts later counts"
+kubectl get node "$node" -o jsonpath='node taints={.spec.taints} ready={.status.conditions[?(@.type=="Ready")].status}{"\n"}'
 touch "$workdir/etcd-marker"
 kubectl patch setting backup.etcd-schedule --type merge -p '{"spec":{"value":"* * * * *"}}'
 retry_until 1800 etcd_snapshot_written
@@ -542,7 +556,7 @@ docs_restore_script_valid "$restore_script" || {
   echo "$docs_backup has no sealed snapshot restore script under Etcd snapshots" >&2
   exit 1
 }
-sed -i "1s#^SNAPSHOT=[^ ]*#SNAPSHOT=$snapshot#" "$restore_script"
+sed -i "1s#^SNAPSHOT=[^ ]*#SNAPSHOT=$snapshot#;1s# sh -eu # sh -eux #" "$restore_script"
 images_before=$(k0s_images_listing)
 test -n "$images_before"
 restore_container=$(kubectl -n default get pod "$restore_marker" -o jsonpath='{.status.containerStatuses[0].containerID}')
@@ -550,15 +564,17 @@ test -n "$restore_container"
 kubectl -n default delete configmap,pod "$restore_marker"
 retry_until 300 container_gone "${restore_container#containerd://}"
 restore_started=$(date -u +%s)
-bash "$restore_script"
+bash -x "$restore_script"
 retry_until 600 kubectl get --raw=/readyz
+print_restore_state
 retry_until 300 kubectl patch setting backup.etcd-schedule --type merge -p '{"spec":{"value":""}}'
+test "$(kubectl -n default get configmap "$restore_marker" -o jsonpath='{.data.state}')" = before-snapshot
+echo "the marker ConfigMap is back: etcd holds the state of the snapshot"
 retry_until 300 node_lease_renewed_since "$restore_started"
 kubectl wait --for=condition=Ready node --all --timeout=300s
 kubectl -n bedrock-system rollout status deploy/bedrock-operator --timeout=300s
 retry_until 300 pod_started_since "$restore_started"
 kubectl -n default wait --for=condition=Ready "pod/$restore_marker" --timeout=300s
-test "$(kubectl -n default get configmap "$restore_marker" -o jsonpath='{.data.state}')" = before-snapshot
 assert_no_image_pull_failures
 images_after=$(k0s_images_listing)
 test -z "$(comm -23 <(printf '%s\n' "$images_before") <(printf '%s\n' "$images_after"))"
