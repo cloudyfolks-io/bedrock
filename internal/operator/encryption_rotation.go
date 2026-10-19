@@ -8,11 +8,14 @@ import (
 	"strings"
 	"time"
 
+	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	"github.com/cloudyfolks-io/bedrock/api/v1alpha1"
 	"github.com/cloudyfolks-io/bedrock/internal/encryption"
 )
+
+const stalledWaitingForEtcd = "WaitingForEtcd"
 
 type rotationInput struct {
 	Action    string
@@ -21,6 +24,7 @@ type rotationInput struct {
 	Status    v1alpha1.EncryptionRotationStatus
 	Secret    []byte
 	Hosts     []v1alpha1.Host
+	Nodes     []corev1.Node
 	Now       time.Time
 	Random    io.Reader
 }
@@ -237,10 +241,10 @@ func grantNext(in rotationInput, all, pending []v1alpha1.Host, hash string, revo
 			return stalled(in.Status, fmt.Sprintf("waiting for host %s to apply the encryption config", host.Name), revoke)
 		}
 	}
-	for _, host := range all {
-		if host.Status.Checks == nil || !host.Status.Checks.EtcdHealthy {
-			return stalled(in.Status, fmt.Sprintf("waiting for etcd to be healthy on host %s", host.Name), revoke)
-		}
+	if problem := etcdGate(all, in.Nodes); problem != "" {
+		waiting := stalled(in.Status, "waiting for "+problem, revoke)
+		waiting.Stalled = stalledWaitingForEtcd
+		return waiting
 	}
 	next := pending[0].Name
 	status := in.Status

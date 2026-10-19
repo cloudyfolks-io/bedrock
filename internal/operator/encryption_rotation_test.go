@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	"github.com/cloudyfolks-io/bedrock/api/v1alpha1"
@@ -40,6 +41,19 @@ func newConfigChain(t *testing.T) configChain {
 	return configChain{one: one, added: added, promoted: promoted, removed: removed}
 }
 
+func decideRotation(in rotationInput) rotationDecision {
+	count := int32(len(controlPlaneHosts(in.Hosts)))
+	hosts := make([]v1alpha1.Host, len(in.Hosts))
+	for index, host := range in.Hosts {
+		hosts[index] = *host.DeepCopy()
+		if checks := hosts[index].Status.Checks; checks != nil && checks.EtcdMembers == 0 {
+			checks.EtcdMembers = count
+		}
+	}
+	in.Hosts = hosts
+	return nextRotation(in)
+}
+
 func controlPlaneHost(name, hash string) v1alpha1.Host {
 	return v1alpha1.Host{
 		ObjectMeta: metav1.ObjectMeta{Name: name},
@@ -71,7 +85,7 @@ func keysOf(t *testing.T, content []byte) []string {
 
 func TestRotationStartsOnRotate(t *testing.T) {
 	chain := newConfigChain(t)
-	got := nextRotation(rotationInput{Action: v1alpha1.EncryptionActionRotate, Secret: chain.one, Hosts: []v1alpha1.Host{controlPlaneHost("a", encryption.Hash(chain.one))}, Now: rotationNow, Random: rand.Reader})
+	got := decideRotation(rotationInput{Action: v1alpha1.EncryptionActionRotate, Secret: chain.one, Hosts: []v1alpha1.Host{controlPlaneHost("a", encryption.Hash(chain.one))}, Now: rotationNow, Random: rand.Reader})
 	if got.Status.Phase != v1alpha1.RotationAddingKey || got.Status.OldKey != "key1" || got.Status.NewKey != "key2" {
 		t.Fatalf("status %+v", got.Status)
 	}
@@ -112,7 +126,7 @@ func TestRotationRefusals(t *testing.T) {
 
 func TestRotationWithoutActionAndIdleChangesNothing(t *testing.T) {
 	chain := newConfigChain(t)
-	got := nextRotation(rotationInput{Secret: chain.one, Hosts: []v1alpha1.Host{controlPlaneHost("a", "x")}, Now: rotationNow})
+	got := decideRotation(rotationInput{Secret: chain.one, Hosts: []v1alpha1.Host{controlPlaneHost("a", "x")}, Now: rotationNow})
 	if got.Status.Phase != "" || got.ClearAction || got.Secret != nil || got.Grant != "" {
 		t.Fatalf("decision %+v", got)
 	}
@@ -122,7 +136,7 @@ func TestAddingKeyGrantsTheFirstHostByName(t *testing.T) {
 	chain := newConfigChain(t)
 	old := encryption.Hash(chain.one)
 	hosts := []v1alpha1.Host{controlPlaneHost("b", old), controlPlaneHost("a", old)}
-	got := nextRotation(rotationInput{Status: phaseStatus(v1alpha1.RotationAddingKey), Secret: chain.added, Hosts: hosts, Now: rotationNow, Random: rand.Reader})
+	got := decideRotation(rotationInput{Status: phaseStatus(v1alpha1.RotationAddingKey), Secret: chain.added, Hosts: hosts, Now: rotationNow, Random: rand.Reader})
 	if got.Grant != "a" || got.GrantHash != encryption.Hash(chain.added) || got.Secret != nil {
 		t.Fatalf("decision %+v", got)
 	}
@@ -134,7 +148,7 @@ func TestAddingKeyGrantsTheFirstHostByName(t *testing.T) {
 func TestAddingKeyWritesTheSecretBeforeAnyGrant(t *testing.T) {
 	chain := newConfigChain(t)
 	hosts := []v1alpha1.Host{controlPlaneHost("a", encryption.Hash(chain.one))}
-	got := nextRotation(rotationInput{Status: phaseStatus(v1alpha1.RotationAddingKey), Secret: chain.one, Hosts: hosts, Now: rotationNow, Random: rand.Reader})
+	got := decideRotation(rotationInput{Status: phaseStatus(v1alpha1.RotationAddingKey), Secret: chain.one, Hosts: hosts, Now: rotationNow, Random: rand.Reader})
 	if got.Grant != "" || !slices.Equal(keysOf(t, got.Secret), []string{"key1", "key2"}) {
 		t.Fatalf("decision %+v", got)
 	}
@@ -144,7 +158,7 @@ func TestOneGrantAtATime(t *testing.T) {
 	chain := newConfigChain(t)
 	old, want := encryption.Hash(chain.one), encryption.Hash(chain.added)
 	hosts := []v1alpha1.Host{withGrant(controlPlaneHost("a", old), want), controlPlaneHost("b", old)}
-	got := nextRotation(rotationInput{Status: phaseStatus(v1alpha1.RotationAddingKey), Secret: chain.added, Hosts: hosts, Now: rotationNow, Random: rand.Reader})
+	got := decideRotation(rotationInput{Status: phaseStatus(v1alpha1.RotationAddingKey), Secret: chain.added, Hosts: hosts, Now: rotationNow, Random: rand.Reader})
 	if got.Grant != "" || !strings.Contains(got.Status.Message, "a") {
 		t.Fatalf("decision %+v", got)
 	}
@@ -155,7 +169,7 @@ func TestARestartPendingHostIsNotConverged(t *testing.T) {
 	want := encryption.Hash(chain.added)
 	pending := withGrant(controlPlaneHost("a", want), want)
 	pending.Status.Encryption.RestartPending = true
-	got := nextRotation(rotationInput{Status: phaseStatus(v1alpha1.RotationAddingKey), Secret: chain.added, Hosts: []v1alpha1.Host{pending}, Now: rotationNow, Random: rand.Reader})
+	got := decideRotation(rotationInput{Status: phaseStatus(v1alpha1.RotationAddingKey), Secret: chain.added, Hosts: []v1alpha1.Host{pending}, Now: rotationNow, Random: rand.Reader})
 	if got.Status.Phase != v1alpha1.RotationAddingKey || got.Grant != "" {
 		t.Fatalf("decision %+v", got)
 	}
@@ -167,7 +181,7 @@ func TestNoGrantWhileEtcdIsUnhealthy(t *testing.T) {
 	sick := controlPlaneHost("c", want)
 	sick.Status.Checks.EtcdHealthy = false
 	hosts := []v1alpha1.Host{controlPlaneHost("a", want), controlPlaneHost("b", old), sick}
-	got := nextRotation(rotationInput{Status: phaseStatus(v1alpha1.RotationAddingKey), Secret: chain.added, Hosts: hosts, Now: rotationNow, Random: rand.Reader})
+	got := decideRotation(rotationInput{Status: phaseStatus(v1alpha1.RotationAddingKey), Secret: chain.added, Hosts: hosts, Now: rotationNow, Random: rand.Reader})
 	if got.Grant != "" || !strings.Contains(got.Status.Message, "etcd") {
 		t.Fatalf("decision %+v", got)
 	}
@@ -178,7 +192,7 @@ func TestAFailedHostStallsTheRotation(t *testing.T) {
 	old, want := encryption.Hash(chain.one), encryption.Hash(chain.added)
 	failed := withGrant(controlPlaneHost("a", old), want)
 	failed.Status.Encryption.FailedHash = want
-	got := nextRotation(rotationInput{Status: phaseStatus(v1alpha1.RotationAddingKey), Secret: chain.added, Hosts: []v1alpha1.Host{failed, controlPlaneHost("b", old)}, Now: rotationNow, Random: rand.Reader})
+	got := decideRotation(rotationInput{Status: phaseStatus(v1alpha1.RotationAddingKey), Secret: chain.added, Hosts: []v1alpha1.Host{failed, controlPlaneHost("b", old)}, Now: rotationNow, Random: rand.Reader})
 	if got.Grant != "" || !strings.Contains(got.Status.Message, "failed") {
 		t.Fatalf("decision %+v", got)
 	}
@@ -188,7 +202,7 @@ func TestWorkerHostsDoNotCount(t *testing.T) {
 	chain := newConfigChain(t)
 	want := encryption.Hash(chain.added)
 	worker := v1alpha1.Host{ObjectMeta: metav1.ObjectMeta{Name: "w"}, Spec: v1alpha1.HostSpec{Roles: []string{"workload"}}}
-	got := nextRotation(rotationInput{Status: phaseStatus(v1alpha1.RotationAddingKey), Secret: chain.added, Hosts: []v1alpha1.Host{worker, controlPlaneHost("a", want)}, Now: rotationNow, Random: rand.Reader})
+	got := decideRotation(rotationInput{Status: phaseStatus(v1alpha1.RotationAddingKey), Secret: chain.added, Hosts: []v1alpha1.Host{worker, controlPlaneHost("a", want)}, Now: rotationNow, Random: rand.Reader})
 	if got.Status.Phase != v1alpha1.RotationPromotingKey {
 		t.Fatalf("phase %q", got.Status.Phase)
 	}
@@ -208,7 +222,7 @@ func TestPhasesAdvanceOnlyWhenEveryHostConverged(t *testing.T) {
 	}
 	for _, c := range cases {
 		hosts := []v1alpha1.Host{controlPlaneHost("a", encryption.Hash(c.secret)), controlPlaneHost("b", encryption.Hash(c.secret))}
-		got := nextRotation(rotationInput{Status: c.status, Secret: c.secret, Hosts: hosts, Now: rotationNow, Random: rand.Reader})
+		got := decideRotation(rotationInput{Status: c.status, Secret: c.secret, Hosts: hosts, Now: rotationNow, Random: rand.Reader})
 		if got.Status.Phase != c.next || got.Secret != nil || got.Grant != "" {
 			t.Errorf("%s: decision %+v", c.name, got)
 		}
@@ -218,7 +232,7 @@ func TestPhasesAdvanceOnlyWhenEveryHostConverged(t *testing.T) {
 func TestPromotingWritesTheSecretFirst(t *testing.T) {
 	chain := newConfigChain(t)
 	hosts := []v1alpha1.Host{controlPlaneHost("a", encryption.Hash(chain.added))}
-	got := nextRotation(rotationInput{Status: phaseStatus(v1alpha1.RotationPromotingKey), Secret: chain.added, Hosts: hosts, Now: rotationNow, Random: rand.Reader})
+	got := decideRotation(rotationInput{Status: phaseStatus(v1alpha1.RotationPromotingKey), Secret: chain.added, Hosts: hosts, Now: rotationNow, Random: rand.Reader})
 	if got.Grant != "" || !slices.Equal(keysOf(t, got.Secret), []string{"key2", "key1"}) {
 		t.Fatalf("decision %+v", got)
 	}
@@ -227,11 +241,11 @@ func TestPromotingWritesTheSecretFirst(t *testing.T) {
 func TestRewritingRunsOnlyOnConvergedHosts(t *testing.T) {
 	chain := newConfigChain(t)
 	want := encryption.Hash(chain.promoted)
-	ready := nextRotation(rotationInput{Status: phaseStatus(v1alpha1.RotationRewritingSecrets), Secret: chain.promoted, Hosts: []v1alpha1.Host{controlPlaneHost("a", want)}, Now: rotationNow, Random: rand.Reader})
+	ready := decideRotation(rotationInput{Status: phaseStatus(v1alpha1.RotationRewritingSecrets), Secret: chain.promoted, Hosts: []v1alpha1.Host{controlPlaneHost("a", want)}, Now: rotationNow, Random: rand.Reader})
 	if !ready.Rewrite || ready.Status.Phase != v1alpha1.RotationRewritingSecrets {
 		t.Fatalf("decision %+v", ready)
 	}
-	behind := nextRotation(rotationInput{Status: phaseStatus(v1alpha1.RotationRewritingSecrets), Secret: chain.promoted, Hosts: []v1alpha1.Host{controlPlaneHost("a", "other")}, Now: rotationNow, Random: rand.Reader})
+	behind := decideRotation(rotationInput{Status: phaseStatus(v1alpha1.RotationRewritingSecrets), Secret: chain.promoted, Hosts: []v1alpha1.Host{controlPlaneHost("a", "other")}, Now: rotationNow, Random: rand.Reader})
 	if behind.Rewrite || behind.Grant != "a" {
 		t.Fatalf("decision %+v", behind)
 	}
@@ -247,13 +261,13 @@ func TestFinishRewriteMovesToRemovingKey(t *testing.T) {
 func TestRemovingKeyDropsTheOldKeyThenEnds(t *testing.T) {
 	chain := newConfigChain(t)
 	status := phaseStatus(v1alpha1.RotationRemovingKey)
-	write := nextRotation(rotationInput{Status: status, Secret: chain.promoted, Hosts: []v1alpha1.Host{controlPlaneHost("a", encryption.Hash(chain.promoted))}, Now: rotationNow, Random: rand.Reader})
+	write := decideRotation(rotationInput{Status: status, Secret: chain.promoted, Hosts: []v1alpha1.Host{controlPlaneHost("a", encryption.Hash(chain.promoted))}, Now: rotationNow, Random: rand.Reader})
 	if write.Grant != "" || !slices.Equal(keysOf(t, write.Secret), []string{"key2"}) {
 		t.Fatalf("decision %+v", write)
 	}
 	done := encryption.Hash(chain.removed)
 	hosts := []v1alpha1.Host{withGrant(controlPlaneHost("a", done), done), controlPlaneHost("b", done)}
-	end := nextRotation(rotationInput{Status: status, Secret: chain.removed, Hosts: hosts, Now: rotationNow, Random: rand.Reader})
+	end := decideRotation(rotationInput{Status: status, Secret: chain.removed, Hosts: hosts, Now: rotationNow, Random: rand.Reader})
 	if end.Status.Phase != "" || end.Status.LastRotatedAt == nil || !end.Status.LastRotatedAt.Time.Equal(rotationNow) {
 		t.Fatalf("status %+v", end.Status)
 	}
@@ -266,7 +280,7 @@ func TestStaleGrantsAreRevokedAndTheCurrentOneStays(t *testing.T) {
 	chain := newConfigChain(t)
 	want := encryption.Hash(chain.added)
 	hosts := []v1alpha1.Host{withGrant(controlPlaneHost("a", want), want), withHandled(withGrant(controlPlaneHost("b", want), "stale"), "stale")}
-	got := nextRotation(rotationInput{Status: phaseStatus(v1alpha1.RotationAddingKey), Secret: chain.added, Hosts: hosts, Now: rotationNow, Random: rand.Reader})
+	got := decideRotation(rotationInput{Status: phaseStatus(v1alpha1.RotationAddingKey), Secret: chain.added, Hosts: hosts, Now: rotationNow, Random: rand.Reader})
 	if !slices.Equal(got.Revoke, []string{"b"}) || got.Grant != "" || got.Status.Phase != v1alpha1.RotationAddingKey {
 		t.Fatalf("decision %+v", got)
 	}
@@ -274,7 +288,7 @@ func TestStaleGrantsAreRevokedAndTheCurrentOneStays(t *testing.T) {
 
 func TestRevertInAddingKeyRemovesTheNewKey(t *testing.T) {
 	chain := newConfigChain(t)
-	got := nextRotation(rotationInput{Action: v1alpha1.EncryptionActionRevert, Status: phaseStatus(v1alpha1.RotationAddingKey), Secret: chain.added, Now: rotationNow, Random: rand.Reader})
+	got := decideRotation(rotationInput{Action: v1alpha1.EncryptionActionRevert, Status: phaseStatus(v1alpha1.RotationAddingKey), Secret: chain.added, Now: rotationNow, Random: rand.Reader})
 	want := v1alpha1.EncryptionRotationStatus{Phase: v1alpha1.RotationRemovingKey, OldKey: "key2", NewKey: "key1", Reverting: true}
 	if got.Status.Phase != want.Phase || got.Status.OldKey != want.OldKey || got.Status.NewKey != want.NewKey || !got.Status.Reverting || !got.ClearAction {
 		t.Fatalf("decision %+v", got)
@@ -287,7 +301,7 @@ func TestRevertInAddingKeyRemovesTheNewKey(t *testing.T) {
 func TestRevertAfterPromoteSwapsTheRoles(t *testing.T) {
 	chain := newConfigChain(t)
 	for _, phase := range []string{v1alpha1.RotationPromotingKey, v1alpha1.RotationRewritingSecrets} {
-		got := nextRotation(rotationInput{Action: v1alpha1.EncryptionActionRevert, Status: phaseStatus(phase), Secret: chain.promoted, Now: rotationNow, Random: rand.Reader})
+		got := decideRotation(rotationInput{Action: v1alpha1.EncryptionActionRevert, Status: phaseStatus(phase), Secret: chain.promoted, Now: rotationNow, Random: rand.Reader})
 		if got.Status.Phase != v1alpha1.RotationPromotingKey || got.Status.OldKey != "key2" || got.Status.NewKey != "key1" || !got.Status.Reverting {
 			t.Fatalf("%s: status %+v", phase, got.Status)
 		}
@@ -301,7 +315,7 @@ func TestSecondRevertIsIgnored(t *testing.T) {
 	chain := newConfigChain(t)
 	status := phaseStatus(v1alpha1.RotationPromotingKey)
 	status.Reverting = true
-	got := nextRotation(rotationInput{Action: v1alpha1.EncryptionActionRevert, Status: status, Secret: chain.added, Now: rotationNow, Random: rand.Reader})
+	got := decideRotation(rotationInput{Action: v1alpha1.EncryptionActionRevert, Status: status, Secret: chain.added, Now: rotationNow, Random: rand.Reader})
 	if got.Status.OldKey != "key1" || !got.ClearAction || !strings.Contains(got.Status.Message, "already") {
 		t.Fatalf("decision %+v", got)
 	}
@@ -309,15 +323,42 @@ func TestSecondRevertIsIgnored(t *testing.T) {
 
 func TestAnUpgradePausesARunningRotation(t *testing.T) {
 	chain := newConfigChain(t)
-	got := nextRotation(rotationInput{Upgrading: true, Status: phaseStatus(v1alpha1.RotationAddingKey), Secret: chain.added, Hosts: []v1alpha1.Host{controlPlaneHost("a", "old")}, Now: rotationNow, Random: rand.Reader})
+	got := decideRotation(rotationInput{Upgrading: true, Status: phaseStatus(v1alpha1.RotationAddingKey), Secret: chain.added, Hosts: []v1alpha1.Host{controlPlaneHost("a", "old")}, Now: rotationNow, Random: rand.Reader})
 	if got.Grant != "" || got.Secret != nil || got.Rewrite || !strings.Contains(got.Status.Message, "upgrade") || got.Status.Phase != v1alpha1.RotationAddingKey {
 		t.Fatalf("decision %+v", got)
 	}
 }
 
 func TestAMissingSecretStallsARunningRotation(t *testing.T) {
-	got := nextRotation(rotationInput{Status: phaseStatus(v1alpha1.RotationAddingKey), Now: rotationNow, Random: rand.Reader})
+	got := decideRotation(rotationInput{Status: phaseStatus(v1alpha1.RotationAddingKey), Now: rotationNow, Random: rand.Reader})
 	if got.Secret != nil || got.Grant != "" || !strings.Contains(got.Status.Message, "missing") {
+		t.Fatalf("decision %+v", got)
+	}
+}
+
+func notReadyNode(name string) corev1.Node {
+	return corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: name}, Status: corev1.NodeStatus{Conditions: []corev1.NodeCondition{{Type: corev1.NodeReady, Status: corev1.ConditionFalse}}}}
+}
+
+func TestNoGrantWhileAControlPlaneNodeIsNotReady(t *testing.T) {
+	chain := newConfigChain(t)
+	old, want := encryption.Hash(chain.one), encryption.Hash(chain.added)
+	hosts := []v1alpha1.Host{controlPlaneHost("a", old), controlPlaneHost("b", old), controlPlaneHost("c", old)}
+	got := decideRotation(rotationInput{Status: phaseStatus(v1alpha1.RotationAddingKey), Secret: chain.added, Hosts: hosts, Nodes: []corev1.Node{notReadyNode("c")}, Now: rotationNow, Random: rand.Reader})
+	if got.Grant != "" || got.Stalled != "WaitingForEtcd" || !strings.Contains(got.Status.Message, "not Ready") || got.GrantHash == want {
+		t.Fatalf("decision %+v", got)
+	}
+}
+
+func TestNoGrantWhenTheEtcdMemberCountIsShort(t *testing.T) {
+	chain := newConfigChain(t)
+	old := encryption.Hash(chain.one)
+	hosts := []v1alpha1.Host{controlPlaneHost("a", old), controlPlaneHost("b", old), controlPlaneHost("c", old)}
+	for index := range hosts {
+		hosts[index].Status.Checks.EtcdMembers = 2
+	}
+	got := nextRotation(rotationInput{Status: phaseStatus(v1alpha1.RotationAddingKey), Secret: chain.added, Hosts: hosts, Now: rotationNow, Random: rand.Reader})
+	if got.Grant != "" || got.Stalled != "WaitingForEtcd" || !strings.Contains(got.Status.Message, "2 of 3") {
 		t.Fatalf("decision %+v", got)
 	}
 }

@@ -42,6 +42,10 @@ func (r *ClusterReconciler) reconcileEncryption(ctx context.Context) (time.Durat
 	if err := r.APIReader.List(ctx, &hosts); err != nil {
 		return 0, err
 	}
+	var nodes corev1.NodeList
+	if err := r.APIReader.List(ctx, &nodes); err != nil {
+		return 0, err
+	}
 	decision := nextRotation(rotationInput{
 		Action:    action,
 		KMS:       cluster.Spec.Encryption.KMS != nil,
@@ -49,6 +53,7 @@ func (r *ClusterReconciler) reconcileEncryption(ctx context.Context) (time.Durat
 		Status:    status,
 		Secret:    secret,
 		Hosts:     hosts.Items,
+		Nodes:     nodes.Items,
 		Now:       time.Now(),
 		Random:    rand.Reader,
 	})

@@ -32,14 +32,14 @@ func createEncryptionSecret(t *testing.T, c client.Client, content []byte) {
 	}
 }
 
-func createControlPlane(t *testing.T, c client.Client, name, hash string) {
+func createControlPlane(t *testing.T, c client.Client, name, hash string, members int32) {
 	t.Helper()
 	ctx := context.Background()
 	host := &v1alpha1.Host{ObjectMeta: metav1.ObjectMeta{Name: name}, Spec: v1alpha1.HostSpec{Roles: []string{v1alpha1.RoleControlPlane}}}
 	if err := c.Create(ctx, host); err != nil {
 		t.Fatal(err)
 	}
-	host.Status.Checks = &v1alpha1.HostChecks{EtcdHealthy: true}
+	host.Status.Checks = &v1alpha1.HostChecks{EtcdHealthy: true, EtcdMembers: members}
 	host.Status.Encryption = &v1alpha1.EncryptionFileStatus{Hash: hash}
 	if err := c.Status().Update(ctx, host); err != nil {
 		t.Fatal(err)
@@ -81,7 +81,7 @@ func TestReconcileEncryptionRunsAFullRotation(t *testing.T) {
 	createValid(t, c, cluster)
 	createEncryptionSecret(t, c, chain.one)
 	for _, name := range []string{"cp-1", "cp-2"} {
-		createControlPlane(t, c, name, encryption.Hash(chain.one))
+		createControlPlane(t, c, name, encryption.Hash(chain.one), 2)
 	}
 	for _, name := range []string{"one", "two"} {
 		if err := c.Create(ctx, &corev1.Secret{ObjectMeta: metav1.ObjectMeta{Namespace: "default", Name: name}, Data: map[string][]byte{"k": []byte("v")}}); err != nil {
@@ -176,7 +176,7 @@ func TestReconcileEncryptionRevertsInAddingKey(t *testing.T) {
 	cluster.Spec.Encryption.Action = v1alpha1.EncryptionActionRotate
 	createValid(t, c, cluster)
 	createEncryptionSecret(t, c, chain.one)
-	createControlPlane(t, c, "cp-1", encryption.Hash(chain.one))
+	createControlPlane(t, c, "cp-1", encryption.Hash(chain.one), 1)
 	reconciler := encryptionReconciler(c)
 	if _, err := reconciler.reconcileEncryption(ctx); err != nil {
 		t.Fatal(err)
