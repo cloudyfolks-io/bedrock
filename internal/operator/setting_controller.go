@@ -21,7 +21,11 @@ func (r *SettingReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 	if err := r.Client.Get(ctx, req.NamespacedName, &setting); err != nil {
 		return ctrl.Result{}, client.IgnoreNotFound(err)
 	}
-	next := settingStatus(setting)
+	effective, err := settings.Effective(ctx, r.Client)
+	if err != nil {
+		return ctrl.Result{}, err
+	}
+	next := settingStatus(setting, effective)
 	if statusEqual(setting.Status, next) {
 		return ctrl.Result{}, nil
 	}
@@ -29,7 +33,7 @@ func (r *SettingReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 	return ctrl.Result{}, r.Client.Status().Update(ctx, &setting)
 }
 
-func settingStatus(setting v1alpha1.Setting) v1alpha1.SettingStatus {
+func settingStatus(setting v1alpha1.Setting, effective map[string]string) v1alpha1.SettingStatus {
 	status := setting.Status
 	status.Conditions = slices.Clone(setting.Status.Conditions)
 	status.ObservedGeneration = setting.Generation
@@ -41,7 +45,11 @@ func settingStatus(setting v1alpha1.Setting) v1alpha1.SettingStatus {
 		return status
 	}
 	status.Default = def.Default
-	if err := def.Validate(setting.Spec.Value); err != nil {
+	err := def.Validate(setting.Spec.Value)
+	if err == nil && settings.AddressRange(setting.Name) {
+		err = settings.RangeConflict(effective)
+	}
+	if err != nil {
 		status.Applied = ""
 		v1alpha1.SetCondition(&status.Conditions, metav1.Condition{Type: v1alpha1.ConditionReady, Status: metav1.ConditionFalse, Reason: "Invalid", Message: err.Error(), ObservedGeneration: setting.Generation})
 		return status

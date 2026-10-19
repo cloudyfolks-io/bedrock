@@ -82,6 +82,9 @@ type Config struct {
 }
 
 func ParseConfig(values map[string]string) (Config, error) {
+	if err := settings.RangeConflict(values); err != nil {
+		return Config{}, err
+	}
 	effective := make(map[string]string)
 	for _, key := range networkKeys {
 		def, _ := settings.Lookup(key)
