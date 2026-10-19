@@ -231,3 +231,53 @@ func TestCNPGImagesAreInTheImageList(t *testing.T) {
 		}
 	}
 }
+
+func TestRegistryComponentRendersHarborWithoutHooksOrCRDs(t *testing.T) {
+	bundle, _ := buildReal(t, "registry")
+	objects := bundle.Addons["registry"]
+	for _, name := range []string{"harbor-core", "harbor-registry", "harbor-jobservice", "harbor-portal", "harbor-exporter"} {
+		if objectNamed(objects, "Deployment", name) == nil {
+			t.Errorf("missing Deployment %s", name)
+		}
+	}
+	if objectNamed(objects, "StatefulSet", "harbor-redis") == nil {
+		t.Error("missing StatefulSet harbor-redis")
+	}
+	for _, obj := range objects {
+		if obj.GetKind() == "CustomResourceDefinition" {
+			t.Errorf("addon holds CRD %s", obj.GetName())
+		}
+		if obj.GetKind() != "Namespace" && obj.GetNamespace() != "bedrock-registry" {
+			t.Errorf("%s %s is in %q", obj.GetKind(), obj.GetName(), obj.GetNamespace())
+		}
+		for key := range obj.GetAnnotations() {
+			if strings.HasPrefix(key, "helm.sh/hook") {
+				t.Errorf("%s %s has %s", obj.GetKind(), obj.GetName(), key)
+			}
+		}
+	}
+	for _, name := range []string{"harbor-database", "harbor-trivy"} {
+		if objectNamed(objects, "StatefulSet", name) != nil {
+			t.Errorf("the addon runs %s", name)
+		}
+	}
+}
+
+func TestRegistryImagesAreInTheImageList(t *testing.T) {
+	bundle, out := buildReal(t, "registry")
+	raw, err := os.ReadFile(filepath.Join(out, "images.txt"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{"harbor-core", "harbor-portal", "harbor-jobservice", "harbor-registryctl", "harbor-exporter", "registry-photon", "redis-photon", "nginx-photon"} {
+		image := "goharbor/" + name + ":v2.14.4"
+		if !contains(string(raw), image) || !slices.Contains(bundle.Images, image) {
+			t.Errorf("image %s missing from %v", image, bundle.Images)
+		}
+	}
+	for _, image := range bundle.Images {
+		if strings.Contains(image, "harbor-db") || strings.Contains(image, "trivy") {
+			t.Errorf("unused image %s is in the list", image)
+		}
+	}
+}
