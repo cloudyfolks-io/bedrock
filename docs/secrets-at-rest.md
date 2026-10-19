@@ -174,10 +174,19 @@ old file back and restarts again. It writes the failed hash in
 The operator waits and gives no other node its turn. The condition
 `EncryptionRotationStalled` of the Cluster is `True` with the reason
 `HostFailed`, and the message names the node.
-The operator also waits, with the reason `WaitingForEtcd`, when a
-control-plane Node is not Ready or when etcd reports fewer members than there
-are control-plane nodes. It gives no grant then, so a node that is down never
-costs the quorum.
+The operator also waits, with the reason `WaitingForEtcd`. Before each grant
+it checks, for every control-plane node:
+
+- The Host has a report that is not older than 3 minutes.
+- The Node exists, and its Ready heartbeat or its lease is not older than 3
+  minutes.
+- The Node is Ready.
+- Etcd reports as many members as there are control-plane nodes (any mismatch
+  stops the grant), and etcd is healthy.
+
+These checks lower the risk that a grant restarts a node while another node
+is down. They cannot see a node that went down in the last seconds. Do not
+start a rotation while a control-plane node is down or in maintenance.
 
 To go on, do these steps:
 
