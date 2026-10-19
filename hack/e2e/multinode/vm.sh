@@ -18,7 +18,7 @@ VOLUME
   wait_jsonpath 300 Available -n "$NS" get volume lab-rwx -o jsonpath='{.status.phase}'
   expect_equal "ReadWriteMany Block" "$(kubectl -n "$NS" get pvc lab-rwx -o jsonpath='{.spec.accessModes[*]} {.spec.volumeMode}')" "access mode and volume mode of the PVC of a block Volume"
   echo "info: Q5: a Volume on the block class gets $(kubectl -n "$NS" get pvc lab-rwx -o jsonpath='{.spec.accessModes[*]} {.spec.volumeMode}') with no accessModes in the DataVolume"
-  kubectl -n "$NS" delete volume lab-rwx
+  kubectl -n "$NS" delete volume lab-rwx --wait=false
   wait_gone 300 volume lab-rwx -n "$NS"
 }
 
@@ -155,7 +155,7 @@ VOLUME
   expect_equal "$boot" "$(guest_boot "$NS" lab-hot)" "guest boot id across the migration with the disk attached"
   echo "info: Q5: a live migration of a VM with a block Volume attached worked from $before to $(vm_node "$NS" lab-hot)"
   delete_vms "$NS" lab-hot
-  kubectl -n "$NS" delete volume lab-hot-data
+  kubectl -n "$NS" delete volume lab-hot-data --wait=false
   wait_gone 300 volume lab-hot-data -n "$NS"
 }
 
@@ -232,6 +232,6 @@ SUBNET
   fi
   echo "info: 8b: with Subnet mtu 1500 on an underlay of $(underlay_mtu), guest MTU $(guest_value "$NS" lab-mtu-client NET | awk '{print $3}'), the read of $xfer_bytes bytes $verdict at $best bytes"
   delete_vms "$NS" lab-mtu-server lab-mtu-client
-  kubectl -n "$NS" delete subnet lab-mtu1500
+  kubectl -n "$NS" delete subnet lab-mtu1500 --wait=false
   wait_gone 300 subnet lab-mtu1500 -n "$NS"
 }
