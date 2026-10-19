@@ -279,6 +279,24 @@ func (r *BackupReconciler) markBackupTargets(ctx context.Context, vm *v1alpha1.V
 			return err
 		}
 	}
+	return r.unlabelDetachedVolumes(ctx, vm)
+}
+
+func (r *BackupReconciler) unlabelDetachedVolumes(ctx context.Context, vm *v1alpha1.VirtualMachine) error {
+	var labeled v1alpha1.VolumeList
+	if err := r.Client.List(ctx, &labeled, client.InNamespace(vm.Namespace), client.MatchingLabels{BackupVMLabel: vm.Name}); err != nil {
+		return err
+	}
+	attached := v1alpha1.VolumeRefs(*vm)
+	patch := client.RawPatch(types.MergePatchType, []byte(`{"metadata":{"labels":{"`+BackupVMLabel+`":null}}}`))
+	for index := range labeled.Items {
+		if slices.Contains(attached, labeled.Items[index].Name) {
+			continue
+		}
+		if err := r.Client.Patch(ctx, &labeled.Items[index], patch, client.FieldOwner(v1alpha1.BackupFieldManager)); client.IgnoreNotFound(err) != nil {
+			return err
+		}
+	}
 	return nil
 }
 

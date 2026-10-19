@@ -592,3 +592,28 @@ func TestBackupLabelsTheRootVolumeOfAVM(t *testing.T) {
 		t.Fatalf("root volume labels %v %v", labeled.Labels, err)
 	}
 }
+
+func TestBackupUnlabelsAVolumeThatLeftTheVM(t *testing.T) {
+	setLocation(t, "Available")
+	createVM(t, "swap-vm", "swap-data")
+	ctx := context.Background()
+	stale := &v1alpha1.Volume{ObjectMeta: metav1.ObjectMeta{Name: "swap-old", Namespace: projectNamespace, Labels: map[string]string{BackupVMLabel: "swap-vm"}}, Spec: v1alpha1.VolumeSpec{SizeGi: 5}}
+	if err := k8sClient.Create(ctx, stale); err != nil {
+		t.Fatal(err)
+	}
+	createVMB(t, "swap-once", v1alpha1.VirtualMachineBackupSpec{VMRef: "swap-vm"})
+	r := newBackupReconciler(testNow)
+	reconcileVMB(t, r, "swap-once")
+	reconcileVMB(t, r, "swap-once")
+	got := &v1alpha1.Volume{}
+	if err := k8sClient.Get(ctx, types.NamespacedName{Namespace: projectNamespace, Name: "swap-old"}, got); err != nil {
+		t.Fatal(err)
+	}
+	if _, labeled := got.Labels[BackupVMLabel]; labeled {
+		t.Fatalf("labels %v", got.Labels)
+	}
+	kept := &v1alpha1.Volume{}
+	if err := k8sClient.Get(ctx, types.NamespacedName{Namespace: projectNamespace, Name: "swap-data"}, kept); err != nil || kept.Labels[BackupVMLabel] != "swap-vm" {
+		t.Fatalf("attached volume labels %v %v", kept.Labels, err)
+	}
+}
