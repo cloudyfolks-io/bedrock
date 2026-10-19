@@ -172,6 +172,20 @@ type NetworkSpec struct {
 	// +kubebuilder:validation:Maximum=65535
 	// +kubebuilder:validation:XValidation:rule="self < 253 || self > 255",message="vrfId must not be a host routing table: 253, 254 and 255 are reserved"
 	VrfID *int32 `json:"vrfId,omitempty"`
+	// +optional
+	// +listType=map
+	// +listMapKey=cidr
+	// +kubebuilder:validation:MaxItems=64
+	StaticRoutes []NetworkStaticRoute `json:"staticRoutes,omitempty"`
+}
+
+type NetworkStaticRoute struct {
+	// +kubebuilder:validation:MaxLength=43
+	// +kubebuilder:validation:XValidation:rule="isCIDR(self) && cidr(self).ip().family() == 4 && string(cidr(self).masked()) == self && self != '0.0.0.0/0'",message="cidr must be a canonical IPv4 network other than the default route"
+	CIDR string `json:"cidr"`
+	// +kubebuilder:validation:MaxLength=45
+	// +kubebuilder:validation:XValidation:rule="isIP(self) && ip(self).family() == 4",message="nextHop must be an IPv4 address"
+	NextHop string `json:"nextHop"`
 }
 
 func (s NetworkSpec) Ranges() []string {
@@ -203,6 +217,9 @@ type NetworkStatus struct {
 	// +listMapKey=name
 	// +kubebuilder:validation:MaxItems=512
 	Subnets []NetworkSubnetStatus `json:"subnets,omitempty"`
+	// +optional
+	// +kubebuilder:validation:MaxLength=45
+	ServicesIdentity string `json:"servicesIdentity,omitempty"`
 }
 
 // +kubebuilder:object:root=true

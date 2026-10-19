@@ -16,6 +16,7 @@ var (
 	SubnetGVK          = gvk("Subnet")
 	OvnEipGVK          = gvk("OvnEip")
 	OvnFipGVK          = gvk("OvnFip")
+	OvnSnatRuleGVK     = gvk("OvnSnatRule")
 	RouterLBRuleGVK    = gvk("RouterLBRule")
 	DNSZoneGVK         = gvk("DNSZone")
 	SecurityGroupGVK   = gvk("SecurityGroup")

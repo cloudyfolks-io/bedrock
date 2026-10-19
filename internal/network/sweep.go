@@ -26,12 +26,12 @@ const (
 )
 
 var sweptKinds = []schema.GroupVersionKind{
-	fabric.OvnFipGVK, fabric.RouterLBRuleGVK, fabric.SwitchLBRuleGVK, fabric.DNSZoneGVK, fabric.VipGVK, fabric.OvnEipGVK,
+	fabric.OvnFipGVK, fabric.OvnSnatRuleGVK, fabric.RouterLBRuleGVK, fabric.SwitchLBRuleGVK, fabric.DNSZoneGVK, fabric.VipGVK, fabric.OvnEipGVK,
 	fabric.SecurityGroupGVK, fabric.SubnetGVK, fabric.VpcGVK,
 }
 
 var deletionRank = map[string]int{
-	fabric.OvnFipGVK.Kind: 0, fabric.RouterLBRuleGVK.Kind: 0, fabric.SwitchLBRuleGVK.Kind: 0, fabric.DNSZoneGVK.Kind: 0, fabric.VipGVK.Kind: 1,
+	fabric.OvnFipGVK.Kind: 0, fabric.OvnSnatRuleGVK.Kind: 0, fabric.RouterLBRuleGVK.Kind: 0, fabric.SwitchLBRuleGVK.Kind: 0, fabric.DNSZoneGVK.Kind: 0, fabric.VipGVK.Kind: 1,
 	fabric.OvnEipGVK.Kind: 1, fabric.SecurityGroupGVK.Kind: 2, fabric.SubnetGVK.Kind: 3, fabric.VpcGVK.Kind: 4,
 }
 

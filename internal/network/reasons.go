@@ -56,6 +56,9 @@ const (
 	ReasonVRFReserved                    = "VRFReserved"
 	ReasonNoPoolCapacity                 = "NoPoolCapacity"
 	ReasonQuotaExceeded                  = "QuotaExceeded"
+	ReasonConnectCIDRInUse               = "ConnectCIDRInUse"
+	ReasonPeeringExists                  = "PeeringExists"
+	ReasonServicesNotConfigured          = "ServicesNotConfigured"
 )
 
 var AllReasons = sortedReasons([]string{
@@ -70,7 +73,7 @@ var AllReasons = sortedReasons([]string{
 	ReasonTargetPortsDiffer, ReasonNotAttached, ReasonInvalidRecords, ReasonRefNotFound, ReasonInvalidRules,
 	ReasonTargetInUse, ReasonWaitingForDefaultSecurityGroup, ReasonCIDRReserved, ReasonCIDROutsideAllowedRanges,
 	ReasonVRFInUse, ReasonVRFReserved, ReasonNoPoolCapacity,
-	ReasonQuotaExceeded,
+	ReasonQuotaExceeded, ReasonConnectCIDRInUse, ReasonPeeringExists, ReasonServicesNotConfigured,
 })
 
 func sortedReasons(reasons []string) []string {
