@@ -42,7 +42,8 @@ usage: hack/e2e-multinode.sh <stage>
 
 stages, in order:
   up        build the bundle, start three lima VMs, check the network and the disks
-  install   run bedrock init on node 1 and bedrock join on nodes 2 and 3, wait for the storage
+  install   run bedrock init on node 1 and bedrock join on nodes 2 and 3, wait for the storage;
+            LAB_EMULATION=kvm|tcg|auto sets the guest virtualization, default auto
   tenant    create a tenant, two projects and the cirros image
   check     run every check, print PASS or FAIL for each, write dist/lab-multinode/result.txt
   snapshot  stop the VMs, snapshot every disk, start the VMs; run it after tenant
@@ -121,13 +122,36 @@ join_node() {
   vm_run "$id" "$(script_join)" REPO="$repo" BIN="$bedrock_bin" BUNDLE="$bundle" TOKEN="$token"
 }
 
+kvm_usable() {
+  vm_run 1 "test -c /dev/kvm && grep -Eq '(^|[[:space:]])(vmx|svm)([[:space:]]|\$)' /proc/cpuinfo"
+}
+
+emulation_flag() {
+  case "${LAB_EMULATION:-auto}" in
+  kvm) echo false ;;
+  tcg) echo true ;;
+  auto)
+    if kvm_usable >/dev/null 2>&1; then
+      echo false
+    else
+      echo "info: no usable KVM inside $(vm_name 1), the guests run with emulation (tcg), which is slow" >&2
+      echo true
+    fi
+    ;;
+  *)
+    echo "LAB_EMULATION must be kvm, tcg or auto" >&2
+    return 1
+    ;;
+  esac
+}
+
 stage_install() {
   local id token emulation
   state_load
   require_state IP_1 IP_2 IP_3
   test -f "$bundle"
   mkdir -p "$lab_dir"
-  emulation=$(vm_run 1 'if test -c /dev/kvm; then echo false; else echo true; fi')
+  emulation=$(emulation_flag) || return 1
   render_config "$emulation" >"$lab_dir/multinode.yaml"
   cat "$lab_dir/multinode.yaml"
   vm_put 1 "$lab_dir/multinode.yaml" /tmp/multinode.yaml
