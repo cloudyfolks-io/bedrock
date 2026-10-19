@@ -195,8 +195,10 @@ steps=(
   panel_login_and_stream
   metering_usage
   metering_series
+  metering_network_totals
   metering_proxy_range
   metering_logs
+  metering_reader_policy
   addons_grafana_and_alerts
   cascade_project
   cascade_tenant
