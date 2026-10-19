@@ -22,6 +22,7 @@ const (
 	maxMessage     = 200
 	requestTimeout = 30 * time.Second
 	pageSize       = 100
+	maxRobotPages  = 1000
 	webhookPolicy  = "platform-events"
 )
 
@@ -43,6 +44,7 @@ type Project struct {
 	ID          int64
 	Name        string
 	RetentionID int64
+	Created     time.Time
 }
 
 type Summary struct {
@@ -52,8 +54,9 @@ type Summary struct {
 }
 
 type Robot struct {
-	ID   int64
-	Name string
+	ID      int64
+	Name    string
+	Created time.Time
 }
 
 type Repository struct {
@@ -90,9 +93,10 @@ func (c *Client) GetProject(ctx context.Context, name string) (Project, error) {
 		return Project{}, err
 	}
 	var decoded struct {
-		ProjectID int64  `json:"project_id"`
-		Name      string `json:"name"`
-		Metadata  struct {
+		ProjectID    int64     `json:"project_id"`
+		Name         string    `json:"name"`
+		CreationTime time.Time `json:"creation_time"`
+		Metadata     struct {
 			RetentionID string `json:"retention_id"`
 		} `json:"metadata"`
 	}
@@ -100,7 +104,7 @@ func (c *Client) GetProject(ctx context.Context, name string) (Project, error) {
 		return Project{}, fmt.Errorf("harbor: read project %q: answer is not valid", name)
 	}
 	retentionID, _ := strconv.ParseInt(decoded.Metadata.RetentionID, 10, 64)
-	return Project{ID: decoded.ProjectID, Name: decoded.Name, RetentionID: retentionID}, nil
+	return Project{ID: decoded.ProjectID, Name: decoded.Name, RetentionID: retentionID, Created: decoded.CreationTime}, nil
 }
 
 func (c *Client) DeleteProject(ctx context.Context, name string) error {
@@ -178,28 +182,59 @@ func (c *Client) CreateRobot(ctx context.Context, project, name, permission stri
 	return Robot{ID: decoded.ID, Name: decoded.Name}, decoded.Secret, nil
 }
 
+type robotRow struct {
+	ID           int64     `json:"id"`
+	Name         string    `json:"name"`
+	CreationTime time.Time `json:"creation_time"`
+	Permissions  []struct {
+		Kind      string `json:"kind"`
+		Namespace string `json:"namespace"`
+	} `json:"permissions"`
+}
+
+func (r robotRow) belongsTo(project string) bool {
+	for _, permission := range r.Permissions {
+		if permission.Kind == "project" && permission.Namespace == project {
+			return true
+		}
+	}
+	return false
+}
+
 func (c *Client) ListRobots(ctx context.Context, project string) ([]Robot, error) {
 	owner, err := c.GetProject(ctx, project)
 	if err != nil {
 		return nil, err
 	}
-	query := url.Values{"page": {"1"}, "page_size": {strconv.Itoa(pageSize)}, "q": {"Level=project,ProjectID=" + strconv.FormatInt(owner.ID, 10)}}
+	var robots []Robot
+	for page := 1; page <= maxRobotPages; page++ {
+		rows, err := c.robotPage(ctx, project, owner.ID, page)
+		if err != nil {
+			return nil, err
+		}
+		for _, row := range rows {
+			if row.belongsTo(project) {
+				robots = append(robots, Robot{ID: row.ID, Name: row.Name, Created: row.CreationTime})
+			}
+		}
+		if len(rows) < pageSize {
+			return robots, nil
+		}
+	}
+	return nil, fmt.Errorf("harbor: project %q has more than %d robots", project, maxRobotPages*pageSize)
+}
+
+func (c *Client) robotPage(ctx context.Context, project string, projectID int64, page int) ([]robotRow, error) {
+	query := url.Values{"page": {strconv.Itoa(page)}, "page_size": {strconv.Itoa(pageSize)}, "q": {"Level=project,ProjectID=" + strconv.FormatInt(projectID, 10)}}
 	got, err := c.send(ctx, request{method: http.MethodGet, path: "/robots?" + query.Encode()})
 	if err != nil {
 		return nil, err
 	}
-	var robots []Robot
-	var decoded []struct {
-		ID   int64  `json:"id"`
-		Name string `json:"name"`
-	}
-	if err := json.Unmarshal(got.body, &decoded); err != nil {
+	var rows []robotRow
+	if err := json.Unmarshal(got.body, &rows); err != nil {
 		return nil, fmt.Errorf("harbor: read robots of %q: answer is not valid", project)
 	}
-	for _, robot := range decoded {
-		robots = append(robots, Robot{ID: robot.ID, Name: robot.Name})
-	}
-	return robots, nil
+	return rows, nil
 }
 
 func (c *Client) FindRobot(ctx context.Context, project, name string) (Robot, bool, error) {

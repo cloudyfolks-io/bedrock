@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -261,7 +262,7 @@ func TestSetRobotSecretPatchesTheRobot(t *testing.T) {
 func TestFindRobotMatchesTheNameInTheProject(t *testing.T) {
 	c, _ := fakeHarbor(t, map[string]route{
 		"GET /api/v2.0/projects/acme": {body: `{"project_id":9}`},
-		"GET /api/v2.0/robots?page=1&page_size=100&q=Level%3Dproject%2CProjectID%3D9": {body: `[{"id":1,"name":"key_acme+other"},{"id":2,"name":"key_acme+ci"}]`},
+		"GET /api/v2.0/robots?page=1&page_size=100&q=Level%3Dproject%2CProjectID%3D9": {body: `[{"id":1,"name":"key_acme+other","permissions":[{"kind":"project","namespace":"acme"}]},{"id":2,"name":"key_acme+ci","permissions":[{"kind":"project","namespace":"acme"}]}]`},
 	})
 	robot, found, err := c.FindRobot(context.Background(), "acme", "ci")
 	if err != nil || !found || robot.ID != 2 {
@@ -276,7 +277,7 @@ func TestFindRobotMatchesTheNameInTheProject(t *testing.T) {
 func TestListRobotsReturnsEveryRobotOfTheProject(t *testing.T) {
 	c, _ := fakeHarbor(t, map[string]route{
 		"GET /api/v2.0/projects/acme": {body: `{"project_id":9}`},
-		"GET /api/v2.0/robots?page=1&page_size=100&q=Level%3Dproject%2CProjectID%3D9": {body: `[{"id":1,"name":"key_acme+a"},{"id":2,"name":"key_acme+b"}]`},
+		"GET /api/v2.0/robots?page=1&page_size=100&q=Level%3Dproject%2CProjectID%3D9": {body: `[{"id":1,"name":"key_acme+a","permissions":[{"kind":"project","namespace":"acme"}]},{"id":2,"name":"key_acme+b","permissions":[{"kind":"project","namespace":"acme"}]}]`},
 	})
 	robots, err := c.ListRobots(context.Background(), "acme")
 	if err != nil || len(robots) != 2 || robots[0].ID != 1 || robots[1].Name != "key_acme+b" {
@@ -505,3 +506,78 @@ func TestAnswersAreLimitedToOneMebibyte(t *testing.T) {
 }
 
 func ptr(value int) *int { return &value }
+
+func robotPage(from, to int, project string) string {
+	items := []string{}
+	for id := from; id <= to; id++ {
+		items = append(items, fmt.Sprintf(`{"id":%d,"name":"key_%s+r%d","creation_time":"2026-10-01T10:00:00Z","permissions":[{"kind":"project","namespace":"%s"}]}`, id, project, id, project))
+	}
+	return "[" + strings.Join(items, ",") + "]"
+}
+
+func TestListRobotsReadsEveryPage(t *testing.T) {
+	query := "&page_size=100&q=Level%3Dproject%2CProjectID%3D9"
+	c, _ := fakeHarbor(t, map[string]route{
+		"GET /api/v2.0/projects/acme":         {body: `{"project_id":9}`},
+		"GET /api/v2.0/robots?page=1" + query: {body: robotPage(1, 100, "acme")},
+		"GET /api/v2.0/robots?page=2" + query: {body: robotPage(101, 200, "acme")},
+		"GET /api/v2.0/robots?page=3" + query: {body: robotPage(201, 250, "acme")},
+	})
+	robots, err := c.ListRobots(context.Background(), "acme")
+	if err != nil || len(robots) != 250 {
+		t.Fatalf("robots %d %v", len(robots), err)
+	}
+	found, ok, err := c.FindRobot(context.Background(), "acme", "r250")
+	if err != nil || !ok || found.ID != 250 {
+		t.Fatalf("find %+v %v %v", found, ok, err)
+	}
+}
+
+func TestListRobotsStopsAfterAnExactFullPageThenAnEmptyOne(t *testing.T) {
+	query := "&page_size=100&q=Level%3Dproject%2CProjectID%3D9"
+	c, calls := fakeHarbor(t, map[string]route{
+		"GET /api/v2.0/projects/acme":         {body: `{"project_id":9}`},
+		"GET /api/v2.0/robots?page=1" + query: {body: robotPage(1, 100, "acme")},
+		"GET /api/v2.0/robots?page=2" + query: {body: `[]`},
+	})
+	robots, err := c.ListRobots(context.Background(), "acme")
+	if err != nil || len(robots) != 100 || len(*calls) != 3 {
+		t.Fatalf("robots %d calls %d %v", len(robots), len(*calls), err)
+	}
+}
+
+func TestListRobotsIgnoresRobotsOfOtherProjectsWhateverTheFilterReturns(t *testing.T) {
+	query := "&page_size=100&q=Level%3Dproject%2CProjectID%3D9"
+	foreign := `{"id":900,"name":"key_other+ci","permissions":[{"kind":"project","namespace":"other"}]}`
+	noPermissions := `{"id":901,"name":"key_acme+ci"}`
+	system := `{"id":902,"name":"key_acme+ci","permissions":[{"kind":"system","namespace":"/"}]}`
+	own := `{"id":2,"name":"key_acme+ci","permissions":[{"kind":"project","namespace":"acme"}]}`
+	c, _ := fakeHarbor(t, map[string]route{
+		"GET /api/v2.0/projects/acme":         {body: `{"project_id":9}`},
+		"GET /api/v2.0/robots?page=1" + query: {body: "[" + foreign + "," + noPermissions + "," + system + "," + own + "]"},
+	})
+	robots, err := c.ListRobots(context.Background(), "acme")
+	if err != nil || len(robots) != 1 || robots[0].ID != 2 {
+		t.Fatalf("robots %+v %v", robots, err)
+	}
+	robot, found, err := c.FindRobot(context.Background(), "acme", "ci")
+	if err != nil || !found || robot.ID != 2 {
+		t.Fatalf("find %+v %v %v", robot, found, err)
+	}
+}
+
+func TestRobotsAndProjectsCarryTheirCreationTime(t *testing.T) {
+	query := "&page_size=100&q=Level%3Dproject%2CProjectID%3D9"
+	c, _ := fakeHarbor(t, map[string]route{
+		"GET /api/v2.0/projects/acme":         {body: `{"project_id":9,"creation_time":"2026-10-02T11:00:00Z"}`},
+		"GET /api/v2.0/robots?page=1" + query: {body: robotPage(1, 1, "acme")},
+	})
+	project, err := c.GetProject(context.Background(), "acme")
+	if err != nil || project.Created.Format("2006-01-02T15:04:05Z") != "2026-10-02T11:00:00Z" {
+		t.Fatalf("project %+v %v", project, err)
+	}
+	robots, _ := c.ListRobots(context.Background(), "acme")
+	if len(robots) != 1 || robots[0].Created.Format("2006-01-02T15:04:05Z") != "2026-10-01T10:00:00Z" {
+		t.Fatalf("robots %+v", robots)
+	}
+}
