@@ -20,10 +20,11 @@ const (
 	keyMaxUtilization   = "database.max-utilization"
 	keySweeperDryRun    = "database.sweeper-dry-run"
 	keyProvisionTimeout = "database.provision-timeout"
+	keyExecTimeout      = "database.exec-timeout"
 	settingPrefix       = "database."
 )
 
-var configKeys = []string{keyEnabled, keyCapacityCPU, keyCapacityMemory, keyCapacityPods, keyMaxUtilization, keySweeperDryRun, keyProvisionTimeout}
+var configKeys = []string{keyEnabled, keyCapacityCPU, keyCapacityMemory, keyCapacityPods, keyMaxUtilization, keySweeperDryRun, keyProvisionTimeout, keyExecTimeout}
 
 type Config struct {
 	Enabled          bool
@@ -33,6 +34,7 @@ type Config struct {
 	MaxUtilization   float64
 	SweeperDryRun    bool
 	ProvisionTimeout time.Duration
+	ExecTimeout      time.Duration
 }
 
 func ParseConfig(values map[string]string) (Config, error) {
@@ -53,6 +55,7 @@ func ParseConfig(values map[string]string) (Config, error) {
 	utilization, _ := strconv.ParseFloat(effective[keyMaxUtilization], 64)
 	dryRun, _ := strconv.ParseBool(effective[keySweeperDryRun])
 	timeout, _ := time.ParseDuration(effective[keyProvisionTimeout])
+	execTimeout, _ := time.ParseDuration(effective[keyExecTimeout])
 	return Config{
 		Enabled:          enabled,
 		CapacityCPU:      resource.MustParse(effective[keyCapacityCPU]),
@@ -61,6 +64,7 @@ func ParseConfig(values map[string]string) (Config, error) {
 		MaxUtilization:   utilization,
 		SweeperDryRun:    dryRun,
 		ProvisionTimeout: timeout,
+		ExecTimeout:      execTimeout,
 	}, nil
 }
 

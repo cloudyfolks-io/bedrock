@@ -149,3 +149,11 @@ func eventually(t testing.TB, what string, check func() bool) {
 func reconcileRequest() ctrl.Request {
 	return ctrl.Request{NamespacedName: client.ObjectKey{Name: PlatformNamespace}}
 }
+
+func ensurePlatformNamespace(t testing.TB, c client.Client) {
+	t.Helper()
+	err := c.Create(context.Background(), &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: PlatformNamespace}})
+	if err != nil && !apierrors.IsAlreadyExists(err) {
+		t.Fatal(err)
+	}
+}

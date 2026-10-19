@@ -71,6 +71,11 @@ func Adopt(obj *unstructured.Unstructured, db v1alpha1.Database, project Project
 	return adopted
 }
 
+func OwnedMetadata(db v1alpha1.Database, project Project) (map[string]string, map[string]string) {
+	probe := Adopt(&unstructured.Unstructured{Object: map[string]any{}}, db, project)
+	return probe.GetLabels(), probe.GetAnnotations()
+}
+
 func InstanceSelector(db v1alpha1.Database) client.MatchingLabels {
 	return client.MatchingLabels{LabelManagedBy: ManagedBy, LabelInstance: Name(db.UID)}
 }
