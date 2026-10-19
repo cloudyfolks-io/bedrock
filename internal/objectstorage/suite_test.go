@@ -30,7 +30,9 @@ var (
 
 const unlabeledNamespace = "unlabeled"
 
-var projectNamespaces = map[string][2]string{"acme-prod": {"acme", "prod"}, "beta-prod": {"beta", "prod"}}
+const leavingNamespace = "leaving-prod"
+
+var projectNamespaces = map[string][2]string{"acme-prod": {"acme", "prod"}, "beta-prod": {"beta", "prod"}, leavingNamespace: {"leaving", "prod"}}
 
 func TestMain(m *testing.M) {
 	os.Exit(run(m))
@@ -100,7 +102,7 @@ func wipe(t *testing.T) {
 	ctx := context.Background()
 	for _, namespace := range allNamespaces() {
 		wipeUsers(ctx, t, namespace)
-		wipeKind(ctx, t, namespace, &v1alpha1.ObjectStorageBucket{})
+		wipeBuckets(ctx, t, namespace)
 		wipeKind(ctx, t, namespace, &corev1.Secret{})
 		wipeKind(ctx, t, namespace, &corev1.ConfigMap{})
 		for _, gvk := range []schema.GroupVersionKind{cephObjectStoreGVK, cephObjectStoreUserGVK, cephObjectStoreAccountGVK, objectBucketClaimGVK} {
@@ -124,6 +126,24 @@ func wipeUsers(ctx context.Context, t *testing.T, namespace string) {
 			t.Fatal(err)
 		}
 		if err := testClient.Delete(ctx, &user); err != nil && !apierrors.IsNotFound(err) {
+			t.Fatal(err)
+		}
+	}
+}
+
+func wipeBuckets(ctx context.Context, t *testing.T, namespace string) {
+	t.Helper()
+	var buckets v1alpha1.ObjectStorageBucketList
+	if err := testClient.List(ctx, &buckets, client.InNamespace(namespace)); err != nil {
+		t.Fatal(err)
+	}
+	for i := range buckets.Items {
+		bucket := buckets.Items[i]
+		bucket.Finalizers = nil
+		if err := testClient.Update(ctx, &bucket); err != nil && !apierrors.IsNotFound(err) {
+			t.Fatal(err)
+		}
+		if err := testClient.Delete(ctx, &bucket); err != nil && !apierrors.IsNotFound(err) {
 			t.Fatal(err)
 		}
 	}
