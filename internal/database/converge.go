@@ -44,17 +44,18 @@ type Observed struct {
 }
 
 type flow struct {
-	cfg     Config
-	db      *v1alpha1.Database
-	project Project
-	catalog Catalog
-	subnet  v1alpha1.Subnet
-	pods    Pods
-	port    int
-	exists  bool
-	plan    Result
-	image   string
-	dest    string
+	cfg        Config
+	db         *v1alpha1.Database
+	project    Project
+	catalog    Catalog
+	subnet     v1alpha1.Subnet
+	pods       Pods
+	port       int
+	exists     bool
+	plan       Result
+	preBackups []*unstructured.Unstructured
+	image      string
+	dest       string
 }
 
 func (r *Reconciler) converge(ctx context.Context, cfg Config, project Project, db *v1alpha1.Database) (Observed, error) {
@@ -235,6 +236,11 @@ func (r *Reconciler) prepareOperations(ctx context.Context, in *flow) (*Refusal,
 func (r *Reconciler) requestUpgradeBackup(ctx context.Context, in *flow) error {
 	if !in.plan.RequestBackup {
 		return nil
+	}
+	for _, failed := range in.preBackups {
+		if err := r.Client.Delete(ctx, failed); client.IgnoreNotFound(err) != nil {
+			return err
+		}
 	}
 	return ApplyPlan(ctx, r.Client, in.db.Spec.Engine, r.specOf(in), Result{RequestBackup: true}, r.now())
 }

@@ -197,6 +197,7 @@ Without the addon, the condition `Ready` shows the reason `EngineNotAvailable`.
 - A class without high availability gives one instance. A class with high availability gives three instances and three HAProxy pods.
 - Backups go to `<bucket>/<uid>/` every day at 02:00. The Setting `database.backup.retention-days` sets how many days stay.
 - The server image and the companion images `backup`, `haproxy`, `init` and `toolkit` come from the `DatabaseVersion`. The seed versions are `mysql-8.4` and `mysql-9.7`.
+- The names `app`, `mysql`, `sys`, `information_schema` and `performance_schema` are reserved: a `DatabaseSchema` with one of them shows `InvalidSpec`, and no script drops them.
 - A restore uses a full backup. A MySQL restore has no target time: `restore.targetTime` shows the reason `RestoreTimeUnsupported`.
 - If the source `Database` does not exist, the controller reads the newest backup directory under `<bucket>/<sourceUID>/`. If there is none, the reason is `RestoreSourceEmpty`.
 
@@ -206,7 +207,7 @@ Valkey needs no addon. It works when `database.enabled` is `true`.
 
 - One instance only. A class with high availability shows the reason `InstancesUnsupported`.
 - No backup and no restore. `backup.enabled: true` and `restore` are refused. A `DatabaseSchema` shows the reason `UnsupportedForEngine`.
-- A `DatabaseUser` takes exactly one grant on the database `app`. Set `spec.keyPrefix` for the prefix; the other engines refuse it. `readonly`, `readwrite` and `all` are the levels. The optional `keyPrefix` limits keys and channels to the prefix. A prefix has at most 64 characters.
+- A `DatabaseUser` takes exactly one grant on the database `app`. Set `spec.keyPrefix` for the prefix; the other engines refuse it. `readonly`, `readwrite` and `all` are the levels. The optional `keyPrefix` limits keys and channels to the prefix. A prefix has at most 64 characters. The ACL does not filter the output of `SCAN` and `KEYS`: a user can list key names outside its prefix in the same database. It cannot read or write their values.
 - A metrics sidecar runs as the user `_exporter`. This user cannot run a write command. A `PodMonitor` scrapes it. The seed versions are `valkey-8.1`, `valkey-9.0` and `valkey-9.1`.
 
 ## Image rule
@@ -219,14 +220,14 @@ To apply the current digest, set the annotation `bedrock.cloudyfolks.io/refresh-
 
 | Change | What happens | Reasons |
 | --- | --- | --- |
-| `spec.class` | Resources and memory parameters change. The address does not change. | `ClassChangeInvalid` when the new class changes `highAvailability`. |
+| `spec.class` | Resources and memory parameters change. The address does not change. | `ClassChangeNotSupported` when the new class changes `highAvailability`. The check compares the instance count of the running engine, from the first render on. |
 | `spec.storageGi` grows | The volume grows. | `StorageOutOfRange` outside the class limits. `ExpansionNotSupported` when the storage class cannot expand. |
 | `spec.version` | The version upgrade starts when the new version is in `upgradeTo` of the current one. | `VersionNotAllowed` otherwise. |
 | `bedrock.cloudyfolks.io/restart` changes | The engine restarts. | |
 | `spec.suspended` | The engine, the gate and the proxy scale to zero, or back. The Secrets and the address stay. | |
 
 An upgrade of PostgreSQL or MySQL needs a completed backup younger than the Setting `database.upgrade.backup-max-age` (default `26h`).
-If there is none, the controller makes one `Backup` named `<uid>-pre-<unix>` once. `Ready` shows `BackupRequired` and the phase is `Upgrading` until the backup completes.
+If there is none, the controller makes one `Backup` named `<uid>-pre-<unix>` once. The `Backup` records the target version and the request time. Only a pre-upgrade `Backup` for the same target, requested less than `database.upgrade.backup-max-age` ago, counts. A database with `backup.enabled` set to `false` cannot upgrade (`BackupsDisabled`). `Ready` shows `BackupRequired` and the phase is `Upgrading` until the backup completes.
 A Valkey upgrade needs no backup.
 `status.applied` records the class, version, storage, suspend state and restart token that the controller applied.
 
@@ -304,7 +305,8 @@ The condition `Ready` shows one of these reasons.
 | `RestoreUnsupported` | The engine has no restore. |
 | `RestoreTimeUnsupported` | The engine has no restore target time. |
 | `UnsupportedForEngine` | The object does not apply to the engine. |
-| `ClassChangeInvalid` | The new class changes `highAvailability`. |
+| `BackupsDisabled` | The upgrade of PostgreSQL or MySQL needs a backup, and `backup.enabled` is `false`. Enable backups to upgrade. The old version keeps running. |
+| `UpgradeBackupFailed` | The backup before the upgrade failed. The operator waits one hour, deletes the failed `Backup` and makes one new `Backup`. |
 | `ExpansionNotSupported` | The storage class cannot expand a volume. |
 | `VersionNotAllowed` | The version is not an enabled upgrade target of the current one. |
 | `BackupRequired` | An upgrade waits for a backup younger than `database.upgrade.backup-max-age`. |

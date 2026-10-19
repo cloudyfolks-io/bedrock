@@ -158,7 +158,7 @@ func checkExisting(catalog Catalog, db v1alpha1.Database, cluster *unstructured.
 		return refusal(ReasonUpgradeNotSupported, "the version of a running database cannot change from %s to %s", applied, db.Spec.Version)
 	}
 	postgresql := db.Spec.Engine == v1alpha1.DatabaseEnginePostgreSQL
-	if have, _, _ := unstructured.NestedInt64(cluster.Object, "spec", "instances"); postgresql && have != 0 && int(have) != Instances(catalog.Class) {
+	if have := liveInstances(db.Spec.Engine, cluster); have != 0 && have != Instances(catalog.Class) {
 		return refusal(ReasonClassChangeNotSupported, "the class %s changes the number of instances from %d to %d: a class change must keep highAvailability", catalog.Class.Name, have, Instances(catalog.Class))
 	}
 	if size, _, _ := unstructured.NestedString(cluster.Object, "spec", "storage", "size"); postgresql && size != "" {

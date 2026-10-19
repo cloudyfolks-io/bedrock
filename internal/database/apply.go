@@ -60,5 +60,6 @@ func ApplyPlan(ctx context.Context, c client.Client, kind string, spec engine.Sp
 	if err != nil {
 		return err
 	}
+	backup.SetAnnotations(map[string]string{annotationUpgradeTarget: spec.Version, annotationUpgradeRequest: now.UTC().Format(time.RFC3339)})
 	return client.IgnoreAlreadyExists(c.Create(ctx, backup, client.FieldOwner(v1alpha1.DatabaseFieldManager)))
 }

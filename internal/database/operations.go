@@ -25,12 +25,12 @@ type UpgradeFacts struct {
 	Targets      []string
 	LatestBackup *time.Time
 	PreRequested bool
+	PreFailedAt  *time.Time
 	MaxAge       time.Duration
 	Now          time.Time
 }
 
 type OperationFacts struct {
-	PreviousClass    v1alpha1.DatabaseClassSpec
 	Class            v1alpha1.DatabaseClassSpec
 	ExpansionAllowed bool
 	Upgrade          UpgradeFacts
@@ -62,9 +62,6 @@ func Plan(applied v1alpha1.DatabaseApplied, spec v1alpha1.DatabaseSpec, facts Op
 func resizeRefusal(applied v1alpha1.DatabaseApplied, spec v1alpha1.DatabaseSpec, facts OperationFacts) *Refusal {
 	classChanged := spec.Class != applied.Class
 	grows := spec.StorageGi > applied.StorageGi
-	if classChanged && facts.PreviousClass.HighAvailability != facts.Class.HighAvailability {
-		return &Refusal{Reason: ReasonClassChangeInvalid, Message: "the new class must keep the high availability of the current class"}
-	}
 	if (classChanged || grows) && (spec.StorageGi < facts.Class.MinStorageGi || spec.StorageGi > facts.Class.MaxStorageGi) {
 		return &Refusal{Reason: ReasonStorageOutOfRange, Message: fmt.Sprintf("storageGi must be from %d to %d for the class %s", facts.Class.MinStorageGi, facts.Class.MaxStorageGi, spec.Class)}
 	}
@@ -75,10 +72,15 @@ func resizeRefusal(applied v1alpha1.DatabaseApplied, spec v1alpha1.DatabaseSpec,
 }
 
 func upgradeRefusal(applied v1alpha1.DatabaseApplied, spec v1alpha1.DatabaseSpec, facts UpgradeFacts) *Refusal {
-	if spec.Version == applied.Version || slices.Contains(facts.Targets, spec.Version) {
+	switch {
+	case spec.Version == applied.Version:
 		return nil
+	case !slices.Contains(facts.Targets, spec.Version):
+		return &Refusal{Reason: ReasonVersionNotAllowed, Message: "version " + spec.Version + " is not an enabled upgrade target of version " + applied.Version}
+	case spec.Engine != v1alpha1.DatabaseEngineValkey && !spec.Backup.Enabled:
+		return &Refusal{Reason: ReasonBackupsDisabled, Message: "enable backups to upgrade: an upgrade needs a backup that is younger than " + facts.MaxAge.String()}
 	}
-	return &Refusal{Reason: ReasonVersionNotAllowed, Message: "version " + spec.Version + " is not an enabled upgrade target of version " + applied.Version}
+	return nil
 }
 
 func resizeSteps(applied v1alpha1.DatabaseApplied, spec v1alpha1.DatabaseSpec) []Step {
@@ -102,9 +104,13 @@ func withUpgrade(plan Result, applied v1alpha1.DatabaseApplied, spec v1alpha1.Da
 		return plan
 	case spec.Engine == v1alpha1.DatabaseEngineValkey, backupIsFresh(facts):
 		plan.Steps = append(plan.Steps, StepUpgrade)
+	case facts.PreRequested:
+		plan.Hold = &Refusal{Reason: ReasonBackupRequired, Message: "a backup younger than " + facts.MaxAge.String() + " must exist before the upgrade"}
+	case facts.PreFailedAt != nil && facts.Now.Sub(*facts.PreFailedAt) < preBackupRetryAfter:
+		plan.Hold = &Refusal{Reason: ReasonUpgradeBackupFailed, Message: "the backup before the upgrade failed; the next try starts " + facts.PreFailedAt.Add(preBackupRetryAfter).UTC().Format(time.RFC3339)}
 	default:
 		plan.Hold = &Refusal{Reason: ReasonBackupRequired, Message: "a backup younger than " + facts.MaxAge.String() + " must exist before the upgrade"}
-		plan.RequestBackup = !facts.PreRequested
+		plan.RequestBackup = true
 	}
 	return plan
 }
