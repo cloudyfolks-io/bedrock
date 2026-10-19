@@ -88,6 +88,11 @@ dump_workloads() {
   kubectl -n rook-ceph logs deploy/rook-ceph-operator --tail=150 || true
   kubectl -n objectstorage-e2e get jobs,pods -o wide || true
   kubectl -n objectstorage-e2e logs -l job-name --tail=50 --prefix || true
+  echo "--- registry"
+  kubectl -n bedrock-registry get pods,pvc,cluster.postgresql.cnpg.io,certificate,ingressroute -o wide || true
+  kubectl -n bedrock-registry logs deploy/harbor-core --tail=150 || true
+  kubectl -n cnpg logs deploy/cnpg-cloudnative-pg --tail=100 || true
+  kubectl get addon registry -o yaml || true
   dump_nmstate
   echo "--- monitoring and logging"
   kubectl -n monitoring get pods,pvc,addons -o wide || true
@@ -128,7 +133,7 @@ k0s ctr --namespace k8s.io images import "$cache/seaweedfs.tar"
 k0s ctr --namespace k8s.io images import "$cache/aws-cli.tar"
 k0s ctr --namespace k8s.io images import "$cache/busybox.tar"
 
-for step_file in encryption addons tenancy images compute network container objectstorage objectstorage-iam backup panel metering cascade; do
+for step_file in encryption addons tenancy images compute network container objectstorage objectstorage-iam registry backup panel metering cascade; do
   source "$steps_dir/$step_file.sh"
 done
 
@@ -202,6 +207,13 @@ steps=(
   objectstorage_suspend
   objectstorage_force_destroy
   objectstorage_public_host
+  registry_enable
+  registry_project_and_names
+  registry_login
+  registry_spikes
+  registry_quota_and_retention
+  registry_force_destroy
+  registry_disable
   backup_target
   backup_once
   backup_restore_replace
