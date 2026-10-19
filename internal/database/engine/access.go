@@ -43,6 +43,7 @@ type Target struct {
 type Stats struct {
 	DiskUsedBytes int64
 	Connections   int
+	LagSeconds    *float64
 }
 
 type Runner interface {
