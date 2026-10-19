@@ -683,3 +683,72 @@ func TestVMAdoptsObjectsThatARestoreLeftWithoutOwner(t *testing.T) {
 		}
 	}
 }
+
+func setSetting(t *testing.T, c client.Client, name, value string) {
+	t.Helper()
+	ctx := context.Background()
+	setting := &v1alpha1.Setting{ObjectMeta: metav1.ObjectMeta{Name: name}, Spec: v1alpha1.SettingSpec{Value: value}}
+	must(t, c.Create(ctx, setting))
+	t.Cleanup(func() { _ = c.Delete(ctx, setting) })
+}
+
+func customSize(cores, memoryMiB int32) func(*v1alpha1.VirtualMachine) {
+	return func(vm *v1alpha1.VirtualMachine) {
+		vm.Spec.InstanceType = ""
+		vm.Spec.Disks = nil
+		vm.Spec.Compute = &v1alpha1.VMCompute{Cores: cores, MemoryMiB: memoryMiB}
+	}
+}
+
+func TestVMWithCustomSizeSkipsTheInstanceType(t *testing.T) {
+	c, _ := startEnv(t)
+	ns := seedPlatform(t, c)
+	createVM(t, c, ns, "web-1", customSize(6, 6144))
+	reconcileVM(t, newVMReconciler(c), ns, "web-1")
+	kubeVirt := requirePresent(t, c, kubeVirtVMGVK, ns, "web-1")
+	if _, found, _ := unstructured.NestedMap(kubeVirt.Object, "spec", "instancetype"); found {
+		t.Fatal("instance type rendered")
+	}
+	cores, _, _ := unstructured.NestedInt64(kubeVirt.Object, "spec", "template", "spec", "domain", "cpu", "cores")
+	guest, _, _ := unstructured.NestedString(kubeVirt.Object, "spec", "template", "spec", "domain", "memory", "guest")
+	if cores != 6 || guest != "6144Mi" {
+		t.Fatalf("cores %d guest %q", cores, guest)
+	}
+	requireReason(t, getVM(t, c, ns, "web-1"), "Starting")
+}
+
+func TestVMRefusesASizeOverTheDefaultLimits(t *testing.T) {
+	c, _ := startEnv(t)
+	ns := seedPlatform(t, c)
+	r := newVMReconciler(c)
+	createVM(t, c, ns, "many-cores", customSize(33, 1024))
+	createVM(t, c, ns, "much-memory", customSize(1, 131073))
+	for _, name := range []string{"many-cores", "much-memory"} {
+		reconcileVM(t, r, ns, name)
+		requireReason(t, getVM(t, c, ns, name), "InvalidSpec")
+		requireAbsent(t, c, kubeVirtVMGVK, ns, name)
+	}
+}
+
+func TestVMSizeLimitsFollowTheSettings(t *testing.T) {
+	c, _ := startEnv(t)
+	ns := seedPlatform(t, c)
+	setSetting(t, c, "compute.max-cores", "64")
+	setSetting(t, c, "compute.max-memory-mib", "1024")
+	r := newVMReconciler(c)
+	createVM(t, c, ns, "wide", customSize(64, 1024))
+	createVM(t, c, ns, "heavy", customSize(2, 2048))
+	reconcileVM(t, r, ns, "wide")
+	requirePresent(t, c, kubeVirtVMGVK, ns, "wide")
+	reconcileVM(t, r, ns, "heavy")
+	requireReason(t, getVM(t, c, ns, "heavy"), "InvalidSpec")
+}
+
+func TestVMWithAnInstanceTypeIgnoresTheSizeLimits(t *testing.T) {
+	c, _ := startEnv(t)
+	ns := seedPlatform(t, c)
+	setSetting(t, c, "compute.max-cores", "1")
+	createVM(t, c, ns, "web-1", noMutation)
+	reconcileVM(t, newVMReconciler(c), ns, "web-1")
+	requirePresent(t, c, kubeVirtVMGVK, ns, "web-1")
+}

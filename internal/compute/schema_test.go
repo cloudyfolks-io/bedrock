@@ -317,3 +317,44 @@ func TestSchemaNICAddressIsImmutable(t *testing.T) {
 		t.Fatalf("attach the network again with a new address: %v", err)
 	}
 }
+
+func TestSchemaRequiresExactlyOneSize(t *testing.T) {
+	c, _ := startEnv(t)
+	ns := uniqueNamespace(t, c)
+	compute := &v1alpha1.VMCompute{Cores: 4, MemoryMiB: 4096}
+	requireAccepted(t, c, schemaVM(ns, func(vm *v1alpha1.VirtualMachine) { vm.Spec.InstanceType, vm.Spec.Compute = "", compute }))
+	for label, mutate := range map[string]func(*v1alpha1.VirtualMachine){
+		"both":    func(vm *v1alpha1.VirtualMachine) { vm.Spec.Compute = compute },
+		"neither": func(vm *v1alpha1.VirtualMachine) { vm.Spec.InstanceType = "" },
+		"zero cores": func(vm *v1alpha1.VirtualMachine) {
+			vm.Spec.InstanceType, vm.Spec.Compute = "", &v1alpha1.VMCompute{Cores: 0, MemoryMiB: 4096}
+		},
+		"tiny memory": func(vm *v1alpha1.VirtualMachine) {
+			vm.Spec.InstanceType, vm.Spec.Compute = "", &v1alpha1.VMCompute{Cores: 1, MemoryMiB: 64}
+		},
+	} {
+		requireRefused(t, c, label, schemaVM(ns, mutate))
+	}
+}
+
+func TestSchemaRefusesSizeMessageNamesBothFields(t *testing.T) {
+	c, _ := startEnv(t)
+	ns := uniqueNamespace(t, c)
+	err := c.Create(context.Background(), schemaVM(ns, func(vm *v1alpha1.VirtualMachine) { vm.Spec.Compute = &v1alpha1.VMCompute{Cores: 1, MemoryMiB: 512} }))
+	if err == nil || !strings.Contains(err.Error(), "exactly one of compute and instanceType") {
+		t.Fatalf("%v", err)
+	}
+}
+
+func TestSchemaSizeChangeAndSwitchAreAllowed(t *testing.T) {
+	c, _ := startEnv(t)
+	ns := uniqueNamespace(t, c)
+	vm := schemaVM(ns, func(vm *v1alpha1.VirtualMachine) {
+		vm.Spec.InstanceType, vm.Spec.Compute = "", &v1alpha1.VMCompute{Cores: 2, MemoryMiB: 2048}
+	})
+	requireAccepted(t, c, vm)
+	vm.Spec.Compute = &v1alpha1.VMCompute{Cores: 8, MemoryMiB: 16384}
+	must(t, c.Update(context.Background(), vm))
+	vm.Spec.Compute, vm.Spec.InstanceType = nil, "u1.medium"
+	must(t, c.Update(context.Background(), vm))
+}

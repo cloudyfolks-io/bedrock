@@ -18,7 +18,8 @@ The condition `Ready` shows the reason `NotInProject`.
 
 | Field | Meaning |
 |---|---|
-| `instanceType` | Name of a cluster instance type, for example `u1.medium`. |
+| `instanceType` | Name of a cluster instance type, for example `u1.medium`. Use it, or `compute`, never both. |
+| `compute` | A custom size: `cores` and `memoryMiB`. Use it, or `instanceType`, never both. |
 | `preference` | Name of a cluster preference. The image preference is the default. |
 | `image` | Name and scope (`cluster` or `project`) of the root disk image. |
 | `rootDisk` | `sizeGi` and an optional `storageClass`. |
@@ -34,6 +35,23 @@ The condition `Ready` shows the reason `NotInProject`.
 All references are names in the namespace of the VM.
 A reference must not hold `/`, `,`, `{`, a space or an upper-case letter.
 The API server refuses such a reference.
+
+### Custom size
+
+A VM has exactly one size: an `instanceType` or `compute`.
+The API server refuses a VM with both or with none.
+`compute` has `cores` (at least 1) and `memoryMiB` (at least 128).
+The operator writes them to `domain.cpu.cores` and `domain.memory.guest`.
+The operator then sets no instance type on the KubeVirt VM.
+
+The Settings `compute.max-cores` (default 32) and `compute.max-memory-mib` (default 131072) set the upper limits.
+A VM above a limit has the condition `Ready` with the reason `InvalidSpec`.
+The operator checks the VM again when a limit changes.
+The limits do not apply to a VM with an `instanceType`.
+
+You can change `compute` or switch between `compute` and `instanceType` at any time.
+On a running VM the condition `RestartRequired` shows until the next restart.
+The new size applies at the next start.
 
 ### Volume
 
@@ -201,6 +219,8 @@ The VM status shows the console paths in `status.console`.
 |---|---|
 | `overcommit.cpu` | The number of vCPUs for each physical thread. The default is 4. |
 | `overcommit.memory` | The memory overcommit ratio. The minimum is 0.1. The default is 1.0. |
+| `compute.max-cores` | The largest `compute.cores` of a VM. The default is 32. |
+| `compute.max-memory-mib` | The largest `compute.memoryMiB` of a VM. The default is 131072. |
 | `migration.parallel` | The number of live migrations at the same time in the cluster. |
 
 A wrong value stops the render of the KubeVirt object.

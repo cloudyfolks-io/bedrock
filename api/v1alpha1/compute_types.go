@@ -128,10 +128,21 @@ type VMScheduling struct {
 	Affinity *corev1.Affinity `json:"affinity,omitempty"`
 }
 
+type VMCompute struct {
+	// +kubebuilder:validation:Minimum=1
+	Cores int32 `json:"cores"`
+	// +kubebuilder:validation:Minimum=128
+	MemoryMiB int32 `json:"memoryMiB"`
+}
+
 // +kubebuilder:validation:XValidation:rule="!has(self.image) || self.image.name.matches('^[a-z0-9]([-a-z0-9.]*[a-z0-9])?$')",message="image.name must be a DNS subdomain"
+// +kubebuilder:validation:XValidation:rule="has(self.compute) != has(self.instanceType)",message="exactly one of compute and instanceType is required"
 type VirtualMachineSpec struct {
 	// +kubebuilder:validation:MinLength=1
-	InstanceType string `json:"instanceType"`
+	// +optional
+	InstanceType string `json:"instanceType,omitempty"`
+	// +optional
+	Compute *VMCompute `json:"compute,omitempty"`
 	// +optional
 	Preference string `json:"preference,omitempty"`
 	// +optional

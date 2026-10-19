@@ -112,12 +112,14 @@ func kubeVirtVM(in RenderInput, affinity *corev1.Affinity) (*unstructured.Unstru
 		templateSpec["affinity"] = converted
 	}
 	spec := map[string]any{
-		"runStrategy":  runStrategyOf(vm.Spec.Running),
-		"instancetype": map[string]any{"kind": "VirtualMachineClusterInstancetype", "name": vm.Spec.InstanceType},
+		"runStrategy": runStrategyOf(vm.Spec.Running),
 		"template": map[string]any{
 			"metadata": map[string]any{"labels": stringMap(templateLabels), "annotations": stringMap(podAnnotations)},
 			"spec":     templateSpec,
 		},
+	}
+	if vm.Spec.InstanceType != "" {
+		spec["instancetype"] = map[string]any{"kind": "VirtualMachineClusterInstancetype", "name": vm.Spec.InstanceType}
 	}
 	if preference := EffectivePreference(vm, in.ImageOS); preference != "" {
 		spec["preference"] = map[string]any{"kind": "VirtualMachineClusterPreference", "name": preference}
@@ -166,8 +168,11 @@ func stringMap(in map[string]string) map[string]any {
 func domainOf(in RenderInput) map[string]any {
 	vm := in.VirtualMachine
 	domain := map[string]any{"devices": devicesOf(vm, in.Volumes, len(in.CDROMs), in.NICs)}
-	if cpu := cpuOf(vm.Spec.CPU); cpu != nil {
+	if cpu := cpuOf(vm.Spec.CPU, vm.Spec.Compute); cpu != nil {
 		domain["cpu"] = cpu
+	}
+	if vm.Spec.Compute != nil {
+		domain["memory"] = map[string]any{"guest": fmt.Sprintf("%dMi", vm.Spec.Compute.MemoryMiB)}
 	}
 	if vm.Spec.Firmware != nil && vm.Spec.Firmware.UEFI {
 		domain["firmware"] = map[string]any{"bootloader": map[string]any{"efi": map[string]any{"secureBoot": vm.Spec.Firmware.SecureBoot}}}
@@ -178,16 +183,19 @@ func domainOf(in RenderInput) map[string]any {
 	return domain
 }
 
-func cpuOf(cpu *v1alpha1.VMCPU) map[string]any {
-	if cpu == nil || (!cpu.Dedicated && cpu.Model == "") {
-		return nil
-	}
+func cpuOf(cpu *v1alpha1.VMCPU, compute *v1alpha1.VMCompute) map[string]any {
 	out := map[string]any{}
-	if cpu.Dedicated {
+	if compute != nil {
+		out["cores"] = int64(compute.Cores)
+	}
+	if cpu != nil && cpu.Dedicated {
 		out["dedicatedCpuPlacement"] = true
 	}
-	if cpu.Model != "" {
+	if cpu != nil && cpu.Model != "" {
 		out["model"] = cpu.Model
+	}
+	if len(out) == 0 {
+		return nil
 	}
 	return out
 }

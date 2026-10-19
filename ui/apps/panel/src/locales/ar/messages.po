@@ -1255,8 +1255,17 @@ msgstr "توسيع {0}"
 msgid "wizard.back"
 msgstr "السابق"
 
+msgid "wizard.cores"
+msgstr "أنوية المعالج"
+
 msgid "wizard.create"
 msgstr "إنشاء جهاز افتراضي"
+
+msgid "wizard.customSize"
+msgstr "حجم مخصص"
+
+msgid "wizard.error.cores"
+msgstr "أدخل عدد أنوية المعالج"
 
 msgid "wizard.error.duplicate"
 msgstr "يوجد جهاز افتراضي بهذا الاسم بالفعل"
@@ -1266,6 +1275,9 @@ msgstr "اختر صورة"
 
 msgid "wizard.error.iso"
 msgstr "اختر صورة ISO"
+
+msgid "wizard.error.memory"
+msgstr "أدخل 128 ميبي بايت من الذاكرة على الأقل"
 
 msgid "wizard.error.name"
 msgstr "استخدم أحرفًا صغيرة وأرقامًا وشرطات. ابدأ وانتهِ بحرف أو رقم."
@@ -1305,6 +1317,9 @@ msgstr "لم يتم إنشاء الجهاز الافتراضي بعد."
 
 msgid "wizard.leave.title"
 msgstr "هل تريد تجاهل تغييراتك؟"
+
+msgid "wizard.memoryMiB"
+msgstr "الذاكرة (MiB)"
 
 msgid "wizard.next"
 msgstr "التالي"

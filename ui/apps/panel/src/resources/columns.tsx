@@ -9,6 +9,7 @@ import { PhaseBadge, StatusBadge } from "../components/StatusBadge";
 import { formatBytes, formatQuantity, formatRelative } from "../format";
 import type { Locale } from "../i18n";
 import { listAt, textAt, valueAt } from "./path";
+import { vmSize } from "./vmSize";
 import { listenersOf, memberCount, networkCidrs, osSummary, ownerCount } from "./summaries";
 
 export interface ColumnContext {
@@ -251,7 +252,7 @@ export const columnsByPlural: Record<string, ColumnDef[]> = {
     count("versions", L.versions, (object) => listAt(object, "status.versions").length),
   ],
   networks: [name, text("tenant", L.tenant, "spec.tenantRef"), { id: "cidr", label: L.cidr, render: (object) => (networkCidrs(object) ? <Ltr>{networkCidrs(object)}</Ltr> : dash), sortValue: networkCidrs }, flag("external", L.external, "spec.enableExternal"), text("vpc", L.vpc, "status.vpc"), status],
-  virtualmachines: [name, phase, text("node", L.node, "status.node"), addresses, text("instanceType", L.instanceType, "spec.instanceType"), age],
+  virtualmachines: [name, phase, text("node", L.node, "status.node"), addresses, { id: "instanceType", label: L.instanceType, render: (object) => vmSize(object) || dash, sortValue: vmSize }, age],
   sshkeys: [
     name,
     { id: "keyType", label: L.keyType, render: (object) => textAt(object, "spec.publicKey").split(" ")[0] || dash, sortValue: (object) => textAt(object, "spec.publicKey").split(" ")[0] ?? "" },

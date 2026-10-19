@@ -9,6 +9,9 @@ const disk: DiskValues = {
   imageName: "ubuntu-24.04",
   imageScope: "cluster",
   instanceType: "u1.medium",
+  customSize: false,
+  cores: null,
+  memoryMiB: null,
   preference: "ubuntu",
   rootDiskGi: 40,
   storageClass: "block",
@@ -40,6 +43,12 @@ describe("buildDiskVirtualMachine", () => {
     });
   });
 
+  it("sends a custom size instead of the instance type", () => {
+    const spec = buildDiskVirtualMachine({ ...disk, customSize: true, cores: 6, memoryMiB: 6144 }, context).spec as Record<string, unknown>;
+    expect(spec.compute).toEqual({ cores: 6, memoryMiB: 6144 });
+    expect(spec.instanceType).toBeUndefined();
+  });
+
   it("omits empty optional parts", () => {
     const spec = buildDiskVirtualMachine({ ...disk, preference: "", storageClass: "", extraVolumes: [], securityGroups: [], sshKeys: [], userData: "" }, context).spec as Record<string, unknown>;
     expect(spec).toEqual({
@@ -64,6 +73,9 @@ describe("buildIsoVirtualMachine", () => {
     extraCdroms: ["virtio-win"],
     osPreference: "windows.2k22",
     instanceType: "u1.large",
+    customSize: false,
+    cores: null,
+    memoryMiB: null,
     rootDiskGi: 80,
     storageClass: "",
     firmware: { uefi: true, secureBoot: false, tpm: true },

@@ -77,6 +77,20 @@ spec:
                 x-kubernetes-validations:
                 - message: secretRef excludes userData and networkData
                   rule: '!has(self.secretRef) || (!has(self.userData) && !has(self.networkData))'
+              compute:
+                properties:
+                  cores:
+                    format: int32
+                    minimum: 1
+                    type: integer
+                  memoryMiB:
+                    format: int32
+                    minimum: 128
+                    type: integer
+                required:
+                - cores
+                - memoryMiB
+                type: object
               cpu:
                 properties:
                   dedicated:
@@ -1156,12 +1170,13 @@ spec:
                 type: array
                 x-kubernetes-list-type: set
             required:
-            - instanceType
             - rootDisk
             type: object
             x-kubernetes-validations:
             - message: image.name must be a DNS subdomain
               rule: '!has(self.image) || self.image.name.matches(''^[a-z0-9]([-a-z0-9.]*[a-z0-9])?$'')'
+            - message: exactly one of compute and instanceType is required
+              rule: has(self.compute) != has(self.instanceType)
           status:
             properties:
               addresses:

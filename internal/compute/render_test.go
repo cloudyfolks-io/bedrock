@@ -354,3 +354,44 @@ func TestRenderAddsOnlyTheAddressAnnotationForAPinnedNIC(t *testing.T) {
 		t.Fatalf("a pinned NIC changes more than the annotation:\nauto   %+v\npinned %+v", auto.VirtualMachine.Object, pinned.VirtualMachine.Object)
 	}
 }
+
+func TestRenderCustomComputeReplacesTheInstanceType(t *testing.T) {
+	in := renderFixture()
+	in.VirtualMachine.Spec.InstanceType = ""
+	in.VirtualMachine.Spec.Compute = &v1alpha1.VMCompute{Cores: 6, MemoryMiB: 6144}
+	out := mustRender(t, in)
+	if _, found, _ := unstructured.NestedMap(out.VirtualMachine.Object, "spec", "instancetype"); found {
+		t.Fatal("a custom size must render no instance type")
+	}
+	domain, _, _ := unstructured.NestedMap(templateSpec(t, out), "domain")
+	cpu, _ := domain["cpu"].(map[string]any)
+	wantCPU := map[string]any{"cores": int64(6), "dedicatedCpuPlacement": true, "model": "host-model"}
+	if !reflect.DeepEqual(cpu, wantCPU) {
+		t.Fatalf("cpu %+v", cpu)
+	}
+	if want := map[string]any{"guest": "6144Mi"}; !reflect.DeepEqual(domain["memory"], want) {
+		t.Fatalf("memory %+v", domain["memory"])
+	}
+}
+
+func TestRenderCustomComputeAloneSetsOnlyCores(t *testing.T) {
+	in := renderFixture()
+	in.VirtualMachine.Spec.InstanceType = ""
+	in.VirtualMachine.Spec.CPU = nil
+	in.VirtualMachine.Spec.Compute = &v1alpha1.VMCompute{Cores: 2, MemoryMiB: 512}
+	domain, _, _ := unstructured.NestedMap(templateSpec(t, mustRender(t, in)), "domain")
+	if want := map[string]any{"cores": int64(2)}; !reflect.DeepEqual(domain["cpu"], want) {
+		t.Fatalf("cpu %+v", domain["cpu"])
+	}
+}
+
+func TestRenderInstanceTypeSetsNoSize(t *testing.T) {
+	domain, _, _ := unstructured.NestedMap(templateSpec(t, mustRender(t, renderFixture())), "domain")
+	if _, found := domain["memory"]; found {
+		t.Fatalf("memory %+v", domain["memory"])
+	}
+	cpu, _ := domain["cpu"].(map[string]any)
+	if _, found := cpu["cores"]; found {
+		t.Fatalf("cpu %+v", cpu)
+	}
+}

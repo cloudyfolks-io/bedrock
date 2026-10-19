@@ -1255,8 +1255,17 @@ msgstr "افزایش اندازه {0}"
 msgid "wizard.back"
 msgstr "بازگشت"
 
+msgid "wizard.cores"
+msgstr "هسته‌های پردازنده"
+
 msgid "wizard.create"
 msgstr "ایجاد ماشین مجازی"
+
+msgid "wizard.customSize"
+msgstr "اندازه سفارشی"
+
+msgid "wizard.error.cores"
+msgstr "تعداد هسته‌های پردازنده را وارد کنید"
 
 msgid "wizard.error.duplicate"
 msgstr "ماشین مجازی‌ای با این نام از قبل وجود دارد"
@@ -1266,6 +1275,9 @@ msgstr "یک تصویر انتخاب کنید"
 
 msgid "wizard.error.iso"
 msgstr "یک تصویر ISO انتخاب کنید"
+
+msgid "wizard.error.memory"
+msgstr "دست‌کم ۱۲۸ مبیبایت حافظه وارد کنید"
 
 msgid "wizard.error.name"
 msgstr "از حروف کوچک، ارقام و خط تیره استفاده کنید. با حرف یا رقم شروع و پایان دهید."
@@ -1305,6 +1317,9 @@ msgstr "ماشین مجازی هنوز ایجاد نشده است."
 
 msgid "wizard.leave.title"
 msgstr "تغییرات شما حذف شود؟"
+
+msgid "wizard.memoryMiB"
+msgstr "حافظه (MiB)"
 
 msgid "wizard.next"
 msgstr "بعدی"
