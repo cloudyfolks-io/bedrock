@@ -240,6 +240,7 @@ rules:
   - cephblockpools
   - cephclusters
   - cephfilesystems
+  - cephobjectstoreaccounts
   - cephobjectstores
   - cephobjectstoreusers
   verbs:
