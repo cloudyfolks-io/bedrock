@@ -94,8 +94,11 @@ msgstr "پشتیبان"
 msgid "col.backupTarget"
 msgstr "مقصد"
 
+msgid "col.bucketName"
+msgstr "نام سطل"
+
 msgid "col.buckets"
-msgstr "سهمیه سطل"
+msgstr "سطل‌ها"
 
 msgid "col.cidr"
 msgstr "CIDR"
@@ -181,6 +184,9 @@ msgstr "سیستم‌عامل"
 msgid "col.owners"
 msgstr "مالکان"
 
+msgid "col.permission"
+msgstr "دسترسی"
+
 msgid "col.phase"
 msgstr "مرحله"
 
@@ -223,6 +229,9 @@ msgstr "کلاس ذخیره‌سازی"
 msgid "col.subnet"
 msgstr "زیرشبکه"
 
+msgid "col.suspended"
+msgstr "تعلیق‌شده"
+
 msgid "col.target"
 msgstr "هدف"
 
@@ -235,8 +244,8 @@ msgstr "مستأجر"
 msgid "col.type"
 msgstr "نوع"
 
-msgid "col.user"
-msgstr "کاربر"
+msgid "col.usage"
+msgstr "مصرف‌شده"
 
 msgid "col.value"
 msgstr "مقدار"
