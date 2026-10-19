@@ -105,6 +105,8 @@ func SubresourceVerb(plural, subresource, method string) string {
 		return "update"
 	case plural == "containers" && isOneOf(subresource, "logs", "exec") && method == http.MethodGet:
 		return "get"
+	case plural == "builds" && subresource == "logs" && method == http.MethodGet:
+		return "get"
 	}
 	return verbOfMethod(method)
 }

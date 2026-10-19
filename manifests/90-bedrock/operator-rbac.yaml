@@ -127,6 +127,16 @@ rules:
   - update
   - watch
 - apiGroups:
+  - batch
+  resources:
+  - jobs
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - watch
+- apiGroups:
   - bedrock.cloudyfolks.io
   resources:
   - addons
@@ -138,6 +148,8 @@ rules:
   - authcodes/status
   - authrequests
   - authrequests/status
+  - builds
+  - builds/status
   - clusterconfigs
   - clusterimages
   - clusterimages/status
@@ -230,6 +242,7 @@ rules:
 - apiGroups:
   - bedrock.cloudyfolks.io
   resources:
+  - builds/finalizers
   - containers/finalizers
   - securitygroups/finalizers
   - subnets/finalizers
@@ -738,6 +751,7 @@ rules:
 - apiGroups:
   - ""
   resources:
+  - configmaps
   - secrets
   verbs:
   - create

@@ -718,6 +718,9 @@ msgstr "النسخ الاحتياطية"
 msgid "nav.item.buckets"
 msgstr "الحاويات"
 
+msgid "nav.item.builds"
+msgstr "عمليات البناء"
+
 msgid "nav.item.clusterImages"
 msgstr "صور الفهرس"
 
@@ -1083,6 +1086,9 @@ msgstr "متوقف"
 
 msgid "status.phase.stopping"
 msgstr "قيد الإيقاف"
+
+msgid "status.phase.succeeded"
+msgstr "نجح"
 
 msgid "status.phase.verify"
 msgstr "التحقق"

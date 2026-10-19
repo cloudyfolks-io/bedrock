@@ -26,6 +26,17 @@ const (
 	ReasonFailed                 = "Failed"
 	ReasonImagePullFailed        = "ImagePullFailed"
 	ReasonContainerConfigError   = "ContainerConfigError"
+	ReasonSecretNotFound         = "SecretNotFound"
+	ReasonSecretTypeInvalid      = "SecretTypeInvalid"
+	ReasonKataUnavailable        = "KataUnavailable"
+	ReasonTimeout                = "Timeout"
+	ReasonJobMissing             = "JobMissing"
+	ReasonStarting               = "Starting"
+	ReasonSucceeded              = "Succeeded"
+	ReasonCloneFailed            = "CloneFailed"
+	ReasonBuildFailed            = "BuildFailed"
+	ReasonPushFailed             = "PushFailed"
+	ReasonInvalidMirrors         = "InvalidEntries"
 )
 
 func Reasons() []string {
@@ -36,5 +47,14 @@ func Reasons() []string {
 		ReasonVolumeNotFound, ReasonVolumeInUse, ReasonVolumeClassUnsupported,
 		ReasonRuntimeUnavailable, ReasonPullSecretNotFound, ReasonApplyFailed, ReasonNameConflict,
 		ReasonQuotaExceeded, ReasonDeploying, ReasonRunning, ReasonStopped, ReasonFailed, ReasonImagePullFailed, ReasonContainerConfigError,
+	}
+}
+
+func BuildReasons() []string {
+	return []string{
+		ReasonNotInProject, ReasonInvalidSpec, ReasonSubnetNotFound, ReasonSubnetNotReady, ReasonWaitingForDefaultGroup,
+		ReasonSecretNotFound, ReasonSecretTypeInvalid, ReasonKataUnavailable, ReasonApplyFailed, ReasonNameConflict,
+		ReasonStarting, ReasonRunning, ReasonSucceeded, ReasonFailed, ReasonCloneFailed, ReasonBuildFailed, ReasonPushFailed, ReasonTimeout,
+		ReasonImagePullFailed, ReasonContainerConfigError, ReasonJobMissing,
 	}
 }

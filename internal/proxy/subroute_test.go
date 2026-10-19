@@ -155,6 +155,7 @@ func TestSubresourceVerbFollowsTheTable(t *testing.T) {
 		{"containers", "logs", "GET", "get"},
 		{"containers", "exec", "GET", "get"},
 		{"containers", "restart", "POST", "update"},
+		{"builds", "logs", "GET", "get"},
 		{"volumes", "x", "GET", "get"},
 		{"volumes", "x", "POST", "update"},
 		{"volumes", "x", "PUT", "update"},

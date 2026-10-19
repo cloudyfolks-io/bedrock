@@ -118,6 +118,7 @@ func bedrockResources() []string {
 		"apitokens", "apitokens/status",
 		"authcodes", "authcodes/status",
 		"authrequests", "authrequests/status",
+		"builds", "builds/status",
 		"clusterconfigs",
 		"clusterimages", "clusterimages/status",
 		"clusters", "clusters/status",

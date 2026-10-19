@@ -9,11 +9,15 @@ import (
 	"github.com/cloudyfolks-io/bedrock/internal/proxy"
 )
 
-const subresourceKind = "containers"
+const (
+	subresourceKind      = "containers"
+	buildSubresourceKind = "builds"
+)
 
 type Deps struct {
-	Config *rest.Config
-	Now    func() time.Time
+	Config  *rest.Config
+	Now     func() time.Time
+	LogPoll time.Duration
 }
 
 func NewDeps(cfg *rest.Config) Deps {
@@ -49,5 +53,5 @@ func registerWith(reg *proxy.Subresources, d Deps) error {
 			return err
 		}
 	}
-	return nil
+	return reg.Register(buildSubresourceKind, "logs", proxy.SubresourceHandler(BuildLogs(d)))
 }
