@@ -19,7 +19,7 @@ min_mem_gb=${LAB_MIN_MEM_GB:-46}
 remote_config_file=/root/multinode.yaml
 join_roles=control-plane,ceph-osd,fabric-gateway,workload
 release_config=dist/components-e2e.yaml
-remote_files=(tenant/tenancy tenant/images multinode/cluster multinode/guest)
+remote_files=(tenant/tenancy tenant/images multinode/cluster multinode/guest multinode/vm)
 vm_env=()
 bundle_make_args=("RELEASE_CONFIG=$release_config")
 vm_path=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
@@ -153,6 +153,13 @@ check_entries=(
   "three control-plane nodes|remote_check check_control_plane"
   "Ceph runs 3 monitors and 6 OSDs on 3 hosts|remote_check check_ceph_topology"
   "every replicated pool has size 3|remote_check check_pool_sizes"
+  "block Volume gets ReadWriteMany in Block mode (Q5)|remote_check check_volume_access_mode"
+  "live migration keeps the IP and the MAC (Q7)|remote_check check_migration_ip_mac"
+  "large transfer crosses two hosts with the Subnet MTU (8b)|remote_check check_large_transfer"
+  "pinned address survives a live migration|remote_check check_pinned_after_migration"
+  "hot-plugged volume shows in the guest (Q2)|remote_check check_hotplug"
+  "SMBIOS UUID of one VM name in two namespaces (Q3)|remote_check check_smbios"
+  "Subnet MTU 1500 on an underlay of 1500 (finding)|remote_check check_mtu_1500_finding"
 )
 
 collect_diagnostics() {
