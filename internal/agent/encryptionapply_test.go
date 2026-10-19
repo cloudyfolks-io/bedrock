@@ -434,3 +434,36 @@ func TestApplyEncryptionClearsTheProgressMarkersAfterASuccess(t *testing.T) {
 		}
 	}
 }
+
+func TestApplyEncryptionDoesNotApplyWhenTheReportFails(t *testing.T) {
+	cfg := newApplyConfigs(t)
+	f := newApplyFixture(t, "cp-enc-report-fails", cfg.one, cfg.added, encryption.Hash(cfg.added))
+	report := func() error { return errors.New("management API down") }
+	err := ApplyEncryption(context.Background(), k8sClient, f.deps, report)
+	if err == nil || !strings.Contains(err.Error(), "management API down") {
+		t.Fatalf("error %v", err)
+	}
+	if *f.restart != 0 || f.file(t) != string(cfg.one) {
+		t.Fatalf("no apply may start: restarts %d", *f.restart)
+	}
+}
+
+func TestApplyEncryptionFinishesARollbackThatCrashedBeforeTheRestart(t *testing.T) {
+	cfg := newApplyConfigs(t)
+	grant := encryption.Hash(cfg.removed)
+	f := newApplyFixture(t, "cp-enc-rollback-crash", cfg.promoted, cfg.removed, grant)
+	dir := filepath.Join(f.deps.Root, "etc/bedrock/encryption")
+	writeFixtureFile(t, filepath.Join(dir, ".apply-failed"), grant)
+	writeFixtureFile(t, filepath.Join(dir, ".apply-in-progress"), grant)
+	writeFixtureFile(t, filepath.Join(dir, ".apply-previous"), string(cfg.promoted))
+	touch(t, encryptionPath(f.deps.Root), time.Now())
+	if err := ApplyEncryption(context.Background(), k8sClient, f.deps, noReport); err != nil {
+		t.Fatal(err)
+	}
+	if *f.restart != 1 || f.file(t) != string(cfg.promoted) {
+		t.Fatalf("the rolled-back config must be live: restarts %d", *f.restart)
+	}
+	if exists(filepath.Join(dir, ".apply-in-progress")) || readEncryptionFailure(f.deps.Root) != grant {
+		t.Fatal("the progress marker must go and the failure mark must stay")
+	}
+}
