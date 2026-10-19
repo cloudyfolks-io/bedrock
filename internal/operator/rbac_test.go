@@ -61,7 +61,7 @@ func TestOperatorRole(t *testing.T) {
 		{"", "pods", "delete"},
 		{"", "pods/eviction", "create"},
 		{"", "pods/exec", "create"},
-		{"coordination.k8s.io", "leases", "update"},
+		{"coordination.k8s.io", "leases", "list"},
 		{"apps", "controllerrevisions", "list"},
 		{"kubevirt.io", "virtualmachines", "create"},
 		{"kubevirt.io", "virtualmachineinstances", "get"},
