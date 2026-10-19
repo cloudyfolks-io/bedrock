@@ -191,6 +191,7 @@ func Tick(ctx context.Context, c client.Client, deps Deps) error {
 		Restore:      readRestoreMarker(deps.Root),
 		Authn:        withAuditMessage(syncAuthnFiles(ctx, c, deps, current), auditErr),
 		Encryption:   syncEncryptionStatus(deps, current),
+		ReportedAt:   reportTime(current.Status.ReportedAt, deps),
 	}
 	if invErr != nil {
 		next.Inventory = current.Status.Inventory
@@ -208,6 +209,15 @@ func Tick(ctx context.Context, c client.Client, deps Deps) error {
 		return err
 	}
 	return invErr
+}
+
+func reportTime(previous *metav1.Time, deps Deps) *metav1.Time {
+	now := deps.Now()
+	if previous != nil && now.Sub(previous.Time) < deps.Interval/2 && !now.Before(previous.Time) {
+		return previous
+	}
+	reported := metav1.NewTime(now)
+	return &reported
 }
 
 func manage(ctx context.Context, c client.Client, deps Deps, current v1alpha1.Host) (*v1alpha1.AppliedConfig, metav1.Condition) {
