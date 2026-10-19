@@ -247,7 +247,7 @@ run_checks() {
 
 stage_check() {
   mkdir -p "$lab_dir"
-  rm -f "$lab_dir"/diag-*.log
+  rm -f "$lab_dir"/diag-*.log "$lab_dir"/check-*.log
   run_checks | tee "$lab_dir/result.txt"
 }
 
@@ -262,7 +262,7 @@ stage_rewind() {
 stage_down() {
   lab_down
   remove_bundle_images
-  rm -f "$state_file" "$lab_dir"/diag-*.log "$lab_dir/multinode.yaml"
+  rm -f "$state_file" "$lab_dir"/diag-*.log "$lab_dir"/check-*.log "$lab_dir/multinode.yaml"
 }
 
 stage_all() {

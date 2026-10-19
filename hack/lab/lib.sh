@@ -417,14 +417,19 @@ SCRIPT
 }
 
 verdict() {
-  local name=$1 check=$2 out
+  local name=$1 check=$2 out log status=0
   shift 2
-  if out=$("$check" "$@" 2>&1); then
+  log=$lab_dir/check-$(printf '%s' "$name" | tr -c 'A-Za-z0-9' '-' | cut -c1-60).log
+  out=$("$check" "$@" 2>&1) || status=$?
+  printf '%s\n' "$out" >"$log"
+  if [ "$status" -eq 0 ]; then
     printf 'PASS %s\n' "$name"
     printf '%s\n' "$out" | grep '^info: ' || true
     return 0
   fi
   printf 'FAIL %s: %s\n' "$name" "$(printf '%s' "$out" | tail -n 1 | cut -c1-240)"
+  printf '%s\n' "$out" | grep '^info: ' || true
+  printf 'output: %s\n' "$log"
   return 1
 }
 
