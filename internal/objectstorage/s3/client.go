@@ -19,8 +19,17 @@ const (
 	VersioningSuspended = "Suspended"
 
 	noSuchBucketPolicy = "NoSuchBucketPolicy"
-	requestTimeout     = 30 * time.Second
-	versioningXMLFmt   = `<VersioningConfiguration xmlns="http://s3.amazonaws.com/doc/2006-03-01/"><Status>%s</Status></VersioningConfiguration>`
+
+	BucketAlreadyExists     = "BucketAlreadyExists"
+	BucketAlreadyOwnedByYou = "BucketAlreadyOwnedByYou"
+	BucketNotEmpty          = "BucketNotEmpty"
+	NoSuchBucket            = "NoSuchBucket"
+	NoSuchEntity            = "NoSuchEntity"
+	MalformedPolicyDocument = "MalformedPolicyDocument"
+	AccessDenied            = "AccessDenied"
+
+	requestTimeout   = 30 * time.Second
+	versioningXMLFmt = `<VersioningConfiguration xmlns="http://s3.amazonaws.com/doc/2006-03-01/"><Status>%s</Status></VersioningConfiguration>`
 )
 
 type Client struct {
@@ -39,8 +48,17 @@ func IsUnavailable(err error) bool {
 
 type call struct {
 	operation, method, endpoint, region, bucket, query string
+	service, path, subject                             string
+	headers                                            map[string]string
 	creds                                              Credentials
 	body                                               []byte
+}
+
+func (in call) target() string {
+	if in.subject != "" {
+		return in.subject
+	}
+	return in.bucket
 }
 
 type answer struct {
@@ -109,32 +127,38 @@ func (c *Client) DeletePolicy(ctx context.Context, endpoint, region string, cred
 }
 
 func (c *Client) do(ctx context.Context, in call) (answer, error) {
-	if in.bucket == "" {
-		return answer{}, errors.New("s3: bucket name is empty")
+	path := in.path
+	if path == "" {
+		if in.bucket == "" {
+			return answer{}, errors.New("s3: bucket name is empty")
+		}
+		path = "/" + in.bucket
 	}
 	target, err := url.Parse(in.endpoint)
 	if err != nil {
-		return answer{}, fmt.Errorf("s3 %s %s: endpoint is not a URL", in.operation, in.bucket)
+		return answer{}, fmt.Errorf("s3 %s %s: endpoint is not a URL", in.operation, in.target())
 	}
-	path := "/" + in.bucket
 	sum := sha256.Sum256(in.body)
 	hash := hex.EncodeToString(sum[:])
-	signed := Sign(Request{Method: in.method, Host: target.Host, Path: path, RawQuery: in.query, PayloadSHA256: hash}, in.creds, in.region, c.now())
+	signed := Sign(Request{Service: in.service, Method: in.method, Host: target.Host, Path: path, RawQuery: in.query, Headers: in.headers, PayloadSHA256: hash}, in.creds, in.region, c.now())
 	request, err := http.NewRequestWithContext(ctx, in.method, target.Scheme+"://"+target.Host+canonicalPath(path)+"?"+in.query, bytes.NewReader(in.body))
 	if err != nil {
-		return answer{}, fmt.Errorf("s3 %s %s: request cannot be built", in.operation, in.bucket)
+		return answer{}, fmt.Errorf("s3 %s %s: request cannot be built", in.operation, in.target())
+	}
+	for name, value := range in.headers {
+		request.Header.Set(name, value)
 	}
 	for name, value := range signed {
 		request.Header.Set(name, value)
 	}
 	response, err := c.client().Do(request)
 	if err != nil {
-		return answer{}, &UnavailableError{message: fmt.Sprintf("s3 %s %s: store unreachable", in.operation, in.bucket)}
+		return answer{}, &UnavailableError{message: fmt.Sprintf("s3 %s %s: store unreachable", in.operation, in.target())}
 	}
 	defer response.Body.Close()
 	body, err := io.ReadAll(io.LimitReader(response.Body, 1<<20))
 	if err != nil {
-		return answer{}, &UnavailableError{message: fmt.Sprintf("s3 %s %s: answer cannot be read", in.operation, in.bucket)}
+		return answer{}, &UnavailableError{message: fmt.Sprintf("s3 %s %s: answer cannot be read", in.operation, in.target())}
 	}
 	return answer{status: response.StatusCode, code: errorCode(response.StatusCode, body), body: body}, nil
 }
@@ -158,21 +182,40 @@ func errorCode(status int, body []byte) string {
 		return ""
 	}
 	var document struct {
-		Code string `xml:"Code"`
+		Code      string `xml:"Code"`
+		ErrorCode string `xml:"Error>Code"`
 	}
 	if err := xml.Unmarshal(body, &document); err != nil {
 		return ""
 	}
-	return document.Code
+	if document.Code != "" {
+		return document.Code
+	}
+	return document.ErrorCode
 }
 
-func failure(got answer, bucket, operation string) error {
+type Error struct {
+	Operation string
+	Subject   string
+	Status    int
+	Code      string
+}
+
+func (e *Error) Error() string {
+	return fmt.Sprintf("s3 %s %s: %d %s", e.Operation, e.Subject, e.Status, e.Code)
+}
+
+func IsCode(err error, code string) bool {
+	var failed *Error
+	return errors.As(err, &failed) && failed.Code == code
+}
+
+func failure(got answer, subject, operation string) error {
 	if got.status >= http.StatusOK && got.status < http.StatusMultipleChoices {
 		return nil
 	}
-	message := fmt.Sprintf("s3 %s %s: %d %s", operation, bucket, got.status, got.code)
 	if got.status >= http.StatusInternalServerError {
-		return &UnavailableError{message: message}
+		return &UnavailableError{message: (&Error{Operation: operation, Subject: subject, Status: got.status, Code: got.code}).Error()}
 	}
-	return errors.New(message)
+	return &Error{Operation: operation, Subject: subject, Status: got.status, Code: got.code}
 }
