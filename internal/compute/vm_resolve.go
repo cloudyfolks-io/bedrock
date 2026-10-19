@@ -9,10 +9,10 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	"github.com/cloudyfolks-io/bedrock/api/v1alpha1"
+	"github.com/cloudyfolks-io/bedrock/internal/container"
 	"github.com/cloudyfolks-io/bedrock/internal/images"
 	"github.com/cloudyfolks-io/bedrock/internal/network"
 )
@@ -35,18 +35,22 @@ func EffectiveNetworks(vm v1alpha1.VirtualMachine) []v1alpha1.VMNetwork {
 }
 
 func VolumeOwner(vms []v1alpha1.VirtualMachine, volume string) string {
-	owner := ""
-	var oldest metav1.Time
-	for _, vm := range vms {
-		if !slices.ContainsFunc(vm.Spec.Disks, func(disk v1alpha1.VMDisk) bool { return disk.VolumeRef == volume }) {
-			continue
-		}
-		older := owner == "" || vm.CreationTimestamp.Before(&oldest) || (vm.CreationTimestamp.Equal(&oldest) && vm.Name < owner)
-		if older {
-			owner, oldest = vm.Name, vm.CreationTimestamp
-		}
+	holder, held := container.VolumeHolder(volume, vms, nil)
+	if !held {
+		return ""
 	}
-	return owner
+	return holder.Name
+}
+
+func VolumeConsumer(vms []v1alpha1.VirtualMachine, containers []v1alpha1.Container, volume string) string {
+	holder, held := container.VolumeHolder(volume, vms, containers)
+	switch {
+	case !held:
+		return ""
+	case holder.Kind == container.Kind:
+		return holder.String()
+	}
+	return holder.Name
 }
 
 func (r *VirtualMachineReconciler) resolve(ctx context.Context, vm v1alpha1.VirtualMachine, labels map[string]string) (RenderInput, *Gate, error) {
@@ -251,6 +255,10 @@ func (r *VirtualMachineReconciler) stepVolumes(ctx context.Context, vm v1alpha1.
 	if err := r.Client.List(ctx, &vms, client.InNamespace(vm.Namespace)); err != nil {
 		return in, nil, err
 	}
+	var containers v1alpha1.ContainerList
+	if err := r.Client.List(ctx, &containers, client.InNamespace(vm.Namespace)); err != nil {
+		return in, nil, err
+	}
 	for _, disk := range vm.Spec.Disks {
 		var volume v1alpha1.Volume
 		err := r.Client.Get(ctx, client.ObjectKey{Namespace: vm.Namespace, Name: disk.VolumeRef}, &volume)
@@ -260,7 +268,7 @@ func (r *VirtualMachineReconciler) stepVolumes(ctx context.Context, vm v1alpha1.
 		if err != nil {
 			return in, nil, err
 		}
-		if owner := VolumeOwner(vms.Items, disk.VolumeRef); owner != vm.Name {
+		if owner := VolumeConsumer(vms.Items, containers.Items, disk.VolumeRef); owner != vm.Name {
 			return in, gateOf(ReasonVolumeInUse, "the volume %q is used by %q", disk.VolumeRef, owner), nil
 		}
 		if gate, err := r.usable(ctx, volume); err != nil || gate != nil {

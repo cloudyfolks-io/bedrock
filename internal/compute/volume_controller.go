@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 
 	corev1 "k8s.io/api/core/v1"
 	storagev1 "k8s.io/api/storage/v1"
@@ -19,6 +20,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	"github.com/cloudyfolks-io/bedrock/api/v1alpha1"
+	"github.com/cloudyfolks-io/bedrock/internal/container"
 )
 
 const FinalizerVolumeInUse = "bedrock.cloudyfolks.io/volume-in-use"
@@ -43,7 +45,11 @@ func (r *VolumeReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctr
 	if err := r.Client.List(ctx, &vms, client.InNamespace(volume.Namespace)); err != nil {
 		return ctrl.Result{}, err
 	}
-	owner := VolumeOwner(vms.Items, volume.Name)
+	var containers v1alpha1.ContainerList
+	if err := r.Client.List(ctx, &containers, client.InNamespace(volume.Namespace)); err != nil {
+		return ctrl.Result{}, err
+	}
+	owner := VolumeConsumer(vms.Items, containers.Items, volume.Name)
 	if !volume.DeletionTimestamp.IsZero() {
 		return ctrl.Result{}, r.release(ctx, volume, owner)
 	}
@@ -102,9 +108,16 @@ func (r *VolumeReconciler) release(ctx context.Context, volume v1alpha1.Volume, 
 		return nil
 	}
 	if owner != "" {
-		return r.writeStatus(ctx, volume, volumeOutcome{Gate: gateOf(ReasonInUse, "the virtual machine %q uses the volume", owner), AttachedTo: owner, Phase: v1alpha1.VolumePhaseInUse})
+		return r.writeStatus(ctx, volume, volumeOutcome{Gate: gateOf(ReasonInUse, "%s uses the volume", describeConsumer(owner)), AttachedTo: owner, Phase: v1alpha1.VolumePhaseInUse})
 	}
 	return r.removeFinalizer(ctx, volume)
+}
+
+func describeConsumer(owner string) string {
+	if name, isContainer := strings.CutPrefix(owner, container.Kind+"/"); isContainer {
+		return fmt.Sprintf("the container %q", name)
+	}
+	return fmt.Sprintf("the virtual machine %q", owner)
 }
 
 func (r *VolumeReconciler) converge(ctx context.Context, volume v1alpha1.Volume, labels map[string]string, owner string) (volumeOutcome, error) {
@@ -302,6 +315,7 @@ func (r *VolumeReconciler) SetupWithManager(mgr ctrl.Manager) error {
 		Owns(emptyOf(dataVolumeGVK)).
 		Watches(&corev1.PersistentVolumeClaim{}, handler.EnqueueRequestsFromMapFunc(sameName)).
 		Watches(&v1alpha1.VirtualMachine{}, handler.EnqueueRequestsFromMapFunc(listedVolumes)).
+		Watches(&v1alpha1.Container{}, handler.EnqueueRequestsFromMapFunc(mountedVolumes)).
 		Watches(&v1alpha1.VolumeSnapshot{}, handler.EnqueueRequestsFromMapFunc(r.cloningFrom)).
 		Complete(r)
 }
@@ -314,6 +328,18 @@ func listedVolumes(_ context.Context, obj client.Object) []reconcile.Request {
 	requests := make([]reconcile.Request, 0, len(vm.Spec.Disks))
 	for _, disk := range vm.Spec.Disks {
 		requests = append(requests, reconcile.Request{NamespacedName: client.ObjectKey{Namespace: vm.Namespace, Name: disk.VolumeRef}})
+	}
+	return requests
+}
+
+func mountedVolumes(_ context.Context, obj client.Object) []reconcile.Request {
+	c, ok := obj.(*v1alpha1.Container)
+	if !ok {
+		return nil
+	}
+	requests := make([]reconcile.Request, 0, len(c.Spec.Volumes))
+	for _, mount := range c.Spec.Volumes {
+		requests = append(requests, reconcile.Request{NamespacedName: client.ObjectKey{Namespace: c.Namespace, Name: mount.VolumeRef}})
 	}
 	return requests
 }

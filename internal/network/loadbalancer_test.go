@@ -21,7 +21,7 @@ func target(vm string, port int32) v1alpha1.LoadBalancerTarget {
 }
 
 func TestBuildListenersUppercasesProtocolAndDefaultsToTCP(t *testing.T) {
-	got, _, v := BuildListeners([]v1alpha1.LoadBalancerListener{listenerSpec(80, "", target("a", 8080)), listenerSpec(53, "udp", target("a", 5353))}, map[string]string{"a": "10.0.0.2"})
+	got, _, v := BuildListeners([]v1alpha1.LoadBalancerListener{listenerSpec(80, "", target("a", 8080)), listenerSpec(53, "udp", target("a", 5353))}, map[string][]string{"a": {"10.0.0.2"}})
 	if v != nil || len(got) != 2 || got[0].Protocol != "TCP" || got[1].Protocol != "UDP" {
 		t.Fatalf("listeners %+v violation %+v", got, v)
 	}
@@ -31,14 +31,14 @@ func TestBuildListenersUppercasesProtocolAndDefaultsToTCP(t *testing.T) {
 }
 
 func TestBuildListenersRequireOneTargetPort(t *testing.T) {
-	_, _, v := BuildListeners([]v1alpha1.LoadBalancerListener{listenerSpec(80, "TCP", target("a", 8080), target("b", 9090))}, map[string]string{"a": "10.0.0.2", "b": "10.0.0.3"})
+	_, _, v := BuildListeners([]v1alpha1.LoadBalancerListener{listenerSpec(80, "TCP", target("a", 8080), target("b", 9090))}, map[string][]string{"a": {"10.0.0.2"}, "b": {"10.0.0.3"}})
 	if v == nil || v.Reason != ReasonTargetPortsDiffer {
 		t.Fatalf("violation %+v", v)
 	}
 }
 
 func TestBuildListenersCollectsMissingAddresses(t *testing.T) {
-	got, missing, v := BuildListeners([]v1alpha1.LoadBalancerListener{listenerSpec(80, "TCP", target("a", 80), target("b", 80)), listenerSpec(81, "TCP", target("b", 81))}, map[string]string{"a": "10.0.0.2"})
+	got, missing, v := BuildListeners([]v1alpha1.LoadBalancerListener{listenerSpec(80, "TCP", target("a", 80), target("b", 80)), listenerSpec(81, "TCP", target("b", 81))}, map[string][]string{"a": {"10.0.0.2"}})
 	if v != nil || !slices.Equal(missing, []string{"b"}) || len(got[0].Endpoints) != 1 || len(got[1].Endpoints) != 0 {
 		t.Fatalf("listeners %+v missing %v violation %+v", got, missing, v)
 	}
@@ -47,7 +47,7 @@ func TestBuildListenersCollectsMissingAddresses(t *testing.T) {
 func TestBuildListenersMapsHealthCheck(t *testing.T) {
 	with := listenerSpec(80, "TCP", target("a", 80))
 	with.HealthCheck = &v1alpha1.LoadBalancerHealthCheck{}
-	got, _, _ := BuildListeners([]v1alpha1.LoadBalancerListener{with, listenerSpec(81, "TCP", target("a", 81))}, map[string]string{"a": "10.0.0.2"})
+	got, _, _ := BuildListeners([]v1alpha1.LoadBalancerListener{with, listenerSpec(81, "TCP", target("a", 81))}, map[string][]string{"a": {"10.0.0.2"}})
 	if !got[0].HealthCheck || got[1].HealthCheck {
 		t.Fatalf("listeners %+v", got)
 	}

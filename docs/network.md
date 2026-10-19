@@ -149,6 +149,22 @@ A user cannot attach a pod to a network, directly or through a workload.
 Only the platform can.
 A workload of a user without these annotations works as before.
 
+## How a container attaches
+
+The container area builds the pod template of a Container.
+The function `PodAttachment` returns its annotations and labels.
+A Container has one interface, on one Subnet `S` of the namespace `N`.
+The pod follows rules 4 to 7 of the section above for this one entry, with these changes.
+
+1. Add the annotation `v1.multus-cni.io/default-network: "N/S"`.
+   This is the override of the default network that KubeVirt sets for a VM.
+2. Never add `default_route`.
+3. A Container with a pinned address has one replica and the strategy `Recreate`.
+   The address check ignores the pods of the Container itself.
+4. A change of the security groups of a Container changes the pod template, so the pods roll.
+
+The Container kind is in `docs/containers.md`.
+
 ## Networks and external access
 
 A `Network` becomes a Fabric `Vpc`.
@@ -304,6 +320,12 @@ The ElasticIP must name the LoadBalancer as its target.
 The LoadBalancer must name the ElasticIP in `elasticIPRef`.
 All targets of a listener must use the same target port.
 All targets of a LoadBalancer must be on one Network.
+A target names a VM with `vmRef` or a Container with `containerRef`. Set exactly one.
+For a Container the operator uses the addresses of its ready pods as endpoints.
+It reads the Fabric `IP` object of each pod. A pod without a Fabric `IP` object has no endpoint yet.
+The endpoints follow the pods when a rolling update changes them.
+When a Container has no ready pod, the operator keeps the rule with no endpoint and sets `Ready=True` with the reason `NoReadyPods`.
+One listener can hold VMs and Containers.
 When `healthCheck` is set, Fabric health checks are on.
 When it is not set, they are off.
 The other health check fields are not used.
@@ -340,8 +362,8 @@ It therefore never reaches the pod network `eth0`.
 Live migration and probes use `eth0`.
 The policy never allows more than the Fabric group.
 
-A group that a VM uses cannot be deleted.
-Remove the group from the VM first.
+A group that a VM or a Container uses cannot be deleted.
+Remove the group from the VM or the Container first.
 
 ## Settings
 
@@ -396,7 +418,7 @@ Then take the action in the table.
 | `FabricConflict` | A Fabric object with this name belongs to another owner. Rename the Bedrock object. |
 | `FabricNotReady` | Fabric has not finished. Wait. If it stays, read the message. |
 | `GatewayInvalid` | The gateway is outside the CIDR or is the network or broadcast address. Use a usable address. |
-| `InUse` | VMs or addresses still use the object. Delete or change them first. |
+| `InUse` | VMs, Containers or addresses still use the object. Delete or change them first. |
 | `InvalidRecords` | A DNS record has a bad name or address. Fix the record. |
 | `InvalidRules` | A security group rule is wrong. Use one of cidr and securityGroupRef, valid ports and a known protocol. |
 | `NamespaceNotLabeled` | The namespace is not a project namespace. Create the object in a project namespace. |
@@ -406,6 +428,7 @@ Then take the action in the table.
 | `NetworkNotReady` | The Network is not ready. Wait. |
 | `NoPoolCapacity` | The ElasticIP names no provider network, and every `tenant` provider network is full or none exists. Add addresses or a `tenant` provider network. The operator checks again every few seconds. |
 | `NoProviderNetwork` | The Network wants an external connection and no provider network exists. In L2 mode a provider network of the role `tenant` must exist. Set `network.provider-networks`. |
+| `NoReadyPods` | A Container target has no ready pod. The rule stays with no endpoint for it. Wait for the pods, or look at the Container. |
 | `NoTargets` | No target has an address yet. Wait for the VMs. |
 | `NotAttached` | No Subnet names this zone in `dnsZoneRef`. Set `dnsZoneRef` on a Subnet. |
 | `Pending` | Fabric has not connected the Network yet. Wait. |

@@ -21,21 +21,25 @@ import (
 	"github.com/cloudyfolks-io/bedrock/internal/ssa"
 )
 
+const defaultSubnetName = "default"
+
 type LoadBalancerReconciler struct {
 	Client client.Client
 	Kinds  KindProbe
 }
 
 type resolvedTargets struct {
-	addresses map[string]string
+	addresses map[string][]string
+	idle      []string
 	vpc       string
 	subnets   []string
 }
 
 type targetInfo struct {
-	vpc     string
-	subnet  string
-	address string
+	vpc       string
+	subnet    string
+	addresses []string
+	container bool
 }
 
 func (r *LoadBalancerReconciler) Reconcile(ctx context.Context, req reconcile.Request) (reconcile.Result, error) {
@@ -110,7 +114,7 @@ func (r *LoadBalancerReconciler) program(ctx context.Context, lb v1alpha1.LoadBa
 	if v != nil {
 		return refused(lb, v)
 	}
-	withEndpoints := slices.DeleteFunc(slices.Clone(listeners), func(l Listener) bool { return len(l.Endpoints) == 0 })
+	withEndpoints := programmable(listeners)
 	if len(withEndpoints) == 0 {
 		return refused(lb, &Violation{Reason: ReasonNoTargets, Message: "no target has an address yet"})
 	}
@@ -118,7 +122,21 @@ func (r *LoadBalancerReconciler) program(ctx context.Context, lb v1alpha1.LoadBa
 		Namespace: lb.Namespace, Name: lb.Name, EIP: FabricName(eip.Namespace, eip.Name), Vpc: targets.vpc,
 		Labels: ObjectLabels("LoadBalancer", lb.Name, tenant, project), Annotations: OwnerAnnotations(&lb), Listeners: withEndpoints,
 	})
-	return r.apply(ctx, lb, rules, missing)
+	cond, requeue, err := r.apply(ctx, lb, rules, missing)
+	return warnIdle(cond, lb, targets.idle), requeue, err
+}
+
+func programmable(listeners []Listener) []Listener {
+	return slices.DeleteFunc(slices.Clone(listeners), func(l Listener) bool { return len(l.Endpoints) == 0 && !l.Kept })
+}
+
+func warnIdle(cond metav1.Condition, lb v1alpha1.LoadBalancer, idle []string) metav1.Condition {
+	if len(idle) == 0 || cond.Status != metav1.ConditionTrue {
+		return cond
+	}
+	warning := trueCondition(v1alpha1.ConditionReady, lb.Generation, ReasonNoReadyPods)
+	warning.Message = fmt.Sprintf("no ready pod stands behind the Containers %s", strings.Join(idle, ", "))
+	return warning
 }
 
 func (r *LoadBalancerReconciler) elasticIP(ctx context.Context, lb v1alpha1.LoadBalancer) (v1alpha1.ElasticIP, *Violation, error) {
@@ -145,9 +163,9 @@ func (r *LoadBalancerReconciler) resolve(ctx context.Context, lb v1alpha1.LoadBa
 	if err != nil {
 		return resolvedTargets{}, nil, err
 	}
-	resolved := resolvedTargets{addresses: map[string]string{}}
-	for _, name := range targetNames(lb) {
-		info, v, err := r.resolveTarget(ctx, lb, name, ips)
+	resolved := resolvedTargets{addresses: map[string][]string{}}
+	for _, key := range targetKeys(lb) {
+		info, v, err := r.resolveTarget(ctx, lb, key, ips)
 		if err != nil || v != nil {
 			return resolvedTargets{}, v, err
 		}
@@ -158,55 +176,118 @@ func (r *LoadBalancerReconciler) resolve(ctx context.Context, lb v1alpha1.LoadBa
 		if !slices.Contains(resolved.subnets, info.subnet) {
 			resolved.subnets = append(resolved.subnets, info.subnet)
 		}
-		if info.address != "" {
-			resolved.addresses[name] = info.address
+		if info.container && len(info.addresses) == 0 {
+			resolved.idle = append(resolved.idle, strings.TrimPrefix(key, containerTargetPrefix))
+		}
+		if info.container || len(info.addresses) > 0 {
+			resolved.addresses[key] = info.addresses
 		}
 	}
 	return resolved, nil, nil
 }
 
-func targetNames(lb v1alpha1.LoadBalancer) []string {
-	var names []string
+func targetKeys(lb v1alpha1.LoadBalancer) []string {
+	var keys []string
 	for _, l := range lb.Spec.Listeners {
 		for _, t := range l.Targets {
-			if !slices.Contains(names, t.VMRef) {
-				names = append(names, t.VMRef)
+			if key := TargetKey(t); !slices.Contains(keys, key) {
+				keys = append(keys, key)
 			}
 		}
 	}
-	slices.Sort(names)
-	return names
+	slices.Sort(keys)
+	return keys
 }
 
-func (r *LoadBalancerReconciler) resolveTarget(ctx context.Context, lb v1alpha1.LoadBalancer, name string, ips []*unstructured.Unstructured) (info targetInfo, v *Violation, err error) {
+func (r *LoadBalancerReconciler) resolveTarget(ctx context.Context, lb v1alpha1.LoadBalancer, key string, ips []*unstructured.Unstructured) (targetInfo, *Violation, error) {
+	if name, isContainer := strings.CutPrefix(key, containerTargetPrefix); isContainer {
+		return r.resolveContainerTarget(ctx, lb, name, ips)
+	}
+	return r.resolveVMTarget(ctx, lb, key, ips)
+}
+
+func (r *LoadBalancerReconciler) resolveVMTarget(ctx context.Context, lb v1alpha1.LoadBalancer, name string, ips []*unstructured.Unstructured) (targetInfo, *Violation, error) {
 	var vm v1alpha1.VirtualMachine
-	if err = r.Client.Get(ctx, client.ObjectKey{Namespace: lb.Namespace, Name: name}, &vm); err != nil || len(vm.Spec.Networks) == 0 {
+	if err := r.Client.Get(ctx, client.ObjectKey{Namespace: lb.Namespace, Name: name}, &vm); err != nil || len(vm.Spec.Networks) == 0 {
 		if err == nil || apierrors.IsNotFound(err) {
 			return targetInfo{}, &Violation{Reason: ReasonTargetNotFound, Message: fmt.Sprintf("the VirtualMachine %q does not exist or has no interface", name)}, nil
 		}
 		return targetInfo{}, nil, err
 	}
-	nic := vm.Spec.Networks[0]
+	info, v, err := r.networkOf(ctx, lb.Namespace, vm.Spec.Networks[0].SubnetRef, "VirtualMachine", name)
+	if err != nil || v != nil {
+		return targetInfo{}, v, err
+	}
+	if ipName, found := FindIP(ips, lb.Namespace, name, FabricName(lb.Namespace, info.subnet)); found {
+		if address := ipAddress(ips, ipName); address != "" {
+			info.addresses = []string{address}
+		}
+	}
+	return info, nil, nil
+}
+
+func (r *LoadBalancerReconciler) resolveContainerTarget(ctx context.Context, lb v1alpha1.LoadBalancer, name string, ips []*unstructured.Unstructured) (targetInfo, *Violation, error) {
+	var container v1alpha1.Container
+	err := r.Client.Get(ctx, client.ObjectKey{Namespace: lb.Namespace, Name: name}, &container)
+	if apierrors.IsNotFound(err) {
+		return targetInfo{}, &Violation{Reason: ReasonTargetNotFound, Message: fmt.Sprintf("the Container %q does not exist", name)}, nil
+	}
+	if err != nil {
+		return targetInfo{}, nil, err
+	}
+	subnet := container.Spec.Network.SubnetRef
+	if subnet == "" {
+		subnet = defaultSubnetName
+	}
+	info, v, err := r.networkOf(ctx, lb.Namespace, subnet, "Container", name)
+	if err != nil || v != nil {
+		return targetInfo{}, v, err
+	}
+	info.container = true
+	var pods corev1.PodList
+	if err := r.Client.List(ctx, &pods, client.InNamespace(lb.Namespace), client.MatchingLabels{v1alpha1.LabelKind: "Container", v1alpha1.LabelName: name}); err != nil {
+		return targetInfo{}, nil, err
+	}
+	for _, pod := range pods.Items {
+		if !PodReady(pod) {
+			continue
+		}
+		if ipName, found := FindIP(ips, lb.Namespace, pod.Name, FabricName(lb.Namespace, subnet)); found {
+			if address := ipAddress(ips, ipName); address != "" {
+				info.addresses = append(info.addresses, address)
+			}
+		}
+	}
+	slices.Sort(info.addresses)
+	return info, nil, nil
+}
+
+func PodReady(pod corev1.Pod) bool {
+	if !pod.DeletionTimestamp.IsZero() {
+		return false
+	}
+	return slices.ContainsFunc(pod.Status.Conditions, func(c corev1.PodCondition) bool {
+		return c.Type == corev1.PodReady && c.Status == corev1.ConditionTrue
+	})
+}
+
+func (r *LoadBalancerReconciler) networkOf(ctx context.Context, namespace, subnetName, kind, owner string) (targetInfo, *Violation, error) {
 	var subnet v1alpha1.Subnet
-	if err = r.Client.Get(ctx, client.ObjectKey{Namespace: lb.Namespace, Name: nic.SubnetRef}, &subnet); err != nil {
+	if err := r.Client.Get(ctx, client.ObjectKey{Namespace: namespace, Name: subnetName}, &subnet); err != nil {
 		if apierrors.IsNotFound(err) {
-			return targetInfo{}, &Violation{Reason: ReasonTargetNotFound, Message: fmt.Sprintf("the Subnet %q of the VirtualMachine %q does not exist", nic.SubnetRef, name)}, nil
+			return targetInfo{}, &Violation{Reason: ReasonTargetNotFound, Message: fmt.Sprintf("the Subnet %q of the %s %q does not exist", subnetName, kind, owner)}, nil
 		}
 		return targetInfo{}, nil, err
 	}
-	var network v1alpha1.Network
-	err = r.Client.Get(ctx, client.ObjectKey{Name: subnet.Spec.NetworkRef}, &network)
+	var parent v1alpha1.Network
+	err := r.Client.Get(ctx, client.ObjectKey{Name: subnet.Spec.NetworkRef}, &parent)
 	if err != nil && !apierrors.IsNotFound(err) {
 		return targetInfo{}, nil, err
 	}
-	if err != nil || network.Status.VPC == "" {
+	if err != nil || parent.Status.VPC == "" {
 		return targetInfo{}, &Violation{Reason: ReasonFabricNotReady, Message: fmt.Sprintf("the Network %q has no Vpc yet", subnet.Spec.NetworkRef)}, nil
 	}
-	info = targetInfo{vpc: network.Status.VPC, subnet: nic.SubnetRef}
-	if ipName, found := FindIP(ips, lb.Namespace, name, FabricName(lb.Namespace, nic.SubnetRef)); found {
-		info.address = ipAddress(ips, ipName)
-	}
-	return info, nil, nil
+	return targetInfo{vpc: parent.Status.VPC, subnet: subnetName}, nil, nil
 }
 
 func ipAddress(ips []*unstructured.Unstructured, name string) string {
@@ -303,7 +384,7 @@ func (r *LoadBalancerReconciler) programInternal(ctx context.Context, lb v1alpha
 	if v != nil {
 		return refused(lb, v)
 	}
-	withEndpoints := slices.DeleteFunc(slices.Clone(listeners), func(l Listener) bool { return len(l.Endpoints) == 0 })
+	withEndpoints := programmable(listeners)
 	if len(withEndpoints) == 0 {
 		return refused(lb, &Violation{Reason: ReasonNoTargets, Message: "no target has an address yet"})
 	}
@@ -317,7 +398,8 @@ func (r *LoadBalancerReconciler) programInternal(ctx context.Context, lb v1alpha
 		return refused(lb, v)
 	}
 	in.Vip = address
-	return r.apply(ctx, lb, append([]*unstructured.Unstructured{vip}, InternalRules(in)...), missing)
+	cond, requeue, err := r.apply(ctx, lb, append([]*unstructured.Unstructured{vip}, InternalRules(in)...), missing)
+	return warnIdle(cond, lb, targets.idle), requeue, err
 }
 
 func (r *LoadBalancerReconciler) allocateVip(ctx context.Context, lb v1alpha1.LoadBalancer, vip *unstructured.Unstructured) (string, *Violation, error) {

@@ -83,6 +83,9 @@ spec:
                     targets:
                       items:
                         properties:
+                          containerRef:
+                            minLength: 1
+                            type: string
                           port:
                             format: int32
                             maximum: 65535
@@ -93,8 +96,10 @@ spec:
                             type: string
                         required:
                         - port
-                        - vmRef
                         type: object
+                        x-kubernetes-validations:
+                        - message: set exactly one of vmRef and containerRef
+                          rule: has(self.vmRef) != has(self.containerRef)
                       type: array
                       x-kubernetes-list-type: atomic
                   required:
