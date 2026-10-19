@@ -46,8 +46,8 @@ func settingStatus(setting v1alpha1.Setting, effective map[string]string) v1alph
 	}
 	status.Default = def.Default
 	err := def.Validate(setting.Spec.Value)
-	if err == nil && settings.AddressRange(setting.Name) {
-		err = settings.RangeConflict(effective)
+	if err == nil {
+		err = settings.Conflict(setting.Name, effective)
 	}
 	if err != nil {
 		status.Applied = ""

@@ -22,3 +22,18 @@ func TestRangeConflict(t *testing.T) {
 		}
 	}
 }
+
+func TestBucketConflict(t *testing.T) {
+	if err := BucketConflict(map[string]string{}); err != nil {
+		t.Fatal(err)
+	}
+	if err := BucketConflict(map[string]string{"registry.bucket": "bedrock-database-backups"}); err == nil {
+		t.Fatal("the same bucket for the registry and the database backups was accepted")
+	}
+	if err := Conflict("registry.bucket", map[string]string{"registry.bucket": "same", "database.backup.bucket": "same"}); err == nil {
+		t.Fatal("Conflict missed the bucket clash")
+	}
+	if err := Conflict("storage.replicas", map[string]string{"registry.bucket": "same", "database.backup.bucket": "same"}); err != nil {
+		t.Fatal("an unrelated key was refused")
+	}
+}

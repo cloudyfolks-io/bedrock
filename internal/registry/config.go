@@ -21,6 +21,9 @@ type Config struct {
 }
 
 func ParseConfig(values map[string]string) (Config, error) {
+	if err := settings.BucketConflict(values); err != nil {
+		return Config{}, err
+	}
 	effective := map[string]string{}
 	for _, key := range configKeys {
 		def, _ := settings.Lookup(key)
