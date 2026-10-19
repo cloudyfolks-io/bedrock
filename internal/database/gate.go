@@ -110,15 +110,10 @@ func EnginePolicyObject(db v1alpha1.Database) (*unstructured.Unstructured, error
 		TypeMeta:   metav1.TypeMeta{APIVersion: "networking.k8s.io/v1", Kind: "NetworkPolicy"},
 		ObjectMeta: metav1.ObjectMeta{Name: uid, Namespace: PlatformNamespace},
 		Spec: networkingv1.NetworkPolicySpec{
-			PodSelector: metav1.LabelSelector{MatchLabels: map[string]string{LabelInstance: uid, LabelComponent: ComponentEngine}},
+			PodSelector: metav1.LabelSelector{MatchLabels: map[string]string{LabelInstance: uid, LabelRole: RoleEngine}},
 			PolicyTypes: []networkingv1.PolicyType{networkingv1.PolicyTypeIngress},
 			Ingress: []networkingv1.NetworkPolicyIngressRule{{From: []networkingv1.NetworkPolicyPeer{{
-				PodSelector: &metav1.LabelSelector{
-					MatchLabels: map[string]string{LabelInstance: uid},
-					MatchExpressions: []metav1.LabelSelectorRequirement{{
-						Key: LabelComponent, Operator: metav1.LabelSelectorOpIn, Values: []string{ComponentGate, ComponentEngine},
-					}},
-				},
+				PodSelector: &metav1.LabelSelector{MatchLabels: map[string]string{LabelInstance: uid}},
 			}}}},
 		},
 	})

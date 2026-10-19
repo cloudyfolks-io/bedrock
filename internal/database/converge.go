@@ -260,7 +260,7 @@ func (r *Reconciler) apply(ctx context.Context, in *flow) (*Refusal, error) {
 func (r *Reconciler) specOf(in *flow) engine.Spec {
 	db := *in.db
 	labels, _ := OwnedMetadata(db, in.project)
-	podLabels := map[string]string{LabelComponent: ComponentEngine}
+	podLabels := map[string]string{LabelComponent: ComponentEngine, LabelRole: RoleEngine}
 	for key, value := range labels {
 		podLabels[key] = value
 	}

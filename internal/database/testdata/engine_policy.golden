@@ -12,16 +12,6 @@
           "from": [
             {
               "podSelector": {
-                "matchExpressions": [
-                  {
-                    "key": "app.kubernetes.io/component",
-                    "operator": "In",
-                    "values": [
-                      "gate",
-                      "engine"
-                    ]
-                  }
-                ],
                 "matchLabels": {
                   "app.kubernetes.io/instance": "0b0c0d0e-1111-4222-8333-444455556666"
                 }
@@ -32,8 +22,8 @@
       ],
       "podSelector": {
         "matchLabels": {
-          "app.kubernetes.io/component": "engine",
-          "app.kubernetes.io/instance": "0b0c0d0e-1111-4222-8333-444455556666"
+          "app.kubernetes.io/instance": "0b0c0d0e-1111-4222-8333-444455556666",
+          "bedrock.cloudyfolks.io/database-role": "engine"
         }
       },
       "policyTypes": [
