@@ -8,6 +8,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strings"
 
 	corev1 "k8s.io/api/core/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -15,6 +16,7 @@ import (
 	"github.com/cloudyfolks-io/bedrock/api/v1alpha1"
 	"github.com/cloudyfolks-io/bedrock/internal/authn/apiserver"
 	"github.com/cloudyfolks-io/bedrock/internal/encryption"
+	"github.com/cloudyfolks-io/bedrock/internal/k0s"
 )
 
 func ApplyEncryption(ctx context.Context, c client.Client, deps Deps) error {
@@ -35,16 +37,20 @@ func ApplyEncryption(ctx context.Context, c client.Client, deps Deps) error {
 		return nil
 	}
 	if encryption.Hash(current) == grant && !encryptionRestartWanted(deps.Root) {
-		return nil
+		return recordHandledGrant(deps.Root, grant)
 	}
 	target, err := readEncryptionSecret(ctx, deps)
 	if err != nil {
 		return err
 	}
 	if encryption.Hash(target) != grant {
-		return nil
+		return recordHandledGrant(deps.Root, grant)
 	}
-	return applyEncryptionConfig(ctx, deps, current, target, grant)
+	return errors.Join(applyEncryptionConfig(ctx, deps, current, target, grant), recordHandledGrant(deps.Root, grant))
+}
+
+func recordHandledGrant(root, grant string) error {
+	return os.WriteFile(filepath.Join(root, encryptionDir, encryptionHandled), []byte(grant), 0o600)
 }
 
 func encryptionRestartWanted(root string) bool {
@@ -146,6 +152,17 @@ func encryptionRestartProblem(ctx context.Context, deps Deps) string {
 		return "kube-apiserver still runs from before " + encryption.File
 	}
 	return bounded(ctx, deps.ProbeTimeout, func(probeCtx context.Context) string {
-		return apiProblem(probeCtx, deps.Exec, deps.Root, "/readyz")
+		return localReadyzProblem(probeCtx, deps)
 	})
+}
+
+func localReadyzProblem(ctx context.Context, deps Deps) string {
+	out, err := deps.Exec.Run(ctx, k0s.DefaultBinary, "kubectl", "--kubeconfig", filepath.Join(deps.Root, adminKubeconfig), "--server", localAPIServer, "--request-timeout=10s", "get", "--raw", "/readyz")
+	if err != nil {
+		return fmt.Sprintf("/readyz: %v", err)
+	}
+	if answer := strings.TrimSpace(out); answer != "ok" {
+		return fmt.Sprintf("/readyz: %s", answer)
+	}
+	return ""
 }

@@ -31,6 +31,10 @@ func secretReadCall(root string) string {
 	return "/usr/local/bin/k0s kubectl --kubeconfig " + filepath.Join(root, "var/lib/k0s/pki/admin.conf") + " --request-timeout=30s --namespace kube-system get secret bedrock-secrets-encryption -o json"
 }
 
+func localReadyzCall(root string) string {
+	return "/usr/local/bin/k0s kubectl --kubeconfig " + filepath.Join(root, "var/lib/k0s/pki/admin.conf") + " --server https://127.0.0.1:6443 --request-timeout=10s get --raw /readyz"
+}
+
 func encryptionSecretJSON(t *testing.T, content []byte) string {
 	t.Helper()
 	raw, err := json.Marshal(corev1.Secret{TypeMeta: metav1.TypeMeta{APIVersion: "v1", Kind: "Secret"}, Data: map[string][]byte{"encryption.yaml": content}})
@@ -57,7 +61,7 @@ func newApplyFixture(t *testing.T, node string, current, target []byte, grant st
 	deps.K0sPoll = 10 * time.Millisecond
 	deps.ProbeTimeout = time.Second
 	root := deps.Root
-	exec.Responses[readyzCall(root)] = "ok"
+	exec.Responses[localReadyzCall(root)] = "ok"
 	exec.Responses[secretReadCall(root)] = encryptionSecretJSON(t, target)
 	writeFixtureFile(t, encryptionPath(root), string(current))
 	touch(t, encryptionPath(root), time.Now().Add(-2*time.Hour))
@@ -242,5 +246,66 @@ func TestApplyEncryptionIgnoresWorkers(t *testing.T) {
 	deps.Exec = exec
 	if err := ApplyEncryption(context.Background(), k8sClient, deps); err != nil || len(exec.Calls) != 0 {
 		t.Fatalf("err %v calls %v", err, exec.Calls)
+	}
+}
+
+func TestApplyEncryptionDoesNotTrustAnotherNodeToAnswerReadyz(t *testing.T) {
+	cfg := newApplyConfigs(t)
+	f := newApplyFixture(t, "cp-enc-vip", cfg.one, cfg.added, encryption.Hash(cfg.added))
+	delete(f.exec.Responses, localReadyzCall(f.deps.Root))
+	f.exec.Responses[readyzCall(f.deps.Root)] = "ok"
+	err := ApplyEncryption(context.Background(), k8sClient, f.deps)
+	if err == nil || !strings.Contains(err.Error(), "did not restart") {
+		t.Fatalf("a readyz answer of the VIP must not count: %v", err)
+	}
+	if f.file(t) != string(cfg.one) {
+		t.Fatal("the old file must return")
+	}
+}
+
+func handledGrant(t *testing.T, f applyFixture) string {
+	t.Helper()
+	return syncEncryptionStatus(f.deps, hostWithRole(f.node, v1alpha1.RoleControlPlane)).HandledGrant
+}
+
+func TestApplyEncryptionReportsTheGrantItHandled(t *testing.T) {
+	cfg := newApplyConfigs(t)
+	applied := newApplyFixture(t, "cp-enc-handled-ok", cfg.one, cfg.added, encryption.Hash(cfg.added))
+	if err := ApplyEncryption(context.Background(), k8sClient, applied.deps); err != nil || handledGrant(t, applied) != encryption.Hash(cfg.added) {
+		t.Fatalf("applied: %v handled %q", err, handledGrant(t, applied))
+	}
+	stale := newApplyFixture(t, "cp-enc-handled-stale", cfg.one, cfg.added, encryption.Hash(cfg.promoted))
+	if err := ApplyEncryption(context.Background(), k8sClient, stale.deps); err != nil || handledGrant(t, stale) != encryption.Hash(cfg.promoted) {
+		t.Fatalf("stale: %v handled %q", err, handledGrant(t, stale))
+	}
+	failed := newApplyFixture(t, "cp-enc-handled-fail", cfg.promoted, cfg.removed, encryption.Hash(cfg.removed))
+	failed.deps.Exec = restartHost{FakeExec: failed.exec, onRestart: func() {}}
+	if err := ApplyEncryption(context.Background(), k8sClient, failed.deps); err == nil || handledGrant(t, failed) != encryption.Hash(cfg.removed) {
+		t.Fatalf("failed: %v handled %q", err, handledGrant(t, failed))
+	}
+}
+
+func TestApplyEncryptionRetriesAfterTheFailureMarkerIsDeleted(t *testing.T) {
+	cfg := newApplyConfigs(t)
+	f := newApplyFixture(t, "cp-enc-retry", cfg.promoted, cfg.removed, encryption.Hash(cfg.removed))
+	root := f.deps.Root
+	attempts := 0
+	f.deps.Exec = restartHost{FakeExec: f.exec, onRestart: func() {
+		attempts++
+		if attempts == 2 || attempts >= 3 {
+			fakeAPIServer(t, root, time.Now().Add(time.Duration(attempts)*time.Hour))
+		}
+	}}
+	if err := ApplyEncryption(context.Background(), k8sClient, f.deps); err == nil {
+		t.Fatal("the first try must fail")
+	}
+	if err := os.Remove(filepath.Join(root, "etc/bedrock/encryption/.apply-failed")); err != nil {
+		t.Fatal(err)
+	}
+	if err := ApplyEncryption(context.Background(), k8sClient, f.deps); err != nil {
+		t.Fatalf("the grant must run again: %v", err)
+	}
+	if f.file(t) != string(cfg.removed) {
+		t.Fatal("the new file must stay after the retry")
 	}
 }
