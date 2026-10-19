@@ -134,3 +134,15 @@ func docDefault(value string) string {
 	}
 	return "`" + value + "`"
 }
+
+func TestLabScriptUsesTheDefaultBuildImages(t *testing.T) {
+	raw, err := os.ReadFile(filepath.Join("..", "..", "hack", "lab-build.sh"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, key := range []string{"build.git-image", "build.buildkit-image", "build.builder-image"} {
+		if image := def(t, key).Default; !strings.Contains(string(raw), "="+image+"\n") {
+			t.Errorf("hack/lab-build.sh does not use the default %s %s", key, image)
+		}
+	}
+}

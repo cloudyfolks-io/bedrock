@@ -128,7 +128,7 @@ k0s ctr --namespace k8s.io images import "$cache/seaweedfs.tar"
 k0s ctr --namespace k8s.io images import "$cache/aws-cli.tar"
 k0s ctr --namespace k8s.io images import "$cache/busybox.tar"
 
-for step_file in encryption addons tenancy images compute network container objectstorage backup panel metering cascade; do
+for step_file in encryption addons tenancy images compute network container build objectstorage backup panel metering cascade; do
   source "$steps_dir/$step_file.sh"
 done
 
@@ -193,6 +193,11 @@ steps=(
   container_load_balancer
   container_proxy
   container_cleanup
+  build_roles
+  build_missing_secret
+  build_kata_gate
+  build_immutable
+  build_cleanup
   objectstorage_user_and_bucket
   objectstorage_roundtrip
   backup_target
