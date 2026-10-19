@@ -4,6 +4,7 @@ import (
 	"context"
 	"strings"
 	"testing"
+	"time"
 
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -531,5 +532,49 @@ func TestRepositoryPathStripsTheProject(t *testing.T) {
 		if got := repositoryPath(input[0], input[1]); got != want {
 			t.Errorf("%v -> %q, want %q", input, got, want)
 		}
+	}
+}
+
+func TestRegistryUsageRefreshesEveryFiveMinutes(t *testing.T) {
+	if usageInterval != 5*time.Minute {
+		t.Fatalf("usage interval %s", usageInterval)
+	}
+	state := newHarborState(t)
+	r, _ := registryWorld(t, state, registryFor("images", "acme-images"))
+	if got := reconcileRegistry(t, r, "images"); got.RequeueAfter != 5*time.Minute {
+		t.Errorf("requeue %s", got.RequeueAfter)
+	}
+}
+
+func TestRegistryUsageFollowsHarbor(t *testing.T) {
+	state := newHarborState(t)
+	r, c := registryWorld(t, state, registryFor("images", "acme-images"))
+	reconcileRegistry(t, r, "images")
+	state.addRepos("acme-images", 4)
+	reconcileRegistry(t, r, "images")
+	reg := fetchRegistry(t, c, "images")
+	if reg.Status.RepositoryCount != 4 || reg.Status.UsedBytes != 42 {
+		t.Errorf("status %+v", reg.Status)
+	}
+}
+
+func TestRegistryKeepsTheOldUsageWhenTheSummaryFails(t *testing.T) {
+	state := newHarborState(t)
+	r, c := registryWorld(t, state, registryFor("images", "acme-images"))
+	reconcileRegistry(t, r, "images")
+	state.addRepos("acme-images", 2)
+	reconcileRegistry(t, r, "images")
+	before := fetchRegistry(t, c, "images").Status
+	state.mu.Lock()
+	state.failSummary = true
+	state.mu.Unlock()
+	state.addRepos("acme-images", 3)
+	reconcileRegistry(t, r, "images")
+	after := fetchRegistry(t, c, "images")
+	if after.Status.UsedBytes != before.UsedBytes || after.Status.HardBytes != before.HardBytes || after.Status.RepositoryCount != 2 {
+		t.Errorf("usage changed: before %+v after %+v", before, after.Status)
+	}
+	if readyCondition(after).Status != metav1.ConditionTrue {
+		t.Errorf("condition %+v", readyCondition(after))
 	}
 }

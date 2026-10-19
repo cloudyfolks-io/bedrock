@@ -87,6 +87,9 @@ type ProjectQuota struct {
 	// +optional
 	// +kubebuilder:validation:Minimum=0
 	Containers *int32 `json:"containers,omitempty"`
+	// +optional
+	// +kubebuilder:validation:Minimum=0
+	Registries *int32 `json:"registries,omitempty"`
 }
 
 type ProjectMember struct {

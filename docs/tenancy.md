@@ -134,6 +134,7 @@ The quota of a project becomes one ApplicationAwareResourceQuota.
 | storage | requests.storage |
 | vms | count/virtualmachines.bedrock.cloudyfolks.io |
 | containers | count/containers.bedrock.cloudyfolks.io |
+| registries | count/registries.bedrock.cloudyfolks.io |
 
 A VM counts its CPU and memory under the same keys as a Pod.
 A Container counts the requests of its pods under the same keys.
