@@ -525,7 +525,8 @@ automatic restore try the host key first, and then the retired keys.
 
 The agent deletes a retired key when no archive in
 `/var/lib/bedrock/backups` has a stamp at or before the stamp of the retired
-key. If you copied archives off the host, keep the retired key for as long as
+key, and the key is older than one day. The wait of one day covers an archive
+that the agent is making when you rotate. If you copied archives off the host, keep the retired key for as long as
 you keep those copies.
 
 ### Set the admin recipients
