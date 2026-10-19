@@ -128,7 +128,7 @@ k0s ctr --namespace k8s.io images import "$cache/seaweedfs.tar"
 k0s ctr --namespace k8s.io images import "$cache/aws-cli.tar"
 k0s ctr --namespace k8s.io images import "$cache/busybox.tar"
 
-for step_file in encryption addons tenancy images compute network container objectstorage objectstorage-iam backup panel metering cascade; do
+for step_file in encryption addons tenancy images compute network container objectstorage objectstorage-iam database backup panel metering cascade; do
   source "$steps_dir/$step_file.sh"
 done
 
@@ -202,6 +202,18 @@ steps=(
   objectstorage_suspend
   objectstorage_force_destroy
   objectstorage_public_host
+  database_extras_prepare
+  database_mysql_create
+  database_valkey_create
+  database_vm_greetings
+  database_mysql_access
+  database_valkey_access
+  database_mysql_backup_and_restore
+  database_mysql_restore_from_deleted
+  database_mysql_resize
+  database_postgres_upgrade
+  database_valkey_suspend_resume_logs
+  database_extras_cleanup
   backup_target
   backup_once
   backup_restore_replace
