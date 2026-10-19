@@ -10,7 +10,11 @@ import (
 	"github.com/cloudyfolks-io/bedrock/api/v1alpha1"
 )
 
-const reportFreshness = 3 * v1alpha1.AgentReportInterval
+const (
+	reportFreshness = 3 * v1alpha1.AgentReportInterval
+	leaseFreshness  = 30 * time.Second
+	clockSkewLimit  = 30 * time.Second
+)
 
 func rotationGate(hosts []v1alpha1.Host, nodes []corev1.Node, leases []coordinationv1.Lease, now time.Time) string {
 	controllers := controlPlaneHosts(hosts)
@@ -23,30 +27,29 @@ func rotationGate(hosts []v1alpha1.Host, nodes []corev1.Node, leases []coordinat
 }
 
 func freshnessProblem(host v1alpha1.Host, nodes []corev1.Node, leases []coordinationv1.Lease, now time.Time) string {
-	if reported := host.Status.ReportedAt; reported == nil || now.Sub(reported.Time) > reportFreshness {
+	reported := host.Status.ReportedAt
+	if reported == nil || !withinBound(now.Sub(reported.Time), reportFreshness) {
 		return fmt.Sprintf("a fresh report of host %s", host.Name)
 	}
-	node, found := findNode(nodes, host.Name)
-	if !found {
+	if _, found := findNode(nodes, host.Name); !found {
 		return fmt.Sprintf("host %s: it has no Node", host.Name)
 	}
-	if now.Sub(lastHeartbeat(node, leases)) > reportFreshness {
-		return fmt.Sprintf("a fresh heartbeat of the Node of host %s", host.Name)
+	renewed, found := leaseRenewal(leases, host.Name)
+	if !found || !withinBound(now.Sub(renewed), leaseFreshness) {
+		return fmt.Sprintf("a fresh node lease of host %s", host.Name)
 	}
 	return ""
 }
 
-func lastHeartbeat(node corev1.Node, leases []coordinationv1.Lease) time.Time {
-	var latest time.Time
-	for _, condition := range node.Status.Conditions {
-		if condition.Type == corev1.NodeReady && condition.LastHeartbeatTime.After(latest) {
-			latest = condition.LastHeartbeatTime.Time
-		}
-	}
+func withinBound(age, bound time.Duration) bool {
+	return age <= bound && age >= -clockSkewLimit
+}
+
+func leaseRenewal(leases []coordinationv1.Lease, name string) (time.Time, bool) {
 	for _, lease := range leases {
-		if lease.Name == node.Name && lease.Spec.RenewTime != nil && lease.Spec.RenewTime.After(latest) {
-			latest = lease.Spec.RenewTime.Time
+		if lease.Name == name && lease.Spec.RenewTime != nil {
+			return lease.Spec.RenewTime.Time, true
 		}
 	}
-	return latest
+	return time.Time{}, false
 }
