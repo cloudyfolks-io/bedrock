@@ -176,6 +176,9 @@ func (r *SchemaReconciler) finalize(ctx context.Context, schema v1alpha1.Databas
 	if err != nil {
 		return ctrl.Result{}, err
 	}
+	if schemaProblem(db.Spec.Engine, schema.Status.Name) != "" {
+		return release()
+	}
 	_, blocked, err := resolveDatabase(ctx, r.Client, schema.Namespace, schema.Spec.DatabaseRef)
 	if err != nil {
 		return ctrl.Result{}, err

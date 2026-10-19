@@ -91,6 +91,9 @@ func (r *Reconciler) prepare(ctx context.Context, in *flow) (*Refusal, error) {
 		if refused := checkNew(catalog, db); refused != nil {
 			return refused, nil
 		}
+		if refused := checkLostEngine(catalog, db); refused != nil {
+			return refused, nil
+		}
 	} else if refused := checkExisting(catalog, db, cluster); refused != nil {
 		return refused, nil
 	}
@@ -531,6 +534,7 @@ func (r *Reconciler) recordApplied(in *flow, primary *unstructured.Unstructured,
 		return
 	}
 	applied := appliedOf(db)
+	applied.Instances = int32(Instances(in.catalog.Class))
 	observed.Applied = &applied
 	observed.Upgrading = false
 }

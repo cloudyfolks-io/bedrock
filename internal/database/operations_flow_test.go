@@ -228,3 +228,50 @@ func TestAMySQLSchemaNamedAppOrASystemSchemaIsRefusedAndNeverDropped(t *testing.
 		}
 	}
 }
+
+func TestAFlipAfterTheLossOfTheEngineObjectIsRefused(t *testing.T) {
+	ctx := context.Background()
+	pg := newWorld(t, nil)
+	pg.bringUp()
+	my := mysqlWorld(t, "small")
+	my.bringUpMySQL()
+	for name, w := range map[string]*world{"postgresql": pg, "mysql": my} {
+		primary := &unstructured.Unstructured{}
+		primary.SetGroupVersionKind(primaryGVK(w.db.Spec.Engine))
+		primary.SetNamespace(PlatformNamespace)
+		primary.SetName(string(w.db.UID))
+		must(t, w.c.Delete(ctx, primary))
+		if name == "postgresql" {
+			ha := &v1alpha1.DatabaseClass{ObjectMeta: metav1.ObjectMeta{Name: w.class + "-ha"}, Spec: v1alpha1.DatabaseClassSpec{CPU: resource.MustParse("500m"), Memory: resource.MustParse("1Gi"), MinStorageGi: 5, MaxStorageGi: 100, HighAvailability: true, Enabled: true}}
+			create(t, w.c, ha)
+		}
+		w.switchClass(w.class + "-ha")
+		if w.reason() != ReasonClassChangeNotSupported {
+			t.Errorf("%s: reason %s", name, w.reason())
+		}
+		if err := w.c.Get(ctx, client.ObjectKeyFromObject(primary), primary); err == nil {
+			t.Errorf("%s: the engine object was made again with another size", name)
+		}
+	}
+}
+
+func TestADeletedMySQLSchemaWithAReservedNameReleasesItsFinalizerWithoutADrop(t *testing.T) {
+	c := startEnv(t)
+	ctx := context.Background()
+	fake := &fakeEngine{}
+	db := readyEngineDatabase(t, c, v1alpha1.DatabaseEngineMySQL)
+	schema := &v1alpha1.DatabaseSchema{ObjectMeta: metav1.ObjectMeta{Name: "legacy-" + nextSequence(), Namespace: db.Namespace, Finalizers: []string{finalizerSchema}},
+		Spec: v1alpha1.DatabaseSchemaSpec{DatabaseRef: db.Name, Name: "app", DeletionPolicy: v1alpha1.DatabaseSchemaDelete}}
+	create(t, c, schema)
+	schema.Status.Name = "app"
+	must(t, c.Status().Update(ctx, schema))
+	must(t, c.Delete(ctx, schema))
+	_, err := (&SchemaReconciler{Client: c, Engine: fake.factoryOf(v1alpha1.DatabaseEngineMySQL)}).Reconcile(ctx, requestOf(schema))
+	must(t, err)
+	if err := c.Get(ctx, client.ObjectKeyFromObject(schema), schema); err == nil {
+		t.Fatalf("the schema is stuck with finalizers %v", schema.Finalizers)
+	}
+	if len(fake.scripts) != 0 {
+		t.Fatalf("scripts ran: %v", fake.scripts)
+	}
+}
