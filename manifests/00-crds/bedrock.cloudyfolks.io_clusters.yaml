@@ -286,6 +286,8 @@ spec:
                     type: string
                   phase:
                     type: string
+                  reverting:
+                    type: boolean
                   rewrittenSecrets:
                     format: int64
                     type: integer

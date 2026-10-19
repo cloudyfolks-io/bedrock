@@ -145,6 +145,8 @@ type EncryptionRotationStatus struct {
 	// +optional
 	NewKey string `json:"newKey,omitempty"`
 	// +optional
+	Reverting bool `json:"reverting,omitempty"`
+	// +optional
 	RewrittenSecrets int64 `json:"rewrittenSecrets,omitempty"`
 	// +optional
 	LastRotatedAt *metav1.Time `json:"lastRotatedAt,omitempty"`
