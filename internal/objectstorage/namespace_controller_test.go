@@ -3,6 +3,7 @@ package objectstorage
 import (
 	"context"
 	"testing"
+	"time"
 
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -10,6 +11,7 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/event"
 
 	"github.com/cloudyfolks-io/bedrock/api/v1alpha1"
 	"github.com/cloudyfolks-io/bedrock/internal/platform"
@@ -28,10 +30,10 @@ func ownedRook(t *testing.T, apiVersionKind [2]string, name string, owner platfo
 	}
 }
 
-func goneProjectObjects(t *testing.T) {
+func goneProjectObjects(t *testing.T, gone string) {
 	t.Helper()
-	ownedRook(t, [2]string{"ceph.rook.io/v1", "CephObjectStoreAccount"}, "gone-prod", platform.Owner{Kind: "Namespace", Name: "gone-prod", UID: types.UID("old"), Tenant: "gone", Project: "prod"})
-	ownedRook(t, [2]string{"ceph.rook.io/v1", "CephObjectStoreUser"}, "gone-prod.app", platform.Owner{Kind: "ObjectStorageUser", Name: "app", Namespace: "gone-prod", UID: types.UID("old"), Tenant: "gone", Project: "prod"})
+	ownedRook(t, [2]string{"ceph.rook.io/v1", "CephObjectStoreAccount"}, gone, platform.Owner{Kind: "Namespace", Name: gone, UID: types.UID("old"), Tenant: "gone", Project: "prod"})
+	ownedRook(t, [2]string{"ceph.rook.io/v1", "CephObjectStoreUser"}, gone+".app", platform.Owner{Kind: "ObjectStorageUser", Name: "app", Namespace: gone, UID: types.UID("old"), Tenant: "gone", Project: "prod"})
 	ownedRook(t, [2]string{"ceph.rook.io/v1", "CephObjectStoreUser"}, "acme-prod.app", platform.Owner{Kind: "ObjectStorageUser", Name: "app", Namespace: "acme-prod", UID: types.UID("live"), Tenant: "acme", Project: "prod"})
 	ownedRook(t, [2]string{"ceph.rook.io/v1", "CephObjectStoreAccount"}, "acme-prod", platform.Owner{Kind: "Namespace", Name: "acme-prod", UID: types.UID("live"), Tenant: "acme", Project: "prod"})
 	ownedRook(t, [2]string{"ceph.rook.io/v1", "CephObjectStoreUser"}, "bedrock-admin", platform.Owner{})
@@ -62,12 +64,12 @@ func rookNames(t *testing.T, kind string) map[string]bool {
 
 func TestNamespaceGoneReleasesItsAccountAndUsers(t *testing.T) {
 	fresh(t)
-	goneProjectObjects(t)
-	if result := reconcileNamespace(t, "gone-prod"); result.RequeueAfter != 0 {
+	goneProjectObjects(t, "vanished-prod")
+	if result := reconcileNamespace(t, "vanished-prod"); result.RequeueAfter != 0 {
 		t.Fatalf("result %+v", result)
 	}
 	users, accounts := rookNames(t, "CephObjectStoreUser"), rookNames(t, "CephObjectStoreAccount")
-	if users["gone-prod.app"] || accounts["gone-prod"] {
+	if users["vanished-prod.app"] || accounts["vanished-prod"] {
 		t.Fatalf("left behind: %v %v", users, accounts)
 	}
 	if !users["acme-prod.app"] || !users["bedrock-admin"] || !accounts["acme-prod"] {
@@ -77,7 +79,7 @@ func TestNamespaceGoneReleasesItsAccountAndUsers(t *testing.T) {
 
 func TestNamespaceThatIsAliveKeepsEverything(t *testing.T) {
 	fresh(t)
-	goneProjectObjects(t)
+	goneProjectObjects(t, "vanished-prod")
 	reconcileNamespace(t, "acme-prod")
 	if !rookNames(t, "CephObjectStoreAccount")["acme-prod"] || !rookNames(t, "CephObjectStoreUser")["acme-prod.app"] {
 		t.Fatal("a live project lost its objects")
@@ -86,23 +88,23 @@ func TestNamespaceThatIsAliveKeepsEverything(t *testing.T) {
 
 func TestNamespaceWaitsForTheTenantObjects(t *testing.T) {
 	fresh(t)
-	goneProjectObjects(t)
-	createNamespaceNamed(t, "gone-prod")
-	createUser(t, "gone-prod", "app", v1alpha1.ObjectStorageUserSpec{Permission: "read"})
-	deleteNamespaceRecord(t, "gone-prod")
-	if result := reconcileNamespace(t, "gone-prod"); result.RequeueAfter == 0 {
+	goneProjectObjects(t, "waiting-prod")
+	createNamespaceNamed(t, "waiting-prod")
+	createUser(t, "waiting-prod", "app", v1alpha1.ObjectStorageUserSpec{Permission: "read"})
+	deleteNamespaceRecord(t, "waiting-prod")
+	if result := reconcileNamespace(t, "waiting-prod"); result.RequeueAfter == 0 {
 		t.Fatalf("result %+v", result)
 	}
-	if !rookNames(t, "CephObjectStoreAccount")["gone-prod"] {
+	if !rookNames(t, "CephObjectStoreAccount")["waiting-prod"] {
 		t.Fatal("the account was removed while a user remained")
 	}
-	if err := testClient.Delete(context.Background(), &v1alpha1.ObjectStorageUser{ObjectMeta: metav1.ObjectMeta{Name: "app", Namespace: "gone-prod"}}); err != nil {
+	if err := testClient.Delete(context.Background(), &v1alpha1.ObjectStorageUser{ObjectMeta: metav1.ObjectMeta{Name: "app", Namespace: "waiting-prod"}}); err != nil {
 		t.Fatal(err)
 	}
-	if result := reconcileNamespace(t, "gone-prod"); result.RequeueAfter != 0 {
+	if result := reconcileNamespace(t, "waiting-prod"); result.RequeueAfter != 0 {
 		t.Fatalf("result %+v", result)
 	}
-	if rookNames(t, "CephObjectStoreAccount")["gone-prod"] {
+	if rookNames(t, "CephObjectStoreAccount")["waiting-prod"] {
 		t.Fatal("the account remains")
 	}
 }
@@ -139,7 +141,7 @@ func TestOwnerExists(t *testing.T) {
 		{"missing user", platform.Owner{Kind: "ObjectStorageUser", Name: "none", Namespace: "acme-prod", UID: user.UID}, false},
 		{"live namespace", platform.Owner{Kind: "Namespace", Name: "acme-prod", UID: project.UID}, true},
 		{"recreated namespace", platform.Owner{Kind: "Namespace", Name: "acme-prod", UID: types.UID("old")}, false},
-		{"missing namespace", platform.Owner{Kind: "Namespace", Name: "gone-prod", UID: project.UID}, false},
+		{"missing namespace", platform.Owner{Kind: "Namespace", Name: "vanished-prod", UID: project.UID}, false},
 		{"unknown kind", platform.Owner{Kind: "Other", Name: "x"}, true},
 	}
 	for _, tc := range cases {
@@ -150,16 +152,44 @@ func TestOwnerExists(t *testing.T) {
 	}
 }
 
-func TestSweeperDryRunKeepsOrphans(t *testing.T) {
+func TestSweeperDryRunStillReleasesAGoneNamespace(t *testing.T) {
 	fresh(t)
-	goneProjectObjects(t)
+	goneProjectObjects(t, "vanished-prod")
 	(&Sweeper{Client: testClient, DryRun: true}).sweep(context.Background())
-	if !rookNames(t, "CephObjectStoreUser")["gone-prod.app"] {
-		t.Fatal("a dry run removed an orphan")
+	users, accounts := rookNames(t, "CephObjectStoreUser"), rookNames(t, "CephObjectStoreAccount")
+	if users["vanished-prod.app"] || accounts["vanished-prod"] {
+		t.Fatalf("the objects of a gone namespace stayed: %v %v", users, accounts)
 	}
+	if !users["acme-prod.app"] || !accounts["acme-prod"] || !users["bedrock-admin"] {
+		t.Fatalf("a dry run removed an orphan of a live namespace: %v %v", users, accounts)
+	}
+}
+
+func TestSweeperWithoutDryRunRemovesOtherOrphans(t *testing.T) {
+	fresh(t)
+	goneProjectObjects(t, "vanished-prod")
 	(&Sweeper{Client: testClient, DryRun: false}).sweep(context.Background())
-	users := rookNames(t, "CephObjectStoreUser")
-	if users["gone-prod.app"] || !users["bedrock-admin"] {
-		t.Fatalf("users %v", users)
+	users, accounts := rookNames(t, "CephObjectStoreUser"), rookNames(t, "CephObjectStoreAccount")
+	if users["vanished-prod.app"] || users["acme-prod.app"] || accounts["acme-prod"] || !users["bedrock-admin"] {
+		t.Fatalf("users %v accounts %v", users, accounts)
+	}
+}
+
+func TestSweeperKeepsTheAccountOfARecreatedNamespaceName(t *testing.T) {
+	fresh(t)
+	ownedRook(t, [2]string{"ceph.rook.io/v1", "CephObjectStoreAccount"}, "acme-prod", platform.Owner{Kind: "Namespace", Name: "acme-prod", UID: types.UID("old"), Tenant: "acme", Project: "prod"})
+	(&Sweeper{Client: testClient, DryRun: true}).sweep(context.Background())
+	if !rookNames(t, "CephObjectStoreAccount")["acme-prod"] {
+		t.Fatal("the account of a live namespace was released")
+	}
+}
+
+func TestNamespaceCreateEventsReachTheReconciler(t *testing.T) {
+	if !namespaceEvents().Create(event.CreateEvent{Object: &corev1.Namespace{}}) {
+		t.Fatal("a namespace that exists at start is never checked")
+	}
+	leaving := &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{DeletionTimestamp: &metav1.Time{Time: time.Now()}}}
+	if !namespaceEvents().Update(event.UpdateEvent{ObjectOld: &corev1.Namespace{}, ObjectNew: leaving}) {
+		t.Fatal("a leaving namespace is ignored")
 	}
 }

@@ -42,6 +42,7 @@ func (s *Sweeper) sweep(ctx context.Context) {
 	}
 	for _, orphan := range orphans {
 		logf.FromContext(ctx).Info("orphan platform object", "kind", orphan.GetKind(), "name", orphan.GetName(), "dryRun", s.DryRun)
+		s.releaseGone(ctx, platform.OwnerOf(orphan))
 	}
 }
 
@@ -66,4 +67,21 @@ func stillOwns(ctx context.Context, c client.Client, obj client.Object, key clie
 		return false, err
 	}
 	return owner.UID == "" || obj.GetUID() == owner.UID, nil
+}
+
+func (s *Sweeper) releaseGone(ctx context.Context, owner platform.Owner) {
+	namespace := owner.Namespace
+	if owner.Kind == "Namespace" {
+		namespace = owner.Name
+	}
+	if namespace == "" {
+		return
+	}
+	err := s.Client.Get(ctx, client.ObjectKey{Name: namespace}, namespaceMeta())
+	if !apierrors.IsNotFound(err) {
+		return
+	}
+	if err := ReleaseNamespace(ctx, s.Client, namespace); err != nil {
+		logf.FromContext(ctx).Info("release of a gone namespace failed", "namespace", namespace, "error", err.Error())
+	}
 }
