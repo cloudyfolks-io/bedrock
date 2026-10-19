@@ -1,0 +1,43 @@
+{
+  "apiVersion": "networking.k8s.io/v1",
+  "kind": "NetworkPolicy",
+  "metadata": {
+    "labels": {
+      "bedrock.cloudyfolks.io/kind": "NetworkPolicy",
+      "bedrock.cloudyfolks.io/name": "engines"
+    },
+    "name": "engines",
+    "namespace": "bedrock-dbaas"
+  },
+  "spec": {
+    "ingress": [
+      {
+        "from": [
+          {
+            "namespaceSelector": {
+              "matchExpressions": [
+                {
+                  "key": "kubernetes.io/metadata.name",
+                  "operator": "In",
+                  "values": [
+                    "bedrock-system",
+                    "cnpg",
+                    "monitoring"
+                  ]
+                }
+              ]
+            }
+          }
+        ]
+      }
+    ],
+    "podSelector": {
+      "matchLabels": {
+        "app.kubernetes.io/component": "engine"
+      }
+    },
+    "policyTypes": [
+      "Ingress"
+    ]
+  }
+}

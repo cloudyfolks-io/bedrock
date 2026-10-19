@@ -10,7 +10,7 @@ import (
 	"github.com/cloudyfolks-io/bedrock/api/v1alpha1"
 )
 
-func database(name, engine string) *v1alpha1.Database {
+func newDatabase(name, engine string) *v1alpha1.Database {
 	return &v1alpha1.Database{
 		ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: "default"},
 		Spec: v1alpha1.DatabaseSpec{
@@ -31,7 +31,7 @@ func TestDatabaseValidation(t *testing.T) {
 	c, _ := StartTestEnv(t)
 	ctx := context.Background()
 
-	good := database("orders", "postgresql")
+	good := newDatabase("orders", "postgresql")
 	good.Spec.AllowedCIDRs = []string{"10.0.0.0/24", "192.168.1.0/28"}
 	createValid(t, c, good)
 	reload(t, c, good)
@@ -48,36 +48,36 @@ func TestDatabaseValidation(t *testing.T) {
 		t.Fatalf("status must be writable through the status subresource: %v", err)
 	}
 
-	createInvalid(t, c, database("unknown", "oracle"), "spec.engine")
-	bad := database("bad-phase", "postgresql")
+	createInvalid(t, c, newDatabase("unknown", "oracle"), "spec.engine")
+	bad := newDatabase("bad-phase", "postgresql")
 	createValid(t, c, bad)
 	bad.Status.Phase = "Sleeping"
 	if err := c.Status().Update(ctx, bad); err == nil {
 		t.Fatal("an unknown phase was accepted")
 	}
 
-	badCIDR := database("bad-cidr", "postgresql")
+	badCIDR := newDatabase("bad-cidr", "postgresql")
 	badCIDR.Spec.AllowedCIDRs = []string{"10.0.0.0/33"}
 	createInvalid(t, c, badCIDR, "allowedCIDRs entries must be IPv4 CIDRs")
-	ipv6 := database("ipv6-cidr", "postgresql")
+	ipv6 := newDatabase("ipv6-cidr", "postgresql")
 	ipv6.Spec.AllowedCIDRs = []string{"fd00::/64"}
 	createInvalid(t, c, ipv6, "allowedCIDRs entries must be IPv4 CIDRs")
 
-	zero := database("zero-storage", "postgresql")
+	zero := newDatabase("zero-storage", "postgresql")
 	zero.Spec.StorageGi = 0
 	createInvalid(t, c, zero, "spec.storageGi")
-	long := database("a1234567890123456789012345678901234567890123456789012", "postgresql")
+	long := newDatabase("a1234567890123456789012345678901234567890123456789012", "postgresql")
 	createInvalid(t, c, long, "at most 52 characters")
 }
 
 func TestDatabaseValkeyHasNoBackups(t *testing.T) {
 	c, _ := StartTestEnv(t)
 
-	createValid(t, c, database("cache", "valkey"))
-	withBackup := database("cache-backup", "valkey")
+	createValid(t, c, newDatabase("cache", "valkey"))
+	withBackup := newDatabase("cache-backup", "valkey")
 	withBackup.Spec.Backup.Enabled = true
 	createInvalid(t, c, withBackup, "a Valkey database has no backups")
-	defaulted := database("cache-default", "valkey")
+	defaulted := newDatabase("cache-default", "valkey")
 	defaulted.Spec.Backup = v1alpha1.DatabaseBackupSpec{}
 	createValid(t, c, defaulted)
 	reload(t, c, defaulted)
@@ -89,7 +89,7 @@ func TestDatabaseValkeyHasNoBackups(t *testing.T) {
 func TestDatabaseImmutableFields(t *testing.T) {
 	c, _ := StartTestEnv(t)
 
-	db := database("orders", "postgresql")
+	db := newDatabase("orders", "postgresql")
 	createValid(t, c, db)
 
 	engine := db.DeepCopy()
@@ -117,7 +117,7 @@ func TestDatabaseImmutableFields(t *testing.T) {
 func TestDatabaseRestoreIsImmutableOnceSet(t *testing.T) {
 	c, _ := StartTestEnv(t)
 
-	db := database("restored", "postgresql")
+	db := newDatabase("restored", "postgresql")
 	db.Spec.Restore = &v1alpha1.DatabaseRestore{SourceUID: "11111111-2222-3333-4444-555555555555"}
 	createValid(t, c, db)
 
@@ -133,7 +133,7 @@ func TestDatabaseRestoreIsImmutableOnceSet(t *testing.T) {
 func TestDatabaseStorageDoesNotShrink(t *testing.T) {
 	c, _ := StartTestEnv(t)
 
-	db := database("orders", "postgresql")
+	db := newDatabase("orders", "postgresql")
 	createValid(t, c, db)
 
 	smaller := db.DeepCopy()
