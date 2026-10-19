@@ -47,6 +47,7 @@ Read `docs/authn.md` for users, groups, LDAP and OIDC, API tokens,
 - [Backup](docs/backup.md): back up and restore VMs, etcd snapshots.
 - [Secrets at rest](docs/secrets-at-rest.md): Secret encryption, the key file and KMS v2.
 - [Object storage](docs/object-storage.md): S3 users and buckets on the shared Ceph object store.
+- [Registry](docs/registry.md): Harbor registries and robot credentials.
 - [Proxy and panel API](docs/proxy.md): the edge service for the panel and the API.
 - [Panel](docs/panel.md): the web console.
 - [Addons, audit and monitoring](docs/addons.md): optional addons, audit log and metering.
