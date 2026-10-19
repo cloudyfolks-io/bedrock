@@ -182,6 +182,32 @@ It is not a job of the local runner. Run it by hand on a Linux host with about 4
 Do not run it while a gate runs.
 The runbook `docs/runbooks/adopt-ceph.md` describes the stages.
 
+## Build lab
+
+The script `hack/lab-build.sh` runs real builds.
+It is not a job of the local runner. Run it by hand on a node of a cluster with KVM and an enabled `kata` Addon.
+Do not run it while a gate runs.
+
+A build pod is on the project Subnet and cannot reach the cluster services.
+The script starts a registry and a git server as Containers of the project, with fixed addresses and a TLS certificate of a lab CA.
+The git server serves two bare repositories as plain files.
+The script adds the lab CA to the git, BuildKit and builder images and loads them on the node.
+It sets the Settings `build.git-image`, `build.buildkit-image` and `build.builder-image` to these images until the stage `down`.
+The registry, git and busybox images are loaded on the node too.
+The builds need a route to the internet for the base images, the buildpacks and the run image.
+
+| Stage | Check |
+| --- | --- |
+| `prepare` | The lab CA, the images and the repositories. |
+| `serve` | The registry and the git server are `Running`. |
+| `dockerfile` | A Dockerfile build is `Succeeded`. The BuildKit container does not hold the git token and has the push credential. The logs start with the clone. The registry holds the image and the cache tag. |
+| `buildpacks` | A buildpacks build is `Succeeded` and the registry holds the image. |
+| `cancel` | A running build is deleted, and its Job, pod and ConfigMap are gone. No Secret is left. |
+| `down` | The lab objects are removed and the Settings are reset. |
+
+The stage `all` runs `prepare` to `cancel`. Run `down` after it.
+Set `LAB_API_TOKEN` to read the logs through the proxy. Without it the script reads the logs of the pod containers.
+
 ## Cleanup and teardown
 
 Each job run writes markers into the directory `/run/bedrock-e2e`.
@@ -253,6 +279,7 @@ If a name changes in an area, change it in that file only.
 | `compute.sh` | An SSH key, a Volume, the SecurityGroup `web` and the VM `vm1`. Hot-plug and expand. A volume snapshot. The proxy actions and the console, which the Go test runs. |
 | `network.sh` | The provider network and the Network status. The fabric-frr agent. Subnet rules. The security group on the VM. A VM with a pinned address, a Subnet MTU and Subnet DNS servers. An ElasticIP in L2 mode with the ARP and ping proof. An ElasticIP without a provider network. The ElasticIP quota. A LoadBalancer and a DNSZone. Isolation rules. |
 | `container.sh` | The proof of the pod network: a hand-made Pod and a hand-made Deployment get the network metadata of a `Container`. Then the kind itself: the runtime gate, replicas, stop and start, a fixed address, autoscale, a Volume, a LoadBalancer target, logs, exec and restart through the proxy, and the cleanup. |
+| `build.sh` | The project roles on `builds` and `builds/logs`. A Build with a missing push Secret and a Build with a push Secret of the wrong type, with no Job. A Build in a cluster with no Kata, with no Job. The immutable spec. The deletion of every Build, with no child object and no Secret left. |
 | `objectstorage.sh` | The object store, two users and one bucket. A put and a get from inside the cluster. A denied read by the other user. |
 | `backup.sh` | The SeaweedFS target. A VM backup with one entry. A restore with `replace: true`. A restore of a missing backup. |
 | `panel.sh` | The panel at `console.<host>`, the redirect from the apex, the API host and the Go test for the login and the watch stream. |
@@ -308,6 +335,21 @@ The steps of `hack/e2e/tenant/container.sh` use the preloaded busybox image.
 | `container_load_balancer` | A LoadBalancer with `containerRef` is `Programmed`, and the Fabric load balancer holds the address of each ready pod. |
 | `container_proxy` | The Go test `TestContainerStreams` for logs, exec and restart. |
 | `container_cleanup` | Deleting the Containers removes every Deployment, autoscaler and pod. |
+
+## Build steps
+
+The e2e cluster has no KVM, so the Addon `kata` is not `Ready`.
+The steps of `hack/e2e/tenant/build.sh` do not need a Job.
+They prove that a Build that cannot run makes no Job.
+The lab script `hack/lab-build.sh` proves the builds that run.
+
+| Step | Check |
+| --- | --- |
+| `build_roles` | A viewer reads `builds` and `builds/logs` and cannot create a Build. An owner creates a Build and reads its logs. A stranger cannot read the logs. |
+| `build_missing_secret` | A Build with a missing push Secret has `Ready=False` with the reason `SecretNotFound`. A push Secret of the wrong type gives `SecretTypeInvalid`. Neither Build has a Job. |
+| `build_kata_gate` | With no Kata, a Build of each type has the reason `KataUnavailable` and no Job. The step skips this check when the Addon `kata` is `Ready`. |
+| `build_immutable` | A change of the spec of a Build is refused. |
+| `build_cleanup` | Deleting the Builds leaves no Job, no ConfigMap, no pod and no Secret of a Build. |
 
 ## Network parity checks
 
