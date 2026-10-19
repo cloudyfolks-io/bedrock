@@ -356,6 +356,9 @@ spec:
               observedGeneration:
                 format: int64
                 type: integer
+              reportedAt:
+                format: date-time
+                type: string
               restore:
                 properties:
                   backup:
