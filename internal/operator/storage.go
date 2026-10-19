@@ -16,6 +16,7 @@ import (
 const (
 	storageNamespace   = "rook-ceph"
 	blockPoolName      = "bedrock-block"
+	blockImageFeatures = "layering,exclusive-lock,object-map,fast-diff,deep-flatten"
 	objectStoreName    = "bedrock-rgw"
 	bucketClassName    = "bucket"
 	bucketProvisioner  = "rook-ceph.ceph.rook.io/bucket"
@@ -254,7 +255,7 @@ func blockStorageClass(name, reclaim string, isDefault bool) *unstructured.Unstr
 	parameters["clusterID"] = storageNamespace
 	parameters["pool"] = blockPoolName
 	parameters["imageFormat"] = "2"
-	parameters["imageFeatures"] = "layering"
+	parameters["imageFeatures"] = blockImageFeatures
 	parameters["csi.storage.k8s.io/fstype"] = "ext4"
 	return storageClass(name, rbdProvisioner, reclaim, isDefault, parameters)
 }
