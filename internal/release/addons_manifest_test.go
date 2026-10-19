@@ -221,6 +221,13 @@ func TestCNPGImagesAreInTheImageList(t *testing.T) {
 			t.Errorf("image %s missing from %v", image, bundle.Images)
 		}
 	}
+	found := false
+	for _, image := range bundle.Images {
+		found = found || strings.HasPrefix(image, "docker.io/library/haproxy:") && strings.Contains(image, "@sha256:")
+	}
+	if !found {
+		t.Errorf("no digest-pinned HAProxy image in %v", bundle.Images)
+	}
 	for _, major := range []string{"16", "17", "18"} {
 		found := false
 		for _, image := range bundle.Images {
@@ -229,5 +236,27 @@ func TestCNPGImagesAreInTheImageList(t *testing.T) {
 		if !found {
 			t.Errorf("no digest-pinned PostgreSQL %s image in %v", major, bundle.Images)
 		}
+	}
+}
+
+func TestCNPGComponentHoldsTheDatabaseCA(t *testing.T) {
+	bundle, _ := buildReal(t, "cnpg")
+	objects := bundle.Addons["cnpg"]
+	if objectNamed(objects, "ClusterIssuer", "bedrock-database-selfsigned") == nil {
+		t.Error("missing the self-signed issuer")
+	}
+	ca := objectNamed(objects, "Certificate", "bedrock-database-ca")
+	if ca == nil || ca.GetNamespace() != "cert-manager" {
+		t.Fatalf("CA certificate %v", ca)
+	}
+	if isCA, _, _ := unstructured.NestedBool(ca.Object, "spec", "isCA"); !isCA {
+		t.Error("the CA certificate is not a CA")
+	}
+	issuer := objectNamed(objects, "ClusterIssuer", "bedrock-database-ca")
+	if issuer == nil {
+		t.Fatal("missing the CA issuer")
+	}
+	if name, _, _ := unstructured.NestedString(issuer.Object, "spec", "ca", "secretName"); name != "bedrock-database-ca" {
+		t.Errorf("the CA issuer reads the secret %q", name)
 	}
 }

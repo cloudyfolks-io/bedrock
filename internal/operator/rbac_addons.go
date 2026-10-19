@@ -13,7 +13,7 @@ func addonsRules() []rbacv1.PolicyRule {
 		{APIGroups: []string{""}, Resources: []string{"secrets"}, Verbs: standardVerbs()},
 		{APIGroups: []string{"apps"}, Resources: []string{"deployments"}, Verbs: standardVerbs()},
 		{APIGroups: []string{rbacv1.GroupName}, Resources: []string{"roles", "rolebindings"}, Verbs: standardVerbs()},
-		{APIGroups: []string{"cert-manager.io"}, Resources: []string{"certificates", "issuers"}, Verbs: standardVerbs()},
+		{APIGroups: []string{"cert-manager.io"}, Resources: []string{"certificates", "issuers", "clusterissuers"}, Verbs: standardVerbs()},
 		{APIGroups: []string{"admissionregistration.k8s.io"}, Resources: []string{"mutatingwebhookconfigurations", "validatingwebhookconfigurations"}, Verbs: standardVerbs()},
 		{APIGroups: []string{"apps"}, Resources: []string{"daemonsets", "statefulsets"}, Verbs: standardVerbs()},
 		{APIGroups: []string{rbacv1.GroupName}, Resources: []string{"clusterroles", "clusterrolebindings"}, Verbs: standardVerbs()},

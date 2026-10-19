@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"testing"
 
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
 )
 
@@ -42,6 +43,19 @@ func goldenObject(t *testing.T, name string, obj any) {
 	delete(content["metadata"].(map[string]any), "creationTimestamp")
 	delete(content, "status")
 	raw, err := json.MarshalIndent(content, "", "  ")
+	if err != nil {
+		t.Fatal(err)
+	}
+	golden(t, name, append(raw, '\n'))
+}
+
+func goldenList(t *testing.T, name string, objs []*unstructured.Unstructured) {
+	t.Helper()
+	list := make([]map[string]any, 0, len(objs))
+	for _, obj := range objs {
+		list = append(list, obj.Object)
+	}
+	raw, err := json.MarshalIndent(list, "", "  ")
 	if err != nil {
 		t.Fatal(err)
 	}
