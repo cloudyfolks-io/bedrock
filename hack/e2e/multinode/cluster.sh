@@ -74,3 +74,44 @@ TENANTS
   wait_condition 300 project data Ready True
   images_cluster_image
 }
+
+etcd_member_count() {
+  k0s etcd member-list 2>/dev/null | jq '.members | length'
+}
+
+etcd_members_are() {
+  [ "$(etcd_member_count)" = "$1" ]
+}
+
+nodes_ready_are() {
+  [ "$(kubectl get nodes --no-headers | grep -cw Ready)" = "$1" ]
+}
+
+check_control_plane() {
+  retry_until 1800 nodes_ready_are 3 || { kubectl get nodes -o wide >&2; return 1; }
+  expect_equal 3 "$(kubectl get hosts -o json | jq '[.items[] | select(.spec.roles | index("control-plane"))] | length')" "hosts with the control-plane role"
+  retry_until 1800 etcd_members_are 3 || { echo "etcd members: $(etcd_member_count), want 3" >&2; return 1; }
+  wait_jsonpath 600 3 -n kube-system get daemonset kube-vip -o jsonpath='{.status.numberReady}'
+}
+
+osds_per_host() {
+  ceph_op osd tree -f json | jq -r '[.nodes[] | select(.type == "host") | (.children // [] | length)] | sort | join(" ")'
+}
+
+osds_up_are() {
+  [ "$(ceph_op osd stat -f json | jq .num_up_osds)" = "$1" ]
+}
+
+check_ceph_topology() {
+  expect_equal 3 "$(ceph_op quorum_status -f json | jq '.quorum_names | length')" "monitors in quorum"
+  retry_until 1800 osds_up_are 6 || { ceph_op osd tree >&2; return 1; }
+  expect_equal "2 2 2" "$(osds_per_host)" "OSDs per host"
+  retry_until 3600 health_ok || { ceph_op status >&2; return 1; }
+}
+
+check_pool_sizes() {
+  local pools
+  pools=$(ceph_op osd pool ls detail -f json)
+  test "$(jq '[.[] | select(.type == 1)] | length' <<<"$pools")" -gt 0
+  expect_equal "" "$(jq -r '[.[] | select(.type == 1 and .size != 3) | "\(.pool_name):\(.size)"] | join(",")' <<<"$pools")" "replicated pools whose size is not 3"
+}

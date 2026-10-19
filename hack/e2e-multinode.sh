@@ -149,7 +149,11 @@ stage_tenant() {
   vm_run 1 setup_tenant
 }
 
-check_entries=()
+check_entries=(
+  "three control-plane nodes|remote_check check_control_plane"
+  "Ceph runs 3 monitors and 6 OSDs on 3 hosts|remote_check check_ceph_topology"
+  "every replicated pool has size 3|remote_check check_pool_sizes"
+)
 
 collect_diagnostics() {
   vm_run 1 diagnose_vms >"$lab_dir/diag-$1.log" 2>&1 || true
