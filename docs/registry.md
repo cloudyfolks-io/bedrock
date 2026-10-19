@@ -122,7 +122,8 @@ If the project still has repositories after that, the reason is `PurgeIncomplete
 When the namespace of the object is deleting, Bedrock acts as if `forceDestroy` were `true`.
 A project delete is a delete of everything in it.
 
-If the addon is off, a delete waits with the reason `RegistryNotAvailable`.
+If the addon is off, a delete of a `Registry` or a `RegistryCredential` that owns a Harbor object waits with the reason `RegistryNotAvailable`.
+A namespace delete waits too, until the addon is on again.
 
 ## Create a credential
 
