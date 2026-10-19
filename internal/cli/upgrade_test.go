@@ -115,6 +115,47 @@ func TestUpgradeRefusesTheRunningVersion(t *testing.T) {
 	}
 }
 
+func TestUpgradeRefusesADowngrade(t *testing.T) {
+	withVersion(t, "v0.4.0")
+	c := upgradeClient(t, "v0.5.0", "amd64")
+	root := t.TempDir()
+	var stdout, stderr bytes.Buffer
+	code := RunUpgrade(context.Background(), upgradeOptions{to: "v0.4.0", bundles: []string{writeUpgradeBundle(t, "v0.4.0", "amd64")}, root: root, timeout: time.Second}, upgradeDeps(c, ""), &stdout, &stderr)
+	if code != 1 || strings.TrimSpace(stderr.String()) != "v0.4.0 is older than the running v0.5.0: a downgrade is not supported" {
+		t.Fatalf("exit %d stderr %q", code, stderr.String())
+	}
+	if entries, _ := os.ReadDir(root); len(entries) != 0 {
+		t.Fatalf("nothing may be staged: %v", entries)
+	}
+	var cluster v1alpha1.Cluster
+	if err := c.Get(context.Background(), client.ObjectKey{Name: v1alpha1.ClusterName}, &cluster); err != nil || cluster.Spec.DesiredVersion != "v0.5.0" {
+		t.Fatalf("cluster %+v %v", cluster.Spec, err)
+	}
+}
+
+func TestUpgradeDoesNotRefuseVersionsThatAreNotADowngrade(t *testing.T) {
+	cases := map[string][2]string{
+		"release":       {"v0.2.0", "v0.3.0"},
+		"e2e pair":      {"v0.0.0-e2e.1", "v0.0.0-e2e.2"},
+		"to dev":        {"v0.5.0", "dev"},
+		"from dev":      {"dev", "v0.5.0"},
+		"release to rc": {"v0.4.0", "v0.5.0-rc.1"},
+	}
+	for name, versions := range cases {
+		t.Run(name, func(t *testing.T) {
+			withVersion(t, versions[1])
+			var stdout, stderr bytes.Buffer
+			RunUpgrade(context.Background(), upgradeOptions{to: versions[1], root: t.TempDir(), timeout: time.Second}, upgradeDeps(upgradeClient(t, versions[0], "amd64"), ""), &stdout, &stderr)
+			if strings.Contains(stderr.String(), "downgrade") {
+				t.Fatalf("stderr %q", stderr.String())
+			}
+			if !strings.Contains(stdout.String(), "downloading bundles") {
+				t.Fatalf("the upgrade did not start: stdout %q stderr %q", stdout.String(), stderr.String())
+			}
+		})
+	}
+}
+
 func TestUpgradeRefusesWithoutPlatformHost(t *testing.T) {
 	withVersion(t, "v0.3.0")
 	want := `the cluster has no platform.host; set it before the upgrade: kubectl patch setting platform.host --type merge -p '{"spec":{"value":"<domain>"}}'`
