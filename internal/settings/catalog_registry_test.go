@@ -17,6 +17,9 @@ func TestRegistryCatalogKeysAndDefaults(t *testing.T) {
 		"registry.robot-prefix":      "robot$",
 		"registry.gc-cron":           "0 0 3 * * *",
 		"registry.proxy-caches":      "",
+		"registry.default-quota-gb":  "5",
+		"registry.reserved-names":    "library,admin,registry,api,docs,system,internal,platform,builders",
+		"registry.reserved-prefixes": "mirror-",
 	}
 	for key, def := range want {
 		got, ok := Lookup(key)
@@ -72,6 +75,16 @@ func TestRegistrySettingsValidate(t *testing.T) {
 		{"registry.proxy-caches", `[{"name":"mirror-docker","type":"docker-hub","url":"https://"}]`, false},
 		{"registry.proxy-caches", `[{"name":"mirror-a","type":"quay","url":"https://quay.io"},{"name":"mirror-a","type":"quay","url":"https://quay.io"}]`, false},
 		{"registry.proxy-caches", `not json`, false},
+		{"registry.default-quota-gb", "0", true},
+		{"registry.default-quota-gb", "20", true},
+		{"registry.default-quota-gb", "-1", false},
+		{"registry.default-quota-gb", "x", false},
+		{"registry.reserved-names", "library,admin", true},
+		{"registry.reserved-names", "Library", false},
+		{"registry.reserved-names", "admin,", false},
+		{"registry.reserved-prefixes", "mirror-,x-", true},
+		{"registry.reserved-prefixes", "-mirror", false},
+		{"registry.reserved-prefixes", "mirror_", false},
 	}
 	for _, c := range cases {
 		def, ok := Lookup(c.key)

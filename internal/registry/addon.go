@@ -234,5 +234,11 @@ func SetupWithManager(mgr ctrl.Manager) error {
 	if err := runtime.SetupWithManager(mgr); err != nil {
 		return err
 	}
-	return (&HarborReconciler{Client: mgr.GetClient()}).SetupWithManager(mgr)
+	if err := (&HarborReconciler{Client: mgr.GetClient()}).SetupWithManager(mgr); err != nil {
+		return err
+	}
+	if err := (&RulesConfigReconciler{Client: mgr.GetClient()}).SetupWithManager(mgr); err != nil {
+		return err
+	}
+	return (&RegistryReconciler{Client: mgr.GetClient()}).SetupWithManager(mgr)
 }

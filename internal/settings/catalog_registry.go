@@ -20,6 +20,7 @@ const (
 	maxRegistryDBReplicas = 3
 	proxyCachePrefix      = "mirror-"
 	gcCronFields          = 6
+	maxDefaultQuotaGB     = 1000000
 )
 
 var (
@@ -27,8 +28,10 @@ var (
 		"harbor", "docker-hub", "docker-registry", "huawei-SWR", "google-gcr", "aws-ecr", "azure-acr",
 		"ali-acr", "jfrog-artifactory", "quay", "gitlab", "dtr", "tencent-tcr", "github-ghcr", "volcengine-cr",
 	}
-	robotPrefixPattern = regexp.MustCompile(`^[A-Za-z0-9$_-]{1,32}$`)
-	proxyCacheName     = regexp.MustCompile(`^[a-z0-9][a-z0-9-]{2,29}$`)
+	robotPrefixPattern  = regexp.MustCompile(`^[A-Za-z0-9$_-]{1,32}$`)
+	proxyCacheName      = regexp.MustCompile(`^[a-z0-9][a-z0-9-]{2,29}$`)
+	registryNameEntry   = regexp.MustCompile(`^[a-z0-9]([a-z0-9-]{0,28}[a-z0-9])?$`)
+	registryPrefixEntry = regexp.MustCompile(`^[a-z0-9][a-z0-9-]{0,28}$`)
 )
 
 func registryDefinitions() []Definition {
@@ -45,6 +48,9 @@ func registryDefinitions() []Definition {
 		{"registry.http-proxy", "", "HTTP proxy that Harbor uses to reach upstream registries for the pull-through caches. Empty means no proxy.", httpURL},
 		{"registry.robot-prefix", "robot$", "Prefix of the login name of every robot account.", robotPrefix},
 		{"registry.gc-cron", "0 0 3 * * *", "Garbage collection schedule of Harbor, as a cron expression with six fields and seconds first.", gcCron},
+		{"registry.default-quota-gb", "5", "Storage quota in GB of a Registry that sets no quotaGB. 0 means no limit.", intBetween(0, maxDefaultQuotaGB)},
+		{"registry.reserved-names", "library,admin,registry,api,docs,system,internal,platform,builders", "Comma list of registry names that tenants cannot use. A user of the group bedrock-admins may use them. Empty keeps the default.", entryList("registry name", registryNameEntry.MatchString)},
+		{"registry.reserved-prefixes", "mirror-", "Comma list of registry name prefixes that tenants cannot use. A user of the group bedrock-admins may use them. Empty keeps the default.", entryList("registry name prefix", registryPrefixEntry.MatchString)},
 		{"registry.proxy-caches", "", "JSON list of pull-through caches. Each entry has name (starts with mirror-), type (a Harbor adapter such as docker-hub or docker-registry) and url (https).", proxyCaches},
 	}
 }
