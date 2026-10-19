@@ -13,6 +13,8 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	"github.com/cloudyfolks-io/bedrock/api/v1alpha1"
+	"github.com/cloudyfolks-io/bedrock/internal/objectstorage"
+	"github.com/cloudyfolks-io/bedrock/internal/objectstorage/s3"
 )
 
 func SetupWithManager(mgr ctrl.Manager) error {
@@ -20,7 +22,7 @@ func SetupWithManager(mgr ctrl.Manager) error {
 	if err := platform.SetupWithManager(mgr); err != nil {
 		return err
 	}
-	if err := mgr.Add(&Sweeper{Client: mgr.GetClient()}); err != nil {
+	if err := mgr.Add(&Sweeper{Client: mgr.GetClient(), Store: BackupStore{S3: &s3.Client{}, Endpoint: objectstorage.Endpoint, Region: objectstorage.Region}}); err != nil {
 		return err
 	}
 	return (&Reconciler{Client: mgr.GetClient()}).SetupWithManager(mgr)

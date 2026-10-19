@@ -145,6 +145,10 @@ func TestDeleteRemovesTheEngineObjectsThenReleasesTheFinalizer(t *testing.T) {
 	if exists(c, mine) {
 		t.Fatal("an engine object of the database stayed")
 	}
+	tombstone, found := getTombstone(c, db)
+	if !found || tombstone.Annotations[AnnotationDeleteAfter] == "" || tombstone.Data["namespace"] != db.Namespace {
+		t.Fatalf("tombstone %v", tombstone)
+	}
 	if !exists(c, other) {
 		t.Fatal("the delete removed an object of another database")
 	}

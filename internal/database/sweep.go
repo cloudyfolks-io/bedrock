@@ -15,6 +15,8 @@ const sweepInterval = 10 * time.Minute
 
 type Sweeper struct {
 	Client client.Client
+	Store  BackupStore
+	Now    func() time.Time
 }
 
 func (s *Sweeper) Start(ctx context.Context) error {
@@ -38,11 +40,25 @@ func (s *Sweeper) sweep(ctx context.Context) {
 	orphans, err := s.Sweep(ctx)
 	if err != nil {
 		logf.FromContext(ctx).Info("database orphan sweep failed", "error", err.Error())
-		return
 	}
 	for _, orphan := range orphans {
 		logf.FromContext(ctx).Info("orphan database object", "kind", orphan.GetKind(), "name", orphan.GetName())
 	}
+	if err := s.Purge(ctx); err != nil {
+		logf.FromContext(ctx).Info("database backup purge failed", "error", err.Error())
+	}
+}
+
+func (s *Sweeper) Purge(ctx context.Context) error {
+	cfg, err := LoadConfig(ctx, s.Client)
+	if err != nil || !cfg.Enabled {
+		return err
+	}
+	now := time.Now()
+	if s.Now != nil {
+		now = s.Now()
+	}
+	return PurgeBackups(ctx, s.Client, s.Store, cfg, now)
 }
 
 func (s *Sweeper) Sweep(ctx context.Context) ([]*unstructured.Unstructured, error) {
