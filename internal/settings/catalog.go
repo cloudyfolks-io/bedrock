@@ -168,7 +168,7 @@ func Catalog() []Definition {
 		{"authn.session-ttl", "12h", "Login session cookie lifetime.", duration(5 * time.Minute)},
 		{"authn.refresh-ttl", "720h", "Refresh token lifetime.", duration(time.Hour)},
 		{"authn.lockout-threshold", "5", "Failed password attempts before lockout.", intMin(1)},
-	}, networkDefinitions())
+	}, networkDefinitions(), computeDefinitions())
 }
 
 func Lookup(key string) (Definition, bool) {

@@ -13,6 +13,9 @@ const values: DiskValues = {
   imageName: "ubuntu",
   imageScope: "cluster",
   instanceType: "u1.small",
+  customSize: false,
+  cores: null,
+  memoryMiB: null,
   preference: "ubuntu",
   rootDiskGi: 20,
   storageClass: "",
@@ -45,6 +48,9 @@ describe("steps", () => {
     expect(diskStepProblems("basics", { ...values, name: "taken" }, environment)[0]?.field).toBe("name");
     expect(diskStepProblems("image", { ...values, imageName: "" }, environment)).toHaveLength(1);
     expect(diskStepProblems("size", { ...values, instanceType: "" }, environment)).toHaveLength(1);
+    expect(diskStepProblems("size", { ...values, instanceType: "", customSize: true, cores: 4, memoryMiB: 4096 }, environment)).toEqual([]);
+    expect(diskStepProblems("size", { ...values, customSize: true, cores: null, memoryMiB: 4096 }, environment).map((problem) => problem.field)).toEqual(["cores"]);
+    expect(diskStepProblems("size", { ...values, customSize: true, cores: 4, memoryMiB: 64 }, environment).map((problem) => problem.field)).toEqual(["memoryMiB"]);
     expect(diskStepProblems("disks", { ...values, rootDiskGi: 5 }, environment)).toHaveLength(1);
     expect(diskStepProblems("disks", { ...values, rootDiskGi: null }, environment)).toHaveLength(1);
     expect(diskStepProblems("network", { ...values, subnetRef: "" }, environment)).toHaveLength(1);
@@ -54,7 +60,7 @@ describe("steps", () => {
   });
 
   it("an ISO step is complete only when its fields validate", () => {
-    const iso: IsoValues = { name: "win", isoName: "iso", extraCdroms: [], osPreference: "", instanceType: "u1.large", rootDiskGi: 60, storageClass: "", firmware: { uefi: true, secureBoot: false, tpm: false }, subnetRef: "default", securityGroups: [], running: false };
+    const iso: IsoValues = { name: "win", isoName: "iso", extraCdroms: [], osPreference: "", instanceType: "u1.large", customSize: false, cores: null, memoryMiB: null, rootDiskGi: 60, storageClass: "", firmware: { uefi: true, secureBoot: false, tpm: false }, subnetRef: "default", securityGroups: [], running: false };
     expect(isoStepProblems("iso", { ...iso, isoName: "" }, environment)).toHaveLength(1);
     expect(isoStepProblems("disks", { ...iso, rootDiskGi: 0 }, environment)).toHaveLength(1);
     expect(isoStepProblems("firmware", iso, environment)).toEqual([]);
@@ -62,6 +68,7 @@ describe("steps", () => {
 
   it("maps server fields to steps", () => {
     expect(stepOfField("spec.rootDisk.sizeGi")).toBe("disks");
+    expect(stepOfField("spec.compute.cores")).toBe("size");
     expect(stepOfField("metadata.name")).toBe("basics");
     expect(stepOfField("spec.networks[0].subnetRef")).toBe("network");
     expect(stepOfField("spec.unknown")).toBe("review");

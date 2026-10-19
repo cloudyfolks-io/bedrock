@@ -317,3 +317,104 @@ func TestSchemaNICAddressIsImmutable(t *testing.T) {
 		t.Fatalf("attach the network again with a new address: %v", err)
 	}
 }
+
+func TestSchemaRequiresExactlyOneSize(t *testing.T) {
+	c, _ := startEnv(t)
+	ns := uniqueNamespace(t, c)
+	compute := &v1alpha1.VMCompute{Cores: 4, MemoryMiB: 4096}
+	requireAccepted(t, c, schemaVM(ns, func(vm *v1alpha1.VirtualMachine) { vm.Spec.InstanceType, vm.Spec.Compute = "", compute }))
+	for label, mutate := range map[string]func(*v1alpha1.VirtualMachine){
+		"both":    func(vm *v1alpha1.VirtualMachine) { vm.Spec.Compute = compute },
+		"neither": func(vm *v1alpha1.VirtualMachine) { vm.Spec.InstanceType = "" },
+		"zero cores": func(vm *v1alpha1.VirtualMachine) {
+			vm.Spec.InstanceType, vm.Spec.Compute = "", &v1alpha1.VMCompute{Cores: 0, MemoryMiB: 4096}
+		},
+		"tiny memory": func(vm *v1alpha1.VirtualMachine) {
+			vm.Spec.InstanceType, vm.Spec.Compute = "", &v1alpha1.VMCompute{Cores: 1, MemoryMiB: 64}
+		},
+	} {
+		requireRefused(t, c, label, schemaVM(ns, mutate))
+	}
+}
+
+func TestSchemaRefusesSizeMessageNamesBothFields(t *testing.T) {
+	c, _ := startEnv(t)
+	ns := uniqueNamespace(t, c)
+	err := c.Create(context.Background(), schemaVM(ns, func(vm *v1alpha1.VirtualMachine) { vm.Spec.Compute = &v1alpha1.VMCompute{Cores: 1, MemoryMiB: 512} }))
+	if err == nil || !strings.Contains(err.Error(), "exactly one of compute and instanceType") {
+		t.Fatalf("%v", err)
+	}
+}
+
+func TestSchemaSizeChangeAndSwitchAreAllowed(t *testing.T) {
+	c, _ := startEnv(t)
+	ns := uniqueNamespace(t, c)
+	vm := schemaVM(ns, func(vm *v1alpha1.VirtualMachine) {
+		vm.Spec.InstanceType, vm.Spec.Compute = "", &v1alpha1.VMCompute{Cores: 2, MemoryMiB: 2048}
+	})
+	requireAccepted(t, c, vm)
+	vm.Spec.Compute = &v1alpha1.VMCompute{Cores: 8, MemoryMiB: 16384}
+	must(t, c.Update(context.Background(), vm))
+	vm.Spec.Compute, vm.Spec.InstanceType = nil, "u1.medium"
+	must(t, c.Update(context.Background(), vm))
+}
+
+func fromVolume(volume string) func(*v1alpha1.VirtualMachine) {
+	return func(vm *v1alpha1.VirtualMachine) {
+		vm.Spec.Image = nil
+		vm.Spec.RootDisk = v1alpha1.VMRootDisk{VolumeRef: volume}
+	}
+}
+
+func TestSchemaRootDiskFromAVolume(t *testing.T) {
+	c, _ := startEnv(t)
+	ns := uniqueNamespace(t, c)
+	requireAccepted(t, c, schemaVM(ns, fromVolume("boot1")))
+	cases := map[string]func(*v1alpha1.VirtualMachine){
+		"with size":          func(vm *v1alpha1.VirtualMachine) { fromVolume("boot1")(vm); vm.Spec.RootDisk.SizeGi = 20 },
+		"with storage class": func(vm *v1alpha1.VirtualMachine) { fromVolume("boot1")(vm); vm.Spec.RootDisk.StorageClass = "block" },
+		"with image": func(vm *v1alpha1.VirtualMachine) {
+			fromVolume("boot1")(vm)
+			vm.Spec.Image = &v1alpha1.ImageRef{Name: "ubuntu-24.04"}
+		},
+		"also a disk":       func(vm *v1alpha1.VirtualMachine) { fromVolume("data1")(vm) },
+		"foreign name":      fromVolume("a/b"),
+		"no size no volume": func(vm *v1alpha1.VirtualMachine) { vm.Spec.RootDisk = v1alpha1.VMRootDisk{} },
+	}
+	for label, mutate := range cases {
+		requireRefused(t, c, label, schemaVM(ns, mutate))
+	}
+}
+
+func TestSchemaRootVolumeSwapNeedsAStoppedVM(t *testing.T) {
+	c, _ := startEnv(t)
+	ns := uniqueNamespace(t, c)
+	ctx := context.Background()
+	vm := schemaVM(ns, fromVolume("boot1"))
+	requireAccepted(t, c, vm)
+	vm.Spec.RootDisk.VolumeRef = "boot2"
+	if err := c.Update(ctx, vm); !apierrors.IsInvalid(err) || !strings.Contains(err.Error(), "stopped") {
+		t.Fatalf("a swap on a running VM: %v", err)
+	}
+	vm.Spec.Running = false
+	must(t, c.Update(ctx, vm))
+}
+
+func TestSchemaRootDiskModeIsFixed(t *testing.T) {
+	c, _ := startEnv(t)
+	ns := uniqueNamespace(t, c)
+	ctx := context.Background()
+	owned := schemaVM(ns, func(vm *v1alpha1.VirtualMachine) { vm.Spec.Running = false })
+	requireAccepted(t, c, owned)
+	owned.Spec.Image = nil
+	owned.Spec.RootDisk = v1alpha1.VMRootDisk{VolumeRef: "boot1"}
+	if err := c.Update(ctx, owned); !apierrors.IsInvalid(err) {
+		t.Fatalf("owned to volume: %v", err)
+	}
+	booted := schemaVM(ns, func(vm *v1alpha1.VirtualMachine) { fromVolume("boot1")(vm); vm.Spec.Running = false })
+	requireAccepted(t, c, booted)
+	booted.Spec.RootDisk = v1alpha1.VMRootDisk{SizeGi: 20}
+	if err := c.Update(ctx, booted); !apierrors.IsInvalid(err) {
+		t.Fatalf("volume to owned: %v", err)
+	}
+}

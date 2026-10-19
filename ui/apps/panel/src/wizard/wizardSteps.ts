@@ -52,6 +52,8 @@ const messages = {
   chooseImage: msg({ id: "wizard.error.image", message: "Choose an image" }),
   chooseIso: msg({ id: "wizard.error.iso", message: "Choose an ISO image" }),
   chooseSize: msg({ id: "wizard.error.size", message: "Choose an instance type" }),
+  cores: msg({ id: "wizard.error.cores", message: "Enter the number of CPU cores" }),
+  memory: msg({ id: "wizard.error.memory", message: "Enter at least 128 MiB of memory" }),
   rootDisk: msg({ id: "wizard.error.rootDisk", message: "Enter a root disk size in GiB" }),
   rootDiskSmall: msg({ id: "wizard.error.rootDiskSmall", message: "The root disk is smaller than the image" }),
   subnet: msg({ id: "wizard.error.subnet", message: "Choose a subnet" }),
@@ -72,6 +74,20 @@ function rootDiskProblems(sizeGi: number | null, minimum: number): Problem[] {
   return sizeGi < minimum ? [{ field: "rootDiskGi", message: messages.rootDiskSmall }] : [];
 }
 
+function sizeProblems(values: { instanceType: string; customSize: boolean; cores: number | null; memoryMiB: number | null }): Problem[] {
+  if (!values.customSize) {
+    return values.instanceType === "" ? [{ field: "instanceType", message: messages.chooseSize }] : [];
+  }
+  const problems: Problem[] = [];
+  if (values.cores === null || !Number.isInteger(values.cores) || values.cores < 1) {
+    problems.push({ field: "cores", message: messages.cores });
+  }
+  if (values.memoryMiB === null || !Number.isInteger(values.memoryMiB) || values.memoryMiB < 128) {
+    problems.push({ field: "memoryMiB", message: messages.memory });
+  }
+  return problems;
+}
+
 function subnetProblems(subnetRef: string): Problem[] {
   return subnetRef === "" ? [{ field: "subnetRef", message: messages.subnet }] : [];
 }
@@ -83,7 +99,7 @@ export function diskStepProblems(step: DiskStep, values: DiskValues, environment
     case "image":
       return values.imageName === "" ? [{ field: "imageName", message: messages.chooseImage }] : [];
     case "size":
-      return values.instanceType === "" ? [{ field: "instanceType", message: messages.chooseSize }] : [];
+      return sizeProblems(values);
     case "disks": {
       const image = environment.images.find((candidate) => candidate.name === values.imageName && candidate.scope === values.imageScope);
       return rootDiskProblems(values.rootDiskGi, image?.sizeGi ?? 1);
@@ -104,7 +120,7 @@ export function isoStepProblems(step: IsoStep, values: IsoValues, environment: S
     case "iso":
       return values.isoName === "" ? [{ field: "isoName", message: messages.chooseIso }] : [];
     case "size":
-      return values.instanceType === "" ? [{ field: "instanceType", message: messages.chooseSize }] : [];
+      return sizeProblems(values);
     case "disks":
       return rootDiskProblems(values.rootDiskGi, 1);
     case "network":
@@ -123,6 +139,7 @@ export function stepOfField(field: string): string {
     ["spec.image", "image"],
     ["spec.cdroms", "iso"],
     ["spec.instanceType", "size"],
+    ["spec.compute", "size"],
     ["spec.preference", "size"],
     ["spec.rootDisk", "disks"],
     ["spec.disks", "disks"],

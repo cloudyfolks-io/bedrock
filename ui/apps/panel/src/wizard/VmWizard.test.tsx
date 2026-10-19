@@ -90,6 +90,25 @@ describe("VmWizard", () => {
     expect(options).toEqual(instanceTypes.map((type) => `${type.name} · ${type.vcpu} vCPU · ${type.memoryGiB} GiB`));
   });
 
+  it("TestCustomSizeAsksForCoresAndMemory", async () => {
+    const user = userEvent.setup();
+    renderWizard(<VmWizard />, path);
+    await user.type(await screen.findByLabelText("Name"), "new-vm");
+    await next(user);
+    await choose(user, /^Image/, "ubuntu-24-04 (cluster)");
+    await next(user);
+    await user.click(await screen.findByRole("switch", { name: "Custom size" }));
+    expect(screen.queryByRole("combobox", { name: /Instance type/ })).toBeNull();
+    await next(user);
+    expect(await screen.findByText("Enter the number of CPU cores")).toBeTruthy();
+    expect(await screen.findByText("Enter at least 128 MiB of memory")).toBeTruthy();
+    await user.type(screen.getByRole("textbox", { name: /CPU cores/ }), "6");
+    await user.type(screen.getByRole("textbox", { name: /Memory \(MiB\)/ }), "6144");
+    await user.tab();
+    await next(user);
+    expect(await screen.findByRole("heading", { level: 2, name: "Disks" })).toBeTruthy();
+  });
+
   it("TestReviewShowsTheObjectAndSubmits", async () => {
     const user = userEvent.setup();
     const { api } = renderWizard(<VmWizard />, path, { api: { [`POST ${ns}/virtualmachines`]: { status: 201, body: {} } } });
@@ -103,7 +122,7 @@ describe("VmWizard", () => {
     expect(post?.url).toContain("fieldManager=bedrock-panel");
     expect(post?.body).toEqual(
       buildDiskVirtualMachine(
-        { name: "new-vm", imageName: "ubuntu-24-04", imageScope: "cluster", instanceType: "u1.medium", preference: "ubuntu", rootDiskGi: 20, storageClass: "", extraVolumes: [], subnetRef: "default", securityGroups: [], sshKeys: [], userData: "", running: true },
+        { name: "new-vm", imageName: "ubuntu-24-04", imageScope: "cluster", instanceType: "u1.medium", customSize: false, cores: null, memoryMiB: null, preference: "ubuntu", rootDiskGi: 20, storageClass: "", extraVolumes: [], subnetRef: "default", securityGroups: [], sshKeys: [], userData: "", running: true },
         { namespace: "acme-web" },
       ),
     );

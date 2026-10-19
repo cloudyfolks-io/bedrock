@@ -9,6 +9,7 @@ import { PageHeader } from "../../components/PageHeader";
 import { Spinner } from "../../components/Spinner";
 import { StatusBadge } from "../../components/StatusBadge";
 import { listAt, textAt } from "../../resources/path";
+import { vmSize } from "../../resources/vmSize";
 import { definitionFor, refOf } from "../../resources/registry";
 import { useCurrentProject } from "../../shell/context";
 import { useLiveObject } from "../../stream/live";
@@ -28,7 +29,7 @@ function Overview({ vm }: { vm: KubeObject }) {
     <>
       <dl className="br-facts">
         <dt>{t({ id: "col.instanceType", message: "Instance type" })}</dt>
-        <dd><Ltr>{textAt(vm, "spec.instanceType")}</Ltr></dd>
+        <dd><Ltr>{vmSize(vm)}</Ltr></dd>
         <dt>{t({ id: "vmDetail.preference", message: "Preference" })}</dt>
         <dd><Ltr>{textAt(vm, "spec.preference") || "—"}</Ltr></dd>
         <dt>{t({ id: "col.image", message: "Image" })}</dt>

@@ -9,6 +9,7 @@ import (
 	storagev1 "k8s.io/api/storage/v1"
 	"k8s.io/apimachinery/pkg/api/equality"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/client-go/util/retry"
@@ -43,7 +44,10 @@ func (r *VolumeReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctr
 	if err := r.Client.List(ctx, &vms, client.InNamespace(volume.Namespace)); err != nil {
 		return ctrl.Result{}, err
 	}
-	owner := VolumeOwner(vms.Items, volume.Name)
+	owner, err := OwnerOf(ctx, r.Client, vms.Items, volume.Namespace, volume.Name)
+	if err != nil {
+		return ctrl.Result{}, err
+	}
 	if !volume.DeletionTimestamp.IsZero() {
 		return ctrl.Result{}, r.release(ctx, volume, owner)
 	}
@@ -58,7 +62,7 @@ func (r *VolumeReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctr
 	if holder, held := v1alpha1.RestoreHolder(&volume); held {
 		return ctrl.Result{}, r.writeStatus(ctx, volume, volumeOutcome{Gate: gateOf(ReasonRestoreInProgress, "the restore %q holds the volume", holder)})
 	}
-	volume, err := r.addFinalizer(ctx, volume)
+	volume, err = r.addFinalizer(ctx, volume)
 	if err != nil {
 		return ctrl.Result{}, err
 	}
@@ -67,6 +71,49 @@ func (r *VolumeReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctr
 		return ctrl.Result{}, err
 	}
 	return ctrl.Result{}, r.writeStatus(ctx, volume, done)
+}
+
+func OwnerOf(ctx context.Context, c client.Reader, vms []v1alpha1.VirtualMachine, namespace, volume string) (string, error) {
+	mounted, err := MountingInstance(ctx, c, namespace, volume)
+	if err != nil || mounted != "" {
+		return mounted, err
+	}
+	return VolumeOwner(vms, volume), nil
+}
+
+func MountingInstance(ctx context.Context, c client.Reader, namespace, claim string) (string, error) {
+	instances := &unstructured.UnstructuredList{}
+	instances.SetGroupVersionKind(kubeVirtVMIGVK.GroupVersion().WithKind("VirtualMachineInstanceList"))
+	if err := c.List(ctx, instances, client.InNamespace(namespace)); err != nil {
+		return "", client.IgnoreNotFound(ignoreNoMatch(err))
+	}
+	for index := range instances.Items {
+		if mountsClaim(&instances.Items[index], claim) {
+			return instances.Items[index].GetName(), nil
+		}
+	}
+	return "", nil
+}
+
+func ignoreNoMatch(err error) error {
+	if meta.IsNoMatchError(err) {
+		return nil
+	}
+	return err
+}
+
+func mountsClaim(instance *unstructured.Unstructured, claim string) bool {
+	volumes, _, _ := unstructured.NestedSlice(instance.Object, "spec", "volumes")
+	for _, item := range volumes {
+		entry, ok := item.(map[string]any)
+		if !ok {
+			continue
+		}
+		if name, _, _ := unstructured.NestedString(entry, "persistentVolumeClaim", "claimName"); name == claim {
+			return true
+		}
+	}
+	return false
 }
 
 func (r *VolumeReconciler) addFinalizer(ctx context.Context, volume v1alpha1.Volume) (v1alpha1.Volume, error) {
@@ -303,7 +350,24 @@ func (r *VolumeReconciler) SetupWithManager(mgr ctrl.Manager) error {
 		Watches(&corev1.PersistentVolumeClaim{}, handler.EnqueueRequestsFromMapFunc(sameName)).
 		Watches(&v1alpha1.VirtualMachine{}, handler.EnqueueRequestsFromMapFunc(listedVolumes)).
 		Watches(&v1alpha1.VolumeSnapshot{}, handler.EnqueueRequestsFromMapFunc(r.cloningFrom)).
+		Watches(emptyOf(kubeVirtVMIGVK), handler.EnqueueRequestsFromMapFunc(mountedVolumes)).
 		Complete(r)
+}
+
+func mountedVolumes(_ context.Context, obj client.Object) []reconcile.Request {
+	instance, ok := obj.(*unstructured.Unstructured)
+	if !ok {
+		return nil
+	}
+	volumes, _, _ := unstructured.NestedSlice(instance.Object, "spec", "volumes")
+	var requests []reconcile.Request
+	for _, item := range volumes {
+		entry, _ := item.(map[string]any)
+		if name, _, _ := unstructured.NestedString(entry, "persistentVolumeClaim", "claimName"); name != "" {
+			requests = append(requests, reconcile.Request{NamespacedName: client.ObjectKey{Namespace: instance.GetNamespace(), Name: name}})
+		}
+	}
+	return requests
 }
 
 func listedVolumes(_ context.Context, obj client.Object) []reconcile.Request {
@@ -311,9 +375,10 @@ func listedVolumes(_ context.Context, obj client.Object) []reconcile.Request {
 	if !ok {
 		return nil
 	}
-	requests := make([]reconcile.Request, 0, len(vm.Spec.Disks))
-	for _, disk := range vm.Spec.Disks {
-		requests = append(requests, reconcile.Request{NamespacedName: client.ObjectKey{Namespace: vm.Namespace, Name: disk.VolumeRef}})
+	refs := v1alpha1.VolumeRefs(*vm)
+	requests := make([]reconcile.Request, 0, len(refs))
+	for _, ref := range refs {
+		requests = append(requests, reconcile.Request{NamespacedName: client.ObjectKey{Namespace: vm.Namespace, Name: ref}})
 	}
 	return requests
 }

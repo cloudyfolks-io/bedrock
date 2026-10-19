@@ -48,8 +48,8 @@ func Refs(vm v1alpha1.VirtualMachine) []string {
 	for _, key := range vm.Spec.SSHKeys {
 		keys = append(keys, "sshkey/"+key)
 	}
-	for _, disk := range vm.Spec.Disks {
-		keys = append(keys, "volume/"+disk.VolumeRef)
+	for _, volume := range v1alpha1.VolumeRefs(vm) {
+		keys = append(keys, "volume/"+volume)
 	}
 	sort.Strings(keys)
 	return slices.Compact(keys)
@@ -213,6 +213,7 @@ func (r *VirtualMachineReconciler) SetupWithManager(mgr ctrl.Manager) error {
 		Watches(&v1alpha1.Image{}, handler.EnqueueRequestsFromMapFunc(r.referrers("image/project/"))).
 		Watches(&v1alpha1.ClusterImage{}, handler.EnqueueRequestsFromMapFunc(r.referrers("image/cluster/"))).
 		Watches(&v1alpha1.ElasticIP{}, handler.EnqueueRequestsFromMapFunc(targetedVM)).
+		Watches(&v1alpha1.Setting{}, handler.EnqueueRequestsFromMapFunc(r.affectedBySetting)).
 		Complete(r)
 }
 
