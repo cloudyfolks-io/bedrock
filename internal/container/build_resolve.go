@@ -133,6 +133,9 @@ func (r BuildResolver) stepSubnet(ctx context.Context, b v1alpha1.Build, in Buil
 	if err != nil || gate != nil {
 		return in, gate, err
 	}
+	if len(dns) == 0 {
+		return in, gateOf(ReasonNoDNSServers, "the subnet %q has no DNS servers, and the Settings network.dns-servers and network.services.resolver are empty, so the build would use the cluster DNS", name), nil
+	}
 	in.NIC = network.NIC{Namespace: b.Namespace, Subnet: name}
 	in.DNSServers = dns
 	return in, nil, nil

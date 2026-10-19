@@ -27,7 +27,12 @@ build_kata_ready() {
   [ "$(kubectl get addon kata -o jsonpath='{.status.conditions[?(@.type=="Ready")].status}' 2>/dev/null)" = True ]
 }
 
+build_dns_setting() {
+  kubectl patch setting network.dns-servers --type merge -p "{\"spec\":{\"value\":\"$1\"}}"
+}
+
 build_prepare_secrets() {
+  build_dns_setting 198.51.100.53
   kubectl -n "$NS" create secret docker-registry "$build_push_secret" --docker-server=registry.example.test --docker-username=robot --docker-password=pushword --dry-run=client -o yaml | kubectl apply -f -
   kubectl -n "$NS" create secret generic "$build_git_secret" --from-literal=username=robot --from-literal=token=build-e2e-token --dry-run=client -o yaml | kubectl apply -f -
 }
@@ -78,4 +83,5 @@ build_cleanup() {
   expect_equal "" "$(kubectl -n "$NS" get secrets -l bedrock.cloudyfolks.io/kind=Build -o name)" "no secret made for a build"
   kubectl -n "$NS" get secret "$build_push_secret" "$build_git_secret" build-wrong-type
   kubectl -n "$NS" delete secret "$build_push_secret" "$build_git_secret" build-wrong-type
+  build_dns_setting ""
 }

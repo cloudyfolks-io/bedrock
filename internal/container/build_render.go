@@ -177,10 +177,8 @@ func buildPodSpec(in BuildInput, inits []corev1.Container, main corev1.Container
 		Containers:                   []corev1.Container{main},
 		Volumes:                      volumes,
 		ImagePullSecrets:             []corev1.LocalObjectReference{{Name: in.Build.Spec.Output.PushSecretRef}},
-	}
-	if len(in.DNSServers) > 0 {
-		pod.DNSPolicy = corev1.DNSNone
-		pod.DNSConfig = &corev1.PodDNSConfig{Nameservers: slices.Clone(in.DNSServers)}
+		DNSPolicy:                    corev1.DNSNone,
+		DNSConfig:                    &corev1.PodDNSConfig{Nameservers: slices.Clone(in.DNSServers)},
 	}
 	return pod
 }

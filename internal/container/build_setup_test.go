@@ -29,6 +29,7 @@ func TestSetupRunsBuildsAndFollowsTheirJobs(t *testing.T) {
 	ensureRuntimeClass(t, c, "kata")
 	createBuildSecrets(t, c, ns)
 	setKataAddon(t, c, metav1.ConditionTrue)
+	setSetting(t, c, "network.dns-servers", "10.100.0.2")
 	createBuild(t, c, ns, "shop", noBuildMutation)
 	eventually(t, "the subnet gate", func() bool {
 		phase, reason := buildPhase(t, c, ns, "shop")
