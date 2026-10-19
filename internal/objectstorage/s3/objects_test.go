@@ -108,7 +108,7 @@ func TestDeletePrefixDeletesUntilTheListingIsEmpty(t *testing.T) {
 		}
 		io.WriteString(w, "<DeleteResult></DeleteResult>")
 	})
-	if err := testClient().DeletePrefix(context.Background(), endpoint, "us-east-1", testCredentials, "backups", "uid/"); err != nil {
+	if err := testClient().DeletePrefix(context.Background(), endpoint, "us-east-1", testCredentials, "backups", "uid-0001/"); err != nil {
 		t.Fatal(err)
 	}
 	if len(remaining) != 0 || len(deleted) != 3 {
@@ -118,7 +118,7 @@ func TestDeletePrefixDeletesUntilTheListingIsEmpty(t *testing.T) {
 
 func TestDeletePrefixOfAnEmptyPrefixMakesNoDeleteCall(t *testing.T) {
 	endpoint, requests := bucketServer(t, func(_ bucketRequest, w http.ResponseWriter) { io.WriteString(w, listing(nil, false, "")) })
-	if err := testClient().DeletePrefix(context.Background(), endpoint, "us-east-1", testCredentials, "backups", "uid/"); err != nil {
+	if err := testClient().DeletePrefix(context.Background(), endpoint, "us-east-1", testCredentials, "backups", "uid-0001/"); err != nil {
 		t.Fatal(err)
 	}
 	if calls := requests(); len(calls) != 1 || calls[0].method != "GET" {
@@ -134,7 +134,19 @@ func TestDeletePrefixStopsOnADeleteFailure(t *testing.T) {
 		}
 		s3Error(w, 403, AccessDenied)
 	})
-	if err := testClient().DeletePrefix(context.Background(), endpoint, "us-east-1", testCredentials, "backups", "uid/"); !IsCode(err, AccessDenied) {
+	if err := testClient().DeletePrefix(context.Background(), endpoint, "us-east-1", testCredentials, "backups", "uid-0001/"); !IsCode(err, AccessDenied) {
 		t.Fatalf("error %v", err)
+	}
+}
+
+func TestDeletePrefixRefusesAnEmptyOrShortPrefix(t *testing.T) {
+	endpoint, requests := bucketServer(t, func(_ bucketRequest, w http.ResponseWriter) { io.WriteString(w, listing(map[string]int64{"a/x": 1}, false, "")) })
+	for _, prefix := range []string{"", "/", "a/", "uid", "0b0c0d0e-1111-4222-8333-444455556666"} {
+		if err := testClient().DeletePrefix(context.Background(), endpoint, "us-east-1", testCredentials, "backups", prefix); err == nil {
+			t.Errorf("prefix %q accepted", prefix)
+		}
+	}
+	if len(requests()) != 0 {
+		t.Fatalf("calls %+v", requests())
 	}
 }

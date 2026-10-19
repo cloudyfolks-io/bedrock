@@ -606,3 +606,39 @@ func TestUserWithAnExistingRoleIsAdoptedWithTheRealSQLState(t *testing.T) {
 		t.Fatalf("status %+v", user.Status)
 	}
 }
+
+func TestUserSecretWithoutAnnotationsDoesNotPanicAndIsHealed(t *testing.T) {
+	c, engine := startEnv(t), &fakeEngine{}
+	db := readyDatabase(t, c)
+	user := newUser(t, c, db, "alice", nil)
+	reconcileUser(t, c, engine, user)
+	secret := getSecret(t, c, db.Namespace, "alice-db")
+	secret.Annotations = nil
+	must(t, c.Update(context.Background(), &secret))
+	reloadUser(t, c, user)
+	user.Annotations = map[string]string{v1alpha1.AnnotationResetPassword: "one"}
+	must(t, c.Update(context.Background(), user))
+	reconcileUser(t, c, engine, user)
+	healed := getSecret(t, c, db.Namespace, "alice-db")
+	if healed.Annotations[annotationPasswordSynced] != "true" || healed.Annotations[annotationResetApplied] != "one" {
+		t.Fatalf("annotations %v", healed.Annotations)
+	}
+}
+
+func TestUserNeverTakesOverASecretItDoesNotOwn(t *testing.T) {
+	c, engine := startEnv(t), &fakeEngine{}
+	db := readyDatabase(t, c)
+	create(t, c, &corev1.Secret{ObjectMeta: metav1.ObjectMeta{Name: "alice-db", Namespace: db.Namespace}, Data: map[string][]byte{"password": []byte("tenant-secret")}})
+	user := newUser(t, c, db, "alice", nil)
+	reconcileUser(t, c, engine, user)
+	if reason, _ := readyReasonOf(reloadUser(t, c, user).Status.Conditions); reason != ReasonNameTaken {
+		t.Fatalf("reason %s", reason)
+	}
+	secret := getSecret(t, c, db.Namespace, "alice-db")
+	if string(secret.Data["password"]) != "tenant-secret" || len(secret.Data) != 1 || len(secret.OwnerReferences) != 0 {
+		t.Fatalf("the foreign Secret was changed: %v", secret.Data)
+	}
+	if len(engine.scripts) != 0 {
+		t.Fatalf("a role was made: %v", engine.scripts)
+	}
+}

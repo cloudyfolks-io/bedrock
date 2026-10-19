@@ -19,6 +19,7 @@ const (
 	ReasonEngineUnavailable       = "EngineUnavailable"
 	ReasonEngineRejected          = "EngineRejected"
 	ReasonReady                   = "Ready"
+	ReasonNameTaken               = "NameTaken"
 	ReasonUpgradeNotSupported     = "UpgradeNotSupported"
 	ReasonClassChangeNotSupported = "ClassChangeNotSupported"
 	ReasonVersionNotAvailable     = "VersionNotAvailable"
@@ -48,7 +49,7 @@ func Reasons() []string {
 		ReasonVersionNotAvailable, ReasonClassNotAvailable, ReasonStorageOutOfRange, ReasonSubnetNotFound, ReasonSubnetNotReady,
 		ReasonEndpointImageMissing, ReasonRuntimeUnavailable, ReasonDNSMissing, ReasonVIPRangeMissing, ReasonBackupStorePending,
 		ReasonBackupStoreFailed, ReasonApplyFailed, ReasonAddressUnavailable,
-		ReasonUpgradeNotSupported, ReasonClassChangeNotSupported,
+		ReasonNameTaken, ReasonUpgradeNotSupported, ReasonClassChangeNotSupported,
 		ReasonProvisioning, ReasonRestoring, ReasonSuspended, ReasonUnhealthy, ReasonEngineWaiting, ReasonBootstrapping, ReasonGateWaiting, ReasonProxyWaiting,
 	}
 }

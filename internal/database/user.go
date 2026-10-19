@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"net"
 	"net/url"
 	"slices"
@@ -140,6 +141,9 @@ func (r *UserReconciler) converge(ctx context.Context, user *v1alpha1.DatabaseUs
 		return accessOutcome{}, err
 	}
 	state, err := ensureUserSecret(ctx, r.Client, *user, project(db), endpoint)
+	if errors.Is(err, errUserSecretTaken) {
+		return accessOutcome{reason: ReasonNameTaken, message: "the Secret " + UserSecretName(*user) + " exists and this user does not own it", requeue: accessBackoff}, nil
+	}
 	if err != nil {
 		return accessOutcome{}, err
 	}
@@ -232,6 +236,8 @@ func userSecretData(user v1alpha1.DatabaseUser, password string, endpoint Endpoi
 	}
 }
 
+var errUserSecretTaken = errors.New("a Secret of that name exists and the user does not own it")
+
 func ensureUserSecret(ctx context.Context, c client.Client, user v1alpha1.DatabaseUser, project Project, endpoint Endpoint) (userSecretState, error) {
 	key := client.ObjectKey{Namespace: user.Namespace, Name: UserSecretName(user)}
 	token := user.Annotations[v1alpha1.AnnotationResetPassword]
@@ -251,7 +257,13 @@ func ensureUserSecret(ctx context.Context, c client.Client, user v1alpha1.Databa
 		if err != nil {
 			return err
 		}
+		if !metav1.IsControlledBy(&secret, &user) {
+			return errUserSecretTaken
+		}
 		before := secret.DeepCopy()
+		if secret.Annotations == nil {
+			secret.Annotations = map[string]string{}
+		}
 		password := string(secret.Data["password"])
 		if token != "" && token != secret.Annotations[annotationResetApplied] {
 			if password, err = credential.Password(); err != nil {
@@ -290,6 +302,9 @@ func markUserPasswordSynced(ctx context.Context, c client.Client, user v1alpha1.
 			return err
 		}
 		before := secret.DeepCopy()
+		if secret.Annotations == nil {
+			secret.Annotations = map[string]string{}
+		}
 		secret.Annotations[annotationPasswordSynced] = synced
 		return c.Patch(ctx, &secret, client.MergeFromWithOptions(before, client.MergeFromWithOptimisticLock{}), client.FieldOwner(v1alpha1.DatabaseFieldManager))
 	})

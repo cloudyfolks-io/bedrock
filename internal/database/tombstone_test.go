@@ -137,3 +137,25 @@ func TestSweeperPurgesOnlyWhileTheDatabaseKindsAreOn(t *testing.T) {
 		t.Fatal("not purged while enabled")
 	}
 }
+
+func TestPurgeWaitsWhileADatabaseStillRestoresFromThePrefix(t *testing.T) {
+	c, fake, store, cfg := purgeWorld(t)
+	ctx := context.Background()
+	gone, project := storedDatabase(t, c, nil)
+	now := mustTime("2026-10-19T12:00:00Z")
+	fake.put(string(gone.UID)+"/base/1", 10)
+	must(t, EnsureTombstone(ctx, c, *gone, project, 0, now))
+	restored, _ := storedDatabase(t, c, func(db *v1alpha1.Database) { db.Spec.Restore = &v1alpha1.DatabaseRestore{SourceUID: string(gone.UID)} })
+
+	must(t, PurgeBackups(ctx, c, store, cfg, now))
+	if !fake.has(string(gone.UID) + "/base/1") {
+		t.Fatal("the prefix was purged while a restore reads it")
+	}
+	must(t, c.Get(ctx, client.ObjectKeyFromObject(restored), restored))
+	restored.Annotations = map[string]string{annotationReadyOnce: "true"}
+	must(t, c.Update(ctx, restored))
+	must(t, PurgeBackups(ctx, c, store, cfg, now))
+	if fake.has(string(gone.UID) + "/base/1") {
+		t.Fatal("the prefix stayed after the restore finished")
+	}
+}
