@@ -174,6 +174,9 @@ Neither Loki nor Alloy sends usage data outside the cluster.
 The Setting `loki.retention-days` sets how long Loki keeps logs. The
 default is `14`. A change of the Setting rolls the Loki pod.
 
+Loki has no address outside the cluster. A platform service reads it
+through the API service proxy, as the section Metering shows.
+
 When Loki is on, Prometheus scrapes it through the ServiceMonitor `loki`.
 The PrometheusRule `loki` holds the alert `LokiDiscardsLogs` with the
 severity `warning`. It fires when `loki_discarded_samples_total` rises in 10
@@ -327,12 +330,92 @@ labels of the project namespaces. They never match a namespace name.
 | `bedrock:project_vm_network_receive_bytes:increase1h` | Received bytes in the last hour, summed after the increase of each VM series | `kubevirt_vmi_network_receive_bytes_total` |
 | `bedrock:project_vm_network_transmit_bytes:increase1h` | Sent bytes in the last hour, summed after the increase of each VM series | `kubevirt_vmi_network_transmit_bytes_total` |
 
-Prometheus does not have an address outside the cluster. A client inside
-the cluster reads the series through the federation endpoint:
+### Labels
+
+Each series has the labels `tenant` and `project`. They come from the
+namespace labels `bedrock.cloudyfolks.io/tenant` and
+`bedrock.cloudyfolks.io/project`. Only the operator can set these labels.
+The name of the namespace is `<tenant>-<project>`. A namespace with no
+`project` label has no series. Series also exist for platform projects, like
+for all other projects. The consumer must drop the pairs that it does not
+know.
+
+Loki streams of project namespaces have the same two labels, as the
+section Loki shows. A reader always selects `{tenant="<t>", project="<p>"}`.
+
+### Hourly queries
+
+A reader runs these queries as instant queries, one for each closed hour.
+The parameter `time` is the end of the hour.
+
+| Unit | Query |
+|---|---|
+| CPU-hours | `sum_over_time(bedrock:project_vm_vcpu:sum[1h]) / 60` |
+| Memory GB-hours | `sum_over_time(bedrock:project_vm_memory_bytes:sum[1h]) / 60 / 1073741824` |
+| Network GB, in | `bedrock:project_vm_network_receive_bytes:increase1h / 1073741824` |
+| Network GB, out | `bedrock:project_vm_network_transmit_bytes:increase1h / 1073741824` |
+
+The rule interval is 1 minute. This value is part of the contract. The
+vCPU and memory series have one sample each minute while a VM runs, and no
+sample while no VM runs. The division by 60 turns the samples into hours,
+so a VM that runs 6 minutes of an hour counts 6 minutes. Do not use
+`avg_over_time` for these two units: it counts a full hour for a VM that
+runs 6 minutes.
+
+The network series take the increase of each VM series first and add the
+results second. A VM that ends in the middle of the hour keeps its bytes,
+and a live migration counts the bytes of both series. The error is about
+one scrape interval of traffic for each series and hour. The test
+`TestMeteringQueriesPassPromtool` runs these queries with `promtool`.
+
+### Read path
+
+Prometheus and Loki have no address outside the cluster. A service of the
+platform reads them through the API service proxy:
 
 ```
-http://kube-prometheus-stack-prometheus.monitoring.svc:9090/federate?match[]={__name__=~"bedrock:project_.*"}
+/api/v1/namespaces/monitoring/services/kube-prometheus-stack-prometheus:9090/proxy/api/v1/query
+/api/v1/namespaces/monitoring/services/loki:3100/proxy/loki/api/v1/query_range
 ```
+
+The names `kube-prometheus-stack-prometheus:9090` and `loki:3100` are part
+of the contract. The reader needs the verb `get` on `services/proxy` for
+these two names. Bedrock does not ship this role. The IaC of the consumer
+writes it:
+
+```
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: metering-reader
+rules:
+  - apiGroups: [""]
+    resources: [services/proxy]
+    verbs: [get]
+    resourceNames: [kube-prometheus-stack-prometheus:9090, loki:3100]
+```
+
+Bind the role with a RoleBinding in the namespace `monitoring`. This role
+reads the series and the logs of every tenant. Give it to platform
+services only.
+
+The NetworkPolicy of the section "Who can read Prometheus and Loki" keeps
+the pods of the projects away from both services. The API service proxy
+still works.
+
+### Gaps
+
+Prometheus keeps series for 15 days, so a reader can fill a missed hour
+for 15 days. The rules run each minute while Prometheus runs. When
+Prometheus is down for part of an hour, the CPU-hours and the memory
+GB-hours lose the minutes of the outage, and no more. The counters keep
+the traffic of the outage, so the network total of the hour stays complete
+when Prometheus runs at the end of the hour. When Prometheus is down at the
+end of the hour, the query answers with a sample of the last 5 minutes or
+with no value. The reader treats a missing value as a gap.
+
+Loki keeps logs for the number of days in the Setting
+`loki.retention-days`.
 
 ## Troubleshooting
 
