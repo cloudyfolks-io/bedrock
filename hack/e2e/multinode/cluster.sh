@@ -4,7 +4,7 @@ NS2=acme-data
 rook_conf=--conf=/var/lib/rook/rook-ceph/rook-ceph.config
 
 op_exec() {
-  kubectl -n rook-ceph exec deploy/rook-ceph-operator -- "$@"
+  timeout 180 kubectl -n rook-ceph exec deploy/rook-ceph-operator -- "$@"
 }
 
 ceph_op() {
@@ -102,8 +102,15 @@ osds_up_are() {
   [ "$(ceph_op osd stat -f json | jq .num_up_osds)" = "$1" ]
 }
 
+mons_in_quorum_are() {
+  [ "$(ceph_op quorum_status -f json | jq '.quorum_names | length')" = "$1" ]
+}
+
 check_ceph_topology() {
-  expect_equal 3 "$(ceph_op quorum_status -f json | jq '.quorum_names | length')" "monitors in quorum"
+  retry_until 1800 mons_in_quorum_are 3 || {
+    ceph_op status >&2
+    return 1
+  }
   retry_until 1800 osds_up_are 6 || { ceph_op osd tree >&2; return 1; }
   expect_equal "2 2 2" "$(osds_per_host)" "OSDs per host"
   retry_until 3600 health_ok || { ceph_op status >&2; return 1; }
