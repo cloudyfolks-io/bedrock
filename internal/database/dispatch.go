@@ -99,6 +99,16 @@ func ChangesPatchSteps(steps []Step) bool {
 	return false
 }
 
+func TargetFor(kind, name string) engine.Target {
+	switch kind {
+	case v1alpha1.DatabaseEngineMySQL:
+		return mysql.Target(name)
+	case v1alpha1.DatabaseEngineValkey:
+		return valkey.Target(name)
+	}
+	return postgres.Target(name)
+}
+
 func BackupStateOf(kind string) BackupState {
 	if kind == v1alpha1.DatabaseEngineMySQL {
 		return mysql.BackupState
