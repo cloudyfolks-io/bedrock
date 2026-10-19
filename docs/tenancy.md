@@ -197,6 +197,9 @@ A project user with the prefix `bedrock:` cannot create a Pod or Deployment with
 
 The rule applies only in namespaces with the label `bedrock.cloudyfolks.io/tenant`.
 It covers Pods and the pod templates of Deployments, ReplicaSets, StatefulSets, DaemonSets, Jobs and CronJobs.
+A project user also cannot set network selection annotations on a Pod or in a pod template.
+Only the platform can.
+See `docs/network.md`.
 Only the operator can set or change the labels `bedrock.cloudyfolks.io/tenant` and `bedrock.cloudyfolks.io/project` on a namespace.
 
 ## Deletion

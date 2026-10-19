@@ -136,8 +136,18 @@ Set `network.mtu` to 1500 only when the node NICs have an MTU of 1600 or more.
 Only the platform may add, change or remove network selection annotations on a pod.
 The annotations are all keys with the prefix `k8s.v1.cni.cncf.io/`, `v1.multus-cni.io/` or `ovn.kubernetes.io/`, and all keys with the text `cloudyfolks.io/`.
 The admission policy `bedrock-network-attachments` refuses every other identity in a project namespace.
-The allowed identities are the service accounts `kubevirt-controller` (namespace `kubevirt`), `ovn`, `fabric-cni` and `multus` (namespace `kube-system`) and `bedrock-operator` (namespace `bedrock-system`).
-A tenant user, a Deployment and a Job cannot attach a pod to a network.
+The allowed identities are the service accounts `kubevirt-controller` (namespace `kubevirt`), `ovn`, `fabric-cni`, `multus`, `replicaset-controller`, `statefulset-controller` and `job-controller` (namespace `kube-system`) and `bedrock-operator` (namespace `bedrock-system`).
+The controllers of Kubernetes create the pods of a workload.
+They copy the annotations from the pod template of the workload.
+
+The admission policy `bedrock-network-attachments-workloads` closes this path.
+It refuses the same annotations in the pod template of a Deployment, ReplicaSet, StatefulSet, DaemonSet, Job or CronJob in a project namespace.
+For a CronJob it reads `spec.jobTemplate.spec.template`.
+Only `bedrock-operator` and the Kubernetes controllers `deployment-controller` and `cronjob-controller` can create such a template with the annotations.
+The two controllers copy a template that `bedrock-operator` made.
+A user cannot attach a pod to a network, directly or through a workload.
+Only the platform can.
+A workload of a user without these annotations works as before.
 
 ## Networks and external access
 

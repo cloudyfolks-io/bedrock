@@ -123,10 +123,10 @@ func TestPodPolicyDeniesFabricAnnotationsByTenants(t *testing.T) {
 	}
 }
 
-func TestPodPolicyDeniesTenantControllers(t *testing.T) {
+func TestPodPolicyDeniesOtherControllers(t *testing.T) {
 	f := newPodPolicyFixture(t)
 	_, cfg := testEnv(t)
-	for _, user := range []string{"system:serviceaccount:kube-system:replicaset-controller", "system:serviceaccount:kube-system:job-controller"} {
+	for _, user := range []string{"system:serviceaccount:kube-system:daemon-set-controller", "system:serviceaccount:kube-system:replication-controller", "system:serviceaccount:kube-system:cronjob-controller"} {
 		c := impersonating(t, cfg, user, "system:masters")
 		requirePodDenied(t, c, podFor(f.ns, unique(t, "rs"), map[string]string{"k8s.v1.cni.cncf.io/networks": "pp-b/default"}))
 	}
@@ -140,6 +140,8 @@ func TestPodPolicyAllowsPlatformIdentities(t *testing.T) {
 	for _, user := range []string{
 		"system:serviceaccount:kube-system:ovn", "system:serviceaccount:kube-system:fabric-cni",
 		"system:serviceaccount:kube-system:multus", "system:serviceaccount:bedrock-system:bedrock-operator",
+		"system:serviceaccount:kube-system:replicaset-controller", "system:serviceaccount:kube-system:statefulset-controller",
+		"system:serviceaccount:kube-system:job-controller",
 	} {
 		requirePodAllowed(t, impersonating(t, cfg, user, "system:masters"), podFor(f.ns, unique(t, "pl"), annotations))
 	}
