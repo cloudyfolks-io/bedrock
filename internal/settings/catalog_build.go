@@ -81,6 +81,23 @@ func ParseRegistryMirrors(v string) ([]RegistryMirror, error) {
 	return mirrors, nil
 }
 
+func ParseRegistryMirrorsLenient(v string) ([]RegistryMirror, []string) {
+	if v == "" {
+		return nil, nil
+	}
+	var mirrors []RegistryMirror
+	var problems []string
+	for i, entry := range strings.Split(v, registryMirrorSeparator) {
+		mirror, err := parseRegistryMirror(entry)
+		if err != nil {
+			problems = append(problems, fmt.Sprintf("entry %d: %s", i+1, err))
+			continue
+		}
+		mirrors = append(mirrors, mirror)
+	}
+	return mirrors, problems
+}
+
 func parseRegistryMirror(entry string) (RegistryMirror, error) {
 	upstream, target, found := strings.Cut(entry, registryMirrorAssignment)
 	if !found || len(entry) > maxRegistryMirrorEntrySize {

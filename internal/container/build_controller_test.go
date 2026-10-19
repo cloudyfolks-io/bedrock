@@ -668,3 +668,44 @@ func TestBuildPodOfAnotherBuildsJobIsNotCounted(t *testing.T) {
 	reconcileBuild(t, r, ns, "mine")
 	requireBuildState(t, getBuild(t, c, ns, "mine"), v1alpha1.BuildPhasePending, ReasonStarting)
 }
+
+func TestBuildKeepsBuildingWithABadStoredMirrorList(t *testing.T) {
+	c, _ := startEnv(t)
+	ns := seedBuildPlatform(t, c)
+	setSetting(t, c, SettingBuildMirrors, "docker.io=registry.test/mirror-docker,broken,ghcr.io=")
+	createBuild(t, c, ns, "tolerant", noBuildMutation)
+	createBuild(t, c, ns, "tolerant-pack", func(s *v1alpha1.BuildSpec) { s.Type = v1alpha1.BuildTypeBuildpacks })
+	r := newBuildReconciler(c)
+	reconcileBuild(t, r, ns, "tolerant")
+	reconcileBuild(t, r, ns, "tolerant-pack")
+	getJob(t, c, ns, "tolerant")
+	getJob(t, c, ns, "tolerant-pack")
+	var configMap corev1.ConfigMap
+	must(t, c.Get(context.Background(), client.ObjectKey{Namespace: ns, Name: "tolerant-buildkitd"}, &configMap))
+	if configMap.Data["buildkitd.toml"] != "[registry.\"docker.io\"]\n  mirrors = [\"registry.test/mirror-docker\"]\n" {
+		t.Fatalf("data %v", configMap.Data)
+	}
+	for _, name := range []string{"tolerant", "tolerant-pack"} {
+		build := getBuild(t, c, ns, name)
+		requireBuildState(t, build, v1alpha1.BuildPhasePending, ReasonStarting)
+		cond := meta.FindStatusCondition(build.Status.Conditions, ConditionRegistryMirrors)
+		if cond == nil || cond.Status != metav1.ConditionFalse || cond.Reason != ReasonInvalidMirrors || !strings.Contains(cond.Message, "entry 2") || !strings.Contains(cond.Message, "entry 3") || strings.Contains(cond.Message, "broken") {
+			t.Fatalf("%s: mirror condition %+v", name, cond)
+		}
+	}
+	reconcileBuild(t, r, ns, "tolerant")
+	if cond := meta.FindStatusCondition(getBuild(t, c, ns, "tolerant").Status.Conditions, ConditionRegistryMirrors); cond == nil {
+		t.Fatal("the mirror condition must stay on the Build while it runs")
+	}
+}
+
+func TestBuildWithAGoodMirrorListHasNoMirrorCondition(t *testing.T) {
+	c, _ := startEnv(t)
+	ns := seedBuildPlatform(t, c)
+	setSetting(t, c, SettingBuildMirrors, "docker.io=registry.test/mirror-docker")
+	createBuild(t, c, ns, "clean", noBuildMutation)
+	reconcileBuild(t, newBuildReconciler(c), ns, "clean")
+	if cond := meta.FindStatusCondition(getBuild(t, c, ns, "clean").Status.Conditions, ConditionRegistryMirrors); cond != nil {
+		t.Fatalf("condition %+v", cond)
+	}
+}

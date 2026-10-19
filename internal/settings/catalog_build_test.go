@@ -146,3 +146,23 @@ func TestLabScriptUsesTheDefaultBuildImages(t *testing.T) {
 		}
 	}
 }
+
+func TestParseRegistryMirrorsLenientKeepsTheValidEntries(t *testing.T) {
+	mirrors, problems := ParseRegistryMirrorsLenient("docker.io=r.test/d,broken,ghcr.io=,quay.io=r.test/q")
+	want := []RegistryMirror{{"docker.io", "r.test/d"}, {"quay.io", "r.test/q"}}
+	if !slices.Equal(mirrors, want) {
+		t.Fatalf("mirrors %+v", mirrors)
+	}
+	if len(problems) != 2 || !strings.HasPrefix(problems[0], "entry 2:") || !strings.HasPrefix(problems[1], "entry 3:") {
+		t.Fatalf("problems %v", problems)
+	}
+	for _, problem := range problems {
+		if strings.Contains(problem, "broken") || strings.Contains(problem, "ghcr.io") {
+			t.Errorf("the problem repeats the value: %s", problem)
+		}
+	}
+	none, noProblems := ParseRegistryMirrorsLenient("")
+	if len(none) != 0 || len(noProblems) != 0 {
+		t.Fatalf("empty gives %v %v", none, noProblems)
+	}
+}

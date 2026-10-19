@@ -57,22 +57,22 @@ func (r *BuildReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 	job, err := r.jobOf(ctx, b)
 	var conflict nameConflict
 	if errors.As(err, &conflict) {
-		return r.report(ctx, b, gateOf(ReasonNameConflict, "%s", conflict.Error()), BuildDecision{}, "", false, buildGateRetry)
+		return r.report(ctx, b, gateOf(ReasonNameConflict, "%s", conflict.Error()), BuildDecision{}, "", false, buildGateRetry, nil)
 	}
 	if err != nil {
 		return ctrl.Result{}, err
 	}
 	if job == nil && b.Status.JobName == "" {
-		gate, created, err := r.start(ctx, b)
+		gate, created, problems, err := r.start(ctx, b)
 		if err != nil {
 			return ctrl.Result{}, err
 		}
 		if gate != nil {
-			return r.report(ctx, b, gate, BuildDecision{}, "", false, buildGateRetry)
+			return r.report(ctx, b, gate, BuildDecision{}, "", false, buildGateRetry, problems)
 		}
-		return r.observe(ctx, b, created, created != nil)
+		return r.observe(ctx, b, created, created != nil, problems)
 	}
-	return r.observe(ctx, b, job, job != nil)
+	return r.observe(ctx, b, job, job != nil, nil)
 }
 
 func (r *BuildReconciler) jobOf(ctx context.Context, b v1alpha1.Build) (*batchv1.Job, error) {
@@ -90,25 +90,25 @@ func (r *BuildReconciler) jobOf(ctx context.Context, b v1alpha1.Build) (*batchv1
 	return &job, nil
 }
 
-func (r *BuildReconciler) start(ctx context.Context, b v1alpha1.Build) (*Gate, *batchv1.Job, error) {
+func (r *BuildReconciler) start(ctx context.Context, b v1alpha1.Build) (*Gate, *batchv1.Job, []string, error) {
 	var ns corev1.Namespace
 	if err := r.Client.Get(ctx, client.ObjectKey{Name: b.Namespace}, &ns); err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
 	labels, ok := BuildOwnerLabels(b.Name, ns)
 	if !ok {
-		return gateOf(ReasonNotInProject, "the namespace is not a project namespace"), nil, nil
+		return gateOf(ReasonNotInProject, "the namespace is not a project namespace"), nil, nil, nil
 	}
 	in, gate, err := r.resolver().Resolve(ctx, b, labels)
 	if err != nil || gate != nil {
-		return gate, nil, err
+		return gate, nil, in.MirrorProblems, err
 	}
 	rendered, err := RenderBuild(in)
 	if err != nil {
-		return gateOf(ReasonInvalidSpec, "%s", err.Error()), nil, nil
+		return gateOf(ReasonInvalidSpec, "%s", err.Error()), nil, in.MirrorProblems, nil
 	}
 	job, gate, err := r.create(ctx, rendered)
-	return gate, job, err
+	return gate, job, in.MirrorProblems, err
 }
 
 func (r *BuildReconciler) create(ctx context.Context, rendered Rendered) (*batchv1.Job, *Gate, error) {
@@ -160,14 +160,14 @@ func (r *BuildReconciler) applyOwnedConfigMap(ctx context.Context, desired *unst
 	return ssa.Apply(ctx, r.Client, desired, v1alpha1.ContainerFieldManager)
 }
 
-func (r *BuildReconciler) observe(ctx context.Context, b v1alpha1.Build, job *batchv1.Job, jobExists bool) (ctrl.Result, error) {
+func (r *BuildReconciler) observe(ctx context.Context, b v1alpha1.Build, job *batchv1.Job, jobExists bool, problems []string) (ctrl.Result, error) {
 	pods, err := r.podsOf(ctx, b, job)
 	if err != nil {
 		return ctrl.Result{}, err
 	}
 	now := r.now()
 	decision := DecideBuild(BuildObservation{Job: job, Pods: pods, Now: now, JobMissingSince: JobMissingSince(b)})
-	if err := r.writeStatus(ctx, b, nil, decision, b.Name, jobExists); err != nil {
+	if err := r.writeStatus(ctx, b, nil, decision, b.Name, jobExists, problems); err != nil {
 		return ctrl.Result{}, fmt.Errorf("write the build status: %w", err)
 	}
 	if decision.Terminal() {
@@ -176,8 +176,8 @@ func (r *BuildReconciler) observe(ctx context.Context, b v1alpha1.Build, job *ba
 	return ctrl.Result{RequeueAfter: buildObserveInterval}, nil
 }
 
-func (r *BuildReconciler) report(ctx context.Context, b v1alpha1.Build, gate *Gate, decision BuildDecision, jobName string, jobExists bool, after time.Duration) (ctrl.Result, error) {
-	if err := r.writeStatus(ctx, b, gate, decision, jobName, jobExists); err != nil {
+func (r *BuildReconciler) report(ctx context.Context, b v1alpha1.Build, gate *Gate, decision BuildDecision, jobName string, jobExists bool, after time.Duration, problems []string) (ctrl.Result, error) {
+	if err := r.writeStatus(ctx, b, gate, decision, jobName, jobExists, problems); err != nil {
 		return ctrl.Result{}, fmt.Errorf("write the build status: %w", err)
 	}
 	return ctrl.Result{RequeueAfter: after}, nil
@@ -211,7 +211,7 @@ func jobFinished(job batchv1.Job) bool {
 	return false
 }
 
-func (r *BuildReconciler) writeStatus(ctx context.Context, b v1alpha1.Build, gate *Gate, decision BuildDecision, jobName string, jobExists bool) error {
+func (r *BuildReconciler) writeStatus(ctx context.Context, b v1alpha1.Build, gate *Gate, decision BuildDecision, jobName string, jobExists bool, problems []string) error {
 	return retry.RetryOnConflict(retry.DefaultRetry, func() error {
 		var current v1alpha1.Build
 		if err := r.Client.Get(ctx, client.ObjectKeyFromObject(&b), &current); err != nil {
@@ -222,6 +222,9 @@ func (r *BuildReconciler) writeStatus(ctx context.Context, b v1alpha1.Build, gat
 		}
 		desired := current.DeepCopy()
 		desired.Status = BuildStatusOf(current, gate, decision, jobNameOf(current, jobName), jobExists, r.now())
+		if len(problems) > 0 {
+			desired.Status.Conditions = withMirrorCondition(desired.Status.Conditions, MirrorCondition(problems, current.Generation, r.now()))
+		}
 		if equality.Semantic.DeepEqual(current.Status, desired.Status) {
 			return nil
 		}
@@ -234,4 +237,9 @@ func jobNameOf(current v1alpha1.Build, proposed string) string {
 		return current.Status.JobName
 	}
 	return proposed
+}
+
+func withMirrorCondition(conditions []metav1.Condition, mirror metav1.Condition) []metav1.Condition {
+	kept := slices.DeleteFunc(slices.Clone(conditions), func(c metav1.Condition) bool { return c.Type == ConditionRegistryMirrors })
+	return append(kept, mirror)
 }
