@@ -12,9 +12,11 @@ import (
 	"time"
 
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/client-go/rest"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
+	"github.com/cloudyfolks-io/bedrock/api/v1alpha1"
 	"github.com/cloudyfolks-io/bedrock/internal/authn/apiserver"
 	"github.com/cloudyfolks-io/bedrock/internal/encryption"
 	"github.com/cloudyfolks-io/bedrock/internal/k0s"
@@ -166,7 +168,24 @@ func readEncryptionSecret(ctx context.Context, ca k0s.CA, vip string, newClient 
 	if err != nil {
 		return nil, err
 	}
+	if err := refuseDuringRotation(ctx, c); err != nil {
+		return nil, err
+	}
 	return encryption.ReadSecret(ctx, c)
+}
+
+func refuseDuringRotation(ctx context.Context, c client.Reader) error {
+	cluster := &unstructured.Unstructured{}
+	cluster.SetGroupVersionKind(v1alpha1.GroupVersion.WithKind("Cluster"))
+	err := c.Get(ctx, client.ObjectKey{Name: v1alpha1.ClusterName}, cluster)
+	if err != nil {
+		return client.IgnoreNotFound(err)
+	}
+	phase, _, _ := unstructured.NestedString(cluster.Object, "status", "encryption", "phase")
+	if phase != "" {
+		return fmt.Errorf("a key rotation is in progress (phase %s): join this node after it ends", phase)
+	}
+	return nil
 }
 
 func fetchJoinEncryption(ctx context.Context, stdout io.Writer, deps InitDeps, token k0s.Token) ([]byte, error) {
