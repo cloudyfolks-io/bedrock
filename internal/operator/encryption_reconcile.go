@@ -6,11 +6,13 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/equality"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/util/retry"
@@ -66,14 +68,19 @@ func (r *ClusterReconciler) reconcileEncryption(ctx context.Context) (time.Durat
 }
 
 func (r *ClusterReconciler) rewriteAndRecord(ctx context.Context, decision rotationDecision) (rotationDecision, error) {
-	rewritten, err := rewriteSecrets(ctx, r.APIReader, r.Client, rewritePageSize)
-	if err != nil {
-		failed := decision.Status
-		failed.Message = fmt.Sprintf("rewriting the Secrets failed, it runs again: %v", err)
-		return decision, errors.Join(err, r.writeEncryptionStatus(ctx, failed))
-	}
-	decision.Status = finishRewrite(decision.Status, rewritten)
+	result, err := rewriteSecrets(ctx, r.APIReader, r.Client, rewritePageSize)
+	decision.Status.RewrittenSecrets += result.Updated
 	decision.Rewrite = false
+	if err != nil {
+		decision.Status.Message = fmt.Sprintf("listing the Secrets failed, it runs again: %v", err)
+		return decision, errors.Join(err, r.writeEncryptionStatus(ctx, decision.Status, stalledSecretsFailed))
+	}
+	if len(result.Failed) > 0 {
+		decision.Status.Message = failedSecretsMessage(result.Failed)
+		decision.Stalled = stalledSecretsFailed
+		return decision, nil
+	}
+	decision.Status = finishRewrite(decision.Status, 0)
 	return decision, nil
 }
 
@@ -97,7 +104,7 @@ func readEncryptionContent(ctx context.Context, reader client.Reader) ([]byte, e
 }
 
 func (r *ClusterReconciler) applyRotation(ctx context.Context, cluster v1alpha1.Cluster, decision rotationDecision) error {
-	if err := r.writeEncryptionStatus(ctx, decision.Status); err != nil {
+	if err := r.writeEncryptionStatus(ctx, decision.Status, decision.Stalled); err != nil {
 		return err
 	}
 	if decision.Secret != nil {
@@ -122,14 +129,25 @@ func (r *ClusterReconciler) applyRotation(ctx context.Context, cluster v1alpha1.
 	return nil
 }
 
-func (r *ClusterReconciler) writeEncryptionStatus(ctx context.Context, status v1alpha1.EncryptionRotationStatus) error {
+func (r *ClusterReconciler) writeEncryptionStatus(ctx context.Context, status v1alpha1.EncryptionRotationStatus, stalled string) error {
 	return writeClusterStatus(ctx, r.Client, func(s *v1alpha1.ClusterStatus) {
+		setStalled(s, status.Message, stalled)
 		if equality.Semantic.DeepEqual(status, v1alpha1.EncryptionRotationStatus{}) {
 			s.Encryption = nil
 			return
 		}
 		s.Encryption = &status
 	})
+}
+
+func setStalled(status *v1alpha1.ClusterStatus, message, reason string) {
+	existing := meta.FindStatusCondition(status.Conditions, v1alpha1.ConditionEncryptionStalled)
+	switch {
+	case reason != "":
+		setCondition(status, v1alpha1.ConditionEncryptionStalled, metav1.ConditionTrue, reason, message, 0)
+	case existing != nil && existing.Status == metav1.ConditionTrue:
+		setCondition(status, v1alpha1.ConditionEncryptionStalled, metav1.ConditionFalse, "Progressing", "", 0)
+	}
 }
 
 func writeEncryptionSecret(ctx context.Context, c client.Client, content []byte) error {
@@ -165,24 +183,83 @@ func clearEncryptionAction(ctx context.Context, c client.Client, action string) 
 	})
 }
 
-func rewriteSecrets(ctx context.Context, reader client.Reader, writer client.Client, pageSize int64) (int64, error) {
-	var rewritten int64
+type rewriteResult struct {
+	Updated int64
+	Failed  []string
+}
+
+const (
+	rewriteAttempts      = 3
+	rewriteListRestarts  = 5
+	stalledSecretsFailed = "SecretsFailed"
+	stalledMessageNames  = 5
+)
+
+func rewriteSecrets(ctx context.Context, reader client.Reader, writer client.Client, pageSize int64) (rewriteResult, error) {
+	var result rewriteResult
+	done := map[types.UID]struct{}{}
+	for restart := 0; ; restart++ {
+		err := rewritePass(ctx, reader, writer, pageSize, done, &result)
+		if (apierrors.IsResourceExpired(err) || apierrors.IsGone(err)) && restart < rewriteListRestarts {
+			continue
+		}
+		return result, err
+	}
+}
+
+func rewritePass(ctx context.Context, reader client.Reader, writer client.Client, pageSize int64, done map[types.UID]struct{}, result *rewriteResult) error {
 	token := ""
 	for {
 		var page corev1.SecretList
 		if err := reader.List(ctx, &page, client.Limit(pageSize), client.Continue(token)); err != nil {
-			return rewritten, err
+			return err
 		}
 		for index := range page.Items {
-			err := writer.Update(ctx, &page.Items[index])
-			if err != nil && !apierrors.IsConflict(err) && !apierrors.IsNotFound(err) {
-				return rewritten, fmt.Errorf("rewrite secret %s/%s: %w", page.Items[index].Namespace, page.Items[index].Name, err)
+			secret := &page.Items[index]
+			if _, seen := done[secret.UID]; seen {
+				continue
 			}
-			rewritten++
+			changed, err := rewriteOne(ctx, reader, writer, secret)
+			if err != nil {
+				result.Failed = append(result.Failed, secret.Namespace+"/"+secret.Name)
+			}
+			if changed {
+				result.Updated++
+			}
+			done[secret.UID] = struct{}{}
 		}
 		token = page.Continue
 		if token == "" {
-			return rewritten, nil
+			return nil
 		}
 	}
+}
+
+func rewriteOne(ctx context.Context, reader client.Reader, writer client.Client, secret *corev1.Secret) (bool, error) {
+	var err error
+	for attempt := 0; attempt < rewriteAttempts; attempt++ {
+		before := secret.ResourceVersion
+		err = writer.Update(ctx, secret)
+		switch {
+		case err == nil:
+			return secret.ResourceVersion != before, nil
+		case apierrors.IsNotFound(err):
+			return false, nil
+		case !apierrors.IsConflict(err):
+			return false, err
+		}
+		if err := reader.Get(ctx, client.ObjectKeyFromObject(secret), secret); err != nil {
+			return false, client.IgnoreNotFound(err)
+		}
+	}
+	return false, err
+}
+
+func failedSecretsMessage(failed []string) string {
+	shown := failed[:min(len(failed), stalledMessageNames)]
+	message := fmt.Sprintf("rewriting %d Secrets failed, it runs again: %s", len(failed), strings.Join(shown, ", "))
+	if extra := len(failed) - len(shown); extra > 0 {
+		message += fmt.Sprintf(" and %d more", extra)
+	}
+	return message
 }
