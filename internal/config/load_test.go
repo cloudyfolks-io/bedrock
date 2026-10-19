@@ -59,6 +59,52 @@ func TestValidateRejectsBadInput(t *testing.T) {
 	}
 }
 
+func TestValidatePodMTU(t *testing.T) {
+	cases := map[int32]bool{-1: false, 0: true, 575: false, 576: true, 1500: true, 9000: true, 9001: false}
+	for mtu, valid := range cases {
+		cfg, err := Load(filepath.Join("testdata", "single-node.yaml"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		cfg.Spec.Network.PodMTU = mtu
+		if err := Validate(cfg); (err == nil) != valid {
+			t.Errorf("podMTU %d: valid %v, error %v", mtu, valid, err)
+		}
+	}
+}
+
+func TestLoadReadsPodMTU(t *testing.T) {
+	raw, err := os.ReadFile(filepath.Join("testdata", "single-node.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(t.TempDir(), "cluster.yaml")
+	patched := strings.Replace(string(raw), "  network:\n", "  network:\n    podMTU: 1500\n", 1)
+	if patched == string(raw) {
+		t.Fatal("the fixture has no network section to patch")
+	}
+	if err := os.WriteFile(path, []byte(patched), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Spec.Network.PodMTU != 1500 || ToCluster(cfg).Spec.PodMTU != 1500 {
+		t.Fatalf("podMTU %d, cluster %d", cfg.Spec.Network.PodMTU, ToCluster(cfg).Spec.PodMTU)
+	}
+}
+
+func TestToClusterLeavesPodMTUEmptyByDefault(t *testing.T) {
+	cfg, err := Load(filepath.Join("testdata", "single-node.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := ToCluster(cfg).Spec.PodMTU; got != 0 {
+		t.Fatalf("podMTU %d", got)
+	}
+}
+
 func TestValidateAllowsNoDevices(t *testing.T) {
 	cfg, err := Load(filepath.Join("testdata", "single-node.yaml"))
 	if err != nil {

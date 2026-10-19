@@ -129,6 +129,9 @@ func Validate(cfg v1alpha1.ClusterConfig) error {
 	if s.Network.Fabric.PodCIDR != defaultPodCIDR || s.Network.Fabric.ServiceCIDR != defaultServiceCIDR || s.Network.Fabric.JoinCIDR != DefaultJoinCIDR {
 		return fmt.Errorf("custom CIDRs arrive in a later release")
 	}
+	if mtu := s.Network.PodMTU; mtu != 0 && (mtu < 576 || mtu > 9000) {
+		return fmt.Errorf("spec.network.podMTU must be from 576 to 9000, got %d", mtu)
+	}
 	if !slices.Contains([]string{"bgp", "l2"}, s.Network.Fabric.EIPMode) {
 		return fmt.Errorf("spec.network.fabric.eipMode must be bgp or l2")
 	}
@@ -309,6 +312,7 @@ func ToCluster(cfg v1alpha1.ClusterConfig) v1alpha1.Cluster {
 			Registry:        v1alpha1.RegistrySpec{Mirror: cfg.Spec.Registry.Mirror},
 			Encryption:      *cfg.Spec.Encryption.DeepCopy(),
 			JoinCIDR:        cfg.Spec.Network.Fabric.JoinCIDR,
+			PodMTU:          cfg.Spec.Network.PodMTU,
 			Storage:         v1alpha1.ClusterStorageSpec{Adopt: adoptWithoutKeyFile(cfg.Spec.Storage.Adopt)},
 		},
 	}

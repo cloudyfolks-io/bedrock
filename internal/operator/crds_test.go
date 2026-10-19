@@ -70,6 +70,26 @@ func TestClusterJoinCIDRDefaultsAndIsImmutable(t *testing.T) {
 	}
 }
 
+func TestClusterPodMTUMustBeFrom576To9000(t *testing.T) {
+	c, _ := StartTestEnv(t)
+	ctx := context.Background()
+	for _, mtu := range []int32{575, 9001} {
+		cluster := newCluster("v0.1.0")
+		cluster.Spec.PodMTU = mtu
+		if err := c.Create(ctx, cluster); err == nil {
+			t.Fatalf("podMTU %d must be rejected", mtu)
+		}
+	}
+	cluster := newCluster("v0.1.0")
+	cluster.Spec.PodMTU = 1500
+	if err := c.Create(ctx, cluster); err != nil {
+		t.Fatal(err)
+	}
+	if cluster.Spec.PodMTU != 1500 {
+		t.Fatalf("podMTU %d", cluster.Spec.PodMTU)
+	}
+}
+
 func clusterWithEncryption(encryption v1alpha1.EncryptionSpec) *v1alpha1.Cluster {
 	return &v1alpha1.Cluster{
 		ObjectMeta: metav1.ObjectMeta{Name: v1alpha1.ClusterName},

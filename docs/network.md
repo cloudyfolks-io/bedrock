@@ -138,6 +138,17 @@ A larger value drops or fragments the packets between nodes.
 A cluster whose node NICs have an MTU of 1500 must leave `network.mtu` empty, or set 1400 or less.
 Set `network.mtu` to 1500 only when the node NICs have an MTU of 1600 or more.
 
+The pod MTU is a separate value.
+It is `spec.network.podMTU` of the cluster configuration, from 576 to 9000.
+When it is empty, Fabric detects the pod MTU from the node NIC and subtracts 100.
+When it is set, the installer adds `--mtu=<value>` to the `cni-server` container of the Fabric agent.
+This is the `networking.pods.mtu` key of the Fabric chart.
+The release render does not change, so an empty value gives the same manifests as before.
+The value is part of the `Cluster` object (`spec.podMTU`).
+The operator applies a changed value at the next release install or upgrade.
+A running pod keeps its MTU until the pod is created again.
+Set `podMTU` to 1500 on a cluster whose guests use `network.mtu` 1500, such as ir-central-1, and use node NICs with an MTU of 1600 or more.
+
 Only the platform may add, change or remove network selection annotations on a pod.
 The annotations are all keys with the prefix `k8s.v1.cni.cncf.io/`, `v1.multus-cni.io/` or `ovn.kubernetes.io/`, and all keys with the text `cloudyfolks.io/`.
 The admission policy `bedrock-network-attachments` refuses every other identity in a project namespace.

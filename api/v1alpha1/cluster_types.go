@@ -98,6 +98,10 @@ type ClusterSpec struct {
 	// +kubebuilder:validation:XValidation:rule="self == oldSelf",message="joinCIDR is immutable"
 	// +optional
 	JoinCIDR string `json:"joinCIDR,omitempty"`
+	// +kubebuilder:validation:Minimum=576
+	// +kubebuilder:validation:Maximum=9000
+	// +optional
+	PodMTU int32 `json:"podMTU,omitempty"`
 }
 
 type ClusterStorageSpec struct {

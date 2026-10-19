@@ -21,6 +21,10 @@ func InstallGroups(ctx context.Context, c client.Client, bundle Bundle, vars map
 	if err != nil {
 		return err
 	}
+	bundle, err = SetPodMTU(bundle, vars)
+	if err != nil {
+		return err
+	}
 	previous, err := ReadInventory(ctx, c)
 	if err != nil {
 		return err
