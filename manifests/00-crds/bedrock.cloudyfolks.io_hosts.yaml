@@ -240,6 +240,8 @@ spec:
                 properties:
                   failedHash:
                     type: string
+                  handledGrant:
+                    type: string
                   hash:
                     type: string
                   restartPending:
