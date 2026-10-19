@@ -19,7 +19,7 @@ min_mem_gb=${LAB_MIN_MEM_GB:-46}
 remote_config_file=/root/multinode.yaml
 join_roles=control-plane,ceph-osd,fabric-gateway,workload
 release_config=dist/components-e2e.yaml
-remote_files=(tenant/tenancy tenant/images multinode/cluster)
+remote_files=(tenant/tenancy tenant/images multinode/cluster multinode/guest)
 vm_env=()
 bundle_make_args=("RELEASE_CONFIG=$release_config")
 vm_path=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
