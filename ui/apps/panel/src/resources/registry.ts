@@ -142,7 +142,7 @@ const rows: Row[] = [
   row({ kind: "LoadBalancer", plural: "loadbalancers", scope: "Namespaced", perspective: "project", section: "Networking", path: "load-balancers", title: t.loadBalancers, create: true, edit: true, actions: [del("simple")], refFields: { "listeners.*.targets.*.vmRef": "virtualmachines" }, uiSchema: { elasticIPRef: { "ui:widget": "hidden" } } }),
   row({ kind: "DNSZone", plural: "dnszones", scope: "Namespaced", perspective: "project", section: "Networking", path: "dns-zones", title: t.dnsZones, create: true, edit: true, actions: [del("simple")], validate: validateDnsZone }),
   row({ kind: "SecurityGroup", plural: "securitygroups", scope: "Namespaced", perspective: "project", section: "Networking", path: "security-groups", title: t.securityGroups, create: true, edit: true, actions: [del("simple")], validate: validateSecurityGroup }),
-  row({ kind: "ObjectStorageBucket", plural: "objectstoragebuckets", scope: "Namespaced", perspective: "project", section: "Object storage", path: "buckets", title: t.buckets, create: true, edit: true, actions: [del("typed")], validate: validateBucket, uiSchema: { policy: { "ui:widget": "textarea" } }, refFields: { userRef: "objectstorageusers" } }),
+  row({ kind: "ObjectStorageBucket", plural: "objectstoragebuckets", scope: "Namespaced", perspective: "project", section: "Object storage", path: "buckets", title: t.buckets, create: true, edit: true, actions: [del("typed")], validate: validateBucket, uiSchema: { policy: { "ui:widget": "textarea" } } }),
   row({ kind: "ObjectStorageUser", plural: "objectstorageusers", scope: "Namespaced", perspective: "project", section: "Object storage", path: "object-users", title: t.objectUsers, create: true, edit: true, actions: [del("typed")] }),
 ];
 

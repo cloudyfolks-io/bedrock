@@ -17,13 +17,40 @@
       },
       "spec": {
         "displayName": "App user",
-        "quota": {
-          "buckets": 5,
-          "bytes": "500Gi"
-        }
+        "permission": "readWrite",
+        "buckets": ["assets", "logs"]
       },
       "status": {
         "credentialsSecret": "object-user-app",
+        "arn": "arn:aws:iam::RGW00000000000000001:user/acme-web.app",
+        "conditions": [
+          {
+            "type": "Ready",
+            "status": "True",
+            "reason": "Ready",
+            "message": "",
+            "lastTransitionTime": "2026-10-01T10:00:00Z"
+          }
+        ]
+      }
+    },
+    {
+      "apiVersion": "bedrock.cloudyfolks.io/v1alpha1",
+      "kind": "ObjectStorageUser",
+      "metadata": {
+        "name": "ci",
+        "uid": "uid-objectstorageuser-ci",
+        "resourceVersion": "100",
+        "creationTimestamp": "2026-10-01T10:00:00Z",
+        "namespace": "acme-web"
+      },
+      "spec": {
+        "displayName": "CI user",
+        "permission": "read",
+        "suspended": true
+      },
+      "status": {
+        "credentialsSecret": "object-user-ci",
         "conditions": [
           {
             "type": "Ready",
