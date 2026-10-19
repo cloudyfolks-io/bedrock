@@ -2,6 +2,7 @@ package objectstorage
 
 import (
 	"errors"
+	"regexp"
 	"strings"
 )
 
@@ -18,7 +19,12 @@ const (
 
 	AppliedVersioningAnnotation = "bedrock.cloudyfolks.io/applied-versioning"
 	AppliedPolicyAnnotation     = "bedrock.cloudyfolks.io/applied-policy"
+	AppliedCORSAnnotation       = "bedrock.cloudyfolks.io/applied-cors"
+
+	ReservedNameApprovedAnnotation = "bedrock.cloudyfolks.io/reserved-name-approved"
 )
+
+var bucketNamePattern = regexp.MustCompile(`^[a-z0-9][a-z0-9-]{1,61}[a-z0-9]$`)
 
 var (
 	ErrQuotaInvalid  = errors.New("quota must not be negative")
@@ -39,4 +45,14 @@ func SplitRGWUserName(id string) (namespace, name string, ok bool) {
 
 func CredentialsSecretName(rgwUser string) string {
 	return "rook-ceph-object-user-" + StoreName + "-" + rgwUser
+}
+
+func nameProblem(name string, rules Rules, approved bool) string {
+	if !bucketNamePattern.MatchString(name) {
+		return reasonNameInvalid
+	}
+	if !approved && reservedName(name, rules) {
+		return reasonNameReserved
+	}
+	return ""
 }
