@@ -135,11 +135,6 @@ func TestBucketAdoptsABucketTheAccountOwns(t *testing.T) {
 	createBucket(t, "acme-prod", "data", v1alpha1.ObjectStorageBucketSpec{BucketName: "acme-assets"})
 	settle(t, r, "acme-prod", "data")
 	requireBucketReason(t, "acme-prod", "data", metav1.ConditionTrue, "Bound")
-	for _, call := range store.take() {
-		if call == "PUT" {
-			t.Fatal("an existing bucket was created again")
-		}
-	}
 	if len(store.objects["acme-assets"]) != 3 {
 		t.Fatal("the adopted bucket lost objects")
 	}
@@ -510,7 +505,7 @@ func TestBucketReportsAnUnreachableStoreAsNotReady(t *testing.T) {
 	requireBucketReason(t, "acme-prod", "data", metav1.ConditionFalse, "StoreNotReady")
 }
 
-func TestBucketTreatsAccessDeniedAsTaken(t *testing.T) {
+func TestBucketReportsADeniedCreateAsAFailure(t *testing.T) {
 	fresh(t)
 	store, url := newFakeS3(t)
 	store.failWith = http.StatusForbidden
@@ -518,7 +513,7 @@ func TestBucketTreatsAccessDeniedAsTaken(t *testing.T) {
 	accountReady(t, "acme-prod")
 	createBucket(t, "acme-prod", "data", v1alpha1.ObjectStorageBucketSpec{})
 	settle(t, r, "acme-prod", "data")
-	requireBucketReason(t, "acme-prod", "data", metav1.ConditionFalse, "NameTaken")
+	requireBucketReason(t, "acme-prod", "data", metav1.ConditionFalse, "BucketFailed")
 }
 
 func TestBucketWithAnOldClaimIsLegacy(t *testing.T) {
@@ -688,4 +683,53 @@ func TestBucketStatusIsWrittenByTheAreaManager(t *testing.T) {
 		}
 	}
 	t.Fatalf("managed fields %+v", readBucket(t, "acme-prod", "data").ManagedFields)
+}
+
+func TestBucketProvesOwnershipWithTheCreateAnswer(t *testing.T) {
+	fresh(t)
+	store, url := newFakeS3(t)
+	store.foreign["acme-assets"] = true
+	store.publicHead["acme-assets"] = true
+	store.fill("acme-assets", 4)
+	r := bucketReconciler(url)
+	accountReady(t, "acme-prod")
+	createBucket(t, "acme-prod", "data", v1alpha1.ObjectStorageBucketSpec{BucketName: "acme-assets", ForceDestroy: true})
+	settle(t, r, "acme-prod", "data")
+	requireBucketReason(t, "acme-prod", "data", metav1.ConditionFalse, "NameTaken")
+	if readBucket(t, "acme-prod", "data").Status.BucketName != "" {
+		t.Fatal("a foreign bucket is reported as ours")
+	}
+	deleteBucketObject(t, "acme-prod", "data")
+	store.take()
+	reconcileBucket(t, r, "acme-prod", "data")
+	if !bucketGone(t, "acme-prod", "data") {
+		t.Fatal("the finalizer stayed")
+	}
+	for _, call := range store.take() {
+		if call != "" {
+			t.Fatalf("the delete of a refused bucket called the store: %q", call)
+		}
+	}
+	if !store.has("acme-assets") || len(store.objects["acme-assets"]) != 4 {
+		t.Fatal("a bucket of another account was touched")
+	}
+}
+
+func TestBucketDeletesAnOwnedBucketWhoseSettingsFailed(t *testing.T) {
+	fresh(t)
+	store, url := newFakeS3(t)
+	r := bucketReconciler(url)
+	accountReady(t, "acme-prod")
+	createBucket(t, "acme-prod", "data", v1alpha1.ObjectStorageBucketSpec{Policy: "{}", ForceDestroy: true})
+	settle(t, r, "acme-prod", "data")
+	requireBucketReason(t, "acme-prod", "data", metav1.ConditionFalse, "PolicyInvalid")
+	if readBucket(t, "acme-prod", "data").Status.BucketName != "" {
+		t.Fatal("the name is reported before the settings are applied")
+	}
+	store.fill("acme-prod-data", 3)
+	deleteBucketObject(t, "acme-prod", "data")
+	reconcileBucket(t, r, "acme-prod", "data")
+	if store.has("acme-prod-data") || !bucketGone(t, "acme-prod", "data") {
+		t.Fatal("an owned bucket was left behind")
+	}
 }
