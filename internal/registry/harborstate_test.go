@@ -34,15 +34,16 @@ type fakeWebhook struct {
 }
 
 type harborState struct {
-	mu         sync.Mutex
-	nextID     int64
-	projects   map[string]*fakeProject
-	retentions map[int64]map[string]any
-	creates    []string
-	deletes    []string
-	robotSets  []string
-	server     *httptest.Server
-	secretSeq  int
+	mu          sync.Mutex
+	nextID      int64
+	projects    map[string]*fakeProject
+	retentions  map[int64]map[string]any
+	creates     []string
+	deletes     []string
+	robotSets   []string
+	server      *httptest.Server
+	secretSeq   int
+	failSummary bool
 }
 
 func newHarborState(t *testing.T) *harborState {
@@ -146,6 +147,8 @@ func (s *harborState) projectRoutes(w http.ResponseWriter, r *http.Request, part
 		delete(s.projects, parts[1])
 		s.deletes = append(s.deletes, parts[1])
 		reply(w, 200, nil)
+	case parts[2] == "summary" && s.failSummary:
+		reply(w, 500, map[string]any{"errors": []map[string]any{{"message": "summary failed"}}})
 	case parts[2] == "summary":
 		reply(w, 200, map[string]any{"repo_count": len(project.repos), "quota": map[string]any{"hard": map[string]any{"storage": project.quota}, "used": map[string]any{"storage": 42}}})
 	case parts[2] == "repositories":
