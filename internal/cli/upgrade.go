@@ -116,6 +116,9 @@ func RunUpgrade(ctx context.Context, o upgradeOptions, deps UpgradeDeps, stdout,
 	if cluster.Status.Version == o.to {
 		return fail(stderr, fmt.Errorf("the cluster already runs %s", o.to))
 	}
+	if release.IsDowngrade(cluster.Status.Version, o.to) {
+		return fail(stderr, fmt.Errorf("%s is older than the running %s: a downgrade is not supported", o.to, cluster.Status.Version))
+	}
 	if running := cluster.Spec.DesiredVersion; running != cluster.Status.Version && running != o.to {
 		return fail(stderr, fmt.Errorf("an upgrade to %s is in progress: finish or abort it first", running))
 	}
