@@ -56,6 +56,10 @@ type ClusterNetworkSpec struct {
 	MigrationVlan int32 `json:"migrationVlan,omitempty"`
 	// +optional
 	Fabric FabricSpec `json:"fabric,omitempty"`
+	// +kubebuilder:validation:Minimum=576
+	// +kubebuilder:validation:Maximum=9000
+	// +optional
+	PodMTU int32 `json:"podMTU,omitempty"`
 }
 
 type StorageSpec struct {

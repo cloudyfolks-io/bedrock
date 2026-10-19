@@ -93,6 +93,7 @@ func (r *ClusterReconciler) reconcileInstall(ctx context.Context, cluster v1alph
 	if err != nil {
 		return ctrl.Result{}, err
 	}
+	vars = release.WithPodMTU(vars, cluster.Spec.PodMTU)
 	if release.Uses(r.Bundle, release.VarMasterIPs) && vars[release.VarMasterIPs] == "" {
 		return ctrl.Result{RequeueAfter: 15 * time.Second}, r.writeStatus(ctx, func(s *v1alpha1.ClusterStatus) {
 			setCondition(s, v1alpha1.ConditionProgressing, metav1.ConditionTrue, "WaitingForMasterNodes", fmt.Sprintf("no node carries %s=master yet", roles.FabricRoleLabel), cluster.Generation)

@@ -126,6 +126,11 @@ spec:
                   migrationVlan:
                     format: int32
                     type: integer
+                  podMTU:
+                    format: int32
+                    maximum: 9000
+                    minimum: 576
+                    type: integer
                   storageVlan:
                     format: int32
                     type: integer

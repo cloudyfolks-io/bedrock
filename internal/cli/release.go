@@ -78,6 +78,7 @@ func releaseApply(args []string, stdout, stderr io.Writer) int {
 	timeout := flags.Duration("timeout", 10*time.Minute, "overall timeout")
 	interval := flags.Duration("interval", 2*time.Second, "readiness poll interval")
 	vip := flags.String("vip", "", "cluster api vip")
+	podMTU := flags.Int("pod-mtu", 0, "pod MTU, empty keeps the Fabric detection")
 	if err := flags.Parse(args); err != nil {
 		return 2
 	}
@@ -116,6 +117,7 @@ func releaseApply(args []string, stdout, stderr io.Writer) int {
 		fmt.Fprintln(stderr, err)
 		return 1
 	}
+	vars = release.WithPodMTU(vars, int32(*podMTU))
 	report := func(group release.Group, err error) {
 		if err != nil {
 			fmt.Fprintf(stdout, "group %s failed\n", group.Name)
