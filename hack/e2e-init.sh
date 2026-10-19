@@ -114,7 +114,7 @@ fi
 provider_entry=""
 if [ -n "${E2E_PROVIDER_NETWORK:-}" ]; then
   provider_underlay_up
-  provider_entry=$(provider_network_entry "$E2E_PROVIDER_NETWORK")
+  provider_entry="$(provider_network_entry "$E2E_PROVIDER_NETWORK"), $(services_network_entry)"
 fi
 
 VERSION=$version VIP=$vip IFACE=$iface EMULATION=$emulation PLATFORM_HOST=$platform_host OSD_DEVICES=$(flow_list "$osd_device") PROVIDER_NETWORKS=$(flow_list "$provider_entry") envsubst < hack/e2e/cluster.yaml.tmpl > "$workdir/cluster.yaml"

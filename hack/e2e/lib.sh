@@ -342,8 +342,8 @@ underlay_is_ready() {
 
 provider_underlay_up() {
   underlay_remove
-  if ip link show bdrpub0 >/dev/null 2>&1 || ip netns list | grep -qw bdrext; then
-    echo "bdrpub0 or bdrext exists and this run did not create it" >&2
+  if ip link show bdrpub0 >/dev/null 2>&1 || ip link show bdrsvc0 >/dev/null 2>&1 || ip netns list | grep -qw bdrext; then
+    echo "bdrpub0, bdrsvc0 or bdrext exists and this run did not create it" >&2
     return 1
   fi
   ip netns add bdrext
@@ -355,6 +355,11 @@ provider_underlay_up() {
   ip -n bdrext link set lo up
   ip -n bdrext link set bdrpub0p up
   ip -n bdrext addr add 192.0.2.250/24 dev bdrpub0p
+  ip link add bdrsvc0 type veth peer name bdrsvc0p
+  ip link set bdrsvc0 up
+  ip link set bdrsvc0p netns bdrext
+  ip -n bdrext link set bdrsvc0p up
+  ip -n bdrext addr add 203.0.113.250/24 dev bdrsvc0p
   underlay_is_ready
 }
 
@@ -365,6 +370,10 @@ e2e_cleanup() {
 
 provider_network_entry() {
   echo "{name: $1, interface: bdrpub0, cidr: 192.0.2.0/24, gateway: 192.0.2.1}"
+}
+
+services_network_entry() {
+  echo "{name: services, interface: bdrsvc0, cidr: 203.0.113.0/24, gateway: 203.0.113.1, excludeIPs: [\"203.0.113.240..203.0.113.254\"], role: services}"
 }
 
 docs_restore_script() {
