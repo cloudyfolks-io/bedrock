@@ -22,11 +22,12 @@ function decode(value: string): string | undefined {
 interface Props {
   namespace: string;
   secretName: string;
+  hidden?: readonly string[];
   open: boolean;
   onClose: () => void;
 }
 
-function Body({ namespace, secretName }: { namespace: string; secretName: string }) {
+function Body({ namespace, secretName, hidden }: { namespace: string; secretName: string; hidden: readonly string[] }) {
   const { t } = useLingui();
   const http = useHttp();
   const toast = useToast();
@@ -45,7 +46,7 @@ function Body({ namespace, secretName }: { namespace: string; secretName: string
   const data = (query.data as unknown as { data?: Record<string, string> }).data ?? {};
   const entries = Object.entries(data)
     .map(([name, encoded]) => [name, decode(encoded)] as const)
-    .filter((entry): entry is readonly [string, string] => entry[1] !== undefined);
+    .filter((entry): entry is readonly [string, string] => entry[1] !== undefined && !hidden.includes(entry[0]));
 
   return (
     <dl className="br-facts">
@@ -81,7 +82,7 @@ function Body({ namespace, secretName }: { namespace: string; secretName: string
   );
 }
 
-export function CredentialsDialog({ namespace, secretName, open, onClose }: Props) {
+export function CredentialsDialog({ namespace, secretName, hidden = [], open, onClose }: Props) {
   const { t } = useLingui();
   return (
     <Dialog
@@ -94,7 +95,7 @@ export function CredentialsDialog({ namespace, secretName, open, onClose }: Prop
       title={t({ id: "credentials.title", message: "Access credentials" })}
       description={t({ id: "credentials.description", message: "Keep these values private." })}
     >
-      {open ? <Body namespace={namespace} secretName={secretName} /> : null}
+      {open ? <Body namespace={namespace} secretName={secretName} hidden={hidden} /> : null}
     </Dialog>
   );
 }

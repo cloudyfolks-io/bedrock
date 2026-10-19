@@ -139,6 +139,9 @@ msgstr "خارجي"
 msgid "col.gateway"
 msgstr "البوابة"
 
+msgid "col.host"
+msgstr "المضيف"
+
 msgid "col.image"
 msgstr "الصورة"
 
@@ -159,6 +162,9 @@ msgstr "نوع المفتاح"
 
 msgid "col.listeners"
 msgstr "المستمعون"
+
+msgid "col.loginSecret"
+msgstr "Secret الدخول"
 
 msgid "col.maintenance"
 msgstr "الصيانة"
@@ -202,11 +208,17 @@ msgstr "الحصة"
 msgid "col.records"
 msgstr "السجلات"
 
+msgid "col.registry"
+msgstr "السجل"
+
 msgid "col.replace"
 msgstr "استبدال"
 
 msgid "col.replicas"
 msgstr "النسخ"
+
+msgid "col.repositories"
+msgstr "المستودعات"
 
 msgid "col.retention"
 msgstr "الاحتفاظ"
@@ -249,6 +261,9 @@ msgstr "النوع"
 
 msgid "col.usage"
 msgstr "المستخدم"
+
+msgid "col.username"
+msgstr "اسم المستخدم"
 
 msgid "col.value"
 msgstr "القيمة"
@@ -745,6 +760,12 @@ msgstr "الشبكات"
 msgid "nav.item.objectUsers"
 msgstr "مستخدمو تخزين الكائنات"
 
+msgid "nav.item.registries"
+msgstr "السجلات"
+
+msgid "nav.item.registryCredentials"
+msgstr "بيانات اعتماد السجل"
+
 msgid "nav.item.securityGroups"
 msgstr "مجموعات الأمان"
 
@@ -790,6 +811,9 @@ msgstr "تخزين الكائنات"
 msgid "nav.section.platform"
 msgstr "المنصة"
 
+msgid "nav.section.registry"
+msgstr "السجل"
+
 msgid "nav.section.storage"
 msgstr "التخزين"
 
@@ -801,6 +825,9 @@ msgstr "تتبع الشبكات المستأجر. تبقى الشبكات الف
 
 msgid "networks.forbidden.title"
 msgstr "لا يمكنك عرض الشبكات"
+
+msgid "registry.showLogin"
+msgstr "عرض بيانات الدخول"
 
 msgid "session.gate.error.body"
 msgstr "تعذر على اللوحة قراءة جلستك."
@@ -1383,3 +1410,4 @@ msgstr "بيانات مستخدم cloud-init"
 
 msgid "wizard.virtioWin"
 msgstr "إرفاق برامج تشغيل virtio-win"
+

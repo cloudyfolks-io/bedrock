@@ -1,0 +1,70 @@
+{
+  "apiVersion": "bedrock.cloudyfolks.io/v1alpha1",
+  "kind": "RegistryList",
+  "metadata": {
+    "resourceVersion": "100"
+  },
+  "items": [
+    {
+      "apiVersion": "bedrock.cloudyfolks.io/v1alpha1",
+      "kind": "Registry",
+      "metadata": {
+        "name": "images",
+        "uid": "uid-registry-images",
+        "resourceVersion": "100",
+        "creationTimestamp": "2026-10-01T10:00:00Z",
+        "namespace": "acme-web"
+      },
+      "spec": {
+        "name": "acme-images",
+        "quotaGB": 10,
+        "retention": {
+          "keepLastN": 10,
+          "schedule": "daily"
+        }
+      },
+      "status": {
+        "host": "registry.lab.example.test",
+        "projectName": "acme-images",
+        "projectID": 7,
+        "usedBytes": 2147483648,
+        "hardBytes": 10737418240,
+        "repositoryCount": 3,
+        "conditions": [
+          {
+            "type": "Ready",
+            "status": "True",
+            "reason": "Ready",
+            "message": "",
+            "lastTransitionTime": "2026-10-01T10:00:00Z"
+          }
+        ]
+      }
+    },
+    {
+      "apiVersion": "bedrock.cloudyfolks.io/v1alpha1",
+      "kind": "Registry",
+      "metadata": {
+        "name": "taken",
+        "uid": "uid-registry-taken",
+        "resourceVersion": "100",
+        "creationTimestamp": "2026-10-02T10:00:00Z",
+        "namespace": "acme-web"
+      },
+      "spec": {
+        "quotaGB": 0
+      },
+      "status": {
+        "conditions": [
+          {
+            "type": "Ready",
+            "status": "False",
+            "reason": "NameTaken",
+            "message": "the Harbor project taken belongs to someone else",
+            "lastTransitionTime": "2026-10-02T10:00:00Z"
+          }
+        ]
+      }
+    }
+  ]
+}

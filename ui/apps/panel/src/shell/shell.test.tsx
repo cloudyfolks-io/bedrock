@@ -79,9 +79,11 @@ describe("shell", () => {
         "security-groups",
         "buckets",
         "object-users",
+        "registries",
+        "registry-credentials",
       ].map((path) => `/p/web/${path}`),
     );
-    for (const heading of ["Compute", "Storage", "Networking", "Object storage"]) {
+    for (const heading of ["Compute", "Storage", "Networking", "Object storage", "Registry"]) {
       expect(within(nav).getByRole("heading", { name: heading })).toBeTruthy();
     }
   });
