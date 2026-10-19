@@ -32,6 +32,10 @@ const (
 	ReasonJobMissing             = "JobMissing"
 	ReasonStarting               = "Starting"
 	ReasonSucceeded              = "Succeeded"
+	ReasonCloneFailed            = "CloneFailed"
+	ReasonBuildFailed            = "BuildFailed"
+	ReasonPushFailed             = "PushFailed"
+	ReasonInvalidMirrors         = "InvalidEntries"
 )
 
 func Reasons() []string {
@@ -49,7 +53,7 @@ func BuildReasons() []string {
 	return []string{
 		ReasonNotInProject, ReasonInvalidSpec, ReasonSubnetNotFound, ReasonSubnetNotReady, ReasonWaitingForDefaultGroup,
 		ReasonSecretNotFound, ReasonSecretTypeInvalid, ReasonKataUnavailable, ReasonApplyFailed, ReasonNameConflict,
-		ReasonStarting, ReasonRunning, ReasonSucceeded, ReasonFailed, ReasonTimeout,
+		ReasonStarting, ReasonRunning, ReasonSucceeded, ReasonFailed, ReasonCloneFailed, ReasonBuildFailed, ReasonPushFailed, ReasonTimeout,
 		ReasonImagePullFailed, ReasonContainerConfigError, ReasonJobMissing,
 	}
 }

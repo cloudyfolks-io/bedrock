@@ -92,6 +92,8 @@ func cnbContainer(in BuildInput, phase cnbPhase) corev1.Container {
 		VolumeMounts:    mounts,
 		Resources:       tierOf(in.Build.Spec.Size).resources(),
 		SecurityContext: nonRootContext(),
+
+		TerminationMessagePolicy: corev1.TerminationMessageFallbackToLogsOnError,
 	}
 }
 

@@ -1,6 +1,8 @@
 package container
 
 import (
+	"slices"
+	"strings"
 	"testing"
 	"time"
 
@@ -175,6 +177,14 @@ func TestBuildStatusOfKeepsTheTransitionTimeOfAnUnchangedCondition(t *testing.T)
 	}
 }
 
+func TestBuildReasonsListTheFailureReasons(t *testing.T) {
+	for _, want := range []string{ReasonCloneFailed, ReasonBuildFailed, ReasonPushFailed, ReasonTimeout, ReasonFailed} {
+		if !slices.Contains(BuildReasons(), want) {
+			t.Errorf("BuildReasons lacks %s", want)
+		}
+	}
+}
+
 func TestBuildReasonsAreUnique(t *testing.T) {
 	seen := map[string]bool{}
 	for _, reason := range BuildReasons() {
@@ -182,5 +192,61 @@ func TestBuildReasonsAreUnique(t *testing.T) {
 			t.Errorf("the reason %s is listed twice", reason)
 		}
 		seen[reason] = true
+	}
+}
+
+func failedPod(inits []corev1.ContainerStatus, mains []corev1.ContainerStatus) corev1.Pod {
+	return podAged(time.Minute, func(p *corev1.Pod) {
+		p.Status.InitContainerStatuses = inits
+		p.Status.ContainerStatuses = mains
+	})
+}
+
+func terminated(name string, code int32, message string) corev1.ContainerStatus {
+	return corev1.ContainerStatus{Name: name, State: corev1.ContainerState{Terminated: &corev1.ContainerStateTerminated{ExitCode: code, Message: message}}}
+}
+
+func TestDecideBuildSeparatesTheFailures(t *testing.T) {
+	failed := jobWith(jobCondition(batchv1.JobFailed, "BackoffLimitExceeded", decideNow))
+	cases := []struct {
+		name   string
+		pods   []corev1.Pod
+		reason string
+		inMsg  string
+	}{
+		{"clone failed", []corev1.Pod{failedPod([]corev1.ContainerStatus{terminated("git-clone", 128, "fatal: repository not found")}, nil)}, ReasonCloneFailed, "fatal: repository not found"},
+		{"clone failed without a message", []corev1.Pod{failedPod([]corev1.ContainerStatus{terminated("git-clone", 128, "")}, nil)}, ReasonCloneFailed, "git-clone"},
+		{"dockerfile build failed", []corev1.Pod{failedPod([]corev1.ContainerStatus{terminated("git-clone", 0, "")}, []corev1.ContainerStatus{terminated("build", 1, "error: failed to solve: process \"/bin/sh -c false\" did not complete successfully")})}, ReasonBuildFailed, "failed to solve"},
+		{"dockerfile push failed", []corev1.Pod{failedPod([]corev1.ContainerStatus{terminated("git-clone", 0, "")}, []corev1.ContainerStatus{terminated("build", 1, "error: failed to solve: failed to push registry.test/a/b:1: unauthorized")})}, ReasonPushFailed, "failed to push"},
+		{"buildpacks export failed", []corev1.Pod{failedPod([]corev1.ContainerStatus{terminated("git-clone", 0, ""), terminated("analyzer", 0, ""), terminated("detector", 0, ""), terminated("restorer", 0, ""), terminated("builder", 0, "")}, []corev1.ContainerStatus{terminated("exporter", 1, "ERROR: failed to export: failed to write image to the following tags")})}, ReasonPushFailed, "failed to export"},
+		{"buildpacks phase failed", []corev1.Pod{failedPod([]corev1.ContainerStatus{terminated("git-clone", 0, ""), terminated("analyzer", 0, ""), terminated("detector", 20, "ERROR: No buildpack groups passed detection.")}, nil)}, ReasonBuildFailed, "No buildpack groups"},
+		{"no pod", nil, ReasonFailed, "backoff"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := DecideBuild(BuildObservation{Job: failed, Pods: tc.pods, Now: decideNow})
+			if got.Phase != v1alpha1.BuildPhaseFailed || got.Reason != tc.reason {
+				t.Fatalf("decision %s %s, want Failed %s", got.Phase, got.Reason, tc.reason)
+			}
+			if !strings.Contains(strings.ToLower(got.Message), strings.ToLower(tc.inMsg)) {
+				t.Fatalf("message %q lacks %q", got.Message, tc.inMsg)
+			}
+		})
+	}
+}
+
+func TestDecideBuildKeepsTheTimeoutAboveTheContainerFailures(t *testing.T) {
+	job := jobWith(jobCondition(batchv1.JobFailed, "DeadlineExceeded", decideNow))
+	pod := failedPod([]corev1.ContainerStatus{terminated("git-clone", 0, "")}, []corev1.ContainerStatus{terminated("build", 137, "killed")})
+	if got := DecideBuild(BuildObservation{Job: job, Pods: []corev1.Pod{pod}, Now: decideNow}); got.Reason != ReasonTimeout {
+		t.Fatalf("reason %s", got.Reason)
+	}
+}
+
+func TestDecideBuildCutsALongTerminationMessage(t *testing.T) {
+	failed := jobWith(jobCondition(batchv1.JobFailed, "BackoffLimitExceeded", decideNow))
+	pod := failedPod([]corev1.ContainerStatus{terminated("git-clone", 128, strings.Repeat("x", 5000))}, nil)
+	if got := DecideBuild(BuildObservation{Job: failed, Pods: []corev1.Pod{pod}, Now: decideNow}); len(got.Message) > 700 {
+		t.Fatalf("message of %d bytes", len(got.Message))
 	}
 }
