@@ -475,6 +475,10 @@ Set the range before the first Network exists.
 Fabric does not change the range of a Subnet, so a new value stops the reconcile of the Networks that exist.
 A LoadBalancer waits with `FabricNotReady` until the plane Subnet of its Network exists.
 The plane Subnet goes away with its Network.
+A Network cannot go while an internal LoadBalancer holds a `Vip` in its plane.
+The Network shows `Ready=False` with the reason `Terminating` and names up to three of these LoadBalancers.
+Delete them, and the Network goes on.
+When Fabric keeps the plane Subnet, the message names it.
 
 An older release put the `Vip` in the Subnet of the targets.
 That `Vip` used the MAC address of the router port, and it cut off the default gateway of a tenant.

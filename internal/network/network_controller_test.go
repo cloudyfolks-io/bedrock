@@ -560,6 +560,58 @@ func TestNetworkDeletionWaitsForSubnets(t *testing.T) {
 	}
 }
 
+func TestNetworkDeletionNamesTheLoadBalancersThatHoldThePlane(t *testing.T) {
+	c := cleanEnv(t)
+	ctx := context.Background()
+	network := createNetwork(t, c)
+	reconcileNetwork(t, c, network.Name)
+	balancer := &v1alpha1.LoadBalancer{ObjectMeta: metav1.ObjectMeta{Name: "web", Namespace: "acme-shop", UID: "balancer-uid"}}
+	vip := fabric.Vip(fabric.Meta{Name: "acme-shop-web-vip", Annotations: OwnerAnnotations(balancer)}, "acme-shop", LBSubnetName(network.Name))
+	if err := c.Create(ctx, vip); err != nil {
+		t.Fatal(err)
+	}
+	if err := c.Delete(ctx, &network); err != nil {
+		t.Fatal(err)
+	}
+	if result := reconcileNetwork(t, c, network.Name); result.RequeueAfter != terminatingRequeue {
+		t.Fatalf("result %+v", result)
+	}
+	got := getNetwork(t, c, network.Name)
+	requireCondition(t, got.Status.Conditions, v1alpha1.ConditionReady, metav1.ConditionFalse, ReasonTerminating)
+	if message := meta.FindStatusCondition(got.Status.Conditions, v1alpha1.ConditionReady).Message; !strings.Contains(message, "acme-shop/web") {
+		t.Fatalf("the message must name the load balancer: %q", message)
+	}
+	if _, err := getObject(ctx, c, fabric.SubnetGVK, LBSubnetName(network.Name)); err != nil {
+		t.Fatalf("the plane Subnet must stay while a Vip holds it: %v", err)
+	}
+	if err := c.Delete(ctx, vip); err != nil {
+		t.Fatal(err)
+	}
+	reconcileNetwork(t, c, network.Name)
+	if err := c.Get(ctx, client.ObjectKey{Name: network.Name}, &v1alpha1.Network{}); !apierrors.IsNotFound(err) {
+		t.Fatalf("the Network must go once the plane is free: %v", err)
+	}
+}
+
+func TestNetworkDeletionReportsAPlaneThatFabricKeeps(t *testing.T) {
+	c := cleanEnv(t)
+	ctx := context.Background()
+	network := createNetwork(t, c)
+	reconcileNetwork(t, c, network.Name)
+	changeFabricObject(t, c, fabric.SubnetGVK, LBSubnetName(network.Name), hold)
+	if err := c.Delete(ctx, &network); err != nil {
+		t.Fatal(err)
+	}
+	if result := reconcileNetwork(t, c, network.Name); result.RequeueAfter != terminatingRequeue {
+		t.Fatalf("result %+v", result)
+	}
+	got := getNetwork(t, c, network.Name)
+	requireCondition(t, got.Status.Conditions, v1alpha1.ConditionReady, metav1.ConditionFalse, ReasonTerminating)
+	if message := meta.FindStatusCondition(got.Status.Conditions, v1alpha1.ConditionReady).Message; !strings.Contains(message, LBSubnetName(network.Name)) {
+		t.Fatalf("the message must name the plane Subnet: %q", message)
+	}
+}
+
 func TestNetworkReconcilerIgnoresForeignVpcs(t *testing.T) {
 	c := cleanEnv(t)
 	foreign := fabric.Vpc(fabric.Meta{Name: unique(t, "ovn-foreign")}, fabric.VpcSpec{})
