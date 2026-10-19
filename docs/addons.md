@@ -1,14 +1,14 @@
 # Addons, audit and monitoring
 
 An addon is an optional part of Bedrock. An admin turns an addon on or off
-with an `Addon` object. This page describes the addons `kata` and `loki`,
+with an `Addon` object. This page describes the addons `kata`, `loki` and `cnpg`,
 the API server audit log, the monitoring stack and the metering series.
 
 ## Addons
 
 The `Addon` kind has no namespace. The name of the object is the name of
-the addon. Bedrock creates one `Addon` for each addon it knows: `kata` and
-`loki`.
+the addon. Bedrock creates one `Addon` for each addon it knows: `kata`,
+`loki` and `cnpg`.
 
 List the addons:
 
@@ -28,13 +28,13 @@ Turn an addon off:
 kubectl patch addon loki --type merge -p '{"spec":{"enabled":false}}'
 ```
 
-The Settings `kata.enabled` and `loki.enabled` set the first state of the
+The Settings `kata.enabled`, `loki.enabled` and `cnpg.enabled` set the first state of the
 `Addon` objects when Bedrock creates them. After that, only the `Addon`
 object counts. A change of the Setting does not change a live addon.
 Bedrock never changes `spec.enabled` by itself.
 
 Bedrock applies the addon objects in a namespace. `kata` uses
-`kube-system`. `loki` uses `monitoring`. Bedrock records the objects of
+`kube-system`. `loki` uses `monitoring`. `cnpg` uses `cnpg`. Bedrock records the objects of
 each addon in the ConfigMap `bedrock-system/bedrock-addon-<name>-inventory`.
 Do not edit this ConfigMap. Bedrock uses it to remove the objects.
 
@@ -47,6 +47,7 @@ An addon can have values. Put them in `spec.values` as flat keys.
 | `kata` | none | | |
 | `loki` | `persistence.size` | `20Gi` | A positive Kubernetes quantity. |
 | `loki` | `persistence.storage-class` | `block` | A DNS-1123 subdomain. |
+| `cnpg` | none | | |
 
 An unknown key is an error. The condition `Ready` then shows the reason
 `InvalidValues`. Bedrock changes nothing until you fix the values.
@@ -155,6 +156,29 @@ When you turn kata off, Bedrock first deletes the DaemonSet. The kata pods
 clean the node when they stop. This can take 10 minutes. Bedrock removes
 the RBAC objects and the RuntimeClasses only after the last kata pod ends.
 The condition `Ready` shows the reason `Pruning` during this time.
+
+## CloudNativePG
+
+The addon `cnpg` installs the CloudNativePG operator and the Barman Cloud
+plugin in the namespace `cnpg`. The managed PostgreSQL databases of the
+`Database` kind need it. The addon is off by default. The Setting
+`cnpg.enabled` sets the first state of the `Addon` object.
+
+- The chart `cloudnative-pg` version 0.29.1 installs the operator.
+- The Barman Cloud plugin v0.13.0 stores backups and write-ahead logs in
+  the object store. It needs cert-manager for its certificates. Bedrock
+  always installs cert-manager. If the CRDs of cert-manager are missing,
+  the condition `Ready` shows the reason `MissingCRD`.
+- The CRDs of both parts are part of the base install. They stay when you
+  turn the addon off, so no database is lost.
+- The release holds the seed `DatabaseVersion` objects `postgresql-16`,
+  `postgresql-17` and `postgresql-18`. The images are pinned by digest.
+
+Turn the addon on:
+
+```
+kubectl patch addon cnpg --type merge -p '{"spec":{"enabled":true}}'
+```
 
 ## Loki
 
