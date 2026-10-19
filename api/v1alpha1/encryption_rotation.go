@@ -9,5 +9,7 @@ const (
 	RotationRewritingSecrets = "RewritingSecrets"
 	RotationRemovingKey      = "RemovingKey"
 
+	ConditionEncryptionStalled = "EncryptionRotationStalled"
+
 	AnnotationEncryptionApply = "bedrock.cloudyfolks.io/encryption-apply"
 )

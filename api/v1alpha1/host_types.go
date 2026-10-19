@@ -195,6 +195,8 @@ type EncryptionFileStatus struct {
 	RestartPending bool `json:"restartPending,omitempty"`
 	// +optional
 	FailedHash string `json:"failedHash,omitempty"`
+	// +optional
+	HandledGrant string `json:"handledGrant,omitempty"`
 }
 
 type HostStatus struct {
