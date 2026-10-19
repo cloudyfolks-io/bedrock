@@ -16,6 +16,9 @@ owned_kinds=(
   restores.velero.io
   cephobjectstoreaccounts.ceph.rook.io
   cephobjectstoreusers.ceph.rook.io
+  clusters.postgresql.cnpg.io
+  objectstores.barmancloud.cnpg.io
+  certificates.cert-manager.io
 )
 
 owned_objects_gone() {
