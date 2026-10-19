@@ -1,0 +1,126 @@
+[
+  {
+    "apiVersion": "ps.percona.com/v1alpha1",
+    "kind": "PerconaServerMySQL",
+    "metadata": {
+      "labels": {
+        "app.kubernetes.io/instance": "0b0c0d0e-1111-4222-8333-444455556666",
+        "app.kubernetes.io/managed-by": "bedrock",
+        "bedrock.cloudyfolks.io/kind": "Database",
+        "bedrock.cloudyfolks.io/name": "orders",
+        "bedrock.cloudyfolks.io/project": "web",
+        "bedrock.cloudyfolks.io/tenant": "acme"
+      },
+      "name": "0b0c0d0e-1111-4222-8333-444455556666",
+      "namespace": "bedrock-dbaas"
+    },
+    "spec": {
+      "backup": {
+        "enabled": true,
+        "image": "docker.io/percona/percona-xtrabackup:8.4.0-6.1@sha256:aa",
+        "schedule": [
+          {
+            "keep": 7,
+            "name": "daily",
+            "schedule": "0 2 * * *",
+            "storageName": "rgw"
+          }
+        ],
+        "storages": {
+          "rgw": {
+            "s3": {
+              "bucket": "bedrock-database-backups",
+              "credentialsSecret": "database-backups-s3",
+              "endpointUrl": "http://rook-ceph-rgw-bedrock-rgw.rook-ceph.svc:80",
+              "prefix": "0b0c0d0e-1111-4222-8333-444455556666",
+              "region": "us-east-1"
+            },
+            "type": "s3"
+          }
+        }
+      },
+      "crVersion": "1.2.0",
+      "mysql": {
+        "clusterType": "group-replication",
+        "configuration": "[mysqld]\ncharacter_set_server=utf8mb4\ncollation_server=utf8mb4_0900_ai_ci\ndefault_time_zone=+00:00\nskip_name_resolve=ON\npartial_revokes=ON\ninnodb_buffer_pool_size=563M\nmax_connections=150\n",
+        "image": "docker.io/percona/percona-server:8.4.10-10.1@sha256:ee",
+        "initImage": "docker.io/percona/percona-server-mysql-operator:1.2.0@sha256:cc",
+        "labels": {
+          "app.kubernetes.io/instance": "0b0c0d0e-1111-4222-8333-444455556666",
+          "app.kubernetes.io/managed-by": "bedrock",
+          "bedrock.cloudyfolks.io/kind": "Database",
+          "bedrock.cloudyfolks.io/name": "orders",
+          "bedrock.cloudyfolks.io/project": "web",
+          "bedrock.cloudyfolks.io/tenant": "acme"
+        },
+        "resources": {
+          "limits": {
+            "cpu": "500m",
+            "memory": "1024Mi"
+          },
+          "requests": {
+            "cpu": "500m",
+            "memory": "1024Mi"
+          }
+        },
+        "size": 3,
+        "volumeSpec": {
+          "persistentVolumeClaim": {
+            "accessModes": [
+              "ReadWriteOnce"
+            ],
+            "resources": {
+              "requests": {
+                "storage": "20Gi"
+              }
+            },
+            "storageClassName": "block"
+          }
+        }
+      },
+      "proxy": {
+        "haproxy": {
+          "enabled": true,
+          "image": "docker.io/percona/haproxy:2.8.18-1@sha256:bb",
+          "size": 3
+        }
+      },
+      "secretsName": "0b0c0d0e-1111-4222-8333-444455556666-superuser",
+      "toolkit": {
+        "image": "docker.io/percona/percona-toolkit:3.7.1-4@sha256:dd"
+      }
+    }
+  },
+  {
+    "apiVersion": "v1",
+    "kind": "Service",
+    "metadata": {
+      "labels": {
+        "app.kubernetes.io/instance": "0b0c0d0e-1111-4222-8333-444455556666",
+        "app.kubernetes.io/managed-by": "bedrock",
+        "bedrock.cloudyfolks.io/kind": "Database",
+        "bedrock.cloudyfolks.io/name": "orders",
+        "bedrock.cloudyfolks.io/project": "web",
+        "bedrock.cloudyfolks.io/tenant": "acme"
+      },
+      "name": "0b0c0d0e-1111-4222-8333-444455556666-db",
+      "namespace": "bedrock-dbaas"
+    },
+    "spec": {
+      "ports": [
+        {
+          "name": "db",
+          "port": 3306,
+          "protocol": "TCP",
+          "targetPort": 3306
+        }
+      ],
+      "selector": {
+        "app.kubernetes.io/component": "mysql",
+        "app.kubernetes.io/instance": "0b0c0d0e-1111-4222-8333-444455556666",
+        "mysql.percona.com/primary": "true"
+      },
+      "type": "ClusterIP"
+    }
+  }
+]

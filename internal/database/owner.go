@@ -34,11 +34,11 @@ var (
 )
 
 func EngineGVKs() []schema.GroupVersionKind {
-	return []schema.GroupVersionKind{
+	return append([]schema.GroupVersionKind{
 		ScheduledBackupGVK, ClusterGVK, ObjectStoreGVK,
 		DeploymentGVK, ServiceGVK, NetworkPolicyGVK, CertificateGVK, SecretGVK,
 		PodGVK, PersistentClaimGVK,
-	}
+	}, additionalEngineGVKs()...)
 }
 
 type Project struct {

@@ -6,7 +6,6 @@ import (
 	"time"
 
 	"k8s.io/apimachinery/pkg/api/equality"
-	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/util/retry"
 	ctrl "sigs.k8s.io/controller-runtime"
@@ -19,7 +18,6 @@ import (
 const (
 	gateRequeue   = 30 * time.Second
 	deleteRequeue = 5 * time.Second
-	addonName     = "cnpg"
 )
 
 type Gate struct{ Reason, Message string }
@@ -73,18 +71,6 @@ func (r *Reconciler) gate(ctx context.Context, cfg Config, db v1alpha1.Database,
 		return &Gate{Reason: ReasonEngineNotAvailable, Message: "the engine " + db.Spec.Engine + " has no running operator addon"}, nil
 	}
 	return nil, nil
-}
-
-func engineAvailable(ctx context.Context, c client.Reader, engine string) (bool, error) {
-	if engine != v1alpha1.DatabaseEnginePostgreSQL {
-		return false, nil
-	}
-	var addon v1alpha1.Addon
-	err := c.Get(ctx, client.ObjectKey{Name: addonName}, &addon)
-	if apierrors.IsNotFound(err) {
-		return false, nil
-	}
-	return err == nil && addon.Spec.Enabled, err
 }
 
 func (r *Reconciler) finalize(ctx context.Context, db v1alpha1.Database) (ctrl.Result, error) {
