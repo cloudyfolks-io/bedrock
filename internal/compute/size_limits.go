@@ -32,10 +32,10 @@ func (r *VirtualMachineReconciler) settingValue(ctx context.Context, key string)
 	if err != nil && !notFound(err) {
 		return "", err
 	}
-	if err == nil && setting.Spec.Value != "" && def.Validate(setting.Spec.Value) == nil {
-		return setting.Spec.Value, nil
+	if err == nil && def.Validate(setting.Spec.Value) == nil {
+		return settings.OrDefault(setting.Spec.Value, key), nil
 	}
-	return def.Default, nil
+	return settings.OrDefault("", key), nil
 }
 
 func (r *VirtualMachineReconciler) sizeLimit(ctx context.Context, key string) (int32, error) {

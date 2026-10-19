@@ -7,6 +7,7 @@ import (
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 
 	"github.com/cloudyfolks-io/bedrock/internal/release"
+	"github.com/cloudyfolks-io/bedrock/internal/settings"
 )
 
 const (
@@ -48,7 +49,7 @@ func parseMigrationTuning(values map[string]string) (migrationTuning, error) {
 }
 
 func positiveQuantity(values map[string]string, key string) (string, error) {
-	quantity, err := resource.ParseQuantity(settingOrDefault(values, key))
+	quantity, err := resource.ParseQuantity(settings.OrDefault(values[key], key))
 	if err != nil || quantity.Sign() <= 0 {
 		return "", fmt.Errorf("%s: must be a quantity greater than zero, for example 1Gi", key)
 	}
@@ -66,7 +67,7 @@ func migrationSettings(tuning migrationTuning, parallel int64) map[string]any {
 }
 
 func compressionPolicy(values map[string]string) (policies, absent []*unstructured.Unstructured, err error) {
-	switch compression := settingOrDefault(values, keyMigrationCompression); compression {
+	switch compression := settings.OrDefault(values[keyMigrationCompression], keyMigrationCompression); compression {
 	case "":
 		return nil, []*unstructured.Unstructured{migrationPolicy(map[string]any{})}, nil
 	case compressionZstd:

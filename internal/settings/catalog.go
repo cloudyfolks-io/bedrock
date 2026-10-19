@@ -180,6 +180,14 @@ func Lookup(key string) (Definition, bool) {
 	return Definition{}, false
 }
 
+func OrDefault(value, key string) string {
+	if value != "" {
+		return value
+	}
+	def, _ := Lookup(key)
+	return def.Default
+}
+
 func Seed(ctx context.Context, c client.Client) error {
 	for _, def := range Catalog() {
 		setting := &v1alpha1.Setting{ObjectMeta: metav1.ObjectMeta{Name: def.Key, Labels: map[string]string{v1alpha1.LabelKind: "Setting", v1alpha1.LabelName: def.Key}}}

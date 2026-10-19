@@ -86,7 +86,7 @@ func kubeVirt(emulation bool, tuning kubeVirtTuning, migration migrationTuning, 
 }
 
 func parseEviction(values map[string]string) (string, error) {
-	value := settingOrDefault(values, keyEvictionStrategy)
+	value := settings.OrDefault(values[keyEvictionStrategy], keyEvictionStrategy)
 	definition, _ := settings.Lookup(keyEvictionStrategy)
 	if err := definition.Validate(value); err != nil {
 		return "", fmt.Errorf("%s: %w", keyEvictionStrategy, err)
