@@ -28,17 +28,27 @@ type DynamicRouting struct {
 	LocalOnly      bool
 }
 
+type Peering struct{ RemoteVpc, LocalConnectIP string }
+
 type VpcSpec struct {
 	EnableExternal       bool
 	EnableBfd            bool
 	ExtraExternalSubnets []string
 	DefaultRoute         *StaticRoute
+	StaticRoutes         []StaticRoute
+	Peerings             []Peering
 	Dynamic              *DynamicRouting
+}
+
+type ACL struct {
+	Direction, Match, Action string
+	Priority                 int
 }
 
 type SubnetSpec struct {
 	Vpc, CIDR, Gateway, Provider, Vlan, DHCPOptions string
 	ExcludeIPs                                      []string
+	ACLs                                            []ACL
 	DHCP                                            bool
 	MTU                                             int
 }
@@ -116,8 +126,11 @@ func Vpc(m Meta, s VpcSpec) *unstructured.Unstructured {
 		spec["enableExternal"] = true
 		spec["extraExternalSubnets"] = anys(s.ExtraExternalSubnets)
 	}
-	if s.DefaultRoute != nil {
-		spec["staticRoutes"] = []any{map[string]any{"policy": "policyDst", "cidr": s.DefaultRoute.CIDR, "nextHopIP": s.DefaultRoute.NextHop}}
+	if routes := vpcRoutes(s); len(routes) > 0 {
+		spec["staticRoutes"] = routes
+	}
+	if len(s.Peerings) > 0 {
+		spec["vpcPeerings"] = vpcPeerings(s.Peerings)
 	}
 	if s.EnableBfd {
 		spec["enableBfd"] = true
@@ -126,6 +139,27 @@ func Vpc(m Meta, s VpcSpec) *unstructured.Unstructured {
 		spec["dynamicRouting"] = dynamicRouting(*s.Dynamic)
 	}
 	return object(VpcGVK, m, spec)
+}
+
+func vpcRoutes(s VpcSpec) []any {
+	var routes []StaticRoute
+	if s.DefaultRoute != nil {
+		routes = append(routes, *s.DefaultRoute)
+	}
+	routes = append(routes, s.StaticRoutes...)
+	out := make([]any, len(routes))
+	for i, r := range routes {
+		out[i] = map[string]any{"policy": "policyDst", "cidr": r.CIDR, "nextHopIP": r.NextHop}
+	}
+	return out
+}
+
+func vpcPeerings(peerings []Peering) []any {
+	out := make([]any, len(peerings))
+	for i, p := range peerings {
+		out[i] = map[string]any{"remoteVpc": p.RemoteVpc, "localConnectIP": p.LocalConnectIP}
+	}
+	return out
 }
 
 func dynamicRouting(d DynamicRouting) map[string]any {
@@ -154,6 +188,9 @@ func Subnet(m Meta, s SubnetSpec) *unstructured.Unstructured {
 	if s.DHCP {
 		spec["enableDHCP"] = true
 	}
+	if len(s.ACLs) > 0 {
+		spec["acls"] = acls(s.ACLs)
+	}
 	set(spec, "vlan", s.Vlan)
 	set(spec, "provider", s.Provider)
 	if s.Provider != "" {
@@ -163,6 +200,14 @@ func Subnet(m Meta, s SubnetSpec) *unstructured.Unstructured {
 		spec["disableGatewayCheck"] = true
 	}
 	return object(SubnetGVK, m, spec)
+}
+
+func acls(rules []ACL) []any {
+	out := make([]any, len(rules))
+	for i, r := range rules {
+		out[i] = map[string]any{"direction": r.Direction, "priority": int64(r.Priority), "match": r.Match, "action": r.Action}
+	}
+	return out
 }
 
 func set(spec map[string]any, key, value string) {
@@ -175,6 +220,14 @@ func OvnEip(m Meta, externalSubnet, address string) *unstructured.Unstructured {
 	spec := map[string]any{"externalSubnet": externalSubnet, "type": "nat"}
 	set(spec, "v4Ip", address)
 	return object(OvnEipGVK, m, spec)
+}
+
+func OvnEipLRP(m Meta, externalSubnet string) *unstructured.Unstructured {
+	return object(OvnEipGVK, m, map[string]any{"externalSubnet": externalSubnet, "type": "lrp"})
+}
+
+func OvnSnatRule(m Meta, eip, vpc, cidr string) *unstructured.Unstructured {
+	return object(OvnSnatRuleGVK, m, map[string]any{"ovnEip": eip, "vpc": vpc, "v4IpCidr": cidr})
 }
 
 func OvnFip(m Meta, eip, ipName string) *unstructured.Unstructured {

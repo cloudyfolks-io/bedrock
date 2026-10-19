@@ -29,6 +29,7 @@ func SetupWithManager(mgr ctrl.Manager) error {
 	for _, r := range []registrar{
 		&UnderlayReconciler{Client: c},
 		&NetworkReconciler{Client: c, Reader: mgr.GetAPIReader()},
+		&NetworkPeeringReconciler{Client: c, Reader: mgr.GetAPIReader()},
 		&SubnetReconciler{Client: c},
 		&SecurityGroupReconciler{Client: c},
 		&DefaultGroupReconciler{Client: c},
