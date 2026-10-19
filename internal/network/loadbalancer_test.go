@@ -136,11 +136,14 @@ func TestInternalRulesOnePerListener(t *testing.T) {
 }
 
 func TestInternalVipUsesTheLoadBalancerIdentity(t *testing.T) {
-	vip := InternalVip(InternalInput{Namespace: "ns", Name: "lb", Labels: map[string]string{"l": "v"}}, "ns-default-0123")
-	if vip.GetName() != FabricName("ns", "lb") || vip.GetKind() != "Vip" {
+	vip := InternalVip(InternalInput{Namespace: "ns", Name: "lb", Labels: map[string]string{"l": "v"}}, "net-lb")
+	if vip.GetName() != InternalVipName("ns", "lb") || vip.GetKind() != "Vip" {
 		t.Fatalf("vip %v", vip.Object)
 	}
-	if subnet, _, _ := unstructured.NestedString(vip.Object, "spec", "subnet"); subnet != "ns-default-0123" {
+	if subnet, _, _ := unstructured.NestedString(vip.Object, "spec", "subnet"); subnet != "net-lb" {
 		t.Fatalf("subnet %q", subnet)
+	}
+	if _, found, _ := unstructured.NestedString(vip.Object, "spec", "type"); found {
+		t.Fatalf("a plane Vip has no type: %v", vip.Object)
 	}
 }

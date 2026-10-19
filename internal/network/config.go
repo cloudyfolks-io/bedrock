@@ -2,6 +2,8 @@ package network
 
 import (
 	"context"
+	"fmt"
+	"net/netip"
 	"slices"
 	"strconv"
 	"strings"
@@ -25,6 +27,9 @@ const (
 	keyBGPTransit      = "network.bgp.transit-network"
 	keyDNSServers      = "network.dns-servers"
 	keyMTU             = "network.mtu"
+
+	keyLBCIDR    = "network.load-balancer.cidr"
+	keyLBGateway = "network.load-balancer.gateway"
 
 	keyReservedCIDRs       = "network.reserved-cidrs"
 	keySubnetAllowedRanges = "network.subnet-allowed-ranges"
@@ -52,12 +57,18 @@ type BGP struct {
 	RedistributeTables []uint32
 }
 
+type LoadBalancerPlane struct {
+	CIDR    string
+	Gateway string
+}
+
 type Config struct {
 	EIPMode          string
 	ProviderNetworks []v1alpha1.ProviderNetworkSpec
 	BGP              BGP
 	DNSServers       []string
 	MTU              int
+	LoadBalancer     LoadBalancerPlane
 
 	ReservedCIDRs       []string
 	SubnetAllowedRanges []string
@@ -85,16 +96,30 @@ func ParseConfig(values map[string]string) (Config, error) {
 		return Config{}, err
 	}
 	mtu, _ := strconv.Atoi(effective[keyMTU])
+	plane, err := parseLoadBalancerPlane(effective)
+	if err != nil {
+		return Config{}, err
+	}
 	return Config{
 		EIPMode:          effective[keyEIPMode],
 		ProviderNetworks: networks,
 		BGP:              bgp,
 		DNSServers:       splitList(effective[keyDNSServers]),
 		MTU:              mtu,
+		LoadBalancer:     plane,
 
 		ReservedCIDRs:       splitList(effective[keyReservedCIDRs]),
 		SubnetAllowedRanges: splitList(effective[keySubnetAllowedRanges]),
 	}, nil
+}
+
+func parseLoadBalancerPlane(effective map[string]string) (LoadBalancerPlane, error) {
+	prefix, _ := netip.ParsePrefix(effective[keyLBCIDR])
+	gateway, _ := netip.ParseAddr(effective[keyLBGateway])
+	if !prefix.Contains(gateway) || isNetworkOrBroadcast(prefix, gateway) {
+		return LoadBalancerPlane{}, fmt.Errorf("the setting %s %q must be a host address inside %s %q", keyLBGateway, gateway, keyLBCIDR, prefix)
+	}
+	return LoadBalancerPlane{CIDR: prefix.String(), Gateway: gateway.String()}, nil
 }
 
 func parseBGP(effective map[string]string) (BGP, error) {
@@ -124,7 +149,7 @@ func parseBGP(effective map[string]string) (BGP, error) {
 var networkKeys = []string{
 	keyEIPMode, keyProviderNetwork, keyBGPLocalASN, keyBGPRouterID, keyBGPPeers, keyBGPTransit, keyDNSServers, keyMTU,
 	keyBGPBFD, keyBGPHoldTime, keyBGPKeepaliveTime, keyBGPGracefulRestart, keyBGPAdvertiseFilter, keyBGPRedistributeTables,
-	keyReservedCIDRs, keySubnetAllowedRanges,
+	keyReservedCIDRs, keySubnetAllowedRanges, keyLBCIDR, keyLBGateway,
 }
 
 func splitList(value string) []string {

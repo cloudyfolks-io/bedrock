@@ -143,17 +143,20 @@ func TestLoadBalancerWithoutElasticIPRefProgramsAnInternalVip(t *testing.T) {
 		t.Fatalf("result %+v", result)
 	}
 	requireLB(t, f.c, f.namespace, "lb1", metav1.ConditionFalse, ReasonFabricNotReady)
-	vip, err := getObject(ctx, f.c, fabric.VipGVK, FabricName(f.namespace, "lb1"))
+	vip, err := getObject(ctx, f.c, fabric.VipGVK, InternalVipName(f.namespace, "lb1"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if subnet, _, _ := unstructured.NestedString(vip.Object, "spec", "subnet"); subnet != FabricName(f.namespace, "default") {
+	if subnet, _, _ := unstructured.NestedString(vip.Object, "spec", "subnet"); subnet != LBSubnetName(f.network.Name) {
 		t.Fatalf("subnet %q", subnet)
+	}
+	if kind, found, _ := unstructured.NestedString(vip.Object, "spec", "type"); found {
+		t.Fatalf("the Vip must be a plain Vip, got type %q", kind)
 	}
 	if len(switchRulesOf(t, f.c, "lb1")) != 0 || len(rulesOf(t, f.c, "lb1")) != 0 {
 		t.Fatal("no rule before the virtual address exists")
 	}
-	if err := fabrictest.MarkVipAllocated(ctx, f.c, vip.GetName(), "10.100.1.200"); err != nil {
+	if err := fabrictest.MarkVipAllocated(ctx, f.c, vip.GetName(), "100.69.0.2"); err != nil {
 		t.Fatal(err)
 	}
 	reconcileLoadBalancer(t, f.c, f.namespace, "lb1", knowsEverything)
@@ -161,7 +164,7 @@ func TestLoadBalancerWithoutElasticIPRefProgramsAnInternalVip(t *testing.T) {
 	if len(rules) != 1 || !slices.Equal(endpointsOf(rules[0]), []string{"10.100.1.5", "10.100.1.6"}) {
 		t.Fatalf("rules %v", rules)
 	}
-	if address, _, _ := unstructured.NestedString(rules[0].Object, "spec", "vip"); address != "10.100.1.200" {
+	if address, _, _ := unstructured.NestedString(rules[0].Object, "spec", "vip"); address != "100.69.0.2" {
 		t.Fatalf("vip %q", address)
 	}
 	requireLB(t, f.c, f.namespace, "lb1", metav1.ConditionFalse, ReasonFabricNotReady)
@@ -170,6 +173,80 @@ func TestLoadBalancerWithoutElasticIPRefProgramsAnInternalVip(t *testing.T) {
 	}
 	reconcileLoadBalancer(t, f.c, f.namespace, "lb1", knowsEverything)
 	requireLB(t, f.c, f.namespace, "lb1", metav1.ConditionTrue, ReasonProgrammed)
+}
+
+func vipsOf(t *testing.T, c client.Client) []*unstructured.Unstructured {
+	t.Helper()
+	vips, err := listObjects(context.Background(), c, fabric.VipGVK)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return vips
+}
+
+func TestLoadBalancerInternalNeverWritesASwitchLBVip(t *testing.T) {
+	f := newInternalFixture(t)
+	ctx := context.Background()
+	reconcileLoadBalancer(t, f.c, f.namespace, "lb1", knowsEverything)
+	if err := fabrictest.MarkVipAllocated(ctx, f.c, InternalVipName(f.namespace, "lb1"), "100.69.0.2"); err != nil {
+		t.Fatal(err)
+	}
+	reconcileLoadBalancer(t, f.c, f.namespace, "lb1", knowsEverything)
+	vips := vipsOf(t, f.c)
+	if len(vips) != 1 {
+		t.Fatalf("vips %d", len(vips))
+	}
+	if kind, _, _ := unstructured.NestedString(vips[0].Object, "spec", "type"); kind == "switch_lb_vip" {
+		t.Fatal("switch_lb_vip must never be written")
+	}
+}
+
+func TestLoadBalancerInternalWaitsForThePlaneSubnet(t *testing.T) {
+	f := newInternalFixture(t)
+	ctx := context.Background()
+	if err := deleteObject(ctx, f.c, fabric.SubnetGVK, LBSubnetName(f.network.Name)); err != nil {
+		t.Fatal(err)
+	}
+	if result := reconcileLoadBalancer(t, f.c, f.namespace, "lb1", knowsEverything); result.RequeueAfter != waitRequeue {
+		t.Fatalf("result %+v", result)
+	}
+	requireLB(t, f.c, f.namespace, "lb1", metav1.ConditionFalse, ReasonFabricNotReady)
+	if len(vipsOf(t, f.c)) != 0 {
+		t.Fatal("no Vip before the plane Subnet exists")
+	}
+}
+
+func TestLoadBalancerInternalMovesAnOldVipToThePlane(t *testing.T) {
+	f := newInternalFixture(t)
+	ctx := context.Background()
+	var lb v1alpha1.LoadBalancer
+	if err := f.c.Get(ctx, client.ObjectKey{Namespace: f.namespace, Name: "lb1"}, &lb); err != nil {
+		t.Fatal(err)
+	}
+	oldName := FabricName(f.namespace, "lb1")
+	old := fabric.Vip(fabric.Meta{Name: oldName, Labels: ObjectLabels("LoadBalancer", "lb1", f.tenant, "prod"), Annotations: OwnerAnnotations(&lb)}, f.namespace, FabricName(f.namespace, "default"))
+	if err := unstructured.SetNestedField(old.Object, "switch_lb_vip", "spec", "type"); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.c.Create(ctx, old); err != nil {
+		t.Fatal(err)
+	}
+	reconcileLoadBalancer(t, f.c, f.namespace, "lb1", knowsEverything)
+	if err := fabrictest.MarkVipAllocated(ctx, f.c, InternalVipName(f.namespace, "lb1"), "100.69.0.2"); err != nil {
+		t.Fatal(err)
+	}
+	reconcileLoadBalancer(t, f.c, f.namespace, "lb1", knowsEverything)
+	if _, err := getObject(ctx, f.c, fabric.VipGVK, oldName); !apierrors.IsNotFound(err) {
+		t.Fatalf("the old Vip must be deleted: %v", err)
+	}
+	vips := vipsOf(t, f.c)
+	if len(vips) != 1 || vips[0].GetName() != InternalVipName(f.namespace, "lb1") {
+		t.Fatalf("vips %v", vips)
+	}
+	rules := switchRulesOf(t, f.c, "lb1")
+	if address, _, _ := unstructured.NestedString(rules[0].Object, "spec", "vip"); len(rules) != 1 || address != "100.69.0.2" {
+		t.Fatalf("rules %v", rules)
+	}
 }
 
 func TestLoadBalancerInternalNeedsOneSubnet(t *testing.T) {
@@ -198,7 +275,7 @@ func TestLoadBalancerInternalDeletionRemovesTheVipAndRules(t *testing.T) {
 	f := newInternalFixture(t)
 	ctx := context.Background()
 	reconcileLoadBalancer(t, f.c, f.namespace, "lb1", knowsEverything)
-	if err := fabrictest.MarkVipAllocated(ctx, f.c, FabricName(f.namespace, "lb1"), "10.100.1.200"); err != nil {
+	if err := fabrictest.MarkVipAllocated(ctx, f.c, InternalVipName(f.namespace, "lb1"), "100.69.0.2"); err != nil {
 		t.Fatal(err)
 	}
 	reconcileLoadBalancer(t, f.c, f.namespace, "lb1", knowsEverything)
@@ -213,7 +290,7 @@ func TestLoadBalancerInternalDeletionRemovesTheVipAndRules(t *testing.T) {
 	if len(switchRulesOf(t, f.c, "lb1")) != 0 {
 		t.Fatal("the rules must be deleted")
 	}
-	if _, err := getObject(ctx, f.c, fabric.VipGVK, FabricName(f.namespace, "lb1")); !apierrors.IsNotFound(err) {
+	if _, err := getObject(ctx, f.c, fabric.VipGVK, InternalVipName(f.namespace, "lb1")); !apierrors.IsNotFound(err) {
 		t.Fatalf("the Vip must be deleted: %v", err)
 	}
 	if err := f.c.Get(ctx, client.ObjectKeyFromObject(&lb), &v1alpha1.LoadBalancer{}); !apierrors.IsNotFound(err) {

@@ -216,7 +216,19 @@ func TestIPOwner(t *testing.T) {
 }
 
 func TestVipBuild(t *testing.T) {
-	equal(t, spec(t, Vip(Meta{Name: "v"}, "ns", "ns-default-0123")), map[string]any{"namespace": "ns", "subnet": "ns-default-0123", "type": "switch_lb_vip"})
+	equal(t, spec(t, Vip(Meta{Name: "v"}, "ns", "net-lb")), map[string]any{"namespace": "ns", "subnet": "net-lb"})
+}
+
+func TestPlaneSubnetBuild(t *testing.T) {
+	u := PlaneSubnet(Meta{Name: "net-lb"}, "net", "100.69.0.0/24", "100.69.0.1")
+	if u.GetKind() != "Subnet" || u.GetName() != "net-lb" {
+		t.Fatalf("unexpected identity %v", u.Object)
+	}
+	equal(t, spec(t, u), map[string]any{
+		"protocol": "IPv4", "vpc": "net", "cidrBlock": "100.69.0.0/24", "gateway": "100.69.0.1",
+		"gatewayType": "distributed", "natOutgoing": false, "disableGatewayCheck": true,
+		"excludeIps": []any{"100.69.0.1"}, "mtu": int64(1500),
+	})
 }
 
 func TestSwitchLBRuleBuild(t *testing.T) {

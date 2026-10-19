@@ -27,6 +27,7 @@ The section "How to read conditions" lists every reason.
 | each provider network | `Subnet` | `provider-<name>` |
 | bgp mode | `BgpConf` | `bedrock` |
 | `Network` | `Vpc` | the Network name |
+| `Network` | `Subnet` for the load balancer plane | `<network>-lb` |
 | `Subnet` | `Subnet` | a short name made from namespace and name |
 | `Subnet` | `NetworkAttachmentDefinition` | the Subnet name, in the project namespace |
 | `ElasticIP` | `OvnEip` | a short name made from namespace and name |
@@ -34,7 +35,7 @@ The section "How to read conditions" lists every reason.
 | `LoadBalancer` listener | `RouterLBRule` | one rule for each listener |
 | `DNSZone` | `DNSZone` | one for each Network of the Subnets that name the zone |
 | `SecurityGroup` | `SecurityGroup` | a short name made from namespace and name |
-| `LoadBalancer` without an ElasticIP | `Vip` and `SwitchLBRule` | one `Vip`, and one rule for each listener |
+| `LoadBalancer` without an ElasticIP | `Vip` and `SwitchLBRule` | one `Vip` in the load balancer plane, and one rule for each listener |
 | `SecurityGroup` | `NetworkPolicy` | `bedrock-sg-<name>` |
 | project namespace | `SecurityGroup` | `default-<namespace>` |
 
@@ -281,7 +282,12 @@ The Settings `network.bgp.bfd`, `network.bgp.hold-time`, `network.bgp.keepalive-
 Bedrock writes them to the `BgpConf` named `bedrock`.
 Bedrock updates the `BgpConf` when one of them changes.
 The advertise filter limits the routes that the agent sends to the peers.
-When the filter is empty, the agent sends all routes.
+When the filter is empty, the agent sends all routes except the load balancer plane.
+The load balancer plane is the range of `network.load-balancer.cidr`.
+Every Network uses the same range, so the agent never advertises it.
+Bedrock removes the plane from the filter before it writes the `BgpConf`, with an empty filter and with a filter that you set.
+The `BgpConf` can therefore show more entries than the Setting holds.
+An entry that overlaps the plane is split into the parts outside the plane, and an entry inside the plane is dropped.
 
 Do not change `network.eip-mode` on a cluster that has ElasticIPs.
 The mode is an install-time choice.
@@ -300,8 +306,26 @@ The other health check fields are not used.
 
 A LoadBalancer without `elasticIPRef` is an internal balancer.
 It becomes one Fabric `SwitchLBRule` for each listener and one Fabric `Vip`.
-The `Vip` is an address of the Subnet of the targets, and Fabric allocates it.
+The `Vip` is a plain Fabric `Vip` in the load balancer plane of the Network, and Fabric allocates it.
+Bedrock never writes the `Vip` type `switch_lb_vip`.
 All targets of an internal LoadBalancer must use one Subnet.
+
+### Load balancer plane
+
+Every Network has one hidden Fabric `Subnet` named `<network>-lb`.
+It has no Bedrock `Subnet` object, so tenants do not see it.
+The range comes from `network.load-balancer.cidr` and `network.load-balancer.gateway`.
+The Subnet is distributed, has no outgoing NAT and no DHCP, and has the MTU 1500.
+The gateway is excluded, so no `Vip` takes it.
+Every Network uses the same range, because the planes are separate in each Vpc.
+Keep the range inside `network.reserved-cidrs`, so no Subnet can overlap it.
+The BGP advertise filter never matches the range.
+A LoadBalancer waits with `FabricNotReady` until the plane Subnet of its Network exists.
+The plane Subnet goes away with its Network.
+
+An older release put the `Vip` in the Subnet of the targets.
+That `Vip` used the MAC address of the router port, and it cut off the default gateway of a tenant.
+The plane replaces it.
 
 ## DNS zones
 
@@ -349,6 +373,8 @@ Remove the group from the VM first.
 | `network.bgp.graceful-restart` | `true` | Keep the BGP routes while a peer restarts. |
 | `network.bgp.advertise-filter` | empty | Comma list of `<cidr> ge <n> le <n>` entries. The mask length must not be more than `ge`, and `ge` must not be more than `le`, which is at most 32. The agent advertises only the matching routes. |
 | `network.bgp.redistribute-tables` | empty | Comma list of host routing table ids from 1 to 999. 253, 254 and 255 are reserved. Ids from 1000 up are the VRF ids of the VPCs, and the agent refuses a host table that equals one of them. The list must not hold a VRF id that a Network pins in `spec.vrfId`. |
+| `network.load-balancer.cidr` | `100.69.0.0/24` | IPv4 network of the load balancer plane. Every Network gets one hidden Fabric Subnet with this range, and internal load balancers take their virtual addresses there. Keep it inside `network.reserved-cidrs`. The BGP advertise filter never matches it. |
+| `network.load-balancer.gateway` | `100.69.0.1` | IPv4 address of the plane gateway. It must be inside `network.load-balancer.cidr` and must not be its network or broadcast address. |
 | `network.dns-servers` | empty | Comma list of IPv4 resolvers that DHCP gives to guests. A Subnet that sets `dnsServers` uses its own list. |
 | `network.reserved-cidrs` | `100.64.0.0/10` | Comma list of IPv4 networks. No Network range and no Subnet can overlap them. They belong to the platform planes. |
 | `network.subnet-allowed-ranges` | `10.0.0.0/8,172.16.0.0/12,192.168.0.0/16` | Comma list of IPv4 networks. Every Subnet must be inside one of them. Use `0.0.0.0/0` to allow every address. |
@@ -428,6 +454,18 @@ Then take the action in the table.
 - L2 mode has one default route, to the first `tenant` provider network by name.
 - You cannot change the elastic IP mode on a cluster that has ElasticIPs.
 - An internal LoadBalancer has no health checks.
+
+## Upgrade notes
+
+Internal load balancers move to the load balancer plane.
+After the upgrade, every internal LoadBalancer gets a new virtual address from `<network>-lb`, so the address of the LoadBalancer changes.
+Bedrock deletes the old `Vip` and writes a new one with a new name.
+Update every client, DNS record and firewall rule that holds the old address.
+List the addresses before the upgrade with `kubectl get vips -l network.bedrock.cloudyfolks.io/managed=true`.
+A cluster that runs no internal LoadBalancer has no change.
+
+With BGP, an empty `network.bgp.advertise-filter` now renders as a list of entries that holds every route except the load balancer plane.
+Set the filter to the prefixes that you want to advertise.
 
 ## Inspect Fabric
 

@@ -80,7 +80,7 @@ func MarkVipAllocated(ctx context.Context, c client.Client, name, address string
 	if err := c.Get(ctx, client.ObjectKey{Name: name}, u); err != nil {
 		return err
 	}
-	u.Object["status"] = map[string]any{"v4ip": address, "type": "switch_lb_vip"}
+	u.Object["status"] = map[string]any{"v4ip": address}
 	return c.Update(ctx, u)
 }
 

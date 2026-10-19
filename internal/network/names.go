@@ -67,6 +67,18 @@ func ExternalSubnetName(providerNetwork string) string {
 	return providerPrefix + providerNetwork
 }
 
+func LBSubnetName(network string) string {
+	name := network + "-lb"
+	if len(name) <= labelValueMax {
+		return name
+	}
+	return shorten(name, network+"/lb", labelValueMax)
+}
+
+func InternalVipName(namespace, loadBalancer string) string {
+	return shorten(namespace+"-"+loadBalancer+"-vip", strings.Join([]string{namespace, loadBalancer, "vip"}, "/"), labelValueMax)
+}
+
 func SubnetProvider(namespace, subnet string) string {
 	return subnet + "." + namespace + ".fabric"
 }

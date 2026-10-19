@@ -308,7 +308,14 @@ func (r *LoadBalancerReconciler) programInternal(ctx context.Context, lb v1alpha
 		return refused(lb, &Violation{Reason: ReasonNoTargets, Message: "no target has an address yet"})
 	}
 	in := InternalInput{Namespace: lb.Namespace, Name: lb.Name, Labels: ObjectLabels("LoadBalancer", lb.Name, tenant, project), Annotations: OwnerAnnotations(&lb), Listeners: withEndpoints}
-	vip := InternalVip(in, FabricName(lb.Namespace, targets.subnets[0]))
+	plane := LBSubnetName(targets.vpc)
+	if present, err := exists(ctx, r.Client, fabric.SubnetGVK, plane); err != nil || !present {
+		if err != nil {
+			return metav1.Condition{}, 0, err
+		}
+		return refused(lb, &Violation{Reason: ReasonFabricNotReady, Message: fmt.Sprintf("waiting for the load balancer Subnet %s of the Network", plane)})
+	}
+	vip := InternalVip(in, plane)
 	address, v, err := r.allocateVip(ctx, lb, vip)
 	if err != nil || v != nil {
 		if err != nil {

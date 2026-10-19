@@ -14,6 +14,7 @@ func TestNetworkCatalogKeysAndDefaults(t *testing.T) {
 		"network.bgp.bfd": "true", "network.bgp.hold-time": "9s", "network.bgp.keepalive-time": "3s",
 		"network.bgp.graceful-restart": "true", "network.bgp.advertise-filter": "", "network.bgp.redistribute-tables": "",
 		"network.reserved-cidrs": "100.64.0.0/10", "network.subnet-allowed-ranges": "10.0.0.0/8,172.16.0.0/12,192.168.0.0/16",
+		"network.load-balancer.cidr": "100.69.0.0/24", "network.load-balancer.gateway": "100.69.0.1",
 	}
 	for key, def := range want {
 		got, ok := Lookup(key)
@@ -42,6 +43,21 @@ func TestSubnetRangeSettingsValidation(t *testing.T) {
 			if (validates(t, key, value) == nil) != valid {
 				t.Fatalf("%s %q valid=%v", key, value, valid)
 			}
+		}
+	}
+}
+
+func TestLoadBalancerPlaneSettingsValidation(t *testing.T) {
+	cidrs := map[string]bool{"": true, "100.69.0.0/24": true, "100.70.0.0/16": true, "100.69.0.5/24": false, "fd00::/64": false, "nonsense": false, "100.69.0.0/24,100.70.0.0/24": false, "100.69.0.0/33": false}
+	for value, valid := range cidrs {
+		if (validates(t, "network.load-balancer.cidr", value) == nil) != valid {
+			t.Fatalf("load-balancer.cidr %q valid=%v", value, valid)
+		}
+	}
+	gateways := map[string]bool{"": true, "100.69.0.1": true, "fd00::1": false, "nonsense": false, "100.69.0.1,100.69.0.2": false}
+	for value, valid := range gateways {
+		if (validates(t, "network.load-balancer.gateway", value) == nil) != valid {
+			t.Fatalf("load-balancer.gateway %q valid=%v", value, valid)
 		}
 	}
 }
