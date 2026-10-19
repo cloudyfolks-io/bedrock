@@ -73,6 +73,17 @@
       },
       "renewBefore": "8760h0m0s",
       "secretName": "orders-endpoint",
+      "secretTemplate": {
+        "annotations": {},
+        "labels": {
+          "app.kubernetes.io/instance": "0b0c0d0e-1111-4222-8333-444455556666",
+          "app.kubernetes.io/managed-by": "bedrock",
+          "bedrock.cloudyfolks.io/kind": "Database",
+          "bedrock.cloudyfolks.io/name": "orders",
+          "bedrock.cloudyfolks.io/project": "web",
+          "bedrock.cloudyfolks.io/tenant": "acme"
+        }
+      },
       "usages": [
         "digital signature",
         "key encipherment",

@@ -7,14 +7,17 @@ import (
 	"testing"
 	"time"
 
+	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 
 	"github.com/cloudyfolks-io/bedrock/api/v1alpha1"
 	"github.com/cloudyfolks-io/bedrock/internal/database/exec"
+	"github.com/cloudyfolks-io/bedrock/internal/database/postgres"
 )
 
 type fakeEngine struct {
@@ -537,5 +540,105 @@ func TestSchemaWaitsForAReadyEngine(t *testing.T) {
 	reconcileSchema(t, c, engine, schema)
 	if reason, _ := readyReasonOf(reloadSchema(t, c, schema).Status.Conditions); reason != ReasonDatabaseNotReady || len(engine.scripts) != 0 {
 		t.Fatalf("reason %s scripts %v", reason, engine.scripts)
+	}
+}
+
+type stderrExecutor struct {
+	stderr   string
+	requests []exec.Request
+}
+
+func (s *stderrExecutor) Exec(_ context.Context, request exec.Request) (exec.Result, error) {
+	s.requests = append(s.requests, request)
+	if strings.Contains(string(request.Stdin), "CREATE DATABASE") || strings.Contains(string(request.Stdin), "CREATE ROLE \"") && strings.Contains(string(request.Stdin), "LOGIN NOSUPERUSER") {
+		return exec.Result{ExitCode: 3, Stderr: []byte(s.stderr)}, nil
+	}
+	if strings.Contains(string(request.Stdin), "FROM pg_database") {
+		return exec.Result{Stdout: []byte("app\n")}, nil
+	}
+	return exec.Result{}, nil
+}
+
+func realStderrFactory(executor exec.Executor, db *v1alpha1.Database) EngineFactory {
+	pod := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{Name: "primary", Namespace: PlatformNamespace, Labels: map[string]string{"cnpg.io/cluster": string(db.UID), "cnpg.io/instanceRole": "primary"}},
+		Status:     corev1.PodStatus{Phase: corev1.PodRunning, Conditions: []corev1.PodCondition{{Type: corev1.PodReady, Status: corev1.ConditionTrue}}},
+	}
+	runner := exec.Runner{Pods: fake.NewClientBuilder().WithObjects(pod).Build(), Executor: executor, Locks: &exec.Locks{}, Timeout: 5 * time.Second}
+	target := postgres.Target(PlatformNamespace, Name(db.UID))
+	return func(context.Context, v1alpha1.Database) (Engine, error) {
+		return Engine{Timeout: 2 * time.Minute, Run: func(ctx context.Context, script string) (string, error) {
+			return runner.Run(ctx, Name(db.UID), target, script)
+		}}, nil
+	}
+}
+
+func TestSchemaOfAnExistingDatabaseIsAdoptedWithTheRealSQLState(t *testing.T) {
+	c := startEnv(t)
+	db := readyDatabase(t, c)
+	executor := &stderrExecutor{stderr: `ERROR:  42P04: database "shop" already exists` + "\nLOCATION:  createdb, dbcommands.c:500"}
+	schema := newSchema(t, c, db, "shop", nil)
+	result, err := (&SchemaReconciler{Client: c, Engine: realStderrFactory(executor, db)}).Reconcile(context.Background(), ctrl.Request{NamespacedName: client.ObjectKeyFromObject(schema)})
+	must(t, err)
+	reloadSchema(t, c, schema)
+	if reason, _ := readyReasonOf(schema.Status.Conditions); reason != ReasonReady || schema.Status.Name != "shop" || result.RequeueAfter == 0 {
+		t.Fatalf("status %+v result %+v", schema.Status, result)
+	}
+	groups := 0
+	for _, request := range executor.requests {
+		if strings.Contains(string(request.Stdin), `CREATE ROLE "shop_ro" NOLOGIN`) && !strings.Contains(string(request.Stdin), "CREATE DATABASE") {
+			groups++
+		}
+	}
+	if groups != 1 {
+		t.Fatalf("the group roles were not ensured after the adopt: %d", groups)
+	}
+}
+
+func TestUserWithAnExistingRoleIsAdoptedWithTheRealSQLState(t *testing.T) {
+	c := startEnv(t)
+	db := readyDatabase(t, c)
+	executor := &stderrExecutor{stderr: `ERROR:  42710: role "alice" already exists`}
+	user := newUser(t, c, db, "alice", nil)
+	_, err := (&UserReconciler{Client: c, Engine: realStderrFactory(executor, db)}).Reconcile(context.Background(), ctrl.Request{NamespacedName: client.ObjectKeyFromObject(user)})
+	must(t, err)
+	if reason, _ := readyReasonOf(reloadUser(t, c, user).Status.Conditions); reason != ReasonReady || user.Status.AppliedGrants == "" {
+		t.Fatalf("status %+v", user.Status)
+	}
+}
+
+func TestUserSecretWithoutAnnotationsDoesNotPanicAndIsHealed(t *testing.T) {
+	c, engine := startEnv(t), &fakeEngine{}
+	db := readyDatabase(t, c)
+	user := newUser(t, c, db, "alice", nil)
+	reconcileUser(t, c, engine, user)
+	secret := getSecret(t, c, db.Namespace, "alice-db")
+	secret.Annotations = nil
+	must(t, c.Update(context.Background(), &secret))
+	reloadUser(t, c, user)
+	user.Annotations = map[string]string{v1alpha1.AnnotationResetPassword: "one"}
+	must(t, c.Update(context.Background(), user))
+	reconcileUser(t, c, engine, user)
+	healed := getSecret(t, c, db.Namespace, "alice-db")
+	if healed.Annotations[annotationPasswordSynced] != "true" || healed.Annotations[annotationResetApplied] != "one" {
+		t.Fatalf("annotations %v", healed.Annotations)
+	}
+}
+
+func TestUserNeverTakesOverASecretItDoesNotOwn(t *testing.T) {
+	c, engine := startEnv(t), &fakeEngine{}
+	db := readyDatabase(t, c)
+	create(t, c, &corev1.Secret{ObjectMeta: metav1.ObjectMeta{Name: "alice-db", Namespace: db.Namespace}, Data: map[string][]byte{"password": []byte("tenant-secret")}})
+	user := newUser(t, c, db, "alice", nil)
+	reconcileUser(t, c, engine, user)
+	if reason, _ := readyReasonOf(reloadUser(t, c, user).Status.Conditions); reason != ReasonNameTaken {
+		t.Fatalf("reason %s", reason)
+	}
+	secret := getSecret(t, c, db.Namespace, "alice-db")
+	if string(secret.Data["password"]) != "tenant-secret" || len(secret.Data) != 1 || len(secret.OwnerReferences) != 0 {
+		t.Fatalf("the foreign Secret was changed: %v", secret.Data)
+	}
+	if len(engine.scripts) != 0 {
+		t.Fatalf("a role was made: %v", engine.scripts)
 	}
 }

@@ -81,6 +81,7 @@ func TestClassifyMapsTheSQLStateCodes(t *testing.T) {
 	cases := map[string]exec.Kind{
 		"ERROR:  42710: role \"x\" already exists":                   exec.KindExists,
 		"ERROR:  23505: duplicate key value":                         exec.KindExists,
+		"ERROR:  42P04: database \"shop\" already exists":            exec.KindExists,
 		"ERROR:  42704: role \"x\" does not exist":                   exec.KindNotFound,
 		"ERROR:  2BP01: role \"x\" cannot be dropped because depend": exec.KindOwnsObjects,
 		"ERROR:  42601: syntax error":                                exec.KindUnclassified,

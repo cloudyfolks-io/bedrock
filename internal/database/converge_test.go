@@ -8,6 +8,7 @@ import (
 
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/meta"
+	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -343,5 +344,111 @@ func TestBackupStatusAndHealthComeFromTheBackupObjects(t *testing.T) {
 	}
 	if condition := meta.FindStatusCondition(w.db.Status.Conditions, ConditionBackupHealthy); condition == nil || condition.Status != metav1.ConditionTrue || condition.Reason != "BackupCurrent" {
 		t.Fatalf("condition %+v", condition)
+	}
+}
+
+func TestAVersionChangeThatIsNoUpgradeTargetIsRefusedAndNothingIsRendered(t *testing.T) {
+	w := newWorld(t, nil)
+	ctx := context.Background()
+	w.bringUp()
+	if w.db.Annotations[annotationAppliedVersion] != "17" || w.db.Status.Applied == nil || w.db.Status.Applied.Version != "17" {
+		t.Fatalf("annotations %v applied %+v", w.db.Annotations, w.db.Status.Applied)
+	}
+	w.addVersion(v1alpha1.DatabaseVersionSpec{Engine: "postgresql", Major: "16", Image: strings.Replace(worldPostgresImage, "17.9", "16.15", 1), Port: 5432, Enabled: true})
+	w.db.Spec.Version = "16"
+	must(t, w.c.Update(ctx, w.db))
+	image, _, _ := unstructured.NestedString(w.cluster().Object, "spec", "imageName")
+	w.reconcile()
+	if w.reason() != ReasonVersionNotAllowed || w.phase() != "Unhealthy" {
+		t.Fatalf("phase %s reason %s", w.phase(), w.reason())
+	}
+	if after, _, _ := unstructured.NestedString(w.cluster().Object, "spec", "imageName"); after != image {
+		t.Fatal("the image changed")
+	}
+}
+
+func TestAClassChangeThatFlipsHighAvailabilityIsRefused(t *testing.T) {
+	w := newWorld(t, nil)
+	ctx := context.Background()
+	w.bringUp()
+	ha := &v1alpha1.DatabaseClass{ObjectMeta: metav1.ObjectMeta{Name: w.class + "-ha"}, Spec: v1alpha1.DatabaseClassSpec{CPU: resource.MustParse("500m"), Memory: resource.MustParse("1Gi"), MinStorageGi: 5, MaxStorageGi: 100, HighAvailability: true, Enabled: true}}
+	create(t, w.c, ha)
+	w.db.Spec.Class = ha.Name
+	must(t, w.c.Update(ctx, w.db))
+	w.reconcile()
+	if w.reason() != ReasonClassChangeNotSupported {
+		t.Fatalf("reason %s", w.reason())
+	}
+	if instances, _, _ := unstructured.NestedInt64(w.cluster().Object, "spec", "instances"); instances != 1 {
+		t.Fatalf("instances %d", instances)
+	}
+	same := &v1alpha1.DatabaseClass{ObjectMeta: metav1.ObjectMeta{Name: w.class + "-big"}, Spec: v1alpha1.DatabaseClassSpec{CPU: resource.MustParse("1"), Memory: resource.MustParse("2Gi"), MinStorageGi: 5, MaxStorageGi: 100, Enabled: true}}
+	create(t, w.c, same)
+	w.db.Spec.Class = same.Name
+	must(t, w.c.Update(ctx, w.db))
+	w.reconcile()
+	if w.reason() == ReasonClassChangeNotSupported {
+		t.Fatal("a class with the same highAvailability was refused")
+	}
+}
+
+func TestStorageGrowthStaysInsideTheClassRange(t *testing.T) {
+	w := newWorld(t, nil)
+	ctx := context.Background()
+	w.bringUp()
+	size := func() string {
+		value, _, _ := unstructured.NestedString(w.cluster().Object, "spec", "storage", "size")
+		return value
+	}
+	w.db.Spec.StorageGi = 50
+	must(t, w.c.Update(ctx, w.db))
+	w.reconcile()
+	if size() != "50Gi" {
+		t.Fatalf("growth inside the range was not applied: %s", size())
+	}
+	w.db.Spec.StorageGi = 101
+	must(t, w.c.Update(ctx, w.db))
+	w.reconcile()
+	if w.reason() != ReasonStorageOutOfRange || size() != "50Gi" {
+		t.Fatalf("reason %s size %s", w.reason(), size())
+	}
+}
+
+func TestAForeignSecurityGroupOfTheDatabaseNameIsLeftAlone(t *testing.T) {
+	w := newWorld(t, nil)
+	ctx := context.Background()
+	w.reconcile()
+	must(t, w.c.Delete(ctx, &v1alpha1.SecurityGroup{ObjectMeta: metav1.ObjectMeta{Name: SecurityGroupName(w.db.UID), Namespace: w.namespace}}))
+	foreign := &v1alpha1.SecurityGroup{ObjectMeta: metav1.ObjectMeta{Name: SecurityGroupName(w.db.UID), Namespace: w.namespace}, Spec: v1alpha1.SecurityGroupSpec{Egress: []v1alpha1.SecurityGroupRule{{Protocol: "all", CIDR: "10.9.0.0/16"}}}}
+	create(t, w.c, foreign)
+	w.reconcile()
+	if w.reason() != ReasonNameTaken {
+		t.Fatalf("reason %s", w.reason())
+	}
+	var stored v1alpha1.SecurityGroup
+	must(t, w.c.Get(ctx, client.ObjectKeyFromObject(foreign), &stored))
+	if len(stored.Spec.Ingress) != 0 || stored.Spec.Egress[0].CIDR != "10.9.0.0/16" || len(stored.OwnerReferences) != 0 {
+		t.Fatalf("the foreign group was changed: %+v", stored.Spec)
+	}
+}
+
+func TestAnExistingVIPServiceWithoutTheAnnotationIsAdoptedOrReported(t *testing.T) {
+	w := newWorld(t, nil)
+	ctx := context.Background()
+	mine, _ := VIPService(*w.db, Project{Namespace: w.namespace, Tenant: "acme", Name: "web"}, "10.1.1.1", 5432)
+	unstructured.RemoveNestedField(mine.Object, "metadata", "annotations")
+	must(t, w.c.Create(ctx, mine))
+	w.reconcile()
+	var service corev1.Service
+	must(t, w.c.Get(ctx, client.ObjectKey{Namespace: PlatformNamespace, Name: VIPName(w.db.UID)}, &service))
+	if service.Annotations[annotationKubeVIP] == "" {
+		t.Fatal("the VIP Service of the database was not adopted")
+	}
+	must(t, w.c.Delete(ctx, &service))
+	foreign := &corev1.Service{ObjectMeta: metav1.ObjectMeta{Name: VIPName(w.db.UID), Namespace: PlatformNamespace}, Spec: corev1.ServiceSpec{Ports: []corev1.ServicePort{{Port: 80}}}}
+	create(t, w.c, foreign)
+	w.reconcile()
+	if w.reason() != ReasonNameTaken {
+		t.Fatalf("reason %s", w.reason())
 	}
 }

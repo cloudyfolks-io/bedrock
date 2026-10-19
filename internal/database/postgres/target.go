@@ -25,7 +25,7 @@ func Target(namespace, name string) exec.Target {
 func Classify(stderr string) exec.Kind {
 	if match := sqlstatePattern.FindStringSubmatch(stderr); match != nil {
 		switch match[1] {
-		case "42710", "23505":
+		case "42710", "42P04", "23505":
 			return exec.KindExists
 		case "42704":
 			return exec.KindNotFound

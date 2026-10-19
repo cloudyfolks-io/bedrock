@@ -10,7 +10,7 @@ func addonsRules() []rbacv1.PolicyRule {
 	return []rbacv1.PolicyRule{
 		{APIGroups: []string{""}, Resources: []string{"serviceaccounts", "services", "configmaps"}, Verbs: standardVerbs()},
 		{APIGroups: []string{""}, Resources: []string{"namespaces"}, Verbs: []string{"get", "create", "patch"}},
-		{APIGroups: []string{""}, Resources: []string{"secrets"}, Verbs: standardVerbs()},
+		{APIGroups: []string{""}, Resources: []string{"secrets"}, Verbs: []string{"create", "delete", "get", "patch", "update"}},
 		{APIGroups: []string{"apps"}, Resources: []string{"deployments"}, Verbs: standardVerbs()},
 		{APIGroups: []string{rbacv1.GroupName}, Resources: []string{"roles", "rolebindings"}, Verbs: standardVerbs()},
 		{APIGroups: []string{"cert-manager.io"}, Resources: []string{"certificates", "issuers", "clusterissuers"}, Verbs: standardVerbs()},

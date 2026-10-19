@@ -79,7 +79,7 @@ func ProxyObjects(in ProxyInput) ([]*unstructured.Unstructured, error) {
 	}
 	certificate := CertificateObject(CertSpec{
 		Name: EndpointName(db), Namespace: db.Namespace, SecretName: EndpointName(db), CommonName: Name(db.UID),
-		Usages: ClientCertUsages(), Labels: labels, OwnerRefs: owners,
+		Usages: ClientCertUsages(), Labels: labels, OwnerRefs: owners, SecretLabels: labels,
 	})
 	attachment := network.PodAttachment(network.NIC{Namespace: db.Namespace, Subnet: in.Subnet.Name, Address: in.Address, SecurityGroups: []string{SecurityGroupName(db.UID)}})
 	podLabels := map[string]string{LabelComponent: ComponentProxy}

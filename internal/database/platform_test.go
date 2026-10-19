@@ -6,6 +6,7 @@ import (
 
 	corev1 "k8s.io/api/core/v1"
 	networkingv1 "k8s.io/api/networking/v1"
+	rbacv1 "k8s.io/api/rbac/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
@@ -109,5 +110,21 @@ func TestPlatformReconcilerMakesNothingWhileDisabledAndEverythingWhenEnabled(t *
 	pods := stored.Spec.Hard["pods"]
 	if pods.String() != "77" || before > 1 {
 		t.Fatalf("quota %v (before %d)", stored.Spec.Hard, before)
+	}
+}
+
+func TestEnsurePlatformGrantsTheOperatorToListSecretsInTheNamespaceOnly(t *testing.T) {
+	c := startEnv(t)
+	ctx := context.Background()
+	must(t, EnsurePlatform(ctx, c, Config{CapacityCPU: mustQuantity("1"), CapacityMemory: mustQuantity("1Gi"), CapacityPods: 1}))
+	var role rbacv1.Role
+	must(t, c.Get(ctx, client.ObjectKey{Namespace: PlatformNamespace, Name: OperatorRoleName}, &role))
+	if len(role.Rules) != 1 || role.Rules[0].Resources[0] != "secrets" || len(role.Rules[0].Verbs) != 1 || role.Rules[0].Verbs[0] != "list" {
+		t.Fatalf("rules %+v", role.Rules)
+	}
+	var binding rbacv1.RoleBinding
+	must(t, c.Get(ctx, client.ObjectKey{Namespace: PlatformNamespace, Name: OperatorRoleName}, &binding))
+	if binding.Subjects[0].Name != "bedrock-operator" || binding.Subjects[0].Namespace != "bedrock-system" || binding.RoleRef.Name != OperatorRoleName {
+		t.Fatalf("binding %+v", binding)
 	}
 }

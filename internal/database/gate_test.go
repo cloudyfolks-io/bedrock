@@ -179,3 +179,18 @@ func TestGateObjectsRefuseWithoutAnImage(t *testing.T) {
 		t.Fatal("a gate without an image was rendered")
 	}
 }
+
+func TestCertificatesLabelTheirSecretsSoTheDeleteAndTheSweeperFindThem(t *testing.T) {
+	gate, _ := GateObjects(GateInput{Database: goldenDatabase(), Project: goldenProject(), Image: haproxy, Port: 5432})
+	proxy, _ := ProxyObjects(goldenProxy())
+	for name, certificate := range map[string]*unstructured.Unstructured{"server": objectOfKind(gate, "Certificate"), "client": objectOfKind(proxy, "Certificate")} {
+		labels, _, _ := unstructured.NestedStringMap(certificate.Object, "spec", "secretTemplate", "labels")
+		if labels[LabelInstance] != gateUID || labels[LabelManagedBy] != ManagedBy || labels[v1alpha1.LabelKind] != Kind || labels[v1alpha1.LabelTenant] != "acme" || labels[v1alpha1.LabelProject] != "web" || labels[v1alpha1.LabelName] != "orders" {
+			t.Errorf("%s certificate secret labels %v", name, labels)
+		}
+	}
+	annotations, _, _ := unstructured.NestedStringMap(objectOfKind(gate, "Certificate").Object, "spec", "secretTemplate", "annotations")
+	if annotations["bedrock.cloudyfolks.io/owner-uid"] != gateUID {
+		t.Errorf("server secret annotations %v", annotations)
+	}
+}

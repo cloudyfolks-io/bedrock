@@ -15,15 +15,17 @@ const (
 )
 
 type CertSpec struct {
-	Name       string
-	Namespace  string
-	SecretName string
-	CommonName string
-	DNSNames   []string
-	IPs        []string
-	Usages     []string
-	Labels     map[string]string
-	OwnerRefs  []metav1.OwnerReference
+	Name              string
+	Namespace         string
+	SecretName        string
+	CommonName        string
+	DNSNames          []string
+	IPs               []string
+	Usages            []string
+	Labels            map[string]string
+	SecretLabels      map[string]string
+	SecretAnnotations map[string]string
+	OwnerRefs         []metav1.OwnerReference
 }
 
 func anyList(values []string) []any {
@@ -59,6 +61,9 @@ func CertificateObject(s CertSpec) *unstructured.Unstructured {
 	if len(s.IPs) > 0 {
 		spec["ipAddresses"] = anyList(s.IPs)
 	}
+	if len(s.SecretLabels) > 0 || len(s.SecretAnnotations) > 0 {
+		spec["secretTemplate"] = map[string]any{"labels": stringMap(s.SecretLabels), "annotations": stringMap(s.SecretAnnotations)}
+	}
 	metadata := map[string]any{"name": s.Name, "namespace": s.Namespace}
 	if len(s.Labels) > 0 {
 		labels := map[string]any{}
@@ -77,4 +82,12 @@ func CertificateObject(s CertSpec) *unstructured.Unstructured {
 func CertificateRevision(obj *unstructured.Unstructured) int64 {
 	revision, _, _ := unstructured.NestedInt64(obj.Object, "status", "revision")
 	return revision
+}
+
+func stringMap(in map[string]string) map[string]any {
+	out := make(map[string]any, len(in))
+	for key, value := range in {
+		out[key] = value
+	}
+	return out
 }

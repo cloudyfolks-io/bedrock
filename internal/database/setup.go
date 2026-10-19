@@ -5,7 +5,6 @@ import (
 	"strings"
 
 	appsv1 "k8s.io/api/apps/v1"
-	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/types"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/builder"
@@ -49,7 +48,6 @@ func (r *UserReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	return ctrl.NewControllerManagedBy(mgr).
 		Named("database-user").
 		For(&v1alpha1.DatabaseUser{}).
-		Owns(&corev1.Secret{}).
 		Watches(&v1alpha1.Database{}, handler.EnqueueRequestsFromMapFunc(r.usersOfDatabase)).
 		Watches(&v1alpha1.DatabaseSchema{}, handler.EnqueueRequestsFromMapFunc(r.usersOfSchema)).
 		Complete(r)
@@ -181,4 +179,12 @@ func (r *PlatformReconciler) SetupWithManager(mgr ctrl.Manager) error {
 		Named("database-platform").
 		Watches(&v1alpha1.Setting{}, handler.EnqueueRequestsFromMapFunc(func(context.Context, client.Object) []reconcile.Request { return platformRequest }), builder.WithPredicates(predicate.NewPredicateFuncs(databaseSetting))).
 		Complete(r)
+}
+
+func CachedTypes() []client.Object {
+	return []client.Object{
+		&v1alpha1.Database{}, &v1alpha1.DatabaseUser{}, &v1alpha1.DatabaseSchema{},
+		&v1alpha1.Setting{}, &v1alpha1.Addon{}, &v1alpha1.Subnet{}, &v1alpha1.SecurityGroup{},
+		&appsv1.Deployment{},
+	}
 }

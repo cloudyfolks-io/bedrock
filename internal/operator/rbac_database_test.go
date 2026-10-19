@@ -1,6 +1,14 @@
 package operator
 
-import "testing"
+import (
+	"testing"
+
+	"k8s.io/apimachinery/pkg/runtime"
+	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
+
+	"github.com/cloudyfolks-io/bedrock/api/v1alpha1"
+	"github.com/cloudyfolks-io/bedrock/internal/database"
+)
 
 func TestOperatorRoleCoversDatabases(t *testing.T) {
 	role, err := OperatorRole(rbacBundle(t))
@@ -31,6 +39,9 @@ func TestOperatorRoleCoversDatabases(t *testing.T) {
 	}
 	for _, resource := range resources {
 		for _, verb := range standard {
+			if resource[1] == "secrets" && (verb == "list" || verb == "watch") {
+				continue
+			}
 			if !allows(role, resource[0], resource[1], verb) {
 				t.Errorf("missing %s on %s/%s", verb, resource[0], resource[1])
 			}
@@ -56,6 +67,52 @@ func TestOperatorRoleCoversDatabases(t *testing.T) {
 	} {
 		if allows(role, denied[0], denied[1], denied[2]) {
 			t.Errorf("%v is allowed", denied)
+		}
+	}
+}
+
+func TestOperatorRoleCannotListOrWatchSecretsClusterWide(t *testing.T) {
+	role, err := OperatorRole(rbacBundle(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, verb := range []string{"list", "watch"} {
+		if allows(role, "", "secrets", verb) {
+			t.Errorf("the operator may %s Secrets in every namespace", verb)
+		}
+	}
+	for _, verb := range []string{"get", "create", "patch", "update", "delete"} {
+		if !allows(role, "", "secrets", verb) {
+			t.Errorf("missing %s on secrets", verb)
+		}
+	}
+}
+
+func TestOperatorRoleCoversEveryTypeTheDatabaseControllersCache(t *testing.T) {
+	role, err := OperatorRole(rbacBundle(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	scheme := runtime.NewScheme()
+	if err := clientgoscheme.AddToScheme(scheme); err != nil {
+		t.Fatal(err)
+	}
+	if err := v1alpha1.AddToScheme(scheme); err != nil {
+		t.Fatal(err)
+	}
+	for _, object := range database.CachedTypes() {
+		gvks, _, err := scheme.ObjectKinds(object)
+		if err != nil {
+			t.Fatal(err)
+		}
+		resource := resourceOf(gvks[0].GroupKind(), nil)
+		if resource == "secrets" {
+			t.Fatal("the database controllers must not cache Secrets")
+		}
+		for _, verb := range []string{"list", "watch"} {
+			if !allows(role, gvks[0].Group, resource, verb) {
+				t.Errorf("the controllers cache %s but the role has no %s on %s/%s", gvks[0].Kind, verb, gvks[0].Group, resource)
+			}
 		}
 	}
 }
