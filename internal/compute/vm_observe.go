@@ -213,7 +213,7 @@ func (r *VirtualMachineReconciler) SetupWithManager(mgr ctrl.Manager) error {
 		Watches(&v1alpha1.Image{}, handler.EnqueueRequestsFromMapFunc(r.referrers("image/project/"))).
 		Watches(&v1alpha1.ClusterImage{}, handler.EnqueueRequestsFromMapFunc(r.referrers("image/cluster/"))).
 		Watches(&v1alpha1.ElasticIP{}, handler.EnqueueRequestsFromMapFunc(targetedVM)).
-		Watches(&v1alpha1.Setting{}, handler.EnqueueRequestsFromMapFunc(r.sizedByCustomCompute)).
+		Watches(&v1alpha1.Setting{}, handler.EnqueueRequestsFromMapFunc(r.affectedBySetting)).
 		Complete(r)
 }
 

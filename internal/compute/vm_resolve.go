@@ -10,6 +10,7 @@ import (
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	"github.com/cloudyfolks-io/bedrock/api/v1alpha1"
@@ -51,7 +52,7 @@ func VolumeOwner(vms []v1alpha1.VirtualMachine, volume string) string {
 
 func (r *VirtualMachineReconciler) resolve(ctx context.Context, vm v1alpha1.VirtualMachine, labels map[string]string) (RenderInput, *Gate, error) {
 	in := RenderInput{VirtualMachine: vm, Labels: labels}
-	steps := []resolveStep{r.stepRootImage, r.stepRootDisk, r.stepRootVolume, r.stepCompute, r.stepCDROMs, r.stepInstanceType, r.stepPreference, r.stepSubnets, r.stepAddresses, r.stepSecurityGroups, r.stepDefaultGroup, r.stepSSHKeys, r.stepCloudInit, r.stepVolumes}
+	steps := []resolveStep{r.stepRootImage, r.stepRootDisk, r.stepRootVolume, r.stepCompute, r.stepEvictionStrategy, r.stepCDROMs, r.stepInstanceType, r.stepPreference, r.stepSubnets, r.stepAddresses, r.stepSecurityGroups, r.stepDefaultGroup, r.stepSSHKeys, r.stepCloudInit, r.stepVolumes}
 	for _, step := range steps {
 		next, gate, err := step(ctx, vm, in)
 		if err != nil || gate != nil {
@@ -123,12 +124,54 @@ func (r *VirtualMachineReconciler) stepRootVolume(ctx context.Context, vm v1alph
 	if ref == "" {
 		return in, nil, nil
 	}
+	mounted, err := r.mountedRootClaim(ctx, vm)
+	if err != nil {
+		return in, nil, err
+	}
+	if mounted != "" && mounted != ref {
+		in.RootVolume = &ResolvedVolume{Name: mounted, Bus: r.busOf(ctx, vm.Namespace, mounted)}
+		in.PendingRootVolume = ref
+		return in, nil, nil
+	}
 	volume, gate, err := r.attachableVolume(ctx, vm, ref)
 	if err != nil || gate != nil {
 		return in, gate, err
 	}
 	in.RootVolume = &ResolvedVolume{Name: ref, Bus: volume.Spec.Bus}
 	return in, nil, nil
+}
+
+func (r *VirtualMachineReconciler) mountedRootClaim(ctx context.Context, vm v1alpha1.VirtualMachine) (string, error) {
+	instance := emptyOf(kubeVirtVMIGVK)
+	err := r.Client.Get(ctx, client.ObjectKeyFromObject(&vm), instance)
+	if notFound(err) {
+		return "", nil
+	}
+	if err != nil {
+		return "", err
+	}
+	return rootClaimNameIn(instance), nil
+}
+
+func (r *VirtualMachineReconciler) busOf(ctx context.Context, namespace, name string) string {
+	var volume v1alpha1.Volume
+	if err := r.Client.Get(ctx, client.ObjectKey{Namespace: namespace, Name: name}, &volume); err != nil {
+		return ""
+	}
+	return volume.Spec.Bus
+}
+
+func rootClaimNameIn(obj *unstructured.Unstructured) string {
+	volumes, _, _ := unstructured.NestedSlice(obj.Object, "spec", "volumes")
+	for _, item := range volumes {
+		entry, ok := item.(map[string]any)
+		if !ok || entry["name"] != "rootdisk" {
+			continue
+		}
+		claim, _, _ := unstructured.NestedString(entry, "persistentVolumeClaim", "claimName")
+		return claim
+	}
+	return ""
 }
 
 func (r *VirtualMachineReconciler) stepCDROMs(ctx context.Context, vm v1alpha1.VirtualMachine, in RenderInput) (RenderInput, *Gate, error) {

@@ -181,6 +181,8 @@ A VolumeSnapshot of the Volume works at all times.
 
 You can change `rootDisk.volumeRef` only while `running` is `false`.
 This swap gives the VM a different boot disk at the next start.
+While the VM instance still runs, the operator keeps the old boot disk and the old Volume stays `InUse`.
+The VM has the reason `RootVolumeSwapPending` until the instance stops. Then the new Volume is the boot disk.
 You cannot add `rootDisk.volumeRef` to a VM that has an operator root disk.
 You cannot remove it from a VM that has it.
 A backup of the VM includes the root Volume.
@@ -291,6 +293,7 @@ Run `kubectl describe virtualmachine <name>` and read the condition `Ready`.
 | `SSHKeyNotReady` | An SSHKey is missing or not valid. | Check the SSHKey condition. |
 | `VolumeNotFound` | A Volume does not exist. | Create the Volume. |
 | `VolumeInUse` | Another VM uses the Volume, as a root disk or as a data disk. | Remove the Volume from one VM. |
+| `RootVolumeSwapPending` | `rootDisk.volumeRef` changed while the VM instance still runs. | Stop the VM. The swap happens when the instance is gone. |
 | `VolumeNotUsable` | The Volume is not ready, or its claim belongs to another object. | Wait for the Volume condition `Ready`, or rename the Volume. |
 | `RestoreInProgress` | A restore holds the object. | Wait until the restore ends. |
 | `ApplyFailed` | The cluster refused an object. | Ask an administrator to read the operator log. The operator tries again in 30 seconds. |

@@ -141,6 +141,9 @@ func (r *VirtualMachineReconciler) apply(ctx context.Context, in RenderInput) (o
 		return outcome{Gate: gateOf(ReasonInvalidSpec, "%s", err.Error())}, nil
 	}
 	err = r.applyRendered(ctx, in, rendered)
+	if err == nil && in.PendingRootVolume != "" {
+		return outcome{Gate: gateOf(ReasonRootVolumeSwapPending, "the virtual machine boots from %q until it is stopped, then it boots from %q", in.RootVolume.Name, in.PendingRootVolume)}, nil
+	}
 	var conflict nameConflict
 	if errors.As(err, &conflict) {
 		return outcome{Gate: gateOf(ReasonNameConflict, "%s", conflict.Error()), RequeueAfter: applyFailureRetry}, nil

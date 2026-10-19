@@ -38,6 +38,7 @@ const (
 	ReasonSSHKeyNotReady         = "SSHKeyNotReady"
 	ReasonVolumeNotFound         = "VolumeNotFound"
 	ReasonVolumeInUse            = "VolumeInUse"
+	ReasonRootVolumeSwapPending  = "RootVolumeSwapPending"
 	ReasonVolumeNotUsable        = "VolumeNotUsable"
 	ReasonRestoreInProgress      = "RestoreInProgress"
 	ReasonApplyFailed            = "ApplyFailed"

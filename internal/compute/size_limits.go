@@ -12,27 +12,45 @@ import (
 )
 
 const (
-	settingMaxCores     = "compute.max-cores"
-	settingMaxMemoryMiB = "compute.max-memory-mib"
+	settingMaxCores         = "compute.max-cores"
+	settingMaxMemoryMiB     = "compute.max-memory-mib"
+	settingEvictionStrategy = "virt.eviction-strategy"
 )
 
 func isSizeLimitSetting(name string) bool {
 	return name == settingMaxCores || name == settingMaxMemoryMiB
 }
 
-func (r *VirtualMachineReconciler) sizeLimit(ctx context.Context, key string) (int32, error) {
+func isVMSetting(name string) bool {
+	return isSizeLimitSetting(name) || name == settingEvictionStrategy
+}
+
+func (r *VirtualMachineReconciler) settingValue(ctx context.Context, key string) (string, error) {
 	def, _ := settings.Lookup(key)
-	value := def.Default
 	var setting v1alpha1.Setting
 	err := r.Client.Get(ctx, client.ObjectKey{Name: key}, &setting)
 	if err != nil && !notFound(err) {
-		return 0, err
+		return "", err
 	}
 	if err == nil && setting.Spec.Value != "" && def.Validate(setting.Spec.Value) == nil {
-		value = setting.Spec.Value
+		return setting.Spec.Value, nil
+	}
+	return def.Default, nil
+}
+
+func (r *VirtualMachineReconciler) sizeLimit(ctx context.Context, key string) (int32, error) {
+	value, err := r.settingValue(ctx, key)
+	if err != nil {
+		return 0, err
 	}
 	parsed, err := strconv.ParseInt(value, 10, 32)
 	return int32(parsed), err
+}
+
+func (r *VirtualMachineReconciler) stepEvictionStrategy(ctx context.Context, _ v1alpha1.VirtualMachine, in RenderInput) (RenderInput, *Gate, error) {
+	value, err := r.settingValue(ctx, settingEvictionStrategy)
+	in.EvictionStrategy = value
+	return in, nil, err
 }
 
 func (r *VirtualMachineReconciler) computeLimits(ctx context.Context) (ComputeLimits, error) {
@@ -58,8 +76,8 @@ func (r *VirtualMachineReconciler) stepCompute(ctx context.Context, vm v1alpha1.
 	return in, nil, nil
 }
 
-func (r *VirtualMachineReconciler) sizedByCustomCompute(ctx context.Context, obj client.Object) []reconcile.Request {
-	if !isSizeLimitSetting(obj.GetName()) {
+func (r *VirtualMachineReconciler) affectedBySetting(ctx context.Context, obj client.Object) []reconcile.Request {
+	if !isVMSetting(obj.GetName()) {
 		return nil
 	}
 	var vms v1alpha1.VirtualMachineList
@@ -68,7 +86,7 @@ func (r *VirtualMachineReconciler) sizedByCustomCompute(ctx context.Context, obj
 	}
 	var requests []reconcile.Request
 	for _, vm := range vms.Items {
-		if vm.Spec.Compute != nil {
+		if vm.Spec.Compute != nil || vm.Spec.EvictionStrategy == "" {
 			requests = append(requests, reconcile.Request{NamespacedName: client.ObjectKeyFromObject(&vm)})
 		}
 	}

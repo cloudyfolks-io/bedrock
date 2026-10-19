@@ -20,17 +20,19 @@ const diskKeyLength = 20
 type ResolvedVolume struct{ Name, Bus string }
 
 type RenderInput struct {
-	VirtualMachine v1alpha1.VirtualMachine
-	Labels         map[string]string
-	RootImage      *ResolvedImage
-	ImageOS        *v1alpha1.ImageOS
-	CDROMs         []ResolvedImage
-	NICs           []NIC
-	SSHKeys        []string
-	RootVolume     *ResolvedVolume
-	Volumes        []ResolvedVolume
-	UserData       string
-	NetworkData    string
+	VirtualMachine    v1alpha1.VirtualMachine
+	Labels            map[string]string
+	RootImage         *ResolvedImage
+	ImageOS           *v1alpha1.ImageOS
+	CDROMs            []ResolvedImage
+	NICs              []NIC
+	SSHKeys           []string
+	RootVolume        *ResolvedVolume
+	PendingRootVolume string
+	EvictionStrategy  string
+	Volumes           []ResolvedVolume
+	UserData          string
+	NetworkData       string
 }
 
 type Rendered struct {
@@ -104,7 +106,7 @@ func kubeVirtVM(in RenderInput, affinity *corev1.Affinity) (*unstructured.Unstru
 	podAnnotations, podLabels := network.PodNetworkMetadata(in.NICs)
 	templateLabels := mergeLabels(in.Labels, podLabels)
 	templateSpec := map[string]any{
-		"evictionStrategy": evictionStrategyOf(vm.Spec.EvictionStrategy),
+		"evictionStrategy": evictionStrategyOf(vm.Spec.EvictionStrategy, in.EvictionStrategy),
 		"domain":           domainOf(in),
 		"networks":         networksOf(in.NICs),
 		"volumes":          volumesOf(in),
@@ -150,11 +152,14 @@ func runStrategyOf(running bool) string {
 	return "Halted"
 }
 
-func evictionStrategyOf(spec string) string {
-	if spec == "" {
-		return v1alpha1.EvictionStrategyLiveMigrateIfPossible
+func evictionStrategyOf(spec, fallback string) string {
+	switch {
+	case spec != "":
+		return spec
+	case fallback != "":
+		return fallback
 	}
-	return spec
+	return v1alpha1.EvictionStrategyLiveMigrateIfPossible
 }
 
 func mergeLabels(first, second map[string]string) map[string]string {

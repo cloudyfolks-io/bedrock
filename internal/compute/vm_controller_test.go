@@ -919,3 +919,81 @@ func TestSnapshotOfARootVolume(t *testing.T) {
 		t.Fatalf("snapshot source %q", claim)
 	}
 }
+
+func mountingInstance(t *testing.T, c client.Client, ns, name, claim string) *unstructured.Unstructured {
+	t.Helper()
+	vmi := emptyOf(kubeVirtVMIGVK)
+	vmi.SetNamespace(ns)
+	vmi.SetName(name)
+	vmi.Object["spec"] = map[string]any{
+		"domain":  map[string]any{"devices": map[string]any{}},
+		"volumes": []any{map[string]any{"name": "rootdisk", "persistentVolumeClaim": map[string]any{"claimName": claim}}},
+	}
+	must(t, c.Create(context.Background(), vmi))
+	return vmi
+}
+
+func TestRootVolumeSwapWaitsForTheInstanceToStop(t *testing.T) {
+	c, _ := startEnv(t)
+	ns := seedPlatform(t, c)
+	readyVolume(t, c, ns, "boot1")
+	readyVolume(t, c, ns, "boot2")
+	r := newVMReconciler(c)
+	createVM(t, c, ns, "web-1", func(vm *v1alpha1.VirtualMachine) { bootFrom("boot1")(vm) })
+	reconcileVM(t, r, ns, "web-1")
+	vmi := mountingInstance(t, c, ns, "web-1", "boot1")
+	vm := getVM(t, c, ns, "web-1")
+	vm.Spec.Running = false
+	vm.Spec.RootDisk.VolumeRef = "boot2"
+	must(t, c.Update(context.Background(), &vm))
+	reconcileVM(t, r, ns, "web-1")
+	if claim := bootClaimName(t, c, ns, "web-1"); claim != "boot1" {
+		t.Fatalf("root claim %q while the instance runs", claim)
+	}
+	requireReason(t, getVM(t, c, ns, "web-1"), "RootVolumeSwapPending")
+	if kubeVirt := requirePresent(t, c, kubeVirtVMGVK, ns, "web-1"); func() string { s, _, _ := unstructured.NestedString(kubeVirt.Object, "spec", "runStrategy"); return s }() != "Halted" {
+		t.Fatal("the stop must still reach KubeVirt")
+	}
+	if old := reconcileVolume(t, c, ns, "boot1"); old.Status.AttachedTo != "web-1" {
+		t.Fatalf("boot1 %+v", old.Status)
+	}
+	must(t, c.Delete(context.Background(), vmi))
+	reconcileVM(t, r, ns, "web-1")
+	if claim := bootClaimName(t, c, ns, "web-1"); claim != "boot2" {
+		t.Fatalf("root claim %q after the stop", claim)
+	}
+	if old := reconcileVolume(t, c, ns, "boot1"); old.Status.AttachedTo != "" {
+		t.Fatalf("boot1 %+v", old.Status)
+	}
+}
+
+func evictionOf(t *testing.T, c client.Client, ns, name string) string {
+	t.Helper()
+	value, _, _ := unstructured.NestedString(requirePresent(t, c, kubeVirtVMGVK, ns, name).Object, "spec", "template", "spec", "evictionStrategy")
+	return value
+}
+
+func TestVMEvictionStrategyFollowsTheSetting(t *testing.T) {
+	c, _ := startEnv(t)
+	ns := seedPlatform(t, c)
+	r := newVMReconciler(c)
+	createVM(t, c, ns, "plain", func(vm *v1alpha1.VirtualMachine) { vm.Spec.Disks = nil })
+	reconcileVM(t, r, ns, "plain")
+	if got := evictionOf(t, c, ns, "plain"); got != "LiveMigrateIfPossible" {
+		t.Fatalf("default %q", got)
+	}
+	setSetting(t, c, "virt.eviction-strategy", "LiveMigrate")
+	createVM(t, c, ns, "followed", func(vm *v1alpha1.VirtualMachine) { vm.Spec.Disks = nil })
+	createVM(t, c, ns, "own", func(vm *v1alpha1.VirtualMachine) {
+		vm.Spec.Disks = nil
+		vm.Spec.EvictionStrategy = v1alpha1.EvictionStrategyNone
+	})
+	reconcileVM(t, r, ns, "followed")
+	reconcileVM(t, r, ns, "own")
+	if got := evictionOf(t, c, ns, "followed"); got != "LiveMigrate" {
+		t.Fatalf("followed %q", got)
+	}
+	if got := evictionOf(t, c, ns, "own"); got != "None" {
+		t.Fatalf("own %q", got)
+	}
+}
