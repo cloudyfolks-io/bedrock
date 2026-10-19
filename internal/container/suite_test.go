@@ -28,6 +28,7 @@ import (
 	"github.com/cloudyfolks-io/bedrock/internal/network"
 	"github.com/cloudyfolks-io/bedrock/internal/network/fabric"
 	"github.com/cloudyfolks-io/bedrock/internal/network/fabrictest"
+	"github.com/cloudyfolks-io/bedrock/internal/proxy"
 	"github.com/cloudyfolks-io/bedrock/internal/testenv"
 )
 
@@ -303,4 +304,8 @@ func createPod(t testing.TB, c client.Client, namespace, name, container string)
 	pod := podOf(namespace, name, container)
 	createObject(t, c, &pod)
 	return pod
+}
+
+func newRegistry() *proxy.Subresources {
+	return proxy.NewSubresources()
 }

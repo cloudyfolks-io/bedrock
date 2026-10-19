@@ -18,3 +18,12 @@ func OperatorRules() []rbacv1.PolicyRule {
 		rule("bedrock.cloudyfolks.io", []string{"containers/finalizers"}, "update"),
 	}
 }
+
+func ProxyRules() []rbacv1.PolicyRule {
+	return []rbacv1.PolicyRule{
+		rule("bedrock.cloudyfolks.io", []string{"containers"}, "get", "patch"),
+		rule("", []string{"pods"}, "list"),
+		rule("", []string{"pods/log"}, "get"),
+		rule("", []string{"pods/exec"}, "create"),
+	}
+}
