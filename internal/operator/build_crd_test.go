@@ -93,6 +93,8 @@ func TestBuildRefusesWrongValues(t *testing.T) {
 		{"url-with-space", func(x *v1alpha1.Build) { x.Spec.Source.Git.URL = "https://git.test/a b.git" }, "spec.source.git.url"},
 		{"url-too-long", func(x *v1alpha1.Build) { x.Spec.Source.Git.URL = "https://git.test/" + strings.Repeat("a", 512) }, "spec.source.git.url"},
 		{"empty-url", func(x *v1alpha1.Build) { x.Spec.Source.Git.URL = "" }, "spec.source.git.url"},
+		{"revision-with-leading-dash", func(x *v1alpha1.Build) { x.Spec.Source.Git.Revision = "-b" }, "spec.source.git.revision"},
+		{"revision-as-an-option", func(x *v1alpha1.Build) { x.Spec.Source.Git.Revision = "--pathspec-from-file=/proc/self/environ" }, "spec.source.git.revision"},
 		{"revision-with-space", func(x *v1alpha1.Build) { x.Spec.Source.Git.Revision = "main branch" }, "spec.source.git.revision"},
 		{"revision-too-long", func(x *v1alpha1.Build) { x.Spec.Source.Git.Revision = strings.Repeat("a", 256) }, "spec.source.git.revision"},
 		{"empty-revision", func(x *v1alpha1.Build) { x.Spec.Source.Git.Revision = "" }, "spec.source.git.revision"},

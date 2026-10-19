@@ -25,7 +25,7 @@ type BuildGitSource struct {
 	URL string `json:"url"`
 	// +kubebuilder:validation:MinLength=1
 	// +kubebuilder:validation:MaxLength=255
-	// +kubebuilder:validation:Pattern=`^[^\s]+$`
+	// +kubebuilder:validation:Pattern=`^[^\s-][^\s]*$`
 	Revision string `json:"revision"`
 	// +kubebuilder:validation:MaxLength=253
 	// +kubebuilder:validation:Pattern=`^[a-z0-9]([-a-z0-9.]*[a-z0-9])?$`

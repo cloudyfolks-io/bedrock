@@ -109,7 +109,7 @@ spec:
                       revision:
                         maxLength: 255
                         minLength: 1
-                        pattern: ^[^\s]+$
+                        pattern: ^[^\s-][^\s]*$
                         type: string
                       secretRef:
                         maxLength: 253
