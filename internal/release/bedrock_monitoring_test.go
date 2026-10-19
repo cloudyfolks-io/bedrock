@@ -55,6 +55,8 @@ var meteringSeries = []string{
 	"bedrock:project_vm_cpu_usage_cores:rate5m",
 	"bedrock:project_vm_network_receive_bytes:rate5m",
 	"bedrock:project_vm_network_transmit_bytes:rate5m",
+	"bedrock:project_vm_network_receive_bytes:increase1h",
+	"bedrock:project_vm_network_transmit_bytes:increase1h",
 }
 
 var sourceMetrics = []string{
@@ -80,6 +82,27 @@ func TestMeteringRulesNameEverySeries(t *testing.T) {
 	sort.Strings(want)
 	if !slices.Equal(got, want) {
 		t.Fatalf("series %v", got)
+	}
+}
+
+func TestMeteringHourlyNetworkRulesSumTheIncreaseOfEachSeries(t *testing.T) {
+	want := map[string]string{
+		"bedrock:project_vm_network_receive_bytes:increase1h":  "sum (increase(kubevirt_vmi_network_receive_bytes_total[1h]) * on (namespace)",
+		"bedrock:project_vm_network_transmit_bytes:increase1h": "sum (increase(kubevirt_vmi_network_transmit_bytes_total[1h]) * on (namespace)",
+	}
+	seen := 0
+	for _, rule := range meteringRules(t) {
+		prefix, ok := want[rule.record]
+		if !ok {
+			continue
+		}
+		seen++
+		if !strings.HasPrefix(rule.expr, prefix) {
+			t.Errorf("%s does not take the increase before the sum: %s", rule.record, rule.expr)
+		}
+	}
+	if seen != len(want) {
+		t.Fatalf("found %d of %d hourly network rules", seen, len(want))
 	}
 }
 

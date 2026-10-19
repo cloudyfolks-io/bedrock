@@ -276,7 +276,7 @@ secrets in the Setting when other people can read it.
 
 ## Metering
 
-Bedrock records seven series for each project. Each series has the labels
+Bedrock records nine series for each project. Each series has the labels
 `tenant` and `project`. The rules join every source series with the
 labels of the project namespaces. They never match a namespace name.
 
@@ -289,6 +289,8 @@ labels of the project namespaces. They never match a namespace name.
 | `bedrock:project_vm_cpu_usage_cores:rate5m` | Used CPU cores, 5 minute rate | `kubevirt_vmi_cpu_usage_seconds_total` |
 | `bedrock:project_vm_network_receive_bytes:rate5m` | Received bytes per second, 5 minute rate | `kubevirt_vmi_network_receive_bytes_total` |
 | `bedrock:project_vm_network_transmit_bytes:rate5m` | Sent bytes per second, 5 minute rate | `kubevirt_vmi_network_transmit_bytes_total` |
+| `bedrock:project_vm_network_receive_bytes:increase1h` | Received bytes in the last hour, summed after the increase of each VM series | `kubevirt_vmi_network_receive_bytes_total` |
+| `bedrock:project_vm_network_transmit_bytes:increase1h` | Sent bytes in the last hour, summed after the increase of each VM series | `kubevirt_vmi_network_transmit_bytes_total` |
 
 Prometheus does not have an address outside the cluster. A client inside
 the cluster reads the series through the federation endpoint:

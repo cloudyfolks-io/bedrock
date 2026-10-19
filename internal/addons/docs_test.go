@@ -21,6 +21,7 @@ func TestAddonsDocNamesEveryContractName(t *testing.T) {
 		"bedrock:project_vm_running:count", "bedrock:project_vm_vcpu:sum", "bedrock:project_vm_memory_bytes:sum",
 		"bedrock:project_volume_requested_bytes:sum", "bedrock:project_vm_cpu_usage_cores:rate5m",
 		"bedrock:project_vm_network_receive_bytes:rate5m", "bedrock:project_vm_network_transmit_bytes:rate5m",
+		"bedrock:project_vm_network_receive_bytes:increase1h", "bedrock:project_vm_network_transmit_bytes:increase1h",
 		"Ready", "Progressing", "Disabled", "PreflightFailed", "PreflightPending", "InvalidValues", "UnknownAddon",
 		"WaitingForCluster", "ApplyFailed", "MissingCRD", "RenderFailed", "Pruning",
 		"Passed", "NoKVM", "WaitingForHosts", ConditionPreflight,
