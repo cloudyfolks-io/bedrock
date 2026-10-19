@@ -51,9 +51,10 @@ type Health struct {
 }
 
 type Patch struct {
-	GVK  schema.GroupVersionKind
-	Name string
-	Body []byte
+	GVK       schema.GroupVersionKind
+	Namespace string
+	Name      string
+	Body      []byte
 }
 
 func Named(name, suffix string) string {

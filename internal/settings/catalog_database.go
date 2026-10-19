@@ -19,6 +19,7 @@ func databaseDefinitions() []Definition {
 		{"database.capacity.pods", "150", "Pods that the namespace bedrock-dbaas may hold, from 1 to 100000.", intBetween(1, 100000)},
 		{"database.max-utilization", "0.9", "Share of the capacity that a new Database may use, above 0 and at most 1. A create above it is refused with the reason CapacityExceeded.", floatBetween(0.01, 1)},
 		{"database.sweeper-dry-run", "true", "When true, the orphan sweeper of the database objects only writes a log line. Set it to false after you checked the log.", boolean},
+		{"database.upgrade.backup-max-age", "26h", "Age limit of the newest completed backup that a PostgreSQL or MySQL version upgrade accepts. An older backup makes the controller request a new one first.", duration(time.Hour)},
 		{"database.provision-timeout", "30m", "Time after which a Database that is not ready becomes Failed.", duration(time.Minute)},
 	}
 }
