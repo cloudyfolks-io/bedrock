@@ -99,7 +99,8 @@ An offline cluster needs a mirror of the install script. Bedrock does not build 
 
 Add an entry to `workers` to add a worker.
 Remove an entry to delete that worker.
-Bedrock deletes only the VM of the entry, its root disk, its cloud-init Secret and its token request.
+Bedrock deletes only the VM of the entry and its root disk.
+When the VM is gone, Bedrock deletes the token request, so k0smotron invalidates the token, and then the cloud-init Secret.
 The other workers do not change.
 
 Bedrock makes the workers one at a time.
@@ -153,11 +154,11 @@ A delete goes in this order.
 Each step shows the phase `Deleting` and the step in the message of `Ready`.
 
 1. Bedrock deletes the worker VMs and waits until they are gone.
-2. Bedrock deletes the token requests and the cloud-init Secrets.
-3. Bedrock deletes the k0smotron `Cluster` and waits until the StatefulSet and the volume claim are gone.
+2. Bedrock deletes the k0smotron `Cluster` and waits until the StatefulSet and the volume claim are gone.
+3. Bedrock deletes the token requests and the cloud-init Secrets. The control plane is gone, so Bedrock removes the finalizer of each token request.
 4. Bedrock releases the finalizer `bedrock.cloudyfolks.io/kubernetescluster`.
 
-A worker VM that does not stop blocks step 3.
+A worker VM that does not stop blocks step 2.
 Bedrock cannot see the nodes of the child cluster, because the platform has no route into a tenant VPC.
 After you remove a worker, delete its stale Node with `kubectl delete node <cluster>-<worker>` in the child cluster.
 
