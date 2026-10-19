@@ -3,6 +3,7 @@ package settings
 import (
 	"fmt"
 	"math"
+	"regexp"
 	"strconv"
 	"time"
 
@@ -19,8 +20,20 @@ func databaseDefinitions() []Definition {
 		{"database.max-utilization", "0.9", "Share of the capacity that a new Database may use, above 0 and at most 1. A create above it is refused with the reason CapacityExceeded.", floatBetween(0.01, 1)},
 		{"database.sweeper-dry-run", "true", "When true, the orphan sweeper of the database objects only writes a log line. Set it to false after you checked the log.", boolean},
 		{"database.provision-timeout", "30m", "Time after which a Database that is not ready becomes Failed.", duration(time.Minute)},
+		{"database.backup.bucket", "bedrock-database-backups", "Bucket of the object store that holds the backups of all databases, one prefix for each database.", bucketNameValue},
+		{"database.backup.retention-days", "7", "Days of backups and WAL archive that a database keeps, from 1 to 365.", intBetween(1, 365)},
+		{"database.backup.retention-after-delete", "168h", "Time that the backups of a deleted database stay in the bucket before the sweeper removes them.", duration(0)},
 		{"database.exec-timeout", "120s", "Time limit of one SQL script that the operator runs in an engine pod.", wholeSecondsBetween(5*time.Second, 10*time.Minute)},
 	}
+}
+
+var bucketNamePattern = regexp.MustCompile(`^[a-z0-9][a-z0-9-]{1,61}[a-z0-9]$`)
+
+func bucketNameValue(v string) error {
+	if v == "" || bucketNamePattern.MatchString(v) {
+		return nil
+	}
+	return fmt.Errorf("value %q is not a bucket name of 3 to 63 lower-case letters, digits and dashes", v)
 }
 
 func positiveQuantity(v string) error {

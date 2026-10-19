@@ -21,20 +21,26 @@ const (
 	keySweeperDryRun    = "database.sweeper-dry-run"
 	keyProvisionTimeout = "database.provision-timeout"
 	keyExecTimeout      = "database.exec-timeout"
+	keyBackupBucket     = "database.backup.bucket"
+	keyRetentionDays    = "database.backup.retention-days"
+	keyRetentionDelete  = "database.backup.retention-after-delete"
 	settingPrefix       = "database."
 )
 
-var configKeys = []string{keyEnabled, keyCapacityCPU, keyCapacityMemory, keyCapacityPods, keyMaxUtilization, keySweeperDryRun, keyProvisionTimeout, keyExecTimeout}
+var configKeys = []string{keyEnabled, keyCapacityCPU, keyCapacityMemory, keyCapacityPods, keyMaxUtilization, keySweeperDryRun, keyProvisionTimeout, keyExecTimeout, keyBackupBucket, keyRetentionDays, keyRetentionDelete}
 
 type Config struct {
-	Enabled          bool
-	CapacityCPU      resource.Quantity
-	CapacityMemory   resource.Quantity
-	CapacityPods     int
-	MaxUtilization   float64
-	SweeperDryRun    bool
-	ProvisionTimeout time.Duration
-	ExecTimeout      time.Duration
+	Enabled              bool
+	CapacityCPU          resource.Quantity
+	CapacityMemory       resource.Quantity
+	CapacityPods         int
+	MaxUtilization       float64
+	SweeperDryRun        bool
+	ProvisionTimeout     time.Duration
+	ExecTimeout          time.Duration
+	BackupBucket         string
+	RetentionDays        int
+	RetentionAfterDelete time.Duration
 }
 
 func ParseConfig(values map[string]string) (Config, error) {
@@ -56,15 +62,20 @@ func ParseConfig(values map[string]string) (Config, error) {
 	dryRun, _ := strconv.ParseBool(effective[keySweeperDryRun])
 	timeout, _ := time.ParseDuration(effective[keyProvisionTimeout])
 	execTimeout, _ := time.ParseDuration(effective[keyExecTimeout])
+	retentionDays, _ := strconv.Atoi(effective[keyRetentionDays])
+	retentionAfterDelete, _ := time.ParseDuration(effective[keyRetentionDelete])
 	return Config{
-		Enabled:          enabled,
-		CapacityCPU:      resource.MustParse(effective[keyCapacityCPU]),
-		CapacityMemory:   resource.MustParse(effective[keyCapacityMemory]),
-		CapacityPods:     pods,
-		MaxUtilization:   utilization,
-		SweeperDryRun:    dryRun,
-		ProvisionTimeout: timeout,
-		ExecTimeout:      execTimeout,
+		Enabled:              enabled,
+		CapacityCPU:          resource.MustParse(effective[keyCapacityCPU]),
+		CapacityMemory:       resource.MustParse(effective[keyCapacityMemory]),
+		CapacityPods:         pods,
+		MaxUtilization:       utilization,
+		SweeperDryRun:        dryRun,
+		ProvisionTimeout:     timeout,
+		ExecTimeout:          execTimeout,
+		BackupBucket:         effective[keyBackupBucket],
+		RetentionDays:        retentionDays,
+		RetentionAfterDelete: retentionAfterDelete,
 	}, nil
 }
 

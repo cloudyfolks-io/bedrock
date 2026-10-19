@@ -104,6 +104,8 @@ type DatabaseBackupStatus struct {
 	// +kubebuilder:validation:Minimum=0
 	// +optional
 	SizeBytes int64 `json:"sizeBytes,omitempty"`
+	// +optional
+	SizeSampledAt *metav1.Time `json:"sizeSampledAt,omitempty"`
 	// +kubebuilder:validation:MaxItems=100
 	// +optional
 	// +listType=atomic

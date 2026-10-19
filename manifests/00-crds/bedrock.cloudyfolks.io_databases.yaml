@@ -200,6 +200,9 @@ spec:
                     format: int64
                     minimum: 0
                     type: integer
+                  sizeSampledAt:
+                    format: date-time
+                    type: string
                 type: object
               conditions:
                 items:
