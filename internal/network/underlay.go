@@ -2,6 +2,7 @@ package network
 
 import (
 	"fmt"
+	"net/netip"
 	"strings"
 
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
@@ -44,6 +45,14 @@ func externalOverlaySubnet(pn v1alpha1.ProviderNetworkSpec) *unstructured.Unstru
 	return fabric.Subnet(poolMeta(pn), fabric.SubnetSpec{CIDR: pn.CIDR, Gateway: pn.Gateway, ExcludeIPs: pn.ExcludeIPs})
 }
 
+func advertiseFilter(cfg Config) []string {
+	plane, err := netip.ParsePrefix(cfg.LoadBalancer.CIDR)
+	if err != nil {
+		return cfg.BGP.AdvertiseFilter
+	}
+	return FilterWithout(cfg.BGP.AdvertiseFilter, plane)
+}
+
 func bgpConf(cfg Config) *unstructured.Unstructured {
 	peers := make([]fabric.BgpPeer, len(cfg.BGP.Peers))
 	for i, p := range cfg.BGP.Peers {
@@ -52,7 +61,7 @@ func bgpConf(cfg Config) *unstructured.Unstructured {
 	return fabric.BgpConf(underlayMeta("BgpConf", bgpConfName), fabric.BgpConfSpec{
 		LocalASN: cfg.BGP.LocalASN, RouterID: cfg.BGP.RouterID, Peers: peers, NodeSelector: gatewayNodes(),
 		HoldTime: cfg.BGP.HoldTime, KeepaliveTime: cfg.BGP.KeepaliveTime, GracefulRestart: cfg.BGP.GracefulRestart,
-		AdvertiseFilter: cfg.BGP.AdvertiseFilter, RedistributeTables: cfg.BGP.RedistributeTables,
+		AdvertiseFilter: advertiseFilter(cfg), RedistributeTables: cfg.BGP.RedistributeTables,
 	})
 }
 

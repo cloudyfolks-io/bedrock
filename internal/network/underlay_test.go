@@ -1,6 +1,7 @@
 package network
 
 import (
+	"net/netip"
 	"reflect"
 	"slices"
 	"strings"
@@ -210,9 +211,44 @@ func TestRenderUnderlayBGPConfSessionDefaults(t *testing.T) {
 	if !reflect.DeepEqual(peerBFD(spec), []any{true, true}) || spec["holdTime"] != "9s" || spec["keepaliveTime"] != "3s" || spec["gracefulRestart"] != true {
 		t.Fatalf("spec %v", spec)
 	}
-	for _, key := range []string{"advertiseFilter", "redistributeTables"} {
-		if _, found := spec[key]; found {
-			t.Fatalf("%s must be absent by default: %v", key, spec)
+	if _, found := spec["redistributeTables"]; found {
+		t.Fatalf("redistributeTables must be absent by default: %v", spec)
+	}
+}
+
+func advertisedFilter(t *testing.T, spec map[string]any) []string {
+	t.Helper()
+	items, _ := spec["advertiseFilter"].([]any)
+	filter := make([]string, len(items))
+	for i, item := range items {
+		filter[i] = item.(string)
+	}
+	return filter
+}
+
+func TestRenderUnderlayBGPConfDeniesTheLoadBalancerPlaneWithAnEmptyFilter(t *testing.T) {
+	filter := advertisedFilter(t, bgpConfSpecOf(t, nil))
+	for route, want := range map[string]bool{"100.69.0.0/24": false, "100.69.0.5/32": false, "100.69.0.128/25": false, "100.69.1.5/32": true, "10.20.0.0/16": true, "91.246.31.20/32": true} {
+		if got := filterMatches(t, filter, netip.MustParsePrefix(route)); got != want {
+			t.Fatalf("%s advertised=%v want %v in %v", route, got, want, filter)
+		}
+	}
+}
+
+func TestRenderUnderlayBGPConfDeniesTheLoadBalancerPlaneWithACustomFilter(t *testing.T) {
+	filter := advertisedFilter(t, bgpConfSpecOf(t, map[string]string{"network.bgp.advertise-filter": "100.64.0.0/10 ge 32 le 32,91.246.31.0/24 ge 32 le 32"}))
+	for route, want := range map[string]bool{"100.69.0.5/32": false, "100.69.0.200/32": false, "100.69.1.5/32": true, "100.70.0.9/32": true, "91.246.31.20/32": true, "10.20.0.0/16": false} {
+		if got := filterMatches(t, filter, netip.MustParsePrefix(route)); got != want {
+			t.Fatalf("%s advertised=%v want %v in %v", route, got, want, filter)
+		}
+	}
+}
+
+func TestRenderUnderlayBGPConfDeniesTheConfiguredLoadBalancerPlane(t *testing.T) {
+	filter := advertisedFilter(t, bgpConfSpecOf(t, map[string]string{"network.load-balancer.cidr": "100.70.0.0/16", "network.load-balancer.gateway": "100.70.0.1"}))
+	for route, want := range map[string]bool{"100.70.3.5/32": false, "100.69.0.5/32": true} {
+		if got := filterMatches(t, filter, netip.MustParsePrefix(route)); got != want {
+			t.Fatalf("%s advertised=%v want %v in %v", route, got, want, filter)
 		}
 	}
 }
