@@ -617,10 +617,6 @@ services_settings() {
   kubectl patch setting network.services.resolver --type merge -p "{\"spec\":{\"value\":\"$resolver\"}}"
 }
 
-services_cleanup() {
-  services_settings "" "" ""
-}
-
 services_checks() {
   local identity
   services_settings services 203.0.113.240/29 203.0.113.10
@@ -640,8 +636,5 @@ services_checks() {
 }
 
 network_services_identity() {
-  (
-    trap services_cleanup EXIT
-    services_checks
-  )
+  services_checks
 }
