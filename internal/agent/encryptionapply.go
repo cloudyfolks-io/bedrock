@@ -25,8 +25,11 @@ func ApplyEncryption(ctx context.Context, c client.Client, deps Deps, report fun
 		return client.IgnoreNotFound(err)
 	}
 	grant := own.Annotations[v1alpha1.AnnotationEncryptionApply]
-	if grant == "" || !v1alpha1.HostHasRole(own, v1alpha1.RoleControlPlane) || readEncryptionFailure(deps.Root) == grant {
+	if grant == "" || !v1alpha1.HostHasRole(own, v1alpha1.RoleControlPlane) {
 		return nil
+	}
+	if readEncryptionFailure(deps.Root) == grant {
+		return resumeRollback(ctx, deps, grant)
 	}
 	upgrading, err := nodeUpgrading(ctx, c, deps.Node)
 	if err != nil || upgrading {
@@ -53,7 +56,9 @@ func ApplyEncryption(ctx context.Context, c client.Client, deps Deps, report fun
 	if err := removeIfExists(filepath.Join(deps.Root, encryptionDir, encryptionHandled)); err != nil {
 		return err
 	}
-	_ = report()
+	if err := report(); err != nil {
+		return fmt.Errorf("report before the apply: %w", err)
+	}
 	previous := current
 	if stored, err := os.ReadFile(filepath.Join(deps.Root, encryptionDir, encryptionPrevious)); interrupted && err == nil {
 		previous = stored
@@ -62,6 +67,23 @@ func ApplyEncryption(ctx context.Context, c client.Client, deps Deps, report fun
 		return err
 	}
 	return recordHandledGrant(deps.Root, grant)
+}
+
+func resumeRollback(ctx context.Context, deps Deps, grant string) error {
+	if readEncryptionMarker(deps.Root, encryptionProgress) != grant {
+		return nil
+	}
+	previous, err := os.ReadFile(filepath.Join(deps.Root, encryptionDir, encryptionPrevious))
+	if err != nil {
+		return clearEncryptionProgress(deps.Root)
+	}
+	if err := writeEncryptionFile(deps, previous); err != nil {
+		return err
+	}
+	if err := restartForEncryption(ctx, deps); err != nil {
+		return err
+	}
+	return clearEncryptionProgress(deps.Root)
 }
 
 func settleInterruptedApply(ctx context.Context, deps Deps, grant string) error {
