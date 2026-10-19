@@ -110,53 +110,38 @@ func TestDatabaseOutsideAProjectShowsNotInProject(t *testing.T) {
 	}
 }
 
-func TestDatabaseGetsTheFinalizerWhenTheEngineIsAvailable(t *testing.T) {
-	c := startEnv(t)
-	setSetting(t, c, "database.enabled", "true")
-	setAddon(t, c, "cnpg", true)
-	db := newDatabase(t, c, projectNamespace(t, c), "orders", nil)
-	reconcileOnce(t, c, db)
-	var current v1alpha1.Database
-	must(t, c.Get(context.Background(), client.ObjectKeyFromObject(db), &current))
-	if !controllerutil.ContainsFinalizer(&current, Finalizer) {
-		t.Fatal("no finalizer")
-	}
-}
-
-func TestDeleteRemovesTheEngineObjectsThenReleasesTheFinalizer(t *testing.T) {
-	c := startEnv(t)
+func TestDeleteRemovesTheEngineObjectsLeavesTheTombstoneThenReleasesTheFinalizer(t *testing.T) {
+	w := newWorld(t, nil)
 	ctx := context.Background()
-	setSetting(t, c, "database.enabled", "true")
-	setAddon(t, c, "cnpg", true)
-	cfg, err := LoadConfig(ctx, c)
+	w.bringUp()
+	if w.engineObjects() == 0 {
+		t.Fatal("no engine object to delete")
+	}
+	other := engineSecret("other-"+nextSequence(), "someone-else", "other", w.namespace, "other-uid")
+	create(t, w.c, other)
+
+	must(t, w.c.Delete(ctx, w.db))
+	first, err := w.r.Reconcile(ctx, ctrl.Request{NamespacedName: client.ObjectKeyFromObject(w.db)})
 	must(t, err)
-	must(t, EnsurePlatform(ctx, c, cfg))
-	db := newDatabase(t, c, projectNamespace(t, c), "orders", nil)
-	reconcileOnce(t, c, db)
-	must(t, c.Get(ctx, client.ObjectKeyFromObject(db), db))
-
-	mine := engineSecret("mine-"+nextSequence(), string(db.UID), db.Name, db.Namespace, string(db.UID))
-	other := engineSecret("other-"+nextSequence(), "someone-else", "other", db.Namespace, "other-uid")
-	create(t, c, mine)
-	create(t, c, other)
-
-	must(t, c.Delete(ctx, db))
-	reconcileOnce(t, c, db)
-	if exists(c, mine) {
+	if first.RequeueAfter == 0 {
+		t.Fatal("the first delete step must wait for the objects to go")
+	}
+	if w.engineObjects() != 0 {
 		t.Fatal("an engine object of the database stayed")
 	}
-	tombstone, found := getTombstone(c, db)
-	if !found || tombstone.Annotations[AnnotationDeleteAfter] == "" || tombstone.Data["namespace"] != db.Namespace {
+	tombstone, found := getTombstone(w.c, w.db)
+	if !found || tombstone.Annotations[AnnotationDeleteAfter] == "" || tombstone.Data["namespace"] != w.namespace {
 		t.Fatalf("tombstone %v", tombstone)
 	}
-	if !exists(c, other) {
+	if !exists(w.c, other) {
 		t.Fatal("the delete removed an object of another database")
 	}
-	result := reconcileOnce(t, c, db)
-	if result.RequeueAfter != 0 {
-		t.Fatalf("requeue %v", result.RequeueAfter)
+	second, err := w.r.Reconcile(ctx, ctrl.Request{NamespacedName: client.ObjectKeyFromObject(w.db)})
+	must(t, err)
+	if second.RequeueAfter != 0 {
+		t.Fatalf("requeue %v", second.RequeueAfter)
 	}
-	eventually(t, "the database to go away", func() bool { return !exists(c, db) })
+	eventually(t, "the database to go away", func() bool { return !exists(w.c, w.db) })
 }
 
 func TestDeleteWithoutTheFinalizerNeedsNoWork(t *testing.T) {

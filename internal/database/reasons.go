@@ -19,6 +19,19 @@ const (
 	ReasonEngineUnavailable     = "EngineUnavailable"
 	ReasonEngineRejected        = "EngineRejected"
 	ReasonReady                 = "Ready"
+	ReasonVersionNotAvailable   = "VersionNotAvailable"
+	ReasonClassNotAvailable     = "ClassNotAvailable"
+	ReasonStorageOutOfRange     = "StorageOutOfRange"
+	ReasonSubnetNotFound        = "SubnetNotFound"
+	ReasonSubnetNotReady        = "SubnetNotReady"
+	ReasonEndpointImageMissing  = "EndpointImageMissing"
+	ReasonRuntimeUnavailable    = "RuntimeUnavailable"
+	ReasonDNSMissing            = "DNSMissing"
+	ReasonVIPRangeMissing       = "VIPRangeMissing"
+	ReasonBackupStorePending    = "BackupStorePending"
+	ReasonBackupStoreFailed     = "BackupStoreFailed"
+	ReasonApplyFailed           = "ApplyFailed"
+	ReasonAddressUnavailable    = "AddressUnavailable"
 	ReasonRestoreSourceEmpty    = "RestoreSourceEmpty"
 	ReasonRestoreTargetInFuture = "RestoreTargetInFuture"
 )
@@ -30,5 +43,9 @@ func Reasons() []string {
 		ReasonRestoreSourceMismatch, ReasonRestoreSourceEmpty, ReasonRestoreTargetInFuture,
 		ReasonDatabaseNotFound, ReasonDatabaseNotReady, ReasonInvalidSpec, ReasonGrantDatabaseNotFound, ReasonEndpointPending,
 		ReasonUserOwnsObjects, ReasonNameConflict, ReasonEngineUnavailable, ReasonEngineRejected, ReasonReady,
+		ReasonVersionNotAvailable, ReasonClassNotAvailable, ReasonStorageOutOfRange, ReasonSubnetNotFound, ReasonSubnetNotReady,
+		ReasonEndpointImageMissing, ReasonRuntimeUnavailable, ReasonDNSMissing, ReasonVIPRangeMissing, ReasonBackupStorePending,
+		ReasonBackupStoreFailed, ReasonApplyFailed, ReasonAddressUnavailable,
+		ReasonProvisioning, ReasonRestoring, ReasonSuspended, ReasonUnhealthy, ReasonEngineWaiting, ReasonBootstrapping, ReasonGateWaiting, ReasonProxyWaiting,
 	}
 }

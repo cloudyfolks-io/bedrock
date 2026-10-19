@@ -7,6 +7,6 @@ import (
 	"github.com/cloudyfolks-io/bedrock/internal/release"
 )
 
-func setupDatabase(mgr ctrl.Manager, _ release.Bundle) error {
-	return database.SetupWithManager(mgr)
+func setupDatabase(mgr ctrl.Manager, bundle release.Bundle) error {
+	return database.SetupWithManager(mgr, bundle.Images)
 }
