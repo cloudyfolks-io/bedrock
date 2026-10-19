@@ -65,7 +65,17 @@ func userAllowed(name string) error {
 
 func CheckUser(name string) error { return userAllowed(name) }
 
-func CheckDatabase(name string) error { return databaseAllowed(name) }
+func CheckSchema(name string) error { return schemaAllowed(name) }
+
+func schemaAllowed(name string) error {
+	if err := databaseAllowed(name); err != nil {
+		return err
+	}
+	if name == engine.DefaultDatabase {
+		return fmt.Errorf("%q is the bootstrap database", name)
+	}
+	return nil
+}
 
 func databaseAllowed(name string) error {
 	if !identRe.MatchString(name) {
@@ -216,6 +226,9 @@ func KillScript(ids []int) (string, error) {
 }
 
 func CreateDatabaseScript(name string) (string, error) {
+	if err := schemaAllowed(name); err != nil {
+		return "", err
+	}
 	database, err := quotedDatabase(name)
 	if err != nil {
 		return "", err
@@ -224,13 +237,16 @@ func CreateDatabaseScript(name string) (string, error) {
 }
 
 func GranteesQuery(database string) (string, error) {
-	if err := databaseAllowed(database); err != nil {
+	if err := schemaAllowed(database); err != nil {
 		return "", err
 	}
 	return queryPreamble() + fmt.Sprintf("SELECT DISTINCT user FROM mysql.db WHERE db = '%s' AND host = '%%';\n", database), nil
 }
 
 func DeleteDatabaseScript(database string, grantees []string) (string, error) {
+	if err := schemaAllowed(database); err != nil {
+		return "", err
+	}
 	quoted, err := quotedDatabase(database)
 	if err != nil {
 		return "", err
