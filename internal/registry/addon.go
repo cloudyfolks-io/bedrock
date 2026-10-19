@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -110,6 +111,7 @@ func (r *AddonReconciler) steps(config Config) []func(context.Context) error {
 			return ensureStore(ctx, r.Client, r.S3, r.Endpoint, backupStore(config))
 		},
 		apply(DatabaseObjects(config, r.Endpoint)...),
+		func(ctx context.Context) error { return r.applyEgressPolicy(ctx, config) },
 		func(ctx context.Context) error { return r.applyRoutes(ctx, config) },
 	}
 }
@@ -140,6 +142,20 @@ func (r *AddonReconciler) apply(ctx context.Context, objects ...*unstructured.Un
 		}
 	}
 	return nil
+}
+
+func (r *AddonReconciler) applyEgressPolicy(ctx context.Context, config Config) error {
+	var nodes corev1.NodeList
+	if err := r.Client.List(ctx, &nodes); err != nil {
+		return err
+	}
+	var addresses []string
+	for _, node := range nodes.Items {
+		for _, address := range node.Status.Addresses {
+			addresses = append(addresses, address.Address)
+		}
+	}
+	return r.apply(ctx, JobserviceEgressPolicy(config, addresses))
 }
 
 func (r *AddonReconciler) applyRoutes(ctx context.Context, config Config) error {

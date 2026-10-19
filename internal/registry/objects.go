@@ -1,6 +1,7 @@
 package registry
 
 import (
+	"net/netip"
 	"strings"
 
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
@@ -9,15 +10,16 @@ import (
 )
 
 const (
-	harborCoreService   = "harbor-core"
-	harborPortalService = "harbor-portal"
-	servicePort         = int64(80)
-	rulePriority        = int64(20)
-	portalPriority      = int64(10)
-	coreAPIPaths        = "PathPrefix(`/v2/`) || PathPrefix(`/service/`) || PathPrefix(`/c/`)"
-	adminAllowName      = "harbor-admin-allow"
-	adminRouteName      = "harbor-admin"
-	primaryRouteName    = "harbor-public"
+	harborCoreService    = "harbor-core"
+	harborPortalService  = "harbor-portal"
+	servicePort          = int64(80)
+	rulePriority         = int64(20)
+	portalPriority       = int64(10)
+	coreAPIPaths         = "PathPrefix(`/v2/`) || PathPrefix(`/service/`) || PathPrefix(`/c/`)"
+	adminAllowName       = "harbor-admin-allow"
+	adminRouteName       = "harbor-admin"
+	primaryRouteName     = "harbor-public"
+	jobserviceEgressName = "harbor-jobservice-egress"
 )
 
 func object(apiVersion, kind, name string, spec map[string]any) *unstructured.Unstructured {
@@ -210,4 +212,36 @@ func RouteObjects(config Config) []*unstructured.Unstructured {
 		objects = append(objects, allowMiddleware(config.AdminAllow), realmMiddleware(config.AdminHost), adminRoute(config))
 	}
 	return objects
+}
+
+func JobserviceEgressPolicy(config Config, nodeAddresses []string) *unstructured.Unstructured {
+	except := make([]any, 0, len(config.BlockedCIDRs)+len(nodeAddresses))
+	for _, cidr := range config.BlockedCIDRs {
+		except = append(except, cidr)
+	}
+	for _, address := range nodeAddresses {
+		if parsed, err := netip.ParseAddr(address); err == nil && parsed.Is4() {
+			except = append(except, parsed.String()+"/32")
+		}
+	}
+	anywhere := map[string]any{"cidr": "0.0.0.0/0"}
+	if len(except) > 0 {
+		anywhere["except"] = except
+	}
+	policy := object("networking.k8s.io/v1", "NetworkPolicy", jobserviceEgressName, map[string]any{
+		"podSelector": map[string]any{"matchLabels": map[string]any{"app": "harbor", "component": "jobservice"}},
+		"policyTypes": []any{"Egress"},
+		"egress": []any{
+			map[string]any{
+				"to": []any{map[string]any{
+					"namespaceSelector": map[string]any{"matchLabels": map[string]any{"kubernetes.io/metadata.name": "kube-system"}},
+					"podSelector":       map[string]any{"matchLabels": map[string]any{"k8s-app": "kube-dns"}},
+				}},
+				"ports": []any{map[string]any{"protocol": "UDP", "port": int64(53)}, map[string]any{"protocol": "TCP", "port": int64(53)}},
+			},
+			map[string]any{"to": []any{map[string]any{"namespaceSelector": map[string]any{"matchLabels": map[string]any{"kubernetes.io/metadata.name": Namespace}}}}},
+			map[string]any{"to": []any{map[string]any{"ipBlock": anywhere}}},
+		},
+	})
+	return policy
 }

@@ -51,6 +51,7 @@ func registryDefinitions() []Definition {
 		{"registry.default-quota-gb", "5", "Storage quota in GB of a Registry that sets no quotaGB. 0 means no limit.", intBetween(0, maxDefaultQuotaGB)},
 		{"registry.reserved-names", "library,admin,registry,api,docs,system,internal,platform,builders", "Comma list of registry names that tenants cannot use. A user of the group bedrock-admins may use them. Empty keeps the default.", entryList("registry name", registryNameEntry.MatchString)},
 		{"registry.reserved-prefixes", "mirror-", "Comma list of registry name prefixes that tenants cannot use. A user of the group bedrock-admins may use them. Empty keeps the default.", entryList("registry name prefix", registryPrefixEntry.MatchString)},
+		{"registry.webhook-blocked-cidrs", "10.0.0.0/8,172.16.0.0/12,192.168.0.0/16,100.64.0.0/10,169.254.0.0/16,127.0.0.0/8", "Comma list of IPv4 networks that the Harbor jobservice cannot reach, so a registry webhook cannot call into the cluster. Keep the pod network, the service network and the link-local range in it. The node addresses are always blocked. Empty keeps the default.", cidrListValue},
 		{"registry.proxy-caches", "", "JSON list of pull-through caches. Each entry has name (starts with mirror-), type (a Harbor adapter such as docker-hub or docker-registry) and url (https).", proxyCaches},
 	}
 }

@@ -1,11 +1,15 @@
 package registry
 
 import (
+	"os"
+	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
 
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+
+	"github.com/cloudyfolks-io/bedrock/internal/release"
 )
 
 func baseConfig() Config {
@@ -233,5 +237,104 @@ func TestParseConfigUsesDefaultsAndValidates(t *testing.T) {
 	}
 	if _, err := ParseConfig(map[string]string{"registry.db-instances": "9"}); err == nil || !strings.Contains(err.Error(), "9") {
 		t.Errorf("error %v", err)
+	}
+}
+
+func egressRules(t *testing.T, policy *unstructured.Unstructured) []map[string]any {
+	t.Helper()
+	items, _, _ := unstructured.NestedSlice(policy.Object, "spec", "egress")
+	rules := make([]map[string]any, 0, len(items))
+	for _, item := range items {
+		rules = append(rules, item.(map[string]any))
+	}
+	return rules
+}
+
+func TestJobserviceEgressPolicy(t *testing.T) {
+	config := baseConfig()
+	config.BlockedCIDRs = []string{"10.0.0.0/8", "169.254.0.0/16"}
+	policy := JobserviceEgressPolicy(config, []string{"192.168.5.10", "fd00::1", "192.168.5.11"})
+	if policy.GetKind() != "NetworkPolicy" || policy.GetName() != "harbor-jobservice-egress" || policy.GetNamespace() != "bedrock-registry" {
+		t.Fatalf("policy %s %s %s", policy.GetKind(), policy.GetName(), policy.GetNamespace())
+	}
+	selector, _, _ := unstructured.NestedStringMap(policy.Object, "spec", "podSelector", "matchLabels")
+	if selector["app"] != "harbor" || selector["component"] != "jobservice" || len(selector) != 2 {
+		t.Errorf("selector %v", selector)
+	}
+	types, _, _ := unstructured.NestedStringSlice(policy.Object, "spec", "policyTypes")
+	if !slices.Equal(types, []string{"Egress"}) {
+		t.Errorf("policy types %v", types)
+	}
+	rules := egressRules(t, policy)
+	if len(rules) != 3 {
+		t.Fatalf("rules %v", rules)
+	}
+	dns := rules[0]["to"].([]any)[0].(map[string]any)
+	if dns["namespaceSelector"].(map[string]any)["matchLabels"].(map[string]any)["kubernetes.io/metadata.name"] != "kube-system" {
+		t.Errorf("dns peer %v", dns)
+	}
+	ports := rules[0]["ports"].([]any)
+	if len(ports) != 2 || ports[0].(map[string]any)["port"] != int64(53) || ports[1].(map[string]any)["protocol"] != "TCP" {
+		t.Errorf("dns ports %v", ports)
+	}
+	namespace := rules[1]["to"].([]any)[0].(map[string]any)
+	if namespace["namespaceSelector"].(map[string]any)["matchLabels"].(map[string]any)["kubernetes.io/metadata.name"] != "bedrock-registry" || namespace["podSelector"] != nil {
+		t.Errorf("namespace peer %v", namespace)
+	}
+	block := rules[2]["to"].([]any)[0].(map[string]any)["ipBlock"].(map[string]any)
+	except := []string{}
+	for _, entry := range block["except"].([]any) {
+		except = append(except, entry.(string))
+	}
+	if block["cidr"] != "0.0.0.0/0" || !slices.Equal(except, []string{"10.0.0.0/8", "169.254.0.0/16", "192.168.5.10/32", "192.168.5.11/32"}) {
+		t.Errorf("ip block %v", block)
+	}
+}
+
+func TestJobserviceEgressPolicyWithoutBlockedAddresses(t *testing.T) {
+	rules := egressRules(t, JobserviceEgressPolicy(baseConfig(), nil))
+	block := rules[2]["to"].([]any)[0].(map[string]any)["ipBlock"].(map[string]any)
+	if _, has := block["except"]; has {
+		t.Errorf("ip block %v", block)
+	}
+}
+
+func TestJobserviceEgressPolicyMatchesTheRenderedJobservicePods(t *testing.T) {
+	cfg, err := release.LoadBuildConfig(filepath.Join("..", "..", "release", "components.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg.Components = slices.DeleteFunc(cfg.Components, func(component release.ComponentConfig) bool { return component.Name != "registry" })
+	out := t.TempDir()
+	opts := release.BuildOptions{Version: "v9.9.9", Image: "ghcr.io/cloudyfolks-io/bedrock:v9.9.9", Out: out, Helm: "helm", Root: filepath.Join("..", ".."), CacheDir: t.TempDir()}
+	if err := release.Build(cfg, opts); err != nil {
+		t.Fatal(err)
+	}
+	bundle, err := release.Load(os.DirFS(out))
+	if err != nil {
+		t.Fatal(err)
+	}
+	policy := JobserviceEgressPolicy(baseConfig(), nil)
+	want, _, _ := unstructured.NestedStringMap(policy.Object, "spec", "podSelector", "matchLabels")
+	deployment := find(t, bundle.Addons["registry"], "Deployment", "harbor-jobservice")
+	labels, _, _ := unstructured.NestedStringMap(deployment.Object, "spec", "template", "metadata", "labels")
+	for key, value := range want {
+		if labels[key] != value {
+			t.Errorf("the jobservice pod label %s is %q, the policy selects %q", key, labels[key], value)
+		}
+	}
+}
+
+func TestParseConfigReadsTheBlockedAddresses(t *testing.T) {
+	config, err := ParseConfig(map[string]string{})
+	if err != nil || !slices.Contains(config.BlockedCIDRs, "10.0.0.0/8") || !slices.Contains(config.BlockedCIDRs, "169.254.0.0/16") {
+		t.Fatalf("config %+v %v", config.BlockedCIDRs, err)
+	}
+	config, err = ParseConfig(map[string]string{"registry.webhook-blocked-cidrs": "172.20.0.0/16"})
+	if err != nil || !slices.Equal(config.BlockedCIDRs, []string{"172.20.0.0/16"}) {
+		t.Fatalf("config %+v %v", config.BlockedCIDRs, err)
+	}
+	if _, err := ParseConfig(map[string]string{"registry.webhook-blocked-cidrs": "nonsense"}); err == nil {
+		t.Error("a bad CIDR list was accepted")
 	}
 }
