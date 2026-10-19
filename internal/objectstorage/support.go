@@ -9,10 +9,12 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
+	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/util/retry"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	"github.com/cloudyfolks-io/bedrock/api/v1alpha1"
+	"github.com/cloudyfolks-io/bedrock/internal/platform"
 )
 
 const (
@@ -22,6 +24,16 @@ const (
 	reasonStoreNotReady     = "StoreNotReady"
 	reasonNamespaceNotProj  = "NamespaceNotProject"
 	reasonQuotaInvalid      = "QuotaInvalid"
+	reasonLegacyUser        = "LegacyUser"
+	reasonLegacyBucket      = "LegacyBucket"
+	reasonNameInvalid       = "NameInvalid"
+	reasonNameReserved      = "NameReserved"
+	reasonNameTaken         = "NameTaken"
+	reasonBucketLimit       = "BucketLimit"
+	reasonNotEmpty          = "NotEmpty"
+	reasonPurgeIncomplete   = "PurgeIncomplete"
+	reasonAccountPending    = "AccountPending"
+	reasonPolicyFailed      = "PolicyFailed"
 
 	pendingRequeue = 10 * time.Second
 	storeRequeue   = 15 * time.Second
@@ -29,9 +41,10 @@ const (
 )
 
 var (
-	cephObjectStoreGVK     = schema.GroupVersionKind{Group: "ceph.rook.io", Version: "v1", Kind: "CephObjectStore"}
-	cephObjectStoreUserGVK = schema.GroupVersionKind{Group: "ceph.rook.io", Version: "v1", Kind: "CephObjectStoreUser"}
-	objectBucketClaimGVK   = schema.GroupVersionKind{Group: "objectbucket.io", Version: "v1alpha1", Kind: "ObjectBucketClaim"}
+	cephObjectStoreGVK        = schema.GroupVersionKind{Group: "ceph.rook.io", Version: "v1", Kind: "CephObjectStore"}
+	cephObjectStoreUserGVK    = schema.GroupVersionKind{Group: "ceph.rook.io", Version: "v1", Kind: "CephObjectStoreUser"}
+	cephObjectStoreAccountGVK = schema.GroupVersionKind{Group: "ceph.rook.io", Version: "v1", Kind: "CephObjectStoreAccount"}
+	objectBucketClaimGVK      = schema.GroupVersionKind{Group: "objectbucket.io", Version: "v1alpha1", Kind: "ObjectBucketClaim"}
 )
 
 type outcome struct {
@@ -63,15 +76,35 @@ func updateStatus[T client.Object](ctx context.Context, c client.Client, obj T, 
 	})
 }
 
-func projectOf(ctx context.Context, c client.Client, namespace string) (tenant, project string, found bool, err error) {
-	var ns metav1.PartialObjectMetadata
+type Project struct {
+	Namespace string
+	Tenant    string
+	Name      string
+	UID       types.UID
+}
+
+func (p Project) Owner() platform.Owner {
+	return platform.Owner{Kind: "Namespace", Name: p.Namespace, UID: p.UID, Tenant: p.Tenant, Project: p.Name}
+}
+
+func platformAdopt(obj *unstructured.Unstructured, project Project) *unstructured.Unstructured {
+	return platform.Adopt(obj, project.Owner())
+}
+
+func namespaceMeta() *metav1.PartialObjectMetadata {
+	ns := &metav1.PartialObjectMetadata{}
 	ns.SetGroupVersionKind(schema.GroupVersionKind{Version: "v1", Kind: "Namespace"})
-	if err := c.Get(ctx, client.ObjectKey{Name: namespace}, &ns); err != nil {
-		return "", "", false, client.IgnoreNotFound(err)
+	return ns
+}
+
+func LoadProject(ctx context.Context, c client.Client, namespace string) (Project, bool, error) {
+	ns := namespaceMeta()
+	if err := c.Get(ctx, client.ObjectKey{Name: namespace}, ns); err != nil {
+		return Project{}, false, client.IgnoreNotFound(err)
 	}
 	labels := ns.GetLabels()
-	tenant, project = labels[v1alpha1.LabelTenant], labels[v1alpha1.LabelProject]
-	return tenant, project, tenant != "" && project != "", nil
+	project := Project{Namespace: namespace, Tenant: labels[v1alpha1.LabelTenant], Name: labels[v1alpha1.LabelProject], UID: ns.GetUID()}
+	return project, project.Tenant != "" && project.Name != "", nil
 }
 
 func storeProblem(ctx context.Context, c client.Client) (outcome, error) {

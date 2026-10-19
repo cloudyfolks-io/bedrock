@@ -84,7 +84,7 @@ dump_workloads() {
   kubectl -n "$S3_NS" logs deploy/seaweedfs --tail=200 || true
   kubectl -n "$S3_NS" logs job/make-bucket --tail=50 || true
   echo "--- object storage"
-  kubectl -n rook-ceph get pods,cephobjectstore,cephobjectstoreuser -o wide || true
+  kubectl -n rook-ceph get pods,cephobjectstore,cephobjectstoreaccount,cephobjectstoreuser -o wide || true
   kubectl -n rook-ceph logs deploy/rook-ceph-operator --tail=150 || true
   kubectl -n objectstorage-e2e get jobs,pods -o wide || true
   kubectl -n objectstorage-e2e logs -l job-name --tail=50 --prefix || true
@@ -128,7 +128,7 @@ k0s ctr --namespace k8s.io images import "$cache/seaweedfs.tar"
 k0s ctr --namespace k8s.io images import "$cache/aws-cli.tar"
 k0s ctr --namespace k8s.io images import "$cache/busybox.tar"
 
-for step_file in encryption addons tenancy images compute network container objectstorage backup panel metering cascade; do
+for step_file in encryption addons tenancy images compute network container objectstorage objectstorage-iam backup panel metering cascade; do
   source "$steps_dir/$step_file.sh"
 done
 
@@ -193,8 +193,15 @@ steps=(
   container_load_balancer
   container_proxy
   container_cleanup
+  objectstorage_iam_spike
   objectstorage_user_and_bucket
   objectstorage_roundtrip
+  objectstorage_permissions
+  objectstorage_names
+  objectstorage_quota
+  objectstorage_suspend
+  objectstorage_force_destroy
+  objectstorage_public_host
   backup_target
   backup_once
   backup_restore_replace

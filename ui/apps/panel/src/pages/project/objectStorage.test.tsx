@@ -38,7 +38,7 @@ describe("Buckets", () => {
     expect(validateBucket({ policy: "{oops" })[0]?.field).toBe("spec.policy");
   });
 
-  it("lists buckets and offers the users as a select", async () => {
+  it("lists buckets with their name, endpoint, quota and usage", async () => {
     const user = userEvent.setup();
     const def = definitionFor("objectstoragebuckets");
     if (!def) {
@@ -48,18 +48,31 @@ describe("Buckets", () => {
       <Routes>
         <Route path="/p/:project/buckets" element={<ResourceListPage def={def} />} />
       </Routes>,
-      { route: "/p/web/buckets", api: { ...openApiRoutes(), "GET /proxy/v1/projects": { body: projects }, [`GET ${ns}/objectstoragebuckets`]: { body: buckets as unknown as KubeList }, [`GET ${ns}/objectstorageusers`]: { body: users as unknown as KubeList } } },
+      { route: "/p/web/buckets", api: { ...openApiRoutes(), "GET /proxy/v1/projects": { body: projects }, [`GET ${ns}/objectstoragebuckets`]: { body: buckets as unknown as KubeList } } },
     );
     const row = (await screen.findByRole("link", { name: "assets" })).closest("tr") as HTMLElement;
-    expect(within(row).getByText("app")).toBeTruthy();
-    expect(row.querySelector('bdi[dir="ltr"]')?.textContent).toBe("https://s3.lab.example.test");
+    const ltr = Array.from(row.querySelectorAll('bdi[dir="ltr"]')).map((element) => element.textContent);
+    expect(ltr).toEqual(["acme-web-assets", "https://s3.lab.example.test"]);
     expect(within(row).getByText("100 GiB")).toBeTruthy();
+    expect(within(row).getByText("5 GiB")).toBeTruthy();
     await user.click(screen.getByRole("button", { name: "Create" }));
-    expect(await screen.findByRole("combobox", { name: /userRef/ }, { timeout: 15000 })).toBeTruthy();
+    expect(await screen.findByRole("textbox", { name: /bucketName/ }, { timeout: 15000 })).toBeTruthy();
+    expect(screen.queryByRole("combobox", { name: /userRef/ })).toBeNull();
   });
 });
 
 describe("ObjectUsersPage", () => {
+  it("lists the permission, the buckets in scope and the suspended flag", async () => {
+    renderUsers();
+    const app = (await screen.findByRole("link", { name: "app" })).closest("tr") as HTMLElement;
+    expect(within(app).getByText("readWrite")).toBeTruthy();
+    expect(within(app).getByText("2")).toBeTruthy();
+    expect(within(app).queryByText("✓")).toBeNull();
+    const ci = (await screen.findByRole("link", { name: "ci" })).closest("tr") as HTMLElement;
+    expect(within(ci).getByText("read")).toBeTruthy();
+    expect(within(ci).getByText("✓")).toBeTruthy();
+  });
+
   it("shows credentials only when reading secrets is allowed", async () => {
     const user = userEvent.setup();
     const denied = renderUsers((check) => check.resource !== "secrets");

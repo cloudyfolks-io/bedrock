@@ -15,12 +15,15 @@ spec:
   scope: Namespaced
   versions:
   - additionalPrinterColumns:
-    - jsonPath: .spec.userRef
-      name: User
-      type: string
     - jsonPath: .status.bucketName
       name: Bucket
       type: string
+    - jsonPath: .status.usage.bytes
+      name: Bytes
+      type: integer
+    - jsonPath: .status.usage.objects
+      name: Objects
+      type: integer
     name: v1alpha1
     schema:
       openAPIV3Schema:
@@ -44,6 +47,18 @@ spec:
             type: object
           spec:
             properties:
+              bucketName:
+                pattern: ^[a-z0-9][a-z0-9-]{1,61}[a-z0-9]$
+                type: string
+              corsOrigins:
+                items:
+                  maxLength: 253
+                  type: string
+                maxItems: 50
+                type: array
+                x-kubernetes-list-type: set
+              forceDestroy:
+                type: boolean
               policy:
                 maxLength: 20480
                 type: string
@@ -60,14 +75,13 @@ spec:
                     minimum: 0
                     type: integer
                 type: object
-              userRef:
-                minLength: 1
-                type: string
               versioning:
                 type: boolean
-            required:
-            - userRef
             type: object
+            x-kubernetes-validations:
+            - message: bucketName is immutable
+              rule: has(self.bucketName) == has(oldSelf.bucketName) && (!has(self.bucketName)
+                || self.bucketName == oldSelf.bucketName)
           status:
             properties:
               bucketName:
@@ -136,6 +150,22 @@ spec:
               observedGeneration:
                 format: int64
                 type: integer
+              usage:
+                properties:
+                  bytes:
+                    format: int64
+                    type: integer
+                  objects:
+                    format: int64
+                    type: integer
+                  sampledAt:
+                    format: date-time
+                    type: string
+                required:
+                - bytes
+                - objects
+                - sampledAt
+                type: object
             type: object
         required:
         - spec

@@ -94,8 +94,11 @@ msgstr "النسخة الاحتياطية"
 msgid "col.backupTarget"
 msgstr "الوجهة"
 
+msgid "col.bucketName"
+msgstr "اسم الحاوية"
+
 msgid "col.buckets"
-msgstr "حصة الحاويات"
+msgstr "الحاويات"
 
 msgid "col.cidr"
 msgstr "CIDR"
@@ -181,6 +184,9 @@ msgstr "نظام التشغيل"
 msgid "col.owners"
 msgstr "المالكون"
 
+msgid "col.permission"
+msgstr "الصلاحية"
+
 msgid "col.phase"
 msgstr "المرحلة"
 
@@ -226,6 +232,9 @@ msgstr "فئة التخزين"
 msgid "col.subnet"
 msgstr "الشبكة الفرعية"
 
+msgid "col.suspended"
+msgstr "معلّق"
+
 msgid "col.target"
 msgstr "الهدف"
 
@@ -238,7 +247,7 @@ msgstr "المستأجر"
 msgid "col.type"
 msgstr "النوع"
 
-msgid "col.user"
+msgid "col.usage"
 msgstr "المستخدم"
 
 msgid "col.value"

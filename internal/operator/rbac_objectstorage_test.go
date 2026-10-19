@@ -13,9 +13,29 @@ func TestOperatorRoleCoversObjectStorage(t *testing.T) {
 		{"ceph.rook.io", "cephobjectstoreusers", "patch"},
 		{"ceph.rook.io", "cephobjectstoreusers", "get"},
 		{"ceph.rook.io", "cephobjectstores", "get"},
-		{"objectbucket.io", "objectbucketclaims", "create"},
-		{"objectbucket.io", "objectbucketclaims", "delete"},
-		{"objectbucket.io", "objectbucketclaims", "patch"},
+		{"ceph.rook.io", "cephobjectstoreaccounts", "create"},
+		{"ceph.rook.io", "cephobjectstoreaccounts", "delete"},
+		{"ceph.rook.io", "cephobjectstoreaccounts", "patch"},
+		{"ceph.rook.io", "cephobjectstoreaccounts", "get"},
+		{"ceph.rook.io", "cephobjectstoreaccounts", "list"},
+		{"ceph.rook.io", "cephobjectstoreaccounts", "watch"},
+		{"ceph.rook.io", "cephobjectstoreusers", "list"},
+		{"ceph.rook.io", "cephobjectstoreusers", "watch"},
+		{"cert-manager.io", "certificates", "create"},
+		{"cert-manager.io", "certificates", "delete"},
+		{"cert-manager.io", "certificates", "patch"},
+		{"traefik.io", "ingressroutes", "create"},
+		{"traefik.io", "ingressroutes", "delete"},
+		{"traefik.io", "ingressroutes", "patch"},
+		{"", "secrets", "create"},
+		{"", "secrets", "delete"},
+		{"", "secrets", "patch"},
+		{"", "configmaps", "create"},
+		{"", "configmaps", "patch"},
+		{"", "configmaps", "watch"},
+		{"objectbucket.io", "objectbucketclaims", "get"},
+		{"objectbucket.io", "objectbucketclaims", "list"},
+		{"objectbucket.io", "objectbucketclaims", "watch"},
 		{"", "configmaps", "get"},
 		{"", "secrets", "get"},
 		{"", "namespaces", "get"},
@@ -33,5 +53,10 @@ func TestOperatorRoleCoversObjectStorage(t *testing.T) {
 	}
 	if allows(role, "objectbucket.io", "objectbuckets", "delete") {
 		t.Error("objectbuckets delete is allowed")
+	}
+	for _, verb := range []string{"create", "update", "patch", "delete"} {
+		if allows(role, "objectbucket.io", "objectbucketclaims", verb) {
+			t.Errorf("objectbucketclaims %s is allowed, but tenant buckets no longer use claims", verb)
+		}
 	}
 }

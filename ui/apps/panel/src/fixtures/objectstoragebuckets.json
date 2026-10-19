@@ -16,7 +16,7 @@
         "namespace": "acme-web"
       },
       "spec": {
-        "userRef": "app",
+        "bucketName": "acme-web-assets",
         "versioning": true,
         "quota": {
           "bytes": "100Gi",
@@ -26,6 +26,11 @@
       "status": {
         "bucketName": "acme-web-assets",
         "endpoint": "https://s3.lab.example.test",
+        "usage": {
+          "bytes": 5368709120,
+          "objects": 42,
+          "sampledAt": "2026-10-01T10:05:00Z"
+        },
         "conditions": [
           {
             "type": "Ready",
