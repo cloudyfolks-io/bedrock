@@ -185,6 +185,10 @@ steps=(
   network_elastic_ip_pool_choice
   network_elastic_ip_quota
   network_load_balancer_and_dns
+  network_internet_gateway
+  network_peering
+  network_internal_load_balancer
+  network_services_identity
   network_isolation
   container_network_proof
   container_runtime_gate
