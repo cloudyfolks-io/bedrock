@@ -351,3 +351,43 @@ func TestEphemeralContainersAreHardened(t *testing.T) {
 		t.Fatalf("a plain ephemeral container was refused: %v", err)
 	}
 }
+
+const tenantServiceAccount = "system:serviceaccount:acme-shop:builder"
+
+func TestTenantServiceAccountIsCheckedLikeAUser(t *testing.T) {
+	w := newWorkloadWorld(t)
+	mustCreate(t, w.admin, editorIn("acme-shop", tenantServiceAccount))
+	builder := actingAs(t, w.cfg, tenantServiceAccount)
+	hostPath := func(s *corev1.PodSpec) {
+		s.Volumes = []corev1.Volume{{Name: "host", VolumeSource: corev1.VolumeSource{HostPath: &corev1.HostPathVolumeSource{Path: "/"}}}}
+	}
+	privileged := func(s *corev1.PodSpec) {
+		s.Containers[0].SecurityContext = &corev1.SecurityContext{Privileged: ptr.To(true)}
+	}
+	hostNetwork := func(s *corev1.PodSpec) { s.HostNetwork = true }
+	cases := map[string]struct {
+		change  func(*corev1.PodSpec)
+		message string
+	}{
+		"hostPath":    {hostPath, "hostPath volumes are not allowed"},
+		"privileged":  {privileged, "privileged containers are not allowed"},
+		"hostNetwork": {hostNetwork, "host namespaces are not allowed"},
+	}
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			for _, workload := range workloadsWith("sa-"+strings.ToLower(name), tc.change)[:2] {
+				requireDenied(t, builder.Create(context.Background(), workload), tc.message)
+			}
+		})
+	}
+	mustCreate(t, builder, plainPod("sa-plain", "acme-shop", keep), deploymentWith("sa-plain-deploy", "acme-shop", keep))
+}
+
+func TestSystemIdentitiesKeepTheirExemption(t *testing.T) {
+	w := newWorkloadWorld(t)
+	hostNetwork := func(s *corev1.PodSpec) { s.HostNetwork = true }
+	for _, user := range []string{"system:serviceaccount:kubevirt:virt-controller", "system:serviceaccount:kube-system:replicaset-controller"} {
+		mustCreate(t, w.admin, editorIn("acme-shop", user))
+		mustCreate(t, actingAs(t, w.cfg, user), plainPod("exempt-"+strings.ReplaceAll(strings.TrimPrefix(user, "system:serviceaccount:"), ":", "-"), "acme-shop", hostNetwork))
+	}
+}
