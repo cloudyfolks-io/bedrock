@@ -88,7 +88,7 @@ func (r *UserReconciler) deleteCephUser(ctx context.Context, user *v1alpha1.Obje
 }
 
 func (r *UserReconciler) converge(ctx context.Context, user *v1alpha1.ObjectStorageUser) (outcome, string, error) {
-	tenant, project, found, err := projectOf(ctx, r.Client, user.Namespace)
+	project, found, err := LoadProject(ctx, r.Client, user.Namespace)
 	if err != nil {
 		return outcome{}, "", err
 	}
@@ -98,7 +98,7 @@ func (r *UserReconciler) converge(ctx context.Context, user *v1alpha1.ObjectStor
 	if problem, err := storeProblem(ctx, r.Client); err != nil || problem.reason != "" {
 		return problem, "", err
 	}
-	desired, err := CephUser(user, tenant, project)
+	desired, err := CephUser(user, project.Tenant, project.Name)
 	if err != nil {
 		return outcome{}, "", err
 	}

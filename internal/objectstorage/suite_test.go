@@ -103,7 +103,7 @@ func wipe(t *testing.T) {
 		wipeKind(ctx, t, namespace, &v1alpha1.ObjectStorageBucket{})
 		wipeKind(ctx, t, namespace, &corev1.Secret{})
 		wipeKind(ctx, t, namespace, &corev1.ConfigMap{})
-		for _, gvk := range []schema.GroupVersionKind{cephObjectStoreGVK, cephObjectStoreUserGVK, objectBucketClaimGVK} {
+		for _, gvk := range []schema.GroupVersionKind{cephObjectStoreGVK, cephObjectStoreUserGVK, cephObjectStoreAccountGVK, objectBucketClaimGVK} {
 			obj := &unstructured.Unstructured{}
 			obj.SetGroupVersionKind(gvk)
 			wipeKind(ctx, t, namespace, obj)

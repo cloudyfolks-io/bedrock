@@ -45,7 +45,7 @@ func (r *BucketReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctr
 }
 
 func (r *BucketReconciler) converge(ctx context.Context, bucket *v1alpha1.ObjectStorageBucket) (bucketState, error) {
-	_, _, found, err := projectOf(ctx, r.Client, bucket.Namespace)
+	_, found, err := LoadProject(ctx, r.Client, bucket.Namespace)
 	if err != nil {
 		return bucketState{}, err
 	}
