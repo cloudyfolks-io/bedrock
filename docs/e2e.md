@@ -253,6 +253,7 @@ If a name changes in an area, change it in that file only.
 | `compute.sh` | An SSH key, a Volume, the SecurityGroup `web` and the VM `vm1`. Hot-plug and expand. A volume snapshot. The proxy actions and the console, which the Go test runs. |
 | `network.sh` | The provider network and the Network status. The fabric-frr agent. Subnet rules. The security group on the VM. A VM with a pinned address, a Subnet MTU and Subnet DNS servers. An ElasticIP in L2 mode with the ARP and ping proof. An ElasticIP without a provider network. The ElasticIP quota. A LoadBalancer and a DNSZone. Isolation rules. |
 | `container.sh` | The proof of the pod network: a hand-made Pod and a hand-made Deployment get the network metadata of a `Container`. Then the kind itself: the runtime gate, replicas, stop and start, a fixed address, autoscale, a Volume, a LoadBalancer target, logs, exec and restart through the proxy, and the cleanup. |
+| `clusters.sh` | The proof of the control plane: a hand-made k0smotron `Cluster` with the fields of the `KubernetesCluster` kind. |
 | `objectstorage.sh` | The object store, two users and one bucket. A put and a get from inside the cluster. A denied read by the other user. |
 | `backup.sh` | The SeaweedFS target. A VM backup with one entry. A restore with `replace: true`. A restore of a missing backup. |
 | `panel.sh` | The panel at `console.<host>`, the redirect from the apex, the API host and the Go test for the login and the watch stream. |
@@ -308,6 +309,28 @@ The steps of `hack/e2e/tenant/container.sh` use the preloaded busybox image.
 | `container_load_balancer` | A LoadBalancer with `containerRef` is `Programmed`, and the Fabric load balancer holds the address of each ready pod. |
 | `container_proxy` | The Go test `TestContainerStreams` for logs, exec and restart. |
 | `container_cleanup` | Deleting the Containers removes every Deployment, autoscaler and pod. |
+
+## Cluster proof
+
+The step `clusters_proof` in `hack/e2e/tenant/clusters.sh` proves the control plane that the `KubernetesCluster` kind needs.
+The step turns the addon `clusters` on and makes a k0smotron `v1beta2` `Cluster` by hand.
+The `Cluster` has the fields that the controller renders: `patches` with the network annotations of a `Container`, `storage.type: kine`, a `pvc` for the data, both ports and `externalAddress`.
+The step skips when the cluster has no `block` StorageClass.
+
+| Check | Proof |
+| --- | --- |
+| First pod | The pod `kmc-cproof-0` has the fixed address from its first start. Its UID and restart count do not change, and the StatefulSet has no second revision. |
+| Probes | The StatefulSet probes are exec probes of `k0s status`. No `httpGet` or `tcpSocket` probe exists. |
+| Ports | The container ports are 6443 and 8132. The k0s config in the pod has `agentPort: 8132`, the `externalAddress` and the address in the API `sans`. The pod has one interface that is not `lo`. |
+| Ready | The pod is Ready and `status.readyReplicas` of the `Cluster` is 1. |
+| Kubeconfig | The Secret `cproof-kubeconfig` has the key `value`, and its server is `https://<address>:6443`. |
+| Join token | A `JoinTokenRequest` gets `status.tokenID`. The Secret with the same name holds the key `token`. The step prints whether the deletion of the request invalidates the token. |
+
+The e2e cluster has no internet, so a worker cannot install k0s there.
+The worker join runs in `hack/lab-cluster.sh proof` on a host with KVM and internet.
+The stage makes a security group, the `Cluster`, a `JoinTokenRequest`, the cloud-init Secret and the worker `VirtualMachine`.
+It then waits for the Node to be Ready and runs `logs` and `exec` in the child through the konnectivity agent.
+The stage `down` removes the objects.
 
 ## Network parity checks
 
