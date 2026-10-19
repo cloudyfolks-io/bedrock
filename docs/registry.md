@@ -61,6 +61,17 @@ The retention policy keeps the tags that one of the rules selects.
 If the spec has no `keepLastN` and no `retainDays`, Bedrock clears the policy of the project.
 If you remove `webhook`, Bedrock deletes the policy `platform-events`.
 
+The webhook cannot target a service in the cluster.
+Harbor sends the call from the jobservice pods in `bedrock-registry`.
+A NetworkPolicy named `harbor-jobservice-egress` limits their egress.
+They can reach DNS, the Harbor pods in the namespace and addresses outside the blocked ranges.
+The Setting `registry.webhook-blocked-cidrs` lists the blocked ranges.
+The default has the private ranges, the shared range `100.64.0.0/10`, the link-local range and the loopback range.
+This covers the default pod and service networks.
+If your pod network or service network is outside these ranges, add it to the Setting.
+Bedrock also blocks the address of every node.
+Use a public URL for the webhook.
+
 `status` shows these fields:
 
 | Field | Meaning |

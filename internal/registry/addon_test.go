@@ -3,6 +3,7 @@ package registry
 import (
 	"context"
 	"net/http"
+	"slices"
 	"testing"
 
 	corev1 "k8s.io/api/core/v1"
@@ -255,5 +256,29 @@ func TestTheDatabaseGetsTheConfiguredInstances(t *testing.T) {
 	class, _, _ := unstructured.NestedString(cluster.Object, "spec", "storage", "storageClass")
 	if instances != 3 || class != "fast" {
 		t.Errorf("instances %d class %q", instances, class)
+	}
+}
+
+func node(name, address string) *corev1.Node {
+	return &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: name}, Status: corev1.NodeStatus{Addresses: []corev1.NodeAddress{{Type: corev1.NodeInternalIP, Address: address}}}}
+}
+
+func TestTheJobserviceEgressPolicyBlocksTheNodesAndTheConfiguredRanges(t *testing.T) {
+	server := fakeS3(t, http.StatusOK, "")
+	r, c := newReconciler(t, server.URL, append(platformSettings(setting("registry.webhook-blocked-cidrs", "172.20.0.0/16"), node("n1", "192.168.5.10")), readyStores()...)...)
+	reconcileOnce(t, r)
+	policy := &unstructured.Unstructured{}
+	policy.SetAPIVersion("networking.k8s.io/v1")
+	policy.SetKind("NetworkPolicy")
+	if err := c.Get(context.Background(), client.ObjectKey{Namespace: Namespace, Name: "harbor-jobservice-egress"}, policy); err != nil {
+		t.Fatal(err)
+	}
+	block := egressRules(t, policy)[2]["to"].([]any)[0].(map[string]any)["ipBlock"].(map[string]any)
+	except := []string{}
+	for _, entry := range block["except"].([]any) {
+		except = append(except, entry.(string))
+	}
+	if !slices.Equal(except, []string{"172.20.0.0/16", "192.168.5.10/32"}) {
+		t.Errorf("except %v", except)
 	}
 }

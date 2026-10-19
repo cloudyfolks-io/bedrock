@@ -17,6 +17,7 @@ type Config struct {
 	Bucket       string
 	BackupBucket string
 	TLSMode      string
+	BlockedCIDRs []string
 }
 
 func ParseConfig(values map[string]string) (Config, error) {
@@ -43,12 +44,13 @@ func ParseConfig(values map[string]string) (Config, error) {
 		Bucket:       effective["registry.bucket"],
 		BackupBucket: effective["database.backup.bucket"],
 		TLSMode:      values[tlsModeKey],
+		BlockedCIDRs: splitList(effective["registry.webhook-blocked-cidrs"]),
 	}, nil
 }
 
 var configKeys = []string{
 	"registry.host", "registry.aliases", "registry.admin-host", "registry.admin-allow-cidrs",
-	"registry.db-instances", "registry.storage-class", "registry.bucket", "database.backup.bucket",
+	"registry.db-instances", "registry.storage-class", "registry.bucket", "database.backup.bucket", "registry.webhook-blocked-cidrs",
 }
 
 func splitList(value string) []string {

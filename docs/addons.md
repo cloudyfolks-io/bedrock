@@ -262,6 +262,7 @@ The condition `RuntimeReady` shows the state of these objects.
 | `registry.robot-prefix` | `robot$` | Prefix of each robot login. |
 | `registry.gc-cron` | `0 0 3 * * *` | Garbage collection schedule. |
 | `registry.proxy-caches` | empty | JSON list of pull-through caches. |
+| `registry.webhook-blocked-cidrs` | private, shared, link-local and loopback ranges | Networks that the jobservice cannot reach, so a webhook cannot call into the cluster. |
 | `database.enabled` | `false` | Turns on the database platform. |
 | `database.backup.bucket` | `bedrock-database-backups` | Bucket of the platform database backups. |
 

@@ -10,13 +10,15 @@ import (
 	"sort"
 	"testing"
 
+	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
-	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
+	"sigs.k8s.io/controller-runtime/pkg/client/interceptor"
 
 	"github.com/cloudyfolks-io/bedrock/api/v1alpha1"
 )
@@ -24,18 +26,17 @@ import (
 func testScheme(t *testing.T) *runtime.Scheme {
 	t.Helper()
 	scheme := runtime.NewScheme()
-	if err := clientgoscheme.AddToScheme(scheme); err != nil {
-		t.Fatal(err)
-	}
-	if err := v1alpha1.AddToScheme(scheme); err != nil {
-		t.Fatal(err)
+	for _, add := range []func(*runtime.Scheme) error{corev1.AddToScheme, appsv1.AddToScheme, v1alpha1.AddToScheme} {
+		if err := add(scheme); err != nil {
+			t.Fatal(err)
+		}
 	}
 	return scheme
 }
 
 func fakeCluster(t *testing.T, objects ...client.Object) client.Client {
 	t.Helper()
-	return fake.NewClientBuilder().WithScheme(testScheme(t)).WithStatusSubresource(&v1alpha1.Addon{}, &v1alpha1.Registry{}, &v1alpha1.RegistryCredential{}).WithObjects(objects...).Build()
+	return fake.NewClientBuilder().WithScheme(testScheme(t)).WithStatusSubresource(&v1alpha1.Addon{}, &v1alpha1.Registry{}, &v1alpha1.RegistryCredential{}).WithInterceptorFuncs(interceptor.Funcs{Apply: applyNetworkPolicies}).WithObjects(objects...).Build()
 }
 
 func repeating(b byte) io.Reader {
@@ -86,4 +87,25 @@ func fakeS3(t *testing.T, status int, code string) *httptest.Server {
 	}))
 	t.Cleanup(server.Close)
 	return server
+}
+
+func applyNetworkPolicies(ctx context.Context, c client.WithWatch, configuration runtime.ApplyConfiguration, opts ...client.ApplyOption) error {
+	content, ok := configuration.(runtime.Unstructured)
+	if !ok || content.UnstructuredContent()["kind"] != "NetworkPolicy" {
+		return c.Apply(ctx, configuration, opts...)
+	}
+	policy := &unstructured.Unstructured{Object: content.UnstructuredContent()}
+	existing := &unstructured.Unstructured{}
+	existing.SetGroupVersionKind(policy.GroupVersionKind())
+	err := c.Get(ctx, client.ObjectKeyFromObject(policy), existing)
+	if apierrors.IsNotFound(err) {
+		return c.Create(ctx, policy)
+	}
+	if err != nil {
+		return err
+	}
+	if err := c.Delete(ctx, existing); err != nil {
+		return err
+	}
+	return c.Create(ctx, policy)
 }
