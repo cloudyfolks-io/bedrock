@@ -1,0 +1,32 @@
+package container
+
+import (
+	rbacv1 "k8s.io/api/rbac/v1"
+)
+
+func rule(group string, resources []string, verbs ...string) rbacv1.PolicyRule {
+	return rbacv1.PolicyRule{APIGroups: []string{group}, Resources: resources, Verbs: verbs}
+}
+
+func OperatorRules() []rbacv1.PolicyRule {
+	return []rbacv1.PolicyRule{
+		rule("apps", []string{"deployments"}, "create", "get", "list", "patch", "watch"),
+		rule("apps", []string{"replicasets"}, "list", "watch"),
+		rule("autoscaling", []string{"horizontalpodautoscalers"}, "create", "delete", "get", "list", "patch", "watch"),
+		rule("node.k8s.io", []string{"runtimeclasses"}, "get", "list", "watch"),
+		rule("", []string{"pods"}, "list", "watch"),
+		rule("", []string{"secrets"}, "get"),
+		rule("bedrock.cloudyfolks.io", []string{"containers/finalizers"}, "update"),
+	}
+}
+
+func ProxyRules() []rbacv1.PolicyRule {
+	return []rbacv1.PolicyRule{
+		rule("bedrock.cloudyfolks.io", []string{"containers"}, "get", "patch"),
+		rule("apps", []string{"deployments"}, "get"),
+		rule("apps", []string{"replicasets"}, "list"),
+		rule("", []string{"pods"}, "list"),
+		rule("", []string{"pods/log"}, "get"),
+		rule("", []string{"pods/exec"}, "create"),
+	}
+}

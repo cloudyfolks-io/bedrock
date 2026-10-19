@@ -160,12 +160,13 @@ func TestDecideUnknownProjectIsTheZeroDecision(t *testing.T) {
 }
 
 func TestQuotaHardMapsEveryResource(t *testing.T) {
-	got := QuotaHard(v1alpha1.ProjectQuota{CPU: quantity("8"), Memory: quantity("16Gi"), Storage: quantity("200Gi"), VMs: ptr.To(int32(5))})
+	got := QuotaHard(v1alpha1.ProjectQuota{CPU: quantity("8"), Memory: quantity("16Gi"), Storage: quantity("200Gi"), VMs: ptr.To(int32(5)), Containers: ptr.To(int32(12))})
 	want := map[corev1.ResourceName]string{
 		"requests.cpu":     "8",
 		"requests.memory":  "16Gi",
 		"requests.storage": "200Gi",
 		"count/virtualmachines.bedrock.cloudyfolks.io": "5",
+		"count/containers.bedrock.cloudyfolks.io":      "12",
 	}
 	if len(got) != len(want) {
 		t.Fatalf("got %v", got)
@@ -193,14 +194,15 @@ func TestProjectUsageMapsBack(t *testing.T) {
 		"requests.memory":  resource.MustParse("4Gi"),
 		"requests.storage": resource.MustParse("10Gi"),
 		"count/virtualmachines.bedrock.cloudyfolks.io": resource.MustParse("3"),
+		"count/containers.bedrock.cloudyfolks.io":      resource.MustParse("4"),
 		"pods": resource.MustParse("9"),
 	}
 	got := ProjectUsage(used)
-	if got.CPU.String() != "2" || got.Memory.String() != "4Gi" || got.Storage.String() != "10Gi" || *got.VMs != 3 {
+	if got.CPU.String() != "2" || got.Memory.String() != "4Gi" || got.Storage.String() != "10Gi" || *got.VMs != 3 || *got.Containers != 4 {
 		t.Fatalf("got %+v", got)
 	}
 	partial := ProjectUsage(corev1.ResourceList{"requests.cpu": resource.MustParse("1")})
-	if partial.Memory != nil || partial.Storage != nil || partial.VMs != nil {
+	if partial.Memory != nil || partial.Storage != nil || partial.VMs != nil || partial.Containers != nil {
 		t.Fatalf("partial %+v", partial)
 	}
 }

@@ -1,0 +1,62 @@
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicy
+metadata:
+  name: bedrock-network-attachments-workloads
+  labels:
+    bedrock.cloudyfolks.io/component: network
+spec:
+  failurePolicy: Fail
+  matchConstraints:
+    namespaceSelector:
+      matchExpressions:
+        - key: bedrock.cloudyfolks.io/tenant
+          operator: Exists
+    resourceRules:
+      - apiGroups: [apps]
+        apiVersions: [v1]
+        operations: [CREATE, UPDATE]
+        resources: [deployments, replicasets, statefulsets, daemonsets]
+      - apiGroups: [batch]
+        apiVersions: [v1]
+        operations: [CREATE, UPDATE]
+        resources: [jobs, cronjobs]
+  variables:
+    - name: template
+      expression: "request.resource.resource == 'cronjobs' ? object.spec.jobTemplate.spec.template : object.spec.template"
+    - name: previousTemplate
+      expression: >-
+        oldObject == null ? {} :
+        (request.resource.resource == 'cronjobs' ? oldObject.spec.jobTemplate.spec.template : oldObject.spec.template)
+    - name: annotations
+      expression: "has(variables.template.metadata) && has(variables.template.metadata.annotations) ? variables.template.metadata.annotations : {}"
+    - name: previous
+      expression: "has(variables.previousTemplate.metadata) && has(variables.previousTemplate.metadata.annotations) ? variables.previousTemplate.metadata.annotations : {}"
+    - name: added
+      expression: >-
+        variables.annotations.filter(k,
+        (k.startsWith('k8s.v1.cni.cncf.io/') || k.startsWith('v1.multus-cni.io/') || k.startsWith('ovn.kubernetes.io/') || k.contains('cloudyfolks.io/')) &&
+        (!(k in variables.previous) || variables.previous[k] != variables.annotations[k]))
+    - name: removed
+      expression: >-
+        variables.previous.filter(k,
+        (k.startsWith('k8s.v1.cni.cncf.io/') || k.startsWith('v1.multus-cni.io/') || k.startsWith('ovn.kubernetes.io/') || k.contains('cloudyfolks.io/')) &&
+        !(k in variables.annotations))
+  validations:
+    - expression: >-
+        request.userInfo.username in [
+        'system:serviceaccount:bedrock-system:bedrock-operator',
+        'system:serviceaccount:kube-system:deployment-controller',
+        'system:serviceaccount:kube-system:cronjob-controller'] ||
+        (size(variables.added) == 0 && size(variables.removed) == 0)
+      message: "only the platform may set network selection annotations"
+      reason: Forbidden
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicyBinding
+metadata:
+  name: bedrock-network-attachments-workloads
+  labels:
+    bedrock.cloudyfolks.io/component: network
+spec:
+  policyName: bedrock-network-attachments-workloads
+  validationActions: [Deny]

@@ -120,6 +120,7 @@ func bedrockResources() []string {
 		"clusterconfigs",
 		"clusterimages", "clusterimages/status",
 		"clusters", "clusters/status",
+		"containers", "containers/status",
 		"credentials", "credentials/status",
 		"devicerequests", "devicerequests/status",
 		"dnszones", "dnszones/status",

@@ -65,6 +65,7 @@ describe("shell", () => {
     expect(hrefs(nav)).toEqual(
       [
         "vms",
+        "containers",
         "ssh-keys",
         "volumes",
         "snapshots",

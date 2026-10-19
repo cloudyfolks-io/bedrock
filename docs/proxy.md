@@ -129,6 +129,8 @@ These pairs are different:
 - `start`, `stop`, `restart`, `migrate` and `snapshot` with `POST` on `virtualmachines` use `update`.
 - `snapshot` with `GET`, `console/vnc` and `console/serial` on `virtualmachines` use `get`.
 - `upload` on `images` uses `create`.
+- `logs` and `exec` with `GET` on `containers` use `get`.
+- `restart` with `POST` on `containers` uses `update`.
 
 The roles of the projects must grant these verbs.
 The handler gets the client of the proxy service account.

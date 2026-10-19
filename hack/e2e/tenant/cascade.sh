@@ -1,5 +1,7 @@
 owned_kinds=(
   virtualmachines.kubevirt.io
+  deployments.apps
+  horizontalpodautoscalers.autoscaling
   datavolumes.cdi.kubevirt.io
   persistentvolumeclaims
   volumesnapshots.snapshot.storage.k8s.io

@@ -125,7 +125,7 @@ func setSetting(t *testing.T, key, value string) {
 	t.Cleanup(func() { _ = c.Delete(ctx, &v1alpha1.Setting{ObjectMeta: metav1.ObjectMeta{Name: key}}) })
 }
 
-var purgedBedrockKinds = []string{"NetworkPeering", "Network", "Subnet", "ElasticIP", "LoadBalancer", "InternetGateway", "DNSZone", "SecurityGroup", "VirtualMachine", "Tenant"}
+var purgedBedrockKinds = []string{"NetworkPeering", "Network", "Subnet", "ElasticIP", "LoadBalancer", "InternetGateway", "DNSZone", "SecurityGroup", "VirtualMachine", "Container", "Tenant"}
 
 var purgedFabricKinds = []schema.GroupVersionKind{
 	fabric.OvnSnatRuleGVK, fabric.OvnFipGVK, fabric.OvnEipGVK, fabric.RouterLBRuleGVK, fabric.SwitchLBRuleGVK, fabric.VipGVK, fabric.DNSZoneGVK, fabric.SecurityGroupGVK,

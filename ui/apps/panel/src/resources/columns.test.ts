@@ -16,3 +16,27 @@ describe("elastic IP columns", () => {
     expect(column?.sortValue?.(elasticIp({ providerNetwork: "external" }, {}))).toBe("external");
   });
 });
+
+const container = (status: Record<string, unknown>): KubeObject =>
+  ({ apiVersion: "bedrock.cloudyfolks.io/v1alpha1", kind: "Container", metadata: { name: "web", namespace: "acme-web" }, spec: { image: "registry.example.test/web:1" }, status }) as KubeObject;
+
+describe("container columns", () => {
+  const columns = columnsByPlural.containers ?? [];
+
+  it("sorts the replicas by the ready count", () => {
+    const replicas = columns.find((def) => def.id === "replicas");
+    expect(replicas?.sortValue?.(container({ replicas: 3, readyReplicas: 2 }))).toBe(2);
+    expect(replicas?.sortValue?.(container({}))).toBe(0);
+  });
+
+  it("sorts the addresses by the first pod address", () => {
+    const addresses = columns.find((def) => def.id === "addresses");
+    expect(addresses?.sortValue?.(container({ addresses: ["10.0.0.4", "10.0.0.5"] }))).toBe("10.0.0.4");
+    expect(addresses?.sortValue?.(container({}))).toBe("");
+  });
+
+  it("shows the image", () => {
+    const image = columns.find((def) => def.id === "image");
+    expect(image?.sortValue?.(container({}))).toBe("registry.example.test/web:1");
+  });
+});

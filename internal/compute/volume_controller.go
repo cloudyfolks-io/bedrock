@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 
 	corev1 "k8s.io/api/core/v1"
 	storagev1 "k8s.io/api/storage/v1"
@@ -20,6 +21,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	"github.com/cloudyfolks-io/bedrock/api/v1alpha1"
+	"github.com/cloudyfolks-io/bedrock/internal/container"
 )
 
 const FinalizerVolumeInUse = "bedrock.cloudyfolks.io/volume-in-use"
@@ -44,7 +46,11 @@ func (r *VolumeReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctr
 	if err := r.Client.List(ctx, &vms, client.InNamespace(volume.Namespace)); err != nil {
 		return ctrl.Result{}, err
 	}
-	owner, err := OwnerOf(ctx, r.Client, vms.Items, volume.Namespace, volume.Name)
+	var containers v1alpha1.ContainerList
+	if err := r.Client.List(ctx, &containers, client.InNamespace(volume.Namespace)); err != nil {
+		return ctrl.Result{}, err
+	}
+	owner, err := OwnerOf(ctx, r.Client, vms.Items, containers.Items, volume.Namespace, volume.Name)
 	if err != nil {
 		return ctrl.Result{}, err
 	}
@@ -73,12 +79,12 @@ func (r *VolumeReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctr
 	return ctrl.Result{}, r.writeStatus(ctx, volume, done)
 }
 
-func OwnerOf(ctx context.Context, c client.Reader, vms []v1alpha1.VirtualMachine, namespace, volume string) (string, error) {
+func OwnerOf(ctx context.Context, c client.Reader, vms []v1alpha1.VirtualMachine, containers []v1alpha1.Container, namespace, volume string) (string, error) {
 	mounted, err := MountingInstance(ctx, c, namespace, volume)
 	if err != nil || mounted != "" {
 		return mounted, err
 	}
-	return VolumeOwner(vms, volume), nil
+	return VolumeConsumer(vms, containers, volume), nil
 }
 
 func MountingInstance(ctx context.Context, c client.Reader, namespace, claim string) (string, error) {
@@ -149,9 +155,16 @@ func (r *VolumeReconciler) release(ctx context.Context, volume v1alpha1.Volume, 
 		return nil
 	}
 	if owner != "" {
-		return r.writeStatus(ctx, volume, volumeOutcome{Gate: gateOf(ReasonInUse, "the virtual machine %q uses the volume", owner), AttachedTo: owner, Phase: v1alpha1.VolumePhaseInUse})
+		return r.writeStatus(ctx, volume, volumeOutcome{Gate: gateOf(ReasonInUse, "%s uses the volume", describeConsumer(owner)), AttachedTo: owner, Phase: v1alpha1.VolumePhaseInUse})
 	}
 	return r.removeFinalizer(ctx, volume)
+}
+
+func describeConsumer(owner string) string {
+	if name, isContainer := strings.CutPrefix(owner, container.Kind+"/"); isContainer {
+		return fmt.Sprintf("the container %q", name)
+	}
+	return fmt.Sprintf("the virtual machine %q", owner)
 }
 
 func (r *VolumeReconciler) converge(ctx context.Context, volume v1alpha1.Volume, labels map[string]string, owner string) (volumeOutcome, error) {
@@ -349,6 +362,7 @@ func (r *VolumeReconciler) SetupWithManager(mgr ctrl.Manager) error {
 		Owns(emptyOf(dataVolumeGVK)).
 		Watches(&corev1.PersistentVolumeClaim{}, handler.EnqueueRequestsFromMapFunc(sameName)).
 		Watches(&v1alpha1.VirtualMachine{}, handler.EnqueueRequestsFromMapFunc(listedVolumes)).
+		Watches(&v1alpha1.Container{}, handler.EnqueueRequestsFromMapFunc(containerVolumes)).
 		Watches(&v1alpha1.VolumeSnapshot{}, handler.EnqueueRequestsFromMapFunc(r.cloningFrom)).
 		Watches(emptyOf(kubeVirtVMIGVK), handler.EnqueueRequestsFromMapFunc(mountedVolumes)).
 		Complete(r)
@@ -379,6 +393,18 @@ func listedVolumes(_ context.Context, obj client.Object) []reconcile.Request {
 	requests := make([]reconcile.Request, 0, len(refs))
 	for _, ref := range refs {
 		requests = append(requests, reconcile.Request{NamespacedName: client.ObjectKey{Namespace: vm.Namespace, Name: ref}})
+	}
+	return requests
+}
+
+func containerVolumes(_ context.Context, obj client.Object) []reconcile.Request {
+	c, ok := obj.(*v1alpha1.Container)
+	if !ok {
+		return nil
+	}
+	requests := make([]reconcile.Request, 0, len(c.Spec.Volumes))
+	for _, mount := range c.Spec.Volumes {
+		requests = append(requests, reconcile.Request{NamespacedName: client.ObjectKey{Namespace: c.Namespace, Name: mount.VolumeRef}})
 	}
 	return requests
 }

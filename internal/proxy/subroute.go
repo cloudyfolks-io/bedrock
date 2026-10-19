@@ -101,6 +101,10 @@ func SubresourceVerb(plural, subresource, method string) string {
 		return "get"
 	case plural == "images" && subresource == "upload":
 		return "create"
+	case plural == "containers" && subresource == "restart" && method == http.MethodPost:
+		return "update"
+	case plural == "containers" && isOneOf(subresource, "logs", "exec") && method == http.MethodGet:
+		return "get"
 	}
 	return verbOfMethod(method)
 }

@@ -44,6 +44,7 @@ The server stays the authority. The panel only hides what the user cannot use.
 | `/p/:project/vms/new` | Create a virtual machine from an image |
 | `/p/:project/vms/new-iso` | Install a virtual machine from an ISO |
 | `/p/:project/vms/:name` | Virtual machine detail: `?tab=overview`, `console`, `metrics`, `disks`, `networks` |
+| `/p/:project/containers` | Containers |
 | `/p/:project/volumes` | Volumes |
 | `/p/:project/volumes/:name` | Volume detail with usage chart |
 | `/p/:project/snapshots` | Volume snapshots |

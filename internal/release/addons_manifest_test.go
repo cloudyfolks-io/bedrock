@@ -68,7 +68,7 @@ func TestKataComponentRendersTheDaemonSetAndRuntimeClasses(t *testing.T) {
 			t.Errorf("RuntimeClass %s handler %q", name, handler)
 		}
 	}
-	if len(objects) != 7 {
+	if len(objects) != 8 {
 		t.Fatalf("kinds %v", kinds(objects))
 	}
 	daemonSet := objectNamed(objects, "DaemonSet", "kata-deploy")
@@ -92,6 +92,31 @@ func TestKataComponentRendersTheDaemonSetAndRuntimeClasses(t *testing.T) {
 	}
 	if distribution != "k0s" {
 		t.Errorf("K8S_DISTRIBUTION %q", distribution)
+	}
+}
+
+func TestKataComponentTunesTheRuntime(t *testing.T) {
+	bundle, _ := buildReal(t, "kata")
+	objects := bundle.Addons["kata"]
+	for _, name := range []string{"kata-qemu", "kata"} {
+		class := objectNamed(objects, "RuntimeClass", name)
+		if class == nil {
+			t.Fatalf("missing RuntimeClass %s", name)
+		}
+		overhead, _, _ := unstructured.NestedStringMap(class.Object, "overhead", "podFixed")
+		if overhead["memory"] != "512Mi" || overhead["cpu"] != "250m" {
+			t.Errorf("RuntimeClass %s overhead %v", name, overhead)
+		}
+	}
+	config := objectNamed(objects, "ConfigMap", "kata-deploy-custom-configs")
+	if config == nil {
+		t.Fatalf("missing the drop-in ConfigMap: %v", kinds(objects))
+	}
+	dropIn, _, _ := unstructured.NestedString(config.Object, "data", "dropin-qemu.toml")
+	for _, line := range []string{"[hypervisor.qemu]", "default_memory = 512", `virtio_fs_extra_args = ["--thread-pool-size=1", "--announce-submounts", "--xattr"]`} {
+		if !strings.Contains(dropIn, line) {
+			t.Errorf("drop-in does not hold %q: %s", line, dropIn)
+		}
 	}
 }
 

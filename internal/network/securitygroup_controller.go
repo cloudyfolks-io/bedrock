@@ -183,9 +183,18 @@ func (r *SecurityGroupReconciler) usedBy(ctx context.Context, group *v1alpha1.Se
 	for _, vm := range vms.Items {
 		for _, n := range vm.Spec.Networks {
 			if slices.Contains(n.SecurityGroups, group.Name) {
-				users = append(users, vm.Name)
+				users = append(users, "VirtualMachine/"+vm.Name)
 				break
 			}
+		}
+	}
+	var containers v1alpha1.ContainerList
+	if err := r.Client.List(ctx, &containers, client.InNamespace(group.Namespace)); err != nil {
+		return nil, err
+	}
+	for _, container := range containers.Items {
+		if slices.Contains(container.Spec.Network.SecurityGroups, group.Name) {
+			users = append(users, "Container/"+container.Name)
 		}
 	}
 	return users, nil
@@ -197,7 +206,7 @@ func (r *SecurityGroupReconciler) finalize(ctx context.Context, group *v1alpha1.
 		return reconcile.Result{}, err
 	}
 	if len(users) > 0 {
-		message := fmt.Sprintf("the VMs %v use this security group; remove it from them first", users)
+		message := fmt.Sprintf("%v use this security group; remove it from them first", users)
 		return r.publish(ctx, *group, falseCondition(v1alpha1.ConditionReady, group.Generation, ReasonInUse, message), terminatingRequeue)
 	}
 	np := &networkingv1.NetworkPolicy{ObjectMeta: metav1.ObjectMeta{Namespace: group.Namespace, Name: policyNamePrefix + group.Name}}

@@ -41,6 +41,7 @@ const (
 	ReasonElasticIPNotFound              = "ElasticIPNotFound"
 	ReasonElasticIPNotReady              = "ElasticIPNotReady"
 	ReasonNoTargets                      = "NoTargets"
+	ReasonNoReadyPods                    = "NoReadyPods"
 	ReasonTargetNetworkMismatch          = "TargetNetworkMismatch"
 	ReasonTargetPortsDiffer              = "TargetPortsDiffer"
 	ReasonNotAttached                    = "NotAttached"
@@ -69,7 +70,7 @@ var AllReasons = sortedReasons([]string{
 	ReasonUnknownProviderNetwork, ReasonUnsupported, ReasonAddressOutsideProviderNetwork, ReasonAddressOutsideSubnet, ReasonAddressReserved,
 	ReasonAddressInUse, ReasonAllocating, ReasonTargetNotFound, ReasonTargetMismatch, ReasonWaitingForAddress,
 	ReasonNetworkNotExternal, ReasonExternalNotConnected, ReasonFRRAgentMissing, ReasonProgrammed,
-	ReasonElasticIPNotFound, ReasonElasticIPNotReady, ReasonNoTargets, ReasonTargetNetworkMismatch,
+	ReasonElasticIPNotFound, ReasonElasticIPNotReady, ReasonNoTargets, ReasonNoReadyPods, ReasonTargetNetworkMismatch,
 	ReasonTargetPortsDiffer, ReasonNotAttached, ReasonInvalidRecords, ReasonRefNotFound, ReasonInvalidRules,
 	ReasonTargetInUse, ReasonWaitingForDefaultSecurityGroup, ReasonCIDRReserved, ReasonCIDROutsideAllowedRanges,
 	ReasonVRFInUse, ReasonVRFReserved, ReasonNoPoolCapacity,

@@ -94,6 +94,9 @@ func (r *SecurityGroupReconciler) SetupWithManager(mgr ctrl.Manager) error {
 		Watches(&v1alpha1.VirtualMachine{}, handler.EnqueueRequestsFromMapFunc(func(_ context.Context, obj client.Object) []reconcile.Request {
 			return GroupsOfVirtualMachine(*obj.(*v1alpha1.VirtualMachine))
 		})).
+		Watches(&v1alpha1.Container{}, handler.EnqueueRequestsFromMapFunc(func(_ context.Context, obj client.Object) []reconcile.Request {
+			return GroupsOfContainer(*obj.(*v1alpha1.Container))
+		})).
 		Watches(fabricObject("SecurityGroup"), ownerAnnotationHandler(), builder.WithPredicates(managedOnly())).
 		Watches(&networkingv1.NetworkPolicy{}, handler.EnqueueRequestForOwner(mgr.GetScheme(), mgr.GetRESTMapper(), &v1alpha1.SecurityGroup{}, handler.OnlyControllerOwner())).
 		Complete(r)
@@ -176,6 +179,8 @@ func (r *LoadBalancerReconciler) SetupWithManager(mgr ctrl.Manager) error {
 		Watches(&v1alpha1.ElasticIP{}, handler.EnqueueRequestsFromMapFunc(inNamespaceOf(balancers))).
 		Watches(fabricObject("IP"), handler.EnqueueRequestsFromMapFunc(ofIP)).
 		Watches(&v1alpha1.VirtualMachine{}, handler.EnqueueRequestsFromMapFunc(inNamespaceOf(balancers))).
+		Watches(&v1alpha1.Container{}, handler.EnqueueRequestsFromMapFunc(inNamespaceOf(balancers))).
+		Watches(&corev1.Pod{}, handler.EnqueueRequestsFromMapFunc(inNamespaceOf(balancers)), builder.WithPredicates(containerPodsOnly())).
 		Complete(r)
 }
 
