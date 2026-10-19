@@ -79,10 +79,10 @@ func OwnerOf(obj *unstructured.Unstructured) Owner {
 	}
 }
 
-func SweepOrphans(ctx context.Context, c client.Client, gvks []schema.GroupVersionKind, ownerExists func(context.Context, Owner) (bool, error), dryRun bool) ([]*unstructured.Unstructured, error) {
+func SweepOrphans(ctx context.Context, c client.Client, gvks []schema.GroupVersionKind, ownerExists func(context.Context, Owner) (bool, error), dryRun bool, scope ...client.ListOption) ([]*unstructured.Unstructured, error) {
 	orphans := []*unstructured.Unstructured{}
 	for _, gvk := range gvks {
-		found, err := orphansOf(ctx, c, gvk, ownerExists)
+		found, err := orphansOf(ctx, c, gvk, ownerExists, scope)
 		if err != nil {
 			return orphans, err
 		}
@@ -99,10 +99,10 @@ func SweepOrphans(ctx context.Context, c client.Client, gvks []schema.GroupVersi
 	return orphans, nil
 }
 
-func orphansOf(ctx context.Context, c client.Client, gvk schema.GroupVersionKind, ownerExists func(context.Context, Owner) (bool, error)) ([]*unstructured.Unstructured, error) {
+func orphansOf(ctx context.Context, c client.Client, gvk schema.GroupVersionKind, ownerExists func(context.Context, Owner) (bool, error), scope []client.ListOption) ([]*unstructured.Unstructured, error) {
 	list := &unstructured.UnstructuredList{}
 	list.SetGroupVersionKind(gvk.GroupVersion().WithKind(gvk.Kind + "List"))
-	err := c.List(ctx, list, client.HasLabels{v1alpha1.LabelKind})
+	err := c.List(ctx, list, append([]client.ListOption{client.HasLabels{v1alpha1.LabelKind}}, scope...)...)
 	if meta.IsNoMatchError(err) {
 		return nil, nil
 	}
