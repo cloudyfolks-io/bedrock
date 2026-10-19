@@ -1,0 +1,271 @@
+package clusters
+
+import (
+	"context"
+	"fmt"
+	"slices"
+	"time"
+
+	appsv1 "k8s.io/api/apps/v1"
+	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/equality"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/client-go/util/retry"
+	ctrl "sigs.k8s.io/controller-runtime"
+	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
+
+	"github.com/cloudyfolks-io/bedrock/api/v1alpha1"
+)
+
+const deleteRetry = 5 * time.Second
+
+type deleteStep struct {
+	Message string
+	Run     func(ctx context.Context, cluster v1alpha1.KubernetesCluster) (bool, error)
+}
+
+func (r *Reconciler) deleteSteps() []deleteStep {
+	return []deleteStep{
+		{Message: "deleting the worker VMs", Run: r.deleteWorkerVMs},
+		{Message: "removing the token requests and the cloud-init secrets", Run: r.removeTokens},
+		{Message: "deleting the control plane and its volume", Run: r.deleteControlPlane},
+	}
+}
+
+func (r *Reconciler) finalize(ctx context.Context, cluster v1alpha1.KubernetesCluster) (ctrl.Result, error) {
+	if !controllerutil.ContainsFinalizer(&cluster, v1alpha1.KubernetesClusterFinalizer) {
+		return ctrl.Result{}, nil
+	}
+	for _, step := range r.deleteSteps() {
+		done, err := step.Run(ctx, cluster)
+		if err != nil {
+			return ctrl.Result{}, err
+		}
+		if !done {
+			if err := r.writeDeleting(ctx, cluster, step.Message); err != nil {
+				return ctrl.Result{}, fmt.Errorf("write the deleting status: %w", err)
+			}
+			return ctrl.Result{RequeueAfter: deleteRetry}, nil
+		}
+	}
+	return ctrl.Result{}, r.releaseFinalizer(ctx, cluster)
+}
+
+func (r *Reconciler) releaseFinalizer(ctx context.Context, cluster v1alpha1.KubernetesCluster) error {
+	return retry.RetryOnConflict(retry.DefaultRetry, func() error {
+		var current v1alpha1.KubernetesCluster
+		if err := r.reader().Get(ctx, client.ObjectKeyFromObject(&cluster), &current); err != nil {
+			return client.IgnoreNotFound(err)
+		}
+		if !controllerutil.RemoveFinalizer(&current, v1alpha1.KubernetesClusterFinalizer) {
+			return nil
+		}
+		return client.IgnoreNotFound(r.Client.Update(ctx, &current))
+	})
+}
+
+func (r *Reconciler) ensureFinalizer(ctx context.Context, cluster v1alpha1.KubernetesCluster) error {
+	if controllerutil.ContainsFinalizer(&cluster, v1alpha1.KubernetesClusterFinalizer) {
+		return nil
+	}
+	return retry.RetryOnConflict(retry.DefaultRetry, func() error {
+		var current v1alpha1.KubernetesCluster
+		if err := r.reader().Get(ctx, client.ObjectKeyFromObject(&cluster), &current); err != nil {
+			return err
+		}
+		if !controllerutil.AddFinalizer(&current, v1alpha1.KubernetesClusterFinalizer) {
+			return nil
+		}
+		return r.Client.Update(ctx, &current)
+	})
+}
+
+func (r *Reconciler) writeDeleting(ctx context.Context, cluster v1alpha1.KubernetesCluster, message string) error {
+	return retry.RetryOnConflict(retry.DefaultRetry, func() error {
+		var current v1alpha1.KubernetesCluster
+		if err := r.reader().Get(ctx, client.ObjectKeyFromObject(&cluster), &current); err != nil {
+			return client.IgnoreNotFound(err)
+		}
+		desired := current.DeepCopy()
+		desired.Status = DeletingStatus(current, message, r.now())
+		if equality.Semantic.DeepEqual(current.Status, desired.Status) {
+			return nil
+		}
+		return r.Client.Status().Update(ctx, desired, client.FieldOwner(v1alpha1.KubernetesClusterFieldManager))
+	})
+}
+
+func DeletingStatus(cluster v1alpha1.KubernetesCluster, message string, now time.Time) v1alpha1.KubernetesClusterStatus {
+	status := *cluster.Status.DeepCopy()
+	status.ObservedGeneration = cluster.Generation
+	status.Phase = v1alpha1.KubernetesClusterPhaseDeleting
+	condition := metav1.Condition{
+		Type: v1alpha1.ConditionReady, Status: metav1.ConditionFalse, Reason: ReasonDeleting, Message: message,
+		ObservedGeneration: cluster.Generation, LastTransitionTime: metav1.NewTime(now),
+	}
+	for _, previous := range cluster.Status.Conditions {
+		if previous.Type == condition.Type && previous.Status == condition.Status {
+			condition.LastTransitionTime = previous.LastTransitionTime
+		}
+	}
+	status.Conditions = []metav1.Condition{condition}
+	return status
+}
+
+func (r *Reconciler) clusterVMs(ctx context.Context, cluster v1alpha1.KubernetesCluster) ([]v1alpha1.VirtualMachine, error) {
+	var list v1alpha1.VirtualMachineList
+	if err := r.Client.List(ctx, &list, client.InNamespace(cluster.Namespace), client.MatchingLabels{LabelCluster: cluster.Name}); err != nil {
+		return nil, err
+	}
+	var owned []v1alpha1.VirtualMachine
+	for _, vm := range list.Items {
+		if metav1.IsControlledBy(&vm, &cluster) {
+			owned = append(owned, vm)
+		}
+	}
+	return owned, nil
+}
+
+func (r *Reconciler) deleteWorkerVMs(ctx context.Context, cluster v1alpha1.KubernetesCluster) (bool, error) {
+	vms, err := r.clusterVMs(ctx, cluster)
+	if err != nil {
+		return false, err
+	}
+	for index := range vms {
+		if vms[index].DeletionTimestamp.IsZero() {
+			if err := client.IgnoreNotFound(r.Client.Delete(ctx, &vms[index])); err != nil {
+				return false, err
+			}
+		}
+	}
+	return len(vms) == 0, nil
+}
+
+func workerNamesOf(cluster v1alpha1.KubernetesCluster, vms []v1alpha1.VirtualMachine) []string {
+	names := make([]string, 0, len(cluster.Spec.Workers)+len(vms))
+	for _, worker := range cluster.Spec.Workers {
+		names = append(names, worker.Name)
+	}
+	for _, vm := range vms {
+		names = append(names, vm.Labels[LabelWorker])
+	}
+	slices.Sort(names)
+	return slices.Compact(slices.DeleteFunc(names, func(name string) bool { return name == "" }))
+}
+
+func (r *Reconciler) removeTokens(ctx context.Context, cluster v1alpha1.KubernetesCluster) (bool, error) {
+	vms, err := r.clusterVMs(ctx, cluster)
+	if err != nil {
+		return false, err
+	}
+	for _, worker := range workerNamesOf(cluster, vms) {
+		if err := r.removeWorkerLeftovers(ctx, cluster, worker); err != nil {
+			return false, err
+		}
+	}
+	return true, nil
+}
+
+func (r *Reconciler) removeWorkerLeftovers(ctx context.Context, cluster v1alpha1.KubernetesCluster, worker string) error {
+	if err := r.removeTokenRequest(ctx, cluster, worker); err != nil {
+		return err
+	}
+	secret := &corev1.Secret{ObjectMeta: metav1.ObjectMeta{Namespace: cluster.Namespace, Name: CloudInitSecretName(cluster.Name, worker)}}
+	return client.IgnoreNotFound(r.Client.Delete(ctx, secret))
+}
+
+func (r *Reconciler) removeTokenRequest(ctx context.Context, cluster v1alpha1.KubernetesCluster, worker string) error {
+	request := &unstructured.Unstructured{}
+	request.SetGroupVersionKind(joinTokenGVK)
+	err := r.Client.Get(ctx, client.ObjectKey{Namespace: cluster.Namespace, Name: WorkerName(cluster.Name, worker)}, request)
+	if apierrors.IsNotFound(err) || notFound(err) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	if len(request.GetFinalizers()) > 0 {
+		request.SetFinalizers(nil)
+		if err := r.Client.Update(ctx, request); client.IgnoreNotFound(err) != nil {
+			return err
+		}
+	}
+	return client.IgnoreNotFound(r.Client.Delete(ctx, request))
+}
+
+func (r *Reconciler) deleteControlPlane(ctx context.Context, cluster v1alpha1.KubernetesCluster) (bool, error) {
+	gone, err := r.deleteK0smotronCluster(ctx, cluster)
+	if err != nil || !gone {
+		return false, err
+	}
+	for _, check := range []func(context.Context, v1alpha1.KubernetesCluster) (bool, error){r.statefulSetGone, r.claimGone} {
+		absent, err := check(ctx, cluster)
+		if err != nil || !absent {
+			return false, err
+		}
+	}
+	return true, nil
+}
+
+func (r *Reconciler) deleteK0smotronCluster(ctx context.Context, cluster v1alpha1.KubernetesCluster) (bool, error) {
+	existing := &unstructured.Unstructured{}
+	existing.SetGroupVersionKind(clusterGVK)
+	err := r.Client.Get(ctx, client.ObjectKey{Namespace: cluster.Namespace, Name: cluster.Name}, existing)
+	if apierrors.IsNotFound(err) || notFound(err) {
+		return true, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	if !metav1.IsControlledBy(existing, &cluster) {
+		return true, nil
+	}
+	if existing.GetDeletionTimestamp().IsZero() {
+		if err := client.IgnoreNotFound(r.Client.Delete(ctx, existing)); err != nil {
+			return false, err
+		}
+	}
+	return false, nil
+}
+
+func (r *Reconciler) statefulSetGone(ctx context.Context, cluster v1alpha1.KubernetesCluster) (bool, error) {
+	err := r.Client.Get(ctx, client.ObjectKey{Namespace: cluster.Namespace, Name: StatefulSetName(cluster.Name)}, &appsv1.StatefulSet{})
+	if apierrors.IsNotFound(err) {
+		return true, nil
+	}
+	return false, err
+}
+
+func (r *Reconciler) claimGone(ctx context.Context, cluster v1alpha1.KubernetesCluster) (bool, error) {
+	err := r.Client.Get(ctx, client.ObjectKey{Namespace: cluster.Namespace, Name: ControlPlaneClaimName(cluster.Name)}, &corev1.PersistentVolumeClaim{})
+	if apierrors.IsNotFound(err) {
+		return true, nil
+	}
+	return false, err
+}
+
+func (r *Reconciler) pruneWorkers(ctx context.Context, cluster v1alpha1.KubernetesCluster) error {
+	vms, err := r.clusterVMs(ctx, cluster)
+	if err != nil {
+		return err
+	}
+	wanted := make([]string, len(cluster.Spec.Workers))
+	for i, worker := range cluster.Spec.Workers {
+		wanted[i] = worker.Name
+	}
+	for index := range vms {
+		if slices.Contains(wanted, vms[index].Labels[LabelWorker]) || !vms[index].DeletionTimestamp.IsZero() {
+			continue
+		}
+		if err := client.IgnoreNotFound(r.Client.Delete(ctx, &vms[index])); err != nil {
+			return err
+		}
+		if err := r.removeWorkerLeftovers(ctx, cluster, vms[index].Labels[LabelWorker]); err != nil {
+			return err
+		}
+	}
+	return nil
+}

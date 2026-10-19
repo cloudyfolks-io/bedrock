@@ -31,6 +31,9 @@ func (r *Reconciler) ownedVM(ctx context.Context, cluster v1alpha1.KubernetesClu
 }
 
 func (r *Reconciler) syncWorkers(ctx context.Context, cluster v1alpha1.KubernetesCluster, labels map[string]string) (outcome, error) {
+	if err := r.pruneWorkers(ctx, cluster); err != nil {
+		return outcome{}, err
+	}
 	var pending *v1alpha1.KubernetesWorker
 	for index := range cluster.Spec.Workers {
 		worker := cluster.Spec.Workers[index]

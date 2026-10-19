@@ -48,7 +48,10 @@ func (r *Reconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Resu
 		return ctrl.Result{}, client.IgnoreNotFound(err)
 	}
 	if !cluster.DeletionTimestamp.IsZero() {
-		return ctrl.Result{}, nil
+		return r.finalize(ctx, cluster)
+	}
+	if err := r.ensureFinalizer(ctx, cluster); err != nil {
+		return ctrl.Result{}, fmt.Errorf("add the finalizer: %w", err)
 	}
 	done, err := r.converge(ctx, cluster)
 	if err != nil {
