@@ -199,13 +199,24 @@ k0s reset
 SCRIPT
 }
 
-restart_node() {
+boot_node() {
   local id=$1
-  limactl stop "$(vm_name "$id")"
   vm_start_existing "$id"
   vm_prepare "$id"
   vm_run "$id" "$(vm_provision)"
-  expect_equal "$(node_ip "$id")" "$(discover_ip "$id")" "address of $(vm_name "$id") after the restart"
+  expect_equal "$(node_ip "$id")" "$(discover_ip "$id")" "address of $(vm_name "$id") after the start"
+}
+
+restart_node() {
+  local id=$1
+  limactl stop "$(vm_name "$id")"
+  boot_node "$id"
+}
+
+crash_node() {
+  local id=$1
+  limactl stop --force "$(vm_name "$id")"
+  boot_node "$id"
 }
 
 rejoin_node() {
