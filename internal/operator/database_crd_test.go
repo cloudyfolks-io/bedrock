@@ -77,6 +77,12 @@ func TestDatabaseValkeyHasNoBackups(t *testing.T) {
 	withBackup := newDatabase("cache-backup", "valkey")
 	withBackup.Spec.Backup.Enabled = true
 	createInvalid(t, c, withBackup, "a Valkey database has no backups")
+	withRestore := newDatabase("cache-restore", "valkey")
+	withRestore.Spec.Restore = &v1alpha1.DatabaseRestore{SourceUID: "abc"}
+	createInvalid(t, c, withRestore, "a Valkey database has no restore")
+	mysqlRestore := newDatabase("sql-restore", "mysql")
+	mysqlRestore.Spec.Restore = &v1alpha1.DatabaseRestore{SourceUID: "abc"}
+	createValid(t, c, mysqlRestore)
 	defaulted := newDatabase("cache-default", "valkey")
 	defaulted.Spec.Backup = v1alpha1.DatabaseBackupSpec{}
 	createValid(t, c, defaulted)

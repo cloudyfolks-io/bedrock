@@ -57,6 +57,28 @@ func TestPerconaSeedVersionsPassTheCRD(t *testing.T) {
 	}
 }
 
+func TestValkeySeedVersionsPassTheCRD(t *testing.T) {
+	c, _ := StartTestEnv(t)
+	raw, err := os.ReadFile(filepath.Join("..", "..", "manifests", "90-bedrock", "database-valkey-versions.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	names := seedNames(t, c, raw)
+	want := []string{"valkey-8.1", "valkey-9.0", "valkey-9.1"}
+	if !slices.Equal(names, want) {
+		t.Fatalf("seed objects %v", names)
+	}
+	for _, name := range want {
+		var version v1alpha1.DatabaseVersion
+		if err := runtime.DefaultUnstructuredConverter.FromUnstructured(decodeSeed(t, raw, name).Object, &version); err != nil {
+			t.Fatal(err)
+		}
+		if version.Spec.Port != 6379 || !strings.Contains(version.Spec.Companions["exporter"], "@sha256:") {
+			t.Errorf("%s: %+v", name, version.Spec)
+		}
+	}
+}
+
 func decodeSeed(t *testing.T, raw []byte, name string) *unstructured.Unstructured {
 	t.Helper()
 	decoder := yaml.NewYAMLOrJSONDecoder(bytes.NewReader(raw), 4096)

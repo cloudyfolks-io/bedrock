@@ -35,6 +35,7 @@ type DatabaseBackupSpec struct {
 }
 
 // +kubebuilder:validation:XValidation:rule="self.engine != 'valkey' || !self.backup.enabled",message="a Valkey database has no backups: set backup.enabled to false"
+// +kubebuilder:validation:XValidation:rule="self.engine != 'valkey' || !has(self.restore)",message="a Valkey database has no restore"
 // +kubebuilder:validation:XValidation:rule="has(self.restore) == has(oldSelf.restore)",message="restore is immutable"
 type DatabaseSpec struct {
 	// +kubebuilder:validation:Enum=postgresql;mysql;valkey

@@ -70,7 +70,11 @@ func (r *Reconciler) gate(ctx context.Context, cfg Config, db v1alpha1.Database,
 	if !available {
 		return &Gate{Reason: ReasonEngineNotAvailable, Message: "the engine " + db.Spec.Engine + " has no running operator addon"}, nil
 	}
-	return nil, nil
+	refusal, err := engineRulesRefusal(ctx, r.Client, db)
+	if err != nil || refusal == nil {
+		return nil, err
+	}
+	return &Gate{Reason: refusal.Reason, Message: refusal.Message}, nil
 }
 
 func (r *Reconciler) finalize(ctx context.Context, db v1alpha1.Database) (ctrl.Result, error) {

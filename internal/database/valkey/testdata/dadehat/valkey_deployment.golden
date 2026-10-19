@@ -1,0 +1,293 @@
+[
+  {
+    "apiVersion": "v1",
+    "kind": "PersistentVolumeClaim",
+    "metadata": {
+      "labels": {
+        "app.kubernetes.io/instance": "0b0c0d0e-1111-4222-8333-444455556666",
+        "app.kubernetes.io/managed-by": "database-api",
+        "bedrock.cloudyfolks.com/environment": "staging",
+        "bedrock.cloudyfolks.com/project-id": "99999999-1111-4222-8333-444455556666"
+      },
+      "name": "0b0c0d0e-1111-4222-8333-444455556666-data",
+      "namespace": "dbaas"
+    },
+    "spec": {
+      "accessModes": [
+        "ReadWriteOnce"
+      ],
+      "resources": {
+        "requests": {
+          "storage": "20Gi"
+        }
+      },
+      "storageClassName": "storage-block"
+    }
+  },
+  {
+    "apiVersion": "apps/v1",
+    "kind": "Deployment",
+    "metadata": {
+      "labels": {
+        "app.kubernetes.io/instance": "0b0c0d0e-1111-4222-8333-444455556666",
+        "app.kubernetes.io/managed-by": "database-api",
+        "bedrock.cloudyfolks.com/environment": "staging",
+        "bedrock.cloudyfolks.com/project-id": "99999999-1111-4222-8333-444455556666"
+      },
+      "name": "0b0c0d0e-1111-4222-8333-444455556666",
+      "namespace": "dbaas"
+    },
+    "spec": {
+      "replicas": 1,
+      "selector": {
+        "matchLabels": {
+          "app.kubernetes.io/instance": "0b0c0d0e-1111-4222-8333-444455556666",
+          "dbaas.cloudyfolks.io/component": "engine"
+        }
+      },
+      "strategy": {
+        "type": "Recreate"
+      },
+      "template": {
+        "metadata": {
+          "labels": {
+            "app.kubernetes.io/instance": "0b0c0d0e-1111-4222-8333-444455556666",
+            "app.kubernetes.io/managed-by": "database-api",
+            "bedrock.cloudyfolks.com/environment": "staging",
+            "bedrock.cloudyfolks.com/project-id": "99999999-1111-4222-8333-444455556666",
+            "dbaas.cloudyfolks.io/component": "engine"
+          }
+        },
+        "spec": {
+          "automountServiceAccountToken": false,
+          "containers": [
+            {
+              "args": [
+                "valkey-server",
+                "--bind",
+                "0.0.0.0",
+                "--protected-mode",
+                "no",
+                "--aclfile",
+                "/data/users.acl",
+                "--dir",
+                "/data",
+                "--appendonly",
+                "yes",
+                "--appendfsync",
+                "everysec",
+                "--maxmemory",
+                "768mb",
+                "--maxmemory-policy",
+                "noeviction",
+                "--rename-command",
+                "CONFIG",
+                "",
+                "--rename-command",
+                "DEBUG",
+                "",
+                "--rename-command",
+                "MODULE",
+                "",
+                "--rename-command",
+                "SHUTDOWN",
+                "",
+                "--rename-command",
+                "REPLICAOF",
+                "",
+                "--rename-command",
+                "SLAVEOF",
+                ""
+              ],
+              "env": [
+                {
+                  "name": "REDISCLI_AUTH",
+                  "valueFrom": {
+                    "secretKeyRef": {
+                      "key": "password",
+                      "name": "0b0c0d0e-1111-4222-8333-444455556666-superuser"
+                    }
+                  }
+                }
+              ],
+              "image": "registry.cloudyfolks.com/mirror-ghcr/example/engine@sha256:0000000000000000000000000000000000000000000000000000000000000000",
+              "livenessProbe": {
+                "exec": {
+                  "command": [
+                    "valkey-cli",
+                    "-e",
+                    "--no-auth-warning",
+                    "--user",
+                    "_platform",
+                    "ping"
+                  ]
+                },
+                "failureThreshold": 3,
+                "initialDelaySeconds": 30,
+                "periodSeconds": 10,
+                "timeoutSeconds": 5
+              },
+              "name": "valkey",
+              "ports": [
+                {
+                  "containerPort": 6379,
+                  "name": "db"
+                }
+              ],
+              "readinessProbe": {
+                "exec": {
+                  "command": [
+                    "valkey-cli",
+                    "-e",
+                    "--no-auth-warning",
+                    "--user",
+                    "_platform",
+                    "ping"
+                  ]
+                },
+                "failureThreshold": 3,
+                "initialDelaySeconds": 5,
+                "periodSeconds": 10,
+                "timeoutSeconds": 5
+              },
+              "resources": {
+                "limits": {
+                  "cpu": "500m",
+                  "memory": "1024Mi"
+                },
+                "requests": {
+                  "cpu": "500m",
+                  "memory": "1024Mi"
+                }
+              },
+              "securityContext": {
+                "allowPrivilegeEscalation": false,
+                "capabilities": {
+                  "drop": [
+                    "ALL"
+                  ]
+                },
+                "runAsGroup": 999,
+                "runAsNonRoot": true,
+                "runAsUser": 999,
+                "seccompProfile": {
+                  "type": "RuntimeDefault"
+                }
+              },
+              "volumeMounts": [
+                {
+                  "mountPath": "/data",
+                  "name": "data",
+                  "subPath": "data"
+                }
+              ]
+            }
+          ],
+          "initContainers": [
+            {
+              "command": [
+                "sh",
+                "-c",
+                "set -eu\nif [ ! -f /data/users.acl ]; then\n  platform=\"$(printf %s \"$PLATFORM_PASSWORD\" | sha256sum | cut -d' ' -f1)\"\n  admin=\"$(printf %s \"$ADMIN_PASSWORD\" | sha256sum | cut -d' ' -f1)\"\n  umask 077\n  printf 'user default off\\nuser _platform on #%s ~* \u0026* +@all\\nuser dbadmin on #%s ~* \u0026* +@all -@admin -@dangerous\\n' \"$platform\" \"$admin\" \u003e /data/users.acl.tmp\n  mv /data/users.acl.tmp /data/users.acl\nfi\n"
+              ],
+              "env": [
+                {
+                  "name": "PLATFORM_PASSWORD",
+                  "valueFrom": {
+                    "secretKeyRef": {
+                      "key": "password",
+                      "name": "0b0c0d0e-1111-4222-8333-444455556666-superuser"
+                    }
+                  }
+                },
+                {
+                  "name": "ADMIN_PASSWORD",
+                  "valueFrom": {
+                    "secretKeyRef": {
+                      "key": "password",
+                      "name": "0b0c0d0e-1111-4222-8333-444455556666-app"
+                    }
+                  }
+                }
+              ],
+              "image": "registry.cloudyfolks.com/mirror-ghcr/example/engine@sha256:0000000000000000000000000000000000000000000000000000000000000000",
+              "name": "acl",
+              "resources": {
+                "limits": {
+                  "cpu": "100m",
+                  "memory": "64Mi"
+                },
+                "requests": {
+                  "cpu": "100m",
+                  "memory": "64Mi"
+                }
+              },
+              "securityContext": {
+                "allowPrivilegeEscalation": false,
+                "capabilities": {
+                  "drop": [
+                    "ALL"
+                  ]
+                },
+                "runAsGroup": 999,
+                "runAsNonRoot": true,
+                "runAsUser": 999,
+                "seccompProfile": {
+                  "type": "RuntimeDefault"
+                }
+              },
+              "volumeMounts": [
+                {
+                  "mountPath": "/data",
+                  "name": "data",
+                  "subPath": "data"
+                }
+              ]
+            }
+          ],
+          "priorityClassName": "dbaas-tenant",
+          "securityContext": {
+            "fsGroup": 999
+          },
+          "volumes": [
+            {
+              "name": "data",
+              "persistentVolumeClaim": {
+                "claimName": "0b0c0d0e-1111-4222-8333-444455556666-data"
+              }
+            }
+          ]
+        }
+      }
+    }
+  },
+  {
+    "apiVersion": "v1",
+    "kind": "Service",
+    "metadata": {
+      "labels": {
+        "app.kubernetes.io/instance": "0b0c0d0e-1111-4222-8333-444455556666",
+        "app.kubernetes.io/managed-by": "database-api",
+        "bedrock.cloudyfolks.com/environment": "staging",
+        "bedrock.cloudyfolks.com/project-id": "99999999-1111-4222-8333-444455556666"
+      },
+      "name": "0b0c0d0e-1111-4222-8333-444455556666-db",
+      "namespace": "dbaas"
+    },
+    "spec": {
+      "ports": [
+        {
+          "name": "db",
+          "port": 6379,
+          "protocol": "TCP",
+          "targetPort": 6379
+        }
+      ],
+      "selector": {
+        "app.kubernetes.io/instance": "0b0c0d0e-1111-4222-8333-444455556666",
+        "dbaas.cloudyfolks.io/component": "engine"
+      },
+      "type": "ClusterIP"
+    }
+  }
+]

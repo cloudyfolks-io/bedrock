@@ -1,0 +1,3 @@
+ACL SETUSER dbadmin resetpass #99ace9ac249ad4adce3e97d48cf9e52fd415e937dbe66c07e4c03f954a2d3ac1
+CLIENT KILL USER dbadmin
+ACL SAVE

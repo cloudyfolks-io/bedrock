@@ -137,6 +137,8 @@ spec:
             x-kubernetes-validations:
             - message: 'a Valkey database has no backups: set backup.enabled to false'
               rule: self.engine != 'valkey' || !self.backup.enabled
+            - message: a Valkey database has no restore
+              rule: self.engine != 'valkey' || !has(self.restore)
             - message: restore is immutable
               rule: has(self.restore) == has(oldSelf.restore)
           status:
