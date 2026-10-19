@@ -302,3 +302,21 @@ func TestPerconaImagesAreInTheImageList(t *testing.T) {
 		}
 	}
 }
+
+func TestValkeyImagesAreInTheImageList(t *testing.T) {
+	bundle, out := buildReal(t, "bedrock")
+	raw, err := os.ReadFile(filepath.Join(out, "images.txt"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, image := range []string{
+		"docker.io/valkey/valkey:8.1.10@sha256:640c5e62cea04b6d6f2084232651d0cc70362d31f4f805e7be94dbed6855e8f2",
+		"docker.io/valkey/valkey:9.0.6@sha256:63346cb24a61221e76bdf41acce99b3968a9fa83d8122144deab45394b27b4f2",
+		"docker.io/valkey/valkey:9.1.2@sha256:418652cfb58ef879d4978c33553735d7147016032d5aefaa14c828e611eb9dfd",
+		"docker.io/oliver006/redis_exporter:v1.94.0@sha256:0842ef7110e62b40bbde2d5c11f38c6fbd99f7100c75e3866637c1b335a1eff7",
+	} {
+		if !contains(string(raw), image) || !slices.Contains(bundle.Images, image) {
+			t.Errorf("image %s missing from %v", image, bundle.Images)
+		}
+	}
+}

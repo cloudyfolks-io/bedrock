@@ -1,0 +1,43 @@
+apiVersion: bedrock.cloudyfolks.io/v1alpha1
+kind: DatabaseVersion
+metadata:
+  name: valkey-8.1
+spec:
+  engine: valkey
+  major: "8.1"
+  image: docker.io/valkey/valkey:8.1.10@sha256:640c5e62cea04b6d6f2084232651d0cc70362d31f4f805e7be94dbed6855e8f2
+  port: 6379
+  enabled: true
+  eolDate: "2030-03-31"
+  upgradeTo: ["9.0", "9.1"]
+  companions:
+    exporter: docker.io/oliver006/redis_exporter:v1.94.0@sha256:0842ef7110e62b40bbde2d5c11f38c6fbd99f7100c75e3866637c1b335a1eff7
+---
+apiVersion: bedrock.cloudyfolks.io/v1alpha1
+kind: DatabaseVersion
+metadata:
+  name: valkey-9.0
+spec:
+  engine: valkey
+  major: "9.0"
+  image: docker.io/valkey/valkey:9.0.6@sha256:63346cb24a61221e76bdf41acce99b3968a9fa83d8122144deab45394b27b4f2
+  port: 6379
+  enabled: true
+  eolDate: "2028-10-31"
+  upgradeTo: ["9.1"]
+  companions:
+    exporter: docker.io/oliver006/redis_exporter:v1.94.0@sha256:0842ef7110e62b40bbde2d5c11f38c6fbd99f7100c75e3866637c1b335a1eff7
+---
+apiVersion: bedrock.cloudyfolks.io/v1alpha1
+kind: DatabaseVersion
+metadata:
+  name: valkey-9.1
+spec:
+  engine: valkey
+  major: "9.1"
+  image: docker.io/valkey/valkey:9.1.2@sha256:418652cfb58ef879d4978c33553735d7147016032d5aefaa14c828e611eb9dfd
+  port: 6379
+  enabled: true
+  eolDate: "2031-05-31"
+  companions:
+    exporter: docker.io/oliver006/redis_exporter:v1.94.0@sha256:0842ef7110e62b40bbde2d5c11f38c6fbd99f7100c75e3866637c1b335a1eff7
