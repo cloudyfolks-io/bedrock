@@ -14,7 +14,9 @@ const (
 	encryptionDir       = "etc/bedrock/encryption"
 	encryptionRetired   = "retired"
 	encryptionFailure   = ".apply-failed"
+	encryptionHandled   = ".grant-handled"
 	encryptionFileStamp = ".yaml"
+	localAPIServer      = "https://127.0.0.1:6443"
 )
 
 func syncEncryptionStatus(deps Deps, current v1alpha1.Host) *v1alpha1.EncryptionFileStatus {
@@ -29,6 +31,7 @@ func syncEncryptionStatus(deps Deps, current v1alpha1.Host) *v1alpha1.Encryption
 		Hash:           encryption.Hash(content),
 		RestartPending: encryptionRestartKnown(deps.Root, current.Status.Encryption),
 		FailedHash:     readEncryptionFailure(deps.Root),
+		HandledGrant:   readEncryptionMarker(deps.Root, encryptionHandled),
 	}
 }
 
@@ -46,7 +49,11 @@ func encryptionRestartPending(root string, apiserverStart time.Time) bool {
 }
 
 func readEncryptionFailure(root string) string {
-	raw, err := os.ReadFile(filepath.Join(root, encryptionDir, encryptionFailure))
+	return readEncryptionMarker(root, encryptionFailure)
+}
+
+func readEncryptionMarker(root, name string) string {
+	raw, err := os.ReadFile(filepath.Join(root, encryptionDir, name))
 	if err != nil {
 		return ""
 	}
