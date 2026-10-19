@@ -333,12 +333,13 @@ func TestRenderStorageIncludesTheBucketClass(t *testing.T) {
 		t.Fatal("no bucket class")
 	}
 	want := map[string]any{
-		"apiVersion":    "storage.k8s.io/v1",
-		"kind":          "StorageClass",
-		"metadata":      map[string]any{"name": "bucket", "labels": map[string]any{"aws-s3/object": ""}},
-		"provisioner":   "rook-ceph.ceph.rook.io/bucket",
-		"parameters":    map[string]any{"objectStoreName": "bedrock-rgw", "objectStoreNamespace": "rook-ceph"},
-		"reclaimPolicy": "Delete",
+		"apiVersion":        "storage.k8s.io/v1",
+		"kind":              "StorageClass",
+		"metadata":          map[string]any{"name": "bucket", "labels": map[string]any{"aws-s3/object": ""}},
+		"provisioner":       "rook-ceph.ceph.rook.io/bucket",
+		"parameters":        map[string]any{"objectStoreName": "bedrock-rgw", "objectStoreNamespace": "rook-ceph"},
+		"reclaimPolicy":     "Delete",
+		"volumeBindingMode": "Immediate",
 	}
 	if !reflect.DeepEqual(class.Object, want) {
 		t.Fatalf("class %+v", class.Object)

@@ -245,3 +245,11 @@ func TestComponentsConfigListsTheCatalog(t *testing.T) {
 		t.Fatalf("catalog component %+v", catalog)
 	}
 }
+
+func TestCatalogImagesCarryTheirDisplayNameAndArchitecture(t *testing.T) {
+	for name, img := range catalogImages(t) {
+		if img.Spec.OS.DisplayName == "" || img.Spec.OS.Architecture != "amd64" {
+			t.Errorf("%s: displayName %q architecture %q", name, img.Spec.OS.DisplayName, img.Spec.OS.Architecture)
+		}
+	}
+}

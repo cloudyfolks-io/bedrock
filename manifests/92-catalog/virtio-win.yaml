@@ -10,6 +10,8 @@ spec:
   type: iso
   os:
     family: virtio-win
+    displayName: VirtIO guest drivers
+    architecture: amd64
   source:
     registry:
       image: quay.io/kubevirt/virtio-container-disk:v1.9.0

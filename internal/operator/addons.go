@@ -244,7 +244,10 @@ func (r *AddonReconciler) applyRendered(ctx context.Context, addon Addon, render
 		return addonCondition(addon, metav1.ConditionFalse, rendered.SkipReason, rendered.SkipMessage), false
 	}
 	for _, obj := range rendered.Objects {
-		err := ssa.Apply(ctx, r.Client, obj, v1alpha1.OperatorFieldManager)
+		err := dropStaleStorageClass(ctx, r.Client, obj)
+		if err == nil {
+			err = ssa.Apply(ctx, r.Client, obj, v1alpha1.OperatorFieldManager)
+		}
 		if meta.IsNoMatchError(err) {
 			return addonCondition(addon, metav1.ConditionFalse, "MissingCRD", fmt.Sprintf("%s %s: %v", obj.GetKind(), obj.GetName(), err)), false
 		}
