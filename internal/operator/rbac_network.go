@@ -9,7 +9,7 @@ func networkRules() []rbacv1.PolicyRule {
 	return []rbacv1.PolicyRule{
 		{
 			APIGroups: []string{"fabric.cloudyfolks.io"},
-			Resources: []string{"bgp-confs", "dns-zones", "ovn-eips", "ovn-fips", "provider-networks", "router-lb-rules", "security-groups", "subnets", "switch-lb-rules", "vips", "vlans", "vpcs"},
+			Resources: []string{"bgp-confs", "dns-zones", "ovn-eips", "ovn-fips", "ovn-snat-rules", "provider-networks", "router-lb-rules", "security-groups", "subnets", "switch-lb-rules", "vips", "vlans", "vpcs"},
 			Verbs:     standardVerbs(),
 		},
 		{APIGroups: []string{"fabric.cloudyfolks.io"}, Resources: []string{"ips"}, Verbs: read},

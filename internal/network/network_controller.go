@@ -2,6 +2,7 @@ package network
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strconv"
 	"strings"
@@ -78,13 +79,24 @@ func (r *NetworkReconciler) Reconcile(ctx context.Context, req reconcile.Request
 	if err != nil {
 		return reconcile.Result{}, err
 	}
-	spec, external := PlanVpc(VpcInput{Network: network, Config: cfg, VrfID: vrf, Attached: attached, AttachedRoute: route})
+	peers, err := r.peerLinks(ctx, &network)
+	if err != nil {
+		return reconcile.Result{}, err
+	}
+	spec, external := PlanVpc(VpcInput{Network: network, Config: cfg, VrfID: vrf, Attached: attached, AttachedRoute: route, Peers: peers})
 	vpc := fabric.Vpc(fabric.Meta{Name: VpcName(network.Name), Labels: ObjectLabels("Network", network.Name, network.Spec.TenantRef, ""), Annotations: OwnerAnnotations(&network)}, spec)
 	if conflict, err := r.conflicts(ctx, vpc, &network); err != nil || conflict {
 		if err != nil {
 			return reconcile.Result{}, err
 		}
 		return r.publish(ctx, &network, notReadyStatus(network, ReasonFabricConflict, fmt.Sprintf("a Fabric Vpc named %s belongs to another owner", vpc.GetName())))
+	}
+	refused, err := r.attachServices(ctx, &network, cfg, external)
+	if err != nil {
+		return reconcile.Result{}, err
+	}
+	if refused != nil {
+		return r.publish(ctx, &network, notReadyStatus(network, refused.Reason, refused.Message))
 	}
 	if err := ssa.Apply(ctx, r.Client, vpc, v1alpha1.NetworkFieldManager); err != nil {
 		return reconcile.Result{}, err
@@ -101,6 +113,15 @@ func (r *NetworkReconciler) Reconcile(ctx context.Context, req reconcile.Request
 	return r.publish(ctx, &network, status)
 }
 
+func (r *NetworkReconciler) peerLinks(ctx context.Context, network *v1alpha1.Network) ([]PeerLink, error) {
+	var peerings v1alpha1.NetworkPeeringList
+	var networks v1alpha1.NetworkList
+	if err := errors.Join(r.Client.List(ctx, &peerings), r.Client.List(ctx, &networks)); err != nil {
+		return nil, err
+	}
+	return PeerLinks(network.Name, peerings.Items, networks.Items), nil
+}
+
 func (r *NetworkReconciler) existingAttachment(ctx context.Context, network *v1alpha1.Network) ([]string, string, error) {
 	existing, err := getObject(ctx, r.Client, fabric.VpcGVK, VpcName(network.Name))
 	if apierrors.IsNotFound(err) || (err == nil && !ownedBy(existing, network)) {
@@ -112,8 +133,8 @@ func (r *NetworkReconciler) existingAttachment(ctx context.Context, network *v1a
 	return fabric.VpcSpecExternalSubnets(existing), fabric.VpcDefaultNextHop(existing), nil
 }
 
-func (r *NetworkReconciler) conflicts(ctx context.Context, vpc *unstructured.Unstructured, network *v1alpha1.Network) (bool, error) {
-	existing, err := getObject(ctx, r.Client, fabric.VpcGVK, vpc.GetName())
+func (r *NetworkReconciler) conflicts(ctx context.Context, object *unstructured.Unstructured, network *v1alpha1.Network) (bool, error) {
+	existing, err := getObject(ctx, r.Client, object.GroupVersionKind(), object.GetName())
 	if apierrors.IsNotFound(err) {
 		return false, nil
 	}
@@ -243,9 +264,10 @@ func (r *NetworkReconciler) observedStatus(ctx context.Context, network v1alpha1
 		conditions = withCondition(conditions, condition)
 	}
 	return v1alpha1.NetworkStatus{
-		CommonStatus: v1alpha1.CommonStatus{ObservedGeneration: network.Generation, Conditions: conditions},
-		VPC:          vpc.GetName(),
-		Subnets:      subnets,
+		CommonStatus:     v1alpha1.CommonStatus{ObservedGeneration: network.Generation, Conditions: conditions},
+		VPC:              vpc.GetName(),
+		Subnets:          subnets,
+		ServicesIdentity: network.Status.ServicesIdentity,
 	}, nil
 }
 
@@ -253,7 +275,7 @@ func (r *NetworkReconciler) externalCondition(ctx context.Context, network v1alp
 	if external.Reason != ReasonConnected {
 		return falseCondition(ConditionExternalReady, network.Generation, external.Reason, external.Message), nil
 	}
-	if message := r.externalGap(ctx, vpc, spec); message != "" {
+	if message := r.externalGap(ctx, vpc, spec, cfg); message != "" {
 		return falseCondition(ConditionExternalReady, network.Generation, ReasonPending, message), nil
 	}
 	gap, err := frrAgentGap(ctx, r.Client, cfg)
@@ -266,7 +288,7 @@ func (r *NetworkReconciler) externalCondition(ctx context.Context, network v1alp
 	return trueCondition(ConditionExternalReady, network.Generation, ReasonConnected), nil
 }
 
-func (r *NetworkReconciler) externalGap(ctx context.Context, vpc *unstructured.Unstructured, spec fabric.VpcSpec) string {
+func (r *NetworkReconciler) externalGap(ctx context.Context, vpc *unstructured.Unstructured, spec fabric.VpcSpec, cfg Config) string {
 	enabled, _, _ := unstructured.NestedBool(vpc.Object, "status", "enableExternal")
 	if !enabled {
 		return "Fabric has not enabled the external connection yet"
@@ -279,6 +301,12 @@ func (r *NetworkReconciler) externalGap(ctx context.Context, vpc *unstructured.U
 		port, err := getObject(ctx, r.Client, fabric.OvnEipGVK, vpc.GetName()+"-"+subnet)
 		if err != nil || fabric.EipAddress(port) == "" || !fabric.EipReady(port) {
 			return fmt.Sprintf("the router port of %s has no address yet", subnet)
+		}
+	}
+	if services, ok := ServicesSubnet(cfg); ok && containsString(spec.ExtraExternalSubnets, services) {
+		identity, err := getObject(ctx, r.Client, fabric.OvnEipGVK, ServicesIdentityName(vpc.GetName()))
+		if err != nil || fabric.EipAddress(identity) == "" || !fabric.EipReady(identity) {
+			return "the services identity address has no address yet"
 		}
 	}
 	return ""
@@ -369,6 +397,14 @@ func (r *NetworkReconciler) finalize(ctx context.Context, network *v1alpha1.Netw
 	if len(facts) > 0 {
 		status := notReadyStatus(*network, ReasonTerminating, remainingSubnets(facts))
 		r.writeTerminatingStatus(ctx, network, status)
+		return reconcile.Result{RequeueAfter: terminatingRequeue}, nil
+	}
+	planeGone, err := r.deleteServicesPlane(ctx, network)
+	if err != nil {
+		ctrl.LoggerFrom(ctx).Error(err, "delete the services plane of the Network", "network", network.Name)
+		return reconcile.Result{RequeueAfter: terminatingRequeue}, nil
+	}
+	if !planeGone {
 		return reconcile.Result{RequeueAfter: terminatingRequeue}, nil
 	}
 	gone, err := r.deleteOwnedVpc(ctx, network)

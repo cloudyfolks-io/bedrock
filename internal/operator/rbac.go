@@ -131,6 +131,7 @@ func bedrockResources() []string {
 		"identityproviders", "identityproviders/status",
 		"images", "images/status",
 		"loadbalancers", "loadbalancers/status",
+		"networkpeerings", "networkpeerings/status",
 		"networks", "networks/status",
 		"nodeupgrades", "nodeupgrades/status",
 		"oauthclients", "oauthclients/status",

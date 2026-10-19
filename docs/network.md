@@ -27,6 +27,9 @@ The section "How to read conditions" lists every reason.
 | each provider network | `Subnet` | `provider-<name>` |
 | bgp mode | `BgpConf` | `bedrock` |
 | `Network` | `Vpc` | the Network name |
+| `Network` with the services plane | `OvnEip` | `<vpc>-provider-<pool>` for the router port, and `<vpc>-services-snat` for the identity address |
+| `Network` with the services plane | `OvnSnatRule` | `<vpc>-services-snat-0` to `<vpc>-services-snat-2` |
+| `NetworkPeering` | `Vpc` | `vpcPeerings` and `staticRoutes` of both Networks |
 | `Subnet` | `Subnet` | a short name made from namespace and name |
 | `Subnet` | `NetworkAttachmentDefinition` | the Subnet name, in the project namespace |
 | `ElasticIP` | `OvnEip` | a short name made from namespace and name |
@@ -228,6 +231,88 @@ When two Subnets overlap, the older Subnet wins.
 A Network does not give a VM access to the internet.
 A VM without an ElasticIP has no route to the internet.
 
+## Peering and static routes
+
+A `NetworkPeering` joins two Networks.
+It is cluster scoped, and only an administrator can create, change or delete it.
+`spec.networkRefs` names the two Networks, and it cannot change.
+A Network cannot peer with itself, and two peerings cannot join the same two Networks.
+If a second peering names the same pair, the older one stays and the other one gets the reason `PeeringExists`.
+
+Each peering has a connect network, which is a /30.
+Set `spec.connectCIDR` to choose it.
+Without `spec.connectCIDR`, the operator takes the lowest free /30 from the Setting `network.peering.range`.
+The operator writes the connect network to `status.connectCIDR`, and it keeps it.
+No two peerings share a connect network.
+If an older peering holds the connect network that you chose, the new peering gets the reason `ConnectCIDRInUse`.
+The same reason shows when the range has no free /30.
+The first address of the connect network belongs to the first Network in `networkRefs`.
+The second address belongs to the second Network.
+
+The Network controller is the only writer of a Fabric `Vpc`.
+For each Network, it reads every peering that names the Network.
+It writes `vpcPeerings` with the connect address of its own side.
+It also writes one static route for each range of the other Network.
+The route goes to the connect address of the other side.
+When you delete a peering, the next reconcile removes the peering and its routes from both Vpcs.
+A peering shows `Ready` when both Vpcs list each other.
+The condition has the reason `Pending` until Fabric programs both sides.
+
+`spec.staticRoutes` of a Network adds more routes to its Vpc.
+Each route has a `cidr` and a `nextHop`.
+The `cidr` must be an IPv4 network address, and it cannot be the default route.
+Only an administrator can set or change `spec.staticRoutes`.
+A route of `spec.staticRoutes` wins over a route that a peering writes for the same `cidr`.
+
+## Services plane
+
+The services plane is a shared provider network that every external Network attaches to.
+It gives guests a way to reach the services of the region, for example a resolver or an image cache.
+Bedrock does not run these services.
+Add them as add-ons.
+
+Three Settings turn it on:
+
+- `network.services.provider-network` names a provider network with the role `services`.
+- `network.services.identity-range` is an IPv4 network inside the CIDR of that provider network.
+  The usable addresses of the range must be inside one `excludeIPs` entry of the provider network, so Fabric does not give them to router ports.
+  If not, the Network gets the reason `ServicesNotConfigured`.
+- `network.services.resolver` is the address of the resolver.
+  DHCP gives it to guests when `network.dns-servers` is empty.
+
+The first /24 of the services provider network is for the addresses of the services.
+Put the resolver there.
+
+For each Network with `enableExternal`, the Network controller does these steps:
+
+1. It adds the provider network to `extraExternalSubnets` of the Vpc, after the other entries.
+   An existing Vpc keeps every entry that it has.
+2. It writes the router port as an `OvnEip` of type `lrp`, named `<vpc>-provider-<pool>`.
+3. It takes one address from `network.services.identity-range` and writes it to `status.servicesIdentity`.
+   The lowest free address is taken.
+   The controller reads the other Networks and the `OvnEip` objects of the provider network from the API before it writes.
+   So two Networks never get the same address, also after a restart.
+4. It writes the `OvnEip` `<vpc>-services-snat` with this address.
+5. It writes three `OvnSnatRule` objects, one for each of `10.0.0.0/8`, `172.16.0.0/12` and `192.168.0.0/16`.
+
+A Network keeps its identity address until you delete the Network.
+The controller deletes the `OvnEip` `<vpc>-services-snat` and the rules only when the Network is no longer external, or when you delete the Network.
+An empty or wrong Setting never deletes them.
+In that case a Network with an identity gets `ExternalReady=False` with the reason `ServicesNotConfigured`.
+The address stays in `status.servicesIdentity`.
+The router port and the entry in `extraExternalSubnets` stay.
+When you delete a Network, the controller deletes these objects before it deletes the Vpc.
+
+Each provider network with the role `services` has an ACL with the direction `to-lport` and the priority 2000.
+It drops traffic when the source and the destination are both in the provider network and both outside the first /24.
+So guests of different Networks cannot reach each other on the plane, but they can reach the services.
+In bgp mode a provider network with the role `services` has its own `ProviderNetwork` and `Vlan`, as the transit network has.
+The ACL, the `ProviderNetwork` and the `Vlan` depend on the role only, so a wrong Setting never removes them.
+
+If a Setting is wrong, the Network gets `ExternalReady=False` with the reason `ServicesNotConfigured`.
+The Vpc keeps its other entries, and the controller does not delete the identity objects.
+If the identity range has no free address, the Network gets `Ready=False` with the reason `NoPoolCapacity`.
+
 ## Elastic IPs
 
 An `ElasticIP` reserves an address from a provider network.
@@ -381,7 +466,11 @@ Remove the group from the VM or the Container first.
 | `network.bgp.graceful-restart` | `true` | Keep the BGP routes while a peer restarts. |
 | `network.bgp.advertise-filter` | empty | Comma list of `<cidr> ge <n> le <n>` entries. The mask length must not be more than `ge`, and `ge` must not be more than `le`, which is at most 32. The agent advertises only the matching routes. |
 | `network.bgp.redistribute-tables` | empty | Comma list of host routing table ids from 1 to 999. 253, 254 and 255 are reserved. Ids from 1000 up are the VRF ids of the VPCs, and the agent refuses a host table that equals one of them. The list must not hold a VRF id that a Network pins in `spec.vrfId`. |
-| `network.dns-servers` | empty | Comma list of IPv4 resolvers that DHCP gives to guests. A Subnet that sets `dnsServers` uses its own list. |
+| `network.dns-servers` | empty | Comma list of IPv4 resolvers that DHCP gives to guests. A Subnet that sets `dnsServers` uses its own list. Empty uses `network.services.resolver`. |
+| `network.peering.range` | `169.254.0.0/16` | IPv4 network from which each NetworkPeering without `connectCIDR` gets a /30 connect network. The prefix must be 30 or shorter. |
+| `network.services.provider-network` | empty | Name of the provider network with the role `services`. Every external Network attaches to it. Empty turns the services plane off. |
+| `network.services.identity-range` | empty | IPv4 network inside the services provider network. Each Network gets one address from it for source NAT. The prefix must be 30 or shorter. |
+| `network.services.resolver` | empty | IPv4 address of the resolver on the services plane. DHCP gives it to guests when `network.dns-servers` is empty. |
 | `network.reserved-cidrs` | `100.64.0.0/10` | Comma list of IPv4 networks. No Network range and no Subnet can overlap them. They belong to the platform planes. |
 | `network.subnet-allowed-ranges` | `10.0.0.0/8,172.16.0.0/12,192.168.0.0/16` | Comma list of IPv4 networks. Every Subnet must be inside one of them. Use `0.0.0.0/0` to allow every address. |
 | `network.mtu` | empty | MTU in bytes, from 576 to 9000, of every Subnet that sets no `mtu`. Empty lets Fabric choose. A running guest learns a new value at its next DHCP lease, and the pod interface of a VM keeps its MTU until the VM restarts. |
@@ -409,6 +498,7 @@ Then take the action in the table.
 | `CIDROutsideNetwork` | The Subnet CIDR is not inside any range of the Network. Use another CIDR, or add a range to `cidrs` of the Network. |
 | `CIDROutsideAllowedRanges` | The Subnet CIDR is not inside a range of `network.subnet-allowed-ranges`. Use another CIDR, or ask an administrator to change the Setting. A provisioned Subnet shows the same text in the condition `RangePolicy`, and it stays `Ready`. |
 | `CIDROverlap` | An older Subnet overlaps this one. Use another CIDR. |
+| `ConnectCIDRInUse` | An older NetworkPeering holds the connect network, or `network.peering.range` has no free /30. Set another `connectCIDR`, or widen the range. |
 | `Connected` | The external connection works. No action. |
 | `ElasticIPNotFound` | The ElasticIP of the LoadBalancer does not exist. Create it. |
 | `ElasticIPNotReady` | The ElasticIP is not ready. Wait or fix the ElasticIP. |
@@ -426,16 +516,18 @@ Then take the action in the table.
 | `NetworkNotExternal` | The Network has no external connection. Set `enableExternal` on the Network. |
 | `NetworkNotFound` | The Network does not exist. Fix `networkRef`. |
 | `NetworkNotReady` | The Network is not ready. Wait. |
-| `NoPoolCapacity` | The ElasticIP names no provider network, and every `tenant` provider network is full or none exists. Add addresses or a `tenant` provider network. The operator checks again every few seconds. |
+| `NoPoolCapacity` | The ElasticIP names no provider network, and every `tenant` provider network is full or none exists. Add addresses or a `tenant` provider network. For a Network, `network.services.identity-range` has no free address. Widen the range. The operator checks again every few seconds. |
 | `NoProviderNetwork` | The Network wants an external connection and no provider network exists. In L2 mode a provider network of the role `tenant` must exist. Set `network.provider-networks`. |
 | `NoReadyPods` | A Container target has no ready pod. The rule stays with no endpoint for it. Wait for the pods, or look at the Container. |
 | `NoTargets` | No target has an address yet. Wait for the VMs. |
 | `NotAttached` | No Subnet names this zone in `dnsZoneRef`. Set `dnsZoneRef` on a Subnet. |
-| `Pending` | Fabric has not connected the Network yet. Wait. |
+| `PeeringExists` | An older NetworkPeering already joins these two Networks. Delete this one. |
+| `Pending` | Fabric has not connected the Network or the peering yet. Wait. |
 | `Programmed` | Fabric has the object. No action. |
 | `RefNotFound` | A rule names a security group that does not exist. Create it or fix the rule. |
 | `QuotaExceeded` | The tenant already has as many ElasticIPs as `quota.elasticIPs` allows. Delete an ElasticIP or raise the quota of the tenant. The operator checks again when the quota or the count changes. |
 | `Reserved` | The ElasticIP holds an address and has no target. No action. |
+| `ServicesNotConfigured` | The services plane misses a Setting or a Setting is wrong. Set the keys that the message names. The Vpc keeps its other entries. |
 | `TargetMismatch` | The target does not point back to this object. Fix the reference. |
 | `TargetInUse` | An older ElasticIP already uses this VM interface. Delete one of the two ElasticIPs. |
 | `TargetNetworkMismatch` | The targets are on more than one Network. Use targets of one Network. |

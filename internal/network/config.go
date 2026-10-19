@@ -25,6 +25,11 @@ const (
 	keyBGPTransit      = "network.bgp.transit-network"
 	keyDNSServers      = "network.dns-servers"
 	keyMTU             = "network.mtu"
+	keyPeeringRange    = "network.peering.range"
+
+	keyServicesProviderNetwork = "network.services.provider-network"
+	keyServicesIdentityRange   = "network.services.identity-range"
+	keyServicesResolver        = "network.services.resolver"
 
 	keyReservedCIDRs       = "network.reserved-cidrs"
 	keySubnetAllowedRanges = "network.subnet-allowed-ranges"
@@ -58,6 +63,8 @@ type Config struct {
 	BGP              BGP
 	DNSServers       []string
 	MTU              int
+	PeeringRange     string
+	Services         Services
 
 	ReservedCIDRs       []string
 	SubnetAllowedRanges []string
@@ -89,8 +96,10 @@ func ParseConfig(values map[string]string) (Config, error) {
 		EIPMode:          effective[keyEIPMode],
 		ProviderNetworks: networks,
 		BGP:              bgp,
-		DNSServers:       splitList(effective[keyDNSServers]),
+		DNSServers:       defaultDNSServers(effective),
 		MTU:              mtu,
+		PeeringRange:     effective[keyPeeringRange],
+		Services:         Services{ProviderNetwork: effective[keyServicesProviderNetwork], IdentityRange: effective[keyServicesIdentityRange], Resolver: effective[keyServicesResolver]},
 
 		ReservedCIDRs:       splitList(effective[keyReservedCIDRs]),
 		SubnetAllowedRanges: splitList(effective[keySubnetAllowedRanges]),
@@ -124,7 +133,18 @@ func parseBGP(effective map[string]string) (BGP, error) {
 var networkKeys = []string{
 	keyEIPMode, keyProviderNetwork, keyBGPLocalASN, keyBGPRouterID, keyBGPPeers, keyBGPTransit, keyDNSServers, keyMTU,
 	keyBGPBFD, keyBGPHoldTime, keyBGPKeepaliveTime, keyBGPGracefulRestart, keyBGPAdvertiseFilter, keyBGPRedistributeTables,
-	keyReservedCIDRs, keySubnetAllowedRanges,
+	keyReservedCIDRs, keySubnetAllowedRanges, keyPeeringRange,
+	keyServicesProviderNetwork, keyServicesIdentityRange, keyServicesResolver,
+}
+
+func defaultDNSServers(effective map[string]string) []string {
+	if servers := splitList(effective[keyDNSServers]); len(servers) > 0 {
+		return servers
+	}
+	if resolver := effective[keyServicesResolver]; resolver != "" {
+		return []string{resolver}
+	}
+	return nil
 }
 
 func splitList(value string) []string {
