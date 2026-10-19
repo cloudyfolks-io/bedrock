@@ -106,7 +106,7 @@ func routeMatch(rules Rules) string {
 			matches = append(matches, "HostRegexp(`^[a-z0-9-]+\\."+strings.ReplaceAll(host, ".", "\\.")+"$`)")
 		}
 	}
-	return strings.Join(matches, " || ")
+	return "(" + strings.Join(matches, " || ") + ") && !PathPrefix(`/admin`)"
 }
 
 func endpointObject(apiVersion, kind string, spec map[string]any) *unstructured.Unstructured {

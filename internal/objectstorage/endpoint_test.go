@@ -56,7 +56,7 @@ func TestEndpointObjectsForOneHost(t *testing.T) {
 		"spec": map[string]any{
 			"entryPoints": []any{"websecure"},
 			"routes": []any{map[string]any{
-				"match":    "Host(`s3.example.test`)",
+				"match":    "(Host(`s3.example.test`)) && !PathPrefix(`/admin`)",
 				"kind":     "Rule",
 				"services": []any{map[string]any{"name": "rook-ceph-rgw-bedrock-rgw", "port": int64(80)}},
 			}},
@@ -81,7 +81,7 @@ func TestEndpointObjectsWithAliasesAddVirtualHostRules(t *testing.T) {
 	}
 	routes, _, _ := unstructured.NestedSlice(objects[1].Object, "spec", "routes")
 	match := routes[0].(map[string]any)["match"]
-	want := "Host(`s3.example.test`) || Host(`s3.alias.test`) || HostRegexp(`^[a-z0-9-]+\\.s3\\.example\\.test$`) || HostRegexp(`^[a-z0-9-]+\\.s3\\.alias\\.test$`)"
+	want := "(Host(`s3.example.test`) || Host(`s3.alias.test`) || HostRegexp(`^[a-z0-9-]+\\.s3\\.example\\.test$`) || HostRegexp(`^[a-z0-9-]+\\.s3\\.alias\\.test$`)) && !PathPrefix(`/admin`)"
 	if match != want {
 		t.Fatalf("match %q", match)
 	}
