@@ -186,6 +186,9 @@ steps=(
   compute_vm
   compute_hotplug
   compute_snapshot
+  compute_size_and_hotplug
+  compute_boot_volume
+  compute_block_access
   compute_proxy_actions
   compute_console
   network_underlay
@@ -197,6 +200,10 @@ steps=(
   network_elastic_ip_pool_choice
   network_elastic_ip_quota
   network_load_balancer_and_dns
+  network_internet_gateway
+  network_peering
+  network_internal_load_balancer
+  network_services_identity
   network_isolation
   container_network_proof
   container_runtime_gate

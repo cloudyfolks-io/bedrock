@@ -149,6 +149,18 @@ The operator applies a changed value at the next release install or upgrade.
 A running pod keeps its MTU until the pod is created again.
 Set `podMTU` to 1500 on a cluster whose guests use `network.mtu` 1500, such as ir-central-1, and use node NICs with an MTU of 1600 or more.
 
+To set the pod MTU on a cluster that runs already, patch the `Cluster` object before the next upgrade:
+
+```
+kubectl patch cluster cluster --type merge -p '{"spec":{"podMTU":1500}}'
+```
+
+The operator renders the value into the Fabric agent when the `components` phase of the next upgrade runs.
+To apply it without an upgrade, run `bedrock release apply --dir <release dir> --pod-mtu 1500`.
+The Fabric agent restarts on each node.
+Create the pods again, and restart the VMs, so that they take the new MTU.
+The flag accepts 576 to 9000 only.
+
 Only the platform may add, change or remove network selection annotations on a pod.
 The annotations are all keys with the prefix `k8s.v1.cni.cncf.io/`, `v1.multus-cni.io/` or `ovn.kubernetes.io/`, and all keys with the text `cloudyfolks.io/`.
 The admission policy `bedrock-network-attachments` refuses every other identity in a project namespace.
@@ -455,12 +467,18 @@ The range comes from `network.load-balancer.cidr` and `network.load-balancer.gat
 The Subnet is distributed, has no outgoing NAT and no DHCP, and has the MTU 1500.
 The gateway is excluded, so no `Vip` takes it.
 Every Network uses the same range, because the planes are separate in each Vpc.
-Keep the range inside `network.reserved-cidrs`, so no Subnet can overlap it.
+Bedrock reserves the range, as it does the ranges of `network.reserved-cidrs`.
+A Network range or a Subnet that overlaps it gets the reason `CIDRReserved`.
+A Network that is provisioned already keeps working and gets the condition `RangePolicy`.
 BGP never advertises the range.
 Set the range before the first Network exists.
 Fabric does not change the range of a Subnet, so a new value stops the reconcile of the Networks that exist.
 A LoadBalancer waits with `FabricNotReady` until the plane Subnet of its Network exists.
 The plane Subnet goes away with its Network.
+A Network cannot go while an internal LoadBalancer holds a `Vip` in its plane.
+The Network shows `Ready=False` with the reason `Terminating` and names up to three of these LoadBalancers.
+Delete them, and the Network goes on.
+When Fabric keeps the plane Subnet, the message names it.
 
 An older release put the `Vip` in the Subnet of the targets.
 That `Vip` used the MAC address of the router port, and it cut off the default gateway of a tenant.
@@ -546,7 +564,7 @@ Remove the group from the VM or the Container first.
 | `network.bgp.advertise-filter` | empty | Comma list of `<cidr> ge <n> le <n>` entries. The mask length must not be more than `ge`, and `ge` must not be more than `le`, which is at most 32. The agent advertises only the matching routes and the ElasticIP routes. Empty advertises only the ElasticIP routes. |
 | `network.bgp.redistribute-tables` | empty | Comma list of host routing table ids from 1 to 999. 253, 254 and 255 are reserved. Ids from 1000 up are the VRF ids of the VPCs, and the agent refuses a host table that equals one of them. The list must not hold a VRF id that a Network pins in `spec.vrfId`. |
 | `network.dns-servers` | empty | Comma list of IPv4 resolvers that DHCP gives to guests. A Subnet that sets `dnsServers` uses its own list. Empty uses `network.services.resolver`. |
-| `network.load-balancer.cidr` | `100.69.0.0/24` | IPv4 network of the load balancer plane. Every Network gets one hidden Fabric Subnet with this range, and internal load balancers take their virtual addresses there. Keep it inside `network.reserved-cidrs`, and set it before the first Network exists. BGP never advertises it. |
+| `network.load-balancer.cidr` | `100.69.0.0/24` | IPv4 network of the load balancer plane. Every Network gets one hidden Fabric Subnet with this range, and internal load balancers take their virtual addresses there. Bedrock reserves it, so no Network range and no Subnet can overlap it. Set it before the first Network exists. BGP never advertises it. |
 | `network.load-balancer.gateway` | `100.69.0.1` | IPv4 address of the plane gateway. It must be inside `network.load-balancer.cidr` and must not be its network or broadcast address. |
 | `network.peering.range` | `169.254.0.0/16` | IPv4 network from which each NetworkPeering without `connectCIDR` gets a /30 connect network. The prefix must be 30 or shorter. |
 | `network.services.provider-network` | empty | Name of the provider network with the role `services`. Every external Network attaches to it. Empty turns the services plane off. |
@@ -645,6 +663,18 @@ Bedrock deletes the old `Vip` and writes a new one with a new name.
 Update every client, DNS record and firewall rule that holds the old address.
 List the addresses before the upgrade with `kubectl get vips -l network.bedrock.cloudyfolks.io/managed=true`.
 A cluster that runs no internal LoadBalancer has no change.
+
+The Network controller is now the only writer of the `vpcPeerings`, `staticRoutes` and `extraExternalSubnets` of a Fabric `Vpc` that a Network owns.
+It writes each list as a whole from the Network, its `NetworkPeering` objects and its `spec.staticRoutes`.
+A peering or a route that someone added to the Vpc by hand is removed at the next reconcile.
+Before the upgrade, list them with `kubectl get vpcs -o yaml`.
+Move every one of them to a `NetworkPeering` or to `spec.staticRoutes` of the Network.
+An entry of `extraExternalSubnets` that the Vpc already has stays.
+
+The services resolver becomes the default DNS server of guests.
+When `network.services.resolver` is set, a Subnet with no `dnsServers` and an empty `network.dns-servers` gives the resolver to its guests through DHCP.
+A running guest takes it at its next DHCP lease.
+Before the upgrade, set `network.dns-servers` to the resolvers that the guests use now, so the default does not change.
 
 An empty `network.bgp.advertise-filter` now advertises only the ElasticIP routes.
 Before, a BGP cluster with no ElasticIP and an empty filter advertised all routes.

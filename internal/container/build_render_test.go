@@ -133,12 +133,12 @@ func TestRenderBuildJobAndPodFields(t *testing.T) {
 	}
 }
 
-func TestRenderBuildWithoutDNSServersKeepsTheDefault(t *testing.T) {
+func TestRenderBuildNeverUsesTheClusterDNS(t *testing.T) {
 	in := baseBuildInput()
 	in.DNSServers = nil
 	job, _ := mustRenderBuild(t, in)
 	pod := job.Spec.Template.Spec
-	if pod.DNSPolicy != "" || pod.DNSConfig != nil {
+	if pod.DNSPolicy != corev1.DNSNone || pod.DNSConfig == nil {
 		t.Fatalf("dns %s %+v", pod.DNSPolicy, pod.DNSConfig)
 	}
 }

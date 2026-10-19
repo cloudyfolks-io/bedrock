@@ -14,7 +14,7 @@ func TestReservedRangesListsPlatformRanges(t *testing.T) {
 		names[i] = r.Name + " " + r.CIDR
 	}
 	want := []string{
-		"provider network public 91.246.31.0/24", "reserved 100.64.0.0/10 100.64.0.0/10", "join subnet 100.64.0.0/16", "management 10.0.10.10/32",
+		"provider network public 91.246.31.0/24", "reserved 100.64.0.0/10 100.64.0.0/10", "load balancer plane 100.69.0.0/24", "join subnet 100.64.0.0/16", "management 10.0.10.10/32",
 		"management 10.0.10.11/32", "management 10.0.10.12/32",
 	}
 	if !slices.Equal(names, want) {
@@ -24,8 +24,8 @@ func TestReservedRangesListsPlatformRanges(t *testing.T) {
 
 func TestReservedRangesSkipsEmptyAndInvalidAddresses(t *testing.T) {
 	got := ReservedRanges(configOf(t, map[string]string{}), "", "", []string{"", "nonsense"})
-	if len(got) != 1 || got[0].CIDR != "100.64.0.0/10" {
-		t.Fatalf("only the reserved cidrs setting is left: %v", got)
+	if len(got) != 2 || got[0].CIDR != "100.64.0.0/10" || got[1].CIDR != "100.69.0.0/24" {
+		t.Fatalf("only the reserved cidrs setting and the load balancer plane are left: %v", got)
 	}
 }
 
@@ -104,5 +104,16 @@ func TestAllowedRangeViolation(t *testing.T) {
 	}
 	if got := AllowedRangeViolation("nonsense", allowed); got != nil {
 		t.Fatalf("an unparsable cidr is judged elsewhere: %+v", got)
+	}
+}
+
+func TestPlaneReservedFollowsTheLoadBalancerSetting(t *testing.T) {
+	cfg := configOf(t, map[string]string{"network.load-balancer.cidr": "100.70.0.0/16", "network.load-balancer.gateway": "100.70.0.1"})
+	got := PlaneReserved(cfg)
+	if len(got) != 1 || got[0].Name != "load balancer plane" || got[0].CIDR != "100.70.0.0/16" {
+		t.Fatalf("plane %v", got)
+	}
+	if got := PlaneReserved(Config{}); len(got) != 0 {
+		t.Fatalf("an unset plane reserves nothing: %v", got)
 	}
 }

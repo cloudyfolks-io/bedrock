@@ -101,6 +101,9 @@ func (f *fakeS3) serve(w http.ResponseWriter, r *http.Request) {
 	f.credentials = append(f.credentials, r.Header.Get("Authorization"))
 	if f.failWith != 0 {
 		w.WriteHeader(f.failWith)
+		if f.failWith == http.StatusForbidden {
+			io.WriteString(w, "<Error><Code>AccessDenied</Code></Error>")
+		}
 		return
 	}
 	switch kind {

@@ -244,14 +244,20 @@ The VM status shows the console paths in `status.console`.
 The Setting `virt.eviction-strategy` is the KubeVirt cluster setting `configuration.evictionStrategy`.
 It decides what a node drain does to a VM that has no `evictionStrategy` of its own.
 The `evictionStrategy` field of a VirtualMachine has priority over the Setting.
-When this field is empty, the operator writes `LiveMigrateIfPossible` into the KubeVirt VM.
-So the Setting does not change the VMs that the operator renders.
+When this field is empty, the operator writes the value of the Setting into the KubeVirt VM.
+The default of the Setting is `LiveMigrateIfPossible`, so a cluster that never sets it keeps its old behavior.
 
 | Value | A drain does this to a VM that can migrate | A drain does this to a VM that cannot migrate |
 |---|---|---|
 | `LiveMigrate` | It migrates the VM. | It waits. The drain does not end until the VM can migrate or stops. |
 | `LiveMigrateIfPossible` | It migrates the VM. | It shuts the VM down and the drain continues. |
 | `None` | It shuts the VM down. | It shuts the VM down. |
+
+A change of the Setting changes the KubeVirt VM of every VM that has no `evictionStrategy` of its own.
+The strategy is part of the machine, so each of these VMs that runs shows `RestartRequired` until its next restart.
+The old strategy stays in force until then.
+Set the Setting before the first VM exists.
+The installer sets `LiveMigrate` on ir-central-1 before any VM exists, so no VM there has a restart pending.
 
 A kured reboot starts a drain.
 With `LiveMigrate`, one VM that cannot migrate blocks the reboot of its node.
@@ -327,6 +333,12 @@ With `migration.compression` set to `zstd`, the operator creates the KubeVirt `M
 The policy matches all VMs and compresses the migration traffic with zstd.
 The compression uses CPU on the source node and is an experimental KubeVirt feature.
 When you set the Setting to empty, the operator deletes the policy.
+
+An upgrade to this release changes the migration configuration of KubeVirt.
+Before, the operator wrote only the number of migrations in the cluster, and KubeVirt used its own defaults for the rest.
+Now the operator writes the four values as well: 4 outbound migrations on one node, the bandwidth `1Gi`, 800 seconds for each GiB and 150 seconds without progress.
+The new values apply to the migrations that start after the upgrade.
+To keep other values, set the four Settings before the upgrade.
 
 A wrong value stops the render of the KubeVirt object.
 The live object does not change.

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -52,7 +53,7 @@ func (r *NetworkReconciler) Reconcile(ctx context.Context, req reconcile.Request
 	if err != nil {
 		return r.publish(ctx, &network, notReadyStatus(network, ReasonVpcPending, err.Error()))
 	}
-	breach := NetworkReservedOverlap(network.Spec.Ranges(), SettingReserved(cfg))
+	breach := NetworkReservedOverlap(network.Spec.Ranges(), append(SettingReserved(cfg), PlaneReserved(cfg)...))
 	vrfBreach, err := r.vrfBreach(ctx, &network, cfg)
 	if err != nil {
 		return reconcile.Result{}, err
@@ -415,6 +416,15 @@ func (r *NetworkReconciler) finalize(ctx context.Context, network *v1alpha1.Netw
 		r.writeTerminatingStatus(ctx, network, status)
 		return reconcile.Result{RequeueAfter: terminatingRequeue}, nil
 	}
+	holders, err := r.planeHolders(ctx, network)
+	if err != nil {
+		ctrl.LoggerFrom(ctx).Error(err, "list the load balancers of the plane", "network", network.Name)
+		return reconcile.Result{RequeueAfter: terminatingRequeue}, nil
+	}
+	if len(holders) > 0 {
+		r.writeTerminatingStatus(ctx, network, notReadyStatus(*network, ReasonTerminating, remainingBalancers(holders)))
+		return reconcile.Result{RequeueAfter: terminatingRequeue}, nil
+	}
 	planeGone, err := r.deleteServicesPlane(ctx, network)
 	if err != nil {
 		ctrl.LoggerFrom(ctx).Error(err, "delete the services plane of the Network", "network", network.Name)
@@ -429,6 +439,7 @@ func (r *NetworkReconciler) finalize(ctx context.Context, network *v1alpha1.Netw
 		return reconcile.Result{RequeueAfter: terminatingRequeue}, nil
 	}
 	if !gone {
+		r.writeTerminatingStatus(ctx, network, notReadyStatus(*network, ReasonTerminating, fmt.Sprintf("waiting for Fabric to delete the load balancer plane Subnet %s and the Vpc", LBSubnetName(network.Name))))
 		return reconcile.Result{RequeueAfter: terminatingRequeue}, nil
 	}
 	return reconcile.Result{}, releaseFinalizer(ctx, r.Client, network)
@@ -443,6 +454,32 @@ func (r *NetworkReconciler) writeTerminatingStatus(ctx context.Context, network 
 	if err := ssa.ApplyStatus(ctx, r.Client, body, v1alpha1.NetworkFieldManager); err != nil {
 		ctrl.LoggerFrom(ctx).Error(err, "write the Network status", "network", network.Name)
 	}
+}
+
+func (r *NetworkReconciler) planeHolders(ctx context.Context, network *v1alpha1.Network) ([]string, error) {
+	vips, err := listObjects(ctx, r.Client, fabric.VipGVK)
+	if err != nil {
+		return nil, err
+	}
+	plane := LBSubnetName(network.Name)
+	var holders []string
+	for _, vip := range vips {
+		if subnet, _, _ := unstructured.NestedString(vip.Object, "spec", "subnet"); subnet != plane {
+			continue
+		}
+		if owner, _, ok := OwnerOf(vip); ok {
+			holders = append(holders, owner.String())
+			continue
+		}
+		holders = append(holders, "Vip "+vip.GetName())
+	}
+	slices.Sort(holders)
+	return holders, nil
+}
+
+func remainingBalancers(holders []string) string {
+	shown := holders[:min(len(holders), remainingSubnetsShown)]
+	return fmt.Sprintf("%d internal load balancers hold the load balancer plane: %s; delete them", len(holders), strings.Join(shown, ", "))
 }
 
 func remainingSubnets(facts []SubnetFacts) string {

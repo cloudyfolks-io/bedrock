@@ -18,6 +18,10 @@ const servicesL2Pools = `[{"name":"public","interface":"b","cidr":"91.246.31.0/2
 
 const servicesBGPPools = `[{"name":"transit","interface":"b","vlan":30,"cidr":"100.65.0.0/16","gateway":"100.65.0.1"},{"name":"public","interface":"b","cidr":"91.246.31.0/24","gateway":"91.246.31.1"},` + servicesPool + `]`
 
+func servicesPoolExcluding(entry string) string {
+	return `[` + strings.Replace(servicesPool, `"100.66.0.1..100.66.0.255","100.67.0.0..100.67.255.254"`, `"`+entry+`"`, 1) + `]`
+}
+
 func servicesValues(pools string, extra map[string]string) map[string]string {
 	values := map[string]string{
 		"network.provider-networks":         pools,
@@ -71,13 +75,15 @@ func TestMissingServicesSettings(t *testing.T) {
 		values map[string]string
 		want   []string
 	}{
-		"not configured": {map[string]string{"network.provider-networks": servicesL2Pools}, nil},
-		"complete":       {servicesValues(servicesL2Pools, nil), nil},
-		"no range":       {servicesValues(servicesL2Pools, map[string]string{"network.services.identity-range": ""}), []string{"network.services.identity-range"}},
-		"unknown pool":   {servicesValues(servicesL2Pools, map[string]string{"network.services.provider-network": "ghost"}), []string{"network.services.provider-network=ghost (not a provider network)"}},
-		"wrong role":     {servicesValues(servicesL2Pools, map[string]string{"network.services.provider-network": "public"}), []string{"network.services.provider-network=public (its role is not services)", "network.services.identity-range=100.67.0.0/16 (not inside the cidr of the provider network)"}},
-		"not excluded":   {servicesValues(`[`+strings.Replace(servicesPool, `,"excludeIPs":["100.66.0.1..100.66.0.255","100.67.0.0..100.67.255.254"]`, `,"excludeIPs":["100.67.0.0..100.67.100.0"]`, 1)+`]`, nil), []string{"network.services.identity-range=100.67.0.0/16 (not inside one excludeIPs entry of the provider network)"}},
-		"range outside":  {servicesValues(servicesL2Pools, map[string]string{"network.services.identity-range": "100.70.0.0/16"}), []string{"network.services.identity-range=100.70.0.0/16 (not inside the cidr of the provider network)"}},
+		"not configured":  {map[string]string{"network.provider-networks": servicesL2Pools}, nil},
+		"complete":        {servicesValues(servicesL2Pools, nil), nil},
+		"no range":        {servicesValues(servicesL2Pools, map[string]string{"network.services.identity-range": ""}), []string{"network.services.identity-range"}},
+		"unknown pool":    {servicesValues(servicesL2Pools, map[string]string{"network.services.provider-network": "ghost"}), []string{"network.services.provider-network=ghost (not a provider network)"}},
+		"wrong role":      {servicesValues(servicesL2Pools, map[string]string{"network.services.provider-network": "public"}), []string{"network.services.provider-network=public (its role is not services)", "network.services.identity-range=100.67.0.0/16 (not inside the cidr of the provider network)"}},
+		"not excluded":    {servicesValues(`[`+strings.Replace(servicesPool, `,"excludeIPs":["100.66.0.1..100.66.0.255","100.67.0.0..100.67.255.254"]`, `,"excludeIPs":["100.67.0.0..100.67.100.0"]`, 1)+`]`, nil), []string{"network.services.identity-range=100.67.0.0/16 (not inside one excludeIPs entry of the provider network)"}},
+		"exact entry":     {servicesValues(servicesPoolExcluding("100.67.0.1..100.67.255.254"), nil), nil},
+		"entry one short": {servicesValues(servicesPoolExcluding("100.67.0.2..100.67.255.254"), nil), []string{"network.services.identity-range=100.67.0.0/16 (not inside one excludeIPs entry of the provider network)"}},
+		"range outside":   {servicesValues(servicesL2Pools, map[string]string{"network.services.identity-range": "100.70.0.0/16"}), []string{"network.services.identity-range=100.70.0.0/16 (not inside the cidr of the provider network)"}},
 	}
 	for name, c := range cases {
 		t.Run(name, func(t *testing.T) {

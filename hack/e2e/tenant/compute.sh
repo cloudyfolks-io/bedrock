@@ -137,3 +137,181 @@ compute_console() {
   compute_token_env
   "$test_bin" -test.count=1 -test.v -test.timeout 15m -test.run '^TestConsoleSerial$'
 }
+
+compute_guest_script() {
+  cat <<'SCRIPT'
+#!/bin/sh
+say() { echo "COMPUTE-$*" >/dev/console; }
+main() {
+  boot=$(cat /proc/sys/kernel/random/boot_id)
+  say "BOOT $boot"
+  say "CPUS $(grep -c '^processor' /proc/cpuinfo)"
+  say "MEMKIB $(awk '/^MemTotal/ {print $2}' /proc/meminfo)"
+  tested=
+  while :; do
+    d=$(ls /sys/block | grep '^sd' | head -n 1)
+    if [ -n "$d" ] && [ -z "$tested" ]; then
+      printf hotplug | dd of="/dev/$d" bs=7 count=1 2>/dev/null
+      sync
+      say "DISKIO $boot $d $(dd if="/dev/$d" bs=7 count=1 2>/dev/null)"
+      tested=1
+    fi
+    sleep 5
+  done
+}
+main </dev/null >/dev/null 2>&1 &
+SCRIPT
+}
+
+compute_size_vm_manifest() {
+  cat <<VM
+apiVersion: bedrock.cloudyfolks.io/v1alpha1
+kind: VirtualMachine
+metadata:
+  name: size-vm
+spec:
+  compute:
+    cores: 2
+    memoryMiB: 512
+  preference: cirros
+  image:
+    name: cirros
+    scope: cluster
+  rootDisk:
+    sizeGi: 2
+  networks:
+    - subnetRef: default
+  cloudInit:
+    userData: |
+$(compute_guest_script | sed 's/^/      /')
+  running: true
+VM
+}
+
+compute_boot_vm_manifest() {
+  cat <<VM
+apiVersion: bedrock.cloudyfolks.io/v1alpha1
+kind: VirtualMachine
+metadata:
+  name: boot-vm
+spec:
+  instanceType: u1.nano
+  preference: cirros
+  rootDisk:
+    volumeRef: boot1
+  networks:
+    - subnetRef: default
+  cloudInit:
+    userData: |
+$(compute_guest_script | sed 's/^/      /')
+  running: true
+VM
+}
+
+compute_guest_value() {
+  guest_console_log "$1" | tr -d '\r' | sed -n "s/.*COMPUTE-$2 //p" | sed 's/ *$//' | tail -1
+}
+
+compute_guest_reported() {
+  [ -n "$(compute_guest_value "$1" "$2")" ]
+}
+
+expect_between() {
+  local low=$1 high=$2 got=$3 what=$4
+  if [ -z "$got" ] || [ "$got" -lt "$low" ] || [ "$got" -gt "$high" ]; then
+    echo "$what: want from $low to $high, got '$got'" >&2
+    return 1
+  fi
+}
+
+compute_vm_cleanup() {
+  local name=$1 status=$2
+  if [ "$status" -ne 0 ]; then
+    guest_console_log "$name" >&2 || true
+    kubectl -n "$NS" get virtualmachine "$name" -o yaml >&2 || true
+  fi
+  kubectl -n "$NS" delete virtualmachine "$name" --ignore-not-found
+  wait_gone 180 virtualmachine "$name" -n "$NS"
+  wait_empty 180 -n "$NS" get pods -l "kubevirt.io/domain=$name"
+  wait_gone 180 datavolume "$name-root" -n "$NS"
+}
+
+compute_size_cleanup() {
+  compute_vm_cleanup size-vm "$1"
+  kubectl -n "$NS" delete volume hot1 --ignore-not-found
+  wait_gone 180 volume hot1 -n "$NS"
+}
+
+compute_size_checks() {
+  kubectl -n "$NS" apply -f - <<VOLUME
+apiVersion: bedrock.cloudyfolks.io/v1alpha1
+kind: Volume
+metadata:
+  name: hot1
+spec:
+  sizeGi: 1
+VOLUME
+  wait_jsonpath 180 Available -n "$NS" get volume hot1 -o jsonpath='{.status.phase}'
+  compute_size_vm_manifest | kubectl -n "$NS" apply -f -
+  wait_jsonpath 600 Running -n "$NS" get virtualmachine size-vm -o jsonpath='{.status.phase}'
+  expect_equal "2 512Mi" "$(kubectl -n "$NS" get virtualmachines.kubevirt.io size-vm -o jsonpath='{.spec.template.spec.domain.cpu.cores} {.spec.template.spec.domain.memory.guest}')" "size in the KubeVirt VM"
+  expect_equal "" "$(kubectl -n "$NS" get virtualmachines.kubevirt.io size-vm -o jsonpath='{.spec.instancetype.name}')" "no instance type on a custom size"
+  retry_until 300 compute_guest_reported size-vm MEMKIB
+  expect_equal 2 "$(compute_guest_value size-vm CPUS)" "guest cpu count"
+  expect_between 400000 524288 "$(compute_guest_value size-vm MEMKIB)" "guest memory in KiB"
+  kubectl -n "$NS" patch virtualmachine size-vm --type merge -p '{"spec":{"disks":[{"volumeRef":"hot1","bus":"scsi"}]}}'
+  wait_jsonpath 180 InUse -n "$NS" get volume hot1 -o jsonpath='{.status.phase}'
+  retry_until 300 compute_guest_reported size-vm DISKIO
+  expect_contains "$(compute_guest_value size-vm DISKIO)" hotplug "guest write and read of the hot-plugged disk"
+  expect_contains "$(compute_guest_value size-vm DISKIO)" "$(compute_guest_value size-vm BOOT)" "guest boot id after the hot-plug"
+}
+
+compute_size_and_hotplug() {
+  (
+    trap 'compute_size_cleanup "$?"' EXIT
+    compute_size_checks
+  )
+}
+
+compute_boot_cleanup() {
+  compute_vm_cleanup boot-vm "$1"
+  kubectl -n "$NS" delete volume boot1 --ignore-not-found
+  wait_gone 180 volume boot1 -n "$NS"
+}
+
+compute_boot_checks() {
+  kubectl -n "$NS" apply -f - <<VOLUME
+apiVersion: bedrock.cloudyfolks.io/v1alpha1
+kind: Volume
+metadata:
+  name: boot1
+spec:
+  sizeGi: 2
+  source:
+    image:
+      name: cirros
+      scope: cluster
+VOLUME
+  wait_jsonpath 300 Available -n "$NS" get volume boot1 -o jsonpath='{.status.phase}'
+  compute_boot_vm_manifest | kubectl -n "$NS" apply -f -
+  wait_jsonpath 600 Running -n "$NS" get virtualmachine boot-vm -o jsonpath='{.status.phase}'
+  expect_equal "" "$(kubectl -n "$NS" get datavolume boot-vm-root -o name 2>/dev/null)" "no root claim of the VM"
+  wait_jsonpath 60 InUse -n "$NS" get volume boot1 -o jsonpath='{.status.phase}'
+  expect_equal boot-vm "$(kubectl -n "$NS" get volume boot1 -o jsonpath='{.status.attachedTo}')" "boot volume attachment"
+  retry_until 300 compute_guest_reported boot-vm BOOT
+  kubectl -n "$NS" delete virtualmachine boot-vm
+  wait_gone 180 virtualmachine boot-vm -n "$NS"
+  wait_jsonpath 180 Available -n "$NS" get volume boot1 -o jsonpath='{.status.phase}'
+  kubectl -n "$NS" get pvc boot1
+}
+
+compute_boot_volume() {
+  (
+    trap 'compute_boot_cleanup "$?"' EXIT
+    compute_boot_checks
+  )
+}
+
+compute_block_access() {
+  expect_equal "ReadWriteMany Block" "$(kubectl -n "$NS" get pvc data1 -o jsonpath='{.spec.accessModes[*]} {.spec.volumeMode}')" "access mode and volume mode of a block Volume"
+}

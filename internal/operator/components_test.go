@@ -361,6 +361,35 @@ func TestComponentsPhase(t *testing.T) {
 	}
 }
 
+func TestComponentsPhaseAppliesThePodMTUOfTheCluster(t *testing.T) {
+	c, _ := StartTestEnv(t)
+	ctx := context.Background()
+	if err := c.Create(ctx, &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: release.SystemNamespace}}); err != nil {
+		t.Fatal(err)
+	}
+	createClusterWithStatus(t, ctx, c, "v2", upgradeStatusIn(v1alpha1.PhaseComponents))
+	cluster := getCluster(t, ctx, c)
+	cluster.Spec.PodMTU = 1500
+	if err := c.Update(ctx, &cluster); err != nil {
+		t.Fatal(err)
+	}
+	ready := func(*unstructured.Unstructured) release.Readiness { return release.Readiness{Ready: true} }
+	gates := release.Gates{schema.GroupKind{Group: "apps", Kind: "DaemonSet"}: ready}
+	env := upgradeEnv{Client: c, Bundle: fabricAgentBundle(t), Gates: gates, PollInterval: 100 * time.Millisecond, GroupTimeout: 10 * time.Second}
+	result, err := components(ctx, env, getCluster(t, ctx, c))
+	if err != nil || result != (phaseResult{Done: true}) {
+		t.Fatalf("result %+v err %v", result, err)
+	}
+	var agent appsv1.DaemonSet
+	if err := c.Get(ctx, client.ObjectKey{Namespace: "kube-system", Name: "fabric-cni"}, &agent); err != nil {
+		t.Fatal(err)
+	}
+	want := []string{"--service-cluster-ip-range=10.96.0.0/12", "--mtu=1500", "--iface=eth0"}
+	if got := agent.Spec.Template.Spec.Containers[0].Args; !slices.Equal(got, want) {
+		t.Fatalf("agent args %v, want %v", got, want)
+	}
+}
+
 func TestComponentsPhaseTable(t *testing.T) {
 	if newPhases()[v1alpha1.PhaseComponents] == nil || oldPhases()[v1alpha1.PhaseComponents] != nil {
 		t.Fatal("only the new operator runs Components")

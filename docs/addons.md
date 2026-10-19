@@ -532,6 +532,9 @@ section Loki shows. A reader always selects `{tenant="<t>", project="<p>"}`.
 
 A reader runs these queries as instant queries, one for each closed hour.
 The parameter `time` is the end of the hour.
+Run the query at least 2 minutes after the end of the hour. The last
+rule sample of the hour is written a short time after its timestamp, and
+an earlier query can miss it.
 
 | Unit | Query |
 |---|---|
@@ -549,8 +552,8 @@ runs 6 minutes.
 
 The network series take the increase of each VM series first and add the
 results second. A VM that ends in the middle of the hour keeps its bytes,
-and a live migration counts the bytes of both series. The error is about
-one scrape interval of traffic for each series and hour. The test
+and a live migration counts the bytes of both series. The error is up to
+one and a half scrape intervals of traffic for each series and hour. The test
 `TestMeteringQueriesPassPromtool` runs these queries with `promtool`.
 
 ### Read path

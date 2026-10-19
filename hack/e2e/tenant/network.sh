@@ -117,10 +117,6 @@ launcher_annotation() {
     jq -r --arg key "parity.$NS.fabric.cloudyfolks.io/$2" '.items[0].metadata.annotations[$key]'
 }
 
-guest_console_log() {
-  kubectl -n "$NS" logs -l "kubevirt.io/domain=$1" -c guest-console-log --tail=-1
-}
-
 guest_has_reported() {
   [[ "$(guest_console_log "$1")" == *PARITY-DONE* ]]
 }
@@ -379,4 +375,273 @@ spec:
       image: $1
       imagePullPolicy: Never
 POD
+}
+
+probe_script() {
+  local tag=$1 address=$2
+  cat <<SCRIPT
+#!/bin/sh
+result=fail
+attempt=0
+while [ \$attempt -lt 60 ]; do
+  if ping -c 1 -W 2 $address >/dev/null 2>&1; then
+    result=ok
+    break
+  fi
+  attempt=\$((attempt + 1))
+  sleep 2
+done
+echo "PROBE-$tag \$result" > /dev/console
+SCRIPT
+}
+
+probe_vm_manifest() {
+  local name=$1 subnet=$2 tag=$3 address=$4
+  cat <<VM
+apiVersion: bedrock.cloudyfolks.io/v1alpha1
+kind: VirtualMachine
+metadata:
+  name: $name
+spec:
+  instanceType: u1.nano
+  preference: cirros
+  image:
+    name: cirros
+    scope: cluster
+  rootDisk:
+    sizeGi: 2
+  networks:
+    - subnetRef: $subnet
+      securityGroups: [web]
+  cloudInit:
+    userData: |
+$(probe_script "$tag" "$address" | sed 's/^/      /')
+  running: true
+VM
+}
+
+probe_value() {
+  guest_console_log "$1" | tr -d '\r' | sed -n "s/.*PROBE-$2 //p" | sed 's/ *$//' | tail -1
+}
+
+probe_reported() {
+  [ -n "$(probe_value "$1" "$2")" ]
+}
+
+probe_vm_succeeds() {
+  local name=$1 subnet=$2 tag=$3 address=$4
+  probe_vm_manifest "$name" "$subnet" "$tag" "$address" | kubectl -n "$NS" apply -f -
+  wait_jsonpath 600 Running -n "$NS" get virtualmachine "$name" -o jsonpath='{.status.phase}'
+  retry_until 300 probe_reported "$name" "$tag"
+  expect_equal ok "$(probe_value "$name" "$tag")" "guest ping $tag to $address"
+}
+
+probe_vm_cleanup() {
+  local name=$1 status=$2
+  if [ "$status" -ne 0 ]; then
+    guest_console_log "$name" >&2 || true
+    kubectl -n "$NS" get virtualmachine "$name" -o yaml >&2 || true
+  fi
+  kubectl -n "$NS" delete virtualmachine "$name" --ignore-not-found
+  wait_gone 180 virtualmachine "$name" -n "$NS"
+  wait_empty 180 -n "$NS" get pods -l "kubevirt.io/domain=$name"
+  wait_gone 180 datavolume "$name-root" -n "$NS"
+}
+
+internet_gateway_manifest() {
+  cat <<GATEWAY
+apiVersion: bedrock.cloudyfolks.io/v1alpha1
+kind: ElasticIP
+metadata:
+  name: igw-ip
+spec:
+  providerNetwork: public
+  target:
+    kind: InternetGateway
+    name: igw1
+---
+apiVersion: bedrock.cloudyfolks.io/v1alpha1
+kind: InternetGateway
+metadata:
+  name: igw1
+spec:
+  networkRef: $TENANT
+  elasticIPRef: igw-ip
+GATEWAY
+}
+
+internet_gateway_cleanup() {
+  probe_vm_cleanup igw-probe "$1"
+  kubectl -n "$NS" delete internetgateway igw1 --ignore-not-found
+  wait_gone 180 internetgateway igw1 -n "$NS"
+  kubectl -n "$NS" delete elasticip igw-ip --ignore-not-found
+  wait_gone 180 elasticip igw-ip -n "$NS"
+  wait_empty 180 get ovn-snat-rules.fabric.cloudyfolks.io -l bedrock.cloudyfolks.io/name=igw1
+  wait_empty 180 get ovn-eips.fabric.cloudyfolks.io -l bedrock.cloudyfolks.io/name=igw-ip
+}
+
+internet_gateway_checks() {
+  local address
+  internet_gateway_manifest | kubectl -n "$NS" apply -f -
+  wait_reason 120 elasticip igw-ip Ready Attached -n "$NS"
+  wait_reason 180 internetgateway igw1 Ready Programmed -n "$NS"
+  address=$(elastic_ip_address igw-ip)
+  provider_pool_address "$address"
+  expect_equal 1 "$(fabric_by_label ovn-snat-rules InternetGateway igw1 -o name | wc -l)" "one snat rule for the one range of the Network"
+  expect_contains "$(kubectl -n kube-system exec deployment/ovn-central -- ovn-nbctl lr-nat-list "$TENANT")" "$address" "snat row of the gateway address"
+  probe_vm_succeeds igw-probe default igw 192.0.2.250
+}
+
+network_internet_gateway() {
+  (
+    trap 'internet_gateway_cleanup "$?"' EXIT
+    internet_gateway_checks
+  )
+}
+
+peer_network_manifest() {
+  cat <<NETWORK
+apiVersion: bedrock.cloudyfolks.io/v1alpha1
+kind: Network
+metadata:
+  name: peer
+spec:
+  tenantRef: $TENANT
+  cidrs: ["10.101.0.0/16"]
+---
+apiVersion: bedrock.cloudyfolks.io/v1alpha1
+kind: NetworkPeering
+metadata:
+  name: $TENANT-peer
+spec:
+  networkRefs: [$TENANT, peer]
+NETWORK
+}
+
+peer_subnet_manifest() {
+  cat <<SUBNET
+apiVersion: bedrock.cloudyfolks.io/v1alpha1
+kind: Subnet
+metadata:
+  name: peer
+spec:
+  networkRef: peer
+  cidr: 10.101.0.0/24
+SUBNET
+}
+
+peering_cleanup() {
+  probe_vm_cleanup peer-probe "$1"
+  kubectl delete networkpeering "$TENANT-peer" --ignore-not-found
+  wait_gone 180 networkpeering "$TENANT-peer"
+  kubectl -n "$NS" delete subnet peer --ignore-not-found
+  wait_gone 180 subnet peer -n "$NS"
+  kubectl delete network peer --ignore-not-found
+  wait_gone 180 network peer
+}
+
+peering_checks() {
+  peer_network_manifest | kubectl apply -f -
+  wait_reason 180 network peer Ready VpcReady
+  peer_subnet_manifest | kubectl -n "$NS" apply -f -
+  wait_reason 120 subnet peer Ready Applied -n "$NS"
+  wait_reason 180 networkpeering "$TENANT-peer" Ready Programmed
+  expect_contains "$(kubectl get networkpeering "$TENANT-peer" -o jsonpath='{.status.connectCIDR}')" "169.254." "connect network from the peering range"
+  expect_contains "$(kubectl get vpcs.fabric.cloudyfolks.io "$TENANT" -o jsonpath='{.spec.vpcPeerings}')" peer "peering in the Vpc of the tenant Network"
+  expect_contains "$(kubectl get vpcs.fabric.cloudyfolks.io peer -o jsonpath='{.spec.vpcPeerings}')" "$TENANT" "peering in the Vpc of the peer Network"
+  expect_contains "$(kubectl get vpcs.fabric.cloudyfolks.io "$TENANT" -o jsonpath='{.spec.staticRoutes}')" 10.101.0.0/16 "route to the peer Network"
+  probe_vm_succeeds peer-probe peer peering "$(vm_address)"
+  kubectl delete networkpeering "$TENANT-peer"
+  wait_gone 180 networkpeering "$TENANT-peer"
+  wait_jsonpath 180 "" get vpcs.fabric.cloudyfolks.io "$TENANT" -o jsonpath='{.spec.vpcPeerings}'
+  wait_jsonpath 180 "" get vpcs.fabric.cloudyfolks.io peer -o jsonpath='{.spec.vpcPeerings}'
+  wait_jsonpath 180 "" get vpcs.fabric.cloudyfolks.io "$TENANT" -o jsonpath='{.spec.staticRoutes}'
+}
+
+network_peering() {
+  (
+    trap 'peering_cleanup "$?"' EXIT
+    peering_checks
+  )
+}
+
+internal_load_balancer_cleanup() {
+  kubectl -n "$NS" delete loadbalancer ilb1 --ignore-not-found
+  wait_gone 180 loadbalancer ilb1 -n "$NS"
+  wait_empty 180 get vips.fabric.cloudyfolks.io -l bedrock.cloudyfolks.io/name=ilb1
+  wait_empty 180 get switch-lb-rules.fabric.cloudyfolks.io -l bedrock.cloudyfolks.io/name=ilb1
+}
+
+internal_load_balancer_checks() {
+  local address
+  kubectl -n "$NS" apply -f - <<BALANCER
+apiVersion: bedrock.cloudyfolks.io/v1alpha1
+kind: LoadBalancer
+metadata:
+  name: ilb1
+spec:
+  listeners:
+    - port: 8080
+      protocol: TCP
+      targets:
+        - vmRef: vm1
+          port: 8080
+BALANCER
+  wait_reason 180 loadbalancer ilb1 Ready Programmed -n "$NS"
+  address=$(kubectl -n "$NS" get loadbalancer ilb1 -o jsonpath='{.status.address}')
+  expect_equal "100.69.0.0/24 100.69.0.1" "$(kubectl get subnets.fabric.cloudyfolks.io "$TENANT-lb" -o jsonpath='{.spec.cidrBlock} {.spec.gateway}')" "load balancer plane"
+  expect_equal "$TENANT-lb" "$(fabric_by_label vips LoadBalancer ilb1 -o jsonpath='{.items[0].spec.subnet}')" "vip subnet"
+  expect_equal "$address" "$(fabric_by_label vips LoadBalancer ilb1 -o jsonpath='{.items[0].status.v4ip}')" "vip address"
+  case "$address" in
+  100.69.0.[0-9]*) ;;
+  *)
+    echo "vip $address is not in the load balancer plane" >&2
+    return 1
+    ;;
+  esac
+  expect_equal "" "$(fabric_by_label vips LoadBalancer ilb1 -o jsonpath='{.items[0].spec.type}')" "vip type"
+  expect_contains "$(kubectl -n kube-system exec deployment/ovn-central -- ovn-nbctl list Load_Balancer)" "\"$address:8080\"" "load balancer vip in OVN"
+}
+
+network_internal_load_balancer() {
+  (
+    trap internal_load_balancer_cleanup EXIT
+    internal_load_balancer_checks
+  )
+}
+
+services_settings() {
+  local provider=$1 range=$2 resolver=$3
+  kubectl patch setting network.services.provider-network --type merge -p "{\"spec\":{\"value\":\"$provider\"}}"
+  kubectl patch setting network.services.identity-range --type merge -p "{\"spec\":{\"value\":\"$range\"}}"
+  kubectl patch setting network.services.resolver --type merge -p "{\"spec\":{\"value\":\"$resolver\"}}"
+}
+
+services_cleanup() {
+  services_settings "" "" ""
+}
+
+services_checks() {
+  local identity
+  services_settings services 203.0.113.240/29 203.0.113.10
+  wait_not_empty 180 get network "$TENANT" -o jsonpath='{.status.servicesIdentity}'
+  wait_reason 180 network "$TENANT" ExternalReady Connected
+  identity=$(kubectl get network "$TENANT" -o jsonpath='{.status.servicesIdentity}')
+  case "$identity" in
+  203.0.113.24[1-6]) ;;
+  *)
+    echo "services identity $identity is not a usable address of 203.0.113.240/29" >&2
+    return 1
+    ;;
+  esac
+  expect_equal "$identity" "$(kubectl get ovn-eips.fabric.cloudyfolks.io "$TENANT-services-snat" -o jsonpath='{.spec.v4Ip}')" "identity address of the Fabric eip"
+  expect_equal 3 "$(kubectl get ovn-snat-rules.fabric.cloudyfolks.io -o name | grep -c "/$TENANT-services-snat-")" "identity snat rules"
+  expect_contains "$(kubectl get vpcs.fabric.cloudyfolks.io "$TENANT" -o jsonpath='{.spec.extraExternalSubnets}')" provider-services "services plane in the Vpc"
+}
+
+network_services_identity() {
+  (
+    trap services_cleanup EXIT
+    services_checks
+  )
 }

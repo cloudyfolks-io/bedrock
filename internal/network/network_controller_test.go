@@ -243,6 +243,22 @@ func TestNetworkReconcilerRefusesARangeInAReservedRange(t *testing.T) {
 	}
 }
 
+func TestNetworkReconcilerRefusesARangeThatOverlapsTheLoadBalancerPlane(t *testing.T) {
+	c := cleanEnv(t)
+	setSetting(t, "network.reserved-cidrs", "192.0.2.0/24")
+	network := networkOfRanges(unique(t, "net"), "acme", "10.100.0.0/16", "100.69.0.0/16")
+	requireAccepted(t, c, network)
+	reconcileNetwork(t, c, network.Name)
+	got := getNetwork(t, c, network.Name)
+	requireCondition(t, got.Status.Conditions, v1alpha1.ConditionReady, metav1.ConditionFalse, ReasonCIDRReserved)
+	if message := meta.FindStatusCondition(got.Status.Conditions, v1alpha1.ConditionReady).Message; !strings.Contains(message, "load balancer plane") {
+		t.Fatalf("message %q", message)
+	}
+	if _, err := getObject(context.Background(), c, fabric.VpcGVK, network.Name); !apierrors.IsNotFound(err) {
+		t.Fatalf("no Fabric Vpc expected: %v", err)
+	}
+}
+
 func TestNetworkReconcilerKeepsAProvisionedNetworkInAReservedRange(t *testing.T) {
 	c := cleanEnv(t)
 	setSetting(t, "network.reserved-cidrs", "192.0.2.0/24")
@@ -541,6 +557,58 @@ func TestNetworkDeletionWaitsForSubnets(t *testing.T) {
 	var gone v1alpha1.Network
 	if err := c.Get(ctx, client.ObjectKey{Name: network.Name}, &gone); !apierrors.IsNotFound(err) {
 		t.Fatalf("the finalizer must be gone: %v", err)
+	}
+}
+
+func TestNetworkDeletionNamesTheLoadBalancersThatHoldThePlane(t *testing.T) {
+	c := cleanEnv(t)
+	ctx := context.Background()
+	network := createNetwork(t, c)
+	reconcileNetwork(t, c, network.Name)
+	balancer := &v1alpha1.LoadBalancer{ObjectMeta: metav1.ObjectMeta{Name: "web", Namespace: "acme-shop", UID: "balancer-uid"}}
+	vip := fabric.Vip(fabric.Meta{Name: "acme-shop-web-vip", Annotations: OwnerAnnotations(balancer)}, "acme-shop", LBSubnetName(network.Name))
+	if err := c.Create(ctx, vip); err != nil {
+		t.Fatal(err)
+	}
+	if err := c.Delete(ctx, &network); err != nil {
+		t.Fatal(err)
+	}
+	if result := reconcileNetwork(t, c, network.Name); result.RequeueAfter != terminatingRequeue {
+		t.Fatalf("result %+v", result)
+	}
+	got := getNetwork(t, c, network.Name)
+	requireCondition(t, got.Status.Conditions, v1alpha1.ConditionReady, metav1.ConditionFalse, ReasonTerminating)
+	if message := meta.FindStatusCondition(got.Status.Conditions, v1alpha1.ConditionReady).Message; !strings.Contains(message, "acme-shop/web") {
+		t.Fatalf("the message must name the load balancer: %q", message)
+	}
+	if _, err := getObject(ctx, c, fabric.SubnetGVK, LBSubnetName(network.Name)); err != nil {
+		t.Fatalf("the plane Subnet must stay while a Vip holds it: %v", err)
+	}
+	if err := c.Delete(ctx, vip); err != nil {
+		t.Fatal(err)
+	}
+	reconcileNetwork(t, c, network.Name)
+	if err := c.Get(ctx, client.ObjectKey{Name: network.Name}, &v1alpha1.Network{}); !apierrors.IsNotFound(err) {
+		t.Fatalf("the Network must go once the plane is free: %v", err)
+	}
+}
+
+func TestNetworkDeletionReportsAPlaneThatFabricKeeps(t *testing.T) {
+	c := cleanEnv(t)
+	ctx := context.Background()
+	network := createNetwork(t, c)
+	reconcileNetwork(t, c, network.Name)
+	changeFabricObject(t, c, fabric.SubnetGVK, LBSubnetName(network.Name), hold)
+	if err := c.Delete(ctx, &network); err != nil {
+		t.Fatal(err)
+	}
+	if result := reconcileNetwork(t, c, network.Name); result.RequeueAfter != terminatingRequeue {
+		t.Fatalf("result %+v", result)
+	}
+	got := getNetwork(t, c, network.Name)
+	requireCondition(t, got.Status.Conditions, v1alpha1.ConditionReady, metav1.ConditionFalse, ReasonTerminating)
+	if message := meta.FindStatusCondition(got.Status.Conditions, v1alpha1.ConditionReady).Message; !strings.Contains(message, LBSubnetName(network.Name)) {
+		t.Fatalf("the message must name the plane Subnet: %q", message)
 	}
 }
 

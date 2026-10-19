@@ -83,6 +83,9 @@ Both Secrets are Secrets of the project, and the Build names them.
 
 The build pod has one interface on the Subnet of `network.subnetRef`.
 It uses the DNS servers of the Subnet.
+When the Subnet has none, it uses the Setting `network.dns-servers`, and then the Setting `network.services.resolver`.
+With none of them, the Build waits with the reason `NoDNSServers`.
+The pod never uses the DNS of the cluster.
 The pod must reach the git server, the registry and the registries of the base images.
 The project needs an internet gateway or an elastic IP for this.
 Without it, the clone fails and the log shows the error.
@@ -164,6 +167,7 @@ The operator tries again every 30 seconds.
 | `InvalidSpec` | The timeout is below 1 second or above `build.max-timeout`, or a build Setting is not valid. | Create a new Build with a valid timeout, or ask an administrator to change the Setting. |
 | `SubnetNotFound` | The Subnet of `network.subnetRef` does not exist. | Create the Subnet or use the name of another one. |
 | `SubnetNotReady` | The Subnet or its network is not ready. | Wait, or read the condition of the Subnet. |
+| `NoDNSServers` | The Subnet has no `dnsServers`, and the Settings `network.dns-servers` and `network.services.resolver` are empty. A build never uses the cluster DNS. | Set `dnsServers` on the Subnet, or set one of the two Settings. |
 | `WaitingForDefaultSecurityGroup` | The default security group of the project does not exist yet. | Wait. The network area makes it. |
 | `SecretNotFound` | The git Secret or the push Secret does not exist in the namespace. | Create the Secret. The operator starts the build when it exists. |
 | `SecretTypeInvalid` | The push Secret is not of the type `kubernetes.io/dockerconfigjson`, or the git Secret has no `username` or no `token`. | Correct the Secret. |
