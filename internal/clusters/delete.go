@@ -20,7 +20,10 @@ import (
 	"github.com/cloudyfolks-io/bedrock/api/v1alpha1"
 )
 
-const deleteRetry = 5 * time.Second
+const (
+	deleteRetry  = 5 * time.Second
+	cleanupGrace = 5 * time.Minute
+)
 
 type deleteStep struct {
 	Message string
@@ -306,36 +309,51 @@ func (r *Reconciler) staleWorkers(ctx context.Context, cluster v1alpha1.Kubernet
 	return names, nil
 }
 
-func (r *Reconciler) pruneWorkers(ctx context.Context, cluster v1alpha1.KubernetesCluster) (bool, error) {
+func (r *Reconciler) pruneWorkers(ctx context.Context, cluster v1alpha1.KubernetesCluster) (bool, *Gate, error) {
 	vms, err := r.clusterVMs(ctx, cluster)
 	if err != nil {
-		return false, err
+		return false, nil, err
 	}
 	stale, err := r.staleWorkers(ctx, cluster, vms)
 	if err != nil {
-		return false, err
+		return false, nil, err
 	}
 	pending := false
+	var stuck *Gate
 	for _, worker := range stale {
-		waiting, err := r.pruneWorker(ctx, cluster, worker, vms)
+		waiting, gate, err := r.pruneWorker(ctx, cluster, worker, vms)
 		if err != nil {
-			return false, err
+			return false, nil, err
 		}
 		pending = pending || waiting
+		if stuck == nil {
+			stuck = gate
+		}
 	}
-	return pending, nil
+	return pending, stuck, nil
 }
 
-func (r *Reconciler) pruneWorker(ctx context.Context, cluster v1alpha1.KubernetesCluster, worker string, vms []v1alpha1.VirtualMachine) (bool, error) {
+func (r *Reconciler) pruneWorker(ctx context.Context, cluster v1alpha1.KubernetesCluster, worker string, vms []v1alpha1.VirtualMachine) (bool, *Gate, error) {
 	index := slices.IndexFunc(vms, func(vm v1alpha1.VirtualMachine) bool { return vm.Labels[LabelWorker] == worker })
 	if index >= 0 {
 		if vms[index].DeletionTimestamp.IsZero() {
-			return true, client.IgnoreNotFound(r.Client.Delete(ctx, &vms[index]))
+			return true, nil, client.IgnoreNotFound(r.Client.Delete(ctx, &vms[index]))
 		}
-		return true, nil
+		return true, nil, nil
 	}
 	if err := r.deleteTokenRequest(ctx, cluster, worker); err != nil {
-		return false, err
+		return false, nil, err
 	}
-	return false, r.deleteCloudInit(ctx, cluster, worker)
+	if err := r.deleteCloudInit(ctx, cluster, worker); err != nil {
+		return false, nil, err
+	}
+	return false, r.stuckTokenRequest(ctx, cluster, worker), nil
+}
+
+func (r *Reconciler) stuckTokenRequest(ctx context.Context, cluster v1alpha1.KubernetesCluster, worker string) *Gate {
+	request, found, err := r.tokenRequest(ctx, cluster, worker)
+	if err != nil || !found || request.GetDeletionTimestamp().IsZero() || r.now().Sub(request.GetDeletionTimestamp().Time) < cleanupGrace {
+		return nil
+	}
+	return gateOf(ReasonWorkerCleanupPending, "the token request %s of the removed worker %q has been deleting for more than %s: check that the k0smotron operator runs", request.GetName(), worker, cleanupGrace)
 }

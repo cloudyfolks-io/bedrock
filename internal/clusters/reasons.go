@@ -21,6 +21,7 @@ const (
 	ReasonControlPlaneNotReady  = "ControlPlaneNotReady"
 	ReasonWorkersNotReady       = "WorkersNotReady"
 	ReasonWorkerFailed          = "WorkerFailed"
+	ReasonWorkerCleanupPending  = "WorkerCleanupPending"
 	ReasonSuspending            = "Suspending"
 	ReasonSuspended             = "Suspended"
 	ReasonReady                 = "Ready"
@@ -32,7 +33,7 @@ func Reasons() []string {
 		ReasonNotInProject, ReasonInvalidSpec, ReasonAddonDisabled, ReasonSubnetNotFound, ReasonSubnetNotReady,
 		ReasonNoExternalPath, ReasonSecurityGroupNotReady, ReasonCIDROverlap, ReasonVersionNotAllowed,
 		ReasonAddressOutsideSubnet, ReasonAddressReserved, ReasonAddressInUse, ReasonAddressExhausted, ReasonExcludeIPsInvalid,
-		ReasonApplyFailed, ReasonNameConflict, ReasonControlPlaneNotReady, ReasonWorkersNotReady, ReasonWorkerFailed,
+		ReasonApplyFailed, ReasonNameConflict, ReasonControlPlaneNotReady, ReasonWorkersNotReady, ReasonWorkerFailed, ReasonWorkerCleanupPending,
 		ReasonSuspending, ReasonSuspended, ReasonReady, ReasonDeleting,
 	}
 }

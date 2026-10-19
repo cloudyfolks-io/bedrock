@@ -31,10 +31,16 @@ func (r *Reconciler) ownedVM(ctx context.Context, cluster v1alpha1.KubernetesClu
 }
 
 func (r *Reconciler) syncWorkers(ctx context.Context, cluster v1alpha1.KubernetesCluster, labels map[string]string) (outcome, error) {
-	pruning, err := r.pruneWorkers(ctx, cluster)
+	pruning, stuck, err := r.pruneWorkers(ctx, cluster)
 	if err != nil {
 		return outcome{}, err
 	}
+	done, err := r.provisionPending(ctx, cluster, labels, pruning)
+	done.Gate = stuck
+	return done, err
+}
+
+func (r *Reconciler) provisionPending(ctx context.Context, cluster v1alpha1.KubernetesCluster, labels map[string]string, pruning bool) (outcome, error) {
 	var pending *v1alpha1.KubernetesWorker
 	for index := range cluster.Spec.Workers {
 		worker := cluster.Spec.Workers[index]

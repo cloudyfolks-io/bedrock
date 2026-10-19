@@ -213,6 +213,7 @@ The condition `Ready` has one of these reasons.
 | `ControlPlaneNotReady` | The control plane pod is not ready, or the kubeconfig does not exist. | Wait. Check the pod `kmc-<cluster>-0` and the security groups. |
 | `WorkersNotReady` | A worker has no VM yet or its VM does not run. | Wait. Check the VM. |
 | `WorkerFailed` | A worker VM has the phase `Failed`. | Check the VM and recreate the worker. |
+| `WorkerCleanupPending` | The token request of a removed worker has been deleting for more than 5 minutes. | Check that the k0smotron operator runs. |
 | `Suspending` | The workers are still stopping. | Wait. |
 | `Suspended` | Every worker is stopped. | Set `suspended` to `false` to start them. |
 | `Ready` | The control plane is ready and every worker VM runs. | None. |

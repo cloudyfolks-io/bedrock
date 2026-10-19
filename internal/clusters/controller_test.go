@@ -627,3 +627,26 @@ func TestAControlPlaneThatIsNotOwnedByTheClusterIsNeverReady(t *testing.T) {
 		t.Fatalf("view %+v err %v", view, err)
 	}
 }
+
+func TestAStuckTokenRequestOfARemovedWorkerSetsACondition(t *testing.T) {
+	h := newHarness(t)
+	h.create(twoWorkerCluster("prod"))
+	provisioned(t, h, "prod")
+	h.reconcile("prod")
+	h.issueToken("prod", "a", "TOKEN-A")
+	request, _ := h.tokenRequest("prod-a")
+	request.SetFinalizers([]string{"k0smotron.io/finalizer"})
+	if err := h.client.Update(context.Background(), request); err != nil {
+		t.Fatal(err)
+	}
+	h.setSpec("prod", func(c *v1alpha1.KubernetesCluster) { c.Spec.Workers = c.Spec.Workers[1:] })
+	h.reconcile("prod")
+	if _, reason := h.readyReason("prod"); reason == ReasonWorkerCleanupPending {
+		t.Fatal("a fresh deletion is not stuck")
+	}
+	h.now = epoch.Add(240 * time.Hour)
+	h.reconcile("prod")
+	if status, reason := h.readyReason("prod"); status != "False" || reason != ReasonWorkerCleanupPending {
+		t.Fatalf("ready %s %s", status, reason)
+	}
+}
