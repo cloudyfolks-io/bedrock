@@ -15,6 +15,8 @@ const (
 	encryptionRetired   = "retired"
 	encryptionFailure   = ".apply-failed"
 	encryptionHandled   = ".grant-handled"
+	encryptionProgress  = ".apply-in-progress"
+	encryptionPrevious  = ".apply-previous"
 	encryptionFileStamp = ".yaml"
 	localAPIServer      = "https://127.0.0.1:6443"
 )

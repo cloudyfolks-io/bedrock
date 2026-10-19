@@ -19,7 +19,7 @@ import (
 	"github.com/cloudyfolks-io/bedrock/internal/k0s"
 )
 
-func ApplyEncryption(ctx context.Context, c client.Client, deps Deps) error {
+func ApplyEncryption(ctx context.Context, c client.Client, deps Deps, report func() error) error {
 	var own v1alpha1.Host
 	if err := c.Get(ctx, client.ObjectKey{Name: deps.Node}, &own); err != nil {
 		return client.IgnoreNotFound(err)
@@ -36,7 +36,11 @@ func ApplyEncryption(ctx context.Context, c client.Client, deps Deps) error {
 	if err != nil {
 		return nil
 	}
+	interrupted := readEncryptionMarker(deps.Root, encryptionProgress) == grant
 	if encryption.Hash(current) == grant && !encryptionRestartWanted(deps.Root) {
+		if interrupted {
+			return settleInterruptedApply(ctx, deps, grant)
+		}
 		return recordHandledGrant(deps.Root, grant)
 	}
 	target, err := readEncryptionSecret(ctx, deps)
@@ -49,10 +53,33 @@ func ApplyEncryption(ctx context.Context, c client.Client, deps Deps) error {
 	if err := removeIfExists(filepath.Join(deps.Root, encryptionDir, encryptionHandled)); err != nil {
 		return err
 	}
-	if err := applyEncryptionConfig(ctx, deps, current, target, grant); err != nil || ctx.Err() != nil {
+	_ = report()
+	previous := current
+	if stored, err := os.ReadFile(filepath.Join(deps.Root, encryptionDir, encryptionPrevious)); interrupted && err == nil {
+		previous = stored
+	}
+	if err := applyEncryptionConfig(ctx, deps, previous, target, grant); err != nil || ctx.Err() != nil {
 		return err
 	}
 	return recordHandledGrant(deps.Root, grant)
+}
+
+func settleInterruptedApply(ctx context.Context, deps Deps, grant string) error {
+	observed, err := waitClear(ctx, deps.K0sTimeout, deps.K0sPoll, func(probeCtx context.Context) string {
+		return encryptionRestartProblem(probeCtx, deps)
+	})
+	if ctx.Err() != nil {
+		return ctx.Err()
+	}
+	if err == nil {
+		return errors.Join(clearEncryptionProgress(deps.Root), recordHandledGrant(deps.Root, grant))
+	}
+	previous, readErr := os.ReadFile(filepath.Join(deps.Root, encryptionDir, encryptionPrevious))
+	if readErr != nil {
+		return errors.Join(fmt.Errorf("kube-apiserver does not answer with the written config (%s) and no previous file exists", observed), recordEncryptionFailure(deps.Root, grant))
+	}
+	failure := fmt.Errorf("kube-apiserver does not answer with the written config: %s", observed)
+	return errors.Join(failure, rollbackEncryption(ctx, deps, previous, "", grant))
 }
 
 func recordHandledGrant(root, grant string) error {
@@ -80,10 +107,13 @@ func readEncryptionSecret(ctx context.Context, deps Deps) ([]byte, error) {
 	return content, nil
 }
 
-func applyEncryptionConfig(ctx context.Context, deps Deps, current, target []byte, grant string) error {
+func applyEncryptionConfig(ctx context.Context, deps Deps, previous, target []byte, grant string) error {
+	if err := writeEncryptionProgress(deps.Root, previous, grant); err != nil {
+		return err
+	}
 	retired := ""
-	if encryption.DropsKey(current, target) {
-		path, err := retireEncryptionFile(deps, current)
+	if encryption.DropsKey(previous, target) {
+		path, err := retireEncryptionFile(deps, previous)
 		if err != nil {
 			return err
 		}
@@ -94,9 +124,9 @@ func applyEncryptionConfig(ctx context.Context, deps Deps, current, target []byt
 	}
 	restartErr := restartForEncryption(ctx, deps)
 	if restartErr == nil {
-		return removeIfExists(filepath.Join(deps.Root, encryptionDir, encryptionFailure))
+		return errors.Join(removeIfExists(filepath.Join(deps.Root, encryptionDir, encryptionFailure)), clearEncryptionProgress(deps.Root))
 	}
-	return errors.Join(restartErr, rollbackEncryption(ctx, deps, current, retired, grant))
+	return errors.Join(restartErr, rollbackEncryption(ctx, deps, previous, retired, grant))
 }
 
 func rollbackEncryption(ctx context.Context, deps Deps, previous []byte, retired, grant string) error {
@@ -108,7 +138,21 @@ func rollbackEncryption(ctx context.Context, deps Deps, previous []byte, retired
 		removeIfExists(retired),
 		recordEncryptionFailure(deps.Root, grant),
 		restartForEncryption(ctx, deps),
+		clearEncryptionProgress(deps.Root),
 	)
+}
+
+func writeEncryptionProgress(root string, previous []byte, grant string) error {
+	dir := filepath.Join(root, encryptionDir)
+	if err := os.WriteFile(filepath.Join(dir, encryptionPrevious), previous, 0o600); err != nil {
+		return err
+	}
+	return os.WriteFile(filepath.Join(dir, encryptionProgress), []byte(grant), 0o600)
+}
+
+func clearEncryptionProgress(root string) error {
+	dir := filepath.Join(root, encryptionDir)
+	return errors.Join(removeIfExists(filepath.Join(dir, encryptionProgress)), removeIfExists(filepath.Join(dir, encryptionPrevious)))
 }
 
 func writeEncryptionFile(deps Deps, content []byte) error {
