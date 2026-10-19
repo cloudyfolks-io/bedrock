@@ -22,7 +22,7 @@ The condition `Ready` shows the reason `NotInProject`.
 | `preference` | Name of a cluster preference. The image preference is the default. |
 | `image` | Name and scope (`cluster` or `project`) of the root disk image. |
 | `rootDisk` | `sizeGi` and an optional `storageClass`. |
-| `disks` | List of Volumes with an optional bus. |
+| `disks` | List of Volumes with an optional bus and an optional `serial`. |
 | `cdroms` | List of ISO image names. |
 | `networks` | List of Subnets with security groups, an optional MAC address and an optional fixed `address`. |
 | `cloudInit` | `userData`, `networkData` or a `secretRef`. |
@@ -195,10 +195,31 @@ The request must be a same-origin WebSocket request.
 The proxy removes the credentials of the caller before it calls KubeVirt.
 The VM status shows the console paths in `status.console`.
 
+## Guest identity
+
+A guest reads its identity from the virtual hardware.
+Windows activation depends on it.
+
+The Settings `virt.smbios.manufacturer`, `virt.smbios.product`, `virt.smbios.family`, `virt.smbios.version` and `virt.smbios.sku` set the SMBIOS values of all guests.
+An empty Setting keeps the KubeVirt value.
+A change of one of these Settings does not restart a running VM.
+The new value applies at the next start of each VM.
+
+`firmware.uuid` and `firmware.serial` set the UUID and the serial number of one VM.
+You cannot change them, add them or remove them after the VM exists.
+Without them KubeVirt derives the UUID from the VM name.
+
+`disks[].serial` sets the serial number of one disk.
+Without it the serial is a fixed value that the operator derives from the Volume name.
+A serial has at most 36 characters.
+It can hold letters, digits, dot, underscore and dash.
+A change applies at the next start of the VM.
+
 ## Settings
 
 | Setting | Effect |
 |---|---|
+| `virt.smbios.manufacturer`, `.product`, `.family`, `.version`, `.sku` | The SMBIOS values of all guests. The default is empty. See Guest identity. |
 | `overcommit.cpu` | The number of vCPUs for each physical thread. The default is 4. |
 | `overcommit.memory` | The memory overcommit ratio. The minimum is 0.1. The default is 1.0. |
 | `migration.parallel` | The number of live migrations at the same time in the cluster. |

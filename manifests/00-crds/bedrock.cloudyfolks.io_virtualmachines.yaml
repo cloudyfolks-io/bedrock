@@ -94,6 +94,10 @@ spec:
                       - sata
                       - scsi
                       type: string
+                    serial:
+                      maxLength: 36
+                      pattern: ^[A-Za-z0-9._-]+$
+                      type: string
                     volumeRef:
                       maxLength: 253
                       minLength: 1
@@ -118,10 +122,17 @@ spec:
                 properties:
                   secureBoot:
                     type: boolean
+                  serial:
+                    maxLength: 64
+                    pattern: ^[A-Za-z0-9._-]+$
+                    type: string
                   tpm:
                     type: boolean
                   uefi:
                     type: boolean
+                  uuid:
+                    pattern: ^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$
+                    type: string
                 type: object
                 x-kubernetes-validations:
                 - message: secureBoot requires uefi
@@ -1162,6 +1173,14 @@ spec:
             x-kubernetes-validations:
             - message: image.name must be a DNS subdomain
               rule: '!has(self.image) || self.image.name.matches(''^[a-z0-9]([-a-z0-9.]*[a-z0-9])?$'')'
+            - message: firmware.uuid is immutable
+              rule: (has(self.firmware) && has(self.firmware.uuid)) == (has(oldSelf.firmware)
+                && has(oldSelf.firmware.uuid)) && (!(has(self.firmware) && has(self.firmware.uuid))
+                || self.firmware.uuid == oldSelf.firmware.uuid)
+            - message: firmware.serial is immutable
+              rule: (has(self.firmware) && has(self.firmware.serial)) == (has(oldSelf.firmware)
+                && has(oldSelf.firmware.serial)) && (!(has(self.firmware) && has(self.firmware.serial))
+                || self.firmware.serial == oldSelf.firmware.serial)
           status:
             properties:
               addresses:

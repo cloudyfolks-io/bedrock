@@ -1,6 +1,7 @@
 package operator
 
 import (
+	"reflect"
 	"slices"
 	"strings"
 	"testing"
@@ -142,5 +143,39 @@ func TestRenderVirtualizationRejectsBadTuning(t *testing.T) {
 		if err == nil || !strings.Contains(err.Error(), tc.key) {
 			t.Errorf("%s=%s: error %v", tc.key, tc.value, err)
 		}
+	}
+}
+
+func TestRenderVirtualizationSMBIOS(t *testing.T) {
+	render := func(values map[string]string) map[string]any {
+		values["virt.emulation"] = "false"
+		out, err := RenderVirtualization(AddonInput{Settings: values})
+		if err != nil {
+			t.Fatal(err)
+		}
+		configuration, _, _ := unstructured.NestedMap(findObject(out.Objects, "KubeVirt", "kubevirt").Object, "spec", "configuration")
+		return configuration
+	}
+	if _, found := render(map[string]string{})["smbios"]; found {
+		t.Fatal("smbios must be absent when every Setting is empty")
+	}
+	all := render(map[string]string{
+		"virt.smbios.manufacturer": "Cloudyfolks", "virt.smbios.product": "Bedrock", "virt.smbios.family": "Bedrock",
+		"virt.smbios.version": "1.0", "virt.smbios.sku": "ir-central-1",
+	})
+	want := map[string]any{"manufacturer": "Cloudyfolks", "product": "Bedrock", "family": "Bedrock", "version": "1.0", "sku": "ir-central-1"}
+	if !reflect.DeepEqual(all["smbios"], want) {
+		t.Fatalf("smbios %+v", all["smbios"])
+	}
+	partial := render(map[string]string{"virt.smbios.product": "Bedrock"})
+	if !reflect.DeepEqual(partial["smbios"], map[string]any{"product": "Bedrock"}) {
+		t.Fatalf("partial smbios %+v", partial["smbios"])
+	}
+}
+
+func TestRenderVirtualizationRejectsBadSMBIOS(t *testing.T) {
+	_, err := RenderVirtualization(AddonInput{Settings: map[string]string{"virt.emulation": "false", "virt.smbios.sku": "a\nb"}})
+	if err == nil || !strings.Contains(err.Error(), "virt.smbios.sku") {
+		t.Fatalf("error %v", err)
 	}
 }

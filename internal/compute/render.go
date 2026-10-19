@@ -169,13 +169,33 @@ func domainOf(in RenderInput) map[string]any {
 	if cpu := cpuOf(vm.Spec.CPU); cpu != nil {
 		domain["cpu"] = cpu
 	}
-	if vm.Spec.Firmware != nil && vm.Spec.Firmware.UEFI {
-		domain["firmware"] = map[string]any{"bootloader": map[string]any{"efi": map[string]any{"secureBoot": vm.Spec.Firmware.SecureBoot}}}
+	if firmware := firmwareOf(vm.Spec.Firmware); firmware != nil {
+		domain["firmware"] = firmware
 	}
 	if vm.Spec.Firmware != nil && vm.Spec.Firmware.SecureBoot {
 		domain["features"] = map[string]any{"smm": map[string]any{"enabled": true}}
 	}
 	return domain
+}
+
+func firmwareOf(firmware *v1alpha1.VMFirmware) map[string]any {
+	if firmware == nil {
+		return nil
+	}
+	out := map[string]any{}
+	if firmware.UEFI {
+		out["bootloader"] = map[string]any{"efi": map[string]any{"secureBoot": firmware.SecureBoot}}
+	}
+	if firmware.UUID != "" {
+		out["uuid"] = firmware.UUID
+	}
+	if firmware.Serial != "" {
+		out["serial"] = firmware.Serial
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
 }
 
 func cpuOf(cpu *v1alpha1.VMCPU) map[string]any {
@@ -196,7 +216,7 @@ func devicesOf(vm v1alpha1.VirtualMachine, volumes []ResolvedVolume, cdroms int,
 	devices := map[string]any{
 		"autoattachPodInterface": false,
 		"logSerialConsole":       true,
-		"disks":                  disksOf(volumes, cdroms),
+		"disks":                  disksOf(vm.Spec.Disks, volumes, cdroms),
 		"interfaces":             interfacesOf(nics),
 	}
 	if vm.Spec.Firmware != nil && vm.Spec.Firmware.TPM {
@@ -208,7 +228,7 @@ func devicesOf(vm v1alpha1.VirtualMachine, volumes []ResolvedVolume, cdroms int,
 	return devices
 }
 
-func disksOf(volumes []ResolvedVolume, cdroms int) []any {
+func disksOf(declared []v1alpha1.VMDisk, volumes []ResolvedVolume, cdroms int) []any {
 	disks := []any{map[string]any{"name": "rootdisk", "disk": map[string]any{}, "bootOrder": int64(1)}}
 	for index := 0; index < cdroms; index++ {
 		disks = append(disks, map[string]any{
@@ -223,9 +243,18 @@ func disksOf(volumes []ResolvedVolume, cdroms int) []any {
 		if volume.Bus != "" {
 			disk["bus"] = volume.Bus
 		}
-		disks = append(disks, map[string]any{"name": "vol-" + key, "disk": disk, "serial": key})
+		disks = append(disks, map[string]any{"name": "vol-" + key, "disk": disk, "serial": serialOf(declared, volume.Name, key)})
 	}
 	return append(disks, map[string]any{"name": "cloudinit", "disk": map[string]any{}})
+}
+
+func serialOf(declared []v1alpha1.VMDisk, volume, fallback string) string {
+	for _, disk := range declared {
+		if disk.VolumeRef == volume && disk.Serial != "" {
+			return disk.Serial
+		}
+	}
+	return fallback
 }
 
 func cdromDiskName(index int) string {

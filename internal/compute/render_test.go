@@ -238,6 +238,37 @@ func TestRenderFirmwareAndCPU(t *testing.T) {
 	}
 }
 
+func TestRenderFirmwareIdentity(t *testing.T) {
+	in := renderFixture()
+	in.VirtualMachine.Spec.Firmware = &v1alpha1.VMFirmware{UUID: "6f1f3a52-2f0b-4c1e-9d55-0c6f1d7a9e10", Serial: "SN-0001"}
+	firmware, _, _ := unstructured.NestedMap(templateSpec(t, mustRender(t, in)), "domain", "firmware")
+	want := map[string]any{"uuid": "6f1f3a52-2f0b-4c1e-9d55-0c6f1d7a9e10", "serial": "SN-0001"}
+	if !reflect.DeepEqual(firmware, want) {
+		t.Fatalf("firmware %+v", firmware)
+	}
+	in.VirtualMachine.Spec.Firmware.UEFI = true
+	firmware, _, _ = unstructured.NestedMap(templateSpec(t, mustRender(t, in)), "domain", "firmware")
+	secure, found, _ := unstructured.NestedBool(firmware, "bootloader", "efi", "secureBoot")
+	if firmware["uuid"] != want["uuid"] || firmware["serial"] != want["serial"] || secure || !found {
+		t.Fatalf("firmware with uefi %+v", firmware)
+	}
+	in.VirtualMachine.Spec.Firmware = &v1alpha1.VMFirmware{TPM: true}
+	if _, found, _ := unstructured.NestedFieldNoCopy(templateSpec(t, mustRender(t, in)), "domain", "firmware"); found {
+		t.Fatal("firmware must be absent without uuid, serial or uefi")
+	}
+}
+
+func TestRenderDiskSerial(t *testing.T) {
+	in := renderFixture()
+	in.VirtualMachine.Spec.Disks = []v1alpha1.VMDisk{{VolumeRef: "data1", Serial: "vol0123456789abcdef"}, {VolumeRef: "data2"}}
+	in.Volumes = []ResolvedVolume{{Name: "data1"}, {Name: "data2"}}
+	disks := list(t, templateSpec(t, mustRender(t, in)), "domain", "devices", "disks")
+	first, second := disks[2].(map[string]any), disks[3].(map[string]any)
+	if first["serial"] != "vol0123456789abcdef" || second["serial"] != DiskKey("data2") {
+		t.Fatalf("serials %+v %+v", first, second)
+	}
+}
+
 func TestRenderHostDevices(t *testing.T) {
 	spec := templateSpec(t, mustRender(t, renderFixture()))
 	want := []any{map[string]any{"name": "hostdev-0", "deviceName": "nvidia.com/GA102"}}

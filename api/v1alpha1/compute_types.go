@@ -49,6 +49,10 @@ type VMDisk struct {
 	// +kubebuilder:validation:Enum=virtio;sata;scsi
 	// +optional
 	Bus string `json:"bus,omitempty"`
+	// +kubebuilder:validation:MaxLength=36
+	// +kubebuilder:validation:Pattern=`^[A-Za-z0-9._-]+$`
+	// +optional
+	Serial string `json:"serial,omitempty"`
 }
 
 type VMCDROM struct {
@@ -111,6 +115,13 @@ type VMFirmware struct {
 	SecureBoot bool `json:"secureBoot,omitempty"`
 	// +optional
 	TPM bool `json:"tpm,omitempty"`
+	// +kubebuilder:validation:Pattern=`^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$`
+	// +optional
+	UUID string `json:"uuid,omitempty"`
+	// +kubebuilder:validation:MaxLength=64
+	// +kubebuilder:validation:Pattern=`^[A-Za-z0-9._-]+$`
+	// +optional
+	Serial string `json:"serial,omitempty"`
 }
 
 type VMCPU struct {
@@ -129,6 +140,8 @@ type VMScheduling struct {
 }
 
 // +kubebuilder:validation:XValidation:rule="!has(self.image) || self.image.name.matches('^[a-z0-9]([-a-z0-9.]*[a-z0-9])?$')",message="image.name must be a DNS subdomain"
+// +kubebuilder:validation:XValidation:rule="(has(self.firmware) && has(self.firmware.uuid)) == (has(oldSelf.firmware) && has(oldSelf.firmware.uuid)) && (!(has(self.firmware) && has(self.firmware.uuid)) || self.firmware.uuid == oldSelf.firmware.uuid)",message="firmware.uuid is immutable"
+// +kubebuilder:validation:XValidation:rule="(has(self.firmware) && has(self.firmware.serial)) == (has(oldSelf.firmware) && has(oldSelf.firmware.serial)) && (!(has(self.firmware) && has(self.firmware.serial)) || self.firmware.serial == oldSelf.firmware.serial)",message="firmware.serial is immutable"
 type VirtualMachineSpec struct {
 	// +kubebuilder:validation:MinLength=1
 	InstanceType string `json:"instanceType"`
