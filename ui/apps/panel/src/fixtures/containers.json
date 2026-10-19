@@ -1,0 +1,109 @@
+{
+  "apiVersion": "bedrock.cloudyfolks.io/v1alpha1",
+  "kind": "ContainerList",
+  "metadata": {
+    "resourceVersion": "100"
+  },
+  "items": [
+    {
+      "apiVersion": "bedrock.cloudyfolks.io/v1alpha1",
+      "kind": "Container",
+      "metadata": {
+        "name": "web",
+        "uid": "uid-container-web",
+        "resourceVersion": "100",
+        "creationTimestamp": "2026-10-01T10:00:00Z",
+        "namespace": "acme-web"
+      },
+      "spec": {
+        "image": "registry.example.test/web:1.4",
+        "ports": [
+          {
+            "name": "http",
+            "port": 8080,
+            "protocol": "TCP"
+          }
+        ],
+        "resources": {
+          "requests": {
+            "cpu": "100m",
+            "memory": "128Mi"
+          },
+          "limits": {
+            "cpu": "500m",
+            "memory": "512Mi"
+          }
+        },
+        "replicas": 2,
+        "network": {
+          "subnetRef": "default",
+          "securityGroups": [
+            "web"
+          ]
+        }
+      },
+      "status": {
+        "phase": "Running",
+        "replicas": 2,
+        "readyReplicas": 2,
+        "addresses": [
+          "10.100.0.11",
+          "10.100.0.12"
+        ],
+        "deployment": "web",
+        "conditions": [
+          {
+            "type": "Ready",
+            "status": "True",
+            "reason": "Running",
+            "message": "2 of 2 replicas are ready",
+            "lastTransitionTime": "2026-10-01T10:00:00Z"
+          }
+        ]
+      }
+    },
+    {
+      "apiVersion": "bedrock.cloudyfolks.io/v1alpha1",
+      "kind": "Container",
+      "metadata": {
+        "name": "worker",
+        "uid": "uid-container-worker",
+        "resourceVersion": "101",
+        "creationTimestamp": "2026-10-02T10:00:00Z",
+        "namespace": "acme-web"
+      },
+      "spec": {
+        "image": "registry.example.test/worker:2.0",
+        "resources": {
+          "requests": {
+            "cpu": "100m",
+            "memory": "128Mi"
+          },
+          "limits": {
+            "cpu": "500m",
+            "memory": "512Mi"
+          }
+        },
+        "replicas": 0,
+        "network": {
+          "subnetRef": "default"
+        }
+      },
+      "status": {
+        "phase": "Stopped",
+        "replicas": 0,
+        "readyReplicas": 0,
+        "deployment": "worker",
+        "conditions": [
+          {
+            "type": "Ready",
+            "status": "True",
+            "reason": "Stopped",
+            "message": "the container is stopped",
+            "lastTransitionTime": "2026-10-02T10:00:00Z"
+          }
+        ]
+      }
+    }
+  ]
+}

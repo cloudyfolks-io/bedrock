@@ -73,6 +73,16 @@ rules:
 - apiGroups:
   - apps
   resources:
+  - deployments
+  verbs:
+  - create
+  - get
+  - list
+  - patch
+  - watch
+- apiGroups:
+  - apps
+  resources:
   - controllerrevisions
   - daemonsets
   verbs:
@@ -86,6 +96,24 @@ rules:
   verbs:
   - get
   - patch
+- apiGroups:
+  - apps
+  resources:
+  - replicasets
+  verbs:
+  - list
+  - watch
+- apiGroups:
+  - autoscaling
+  resources:
+  - horizontalpodautoscalers
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - watch
 - apiGroups:
   - batch
   resources:
@@ -115,6 +143,8 @@ rules:
   - clusterimages/status
   - clusters
   - clusters/status
+  - containers
+  - containers/status
   - credentials
   - credentials/status
   - devicerequests
@@ -200,6 +230,7 @@ rules:
 - apiGroups:
   - bedrock.cloudyfolks.io
   resources:
+  - containers/finalizers
   - securitygroups/finalizers
   - subnets/finalizers
   - virtualmachines/finalizers
@@ -476,6 +507,14 @@ rules:
   - update
   - watch
 - apiGroups:
+  - node.k8s.io
+  resources:
+  - runtimeclasses
+  verbs:
+  - get
+  - list
+  - watch
+- apiGroups:
   - objectbucket.io
   resources:
   - objectbucketclaims
@@ -737,6 +776,12 @@ rules:
 - apiGroups:
   - ""
   resources:
+  - secrets
+  verbs:
+  - get
+- apiGroups:
+  - ""
+  resources:
   - nodes
   verbs:
   - get
@@ -761,4 +806,11 @@ rules:
   verbs:
   - list
   - patch
+  - watch
+- apiGroups:
+  - ""
+  resources:
+  - pods
+  verbs:
+  - list
   - watch

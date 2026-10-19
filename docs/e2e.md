@@ -274,7 +274,8 @@ The job script imports the tarballs into containerd with `k0s ctr`.
 | Image | Use |
 | --- | --- |
 | `docker.io/chrislusf/seaweedfs:4.48` | The S3 target of the VM backup. |
-| `docker.io/amazon/aws-cli:2.37.10` | The S3 client for the backup bucket and the object storage checks. |
+| `docker.io/amazon/aws-cli:2.37.10` | The S3 client for the backup bucket and the object storage checks. It also checks `setfattr` in a Kata pod. |
+| `docker.io/library/busybox:1.37.0` | The web server of the container checks. |
 
 The VM image is the cirros containerDisk from the release bundle.
 The Fabric image of the release is the pod image for network probes.
@@ -307,6 +308,7 @@ If a name changes in an area, change it in that file only.
 | `images.sh` | The ClusterImage `cirros` from the bundle. An image upload through the proxy. |
 | `compute.sh` | An SSH key, a Volume, the SecurityGroup `web` and the VM `vm1`. Hot-plug and expand. A volume snapshot. The proxy actions and the console, which the Go test runs. |
 | `network.sh` | The provider network and the Network status. The fabric-frr agent. Subnet rules. The security group on the VM. A VM with a pinned address, a Subnet MTU and Subnet DNS servers. An ElasticIP in L2 mode with the ARP and ping proof. An ElasticIP without a provider network. The ElasticIP quota. A LoadBalancer and a DNSZone. Isolation rules. |
+| `container.sh` | The proof of the pod network: a hand-made Pod and a hand-made Deployment get the network metadata of a `Container`. Then the kind itself: the runtime gate, replicas, stop and start, a fixed address, autoscale, a Volume, a LoadBalancer target, logs, exec and restart through the proxy, and the cleanup. |
 | `objectstorage.sh` | The object store, two users and one bucket. A put and a get from inside the cluster. A denied read by the other user. |
 | `backup.sh` | The SeaweedFS target. A VM backup with one entry. A restore with `replace: true`. A restore of a missing backup. |
 | `panel.sh` | The panel at `console.<host>`, the redirect from the apex, the API host and the Go test for the login and the watch stream. |
@@ -321,11 +323,49 @@ The script runs it with `-test.run` for each phase.
 | `TestProxyActions` | Start, stop, restart, migrate and snapshot through the proxy. A user without a role gets 403. |
 | `TestConsoleSerial` | The serial console WebSocket, the origin check and the guest login prompt. |
 | `TestPanelLoginAndStream` | The browserless login of the admin, the session, the access checks, the CSRF guard and the watch stream. |
+| `TestContainerStreams` | The logs of a Container, merged with the pod name, the refusal of a viewer on exec and restart, the refusal of a stranger, a pod of another container giving 404, the origin check, a command through the exec WebSocket and the restart stamp. |
 | `TestJoinFetchesEncryption` | The fetch of the encryption file with a control-plane join token. The fetched bytes equal the file on the node. |
 
 The shell and the Go test do not repeat each other.
 The shell checks objects with `kubectl`.
 The Go test checks HTTP and WebSocket flows.
+
+## Container network proof
+
+The step `container_network_proof` in `hack/e2e/tenant/container.sh` proves the pod network that the `Container` kind needs.
+The step runs after `network_isolation`.
+A failed check stops the step.
+The step makes the objects with the identity of `bedrock-operator`, because only the platform can set network annotations.
+
+| Check | Proof |
+| --- | --- |
+| Tenant refusal | A Deployment of a tenant user with the network annotations in its pod template is refused with the text `only the platform may set network selection annotations`. |
+| One interface | The pod has one interface that is not `lo`, and the pinned address `10.100.0.200`. |
+| Fabric IP object | The Fabric `IP` object has `spec.podName` equal to the pod name and the Fabric Subnet label. |
+| Pod port from a VM | A cirros VM on the same Subnet reads the page of the pod. The VM writes the result to the serial console. |
+| Load balancer endpoint | A Fabric `SwitchLBRule` with the pod address as the endpoint forwards the traffic that the VM sends to the `Vip`. |
+| Exec probe | A pod with an `exec` readiness probe becomes Ready, also as a Deployment with the strategy `Recreate`. |
+| Probe limit | A pod with an `httpGet` readiness probe never becomes Ready, because the node cannot reach the pod network. |
+| Kata | With KVM and a RuntimeClass `kata`, a pod runs, and `setxattr` works in an `emptyDir`. The step skips this check on hosts without KVM. |
+
+The step uses a `SwitchLBRule` and not a `RouterLBRule`, because a `RouterLBRule` needs an external address.
+Both kinds take the same endpoint list.
+
+## Container steps
+
+The e2e cluster has no KVM, so the kata RuntimeClass does not exist.
+The steps of `hack/e2e/tenant/container.sh` use the preloaded busybox image.
+
+| Step | Check |
+| --- | --- |
+| `container_runtime_gate` | With the default Setting `container.runtime-class` a Container has `Ready=False` with the reason `RuntimeUnavailable` and no Deployment. The step then sets the Setting to `none`. |
+| `container_lifecycle` | A Container with two replicas is `Running` with two addresses and the strategy `RollingUpdate`. Replicas 0 gives `Stopped` with `Ready=True`, and it stays `Stopped`. Replicas 2 starts it again. A Container with `address` and one replica shows the address and uses `Recreate`. `autoscale` makes a HorizontalPodAutoscaler. Removing `autoscale` with `replicas: 0` stops the Container and removes the autoscaler. |
+| `container_volume` | With the storage class `filesystem`, a Container mounts a Volume and the Volume shows `Container/stateful`. A second Container gets `VolumeInUse`. A restart keeps the data. Deleting the Container frees the Volume and keeps the claim. The step skips these checks when no `filesystem` class exists. |
+| `container_load_balancer` | A LoadBalancer with `containerRef` is `Programmed`, and the Fabric load balancer holds the address of each ready pod. |
+| `container_scale_to_zero` | With `replicas: 0` the LoadBalancer has `Idle=True` with the reason `NoReadyPods`, keeps `Ready=True` and has no `RouterLBRule`. With two replicas again the pod addresses are endpoints again and the `Idle` condition is gone. |
+| `container_quota_refusal` | A project quota of `containers` equal to the count refuses a new Container with the text `exceeded quota`. A project CPU quota below the use shows `QuotaExceeded` on a scaled Container. The step restores the quota. |
+| `container_proxy` | The Go test `TestContainerStreams` for logs, exec and restart. |
+| `container_cleanup` | Deleting the Containers removes every Deployment, autoscaler and pod. |
 
 ## Network parity checks
 

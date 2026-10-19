@@ -127,9 +127,14 @@ type ElasticIPList struct {
 	Items           []ElasticIP `json:"items"`
 }
 
+// +kubebuilder:validation:XValidation:rule="has(self.vmRef) != has(self.containerRef)",message="set exactly one of vmRef and containerRef"
 type LoadBalancerTarget struct {
 	// +kubebuilder:validation:MinLength=1
-	VMRef string `json:"vmRef"`
+	// +optional
+	VMRef string `json:"vmRef,omitempty"`
+	// +kubebuilder:validation:MinLength=1
+	// +optional
+	ContainerRef string `json:"containerRef,omitempty"`
 	// +kubebuilder:validation:Minimum=1
 	// +kubebuilder:validation:Maximum=65535
 	Port int32 `json:"port"`

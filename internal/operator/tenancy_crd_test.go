@@ -63,7 +63,7 @@ func TestProjectValidation(t *testing.T) {
 		Spec: v1alpha1.ProjectSpec{
 			TenantRef: "acme",
 			Members:   []v1alpha1.ProjectMember{{Ref: v1alpha1.SubjectRef{Kind: v1alpha1.SubjectKindGroup, Name: "devs"}, Role: v1alpha1.MemberRoleEditor}},
-			Quota:     v1alpha1.ProjectQuota{CPU: ptr.To(resource.MustParse("8")), VMs: ptr.To(int32(5))},
+			Quota:     v1alpha1.ProjectQuota{CPU: ptr.To(resource.MustParse("8")), VMs: ptr.To(int32(5)), Containers: ptr.To(int32(12))},
 		},
 	}
 	createValid(t, c, project)

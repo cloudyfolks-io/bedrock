@@ -90,6 +90,18 @@ func GroupsOfVirtualMachine(vm v1alpha1.VirtualMachine) []reconcile.Request {
 	return requests
 }
 
+func GroupsOfContainer(container v1alpha1.Container) []reconcile.Request {
+	requests := make([]reconcile.Request, len(container.Spec.Network.SecurityGroups))
+	for i, name := range container.Spec.Network.SecurityGroups {
+		requests[i] = requestOf(container.Namespace, name)
+	}
+	return requests
+}
+
+func containerPodsOnly() predicate.Predicate {
+	return predicate.NewPredicateFuncs(func(obj client.Object) bool { return obj.GetLabels()[v1alpha1.LabelKind] == "Container" })
+}
+
 func managedOnly() predicate.Predicate {
 	return predicate.NewPredicateFuncs(func(obj client.Object) bool { return obj.GetLabels()[LabelManaged] == "true" })
 }

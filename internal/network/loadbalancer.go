@@ -37,7 +37,16 @@ func listenerProtocol(spec v1alpha1.LoadBalancerListener) string {
 	return strings.ToUpper(spec.Protocol)
 }
 
-func BuildListeners(spec []v1alpha1.LoadBalancerListener, addresses map[string]string) ([]Listener, []string, *Violation) {
+const containerTargetPrefix = "Container/"
+
+func TargetKey(target v1alpha1.LoadBalancerTarget) string {
+	if target.ContainerRef != "" {
+		return containerTargetPrefix + target.ContainerRef
+	}
+	return target.VMRef
+}
+
+func BuildListeners(spec []v1alpha1.LoadBalancerListener, addresses map[string][]string) ([]Listener, []string, *Violation) {
 	listeners := make([]Listener, 0, len(spec))
 	var missing []string
 	for _, s := range spec {
@@ -49,12 +58,12 @@ func BuildListeners(spec []v1alpha1.LoadBalancerListener, addresses map[string]s
 			if t.Port != listener.TargetPort {
 				return nil, nil, &Violation{Reason: ReasonTargetPortsDiffer, Message: fmt.Sprintf("the listener %d/%s needs one port for all targets", s.Port, listener.Protocol)}
 			}
-			address, found := addresses[t.VMRef]
+			resolved, found := addresses[TargetKey(t)]
 			if !found {
-				missing = append(missing, t.VMRef)
+				missing = append(missing, TargetKey(t))
 				continue
 			}
-			listener.Endpoints = append(listener.Endpoints, address)
+			listener.Endpoints = append(listener.Endpoints, resolved...)
 		}
 		listeners = append(listeners, listener)
 	}

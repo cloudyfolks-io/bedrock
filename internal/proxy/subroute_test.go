@@ -152,6 +152,9 @@ func TestSubresourceVerbFollowsTheTable(t *testing.T) {
 		{"virtualmachines", "console/vnc", "GET", "get"},
 		{"virtualmachines", "console/serial", "GET", "get"},
 		{"images", "upload", "POST", "create"},
+		{"containers", "logs", "GET", "get"},
+		{"containers", "exec", "GET", "get"},
+		{"containers", "restart", "POST", "update"},
 		{"volumes", "x", "GET", "get"},
 		{"volumes", "x", "POST", "update"},
 		{"volumes", "x", "PUT", "update"},
@@ -169,6 +172,60 @@ func TestSubresourceVerbFollowsTheTable(t *testing.T) {
 		do(asCaller(router, "caller-token"), httptest.NewRequest(method, vmStart, nil))
 		if !*reachedNext || len(called.calls()) != 0 {
 			t.Errorf("%s did not fall through", method)
+		}
+	}
+}
+
+const containerExec = "/apis/bedrock.cloudyfolks.io/v1alpha1/namespaces/acme-web/containers/web/exec"
+
+func containerRouter(t *testing.T, allow func(authorizationv1.ResourceAttributes) bool) (*reviewAPI, *calledHandler, http.Handler) {
+	t.Helper()
+	subs := NewSubresources()
+	api := newReviewAPI(t, allow)
+	called := &calledHandler{}
+	for _, name := range []string{"logs", "exec", "restart"} {
+		if err := subs.Register("containers", name, called.handler(http.StatusOK)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	next := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusTeapot) })
+	return api, called, SubresourceRouter(subs, api.upstream(t), fakeReader(t), next)
+}
+
+func TestContainerSubresourcesAreAuthorizedPerSubresource(t *testing.T) {
+	onlyLogs := func(attributes authorizationv1.ResourceAttributes) bool {
+		return attributes.Resource == "containers" && attributes.Subresource == "logs" && attributes.Verb == "get"
+	}
+	api, called, router := containerRouter(t, onlyLogs)
+	handler := asCaller(router, "viewer-token")
+	rec := do(handler, httptest.NewRequest(http.MethodGet, "/apis/bedrock.cloudyfolks.io/v1alpha1/namespaces/acme-web/containers/web/logs", nil))
+	if rec.Code != http.StatusOK || len(called.calls()) != 1 {
+		t.Fatalf("logs: %d", rec.Code)
+	}
+	for _, request := range []*http.Request{
+		httptest.NewRequest(http.MethodGet, containerExec, nil),
+		httptest.NewRequest(http.MethodPost, "/apis/bedrock.cloudyfolks.io/v1alpha1/namespaces/acme-web/containers/web/restart", nil),
+	} {
+		rec = do(handler, request)
+		if rec.Code != http.StatusForbidden || !strings.Contains(rec.Body.String(), `"forbidden"`) {
+			t.Fatalf("%s %s: %d %s", request.Method, request.URL.Path, rec.Code, rec.Body.String())
+		}
+	}
+	if len(called.calls()) != 1 {
+		t.Fatalf("a refused request reached a handler: %v", called.calls())
+	}
+	want := []authorizationv1.ResourceAttributes{
+		{Namespace: "acme-web", Verb: "get", Group: "bedrock.cloudyfolks.io", Resource: "containers", Subresource: "logs", Name: "web"},
+		{Namespace: "acme-web", Verb: "get", Group: "bedrock.cloudyfolks.io", Resource: "containers", Subresource: "exec", Name: "web"},
+		{Namespace: "acme-web", Verb: "update", Group: "bedrock.cloudyfolks.io", Resource: "containers", Subresource: "restart", Name: "web"},
+	}
+	got := api.reviews()
+	if len(got) != len(want) {
+		t.Fatalf("reviews %+v", got)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Errorf("review %d = %+v, want %+v", i, got[i], want[i])
 		}
 	}
 }

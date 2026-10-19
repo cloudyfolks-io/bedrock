@@ -1,0 +1,487 @@
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  annotations:
+    controller-gen.kubebuilder.io/version: v0.20.0
+  name: containers.bedrock.cloudyfolks.io
+spec:
+  group: bedrock.cloudyfolks.io
+  names:
+    kind: Container
+    listKind: ContainerList
+    plural: containers
+    singular: container
+  scope: Namespaced
+  versions:
+  - additionalPrinterColumns:
+    - jsonPath: .spec.image
+      name: Image
+      type: string
+    - jsonPath: .status.phase
+      name: Phase
+      type: string
+    - jsonPath: .status.replicas
+      name: Replicas
+      type: integer
+    name: v1alpha1
+    schema:
+      openAPIV3Schema:
+        properties:
+          apiVersion:
+            description: |-
+              APIVersion defines the versioned schema of this representation of an object.
+              Servers should convert recognized schemas to the latest internal value, and
+              may reject unrecognized values.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources
+            type: string
+          kind:
+            description: |-
+              Kind is a string value representing the REST resource this object represents.
+              Servers may infer this from the endpoint the client submits requests to.
+              Cannot be updated.
+              In CamelCase.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds
+            type: string
+          metadata:
+            type: object
+          spec:
+            properties:
+              args:
+                items:
+                  type: string
+                maxItems: 256
+                type: array
+                x-kubernetes-list-type: atomic
+              autoscale:
+                properties:
+                  cpuPercent:
+                    format: int32
+                    maximum: 100
+                    minimum: 1
+                    type: integer
+                  max:
+                    format: int32
+                    maximum: 20
+                    minimum: 1
+                    type: integer
+                  memoryPercent:
+                    format: int32
+                    maximum: 100
+                    minimum: 1
+                    type: integer
+                  min:
+                    format: int32
+                    maximum: 20
+                    minimum: 1
+                    type: integer
+                required:
+                - max
+                - min
+                type: object
+                x-kubernetes-validations:
+                - message: min must not be above max
+                  rule: self.min <= self.max
+              command:
+                items:
+                  type: string
+                maxItems: 64
+                type: array
+                x-kubernetes-list-type: atomic
+              env:
+                items:
+                  properties:
+                    name:
+                      maxLength: 253
+                      minLength: 1
+                      pattern: ^[-._a-zA-Z][-._a-zA-Z0-9]*$
+                      type: string
+                    value:
+                      maxLength: 32768
+                      type: string
+                    valueFrom:
+                      properties:
+                        secretKeyRef:
+                          properties:
+                            key:
+                              maxLength: 253
+                              minLength: 1
+                              pattern: ^[-._a-zA-Z0-9]+$
+                              type: string
+                            name:
+                              maxLength: 253
+                              minLength: 1
+                              pattern: ^[a-z0-9]([-a-z0-9.]*[a-z0-9])?$
+                              type: string
+                          required:
+                          - key
+                          - name
+                          type: object
+                      required:
+                      - secretKeyRef
+                      type: object
+                  required:
+                  - name
+                  type: object
+                  x-kubernetes-validations:
+                  - message: set exactly one of value and valueFrom
+                    rule: has(self.value) != has(self.valueFrom)
+                maxItems: 128
+                type: array
+                x-kubernetes-list-map-keys:
+                - name
+                x-kubernetes-list-type: map
+              fsGroup:
+                format: int64
+                minimum: 0
+                type: integer
+              image:
+                maxLength: 1024
+                minLength: 1
+                type: string
+              imagePullSecrets:
+                items:
+                  maxLength: 253
+                  pattern: ^[a-z0-9]([-a-z0-9.]*[a-z0-9])?$
+                  type: string
+                maxItems: 8
+                type: array
+                x-kubernetes-list-type: set
+              network:
+                default: {}
+                properties:
+                  address:
+                    maxLength: 15
+                    type: string
+                    x-kubernetes-validations:
+                    - message: address must be an IPv4 address
+                      rule: isIP(self) && ip(self).family() == 4
+                  securityGroups:
+                    items:
+                      maxLength: 63
+                      pattern: ^[a-z0-9]([-a-z0-9]*[a-z0-9])?$
+                      type: string
+                    maxItems: 8
+                    type: array
+                    x-kubernetes-list-type: set
+                  subnetRef:
+                    default: default
+                    maxLength: 63
+                    minLength: 1
+                    pattern: ^[a-z0-9]([-a-z0-9]*[a-z0-9])?$
+                    type: string
+                    x-kubernetes-validations:
+                    - message: subnetRef is immutable
+                      rule: self == oldSelf
+                type: object
+                x-kubernetes-validations:
+                - message: address is immutable
+                  rule: has(self.address) == has(oldSelf.address) && (!has(self.address)
+                    || self.address == oldSelf.address)
+              ports:
+                items:
+                  properties:
+                    name:
+                      maxLength: 15
+                      pattern: ^[a-z0-9]([-a-z0-9]*[a-z0-9])?$
+                      type: string
+                    port:
+                      format: int32
+                      maximum: 65535
+                      minimum: 1
+                      type: integer
+                    protocol:
+                      default: TCP
+                      enum:
+                      - TCP
+                      - UDP
+                      - SCTP
+                      type: string
+                  required:
+                  - port
+                  type: object
+                maxItems: 8
+                type: array
+                x-kubernetes-list-type: atomic
+                x-kubernetes-validations:
+                - message: a port and protocol can be listed once
+                  rule: 'self.all(a, self.exists_one(b, b.port == a.port && (has(a.protocol)
+                    ? a.protocol : ''TCP'') == (has(b.protocol) ? b.protocol : ''TCP'')))'
+              probes:
+                properties:
+                  liveness:
+                    properties:
+                      exec:
+                        properties:
+                          command:
+                            items:
+                              type: string
+                            maxItems: 64
+                            minItems: 1
+                            type: array
+                            x-kubernetes-list-type: atomic
+                        required:
+                        - command
+                        type: object
+                      failureThreshold:
+                        format: int32
+                        minimum: 1
+                        type: integer
+                      initialDelaySeconds:
+                        format: int32
+                        minimum: 0
+                        type: integer
+                      periodSeconds:
+                        format: int32
+                        minimum: 1
+                        type: integer
+                      successThreshold:
+                        format: int32
+                        minimum: 1
+                        type: integer
+                      timeoutSeconds:
+                        format: int32
+                        minimum: 1
+                        type: integer
+                    type: object
+                    x-kubernetes-validations:
+                    - message: only exec probes are supported
+                      rule: has(self.exec)
+                  readiness:
+                    properties:
+                      exec:
+                        properties:
+                          command:
+                            items:
+                              type: string
+                            maxItems: 64
+                            minItems: 1
+                            type: array
+                            x-kubernetes-list-type: atomic
+                        required:
+                        - command
+                        type: object
+                      failureThreshold:
+                        format: int32
+                        minimum: 1
+                        type: integer
+                      initialDelaySeconds:
+                        format: int32
+                        minimum: 0
+                        type: integer
+                      periodSeconds:
+                        format: int32
+                        minimum: 1
+                        type: integer
+                      successThreshold:
+                        format: int32
+                        minimum: 1
+                        type: integer
+                      timeoutSeconds:
+                        format: int32
+                        minimum: 1
+                        type: integer
+                    type: object
+                    x-kubernetes-validations:
+                    - message: only exec probes are supported
+                      rule: has(self.exec)
+                type: object
+              replicas:
+                format: int32
+                maximum: 20
+                minimum: 0
+                type: integer
+              resources:
+                default: {}
+                properties:
+                  limits:
+                    default: {}
+                    properties:
+                      cpu:
+                        anyOf:
+                        - type: integer
+                        - type: string
+                        default: 500m
+                        pattern: ^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$
+                        x-kubernetes-int-or-string: true
+                      memory:
+                        anyOf:
+                        - type: integer
+                        - type: string
+                        default: 512Mi
+                        pattern: ^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$
+                        x-kubernetes-int-or-string: true
+                    type: object
+                  requests:
+                    default: {}
+                    properties:
+                      cpu:
+                        anyOf:
+                        - type: integer
+                        - type: string
+                        default: 100m
+                        pattern: ^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$
+                        x-kubernetes-int-or-string: true
+                      memory:
+                        anyOf:
+                        - type: integer
+                        - type: string
+                        default: 128Mi
+                        pattern: ^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$
+                        x-kubernetes-int-or-string: true
+                    type: object
+                type: object
+                x-kubernetes-validations:
+                - message: requests must not be above limits
+                  rule: '!has(self.requests) || !has(self.limits) || ((!has(self.requests.cpu)
+                    || !has(self.limits.cpu) || quantity(string(self.requests.cpu)).compareTo(quantity(string(self.limits.cpu)))
+                    <= 0) && (!has(self.requests.memory) || !has(self.limits.memory)
+                    || quantity(string(self.requests.memory)).compareTo(quantity(string(self.limits.memory)))
+                    <= 0))'
+                - message: limits.cpu must be at most 32
+                  rule: '!has(self.limits) || !has(self.limits.cpu) || quantity(string(self.limits.cpu)).compareTo(quantity(''32''))
+                    <= 0'
+                - message: limits.memory must be at most 256Gi
+                  rule: '!has(self.limits) || !has(self.limits.memory) || quantity(string(self.limits.memory)).compareTo(quantity(''256Gi''))
+                    <= 0'
+              strategy:
+                enum:
+                - Recreate
+                - RollingUpdate
+                type: string
+              volumes:
+                items:
+                  properties:
+                    mountPath:
+                      maxLength: 4096
+                      pattern: ^/[^:]+$
+                      type: string
+                    volumeRef:
+                      maxLength: 253
+                      minLength: 1
+                      pattern: ^[a-z0-9]([-a-z0-9.]*[a-z0-9])?$
+                      type: string
+                  required:
+                  - mountPath
+                  - volumeRef
+                  type: object
+                maxItems: 8
+                type: array
+                x-kubernetes-list-type: atomic
+                x-kubernetes-validations:
+                - message: a volume can be listed once
+                  rule: self.all(a, self.exists_one(b, b.volumeRef == a.volumeRef))
+                - message: a mount path can be used once
+                  rule: self.all(a, self.exists_one(b, b.mountPath == a.mountPath))
+            required:
+            - image
+            type: object
+            x-kubernetes-validations:
+            - message: replicas and autoscale exclude each other
+              rule: '!has(self.replicas) || !has(self.autoscale)'
+            - message: address needs replicas of at most 1 and no autoscale
+              rule: '!has(self.network.address) || (!has(self.autoscale) && (!has(self.replicas)
+                || self.replicas <= 1))'
+            - message: volumes need replicas of at most 1 and no autoscale
+              rule: '!has(self.volumes) || self.volumes.size() == 0 || (!has(self.autoscale)
+                && (!has(self.replicas) || self.replicas <= 1))'
+            - message: address and volumes need the strategy Recreate
+              rule: '!has(self.strategy) || self.strategy == ''Recreate'' || (!has(self.network.address)
+                && (!has(self.volumes) || self.volumes.size() == 0))'
+          status:
+            properties:
+              addresses:
+                items:
+                  type: string
+                type: array
+                x-kubernetes-list-type: atomic
+              conditions:
+                items:
+                  description: Condition contains details for one aspect of the current
+                    state of this API Resource.
+                  properties:
+                    lastTransitionTime:
+                      description: |-
+                        lastTransitionTime is the last time the condition transitioned from one status to another.
+                        This should be when the underlying condition changed.  If that is not known, then using the time when the API field changed is acceptable.
+                      format: date-time
+                      type: string
+                    message:
+                      description: |-
+                        message is a human readable message indicating details about the transition.
+                        This may be an empty string.
+                      maxLength: 32768
+                      type: string
+                    observedGeneration:
+                      description: |-
+                        observedGeneration represents the .metadata.generation that the condition was set based upon.
+                        For instance, if .metadata.generation is currently 12, but the .status.conditions[x].observedGeneration is 9, the condition is out of date
+                        with respect to the current state of the instance.
+                      format: int64
+                      minimum: 0
+                      type: integer
+                    reason:
+                      description: |-
+                        reason contains a programmatic identifier indicating the reason for the condition's last transition.
+                        Producers of specific condition types may define expected values and meanings for this field,
+                        and whether the values are considered a guaranteed API.
+                        The value should be a CamelCase string.
+                        This field may not be empty.
+                      maxLength: 1024
+                      minLength: 1
+                      pattern: ^[A-Za-z]([A-Za-z0-9_,:]*[A-Za-z0-9_])?$
+                      type: string
+                    status:
+                      description: status of the condition, one of True, False, Unknown.
+                      enum:
+                      - "True"
+                      - "False"
+                      - Unknown
+                      type: string
+                    type:
+                      description: type of condition in CamelCase or in foo.example.com/CamelCase.
+                      maxLength: 316
+                      pattern: ^([a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*/)?(([A-Za-z0-9][-A-Za-z0-9_.]*)?[A-Za-z0-9])$
+                      type: string
+                  required:
+                  - lastTransitionTime
+                  - message
+                  - reason
+                  - status
+                  - type
+                  type: object
+                type: array
+                x-kubernetes-list-map-keys:
+                - type
+                x-kubernetes-list-type: map
+              deployment:
+                type: string
+              observedGeneration:
+                format: int64
+                type: integer
+              phase:
+                enum:
+                - Pending
+                - Running
+                - Stopped
+                - Failed
+                type: string
+              readyReplicas:
+                format: int32
+                type: integer
+              replicas:
+                format: int32
+                type: integer
+            type: object
+        required:
+        - spec
+        type: object
+        x-kubernetes-validations:
+        - message: the name must have at most 52 characters
+          rule: self.metadata.name.size() <= 52
+        - message: the name must be a DNS label
+          rule: self.metadata.name.matches('^[a-z0-9]([-a-z0-9]*[a-z0-9])?$')
+    served: true
+    storage: true
+    subresources:
+      status: {}

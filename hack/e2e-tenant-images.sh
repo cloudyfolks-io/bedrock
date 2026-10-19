@@ -4,7 +4,7 @@ set -euo pipefail
 arch=${ARCH:-$(uname -m | sed 's/x86_64/amd64/;s/aarch64/arm64/')}
 crane=${CRANE:-crane}
 out=dist/cache/e2e-tenant
-images=(docker.io/chrislusf/seaweedfs:4.48 docker.io/amazon/aws-cli:2.37.10)
+images=(docker.io/chrislusf/seaweedfs:4.48 docker.io/amazon/aws-cli:2.37.10 docker.io/library/busybox:1.37.0)
 
 mkdir -p "$out"
 

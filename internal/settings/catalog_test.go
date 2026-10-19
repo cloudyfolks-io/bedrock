@@ -311,3 +311,23 @@ func TestHTTPURLErrorsDoNotRepeatTheValue(t *testing.T) {
 		}
 	}
 }
+
+func TestContainerRuntimeClassSetting(t *testing.T) {
+	def, ok := Lookup("container.runtime-class")
+	if !ok || def.Default != "kata" {
+		t.Fatalf("setting %+v", def)
+	}
+	if !strings.Contains(def.Description, "none") {
+		t.Fatalf("the description must name the value none: %q", def.Description)
+	}
+	for _, value := range []string{"", "kata", "none", "gvisor-1"} {
+		if err := def.Validate(value); err != nil {
+			t.Errorf("%q: %v", value, err)
+		}
+	}
+	for _, value := range []string{"Kata", "kata_x", "kata x", "kata.x", strings.Repeat("a", 64)} {
+		if err := def.Validate(value); err == nil {
+			t.Errorf("%q passed", value)
+		}
+	}
+}
