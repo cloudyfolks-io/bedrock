@@ -178,15 +178,23 @@ The operator also waits, with the reason `WaitingForEtcd`. Before each grant
 it checks, for every control-plane node:
 
 - The Host has a report that is not older than 3 minutes.
-- The Node exists, and its Ready heartbeat or its lease is not older than 3
-  minutes.
+- The Node exists, and its node lease was renewed in the last 30 seconds.
+  The lease is the proof that the node lives. The Ready heartbeat of the Node
+  is not used, because it renews only every 5 minutes when nothing changes.
 - The Node is Ready.
 - Etcd reports as many members as there are control-plane nodes (any mismatch
   stops the grant), and etcd is healthy.
 
 These checks lower the risk that a grant restarts a node while another node
-is down. They cannot see a node that went down in the last seconds. Do not
-start a rotation while a control-plane node is down or in maintenance.
+is down. Obey these limits:
+
+- Every node needs NTP. The operator compares its clock with the times that
+  the agents and kubelets write. It refuses a grant when a report time or a
+  lease time is more than 30 seconds in the future.
+- An etcd member can die while its kubelet and its agent run. The operator
+  sees this only with the next agent report, within 60 seconds.
+- Do not start a rotation while a control-plane node is down or in
+  maintenance.
 
 To go on, do these steps:
 
@@ -195,6 +203,12 @@ To go on, do these steps:
    keeps the grant, so the agent runs it again on its next round.
    The agent clears its own mark of the handled grant when the apply starts,
    so the operator waits for the new result and accepts no `revert` before.
+
+A node that boots into a lost etcd quorum fails the readiness check for the
+whole wait time (10 minutes). The agent then rolls back a good config and
+marks it failed, and the condition shows `HostFailed`. To recover, restore
+the quorum first. Then delete `/etc/bedrock/encryption/.apply-failed` on that
+node, and the agent applies the config again.
 
 This is the only way in the phase `RemovingKey`, because a revert is refused
 in that phase. In the earlier phases you can also revert the rotation.
