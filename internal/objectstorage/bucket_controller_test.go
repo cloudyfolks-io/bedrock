@@ -2,68 +2,30 @@ package objectstorage
 
 import (
 	"context"
-	"io"
 	"net/http"
-	"net/http/httptest"
 	"strings"
-	"sync"
 	"testing"
-	"time"
 
 	corev1 "k8s.io/api/core/v1"
-	"k8s.io/apimachinery/pkg/api/resource"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	"github.com/cloudyfolks-io/bedrock/api/v1alpha1"
-	"github.com/cloudyfolks-io/bedrock/internal/objectstorage/s3"
 )
 
-type recorded struct{ method, query, body, authorization string }
-
-type fakeStore struct {
-	mu    sync.Mutex
-	seen  []recorded
-	reply func(recorded, http.ResponseWriter)
+func rulesOf(rules Rules) func(context.Context) (Rules, error) {
+	return func(context.Context) (Rules, error) { return rules, nil }
 }
 
-func newFakeStore(t *testing.T, reply func(recorded, http.ResponseWriter)) (*fakeStore, string) {
-	t.Helper()
-	store := &fakeStore{reply: reply}
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		body, _ := io.ReadAll(r.Body)
-		call := recorded{method: r.Method, query: r.URL.RawQuery, body: string(body), authorization: r.Header.Get("Authorization")}
-		store.mu.Lock()
-		store.seen = append(store.seen, call)
-		store.mu.Unlock()
-		store.reply(call, w)
-	}))
-	t.Cleanup(server.Close)
-	return store, server.URL
-}
-
-func (f *fakeStore) take() []recorded {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	seen := f.seen
-	f.seen = nil
-	return seen
-}
-
-func noPolicy(w http.ResponseWriter) {
-	w.WriteHeader(http.StatusNotFound)
-	io.WriteString(w, `<Error><Code>NoSuchBucketPolicy</Code></Error>`)
-}
-
-func versioningAnswer(status string) string {
-	return `<VersioningConfiguration><Status>` + status + `</Status></VersioningConfiguration>`
+func bucketReconcilerWith(url string, rules Rules) *BucketReconciler {
+	return &BucketReconciler{Client: testClient, S3: fixedClient(), Endpoint: url, Rules: rulesOf(rules)}
 }
 
 func bucketReconciler(url string) *BucketReconciler {
-	fixed := func() time.Time { return time.Date(2026, 10, 8, 10, 0, 0, 0, time.UTC) }
-	return &BucketReconciler{Client: testClient, S3: &s3.Client{Now: fixed}, Endpoint: url}
+	return bucketReconcilerWith(url, DefaultRules())
 }
 
 func reconcileBucket(t *testing.T, r *BucketReconciler, namespace, name string) {
@@ -83,225 +45,420 @@ func readBucket(t *testing.T, namespace, name string) *v1alpha1.ObjectStorageBuc
 	return &bucket
 }
 
+func bucketGone(t *testing.T, namespace, name string) bool {
+	t.Helper()
+	var bucket v1alpha1.ObjectStorageBucket
+	err := testClient.Get(context.Background(), client.ObjectKey{Namespace: namespace, Name: name}, &bucket)
+	return apierrors.IsNotFound(err)
+}
+
 func requireBucketReason(t *testing.T, namespace, name string, status metav1.ConditionStatus, reason string) {
 	t.Helper()
 	requireCondition(t, readBucket(t, namespace, name).Status.Conditions, v1alpha1.ConditionReady, status, reason)
 }
 
-func readyOwner(t *testing.T, namespace, name string) {
-	t.Helper()
-	createUser(t, namespace, name, v1alpha1.ObjectStorageUserSpec{})
-	user := readUser(t, namespace, name)
-	user.Status.CredentialsSecret = CredentialsSecretName(RGWUserName(namespace, name))
-	user.Status.Conditions = []metav1.Condition{condition(v1alpha1.ConditionReady, true, "Ready", "", user.Generation)}
-	user.Status.Conditions[0].LastTransitionTime = metav1.Now()
-	if err := testClient.Status().Update(context.Background(), user); err != nil {
-		t.Fatal(err)
-	}
-	createCredentials(t, namespace, RGWUserName(namespace, name), map[string][]byte{"AccessKey": []byte("AK"), "SecretKey": []byte("SK")})
-}
-
-func getClaim(t *testing.T, namespace, name string) *unstructured.Unstructured {
-	t.Helper()
-	claim, found, err := getRook(context.Background(), testClient, objectBucketClaimGVK, client.ObjectKey{Namespace: namespace, Name: name})
-	if err != nil || !found {
-		t.Fatalf("claim %v %v", found, err)
-	}
-	return claim
-}
-
-func bindClaim(t *testing.T, namespace, name, bucketName string) {
-	t.Helper()
-	setRookPhase(t, getClaim(t, namespace, name), "Bound")
-	data := map[string]string{"BUCKET_NAME": bucketName, "BUCKET_HOST": "rook-ceph-rgw-bedrock-rgw.rook-ceph.svc", "BUCKET_PORT": "80"}
-	config := &corev1.ConfigMap{ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: namespace}, Data: data}
-	if err := testClient.Create(context.Background(), config); err != nil {
-		t.Fatal(err)
-	}
-}
-
-func boundBucket(t *testing.T, r *BucketReconciler, annotations map[string]string, spec v1alpha1.ObjectStorageBucketSpec) {
+func accountReady(t *testing.T, namespace string) {
 	t.Helper()
 	createStore(t, "Ready")
-	readyOwner(t, "acme-prod", "app")
-	bucket := &v1alpha1.ObjectStorageBucket{ObjectMeta: metav1.ObjectMeta{Name: "data", Namespace: "acme-prod", Annotations: annotations}, Spec: spec}
-	if err := testClient.Create(context.Background(), bucket); err != nil {
-		t.Fatal(err)
-	}
-	reconcileBucket(t, r, "acme-prod", "data")
-	bindClaim(t, "acme-prod", "data", "data-x1y2z")
+	readyAccountOf(t, namespace)
 }
 
-func requireNoRequests(t *testing.T, store *fakeStore) {
+func settle(t *testing.T, r *BucketReconciler, namespace, name string) {
 	t.Helper()
-	if seen := store.take(); len(seen) != 0 {
-		t.Fatalf("requests %+v", seen)
+	reconcileBucket(t, r, namespace, name)
+	reconcileBucket(t, r, namespace, name)
+}
+
+func callsWithout(calls []string, ignored ...string) []string {
+	kept := []string{}
+	for _, call := range calls {
+		skip := false
+		for _, prefix := range ignored {
+			skip = skip || strings.HasPrefix(call, prefix)
+		}
+		if !skip {
+			kept = append(kept, call)
+		}
 	}
+	return kept
 }
 
-func answerEverythingWith(status int) func(recorded, http.ResponseWriter) {
-	return func(_ recorded, w http.ResponseWriter) { w.WriteHeader(status) }
-}
-
-func TestBucketCreatesTheClaim(t *testing.T) {
+func TestBucketMakesTheBucketWithAGeneratedName(t *testing.T) {
 	fresh(t)
-	createStore(t, "Ready")
-	readyOwner(t, "acme-prod", "app")
-	_, url := newFakeStore(t, answerEverythingWith(500))
+	store, url := newFakeS3(t)
 	r := bucketReconciler(url)
-	quota := v1alpha1.ObjectStorageBucketQuota{Bytes: resource.NewQuantity(1000, resource.BinarySI), Objects: int64Ptr(50)}
-	createBucket(t, "acme-prod", "data", v1alpha1.ObjectStorageBucketSpec{UserRef: "app", Quota: quota})
-	reconcileBucket(t, r, "acme-prod", "data")
-	requireBucketReason(t, "acme-prod", "data", metav1.ConditionFalse, "ClaimPending")
-	claim := getClaim(t, "acme-prod", "data")
-	config, _, _ := unstructured.NestedStringMap(claim.Object, "spec", "additionalConfig")
-	if config["bucketOwner"] != "acme-prod.app" || config["bucketMaxSize"] != "1000" || config["bucketMaxObjects"] != "50" {
-		t.Fatalf("config %+v", config)
+	accountReady(t, "acme-prod")
+	createBucket(t, "acme-prod", "data", v1alpha1.ObjectStorageBucketSpec{})
+	settle(t, r, "acme-prod", "data")
+	if !store.has("acme-prod-data") {
+		t.Fatal("the bucket was not created")
 	}
-	reconcileBucket(t, r, "acme-prod", "data")
-	if again := getClaim(t, "acme-prod", "data"); again.GetResourceVersion() != claim.GetResourceVersion() {
-		t.Fatal("the claim changed")
-	}
-}
-
-func TestBucketReportsEndpointAndName(t *testing.T) {
-	fresh(t)
-	_, url := newFakeStore(t, answerEverythingWith(500))
-	r := bucketReconciler(url)
-	boundBucket(t, r, nil, v1alpha1.ObjectStorageBucketSpec{UserRef: "app"})
-	reconcileBucket(t, r, "acme-prod", "data")
 	bucket := readBucket(t, "acme-prod", "data")
-	if bucket.Status.BucketName != "data-x1y2z" || bucket.Status.Endpoint != "http://rook-ceph-rgw-bedrock-rgw.rook-ceph.svc:80" {
+	if bucket.Status.BucketName != "acme-prod-data" || bucket.Status.Endpoint != url {
 		t.Fatalf("status %+v", bucket.Status)
 	}
-	requireCondition(t, bucket.Status.Conditions, v1alpha1.ConditionReady, metav1.ConditionTrue, "Bound")
-	requireCondition(t, bucket.Status.Conditions, "QuotaApplied", metav1.ConditionTrue, "Applied")
-}
-
-func TestBucketWaitsForTheUser(t *testing.T) {
-	fresh(t)
-	createStore(t, "Ready")
-	_, url := newFakeStore(t, answerEverythingWith(500))
-	r := bucketReconciler(url)
-	createBucket(t, "acme-prod", "data", v1alpha1.ObjectStorageBucketSpec{UserRef: "app"})
-	reconcileBucket(t, r, "acme-prod", "data")
-	requireBucketReason(t, "acme-prod", "data", metav1.ConditionFalse, "UserNotFound")
-	createUser(t, "acme-prod", "app", v1alpha1.ObjectStorageUserSpec{})
-	reconcileBucket(t, r, "acme-prod", "data")
-	requireBucketReason(t, "acme-prod", "data", metav1.ConditionFalse, "UserNotReady")
+	requireBucketReason(t, "acme-prod", "data", metav1.ConditionTrue, "Bound")
+	if len(bucket.Finalizers) != 1 || bucket.Finalizers[0] != bucketFinalizer {
+		t.Fatalf("finalizers %v", bucket.Finalizers)
+	}
 	if countRook(t, objectBucketClaimGVK, "acme-prod") != 0 {
 		t.Fatal("a claim exists")
 	}
-}
-
-func TestBucketNeverCrossesNamespaces(t *testing.T) {
-	fresh(t)
-	createStore(t, "Ready")
-	readyOwner(t, "acme-prod", "app")
-	_, url := newFakeStore(t, answerEverythingWith(500))
-	r := bucketReconciler(url)
-	createBucket(t, "beta-prod", "data", v1alpha1.ObjectStorageBucketSpec{UserRef: "app"})
-	reconcileBucket(t, r, "beta-prod", "data")
-	requireBucketReason(t, "beta-prod", "data", metav1.ConditionFalse, "UserNotFound")
-	if countRook(t, objectBucketClaimGVK, "beta-prod") != 0 {
-		t.Fatal("a claim exists")
+	for _, authorization := range store.credentials {
+		if !strings.Contains(authorization, "Credential=ROOTAK/") {
+			t.Fatalf("authorization %q", authorization)
+		}
 	}
 }
 
-func TestBucketEnablesVersioning(t *testing.T) {
+func TestBucketUsesTheChosenName(t *testing.T) {
 	fresh(t)
-	current := ""
-	store, url := newFakeStore(t, func(call recorded, w http.ResponseWriter) {
-		if call.method == http.MethodGet {
-			io.WriteString(w, versioningAnswer(current))
-		}
-	})
+	store, url := newFakeS3(t)
 	r := bucketReconciler(url)
-	boundBucket(t, r, nil, v1alpha1.ObjectStorageBucketSpec{UserRef: "app", Versioning: true})
+	accountReady(t, "acme-prod")
+	createBucket(t, "acme-prod", "data", v1alpha1.ObjectStorageBucketSpec{BucketName: "acme-assets"})
+	settle(t, r, "acme-prod", "data")
+	if !store.has("acme-assets") || store.has("acme-prod-data") {
+		t.Fatal("the chosen name was not used")
+	}
+	if readBucket(t, "acme-prod", "data").Status.BucketName != "acme-assets" {
+		t.Fatal("status name")
+	}
+}
+
+func TestBucketAdoptsABucketTheAccountOwns(t *testing.T) {
+	fresh(t)
+	store, url := newFakeS3(t)
+	store.fill("acme-assets", 3)
+	r := bucketReconciler(url)
+	accountReady(t, "acme-prod")
+	createBucket(t, "acme-prod", "data", v1alpha1.ObjectStorageBucketSpec{BucketName: "acme-assets"})
+	settle(t, r, "acme-prod", "data")
+	requireBucketReason(t, "acme-prod", "data", metav1.ConditionTrue, "Bound")
+	if len(store.objects["acme-assets"]) != 3 {
+		t.Fatal("the adopted bucket lost objects")
+	}
+}
+
+func TestBucketAdoptsWhenTheCreateSaysOwnedByYou(t *testing.T) {
+	fresh(t)
+	store, url := newFakeS3(t)
+	store.hideFromHead["acme-prod-data"] = true
+	store.buckets["acme-prod-data"] = true
+	r := bucketReconciler(url)
+	accountReady(t, "acme-prod")
+	createBucket(t, "acme-prod", "data", v1alpha1.ObjectStorageBucketSpec{})
+	settle(t, r, "acme-prod", "data")
+	requireBucketReason(t, "acme-prod", "data", metav1.ConditionTrue, "Bound")
+}
+
+func TestBucketNameTakenWhenTheCreateRaces(t *testing.T) {
+	fresh(t)
+	store, url := newFakeS3(t)
+	store.hideFromHead["acme-assets"] = true
+	store.foreign["acme-assets"] = true
+	r := bucketReconciler(url)
+	accountReady(t, "acme-prod")
+	createBucket(t, "acme-prod", "data", v1alpha1.ObjectStorageBucketSpec{BucketName: "acme-assets"})
+	settle(t, r, "acme-prod", "data")
+	requireBucketReason(t, "acme-prod", "data", metav1.ConditionFalse, "NameTaken")
+}
+
+func TestBucketNameTakenByAnotherAccount(t *testing.T) {
+	fresh(t)
+	store, url := newFakeS3(t)
+	store.foreign["acme-assets"] = true
+	r := bucketReconciler(url)
+	accountReady(t, "acme-prod")
+	createBucket(t, "acme-prod", "data", v1alpha1.ObjectStorageBucketSpec{BucketName: "acme-assets"})
+	settle(t, r, "acme-prod", "data")
+	requireBucketReason(t, "acme-prod", "data", metav1.ConditionFalse, "NameTaken")
+	if readBucket(t, "acme-prod", "data").Status.BucketName != "" {
+		t.Fatal("a refused bucket reports a name")
+	}
+	if store.has("acme-assets") {
+		t.Fatal("the foreign bucket changed")
+	}
+}
+
+func TestBucketNameTakenInTheSameProject(t *testing.T) {
+	fresh(t)
+	store, url := newFakeS3(t)
+	r := bucketReconciler(url)
+	accountReady(t, "acme-prod")
+	createBucket(t, "acme-prod", "first", v1alpha1.ObjectStorageBucketSpec{BucketName: "acme-assets"})
+	createBucket(t, "acme-prod", "second", v1alpha1.ObjectStorageBucketSpec{BucketName: "acme-assets"})
+	settle(t, r, "acme-prod", "first")
+	settle(t, r, "acme-prod", "second")
+	requireBucketReason(t, "acme-prod", "first", metav1.ConditionTrue, "Bound")
+	requireBucketReason(t, "acme-prod", "second", metav1.ConditionFalse, "NameTaken")
+	if !store.has("acme-assets") {
+		t.Fatal("the bucket is gone")
+	}
+}
+
+func TestBucketSameObjectNameInTwoProjects(t *testing.T) {
+	fresh(t)
+	store, url := newFakeS3(t)
+	r := bucketReconciler(url)
+	accountReady(t, "acme-prod")
+	readyAccountOf(t, "beta-prod")
+	createBucket(t, "acme-prod", "data", v1alpha1.ObjectStorageBucketSpec{})
+	createBucket(t, "beta-prod", "data", v1alpha1.ObjectStorageBucketSpec{})
+	settle(t, r, "acme-prod", "data")
+	settle(t, r, "beta-prod", "data")
+	if !store.has("acme-prod-data") || !store.has("beta-prod-data") {
+		t.Fatal("both buckets must exist")
+	}
+}
+
+func TestBucketNameProblems(t *testing.T) {
+	rules := Rules{ReservedNames: []string{"admin"}, ReservedPrefixes: []string{"git-", "e2e-"}}
+	cases := []struct {
+		name     string
+		approved bool
+		want     string
+	}{
+		{"acme-data", false, ""},
+		{"ab", false, reasonNameInvalid},
+		{"Upper-case", false, reasonNameInvalid},
+		{"-leading", false, reasonNameInvalid},
+		{"trailing-", false, reasonNameInvalid},
+		{"under_score", false, reasonNameInvalid},
+		{"192.168.0.1", false, reasonNameInvalid},
+		{strings.Repeat("a", 64), false, reasonNameInvalid},
+		{"admin", false, reasonNameReserved},
+		{"git-repos", false, reasonNameReserved},
+		{"e2e-run", false, reasonNameReserved},
+		{"admin", true, ""},
+		{"git-repos", true, ""},
+		{"gitless", false, ""},
+	}
+	for _, tc := range cases {
+		if got := nameProblem(tc.name, rules, tc.approved); got != tc.want {
+			t.Fatalf("%q approved %v: got %q want %q", tc.name, tc.approved, got, tc.want)
+		}
+	}
+}
+
+func TestBucketRefusesAReservedName(t *testing.T) {
+	fresh(t)
+	store, url := newFakeS3(t)
+	r := bucketReconcilerWith(url, Rules{ReservedPrefixes: []string{"git-"}, MaxBuckets: 100})
+	accountReady(t, "acme-prod")
+	createBucket(t, "acme-prod", "repos", v1alpha1.ObjectStorageBucketSpec{BucketName: "git-repos"})
+	settle(t, r, "acme-prod", "repos")
+	requireBucketReason(t, "acme-prod", "repos", metav1.ConditionFalse, "NameReserved")
+	if len(store.take()) != 0 {
+		t.Fatal("the store was called")
+	}
+	bucket := readBucket(t, "acme-prod", "repos")
+	bucket.Annotations = map[string]string{ReservedNameApprovedAnnotation: "true"}
+	if err := testClient.Update(context.Background(), bucket); err != nil {
+		t.Fatal(err)
+	}
+	settle(t, r, "acme-prod", "repos")
+	requireBucketReason(t, "acme-prod", "repos", metav1.ConditionTrue, "Bound")
+}
+
+func TestBucketRefusesAReservedGeneratedName(t *testing.T) {
+	fresh(t)
+	_, url := newFakeS3(t)
+	r := bucketReconcilerWith(url, Rules{ReservedNames: []string{"acme-prod-data"}, MaxBuckets: 100})
+	accountReady(t, "acme-prod")
+	createBucket(t, "acme-prod", "data", v1alpha1.ObjectStorageBucketSpec{})
+	settle(t, r, "acme-prod", "data")
+	requireBucketReason(t, "acme-prod", "data", metav1.ConditionFalse, "NameReserved")
+}
+
+func TestBucketLimitRefusesOnlyNewBuckets(t *testing.T) {
+	fresh(t)
+	store, url := newFakeS3(t)
+	accountReady(t, "acme-prod")
+	generous := bucketReconcilerWith(url, Rules{MaxBuckets: 3})
+	for _, name := range []string{"one", "two"} {
+		createBucket(t, "acme-prod", name, v1alpha1.ObjectStorageBucketSpec{})
+		settle(t, generous, "acme-prod", name)
+	}
+	strict := bucketReconcilerWith(url, Rules{MaxBuckets: 2})
+	createBucket(t, "acme-prod", "three", v1alpha1.ObjectStorageBucketSpec{})
+	settle(t, strict, "acme-prod", "three")
+	requireBucketReason(t, "acme-prod", "three", metav1.ConditionFalse, "BucketLimit")
+	if store.has("acme-prod-three") {
+		t.Fatal("a bucket over the limit was created")
+	}
+	lower := bucketReconcilerWith(url, Rules{MaxBuckets: 1})
+	reconcileBucket(t, lower, "acme-prod", "one")
+	reconcileBucket(t, lower, "acme-prod", "two")
+	requireBucketReason(t, "acme-prod", "one", metav1.ConditionTrue, "Bound")
+	requireBucketReason(t, "acme-prod", "two", metav1.ConditionTrue, "Bound")
+}
+
+func TestBucketLimitIgnoresDeletingBuckets(t *testing.T) {
+	fresh(t)
+	store, url := newFakeS3(t)
+	accountReady(t, "acme-prod")
+	r := bucketReconcilerWith(url, Rules{MaxBuckets: 1})
+	createBucket(t, "acme-prod", "one", v1alpha1.ObjectStorageBucketSpec{})
+	settle(t, r, "acme-prod", "one")
+	store.fill("acme-prod-one", 1)
+	if err := testClient.Delete(context.Background(), readBucket(t, "acme-prod", "one")); err != nil {
+		t.Fatal(err)
+	}
+	createBucket(t, "acme-prod", "two", v1alpha1.ObjectStorageBucketSpec{})
+	settle(t, r, "acme-prod", "two")
+	requireBucketReason(t, "acme-prod", "two", metav1.ConditionTrue, "Bound")
+}
+
+func TestBucketWaitsForTheAccount(t *testing.T) {
+	fresh(t)
+	store, url := newFakeS3(t)
+	r := bucketReconciler(url)
+	createStore(t, "Ready")
+	createBucket(t, "acme-prod", "data", v1alpha1.ObjectStorageBucketSpec{})
+	settle(t, r, "acme-prod", "data")
+	requireBucketReason(t, "acme-prod", "data", metav1.ConditionFalse, "AccountPending")
+	if len(store.take()) != 0 {
+		t.Fatal("the store was called")
+	}
+}
+
+func TestBucketWaitsForTheStore(t *testing.T) {
+	fresh(t)
+	_, url := newFakeS3(t)
+	r := bucketReconciler(url)
+	createBucket(t, "acme-prod", "data", v1alpha1.ObjectStorageBucketSpec{})
+	reconcileBucket(t, r, "acme-prod", "data")
+	requireBucketReason(t, "acme-prod", "data", metav1.ConditionFalse, "StoreNotInstalled")
+}
+
+func TestBucketOutsideAProjectNamespace(t *testing.T) {
+	fresh(t)
+	_, url := newFakeS3(t)
+	r := bucketReconciler(url)
+	createBucket(t, unlabeledNamespace, "data", v1alpha1.ObjectStorageBucketSpec{})
+	reconcileBucket(t, r, unlabeledNamespace, "data")
+	requireBucketReason(t, unlabeledNamespace, "data", metav1.ConditionFalse, "NamespaceNotProject")
+}
+
+func TestBucketMergesTheCorsOrigins(t *testing.T) {
+	fresh(t)
+	store, url := newFakeS3(t)
+	r := bucketReconcilerWith(url, Rules{CORSOrigins: []string{"https://panel.test"}, MaxBuckets: 100})
+	accountReady(t, "acme-prod")
+	createBucket(t, "acme-prod", "data", v1alpha1.ObjectStorageBucketSpec{CORSOrigins: []string{"https://app.test", "https://panel.test"}})
+	settle(t, r, "acme-prod", "data")
+	got := store.cors["acme-prod-data"]
+	if len(got) != 2 || got[0] != "https://panel.test" || got[1] != "https://app.test" {
+		t.Fatalf("origins %v", got)
+	}
 	store.take()
 	reconcileBucket(t, r, "acme-prod", "data")
-	seen := store.take()
-	if len(seen) != 2 || seen[0].method != "GET" || seen[1].method != "PUT" || seen[1].query != "versioning" || !strings.Contains(seen[1].body, "<Status>Enabled</Status>") {
-		t.Fatalf("requests %+v", seen)
+	for _, call := range store.take() {
+		if call == "PUT cors" {
+			t.Fatal("an unneeded CORS put")
+		}
+	}
+}
+
+func TestBucketAppliesTheSettingOriginsAlone(t *testing.T) {
+	fresh(t)
+	store, url := newFakeS3(t)
+	r := bucketReconcilerWith(url, Rules{CORSOrigins: []string{"https://panel.test"}, MaxBuckets: 100})
+	accountReady(t, "acme-prod")
+	createBucket(t, "acme-prod", "data", v1alpha1.ObjectStorageBucketSpec{})
+	settle(t, r, "acme-prod", "data")
+	if got := store.cors["acme-prod-data"]; len(got) != 1 || got[0] != "https://panel.test" {
+		t.Fatalf("origins %v", got)
+	}
+}
+
+func TestBucketRemovesCorsWhenNoOriginRemains(t *testing.T) {
+	fresh(t)
+	store, url := newFakeS3(t)
+	r := bucketReconciler(url)
+	accountReady(t, "acme-prod")
+	createBucket(t, "acme-prod", "data", v1alpha1.ObjectStorageBucketSpec{CORSOrigins: []string{"https://app.test"}})
+	settle(t, r, "acme-prod", "data")
+	if len(store.cors["acme-prod-data"]) != 1 {
+		t.Fatal("origin missing")
+	}
+	bucket := readBucket(t, "acme-prod", "data")
+	bucket.Spec.CORSOrigins = nil
+	if err := testClient.Update(context.Background(), bucket); err != nil {
+		t.Fatal(err)
+	}
+	reconcileBucket(t, r, "acme-prod", "data")
+	if _, found := store.cors["acme-prod-data"]; found {
+		t.Fatal("the CORS configuration stayed")
+	}
+}
+
+func TestBucketNeverTouchesCorsWhenThereIsNone(t *testing.T) {
+	fresh(t)
+	store, url := newFakeS3(t)
+	r := bucketReconciler(url)
+	accountReady(t, "acme-prod")
+	createBucket(t, "acme-prod", "data", v1alpha1.ObjectStorageBucketSpec{})
+	settle(t, r, "acme-prod", "data")
+	for _, call := range store.take() {
+		if strings.Contains(call, "cors") {
+			t.Fatalf("call %q", call)
+		}
+	}
+}
+
+func TestBucketEnablesAndSuspendsVersioning(t *testing.T) {
+	fresh(t)
+	store, url := newFakeS3(t)
+	r := bucketReconciler(url)
+	accountReady(t, "acme-prod")
+	createBucket(t, "acme-prod", "data", v1alpha1.ObjectStorageBucketSpec{Versioning: true})
+	settle(t, r, "acme-prod", "data")
+	if store.versioning["acme-prod-data"] != "Enabled" {
+		t.Fatalf("versioning %q", store.versioning["acme-prod-data"])
 	}
 	if readBucket(t, "acme-prod", "data").Annotations[AppliedVersioningAnnotation] != "Enabled" {
 		t.Fatal("annotation missing")
 	}
-	current = "Enabled"
-	reconcileBucket(t, r, "acme-prod", "data")
-	for _, call := range store.take() {
-		if call.method == "PUT" {
-			t.Fatalf("unneeded put %+v", call)
-		}
-	}
-}
-
-func TestBucketSuspendsVersioning(t *testing.T) {
-	fresh(t)
-	store, url := newFakeStore(t, func(call recorded, w http.ResponseWriter) {
-		if call.method == http.MethodGet {
-			io.WriteString(w, versioningAnswer("Enabled"))
-		}
-	})
-	r := bucketReconciler(url)
-	boundBucket(t, r, map[string]string{AppliedVersioningAnnotation: "Enabled"}, v1alpha1.ObjectStorageBucketSpec{UserRef: "app"})
 	store.take()
 	reconcileBucket(t, r, "acme-prod", "data")
-	seen := store.take()
-	if len(seen) != 2 || seen[1].method != "PUT" || !strings.Contains(seen[1].body, "<Status>Suspended</Status>") {
-		t.Fatalf("requests %+v", seen)
+	for _, call := range store.take() {
+		if call == "PUT versioning" {
+			t.Fatal("an unneeded versioning put")
+		}
 	}
-	if readBucket(t, "acme-prod", "data").Annotations[AppliedVersioningAnnotation] != "Suspended" {
-		t.Fatal("annotation not suspended")
+	bucket := readBucket(t, "acme-prod", "data")
+	bucket.Spec.Versioning = false
+	if err := testClient.Update(context.Background(), bucket); err != nil {
+		t.Fatal(err)
 	}
 	reconcileBucket(t, r, "acme-prod", "data")
-	requireNoRequests(t, store)
-}
-
-func TestBucketSkipsS3WhenNothingToApply(t *testing.T) {
-	fresh(t)
-	store, url := newFakeStore(t, answerEverythingWith(500))
-	r := bucketReconciler(url)
-	boundBucket(t, r, nil, v1alpha1.ObjectStorageBucketSpec{UserRef: "app"})
-	reconcileBucket(t, r, "acme-prod", "data")
-	reconcileBucket(t, r, "acme-prod", "data")
-	requireNoRequests(t, store)
-	requireBucketReason(t, "acme-prod", "data", metav1.ConditionTrue, "Bound")
+	if store.versioning["acme-prod-data"] != "Suspended" {
+		t.Fatalf("versioning %q", store.versioning["acme-prod-data"])
+	}
 }
 
 const examplePolicy = `{"Version":"2012-10-17","Statement":[{"Effect":"Allow","Principal":"*","Action":"s3:GetObject","Resource":"arn:aws:s3:::b/*"}]}`
 
 const reorderedPolicy = `{"Statement":[{"Resource":"arn:aws:s3:::b/*","Action":"s3:GetObject","Principal":"*","Effect":"Allow"}],"Version":"2012-10-17"}`
 
-func TestBucketAppliesThePolicy(t *testing.T) {
+func TestBucketAppliesAndRemovesThePolicy(t *testing.T) {
 	fresh(t)
-	stored := ""
-	store, url := newFakeStore(t, func(call recorded, w http.ResponseWriter) {
-		switch {
-		case call.method == http.MethodGet && stored == "":
-			noPolicy(w)
-		case call.method == http.MethodGet:
-			io.WriteString(w, stored)
-		default:
-			w.WriteHeader(http.StatusNoContent)
-		}
-	})
+	store, url := newFakeS3(t)
 	r := bucketReconciler(url)
-	boundBucket(t, r, nil, v1alpha1.ObjectStorageBucketSpec{UserRef: "app", Policy: examplePolicy})
+	accountReady(t, "acme-prod")
+	createBucket(t, "acme-prod", "data", v1alpha1.ObjectStorageBucketSpec{Policy: examplePolicy})
+	settle(t, r, "acme-prod", "data")
+	if store.policies["acme-prod-data"] != examplePolicy {
+		t.Fatalf("policy %q", store.policies["acme-prod-data"])
+	}
+	store.policies["acme-prod-data"] = reorderedPolicy
 	store.take()
 	reconcileBucket(t, r, "acme-prod", "data")
-	seen := store.take()
-	if len(seen) != 2 || seen[1].method != "PUT" || seen[1].query != "policy" || seen[1].body != examplePolicy {
-		t.Fatalf("requests %+v", seen)
-	}
-	if readBucket(t, "acme-prod", "data").Annotations[AppliedPolicyAnnotation] != "true" {
-		t.Fatal("annotation missing")
-	}
-	stored = reorderedPolicy
-	reconcileBucket(t, r, "acme-prod", "data")
 	for _, call := range store.take() {
-		if call.method == "PUT" {
-			t.Fatalf("unneeded put %+v", call)
+		if call == "PUT policy" {
+			t.Fatal("an unneeded policy put")
 		}
 	}
 	bucket := readBucket(t, "acme-prod", "data")
@@ -310,136 +467,354 @@ func TestBucketAppliesThePolicy(t *testing.T) {
 		t.Fatal(err)
 	}
 	reconcileBucket(t, r, "acme-prod", "data")
-	seen = store.take()
-	if len(seen) != 2 || seen[1].method != "DELETE" {
-		t.Fatalf("requests %+v", seen)
+	if _, found := store.policies["acme-prod-data"]; found {
+		t.Fatal("the policy stayed")
 	}
-	if _, kept := readBucket(t, "acme-prod", "data").Annotations[AppliedPolicyAnnotation]; kept {
-		t.Fatal("annotation kept")
-	}
-	reconcileBucket(t, r, "acme-prod", "data")
-	requireNoRequests(t, store)
 }
 
 func TestBucketRejectsAnInvalidPolicy(t *testing.T) {
 	fresh(t)
-	store, url := newFakeStore(t, answerEverythingWith(500))
+	store, url := newFakeS3(t)
 	r := bucketReconciler(url)
-	boundBucket(t, r, nil, v1alpha1.ObjectStorageBucketSpec{UserRef: "app", Policy: "{}"})
-	reconcileBucket(t, r, "acme-prod", "data")
+	accountReady(t, "acme-prod")
+	createBucket(t, "acme-prod", "data", v1alpha1.ObjectStorageBucketSpec{Policy: "{}"})
+	settle(t, r, "acme-prod", "data")
 	requireBucketReason(t, "acme-prod", "data", metav1.ConditionFalse, "PolicyInvalid")
-	requireNoRequests(t, store)
-}
-
-func TestBucketReportsPolicyRejectedByTheStore(t *testing.T) {
-	fresh(t)
-	_, url := newFakeStore(t, func(call recorded, w http.ResponseWriter) {
-		if call.method == http.MethodGet {
-			noPolicy(w)
-			return
-		}
-		w.WriteHeader(http.StatusBadRequest)
-		io.WriteString(w, `<Error><Code>MalformedPolicy</Code><Message>key AK secret SK</Message></Error>`)
-	})
-	r := bucketReconciler(url)
-	boundBucket(t, r, nil, v1alpha1.ObjectStorageBucketSpec{UserRef: "app", Policy: examplePolicy})
-	reconcileBucket(t, r, "acme-prod", "data")
-	requireBucketReason(t, "acme-prod", "data", metav1.ConditionFalse, "PolicyRejected")
-	message := readBucket(t, "acme-prod", "data").Status.Conditions[0].Message
-	if !strings.Contains(message, "MalformedPolicy") || strings.Contains(message, "AK") || strings.Contains(message, "SK") {
-		t.Fatalf("message %q", message)
-	}
-}
-
-func TestBucketUsesOnlyTheOwnersCredentials(t *testing.T) {
-	fresh(t)
-	store, url := newFakeStore(t, func(call recorded, w http.ResponseWriter) {
-		if call.method == http.MethodGet {
-			noPolicy(w)
-		}
-	})
-	r := bucketReconciler(url)
-	boundBucket(t, r, nil, v1alpha1.ObjectStorageBucketSpec{UserRef: "app", Policy: examplePolicy, Versioning: true})
-	reconcileBucket(t, r, "acme-prod", "data")
-	seen := store.take()
-	if len(seen) == 0 {
-		t.Fatal("no requests")
-	}
-	for _, call := range seen {
-		if !strings.Contains(call.authorization, "Credential=AK/") {
-			t.Fatalf("authorization %q", call.authorization)
-		}
-	}
-}
-
-func TestBucketOwnerChangeIsRefused(t *testing.T) {
-	fresh(t)
-	createStore(t, "Ready")
-	readyOwner(t, "acme-prod", "app")
-	readyOwner(t, "acme-prod", "other")
-	_, url := newFakeStore(t, answerEverythingWith(500))
-	r := bucketReconciler(url)
-	createBucket(t, "acme-prod", "data", v1alpha1.ObjectStorageBucketSpec{UserRef: "app"})
-	reconcileBucket(t, r, "acme-prod", "data")
-	before := getClaim(t, "acme-prod", "data").GetResourceVersion()
-	bucket := readBucket(t, "acme-prod", "data")
-	bucket.Spec.UserRef = "other"
-	if err := testClient.Update(context.Background(), bucket); err != nil {
-		t.Fatal(err)
-	}
-	reconcileBucket(t, r, "acme-prod", "data")
-	requireBucketReason(t, "acme-prod", "data", metav1.ConditionFalse, "OwnerChangeNotSupported")
-	if getClaim(t, "acme-prod", "data").GetResourceVersion() != before {
-		t.Fatal("the claim changed")
-	}
-}
-
-func TestBucketQuotaChangeIsReported(t *testing.T) {
-	fresh(t)
-	_, url := newFakeStore(t, answerEverythingWith(500))
-	r := bucketReconciler(url)
-	quota := v1alpha1.ObjectStorageBucketQuota{Bytes: resource.NewQuantity(1000, resource.BinarySI)}
-	boundBucket(t, r, nil, v1alpha1.ObjectStorageBucketSpec{UserRef: "app", Quota: quota})
-	bucket := readBucket(t, "acme-prod", "data")
-	bucket.Spec.Quota.Bytes = resource.NewQuantity(2000, resource.BinarySI)
-	if err := testClient.Update(context.Background(), bucket); err != nil {
-		t.Fatal(err)
-	}
-	reconcileBucket(t, r, "acme-prod", "data")
-	requireCondition(t, readBucket(t, "acme-prod", "data").Status.Conditions, "QuotaApplied", metav1.ConditionFalse, "ChangeNotSupported")
-	size, _, _ := unstructured.NestedString(getClaim(t, "acme-prod", "data").Object, "spec", "additionalConfig", "bucketMaxSize")
-	if size != "1000" {
-		t.Fatalf("bucketMaxSize %q", size)
+	if _, found := store.policies["acme-prod-data"]; found {
+		t.Fatal("an invalid policy was stored")
 	}
 }
 
 func TestBucketReportsAnUnavailableStoreAsNotReady(t *testing.T) {
 	fresh(t)
-	store, url := newFakeStore(t, answerEverythingWith(503))
+	store, url := newFakeS3(t)
+	store.failWith = http.StatusServiceUnavailable
 	r := bucketReconciler(url)
-	boundBucket(t, r, nil, v1alpha1.ObjectStorageBucketSpec{UserRef: "app", Versioning: true})
-	reconcileBucket(t, r, "acme-prod", "data")
+	accountReady(t, "acme-prod")
+	createBucket(t, "acme-prod", "data", v1alpha1.ObjectStorageBucketSpec{})
+	settle(t, r, "acme-prod", "data")
 	requireBucketReason(t, "acme-prod", "data", metav1.ConditionFalse, "StoreNotReady")
-	if len(store.take()) == 0 {
-		t.Fatal("the store was not called")
-	}
 }
 
 func TestBucketReportsAnUnreachableStoreAsNotReady(t *testing.T) {
 	fresh(t)
-	_, url := newFakeStore(t, answerEverythingWith(200))
-	r := bucketReconciler(url)
-	boundBucket(t, r, nil, v1alpha1.ObjectStorageBucketSpec{UserRef: "app", Policy: examplePolicy})
-	r.Endpoint = "http://127.0.0.1:1"
-	reconcileBucket(t, r, "acme-prod", "data")
+	r := bucketReconciler("http://127.0.0.1:1")
+	accountReady(t, "acme-prod")
+	createBucket(t, "acme-prod", "data", v1alpha1.ObjectStorageBucketSpec{})
+	settle(t, r, "acme-prod", "data")
 	requireBucketReason(t, "acme-prod", "data", metav1.ConditionFalse, "StoreNotReady")
 }
 
-func TestBucketKeepsClientErrorsAsRefusals(t *testing.T) {
+func TestBucketReportsADeniedCreateAsAFailure(t *testing.T) {
 	fresh(t)
-	_, url := newFakeStore(t, answerEverythingWith(403))
+	store, url := newFakeS3(t)
+	store.failWith = http.StatusForbidden
 	r := bucketReconciler(url)
-	boundBucket(t, r, nil, v1alpha1.ObjectStorageBucketSpec{UserRef: "app", Versioning: true})
+	accountReady(t, "acme-prod")
+	createBucket(t, "acme-prod", "data", v1alpha1.ObjectStorageBucketSpec{})
+	settle(t, r, "acme-prod", "data")
+	requireBucketReason(t, "acme-prod", "data", metav1.ConditionFalse, "BucketFailed")
+}
+
+func TestBucketWithAnOldClaimIsLegacy(t *testing.T) {
+	fresh(t)
+	store, url := newFakeS3(t)
+	r := bucketReconciler(url)
+	accountReady(t, "acme-prod")
+	claim := &unstructured.Unstructured{Object: map[string]any{
+		"apiVersion": "objectbucket.io/v1alpha1",
+		"kind":       "ObjectBucketClaim",
+		"metadata":   map[string]any{"name": "data", "namespace": "acme-prod"},
+		"spec":       map[string]any{"generateBucketName": "data", "storageClassName": "bucket"},
+	}}
+	if err := testClient.Create(context.Background(), claim); err != nil {
+		t.Fatal(err)
+	}
+	createBucket(t, "acme-prod", "data", v1alpha1.ObjectStorageBucketSpec{})
+	settle(t, r, "acme-prod", "data")
+	requireBucketReason(t, "acme-prod", "data", metav1.ConditionFalse, "LegacyBucket")
+	if len(store.take()) != 0 {
+		t.Fatal("the store was called for a legacy bucket")
+	}
+	if err := testClient.Delete(context.Background(), readBucket(t, "acme-prod", "data")); err != nil {
+		t.Fatal(err)
+	}
 	reconcileBucket(t, r, "acme-prod", "data")
-	requireBucketReason(t, "acme-prod", "data", metav1.ConditionFalse, "VersioningFailed")
+	if !bucketGone(t, "acme-prod", "data") || len(store.take()) != 0 {
+		t.Fatal("a legacy bucket delete touched the store")
+	}
+	if countRook(t, objectBucketClaimGVK, "acme-prod") != 1 {
+		t.Fatal("the legacy claim was deleted")
+	}
+}
+
+func deleteBucketObject(t *testing.T, namespace, name string) {
+	t.Helper()
+	if err := testClient.Delete(context.Background(), readBucket(t, namespace, name)); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestBucketDeleteOfAnEmptyBucket(t *testing.T) {
+	fresh(t)
+	store, url := newFakeS3(t)
+	r := bucketReconciler(url)
+	accountReady(t, "acme-prod")
+	createBucket(t, "acme-prod", "data", v1alpha1.ObjectStorageBucketSpec{})
+	settle(t, r, "acme-prod", "data")
+	deleteBucketObject(t, "acme-prod", "data")
+	reconcileBucket(t, r, "acme-prod", "data")
+	if store.has("acme-prod-data") || !bucketGone(t, "acme-prod", "data") {
+		t.Fatal("the bucket or its object remains")
+	}
+}
+
+func TestBucketDeleteWaitsWhenNotEmpty(t *testing.T) {
+	fresh(t)
+	store, url := newFakeS3(t)
+	r := bucketReconciler(url)
+	accountReady(t, "acme-prod")
+	createBucket(t, "acme-prod", "data", v1alpha1.ObjectStorageBucketSpec{})
+	settle(t, r, "acme-prod", "data")
+	store.fill("acme-prod-data", 5)
+	deleteBucketObject(t, "acme-prod", "data")
+	store.take()
+	reconcileBucket(t, r, "acme-prod", "data")
+	requireBucketReason(t, "acme-prod", "data", metav1.ConditionFalse, "NotEmpty")
+	if !strings.Contains(readBucket(t, "acme-prod", "data").Status.Conditions[0].Message, "5") {
+		t.Fatalf("message %q", readBucket(t, "acme-prod", "data").Status.Conditions[0].Message)
+	}
+	for _, call := range store.take() {
+		if call == "POST delete" || call == "DELETE" {
+			t.Fatalf("call %q", call)
+		}
+	}
+	if len(store.objects["acme-prod-data"]) != 5 {
+		t.Fatal("objects were removed")
+	}
+}
+
+func TestBucketForceDestroyPurgesThreePages(t *testing.T) {
+	fresh(t)
+	store, url := newFakeS3(t)
+	r := bucketReconciler(url)
+	accountReady(t, "acme-prod")
+	createBucket(t, "acme-prod", "data", v1alpha1.ObjectStorageBucketSpec{ForceDestroy: true})
+	settle(t, r, "acme-prod", "data")
+	store.fill("acme-prod-data", 2500)
+	deleteBucketObject(t, "acme-prod", "data")
+	store.take()
+	reconcileBucket(t, r, "acme-prod", "data")
+	purges := 0
+	for _, call := range store.take() {
+		if call == "POST delete" {
+			purges++
+		}
+	}
+	if purges != 3 || store.has("acme-prod-data") || !bucketGone(t, "acme-prod", "data") {
+		t.Fatalf("purges %d, bucket present %v", purges, store.has("acme-prod-data"))
+	}
+}
+
+func TestBucketPurgeStopsAndReportsIncomplete(t *testing.T) {
+	fresh(t)
+	store, url := newFakeS3(t)
+	r := bucketReconciler(url)
+	r.MaxPurgePages = 2
+	accountReady(t, "acme-prod")
+	createBucket(t, "acme-prod", "data", v1alpha1.ObjectStorageBucketSpec{ForceDestroy: true})
+	settle(t, r, "acme-prod", "data")
+	store.fill("acme-prod-data", 2500)
+	deleteBucketObject(t, "acme-prod", "data")
+	reconcileBucket(t, r, "acme-prod", "data")
+	requireBucketReason(t, "acme-prod", "data", metav1.ConditionFalse, "PurgeIncomplete")
+	if len(store.objects["acme-prod-data"]) != 500 {
+		t.Fatalf("objects left %d", len(store.objects["acme-prod-data"]))
+	}
+	reconcileBucket(t, r, "acme-prod", "data")
+	if !bucketGone(t, "acme-prod", "data") {
+		t.Fatal("the next pass did not finish")
+	}
+}
+
+func TestBucketInADeletingNamespaceActsAsForceDestroy(t *testing.T) {
+	fresh(t)
+	store, url := newFakeS3(t)
+	r := bucketReconciler(url)
+	namespace := &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: leavingNamespace}}
+	accountReady(t, "leaving-prod")
+	createBucket(t, "leaving-prod", "data", v1alpha1.ObjectStorageBucketSpec{})
+	settle(t, r, "leaving-prod", "data")
+	store.fill("leaving-prod-data", 10)
+	if err := testClient.Delete(context.Background(), namespace); err != nil {
+		t.Fatal(err)
+	}
+	deleteBucketObject(t, "leaving-prod", "data")
+	reconcileBucket(t, r, "leaving-prod", "data")
+	if store.has("leaving-prod-data") || !bucketGone(t, "leaving-prod", "data") {
+		t.Fatal("the bucket of a deleting namespace was kept")
+	}
+}
+
+func TestBucketDeleteWithoutAnAccountFinishes(t *testing.T) {
+	fresh(t)
+	store, url := newFakeS3(t)
+	r := bucketReconciler(url)
+	createStore(t, "Ready")
+	createBucket(t, "acme-prod", "data", v1alpha1.ObjectStorageBucketSpec{})
+	reconcileBucket(t, r, "acme-prod", "data")
+	deleteBucketObject(t, "acme-prod", "data")
+	reconcileBucket(t, r, "acme-prod", "data")
+	if !bucketGone(t, "acme-prod", "data") || len(store.take()) != 0 {
+		t.Fatal("the delete needed an account that does not exist")
+	}
+}
+
+func TestBucketStatusIsWrittenByTheAreaManager(t *testing.T) {
+	fresh(t)
+	_, url := newFakeS3(t)
+	r := bucketReconciler(url)
+	createStore(t, "Ready")
+	createBucket(t, "acme-prod", "data", v1alpha1.ObjectStorageBucketSpec{})
+	reconcileBucket(t, r, "acme-prod", "data")
+	for _, entry := range readBucket(t, "acme-prod", "data").ManagedFields {
+		if entry.Subresource == "status" && entry.Manager == v1alpha1.ObjectStorageFieldManager {
+			return
+		}
+	}
+	t.Fatalf("managed fields %+v", readBucket(t, "acme-prod", "data").ManagedFields)
+}
+
+func TestBucketProvesOwnershipWithTheCreateAnswer(t *testing.T) {
+	fresh(t)
+	store, url := newFakeS3(t)
+	store.foreign["acme-assets"] = true
+	store.publicHead["acme-assets"] = true
+	store.fill("acme-assets", 4)
+	r := bucketReconciler(url)
+	accountReady(t, "acme-prod")
+	createBucket(t, "acme-prod", "data", v1alpha1.ObjectStorageBucketSpec{BucketName: "acme-assets", ForceDestroy: true})
+	settle(t, r, "acme-prod", "data")
+	requireBucketReason(t, "acme-prod", "data", metav1.ConditionFalse, "NameTaken")
+	if readBucket(t, "acme-prod", "data").Status.BucketName != "" {
+		t.Fatal("a foreign bucket is reported as ours")
+	}
+	deleteBucketObject(t, "acme-prod", "data")
+	store.take()
+	reconcileBucket(t, r, "acme-prod", "data")
+	if !bucketGone(t, "acme-prod", "data") {
+		t.Fatal("the finalizer stayed")
+	}
+	for _, call := range store.take() {
+		if call != "" {
+			t.Fatalf("the delete of a refused bucket called the store: %q", call)
+		}
+	}
+	if !store.has("acme-assets") || len(store.objects["acme-assets"]) != 4 {
+		t.Fatal("a bucket of another account was touched")
+	}
+}
+
+func TestBucketDeletesAnOwnedBucketWhoseSettingsFailed(t *testing.T) {
+	fresh(t)
+	store, url := newFakeS3(t)
+	r := bucketReconciler(url)
+	accountReady(t, "acme-prod")
+	createBucket(t, "acme-prod", "data", v1alpha1.ObjectStorageBucketSpec{Policy: "{}", ForceDestroy: true})
+	settle(t, r, "acme-prod", "data")
+	requireBucketReason(t, "acme-prod", "data", metav1.ConditionFalse, "PolicyInvalid")
+	if readBucket(t, "acme-prod", "data").Status.BucketName != "acme-prod-data" {
+		t.Fatal("the proven bucket is not recorded in the status")
+	}
+	store.fill("acme-prod-data", 3)
+	deleteBucketObject(t, "acme-prod", "data")
+	reconcileBucket(t, r, "acme-prod", "data")
+	if store.has("acme-prod-data") || !bucketGone(t, "acme-prod", "data") {
+		t.Fatal("an owned bucket was left behind")
+	}
+}
+
+func TestBucketIgnoresAForgedOwnershipAnnotation(t *testing.T) {
+	fresh(t)
+	store, url := newFakeS3(t)
+	store.foreign["acme-assets"] = true
+	store.publicHead["acme-assets"] = true
+	store.fill("acme-assets", 4)
+	r := bucketReconciler(url)
+	accountReady(t, "acme-prod")
+	createBucket(t, "acme-prod", "data", v1alpha1.ObjectStorageBucketSpec{BucketName: "acme-assets", ForceDestroy: true})
+	bucket := readBucket(t, "acme-prod", "data")
+	bucket.Annotations = map[string]string{"bedrock.cloudyfolks.io/owned-bucket": "acme-assets"}
+	if err := testClient.Update(context.Background(), bucket); err != nil {
+		t.Fatal(err)
+	}
+	settle(t, r, "acme-prod", "data")
+	deleteBucketObject(t, "acme-prod", "data")
+	store.take()
+	reconcileBucket(t, r, "acme-prod", "data")
+	for _, call := range store.take() {
+		if call != "" {
+			t.Fatalf("the store was called: %q", call)
+		}
+	}
+	if !bucketGone(t, "acme-prod", "data") || len(store.objects["acme-assets"]) != 4 {
+		t.Fatal("the delete touched a foreign bucket or blocked")
+	}
+}
+
+func TestForgedAnnotationDoesNotSkipTheBucketLimit(t *testing.T) {
+	fresh(t)
+	_, url := newFakeS3(t)
+	r := bucketReconcilerWith(url, Rules{MaxBuckets: 1})
+	accountReady(t, "acme-prod")
+	createBucket(t, "acme-prod", "one", v1alpha1.ObjectStorageBucketSpec{})
+	settle(t, r, "acme-prod", "one")
+	createBucket(t, "acme-prod", "two", v1alpha1.ObjectStorageBucketSpec{})
+	two := readBucket(t, "acme-prod", "two")
+	two.Annotations = map[string]string{"bedrock.cloudyfolks.io/owned-bucket": "acme-prod-two"}
+	if err := testClient.Update(context.Background(), two); err != nil {
+		t.Fatal(err)
+	}
+	settle(t, r, "acme-prod", "two")
+	requireBucketReason(t, "acme-prod", "two", metav1.ConditionFalse, "BucketLimit")
+}
+
+func TestBucketDeleteRechecksTheAclOwner(t *testing.T) {
+	fresh(t)
+	store, url := newFakeS3(t)
+	r := bucketReconciler(url)
+	accountReady(t, "acme-prod")
+	createBucket(t, "acme-prod", "data", v1alpha1.ObjectStorageBucketSpec{ForceDestroy: true})
+	settle(t, r, "acme-prod", "data")
+	store.fill("acme-prod-data", 3)
+	store.aclOwner["acme-prod-data"] = "RGW99999999999999999"
+	deleteBucketObject(t, "acme-prod", "data")
+	store.take()
+	reconcileBucket(t, r, "acme-prod", "data")
+	for _, call := range store.take() {
+		if call != "GET acl" {
+			t.Fatalf("a destructive call went out: %q", call)
+		}
+	}
+	if !bucketGone(t, "acme-prod", "data") || len(store.objects["acme-prod-data"]) != 3 {
+		t.Fatal("the tenant delete blocked or the bucket was touched")
+	}
+}
+
+func TestBucketDeleteWaitsWhileTheOwnerCheckIsUnavailable(t *testing.T) {
+	fresh(t)
+	store, url := newFakeS3(t)
+	r := bucketReconciler(url)
+	accountReady(t, "acme-prod")
+	createBucket(t, "acme-prod", "data", v1alpha1.ObjectStorageBucketSpec{})
+	settle(t, r, "acme-prod", "data")
+	deleteBucketObject(t, "acme-prod", "data")
+	store.mu.Lock()
+	store.failWith = http.StatusServiceUnavailable
+	store.mu.Unlock()
+	reconcileBucket(t, r, "acme-prod", "data")
+	if bucketGone(t, "acme-prod", "data") {
+		t.Fatal("the finalizer went while the store was down")
+	}
+	requireBucketReason(t, "acme-prod", "data", metav1.ConditionFalse, "StoreNotReady")
 }
