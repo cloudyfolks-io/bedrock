@@ -42,6 +42,16 @@ func MarkVpcStandby(ctx context.Context, c client.Client, name string) error {
 	})
 }
 
+func MarkVpcPeered(ctx context.Context, c client.Client, name string, remotes ...string) error {
+	return updateStatus(ctx, c, fabric.VpcGVK, name, func(status, _ map[string]any) {
+		peered, _ := status["vpcPeerings"].([]any)
+		for _, remote := range remotes {
+			peered = append(peered, remote)
+		}
+		status["vpcPeerings"] = peered
+	})
+}
+
 func MarkSubnetReady(ctx context.Context, c client.Client, name string) error {
 	return updateStatus(ctx, c, fabric.SubnetGVK, name, func(status, _ map[string]any) {
 		status["conditions"] = readyCondition()

@@ -13,6 +13,7 @@ func TestNetworkCatalogKeysAndDefaults(t *testing.T) {
 		"network.bgp.peers": "", "network.bgp.transit-network": "", "network.dns-servers": "", "network.mtu": "",
 		"network.bgp.bfd": "true", "network.bgp.hold-time": "9s", "network.bgp.keepalive-time": "3s",
 		"network.bgp.graceful-restart": "true", "network.bgp.advertise-filter": "", "network.bgp.redistribute-tables": "",
+		"network.peering.range":  "169.254.0.0/16",
 		"network.reserved-cidrs": "100.64.0.0/10", "network.subnet-allowed-ranges": "10.0.0.0/8,172.16.0.0/12,192.168.0.0/16",
 	}
 	for key, def := range want {

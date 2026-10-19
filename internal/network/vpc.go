@@ -23,6 +23,7 @@ type VpcInput struct {
 
 	Attached      []string
 	AttachedRoute string
+	Peers         []PeerLink
 }
 
 type External struct {
@@ -32,6 +33,43 @@ type External struct {
 }
 
 func PlanVpc(in VpcInput) (fabric.VpcSpec, External) {
+	spec, external := planExternal(in)
+	return withRouting(spec, in), external
+}
+
+func withRouting(spec fabric.VpcSpec, in VpcInput) fabric.VpcSpec {
+	spec.Peerings = vpcPeerings(in.Peers)
+	spec.StaticRoutes = vpcStaticRoutes(in)
+	return spec
+}
+
+func vpcPeerings(links []PeerLink) []fabric.Peering {
+	peerings := make([]fabric.Peering, len(links))
+	for i, link := range links {
+		peerings[i] = fabric.Peering{RemoteVpc: link.RemoteVpc, LocalConnectIP: link.LocalIP}
+	}
+	return peerings
+}
+
+func vpcStaticRoutes(in VpcInput) []fabric.StaticRoute {
+	var routes []fabric.StaticRoute
+	add := func(route fabric.StaticRoute) {
+		if !slices.ContainsFunc(routes, func(r fabric.StaticRoute) bool { return r.CIDR == route.CIDR }) {
+			routes = append(routes, route)
+		}
+	}
+	for _, route := range in.Network.Spec.StaticRoutes {
+		add(fabric.StaticRoute{CIDR: route.CIDR, NextHop: route.NextHop})
+	}
+	for _, link := range in.Peers {
+		for _, cidr := range link.RemoteRanges {
+			add(fabric.StaticRoute{CIDR: cidr, NextHop: link.RemoteIP})
+		}
+	}
+	return routes
+}
+
+func planExternal(in VpcInput) (fabric.VpcSpec, External) {
 	if !in.Network.Spec.EnableExternal {
 		return fabric.VpcSpec{}, External{}
 	}

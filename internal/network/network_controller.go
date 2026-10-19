@@ -2,6 +2,7 @@ package network
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strconv"
 	"strings"
@@ -78,7 +79,11 @@ func (r *NetworkReconciler) Reconcile(ctx context.Context, req reconcile.Request
 	if err != nil {
 		return reconcile.Result{}, err
 	}
-	spec, external := PlanVpc(VpcInput{Network: network, Config: cfg, VrfID: vrf, Attached: attached, AttachedRoute: route})
+	peers, err := r.peerLinks(ctx, &network)
+	if err != nil {
+		return reconcile.Result{}, err
+	}
+	spec, external := PlanVpc(VpcInput{Network: network, Config: cfg, VrfID: vrf, Attached: attached, AttachedRoute: route, Peers: peers})
 	vpc := fabric.Vpc(fabric.Meta{Name: VpcName(network.Name), Labels: ObjectLabels("Network", network.Name, network.Spec.TenantRef, ""), Annotations: OwnerAnnotations(&network)}, spec)
 	if conflict, err := r.conflicts(ctx, vpc, &network); err != nil || conflict {
 		if err != nil {
@@ -99,6 +104,15 @@ func (r *NetworkReconciler) Reconcile(ctx context.Context, req reconcile.Request
 	}
 	status.Conditions = withVRFPolicy(withRangePolicy(status.Conditions, network.Generation, breach), network.Generation, vrfBreach)
 	return r.publish(ctx, &network, status)
+}
+
+func (r *NetworkReconciler) peerLinks(ctx context.Context, network *v1alpha1.Network) ([]PeerLink, error) {
+	var peerings v1alpha1.NetworkPeeringList
+	var networks v1alpha1.NetworkList
+	if err := errors.Join(r.Client.List(ctx, &peerings), r.Client.List(ctx, &networks)); err != nil {
+		return nil, err
+	}
+	return PeerLinks(network.Name, peerings.Items, networks.Items), nil
 }
 
 func (r *NetworkReconciler) existingAttachment(ctx context.Context, network *v1alpha1.Network) ([]string, string, error) {

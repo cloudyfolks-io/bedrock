@@ -76,6 +76,32 @@ spec:
                     || !(cidr(a).containsCIDR(b) || cidr(b).containsCIDR(a))))
               enableExternal:
                 type: boolean
+              staticRoutes:
+                items:
+                  properties:
+                    cidr:
+                      maxLength: 43
+                      type: string
+                      x-kubernetes-validations:
+                      - message: cidr must be a canonical IPv4 network other than
+                          the default route
+                        rule: isCIDR(self) && cidr(self).ip().family() == 4 && string(cidr(self).masked())
+                          == self && self != '0.0.0.0/0'
+                    nextHop:
+                      maxLength: 45
+                      type: string
+                      x-kubernetes-validations:
+                      - message: nextHop must be an IPv4 address
+                        rule: isIP(self) && ip(self).family() == 4
+                  required:
+                  - cidr
+                  - nextHop
+                  type: object
+                maxItems: 64
+                type: array
+                x-kubernetes-list-map-keys:
+                - cidr
+                x-kubernetes-list-type: map
               tenantRef:
                 maxLength: 30
                 minLength: 1
