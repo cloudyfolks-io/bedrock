@@ -39,9 +39,19 @@ func createControlPlane(t *testing.T, c client.Client, name, hash string, member
 	if err := c.Create(ctx, host); err != nil {
 		t.Fatal(err)
 	}
+	reported := metav1.Now()
+	host.Status.ReportedAt = &reported
 	host.Status.Checks = &v1alpha1.HostChecks{EtcdHealthy: true, EtcdMembers: members}
 	host.Status.Encryption = &v1alpha1.EncryptionFileStatus{Hash: hash}
 	if err := c.Status().Update(ctx, host); err != nil {
+		t.Fatal(err)
+	}
+	node := &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: name}}
+	if err := c.Create(ctx, node); err != nil {
+		t.Fatal(err)
+	}
+	node.Status.Conditions = []corev1.NodeCondition{{Type: corev1.NodeReady, Status: corev1.ConditionTrue, LastHeartbeatTime: reported}}
+	if err := c.Status().Update(ctx, node); err != nil {
 		t.Fatal(err)
 	}
 }
