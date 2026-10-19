@@ -1258,8 +1258,17 @@ msgstr "Expand {0}"
 msgid "wizard.back"
 msgstr "Back"
 
+msgid "wizard.cores"
+msgstr "CPU cores"
+
 msgid "wizard.create"
 msgstr "Create virtual machine"
+
+msgid "wizard.customSize"
+msgstr "Custom size"
+
+msgid "wizard.error.cores"
+msgstr "Enter the number of CPU cores"
 
 msgid "wizard.error.duplicate"
 msgstr "A virtual machine with this name already exists"
@@ -1269,6 +1278,9 @@ msgstr "Choose an image"
 
 msgid "wizard.error.iso"
 msgstr "Choose an ISO image"
+
+msgid "wizard.error.memory"
+msgstr "Enter at least 128 MiB of memory"
 
 msgid "wizard.error.name"
 msgstr "Use lowercase letters, digits and hyphens. Start and end with a letter or digit."
@@ -1308,6 +1320,9 @@ msgstr "The virtual machine is not created yet."
 
 msgid "wizard.leave.title"
 msgstr "Discard your changes?"
+
+msgid "wizard.memoryMiB"
+msgstr "Memory (MiB)"
 
 msgid "wizard.next"
 msgstr "Next"

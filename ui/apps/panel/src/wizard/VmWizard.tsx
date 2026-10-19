@@ -38,6 +38,9 @@ const initial: DiskValues = {
   imageName: "",
   imageScope: "cluster",
   instanceType: "",
+  customSize: false,
+  cores: null,
+  memoryMiB: null,
   preference: "",
   rootDiskGi: 20,
   storageClass: "",
@@ -165,6 +168,8 @@ function fieldOfCause(field: string): string {
   const table: [string, string][] = [
     ["spec.rootDisk", "rootDiskGi"],
     ["spec.instanceType", "instanceType"],
+    ["spec.compute.cores", "cores"],
+    ["spec.compute.memoryMiB", "memoryMiB"],
     ["spec.image", "imageName"],
     ["spec.networks", "subnetRef"],
     ["spec.cloudInit", "userData"],

@@ -14,6 +14,8 @@ const maxVMNameLength = 52
 
 type Issue struct{ Field, Reason, Message string }
 
+type ComputeLimits struct{ MaxCores, MaxMemoryMiB int32 }
+
 func invalid(field, message string) Issue {
 	return Issue{Field: field, Reason: ReasonInvalidSpec, Message: message}
 }
@@ -22,6 +24,7 @@ func ValidateVirtualMachine(vm v1alpha1.VirtualMachine) []Issue {
 	var issues []Issue
 	issues = append(issues, nameIssues(vm.Name)...)
 	issues = append(issues, imageIssues(vm.Spec)...)
+	issues = append(issues, rootDiskIssues(vm.Spec.RootDisk)...)
 	issues = append(issues, diskIssues(vm.Spec.Disks)...)
 	issues = append(issues, cdromIssues(vm.Spec.CDROMs)...)
 	issues = append(issues, networkIssues(vm.Spec.Networks)...)
@@ -61,6 +64,13 @@ func imageIssues(spec v1alpha1.VirtualMachineSpec) []Issue {
 		return nil
 	}
 	return subdomainIssues("spec.image.name", spec.Image.Name)
+}
+
+func rootDiskIssues(root v1alpha1.VMRootDisk) []Issue {
+	if root.VolumeRef == "" {
+		return nil
+	}
+	return subdomainIssues("spec.rootDisk.volumeRef", root.VolumeRef)
 }
 
 func diskIssues(disks []v1alpha1.VMDisk) []Issue {
@@ -148,6 +158,20 @@ func schedulingIssues(scheduling *v1alpha1.VMScheduling) []Issue {
 	}
 	if _, err := ScopedAffinity(scheduling.Affinity); err != nil {
 		issues = append(issues, invalid("spec.scheduling.affinity", err.Error()))
+	}
+	return issues
+}
+
+func ComputeIssues(compute *v1alpha1.VMCompute, limits ComputeLimits) []Issue {
+	if compute == nil {
+		return nil
+	}
+	var issues []Issue
+	if compute.Cores > limits.MaxCores {
+		issues = append(issues, invalid("spec.compute.cores", fmt.Sprintf("must be at most %d", limits.MaxCores)))
+	}
+	if compute.MemoryMiB > limits.MaxMemoryMiB {
+		issues = append(issues, invalid("spec.compute.memoryMiB", fmt.Sprintf("must be at most %d", limits.MaxMemoryMiB)))
 	}
 	return issues
 }

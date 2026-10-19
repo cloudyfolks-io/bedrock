@@ -198,3 +198,20 @@ func TestScopedAffinityAllowsOwnTerms(t *testing.T) {
 		t.Fatalf("nil gave %v %v", out, err)
 	}
 }
+
+func TestComputeIssuesEnforceTheLimits(t *testing.T) {
+	limits := ComputeLimits{MaxCores: 32, MaxMemoryMiB: 131072}
+	if issues := ComputeIssues(nil, limits); len(issues) != 0 {
+		t.Fatalf("%+v", issues)
+	}
+	if issues := ComputeIssues(&v1alpha1.VMCompute{Cores: 32, MemoryMiB: 131072}, limits); len(issues) != 0 {
+		t.Fatalf("%+v", issues)
+	}
+	over := ComputeIssues(&v1alpha1.VMCompute{Cores: 33, MemoryMiB: 131073}, limits)
+	if !hasField(over, "spec.compute.cores") || !hasField(over, "spec.compute.memoryMiB") || len(over) != 2 {
+		t.Fatalf("%+v", over)
+	}
+	if !strings.Contains(over[0].Message, "32") || over[0].Reason != ReasonInvalidSpec {
+		t.Fatalf("%+v", over[0])
+	}
+}

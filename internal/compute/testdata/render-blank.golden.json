@@ -1,0 +1,170 @@
+{
+  "Secret": {
+    "kind": "Secret",
+    "apiVersion": "v1",
+    "metadata": {
+      "name": "web-2-cloudinit",
+      "namespace": "acme-web",
+      "labels": {
+        "bedrock.cloudyfolks.io/kind": "VirtualMachine",
+        "bedrock.cloudyfolks.io/name": "web-1",
+        "bedrock.cloudyfolks.io/project": "web",
+        "bedrock.cloudyfolks.io/tenant": "acme"
+      },
+      "ownerReferences": [
+        {
+          "apiVersion": "bedrock.cloudyfolks.io/v1alpha1",
+          "kind": "VirtualMachine",
+          "name": "web-2",
+          "uid": "vm-uid-2",
+          "controller": true,
+          "blockOwnerDeletion": true
+        }
+      ]
+    },
+    "data": {
+      "userdata": "I2Nsb3VkLWNvbmZpZwpob3N0bmFtZTogd2ViLTEKc3NoX2F1dGhvcml6ZWRfa2V5czoKLSBzc2gtZWQyNTUxOSBBQUFBazEK"
+    },
+    "type": "Opaque"
+  },
+  "RootClaim": {
+    "apiVersion": "cdi.kubevirt.io/v1beta1",
+    "kind": "DataVolume",
+    "metadata": {
+      "annotations": {
+        "cdi.kubevirt.io/allowClaimAdoption": "true"
+      },
+      "labels": {
+        "bedrock.cloudyfolks.io/kind": "VirtualMachine",
+        "bedrock.cloudyfolks.io/name": "web-1",
+        "bedrock.cloudyfolks.io/project": "web",
+        "bedrock.cloudyfolks.io/tenant": "acme"
+      },
+      "name": "web-2-root",
+      "namespace": "acme-web",
+      "ownerReferences": [
+        {
+          "apiVersion": "bedrock.cloudyfolks.io/v1alpha1",
+          "blockOwnerDeletion": true,
+          "controller": true,
+          "kind": "VirtualMachine",
+          "name": "web-2",
+          "uid": "vm-uid-2"
+        }
+      ]
+    },
+    "spec": {
+      "source": {
+        "blank": {}
+      },
+      "storage": {
+        "resources": {
+          "requests": {
+            "storage": "20Gi"
+          }
+        },
+        "storageClassName": "block"
+      }
+    }
+  },
+  "CDROMClaims": [],
+  "VirtualMachine": {
+    "apiVersion": "kubevirt.io/v1",
+    "kind": "VirtualMachine",
+    "metadata": {
+      "labels": {
+        "bedrock.cloudyfolks.io/kind": "VirtualMachine",
+        "bedrock.cloudyfolks.io/name": "web-1",
+        "bedrock.cloudyfolks.io/project": "web",
+        "bedrock.cloudyfolks.io/tenant": "acme"
+      },
+      "name": "web-2",
+      "namespace": "acme-web",
+      "ownerReferences": [
+        {
+          "apiVersion": "bedrock.cloudyfolks.io/v1alpha1",
+          "blockOwnerDeletion": true,
+          "controller": true,
+          "kind": "VirtualMachine",
+          "name": "web-2",
+          "uid": "vm-uid-2"
+        }
+      ]
+    },
+    "spec": {
+      "instancetype": {
+        "kind": "VirtualMachineClusterInstancetype",
+        "name": "u1.medium"
+      },
+      "runStrategy": "Halted",
+      "template": {
+        "metadata": {
+          "annotations": {
+            "default.acme-web.fabric.cloudyfolks.io/mac_address": "52:54:00:12:34:56",
+            "default.acme-web.fabric.cloudyfolks.io/port_security": "true",
+            "default.acme-web.fabric.cloudyfolks.io/security_groups": "acme-web-web-e90284b6d013"
+          },
+          "labels": {
+            "bedrock.cloudyfolks.io/kind": "VirtualMachine",
+            "bedrock.cloudyfolks.io/name": "web-1",
+            "bedrock.cloudyfolks.io/project": "web",
+            "bedrock.cloudyfolks.io/tenant": "acme",
+            "sg.bedrock.cloudyfolks.io/web": "true"
+          }
+        },
+        "spec": {
+          "domain": {
+            "devices": {
+              "autoattachPodInterface": false,
+              "disks": [
+                {
+                  "bootOrder": 1,
+                  "disk": {},
+                  "name": "rootdisk"
+                },
+                {
+                  "disk": {},
+                  "name": "cloudinit"
+                }
+              ],
+              "interfaces": [
+                {
+                  "bridge": {},
+                  "macAddress": "52:54:00:12:34:56",
+                  "name": "default"
+                }
+              ],
+              "logSerialConsole": true
+            }
+          },
+          "evictionStrategy": "LiveMigrateIfPossible",
+          "networks": [
+            {
+              "multus": {
+                "default": true,
+                "networkName": "acme-web/default"
+              },
+              "name": "default"
+            }
+          ],
+          "volumes": [
+            {
+              "dataVolume": {
+                "name": "web-2-root"
+              },
+              "name": "rootdisk"
+            },
+            {
+              "cloudInitNoCloud": {
+                "secretRef": {
+                  "name": "web-2-cloudinit"
+                }
+              },
+              "name": "cloudinit"
+            }
+          ]
+        }
+      }
+    }
+  }
+}

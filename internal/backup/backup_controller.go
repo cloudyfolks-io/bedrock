@@ -27,6 +27,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	"github.com/cloudyfolks-io/bedrock/api/v1alpha1"
+	"github.com/cloudyfolks-io/bedrock/internal/compute"
 	"github.com/cloudyfolks-io/bedrock/internal/ssa"
 )
 
@@ -266,9 +267,9 @@ func (r *BackupReconciler) markBackupTargets(ctx context.Context, vm *v1alpha1.V
 	if err := r.keepOutOfVelero(ctx, vm); err != nil {
 		return err
 	}
-	for _, disk := range vm.Spec.Disks {
+	for _, ref := range v1alpha1.VolumeRefs(*vm) {
 		volume := &v1alpha1.Volume{}
-		err := r.Client.Get(ctx, types.NamespacedName{Namespace: vm.Namespace, Name: disk.VolumeRef}, volume)
+		err := r.Client.Get(ctx, types.NamespacedName{Namespace: vm.Namespace, Name: ref}, volume)
 		if apierrors.IsNotFound(err) {
 			continue
 		}
@@ -276,6 +277,31 @@ func (r *BackupReconciler) markBackupTargets(ctx context.Context, vm *v1alpha1.V
 			return err
 		}
 		if err := r.labelBackupVM(ctx, volume, vm.Name); err != nil {
+			return err
+		}
+	}
+	return r.unlabelDetachedVolumes(ctx, vm)
+}
+
+func (r *BackupReconciler) unlabelDetachedVolumes(ctx context.Context, vm *v1alpha1.VirtualMachine) error {
+	var labeled v1alpha1.VolumeList
+	if err := r.Client.List(ctx, &labeled, client.InNamespace(vm.Namespace), client.MatchingLabels{BackupVMLabel: vm.Name}); err != nil {
+		return err
+	}
+	attached := v1alpha1.VolumeRefs(*vm)
+	patch := client.RawPatch(types.MergePatchType, []byte(`{"metadata":{"labels":{"`+BackupVMLabel+`":null}}}`))
+	for index := range labeled.Items {
+		if slices.Contains(attached, labeled.Items[index].Name) {
+			continue
+		}
+		mounted, err := compute.MountingInstance(ctx, r.Client, vm.Namespace, labeled.Items[index].Name)
+		if err != nil {
+			return err
+		}
+		if mounted == vm.Name {
+			continue
+		}
+		if err := r.Client.Patch(ctx, &labeled.Items[index], patch, client.FieldOwner(v1alpha1.BackupFieldManager)); client.IgnoreNotFound(err) != nil {
 			return err
 		}
 	}

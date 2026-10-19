@@ -567,3 +567,93 @@ func TestBackupNamesAreLimitedTo63Characters(t *testing.T) {
 		t.Fatalf("a 63 character name must be valid: %v", err)
 	}
 }
+
+func TestBackupLabelsTheRootVolumeOfAVM(t *testing.T) {
+	setLocation(t, "Available")
+	ensureProject(t)
+	ctx := context.Background()
+	root := &v1alpha1.Volume{ObjectMeta: metav1.ObjectMeta{Name: "boot-root", Namespace: projectNamespace}, Spec: v1alpha1.VolumeSpec{SizeGi: 5}}
+	if err := k8sClient.Create(ctx, root); err != nil {
+		t.Fatal(err)
+	}
+	vm := &v1alpha1.VirtualMachine{
+		ObjectMeta: metav1.ObjectMeta{Name: "boot-vm", Namespace: projectNamespace},
+		Spec:       v1alpha1.VirtualMachineSpec{InstanceType: "small", RootDisk: v1alpha1.VMRootDisk{VolumeRef: "boot-root"}},
+	}
+	if err := k8sClient.Create(ctx, vm); err != nil {
+		t.Fatal(err)
+	}
+	createVMB(t, "boot-once", v1alpha1.VirtualMachineBackupSpec{VMRef: "boot-vm"})
+	r := newBackupReconciler(testNow)
+	reconcileVMB(t, r, "boot-once")
+	reconcileVMB(t, r, "boot-once")
+	labeled := &v1alpha1.Volume{}
+	if err := k8sClient.Get(ctx, types.NamespacedName{Namespace: projectNamespace, Name: "boot-root"}, labeled); err != nil || labeled.Labels[BackupVMLabel] != "boot-vm" {
+		t.Fatalf("root volume labels %v %v", labeled.Labels, err)
+	}
+}
+
+func TestBackupUnlabelsAVolumeThatLeftTheVM(t *testing.T) {
+	setLocation(t, "Available")
+	createVM(t, "swap-vm", "swap-data")
+	ctx := context.Background()
+	stale := &v1alpha1.Volume{ObjectMeta: metav1.ObjectMeta{Name: "swap-old", Namespace: projectNamespace, Labels: map[string]string{BackupVMLabel: "swap-vm"}}, Spec: v1alpha1.VolumeSpec{SizeGi: 5}}
+	if err := k8sClient.Create(ctx, stale); err != nil {
+		t.Fatal(err)
+	}
+	createVMB(t, "swap-once", v1alpha1.VirtualMachineBackupSpec{VMRef: "swap-vm"})
+	r := newBackupReconciler(testNow)
+	reconcileVMB(t, r, "swap-once")
+	reconcileVMB(t, r, "swap-once")
+	got := &v1alpha1.Volume{}
+	if err := k8sClient.Get(ctx, types.NamespacedName{Namespace: projectNamespace, Name: "swap-old"}, got); err != nil {
+		t.Fatal(err)
+	}
+	if _, labeled := got.Labels[BackupVMLabel]; labeled {
+		t.Fatalf("labels %v", got.Labels)
+	}
+	kept := &v1alpha1.Volume{}
+	if err := k8sClient.Get(ctx, types.NamespacedName{Namespace: projectNamespace, Name: "swap-data"}, kept); err != nil || kept.Labels[BackupVMLabel] != "swap-vm" {
+		t.Fatalf("attached volume labels %v %v", kept.Labels, err)
+	}
+}
+
+func TestBackupKeepsTheLabelWhileAnInstanceMountsTheVolume(t *testing.T) {
+	setLocation(t, "Available")
+	createVM(t, "mount-vm", "mount-data")
+	ctx := context.Background()
+	old := &v1alpha1.Volume{ObjectMeta: metav1.ObjectMeta{Name: "mount-old", Namespace: projectNamespace, Labels: map[string]string{BackupVMLabel: "mount-vm"}}, Spec: v1alpha1.VolumeSpec{SizeGi: 5}}
+	if err := k8sClient.Create(ctx, old); err != nil {
+		t.Fatal(err)
+	}
+	vmi := &unstructured.Unstructured{Object: map[string]any{
+		"apiVersion": "kubevirt.io/v1",
+		"kind":       "VirtualMachineInstance",
+		"metadata":   map[string]any{"name": "mount-vm", "namespace": projectNamespace},
+		"spec": map[string]any{
+			"domain":  map[string]any{"devices": map[string]any{}},
+			"volumes": []any{map[string]any{"name": "rootdisk", "persistentVolumeClaim": map[string]any{"claimName": "mount-old"}}},
+		},
+	}}
+	if err := k8sClient.Create(ctx, vmi); err != nil {
+		t.Fatal(err)
+	}
+	createVMB(t, "mount-once", v1alpha1.VirtualMachineBackupSpec{VMRef: "mount-vm"})
+	r := newBackupReconciler(testNow)
+	reconcileVMB(t, r, "mount-once")
+	reconcileVMB(t, r, "mount-once")
+	got := &v1alpha1.Volume{}
+	if err := k8sClient.Get(ctx, types.NamespacedName{Namespace: projectNamespace, Name: "mount-old"}, got); err != nil || got.Labels[BackupVMLabel] != "mount-vm" {
+		t.Fatalf("labels while mounted %v %v", got.Labels, err)
+	}
+	if err := k8sClient.Delete(ctx, vmi); err != nil {
+		t.Fatal(err)
+	}
+	reconcileVMB(t, r, "mount-once")
+	if err := k8sClient.Get(ctx, types.NamespacedName{Namespace: projectNamespace, Name: "mount-old"}, got); err != nil {
+		t.Fatal(err)
+	}
+	if _, labeled := got.Labels[BackupVMLabel]; labeled {
+		t.Fatalf("labels after stop %v", got.Labels)
+	}
+}
