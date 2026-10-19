@@ -51,3 +51,4 @@ grafana:
 kube-state-metrics:
   metricLabelsAllowlist:
     - namespaces=[bedrock.cloudyfolks.io/tenant,bedrock.cloudyfolks.io/project]
+    - pods=[app.kubernetes.io/managed-by,app.kubernetes.io/instance,bedrock.cloudyfolks.io/name]

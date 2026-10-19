@@ -25,7 +25,7 @@ type Definition struct {
 }
 
 func Known() []Definition {
-	return []Definition{kataDefinition(), lokiDefinition(), cnpgDefinition()}
+	return []Definition{kataDefinition(), lokiDefinition(), cnpgDefinition(), perconaDefinition()}
 }
 
 func Lookup(name string) (Definition, bool) {
@@ -43,6 +43,10 @@ func kataDefinition() Definition {
 
 func cnpgDefinition() Definition {
 	return Definition{Name: CNPG, EnabledSetting: "cnpg.enabled"}
+}
+
+func perconaDefinition() Definition {
+	return Definition{Name: PerconaPS, EnabledSetting: "percona-ps.enabled"}
 }
 
 func lokiDefinition() Definition {

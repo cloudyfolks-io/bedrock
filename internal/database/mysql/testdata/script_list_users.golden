@@ -1,0 +1,5 @@
+SET SESSION max_execution_time = 30000;
+SELECT u.user, coalesce(d.db, ''), coalesce(d.Create_priv, ''), coalesce(d.Insert_priv, '')
+FROM mysql.user u LEFT JOIN mysql.db d ON d.user = u.user AND d.host = u.host
+WHERE u.host = '%' AND u.user NOT IN ('dbadmin', 'operator', 'xtrabackup', 'monitor', 'replication', 'orchestrator', 'clustercheck', 'proxyadmin', 'heartbeat', 'mysql.sys', 'mysql.session', 'mysql.infoschema')
+ORDER BY u.user, d.db;

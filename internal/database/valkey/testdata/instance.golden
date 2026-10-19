@@ -1,0 +1,393 @@
+[
+  {
+    "apiVersion": "v1",
+    "kind": "PersistentVolumeClaim",
+    "metadata": {
+      "labels": {
+        "app.kubernetes.io/instance": "0b0c0d0e-1111-4222-8333-444455556666",
+        "app.kubernetes.io/managed-by": "bedrock",
+        "bedrock.cloudyfolks.io/kind": "Database",
+        "bedrock.cloudyfolks.io/name": "cache",
+        "bedrock.cloudyfolks.io/project": "web",
+        "bedrock.cloudyfolks.io/tenant": "acme"
+      },
+      "name": "0b0c0d0e-1111-4222-8333-444455556666-data",
+      "namespace": "bedrock-dbaas"
+    },
+    "spec": {
+      "accessModes": [
+        "ReadWriteOnce"
+      ],
+      "resources": {
+        "requests": {
+          "storage": "20Gi"
+        }
+      },
+      "storageClassName": "block"
+    }
+  },
+  {
+    "apiVersion": "apps/v1",
+    "kind": "Deployment",
+    "metadata": {
+      "labels": {
+        "app.kubernetes.io/instance": "0b0c0d0e-1111-4222-8333-444455556666",
+        "app.kubernetes.io/managed-by": "bedrock",
+        "bedrock.cloudyfolks.io/kind": "Database",
+        "bedrock.cloudyfolks.io/name": "cache",
+        "bedrock.cloudyfolks.io/project": "web",
+        "bedrock.cloudyfolks.io/tenant": "acme"
+      },
+      "name": "0b0c0d0e-1111-4222-8333-444455556666",
+      "namespace": "bedrock-dbaas"
+    },
+    "spec": {
+      "replicas": 1,
+      "selector": {
+        "matchLabels": {
+          "app.kubernetes.io/component": "engine",
+          "app.kubernetes.io/instance": "0b0c0d0e-1111-4222-8333-444455556666"
+        }
+      },
+      "strategy": {
+        "type": "Recreate"
+      },
+      "template": {
+        "metadata": {
+          "labels": {
+            "app.kubernetes.io/component": "engine",
+            "app.kubernetes.io/instance": "0b0c0d0e-1111-4222-8333-444455556666",
+            "app.kubernetes.io/managed-by": "bedrock",
+            "bedrock.cloudyfolks.io/kind": "Database",
+            "bedrock.cloudyfolks.io/name": "cache",
+            "bedrock.cloudyfolks.io/project": "web",
+            "bedrock.cloudyfolks.io/tenant": "acme"
+          }
+        },
+        "spec": {
+          "automountServiceAccountToken": false,
+          "containers": [
+            {
+              "args": [
+                "valkey-server",
+                "--bind",
+                "0.0.0.0",
+                "--protected-mode",
+                "no",
+                "--aclfile",
+                "/data/users.acl",
+                "--dir",
+                "/data",
+                "--appendonly",
+                "yes",
+                "--appendfsync",
+                "everysec",
+                "--maxmemory",
+                "768mb",
+                "--maxmemory-policy",
+                "noeviction",
+                "--rename-command",
+                "CONFIG",
+                "",
+                "--rename-command",
+                "DEBUG",
+                "",
+                "--rename-command",
+                "MODULE",
+                "",
+                "--rename-command",
+                "SHUTDOWN",
+                "",
+                "--rename-command",
+                "REPLICAOF",
+                "",
+                "--rename-command",
+                "SLAVEOF",
+                ""
+              ],
+              "env": [
+                {
+                  "name": "REDISCLI_AUTH",
+                  "valueFrom": {
+                    "secretKeyRef": {
+                      "key": "password",
+                      "name": "0b0c0d0e-1111-4222-8333-444455556666-superuser"
+                    }
+                  }
+                }
+              ],
+              "image": "docker.io/valkey/valkey:9.1.2@sha256:418652cfb58ef879d4978c33553735d7147016032d5aefaa14c828e611eb9dfd",
+              "livenessProbe": {
+                "exec": {
+                  "command": [
+                    "valkey-cli",
+                    "-e",
+                    "--no-auth-warning",
+                    "--user",
+                    "_platform",
+                    "ping"
+                  ]
+                },
+                "failureThreshold": 3,
+                "initialDelaySeconds": 30,
+                "periodSeconds": 10,
+                "timeoutSeconds": 5
+              },
+              "name": "valkey",
+              "ports": [
+                {
+                  "containerPort": 6379,
+                  "name": "db"
+                }
+              ],
+              "readinessProbe": {
+                "exec": {
+                  "command": [
+                    "valkey-cli",
+                    "-e",
+                    "--no-auth-warning",
+                    "--user",
+                    "_platform",
+                    "ping"
+                  ]
+                },
+                "failureThreshold": 3,
+                "initialDelaySeconds": 5,
+                "periodSeconds": 10,
+                "timeoutSeconds": 5
+              },
+              "resources": {
+                "limits": {
+                  "cpu": "500m",
+                  "memory": "1024Mi"
+                },
+                "requests": {
+                  "cpu": "500m",
+                  "memory": "1024Mi"
+                }
+              },
+              "securityContext": {
+                "allowPrivilegeEscalation": false,
+                "capabilities": {
+                  "drop": [
+                    "ALL"
+                  ]
+                },
+                "runAsGroup": 999,
+                "runAsNonRoot": true,
+                "runAsUser": 999,
+                "seccompProfile": {
+                  "type": "RuntimeDefault"
+                }
+              },
+              "volumeMounts": [
+                {
+                  "mountPath": "/data",
+                  "name": "data",
+                  "subPath": "data"
+                }
+              ]
+            },
+            {
+              "env": [
+                {
+                  "name": "REDIS_ADDR",
+                  "value": "redis://127.0.0.1:6379"
+                },
+                {
+                  "name": "REDIS_USER",
+                  "value": "_exporter"
+                },
+                {
+                  "name": "REDIS_PASSWORD",
+                  "valueFrom": {
+                    "secretKeyRef": {
+                      "key": "exporter-password",
+                      "name": "0b0c0d0e-1111-4222-8333-444455556666-superuser"
+                    }
+                  }
+                }
+              ],
+              "image": "docker.io/oliver006/redis_exporter:v1.94.0@sha256:0842ef7110e62b40bbde2d5c11f38c6fbd99f7100c75e3866637c1b335a1eff7",
+              "name": "exporter",
+              "ports": [
+                {
+                  "containerPort": 9121,
+                  "name": "metrics"
+                }
+              ],
+              "resources": {
+                "limits": {
+                  "cpu": "50m",
+                  "memory": "64Mi"
+                },
+                "requests": {
+                  "cpu": "50m",
+                  "memory": "64Mi"
+                }
+              },
+              "securityContext": {
+                "allowPrivilegeEscalation": false,
+                "capabilities": {
+                  "drop": [
+                    "ALL"
+                  ]
+                },
+                "readOnlyRootFilesystem": true,
+                "runAsGroup": 999,
+                "runAsNonRoot": true,
+                "runAsUser": 999,
+                "seccompProfile": {
+                  "type": "RuntimeDefault"
+                }
+              }
+            }
+          ],
+          "initContainers": [
+            {
+              "command": [
+                "sh",
+                "-c",
+                "set -eu\nif [ ! -f /data/users.acl ]; then\n  platform=\"$(printf %s \"$PLATFORM_PASSWORD\" | sha256sum | cut -d' ' -f1)\"\n  admin=\"$(printf %s \"$ADMIN_PASSWORD\" | sha256sum | cut -d' ' -f1)\"\n  exporter=\"$(printf %s \"$EXPORTER_PASSWORD\" | sha256sum | cut -d' ' -f1)\"\n  umask 077\n  printf 'user default off\\nuser _platform on #%s ~* \u0026* +@all\\nuser dbadmin on #%s ~* \u0026* +@all -@admin -@dangerous\\nuser _exporter on #%s ~* \u0026* -@all +info +ping +client|list +slowlog|get +slowlog|len +latency|latest +latency|history +dbsize\\n' \"$platform\" \"$admin\" \"$exporter\" \u003e /data/users.acl.tmp\n  mv /data/users.acl.tmp /data/users.acl\nfi\n"
+              ],
+              "env": [
+                {
+                  "name": "PLATFORM_PASSWORD",
+                  "valueFrom": {
+                    "secretKeyRef": {
+                      "key": "password",
+                      "name": "0b0c0d0e-1111-4222-8333-444455556666-superuser"
+                    }
+                  }
+                },
+                {
+                  "name": "ADMIN_PASSWORD",
+                  "valueFrom": {
+                    "secretKeyRef": {
+                      "key": "password",
+                      "name": "0b0c0d0e-1111-4222-8333-444455556666-app"
+                    }
+                  }
+                },
+                {
+                  "name": "EXPORTER_PASSWORD",
+                  "valueFrom": {
+                    "secretKeyRef": {
+                      "key": "exporter-password",
+                      "name": "0b0c0d0e-1111-4222-8333-444455556666-superuser"
+                    }
+                  }
+                }
+              ],
+              "image": "docker.io/valkey/valkey:9.1.2@sha256:418652cfb58ef879d4978c33553735d7147016032d5aefaa14c828e611eb9dfd",
+              "name": "acl",
+              "resources": {
+                "limits": {
+                  "cpu": "100m",
+                  "memory": "64Mi"
+                },
+                "requests": {
+                  "cpu": "100m",
+                  "memory": "64Mi"
+                }
+              },
+              "securityContext": {
+                "allowPrivilegeEscalation": false,
+                "capabilities": {
+                  "drop": [
+                    "ALL"
+                  ]
+                },
+                "runAsGroup": 999,
+                "runAsNonRoot": true,
+                "runAsUser": 999,
+                "seccompProfile": {
+                  "type": "RuntimeDefault"
+                }
+              },
+              "volumeMounts": [
+                {
+                  "mountPath": "/data",
+                  "name": "data",
+                  "subPath": "data"
+                }
+              ]
+            }
+          ],
+          "securityContext": {
+            "fsGroup": 999
+          },
+          "volumes": [
+            {
+              "name": "data",
+              "persistentVolumeClaim": {
+                "claimName": "0b0c0d0e-1111-4222-8333-444455556666-data"
+              }
+            }
+          ]
+        }
+      }
+    }
+  },
+  {
+    "apiVersion": "v1",
+    "kind": "Service",
+    "metadata": {
+      "labels": {
+        "app.kubernetes.io/instance": "0b0c0d0e-1111-4222-8333-444455556666",
+        "app.kubernetes.io/managed-by": "bedrock",
+        "bedrock.cloudyfolks.io/kind": "Database",
+        "bedrock.cloudyfolks.io/name": "cache",
+        "bedrock.cloudyfolks.io/project": "web",
+        "bedrock.cloudyfolks.io/tenant": "acme"
+      },
+      "name": "0b0c0d0e-1111-4222-8333-444455556666-db",
+      "namespace": "bedrock-dbaas"
+    },
+    "spec": {
+      "ports": [
+        {
+          "name": "db",
+          "port": 6379,
+          "protocol": "TCP",
+          "targetPort": 6379
+        }
+      ],
+      "selector": {
+        "app.kubernetes.io/component": "engine",
+        "app.kubernetes.io/instance": "0b0c0d0e-1111-4222-8333-444455556666"
+      },
+      "type": "ClusterIP"
+    }
+  },
+  {
+    "apiVersion": "monitoring.coreos.com/v1",
+    "kind": "PodMonitor",
+    "metadata": {
+      "labels": {
+        "app.kubernetes.io/instance": "0b0c0d0e-1111-4222-8333-444455556666",
+        "app.kubernetes.io/managed-by": "bedrock",
+        "bedrock.cloudyfolks.io/kind": "Database",
+        "bedrock.cloudyfolks.io/name": "cache",
+        "bedrock.cloudyfolks.io/project": "web",
+        "bedrock.cloudyfolks.io/tenant": "acme"
+      },
+      "name": "0b0c0d0e-1111-4222-8333-444455556666",
+      "namespace": "bedrock-dbaas"
+    },
+    "spec": {
+      "podMetricsEndpoints": [
+        {
+          "interval": "30s",
+          "port": "metrics"
+        }
+      ],
+      "selector": {
+        "matchLabels": {
+          "app.kubernetes.io/component": "engine",
+          "app.kubernetes.io/instance": "0b0c0d0e-1111-4222-8333-444455556666"
+        }
+      }
+    }
+  }
+]

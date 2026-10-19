@@ -15,6 +15,8 @@ const annotationBootstrapped = "bedrock.cloudyfolks.io/bootstrapped"
 
 type Run func(ctx context.Context, script string) (string, error)
 
+func (run Run) Run(ctx context.Context, script string) (string, error) { return run(ctx, script) }
+
 func Bootstrapped(db v1alpha1.Database) bool {
 	return db.Annotations[annotationBootstrapped] == synced
 }

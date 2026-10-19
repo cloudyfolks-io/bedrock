@@ -136,6 +136,20 @@ func TestPrometheusStackSkipsControlPlaneRules(t *testing.T) {
 	}
 }
 
+func TestKubeStateMetricsExportsTheLabelsOfTheDatabasePods(t *testing.T) {
+	bundle, _ := buildStack(t)
+	deployment := objectNamed(groupObjects(bundle, "kube-prometheus-stack"), "Deployment", "kube-prometheus-stack-kube-state-metrics")
+	if deployment == nil {
+		t.Fatal("missing kube-state-metrics")
+	}
+	containers, _, _ := unstructured.NestedSlice(deployment.Object, "spec", "template", "spec", "containers")
+	args, _ := containers[0].(map[string]any)["args"].([]any)
+	want := "--metric-labels-allowlist=namespaces=[bedrock.cloudyfolks.io/tenant,bedrock.cloudyfolks.io/project],pods=[app.kubernetes.io/managed-by,app.kubernetes.io/instance,bedrock.cloudyfolks.io/name]"
+	if !slices.Contains(args, any(want)) {
+		t.Fatalf("args %v", args)
+	}
+}
+
 func TestKubeStateMetricsExportsTheProjectLabels(t *testing.T) {
 	bundle, _ := buildStack(t)
 	deployment := objectNamed(groupObjects(bundle, "kube-prometheus-stack"), "Deployment", "kube-prometheus-stack-kube-state-metrics")
@@ -144,7 +158,11 @@ func TestKubeStateMetricsExportsTheProjectLabels(t *testing.T) {
 	}
 	containers, _, _ := unstructured.NestedSlice(deployment.Object, "spec", "template", "spec", "containers")
 	args, _ := containers[0].(map[string]any)["args"].([]any)
-	if !slices.Contains(args, any("--metric-labels-allowlist=namespaces=[bedrock.cloudyfolks.io/tenant,bedrock.cloudyfolks.io/project]")) {
+	found := slices.ContainsFunc(args, func(arg any) bool {
+		text, _ := arg.(string)
+		return strings.HasPrefix(text, "--metric-labels-allowlist=namespaces=[bedrock.cloudyfolks.io/tenant,bedrock.cloudyfolks.io/project]")
+	})
+	if !found {
 		t.Fatalf("args %v", args)
 	}
 }
