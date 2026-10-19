@@ -561,3 +561,22 @@ func TestBuildReconcileLeavesAnAbsentBuildAlone(t *testing.T) {
 		t.Fatalf("result %+v", result)
 	}
 }
+
+func TestBuildReconcileCreatesABuildpacksJob(t *testing.T) {
+	c, _ := startEnv(t)
+	ns := seedBuildPlatform(t, c)
+	setSetting(t, c, SettingBuildMirrors, "docker.io=registry.test/mirror-docker")
+	createBuild(t, c, ns, "cnb", func(s *v1alpha1.BuildSpec) { s.Type = v1alpha1.BuildTypeBuildpacks })
+	reconcileBuild(t, newBuildReconciler(c), ns, "cnb")
+	job := getJob(t, c, ns, "cnb")
+	pod := job.Spec.Template.Spec
+	if len(pod.InitContainers) != 5 || pod.Containers[0].Name != "exporter" || pod.Containers[0].Image != "paketobuildpacks/builder-jammy-base:0.4.640" {
+		t.Fatalf("pod %+v", pod)
+	}
+	var configMaps corev1.ConfigMapList
+	must(t, c.List(context.Background(), &configMaps, client.InNamespace(ns), client.MatchingLabels{v1alpha1.LabelKind: "Build"}))
+	if len(configMaps.Items) != 0 {
+		t.Fatalf("a buildpacks build has no mirror ConfigMap: %d", len(configMaps.Items))
+	}
+	requireBuildState(t, getBuild(t, c, ns, "cnb"), v1alpha1.BuildPhasePending, ReasonStarting)
+}

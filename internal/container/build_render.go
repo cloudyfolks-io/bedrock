@@ -114,6 +114,8 @@ func RenderBuild(in BuildInput) (Rendered, error) {
 	switch in.Build.Spec.Type {
 	case "", v1alpha1.BuildTypeDockerfile:
 		return renderDockerfileBuild(in)
+	case v1alpha1.BuildTypeBuildpacks:
+		return renderBuildpacksBuild(in)
 	}
 	return Rendered{}, fmt.Errorf("the build type %q is not supported", in.Build.Spec.Type)
 }

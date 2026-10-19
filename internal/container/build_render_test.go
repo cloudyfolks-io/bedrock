@@ -396,7 +396,7 @@ func TestBuildTierResources(t *testing.T) {
 
 func allBuildInputs() []BuildInput {
 	var inputs []BuildInput
-	for _, buildType := range []string{v1alpha1.BuildTypeDockerfile} {
+	for _, buildType := range []string{v1alpha1.BuildTypeDockerfile, v1alpha1.BuildTypeBuildpacks} {
 		for _, size := range []string{"", "s", "m", "l"} {
 			for _, cache := range []bool{false, true} {
 				for _, mirrors := range [][]settings.RegistryMirror{nil, {{Upstream: "docker.io", Target: "r.test/d"}}} {
