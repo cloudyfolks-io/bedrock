@@ -106,7 +106,7 @@ func (r *InternetGatewayReconciler) plan(ctx context.Context, gateway v1alpha1.I
 	if err != nil || v != nil {
 		return nil, v, err
 	}
-	if v, err := r.otherGateway(ctx, gateway); err != nil || v != nil {
+	if v, err := r.otherGateway(ctx, gateway, network); err != nil || v != nil {
 		return nil, v, err
 	}
 	eip, v, err := r.elasticIP(ctx, gateway)
@@ -147,17 +147,32 @@ func (r *InternetGatewayReconciler) network(ctx context.Context, gateway v1alpha
 	return network, NetworkAllowed(tenant, network), nil
 }
 
-func (r *InternetGatewayReconciler) otherGateway(ctx context.Context, gateway v1alpha1.InternetGateway) (*Violation, error) {
+func (r *InternetGatewayReconciler) otherGateway(ctx context.Context, gateway v1alpha1.InternetGateway, network v1alpha1.Network) (*Violation, error) {
 	var all v1alpha1.InternetGatewayList
 	if err := r.Client.List(ctx, &all); err != nil {
 		return nil, err
 	}
 	for _, other := range all.Items {
-		if other.UID != gateway.UID && other.Spec.NetworkRef == gateway.Spec.NetworkRef && Older(&other, &gateway) {
+		if other.UID == gateway.UID || other.Spec.NetworkRef != gateway.Spec.NetworkRef || !Older(&other, &gateway) {
+			continue
+		}
+		owned, err := r.ownedByTenantOf(ctx, other.Namespace, network)
+		if err != nil {
+			return nil, err
+		}
+		if owned {
 			return &Violation{Reason: ReasonGatewayExists, Message: fmt.Sprintf("the InternetGateway %s/%s already serves the Network %q", other.Namespace, other.Name, gateway.Spec.NetworkRef)}, nil
 		}
 	}
 	return nil, nil
+}
+
+func (r *InternetGatewayReconciler) ownedByTenantOf(ctx context.Context, namespace string, network v1alpha1.Network) (bool, error) {
+	var holder corev1.Namespace
+	if err := r.Client.Get(ctx, client.ObjectKey{Name: namespace}, &holder); err != nil {
+		return false, client.IgnoreNotFound(err)
+	}
+	return NetworkAllowed(holder.Labels[v1alpha1.LabelTenant], network) == nil, nil
 }
 
 func (r *InternetGatewayReconciler) elasticIP(ctx context.Context, gateway v1alpha1.InternetGateway) (v1alpha1.ElasticIP, *Violation, error) {

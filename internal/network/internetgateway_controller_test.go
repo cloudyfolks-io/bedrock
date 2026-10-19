@@ -2,6 +2,7 @@ package network
 
 import (
 	"context"
+	"errors"
 	"slices"
 	"testing"
 	"time"
@@ -14,6 +15,7 @@ import (
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/client/interceptor"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	"github.com/cloudyfolks-io/bedrock/api/v1alpha1"
@@ -389,6 +391,115 @@ func TestInternetGatewayRefusesASecondGatewayOfANetwork(t *testing.T) {
 	if len(snatRulesOf(t, f.c, "gw2")) == 0 {
 		t.Fatal("the second gateway must take over when the first is gone")
 	}
+}
+
+func TestInternetGatewayOfAnotherTenantDoesNotPreemptTheNetworkOwner(t *testing.T) {
+	f := newExternalFixture(t)
+	foreign := newNamespace(t, unique(t, "evil"), "prod")
+	requireAccepted(t, f.c, internetGatewayFor(foreign, "squat", f.network.Name, "ip9"))
+	time.Sleep(1100 * time.Millisecond)
+	f.provisionGateway(t, "gw", "ip1")
+	reconcileGateway(t, f.c, f.namespace, "gw")
+	before := snatRuleNames(t, f.c, "gw")
+	if len(before) == 0 {
+		t.Fatal("the gateway of the owner must write its rules")
+	}
+	reconcileGateway(t, f.c, foreign, "squat")
+	requireGateway(t, f.c, foreign, "squat", metav1.ConditionFalse, ReasonNetworkNotOwned)
+	reconcileGateway(t, f.c, f.namespace, "gw")
+	requireGateway(t, f.c, f.namespace, "gw", metav1.ConditionFalse, ReasonFabricNotReady)
+	if after := snatRuleNames(t, f.c, "gw"); !slices.Equal(before, after) {
+		t.Fatalf("rules before %v after %v", before, after)
+	}
+}
+
+func snatRuleNames(t *testing.T, c client.Client, gateway string) []string {
+	t.Helper()
+	var names []string
+	for _, rule := range snatRulesOf(t, c, gateway) {
+		names = append(names, rule.GetName())
+	}
+	slices.Sort(names)
+	return names
+}
+
+func TestInternetGatewayKeepsItsRulesOnATransientRefusal(t *testing.T) {
+	ctx := context.Background()
+	causes := map[string]struct {
+		cause  func(*testing.T, externalFixture)
+		reason string
+	}{
+		"network disconnected": {
+			cause: func(t *testing.T, f externalFixture) {
+				if err := deleteObject(ctx, f.c, fabric.OvnEipGVK, f.network.Name+"-provider-public"); err != nil {
+					t.Fatal(err)
+				}
+			},
+			reason: ReasonExternalNotConnected,
+		},
+		"elastic ip not ready": {
+			cause: func(t *testing.T, f externalFixture) {
+				eip := getElasticIP(t, f.c, f.namespace, "ip1")
+				eip.Status.Conditions = withCondition(eip.Status.Conditions, falseCondition(v1alpha1.ConditionReady, eip.Generation, ReasonFabricNotReady, "moving"))
+				if err := f.c.Status().Update(ctx, &eip); err != nil {
+					t.Fatal(err)
+				}
+			},
+			reason: ReasonElasticIPNotReady,
+		},
+		"fabric conflict": {
+			cause: func(t *testing.T, f externalFixture) {
+				var network v1alpha1.Network
+				if err := f.c.Get(ctx, client.ObjectKey{Name: f.network.Name}, &network); err != nil {
+					t.Fatal(err)
+				}
+				network.Spec.CIDRs = append(slices.Clone(network.Spec.Ranges()), "192.168.0.0/16")
+				network.Spec.CIDR = ""
+				if err := f.c.Update(ctx, &network); err != nil {
+					t.Fatal(err)
+				}
+				foreign := fabric.OvnSnatRule(fabric.Meta{Name: SnatRuleName(f.network.Name, "192.168.0.0/16"), Annotations: map[string]string{AnnotationOwnerName: "x", AnnotationOwnerUID: "foreign"}}, "e", f.network.Name, "192.168.0.0/16")
+				if err := f.c.Create(ctx, foreign); err != nil {
+					t.Fatal(err)
+				}
+			},
+			reason: ReasonFabricConflict,
+		},
+	}
+	for name, tc := range causes {
+		t.Run(name, func(t *testing.T) {
+			f := newRangesGatewayFixture(t)
+			reconcileGateway(t, f.c, f.namespace, "gw")
+			before := snatRuleNames(t, f.c, "gw")
+			if len(before) != 2 {
+				t.Fatalf("rules %v", before)
+			}
+			tc.cause(t, f)
+			reconcileGateway(t, f.c, f.namespace, "gw")
+			requireGateway(t, f.c, f.namespace, "gw", metav1.ConditionFalse, tc.reason)
+			if after := snatRuleNames(t, f.c, "gw"); !slices.Equal(before, after) {
+				t.Fatalf("rules before %v after %v", before, after)
+			}
+		})
+	}
+	t.Run("api error", func(t *testing.T) {
+		f := newRangesGatewayFixture(t)
+		reconcileGateway(t, f.c, f.namespace, "gw")
+		before := snatRuleNames(t, f.c, "gw")
+		failing := watchingClient(t, interceptor.Funcs{Get: func(ctx context.Context, cl client.WithWatch, key client.ObjectKey, obj client.Object, opts ...client.GetOption) error {
+			if _, isEIP := obj.(*v1alpha1.ElasticIP); isEIP {
+				return errors.New("the API server is unavailable")
+			}
+			return cl.Get(ctx, key, obj, opts...)
+		}})
+		request := reconcile.Request{NamespacedName: types.NamespacedName{Namespace: f.namespace, Name: "gw"}}
+		if _, err := (&InternetGatewayReconciler{Client: failing, Kinds: knowsEverything}).Reconcile(ctx, request); err == nil {
+			t.Fatal("the failure must be reported")
+		}
+		if after := snatRuleNames(t, f.c, "gw"); !slices.Equal(before, after) {
+			t.Fatalf("rules before %v after %v", before, after)
+		}
+	})
 }
 
 func TestInternetGatewayDeletionRemovesTheRules(t *testing.T) {
