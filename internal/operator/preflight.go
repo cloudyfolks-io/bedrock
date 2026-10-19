@@ -17,6 +17,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	"github.com/cloudyfolks-io/bedrock/api/v1alpha1"
+	"github.com/cloudyfolks-io/bedrock/internal/release"
 	"github.com/cloudyfolks-io/bedrock/internal/roles"
 )
 
@@ -151,6 +152,9 @@ func etcdProblems(in preflightInput) []string {
 }
 
 func releaseProblems(in preflightInput) []string {
+	if release.IsDowngrade(in.Running, in.To) {
+		return []string{fmt.Sprintf("release: %s is older than the running %s: a downgrade is not supported", in.To, in.Running)}
+	}
 	if in.Target == nil {
 		return []string{fmt.Sprintf("release: Release/%s does not exist", in.To)}
 	}
