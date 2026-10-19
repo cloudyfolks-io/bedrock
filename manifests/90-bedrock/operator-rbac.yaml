@@ -115,6 +115,8 @@ rules:
   - clusterimages/status
   - clusters
   - clusters/status
+  - containers
+  - containers/status
   - credentials
   - credentials/status
   - devicerequests
