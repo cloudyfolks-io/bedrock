@@ -28,7 +28,7 @@ func TestKnownAddonsAreKataLokiClustersCNPGRegistryAndPercona(t *testing.T) {
 	if cnpg.EnabledSetting != "cnpg.enabled" || len(cnpg.Values) != 0 || cnpg.Vars != nil {
 		t.Errorf("cnpg %+v", cnpg)
 	}
-	percona := known[3]
+	percona := known[5]
 	if percona.EnabledSetting != "percona-ps.enabled" || len(percona.Values) != 0 || percona.Vars != nil || percona.Preflight != nil {
 		t.Errorf("percona-ps %+v", percona)
 	}
