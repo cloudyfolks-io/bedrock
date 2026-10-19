@@ -27,6 +27,7 @@ func tidyBackupDir(ctx context.Context, c client.Client, deps Deps) error {
 	return errors.Join(
 		removeStaleLeftovers(deps.Root, deps.Now().Add(-staleWorkAge)),
 		sealOlderArchives(ctx, c, deps),
+		pruneRetired(deps.Root),
 	)
 }
 
