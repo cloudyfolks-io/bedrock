@@ -103,6 +103,9 @@ msgstr "سطل‌ها"
 msgid "col.cidr"
 msgstr "CIDR"
 
+msgid "col.connectCidr"
+msgstr "شبکه اتصال"
+
 msgid "col.default"
 msgstr "پیش‌فرض"
 
@@ -174,6 +177,9 @@ msgstr "فضای نام"
 
 msgid "col.network"
 msgstr "شبکه"
+
+msgid "col.networks"
+msgstr "شبکه‌ها"
 
 msgid "col.node"
 msgstr "گره"
@@ -749,6 +755,9 @@ msgstr "خوشه‌های کوبرنتیز"
 
 msgid "nav.item.loadBalancers"
 msgstr "توزیع‌کننده‌های بار"
+
+msgid "nav.item.networkPeerings"
+msgstr "پیرینگ شبکه‌ها"
 
 msgid "nav.item.networks"
 msgstr "شبکه‌ها"

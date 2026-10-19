@@ -24,7 +24,7 @@ function adminNavigation(): NavSection[] {
     {
       id: "infrastructure",
       label: msg({ id: "nav.section.infrastructure", message: "Infrastructure" }),
-      items: [item("hosts", msg({ id: "nav.item.hosts", message: "Hosts" }), "/admin"), item("upgrades", msg({ id: "nav.item.upgrades", message: "Upgrades" }), "/admin")],
+      items: [item("hosts", msg({ id: "nav.item.hosts", message: "Hosts" }), "/admin"), item("upgrades", msg({ id: "nav.item.upgrades", message: "Upgrades" }), "/admin"), item("network-peerings", msg({ id: "nav.item.networkPeerings", message: "Network peerings" }), "/admin")],
     },
     {
       id: "platform",

@@ -103,6 +103,9 @@ msgstr "Buckets"
 msgid "col.cidr"
 msgstr "CIDR"
 
+msgid "col.connectCidr"
+msgstr "Connect network"
+
 msgid "col.default"
 msgstr "Default"
 
@@ -174,6 +177,9 @@ msgstr "Namespace"
 
 msgid "col.network"
 msgstr "Network"
+
+msgid "col.networks"
+msgstr "Networks"
 
 msgid "col.node"
 msgstr "Node"
@@ -749,6 +755,9 @@ msgstr "Kubernetes clusters"
 
 msgid "nav.item.loadBalancers"
 msgstr "Load balancers"
+
+msgid "nav.item.networkPeerings"
+msgstr "Network peerings"
 
 msgid "nav.item.networks"
 msgstr "Networks"

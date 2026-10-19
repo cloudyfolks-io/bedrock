@@ -202,6 +202,8 @@ const L = {
   size: msg({ id: "col.size", message: "Size" }),
   versions: msg({ id: "col.versions", message: "Versions" }),
   cidr: msg({ id: "col.cidr", message: "CIDR" }),
+  connectCidr: msg({ id: "col.connectCidr", message: "Connect network" }),
+  networks: msg({ id: "col.networks", message: "Networks" }),
   external: msg({ id: "col.external", message: "External" }),
   vpc: msg({ id: "col.vpc", message: "VPC" }),
   storageClass: msg({ id: "col.storageClass", message: "Storage class" }),
@@ -241,6 +243,7 @@ const L = {
   keyType: msg({ id: "col.keyType", message: "Key type" }),
 };
 
+const networkRefsOf = (object: KubeObject): string => (listAt(object, "spec.networkRefs") as string[]).join(", ");
 const poolOf = (object: KubeObject): string => textAt(object, "status.providerNetwork") || textAt(object, "spec.providerNetwork");
 
 const sourceSummary = (object: KubeObject): string =>
@@ -285,6 +288,7 @@ export const columnsByPlural: Record<string, ColumnDef[]> = {
     sizeBytes("size", L.size, "status.sizeBytes"),
     count("versions", L.versions, (object) => listAt(object, "status.versions").length),
   ],
+  networkpeerings: [name, { id: "networks", label: L.networks, render: (object) => (networkRefsOf(object) ? <Ltr>{networkRefsOf(object)}</Ltr> : dash), sortValue: networkRefsOf }, ltrText("connectCidr", L.connectCidr, "status.connectCIDR"), status, age],
   networks: [name, text("tenant", L.tenant, "spec.tenantRef"), { id: "cidr", label: L.cidr, render: (object) => (networkCidrs(object) ? <Ltr>{networkCidrs(object)}</Ltr> : dash), sortValue: networkCidrs }, flag("external", L.external, "spec.enableExternal"), text("vpc", L.vpc, "status.vpc"), status],
   virtualmachines: [name, phase, text("node", L.node, "status.node"), addresses, { id: "instanceType", label: L.instanceType, render: (object) => vmSize(object) || dash, sortValue: vmSize }, age],
   containers: [name, phase, ltrText("image", L.image, "spec.image"), replicas, containerAddresses, age],

@@ -103,6 +103,9 @@ msgstr "الحاويات"
 msgid "col.cidr"
 msgstr "CIDR"
 
+msgid "col.connectCidr"
+msgstr "شبكة الاتصال"
+
 msgid "col.default"
 msgstr "الافتراضي"
 
@@ -174,6 +177,9 @@ msgstr "مساحة الأسماء"
 
 msgid "col.network"
 msgstr "الشبكة"
+
+msgid "col.networks"
+msgstr "الشبكات"
 
 msgid "col.node"
 msgstr "العقدة"
@@ -749,6 +755,9 @@ msgstr "عناقيد Kubernetes"
 
 msgid "nav.item.loadBalancers"
 msgstr "موازنات الحمل"
+
+msgid "nav.item.networkPeerings"
+msgstr "ربط الشبكات"
 
 msgid "nav.item.networks"
 msgstr "الشبكات"

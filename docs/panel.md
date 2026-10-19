@@ -33,6 +33,7 @@ The server stays the authority. The panel only hides what the user cannot use.
 | `/admin/hosts/:name` | Host detail: overview, inventory, metrics, maintenance mode |
 | `/admin/settings` | Settings, grouped by prefix |
 | `/admin/upgrades` | Upgrade phase, releases, resume and abort |
+| `/admin/network-peerings` | Network peerings |
 | `/admin/tenants` | Tenants |
 | `/admin/tenants/:name` | Tenant detail: quota use and projects |
 | `/admin/cluster-images` | Catalog images |

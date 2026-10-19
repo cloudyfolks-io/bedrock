@@ -49,7 +49,7 @@ describe("shell", () => {
     for (const heading of ["Infrastructure", "Platform", "Tenancy", "Catalog"]) {
       expect(within(nav).getByRole("heading", { name: heading })).toBeTruthy();
     }
-    expect(hrefs(nav)).toEqual(["/admin/hosts", "/admin/upgrades", "/admin/settings", "/admin/addons", "/admin/tenants", "/admin/cluster-images"]);
+    expect(hrefs(nav)).toEqual(["/admin/hosts", "/admin/upgrades", "/admin/network-peerings", "/admin/settings", "/admin/addons", "/admin/tenants", "/admin/cluster-images"]);
   });
 
   it("TestNonAdminNeverSeesAdmin", async () => {

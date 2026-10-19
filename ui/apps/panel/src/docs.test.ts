@@ -9,6 +9,7 @@ const routes = [
   "/admin/hosts/:name",
   "/admin/settings",
   "/admin/upgrades",
+  "/admin/network-peerings",
   "/admin/tenants",
   "/admin/tenants/:name",
   "/admin/cluster-images",
