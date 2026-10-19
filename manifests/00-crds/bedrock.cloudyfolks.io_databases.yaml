@@ -170,6 +170,10 @@ spec:
                   class:
                     maxLength: 63
                     type: string
+                  instances:
+                    format: int32
+                    minimum: 0
+                    type: integer
                   restartToken:
                     maxLength: 253
                     type: string
