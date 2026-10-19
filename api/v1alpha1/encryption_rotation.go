@@ -1,5 +1,9 @@
 package v1alpha1
 
+import "time"
+
+const AgentReportInterval = 60 * time.Second
+
 const (
 	EncryptionActionRotate = "rotate"
 	EncryptionActionRevert = "revert"

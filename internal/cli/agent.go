@@ -16,6 +16,7 @@ import (
 
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
+	"github.com/cloudyfolks-io/bedrock/api/v1alpha1"
 	"github.com/cloudyfolks-io/bedrock/internal/agent"
 	"github.com/cloudyfolks-io/bedrock/internal/authn/apiserver"
 	"github.com/cloudyfolks-io/bedrock/internal/depot"
@@ -47,7 +48,7 @@ func agentCommand(args []string, _, stderr io.Writer) int {
 	flags.StringVar(&o.kubeconfig, "kubeconfig", filepath.Join("/var/lib/k0s", "kubelet.conf"), "kubelet kubeconfig with the node identity")
 	flags.StringVar(&o.node, "node", "", "node name, default is the lowercase hostname")
 	flags.StringVar(&o.root, "root", "/", "host root")
-	flags.DurationVar(&o.interval, "interval", 60*time.Second, "reconcile interval")
+	flags.DurationVar(&o.interval, "interval", v1alpha1.AgentReportInterval, "reconcile interval")
 	if err := flags.Parse(args); err != nil {
 		return 2
 	}

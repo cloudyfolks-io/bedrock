@@ -228,6 +228,8 @@ type HostStatus struct {
 	Authn *AuthnFilesStatus `json:"authn,omitempty"`
 	// +optional
 	Encryption *EncryptionFileStatus `json:"encryption,omitempty"`
+	// +optional
+	ReportedAt *metav1.Time `json:"reportedAt,omitempty"`
 }
 
 // +kubebuilder:object:root=true
