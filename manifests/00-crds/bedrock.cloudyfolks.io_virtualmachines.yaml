@@ -236,8 +236,8 @@ spec:
                     type: string
                 type: object
                 x-kubernetes-validations:
-                - message: rootDisk needs sizeGi, or volumeRef without sizeGi and
-                    storageClass
+                - message: rootDisk.sizeGi is required without rootDisk.volumeRef,
+                    and rootDisk.volumeRef excludes sizeGi and storageClass
                   rule: 'has(self.volumeRef) ? (!has(self.sizeGi) && !has(self.storageClass))
                     : has(self.sizeGi)'
               running:

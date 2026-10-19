@@ -32,7 +32,7 @@ const (
 	VolumeSnapshotPhaseFailed  = "Failed"
 )
 
-// +kubebuilder:validation:XValidation:rule="has(self.volumeRef) ? (!has(self.sizeGi) && !has(self.storageClass)) : has(self.sizeGi)",message="rootDisk needs sizeGi, or volumeRef without sizeGi and storageClass"
+// +kubebuilder:validation:XValidation:rule="has(self.volumeRef) ? (!has(self.sizeGi) && !has(self.storageClass)) : has(self.sizeGi)",message="rootDisk.sizeGi is required without rootDisk.volumeRef, and rootDisk.volumeRef excludes sizeGi and storageClass"
 type VMRootDisk struct {
 	// +kubebuilder:validation:Minimum=1
 	// +kubebuilder:validation:XValidation:rule="self >= oldSelf",message="rootDisk.sizeGi can only grow"
