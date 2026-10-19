@@ -95,10 +95,10 @@ msgid "col.backupTarget"
 msgstr "الوجهة"
 
 msgid "col.bucketName"
-msgstr "اسم الحاوية"
+msgstr "اسم الحزمة"
 
 msgid "col.buckets"
-msgstr "الحاويات"
+msgstr "الحزم"
 
 msgid "col.cidr"
 msgstr "CIDR"
@@ -774,7 +774,7 @@ msgid "nav.item.backups"
 msgstr "النسخ الاحتياطية"
 
 msgid "nav.item.buckets"
-msgstr "الحاويات"
+msgstr "الحزم"
 
 msgid "nav.item.builds"
 msgstr "عمليات البناء"
