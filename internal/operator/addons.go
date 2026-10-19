@@ -58,6 +58,7 @@ type Probe struct {
 
 type Rendered struct {
 	Objects     []*unstructured.Unstructured
+	Absent      []*unstructured.Unstructured
 	Probes      []Probe
 	SkipReason  string
 	SkipMessage string
@@ -249,6 +250,12 @@ func (r *AddonReconciler) applyRendered(ctx context.Context, addon Addon, render
 			return addonCondition(addon, metav1.ConditionFalse, "MissingCRD", fmt.Sprintf("%s %s: %v", obj.GetKind(), obj.GetName(), err)), false
 		}
 		if err != nil {
+			return addonCondition(addon, metav1.ConditionFalse, "ApplyFailed", fmt.Sprintf("%s %s: %v", obj.GetKind(), obj.GetName(), err)), false
+		}
+	}
+	for _, obj := range rendered.Absent {
+		err := r.Client.Delete(ctx, obj)
+		if err != nil && !errors.IsNotFound(err) && !meta.IsNoMatchError(err) {
 			return addonCondition(addon, metav1.ConditionFalse, "ApplyFailed", fmt.Sprintf("%s %s: %v", obj.GetKind(), obj.GetName(), err)), false
 		}
 	}

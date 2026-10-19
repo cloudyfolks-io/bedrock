@@ -34,12 +34,20 @@ func RenderVirtualization(in AddonInput) (Rendered, error) {
 	if err != nil {
 		return Rendered{}, err
 	}
-	objects := []*unstructured.Unstructured{kubeVirt(emulation, tuning, smbios), cdi()}
+	migration, err := parseMigrationTuning(in.Settings)
+	if err != nil {
+		return Rendered{}, err
+	}
+	policies, absent, err := compressionPolicy(in.Settings)
+	if err != nil {
+		return Rendered{}, err
+	}
+	objects := append([]*unstructured.Unstructured{kubeVirt(emulation, tuning, migration, smbios), cdi()}, policies...)
 	probes := []Probe{
 		{GVK: kubeVirtGVK, Key: client.ObjectKey{Namespace: kubevirtNamespace, Name: "kubevirt"}, Gate: release.PhaseGate("Deployed")},
 		{GVK: cdiGVK, Key: client.ObjectKey{Name: "cdi"}, Gate: release.PhaseGate("Deployed")},
 	}
-	return Rendered{Objects: objects, Probes: probes}, nil
+	return Rendered{Objects: objects, Absent: absent, Probes: probes}, nil
 }
 
 func boolSetting(value string) (bool, error) {
@@ -49,13 +57,13 @@ func boolSetting(value string) (bool, error) {
 	return strconv.ParseBool(value)
 }
 
-func kubeVirt(emulation bool, tuning kubeVirtTuning, smbios map[string]any) *unstructured.Unstructured {
+func kubeVirt(emulation bool, tuning kubeVirtTuning, migration migrationTuning, smbios map[string]any) *unstructured.Unstructured {
 	return object("kubevirt.io/v1", "KubeVirt", kubevirtNamespace, "kubevirt", map[string]any{
 		"imagePullPolicy": "IfNotPresent",
 		"configuration": withSMBIOS(map[string]any{
 			"commonInstancetypesDeployment": map[string]any{"enabled": true},
 			"vmStateStorageClass":           "filesystem",
-			"migrations":                    map[string]any{"parallelMigrationsPerCluster": tuning.ParallelMigrations},
+			"migrations":                    migrationSettings(migration, tuning.ParallelMigrations),
 			"developerConfiguration": map[string]any{
 				"useEmulation":       emulation,
 				"featureGates":       []any{"CPUManager", "HostDevices"},

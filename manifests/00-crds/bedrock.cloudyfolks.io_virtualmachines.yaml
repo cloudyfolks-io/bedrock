@@ -1275,6 +1275,21 @@ spec:
                   version:
                     type: string
                 type: object
+              migration:
+                properties:
+                  message:
+                    type: string
+                  name:
+                    type: string
+                  phase:
+                    type: string
+                  startedAt:
+                    format: date-time
+                    type: string
+                required:
+                - name
+                - phase
+                type: object
               node:
                 type: string
               observedGeneration:

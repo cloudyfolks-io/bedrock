@@ -12,6 +12,7 @@ func OperatorRules() []rbacv1.PolicyRule {
 	return []rbacv1.PolicyRule{
 		rule("kubevirt.io", []string{"virtualmachines"}, "create", "get", "list", "patch", "watch"),
 		rule("kubevirt.io", []string{"virtualmachineinstances"}, "get", "list", "watch"),
+		rule("kubevirt.io", []string{"virtualmachineinstancemigrations"}, "list", "watch"),
 		rule("snapshot.kubevirt.io", []string{"virtualmachinesnapshots"}, "delete", "list"),
 		rule("instancetype.kubevirt.io", []string{"virtualmachineclusterinstancetypes", "virtualmachineclusterpreferences"}, "get"),
 		rule("subresources.kubevirt.io", []string{"virtualmachineinstances/guestosinfo"}, "get"),

@@ -23,3 +23,34 @@ func TestCatalogSMBIOSKeys(t *testing.T) {
 		}
 	}
 }
+
+func TestCatalogMigrationKeys(t *testing.T) {
+	cases := []struct {
+		key     string
+		def     string
+		valid   []string
+		invalid []string
+	}{
+		{"migration.parallel-outbound", "4", []string{"1", "8"}, []string{"0", "x"}},
+		{"migration.bandwidth", "1Gi", []string{"512Mi", "2G", "1000000"}, []string{"fast", "0", "-1Gi"}},
+		{"migration.completion-timeout-per-gib", "800", []string{"150"}, []string{"0", "x"}},
+		{"migration.progress-timeout", "150", []string{"60"}, []string{"0", "x"}},
+		{"migration.compression", "", []string{"", "zstd"}, []string{"lz4", "none"}},
+	}
+	for _, c := range cases {
+		def, ok := Lookup(c.key)
+		if !ok || def.Default != c.def {
+			t.Fatalf("%s: definition %+v %v", c.key, def, ok)
+		}
+		for _, value := range c.valid {
+			if err := def.Validate(value); err != nil {
+				t.Errorf("%s: %q must be valid: %v", c.key, value, err)
+			}
+		}
+		for _, value := range c.invalid {
+			if err := def.Validate(value); err == nil {
+				t.Errorf("%s: %q must be invalid", c.key, value)
+			}
+		}
+	}
+}

@@ -400,6 +400,25 @@ rules:
   - list
   - watch
 - apiGroups:
+  - kubevirt.io
+  resources:
+  - virtualmachineinstancemigrations
+  verbs:
+  - list
+  - watch
+- apiGroups:
+  - migrations.kubevirt.io
+  resources:
+  - migrationpolicies
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - update
+  - watch
+- apiGroups:
   - monitoring.coreos.com
   resources:
   - alertmanagers

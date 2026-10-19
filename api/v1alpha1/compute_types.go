@@ -214,6 +214,15 @@ type VMConsole struct {
 	SerialPath string `json:"serialPath,omitempty"`
 }
 
+type VMMigration struct {
+	Name  string `json:"name"`
+	Phase string `json:"phase"`
+	// +optional
+	StartedAt *metav1.Time `json:"startedAt,omitempty"`
+	// +optional
+	Message string `json:"message,omitempty"`
+}
+
 type VirtualMachineStatus struct {
 	CommonStatus `json:",inline"`
 	// +kubebuilder:validation:Enum=Stopped;Starting;Running;Migrating;Stopping;Failed
@@ -230,6 +239,8 @@ type VirtualMachineStatus struct {
 	GuestAgent *VMGuestAgent `json:"guestAgent,omitempty"`
 	// +optional
 	Console *VMConsole `json:"console,omitempty"`
+	// +optional
+	Migration *VMMigration `json:"migration,omitempty"`
 }
 
 // +kubebuilder:object:root=true

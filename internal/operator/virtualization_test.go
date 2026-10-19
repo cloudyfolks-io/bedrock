@@ -179,3 +179,80 @@ func TestRenderVirtualizationRejectsBadSMBIOS(t *testing.T) {
 		t.Fatalf("error %v", err)
 	}
 }
+
+func renderKubeVirt(t *testing.T, settings map[string]string) (*unstructured.Unstructured, Rendered) {
+	t.Helper()
+	settings["virt.emulation"] = "false"
+	out, err := RenderVirtualization(AddonInput{Settings: settings})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return findObject(out.Objects, "KubeVirt", "kubevirt"), out
+}
+
+func TestRenderVirtualizationMigrationDefaults(t *testing.T) {
+	kv, _ := renderKubeVirt(t, map[string]string{})
+	migrations, _, _ := unstructured.NestedMap(kv.Object, "spec", "configuration", "migrations")
+	want := map[string]any{
+		"parallelMigrationsPerCluster":      int64(2),
+		"parallelOutboundMigrationsPerNode": int64(4),
+		"bandwidthPerMigration":             "1Gi",
+		"completionTimeoutPerGiB":           int64(800),
+		"progressTimeout":                   int64(150),
+	}
+	if !reflect.DeepEqual(migrations, want) {
+		t.Fatalf("migrations %+v", migrations)
+	}
+}
+
+func TestRenderVirtualizationMigrationSettings(t *testing.T) {
+	kv, _ := renderKubeVirt(t, map[string]string{
+		"migration.parallel": "3", "migration.parallel-outbound": "6", "migration.bandwidth": "512Mi",
+		"migration.completion-timeout-per-gib": "900", "migration.progress-timeout": "200",
+	})
+	migrations, _, _ := unstructured.NestedMap(kv.Object, "spec", "configuration", "migrations")
+	want := map[string]any{
+		"parallelMigrationsPerCluster":      int64(3),
+		"parallelOutboundMigrationsPerNode": int64(6),
+		"bandwidthPerMigration":             "512Mi",
+		"completionTimeoutPerGiB":           int64(900),
+		"progressTimeout":                   int64(200),
+	}
+	if !reflect.DeepEqual(migrations, want) {
+		t.Fatalf("migrations %+v", migrations)
+	}
+}
+
+func TestRenderVirtualizationRejectsBadMigrationSettings(t *testing.T) {
+	for _, tc := range []struct{ key, value string }{
+		{"migration.parallel-outbound", "0"}, {"migration.parallel-outbound", "x"},
+		{"migration.bandwidth", "fast"}, {"migration.bandwidth", "0"}, {"migration.bandwidth", "-1Gi"},
+		{"migration.completion-timeout-per-gib", "0"}, {"migration.progress-timeout", "x"},
+		{"migration.compression", "lz4"},
+	} {
+		_, err := RenderVirtualization(AddonInput{Settings: map[string]string{"virt.emulation": "false", tc.key: tc.value}})
+		if err == nil || !strings.Contains(err.Error(), tc.key) {
+			t.Errorf("%s=%s: error %v", tc.key, tc.value, err)
+		}
+	}
+}
+
+func TestRenderVirtualizationCompression(t *testing.T) {
+	_, off := renderKubeVirt(t, map[string]string{})
+	if findObject(off.Objects, "MigrationPolicy", migrationPolicyName) != nil {
+		t.Fatal("no policy without compression")
+	}
+	if len(off.Absent) != 1 || off.Absent[0].GetKind() != "MigrationPolicy" || off.Absent[0].GetName() != migrationPolicyName {
+		t.Fatalf("absent %+v", off.Absent)
+	}
+	_, on := renderKubeVirt(t, map[string]string{"migration.compression": "zstd"})
+	policy := findObject(on.Objects, "MigrationPolicy", migrationPolicyName)
+	if policy == nil || policy.GetAPIVersion() != "migrations.kubevirt.io/v1alpha1" || policy.GetNamespace() != "" {
+		t.Fatalf("objects %+v", on.Objects)
+	}
+	spec, _, _ := unstructured.NestedMap(policy.Object, "spec")
+	want := map[string]any{"selectors": map[string]any{}, "experimental": map[string]any{"compression": "zstd"}}
+	if !reflect.DeepEqual(spec, want) || len(on.Absent) != 0 {
+		t.Fatalf("spec %+v absent %+v", spec, on.Absent)
+	}
+}

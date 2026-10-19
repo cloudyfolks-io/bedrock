@@ -44,3 +44,30 @@ func TestOperatorRoleAllowsCompute(t *testing.T) {
 		}
 	}
 }
+
+func TestOperatorRoleManagesMigrationPolicies(t *testing.T) {
+	role, err := OperatorRole(rbacBundle(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	body, err := os.ReadFile(filepath.Join("..", "..", "manifests", "90-bedrock", "operator-rbac.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var committed rbacv1.ClusterRole
+	if err := sigyaml.Unmarshal(body, &committed); err != nil {
+		t.Fatal(err)
+	}
+	for _, candidate := range []rbacv1.ClusterRole{role, committed} {
+		for _, verb := range []string{"create", "get", "patch", "delete"} {
+			if !allows(candidate, "migrations.kubevirt.io", "migrationpolicies", verb) {
+				t.Errorf("the role must allow %s migrationpolicies (run the release rbac command)", verb)
+			}
+		}
+		for _, verb := range []string{"list", "watch"} {
+			if !allows(candidate, "kubevirt.io", "virtualmachineinstancemigrations", verb) {
+				t.Errorf("the role must allow %s virtualmachineinstancemigrations (run the release rbac command)", verb)
+			}
+		}
+	}
+}

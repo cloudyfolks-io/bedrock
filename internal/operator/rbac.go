@@ -178,7 +178,7 @@ func renderedAddonKinds(bundle release.Bundle) ([]schema.GroupVersionKind, error
 			if err != nil {
 				return nil, fmt.Errorf("%s addon: %w", addon.Name, err)
 			}
-			kinds = append(kinds, objectKinds(rendered.Objects)...)
+			kinds = append(kinds, objectKinds(slices.Concat(rendered.Objects, rendered.Absent))...)
 			for _, probe := range rendered.Probes {
 				kinds = append(kinds, probe.GVK)
 			}

@@ -45,6 +45,7 @@ func TestOperatorRules(t *testing.T) {
 	requireGrants(t, rules, []grant{
 		{"kubevirt.io", "virtualmachines", "create"}, {"kubevirt.io", "virtualmachines", "patch"}, {"kubevirt.io", "virtualmachines", "watch"},
 		{"kubevirt.io", "virtualmachineinstances", "watch"}, {"kubevirt.io", "virtualmachineinstances", "get"},
+		{"kubevirt.io", "virtualmachineinstancemigrations", "list"}, {"kubevirt.io", "virtualmachineinstancemigrations", "watch"},
 		{"snapshot.kubevirt.io", "virtualmachinesnapshots", "list"}, {"snapshot.kubevirt.io", "virtualmachinesnapshots", "delete"},
 		{"instancetype.kubevirt.io", "virtualmachineclusterinstancetypes", "get"}, {"instancetype.kubevirt.io", "virtualmachineclusterpreferences", "get"},
 		{"subresources.kubevirt.io", "virtualmachineinstances/guestosinfo", "get"},

@@ -195,6 +195,16 @@ The request must be a same-origin WebSocket request.
 The proxy removes the credentials of the caller before it calls KubeVirt.
 The VM status shows the console paths in `status.console`.
 
+## Live migration status
+
+`status.migration` shows the newest KubeVirt migration of the VM.
+It has the fields `name`, `phase`, `startedAt` and `message`.
+The `phase` is the phase of the KubeVirt migration, for example `Running`, `Succeeded` or `Failed`.
+The `message` holds the failure reason of a failed migration.
+The `startedAt` is the creation time of the migration.
+The operator reads only migrations in the namespace of the VM that name the VM.
+The status is empty when the VM has no migration.
+
 ## Guest identity
 
 A guest reads its identity from the virtual hardware.
@@ -223,6 +233,19 @@ A change applies at the next start of the VM.
 | `overcommit.cpu` | The number of vCPUs for each physical thread. The default is 4. |
 | `overcommit.memory` | The memory overcommit ratio. The minimum is 0.1. The default is 1.0. |
 | `migration.parallel` | The number of live migrations at the same time in the cluster. |
+| `migration.parallel-outbound` | The number of outbound live migrations at the same time on one node. The default is 4. |
+| `migration.bandwidth` | The bandwidth limit of one live migration, in bytes per second. The default is `1Gi`. |
+| `migration.completion-timeout-per-gib` | The seconds for each GiB of guest memory before KubeVirt aborts a live migration. The default is 800. |
+| `migration.progress-timeout` | The seconds without progress before KubeVirt aborts a live migration. The default is 150. |
+| `migration.compression` | Empty or `zstd`. The default is empty. |
+
+The migration Settings change the KubeVirt configuration.
+A running VM is not restarted and not migrated by this change.
+
+With `migration.compression` set to `zstd`, the operator creates the KubeVirt `MigrationPolicy` `bedrock-compression`.
+The policy matches all VMs and compresses the migration traffic with zstd.
+The compression uses CPU on the source node and is an experimental KubeVirt feature.
+When you set the Setting to empty, the operator deletes the policy.
 
 A wrong value stops the render of the KubeVirt object.
 The live object does not change.
