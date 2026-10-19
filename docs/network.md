@@ -149,6 +149,18 @@ The operator applies a changed value at the next release install or upgrade.
 A running pod keeps its MTU until the pod is created again.
 Set `podMTU` to 1500 on a cluster whose guests use `network.mtu` 1500, such as ir-central-1, and use node NICs with an MTU of 1600 or more.
 
+To set the pod MTU on a cluster that runs already, patch the `Cluster` object before the next upgrade:
+
+```
+kubectl patch cluster cluster --type merge -p '{"spec":{"podMTU":1500}}'
+```
+
+The operator renders the value into the Fabric agent when the `components` phase of the next upgrade runs.
+To apply it without an upgrade, run `bedrock release apply --dir <release dir> --pod-mtu 1500`.
+The Fabric agent restarts on each node.
+Create the pods again, and restart the VMs, so that they take the new MTU.
+The flag accepts 576 to 9000 only.
+
 Only the platform may add, change or remove network selection annotations on a pod.
 The annotations are all keys with the prefix `k8s.v1.cni.cncf.io/`, `v1.multus-cni.io/` or `ovn.kubernetes.io/`, and all keys with the text `cloudyfolks.io/`.
 The admission policy `bedrock-network-attachments` refuses every other identity in a project namespace.
@@ -645,6 +657,18 @@ Bedrock deletes the old `Vip` and writes a new one with a new name.
 Update every client, DNS record and firewall rule that holds the old address.
 List the addresses before the upgrade with `kubectl get vips -l network.bedrock.cloudyfolks.io/managed=true`.
 A cluster that runs no internal LoadBalancer has no change.
+
+The Network controller is now the only writer of the `vpcPeerings`, `staticRoutes` and `extraExternalSubnets` of a Fabric `Vpc` that a Network owns.
+It writes each list as a whole from the Network, its `NetworkPeering` objects and its `spec.staticRoutes`.
+A peering or a route that someone added to the Vpc by hand is removed at the next reconcile.
+Before the upgrade, list them with `kubectl get vpcs -o yaml`.
+Move every one of them to a `NetworkPeering` or to `spec.staticRoutes` of the Network.
+An entry of `extraExternalSubnets` that the Vpc already has stays.
+
+The services resolver becomes the default DNS server of guests.
+When `network.services.resolver` is set, a Subnet with no `dnsServers` and an empty `network.dns-servers` gives the resolver to its guests through DHCP.
+A running guest takes it at its next DHCP lease.
+Before the upgrade, set `network.dns-servers` to the resolvers that the guests use now, so the default does not change.
 
 An empty `network.bgp.advertise-filter` now advertises only the ElasticIP routes.
 Before, a BGP cluster with no ElasticIP and an empty filter advertised all routes.
