@@ -142,7 +142,9 @@ other keys only read.
 When the last phase ends, `status.encryption.phase` is empty and
 `status.encryption.lastRotatedAt` shows the time.
 
-The operator changes one control-plane node at a time. It starts the next
+The operator changes one control-plane node at a time. It never gives a
+second grant while a node has not reported a result for its grant, and it
+waits for that node before it takes a `revert`. It starts the next
 node only when all of these are true:
 
 - The earlier nodes have the new file and a running API server.
@@ -150,6 +152,10 @@ node only when all of these are true:
 
 During a restart, a cluster with one control-plane node has no API for a short
 time. A cluster with three control-plane nodes keeps its API.
+
+Do not join a control-plane node during a rotation. `bedrock join` stops
+with an error while `status.encryption.phase` is not empty. Do not start a
+rotation while a node joins.
 
 The operator gives a node its turn with the annotation
 `bedrock.cloudyfolks.io/encryption-apply` on the Host. The agent reads the
@@ -165,9 +171,29 @@ when the reason is gone, also after a restart of the operator or of an agent.
 If a node cannot start its API server with the new file, the agent puts the
 old file back and restarts again. It writes the failed hash in
 `/etc/bedrock/encryption/.apply-failed` and does not try that content again.
-The operator waits and gives no other node its turn. Read
-`journalctl -u bedrock-agent` on the node, fix the reason, and then revert the
-rotation.
+The operator waits and gives no other node its turn. The condition
+`EncryptionRotationStalled` of the Cluster is `True` with the reason
+`HostFailed`, and the message names the node.
+
+To go on, do these steps:
+
+1. Read `journalctl -u bedrock-agent` on the node and fix the reason.
+2. Delete `/etc/bedrock/encryption/.apply-failed` on the node. The operator
+   keeps the grant, so the agent runs it again on its next round.
+
+This is the only way in the phase `RemovingKey`, because a revert is refused
+in that phase. In the earlier phases you can also revert the rotation.
+
+If the operator cannot write a Secret, for example because a webhook refuses
+the update, the condition `EncryptionRotationStalled` has the reason
+`SecretsFailed`. The message lists the first names (`namespace/name`). The
+operator runs the rewrite again in each round and never skips a Secret that
+failed. Fix the Secret or the webhook, or revert the rotation. The operator
+does not remove the old key until all Secrets are written.
+
+A rewrite that needs more than a few minutes can lose its place in the list
+of Secrets (the continue token expires). The operator then starts the list
+again and skips the Secrets that it already wrote.
 
 To undo a rotation, set the action `revert`:
 
@@ -203,7 +229,7 @@ time of the removal.
 
 The agent deletes a retired file when no archive in
 `/var/lib/bedrock/backups` has a stamp at or before the stamp of the retired
-file. If you copied archives off the host, keep the retired files for as
+file, and the file is older than one day. If you copied archives off the host, keep the retired files for as
 long as you keep those copies.
 
 ### Restore an older snapshot
@@ -252,6 +278,10 @@ cannot change after install.
 - Rotation works only with AES-GCM. A KMS v2 cluster rotates the key in its
   KMS service.
 - Bedrock does not read etcd to prove that no Secret uses the old key. It
-  writes every Secret again, and it shows the number in
-  `status.encryption.rewrittenSecrets`.
+  writes every Secret again, and it shows the number of Secrets that changed
+  in `status.encryption.rewrittenSecrets`. With the key at its first place, a
+  Secret that is already under the new key does not change.
+- A node that joins during a rotation is refused. Do not start a rotation
+  while a node joins.
+- `rotate` is refused when the file has more than one key.
 - A rotation in the phase `RemovingKey` cannot revert.
