@@ -90,6 +90,10 @@ func releaseApply(args []string, stdout, stderr io.Writer) int {
 		fmt.Fprintln(stderr, "release apply: --interval must be positive")
 		return 2
 	}
+	if *podMTU != 0 && (*podMTU < 576 || *podMTU > 9000) {
+		fmt.Fprintf(stderr, "release apply: --pod-mtu must be from 576 to 9000, got %d\n", *podMTU)
+		return 2
+	}
 	bundle, err := release.Load(os.DirFS(*dir))
 	if err != nil {
 		fmt.Fprintln(stderr, err)

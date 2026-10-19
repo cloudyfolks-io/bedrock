@@ -48,6 +48,19 @@ func TestReleaseApplyRejectsNonPositiveInterval(t *testing.T) {
 	}
 }
 
+func TestReleaseApplyRejectsPodMTUOutsideTheRange(t *testing.T) {
+	for _, mtu := range []string{"575", "9001", "-1"} {
+		var out, errOut bytes.Buffer
+		code := Run([]string{"release", "apply", "--dir", ".", "--pod-mtu", mtu}, &out, &errOut)
+		if code != 2 {
+			t.Fatalf("pod-mtu %s: exit %d, want 2", mtu, code)
+		}
+		if !bytes.Contains(errOut.Bytes(), []byte("--pod-mtu")) {
+			t.Fatalf("pod-mtu %s: stderr %q", mtu, errOut.String())
+		}
+	}
+}
+
 func TestSplitList(t *testing.T) {
 	cases := map[string][]string{
 		"":                 nil,
