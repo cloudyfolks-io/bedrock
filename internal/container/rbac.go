@@ -26,6 +26,7 @@ func ProxyRules() []rbacv1.PolicyRule {
 	return []rbacv1.PolicyRule{
 		rule("bedrock.cloudyfolks.io", []string{"builds"}, "get"),
 		rule("bedrock.cloudyfolks.io", []string{"containers"}, "get", "patch"),
+		rule("batch", []string{"jobs"}, "get"),
 		rule("apps", []string{"deployments"}, "get"),
 		rule("apps", []string{"replicasets"}, "list"),
 		rule("", []string{"pods"}, "list"),
