@@ -20,6 +20,7 @@ usage: NS=<project namespace> PROJECT=<project> LAB_CLUSTER_ADDRESS=<free addres
 
 stages:
   proof   a hand-made k0smotron Cluster and one worker VM: the worker joins and its Node is Ready
+  full    a KubernetesCluster with two workers: both Nodes Ready, a deployment, logs, one worker removed, then the delete
   down    delete the objects of the proof
 
 The host needs a Bedrock cluster with the addon clusters, KVM, internet egress for the worker,
@@ -225,16 +226,80 @@ stage_proof() {
   echo "PROOF-DONE"
 }
 
+kubernetes_cluster_manifest() {
+  cat <<CLUSTER
+apiVersion: bedrock.cloudyfolks.io/v1alpha1
+kind: KubernetesCluster
+metadata:
+  name: $lab_name
+spec:
+  version: $lab_version
+  controlPlane:
+    address: $lab_address
+    securityGroups: [$lab_name]
+  workers:
+    - name: w1
+      image:
+        name: $lab_image
+      securityGroups: [$lab_name]
+    - name: w2
+      image:
+        name: $lab_image
+      securityGroups: [$lab_name]
+CLUSTER
+}
+
+ready_nodes() {
+  child_exec get nodes -o jsonpath='{range .items[*]}{.status.conditions[?(@.type=="Ready")].status}{"\n"}{end}' | grep -c True
+}
+
+two_nodes_ready() {
+  [ "$(ready_nodes)" -eq 2 ]
+}
+
+hello_logged() {
+  [[ "$(child_exec logs deployment/hello 2>/dev/null)" == *lab-log* ]]
+}
+
+stage_full() {
+  log "security group and cluster"
+  security_group | kubectl -n "$NS" apply -f -
+  wait_condition 180 securitygroup "$lab_name" Ready True -n "$NS"
+  kubernetes_cluster_manifest | kubectl -n "$NS" apply -f -
+  wait_jsonpath 900 true -n "$NS" get kubernetescluster "$lab_name" -o jsonpath='{.status.controlPlane.ready}'
+  log "two workers join"
+  wait_jsonpath 1800 Ready -n "$NS" get kubernetescluster "$lab_name" -o jsonpath='{.status.phase}'
+  retry_until 1800 two_nodes_ready
+  echo "PROOF-NODES $(child_exec get nodes -o wide)"
+  log "a deployment and its logs in the child"
+  child_exec create deployment hello --image=docker.io/library/busybox:1.37.0 -- sh -c 'echo lab-log; exec sleep 3600'
+  child_exec rollout status deployment/hello --timeout=600s
+  retry_until 300 hello_logged
+  log "one worker removed"
+  kubectl -n "$NS" patch kubernetescluster "$lab_name" --type json -p '[{"op":"remove","path":"/spec/workers/1"}]'
+  wait_gone 600 -n "$NS" virtualmachine "$lab_name-w2"
+  expect_equal "$lab_name-w1" "$(kubectl -n "$NS" get virtualmachines -l bedrock.cloudyfolks.io/cluster="$lab_name" -o jsonpath='{.items[*].metadata.name}')" "only the first worker VM is left"
+  child_exec delete node "$lab_name-w2"
+  log "delete"
+  kubectl -n "$NS" delete kubernetescluster "$lab_name"
+  wait_gone 900 -n "$NS" kubernetescluster "$lab_name"
+  wait_empty 60 -n "$NS" get virtualmachines -l bedrock.cloudyfolks.io/cluster="$lab_name"
+  wait_gone 60 -n "$NS" statefulset "kmc-$lab_name"
+  echo "FULL-DONE"
+}
+
 stage_down() {
   kubectl -n "$NS" delete virtualmachine "$lab_vm" --ignore-not-found
   kubectl -n "$NS" delete secret "$lab_vm-cloudinit" --ignore-not-found
   kubectl -n "$NS" delete jointokenrequest.k0smotron.io "$lab_vm" --ignore-not-found --wait=false
+  kubectl -n "$NS" delete kubernetescluster "$lab_name" --ignore-not-found
   kubectl -n "$NS" delete cluster.k0smotron.io "$lab_name" --ignore-not-found
   kubectl -n "$NS" delete securitygroup "$lab_name" --ignore-not-found
 }
 
 case "${1:-}" in
 proof) stage_proof ;;
+full) stage_full ;;
 down) stage_down ;;
 *)
   usage

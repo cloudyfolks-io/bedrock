@@ -253,7 +253,7 @@ If a name changes in an area, change it in that file only.
 | `compute.sh` | An SSH key, a Volume, the SecurityGroup `web` and the VM `vm1`. Hot-plug and expand. A volume snapshot. The proxy actions and the console, which the Go test runs. |
 | `network.sh` | The provider network and the Network status. The fabric-frr agent. Subnet rules. The security group on the VM. A VM with a pinned address, a Subnet MTU and Subnet DNS servers. An ElasticIP in L2 mode with the ARP and ping proof. An ElasticIP without a provider network. The ElasticIP quota. A LoadBalancer and a DNSZone. Isolation rules. |
 | `container.sh` | The proof of the pod network: a hand-made Pod and a hand-made Deployment get the network metadata of a `Container`. Then the kind itself: the runtime gate, replicas, stop and start, a fixed address, autoscale, a Volume, a LoadBalancer target, logs, exec and restart through the proxy, and the cleanup. |
-| `clusters.sh` | The proof of the control plane: a hand-made k0smotron `Cluster` with the fields of the `KubernetesCluster` kind. |
+| `clusters.sh` | The proof of the control plane: a hand-made k0smotron `Cluster` with the fields of the `KubernetesCluster` kind. Then the kind itself: the addon off, a cluster, a refused address, suspend and the ordered delete. |
 | `objectstorage.sh` | The object store, two users and one bucket. A put and a get from inside the cluster. A denied read by the other user. |
 | `backup.sh` | The SeaweedFS target. A VM backup with one entry. A restore with `replace: true`. A restore of a missing backup. |
 | `panel.sh` | The panel at `console.<host>`, the redirect from the apex, the API host and the Go test for the login and the watch stream. |
@@ -331,6 +331,30 @@ The worker join runs in `hack/lab-cluster.sh proof` on a host with KVM and inter
 The stage makes a security group, the `Cluster`, a `JoinTokenRequest`, the cloud-init Secret and the worker `VirtualMachine`.
 It then waits for the Node to be Ready and runs `logs` and `exec` in the child through the konnectivity agent.
 The stage `down` removes the objects.
+
+## Cluster steps
+
+The steps of `hack/e2e/tenant/clusters.sh` run in this order.
+They use the SecurityGroup `web` and the image `cirros`.
+The k0smotron and k0s images are in the offline bundle, so no fixture is needed.
+
+| Step | Check |
+| --- | --- |
+| `clusters_addon_off` | The addon `clusters` is off by default. A `KubernetesCluster` has `Ready=False` with the reason `AddonDisabled`, and no k0smotron `Cluster` and no VM exist. The delete releases the finalizer. |
+| `clusters_proof` | The hand-made control plane proof of the section above. It turns the addon on. |
+| `clusters_provision` | A cluster gets a status address inside the Subnet. The control plane becomes ready, and the address is the address of the pod `kmc-kc-0`. The Secret `kc-kubeconfig` exists, and the endpoint is `https://<address>:6443`. The worker VM `kc-a` and the Secret `kc-a-cloudinit` exist, and the VM spec holds no token. |
+| `clusters_duplicate_address` | A second cluster that pins the address of the first has `AddressInUse`, makes no control plane and records no address. |
+| `clusters_suspend` | `suspended: true` stops the worker VM and gives the phase `Suspended`. The control plane keeps running. Resume starts the VM. |
+| `clusters_delete` | The delete leaves no VM, no k0smotron `Cluster`, no StatefulSet, no volume claim, no token request and no Fabric `IP` object of the control plane pod. |
+
+The cascade step checks that deleting the project leaves no `KubernetesCluster`, k0smotron `Cluster` or `JoinTokenRequest`.
+
+## Cluster lab
+
+`hack/lab-cluster.sh full` runs on a host with KVM and internet.
+It makes a `KubernetesCluster` with two workers and waits until both Nodes are Ready.
+It then makes a deployment in the child cluster, reads its log with `kubectl logs`, removes one worker, deletes its stale Node and deletes the cluster.
+The script needs `NS`, `PROJECT` and `LAB_CLUSTER_ADDRESS`.
 
 ## Network parity checks
 

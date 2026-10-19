@@ -193,7 +193,12 @@ steps=(
   container_load_balancer
   container_proxy
   container_cleanup
+  clusters_addon_off
   clusters_proof
+  clusters_provision
+  clusters_duplicate_address
+  clusters_suspend
+  clusters_delete
   objectstorage_user_and_bucket
   objectstorage_roundtrip
   backup_target

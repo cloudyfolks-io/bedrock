@@ -203,3 +203,101 @@ clusters_proof() {
     clusters_proof_join_token
   )
 }
+
+clusters_cluster() {
+  local name=$1 address=${2:-}
+  cat <<CLUSTER
+apiVersion: bedrock.cloudyfolks.io/v1alpha1
+kind: KubernetesCluster
+metadata:
+  name: $name
+spec:
+  version: $clusters_proof_version
+  controlPlane:
+    securityGroups: [web]
+$([ -n "$address" ] && echo "    address: $address")
+  workers:
+    - name: a
+      image:
+        name: cirros
+      securityGroups: [web]
+CLUSTER
+}
+
+clusters_status_address() {
+  kubectl -n "$NS" get kubernetescluster "$1" -o jsonpath='{.status.controlPlane.address}'
+}
+
+clusters_address_in_subnet() {
+  python3 -c 'import ipaddress, sys; sys.exit(0 if ipaddress.ip_address(sys.argv[1]) in ipaddress.ip_network(sys.argv[2]) else 1)' "$1" "$(kubectl -n "$NS" get subnet default -o jsonpath='{.spec.cidr}')"
+}
+
+clusters_fabric_ips() {
+  kubectl get ips.fabric.cloudyfolks.io -o json | jq -r --arg ns "$NS" --arg pod "kmc-$1-0" '.items[] | select(.spec.namespace == $ns and .spec.podName == $pod) | .metadata.name'
+}
+
+clusters_fabric_ips_gone() {
+  [ -z "$(clusters_fabric_ips "$1")" ]
+}
+
+clusters_addon_off() {
+  expect_equal false "$(kubectl get addon clusters -o jsonpath='{.spec.enabled}')" "clusters is off by default"
+  clusters_cluster kc | kubectl -n "$NS" apply -f -
+  wait_reason 120 kubernetescluster kc Ready AddonDisabled -n "$NS"
+  expect_equal "" "$(kubectl -n "$NS" get clusters.k0smotron.io kc -o name 2>/dev/null || true)" "no control plane without the addon"
+  expect_equal "" "$(kubectl -n "$NS" get virtualmachines -l bedrock.cloudyfolks.io/cluster=kc -o name)" "no worker VM without the addon"
+  kubectl -n "$NS" delete kubernetescluster kc
+  wait_gone 120 kubernetescluster kc -n "$NS"
+}
+
+clusters_provision() {
+  local address token
+  clusters_cluster kc | kubectl -n "$NS" apply -f -
+  wait_not_empty 180 -n "$NS" get kubernetescluster kc -o jsonpath='{.status.controlPlane.address}'
+  address=$(clusters_status_address kc)
+  clusters_address_in_subnet "$address"
+  wait_jsonpath 900 true -n "$NS" get kubernetescluster kc -o jsonpath='{.status.controlPlane.ready}'
+  expect_equal "$address" "$(kubectl -n "$NS" get pod kmc-kc-0 -o jsonpath='{.status.podIP}')" "the status address is the pod address"
+  expect_equal "https://$address:6443" "$(kubectl -n "$NS" get kubernetescluster kc -o jsonpath='{.status.endpoint}')" "endpoint"
+  expect_equal kc-kubeconfig "$(kubectl -n "$NS" get kubernetescluster kc -o jsonpath='{.status.kubeconfigSecret}')" "kubeconfig secret name"
+  wait_not_empty 60 -n "$NS" get secret kc-kubeconfig -o jsonpath='{.data.value}'
+  wait_not_empty 600 -n "$NS" get secret kc-a-cloudinit -o jsonpath='{.data.userdata}'
+  wait_not_empty 600 -n "$NS" get virtualmachine kc-a -o jsonpath='{.spec.cloudInit.secretRef}'
+  token=$(kubectl -n "$NS" get secret kc-a-cloudinit -o jsonpath='{.data.userdata}' | base64 -d | sed -n '/join.token/,/^runcmd/p' | sed -n 's/^      //p' | head -1)
+  test -n "$token"
+  if kubectl -n "$NS" get virtualmachine kc-a -o json | grep -qF "$token"; then
+    echo "the VM spec holds the join token" >&2
+    return 1
+  fi
+  expect_equal kc "$(kubectl -n "$NS" get virtualmachine kc-a -o jsonpath='{.metadata.ownerReferences[0].name}')" "worker VM owner"
+}
+
+clusters_duplicate_address() {
+  clusters_cluster dup "$(clusters_status_address kc)" | kubectl -n "$NS" apply -f -
+  wait_reason 120 kubernetescluster dup Ready AddressInUse -n "$NS"
+  expect_equal "" "$(kubectl -n "$NS" get clusters.k0smotron.io dup -o name 2>/dev/null || true)" "a refused address creates no control plane"
+  expect_equal "" "$(clusters_status_address dup)" "a refused address is not recorded"
+  kubectl -n "$NS" delete kubernetescluster dup
+  wait_gone 120 kubernetescluster dup -n "$NS"
+}
+
+clusters_suspend() {
+  kubectl -n "$NS" patch kubernetescluster kc --type merge -p '{"spec":{"suspended":true}}'
+  wait_jsonpath 300 false -n "$NS" get virtualmachine kc-a -o jsonpath='{.spec.running}'
+  wait_jsonpath 600 Stopped -n "$NS" get virtualmachine kc-a -o jsonpath='{.status.phase}'
+  wait_jsonpath 300 Suspended -n "$NS" get kubernetescluster kc -o jsonpath='{.status.phase}'
+  expect_equal true "$(kubectl -n "$NS" get kubernetescluster kc -o jsonpath='{.status.controlPlane.ready}')" "the control plane keeps running"
+  kubectl -n "$NS" patch kubernetescluster kc --type merge -p '{"spec":{"suspended":false}}'
+  wait_jsonpath 300 true -n "$NS" get virtualmachine kc-a -o jsonpath='{.spec.running}'
+}
+
+clusters_delete() {
+  kubectl -n "$NS" delete kubernetescluster kc
+  wait_gone 900 kubernetescluster kc -n "$NS"
+  wait_empty 60 -n "$NS" get virtualmachines -l bedrock.cloudyfolks.io/cluster=kc
+  wait_gone 60 clusters.k0smotron.io kc -n "$NS"
+  wait_gone 60 statefulset kmc-kc -n "$NS"
+  wait_gone 60 pvc kmc-kc-kmc-kc-0 -n "$NS"
+  wait_empty 60 -n "$NS" get jointokenrequests.k0smotron.io -l bedrock.cloudyfolks.io/cluster=kc
+  retry_until 120 clusters_fabric_ips_gone kc
+}
