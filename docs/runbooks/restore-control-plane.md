@@ -126,6 +126,13 @@ staged files and the `/var/lib/k0s/.pre-restore-*` directories, sets
 Without the marker, the restored operator continues the upgrade from the
 Backup phase.
 
+After a restore, Kubernetes can delete and start again some pods on the
+node, also VM pods. The restored Node object has the state of the snapshot
+time, and the taint manager can evict the pods that do not tolerate a
+`NoExecute` taint. Pods of a Deployment or a StatefulSet start again. A VM
+that cannot migrate restarts. A bare pod with no controller is gone. Plan a
+restore as an outage of the workloads on the node.
+
 The archive also contains the OVN databases `ovnnb_db.db` and `ovnsb_db.db`.
 This procedure does not use them.
 

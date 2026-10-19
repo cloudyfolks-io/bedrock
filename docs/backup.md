@@ -426,6 +426,13 @@ systemctl start k0scontroller
 EOF
 ```
 
+After a restore, Kubernetes can delete and start again some pods on the
+node, also VM pods. The restored Node object has the state of the snapshot
+time, and the taint manager can evict the pods that do not tolerate a
+`NoExecute` taint. Pods of a Deployment or a StatefulSet start again. A VM
+that cannot migrate restarts. A bare pod with no controller is gone. Plan a
+restore as an outage of the workloads on the node.
+
 The snapshot does not hold the encryption key of the Secrets. On a host that
 lost its disk, put the key at `/etc/bedrock/encryption/encryption.yaml`
 before you run the script. See [Secrets at rest](secrets-at-rest.md).
