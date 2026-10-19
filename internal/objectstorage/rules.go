@@ -22,10 +22,14 @@ func DefaultRules() Rules {
 }
 
 func (r *BucketReconciler) rules(ctx context.Context) (Rules, error) {
+	return rulesFrom(ctx, r.Rules)
+}
+
+func rulesFrom(ctx context.Context, load func(context.Context) (Rules, error)) (Rules, error) {
 	rules := DefaultRules()
-	if r.Rules != nil {
+	if load != nil {
 		var err error
-		if rules, err = r.Rules(ctx); err != nil {
+		if rules, err = load(ctx); err != nil {
 			return Rules{}, err
 		}
 	}

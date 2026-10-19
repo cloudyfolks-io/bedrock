@@ -10,7 +10,7 @@ const (
 	StoreName       = "bedrock-rgw"
 	StoreNamespace  = "rook-ceph"
 	BucketClassName = "bucket"
-	Endpoint        = "http://rook-ceph-rgw-bedrock-rgw.rook-ceph.svc:80"
+	Endpoint        = "http://" + ServiceHost + ":80"
 	Region          = "us-east-1"
 	AccessKeyKey    = "AccessKey"
 	SecretKeyKey    = "SecretKey"

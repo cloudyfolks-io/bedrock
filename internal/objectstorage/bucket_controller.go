@@ -119,7 +119,7 @@ func (r *BucketReconciler) converge(ctx context.Context, bucket *v1alpha1.Object
 	if err != nil || !ready {
 		return bucketState{outcome: accountPending()}, err
 	}
-	state := bucketState{bucketName: name, endpoint: r.Endpoint}
+	state := bucketState{bucketName: name, endpoint: PublicEndpoint(rules, r.Endpoint)}
 	state.outcome, err = r.ensureBucket(ctx, account.Root, name)
 	if err != nil || state.reason != "" {
 		state.bucketName, state.endpoint = "", ""
