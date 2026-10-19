@@ -102,6 +102,7 @@ func (r *AddonReconciler) steps(config Config) []func(context.Context) error {
 	}
 	return []func(context.Context) error{
 		apply(NamespaceObject()),
+		apply(OperatorRole(), OperatorRoleBinding()),
 		func(ctx context.Context) error { return EnsureSecrets(ctx, r.Client, r.random()) },
 		apply(TokenCertificate()),
 		func(ctx context.Context) error {

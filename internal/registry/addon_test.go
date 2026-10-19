@@ -150,6 +150,8 @@ func TestRuntimeObjectsAreMadeWhenEverythingIsReady(t *testing.T) {
 		{"barmancloud.cnpg.io/v1", "ObjectStore", "harbor-db-backups"},
 		{"postgresql.cnpg.io/v1", "ScheduledBackup", "harbor-db-daily"},
 		{"traefik.io/v1alpha1", "IngressRoute", "harbor-public"},
+		{"rbac.authorization.k8s.io/v1", "Role", "bedrock-registry-operator"},
+		{"rbac.authorization.k8s.io/v1", "RoleBinding", "bedrock-registry-operator-binding"},
 	} {
 		if !exists(c, check[0], check[1], check[2]) {
 			t.Errorf("missing %s %s", check[1], check[2])
