@@ -68,6 +68,11 @@ func TestBuildAcceptsEveryChoice(t *testing.T) {
 	public.Spec.Source.Git.Revision = "refs/heads/main"
 	createValid(t, c, public)
 
+	byAddress := validBuild("by-address")
+	byAddress.Spec.Source.Git.URL = "https://10.100.0.221/dockerfile.git"
+	byAddress.Spec.Output.Image = "10.100.0.220:5000/lab/docker:1"
+	createValid(t, c, byAddress)
+
 	for _, size := range []string{"s", "m", "l"} {
 		sized := validBuild("size-" + size)
 		sized.Spec.Size = size

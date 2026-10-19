@@ -2,6 +2,7 @@ package settings
 
 import (
 	"fmt"
+	"net"
 	"strings"
 	"time"
 	"unicode"
@@ -100,7 +101,7 @@ func registryHost(v string) bool {
 	if hasPort && (port == "" || strings.ContainsFunc(port, func(r rune) bool { return r < '0' || r > '9' })) {
 		return false
 	}
-	return dnsname.Valid(host)
+	return net.ParseIP(host) != nil || dnsname.Valid(host)
 }
 
 func invalidMirrorPathRune(r rune) bool {

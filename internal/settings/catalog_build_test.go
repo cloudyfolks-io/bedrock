@@ -77,6 +77,7 @@ func TestBuildRegistryMirrorsValidation(t *testing.T) {
 		"docker.io=registry.test/mirror-docker",
 		"docker.io=registry.test/mirror-docker,ghcr.io=registry.test/mirror-ghcr",
 		"docker.io=registry.test:5000/mirror/docker",
+		"docker.io=10.100.0.220:5000/mirror",
 	}
 	for _, value := range good {
 		if err := validates(t, "build.registry-mirrors", value); err != nil {
