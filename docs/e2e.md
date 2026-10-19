@@ -223,6 +223,7 @@ The checks run in this order.
 | Subnet MTU 1500 | The script records whether the 10 MiB read stalls with a Subnet MTU of 1500 on an underlay of 1500. |
 | Drain | `kubectl drain` moves a `LiveMigrateIfPossible` VM and a `LiveMigrate` VM to another node with no guest restart. |
 | Etcd restore with running VMs | The restore follows `docs/runbooks/restore-control-plane.md` with a snapshot of the schedule. Then the cluster checks run again. |
+| Secrets key rotation | Runs only when the Cluster CRD has `spec.encryption.action`. The script creates 2000 Secrets, sets the action `rotate`, and crashes node 3 during `RewritingSecrets`. The rotation must end. The sampled Secrets in etcd must hold one new key name, no `encryption.yaml` may hold the old key, and an archive made before `bedrock backup rotate-key` must still decrypt. |
 
 A check that answers an open question prints lines that start with `info:`. Read them in `result.txt`:
 
