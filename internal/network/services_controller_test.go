@@ -304,31 +304,46 @@ func TestNetworkReconcilerRefusesAForeignServicesIdentityObject(t *testing.T) {
 	}
 }
 
-func TestNetworkReconcilerDropsTheIdentityObjectsWhenTheServicesPlaneIsOff(t *testing.T) {
+func TestNetworkReconcilerKeepsTheServicesObjectsWhenTheSettingIsEmpty(t *testing.T) {
 	c := cleanEnv(t)
 	servicesSettings(t, servicesL2Pools, nil)
 	network := createExternalNetwork(t, c)
 	reconcileNetwork(t, c, network.Name)
 	setSetting(t, "network.services.provider-network", "")
 	reconcileNetwork(t, c, network.Name)
-	for _, name := range []string{network.Name + "-services-snat"} {
-		if !objectGone(t, c, "OvnEip", name) {
-			t.Fatalf("%s must go", name)
-		}
+	requireCondition(t, getNetwork(t, c, network.Name).Status.Conditions, ConditionExternalReady, metav1.ConditionFalse, ReasonServicesNotConfigured)
+	if objectGone(t, c, "OvnEip", network.Name+"-services-snat") || objectGone(t, c, "OvnEip", network.Name+"-provider-services") {
+		t.Fatal("an empty Setting must not delete the EIPs")
 	}
 	for i := range 3 {
-		if !objectGone(t, c, "OvnSnatRule", network.Name+"-services-snat-"+string(rune('0'+i))) {
-			t.Fatal("the rules must go")
+		if objectGone(t, c, "OvnSnatRule", network.Name+"-services-snat-"+string(rune('0'+i))) {
+			t.Fatal("an empty Setting must not delete the rules")
 		}
-	}
-	if objectGone(t, c, "OvnEip", network.Name+"-provider-services") {
-		t.Fatal("the router port stays while the Vpc is attached")
 	}
 	if identityOf(t, c, network.Name) != "100.67.0.1" {
 		t.Fatal("the recorded identity stays reserved")
 	}
 	if got := subnetsOfVpc(t, c, network.Name); !slices.Equal(got, []string{"provider-public", "provider-services"}) {
 		t.Fatalf("subnets %v", got)
+	}
+}
+
+func TestNetworkReconcilerDropsTheIdentityObjectsWhenTheNetworkIsNoLongerExternal(t *testing.T) {
+	c := cleanEnv(t)
+	servicesSettings(t, servicesL2Pools, nil)
+	network := createExternalNetwork(t, c)
+	reconcileNetwork(t, c, network.Name)
+	current := getNetwork(t, c, network.Name)
+	current.Spec.EnableExternal = false
+	if err := c.Update(context.Background(), &current); err != nil {
+		t.Fatal(err)
+	}
+	reconcileNetwork(t, c, network.Name)
+	if !objectGone(t, c, "OvnEip", network.Name+"-services-snat") || !objectGone(t, c, "OvnSnatRule", network.Name+"-services-snat-0") {
+		t.Fatal("the identity objects must go")
+	}
+	if objectGone(t, c, "OvnEip", network.Name+"-provider-services") || identityOf(t, c, network.Name) != "100.67.0.1" {
+		t.Fatal("the router port and the recorded identity stay")
 	}
 }
 

@@ -39,7 +39,10 @@ func (r *NetworkPeeringReconciler) Reconcile(ctx context.Context, req reconcile.
 	}
 	cfg, err := LoadConfig(ctx, r.Client)
 	if err != nil {
-		return r.publish(ctx, peering, "", falseCondition(v1alpha1.ConditionReady, peering.Generation, ReasonPending, err.Error()))
+		if _, publishErr := r.publish(ctx, peering, peering.Status.ConnectCIDR, falseCondition(v1alpha1.ConditionReady, peering.Generation, ReasonPending, err.Error())); publishErr != nil {
+			return reconcile.Result{}, publishErr
+		}
+		return reconcile.Result{}, err
 	}
 	var all v1alpha1.NetworkPeeringList
 	if err := r.live().List(ctx, &all); err != nil {

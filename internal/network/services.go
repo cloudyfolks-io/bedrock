@@ -10,6 +10,7 @@ import (
 
 	"github.com/cloudyfolks-io/bedrock/api/v1alpha1"
 	"github.com/cloudyfolks-io/bedrock/internal/network/fabric"
+	"github.com/cloudyfolks-io/bedrock/internal/settings"
 )
 
 const (
@@ -60,6 +61,8 @@ func MissingServicesSettings(c Config) []string {
 		missing = append(missing, keyServicesIdentityRange)
 	case found && !insidePool(s.IdentityRange, pool):
 		missing = append(missing, keyServicesIdentityRange+"="+s.IdentityRange+" (not inside the cidr of the provider network)")
+	case found && !identityExcluded(s.IdentityRange, pool):
+		missing = append(missing, keyServicesIdentityRange+"="+s.IdentityRange+" (not inside one excludeIPs entry of the provider network)")
 	}
 	return missing
 }
@@ -69,6 +72,19 @@ func insidePool(cidr string, pool v1alpha1.ProviderNetworkSpec) bool {
 	return err == nil && insideAny(prefix, []string{pool.CIDR})
 }
 
+func identityExcluded(cidr string, pool v1alpha1.ProviderNetworkSpec) bool {
+	prefix, err := netip.ParsePrefix(cidr)
+	if err != nil {
+		return false
+	}
+	first := prefix.Addr().Next()
+	last := lastAddress(prefix).Prev()
+	return slices.ContainsFunc(pool.ExcludeIPs, func(entry string) bool {
+		low, high, err := settings.ParseAddressRange(entry)
+		return err == nil && low.Compare(first) <= 0 && high.Compare(last) >= 0
+	})
+}
+
 func ServicesSubnet(c Config) (string, bool) {
 	if c.Services.ProviderNetwork == "" || len(MissingServicesSettings(c)) > 0 {
 		return "", false
@@ -76,8 +92,8 @@ func ServicesSubnet(c Config) (string, bool) {
 	return ExternalSubnetName(c.Services.ProviderNetwork), true
 }
 
-func isServicesPool(c Config, pn v1alpha1.ProviderNetworkSpec) bool {
-	return c.Services.ProviderNetwork == pn.Name && pn.Role == v1alpha1.ProviderRoleServices
+func isServicesPool(pn v1alpha1.ProviderNetworkSpec) bool {
+	return pn.Role == v1alpha1.ProviderRoleServices
 }
 
 func ServicesIdentityName(vpc string) string {
@@ -127,7 +143,7 @@ func ServicesPlane(network v1alpha1.Network, cfg Config, identity string) Servic
 }
 
 func servicesACLs(cfg Config, pn v1alpha1.ProviderNetworkSpec) []fabric.ACL {
-	if !isServicesPool(cfg, pn) {
+	if !isServicesPool(pn) {
 		return nil
 	}
 	pool, err := netip.ParsePrefix(pn.CIDR)

@@ -59,10 +59,6 @@ func TestRenderUnderlayLeavesOtherPoolsWithoutACLs(t *testing.T) {
 	if _, found, _ := unstructured.NestedSlice(public.Object, "spec", "acls"); found {
 		t.Fatal("only the services pool has an ACL")
 	}
-	objects, _ = RenderUnderlay(configOf(t, map[string]string{"network.provider-networks": servicesL2Pools}))
-	if _, found, _ := unstructured.NestedSlice(byKindAndName(objects)["Subnet/provider-services"].Object, "spec", "acls"); found {
-		t.Fatal("no ACL without the Setting")
-	}
 }
 
 func TestRenderUnderlaySkipsTheACLForAPoolThatIsNotAServicesPool(t *testing.T) {
@@ -70,5 +66,24 @@ func TestRenderUnderlaySkipsTheACLForAPoolThatIsNotAServicesPool(t *testing.T) {
 	objects, _ := RenderUnderlay(configOf(t, values))
 	if _, found, _ := unstructured.NestedSlice(byKindAndName(objects)["Subnet/provider-public"].Object, "spec", "acls"); found {
 		t.Fatal("the role services is required")
+	}
+}
+
+func TestRenderUnderlayKeepsAServicesRolePoolWhateverTheSettingSays(t *testing.T) {
+	for name, pools := range map[string]string{"l2": servicesL2Pools, "bgp": servicesBGPPools} {
+		for setting, value := range map[string]string{"empty": "", "typo": "servces"} {
+			t.Run(name+" "+setting, func(t *testing.T) {
+				values := servicesValues(pools, map[string]string{"network.services.provider-network": value})
+				if name == "bgp" {
+					values = bgpValues(values)
+				}
+				objects, _ := RenderUnderlay(configOf(t, values))
+				rendered := byKindAndName(objects)
+				if rendered["ProviderNetwork/services"] == nil || rendered["Vlan/services"] == nil {
+					t.Fatal("the provider network and the vlan must stay")
+				}
+				requireDropACL(t, rendered["Subnet/provider-services"])
+			})
+		}
 	}
 }

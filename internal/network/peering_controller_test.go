@@ -293,3 +293,25 @@ func TestNetworkReconcilerKeepsTheDefaultRouteBesideThePeerRoutes(t *testing.T) 
 		t.Fatal("the external connection must stay")
 	}
 }
+
+func TestPeeringReconcilerKeepsTheConnectCIDROnAConfigError(t *testing.T) {
+	c := cleanEnv(t)
+	a, b := createRangedNetwork(t, c, "10.1.0.0/16"), createRangedNetwork(t, c, "10.2.0.0/16")
+	createPeering(t, c, "peer-ab", a, b, "")
+	reconcilePeering(t, c, "peer-ab")
+	recorded := getPeering(t, c, "peer-ab").Status.ConnectCIDR
+	if recorded == "" {
+		t.Fatal("no connect CIDR recorded")
+	}
+	broken := &v1alpha1.Setting{ObjectMeta: metav1.ObjectMeta{Name: "network.peering.range"}, Spec: v1alpha1.SettingSpec{Value: "not-a-cidr"}}
+	if err := c.Create(context.Background(), broken); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = c.Delete(context.Background(), broken) })
+	if _, err := (&NetworkPeeringReconciler{Client: c}).Reconcile(context.Background(), reconcile.Request{NamespacedName: types.NamespacedName{Name: "peer-ab"}}); err == nil {
+		t.Fatal("a config error must be returned for a requeue")
+	}
+	if got := getPeering(t, c, "peer-ab").Status.ConnectCIDR; got != recorded {
+		t.Fatalf("connect CIDR %q, want %q", got, recorded)
+	}
+}

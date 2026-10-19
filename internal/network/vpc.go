@@ -97,12 +97,16 @@ func planL2(in VpcInput) (fabric.VpcSpec, External) {
 		EnableExternal:       true,
 		ExtraExternalSubnets: composeExternalSubnets(in.Config, kept, tenants),
 		DefaultRoute:         &fabric.StaticRoute{CIDR: defaultCIDR, NextHop: nextHop},
-	}, connected(in.Config)
+	}, connected(in)
 }
 
-func connected(cfg Config) External {
+func connected(in VpcInput) External {
+	cfg := in.Config
 	if missing := MissingServicesSettings(cfg); len(missing) > 0 {
 		return External{Requested: true, Reason: ReasonServicesNotConfigured, Message: "the services plane needs these settings: " + strings.Join(missing, ", ")}
+	}
+	if cfg.Services.ProviderNetwork == "" && in.Network.Status.ServicesIdentity != "" {
+		return External{Requested: true, Reason: ReasonServicesNotConfigured, Message: "network.services.provider-network is empty, and this Network has a services identity; set the Setting to keep the services plane"}
 	}
 	return External{Requested: true, Reason: ReasonConnected}
 }
@@ -153,7 +157,7 @@ func planBGP(in VpcInput) (fabric.VpcSpec, External) {
 		ExtraExternalSubnets: composeExternalSubnets(in.Config, keptPools(in.Config, in.Attached), []v1alpha1.ProviderNetworkSpec{transit}),
 		DefaultRoute:         &fabric.StaticRoute{CIDR: defaultCIDR, NextHop: transit.Gateway},
 		Dynamic:              &fabric.DynamicRouting{VrfID: in.VrfID, ExternalSubnet: subnet, Redistribute: []string{"nat", "lb"}, LocalOnly: true},
-	}, connected(in.Config)
+	}, connected(in)
 }
 
 func NextVrfID(used []uint32) (uint32, error) {
