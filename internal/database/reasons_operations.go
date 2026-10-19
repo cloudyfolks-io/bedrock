@@ -6,7 +6,8 @@ const (
 	ReasonRestoreUnsupported     = "RestoreUnsupported"
 	ReasonRestoreTimeUnsupported = "RestoreTimeUnsupported"
 	ReasonUnsupportedForEngine   = "UnsupportedForEngine"
-	ReasonClassChangeInvalid     = "ClassChangeInvalid"
+	ReasonBackupsDisabled        = "BackupsDisabled"
+	ReasonUpgradeBackupFailed    = "UpgradeBackupFailed"
 	ReasonExpansionNotSupported  = "ExpansionNotSupported"
 	ReasonVersionNotAllowed      = "VersionNotAllowed"
 	ReasonBackupRequired         = "BackupRequired"
@@ -16,7 +17,7 @@ func OperationReasons() []string {
 	return []string{
 		ReasonInstancesUnsupported, ReasonBackupUnsupported, ReasonRestoreUnsupported,
 		ReasonRestoreTimeUnsupported, ReasonUnsupportedForEngine,
-		ReasonClassChangeInvalid, ReasonExpansionNotSupported,
+		ReasonBackupsDisabled, ReasonUpgradeBackupFailed, ReasonExpansionNotSupported,
 		ReasonVersionNotAllowed, ReasonBackupRequired, ReasonUpgrading,
 	}
 }

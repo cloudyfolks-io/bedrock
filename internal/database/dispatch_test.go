@@ -89,27 +89,38 @@ func cnpgBackupObject(name, phase string, completed *time.Time, key string) *uns
 	return obj
 }
 
+func annotated(obj *unstructured.Unstructured, target string, requested time.Time) *unstructured.Unstructured {
+	obj.SetAnnotations(map[string]string{annotationUpgradeTarget: target, annotationUpgradeRequest: requested.UTC().Format(time.RFC3339)})
+	return obj
+}
+
 func TestUpgradeBackupFacts(t *testing.T) {
-	old, fresh := time.Date(2026, 10, 18, 2, 0, 0, 0, time.UTC), time.Date(2026, 10, 19, 2, 0, 0, 0, time.UTC)
+	now := time.Date(2026, 10, 19, 12, 0, 0, 0, time.UTC)
+	old, fresh := now.Add(-34*time.Hour), now.Add(-10*time.Hour)
+	recent, stale := now.Add(-time.Hour), now.Add(-72*time.Hour)
 	state := BackupStateOf(v1alpha1.DatabaseEnginePostgreSQL)
 	cases := []struct {
-		name         string
-		backups      []*unstructured.Unstructured
-		latest       *time.Time
-		preRequested bool
+		name      string
+		backups   []*unstructured.Unstructured
+		latest    *time.Time
+		requested bool
+		failed    *time.Time
 	}{
-		{"none", nil, nil, false},
-		{"newest completed wins", []*unstructured.Unstructured{cnpgBackupObject("a", "completed", &old, "stoppedAt"), cnpgBackupObject("b", "completed", &fresh, "stoppedAt")}, &fresh, false},
-		{"running is not completed", []*unstructured.Unstructured{cnpgBackupObject("a", "running", nil, "")}, nil, false},
-		{"a pre-upgrade backup that runs counts as requested", []*unstructured.Unstructured{cnpgBackupObject("uid-1-pre-100", "running", nil, "")}, nil, true},
-		{"a failed pre-upgrade backup does not", []*unstructured.Unstructured{cnpgBackupObject("uid-1-pre-100", "failed", nil, "")}, nil, false},
-		{"a pre-upgrade backup of another database does not", []*unstructured.Unstructured{cnpgBackupObject("uid-2-pre-100", "running", nil, "")}, nil, false},
-		{"a completed pre-upgrade backup is both", []*unstructured.Unstructured{cnpgBackupObject("uid-1-pre-100", "completed", &fresh, "stoppedAt")}, &fresh, true},
+		{"none", nil, nil, false, nil},
+		{"newest completed wins", []*unstructured.Unstructured{cnpgBackupObject("a", "completed", &old, "stoppedAt"), cnpgBackupObject("b", "completed", &fresh, "stoppedAt")}, &fresh, false, nil},
+		{"running is not completed", []*unstructured.Unstructured{cnpgBackupObject("a", "running", nil, "")}, nil, false, nil},
+		{"a pre-upgrade backup that runs counts as requested", []*unstructured.Unstructured{annotated(cnpgBackupObject("uid-1-pre-100", "running", nil, ""), "18", recent)}, nil, true, nil},
+		{"a failed pre-upgrade backup is reported", []*unstructured.Unstructured{annotated(cnpgBackupObject("uid-1-pre-100", "failed", nil, ""), "18", recent)}, nil, false, &recent},
+		{"a pre-upgrade backup of another database does not", []*unstructured.Unstructured{annotated(cnpgBackupObject("uid-2-pre-100", "running", nil, ""), "18", recent)}, nil, false, nil},
+		{"a completed pre-upgrade backup is both", []*unstructured.Unstructured{annotated(cnpgBackupObject("uid-1-pre-100", "completed", &fresh, "stoppedAt"), "18", recent)}, &fresh, true, nil},
+		{"a pre-upgrade backup without a record does not", []*unstructured.Unstructured{cnpgBackupObject("uid-1-pre-100", "completed", &fresh, "stoppedAt")}, nil, false, nil},
+		{"a pre-upgrade backup for another target does not", []*unstructured.Unstructured{annotated(cnpgBackupObject("uid-1-pre-100", "completed", &fresh, "stoppedAt"), "17", recent)}, nil, false, nil},
+		{"a pre-upgrade backup requested 72 hours ago does not", []*unstructured.Unstructured{annotated(cnpgBackupObject("uid-1-pre-100", "completed", &stale, "stoppedAt"), "18", stale)}, nil, false, nil},
 	}
 	for _, c := range cases {
-		latest, requested := UpgradeBackupFacts("uid-1", c.backups, state)
-		if (latest == nil) != (c.latest == nil) || latest != nil && !latest.Equal(*c.latest) || requested != c.preRequested {
-			t.Errorf("%s: latest %v requested %v", c.name, latest, requested)
+		got := UpgradeBackupFacts("uid-1", "18", now, 26*time.Hour, c.backups, state)
+		if (got.Latest == nil) != (c.latest == nil) || got.Latest != nil && !got.Latest.Equal(*c.latest) || got.Requested != c.requested || (got.FailedAt == nil) != (c.failed == nil) || got.FailedAt != nil && !got.FailedAt.Equal(*c.failed) {
+			t.Errorf("%s: %+v", c.name, got)
 		}
 	}
 }

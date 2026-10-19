@@ -69,7 +69,7 @@ func Phase(o Observation) Verdict {
 }
 
 func upgradeReason(problem string) string {
-	if problem == ReasonBackupRequired {
+	if problem == ReasonBackupRequired || problem == ReasonUpgradeBackupFailed {
 		return problem
 	}
 	return ReasonUpgrading

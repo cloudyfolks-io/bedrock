@@ -24,7 +24,7 @@ func appliedState() v1alpha1.DatabaseApplied {
 }
 
 func desiredSpec(edit func(*v1alpha1.DatabaseSpec)) v1alpha1.DatabaseSpec {
-	spec := v1alpha1.DatabaseSpec{Engine: v1alpha1.DatabaseEnginePostgreSQL, Version: "16", Class: "small", StorageGi: 20}
+	spec := v1alpha1.DatabaseSpec{Engine: v1alpha1.DatabaseEnginePostgreSQL, Version: "16", Class: "small", StorageGi: 20, Backup: v1alpha1.DatabaseBackupSpec{Enabled: true}}
 	if edit != nil {
 		edit(&spec)
 	}
@@ -33,7 +33,6 @@ func desiredSpec(edit func(*v1alpha1.DatabaseSpec)) v1alpha1.DatabaseSpec {
 
 func baseFacts() OperationFacts {
 	return OperationFacts{
-		PreviousClass:    classSpec(10, 500, false),
 		Class:            classSpec(10, 500, false),
 		ExpansionAllowed: true,
 		Upgrade:          UpgradeFacts{Targets: []string{"17", "18"}, MaxAge: 26 * time.Hour, Now: operationsNow},
@@ -54,8 +53,14 @@ func TestPlanStepsAndRefusals(t *testing.T) {
 	}{
 		{name: "nothing changed", spec: desiredSpec(nil)},
 		{name: "class change", spec: desiredSpec(func(s *v1alpha1.DatabaseSpec) { s.Class = "medium" }), steps: []Step{StepResize}},
-		{name: "class change that loses high availability", spec: desiredSpec(func(s *v1alpha1.DatabaseSpec) { s.Class = "ha" }),
-			facts: func(f *OperationFacts) { f.Class.HighAvailability = true }, refusal: ReasonClassChangeInvalid},
+		{name: "version upgrade with backups disabled", spec: desiredSpec(func(s *v1alpha1.DatabaseSpec) { s.Version = "17"; s.Backup.Enabled = false }), refusal: ReasonBackupsDisabled},
+		{name: "version upgrade of valkey with backups disabled needs none", spec: desiredSpec(func(s *v1alpha1.DatabaseSpec) { s.Engine = v1alpha1.DatabaseEngineValkey; s.Version = "9.1" }),
+			applied: v1alpha1.DatabaseApplied{Class: "small", Version: "9.0", StorageGi: 20},
+			facts:   func(f *OperationFacts) { f.Upgrade.Targets = []string{"9.1"} }, steps: []Step{StepUpgrade}},
+		{name: "version upgrade after a failed backup waits", spec: desiredSpec(func(s *v1alpha1.DatabaseSpec) { s.Version = "17" }),
+			facts: func(f *OperationFacts) { f.Upgrade.PreFailedAt = timeAgo(10 * time.Minute) }, hold: ReasonUpgradeBackupFailed},
+		{name: "version upgrade after an old failed backup tries again", spec: desiredSpec(func(s *v1alpha1.DatabaseSpec) { s.Version = "17" }),
+			facts: func(f *OperationFacts) { f.Upgrade.PreFailedAt = timeAgo(2 * time.Hour) }, hold: ReasonBackupRequired, backup: true},
 		{name: "storage growth", spec: desiredSpec(func(s *v1alpha1.DatabaseSpec) { s.StorageGi = 40 }), steps: []Step{StepGrowStorage}},
 		{name: "class and storage together", spec: desiredSpec(func(s *v1alpha1.DatabaseSpec) { s.Class = "medium"; s.StorageGi = 40 }), steps: []Step{StepResize, StepGrowStorage}},
 		{name: "storage above the class limit", spec: desiredSpec(func(s *v1alpha1.DatabaseSpec) { s.StorageGi = 501 }), refusal: ReasonStorageOutOfRange},
@@ -182,7 +187,7 @@ func TestSecondReconcileDoesNotRequestASecondBackup(t *testing.T) {
 
 func TestOperationReasonsListEveryOperationReason(t *testing.T) {
 	listed := append(Reasons(), OperationReasons()...)
-	for _, want := range []string{ReasonClassChangeInvalid, ReasonStorageOutOfRange, ReasonExpansionNotSupported, ReasonVersionNotAllowed, ReasonBackupRequired} {
+	for _, want := range []string{ReasonStorageOutOfRange, ReasonExpansionNotSupported, ReasonVersionNotAllowed, ReasonBackupRequired} {
 		if !slices.Contains(listed, want) {
 			t.Errorf("reason %s is not listed", want)
 		}
