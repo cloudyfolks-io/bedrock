@@ -109,18 +109,6 @@ rules:
   - patch
   - watch
 - apiGroups:
-  - barmancloud.cnpg.io
-  resources:
-  - objectstores
-  verbs:
-  - create
-  - delete
-  - get
-  - list
-  - patch
-  - update
-  - watch
-- apiGroups:
   - batch
   resources:
   - jobs
@@ -518,19 +506,6 @@ rules:
   - policy
   resources:
   - poddisruptionbudgets
-  verbs:
-  - create
-  - delete
-  - get
-  - list
-  - patch
-  - update
-  - watch
-- apiGroups:
-  - postgresql.cnpg.io
-  resources:
-  - clusters
-  - scheduledbackups
   verbs:
   - create
   - delete

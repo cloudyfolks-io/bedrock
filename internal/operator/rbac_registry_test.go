@@ -23,14 +23,8 @@ func TestOperatorRoleCoversTheRegistry(t *testing.T) {
 		t.Fatal(err)
 	}
 	var allowed [][3]string
-	for _, resource := range []string{"clusters", "scheduledbackups"} {
-		for _, verb := range []string{"create", "delete", "get", "list", "patch", "update", "watch"} {
-			allowed = append(allowed, [3]string{"postgresql.cnpg.io", resource, verb})
-		}
-	}
 	for _, verb := range []string{"create", "delete", "get", "list", "patch", "update", "watch"} {
 		allowed = append(allowed,
-			[3]string{"barmancloud.cnpg.io", "objectstores", verb},
 			[3]string{"traefik.io", "middlewares", verb},
 			[3]string{"traefik.io", "ingressroutes", verb},
 			[3]string{"cert-manager.io", "certificates", verb},
@@ -54,6 +48,13 @@ func TestOperatorRoleCoversTheRegistry(t *testing.T) {
 		[3]string{"bedrock.cloudyfolks.io", "registrycredentials/finalizers", "update"},
 	)
 	for _, candidate := range []rbacv1.ClusterRole{role, committed} {
+		for _, namespaced := range [][2]string{{"postgresql.cnpg.io", "clusters"}, {"postgresql.cnpg.io", "scheduledbackups"}, {"barmancloud.cnpg.io", "objectstores"}} {
+			for _, verb := range []string{"create", "delete", "get", "list", "patch", "update", "watch"} {
+				if allows(candidate, namespaced[0], namespaced[1], verb) {
+					t.Errorf("the cluster role allows %s %s/%s, which belongs to the Role in bedrock-registry", verb, namespaced[0], namespaced[1])
+				}
+			}
+		}
 		for _, rule := range allowed {
 			if !allows(candidate, rule[0], rule[1], rule[2]) {
 				t.Errorf("the role must allow %s %s/%s (run the release rbac command)", rule[2], rule[0], rule[1])

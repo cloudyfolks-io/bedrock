@@ -7,11 +7,13 @@ import (
 	"math/rand/v2"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"sort"
 	"testing"
 
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
+	rbacv1 "k8s.io/api/rbac/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
@@ -26,7 +28,7 @@ import (
 func testScheme(t *testing.T) *runtime.Scheme {
 	t.Helper()
 	scheme := runtime.NewScheme()
-	for _, add := range []func(*runtime.Scheme) error{corev1.AddToScheme, appsv1.AddToScheme, v1alpha1.AddToScheme} {
+	for _, add := range []func(*runtime.Scheme) error{corev1.AddToScheme, appsv1.AddToScheme, rbacv1.AddToScheme, v1alpha1.AddToScheme} {
 		if err := add(scheme); err != nil {
 			t.Fatal(err)
 		}
@@ -91,21 +93,38 @@ func fakeS3(t *testing.T, status int, code string) *httptest.Server {
 
 func applyNetworkPolicies(ctx context.Context, c client.WithWatch, configuration runtime.ApplyConfiguration, opts ...client.ApplyOption) error {
 	content, ok := configuration.(runtime.Unstructured)
-	if !ok || content.UnstructuredContent()["kind"] != "NetworkPolicy" {
+	if !ok || !slices.Contains([]any{"NetworkPolicy", "Role", "RoleBinding"}, content.UnstructuredContent()["kind"]) {
 		return c.Apply(ctx, configuration, opts...)
 	}
 	policy := &unstructured.Unstructured{Object: content.UnstructuredContent()}
 	existing := &unstructured.Unstructured{}
 	existing.SetGroupVersionKind(policy.GroupVersionKind())
 	err := c.Get(ctx, client.ObjectKeyFromObject(policy), existing)
-	if apierrors.IsNotFound(err) {
-		return c.Create(ctx, policy)
-	}
-	if err != nil {
+	if err == nil {
+		if err := c.Delete(ctx, existing); err != nil {
+			return err
+		}
+	} else if !apierrors.IsNotFound(err) {
 		return err
 	}
-	if err := c.Delete(ctx, existing); err != nil {
-		return err
+	if typed := typedRBAC(policy); typed != nil {
+		return c.Create(ctx, typed)
 	}
 	return c.Create(ctx, policy)
+}
+
+func typedRBAC(obj *unstructured.Unstructured) client.Object {
+	var typed client.Object
+	switch obj.GetKind() {
+	case "Role":
+		typed = &rbacv1.Role{}
+	case "RoleBinding":
+		typed = &rbacv1.RoleBinding{}
+	default:
+		return nil
+	}
+	if err := runtime.DefaultUnstructuredConverter.FromUnstructured(obj.Object, typed); err != nil {
+		return nil
+	}
+	return typed
 }

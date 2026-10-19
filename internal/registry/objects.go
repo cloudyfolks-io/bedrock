@@ -20,6 +20,7 @@ const (
 	adminRouteName       = "harbor-admin"
 	primaryRouteName     = "harbor-public"
 	jobserviceEgressName = "harbor-jobservice-egress"
+	operatorRoleName     = "bedrock-registry-operator"
 )
 
 func object(apiVersion, kind, name string, spec map[string]any) *unstructured.Unstructured {
@@ -244,4 +245,24 @@ func JobserviceEgressPolicy(config Config, nodeAddresses []string) *unstructured
 		},
 	})
 	return policy
+}
+
+func OperatorRole() *unstructured.Unstructured {
+	verbs := []any{"create", "delete", "get", "list", "patch", "update", "watch"}
+	role := object("rbac.authorization.k8s.io/v1", "Role", operatorRoleName, nil)
+	delete(role.Object, "spec")
+	role.Object["rules"] = []any{
+		map[string]any{"apiGroups": []any{"postgresql.cnpg.io"}, "resources": []any{"clusters", "scheduledbackups"}, "verbs": verbs},
+		map[string]any{"apiGroups": []any{"barmancloud.cnpg.io"}, "resources": []any{"objectstores"}, "verbs": verbs},
+		map[string]any{"apiGroups": []any{""}, "resources": []any{"secrets"}, "verbs": []any{"delete"}},
+	}
+	return role
+}
+
+func OperatorRoleBinding() *unstructured.Unstructured {
+	binding := object("rbac.authorization.k8s.io/v1", "RoleBinding", operatorRoleName+"-binding", nil)
+	delete(binding.Object, "spec")
+	binding.Object["roleRef"] = map[string]any{"apiGroup": "rbac.authorization.k8s.io", "kind": "Role", "name": operatorRoleName}
+	binding.Object["subjects"] = []any{map[string]any{"kind": "ServiceAccount", "name": "bedrock-operator", "namespace": "bedrock-system"}}
+	return binding
 }

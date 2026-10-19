@@ -338,3 +338,43 @@ func TestParseConfigReadsTheBlockedAddresses(t *testing.T) {
 		t.Error("a bad CIDR list was accepted")
 	}
 }
+
+func TestOperatorRoleHoldsTheNamespacedRegistryRules(t *testing.T) {
+	role := OperatorRole()
+	if role.GetKind() != "Role" || role.GetName() != "bedrock-registry-operator" || role.GetNamespace() != "bedrock-registry" {
+		t.Fatalf("role %s %s %s", role.GetKind(), role.GetName(), role.GetNamespace())
+	}
+	rules, _, _ := unstructured.NestedSlice(role.Object, "rules")
+	seen := map[string][]string{}
+	for _, item := range rules {
+		rule := item.(map[string]any)
+		verbs := []string{}
+		for _, verb := range rule["verbs"].([]any) {
+			verbs = append(verbs, verb.(string))
+		}
+		for _, group := range rule["apiGroups"].([]any) {
+			for _, resource := range rule["resources"].([]any) {
+				seen[group.(string)+"/"+resource.(string)] = verbs
+			}
+		}
+	}
+	for _, key := range []string{"postgresql.cnpg.io/clusters", "postgresql.cnpg.io/scheduledbackups", "barmancloud.cnpg.io/objectstores"} {
+		if len(seen[key]) != 7 {
+			t.Errorf("%s verbs %v", key, seen[key])
+		}
+	}
+	if !slices.Equal(seen["/secrets"], []string{"delete"}) || len(seen) != 4 {
+		t.Errorf("rules %v", seen)
+	}
+}
+
+func TestOperatorRoleBindingGrantsTheOperatorServiceAccount(t *testing.T) {
+	binding := OperatorRoleBinding()
+	subjects, _, _ := unstructured.NestedSlice(binding.Object, "subjects")
+	subject := subjects[0].(map[string]any)
+	ref, _, _ := unstructured.NestedStringMap(binding.Object, "roleRef")
+	if binding.GetKind() != "RoleBinding" || binding.GetNamespace() != "bedrock-registry" || ref["kind"] != "Role" || ref["name"] != "bedrock-registry-operator" ||
+		len(subjects) != 1 || subject["kind"] != "ServiceAccount" || subject["name"] != "bedrock-operator" || subject["namespace"] != "bedrock-system" {
+		t.Fatalf("binding %v", binding.Object)
+	}
+}
