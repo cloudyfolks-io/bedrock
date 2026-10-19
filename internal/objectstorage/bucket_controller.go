@@ -17,13 +17,15 @@ import (
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
 
 	"github.com/cloudyfolks-io/bedrock/api/v1alpha1"
+	"github.com/cloudyfolks-io/bedrock/internal/objectstorage/admin"
 	"github.com/cloudyfolks-io/bedrock/internal/objectstorage/s3"
 	"github.com/cloudyfolks-io/bedrock/internal/platform"
 )
 
 const (
-	defaultMaxPurgePages = 100000
-	legacyBucketMessage  = "this bucket was made by an older release; delete the ObjectStorageBucket and create it again"
+	conditionQuotaApplied = "QuotaApplied"
+	defaultMaxPurgePages  = 100000
+	legacyBucketMessage   = "this bucket was made by an older release; delete the ObjectStorageBucket and create it again"
 )
 
 var bucketFinalizer = platform.Finalizer("ObjectStorageBucket")
@@ -32,14 +34,17 @@ type BucketReconciler struct {
 	Client        client.Client
 	S3            *s3.Client
 	Endpoint      string
+	Admin         *admin.Client
 	Rules         func(context.Context) (Rules, error)
 	MaxPurgePages int
+	Now           func() time.Time
 }
 
 type bucketState struct {
 	outcome
 	bucketName string
 	endpoint   string
+	seen       observation
 }
 
 func (r *BucketReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
@@ -118,6 +123,10 @@ func (r *BucketReconciler) converge(ctx context.Context, bucket *v1alpha1.Object
 		return state, err
 	}
 	state.outcome, err = r.applyS3(ctx, bucket, account.Root, name, rules)
+	if err != nil || !state.ready() || r.Admin == nil {
+		return state, err
+	}
+	state.seen, err = r.observe(ctx, bucket, name)
 	return state, err
 }
 
@@ -441,7 +450,13 @@ func (r *BucketReconciler) report(ctx context.Context, bucket *v1alpha1.ObjectSt
 			latest.Status.BucketName = state.bucketName
 			latest.Status.Endpoint = state.endpoint
 		}
+		if state.seen.usage != nil {
+			latest.Status.Usage = state.seen.usage
+		}
 		v1alpha1.SetCondition(&latest.Status.Conditions, condition(v1alpha1.ConditionReady, state.ready(), state.reason, state.message, latest.Generation))
+		if quota := state.seen.quota; quota != nil {
+			v1alpha1.SetCondition(&latest.Status.Conditions, condition(conditionQuotaApplied, quota.ok, quota.reason, quota.message, latest.Generation))
+		}
 	})
 	if err != nil {
 		logf.FromContext(ctx).Info("status write failed", "error", err.Error())

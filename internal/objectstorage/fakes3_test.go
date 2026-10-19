@@ -1,11 +1,13 @@
 package objectstorage
 
 import (
+	"encoding/json"
 	"encoding/xml"
 	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"strings"
 	"sync"
 	"testing"
@@ -25,6 +27,9 @@ type fakeS3 struct {
 	calls        []string
 	credentials  []string
 	failWith     int
+	failAdmin    int
+	stats        map[string][2]int64
+	quotas       map[string]url.Values
 }
 
 func newFakeS3(t *testing.T) (*fakeS3, string) {
@@ -37,6 +42,8 @@ func newFakeS3(t *testing.T) (*fakeS3, string) {
 		versioning:   map[string]string{},
 		policies:     map[string]string{},
 		cors:         map[string][]string{},
+		stats:        map[string][2]int64{},
+		quotas:       map[string]url.Values{},
 	}
 	server := httptest.NewServer(http.HandlerFunc(store.serve))
 	t.Cleanup(server.Close)
@@ -72,6 +79,14 @@ func (f *fakeS3) serve(w http.ResponseWriter, r *http.Request) {
 	query := r.URL.Query()
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	if strings.HasPrefix(r.URL.Path, "/admin/") {
+		f.adminCall(w, r)
+		return
+	}
+	if strings.HasPrefix(r.URL.Path, "/admin/") {
+		f.adminCall(w, r)
+		return
+	}
 	kind := ""
 	for _, candidate := range []string{"versioning", "policy", "cors", "versions", "delete"} {
 		if _, found := query[candidate]; found {
@@ -216,4 +231,45 @@ func (f *fakeS3) deleteCall(w http.ResponseWriter, bucket, body string) {
 	}
 	f.objects[bucket] = kept
 	io.WriteString(w, `<DeleteResult></DeleteResult>`)
+}
+
+func (f *fakeS3) adminCall(w http.ResponseWriter, r *http.Request) {
+	query := r.URL.Query()
+	bucket := query.Get("bucket")
+	f.calls = append(f.calls, "ADMIN "+r.Method+" "+r.URL.Path)
+	f.credentials = append(f.credentials, r.Header.Get("Authorization"))
+	if f.failAdmin != 0 {
+		w.WriteHeader(f.failAdmin)
+		return
+	}
+	if r.Method == http.MethodGet {
+		numbers := f.stats[bucket]
+		answer := map[string]any{"bucket": bucket, "usage": map[string]any{"rgw.main": map[string]any{"size_actual": numbers[0], "num_objects": numbers[1]}}}
+		_ = json.NewEncoder(w).Encode(answer)
+		return
+	}
+	if query.Get("enabled") == "false" {
+		delete(f.quotas, bucket)
+		return
+	}
+	f.quotas[bucket] = query
+}
+
+func (f *fakeS3) quota(bucket string) (url.Values, bool) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	query, found := f.quotas[bucket]
+	return query, found
+}
+
+func (f *fakeS3) countCalls(call string) int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	count := 0
+	for _, seen := range f.calls {
+		if seen == call {
+			count++
+		}
+	}
+	return count
 }

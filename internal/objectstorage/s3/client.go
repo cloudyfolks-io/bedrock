@@ -41,6 +41,10 @@ type UnavailableError struct{ message string }
 
 func (e *UnavailableError) Error() string { return e.message }
 
+func Unavailable(message string) error {
+	return &UnavailableError{message: message}
+}
+
 func IsUnavailable(err error) bool {
 	var unavailable *UnavailableError
 	return errors.As(err, &unavailable)
