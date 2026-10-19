@@ -217,6 +217,7 @@ steps=(
   build_roles
   build_missing_secret
   build_kata_gate
+  build_logs
   build_immutable
   build_cleanup
   clusters_addon_off

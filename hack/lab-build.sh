@@ -38,7 +38,7 @@ The lab runs as root on a node of a Bedrock cluster with KVM and an enabled kata
 The project namespace (NS, default acme-web) needs the default Subnet and a route to the internet.
 The node needs crane, openssl, git, curl and k0s. The Settings build.git-image, build.buildkit-image
 and build.builder-image are set to images with the lab CA until the stage down.
-Set LAB_API_TOKEN to an API token of a project member to read the logs through the proxy.
+LAB_API_TOKEN, an API token of a project member, is required: the stage dockerfile reads the logs through the proxy.
 USAGE
 }
 
@@ -243,20 +243,13 @@ expect_token_hidden() {
 }
 
 build_logs() {
-  local pod host vip container
-  if [ -n "${LAB_API_TOKEN:-}" ]; then
-    host=$(kubectl get setting platform.host -o jsonpath='{.spec.value}')
-    vip=$(kubectl get cluster cluster -o jsonpath='{.spec.api.vip}')
-    kubectl -n cert-manager get secret bedrock-ca -o jsonpath='{.data.ca\.crt}' | base64 -d >"$work/platform-ca.crt"
-    curl -fsS --cacert "$work/platform-ca.crt" --resolve "api.$host:443:$vip" -H "Authorization: Bearer $LAB_API_TOKEN" \
-      "https://api.$host/apis/bedrock.cloudyfolks.io/v1alpha1/namespaces/$ns/builds/$1/logs"
-    return
-  fi
-  pod=$(build_pod "$1")
-  for container in $(kubectl -n "$ns" get pod "$pod" -o jsonpath='{.spec.initContainers[*].name} {.spec.containers[*].name}'); do
-    printf '==> %s <==\n' "$container"
-    kubectl -n "$ns" logs "$pod" -c "$container"
-  done
+  local host vip
+  : "${LAB_API_TOKEN:?LAB_API_TOKEN is required to read the logs through the proxy}"
+  host=$(kubectl get setting platform.host -o jsonpath='{.spec.value}')
+  vip=$(kubectl get cluster cluster -o jsonpath='{.spec.api.vip}')
+  kubectl -n cert-manager get secret bedrock-ca -o jsonpath='{.data.ca\.crt}' | base64 -d >"$work/platform-ca.crt"
+  curl -fsS --cacert "$work/platform-ca.crt" --resolve "api.$host:443:$vip" -H "Authorization: Bearer $LAB_API_TOKEN" \
+    "https://api.$host/apis/bedrock.cloudyfolks.io/v1alpha1/namespaces/$ns/builds/$1/logs"
 }
 
 expect_logs() {

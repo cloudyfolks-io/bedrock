@@ -72,6 +72,28 @@ build_kata_gate() {
   expect_equal "" "$(kubectl -n "$NS" get job gated-pack -o name 2>/dev/null || true)" "no job without kata for buildpacks"
 }
 
+build_logs_url() {
+  echo "https://api.$HOST/apis/bedrock.cloudyfolks.io/v1alpha1/namespaces/$NS/builds/$1/logs"
+}
+
+build_logs_through_proxy() {
+  curl -s --cacert "$BEDROCK_CA" -m 30 -H "Authorization: Bearer $(cat "$TOKEN_DIR/dana")" "$(build_logs_url "$1")"
+}
+
+build_logs_contain() {
+  [[ "$(build_logs_through_proxy "$1")" == *"$2"* ]]
+}
+
+build_logs() {
+  if build_kata_ready; then
+    build_manifest logs-probe dockerfile "$build_push_secret" | kubectl -n "$NS" apply -f -
+    wait_not_empty 600 -n "$NS" get pods -l "bedrock.cloudyfolks.io/kind=Build,bedrock.cloudyfolks.io/name=logs-probe" -o jsonpath='{.items[0].metadata.name}'
+    retry_until 300 build_logs_contain logs-probe "==> git-clone <=="
+    return 0
+  fi
+  retry_until 60 build_logs_contain gated "the build has no pod yet"
+}
+
 build_immutable() {
   expect_refused "a build is immutable" kubectl -n "$NS" patch build no-secret --type merge -p '{"spec":{"source":{"git":{"revision":"main"}}}}'
 }
