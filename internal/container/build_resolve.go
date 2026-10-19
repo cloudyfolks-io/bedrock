@@ -102,11 +102,7 @@ func (r BuildResolver) stepSettings(ctx context.Context, _ v1alpha1.Build, in Bu
 	if err != nil {
 		return in, nil, err
 	}
-	mirrors, parseErr := settings.ParseRegistryMirrors(raw)
-	if parseErr != nil {
-		return in, gateOf(ReasonInvalidSpec, "the Setting %s is not valid", SettingBuildMirrors), nil
-	}
-	in.Mirrors = mirrors
+	in.Mirrors, in.MirrorProblems = settings.ParseRegistryMirrorsLenient(raw)
 	return in, nil, nil
 }
 
