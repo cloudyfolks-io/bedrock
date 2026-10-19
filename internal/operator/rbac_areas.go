@@ -7,5 +7,5 @@ import (
 )
 
 func areaRules() []rbacv1.PolicyRule {
-	return slices.Concat(tenancyRules(), imagesRules(), computeRules(), containerRules(), clustersRules(), networkRules(), backupRules(), objectStorageRules(), databaseRules(), addonsRules())
+	return slices.Concat(tenancyRules(), imagesRules(), computeRules(), containerRules(), clustersRules(), networkRules(), backupRules(), objectStorageRules(), databaseRules(), addonsRules(), registryRules())
 }

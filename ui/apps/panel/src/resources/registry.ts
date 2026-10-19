@@ -8,7 +8,7 @@ import type { UiSchema } from "@rjsf/utils";
 import { actionStates, type VmAction } from "./vmActionStates";
 import { validateBackup, validateBucket, validateDnsZone, validateSecurityGroup, validateSshKey, type SpecValidator } from "./validators";
 
-export type Section = "Infrastructure" | "Platform" | "Tenancy" | "Catalog" | "Compute" | "Storage" | "Networking" | "Object storage" | "Databases";
+export type Section = "Infrastructure" | "Platform" | "Tenancy" | "Catalog" | "Compute" | "Storage" | "Networking" | "Object storage" | "Databases" | "Registry";
 export type Perspective = "admin" | "project";
 
 export interface ActionDef {
@@ -134,6 +134,8 @@ const t = {
   databaseSchemas: msg({ id: "nav.item.databaseSchemas", message: "Database schemas" }),
   databaseVersions: msg({ id: "nav.item.databaseVersions", message: "Database versions" }),
   databaseClasses: msg({ id: "nav.item.databaseClasses", message: "Database classes" }),
+  registries: msg({ id: "nav.item.registries", message: "Registries" }),
+  registryCredentials: msg({ id: "nav.item.registryCredentials", message: "Registry credentials" }),
 };
 
 function row(r: Omit<Row, "actions" | "createPath" | "validate" | "uiSchema" | "refFields"> & { actions?: ActionDef[]; createPath?: string; validate?: SpecValidator; uiSchema?: UiSchema; refFields?: Record<string, string> }): Row {
@@ -174,6 +176,8 @@ const rows: Row[] = [
   row({ kind: "DatabaseUser", plural: "databaseusers", scope: "Namespaced", perspective: "project", section: "Databases", path: "database-users", title: t.databaseUsers, create: true, edit: true, actions: [del("typed")], refFields: { databaseRef: "databases" } }),
   row({ kind: "DatabaseSchema", plural: "databaseschemas", scope: "Namespaced", perspective: "project", section: "Databases", path: "database-schemas", title: t.databaseSchemas, create: true, edit: true, actions: [del("typed")], refFields: { databaseRef: "databases" } }),
   row({ kind: "ObjectStorageUser", plural: "objectstorageusers", scope: "Namespaced", perspective: "project", section: "Object storage", path: "object-users", title: t.objectUsers, create: true, edit: true, actions: [del("typed")] }),
+  row({ kind: "Registry", plural: "registries", scope: "Namespaced", perspective: "project", section: "Registry", path: "registries", title: t.registries, create: true, edit: true, actions: [del("typed")] }),
+  row({ kind: "RegistryCredential", plural: "registrycredentials", scope: "Namespaced", perspective: "project", section: "Registry", path: "registry-credentials", title: t.registryCredentials, create: true, edit: false, actions: [del("simple")], refFields: { "registryRef.name": "registries" } }),
 ];
 
 export const definitions: ResourceDef[] = rows.map((r) => ({

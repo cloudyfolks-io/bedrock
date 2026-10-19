@@ -96,6 +96,14 @@ function projectNavigation(project: string): NavSection[] {
         item("object-users", msg({ id: "nav.item.objectUsers", message: "Object storage users" }), base),
       ],
     },
+    {
+      id: "registry",
+      label: msg({ id: "nav.section.registry", message: "Registry" }),
+      items: [
+        item("registries", msg({ id: "nav.item.registries", message: "Registries" }), base),
+        item("registry-credentials", msg({ id: "nav.item.registryCredentials", message: "Registry credentials" }), base),
+      ],
+    },
   ];
 }
 

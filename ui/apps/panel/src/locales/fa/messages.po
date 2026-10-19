@@ -164,6 +164,8 @@ msgstr "دسترسی‌ها"
 
 msgid "col.highAvailability"
 msgstr "دسترس‌پذیری بالا"
+msgid "col.host"
+msgstr "میزبان"
 
 msgid "col.image"
 msgstr "تصویر"
@@ -185,6 +187,9 @@ msgstr "نوع کلید"
 
 msgid "col.listeners"
 msgstr "شنودکننده‌ها"
+
+msgid "col.loginSecret"
+msgstr "Secret ورود"
 
 msgid "col.maintenance"
 msgstr "نگهداری"
@@ -243,11 +248,17 @@ msgstr "سهمیه"
 msgid "col.records"
 msgstr "رکوردها"
 
+msgid "col.registry"
+msgstr "رجیستری"
+
 msgid "col.replace"
 msgstr "جایگزینی"
 
 msgid "col.replicas"
 msgstr "نسخه‌ها"
+
+msgid "col.repositories"
+msgstr "مخزن‌ها"
 
 msgid "col.retention"
 msgstr "نگهداشت"
@@ -818,6 +829,12 @@ msgstr "شبکه‌ها"
 msgid "nav.item.objectUsers"
 msgstr "کاربران ذخیره‌سازی شیء"
 
+msgid "nav.item.registries"
+msgstr "رجیستری‌ها"
+
+msgid "nav.item.registryCredentials"
+msgstr "اعتبارنامه‌های رجیستری"
+
 msgid "nav.item.securityGroups"
 msgstr "گروه‌های امنیتی"
 
@@ -866,6 +883,9 @@ msgstr "ذخیره‌سازی شیء"
 msgid "nav.section.platform"
 msgstr "پلتفرم"
 
+msgid "nav.section.registry"
+msgstr "رجیستری"
+
 msgid "nav.section.storage"
 msgstr "ذخیره‌سازی"
 
@@ -877,6 +897,9 @@ msgstr "شبکه‌ها به مستأجر تعلق دارند. زیرشبکه‌
 
 msgid "networks.forbidden.title"
 msgstr "شما اجازه فهرست‌کردن شبکه‌ها را ندارید"
+
+msgid "registry.showLogin"
+msgstr "نمایش ورود"
 
 msgid "session.gate.error.body"
 msgstr "پنل نتوانست نشست شما را بخواند."

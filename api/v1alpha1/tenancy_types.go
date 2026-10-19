@@ -93,6 +93,9 @@ type ProjectQuota struct {
 	// +optional
 	// +kubebuilder:validation:Minimum=0
 	Databases *int32 `json:"databases,omitempty"`
+	// +optional
+	// +kubebuilder:validation:Minimum=0
+	Registries *int32 `json:"registries,omitempty"`
 }
 
 type ProjectMember struct {

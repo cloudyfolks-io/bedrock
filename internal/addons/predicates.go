@@ -13,6 +13,8 @@ import (
 
 const retentionSetting = "loki.retention-days"
 
+var registryInputSettings = []string{"registry.host", "registry.storage-class", "registry.bucket", "registry.http-proxy", "registry.replicas", "database.enabled"}
+
 func kvmOf(host *v1alpha1.Host) *bool {
 	if host.Status.Checks == nil {
 		return nil
@@ -33,7 +35,7 @@ func hostPreflightInputsChanged(oldHost, newHost *v1alpha1.Host) bool {
 }
 
 func readSettings() []string {
-	names := []string{retentionSetting}
+	names := append([]string{retentionSetting}, registryInputSettings...)
 	for _, def := range Known() {
 		names = append(names, def.EnabledSetting)
 	}

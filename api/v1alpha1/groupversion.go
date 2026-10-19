@@ -26,6 +26,7 @@ const (
 	NetworkFieldManager       = "bedrock-network"
 	BackupFieldManager        = "bedrock-backup"
 	ObjectStorageFieldManager = "bedrock-objectstorage"
+	RegistryFieldManager      = "bedrock-registry"
 	AddonsFieldManager        = "bedrock-addons"
 	ProxyFieldManager         = "bedrock-proxy"
 

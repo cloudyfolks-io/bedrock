@@ -148,6 +148,8 @@ func bedrockResources() []string {
 		"objectstorageusers", "objectstorageusers/status",
 		"projects", "projects/status",
 		"refreshtokens", "refreshtokens/status",
+		"registries", "registries/status",
+		"registrycredentials", "registrycredentials/status",
 		"releases", "releases/status",
 		"securitygroups", "securitygroups/status",
 		"sessions", "sessions/status",

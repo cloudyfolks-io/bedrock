@@ -254,6 +254,10 @@ const L = {
   maxStorage: msg({ id: "col.maxStorage", message: "Maximum storage" }),
   highAvailability: msg({ id: "col.highAvailability", message: "High availability" }),
   eolDate: msg({ id: "col.eolDate", message: "End of life" }),
+  host: msg({ id: "col.host", message: "Host" }),
+  registry: msg({ id: "col.registry", message: "Registry" }),
+  loginSecret: msg({ id: "col.loginSecret", message: "Login Secret" }),
+  repositories: msg({ id: "col.repositories", message: "Repositories" }),
 };
 
 const networkRefsOf = (object: KubeObject): string => (listAt(object, "spec.networkRefs") as string[]).join(", ");
@@ -336,5 +340,7 @@ export const columnsByPlural: Record<string, ColumnDef[]> = {
     sizeBytes("usage", L.usage, "status.usage.bytes"),
     status,
   ],
+  registries: [name, ltrText("host", L.host, "status.host"), gi("quota", L.quota, "spec.quotaGB"), sizeBytes("usage", L.usage, "status.usedBytes"), text("repositories", L.repositories, "status.repositoryCount"), status],
+  registrycredentials: [name, text("registry", L.registry, "spec.registryRef.name"), text("permission", L.permission, "spec.permission"), ltrText("username", L.username, "status.username"), ltrText("loginSecret", L.loginSecret, "status.secretName"), status],
   objectstorageusers: [name, text("displayName", L.displayName, "spec.displayName"), text("permission", L.permission, "spec.permission"), count("buckets", L.buckets, (object) => listAt(object, "spec.buckets").length), flag("suspended", L.suspended, "spec.suspended"), status],
 };

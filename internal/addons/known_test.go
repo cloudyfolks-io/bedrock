@@ -5,9 +5,9 @@ import (
 	"testing"
 )
 
-func TestKnownAddonsAreKataLokiClustersAndCNPG(t *testing.T) {
+func TestKnownAddonsAreKataLokiClustersCNPGAndRegistry(t *testing.T) {
 	known := Known()
-	if len(known) != 4 || known[0].Name != "kata" || known[1].Name != "loki" || known[2].Name != "clusters" || known[3].Name != "cnpg" {
+	if len(known) != 5 || known[0].Name != "kata" || known[1].Name != "loki" || known[2].Name != "clusters" || known[3].Name != "cnpg" || known[4].Name != "registry" {
 		t.Fatalf("known %+v", known)
 	}
 	if known[0].EnabledSetting != "kata.enabled" || len(known[0].Values) != 0 || known[0].Preflight == nil || known[0].Vars != nil {

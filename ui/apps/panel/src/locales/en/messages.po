@@ -164,6 +164,8 @@ msgstr "Grants"
 
 msgid "col.highAvailability"
 msgstr "High availability"
+msgid "col.host"
+msgstr "Host"
 
 msgid "col.image"
 msgstr "Image"
@@ -185,6 +187,9 @@ msgstr "Key type"
 
 msgid "col.listeners"
 msgstr "Listeners"
+
+msgid "col.loginSecret"
+msgstr "Login Secret"
 
 msgid "col.maintenance"
 msgstr "Maintenance"
@@ -243,11 +248,17 @@ msgstr "Quota"
 msgid "col.records"
 msgstr "Records"
 
+msgid "col.registry"
+msgstr "Registry"
+
 msgid "col.replace"
 msgstr "Replace"
 
 msgid "col.replicas"
 msgstr "Replicas"
+
+msgid "col.repositories"
+msgstr "Repositories"
 
 msgid "col.retention"
 msgstr "Retention"
@@ -818,6 +829,12 @@ msgstr "Networks"
 msgid "nav.item.objectUsers"
 msgstr "Object storage users"
 
+msgid "nav.item.registries"
+msgstr "Registries"
+
+msgid "nav.item.registryCredentials"
+msgstr "Registry credentials"
+
 msgid "nav.item.securityGroups"
 msgstr "Security groups"
 
@@ -866,6 +883,9 @@ msgstr "Object storage"
 msgid "nav.section.platform"
 msgstr "Platform"
 
+msgid "nav.section.registry"
+msgstr "Registry"
+
 msgid "nav.section.storage"
 msgstr "Storage"
 
@@ -877,6 +897,9 @@ msgstr "Networks belong to the tenant. Subnets of your project still work."
 
 msgid "networks.forbidden.title"
 msgstr "You cannot list networks"
+
+msgid "registry.showLogin"
+msgstr "Show login"
 
 msgid "session.gate.error.body"
 msgstr "The panel could not read your session."

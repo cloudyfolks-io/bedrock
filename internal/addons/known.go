@@ -5,6 +5,7 @@ import (
 	"strconv"
 
 	"k8s.io/apimachinery/pkg/api/resource"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/util/validation"
 
 	"github.com/cloudyfolks-io/bedrock/api/v1alpha1"
@@ -21,11 +22,13 @@ type Definition struct {
 	EnabledSetting string
 	Values         []Value
 	Preflight      func(hosts []v1alpha1.Host) Verdict
+	Check          func(Facts) Verdict
 	Vars           func(values, settings map[string]string) (map[string]string, error)
+	Adjust         func(objects []*unstructured.Unstructured, settings map[string]string) ([]*unstructured.Unstructured, error)
 }
 
 func Known() []Definition {
-	return []Definition{kataDefinition(), lokiDefinition(), clustersDefinition(), cnpgDefinition()}
+	return []Definition{kataDefinition(), lokiDefinition(), clustersDefinition(), cnpgDefinition(), registryDefinition()}
 }
 
 func Lookup(name string) (Definition, bool) {

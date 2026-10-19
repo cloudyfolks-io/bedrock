@@ -85,6 +85,7 @@ rules:
   resources:
   - controllerrevisions
   - daemonsets
+  - deployments
   - statefulsets
   verbs:
   - get
@@ -218,6 +219,12 @@ rules:
   - projects/status
   - refreshtokens
   - refreshtokens/status
+  - registries
+  - registries/finalizers
+  - registries/status
+  - registrycredentials
+  - registrycredentials/finalizers
+  - registrycredentials/status
   - releases
   - releases/status
   - securitygroups

@@ -7,6 +7,7 @@ const (
 	Loki                 = "loki"
 	Clusters             = "clusters"
 	CNPG                 = "cnpg"
+	Registry             = "registry"
 	ConditionPreflight   = "Preflight"
 	LabelKVM             = "bedrock.cloudyfolks.io/kvm"
 	AnnotationConfigHash = "bedrock.cloudyfolks.io/config-hash"

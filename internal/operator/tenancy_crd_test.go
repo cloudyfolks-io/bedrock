@@ -63,7 +63,7 @@ func TestProjectValidation(t *testing.T) {
 		Spec: v1alpha1.ProjectSpec{
 			TenantRef: "acme",
 			Members:   []v1alpha1.ProjectMember{{Ref: v1alpha1.SubjectRef{Kind: v1alpha1.SubjectKindGroup, Name: "devs"}, Role: v1alpha1.MemberRoleEditor}},
-			Quota:     v1alpha1.ProjectQuota{CPU: ptr.To(resource.MustParse("8")), VMs: ptr.To(int32(5)), Containers: ptr.To(int32(12)), KubernetesClusters: ptr.To(int32(3))},
+			Quota:     v1alpha1.ProjectQuota{CPU: ptr.To(resource.MustParse("8")), VMs: ptr.To(int32(5)), Containers: ptr.To(int32(12)), KubernetesClusters: ptr.To(int32(3)), Registries: ptr.To(int32(3))},
 		},
 	}
 	createValid(t, c, project)
@@ -84,6 +84,9 @@ func TestProjectValidation(t *testing.T) {
 		},
 	}
 	createInvalid(t, c, badRole, "Unsupported value")
+
+	negative := &v1alpha1.Project{ObjectMeta: metav1.ObjectMeta{Name: "negative"}, Spec: v1alpha1.ProjectSpec{TenantRef: "acme", Quota: v1alpha1.ProjectQuota{Registries: ptr.To(int32(-1))}}}
+	createInvalid(t, c, negative, "registries")
 
 	badTenantRef := &v1alpha1.Project{ObjectMeta: metav1.ObjectMeta{Name: "bad-ref"}, Spec: v1alpha1.ProjectSpec{TenantRef: strings.Repeat("a", 31)}}
 	createInvalid(t, c, badTenantRef, "spec.tenantRef")

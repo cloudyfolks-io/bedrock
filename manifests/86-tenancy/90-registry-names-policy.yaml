@@ -1,0 +1,143 @@
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicy
+metadata:
+  name: bedrock-registry-names
+  labels:
+    bedrock.cloudyfolks.io/kind: ValidatingAdmissionPolicy
+    bedrock.cloudyfolks.io/name: bedrock-registry-names
+spec:
+  failurePolicy: Fail
+  paramKind:
+    apiVersion: v1
+    kind: ConfigMap
+  matchConstraints:
+    resourceRules:
+      - apiGroups: [bedrock.cloudyfolks.io]
+        apiVersions: [v1alpha1]
+        operations: [CREATE, UPDATE]
+        resources: [registries]
+  matchConditions:
+    - name: bedrock-identity
+      expression: "request.userInfo.username.startsWith('bedrock:')"
+  variables:
+    - name: names
+      expression: "params.data.?reservedNames.orValue('').split(',')"
+    - name: prefixes
+      expression: "params.data.?reservedPrefixes.orValue('').split(',')"
+    - name: chosen
+      expression: "has(object.spec.name) ? object.spec.name : object.metadata.name"
+  validations:
+    - expression: >-
+        'bedrock:bedrock-admins' in request.userInfo.groups ||
+        request.operation == 'UPDATE' ||
+        !(variables.names.exists(n, n != '' && n == variables.chosen) ||
+          variables.prefixes.exists(p, p != '' && variables.chosen.startsWith(p)))
+      message: "only an administrator may use a reserved registry name"
+      reason: Forbidden
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicyBinding
+metadata:
+  name: bedrock-registry-names
+  labels:
+    bedrock.cloudyfolks.io/kind: ValidatingAdmissionPolicyBinding
+    bedrock.cloudyfolks.io/name: bedrock-registry-names
+spec:
+  policyName: bedrock-registry-names
+  validationActions: [Deny]
+  paramRef:
+    name: registry-name-rules
+    namespace: bedrock-system
+    parameterNotFoundAction: Allow
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicy
+metadata:
+  name: bedrock-registry-annotations
+  labels:
+    bedrock.cloudyfolks.io/kind: ValidatingAdmissionPolicy
+    bedrock.cloudyfolks.io/name: bedrock-registry-annotations
+spec:
+  failurePolicy: Fail
+  matchConstraints:
+    resourceRules:
+      - apiGroups: [bedrock.cloudyfolks.io]
+        apiVersions: [v1alpha1]
+        operations: [CREATE, UPDATE]
+        resources: [registries]
+  matchConditions:
+    - name: bedrock-identity
+      expression: "request.userInfo.username.startsWith('bedrock:')"
+  variables:
+    - name: adoptNew
+      expression: "has(object.metadata.annotations) && 'bedrock.cloudyfolks.io/adopt' in object.metadata.annotations ? object.metadata.annotations['bedrock.cloudyfolks.io/adopt'] : ''"
+    - name: adoptOld
+      expression: "request.operation == 'CREATE' ? '' : (has(oldObject.metadata.annotations) && 'bedrock.cloudyfolks.io/adopt' in oldObject.metadata.annotations ? oldObject.metadata.annotations['bedrock.cloudyfolks.io/adopt'] : '')"
+    - name: approvedNew
+      expression: "has(object.metadata.annotations) && 'bedrock.cloudyfolks.io/reserved-name-approved' in object.metadata.annotations ? object.metadata.annotations['bedrock.cloudyfolks.io/reserved-name-approved'] : ''"
+    - name: approvedOld
+      expression: "request.operation == 'CREATE' ? '' : (has(oldObject.metadata.annotations) && 'bedrock.cloudyfolks.io/reserved-name-approved' in oldObject.metadata.annotations ? oldObject.metadata.annotations['bedrock.cloudyfolks.io/reserved-name-approved'] : '')"
+  validations:
+    - expression: >-
+        'bedrock:bedrock-admins' in request.userInfo.groups ||
+        (variables.adoptNew == variables.adoptOld && variables.approvedNew == variables.approvedOld)
+      message: "only an administrator may set the adopt or reserved-name-approved annotation"
+      reason: Forbidden
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicyBinding
+metadata:
+  name: bedrock-registry-annotations
+  labels:
+    bedrock.cloudyfolks.io/kind: ValidatingAdmissionPolicyBinding
+    bedrock.cloudyfolks.io/name: bedrock-registry-annotations
+spec:
+  policyName: bedrock-registry-annotations
+  validationActions: [Deny]
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicy
+metadata:
+  name: bedrock-registry-credential-names
+  labels:
+    bedrock.cloudyfolks.io/kind: ValidatingAdmissionPolicy
+    bedrock.cloudyfolks.io/name: bedrock-registry-credential-names
+spec:
+  failurePolicy: Fail
+  matchConstraints:
+    resourceRules:
+      - apiGroups: [bedrock.cloudyfolks.io]
+        apiVersions: [v1alpha1]
+        operations: [CREATE, UPDATE]
+        resources: [registrycredentials]
+  matchConditions:
+    - name: bedrock-identity
+      expression: "request.userInfo.username.startsWith('bedrock:')"
+  variables:
+    - name: adoptNew
+      expression: "has(object.metadata.annotations) && 'bedrock.cloudyfolks.io/adopt' in object.metadata.annotations ? object.metadata.annotations['bedrock.cloudyfolks.io/adopt'] : ''"
+    - name: adoptOld
+      expression: "request.operation == 'CREATE' ? '' : (has(oldObject.metadata.annotations) && 'bedrock.cloudyfolks.io/adopt' in oldObject.metadata.annotations ? oldObject.metadata.annotations['bedrock.cloudyfolks.io/adopt'] : '')"
+  validations:
+    - expression: >-
+        'bedrock:bedrock-admins' in request.userInfo.groups ||
+        request.operation == 'UPDATE' ||
+        !object.metadata.name.startsWith('platform-')
+      message: "only an administrator may use the name prefix platform-"
+      reason: Forbidden
+    - expression: >-
+        'bedrock:bedrock-admins' in request.userInfo.groups ||
+        variables.adoptNew == variables.adoptOld
+      message: "only an administrator may set the adopt annotation"
+      reason: Forbidden
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicyBinding
+metadata:
+  name: bedrock-registry-credential-names
+  labels:
+    bedrock.cloudyfolks.io/kind: ValidatingAdmissionPolicyBinding
+    bedrock.cloudyfolks.io/name: bedrock-registry-credential-names
+spec:
+  policyName: bedrock-registry-credential-names
+  validationActions: [Deny]

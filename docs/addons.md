@@ -1,14 +1,14 @@
 # Addons, audit and monitoring
 
 An addon is an optional part of Bedrock. An admin turns an addon on or off
-with an `Addon` object. This page describes the addons `kata`, `loki`, `clusters` and `cnpg`,
+with an `Addon` object. This page describes the addons `kata`, `loki`, `clusters`, `cnpg` and `registry`,
 the API server audit log, the monitoring stack and the metering series.
 
 ## Addons
 
 The `Addon` kind has no namespace. The name of the object is the name of
 the addon. Bedrock creates one `Addon` for each addon it knows: `kata`,
-`loki`, `clusters` and `cnpg`.
+`loki`, `clusters`, `cnpg` and `registry`.
 
 List the addons:
 
@@ -28,13 +28,13 @@ Turn an addon off:
 kubectl patch addon loki --type merge -p '{"spec":{"enabled":false}}'
 ```
 
-The Settings `kata.enabled`, `loki.enabled`, `clusters.enabled` and `cnpg.enabled` set the first state of the
+The Settings `kata.enabled`, `loki.enabled`, `clusters.enabled`, `cnpg.enabled` and `registry.enabled` set the first state of the
 `Addon` objects when Bedrock creates them. After that, only the `Addon`
 object counts. A change of the Setting does not change a live addon.
 Bedrock never changes `spec.enabled` by itself.
 
 Bedrock applies the addon objects in a namespace. `kata` uses
-`kube-system`. `loki` uses `monitoring`. `cnpg` uses `cnpg`. Bedrock records the objects of
+`kube-system`. `loki` uses `monitoring`. `cnpg` uses `cnpg`. `registry` uses `bedrock-registry`. Bedrock records the objects of
 each addon in the ConfigMap `bedrock-system/bedrock-addon-<name>-inventory`.
 Do not edit this ConfigMap. Bedrock uses it to remove the objects.
 
@@ -48,6 +48,7 @@ An addon can have values. Put them in `spec.values` as flat keys.
 | `loki` | `persistence.size` | `20Gi` | A positive Kubernetes quantity. |
 | `loki` | `persistence.storage-class` | `block` | A DNS-1123 subdomain. |
 | `cnpg` | none | | |
+| `registry` | none | | |
 
 An unknown key is an error. The condition `Ready` then shows the reason
 `InvalidValues`. Bedrock changes nothing until you fix the values.
@@ -70,7 +71,7 @@ when the operator starts, with the first state from the Settings.
 
 ### Conditions
 
-The `Addon` has the conditions `Ready` and, for `kata`, `Preflight`. The
+The `Addon` has the condition `Ready`. The addons `kata` and `registry` also have `Preflight`, and `registry` has `RuntimeReady`. The
 field `status.observedGeneration` shows the last generation that Bedrock
 read.
 
@@ -94,6 +95,10 @@ read.
 | `Passed` | `True` | A workload host has `/dev/kvm`. |
 | `NoKVM` | `False` | No workload host has `/dev/kvm`. |
 | `WaitingForHosts` | `Unknown` | A workload host did not report yet. |
+| `HostNotSet` | `Unknown` | The `registry` addon waits for the Setting `registry.host`. |
+| `CNPGAddonOff` | `Unknown` | The `registry` addon waits for the addon `cnpg`. |
+| `DatabaseDisabled` | `Unknown` | The `registry` addon waits for the Setting `database.enabled`. |
+| `CertManagerNotReady` | `Unknown` | The `registry` addon waits for cert-manager. |
 
 ## Kata
 
@@ -179,6 +184,87 @@ Turn the addon on:
 ```
 kubectl patch addon cnpg --type merge -p '{"spec":{"enabled":true}}'
 ```
+
+## Registry
+
+The addon `registry` installs one shared Harbor in the namespace
+`bedrock-registry`. The kinds `Registry` and `RegistryCredential` use it.
+The addon is off by default. The Setting `registry.enabled` sets the first
+state of the `Addon` object.
+
+The addon needs four things. The `Preflight` condition names each missing
+one with a reason, and Bedrock changes nothing until all four are there:
+
+- The Setting `registry.host` has a DNS name (`HostNotSet`).
+- The addon `cnpg` is on (`CNPGAddonOff`).
+- The Setting `database.enabled` is `true` (`DatabaseDisabled`).
+- cert-manager is ready (`CertManagerNotReady`).
+
+Bedrock does not turn on `cnpg` or `database.enabled` for you.
+
+Turn the addon on:
+
+```
+kubectl patch setting registry.host --type merge -p '{"spec":{"value":"registry.example.com"}}'
+kubectl patch setting database.enabled --type merge -p '{"spec":{"value":"true"}}'
+kubectl patch addon cnpg --type merge -p '{"spec":{"enabled":true}}'
+kubectl patch addon registry --type merge -p '{"spec":{"enabled":true}}'
+```
+
+The chart `harbor` version 1.18.4 installs Harbor with the core, registry,
+jobservice, portal and exporter services, an internal Redis, no scanner and
+an external database. A controller of Bedrock makes the other objects in
+`bedrock-registry`:
+
+- The namespace. Turning the addon off keeps it, so no data is lost.
+- The Secrets that the chart reads: `harbor-admin`, `harbor-core-keys`,
+  `harbor-jobservice-keys`, `harbor-registry-keys`,
+  `harbor-registry-credentials` and `harbor-db-credentials`. Bedrock makes a
+  Secret only when it does not exist. A Secret that you made before stays as
+  it is.
+- The CloudNativePG cluster `harbor-db`, with the instances from
+  `registry.db-instances`. A daily backup goes to the bucket of
+  `database.backup.bucket` under the prefix `registry/`.
+- The object store user `bedrock-registry` and the bucket of
+  `registry.bucket` for the image data.
+- The certificate `harbor-token`, from the issuer `bedrock-selfsigned`.
+- A certificate and Traefik routes for `registry.host` and each name of
+  `registry.aliases`. Harbor makes the token address from one URL. Each alias
+  route rewrites the header `WWW-Authenticate` so that a client asks the
+  alias for its token.
+- A route for the Harbor portal only when `registry.admin-host` and
+  `registry.admin-allow-cidrs` are both set. Only the listed networks can
+  open it.
+
+The condition `RuntimeReady` shows the state of these objects.
+
+| Reason of `RuntimeReady` | Meaning |
+|---|---|
+| `Ready` | All objects are applied. |
+| `InvalidSettings` | A Setting of the registry has a wrong value. |
+| `StorePending` | A user of the object store is not ready yet. |
+| `BucketNotOwned` | The bucket exists and another identity owns it. Bedrock never changes the owner. An administrator links the bucket to the user `bedrock-registry` with `radosgw-admin bucket link`. |
+| `MissingCRD` | The kind of cert-manager, Traefik or CloudNativePG is not in the cluster. |
+| the reasons of `Preflight` | A prerequisite is missing. |
+
+| Setting | Default | Meaning |
+|---|---|---|
+| `registry.enabled` | `false` | First state of the addon. |
+| `registry.host` | empty | DNS name of the registry. |
+| `registry.aliases` | empty | Comma list of extra DNS names. |
+| `registry.admin-host` | empty | DNS name of the Harbor portal. |
+| `registry.admin-allow-cidrs` | empty | Networks that can open the portal. |
+| `registry.replicas` | `2` | Replicas of core, registry and jobservice (1 to 5). |
+| `registry.db-instances` | `2` | Instances of `harbor-db` (1 to 3). |
+| `registry.storage-class` | `block` | StorageClass of the database and Redis. |
+| `registry.bucket` | `bedrock-registry` | Bucket of the image data. |
+| `registry.http-proxy` | empty | Proxy for the pull-through caches. |
+| `registry.robot-prefix` | `robot$` | Prefix of each robot login. |
+| `registry.gc-cron` | `0 0 3 * * *` | Garbage collection schedule. |
+| `registry.proxy-caches` | empty | JSON list of pull-through caches. |
+| `registry.webhook-blocked-cidrs` | private, shared, link-local and loopback ranges | Networks that the jobservice cannot reach, so a webhook cannot call into the cluster. |
+| `database.enabled` | `false` | Turns on the database platform. |
+| `database.backup.bucket` | `bedrock-database-backups` | Bucket of the platform database backups. |
 
 ## Loki
 

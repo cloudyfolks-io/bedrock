@@ -40,6 +40,8 @@ const routes = [
   "/p/:project/database-schemas",
   "/p/:project/buckets",
   "/p/:project/object-users",
+  "/p/:project/registries",
+  "/p/:project/registry-credentials",
   "/account",
 ];
 
