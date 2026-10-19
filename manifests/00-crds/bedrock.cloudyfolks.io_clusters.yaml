@@ -86,6 +86,11 @@ spec:
                 format: int32
                 minimum: 1
                 type: integer
+              podMTU:
+                format: int32
+                maximum: 9000
+                minimum: 576
+                type: integer
               registry:
                 properties:
                   mirror:

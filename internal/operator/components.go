@@ -39,6 +39,7 @@ func components(ctx context.Context, env upgradeEnv, cluster v1alpha1.Cluster) (
 	if err != nil {
 		return phaseResult{}, err
 	}
+	vars = release.WithPodMTU(vars, cluster.Spec.PodMTU)
 	if err := writeClusterStatus(ctx, env.Client, func(s *v1alpha1.ClusterStatus) {
 		*s = resetComponents(*s)
 	}); err != nil {
