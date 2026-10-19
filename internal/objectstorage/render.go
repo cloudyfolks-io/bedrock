@@ -1,102 +1,42 @@
 package objectstorage
 
 import (
-	"strconv"
+	"strings"
 
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 
 	"github.com/cloudyfolks-io/bedrock/api/v1alpha1"
+	"github.com/cloudyfolks-io/bedrock/internal/platform"
 )
 
-const maxGenerateBucketName = 50
+const maxBucketName = 63
 
-func CephUser(user *v1alpha1.ObjectStorageUser, tenant, project string) (*unstructured.Unstructured, error) {
-	quotas, err := userQuotas(user.Spec.Quota)
-	if err != nil {
-		return nil, err
-	}
+func CephUser(user *v1alpha1.ObjectStorageUser, project Project) *unstructured.Unstructured {
+	rgwName := RGWUserName(user.Namespace, user.Name)
 	spec := map[string]any{
-		"store":            StoreName,
-		"clusterNamespace": StoreNamespace,
-		"displayName":      displayName(user),
+		"store":       StoreName,
+		"displayName": rgwName,
+		"accountRef":  map[string]any{"name": AccountName(user.Namespace)},
 	}
-	if len(quotas) > 0 {
-		spec["quotas"] = quotas
+	if user.Spec.Suspended {
+		spec["opMask"] = []any{}
 	}
-	owner := metav1.NewControllerRef(user, v1alpha1.GroupVersion.WithKind("ObjectStorageUser"))
 	obj := &unstructured.Unstructured{Object: map[string]any{
 		"apiVersion": "ceph.rook.io/v1",
 		"kind":       "CephObjectStoreUser",
-		"metadata":   map[string]any{"name": RGWUserName(user.Namespace, user.Name), "namespace": user.Namespace},
+		"metadata":   map[string]any{"name": rgwName, "namespace": StoreNamespace},
 		"spec":       spec,
 	}}
-	obj.SetLabels(v1alpha1.TenantLabels("ObjectStorageUser", user.Name, tenant, project))
-	obj.SetOwnerReferences([]metav1.OwnerReference{*owner})
-	return obj, nil
+	owner := platform.Owner{Kind: "ObjectStorageUser", Name: user.Name, Namespace: user.Namespace, UID: user.UID, Tenant: project.Tenant, Project: project.Name}
+	return platform.Adopt(obj, owner)
 }
 
-func BucketClaim(bucket *v1alpha1.ObjectStorageBucket, tenant, project string) (*unstructured.Unstructured, error) {
-	config, err := bucketConfig(bucket)
-	if err != nil {
-		return nil, err
+func S3BucketName(bucket *v1alpha1.ObjectStorageBucket) string {
+	if bucket.Spec.BucketName != "" {
+		return bucket.Spec.BucketName
 	}
-	owner := metav1.NewControllerRef(bucket, v1alpha1.GroupVersion.WithKind("ObjectStorageBucket"))
-	obj := &unstructured.Unstructured{Object: map[string]any{
-		"apiVersion": "objectbucket.io/v1alpha1",
-		"kind":       "ObjectBucketClaim",
-		"metadata":   map[string]any{"name": bucket.Name, "namespace": bucket.Namespace},
-		"spec": map[string]any{
-			"generateBucketName": cut(bucket.Name, maxGenerateBucketName),
-			"storageClassName":   BucketClassName,
-			"additionalConfig":   config,
-		},
-	}}
-	obj.SetLabels(v1alpha1.TenantLabels("ObjectStorageBucket", bucket.Name, tenant, project))
-	obj.SetOwnerReferences([]metav1.OwnerReference{*owner})
-	return obj, nil
-}
-
-func bucketConfig(bucket *v1alpha1.ObjectStorageBucket) (map[string]any, error) {
-	config := map[string]any{"bucketOwner": RGWUserName(bucket.Namespace, bucket.Spec.UserRef)}
-	quota := bucket.Spec.Quota
-	if quota.Bytes != nil && quota.Bytes.Value() < 0 {
-		return nil, ErrQuotaInvalid
-	}
-	if quota.Objects != nil && *quota.Objects < 0 {
-		return nil, ErrQuotaInvalid
-	}
-	if quota.Bytes != nil && quota.Bytes.Value() > 0 {
-		config["bucketMaxSize"] = strconv.FormatInt(quota.Bytes.Value(), 10)
-	}
-	if quota.Objects != nil && *quota.Objects > 0 {
-		config["bucketMaxObjects"] = strconv.FormatInt(*quota.Objects, 10)
-	}
-	return config, nil
-}
-
-func userQuotas(quota v1alpha1.ObjectStorageUserQuota) (map[string]any, error) {
-	if quota.Bytes != nil && quota.Bytes.Value() < 0 {
-		return nil, ErrQuotaInvalid
-	}
-	if quota.Buckets != nil && *quota.Buckets < 0 {
-		return nil, ErrQuotaInvalid
-	}
-	quotas := map[string]any{}
-	if quota.Bytes != nil && quota.Bytes.Value() > 0 {
-		quotas["maxSize"] = quota.Bytes.Value()
-	}
-	if quota.Buckets != nil && *quota.Buckets > 0 {
-		quotas["maxBuckets"] = int64(*quota.Buckets)
-	}
-	return quotas, nil
-}
-
-func displayName(user *v1alpha1.ObjectStorageUser) string {
-	if user.Spec.DisplayName != "" {
-		return user.Spec.DisplayName
-	}
-	return user.Namespace + "/" + user.Name
+	generated := strings.ReplaceAll(bucket.Namespace+"-"+bucket.Name, ".", "-")
+	return strings.TrimRight(cut(generated, maxBucketName), "-")
 }
 
 func cut(value string, limit int) string {

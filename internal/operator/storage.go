@@ -10,6 +10,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	"github.com/cloudyfolks-io/bedrock/api/v1alpha1"
+	"github.com/cloudyfolks-io/bedrock/internal/objectstorage"
 	"github.com/cloudyfolks-io/bedrock/internal/release"
 )
 
@@ -43,7 +44,7 @@ func RenderStorage(in AddonInput) (Rendered, error) {
 		return Rendered{}, err
 	}
 	cluster := cephCluster(image, hosts, monCount(replicas), replicas)
-	objects := slices.Concat([]*unstructured.Unstructured{cluster}, storageObjects(replicas, hosts))
+	objects := slices.Concat([]*unstructured.Unstructured{cluster}, storageObjects(replicas, hosts, hostingNames(in)))
 	return Rendered{Objects: objects, Probes: []Probe{cephClusterProbe(cephGate(deviceCount(hosts)))}}, nil
 }
 
@@ -63,7 +64,7 @@ func storageSettings(in AddonInput) (string, int, error) {
 	return image, replicas, nil
 }
 
-func storageObjects(replicas int, hosts []v1alpha1.Host) []*unstructured.Unstructured {
+func storageObjects(replicas int, hosts []v1alpha1.Host, dnsNames []string) []*unstructured.Unstructured {
 	return []*unstructured.Unstructured{
 		cephBlockPool(replicas),
 		cephFilesystem(replicas, len(hosts) > 1),
@@ -71,7 +72,7 @@ func storageObjects(replicas int, hosts []v1alpha1.Host) []*unstructured.Unstruc
 		blockStorageClass("block-retain", "Retain", false),
 		filesystemStorageClass(),
 		blockSnapshotClass(),
-		cephObjectStore(replicas, len(hosts)),
+		cephObjectStore(replicas, len(hosts), dnsNames),
 		bucketStorageClass(),
 	}
 }
@@ -194,18 +195,34 @@ func cephFilesystem(replicas int, standby bool) *unstructured.Unstructured {
 	})
 }
 
-func cephObjectStore(replicas, hosts int) *unstructured.Unstructured {
+func cephObjectStore(replicas, hosts int, dnsNames []string) *unstructured.Unstructured {
 	instances := int64(1)
 	if hosts > 1 {
 		instances = 2
 	}
-	return object("ceph.rook.io/v1", "CephObjectStore", storageNamespace, objectStoreName, map[string]any{
+	spec := map[string]any{
 		"metadataPool":           map[string]any{"failureDomain": cephFailureDomain, "replicated": replicated(replicas)},
 		"dataPool":               map[string]any{"failureDomain": cephFailureDomain, "replicated": replicated(replicas)},
 		"preservePoolsOnDelete":  true,
 		"allowUsersInNamespaces": []any{"*"},
 		"gateway":                map[string]any{"port": int64(80), "instances": instances},
-	})
+	}
+	if len(dnsNames) > 0 {
+		names := make([]any, len(dnsNames))
+		for i, name := range dnsNames {
+			names[i] = name
+		}
+		spec["hosting"] = map[string]any{"dnsNames": names}
+	}
+	return object("ceph.rook.io/v1", "CephObjectStore", storageNamespace, objectStoreName, spec)
+}
+
+func hostingNames(in AddonInput) []string {
+	rules, err := objectstorage.ParseRules(in.Settings)
+	if err != nil {
+		return nil
+	}
+	return objectstorage.HostingDNSNames(rules)
 }
 
 func bucketStorageClass() *unstructured.Unstructured {

@@ -14,7 +14,7 @@ owned_kinds=(
   backups.velero.io
   schedules.velero.io
   restores.velero.io
-  objectbucketclaims.objectbucket.io
+  cephobjectstoreaccounts.ceph.rook.io
   cephobjectstoreusers.ceph.rook.io
 )
 

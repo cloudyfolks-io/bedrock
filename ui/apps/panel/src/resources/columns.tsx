@@ -219,11 +219,14 @@ const L = {
   records: msg({ id: "col.records", message: "Records" }),
   ingress: msg({ id: "col.ingress", message: "Ingress rules" }),
   egress: msg({ id: "col.egress", message: "Egress rules" }),
-  user: msg({ id: "col.user", message: "User" }),
+  permission: msg({ id: "col.permission", message: "Permission" }),
+  suspended: msg({ id: "col.suspended", message: "Suspended" }),
+  bucketName: msg({ id: "col.bucketName", message: "Bucket name" }),
+  usage: msg({ id: "col.usage", message: "Used" }),
   endpoint: msg({ id: "col.endpoint", message: "Endpoint" }),
   versioning: msg({ id: "col.versioning", message: "Versioning" }),
   quota: msg({ id: "col.quota", message: "Quota" }),
-  buckets: msg({ id: "col.buckets", message: "Bucket quota" }),
+  buckets: msg({ id: "col.buckets", message: "Buckets" }),
   keyType: msg({ id: "col.keyType", message: "Key type" }),
 };
 
@@ -291,11 +294,11 @@ export const columnsByPlural: Record<string, ColumnDef[]> = {
   securitygroups: [name, count("ingress", L.ingress, (object) => listAt(object, "spec.ingress").length), count("egress", L.egress, (object) => listAt(object, "spec.egress").length), status],
   objectstoragebuckets: [
     name,
-    text("user", L.user, "spec.userRef"),
+    ltrText("bucketName", L.bucketName, "status.bucketName"),
     ltrText("endpoint", L.endpoint, "status.endpoint"),
-    flag("versioning", L.versioning, "spec.versioning"),
     quota("quota", L.quota, "spec.quota.bytes"),
+    sizeBytes("usage", L.usage, "status.usage.bytes"),
     status,
   ],
-  objectstorageusers: [name, text("displayName", L.displayName, "spec.displayName"), text("buckets", L.buckets, "spec.quota.buckets"), quota("quota", L.quota, "spec.quota.bytes"), status],
+  objectstorageusers: [name, text("displayName", L.displayName, "spec.displayName"), text("permission", L.permission, "spec.permission"), count("buckets", L.buckets, (object) => listAt(object, "spec.buckets").length), flag("suspended", L.suspended, "spec.suspended"), status],
 };
