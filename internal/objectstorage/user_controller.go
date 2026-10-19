@@ -30,6 +30,7 @@ type UserReconciler struct {
 	Client   client.Client
 	S3       *s3.Client
 	Endpoint string
+	Rules    func(context.Context) (Rules, error)
 }
 
 type userState struct {
@@ -163,7 +164,11 @@ func (r *UserReconciler) converged(ctx context.Context, user *v1alpha1.ObjectSto
 	if !complete {
 		return userBlocked("CredentialsMissing", "the credentials Secret "+CredentialsSecretName(rgwName)+" is missing or incomplete", pendingRequeue), nil
 	}
-	if err := ssa.Apply(ctx, r.Client, keysSecret(user, project, keys, r.Endpoint), v1alpha1.ObjectStorageFieldManager); err != nil {
+	rules, err := rulesFrom(ctx, r.Rules)
+	if err != nil {
+		return userState{}, err
+	}
+	if err := ssa.Apply(ctx, r.Client, keysSecret(user, project, keys, PublicEndpoint(rules, r.Endpoint)), v1alpha1.ObjectStorageFieldManager); err != nil {
 		return userState{}, err
 	}
 	state := userState{secret: keysSecretName(user), arn: UserARN(account.ID, rgwName)}
