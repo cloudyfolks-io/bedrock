@@ -266,9 +266,9 @@ func (r *BackupReconciler) markBackupTargets(ctx context.Context, vm *v1alpha1.V
 	if err := r.keepOutOfVelero(ctx, vm); err != nil {
 		return err
 	}
-	for _, disk := range vm.Spec.Disks {
+	for _, ref := range v1alpha1.VolumeRefs(*vm) {
 		volume := &v1alpha1.Volume{}
-		err := r.Client.Get(ctx, types.NamespacedName{Namespace: vm.Namespace, Name: disk.VolumeRef}, volume)
+		err := r.Client.Get(ctx, types.NamespacedName{Namespace: vm.Namespace, Name: ref}, volume)
 		if apierrors.IsNotFound(err) {
 			continue
 		}

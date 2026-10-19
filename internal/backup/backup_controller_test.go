@@ -567,3 +567,28 @@ func TestBackupNamesAreLimitedTo63Characters(t *testing.T) {
 		t.Fatalf("a 63 character name must be valid: %v", err)
 	}
 }
+
+func TestBackupLabelsTheRootVolumeOfAVM(t *testing.T) {
+	setLocation(t, "Available")
+	ensureProject(t)
+	ctx := context.Background()
+	root := &v1alpha1.Volume{ObjectMeta: metav1.ObjectMeta{Name: "boot-root", Namespace: projectNamespace}, Spec: v1alpha1.VolumeSpec{SizeGi: 5}}
+	if err := k8sClient.Create(ctx, root); err != nil {
+		t.Fatal(err)
+	}
+	vm := &v1alpha1.VirtualMachine{
+		ObjectMeta: metav1.ObjectMeta{Name: "boot-vm", Namespace: projectNamespace},
+		Spec:       v1alpha1.VirtualMachineSpec{InstanceType: "small", RootDisk: v1alpha1.VMRootDisk{VolumeRef: "boot-root"}},
+	}
+	if err := k8sClient.Create(ctx, vm); err != nil {
+		t.Fatal(err)
+	}
+	createVMB(t, "boot-once", v1alpha1.VirtualMachineBackupSpec{VMRef: "boot-vm"})
+	r := newBackupReconciler(testNow)
+	reconcileVMB(t, r, "boot-once")
+	reconcileVMB(t, r, "boot-once")
+	labeled := &v1alpha1.Volume{}
+	if err := k8sClient.Get(ctx, types.NamespacedName{Namespace: projectNamespace, Name: "boot-root"}, labeled); err != nil || labeled.Labels[BackupVMLabel] != "boot-vm" {
+		t.Fatalf("root volume labels %v %v", labeled.Labels, err)
+	}
+}
