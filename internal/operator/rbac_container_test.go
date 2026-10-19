@@ -39,6 +39,15 @@ func TestOperatorRoleAllowsContainers(t *testing.T) {
 			{"node.k8s.io", "runtimeclasses", "watch"},
 			{"", "pods", "list"},
 			{"", "secrets", "get"},
+			{"bedrock.cloudyfolks.io", "builds", "get"},
+			{"bedrock.cloudyfolks.io", "builds/status", "patch"},
+			{"bedrock.cloudyfolks.io", "builds/finalizers", "update"},
+			{"batch", "jobs", "create"},
+			{"batch", "jobs", "delete"},
+			{"batch", "jobs", "list"},
+			{"batch", "jobs", "watch"},
+			{"", "configmaps", "patch"},
+			{"bedrock.cloudyfolks.io", "addons", "get"},
 		} {
 			if !allows(candidate, want.group, want.resource, want.verb) {
 				t.Errorf("the role must allow %s %s/%s (run the release rbac command)", want.verb, want.group, want.resource)

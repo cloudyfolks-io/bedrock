@@ -44,9 +44,12 @@ func TestOperatorRules(t *testing.T) {
 		{"autoscaling", "horizontalpodautoscalers", "create"}, {"autoscaling", "horizontalpodautoscalers", "delete"}, {"autoscaling", "horizontalpodautoscalers", "get"},
 		{"autoscaling", "horizontalpodautoscalers", "list"}, {"autoscaling", "horizontalpodautoscalers", "patch"}, {"autoscaling", "horizontalpodautoscalers", "watch"},
 		{"node.k8s.io", "runtimeclasses", "get"}, {"node.k8s.io", "runtimeclasses", "list"}, {"node.k8s.io", "runtimeclasses", "watch"},
+		{"batch", "jobs", "create"}, {"batch", "jobs", "delete"}, {"batch", "jobs", "get"}, {"batch", "jobs", "list"}, {"batch", "jobs", "watch"},
+		{"", "configmaps", "create"}, {"", "configmaps", "get"}, {"", "configmaps", "patch"},
 		{"", "pods", "list"}, {"", "pods", "watch"},
 		{"", "secrets", "get"},
 		{"bedrock.cloudyfolks.io", "containers/finalizers", "update"},
+		{"bedrock.cloudyfolks.io", "builds/finalizers", "update"},
 	})
 }
 

@@ -25,6 +25,13 @@ const (
 	ReasonFailed                 = "Failed"
 	ReasonImagePullFailed        = "ImagePullFailed"
 	ReasonContainerConfigError   = "ContainerConfigError"
+	ReasonSecretNotFound         = "SecretNotFound"
+	ReasonSecretTypeInvalid      = "SecretTypeInvalid"
+	ReasonKataUnavailable        = "KataUnavailable"
+	ReasonTimeout                = "Timeout"
+	ReasonJobMissing             = "JobMissing"
+	ReasonStarting               = "Starting"
+	ReasonSucceeded              = "Succeeded"
 )
 
 func Reasons() []string {
@@ -35,5 +42,14 @@ func Reasons() []string {
 		ReasonVolumeNotFound, ReasonVolumeInUse, ReasonVolumeClassUnsupported,
 		ReasonRuntimeUnavailable, ReasonPullSecretNotFound, ReasonApplyFailed, ReasonNameConflict,
 		ReasonDeploying, ReasonRunning, ReasonStopped, ReasonFailed, ReasonImagePullFailed, ReasonContainerConfigError,
+	}
+}
+
+func BuildReasons() []string {
+	return []string{
+		ReasonNotInProject, ReasonInvalidSpec, ReasonSubnetNotFound, ReasonSubnetNotReady, ReasonWaitingForDefaultGroup,
+		ReasonSecretNotFound, ReasonSecretTypeInvalid, ReasonKataUnavailable, ReasonApplyFailed, ReasonNameConflict,
+		ReasonStarting, ReasonRunning, ReasonSucceeded, ReasonFailed, ReasonTimeout,
+		ReasonImagePullFailed, ReasonContainerConfigError, ReasonJobMissing,
 	}
 }
