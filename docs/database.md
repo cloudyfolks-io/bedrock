@@ -213,6 +213,7 @@ The condition `Ready` shows one of these reasons.
 | `EngineUnavailable` | The engine did not answer a command. |
 | `EngineRejected` | The engine refused a command. |
 | `Ready` | The object is as the spec says. |
+| `NameTaken` | A Secret, SecurityGroup or Service that the operator needs exists and the object does not own it. |
 | `UpgradeNotSupported` | The version of a running database changed. The operator keeps the old render. |
 | `ClassChangeNotSupported` | The new class has another `highAvailability`. |
 | `VersionNotAvailable` | The `DatabaseVersion` does not exist, or it is disabled for a new database. |

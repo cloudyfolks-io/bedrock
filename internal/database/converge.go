@@ -202,6 +202,8 @@ func (r *Reconciler) apply(ctx context.Context, in *flow) (*Refusal, error) {
 	switch {
 	case errors.Is(err, ErrVIPRangeMissing):
 		return refusal(ReasonVIPRangeMissing, "the Setting database.vip-range is empty"), nil
+	case errors.Is(err, ErrVIPNameTaken):
+		return refusal(ReasonNameTaken, "the Service %s exists and this database does not own it", VIPName(db.UID)), nil
 	case errors.Is(err, ErrVIPRangeFull):
 		return refusal(ReasonAddressUnavailable, "the gate address range database.vip-range has no free address"), nil
 	case err != nil:
@@ -309,6 +311,13 @@ func (r *Reconciler) applyProxy(ctx context.Context, in *flow, vip string) (*Ref
 		return refusal(ReasonAddressUnavailable, "the subnet %s has no free address", in.subnet.Name), nil
 	case err != nil:
 		return nil, fmt.Errorf("allocate the proxy address: %w", err)
+	}
+	var existing v1alpha1.SecurityGroup
+	switch err := r.Live.Get(ctx, client.ObjectKey{Namespace: in.db.Namespace, Name: SecurityGroupName(in.db.UID)}, &existing); {
+	case err == nil && !metav1.IsControlledBy(&existing, in.db):
+		return refusal(ReasonNameTaken, "the SecurityGroup %s exists and this database does not own it", existing.Name), nil
+	case err != nil && !apierrors.IsNotFound(err):
+		return nil, err
 	}
 	if err := ssa.Apply(ctx, r.Client, SecurityGroupObject(*in.db, in.project, in.subnet, vip, in.port), v1alpha1.DatabaseFieldManager); err != nil {
 		return nil, fmt.Errorf("apply the security group: %w", err)

@@ -63,10 +63,14 @@ func PurgeBackups(ctx context.Context, c client.Client, store BackupStore, cfg C
 	if err := c.List(ctx, &tombstones, client.InNamespace(PlatformNamespace), client.MatchingLabels{v1alpha1.LabelKind: tombstoneKind}); err != nil {
 		return err
 	}
+	restoring, err := restoreSources(ctx, c)
+	if err != nil {
+		return err
+	}
 	var failures []error
 	for i := range tombstones.Items {
 		tombstone := &tombstones.Items[i]
-		if !purgeDue(tombstone, now) {
+		if !purgeDue(tombstone, now) || restoring[tombstone.Name[len(tombstonePrefix):]] {
 			continue
 		}
 		if err := purge(ctx, c, store, cfg, tombstone); err != nil {
@@ -74,6 +78,20 @@ func PurgeBackups(ctx context.Context, c client.Client, store BackupStore, cfg C
 		}
 	}
 	return errors.Join(failures...)
+}
+
+func restoreSources(ctx context.Context, c client.Reader) (map[string]bool, error) {
+	var databases v1alpha1.DatabaseList
+	if err := c.List(ctx, &databases); err != nil {
+		return nil, err
+	}
+	sources := map[string]bool{}
+	for _, db := range databases.Items {
+		if db.Spec.Restore != nil && db.Annotations[annotationReadyOnce] != "true" {
+			sources[db.Spec.Restore.SourceUID] = true
+		}
+	}
+	return sources, nil
 }
 
 func purgeDue(tombstone *corev1.ConfigMap, now time.Time) bool {

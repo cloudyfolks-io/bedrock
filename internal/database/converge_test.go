@@ -412,3 +412,42 @@ func TestStorageGrowthStaysInsideTheClassRange(t *testing.T) {
 		t.Fatalf("reason %s size %s", w.reason(), size())
 	}
 }
+
+func TestAForeignSecurityGroupOfTheDatabaseNameIsLeftAlone(t *testing.T) {
+	w := newWorld(t, nil)
+	ctx := context.Background()
+	w.reconcile()
+	must(t, w.c.Delete(ctx, &v1alpha1.SecurityGroup{ObjectMeta: metav1.ObjectMeta{Name: SecurityGroupName(w.db.UID), Namespace: w.namespace}}))
+	foreign := &v1alpha1.SecurityGroup{ObjectMeta: metav1.ObjectMeta{Name: SecurityGroupName(w.db.UID), Namespace: w.namespace}, Spec: v1alpha1.SecurityGroupSpec{Egress: []v1alpha1.SecurityGroupRule{{Protocol: "all", CIDR: "10.9.0.0/16"}}}}
+	create(t, w.c, foreign)
+	w.reconcile()
+	if w.reason() != ReasonNameTaken {
+		t.Fatalf("reason %s", w.reason())
+	}
+	var stored v1alpha1.SecurityGroup
+	must(t, w.c.Get(ctx, client.ObjectKeyFromObject(foreign), &stored))
+	if len(stored.Spec.Ingress) != 0 || stored.Spec.Egress[0].CIDR != "10.9.0.0/16" || len(stored.OwnerReferences) != 0 {
+		t.Fatalf("the foreign group was changed: %+v", stored.Spec)
+	}
+}
+
+func TestAnExistingVIPServiceWithoutTheAnnotationIsAdoptedOrReported(t *testing.T) {
+	w := newWorld(t, nil)
+	ctx := context.Background()
+	mine, _ := VIPService(*w.db, Project{Namespace: w.namespace, Tenant: "acme", Name: "web"}, "10.1.1.1", 5432)
+	unstructured.RemoveNestedField(mine.Object, "metadata", "annotations")
+	must(t, w.c.Create(ctx, mine))
+	w.reconcile()
+	var service corev1.Service
+	must(t, w.c.Get(ctx, client.ObjectKey{Namespace: PlatformNamespace, Name: VIPName(w.db.UID)}, &service))
+	if service.Annotations[annotationKubeVIP] == "" {
+		t.Fatal("the VIP Service of the database was not adopted")
+	}
+	must(t, w.c.Delete(ctx, &service))
+	foreign := &corev1.Service{ObjectMeta: metav1.ObjectMeta{Name: VIPName(w.db.UID), Namespace: PlatformNamespace}, Spec: corev1.ServiceSpec{Ports: []corev1.ServicePort{{Port: 80}}}}
+	create(t, w.c, foreign)
+	w.reconcile()
+	if w.reason() != ReasonNameTaken {
+		t.Fatalf("reason %s", w.reason())
+	}
+}
