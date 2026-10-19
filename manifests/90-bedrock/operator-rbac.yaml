@@ -738,3 +738,10 @@ rules:
   - list
   - patch
   - watch
+- apiGroups:
+  - ""
+  resources:
+  - secrets
+  verbs:
+  - list
+  - update

@@ -98,6 +98,7 @@ func fixedRules() []rbacv1.PolicyRule {
 		{APIGroups: []string{v1alpha1.GroupVersion.Group}, Resources: bedrockResources(), Verbs: standardVerbs()},
 		{APIGroups: []string{""}, Resources: []string{"nodes"}, Verbs: []string{"get", "list", "patch", "update", "watch"}},
 		{APIGroups: []string{""}, Resources: []string{"pods"}, Verbs: []string{"delete", "get", "list", "watch"}},
+		{APIGroups: []string{""}, Resources: []string{"secrets"}, Verbs: []string{"list", "update"}},
 		{APIGroups: []string{""}, Resources: []string{"pods/eviction"}, Verbs: []string{"create"}},
 		{APIGroups: []string{""}, Resources: []string{"pods/exec"}, Verbs: []string{"create", "get"}},
 		{APIGroups: []string{""}, Resources: []string{"events"}, Verbs: []string{"create", "patch"}},
