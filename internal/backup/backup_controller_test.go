@@ -617,3 +617,43 @@ func TestBackupUnlabelsAVolumeThatLeftTheVM(t *testing.T) {
 		t.Fatalf("attached volume labels %v %v", kept.Labels, err)
 	}
 }
+
+func TestBackupKeepsTheLabelWhileAnInstanceMountsTheVolume(t *testing.T) {
+	setLocation(t, "Available")
+	createVM(t, "mount-vm", "mount-data")
+	ctx := context.Background()
+	old := &v1alpha1.Volume{ObjectMeta: metav1.ObjectMeta{Name: "mount-old", Namespace: projectNamespace, Labels: map[string]string{BackupVMLabel: "mount-vm"}}, Spec: v1alpha1.VolumeSpec{SizeGi: 5}}
+	if err := k8sClient.Create(ctx, old); err != nil {
+		t.Fatal(err)
+	}
+	vmi := &unstructured.Unstructured{Object: map[string]any{
+		"apiVersion": "kubevirt.io/v1",
+		"kind":       "VirtualMachineInstance",
+		"metadata":   map[string]any{"name": "mount-vm", "namespace": projectNamespace},
+		"spec": map[string]any{
+			"domain":  map[string]any{"devices": map[string]any{}},
+			"volumes": []any{map[string]any{"name": "rootdisk", "persistentVolumeClaim": map[string]any{"claimName": "mount-old"}}},
+		},
+	}}
+	if err := k8sClient.Create(ctx, vmi); err != nil {
+		t.Fatal(err)
+	}
+	createVMB(t, "mount-once", v1alpha1.VirtualMachineBackupSpec{VMRef: "mount-vm"})
+	r := newBackupReconciler(testNow)
+	reconcileVMB(t, r, "mount-once")
+	reconcileVMB(t, r, "mount-once")
+	got := &v1alpha1.Volume{}
+	if err := k8sClient.Get(ctx, types.NamespacedName{Namespace: projectNamespace, Name: "mount-old"}, got); err != nil || got.Labels[BackupVMLabel] != "mount-vm" {
+		t.Fatalf("labels while mounted %v %v", got.Labels, err)
+	}
+	if err := k8sClient.Delete(ctx, vmi); err != nil {
+		t.Fatal(err)
+	}
+	reconcileVMB(t, r, "mount-once")
+	if err := k8sClient.Get(ctx, types.NamespacedName{Namespace: projectNamespace, Name: "mount-old"}, got); err != nil {
+		t.Fatal(err)
+	}
+	if _, labeled := got.Labels[BackupVMLabel]; labeled {
+		t.Fatalf("labels after stop %v", got.Labels)
+	}
+}

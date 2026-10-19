@@ -997,3 +997,36 @@ func TestVMEvictionStrategyFollowsTheSetting(t *testing.T) {
 		t.Fatalf("own %q", got)
 	}
 }
+
+func bootOnly(volume string) func(*v1alpha1.VirtualMachine) {
+	return func(vm *v1alpha1.VirtualMachine) {
+		bootFrom(volume)(vm)
+		vm.Spec.Disks = nil
+	}
+}
+
+func TestAVolumeStaysWithTheInstanceThatMountsIt(t *testing.T) {
+	c, _ := startEnv(t)
+	ns := seedPlatform(t, c)
+	readyVolume(t, c, ns, "boot1")
+	readyVolume(t, c, ns, "boot2")
+	r := newVMReconciler(c)
+	createVM(t, c, ns, "a-vm", bootOnly("boot1"))
+	reconcileVM(t, r, ns, "a-vm")
+	vmi := mountingInstance(t, c, ns, "a-vm", "boot1")
+	vm := getVM(t, c, ns, "a-vm")
+	vm.Spec.Running = false
+	vm.Spec.RootDisk.VolumeRef = "boot2"
+	must(t, c.Update(context.Background(), &vm))
+	reconcileVM(t, r, ns, "a-vm")
+	createVM(t, c, ns, "b-vm", bootOnly("boot1"))
+	reconcileVM(t, r, ns, "b-vm")
+	requireReason(t, getVM(t, c, ns, "b-vm"), "VolumeInUse")
+	requireAbsent(t, c, kubeVirtVMGVK, ns, "b-vm")
+	must(t, c.Delete(context.Background(), vmi))
+	reconcileVM(t, r, ns, "a-vm")
+	reconcileVM(t, r, ns, "b-vm")
+	if claim := bootClaimName(t, c, ns, "b-vm"); claim != "boot1" {
+		t.Fatalf("root claim %q", claim)
+	}
+}

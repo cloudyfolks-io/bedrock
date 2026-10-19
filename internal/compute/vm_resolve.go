@@ -326,7 +326,11 @@ func (r *VirtualMachineReconciler) attachableVolume(ctx context.Context, vm v1al
 	if err != nil {
 		return volume, nil, err
 	}
-	if owner := VolumeOwner(vms.Items, name); owner != vm.Name {
+	owner, err := OwnerOf(ctx, r.Client, vms.Items, vm.Namespace, name)
+	if err != nil {
+		return volume, nil, err
+	}
+	if owner != vm.Name {
 		return volume, gateOf(ReasonVolumeInUse, "the volume %q is used by %q", name, owner), nil
 	}
 	gate, err := r.usable(ctx, volume)

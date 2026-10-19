@@ -44,13 +44,9 @@ func (r *VolumeReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctr
 	if err := r.Client.List(ctx, &vms, client.InNamespace(volume.Namespace)); err != nil {
 		return ctrl.Result{}, err
 	}
-	var err error
-	owner := VolumeOwner(vms.Items, volume.Name)
-	if owner == "" {
-		owner, err = r.mountedBy(ctx, volume)
-		if err != nil {
-			return ctrl.Result{}, err
-		}
+	owner, err := OwnerOf(ctx, r.Client, vms.Items, volume.Namespace, volume.Name)
+	if err != nil {
+		return ctrl.Result{}, err
 	}
 	if !volume.DeletionTimestamp.IsZero() {
 		return ctrl.Result{}, r.release(ctx, volume, owner)
@@ -77,14 +73,22 @@ func (r *VolumeReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctr
 	return ctrl.Result{}, r.writeStatus(ctx, volume, done)
 }
 
-func (r *VolumeReconciler) mountedBy(ctx context.Context, volume v1alpha1.Volume) (string, error) {
+func OwnerOf(ctx context.Context, c client.Reader, vms []v1alpha1.VirtualMachine, namespace, volume string) (string, error) {
+	mounted, err := MountingInstance(ctx, c, namespace, volume)
+	if err != nil || mounted != "" {
+		return mounted, err
+	}
+	return VolumeOwner(vms, volume), nil
+}
+
+func MountingInstance(ctx context.Context, c client.Reader, namespace, claim string) (string, error) {
 	instances := &unstructured.UnstructuredList{}
 	instances.SetGroupVersionKind(kubeVirtVMIGVK.GroupVersion().WithKind("VirtualMachineInstanceList"))
-	if err := r.Client.List(ctx, instances, client.InNamespace(volume.Namespace)); err != nil {
+	if err := c.List(ctx, instances, client.InNamespace(namespace)); err != nil {
 		return "", client.IgnoreNotFound(ignoreNoMatch(err))
 	}
 	for index := range instances.Items {
-		if mountsClaim(&instances.Items[index], volume.Name) {
+		if mountsClaim(&instances.Items[index], claim) {
 			return instances.Items[index].GetName(), nil
 		}
 	}
