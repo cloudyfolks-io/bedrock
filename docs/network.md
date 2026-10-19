@@ -282,12 +282,14 @@ The Settings `network.bgp.bfd`, `network.bgp.hold-time`, `network.bgp.keepalive-
 Bedrock writes them to the `BgpConf` named `bedrock`.
 Bedrock updates the `BgpConf` when one of them changes.
 The advertise filter limits the routes that the agent sends to the peers.
-When the filter is empty, the agent sends all routes except the load balancer plane.
+When the filter is empty, Bedrock writes no filter.
+Fabric then advertises only the NAT addresses of the ElasticIPs, and the load balancer plane is not among them.
 The load balancer plane is the range of `network.load-balancer.cidr`.
-Every Network uses the same range, so the agent never advertises it.
-Bedrock removes the plane from the filter before it writes the `BgpConf`, with an empty filter and with a filter that you set.
+Every Network uses the same range, so the agent must never advertise it.
+When you set a filter, Bedrock removes the plane from it before it writes the `BgpConf`.
 The `BgpConf` can therefore show more entries than the Setting holds.
 An entry that overlaps the plane is split into the parts outside the plane, and an entry inside the plane is dropped.
+When nothing is left, the filter is the single entry `0.0.0.0/32`, which matches no route.
 
 Do not change `network.eip-mode` on a cluster that has ElasticIPs.
 The mode is an install-time choice.
@@ -468,9 +470,6 @@ Bedrock deletes the old `Vip` and writes a new one with a new name.
 Update every client, DNS record and firewall rule that holds the old address.
 List the addresses before the upgrade with `kubectl get vips -l network.bedrock.cloudyfolks.io/managed=true`.
 A cluster that runs no internal LoadBalancer has no change.
-
-With BGP, an empty `network.bgp.advertise-filter` now renders as a list of entries that holds every route except the load balancer plane.
-Set the filter to the prefixes that you want to advertise.
 
 ## Inspect Fabric
 

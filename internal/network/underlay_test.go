@@ -10,6 +10,7 @@ import (
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 
 	"github.com/cloudyfolks-io/bedrock/api/v1alpha1"
+	"github.com/cloudyfolks-io/bedrock/internal/network/fabric"
 )
 
 func configOf(t *testing.T, values map[string]string) Config {
@@ -211,8 +212,10 @@ func TestRenderUnderlayBGPConfSessionDefaults(t *testing.T) {
 	if !reflect.DeepEqual(peerBFD(spec), []any{true, true}) || spec["holdTime"] != "9s" || spec["keepaliveTime"] != "3s" || spec["gracefulRestart"] != true {
 		t.Fatalf("spec %v", spec)
 	}
-	if _, found := spec["redistributeTables"]; found {
-		t.Fatalf("redistributeTables must be absent by default: %v", spec)
+	for _, key := range []string{"advertiseFilter", "redistributeTables"} {
+		if _, found := spec[key]; found {
+			t.Fatalf("%s must be absent by default: %v", key, spec)
+		}
 	}
 }
 
@@ -226,12 +229,22 @@ func advertisedFilter(t *testing.T, spec map[string]any) []string {
 	return filter
 }
 
-func TestRenderUnderlayBGPConfDeniesTheLoadBalancerPlaneWithAnEmptyFilter(t *testing.T) {
-	filter := advertisedFilter(t, bgpConfSpecOf(t, nil))
-	for route, want := range map[string]bool{"100.69.0.0/24": false, "100.69.0.5/32": false, "100.69.0.128/25": false, "100.69.1.5/32": true, "10.20.0.0/16": true, "91.246.31.20/32": true} {
-		if got := filterMatches(t, filter, netip.MustParsePrefix(route)); got != want {
-			t.Fatalf("%s advertised=%v want %v in %v", route, got, want, filter)
-		}
+func TestRenderUnderlayBGPConfLeavesAnEmptyFilterUnchanged(t *testing.T) {
+	cfg := configOf(t, bgpValues(nil))
+	peers := make([]fabric.BgpPeer, len(cfg.BGP.Peers))
+	for i, p := range cfg.BGP.Peers {
+		peers[i] = fabric.BgpPeer{Address: p.Address, ASN: p.ASN, BFD: cfg.BGP.BFD}
+	}
+	before := fabric.BgpConf(underlayMeta("BgpConf", bgpConfName), fabric.BgpConfSpec{
+		LocalASN: cfg.BGP.LocalASN, RouterID: cfg.BGP.RouterID, Peers: peers, NodeSelector: gatewayNodes(),
+		HoldTime: cfg.BGP.HoldTime, KeepaliveTime: cfg.BGP.KeepaliveTime, GracefulRestart: cfg.BGP.GracefulRestart,
+		AdvertiseFilter: cfg.BGP.AdvertiseFilter, RedistributeTables: cfg.BGP.RedistributeTables,
+	})
+	if got := bgpConf(cfg); !reflect.DeepEqual(got.Object, before.Object) {
+		t.Fatalf("got  %v\nwant %v", got.Object, before.Object)
+	}
+	if _, found := bgpConfSpecOf(t, nil)["advertiseFilter"]; found {
+		t.Fatal("an empty filter must stay absent")
 	}
 }
 
@@ -245,7 +258,7 @@ func TestRenderUnderlayBGPConfDeniesTheLoadBalancerPlaneWithACustomFilter(t *tes
 }
 
 func TestRenderUnderlayBGPConfDeniesTheConfiguredLoadBalancerPlane(t *testing.T) {
-	filter := advertisedFilter(t, bgpConfSpecOf(t, map[string]string{"network.load-balancer.cidr": "100.70.0.0/16", "network.load-balancer.gateway": "100.70.0.1"}))
+	filter := advertisedFilter(t, bgpConfSpecOf(t, map[string]string{"network.load-balancer.cidr": "100.70.0.0/16", "network.load-balancer.gateway": "100.70.0.1", "network.bgp.advertise-filter": "100.64.0.0/10 ge 32 le 32"}))
 	for route, want := range map[string]bool{"100.70.3.5/32": false, "100.69.0.5/32": true} {
 		if got := filterMatches(t, filter, netip.MustParsePrefix(route)); got != want {
 			t.Fatalf("%s advertised=%v want %v in %v", route, got, want, filter)

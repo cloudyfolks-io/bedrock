@@ -7,10 +7,7 @@ import (
 	"strings"
 )
 
-const (
-	allRoutes = "0.0.0.0/0 ge 0 le 32"
-	noRoutes  = "0.0.0.0/32"
-)
+const noRoutes = "0.0.0.0/32"
 
 type filterEntry struct {
 	prefix netip.Prefix
@@ -79,7 +76,7 @@ func splitAround(entry filterEntry, hole netip.Prefix) []filterEntry {
 
 func FilterWithout(filter []string, hole netip.Prefix) []string {
 	if len(filter) == 0 {
-		filter = []string{allRoutes}
+		return nil
 	}
 	var kept []string
 	for _, text := range filter {

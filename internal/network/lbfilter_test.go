@@ -78,16 +78,20 @@ func TestFilterWithoutDeniesThePlaneInACustomFilter(t *testing.T) {
 	}
 }
 
-func TestFilterWithoutDeniesThePlaneInAnEmptyFilter(t *testing.T) {
-	plane := netip.MustParsePrefix("100.69.0.0/24")
-	got := FilterWithout(nil, plane)
-	if len(got) == 0 {
-		t.Fatal("an empty filter must stay a filter that denies the plane")
+func TestFilterWithoutKeepsAnEmptyFilterEmpty(t *testing.T) {
+	if got := FilterWithout(nil, netip.MustParsePrefix("100.69.0.0/24")); len(got) != 0 {
+		t.Fatalf("got %v", got)
 	}
-	requirePlaneDenied(t, []string{"0.0.0.0/0 ge 0 le 32"}, got, plane)
+}
+
+func TestFilterWithoutDeniesThePlaneInAFilterOfAllRoutes(t *testing.T) {
+	plane := netip.MustParsePrefix("100.69.0.0/24")
+	all := []string{"0.0.0.0/0 ge 0 le 32"}
+	got := FilterWithout(all, plane)
+	requirePlaneDenied(t, all, got, plane)
 	for _, route := range []string{"10.0.0.0/8", "91.246.31.20/32", "100.68.0.0/16", "100.70.0.0/24", "192.168.1.0/24"} {
 		if !filterMatches(t, got, netip.MustParsePrefix(route)) {
-			t.Fatalf("%s must still be advertised by %v", route, got)
+			t.Fatalf("%s must still match %v", route, got)
 		}
 	}
 }
@@ -115,7 +119,7 @@ func TestFilterWithoutNeverReturnsAnEmptyFilter(t *testing.T) {
 
 func TestFilterWithoutNeverWritesGeAtTheMaskLength(t *testing.T) {
 	plane := netip.MustParsePrefix("100.69.0.0/24")
-	for _, entry := range FilterWithout(nil, plane) {
+	for _, entry := range FilterWithout([]string{"0.0.0.0/0 ge 0 le 32"}, plane) {
 		fields := strings.Fields(entry)
 		base := netip.MustParsePrefix(fields[0])
 		if len(fields)%2 == 0 || base.Masked() != base {
