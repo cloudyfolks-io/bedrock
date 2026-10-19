@@ -1,0 +1,98 @@
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  annotations:
+    controller-gen.kubebuilder.io/version: v0.20.0
+  name: databaseclasses.bedrock.cloudyfolks.io
+spec:
+  group: bedrock.cloudyfolks.io
+  names:
+    kind: DatabaseClass
+    listKind: DatabaseClassList
+    plural: databaseclasses
+    singular: databaseclass
+  scope: Cluster
+  versions:
+  - additionalPrinterColumns:
+    - jsonPath: .spec.cpu
+      name: CPU
+      type: string
+    - jsonPath: .spec.memory
+      name: Memory
+      type: string
+    - jsonPath: .spec.highAvailability
+      name: HA
+      type: boolean
+    - jsonPath: .spec.enabled
+      name: Enabled
+      type: boolean
+    name: v1alpha1
+    schema:
+      openAPIV3Schema:
+        properties:
+          apiVersion:
+            description: |-
+              APIVersion defines the versioned schema of this representation of an object.
+              Servers should convert recognized schemas to the latest internal value, and
+              may reject unrecognized values.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources
+            type: string
+          kind:
+            description: |-
+              Kind is a string value representing the REST resource this object represents.
+              Servers may infer this from the endpoint the client submits requests to.
+              Cannot be updated.
+              In CamelCase.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds
+            type: string
+          metadata:
+            type: object
+          spec:
+            properties:
+              cpu:
+                anyOf:
+                - type: integer
+                - type: string
+                pattern: ^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$
+                x-kubernetes-int-or-string: true
+              enabled:
+                default: true
+                type: boolean
+              highAvailability:
+                default: false
+                type: boolean
+              maxStorageGi:
+                format: int32
+                minimum: 1
+                type: integer
+              memory:
+                anyOf:
+                - type: integer
+                - type: string
+                pattern: ^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$
+                x-kubernetes-int-or-string: true
+              minStorageGi:
+                format: int32
+                minimum: 1
+                type: integer
+            required:
+            - cpu
+            - enabled
+            - highAvailability
+            - maxStorageGi
+            - memory
+            - minStorageGi
+            type: object
+            x-kubernetes-validations:
+            - message: maxStorageGi must not be below minStorageGi
+              rule: self.maxStorageGi >= self.minStorageGi
+        required:
+        - spec
+        type: object
+        x-kubernetes-validations:
+        - message: the name must be a DNS label
+          rule: self.metadata.name.size() <= 63 && self.metadata.name.matches('^[a-z0-9]([-a-z0-9]*[a-z0-9])?$')
+    served: true
+    storage: true
+    subresources: {}
