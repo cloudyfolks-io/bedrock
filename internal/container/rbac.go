@@ -17,6 +17,7 @@ func OperatorRules() []rbacv1.PolicyRule {
 		rule("node.k8s.io", []string{"runtimeclasses"}, "get", "list", "watch"),
 		rule("", []string{"configmaps"}, "create", "get", "patch"),
 		rule("", []string{"pods"}, "list", "watch"),
+		rule("kubevirt.io", []string{"virtualmachineinstances"}, "list"),
 		rule("", []string{"secrets"}, "get"),
 		rule("bedrock.cloudyfolks.io", []string{"builds/finalizers", "containers/finalizers"}, "update"),
 	}

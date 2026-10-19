@@ -10,7 +10,6 @@ import (
 	storagev1 "k8s.io/api/storage/v1"
 	"k8s.io/apimachinery/pkg/api/equality"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
-	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/client-go/util/retry"
@@ -80,46 +79,11 @@ func (r *VolumeReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctr
 }
 
 func OwnerOf(ctx context.Context, c client.Reader, vms []v1alpha1.VirtualMachine, containers []v1alpha1.Container, namespace, volume string) (string, error) {
-	mounted, err := MountingInstance(ctx, c, namespace, volume)
+	mounted, err := container.MountingInstance(ctx, c, namespace, volume)
 	if err != nil || mounted != "" {
 		return mounted, err
 	}
 	return VolumeConsumer(vms, containers, volume), nil
-}
-
-func MountingInstance(ctx context.Context, c client.Reader, namespace, claim string) (string, error) {
-	instances := &unstructured.UnstructuredList{}
-	instances.SetGroupVersionKind(kubeVirtVMIGVK.GroupVersion().WithKind("VirtualMachineInstanceList"))
-	if err := c.List(ctx, instances, client.InNamespace(namespace)); err != nil {
-		return "", client.IgnoreNotFound(ignoreNoMatch(err))
-	}
-	for index := range instances.Items {
-		if mountsClaim(&instances.Items[index], claim) {
-			return instances.Items[index].GetName(), nil
-		}
-	}
-	return "", nil
-}
-
-func ignoreNoMatch(err error) error {
-	if meta.IsNoMatchError(err) {
-		return nil
-	}
-	return err
-}
-
-func mountsClaim(instance *unstructured.Unstructured, claim string) bool {
-	volumes, _, _ := unstructured.NestedSlice(instance.Object, "spec", "volumes")
-	for _, item := range volumes {
-		entry, ok := item.(map[string]any)
-		if !ok {
-			continue
-		}
-		if name, _, _ := unstructured.NestedString(entry, "persistentVolumeClaim", "claimName"); name == claim {
-			return true
-		}
-	}
-	return false
 }
 
 func (r *VolumeReconciler) addFinalizer(ctx context.Context, volume v1alpha1.Volume) (v1alpha1.Volume, error) {
