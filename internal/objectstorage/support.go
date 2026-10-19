@@ -91,10 +91,15 @@ func platformAdopt(obj *unstructured.Unstructured, project Project) *unstructure
 	return platform.Adopt(obj, project.Owner())
 }
 
-func LoadProject(ctx context.Context, c client.Client, namespace string) (Project, bool, error) {
-	var ns metav1.PartialObjectMetadata
+func namespaceMeta() *metav1.PartialObjectMetadata {
+	ns := &metav1.PartialObjectMetadata{}
 	ns.SetGroupVersionKind(schema.GroupVersionKind{Version: "v1", Kind: "Namespace"})
-	if err := c.Get(ctx, client.ObjectKey{Name: namespace}, &ns); err != nil {
+	return ns
+}
+
+func LoadProject(ctx context.Context, c client.Client, namespace string) (Project, bool, error) {
+	ns := namespaceMeta()
+	if err := c.Get(ctx, client.ObjectKey{Name: namespace}, ns); err != nil {
 		return Project{}, false, client.IgnoreNotFound(err)
 	}
 	labels := ns.GetLabels()

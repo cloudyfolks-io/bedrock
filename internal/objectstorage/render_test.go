@@ -16,15 +16,10 @@ func fixtureUser(spec v1alpha1.ObjectStorageUserSpec) *v1alpha1.ObjectStorageUse
 	return user
 }
 
-func ownerOf(kind, name, uid string) []any {
-	return []any{map[string]any{
-		"apiVersion":         "bedrock.cloudyfolks.io/v1alpha1",
-		"kind":               kind,
-		"name":               name,
-		"uid":                uid,
-		"controller":         true,
-		"blockOwnerDeletion": true,
-	}}
+func fixtureBucket(spec v1alpha1.ObjectStorageBucketSpec) *v1alpha1.ObjectStorageBucket {
+	bucket := &v1alpha1.ObjectStorageBucket{Spec: spec}
+	bucket.Name, bucket.Namespace, bucket.UID = "data", "acme-prod", types.UID("uid-2")
+	return bucket
 }
 
 func labelsOf(kind, name string) map[string]any {
@@ -73,23 +68,20 @@ func TestCredentialsSecretName(t *testing.T) {
 
 func TestCephUser(t *testing.T) {
 	user := fixtureUser(v1alpha1.ObjectStorageUserSpec{DisplayName: "App", Permission: "read"})
-	got, err := CephUser(user, "acme", "prod")
-	if err != nil {
-		t.Fatal(err)
-	}
+	got := CephUser(user, Project{Namespace: "acme-prod", Tenant: "acme", Name: "prod"})
 	want := map[string]any{
 		"apiVersion": "ceph.rook.io/v1",
 		"kind":       "CephObjectStoreUser",
 		"metadata": map[string]any{
-			"name":            "acme-prod.app",
-			"namespace":       "acme-prod",
-			"labels":          labelsOf("ObjectStorageUser", "app"),
-			"ownerReferences": ownerOf("ObjectStorageUser", "app", "uid-1"),
+			"name":        "acme-prod.app",
+			"namespace":   "rook-ceph",
+			"labels":      labelsOf("ObjectStorageUser", "app"),
+			"annotations": map[string]any{"bedrock.cloudyfolks.io/owner-uid": "uid-1", "bedrock.cloudyfolks.io/owner-namespace": "acme-prod"},
 		},
 		"spec": map[string]any{
-			"store":            "bedrock-rgw",
-			"clusterNamespace": "rook-ceph",
-			"displayName":      "App",
+			"store":       "bedrock-rgw",
+			"displayName": "acme-prod.app",
+			"accountRef":  map[string]any{"name": "acme-prod"},
 		},
 	}
 	if !reflect.DeepEqual(got.Object, want) {
@@ -97,14 +89,30 @@ func TestCephUser(t *testing.T) {
 	}
 }
 
-func TestCephUserDefaults(t *testing.T) {
-	plain, err := CephUser(fixtureUser(v1alpha1.ObjectStorageUserSpec{Permission: "read"}), "acme", "prod")
-	if err != nil {
-		t.Fatal(err)
-	}
-	spec := plain.Object["spec"].(map[string]any)
-	if spec["displayName"] != "acme-prod/app" {
+func TestCephUserSuspended(t *testing.T) {
+	user := fixtureUser(v1alpha1.ObjectStorageUserSpec{Permission: "read", Suspended: true})
+	spec := CephUser(user, Project{Namespace: "acme-prod", Tenant: "acme", Name: "prod"}).Object["spec"].(map[string]any)
+	if mask, found := spec["opMask"]; !found || !reflect.DeepEqual(mask, []any{}) {
 		t.Fatalf("spec %+v", spec)
+	}
+}
+
+func TestS3BucketName(t *testing.T) {
+	cases := []struct {
+		name, namespace, object, chosen, want string
+	}{
+		{"generated", "acme-prod", "data", "", "acme-prod-data"},
+		{"chosen", "acme-prod", "data", "acme-assets", "acme-assets"},
+		{"dots", "acme-prod", "logs.v2", "", "acme-prod-logs-v2"},
+		{"cut", "acme-prod", strings.Repeat("a", 80), "", "acme-prod-" + strings.Repeat("a", 53)},
+		{"cut at a dash", "acme-prod", strings.Repeat("a", 52) + "-bcd", "", "acme-prod-" + strings.Repeat("a", 52)},
+	}
+	for _, tc := range cases {
+		bucket := fixtureBucket(v1alpha1.ObjectStorageBucketSpec{BucketName: tc.chosen})
+		bucket.Namespace, bucket.Name = tc.namespace, tc.object
+		if got := S3BucketName(bucket); got != tc.want || len(got) > 63 {
+			t.Fatalf("%s: got %q", tc.name, got)
+		}
 	}
 }
 

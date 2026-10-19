@@ -36,7 +36,11 @@ func EnsureAccount(ctx context.Context, c client.Client, project Project) (Accou
 	if err := ssa.Apply(ctx, c, AccountObject(project), v1alpha1.ObjectStorageFieldManager); err != nil {
 		return Account{}, false, err
 	}
-	rook, found, err := getRook(ctx, c, cephObjectStoreAccountGVK, client.ObjectKey{Namespace: StoreNamespace, Name: AccountName(project.Namespace)})
+	return ReadAccount(ctx, c, project.Namespace)
+}
+
+func ReadAccount(ctx context.Context, c client.Client, namespace string) (Account, bool, error) {
+	rook, found, err := getRook(ctx, c, cephObjectStoreAccountGVK, client.ObjectKey{Namespace: StoreNamespace, Name: AccountName(namespace)})
 	if err != nil || !found || rookPhase(rook) != "Ready" {
 		return Account{}, false, err
 	}

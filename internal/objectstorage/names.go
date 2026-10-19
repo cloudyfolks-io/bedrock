@@ -11,9 +11,9 @@ const (
 	BucketClassName = "bucket"
 	Endpoint        = "http://rook-ceph-rgw-bedrock-rgw.rook-ceph.svc:80"
 	Region          = "us-east-1"
-	UserFinalizer   = "bedrock.cloudyfolks.io/object-storage-user"
 	AccessKeyKey    = "AccessKey"
 	SecretKeyKey    = "SecretKey"
+	EndpointKey     = "Endpoint"
 	MaxPolicyBytes  = 20480
 
 	AppliedVersioningAnnotation = "bedrock.cloudyfolks.io/applied-versioning"
