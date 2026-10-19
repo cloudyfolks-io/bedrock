@@ -131,6 +131,8 @@ rules:
   - authcodes/status
   - authrequests
   - authrequests/status
+  - builds
+  - builds/status
   - clusterconfigs
   - clusterimages
   - clusterimages/status
