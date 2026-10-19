@@ -452,6 +452,7 @@ rules:
   - monitoring.coreos.com
   resources:
   - alertmanagers
+  - podmonitors
   - prometheuses
   - prometheusrules
   - servicemonitors
@@ -534,6 +535,20 @@ rules:
   - backups
   - clusters
   - scheduledbackups
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - update
+  - watch
+- apiGroups:
+  - ps.percona.com
+  resources:
+  - perconaservermysqlbackups
+  - perconaservermysqlrestores
+  - perconaservermysqls
   verbs:
   - create
   - delete
