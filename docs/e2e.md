@@ -286,6 +286,10 @@ Then `hack/e2e-init.sh` creates this underlay before it starts the cluster.
 | veth pair | `bdrpub0` (host side) and `bdrpub0p` (peer side) |
 | network namespace | `bdrext`, holds `bdrpub0p` with the address `192.0.2.250/24` |
 | provider network | `192.0.2.0/24`, gateway `192.0.2.1`, interface `bdrpub0` |
+| services veth pair | `bdrsvc0` (host side) and `bdrsvc0p` (peer side, in `bdrext` with the address `203.0.113.250/24`) |
+| services provider network | `203.0.113.0/24`, gateway `203.0.113.1`, interface `bdrsvc0`, role `services`, `excludeIPs` `203.0.113.240..203.0.113.254` |
+
+The services provider network has no effect until the step `network_services_identity` sets the three services Settings.
 
 A ping from `bdrext` to an ElasticIP proves that OVN answers ARP on the provider network and that the NAT reaches the guest.
 The underlay does not prove gateway failover or BGP.
@@ -333,7 +337,7 @@ If a name changes in an area, change it in that file only.
 | `tenancy.sh` | The users and tokens. The tenant `acme` with its Network and owner role. The projects `web` and `data` with quota, the AAQ limit of five VMs, roles and policies. Workload and role checks. Quota edges. |
 | `images.sh` | The ClusterImage `cirros` from the bundle. An image upload through the proxy. |
 | `compute.sh` | An SSH key, a Volume, the SecurityGroup `web` and the VM `vm1`. Hot-plug and expand. A volume snapshot. The proxy actions and the console, which the Go test runs. |
-| `network.sh` | The provider network and the Network status. The fabric-frr agent. Subnet rules. The security group on the VM. A VM with a pinned address, a Subnet MTU and Subnet DNS servers. An ElasticIP in L2 mode with the ARP and ping proof. An ElasticIP without a provider network. The ElasticIP quota. A LoadBalancer and a DNSZone. Isolation rules. |
+| `network.sh` | The provider network and the Network status. The fabric-frr agent. Subnet rules. The security group on the VM. A VM with a pinned address, a Subnet MTU and Subnet DNS servers. An ElasticIP in L2 mode with the ARP and ping proof. An ElasticIP without a provider network. The ElasticIP quota. A LoadBalancer and a DNSZone. An InternetGateway, a NetworkPeering, an internal LoadBalancer and the services identity. Isolation rules. |
 | `container.sh` | The proof of the pod network: a hand-made Pod and a hand-made Deployment get the network metadata of a `Container`. Then the kind itself: the runtime gate, replicas, stop and start, a fixed address, autoscale, a Volume, a LoadBalancer target, logs, exec and restart through the proxy, and the cleanup. |
 | `build.sh` | The project roles on `builds` and `builds/logs`. A Build with a missing push Secret and a Build with a push Secret of the wrong type, with no Job. A Build in a cluster with no Kata, with no Job. The immutable spec. The deletion of every Build, with no child object and no Secret left. |
 | `clusters.sh` | The proof of the control plane: a hand-made k0smotron `Cluster` with the fields of the `KubernetesCluster` kind. Then the kind itself: the addon off, a cluster, a refused address, suspend and the ordered delete. |
@@ -458,7 +462,7 @@ The script needs `NS`, `PROJECT` and `LAB_CLUSTER_ADDRESS`.
 
 ## Network parity checks
 
-The steps `network_underlay`, `network_frr_agent`, `network_guest_parity`, `network_elastic_ip_pool_choice` and `network_elastic_ip_quota` in `hack/e2e/tenant/network.sh` check the features of `docs/network.md`.
+The steps `network_underlay`, `network_frr_agent`, `network_guest_parity`, `network_elastic_ip_pool_choice`, `network_elastic_ip_quota`, `network_internet_gateway`, `network_peering`, `network_internal_load_balancer` and `network_services_identity` in `hack/e2e/tenant/network.sh` check the features of `docs/network.md`.
 
 | Step | Check |
 | --- | --- |
@@ -467,6 +471,10 @@ The steps `network_underlay`, `network_frr_agent`, `network_guest_parity`, `netw
 | `network_guest_parity` | The Subnet `parity` has `mtu: 1350` and two `dnsServers`. The Fabric `Subnet` has `spec.mtu` 1350 and the DHCP options `mtu=1350` and `dns_server=198.51.100.53;198.51.100.54`. A VM that pins the gateway address has `NetworkReady=False` with the reason `AddressReserved`, and it has no pod. A VM that pins `10.100.16.50` runs, and the VM status, the launcher pod annotations `ip_address` and `allocated`, and the guest agree. |
 | `network_elastic_ip_pool_choice` | An ElasticIP with an empty `spec` is `Reserved`, has `status.providerNetwork` set to `public`, and has an address of the pool. |
 | `network_elastic_ip_quota` | The script sets `quota.elasticIPs` to the number of ElasticIPs of the tenant plus one. The first new ElasticIP is `Reserved`. The second has `QuotaExceeded`, no `status.providerNetwork` and no Fabric `OvnEip`. When the first is deleted, the second becomes `Reserved`. The script then sets the quota to its old value. |
+| `network_internet_gateway` | An ElasticIP with the target `InternetGateway` is `Attached`, and the InternetGateway is `Programmed` with one `OvnSnatRule` for the one range of the Network. The NAT table of the Vpc holds the address. A VM `igw-probe` has no ElasticIP, and its guest pings `192.0.2.250` in `bdrext`. The reply can only come back through the shared source address. |
+| `network_peering` | The step makes the Network `peer` with the range `10.101.0.0/16` and a Subnet, and a `NetworkPeering` of the two Networks. The peering is `Programmed` with a connect network from `169.254.0.0/16`. Both Vpcs list each other, and the tenant Vpc has the route to `10.101.0.0/16`. A VM `peer-probe` on the peer Network pings `vm1` across the peering. After the peering is deleted, both Vpcs have no `vpcPeerings` and no `staticRoutes`. |
+| `network_internal_load_balancer` | A LoadBalancer without an ElasticIP is `Programmed`. Its `status.address` is a `Vip` of the plane Subnet `acme-lb` (`100.69.0.0/24`, gateway `100.69.0.1`), the `Vip` has no type `switch_lb_vip`, and OVN holds the address with port 8080. |
+| `network_services_identity` | The step sets `network.services.provider-network` to `services`, `network.services.identity-range` to `203.0.113.240/29` and `network.services.resolver`. The Network `acme` gets `status.servicesIdentity` from the range. The Fabric `OvnEip` `acme-services-snat` has the same address, three `OvnSnatRule` objects exist, and the Vpc lists `provider-services`. The step then empties the three Settings. |
 
 The test VM `vm2` has no SSH key.
 Its user data is a shell script, and cirros runs it at boot.
