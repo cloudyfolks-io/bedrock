@@ -1,0 +1,59 @@
+fullnameOverride: harbor
+expose:
+  type: clusterIP
+  tls:
+    enabled: false
+externalURL: "https://${BEDROCK_REGISTRY_HOST}"
+existingSecretAdminPassword: harbor-admin
+existingSecretSecretKey: harbor-core-keys
+database:
+  type: external
+  external:
+    host: harbor-db-rw.bedrock-registry.svc
+    port: "5432"
+    username: harbor
+    coreDatabase: registry
+    existingSecret: harbor-db-credentials
+    sslmode: disable
+redis:
+  type: internal
+persistence:
+  enabled: true
+  persistentVolumeClaim:
+    redis:
+      storageClass: "${BEDROCK_REGISTRY_STORAGE_CLASS}"
+  imageChartStorage:
+    disableredirect: true
+    type: s3
+    s3:
+      existingSecret: bedrock-registry
+      region: us-east-1
+      bucket: "${BEDROCK_REGISTRY_BUCKET}"
+      regionendpoint: http://rook-ceph-rgw-bedrock-rgw.rook-ceph.svc:80
+      secure: false
+core:
+  secretName: harbor-token
+  existingSecret: harbor-core-keys
+  existingXsrfSecret: harbor-core-keys
+jobservice:
+  existingSecret: harbor-jobservice-keys
+  jobLoggers:
+    - database
+registry:
+  existingSecret: harbor-registry-keys
+  credentials:
+    username: harbor_registry_user
+    existingSecret: harbor-registry-credentials
+trivy:
+  enabled: false
+proxy:
+  httpProxy: "${BEDROCK_REGISTRY_HTTP_PROXY}"
+  httpsProxy: "${BEDROCK_REGISTRY_HTTP_PROXY}"
+  noProxy: 127.0.0.1,localhost,.local,.internal,.svc,.cluster.local,10.0.0.0/8
+  components:
+    - core
+    - jobservice
+metrics:
+  enabled: true
+  serviceMonitor:
+    enabled: true

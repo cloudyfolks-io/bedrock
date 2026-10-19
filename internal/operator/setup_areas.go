@@ -17,7 +17,7 @@ func setupAreas(mgr ctrl.Manager, bundle release.Bundle) error {
 
 func setupEachArea(mgr ctrl.Manager, bundle release.Bundle) error {
 	for _, setup := range []func(ctrl.Manager, release.Bundle) error{
-		setupTenancy, setupImages, setupCompute, setupContainer, setupNetwork, setupBackup, setupObjectStorage, setupAddons,
+		setupTenancy, setupImages, setupCompute, setupContainer, setupNetwork, setupBackup, setupObjectStorage, setupAddons, setupRegistry,
 	} {
 		if err := setup(mgr, bundle); err != nil {
 			return err

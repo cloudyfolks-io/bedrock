@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	appsv1 "k8s.io/api/apps/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -18,6 +19,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	"sigs.k8s.io/controller-runtime/pkg/handler"
 	"sigs.k8s.io/controller-runtime/pkg/log"
+	"sigs.k8s.io/controller-runtime/pkg/predicate"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	"github.com/cloudyfolks-io/bedrock/api/v1alpha1"
@@ -73,6 +75,32 @@ type gathered struct {
 	hosts    []v1alpha1.Host
 }
 
+func (r *Reconciler) facts(ctx context.Context, settings map[string]string) (Facts, error) {
+	var addons v1alpha1.AddonList
+	if err := r.Client.List(ctx, &addons); err != nil {
+		return Facts{}, err
+	}
+	enabled := map[string]bool{}
+	for _, addon := range addons.Items {
+		enabled[addon.Name] = addon.Spec.Enabled
+	}
+	return Facts{Settings: settings, EnabledAddons: enabled, CertManagerReady: r.certManagerReady(ctx)}, nil
+}
+
+func (r *Reconciler) certManagerReady(ctx context.Context) bool {
+	for _, name := range []string{"cert-manager", "cert-manager-webhook"} {
+		live := &unstructured.Unstructured{}
+		live.SetGroupVersionKind(appsv1.SchemeGroupVersion.WithKind("Deployment"))
+		if err := r.Client.Get(ctx, client.ObjectKey{Namespace: "cert-manager", Name: name}, live); err != nil {
+			return false
+		}
+		if !release.DefaultGate(live).Ready {
+			return false
+		}
+	}
+	return true
+}
+
 func (r *Reconciler) gather(ctx context.Context, addon v1alpha1.Addon, def Definition, known bool) (gathered, error) {
 	input := gathered{decision: DecisionInput{Known: known, Enabled: addon.Spec.Enabled}}
 	if !known {
@@ -99,6 +127,13 @@ func (r *Reconciler) gather(ctx context.Context, addon v1alpha1.Addon, def Defin
 	input.decision.ValuesErr = err
 	if def.Preflight != nil {
 		input.decision.Verdict = def.Preflight(input.hosts)
+	}
+	if def.Check != nil {
+		facts, err := r.facts(ctx, input.settings)
+		if err != nil {
+			return input, err
+		}
+		input.decision.Verdict = def.Check(facts)
 	}
 	return input, nil
 }
@@ -140,6 +175,11 @@ func (r *Reconciler) apply(ctx context.Context, def Definition, input gathered) 
 	rendered, err := Render(def.Name, objects, vars)
 	if err != nil {
 		return outcome{ready: notReady("RenderFailed", err.Error())}
+	}
+	if def.Adjust != nil {
+		if rendered, err = def.Adjust(rendered, input.settings); err != nil {
+			return outcome{ready: notReady("RenderFailed", err.Error())}
+		}
 	}
 	previous, err := readInventory(ctx, r.Client, def.Name)
 	if err != nil {
@@ -287,7 +327,7 @@ func (r *Reconciler) writeStatus(ctx context.Context, addon v1alpha1.Addon, def 
 }
 
 func preflightCondition(def Definition, input gathered, generation int64) (metav1.Condition, bool) {
-	if def.Preflight == nil || !input.decision.Known {
+	if (def.Preflight == nil && def.Check == nil) || !input.decision.Known {
 		return metav1.Condition{}, false
 	}
 	verdict := input.decision.Verdict
@@ -324,5 +364,6 @@ func (r *Reconciler) SetupWithManager(mgr ctrl.Manager) error {
 		For(&v1alpha1.Addon{}).
 		Watches(&v1alpha1.Host{}, everyAddon, builder.WithPredicates(hostPreflightPredicate())).
 		Watches(&v1alpha1.Setting{}, everyAddon, builder.WithPredicates(readSettingPredicate())).
+		Watches(&v1alpha1.Addon{}, everyAddon, builder.WithPredicates(predicate.GenerationChangedPredicate{})).
 		Complete(r)
 }
