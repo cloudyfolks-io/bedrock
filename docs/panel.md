@@ -55,6 +55,7 @@ The server stays the authority. The panel only hides what the user cannot use.
 | `/p/:project/subnets` | Subnets |
 | `/p/:project/elastic-ips` | Elastic IPs, attach and detach |
 | `/p/:project/load-balancers` | Load balancers |
+| `/p/:project/internet-gateways` | Internet gateways |
 | `/p/:project/dns-zones` | DNS zones |
 | `/p/:project/security-groups` | Security groups |
 | `/p/:project/buckets` | Buckets |
@@ -117,7 +118,7 @@ A field that cannot change is read-only when the user edits an object.
 The panel sends `PUT` with the version that it read. A conflict asks the user to reload.
 The panel never sends `status`.
 A refused form shows the server messages on the right fields.
-Some fields use a list of objects. Subnets, load balancers and buckets offer a list of names.
+Some fields use a list of objects. Subnets, load balancers, internet gateways and buckets offer a list of names.
 The panel also checks cron schedules, SSH keys, IP addresses, rules and bucket policies before it sends.
 
 ## Upload an ISO

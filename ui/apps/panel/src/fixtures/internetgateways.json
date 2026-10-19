@@ -1,0 +1,35 @@
+{
+  "apiVersion": "bedrock.cloudyfolks.io/v1alpha1",
+  "kind": "InternetGatewayList",
+  "metadata": {
+    "resourceVersion": "100"
+  },
+  "items": [
+    {
+      "apiVersion": "bedrock.cloudyfolks.io/v1alpha1",
+      "kind": "InternetGateway",
+      "metadata": {
+        "name": "egress",
+        "uid": "uid-internetgateway-egress",
+        "resourceVersion": "100",
+        "creationTimestamp": "2026-10-01T10:00:00Z",
+        "namespace": "acme-web"
+      },
+      "spec": {
+        "networkRef": "acme",
+        "elasticIPRef": "web-ip"
+      },
+      "status": {
+        "conditions": [
+          {
+            "type": "Ready",
+            "status": "True",
+            "reason": "Programmed",
+            "message": "",
+            "lastTransitionTime": "2026-10-01T10:00:00Z"
+          }
+        ]
+      }
+    }
+  ]
+}

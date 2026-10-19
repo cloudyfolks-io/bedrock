@@ -70,6 +70,7 @@ function projectNavigation(project: string): NavSection[] {
         item("subnets", msg({ id: "nav.item.subnets", message: "Subnets" }), base),
         item("elastic-ips", msg({ id: "nav.item.elasticIps", message: "Elastic IPs" }), base),
         item("load-balancers", msg({ id: "nav.item.loadBalancers", message: "Load balancers" }), base),
+        item("internet-gateways", msg({ id: "nav.item.internetGateways", message: "Internet gateways" }), base),
         item("dns-zones", msg({ id: "nav.item.dnsZones", message: "DNS zones" }), base),
         item("security-groups", msg({ id: "nav.item.securityGroups", message: "Security groups" }), base),
       ],

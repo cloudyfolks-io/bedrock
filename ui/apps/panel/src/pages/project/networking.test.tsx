@@ -6,6 +6,7 @@ import { describe, expect, it } from "vitest";
 import type { Check, KubeList, KubeObject } from "../../api/types";
 import dnszones from "../../fixtures/dnszones.json";
 import elasticips from "../../fixtures/elasticips.json";
+import internetgateways from "../../fixtures/internetgateways.json";
 import loadbalancers from "../../fixtures/loadbalancers.json";
 import networks from "../../fixtures/networks.json";
 import securitygroups from "../../fixtures/securitygroups.json";
@@ -162,6 +163,31 @@ describe("LoadBalancers", () => {
     await user.type(port[0] as HTMLElement, "0");
     await user.tab();
     expect((port[0] as HTMLInputElement).value).toBe("1");
+  });
+});
+
+describe("InternetGateways", () => {
+  const gateways = asList(internetgateways);
+
+  it("lists the Network and the Elastic IP of a gateway", async () => {
+    renderAt("/p/web/internet-gateways", generic("internetgateways"), { [`GET ${ns}/internetgateways`]: { body: gateways } }, undefined, "/p/:project/internet-gateways");
+    const row = (await screen.findByRole("link", { name: "egress" })).closest("tr") as HTMLElement;
+    expect(within(row).getByText("acme")).toBeTruthy();
+    expect(within(row).getByText("web-ip")).toBeTruthy();
+  });
+
+  it("offers the Networks and the Elastic IPs as selects", async () => {
+    const user = userEvent.setup();
+    renderAt(
+      "/p/web/internet-gateways",
+      generic("internetgateways"),
+      { [`GET ${ns}/internetgateways`]: { body: gateways }, [`GET ${root}/networks`]: { body: asList(networks) }, [`GET ${ns}/elasticips`]: { body: asList(elasticips) }, [`GET ${ns}/subnets`]: { body: asList(subnets) } },
+      undefined,
+      "/p/:project/internet-gateways",
+    );
+    await user.click(await screen.findByRole("button", { name: "Create" }));
+    expect(await screen.findByRole("combobox", { name: /networkRef/ }, { timeout: 15000 })).toBeTruthy();
+    expect(await screen.findByRole("combobox", { name: /elasticIPRef/ }, { timeout: 15000 })).toBeTruthy();
   });
 });
 

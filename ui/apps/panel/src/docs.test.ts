@@ -29,6 +29,7 @@ const routes = [
   "/p/:project/subnets",
   "/p/:project/elastic-ips",
   "/p/:project/load-balancers",
+  "/p/:project/internet-gateways",
   "/p/:project/dns-zones",
   "/p/:project/security-groups",
   "/p/:project/buckets",

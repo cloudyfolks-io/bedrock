@@ -74,6 +74,7 @@ describe("shell", () => {
         "subnets",
         "elastic-ips",
         "load-balancers",
+        "internet-gateways",
         "dns-zones",
         "security-groups",
         "buckets",

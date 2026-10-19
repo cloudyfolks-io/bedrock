@@ -721,6 +721,9 @@ msgstr "المضيفون"
 msgid "nav.item.images"
 msgstr "الصور"
 
+msgid "nav.item.internetGateways"
+msgstr "بوابات الإنترنت"
+
 msgid "nav.item.loadBalancers"
 msgstr "موازنات الحمل"
 

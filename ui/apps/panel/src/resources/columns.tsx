@@ -193,6 +193,7 @@ const L = {
   providerNetwork: msg({ id: "col.providerNetwork", message: "Provider network" }),
   address: msg({ id: "col.address", message: "Address" }),
   elasticIp: msg({ id: "col.elasticIp", message: "Elastic IP" }),
+  subnet: msg({ id: "col.subnet", message: "Subnet" }),
   listeners: msg({ id: "col.listeners", message: "Listeners" }),
   zone: msg({ id: "col.zone", message: "Zone" }),
   records: msg({ id: "col.records", message: "Records" }),
@@ -265,6 +266,7 @@ export const columnsByPlural: Record<string, ColumnDef[]> = {
   subnets: [name, text("network", L.network, "spec.networkRef"), ltrText("cidr", L.cidr, "spec.cidr"), ltrText("gateway", L.gateway, "spec.gateway"), flag("dhcp", L.dhcp, "spec.dhcp"), text("dnsZone", L.dnsZone, "spec.dnsZoneRef")],
   elasticips: [name, { id: "providerNetwork", label: L.providerNetwork, render: (object) => poolOf(object) || dash, sortValue: poolOf }, { ...ltrText("address", L.address, "status.address") }, target, status],
   loadbalancers: [name, lbAddress, { id: "listeners", label: L.listeners, render: (object) => listenersOf(object) || dash, sortValue: listenersOf }, status],
+  internetgateways: [name, text("network", L.network, "spec.networkRef"), text("elasticIp", L.elasticIp, "spec.elasticIPRef"), text("subnet", L.subnet, "spec.subnetRef"), status],
   dnszones: [name, ltrText("zone", L.zone, "spec.zone"), { id: "records", label: L.records, render: (object) => (<span className="br-records">{(listAt(object, "spec.records") as { name: string; ips: string[] }[]).map((record) => (<Ltr key={record.name}>{`${record.name}: ${record.ips.join(", ")} `}</Ltr>))}</span>), sortValue: (object) => listAt(object, "spec.records").length }, status],
   securitygroups: [name, count("ingress", L.ingress, (object) => listAt(object, "spec.ingress").length), count("egress", L.egress, (object) => listAt(object, "spec.egress").length), status],
   objectstoragebuckets: [
