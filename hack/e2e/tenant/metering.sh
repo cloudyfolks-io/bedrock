@@ -254,3 +254,121 @@ metering_logs() {
   expect_equal 0 "$(loki_lines '{job="journald", tenant!=""}')" "journald lines under a tenant label"
   expect_equal 0 "$(loki_lines '{job="kube-apiserver-audit", tenant!=""}')" "audit lines under a tenant label"
 }
+
+reader_service_names() {
+  printf '%s\n' kube-prometheus-stack-prometheus:9090 loki:3100
+}
+
+reader_role_manifest() {
+  cat <<ROLE
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: metering-reader
+  namespace: monitoring
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: metering-reader
+  namespace: monitoring
+rules:
+  - apiGroups: [""]
+    resources: [services/proxy]
+    verbs: [get]
+    resourceNames: [kube-prometheus-stack-prometheus:9090, loki:3100]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: metering-reader
+  namespace: monitoring
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: metering-reader
+subjects:
+  - kind: ServiceAccount
+    name: metering-reader
+    namespace: monitoring
+ROLE
+}
+
+reader_ready_path() {
+  case "$1" in
+  loki:*) echo /ready ;;
+  *) echo /-/ready ;;
+  esac
+}
+
+reader_get() {
+  local token=$1 service=$2 path=$3
+  kubectl --kubeconfig=/dev/null --server="$(kubectl config view --minify -o jsonpath='{.clusters[0].cluster.server}')" \
+    --certificate-authority=/var/lib/k0s/pki/ca.crt --token="$token" \
+    get --raw "/api/v1/namespaces/monitoring/services/$service/proxy$path"
+}
+
+reader_probe_manifest() {
+  cat <<POD
+apiVersion: v1
+kind: Pod
+metadata:
+  name: reader-probe
+spec:
+  restartPolicy: Never
+  containers:
+    - name: probe
+      image: docker.io/amazon/aws-cli:2.37.10
+      imagePullPolicy: IfNotPresent
+      command:
+        - bash
+        - -c
+        - |
+          for target in loki:3100 kube-prometheus-stack-prometheus:9090 kube-prometheus-stack-grafana:80; do
+            if timeout 5 bash -c "exec 3<>/dev/tcp/\${target%%:*}.monitoring.svc/\${target##*:}"; then
+              echo "PROBE \${target%%:*} open"
+            else
+              echo "PROBE \${target%%:*} blocked"
+            fi
+          done
+POD
+}
+
+reader_probe_state() {
+  kubectl -n "$NS" logs reader-probe | sed -n "s/^PROBE $1 //p"
+}
+
+reader_probe_finished() {
+  [ "$(kubectl -n "$NS" get pod reader-probe -o jsonpath='{.status.phase}')" = Succeeded ]
+}
+
+reader_cleanup() {
+  kubectl -n "$NS" delete pod reader-probe --ignore-not-found
+  kubectl -n monitoring delete rolebinding,role,serviceaccount metering-reader --ignore-not-found
+}
+
+reader_checks() {
+  local token service
+  reader_probe_manifest | kubectl -n "$NS" apply -f -
+  retry_until 300 reader_probe_finished
+  expect_equal blocked "$(reader_probe_state loki)" "tenant pod reaching loki"
+  expect_equal blocked "$(reader_probe_state kube-prometheus-stack-prometheus)" "tenant pod reaching prometheus"
+  expect_equal open "$(reader_probe_state kube-prometheus-stack-grafana)" "tenant pod reaching grafana, the control that proves the pod has a network"
+  for service in $(reader_service_names); do
+    service_get monitoring "$service" "$(reader_ready_path "$service")"
+  done
+  reader_role_manifest | kubectl apply -f -
+  token=$(kubectl -n monitoring create token metering-reader)
+  for service in $(reader_service_names); do
+    reader_get "$token" "$service" "$(reader_ready_path "$service")"
+  done
+  expect_refused Forbidden reader_get "$token" kube-prometheus-stack-grafana:80 /
+  kubectl -n monitoring rollout status statefulset/prometheus-kube-prometheus-stack-prometheus --timeout=300s
+}
+
+metering_reader_policy() {
+  (
+    trap reader_cleanup EXIT
+    reader_checks
+  )
+}

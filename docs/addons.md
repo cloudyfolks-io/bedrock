@@ -253,6 +253,26 @@ kubectl -n monitoring port-forward svc/kube-prometheus-stack-grafana 3000:80
 
 Then open `http://127.0.0.1:3000` and sign in as `admin`.
 
+### Who can read Prometheus and Loki
+
+The NetworkPolicy `monitoring/bedrock-metrics-readers` selects the pods with
+the label `app.kubernetes.io/name` set to `prometheus` or `loki`. It
+allows ingress from these sources only:
+
+- Pods in the namespaces `monitoring` and `bedrock-system`. Grafana,
+  Alertmanager, the Prometheus operator, Alloy and the Bedrock proxy use
+  this path.
+- The join subnet `100.64.0.0/16`. The API server and the kubelet reach a
+  pod from the address of their node in this subnet. The API service proxy
+  and the readiness probe of Prometheus use this path. The policies of
+  `bedrock-authn` and `bedrock-proxy` use the same range.
+
+Egress stays open. A pod of a project cannot connect to Prometheus or Loki,
+because a project namespace is in neither source. Loki has no
+authentication, and the series name every tenant, so this policy is the
+only access control for both. When Loki is off, the second name selects no
+pod.
+
 Two dashboards come with Bedrock:
 
 - `Bedrock / Virtual machines` (`bedrock-vms`): VM state, CPU, memory,
