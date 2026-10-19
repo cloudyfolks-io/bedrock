@@ -140,6 +140,10 @@ rules:
   - containers/status
   - credentials
   - credentials/status
+  - databaseclasses
+  - databases
+  - databases/status
+  - databaseversions
   - devicerequests
   - devicerequests/status
   - dnszones
@@ -290,6 +294,7 @@ rules:
   resources:
   - certificates
   - clusterissuers
+  - issuers
   verbs:
   - create
   - delete
@@ -673,6 +678,7 @@ rules:
   - ""
   resources:
   - configmaps
+  - secrets
   - serviceaccounts
   - services
   verbs:
@@ -695,7 +701,6 @@ rules:
 - apiGroups:
   - ""
   resources:
-  - namespaces
   - pods/exec
   verbs:
   - create
@@ -714,6 +719,7 @@ rules:
 - apiGroups:
   - ""
   resources:
+  - namespaces
   - secrets
   verbs:
   - create
