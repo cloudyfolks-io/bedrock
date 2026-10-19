@@ -94,8 +94,11 @@ msgstr "Backup"
 msgid "col.backupTarget"
 msgstr "Target"
 
+msgid "col.bucketName"
+msgstr "Bucket name"
+
 msgid "col.buckets"
-msgstr "Bucket quota"
+msgstr "Buckets"
 
 msgid "col.cidr"
 msgstr "CIDR"
@@ -181,6 +184,9 @@ msgstr "OS"
 msgid "col.owners"
 msgstr "Owners"
 
+msgid "col.permission"
+msgstr "Permission"
+
 msgid "col.phase"
 msgstr "Phase"
 
@@ -226,6 +232,9 @@ msgstr "Storage class"
 msgid "col.subnet"
 msgstr "Subnet"
 
+msgid "col.suspended"
+msgstr "Suspended"
+
 msgid "col.target"
 msgstr "Target"
 
@@ -238,8 +247,8 @@ msgstr "Tenant"
 msgid "col.type"
 msgstr "Type"
 
-msgid "col.user"
-msgstr "User"
+msgid "col.usage"
+msgstr "Used"
 
 msgid "col.value"
 msgstr "Value"

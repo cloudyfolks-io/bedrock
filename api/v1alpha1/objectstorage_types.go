@@ -5,30 +5,34 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
-type ObjectStorageUserQuota struct {
-	// +optional
-	Bytes *resource.Quantity `json:"bytes,omitempty"`
-	// +kubebuilder:validation:Minimum=0
-	// +optional
-	Buckets *int32 `json:"buckets,omitempty"`
-}
-
 type ObjectStorageUserSpec struct {
 	// +optional
 	DisplayName string `json:"displayName,omitempty"`
+	// +kubebuilder:validation:Enum=read;readWrite
+	Permission string `json:"permission"`
+	// +kubebuilder:validation:MaxItems=100
+	// +kubebuilder:validation:items:MaxLength=63
+	// +kubebuilder:validation:items:Pattern=`^[a-z0-9]([-a-z0-9]*[a-z0-9])?$`
+	// +listType=set
 	// +optional
-	Quota ObjectStorageUserQuota `json:"quota,omitempty"`
+	Buckets []string `json:"buckets,omitempty"`
+	// +optional
+	Suspended bool `json:"suspended,omitempty"`
 }
 
 type ObjectStorageUserStatus struct {
 	CommonStatus `json:",inline"`
 	// +optional
 	CredentialsSecret string `json:"credentialsSecret,omitempty"`
+	// +optional
+	ARN string `json:"arn,omitempty"`
 }
 
 // +kubebuilder:object:root=true
 // +kubebuilder:resource:scope=Namespaced
 // +kubebuilder:subresource:status
+// +kubebuilder:printcolumn:name="Permission",type=string,JSONPath=`.spec.permission`
+// +kubebuilder:printcolumn:name="Suspended",type=boolean,JSONPath=`.spec.suspended`
 // +kubebuilder:printcolumn:name="Display Name",type=string,JSONPath=`.spec.displayName`
 type ObjectStorageUser struct {
 	metav1.TypeMeta   `json:",inline"`
@@ -52,9 +56,11 @@ type ObjectStorageBucketQuota struct {
 	Objects *int64 `json:"objects,omitempty"`
 }
 
+// +kubebuilder:validation:XValidation:rule="has(self.bucketName) == has(oldSelf.bucketName) && (!has(self.bucketName) || self.bucketName == oldSelf.bucketName)",message="bucketName is immutable"
 type ObjectStorageBucketSpec struct {
-	// +kubebuilder:validation:MinLength=1
-	UserRef string `json:"userRef"`
+	// +kubebuilder:validation:Pattern=`^[a-z0-9][a-z0-9-]{1,61}[a-z0-9]$`
+	// +optional
+	BucketName string `json:"bucketName,omitempty"`
 	// +optional
 	Quota ObjectStorageBucketQuota `json:"quota,omitempty"`
 	// +optional
@@ -62,6 +68,19 @@ type ObjectStorageBucketSpec struct {
 	// +kubebuilder:validation:MaxLength=20480
 	// +optional
 	Policy string `json:"policy,omitempty"`
+	// +kubebuilder:validation:MaxItems=50
+	// +kubebuilder:validation:items:MaxLength=253
+	// +listType=set
+	// +optional
+	CORSOrigins []string `json:"corsOrigins,omitempty"`
+	// +optional
+	ForceDestroy bool `json:"forceDestroy,omitempty"`
+}
+
+type ObjectStorageBucketUsage struct {
+	Bytes     int64       `json:"bytes"`
+	Objects   int64       `json:"objects"`
+	SampledAt metav1.Time `json:"sampledAt"`
 }
 
 type ObjectStorageBucketStatus struct {
@@ -70,13 +89,16 @@ type ObjectStorageBucketStatus struct {
 	Endpoint string `json:"endpoint,omitempty"`
 	// +optional
 	BucketName string `json:"bucketName,omitempty"`
+	// +optional
+	Usage *ObjectStorageBucketUsage `json:"usage,omitempty"`
 }
 
 // +kubebuilder:object:root=true
 // +kubebuilder:resource:scope=Namespaced
 // +kubebuilder:subresource:status
-// +kubebuilder:printcolumn:name="User",type=string,JSONPath=`.spec.userRef`
 // +kubebuilder:printcolumn:name="Bucket",type=string,JSONPath=`.status.bucketName`
+// +kubebuilder:printcolumn:name="Bytes",type=integer,JSONPath=`.status.usage.bytes`
+// +kubebuilder:printcolumn:name="Objects",type=integer,JSONPath=`.status.usage.objects`
 type ObjectStorageBucket struct {
 	metav1.TypeMeta   `json:",inline"`
 	metav1.ObjectMeta `json:"metadata,omitempty"`

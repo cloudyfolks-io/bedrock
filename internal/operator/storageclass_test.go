@@ -146,7 +146,7 @@ func TestReplacingAStorageClassKeepsExistingVolumes(t *testing.T) {
 
 func renderedStorageClasses() []*unstructured.Unstructured {
 	var classes []*unstructured.Unstructured
-	for _, obj := range storageObjects(1, []v1alpha1.Host{osdHost("a", "/dev/sdb")}) {
+	for _, obj := range storageObjects(1, []v1alpha1.Host{osdHost("a", "/dev/sdb")}, nil) {
 		if obj.GetKind() == "StorageClass" {
 			classes = append(classes, obj)
 		}

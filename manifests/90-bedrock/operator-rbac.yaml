@@ -275,6 +275,7 @@ rules:
   - cephblockpools
   - cephclusters
   - cephfilesystems
+  - cephobjectstoreaccounts
   - cephobjectstores
   - cephobjectstoreusers
   verbs:
@@ -519,12 +520,8 @@ rules:
   resources:
   - objectbucketclaims
   verbs:
-  - create
-  - delete
   - get
   - list
-  - patch
-  - update
   - watch
 - apiGroups:
   - policy
