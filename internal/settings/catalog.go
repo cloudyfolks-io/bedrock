@@ -160,6 +160,7 @@ func Catalog() []Definition {
 		{"audit.level", "Metadata", "Audit level for read requests. Writes on Bedrock kinds always use RequestResponse.", oneOf("Metadata", "RequestResponse")},
 		{"loki.retention-days", "14", "Log retention in days when Loki is enabled.", intMin(1)},
 		{"kata.enabled", "true", "Initial state of the kata addon. Change the Addon object after install.", boolean},
+		{"container.runtime-class", "kata", "RuntimeClass of the pods of Container objects. An empty value sets no RuntimeClass: use it only on a cluster with no KVM, because a customer pod then shares the node kernel.", dnsLabelValue},
 		{"loki.enabled", "false", "Initial state of the loki addon. Change the Addon object after install.", boolean},
 		{"alertmanager.webhook-url", "", "Webhook that receives Alertmanager notifications.", httpURL},
 		{"images.refresh-schedule", "0 3 * * *", "Cron schedule for catalog image refresh.", free},

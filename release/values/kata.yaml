@@ -8,6 +8,14 @@ shims:
   disableAll: true
   qemu:
     enabled: true
+    runtimeClass:
+      overhead:
+        memory: 512Mi
+        cpu: 250m
+    dropIn: |
+      [hypervisor.qemu]
+      default_memory = 512
+      virtio_fs_extra_args = ["-o", "xattr"]
 defaultShim:
   amd64: qemu
   arm64: qemu

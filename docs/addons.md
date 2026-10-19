@@ -130,6 +130,26 @@ spec:
       command: ["sleep", "3600"]
 ```
 
+The RuntimeClass adds an overhead of 512Mi memory and 250m CPU to each pod.
+The quota of a project counts this overhead.
+The chart default is 320Mi.
+The values file `release/values/kata.yaml` sets the larger value through the chart value `shims.qemu.runtimeClass.overhead`.
+
+The same values file sets two options of the QEMU shim.
+The chart value `shims.qemu.dropIn` holds a Kata TOML drop-in.
+The chart puts it in the ConfigMap `kata-deploy-custom-configs`, and kata-deploy applies it to the `qemu` configuration as `50-user-overrides.toml`.
+
+| Option | Value | Reason |
+| --- | --- | --- |
+| `default_memory` | 512 | The guest starts with 512 MiB. The shipped default is 2048. |
+| `virtio_fs_extra_args` | `["-o", "xattr"]` | Extended attributes work in a volume that the guest shares with the host, for example an `emptyDir`. Tools that set an attribute, such as an image builder, need this. |
+
+The Setting `container.runtime-class` has the default `kata`.
+The controller of the `Container` kind uses its value as the `runtimeClassName` of each pod.
+An empty value sets no runtime class.
+Use an empty value only on a cluster with no KVM, for example the e2e cluster.
+A customer pod then shares the kernel of the node.
+
 When you turn kata off, Bedrock first deletes the DaemonSet. The kata pods
 clean the node when they stop. This can take 10 minutes. Bedrock removes
 the RBAC objects and the RuntimeClasses only after the last kata pod ends.
