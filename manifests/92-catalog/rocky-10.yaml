@@ -12,6 +12,8 @@ spec:
     family: rocky
     version: "10"
     preference: rhel.10
+    displayName: Rocky Linux 10
+    architecture: amd64
   source:
     http:
       url: https://dl.rockylinux.org/pub/rocky/10/images/x86_64/Rocky-10-GenericCloud-Base-10.2-20260525.0.x86_64.qcow2

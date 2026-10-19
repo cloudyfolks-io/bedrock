@@ -34,6 +34,12 @@ type ImageOS struct {
 	Version string `json:"version,omitempty"`
 	// +optional
 	Preference string `json:"preference,omitempty"`
+	// +kubebuilder:validation:MaxLength=128
+	// +optional
+	DisplayName string `json:"displayName,omitempty"`
+	// +kubebuilder:validation:Enum=amd64;arm64
+	// +optional
+	Architecture string `json:"architecture,omitempty"`
 }
 
 type ImageRegistrySource struct {

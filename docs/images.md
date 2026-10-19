@@ -197,6 +197,14 @@ The release has a catalog of `ClusterImage` objects.
 | `rocky-9`, `rocky-10` | disk | http, `dl.rockylinux.org`, with SHA-256 |
 | `virtio-win` | iso | registry, `quay.io/kubevirt/virtio-container-disk` |
 
+Each catalog image sets `spec.os.displayName` and `spec.os.architecture` (`amd64` or `arm64`).
+A client shows the display name to a user and filters the catalog by architecture.
+
+A `ClusterImage` can use any DNS subdomain as its name.
+A migrated image keeps its old identifier as the name, for example a lowercase UUID such as `0f8b2c1e-6d4a-4f35-9a7e-3b1c5d2e8f40`.
+The name must be lowercase.
+A client that stores this identifier can then read the image from Bedrock without a mapping table.
+
 Windows disk images are never part of the catalog.
 The `virtio-win` ISO holds the Windows drivers.
 

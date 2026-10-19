@@ -16,6 +16,7 @@ import (
 const (
 	storageNamespace   = "rook-ceph"
 	blockPoolName      = "bedrock-block"
+	blockImageFeatures = "layering,exclusive-lock,object-map,fast-diff,deep-flatten"
 	objectStoreName    = "bedrock-rgw"
 	bucketClassName    = "bucket"
 	bucketProvisioner  = "rook-ceph.ceph.rook.io/bucket"
@@ -210,12 +211,13 @@ func cephObjectStore(replicas, hosts int) *unstructured.Unstructured {
 
 func bucketStorageClass() *unstructured.Unstructured {
 	obj := &unstructured.Unstructured{Object: map[string]any{
-		"apiVersion":    "storage.k8s.io/v1",
-		"kind":          "StorageClass",
-		"metadata":      map[string]any{"name": bucketClassName},
-		"provisioner":   bucketProvisioner,
-		"parameters":    map[string]any{"objectStoreName": objectStoreName, "objectStoreNamespace": storageNamespace},
-		"reclaimPolicy": "Delete",
+		"apiVersion":        "storage.k8s.io/v1",
+		"kind":              "StorageClass",
+		"metadata":          map[string]any{"name": bucketClassName},
+		"provisioner":       bucketProvisioner,
+		"parameters":        map[string]any{"objectStoreName": objectStoreName, "objectStoreNamespace": storageNamespace},
+		"reclaimPolicy":     "Delete",
+		"volumeBindingMode": "Immediate",
 	}}
 	obj.SetLabels(map[string]string{"aws-s3/object": ""})
 	return obj
@@ -254,7 +256,7 @@ func blockStorageClass(name, reclaim string, isDefault bool) *unstructured.Unstr
 	parameters["clusterID"] = storageNamespace
 	parameters["pool"] = blockPoolName
 	parameters["imageFormat"] = "2"
-	parameters["imageFeatures"] = "layering"
+	parameters["imageFeatures"] = blockImageFeatures
 	parameters["csi.storage.k8s.io/fstype"] = "ext4"
 	return storageClass(name, rbdProvisioner, reclaim, isDefault, parameters)
 }
