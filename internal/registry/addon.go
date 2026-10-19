@@ -230,5 +230,9 @@ func (r *AddonReconciler) SetupWithManager(mgr ctrl.Manager) error {
 }
 
 func SetupWithManager(mgr ctrl.Manager) error {
-	return (&AddonReconciler{Client: mgr.GetClient(), S3: &s3.Client{}, Endpoint: objectstorage.Endpoint}).SetupWithManager(mgr)
+	runtime := &AddonReconciler{Client: mgr.GetClient(), S3: &s3.Client{}, Endpoint: objectstorage.Endpoint}
+	if err := runtime.SetupWithManager(mgr); err != nil {
+		return err
+	}
+	return (&HarborReconciler{Client: mgr.GetClient()}).SetupWithManager(mgr)
 }
