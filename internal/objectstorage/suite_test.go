@@ -72,6 +72,9 @@ func createNamespaces(ctx context.Context) error {
 	if err := create(StoreNamespace, nil); err != nil {
 		return err
 	}
+	if err := create(SystemNamespace, nil); err != nil {
+		return err
+	}
 	if err := create(unlabeledNamespace, nil); err != nil {
 		return err
 	}

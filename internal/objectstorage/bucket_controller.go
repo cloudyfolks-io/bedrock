@@ -12,9 +12,12 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/util/retry"
 	ctrl "sigs.k8s.io/controller-runtime"
+	"sigs.k8s.io/controller-runtime/pkg/builder"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
+	"sigs.k8s.io/controller-runtime/pkg/handler"
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
+	"sigs.k8s.io/controller-runtime/pkg/predicate"
 
 	"github.com/cloudyfolks-io/bedrock/api/v1alpha1"
 	"github.com/cloudyfolks-io/bedrock/internal/objectstorage/admin"
@@ -465,5 +468,8 @@ func (r *BucketReconciler) report(ctx context.Context, bucket *v1alpha1.ObjectSt
 }
 
 func (r *BucketReconciler) SetupWithManager(mgr ctrl.Manager) error {
-	return ctrl.NewControllerManagedBy(mgr).Named("objectstorage-bucket").For(&v1alpha1.ObjectStorageBucket{}).Complete(r)
+	return ctrl.NewControllerManagedBy(mgr).Named("objectstorage-bucket").
+		For(&v1alpha1.ObjectStorageBucket{}).
+		Watches(&v1alpha1.Setting{}, handler.EnqueueRequestsFromMapFunc(r.bucketsOfSetting), builder.WithPredicates(predicate.NewPredicateFuncs(objectStorageSetting))).
+		Complete(r)
 }

@@ -1,6 +1,8 @@
 package objectstorage
 
 import (
+	"context"
+
 	ctrl "sigs.k8s.io/controller-runtime"
 
 	"github.com/cloudyfolks-io/bedrock/internal/objectstorage/admin"
@@ -19,6 +21,11 @@ func SetupWithManager(mgr ctrl.Manager) error {
 	if err := mgr.Add(&Sweeper{Client: mgr.GetClient(), DryRun: true}); err != nil {
 		return err
 	}
-	buckets := &BucketReconciler{Client: mgr.GetClient(), S3: &s3.Client{}, Admin: &admin.Client{}, Endpoint: Endpoint}
+	rules := &RulesConfigReconciler{Client: mgr.GetClient()}
+	if err := rules.SetupWithManager(mgr); err != nil {
+		return err
+	}
+	loadRules := func(ctx context.Context) (Rules, error) { return LoadRules(ctx, mgr.GetClient()) }
+	buckets := &BucketReconciler{Client: mgr.GetClient(), S3: &s3.Client{}, Admin: &admin.Client{}, Endpoint: Endpoint, Rules: loadRules}
 	return buckets.SetupWithManager(mgr)
 }

@@ -13,6 +13,8 @@ type Rules struct {
 	ReservedPrefixes []string
 	CORSOrigins      []string
 	MaxBuckets       int
+	PublicHost       string
+	PublicAliases    []string
 }
 
 func DefaultRules() Rules {
