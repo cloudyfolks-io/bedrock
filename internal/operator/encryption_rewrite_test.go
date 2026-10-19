@@ -152,7 +152,7 @@ func TestARewriteFailureStallsTheRotationWithACondition(t *testing.T) {
 	cluster.Spec.Encryption.Action = v1alpha1.EncryptionActionRotate
 	createValid(t, c, cluster)
 	createEncryptionSecret(t, c, chain.one)
-	createControlPlane(t, c, "cp-1", encryption.Hash(chain.one))
+	createControlPlane(t, c, "cp-1", encryption.Hash(chain.one), 1)
 	createSecrets(t, c, "stall-a", 2)
 	driveToRewriting(t, c)
 
@@ -191,7 +191,7 @@ func TestAFailedHostSetsTheStalledCondition(t *testing.T) {
 	cluster.Spec.Encryption.Action = v1alpha1.EncryptionActionRotate
 	createValid(t, c, cluster)
 	createEncryptionSecret(t, c, chain.one)
-	createControlPlane(t, c, "cp-1", encryption.Hash(chain.one))
+	createControlPlane(t, c, "cp-1", encryption.Hash(chain.one), 1)
 	reconciler := encryptionReconciler(c)
 	for range 3 {
 		if _, err := reconciler.reconcileEncryption(ctx); err != nil {

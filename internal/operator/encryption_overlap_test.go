@@ -18,12 +18,12 @@ func TestRevertWaitsForAnApplyInFlight(t *testing.T) {
 	chain := newConfigChain(t)
 	h1, h2 := encryption.Hash(chain.added), encryption.Hash(chain.promoted)
 	hosts := []v1alpha1.Host{inFlightHost("cp-1", h2, h2), inFlightHost("cp-2", h1, h2), controlPlaneHost("cp-3", h1)}
-	got := nextRotation(rotationInput{Action: v1alpha1.EncryptionActionRevert, Status: phaseStatus(v1alpha1.RotationPromotingKey), Secret: chain.promoted, Hosts: hosts, Now: rotationNow, Random: rand.Reader})
+	got := decideRotation(rotationInput{Action: v1alpha1.EncryptionActionRevert, Status: phaseStatus(v1alpha1.RotationPromotingKey), Secret: chain.promoted, Hosts: hosts, Now: rotationNow, Random: rand.Reader})
 	if got.ClearAction || got.Secret != nil || got.Grant != "" || len(got.Revoke) != 0 || got.Status.Reverting || !strings.Contains(got.Status.Message, "cp-2") {
 		t.Fatalf("decision %+v", got)
 	}
 	hosts[1] = withHandled(inFlightHost("cp-2", h2, h2), h2)
-	proceed := nextRotation(rotationInput{Action: v1alpha1.EncryptionActionRevert, Status: phaseStatus(v1alpha1.RotationPromotingKey), Secret: chain.promoted, Hosts: hosts, Now: rotationNow, Random: rand.Reader})
+	proceed := decideRotation(rotationInput{Action: v1alpha1.EncryptionActionRevert, Status: phaseStatus(v1alpha1.RotationPromotingKey), Secret: chain.promoted, Hosts: hosts, Now: rotationNow, Random: rand.Reader})
 	if !proceed.ClearAction || !proceed.Status.Reverting || !slices.Equal(keysOf(t, proceed.Secret), []string{"key1", "key2"}) {
 		t.Fatalf("decision %+v", proceed)
 	}
@@ -38,7 +38,7 @@ func TestAHostWithAnotherGrantThanItsReportIsNotConverged(t *testing.T) {
 	chain := newConfigChain(t)
 	h1, h2 := encryption.Hash(chain.added), encryption.Hash(chain.promoted)
 	hosts := []v1alpha1.Host{inFlightHost("cp-1", h1, h2), controlPlaneHost("cp-2", h1)}
-	got := nextRotation(rotationInput{Status: phaseStatus(v1alpha1.RotationAddingKey), Secret: chain.added, Hosts: hosts, Now: rotationNow, Random: rand.Reader})
+	got := decideRotation(rotationInput{Status: phaseStatus(v1alpha1.RotationAddingKey), Secret: chain.added, Hosts: hosts, Now: rotationNow, Random: rand.Reader})
 	if got.Status.Phase != v1alpha1.RotationAddingKey || got.Grant != "" || len(got.Revoke) != 0 {
 		t.Fatalf("decision %+v", got)
 	}
@@ -49,7 +49,7 @@ func TestNoSecondGrantWhileAnEarlierGrantIsUnresolved(t *testing.T) {
 	h1, h2 := encryption.Hash(chain.added), encryption.Hash(chain.promoted)
 	hosts := []v1alpha1.Host{inFlightHost("cp-1", h2, h2), inFlightHost("cp-2", h2, "older"), controlPlaneHost("cp-3", h2)}
 	hosts[1].Status.Encryption.Hash = h1
-	got := nextRotation(rotationInput{Status: phaseStatus(v1alpha1.RotationPromotingKey), Secret: chain.promoted, Hosts: append(hosts, controlPlaneHost("cp-4", h1)), Now: rotationNow, Random: rand.Reader})
+	got := decideRotation(rotationInput{Status: phaseStatus(v1alpha1.RotationPromotingKey), Secret: chain.promoted, Hosts: append(hosts, controlPlaneHost("cp-4", h1)), Now: rotationNow, Random: rand.Reader})
 	if got.Grant != "" || !strings.Contains(got.Status.Message, "cp-2") {
 		t.Fatalf("decision %+v", got)
 	}
@@ -79,7 +79,7 @@ func TestRevertDuringAnApplyNeverOverlapsAndNeverRemovesEarly(t *testing.T) {
 		for _, name := range []string{"cp-1", "cp-2", "cp-3"} {
 			list = append(list, simulatedReport(name, hosts[name]))
 		}
-		decision := nextRotation(rotationInput{Action: action, Status: status, Secret: secret, Hosts: list, Now: rotationNow, Random: rand.Reader})
+		decision := decideRotation(rotationInput{Action: action, Status: status, Secret: secret, Hosts: list, Now: rotationNow, Random: rand.Reader})
 		if decision.ClearAction {
 			action = ""
 		}
