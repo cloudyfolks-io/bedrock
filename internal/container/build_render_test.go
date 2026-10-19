@@ -242,7 +242,7 @@ func TestGitCloneRunsFirstAsNonRootWithoutTheTokenInTheScriptOrURL(t *testing.T)
 		}
 	}
 	script := strings.Join(clone.Command, " ")
-	if !strings.Contains(script, "http.extraHeader") || !strings.Contains(script, "git clone --no-checkout") || !strings.Contains(script, "git checkout --detach \"$GIT_REVISION\"") {
+	if !strings.Contains(script, "http.${GIT_URL}.extraHeader") || !strings.Contains(script, "git clone --no-checkout") || !strings.Contains(script, "--end-of-options") || !strings.Contains(script, "git checkout --detach \"$resolved\" --") {
 		t.Fatalf("script %q", script)
 	}
 	if strings.Contains(script, "git.test") || strings.Contains(script, "@") {
@@ -553,4 +553,16 @@ func toJSON(t *testing.T, value map[string]any) string {
 		t.Fatal(err)
 	}
 	return string(raw)
+}
+
+func TestEveryBuildContainerKeepsTheEndOfItsLogAsTheTerminationMessage(t *testing.T) {
+	for _, in := range allBuildInputs() {
+		job, _ := mustRenderBuild(t, in)
+		pod := job.Spec.Template.Spec
+		for _, c := range append(append([]corev1.Container{}, pod.InitContainers...), pod.Containers...) {
+			if c.TerminationMessagePolicy != corev1.TerminationMessageFallbackToLogsOnError {
+				t.Errorf("%s %s: policy %q", in.Build.Spec.Type, c.Name, c.TerminationMessagePolicy)
+			}
+		}
+	}
 }

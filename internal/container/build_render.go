@@ -57,25 +57,27 @@ export GIT_CONFIG_VALUE_0=` + workspaceDir + `
 if [ -n "${GIT_TOKEN:-}" ]; then
   GIT_BASIC_AUTH=$(printf '%s:%s' "$GIT_USERNAME" "$GIT_TOKEN" | base64 | tr -d '\n')
   export GIT_CONFIG_COUNT=2
-  export GIT_CONFIG_KEY_1=http.extraHeader
+  export GIT_CONFIG_KEY_1="http.${GIT_URL}.extraHeader"
   export GIT_CONFIG_VALUE_1="Authorization: Basic ${GIT_BASIC_AUTH}"
 fi
 git clone --no-checkout -- "$GIT_URL" ` + workspaceDir + `
-git checkout --detach "$GIT_REVISION" --
+resolved=$(git rev-parse --verify --end-of-options "${GIT_REVISION}^{commit}" 2>/dev/null || git rev-parse --verify --end-of-options "origin/${GIT_REVISION}^{commit}")
+git checkout --detach "$resolved" --
 `
 
 type BuildInput struct {
-	Build         v1alpha1.Build
-	Labels        map[string]string
-	NIC           network.NIC
-	DNSServers    []string
-	GitImage      string
-	BuildKitImage string
-	BuilderImage  string
-	RunImage      string
-	Timeout       time.Duration
-	JobTTL        time.Duration
-	Mirrors       []settings.RegistryMirror
+	Build          v1alpha1.Build
+	Labels         map[string]string
+	NIC            network.NIC
+	DNSServers     []string
+	GitImage       string
+	BuildKitImage  string
+	BuilderImage   string
+	RunImage       string
+	Timeout        time.Duration
+	JobTTL         time.Duration
+	Mirrors        []settings.RegistryMirror
+	MirrorProblems []string
 }
 
 type Rendered struct {
@@ -214,6 +216,8 @@ func gitCloneContainer(in BuildInput) corev1.Container {
 		VolumeMounts:    []corev1.VolumeMount{workspaceMount()},
 		Resources:       tierOf(in.Build.Spec.Size).resources(),
 		SecurityContext: nonRootContext(),
+
+		TerminationMessagePolicy: corev1.TerminationMessageFallbackToLogsOnError,
 	}
 }
 
@@ -231,6 +235,8 @@ func buildContainer(in BuildInput) corev1.Container {
 		VolumeMounts:    buildkitMounts(in),
 		Resources:       tierOf(in.Build.Spec.Size).resources(),
 		SecurityContext: &corev1.SecurityContext{Privileged: ptr.To(true), RunAsUser: ptr.To(int64(0))},
+
+		TerminationMessagePolicy: corev1.TerminationMessageFallbackToLogsOnError,
 	}
 }
 
