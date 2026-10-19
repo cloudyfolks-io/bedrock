@@ -25,7 +25,7 @@ type Definition struct {
 }
 
 func Known() []Definition {
-	return []Definition{kataDefinition(), lokiDefinition(), clustersDefinition()}
+	return []Definition{kataDefinition(), lokiDefinition(), clustersDefinition(), cnpgDefinition()}
 }
 
 func Lookup(name string) (Definition, bool) {
@@ -43,6 +43,10 @@ func kataDefinition() Definition {
 
 func clustersDefinition() Definition {
 	return Definition{Name: Clusters, EnabledSetting: "clusters.enabled"}
+}
+
+func cnpgDefinition() Definition {
+	return Definition{Name: CNPG, EnabledSetting: "cnpg.enabled"}
 }
 
 func lokiDefinition() Definition {

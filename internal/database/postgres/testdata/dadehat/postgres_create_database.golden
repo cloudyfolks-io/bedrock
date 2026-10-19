@@ -1,0 +1,25 @@
+SET statement_timeout = '30000';
+SET idle_in_transaction_session_timeout = '30000';
+CREATE DATABASE "orders" OWNER "dbadmin" TEMPLATE template0 ENCODING 'UTF8' LC_COLLATE 'C.UTF-8' LC_CTYPE 'C.UTF-8';
+REVOKE CONNECT, TEMPORARY ON DATABASE "orders" FROM PUBLIC;
+GRANT CONNECT ON DATABASE "orders" TO "dbadmin";
+\connect "orders"
+SET statement_timeout = '30000';
+SET idle_in_transaction_session_timeout = '30000';
+DO $do$ BEGIN IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'orders_ro' AND rolcanlogin) THEN RAISE EXCEPTION 'a login role uses a group role name'; END IF; IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'orders_ro') THEN CREATE ROLE "orders_ro" NOLOGIN; END IF; END $do$;
+DO $do$ BEGIN IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'orders_rw' AND rolcanlogin) THEN RAISE EXCEPTION 'a login role uses a group role name'; END IF; IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'orders_rw') THEN CREATE ROLE "orders_rw" NOLOGIN; END IF; END $do$;
+DO $do$ BEGIN IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'orders_all' AND rolcanlogin) THEN RAISE EXCEPTION 'a login role uses a group role name'; END IF; IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'orders_all') THEN CREATE ROLE "orders_all" NOLOGIN; END IF; END $do$;
+GRANT CONNECT ON DATABASE "orders" TO "orders_ro", "orders_rw", "orders_all";
+GRANT USAGE ON SCHEMA public TO "orders_ro", "orders_rw", "orders_all";
+GRANT CREATE ON SCHEMA public TO "orders_all";
+GRANT SELECT ON ALL TABLES IN SCHEMA public TO "orders_ro", "orders_rw", "orders_all";
+GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO "orders_ro", "orders_rw", "orders_all";
+GRANT INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO "orders_rw", "orders_all";
+GRANT UPDATE ON ALL SEQUENCES IN SCHEMA public TO "orders_rw", "orders_all";
+GRANT ALL ON ALL TABLES IN SCHEMA public TO "orders_all";
+GRANT TEMPORARY ON DATABASE "orders" TO "orders_all";
+ALTER DEFAULT PRIVILEGES FOR ROLE "dbadmin" IN SCHEMA public GRANT SELECT ON TABLES TO "orders_ro", "orders_rw", "orders_all";
+ALTER DEFAULT PRIVILEGES FOR ROLE "dbadmin" IN SCHEMA public GRANT USAGE, SELECT ON SEQUENCES TO "orders_ro", "orders_rw", "orders_all";
+ALTER DEFAULT PRIVILEGES FOR ROLE "dbadmin" IN SCHEMA public GRANT INSERT, UPDATE, DELETE ON TABLES TO "orders_rw", "orders_all";
+ALTER DEFAULT PRIVILEGES FOR ROLE "dbadmin" IN SCHEMA public GRANT UPDATE ON SEQUENCES TO "orders_rw", "orders_all";
+ALTER DEFAULT PRIVILEGES FOR ROLE "dbadmin" IN SCHEMA public GRANT ALL ON TABLES TO "orders_all";

@@ -1,0 +1,45 @@
+{
+  "apiVersion": "bedrock.cloudyfolks.io/v1alpha1",
+  "kind": "DatabaseClassList",
+  "metadata": {
+    "resourceVersion": "100"
+  },
+  "items": [
+    {
+      "apiVersion": "bedrock.cloudyfolks.io/v1alpha1",
+      "kind": "DatabaseClass",
+      "metadata": {
+        "name": "small",
+        "uid": "uid-dbclass-small",
+        "resourceVersion": "100",
+        "creationTimestamp": "2026-10-01T09:00:00Z"
+      },
+      "spec": {
+        "cpu": "500m",
+        "memory": "1Gi",
+        "minStorageGi": 5,
+        "maxStorageGi": 100,
+        "highAvailability": false,
+        "enabled": true
+      }
+    },
+    {
+      "apiVersion": "bedrock.cloudyfolks.io/v1alpha1",
+      "kind": "DatabaseClass",
+      "metadata": {
+        "name": "small-ha",
+        "uid": "uid-dbclass-small-ha",
+        "resourceVersion": "101",
+        "creationTimestamp": "2026-10-01T09:00:00Z"
+      },
+      "spec": {
+        "cpu": "500m",
+        "memory": "1Gi",
+        "minStorageGi": 10,
+        "maxStorageGi": 200,
+        "highAvailability": true,
+        "enabled": true
+      }
+    }
+  ]
+}

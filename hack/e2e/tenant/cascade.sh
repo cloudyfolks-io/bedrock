@@ -20,6 +20,9 @@ owned_kinds=(
   kubernetesclusters.bedrock.cloudyfolks.io
   clusters.k0smotron.io
   jointokenrequests.k0smotron.io
+  clusters.postgresql.cnpg.io
+  objectstores.barmancloud.cnpg.io
+  certificates.cert-manager.io
 )
 
 owned_objects_gone() {

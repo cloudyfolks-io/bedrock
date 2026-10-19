@@ -105,6 +105,17 @@ msgstr "CIDR"
 
 msgid "col.connectCidr"
 msgstr "Connect network"
+msgid "col.class"
+msgstr "Class"
+
+msgid "col.cpu"
+msgstr "CPU"
+
+msgid "col.database"
+msgstr "Database"
+
+msgid "col.databaseName"
+msgstr "Database name"
 
 msgid "col.default"
 msgstr "Default"
@@ -136,11 +147,23 @@ msgstr "Enabled"
 msgid "col.endpoint"
 msgstr "Endpoint"
 
+msgid "col.engine"
+msgstr "Engine"
+
+msgid "col.eolDate"
+msgstr "End of life"
+
 msgid "col.external"
 msgstr "External"
 
 msgid "col.gateway"
 msgstr "Gateway"
+
+msgid "col.grants"
+msgstr "Grants"
+
+msgid "col.highAvailability"
+msgstr "High availability"
 
 msgid "col.image"
 msgstr "Image"
@@ -166,8 +189,17 @@ msgstr "Listeners"
 msgid "col.maintenance"
 msgstr "Maintenance"
 
+msgid "col.maxStorage"
+msgstr "Maximum storage"
+
 msgid "col.members"
 msgstr "Members"
+
+msgid "col.memory"
+msgstr "Memory"
+
+msgid "col.minStorage"
+msgstr "Minimum storage"
 
 msgid "col.name"
 msgstr "Name"
@@ -195,6 +227,9 @@ msgstr "Permission"
 
 msgid "col.phase"
 msgstr "Phase"
+
+msgid "col.policy"
+msgstr "On delete"
 
 msgid "col.projects"
 msgstr "Project quota"
@@ -255,6 +290,9 @@ msgstr "Type"
 
 msgid "col.usage"
 msgstr "Used"
+
+msgid "col.username"
+msgstr "User name"
 
 msgid "col.value"
 msgstr "Value"
@@ -736,6 +774,21 @@ msgstr "Catalog images"
 msgid "nav.item.containers"
 msgstr "Containers"
 
+msgid "nav.item.databaseClasses"
+msgstr "Database classes"
+
+msgid "nav.item.databaseSchemas"
+msgstr "Database schemas"
+
+msgid "nav.item.databaseUsers"
+msgstr "Database users"
+
+msgid "nav.item.databaseVersions"
+msgstr "Database versions"
+
+msgid "nav.item.databases"
+msgstr "Databases"
+
 msgid "nav.item.dnsZones"
 msgstr "DNS zones"
 
@@ -797,6 +850,9 @@ msgstr "Catalog"
 
 msgid "nav.section.compute"
 msgstr "Compute"
+
+msgid "nav.section.databases"
+msgstr "Databases"
 
 msgid "nav.section.infrastructure"
 msgstr "Infrastructure"

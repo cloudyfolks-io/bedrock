@@ -1,0 +1,268 @@
+[
+  {
+    "apiVersion": "v1",
+    "data": {
+      "haproxy.cfg": "global\n    maxconn 2048\ndefaults\n    mode tcp\n    timeout connect 5s\n    timeout client 1h\n    timeout server 1h\nfrontend db\n    bind :5432\n    default_backend gate\nbackend gate\n    server gate 100.66.16.2:5432 ssl crt /certs/tenant.pem ssl-min-ver TLSv1.2 ca-file /certs/ca.crt verify required sni str(0b0c0d0e-1111-4222-8333-444455556666.dbaas.internal) verifyhost 0b0c0d0e-1111-4222-8333-444455556666.dbaas.internal check check-ssl\nfrontend health\n    mode http\n    bind :8404\n    monitor-uri /healthz\n    monitor fail if { nbsrv(gate) lt 1 }\n"
+    },
+    "kind": "ConfigMap",
+    "metadata": {
+      "labels": {
+        "app.kubernetes.io/instance": "0b0c0d0e-1111-4222-8333-444455556666",
+        "app.kubernetes.io/managed-by": "bedrock",
+        "bedrock.cloudyfolks.io/kind": "Database",
+        "bedrock.cloudyfolks.io/name": "orders",
+        "bedrock.cloudyfolks.io/project": "web",
+        "bedrock.cloudyfolks.io/tenant": "acme"
+      },
+      "name": "orders-endpoint",
+      "namespace": "acme-web",
+      "ownerReferences": [
+        {
+          "apiVersion": "bedrock.cloudyfolks.io/v1alpha1",
+          "blockOwnerDeletion": true,
+          "controller": true,
+          "kind": "Database",
+          "name": "orders",
+          "uid": "0b0c0d0e-1111-4222-8333-444455556666"
+        }
+      ]
+    }
+  },
+  {
+    "apiVersion": "cert-manager.io/v1",
+    "kind": "Certificate",
+    "metadata": {
+      "labels": {
+        "app.kubernetes.io/instance": "0b0c0d0e-1111-4222-8333-444455556666",
+        "app.kubernetes.io/managed-by": "bedrock",
+        "bedrock.cloudyfolks.io/kind": "Database",
+        "bedrock.cloudyfolks.io/name": "orders",
+        "bedrock.cloudyfolks.io/project": "web",
+        "bedrock.cloudyfolks.io/tenant": "acme"
+      },
+      "name": "orders-endpoint",
+      "namespace": "acme-web",
+      "ownerReferences": [
+        {
+          "apiVersion": "bedrock.cloudyfolks.io/v1alpha1",
+          "blockOwnerDeletion": true,
+          "controller": true,
+          "kind": "Database",
+          "name": "orders",
+          "uid": "0b0c0d0e-1111-4222-8333-444455556666"
+        }
+      ]
+    },
+    "spec": {
+      "additionalOutputFormats": [
+        {
+          "type": "CombinedPEM"
+        }
+      ],
+      "commonName": "0b0c0d0e-1111-4222-8333-444455556666",
+      "duration": "43800h0m0s",
+      "issuerRef": {
+        "group": "cert-manager.io",
+        "kind": "ClusterIssuer",
+        "name": "bedrock-database-ca"
+      },
+      "privateKey": {
+        "algorithm": "ECDSA",
+        "rotationPolicy": "Always",
+        "size": 256
+      },
+      "renewBefore": "8760h0m0s",
+      "secretName": "orders-endpoint",
+      "secretTemplate": {
+        "annotations": {},
+        "labels": {
+          "app.kubernetes.io/instance": "0b0c0d0e-1111-4222-8333-444455556666",
+          "app.kubernetes.io/managed-by": "bedrock",
+          "bedrock.cloudyfolks.io/kind": "Database",
+          "bedrock.cloudyfolks.io/name": "orders",
+          "bedrock.cloudyfolks.io/project": "web",
+          "bedrock.cloudyfolks.io/tenant": "acme"
+        }
+      },
+      "usages": [
+        "digital signature",
+        "key encipherment",
+        "client auth"
+      ]
+    }
+  },
+  {
+    "apiVersion": "apps/v1",
+    "kind": "Deployment",
+    "metadata": {
+      "labels": {
+        "app.kubernetes.io/instance": "0b0c0d0e-1111-4222-8333-444455556666",
+        "app.kubernetes.io/managed-by": "bedrock",
+        "bedrock.cloudyfolks.io/kind": "Database",
+        "bedrock.cloudyfolks.io/name": "orders",
+        "bedrock.cloudyfolks.io/project": "web",
+        "bedrock.cloudyfolks.io/tenant": "acme"
+      },
+      "name": "orders-endpoint",
+      "namespace": "acme-web",
+      "ownerReferences": [
+        {
+          "apiVersion": "bedrock.cloudyfolks.io/v1alpha1",
+          "blockOwnerDeletion": true,
+          "controller": true,
+          "kind": "Database",
+          "name": "orders",
+          "uid": "0b0c0d0e-1111-4222-8333-444455556666"
+        }
+      ]
+    },
+    "spec": {
+      "replicas": 1,
+      "selector": {
+        "matchLabels": {
+          "app.kubernetes.io/component": "endpoint",
+          "app.kubernetes.io/instance": "0b0c0d0e-1111-4222-8333-444455556666"
+        }
+      },
+      "strategy": {
+        "type": "Recreate"
+      },
+      "template": {
+        "metadata": {
+          "annotations": {
+            "bedrock.cloudyfolks.io/config-hash": "8e698347d441ed10",
+            "default.acme-web.fabric.cloudyfolks.io/ip_address": "10.100.0.2",
+            "default.acme-web.fabric.cloudyfolks.io/port_security": "true",
+            "default.acme-web.fabric.cloudyfolks.io/security_groups": "acme-web-database-0b0c0d0e-04bddd387630",
+            "v1.multus-cni.io/default-network": "acme-web/default"
+          },
+          "labels": {
+            "app.kubernetes.io/component": "endpoint",
+            "app.kubernetes.io/instance": "0b0c0d0e-1111-4222-8333-444455556666",
+            "app.kubernetes.io/managed-by": "bedrock",
+            "bedrock.cloudyfolks.io/kind": "Database",
+            "bedrock.cloudyfolks.io/name": "orders",
+            "bedrock.cloudyfolks.io/project": "web",
+            "bedrock.cloudyfolks.io/tenant": "acme",
+            "sg.bedrock.cloudyfolks.io/database-0b0c0d0e": "true"
+          }
+        },
+        "spec": {
+          "automountServiceAccountToken": false,
+          "containers": [
+            {
+              "command": [
+                "haproxy",
+                "-f",
+                "/certs/haproxy.cfg"
+              ],
+              "image": "docker.io/library/haproxy:3.2-alpine@sha256:254e6370f01cd654e0744edf607c67f33777c1b6a9dc0d4b28bcba7171460122",
+              "livenessProbe": {
+                "failureThreshold": 3,
+                "httpGet": {
+                  "path": "/healthz",
+                  "port": 8404
+                },
+                "initialDelaySeconds": 15,
+                "periodSeconds": 10,
+                "timeoutSeconds": 3
+              },
+              "name": "haproxy",
+              "ports": [
+                {
+                  "containerPort": 5432,
+                  "name": "db"
+                }
+              ],
+              "readinessProbe": {
+                "failureThreshold": 3,
+                "httpGet": {
+                  "path": "/healthz",
+                  "port": 8404
+                },
+                "initialDelaySeconds": 2,
+                "periodSeconds": 10,
+                "timeoutSeconds": 3
+              },
+              "resources": {
+                "limits": {
+                  "cpu": "100m",
+                  "memory": "128Mi"
+                },
+                "requests": {
+                  "cpu": "100m",
+                  "memory": "128Mi"
+                }
+              },
+              "securityContext": {
+                "allowPrivilegeEscalation": false,
+                "capabilities": {
+                  "drop": [
+                    "ALL"
+                  ]
+                }
+              },
+              "volumeMounts": [
+                {
+                  "mountPath": "/certs",
+                  "name": "certs",
+                  "readOnly": true
+                }
+              ]
+            }
+          ],
+          "dnsConfig": {
+            "nameservers": [
+              "100.66.0.53"
+            ]
+          },
+          "dnsPolicy": "None",
+          "enableServiceLinks": false,
+          "runtimeClassName": "kata",
+          "securityContext": {
+            "fsGroup": 1000,
+            "runAsGroup": 1000,
+            "runAsNonRoot": true,
+            "runAsUser": 1000
+          },
+          "volumes": [
+            {
+              "name": "certs",
+              "projected": {
+                "defaultMode": 288,
+                "sources": [
+                  {
+                    "secret": {
+                      "items": [
+                        {
+                          "key": "tls-combined.pem",
+                          "path": "tenant.pem"
+                        },
+                        {
+                          "key": "ca.crt",
+                          "path": "ca.crt"
+                        }
+                      ],
+                      "name": "orders-endpoint"
+                    }
+                  },
+                  {
+                    "configMap": {
+                      "items": [
+                        {
+                          "key": "haproxy.cfg",
+                          "path": "haproxy.cfg"
+                        }
+                      ],
+                      "name": "orders-endpoint"
+                    }
+                  }
+                ]
+              }
+            }
+          ]
+        }
+      }
+    }
+  }
+]

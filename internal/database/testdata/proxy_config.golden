@@ -1,0 +1,17 @@
+global
+    maxconn 2048
+defaults
+    mode tcp
+    timeout connect 5s
+    timeout client 1h
+    timeout server 1h
+frontend db
+    bind :5432
+    default_backend gate
+backend gate
+    server gate 100.66.16.2:5432 ssl crt /certs/tenant.pem ssl-min-ver TLSv1.2 ca-file /certs/ca.crt verify required sni str(0b0c0d0e-1111-4222-8333-444455556666.dbaas.internal) verifyhost 0b0c0d0e-1111-4222-8333-444455556666.dbaas.internal check check-ssl
+frontend health
+    mode http
+    bind :8404
+    monitor-uri /healthz
+    monitor fail if { nbsrv(gate) lt 1 }

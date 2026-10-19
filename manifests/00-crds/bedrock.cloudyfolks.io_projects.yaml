@@ -88,6 +88,10 @@ spec:
                     - type: string
                     pattern: ^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$
                     x-kubernetes-int-or-string: true
+                  databases:
+                    format: int32
+                    minimum: 0
+                    type: integer
                   kubernetesClusters:
                     format: int32
                     minimum: 0
@@ -200,6 +204,10 @@ spec:
                     - type: string
                     pattern: ^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$
                     x-kubernetes-int-or-string: true
+                  databases:
+                    format: int32
+                    minimum: 0
+                    type: integer
                   kubernetesClusters:
                     format: int32
                     minimum: 0

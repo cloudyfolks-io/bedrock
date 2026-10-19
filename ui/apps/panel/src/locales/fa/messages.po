@@ -105,6 +105,17 @@ msgstr "CIDR"
 
 msgid "col.connectCidr"
 msgstr "شبکه اتصال"
+msgid "col.class"
+msgstr "کلاس"
+
+msgid "col.cpu"
+msgstr "پردازنده"
+
+msgid "col.database"
+msgstr "پایگاه داده"
+
+msgid "col.databaseName"
+msgstr "نام پایگاه داده"
 
 msgid "col.default"
 msgstr "پیش‌فرض"
@@ -136,11 +147,23 @@ msgstr "فعال"
 msgid "col.endpoint"
 msgstr "نقطه دسترسی"
 
+msgid "col.engine"
+msgstr "موتور"
+
+msgid "col.eolDate"
+msgstr "پایان پشتیبانی"
+
 msgid "col.external"
 msgstr "خارجی"
 
 msgid "col.gateway"
 msgstr "دروازه"
+
+msgid "col.grants"
+msgstr "دسترسی‌ها"
+
+msgid "col.highAvailability"
+msgstr "دسترس‌پذیری بالا"
 
 msgid "col.image"
 msgstr "تصویر"
@@ -166,8 +189,17 @@ msgstr "شنودکننده‌ها"
 msgid "col.maintenance"
 msgstr "نگهداری"
 
+msgid "col.maxStorage"
+msgstr "بیشترین فضای ذخیره‌سازی"
+
 msgid "col.members"
 msgstr "اعضا"
+
+msgid "col.memory"
+msgstr "حافظه"
+
+msgid "col.minStorage"
+msgstr "کمترین فضای ذخیره‌سازی"
 
 msgid "col.name"
 msgstr "نام"
@@ -195,6 +227,9 @@ msgstr "دسترسی"
 
 msgid "col.phase"
 msgstr "مرحله"
+
+msgid "col.policy"
+msgstr "هنگام حذف"
 
 msgid "col.projects"
 msgstr "سهمیه پروژه"
@@ -255,6 +290,9 @@ msgstr "نوع"
 
 msgid "col.usage"
 msgstr "مصرف‌شده"
+
+msgid "col.username"
+msgstr "نام کاربری"
 
 msgid "col.value"
 msgstr "مقدار"
@@ -736,6 +774,21 @@ msgstr "تصاویر کاتالوگ"
 msgid "nav.item.containers"
 msgstr "کانتینرها"
 
+msgid "nav.item.databaseClasses"
+msgstr "کلاس‌های پایگاه داده"
+
+msgid "nav.item.databaseSchemas"
+msgstr "اسکیماهای پایگاه داده"
+
+msgid "nav.item.databaseUsers"
+msgstr "کاربران پایگاه داده"
+
+msgid "nav.item.databaseVersions"
+msgstr "نسخه‌های پایگاه داده"
+
+msgid "nav.item.databases"
+msgstr "پایگاه‌های داده"
+
 msgid "nav.item.dnsZones"
 msgstr "ناحیه‌های DNS"
 
@@ -797,6 +850,9 @@ msgstr "کاتالوگ"
 
 msgid "nav.section.compute"
 msgstr "محاسبه"
+
+msgid "nav.section.databases"
+msgstr "پایگاه‌های داده"
 
 msgid "nav.section.infrastructure"
 msgstr "زیرساخت"

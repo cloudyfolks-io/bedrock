@@ -116,6 +116,18 @@ rules:
   - patch
   - watch
 - apiGroups:
+  - barmancloud.cnpg.io
+  resources:
+  - objectstores
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - update
+  - watch
+- apiGroups:
   - batch
   resources:
   - jobs
@@ -160,6 +172,14 @@ rules:
   - containers/status
   - credentials
   - credentials/status
+  - databaseclasses
+  - databases
+  - databases/status
+  - databaseschemas
+  - databaseschemas/status
+  - databaseusers
+  - databaseusers/status
+  - databaseversions
   - devicerequests
   - devicerequests/status
   - dnszones
@@ -316,6 +336,7 @@ rules:
   resources:
   - certificates
   - clusterissuers
+  - issuers
   verbs:
   - create
   - delete
@@ -561,6 +582,20 @@ rules:
   - update
   - watch
 - apiGroups:
+  - postgresql.cnpg.io
+  resources:
+  - backups
+  - clusters
+  - scheduledbackups
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - update
+  - watch
+- apiGroups:
   - rbac.authorization.k8s.io
   resources:
   - clusterrolebindings
@@ -726,6 +761,8 @@ rules:
   - ""
   resources:
   - configmaps
+  - persistentvolumeclaims
+  - resourcequotas
   - serviceaccounts
   - services
   verbs:
@@ -748,7 +785,16 @@ rules:
 - apiGroups:
   - ""
   resources:
-  - namespaces
+  - secrets
+  verbs:
+  - create
+  - delete
+  - get
+  - patch
+  - update
+- apiGroups:
+  - ""
+  resources:
   - pods/exec
   verbs:
   - create
@@ -768,6 +814,7 @@ rules:
   - ""
   resources:
   - configmaps
+  - namespaces
   - secrets
   verbs:
   - create

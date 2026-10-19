@@ -1,0 +1,51 @@
+{
+  "apiVersion": "bedrock.cloudyfolks.io/v1alpha1",
+  "kind": "DatabaseVersionList",
+  "metadata": {
+    "resourceVersion": "100"
+  },
+  "items": [
+    {
+      "apiVersion": "bedrock.cloudyfolks.io/v1alpha1",
+      "kind": "DatabaseVersion",
+      "metadata": {
+        "name": "postgresql-16",
+        "uid": "uid-dbversion-16",
+        "resourceVersion": "100",
+        "creationTimestamp": "2026-10-01T09:00:00Z"
+      },
+      "spec": {
+        "engine": "postgresql",
+        "major": "16",
+        "image": "ghcr.io/cloudnative-pg/postgresql:16.15-minimal-trixie@sha256:0000000000000000000000000000000000000000000000000000000000000000",
+        "port": 5432,
+        "enabled": true,
+        "eolDate": "2028-11-09",
+        "upgradeTo": [
+          "17",
+          "18"
+        ]
+      }
+    },
+    {
+      "apiVersion": "bedrock.cloudyfolks.io/v1alpha1",
+      "kind": "DatabaseVersion",
+      "metadata": {
+        "name": "postgresql-17",
+        "uid": "uid-dbversion-17",
+        "resourceVersion": "101",
+        "creationTimestamp": "2026-10-01T09:00:00Z"
+      },
+      "spec": {
+        "engine": "postgresql",
+        "major": "17",
+        "image": "ghcr.io/cloudnative-pg/postgresql:17.9-minimal-trixie@sha256:0000000000000000000000000000000000000000000000000000000000000000",
+        "port": 5432,
+        "enabled": true,
+        "upgradeTo": [
+          "18"
+        ]
+      }
+    }
+  ]
+}

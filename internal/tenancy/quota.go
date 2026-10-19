@@ -21,6 +21,7 @@ const (
 	resourceCountVMs        corev1.ResourceName = "count/virtualmachines.bedrock.cloudyfolks.io"
 	resourceCountContainers corev1.ResourceName = "count/containers.bedrock.cloudyfolks.io"
 	resourceCountClusters   corev1.ResourceName = "count/kubernetesclusters.bedrock.cloudyfolks.io"
+	resourceCountDatabases  corev1.ResourceName = "count/databases.bedrock.cloudyfolks.io"
 )
 
 type Decision struct {
@@ -90,6 +91,9 @@ func QuotaHard(quota v1alpha1.ProjectQuota) corev1.ResourceList {
 	if quota.KubernetesClusters != nil {
 		hard[resourceCountClusters] = *resource.NewQuantity(int64(*quota.KubernetesClusters), resource.DecimalSI)
 	}
+	if quota.Databases != nil {
+		hard[resourceCountDatabases] = *resource.NewQuantity(int64(*quota.Databases), resource.DecimalSI)
+	}
 	return hard
 }
 
@@ -112,6 +116,9 @@ func ProjectUsage(used corev1.ResourceList) v1alpha1.ProjectQuota {
 	}
 	if value, found := used[resourceCountClusters]; found {
 		usage.KubernetesClusters = ptr.To(int32(value.Value()))
+	}
+	if value, found := used[resourceCountDatabases]; found {
+		usage.Databases = ptr.To(int32(value.Value()))
 	}
 	return usage
 }

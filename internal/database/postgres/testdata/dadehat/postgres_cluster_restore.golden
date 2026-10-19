@@ -1,0 +1,214 @@
+[
+  {
+    "apiVersion": "barmancloud.cnpg.io/v1",
+    "kind": "ObjectStore",
+    "metadata": {
+      "labels": {
+        "app.kubernetes.io/instance": "0b0c0d0e-1111-4222-8333-444455556666",
+        "app.kubernetes.io/managed-by": "database-api",
+        "bedrock.cloudyfolks.com/environment": "staging",
+        "bedrock.cloudyfolks.com/project-id": "99999999-1111-4222-8333-444455556666"
+      },
+      "name": "0b0c0d0e-1111-4222-8333-444455556666",
+      "namespace": "dbaas"
+    },
+    "spec": {
+      "configuration": {
+        "destinationPath": "s3://dbaas-backups/0b0c0d0e-1111-4222-8333-444455556666/",
+        "endpointURL": "https://rgw.example.internal",
+        "s3Credentials": {
+          "accessKeyId": {
+            "key": "ACCESS_KEY_ID",
+            "name": "dbaas-backups-rgw"
+          },
+          "secretAccessKey": {
+            "key": "ACCESS_SECRET_KEY",
+            "name": "dbaas-backups-rgw"
+          }
+        }
+      },
+      "retentionPolicy": "7d"
+    }
+  },
+  {
+    "apiVersion": "barmancloud.cnpg.io/v1",
+    "kind": "ObjectStore",
+    "metadata": {
+      "labels": {
+        "app.kubernetes.io/instance": "0b0c0d0e-1111-4222-8333-444455556666",
+        "app.kubernetes.io/managed-by": "database-api",
+        "bedrock.cloudyfolks.com/environment": "staging",
+        "bedrock.cloudyfolks.com/project-id": "99999999-1111-4222-8333-444455556666"
+      },
+      "name": "0b0c0d0e-1111-4222-8333-444455556666-source",
+      "namespace": "dbaas"
+    },
+    "spec": {
+      "configuration": {
+        "destinationPath": "s3://dbaas-backups/aaaaaaaa-1111-4222-8333-444455556666/",
+        "endpointURL": "https://rgw.example.internal",
+        "s3Credentials": {
+          "accessKeyId": {
+            "key": "ACCESS_KEY_ID",
+            "name": "dbaas-backups-rgw"
+          },
+          "secretAccessKey": {
+            "key": "ACCESS_SECRET_KEY",
+            "name": "dbaas-backups-rgw"
+          }
+        }
+      },
+      "retentionPolicy": "7d"
+    }
+  },
+  {
+    "apiVersion": "postgresql.cnpg.io/v1",
+    "kind": "Cluster",
+    "metadata": {
+      "labels": {
+        "app.kubernetes.io/instance": "0b0c0d0e-1111-4222-8333-444455556666",
+        "app.kubernetes.io/managed-by": "database-api",
+        "bedrock.cloudyfolks.com/environment": "staging",
+        "bedrock.cloudyfolks.com/project-id": "99999999-1111-4222-8333-444455556666"
+      },
+      "name": "0b0c0d0e-1111-4222-8333-444455556666",
+      "namespace": "dbaas"
+    },
+    "spec": {
+      "bootstrap": {
+        "recovery": {
+          "database": "app",
+          "owner": "dbadmin",
+          "recoveryTarget": {
+            "targetTime": "2026-10-01 12:30:00.000000+00"
+          },
+          "secret": {
+            "name": "0b0c0d0e-1111-4222-8333-444455556666-app"
+          },
+          "source": "source"
+        }
+      },
+      "enableSuperuserAccess": true,
+      "externalClusters": [
+        {
+          "name": "source",
+          "plugin": {
+            "name": "barman-cloud.cloudnative-pg.io",
+            "parameters": {
+              "barmanObjectName": "0b0c0d0e-1111-4222-8333-444455556666-source",
+              "serverName": "aaaaaaaa-1111-4222-8333-444455556666"
+            }
+          }
+        }
+      ],
+      "imageName": "registry.cloudyfolks.com/mirror-ghcr/example/engine@sha256:0000000000000000000000000000000000000000000000000000000000000000",
+      "inheritedMetadata": {
+        "labels": {
+          "app.kubernetes.io/instance": "0b0c0d0e-1111-4222-8333-444455556666",
+          "app.kubernetes.io/managed-by": "database-api",
+          "bedrock.cloudyfolks.com/environment": "staging",
+          "bedrock.cloudyfolks.com/project-id": "99999999-1111-4222-8333-444455556666"
+        }
+      },
+      "instances": 1,
+      "monitoring": {
+        "enablePodMonitor": true
+      },
+      "plugins": [
+        {
+          "isWALArchiver": true,
+          "name": "barman-cloud.cloudnative-pg.io",
+          "parameters": {
+            "barmanObjectName": "0b0c0d0e-1111-4222-8333-444455556666"
+          }
+        }
+      ],
+      "postgresql": {
+        "parameters": {
+          "effective_cache_size": "614MB",
+          "log_min_error_statement": "panic",
+          "log_timezone": "UTC",
+          "max_connections": "100",
+          "password_encryption": "scram-sha-256",
+          "shared_buffers": "256MB",
+          "timezone": "UTC"
+        },
+        "pg_hba": [
+          "host all postgres all reject"
+        ]
+      },
+      "priorityClassName": "dbaas-tenant",
+      "resources": {
+        "limits": {
+          "cpu": "500m",
+          "memory": "1024Mi"
+        },
+        "requests": {
+          "cpu": "500m",
+          "memory": "1024Mi"
+        }
+      },
+      "storage": {
+        "size": "20Gi",
+        "storageClass": "storage-block"
+      },
+      "superuserSecret": {
+        "name": "0b0c0d0e-1111-4222-8333-444455556666-superuser"
+      }
+    }
+  },
+  {
+    "apiVersion": "postgresql.cnpg.io/v1",
+    "kind": "ScheduledBackup",
+    "metadata": {
+      "labels": {
+        "app.kubernetes.io/instance": "0b0c0d0e-1111-4222-8333-444455556666",
+        "app.kubernetes.io/managed-by": "database-api",
+        "bedrock.cloudyfolks.com/environment": "staging",
+        "bedrock.cloudyfolks.com/project-id": "99999999-1111-4222-8333-444455556666"
+      },
+      "name": "0b0c0d0e-1111-4222-8333-444455556666-daily",
+      "namespace": "dbaas"
+    },
+    "spec": {
+      "backupOwnerReference": "self",
+      "cluster": {
+        "name": "0b0c0d0e-1111-4222-8333-444455556666"
+      },
+      "method": "plugin",
+      "pluginConfiguration": {
+        "name": "barman-cloud.cloudnative-pg.io"
+      },
+      "schedule": "0 0 2 * * *"
+    }
+  },
+  {
+    "apiVersion": "v1",
+    "kind": "Service",
+    "metadata": {
+      "labels": {
+        "app.kubernetes.io/instance": "0b0c0d0e-1111-4222-8333-444455556666",
+        "app.kubernetes.io/managed-by": "database-api",
+        "bedrock.cloudyfolks.com/environment": "staging",
+        "bedrock.cloudyfolks.com/project-id": "99999999-1111-4222-8333-444455556666"
+      },
+      "name": "0b0c0d0e-1111-4222-8333-444455556666-db",
+      "namespace": "dbaas"
+    },
+    "spec": {
+      "ports": [
+        {
+          "name": "db",
+          "port": 5432,
+          "protocol": "TCP",
+          "targetPort": 5432
+        }
+      ],
+      "selector": {
+        "cnpg.io/cluster": "0b0c0d0e-1111-4222-8333-444455556666",
+        "cnpg.io/instanceRole": "primary"
+      },
+      "type": "ClusterIP"
+    }
+  }
+]

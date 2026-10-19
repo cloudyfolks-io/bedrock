@@ -7,7 +7,7 @@ metadata:
     bedrock.cloudyfolks.io/name: bedrock-project-viewer
 rules:
   - apiGroups: [bedrock.cloudyfolks.io]
-    resources: [builds, containers, dnszones, elasticips, images, internetgateways, loadbalancers, objectstoragebuckets, objectstorageusers, securitygroups, sshkeys, subnets, virtualmachinebackups, virtualmachinerestores, virtualmachines, volumes, volumesnapshots]
+    resources: [builds, containers, databases, databaseschemas, databaseusers, dnszones, elasticips, images, internetgateways, loadbalancers, objectstoragebuckets, objectstorageusers, securitygroups, sshkeys, subnets, virtualmachinebackups, virtualmachinerestores, virtualmachines, volumes, volumesnapshots]
     verbs: [get, list, watch]
   - apiGroups: [""]
     resources: [configmaps, events, pods, pods/log, resourcequotas, services]
@@ -37,7 +37,7 @@ metadata:
     bedrock.cloudyfolks.io/name: bedrock-project-editor
 rules:
   - apiGroups: [bedrock.cloudyfolks.io]
-    resources: [builds, containers, dnszones, elasticips, images, internetgateways, loadbalancers, objectstoragebuckets, objectstorageusers, securitygroups, sshkeys, subnets, virtualmachinebackups, virtualmachinerestores, virtualmachines, volumes, volumesnapshots]
+    resources: [builds, containers, databases, databaseschemas, databaseusers, dnszones, elasticips, images, internetgateways, loadbalancers, objectstoragebuckets, objectstorageusers, securitygroups, sshkeys, subnets, virtualmachinebackups, virtualmachinerestores, virtualmachines, volumes, volumesnapshots]
     verbs: [get, list, watch]
   - apiGroups: [""]
     resources: [configmaps, events, pods, pods/log, resourcequotas, services]
@@ -52,7 +52,7 @@ rules:
     resources: [applicationawareresourcequotas]
     verbs: [get, list, watch]
   - apiGroups: [bedrock.cloudyfolks.io]
-    resources: [builds, containers, dnszones, elasticips, images, internetgateways, loadbalancers, objectstoragebuckets, objectstorageusers, securitygroups, sshkeys, subnets, virtualmachinebackups, virtualmachinerestores, virtualmachines, volumes, volumesnapshots]
+    resources: [builds, containers, databases, databaseschemas, databaseusers, dnszones, elasticips, images, internetgateways, loadbalancers, objectstoragebuckets, objectstorageusers, securitygroups, sshkeys, subnets, virtualmachinebackups, virtualmachinerestores, virtualmachines, volumes, volumesnapshots]
     verbs: [create, delete, patch, update]
   - apiGroups: [bedrock.cloudyfolks.io]
     resources: [virtualmachines/restart, virtualmachines/snapshot, virtualmachines/start, virtualmachines/stop]
@@ -94,7 +94,7 @@ metadata:
     bedrock.cloudyfolks.io/name: bedrock-project-owner
 rules:
   - apiGroups: [bedrock.cloudyfolks.io]
-    resources: [builds, containers, dnszones, elasticips, images, internetgateways, loadbalancers, objectstoragebuckets, objectstorageusers, securitygroups, sshkeys, subnets, virtualmachinebackups, virtualmachinerestores, virtualmachines, volumes, volumesnapshots]
+    resources: [builds, containers, databases, databaseschemas, databaseusers, dnszones, elasticips, images, internetgateways, loadbalancers, objectstoragebuckets, objectstorageusers, securitygroups, sshkeys, subnets, virtualmachinebackups, virtualmachinerestores, virtualmachines, volumes, volumesnapshots]
     verbs: [get, list, watch]
   - apiGroups: [""]
     resources: [configmaps, events, pods, pods/log, resourcequotas, services]
@@ -109,7 +109,7 @@ rules:
     resources: [applicationawareresourcequotas]
     verbs: [get, list, watch]
   - apiGroups: [bedrock.cloudyfolks.io]
-    resources: [builds, containers, dnszones, elasticips, images, internetgateways, loadbalancers, objectstoragebuckets, objectstorageusers, securitygroups, sshkeys, subnets, virtualmachinebackups, virtualmachinerestores, virtualmachines, volumes, volumesnapshots]
+    resources: [builds, containers, databases, databaseschemas, databaseusers, dnszones, elasticips, images, internetgateways, loadbalancers, objectstoragebuckets, objectstorageusers, securitygroups, sshkeys, subnets, virtualmachinebackups, virtualmachinerestores, virtualmachines, volumes, volumesnapshots]
     verbs: [create, delete, patch, update]
   - apiGroups: [bedrock.cloudyfolks.io]
     resources: [virtualmachines/restart, virtualmachines/snapshot, virtualmachines/start, virtualmachines/stop]
@@ -139,7 +139,7 @@ rules:
     resources: [deployments]
     verbs: [create, delete, patch, update]
   - apiGroups: [bedrock.cloudyfolks.io]
-    resources: [builds, containers, dnszones, elasticips, images, internetgateways, loadbalancers, objectstoragebuckets, objectstorageusers, securitygroups, sshkeys, subnets, virtualmachinebackups, virtualmachinerestores, virtualmachines, volumes, volumesnapshots]
+    resources: [builds, containers, databases, databaseschemas, databaseusers, dnszones, elasticips, images, internetgateways, loadbalancers, objectstoragebuckets, objectstorageusers, securitygroups, sshkeys, subnets, virtualmachinebackups, virtualmachinerestores, virtualmachines, volumes, volumesnapshots]
     verbs: [deletecollection]
   - apiGroups: [""]
     resources: [configmaps, pods, secrets, services]

@@ -153,6 +153,21 @@ components:
     namespace: kube-system
     values: release/values/kata.yaml
     noHooks: true
+  - name: cnpg
+    addon: true
+    chart: charts/cloudnative-pg
+    version: 0.29.1
+    namespace: cnpg
+    values: release/values/cnpg.yaml
+    noHooks: true
+    crdsToGroup: crds
+    dirs: [manifests/addons/cnpg]
+    extraImages:
+      - ghcr.io/cloudnative-pg/plugin-barman-cloud-sidecar:v0.13.0
+      - docker.io/library/haproxy:3.2-alpine@sha256:254e6370f01cd654e0744edf607c67f33777c1b6a9dc0d4b28bcba7171460122
+      - ghcr.io/cloudnative-pg/postgresql:16.15-minimal-trixie@sha256:f76ba02680a07bdafaa00c81827351b15e671ac11e0e6a0b72f8ee5835cc82c6
+      - ghcr.io/cloudnative-pg/postgresql:17.9-minimal-trixie@sha256:3c9f2df53e15f3fff0aee630beffe73936590333b7fd80f2239bf59b22a9852e
+      - ghcr.io/cloudnative-pg/postgresql:18.6-minimal-trixie@sha256:0675340b02be838319b9b6f323c206693e519dcd62ec729d539be9f46bb7a2f9
   - name: loki
     addon: true
     dirs: [manifests/addons/loki]

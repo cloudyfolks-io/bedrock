@@ -183,3 +183,119 @@ func TestClustersAddonShipsTheK0smotronOperator(t *testing.T) {
 		}
 	}
 }
+
+func TestCNPGComponentRendersTheOperatorAndThePlugin(t *testing.T) {
+	bundle, _ := buildReal(t, "cnpg")
+	objects := bundle.Addons["cnpg"]
+	want := map[string]string{
+		"Namespace":  "cnpg",
+		"Deployment": "barman-cloud",
+		"Issuer":     "selfsigned-issuer",
+	}
+	for kind, name := range want {
+		if objectNamed(objects, kind, name) == nil {
+			t.Errorf("missing %s %s", kind, name)
+		}
+	}
+	operator := 0
+	for _, obj := range objects {
+		if obj.GetKind() == "Deployment" && obj.GetNamespace() == "cnpg" {
+			operator++
+		}
+		if obj.GetNamespace() == "cnpg-system" {
+			t.Errorf("%s %s is in cnpg-system", obj.GetKind(), obj.GetName())
+		}
+	}
+	if operator != 2 {
+		t.Errorf("deployments in cnpg: %d", operator)
+	}
+}
+
+func TestCNPGComponentPutsCRDsInTheBaseGroup(t *testing.T) {
+	bundle, _ := buildReal(t, "cnpg")
+	for _, obj := range bundle.Addons["cnpg"] {
+		if obj.GetKind() == "CustomResourceDefinition" {
+			t.Errorf("addon holds CRD %s", obj.GetName())
+		}
+	}
+	var crds []string
+	for _, group := range bundle.Groups {
+		if group.Name != "crds" {
+			continue
+		}
+		for _, obj := range group.Objects {
+			crds = append(crds, obj.GetName())
+		}
+	}
+	for _, name := range []string{"clusters.postgresql.cnpg.io", "scheduledbackups.postgresql.cnpg.io", "backups.postgresql.cnpg.io", "objectstores.barmancloud.cnpg.io"} {
+		if !slices.Contains(crds, name) {
+			t.Errorf("missing CRD %s", name)
+		}
+	}
+}
+
+func TestCNPGComponentHasNoHooks(t *testing.T) {
+	bundle, _ := buildReal(t, "cnpg")
+	for _, obj := range bundle.Addons["cnpg"] {
+		for key := range obj.GetAnnotations() {
+			if strings.HasPrefix(key, "helm.sh/hook") {
+				t.Errorf("%s %s has %s", obj.GetKind(), obj.GetName(), key)
+			}
+		}
+	}
+}
+
+func TestCNPGImagesAreInTheImageList(t *testing.T) {
+	bundle, out := buildReal(t, "cnpg")
+	raw, err := os.ReadFile(filepath.Join(out, "images.txt"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, image := range []string{
+		"ghcr.io/cloudnative-pg/cloudnative-pg:1.30.1",
+		"ghcr.io/cloudnative-pg/plugin-barman-cloud:v0.13.0",
+		"ghcr.io/cloudnative-pg/plugin-barman-cloud-sidecar:v0.13.0",
+	} {
+		if !contains(string(raw), image) || !slices.Contains(bundle.Images, image) {
+			t.Errorf("image %s missing from %v", image, bundle.Images)
+		}
+	}
+	found := false
+	for _, image := range bundle.Images {
+		found = found || strings.HasPrefix(image, "docker.io/library/haproxy:") && strings.Contains(image, "@sha256:")
+	}
+	if !found {
+		t.Errorf("no digest-pinned HAProxy image in %v", bundle.Images)
+	}
+	for _, major := range []string{"16", "17", "18"} {
+		found := false
+		for _, image := range bundle.Images {
+			found = found || strings.HasPrefix(image, "ghcr.io/cloudnative-pg/postgresql:"+major+".") && strings.Contains(image, "@sha256:")
+		}
+		if !found {
+			t.Errorf("no digest-pinned PostgreSQL %s image in %v", major, bundle.Images)
+		}
+	}
+}
+
+func TestCNPGComponentHoldsTheDatabaseCA(t *testing.T) {
+	bundle, _ := buildReal(t, "cnpg")
+	objects := bundle.Addons["cnpg"]
+	if objectNamed(objects, "ClusterIssuer", "bedrock-database-selfsigned") == nil {
+		t.Error("missing the self-signed issuer")
+	}
+	ca := objectNamed(objects, "Certificate", "bedrock-database-ca")
+	if ca == nil || ca.GetNamespace() != "cert-manager" {
+		t.Fatalf("CA certificate %v", ca)
+	}
+	if isCA, _, _ := unstructured.NestedBool(ca.Object, "spec", "isCA"); !isCA {
+		t.Error("the CA certificate is not a CA")
+	}
+	issuer := objectNamed(objects, "ClusterIssuer", "bedrock-database-ca")
+	if issuer == nil {
+		t.Fatal("missing the CA issuer")
+	}
+	if name, _, _ := unstructured.NestedString(issuer.Object, "spec", "ca", "secretName"); name != "bedrock-database-ca" {
+		t.Errorf("the CA issuer reads the secret %q", name)
+	}
+}

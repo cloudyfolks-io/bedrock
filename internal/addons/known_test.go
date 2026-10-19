@@ -5,9 +5,9 @@ import (
 	"testing"
 )
 
-func TestKnownAddonsAreKataLokiAndClusters(t *testing.T) {
+func TestKnownAddonsAreKataLokiClustersAndCNPG(t *testing.T) {
 	known := Known()
-	if len(known) != 3 || known[0].Name != "kata" || known[1].Name != "loki" || known[2].Name != "clusters" {
+	if len(known) != 4 || known[0].Name != "kata" || known[1].Name != "loki" || known[2].Name != "clusters" || known[3].Name != "cnpg" {
 		t.Fatalf("known %+v", known)
 	}
 	if known[0].EnabledSetting != "kata.enabled" || len(known[0].Values) != 0 || known[0].Preflight == nil || known[0].Vars != nil {
@@ -23,6 +23,13 @@ func TestKnownAddonsAreKataLokiAndClusters(t *testing.T) {
 	}
 	if defaults["persistence.size"] != "20Gi" || defaults["persistence.storage-class"] != "block" || len(defaults) != 2 {
 		t.Errorf("defaults %v", defaults)
+	}
+	cnpg := known[2]
+	if cnpg.EnabledSetting != "cnpg.enabled" || len(cnpg.Values) != 0 || cnpg.Vars != nil {
+		t.Errorf("cnpg %+v", cnpg)
+	}
+	if _, ok := Lookup("cnpg"); !ok {
+		t.Error("Lookup(cnpg)")
 	}
 	if _, ok := Lookup("loki"); !ok {
 		t.Error("Lookup(loki)")

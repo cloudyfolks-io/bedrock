@@ -241,6 +241,19 @@ const L = {
   quota: msg({ id: "col.quota", message: "Quota" }),
   buckets: msg({ id: "col.buckets", message: "Buckets" }),
   keyType: msg({ id: "col.keyType", message: "Key type" }),
+  engine: msg({ id: "col.engine", message: "Engine" }),
+  class: msg({ id: "col.class", message: "Class" }),
+  database: msg({ id: "col.database", message: "Database" }),
+  databaseName: msg({ id: "col.databaseName", message: "Database name" }),
+  username: msg({ id: "col.username", message: "User name" }),
+  grants: msg({ id: "col.grants", message: "Grants" }),
+  policy: msg({ id: "col.policy", message: "On delete" }),
+  cpu: msg({ id: "col.cpu", message: "CPU" }),
+  memory: msg({ id: "col.memory", message: "Memory" }),
+  minStorage: msg({ id: "col.minStorage", message: "Minimum storage" }),
+  maxStorage: msg({ id: "col.maxStorage", message: "Maximum storage" }),
+  highAvailability: msg({ id: "col.highAvailability", message: "High availability" }),
+  eolDate: msg({ id: "col.eolDate", message: "End of life" }),
 };
 
 const networkRefsOf = (object: KubeObject): string => (listAt(object, "spec.networkRefs") as string[]).join(", ");
@@ -294,6 +307,11 @@ export const columnsByPlural: Record<string, ColumnDef[]> = {
   containers: [name, phase, ltrText("image", L.image, "spec.image"), replicas, containerAddresses, age],
   builds: [name, phase, text("type", L.type, "spec.type"), ltrText("image", L.image, "spec.output.image"), age],
   kubernetesclusters: [name, phase, version("version", L.version, "spec.version"), ltrText("endpoint", L.endpoint, "status.endpoint"), workers, age],
+  databases: [name, phase, text("engine", L.engine, "spec.engine"), version("version", L.version, "spec.version"), text("class", L.class, "spec.class"), addresses],
+  databaseusers: [name, text("database", L.database, "spec.databaseRef"), text("username", L.username, "status.username"), count("grants", L.grants, (object) => listAt(object, "spec.grants").length), status],
+  databaseschemas: [name, text("database", L.database, "spec.databaseRef"), text("databaseName", L.databaseName, "status.name"), text("policy", L.policy, "spec.deletionPolicy"), status],
+  databaseversions: [name, text("engine", L.engine, "spec.engine"), version("version", L.version, "spec.major"), ltrText("image", L.image, "spec.image"), flag("enabled", L.enabled, "spec.enabled"), text("eolDate", L.eolDate, "spec.eolDate")],
+  databaseclasses: [name, quota("cpu", L.cpu, "spec.cpu"), quota("memory", L.memory, "spec.memory"), gi("minStorage", L.minStorage, "spec.minStorageGi"), flag("highAvailability", L.highAvailability, "spec.highAvailability"), flag("enabled", L.enabled, "spec.enabled")],
   sshkeys: [
     name,
     { id: "keyType", label: L.keyType, render: (object) => textAt(object, "spec.publicKey").split(" ")[0] || dash, sortValue: (object) => textAt(object, "spec.publicKey").split(" ")[0] ?? "" },

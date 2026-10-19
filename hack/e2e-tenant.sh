@@ -83,6 +83,11 @@ dump_workloads() {
   kubectl -n "$S3_NS" get pods,jobs -o wide || true
   kubectl -n "$S3_NS" logs deploy/seaweedfs --tail=200 || true
   kubectl -n "$S3_NS" logs job/make-bucket --tail=50 || true
+  echo "--- databases"
+  kubectl -n bedrock-dbaas get all,clusters.postgresql.cnpg.io,scheduledbackups.postgresql.cnpg.io,backups.postgresql.cnpg.io,objectstores.barmancloud.cnpg.io,certificates.cert-manager.io,networkpolicies,configmaps -o wide || true
+  kubectl -n cnpg get pods -o wide || true
+  kubectl -n cnpg logs deploy/cnpg-cloudnative-pg --tail=150 || true
+  kubectl -n cnpg logs deploy/barman-cloud --tail=100 || true
   echo "--- object storage"
   kubectl -n rook-ceph get pods,cephobjectstore,cephobjectstoreaccount,cephobjectstoreuser -o wide || true
   kubectl -n rook-ceph logs deploy/rook-ceph-operator --tail=150 || true
@@ -128,7 +133,7 @@ k0s ctr --namespace k8s.io images import "$cache/seaweedfs.tar"
 k0s ctr --namespace k8s.io images import "$cache/aws-cli.tar"
 k0s ctr --namespace k8s.io images import "$cache/busybox.tar"
 
-for step_file in encryption addons tenancy images compute network container build clusters objectstorage objectstorage-iam backup panel metering cascade; do
+for step_file in encryption addons tenancy images compute network container build clusters objectstorage objectstorage-iam database backup panel metering cascade; do
   source "$steps_dir/$step_file.sh"
 done
 
@@ -215,6 +220,13 @@ steps=(
   objectstorage_suspend
   objectstorage_force_destroy
   objectstorage_public_host
+  database_prepare
+  database_create
+  database_sslrequest
+  database_access
+  database_backup_restore
+  database_isolation
+  database_cleanup
   backup_target
   backup_once
   backup_restore_replace

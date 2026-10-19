@@ -39,6 +39,8 @@ The server stays the authority. The panel only hides what the user cannot use.
 | `/admin/cluster-images` | Catalog images |
 | `/admin/cluster-images/:name` | Catalog image detail |
 | `/admin/addons` | Addons |
+| `/admin/database-versions` | Database versions of the catalog |
+| `/admin/database-classes` | Database classes of the catalog |
 | `/p` | Redirect to the stored project, else the first project |
 | `/p/:project` | Redirect to the virtual machines |
 | `/p/:project/vms` | Virtual machines |
@@ -62,6 +64,9 @@ The server stays the authority. The panel only hides what the user cannot use.
 | `/p/:project/internet-gateways` | Internet gateways |
 | `/p/:project/dns-zones` | DNS zones |
 | `/p/:project/security-groups` | Security groups |
+| `/p/:project/databases` | Managed databases |
+| `/p/:project/database-users` | Database users and their grants |
+| `/p/:project/database-schemas` | Logical databases of a managed database |
 | `/p/:project/buckets` | Buckets |
 | `/p/:project/object-users` | Object storage users and their credentials |
 | `/account` | Language, theme and downloads |
