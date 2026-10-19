@@ -5,6 +5,7 @@ import "testing"
 func TestDatabaseCatalogKeysAndDefaults(t *testing.T) {
 	want := map[string]string{
 		"cnpg.enabled":               "false",
+		"percona-ps.enabled":         "false",
 		"database.enabled":           "false",
 		"database.capacity.cpu":      "32",
 		"database.capacity.memory":   "128Gi",

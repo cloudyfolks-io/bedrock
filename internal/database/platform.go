@@ -14,7 +14,7 @@ import (
 	"github.com/cloudyfolks-io/bedrock/internal/ssa"
 )
 
-var operatorNamespaces = []string{"bedrock-system", "cnpg", "monitoring"}
+var operatorNamespaces = []string{"bedrock-system", "cnpg", "ps-operator", "monitoring"}
 
 func platformLabels(kind, name string) map[string]string {
 	return map[string]string{v1alpha1.LabelKind: kind, v1alpha1.LabelName: name}

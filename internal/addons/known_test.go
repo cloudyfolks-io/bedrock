@@ -5,9 +5,9 @@ import (
 	"testing"
 )
 
-func TestKnownAddonsAreKataLokiAndCNPG(t *testing.T) {
+func TestKnownAddonsAreKataLokiCNPGAndPercona(t *testing.T) {
 	known := Known()
-	if len(known) != 3 || known[0].Name != "kata" || known[1].Name != "loki" || known[2].Name != "cnpg" {
+	if len(known) != 4 || known[0].Name != "kata" || known[1].Name != "loki" || known[2].Name != "cnpg" || known[3].Name != "percona-ps" {
 		t.Fatalf("known %+v", known)
 	}
 	if known[0].EnabledSetting != "kata.enabled" || len(known[0].Values) != 0 || known[0].Preflight == nil || known[0].Vars != nil {
@@ -27,6 +27,13 @@ func TestKnownAddonsAreKataLokiAndCNPG(t *testing.T) {
 	cnpg := known[2]
 	if cnpg.EnabledSetting != "cnpg.enabled" || len(cnpg.Values) != 0 || cnpg.Vars != nil {
 		t.Errorf("cnpg %+v", cnpg)
+	}
+	percona := known[3]
+	if percona.EnabledSetting != "percona-ps.enabled" || len(percona.Values) != 0 || percona.Vars != nil || percona.Preflight != nil {
+		t.Errorf("percona-ps %+v", percona)
+	}
+	if _, ok := Lookup("percona-ps"); !ok {
+		t.Error("Lookup(percona-ps)")
 	}
 	if _, ok := Lookup("cnpg"); !ok {
 		t.Error("Lookup(cnpg)")
