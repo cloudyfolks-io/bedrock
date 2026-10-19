@@ -77,7 +77,7 @@ type answer struct {
 func (c *Client) CreateProject(ctx context.Context, name string, quotaGB int64) error {
 	body := map[string]any{
 		"project_name":  name,
-		"storage_limit": quotaBytes(quotaGB),
+		"storage_limit": QuotaBytes(quotaGB),
 		"metadata":      map[string]string{"public": "false"},
 	}
 	_, err := c.send(ctx, request{method: http.MethodPost, path: "/projects", body: body})
@@ -145,7 +145,7 @@ func (c *Client) SetQuota(ctx context.Context, name string, quotaGB int64) error
 	if len(rows) == 0 {
 		return fmt.Errorf("harbor: project %q has no quota row", name)
 	}
-	body := map[string]any{"hard": map[string]int64{"storage": quotaBytes(quotaGB)}}
+	body := map[string]any{"hard": map[string]int64{"storage": QuotaBytes(quotaGB)}}
 	_, err = c.send(ctx, request{method: http.MethodPut, path: "/quotas/" + strconv.FormatInt(rows[0].ID, 10), body: body})
 	return err
 }
@@ -178,26 +178,38 @@ func (c *Client) CreateRobot(ctx context.Context, project, name, permission stri
 	return Robot{ID: decoded.ID, Name: decoded.Name}, decoded.Secret, nil
 }
 
-func (c *Client) FindRobot(ctx context.Context, project, name string) (Robot, bool, error) {
+func (c *Client) ListRobots(ctx context.Context, project string) ([]Robot, error) {
 	owner, err := c.GetProject(ctx, project)
 	if err != nil {
-		return Robot{}, false, err
+		return nil, err
 	}
 	query := url.Values{"page": {"1"}, "page_size": {strconv.Itoa(pageSize)}, "q": {"Level=project,ProjectID=" + strconv.FormatInt(owner.ID, 10)}}
 	got, err := c.send(ctx, request{method: http.MethodGet, path: "/robots?" + query.Encode()})
 	if err != nil {
-		return Robot{}, false, err
+		return nil, err
 	}
-	var robots []struct {
+	var robots []Robot
+	var decoded []struct {
 		ID   int64  `json:"id"`
 		Name string `json:"name"`
 	}
-	if err := json.Unmarshal(got.body, &robots); err != nil {
-		return Robot{}, false, fmt.Errorf("harbor: read robots of %q: answer is not valid", project)
+	if err := json.Unmarshal(got.body, &decoded); err != nil {
+		return nil, fmt.Errorf("harbor: read robots of %q: answer is not valid", project)
+	}
+	for _, robot := range decoded {
+		robots = append(robots, Robot{ID: robot.ID, Name: robot.Name})
+	}
+	return robots, nil
+}
+
+func (c *Client) FindRobot(ctx context.Context, project, name string) (Robot, bool, error) {
+	robots, err := c.ListRobots(ctx, project)
+	if err != nil {
+		return Robot{}, false, err
 	}
 	for _, robot := range robots {
 		if strings.HasSuffix(robot.Name, "+"+name) {
-			return Robot{ID: robot.ID, Name: robot.Name}, true, nil
+			return robot, true, nil
 		}
 	}
 	return Robot{}, false, nil
@@ -264,18 +276,29 @@ func (c *Client) SetRetention(ctx context.Context, project string, retention Ret
 	return err
 }
 
+type webhookPolicyRow struct {
+	ID   int64  `json:"id"`
+	Name string `json:"name"`
+}
+
+func (c *Client) listWebhooks(ctx context.Context, project string) ([]webhookPolicyRow, error) {
+	path := fmt.Sprintf("/projects/%s/webhook/policies?page=1&page_size=%d", project, pageSize)
+	got, err := c.send(ctx, request{method: http.MethodGet, path: path, byName: true})
+	if err != nil {
+		return nil, err
+	}
+	var policies []webhookPolicyRow
+	if err := json.Unmarshal(got.body, &policies); err != nil {
+		return nil, fmt.Errorf("harbor: read webhooks of %q: answer is not valid", project)
+	}
+	return policies, nil
+}
+
 func (c *Client) EnsureWebhook(ctx context.Context, project, address, authHeader string) error {
 	base := "/projects/" + project + "/webhook/policies"
-	got, err := c.send(ctx, request{method: http.MethodGet, path: fmt.Sprintf("%s?page=1&page_size=%d", base, pageSize), byName: true})
+	policies, err := c.listWebhooks(ctx, project)
 	if err != nil {
 		return err
-	}
-	var policies []struct {
-		ID   int64  `json:"id"`
-		Name string `json:"name"`
-	}
-	if err := json.Unmarshal(got.body, &policies); err != nil {
-		return fmt.Errorf("harbor: read webhooks of %q: answer is not valid", project)
 	}
 	body := map[string]any{
 		"name":    webhookPolicy,
@@ -293,6 +316,20 @@ func (c *Client) EnsureWebhook(ctx context.Context, project, address, authHeader
 	}
 	_, err = c.send(ctx, request{method: method, path: path, body: body, byName: true, secrets: []string{authHeader}})
 	return err
+}
+
+func (c *Client) DeleteWebhook(ctx context.Context, project string) error {
+	policies, err := c.listWebhooks(ctx, project)
+	if err != nil {
+		return err
+	}
+	for _, policy := range policies {
+		if policy.Name == webhookPolicy {
+			_, err := c.send(ctx, request{method: http.MethodDelete, path: "/projects/" + project + "/webhook/policies/" + strconv.FormatInt(policy.ID, 10), byName: true})
+			return ignoreNotFound(err)
+		}
+	}
+	return nil
 }
 
 func (c *Client) SetConfigurations(ctx context.Context, configuration map[string]any) error {
@@ -485,7 +522,7 @@ func ignoreNotFound(err error) error {
 	return err
 }
 
-func quotaBytes(quotaGB int64) int64 {
+func QuotaBytes(quotaGB int64) int64 {
 	if quotaGB <= 0 {
 		return unlimitedBytes
 	}

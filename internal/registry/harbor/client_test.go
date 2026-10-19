@@ -265,6 +265,36 @@ func TestFindRobotMatchesTheNameInTheProject(t *testing.T) {
 	}
 }
 
+func TestListRobotsReturnsEveryRobotOfTheProject(t *testing.T) {
+	c, _ := fakeHarbor(t, map[string]route{
+		"GET /api/v2.0/projects/acme": {body: `{"project_id":9}`},
+		"GET /api/v2.0/robots?page=1&page_size=100&q=Level%3Dproject%2CProjectID%3D9": {body: `[{"id":1,"name":"key_acme+a"},{"id":2,"name":"key_acme+b"}]`},
+	})
+	robots, err := c.ListRobots(context.Background(), "acme")
+	if err != nil || len(robots) != 2 || robots[0].ID != 1 || robots[1].Name != "key_acme+b" {
+		t.Fatalf("robots %v %v", robots, err)
+	}
+}
+
+func TestDeleteWebhookRemovesThePolicyByName(t *testing.T) {
+	c, calls := fakeHarbor(t, map[string]route{
+		"GET /api/v2.0/projects/acme/webhook/policies?page=1&page_size=100": {body: `[{"id":2,"name":"other"},{"id":3,"name":"platform-events"}]`},
+		"DELETE /api/v2.0/projects/acme/webhook/policies/3":                 {status: 200},
+	})
+	if err := c.DeleteWebhook(context.Background(), "acme"); err != nil {
+		t.Fatal(err)
+	}
+	if len(*calls) != 2 || (*calls)[1].method != http.MethodDelete {
+		t.Errorf("calls %+v", *calls)
+	}
+	c, calls = fakeHarbor(t, map[string]route{
+		"GET /api/v2.0/projects/acme/webhook/policies?page=1&page_size=100": {body: `[{"id":2,"name":"other"}]`},
+	})
+	if err := c.DeleteWebhook(context.Background(), "acme"); err != nil || len(*calls) != 1 {
+		t.Errorf("a missing policy: %v %+v", err, *calls)
+	}
+}
+
 func TestDeleteRobotIgnoresAMissingRobot(t *testing.T) {
 	c, _ := fakeHarbor(t, map[string]route{"DELETE /api/v2.0/robots/12": {status: 404}})
 	if err := c.DeleteRobot(context.Background(), 12); err != nil {

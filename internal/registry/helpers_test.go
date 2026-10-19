@@ -35,7 +35,7 @@ func testScheme(t *testing.T) *runtime.Scheme {
 
 func fakeCluster(t *testing.T, objects ...client.Object) client.Client {
 	t.Helper()
-	return fake.NewClientBuilder().WithScheme(testScheme(t)).WithStatusSubresource(&v1alpha1.Addon{}).WithObjects(objects...).Build()
+	return fake.NewClientBuilder().WithScheme(testScheme(t)).WithStatusSubresource(&v1alpha1.Addon{}, &v1alpha1.Registry{}).WithObjects(objects...).Build()
 }
 
 func repeating(b byte) io.Reader {

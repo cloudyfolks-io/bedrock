@@ -35,5 +35,9 @@ const (
 	managedByLabel            = "app.kubernetes.io/managed-by"
 	managedByValue            = "bedrock-registry"
 
+	AnnotationAdopt                = "bedrock.cloudyfolks.io/adopt"
+	AnnotationReservedNameApproved = "bedrock.cloudyfolks.io/reserved-name-approved"
+	AnnotationResetSecret          = "bedrock.cloudyfolks.io/reset-secret"
+
 	DatabaseImage = "ghcr.io/cloudnative-pg/postgresql:17.9-minimal-trixie@sha256:3c9f2df53e15f3fff0aee630beffe73936590333b7fd80f2239bf59b22a9852e"
 )

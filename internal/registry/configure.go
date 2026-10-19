@@ -10,7 +10,6 @@ import (
 	"time"
 
 	appsv1 "k8s.io/api/apps/v1"
-	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	ctrl "sigs.k8s.io/controller-runtime"
@@ -29,9 +28,6 @@ import (
 
 const (
 	ConditionConfigured = "HarborConfigured"
-	adminUsername       = "admin"
-	adminPasswordKey    = "HARBOR_ADMIN_PASSWORD"
-	HarborURL           = "http://harbor-core." + Namespace + ".svc"
 	coreDeployment      = "harbor-core"
 	configuredRequeue   = 10 * time.Minute
 	failedRequeue       = 30 * time.Second
@@ -119,14 +115,14 @@ func (r *HarborReconciler) configure(ctx context.Context) (result, error) {
 	if err != nil {
 		return result{reason: "InvalidSettings", message: err.Error(), requeue: configuredRequeue}, nil
 	}
-	password, found, err := r.adminPassword(ctx)
+	password, found, err := r.connector().AdminPassword(ctx)
 	if err != nil {
 		return result{}, err
 	}
 	if !found {
 		return result{reason: "AdminSecretMissing", message: "the Secret harbor-admin in " + Namespace + " has no admin password", requeue: failedRequeue}, nil
 	}
-	harborClient := &harbor.Client{BaseURL: r.baseURL(), Username: adminUsername, Password: password, HTTP: r.HTTP}
+	harborClient := r.connector().WithPassword(password)
 	if err := harborClient.Health(ctx); err != nil {
 		return result{reason: "HarborNotReady", message: err.Error(), requeue: failedRequeue}, nil
 	}
@@ -166,24 +162,8 @@ func ensureCaches(ctx context.Context, harborClient *harbor.Client, caches []Pro
 	return nil
 }
 
-func (r *HarborReconciler) adminPassword(ctx context.Context) (string, bool, error) {
-	var secret corev1.Secret
-	err := r.Client.Get(ctx, client.ObjectKey{Namespace: Namespace, Name: adminSecret}, &secret)
-	if apierrors.IsNotFound(err) {
-		return "", false, nil
-	}
-	if err != nil {
-		return "", false, err
-	}
-	password := string(secret.Data[adminPasswordKey])
-	return password, password != "", nil
-}
-
-func (r *HarborReconciler) baseURL() string {
-	if r.BaseURL != "" {
-		return r.BaseURL
-	}
-	return HarborURL
+func (r *HarborReconciler) connector() Connector {
+	return Connector{Client: r.Client, BaseURL: r.BaseURL, HTTP: r.HTTP}
 }
 
 func harborSetting(obj client.Object) bool {
