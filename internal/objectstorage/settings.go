@@ -2,6 +2,7 @@ package objectstorage
 
 import (
 	"context"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -34,6 +35,8 @@ const (
 	settingPrefix       = "objectstorage."
 )
 
+var platformBucketKeys = []string{"registry.bucket", "database.backup.bucket"}
+
 var ruleKeys = []string{keyReservedNames, keyReservedPrefixes, keyCORSOrigins, keyMaxBuckets, keyPublicHost, keyPublicAliases}
 
 func ParseRules(values map[string]string) (Rules, error) {
@@ -49,19 +52,33 @@ func ParseRules(values map[string]string) (Rules, error) {
 		}
 		effective[key] = value
 	}
+	reserved := splitList(effective[keyReservedNames])
+	for _, key := range platformBucketKeys {
+		if name := effectiveValue(values, key); name != "" && !slices.Contains(reserved, name) {
+			reserved = append(reserved, name)
+		}
+	}
 	maxBuckets, _ := strconv.Atoi(effective[keyMaxBuckets])
 	origins := splitList(effective[keyCORSOrigins])
 	for i, origin := range origins {
 		origins[i] = strings.TrimSuffix(origin, "/")
 	}
 	return Rules{
-		ReservedNames:    splitList(effective[keyReservedNames]),
+		ReservedNames:    reserved,
 		ReservedPrefixes: splitList(effective[keyReservedPrefixes]),
 		CORSOrigins:      origins,
 		MaxBuckets:       maxBuckets,
 		PublicHost:       effective[keyPublicHost],
 		PublicAliases:    splitList(effective[keyPublicAliases]),
 	}, nil
+}
+
+func effectiveValue(values map[string]string, key string) string {
+	if value := values[key]; value != "" {
+		return value
+	}
+	def, _ := settings.Lookup(key)
+	return def.Default
 }
 
 func splitList(value string) []string {
@@ -123,7 +140,7 @@ func toRulesRequest(context.Context, client.Object) []reconcile.Request {
 }
 
 func objectStorageSetting(obj client.Object) bool {
-	return strings.HasPrefix(obj.GetName(), settingPrefix)
+	return strings.HasPrefix(obj.GetName(), settingPrefix) || slices.Contains(platformBucketKeys, obj.GetName())
 }
 
 func (r *RulesConfigReconciler) SetupWithManager(mgr ctrl.Manager) error {

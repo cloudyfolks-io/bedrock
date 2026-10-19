@@ -18,7 +18,7 @@ func TestParseRulesUsesTheDefaults(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := Rules{ReservedNames: []string{"admin"}, MaxBuckets: 100}
+	want := Rules{ReservedNames: []string{"admin", "bedrock-registry", "bedrock-database-backups"}, MaxBuckets: 100}
 	if !reflect.DeepEqual(rules, want) {
 		t.Fatalf("rules %+v", rules)
 	}
@@ -37,7 +37,7 @@ func TestParseRulesReadsEveryValue(t *testing.T) {
 		t.Fatal(err)
 	}
 	want := Rules{
-		ReservedNames:    []string{"admin", "billing"},
+		ReservedNames:    []string{"admin", "billing", "bedrock-registry", "bedrock-database-backups"},
 		ReservedPrefixes: []string{"git-", "e2e-"},
 		CORSOrigins:      []string{"https://panel.test", "http://localhost:3000"},
 		MaxBuckets:       7,
@@ -46,6 +46,21 @@ func TestParseRulesReadsEveryValue(t *testing.T) {
 	}
 	if !reflect.DeepEqual(rules, want) {
 		t.Fatalf("rules %+v", rules)
+	}
+}
+
+func TestParseRulesReservesThePlatformBuckets(t *testing.T) {
+	rules, err := ParseRules(map[string]string{"registry.bucket": "image-blobs", "database.backup.bucket": "db-dumps"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{"image-blobs", "db-dumps", "admin"} {
+		if nameProblem(name, rules, false) != reasonNameReserved {
+			t.Errorf("%s is not reserved", name)
+		}
+	}
+	if nameProblem("bedrock-registry", rules, false) != "" {
+		t.Error("the old default is still reserved after the Setting changed")
 	}
 }
 
@@ -96,7 +111,7 @@ func TestRulesConfigMapFollowsTheSettings(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = testClient.Delete(context.Background(), &config) })
-	want := map[string]string{"reservedNames": "admin,billing", "reservedPrefixes": "git-,e2e-"}
+	want := map[string]string{"reservedNames": "admin,billing,bedrock-registry,bedrock-database-backups", "reservedPrefixes": "git-,e2e-"}
 	if !reflect.DeepEqual(config.Data, want) {
 		t.Fatalf("data %v", config.Data)
 	}
