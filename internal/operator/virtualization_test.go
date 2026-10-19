@@ -7,6 +7,8 @@ import (
 	"testing"
 
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+
+	"github.com/cloudyfolks-io/bedrock/internal/release"
 )
 
 func TestRenderVirtualizationDefaults(t *testing.T) {
@@ -241,6 +243,9 @@ func TestRenderVirtualizationCompression(t *testing.T) {
 	_, off := renderKubeVirt(t, map[string]string{})
 	if findObject(off.Objects, "MigrationPolicy", migrationPolicyName) != nil {
 		t.Fatal("no policy without compression")
+	}
+	if off.Absent[0].GetLabels()[release.ComponentLabel] != "virtualization" {
+		t.Fatalf("labels %+v", off.Absent[0].GetLabels())
 	}
 	if len(off.Absent) != 1 || off.Absent[0].GetKind() != "MigrationPolicy" || off.Absent[0].GetName() != migrationPolicyName {
 		t.Fatalf("absent %+v", off.Absent)

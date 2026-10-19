@@ -5,6 +5,8 @@ import (
 
 	"k8s.io/apimachinery/pkg/api/resource"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+
+	"github.com/cloudyfolks-io/bedrock/internal/release"
 )
 
 const (
@@ -15,6 +17,7 @@ const (
 	keyMigrationCompression = "migration.compression"
 	compressionZstd         = "zstd"
 	migrationPolicyName     = "bedrock-compression"
+	virtualizationComponent = "virtualization"
 )
 
 type migrationTuning struct {
@@ -75,5 +78,7 @@ func compressionPolicy(values map[string]string) (policies, absent []*unstructur
 }
 
 func migrationPolicy(spec map[string]any) *unstructured.Unstructured {
-	return object("migrations.kubevirt.io/v1alpha1", "MigrationPolicy", "", migrationPolicyName, spec)
+	policy := object("migrations.kubevirt.io/v1alpha1", "MigrationPolicy", "", migrationPolicyName, spec)
+	policy.SetLabels(map[string]string{release.ComponentLabel: virtualizationComponent})
+	return policy
 }

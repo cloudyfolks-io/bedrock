@@ -254,12 +254,26 @@ func (r *AddonReconciler) applyRendered(ctx context.Context, addon Addon, render
 		}
 	}
 	for _, obj := range rendered.Absent {
-		err := r.Client.Delete(ctx, obj)
+		err := r.deleteOwned(ctx, obj)
 		if err != nil && !errors.IsNotFound(err) && !meta.IsNoMatchError(err) {
 			return addonCondition(addon, metav1.ConditionFalse, "ApplyFailed", fmt.Sprintf("%s %s: %v", obj.GetKind(), obj.GetName(), err)), false
 		}
 	}
 	return r.probe(ctx, addon, rendered.Probes), true
+}
+
+func (r *AddonReconciler) deleteOwned(ctx context.Context, want *unstructured.Unstructured) error {
+	live := &unstructured.Unstructured{}
+	live.SetGroupVersionKind(want.GroupVersionKind())
+	if err := r.Client.Get(ctx, client.ObjectKeyFromObject(want), live); err != nil {
+		return err
+	}
+	for key, value := range want.GetLabels() {
+		if live.GetLabels()[key] != value {
+			return nil
+		}
+	}
+	return r.Client.Delete(ctx, live)
 }
 
 func (r *AddonReconciler) advance(ctx context.Context, addon Addon, input AddonInput) []metav1.Condition {
