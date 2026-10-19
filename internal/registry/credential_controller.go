@@ -332,7 +332,6 @@ func (r *CredentialReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	changed := predicate.Or[client.Object](predicate.GenerationChangedPredicate{}, predicate.AnnotationChangedPredicate{}, deletionStarted())
 	return ctrl.NewControllerManagedBy(mgr).Named("registrycredential").
 		For(&v1alpha1.RegistryCredential{}, builder.WithPredicates(changed)).
-		Owns(&corev1.Secret{}).
 		Watches(&v1alpha1.Registry{}, handler.EnqueueRequestsFromMapFunc(credentialsOfRegistry(r.Client))).
 		Complete(r)
 }
