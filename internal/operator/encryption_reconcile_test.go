@@ -14,7 +14,6 @@ import (
 	rbacv1 "k8s.io/api/rbac/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/runtime/schema"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	sigyaml "sigs.k8s.io/yaml"
 
@@ -120,7 +119,7 @@ func TestReconcileEncryptionRunsAFullRotation(t *testing.T) {
 		t.Fatalf("final keys %v", names)
 	}
 	final := currentCluster(t, c)
-	if final.Spec.Encryption.Action != "" || final.Status.Encryption.RewrittenSecrets < 3 {
+	if final.Spec.Encryption.Action != "" || final.Status.Encryption.RewrittenSecrets != 0 {
 		t.Fatalf("action %q status %+v", final.Spec.Encryption.Action, final.Status.Encryption)
 	}
 	var hosts v1alpha1.HostList
@@ -228,9 +227,13 @@ func TestRewriteSecretsPagesThroughEverySecret(t *testing.T) {
 	if err := c.List(ctx, &all); err != nil {
 		t.Fatal(err)
 	}
-	count, err := rewriteSecrets(ctx, c, c, 2)
-	if err != nil || count != int64(len(all.Items)) || count < 7 {
-		t.Fatalf("count %d of %d err %v", count, len(all.Items), err)
+	writer := newScriptedWriter(c)
+	for index := range all.Items {
+		writer.moved[all.Items[index].Namespace+"/"+all.Items[index].Name] = true
+	}
+	result, err := rewriteSecrets(ctx, c, writer, 2)
+	if err != nil || result.Updated != int64(len(all.Items)) || result.Updated < 7 {
+		t.Fatalf("result %+v of %d err %v", result, len(all.Items), err)
 	}
 	var after corev1.SecretList
 	if err := c.List(ctx, &after); err != nil {
@@ -252,7 +255,7 @@ func (u updateFails) Update(context.Context, client.Object, ...client.UpdateOpti
 	return u.err
 }
 
-func TestRewriteSecretsSkipsAConflictAndStopsOnAnotherError(t *testing.T) {
+func TestRewriteSecretsReportsEverySecretThatCannotBeWritten(t *testing.T) {
 	c, _ := StartTestEnv(t)
 	ctx := context.Background()
 	createSecrets(t, c, "rewrite-c", 3)
@@ -260,15 +263,15 @@ func TestRewriteSecretsSkipsAConflictAndStopsOnAnotherError(t *testing.T) {
 	if err := c.List(ctx, &all); err != nil {
 		t.Fatal(err)
 	}
-	conflict := schema.GroupResource{Resource: "secrets"}
-	skipping := updateFails{Client: c, err: apierrors.NewConflict(conflict, "x", errors.New("changed"))}
-	count, err := rewriteSecrets(ctx, c, skipping, 2)
-	if err != nil || count != int64(len(all.Items)) {
-		t.Fatalf("count %d err %v", count, err)
+	conflict := updateFails{Client: c, err: apierrors.NewConflict(secretsResource, "x", errors.New("changed"))}
+	result, err := rewriteSecrets(ctx, c, conflict, 2)
+	if err != nil || len(result.Failed) != len(all.Items) || result.Updated != 0 {
+		t.Fatalf("a conflict that stays must be reported: %+v err %v", result, err)
 	}
 	failing := updateFails{Client: c, err: errors.New("forbidden")}
-	if _, err := rewriteSecrets(ctx, c, failing, 2); err == nil {
-		t.Fatal("another error must stop the rewrite")
+	result, err = rewriteSecrets(ctx, c, failing, 2)
+	if err != nil || len(result.Failed) != len(all.Items) {
+		t.Fatalf("result %+v err %v", result, err)
 	}
 }
 
