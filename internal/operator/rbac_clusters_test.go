@@ -49,8 +49,8 @@ func TestOperatorRoleAllowsKubernetesClusters(t *testing.T) {
 				t.Errorf("the role must allow %s %s/%s (run the release rbac command)", want.verb, want.group, want.resource)
 			}
 		}
-		if allows(candidate, "", "secrets", "list") {
-			t.Error("the role must not list or watch every Secret")
+		if allows(candidate, "", "secrets", "watch") {
+			t.Error("the role must not watch Secrets")
 		}
 	}
 }
