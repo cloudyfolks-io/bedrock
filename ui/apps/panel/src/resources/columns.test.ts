@@ -38,6 +38,26 @@ describe("build columns", () => {
   });
 });
 
+const kubernetesCluster = (spec: Record<string, unknown>, status: Record<string, unknown>): KubeObject =>
+  ({ apiVersion: "bedrock.cloudyfolks.io/v1alpha1", kind: "KubernetesCluster", metadata: { name: "prod", namespace: "acme-web" }, spec, status }) as KubeObject;
+
+describe("kubernetes cluster columns", () => {
+  const columns = columnsByPlural.kubernetesclusters ?? [];
+
+  it("sorts the workers by the running count", () => {
+    const workers = columns.find((def) => def.id === "workers");
+    const spec = { workers: [{ name: "a" }, { name: "b" }, { name: "c" }] };
+    expect(workers?.sortValue?.(kubernetesCluster(spec, { workers: [{ name: "a", phase: "Running" }, { name: "b", phase: "Starting" }, { name: "c", phase: "Running" }] }))).toBe(2);
+    expect(workers?.sortValue?.(kubernetesCluster(spec, {}))).toBe(0);
+  });
+
+  it("sorts by version and endpoint", () => {
+    const object = kubernetesCluster({ version: "v1.36.3+k0s.1" }, { endpoint: "https://10.100.0.10:6443" });
+    expect(columns.find((def) => def.id === "version")?.sortValue?.(object)).toBe("v1.36.3+k0s.1");
+    expect(columns.find((def) => def.id === "endpoint")?.sortValue?.(object)).toBe("https://10.100.0.10:6443");
+  });
+});
+
 describe("container columns", () => {
   const columns = columnsByPlural.containers ?? [];
 

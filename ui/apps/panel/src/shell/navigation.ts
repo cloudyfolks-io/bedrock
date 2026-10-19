@@ -50,7 +50,7 @@ function projectNavigation(project: string): NavSection[] {
     {
       id: "compute",
       label: msg({ id: "nav.section.compute", message: "Compute" }),
-      items: [item("vms", msg({ id: "nav.item.vms", message: "Virtual machines" }), base), item("containers", msg({ id: "nav.item.containers", message: "Containers" }), base), item("builds", msg({ id: "nav.item.builds", message: "Builds" }), base), item("ssh-keys", msg({ id: "nav.item.sshKeys", message: "SSH keys" }), base)],
+      items: [item("vms", msg({ id: "nav.item.vms", message: "Virtual machines" }), base), item("containers", msg({ id: "nav.item.containers", message: "Containers" }), base), item("builds", msg({ id: "nav.item.builds", message: "Builds" }), base), item("kubernetes-clusters", msg({ id: "nav.item.kubernetesClusters", message: "Kubernetes clusters" }), base), item("ssh-keys", msg({ id: "nav.item.sshKeys", message: "SSH keys" }), base)],
     },
     {
       id: "storage",

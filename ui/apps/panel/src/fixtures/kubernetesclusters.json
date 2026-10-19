@@ -1,0 +1,157 @@
+{
+  "apiVersion": "bedrock.cloudyfolks.io/v1alpha1",
+  "kind": "KubernetesClusterList",
+  "metadata": {
+    "resourceVersion": "100"
+  },
+  "items": [
+    {
+      "apiVersion": "bedrock.cloudyfolks.io/v1alpha1",
+      "kind": "KubernetesCluster",
+      "metadata": {
+        "name": "prod",
+        "uid": "uid-kubernetescluster-prod",
+        "resourceVersion": "100",
+        "creationTimestamp": "2026-10-01T10:00:00Z",
+        "namespace": "acme-web"
+      },
+      "spec": {
+        "version": "v1.36.3+k0s.1",
+        "network": {
+          "subnetRef": "default",
+          "podCIDR": "100.64.0.0/16",
+          "serviceCIDR": "100.65.0.0/16"
+        },
+        "controlPlane": {
+          "securityGroups": ["k8s"]
+        },
+        "workers": [
+          {
+            "name": "a",
+            "compute": {
+              "cores": 2,
+              "memoryMiB": 4096
+            },
+            "rootDisk": {
+              "sizeGi": 40
+            },
+            "image": {
+              "name": "ubuntu-24.04",
+              "scope": "cluster"
+            },
+            "securityGroups": ["k8s"]
+          },
+          {
+            "name": "b",
+            "compute": {
+              "cores": 4,
+              "memoryMiB": 8192
+            },
+            "rootDisk": {
+              "sizeGi": 80
+            },
+            "image": {
+              "name": "ubuntu-24.04",
+              "scope": "cluster"
+            },
+            "securityGroups": ["k8s"]
+          }
+        ]
+      },
+      "status": {
+        "observedGeneration": 1,
+        "phase": "Ready",
+        "controlPlane": {
+          "address": "10.100.0.10",
+          "ready": true
+        },
+        "endpoint": "https://10.100.0.10:6443",
+        "kubeconfigSecret": "prod-kubeconfig",
+        "workers": [
+          {
+            "name": "a",
+            "phase": "Running",
+            "vm": "prod-a"
+          },
+          {
+            "name": "b",
+            "phase": "Running",
+            "vm": "prod-b"
+          }
+        ],
+        "conditions": [
+          {
+            "type": "Ready",
+            "status": "True",
+            "reason": "Ready",
+            "message": "the control plane and 2 workers are ready",
+            "lastTransitionTime": "2026-10-01T10:20:00Z"
+          }
+        ]
+      }
+    },
+    {
+      "apiVersion": "bedrock.cloudyfolks.io/v1alpha1",
+      "kind": "KubernetesCluster",
+      "metadata": {
+        "name": "staging",
+        "uid": "uid-kubernetescluster-staging",
+        "resourceVersion": "101",
+        "creationTimestamp": "2026-10-02T10:00:00Z",
+        "namespace": "acme-web"
+      },
+      "spec": {
+        "version": "v1.36.3+k0s.1",
+        "network": {
+          "subnetRef": "default",
+          "podCIDR": "100.64.0.0/16",
+          "serviceCIDR": "100.65.0.0/16"
+        },
+        "controlPlane": {
+          "securityGroups": ["k8s"]
+        },
+        "workers": [
+          {
+            "name": "a",
+            "compute": {
+              "cores": 2,
+              "memoryMiB": 4096
+            },
+            "rootDisk": {
+              "sizeGi": 40
+            },
+            "image": {
+              "name": "ubuntu-24.04",
+              "scope": "cluster"
+            },
+            "securityGroups": ["k8s"]
+          }
+        ]
+      },
+      "status": {
+        "observedGeneration": 1,
+        "phase": "Provisioning",
+        "controlPlane": {
+          "address": "10.100.0.11",
+          "ready": false
+        },
+        "endpoint": "https://10.100.0.11:6443",
+        "workers": [
+          {
+            "name": "a",
+            "phase": "Pending"
+          }
+        ],
+        "conditions": [
+          {
+            "type": "Ready",
+            "status": "False",
+            "reason": "ControlPlaneNotReady",
+            "message": "the control plane pod is not ready",
+            "lastTransitionTime": "2026-10-02T10:00:30Z"
+          }
+        ]
+      }
+    }
+  ]
+}

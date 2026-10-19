@@ -85,6 +85,7 @@ rules:
   resources:
   - controllerrevisions
   - daemonsets
+  - statefulsets
   verbs:
   - get
   - list
@@ -177,6 +178,8 @@ rules:
   - images/status
   - internetgateways
   - internetgateways/status
+  - kubernetesclusters
+  - kubernetesclusters/status
   - loadbalancers
   - loadbalancers/status
   - networkpeerings
@@ -244,6 +247,7 @@ rules:
   resources:
   - builds/finalizers
   - containers/finalizers
+  - kubernetesclusters/finalizers
   - securitygroups/finalizers
   - subnets/finalizers
   - virtualmachines/finalizers
@@ -386,6 +390,18 @@ rules:
   - virtualmachineclusterpreferences
   verbs:
   - get
+- apiGroups:
+  - k0smotron.io
+  resources:
+  - clusters
+  - jointokenrequests
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - watch
 - apiGroups:
   - k8s.cni.cncf.io
   resources:

@@ -130,6 +130,15 @@ const containerAddresses: ColumnDef = {
   sortValue: (object) => String(listAt(object, "status.addresses")[0] ?? ""),
 };
 
+const runningWorkers = (object: KubeObject): number => listAt(object, "status.workers").filter((entry) => (entry as { phase?: string }).phase === "Running").length;
+
+const workers: ColumnDef = {
+  id: "workers",
+  label: msg({ id: "col.workers", message: "Workers" }),
+  render: (object) => `${String(runningWorkers(object))}/${String(listAt(object, "spec.workers").length)}`,
+  sortValue: runningWorkers,
+};
+
 const replicas: ColumnDef = {
   id: "replicas",
   label: msg({ id: "col.replicas", message: "Replicas" }),
@@ -280,6 +289,7 @@ export const columnsByPlural: Record<string, ColumnDef[]> = {
   virtualmachines: [name, phase, text("node", L.node, "status.node"), addresses, { id: "instanceType", label: L.instanceType, render: (object) => vmSize(object) || dash, sortValue: vmSize }, age],
   containers: [name, phase, ltrText("image", L.image, "spec.image"), replicas, containerAddresses, age],
   builds: [name, phase, text("type", L.type, "spec.type"), ltrText("image", L.image, "spec.output.image"), age],
+  kubernetesclusters: [name, phase, version("version", L.version, "spec.version"), ltrText("endpoint", L.endpoint, "status.endpoint"), workers, age],
   sshkeys: [
     name,
     { id: "keyType", label: L.keyType, render: (object) => textAt(object, "spec.publicKey").split(" ")[0] || dash, sortValue: (object) => textAt(object, "spec.publicKey").split(" ")[0] ?? "" },

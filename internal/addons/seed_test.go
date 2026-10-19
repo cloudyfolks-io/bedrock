@@ -57,8 +57,8 @@ func TestSeedCreatesKnownAddons(t *testing.T) {
 	if err := Seed(context.Background(), c); err != nil {
 		t.Fatal(err)
 	}
-	if !getAddon(t, c, "kata").Spec.Enabled || getAddon(t, c, "loki").Spec.Enabled {
-		t.Fatal("defaults are kata on and loki off")
+	if !getAddon(t, c, "kata").Spec.Enabled || getAddon(t, c, "loki").Spec.Enabled || getAddon(t, c, "clusters").Spec.Enabled {
+		t.Fatal("defaults are kata on, loki and clusters off")
 	}
 	if getAddon(t, c, "kata").Labels["bedrock.cloudyfolks.io/kind"] != "Addon" {
 		t.Fatal("kind label missing")
