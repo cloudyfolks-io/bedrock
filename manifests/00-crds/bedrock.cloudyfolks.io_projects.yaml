@@ -78,6 +78,10 @@ spec:
                 x-kubernetes-list-type: atomic
               quota:
                 properties:
+                  containers:
+                    format: int32
+                    minimum: 0
+                    type: integer
                   cpu:
                     anyOf:
                     - type: integer
@@ -182,6 +186,10 @@ spec:
                 type: string
               usage:
                 properties:
+                  containers:
+                    format: int32
+                    minimum: 0
+                    type: integer
                   cpu:
                     anyOf:
                     - type: integer

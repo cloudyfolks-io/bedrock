@@ -66,8 +66,8 @@ A project has three roles.
 
 | Role | Can do |
 |---|---|
-| viewer | Read project objects, pods, logs, services and events. Cannot read Secrets. |
-| editor | All viewer rights. Create and change project objects, pods, Deployments and Secrets. Run `exec`. Start, stop, restart and snapshot VMs. Open VM consoles. Upload images. |
+| viewer | Read project objects, pods, logs, services and events. Read the logs of containers. Cannot read Secrets. |
+| editor | All viewer rights. Create and change project objects, pods, Deployments and Secrets. Run `exec`. Start, stop, restart and snapshot VMs. Open VM consoles. Upload images. Run `exec` in a Container and restart it. |
 | owner | All editor rights. Delete many objects at once. Write NetworkPolicies. |
 
 No project role can migrate a VM.
@@ -133,8 +133,11 @@ The quota of a project becomes one ApplicationAwareResourceQuota.
 | memory | requests.memory |
 | storage | requests.storage |
 | vms | count/virtualmachines.bedrock.cloudyfolks.io |
+| containers | count/containers.bedrock.cloudyfolks.io |
 
 A VM counts its CPU and memory under the same keys as a Pod.
+A Container counts the requests of its pods under the same keys.
+The pods of a Container run in Kata, so the quota also counts the overhead of the RuntimeClass `kata`, which is 512Mi memory and 250m CPU for each pod.
 
 The quota of a tenant has three kinds of ceiling.
 
