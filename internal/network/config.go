@@ -58,8 +58,8 @@ type BGP struct {
 }
 
 type LoadBalancerPlane struct {
-	CIDR    string
-	Gateway string
+	CIDR    netip.Prefix
+	Gateway netip.Addr
 }
 
 type Config struct {
@@ -117,9 +117,9 @@ func parseLoadBalancerPlane(effective map[string]string) (LoadBalancerPlane, err
 	prefix, _ := netip.ParsePrefix(effective[keyLBCIDR])
 	gateway, _ := netip.ParseAddr(effective[keyLBGateway])
 	if !prefix.Contains(gateway) || isNetworkOrBroadcast(prefix, gateway) {
-		return LoadBalancerPlane{}, fmt.Errorf("the setting %s %q must be a host address inside %s %q", keyLBGateway, gateway, keyLBCIDR, prefix)
+		return LoadBalancerPlane{}, fmt.Errorf("the setting %s %q must be a host address inside %s %q", keyLBGateway, effective[keyLBGateway], keyLBCIDR, effective[keyLBCIDR])
 	}
-	return LoadBalancerPlane{CIDR: prefix.String(), Gateway: gateway.String()}, nil
+	return LoadBalancerPlane{CIDR: prefix, Gateway: gateway}, nil
 }
 
 func parseBGP(effective map[string]string) (BGP, error) {

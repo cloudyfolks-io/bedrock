@@ -110,7 +110,7 @@ func (r *NetworkReconciler) Reconcile(ctx context.Context, req reconcile.Request
 
 func (r *NetworkReconciler) applyLBPlane(ctx context.Context, network *v1alpha1.Network, cfg Config) (bool, error) {
 	meta := fabric.Meta{Name: LBSubnetName(network.Name), Labels: ObjectLabels("Network", network.Name, network.Spec.TenantRef, ""), Annotations: OwnerAnnotations(network)}
-	subnet := fabric.PlaneSubnet(meta, VpcName(network.Name), cfg.LoadBalancer.CIDR, cfg.LoadBalancer.Gateway)
+	subnet := fabric.PlaneSubnet(meta, VpcName(network.Name), cfg.LoadBalancer.CIDR.String(), cfg.LoadBalancer.Gateway.String())
 	if conflict, err := r.conflicts(ctx, subnet, network); err != nil || conflict {
 		return conflict, err
 	}

@@ -2,6 +2,7 @@ package network
 
 import (
 	"context"
+	"net/netip"
 	"slices"
 	"strconv"
 	"strings"
@@ -36,11 +37,11 @@ func TestParseConfigDefaults(t *testing.T) {
 
 func TestParseConfigLoadBalancerPlane(t *testing.T) {
 	cfg, err := ParseConfig(map[string]string{})
-	if err != nil || cfg.LoadBalancer != (LoadBalancerPlane{CIDR: "100.69.0.0/24", Gateway: "100.69.0.1"}) {
+	if err != nil || cfg.LoadBalancer != (LoadBalancerPlane{CIDR: netip.MustParsePrefix("100.69.0.0/24"), Gateway: netip.MustParseAddr("100.69.0.1")}) {
 		t.Fatalf("defaults %+v, error %v", cfg.LoadBalancer, err)
 	}
 	cfg, err = ParseConfig(map[string]string{"network.load-balancer.cidr": "100.70.0.0/16", "network.load-balancer.gateway": "100.70.0.254"})
-	if err != nil || cfg.LoadBalancer != (LoadBalancerPlane{CIDR: "100.70.0.0/16", Gateway: "100.70.0.254"}) {
+	if err != nil || cfg.LoadBalancer != (LoadBalancerPlane{CIDR: netip.MustParsePrefix("100.70.0.0/16"), Gateway: netip.MustParseAddr("100.70.0.254")}) {
 		t.Fatalf("custom %+v, error %v", cfg.LoadBalancer, err)
 	}
 }
