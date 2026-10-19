@@ -254,6 +254,7 @@ If a name changes in an area, change it in that file only.
 | `network.sh` | The provider network and the Network status. The fabric-frr agent. Subnet rules. The security group on the VM. A VM with a pinned address, a Subnet MTU and Subnet DNS servers. An ElasticIP in L2 mode with the ARP and ping proof. An ElasticIP without a provider network. The ElasticIP quota. A LoadBalancer and a DNSZone. Isolation rules. |
 | `container.sh` | The proof of the pod network: a hand-made Pod and a hand-made Deployment get the network metadata of a `Container`. Then the kind itself: the runtime gate, replicas, stop and start, a fixed address, autoscale, a Volume, a LoadBalancer target, logs, exec and restart through the proxy, and the cleanup. |
 | `objectstorage.sh` | The object store, two users and one bucket. A put and a get from inside the cluster. A denied read by the other user. |
+| `database.sh` | The database area, when `E2E_DATABASE_VIP_RANGE` is set: a PostgreSQL database with its proxy address, a probe from a VM in the subnet, a user and a logical database, a point-in-time restore into a second database, the role checks for `bedrock-dbaas`, and the cleanup that leaves only the tombstones. |
 | `backup.sh` | The SeaweedFS target. A VM backup with one entry. A restore with `replace: true`. A restore of a missing backup. |
 | `panel.sh` | The panel at `console.<host>`, the redirect from the apex, the API host and the Go test for the login and the watch stream. |
 | `metering.sh` | `Project.status.usage` and `Tenant.status.usage`. The AAQ count of used VMs against the VMs in the project. The metering series in Prometheus with the labels `tenant` and `project`. The proxy route `/proxy/v1/metrics/range`, which returns points for the query `vm.cpu`. The serial console lines in Loki. |
@@ -356,3 +357,19 @@ The tenant job does not check these items.
 - The migration of a VM to a second node.
 - A full control-plane join of a second node. The tenant job checks only the fetch of the encryption file.
 - The catalog download of the ClusterImage list.
+
+## Database steps
+
+The steps of `hack/e2e/tenant/database.sh` need the services plane and a kube-vip range.
+Set `E2E_DATABASE_VIP_RANGE` to an IPv4 network of that plane, for example `100.66.16.0/21`.
+Without the variable, every database step prints a line and passes.
+
+| Step | Check |
+| --- | --- |
+| `database_prepare` | Turns `database.enabled` on, sets `database.vip-range`, turns the addon `cnpg` on and makes the class `e2e-small`. |
+| `database_create` | A `Database` becomes `Ready`. The Secret `orders-admin` has the credentials and the address. The project namespace holds the proxy pod and no engine pod, no cluster and no platform Secret. |
+| `database_sslrequest` | A VM in the subnet sends the PostgreSQL SSLRequest bytes to the proxy address and the answer is `N`. |
+| `database_access` | A `DatabaseSchema` and a `DatabaseUser` become `Ready`. An exec in the engine pod shows the roles and the database. |
+| `database_backup_restore` | A backup completes, rows are inserted, a second `Database` restores to a time between two inserts and holds only the earlier rows. |
+| `database_isolation` | The project owner cannot read pods, secrets or CloudNativePG objects of `bedrock-dbaas`, cannot make a certificate and cannot write the catalog. |
+| `database_cleanup` | Deleting both databases leaves no engine object. Only the two tombstones stay. |
