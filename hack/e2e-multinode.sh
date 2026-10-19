@@ -19,7 +19,7 @@ min_mem_gb=${LAB_MIN_MEM_GB:-46}
 remote_config_file=/root/multinode.yaml
 join_roles=control-plane,ceph-osd,fabric-gateway,workload
 release_config=dist/components-e2e.yaml
-remote_files=(tenant/tenancy tenant/images multinode/cluster multinode/guest multinode/vm multinode/drain)
+remote_files=(tenant/tenancy tenant/images multinode/cluster multinode/guest multinode/vm multinode/drain multinode/restore)
 vm_env=()
 bundle_make_args=("RELEASE_CONFIG=$release_config")
 vm_path=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
@@ -31,7 +31,7 @@ lab_dir=$repo/dist/lab-multinode
 state_file=$lab_dir/state.env
 bundle=$repo/dist/bedrock-dev-bundle-$arch.tar.zst
 bedrock_bin=$repo/dist/bedrock-dev-linux-$arch
-snapshot_tag=after-tenant
+snapshot_tag=tenant-ready
 
 source "$repo/hack/lab/lib.sh"
 
@@ -149,6 +149,60 @@ stage_tenant() {
   vm_run 1 setup_tenant
 }
 
+script_reset_node() {
+  cat <<'SCRIPT'
+k0s stop || true
+k0s reset
+SCRIPT
+}
+
+restart_node() {
+  local id=$1
+  limactl stop "$(vm_name "$id")"
+  vm_start_existing "$id"
+  vm_prepare "$id"
+  vm_run "$id" "$(vm_provision)"
+  expect_equal "$(node_ip "$id")" "$(discover_ip "$id")" "address of $(vm_name "$id") after the restart"
+}
+
+rejoin_node() {
+  local id=$1 token=$2
+  vm_run "$id" "$(script_reset_node)" || return 1
+  restart_node "$id" || return 1
+  vm_run "$id" "$(script_offline_registry)" || return 1
+  join_node "$id" "$token"
+}
+
+restart_summary() {
+  join -j 1 <(printf '%s\n' "$1" | sort) <(printf '%s\n' "$2" | sort) |
+    awk '{ restarted = ($3 != $5); total++; count += restarted; printf "info: restore: %s on %s restarted=%d\n", $1, $2, restarted } END { printf "info: restore: %d of %d VMs restarted\n", count, total }'
+}
+
+check_restore() {
+  local before after floor snapshot token evicted_before evicted_after
+  vm_run 1 restore_fixture || return 1
+  before=$(vm_run 1 vm_listing) || return 1
+  evicted_before=$(vm_run 1 eviction_events) || return 1
+  floor=$(vm_run 1 'date -u +%Y%m%dT%H%M%SZ') || return 1
+  snapshot=$(vm_run 1 "take_etcd_snapshot $floor") || return 1
+  [ -n "$snapshot" ] || {
+    echo "no etcd snapshot after $floor" >&2
+    return 1
+  }
+  vm_run 3 'systemctl stop k0scontroller' || return 1
+  vm_run 2 'systemctl stop k0scontroller' || return 1
+  vm_run 1 "restore_node_one $snapshot" || return 1
+  vm_run 1 'retry_until 900 kubectl get --raw=/readyz' || return 1
+  token=$(vm_run 1 "$bedrock_bin token create --roles $join_roles --expiry 2h") || return 1
+  rejoin_node 2 "$token" || return 1
+  rejoin_node 3 "$token" || return 1
+  vm_run 1 "$bedrock_bin restart-workloads" || return 1
+  after=$(vm_run 1 restore_settle) || return 1
+  evicted_after=$(vm_run 1 eviction_events) || return 1
+  restart_summary "$before" "$after"
+  echo "info: restore: TaintManagerEviction events: $evicted_before before the restore, $evicted_after after"
+}
+
 check_entries=(
   "three control-plane nodes|remote_check check_control_plane"
   "Ceph runs 3 monitors and 6 OSDs on 3 hosts|remote_check check_ceph_topology"
@@ -161,6 +215,10 @@ check_entries=(
   "SMBIOS UUID of one VM name in two namespaces (Q3)|remote_check check_smbios"
   "Subnet MTU 1500 on an underlay of 1500 (finding)|remote_check check_mtu_1500_finding"
   "drain with LiveMigrateIfPossible and LiveMigrate|remote_check check_drain"
+  "etcd restore with running VMs|check_restore"
+  "three control-plane nodes after the restore|remote_check check_control_plane"
+  "Ceph runs 3 monitors and 6 OSDs on 3 hosts after the restore|remote_check check_ceph_topology"
+  "every replicated pool has size 3 after the restore|remote_check check_pool_sizes"
 )
 
 collect_diagnostics() {
