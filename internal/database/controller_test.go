@@ -152,3 +152,40 @@ func TestDeleteWithoutTheFinalizerNeedsNoWork(t *testing.T) {
 	reconcileOnce(t, c, db)
 	eventually(t, "the database to go away", func() bool { return !exists(c, db) })
 }
+
+func TestDeleteRemovesTheKeySecretsOfBothCertificatesAndLeavesForeignOnes(t *testing.T) {
+	w := newWorld(t, nil)
+	ctx := context.Background()
+	w.bringUp()
+	uid := string(w.db.UID)
+	labels := map[string]string{LabelInstance: uid, LabelManagedBy: ManagedBy}
+	server := &corev1.Secret{ObjectMeta: metav1.ObjectMeta{Name: ServerSecretName(w.db.UID), Namespace: PlatformNamespace, Labels: labels}}
+	client1 := &corev1.Secret{ObjectMeta: metav1.ObjectMeta{Name: EndpointName(*w.db), Namespace: w.namespace, Labels: labels}}
+	foreign := &corev1.Secret{ObjectMeta: metav1.ObjectMeta{Name: "orders-other", Namespace: w.namespace}}
+	for _, secret := range []*corev1.Secret{server, client1, foreign} {
+		create(t, w.c, secret)
+	}
+	must(t, w.c.Delete(ctx, w.db))
+	for i := 0; i < 2; i++ {
+		_, err := w.r.Reconcile(ctx, ctrl.Request{NamespacedName: client.ObjectKeyFromObject(w.db)})
+		must(t, err)
+	}
+	if exists(w.c, server) || exists(w.c, client1) {
+		t.Fatal("a key Secret of the database stayed")
+	}
+	if !exists(w.c, foreign) {
+		t.Fatal("the delete removed a Secret of the tenant")
+	}
+}
+
+func TestDeleteDoesNotTakeASecretOfTheProxyNameThatTheDatabaseDoesNotOwn(t *testing.T) {
+	w := newWorld(t, nil)
+	ctx := context.Background()
+	w.bringUp()
+	taken := &corev1.Secret{ObjectMeta: metav1.ObjectMeta{Name: EndpointName(*w.db), Namespace: w.namespace}}
+	create(t, w.c, taken)
+	must(t, DeleteProxySecret(ctx, w.c, *w.db))
+	if !exists(w.c, taken) {
+		t.Fatal("a Secret without the instance label was deleted")
+	}
+}

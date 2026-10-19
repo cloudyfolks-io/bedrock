@@ -3,6 +3,7 @@ package database
 import (
 	"context"
 
+	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -136,6 +137,25 @@ func EngineObjects(ctx context.Context, c client.Reader, db v1alpha1.Database) (
 		}
 	}
 	return found, nil
+}
+
+func DeleteProxySecret(ctx context.Context, c client.Client, db v1alpha1.Database) error {
+	certificate := &unstructured.Unstructured{}
+	certificate.SetGroupVersionKind(CertificateGVK)
+	certificate.SetNamespace(db.Namespace)
+	certificate.SetName(EndpointName(db))
+	if err := c.Delete(ctx, certificate); client.IgnoreNotFound(err) != nil && !meta.IsNoMatchError(err) {
+		return err
+	}
+	var secret corev1.Secret
+	err := c.Get(ctx, client.ObjectKey{Namespace: db.Namespace, Name: EndpointName(db)}, &secret)
+	if apierrors.IsNotFound(err) || err == nil && secret.Labels[LabelInstance] != Name(db.UID) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	return client.IgnoreNotFound(c.Delete(ctx, &secret))
 }
 
 func DeleteEngineObjects(ctx context.Context, c client.Client, db v1alpha1.Database) (bool, error) {
