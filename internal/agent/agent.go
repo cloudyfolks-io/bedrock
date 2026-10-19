@@ -187,6 +187,7 @@ func Tick(ctx context.Context, c client.Client, deps Deps) error {
 		Depot:        bounded(ctx, deps.ProbeTimeout, func(probeCtx context.Context) *v1alpha1.DepotStatus { return depotStatus(probeCtx, c, deps) }),
 		Restore:      readRestoreMarker(deps.Root),
 		Authn:        withAuditMessage(syncAuthnFiles(ctx, c, deps, current), auditErr),
+		Encryption:   syncEncryptionStatus(deps, current),
 	}
 	if invErr != nil {
 		next.Inventory = current.Status.Inventory
