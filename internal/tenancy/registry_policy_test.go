@@ -237,3 +237,31 @@ func TestNonAdminCannotSetTheCredentialAdoptAnnotation(t *testing.T) {
 	}
 	mustCreate(t, root, namedCredential("adopted", map[string]string{"bedrock.cloudyfolks.io/adopt": "true"}))
 }
+
+func TestRegistryAnnotationGuardHoldsWithoutTheNameRules(t *testing.T) {
+	admin, alice, root := registryNameWorld(t)
+	if err := admin.Delete(context.Background(), &corev1.ConfigMap{ObjectMeta: metav1.ObjectMeta{Name: "registry-name-rules", Namespace: "bedrock-system"}}); err != nil {
+		t.Fatal(err)
+	}
+	waitFor(t, func() bool {
+		probe := namedRegistry("open", "library", nil)
+		err := alice.Create(context.Background(), probe)
+		if err == nil {
+			_ = admin.Delete(context.Background(), probe)
+		}
+		return err == nil
+	})
+	for _, key := range []string{"bedrock.cloudyfolks.io/adopt", "bedrock.cloudyfolks.io/reserved-name-approved"} {
+		err := alice.Create(context.Background(), namedRegistry("guarded", "acme-guarded", map[string]string{key: "true"}))
+		if !apierrors.IsForbidden(err) || !strings.Contains(err.Error(), annotationMessage) {
+			t.Fatalf("%s on create without the rules: err = %v", key, err)
+		}
+	}
+	plain := namedRegistry("plain-late", "acme-plain-late", nil)
+	mustCreate(t, alice, plain)
+	plain.Annotations = map[string]string{"bedrock.cloudyfolks.io/adopt": "true"}
+	if err := alice.Update(context.Background(), plain); !apierrors.IsForbidden(err) {
+		t.Fatalf("adopt on update without the rules: err = %v", err)
+	}
+	mustCreate(t, root, namedRegistry("adopted-by-admin", "acme-admin", map[string]string{"bedrock.cloudyfolks.io/adopt": "true"}))
+}
