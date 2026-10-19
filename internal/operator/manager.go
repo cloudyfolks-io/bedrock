@@ -33,21 +33,35 @@ type RunOptions struct {
 	ReleaseDir string
 }
 
-func Run(ctx context.Context, cfg *rest.Config, scheme *runtime.Scheme, opts RunOptions) error {
-	bundle, err := release.Load(os.DirFS(opts.ReleaseDir))
-	if err != nil {
-		return fmt.Errorf("load release from %s: %w", opts.ReleaseDir, err)
-	}
-	mgr, err := ctrl.NewManager(cfg, ctrl.Options{
+func managerOptions(scheme *runtime.Scheme) ctrl.Options {
+	return ctrl.Options{
 		Scheme:                  scheme,
 		LeaderElection:          true,
 		LeaderElectionID:        "bedrock-operator",
 		LeaderElectionNamespace: "bedrock-system",
 		Client:                  client.Options{Cache: &client.CacheOptions{DisableFor: []client.Object{&corev1.ConfigMap{}, &corev1.Secret{}}}},
-	})
+	}
+}
+
+func Run(ctx context.Context, cfg *rest.Config, scheme *runtime.Scheme, opts RunOptions) error {
+	bundle, err := release.Load(os.DirFS(opts.ReleaseDir))
+	if err != nil {
+		return fmt.Errorf("load release from %s: %w", opts.ReleaseDir, err)
+	}
+	mgr, err := ctrl.NewManager(cfg, managerOptions(scheme))
 	if err != nil {
 		return err
 	}
+	if err := setupControllers(mgr, cfg, bundle); err != nil {
+		return err
+	}
+	if err := mgr.Add(seeder{client: mgr.GetClient()}); err != nil {
+		return err
+	}
+	return mgr.Start(ctx)
+}
+
+func setupControllers(mgr ctrl.Manager, cfg *rest.Config, bundle release.Bundle) error {
 	if err := (&SettingReconciler{Client: mgr.GetClient()}).SetupWithManager(mgr); err != nil {
 		return err
 	}
@@ -67,13 +81,7 @@ func Run(ctx context.Context, cfg *rest.Config, scheme *runtime.Scheme, opts Run
 	if err := (&AddonReconciler{Client: mgr.GetClient(), Bundle: bundle, Addons: DefaultAddons(), Interval: DefaultAddonInterval, ReadyInterval: DefaultAddonReadyInterval, Exec: exec}).SetupWithManager(mgr); err != nil {
 		return err
 	}
-	if err := setupAreas(mgr, bundle); err != nil {
-		return err
-	}
-	if err := mgr.Add(seeder{client: mgr.GetClient()}); err != nil {
-		return err
-	}
-	return mgr.Start(ctx)
+	return setupAreas(mgr, bundle)
 }
 
 type seeder struct {
