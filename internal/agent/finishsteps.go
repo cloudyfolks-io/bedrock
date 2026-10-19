@@ -275,12 +275,7 @@ func archiveReader(file io.Reader, archive, root string) (io.Reader, error) {
 }
 
 func readHostIdentities(root string) ([]age.Identity, error) {
-	file, err := os.Open(filepath.Join(root, seal.HostKeyFile))
-	if err != nil {
-		return nil, err
-	}
-	defer file.Close()
-	return age.ParseIdentities(file)
+	return seal.HostIdentities(root)
 }
 
 func readK0sBackup(plain io.Reader, dest string) (string, error) {

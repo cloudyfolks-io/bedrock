@@ -312,12 +312,8 @@ rules:
   resources:
   - leases
   verbs:
-  - create
-  - delete
   - get
   - list
-  - patch
-  - update
   - watch
 - apiGroups:
   - csi.ceph.io
@@ -804,6 +800,13 @@ rules:
   - list
   - patch
   - watch
+- apiGroups:
+  - ""
+  resources:
+  - secrets
+  verbs:
+  - list
+  - update
 - apiGroups:
   - ""
   resources:

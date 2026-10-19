@@ -47,7 +47,11 @@ func (r *ClusterReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 	case routeInstall:
 		return r.reconcileInstall(ctx, cluster)
 	case routeSteady:
-		return ctrl.Result{}, r.reconcileSteady(ctx, cluster)
+		if err := r.reconcileSteady(ctx, cluster); err != nil {
+			return ctrl.Result{}, err
+		}
+		wait, err := r.reconcileEncryption(ctx)
+		return ctrl.Result{RequeueAfter: wait}, err
 	case routeOld:
 		return runUpgrade(ctx, r.upgradeEnv(), cluster, oldRole())
 	case routeNew:

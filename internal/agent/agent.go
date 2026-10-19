@@ -71,6 +71,9 @@ func Run(ctx context.Context, c client.WithWatch, deps Deps) error {
 		if err := EnableAuthnArgs(ctx, c, deps); err != nil {
 			fmt.Fprintf(os.Stderr, "agent: authn flags: %v\n", err)
 		}
+		if err := ApplyEncryption(ctx, c, deps, func() error { return Report(ctx, c, deps) }); err != nil {
+			fmt.Fprintf(os.Stderr, "agent: encryption config: %v\n", err)
+		}
 		for ready := false; !ready; {
 			select {
 			case <-ctx.Done():
@@ -164,9 +167,22 @@ type inventoryRead struct {
 }
 
 func Tick(ctx context.Context, c client.Client, deps Deps) error {
+	inventoryErr, writeErr := tick(ctx, c, deps)
+	if writeErr != nil {
+		return writeErr
+	}
+	return inventoryErr
+}
+
+func Report(ctx context.Context, c client.Client, deps Deps) error {
+	_, writeErr := tick(ctx, c, deps)
+	return writeErr
+}
+
+func tick(ctx context.Context, c client.Client, deps Deps) (inventoryErr, writeErr error) {
 	var current v1alpha1.Host
 	if err := c.Get(ctx, client.ObjectKey{Name: deps.Node}, &current); err != nil {
-		return client.IgnoreNotFound(err)
+		return nil, client.IgnoreNotFound(err)
 	}
 	gathered := bounded(ctx, deps.ProbeTimeout, func(probeCtx context.Context) inventoryRead {
 		inv, err := deps.Inventory(probeCtx, deps.Exec, deps.Root)
@@ -187,6 +203,8 @@ func Tick(ctx context.Context, c client.Client, deps Deps) error {
 		Depot:        bounded(ctx, deps.ProbeTimeout, func(probeCtx context.Context) *v1alpha1.DepotStatus { return depotStatus(probeCtx, c, deps) }),
 		Restore:      readRestoreMarker(deps.Root),
 		Authn:        withAuditMessage(syncAuthnFiles(ctx, c, deps, current), auditErr),
+		Encryption:   syncEncryptionStatus(deps, current),
+		ReportedAt:   reportTime(current.Status.ReportedAt, deps),
 	}
 	if invErr != nil {
 		next.Inventory = current.Status.Inventory
@@ -201,9 +219,18 @@ func Tick(ctx context.Context, c client.Client, deps Deps) error {
 	}
 	next.Conditions = stable(current.Status.Conditions, conditions)
 	if err := ApplyStatus(ctx, c, deps.Node, next); err != nil {
-		return err
+		return invErr, err
 	}
-	return invErr
+	return invErr, nil
+}
+
+func reportTime(previous *metav1.Time, deps Deps) *metav1.Time {
+	now := deps.Now()
+	if previous != nil && now.Sub(previous.Time) < deps.Interval/2 && !now.Before(previous.Time) {
+		return previous
+	}
+	reported := metav1.NewTime(now)
+	return &reported
 }
 
 func manage(ctx context.Context, c client.Client, deps Deps, current v1alpha1.Host) (*v1alpha1.AppliedConfig, metav1.Condition) {

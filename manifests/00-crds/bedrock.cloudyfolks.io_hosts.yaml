@@ -236,6 +236,17 @@ spec:
                 required:
                 - url
                 type: object
+              encryption:
+                properties:
+                  failedHash:
+                    type: string
+                  handledGrant:
+                    type: string
+                  hash:
+                    type: string
+                  restartPending:
+                    type: boolean
+                type: object
               hostname:
                 type: string
               inventory:
@@ -345,6 +356,9 @@ spec:
               observedGeneration:
                 format: int64
                 type: integer
+              reportedAt:
+                format: date-time
+                type: string
               restore:
                 properties:
                   backup:
