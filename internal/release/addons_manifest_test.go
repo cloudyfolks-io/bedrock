@@ -231,3 +231,74 @@ func TestCNPGImagesAreInTheImageList(t *testing.T) {
 		}
 	}
 }
+
+func TestPerconaComponentRendersTheOperator(t *testing.T) {
+	bundle, _ := buildReal(t, "percona-ps")
+	objects := bundle.Addons["percona-ps"]
+	for kind, name := range map[string]string{"Namespace": "ps-operator", "Deployment": "percona-ps-ps-operator"} {
+		if objectNamed(objects, kind, name) == nil {
+			t.Errorf("missing %s %s", kind, name)
+		}
+	}
+	for _, obj := range objects {
+		if obj.GetKind() == "CustomResourceDefinition" {
+			t.Errorf("addon holds CRD %s", obj.GetName())
+		}
+		for key := range obj.GetAnnotations() {
+			if strings.HasPrefix(key, "helm.sh/hook") {
+				t.Errorf("%s %s has %s", obj.GetKind(), obj.GetName(), key)
+			}
+		}
+	}
+	deployment := objectNamed(objects, "Deployment", "percona-ps-ps-operator")
+	if deployment == nil {
+		return
+	}
+	containers, _, _ := unstructured.NestedSlice(deployment.Object, "spec", "template", "spec", "containers")
+	env, _, _ := unstructured.NestedSlice(containers[0].(map[string]any), "env")
+	for _, item := range env {
+		entry := item.(map[string]any)
+		if entry["name"] == "WATCH_NAMESPACE" && entry["value"] != "bedrock-dbaas" {
+			t.Errorf("WATCH_NAMESPACE is %v", entry["value"])
+		}
+	}
+}
+
+func TestPerconaComponentPutsCRDsInTheBaseGroup(t *testing.T) {
+	bundle, _ := buildReal(t, "percona-ps")
+	var crds []string
+	for _, group := range bundle.Groups {
+		if group.Name != "crds" {
+			continue
+		}
+		for _, obj := range group.Objects {
+			crds = append(crds, obj.GetName())
+		}
+	}
+	for _, name := range []string{"perconaservermysqls.ps.percona.com", "perconaservermysqlbackups.ps.percona.com", "perconaservermysqlrestores.ps.percona.com"} {
+		if !slices.Contains(crds, name) {
+			t.Errorf("missing CRD %s", name)
+		}
+	}
+}
+
+func TestPerconaImagesAreInTheImageList(t *testing.T) {
+	bundle, out := buildReal(t, "percona-ps")
+	raw, err := os.ReadFile(filepath.Join(out, "images.txt"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, image := range []string{
+		"docker.io/percona/percona-server-mysql-operator:1.2.0@sha256:28bfc38c1d4b642e860fda46aa7a964fc2de11a93a6dd05fcd7de4fd782982c8",
+		"docker.io/percona/percona-server:8.4.10-10.1@sha256:01cf1439241e11c5d49312db1b18ee01a5947869c1a1dec18417d88ffaeb5717",
+		"docker.io/percona/percona-server:9.7.2-2.1@sha256:ad263f3a9b964131492485d06b8663de343d58c68063abd40a3da07fbf8f3359",
+		"docker.io/percona/percona-xtrabackup:8.4.0-6.1@sha256:f4fc511cca67d1ba0aef6752c53bdd25383235cb58f1d28e570adbc4bb67d374",
+		"docker.io/percona/percona-xtrabackup:9.7.1@sha256:41bd1636340a436012411b82b98c9d70a54fe600c29424d75749c53ca2e721c7",
+		"docker.io/percona/haproxy:2.8.18-1@sha256:726b65930d86f7342eb6bce97a38b9af934c935345e4524afda6b65c2b3213b3",
+		"docker.io/percona/percona-toolkit:3.7.1-4@sha256:9ed7a2025946ed326fb26fbfa45b49c81658be5bfe87a0ba5c34441df05e8dde",
+	} {
+		if !contains(string(raw), image) || !slices.Contains(bundle.Images, image) {
+			t.Errorf("image %s missing from %v", image, bundle.Images)
+		}
+	}
+}

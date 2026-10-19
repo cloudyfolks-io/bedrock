@@ -12,6 +12,7 @@ import (
 func databaseDefinitions() []Definition {
 	return []Definition{
 		{"cnpg.enabled", "false", "Initial state of the cnpg addon. Change the Addon object after install.", boolean},
+		{"percona-ps.enabled", "false", "Initial state of the percona-ps addon. Change the Addon object after install.", boolean},
 		{"database.enabled", "false", "Turns the Database kinds on. When false, no platform object exists and a Database shows the reason DatabaseDisabled.", boolean},
 		{"database.capacity.cpu", "32", "CPU requests that all engine pods may hold together in the namespace bedrock-dbaas.", positiveQuantity},
 		{"database.capacity.memory", "128Gi", "Memory requests that all engine pods may hold together in the namespace bedrock-dbaas.", positiveQuantity},
