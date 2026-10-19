@@ -725,7 +725,6 @@ rules:
   - configmaps
   - persistentvolumeclaims
   - resourcequotas
-  - secrets
   - serviceaccounts
   - services
   verbs:
@@ -745,6 +744,16 @@ rules:
   - delete
   - get
   - patch
+- apiGroups:
+  - ""
+  resources:
+  - secrets
+  verbs:
+  - create
+  - delete
+  - get
+  - patch
+  - update
 - apiGroups:
   - ""
   resources:

@@ -23,7 +23,10 @@ import (
 	"github.com/cloudyfolks-io/bedrock/internal/ssa"
 )
 
-const annotationReadyOnce = "bedrock.cloudyfolks.io/ready-once"
+const (
+	annotationReadyOnce      = "bedrock.cloudyfolks.io/ready-once"
+	annotationAppliedVersion = "bedrock.cloudyfolks.io/applied-version"
+)
 
 type Observed struct {
 	EngineReady   bool
@@ -72,7 +75,7 @@ func (r *Reconciler) converge(ctx context.Context, cfg Config, project Project, 
 
 func (r *Reconciler) prepare(ctx context.Context, in *flow) (*Refusal, error) {
 	db := *in.db
-	exists, err := r.clusterExists(ctx, db)
+	cluster, exists, err := r.clusterOf(ctx, db)
 	if err != nil {
 		return nil, err
 	}
@@ -87,6 +90,8 @@ func (r *Reconciler) prepare(ctx context.Context, in *flow) (*Refusal, error) {
 		if refused := checkNew(catalog, db); refused != nil {
 			return refused, nil
 		}
+	} else if refused := checkExisting(catalog, db, cluster); refused != nil {
+		return refused, nil
 	}
 	steps := []func(context.Context, *flow) (*Refusal, error){r.preparePlatform, r.prepareCapacity, r.prepareSubnet, r.preparePods, r.prepareVIPRange, r.prepareBackupStore, r.prepareRestore, r.prepareOperations}
 	for _, step := range steps {
@@ -97,14 +102,14 @@ func (r *Reconciler) prepare(ctx context.Context, in *flow) (*Refusal, error) {
 	return nil, nil
 }
 
-func (r *Reconciler) clusterExists(ctx context.Context, db v1alpha1.Database) (bool, error) {
+func (r *Reconciler) clusterOf(ctx context.Context, db v1alpha1.Database) (*unstructured.Unstructured, bool, error) {
 	primary := &unstructured.Unstructured{}
 	primary.SetGroupVersionKind(primaryGVK(db.Spec.Engine))
 	err := r.Live.Get(ctx, client.ObjectKey{Namespace: PlatformNamespace, Name: Name(db.UID)}, primary)
 	if apierrors.IsNotFound(err) || meta.IsNoMatchError(err) {
-		return false, nil
+		return nil, false, nil
 	}
-	return err == nil, err
+	return primary, err == nil, err
 }
 
 func (r *Reconciler) preparePlatform(ctx context.Context, in *flow) (*Refusal, error) {
@@ -246,6 +251,8 @@ func (r *Reconciler) apply(ctx context.Context, in *flow) (*Refusal, error) {
 	switch {
 	case errors.Is(err, ErrVIPRangeMissing):
 		return refusal(ReasonVIPRangeMissing, "the Setting database.vip-range is empty"), nil
+	case errors.Is(err, ErrVIPNameTaken):
+		return refusal(ReasonNameTaken, "the Service %s exists and this database does not own it", VIPName(db.UID)), nil
 	case errors.Is(err, ErrVIPRangeFull):
 		return refusal(ReasonAddressUnavailable, "the gate address range database.vip-range has no free address"), nil
 	case err != nil:
@@ -310,10 +317,12 @@ func (r *Reconciler) applyEngine(ctx context.Context, in *flow) error {
 	if err := ApplyPlan(ctx, r.Client, in.db.Spec.Engine, spec, in.plan, r.now()); err != nil {
 		return err
 	}
-	if in.db.Spec.Engine != v1alpha1.DatabaseEnginePostgreSQL {
-		return nil
+	if in.db.Spec.Engine == v1alpha1.DatabaseEnginePostgreSQL {
+		if err := r.applyHibernation(ctx, *in.db); err != nil {
+			return err
+		}
 	}
-	return r.applyHibernation(ctx, *in.db)
+	return markAppliedVersion(ctx, r.Client, in.db)
 }
 
 func (r *Reconciler) applyHibernation(ctx context.Context, db v1alpha1.Database) error {
@@ -371,6 +380,13 @@ func (r *Reconciler) applyProxy(ctx context.Context, in *flow, vip string) (*Ref
 		return refusal(ReasonAddressUnavailable, "the subnet %s has no free address", in.subnet.Name), nil
 	case err != nil:
 		return nil, fmt.Errorf("allocate the proxy address: %w", err)
+	}
+	var existing v1alpha1.SecurityGroup
+	switch err := r.Live.Get(ctx, client.ObjectKey{Namespace: in.db.Namespace, Name: SecurityGroupName(in.db.UID)}, &existing); {
+	case err == nil && !metav1.IsControlledBy(&existing, in.db):
+		return refusal(ReasonNameTaken, "the SecurityGroup %s exists and this database does not own it", existing.Name), nil
+	case err != nil && !apierrors.IsNotFound(err):
+		return nil, err
 	}
 	if err := ssa.Apply(ctx, r.Client, SecurityGroupObject(*in.db, in.project, in.subnet, vip, in.port), v1alpha1.DatabaseFieldManager); err != nil {
 		return nil, fmt.Errorf("apply the security group: %w", err)

@@ -76,7 +76,9 @@ func GateObjects(in GateInput) ([]*unstructured.Unstructured, error) {
 	if err != nil {
 		return nil, err
 	}
+	secretLabels, secretAnnotations := OwnedMetadata(db, in.Project)
 	certificate := CertificateObject(CertSpec{
+		SecretLabels: secretLabels, SecretAnnotations: secretAnnotations,
 		Name: ServerCertName(db.UID), Namespace: PlatformNamespace, SecretName: ServerSecretName(db.UID), CommonName: Name(db.UID),
 		DNSNames: []string{ServerName(Name(db.UID)), "localhost"}, IPs: []string{"127.0.0.1"}, Usages: ServerCertUsages(),
 	})

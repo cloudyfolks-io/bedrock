@@ -8,6 +8,7 @@ import (
 
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
+	storagev1 "k8s.io/api/storage/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -46,7 +47,7 @@ func newWorld(t *testing.T, edit func(*v1alpha1.DatabaseSpec)) *world {
 	fake, store := newFakeS3(t)
 	sequence := nextSequence()
 	setSetting(t, c, "database.enabled", "true")
-	setSetting(t, c, "database.vip-range", fmt.Sprintf("10.%d.0.0/24", 100+mustAtoi(sequence)))
+	setSetting(t, c, "database.vip-range", fmt.Sprintf("10.%d.%d.0/24", 100+mustAtoi(sequence)/200, mustAtoi(sequence)%200))
 	setSetting(t, c, "network.dns-servers", "100.66.0.53")
 	setSetting(t, c, "container.runtime-class", "none")
 	setAddon(t, c, "cnpg", true)
@@ -106,6 +107,11 @@ func (w *world) ensureCatalog() {
 		Spec:       v1alpha1.DatabaseVersionSpec{Engine: "postgresql", Major: "17", Image: worldPostgresImage, Port: 5432, Enabled: true},
 	}
 	if err := w.c.Create(ctx, version); err != nil && !apierrors.IsAlreadyExists(err) {
+		w.t.Fatal(err)
+	}
+	expansion := true
+	block := &storagev1.StorageClass{ObjectMeta: metav1.ObjectMeta{Name: StorageClass}, Provisioner: "test.example/block", AllowVolumeExpansion: &expansion}
+	if err := w.c.Create(ctx, block); err != nil && !apierrors.IsAlreadyExists(err) {
 		w.t.Fatal(err)
 	}
 	class := &v1alpha1.DatabaseClass{

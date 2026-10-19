@@ -95,13 +95,33 @@ func (r *SchemaReconciler) converge(ctx context.Context, schema *v1alpha1.Databa
 	if err != nil {
 		return accessOutcome{}, err
 	}
-	if err := createDatabase(ctx, engineAccess, SchemaNameOf(*schema)); err != nil && !engine.IsExists(err) {
+	err = createDatabase(ctx, engineAccess, SchemaNameOf(*schema))
+	if engine.IsExists(err) {
+		err = r.adoptSchema(ctx, engineAccess, SchemaNameOf(*schema))
+	}
+	if err != nil {
 		if failure := engineFailure(err); failure != nil {
 			return *failure, nil
 		}
 		return accessOutcome{}, err
 	}
 	return readyOutcome(), r.recordName(ctx, schema)
+}
+
+func (r *SchemaReconciler) adoptSchema(ctx context.Context, engineAccess Engine, name string) error {
+	if engineAccess.Kind == v1alpha1.DatabaseEngineMySQL {
+		return nil
+	}
+	return r.adoptGroups(ctx, engineAccess, name)
+}
+
+func (r *SchemaReconciler) adoptGroups(ctx context.Context, engineAccess Engine, name string) error {
+	script, err := postgres.EnsureGroupsScript(name, engineAccess.Timeout)
+	if err != nil {
+		return err
+	}
+	_, err = engineAccess.Run(ctx, script)
+	return err
 }
 
 func (r *SchemaReconciler) recordName(ctx context.Context, schema *v1alpha1.DatabaseSchema) error {

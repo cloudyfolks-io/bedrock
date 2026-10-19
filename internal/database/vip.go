@@ -23,6 +23,7 @@ const annotationKubeVIP = "kube-vip.io/loadbalancerIPs"
 var (
 	ErrVIPRangeMissing = errors.New("the Setting database.vip-range is empty")
 	ErrVIPRangeFull    = errors.New("the VIP range has no free address")
+	ErrVIPNameTaken    = errors.New("a Service of the gate address name exists and the database does not own it")
 )
 
 func LowestFreeVIP(prefix netip.Prefix, taken map[netip.Addr]bool) (string, error) {
@@ -108,9 +109,13 @@ func (a *Allocator) EnsureVIP(ctx context.Context, c client.Client, live client.
 	defer a.mu.Unlock()
 	var existing corev1.Service
 	err := live.Get(ctx, client.ObjectKey{Namespace: PlatformNamespace, Name: VIPName(db.UID)}, &existing)
-	if err == nil {
+	found := err == nil
+	if found {
 		if address := strings.TrimSpace(existing.Annotations[annotationKubeVIP]); address != "" {
 			return address, nil
+		}
+		if existing.Labels[LabelInstance] != Name(db.UID) {
+			return "", ErrVIPNameTaken
 		}
 	}
 	if err != nil && !apierrors.IsNotFound(err) {
@@ -130,6 +135,14 @@ func (a *Allocator) EnsureVIP(ctx context.Context, c client.Client, live client.
 	service, err := VIPService(db, project, vip, port)
 	if err != nil {
 		return "", err
+	}
+	if found {
+		before := existing.DeepCopy()
+		if existing.Annotations == nil {
+			existing.Annotations = map[string]string{}
+		}
+		existing.Annotations[annotationKubeVIP] = vip
+		return vip, c.Patch(ctx, &existing, client.MergeFrom(before), client.FieldOwner(v1alpha1.DatabaseFieldManager))
 	}
 	if err := c.Create(ctx, service, client.FieldOwner(v1alpha1.DatabaseFieldManager)); err != nil {
 		return "", err

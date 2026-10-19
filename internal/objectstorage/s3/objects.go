@@ -3,6 +3,7 @@ package s3
 import (
 	"context"
 	"encoding/xml"
+	"errors"
 	"fmt"
 	"net/http"
 	"strings"
@@ -79,7 +80,12 @@ func (c *Client) UsageOfPrefix(ctx context.Context, endpoint, region string, cre
 	}
 }
 
+var ErrPrefixTooBroad = errors.New("a prefix to delete must end with a slash and have at least 8 characters")
+
 func (c *Client) DeletePrefix(ctx context.Context, endpoint, region string, creds Credentials, bucket, prefix string) error {
+	if len(prefix) < 8 || !strings.HasSuffix(prefix, "/") {
+		return ErrPrefixTooBroad
+	}
 	for {
 		page, err := c.ListObjectsV2(ctx, endpoint, region, creds, bucket, prefix, "")
 		if err != nil {

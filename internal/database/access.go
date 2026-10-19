@@ -64,7 +64,7 @@ type accessOutcome struct {
 func (o accessOutcome) ready() bool { return o.reason == ReasonReady }
 
 func readyOutcome() accessOutcome {
-	return accessOutcome{reason: ReasonReady, message: "the engine matches the object"}
+	return accessOutcome{reason: ReasonReady, message: "the engine matches the object", requeue: readyRequeue}
 }
 
 func resolveDatabase(ctx context.Context, c client.Reader, namespace, name string) (v1alpha1.Database, *accessOutcome, error) {
