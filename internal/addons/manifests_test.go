@@ -105,12 +105,12 @@ func TestLokiManifestsUseOnlyKnownPlaceholders(t *testing.T) {
 	}
 }
 
-func TestLokiHasTheTenObjectsOfTheContract(t *testing.T) {
+func TestLokiHasTheObjectsOfTheContract(t *testing.T) {
 	objects := lokiObjects(t)
 	want := []string{
 		"ConfigMap/loki", "ServiceAccount/loki", "Service/loki", "StatefulSet/loki",
 		"ConfigMap/alloy", "ServiceAccount/alloy", "ClusterRole/bedrock-alloy", "ClusterRoleBinding/bedrock-alloy",
-		"DaemonSet/alloy", "ConfigMap/loki-datasource",
+		"DaemonSet/alloy", "ConfigMap/loki-datasource", "ServiceMonitor/loki", "PrometheusRule/loki",
 	}
 	var got []string
 	for _, obj := range objects {
@@ -231,6 +231,61 @@ func TestAlloyRunsOnEveryNode(t *testing.T) {
 	}
 }
 
+func TestLokiServiceMonitorScrapesTheHTTPPort(t *testing.T) {
+	objects := lokiObjects(t)
+	monitor := find(t, objects, "ServiceMonitor", "loki")
+	if monitor.GetNamespace() != "monitoring" {
+		t.Fatalf("namespace %q", monitor.GetNamespace())
+	}
+	selector, _, _ := unstructured.NestedStringMap(monitor.Object, "spec", "selector", "matchLabels")
+	service := find(t, objects, "Service", "loki")
+	for key, value := range selector {
+		if service.GetLabels()[key] != value {
+			t.Errorf("the Service lacks the selected label %s=%s", key, value)
+		}
+	}
+	if len(selector) == 0 {
+		t.Fatal("the selector is empty")
+	}
+	endpoints, _, _ := unstructured.NestedSlice(monitor.Object, "spec", "endpoints")
+	if len(endpoints) != 1 || endpoints[0].(map[string]any)["port"] != "http" {
+		t.Fatalf("endpoints %v", endpoints)
+	}
+	ports, _, _ := unstructured.NestedSlice(service.Object, "spec", "ports")
+	if ports[0].(map[string]any)["name"] != "http" {
+		t.Fatalf("service ports %v", ports)
+	}
+}
+
+func TestLokiAlertsWhenLogsAreDropped(t *testing.T) {
+	rule := find(t, lokiObjects(t), "PrometheusRule", "loki")
+	groups, _, _ := unstructured.NestedSlice(rule.Object, "spec", "groups")
+	if len(groups) != 1 {
+		t.Fatalf("groups %v", groups)
+	}
+	rules := groups[0].(map[string]any)["rules"].([]any)
+	if len(rules) != 1 {
+		t.Fatalf("rules %v", rules)
+	}
+	alert := rules[0].(map[string]any)
+	if alert["expr"] != "increase(loki_discarded_samples_total[10m]) > 0" {
+		t.Errorf("expr %v", alert["expr"])
+	}
+	if alert["labels"].(map[string]any)["severity"] != "warning" || alert["alert"] == nil {
+		t.Errorf("alert %v", alert)
+	}
+}
+
+func TestLokiInventoryListsTheMonitoringObjects(t *testing.T) {
+	inventory := inventoryOf(testBundle.Addons["loki"])
+	for _, kind := range []string{"ServiceMonitor", "PrometheusRule"} {
+		ref := release.ObjectRef{APIVersion: "monitoring.coreos.com/v1", Kind: kind, Namespace: "monitoring", Name: "loki"}
+		if _, found := inventory[ref]; !found {
+			t.Errorf("the inventory lacks %v", ref)
+		}
+	}
+}
+
 func TestLokiDatasourceIsLabelled(t *testing.T) {
 	datasource := find(t, lokiObjects(t), "ConfigMap", "loki-datasource")
 	if datasource.GetLabels()["grafana_datasource"] != "1" {
@@ -258,7 +313,7 @@ var commentLine = regexp.MustCompile(`(?m)^\s*#`)
 
 func TestAddonManifestsHaveNoComments(t *testing.T) {
 	files, err := filepath.Glob(filepath.Join("..", "..", "manifests", "addons", "loki", "*.yaml"))
-	if err != nil || len(files) != 5 {
+	if err != nil || len(files) != 7 {
 		t.Fatalf("files %v %v", files, err)
 	}
 	for _, file := range files {

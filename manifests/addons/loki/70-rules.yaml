@@ -1,0 +1,16 @@
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: loki
+  namespace: monitoring
+spec:
+  groups:
+    - name: loki
+      rules:
+        - alert: LokiDiscardsLogs
+          expr: increase(loki_discarded_samples_total[10m]) > 0
+          labels:
+            severity: warning
+          annotations:
+            summary: Loki drops log lines.
+            description: Loki discarded log lines in the last 10 minutes. Read the label reason of loki_discarded_samples_total.
