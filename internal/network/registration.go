@@ -36,6 +36,16 @@ func (r *NetworkReconciler) SetupWithManager(mgr ctrl.Manager) error {
 		Watches(&v1alpha1.Subnet{}, handler.EnqueueRequestsFromMapFunc(func(_ context.Context, obj client.Object) []reconcile.Request {
 			return NetworkOfSubnet(*obj.(*v1alpha1.Subnet))
 		}), builder.WithPredicates(predicate.GenerationChangedPredicate{})).
+		Watches(&v1alpha1.NetworkPeering{}, handler.EnqueueRequestsFromMapFunc(func(_ context.Context, obj client.Object) []reconcile.Request {
+			return NetworksOfPeering(*obj.(*v1alpha1.NetworkPeering))
+		})).
+		Watches(&v1alpha1.Network{}, handler.EnqueueRequestsFromMapFunc(func(ctx context.Context, obj client.Object) []reconcile.Request {
+			var peerings v1alpha1.NetworkPeeringList
+			if err := c.List(ctx, &peerings); err != nil {
+				return nil
+			}
+			return PeersOfNetwork(peerings.Items, obj.GetName())
+		})).
 		Watches(&v1alpha1.Setting{}, handler.EnqueueRequestsFromMapFunc(everything(networkLister(c))), builder.WithPredicates(settingsOfNetworkArea())).
 		Watches(&appsv1.DaemonSet{}, handler.EnqueueRequestsFromMapFunc(everything(networkLister(c))), builder.WithPredicates(frrAgentOnly())).
 		Complete(r)

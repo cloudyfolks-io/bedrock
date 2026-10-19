@@ -59,6 +59,10 @@ func VpcDefaultNextHop(u *unstructured.Unstructured) string {
 	return ""
 }
 
+func VpcStatusPeerings(u *unstructured.Unstructured) []string {
+	return list(u, "status", "vpcPeerings")
+}
+
 func VpcSubnets(u *unstructured.Unstructured) []string {
 	return list(u, "status", "subnets")
 }

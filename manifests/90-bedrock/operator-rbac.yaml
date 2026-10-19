@@ -137,6 +137,8 @@ rules:
   - internetgateways/status
   - loadbalancers
   - loadbalancers/status
+  - networkpeerings
+  - networkpeerings/status
   - networks
   - networks/status
   - nodeupgrades
