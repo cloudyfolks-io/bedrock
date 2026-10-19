@@ -228,9 +228,12 @@ A check that answers an open question prints lines that start with `info:`. Read
 
 - `Q2`, `Q3`, `Q5` and `Q7` are the open questions of the compute research.
 - `8b` is the MTU rule of the migration program.
-- `restore:` lines list each VM, and tell if its guest restarted. The last two lines give the number of restarts and the number of `TaintManagerEviction` events.
+- `restore:` lines list each VM, and tell if its guest restarted. The script samples twice: after the nodes renew their Leases, and again after the taint eviction window of 380 seconds. Read the final sample. The last line gives the number of `TaintManagerEviction` events.
 
 A guest is a cirros VM. Its boot script prints `LAB-` lines to the serial console every 5 seconds. The checks read them from the container `guest-console-log` of the launcher pod, so no guest needs an SSH route.
+
+The variable `LAB_EMULATION` sets the virtualization of the guests: `kvm`, `tcg` or `auto`. The default is `auto`. It probes `/dev/kvm` and the CPU flags inside node 1, and it falls back to `tcg` with an `info:` line when the probe fails. A guest in `tcg` is much slower than a guest with KVM.
+A check that fails writes its full output to `dist/lab-multinode/check-<name>.log`. The script prints the path, and the `info:` lines of the failed check.
 
 The run takes about 2.5 hours. The restore waits for an etcd snapshot, which takes about 11 minutes, and then for Ceph to settle.
 

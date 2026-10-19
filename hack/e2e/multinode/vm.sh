@@ -81,6 +81,7 @@ check_large_transfer() {
     return 1
   }
   mtu=$(guest_value "$NS" lab-xfer-client NET | awk '{print $3}')
+  test -n "$mtu"
   underlay=$(underlay_mtu)
   if [ "$((mtu + 100))" -gt "$underlay" ]; then
     echo "guest MTU $mtu plus 100 bytes of Geneve is more than the underlay MTU $underlay" >&2
