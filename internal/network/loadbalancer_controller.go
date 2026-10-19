@@ -21,7 +21,10 @@ import (
 	"github.com/cloudyfolks-io/bedrock/internal/ssa"
 )
 
-const defaultSubnetName = "default"
+const (
+	defaultSubnetName = "default"
+	ConditionIdle     = "Idle"
+)
 
 type LoadBalancerReconciler struct {
 	Client client.Client
@@ -53,18 +56,19 @@ func (r *LoadBalancerReconciler) Reconcile(ctx context.Context, req reconcile.Re
 	if err := ensureFinalizer(ctx, r.Client, &lb); err != nil {
 		return reconcile.Result{}, err
 	}
-	cond, requeue, err := r.program(ctx, lb)
+	var idle []string
+	cond, requeue, err := r.program(ctx, lb, &idle)
 	if err != nil {
 		return reconcile.Result{}, err
 	}
-	return r.publish(ctx, lb, cond, requeue), nil
+	return r.publish(ctx, lb, cond, idle, requeue), nil
 }
 
-func (r *LoadBalancerReconciler) publish(ctx context.Context, lb v1alpha1.LoadBalancer, cond metav1.Condition, requeue time.Duration) reconcile.Result {
+func (r *LoadBalancerReconciler) publish(ctx context.Context, lb v1alpha1.LoadBalancer, cond metav1.Condition, idle []string, requeue time.Duration) reconcile.Result {
 	body := &v1alpha1.LoadBalancer{
 		TypeMeta:   metav1.TypeMeta{APIVersion: v1alpha1.GroupVersion.String(), Kind: "LoadBalancer"},
 		ObjectMeta: metav1.ObjectMeta{Namespace: lb.Namespace, Name: lb.Name},
-		Status:     v1alpha1.LoadBalancerStatus{CommonStatus: v1alpha1.CommonStatus{ObservedGeneration: lb.Generation, Conditions: withCondition(lb.Status.Conditions, cond)}},
+		Status:     v1alpha1.LoadBalancerStatus{CommonStatus: v1alpha1.CommonStatus{ObservedGeneration: lb.Generation, Conditions: withIdle(withCondition(lb.Status.Conditions, cond), lb.Generation, idle)}},
 	}
 	if err := applyStatus(ctx, r.Client, body); err != nil && requeue == 0 {
 		return reconcile.Result{RequeueAfter: waitRequeue}
@@ -81,7 +85,7 @@ func refused(lb v1alpha1.LoadBalancer, v *Violation) (metav1.Condition, time.Dur
 	return violationCondition(v1alpha1.ConditionReady, lb.Generation, v), requeue, nil
 }
 
-func (r *LoadBalancerReconciler) program(ctx context.Context, lb v1alpha1.LoadBalancer) (metav1.Condition, time.Duration, error) {
+func (r *LoadBalancerReconciler) program(ctx context.Context, lb v1alpha1.LoadBalancer, idle *[]string) (metav1.Condition, time.Duration, error) {
 	var namespace corev1.Namespace
 	if err := r.Client.Get(ctx, client.ObjectKey{Name: lb.Namespace}, &namespace); err != nil {
 		return metav1.Condition{}, 0, err
@@ -91,7 +95,7 @@ func (r *LoadBalancerReconciler) program(ctx context.Context, lb v1alpha1.LoadBa
 		return refused(lb, &Violation{Reason: ReasonNamespaceNotLabeled, Message: "the namespace has no tenant and project labels; only project namespaces hold load balancers"})
 	}
 	if lb.Spec.ElasticIPRef == "" {
-		return r.programInternal(ctx, lb, tenant, project)
+		return r.programInternal(ctx, lb, tenant, project, idle)
 	}
 	if v := missingKind(r.Kinds, "RouterLBRule"); v != nil {
 		return refused(lb, v)
@@ -114,29 +118,29 @@ func (r *LoadBalancerReconciler) program(ctx context.Context, lb v1alpha1.LoadBa
 	if v != nil {
 		return refused(lb, v)
 	}
+	*idle = targets.idle
 	withEndpoints := programmable(listeners)
-	if len(withEndpoints) == 0 {
+	if len(withEndpoints) == 0 && len(targets.idle) == 0 {
 		return refused(lb, &Violation{Reason: ReasonNoTargets, Message: "no target has an address yet"})
 	}
 	rules := ListenerRules(ListenerInput{
 		Namespace: lb.Namespace, Name: lb.Name, EIP: FabricName(eip.Namespace, eip.Name), Vpc: targets.vpc,
 		Labels: ObjectLabels("LoadBalancer", lb.Name, tenant, project), Annotations: OwnerAnnotations(&lb), Listeners: withEndpoints,
 	})
-	cond, requeue, err := r.apply(ctx, lb, rules, missing)
-	return warnIdle(cond, lb, targets.idle), requeue, err
+	return r.apply(ctx, lb, rules, missing)
 }
 
 func programmable(listeners []Listener) []Listener {
-	return slices.DeleteFunc(slices.Clone(listeners), func(l Listener) bool { return len(l.Endpoints) == 0 && !l.Kept })
+	return slices.DeleteFunc(slices.Clone(listeners), func(l Listener) bool { return len(l.Endpoints) == 0 })
 }
 
-func warnIdle(cond metav1.Condition, lb v1alpha1.LoadBalancer, idle []string) metav1.Condition {
-	if len(idle) == 0 || cond.Status != metav1.ConditionTrue {
-		return cond
+func withIdle(conditions []metav1.Condition, generation int64, idle []string) []metav1.Condition {
+	if len(idle) == 0 {
+		return slices.DeleteFunc(slices.Clone(conditions), func(c metav1.Condition) bool { return c.Type == ConditionIdle })
 	}
-	warning := trueCondition(v1alpha1.ConditionReady, lb.Generation, ReasonNoReadyPods)
-	warning.Message = fmt.Sprintf("no ready pod stands behind the Containers %s", strings.Join(idle, ", "))
-	return warning
+	warning := trueCondition(ConditionIdle, generation, ReasonNoReadyPods)
+	warning.Message = fmt.Sprintf("no ready pod stands behind the Containers %s, so the rules of their listeners are removed", strings.Join(idle, ", "))
+	return withCondition(conditions, warning)
 }
 
 func (r *LoadBalancerReconciler) elasticIP(ctx context.Context, lb v1alpha1.LoadBalancer) (v1alpha1.ElasticIP, *Violation, error) {
@@ -244,11 +248,11 @@ func (r *LoadBalancerReconciler) resolveContainerTarget(ctx context.Context, lb 
 		return targetInfo{}, v, err
 	}
 	info.container = true
-	var pods corev1.PodList
-	if err := r.Client.List(ctx, &pods, client.InNamespace(lb.Namespace), client.MatchingLabels{v1alpha1.LabelKind: "Container", v1alpha1.LabelName: name}); err != nil {
+	pods, err := PodsOfContainer(ctx, r.Client, container)
+	if err != nil {
 		return targetInfo{}, nil, err
 	}
-	for _, pod := range pods.Items {
+	for _, pod := range pods {
 		if !PodReady(pod) {
 			continue
 		}
@@ -364,7 +368,7 @@ func (r *LoadBalancerReconciler) ownedObjects(ctx context.Context, lb *v1alpha1.
 	return owned, nil
 }
 
-func (r *LoadBalancerReconciler) programInternal(ctx context.Context, lb v1alpha1.LoadBalancer, tenant, project string) (metav1.Condition, time.Duration, error) {
+func (r *LoadBalancerReconciler) programInternal(ctx context.Context, lb v1alpha1.LoadBalancer, tenant, project string, idle *[]string) (metav1.Condition, time.Duration, error) {
 	for _, kind := range []string{"SwitchLBRule", "Vip"} {
 		if v := missingKind(r.Kinds, kind); v != nil {
 			return refused(lb, v)
@@ -384,8 +388,9 @@ func (r *LoadBalancerReconciler) programInternal(ctx context.Context, lb v1alpha
 	if v != nil {
 		return refused(lb, v)
 	}
+	*idle = targets.idle
 	withEndpoints := programmable(listeners)
-	if len(withEndpoints) == 0 {
+	if len(withEndpoints) == 0 && len(targets.idle) == 0 {
 		return refused(lb, &Violation{Reason: ReasonNoTargets, Message: "no target has an address yet"})
 	}
 	in := InternalInput{Namespace: lb.Namespace, Name: lb.Name, Labels: ObjectLabels("LoadBalancer", lb.Name, tenant, project), Annotations: OwnerAnnotations(&lb), Listeners: withEndpoints}
@@ -398,8 +403,7 @@ func (r *LoadBalancerReconciler) programInternal(ctx context.Context, lb v1alpha
 		return refused(lb, v)
 	}
 	in.Vip = address
-	cond, requeue, err := r.apply(ctx, lb, append([]*unstructured.Unstructured{vip}, InternalRules(in)...), missing)
-	return warnIdle(cond, lb, targets.idle), requeue, err
+	return r.apply(ctx, lb, append([]*unstructured.Unstructured{vip}, InternalRules(in)...), missing)
 }
 
 func (r *LoadBalancerReconciler) allocateVip(ctx context.Context, lb v1alpha1.LoadBalancer, vip *unstructured.Unstructured) (string, *Violation, error) {

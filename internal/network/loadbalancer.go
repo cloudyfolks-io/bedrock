@@ -18,7 +18,6 @@ type Listener struct {
 	TargetPort  int32
 	Endpoints   []string
 	HealthCheck bool
-	Kept        bool
 }
 
 type ListenerInput struct {
@@ -51,7 +50,7 @@ func BuildListeners(spec []v1alpha1.LoadBalancerListener, addresses map[string][
 	listeners := make([]Listener, 0, len(spec))
 	var missing []string
 	for _, s := range spec {
-		listener := Listener{Port: s.Port, Protocol: listenerProtocol(s), HealthCheck: s.HealthCheck != nil, Kept: len(s.Targets) > 0}
+		listener := Listener{Port: s.Port, Protocol: listenerProtocol(s), HealthCheck: s.HealthCheck != nil}
 		for i, t := range s.Targets {
 			if i == 0 {
 				listener.TargetPort = t.Port
@@ -62,7 +61,6 @@ func BuildListeners(spec []v1alpha1.LoadBalancerListener, addresses map[string][
 			resolved, found := addresses[TargetKey(t)]
 			if !found {
 				missing = append(missing, TargetKey(t))
-				listener.Kept = false
 				continue
 			}
 			listener.Endpoints = append(listener.Endpoints, resolved...)

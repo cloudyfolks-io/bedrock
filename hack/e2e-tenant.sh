@@ -191,6 +191,8 @@ steps=(
   container_lifecycle
   container_volume
   container_load_balancer
+  container_scale_to_zero
+  container_quota_refusal
   container_proxy
   container_cleanup
   objectstorage_user_and_bucket

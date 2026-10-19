@@ -6,11 +6,14 @@ import (
 	"strings"
 	"testing"
 
+	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/utils/ptr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	"github.com/cloudyfolks-io/bedrock/api/v1alpha1"
@@ -32,10 +35,58 @@ func (f externalFixture) addContainer(t *testing.T, name string) {
 
 func (f externalFixture) addPod(t *testing.T, container, pod, address string, ready bool) {
 	t.Helper()
+	f.createPod(t, container, pod, address, ready, true)
+}
+
+func (f externalFixture) addLoosePod(t *testing.T, container, pod, address string) {
+	t.Helper()
+	f.createPod(t, container, pod, address, true, false)
+}
+
+func (f externalFixture) ownerChain(t *testing.T, container string) *appsv1.ReplicaSet {
+	t.Helper()
+	ctx := context.Background()
+	var owner v1alpha1.Container
+	if err := f.c.Get(ctx, client.ObjectKey{Namespace: f.namespace, Name: container}, &owner); err != nil {
+		return nil
+	}
+	labels := map[string]string{"app": container}
+	template := corev1.PodTemplateSpec{ObjectMeta: metav1.ObjectMeta{Labels: labels}, Spec: corev1.PodSpec{Containers: []corev1.Container{{Name: "app", Image: "registry.test/web:1"}}}}
+	controlled := func(kind, name string, uid types.UID) []metav1.OwnerReference {
+		return []metav1.OwnerReference{{APIVersion: "x/v1", Kind: kind, Name: name, UID: uid, Controller: ptr.To(true)}}
+	}
+	var deployment appsv1.Deployment
+	if err := f.c.Get(ctx, client.ObjectKey{Namespace: f.namespace, Name: container}, &deployment); apierrors.IsNotFound(err) {
+		deployment = appsv1.Deployment{
+			ObjectMeta: metav1.ObjectMeta{Namespace: f.namespace, Name: container, OwnerReferences: controlled("Container", owner.Name, owner.UID)},
+			Spec:       appsv1.DeploymentSpec{Selector: &metav1.LabelSelector{MatchLabels: labels}, Template: template},
+		}
+		if err := f.c.Create(ctx, &deployment); err != nil {
+			t.Fatal(err)
+		}
+	}
+	var set appsv1.ReplicaSet
+	if err := f.c.Get(ctx, client.ObjectKey{Namespace: f.namespace, Name: container + "-rs"}, &set); apierrors.IsNotFound(err) {
+		set = appsv1.ReplicaSet{
+			ObjectMeta: metav1.ObjectMeta{Namespace: f.namespace, Name: container + "-rs", Labels: map[string]string{v1alpha1.LabelKind: "Container", v1alpha1.LabelName: container}, OwnerReferences: controlled("Deployment", deployment.Name, deployment.UID)},
+			Spec:       appsv1.ReplicaSetSpec{Selector: &metav1.LabelSelector{MatchLabels: labels}, Template: template},
+		}
+		if err := f.c.Create(ctx, &set); err != nil {
+			t.Fatal(err)
+		}
+	}
+	return &set
+}
+
+func (f externalFixture) createPod(t *testing.T, container, pod, address string, ready, owned bool) {
+	t.Helper()
 	ctx := context.Background()
 	withServiceAccount(t, f.c, f.namespace)
 	body := podFor(f.namespace, pod, nil)
 	body.Labels = map[string]string{v1alpha1.LabelKind: "Container", v1alpha1.LabelName: container}
+	if set := f.ownerChain(t, container); owned && set != nil {
+		body.OwnerReferences = []metav1.OwnerReference{{APIVersion: "apps/v1", Kind: "ReplicaSet", Name: set.Name, UID: set.UID, Controller: ptr.To(true)}}
+	}
 	if err := f.c.Create(ctx, body); err != nil {
 		t.Fatal(err)
 	}
@@ -139,23 +190,82 @@ func TestLoadBalancerEndpointsFollowARollingUpdate(t *testing.T) {
 	}
 }
 
-func TestLoadBalancerKeepsTheRuleWithoutReadyPods(t *testing.T) {
-	f := newContainerLBFixture(t)
-	f.addPod(t, "web", "web-1-a", "10.100.1.9", false)
-	reconcileLoadBalancer(t, f.c, f.namespace, "lb1", knowsEverything)
-	rule := tcpRuleOf(t, f)
-	if got := endpointsOf(rule); len(got) != 0 {
-		t.Fatalf("endpoints %v", got)
+func idleOf(t *testing.T, f externalFixture) *metav1.Condition {
+	t.Helper()
+	var lb v1alpha1.LoadBalancer
+	if err := f.c.Get(context.Background(), client.ObjectKey{Namespace: f.namespace, Name: "lb1"}, &lb); err != nil {
+		t.Fatal(err)
 	}
+	return meta.FindStatusCondition(lb.Status.Conditions, ConditionIdle)
+}
+
+func TestLoadBalancerRemovesTheRuleWithoutReadyPodsAndKeepsTheOtherConditions(t *testing.T) {
+	f := newContainerLBFixture(t)
+	f.addPod(t, "web", "web-1-a", "10.100.1.9", true)
+	reconcileLoadBalancer(t, f.c, f.namespace, "lb1", knowsEverything)
 	markRulesProgrammed(t, f.c, "lb1")
 	reconcileLoadBalancer(t, f.c, f.namespace, "lb1", knowsEverything)
-	requireLB(t, f.c, f.namespace, "lb1", metav1.ConditionTrue, ReasonNoReadyPods)
-	f.addPod(t, "web", "web-1-b", "10.100.1.10", true)
+	requireLB(t, f.c, f.namespace, "lb1", metav1.ConditionTrue, ReasonProgrammed)
+	if idleOf(t, f) != nil {
+		t.Fatal("a container with a ready pod is not idle")
+	}
+	ctx := context.Background()
+	pod := podFor(f.namespace, "web-1-a", nil)
+	if err := f.c.Delete(ctx, pod, client.GracePeriodSeconds(0)); err != nil {
+		t.Fatal(err)
+	}
+	f.addPod(t, "web", "web-1-b", "10.100.1.10", false)
 	reconcileLoadBalancer(t, f.c, f.namespace, "lb1", knowsEverything)
-	if got := endpointsOf(tcpRuleOf(t, f)); !slices.Equal(got, []string{"10.100.1.10"}) {
-		t.Fatalf("endpoints %v", got)
+	if rules := rulesOf(t, f.c, "lb1"); len(rules) != 0 {
+		t.Fatalf("no rule may stay with no endpoint: %d", len(rules))
 	}
 	requireLB(t, f.c, f.namespace, "lb1", metav1.ConditionTrue, ReasonProgrammed)
+	idle := idleOf(t, f)
+	if idle == nil || idle.Status != metav1.ConditionTrue || idle.Reason != ReasonNoReadyPods || !strings.Contains(idle.Message, "web") {
+		t.Fatalf("idle condition %+v", idle)
+	}
+	f.addPod(t, "web", "web-1-c", "10.100.1.11", true)
+	reconcileLoadBalancer(t, f.c, f.namespace, "lb1", knowsEverything)
+	if got := endpointsOf(tcpRuleOf(t, f)); !slices.Equal(got, []string{"10.100.1.11"}) {
+		t.Fatalf("endpoints %v", got)
+	}
+	if idleOf(t, f) != nil {
+		t.Fatal("the idle condition must go when a pod is ready")
+	}
+}
+
+func TestLoadBalancerNeverTargetsALooselyLabeledPod(t *testing.T) {
+	f := newContainerLBFixture(t)
+	f.addPod(t, "web", "web-1-a", "10.100.1.9", true)
+	f.addLoosePod(t, "web", "intruder", "10.100.1.66")
+	reconcileLoadBalancer(t, f.c, f.namespace, "lb1", knowsEverything)
+	if got := endpointsOf(tcpRuleOf(t, f)); !slices.Equal(got, []string{"10.100.1.9"}) {
+		t.Fatalf("endpoints %v", got)
+	}
+}
+
+func TestOwnedPodsFollowTheOwnerChain(t *testing.T) {
+	container := v1alpha1.Container{ObjectMeta: metav1.ObjectMeta{Name: "web", UID: "c1"}}
+	owner := func(kind, name string, uid types.UID) []metav1.OwnerReference {
+		return []metav1.OwnerReference{{Kind: kind, Name: name, UID: uid, Controller: ptr.To(true)}}
+	}
+	deployment := appsv1.Deployment{ObjectMeta: metav1.ObjectMeta{Name: "web", UID: "d1", OwnerReferences: owner("Container", "web", "c1")}}
+	set := appsv1.ReplicaSet{ObjectMeta: metav1.ObjectMeta{Name: "rs", UID: "r1", OwnerReferences: owner("Deployment", "web", "d1")}}
+	foreignSet := appsv1.ReplicaSet{ObjectMeta: metav1.ObjectMeta{Name: "other", UID: "r2", OwnerReferences: owner("Deployment", "x", "d9")}}
+	pods := []corev1.Pod{
+		{ObjectMeta: metav1.ObjectMeta{Name: "own", OwnerReferences: owner("ReplicaSet", "rs", "r1")}},
+		{ObjectMeta: metav1.ObjectMeta{Name: "foreign", OwnerReferences: owner("ReplicaSet", "other", "r2")}},
+		{ObjectMeta: metav1.ObjectMeta{Name: "loose"}},
+	}
+	got := OwnedPods(container, deployment, []appsv1.ReplicaSet{set, foreignSet}, pods)
+	if len(got) != 1 || got[0].Name != "own" {
+		t.Fatalf("owned pods %v", got)
+	}
+	foreignDeployment := deployment
+	foreignDeployment.OwnerReferences = owner("Container", "web", "someone-else")
+	if got := OwnedPods(container, foreignDeployment, []appsv1.ReplicaSet{set}, pods); len(got) != 0 {
+		t.Fatalf("a Deployment of another owner has no pods of the Container: %v", got)
+	}
 }
 
 func TestLoadBalancerCombinesAContainerAndAVMInOneListener(t *testing.T) {
@@ -224,17 +334,11 @@ func TestBuildListenersCollectsContainerEndpoints(t *testing.T) {
 	if v != nil || !slices.Equal(missing, []string{"gone"}) {
 		t.Fatalf("missing %v violation %+v", missing, v)
 	}
-	if !slices.Equal(got[0].Endpoints, []string{"10.0.0.9", "10.0.0.8", "10.0.0.2"}) || !got[0].Kept {
-		t.Fatalf("listener 0 %+v", got[0])
+	if !slices.Equal(got[0].Endpoints, []string{"10.0.0.9", "10.0.0.8", "10.0.0.2"}) || len(got[1].Endpoints) != 0 || len(got[2].Endpoints) != 2 || len(got[3].Endpoints) != 0 {
+		t.Fatalf("listeners %+v", got)
 	}
-	if len(got[1].Endpoints) != 0 || !got[1].Kept {
-		t.Fatalf("an idle container keeps the listener: %+v", got[1])
-	}
-	if got[2].Kept || len(got[2].Endpoints) != 2 || got[3].Kept || len(got[3].Endpoints) != 0 {
-		t.Fatalf("a missing target does not keep the listener: %+v %+v", got[2], got[3])
-	}
-	if programmed := programmable(got); len(programmed) != 3 || programmed[2].Port != 82 {
-		t.Fatalf("programmable listeners %+v", programmed)
+	if programmed := programmable(got); len(programmed) != 2 || programmed[1].Port != 82 {
+		t.Fatalf("a listener with no endpoint is not programmed: %+v", programmed)
 	}
 }
 

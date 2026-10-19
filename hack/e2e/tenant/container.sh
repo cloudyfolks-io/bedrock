@@ -459,9 +459,68 @@ BALANCER
   for pod_address in $(container_pod_addresses web); do
     expect_contains "$(kubectl -n kube-system exec deployment/ovn-central -- ovn-nbctl list Load_Balancer)" "$pod_address:8080" "container load balancer endpoint"
   done
+}
+
+container_lb_has_endpoints() {
+  local balancers pod_address
+  balancers=$(kubectl -n kube-system exec deployment/ovn-central -- ovn-nbctl list Load_Balancer)
+  for pod_address in $(container_pod_addresses web); do
+    [[ "$balancers" == *"$pod_address:8080"* ]] || return 1
+  done
+}
+
+container_scale_to_zero() {
+  kubectl -n "$NS" patch container web --type merge -p '{"spec":{"replicas":0}}'
+  wait_jsonpath 180 Stopped -n "$NS" get container web -o jsonpath='{.status.phase}'
+  wait_condition 120 loadbalancer clb Idle True -n "$NS"
+  wait_reason 120 loadbalancer clb Idle NoReadyPods -n "$NS"
+  wait_condition 120 loadbalancer clb Ready True -n "$NS"
+  wait_empty 120 get router-lb-rules.fabric.cloudyfolks.io -l bedrock.cloudyfolks.io/name=clb
+  kubectl -n "$NS" patch container web --type merge -p '{"spec":{"replicas":2}}'
+  wait_jsonpath 300 Running -n "$NS" get container web -o jsonpath='{.status.phase}'
+  retry_until 180 container_lb_has_endpoints
+  wait_reason 180 loadbalancer clb Ready Programmed -n "$NS"
+  wait_condition 60 loadbalancer clb Idle False -n "$NS" || [ -z "$(condition_status loadbalancer clb Idle -n "$NS")" ]
   kubectl -n "$NS" delete loadbalancer clb
   wait_empty 180 get router-lb-rules.fabric.cloudyfolks.io -l bedrock.cloudyfolks.io/name=clb
   kubectl -n "$NS" delete elasticip clbip
+}
+
+container_quota_cleanup() {
+  kubectl patch project "$PROJECT" --type merge -p "{\"spec\":{\"quota\":$1}}"
+  kubectl -n "$NS" delete container quota-second quota-scaled --ignore-not-found
+}
+
+container_quota_checks() {
+  local count
+  count=$(kubectl -n "$NS" get containers -o name | wc -l)
+  kubectl patch project "$PROJECT" --type merge -p "{\"spec\":{\"quota\":{\"containers\":$count}}}"
+  retry_until 120 container_create_refused quota-second
+  kubectl patch project "$PROJECT" --type merge -p '{"spec":{"quota":{"containers":null}}}'
+  container_manifest quota-scaled "  replicas: 1" | kubectl -n "$NS" apply -f -
+  wait_jsonpath 300 Running -n "$NS" get container quota-scaled -o jsonpath='{.status.phase}'
+  kubectl patch project "$PROJECT" --type merge -p '{"spec":{"quota":{"cpu":"100m"}}}'
+  kubectl -n "$NS" patch container quota-scaled --type merge -p '{"spec":{"replicas":4}}'
+  wait_reason 180 container quota-scaled Ready QuotaExceeded -n "$NS"
+}
+
+container_create_refused() {
+  local out
+  if out=$(container_manifest quota-second "" | kubectl -n "$NS" apply -f - 2>&1); then
+    kubectl -n "$NS" delete container quota-second --ignore-not-found >/dev/null 2>&1
+    return 1
+  fi
+  [[ "$out" == *"exceeded quota"* ]]
+}
+
+container_quota_refusal() {
+  local previous
+  previous=$(kubectl get project "$PROJECT" -o jsonpath='{.spec.quota}')
+  previous=${previous:-null}
+  (
+    trap 'container_quota_cleanup "$previous"' EXIT
+    container_quota_checks
+  )
 }
 
 container_proxy() {
