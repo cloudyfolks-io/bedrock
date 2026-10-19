@@ -39,7 +39,7 @@ func TestMain(m *testing.M) {
 		panic(err)
 	}
 	testBundle = buildBundle(built)
-	env := &envtest.Environment{CRDDirectoryPaths: testenv.CRDPaths(), ErrorIfCRDPathMissing: true}
+	env := &envtest.Environment{CRDDirectoryPaths: append(testenv.CRDPaths(), monitoringCRDPaths()...), ErrorIfCRDPathMissing: true}
 	cfg, err := env.Start()
 	if err != nil {
 		panic(err)
@@ -58,6 +58,11 @@ func TestMain(m *testing.M) {
 	_ = env.Stop()
 	_ = os.RemoveAll(built)
 	os.Exit(code)
+}
+
+func monitoringCRDPaths() []string {
+	dir := filepath.Join("..", "..", "charts", "kube-prometheus-stack", "charts", "crds", "crds")
+	return []string{filepath.Join(dir, "crd-servicemonitors.yaml"), filepath.Join(dir, "crd-prometheusrules.yaml")}
 }
 
 func buildBundle(out string) release.Bundle {

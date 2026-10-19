@@ -29,3 +29,9 @@ spec:
         - record: bedrock:project_vm_network_transmit_bytes:rate5m
           expr: |-
             sum (rate(kubevirt_vmi_network_transmit_bytes_total[5m]) * on (namespace) group_left (tenant, project) label_replace(label_replace(kube_namespace_labels{label_bedrock_cloudyfolks_io_project!=""}, "tenant", "$1", "label_bedrock_cloudyfolks_io_tenant", "(.*)"), "project", "$1", "label_bedrock_cloudyfolks_io_project", "(.*)")) by (tenant, project)
+        - record: bedrock:project_vm_network_receive_bytes:increase1h
+          expr: |-
+            sum (increase(kubevirt_vmi_network_receive_bytes_total[1h]) * on (namespace) group_left (tenant, project) label_replace(label_replace(kube_namespace_labels{label_bedrock_cloudyfolks_io_project!=""}, "tenant", "$1", "label_bedrock_cloudyfolks_io_tenant", "(.*)"), "project", "$1", "label_bedrock_cloudyfolks_io_project", "(.*)")) by (tenant, project)
+        - record: bedrock:project_vm_network_transmit_bytes:increase1h
+          expr: |-
+            sum (increase(kubevirt_vmi_network_transmit_bytes_total[1h]) * on (namespace) group_left (tenant, project) label_replace(label_replace(kube_namespace_labels{label_bedrock_cloudyfolks_io_project!=""}, "tenant", "$1", "label_bedrock_cloudyfolks_io_tenant", "(.*)"), "project", "$1", "label_bedrock_cloudyfolks_io_project", "(.*)")) by (tenant, project)

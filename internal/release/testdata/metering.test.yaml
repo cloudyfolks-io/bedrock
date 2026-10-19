@@ -1,0 +1,287 @@
+rule_files:
+  - rules.yaml
+evaluation_interval: 1m
+tests:
+  - name: a vm of 4 vcpus and 4 GiB that runs 6 minutes of the hour
+    interval: 1m
+    input_series:
+      - series: 'kube_namespace_labels{namespace="acme-web", label_bedrock_cloudyfolks_io_tenant="acme", label_bedrock_cloudyfolks_io_project="web"}'
+        values: '1+0x60'
+      - series: 'kubevirt_vmi_vcpu_seconds_total{namespace="acme-web", name="vm1", id="0"}'
+        values: '_x10 1+1x5 stale'
+      - series: 'kubevirt_vmi_vcpu_seconds_total{namespace="acme-web", name="vm1", id="1"}'
+        values: '_x10 1+1x5 stale'
+      - series: 'kubevirt_vmi_vcpu_seconds_total{namespace="acme-web", name="vm1", id="2"}'
+        values: '_x10 1+1x5 stale'
+      - series: 'kubevirt_vmi_vcpu_seconds_total{namespace="acme-web", name="vm1", id="3"}'
+        values: '_x10 1+1x5 stale'
+      - series: 'kubevirt_vmi_memory_domain_bytes{namespace="acme-web", name="vm1"}'
+        values: '_x10 4294967296+0x5 stale'
+    promql_expr_test:
+      - expr: 'sum_over_time(bedrock:project_vm_vcpu:sum[1h]) / 60'
+        eval_time: 1h
+        exp_samples:
+          - labels: '{project="web", tenant="acme"}'
+            value: 0.4
+      - expr: 'sum_over_time(bedrock:project_vm_memory_bytes:sum[1h]) / 60 / 1073741824'
+        eval_time: 1h
+        exp_samples:
+          - labels: '{project="web", tenant="acme"}'
+            value: 0.4
+  - name: a vm that ends in the middle of the hour
+    interval: 1m
+    input_series:
+      - series: 'kube_namespace_labels{namespace="acme-web", label_bedrock_cloudyfolks_io_tenant="acme", label_bedrock_cloudyfolks_io_project="web"}'
+        values: '1+0x60'
+      - series: 'kubevirt_vmi_vcpu_seconds_total{namespace="acme-web", name="vm1", id="0"}'
+        values: '_x1 1+1x29 stale'
+      - series: 'kubevirt_vmi_vcpu_seconds_total{namespace="acme-web", name="vm1", id="1"}'
+        values: '_x1 1+1x29 stale'
+      - series: 'kubevirt_vmi_vcpu_seconds_total{namespace="acme-web", name="vm1", id="2"}'
+        values: '_x1 1+1x29 stale'
+      - series: 'kubevirt_vmi_vcpu_seconds_total{namespace="acme-web", name="vm1", id="3"}'
+        values: '_x1 1+1x29 stale'
+      - series: 'kubevirt_vmi_memory_domain_bytes{namespace="acme-web", name="vm1"}'
+        values: '_x1 4294967296+0x29 stale'
+    promql_expr_test:
+      - expr: 'sum_over_time(bedrock:project_vm_vcpu:sum[1h]) / 60'
+        eval_time: 1h
+        exp_samples:
+          - labels: '{project="web", tenant="acme"}'
+            value: 2
+      - expr: 'sum_over_time(bedrock:project_vm_memory_bytes:sum[1h]) / 60 / 1073741824'
+        eval_time: 1h
+        exp_samples:
+          - labels: '{project="web", tenant="acme"}'
+            value: 2
+  - name: a live migration counts cpu and memory once
+    interval: 1m
+    input_series:
+      - series: 'kube_namespace_labels{namespace="acme-web", label_bedrock_cloudyfolks_io_tenant="acme", label_bedrock_cloudyfolks_io_project="web"}'
+        values: '1+0x60'
+      - series: 'kubevirt_vmi_vcpu_seconds_total{namespace="acme-web", name="vm1", id="0", node="n1"}'
+        values: '_x1 1+1x9 stale'
+      - series: 'kubevirt_vmi_vcpu_seconds_total{namespace="acme-web", name="vm1", id="1", node="n1"}'
+        values: '_x1 1+1x9 stale'
+      - series: 'kubevirt_vmi_vcpu_seconds_total{namespace="acme-web", name="vm1", id="2", node="n1"}'
+        values: '_x1 1+1x9 stale'
+      - series: 'kubevirt_vmi_vcpu_seconds_total{namespace="acme-web", name="vm1", id="3", node="n1"}'
+        values: '_x1 1+1x9 stale'
+      - series: 'kubevirt_vmi_vcpu_seconds_total{namespace="acme-web", name="vm1", id="0", node="n2"}'
+        values: '_x6 1+1x54'
+      - series: 'kubevirt_vmi_vcpu_seconds_total{namespace="acme-web", name="vm1", id="1", node="n2"}'
+        values: '_x6 1+1x54'
+      - series: 'kubevirt_vmi_vcpu_seconds_total{namespace="acme-web", name="vm1", id="2", node="n2"}'
+        values: '_x6 1+1x54'
+      - series: 'kubevirt_vmi_vcpu_seconds_total{namespace="acme-web", name="vm1", id="3", node="n2"}'
+        values: '_x6 1+1x54'
+      - series: 'kubevirt_vmi_memory_domain_bytes{namespace="acme-web", name="vm1", node="n1"}'
+        values: '_x1 4294967296+0x9 stale'
+      - series: 'kubevirt_vmi_memory_domain_bytes{namespace="acme-web", name="vm1", node="n2"}'
+        values: '_x6 4294967296+0x54'
+    promql_expr_test:
+      - expr: 'sum_over_time(bedrock:project_vm_vcpu:sum[1h]) / 60'
+        eval_time: 1h
+        exp_samples:
+          - labels: '{project="web", tenant="acme"}'
+            value: 4
+      - expr: 'sum_over_time(bedrock:project_vm_memory_bytes:sum[1h]) / 60 / 1073741824'
+        eval_time: 1h
+        exp_samples:
+          - labels: '{project="web", tenant="acme"}'
+            value: 4
+  - name: a live migration counts the increase of both series
+    interval: 30s
+    input_series:
+      - series: 'kube_namespace_labels{namespace="acme-web", label_bedrock_cloudyfolks_io_tenant="acme", label_bedrock_cloudyfolks_io_project="web"}'
+        values: '1+0x120'
+      - series: 'kubevirt_vmi_network_receive_bytes_total{namespace="acme-web", name="vm1", node="n1"}'
+        values: '_x1 1000000000+1048576x19 stale'
+      - series: 'kubevirt_vmi_network_receive_bytes_total{namespace="acme-web", name="vm1", node="n2"}'
+        values: '_x21 5000000000+1048576x99'
+      - series: 'kubevirt_vmi_network_transmit_bytes_total{namespace="acme-web", name="vm1", node="n1"}'
+        values: '_x1 1000000000+2097152x19 stale'
+      - series: 'kubevirt_vmi_network_transmit_bytes_total{namespace="acme-web", name="vm1", node="n2"}'
+        values: '_x21 5000000000+2097152x99'
+    promql_expr_test:
+      - expr: 'round(bedrock:project_vm_network_receive_bytes:increase1h, 1) / 1073741824'
+        eval_time: 1h
+        exp_samples:
+          - labels: '{project="web", tenant="acme"}'
+            value: 0.1171875
+      - expr: 'round(bedrock:project_vm_network_transmit_bytes:increase1h, 1) / 1073741824'
+        eval_time: 1h
+        exp_samples:
+          - labels: '{project="web", tenant="acme"}'
+            value: 0.234375
+  - name: a counter reset inside the hour
+    interval: 30s
+    input_series:
+      - series: 'kube_namespace_labels{namespace="acme-web", label_bedrock_cloudyfolks_io_tenant="acme", label_bedrock_cloudyfolks_io_project="web"}'
+        values: '1+0x120'
+      - series: 'kubevirt_vmi_network_receive_bytes_total{namespace="acme-web", name="vm1"}'
+        values: '1000000000+1048576x60 1048576+1048576x59'
+      - series: 'kubevirt_vmi_network_transmit_bytes_total{namespace="acme-web", name="vm1"}'
+        values: '1000000000+2097152x60 2097152+2097152x59'
+    promql_expr_test:
+      - expr: 'round(bedrock:project_vm_network_receive_bytes:increase1h, 1) / 1073741824'
+        eval_time: 1h
+        exp_samples:
+          - labels: '{project="web", tenant="acme"}'
+            value: 0.1171875
+      - expr: 'round(bedrock:project_vm_network_transmit_bytes:increase1h, 1) / 1073741824'
+        eval_time: 1h
+        exp_samples:
+          - labels: '{project="web", tenant="acme"}'
+            value: 0.234375
+  - name: a vm that ends in the middle of the hour keeps its traffic
+    interval: 30s
+    input_series:
+      - series: 'kube_namespace_labels{namespace="acme-web", label_bedrock_cloudyfolks_io_tenant="acme", label_bedrock_cloudyfolks_io_project="web"}'
+        values: '1+0x120'
+      - series: 'kubevirt_vmi_network_receive_bytes_total{namespace="acme-web", name="vm1"}'
+        values: '_x1 1000000000+1048576x59 stale'
+      - series: 'kubevirt_vmi_network_transmit_bytes_total{namespace="acme-web", name="vm1"}'
+        values: '_x1 1000000000+2097152x59 stale'
+    promql_expr_test:
+      - expr: 'round(bedrock:project_vm_network_receive_bytes:increase1h, 1) / 1073741824'
+        eval_time: 1h
+        exp_samples:
+          - labels: '{project="web", tenant="acme"}'
+            value: 0.05908203125
+      - expr: 'round(bedrock:project_vm_network_transmit_bytes:increase1h, 1) / 1073741824'
+        eval_time: 1h
+        exp_samples:
+          - labels: '{project="web", tenant="acme"}'
+            value: 0.1181640625
+  - name: the network total is the sum of the increases of the separate series
+    interval: 30s
+    input_series:
+      - series: 'kube_namespace_labels{namespace="acme-web", label_bedrock_cloudyfolks_io_tenant="acme", label_bedrock_cloudyfolks_io_project="web"}'
+        values: '1+0x120'
+      - series: 'kubevirt_vmi_network_receive_bytes_total{namespace="acme-web", name="vm-a"}'
+        values: '_x1 5000000000+1048576x59 stale'
+      - series: 'kubevirt_vmi_network_receive_bytes_total{namespace="acme-web", name="vm-b"}'
+        values: '100+1048576x120'
+      - series: 'kubevirt_vmi_network_transmit_bytes_total{namespace="acme-web", name="vm-a"}'
+        values: '_x1 5000000000+2097152x59 stale'
+      - series: 'kubevirt_vmi_network_transmit_bytes_total{namespace="acme-web", name="vm-b"}'
+        values: '100+2097152x120'
+    promql_expr_test:
+      - expr: 'round(bedrock:project_vm_network_receive_bytes:increase1h, 1) / 1073741824'
+        eval_time: 1h
+        exp_samples:
+          - labels: '{project="web", tenant="acme"}'
+            value: 0.17626953125
+      - expr: 'round(bedrock:project_vm_network_transmit_bytes:increase1h, 1) / 1073741824'
+        eval_time: 1h
+        exp_samples:
+          - labels: '{project="web", tenant="acme"}'
+            value: 0.3525390625
+      - expr: 'round(sum(increase(kubevirt_vmi_network_receive_bytes_total[1h])), 1) / 1073741824'
+        eval_time: 1h
+        exp_samples:
+          - labels: '{}'
+            value: 0.17626953125
+      - expr: 'round(sum(increase(kubevirt_vmi_network_transmit_bytes_total[1h])), 1) / 1073741824'
+        eval_time: 1h
+        exp_samples:
+          - labels: '{}'
+            value: 0.3525390625
+  - name: a namespace without a project label gives no series
+    interval: 1m
+    input_series:
+      - series: 'kube_namespace_labels{namespace="kube-system"}'
+        values: '1+0x60'
+      - series: 'kube_namespace_labels{namespace="acme", label_bedrock_cloudyfolks_io_tenant="acme"}'
+        values: '1+0x60'
+      - series: 'kubevirt_vmi_vcpu_seconds_total{namespace="kube-system", name="vm1", id="0"}'
+        values: '_x10 1+1x5 stale'
+      - series: 'kubevirt_vmi_vcpu_seconds_total{namespace="kube-system", name="vm1", id="1"}'
+        values: '_x10 1+1x5 stale'
+      - series: 'kubevirt_vmi_vcpu_seconds_total{namespace="acme", name="vm1", id="0"}'
+        values: '_x10 1+1x5 stale'
+      - series: 'kubevirt_vmi_vcpu_seconds_total{namespace="acme", name="vm1", id="1"}'
+        values: '_x10 1+1x5 stale'
+      - series: 'kubevirt_vmi_memory_domain_bytes{namespace="kube-system", name="vm1"}'
+        values: '_x10 4294967296+0x5 stale'
+      - series: 'kubevirt_vmi_memory_domain_bytes{namespace="acme", name="vm1"}'
+        values: '_x10 4294967296+0x5 stale'
+      - series: 'kubevirt_vmi_info{namespace="kube-system", name="vm1", phase="Running"}'
+        values: '1+0x60'
+      - series: 'kubevirt_vmi_info{namespace="acme", name="vm1", phase="Running"}'
+        values: '1+0x60'
+      - series: 'kube_persistentvolumeclaim_resource_requests_storage_bytes{namespace="acme", persistentvolumeclaim="disk"}'
+        values: '1073741824+0x60'
+    promql_expr_test:
+      - expr: '{__name__=~"bedrock:project_.+"}'
+        eval_time: 1h
+  - name: a namespace without a project label gives no network series
+    interval: 30s
+    input_series:
+      - series: 'kube_namespace_labels{namespace="kube-system"}'
+        values: '1+0x120'
+      - series: 'kubevirt_vmi_network_receive_bytes_total{namespace="kube-system", name="vm1"}'
+        values: '1000000000+1048576x120'
+      - series: 'kubevirt_vmi_network_transmit_bytes_total{namespace="kube-system", name="vm1"}'
+        values: '1000000000+1048576x120'
+    promql_expr_test:
+      - expr: '{__name__=~"bedrock:project_.+"}'
+        eval_time: 1h
+  - name: two projects of one tenant stay apart
+    interval: 1m
+    input_series:
+      - series: 'kube_namespace_labels{namespace="acme-web", label_bedrock_cloudyfolks_io_tenant="acme", label_bedrock_cloudyfolks_io_project="web"}'
+        values: '1+0x60'
+      - series: 'kube_namespace_labels{namespace="acme-db", label_bedrock_cloudyfolks_io_tenant="acme", label_bedrock_cloudyfolks_io_project="db"}'
+        values: '1+0x60'
+      - series: 'kubevirt_vmi_vcpu_seconds_total{namespace="acme-web", name="vm1", id="0"}'
+        values: '_x10 1+1x5 stale'
+      - series: 'kubevirt_vmi_vcpu_seconds_total{namespace="acme-web", name="vm1", id="1"}'
+        values: '_x10 1+1x5 stale'
+      - series: 'kubevirt_vmi_vcpu_seconds_total{namespace="acme-db", name="vm1", id="0"}'
+        values: '_x10 1+1x5 stale'
+      - series: 'kubevirt_vmi_vcpu_seconds_total{namespace="acme-db", name="vm1", id="1"}'
+        values: '_x10 1+1x5 stale'
+      - series: 'kubevirt_vmi_vcpu_seconds_total{namespace="acme-db", name="vm1", id="2"}'
+        values: '_x10 1+1x5 stale'
+      - series: 'kubevirt_vmi_vcpu_seconds_total{namespace="acme-db", name="vm1", id="3"}'
+        values: '_x10 1+1x5 stale'
+      - series: 'kubevirt_vmi_memory_domain_bytes{namespace="acme-web", name="vm1"}'
+        values: '_x10 2147483648+0x5 stale'
+      - series: 'kubevirt_vmi_memory_domain_bytes{namespace="acme-db", name="vm1"}'
+        values: '_x10 8589934592+0x5 stale'
+    promql_expr_test:
+      - expr: 'sum_over_time(bedrock:project_vm_vcpu:sum[1h]) / 60'
+        eval_time: 1h
+        exp_samples:
+          - labels: '{project="web", tenant="acme"}'
+            value: 0.2
+          - labels: '{project="db", tenant="acme"}'
+            value: 0.4
+      - expr: 'sum_over_time(bedrock:project_vm_memory_bytes:sum[1h]) / 60 / 1073741824'
+        eval_time: 1h
+        exp_samples:
+          - labels: '{project="web", tenant="acme"}'
+            value: 0.2
+          - labels: '{project="db", tenant="acme"}'
+            value: 0.8
+  - name: two projects of one tenant keep their own network totals
+    interval: 30s
+    input_series:
+      - series: 'kube_namespace_labels{namespace="acme-web", label_bedrock_cloudyfolks_io_tenant="acme", label_bedrock_cloudyfolks_io_project="web"}'
+        values: '1+0x120'
+      - series: 'kube_namespace_labels{namespace="acme-db", label_bedrock_cloudyfolks_io_tenant="acme", label_bedrock_cloudyfolks_io_project="db"}'
+        values: '1+0x120'
+      - series: 'kubevirt_vmi_network_receive_bytes_total{namespace="acme-web", name="vm1"}'
+        values: '1000000000+1048576x120'
+      - series: 'kubevirt_vmi_network_receive_bytes_total{namespace="acme-db", name="vm1"}'
+        values: '1000000000+2097152x120'
+    promql_expr_test:
+      - expr: 'round(bedrock:project_vm_network_receive_bytes:increase1h, 1) / 1073741824'
+        eval_time: 1h
+        exp_samples:
+          - labels: '{project="web", tenant="acme"}'
+            value: 0.1171875
+          - labels: '{project="db", tenant="acme"}'
+            value: 0.234375

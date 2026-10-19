@@ -10,6 +10,8 @@ import (
 	"testing"
 
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+
+	"github.com/cloudyfolks-io/bedrock/internal/config"
 )
 
 const monitoringSourceDir = "manifests/71-kube-prometheus-stack"
@@ -55,6 +57,8 @@ var meteringSeries = []string{
 	"bedrock:project_vm_cpu_usage_cores:rate5m",
 	"bedrock:project_vm_network_receive_bytes:rate5m",
 	"bedrock:project_vm_network_transmit_bytes:rate5m",
+	"bedrock:project_vm_network_receive_bytes:increase1h",
+	"bedrock:project_vm_network_transmit_bytes:increase1h",
 }
 
 var sourceMetrics = []string{
@@ -80,6 +84,27 @@ func TestMeteringRulesNameEverySeries(t *testing.T) {
 	sort.Strings(want)
 	if !slices.Equal(got, want) {
 		t.Fatalf("series %v", got)
+	}
+}
+
+func TestMeteringHourlyNetworkRulesSumTheIncreaseOfEachSeries(t *testing.T) {
+	want := map[string]string{
+		"bedrock:project_vm_network_receive_bytes:increase1h":  "sum (increase(kubevirt_vmi_network_receive_bytes_total[1h]) * on (namespace)",
+		"bedrock:project_vm_network_transmit_bytes:increase1h": "sum (increase(kubevirt_vmi_network_transmit_bytes_total[1h]) * on (namespace)",
+	}
+	seen := 0
+	for _, rule := range meteringRules(t) {
+		prefix, ok := want[rule.record]
+		if !ok {
+			continue
+		}
+		seen++
+		if !strings.HasPrefix(rule.expr, prefix) {
+			t.Errorf("%s does not take the increase before the sum: %s", rule.record, rule.expr)
+		}
+	}
+	if seen != len(want) {
+		t.Fatalf("found %d of %d hourly network rules", seen, len(want))
 	}
 }
 
@@ -252,5 +277,97 @@ func TestKubeVirtServiceMonitorScrapesTheMetricsService(t *testing.T) {
 	endpoint := endpoints[0].(map[string]any)
 	if endpoint["port"] != "metrics" || endpoint["scheme"] != "https" || endpoint["honorLabels"] != true {
 		t.Fatalf("endpoint %v", endpoint)
+	}
+}
+
+func readerPolicy(t *testing.T) *unstructured.Unstructured {
+	t.Helper()
+	policy := objectNamed(sourceObjects(t), "NetworkPolicy", "bedrock-metrics-readers")
+	if policy == nil {
+		t.Fatal("missing NetworkPolicy bedrock-metrics-readers")
+	}
+	if policy.GetNamespace() != "monitoring" {
+		t.Fatalf("namespace %q", policy.GetNamespace())
+	}
+	return policy
+}
+
+func TestReaderPolicySelectsPrometheusAndLoki(t *testing.T) {
+	policy := readerPolicy(t)
+	selector, _, _ := unstructured.NestedMap(policy.Object, "spec", "podSelector")
+	if len(selector) != 1 {
+		t.Fatalf("selector %v", selector)
+	}
+	expressions := selector["matchExpressions"].([]any)
+	if len(expressions) != 1 {
+		t.Fatalf("expressions %v", expressions)
+	}
+	expression := expressions[0].(map[string]any)
+	values := toStringSlice(expression["values"].([]any))
+	slices.Sort(values)
+	if expression["key"] != "app.kubernetes.io/name" || expression["operator"] != "In" || !slices.Equal(values, []string{"loki", "prometheus"}) {
+		t.Fatalf("expression %v", expression)
+	}
+	types, _, _ := unstructured.NestedStringSlice(policy.Object, "spec", "policyTypes")
+	if !slices.Equal(types, []string{"Ingress"}) {
+		t.Fatalf("policyTypes %v: egress must stay open", types)
+	}
+}
+
+func TestReaderPolicyAllowsOnlyPlatformSources(t *testing.T) {
+	rules, _, _ := unstructured.NestedSlice(readerPolicy(t).Object, "spec", "ingress")
+	if len(rules) != 1 {
+		t.Fatalf("ingress rules %v", rules)
+	}
+	rule := rules[0].(map[string]any)
+	if _, restricted := rule["ports"]; restricted {
+		t.Errorf("ports %v", rule["ports"])
+	}
+	var namespaces []string
+	var blocks []string
+	for _, item := range rule["from"].([]any) {
+		peer := item.(map[string]any)
+		if len(peer) != 1 {
+			t.Fatalf("peer %v mixes selectors", peer)
+		}
+		if selector, ok := peer["namespaceSelector"].(map[string]any); ok {
+			expressions := selector["matchExpressions"].([]any)
+			if len(selector) != 1 || len(expressions) != 1 {
+				t.Fatalf("namespace selector %v", selector)
+			}
+			expression := expressions[0].(map[string]any)
+			if expression["key"] != "kubernetes.io/metadata.name" || expression["operator"] != "In" {
+				t.Fatalf("namespace expression %v", expression)
+			}
+			namespaces = append(namespaces, toStringSlice(expression["values"].([]any))...)
+		}
+		if block, ok := peer["ipBlock"].(map[string]any); ok {
+			if _, excepted := block["except"]; excepted {
+				t.Errorf("ipBlock %v", block)
+			}
+			blocks = append(blocks, block["cidr"].(string))
+		}
+	}
+	slices.Sort(namespaces)
+	if !slices.Equal(namespaces, []string{"bedrock-system", "monitoring"}) {
+		t.Errorf("namespaces %v", namespaces)
+	}
+	if !slices.Equal(blocks, []string{config.DefaultJoinCIDR}) {
+		t.Errorf("ip blocks %v", blocks)
+	}
+}
+
+func toStringSlice(values []any) []string {
+	out := make([]string, 0, len(values))
+	for _, value := range values {
+		out = append(out, value.(string))
+	}
+	return out
+}
+
+func TestReaderPolicyReachesTheBuiltStack(t *testing.T) {
+	bundle, _ := buildStack(t)
+	if objectNamed(groupObjects(bundle, "kube-prometheus-stack"), "NetworkPolicy", "bedrock-metrics-readers") == nil {
+		t.Fatal("bedrock-metrics-readers is not in the built group")
 	}
 }
