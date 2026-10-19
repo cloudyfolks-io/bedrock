@@ -146,8 +146,9 @@ The chart puts it in the ConfigMap `kata-deploy-custom-configs`, and kata-deploy
 
 The Setting `container.runtime-class` has the default `kata`.
 The controller of the `Container` kind uses its value as the `runtimeClassName` of each pod.
-An empty value sets no runtime class.
-Use an empty value only on a cluster with no KVM, for example the e2e cluster.
+An empty value keeps the default.
+The value `none` sets no runtime class.
+Use `none` only on a cluster with no KVM, for example the e2e cluster.
 A customer pod then shares the kernel of the node.
 
 When you turn kata off, Bedrock first deletes the DaemonSet. The kata pods

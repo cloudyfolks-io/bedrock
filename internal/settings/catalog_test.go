@@ -317,7 +317,10 @@ func TestContainerRuntimeClassSetting(t *testing.T) {
 	if !ok || def.Default != "kata" {
 		t.Fatalf("setting %+v", def)
 	}
-	for _, value := range []string{"", "kata", "gvisor-1"} {
+	if !strings.Contains(def.Description, "none") {
+		t.Fatalf("the description must name the value none: %q", def.Description)
+	}
+	for _, value := range []string{"", "kata", "none", "gvisor-1"} {
 		if err := def.Validate(value); err != nil {
 			t.Errorf("%q: %v", value, err)
 		}
