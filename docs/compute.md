@@ -195,6 +195,40 @@ The request must be a same-origin WebSocket request.
 The proxy removes the credentials of the caller before it calls KubeVirt.
 The VM status shows the console paths in `status.console`.
 
+## Node drains
+
+The Setting `virt.eviction-strategy` is the KubeVirt cluster setting `configuration.evictionStrategy`.
+It decides what a node drain does to a VM that has no `evictionStrategy` of its own.
+The `evictionStrategy` field of a VirtualMachine has priority over the Setting.
+When this field is empty, the operator writes `LiveMigrateIfPossible` into the KubeVirt VM.
+So the Setting does not change the VMs that the operator renders.
+
+| Value | A drain does this to a VM that can migrate | A drain does this to a VM that cannot migrate |
+|---|---|---|
+| `LiveMigrate` | It migrates the VM. | It waits. The drain does not end until the VM can migrate or stops. |
+| `LiveMigrateIfPossible` | It migrates the VM. | It shuts the VM down and the drain continues. |
+| `None` | It shuts the VM down. | It shuts the VM down. |
+
+A kured reboot starts a drain.
+With `LiveMigrate`, one VM that cannot migrate blocks the reboot of its node.
+With `LiveMigrateIfPossible`, the reboot stops this VM.
+Check the condition `LiveMigratable` of a VM before you plan a reboot.
+
+## Volume hot-plug
+
+KubeVirt 1.9.0 has the feature gate `DeclarativeHotplugVolumes` in state Beta.
+KubeVirt enables a Beta gate unless the cluster setting disables it.
+The source is `pkg/virt-config/featuregate/active.go` and `pkg/virt-config/featuregate/feature-gates.go` (function `IsEnabled`) in the KubeVirt repository at the tag `v1.9.0`.
+So the operator does not list this gate in `featureGates`.
+You can add and remove Volumes in `disks` while a VM runs.
+
+## Support containers
+
+The operator sets the limits of the KubeVirt container `guest-console-log` to 100m CPU and 120M memory.
+The KubeVirt default of 15m CPU slows the console log of a VM that writes much output.
+The limits apply to each new launcher pod.
+A running VM keeps its limits until the next start or migration.
+
 ## Live migration status
 
 `status.migration` shows the newest KubeVirt migration of the VM.
@@ -238,6 +272,7 @@ A change applies at the next start of the VM.
 | `migration.completion-timeout-per-gib` | The seconds for each GiB of guest memory before KubeVirt aborts a live migration. The default is 800. |
 | `migration.progress-timeout` | The seconds without progress before KubeVirt aborts a live migration. The default is 150. |
 | `migration.compression` | Empty or `zstd`. The default is empty. |
+| `virt.eviction-strategy` | `LiveMigrate`, `LiveMigrateIfPossible` or `None`. The default is `LiveMigrateIfPossible`. See Node drains. |
 
 The migration Settings change the KubeVirt configuration.
 A running VM is not restarted and not migrated by this change.

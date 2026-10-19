@@ -256,3 +256,36 @@ func TestRenderVirtualizationCompression(t *testing.T) {
 		t.Fatalf("spec %+v absent %+v", spec, on.Absent)
 	}
 }
+
+func TestRenderVirtualizationEviction(t *testing.T) {
+	for setting, want := range map[string]string{"": "LiveMigrateIfPossible", "LiveMigrate": "LiveMigrate", "None": "None"} {
+		kv, _ := renderKubeVirt(t, map[string]string{"virt.eviction-strategy": setting})
+		if got, _, _ := unstructured.NestedString(kv.Object, "spec", "configuration", "evictionStrategy"); got != want {
+			t.Errorf("%q gave %q", setting, got)
+		}
+	}
+	_, err := RenderVirtualization(AddonInput{Settings: map[string]string{"virt.emulation": "false", "virt.eviction-strategy": "Always"}})
+	if err == nil || !strings.Contains(err.Error(), "virt.eviction-strategy") {
+		t.Fatalf("error %v", err)
+	}
+}
+
+func TestRenderVirtualizationSupportContainerResources(t *testing.T) {
+	kv, _ := renderKubeVirt(t, map[string]string{})
+	got, _, _ := unstructured.NestedSlice(kv.Object, "spec", "configuration", "supportContainerResources")
+	want := []any{map[string]any{
+		"type":      "guest-console-log",
+		"resources": map[string]any{"limits": map[string]any{"cpu": "100m", "memory": "120M"}},
+	}}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("support container resources %+v", got)
+	}
+}
+
+func TestRenderVirtualizationKeepsTheHotplugGateToKubeVirt(t *testing.T) {
+	kv, _ := renderKubeVirt(t, map[string]string{})
+	gates, _, _ := unstructured.NestedStringSlice(kv.Object, "spec", "configuration", "developerConfiguration", "featureGates")
+	if slices.Contains(gates, "DeclarativeHotplugVolumes") {
+		t.Fatalf("gates %v: KubeVirt 1.9.0 enables DeclarativeHotplugVolumes by default", gates)
+	}
+}

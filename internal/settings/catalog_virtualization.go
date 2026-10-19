@@ -42,6 +42,7 @@ func virtualizationDefinitions() []Definition {
 		{"migration.bandwidth", "1Gi", "Bandwidth limit of one live migration, in bytes per second, for example 1Gi.", positiveQuantity},
 		{"migration.completion-timeout-per-gib", "800", "Seconds for each GiB of guest memory before a live migration is aborted.", intMin(1)},
 		{"migration.progress-timeout", "150", "Seconds without progress before a live migration is aborted.", intMin(1)},
+		{"virt.eviction-strategy", "LiveMigrateIfPossible", "What a node drain does to a VM that has no evictionStrategy of its own. LiveMigrate makes the drain wait for a VM that cannot migrate. LiveMigrateIfPossible shuts such a VM down. None shuts every VM down.", oneOf("LiveMigrate", "LiveMigrateIfPossible", "None")},
 		{"migration.compression", "", "Compression of live migration traffic. Empty means none. zstd compresses.", oneOf("zstd")},
 	}
 }

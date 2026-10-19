@@ -54,3 +54,20 @@ func TestCatalogMigrationKeys(t *testing.T) {
 		}
 	}
 }
+
+func TestCatalogEvictionStrategy(t *testing.T) {
+	def, ok := Lookup("virt.eviction-strategy")
+	if !ok || def.Default != "LiveMigrateIfPossible" {
+		t.Fatalf("definition %+v %v", def, ok)
+	}
+	for _, valid := range []string{"LiveMigrate", "LiveMigrateIfPossible", "None"} {
+		if err := def.Validate(valid); err != nil {
+			t.Errorf("%q must be valid: %v", valid, err)
+		}
+	}
+	for _, invalid := range []string{"Always", "livemigrate"} {
+		if err := def.Validate(invalid); err == nil {
+			t.Errorf("%q must be invalid", invalid)
+		}
+	}
+}

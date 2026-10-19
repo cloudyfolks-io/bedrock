@@ -10,9 +10,13 @@ import (
 
 	"github.com/cloudyfolks-io/bedrock/api/v1alpha1"
 	"github.com/cloudyfolks-io/bedrock/internal/release"
+	"github.com/cloudyfolks-io/bedrock/internal/settings"
 )
 
-const kubevirtNamespace = "kubevirt"
+const (
+	kubevirtNamespace   = "kubevirt"
+	keyEvictionStrategy = "virt.eviction-strategy"
+)
 
 var virtualizationAddon = Addon{Name: "virtualization", Condition: v1alpha1.ConditionVirtualizationReady, Render: RenderVirtualization}
 
@@ -38,11 +42,15 @@ func RenderVirtualization(in AddonInput) (Rendered, error) {
 	if err != nil {
 		return Rendered{}, err
 	}
+	eviction, err := parseEviction(in.Settings)
+	if err != nil {
+		return Rendered{}, err
+	}
 	policies, absent, err := compressionPolicy(in.Settings)
 	if err != nil {
 		return Rendered{}, err
 	}
-	objects := append([]*unstructured.Unstructured{kubeVirt(emulation, tuning, migration, smbios), cdi()}, policies...)
+	objects := append([]*unstructured.Unstructured{kubeVirt(emulation, tuning, migration, smbios, eviction), cdi()}, policies...)
 	probes := []Probe{
 		{GVK: kubeVirtGVK, Key: client.ObjectKey{Namespace: kubevirtNamespace, Name: "kubevirt"}, Gate: release.PhaseGate("Deployed")},
 		{GVK: cdiGVK, Key: client.ObjectKey{Name: "cdi"}, Gate: release.PhaseGate("Deployed")},
@@ -57,12 +65,14 @@ func boolSetting(value string) (bool, error) {
 	return strconv.ParseBool(value)
 }
 
-func kubeVirt(emulation bool, tuning kubeVirtTuning, migration migrationTuning, smbios map[string]any) *unstructured.Unstructured {
+func kubeVirt(emulation bool, tuning kubeVirtTuning, migration migrationTuning, smbios map[string]any, eviction string) *unstructured.Unstructured {
 	return object("kubevirt.io/v1", "KubeVirt", kubevirtNamespace, "kubevirt", map[string]any{
 		"imagePullPolicy": "IfNotPresent",
 		"configuration": withSMBIOS(map[string]any{
 			"commonInstancetypesDeployment": map[string]any{"enabled": true},
 			"vmStateStorageClass":           "filesystem",
+			"evictionStrategy":              eviction,
+			"supportContainerResources":     supportContainerResources(),
 			"migrations":                    migrationSettings(migration, tuning.ParallelMigrations),
 			"developerConfiguration": map[string]any{
 				"useEmulation":       emulation,
@@ -73,6 +83,22 @@ func kubeVirt(emulation bool, tuning kubeVirtTuning, migration migrationTuning, 
 		}, smbios),
 		"workloadUpdateStrategy": map[string]any{"workloadUpdateMethods": []any{"LiveMigrate", "Evict"}},
 	})
+}
+
+func parseEviction(values map[string]string) (string, error) {
+	value := settingOrDefault(values, keyEvictionStrategy)
+	definition, _ := settings.Lookup(keyEvictionStrategy)
+	if err := definition.Validate(value); err != nil {
+		return "", fmt.Errorf("%s: %w", keyEvictionStrategy, err)
+	}
+	return value, nil
+}
+
+func supportContainerResources() []any {
+	return []any{map[string]any{
+		"type":      "guest-console-log",
+		"resources": map[string]any{"limits": map[string]any{"cpu": "100m", "memory": "120M"}},
+	}}
 }
 
 func withSMBIOS(configuration, smbios map[string]any) map[string]any {
