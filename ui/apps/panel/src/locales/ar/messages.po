@@ -265,6 +265,9 @@ msgstr "الشبكة الخاصة"
 msgid "col.vpcCidr"
 msgstr "CIDR للشبكة الخاصة"
 
+msgid "col.workers"
+msgstr "العُقد العاملة"
+
 msgid "col.zone"
 msgstr "النطاق"
 
@@ -726,6 +729,9 @@ msgstr "المضيفون"
 
 msgid "nav.item.images"
 msgstr "الصور"
+
+msgid "nav.item.kubernetesClusters"
+msgstr "عناقيد Kubernetes"
 
 msgid "nav.item.loadBalancers"
 msgstr "موازنات الحمل"

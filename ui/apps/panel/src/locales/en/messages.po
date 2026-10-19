@@ -265,6 +265,9 @@ msgstr "VPC"
 msgid "col.vpcCidr"
 msgstr "VPC CIDR"
 
+msgid "col.workers"
+msgstr "Workers"
+
 msgid "col.zone"
 msgstr "Zone"
 
@@ -726,6 +729,9 @@ msgstr "Hosts"
 
 msgid "nav.item.images"
 msgstr "Images"
+
+msgid "nav.item.kubernetesClusters"
+msgstr "Kubernetes clusters"
 
 msgid "nav.item.loadBalancers"
 msgstr "Load balancers"

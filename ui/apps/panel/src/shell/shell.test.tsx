@@ -66,6 +66,7 @@ describe("shell", () => {
       [
         "vms",
         "containers",
+        "kubernetes-clusters",
         "ssh-keys",
         "volumes",
         "snapshots",
