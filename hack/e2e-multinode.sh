@@ -19,7 +19,7 @@ min_mem_gb=${LAB_MIN_MEM_GB:-46}
 remote_config_file=/root/multinode.yaml
 join_roles=control-plane,ceph-osd,fabric-gateway,workload
 release_config=dist/components-e2e.yaml
-remote_files=(tenant/tenancy tenant/images multinode/cluster multinode/guest multinode/vm)
+remote_files=(tenant/tenancy tenant/images multinode/cluster multinode/guest multinode/vm multinode/drain)
 vm_env=()
 bundle_make_args=("RELEASE_CONFIG=$release_config")
 vm_path=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
@@ -160,6 +160,7 @@ check_entries=(
   "hot-plugged volume shows in the guest (Q2)|remote_check check_hotplug"
   "SMBIOS UUID of one VM name in two namespaces (Q3)|remote_check check_smbios"
   "Subnet MTU 1500 on an underlay of 1500 (finding)|remote_check check_mtu_1500_finding"
+  "drain with LiveMigrateIfPossible and LiveMigrate|remote_check check_drain"
 )
 
 collect_diagnostics() {
