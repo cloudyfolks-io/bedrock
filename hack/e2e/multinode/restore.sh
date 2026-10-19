@@ -74,8 +74,23 @@ restore_node_one() {
   rm -f "$script"
 }
 
+lease_renewed_since() {
+  local renewed
+  renewed=$(kubectl -n kube-node-lease get lease "$2" -o jsonpath='{.spec.renewTime}') || return 1
+  [ -n "$renewed" ] && [ "$(date -u -d "$renewed" +%s)" -ge "$1" ]
+}
+
+leases_renewed_since() {
+  local index
+  for index in 1 2 3; do
+    lease_renewed_since "$1" "$(lab_node "$index")" || return 1
+  done
+}
+
 restore_settle() {
   local name
+  retry_until 1800 leases_renewed_since "$1"
+  kubectl wait --for=condition=Ready node --all --timeout=900s >/dev/null
   for name in "${restore_vms[@]}"; do
     wait_vm_running 1800 "$NS" "$name"
   done
