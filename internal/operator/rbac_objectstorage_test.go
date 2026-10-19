@@ -13,9 +13,9 @@ func TestOperatorRoleCoversObjectStorage(t *testing.T) {
 		{"ceph.rook.io", "cephobjectstoreusers", "patch"},
 		{"ceph.rook.io", "cephobjectstoreusers", "get"},
 		{"ceph.rook.io", "cephobjectstores", "get"},
-		{"objectbucket.io", "objectbucketclaims", "create"},
-		{"objectbucket.io", "objectbucketclaims", "delete"},
-		{"objectbucket.io", "objectbucketclaims", "patch"},
+		{"objectbucket.io", "objectbucketclaims", "get"},
+		{"objectbucket.io", "objectbucketclaims", "list"},
+		{"objectbucket.io", "objectbucketclaims", "watch"},
 		{"", "configmaps", "get"},
 		{"", "secrets", "get"},
 		{"", "namespaces", "get"},
@@ -33,5 +33,10 @@ func TestOperatorRoleCoversObjectStorage(t *testing.T) {
 	}
 	if allows(role, "objectbucket.io", "objectbuckets", "delete") {
 		t.Error("objectbuckets delete is allowed")
+	}
+	for _, verb := range []string{"create", "update", "patch", "delete"} {
+		if allows(role, "objectbucket.io", "objectbucketclaims", verb) {
+			t.Errorf("objectbucketclaims %s is allowed, but tenant buckets no longer use claims", verb)
+		}
 	}
 }
