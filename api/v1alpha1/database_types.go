@@ -136,6 +136,9 @@ type DatabaseApplied struct {
 	Version string `json:"version"`
 	// +kubebuilder:validation:Minimum=0
 	StorageGi int32 `json:"storageGi"`
+	// +kubebuilder:validation:Minimum=0
+	// +optional
+	Instances int32 `json:"instances,omitempty"`
 	// +optional
 	Suspended bool `json:"suspended,omitempty"`
 	// +kubebuilder:validation:MaxLength=253

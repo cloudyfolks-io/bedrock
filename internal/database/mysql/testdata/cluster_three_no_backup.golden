@@ -58,6 +58,14 @@
         "haproxy": {
           "enabled": true,
           "image": "docker.io/percona/haproxy:2.8.18-1@sha256:bb",
+          "labels": {
+            "app.kubernetes.io/instance": "0b0c0d0e-1111-4222-8333-444455556666",
+            "app.kubernetes.io/managed-by": "bedrock",
+            "bedrock.cloudyfolks.io/kind": "Database",
+            "bedrock.cloudyfolks.io/name": "orders",
+            "bedrock.cloudyfolks.io/project": "web",
+            "bedrock.cloudyfolks.io/tenant": "acme"
+          },
           "size": 3
         },
         "router": {

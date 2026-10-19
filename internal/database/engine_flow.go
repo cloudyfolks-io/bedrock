@@ -177,15 +177,7 @@ func (r *Reconciler) upgradeTargets(ctx context.Context, db v1alpha1.Database, a
 
 func (r *Reconciler) operationFacts(ctx context.Context, in *flow) (OperationFacts, error) {
 	db, applied := *in.db, *in.db.Status.Applied
-	facts := OperationFacts{Class: in.catalog.Class.Spec, PreviousClass: in.catalog.Class.Spec}
-	if applied.Class != db.Spec.Class {
-		var previous v1alpha1.DatabaseClass
-		if err := r.Live.Get(ctx, client.ObjectKey{Name: applied.Class}, &previous); err == nil {
-			facts.PreviousClass = previous.Spec
-		} else if !apierrors.IsNotFound(err) {
-			return facts, err
-		}
-	}
+	facts := OperationFacts{Class: in.catalog.Class.Spec}
 	var err error
 	if facts.ExpansionAllowed, err = r.expansionAllowed(ctx); err != nil {
 		return facts, err
@@ -198,9 +190,22 @@ func (r *Reconciler) operationFacts(ctx context.Context, in *flow) (OperationFac
 	if err != nil {
 		return facts, err
 	}
-	latest, requested := UpgradeBackupFacts(Name(db.UID), backups, BackupStateOf(db.Spec.Engine))
-	facts.Upgrade = UpgradeFacts{Targets: targets, LatestBackup: latest, PreRequested: requested, MaxAge: in.cfg.BackupMaxAge, Now: r.now()}
+	upgrade := UpgradeBackupFacts(Name(db.UID), db.Spec.Version, r.now(), in.cfg.BackupMaxAge, backups, BackupStateOf(db.Spec.Engine))
+	in.preBackups = FailedPreUpgradeBackups(Name(db.UID), backups, BackupStateOf(db.Spec.Engine))
+	facts.Upgrade = UpgradeFacts{Targets: targets, LatestBackup: upgrade.Latest, PreRequested: upgrade.Requested, PreFailedAt: upgrade.FailedAt, MaxAge: in.cfg.BackupMaxAge, Now: r.now()}
 	return facts, nil
+}
+
+func liveInstances(kind string, obj *unstructured.Unstructured) int {
+	path := []string{"spec", "instances"}
+	switch kind {
+	case v1alpha1.DatabaseEngineMySQL:
+		path = []string{"spec", "mysql", "size"}
+	case v1alpha1.DatabaseEngineValkey:
+		return 0
+	}
+	have, _, _ := unstructured.NestedInt64(obj.Object, path...)
+	return int(have)
 }
 
 func appliedOf(db v1alpha1.Database) v1alpha1.DatabaseApplied {

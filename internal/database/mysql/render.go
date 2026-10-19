@@ -149,7 +149,7 @@ func mysqlBlock(s engine.Spec) map[string]any {
 }
 
 func proxyBlock(s engine.Spec) map[string]any {
-	haproxy := map[string]any{"enabled": true, "size": int64(3)}
+	haproxy := map[string]any{"enabled": true, "size": int64(3), "labels": podLabels(s)}
 	if image := s.Images[ImageHAProxy]; image != "" {
 		haproxy["image"] = image
 	}

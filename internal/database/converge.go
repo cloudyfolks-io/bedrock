@@ -44,17 +44,18 @@ type Observed struct {
 }
 
 type flow struct {
-	cfg     Config
-	db      *v1alpha1.Database
-	project Project
-	catalog Catalog
-	subnet  v1alpha1.Subnet
-	pods    Pods
-	port    int
-	exists  bool
-	plan    Result
-	image   string
-	dest    string
+	cfg        Config
+	db         *v1alpha1.Database
+	project    Project
+	catalog    Catalog
+	subnet     v1alpha1.Subnet
+	pods       Pods
+	port       int
+	exists     bool
+	plan       Result
+	preBackups []*unstructured.Unstructured
+	image      string
+	dest       string
 }
 
 func (r *Reconciler) converge(ctx context.Context, cfg Config, project Project, db *v1alpha1.Database) (Observed, error) {
@@ -88,6 +89,9 @@ func (r *Reconciler) prepare(ctx context.Context, in *flow) (*Refusal, error) {
 	in.port = int(catalog.Version.Spec.Port)
 	if !exists {
 		if refused := checkNew(catalog, db); refused != nil {
+			return refused, nil
+		}
+		if refused := checkLostEngine(catalog, db); refused != nil {
 			return refused, nil
 		}
 	} else if refused := checkExisting(catalog, db, cluster); refused != nil {
@@ -235,6 +239,11 @@ func (r *Reconciler) prepareOperations(ctx context.Context, in *flow) (*Refusal,
 func (r *Reconciler) requestUpgradeBackup(ctx context.Context, in *flow) error {
 	if !in.plan.RequestBackup {
 		return nil
+	}
+	for _, failed := range in.preBackups {
+		if err := r.Client.Delete(ctx, failed); client.IgnoreNotFound(err) != nil {
+			return err
+		}
 	}
 	return ApplyPlan(ctx, r.Client, in.db.Spec.Engine, r.specOf(in), Result{RequestBackup: true}, r.now())
 }
@@ -525,6 +534,7 @@ func (r *Reconciler) recordApplied(in *flow, primary *unstructured.Unstructured,
 		return
 	}
 	applied := appliedOf(db)
+	applied.Instances = int32(Instances(in.catalog.Class))
 	observed.Applied = &applied
 	observed.Upgrading = false
 }
