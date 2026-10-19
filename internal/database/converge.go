@@ -22,7 +22,10 @@ import (
 	"github.com/cloudyfolks-io/bedrock/internal/ssa"
 )
 
-const annotationReadyOnce = "bedrock.cloudyfolks.io/ready-once"
+const (
+	annotationReadyOnce      = "bedrock.cloudyfolks.io/ready-once"
+	annotationAppliedVersion = "bedrock.cloudyfolks.io/applied-version"
+)
 
 type Observed struct {
 	EngineReady   bool
@@ -64,7 +67,7 @@ func (r *Reconciler) converge(ctx context.Context, cfg Config, project Project, 
 
 func (r *Reconciler) prepare(ctx context.Context, in *flow) (*Refusal, error) {
 	db := *in.db
-	exists, err := r.clusterExists(ctx, db)
+	cluster, exists, err := r.clusterOf(ctx, db)
 	if err != nil {
 		return nil, err
 	}
@@ -79,6 +82,8 @@ func (r *Reconciler) prepare(ctx context.Context, in *flow) (*Refusal, error) {
 		if refused := checkNew(catalog, db); refused != nil {
 			return refused, nil
 		}
+	} else if refused := checkExisting(catalog, db, cluster); refused != nil {
+		return refused, nil
 	}
 	steps := []func(context.Context, *flow) (*Refusal, error){r.preparePlatform, r.prepareCapacity, r.prepareSubnet, r.preparePods, r.prepareVIPRange, r.prepareBackupStore, r.prepareRestore}
 	for _, step := range steps {
@@ -89,14 +94,14 @@ func (r *Reconciler) prepare(ctx context.Context, in *flow) (*Refusal, error) {
 	return nil, nil
 }
 
-func (r *Reconciler) clusterExists(ctx context.Context, db v1alpha1.Database) (bool, error) {
+func (r *Reconciler) clusterOf(ctx context.Context, db v1alpha1.Database) (*unstructured.Unstructured, bool, error) {
 	cluster := &unstructured.Unstructured{}
 	cluster.SetGroupVersionKind(ClusterGVK)
 	err := r.Live.Get(ctx, client.ObjectKey{Namespace: PlatformNamespace, Name: Name(db.UID)}, cluster)
 	if apierrors.IsNotFound(err) || meta.IsNoMatchError(err) {
-		return false, nil
+		return nil, false, nil
 	}
-	return err == nil, err
+	return cluster, err == nil, err
 }
 
 func (r *Reconciler) preparePlatform(ctx context.Context, in *flow) (*Refusal, error) {
@@ -243,7 +248,10 @@ func (r *Reconciler) applyEngine(ctx context.Context, in *flow) error {
 			return fmt.Errorf("%s %s: %w", obj.GetKind(), obj.GetName(), err)
 		}
 	}
-	return r.applyHibernation(ctx, *in.db)
+	if err := r.applyHibernation(ctx, *in.db); err != nil {
+		return err
+	}
+	return markAppliedVersion(ctx, r.Client, in.db)
 }
 
 func (r *Reconciler) applyHibernation(ctx context.Context, db v1alpha1.Database) error {

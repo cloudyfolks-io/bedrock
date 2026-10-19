@@ -43,6 +43,7 @@ type DatabaseSpec struct {
 	// +kubebuilder:validation:MinLength=1
 	// +kubebuilder:validation:MaxLength=16
 	// +kubebuilder:validation:Pattern=`^[0-9]+(\.[0-9]+)?$`
+	// +kubebuilder:validation:XValidation:rule="self == oldSelf",message="version cannot change until upgrades are supported"
 	Version string `json:"version"`
 	// +kubebuilder:validation:MinLength=1
 	// +kubebuilder:validation:MaxLength=63
