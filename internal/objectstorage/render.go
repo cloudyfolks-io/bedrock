@@ -1,37 +1,42 @@
 package objectstorage
 
 import (
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"strings"
+
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 
 	"github.com/cloudyfolks-io/bedrock/api/v1alpha1"
+	"github.com/cloudyfolks-io/bedrock/internal/platform"
 )
 
-const maxGenerateBucketName = 50
+const maxBucketName = 63
 
-func CephUser(user *v1alpha1.ObjectStorageUser, tenant, project string) (*unstructured.Unstructured, error) {
+func CephUser(user *v1alpha1.ObjectStorageUser, project Project) *unstructured.Unstructured {
+	rgwName := RGWUserName(user.Namespace, user.Name)
 	spec := map[string]any{
-		"store":            StoreName,
-		"clusterNamespace": StoreNamespace,
-		"displayName":      displayName(user),
+		"store":       StoreName,
+		"displayName": rgwName,
+		"accountRef":  map[string]any{"name": AccountName(user.Namespace)},
 	}
-	owner := metav1.NewControllerRef(user, v1alpha1.GroupVersion.WithKind("ObjectStorageUser"))
+	if user.Spec.Suspended {
+		spec["opMask"] = []any{}
+	}
 	obj := &unstructured.Unstructured{Object: map[string]any{
 		"apiVersion": "ceph.rook.io/v1",
 		"kind":       "CephObjectStoreUser",
-		"metadata":   map[string]any{"name": RGWUserName(user.Namespace, user.Name), "namespace": user.Namespace},
+		"metadata":   map[string]any{"name": rgwName, "namespace": StoreNamespace},
 		"spec":       spec,
 	}}
-	obj.SetLabels(v1alpha1.TenantLabels("ObjectStorageUser", user.Name, tenant, project))
-	obj.SetOwnerReferences([]metav1.OwnerReference{*owner})
-	return obj, nil
+	owner := platform.Owner{Kind: "ObjectStorageUser", Name: user.Name, Namespace: user.Namespace, UID: user.UID, Tenant: project.Tenant, Project: project.Name}
+	return platform.Adopt(obj, owner)
 }
 
-func displayName(user *v1alpha1.ObjectStorageUser) string {
-	if user.Spec.DisplayName != "" {
-		return user.Spec.DisplayName
+func S3BucketName(bucket *v1alpha1.ObjectStorageBucket) string {
+	if bucket.Spec.BucketName != "" {
+		return bucket.Spec.BucketName
 	}
-	return user.Namespace + "/" + user.Name
+	generated := strings.ReplaceAll(bucket.Namespace+"-"+bucket.Name, ".", "-")
+	return strings.TrimRight(cut(generated, maxBucketName), "-")
 }
 
 func cut(value string, limit int) string {

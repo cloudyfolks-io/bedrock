@@ -42,7 +42,7 @@ func TestSetupRegistersTheControllers(t *testing.T) {
 		if err := testClient.Get(ctx, client.ObjectKey{Namespace: "acme-prod", Name: "app"}, &user); err != nil {
 			return false, nil
 		}
-		return controllerutil.ContainsFinalizer(&user, UserFinalizer), nil
+		return controllerutil.ContainsFinalizer(&user, userFinalizer), nil
 	})
 	if err != nil {
 		t.Fatalf("the user never got its finalizer: %v", err)
