@@ -218,7 +218,8 @@ The job script imports the tarballs into containerd with `k0s ctr`.
 | Image | Use |
 | --- | --- |
 | `docker.io/chrislusf/seaweedfs:4.48` | The S3 target of the VM backup. |
-| `docker.io/amazon/aws-cli:2.37.10` | The S3 client for the backup bucket and the object storage checks. |
+| `docker.io/amazon/aws-cli:2.37.10` | The S3 client for the backup bucket and the object storage checks. It also checks `setfattr` in a Kata pod. |
+| `docker.io/library/busybox:1.37.0` | The web server of the container checks. |
 
 The VM image is the cirros containerDisk from the release bundle.
 The Fabric image of the release is the pod image for network probes.
@@ -251,6 +252,7 @@ If a name changes in an area, change it in that file only.
 | `images.sh` | The ClusterImage `cirros` from the bundle. An image upload through the proxy. |
 | `compute.sh` | An SSH key, a Volume, the SecurityGroup `web` and the VM `vm1`. Hot-plug and expand. A volume snapshot. The proxy actions and the console, which the Go test runs. |
 | `network.sh` | The provider network and the Network status. The fabric-frr agent. Subnet rules. The security group on the VM. A VM with a pinned address, a Subnet MTU and Subnet DNS servers. An ElasticIP in L2 mode with the ARP and ping proof. An ElasticIP without a provider network. The ElasticIP quota. A LoadBalancer and a DNSZone. Isolation rules. |
+| `container.sh` | The proof of the pod network. A hand-made Pod and a hand-made Deployment get the network metadata of a `Container`. |
 | `objectstorage.sh` | The object store, two users and one bucket. A put and a get from inside the cluster. A denied read by the other user. |
 | `backup.sh` | The SeaweedFS target. A VM backup with one entry. A restore with `replace: true`. A restore of a missing backup. |
 | `panel.sh` | The panel at `console.<host>`, the redirect from the apex, the API host and the Go test for the login and the watch stream. |
@@ -270,6 +272,27 @@ The script runs it with `-test.run` for each phase.
 The shell and the Go test do not repeat each other.
 The shell checks objects with `kubectl`.
 The Go test checks HTTP and WebSocket flows.
+
+## Container network proof
+
+The step `container_network_proof` in `hack/e2e/tenant/container.sh` proves the pod network that the `Container` kind needs.
+The step runs after `network_isolation`.
+A failed check stops the step.
+The step makes the objects with the identity of `bedrock-operator`, because only the platform can set network annotations.
+
+| Check | Proof |
+| --- | --- |
+| Tenant refusal | A Deployment of a tenant user with the network annotations in its pod template is refused with the text `only the platform may set network selection annotations`. |
+| One interface | The pod has one interface that is not `lo`, and the pinned address `10.100.0.200`. |
+| Fabric IP object | The Fabric `IP` object has `spec.podName` equal to the pod name and the Fabric Subnet label. |
+| Pod port from a VM | A cirros VM on the same Subnet reads the page of the pod. The VM writes the result to the serial console. |
+| Load balancer endpoint | A Fabric `SwitchLBRule` with the pod address as the endpoint forwards the traffic that the VM sends to the `Vip`. |
+| Exec probe | A pod with an `exec` readiness probe becomes Ready, also as a Deployment with the strategy `Recreate`. |
+| Probe limit | A pod with an `httpGet` readiness probe never becomes Ready, because the node cannot reach the pod network. |
+| Kata | With KVM and a RuntimeClass `kata`, a pod runs, and `setxattr` works in an `emptyDir`. The step skips this check on hosts without KVM. |
+
+The step uses a `SwitchLBRule` and not a `RouterLBRule`, because a `RouterLBRule` needs an external address.
+Both kinds take the same endpoint list.
 
 ## Network parity checks
 
