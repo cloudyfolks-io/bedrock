@@ -19,6 +19,7 @@ min_mem_gb=${LAB_MIN_MEM_GB:-46}
 remote_config_file=/root/multinode.yaml
 join_roles=control-plane,ceph-osd,fabric-gateway,workload
 release_config=dist/components-e2e.yaml
+restore_window=$((20 + 300 + 60))
 remote_files=(tenant/tenancy tenant/images multinode/cluster multinode/guest multinode/vm multinode/drain multinode/restore)
 vm_env=()
 bundle_make_args=("RELEASE_CONFIG=$release_config")
@@ -177,14 +178,31 @@ rejoin_node() {
 }
 
 restart_summary() {
-  join -j 1 <(printf '%s\n' "$1" | sort) <(printf '%s\n' "$2" | sort) |
-    awk '{ restarted = ($3 != $5); total++; count += restarted; printf "info: restore: %s on %s restarted=%d\n", $1, $2, restarted } END { printf "info: restore: %d of %d VMs restarted\n", count, total }'
+  local label=$1 joined
+  joined=$(join -j 1 <(printf '%s\n' "$2" | sort) <(printf '%s\n' "$3" | sort)) || return 1
+  [ "$(printf '%s\n' "$joined" | awk 'NF == 5' | wc -l)" -eq 3 ] || {
+    echo "restore: the listings before and after do not match for 3 VMs: $joined" >&2
+    return 1
+  }
+  printf '%s\n' "$joined" | awk -v label="$label" '{ restarted = ($3 != $5); count += restarted; printf "info: restore (%s): %s on %s restarted=%d\n", label, $1, $2, restarted } END { printf "info: restore (%s): %d of 3 VMs restarted\n", label, count }'
+}
+
+expect_spread_listing() {
+  [ "$(printf '%s\n' "$1" | awk 'NF == 3' | wc -l)" -eq 3 ] || {
+    echo "the listing before the restore has no 3 complete lines: $1" >&2
+    return 1
+  }
+  [ "$(printf '%s\n' "$1" | awk '{ print $2 }' | sort -u | wc -l)" -eq 3 ] || {
+    echo "the 3 VMs do not run on 3 different nodes: $1" >&2
+    return 1
+  }
 }
 
 check_restore() {
-  local before after floor snapshot token evicted_before evicted_after
+  local before early after started floor snapshot token evicted_before evicted_after
   vm_run 1 restore_fixture || return 1
   before=$(vm_run 1 vm_listing) || return 1
+  expect_spread_listing "$before" || return 1
   evicted_before=$(vm_run 1 eviction_events) || return 1
   floor=$(vm_run 1 'date -u +%Y%m%dT%H%M%SZ') || return 1
   snapshot=$(vm_run 1 "take_etcd_snapshot $floor") || return 1
@@ -192,6 +210,7 @@ check_restore() {
     echo "no etcd snapshot after $floor" >&2
     return 1
   }
+  started=$(vm_run 1 'date -u +%s') || return 1
   vm_run 3 'systemctl stop k0scontroller' || return 1
   vm_run 2 'systemctl stop k0scontroller' || return 1
   vm_run 1 "restore_node_one $snapshot" || return 1
@@ -200,9 +219,13 @@ check_restore() {
   rejoin_node 2 "$token" || return 1
   rejoin_node 3 "$token" || return 1
   vm_run 1 "$bedrock_bin restart-workloads" || return 1
-  after=$(vm_run 1 restore_settle) || return 1
+  early=$(vm_run 1 "restore_settle $started") || return 1
+  log "waiting ${restore_window}s for the taint eviction window"
+  sleep "$restore_window"
+  after=$(vm_run 1 "restore_settle $started") || return 1
   evicted_after=$(vm_run 1 eviction_events) || return 1
-  restart_summary "$before" "$after"
+  restart_summary "early sample" "$before" "$early" || return 1
+  restart_summary "final sample" "$before" "$after" || return 1
   echo "info: restore: TaintManagerEviction events: $evicted_before before the restore, $evicted_after after"
 }
 
