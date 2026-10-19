@@ -709,6 +709,9 @@ msgstr "Backups"
 msgid "nav.item.buckets"
 msgstr "Buckets"
 
+msgid "nav.item.builds"
+msgstr "Builds"
+
 msgid "nav.item.clusterImages"
 msgstr "Catalog images"
 
@@ -1071,6 +1074,9 @@ msgstr "Stopped"
 
 msgid "status.phase.stopping"
 msgstr "Stopping"
+
+msgid "status.phase.succeeded"
+msgstr "Succeeded"
 
 msgid "status.phase.verify"
 msgstr "Verify"
