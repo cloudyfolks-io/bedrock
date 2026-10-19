@@ -366,3 +366,19 @@ e2e_cleanup() {
 provider_network_entry() {
   echo "{name: $1, interface: bdrpub0, cidr: 192.0.2.0/24, gateway: 192.0.2.1}"
 }
+
+docs_restore_script() {
+  awk -v intro="$1" '
+    /^## / { in_section = ($0 == "## Etcd snapshots"); armed = 0; next }
+    in_section && index($0, intro) == 1 { armed = 1; next }
+    armed && $0 == "```sh" { inside = 1; next }
+    inside && $0 == "```" { exit }
+    inside { print }
+  ' "$2"
+}
+
+docs_restore_script_valid() {
+  head -n 1 "$1" | grep -Eq "^SNAPSHOT=[^ ]+ sh -eu <<'EOF'\$" &&
+    tail -n 1 "$1" | grep -qx EOF &&
+    grep -q '^k0s restore ' "$1"
+}
