@@ -20,7 +20,7 @@ remote_config_file=/root/multinode.yaml
 join_roles=control-plane,ceph-osd,fabric-gateway,workload
 release_config=dist/components-e2e.yaml
 restore_window=$((20 + 300 + 60))
-remote_files=(tenant/tenancy tenant/images multinode/cluster multinode/guest multinode/vm multinode/drain multinode/restore)
+remote_files=(tenant/tenancy tenant/images multinode/cluster multinode/guest multinode/vm multinode/drain multinode/restore multinode/rotation)
 vm_env=()
 bundle_make_args=("RELEASE_CONFIG=$release_config")
 vm_path=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
@@ -279,6 +279,40 @@ check_restore() {
   echo "info: restore: TaintManagerEviction events: $evicted_before before the restore, $evicted_after after"
 }
 
+check_key_rotation() {
+  local supported old archive digest started id status=0
+  supported=$(vm_run 1 'if rotation_supported; then echo yes; else echo no; fi') || return 1
+  if [ "$supported" != yes ]; then
+    echo "info: key rotation: the Cluster CRD has no spec.encryption.action, the check is skipped"
+    return 0
+  fi
+  old=$(vm_run 1 key_rotation_fixture) || return 1
+  [ -n "$old" ] || {
+    echo "etcd holds no key name for the test Secret" >&2
+    return 1
+  }
+  archive=$(vm_run 1 pre_rotation_archive) || return 1
+  digest=$(vm_run 1 "archive_digest $archive") || return 1
+  started=$(vm_run 1 'date -u +%s') || return 1
+  vm_run 1 start_key_rotation || return 1
+  vm_run 1 "wait_rotation_phase 5400 RewritingSecrets $started" || status=$?
+  case "$status" in
+  0)
+    log "crashing $(vm_name 3) during RewritingSecrets"
+    crash_node 3 || return 1
+    ;;
+  3) echo "info: key rotation: the rotation ended before the crash window, no node was crashed" ;;
+  *) return 1 ;;
+  esac
+  vm_run 1 "wait_rotation_done 5400 $started" || return 1
+  vm_run 1 "verify_rotated_secrets $old" || return 1
+  for id in "${ids[@]}"; do
+    vm_run "$id" "assert_old_key_gone $old" || return 1
+  done
+  vm_run 1 "rotate_host_key_and_decrypt $archive $digest" || return 1
+  vm_run 1 key_rotation_cleanup
+}
+
 check_entries=(
   "three control-plane nodes|remote_check check_control_plane"
   "Ceph runs 3 monitors and 6 OSDs on 3 hosts|remote_check check_ceph_topology"
@@ -295,6 +329,7 @@ check_entries=(
   "three control-plane nodes after the restore|remote_check check_control_plane"
   "Ceph runs 3 monitors and 6 OSDs on 3 hosts after the restore|remote_check check_ceph_topology"
   "every replicated pool has size 3 after the restore|remote_check check_pool_sizes"
+  "Secrets key rotation with a node crash|check_key_rotation"
 )
 
 collect_diagnostics() {
