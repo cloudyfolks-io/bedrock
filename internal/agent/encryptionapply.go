@@ -46,7 +46,13 @@ func ApplyEncryption(ctx context.Context, c client.Client, deps Deps) error {
 	if encryption.Hash(target) != grant {
 		return recordHandledGrant(deps.Root, grant)
 	}
-	return errors.Join(applyEncryptionConfig(ctx, deps, current, target, grant), recordHandledGrant(deps.Root, grant))
+	if err := removeIfExists(filepath.Join(deps.Root, encryptionDir, encryptionHandled)); err != nil {
+		return err
+	}
+	if err := applyEncryptionConfig(ctx, deps, current, target, grant); err != nil || ctx.Err() != nil {
+		return err
+	}
+	return recordHandledGrant(deps.Root, grant)
 }
 
 func recordHandledGrant(root, grant string) error {
