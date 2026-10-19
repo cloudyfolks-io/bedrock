@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	coordinationv1 "k8s.io/api/coordination/v1"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
@@ -25,6 +26,7 @@ type rotationInput struct {
 	Secret    []byte
 	Hosts     []v1alpha1.Host
 	Nodes     []corev1.Node
+	Leases    []coordinationv1.Lease
 	Now       time.Time
 	Random    io.Reader
 }
@@ -241,7 +243,7 @@ func grantNext(in rotationInput, all, pending []v1alpha1.Host, hash string, revo
 			return stalled(in.Status, fmt.Sprintf("waiting for host %s to apply the encryption config", host.Name), revoke)
 		}
 	}
-	if problem := etcdGate(all, in.Nodes); problem != "" {
+	if problem := rotationGate(all, in.Nodes, in.Leases, in.Now); problem != "" {
 		waiting := stalled(in.Status, "waiting for "+problem, revoke)
 		waiting.Stalled = stalledWaitingForEtcd
 		return waiting

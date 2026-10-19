@@ -43,14 +43,27 @@ func newConfigChain(t *testing.T) configChain {
 
 func decideRotation(in rotationInput) rotationDecision {
 	count := int32(len(controlPlaneHosts(in.Hosts)))
+	reported := metav1.NewTime(in.Now)
 	hosts := make([]v1alpha1.Host, len(in.Hosts))
 	for index, host := range in.Hosts {
 		hosts[index] = *host.DeepCopy()
+		if hosts[index].Status.ReportedAt == nil {
+			hosts[index].Status.ReportedAt = &reported
+		}
 		if checks := hosts[index].Status.Checks; checks != nil && checks.EtcdMembers == 0 {
 			checks.EtcdMembers = count
 		}
 	}
 	in.Hosts = hosts
+	present := map[string]bool{}
+	for _, node := range in.Nodes {
+		present[node.Name] = true
+	}
+	for _, host := range hosts {
+		if !present[host.Name] {
+			in.Nodes = append(in.Nodes, heartbeatNode(host.Name, 0))
+		}
+	}
 	return nextRotation(in)
 }
 
@@ -337,7 +350,7 @@ func TestAMissingSecretStallsARunningRotation(t *testing.T) {
 }
 
 func notReadyNode(name string) corev1.Node {
-	return corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: name}, Status: corev1.NodeStatus{Conditions: []corev1.NodeCondition{{Type: corev1.NodeReady, Status: corev1.ConditionFalse}}}}
+	return corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: name}, Status: corev1.NodeStatus{Conditions: []corev1.NodeCondition{{Type: corev1.NodeReady, Status: corev1.ConditionFalse, LastHeartbeatTime: metav1.NewTime(rotationNow)}}}}
 }
 
 func TestNoGrantWhileAControlPlaneNodeIsNotReady(t *testing.T) {
@@ -357,7 +370,7 @@ func TestNoGrantWhenTheEtcdMemberCountIsShort(t *testing.T) {
 	for index := range hosts {
 		hosts[index].Status.Checks.EtcdMembers = 2
 	}
-	got := nextRotation(rotationInput{Status: phaseStatus(v1alpha1.RotationAddingKey), Secret: chain.added, Hosts: hosts, Now: rotationNow, Random: rand.Reader})
+	got := decideRotation(rotationInput{Status: phaseStatus(v1alpha1.RotationAddingKey), Secret: chain.added, Hosts: hosts, Now: rotationNow, Random: rand.Reader})
 	if got.Grant != "" || got.Stalled != "WaitingForEtcd" || !strings.Contains(got.Status.Message, "2 of 3") {
 		t.Fatalf("decision %+v", got)
 	}

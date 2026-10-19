@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	coordinationv1 "k8s.io/api/coordination/v1"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/equality"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -22,7 +23,10 @@ import (
 	"github.com/cloudyfolks-io/bedrock/internal/encryption"
 )
 
-const rewritePageSize = 200
+const (
+	rewritePageSize    = 200
+	nodeLeaseNamespace = "kube-node-lease"
+)
 
 func (r *ClusterReconciler) reconcileEncryption(ctx context.Context) (time.Duration, error) {
 	var cluster v1alpha1.Cluster
@@ -46,6 +50,10 @@ func (r *ClusterReconciler) reconcileEncryption(ctx context.Context) (time.Durat
 	if err := r.APIReader.List(ctx, &nodes); err != nil {
 		return 0, err
 	}
+	var leases coordinationv1.LeaseList
+	if err := r.APIReader.List(ctx, &leases, client.InNamespace(nodeLeaseNamespace)); err != nil {
+		return 0, err
+	}
 	decision := nextRotation(rotationInput{
 		Action:    action,
 		KMS:       cluster.Spec.Encryption.KMS != nil,
@@ -54,6 +62,7 @@ func (r *ClusterReconciler) reconcileEncryption(ctx context.Context) (time.Durat
 		Secret:    secret,
 		Hosts:     hosts.Items,
 		Nodes:     nodes.Items,
+		Leases:    leases.Items,
 		Now:       time.Now(),
 		Random:    rand.Reader,
 	})
