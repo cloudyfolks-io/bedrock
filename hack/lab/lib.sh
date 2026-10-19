@@ -169,7 +169,7 @@ require_host() {
     fi
   done
   if [ "$(uname -s)" != Linux ]; then
-    echo "hack/lab-adopt.sh runs on a Linux host with KVM" >&2
+    echo "the lab scripts run on a Linux host with KVM" >&2
     missing=1
   fi
   if [ ! -w /dev/kvm ]; then
@@ -195,7 +195,7 @@ guard_host() {
     echo "the VM bedrock-ci exists, a gate runs or left it behind" >&2
     return 1
   fi
-  if limactl list --quiet 2>/dev/null | grep -E '^(adoptlab|multilab)-' | grep -qv "^$prefix-"; then
+  if limactl list --quiet 2>/dev/null | awk -v own="$prefix-" '/^(adoptlab|multilab)-/ && index($0, own) != 1 { found = 1 } END { exit !found }'; then
     echo "a VM of another lab exists, both labs share the network user-v2 and the address $vip" >&2
     return 1
   fi
