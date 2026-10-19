@@ -174,6 +174,9 @@ steps=(
   compute_vm
   compute_hotplug
   compute_snapshot
+  compute_size_and_hotplug
+  compute_boot_volume
+  compute_block_access
   compute_proxy_actions
   compute_console
   network_underlay

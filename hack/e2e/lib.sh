@@ -179,6 +179,10 @@ as_user() {
   kubectl --as="bedrock:$user" "$@"
 }
 
+guest_console_log() {
+  kubectl -n "$NS" logs -l "kubevirt.io/domain=$1" -c guest-console-log --tail=-1
+}
+
 state_dir() {
   echo "${E2E_STATE_DIR:-/run/bedrock-e2e}"
 }

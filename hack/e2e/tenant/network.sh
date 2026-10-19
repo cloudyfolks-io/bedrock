@@ -117,10 +117,6 @@ launcher_annotation() {
     jq -r --arg key "parity.$NS.fabric.cloudyfolks.io/$2" '.items[0].metadata.annotations[$key]'
 }
 
-guest_console_log() {
-  kubectl -n "$NS" logs -l "kubevirt.io/domain=$1" -c guest-console-log --tail=-1
-}
-
 guest_has_reported() {
   [[ "$(guest_console_log "$1")" == *PARITY-DONE* ]]
 }
