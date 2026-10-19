@@ -30,6 +30,7 @@ const (
 	reasonNameReserved      = "NameReserved"
 	reasonNameTaken         = "NameTaken"
 	reasonBucketLimit       = "BucketLimit"
+	reasonNotOwned          = "NotOwned"
 	reasonNotEmpty          = "NotEmpty"
 	reasonPurgeIncomplete   = "PurgeIncomplete"
 	reasonAccountPending    = "AccountPending"

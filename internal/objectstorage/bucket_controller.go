@@ -48,6 +48,7 @@ type bucketState struct {
 	bucketName string
 	endpoint   string
 	seen       observation
+	abandon    bool
 }
 
 func (r *BucketReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
@@ -124,14 +125,11 @@ func (r *BucketReconciler) converge(ctx context.Context, bucket *v1alpha1.Object
 	if err != nil || state.reason != "" {
 		return state, err
 	}
-	if err := r.setAnnotation(ctx, bucket, OwnedBucketAnnotation, name); err != nil {
-		return bucketState{}, err
-	}
+	state.bucketName, state.endpoint = name, PublicEndpoint(rules, r.Endpoint)
 	state.outcome, err = r.applyS3(ctx, bucket, account.Root, name, rules)
 	if err != nil || !state.ready() {
 		return state, err
 	}
-	state.bucketName, state.endpoint = name, PublicEndpoint(rules, r.Endpoint)
 	if r.Admin == nil {
 		return state, nil
 	}
@@ -165,7 +163,7 @@ func (r *BucketReconciler) projectRefusal(ctx context.Context, bucket *v1alpha1.
 }
 
 func ownsBucket(bucket *v1alpha1.ObjectStorageBucket, name string) bool {
-	return bucket.Annotations[OwnedBucketAnnotation] == name || bucket.Status.BucketName == name
+	return bucket.Status.BucketName == name
 }
 
 func comesBefore(a, b *v1alpha1.ObjectStorageBucket) bool {
@@ -348,7 +346,10 @@ func (r *BucketReconciler) finalize(ctx context.Context, bucket *v1alpha1.Object
 		return ctrl.Result{}, err
 	}
 	if state.reason != "" {
-		return r.report(ctx, bucket, state), nil
+		result := r.report(ctx, bucket, state)
+		if !state.abandon {
+			return result, nil
+		}
 	}
 	err = retry.RetryOnConflict(retry.DefaultRetry, func() error {
 		latest := &v1alpha1.ObjectStorageBucket{}
@@ -372,6 +373,17 @@ func (r *BucketReconciler) release(ctx context.Context, bucket *v1alpha1.ObjectS
 	}
 	if account.ID == "" {
 		return blocked(reasonAccountPending, "the account of this project is not ready, so the bucket cannot be deleted yet", pendingRequeue), nil
+	}
+	owner, err := r.S3.GetBucketOwner(ctx, r.Endpoint, Region, account.Root, name)
+	switch {
+	case s3.IsCode(err, s3.NoSuchBucket):
+		return bucketState{}, nil
+	case s3.IsUnavailable(err):
+		return bucketState{outcome: bucketFailure(err)}, nil
+	case err != nil || owner != account.ID:
+		state := blocked(reasonNotOwned, fmt.Sprintf("the bucket %q is not owned by the account of this project, so Bedrock left it alone", name), 0)
+		state.abandon = true
+		return state, nil
 	}
 	force := bucket.Spec.ForceDestroy || r.namespaceLeaving(ctx, bucket.Namespace)
 	return r.empty(ctx, account.Root, name, force)

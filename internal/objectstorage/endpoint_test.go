@@ -3,6 +3,7 @@ package objectstorage
 import (
 	"context"
 	"reflect"
+	"strings"
 	"testing"
 
 	"k8s.io/apimachinery/pkg/api/meta"
@@ -56,7 +57,7 @@ func TestEndpointObjectsForOneHost(t *testing.T) {
 		"spec": map[string]any{
 			"entryPoints": []any{"websecure"},
 			"routes": []any{map[string]any{
-				"match":    "(Host(`s3.example.test`)) && !PathPrefix(`/admin`)",
+				"match":    "(Host(`s3.example.test`) && !(Path(`/admin`) || PathPrefix(`/admin/`)))",
 				"kind":     "Rule",
 				"services": []any{map[string]any{"name": "rook-ceph-rgw-bedrock-rgw", "port": int64(80)}},
 			}},
@@ -81,7 +82,7 @@ func TestEndpointObjectsWithAliasesAddVirtualHostRules(t *testing.T) {
 	}
 	routes, _, _ := unstructured.NestedSlice(objects[1].Object, "spec", "routes")
 	match := routes[0].(map[string]any)["match"]
-	want := "(Host(`s3.example.test`) || Host(`s3.alias.test`) || HostRegexp(`^[a-z0-9-]+\\.s3\\.example\\.test$`) || HostRegexp(`^[a-z0-9-]+\\.s3\\.alias\\.test$`)) && !PathPrefix(`/admin`)"
+	want := "(Host(`s3.example.test`) && !(Path(`/admin`) || PathPrefix(`/admin/`))) || (Host(`s3.alias.test`) && !(Path(`/admin`) || PathPrefix(`/admin/`))) || HostRegexp(`^[a-z0-9-]+\\.s3\\.example\\.test$`) || HostRegexp(`^[a-z0-9-]+\\.s3\\.alias\\.test$`)"
 	if match != want {
 		t.Fatalf("match %q", match)
 	}
@@ -225,5 +226,18 @@ func TestUserSecretShowsThePublicEndpoint(t *testing.T) {
 	secret, found := readSecret(t, "acme-prod", "app-s3")
 	if !found || string(secret.Data["Endpoint"]) != "https://s3.example.test" {
 		t.Fatalf("secret %+v", secret)
+	}
+}
+
+func TestAdminGuardHitsOnlyTheExactPathsOfThePlainHost(t *testing.T) {
+	match := routeMatch(Rules{PublicHost: "s3.example.test", PublicAliases: []string{"s3.alias.test"}})
+	if strings.Contains(match, "PathPrefix(`/admin`)") {
+		t.Fatalf("a bare /admin prefix would block admin-logs and admin-report.csv: %s", match)
+	}
+	for _, part := range strings.Split(match, " || ") {
+		guarded := strings.Contains(part, "/admin")
+		if strings.HasPrefix(part, "HostRegexp") == guarded {
+			t.Fatalf("rule %q: the guard belongs on plain Host rules only", part)
+		}
 	}
 }
