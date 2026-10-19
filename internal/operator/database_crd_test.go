@@ -108,10 +108,19 @@ func TestDatabaseImmutableFields(t *testing.T) {
 	allowed.Spec.AllowedCIDRs = []string{"10.1.0.0/16"}
 	allowed.Spec.Suspended = true
 	allowed.Spec.Class = "large"
-	allowed.Spec.Version = "18"
 	if err := c.Update(context.Background(), allowed); err != nil {
 		t.Fatalf("other fields stay mutable: %v", err)
 	}
+}
+
+func TestDatabaseVersionCannotChange(t *testing.T) {
+	c, _ := StartTestEnv(t)
+
+	db := newDatabase("orders", "postgresql")
+	createValid(t, c, db)
+	upgraded := db.DeepCopy()
+	upgraded.Spec.Version = "18"
+	updateInvalid(t, c, upgraded, "version cannot change")
 }
 
 func TestDatabaseRestoreIsImmutableOnceSet(t *testing.T) {

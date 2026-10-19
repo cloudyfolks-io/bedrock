@@ -62,8 +62,8 @@ A class with `highAvailability: true` makes 3 instances. Other classes make 1 in
 | Field | Meaning |
 |---|---|
 | `engine` | `postgresql`, `mysql` or `valkey`. It cannot change. |
-| `version` | A major that names an enabled `DatabaseVersion`. |
-| `class` | The name of a `DatabaseClass`. |
+| `version` | A major that names an enabled `DatabaseVersion`. It cannot change until upgrades are supported (plan 26c). |
+| `class` | The name of a `DatabaseClass`. A change must keep `highAvailability`. |
 | `storageGi` | The storage in GiB. It is between the class minimum and maximum. It can only grow. |
 | `subnetRef` | A `Subnet` of the project. The default is `default`. It cannot change. |
 | `allowedCIDRs` | The networks that can connect. The default is the CIDR of the subnet. |
@@ -213,6 +213,8 @@ The condition `Ready` shows one of these reasons.
 | `EngineUnavailable` | The engine did not answer a command. |
 | `EngineRejected` | The engine refused a command. |
 | `Ready` | The object is as the spec says. |
+| `UpgradeNotSupported` | The version of a running database changed. The operator keeps the old render. |
+| `ClassChangeNotSupported` | The new class has another `highAvailability`. |
 | `VersionNotAvailable` | The `DatabaseVersion` does not exist, or it is disabled for a new database. |
 | `ClassNotAvailable` | The `DatabaseClass` does not exist, or it is disabled for a new database. |
 | `StorageOutOfRange` | `storageGi` is outside the range of the class. |

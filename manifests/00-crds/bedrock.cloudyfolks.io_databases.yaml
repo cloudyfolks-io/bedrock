@@ -127,6 +127,9 @@ spec:
                 minLength: 1
                 pattern: ^[0-9]+(\.[0-9]+)?$
                 type: string
+                x-kubernetes-validations:
+                - message: version cannot change until upgrades are supported
+                  rule: self == oldSelf
             required:
             - backup
             - class

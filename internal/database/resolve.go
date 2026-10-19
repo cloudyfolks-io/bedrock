@@ -5,6 +5,10 @@ import (
 	"fmt"
 	"slices"
 
+	"k8s.io/apimachinery/pkg/api/resource"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/client-go/util/retry"
+
 	corev1 "k8s.io/api/core/v1"
 	nodev1 "k8s.io/api/node/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -130,4 +134,39 @@ func namespaceExists(ctx context.Context, c client.Reader, name string) (bool, e
 		return false, nil
 	}
 	return err == nil, err
+}
+
+func markAppliedVersion(ctx context.Context, c client.Client, db *v1alpha1.Database) error {
+	if db.Annotations[annotationAppliedVersion] != "" {
+		return nil
+	}
+	return retry.RetryOnConflict(retry.DefaultRetry, func() error {
+		if err := c.Get(ctx, client.ObjectKeyFromObject(db), db); err != nil {
+			return err
+		}
+		before := db.DeepCopy()
+		if db.Annotations == nil {
+			db.Annotations = map[string]string{}
+		}
+		db.Annotations[annotationAppliedVersion] = db.Spec.Version
+		return c.Patch(ctx, db, client.MergeFromWithOptions(before, client.MergeFromWithOptimisticLock{}), client.FieldOwner(v1alpha1.DatabaseFieldManager))
+	})
+}
+
+func checkExisting(catalog Catalog, db v1alpha1.Database, cluster *unstructured.Unstructured) *Refusal {
+	if applied := db.Annotations[annotationAppliedVersion]; applied != "" && applied != db.Spec.Version {
+		return refusal(ReasonUpgradeNotSupported, "the version of a running database cannot change from %s to %s", applied, db.Spec.Version)
+	}
+	if have, _, _ := unstructured.NestedInt64(cluster.Object, "spec", "instances"); have != 0 && int(have) != Instances(catalog.Class) {
+		return refusal(ReasonClassChangeNotSupported, "the class %s changes the number of instances from %d to %d: a class change must keep highAvailability", catalog.Class.Name, have, Instances(catalog.Class))
+	}
+	if size, _, _ := unstructured.NestedString(cluster.Object, "spec", "storage", "size"); size != "" {
+		if current, err := resource.ParseQuantity(size); err == nil && int64(db.Spec.StorageGi)*1024*1024*1024 < current.Value() {
+			return refusal(ReasonStorageOutOfRange, "storageGi cannot shrink below %s", size)
+		}
+	}
+	if db.Spec.StorageGi < catalog.Class.Spec.MinStorageGi || db.Spec.StorageGi > catalog.Class.Spec.MaxStorageGi {
+		return refusal(ReasonStorageOutOfRange, "storageGi must be from %d to %d for the class %s", catalog.Class.Spec.MinStorageGi, catalog.Class.Spec.MaxStorageGi, catalog.Class.Name)
+	}
+	return nil
 }
