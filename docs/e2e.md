@@ -252,7 +252,7 @@ If a name changes in an area, change it in that file only.
 | `images.sh` | The ClusterImage `cirros` from the bundle. An image upload through the proxy. |
 | `compute.sh` | An SSH key, a Volume, the SecurityGroup `web` and the VM `vm1`. Hot-plug and expand. A volume snapshot. The proxy actions and the console, which the Go test runs. |
 | `network.sh` | The provider network and the Network status. The fabric-frr agent. Subnet rules. The security group on the VM. A VM with a pinned address, a Subnet MTU and Subnet DNS servers. An ElasticIP in L2 mode with the ARP and ping proof. An ElasticIP without a provider network. The ElasticIP quota. A LoadBalancer and a DNSZone. Isolation rules. |
-| `container.sh` | The proof of the pod network. A hand-made Pod and a hand-made Deployment get the network metadata of a `Container`. |
+| `container.sh` | The proof of the pod network: a hand-made Pod and a hand-made Deployment get the network metadata of a `Container`. Then the kind itself: the runtime gate, replicas, stop and start, a fixed address, autoscale, a Volume, a LoadBalancer target, logs, exec and restart through the proxy, and the cleanup. |
 | `objectstorage.sh` | The object store, two users and one bucket. A put and a get from inside the cluster. A denied read by the other user. |
 | `backup.sh` | The SeaweedFS target. A VM backup with one entry. A restore with `replace: true`. A restore of a missing backup. |
 | `panel.sh` | The panel at `console.<host>`, the redirect from the apex, the API host and the Go test for the login and the watch stream. |
@@ -267,6 +267,7 @@ The script runs it with `-test.run` for each phase.
 | `TestProxyActions` | Start, stop, restart, migrate and snapshot through the proxy. A user without a role gets 403. |
 | `TestConsoleSerial` | The serial console WebSocket, the origin check and the guest login prompt. |
 | `TestPanelLoginAndStream` | The browserless login of the admin, the session, the access checks, the CSRF guard and the watch stream. |
+| `TestContainerStreams` | The logs of a Container, merged with the pod name, the refusal of a viewer on exec and restart, the refusal of a stranger, a pod of another container giving 404, the origin check, a command through the exec WebSocket and the restart stamp. |
 | `TestJoinFetchesEncryption` | The fetch of the encryption file with a control-plane join token. The fetched bytes equal the file on the node. |
 
 The shell and the Go test do not repeat each other.
@@ -293,6 +294,20 @@ The step makes the objects with the identity of `bedrock-operator`, because only
 
 The step uses a `SwitchLBRule` and not a `RouterLBRule`, because a `RouterLBRule` needs an external address.
 Both kinds take the same endpoint list.
+
+## Container steps
+
+The e2e cluster has no KVM, so the kata RuntimeClass does not exist.
+The steps of `hack/e2e/tenant/container.sh` use the preloaded busybox image.
+
+| Step | Check |
+| --- | --- |
+| `container_runtime_gate` | With the default Setting `container.runtime-class` a Container has `Ready=False` with the reason `RuntimeUnavailable` and no Deployment. The step then sets the Setting to `none`. |
+| `container_lifecycle` | A Container with two replicas is `Running` with two addresses and the strategy `RollingUpdate`. Replicas 0 gives `Stopped` with `Ready=True`, and it stays `Stopped`. Replicas 2 starts it again. A Container with `address` and one replica shows the address and uses `Recreate`. `autoscale` makes a HorizontalPodAutoscaler. Removing `autoscale` with `replicas: 0` stops the Container and removes the autoscaler. |
+| `container_volume` | With the storage class `filesystem`, a Container mounts a Volume and the Volume shows `Container/stateful`. A second Container gets `VolumeInUse`. A restart keeps the data. Deleting the Container frees the Volume and keeps the claim. The step skips these checks when no `filesystem` class exists. |
+| `container_load_balancer` | A LoadBalancer with `containerRef` is `Programmed`, and the Fabric load balancer holds the address of each ready pod. |
+| `container_proxy` | The Go test `TestContainerStreams` for logs, exec and restart. |
+| `container_cleanup` | Deleting the Containers removes every Deployment, autoscaler and pod. |
 
 ## Network parity checks
 

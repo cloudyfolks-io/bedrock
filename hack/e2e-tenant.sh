@@ -187,6 +187,12 @@ steps=(
   network_load_balancer_and_dns
   network_isolation
   container_network_proof
+  container_runtime_gate
+  container_lifecycle
+  container_volume
+  container_load_balancer
+  container_proxy
+  container_cleanup
   objectstorage_user_and_bucket
   objectstorage_roundtrip
   backup_target

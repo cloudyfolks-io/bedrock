@@ -290,3 +290,188 @@ container_network_proof() {
     container_proof_runtime_checks
   )
 }
+
+container_web_spec() {
+  cat <<SPEC
+  image: $container_proof_image
+  command: ["sh", "-c", "echo container-log-line; mkdir -p /www && echo proof-reply >/www/index.html && exec httpd -f -p 8080 -h /www"]
+  ports:
+    - port: 8080
+  probes:
+    readiness:
+      exec:
+        command: ["wget", "-q", "-O", "/dev/null", "http://127.0.0.1:8080/"]
+      periodSeconds: 3
+SPEC
+}
+
+container_network_spec() {
+  echo "  network:"
+  echo "    securityGroups: [web]"
+  if [ -n "${1:-}" ]; then
+    echo "    address: $1"
+  fi
+}
+
+container_manifest() {
+  local name=$1 extra=$2 address=${3:-}
+  cat <<CONTAINER
+apiVersion: bedrock.cloudyfolks.io/v1alpha1
+kind: Container
+metadata:
+  name: $name
+spec:
+$(container_web_spec)
+$(container_network_spec "$address")
+$extra
+CONTAINER
+}
+
+container_pod_addresses() {
+  kubectl -n "$NS" get container "$1" -o jsonpath='{.status.addresses[*]}'
+}
+
+container_runtime_gate() {
+  container_manifest gate "" | kubectl -n "$NS" apply -f -
+  wait_reason 120 container gate Ready RuntimeUnavailable -n "$NS"
+  expect_equal "" "$(kubectl -n "$NS" get deployment gate -o name 2>/dev/null || true)" "no deployment without the runtime class"
+  kubectl -n "$NS" delete container gate
+  wait_gone 60 container gate -n "$NS"
+  kubectl patch setting container.runtime-class --type merge -p '{"spec":{"value":"none"}}'
+  wait_jsonpath 60 none get setting container.runtime-class -o jsonpath='{.status.applied}'
+}
+
+container_lifecycle() {
+  container_manifest web "  replicas: 2" | kubectl -n "$NS" apply -f -
+  wait_jsonpath 300 Running -n "$NS" get container web -o jsonpath='{.status.phase}'
+  expect_equal 2 "$(kubectl -n "$NS" get container web -o jsonpath='{.status.readyReplicas}')" "ready replicas"
+  expect_equal 2 "$(container_pod_addresses web | wc -w)" "addresses of the ready pods"
+  expect_equal RollingUpdate "$(kubectl -n "$NS" get deployment web -o jsonpath='{.spec.strategy.type}')" "strategy of a plain container"
+  kubectl -n "$NS" patch container web --type merge -p '{"spec":{"replicas":0}}'
+  wait_jsonpath 180 Stopped -n "$NS" get container web -o jsonpath='{.status.phase}'
+  wait_condition 60 container web Ready True -n "$NS"
+  sleep 20
+  expect_equal Stopped "$(kubectl -n "$NS" get container web -o jsonpath='{.status.phase}')" "a stopped container stays Stopped"
+  kubectl -n "$NS" patch container web --type merge -p '{"spec":{"replicas":2}}'
+  wait_jsonpath 300 Running -n "$NS" get container web -o jsonpath='{.status.phase}'
+  container_manifest pinned "  replicas: 1" 10.100.0.210 | kubectl -n "$NS" apply -f -
+  wait_jsonpath 300 Running -n "$NS" get container pinned -o jsonpath='{.status.phase}'
+  expect_equal 10.100.0.210 "$(container_pod_addresses pinned)" "pinned container address"
+  expect_equal Recreate "$(kubectl -n "$NS" get deployment pinned -o jsonpath='{.spec.strategy.type}')" "pinned strategy"
+  container_manifest scaled "  autoscale:
+    min: 1
+    max: 3
+    cpuPercent: 50" | kubectl -n "$NS" apply -f -
+  wait_jsonpath 120 "1 3" -n "$NS" get horizontalpodautoscaler scaled -o jsonpath='{.spec.minReplicas} {.spec.maxReplicas}'
+  kubectl -n "$NS" patch container scaled --type merge -p '{"spec":{"autoscale":null,"replicas":0}}'
+  wait_jsonpath 180 Stopped -n "$NS" get container scaled -o jsonpath='{.status.phase}'
+  wait_gone 60 horizontalpodautoscaler scaled -n "$NS"
+}
+
+container_volume() {
+  if ! kubectl get storageclass filesystem >/dev/null 2>&1; then
+    echo "no filesystem storage class: skipping the volume checks"
+    return 0
+  fi
+  kubectl -n "$NS" apply -f - <<VOLUME
+apiVersion: bedrock.cloudyfolks.io/v1alpha1
+kind: Volume
+metadata:
+  name: cdata
+spec:
+  sizeGi: 1
+  storageClass: filesystem
+VOLUME
+  wait_jsonpath 180 Available -n "$NS" get volume cdata -o jsonpath='{.status.phase}'
+  kubectl -n "$NS" apply -f - <<CONTAINER
+apiVersion: bedrock.cloudyfolks.io/v1alpha1
+kind: Container
+metadata:
+  name: stateful
+spec:
+  image: $container_proof_image
+  command: ["sh", "-c", "echo kept >>/data/state; exec sleep 3600"]
+  network:
+    securityGroups: [web]
+  volumes:
+    - volumeRef: cdata
+      mountPath: /data
+CONTAINER
+  wait_jsonpath 300 Running -n "$NS" get container stateful -o jsonpath='{.status.phase}'
+  expect_equal Container/stateful "$(kubectl -n "$NS" get volume cdata -o jsonpath='{.status.attachedTo}')" "volume holder"
+  kubectl -n "$NS" apply -f - <<CONTAINER
+apiVersion: bedrock.cloudyfolks.io/v1alpha1
+kind: Container
+metadata:
+  name: rival
+spec:
+  image: $container_proof_image
+  command: ["sleep", "3600"]
+  network:
+    securityGroups: [web]
+  volumes:
+    - volumeRef: cdata
+      mountPath: /data
+CONTAINER
+  wait_reason 120 container rival Ready VolumeInUse -n "$NS"
+  kubectl -n "$NS" delete container rival
+  kubectl -n "$NS" annotate container stateful --overwrite "bedrock.cloudyfolks.io/restarted-at=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+  retry_until 300 container_state_kept
+  kubectl -n "$NS" delete container stateful
+  wait_gone 120 deployment stateful -n "$NS"
+  wait_jsonpath 120 "" -n "$NS" get volume cdata -o jsonpath='{.status.attachedTo}'
+  kubectl -n "$NS" get pvc cdata
+}
+
+container_state_kept() {
+  [ "$(kubectl -n "$NS" exec deploy/stateful -- wc -l /data/state 2>/dev/null | cut -d' ' -f1)" -ge 2 ]
+}
+
+container_load_balancer() {
+  local address
+  kubectl -n "$NS" apply -f - <<BALANCER
+apiVersion: bedrock.cloudyfolks.io/v1alpha1
+kind: LoadBalancer
+metadata:
+  name: clb
+spec:
+  elasticIPRef: clbip
+  listeners:
+    - port: 8080
+      protocol: TCP
+      targets:
+        - containerRef: web
+          port: 8080
+---
+apiVersion: bedrock.cloudyfolks.io/v1alpha1
+kind: ElasticIP
+metadata:
+  name: clbip
+spec:
+  providerNetwork: public
+  target:
+    kind: LoadBalancer
+    name: clb
+BALANCER
+  wait_reason 180 loadbalancer clb Ready Programmed -n "$NS"
+  address=$(elastic_ip_address clbip)
+  expect_contains "$(kubectl -n kube-system exec deployment/ovn-central -- ovn-nbctl list Load_Balancer)" "\"$address:8080\"" "container load balancer vip"
+  for pod_address in $(container_pod_addresses web); do
+    expect_contains "$(kubectl -n kube-system exec deployment/ovn-central -- ovn-nbctl list Load_Balancer)" "$pod_address:8080" "container load balancer endpoint"
+  done
+  kubectl -n "$NS" delete loadbalancer clb
+  wait_empty 180 get router-lb-rules.fabric.cloudyfolks.io -l bedrock.cloudyfolks.io/name=clb
+  kubectl -n "$NS" delete elasticip clbip
+}
+
+container_proxy() {
+  compute_token_env
+  CONTAINER=web "$test_bin" -test.count=1 -test.v -test.timeout 15m -test.run '^TestContainerStreams$'
+}
+
+container_cleanup() {
+  kubectl -n "$NS" delete container --all
+  wait_empty 180 -n "$NS" get deployments.apps
+  wait_empty 60 -n "$NS" get horizontalpodautoscalers.autoscaling
+  wait_empty 120 -n "$NS" get pods -l bedrock.cloudyfolks.io/kind=Container
+}
