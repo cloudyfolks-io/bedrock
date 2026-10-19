@@ -142,6 +142,13 @@ describe("LoadBalancers", () => {
     await waitFor(() => expect(within(row).getByText("web-ip 203.0.113.10")).toBeTruthy());
   });
 
+  it("shows the address that the status reports", async () => {
+    const withAddress = { ...lbs, items: [{ ...(lbs.items[0] as KubeObject), status: { address: "100.69.0.2" } }] };
+    renderAt("/p/web/load-balancers", <LoadBalancersPage />, { [`GET ${ns}/loadbalancers`]: { body: withAddress }, [`GET ${ns}/elasticips`]: { body: asList(elasticips) } }, undefined, "/p/:project/load-balancers");
+    const row = (await screen.findByRole("link", { name: "web-lb" })).closest("tr") as HTMLElement;
+    expect(within(row).getByText("100.69.0.2")).toBeTruthy();
+  });
+
   it("shows a dash when no ElasticIP targets it, even if elasticIPRef is set", async () => {
     renderAt("/p/web/load-balancers", <LoadBalancersPage />, { [`GET ${ns}/loadbalancers`]: { body: lbs }, [`GET ${ns}/elasticips`]: { body: asList(elasticips) } }, undefined, "/p/:project/load-balancers");
     const row = (await screen.findByRole("link", { name: "web-lb" })).closest("tr") as HTMLElement;

@@ -18,6 +18,9 @@ spec:
     - jsonPath: .spec.elasticIPRef
       name: Elastic IP
       type: string
+    - jsonPath: .status.address
+      name: Address
+      type: string
     name: v1alpha1
     schema:
       openAPIV3Schema:
@@ -112,6 +115,8 @@ spec:
             type: object
           status:
             properties:
+              address:
+                type: string
               conditions:
                 items:
                   description: Condition contains details for one aspect of the current

@@ -310,6 +310,11 @@ The `Vip` is a plain Fabric `Vip` in the load balancer plane of the Network, and
 Bedrock never writes the `Vip` type `switch_lb_vip`.
 All targets of an internal LoadBalancer must use one Subnet.
 
+The field `status.address` shows the address of the LoadBalancer.
+For an internal LoadBalancer, it is the address of the `Vip` in the load balancer plane.
+For a LoadBalancer with an ElasticIP, it is the address of the ElasticIP.
+The field is empty while the address does not exist, and when the `Vip` or the ElasticIP goes.
+
 ### Load balancer plane
 
 Every Network has one hidden Fabric `Subnet` named `<network>-lb`.

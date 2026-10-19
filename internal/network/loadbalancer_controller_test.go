@@ -39,6 +39,15 @@ func requireLB(t *testing.T, c client.Client, namespace, name string, status met
 	requireCondition(t, lb.Status.Conditions, v1alpha1.ConditionReady, status, reason)
 }
 
+func addressOf(t *testing.T, c client.Client, namespace, name string) string {
+	t.Helper()
+	var lb v1alpha1.LoadBalancer
+	if err := c.Get(context.Background(), client.ObjectKey{Namespace: namespace, Name: name}, &lb); err != nil {
+		t.Fatal(err)
+	}
+	return lb.Status.Address
+}
+
 func rulesOf(t *testing.T, c client.Client, name string) []*unstructured.Unstructured {
 	t.Helper()
 	rules, err := listObjects(context.Background(), c, fabric.RouterLBRuleGVK, client.MatchingLabels{v1alpha1.LabelKind: "LoadBalancer", v1alpha1.LabelName: name})
@@ -102,6 +111,9 @@ func TestLoadBalancerProgramsRouterRules(t *testing.T) {
 		t.Fatalf("vpc %q", vpc)
 	}
 	requireLB(t, f.c, f.namespace, "lb1", metav1.ConditionFalse, ReasonFabricNotReady)
+	if got := addressOf(t, f.c, f.namespace, "lb1"); got != "91.246.31.20" {
+		t.Fatalf("status address %q", got)
+	}
 	markRulesProgrammed(t, f.c, "lb1")
 	if result := reconcileLoadBalancer(t, f.c, f.namespace, "lb1", knowsEverything); result.RequeueAfter != 0 {
 		t.Fatalf("result %+v", result)
@@ -130,6 +142,9 @@ func TestLoadBalancerTreatsADeletingElasticIPAsGone(t *testing.T) {
 	requireLB(t, f.c, f.namespace, "lb1", metav1.ConditionFalse, ReasonElasticIPNotFound)
 	if len(rulesOf(t, f.c, "lb1")) != 0 {
 		t.Fatal("the rules must release the OvnEip")
+	}
+	if got := addressOf(t, f.c, f.namespace, "lb1"); got != "" {
+		t.Fatalf("the address must go with the ElasticIP, got %q", got)
 	}
 }
 
@@ -167,6 +182,9 @@ func TestLoadBalancerWithoutElasticIPRefProgramsAnInternalVip(t *testing.T) {
 		t.Fatalf("result %+v", result)
 	}
 	requireLB(t, f.c, f.namespace, "lb1", metav1.ConditionFalse, ReasonFabricNotReady)
+	if got := addressOf(t, f.c, f.namespace, "lb1"); got != "" {
+		t.Fatalf("no address before the Vip has one, got %q", got)
+	}
 	vip, err := getObject(ctx, f.c, fabric.VipGVK, InternalVipName(f.namespace, "lb1"))
 	if err != nil {
 		t.Fatal(err)
@@ -190,6 +208,9 @@ func TestLoadBalancerWithoutElasticIPRefProgramsAnInternalVip(t *testing.T) {
 	}
 	if address, _, _ := unstructured.NestedString(rules[0].Object, "spec", "vip"); address != "100.69.0.2" {
 		t.Fatalf("vip %q", address)
+	}
+	if got := addressOf(t, f.c, f.namespace, "lb1"); got != "100.69.0.2" {
+		t.Fatalf("status address %q", got)
 	}
 	requireLB(t, f.c, f.namespace, "lb1", metav1.ConditionFalse, ReasonFabricNotReady)
 	if err := fabrictest.MarkSwitchLBRuleProgrammed(ctx, f.c, rules[0].GetName(), "ns/slr"); err != nil {
@@ -222,6 +243,26 @@ func TestLoadBalancerInternalNeverWritesASwitchLBVip(t *testing.T) {
 	}
 	if kind, _, _ := unstructured.NestedString(vips[0].Object, "spec", "type"); kind == "switch_lb_vip" {
 		t.Fatal("switch_lb_vip must never be written")
+	}
+}
+
+func TestLoadBalancerInternalClearsTheAddressWhenTheVipGoes(t *testing.T) {
+	f := newInternalFixture(t)
+	ctx := context.Background()
+	reconcileLoadBalancer(t, f.c, f.namespace, "lb1", knowsEverything)
+	if err := fabrictest.MarkVipAllocated(ctx, f.c, InternalVipName(f.namespace, "lb1"), "100.69.0.2"); err != nil {
+		t.Fatal(err)
+	}
+	reconcileLoadBalancer(t, f.c, f.namespace, "lb1", knowsEverything)
+	if got := addressOf(t, f.c, f.namespace, "lb1"); got != "100.69.0.2" {
+		t.Fatalf("status address %q", got)
+	}
+	if err := deleteObject(ctx, f.c, fabric.VipGVK, InternalVipName(f.namespace, "lb1")); err != nil {
+		t.Fatal(err)
+	}
+	reconcileLoadBalancer(t, f.c, f.namespace, "lb1", knowsEverything)
+	if got := addressOf(t, f.c, f.namespace, "lb1"); got != "" {
+		t.Fatalf("the address must go with the Vip, got %q", got)
 	}
 }
 

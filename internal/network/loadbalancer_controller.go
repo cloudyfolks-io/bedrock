@@ -53,14 +53,36 @@ func (r *LoadBalancerReconciler) Reconcile(ctx context.Context, req reconcile.Re
 	if err != nil {
 		return reconcile.Result{}, err
 	}
-	return r.publish(ctx, lb, cond, requeue), nil
+	address, err := r.address(ctx, lb)
+	if err != nil {
+		return reconcile.Result{}, err
+	}
+	return r.publish(ctx, lb, cond, requeue, address), nil
 }
 
-func (r *LoadBalancerReconciler) publish(ctx context.Context, lb v1alpha1.LoadBalancer, cond metav1.Condition, requeue time.Duration) reconcile.Result {
+func (r *LoadBalancerReconciler) address(ctx context.Context, lb v1alpha1.LoadBalancer) (string, error) {
+	if lb.Spec.ElasticIPRef != "" {
+		eip, v, err := r.elasticIP(ctx, lb)
+		if err != nil || v != nil {
+			return "", err
+		}
+		return eip.Status.Address, nil
+	}
+	vip, err := getObject(ctx, r.Client, fabric.VipGVK, InternalVipName(lb.Namespace, lb.Name))
+	if apierrors.IsNotFound(err) || (err == nil && !ownedBy(vip, &lb)) {
+		return "", nil
+	}
+	if err != nil {
+		return "", err
+	}
+	return fabric.VipAddress(vip), nil
+}
+
+func (r *LoadBalancerReconciler) publish(ctx context.Context, lb v1alpha1.LoadBalancer, cond metav1.Condition, requeue time.Duration, address string) reconcile.Result {
 	body := &v1alpha1.LoadBalancer{
 		TypeMeta:   metav1.TypeMeta{APIVersion: v1alpha1.GroupVersion.String(), Kind: "LoadBalancer"},
 		ObjectMeta: metav1.ObjectMeta{Namespace: lb.Namespace, Name: lb.Name},
-		Status:     v1alpha1.LoadBalancerStatus{CommonStatus: v1alpha1.CommonStatus{ObservedGeneration: lb.Generation, Conditions: withCondition(lb.Status.Conditions, cond)}},
+		Status:     v1alpha1.LoadBalancerStatus{CommonStatus: v1alpha1.CommonStatus{ObservedGeneration: lb.Generation, Conditions: withCondition(lb.Status.Conditions, cond)}, Address: address},
 	}
 	if err := applyStatus(ctx, r.Client, body); err != nil && requeue == 0 {
 		return reconcile.Result{RequeueAfter: waitRequeue}

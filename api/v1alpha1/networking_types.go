@@ -179,12 +179,15 @@ type LoadBalancerSpec struct {
 
 type LoadBalancerStatus struct {
 	CommonStatus `json:",inline"`
+	// +optional
+	Address string `json:"address,omitempty"`
 }
 
 // +kubebuilder:object:root=true
 // +kubebuilder:resource:scope=Namespaced
 // +kubebuilder:subresource:status
 // +kubebuilder:printcolumn:name="Elastic IP",type=string,JSONPath=`.spec.elasticIPRef`
+// +kubebuilder:printcolumn:name="Address",type=string,JSONPath=`.status.address`
 type LoadBalancer struct {
 	metav1.TypeMeta   `json:",inline"`
 	metav1.ObjectMeta `json:"metadata,omitempty"`
