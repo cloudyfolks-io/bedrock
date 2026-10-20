@@ -48,7 +48,12 @@ dump() {
     echo "--- agent log"
     journalctl -u bedrock-agent.service --no-pager -n 300 || true
     echo "--- k0s log"
-    journalctl -u k0scontroller --no-pager -n 200 || true
+    journalctl -u k0scontroller --no-pager -n 3000 | grep -v "component=grpc" | tail -200 || true
+    echo "--- kubelet log"
+    journalctl -u k0scontroller --no-pager --since "-60min" | grep "component=kubelet" | tail -150 || true
+    echo "--- k0s service"
+    systemctl status k0scontroller --no-pager -l | head -30 || true
+    ss -ltnp | grep -E ":(6443|10250) " || true
     echo "--- depot and backups"
     find /var/lib/bedrock -maxdepth 4 | head -100 || true
     echo "--- disk"
