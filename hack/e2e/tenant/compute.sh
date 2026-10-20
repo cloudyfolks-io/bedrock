@@ -141,25 +141,26 @@ compute_console() {
 compute_guest_script() {
   cat <<'SCRIPT'
 #!/bin/sh
-say() { echo "COMPUTE-$*" >/dev/console; }
-main() {
-  boot=$(cat /proc/sys/kernel/random/boot_id)
-  say "BOOT $boot"
-  say "CPUS $(grep -c '^processor' /proc/cpuinfo)"
-  say "MEMKIB $(awk '/^MemTotal/ {print $2}' /proc/meminfo)"
-  tested=
-  while :; do
-    d=$(ls /sys/block | grep '^sd' | head -n 1)
-    if [ -n "$d" ] && [ -z "$tested" ]; then
-      printf hotplug | dd of="/dev/$d" bs=7 count=1 2>/dev/null
-      sync
-      say "DISKIO $boot $d $(dd if="/dev/$d" bs=7 count=1 2>/dev/null)"
-      tested=1
-    fi
-    sleep 5
-  done
-}
-main </dev/null >/dev/null 2>&1 &
+boot=$(cat /proc/sys/kernel/random/boot_id)
+{
+  echo "COMPUTE-BOOT $boot"
+  echo "COMPUTE-CPUS $(grep -c '^processor' /proc/cpuinfo)"
+  echo "COMPUTE-MEMKIB $(awk '/^MemTotal/ {print $2}' /proc/meminfo)"
+} >/dev/console
+cat >/tmp/diskio.sh <<'LOOP'
+#!/bin/sh
+while :; do
+  d=$(ls /sys/block | grep '^sd' | head -n 1)
+  if [ -n "$d" ]; then
+    printf hotplug | dd of="/dev/$d" bs=7 count=1 2>/dev/null
+    sync
+    echo "COMPUTE-DISKIO $1 $d $(dd if="/dev/$d" bs=7 count=1 2>/dev/null)" >/dev/console
+    exit 0
+  fi
+  sleep 5
+done
+LOOP
+setsid sh /tmp/diskio.sh "$boot" </dev/null >/dev/null 2>&1 &
 SCRIPT
 }
 
