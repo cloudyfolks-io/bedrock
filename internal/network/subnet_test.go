@@ -37,7 +37,7 @@ func TestDesiredFabricSubnet(t *testing.T) {
 		"vpc": "t1", "protocol": "IPv4", "cidrBlock": "10.100.1.0/24", "gateway": "10.100.1.1",
 		"excludeIps": []any{"10.100.1.2..10.100.1.5"}, "provider": "default.t1-prod.fabric",
 		"gatewayType": "distributed", "natOutgoing": false, "private": false, "disableGatewayCheck": true,
-		"enableDHCP": true, "mtu": int64(1500), "dhcpV4Options": "mtu=1500,dns_server=1.1.1.1;8.8.8.8",
+		"enableDHCP": true, "mtu": int64(1500), "dhcpV4Options": "mtu=1500,dns_server=1.1.1.1;8.8.8.8", "acls": []any{},
 	}
 	for k, v := range want {
 		if got := spec[k]; !equalValue(got, v) {
@@ -159,7 +159,7 @@ func TestDesiredFabricSubnetWithoutDHCP(t *testing.T) {
 	in.DefaultMTU = 1500
 	in.Subnet.Spec.DHCP = false
 	spec, _, _ := unstructured.NestedMap(DesiredFabricSubnet(in).Object, "spec")
-	if _, found := spec["enableDHCP"]; found {
+	if spec["enableDHCP"] != false {
 		t.Fatalf("spec %v", spec)
 	}
 	if _, found := spec["dhcpV4Options"]; found {

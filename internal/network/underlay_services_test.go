@@ -56,7 +56,7 @@ func TestRenderUnderlayBGPBacksTheServicesSubnetWithAVlanAndTheTenantDropACL(t *
 func TestRenderUnderlayLeavesOtherPoolsWithoutACLs(t *testing.T) {
 	objects, _ := RenderUnderlay(configOf(t, servicesValues(servicesL2Pools, nil)))
 	public := byKindAndName(objects)["Subnet/provider-public"]
-	if _, found, _ := unstructured.NestedSlice(public.Object, "spec", "acls"); found {
+	if acls, _, _ := unstructured.NestedSlice(public.Object, "spec", "acls"); len(acls) > 0 {
 		t.Fatal("only the services pool has an ACL")
 	}
 }
@@ -64,7 +64,7 @@ func TestRenderUnderlayLeavesOtherPoolsWithoutACLs(t *testing.T) {
 func TestRenderUnderlaySkipsTheACLForAPoolThatIsNotAServicesPool(t *testing.T) {
 	values := servicesValues(servicesL2Pools, map[string]string{"network.services.provider-network": "public"})
 	objects, _ := RenderUnderlay(configOf(t, values))
-	if _, found, _ := unstructured.NestedSlice(byKindAndName(objects)["Subnet/provider-public"].Object, "spec", "acls"); found {
+	if acls, _, _ := unstructured.NestedSlice(byKindAndName(objects)["Subnet/provider-public"].Object, "spec", "acls"); len(acls) > 0 {
 		t.Fatal("the role services is required")
 	}
 }

@@ -10,7 +10,7 @@ func TestVpcBuildsPeeringsAndStaticRoutes(t *testing.T) {
 		StaticRoutes:         []StaticRoute{{CIDR: "10.2.0.0/16", NextHop: "169.254.0.2"}},
 		Peerings:             []Peering{{RemoteVpc: "other", LocalConnectIP: "169.254.0.1/30"}},
 	})
-	equal(t, spec(t, u), map[string]any{
+	equal(t, spec(t, u), vpcDefaults(map[string]any{
 		"enableExternal":       true,
 		"extraExternalSubnets": []any{"provider-public"},
 		"staticRoutes": []any{
@@ -18,12 +18,12 @@ func TestVpcBuildsPeeringsAndStaticRoutes(t *testing.T) {
 			map[string]any{"policy": "policyDst", "cidr": "10.2.0.0/16", "nextHopIP": "169.254.0.2"},
 		},
 		"vpcPeerings": []any{map[string]any{"remoteVpc": "other", "localConnectIP": "169.254.0.1/30"}},
-	})
+	}))
 }
 
 func TestVpcWritesPeeringsWithoutTheExternalConnection(t *testing.T) {
 	u := Vpc(Meta{Name: "acme"}, VpcSpec{Peerings: []Peering{{RemoteVpc: "other", LocalConnectIP: "169.254.0.1/30"}}})
-	equal(t, spec(t, u), map[string]any{"vpcPeerings": []any{map[string]any{"remoteVpc": "other", "localConnectIP": "169.254.0.1/30"}}})
+	equal(t, spec(t, u), vpcDefaults(map[string]any{"vpcPeerings": []any{map[string]any{"remoteVpc": "other", "localConnectIP": "169.254.0.1/30"}}}))
 }
 
 func TestVpcPeeringsStatusIsRead(t *testing.T) {

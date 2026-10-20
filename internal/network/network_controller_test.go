@@ -95,8 +95,13 @@ func TestNetworkReconcilerCreatesVpc(t *testing.T) {
 	if labels[v1alpha1.LabelKind] != "Network" || labels[v1alpha1.LabelName] != network.Name || labels[v1alpha1.LabelTenant] != "acme" || labels[LabelManaged] != "true" {
 		t.Fatalf("labels %v", labels)
 	}
-	if spec, _, _ := unstructured.NestedMap(vpc.Object, "spec"); len(spec) != 0 {
-		t.Fatalf("a private Network has an empty Vpc spec, got %v", spec)
+	if external, _, _ := unstructured.NestedBool(vpc.Object, "spec", "enableExternal"); external {
+		t.Fatal("a private Network has no external connection")
+	}
+	for _, field := range []string{"extraExternalSubnets", "staticRoutes", "vpcPeerings"} {
+		if list, _, _ := unstructured.NestedSlice(vpc.Object, "spec", field); len(list) != 0 {
+			t.Fatalf("a private Network has no %s, got %v", field, list)
+		}
 	}
 	if _, uid, ok := OwnerOf(vpc); !ok || uid != network.UID {
 		t.Fatal("owner annotations are missing")
