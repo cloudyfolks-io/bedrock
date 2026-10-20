@@ -20,19 +20,20 @@ const diskKeyLength = 20
 type ResolvedVolume struct{ Name, Bus string }
 
 type RenderInput struct {
-	VirtualMachine    v1alpha1.VirtualMachine
-	Labels            map[string]string
-	RootImage         *ResolvedImage
-	ImageOS           *v1alpha1.ImageOS
-	CDROMs            []ResolvedImage
-	NICs              []NIC
-	SSHKeys           []string
-	RootVolume        *ResolvedVolume
-	PendingRootVolume string
-	EvictionStrategy  string
-	Volumes           []ResolvedVolume
-	UserData          string
-	NetworkData       string
+	VirtualMachine     v1alpha1.VirtualMachine
+	Labels             map[string]string
+	RootImage          *ResolvedImage
+	ImageOS            *v1alpha1.ImageOS
+	CDROMs             []ResolvedImage
+	NICs               []NIC
+	SSHKeys            []string
+	RootVolume         *ResolvedVolume
+	PendingRootVolume  string
+	EvictionStrategy   string
+	Volumes            []ResolvedVolume
+	UserData           string
+	NetworkData        string
+	PreferenceTopology string
 }
 
 type Rendered struct {
@@ -181,7 +182,7 @@ func stringMap(in map[string]string) map[string]any {
 func domainOf(in RenderInput) map[string]any {
 	vm := in.VirtualMachine
 	domain := map[string]any{"devices": devicesOf(vm, in)}
-	if cpu := cpuOf(vm.Spec.CPU, vm.Spec.Compute); cpu != nil {
+	if cpu := cpuOf(vm.Spec.CPU, vm.Spec.Compute, in.PreferenceTopology); cpu != nil {
 		domain["cpu"] = cpu
 	}
 	if vm.Spec.Compute != nil {
@@ -216,10 +217,14 @@ func firmwareOf(firmware *v1alpha1.VMFirmware) map[string]any {
 	return out
 }
 
-func cpuOf(cpu *v1alpha1.VMCPU, compute *v1alpha1.VMCompute) map[string]any {
+func cpuOf(cpu *v1alpha1.VMCPU, compute *v1alpha1.VMCompute, topology string) map[string]any {
 	out := map[string]any{}
 	if compute != nil {
-		out["cores"] = int64(compute.Cores)
+		counted := countedCPUField(topology)
+		for _, field := range []string{"sockets", "cores", "threads"} {
+			out[field] = int64(1)
+		}
+		out[counted] = int64(compute.Cores)
 	}
 	if cpu != nil && cpu.Dedicated {
 		out["dedicatedCpuPlacement"] = true
@@ -231,6 +236,16 @@ func cpuOf(cpu *v1alpha1.VMCPU, compute *v1alpha1.VMCompute) map[string]any {
 		return nil
 	}
 	return out
+}
+
+func countedCPUField(topology string) string {
+	switch topology {
+	case "preferCores", "cores":
+		return "cores"
+	case "preferThreads", "threads":
+		return "threads"
+	}
+	return "sockets"
 }
 
 func devicesOf(vm v1alpha1.VirtualMachine, in RenderInput) map[string]any {

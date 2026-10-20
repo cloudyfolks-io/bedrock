@@ -710,12 +710,28 @@ func TestVMWithCustomSizeSkipsTheInstanceType(t *testing.T) {
 	if _, found, _ := unstructured.NestedMap(kubeVirt.Object, "spec", "instancetype"); found {
 		t.Fatal("instance type rendered")
 	}
-	cores, _, _ := unstructured.NestedInt64(kubeVirt.Object, "spec", "template", "spec", "domain", "cpu", "cores")
+	sockets, _, _ := unstructured.NestedInt64(kubeVirt.Object, "spec", "template", "spec", "domain", "cpu", "sockets")
 	guest, _, _ := unstructured.NestedString(kubeVirt.Object, "spec", "template", "spec", "domain", "memory", "guest")
-	if cores != 6 || guest != "6144Mi" {
-		t.Fatalf("cores %d guest %q", cores, guest)
+	if sockets != 6 || guest != "6144Mi" {
+		t.Fatalf("sockets %d guest %q", sockets, guest)
 	}
 	requireReason(t, getVM(t, c, ns, "web-1"), "Starting")
+}
+
+func TestVMCustomSizeFollowsThePreferenceTopology(t *testing.T) {
+	c, _ := startEnv(t)
+	ns := seedPlatform(t, c)
+	ensureUnstructured(t, c, preferenceGVK, "by-cores",
+		map[string]any{"cpu": map[string]any{"preferredCPUTopology": "preferCores"}})
+	createVM(t, c, ns, "web-1", func(vm *v1alpha1.VirtualMachine) {
+		customSize(2, 512)(vm)
+		vm.Spec.Preference = "by-cores"
+	})
+	reconcileVM(t, newVMReconciler(c), ns, "web-1")
+	cpu, _, _ := unstructured.NestedMap(requirePresent(t, c, kubeVirtVMGVK, ns, "web-1").Object, "spec", "template", "spec", "domain", "cpu")
+	if want := map[string]any{"sockets": int64(1), "cores": int64(2), "threads": int64(1)}; !reflect.DeepEqual(cpu, want) {
+		t.Fatalf("cpu %+v", cpu)
+	}
 }
 
 func TestVMRefusesASizeOverTheDefaultLimits(t *testing.T) {

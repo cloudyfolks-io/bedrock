@@ -214,11 +214,16 @@ func (r *VirtualMachineReconciler) stepPreference(ctx context.Context, vm v1alph
 	if name == "" {
 		return in, nil, nil
 	}
-	err := r.Client.Get(ctx, client.ObjectKey{Name: name}, emptyOf(preferenceGVK))
+	preference := emptyOf(preferenceGVK)
+	err := r.Client.Get(ctx, client.ObjectKey{Name: name}, preference)
 	if notFound(err) {
 		return in, gateOf(ReasonPreferenceNotFound, "the preference %q does not exist", name), nil
 	}
-	return in, nil, err
+	if err != nil {
+		return in, nil, err
+	}
+	in.PreferenceTopology, _, _ = unstructured.NestedString(preference.Object, "spec", "cpu", "preferredCPUTopology")
+	return in, nil, nil
 }
 
 func (r *VirtualMachineReconciler) stepSubnets(ctx context.Context, vm v1alpha1.VirtualMachine, in RenderInput) (RenderInput, *Gate, error) {
