@@ -108,6 +108,12 @@ Port security is on for each interface.
 A change of the security groups reaches a running VM at once.
 A change of the Subnets applies at the next restart.
 
+The guest takes its DNS servers from the Subnet of the first network.
+The operator uses `spec.dnsServers` of the Subnet, then the Setting `network.dns-servers`, then the Setting `network.services.resolver`.
+It writes them as `dnsPolicy: None` and `dnsConfig.nameservers` on the KubeVirt VM.
+When none is set, the guest gets the cluster DNS.
+A change of the DNS servers applies at the next restart, and a running VM shows `RestartRequired` until then.
+
 ### Fixed address
 
 An entry of `networks` can have an `address`, an IPv4 address.

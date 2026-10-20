@@ -126,6 +126,13 @@ Fabric joins the DNS servers with `;`.
 
 A change of `network.mtu` or `network.dns-servers` updates every Subnet that does not set the field.
 A new MTU or DNS server list reaches a running guest at its next DHCP lease, which is 3600 seconds long.
+
+A VM does not use the DHCP lease for DNS.
+The KubeVirt DHCP server gives the guest the resolv.conf of the launcher pod.
+So the operator sets `dnsPolicy: None` and `dnsConfig.nameservers` on the KubeVirt VM.
+The nameservers are the DNS servers of the Subnet of the first network of the VM, with the same order of choice as the DHCP option.
+When no DNS server is set, the operator does not write `dnsPolicy`, and the guest gets the cluster DNS.
+A change of the DNS servers changes the KubeVirt VM, so a running VM shows `RestartRequired` until its next restart.
 The pod interface of a VM keeps its MTU until the VM pod is created again, which is a VM restart.
 The operator does not restart a VM.
 Raise the MTU only with a planned VM restart.
