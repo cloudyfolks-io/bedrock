@@ -20,7 +20,7 @@ import (
 )
 
 var (
-	genericAlertsFile    = filepath.Join("..", "..", "manifests", "90-bedrock", "database-alerts.yaml")
+	genericAlertsFile    = filepath.Join("..", "..", "manifests", "addons", "cnpg", "database-alerts.yaml")
 	postgresqlAlertsFile = filepath.Join("..", "..", "manifests", "addons", "cnpg", "alerts.yaml")
 	metricIdentifier     = regexp.MustCompile(`\b(?:kubelet_|kube_|redis_|cnpg_)[a-z0-9_]+`)
 	knownMetrics         = []string{
