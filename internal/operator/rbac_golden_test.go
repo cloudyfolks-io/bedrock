@@ -10,9 +10,9 @@ import (
 )
 
 func TestCommittedOperatorRoleMatchesTheGeneratorExactly(t *testing.T) {
-	built := filepath.Join("..", "..", "dist", "release")
-	if _, err := os.Stat(built); err != nil {
-		t.Skip("run make release first: no built release in dist/release")
+	built := os.Getenv("BEDROCK_RBAC_RELEASE")
+	if built == "" {
+		t.Skip("set BEDROCK_RBAC_RELEASE to a full built release directory")
 	}
 	bundle, err := release.Load(os.DirFS(built))
 	if err != nil {
