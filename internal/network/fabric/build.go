@@ -121,19 +121,13 @@ func selector(labels map[string]string) map[string]any {
 }
 
 func Vpc(m Meta, s VpcSpec) *unstructured.Unstructured {
-	spec := map[string]any{}
-	if s.EnableExternal {
-		spec["enableExternal"] = true
-		spec["extraExternalSubnets"] = anys(s.ExtraExternalSubnets)
-	}
-	if routes := vpcRoutes(s); len(routes) > 0 {
-		spec["staticRoutes"] = routes
-	}
-	if len(s.Peerings) > 0 {
-		spec["vpcPeerings"] = vpcPeerings(s.Peerings)
-	}
-	if s.EnableBfd {
-		spec["enableBfd"] = true
+	spec := map[string]any{
+		"enableExternal":       s.EnableExternal,
+		"extraExternalSubnets": anys(s.ExtraExternalSubnets),
+		"staticRoutes":         vpcRoutes(s),
+		"vpcPeerings":          vpcPeerings(s.Peerings),
+		"enableBfd":            s.EnableBfd,
+		"dynamicRouting":       map[string]any{"enabled": false},
 	}
 	if s.Dynamic != nil {
 		spec["dynamicRouting"] = dynamicRouting(*s.Dynamic)
@@ -185,12 +179,8 @@ func Subnet(m Meta, s SubnetSpec) *unstructured.Unstructured {
 	if len(s.ExcludeIPs) > 0 {
 		spec["excludeIps"] = anys(s.ExcludeIPs)
 	}
-	if s.DHCP {
-		spec["enableDHCP"] = true
-	}
-	if len(s.ACLs) > 0 {
-		spec["acls"] = acls(s.ACLs)
-	}
+	spec["enableDHCP"] = s.DHCP
+	spec["acls"] = acls(s.ACLs)
 	set(spec, "vlan", s.Vlan)
 	set(spec, "provider", s.Provider)
 	if s.Provider != "" {

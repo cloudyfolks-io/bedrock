@@ -1,6 +1,7 @@
 package fabric
 
 import (
+	"maps"
 	"reflect"
 	"testing"
 	"time"
@@ -26,7 +27,7 @@ func equal(t *testing.T, got, want map[string]any) {
 
 func TestVpcBuildsPrivateSpec(t *testing.T) {
 	u := Vpc(Meta{Name: "acme"}, VpcSpec{})
-	equal(t, spec(t, u), map[string]any{})
+	equal(t, spec(t, u), vpcDefaults(nil))
 	if u.GetKind() != "Vpc" || u.GetAPIVersion() != "fabric.cloudyfolks.io/v1" || u.GetName() != "acme" {
 		t.Fatalf("unexpected identity %v", u.Object)
 	}
@@ -34,11 +35,11 @@ func TestVpcBuildsPrivateSpec(t *testing.T) {
 
 func TestVpcBuildsL2Spec(t *testing.T) {
 	u := Vpc(Meta{Name: "acme"}, VpcSpec{EnableExternal: true, ExtraExternalSubnets: []string{"provider-public"}, DefaultRoute: &StaticRoute{CIDR: "0.0.0.0/0", NextHop: "192.0.2.1"}})
-	equal(t, spec(t, u), map[string]any{
+	equal(t, spec(t, u), vpcDefaults(map[string]any{
 		"enableExternal":       true,
 		"extraExternalSubnets": []any{"provider-public"},
 		"staticRoutes":         []any{map[string]any{"policy": "policyDst", "cidr": "0.0.0.0/0", "nextHopIP": "192.0.2.1"}},
-	})
+	}))
 }
 
 func TestVpcBuildsBGPSpec(t *testing.T) {
@@ -50,10 +51,32 @@ func TestVpcBuildsBGPSpec(t *testing.T) {
 	equal(t, got["dynamicRouting"].(map[string]any), map[string]any{"enabled": true, "redistribute": []any{"nat", "lb"}, "vrfId": int64(1000), "externalSubnet": "provider-transit", "localOnly": true})
 }
 
-func TestVpcOmitsBfdAndLocalOnlyByDefault(t *testing.T) {
+func vpcDefaults(overrides map[string]any) map[string]any {
+	out := map[string]any{
+		"enableExternal":       false,
+		"enableBfd":            false,
+		"extraExternalSubnets": []any{},
+		"staticRoutes":         []any{},
+		"vpcPeerings":          []any{},
+		"dynamicRouting":       map[string]any{"enabled": false},
+	}
+	maps.Copy(out, overrides)
+	return out
+}
+
+func TestVpcWritesEveryManagedFieldWhenEmpty(t *testing.T) {
+	got := spec(t, Vpc(Meta{Name: "acme"}, VpcSpec{}))
+	for _, field := range []string{"enableExternal", "enableBfd", "extraExternalSubnets", "staticRoutes", "vpcPeerings", "dynamicRouting"} {
+		if _, found := got[field]; !found {
+			t.Fatalf("spec.%s is missing: %#v", field, got)
+		}
+	}
+}
+
+func TestVpcWritesBfdOffByDefault(t *testing.T) {
 	u := Vpc(Meta{Name: "acme"}, VpcSpec{EnableExternal: true, Dynamic: &DynamicRouting{VrfID: 1000, ExternalSubnet: "provider-transit", Redistribute: []string{"nat"}}})
 	got := spec(t, u)
-	if _, found := got["enableBfd"]; found {
+	if got["enableBfd"] != false {
 		t.Fatalf("unexpected spec %#v", got)
 	}
 	if _, found := got["dynamicRouting"].(map[string]any)["localOnly"]; found {
@@ -67,18 +90,18 @@ func TestSubnetBuild(t *testing.T) {
 		"vpc": "acme", "protocol": "IPv4", "cidrBlock": "10.100.1.0/24", "gateway": "10.100.1.1",
 		"excludeIps": []any{"10.100.1.2..10.100.1.5"}, "provider": "default.t1-prod.fabric",
 		"gatewayType": "distributed", "natOutgoing": false, "private": false, "disableGatewayCheck": true,
-		"enableDHCP": true, "dhcpV4Options": "router=10.100.1.1,mtu=1500,dns_server=1.1.1.1;8.8.8.8", "mtu": int64(1500),
+		"enableDHCP": true, "dhcpV4Options": "router=10.100.1.1,mtu=1500,dns_server=1.1.1.1;8.8.8.8", "mtu": int64(1500), "acls": []any{},
 	})
 }
 
 func TestUnderlaySubnetBuild(t *testing.T) {
 	u := Subnet(Meta{Name: "provider-public"}, SubnetSpec{CIDR: "192.0.2.0/24", Gateway: "192.0.2.1", Vlan: "public"})
-	equal(t, spec(t, u), map[string]any{"protocol": "IPv4", "cidrBlock": "192.0.2.0/24", "gateway": "192.0.2.1", "vlan": "public"})
+	equal(t, spec(t, u), map[string]any{"protocol": "IPv4", "cidrBlock": "192.0.2.0/24", "gateway": "192.0.2.1", "vlan": "public", "enableDHCP": false, "acls": []any{}})
 }
 
 func TestOverlaySubnetBuild(t *testing.T) {
 	u := Subnet(Meta{Name: "provider-pool"}, SubnetSpec{CIDR: "198.51.100.0/24", Gateway: "198.51.100.1"})
-	equal(t, spec(t, u), map[string]any{"protocol": "IPv4", "cidrBlock": "198.51.100.0/24", "gateway": "198.51.100.1"})
+	equal(t, spec(t, u), map[string]any{"protocol": "IPv4", "cidrBlock": "198.51.100.0/24", "gateway": "198.51.100.1", "enableDHCP": false, "acls": []any{}})
 }
 
 func TestOvnEipBuildWithAndWithoutAddress(t *testing.T) {
