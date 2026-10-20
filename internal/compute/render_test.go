@@ -396,7 +396,7 @@ func TestRenderCustomComputeReplacesTheInstanceType(t *testing.T) {
 	}
 	domain, _, _ := unstructured.NestedMap(templateSpec(t, out), "domain")
 	cpu, _ := domain["cpu"].(map[string]any)
-	wantCPU := map[string]any{"cores": int64(6), "dedicatedCpuPlacement": true, "model": "host-model"}
+	wantCPU := map[string]any{"sockets": int64(6), "cores": int64(1), "threads": int64(1), "dedicatedCpuPlacement": true, "model": "host-model"}
 	if !reflect.DeepEqual(cpu, wantCPU) {
 		t.Fatalf("cpu %+v", cpu)
 	}
@@ -405,14 +405,58 @@ func TestRenderCustomComputeReplacesTheInstanceType(t *testing.T) {
 	}
 }
 
-func TestRenderCustomComputeAloneSetsOnlyCores(t *testing.T) {
+func TestRenderCustomComputeAloneSetsOnlyTheTopology(t *testing.T) {
 	in := renderFixture()
 	in.VirtualMachine.Spec.InstanceType = ""
 	in.VirtualMachine.Spec.CPU = nil
 	in.VirtualMachine.Spec.Compute = &v1alpha1.VMCompute{Cores: 2, MemoryMiB: 512}
 	domain, _, _ := unstructured.NestedMap(templateSpec(t, mustRender(t, in)), "domain")
-	if want := map[string]any{"cores": int64(2)}; !reflect.DeepEqual(domain["cpu"], want) {
+	if want := map[string]any{"sockets": int64(2), "cores": int64(1), "threads": int64(1)}; !reflect.DeepEqual(domain["cpu"], want) {
 		t.Fatalf("cpu %+v", domain["cpu"])
+	}
+}
+
+func TestRenderCustomComputeCountsInTheFieldOfThePreferenceTopology(t *testing.T) {
+	cases := map[string]map[string]any{
+		"":              {"sockets": int64(3), "cores": int64(1), "threads": int64(1)},
+		"preferSockets": {"sockets": int64(3), "cores": int64(1), "threads": int64(1)},
+		"sockets":       {"sockets": int64(3), "cores": int64(1), "threads": int64(1)},
+		"preferCores":   {"sockets": int64(1), "cores": int64(3), "threads": int64(1)},
+		"cores":         {"sockets": int64(1), "cores": int64(3), "threads": int64(1)},
+		"preferThreads": {"sockets": int64(1), "cores": int64(1), "threads": int64(3)},
+		"threads":       {"sockets": int64(1), "cores": int64(1), "threads": int64(3)},
+		"preferSpread":  {"sockets": int64(3), "cores": int64(1), "threads": int64(1)},
+		"spread":        {"sockets": int64(3), "cores": int64(1), "threads": int64(1)},
+		"preferAny":     {"sockets": int64(3), "cores": int64(1), "threads": int64(1)},
+	}
+	for topology, want := range cases {
+		t.Run(topology, func(t *testing.T) {
+			in := renderFixture()
+			in.VirtualMachine.Spec.InstanceType = ""
+			in.VirtualMachine.Spec.CPU = nil
+			in.VirtualMachine.Spec.Compute = &v1alpha1.VMCompute{Cores: 3, MemoryMiB: 512}
+			in.PreferenceTopology = topology
+			domain, _, _ := unstructured.NestedMap(templateSpec(t, mustRender(t, in)), "domain")
+			if !reflect.DeepEqual(domain["cpu"], want) {
+				t.Fatalf("cpu %+v", domain["cpu"])
+			}
+		})
+	}
+}
+
+func TestRenderCustomComputeSatisfiesThePreferenceRequirements(t *testing.T) {
+	in := renderFixture()
+	in.VirtualMachine.Spec.InstanceType = ""
+	in.VirtualMachine.Spec.CPU = nil
+	in.VirtualMachine.Spec.Preference = "cirros"
+	in.VirtualMachine.Spec.Compute = &v1alpha1.VMCompute{Cores: 2, MemoryMiB: 512}
+	domain, _, _ := unstructured.NestedMap(templateSpec(t, mustRender(t, in)), "domain")
+	cpu, _ := domain["cpu"].(map[string]any)
+	if cpu["sockets"] != int64(2) {
+		t.Fatalf("the cirros preference counts sockets: %+v", cpu)
+	}
+	if want := map[string]any{"guest": "512Mi"}; !reflect.DeepEqual(domain["memory"], want) {
+		t.Fatalf("memory %+v", domain["memory"])
 	}
 }
 
@@ -422,8 +466,10 @@ func TestRenderInstanceTypeSetsNoSize(t *testing.T) {
 		t.Fatalf("memory %+v", domain["memory"])
 	}
 	cpu, _ := domain["cpu"].(map[string]any)
-	if _, found := cpu["cores"]; found {
-		t.Fatalf("cpu %+v", cpu)
+	for _, field := range []string{"sockets", "cores", "threads"} {
+		if _, found := cpu[field]; found {
+			t.Fatalf("cpu %+v", cpu)
+		}
 	}
 }
 
