@@ -26,6 +26,7 @@ type RenderInput struct {
 	ImageOS            *v1alpha1.ImageOS
 	CDROMs             []ResolvedImage
 	NICs               []NIC
+	DNSServers         []string
 	SSHKeys            []string
 	RootVolume         *ResolvedVolume
 	PendingRootVolume  string
@@ -112,6 +113,10 @@ func kubeVirtVM(in RenderInput, affinity *corev1.Affinity) (*unstructured.Unstru
 		"networks":         networksOf(in.NICs),
 		"volumes":          volumesOf(in),
 	}
+	if len(in.DNSServers) > 0 {
+		templateSpec["dnsPolicy"] = "None"
+		templateSpec["dnsConfig"] = map[string]any{"nameservers": stringList(in.DNSServers)}
+	}
 	if vm.Spec.Scheduling != nil && len(vm.Spec.Scheduling.NodeSelector) > 0 {
 		templateSpec["nodeSelector"] = stringMap(vm.Spec.Scheduling.NodeSelector)
 	}
@@ -175,6 +180,14 @@ func stringMap(in map[string]string) map[string]any {
 	out := make(map[string]any, len(in))
 	for key, value := range in {
 		out[key] = value
+	}
+	return out
+}
+
+func stringList(in []string) []any {
+	out := make([]any, 0, len(in))
+	for _, value := range in {
+		out = append(out, value)
 	}
 	return out
 }

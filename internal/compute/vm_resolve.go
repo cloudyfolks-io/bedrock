@@ -236,9 +236,27 @@ func (r *VirtualMachineReconciler) stepSubnets(ctx context.Context, vm v1alpha1.
 		if err != nil {
 			return in, nil, err
 		}
+		if len(in.NICs) == 0 {
+			servers, err := r.primaryDNSServers(ctx, subnet)
+			if err != nil {
+				return in, nil, err
+			}
+			in.DNSServers = servers
+		}
 		in.NICs = append(slices.Clone(in.NICs), NIC{Namespace: vm.Namespace, Subnet: network.SubnetRef, MAC: network.MACAddress, Address: network.Address, SecurityGroups: slices.Clone(network.SecurityGroups)})
 	}
 	return in, nil, nil
+}
+
+func (r *VirtualMachineReconciler) primaryDNSServers(ctx context.Context, subnet v1alpha1.Subnet) ([]string, error) {
+	if len(subnet.Spec.DNSServers) > 0 {
+		return container.DNSServersOf(subnet, nil), nil
+	}
+	cfg, err := network.LoadConfig(ctx, r.Client)
+	if err != nil {
+		return nil, err
+	}
+	return container.DNSServersOf(subnet, cfg.DNSServers), nil
 }
 
 func (r *VirtualMachineReconciler) stepSecurityGroups(ctx context.Context, vm v1alpha1.VirtualMachine, in RenderInput) (RenderInput, *Gate, error) {

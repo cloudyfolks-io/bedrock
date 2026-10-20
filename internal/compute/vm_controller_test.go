@@ -1046,3 +1046,64 @@ func TestAVolumeStaysWithTheInstanceThatMountsIt(t *testing.T) {
 		t.Fatalf("root claim %q", claim)
 	}
 }
+
+func setSubnetDNS(t *testing.T, c client.Client, ns, name string, servers []string) {
+	t.Helper()
+	var subnet v1alpha1.Subnet
+	must(t, c.Get(context.Background(), client.ObjectKey{Namespace: ns, Name: name}, &subnet))
+	subnet.Spec.DNSServers = servers
+	must(t, c.Update(context.Background(), &subnet))
+}
+
+func renderedNameservers(t *testing.T, c client.Client, ns string) (string, []string) {
+	t.Helper()
+	obj := requirePresent(t, c, kubeVirtVMGVK, ns, "web-1")
+	policy, _, _ := unstructured.NestedString(obj.Object, "spec", "template", "spec", "dnsPolicy")
+	servers, _, _ := unstructured.NestedStringSlice(obj.Object, "spec", "template", "spec", "dnsConfig", "nameservers")
+	return policy, servers
+}
+
+func requireNameservers(t *testing.T, c client.Client, ns, wantPolicy string, want []string) {
+	t.Helper()
+	policy, servers := renderedNameservers(t, c, ns)
+	if policy != wantPolicy || !slices.Equal(servers, want) {
+		t.Fatalf("dnsPolicy %q nameservers %v, want %q %v", policy, servers, wantPolicy, want)
+	}
+}
+
+func TestVMReadsTheDNSServersOfTheSubnet(t *testing.T) {
+	c, _ := startEnv(t)
+	ns := seedPlatform(t, c)
+	setSetting(t, c, "network.dns-servers", "203.0.113.1")
+	setSubnetDNS(t, c, ns, "default", []string{"198.51.100.53", "198.51.100.54"})
+	createVM(t, c, ns, "web-1", noMutation)
+	reconcileVM(t, newVMReconciler(c), ns, "web-1")
+	requireNameservers(t, c, ns, "None", []string{"198.51.100.53", "198.51.100.54"})
+}
+
+func TestVMDNSFallsBackToTheSetting(t *testing.T) {
+	c, _ := startEnv(t)
+	ns := seedPlatform(t, c)
+	setSetting(t, c, "network.dns-servers", "203.0.113.1,203.0.113.2")
+	setSetting(t, c, "network.services.resolver", "203.0.113.9")
+	createVM(t, c, ns, "web-1", noMutation)
+	reconcileVM(t, newVMReconciler(c), ns, "web-1")
+	requireNameservers(t, c, ns, "None", []string{"203.0.113.1", "203.0.113.2"})
+}
+
+func TestVMDNSFallsBackToTheResolver(t *testing.T) {
+	c, _ := startEnv(t)
+	ns := seedPlatform(t, c)
+	setSetting(t, c, "network.services.resolver", "203.0.113.9")
+	createVM(t, c, ns, "web-1", noMutation)
+	reconcileVM(t, newVMReconciler(c), ns, "web-1")
+	requireNameservers(t, c, ns, "None", []string{"203.0.113.9"})
+}
+
+func TestVMWithoutDNSConfigurationKeepsTheClusterDNS(t *testing.T) {
+	c, _ := startEnv(t)
+	ns := seedPlatform(t, c)
+	createVM(t, c, ns, "web-1", noMutation)
+	reconcileVM(t, newVMReconciler(c), ns, "web-1")
+	requireNameservers(t, c, ns, "", nil)
+}
