@@ -4,7 +4,7 @@ set -euo pipefail
 vm=${CI_VM:-bedrock-ci}
 cpus=${CI_CPUS:-12}
 memory=${CI_MEMORY:-24}
-disk=${CI_DISK:-100}
+disk=${CI_DISK:-160}
 osd_size=${CI_OSD_GB:-60}
 min_free=${CI_MIN_FREE_GB:-25}
 floor=${CI_FLOOR_GB:-15}
