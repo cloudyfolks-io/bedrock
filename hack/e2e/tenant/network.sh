@@ -113,7 +113,7 @@ VM
 }
 
 launcher_annotation() {
-  kubectl -n "$NS" get pods -l "kubevirt.io/domain=$1" -o json |
+  kubectl -n "$NS" get pods -l "vm.kubevirt.io/name=$1" -o json |
     jq -r --arg key "parity.$NS.fabric.cloudyfolks.io/$2" '.items[0].metadata.annotations[$key]'
 }
 
@@ -137,12 +137,12 @@ parity_cleanup() {
   if [ "$1" -ne 0 ]; then
     guest_console_log vm2 >&2 || true
     kubectl -n "$NS" get virtualmachine vm2 vm-bad -o yaml >&2 || true
-    kubectl -n "$NS" describe pods -l 'kubevirt.io/domain in (vm2,vm-bad)' >&2 || true
+    kubectl -n "$NS" describe pods -l 'vm.kubevirt.io/name in (vm2,vm-bad)' >&2 || true
   fi
   kubectl -n "$NS" delete virtualmachine vm2 vm-bad --ignore-not-found
   wait_gone 180 virtualmachine vm2 -n "$NS"
   wait_gone 180 virtualmachine vm-bad -n "$NS"
-  wait_empty 180 -n "$NS" get pods -l 'kubevirt.io/domain in (vm2,vm-bad)'
+  wait_empty 180 -n "$NS" get pods -l 'vm.kubevirt.io/name in (vm2,vm-bad)'
   wait_gone 180 datavolume vm2-root -n "$NS"
   wait_gone 180 datavolume vm-bad-root -n "$NS"
   kubectl -n "$NS" delete subnet parity --ignore-not-found
@@ -157,7 +157,7 @@ parity_checks() {
   expect_contains "$(fabric_by_label subnets Subnet parity -o jsonpath='{.items[0].spec.dhcpV4Options}')" "dns_server=198.51.100.53;198.51.100.54" "dhcp dns option"
   parity_vm_manifest vm-bad 10.100.16.1 | kubectl -n "$NS" apply -f -
   wait_reason 120 virtualmachine vm-bad NetworkReady AddressReserved -n "$NS"
-  expect_equal "" "$(kubectl -n "$NS" get pods -l kubevirt.io/domain=vm-bad -o name)" "no pod for a reserved address"
+  expect_equal "" "$(kubectl -n "$NS" get pods -l vm.kubevirt.io/name=vm-bad -o name)" "no pod for a reserved address"
   kubectl -n "$NS" delete virtualmachine vm-bad
   wait_gone 180 virtualmachine vm-bad -n "$NS"
   parity_vm_manifest vm2 10.100.16.50 | kubectl -n "$NS" apply -f -
@@ -444,7 +444,7 @@ probe_vm_cleanup() {
   fi
   kubectl -n "$NS" delete virtualmachine "$name" --ignore-not-found
   wait_gone 180 virtualmachine "$name" -n "$NS"
-  wait_empty 180 -n "$NS" get pods -l "kubevirt.io/domain=$name"
+  wait_empty 180 -n "$NS" get pods -l "vm.kubevirt.io/name=$name"
   wait_gone 180 datavolume "$name-root" -n "$NS"
 }
 

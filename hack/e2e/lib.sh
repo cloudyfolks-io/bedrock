@@ -180,7 +180,7 @@ as_user() {
 }
 
 guest_console_log() {
-  kubectl -n "$NS" logs -l "kubevirt.io/domain=$1" -c guest-console-log --tail=-1
+  kubectl -n "$NS" logs -l "vm.kubevirt.io/name=$1" -c guest-console-log --tail=-1
 }
 
 state_dir() {
