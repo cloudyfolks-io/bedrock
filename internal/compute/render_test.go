@@ -503,3 +503,26 @@ func TestRenderRootVolumeKeepsItsBus(t *testing.T) {
 		t.Fatalf("root disk %+v", disk)
 	}
 }
+
+func TestRenderWithDNSServersSetsDNSPolicyNone(t *testing.T) {
+	in := renderFixture()
+	in.DNSServers = []string{"198.51.100.53", "198.51.100.54"}
+	spec := templateSpec(t, mustRender(t, in))
+	if spec["dnsPolicy"] != "None" {
+		t.Fatalf("dnsPolicy %v", spec["dnsPolicy"])
+	}
+	nameservers, _, _ := unstructured.NestedStringSlice(spec, "dnsConfig", "nameservers")
+	if !reflect.DeepEqual(nameservers, in.DNSServers) {
+		t.Fatalf("nameservers %v", nameservers)
+	}
+}
+
+func TestRenderWithoutDNSServersKeepsTheClusterDNS(t *testing.T) {
+	spec := templateSpec(t, mustRender(t, renderFixture()))
+	if _, found := spec["dnsPolicy"]; found {
+		t.Fatal("dnsPolicy must be absent")
+	}
+	if _, found := spec["dnsConfig"]; found {
+		t.Fatal("dnsConfig must be absent")
+	}
+}

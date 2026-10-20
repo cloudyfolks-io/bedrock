@@ -107,10 +107,10 @@ func (r Resolver) resolveSubnet(ctx context.Context, namespace, name string) (v1
 	if err != nil {
 		return subnet, nil, nil, err
 	}
-	return subnet, dnsServersOf(subnet, cfg.DNSServers), nil, nil
+	return subnet, DNSServersOf(subnet, cfg.DNSServers), nil, nil
 }
 
-func dnsServersOf(subnet v1alpha1.Subnet, fallback []string) []string {
+func DNSServersOf(subnet v1alpha1.Subnet, fallback []string) []string {
 	if len(subnet.Spec.DNSServers) > 0 {
 		return slices.Clone(subnet.Spec.DNSServers)
 	}
