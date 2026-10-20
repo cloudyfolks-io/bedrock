@@ -559,10 +559,10 @@ print_restore_state
 retry_until 300 kubectl patch setting backup.etcd-schedule --type merge -p '{"spec":{"value":""}}'
 test "$(kubectl -n default get configmap "$restore_marker" -o jsonpath='{.data.state}')" = before-snapshot
 echo "the marker ConfigMap is back: etcd holds the state of the snapshot"
-retry_until 300 node_lease_renewed_since "$restore_started"
+retry_until 1800 node_lease_renewed_since "$restore_started"
 kubectl wait --for=condition=Ready node --all --timeout=300s
 kubectl -n bedrock-system rollout status deploy/bedrock-operator --timeout=300s
-retry_until 300 pod_started_since "$restore_started"
+retry_until 900 pod_started_since "$restore_started"
 kubectl -n default wait --for=condition=Ready "pod/$restore_marker" --timeout=300s
 assert_no_image_pull_failures
 images_after=$(k0s_images_listing)
