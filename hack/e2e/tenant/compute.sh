@@ -254,7 +254,7 @@ VOLUME
   wait_jsonpath 180 Available -n "$NS" get volume hot1 -o jsonpath='{.status.phase}'
   compute_size_vm_manifest | kubectl -n "$NS" apply -f -
   wait_jsonpath 600 Running -n "$NS" get virtualmachine size-vm -o jsonpath='{.status.phase}'
-  expect_equal "2 512Mi" "$(kubectl -n "$NS" get virtualmachines.kubevirt.io size-vm -o jsonpath='{.spec.template.spec.domain.cpu.cores} {.spec.template.spec.domain.memory.guest}')" "size in the KubeVirt VM"
+  expect_equal "2 1 1 512Mi" "$(kubectl -n "$NS" get virtualmachines.kubevirt.io size-vm -o jsonpath='{.spec.template.spec.domain.cpu.sockets} {.spec.template.spec.domain.cpu.cores} {.spec.template.spec.domain.cpu.threads} {.spec.template.spec.domain.memory.guest}')" "size in the KubeVirt VM"
   expect_equal "" "$(kubectl -n "$NS" get virtualmachines.kubevirt.io size-vm -o jsonpath='{.spec.instancetype.name}')" "no instance type on a custom size"
   retry_until 300 compute_guest_reported size-vm MEMKIB
   expect_equal 2 "$(compute_guest_value size-vm CPUS)" "guest cpu count"
