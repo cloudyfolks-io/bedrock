@@ -210,7 +210,7 @@ transfer_cleanup() {
   kubectl -n "$NS" delete virtualmachine meter-client meter-server --ignore-not-found
   wait_gone 180 virtualmachine meter-client -n "$NS"
   wait_gone 180 virtualmachine meter-server -n "$NS"
-  wait_empty 180 -n "$NS" get pods -l 'kubevirt.io/domain in (meter-client,meter-server)'
+  wait_empty 180 -n "$NS" get pods -l 'vm.kubevirt.io/name in (meter-client,meter-server)'
   wait_gone 180 datavolume meter-client-root -n "$NS"
   wait_gone 180 datavolume meter-server-root -n "$NS"
   kubectl -n "$NS" delete subnet metering --ignore-not-found

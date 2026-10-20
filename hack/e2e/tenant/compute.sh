@@ -233,7 +233,7 @@ compute_vm_cleanup() {
   fi
   kubectl -n "$NS" delete virtualmachine "$name" --ignore-not-found
   wait_gone 180 virtualmachine "$name" -n "$NS"
-  wait_empty 180 -n "$NS" get pods -l "kubevirt.io/domain=$name"
+  wait_empty 180 -n "$NS" get pods -l "vm.kubevirt.io/name=$name"
   wait_gone 180 datavolume "$name-root" -n "$NS"
 }
 

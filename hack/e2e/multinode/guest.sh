@@ -114,7 +114,7 @@ lab_node() {
 }
 
 launcher_pod() {
-  kubectl -n "$1" get pods -l "kubevirt.io/domain=$2" -o json |
+  kubectl -n "$1" get pods -l "vm.kubevirt.io/name=$2" -o json |
     jq -r '[.items[] | select(.status.phase == "Running")] | sort_by(.metadata.creationTimestamp) | last | .metadata.name // empty'
 }
 
@@ -181,7 +181,7 @@ delete_vms() {
   done
   for name in "$@"; do
     wait_gone 300 virtualmachine "$name" -n "$namespace"
-    wait_empty 300 -n "$namespace" get pods -l "kubevirt.io/domain=$name"
+    wait_empty 300 -n "$namespace" get pods -l "vm.kubevirt.io/name=$name"
   done
 }
 
