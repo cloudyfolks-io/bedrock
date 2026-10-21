@@ -151,7 +151,15 @@ k0s_archive_entries() {
 }
 
 k0s_images_listing() {
-  find /var/lib/k0s/images -type f -printf '%P %s\n' | sort
+  find /var/lib/bedrock/images -type f -printf '%P %s\n' | sort
+}
+
+archived_file() {
+  test -n "$(compgen -G "/var/lib/bedrock/images/$1/*/$2")"
+}
+
+k0s_images_dir_empty() {
+  test -z "$(find /var/lib/k0s/images -type f 2>/dev/null)"
 }
 
 local_pause_image() {
@@ -291,8 +299,9 @@ if [ -n "$abort_in" ]; then
   kubectl get host "$node" -o jsonpath='{.status.restore.backup}' | grep -q "^/var/lib/bedrock/backups/bedrock-$VERSION_A-"
   test -n "$(kubectl -n bedrock-system get deploy/bedrock-operator -o jsonpath='{.spec.template.metadata.annotations.kubectl\.kubernetes\.io/restartedAt}')"
   test -n "$(kubectl -n kube-system get daemonset/fabric-cni -o jsonpath='{.spec.template.metadata.annotations.kubectl\.kubernetes\.io/restartedAt}')"
-  test -f /var/lib/k0s/images/k0s-airgap.tar
-  test ! -e "/var/lib/k0s/images/k0s-airgap-$VERSION_B.tar"
+  archived_file "$VERSION_A" k0s-airgap.tar
+  test ! -e "/var/lib/bedrock/images/$VERSION_B"
+  retry_until 300 k0s_images_dir_empty
   for _ in $(seq 1 60); do
     if [ -z "$(kubectl get nodeupgrades -o name)" ]; then break; fi
     sleep 5
@@ -524,11 +533,12 @@ kubectl -n bedrock-system wait --for=delete virtualmachine/bedrock-smoke --timeo
 test -z "$(kubectl get nodeupgrades -o name)"
 test ! -e "/var/lib/bedrock/staged/$VERSION_B"
 test ! -e /var/lib/bedrock/previous/k0s
-test -f "/var/lib/k0s/images/k0s-airgap-$VERSION_B.tar"
-test ! -e /var/lib/k0s/images/k0s-airgap.tar
+archived_file "$VERSION_B" k0s-airgap.tar
+test ! -e "/var/lib/bedrock/images/$VERSION_A"
 if [ "$image_a_file" != "$image_b_file" ]; then
-  test ! -e "/var/lib/k0s/images/$image_a_file"
+  test -z "$(compgen -G "/var/lib/bedrock/images/*/*/$image_a_file")"
 fi
+retry_until 300 k0s_images_dir_empty
 test "$(kubectl get node "$node" -o jsonpath='{.spec.unschedulable}')" != "true"
 kubectl wait --for=condition=Ready node --all --timeout=300s
 grep -qx 'server = "https://127.0.0.1:1"' /etc/k0s/containerd.d/certs.d/_default/hosts.toml
@@ -559,6 +569,8 @@ print_restore_state
 retry_until 300 kubectl patch setting backup.etcd-schedule --type merge -p '{"spec":{"value":""}}'
 test "$(kubectl -n default get configmap "$restore_marker" -o jsonpath='{.data.state}')" = before-snapshot
 echo "the marker ConfigMap is back: etcd holds the state of the snapshot"
+retry_until 120 node_lease_renewed_since "$restore_started"
+echo "the kubelet lease renewed $(($(date -u +%s) - restore_started)) s after the restore started"
 retry_until 1800 node_lease_renewed_since "$restore_started"
 kubectl wait --for=condition=Ready node --all --timeout=300s
 kubectl -n bedrock-system rollout status deploy/bedrock-operator --timeout=300s
@@ -567,6 +579,7 @@ kubectl -n default wait --for=condition=Ready "pod/$restore_marker" --timeout=30
 assert_no_image_pull_failures
 images_after=$(k0s_images_listing)
 test -z "$(comm -23 <(printf '%s\n' "$images_before") <(printf '%s\n' "$images_after"))"
+retry_until 300 k0s_images_dir_empty
 kubectl -n default delete configmap,pod "$restore_marker"
 rm -rf /root/restore /var/lib/k0s/.pre-restore-*
 echo "e2e-upgrade passed"
