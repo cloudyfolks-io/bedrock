@@ -59,6 +59,11 @@ spec:
 
 The retention policy keeps the tags that one of the rules selects.
 If the spec has no `keepLastN` and no `retainDays`, Bedrock clears the policy of the project.
+This holds only for a policy that Bedrock applied before.
+`status.retentionApplied` shows that Bedrock holds a policy.
+If the spec has no `retention` at all and Bedrock never applied a policy, Bedrock leaves the Harbor policy of the project alone.
+So an adopted project keeps its retention policy.
+A `retention` in the spec always wins over the policy in Harbor.
 If you remove `webhook`, Bedrock deletes the policy `platform-events`.
 
 The webhook cannot target a service in the cluster.
@@ -148,6 +153,15 @@ spec:
 The spec cannot change after the create. To change the permission, make a new credential.
 The robot has no expiry.
 The name `platform-` as a prefix is for administrators.
+This holds for the object name and for `spec.robotName`.
+
+`spec.robotName` is optional and immutable.
+It is the name of the Harbor robot, and the part of the login after `+`.
+Without it, the robot name is the name of the object.
+Use it to keep a docker login name that exists already, for example `key_acme+ci` with `robotName: ci`.
+The name has lowercase letters, digits, dot, underscore and dash, at most 100 characters.
+A new name follows the rules above.
+A robot with that name that exists already is adopted, as the next section shows.
 
 Bedrock writes the Secret `<name>-docker` in the same namespace.
 It has the type `kubernetes.io/dockerconfigjson`.
@@ -180,6 +194,9 @@ Until then the credential shows the reason `RegistryNotFound` or `RegistryNotRea
 A robot with the same name that exists already gives `NameTaken`.
 An administrator can adopt it with the annotation `bedrock.cloudyfolks.io/adopt: "true"`.
 Bedrock then takes the robot over and sets a new secret.
+The login name stays the same, and the old secret stops working.
+Bedrock finds the robot only inside the Harbor project of the Registry.
+A robot that another credential holds already gives the reason `RobotClaimed`, and Bedrock changes nothing.
 
 ## Conditions
 
@@ -193,6 +210,7 @@ Both kinds report the condition `Ready`.
 | `NameInvalid` | `Registry` | The project name does not follow the rules. |
 | `NameReserved` | `Registry` | The name or its prefix is reserved and the object has no approval. |
 | `NameTaken` | both | The project or the robot exists and the object does not own it. |
+| `RobotClaimed` | `RegistryCredential` | The adopt annotation is set, but another credential holds the robot. |
 | `WebhookSecretMissing` | `Registry` | The Secret or the key of `webhook.authHeaderSecretRef` does not exist. |
 | `NotEmpty` | `Registry` | The delete waits because the project has repositories and `forceDestroy` is `false`. |
 | `PurgeIncomplete` | `Registry` | The purge of a forced delete is not finished. The next pass continues. |
@@ -241,3 +259,7 @@ An administrator who moves an older Harbor database writes this Secret with the 
 Then Bedrock uses that password.
 Harbor projects and robots come back with the database.
 Adopt them with the annotation `bedrock.cloudyfolks.io/adopt: "true"`.
+Adoption keeps the retention policy of a project when the Registry has no `retention`.
+A credential names an old robot with `spec.robotName`.
+The Setting `registry.gc-cron` sets the garbage collection schedule of Harbor.
+It has six fields, seconds first, and Bedrock refuses a value with a field out of range.

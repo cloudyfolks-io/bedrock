@@ -22,7 +22,7 @@ func TestRegistryDocNamesTheContract(t *testing.T) {
 		"registry.default-quota-gb", "registry.reserved-names", "registry.reserved-prefixes", "registry.robot-prefix", "registry.proxy-caches",
 		"count/registries.bedrock.cloudyfolks.io", "kubernetes.io/dockerconfigjson", "<name>-docker", "bedrock-registry", "harbor-admin",
 		"BucketNotOwned", "ProxyCacheTypeMismatch", "forceDestroy", "keepLastN", "retainDays", "tagPattern", "retainUntagged", "schedule", "quotaGB",
-		"pull", "pushPull", "manage", "platform-events",
+		"pull", "pushPull", "manage", "platform-events", "robotName", reasonRobotClaimed, "retentionApplied", "registry.gc-cron",
 	} {
 		if !strings.Contains(doc, name) {
 			t.Errorf("docs/registry.md does not mention %q", name)
