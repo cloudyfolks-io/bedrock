@@ -453,10 +453,14 @@ The snapshot does not hold the encryption key of the Secrets. On a host that
 lost its disk, put the key at `/etc/bedrock/encryption/encryption.yaml`
 before you run the script. See [Secrets at rest](secrets-at-rest.md).
 
-A scheduled etcd snapshot holds no image tarballs. The script keeps the
-directory `/var/lib/k0s/images` on the host. A snapshot of an older release
-and a backup of an upgrade hold the directory `images`. For these archives,
-the script moves the directory aside and restores it from the archive.
+A scheduled etcd snapshot holds no image tarballs. The host keeps the
+tarballs in the image archive `/var/lib/bedrock/images`, and the directory
+`/var/lib/k0s/images` stays empty. See [Upgrade](upgrade.md). A snapshot of an
+older release and a backup of an upgrade hold the directory `images`. For
+these archives, the script moves the directory aside and restores it from the
+archive. The agent then moves these tarballs into the image archive. When
+the host has no containerd store, the script links the tarballs of the image
+archive into `/var/lib/k0s/images` before it starts k0s.
 
 On a rebuilt host, put the images back before you run the script. Use the
 bundle of the version that took the snapshot, for the architecture of the
