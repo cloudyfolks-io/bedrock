@@ -115,7 +115,10 @@ func preloadImages(ctx context.Context, deps Deps, bundleURL, dir string, wanted
 	if err := os.RemoveAll(dir); err != nil {
 		return 0, err
 	}
-	return len(wanted), requireImages(ctx, deps.Exec, wanted)
+	if err := requireImages(ctx, deps.Exec, wanted); err != nil {
+		return 0, err
+	}
+	return len(wanted), syncHostImages(ctx, deps)
 }
 
 func keepTarball(staged, dest string) error {
