@@ -21,6 +21,26 @@ import (
 
 const SuffixEndpoint = "endpoint"
 
+var ErrEndpointAddressTaken = errors.New("the pinned endpoint address is in use")
+
+func PinnedAddress(db v1alpha1.Database) string {
+	if db.Spec.Endpoint == nil {
+		return ""
+	}
+	return db.Spec.Endpoint.Address
+}
+
+func PinnedAddressProblem(db v1alpha1.Database, subnet v1alpha1.Subnet) string {
+	pinned := PinnedAddress(db)
+	if pinned == "" {
+		return ""
+	}
+	if violation := network.CheckNICAddress(subnet, pinned); violation != nil {
+		return violation.Message
+	}
+	return ""
+}
+
 func EndpointName(db v1alpha1.Database) string { return db.Name + "-" + SuffixEndpoint }
 
 func SecurityGroupName(uid types.UID) string {
@@ -166,11 +186,26 @@ func (a *Allocator) EnsureAddress(ctx context.Context, c client.Client, live cli
 	if err != nil {
 		return "", err
 	}
-	address, err := network.AllocateAddress(ctx, live, subnet, reserved)
+	address, err := a.choose(ctx, live, *db, subnet, reserved)
 	if err != nil {
 		return "", err
 	}
 	return address, a.record(ctx, c, db, subnet.Name, address, port)
+}
+
+func (a *Allocator) choose(ctx context.Context, live client.Reader, db v1alpha1.Database, subnet v1alpha1.Subnet, reserved []string) (string, error) {
+	pinned := PinnedAddress(db)
+	if pinned == "" {
+		return network.AllocateAddress(ctx, live, subnet, reserved)
+	}
+	taken, err := network.TakenAddresses(ctx, live, subnet, reserved)
+	if err != nil {
+		return "", err
+	}
+	if taken[parseAddr(pinned)] {
+		return "", ErrEndpointAddressTaken
+	}
+	return pinned, nil
 }
 
 func (a *Allocator) proxyAddress(ctx context.Context, live client.Reader, db v1alpha1.Database) string {

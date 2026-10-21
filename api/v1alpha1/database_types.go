@@ -31,6 +31,13 @@ type DatabaseRestore struct {
 	TargetTime *metav1.Time `json:"targetTime,omitempty"`
 }
 
+type DatabaseEndpointSpec struct {
+	// +kubebuilder:validation:MaxLength=15
+	// +kubebuilder:validation:XValidation:rule="isIP(self) && ip(self).family() == 4",message="endpoint.address must be an IPv4 address"
+	// +kubebuilder:validation:XValidation:rule="self == oldSelf",message="endpoint.address is immutable"
+	Address string `json:"address"`
+}
+
 type DatabaseBackupSpec struct {
 	// +kubebuilder:default=true
 	Enabled bool `json:"enabled"`
@@ -39,6 +46,7 @@ type DatabaseBackupSpec struct {
 // +kubebuilder:validation:XValidation:rule="self.engine != 'valkey' || !self.backup.enabled",message="a Valkey database has no backups: set backup.enabled to false"
 // +kubebuilder:validation:XValidation:rule="self.engine != 'valkey' || !has(self.restore)",message="a Valkey database has no restore"
 // +kubebuilder:validation:XValidation:rule="has(self.restore) == has(oldSelf.restore)",message="restore is immutable"
+// +kubebuilder:validation:XValidation:rule="has(self.endpoint) == has(oldSelf.endpoint)",message="endpoint is immutable"
 type DatabaseSpec struct {
 	// +kubebuilder:validation:Enum=postgresql;mysql;valkey
 	// +kubebuilder:validation:XValidation:rule="self == oldSelf",message="engine is immutable"
@@ -62,6 +70,8 @@ type DatabaseSpec struct {
 	// +kubebuilder:default=default
 	// +optional
 	SubnetRef string `json:"subnetRef,omitempty"`
+	// +optional
+	Endpoint *DatabaseEndpointSpec `json:"endpoint,omitempty"`
 	// +kubebuilder:validation:MaxItems=64
 	// +kubebuilder:validation:items:MaxLength=43
 	// +kubebuilder:validation:items:XValidation:rule="isCIDR(self) && cidr(self).ip().family() == 4",message="allowedCIDRs entries must be IPv4 CIDRs"

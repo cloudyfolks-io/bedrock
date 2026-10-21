@@ -97,7 +97,7 @@ func (r *Reconciler) prepare(ctx context.Context, in *flow) (*Refusal, error) {
 	} else if refused := checkExisting(catalog, db, cluster); refused != nil {
 		return refused, nil
 	}
-	steps := []func(context.Context, *flow) (*Refusal, error){r.preparePlatform, r.prepareCapacity, r.prepareSubnet, r.preparePods, r.prepareVIPRange, r.prepareBackupStore, r.prepareRestore, r.prepareOperations}
+	steps := []func(context.Context, *flow) (*Refusal, error){r.preparePlatform, r.prepareCapacity, r.prepareSubnet, r.prepareEndpointAddress, r.preparePods, r.prepareVIPRange, r.prepareBackupStore, r.prepareRestore, r.prepareOperations}
 	for _, step := range steps {
 		if refused, err := step(ctx, in); err != nil || refused != nil {
 			return refused, err
@@ -147,6 +147,16 @@ func (r *Reconciler) prepareSubnet(ctx context.Context, in *flow) (*Refusal, err
 	subnet, refused, err := resolveSubnet(ctx, r.Live, *in.db)
 	in.subnet = subnet
 	return refused, err
+}
+
+func (r *Reconciler) prepareEndpointAddress(_ context.Context, in *flow) (*Refusal, error) {
+	if _, recorded := AddressOf(*in.db, in.subnet.Name); recorded {
+		return nil, nil
+	}
+	if problem := PinnedAddressProblem(*in.db, in.subnet); problem != "" {
+		return refusal(ReasonEndpointAddressInvalid, "%s", problem), nil
+	}
+	return nil, nil
 }
 
 func (r *Reconciler) preparePods(ctx context.Context, in *flow) (*Refusal, error) {
@@ -387,6 +397,8 @@ func (r *Reconciler) applyProxy(ctx context.Context, in *flow, vip string) (*Ref
 	switch {
 	case errors.Is(err, network.ErrNoFreeAddress):
 		return refusal(ReasonAddressUnavailable, "the subnet %s has no free address", in.subnet.Name), nil
+	case errors.Is(err, ErrEndpointAddressTaken):
+		return refusal(ReasonEndpointAddressTaken, "the endpoint address %s is in use in the subnet %s", PinnedAddress(*in.db), in.subnet.Name), nil
 	case err != nil:
 		return nil, fmt.Errorf("allocate the proxy address: %w", err)
 	}

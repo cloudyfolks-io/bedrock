@@ -2,6 +2,7 @@ package database
 
 import (
 	"context"
+	"errors"
 	"sync"
 	"testing"
 
@@ -256,4 +257,87 @@ func TestEnsureAddressOfAFullSubnetFails(t *testing.T) {
 		t.Fatalf("err %v", err)
 	}
 	_ = corev1.Pod{}
+}
+
+func pinnedDatabase(t *testing.T, c client.Client, namespace, address string) *v1alpha1.Database {
+	t.Helper()
+	db := &v1alpha1.Database{ObjectMeta: metav1.ObjectMeta{Name: "db-" + nextSequence(), Namespace: namespace}, Spec: newSpec()}
+	db.Spec.Endpoint = &v1alpha1.DatabaseEndpointSpec{Address: address}
+	create(t, c, db)
+	must(t, c.Get(context.Background(), client.ObjectKeyFromObject(db), db))
+	return db
+}
+
+func TestEnsureAddressUsesThePinnedAddress(t *testing.T) {
+	c, subnet := addressWorld(t)
+	db := pinnedDatabase(t, c, subnet.Namespace, "10.100.0.50")
+	address, err := (&Allocator{}).EnsureAddress(context.Background(), c, c, db, subnet, 5432)
+	must(t, err)
+	if address != "10.100.0.50" || len(db.Status.Addresses) != 1 || db.Status.Addresses[0].IP != "10.100.0.50" {
+		t.Fatalf("address %s status %+v", address, db.Status.Addresses)
+	}
+}
+
+func TestEnsureAddressRefusesAPinTakenByAnotherWorkload(t *testing.T) {
+	c, subnet := addressWorld(t)
+	create(t, c, &v1alpha1.Container{ObjectMeta: metav1.ObjectMeta{Name: "holder", Namespace: subnet.Namespace}, Spec: v1alpha1.ContainerSpec{Image: "x", Network: v1alpha1.ContainerNetwork{Address: "10.100.0.50"}}})
+	db := pinnedDatabase(t, c, subnet.Namespace, "10.100.0.50")
+	if _, err := (&Allocator{}).EnsureAddress(context.Background(), c, c, db, subnet, 5432); !errors.Is(err, ErrEndpointAddressTaken) {
+		t.Fatalf("err %v", err)
+	}
+}
+
+func TestEnsureAddressRefusesAPinHeldByAnotherDatabase(t *testing.T) {
+	c, subnet := addressWorld(t)
+	ctx := context.Background()
+	a := &Allocator{}
+	first := pinnedDatabase(t, c, subnet.Namespace, "10.100.0.50")
+	_, err := a.EnsureAddress(ctx, c, c, first, subnet, 5432)
+	must(t, err)
+	second := pinnedDatabase(t, c, subnet.Namespace, "10.100.0.50")
+	if _, err := a.EnsureAddress(ctx, c, c, second, subnet, 5432); !errors.Is(err, ErrEndpointAddressTaken) {
+		t.Fatalf("err %v", err)
+	}
+}
+
+func TestPinnedAddressProblemNamesTheSubnetRule(t *testing.T) {
+	subnet := goldenSubnet()
+	for _, address := range []string{"10.200.0.5", "10.100.0.0", "10.100.0.255", "10.100.0.1"} {
+		db := goldenDatabase()
+		db.Spec.Endpoint = &v1alpha1.DatabaseEndpointSpec{Address: address}
+		if problem := PinnedAddressProblem(db, subnet); problem == "" {
+			t.Errorf("%s was accepted", address)
+		}
+	}
+	db := goldenDatabase()
+	if PinnedAddressProblem(db, subnet) != "" {
+		t.Error("no pin has no problem")
+	}
+	db.Spec.Endpoint = &v1alpha1.DatabaseEndpointSpec{Address: "10.100.0.50"}
+	if problem := PinnedAddressProblem(db, subnet); problem != "" {
+		t.Errorf("problem %q", problem)
+	}
+}
+
+func TestADatabaseWithAPinOutsideTheSubnetIsRefusedBeforeAnyObject(t *testing.T) {
+	w := newWorld(t, func(spec *v1alpha1.DatabaseSpec) {
+		spec.Endpoint = &v1alpha1.DatabaseEndpointSpec{Address: "10.200.0.5"}
+	})
+	w.reconcile()
+	if w.reason() != ReasonEndpointAddressInvalid || w.engineObjects() != 0 {
+		t.Fatalf("reason %s engine objects %d", w.reason(), w.engineObjects())
+	}
+}
+
+func TestTheProxyGetsThePinnedAddress(t *testing.T) {
+	w := newWorld(t, func(spec *v1alpha1.DatabaseSpec) {
+		spec.Endpoint = &v1alpha1.DatabaseEndpointSpec{Address: "10.100.0.77"}
+	})
+	w.bringUp()
+	deployment := &unstructured.Unstructured{}
+	deployment.SetGroupVersionKind(DeploymentGVK)
+	must(t, w.c.Get(context.Background(), client.ObjectKey{Namespace: w.namespace, Name: EndpointName(*w.db)}, deployment))
+	if pinnedByProxy(deployment) != "10.100.0.77" || len(w.db.Status.Addresses) != 1 || w.db.Status.Addresses[0].IP != "10.100.0.77" {
+		t.Fatalf("proxy %q status %+v", pinnedByProxy(deployment), w.db.Status.Addresses)
+	}
 }

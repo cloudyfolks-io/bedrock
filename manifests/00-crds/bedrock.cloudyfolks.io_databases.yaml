@@ -78,6 +78,19 @@ spec:
                 minLength: 1
                 pattern: ^[a-z0-9]([-a-z0-9]*[a-z0-9])?$
                 type: string
+              endpoint:
+                properties:
+                  address:
+                    maxLength: 15
+                    type: string
+                    x-kubernetes-validations:
+                    - message: endpoint.address must be an IPv4 address
+                      rule: isIP(self) && ip(self).family() == 4
+                    - message: endpoint.address is immutable
+                      rule: self == oldSelf
+                required:
+                - address
+                type: object
               engine:
                 enum:
                 - postgresql
@@ -141,6 +154,8 @@ spec:
               rule: self.engine != 'valkey' || !has(self.restore)
             - message: restore is immutable
               rule: has(self.restore) == has(oldSelf.restore)
+            - message: endpoint is immutable
+              rule: has(self.endpoint) == has(oldSelf.endpoint)
           status:
             properties:
               addresses:

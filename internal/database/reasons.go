@@ -37,6 +37,8 @@ const (
 	ReasonAddressUnavailable      = "AddressUnavailable"
 	ReasonRestoreSourceEmpty      = "RestoreSourceEmpty"
 	ReasonRestoreTargetInFuture   = "RestoreTargetInFuture"
+	ReasonEndpointAddressInvalid  = "EndpointAddressInvalid"
+	ReasonEndpointAddressTaken    = "EndpointAddressTaken"
 )
 
 func Reasons() []string {
@@ -48,7 +50,7 @@ func Reasons() []string {
 		ReasonUserOwnsObjects, ReasonNameConflict, ReasonEngineUnavailable, ReasonEngineRejected, ReasonReady,
 		ReasonVersionNotAvailable, ReasonClassNotAvailable, ReasonStorageOutOfRange, ReasonSubnetNotFound, ReasonSubnetNotReady,
 		ReasonEndpointImageMissing, ReasonRuntimeUnavailable, ReasonDNSMissing, ReasonVIPRangeMissing, ReasonBackupStorePending,
-		ReasonBackupStoreFailed, ReasonApplyFailed, ReasonAddressUnavailable,
+		ReasonBackupStoreFailed, ReasonApplyFailed, ReasonAddressUnavailable, ReasonEndpointAddressInvalid, ReasonEndpointAddressTaken,
 		ReasonNameTaken, ReasonUpgradeNotSupported, ReasonClassChangeNotSupported,
 		ReasonProvisioning, ReasonRestoring, ReasonSuspended, ReasonUnhealthy, ReasonEngineWaiting, ReasonBootstrapping, ReasonGateWaiting, ReasonProxyWaiting,
 	}

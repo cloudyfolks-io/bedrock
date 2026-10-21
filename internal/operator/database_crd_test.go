@@ -163,3 +163,41 @@ func TestDatabaseStorageDoesNotShrink(t *testing.T) {
 		t.Fatalf("growth must pass: %v", err)
 	}
 }
+
+func TestDatabaseEndpointAddressFormat(t *testing.T) {
+	c, _ := StartTestEnv(t)
+
+	for name, address := range map[string]string{"not-ip": "database", "ipv6": "fd00::5", "range": "10.0.0.256", "cidr": "10.0.0.5/24"} {
+		db := newDatabase("pin-"+name, "postgresql")
+		db.Spec.Endpoint = &v1alpha1.DatabaseEndpointSpec{Address: address}
+		createInvalid(t, c, db, "endpoint.address")
+	}
+	pinned := newDatabase("pin-ok", "postgresql")
+	pinned.Spec.Endpoint = &v1alpha1.DatabaseEndpointSpec{Address: "10.0.0.5"}
+	createValid(t, c, pinned)
+	reload(t, c, pinned)
+	if pinned.Spec.Endpoint == nil || pinned.Spec.Endpoint.Address != "10.0.0.5" {
+		t.Fatalf("endpoint %+v", pinned.Spec.Endpoint)
+	}
+}
+
+func TestDatabaseEndpointAddressIsImmutable(t *testing.T) {
+	c, _ := StartTestEnv(t)
+
+	pinned := newDatabase("pin-fixed", "postgresql")
+	pinned.Spec.Endpoint = &v1alpha1.DatabaseEndpointSpec{Address: "10.0.0.5"}
+	createValid(t, c, pinned)
+
+	moved := pinned.DeepCopy()
+	moved.Spec.Endpoint.Address = "10.0.0.6"
+	updateInvalid(t, c, moved, "endpoint.address is immutable")
+	removed := pinned.DeepCopy()
+	removed.Spec.Endpoint = nil
+	updateInvalid(t, c, removed, "endpoint is immutable")
+
+	plain := newDatabase("pin-late", "postgresql")
+	createValid(t, c, plain)
+	late := plain.DeepCopy()
+	late.Spec.Endpoint = &v1alpha1.DatabaseEndpointSpec{Address: "10.0.0.7"}
+	updateInvalid(t, c, late, "endpoint is immutable")
+}

@@ -65,6 +65,7 @@ A class with `highAvailability: true` makes 3 instances. Other classes make 1 in
 | `class` | The name of a `DatabaseClass`. A change must keep `highAvailability`. |
 | `storageGi` | The storage in GiB. It is between the class minimum and maximum. It can only grow. |
 | `subnetRef` | A `Subnet` of the project. The default is `default`. It cannot change. |
+| `endpoint.address` | An optional IPv4 address in the CIDR of the subnet. The proxy pod gets this address. It cannot be the gateway, the network or broadcast address, an excluded address or an address that another workload holds. It cannot change or be added after the create. Without it, the operator picks the lowest free address. |
 | `allowedCIDRs` | The networks that can connect. The default is the CIDR of the subnet. |
 | `backup.enabled` | The default is `true`. A Valkey database must set `false`. |
 | `restore` | `sourceUID` and an optional `targetTime`. It cannot change after the create. |
@@ -292,6 +293,8 @@ The condition `Ready` shows one of these reasons.
 | `BackupStoreFailed` | The object store refused the backup bucket or does not answer. |
 | `ApplyFailed` | The API server refused an object. |
 | `AddressUnavailable` | The subnet or the gate range has no free address. |
+| `EndpointAddressInvalid` | `spec.endpoint.address` is outside the subnet, or it is the gateway, the network or broadcast address, or an excluded address. |
+| `EndpointAddressTaken` | Another database, VM or container holds `spec.endpoint.address`. |
 | `Provisioning` | The database is new and not ready yet. |
 | `Restoring` | A restore is not ready yet. |
 | `Suspended` | `spec.suspended` is `true`. |
