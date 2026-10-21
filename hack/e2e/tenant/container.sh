@@ -154,9 +154,9 @@ $(container_proof_vm_script "$1" "$2" | sed 's/^/      /')
 VM
 }
 
-container_proof_balancer() {
-  local subnet=$1 vip=${2:-}
-  cat <<BALANCER
+container_proof_vip() {
+  local subnet=$1
+  cat <<VIP
 apiVersion: fabric.cloudyfolks.io/v1
 kind: Vip
 metadata:
@@ -167,7 +167,11 @@ spec:
   namespace: $NS
   subnet: $subnet
   type: switch_lb_vip
----
+VIP
+}
+
+container_proof_rule() {
+  cat <<RULE
 apiVersion: fabric.cloudyfolks.io/v1
 kind: SwitchLBRule
 metadata:
@@ -175,7 +179,7 @@ metadata:
   labels:
     bedrock.cloudyfolks.io/project: $PROJECT
 spec:
-  vip: ${vip:-proof-vip}
+  vip: $1
   namespace: $NS
   selector: []
   endpoints: ["$container_proof_address"]
@@ -184,7 +188,7 @@ spec:
       port: 8080
       targetPort: 8080
       protocol: TCP
-BALANCER
+RULE
 }
 
 container_proof_fabric_ip() {
@@ -213,9 +217,10 @@ container_proof_pod_checks() {
   expect_equal "$container_proof_address" "$(kubectl -n "$NS" get pod proof-pod -o jsonpath='{.status.podIP}')" "pod ip in the status"
   subnet=$(fabric_by_label subnets Subnet default -o jsonpath='{.items[0].metadata.name}')
   expect_equal "$subnet" "$(container_proof_fabric_ip proof-pod)" "fabric ip object of the pod"
-  container_proof_balancer "$subnet" | kubectl apply -f -
+  container_proof_vip "$subnet" | kubectl apply -f -
   wait_not_empty 120 get vips.fabric.cloudyfolks.io proof-vip -o jsonpath='{.status.v4ip}'
   vip=$(kubectl get vips.fabric.cloudyfolks.io proof-vip -o jsonpath='{.status.v4ip}')
+  container_proof_rule "$vip" | kubectl apply -f -
   retry_until 120 container_proof_rule_programmed
   container_proof_vm "$container_proof_address" "$vip" | kubectl -n "$NS" apply -f -
   wait_jsonpath 600 Running -n "$NS" get virtualmachine proof-vm -o jsonpath='{.status.phase}'
