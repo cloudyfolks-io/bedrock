@@ -53,6 +53,22 @@ func TestRestoreLinksTheOldVersionImagesBeforeK0sStartsOnAnEmptyStore(t *testing
 	}
 }
 
+func TestRestoreRecordsTheLinksItMakes(t *testing.T) {
+	env := restoreEnv(t, &host.FakeExec{})
+	root := env.Deps.Root
+	if err := os.RemoveAll(filepath.Join(root, "var/lib/k0s/containerd")); err != nil {
+		t.Fatal(err)
+	}
+	writeArchived(t, root, "v0.2.0", "a.tar")
+	env.Deps.Exec = restoredClusterExec(root, `{"items":[]}`)
+	if _, err := restore(context.Background(), env); err != nil {
+		t.Fatal(err)
+	}
+	if got := readLinkRecord(root); !slices.Equal(got, []string{"v0.2.0-a.tar"}) {
+		t.Fatalf("record %v", got)
+	}
+}
+
 func TestRestoreLinksNothingWhenContainerdHoldsTheImages(t *testing.T) {
 	if got := restoreWithArchive(t, true); len(got) != 0 {
 		t.Fatalf("k0s must start with an empty images directory, found %v", got)

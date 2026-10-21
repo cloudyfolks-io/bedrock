@@ -55,9 +55,6 @@ func Run(ctx context.Context, c client.WithWatch, deps Deps) error {
 	if err := removeStaleLeftovers(deps.Root, deps.Now()); err != nil {
 		logLine(fmt.Sprintf("stale backup files: %v", err))
 	}
-	if err := adoptK0sImages(deps.Root, deps.Version); err != nil {
-		logLine(fmt.Sprintf("image archive: %v", err))
-	}
 	if _, err := ensureHostKey(deps.Root, logLine); err != nil {
 		logLine(fmt.Sprintf("host backup key: %v", err))
 	}
@@ -70,6 +67,9 @@ func Run(ctx context.Context, c client.WithWatch, deps Deps) error {
 		}
 		if err := RunUpgrades(ctx, c, deps, Steps()); err != nil {
 			fmt.Fprintf(os.Stderr, "agent: upgrade: %v\n", err)
+		}
+		if err := adoptK0sImages(deps.Root, releaseLists(ctx, c, deps.Root), deps.Version); err != nil {
+			fmt.Fprintf(os.Stderr, "agent: image archive: %v\n", err)
 		}
 		if err := syncHostImages(ctx, deps); err != nil {
 			fmt.Fprintf(os.Stderr, "agent: images: %v\n", err)
@@ -223,6 +223,7 @@ func tick(ctx context.Context, c client.Client, deps Deps) (inventoryErr, writeE
 	} else {
 		conditions = append(conditions, condition(v1alpha1.ConditionManagementApplied, metav1.ConditionFalse, "ManagementDisabled", "", current.Generation))
 	}
+	conditions = append(conditions, importsCondition(deps, current.Generation)...)
 	next.Conditions = stable(current.Status.Conditions, conditions)
 	if err := ApplyStatus(ctx, c, deps.Node, next); err != nil {
 		return invErr, err

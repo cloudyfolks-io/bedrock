@@ -13,33 +13,52 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+	"time"
 
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+
+	"github.com/cloudyfolks-io/bedrock/api/v1alpha1"
 	"github.com/cloudyfolks-io/bedrock/internal/host"
 	"github.com/cloudyfolks-io/bedrock/internal/k0s"
 	"github.com/cloudyfolks-io/bedrock/internal/release"
 )
 
 const (
-	pinnedLabel       = "io.cri-containerd.pinned=pinned"
+	pinnedLabelKey    = "io.cri-containerd.pinned"
+	pinnedLabel       = pinnedLabelKey + "=pinned"
 	k0sSourceLabelKey = "io.k0sproject.ocibundle-paths"
+	ctrCallTimeout    = 30 * time.Second
+	importBackoffBase = time.Minute
+	importBackoffMax  = time.Hour
+	containerdNames   = "io.containerd.image.name"
+	ociRefName        = "org.opencontainers.image.ref.name"
 )
 
 type storedImage struct {
-	Name   string
-	Pinned bool
+	Name          string
+	Pinned        bool
+	SourceLabeled bool
 }
 
 type imageStore interface {
 	List(ctx context.Context) ([]storedImage, error)
 	Pin(ctx context.Context, name string) error
+	Unpin(ctx context.Context, name string) error
 }
 
 type ctrStore struct {
-	exec host.Exec
+	exec    host.Exec
+	timeout time.Duration
+}
+
+func (s ctrStore) run(ctx context.Context, args ...string) (string, error) {
+	callCtx, cancel := context.WithTimeout(ctx, s.timeout)
+	defer cancel()
+	return s.exec.Run(callCtx, k0s.DefaultBinary, append([]string{"ctr", "--namespace", "k8s.io", "images"}, args...)...)
 }
 
 func (s ctrStore) List(ctx context.Context) ([]storedImage, error) {
-	out, err := s.exec.Run(ctx, k0s.DefaultBinary, "ctr", "--namespace", "k8s.io", "images", "ls")
+	out, err := s.run(ctx, "ls")
 	if err != nil {
 		return nil, err
 	}
@@ -49,16 +68,26 @@ func (s ctrStore) List(ctx context.Context) ([]storedImage, error) {
 		if len(fields) < 6 || fields[0] == "REF" {
 			continue
 		}
-		images = append(images, storedImage{Name: fields[0], Pinned: slices.Contains(strings.Split(fields[len(fields)-1], ","), pinnedLabel)})
+		labels := strings.Join(fields[5:], " ")
+		images = append(images, storedImage{
+			Name:          fields[0],
+			Pinned:        strings.Contains(labels, pinnedLabel),
+			SourceLabeled: strings.Contains(labels, k0sSourceLabelKey+"="),
+		})
 	}
 	return images, nil
 }
 
 func (s ctrStore) Pin(ctx context.Context, name string) error {
-	if _, err := s.exec.Run(ctx, k0s.DefaultBinary, "ctr", "--namespace", "k8s.io", "images", "label", name, k0sSourceLabelKey+"="); err != nil {
+	if _, err := s.run(ctx, "label", name, k0sSourceLabelKey+"="); err != nil {
 		return err
 	}
-	_, err := s.exec.Run(ctx, k0s.DefaultBinary, "ctr", "--namespace", "k8s.io", "images", "label", name, pinnedLabel)
+	_, err := s.run(ctx, "label", name, pinnedLabel)
+	return err
+}
+
+func (s ctrStore) Unpin(ctx context.Context, name string) error {
+	_, err := s.run(ctx, "label", name, pinnedLabelKey+"=")
 	return err
 }
 
@@ -71,6 +100,19 @@ type archivedTarball struct {
 
 func (t archivedTarball) linkName() string {
 	return t.Version + "-" + t.File
+}
+
+func (t archivedTarball) importedIn(images []storedImage) bool {
+	return len(t.Names) > 0 && allMatch(t.Names, images, func(storedImage) bool { return true })
+}
+
+func allMatch(names []string, images []storedImage, ok func(storedImage) bool) bool {
+	for _, name := range names {
+		if !slices.ContainsFunc(images, func(image storedImage) bool { return image.Name == name && ok(image) }) {
+			return false
+		}
+	}
+	return true
 }
 
 func linkArchiveWhenStoreIsEmpty(root, version string) error {
@@ -88,108 +130,217 @@ func syncHostImages(ctx context.Context, deps Deps) error {
 	if !runsContainers(deps.Root) {
 		return nil
 	}
-	return syncImages(ctx, deps, ctrStore{exec: deps.Exec})
+	return syncImages(ctx, deps, ctrStore{exec: deps.Exec, timeout: ctrCallTimeout})
 }
 
 func syncImages(ctx context.Context, deps Deps, store imageStore) error {
 	tarballs, err := archivedTarballs(deps.Root)
-	if err != nil || len(tarballs) == 0 {
+	if err != nil {
 		return err
 	}
+	if err := removeOrphanLinks(deps.Root, tarballs); err != nil {
+		return err
+	}
+	if len(tarballs) == 0 {
+		return nil
+	}
+	warnUnnamed(tarballs)
 	images, err := store.List(ctx)
 	if err != nil {
 		return err
 	}
-	missing := tarballsMissingFrom(tarballs, heldNames(images))
-	if err := linkTarballs(deps.Root, missing); err != nil {
+	if err := settle(ctx, deps.Root, store, tarballs, images); err != nil {
 		return err
 	}
-	if len(missing) > 0 {
-		if err := waitForImport(ctx, deps, store, missing); err != nil {
-			return err
-		}
-	}
-	return settle(ctx, deps.Root, store, tarballs)
+	return advanceImport(deps, tarballs, images)
 }
 
-func settle(ctx context.Context, root string, store imageStore, tarballs []archivedTarball) error {
-	images, err := store.List(ctx)
-	if err != nil {
-		return err
+func warnUnnamed(tarballs []archivedTarball) {
+	for _, tarball := range tarballs {
+		if len(tarball.Names) == 0 {
+			logLine(fmt.Sprintf("image tarball %s has no readable image name, it is not imported or pinned", tarball.Path))
+		}
 	}
-	held := heldNames(images)
+}
+
+func settle(ctx context.Context, root string, store imageStore, tarballs []archivedTarball, images []storedImage) error {
 	var imported []archivedTarball
 	for _, tarball := range tarballs {
-		if len(tarball.Names) > 0 && containsAll(held, tarball.Names) {
+		if tarball.importedIn(images) {
 			imported = append(imported, tarball)
 		}
 	}
-	if err := unlinkTarballs(root, imported); err != nil {
+	if err := pinUnsettled(ctx, store, imported, images); err != nil {
 		return err
 	}
-	return pinUnpinned(ctx, store, imported, images)
+	return unlinkTarballs(root, imported)
 }
 
-func pinUnpinned(ctx context.Context, store imageStore, tarballs []archivedTarball, images []storedImage) error {
-	pinned := map[string]bool{}
+func pinUnsettled(ctx context.Context, store imageStore, tarballs []archivedTarball, images []storedImage) error {
+	done := map[string]bool{}
 	for _, image := range images {
-		pinned[image.Name] = image.Pinned
+		done[image.Name] = image.Pinned && !image.SourceLabeled
 	}
 	for _, tarball := range tarballs {
 		for _, name := range tarball.Names {
-			if pinned[name] {
+			if done[name] {
 				continue
 			}
 			if err := store.Pin(ctx, name); err != nil {
 				return fmt.Errorf("pin %s: %w", name, err)
 			}
-			pinned[name] = true
+			done[name] = true
 		}
 	}
 	return nil
 }
 
-func heldNames(images []storedImage) []string {
-	names := make([]string, 0, len(images))
+func unpinStale(ctx context.Context, store imageStore, before, after []archivedTarball) error {
+	stale := namesOfTarballs(before)
+	kept := namesOfTarballs(after)
+	images, err := store.List(ctx)
+	if err != nil {
+		return err
+	}
 	for _, image := range images {
-		names = append(names, image.Name)
+		if image.Pinned && slices.Contains(stale, image.Name) && !slices.Contains(kept, image.Name) {
+			if err := store.Unpin(ctx, image.Name); err != nil {
+				return fmt.Errorf("unpin %s: %w", image.Name, err)
+			}
+		}
+	}
+	return nil
+}
+
+func namesOfTarballs(tarballs []archivedTarball) []string {
+	var names []string
+	for _, tarball := range tarballs {
+		names = append(names, tarball.Names...)
 	}
 	return names
 }
 
-func tarballsMissingFrom(tarballs []archivedTarball, held []string) []archivedTarball {
+type importState struct {
+	LinkedAt  *time.Time `json:"linkedAt,omitempty"`
+	Attempts  int        `json:"attempts,omitempty"`
+	NextAt    *time.Time `json:"nextAt,omitempty"`
+	LastError string     `json:"lastError,omitempty"`
+}
+
+func advanceImport(deps Deps, tarballs []archivedTarball, images []storedImage) error {
 	var missing []archivedTarball
 	for _, tarball := range tarballs {
-		if len(tarball.Names) > 0 && !containsAll(held, tarball.Names) {
+		if len(tarball.Names) > 0 && !tarball.importedIn(images) {
 			missing = append(missing, tarball)
 		}
 	}
-	return missing
+	state := readImportState(deps.Root)
+	now := deps.Now()
+	switch {
+	case len(missing) == 0:
+		return writeImportState(deps.Root, importState{})
+	case state.LinkedAt != nil && now.Sub(*state.LinkedAt) > deps.K0sTimeout:
+		return failImport(deps, state, missing, now)
+	case state.LinkedAt != nil, state.NextAt != nil && now.Before(*state.NextAt):
+		return nil
+	}
+	if err := linkTarballs(deps.Root, missing); err != nil {
+		return err
+	}
+	state.LinkedAt = &now
+	return writeImportState(deps.Root, state)
 }
 
-func waitForImport(ctx context.Context, deps Deps, store imageStore, wanted []archivedTarball) error {
-	observed, err := waitClear(ctx, deps.K0sTimeout, deps.K0sPoll, func(probeCtx context.Context) string {
-		images, err := store.List(probeCtx)
-		if err != nil {
-			return err.Error()
-		}
-		held := heldNames(images)
-		for _, tarball := range wanted {
-			for _, name := range tarball.Names {
-				if !slices.Contains(held, name) {
-					return "image " + name + " is not imported"
-				}
-			}
-		}
-		return ""
-	})
+func failImport(deps Deps, state importState, missing []archivedTarball, now time.Time) error {
+	if err := unlinkTarballs(deps.Root, missing); err != nil {
+		return err
+	}
+	attempts := state.Attempts + 1
+	next := now.Add(min(importBackoffBase<<(attempts-1), importBackoffMax))
+	message := fmt.Sprintf("k0s did not import the linked images within %s: image %s is not imported", deps.K0sTimeout, missing[0].Names[0])
+	if err := writeImportState(deps.Root, importState{Attempts: attempts, NextAt: &next, LastError: message}); err != nil {
+		return err
+	}
+	return errors.New(message)
+}
+
+func importsCondition(deps Deps, generation int64) []metav1.Condition {
+	state := readImportState(deps.Root)
+	if state.LastError == "" {
+		return nil
+	}
+	return []metav1.Condition{condition(v1alpha1.ConditionImagesImported, metav1.ConditionFalse, "ImportFailed", state.LastError, generation)}
+}
+
+func readImportState(root string) importState {
+	raw, err := os.ReadFile(filepath.Join(root, importStateFile))
 	if err != nil {
-		return fmt.Errorf("k0s did not import the linked images within %s: %s: %w", deps.K0sTimeout, observed, err)
+		return importState{}
+	}
+	var state importState
+	if json.Unmarshal(raw, &state) != nil {
+		return importState{}
+	}
+	return state
+}
+
+func writeImportState(root string, state importState) error {
+	file := filepath.Join(root, importStateFile)
+	if state == (importState{}) {
+		return removeIfPresent(file)
+	}
+	raw, err := json.Marshal(state)
+	if err != nil {
+		return err
+	}
+	if err := os.MkdirAll(filepath.Dir(file), 0o755); err != nil {
+		return err
+	}
+	return os.WriteFile(file, raw, 0o644)
+}
+
+func removeIfPresent(file string) error {
+	if err := os.Remove(file); err != nil && !errors.Is(err, fs.ErrNotExist) {
+		return err
 	}
 	return nil
 }
 
+func readLinkRecord(root string) []string {
+	raw, err := os.ReadFile(filepath.Join(root, linkRecordFile))
+	if err != nil {
+		return nil
+	}
+	return strings.Fields(string(raw))
+}
+
+func writeLinkRecord(root string, names []string) error {
+	file := filepath.Join(root, linkRecordFile)
+	if len(names) == 0 {
+		return removeIfPresent(file)
+	}
+	if err := os.MkdirAll(filepath.Dir(file), 0o755); err != nil {
+		return err
+	}
+	return os.WriteFile(file, []byte(strings.Join(names, "\n")+"\n"), 0o644)
+}
+
+func recordLinks(root string, names []string) error {
+	recorded := readLinkRecord(root)
+	for _, name := range names {
+		recorded = appendMissing(recorded, name)
+	}
+	return writeLinkRecord(root, recorded)
+}
+
 func linkTarballs(root string, tarballs []archivedTarball) error {
+	names := make([]string, 0, len(tarballs))
+	for _, tarball := range tarballs {
+		names = append(names, tarball.linkName())
+	}
+	if err := recordLinks(root, names); err != nil {
+		return err
+	}
 	for _, tarball := range tarballs {
 		if err := os.MkdirAll(filepath.Join(root, k0sImagesDir), 0o755); err != nil {
 			return err
@@ -203,21 +354,38 @@ func linkTarballs(root string, tarballs []archivedTarball) error {
 }
 
 func unlinkTarballs(root string, tarballs []archivedTarball) error {
+	names := make([]string, 0, len(tarballs))
 	for _, tarball := range tarballs {
-		link := filepath.Join(root, k0sImagesDir, tarball.linkName())
-		linked, err := os.Stat(link)
-		if err != nil {
+		names = append(names, tarball.linkName())
+	}
+	return unlinkRecorded(root, names)
+}
+
+func removeOrphanLinks(root string, tarballs []archivedTarball) error {
+	var current []string
+	for _, tarball := range tarballs {
+		current = append(current, tarball.linkName())
+	}
+	var orphans []string
+	for _, name := range readLinkRecord(root) {
+		if !slices.Contains(current, name) {
+			orphans = append(orphans, name)
+		}
+	}
+	return unlinkRecorded(root, orphans)
+}
+
+func unlinkRecorded(root string, names []string) error {
+	recorded := readLinkRecord(root)
+	for _, name := range names {
+		if !slices.Contains(recorded, name) {
 			continue
 		}
-		archived, err := os.Stat(tarball.Path)
-		if err != nil || !os.SameFile(linked, archived) {
-			continue
-		}
-		if err := os.Remove(link); err != nil {
+		if err := removeIfPresent(filepath.Join(root, k0sImagesDir, name)); err != nil {
 			return err
 		}
 	}
-	return nil
+	return writeLinkRecord(root, slices.DeleteFunc(recorded, func(name string) bool { return slices.Contains(names, name) }))
 }
 
 func archivedTarballs(root string) ([]archivedTarball, error) {
@@ -313,11 +481,18 @@ func indexNames(in io.Reader) []string {
 	}
 	var names []string
 	for _, manifest := range index.Manifests {
-		if name := manifest.Annotations["io.containerd.image.name"]; name != "" {
+		if name := annotatedName(manifest.Annotations); name != "" {
 			names = append(names, name)
 		}
 	}
 	return names
+}
+
+func annotatedName(annotations map[string]string) string {
+	if name := annotations[containerdNames]; name != "" {
+		return name
+	}
+	return annotations[ociRefName]
 }
 
 func manifestNames(in io.Reader) []string {
@@ -329,7 +504,11 @@ func manifestNames(in io.Reader) []string {
 	}
 	var names []string
 	for _, manifest := range manifests {
-		names = append(names, manifest.RepoTags...)
+		for _, tag := range manifest.RepoTags {
+			if normalized, err := release.ContainerdNames(tag); err == nil {
+				names = append(names, normalized...)
+			}
+		}
 	}
 	return names
 }

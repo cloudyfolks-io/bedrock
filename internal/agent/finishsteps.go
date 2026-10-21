@@ -44,7 +44,7 @@ func prune(ctx context.Context, env StepEnv) (Outcome, error) {
 	if err != nil {
 		return Outcome{}, err
 	}
-	if err := retainArchive(deps.Root, env.Target.Spec.Version, archiveFileNames(env.Target.Spec.Images)); err != nil {
+	if err := retainAndUnpin(ctx, deps, env.Target.Spec.Version, archiveFileNames(releaseRefs(env.Target))); err != nil {
 		return Outcome{}, err
 	}
 	if err := removeUpgradeFiles(deps.Root, env.Upgrade.Spec.Version); err != nil {
@@ -61,7 +61,7 @@ func cleanup(ctx context.Context, env StepEnv) (Outcome, error) {
 	count, imagesErr := removeImages(ctx, deps, env.Target.Spec.Images, env.From.Spec.Images)
 	err := errors.Join(
 		imagesErr,
-		retainArchive(deps.Root, env.From.Spec.Version, archiveFileNames(env.From.Spec.Images)),
+		retainAndUnpin(ctx, deps, env.From.Spec.Version, archiveFileNames(releaseRefs(env.From))),
 		removeUpgradeFiles(deps.Root, env.Upgrade.Spec.Version),
 		removePreRestoreData(deps.Root),
 	)
@@ -69,6 +69,24 @@ func cleanup(ctx context.Context, env StepEnv) (Outcome, error) {
 		return Outcome{}, err
 	}
 	return Outcome{Message: fmt.Sprintf("removed %d images", count)}, nil
+}
+
+func retainAndUnpin(ctx context.Context, deps Deps, keepVersion string, keepFiles []string) error {
+	before, err := archivedTarballs(deps.Root)
+	if err != nil {
+		return err
+	}
+	if err := retainArchive(deps.Root, keepVersion, keepFiles); err != nil {
+		return err
+	}
+	if !runsContainers(deps.Root) {
+		return nil
+	}
+	after, err := archivedTarballs(deps.Root)
+	if err != nil {
+		return err
+	}
+	return unpinStale(ctx, ctrStore{exec: deps.Exec, timeout: ctrCallTimeout}, before, after)
 }
 
 func removeImages(ctx context.Context, deps Deps, drop, keep []string) (int, error) {
