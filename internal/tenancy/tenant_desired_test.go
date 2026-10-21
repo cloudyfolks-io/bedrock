@@ -258,3 +258,27 @@ func TestOwnerRoleTouchesNoPlatformKinds(t *testing.T) {
 		}
 	}
 }
+
+func TestDesiredNetworkCarriesTheTenantVrfID(t *testing.T) {
+	tenant := acmeTenant()
+	tenant.Spec.Network.VrfID = ptr.To(int32(1500))
+	if got := DesiredNetwork(tenant, nil); got.Spec.VrfID == nil || *got.Spec.VrfID != 1500 {
+		t.Fatalf("vrfId = %v", got.Spec.VrfID)
+	}
+	if got := DesiredNetwork(acmeTenant(), nil); got.Spec.VrfID != nil {
+		t.Fatalf("an unset tenant vrfId must stay unset: %v", got.Spec.VrfID)
+	}
+}
+
+func TestDesiredNetworkKeepsTheVrfIDOfAnExistingNetwork(t *testing.T) {
+	tenant := acmeTenant()
+	tenant.Spec.Network.VrfID = ptr.To(int32(1500))
+	late := v1alpha1.Network{ObjectMeta: metav1.ObjectMeta{Name: "acme"}, Spec: v1alpha1.NetworkSpec{TenantRef: "acme", CIDRs: []string{"10.100.0.0/16"}}}
+	if got := DesiredNetwork(tenant, &late); got.Spec.VrfID != nil {
+		t.Fatalf("a vrfId cannot be added to an existing Network: %v", got.Spec.VrfID)
+	}
+	pinned := v1alpha1.Network{ObjectMeta: metav1.ObjectMeta{Name: "acme"}, Spec: v1alpha1.NetworkSpec{TenantRef: "acme", CIDRs: []string{"10.100.0.0/16"}, VrfID: ptr.To(int32(1500))}}
+	if got := DesiredNetwork(acmeTenant(), &pinned); got.Spec.VrfID == nil || *got.Spec.VrfID != 1500 {
+		t.Fatalf("the vrfId of an existing Network must stay: %v", got.Spec.VrfID)
+	}
+}
