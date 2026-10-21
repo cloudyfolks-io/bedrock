@@ -164,12 +164,13 @@ func TestCleanupTriesEveryRemovalAfterAFailure(t *testing.T) {
 	env, container := finishEnv(t, namesOf(t, oldOnly, newOnly, shared, retagged))
 	container.failures["/usr/local/bin/k0s ctr --namespace k8s.io images ls --quiet"] = errors.New("containerd is down")
 	root := env.Deps.Root
-	writeImageTarball(t, root, "k0s-airgap-v0.3.0.tar")
+	writeArchived(t, root, "v0.2.0", "k0s-airgap.tar")
+	writeArchived(t, root, "v0.3.0", "k0s-airgap.tar")
 	writeFixtureFile(t, filepath.Join(root, "var/lib/k0s/.pre-restore-20261001T110000Z/etcd/data"), "old etcd")
 	if _, err := cleanup(context.Background(), env); err == nil || !strings.Contains(err.Error(), "containerd is down") {
 		t.Fatalf("error %v", err)
 	}
-	for _, path := range []string{"var/lib/k0s/images/k0s-airgap-v0.3.0.tar", "var/lib/bedrock/staged/v0.3.0", "var/lib/bedrock/previous/k0s", "var/lib/k0s/.pre-restore-20261001T110000Z"} {
+	for _, path := range []string{"var/lib/bedrock/images/v0.3.0", "var/lib/bedrock/staged/v0.3.0", "var/lib/bedrock/previous/k0s", "var/lib/k0s/.pre-restore-20261001T110000Z"} {
 		if _, err := os.Stat(filepath.Join(root, path)); !os.IsNotExist(err) {
 			t.Fatalf("%s must be removed although the image removal failed", path)
 		}
@@ -181,51 +182,57 @@ func writeImageTarball(t *testing.T, root, name string) {
 	writeFixtureFile(t, filepath.Join(root, k0sImagesDir, name), "tar")
 }
 
-func TestPruneRemovesOldImageTarballsAndAirgapKeepsTarget(t *testing.T) {
+func writeArchived(t *testing.T, root, version string, names ...string) {
+	t.Helper()
+	for _, name := range names {
+		writeFixtureFile(t, archiveFile(root, version, name), "tar")
+	}
+}
+
+func TestPruneKeepsTargetTarballsCarriesSharedOnesAndDropsTheOldVersion(t *testing.T) {
 	env, _ := finishEnv(t, nil)
 	root := env.Deps.Root
-	writeImageTarball(t, root, release.ImageFileName(oldOnly))
-	writeImageTarball(t, root, release.ImageFileName(shared))
-	writeImageTarball(t, root, release.ImageFileName(newOnly))
-	writeImageTarball(t, root, release.ImageFileName(retagged))
-	writeImageTarball(t, root, "k0s-airgap.tar")
-	writeImageTarball(t, root, "k0s-airgap-v0.2.0.tar")
-	writeImageTarball(t, root, "k0s-airgap-v0.3.0.tar")
+	writeArchived(t, root, "v0.2.0", release.ImageFileName(oldOnly), release.ImageFileName(shared), "k0s-airgap.tar")
+	writeArchived(t, root, "v0.3.0", release.ImageFileName(newOnly), release.ImageFileName(retagged), "k0s-airgap.tar")
 	if _, err := prune(context.Background(), env); err != nil {
 		t.Fatal(err)
 	}
-	for _, gone := range []string{release.ImageFileName(oldOnly), release.ImageFileName(shared), "k0s-airgap.tar", "k0s-airgap-v0.2.0.tar"} {
-		if _, err := os.Stat(filepath.Join(root, k0sImagesDir, gone)); !os.IsNotExist(err) {
-			t.Fatalf("%s must be removed", gone)
-		}
+	if exists(filepath.Join(root, archiveDir, "v0.2.0")) {
+		t.Fatal("the old version must leave the archive")
 	}
-	for _, kept := range []string{release.ImageFileName(newOnly), release.ImageFileName(retagged), "k0s-airgap-v0.3.0.tar"} {
-		if _, err := os.Stat(filepath.Join(root, k0sImagesDir, kept)); err != nil {
-			t.Fatalf("%s must be kept: %v", kept, err)
+	for _, kept := range []string{release.ImageFileName(newOnly), release.ImageFileName(retagged), "k0s-airgap.tar"} {
+		if !exists(archiveFile(root, "v0.3.0", kept)) {
+			t.Fatalf("%s must be kept", kept)
 		}
 	}
 }
 
-func TestCleanupRemovesTargetOnlyTarballsKeepsFromAndBaseAirgap(t *testing.T) {
+func TestPruneKeepsTheOldVersionWhenTheTargetIsNotArchived(t *testing.T) {
 	env, _ := finishEnv(t, nil)
 	root := env.Deps.Root
-	writeImageTarball(t, root, release.ImageFileName(oldOnly))
-	writeImageTarball(t, root, release.ImageFileName(shared))
-	writeImageTarball(t, root, release.ImageFileName(newOnly))
-	writeImageTarball(t, root, release.ImageFileName(retagged))
-	writeImageTarball(t, root, "k0s-airgap.tar")
-	writeImageTarball(t, root, "k0s-airgap-v0.3.0.tar")
+	writeArchived(t, root, "v0.2.0", release.ImageFileName(oldOnly))
+	if _, err := prune(context.Background(), env); err != nil {
+		t.Fatal(err)
+	}
+	if !exists(archiveFile(root, "v0.2.0", release.ImageFileName(oldOnly))) {
+		t.Fatal("the last copy of a tarball must stay")
+	}
+}
+
+func TestCleanupDropsTheTargetVersionAndKeepsTheOldOne(t *testing.T) {
+	env, _ := finishEnv(t, nil)
+	root := env.Deps.Root
+	writeArchived(t, root, "v0.2.0", release.ImageFileName(oldOnly), release.ImageFileName(shared), "k0s-airgap.tar")
+	writeArchived(t, root, "v0.3.0", release.ImageFileName(newOnly), release.ImageFileName(retagged), "k0s-airgap.tar")
 	if _, err := cleanup(context.Background(), env); err != nil {
 		t.Fatal(err)
 	}
-	for _, gone := range []string{release.ImageFileName(newOnly), release.ImageFileName(retagged), "k0s-airgap-v0.3.0.tar"} {
-		if _, err := os.Stat(filepath.Join(root, k0sImagesDir, gone)); !os.IsNotExist(err) {
-			t.Fatalf("%s must be removed", gone)
-		}
+	if exists(filepath.Join(root, archiveDir, "v0.3.0")) {
+		t.Fatal("the target version must leave the archive")
 	}
 	for _, kept := range []string{release.ImageFileName(oldOnly), release.ImageFileName(shared), "k0s-airgap.tar"} {
-		if _, err := os.Stat(filepath.Join(root, k0sImagesDir, kept)); err != nil {
-			t.Fatalf("%s must be kept: %v", kept, err)
+		if !exists(archiveFile(root, "v0.2.0", kept)) {
+			t.Fatalf("%s must be kept", kept)
 		}
 	}
 }

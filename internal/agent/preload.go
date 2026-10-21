@@ -99,27 +99,23 @@ func preloadImages(ctx context.Context, deps Deps, bundleURL, dir string, wanted
 			files = append(files, image.File)
 		}
 	}
-	imagesDir := filepath.Join(deps.Root, k0sImagesDir)
+	archive := archiveVersionDir(deps.Root, spec.Version)
 	for _, file := range files {
 		staged := filepath.Join(dir, file)
 		if err := importImage(ctx, deps, bundleURL+"/images/"+file, staged); err != nil {
 			return 0, err
 		}
-		if err := keepTarball(staged, filepath.Join(imagesDir, tarballName(file, spec.Version))); err != nil {
+		if err := keepTarball(staged, filepath.Join(archive, file)); err != nil {
 			return 0, err
 		}
+	}
+	if err := keepTarball(manifest, filepath.Join(archive, release.BundleFileName)); err != nil {
+		return 0, err
 	}
 	if err := os.RemoveAll(dir); err != nil {
 		return 0, err
 	}
 	return len(wanted), requireImages(ctx, deps.Exec, wanted)
-}
-
-func tarballName(file, version string) string {
-	if file == airgapFile {
-		return versionedAirgap(version)
-	}
-	return file
 }
 
 func keepTarball(staged, dest string) error {

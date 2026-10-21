@@ -55,6 +55,9 @@ func Run(ctx context.Context, c client.WithWatch, deps Deps) error {
 	if err := removeStaleLeftovers(deps.Root, deps.Now()); err != nil {
 		logLine(fmt.Sprintf("stale backup files: %v", err))
 	}
+	if err := adoptK0sImages(deps.Root, deps.Version); err != nil {
+		logLine(fmt.Sprintf("image archive: %v", err))
+	}
 	if _, err := ensureHostKey(deps.Root, logLine); err != nil {
 		logLine(fmt.Sprintf("host backup key: %v", err))
 	}
