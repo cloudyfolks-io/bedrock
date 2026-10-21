@@ -49,6 +49,21 @@ kubectl -n acme-prod get secret app-s3 -o jsonpath='{.data.SecretKey}' | base64 
 
 The store user id is `<namespace>.<name>`. Two projects can use the same user name.
 
+### Adopt an existing user
+
+An administrator can bind a user to an RGW user that exists already, so the S3 keys of the customer stay the same.
+Set the annotation `bedrock.cloudyfolks.io/adopt-rgw-user: <RGW user name>` on the `ObjectStorageUser` when you create it.
+Only `bedrock:bedrock-admins` can set it, only at the create, and it cannot change afterwards.
+Bedrock proves the ownership before it acts.
+The account of the project must hold the user, which Bedrock checks with the IAM call `GetUser` and the root key of that account.
+No other object may hold the Rook user of that name.
+If the account holds no such user, the condition `Ready` shows `AdoptUserNotFound`.
+If another object holds the user, it shows `UserClaimed`.
+In both cases Bedrock changes nothing.
+After the proof, Bedrock makes the Rook user with the name of the RGW user, keeps its access keys, and writes them into the Secret `<name>-s3` as always.
+`status.arn` and the inline policy use the RGW user name.
+Deleting the object deletes the RGW user and its keys.
+
 ### The principal
 
 `status.arn` holds the IAM principal of the user.
@@ -148,6 +163,14 @@ Bedrock never exposes the admin API.
 
 Delete a user to remove its keys and its policy.
 A project keeps its account until you delete the project.
+
+An administrator can make a project take over an account that exists already, for example an account of an older install named `<env>-<project>`.
+Set the annotation `bedrock.cloudyfolks.io/object-storage-account: <account name>` on the namespace of the project, before the first bucket or user.
+Only `bedrock:bedrock-admins` can set it, and it cannot change afterwards.
+Bedrock writes the name into the Rook account.
+If another project holds that account name, the condition `Ready` of every bucket and user shows `AccountNameTaken`, and Bedrock makes no object.
+A bucket that this account owns passes the ownership proof of Bedrock, because the proof reads the owner of the bucket and compares it with the account of the project.
+So its name does not give `NameTaken`.
 
 A bucket with objects stays in `Terminating`.
 Its condition `Ready` shows the reason `NotEmpty` and the number of objects.
