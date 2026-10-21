@@ -72,6 +72,8 @@ type RegistryStatus struct {
 	HardBytes int64 `json:"hardBytes,omitempty"`
 	// +optional
 	RepositoryCount int64 `json:"repositoryCount,omitempty"`
+	// +optional
+	RetentionApplied bool `json:"retentionApplied,omitempty"`
 }
 
 // +kubebuilder:object:root=true

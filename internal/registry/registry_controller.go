@@ -55,6 +55,7 @@ type facts struct {
 	projectName string
 	projectID   int64
 	summary     *harbor.Summary
+	retention   *bool
 	host        string
 }
 
@@ -139,9 +140,11 @@ func (r *RegistryReconciler) converge(ctx context.Context, reg *v1alpha1.Registr
 	if got.summary != nil {
 		got.summary.HardBytes = harbor.QuotaBytes(quotaGB(reg, rules))
 	}
-	if err := applyRetention(ctx, hc, name, reg.Spec.Retention); err != nil {
+	applied, err := applyRetention(ctx, hc, name, reg.Spec.Retention, reg.Status.RetentionApplied)
+	if err != nil {
 		return got, result{}, err
 	}
+	got.retention = &applied
 	if out, err := r.applyWebhook(ctx, reg, hc, name); err != nil || out.reason != "" {
 		return got, out, err
 	}
@@ -218,18 +221,21 @@ func (r *RegistryReconciler) applyQuota(ctx context.Context, hc *harbor.Client, 
 	return hc.SetQuota(ctx, name, gb)
 }
 
-func applyRetention(ctx context.Context, hc *harbor.Client, name string, spec *v1alpha1.RegistryRetention) error {
+func applyRetention(ctx context.Context, hc *harbor.Client, name string, spec *v1alpha1.RegistryRetention, applied bool) (bool, error) {
+	if spec == nil && !applied {
+		return false, nil
+	}
 	if !hasRetention(spec) {
 		existing, err := hc.GetRetention(ctx, name)
 		if err != nil || existing == nil || len(existing.Rules) == 0 {
-			return err
+			return false, err
 		}
 	}
 	retention, err := harbor.BuildRetention(retentionInput(spec))
 	if err != nil {
-		return err
+		return false, err
 	}
-	return hc.SetRetention(ctx, name, retention)
+	return hasRetention(spec), hc.SetRetention(ctx, name, retention)
 }
 
 func (r *RegistryReconciler) applyWebhook(ctx context.Context, reg *v1alpha1.Registry, hc *harbor.Client, name string) (result, error) {
@@ -437,6 +443,9 @@ func (r *RegistryReconciler) writeStatus(ctx context.Context, reg *v1alpha1.Regi
 		}
 		if got.projectID != 0 {
 			current.ProjectID = got.projectID
+		}
+		if got.retention != nil {
+			current.RetentionApplied = *got.retention
 		}
 		if got.summary != nil {
 			current.UsedBytes, current.HardBytes, current.RepositoryCount = got.summary.UsedBytes, got.summary.HardBytes, got.summary.RepositoryCount
