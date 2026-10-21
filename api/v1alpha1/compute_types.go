@@ -33,6 +33,7 @@ const (
 )
 
 // +kubebuilder:validation:XValidation:rule="has(self.volumeRef) ? (!has(self.sizeGi) && !has(self.storageClass)) : has(self.sizeGi)",message="rootDisk.sizeGi is required without rootDisk.volumeRef, and rootDisk.volumeRef excludes sizeGi and storageClass"
+// +kubebuilder:validation:XValidation:rule="!has(oldSelf.serial) || (has(self.serial) && self.serial == oldSelf.serial)",message="rootDisk.serial is immutable"
 type VMRootDisk struct {
 	// +kubebuilder:validation:Minimum=1
 	// +kubebuilder:validation:XValidation:rule="self >= oldSelf",message="rootDisk.sizeGi can only grow"
@@ -46,6 +47,10 @@ type VMRootDisk struct {
 	// +kubebuilder:validation:Pattern=`^[a-z0-9]([-a-z0-9.]*[a-z0-9])?$`
 	// +optional
 	VolumeRef string `json:"volumeRef,omitempty"`
+	// +kubebuilder:validation:MaxLength=36
+	// +kubebuilder:validation:Pattern=`^[A-Za-z0-9._-]+$`
+	// +optional
+	Serial string `json:"serial,omitempty"`
 }
 
 type VMDisk struct {

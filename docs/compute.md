@@ -312,6 +312,9 @@ Without them KubeVirt derives the UUID from the VM name.
 `disks[].serial` sets the serial number of one disk.
 Without it the serial is a fixed value that the operator derives from the Volume name.
 A serial has at most 36 characters.
+`rootDisk.serial` sets the serial number of the root disk with the same rules.
+It cannot change after it is set.
+Without it the guest sees a serial that KubeVirt derives from the disk name.
 It can hold letters, digits, dot, underscore and dash.
 A change applies at the next start of the VM.
 
