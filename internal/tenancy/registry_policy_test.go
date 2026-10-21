@@ -265,3 +265,19 @@ func TestRegistryAnnotationGuardHoldsWithoutTheNameRules(t *testing.T) {
 	}
 	mustCreate(t, root, namedRegistry("adopted-by-admin", "acme-admin", map[string]string{"bedrock.cloudyfolks.io/adopt": "true"}))
 }
+
+func namedRobotCredentialOf(name, robotName string) *v1alpha1.RegistryCredential {
+	credential := namedCredential(name, nil)
+	credential.Spec.RobotName = robotName
+	return credential
+}
+
+func TestNonAdminCannotNameAPlatformRobot(t *testing.T) {
+	_, alice, root := credentialWorld(t)
+	err := alice.Create(context.Background(), namedRobotCredentialOf("ci", "platform-pull"))
+	if !apierrors.IsForbidden(err) || !strings.Contains(err.Error(), platformCredentialMessage) {
+		t.Fatalf("err = %v", err)
+	}
+	mustCreate(t, alice, namedRobotCredentialOf("fine", "key-ci"))
+	mustCreate(t, root, namedRobotCredentialOf("platform-by-admin", "platform-pull"))
+}

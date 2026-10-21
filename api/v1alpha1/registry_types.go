@@ -107,6 +107,10 @@ type RegistryCredentialSpec struct {
 	RegistryRef RegistryReference `json:"registryRef"`
 	// +kubebuilder:validation:Enum=pull;pushPull;manage
 	Permission string `json:"permission"`
+	// +kubebuilder:validation:Pattern=`^[a-z0-9]+([._-][a-z0-9]+)*$`
+	// +kubebuilder:validation:MaxLength=100
+	// +optional
+	RobotName string `json:"robotName,omitempty"`
 }
 
 type RegistryCredentialStatus struct {

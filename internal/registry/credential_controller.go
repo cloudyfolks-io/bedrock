@@ -33,6 +33,7 @@ import (
 const (
 	reasonRegistryMissing  = "RegistryNotFound"
 	reasonRegistryNotReady = "RegistryNotReady"
+	reasonRobotClaimed     = "RobotClaimed"
 	credentialRequeue      = 10 * time.Minute
 	robotSecretLength      = 32
 	dockerConfigKey        = ".dockerconfigjson"
@@ -54,6 +55,13 @@ func (r *CredentialReconciler) random() io.Reader {
 		return r.Random
 	}
 	return rand.Reader
+}
+
+func robotNameOf(credential *v1alpha1.RegistryCredential) string {
+	if credential.Spec.RobotName != "" {
+		return credential.Spec.RobotName
+	}
+	return credential.Name
 }
 
 func SecretName(credential *v1alpha1.RegistryCredential) string {
@@ -116,8 +124,8 @@ func (r *CredentialReconciler) reconcileRobot(ctx context.Context, credential *v
 
 func (r *CredentialReconciler) ensureRobot(ctx context.Context, credential *v1alpha1.RegistryCredential, registry *v1alpha1.Registry, hc *harbor.Client, project string) (robotFacts, result, error) {
 	got := robotFacts{robotID: credential.Status.RobotID, robotName: credential.Status.RobotName, username: credential.Status.Username, secretReset: credential.Status.SecretReset, secretName: credential.Status.SecretName}
-	owned := credential.Status.RobotName == credential.Name
-	robot, found, err := hc.FindRobot(ctx, project, credential.Name)
+	owned := credential.Status.RobotName == robotNameOf(credential)
+	robot, found, err := hc.FindRobot(ctx, project, robotNameOf(credential))
 	if err != nil {
 		return got, result{}, err
 	}
@@ -125,30 +133,33 @@ func (r *CredentialReconciler) ensureRobot(ctx context.Context, credential *v1al
 	case found && owned && claimed(credential.Status.RobotID, robot.ID, credential.Status.RobotMarkedAt, robot.Created):
 		return r.healRobot(ctx, credential, registry, hc, got, robot)
 	case found && adopting(credential):
+		if holder, err := r.holderOf(ctx, credential, robot.ID); err != nil || holder != "" {
+			return got, result{reason: reasonRobotClaimed, message: "the Harbor robot " + robotNameOf(credential) + " is held by the credential " + holder, requeue: credentialRequeue}, err
+		}
 		return r.takeOver(ctx, credential, registry, hc, got, robot)
 	case found:
-		return got, result{reason: reasonNameTaken, message: "the Harbor robot " + credential.Name + " exists in the project; set the annotation " + AnnotationAdopt + " (administrators only) to adopt it", requeue: credentialRequeue}, nil
+		return got, result{reason: reasonNameTaken, message: "the Harbor robot " + robotNameOf(credential) + " exists in the project; set the annotation " + AnnotationAdopt + " (administrators only) to adopt it", requeue: credentialRequeue}, nil
 	}
 	return r.createRobot(ctx, credential, registry, hc, got, project, owned)
 }
 
 func (r *CredentialReconciler) createRobot(ctx context.Context, credential *v1alpha1.RegistryCredential, registry *v1alpha1.Registry, hc *harbor.Client, got robotFacts, project string, owned bool) (robotFacts, result, error) {
 	if !owned {
-		if err := r.recordRobot(ctx, credential, credential.Name, 0); err != nil {
+		if err := r.recordRobot(ctx, credential, robotNameOf(credential), 0); err != nil {
 			return got, result{}, err
 		}
 	}
-	robot, secret, err := hc.CreateRobot(ctx, project, credential.Name, credential.Spec.Permission)
+	robot, secret, err := hc.CreateRobot(ctx, project, robotNameOf(credential), credential.Spec.Permission)
 	if errors.Is(err, harbor.ErrConflict) {
-		return got, result{reason: reasonNameTaken, message: "the Harbor robot " + credential.Name + " exists in the project", requeue: credentialRequeue}, r.forgetUnlessOwned(ctx, credential, owned)
+		return got, result{reason: reasonNameTaken, message: "the Harbor robot " + robotNameOf(credential) + " exists in the project", requeue: credentialRequeue}, r.forgetUnlessOwned(ctx, credential, owned)
 	}
 	if err != nil {
 		return got, result{}, errors.Join(err, r.forgetUnlessOwned(ctx, credential, owned))
 	}
-	if err := r.recordRobot(ctx, credential, credential.Name, robot.ID); err != nil {
+	if err := r.recordRobot(ctx, credential, robotNameOf(credential), robot.ID); err != nil {
 		return got, result{}, err
 	}
-	got.robotName, got.robotID, got.username = credential.Name, robot.ID, robot.Name
+	got.robotName, got.robotID, got.username = robotNameOf(credential), robot.ID, robot.Name
 	got.secretReset = credential.Annotations[AnnotationResetSecret]
 	return r.writeSecret(ctx, credential, registry, got, secret)
 }
@@ -160,15 +171,29 @@ func (r *CredentialReconciler) forgetUnlessOwned(ctx context.Context, credential
 	return r.recordRobot(ctx, credential, "", 0)
 }
 
+func (r *CredentialReconciler) holderOf(ctx context.Context, credential *v1alpha1.RegistryCredential, robotID int64) (string, error) {
+	var all v1alpha1.RegistryCredentialList
+	if err := r.Client.List(ctx, &all); err != nil {
+		return "", err
+	}
+	for i := range all.Items {
+		other := &all.Items[i]
+		if client.ObjectKeyFromObject(other) != client.ObjectKeyFromObject(credential) && other.Status.RobotID == robotID {
+			return other.Namespace + "/" + other.Name, nil
+		}
+	}
+	return "", nil
+}
+
 func (r *CredentialReconciler) takeOver(ctx context.Context, credential *v1alpha1.RegistryCredential, registry *v1alpha1.Registry, hc *harbor.Client, got robotFacts, robot harbor.Robot) (robotFacts, result, error) {
-	if err := r.recordRobot(ctx, credential, credential.Name, robot.ID); err != nil {
+	if err := r.recordRobot(ctx, credential, robotNameOf(credential), robot.ID); err != nil {
 		return got, result{}, err
 	}
 	return r.resetRobot(ctx, credential, registry, hc, got, robot)
 }
 
 func (r *CredentialReconciler) healRobot(ctx context.Context, credential *v1alpha1.RegistryCredential, registry *v1alpha1.Registry, hc *harbor.Client, got robotFacts, robot harbor.Robot) (robotFacts, result, error) {
-	got.robotName, got.robotID, got.username = credential.Name, robot.ID, robot.Name
+	got.robotName, got.robotID, got.username = robotNameOf(credential), robot.ID, robot.Name
 	requested := credential.Annotations[AnnotationResetSecret]
 	if requested != credential.Status.SecretReset || !r.secretIsValid(ctx, credential, robot.Name, registry.Status.Host) {
 		return r.resetRobot(ctx, credential, registry, hc, got, robot)
@@ -184,7 +209,7 @@ func (r *CredentialReconciler) resetRobot(ctx context.Context, credential *v1alp
 	if err := hc.SetRobotSecret(ctx, robot.ID, secret); err != nil {
 		return got, result{}, err
 	}
-	got.robotName, got.robotID, got.username = credential.Name, robot.ID, robot.Name
+	got.robotName, got.robotID, got.username = robotNameOf(credential), robot.ID, robot.Name
 	got.secretReset = credential.Annotations[AnnotationResetSecret]
 	return r.writeSecret(ctx, credential, registry, got, secret)
 }
@@ -247,7 +272,7 @@ func (r *CredentialReconciler) finalize(ctx context.Context, credential *v1alpha
 	if !controllerutil.ContainsFinalizer(credential, platform.Finalizer("RegistryCredential")) {
 		return ctrl.Result{}, nil
 	}
-	if credential.Status.RobotName != credential.Name {
+	if credential.Status.RobotName != robotNameOf(credential) {
 		return ctrl.Result{}, r.updateFinalizers(ctx, credential, controllerutil.RemoveFinalizer)
 	}
 	hc, unavailable, err := r.connector().Harbor(ctx)
@@ -278,7 +303,7 @@ func (r *CredentialReconciler) deleteOwnRobot(ctx context.Context, credential *v
 		if err != nil {
 			return err
 		}
-		robot, found, err := hc.FindRobot(ctx, registry.Status.ProjectName, credential.Name)
+		robot, found, err := hc.FindRobot(ctx, registry.Status.ProjectName, robotNameOf(credential))
 		if err != nil && !errors.Is(err, harbor.ErrNotFound) {
 			return err
 		}
