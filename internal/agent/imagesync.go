@@ -144,7 +144,9 @@ func syncImages(ctx context.Context, deps Deps, store imageStore) error {
 	if len(tarballs) == 0 {
 		return nil
 	}
-	warnUnnamed(tarballs)
+	for _, path := range newUnnamedWarnings(deps.Root, tarballs) {
+		logLine(fmt.Sprintf("image tarball %s has no readable image name, it is not imported or pinned", path))
+	}
 	images, err := store.List(ctx)
 	if err != nil {
 		return err
@@ -155,12 +157,18 @@ func syncImages(ctx context.Context, deps Deps, store imageStore) error {
 	return advanceImport(deps, tarballs, images)
 }
 
-func warnUnnamed(tarballs []archivedTarball) {
+func newUnnamedWarnings(root string, tarballs []archivedTarball) []string {
+	warned := readLines(root, unnamedRecordFile)
+	var fresh []string
 	for _, tarball := range tarballs {
-		if len(tarball.Names) == 0 {
-			logLine(fmt.Sprintf("image tarball %s has no readable image name, it is not imported or pinned", tarball.Path))
+		if len(tarball.Names) == 0 && !slices.Contains(warned, tarball.Path) {
+			fresh = append(fresh, tarball.Path)
 		}
 	}
+	if len(fresh) > 0 {
+		writeLines(root, unnamedRecordFile, append(warned, fresh...))
+	}
+	return fresh
 }
 
 func settle(ctx context.Context, root string, store imageStore, tarballs []archivedTarball, images []storedImage) error {
@@ -256,12 +264,16 @@ func failImport(deps Deps, state importState, missing []archivedTarball, now tim
 		return err
 	}
 	attempts := state.Attempts + 1
-	next := now.Add(min(importBackoffBase<<(attempts-1), importBackoffMax))
+	next := now.Add(importBackoff(attempts))
 	message := fmt.Sprintf("k0s did not import the linked images within %s: image %s is not imported", deps.K0sTimeout, missing[0].Names[0])
 	if err := writeImportState(deps.Root, importState{Attempts: attempts, NextAt: &next, LastError: message}); err != nil {
 		return err
 	}
 	return errors.New(message)
+}
+
+func importBackoff(attempts int) time.Duration {
+	return min(importBackoffBase<<min(max(attempts-1, 0), 6), importBackoffMax)
 }
 
 func importsCondition(deps Deps, generation int64) []metav1.Condition {
@@ -306,23 +318,31 @@ func removeIfPresent(file string) error {
 	return nil
 }
 
-func readLinkRecord(root string) []string {
-	raw, err := os.ReadFile(filepath.Join(root, linkRecordFile))
+func readLines(root, name string) []string {
+	raw, err := os.ReadFile(filepath.Join(root, name))
 	if err != nil {
 		return nil
 	}
-	return strings.Fields(string(raw))
+	return strings.Split(strings.TrimSpace(string(raw)), "\n")
 }
 
-func writeLinkRecord(root string, names []string) error {
-	file := filepath.Join(root, linkRecordFile)
-	if len(names) == 0 {
+func writeLines(root, name string, lines []string) error {
+	file := filepath.Join(root, name)
+	if len(lines) == 0 {
 		return removeIfPresent(file)
 	}
 	if err := os.MkdirAll(filepath.Dir(file), 0o755); err != nil {
 		return err
 	}
-	return os.WriteFile(file, []byte(strings.Join(names, "\n")+"\n"), 0o644)
+	return os.WriteFile(file, []byte(strings.Join(lines, "\n")+"\n"), 0o644)
+}
+
+func readLinkRecord(root string) []string {
+	return slices.DeleteFunc(readLines(root, linkRecordFile), func(name string) bool { return name == "" })
+}
+
+func writeLinkRecord(root string, names []string) error {
+	return writeLines(root, linkRecordFile, names)
 }
 
 func recordLinks(root string, names []string) error {
@@ -355,10 +375,12 @@ func linkTarballs(root string, tarballs []archivedTarball) error {
 
 func unlinkTarballs(root string, tarballs []archivedTarball) error {
 	names := make([]string, 0, len(tarballs))
+	twins := map[string]string{}
 	for _, tarball := range tarballs {
 		names = append(names, tarball.linkName())
+		twins[tarball.linkName()] = tarball.Path
 	}
-	return unlinkRecorded(root, names)
+	return unlinkRecorded(root, names, twins)
 }
 
 func removeOrphanLinks(root string, tarballs []archivedTarball) error {
@@ -372,20 +394,41 @@ func removeOrphanLinks(root string, tarballs []archivedTarball) error {
 			orphans = append(orphans, name)
 		}
 	}
-	return unlinkRecorded(root, orphans)
+	return unlinkRecorded(root, orphans, nil)
 }
 
-func unlinkRecorded(root string, names []string) error {
+func unlinkRecorded(root string, names []string, twins map[string]string) error {
 	recorded := readLinkRecord(root)
+	var removed []string
 	for _, name := range names {
 		if !slices.Contains(recorded, name) {
 			continue
 		}
-		if err := removeIfPresent(filepath.Join(root, k0sImagesDir, name)); err != nil {
+		link := filepath.Join(root, k0sImagesDir, name)
+		if twin, known := twins[name]; known && !isCopyOf(link, twin) {
+			continue
+		}
+		if err := removeIfPresent(link); err != nil {
 			return err
 		}
+		removed = append(removed, name)
 	}
-	return writeLinkRecord(root, slices.DeleteFunc(recorded, func(name string) bool { return slices.Contains(names, name) }))
+	return writeLinkRecord(root, slices.DeleteFunc(recorded, func(name string) bool { return slices.Contains(removed, name) }))
+}
+
+func isCopyOf(link, twin string) bool {
+	info, err := os.Lstat(link)
+	if errors.Is(err, fs.ErrNotExist) {
+		return true
+	}
+	if err != nil {
+		return false
+	}
+	if info.Mode()&os.ModeSymlink != 0 {
+		return true
+	}
+	same, err := sameContent(link, twin)
+	return err == nil && same
 }
 
 func archivedTarballs(root string) ([]archivedTarball, error) {

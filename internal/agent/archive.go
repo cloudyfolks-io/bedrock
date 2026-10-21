@@ -203,6 +203,24 @@ func isArchivedFile(path string, archived []os.FileInfo) bool {
 	return slices.ContainsFunc(archived, func(other os.FileInfo) bool { return os.SameFile(info, other) })
 }
 
+func settleArchive(root, keepVersion string, keepFiles []string) error {
+	if err := os.MkdirAll(archiveVersionDir(root, keepVersion), 0o755); err != nil {
+		return err
+	}
+	return retainArchive(root, keepVersion, keepFiles)
+}
+
+func retainedTarballs(before []archivedTarball, keepVersion string, keepFiles []string) []archivedTarball {
+	var kept []archivedTarball
+	for _, tarball := range before {
+		carried := tarball.Version != keepVersion && tarball.File != airgapFile && tarball.File != release.BundleFileName
+		if slices.Contains(keepFiles, tarball.File) && (tarball.Version == keepVersion || carried) {
+			kept = append(kept, tarball)
+		}
+	}
+	return kept
+}
+
 func retainArchive(root, keepVersion string, keepFiles []string) error {
 	base := filepath.Join(root, archiveDir)
 	keepDir := archiveVersionDir(root, keepVersion)
