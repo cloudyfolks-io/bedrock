@@ -20,7 +20,7 @@ The condition `Ready` shows the reason `NotInProject`.
 |---|---|
 | `image` | The image reference. Required. |
 | `command`, `args` | Replace the entry point and the arguments of the image. |
-| `env` | A list of variables. Each variable has a `value` or a `valueFrom.secretKeyRef`. Set exactly one. |
+| `env` | A list of variables. Each variable has a `value` or a `valueFrom.secretKeyRef`. Set exactly one. An empty string is a valid `value`. A variable with no `value` and no `valueFrom` is refused. |
 | `ports` | At most 8 ports with a `port`, an optional `name` and a `protocol` (`TCP`, `UDP` or `SCTP`). The default is `TCP`. |
 | `resources` | `requests` and `limits` for `cpu` and `memory`. The defaults are 100m, 500m, 128Mi and 512Mi. A request cannot be above its limit. A limit cannot be above 32 CPUs or 256Gi. |
 | `replicas` | From 0 to 20. Without `replicas` and without `autoscale` the container has one replica. |

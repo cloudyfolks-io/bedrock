@@ -201,7 +201,7 @@ func appContainerOf(spec v1alpha1.ContainerSpec) corev1.Container {
 func envOf(env []v1alpha1.ContainerEnvVar) []corev1.EnvVar {
 	out := make([]corev1.EnvVar, 0, len(env))
 	for _, variable := range env {
-		entry := corev1.EnvVar{Name: variable.Name, Value: variable.Value}
+		entry := corev1.EnvVar{Name: variable.Name, Value: ptr.Deref(variable.Value, "")}
 		if variable.ValueFrom != nil && variable.ValueFrom.SecretKeyRef != nil {
 			ref := variable.ValueFrom.SecretKeyRef
 			entry.ValueFrom = &corev1.EnvVarSource{SecretKeyRef: &corev1.SecretKeySelector{LocalObjectReference: corev1.LocalObjectReference{Name: ref.Name}, Key: ref.Key}}

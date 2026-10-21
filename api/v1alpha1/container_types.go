@@ -31,7 +31,7 @@ type ContainerEnvVar struct {
 	Name string `json:"name"`
 	// +kubebuilder:validation:MaxLength=32768
 	// +optional
-	Value string `json:"value,omitempty"`
+	Value *string `json:"value,omitempty"`
 	// +optional
 	ValueFrom *ContainerEnvSource `json:"valueFrom,omitempty"`
 }
