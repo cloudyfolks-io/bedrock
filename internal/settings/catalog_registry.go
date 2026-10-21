@@ -6,6 +6,7 @@ import (
 	"net/url"
 	"regexp"
 	"slices"
+	"strconv"
 	"strings"
 
 	"k8s.io/apimachinery/pkg/util/validation"
@@ -74,10 +75,79 @@ func gcCron(v string) error {
 	if v == "" {
 		return nil
 	}
-	if len(strings.Fields(v)) != gcCronFields {
+	fields := strings.Fields(v)
+	if len(fields) != gcCronFields {
 		return fmt.Errorf("value %q must have %d fields", v, gcCronFields)
 	}
+	for i, field := range fields {
+		if err := cronField(field, gcCronRanges[i]); err != nil {
+			return fmt.Errorf("value %q: %w", v, err)
+		}
+	}
 	return nil
+}
+
+type cronRange struct {
+	name     string
+	min, max int
+	names    []string
+}
+
+var gcCronRanges = [gcCronFields]cronRange{
+	{"second", 0, 59, nil},
+	{"minute", 0, 59, nil},
+	{"hour", 0, 23, nil},
+	{"day of month", 1, 31, nil},
+	{"month", 1, 12, []string{"JAN", "FEB", "MAR", "APR", "MAY", "JUN", "JUL", "AUG", "SEP", "OCT", "NOV", "DEC"}},
+	{"day of week", 0, 7, []string{"SUN", "MON", "TUE", "WED", "THU", "FRI", "SAT"}},
+}
+
+func cronField(field string, allowed cronRange) error {
+	for _, item := range strings.Split(field, ",") {
+		if err := cronItem(item, allowed); err != nil {
+			return fmt.Errorf("%s field %q: %w", allowed.name, field, err)
+		}
+	}
+	return nil
+}
+
+func cronItem(item string, allowed cronRange) error {
+	span, step, stepped := strings.Cut(item, "/")
+	if stepped {
+		if n, err := strconv.Atoi(step); err != nil || n < 1 {
+			return fmt.Errorf("the step must be a positive number")
+		}
+	}
+	if span == "*" || span == "?" {
+		return nil
+	}
+	low, high, ranged := strings.Cut(span, "-")
+	first, err := cronValue(low, allowed)
+	if err != nil {
+		return err
+	}
+	if !ranged {
+		return nil
+	}
+	last, err := cronValue(high, allowed)
+	if err != nil {
+		return err
+	}
+	if first > last {
+		return fmt.Errorf("the range runs backwards")
+	}
+	return nil
+}
+
+func cronValue(text string, allowed cronRange) (int, error) {
+	if index := slices.Index(allowed.names, strings.ToUpper(text)); index >= 0 {
+		return index + allowed.min, nil
+	}
+	n, err := strconv.Atoi(text)
+	if err != nil || n < allowed.min || n > allowed.max {
+		return 0, fmt.Errorf("%q is not between %d and %d", text, allowed.min, allowed.max)
+	}
+	return n, nil
 }
 
 type proxyCacheEntry struct {
