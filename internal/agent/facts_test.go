@@ -147,8 +147,8 @@ func TestTimeSynced(t *testing.T) {
 
 func TestImagesBytesSumsTheImageFiles(t *testing.T) {
 	root := t.TempDir()
-	writeFixtureFile(t, filepath.Join(root, k0sImagesDir, "a.tar"), "01234")
-	writeFixtureFile(t, filepath.Join(root, k0sImagesDir, "b.tar"), "0123456789")
+	writeFixtureFile(t, archiveFile(root, "v0.2.0", "a.tar"), "01234")
+	writeFixtureFile(t, archiveFile(root, "v0.3.0", "b.tar"), "0123456789")
 	if got := imagesBytes(root); got != 15 {
 		t.Fatalf("imagesBytes %d, want 15", got)
 	}

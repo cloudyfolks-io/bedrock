@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"encoding/pem"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
@@ -53,18 +54,16 @@ func bounded[T any](ctx context.Context, limit time.Duration, read func(context.
 }
 
 func imagesBytes(root string) int64 {
-	entries, err := os.ReadDir(filepath.Join(root, k0sImagesDir))
-	if err != nil {
-		return 0
-	}
 	var total int64
-	for _, entry := range entries {
-		info, err := entry.Info()
-		if err != nil || !info.Mode().IsRegular() {
-			continue
+	filepath.WalkDir(filepath.Join(root, archiveDir), func(_ string, entry fs.DirEntry, err error) error {
+		if err != nil || !entry.Type().IsRegular() {
+			return nil
 		}
-		total += info.Size()
-	}
+		if info, err := entry.Info(); err == nil {
+			total += info.Size()
+		}
+		return nil
+	})
 	return total
 }
 

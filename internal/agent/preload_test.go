@@ -226,26 +226,28 @@ func TestPreloadFailsWhenAnImageHasAnotherDigest(t *testing.T) {
 	}
 }
 
-func TestPreloadLinksTargetTarballsForK0sReimport(t *testing.T) {
+func TestPreloadArchivesTargetTarballsOutsideK0s(t *testing.T) {
 	fixture := newPreloadFixture(t)
 	writeFixtureFile(t, filepath.Join(fixture.nodeRoot, "run/k0s/containerd.sock"), "")
 	if _, err := preload(context.Background(), fixture.env); err != nil {
 		t.Fatal(err)
 	}
-	imagesDir := filepath.Join(fixture.nodeRoot, k0sImagesDir)
 	imageFile := release.ImageFileName(pinnedImage)
-	if readFixtureFile(t, filepath.Join(imagesDir, imageFile)) != "layout" {
-		t.Fatal("the target image tarball must be kept for k0s to re-import")
+	if readFixtureFile(t, archiveFile(fixture.nodeRoot, "v0.3.0", imageFile)) != "layout" {
+		t.Fatal("the target image tarball must be kept in the archive")
 	}
-	if readFixtureFile(t, filepath.Join(imagesDir, "k0s-airgap-v0.3.0.tar")) != "airgap" {
-		t.Fatal("the target airgap tarball must be kept under its versioned name")
+	if readFixtureFile(t, archiveFile(fixture.nodeRoot, "v0.3.0", "k0s-airgap.tar")) != "airgap" {
+		t.Fatal("the target airgap tarball must be kept in the archive")
 	}
-	if _, err := os.Stat(filepath.Join(imagesDir, "k0s-airgap.tar")); !os.IsNotExist(err) {
-		t.Fatal("k0s-airgap.tar must never be written by Preload")
+	if !exists(archiveFile(fixture.nodeRoot, "v0.3.0", release.BundleFileName)) {
+		t.Fatal("the bundle manifest must be kept in the archive")
+	}
+	if exists(filepath.Join(fixture.nodeRoot, k0sImagesDir)) {
+		t.Fatal("preload must not write into the k0s images directory")
 	}
 }
 
-func TestPreloadRelinkingTarballsIsANoOp(t *testing.T) {
+func TestPreloadArchivingTwiceIsANoOp(t *testing.T) {
 	fixture := newPreloadFixture(t)
 	writeFixtureFile(t, filepath.Join(fixture.nodeRoot, "run/k0s/containerd.sock"), "")
 	if _, err := preload(context.Background(), fixture.env); err != nil {
@@ -254,24 +256,24 @@ func TestPreloadRelinkingTarballsIsANoOp(t *testing.T) {
 	if _, err := preload(context.Background(), fixture.env); err != nil {
 		t.Fatal(err)
 	}
-	entries, err := os.ReadDir(filepath.Join(fixture.nodeRoot, k0sImagesDir))
+	entries, err := os.ReadDir(filepath.Dir(archiveFile(fixture.nodeRoot, "v0.3.0", "x")))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(entries) != 2 {
-		t.Fatalf("images dir has %d entries, want 2 (the image and the versioned airgap file)", len(entries))
+	if len(entries) != 3 {
+		t.Fatalf("archive has %d entries, want 3 (image, airgap, manifest)", len(entries))
 	}
 }
 
-func TestPreloadKeepsAnExistingImageTarball(t *testing.T) {
+func TestPreloadKeepsAnExistingArchivedTarball(t *testing.T) {
 	fixture := newPreloadFixture(t)
 	writeFixtureFile(t, filepath.Join(fixture.nodeRoot, "run/k0s/containerd.sock"), "")
 	imageFile := release.ImageFileName(pinnedImage)
-	writeFixtureFile(t, filepath.Join(fixture.nodeRoot, k0sImagesDir, imageFile), "already there")
+	writeFixtureFile(t, archiveFile(fixture.nodeRoot, "v0.3.0", imageFile), "already there")
 	if _, err := preload(context.Background(), fixture.env); err != nil {
 		t.Fatal(err)
 	}
-	if got := readFixtureFile(t, filepath.Join(fixture.nodeRoot, k0sImagesDir, imageFile)); got != "already there" {
+	if got := readFixtureFile(t, archiveFile(fixture.nodeRoot, "v0.3.0", imageFile)); got != "already there" {
 		t.Fatalf("an existing tarball with the same name must be kept, got %q", got)
 	}
 }
