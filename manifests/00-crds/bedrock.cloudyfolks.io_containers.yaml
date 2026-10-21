@@ -156,6 +156,16 @@ spec:
                     x-kubernetes-validations:
                     - message: address must be an IPv4 address
                       rule: isIP(self) && ip(self).family() == 4
+                  addresses:
+                    items:
+                      maxLength: 15
+                      type: string
+                      x-kubernetes-validations:
+                      - message: addresses must be IPv4 addresses
+                        rule: isIP(self) && ip(self).family() == 4
+                    maxItems: 20
+                    type: array
+                    x-kubernetes-list-type: set
                   securityGroups:
                     items:
                       maxLength: 63
@@ -178,6 +188,11 @@ spec:
                 - message: address is immutable
                   rule: has(self.address) == has(oldSelf.address) && (!has(self.address)
                     || self.address == oldSelf.address)
+                - message: set address or addresses, not both
+                  rule: '!(has(self.address) && has(self.addresses))'
+                - message: addresses entries are immutable
+                  rule: '!has(oldSelf.addresses) || (has(self.addresses) && oldSelf.addresses.all(a,
+                    a in self.addresses))'
               ports:
                 items:
                   properties:
@@ -382,12 +397,17 @@ spec:
             - message: address needs replicas of at most 1 and no autoscale
               rule: '!has(self.network.address) || (!has(self.autoscale) && (!has(self.replicas)
                 || self.replicas <= 1))'
+            - message: addresses need replicas of at most the number of addresses
+                and no autoscale
+              rule: '!has(self.network.addresses) || (!has(self.autoscale) && (has(self.replicas)
+                ? self.replicas : 1) <= self.network.addresses.size())'
             - message: volumes need replicas of at most 1 and no autoscale
               rule: '!has(self.volumes) || self.volumes.size() == 0 || (!has(self.autoscale)
                 && (!has(self.replicas) || self.replicas <= 1))'
-            - message: address and volumes need the strategy Recreate
+            - message: address, addresses and volumes need the strategy Recreate
               rule: '!has(self.strategy) || self.strategy == ''Recreate'' || (!has(self.network.address)
-                && (!has(self.volumes) || self.volumes.size() == 0))'
+                && !has(self.network.addresses) && (!has(self.volumes) || self.volumes.size()
+                == 0))'
           status:
             properties:
               addresses:

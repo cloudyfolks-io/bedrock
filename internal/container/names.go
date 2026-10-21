@@ -1,6 +1,8 @@
 package container
 
 import (
+	"slices"
+
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
@@ -37,5 +39,12 @@ func OwnerRef(c v1alpha1.Container) metav1.OwnerReference {
 }
 
 func IsPinned(spec v1alpha1.ContainerSpec) bool {
-	return spec.Network.Address != ""
+	return spec.Network.Address != "" || len(spec.Network.Addresses) > 0
+}
+
+func PinnedAddresses(spec v1alpha1.ContainerSpec) []string {
+	if spec.Network.Address != "" {
+		return []string{spec.Network.Address}
+	}
+	return slices.Clone(spec.Network.Addresses)
 }

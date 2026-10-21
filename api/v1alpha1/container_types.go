@@ -159,6 +159,8 @@ type ContainerVolume struct {
 }
 
 // +kubebuilder:validation:XValidation:rule="has(self.address) == has(oldSelf.address) && (!has(self.address) || self.address == oldSelf.address)",message="address is immutable"
+// +kubebuilder:validation:XValidation:rule="!(has(self.address) && has(self.addresses))",message="set address or addresses, not both"
+// +kubebuilder:validation:XValidation:rule="!has(oldSelf.addresses) || (has(self.addresses) && oldSelf.addresses.all(a, a in self.addresses))",message="addresses entries are immutable"
 type ContainerNetwork struct {
 	// +kubebuilder:validation:MinLength=1
 	// +kubebuilder:validation:MaxLength=63
@@ -171,6 +173,12 @@ type ContainerNetwork struct {
 	// +kubebuilder:validation:XValidation:rule="isIP(self) && ip(self).family() == 4",message="address must be an IPv4 address"
 	// +optional
 	Address string `json:"address,omitempty"`
+	// +kubebuilder:validation:MaxItems=20
+	// +kubebuilder:validation:items:MaxLength=15
+	// +kubebuilder:validation:items:XValidation:rule="isIP(self) && ip(self).family() == 4",message="addresses must be IPv4 addresses"
+	// +optional
+	// +listType=set
+	Addresses []string `json:"addresses,omitempty"`
 	// +kubebuilder:validation:MaxItems=8
 	// +kubebuilder:validation:items:MaxLength=63
 	// +kubebuilder:validation:items:Pattern=`^[a-z0-9]([-a-z0-9]*[a-z0-9])?$`
@@ -181,8 +189,9 @@ type ContainerNetwork struct {
 
 // +kubebuilder:validation:XValidation:rule="!has(self.replicas) || !has(self.autoscale)",message="replicas and autoscale exclude each other"
 // +kubebuilder:validation:XValidation:rule="!has(self.network.address) || (!has(self.autoscale) && (!has(self.replicas) || self.replicas <= 1))",message="address needs replicas of at most 1 and no autoscale"
+// +kubebuilder:validation:XValidation:rule="!has(self.network.addresses) || (!has(self.autoscale) && (has(self.replicas) ? self.replicas : 1) <= self.network.addresses.size())",message="addresses need replicas of at most the number of addresses and no autoscale"
 // +kubebuilder:validation:XValidation:rule="!has(self.volumes) || self.volumes.size() == 0 || (!has(self.autoscale) && (!has(self.replicas) || self.replicas <= 1))",message="volumes need replicas of at most 1 and no autoscale"
-// +kubebuilder:validation:XValidation:rule="!has(self.strategy) || self.strategy == 'Recreate' || (!has(self.network.address) && (!has(self.volumes) || self.volumes.size() == 0))",message="address and volumes need the strategy Recreate"
+// +kubebuilder:validation:XValidation:rule="!has(self.strategy) || self.strategy == 'Recreate' || (!has(self.network.address) && !has(self.network.addresses) && (!has(self.volumes) || self.volumes.size() == 0))",message="address, addresses and volumes need the strategy Recreate"
 type ContainerSpec struct {
 	// +kubebuilder:validation:MinLength=1
 	// +kubebuilder:validation:MaxLength=1024

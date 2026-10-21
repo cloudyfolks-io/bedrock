@@ -151,11 +151,30 @@ func TestContainerRefusesWrongMixes(t *testing.T) {
 		{"pinned-rolling-update", func(x *v1alpha1.Container) {
 			x.Spec.Network.Address = "10.0.0.50"
 			x.Spec.Strategy = "RollingUpdate"
-		}, "address and volumes need the strategy Recreate"},
+		}, "address, addresses and volumes need the strategy Recreate"},
 		{"volume-rolling-update", func(x *v1alpha1.Container) {
 			x.Spec.Volumes = []v1alpha1.ContainerVolume{{VolumeRef: "data", MountPath: "/data"}}
 			x.Spec.Strategy = "RollingUpdate"
-		}, "address and volumes need the strategy Recreate"},
+		}, "address, addresses and volumes need the strategy Recreate"},
+		{"addresses-with-too-many-replicas", func(x *v1alpha1.Container) {
+			x.Spec.Network.Addresses = []string{"10.0.0.50", "10.0.0.51"}
+			x.Spec.Replicas = ptr.To(int32(3))
+			x.Spec.Strategy = "Recreate"
+		}, "addresses need replicas of at most the number of addresses and no autoscale"},
+		{"addresses-with-autoscale", func(x *v1alpha1.Container) {
+			x.Spec.Network.Addresses = []string{"10.0.0.50", "10.0.0.51"}
+			x.Spec.Autoscale = &v1alpha1.ContainerAutoscale{Min: 1, Max: 2}
+		}, "addresses need replicas of at most the number of addresses and no autoscale"},
+		{"addresses-rolling-update", func(x *v1alpha1.Container) {
+			x.Spec.Network.Addresses = []string{"10.0.0.50", "10.0.0.51"}
+			x.Spec.Strategy = "RollingUpdate"
+		}, "address, addresses and volumes need the strategy Recreate"},
+		{"address-and-addresses", func(x *v1alpha1.Container) {
+			x.Spec.Network.Address = "10.0.0.50"
+			x.Spec.Network.Addresses = []string{"10.0.0.51"}
+		}, "set address or addresses, not both"},
+		{"addresses-not-ipv4", func(x *v1alpha1.Container) { x.Spec.Network.Addresses = []string{"fd00::1"} }, "addresses must be IPv4 addresses"},
+		{"addresses-duplicate", func(x *v1alpha1.Container) { x.Spec.Network.Addresses = []string{"10.0.0.50", "10.0.0.50"} }, "Duplicate value"},
 		{"too-many-replicas", func(x *v1alpha1.Container) { x.Spec.Replicas = ptr.To(int32(21)) }, "spec.replicas"},
 		{"negative-replicas", func(x *v1alpha1.Container) { x.Spec.Replicas = ptr.To(int32(-1)) }, "spec.replicas"},
 		{"unknown-strategy", func(x *v1alpha1.Container) { x.Spec.Strategy = "Blue" }, "Unsupported value"},
@@ -266,4 +285,44 @@ func TestContainerNetworkIsImmutable(t *testing.T) {
 	}
 	assigned.Spec.Network.Address = "10.0.0.62"
 	updateInvalid(t, c, assigned, "address is immutable")
+}
+
+func TestContainerAddressesAreImmutablePerEntry(t *testing.T) {
+	c, _ := StartTestEnv(t)
+	ctx := context.Background()
+	listed := validContainer("listed")
+	listed.Spec.Network.Addresses = []string{"10.0.0.70", "10.0.0.71", "10.0.0.72"}
+	listed.Spec.Replicas = ptr.To(int32(3))
+	listed.Spec.Strategy = "Recreate"
+	createValid(t, c, listed)
+
+	var fresh v1alpha1.Container
+	get := func() *v1alpha1.Container {
+		if err := c.Get(ctx, client.ObjectKeyFromObject(listed), &fresh); err != nil {
+			t.Fatal(err)
+		}
+		return fresh.DeepCopy()
+	}
+	changed := get()
+	changed.Spec.Network.Addresses[1] = "10.0.0.75"
+	updateInvalid(t, c, changed, "addresses entries are immutable")
+	removed := get()
+	removed.Spec.Network.Addresses = removed.Spec.Network.Addresses[:2]
+	removed.Spec.Replicas = ptr.To(int32(2))
+	updateInvalid(t, c, removed, "addresses entries are immutable")
+	cleared := get()
+	cleared.Spec.Network.Addresses = nil
+	cleared.Spec.Replicas = ptr.To(int32(1))
+	updateInvalid(t, c, cleared, "addresses entries are immutable")
+	grown := get()
+	grown.Spec.Network.Addresses = append(grown.Spec.Network.Addresses, "10.0.0.73")
+	grown.Spec.Replicas = ptr.To(int32(4))
+	if err := c.Update(ctx, grown); err != nil {
+		t.Fatalf("an entry must be addable: %v", err)
+	}
+	scaled := get()
+	scaled.Spec.Replicas = ptr.To(int32(1))
+	if err := c.Update(ctx, scaled); err != nil {
+		t.Fatalf("scaling down inside the list must work: %v", err)
+	}
 }

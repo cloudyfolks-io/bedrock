@@ -78,7 +78,7 @@ func (r Resolver) stepSubnet(ctx context.Context, c v1alpha1.Container, in resol
 		return in, gate, err
 	}
 	in.subnet = subnet
-	in.NIC = network.NIC{Namespace: c.Namespace, Subnet: name, Address: c.Spec.Network.Address, SecurityGroups: slices.Clone(c.Spec.Network.SecurityGroups)}
+	in.NIC = network.NIC{Namespace: c.Namespace, Subnet: name, Address: c.Spec.Network.Address, Addresses: slices.Clone(c.Spec.Network.Addresses), SecurityGroups: slices.Clone(c.Spec.Network.SecurityGroups)}
 	in.DNSServers = dns
 	return in, nil, nil
 }
@@ -118,42 +118,50 @@ func DNSServersOf(subnet v1alpha1.Subnet, fallback []string) []string {
 }
 
 func (r Resolver) stepAddress(ctx context.Context, c v1alpha1.Container, in resolved) (resolved, *Gate, error) {
-	address := c.Spec.Network.Address
-	if address == "" {
+	addresses := PinnedAddresses(c.Spec)
+	if len(addresses) == 0 {
 		return in, nil, nil
 	}
-	if violation := network.CheckNICAddress(in.subnet, address); violation != nil {
-		return in, &Gate{Reason: violation.Reason, Message: violation.Message}, nil
+	for _, address := range addresses {
+		if violation := network.CheckNICAddress(in.subnet, address); violation != nil {
+			return in, &Gate{Reason: violation.Reason, Message: violation.Message}, nil
+		}
 	}
 	var containers v1alpha1.ContainerList
 	if err := r.Client.List(ctx, &containers, client.InNamespace(c.Namespace)); err != nil {
 		return in, nil, err
 	}
-	if other, held := pinnedBy(containers.Items, c); held {
+	if other, address, held := pinnedBy(containers.Items, c); held {
 		return in, gateOf(ReasonAddressInUse, "the address %s of the subnet %q is pinned by the container %q", address, in.NIC.Subnet, other), nil
 	}
 	pods, err := r.podNames(ctx, c)
 	if err != nil {
 		return in, nil, err
 	}
-	ips, err := network.IPsOfAddress(ctx, r.FabricIPs, network.FabricName(c.Namespace, in.NIC.Subnet), address)
-	if err != nil {
-		return in, nil, err
-	}
-	if heldByOther(ips, address, c.Namespace, pods) {
-		return in, gateOf(ReasonAddressInUse, "the address %s of the subnet %q is already allocated to another pod", address, in.NIC.Subnet), nil
+	for _, address := range addresses {
+		ips, err := network.IPsOfAddress(ctx, r.FabricIPs, network.FabricName(c.Namespace, in.NIC.Subnet), address)
+		if err != nil {
+			return in, nil, err
+		}
+		if heldByOther(ips, address, c.Namespace, pods) {
+			return in, gateOf(ReasonAddressInUse, "the address %s of the subnet %q is already allocated to another pod", address, in.NIC.Subnet), nil
+		}
 	}
 	return in, nil, nil
 }
 
-func pinnedBy(containers []v1alpha1.Container, c v1alpha1.Container) (string, bool) {
+func pinnedBy(containers []v1alpha1.Container, c v1alpha1.Container) (string, string, bool) {
+	mine := PinnedAddresses(c.Spec)
 	for index := range containers {
 		other := containers[index]
-		if other.Name != c.Name && SubnetName(other.Spec) == SubnetName(c.Spec) && other.Spec.Network.Address == c.Spec.Network.Address && network.Older(&other, &c) {
-			return other.Name, true
+		if other.Name == c.Name || SubnetName(other.Spec) != SubnetName(c.Spec) || !network.Older(&other, &c) {
+			continue
+		}
+		if shared := slices.IndexFunc(PinnedAddresses(other.Spec), func(a string) bool { return slices.Contains(mine, a) }); shared >= 0 {
+			return other.Name, PinnedAddresses(other.Spec)[shared], true
 		}
 	}
-	return "", false
+	return "", "", false
 }
 
 func heldByOther(ips []*unstructured.Unstructured, address, namespace string, own []string) bool {
