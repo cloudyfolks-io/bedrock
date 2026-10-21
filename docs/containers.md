@@ -132,6 +132,9 @@ To stop an autoscaled container, remove `autoscale` and set `replicas: 0`.
 
 `status.addresses` lists the addresses of the ready pods in sorted order.
 `status.replicas` and `status.readyReplicas` count the pods.
+`status.pods` lists the pods that the Container owns, sorted by name, at most 50.
+Each entry has `name`, `phase`, `ready`, `node` and `startedAt`.
+Use a `name` as the `pod` query of logs and exec.
 Only pods that the Container owns count. The owner chain is the Container, its Deployment, a ReplicaSet and the pod.
 A pod with the same labels that someone made directly is never a load balancer target, a log source or an exec target.
 When the quota of the project refuses a replica, the condition `Ready` shows `QuotaExceeded` at once.

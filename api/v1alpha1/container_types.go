@@ -239,6 +239,15 @@ type ContainerSpec struct {
 	Network ContainerNetwork `json:"network"`
 }
 
+type ContainerPodStatus struct {
+	Name  string `json:"name"`
+	Phase string `json:"phase,omitempty"`
+	Ready bool   `json:"ready"`
+	Node  string `json:"node,omitempty"`
+	// +optional
+	StartedAt *metav1.Time `json:"startedAt,omitempty"`
+}
+
 type ContainerStatus struct {
 	CommonStatus `json:",inline"`
 	// +kubebuilder:validation:Enum=Pending;Running;Stopped;Failed
@@ -253,6 +262,10 @@ type ContainerStatus struct {
 	Addresses []string `json:"addresses,omitempty"`
 	// +optional
 	Deployment string `json:"deployment,omitempty"`
+	// +kubebuilder:validation:MaxItems=50
+	// +optional
+	// +listType=atomic
+	Pods []ContainerPodStatus `json:"pods,omitempty"`
 }
 
 // +kubebuilder:object:root=true

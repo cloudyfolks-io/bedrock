@@ -1,6 +1,7 @@
 package container
 
 import (
+	"fmt"
 	"reflect"
 	"strings"
 	"testing"
@@ -85,6 +86,43 @@ func TestDecideAddressesAreTheReadyPodsSorted(t *testing.T) {
 	}
 	if got.Replicas != 3 || got.Ready != 2 {
 		t.Fatalf("counts %+v", got)
+	}
+}
+
+func TestDecideListsThePodsSortedAndBounded(t *testing.T) {
+	started := metav1.NewTime(time.Date(2026, 10, 19, 12, 0, 0, 0, time.UTC))
+	pods := []PodView{
+		{Name: "b", Phase: "Running", Ready: true, Node: "n2", StartedAt: &started},
+		{Name: "a", Phase: "Pending"},
+	}
+	got := Decide(settled(2, 2, 2, 1), pods).Pods
+	want := []v1alpha1.ContainerPodStatus{
+		{Name: "a", Phase: "Pending"},
+		{Name: "b", Phase: "Running", Ready: true, Node: "n2", StartedAt: &started},
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("pods %+v", got)
+	}
+	var many []PodView
+	for index := 0; index < 60; index++ {
+		many = append(many, PodView{Name: fmt.Sprintf("p-%02d", 59-index)})
+	}
+	bounded := Decide(settled(60, 60, 60, 0), many).Pods
+	if len(bounded) != 50 || bounded[0].Name != "p-00" || bounded[49].Name != "p-49" {
+		t.Fatalf("bounded %d %s %s", len(bounded), bounded[0].Name, bounded[len(bounded)-1].Name)
+	}
+}
+
+func TestPodViewOfReadsPhaseNodeAndStart(t *testing.T) {
+	started := metav1.NewTime(time.Date(2026, 10, 19, 12, 0, 0, 0, time.UTC))
+	pod := corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{Name: "web-1"},
+		Spec:       corev1.PodSpec{NodeName: "node-a"},
+		Status:     corev1.PodStatus{Phase: corev1.PodRunning, StartTime: &started},
+	}
+	view := PodViewOf(pod, "default")
+	if view.Phase != "Running" || view.Node != "node-a" || view.StartedAt == nil || !view.StartedAt.Equal(&started) {
+		t.Fatalf("view %+v", view)
 	}
 }
 
