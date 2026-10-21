@@ -159,7 +159,7 @@ The archive also contains the OVN databases `ovnnb_db.db` and `ovnsb_db.db`.
 This procedure does not use them.
 
 A scheduled etcd snapshot (`etcd-*`) holds no image tarballs. The script
-keeps the directory `/var/lib/k0s/images` on the host. On a rebuilt host,
+keeps the image archive `/var/lib/bedrock/images` on the host. On a rebuilt host,
 put the images of the bundle back before you run the script. See
 [Etcd snapshots](../backup.md#etcd-snapshots).
 
