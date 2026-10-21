@@ -21,6 +21,7 @@ const (
 	AppliedCORSAnnotation       = "bedrock.cloudyfolks.io/applied-cors"
 
 	ReservedNameApprovedAnnotation = "bedrock.cloudyfolks.io/reserved-name-approved"
+	AccountNameAnnotation          = "bedrock.cloudyfolks.io/object-storage-account"
 )
 
 var bucketNamePattern = regexp.MustCompile(`^[a-z0-9][a-z0-9-]{1,61}[a-z0-9]$`)

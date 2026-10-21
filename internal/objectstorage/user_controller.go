@@ -135,7 +135,8 @@ func (r *UserReconciler) converge(ctx context.Context, user *v1alpha1.ObjectStor
 	}
 	account, ready, err := EnsureAccount(ctx, r.Client, project)
 	if err != nil || !ready {
-		return userState{outcome: accountPending()}, err
+		blockedBy, err := accountBlocked(err)
+		return userState{outcome: blockedBy}, err
 	}
 	return r.converged(ctx, user, project, account)
 }

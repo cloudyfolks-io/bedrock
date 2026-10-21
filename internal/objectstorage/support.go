@@ -34,6 +34,7 @@ const (
 	reasonNotEmpty          = "NotEmpty"
 	reasonPurgeIncomplete   = "PurgeIncomplete"
 	reasonAccountPending    = "AccountPending"
+	reasonAccountNameTaken  = "AccountNameTaken"
 	reasonPolicyFailed      = "PolicyFailed"
 
 	pendingRequeue = 10 * time.Second
@@ -82,6 +83,8 @@ type Project struct {
 	Tenant    string
 	Name      string
 	UID       types.UID
+
+	AdoptedAccount string
 }
 
 func (p Project) Owner() platform.Owner {
@@ -104,7 +107,7 @@ func LoadProject(ctx context.Context, c client.Client, namespace string) (Projec
 		return Project{}, false, client.IgnoreNotFound(err)
 	}
 	labels := ns.GetLabels()
-	project := Project{Namespace: namespace, Tenant: labels[v1alpha1.LabelTenant], Name: labels[v1alpha1.LabelProject], UID: ns.GetUID()}
+	project := Project{Namespace: namespace, Tenant: labels[v1alpha1.LabelTenant], Name: labels[v1alpha1.LabelProject], UID: ns.GetUID(), AdoptedAccount: ns.GetAnnotations()[AccountNameAnnotation]}
 	return project, project.Tenant != "" && project.Name != "", nil
 }
 
