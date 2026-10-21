@@ -53,6 +53,8 @@ func (f *fakeContainerd) Run(_ context.Context, name string, args ...string) (st
 		return strings.Join(f.present, "\n") + "\n", nil
 	case call == "/usr/local/bin/k0s ctr --namespace k8s.io images ls":
 		return imageListing(f.present, f.targets), nil
+	case strings.HasPrefix(call, "/usr/local/bin/k0s ctr --namespace k8s.io images label "):
+		return "", nil
 	case strings.HasPrefix(call, "/usr/local/bin/k0s ctr --namespace k8s.io images import "):
 		f.present = append(f.present, f.images[filepath.Base(strings.TrimPrefix(call, "/usr/local/bin/k0s ctr --namespace k8s.io images import "))]...)
 		return "", nil
@@ -244,6 +246,18 @@ func TestPreloadArchivesTargetTarballsOutsideK0s(t *testing.T) {
 	}
 	if exists(filepath.Join(fixture.nodeRoot, k0sImagesDir)) {
 		t.Fatal("preload must not write into the k0s images directory")
+	}
+}
+
+func TestPreloadPinsTheImportedImages(t *testing.T) {
+	fixture := newPreloadFixture(t)
+	writeFixtureFile(t, filepath.Join(fixture.nodeRoot, "run/k0s/containerd.sock"), "")
+	if _, err := preload(context.Background(), fixture.env); err != nil {
+		t.Fatal(err)
+	}
+	want := "/usr/local/bin/k0s ctr --namespace k8s.io images label quay.io/a/b@sha256:" + strings.Repeat("1", 64) + " io.cri-containerd.pinned=pinned"
+	if !slices.Contains(fixture.container.calls, want) {
+		t.Fatalf("the imported image must be pinned: %v", fixture.container.calls)
 	}
 }
 
