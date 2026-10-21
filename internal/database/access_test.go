@@ -298,13 +298,13 @@ func TestUserAdoptsARoleThatAlreadyExists(t *testing.T) {
 		return "", nil
 	}}
 	db := readyDatabase(t, c)
-	user := newUser(t, c, db, "alice", nil)
+	user := newUser(t, c, db, "alice", withUserAnnotations(adoptAnnotation()))
 	reconcileUser(t, c, engine, user)
 	reloadUser(t, c, user)
 	if reason, _ := readyReasonOf(user.Status.Conditions); reason != ReasonReady || user.Status.AppliedGrants == "" {
 		t.Fatalf("status %+v", user.Status)
 	}
-	if engine.count("ALTER ROLE") != 1 || engine.count(`REVOKE "app_ro", "app_rw", "app_all" FROM "alice"`) != 1 {
+	if engine.count("ALTER ROLE") != 0 || engine.count(`REVOKE "app_ro", "app_rw", "app_all" FROM "alice"`) != 1 {
 		t.Fatalf("scripts %v", engine.scripts)
 	}
 }
@@ -482,7 +482,7 @@ func TestSchemaAdoptsADatabaseThatAlreadyExists(t *testing.T) {
 		return "", nil
 	}}
 	db := readyDatabase(t, c)
-	schema := newSchema(t, c, db, "orders", nil)
+	schema := newSchema(t, c, db, "orders", func(s *v1alpha1.DatabaseSchema) { s.Annotations = adoptAnnotation() })
 	reconcileSchema(t, c, engine, schema)
 	if reason, _ := readyReasonOf(reloadSchema(t, c, schema).Status.Conditions); reason != ReasonReady || schema.Status.Name != "orders" {
 		t.Fatalf("status %+v", schema.Status)
@@ -577,7 +577,7 @@ func TestSchemaOfAnExistingDatabaseIsAdoptedWithTheRealSQLState(t *testing.T) {
 	c := startEnv(t)
 	db := readyDatabase(t, c)
 	executor := &stderrExecutor{stderr: `ERROR:  42P04: database "shop" already exists` + "\nLOCATION:  createdb, dbcommands.c:500"}
-	schema := newSchema(t, c, db, "shop", nil)
+	schema := newSchema(t, c, db, "shop", func(s *v1alpha1.DatabaseSchema) { s.Annotations = adoptAnnotation() })
 	result, err := (&SchemaReconciler{Client: c, Engine: realStderrFactory(executor, db)}).Reconcile(context.Background(), ctrl.Request{NamespacedName: client.ObjectKeyFromObject(schema)})
 	must(t, err)
 	reloadSchema(t, c, schema)
@@ -599,7 +599,7 @@ func TestUserWithAnExistingRoleIsAdoptedWithTheRealSQLState(t *testing.T) {
 	c := startEnv(t)
 	db := readyDatabase(t, c)
 	executor := &stderrExecutor{stderr: `ERROR:  42710: role "alice" already exists`}
-	user := newUser(t, c, db, "alice", nil)
+	user := newUser(t, c, db, "alice", withUserAnnotations(adoptAnnotation()))
 	_, err := (&UserReconciler{Client: c, Engine: realStderrFactory(executor, db)}).Reconcile(context.Background(), ctrl.Request{NamespacedName: client.ObjectKeyFromObject(user)})
 	must(t, err)
 	if reason, _ := readyReasonOf(reloadUser(t, c, user).Status.Conditions); reason != ReasonReady || user.Status.AppliedGrants == "" {

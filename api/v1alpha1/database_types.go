@@ -19,6 +19,7 @@ const (
 	AnnotationResetPassword = "bedrock.cloudyfolks.io/reset-password"
 	AnnotationRestart       = "bedrock.cloudyfolks.io/restart"
 	AnnotationRefreshImage  = "bedrock.cloudyfolks.io/refresh-image"
+	AnnotationAdopt         = "bedrock.cloudyfolks.io/adopt"
 )
 
 // +kubebuilder:validation:XValidation:rule="self == oldSelf",message="restore is immutable"

@@ -95,7 +95,7 @@ The `status` shows `phase`, `conditions`, `addresses` (`subnet`, `ip` and `port`
 
 ### DatabaseUser
 
-`DatabaseUser` has these fields: `databaseRef`, `username` and `grants`.
+`DatabaseUser` has these fields: `databaseRef`, `username`, `grants` and `passwordSecretRef`.
 A grant has a `database` (`app` or the name of a ready `DatabaseSchema`) and a `level` (`readonly`, `readwrite` or `all`).
 The user name is `spec.username`, or the name of the object when you set no `username`.
 It must match `^[a-z][a-z0-9_]{1,62}$`.
@@ -103,6 +103,9 @@ These names are reserved: `postgres`, `dbadmin`, `streaming_replica`, `cnpg_pool
 
 The operator makes the Secret `<name>-db` with the keys `username`, `password`, `host`, `port` and `uri`.
 Set the annotation `bedrock.cloudyfolks.io/reset-password` to a new value to make a new password.
+`passwordSecretRef.name` names a Secret in the project with the key `password`. The operator sets this password and does not make one.
+The password has 16 to 128 characters: letters, digits and `!#$%&()*+,-./:;<=>?@[]^_{|}~`. A change of the Secret changes the password within one minute. The operator never logs the password and never sends it as plain text to the engine. When `passwordSecretRef` is set, the reset-password annotation has no effect. When you remove it, the user keeps the last password.
+If the role already exists in the engine (PostgreSQL and MySQL), the reason is `NameTaken`. An administrator can set the annotation `bedrock.cloudyfolks.io/adopt` to `true`. The operator then adopts the role and sets its grants. It keeps the password of the role, unless `passwordSecretRef` is set. When it keeps the password, the key `password` of the Secret `<name>-db` is empty and the `uri` has no password. If the operator stops after it made a role and before it saved the status, set the annotation to finish.
 When you delete the object, the operator moves the objects of the role to `dbadmin` and drops the role.
 If the role still owns objects that cannot move, the reason is `UserOwnsObjects` and the object stays.
 
@@ -116,6 +119,7 @@ The database `app` exists from the first setup and has no object.
 `deletionPolicy` is `Retain` (the default) or `Delete`.
 `Delete` drops the database when you delete the object. `Retain` removes only the object.
 The operator makes three group roles for each database: `<name>_ro`, `<name>_rw` and `<name>_all`.
+If the database already exists in the engine, the reason is `NameTaken`. An administrator can set the annotation `bedrock.cloudyfolks.io/adopt` to `true` to adopt it (PostgreSQL makes the group roles then).
 
 ## The admin account
 
@@ -277,7 +281,7 @@ The condition `Ready` shows one of these reasons.
 | `EngineUnavailable` | The engine did not answer a command. |
 | `EngineRejected` | The engine refused a command. |
 | `Ready` | The object is as the spec says. |
-| `NameTaken` | A Secret, SecurityGroup or Service that the operator needs exists and the object does not own it. |
+| `NameTaken` | A Secret, SecurityGroup or Service that the operator needs exists and the object does not own it. A role or logical database of that name exists in the engine and the object has no adopt annotation. |
 | `UpgradeNotSupported` | The version of a running database changed. The operator keeps the old render. |
 | `ClassChangeNotSupported` | The new class has another `highAvailability`. |
 | `VersionNotAvailable` | The `DatabaseVersion` does not exist, or it is disabled for a new database. |
@@ -292,6 +296,7 @@ The condition `Ready` shows one of these reasons.
 | `BackupStorePending` | The identity of the backup store is not ready. |
 | `BackupStoreFailed` | The object store refused the backup bucket or does not answer. |
 | `ApplyFailed` | The API server refused an object. |
+| `PasswordSecretNotFound` | The Secret of `passwordSecretRef` does not exist in the project. |
 | `AddressUnavailable` | The subnet or the gate range has no free address. |
 | `EndpointAddressInvalid` | `spec.endpoint.address` is outside the subnet, or it is the gateway, the network or broadcast address, or an excluded address. |
 | `EndpointAddressTaken` | Another database, VM or container holds `spec.endpoint.address`. |
