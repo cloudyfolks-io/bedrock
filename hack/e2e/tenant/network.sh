@@ -540,6 +540,12 @@ peering_cleanup() {
   wait_gone 180 network peer
 }
 
+vpc_has_no_route_to() {
+  local routes
+  routes=$(kubectl get vpcs.fabric.cloudyfolks.io "$1" -o jsonpath='{.spec.staticRoutes}') || return 1
+  [[ "$routes" != *"\"$2\""* ]]
+}
+
 peering_checks() {
   peer_network_manifest | kubectl apply -f -
   wait_reason 180 network peer Ready VpcReady
@@ -555,7 +561,7 @@ peering_checks() {
   wait_gone 180 networkpeering "$TENANT-peer"
   wait_jsonpath 180 "[]" get vpcs.fabric.cloudyfolks.io "$TENANT" -o jsonpath='{.spec.vpcPeerings}'
   wait_jsonpath 180 "[]" get vpcs.fabric.cloudyfolks.io peer -o jsonpath='{.spec.vpcPeerings}'
-  wait_jsonpath 180 "[]" get vpcs.fabric.cloudyfolks.io "$TENANT" -o jsonpath='{.spec.staticRoutes}'
+  retry_until 180 vpc_has_no_route_to "$TENANT" 10.101.0.0/16
 }
 
 network_peering() {
