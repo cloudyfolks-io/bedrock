@@ -94,7 +94,7 @@ func (r *UserReconciler) finalize(ctx context.Context, user *v1alpha1.ObjectStor
 }
 
 func (r *UserReconciler) release(ctx context.Context, user *v1alpha1.ObjectStorageUser) error {
-	rgwName := RGWUserName(user.Namespace, user.Name)
+	rgwName := rgwUserOf(user)
 	rook, found, err := getRook(ctx, r.Client, cephObjectStoreUserGVK, client.ObjectKey{Namespace: StoreNamespace, Name: rgwName})
 	if err != nil {
 		return err
@@ -141,11 +141,43 @@ func (r *UserReconciler) converge(ctx context.Context, user *v1alpha1.ObjectStor
 	return r.converged(ctx, user, project, account)
 }
 
+func ownsRookUser(rook *unstructured.Unstructured, user *v1alpha1.ObjectStorageUser) bool {
+	owner := platform.OwnerOf(rook)
+	return owner.Kind == "ObjectStorageUser" && owner.Name == user.Name && owner.Namespace == user.Namespace && owner.UID == user.UID
+}
+
+func (r *UserReconciler) adoptionRefusal(ctx context.Context, user *v1alpha1.ObjectStorageUser, account Account) (outcome, error) {
+	rgwName := rgwUserOf(user)
+	rook, found, err := getRook(ctx, r.Client, cephObjectStoreUserGVK, client.ObjectKey{Namespace: StoreNamespace, Name: rgwName})
+	if err != nil {
+		return outcome{}, err
+	}
+	if found && ownsRookUser(rook, user) {
+		return outcome{}, nil
+	}
+	if found {
+		return outcome{reason: reasonUserClaimed, message: "the RGW user " + rgwName + " belongs to another object", requeue: steadyRequeue}, nil
+	}
+	exists, err := r.S3.UserExists(ctx, r.Endpoint, Region, account.Root, rgwName)
+	switch {
+	case err != nil:
+		return outcome{reason: failureReason(err, "AdoptCheckFailed"), message: err.Error(), requeue: pendingRequeue}, nil
+	case !exists:
+		return outcome{reason: reasonAdoptUserMissing, message: "the account of this project holds no RGW user " + rgwName, requeue: steadyRequeue}, nil
+	}
+	return outcome{}, nil
+}
+
 func (r *UserReconciler) converged(ctx context.Context, user *v1alpha1.ObjectStorageUser, project Project, account Account) (userState, error) {
+	if user.Annotations[AdoptUserAnnotation] != "" {
+		if refusal, err := r.adoptionRefusal(ctx, user, account); err != nil || refusal.reason != "" {
+			return userState{outcome: refusal}, err
+		}
+	}
 	if err := ssa.Apply(ctx, r.Client, CephUser(user, project), v1alpha1.ObjectStorageFieldManager); err != nil {
 		return userState{}, err
 	}
-	rgwName := RGWUserName(user.Namespace, user.Name)
+	rgwName := rgwUserOf(user)
 	rook, found, err := getRook(ctx, r.Client, cephObjectStoreUserGVK, client.ObjectKey{Namespace: StoreNamespace, Name: rgwName})
 	if err != nil {
 		return userState{}, err
@@ -193,7 +225,7 @@ func (r *UserReconciler) isLegacy(ctx context.Context, user *v1alpha1.ObjectStor
 	if user.Spec.Permission == "" {
 		return true, nil
 	}
-	rgwName := RGWUserName(user.Namespace, user.Name)
+	rgwName := rgwUserOf(user)
 	_, old, err := getRook(ctx, r.Client, cephObjectStoreUserGVK, client.ObjectKey{Namespace: user.Namespace, Name: rgwName})
 	if err != nil || old {
 		return old, err

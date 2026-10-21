@@ -33,6 +33,17 @@ func (c *Client) PutUserPolicy(ctx context.Context, endpoint, region string, cre
 	return failure(got, user, "PutUserPolicy")
 }
 
+func (c *Client) UserExists(ctx context.Context, endpoint, region string, creds Credentials, user string) (bool, error) {
+	got, err := c.iamCall(ctx, endpoint, region, creds, "GetUser", user, nil)
+	if err != nil {
+		return false, err
+	}
+	if got.code == NoSuchEntity {
+		return false, nil
+	}
+	return true, failure(got, user, "GetUser")
+}
+
 func (c *Client) GetUserPolicy(ctx context.Context, endpoint, region string, creds Credentials, user, name string) (string, bool, error) {
 	got, err := c.iamCall(ctx, endpoint, region, creds, "GetUserPolicy", user, url.Values{"PolicyName": {name}})
 	if err != nil {

@@ -23,12 +23,13 @@ import (
 type fakeIAM struct {
 	mu       sync.Mutex
 	policies map[string]string
+	known    map[string]bool
 	actions  []string
 }
 
 func newFakeIAM(t *testing.T) (*fakeIAM, string) {
 	t.Helper()
-	iam := &fakeIAM{policies: map[string]string{}}
+	iam := &fakeIAM{policies: map[string]string{}, known: map[string]bool{}}
 	server := httptest.NewServer(http.HandlerFunc(iam.serve))
 	t.Cleanup(server.Close)
 	return iam, server.URL
@@ -44,6 +45,13 @@ func (f *fakeIAM) serve(w http.ResponseWriter, r *http.Request) {
 	switch form.Get("Action") {
 	case "PutUserPolicy":
 		f.policies[user] = form.Get("PolicyDocument")
+	case "GetUser":
+		if !f.known[user] {
+			w.WriteHeader(http.StatusNotFound)
+			io.WriteString(w, `<ErrorResponse><Error><Code>NoSuchEntity</Code></Error></ErrorResponse>`)
+			return
+		}
+		io.WriteString(w, `<GetUserResponse><GetUserResult><User><UserName>`+user+`</UserName></User></GetUserResult></GetUserResponse>`)
 	case "GetUserPolicy":
 		document, found := f.policies[user]
 		if !found {

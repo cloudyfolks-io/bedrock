@@ -35,6 +35,8 @@ const (
 	reasonPurgeIncomplete   = "PurgeIncomplete"
 	reasonAccountPending    = "AccountPending"
 	reasonAccountNameTaken  = "AccountNameTaken"
+	reasonAdoptUserMissing  = "AdoptUserNotFound"
+	reasonUserClaimed       = "UserClaimed"
 	reasonPolicyFailed      = "PolicyFailed"
 
 	pendingRequeue = 10 * time.Second

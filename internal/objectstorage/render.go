@@ -12,7 +12,7 @@ import (
 const maxBucketName = 63
 
 func CephUser(user *v1alpha1.ObjectStorageUser, project Project) *unstructured.Unstructured {
-	rgwName := RGWUserName(user.Namespace, user.Name)
+	rgwName := rgwUserOf(user)
 	spec := map[string]any{
 		"store":       StoreName,
 		"displayName": rgwName,
