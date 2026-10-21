@@ -511,7 +511,7 @@ func (r *Reconciler) observe(ctx context.Context, in *flow, refused *Refusal) (O
 		r.settleEngine(ctx, in, &observed)
 		r.recordApplied(in, primary, &observed)
 	}
-	observed.Backup = r.observeBackup(ctx, in)
+	observed.Backup = r.observeBackup(ctx, in, observed.EngineReady && refused == nil)
 	return observed, nil
 }
 
@@ -562,14 +562,18 @@ func engineStepReason(err error) string {
 	return "a setup step failed"
 }
 
-func (r *Reconciler) observeBackup(ctx context.Context, in *flow) *v1alpha1.DatabaseBackupStatus {
+func (r *Reconciler) observeBackup(ctx context.Context, in *flow, ready bool) *v1alpha1.DatabaseBackupStatus {
 	db := *in.db
-	if !db.Spec.Backup.Enabled {
-		return nil
-	}
 	backups, err := ListBackups(ctx, r.Live, db)
 	if err != nil {
 		return db.Status.Backup
+	}
+	request := r.startRequestedBackup(ctx, in, PlanBackupRequest(db, backups, ready))
+	if !db.Spec.Backup.Enabled {
+		if request == nil {
+			return nil
+		}
+		return &v1alpha1.DatabaseBackupStatus{Request: request}
 	}
 	size, sampledAt := int64(0), (*metav1.Time)(nil)
 	if db.Status.Backup != nil {
@@ -578,7 +582,26 @@ func (r *Reconciler) observeBackup(ctx context.Context, in *flow) *v1alpha1.Data
 	if sampled, at, err := SampleBackupSize(ctx, r.Live, r.Store, in.cfg, db, r.now()); err == nil {
 		size, sampledAt = sampled, at
 	}
-	return BackupStatusOf(backups, r.now(), size, sampledAt)
+	status := BackupStatusOf(backups, r.now(), size, sampledAt)
+	status.Request = request
+	return status
+}
+
+func (r *Reconciler) startRequestedBackup(ctx context.Context, in *flow, plan BackupRequestPlan) *v1alpha1.DatabaseBackupRequest {
+	if plan.Create == "" {
+		return plan.Status
+	}
+	backup, err := PreUpgradeBackup(in.db.Spec.Engine, r.specOf(in), plan.Create)
+	if err != nil {
+		return plan.Status
+	}
+	backup.SetAnnotations(map[string]string{annotationBackupRequestedAt: plan.Status.At.UTC().Format(time.RFC3339)})
+	if err := client.IgnoreAlreadyExists(r.Client.Create(ctx, backup, client.FieldOwner(v1alpha1.DatabaseFieldManager))); err != nil {
+		return plan.Status
+	}
+	started := *plan.Status
+	started.Phase = v1alpha1.DatabaseBackupRequestRunning
+	return &started
 }
 
 func statsDue(db v1alpha1.Database, now time.Time) bool {

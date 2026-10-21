@@ -20,6 +20,14 @@ const (
 	AnnotationRestart       = "bedrock.cloudyfolks.io/restart"
 	AnnotationRefreshImage  = "bedrock.cloudyfolks.io/refresh-image"
 	AnnotationAdopt         = "bedrock.cloudyfolks.io/adopt"
+
+	AnnotationBackupRequested = "bedrock.cloudyfolks.io/backup-requested"
+
+	DatabaseBackupRequestPending   = "Pending"
+	DatabaseBackupRequestRunning   = "Running"
+	DatabaseBackupRequestCompleted = "Completed"
+	DatabaseBackupRequestFailed    = "Failed"
+	DatabaseBackupRequestRefused   = "Refused"
 )
 
 // +kubebuilder:validation:XValidation:rule="self == oldSelf",message="restore is immutable"
@@ -108,7 +116,25 @@ type DatabaseBackupItem struct {
 	CompletedAt *metav1.Time `json:"completedAt,omitempty"`
 }
 
+type DatabaseBackupRequest struct {
+	// +optional
+	At *metav1.Time `json:"at,omitempty"`
+	// +kubebuilder:validation:Enum=Pending;Running;Completed;Failed;Refused
+	Phase string `json:"phase"`
+	// +kubebuilder:validation:MaxLength=253
+	// +optional
+	BackupID string `json:"backupID,omitempty"`
+	// +kubebuilder:validation:MaxLength=63
+	// +optional
+	Reason string `json:"reason,omitempty"`
+	// +kubebuilder:validation:MaxLength=512
+	// +optional
+	Message string `json:"message,omitempty"`
+}
+
 type DatabaseBackupStatus struct {
+	// +optional
+	Request *DatabaseBackupRequest `json:"request,omitempty"`
 	// +optional
 	LastAt *metav1.Time `json:"lastAt,omitempty"`
 	// +optional

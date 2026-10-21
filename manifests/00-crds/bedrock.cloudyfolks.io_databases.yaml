@@ -239,6 +239,31 @@ spec:
                   pitrTo:
                     format: date-time
                     type: string
+                  request:
+                    properties:
+                      at:
+                        format: date-time
+                        type: string
+                      backupID:
+                        maxLength: 253
+                        type: string
+                      message:
+                        maxLength: 512
+                        type: string
+                      phase:
+                        enum:
+                        - Pending
+                        - Running
+                        - Completed
+                        - Failed
+                        - Refused
+                        type: string
+                      reason:
+                        maxLength: 63
+                        type: string
+                    required:
+                    - phase
+                    type: object
                   sizeBytes:
                     format: int64
                     minimum: 0
