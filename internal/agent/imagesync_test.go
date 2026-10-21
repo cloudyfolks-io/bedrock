@@ -510,3 +510,55 @@ func TestUnpinStaleUnpinsOnlyImagesOfDroppedTarballs(t *testing.T) {
 		t.Fatalf("unpinned %v", store.unpinCalls)
 	}
 }
+
+func TestImportBackoffNeverOverflows(t *testing.T) {
+	for _, attempts := range []int{1, 2, 7, 30, 64, 1000} {
+		got := importBackoff(attempts)
+		if got < importBackoffBase || got > importBackoffMax {
+			t.Fatalf("backoff after %d attempts is %s", attempts, got)
+		}
+	}
+}
+
+func TestSyncKeepsARecordedFileThatIsNotACopyOfTheArchivedTarball(t *testing.T) {
+	fixture := newSyncFixture(t)
+	fixture.holdAll()
+	link := "v0.3.0-" + release.ImageFileName(imageTwo)
+	writeFixtureFile(t, k0sFile(fixture.deps.Root, link), "someone else")
+	if err := recordLinks(fixture.deps.Root, []string{link}); err != nil {
+		t.Fatal(err)
+	}
+	if err := fixture.sync(t); err != nil {
+		t.Fatal(err)
+	}
+	if readFixtureFile(t, k0sFile(fixture.deps.Root, link)) != "someone else" {
+		t.Fatal("a recorded name alone must not allow the removal of a file with other content")
+	}
+}
+
+func TestSyncRemovesARecordedCopyOfTheArchivedTarball(t *testing.T) {
+	fixture := newSyncFixture(t)
+	fixture.holdAll()
+	link := "v0.3.0-" + release.ImageFileName(imageTwo)
+	writeFixtureFile(t, k0sFile(fixture.deps.Root, link), "two")
+	if err := recordLinks(fixture.deps.Root, []string{link}); err != nil {
+		t.Fatal(err)
+	}
+	if err := fixture.sync(t); err != nil {
+		t.Fatal(err)
+	}
+	if exists(k0sFile(fixture.deps.Root, link)) {
+		t.Fatal("the copy that the restore script makes must go")
+	}
+}
+
+func TestUnnamedTarballsAreReportedOnce(t *testing.T) {
+	root := t.TempDir()
+	tarballs := []archivedTarball{{Path: "/a/one.tar"}, {Path: "/a/two.tar", Names: []string{"x"}}}
+	if got := newUnnamedWarnings(root, tarballs); !slices.Equal(got, []string{"/a/one.tar"}) {
+		t.Fatalf("first call %v", got)
+	}
+	if got := newUnnamedWarnings(root, tarballs); len(got) != 0 {
+		t.Fatalf("second call %v", got)
+	}
+}

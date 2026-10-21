@@ -214,3 +214,18 @@ func TestRetainArchiveWithoutAnArchiveDoesNothing(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+func TestSettleArchiveDropsTheTargetVersionWhenTheKeptVersionIsMissing(t *testing.T) {
+	root := t.TempDir()
+	writeFixtureFile(t, archiveFile(root, "v0.3.0", "shared.tar"), "shared")
+	writeFixtureFile(t, archiveFile(root, "v0.3.0", "new.tar"), "new")
+	if err := settleArchive(root, "v0.2.0", []string{"shared.tar", "old.tar"}); err != nil {
+		t.Fatal(err)
+	}
+	if exists(filepath.Join(root, archiveDir, "v0.3.0")) {
+		t.Fatal("the target version must leave the archive after an abort")
+	}
+	if readFixtureFile(t, archiveFile(root, "v0.2.0", "shared.tar")) != "shared" {
+		t.Fatal("a tarball the kept version names must be carried before the other version goes")
+	}
+}

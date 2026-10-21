@@ -61,7 +61,7 @@ func cleanup(ctx context.Context, env StepEnv) (Outcome, error) {
 	count, imagesErr := removeImages(ctx, deps, env.Target.Spec.Images, env.From.Spec.Images)
 	err := errors.Join(
 		imagesErr,
-		retainAndUnpin(ctx, deps, env.From.Spec.Version, archiveFileNames(releaseRefs(env.From))),
+		restoreArchiveOf(ctx, deps, env.From.Spec.Version, archiveFileNames(releaseRefs(env.From))),
 		removeUpgradeFiles(deps.Root, env.Upgrade.Spec.Version),
 		removePreRestoreData(deps.Root),
 	)
@@ -76,17 +76,23 @@ func retainAndUnpin(ctx context.Context, deps Deps, keepVersion string, keepFile
 	if err != nil {
 		return err
 	}
-	if err := retainArchive(deps.Root, keepVersion, keepFiles); err != nil {
-		return err
-	}
-	if !runsContainers(deps.Root) {
+	if _, err := os.Stat(archiveVersionDir(deps.Root, keepVersion)); err != nil {
 		return nil
 	}
-	after, err := archivedTarballs(deps.Root)
-	if err != nil {
+	if runsContainers(deps.Root) {
+		kept := retainedTarballs(before, keepVersion, keepFiles)
+		if err := unpinStale(ctx, ctrStore{exec: deps.Exec, timeout: ctrCallTimeout}, before, kept); err != nil {
+			return err
+		}
+	}
+	return retainArchive(deps.Root, keepVersion, keepFiles)
+}
+
+func restoreArchiveOf(ctx context.Context, deps Deps, version string, keepFiles []string) error {
+	if err := os.MkdirAll(archiveVersionDir(deps.Root, version), 0o755); err != nil {
 		return err
 	}
-	return unpinStale(ctx, ctrStore{exec: deps.Exec, timeout: ctrCallTimeout}, before, after)
+	return retainAndUnpin(ctx, deps, version, keepFiles)
 }
 
 func removeImages(ctx context.Context, deps Deps, drop, keep []string) (int, error) {

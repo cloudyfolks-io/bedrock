@@ -496,3 +496,53 @@ func TestFinishStepsAreRegistered(t *testing.T) {
 		}
 	}
 }
+
+func TestCleanupRemovesTheTargetArchiveWhenTheOldOneIsMissing(t *testing.T) {
+	env, _ := finishEnv(t, nil)
+	root := env.Deps.Root
+	writeArchived(t, root, "v0.3.0", release.ImageFileName(newOnly), release.ImageFileName(shared))
+	if _, err := cleanup(context.Background(), env); err != nil {
+		t.Fatal(err)
+	}
+	if exists(filepath.Join(root, archiveDir, "v0.3.0")) {
+		t.Fatal("target-only tarballs must not stay after an abort")
+	}
+	if !exists(archiveFile(root, "v0.2.0", release.ImageFileName(shared))) {
+		t.Fatal("the shared tarball must move to the old version")
+	}
+}
+
+func TestPruneKeepsTheArchiveWhenContainerdCannotBeListed(t *testing.T) {
+	env, container := finishEnv(t, nil)
+	root := env.Deps.Root
+	writeArchived(t, root, "v0.2.0", release.ImageFileName(oldOnly))
+	writeArchived(t, root, "v0.3.0", release.ImageFileName(newOnly))
+	container.failures["/usr/local/bin/k0s ctr --namespace k8s.io images ls"] = errors.New("containerd is down")
+	if _, err := prune(context.Background(), env); err == nil {
+		t.Fatal("the failure must be reported")
+	}
+	if !exists(archiveFile(root, "v0.2.0", release.ImageFileName(oldOnly))) {
+		t.Fatal("tarballs must stay until their images are unpinned, so a retry converges")
+	}
+}
+
+func TestRetainedTarballsAreTheKeptListIncludingCarriedFiles(t *testing.T) {
+	before := []archivedTarball{
+		{Version: "v0.2.0", File: "shared.tar"},
+		{Version: "v0.2.0", File: "old.tar"},
+		{Version: "v0.2.0", File: "k0s-airgap.tar"},
+		{Version: "v0.3.0", File: "new.tar"},
+		{Version: "v0.3.0", File: "stale.tar"},
+		{Version: "v0.3.0", File: "k0s-airgap.tar"},
+	}
+	got := retainedTarballs(before, "v0.3.0", []string{"shared.tar", "new.tar", "k0s-airgap.tar"})
+	var files []string
+	for _, t := range got {
+		files = append(files, t.Version+"/"+t.File)
+	}
+	slices.Sort(files)
+	want := []string{"v0.2.0/shared.tar", "v0.3.0/k0s-airgap.tar", "v0.3.0/new.tar"}
+	if !slices.Equal(files, want) {
+		t.Fatalf("retained %v, want %v", files, want)
+	}
+}
