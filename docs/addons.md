@@ -499,7 +499,7 @@ secrets in the Setting when other people can read it.
 
 ## Metering
 
-Bedrock records nine series for each project. Each series has the labels
+Bedrock records ten series for each project. Each series has the labels
 `tenant` and `project`. The rules join every source series with the
 labels of the project namespaces. They never match a namespace name.
 
@@ -514,6 +514,7 @@ labels of the project namespaces. They never match a namespace name.
 | `bedrock:project_vm_network_transmit_bytes:rate5m` | Sent bytes per second, 5 minute rate | `kubevirt_vmi_network_transmit_bytes_total` |
 | `bedrock:project_vm_network_receive_bytes:increase1h` | Received bytes in the last hour, summed after the increase of each VM series | `kubevirt_vmi_network_receive_bytes_total` |
 | `bedrock:project_vm_network_transmit_bytes:increase1h` | Sent bytes in the last hour, summed after the increase of each VM series | `kubevirt_vmi_network_transmit_bytes_total` |
+| `bedrock:project_pod_network_transmit_bytes:increase1h` | Bytes that all pods of the project sent in the last hour, summed after the increase of each pod interface | `kube_ovn_interface_rx_bytes` |
 
 ### Labels
 
@@ -542,6 +543,21 @@ an earlier query can miss it.
 | Memory GB-hours | `sum_over_time(bedrock:project_vm_memory_bytes:sum[1h]) / 60 / 1073741824` |
 | Network GB, in | `bedrock:project_vm_network_receive_bytes:increase1h / 1073741824` |
 | Network GB, out | `bedrock:project_vm_network_transmit_bytes:increase1h / 1073741824` |
+| Pod network GB, out | `bedrock:project_pod_network_transmit_bytes:increase1h / 1073741824` |
+
+The series `bedrock:project_pod_network_transmit_bytes:increase1h` comes from the
+Fabric pinger. The pinger exports the counters of every OVS port with the labels
+`pod_name` and `pod_namespace`, and Fabric v1.2.1 has no other per-pod or per-port
+byte counter. The ServiceMonitor `bedrock-fabric-pinger` scrapes it. OVS counts
+from the side of the switch, so the bytes that a pod sends are `rx_bytes` of its port.
+The series covers VMs and containers. A VM is a launcher pod, so the VM series and
+this series count the same VM traffic: use one of them for a VM, never the sum.
+A pod that was deleted inside the hour loses the last part of its increase.
+The series counts all bytes that leave the pod interface, inside the VPC and to the
+internet. No Fabric v1.2.1 metric separates the bytes that leave through the gateway,
+the SNAT rule or an elastic IP. To bill internet egress only, Fabric must export a
+byte counter of the external gateway port or of the NAT rules, per project. Until then
+the series is an upper bound of the egress.
 
 The rule interval is 1 minute. This value is part of the contract. The
 vCPU and memory series have one sample each minute while a VM runs, and no
