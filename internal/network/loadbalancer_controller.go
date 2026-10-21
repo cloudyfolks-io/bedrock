@@ -119,8 +119,10 @@ func (r *LoadBalancerReconciler) program(ctx context.Context, lb v1alpha1.LoadBa
 	if lb.Spec.ElasticIPRef == "" {
 		return r.programInternal(ctx, lb, tenant, project, idle)
 	}
-	if v := missingKind(r.Kinds, "RouterLBRule"); v != nil {
-		return refused(lb, v)
+	for _, kind := range []string{"RouterLBRule", "SwitchLBRule", "Vip"} {
+		if v := missingKind(r.Kinds, kind); v != nil {
+			return refused(lb, v)
+		}
 	}
 	eip, v, err := r.elasticIP(ctx, lb)
 	if err != nil || v != nil {
@@ -154,7 +156,18 @@ func (r *LoadBalancerReconciler) program(ctx context.Context, lb v1alpha1.LoadBa
 		Namespace: lb.Namespace, Name: lb.Name, EIP: FabricName(eip.Namespace, eip.Name), Vpc: targets.vpc,
 		Labels: ObjectLabels("LoadBalancer", lb.Name, tenant, project), Annotations: OwnerAnnotations(&lb), Listeners: withEndpoints,
 	})
-	return r.apply(ctx, lb, rules, missing)
+	if len(targets.subnets) > 1 {
+		return r.apply(ctx, lb, rules, missing)
+	}
+	internal, v, err := r.internalObjects(ctx, lb, tenant, project, withEndpoints, targets.vpc)
+	if err != nil {
+		return metav1.Condition{}, 0, err
+	}
+	if v != nil {
+		cond, requeue, err := r.apply(ctx, lb, append(rules, internal...), missing)
+		return cond, max(requeue, waitRequeue), err
+	}
+	return r.apply(ctx, lb, append(rules, internal...), missing)
 }
 
 func programmable(listeners []Listener) []Listener {
@@ -423,24 +436,29 @@ func (r *LoadBalancerReconciler) programInternal(ctx context.Context, lb v1alpha
 	if len(withEndpoints) == 0 && len(targets.idle) == 0 {
 		return refused(lb, &Violation{Reason: ReasonNoTargets, Message: "no target has an address yet"})
 	}
-	in := InternalInput{Namespace: lb.Namespace, Name: lb.Name, Labels: ObjectLabels("LoadBalancer", lb.Name, tenant, project), Annotations: OwnerAnnotations(&lb), Listeners: withEndpoints}
-	plane := LBSubnetName(targets.vpc)
-	if present, err := exists(ctx, r.Client, fabric.SubnetGVK, plane); err != nil || !present {
-		if err != nil {
-			return metav1.Condition{}, 0, err
-		}
-		return refused(lb, &Violation{Reason: ReasonFabricNotReady, Message: fmt.Sprintf("waiting for the load balancer Subnet %s of the Network", plane)})
-	}
-	vip := InternalVip(in, plane)
-	address, v, err := r.allocateVip(ctx, lb, vip)
+	objects, v, err := r.internalObjects(ctx, lb, tenant, project, withEndpoints, targets.vpc)
 	if err != nil || v != nil {
 		if err != nil {
 			return metav1.Condition{}, 0, err
 		}
 		return refused(lb, v)
 	}
+	return r.apply(ctx, lb, objects, missing)
+}
+
+func (r *LoadBalancerReconciler) internalObjects(ctx context.Context, lb v1alpha1.LoadBalancer, tenant, project string, listeners []Listener, vpc string) ([]*unstructured.Unstructured, *Violation, error) {
+	in := InternalInput{Namespace: lb.Namespace, Name: lb.Name, Labels: ObjectLabels("LoadBalancer", lb.Name, tenant, project), Annotations: OwnerAnnotations(&lb), Listeners: listeners}
+	plane := LBSubnetName(vpc)
+	if present, err := exists(ctx, r.Client, fabric.SubnetGVK, plane); err != nil || !present {
+		return nil, &Violation{Reason: ReasonFabricNotReady, Message: fmt.Sprintf("waiting for the load balancer Subnet %s of the Network", plane)}, err
+	}
+	vip := InternalVip(in, plane)
+	address, v, err := r.allocateVip(ctx, lb, vip)
+	if err != nil || v != nil {
+		return []*unstructured.Unstructured{vip}, v, err
+	}
 	in.Vip = address
-	return r.apply(ctx, lb, append([]*unstructured.Unstructured{vip}, InternalRules(in)...), missing)
+	return append([]*unstructured.Unstructured{vip}, InternalRules(in)...), nil, nil
 }
 
 func (r *LoadBalancerReconciler) allocateVip(ctx context.Context, lb v1alpha1.LoadBalancer, vip *unstructured.Unstructured) (string, *Violation, error) {

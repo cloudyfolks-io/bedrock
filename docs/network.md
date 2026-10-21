@@ -455,6 +455,12 @@ When `healthCheck` is set, Fabric health checks are on.
 When it is not set, they are off.
 The other health check fields are not used.
 
+A LoadBalancer with `elasticIPRef` also keeps an internal address.
+It has the same `Vip` and `SwitchLBRule` objects as an internal balancer, so tenant traffic reaches it on the load balancer plane.
+This holds only when all targets use one Subnet.
+A waiting `Vip` does not delay the public rules.
+The field `status.address` stays the ElasticIP address.
+
 A LoadBalancer without `elasticIPRef` is an internal balancer.
 It becomes one Fabric `SwitchLBRule` for each listener and one Fabric `Vip`.
 The `Vip` is a plain Fabric `Vip` in the load balancer plane of the Network, and Fabric allocates it.

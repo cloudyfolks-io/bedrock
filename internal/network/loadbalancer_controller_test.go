@@ -115,6 +115,15 @@ func TestLoadBalancerProgramsRouterRules(t *testing.T) {
 		t.Fatalf("status address %q", got)
 	}
 	markRulesProgrammed(t, f.c, "lb1")
+	if err := fabrictest.MarkVipAllocated(context.Background(), f.c, InternalVipName(f.namespace, "lb1"), "100.69.0.2"); err != nil {
+		t.Fatal(err)
+	}
+	reconcileLoadBalancer(t, f.c, f.namespace, "lb1", knowsEverything)
+	for _, rule := range switchRulesOf(t, f.c, "lb1") {
+		if err := fabrictest.MarkSwitchLBRuleProgrammed(context.Background(), f.c, rule.GetName(), "ns/slr"); err != nil {
+			t.Fatal(err)
+		}
+	}
 	if result := reconcileLoadBalancer(t, f.c, f.namespace, "lb1", knowsEverything); result.RequeueAfter != 0 {
 		t.Fatalf("result %+v", result)
 	}
@@ -544,4 +553,34 @@ func TestLoadBalancerRequiresLabeledNamespace(t *testing.T) {
 	requireAccepted(t, c, loadBalancerFor(bare, "lb1", "ip1"))
 	reconcileLoadBalancer(t, c, bare, "lb1", knowsEverything)
 	requireLB(t, c, bare, "lb1", metav1.ConditionFalse, ReasonNamespaceNotLabeled)
+}
+
+func TestLoadBalancerWithElasticIPKeepsItsInternalVip(t *testing.T) {
+	f := newLBFixture(t)
+	ctx := context.Background()
+	reconcileLoadBalancer(t, f.c, f.namespace, "lb1", knowsEverything)
+	vip, err := getObject(ctx, f.c, fabric.VipGVK, InternalVipName(f.namespace, "lb1"))
+	if err != nil {
+		t.Fatalf("a public LoadBalancer must keep its plane Vip: %v", err)
+	}
+	if subnet, _, _ := unstructured.NestedString(vip.Object, "spec", "subnet"); subnet != LBSubnetName(f.network.Name) {
+		t.Fatalf("subnet %q", subnet)
+	}
+	if err := fabrictest.MarkVipAllocated(ctx, f.c, vip.GetName(), "100.69.0.2"); err != nil {
+		t.Fatal(err)
+	}
+	reconcileLoadBalancer(t, f.c, f.namespace, "lb1", knowsEverything)
+	if len(rulesOf(t, f.c, "lb1")) != 2 {
+		t.Fatal("the public rules must stay")
+	}
+	internal := switchRulesOf(t, f.c, "lb1")
+	if len(internal) != 2 {
+		t.Fatalf("internal rules %d", len(internal))
+	}
+	if address, _, _ := unstructured.NestedString(internal[0].Object, "spec", "vip"); address != "100.69.0.2" {
+		t.Fatalf("vip %q", address)
+	}
+	if got := addressOf(t, f.c, f.namespace, "lb1"); got != "91.246.31.20" {
+		t.Fatalf("status address must stay the public one, got %q", got)
+	}
 }
