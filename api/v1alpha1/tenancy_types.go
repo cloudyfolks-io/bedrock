@@ -57,6 +57,9 @@ type TenantStatus struct {
 	// +optional
 	VPC string `json:"vpc,omitempty"`
 	// +optional
+	// +listType=set
+	ProviderNetworks []string `json:"providerNetworks,omitempty"`
+	// +optional
 	Usage TenantQuota `json:"usage,omitempty"`
 }
 

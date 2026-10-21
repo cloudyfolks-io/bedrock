@@ -52,6 +52,8 @@ The operator creates these objects for the tenant:
 - A ClusterRoleBinding `tenant:acme:owner`.
 
 The field `status.vpc` shows the name of the virtual network.
+The field `status.providerNetworks` lists the names of the provider networks that the Networks of the tenant can use.
+The optional field `spec.network.vrfId` sets the VRF id of the default Network. Only an administrator can set it, and only when the Tenant is created.
 The field `status.usage` shows the measured use of the tenant.
 
 ## Owners and members

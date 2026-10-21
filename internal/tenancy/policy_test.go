@@ -428,3 +428,43 @@ func TestNonAdminKeepsEditingAnElasticIPOfAPlatformPool(t *testing.T) {
 		t.Fatalf("an unrelated change must pass: %v", err)
 	}
 }
+
+func tenantVrfPolicyWorld(t *testing.T) (admin, alice, root client.Client) {
+	t.Helper()
+	admin, cfg := startEnv(t)
+	mustCreate(t, admin,
+		&rbacv1.ClusterRole{ObjectMeta: metav1.ObjectMeta{Name: "tenant-writer"}, Rules: []rbacv1.PolicyRule{{APIGroups: []string{"bedrock.cloudyfolks.io"}, Resources: []string{"tenants"}, Verbs: []string{"create", "update", "get"}}}},
+		&rbacv1.ClusterRoleBinding{
+			ObjectMeta: metav1.ObjectMeta{Name: "tenant-writer"},
+			RoleRef:    rbacv1.RoleRef{APIGroup: rbacv1.GroupName, Kind: "ClusterRole", Name: "tenant-writer"},
+			Subjects: []rbacv1.Subject{
+				{APIGroup: rbacv1.GroupName, Kind: "User", Name: "bedrock:alice"},
+				{APIGroup: rbacv1.GroupName, Kind: "Group", Name: "bedrock:bedrock-admins"},
+			},
+		},
+	)
+	applyFile(t, admin, manifestPath("86-tenancy", "60-network-vrf-policy.yaml"))
+	alice = actingAs(t, cfg, "bedrock:alice")
+	root = actingAs(t, cfg, "bedrock:root", "bedrock:bedrock-admins", "system:authenticated")
+	return admin, alice, root
+}
+
+func tenantWithVrf(name string, id int32) *v1alpha1.Tenant {
+	tenant := acmeWithOwners()
+	tenant.Name = name
+	tenant.Spec.Network.VrfID = ptr.To(id)
+	return tenant
+}
+
+func TestNonAdminCannotCreateATenantWithAVrfID(t *testing.T) {
+	admin, alice, _ := tenantVrfPolicyWorld(t)
+	err := eventuallyForbidden(t, denyCreate(admin, alice, tenantWithVrf("pinneda", 1500)))
+	if !strings.Contains(err.Error(), "only an administrator may set or change vrfId") {
+		t.Fatalf("err = %v", err)
+	}
+}
+
+func TestAdminCanCreateATenantWithAVrfID(t *testing.T) {
+	_, _, root := tenantVrfPolicyWorld(t)
+	mustCreate(t, root, tenantWithVrf("pinnedb", 1500))
+}

@@ -376,6 +376,11 @@ When it names another ElasticIP, the ElasticIP reports `TargetMismatch`.
 Each provider network has a `role` in the cluster configuration: `tenant` (the default), `platform`, `transit` or `services`.
 The operator writes the role to the label `usability` of the Fabric `Subnet` `provider-<name>`: `public` for `tenant`, `private` for `platform`, `transit` for `transit` and `services` for `services`.
 A provider network without a role is a `tenant` network.
+
+The Tenant field `status.providerNetworks` lists the names of the `tenant` provider networks, sorted.
+These are the provider networks that a Network of the Tenant can use.
+The owners of a Tenant can read it, so a tenant service identity does not need a role on the Fabric `ProviderNetwork` kind.
+The list has names only. It does not show the interface, the range or the other roles.
 Only a member of `bedrock:bedrock-admins` can create an ElasticIP that names a provider network whose `usability` is not `public`.
 The policy `bedrock-elasticip-pool` reads the label `usability` of the Fabric `Subnet` objects.
 
@@ -408,6 +413,9 @@ Only a member of the group `bedrock:bedrock-admins` can set it.
 You can set it only when you create the Network.
 Nobody can change or remove it after that.
 Use it to keep the VRF id of a VPC that moves from another platform.
+The Tenant field `spec.network.vrfId` has the same rules, and the Tenant controller gives it to the default Network that it creates.
+A Tenant keeps the id of its default Network, so a migrated tenant keeps its VRF id.
+The checks `VRFInUse` and `VRFReserved` then run on that Network.
 Without `vrfId`, the operator picks the lowest free id from 1000 and records it in the annotation `network.bedrock.cloudyfolks.io/vrf-id`.
 The operator never picks an id that a Network pins.
 A Network gets `Ready=False` with the reason `VRFInUse` when another Network or another Fabric `Vpc` holds the id, and the operator does not make its Fabric Vpc.

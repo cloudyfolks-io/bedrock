@@ -456,3 +456,17 @@ func TestTenantShowsWhatBlocksItsTeardown(t *testing.T) {
 	}
 	releaseHold(t, c, network)
 }
+
+func TestTenantStatusListsTheTenantProviderNetworks(t *testing.T) {
+	c, _ := startEnv(t)
+	value := `[{"name":"public-b","role":"tenant","interface":"b","cidr":"192.0.2.0/24","gateway":"192.0.2.1"},{"name":"public-a","interface":"a","cidr":"198.51.100.0/24","gateway":"198.51.100.1"},{"name":"mgmt","role":"platform","interface":"m","cidr":"203.0.113.0/24","gateway":"203.0.113.1"}]`
+	mustCreate(t, c, &v1alpha1.Setting{ObjectMeta: metav1.ObjectMeta{Name: "network.provider-networks"}, Spec: v1alpha1.SettingSpec{Value: value}}, acmeWithOwners(defaultOwners()...))
+	reconciler := &TenantReconciler{Client: c, Reader: c}
+	if _, err := reconciler.Reconcile(context.Background(), reconcile.Request{NamespacedName: client.ObjectKey{Name: "acme"}}); err != nil {
+		t.Fatal(err)
+	}
+	tenant := &v1alpha1.Tenant{}
+	if !getInto(t, c, "acme", tenant) || !reflect.DeepEqual(tenant.Status.ProviderNetworks, []string{"public-a", "public-b"}) {
+		t.Fatalf("status %+v", tenant.Status.ProviderNetworks)
+	}
+}

@@ -12,12 +12,13 @@ import (
 )
 
 type TenantObservation struct {
-	Tenant     v1alpha1.Tenant
-	Network    *v1alpha1.Network
-	Projects   []v1alpha1.Project
-	ElasticIPs int
-	NetworkErr error
-	OwnersErr  error
+	Tenant           v1alpha1.Tenant
+	Network          *v1alpha1.Network
+	Projects         []v1alpha1.Project
+	ElasticIPs       int
+	ProviderNetworks []string
+	NetworkErr       error
+	OwnersErr        error
 }
 
 func DesiredNetwork(tenant v1alpha1.Tenant, existing *v1alpha1.Network) v1alpha1.Network {
@@ -88,7 +89,8 @@ func TenantStatus(in TenantObservation) v1alpha1.TenantStatus {
 	progressing := flagged(generation, v1alpha1.ConditionProgressing, ReasonSettled, checked, ReasonWaitingForNetwork)
 	degraded := flagged(generation, v1alpha1.ConditionDegraded, ReasonHealthy, checked, ReasonApplyFailed)
 	status := v1alpha1.TenantStatus{
-		Usage: TenantUsage(in.Projects, in.ElasticIPs),
+		Usage:            TenantUsage(in.Projects, in.ElasticIPs),
+		ProviderNetworks: in.ProviderNetworks,
 		CommonStatus: v1alpha1.CommonStatus{
 			ObservedGeneration: generation,
 			Conditions:         withConditions(in.Tenant.Status.Conditions, network, owners, quota, ready, progressing, degraded),
@@ -98,6 +100,17 @@ func TenantStatus(in TenantObservation) v1alpha1.TenantStatus {
 		status.VPC = in.Network.Status.VPC
 	}
 	return status
+}
+
+func TenantProviderNetworks(pools []v1alpha1.ProviderNetworkSpec) []string {
+	var names []string
+	for _, pool := range pools {
+		if pool.Role == "" || pool.Role == v1alpha1.ProviderRoleTenant {
+			names = append(names, pool.Name)
+		}
+	}
+	slices.Sort(names)
+	return names
 }
 
 func readNamed(resource string, names []string) []rbacv1.PolicyRule {

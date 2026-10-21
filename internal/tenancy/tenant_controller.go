@@ -18,6 +18,7 @@ import (
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
 
 	"github.com/cloudyfolks-io/bedrock/api/v1alpha1"
+	"github.com/cloudyfolks-io/bedrock/internal/network"
 	"github.com/cloudyfolks-io/bedrock/internal/ssa"
 )
 
@@ -53,18 +54,29 @@ func (r *TenantReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctr
 	if countErr != nil {
 		return ctrl.Result{}, countErr
 	}
+	providers := r.providerNetworks(ctx, tenant)
 	networkErr := r.applyNetwork(ctx, tenant, networks)
 	ownersErr := r.applyOwners(ctx, tenant, projects, networks)
 	observation := TenantObservation{
-		Tenant:     tenant,
-		Network:    r.observeNetwork(ctx, tenant),
-		Projects:   projects,
-		ElasticIPs: elasticIPs,
-		NetworkErr: networkErr,
-		OwnersErr:  ownersErr,
+		Tenant:           tenant,
+		Network:          r.observeNetwork(ctx, tenant),
+		Projects:         projects,
+		ElasticIPs:       elasticIPs,
+		ProviderNetworks: providers,
+		NetworkErr:       networkErr,
+		OwnersErr:        ownersErr,
 	}
 	r.writeStatus(ctx, tenant, TenantStatus(observation))
 	return ctrl.Result{RequeueAfter: Interval}, errors.Join(networkErr, ownersErr)
+}
+
+func (r *TenantReconciler) providerNetworks(ctx context.Context, tenant v1alpha1.Tenant) []string {
+	cfg, err := network.LoadConfig(ctx, r.Reader)
+	if err != nil {
+		logf.FromContext(ctx).Error(err, "read the provider networks", "tenant", tenant.Name)
+		return tenant.Status.ProviderNetworks
+	}
+	return TenantProviderNetworks(cfg.ProviderNetworks)
 }
 
 func (r *TenantReconciler) listOfTenant(ctx context.Context, tenant string) ([]v1alpha1.Project, []v1alpha1.Network, error) {

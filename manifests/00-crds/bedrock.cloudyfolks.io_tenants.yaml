@@ -192,6 +192,11 @@ spec:
               observedGeneration:
                 format: int64
                 type: integer
+              providerNetworks:
+                items:
+                  type: string
+                type: array
+                x-kubernetes-list-type: set
               usage:
                 properties:
                   cpu:

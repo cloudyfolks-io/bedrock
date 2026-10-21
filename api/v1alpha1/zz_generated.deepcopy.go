@@ -6610,6 +6610,11 @@ func (in *TenantSpec) DeepCopy() *TenantSpec {
 func (in *TenantStatus) DeepCopyInto(out *TenantStatus) {
 	*out = *in
 	in.CommonStatus.DeepCopyInto(&out.CommonStatus)
+	if in.ProviderNetworks != nil {
+		in, out := &in.ProviderNetworks, &out.ProviderNetworks
+		*out = make([]string, len(*in))
+		copy(*out, *in)
+	}
 	in.Usage.DeepCopyInto(&out.Usage)
 }
 

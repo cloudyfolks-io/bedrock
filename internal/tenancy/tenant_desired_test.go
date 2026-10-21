@@ -282,3 +282,26 @@ func TestDesiredNetworkKeepsTheVrfIDOfAnExistingNetwork(t *testing.T) {
 		t.Fatalf("the vrfId of an existing Network must stay: %v", got.Spec.VrfID)
 	}
 }
+
+func TestTenantProviderNetworksListsTheTenantRoleNames(t *testing.T) {
+	pools := []v1alpha1.ProviderNetworkSpec{
+		{Name: "zeta", Role: v1alpha1.ProviderRoleTenant},
+		{Name: "alpha"},
+		{Name: "mgmt", Role: v1alpha1.ProviderRolePlatform},
+		{Name: "transit", Role: v1alpha1.ProviderRoleTransit},
+		{Name: "svc", Role: v1alpha1.ProviderRoleServices},
+	}
+	if got := TenantProviderNetworks(pools); !slices.Equal(got, []string{"alpha", "zeta"}) {
+		t.Fatalf("got %v", got)
+	}
+	if got := TenantProviderNetworks(nil); len(got) != 0 {
+		t.Fatalf("got %v", got)
+	}
+}
+
+func TestTenantStatusCarriesTheProviderNetworks(t *testing.T) {
+	got := TenantStatus(TenantObservation{Tenant: acmeTenant(), Network: readyNetwork(), ProviderNetworks: []string{"alpha", "zeta"}})
+	if !slices.Equal(got.ProviderNetworks, []string{"alpha", "zeta"}) {
+		t.Fatalf("got %v", got.ProviderNetworks)
+	}
+}
