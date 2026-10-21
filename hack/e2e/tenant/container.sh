@@ -337,6 +337,8 @@ container_pod_addresses() {
 }
 
 container_runtime_gate() {
+  kubectl patch setting container.runtime-class --type merge -p '{"spec":{"value":"absent-runtime"}}'
+  wait_jsonpath 60 absent-runtime get setting container.runtime-class -o jsonpath='{.status.applied}'
   container_manifest gate "" | kubectl -n "$NS" apply -f -
   wait_reason 120 container gate Ready RuntimeUnavailable -n "$NS"
   expect_equal "" "$(kubectl -n "$NS" get deployment gate -o name 2>/dev/null || true)" "no deployment without the runtime class"
