@@ -14,6 +14,7 @@ const (
 	RoleWorkload      = "workload"
 
 	ConditionManagementApplied = "ManagementApplied"
+	ConditionImagesImported    = "ImagesImported"
 	ConditionMaintenanceMode   = "MaintenanceMode"
 	ConditionRebootPending     = "RebootPending"
 )

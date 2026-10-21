@@ -98,10 +98,11 @@ done
 k0s restore --config-out /root/restore/k0s.yaml "$1"
 printf '{"backup":"%s","completedAt":"%s"}\n' "$BACKUP" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" > /var/lib/bedrock/restore.json
 if [ ! -e /var/lib/k0s/containerd ]; then
-  mkdir -p /var/lib/k0s/images
+  mkdir -p /var/lib/k0s/images /var/lib/bedrock
   for FILE in /var/lib/bedrock/images/*/*/*.tar; do
     [ -e "$FILE" ] || continue
     VERSION=$(basename "$(dirname "$(dirname "$FILE")")")
+    echo "$VERSION-$(basename "$FILE")" >> /var/lib/bedrock/image-links
     ln -f "$FILE" "/var/lib/k0s/images/$VERSION-$(basename "$FILE")" || cp "$FILE" "/var/lib/k0s/images/$VERSION-$(basename "$FILE")"
   done
 fi
@@ -129,10 +130,11 @@ done
 k0s restore --config-out /root/restore/k0s.yaml "$1"
 printf '{"backup":"%s","completedAt":"%s"}\n' "$BACKUP" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" > /var/lib/bedrock/restore.json
 if [ ! -e /var/lib/k0s/containerd ]; then
-  mkdir -p /var/lib/k0s/images
+  mkdir -p /var/lib/k0s/images /var/lib/bedrock
   for FILE in /var/lib/bedrock/images/*/*/*.tar; do
     [ -e "$FILE" ] || continue
     VERSION=$(basename "$(dirname "$(dirname "$FILE")")")
+    echo "$VERSION-$(basename "$FILE")" >> /var/lib/bedrock/image-links
     ln -f "$FILE" "/var/lib/k0s/images/$VERSION-$(basename "$FILE")" || cp "$FILE" "/var/lib/k0s/images/$VERSION-$(basename "$FILE")"
   done
 fi
