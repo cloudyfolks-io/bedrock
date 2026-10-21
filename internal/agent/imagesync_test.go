@@ -90,7 +90,7 @@ func newSyncFixture(t *testing.T) syncFixture {
 	deps.K0sTimeout = 200 * time.Millisecond
 	deps.K0sPoll = 5 * time.Millisecond
 	store := &fakeStore{root: root, held: map[string]bool{}, pinned: map[string]bool{}, contents: map[string][]string{
-		oneFile: oneNames, twoFile: twoNames, versionedAirgap("v0.3.0"): {pauseRef},
+		"v0.3.0-" + oneFile: oneNames, "v0.3.0-" + twoFile: twoNames, "v0.3.0-" + airgapFile: {pauseRef},
 	}}
 	return syncFixture{deps: deps, store: store}
 }
@@ -171,7 +171,7 @@ func TestSyncLinksMissingTarballsWaitsPinsAndRemovesTheLinks(t *testing.T) {
 	if err := syncImages(context.Background(), fixture.deps, fixture.store); err != nil {
 		t.Fatal(err)
 	}
-	if !slices.Equal(fixture.store.linked, []string{release.ImageFileName(imageTwo)}) {
+	if !slices.Equal(fixture.store.linked, []string{"v0.3.0-" + release.ImageFileName(imageTwo)}) {
 		t.Fatalf("only the missing tarball may be linked, k0s saw %v", fixture.store.linked)
 	}
 	for _, name := range namesOf(t, imageTwo) {
@@ -194,7 +194,7 @@ func TestSyncAfterACrashBetweenLinkAndPinConverges(t *testing.T) {
 	if err := os.MkdirAll(filepath.Join(fixture.deps.Root, k0sImagesDir), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.Link(archiveFile(fixture.deps.Root, "v0.3.0", twoFile), filepath.Join(fixture.deps.Root, k0sImagesDir, twoFile)); err != nil {
+	if err := os.Link(archiveFile(fixture.deps.Root, "v0.3.0", twoFile), filepath.Join(fixture.deps.Root, k0sImagesDir, "v0.3.0-"+twoFile)); err != nil {
 		t.Fatal(err)
 	}
 	if err := syncImages(context.Background(), fixture.deps, fixture.store); err != nil {
@@ -215,11 +215,11 @@ func TestSyncKeepsAForeignFileInTheK0sDirectory(t *testing.T) {
 	fixture := newSyncFixture(t)
 	fixture.holdAll()
 	twoFile := release.ImageFileName(imageTwo)
-	writeFixtureFile(t, filepath.Join(fixture.deps.Root, k0sImagesDir, twoFile), "someone else")
+	writeFixtureFile(t, filepath.Join(fixture.deps.Root, k0sImagesDir, "v0.3.0-"+twoFile), "someone else")
 	if err := syncImages(context.Background(), fixture.deps, fixture.store); err != nil {
 		t.Fatal(err)
 	}
-	if readFixtureFile(t, filepath.Join(fixture.deps.Root, k0sImagesDir, twoFile)) != "someone else" {
+	if readFixtureFile(t, filepath.Join(fixture.deps.Root, k0sImagesDir, "v0.3.0-"+twoFile)) != "someone else" {
 		t.Fatal("only a link to the archived tarball may be removed")
 	}
 }
