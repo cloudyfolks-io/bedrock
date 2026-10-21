@@ -225,7 +225,7 @@ container_proof_pod_checks() {
 }
 
 container_proof_rule_programmed() {
-  [ -n "$(kubectl get switchlbrules.fabric.cloudyfolks.io proof-rule -o jsonpath='{.status.service}')" ]
+  [ -n "$(kubectl get switch-lb-rules.fabric.cloudyfolks.io proof-rule -o jsonpath='{.status.service}')" ]
 }
 
 container_proof_deployment_checks() {
@@ -267,12 +267,12 @@ container_proof_cleanup() {
   kubectl -n "$NS" delete pod proof-pod proof-http proof-kata --ignore-not-found --wait=false
   kubectl -n "$NS" delete deployment proof-deploy --ignore-not-found
   kubectl -n "$NS" delete virtualmachine proof-vm --ignore-not-found
-  kubectl delete switchlbrules.fabric.cloudyfolks.io proof-rule --ignore-not-found
+  kubectl delete switch-lb-rules.fabric.cloudyfolks.io proof-rule --ignore-not-found
   kubectl delete vips.fabric.cloudyfolks.io proof-vip --ignore-not-found
   wait_empty 180 -n "$NS" get pods -l 'proof'
   wait_gone 180 virtualmachine proof-vm -n "$NS"
   wait_gone 180 datavolume proof-vm-root -n "$NS"
-  wait_gone 180 switchlbrules.fabric.cloudyfolks.io proof-rule
+  wait_gone 180 switch-lb-rules.fabric.cloudyfolks.io proof-rule
   wait_gone 180 vips.fabric.cloudyfolks.io proof-vip
 }
 
