@@ -59,7 +59,7 @@ GROUP
 
 cluster_annotations() {
   local group
-  group=$(kubectl get securitygroups.fabric.cloudyfolks.io -l "bedrock.cloudyfolks.io/kind=SecurityGroup,bedrock.cloudyfolks.io/name=$lab_name,bedrock.cloudyfolks.io/project=${PROJECT:?set PROJECT}" -o jsonpath='{.items[0].metadata.name}')
+  group=$(kubectl get security-groups.fabric.cloudyfolks.io -l "bedrock.cloudyfolks.io/kind=SecurityGroup,bedrock.cloudyfolks.io/name=$lab_name,bedrock.cloudyfolks.io/project=${PROJECT:?set PROJECT}" -o jsonpath='{.items[0].metadata.name}')
   cat <<ANNOTATIONS
 v1.multus-cni.io/default-network: $NS/default
 default.$NS.fabric.cloudyfolks.io/port_security: "true"
