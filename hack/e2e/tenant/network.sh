@@ -553,9 +553,9 @@ peering_checks() {
   probe_vm_succeeds peer-probe peer peering "$(vm_address)"
   kubectl delete networkpeering "$TENANT-peer"
   wait_gone 180 networkpeering "$TENANT-peer"
-  wait_jsonpath 180 "" get vpcs.fabric.cloudyfolks.io "$TENANT" -o jsonpath='{.spec.vpcPeerings}'
-  wait_jsonpath 180 "" get vpcs.fabric.cloudyfolks.io peer -o jsonpath='{.spec.vpcPeerings}'
-  wait_jsonpath 180 "" get vpcs.fabric.cloudyfolks.io "$TENANT" -o jsonpath='{.spec.staticRoutes}'
+  wait_jsonpath 180 "[]" get vpcs.fabric.cloudyfolks.io "$TENANT" -o jsonpath='{.spec.vpcPeerings}'
+  wait_jsonpath 180 "[]" get vpcs.fabric.cloudyfolks.io peer -o jsonpath='{.spec.vpcPeerings}'
+  wait_jsonpath 180 "[]" get vpcs.fabric.cloudyfolks.io "$TENANT" -o jsonpath='{.spec.staticRoutes}'
 }
 
 network_peering() {
