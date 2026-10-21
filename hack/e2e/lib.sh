@@ -393,5 +393,6 @@ docs_restore_script() {
 docs_restore_script_valid() {
   head -n 1 "$1" | grep -Eq "^SNAPSHOT=[^ ]+ sh -eu <<'EOF'\$" &&
     tail -n 1 "$1" | grep -qx EOF &&
-    grep -q '^k0s restore ' "$1"
+    grep -q '^k0s restore ' "$1" &&
+    grep -q '^  for FILE in /var/lib/bedrock/images/\*/\*/\*.tar; do$' "$1"
 }

@@ -71,10 +71,6 @@ func cleanup(ctx context.Context, env StepEnv) (Outcome, error) {
 	return Outcome{Message: fmt.Sprintf("removed %d images", count)}, nil
 }
 
-func versionedAirgap(version string) string {
-	return "k0s-airgap-" + version + ".tar"
-}
-
 func removeImages(ctx context.Context, deps Deps, drop, keep []string) (int, error) {
 	if !runsContainers(deps.Root) {
 		return 0, nil
@@ -207,6 +203,9 @@ func restore(ctx context.Context, env StepEnv) (Outcome, error) {
 		return Outcome{}, err
 	}
 	if err := writeRestoreMarker(deps.Root, backupPath, deps.Now()); err != nil {
+		return Outcome{}, err
+	}
+	if err := linkArchiveWhenStoreIsEmpty(deps.Root, env.Upgrade.Spec.From); err != nil {
 		return Outcome{}, err
 	}
 	if _, err := deps.Exec.Run(ctx, "systemctl", "start", k0sControllerUnit); err != nil {

@@ -400,6 +400,14 @@ for dir in $DIRS; do
   if [ -e "/var/lib/k0s/$dir" ]; then mv "/var/lib/k0s/$dir" "$HOLD/"; fi
 done
 k0s restore --config-out /root/restore/k0s.yaml "$1"
+if [ ! -e /var/lib/k0s/containerd ]; then
+  mkdir -p /var/lib/k0s/images
+  for FILE in /var/lib/bedrock/images/*/*/*.tar; do
+    [ -e "$FILE" ] || continue
+    VERSION=$(basename "$(dirname "$(dirname "$FILE")")")
+    ln -f "$FILE" "/var/lib/k0s/images/$VERSION-$(basename "$FILE")" || cp "$FILE" "/var/lib/k0s/images/$VERSION-$(basename "$FILE")"
+  done
+fi
 systemctl start k0scontroller
 EOF
 ```
@@ -422,6 +430,14 @@ for dir in $DIRS; do
   if [ -e "/var/lib/k0s/$dir" ]; then mv "/var/lib/k0s/$dir" "$HOLD/"; fi
 done
 k0s restore --config-out /root/restore/k0s.yaml "$1"
+if [ ! -e /var/lib/k0s/containerd ]; then
+  mkdir -p /var/lib/k0s/images
+  for FILE in /var/lib/bedrock/images/*/*/*.tar; do
+    [ -e "$FILE" ] || continue
+    VERSION=$(basename "$(dirname "$(dirname "$FILE")")")
+    ln -f "$FILE" "/var/lib/k0s/images/$VERSION-$(basename "$FILE")" || cp "$FILE" "/var/lib/k0s/images/$VERSION-$(basename "$FILE")"
+  done
+fi
 systemctl start k0scontroller
 EOF
 ```

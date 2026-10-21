@@ -70,10 +70,18 @@ type archivedTarball struct {
 }
 
 func (t archivedTarball) linkName() string {
-	if t.File == airgapFile {
-		return versionedAirgap(t.Version)
+	return t.Version + "-" + t.File
+}
+
+func linkArchiveWhenStoreIsEmpty(root, version string) error {
+	if _, err := os.Stat(filepath.Join(root, containerdStore)); err == nil {
+		return nil
 	}
-	return t.File
+	tarballs, err := archivedTarballs(root)
+	if err != nil {
+		return err
+	}
+	return linkTarballs(root, slices.DeleteFunc(tarballs, func(t archivedTarball) bool { return t.Version != version }))
 }
 
 func syncHostImages(ctx context.Context, deps Deps) error {
