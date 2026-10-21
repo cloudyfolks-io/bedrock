@@ -169,7 +169,9 @@ Then the script checks these items.
 
 | Check | Why |
 | --- | --- |
-| The Lease of the node renews within 120 seconds after the restore starts. The script prints the time. | The kubelet starts at once, because `/var/lib/k0s/images` is empty and k0s imports nothing. |
+| The Lease of the node is renewed within 120 seconds after k0s starts. The job fails when it is not. | The kubelet starts at once, because `/var/lib/k0s/images` is empty and k0s imports nothing. |
+| The images of k0s (pause, kube-proxy) and of Bedrock are pinned and have no k0s source label, after the upgrade and after the restore. The images of the k0s airgap tarball are held. | The agent pins the images itself. The kubelet garbage collection keeps them. |
+| Before the upgrade, a tarball that the script puts in `/var/lib/k0s/images` as an older agent does is filed in the archive and not deleted. | The agent files legacy tarballs by the release image lists. |
 | The Pod starts after the restore starts, and the ConfigMap has the value `before-snapshot`. | The restore brings back the objects of the snapshot. The kubelet starts the Pod again. |
 | No Pod waits with the reason `ImagePullBackOff` or `ErrImagePull`. | The Pod starts from the images on the host. |
 | Each file of the saved list is still in `/var/lib/bedrock/images`, with the same size. | The restore keeps the archive of the images. |

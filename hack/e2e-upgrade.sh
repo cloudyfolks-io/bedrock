@@ -158,6 +158,30 @@ archived_file() {
   test -n "$(compgen -G "/var/lib/bedrock/images/$1/*/$2")"
 }
 
+image_pinned_clean() {
+  /usr/local/bin/k0s ctr --namespace k8s.io images ls | awk -v pattern="$1" '
+    index($1, pattern) { found = 1; if ($NF !~ /io.cri-containerd.pinned=pinned/ || $0 ~ /io.k0sproject.ocibundle-paths/) bad = 1 }
+    END { exit !(found && !bad) }'
+}
+
+assert_images_pinned() {
+  local repo_b=${image_b%%[:@]*}
+  retry_until 300 image_pinned_clean "/pause:"
+  retry_until 300 image_pinned_clean "/kube-proxy:"
+  retry_until 300 image_pinned_clean "$repo_b:"
+}
+
+airgap_images_held() {
+  local tarball names held name
+  tarball=$(compgen -G "/var/lib/bedrock/images/$1/*/k0s-airgap.tar") || return 1
+  names=$(tar -xOf "$tarball" index.json | grep -o '"org.opencontainers.image.ref.name": *"[^"]*"' | sed -E 's/.*: *"([^"]*)"/\1/')
+  test -n "$names"
+  held=$(/usr/local/bin/k0s ctr --namespace k8s.io images ls -q) || return 1
+  while read -r name; do
+    grep -qxF "$name" <<<"$held" || return 1
+  done <<<"$names"
+}
+
 k0s_images_dir_empty() {
   test -z "$(find /var/lib/k0s/images -type f 2>/dev/null)"
 }
@@ -229,6 +253,15 @@ metadata:
 spec:
   value: "$admin_recipient"
 SETTING
+
+retry_until 300 archived_file "$VERSION_A" "$image_a_file"
+legacy_source=$(compgen -G "/var/lib/bedrock/images/$VERSION_A/*/$image_a_file")
+legacy_sum=$(sha256sum "$legacy_source" | cut -d' ' -f1)
+cp "$legacy_source" "/var/lib/k0s/images/$image_a_file"
+retry_until 300 k0s_images_dir_empty
+test "$(sha256sum "$legacy_source" | cut -d' ' -f1)" = "$legacy_sum"
+retry_until 300 airgap_images_held "$VERSION_A"
+assert_images_pinned
 
 "$cli_b" upgrade --to "$VERSION_B" --bundle "$bundle_b" --yes --timeout 2h > "$workdir/upgrade.log" 2>&1 &
 upgrade=$!
@@ -302,6 +335,7 @@ if [ -n "$abort_in" ]; then
   archived_file "$VERSION_A" k0s-airgap.tar
   test ! -e "/var/lib/bedrock/images/$VERSION_B"
   retry_until 300 k0s_images_dir_empty
+  retry_until 300 airgap_images_held "$VERSION_A"
   for _ in $(seq 1 60); do
     if [ -z "$(kubectl get nodeupgrades -o name)" ]; then break; fi
     sleep 5
@@ -539,6 +573,8 @@ if [ "$image_a_file" != "$image_b_file" ]; then
   test -z "$(compgen -G "/var/lib/bedrock/images/*/*/$image_a_file")"
 fi
 retry_until 300 k0s_images_dir_empty
+retry_until 300 airgap_images_held "$VERSION_B"
+assert_images_pinned
 test "$(kubectl get node "$node" -o jsonpath='{.spec.unschedulable}')" != "true"
 kubectl wait --for=condition=Ready node --all --timeout=300s
 grep -qx 'server = "https://127.0.0.1:1"' /etc/k0s/containerd.d/certs.d/_default/hosts.toml
@@ -564,13 +600,20 @@ kubectl -n default delete configmap,pod "$restore_marker"
 retry_until 300 container_gone "${restore_container#containerd://}"
 restore_started=$(date -u +%s)
 bash -x "$restore_script"
+k0s_started=$(date -u -d "$(systemctl show k0scontroller -p ActiveEnterTimestamp --value)" +%s)
+lease_deadline=$((k0s_started + 120))
+lease_now=$(date -u +%s)
+if [ "$lease_now" -lt "$lease_deadline" ]; then sleep $((lease_deadline - lease_now)); fi
+node_lease_renewed_since "$k0s_started" || {
+  echo "the kubelet lease was not renewed within 120 s after k0s started" >&2
+  exit 1
+}
+echo "the kubelet lease renewed within 120 s after k0s started"
 retry_until 600 kubectl get --raw=/readyz
 print_restore_state
 retry_until 300 kubectl patch setting backup.etcd-schedule --type merge -p '{"spec":{"value":""}}'
 test "$(kubectl -n default get configmap "$restore_marker" -o jsonpath='{.data.state}')" = before-snapshot
 echo "the marker ConfigMap is back: etcd holds the state of the snapshot"
-retry_until 120 node_lease_renewed_since "$restore_started"
-echo "the kubelet lease renewed $(($(date -u +%s) - restore_started)) s after the restore started"
 retry_until 1800 node_lease_renewed_since "$restore_started"
 kubectl wait --for=condition=Ready node --all --timeout=300s
 kubectl -n bedrock-system rollout status deploy/bedrock-operator --timeout=300s
@@ -580,6 +623,7 @@ assert_no_image_pull_failures
 images_after=$(k0s_images_listing)
 test -z "$(comm -23 <(printf '%s\n' "$images_before") <(printf '%s\n' "$images_after"))"
 retry_until 300 k0s_images_dir_empty
+assert_images_pinned
 kubectl -n default delete configmap,pod "$restore_marker"
 rm -rf /root/restore /var/lib/k0s/.pre-restore-*
 echo "e2e-upgrade passed"
