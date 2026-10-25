@@ -7,7 +7,6 @@ import (
 	"crypto/tls"
 	"crypto/x509"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -21,7 +20,6 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	"github.com/cloudyfolks-io/bedrock/api/v1alpha1"
-	"github.com/cloudyfolks-io/bedrock/internal/backup/schedule"
 )
 
 const (
@@ -34,6 +32,7 @@ const (
 	minReclaimBytes       = 268435456
 	defragSlotMinutes     = 15
 	defragSlotCount       = 4
+	defragStartHour       = 3
 	defragRequestTimeout  = 10 * time.Minute
 	etcdProbeTimeout      = 30 * time.Second
 	etcdStatusPath        = "/v3/maintenance/status"
@@ -48,8 +47,18 @@ type etcdStatus struct {
 	DBSizeInUse int64
 }
 
-func defragSchedule(index int) string {
-	return fmt.Sprintf("%d 3 * * 0", defragSlotMinutes*(index%defragSlotCount))
+func defragSlotStart(now time.Time, index int) time.Time {
+	utc := now.UTC()
+	sunday := time.Date(utc.Year(), utc.Month(), utc.Day()-int(utc.Weekday()), defragStartHour, 0, 0, 0, time.UTC)
+	slot := sunday.Add(time.Duration(defragSlotMinutes*(index%defragSlotCount)) * time.Minute)
+	if slot.After(utc) {
+		return slot.AddDate(0, 0, -7)
+	}
+	return slot
+}
+
+func inDefragSlot(now time.Time, index int) bool {
+	return now.UTC().Sub(defragSlotStart(now, index)) < defragSlotMinutes*time.Minute
 }
 
 func controllerIndex(hosts []v1alpha1.Host, node string) (int, bool) {
@@ -205,28 +214,24 @@ func RunEtcdDefrag(ctx context.Context, c client.Client, deps Deps) error {
 		return err
 	}
 	index, ok := controllerIndex(hosts.Items, deps.Node)
-	if !ok {
+	now := deps.Now()
+	if !ok || !inDefragSlot(now, index) {
 		return nil
 	}
-	last := readDefragStamp(deps.Root)
-	if last.IsZero() {
-		return writeDefragStamp(deps.Root, deps.Now())
+	slot := defragSlotStart(now, index)
+	if !readDefragStamp(deps.Root).Before(slot) {
+		return nil
 	}
-	due, err := schedule.Due(defragSchedule(index), last, deps.Now())
-	if err != nil || !due {
+	if err := writeDefragStamp(deps.Root, slot); err != nil {
 		return err
 	}
 	httpClient, err := etcdHTTPClient(deps.Root)
 	if err != nil {
 		return err
 	}
-	endpoint := cmp.Or(deps.EtcdEndpoint, etcdDefaultEndpoint)
-	did, defragErr := defragMember(ctx, httpClient, endpoint)
-	if defragErr != nil && !did {
-		return defragErr
-	}
-	if did && defragErr == nil {
+	did, err := defragMember(ctx, httpClient, cmp.Or(deps.EtcdEndpoint, etcdDefaultEndpoint))
+	if did && err == nil {
 		logLine("etcd member defragmented")
 	}
-	return errors.Join(defragErr, writeDefragStamp(deps.Root, deps.Now()))
+	return err
 }

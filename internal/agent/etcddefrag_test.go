@@ -18,11 +18,44 @@ import (
 	"github.com/cloudyfolks-io/bedrock/api/v1alpha1"
 )
 
-func TestDefragScheduleOffsetsMembersByFifteenMinutes(t *testing.T) {
-	want := map[int]string{0: "0 3 * * 0", 1: "15 3 * * 0", 2: "30 3 * * 0", 3: "45 3 * * 0", 4: "0 3 * * 0", 7: "45 3 * * 0"}
-	for index, expr := range want {
-		if got := defragSchedule(index); got != expr {
-			t.Errorf("index %d: got %q, want %q", index, got, expr)
+func TestDefragSlotStartIsSundayThreeUTCPlusFifteenMinutesPerIndex(t *testing.T) {
+	wednesday := time.Date(2026, 10, 28, 17, 45, 0, 0, time.UTC)
+	want := map[int]time.Time{
+		0: sundayAt(3, 0).AddDate(0, 0, -7),
+		1: sundayAt(3, 15).AddDate(0, 0, -7),
+		2: sundayAt(3, 30).AddDate(0, 0, -7),
+		3: sundayAt(3, 45).AddDate(0, 0, -7),
+		4: sundayAt(3, 0).AddDate(0, 0, -7),
+		7: sundayAt(3, 45).AddDate(0, 0, -7),
+	}
+	for index, slot := range want {
+		if got := defragSlotStart(wednesday, index); !got.Equal(slot) {
+			t.Errorf("index %d: got %s, want %s", index, got, slot)
+		}
+	}
+	if got := defragSlotStart(sundayAt(2, 59), 0); !got.Equal(sundayAt(3, 0).AddDate(0, 0, -7)) {
+		t.Errorf("before the slot the slot of the last week counts: %s", got)
+	}
+	if got := defragSlotStart(sundayAt(3, 0), 0); !got.Equal(sundayAt(3, 0)) {
+		t.Errorf("at the start: %s", got)
+	}
+}
+
+func TestInDefragSlotLastsFifteenMinutes(t *testing.T) {
+	cases := []struct {
+		now  time.Time
+		want bool
+	}{
+		{sundayAt(3, 14), false},
+		{sundayAt(3, 15), true},
+		{sundayAt(3, 29), true},
+		{sundayAt(3, 30), false},
+		{sundayAt(3, 15).AddDate(0, 0, 1), false},
+		{sundayAt(3, 15).AddDate(0, 0, -1), false},
+	}
+	for _, tc := range cases {
+		if got := inDefragSlot(tc.now, 1); got != tc.want {
+			t.Errorf("%s: got %v", tc.now, got)
 		}
 	}
 }
@@ -169,11 +202,11 @@ func writeEtcdPKI(t *testing.T, root string, srv *httptest.Server) {
 	}
 }
 
-func defragDeps(t *testing.T, srv *httptest.Server, now time.Time) Deps {
+func defragDeps(t *testing.T, srv *httptest.Server, node string, now time.Time) Deps {
 	t.Helper()
 	deps := newDeps(nil, now)
 	deps.Root = t.TempDir()
-	deps.Node = "defrag-b"
+	deps.Node = node
 	deps.EtcdEndpoint = srv.URL
 	writeEtcdPKI(t, deps.Root, srv)
 	return deps
@@ -183,53 +216,177 @@ func sundayAt(hour, minute int) time.Time {
 	return time.Date(2026, 11, 1, hour, minute, 0, 0, time.UTC)
 }
 
-func TestRunEtcdDefragWaitsForTheScheduledSlotOfTheMember(t *testing.T) {
-	createControlPlaneHost(t, "defrag-a", v1alpha1.RoleControlPlane)
-	createControlPlaneHost(t, "defrag-b", v1alpha1.RoleControlPlane)
-	etcd := &fakeEtcd{size: "1900000000", inUse: "77000000"}
+func runAt(t *testing.T, deps *Deps, now time.Time) error {
+	t.Helper()
+	deps.Now = func() time.Time { return now }
+	return RunEtcdDefrag(context.Background(), k8sClient, *deps)
+}
+
+func startEtcd(t *testing.T, etcd *fakeEtcd) *httptest.Server {
+	t.Helper()
 	srv := httptest.NewTLSServer(etcd)
 	t.Cleanup(srv.Close)
-	deps := defragDeps(t, srv, sundayAt(2, 0))
-	if err := RunEtcdDefrag(context.Background(), k8sClient, deps); err != nil {
+	return srv
+}
+
+func (f *fakeEtcd) defragments() int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	count := 0
+	for _, request := range f.requests {
+		if strings.HasSuffix(request, "/defragment") {
+			count++
+		}
+	}
+	return count
+}
+
+func controllers(t *testing.T) {
+	t.Helper()
+	for _, name := range []string{"defrag-a", "defrag-b", "defrag-c"} {
+		createControlPlaneHost(t, name, v1alpha1.RoleControlPlane)
+	}
+}
+
+func TestRunEtcdDefragRunsOnceInsideTheSlotOfTheMember(t *testing.T) {
+	controllers(t)
+	etcd := &fakeEtcd{size: "1900000000", inUse: "77000000"}
+	deps := defragDeps(t, startEtcd(t, etcd), "defrag-b", sundayAt(2, 0))
+	for _, now := range []time.Time{sundayAt(2, 0), sundayAt(3, 14), sundayAt(3, 30), sundayAt(9, 0)} {
+		if err := runAt(t, &deps, now); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if etcd.defragments() != 0 {
+		t.Fatalf("defragmented outside the slot: %s", etcd.seen())
+	}
+	for _, now := range []time.Time{sundayAt(3, 16), sundayAt(3, 20), sundayAt(3, 29)} {
+		if err := runAt(t, &deps, now); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if etcd.defragments() != 1 {
+		t.Fatalf("want one defragment in the slot: %s", etcd.seen())
+	}
+}
+
+func TestRunEtcdDefragDoesNotCatchUpAMissedSlot(t *testing.T) {
+	controllers(t)
+	etcd := &fakeEtcd{size: "1900000000", inUse: "77000000"}
+	deps := defragDeps(t, startEtcd(t, etcd), "defrag-b", sundayAt(4, 0))
+	for _, now := range []time.Time{sundayAt(4, 0), sundayAt(4, 0).AddDate(0, 0, 1), sundayAt(4, 0).AddDate(0, 0, 6), sundayAt(3, 14).AddDate(0, 0, 7)} {
+		if err := runAt(t, &deps, now); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if etcd.defragments() != 0 {
+		t.Fatalf("caught up a missed slot: %s", etcd.seen())
+	}
+	if err := runAt(t, &deps, sundayAt(3, 20).AddDate(0, 0, 7)); err != nil {
 		t.Fatal(err)
 	}
-	deps.Now = func() time.Time { return sundayAt(3, 14) }
-	if err := RunEtcdDefrag(context.Background(), k8sClient, deps); err != nil {
-		t.Fatal(err)
+	if etcd.defragments() != 1 {
+		t.Fatalf("the slot of the next week must run: %s", etcd.seen())
 	}
-	if etcd.seen() != "" {
-		t.Fatalf("the member defragmented before its slot: %s", etcd.seen())
+}
+
+func TestRunEtcdDefragNeverRunsMembersTogether(t *testing.T) {
+	controllers(t)
+	etcd := &fakeEtcd{size: "1900000000", inUse: "77000000"}
+	srv := startEtcd(t, etcd)
+	deps := map[string]*Deps{}
+	for _, name := range []string{"defrag-a", "defrag-b", "defrag-c"} {
+		d := defragDeps(t, srv, name, sundayAt(3, 0))
+		deps[name] = &d
 	}
-	deps.Now = func() time.Time { return sundayAt(3, 16) }
-	if err := RunEtcdDefrag(context.Background(), k8sClient, deps); err != nil {
-		t.Fatal(err)
+	for now, runner := range map[time.Time]string{sundayAt(3, 5): "defrag-a", sundayAt(3, 20): "defrag-b", sundayAt(3, 35): "defrag-c"} {
+		before := etcd.defragments()
+		for name, d := range deps {
+			if err := runAt(t, d, now); err != nil {
+				t.Fatal(err)
+			}
+			ran := etcd.defragments() > before
+			if ran != (name == runner) {
+				t.Fatalf("at %s %s ran=%v", now, name, ran)
+			}
+			if ran {
+				before = etcd.defragments()
+			}
+		}
 	}
-	if !strings.Contains(etcd.seen(), "POST /v3/maintenance/defragment") {
-		t.Fatalf("no defragment: %s", etcd.seen())
+	if etcd.defragments() != 3 {
+		t.Fatalf("defragments %d", etcd.defragments())
+	}
+	for _, d := range deps {
+		if err := runAt(t, d, sundayAt(3, 50)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if etcd.defragments() != 3 {
+		t.Fatalf("a member ran after its slot: %d", etcd.defragments())
+	}
+}
+
+func TestRunEtcdDefragSkipsTheWeekWhenTheMemberIsNotHealthy(t *testing.T) {
+	controllers(t)
+	etcd := &fakeEtcd{size: "1900000000", inUse: "77000000", failHeal: true}
+	deps := defragDeps(t, startEtcd(t, etcd), "defrag-b", sundayAt(3, 0))
+	if err := runAt(t, &deps, sundayAt(3, 16)); err == nil {
+		t.Fatal("an unhealthy member must be reported")
 	}
 	etcd.mu.Lock()
+	etcd.failHeal = false
 	etcd.requests = nil
 	etcd.mu.Unlock()
-	deps.Now = func() time.Time { return sundayAt(3, 20) }
-	if err := RunEtcdDefrag(context.Background(), k8sClient, deps); err != nil {
-		t.Fatal(err)
+	for _, now := range []time.Time{sundayAt(3, 17), sundayAt(3, 29), sundayAt(3, 40), sundayAt(5, 0)} {
+		if err := runAt(t, &deps, now); err != nil {
+			t.Fatal(err)
+		}
 	}
 	if etcd.seen() != "" {
-		t.Fatalf("the member defragmented twice in a week: %s", etcd.seen())
+		t.Fatalf("retried in the same week: %s", etcd.seen())
+	}
+	if err := runAt(t, &deps, sundayAt(3, 16).AddDate(0, 0, 7)); err != nil {
+		t.Fatal(err)
+	}
+	if etcd.defragments() != 1 {
+		t.Fatalf("next week must run: %s", etcd.seen())
+	}
+}
+
+func TestRunEtcdDefragIgnoresClockJumps(t *testing.T) {
+	controllers(t)
+	etcd := &fakeEtcd{size: "1900000000", inUse: "77000000"}
+	deps := defragDeps(t, startEtcd(t, etcd), "defrag-b", sundayAt(3, 0))
+	if err := runAt(t, &deps, sundayAt(3, 20)); err != nil {
+		t.Fatal(err)
+	}
+	if etcd.defragments() != 1 {
+		t.Fatalf("setup: %s", etcd.seen())
+	}
+	jumps := []time.Time{
+		sundayAt(3, 16),
+		sundayAt(3, 16).AddDate(0, 0, -7),
+		sundayAt(3, 16).AddDate(0, -3, 0),
+		sundayAt(3, 16).AddDate(1, 0, 0).Add(-time.Hour),
+		sundayAt(3, 14).AddDate(0, 0, 7),
+		sundayAt(3, 30).AddDate(0, 0, 7),
+	}
+	for _, now := range jumps {
+		if err := runAt(t, &deps, now); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if etcd.defragments() != 1 {
+		t.Fatalf("a clock jump gave a run: %s", etcd.seen())
 	}
 }
 
 func TestRunEtcdDefragIgnoresAHostWithoutTheControlPlaneRole(t *testing.T) {
 	createControlPlaneHost(t, "defrag-b", v1alpha1.RoleWorkload)
 	etcd := &fakeEtcd{size: "1900000000", inUse: "77000000"}
-	srv := httptest.NewTLSServer(etcd)
-	t.Cleanup(srv.Close)
-	deps := defragDeps(t, srv, sundayAt(3, 16).AddDate(0, 0, -7))
-	if err := RunEtcdDefrag(context.Background(), k8sClient, deps); err != nil {
-		t.Fatal(err)
-	}
-	deps.Now = func() time.Time { return sundayAt(3, 16) }
-	if err := RunEtcdDefrag(context.Background(), k8sClient, deps); err != nil {
+	deps := defragDeps(t, startEtcd(t, etcd), "defrag-b", sundayAt(3, 0))
+	if err := runAt(t, &deps, sundayAt(3, 16)); err != nil {
 		t.Fatal(err)
 	}
 	if etcd.seen() != "" {

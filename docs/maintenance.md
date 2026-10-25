@@ -17,19 +17,28 @@ rules are:
   The controller index is the position of the host name in the sorted list of
   the control-plane hosts. The first host runs at 03:00, the second at 03:15,
   the third at 03:30, the fourth at 03:45, the fifth at 03:00 again. The members
-  never defragment together when the cluster has up to four controllers.
+  never defragment together when the cluster has up to four controllers. A
+  cluster with more than four controllers has members with the same slot.
 - Each run handles one member. The agent defragments only the member on its own
   host, through `https://127.0.0.1:2379`. It uses the files
   `apiserver-etcd-client.crt`, `apiserver-etcd-client.key` and `etcd/ca.crt`
   under `/var/lib/k0s/pki`.
+- The agent runs only inside the slot of its own member, in the current week.
+  The slot lasts 15 minutes. A missed slot does not run later. It waits for the
+  next week. A change of the clock never gives a run outside the slot.
 - The agent checks that the member is healthy before the defragmentation. When
-  the member is not healthy, the agent does nothing and tries again at the next
-  tick. The agent checks the health again after the defragmentation and reports
-  an error when the member is not healthy.
+  the member is not healthy, the agent writes the error to the journal and skips
+  this week. It does not try again in the same slot. The agent checks the
+  health again after the defragmentation and reports an error when the member
+  is not healthy.
 - The agent skips the run when the database file is less than 268435456 bytes
   (256 MiB) larger than the data in it.
-- The agent saves the time of the last run in `/var/lib/bedrock/etcd-defrag`. A
-  host that has no file waits for its next slot.
+- The agent saves the start of the last slot it handled in
+  `/var/lib/bedrock/etcd-defrag`. A run, a skip and a failed health check all
+  count as handled.
+- On a control plane with one member, the defragmentation blocks the API for
+  its duration, because no other member serves requests. Plan the Sunday slot
+  for a quiet time.
 
 The agent writes `etcd member defragmented` to the journal of `bedrock-agent`
 after a defragmentation. Find the line on a controller:
