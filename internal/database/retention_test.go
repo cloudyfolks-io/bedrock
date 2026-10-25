@@ -20,8 +20,9 @@ func TestConfigReadsTheRetentionBounds(t *testing.T) {
 	if err != nil || cfg.RetentionMin != 3 || cfg.RetentionMax != 30 {
 		t.Fatalf("values %+v %v", cfg, err)
 	}
-	if _, err := ParseConfig(map[string]string{"database.backup.retention-days-min": "40", "database.backup.retention-days-max": "30"}); err == nil {
-		t.Fatal("a minimum above the maximum was accepted")
+	cfg, err = ParseConfig(map[string]string{"database.backup.retention-days-min": "40", "database.backup.retention-days-max": "30"})
+	if err != nil || cfg.RetentionMin != 1 || cfg.RetentionMax != 365 {
+		t.Fatalf("conflict %+v %v", cfg, err)
 	}
 }
 

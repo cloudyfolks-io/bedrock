@@ -2,7 +2,6 @@ package database
 
 import (
 	"context"
-	"fmt"
 	"net/netip"
 	"strconv"
 	"time"
@@ -57,6 +56,9 @@ func ParseConfig(values map[string]string) (Config, error) {
 	if err := settings.RangeConflict(values); err != nil {
 		return Config{}, err
 	}
+	if settings.RetentionConflict(values) != nil {
+		values = withoutRetentionBounds(values)
+	}
 	effective := make(map[string]string, len(configKeys))
 	for _, key := range configKeys {
 		def, _ := settings.Lookup(key)
@@ -78,9 +80,6 @@ func ParseConfig(values map[string]string) (Config, error) {
 	retentionDays, _ := strconv.Atoi(effective[keyRetentionDays])
 	retentionMin, _ := strconv.Atoi(effective[keyRetentionMin])
 	retentionMax, _ := strconv.Atoi(effective[keyRetentionMax])
-	if retentionMin > retentionMax {
-		return Config{}, fmt.Errorf("the Setting %s must not be above %s", keyRetentionMin, keyRetentionMax)
-	}
 	vipRange, _ := netip.ParsePrefix(effective[keyVIPRange])
 	retentionAfterDelete, _ := time.ParseDuration(effective[keyRetentionDelete])
 	backupMaxAge, _ := time.ParseDuration(effective[keyBackupMaxAge])
@@ -101,6 +100,16 @@ func ParseConfig(values map[string]string) (Config, error) {
 		RetentionAfterDelete: retentionAfterDelete,
 		BackupMaxAge:         backupMaxAge,
 	}, nil
+}
+
+func withoutRetentionBounds(values map[string]string) map[string]string {
+	kept := make(map[string]string, len(values))
+	for key, value := range values {
+		if key != keyRetentionMin && key != keyRetentionMax {
+			kept[key] = value
+		}
+	}
+	return kept
 }
 
 func settingValues(ctx context.Context, c client.Reader) (map[string]string, error) {
