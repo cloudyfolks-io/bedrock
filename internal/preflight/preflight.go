@@ -62,7 +62,22 @@ func checks(facts host.Facts, devices []host.Device, cfg v1alpha1.ClusterConfig,
 }
 
 func swapMessage(swaps []string) string {
-	return fmt.Sprintf("swap is active on %s, run swapoff for each device and remove its entry from /etc/fstab", strings.Join(swaps, ", "))
+	var zram, others []string
+	for _, device := range swaps {
+		if strings.HasPrefix(device, "/dev/zram") {
+			zram = append(zram, device)
+		} else {
+			others = append(others, device)
+		}
+	}
+	var fixes []string
+	if len(others) > 0 {
+		fixes = append(fixes, fmt.Sprintf("%s: run swapoff and remove its entry from /etc/fstab", strings.Join(others, ", ")))
+	}
+	if len(zram) > 0 {
+		fixes = append(fixes, fmt.Sprintf("%s: run swapoff and disable the zram swap service that creates it, for example the zram generator or zram tools unit", strings.Join(zram, ", ")))
+	}
+	return "swap is active, " + strings.Join(fixes, "; ")
 }
 
 func minFreeFor(cfg v1alpha1.ClusterConfig) uint64 {

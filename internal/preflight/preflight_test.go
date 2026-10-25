@@ -81,6 +81,21 @@ func TestRunSwapBlocksAndNamesTheDevice(t *testing.T) {
 	}
 }
 
+func TestRunSwapMessageFitsTheDeviceKind(t *testing.T) {
+	zram := swapMessage([]string{"/dev/zram0"})
+	if !strings.Contains(zram, "zram") || strings.Contains(zram, "/etc/fstab") {
+		t.Fatalf("zram message %q", zram)
+	}
+	file := swapMessage([]string{"/swap.img"})
+	if !strings.Contains(file, "/etc/fstab") || strings.Contains(file, "zram") {
+		t.Fatalf("file message %q", file)
+	}
+	both := swapMessage([]string{"/dev/zram0", "/swap.img"})
+	if !strings.Contains(both, "zram") || !strings.Contains(both, "/etc/fstab") {
+		t.Fatalf("mixed message %q", both)
+	}
+}
+
 func TestRunUbuntu2604IsSupported(t *testing.T) {
 	facts := goodFacts()
 	facts.OSVersionID = "26.04"

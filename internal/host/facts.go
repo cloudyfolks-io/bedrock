@@ -4,7 +4,9 @@ import (
 	"bufio"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -75,6 +77,10 @@ func Gather(ctx context.Context, e Exec, root string, freeBytes func(string) (ui
 	if err != nil {
 		return Facts{}, err
 	}
+	swaps, err := readSwaps(filepath.Join(root, "proc", "swaps"))
+	if err != nil {
+		return Facts{}, err
+	}
 	return Facts{
 		Hostname:         strings.ToLower(strings.TrimSpace(hostname)),
 		OSID:             id,
@@ -90,14 +96,17 @@ func Gather(ctx context.Context, e Exec, root string, freeBytes func(string) (ui
 		Interfaces:       links,
 		FreeVarLibBytes:  free,
 		IOMMUGroups:      countEntries(filepath.Join(root, "sys", "kernel", "iommu_groups")),
-		Swaps:            readSwaps(filepath.Join(root, "proc", "swaps")),
+		Swaps:            swaps,
 	}, nil
 }
 
-func readSwaps(path string) []string {
+func readSwaps(path string) ([]string, error) {
 	data, err := os.ReadFile(path)
+	if errors.Is(err, fs.ErrNotExist) {
+		return nil, nil
+	}
 	if err != nil {
-		return nil
+		return nil, fmt.Errorf("read swaps: %w", err)
 	}
 	var devices []string
 	for i, line := range strings.Split(string(data), "\n") {
@@ -106,7 +115,7 @@ func readSwaps(path string) []string {
 			devices = append(devices, fields[0])
 		}
 	}
-	return devices
+	return devices, nil
 }
 
 func countEntries(path string) int {

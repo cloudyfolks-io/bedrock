@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -135,6 +136,28 @@ func TestGatherWithoutSwap(t *testing.T) {
 	}
 	if len(facts.Swaps) != 0 {
 		t.Fatalf("swaps %v", facts.Swaps)
+	}
+}
+
+func TestGatherWithoutProcSwapsMeansNoSwap(t *testing.T) {
+	root := fakeRoot(t, true)
+	facts, err := Gather(context.Background(), fakeIP(), root, func(string) (uint64, error) { return 50 << 30, nil }, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(facts.Swaps) != 0 {
+		t.Fatalf("swaps %v", facts.Swaps)
+	}
+}
+
+func TestGatherFailsWhenProcSwapsCannotBeRead(t *testing.T) {
+	root := fakeRoot(t, true)
+	if err := os.MkdirAll(filepath.Join(root, "proc", "swaps"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	_, err := Gather(context.Background(), fakeIP(), root, func(string) (uint64, error) { return 50 << 30, nil }, 0)
+	if err == nil || !strings.Contains(err.Error(), "swaps") {
+		t.Fatalf("err %v", err)
 	}
 }
 

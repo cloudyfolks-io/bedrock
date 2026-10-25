@@ -830,7 +830,7 @@ Run `snapshot` after `stop` when you want to repeat `adopt`. Run `rewind` to go 
 
 | Stage | What it does |
 | --- | --- |
-| `up` | Builds the bundle from the worktree into `dist/`. Starts three Ubuntu 24.04 VMs (4 vCPU, 14 GiB, 100 GiB root disk) on one Lima user-v2 network, and gives each VM two 20 GiB OSD disks with serial numbers. |
+| `up` | Builds the bundle from the worktree into `dist/`. Starts three Ubuntu 26.04 VMs (4 vCPU, 14 GiB, 100 GiB root disk) on one Lima user-v2 network, and gives each VM two 20 GiB OSD disks with serial numbers. |
 | `old` | Installs k0s and Rook with the old values in `hack/lab/old-rook-values.yaml`. Writes two RBD images, a CephFS file, and a bucket with two S3 objects. |
 | `export` | Writes the key file and the cluster configuration from `hack/lab/adopt.yaml.tmpl`. Records the fsid, the monitor ids, the OSD ids and the pool sizes. |
 | `stop` | Does section 4 of this runbook: `noout`, Rook scale down, copy of `/var/lib/rook`, `k0s reset`. |
