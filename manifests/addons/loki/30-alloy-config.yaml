@@ -39,7 +39,7 @@ data:
         target_label  = "container"
       }
       rule {
-        source_labels = ["__meta_kubernetes_pod_label_kubevirt_io_domain"]
+        source_labels = ["__meta_kubernetes_pod_label_vm_kubevirt_io_name"]
         target_label  = "vm"
       }
       rule {
