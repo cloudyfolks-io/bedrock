@@ -337,6 +337,9 @@ container_pod_addresses() {
 }
 
 container_runtime_gate() {
+  local value applied
+  value=$(kubectl get setting container.runtime-class -o jsonpath='{.spec.value}')
+  applied=$(kubectl get setting container.runtime-class -o jsonpath='{.status.applied}')
   kubectl patch setting container.runtime-class --type merge -p '{"spec":{"value":"absent-runtime"}}'
   wait_jsonpath 60 absent-runtime get setting container.runtime-class -o jsonpath='{.status.applied}'
   container_manifest gate "" | kubectl -n "$NS" apply -f -
@@ -344,8 +347,8 @@ container_runtime_gate() {
   expect_equal "" "$(kubectl -n "$NS" get deployment gate -o name 2>/dev/null || true)" "no deployment without the runtime class"
   kubectl -n "$NS" delete container gate
   wait_gone 60 container gate -n "$NS"
-  kubectl patch setting container.runtime-class --type merge -p '{"spec":{"value":"none"}}'
-  wait_jsonpath 60 none get setting container.runtime-class -o jsonpath='{.status.applied}'
+  kubectl patch setting container.runtime-class --type merge -p "{\"spec\":{\"value\":\"$value\"}}"
+  wait_jsonpath 60 "$applied" get setting container.runtime-class -o jsonpath='{.status.applied}'
 }
 
 container_lifecycle() {
