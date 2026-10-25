@@ -3,7 +3,6 @@ package release
 import (
 	"context"
 	"net/netip"
-	"strconv"
 	"strings"
 
 	corev1 "k8s.io/api/core/v1"
@@ -15,12 +14,12 @@ import (
 )
 
 const (
-	VarDNSIP            = "BEDROCK_DNS_IP"
-	VarDNSForward       = "BEDROCK_DNS_FORWARD"
-	VarEgressHTTPProxy  = "BEDROCK_EGRESS_HTTP_PROXY"
-	VarEgressNoProxy    = "BEDROCK_EGRESS_NO_PROXY"
-	VarDNS01Nameservers = "BEDROCK_DNS01_NAMESERVERS"
-	VarDNS01Only        = "BEDROCK_DNS01_ONLY"
+	VarDNSIP               = "BEDROCK_DNS_IP"
+	VarDNSForward          = "BEDROCK_DNS_FORWARD"
+	VarEgressHTTPProxy     = "BEDROCK_EGRESS_HTTP_PROXY"
+	VarEgressNoProxy       = "BEDROCK_EGRESS_NO_PROXY"
+	VarDNS01NameserversArg = "BEDROCK_DNS01_NAMESERVERS_ARG"
+	VarDNS01OnlyArg        = "BEDROCK_DNS01_ONLY_ARG"
 
 	NodeResolvConf = "/etc/resolv.conf"
 
@@ -34,14 +33,18 @@ func SettingVars(values map[string]string) map[string]string {
 	if forward == "" {
 		forward = NodeResolvConf
 	}
-	nameservers := values["letsencrypt.dns01-nameservers"]
-	return map[string]string{
-		VarDNSForward:       forward,
-		VarEgressHTTPProxy:  values["egress.http-proxy"],
-		VarEgressNoProxy:    values["egress.no-proxy"],
-		VarDNS01Nameservers: nameservers,
-		VarDNS01Only:        strconv.FormatBool(nameservers != ""),
+	vars := map[string]string{
+		VarDNSForward:          forward,
+		VarEgressHTTPProxy:     values["egress.http-proxy"],
+		VarEgressNoProxy:       values["egress.no-proxy"],
+		VarDNS01NameserversArg: "",
+		VarDNS01OnlyArg:        "",
 	}
+	if nameservers := values["letsencrypt.dns01-nameservers"]; nameservers != "" {
+		vars[VarDNS01NameserversArg] = "--dns01-recursive-nameservers=" + nameservers
+		vars[VarDNS01OnlyArg] = "--dns01-recursive-nameservers-only=true"
+	}
+	return vars
 }
 
 func DNSAddress(apiServiceIP string) (string, bool) {

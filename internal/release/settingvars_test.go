@@ -12,7 +12,7 @@ import (
 func TestSettingVarsDefaultToNodeResolvConfAndNoEgress(t *testing.T) {
 	vars := SettingVars(map[string]string{})
 	want := map[string]string{
-		VarDNSForward: "/etc/resolv.conf", VarEgressHTTPProxy: "", VarEgressNoProxy: "", VarDNS01Nameservers: "", VarDNS01Only: "false",
+		VarDNSForward: "/etc/resolv.conf", VarEgressHTTPProxy: "", VarEgressNoProxy: "", VarDNS01NameserversArg: "", VarDNS01OnlyArg: "",
 	}
 	for name, value := range want {
 		if got, ok := vars[name]; !ok || got != value {
@@ -29,11 +29,11 @@ func TestSettingVarsCarryTheSettings(t *testing.T) {
 		"letsencrypt.dns01-nameservers": "https://one.one.one.one/dns-query",
 	})
 	want := map[string]string{
-		VarDNSForward:       "217.218.127.127 217.218.155.155",
-		VarEgressHTTPProxy:  "http://proxy.kube-system:10808",
-		VarEgressNoProxy:    "10.0.0.0/8,.svc",
-		VarDNS01Nameservers: "https://one.one.one.one/dns-query",
-		VarDNS01Only:        "true",
+		VarDNSForward:          "217.218.127.127 217.218.155.155",
+		VarEgressHTTPProxy:     "http://proxy.kube-system:10808",
+		VarEgressNoProxy:       "10.0.0.0/8,.svc",
+		VarDNS01NameserversArg: "--dns01-recursive-nameservers=https://one.one.one.one/dns-query",
+		VarDNS01OnlyArg:        "--dns01-recursive-nameservers-only=true",
 	}
 	for name, value := range want {
 		if vars[name] != value {
@@ -66,7 +66,7 @@ func TestVarsHoldTheDNSAddressAndTheSettings(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if vars[VarDNSIP] != "10.0.0.10" || vars[VarDNSForward] != "9.9.9.9" || vars[VarDNS01Only] != "false" {
+	if vars[VarDNSIP] != "10.0.0.10" || vars[VarDNSForward] != "9.9.9.9" || vars[VarDNS01OnlyArg] != "" {
 		t.Fatalf("vars %v", vars)
 	}
 }

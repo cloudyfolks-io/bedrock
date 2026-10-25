@@ -7,8 +7,8 @@ global:
 startupapicheck:
   enabled: false
 extraArgs:
-  - --dns01-recursive-nameservers=${BEDROCK_DNS01_NAMESERVERS}
-  - --dns01-recursive-nameservers-only=${BEDROCK_DNS01_ONLY}
+  - ${BEDROCK_DNS01_NAMESERVERS_ARG}
+  - ${BEDROCK_DNS01_ONLY_ARG}
 extraEnv:
   - name: HTTP_PROXY
     value: ${BEDROCK_EGRESS_HTTP_PROXY}

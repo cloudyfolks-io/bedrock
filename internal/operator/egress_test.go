@@ -15,7 +15,7 @@ func certManagerBundle() release.Bundle {
 		"metadata": map[string]any{"namespace": "cert-manager", "name": "cert-manager"},
 		"spec": map[string]any{"template": map[string]any{"spec": map[string]any{"containers": []any{map[string]any{
 			"name": "cert-manager-controller",
-			"args": []any{"--v=2", "--dns01-recursive-nameservers=${BEDROCK_DNS01_NAMESERVERS}", "--dns01-recursive-nameservers-only=${BEDROCK_DNS01_ONLY}"},
+			"args": []any{"--v=2", "${BEDROCK_DNS01_NAMESERVERS_ARG}", "${BEDROCK_DNS01_ONLY_ARG}"},
 			"env": []any{
 				map[string]any{"name": "HTTP_PROXY", "value": "${BEDROCK_EGRESS_HTTP_PROXY}"},
 				map[string]any{"name": "HTTPS_PROXY", "value": "${BEDROCK_EGRESS_HTTP_PROXY}"},
@@ -51,7 +51,7 @@ func TestRenderEgressWithoutSettingsSetsNoProxyAndNoNameservers(t *testing.T) {
 		t.Fatal(err)
 	}
 	args, env := controllerContainer(t, rendered)
-	want := []string{"--v=2", "--dns01-recursive-nameservers=", "--dns01-recursive-nameservers-only=false"}
+	want := []string{"--v=2"}
 	if strings.Join(args, " ") != strings.Join(want, " ") {
 		t.Fatalf("args %v", args)
 	}

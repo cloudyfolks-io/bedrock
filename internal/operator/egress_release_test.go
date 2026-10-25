@@ -58,7 +58,7 @@ func TestCertManagerChartHasNoEgressByDefault(t *testing.T) {
 	}
 	args, env := controllerContainer(t, rendered)
 	joined := strings.Join(args, " ")
-	if !strings.Contains(joined, "--dns01-recursive-nameservers= ") && !strings.HasSuffix(joined, "--dns01-recursive-nameservers=") {
+	if strings.Contains(joined, "dns01") {
 		t.Fatalf("args %v", args)
 	}
 	if env["HTTP_PROXY"] != "" || env["HTTPS_PROXY"] != "" || env["NO_PROXY"] != "" {
