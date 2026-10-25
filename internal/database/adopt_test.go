@@ -281,29 +281,14 @@ func TestAnAdoptedPostgresDatabaseGetsItsGroupRoles(t *testing.T) {
 	}
 }
 
-func TestARoleOfAnEarlierPassWithoutSyncGetsTheSecretPassword(t *testing.T) {
-	c := startEnv(t)
-	fake := &fakeEngine{handle: existsOn("CREATE ROLE")}
-	db := readyDatabase(t, c)
-	user := newUser(t, c, db, "alice", nil)
-	reconcileUser(t, c, fake, user)
-	secret := getSecret(t, c, db.Namespace, "alice-db")
-	password := string(secret.Data["password"])
-	delete(secret.Annotations, annotationNameTaken)
-	must(t, c.Update(context.Background(), &secret))
-	fake.reset()
-	reconcileUser(t, c, fake, user)
-	reloadUser(t, c, user)
-	if reason, _ := readyReasonOf(user.Status.Conditions); reason != ReasonReady || user.Status.AppliedGrants == "" {
-		t.Fatalf("status %+v", user.Status)
-	}
-	after := getSecret(t, c, db.Namespace, "alice-db")
-	if fake.count(`ALTER ROLE "alice" PASSWORD 'SCRAM-SHA-256$`) != 1 || string(after.Data["password"]) != password || after.Annotations[annotationPasswordSynced] != "true" {
-		t.Fatalf("scripts %v secret %v", fake.scripts, after.Annotations)
-	}
+func secretMarker(t *testing.T, c client.Client, namespace string) (string, bool) {
+	t.Helper()
+	secret := getSecret(t, c, namespace, "alice-db")
+	value, found := secret.Annotations[annotationRoleIntent]
+	return value, found
 }
 
-func TestANameTakenRoleStaysUntouchedOnTheNextPass(t *testing.T) {
+func TestARoleThatExistsWithoutTheIntentMarkerIsNeverTouched(t *testing.T) {
 	c := startEnv(t)
 	fake := &fakeEngine{handle: existsOn("CREATE ROLE")}
 	db := readyDatabase(t, c)
@@ -312,6 +297,113 @@ func TestANameTakenRoleStaysUntouchedOnTheNextPass(t *testing.T) {
 	reconcileUser(t, c, fake, user)
 	reloadUser(t, c, user)
 	if reason, _ := readyReasonOf(user.Status.Conditions); reason != ReasonNameTaken || fake.count("ALTER ROLE") != 0 {
+		t.Fatalf("reason %s scripts %v", reason, fake.scripts)
+	}
+	if _, found := secretMarker(t, c, db.Namespace); found {
+		t.Fatal("the intent marker stays after the refusal")
+	}
+}
+
+func TestTheIntentMarkerIsWrittenBeforeTheCreateAndRemovedAfterTheSync(t *testing.T) {
+	c := startEnv(t)
+	db := readyDatabase(t, c)
+	var user *v1alpha1.DatabaseUser
+	var markerAtCreate string
+	fake := &fakeEngine{handle: func(script string) (string, error) {
+		if strings.Contains(script, "CREATE ROLE") {
+			markerAtCreate, _ = secretMarker(t, c, db.Namespace)
+		}
+		return "", nil
+	}}
+	user = newUser(t, c, db, "alice", nil)
+	reconcileUser(t, c, fake, user)
+	reloadUser(t, c, user)
+	if markerAtCreate != string(user.UID) {
+		t.Fatalf("marker at the create %q, user %q", markerAtCreate, user.UID)
+	}
+	if reason, _ := readyReasonOf(user.Status.Conditions); reason != ReasonReady {
+		t.Fatalf("reason %s", reason)
+	}
+	secret := getSecret(t, c, db.Namespace, "alice-db")
+	if _, found := secret.Annotations[annotationRoleIntent]; found || secret.Annotations[annotationPasswordSynced] != "true" {
+		t.Fatalf("annotations %v", secret.Annotations)
+	}
+}
+
+func markIntent(t *testing.T, c client.Client, namespace, value string) {
+	t.Helper()
+	secret := getSecret(t, c, namespace, "alice-db")
+	secret.Annotations[annotationRoleIntent] = value
+	must(t, c.Update(context.Background(), &secret))
+}
+
+func TestARoleWithOurIntentMarkerGetsTheSecretPassword(t *testing.T) {
+	c := startEnv(t)
+	fake := &fakeEngine{handle: existsOn("CREATE ROLE")}
+	db := readyDatabase(t, c)
+	user := newUser(t, c, db, "alice", nil)
+	reconcileUser(t, c, fake, user)
+	password := string(getSecret(t, c, db.Namespace, "alice-db").Data["password"])
+	markIntent(t, c, db.Namespace, string(user.UID))
+	fake.reset()
+	reconcileUser(t, c, fake, user)
+	reloadUser(t, c, user)
+	if reason, _ := readyReasonOf(user.Status.Conditions); reason != ReasonReady || user.Status.AppliedGrants == "" {
+		t.Fatalf("status %+v", user.Status)
+	}
+	after := getSecret(t, c, db.Namespace, "alice-db")
+	_, found := after.Annotations[annotationRoleIntent]
+	if fake.count(`ALTER ROLE "alice" PASSWORD 'SCRAM-SHA-256$`) != 1 || string(after.Data["password"]) != password || after.Annotations[annotationPasswordSynced] != "true" || found {
+		t.Fatalf("scripts %v secret %v", fake.scripts, after.Annotations)
+	}
+}
+
+func TestARoleWithAnotherIntentMarkerIsNeverTouched(t *testing.T) {
+	c := startEnv(t)
+	fake := &fakeEngine{handle: existsOn("CREATE ROLE")}
+	db := readyDatabase(t, c)
+	user := newUser(t, c, db, "alice", nil)
+	reconcileUser(t, c, fake, user)
+	markIntent(t, c, db.Namespace, "another-uid")
+	fake.reset()
+	reconcileUser(t, c, fake, user)
+	reloadUser(t, c, user)
+	if reason, _ := readyReasonOf(user.Status.Conditions); reason != ReasonNameTaken || fake.count("ALTER ROLE") != 0 {
+		t.Fatalf("reason %s scripts %v", reason, fake.scripts)
+	}
+}
+
+func TestAForeignRoleThatAppearsBeforeTheCreateRemovesTheMarker(t *testing.T) {
+	c := startEnv(t)
+	db := readyDatabase(t, c)
+	fake := &fakeEngine{handle: existsOn("CREATE ROLE")}
+	user := newUser(t, c, db, "alice", nil)
+	reconcileUser(t, c, fake, user)
+	reloadUser(t, c, user)
+	if reason, _ := readyReasonOf(user.Status.Conditions); reason != ReasonNameTaken || user.Status.AppliedGrants != "" {
+		t.Fatalf("status %+v", user.Status)
+	}
+	if _, found := secretMarker(t, c, db.Namespace); found || fake.count("ALTER ROLE") != 0 {
+		t.Fatalf("marker found %v scripts %v", found, fake.scripts)
+	}
+}
+
+func TestAMySQLAccountWithOurIntentMarkerGetsTheSecretPassword(t *testing.T) {
+	c := startEnv(t)
+	fake := &fakeEngine{handle: func(script string) (string, error) {
+		if strings.Contains(script, "CREATE USER") {
+			return "", engine.ErrExists
+		}
+		return "", nil
+	}}
+	db := readyEngineDatabase(t, c, v1alpha1.DatabaseEngineMySQL)
+	user := newUser(t, c, db, "alice", nil)
+	reconcileUserOf(t, c, fake, v1alpha1.DatabaseEngineMySQL, user)
+	markIntent(t, c, db.Namespace, string(user.UID))
+	fake.reset()
+	reconcileUserOf(t, c, fake, v1alpha1.DatabaseEngineMySQL, user)
+	reloadUser(t, c, user)
+	if reason, _ := readyReasonOf(user.Status.Conditions); reason != ReasonReady || fake.count("ALTER USER") != 1 {
 		t.Fatalf("reason %s scripts %v", reason, fake.scripts)
 	}
 }
