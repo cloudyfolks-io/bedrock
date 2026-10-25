@@ -577,6 +577,9 @@ The upgrade moves it to the CoreDNS of the release in this order:
    The only gap is the restart of the CoreDNS pods.
 3. Bedrock removes the label `k0s.k0sproject.io/stack` from the objects, so k0s cannot prune them.
    It keeps the checksum annotation of k0s, so k0s does not write its own version back when it restarts.
+4. The operator marks the Cluster with the annotation `bedrock.cloudyfolks.io/k0s-coredns-takeover: done`.
+   Then the `Prune` step on each control plane node removes the old k0s manifest directory `/var/lib/k0s/manifests/coredns`.
+   The step fails and keeps the directory if an object of the old k0s stack still has the stack label, because k0s would delete that object.
 
 The upgrade ends with one CoreDNS Deployment, owned by Bedrock.
 

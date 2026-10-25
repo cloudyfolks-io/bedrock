@@ -7,6 +7,8 @@ import (
 const (
 	ClusterName = "cluster"
 
+	AnnotationK0sCoreDNSTakeover = "bedrock.cloudyfolks.io/k0s-coredns-takeover"
+
 	PhaseIdle         = "Idle"
 	PhasePreflight    = "Preflight"
 	PhaseBackup       = "Backup"

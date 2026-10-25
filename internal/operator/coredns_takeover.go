@@ -2,11 +2,15 @@ package operator
 
 import (
 	"context"
+	"fmt"
 
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
+	"github.com/cloudyfolks-io/bedrock/api/v1alpha1"
 	"github.com/cloudyfolks-io/bedrock/internal/release"
 )
 
@@ -29,8 +33,14 @@ func adoptK0sCoreDNS(c client.Client) func(context.Context, release.Group) error
 				return err
 			}
 		}
-		return nil
+		return markTakeoverDone(ctx, c)
 	}
+}
+
+func markTakeoverDone(ctx context.Context, c client.Client) error {
+	patch := fmt.Sprintf(`{"metadata":{"annotations":{%q:"done"}}}`, v1alpha1.AnnotationK0sCoreDNSTakeover)
+	cluster := &v1alpha1.Cluster{ObjectMeta: metav1.ObjectMeta{Name: v1alpha1.ClusterName}}
+	return c.Patch(ctx, cluster, client.RawPatch(types.MergePatchType, []byte(patch)))
 }
 
 func replaceK0sObject(ctx context.Context, c client.Client, desired *unstructured.Unstructured) error {

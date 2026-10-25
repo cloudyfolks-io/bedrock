@@ -6,9 +6,11 @@ import (
 	"testing"
 
 	corev1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
+	"github.com/cloudyfolks-io/bedrock/api/v1alpha1"
 	"github.com/cloudyfolks-io/bedrock/internal/release"
 )
 
@@ -126,6 +128,7 @@ func k0sStackLabelOf(obj *unstructured.Unstructured) string {
 
 func TestTakeoverReplacesTheK0sObjectsInPlace(t *testing.T) {
 	c, _ := StartTestEnv(t)
+	createCluster(t, c)
 	ctx := context.Background()
 	createK0sCoreDNS(t, c)
 	service := liveObject(t, c, "Service", "v1", "kube-system", "kube-dns")
@@ -175,6 +178,7 @@ func TestTakeoverReplacesTheK0sObjectsInPlace(t *testing.T) {
 
 func TestReleaseApplyAfterTheTakeoverKeepsTheObjects(t *testing.T) {
 	c, _ := StartTestEnv(t)
+	createCluster(t, c)
 	ctx := context.Background()
 	createK0sCoreDNS(t, c)
 	service := liveObject(t, c, "Service", "v1", "kube-system", "kube-dns")
@@ -210,6 +214,7 @@ func TestTakeoverIgnoresOtherGroups(t *testing.T) {
 
 func TestTakeoverLeavesObjectsOfAnotherOwner(t *testing.T) {
 	c, _ := StartTestEnv(t)
+	createCluster(t, c)
 	ctx := context.Background()
 	foreign := decodeDocuments(t, []byte(k0sCoreDNSObjects))
 	for _, obj := range foreign {
@@ -232,6 +237,7 @@ func TestTakeoverLeavesObjectsOfAnotherOwner(t *testing.T) {
 
 func TestTakeoverOnAClusterWithoutK0sCoreDNS(t *testing.T) {
 	c, _ := StartTestEnv(t)
+	createCluster(t, c)
 	if err := adoptK0sCoreDNS(c)(context.Background(), releaseCoreDNSGroup(t, "10.0.0.10")); err != nil {
 		t.Fatal(err)
 	}
@@ -239,6 +245,7 @@ func TestTakeoverOnAClusterWithoutK0sCoreDNS(t *testing.T) {
 
 func TestInstallRunsTheTakeoverBeforeTheCoreDNSGroup(t *testing.T) {
 	c, _ := StartTestEnv(t)
+	createCluster(t, c)
 	createK0sCoreDNS(t, c)
 	service := liveObject(t, c, "Service", "v1", "kube-system", "kube-dns")
 	dnsIP, _, _ := unstructured.NestedString(service.Object, "spec", "clusterIP")
@@ -247,5 +254,52 @@ func TestInstallRunsTheTakeoverBeforeTheCoreDNSGroup(t *testing.T) {
 	}
 	if k0sStackLabelOf(liveObject(t, c, "Service", "v1", "kube-system", "kube-dns")) != "" {
 		t.Fatal("the hook of an install must take the k0s objects over")
+	}
+}
+
+func createCluster(t *testing.T, c client.Client) {
+	t.Helper()
+	cluster := &v1alpha1.Cluster{ObjectMeta: metav1.ObjectMeta{Name: v1alpha1.ClusterName}, Spec: v1alpha1.ClusterSpec{DesiredVersion: "v0.3.0", API: v1alpha1.APISpec{VIP: "10.0.10.10"}}}
+	if err := c.Create(context.Background(), cluster); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func takeoverMark(t *testing.T, c client.Client) string {
+	t.Helper()
+	var cluster v1alpha1.Cluster
+	if err := c.Get(context.Background(), client.ObjectKey{Name: v1alpha1.ClusterName}, &cluster); err != nil {
+		t.Fatal(err)
+	}
+	return cluster.Annotations[v1alpha1.AnnotationK0sCoreDNSTakeover]
+}
+
+func TestTakeoverMarksTheClusterWhenTheObjectsAreReplaced(t *testing.T) {
+	c, _ := StartTestEnv(t)
+	createCluster(t, c)
+	createK0sCoreDNS(t, c)
+	service := liveObject(t, c, "Service", "v1", "kube-system", "kube-dns")
+	dnsIP, _, _ := unstructured.NestedString(service.Object, "spec", "clusterIP")
+	if takeoverMark(t, c) != "" {
+		t.Fatal("the mark must not exist before the take over")
+	}
+	if err := adoptK0sCoreDNS(c)(context.Background(), releaseCoreDNSGroup(t, dnsIP)); err != nil {
+		t.Fatal(err)
+	}
+	if takeoverMark(t, c) != "done" {
+		t.Fatalf("mark %q", takeoverMark(t, c))
+	}
+}
+
+func TestTakeoverDoesNotMarkTheClusterForOtherGroups(t *testing.T) {
+	c, _ := StartTestEnv(t)
+	createCluster(t, c)
+	group := releaseCoreDNSGroup(t, "10.0.0.10")
+	group.Name = "traefik"
+	if err := adoptK0sCoreDNS(c)(context.Background(), group); err != nil {
+		t.Fatal(err)
+	}
+	if takeoverMark(t, c) != "" {
+		t.Fatal("only the coredns group marks the take over")
 	}
 }
