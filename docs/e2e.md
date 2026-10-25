@@ -191,6 +191,7 @@ Ceph has 3 replicas and 6 OSDs.
 It is not a job of the local runner. Run it by hand, or from a nightly job, on a Linux host with KVM and about 46 GiB of free RAM.
 Do not run it while a gate or the adoption lab runs. Both labs use the same network and the same VIP, and the script stops when it finds a VM of the other lab.
 The VM code is in `hack/lab/lib.sh`. The adoption lab uses the same file.
+The VMs boot the Ubuntu 26.04 cloud image. `vm_config` pins the build `release-20261016` and its sha256 digests. Change the pin when the build leaves cloud-images.ubuntu.com.
 The checks are in `hack/e2e/multinode/`.
 
 ```
