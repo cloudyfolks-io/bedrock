@@ -393,7 +393,7 @@ database_proof_script() {
 #!/bin/sh
 {
   echo "DBPROOF-MYSQL \$(nc -w 5 $1 3306 </dev/null | head -c 5 | od -An -tx1 | tr -d ' \n' | tail -c 2)"
-  echo "DBPROOF-VALKEY \$(printf 'PING\r\n' | nc -w 5 $2 6379 | head -1 | cut -c1-6)"
+  echo "DBPROOF-VALKEY \$(printf 'PING\r\n' | nc -w 5 $2 6379 | head -1 | cut -c1-7)"
   echo "DBPROOF-DONE"
 } > /dev/console
 SCRIPT
