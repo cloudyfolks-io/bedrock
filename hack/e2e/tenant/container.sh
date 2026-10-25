@@ -347,6 +347,15 @@ container_runtime_gate() {
   expect_equal "" "$(kubectl -n "$NS" get deployment gate -o name 2>/dev/null || true)" "no deployment without the runtime class"
   kubectl -n "$NS" delete container gate
   wait_gone 60 container gate -n "$NS"
+  container_runtime_restore "$value" "$applied"
+}
+
+container_runtime_restore() {
+  local value=$1 applied=$2
+  if [ "$applied" != none ] && ! kubectl get runtimeclass "$applied" >/dev/null 2>&1; then
+    value=none
+    applied=none
+  fi
   kubectl patch setting container.runtime-class --type merge -p "{\"spec\":{\"value\":\"$value\"}}"
   wait_jsonpath 60 "$applied" get setting container.runtime-class -o jsonpath='{.status.applied}'
 }
