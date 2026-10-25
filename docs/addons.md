@@ -267,6 +267,39 @@ The condition `RuntimeReady` shows the state of these objects.
 | `database.enabled` | `false` | Turns on the database platform. |
 | `database.backup.bucket` | `bedrock-database-backups` | Bucket of the platform database backups. |
 
+## Egress proxy
+
+Some upstream services are reachable only through an HTTP proxy.
+Bedrock does not run this proxy. It points cert-manager and CDI at the proxy that you give.
+The value has the same format as `registry.http-proxy`: an `http` or `https` URL with a host.
+
+| Setting | Default | Meaning |
+|---|---|---|
+| `egress.http-proxy` | empty | Proxy URL. Empty means no proxy. |
+| `egress.no-proxy` | empty | Comma list of hosts, domains and networks that bypass the proxy. |
+| `letsencrypt.dns01-nameservers` | empty | Comma list of `host:port` servers or `https` DNS-over-HTTPS URLs for the DNS-01 self check. |
+
+With `egress.http-proxy` set, the cert-manager controller gets the variables `HTTP_PROXY`, `HTTPS_PROXY` and `NO_PROXY`.
+The CDI object gets `spec.config.importProxy` with `HTTPProxy`, `HTTPSProxy` and `noProxy`.
+Add the networks of the cluster and its domains to `egress.no-proxy`, so that cluster traffic does not use the proxy.
+`registry.http-proxy` stays a separate Setting.
+
+With `letsencrypt.dns01-nameservers` set, cert-manager asks only these servers for the DNS-01 self check.
+An empty value keeps the resolver of the node.
+A DNS-over-HTTPS URL goes through the proxy when `egress.http-proxy` is set.
+
+The addon `egress` applies the cert-manager Deployment with the values and shows the condition `EgressReady` on the Cluster.
+A change of a Setting restarts the cert-manager controller.
+The CDI change needs no restart of a VM.
+
+Example:
+
+```
+kubectl patch setting egress.http-proxy --type merge -p '{"spec":{"value":"http://proxy.kube-system:10808"}}'
+kubectl patch setting egress.no-proxy --type merge -p '{"spec":{"value":"10.0.0.0/8,172.16.0.0/12,192.168.0.0/16,cluster.local,.svc"}}'
+kubectl patch setting letsencrypt.dns01-nameservers --type merge -p '{"spec":{"value":"https://one.one.one.one/dns-query"}}'
+```
+
 ## Percona Server for MySQL
 
 The addon `percona-ps` installs the Percona Operator for MySQL in the

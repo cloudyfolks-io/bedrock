@@ -31,7 +31,7 @@ var (
 )
 
 func DefaultAddons() []Addon {
-	return []Addon{storageAddon, virtualizationAddon, platformAddon, authnAddon, uploadAddon, proxyAddon, dnsAddon}
+	return []Addon{storageAddon, virtualizationAddon, platformAddon, authnAddon, uploadAddon, proxyAddon, dnsAddon, egressAddon}
 }
 
 func RenderPlatform(in AddonInput) (Rendered, error) {

@@ -145,11 +145,11 @@ func TestDefaultAddonsOrder(t *testing.T) {
 	for _, addon := range addons {
 		names = append(names, addon.Name)
 	}
-	if want := []string{"storage", "virtualization", "platform", "authn", "upload", "proxy", "dns"}; !slices.Equal(names, want) {
+	if want := []string{"storage", "virtualization", "platform", "authn", "upload", "proxy", "dns", "egress"}; !slices.Equal(names, want) {
 		t.Fatalf("addons %v", names)
 	}
-	if addons[3].Condition != "AuthnReady" || addons[5].Condition != "ProxyReady" || addons[6].Condition != "DNSReady" {
-		t.Fatalf("conditions %s %s %s", addons[3].Condition, addons[5].Condition, addons[6].Condition)
+	if addons[3].Condition != "AuthnReady" || addons[5].Condition != "ProxyReady" || addons[6].Condition != "DNSReady" || addons[7].Condition != "EgressReady" {
+		t.Fatalf("conditions %s %s %s %s", addons[3].Condition, addons[5].Condition, addons[6].Condition, addons[7].Condition)
 	}
 }
 
