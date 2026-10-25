@@ -146,3 +146,38 @@ func TestAdoptedUserDeleteRemovesTheAdoptedRookUser(t *testing.T) {
 		t.Fatal("the user is still there")
 	}
 }
+
+func holdRookUser(t *testing.T, name, holder string) {
+	t.Helper()
+	owner := platform.Owner{Kind: "ObjectStorageUser", Name: holder, Namespace: "acme-prod", UID: "holder-uid", Tenant: "acme", Project: "prod"}
+	held := &unstructured.Unstructured{Object: map[string]any{
+		"apiVersion": "ceph.rook.io/v1", "kind": "CephObjectStoreUser",
+		"metadata": map[string]any{"name": name, "namespace": StoreNamespace},
+		"spec":     map[string]any{"store": StoreName, "accountRef": map[string]any{"name": "acme-prod"}},
+	}}
+	if err := testClient.Create(context.Background(), platform.Adopt(held, owner)); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestDeleteOfARefusedAdopterKeepsTheHoldersRookUser(t *testing.T) {
+	iam, r := adoptionSetup(t, "k-8f3a")
+	holdRookUser(t, "k-8f3a", "first")
+	createAdoptingUser(t, "acme-prod", "second", "k-8f3a", v1alpha1.ObjectStorageUserSpec{Permission: "read"})
+	reconcileUserWith(t, r, "acme-prod", "second")
+	readyAccountOf(t, "acme-prod")
+	reconcileUserWith(t, r, "acme-prod", "second")
+	requireUserReason(t, "acme-prod", "second", metav1.ConditionFalse, "UserClaimed")
+	iam.take()
+	if err := testClient.Delete(context.Background(), readUser(t, "acme-prod", "second")); err != nil {
+		t.Fatal(err)
+	}
+	reconcileUserWith(t, r, "acme-prod", "second")
+	rgw, found := getRookUser(t, "k-8f3a")
+	if !found || rgw.GetLabels()["bedrock.cloudyfolks.io/name"] != "first" {
+		t.Fatal("the holder Rook user is gone or changed")
+	}
+	if slices.Contains(iam.take(), "DeleteUserPolicy k-8f3a") {
+		t.Fatal("the policy of the holder was deleted")
+	}
+}

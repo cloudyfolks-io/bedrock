@@ -99,7 +99,7 @@ func (r *UserReconciler) release(ctx context.Context, user *v1alpha1.ObjectStora
 	if err != nil {
 		return err
 	}
-	if found && hasAccountRef(rook) {
+	if found && hasAccountRef(rook) && ownsRookUser(rook, user) {
 		r.dropPolicy(ctx, user.Namespace, rgwName)
 		if err := client.IgnoreNotFound(r.Client.Delete(ctx, rook)); err != nil {
 			return err
