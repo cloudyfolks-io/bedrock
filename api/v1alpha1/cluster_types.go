@@ -46,6 +46,7 @@ const (
 	ConditionAuthnReady          = "AuthnReady"
 	ConditionUploadReady         = "UploadReady"
 	ConditionProxyReady          = "ProxyReady"
+	ConditionDNSReady            = "DNSReady"
 )
 
 type APISpec struct {
