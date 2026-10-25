@@ -1,5 +1,6 @@
-k0sVersion: v1.36.3+k0s.0
+k0sVersion: v1.36.3+k0s.1
 supportedOS:
+  - ubuntu-26.04
   - ubuntu-24.04
   - ubuntu-22.04
   - debian-13

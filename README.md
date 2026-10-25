@@ -11,6 +11,22 @@ Status: pre-release. Follow the milestones in the GitHub project.
     make build
     make test
 
+## Supported hosts
+
+The preflight of `bedrock init`, `bedrock join` and the adoption refuses a host with another operating system.
+The supported list is `supportedOS` in `release/components.yaml`:
+
+- Ubuntu 26.04, 24.04 and 22.04
+- Debian 13 and 12
+- Fedora 43 and 42
+- RHEL 10 and 9
+- CentOS Stream 10 and 9
+- SLES 16 and 15
+
+The host must not use swap. The preflight check `swap` fails when `/proc/swaps` lists a device.
+Run `swapoff` for each device that the message names, and remove its entry from `/etc/fstab`.
+Ubuntu hosts often have `/swap.img`: run `swapoff /swap.img`, then remove the line and the file.
+
 ## Platform domain
 
 `bedrock init` needs a platform domain in `cluster.yaml`:
