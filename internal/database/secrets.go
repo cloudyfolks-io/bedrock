@@ -29,6 +29,7 @@ const (
 	annotationResetApplied   = "bedrock.cloudyfolks.io/reset-applied"
 	postgresSuperuser        = "postgres"
 	passwordKey              = "password"
+	annotationNameTaken      = "bedrock.cloudyfolks.io/name-taken"
 	synced                   = "true"
 	unsynced                 = "false"
 )

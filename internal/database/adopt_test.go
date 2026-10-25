@@ -280,3 +280,38 @@ func TestAnAdoptedPostgresDatabaseGetsItsGroupRoles(t *testing.T) {
 		t.Fatalf("status %+v", schema.Status)
 	}
 }
+
+func TestARoleOfAnEarlierPassWithoutSyncGetsTheSecretPassword(t *testing.T) {
+	c := startEnv(t)
+	fake := &fakeEngine{handle: existsOn("CREATE ROLE")}
+	db := readyDatabase(t, c)
+	user := newUser(t, c, db, "alice", nil)
+	reconcileUser(t, c, fake, user)
+	secret := getSecret(t, c, db.Namespace, "alice-db")
+	password := string(secret.Data["password"])
+	delete(secret.Annotations, annotationNameTaken)
+	must(t, c.Update(context.Background(), &secret))
+	fake.reset()
+	reconcileUser(t, c, fake, user)
+	reloadUser(t, c, user)
+	if reason, _ := readyReasonOf(user.Status.Conditions); reason != ReasonReady || user.Status.AppliedGrants == "" {
+		t.Fatalf("status %+v", user.Status)
+	}
+	after := getSecret(t, c, db.Namespace, "alice-db")
+	if fake.count(`ALTER ROLE "alice" PASSWORD 'SCRAM-SHA-256$`) != 1 || string(after.Data["password"]) != password || after.Annotations[annotationPasswordSynced] != "true" {
+		t.Fatalf("scripts %v secret %v", fake.scripts, after.Annotations)
+	}
+}
+
+func TestANameTakenRoleStaysUntouchedOnTheNextPass(t *testing.T) {
+	c := startEnv(t)
+	fake := &fakeEngine{handle: existsOn("CREATE ROLE")}
+	db := readyDatabase(t, c)
+	user := newUser(t, c, db, "alice", nil)
+	reconcileUser(t, c, fake, user)
+	reconcileUser(t, c, fake, user)
+	reloadUser(t, c, user)
+	if reason, _ := readyReasonOf(user.Status.Conditions); reason != ReasonNameTaken || fake.count("ALTER ROLE") != 0 {
+		t.Fatalf("reason %s scripts %v", reason, fake.scripts)
+	}
+}

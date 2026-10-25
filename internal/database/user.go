@@ -223,6 +223,8 @@ func conditionTrue(conditions []metav1.Condition) bool {
 type userSecretState struct {
 	Password string
 	Synced   bool
+	Created  bool
+	Foreign  bool
 }
 
 func connectionDatabase(user v1alpha1.DatabaseUser) string {
@@ -266,7 +268,7 @@ func ensureUserSecret(ctx context.Context, c client.Client, user v1alpha1.Databa
 				}
 			}
 			created := userSecret(user, project, userSecretData(user, kind, password, endpoint), map[string]string{annotationPasswordSynced: unsynced, annotationResetApplied: token})
-			state = userSecretState{Password: password}
+			state = userSecretState{Password: password, Created: true}
 			return c.Create(ctx, created, client.FieldOwner(v1alpha1.DatabaseFieldManager))
 		}
 		if err != nil {
@@ -294,7 +296,7 @@ func ensureUserSecret(ctx context.Context, c client.Client, user v1alpha1.Databa
 			secret.Annotations[annotationResetApplied] = token
 		}
 		secret.Data = userSecretData(user, kind, password, endpoint)
-		state = userSecretState{Password: password, Synced: secret.Annotations[annotationPasswordSynced] == synced}
+		state = userSecretState{Password: password, Synced: secret.Annotations[annotationPasswordSynced] == synced, Foreign: secret.Annotations[annotationNameTaken] == "true"}
 		if equality.Semantic.DeepEqual(before.Data, secret.Data) && equality.Semantic.DeepEqual(before.Annotations, secret.Annotations) {
 			return nil
 		}
@@ -384,7 +386,14 @@ func (r *UserReconciler) createRole(ctx context.Context, in userSync, spec engin
 	}
 	switch {
 	case in.State.Synced:
+	case !in.State.Created && !in.State.Foreign:
+		if err := resetAccountPassword(ctx, in.Access, spec.Name, spec.Password); err != nil {
+			return nil, err
+		}
 	case !adopting(in.User):
+		if err := markNameTaken(ctx, r.Client, *in.User); err != nil {
+			return nil, err
+		}
 		return &accessOutcome{reason: ReasonNameTaken, message: "the user " + spec.Name + " exists in the engine; an administrator can set the annotation " + v1alpha1.AnnotationAdopt + " to adopt it", requeue: accessBackoff}, nil
 	case in.Chosen != "":
 		if err := resetAccountPassword(ctx, in.Access, spec.Name, spec.Password); err != nil {
@@ -396,6 +405,21 @@ func (r *UserReconciler) createRole(ctx context.Context, in userSync, spec engin
 		}
 	}
 	return nil, setAccountGrants(ctx, in.Access, spec)
+}
+
+func markNameTaken(ctx context.Context, c client.Client, user v1alpha1.DatabaseUser) error {
+	return retry.RetryOnConflict(retry.DefaultRetry, func() error {
+		var secret corev1.Secret
+		if err := c.Get(ctx, client.ObjectKey{Namespace: user.Namespace, Name: UserSecretName(user)}, &secret); err != nil {
+			return err
+		}
+		before := secret.DeepCopy()
+		if secret.Annotations == nil {
+			secret.Annotations = map[string]string{}
+		}
+		secret.Annotations[annotationNameTaken] = "true"
+		return c.Patch(ctx, &secret, client.MergeFromWithOptions(before, client.MergeFromWithOptimisticLock{}), client.FieldOwner(v1alpha1.DatabaseFieldManager))
+	})
 }
 
 func keepEnginePassword(ctx context.Context, c client.Client, user v1alpha1.DatabaseUser, kind string, endpoint Endpoint) error {
