@@ -226,6 +226,10 @@ func (r *VirtualMachineReconciler) stepPreference(ctx context.Context, vm v1alph
 	return in, nil, nil
 }
 
+func portSecurityOff(network v1alpha1.VMNetwork) bool {
+	return network.PortSecurity != nil && !*network.PortSecurity
+}
+
 func (r *VirtualMachineReconciler) stepSubnets(ctx context.Context, vm v1alpha1.VirtualMachine, in RenderInput) (RenderInput, *Gate, error) {
 	for _, network := range EffectiveNetworks(vm) {
 		var subnet v1alpha1.Subnet
@@ -243,7 +247,7 @@ func (r *VirtualMachineReconciler) stepSubnets(ctx context.Context, vm v1alpha1.
 			}
 			in.DNSServers = servers
 		}
-		in.NICs = append(slices.Clone(in.NICs), NIC{Namespace: vm.Namespace, Subnet: network.SubnetRef, MAC: network.MACAddress, Address: network.Address, SecurityGroups: slices.Clone(network.SecurityGroups)})
+		in.NICs = append(slices.Clone(in.NICs), NIC{Namespace: vm.Namespace, Subnet: network.SubnetRef, MAC: network.MACAddress, Address: network.Address, SecurityGroups: slices.Clone(network.SecurityGroups), PortSecurityOff: portSecurityOff(network)})
 	}
 	return in, nil, nil
 }

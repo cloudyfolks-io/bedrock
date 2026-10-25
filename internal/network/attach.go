@@ -2,6 +2,7 @@ package network
 
 import (
 	"slices"
+	"strconv"
 	"strings"
 )
 
@@ -11,11 +12,12 @@ const (
 )
 
 type NIC struct {
-	Namespace      string
-	Subnet         string
-	MAC            string
-	Address        string
-	SecurityGroups []string
+	Namespace       string
+	Subnet          string
+	MAC             string
+	Address         string
+	SecurityGroups  []string
+	PortSecurityOff bool
 }
 
 func nicPrefix(nic NIC) string {
@@ -38,9 +40,13 @@ func securityGroupNames(nic NIC) string {
 	return strings.Join(names, ",")
 }
 
+func portSecurityValue(nic NIC) string {
+	return strconv.FormatBool(!nic.PortSecurityOff)
+}
+
 func nicAnnotations(index int, nic NIC) map[string]string {
 	prefix := nicPrefix(nic)
-	annotations := map[string]string{prefix + "port_security": "true"}
+	annotations := map[string]string{prefix + "port_security": portSecurityValue(nic)}
 	annotations[prefix+"security_groups"] = securityGroupNames(nic)
 	if nic.MAC != "" {
 		annotations[prefix+"mac_address"] = nic.MAC

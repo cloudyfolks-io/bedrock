@@ -91,6 +91,8 @@ type VMNetwork struct {
 	// +kubebuilder:validation:XValidation:rule="isIP(self) && ip(self).family() == 4",message="address must be an IPv4 address"
 	// +optional
 	Address string `json:"address,omitempty"`
+	// +optional
+	PortSecurity *bool `json:"portSecurity,omitempty"`
 }
 
 // +kubebuilder:validation:XValidation:rule="!has(self.secretRef) || (!has(self.userData) && !has(self.networkData))",message="secretRef excludes userData and networkData"
