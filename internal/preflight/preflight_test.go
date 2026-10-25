@@ -171,3 +171,32 @@ func TestRunJoinKeepsTheOtherChecks(t *testing.T) {
 		t.Fatalf("want root and vip to fail: %s", Format(results))
 	}
 }
+
+func TestRunRefusesAKernelThatCannotMountAes256kKeys(t *testing.T) {
+	facts := goodFacts()
+	facts.Kernel = "6.8.0-45-generic"
+	cfg := goodConfig()
+	cfg.Spec.Storage.CephxCipher = "aes256k"
+	results := Run(context.Background(), goodExec(), facts, []host.Device{{Path: "/dev/sdb", Block: true}}, cfg, []string{"ubuntu-24.04"})
+	if !Blocked(results) || !strings.Contains(Format(results), "kernel 7.0") {
+		t.Fatalf("expected a block that names the rule: %s", Format(results))
+	}
+	if blocked := Blocked(RunJoin(context.Background(), goodExec(), facts, []host.Device{{Path: "/dev/sdb", Block: true}}, cfg, []string{"ubuntu-24.04"})); !blocked {
+		t.Fatal("a join must block too")
+	}
+}
+
+func TestRunAcceptsTheKernelForAes256kAndAnyKernelForAes(t *testing.T) {
+	facts := goodFacts()
+	facts.Kernel = "7.0.2"
+	cfg := goodConfig()
+	cfg.Spec.Storage.CephxCipher = "aes256k"
+	if Blocked(Run(context.Background(), goodExec(), facts, []host.Device{{Path: "/dev/sdb", Block: true}}, cfg, []string{"ubuntu-24.04"})) {
+		t.Fatal("kernel 7.0 must pass")
+	}
+	facts.Kernel = "5.14.0"
+	cfg.Spec.Storage.CephxCipher = "aes"
+	if Blocked(Run(context.Background(), goodExec(), facts, []host.Device{{Path: "/dev/sdb", Block: true}}, cfg, []string{"ubuntu-24.04"})) {
+		t.Fatal("aes must pass on an old kernel")
+	}
+}

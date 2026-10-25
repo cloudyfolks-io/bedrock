@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/cloudyfolks-io/bedrock/api/v1alpha1"
+	"github.com/cloudyfolks-io/bedrock/internal/cephx"
 	"github.com/cloudyfolks-io/bedrock/internal/host"
 )
 
@@ -53,11 +54,20 @@ func checks(facts host.Facts, devices []host.Device, cfg v1alpha1.ClusterConfig,
 		check("management-interface", true, slices.Contains(facts.Interfaces, cfg.Spec.Network.ManagementInterface), fmt.Sprintf("interface %s not found", cfg.Spec.Network.ManagementInterface)),
 	}
 	results = append(results, vipResults...)
+	results = append(results, cephxKernelResults(cfg, facts)...)
 	results = append(results, check("iommu", false, facts.IOMMUGroups > 0, "no IOMMU groups found, hardware passthrough will not work"))
 	for _, device := range devices {
 		results = append(results, deviceCheck(device, adoptedFSID(cfg)))
 	}
 	return results
+}
+
+func cephxKernelResults(cfg v1alpha1.ClusterConfig, facts host.Facts) []Result {
+	if cfg.Spec.Storage.CephxCipher != cephx.Aes256k {
+		return nil
+	}
+	problem := cephx.KernelProblem(facts.Hostname, facts.Kernel)
+	return []Result{check("cephx-kernel", true, problem == "", problem)}
 }
 
 func minFreeFor(cfg v1alpha1.ClusterConfig) uint64 {

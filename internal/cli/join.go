@@ -103,6 +103,7 @@ func RunJoin(ctx context.Context, args []string, deps InitDeps, stdout, stderr i
 	cfg.Spec.API.VIP = token.VIP
 	cfg.Spec.Network.ManagementInterface = facts.DefaultInterface
 	cfg.Spec.Storage.Adopt = adopt
+	cfg.Spec.Storage.CephxCipher = token.CephxCipher
 	k0sClient := k0s.Client{Exec: deps.Exec, Binary: o.k0sBin, DataDir: o.dataDir}
 	results, err := preflightResults(ctx, deps, k0sClient, preflight.RunJoin, facts, cfg, token.SupportedOS)
 	if err != nil {

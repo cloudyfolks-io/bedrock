@@ -16,6 +16,7 @@ type Facts struct {
 	OSID             string
 	OSVersionID      string
 	Arch             string
+	Kernel           string
 	Root             bool
 	Systemd          bool
 	CgroupV2         bool
@@ -79,6 +80,7 @@ func Gather(ctx context.Context, e Exec, root string, freeBytes func(string) (ui
 		OSID:             id,
 		OSVersionID:      version,
 		Arch:             runtime.GOARCH,
+		Kernel:           kernelRelease(root),
 		Root:             uid == 0,
 		Systemd:          exists(filepath.Join(root, "run", "systemd", "system")),
 		CgroupV2:         exists(filepath.Join(root, "sys", "fs", "cgroup", "cgroup.controllers")),
@@ -90,6 +92,14 @@ func Gather(ctx context.Context, e Exec, root string, freeBytes func(string) (ui
 		FreeVarLibBytes:  free,
 		IOMMUGroups:      countEntries(filepath.Join(root, "sys", "kernel", "iommu_groups")),
 	}, nil
+}
+
+func kernelRelease(root string) string {
+	raw, err := os.ReadFile(filepath.Join(root, "proc", "sys", "kernel", "osrelease"))
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(string(raw))
 }
 
 func countEntries(path string) int {

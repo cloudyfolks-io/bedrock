@@ -63,6 +63,18 @@ func TestBuildTokenCarriesMirror(t *testing.T) {
 	}
 }
 
+func TestBuildTokenCarriesTheCephxCipher(t *testing.T) {
+	setting := &v1alpha1.Setting{ObjectMeta: metav1.ObjectMeta{Name: "storage.cephx-cipher"}, Spec: v1alpha1.SettingSpec{Value: "aes256k"}}
+	e := &host.FakeExec{Responses: map[string]string{"/usr/local/bin/k0s token create --role worker --expiry 1h": "tok\n"}}
+	token, err := buildToken(context.Background(), tokenClient(t, setting), k0s.Client{Exec: e, Binary: "/usr/local/bin/k0s"}, []string{v1alpha1.RoleWorkload}, "1h", "", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if token.CephxCipher != "aes256k" {
+		t.Fatalf("token %+v", token)
+	}
+}
+
 func tokenClient(t *testing.T, extra ...client.Object) client.Client {
 	t.Helper()
 	scheme := runtime.NewScheme()
