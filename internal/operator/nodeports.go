@@ -6,6 +6,7 @@ import (
 	"fmt"
 
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
@@ -47,9 +48,12 @@ func (r *ClusterReconciler) reconcileNodePorts(ctx context.Context) error {
 }
 
 func (r *ClusterReconciler) scopeNodePorts(ctx context.Context, cidr string) (string, string, error) {
-	live, err := readK0sClusterConfig(ctx, r.APIReader)
+	live, found, err := readK0sClusterConfig(ctx, r.APIReader)
 	if err != nil {
 		return reasonK0sConfigUnavailable, err.Error(), err
+	}
+	if !found {
+		return reasonK0sConfigUnavailable, fmt.Sprintf("k0s ClusterConfig %s/%s not found: the controllers must run with dynamic config", k0sConfigNamespace, k0sConfigName), nil
 	}
 	if nodePortsScoped(live) {
 		return reasonNodePortsScoped, "", nil
@@ -60,25 +64,25 @@ func (r *ClusterReconciler) scopeNodePorts(ctx context.Context, cidr string) (st
 	if err := patchNodePortAddresses(ctx, r.Client, live, cidr); err != nil {
 		return reasonNodePortsPatchFailed, err.Error(), err
 	}
-	verified, err := readK0sClusterConfig(ctx, r.APIReader)
+	verified, found, err := readK0sClusterConfig(ctx, r.APIReader)
 	if err != nil {
 		return reasonK0sConfigUnavailable, err.Error(), err
 	}
-	if !nodePortsScoped(verified) {
+	if !found || !nodePortsScoped(verified) {
 		err := fmt.Errorf("k0s ClusterConfig %s/%s has no kubeProxy.nodePortAddresses after the patch", k0sConfigNamespace, k0sConfigName)
 		return reasonNodePortsNotApplied, err.Error(), err
 	}
 	return reasonNodePortsScoped, "", nil
 }
 
-func readK0sClusterConfig(ctx context.Context, reader client.Reader) (*unstructured.Unstructured, error) {
+func readK0sClusterConfig(ctx context.Context, reader client.Reader) (*unstructured.Unstructured, bool, error) {
 	live := &unstructured.Unstructured{}
 	live.SetGroupVersionKind(k0sClusterConfigGVK)
 	err := reader.Get(ctx, client.ObjectKey{Namespace: k0sConfigNamespace, Name: k0sConfigName}, live)
-	if apierrors.IsNotFound(err) {
-		return nil, fmt.Errorf("k0s ClusterConfig %s/%s not found: the controllers must run with dynamic config", k0sConfigNamespace, k0sConfigName)
+	if apierrors.IsNotFound(err) || meta.IsNoMatchError(err) {
+		return nil, false, nil
 	}
-	return live, err
+	return live, err == nil, err
 }
 
 func nodePortsScoped(config *unstructured.Unstructured) bool {

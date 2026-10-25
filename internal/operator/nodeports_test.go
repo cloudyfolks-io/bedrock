@@ -132,8 +132,8 @@ func TestNodePortScopeReportsAMissingCIDR(t *testing.T) {
 
 func TestNodePortScopeReportsAMissingK0sConfig(t *testing.T) {
 	r, c := nodePortReconciler(t, "10.0.10.0/24")
-	if err := r.reconcileNodePorts(context.Background()); err == nil {
-		t.Fatal("a missing k0s ClusterConfig must fail")
+	if err := r.reconcileNodePorts(context.Background()); err != nil {
+		t.Fatalf("a missing k0s ClusterConfig is reported, not retried: %v", err)
 	}
 	got := nodePortCondition(t, c)
 	if got == nil || got.Status != metav1.ConditionFalse || got.Reason != "K0sConfigUnavailable" {
@@ -197,4 +197,24 @@ func TestOperatorRolePatchesTheK0sClusterConfig(t *testing.T) {
 	if allows(role, "k0s.k0sproject.io", "clusterconfigs", "delete") {
 		t.Error("the operator must not delete the k0s ClusterConfig")
 	}
+}
+
+func TestNodePortScopeReportsAMissingK0sKind(t *testing.T) {
+	r, c := nodePortReconciler(t, "10.0.10.0/24")
+	r.APIReader = noKindReader{c}
+	if err := r.reconcileNodePorts(context.Background()); err != nil {
+		t.Fatalf("an absent kind is reported, not retried: %v", err)
+	}
+	if got := nodePortCondition(t, c); got == nil || got.Reason != "K0sConfigUnavailable" {
+		t.Fatalf("condition %+v", got)
+	}
+}
+
+type noKindReader struct{ client.Client }
+
+func (r noKindReader) Get(ctx context.Context, key client.ObjectKey, obj client.Object, opts ...client.GetOption) error {
+	if _, isCluster := obj.(*v1alpha1.Cluster); isCluster {
+		return r.Client.Get(ctx, key, obj, opts...)
+	}
+	return &meta.NoKindMatchError{GroupKind: k0sClusterConfigGVK.GroupKind()}
 }
