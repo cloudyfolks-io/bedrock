@@ -125,7 +125,7 @@ func TestGrafanaReadsTheBedrockAdminSecret(t *testing.T) {
 func TestPrometheusStackSkipsControlPlaneRules(t *testing.T) {
 	bundle, _ := buildStack(t)
 	for _, obj := range groupObjects(bundle, "kube-prometheus-stack") {
-		if obj.GetKind() != "PrometheusRule" || strings.HasPrefix(obj.GetName(), "bedrock-") {
+		if obj.GetKind() != "PrometheusRule" || obj.GetName() == "bedrock-etcd" {
 			continue
 		}
 		for _, word := range []string{"etcd", "scheduler", "controller-manager", "kube-proxy"} {
