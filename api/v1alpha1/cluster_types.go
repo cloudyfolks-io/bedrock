@@ -37,15 +37,16 @@ const (
 	ReasonPoolSizeTooSmall   = "PoolSizeTooSmall"
 	ReasonRenameFailed       = "RenameFailed"
 
-	ConditionAvailable           = "Available"
-	ConditionUpgradeBlocked      = "UpgradeBlocked"
-	ConditionStorageReady        = "StorageReady"
-	ConditionStorageAdopted      = "StorageAdopted"
-	ConditionVirtualizationReady = "VirtualizationReady"
-	ConditionPlatformReady       = "PlatformReady"
-	ConditionAuthnReady          = "AuthnReady"
-	ConditionUploadReady         = "UploadReady"
-	ConditionProxyReady          = "ProxyReady"
+	ConditionAvailable              = "Available"
+	ConditionUpgradeBlocked         = "UpgradeBlocked"
+	ConditionStorageReady           = "StorageReady"
+	ConditionStorageAdopted         = "StorageAdopted"
+	ConditionStorageCephxRestricted = "StorageCephxRestricted"
+	ConditionVirtualizationReady    = "VirtualizationReady"
+	ConditionPlatformReady          = "PlatformReady"
+	ConditionAuthnReady             = "AuthnReady"
+	ConditionUploadReady            = "UploadReady"
+	ConditionProxyReady             = "ProxyReady"
 )
 
 type APISpec struct {

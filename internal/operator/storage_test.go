@@ -3,6 +3,7 @@ package operator
 import (
 	"os"
 	"reflect"
+	"strings"
 	"testing"
 
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
@@ -396,18 +397,28 @@ func TestRookValues(t *testing.T) {
 	}
 }
 
+func authPolicies(t *testing.T, in AddonInput) map[string]string {
+	t.Helper()
+	out, err := RenderStorage(in)
+	if err != nil {
+		t.Fatal(err)
+	}
+	muted, _, _ := unstructured.NestedMap(findObject(out.Objects, "CephCluster", "rook-ceph").Object, "spec", "healthCheck", "muteHealthWarning")
+	got := map[string]string{}
+	for check, spec := range muted {
+		got[check], _, _ = unstructured.NestedString(spec.(map[string]any), "policy")
+	}
+	return got
+}
+
+func withCipher(in AddonInput, cipher string) AddonInput {
+	in.Settings["storage.cephx-cipher"] = cipher
+	return in
+}
+
 func TestRenderStorageMutesOnlyWarningsThatReplicasExplain(t *testing.T) {
 	policies := func(replicas string) map[string]string {
-		out, err := RenderStorage(storageInput([]v1alpha1.Host{osdHost("a", "/dev/sdb")}, replicas))
-		if err != nil {
-			t.Fatal(err)
-		}
-		muted, _, _ := unstructured.NestedMap(findObject(out.Objects, "CephCluster", "rook-ceph").Object, "spec", "healthCheck", "muteHealthWarning")
-		got := map[string]string{}
-		for check, spec := range muted {
-			got[check], _, _ = unstructured.NestedString(spec.(map[string]any), "policy")
-		}
-		return got
+		return authPolicies(t, withCipher(storageInput([]v1alpha1.Host{osdHost("a", "/dev/sdb")}, replicas), "aes256k"))
 	}
 	want := map[string]string{
 		"AUTH_EMERGENCY_CIPHERS_SET":    "unmute",
@@ -426,8 +437,25 @@ func TestRenderStorageMutesOnlyWarningsThatReplicasExplain(t *testing.T) {
 	}
 }
 
-func TestRenderStorageGivesTheAes256kCephxBlock(t *testing.T) {
-	out, err := RenderStorage(storageInput([]v1alpha1.Host{osdHost("a", "/dev/sdb")}, "1"))
+func TestRenderStorageAesModeKeepsTheKeysOfRook120(t *testing.T) {
+	in := storageInput([]v1alpha1.Host{osdHost("a", "/dev/sdb")}, "3")
+	out, err := RenderStorage(in)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cephx, _, _ := unstructured.NestedMap(findObject(out.Objects, "CephCluster", "rook-ceph").Object, "spec", "security", "cephx")
+	if !reflect.DeepEqual(cephx, map[string]any{"csi": map[string]any{"keyType": "aes"}}) {
+		t.Fatalf("cephx %+v", cephx)
+	}
+	for check, policy := range authPolicies(t, in) {
+		if strings.HasPrefix(check, "AUTH_") && policy != "mute" {
+			t.Errorf("%s is %s", check, policy)
+		}
+	}
+}
+
+func TestRenderStorageGivesTheAes256kCephxBlockToANewCluster(t *testing.T) {
+	out, err := RenderStorage(withCipher(storageInput([]v1alpha1.Host{osdHost("a", "/dev/sdb")}, "1"), "aes256k"))
 	if err != nil {
 		t.Fatal(err)
 	}

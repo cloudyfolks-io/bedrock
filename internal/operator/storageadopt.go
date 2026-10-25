@@ -60,14 +60,16 @@ func renderAdopted(in AddonInput, adopt v1alpha1.AdoptSpec) (Rendered, error) {
 	if err != nil {
 		return Rendered{}, err
 	}
-	cluster, err := adoptedCephCluster(image, hosts, adopt, replicas)
+	adoptCephx, err := adoptedCephxMap(adopt)
 	if err != nil {
 		return Rendered{}, err
 	}
+	plan := planCephx(in, adoptCephx)
+	cluster := adoptedCephCluster(image, hosts, adopt, replicas, plan)
 	switch phase {
 	case v1alpha1.ReasonAdopted:
 		objects := slices.Concat([]*unstructured.Unstructured{cluster}, storageObjects(replicas, hosts, hostingNames(in)))
-		return Rendered{Objects: objects, Probes: []Probe{cephClusterProbe(adoptedGate(cephGate(deviceCount(hosts)), in.CephProblems))}}, nil
+		return Rendered{Objects: objects, Probes: []Probe{cephClusterProbe(adoptedGate(cephGate(deviceCount(hosts)), in.CephProblems))}, Conditions: plan.Conditions}, nil
 	case "", v1alpha1.ReasonWaitingForIdentity, v1alpha1.ReasonWaitingForHosts:
 		quorum := adoptedCondition(v1alpha1.ReasonWaitingForQuorum, "the CephCluster is rendered and waits for every monitor to join the quorum")
 		return adoptionPending(cluster, v1alpha1.ReasonWaitingForQuorum, quorum), nil
@@ -121,19 +123,23 @@ func monitorsWithoutHost(monitors []v1alpha1.AdoptMonitor, osdNodes []string) []
 	return missing
 }
 
-func adoptedCephCluster(image string, hosts []v1alpha1.Host, adopt v1alpha1.AdoptSpec, replicas int) (*unstructured.Unstructured, error) {
+func adoptedCephCluster(image string, hosts []v1alpha1.Host, adopt v1alpha1.AdoptSpec, replicas int, plan cephxPlan) *unstructured.Unstructured {
 	mons := int64(len(adopt.Monitors))
-	spec := cephClusterSpec(image, hosts, mons, replicas)
+	spec := cephClusterSpec(image, hosts, mons, replicas, plan)
 	spec["network"] = map[string]any{"provider": "host"}
 	spec["mon"] = map[string]any{"count": mons, "allowMultiplePerNode": false}
-	if adopt.Cephx != nil && len(adopt.Cephx.Raw) > 0 {
-		var cephx map[string]any
-		if err := utiljson.Unmarshal(adopt.Cephx.Raw, &cephx); err != nil {
-			return nil, fmt.Errorf("storage.adopt.cephx: %w", err)
-		}
-		spec["security"] = map[string]any{"cephx": mergeMaps(defaultCephx(), cephx)}
+	return object("ceph.rook.io/v1", "CephCluster", storageNamespace, storageNamespace, spec)
+}
+
+func adoptedCephxMap(adopt v1alpha1.AdoptSpec) (map[string]any, error) {
+	if adopt.Cephx == nil || len(adopt.Cephx.Raw) == 0 {
+		return nil, nil
 	}
-	return object("ceph.rook.io/v1", "CephCluster", storageNamespace, storageNamespace, spec), nil
+	var cephx map[string]any
+	if err := utiljson.Unmarshal(adopt.Cephx.Raw, &cephx); err != nil {
+		return nil, fmt.Errorf("storage.adopt.cephx: %w", err)
+	}
+	return cephx, nil
 }
 
 const verificationFailed = "VerificationFailed"
