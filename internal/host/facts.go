@@ -26,6 +26,7 @@ type Facts struct {
 	Interfaces       []string
 	FreeVarLibBytes  uint64
 	IOMMUGroups      int
+	Swaps            []string
 }
 
 type route struct {
@@ -89,7 +90,23 @@ func Gather(ctx context.Context, e Exec, root string, freeBytes func(string) (ui
 		Interfaces:       links,
 		FreeVarLibBytes:  free,
 		IOMMUGroups:      countEntries(filepath.Join(root, "sys", "kernel", "iommu_groups")),
+		Swaps:            readSwaps(filepath.Join(root, "proc", "swaps")),
 	}, nil
+}
+
+func readSwaps(path string) []string {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil
+	}
+	var devices []string
+	for i, line := range strings.Split(string(data), "\n") {
+		fields := strings.Fields(line)
+		if i > 0 && len(fields) > 0 {
+			devices = append(devices, fields[0])
+		}
+	}
+	return devices
 }
 
 func countEntries(path string) int {
