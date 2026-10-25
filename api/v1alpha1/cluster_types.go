@@ -47,6 +47,7 @@ const (
 	ConditionUploadReady         = "UploadReady"
 	ConditionProxyReady          = "ProxyReady"
 	ConditionNodePortsScoped     = "NodePortsScoped"
+	ConditionTenantLegsGuarded   = "TenantLegsGuarded"
 )
 
 type APISpec struct {

@@ -54,13 +54,18 @@ func liveKubeProxy(t *testing.T, c client.Client) map[string]any {
 	return proxy
 }
 
-func nodePortCondition(t *testing.T, c client.Client) *metav1.Condition {
+func clusterConditionOf(t *testing.T, c client.Client, conditionType string) *metav1.Condition {
 	t.Helper()
 	var cluster v1alpha1.Cluster
 	if err := c.Get(context.Background(), client.ObjectKey{Name: v1alpha1.ClusterName}, &cluster); err != nil {
 		t.Fatal(err)
 	}
-	return meta.FindStatusCondition(cluster.Status.Conditions, v1alpha1.ConditionNodePortsScoped)
+	return meta.FindStatusCondition(cluster.Status.Conditions, conditionType)
+}
+
+func nodePortCondition(t *testing.T, c client.Client) *metav1.Condition {
+	t.Helper()
+	return clusterConditionOf(t, c, v1alpha1.ConditionNodePortsScoped)
 }
 
 func TestNodePortScopePatchesOnlyTheAddresses(t *testing.T) {

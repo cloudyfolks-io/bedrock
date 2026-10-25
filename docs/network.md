@@ -602,6 +602,9 @@ If the table is missing or its rules differ, the agent loads it again and the co
 A change of the list replaces the table in one nft transaction: the file creates, deletes and recreates the table.
 No packet passes between the delete and the new rules.
 If you remove all legs, the agent removes the unit, the file and the table.
+This is allowed, but the guard is then gone on every host.
+The operator sets the condition `TenantLegsGuarded` of the `Cluster` to `False` with the reason `NoTenantLegs` and raises a Warning event.
+While the list is not empty, the condition is `True`.
 The agent needs the `nftables` package, and the operator adds it to the packages of the `HostConfig` when the list is not empty.
 
 A host that came from the legacy Ansible roles already has the table `inet tenant_legs` and the unit `tenant-legs.service`.
