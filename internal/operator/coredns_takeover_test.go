@@ -102,7 +102,7 @@ func createK0sCoreDNS(t *testing.T, c client.Client) {
 func releaseCoreDNSGroup(t *testing.T, dnsIP string) release.Group {
 	t.Helper()
 	bundle := release.Bundle{Groups: []release.Group{{Name: "coredns", Objects: corednsManifest(t)}}}
-	vars := release.SettingVars(map[string]string{"dns.upstreams": "217.218.127.127 217.218.155.155"})
+	vars := release.SettingVars(map[string]string{"dns.upstreams": "217.218.127.127 217.218.155.155"}, "10.0.10.10")
 	vars[release.VarDNSIP] = dnsIP
 	substituted, err := release.Substitute(bundle, vars)
 	if err != nil {

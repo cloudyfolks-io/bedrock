@@ -46,7 +46,7 @@ func Vars(ctx context.Context, c client.Client, vip string) (map[string]string, 
 	if err != nil {
 		return nil, err
 	}
-	maps.Copy(vars, SettingVars(values))
+	maps.Copy(vars, SettingVars(values, vip))
 	maps.Copy(vars, dns)
 	return vars, nil
 }

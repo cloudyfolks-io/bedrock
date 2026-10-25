@@ -3,6 +3,7 @@ package release
 import (
 	"context"
 	"net/netip"
+	"slices"
 	"strings"
 
 	corev1 "k8s.io/api/core/v1"
@@ -11,6 +12,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	"github.com/cloudyfolks-io/bedrock/api/v1alpha1"
+	"github.com/cloudyfolks-io/bedrock/internal/config"
 )
 
 const (
@@ -28,7 +30,7 @@ const (
 	dnsOffsetFromAPIService    = 9
 )
 
-func SettingVars(values map[string]string) map[string]string {
+func SettingVars(values map[string]string, apiAddress string) map[string]string {
 	forward := strings.TrimSpace(values["dns.upstreams"])
 	if forward == "" {
 		forward = NodeResolvConf
@@ -36,7 +38,7 @@ func SettingVars(values map[string]string) map[string]string {
 	vars := map[string]string{
 		VarDNSForward:          forward,
 		VarEgressHTTPProxy:     values["egress.http-proxy"],
-		VarEgressNoProxy:       values["egress.no-proxy"],
+		VarEgressNoProxy:       egressNoProxy(values, apiAddress),
 		VarDNS01NameserversArg: "",
 		VarDNS01OnlyArg:        "",
 	}
@@ -45,6 +47,27 @@ func SettingVars(values map[string]string) map[string]string {
 		vars[VarDNS01OnlyArg] = "--dns01-recursive-nameservers-only=true"
 	}
 	return vars
+}
+
+func egressNoProxy(values map[string]string, apiAddress string) string {
+	if values["egress.http-proxy"] == "" {
+		return ""
+	}
+	return NoProxy(values["egress.no-proxy"], apiAddress)
+}
+
+func NoProxy(setting, apiAddress string) string {
+	entries := []string{config.DefaultPodCIDR, config.DefaultServiceCIDR, "cluster.local", ".cluster.local", ".svc", "localhost", "127.0.0.1", apiAddress}
+	if setting != "" {
+		entries = append(entries, strings.Split(setting, ",")...)
+	}
+	kept := make([]string, 0, len(entries))
+	for _, entry := range entries {
+		if entry != "" && !slices.Contains(kept, entry) {
+			kept = append(kept, entry)
+		}
+	}
+	return strings.Join(kept, ",")
 }
 
 func DNSAddress(apiServiceIP string) (string, bool) {

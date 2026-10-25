@@ -330,7 +330,7 @@ func RunInit(ctx context.Context, args []string, deps InitDeps, stdout, stderr i
 		return fail(stderr, err)
 	}
 	vars = release.WithPodMTU(vars, cfg.Spec.Network.PodMTU)
-	maps.Copy(vars, release.SettingVars(config.SettingValues(cfg)))
+	maps.Copy(vars, release.SettingVars(config.SettingValues(cfg), cfg.Spec.API.VIP))
 	if err := release.InstallGroups(ctx, c, bundle, vars, release.Gates{}, 2*time.Second, 30*time.Minute, report, grafanaAdminHook(c, rand.Reader), rookIdentityHook(c, adopt, rookSecret)); err != nil {
 		return fail(stderr, err)
 	}

@@ -22,7 +22,7 @@ func TestCertManagerChartTakesTheEgressSettings(t *testing.T) {
 		t.Fatalf("helm template: %v: %s", err, stderr.String())
 	}
 	bundle := release.Bundle{Groups: []release.Group{{Name: "cert-manager", Objects: decodeDocuments(t, out.Bytes())}}}
-	rendered, err := RenderEgress(AddonInput{Bundle: bundle, Settings: map[string]string{
+	rendered, err := RenderEgress(AddonInput{Cluster: testCluster(), Bundle: bundle, Settings: map[string]string{
 		"egress.http-proxy":             "http://proxy.kube-system:10808",
 		"egress.no-proxy":               "10.0.0.0/8,.svc",
 		"letsencrypt.dns01-nameservers": "https://one.one.one.one/dns-query",
@@ -35,7 +35,7 @@ func TestCertManagerChartTakesTheEgressSettings(t *testing.T) {
 	if !strings.Contains(joined, "--dns01-recursive-nameservers=https://one.one.one.one/dns-query") || !strings.Contains(joined, "--dns01-recursive-nameservers-only=true") {
 		t.Fatalf("args %v", args)
 	}
-	if env["HTTP_PROXY"] != "http://proxy.kube-system:10808" || env["HTTPS_PROXY"] != "http://proxy.kube-system:10808" || env["NO_PROXY"] != "10.0.0.0/8,.svc" {
+	if env["HTTP_PROXY"] != "http://proxy.kube-system:10808" || env["HTTPS_PROXY"] != "http://proxy.kube-system:10808" || env["NO_PROXY"] != derivedNoProxy+",10.0.0.0/8" {
 		t.Fatalf("env %v", env)
 	}
 }

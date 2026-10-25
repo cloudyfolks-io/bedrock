@@ -9,7 +9,7 @@ import (
 
 func cdiImportProxy(t *testing.T, settings map[string]string) (map[string]any, bool, error) {
 	t.Helper()
-	out, err := RenderVirtualization(AddonInput{Settings: settings})
+	out, err := RenderVirtualization(AddonInput{Cluster: testCluster(), Settings: settings})
 	if err != nil {
 		return nil, false, err
 	}
@@ -33,7 +33,7 @@ func TestCDIImportProxyFollowsTheEgressSettings(t *testing.T) {
 	if err != nil || !found {
 		t.Fatalf("importProxy found %v, error %v", found, err)
 	}
-	want := map[string]any{"HTTPProxy": "http://proxy.kube-system:10808", "HTTPSProxy": "http://proxy.kube-system:10808", "noProxy": "10.0.0.0/8,.cloudyfolks.com"}
+	want := map[string]any{"HTTPProxy": "http://proxy.kube-system:10808", "HTTPSProxy": "http://proxy.kube-system:10808", "noProxy": derivedNoProxy + ",10.0.0.0/8,.cloudyfolks.com"}
 	if len(proxy) != len(want) {
 		t.Fatalf("importProxy %v", proxy)
 	}
@@ -44,12 +44,12 @@ func TestCDIImportProxyFollowsTheEgressSettings(t *testing.T) {
 	}
 }
 
-func TestCDIImportProxyOmitsAnEmptyNoProxy(t *testing.T) {
+func TestCDIImportProxyKeepsClusterTrafficOffTheProxyWithAnEmptySetting(t *testing.T) {
 	proxy, _, err := cdiImportProxy(t, map[string]string{"egress.http-proxy": "http://proxy.kube-system:10808"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, ok := proxy["noProxy"]; ok {
+	if proxy["noProxy"] != derivedNoProxy {
 		t.Fatalf("importProxy %v", proxy)
 	}
 }

@@ -26,7 +26,7 @@ func RenderEgress(in AddonInput) (Rendered, error) {
 		return Rendered{}, err
 	}
 	key := client.ObjectKey{Namespace: certManagerNS, Name: certManagerName}
-	controller, found, err := bundleObject(in.Bundle, certManagerGroup, deploymentGVK, key, release.SettingVars(in.Settings))
+	controller, found, err := bundleObject(in.Bundle, certManagerGroup, deploymentGVK, key, release.SettingVars(in.Settings, in.Cluster.Spec.API.VIP))
 	if err != nil {
 		return Rendered{}, err
 	}

@@ -53,7 +53,7 @@ func RenderVirtualization(in AddonInput) (Rendered, error) {
 	if err := validateSettings(in.Settings, keyEgressProxy, keyEgressNoProxy); err != nil {
 		return Rendered{}, err
 	}
-	objects := append([]*unstructured.Unstructured{kubeVirt(emulation, tuning, migration, smbios, eviction), cdi(in.Settings[keyEgressProxy], in.Settings[keyEgressNoProxy])}, policies...)
+	objects := append([]*unstructured.Unstructured{kubeVirt(emulation, tuning, migration, smbios, eviction), cdi(in.Settings[keyEgressProxy], release.NoProxy(in.Settings[keyEgressNoProxy], in.Cluster.Spec.API.VIP))}, policies...)
 	probes := []Probe{
 		{GVK: kubeVirtGVK, Key: client.ObjectKey{Namespace: kubevirtNamespace, Name: "kubevirt"}, Gate: release.PhaseGate("Deployed")},
 		{GVK: cdiGVK, Key: client.ObjectKey{Name: "cdi"}, Gate: release.PhaseGate("Deployed")},
@@ -124,11 +124,7 @@ func withImportProxy(config map[string]any, proxy, noProxy string) map[string]an
 	if proxy == "" {
 		return config
 	}
-	importProxy := map[string]any{"HTTPProxy": proxy, "HTTPSProxy": proxy}
-	if noProxy != "" {
-		importProxy["noProxy"] = noProxy
-	}
-	config["importProxy"] = importProxy
+	config["importProxy"] = map[string]any{"HTTPProxy": proxy, "HTTPSProxy": proxy, "noProxy": noProxy}
 	return config
 }
 

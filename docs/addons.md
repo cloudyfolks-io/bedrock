@@ -281,7 +281,8 @@ The value has the same format as `registry.http-proxy`: an `http` or `https` URL
 
 With `egress.http-proxy` set, the cert-manager controller gets the variables `HTTP_PROXY`, `HTTPS_PROXY` and `NO_PROXY`.
 The CDI object gets `spec.config.importProxy` with `HTTPProxy`, `HTTPSProxy` and `noProxy`.
-Add the networks of the cluster and its domains to `egress.no-proxy`, so that cluster traffic does not use the proxy.
+Bedrock always adds the pod network, the service network, the API address, `localhost`, `127.0.0.1`, `cluster.local` and `.svc` to the no-proxy list.
+`egress.no-proxy` adds more entries, for example your own domains.
 `registry.http-proxy` stays a separate Setting.
 
 With `letsencrypt.dns01-nameservers` set, cert-manager asks only these servers for the DNS-01 self check.

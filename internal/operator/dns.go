@@ -23,7 +23,7 @@ func RenderDNS(in AddonInput) (Rendered, error) {
 	if err := validateSettings(in.Settings, keyDNSUpstreams); err != nil {
 		return Rendered{}, err
 	}
-	config, found, err := bundleObject(in.Bundle, dnsGroup, configMapGVK, client.ObjectKey{Namespace: dnsNamespace, Name: dnsName}, release.SettingVars(in.Settings))
+	config, found, err := bundleObject(in.Bundle, dnsGroup, configMapGVK, client.ObjectKey{Namespace: dnsNamespace, Name: dnsName}, release.SettingVars(in.Settings, in.Cluster.Spec.API.VIP))
 	if err != nil {
 		return Rendered{}, err
 	}

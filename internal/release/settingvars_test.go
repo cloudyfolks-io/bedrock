@@ -2,6 +2,7 @@ package release
 
 import (
 	"context"
+	"strings"
 	"testing"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -10,7 +11,7 @@ import (
 )
 
 func TestSettingVarsDefaultToNodeResolvConfAndNoEgress(t *testing.T) {
-	vars := SettingVars(map[string]string{})
+	vars := SettingVars(map[string]string{}, "10.0.10.10")
 	want := map[string]string{
 		VarDNSForward: "/etc/resolv.conf", VarEgressHTTPProxy: "", VarEgressNoProxy: "", VarDNS01NameserversArg: "", VarDNS01OnlyArg: "",
 	}
@@ -27,11 +28,11 @@ func TestSettingVarsCarryTheSettings(t *testing.T) {
 		"egress.http-proxy":             "http://proxy.kube-system:10808",
 		"egress.no-proxy":               "10.0.0.0/8,.svc",
 		"letsencrypt.dns01-nameservers": "https://one.one.one.one/dns-query",
-	})
+	}, "10.0.10.10")
 	want := map[string]string{
 		VarDNSForward:          "217.218.127.127 217.218.155.155",
 		VarEgressHTTPProxy:     "http://proxy.kube-system:10808",
-		VarEgressNoProxy:       "10.0.0.0/8,.svc",
+		VarEgressNoProxy:       "10.16.0.0/16,10.96.0.0/12,cluster.local,.cluster.local,.svc,localhost,127.0.0.1,10.0.10.10,10.0.0.0/8",
 		VarDNS01NameserversArg: "--dns01-recursive-nameservers=https://one.one.one.one/dns-query",
 		VarDNS01OnlyArg:        "--dns01-recursive-nameservers-only=true",
 	}
@@ -68,5 +69,33 @@ func TestVarsHoldTheDNSAddressAndTheSettings(t *testing.T) {
 	}
 	if vars[VarDNSIP] != "10.0.0.10" || vars[VarDNSForward] != "9.9.9.9" || vars[VarDNS01OnlyArg] != "" {
 		t.Fatalf("vars %v", vars)
+	}
+}
+
+func TestNoProxyHoldsTheInClusterEntriesFirst(t *testing.T) {
+	got := NoProxy("", "10.0.10.10")
+	want := "10.16.0.0/16,10.96.0.0/12,cluster.local,.cluster.local,.svc,localhost,127.0.0.1,10.0.10.10"
+	if got != want {
+		t.Fatalf("got %q, want %q", got, want)
+	}
+}
+
+func TestNoProxyAppendsTheSettingAndDropsDuplicates(t *testing.T) {
+	got := NoProxy(".svc,.cloudyfolks.com,10.0.10.10,.cloudyfolks.com", "10.0.10.10")
+	want := "10.16.0.0/16,10.96.0.0/12,cluster.local,.cluster.local,.svc,localhost,127.0.0.1,10.0.10.10,.cloudyfolks.com"
+	if got != want {
+		t.Fatalf("got %q, want %q", got, want)
+	}
+}
+
+func TestNoProxyWithoutAnAPIAddress(t *testing.T) {
+	if got := NoProxy("", ""); strings.Contains(got, ",,") || strings.HasSuffix(got, ",") {
+		t.Fatalf("got %q", got)
+	}
+}
+
+func TestNoProxyIsEmptyWithoutAProxy(t *testing.T) {
+	if got := SettingVars(map[string]string{"egress.no-proxy": ".svc"}, "10.0.10.10")[VarEgressNoProxy]; got != "" {
+		t.Fatalf("got %q", got)
 	}
 }

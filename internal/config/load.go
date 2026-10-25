@@ -24,8 +24,8 @@ import (
 )
 
 const (
-	defaultPodCIDR     = "10.16.0.0/16"
-	defaultServiceCIDR = "10.96.0.0/12"
+	DefaultPodCIDR     = "10.16.0.0/16"
+	DefaultServiceCIDR = "10.96.0.0/12"
 	DefaultJoinCIDR    = "100.64.0.0/16"
 
 	adoptDevicePrefix = "/dev/disk/by-id/"
@@ -69,8 +69,8 @@ func WithDefaults(cfg v1alpha1.ClusterConfig) v1alpha1.ClusterConfig {
 	out := *cfg.DeepCopy()
 	out.Spec.API.VIPMode = fallback(out.Spec.API.VIPMode, "arp")
 	out.Spec.Platform.TLSMode = fallback(out.Spec.Platform.TLSMode, "SelfSigned")
-	out.Spec.Network.Fabric.PodCIDR = fallback(out.Spec.Network.Fabric.PodCIDR, defaultPodCIDR)
-	out.Spec.Network.Fabric.ServiceCIDR = fallback(out.Spec.Network.Fabric.ServiceCIDR, defaultServiceCIDR)
+	out.Spec.Network.Fabric.PodCIDR = fallback(out.Spec.Network.Fabric.PodCIDR, DefaultPodCIDR)
+	out.Spec.Network.Fabric.ServiceCIDR = fallback(out.Spec.Network.Fabric.ServiceCIDR, DefaultServiceCIDR)
 	out.Spec.Network.Fabric.JoinCIDR = fallback(out.Spec.Network.Fabric.JoinCIDR, DefaultJoinCIDR)
 	out.Spec.Network.Fabric.EIPMode = fallback(out.Spec.Network.Fabric.EIPMode, "l2")
 	if out.Spec.Storage.Replicas == 0 {
@@ -129,7 +129,7 @@ func Validate(cfg v1alpha1.ClusterConfig) error {
 			return fmt.Errorf("spec.network.fabric cidr %q: %w", cidr, err)
 		}
 	}
-	if s.Network.Fabric.PodCIDR != defaultPodCIDR || s.Network.Fabric.ServiceCIDR != defaultServiceCIDR || s.Network.Fabric.JoinCIDR != DefaultJoinCIDR {
+	if s.Network.Fabric.PodCIDR != DefaultPodCIDR || s.Network.Fabric.ServiceCIDR != DefaultServiceCIDR || s.Network.Fabric.JoinCIDR != DefaultJoinCIDR {
 		return fmt.Errorf("custom CIDRs arrive in a later release")
 	}
 	if mtu := s.Network.PodMTU; mtu != 0 && (mtu < 576 || mtu > 9000) {
