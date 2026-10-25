@@ -2,6 +2,7 @@ package hostconfig
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -68,8 +69,20 @@ func legsDeps(root string, exec *host.FakeExec) Deps {
 	return Deps{Exec: exec, Root: root, Packages: pkgmgr.Manager{Exec: exec, Family: "apt", Root: root}}
 }
 
+const (
+	listLegsTable = "nft list table inet bedrock_legs"
+	loadedListing = "table inet bedrock_legs {\n\tchain leg_input {\n\t\tcounter packets 0 bytes 0 drop\n\t}\n}\n"
+)
+
 func legsExec() *host.FakeExec {
-	return &host.FakeExec{ResponsePrefixes: map[string]string{"systemctl ": "", "nft ": "", "sysctl -p ": ""}}
+	return &host.FakeExec{
+		Responses:        map[string]string{listLegsTable: loadedListing},
+		ResponsePrefixes: map[string]string{"systemctl ": "", "nft ": "", "sysctl -p ": ""},
+	}
+}
+
+func restarts(exec *host.FakeExec) int {
+	return strings.Count(strings.Join(exec.Calls, "|"), "systemctl restart bedrock-tenant-legs.service")
 }
 
 func TestLegsStepInstallsGuardBeforeNetwork(t *testing.T) {
@@ -86,7 +99,7 @@ func TestLegsStepInstallsGuardBeforeNetwork(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, line := range []string{"DefaultDependencies=no", "Before=network-pre.target", "Wants=network-pre.target", "ExecStart=/usr/sbin/nft -f /etc/bedrock/tenant-legs.nft", "WantedBy=multi-user.target"} {
+	for _, line := range []string{"DefaultDependencies=no", "After=local-fs.target nftables.service", "Before=network-pre.target", "Wants=network-pre.target", "ExecStart=/usr/sbin/nft -f /etc/bedrock/tenant-legs.nft", "WantedBy=multi-user.target"} {
 		if !strings.Contains(string(unit), line) {
 			t.Fatalf("unit lacks %q:\n%s", line, unit)
 		}
@@ -96,7 +109,7 @@ func TestLegsStepInstallsGuardBeforeNetwork(t *testing.T) {
 	if string(rules) != want {
 		t.Fatal("rule file differs from the rendered ruleset")
 	}
-	if strings.Join(exec.Calls, "|") != "systemctl daemon-reload|systemctl enable --now bedrock-tenant-legs.service" {
+	if !strings.HasPrefix(strings.Join(exec.Calls, "|"), "systemctl daemon-reload|systemctl enable --now bedrock-tenant-legs.service") {
 		t.Fatalf("calls %v", exec.Calls)
 	}
 }
@@ -111,7 +124,7 @@ func TestLegsStepIsIdempotent(t *testing.T) {
 	if _, err := legsStep(context.Background(), legsDeps(root, exec), spec); err != nil {
 		t.Fatal(err)
 	}
-	if strings.Join(exec.Calls, "|") != "systemctl daemon-reload|systemctl enable --now bedrock-tenant-legs.service" {
+	if restarts(exec) != 0 {
 		t.Fatalf("second run must only confirm the unit, calls %v", exec.Calls)
 	}
 }
@@ -125,7 +138,7 @@ func TestLegsStepReplacesTableInOneTransaction(t *testing.T) {
 	if _, err := legsStep(context.Background(), legsDeps(root, exec), v1alpha1.HostConfigSpec{TenantLegs: productionLegs}); err != nil {
 		t.Fatal(err)
 	}
-	if strings.Join(exec.Calls, "|") != "systemctl daemon-reload|systemctl enable --now bedrock-tenant-legs.service|systemctl restart bedrock-tenant-legs.service" {
+	if restarts(exec) != 1 {
 		t.Fatalf("calls %v", exec.Calls)
 	}
 	rules, _ := os.ReadFile(filepath.Join(root, "etc", "bedrock", "tenant-legs.nft"))
@@ -158,7 +171,7 @@ func TestLegsStepRetiresTheGuardWhenLegsAreRemoved(t *testing.T) {
 	if strings.Join(exec.Calls, "|") != "systemctl disable --now bedrock-tenant-legs.service|nft delete table inet bedrock_legs|systemctl daemon-reload" {
 		t.Fatalf("calls %v", exec.Calls)
 	}
-	for _, path := range []string{"etc/bedrock/tenant-legs.nft", "etc/systemd/system/bedrock-tenant-legs.service"} {
+	for _, path := range []string{"etc/bedrock/tenant-legs.nft", "etc/bedrock/tenant-legs.applied", "etc/systemd/system/bedrock-tenant-legs.service"} {
 		if _, err := os.Stat(filepath.Join(root, path)); !os.IsNotExist(err) {
 			t.Fatalf("%s must be removed, err %v", path, err)
 		}
@@ -170,5 +183,88 @@ func TestLegsStepFailsOnUnsafeLeg(t *testing.T) {
 	_, err := legsStep(context.Background(), legsDeps(t.TempDir(), exec), v1alpha1.HostConfigSpec{TenantLegs: []v1alpha1.TenantLegSpec{{Interface: "a b"}}})
 	if err == nil || len(exec.Calls) != 0 {
 		t.Fatalf("err %v calls %v", err, exec.Calls)
+	}
+}
+
+func installedLegs(t *testing.T) (string, *host.FakeExec) {
+	t.Helper()
+	root := t.TempDir()
+	exec := legsExec()
+	if _, err := legsStep(context.Background(), legsDeps(root, exec), v1alpha1.HostConfigSpec{TenantLegs: productionLegs}); err != nil {
+		t.Fatal(err)
+	}
+	return root, exec
+}
+
+func TestLegsStepLoadsTheTableOnTheFirstPass(t *testing.T) {
+	root, exec := installedLegs(t)
+	if restarts(exec) != 1 {
+		t.Fatalf("calls %v", exec.Calls)
+	}
+	if _, err := os.Stat(filepath.Join(root, "etc", "bedrock", "tenant-legs.applied")); err != nil {
+		t.Fatal(err)
+	}
+}
+
+type flushedRuleset struct {
+	*host.FakeExec
+	flushed bool
+}
+
+func (f *flushedRuleset) Run(ctx context.Context, name string, args ...string) (string, error) {
+	key := strings.TrimSpace(name + " " + strings.Join(args, " "))
+	if key == listLegsTable && f.flushed {
+		f.Calls = append(f.Calls, key)
+		return "", errors.New("No such file or directory")
+	}
+	if key == "systemctl restart bedrock-tenant-legs.service" {
+		f.flushed = false
+	}
+	return f.FakeExec.Run(ctx, name, args...)
+}
+
+func TestLegsStepRepairsAMissingTable(t *testing.T) {
+	root, fake := installedLegs(t)
+	fake.Calls = nil
+	exec := &flushedRuleset{FakeExec: fake, flushed: true}
+	deps := Deps{Exec: exec, Root: root, Packages: pkgmgr.Manager{Exec: fake, Family: "apt", Root: root}}
+	if _, err := legsStep(context.Background(), deps, v1alpha1.HostConfigSpec{TenantLegs: productionLegs}); err != nil {
+		t.Fatal(err)
+	}
+	if restarts(fake) != 1 {
+		t.Fatalf("a flushed ruleset must be loaded again: %v", fake.Calls)
+	}
+}
+
+func TestLegsStepRepairsATamperedTable(t *testing.T) {
+	root, exec := installedLegs(t)
+	exec.Calls = nil
+	exec.Responses[listLegsTable] = "table inet bedrock_legs {\n}\n"
+	if _, err := legsStep(context.Background(), legsDeps(root, exec), v1alpha1.HostConfigSpec{TenantLegs: productionLegs}); err != nil {
+		t.Fatal(err)
+	}
+	if restarts(exec) != 1 {
+		t.Fatalf("a table with other content must be loaded again: %v", exec.Calls)
+	}
+}
+
+func TestLegsStepIgnoresCounterChanges(t *testing.T) {
+	root, exec := installedLegs(t)
+	exec.Calls = nil
+	exec.Responses[listLegsTable] = strings.Replace(loadedListing, "packets 0 bytes 0", "packets 912 bytes 70112", 1)
+	if _, err := legsStep(context.Background(), legsDeps(root, exec), v1alpha1.HostConfigSpec{TenantLegs: productionLegs}); err != nil {
+		t.Fatal(err)
+	}
+	if restarts(exec) != 0 {
+		t.Fatalf("counters are not content: %v", exec.Calls)
+	}
+}
+
+func TestLegsStepFailsWhenTheTableIsMissingAfterTheLoad(t *testing.T) {
+	exec := legsExec()
+	exec.Errors = map[string]error{listLegsTable: errors.New("No such file or directory")}
+	delete(exec.Responses, listLegsTable)
+	if _, err := legsStep(context.Background(), legsDeps(t.TempDir(), exec), v1alpha1.HostConfigSpec{TenantLegs: productionLegs}); err == nil {
+		t.Fatal("a guard that did not load must fail the step")
 	}
 }

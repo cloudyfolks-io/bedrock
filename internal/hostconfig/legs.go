@@ -22,8 +22,11 @@ const (
 	legsTable    = "bedrock_legs"
 )
 
+var counterValues = regexp.MustCompile(`packets \d+ bytes \d+`)
+
 var (
 	legsRulesetPath = filepath.Join("etc", "bedrock", "tenant-legs.nft")
+	legsAppliedPath = filepath.Join("etc", "bedrock", "tenant-legs.applied")
 	legsUnitPath    = filepath.Join("etc", "systemd", "system", legsUnitName)
 	legNamePattern  = regexp.MustCompile(`^[A-Za-z0-9_.-]{1,15}$`)
 )
@@ -31,7 +34,7 @@ var (
 const legsUnit = `[Unit]
 Description=drop host-bound traffic from the tenant-facing legs
 DefaultDependencies=no
-After=local-fs.target
+After=local-fs.target nftables.service
 Before=network-pre.target
 Wants=network-pre.target
 
@@ -147,14 +150,53 @@ func legsStep(ctx context.Context, deps Deps, spec v1alpha1.HostConfigSpec) (str
 	return fmt.Sprintf("guarding %d tenant legs", len(spec.TenantLegs)), nil
 }
 
-func enableLegsUnit(ctx context.Context, deps Deps, restart bool) error {
+func enableLegsUnit(ctx context.Context, deps Deps, replaced bool) error {
 	if _, err := deps.Exec.Run(ctx, "systemctl", "enable", "--now", legsUnitName); err != nil {
 		return err
 	}
-	if !restart {
+	if !replaced && tableIntact(ctx, deps) {
 		return nil
 	}
-	_, err := deps.Exec.Run(ctx, "systemctl", "restart", legsUnitName)
+	return reloadTable(ctx, deps)
+}
+
+func GuardLegs(ctx context.Context, deps Deps, spec v1alpha1.HostConfigSpec) error {
+	if len(spec.TenantLegs) == 0 || tableIntact(ctx, deps) {
+		return nil
+	}
+	return reloadTable(ctx, deps)
+}
+
+func reloadTable(ctx context.Context, deps Deps) error {
+	if _, err := deps.Exec.Run(ctx, "systemctl", "restart", legsUnitName); err != nil {
+		return err
+	}
+	return recordLoadedTable(ctx, deps)
+}
+
+func loadedTable(ctx context.Context, deps Deps) (string, error) {
+	listing, err := deps.Exec.Run(ctx, "nft", "list", "table", "inet", legsTable)
+	if err != nil {
+		return "", err
+	}
+	return counterValues.ReplaceAllString(listing, "packets 0 bytes 0"), nil
+}
+
+func tableIntact(ctx context.Context, deps Deps) bool {
+	listing, err := loadedTable(ctx, deps)
+	if err != nil {
+		return false
+	}
+	recorded, err := os.ReadFile(filepath.Join(deps.Root, legsAppliedPath))
+	return err == nil && string(recorded) == listing
+}
+
+func recordLoadedTable(ctx context.Context, deps Deps) error {
+	listing, err := loadedTable(ctx, deps)
+	if err != nil {
+		return fmt.Errorf("table inet %s is not loaded after the start: %w", legsTable, err)
+	}
+	_, err = host.ReplaceFile(filepath.Join(deps.Root, legsAppliedPath), listing, 0o644)
 	return err
 }
 
@@ -167,7 +209,7 @@ func retireLegs(ctx context.Context, deps Deps) (string, error) {
 		return "", err
 	}
 	deps.Exec.Run(ctx, "nft", "delete", "table", "inet", legsTable)
-	for _, path := range []string{unit, filepath.Join(deps.Root, legsRulesetPath)} {
+	for _, path := range []string{unit, filepath.Join(deps.Root, legsRulesetPath), filepath.Join(deps.Root, legsAppliedPath)} {
 		if err := os.Remove(path); err != nil && !errors.Is(err, fs.ErrNotExist) {
 			return "", err
 		}
