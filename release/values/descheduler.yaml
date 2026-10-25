@@ -3,9 +3,6 @@ schedule: "*/15 * * * *"
 successfulJobsHistoryLimit: 3
 failedJobsHistoryLimit: 1
 deschedulerPolicyAPIVersion: descheduler/v1alpha2
-nodeSelector:
-  kubernetes.io/os: linux
-  bedrock.cloudyfolks.io/managed: "true"
 deschedulerPolicy:
   maxNoOfPodsToEvictPerNode: 1
   profiles:

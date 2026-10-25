@@ -360,6 +360,9 @@ func TestDeschedulerComponentRendersTheLegacyPolicy(t *testing.T) {
 	if schedule, _, _ := unstructured.NestedString(cron.Object, "spec", "schedule"); schedule != "*/15 * * * *" {
 		t.Errorf("schedule %q", schedule)
 	}
+	if selector, found, _ := unstructured.NestedMap(cron.Object, "spec", "jobTemplate", "spec", "template", "spec", "nodeSelector"); found && len(selector) > 0 {
+		t.Errorf("nodeSelector %v", selector)
+	}
 	policy := objectNamed(objects, "ConfigMap", "descheduler")
 	if policy == nil {
 		t.Fatal("missing ConfigMap descheduler")
