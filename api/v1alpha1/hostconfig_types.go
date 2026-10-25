@@ -25,6 +25,7 @@ type TenantLegSpec struct {
 	// +kubebuilder:validation:MaxItems=32
 	// +kubebuilder:validation:items:MaxLength=43
 	// +kubebuilder:validation:items:XValidation:rule="isCIDR(self)",message="every allowSources entry must be a CIDR"
+	// +kubebuilder:validation:items:XValidation:rule="!isCIDR(self) || cidr(self).prefixLength() > 0",message="allowSources must not match every address"
 	AllowSources []string `json:"allowSources,omitempty"`
 }
 

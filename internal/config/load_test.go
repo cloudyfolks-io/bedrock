@@ -617,6 +617,9 @@ func TestValidateRejectsBadManagementCIDRAndLegs(t *testing.T) {
 		"leg source": func(c *v1alpha1.ClusterConfig) {
 			c.Spec.Network.TenantLegs = []v1alpha1.TenantLegSpec{{Interface: "leg0", AllowSources: []string{"nope"}}}
 		},
+		"any source": func(c *v1alpha1.ClusterConfig) {
+			c.Spec.Network.TenantLegs = []v1alpha1.TenantLegSpec{{Interface: "leg0", AllowSources: []string{"::/0"}}}
+		},
 		"duplicate leg": func(c *v1alpha1.ClusterConfig) {
 			c.Spec.Network.TenantLegs = []v1alpha1.TenantLegSpec{{Interface: "leg0"}, {Interface: "leg0"}}
 		},

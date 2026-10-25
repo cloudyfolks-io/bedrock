@@ -57,6 +57,8 @@ func TestRenderLegsRulesetRejectsUnsafeInput(t *testing.T) {
 		"quote in interface":  {Interface: `a" accept #`},
 		"empty interface":     {},
 		"long interface":      {Interface: "abcdefghijklmnop"},
+		"any v4 source":       {Interface: "leg0", AllowSources: []string{"0.0.0.0/0"}},
+		"any v6 source":       {Interface: "leg0", AllowSources: []string{"::/0"}},
 		"source not a prefix": {Interface: "leg0", AllowSources: []string{"1.2.3.4 accept"}},
 	} {
 		if _, err := RenderLegsRuleset([]v1alpha1.TenantLegSpec{leg}); err == nil {

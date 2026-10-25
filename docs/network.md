@@ -589,6 +589,7 @@ The rules are, for traffic that comes in on a leg:
 - Forwarded traffic is accepted only if it is part of an established connection or was translated by DNAT. All other traffic is counted and dropped.
 
 Use the transit leg `allowSources` for the BGP peer.
+An entry of `allowSources` must not have the prefix length 0. The configuration, the `Cluster` and the `HostConfig` reject `0.0.0.0/0` and `::/0`.
 A tenant on a leg cannot reach SSH, the API server, the kubelet or a NodePort of the host.
 
 The unit has `DefaultDependencies=no`, `Before=network-pre.target` and `Wants=network-pre.target`.
@@ -618,6 +619,7 @@ Bedrock sets `spec.network.kubeProxy` in the k0s configuration: mode `iptables`,
 A NodePort answers only on the management network of a host.
 The management CIDR is `spec.network.managementCIDR` of the cluster configuration, and `spec.managementCIDR` of the `Cluster`.
 If you do not set it at install, `bedrock init` uses the network of the address on `spec.network.managementInterface`.
+If that interface has more than one IPv4 address, `bedrock init` stops and asks you to set `spec.network.managementCIDR`.
 Controllers run k0s with dynamic config, so k0s reads `kubeProxy` from the object `clusterconfigs.k0s.k0sproject.io` `kube-system/k0s`, not from the file `k0s.yaml`.
 At install, the file seeds that object on the first start of k0s. An adopted cluster is a new install, so it gets the setting in the same way.
 On a running cluster, the operator patches only `spec.network.kubeProxy.nodePortAddresses` of that object, with `spec.managementCIDR` of the `Cluster`, when the field is empty.

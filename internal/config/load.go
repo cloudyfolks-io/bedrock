@@ -193,8 +193,12 @@ func validateManagementNetwork(network v1alpha1.ClusterNetworkSpec) error {
 		}
 		seen[leg.Interface] = true
 		for _, source := range leg.AllowSources {
-			if _, err := netip.ParsePrefix(source); err != nil {
+			prefix, err := netip.ParsePrefix(source)
+			if err != nil {
 				return fmt.Errorf("spec.network.tenantLegs %s allowSources: %w", leg.Interface, err)
+			}
+			if prefix.Bits() == 0 {
+				return fmt.Errorf("spec.network.tenantLegs %s allowSources: %s matches every address", leg.Interface, source)
 			}
 		}
 	}

@@ -178,6 +178,8 @@ spec:
                         x-kubernetes-validations:
                         - message: every allowSources entry must be a CIDR
                           rule: isCIDR(self)
+                        - message: allowSources must not match every address
+                          rule: '!isCIDR(self) || cidr(self).prefixLength() > 0'
                       maxItems: 32
                       type: array
                       x-kubernetes-list-type: set

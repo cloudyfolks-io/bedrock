@@ -108,6 +108,9 @@ func sourceRules(leg v1alpha1.TenantLegSpec) (string, error) {
 		if err != nil {
 			return "", fmt.Errorf("tenant leg %s: allow source %q is not a CIDR", leg.Interface, source)
 		}
+		if prefix.Bits() == 0 {
+			return "", fmt.Errorf("tenant leg %s: allow source %q matches every address", leg.Interface, source)
+		}
 		masked := prefix.Masked().String()
 		if prefix.Addr().Is4() {
 			v4 = append(v4, masked)

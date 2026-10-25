@@ -60,9 +60,13 @@ type ClusterNetworkSpec struct {
 	// +kubebuilder:validation:Maximum=9000
 	// +optional
 	PodMTU int32 `json:"podMTU,omitempty"`
+	// +kubebuilder:validation:MaxLength=43
+	// +kubebuilder:validation:XValidation:rule="isCIDR(self)",message="managementCIDR must be a CIDR"
 	// +optional
 	ManagementCIDR string `json:"managementCIDR,omitempty"`
 	// +optional
+	// +listType=map
+	// +listMapKey=interface
 	// +kubebuilder:validation:MaxItems=16
 	TenantLegs []TenantLegSpec `json:"tenantLegs,omitempty"`
 }

@@ -128,7 +128,11 @@ spec:
                         type: string
                     type: object
                   managementCIDR:
+                    maxLength: 43
                     type: string
+                    x-kubernetes-validations:
+                    - message: managementCIDR must be a CIDR
+                      rule: isCIDR(self)
                   managementInterface:
                     type: string
                   migrationVlan:
@@ -152,6 +156,9 @@ spec:
                             x-kubernetes-validations:
                             - message: every allowSources entry must be a CIDR
                               rule: isCIDR(self)
+                            - message: allowSources must not match every address
+                              rule: '!isCIDR(self) || cidr(self).prefixLength() >
+                                0'
                           maxItems: 32
                           type: array
                           x-kubernetes-list-type: set
@@ -164,6 +171,9 @@ spec:
                       type: object
                     maxItems: 16
                     type: array
+                    x-kubernetes-list-map-keys:
+                    - interface
+                    x-kubernetes-list-type: map
                 required:
                 - managementInterface
                 type: object
