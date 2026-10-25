@@ -105,6 +105,13 @@ type ClusterSpec struct {
 	// +kubebuilder:validation:Maximum=9000
 	// +optional
 	PodMTU int32 `json:"podMTU,omitempty"`
+	// +kubebuilder:validation:XValidation:rule="isCIDR(self)",message="managementCIDR must be a CIDR"
+	// +optional
+	ManagementCIDR string `json:"managementCIDR,omitempty"`
+	// +optional
+	// +listType=map
+	// +listMapKey=interface
+	TenantLegs []TenantLegSpec `json:"tenantLegs,omitempty"`
 }
 
 type ClusterStorageSpec struct {

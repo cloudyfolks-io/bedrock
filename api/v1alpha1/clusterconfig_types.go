@@ -60,6 +60,10 @@ type ClusterNetworkSpec struct {
 	// +kubebuilder:validation:Maximum=9000
 	// +optional
 	PodMTU int32 `json:"podMTU,omitempty"`
+	// +optional
+	ManagementCIDR string `json:"managementCIDR,omitempty"`
+	// +optional
+	TenantLegs []TenantLegSpec `json:"tenantLegs,omitempty"`
 }
 
 type StorageSpec struct {

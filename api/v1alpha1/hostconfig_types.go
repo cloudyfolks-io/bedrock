@@ -16,6 +16,16 @@ type MirrorSpec struct {
 	Endpoint string `json:"endpoint"`
 }
 
+type TenantLegSpec struct {
+	// +kubebuilder:validation:MaxLength=15
+	// +kubebuilder:validation:Pattern=`^[A-Za-z0-9_.-]+$`
+	Interface string `json:"interface"`
+	// +optional
+	// +listType=set
+	// +kubebuilder:validation:items:XValidation:rule="isCIDR(self)",message="every allowSources entry must be a CIDR"
+	AllowSources []string `json:"allowSources,omitempty"`
+}
+
 type HostConfigSpec struct {
 	// +optional
 	Packages []string `json:"packages,omitempty"`
@@ -32,6 +42,10 @@ type HostConfigSpec struct {
 	NMState *apiextensionsv1.JSON `json:"nmstate,omitempty"`
 	// +optional
 	ContainerdMirrors []MirrorSpec `json:"containerdMirrors,omitempty"`
+	// +optional
+	// +listType=map
+	// +listMapKey=interface
+	TenantLegs []TenantLegSpec `json:"tenantLegs,omitempty"`
 }
 
 type HostConfigStatus struct {

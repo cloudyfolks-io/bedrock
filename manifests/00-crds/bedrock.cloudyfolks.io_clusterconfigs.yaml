@@ -127,6 +127,8 @@ spec:
                       serviceCIDR:
                         type: string
                     type: object
+                  managementCIDR:
+                    type: string
                   managementInterface:
                     type: string
                   migrationVlan:
@@ -140,6 +142,25 @@ spec:
                   storageVlan:
                     format: int32
                     type: integer
+                  tenantLegs:
+                    items:
+                      properties:
+                        allowSources:
+                          items:
+                            type: string
+                            x-kubernetes-validations:
+                            - message: every allowSources entry must be a CIDR
+                              rule: isCIDR(self)
+                          type: array
+                          x-kubernetes-list-type: set
+                        interface:
+                          maxLength: 15
+                          pattern: ^[A-Za-z0-9_.-]+$
+                          type: string
+                      required:
+                      - interface
+                      type: object
+                    type: array
                 required:
                 - managementInterface
                 type: object
