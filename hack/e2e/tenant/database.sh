@@ -281,7 +281,8 @@ database_cleanup() {
   local first second
   first=$(database_uid orders)
   second=$(database_uid orders-restored)
-  kubectl -n "$NS" delete databaseuser alice databaseschema shop --wait=true
+  kubectl -n "$NS" delete databaseuser alice --wait=true
+  kubectl -n "$NS" delete databaseschema shop --wait=true
   kubectl -n "$NS" delete database orders orders-restored
   wait_gone 600 database orders -n "$NS"
   wait_gone 600 database orders-restored -n "$NS"
