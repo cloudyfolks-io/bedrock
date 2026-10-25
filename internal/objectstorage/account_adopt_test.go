@@ -156,3 +156,13 @@ func TestBucketOfAnAdoptedAccountIsBoundNotTaken(t *testing.T) {
 		t.Fatal("the adopted bucket is not bound")
 	}
 }
+func TestEnsureAccountRefusesAPlainNameAnAdoptionHolds(t *testing.T) {
+	fresh(t)
+	adoptAccountName(t, "acme-prod", "beta-prod")
+	if _, _, err := EnsureAccount(context.Background(), testClient, loadedProject(t, "acme-prod")); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := EnsureAccount(context.Background(), testClient, loadedProject(t, "beta-prod")); !errors.Is(err, ErrAccountClaimed) {
+		t.Fatalf("err %v", err)
+	}
+}

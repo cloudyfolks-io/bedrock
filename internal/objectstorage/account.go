@@ -50,9 +50,7 @@ func rgwAccountName(account *unstructured.Unstructured) string {
 }
 
 func claimedElsewhere(ctx context.Context, c client.Client, project Project) (bool, error) {
-	if project.AdoptedAccount == "" {
-		return false, nil
-	}
+	wanted := rgwAccountName(AccountObject(project))
 	accounts := &unstructured.UnstructuredList{}
 	accounts.SetGroupVersionKind(cephObjectStoreAccountGVK.GroupVersion().WithKind("CephObjectStoreAccountList"))
 	if err := c.List(ctx, accounts, client.InNamespace(StoreNamespace)); err != nil {
@@ -63,7 +61,7 @@ func claimedElsewhere(ctx context.Context, c client.Client, project Project) (bo
 	}
 	for i := range accounts.Items {
 		other := &accounts.Items[i]
-		if other.GetName() != AccountName(project.Namespace) && rgwAccountName(other) == project.AdoptedAccount {
+		if other.GetName() != AccountName(project.Namespace) && rgwAccountName(other) == wanted {
 			return true, nil
 		}
 	}
