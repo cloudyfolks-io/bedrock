@@ -545,6 +545,16 @@ The Setting `dns.upstreams` sets where CoreDNS sends every name that is not in t
 Separate the addresses with single spaces.
 CoreDNS reloads the ConfigMap by itself, so the change needs no restart.
 
+Give the upstreams in the cluster configuration of `bedrock init` too, so the first CoreDNS never uses the node `resolv.conf`:
+
+```yaml
+spec:
+  dns:
+    upstreams: [217.218.127.127, 217.218.155.155]
+```
+
+`bedrock init` writes the Setting `dns.upstreams` from this list and renders it into the first CoreDNS.
+
 Use `dns.upstreams` when a node has a resolver that only answers private zones.
 A host with systemd-resolved can list that per-link resolver in `/run/systemd/resolve/resolv.conf` next to the public servers.
 Names that are not in the private zones then get relay answers.

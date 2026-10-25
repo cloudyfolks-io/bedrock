@@ -292,6 +292,17 @@ The addon `egress` applies the cert-manager Deployment with the values and shows
 A change of a Setting restarts the cert-manager controller.
 The CDI change needs no restart of a VM.
 
+The cluster configuration of `bedrock init` has the same values.
+The first cert-manager and CDI use them.
+
+```yaml
+spec:
+  egress:
+    httpProxy: http://proxy.kube-system:10808
+    noProxy: [10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16, cluster.local, .svc]
+    dns01Nameservers: [https://one.one.one.one/dns-query]
+```
+
 Example:
 
 ```

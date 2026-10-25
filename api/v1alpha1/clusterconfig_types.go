@@ -112,6 +112,20 @@ type BundleRegistrySpec struct {
 	Mirror string `json:"mirror,omitempty"`
 }
 
+type DNSSpec struct {
+	// +optional
+	Upstreams []string `json:"upstreams,omitempty"`
+}
+
+type EgressSpec struct {
+	// +optional
+	HTTPProxy string `json:"httpProxy,omitempty"`
+	// +optional
+	NoProxy []string `json:"noProxy,omitempty"`
+	// +optional
+	DNS01Nameservers []string `json:"dns01Nameservers,omitempty"`
+}
+
 type HostDefaults struct {
 	// +optional
 	Management bool `json:"management,omitempty"`
@@ -132,6 +146,10 @@ type ClusterConfigSpec struct {
 	Registry BundleRegistrySpec `json:"registry,omitempty"`
 	// +optional
 	Encryption EncryptionSpec `json:"encryption,omitempty"`
+	// +optional
+	DNS DNSSpec `json:"dns,omitempty"`
+	// +optional
+	Egress EgressSpec `json:"egress,omitempty"`
 	// +optional
 	Addons map[string]bool `json:"addons,omitempty"`
 	// +optional

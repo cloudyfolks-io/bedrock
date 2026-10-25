@@ -54,6 +54,26 @@ spec:
                 required:
                 - vip
                 type: object
+              dns:
+                properties:
+                  upstreams:
+                    items:
+                      type: string
+                    type: array
+                type: object
+              egress:
+                properties:
+                  dns01Nameservers:
+                    items:
+                      type: string
+                    type: array
+                  httpProxy:
+                    type: string
+                  noProxy:
+                    items:
+                      type: string
+                    type: array
+                type: object
               encryption:
                 properties:
                   action:

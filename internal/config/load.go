@@ -149,6 +149,9 @@ func Validate(cfg v1alpha1.ClusterConfig) error {
 	if err := settings.ValidateProviderNetworks(s.Network.Fabric.ProviderNetworks); err != nil {
 		return fmt.Errorf("spec.network.fabric.providerNetworks: %w", err)
 	}
+	if err := validateClusterServices(cfg); err != nil {
+		return err
+	}
 	if s.Storage.Replicas < 1 {
 		return fmt.Errorf("spec.storage.replicas must be at least 1")
 	}
@@ -168,6 +171,23 @@ func Validate(cfg v1alpha1.ClusterConfig) error {
 	}
 	if !slices.Contains(s.Roles, v1alpha1.RoleCephOSD) {
 		return fmt.Errorf("the first node must carry the ceph-osd role")
+	}
+	return nil
+}
+
+func validateClusterServices(cfg v1alpha1.ClusterConfig) error {
+	values := SettingValues(cfg)
+	fields := []struct{ field, key string }{
+		{"spec.dns.upstreams", "dns.upstreams"},
+		{"spec.egress.httpProxy", "egress.http-proxy"},
+		{"spec.egress.noProxy", "egress.no-proxy"},
+		{"spec.egress.dns01Nameservers", "letsencrypt.dns01-nameservers"},
+	}
+	for _, f := range fields {
+		definition, _ := settings.Lookup(f.key)
+		if err := definition.Validate(values[f.key]); err != nil {
+			return fmt.Errorf("%s: %w", f.field, err)
+		}
 	}
 	return nil
 }
@@ -342,20 +362,28 @@ func ToHost(cfg v1alpha1.ClusterConfig, nodeName string) v1alpha1.Host {
 	}
 }
 
-func ToSettings(cfg v1alpha1.ClusterConfig) []v1alpha1.Setting {
-	values := map[string]string{
-		"platform.host":             cfg.Spec.Platform.Host,
-		"platform.tls-mode":         cfg.Spec.Platform.TLSMode,
-		"storage.replicas":          strconv.Itoa(int(cfg.Spec.Storage.Replicas)),
-		"storage.network":           vlanValue(cfg.Spec.Network.StorageVlan),
-		"migration.network":         vlanValue(cfg.Spec.Network.MigrationVlan),
-		"virt.emulation":            strconv.FormatBool(cfg.Spec.Virtualization.Emulation),
-		"kata.enabled":              strconv.FormatBool(cfg.Spec.Addons["kata"]),
-		"loki.enabled":              strconv.FormatBool(cfg.Spec.Addons["loki"]),
-		"clusters.enabled":          strconv.FormatBool(cfg.Spec.Addons["clusters"]),
-		"network.eip-mode":          cfg.Spec.Network.Fabric.EIPMode,
-		"network.provider-networks": providerNetworksValue(cfg),
+func SettingValues(cfg v1alpha1.ClusterConfig) map[string]string {
+	return map[string]string{
+		"platform.host":                 cfg.Spec.Platform.Host,
+		"platform.tls-mode":             cfg.Spec.Platform.TLSMode,
+		"storage.replicas":              strconv.Itoa(int(cfg.Spec.Storage.Replicas)),
+		"storage.network":               vlanValue(cfg.Spec.Network.StorageVlan),
+		"migration.network":             vlanValue(cfg.Spec.Network.MigrationVlan),
+		"virt.emulation":                strconv.FormatBool(cfg.Spec.Virtualization.Emulation),
+		"kata.enabled":                  strconv.FormatBool(cfg.Spec.Addons["kata"]),
+		"loki.enabled":                  strconv.FormatBool(cfg.Spec.Addons["loki"]),
+		"clusters.enabled":              strconv.FormatBool(cfg.Spec.Addons["clusters"]),
+		"network.eip-mode":              cfg.Spec.Network.Fabric.EIPMode,
+		"network.provider-networks":     providerNetworksValue(cfg),
+		"dns.upstreams":                 strings.Join(cfg.Spec.DNS.Upstreams, " "),
+		"egress.http-proxy":             cfg.Spec.Egress.HTTPProxy,
+		"egress.no-proxy":               strings.Join(cfg.Spec.Egress.NoProxy, ","),
+		"letsencrypt.dns01-nameservers": strings.Join(cfg.Spec.Egress.DNS01Nameservers, ","),
 	}
+}
+
+func ToSettings(cfg v1alpha1.ClusterConfig) []v1alpha1.Setting {
+	values := SettingValues(cfg)
 	keys := make([]string, 0, len(values))
 	for k := range values {
 		keys = append(keys, k)
