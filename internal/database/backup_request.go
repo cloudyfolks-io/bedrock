@@ -3,6 +3,7 @@ package database
 import (
 	"fmt"
 	"strconv"
+	"strings"
 	"time"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -14,6 +15,8 @@ import (
 const (
 	ReasonBackupNotSupported   = "BackupNotSupported"
 	ReasonInvalidBackupRequest = "InvalidBackupRequest"
+
+	maxRequestSkew = 5 * time.Minute
 
 	annotationBackupRequestedAt = "bedrock.cloudyfolks.io/requested-at"
 )
@@ -48,7 +51,7 @@ func backupRequestRefusal(db v1alpha1.Database, at *metav1.Time) *v1alpha1.Datab
 	return nil
 }
 
-func PlanBackupRequest(db v1alpha1.Database, backups []*unstructured.Unstructured, ready bool) BackupRequestPlan {
+func PlanBackupRequest(db v1alpha1.Database, backups []*unstructured.Unstructured, ready bool, now time.Time) BackupRequestPlan {
 	previous := previousBackupRequest(db)
 	raw := db.Annotations[v1alpha1.AnnotationBackupRequested]
 	if raw == "" {
@@ -63,6 +66,13 @@ func PlanBackupRequest(db v1alpha1.Database, backups []*unstructured.Unstructure
 		return BackupRequestPlan{Status: refusedRequest(kept, ReasonInvalidBackupRequest, fmt.Sprintf("the annotation %s must hold an RFC 3339 time", v1alpha1.AnnotationBackupRequested))}
 	}
 	at := metav1.NewTime(parsed.UTC())
+	if at.Time.After(now.Add(maxRequestSkew)) {
+		var kept *metav1.Time
+		if previous != nil {
+			kept = previous.At
+		}
+		return BackupRequestPlan{Status: refusedRequest(kept, ReasonBackupRequestInFuture, "the time of the annotation "+v1alpha1.AnnotationBackupRequested+" is more than 5 minutes ahead")}
+	}
 	if previous != nil && previous.At != nil {
 		switch {
 		case at.Time.Before(previous.At.Time):
@@ -74,12 +84,29 @@ func PlanBackupRequest(db v1alpha1.Database, backups []*unstructured.Unstructure
 	if refusal := backupRequestRefusal(db, &at); refusal != nil {
 		return BackupRequestPlan{Status: refusal}
 	}
+	if unfinishedRequestedBackup(db, backups) {
+		return BackupRequestPlan{Status: refusedRequest(&at, ReasonBackupInProgress, "an earlier requested backup is not finished")}
+	}
 	name := RequestedBackupName(Name(db.UID), at.Time)
 	plan := BackupRequestPlan{Status: &v1alpha1.DatabaseBackupRequest{At: &at, Phase: v1alpha1.DatabaseBackupRequestPending, BackupID: name}}
 	if ready {
 		plan.Create = name
 	}
 	return plan
+}
+
+func unfinishedRequestedBackup(db v1alpha1.Database, backups []*unstructured.Unstructured) bool {
+	state := BackupStateOf(db.Spec.Engine)
+	prefix := Name(db.UID) + "-req-"
+	for _, backup := range backups {
+		if !strings.HasPrefix(backup.GetName(), prefix) {
+			continue
+		}
+		if completed, failed := state(backup); completed == nil && !failed {
+			return true
+		}
+	}
+	return false
 }
 
 func continueRequest(db v1alpha1.Database, previous v1alpha1.DatabaseBackupRequest, backups []*unstructured.Unstructured, ready bool) BackupRequestPlan {

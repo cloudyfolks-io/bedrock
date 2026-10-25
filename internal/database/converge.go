@@ -572,7 +572,7 @@ func (r *Reconciler) observeBackup(ctx context.Context, in *flow, ready bool) *v
 	if err != nil {
 		return db.Status.Backup
 	}
-	request := r.startRequestedBackup(ctx, in, PlanBackupRequest(db, backups, ready))
+	request := r.startRequestedBackup(ctx, in, PlanBackupRequest(db, backups, ready, r.now()))
 	if !db.Spec.Backup.Enabled {
 		if request == nil {
 			return nil

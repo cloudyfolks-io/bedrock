@@ -15,6 +15,8 @@ import (
 
 var requestedAt = time.Date(2026, 10, 21, 9, 0, 0, 0, time.UTC)
 
+var planNow = requestedAt.Add(2 * time.Hour)
+
 func requesting(at time.Time, previous *v1alpha1.DatabaseBackupRequest, edit func(*v1alpha1.Database)) v1alpha1.Database {
 	db := goldenDatabase()
 	db.UID = "uid-1"
@@ -35,18 +37,18 @@ func backupRequestOf(at time.Time, phase, id string) *v1alpha1.DatabaseBackupReq
 
 func TestNoAnnotationNoBackupRequest(t *testing.T) {
 	db := goldenDatabase()
-	plan := PlanBackupRequest(db, nil, true)
+	plan := PlanBackupRequest(db, nil, true, planNow)
 	if plan.Status != nil || plan.Create != "" {
 		t.Fatalf("plan %+v", plan)
 	}
 	db.Status.Backup = &v1alpha1.DatabaseBackupStatus{Request: backupRequestOf(requestedAt, v1alpha1.DatabaseBackupRequestCompleted, "x")}
-	if plan := PlanBackupRequest(db, nil, true); plan.Status == nil || plan.Status.Phase != v1alpha1.DatabaseBackupRequestCompleted {
+	if plan := PlanBackupRequest(db, nil, true, planNow); plan.Status == nil || plan.Status.Phase != v1alpha1.DatabaseBackupRequestCompleted {
 		t.Fatalf("the last result is lost: %+v", plan)
 	}
 }
 
 func TestANewRequestMakesOneBackupWhenTheEngineIsReady(t *testing.T) {
-	plan := PlanBackupRequest(requesting(requestedAt, nil, nil), nil, true)
+	plan := PlanBackupRequest(requesting(requestedAt, nil, nil), nil, true, planNow)
 	want := "uid-1-req-" + "1792573200"
 	if plan.Create != want || plan.Status.Phase != v1alpha1.DatabaseBackupRequestPending || plan.Status.BackupID != want || !plan.Status.At.Time.Equal(requestedAt) {
 		t.Fatalf("plan %+v status %+v", plan, plan.Status)
@@ -54,11 +56,11 @@ func TestANewRequestMakesOneBackupWhenTheEngineIsReady(t *testing.T) {
 }
 
 func TestARequestWaitsForTheEngineAndThenStarts(t *testing.T) {
-	waiting := PlanBackupRequest(requesting(requestedAt, nil, nil), nil, false)
+	waiting := PlanBackupRequest(requesting(requestedAt, nil, nil), nil, false, planNow)
 	if waiting.Create != "" || waiting.Status.Phase != v1alpha1.DatabaseBackupRequestPending {
 		t.Fatalf("waiting %+v", waiting)
 	}
-	again := PlanBackupRequest(requesting(requestedAt, waiting.Status, nil), nil, true)
+	again := PlanBackupRequest(requesting(requestedAt, waiting.Status, nil), nil, true, planNow)
 	if again.Create != waiting.Status.BackupID {
 		t.Fatalf("again %+v", again)
 	}
@@ -78,7 +80,7 @@ func TestARunningRequestFollowsItsBackup(t *testing.T) {
 		"unseen":    {nil, v1alpha1.DatabaseBackupRequestRunning},
 	}
 	for label, tc := range cases {
-		plan := PlanBackupRequest(requesting(requestedAt, running, nil), tc.backups, true)
+		plan := PlanBackupRequest(requesting(requestedAt, running, nil), tc.backups, true, planNow)
 		if plan.Create != "" || plan.Status.Phase != tc.want {
 			t.Errorf("%s: %+v", label, plan.Status)
 		}
@@ -88,12 +90,12 @@ func TestARunningRequestFollowsItsBackup(t *testing.T) {
 func TestAnOlderOrEqualTimeStartsNoSecondBackup(t *testing.T) {
 	last := backupRequestOf(requestedAt, v1alpha1.DatabaseBackupRequestCompleted, "uid-1-req-1")
 	for _, at := range []time.Time{requestedAt, requestedAt.Add(-time.Hour)} {
-		plan := PlanBackupRequest(requesting(at, last, nil), nil, true)
+		plan := PlanBackupRequest(requesting(at, last, nil), nil, true, planNow)
 		if plan.Create != "" || plan.Status.Phase != v1alpha1.DatabaseBackupRequestCompleted {
 			t.Errorf("%s: %+v", at, plan)
 		}
 	}
-	plan := PlanBackupRequest(requesting(requestedAt.Add(time.Hour), last, nil), nil, true)
+	plan := PlanBackupRequest(requesting(requestedAt.Add(time.Hour), last, nil), nil, true, planNow)
 	if plan.Create == "" || plan.Status.BackupID != plan.Create {
 		t.Fatalf("a newer time did not start: %+v", plan)
 	}
@@ -112,10 +114,44 @@ func TestARequestIsRefusedWithAReason(t *testing.T) {
 		"garbage": {func(db *v1alpha1.Database) { db.Annotations[v1alpha1.AnnotationBackupRequested] = "yesterday" }, ReasonInvalidBackupRequest},
 	}
 	for label, tc := range cases {
-		plan := PlanBackupRequest(requesting(requestedAt, nil, tc.edit), nil, true)
+		plan := PlanBackupRequest(requesting(requestedAt, nil, tc.edit), nil, true, planNow)
 		if plan.Create != "" || plan.Status.Phase != v1alpha1.DatabaseBackupRequestRefused || plan.Status.Reason != tc.reason || plan.Status.Message == "" {
 			t.Errorf("%s: %+v", label, plan.Status)
 		}
+	}
+}
+
+func TestARequestIsRefusedWhileAnEarlierRequestedBackupRuns(t *testing.T) {
+	last := backupRequestOf(requestedAt, v1alpha1.DatabaseBackupRequestRunning, "uid-1-req-1")
+	for label, tc := range map[string]struct {
+		backups []*unstructured.Unstructured
+		refused bool
+	}{
+		"running":   {[]*unstructured.Unstructured{cnpgBackupObject("uid-1-req-1", "running", nil, "")}, true},
+		"started":   {[]*unstructured.Unstructured{cnpgBackupObject("uid-1-req-1", "started", nil, "")}, true},
+		"completed": {[]*unstructured.Unstructured{cnpgBackupObject("uid-1-req-1", "completed", &planNow, "stoppedAt")}, false},
+		"failed":    {[]*unstructured.Unstructured{cnpgBackupObject("uid-1-req-1", "failed", nil, "")}, false},
+		"other":     {[]*unstructured.Unstructured{cnpgBackupObject("uid-1-pre-upgrade", "running", nil, "")}, false},
+	} {
+		plan := PlanBackupRequest(requesting(requestedAt.Add(time.Hour), last, nil), tc.backups, true, planNow)
+		if tc.refused && (plan.Create != "" || plan.Status.Phase != v1alpha1.DatabaseBackupRequestRefused || plan.Status.Reason != ReasonBackupInProgress) {
+			t.Errorf("%s: %+v", label, plan)
+		}
+		if !tc.refused && plan.Create == "" {
+			t.Errorf("%s: no backup started: %+v", label, plan)
+		}
+	}
+}
+
+func TestARequestMoreThanFiveMinutesAheadIsRefusedAndBlocksNothing(t *testing.T) {
+	last := backupRequestOf(requestedAt, v1alpha1.DatabaseBackupRequestCompleted, "uid-1-req-1")
+	far := PlanBackupRequest(requesting(planNow.Add(6*time.Minute), last, nil), nil, true, planNow)
+	if far.Create != "" || far.Status.Phase != v1alpha1.DatabaseBackupRequestRefused || far.Status.Reason != ReasonBackupRequestInFuture || !far.Status.At.Time.Equal(requestedAt) {
+		t.Fatalf("far %+v", far.Status)
+	}
+	near := PlanBackupRequest(requesting(planNow.Add(4*time.Minute), last, nil), nil, true, planNow)
+	if near.Create == "" {
+		t.Fatalf("near %+v", near.Status)
 	}
 }
 

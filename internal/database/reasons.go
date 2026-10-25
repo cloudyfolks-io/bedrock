@@ -41,6 +41,8 @@ const (
 	ReasonEndpointAddressTaken    = "EndpointAddressTaken"
 	ReasonPasswordSecretNotFound  = "PasswordSecretNotFound"
 	ReasonRetentionOutOfRange     = "RetentionOutOfRange"
+	ReasonBackupInProgress        = "BackupInProgress"
+	ReasonBackupRequestInFuture   = "BackupRequestInFuture"
 )
 
 func Reasons() []string {
@@ -52,7 +54,7 @@ func Reasons() []string {
 		ReasonUserOwnsObjects, ReasonNameConflict, ReasonEngineUnavailable, ReasonEngineRejected, ReasonReady,
 		ReasonVersionNotAvailable, ReasonClassNotAvailable, ReasonStorageOutOfRange, ReasonSubnetNotFound, ReasonSubnetNotReady,
 		ReasonEndpointImageMissing, ReasonRuntimeUnavailable, ReasonDNSMissing, ReasonVIPRangeMissing, ReasonBackupStorePending,
-		ReasonBackupStoreFailed, ReasonApplyFailed, ReasonAddressUnavailable, ReasonEndpointAddressInvalid, ReasonEndpointAddressTaken, ReasonPasswordSecretNotFound, ReasonRetentionOutOfRange, ReasonBackupNotSupported, ReasonInvalidBackupRequest,
+		ReasonBackupStoreFailed, ReasonApplyFailed, ReasonAddressUnavailable, ReasonEndpointAddressInvalid, ReasonEndpointAddressTaken, ReasonPasswordSecretNotFound, ReasonRetentionOutOfRange, ReasonBackupNotSupported, ReasonInvalidBackupRequest, ReasonBackupInProgress, ReasonBackupRequestInFuture,
 		ReasonNameTaken, ReasonUpgradeNotSupported, ReasonClassChangeNotSupported,
 		ReasonProvisioning, ReasonRestoring, ReasonSuspended, ReasonUnhealthy, ReasonEngineWaiting, ReasonBootstrapping, ReasonGateWaiting, ReasonProxyWaiting,
 	}

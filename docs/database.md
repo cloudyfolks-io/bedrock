@@ -161,7 +161,7 @@ A tenant cannot read this Secret.
 To start one backup at once, set the annotation `bedrock.cloudyfolks.io/backup-requested` on the `Database` to an RFC 3339 time, for example the current time. Project editors and administrators can set it.
 The operator starts one backup when the time is newer than `status.backup.request.at`. The same or an older time starts nothing. The backup is a CNPG `Backup` (PostgreSQL) or a Percona backup (MySQL) in `bedrock-dbaas`.
 `status.backup.request` shows `at`, `phase` (`Pending`, `Running`, `Completed`, `Failed` or `Refused`), `backupID`, `reason` and `message`. `Pending` lasts until the engine is ready.
-The request is `Refused` with the reason `BackupNotSupported` for Valkey, `BackupsDisabled` when `backup.enabled` is `false`, and `InvalidBackupRequest` when the value is not an RFC 3339 time.
+The request is `Refused` with the reason `BackupNotSupported` for Valkey, `BackupsDisabled` when `backup.enabled` is `false`, `InvalidBackupRequest` when the value is not an RFC 3339 time, `BackupRequestInFuture` when the time is more than 5 minutes ahead, and `BackupInProgress` when a backup of an earlier request is not finished.
 
 To restore, set `spec.restore.sourceUID` to the UID of the source database. Add `targetTime` for a point in time.
 
@@ -307,6 +307,8 @@ The condition `Ready` shows one of these reasons.
 | `RetentionOutOfRange` | `backup.retentionDays` is outside the Settings `database.backup.retention-days-min` and `-max`. |
 | `BackupNotSupported` | A backup was requested for a Valkey database. |
 | `InvalidBackupRequest` | The annotation `bedrock.cloudyfolks.io/backup-requested` is not an RFC 3339 time. |
+| `BackupRequestInFuture` | The time of the annotation is more than 5 minutes ahead. |
+| `BackupInProgress` | A backup of an earlier request is not finished. |
 | `PasswordSecretNotFound` | The Secret of `passwordSecretRef` does not exist in the project. |
 | `AddressUnavailable` | The subnet or the gate range has no free address. |
 | `EndpointAddressInvalid` | `spec.endpoint.address` is outside the subnet, or it is the gateway, the network or broadcast address, or an excluded address. |
