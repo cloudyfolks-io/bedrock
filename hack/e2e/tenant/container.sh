@@ -434,7 +434,7 @@ CONTAINER
 }
 
 container_state_kept() {
-  [ "$(kubectl -n "$NS" exec deploy/stateful -- wc -l /data/state 2>/dev/null | cut -d' ' -f1)" -ge 2 ]
+  [ "$(kubectl -n "$NS" exec deploy/stateful -- cat /data/state 2>/dev/null | wc -l)" -ge 2 ]
 }
 
 container_load_balancer() {
@@ -490,7 +490,7 @@ container_scale_to_zero() {
   wait_jsonpath 300 Running -n "$NS" get container web -o jsonpath='{.status.phase}'
   retry_until 180 container_lb_has_endpoints
   wait_reason 180 loadbalancer clb Ready Programmed -n "$NS"
-  wait_condition 60 loadbalancer clb Idle False -n "$NS" || [ -z "$(condition_status loadbalancer clb Idle -n "$NS")" ]
+  wait_jsonpath 60 "" -n "$NS" get loadbalancer clb -o jsonpath='{.status.conditions[?(@.type=="Idle")].status}'
   kubectl -n "$NS" delete loadbalancer clb
   wait_empty 180 get router-lb-rules.fabric.cloudyfolks.io -l bedrock.cloudyfolks.io/name=clb
   kubectl -n "$NS" delete elasticip clbip
