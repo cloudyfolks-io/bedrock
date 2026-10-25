@@ -145,11 +145,16 @@
               ],
               "image": "docker.io/library/haproxy:3.2-alpine@sha256:254e6370f01cd654e0744edf607c67f33777c1b6a9dc0d4b28bcba7171460122",
               "livenessProbe": {
-                "failureThreshold": 3,
-                "httpGet": {
-                  "path": "/healthz",
-                  "port": 8404
+                "exec": {
+                  "command": [
+                    "wget",
+                    "-q",
+                    "-O",
+                    "/dev/null",
+                    "http://127.0.0.1:8404/healthz"
+                  ]
                 },
+                "failureThreshold": 3,
                 "initialDelaySeconds": 15,
                 "periodSeconds": 10,
                 "timeoutSeconds": 3
@@ -162,11 +167,16 @@
                 }
               ],
               "readinessProbe": {
-                "failureThreshold": 3,
-                "httpGet": {
-                  "path": "/healthz",
-                  "port": 8404
+                "exec": {
+                  "command": [
+                    "wget",
+                    "-q",
+                    "-O",
+                    "/dev/null",
+                    "http://127.0.0.1:8404/healthz"
+                  ]
                 },
+                "failureThreshold": 3,
                 "initialDelaySeconds": 2,
                 "periodSeconds": 10,
                 "timeoutSeconds": 3

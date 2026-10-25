@@ -13,7 +13,6 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
-	"k8s.io/apimachinery/pkg/util/intstr"
 	"k8s.io/utils/ptr"
 )
 
@@ -156,7 +155,7 @@ func deploymentOf(p proxyDeployment) (*unstructured.Unstructured, error) {
 	}
 	probe := func(initial int32) *corev1.Probe {
 		return &corev1.Probe{
-			ProbeHandler:        corev1.ProbeHandler{HTTPGet: &corev1.HTTPGetAction{Path: "/healthz", Port: intstr.FromInt32(HealthPort)}},
+			ProbeHandler:        corev1.ProbeHandler{Exec: &corev1.ExecAction{Command: []string{"wget", "-q", "-O", "/dev/null", fmt.Sprintf("http://127.0.0.1:%d/healthz", HealthPort)}}},
 			InitialDelaySeconds: initial, PeriodSeconds: 10, TimeoutSeconds: 3, FailureThreshold: 3,
 		}
 	}
