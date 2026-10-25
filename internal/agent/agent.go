@@ -45,6 +45,7 @@ type Deps struct {
 	K0sPoll      time.Duration
 	ProbeTimeout time.Duration
 	AuthnOwner   apiserver.Owner
+	EtcdEndpoint string
 }
 
 func Run(ctx context.Context, c client.WithWatch, deps Deps) error {
@@ -104,6 +105,9 @@ func snapshotLoop(ctx context.Context, c client.Client, deps Deps) {
 		}
 		if err := RunEtcdSnapshots(ctx, c, deps); err != nil {
 			fmt.Fprintf(os.Stderr, "agent: etcd snapshot: %v\n", err)
+		}
+		if err := RunEtcdDefrag(ctx, c, deps); err != nil {
+			fmt.Fprintf(os.Stderr, "agent: etcd defrag: %v\n", err)
 		}
 		select {
 		case <-ctx.Done():
