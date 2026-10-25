@@ -19,8 +19,10 @@ const (
 	EIPModeL2  = "l2"
 	EIPModeBGP = "bgp"
 
+	SettingProviderNetworks = "network.provider-networks"
+
 	keyEIPMode         = "network.eip-mode"
-	keyProviderNetwork = "network.provider-networks"
+	keyProviderNetwork = SettingProviderNetworks
 	keyBGPLocalASN     = "network.bgp.local-asn"
 	keyBGPRouterID     = "network.bgp.router-id"
 	keyBGPPeers        = "network.bgp.peers"

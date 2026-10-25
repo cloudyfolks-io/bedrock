@@ -9,16 +9,18 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	"github.com/cloudyfolks-io/bedrock/api/v1alpha1"
+	"github.com/cloudyfolks-io/bedrock/internal/network"
 )
 
 type TenantObservation struct {
-	Tenant           v1alpha1.Tenant
-	Network          *v1alpha1.Network
-	Projects         []v1alpha1.Project
-	ElasticIPs       int
-	ProviderNetworks []string
-	NetworkErr       error
-	OwnersErr        error
+	Tenant              v1alpha1.Tenant
+	Network             *v1alpha1.Network
+	Projects            []v1alpha1.Project
+	ElasticIPs          int
+	ProviderNetworks    []string
+	ProviderNetworksErr error
+	NetworkErr          error
+	OwnersErr           error
 }
 
 func DesiredNetwork(tenant v1alpha1.Tenant, existing *v1alpha1.Network) v1alpha1.Network {
@@ -93,7 +95,7 @@ func TenantStatus(in TenantObservation) v1alpha1.TenantStatus {
 		ProviderNetworks: in.ProviderNetworks,
 		CommonStatus: v1alpha1.CommonStatus{
 			ObservedGeneration: generation,
-			Conditions:         withConditions(in.Tenant.Status.Conditions, network, owners, quota, ready, progressing, degraded),
+			Conditions:         withConditions(in.Tenant.Status.Conditions, network, owners, quota, providerNetworksCondition(generation, in.ProviderNetworksErr), ready, progressing, degraded),
 		},
 	}
 	if in.Network != nil {
@@ -105,12 +107,19 @@ func TenantStatus(in TenantObservation) v1alpha1.TenantStatus {
 func TenantProviderNetworks(pools []v1alpha1.ProviderNetworkSpec) []string {
 	var names []string
 	for _, pool := range pools {
-		if pool.Role == "" || pool.Role == v1alpha1.ProviderRoleTenant {
+		if network.IsTenantPool(pool) {
 			names = append(names, pool.Name)
 		}
 	}
 	slices.Sort(names)
 	return names
+}
+
+func providerNetworksCondition(generation int64, err error) metav1.Condition {
+	if err != nil {
+		return conditionOn(generation, ConditionProviderNetworksKnown, metav1.ConditionFalse, ReasonSettingInvalid, err.Error())
+	}
+	return conditionOn(generation, ConditionProviderNetworksKnown, metav1.ConditionTrue, ReasonAvailable, "")
 }
 
 func readNamed(resource string, names []string) []rbacv1.PolicyRule {

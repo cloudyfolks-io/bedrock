@@ -1,6 +1,7 @@
 package tenancy
 
 import (
+	"errors"
 	"reflect"
 	"slices"
 	"strings"
@@ -12,6 +13,7 @@ import (
 	"k8s.io/utils/ptr"
 
 	"github.com/cloudyfolks-io/bedrock/api/v1alpha1"
+	"github.com/cloudyfolks-io/bedrock/internal/network"
 )
 
 func acmeTenant(owners ...v1alpha1.SubjectRef) v1alpha1.Tenant {
@@ -303,5 +305,28 @@ func TestTenantStatusCarriesTheProviderNetworks(t *testing.T) {
 	got := TenantStatus(TenantObservation{Tenant: acmeTenant(), Network: readyNetwork(), ProviderNetworks: []string{"alpha", "zeta"}})
 	if !slices.Equal(got.ProviderNetworks, []string{"alpha", "zeta"}) {
 		t.Fatalf("got %v", got.ProviderNetworks)
+	}
+}
+
+func TestTenantStatusReportsAProviderNetworksReadFailure(t *testing.T) {
+	failed := TenantStatus(TenantObservation{Tenant: acmeTenant(), Network: readyNetwork(), ProviderNetworksErr: errors.New("bad json")})
+	condition := requireCondition(t, failed.Conditions, ConditionProviderNetworksKnown, metav1.ConditionFalse, ReasonSettingInvalid)
+	if condition.Message != "bad json" {
+		t.Fatalf("message = %q", condition.Message)
+	}
+	requireCondition(t, failed.Conditions, v1alpha1.ConditionReady, metav1.ConditionTrue, ReasonReady)
+	ok := TenantStatus(TenantObservation{Tenant: acmeTenant(), Network: readyNetwork()})
+	requireCondition(t, ok.Conditions, ConditionProviderNetworksKnown, metav1.ConditionTrue, ReasonAvailable)
+}
+
+func TestTenantVrfIDHeldByAnotherNetworkIsRefusedOnTheDefaultNetwork(t *testing.T) {
+	tenant := acmeTenant()
+	tenant.Spec.Network.VrfID = ptr.To(int32(1500))
+	desired := DesiredNetwork(tenant, nil)
+	desired.CreationTimestamp = metav1.Unix(2, 0)
+	holder := v1alpha1.Network{ObjectMeta: metav1.ObjectMeta{Name: "other", CreationTimestamp: metav1.Unix(1, 0)}, Spec: v1alpha1.NetworkSpec{VrfID: ptr.To(int32(1500))}}
+	violation := network.VrfInUse(desired, []v1alpha1.Network{holder}, nil)
+	if violation == nil || violation.Reason != network.ReasonVRFInUse {
+		t.Fatalf("violation = %+v", violation)
 	}
 }

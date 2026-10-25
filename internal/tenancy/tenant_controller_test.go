@@ -470,3 +470,41 @@ func TestTenantStatusListsTheTenantProviderNetworks(t *testing.T) {
 		t.Fatalf("status %+v", tenant.Status.ProviderNetworks)
 	}
 }
+
+func providerNetworksSetting(value string) *v1alpha1.Setting {
+	return &v1alpha1.Setting{ObjectMeta: metav1.ObjectMeta{Name: "network.provider-networks"}, Spec: v1alpha1.SettingSpec{Value: value}}
+}
+
+func TestTenantStatusFollowsTheProviderNetworksSetting(t *testing.T) {
+	c, _ := tenantWorld(t)
+	setting := providerNetworksSetting(`[{"name":"public-a","interface":"a","cidr":"198.51.100.0/24","gateway":"198.51.100.1"}]`)
+	mustCreate(t, c, setting, acmeWithOwners(defaultOwners()...))
+	tenant := &v1alpha1.Tenant{}
+	waitFor(t, func() bool {
+		return getInto(t, c, "acme", tenant) && reflect.DeepEqual(tenant.Status.ProviderNetworks, []string{"public-a"})
+	})
+	waitFor(t, func() bool {
+		if !getInto(t, c, setting.Name, setting) {
+			return false
+		}
+		setting.Spec.Value = `[{"name":"public-c","interface":"c","cidr":"192.0.2.0/24","gateway":"192.0.2.1"}]`
+		return c.Update(context.Background(), setting) == nil
+	})
+	waitFor(t, func() bool {
+		return getInto(t, c, "acme", tenant) && reflect.DeepEqual(tenant.Status.ProviderNetworks, []string{"public-c"})
+	})
+}
+
+func TestTenantReportsAnInvalidProviderNetworksSetting(t *testing.T) {
+	c, _ := startEnv(t)
+	mustCreate(t, c, providerNetworksSetting(`not json`), acmeWithOwners(defaultOwners()...))
+	reconciler := &TenantReconciler{Client: c, Reader: c}
+	if _, err := reconciler.Reconcile(context.Background(), reconcile.Request{NamespacedName: client.ObjectKey{Name: "acme"}}); err != nil {
+		t.Fatal(err)
+	}
+	tenant := &v1alpha1.Tenant{}
+	if !getInto(t, c, "acme", tenant) {
+		t.Fatal("tenant not found")
+	}
+	requireCondition(t, tenant.Status.Conditions, ConditionProviderNetworksKnown, metav1.ConditionFalse, ReasonSettingInvalid)
+}
