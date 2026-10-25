@@ -68,7 +68,7 @@ A class with `highAvailability: true` makes 3 instances. Other classes make 1 in
 | `endpoint.address` | An optional IPv4 address in the CIDR of the subnet. The proxy pod gets this address. It cannot be the gateway, the network or broadcast address, an excluded address or an address that another workload holds. It cannot change or be added after the create. Without it, the operator picks the lowest free address. |
 | `allowedCIDRs` | The networks that can connect. The default is the CIDR of the subnet. |
 | `backup.enabled` | The default is `true`. A Valkey database must set `false`. |
-| `backup.retentionDays` | Optional, 1 to 365. The days of backups and WAL that this database keeps. It must be inside `database.backup.retention-days-min` and `-max`, or the reason is `RetentionOutOfRange` and the controller changes nothing. Without it the Setting `database.backup.retention-days` applies. It needs `backup.enabled`. |
+| `backup.retentionDays` | Optional, 1 to 365. The days of backups and WAL that this database keeps. It must be inside `database.backup.retention-days-min` and `-max`, or the reason is `RetentionOutOfRange` and the controller changes nothing. Without it the Setting `database.backup.retention-days` applies. It needs `backup.enabled`. A lower value removes the backups that are older than the new value. |
 | `restore` | `sourceUID` and an optional `targetTime`. It cannot change after the create. |
 | `suspended` | Hibernates the engine. |
 
