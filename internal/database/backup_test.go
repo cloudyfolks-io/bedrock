@@ -242,11 +242,11 @@ func TestSampleBackupSizeListsThePrefixAtMostEveryTenMinutes(t *testing.T) {
 
 func TestBackupSpecOfCarriesTheSettingsAndTheSecret(t *testing.T) {
 	cfg, _ := ParseConfig(map[string]string{"database.backup.bucket": "my-backups", "database.backup.retention-days": "14"})
-	spec := BackupSpecOf(cfg, BackupStore{Endpoint: "http://rgw", Region: "us-east-1"}, true)
+	spec := BackupSpecOf(cfg, BackupStore{Endpoint: "http://rgw", Region: "us-east-1"}, v1alpha1.DatabaseBackupSpec{Enabled: true})
 	if !spec.Enabled || spec.Bucket != "my-backups" || spec.Endpoint != "http://rgw" || spec.Region != "us-east-1" || spec.RetentionDays != 14 || spec.SecretName != "database-backups-s3" {
 		t.Fatalf("spec %+v", spec)
 	}
-	if BackupSpecOf(cfg, BackupStore{}, false).Enabled {
+	if BackupSpecOf(cfg, BackupStore{}, v1alpha1.DatabaseBackupSpec{}).Enabled {
 		t.Fatal("enabled")
 	}
 }

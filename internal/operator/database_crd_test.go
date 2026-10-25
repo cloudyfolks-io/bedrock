@@ -201,3 +201,31 @@ func TestDatabaseEndpointAddressIsImmutable(t *testing.T) {
 	late.Spec.Endpoint = &v1alpha1.DatabaseEndpointSpec{Address: "10.0.0.7"}
 	updateInvalid(t, c, late, "endpoint is immutable")
 }
+
+func TestDatabaseBackupRetentionDays(t *testing.T) {
+	c, _ := StartTestEnv(t)
+	thirty, zero, over := int32(30), int32(0), int32(366)
+
+	kept := newDatabase("retained", "postgresql")
+	kept.Spec.Backup.RetentionDays = &thirty
+	createValid(t, c, kept)
+	reload(t, c, kept)
+	if kept.Spec.Backup.RetentionDays == nil || *kept.Spec.Backup.RetentionDays != 30 {
+		t.Fatalf("backup %+v", kept.Spec.Backup)
+	}
+	for name, value := range map[string]*int32{"zero": &zero, "over": &over} {
+		bad := newDatabase("retention-"+name, "postgresql")
+		bad.Spec.Backup.RetentionDays = value
+		createInvalid(t, c, bad, "retentionDays")
+	}
+	off := newDatabase("retention-off", "mysql")
+	off.Spec.Backup.Enabled = false
+	off.Spec.Backup.RetentionDays = &thirty
+	createInvalid(t, c, off, "retentionDays needs backup.enabled")
+	retained := kept.DeepCopy()
+	sixty := int32(60)
+	retained.Spec.Backup.RetentionDays = &sixty
+	if err := c.Update(context.Background(), retained); err != nil {
+		t.Fatalf("the retention stays mutable: %v", err)
+	}
+}

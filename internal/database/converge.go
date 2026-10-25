@@ -97,7 +97,7 @@ func (r *Reconciler) prepare(ctx context.Context, in *flow) (*Refusal, error) {
 	} else if refused := checkExisting(catalog, db, cluster); refused != nil {
 		return refused, nil
 	}
-	steps := []func(context.Context, *flow) (*Refusal, error){r.preparePlatform, r.prepareCapacity, r.prepareSubnet, r.prepareEndpointAddress, r.preparePods, r.prepareVIPRange, r.prepareBackupStore, r.prepareRestore, r.prepareOperations}
+	steps := []func(context.Context, *flow) (*Refusal, error){r.preparePlatform, r.prepareCapacity, r.prepareSubnet, r.prepareEndpointAddress, r.preparePods, r.prepareVIPRange, r.prepareRetention, r.prepareBackupStore, r.prepareRestore, r.prepareOperations}
 	for _, step := range steps {
 		if refused, err := step(ctx, in); err != nil || refused != nil {
 			return refused, err
@@ -177,6 +177,10 @@ func (r *Reconciler) prepareVIPRange(ctx context.Context, in *flow) (*Refusal, e
 		return nil, err
 	}
 	return refusal(ReasonVIPRangeMissing, "the Setting database.vip-range is empty"), nil
+}
+
+func (r *Reconciler) prepareRetention(_ context.Context, in *flow) (*Refusal, error) {
+	return RetentionRefusal(in.cfg, in.db.Spec.Backup), nil
 }
 
 func (r *Reconciler) prepareBackupStore(ctx context.Context, in *flow) (*Refusal, error) {
@@ -303,7 +307,7 @@ func (r *Reconciler) specOf(in *flow) engine.Spec {
 		StorageClass: StorageClass,
 		Labels:       labels,
 		PodLabels:    podLabels,
-		Backup:       BackupSpecOf(in.cfg, r.Store, db.Spec.Backup.Enabled),
+		Backup:       BackupSpecOf(in.cfg, r.Store, db.Spec.Backup),
 		Restore:      restoreOf(db, in.dest),
 		Images:       in.catalog.Version.Spec.Companions,
 		Suspended:    db.Spec.Suspended,

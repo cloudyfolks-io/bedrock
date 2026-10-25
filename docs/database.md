@@ -68,6 +68,7 @@ A class with `highAvailability: true` makes 3 instances. Other classes make 1 in
 | `endpoint.address` | An optional IPv4 address in the CIDR of the subnet. The proxy pod gets this address. It cannot be the gateway, the network or broadcast address, an excluded address or an address that another workload holds. It cannot change or be added after the create. Without it, the operator picks the lowest free address. |
 | `allowedCIDRs` | The networks that can connect. The default is the CIDR of the subnet. |
 | `backup.enabled` | The default is `true`. A Valkey database must set `false`. |
+| `backup.retentionDays` | Optional, 1 to 365. The days of backups and WAL that this database keeps. It must be inside `database.backup.retention-days-min` and `-max`, or the reason is `RetentionOutOfRange` and the controller changes nothing. Without it the Setting `database.backup.retention-days` applies. It needs `backup.enabled`. |
 | `restore` | `sourceUID` and an optional `targetTime`. It cannot change after the create. |
 | `suspended` | Hibernates the engine. |
 
@@ -194,6 +195,8 @@ The sweeper deletes the prefix and the ConfigMap after `database.backup.retentio
 | `database.vip-range` | empty | The network of the gate addresses. Empty gives `VIPRangeMissing`. |
 | `database.backup.bucket` | `bedrock-database-backups` | The bucket of the backups. |
 | `database.backup.retention-days` | `7` | Days of backups. |
+| `database.backup.retention-days-min` | `1` | Smallest `backup.retentionDays` of a database. |
+| `database.backup.retention-days-max` | `365` | Largest `backup.retentionDays` of a database. |
 | `database.backup.retention-after-delete` | `168h` | The time that the backups of a deleted database stay. |
 | `database.upgrade.backup-max-age` | `26h` | The age limit of the backup that an upgrade needs. An older backup makes a new pre-upgrade backup. |
 
@@ -301,6 +304,7 @@ The condition `Ready` shows one of these reasons.
 | `BackupStorePending` | The identity of the backup store is not ready. |
 | `BackupStoreFailed` | The object store refused the backup bucket or does not answer. |
 | `ApplyFailed` | The API server refused an object. |
+| `RetentionOutOfRange` | `backup.retentionDays` is outside the Settings `database.backup.retention-days-min` and `-max`. |
 | `BackupNotSupported` | A backup was requested for a Valkey database. |
 | `InvalidBackupRequest` | The annotation `bedrock.cloudyfolks.io/backup-requested` is not an RFC 3339 time. |
 | `PasswordSecretNotFound` | The Secret of `passwordSecretRef` does not exist in the project. |

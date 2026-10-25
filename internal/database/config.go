@@ -2,6 +2,7 @@ package database
 
 import (
 	"context"
+	"fmt"
 	"net/netip"
 	"strconv"
 	"time"
@@ -26,11 +27,13 @@ const (
 	keyVIPRange         = "database.vip-range"
 	keyRetentionDays    = "database.backup.retention-days"
 	keyRetentionDelete  = "database.backup.retention-after-delete"
+	keyRetentionMin     = "database.backup.retention-days-min"
+	keyRetentionMax     = "database.backup.retention-days-max"
 	keyBackupMaxAge     = "database.upgrade.backup-max-age"
 	settingPrefix       = "database."
 )
 
-var configKeys = []string{keyEnabled, keyCapacityCPU, keyCapacityMemory, keyCapacityPods, keyMaxUtilization, keySweeperDryRun, keyProvisionTimeout, keyExecTimeout, keyBackupBucket, keyVIPRange, keyRetentionDays, keyRetentionDelete, keyBackupMaxAge}
+var configKeys = []string{keyEnabled, keyCapacityCPU, keyCapacityMemory, keyCapacityPods, keyMaxUtilization, keySweeperDryRun, keyProvisionTimeout, keyExecTimeout, keyBackupBucket, keyVIPRange, keyRetentionDays, keyRetentionMin, keyRetentionMax, keyRetentionDelete, keyBackupMaxAge}
 
 type Config struct {
 	Enabled              bool
@@ -44,6 +47,8 @@ type Config struct {
 	BackupBucket         string
 	VIPRange             netip.Prefix
 	RetentionDays        int
+	RetentionMin         int
+	RetentionMax         int
 	RetentionAfterDelete time.Duration
 	BackupMaxAge         time.Duration
 }
@@ -71,6 +76,11 @@ func ParseConfig(values map[string]string) (Config, error) {
 	timeout, _ := time.ParseDuration(effective[keyProvisionTimeout])
 	execTimeout, _ := time.ParseDuration(effective[keyExecTimeout])
 	retentionDays, _ := strconv.Atoi(effective[keyRetentionDays])
+	retentionMin, _ := strconv.Atoi(effective[keyRetentionMin])
+	retentionMax, _ := strconv.Atoi(effective[keyRetentionMax])
+	if retentionMin > retentionMax {
+		return Config{}, fmt.Errorf("the Setting %s must not be above %s", keyRetentionMin, keyRetentionMax)
+	}
 	vipRange, _ := netip.ParsePrefix(effective[keyVIPRange])
 	retentionAfterDelete, _ := time.ParseDuration(effective[keyRetentionDelete])
 	backupMaxAge, _ := time.ParseDuration(effective[keyBackupMaxAge])
@@ -86,6 +96,8 @@ func ParseConfig(values map[string]string) (Config, error) {
 		BackupBucket:         effective[keyBackupBucket],
 		VIPRange:             vipRange,
 		RetentionDays:        retentionDays,
+		RetentionMin:         retentionMin,
+		RetentionMax:         retentionMax,
 		RetentionAfterDelete: retentionAfterDelete,
 		BackupMaxAge:         backupMaxAge,
 	}, nil

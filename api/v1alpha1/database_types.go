@@ -47,9 +47,14 @@ type DatabaseEndpointSpec struct {
 	Address string `json:"address"`
 }
 
+// +kubebuilder:validation:XValidation:rule="!has(self.retentionDays) || self.enabled",message="retentionDays needs backup.enabled to be true"
 type DatabaseBackupSpec struct {
 	// +kubebuilder:default=true
 	Enabled bool `json:"enabled"`
+	// +kubebuilder:validation:Minimum=1
+	// +kubebuilder:validation:Maximum=365
+	// +optional
+	RetentionDays *int32 `json:"retentionDays,omitempty"`
 }
 
 // +kubebuilder:validation:XValidation:rule="self.engine != 'valkey' || !self.backup.enabled",message="a Valkey database has no backups: set backup.enabled to false"

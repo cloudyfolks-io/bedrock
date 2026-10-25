@@ -70,9 +70,17 @@ spec:
                   enabled:
                     default: true
                     type: boolean
+                  retentionDays:
+                    format: int32
+                    maximum: 365
+                    minimum: 1
+                    type: integer
                 required:
                 - enabled
                 type: object
+                x-kubernetes-validations:
+                - message: retentionDays needs backup.enabled to be true
+                  rule: '!has(self.retentionDays) || self.enabled'
               class:
                 maxLength: 63
                 minLength: 1

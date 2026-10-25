@@ -91,11 +91,26 @@ func BackupCredentials(ctx context.Context, c client.Reader) (s3.Credentials, er
 	return BackupStore{}.Credentials(secret), nil
 }
 
-func BackupSpecOf(cfg Config, store BackupStore, enabled bool) engine.BackupSpec {
-	return engine.BackupSpec{
-		Enabled: enabled, Bucket: cfg.BackupBucket, Endpoint: store.Endpoint, Region: store.Region,
-		RetentionDays: cfg.RetentionDays, SecretName: BackupSecretName,
+func BackupSpecOf(cfg Config, store BackupStore, backup v1alpha1.DatabaseBackupSpec) engine.BackupSpec {
+	retention := cfg.RetentionDays
+	if backup.RetentionDays != nil {
+		retention = int(*backup.RetentionDays)
 	}
+	return engine.BackupSpec{
+		Enabled: backup.Enabled, Bucket: cfg.BackupBucket, Endpoint: store.Endpoint, Region: store.Region,
+		RetentionDays: retention, SecretName: BackupSecretName,
+	}
+}
+
+func RetentionRefusal(cfg Config, backup v1alpha1.DatabaseBackupSpec) *Refusal {
+	if backup.RetentionDays == nil {
+		return nil
+	}
+	days := int(*backup.RetentionDays)
+	if days >= cfg.RetentionMin && days <= cfg.RetentionMax {
+		return nil
+	}
+	return refusal(ReasonRetentionOutOfRange, "backup.retentionDays must be from %d to %d", cfg.RetentionMin, cfg.RetentionMax)
 }
 
 func SizeSampleDue(previous *v1alpha1.DatabaseBackupStatus, now time.Time) bool {
