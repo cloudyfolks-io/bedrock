@@ -181,3 +181,33 @@ func TestDeleteOfARefusedAdopterKeepsTheHoldersRookUser(t *testing.T) {
 		t.Fatal("the policy of the holder was deleted")
 	}
 }
+func TestClaimRookUserDoesNotOverwriteAHeldUser(t *testing.T) {
+	_, r := adoptionSetup(t, "k-8f3a")
+	holdRookUser(t, "k-8f3a", "first")
+	createAdoptingUser(t, "acme-prod", "second", "k-8f3a", v1alpha1.ObjectStorageUserSpec{Permission: "read"})
+	refusal, err := r.claimRookUser(context.Background(), readUser(t, "acme-prod", "second"), loadedProject(t, "acme-prod"))
+	if err != nil || refusal.reason != "UserClaimed" {
+		t.Fatalf("refusal %+v err %v", refusal, err)
+	}
+	rgw, _ := getRookUser(t, "k-8f3a")
+	if rgw.GetLabels()["bedrock.cloudyfolks.io/name"] != "first" {
+		t.Fatal("the held Rook user changed")
+	}
+}
+
+func TestTwoAdoptersOfOneUserHaveOneWinner(t *testing.T) {
+	_, r := adoptionSetup(t, "k-8f3a")
+	createAdoptingUser(t, "acme-prod", "one", "k-8f3a", v1alpha1.ObjectStorageUserSpec{Permission: "read"})
+	createAdoptingUser(t, "acme-prod", "two", "k-8f3a", v1alpha1.ObjectStorageUserSpec{Permission: "read"})
+	reconcileUserWith(t, r, "acme-prod", "one")
+	readyAccountOf(t, "acme-prod")
+	reconcileUserWith(t, r, "acme-prod", "one")
+	reconcileUserWith(t, r, "acme-prod", "two")
+	reconcileUserWith(t, r, "acme-prod", "two")
+	reconcileUserWith(t, r, "acme-prod", "one")
+	requireUserReason(t, "acme-prod", "two", metav1.ConditionFalse, "UserClaimed")
+	rgw, _ := getRookUser(t, "k-8f3a")
+	if rgw.GetLabels()["bedrock.cloudyfolks.io/name"] != "one" {
+		t.Fatal("the first adopter lost the user")
+	}
+}
