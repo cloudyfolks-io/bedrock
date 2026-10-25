@@ -1,14 +1,14 @@
 # Addons, audit and monitoring
 
 An addon is an optional part of Bedrock. An admin turns an addon on or off
-with an `Addon` object. This page describes the addons `kata`, `loki`, `clusters`, `cnpg`, `registry` and `percona-ps`,
+with an `Addon` object. This page describes the addons `kata`, `loki`, `clusters`, `cnpg`, `registry`, `percona-ps` and `descheduler`,
 the API server audit log, the monitoring stack and the metering series.
 
 ## Addons
 
 The `Addon` kind has no namespace. The name of the object is the name of
 the addon. Bedrock creates one `Addon` for each addon it knows: `kata`,
-`loki`, `clusters`, `cnpg`, `registry` and `percona-ps`.
+`loki`, `clusters`, `cnpg`, `registry`, `percona-ps` and `descheduler`.
 
 List the addons:
 
@@ -28,13 +28,13 @@ Turn an addon off:
 kubectl patch addon loki --type merge -p '{"spec":{"enabled":false}}'
 ```
 
-The Settings `kata.enabled`, `loki.enabled`, `clusters.enabled`, `cnpg.enabled`, `registry.enabled` and `percona-ps.enabled` set the first state of the
+The Settings `kata.enabled`, `loki.enabled`, `clusters.enabled`, `cnpg.enabled`, `registry.enabled`, `percona-ps.enabled` and `descheduler.enabled` set the first state of the
 `Addon` objects when Bedrock creates them. After that, only the `Addon`
 object counts. A change of the Setting does not change a live addon.
 Bedrock never changes `spec.enabled` by itself.
 
 Bedrock applies the addon objects in a namespace. `kata` uses
-`kube-system`. `loki` uses `monitoring`. `cnpg` uses `cnpg`. `registry` uses `bedrock-registry`. `percona-ps` uses `ps-operator`. Bedrock records the objects of
+`kube-system`. `loki` uses `monitoring`. `cnpg` uses `cnpg`. `registry` uses `bedrock-registry`. `percona-ps` uses `ps-operator`. `descheduler` uses `kube-system`. Bedrock records the objects of
 each addon in the ConfigMap `bedrock-system/bedrock-addon-<name>-inventory`.
 Do not edit this ConfigMap. Bedrock uses it to remove the objects.
 
@@ -50,6 +50,7 @@ An addon can have values. Put them in `spec.values` as flat keys.
 | `cnpg` | none | | |
 | `registry` | none | | |
 | `percona-ps` | none | | |
+| `descheduler` | none | | |
 
 An unknown key is an error. The condition `Ready` then shows the reason
 `InvalidValues`. Bedrock changes nothing until you fix the values.
@@ -289,6 +290,43 @@ Turn the addon on:
 
 ```
 kubectl patch addon percona-ps --type merge -p '{"spec":{"enabled":true}}'
+```
+
+## Descheduler
+
+The addon `descheduler` moves VMs from a busy host to a quiet host. It installs
+the Kubernetes descheduler in the namespace `kube-system`. The addon is off by
+default. The Setting `descheduler.enabled` sets the first state of the `Addon`
+object. The `ClusterConfig` of an adopted cluster turns it on with
+`spec.addons.descheduler: true`.
+
+- The chart `descheduler` version 0.35.1 installs a CronJob. The CronJob runs
+  every 15 minutes on a managed host.
+- The policy evicts only the pods that have the label `kubevirt.io=virt-launcher`.
+  It does not evict a pod with local storage or a system critical pod. It
+  evicts a pod only when another host can take it.
+- The plugin `LowNodeUtilization` looks at memory only. A host is quiet when it
+  uses less than 60 percent of its memory. A host is busy when it uses more than
+  75 percent.
+- The policy evicts at most one pod for each host in each run.
+
+An eviction of a `virt-launcher` pod is a live migration only when the VM has
+the `evictionStrategy` `LiveMigrate` or `LiveMigrateIfPossible`. With `None`,
+the eviction shuts the VM down. The default of the Setting
+`virt.eviction-strategy` is `LiveMigrateIfPossible`. Set it to `LiveMigrate`
+when the descheduler must never stop a VM. See Node drains in `compute.md`.
+With `LiveMigrate`, a VM that cannot migrate stays on its host.
+
+Turn the addon on:
+
+```
+kubectl patch addon descheduler --type merge -p '{"spec":{"enabled":true}}'
+```
+
+Show the last runs:
+
+```
+kubectl -n kube-system get jobs -l app.kubernetes.io/name=descheduler
 ```
 
 ## Loki

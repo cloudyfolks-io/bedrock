@@ -270,7 +270,7 @@ func TestAlertmanagerWebhookURLValidation(t *testing.T) {
 }
 
 func TestCatalogHasTheObservabilityKeys(t *testing.T) {
-	want := map[string]string{"audit.level": "Metadata", "loki.retention-days": "14", "kata.enabled": "true", "loki.enabled": "false", "clusters.enabled": "false", "clusters.versions": "v1.36.3+k0s.1", "alertmanager.webhook-url": ""}
+	want := map[string]string{"audit.level": "Metadata", "loki.retention-days": "14", "kata.enabled": "true", "loki.enabled": "false", "clusters.enabled": "false", "descheduler.enabled": "false", "clusters.versions": "v1.36.3+k0s.1", "alertmanager.webhook-url": ""}
 	for key, value := range want {
 		def, ok := Lookup(key)
 		if !ok || def.Default != value {

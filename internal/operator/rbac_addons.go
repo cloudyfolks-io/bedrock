@@ -16,6 +16,7 @@ func addonsRules() []rbacv1.PolicyRule {
 		{APIGroups: []string{"cert-manager.io"}, Resources: []string{"certificates", "issuers", "clusterissuers"}, Verbs: standardVerbs()},
 		{APIGroups: []string{"admissionregistration.k8s.io"}, Resources: []string{"mutatingwebhookconfigurations", "validatingwebhookconfigurations"}, Verbs: standardVerbs()},
 		{APIGroups: []string{"apps"}, Resources: []string{"daemonsets", "statefulsets"}, Verbs: standardVerbs()},
+		{APIGroups: []string{"batch"}, Resources: []string{"cronjobs"}, Verbs: standardVerbs()},
 		{APIGroups: []string{rbacv1.GroupName}, Resources: []string{"clusterroles", "clusterrolebindings"}, Verbs: standardVerbs()},
 		{APIGroups: []string{"monitoring.coreos.com"}, Resources: []string{"servicemonitors", "prometheusrules"}, Verbs: standardVerbs()},
 		{APIGroups: []string{"node.k8s.io"}, Resources: []string{"runtimeclasses"}, Verbs: standardVerbs()},

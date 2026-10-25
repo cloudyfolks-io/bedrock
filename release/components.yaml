@@ -192,6 +192,13 @@ components:
       - docker.io/percona/percona-xtrabackup:9.7.1@sha256:41bd1636340a436012411b82b98c9d70a54fe600c29424d75749c53ca2e721c7
       - docker.io/percona/haproxy:2.8.18-1@sha256:726b65930d86f7342eb6bce97a38b9af934c935345e4524afda6b65c2b3213b3
       - docker.io/percona/percona-toolkit:3.7.1-4@sha256:9ed7a2025946ed326fb26fbfa45b49c81658be5bfe87a0ba5c34441df05e8dde
+  - name: descheduler
+    addon: true
+    chart: charts/descheduler
+    version: 0.35.1
+    namespace: kube-system
+    values: release/values/descheduler.yaml
+    noHooks: true
   - name: loki
     addon: true
     dirs: [manifests/addons/loki]

@@ -9,6 +9,7 @@ const (
 	CNPG                 = "cnpg"
 	Registry             = "registry"
 	PerconaPS            = "percona-ps"
+	Descheduler          = "descheduler"
 	ConditionPreflight   = "Preflight"
 	LabelKVM             = "bedrock.cloudyfolks.io/kvm"
 	AnnotationConfigHash = "bedrock.cloudyfolks.io/config-hash"

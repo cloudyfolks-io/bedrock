@@ -88,6 +88,9 @@ func WithDefaults(cfg v1alpha1.ClusterConfig) v1alpha1.ClusterConfig {
 	if _, ok := out.Spec.Addons["clusters"]; !ok {
 		out.Spec.Addons["clusters"] = false
 	}
+	if _, ok := out.Spec.Addons["descheduler"]; !ok {
+		out.Spec.Addons["descheduler"] = false
+	}
 	return out
 }
 
@@ -353,6 +356,7 @@ func ToSettings(cfg v1alpha1.ClusterConfig) []v1alpha1.Setting {
 		"kata.enabled":              strconv.FormatBool(cfg.Spec.Addons["kata"]),
 		"loki.enabled":              strconv.FormatBool(cfg.Spec.Addons["loki"]),
 		"clusters.enabled":          strconv.FormatBool(cfg.Spec.Addons["clusters"]),
+		"descheduler.enabled":       strconv.FormatBool(cfg.Spec.Addons["descheduler"]),
 		"network.eip-mode":          cfg.Spec.Network.Fabric.EIPMode,
 		"network.provider-networks": providerNetworksValue(cfg),
 	}
