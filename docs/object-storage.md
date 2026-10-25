@@ -62,7 +62,10 @@ If another object holds the user, it shows `UserClaimed`.
 In both cases Bedrock changes nothing.
 After the proof, Bedrock makes the Rook user with the name of the RGW user, keeps its access keys, and writes them into the Secret `<name>-s3` as always.
 `status.arn` and the inline policy use the RGW user name.
-Deleting the object deletes the RGW user and its keys.
+
+> **Warning:** Deleting an adopted `ObjectStorageUser` deletes the RGW user and its access keys, the same as for any other user.
+> Anything that still uses those keys stops working.
+> Before you delete the object, move every client to other keys.
 
 ### The principal
 
