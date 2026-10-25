@@ -43,6 +43,8 @@ New claims wait for a short time while the class is missing.
 
 - Every old Ceph daemon runs the same Ceph major release as the bundle, and at least v20.2.1.
   Read the release of the bundle in the `rook` component of `release/components.yaml`.
+- The old cluster runs Rook v1.20 or v1.21. Bedrock runs the Rook operator of the bundle and upgrades it in place.
+- Every host runs a Linux kernel 5.11 or newer. Rook v1.21 requires Ceph msgr2 by default.
 - The old cluster shows `HEALTH_OK` and all PGs are `active+clean`.
 - Every adopted pool has a size that is not larger than `storage.replicas`.
   Adoption refuses the other case, because Rook would shrink the pool.

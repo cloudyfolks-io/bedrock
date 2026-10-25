@@ -53,6 +53,13 @@ spec:
               capabilities:
                 nullable: true
                 properties:
+                  accounts:
+                    enum:
+                    - '*'
+                    - read
+                    - write
+                    - read, write
+                    type: string
                   amz-cache:
                     enum:
                     - '*'
@@ -151,6 +158,13 @@ spec:
                     - write
                     - read, write
                     type: string
+                  userInfoWithoutKeys:
+                    enum:
+                    - '*'
+                    - read
+                    - write
+                    - read, write
+                    type: string
                   users:
                     enum:
                     - '*'
@@ -167,6 +181,16 @@ spec:
                     type: string
                 type: object
               clusterNamespace:
+                type: string
+              defaultPlacement:
+                maxLength: 2048
+                minLength: 1
+                pattern: ^[a-zA-Z0-9._-]+$
+                type: string
+              defaultStorageClass:
+                maxLength: 2048
+                minLength: 1
+                pattern: ^[a-zA-Z0-9._-]+$
                 type: string
               displayName:
                 type: string
@@ -233,6 +257,9 @@ spec:
               store:
                 type: string
             type: object
+            x-kubernetes-validations:
+            - message: defaultStorageClass requires defaultPlacement
+              rule: '!has(self.defaultStorageClass) || has(self.defaultPlacement)'
           status:
             properties:
               info:

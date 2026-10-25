@@ -35,7 +35,7 @@ grep -q 'name: kubevirts.kubevirt.io' "$dir/manifests/00-crds/kubevirt-crds.yaml
 grep -q 'name: cdis.cdi.kubevirt.io' "$dir/manifests/00-crds/kubevirt-crds.yaml"
 grep -q 'quay.io/kubevirt/virt-launcher:v1.9.0' "$dir/images.txt"
 grep -q 'quay.io/ceph/ceph:v20.2.4' "$dir/images.txt"
-grep -q 'quay.io/cephcsi/cephcsi:v3.17.1' "$dir/images.txt"
+grep -q 'quay.io/cephcsi/cephcsi:v3.18.1' "$dir/images.txt"
 grep -q 'image: quay.io/ceph/ceph:v20.2.4' "$dir/release.yaml"
 grep -q 'name: cert-manager' "$dir/manifests/60-cert-manager/cert-manager.yaml"
 grep -q 'kind: Service' "$dir/manifests/65-traefik/traefik.yaml"

@@ -19,7 +19,7 @@ import (
 func rbacBundle(t *testing.T) release.Bundle {
 	t.Helper()
 	bundle := testBundle(t)
-	bundle.Spec.Components = append(bundle.Spec.Components, v1alpha1.ReleaseComponent{Name: "rook", Version: "v1.20.7", Image: "quay.io/ceph/ceph:v20.2.4"})
+	bundle.Spec.Components = append(bundle.Spec.Components, v1alpha1.ReleaseComponent{Name: "rook", Version: "1.21.0", Image: "quay.io/ceph/ceph:v20.2.4"})
 	return bundle
 }
 
