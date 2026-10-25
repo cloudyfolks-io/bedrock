@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"net/netip"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -37,8 +38,9 @@ type link struct {
 }
 
 type addrInfo struct {
-	Family string `json:"family"`
-	Local  string `json:"local"`
+	Family    string `json:"family"`
+	Local     string `json:"local"`
+	PrefixLen int    `json:"prefixlen"`
 }
 
 type addrEntry struct {
@@ -155,6 +157,38 @@ func primaryAddress(ctx context.Context, e Exec, iface string) (string, error) {
 		}
 	}
 	return "", fmt.Errorf("no IPv4 address on %s", iface)
+}
+
+func InterfaceCIDR(ctx context.Context, e Exec, iface string) (string, error) {
+	out, err := e.Run(ctx, "ip", "-json", "-4", "addr", "show", "dev", iface)
+	if err != nil {
+		return "", err
+	}
+	var entries []addrEntry
+	if err := json.Unmarshal([]byte(out), &entries); err != nil {
+		return "", fmt.Errorf("parse addresses: %w", err)
+	}
+	for _, entry := range entries {
+		for _, info := range entry.AddrInfo {
+			if info.Family != "inet" || info.Local == "" {
+				continue
+			}
+			addr, err := netip.ParseAddr(info.Local)
+			if err != nil || info.PrefixLen < 1 || info.PrefixLen > 32 {
+				return "", fmt.Errorf("address %s/%d on %s is not usable", info.Local, info.PrefixLen, iface)
+			}
+			return netip.PrefixFrom(addr, info.PrefixLen).Masked().String(), nil
+		}
+	}
+	return "", fmt.Errorf("no IPv4 address on %s", iface)
+}
+
+func DefaultInterfaceCIDR(ctx context.Context, e Exec) (string, error) {
+	iface, err := defaultInterface(ctx, e)
+	if err != nil {
+		return "", err
+	}
+	return InterfaceCIDR(ctx, e, iface)
 }
 
 func HasAddress(ctx context.Context, e Exec, ip string) (bool, error) {

@@ -22,6 +22,8 @@ type TenantLegSpec struct {
 	Interface string `json:"interface"`
 	// +optional
 	// +listType=set
+	// +kubebuilder:validation:MaxItems=32
+	// +kubebuilder:validation:items:MaxLength=43
 	// +kubebuilder:validation:items:XValidation:rule="isCIDR(self)",message="every allowSources entry must be a CIDR"
 	AllowSources []string `json:"allowSources,omitempty"`
 }
@@ -45,6 +47,7 @@ type HostConfigSpec struct {
 	// +optional
 	// +listType=map
 	// +listMapKey=interface
+	// +kubebuilder:validation:MaxItems=16
 	TenantLegs []TenantLegSpec `json:"tenantLegs,omitempty"`
 }
 

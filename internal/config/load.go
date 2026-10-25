@@ -135,6 +135,9 @@ func Validate(cfg v1alpha1.ClusterConfig) error {
 	if mtu := s.Network.PodMTU; mtu != 0 && (mtu < 576 || mtu > 9000) {
 		return fmt.Errorf("spec.network.podMTU must be from 576 to 9000, got %d", mtu)
 	}
+	if err := validateManagementNetwork(s.Network); err != nil {
+		return err
+	}
 	if !slices.Contains([]string{"bgp", "l2"}, s.Network.Fabric.EIPMode) {
 		return fmt.Errorf("spec.network.fabric.eipMode must be bgp or l2")
 	}
@@ -168,6 +171,32 @@ func Validate(cfg v1alpha1.ClusterConfig) error {
 	}
 	if !slices.Contains(s.Roles, v1alpha1.RoleCephOSD) {
 		return fmt.Errorf("the first node must carry the ceph-osd role")
+	}
+	return nil
+}
+
+var legInterfacePattern = regexp.MustCompile(`^[A-Za-z0-9_.-]{1,15}$`)
+
+func validateManagementNetwork(network v1alpha1.ClusterNetworkSpec) error {
+	if cidr := network.ManagementCIDR; cidr != "" {
+		if _, err := netip.ParsePrefix(cidr); err != nil {
+			return fmt.Errorf("spec.network.managementCIDR: %w", err)
+		}
+	}
+	seen := map[string]bool{}
+	for _, leg := range network.TenantLegs {
+		if !legInterfacePattern.MatchString(leg.Interface) {
+			return fmt.Errorf("spec.network.tenantLegs interface %q is not a valid interface name", leg.Interface)
+		}
+		if seen[leg.Interface] {
+			return fmt.Errorf("spec.network.tenantLegs lists %s twice", leg.Interface)
+		}
+		seen[leg.Interface] = true
+		for _, source := range leg.AllowSources {
+			if _, err := netip.ParsePrefix(source); err != nil {
+				return fmt.Errorf("spec.network.tenantLegs %s allowSources: %w", leg.Interface, err)
+			}
+		}
 	}
 	return nil
 }
@@ -316,6 +345,8 @@ func ToCluster(cfg v1alpha1.ClusterConfig) v1alpha1.Cluster {
 			Encryption:      *cfg.Spec.Encryption.DeepCopy(),
 			JoinCIDR:        cfg.Spec.Network.Fabric.JoinCIDR,
 			PodMTU:          cfg.Spec.Network.PodMTU,
+			ManagementCIDR:  cfg.Spec.Network.ManagementCIDR,
+			TenantLegs:      cfg.DeepCopy().Spec.Network.TenantLegs,
 			Storage:         v1alpha1.ClusterStorageSpec{Adopt: adoptWithoutKeyFile(cfg.Spec.Storage.Adopt)},
 		},
 	}

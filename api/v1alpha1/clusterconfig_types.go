@@ -63,6 +63,7 @@ type ClusterNetworkSpec struct {
 	// +optional
 	ManagementCIDR string `json:"managementCIDR,omitempty"`
 	// +optional
+	// +kubebuilder:validation:MaxItems=16
 	TenantLegs []TenantLegSpec `json:"tenantLegs,omitempty"`
 }
 

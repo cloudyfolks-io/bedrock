@@ -72,10 +72,12 @@ spec:
                   properties:
                     allowSources:
                       items:
+                        maxLength: 43
                         type: string
                         x-kubernetes-validations:
                         - message: every allowSources entry must be a CIDR
                           rule: isCIDR(self)
+                      maxItems: 32
                       type: array
                       x-kubernetes-list-type: set
                     interface:
@@ -85,6 +87,7 @@ spec:
                   required:
                   - interface
                   type: object
+                maxItems: 16
                 type: array
                 x-kubernetes-list-map-keys:
                 - interface
