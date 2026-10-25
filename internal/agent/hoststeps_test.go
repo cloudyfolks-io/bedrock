@@ -180,11 +180,6 @@ func k0sStepEnv(t *testing.T, node, role string) (StepEnv, *k0sHost) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { k8sClient.Delete(context.Background(), h) })
-	cluster := &v1alpha1.Cluster{ObjectMeta: metav1.ObjectMeta{Name: v1alpha1.ClusterName}, Spec: v1alpha1.ClusterSpec{DesiredVersion: "v0.3.0", API: v1alpha1.APISpec{VIP: "10.0.10.10"}, ManagementCIDR: "10.0.10.0/24"}}
-	if err := k8sClient.Create(context.Background(), cluster); err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { k8sClient.Delete(context.Background(), cluster) })
 	root := t.TempDir()
 	fake := &k0sHost{root: root, versions: map[string]string{"old k0s": oldK0s, "new k0s": newK0s}, running: oldK0s, startPolls: 2}
 	deps := newDeps(&host.FakeExec{}, time.Now())
@@ -444,14 +439,13 @@ func TestK0sUpdateLeavesControllersWithoutAuthnFiles(t *testing.T) {
 	writeFixtureFile(t, filepath.Join(env.Deps.Root, "usr/local/bin/k0s"), "new k0s")
 	fake.running = newK0s
 	config := filepath.Join(env.Deps.Root, "etc/k0s/k0s.yaml")
-	scoped := "apiVersion: k0s.k0sproject.io/v1beta1\nspec:\n  network:\n    kubeProxy:\n      nodePortAddresses:\n      - 10.0.10.0/24\n"
-	writeFixtureFile(t, config, scoped)
+	writeFixtureFile(t, config, "apiVersion: k0s.k0sproject.io/v1beta1\n")
 	fakeAPIServer(t, env.Deps.Root, time.Now().Add(-time.Hour))
 	outcome, err := k0sUpdate(context.Background(), env)
 	if err != nil || outcome.Message != "k0s already at v1.36.3+k0s.0" {
 		t.Fatalf("outcome %+v %v", outcome, err)
 	}
-	if readFixtureFile(t, config) != scoped {
+	if readFixtureFile(t, config) != "apiVersion: k0s.k0sproject.io/v1beta1\n" {
 		t.Fatal("flags pointing at missing files would stop kube-apiserver")
 	}
 }
@@ -528,20 +522,5 @@ func TestWithAPIServerArgsMergesBothFlagSets(t *testing.T) {
 	again, changed, err := withAPIServerArgs(out, merged)
 	if err != nil || changed || string(again) != string(out) {
 		t.Fatalf("a second merge must change nothing: %v %v", changed, err)
-	}
-}
-
-func TestK0sUpdateRestartsControllerThatGainedNodePortScope(t *testing.T) {
-	env, fake := k0sStepEnv(t, "k0s-nodeport-a", v1alpha1.RoleControlPlane)
-	writeFixtureFile(t, filepath.Join(env.Deps.Root, "usr/local/bin/k0s"), "new k0s")
-	fake.running = newK0s
-	config := filepath.Join(env.Deps.Root, "etc/k0s/k0s.yaml")
-	writeFixtureFile(t, config, plainConfig)
-	outcome, err := k0sUpdate(context.Background(), env)
-	if err != nil || outcome.Message != "k0s v1.36.3+k0s.0 installed, restarted k0scontroller.service" {
-		t.Fatalf("outcome %+v %v", outcome, err)
-	}
-	if !strings.Contains(readFixtureFile(t, config), "10.0.10.0/24") {
-		t.Fatal("k0s.yaml lacks the node port scope")
 	}
 }

@@ -419,6 +419,13 @@ rules:
   verbs:
   - get
 - apiGroups:
+  - k0s.k0sproject.io
+  resources:
+  - clusterconfigs
+  verbs:
+  - get
+  - patch
+- apiGroups:
   - k0smotron.io
   resources:
   - clusters

@@ -608,10 +608,15 @@ Bedrock sets `spec.network.kubeProxy` in the k0s configuration: mode `iptables`,
 A NodePort answers only on the management network of a host.
 The management CIDR is `spec.network.managementCIDR` of the cluster configuration, and `spec.managementCIDR` of the `Cluster`.
 If you do not set it at install, `bedrock init` uses the network of the address on `spec.network.managementInterface`.
-At an upgrade, the agent of each control plane host writes the setting to `k0s.yaml` when `kubeProxy` has no `nodePortAddresses`, and restarts k0s once.
-It takes the CIDR from the `Cluster`, or else from the address on the default interface.
-It keeps a `nodePortAddresses` list that an administrator set, and a disabled kube-proxy.
-For an adopted cluster, set `spec.managementCIDR` of the `Cluster` before the upgrade to the value of the old `k0s_kube_proxy_node_port_addresses`.
+Controllers run k0s with dynamic config, so k0s reads `kubeProxy` from the object `clusterconfigs.k0s.k0sproject.io` `kube-system/k0s`, not from the file `k0s.yaml`.
+At install, the file seeds that object on the first start of k0s. An adopted cluster is a new install, so it gets the setting in the same way.
+On a running cluster, the operator patches only `spec.network.kubeProxy.nodePortAddresses` of that object, with `spec.managementCIDR` of the `Cluster`, when the field is empty.
+It keeps every other `kubeProxy` field, a `nodePortAddresses` list that an administrator set, and a disabled kube-proxy.
+Then it reads the object again, and the condition `NodePortsScoped` of the `Cluster` shows the result.
+The condition is `False` with the reason `NoManagementCIDR`, `K0sConfigUnavailable`, `PatchFailed` or `NotApplied` when the setting is not in place.
+k0s applies the change to kube-proxy by itself, and no restart is needed.
+For a cluster that you made before this setting existed, set `spec.managementCIDR` of the `Cluster`.
+For an adopted cluster, use the value of the old `k0s_kube_proxy_node_port_addresses`.
 
 ### Switch rules
 

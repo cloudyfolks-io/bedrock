@@ -50,6 +50,9 @@ func (r *ClusterReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 		if err := r.reconcileSteady(ctx, cluster); err != nil {
 			return ctrl.Result{}, err
 		}
+		if err := r.reconcileNodePorts(ctx); err != nil {
+			return ctrl.Result{}, err
+		}
 		wait, err := r.reconcileEncryption(ctx)
 		return ctrl.Result{RequeueAfter: wait}, err
 	case routeOld:

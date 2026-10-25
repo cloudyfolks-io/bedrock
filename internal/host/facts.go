@@ -183,14 +183,6 @@ func InterfaceCIDR(ctx context.Context, e Exec, iface string) (string, error) {
 	return "", fmt.Errorf("no IPv4 address on %s", iface)
 }
 
-func DefaultInterfaceCIDR(ctx context.Context, e Exec) (string, error) {
-	iface, err := defaultInterface(ctx, e)
-	if err != nil {
-		return "", err
-	}
-	return InterfaceCIDR(ctx, e, iface)
-}
-
 func HasAddress(ctx context.Context, e Exec, ip string) (bool, error) {
 	out, err := e.Run(ctx, "ip", "-json", "addr")
 	if err != nil {

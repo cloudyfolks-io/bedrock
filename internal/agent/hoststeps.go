@@ -96,11 +96,7 @@ func k0sUpdate(ctx context.Context, env StepEnv) (Outcome, error) {
 	if err != nil {
 		return Outcome{}, err
 	}
-	proxyReconfigured, err := ensureNodePortScope(ctx, env, service)
-	if err != nil {
-		return Outcome{}, err
-	}
-	restart := reconfigured || auditReconfigured || proxyReconfigured || k0sConfigNewerThanAPIServer(env.Deps.Root, service)
+	restart := reconfigured || auditReconfigured || k0sConfigNewerThanAPIServer(env.Deps.Root, service)
 	installed := filepath.Join(env.Deps.Root, k0s.DefaultBinary)
 	current := hasChecksum(installed, checksum)
 	if current && !restart && settledK0sVersion(ctx, env) == version {

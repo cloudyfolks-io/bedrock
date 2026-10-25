@@ -133,10 +133,3 @@ func TestInterfaceCIDRNeedsAPrefixLength(t *testing.T) {
 		t.Fatalf("cidr %q without a prefix length", got)
 	}
 }
-
-func TestDefaultInterfaceCIDR(t *testing.T) {
-	got, err := DefaultInterfaceCIDR(context.Background(), fakeIP())
-	if err != nil || got != "10.0.10.0/24" {
-		t.Fatalf("cidr %q err %v", got, err)
-	}
-}
