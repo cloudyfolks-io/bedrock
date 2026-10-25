@@ -112,11 +112,14 @@ The operator writes the Fabric annotation `port_security: "false"` for this inte
 The security groups of the interface stay in place.
 
 Fabric v1.2.1 reads `port_security` and the security groups as two separate settings.
-With `port_security` set to `"false"`, Fabric clears the port security of the logical switch port, so OVN does not check the source MAC and IP addresses.
-The ACLs of the security groups are bound to the port through its port groups, and they stay enforced.
-Fabric builds the address set of a security group from the addresses of the port when the port security is empty.
+With `port_security` set to `"false"`, Fabric clears the port security of the logical switch port.
+The interface can then send any source MAC address and any source IP address, not only the addresses of its own Subnet.
+The security group rules still apply, because Fabric binds them to the port through its port groups.
+An egress rule matches the destination only.
+A remote-group rule and the same-group rule do not match the source addresses of forwarded client traffic, so only address (CIDR) rules apply to that traffic.
 Use `portSecurity: false` for a VM that forwards traffic with source addresses that are not its own, for example a VPN gateway.
 A change of `portSecurity` reaches a running VM at once.
+A restore from a backup keeps a `portSecurity: false` that an administrator set.
 
 A change of the security groups reaches a running VM at once.
 A change of the Subnets applies at the next restart.
