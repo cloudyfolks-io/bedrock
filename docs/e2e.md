@@ -396,7 +396,7 @@ The steps of `hack/e2e/tenant/container.sh` use the preloaded busybox image.
 
 | Step | Check |
 | --- | --- |
-| `container_runtime_gate` | With the default Setting `container.runtime-class` a Container has `Ready=False` with the reason `RuntimeUnavailable` and no Deployment. The step then sets the Setting to `none`. |
+| `container_runtime_gate` | With the Setting `container.runtime-class` set to a RuntimeClass that does not exist, a Container has `Ready=False` with the reason `RuntimeUnavailable` and no Deployment. The step then restores the value that the Setting had before. On a host with no such RuntimeClass, such as a host with no KVM, it sets `none`. |
 | `container_lifecycle` | A Container with two replicas is `Running` with two addresses and the strategy `RollingUpdate`. Replicas 0 gives `Stopped` with `Ready=True`, and it stays `Stopped`. Replicas 2 starts it again. A Container with `address` and one replica shows the address and uses `Recreate`. `autoscale` makes a HorizontalPodAutoscaler. Removing `autoscale` with `replicas: 0` stops the Container and removes the autoscaler. |
 | `container_volume` | With the storage class `filesystem`, a Container mounts a Volume and the Volume shows `Container/stateful`. A second Container gets `VolumeInUse`. A restart keeps the data. Deleting the Container frees the Volume and keeps the claim. The step skips these checks when no `filesystem` class exists. |
 | `container_load_balancer` | A LoadBalancer with `containerRef` is `Programmed`, and the Fabric load balancer holds the address of each ready pod. |
