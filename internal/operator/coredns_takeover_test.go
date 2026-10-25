@@ -1,0 +1,251 @@
+package operator
+
+import (
+	"context"
+	"strings"
+	"testing"
+
+	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"sigs.k8s.io/controller-runtime/pkg/client"
+
+	"github.com/cloudyfolks-io/bedrock/internal/release"
+)
+
+const k0sCoreDNSObjects = `apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: coredns
+  namespace: kube-system
+  labels: {k0s.k0sproject.io/stack: coredns}
+  annotations: {k0s.k0sproject.io/stack-checksum: sum-sa}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: system-coredns
+  labels: {k0s.k0sproject.io/stack: coredns}
+  annotations: {k0s.k0sproject.io/stack-checksum: sum-cr}
+rules:
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["list"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: system-coredns
+  labels: {k0s.k0sproject.io/stack: coredns}
+  annotations: {k0s.k0sproject.io/stack-checksum: sum-crb}
+roleRef: {apiGroup: rbac.authorization.k8s.io, kind: ClusterRole, name: system-coredns}
+subjects:
+  - {kind: ServiceAccount, name: coredns, namespace: kube-system}
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: coredns
+  namespace: kube-system
+  labels: {k0s.k0sproject.io/stack: coredns}
+  annotations: {k0s.k0sproject.io/stack-checksum: sum-cm}
+data:
+  Corefile: ".:53 {\n    forward . /etc/resolv.conf\n}\n"
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: coredns
+  namespace: kube-system
+  labels: {k8s-app: kube-dns, k0s.k0sproject.io/stack: coredns}
+  annotations: {k0s.k0sproject.io/stack-checksum: sum-deploy, k0s.k0sproject.io/last-applied-configuration: "{}"}
+spec:
+  replicas: 1
+  selector:
+    matchLabels: {k8s-app: kube-dns}
+  template:
+    metadata:
+      labels: {k8s-app: kube-dns}
+    spec:
+      affinity:
+        podAntiAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            - topologyKey: kubernetes.io/hostname
+              labelSelector:
+                matchLabels: {k8s-app: kube-dns}
+      containers:
+        - name: coredns
+          image: registry.k8s.io/coredns/coredns:v1.12.0
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: kube-dns
+  namespace: kube-system
+  labels: {k8s-app: kube-dns, k0s.k0sproject.io/stack: coredns}
+  annotations: {k0s.k0sproject.io/stack-checksum: sum-svc}
+spec:
+  selector: {k8s-app: kube-dns}
+  ports:
+    - {name: dns, port: 53, protocol: UDP}
+`
+
+func createK0sCoreDNS(t *testing.T, c client.Client) {
+	t.Helper()
+	ctx := context.Background()
+	for _, obj := range decodeDocuments(t, []byte(k0sCoreDNSObjects)) {
+		if err := c.Create(ctx, obj); err != nil {
+			t.Fatalf("create %s %s: %v", obj.GetKind(), obj.GetName(), err)
+		}
+	}
+}
+
+func releaseCoreDNSGroup(t *testing.T, dnsIP string) release.Group {
+	t.Helper()
+	bundle := release.Bundle{Groups: []release.Group{{Name: "coredns", Objects: corednsManifest(t)}}}
+	vars := release.SettingVars(map[string]string{"dns.upstreams": "217.218.127.127 217.218.155.155"})
+	vars[release.VarDNSIP] = dnsIP
+	substituted, err := release.Substitute(bundle, vars)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return substituted.Groups[0]
+}
+
+func liveObject(t *testing.T, c client.Client, kind, apiVersion, namespace, name string) *unstructured.Unstructured {
+	t.Helper()
+	live := &unstructured.Unstructured{Object: map[string]any{"apiVersion": apiVersion, "kind": kind}}
+	if err := c.Get(context.Background(), client.ObjectKey{Namespace: namespace, Name: name}, live); err != nil {
+		t.Fatalf("get %s %s: %v", kind, name, err)
+	}
+	return live
+}
+
+func k0sStackLabelOf(obj *unstructured.Unstructured) string {
+	return obj.GetLabels()["k0s.k0sproject.io/stack"]
+}
+
+func TestTakeoverReplacesTheK0sObjectsInPlace(t *testing.T) {
+	c, _ := StartTestEnv(t)
+	ctx := context.Background()
+	createK0sCoreDNS(t, c)
+	service := liveObject(t, c, "Service", "v1", "kube-system", "kube-dns")
+	dnsIP, _, _ := unstructured.NestedString(service.Object, "spec", "clusterIP")
+	group := releaseCoreDNSGroup(t, dnsIP)
+	uids := map[string]string{}
+	for _, obj := range group.Objects {
+		uids[obj.GetKind()+"/"+obj.GetName()] = string(liveObject(t, c, obj.GetKind(), obj.GetAPIVersion(), obj.GetNamespace(), obj.GetName()).GetUID())
+	}
+
+	if err := adoptK0sCoreDNS(c)(ctx, group); err != nil {
+		t.Fatal(err)
+	}
+
+	for _, obj := range group.Objects {
+		live := liveObject(t, c, obj.GetKind(), obj.GetAPIVersion(), obj.GetNamespace(), obj.GetName())
+		if string(live.GetUID()) != uids[obj.GetKind()+"/"+obj.GetName()] {
+			t.Errorf("%s %s was deleted and created again", obj.GetKind(), obj.GetName())
+		}
+		if k0sStackLabelOf(live) != "" {
+			t.Errorf("%s %s keeps the k0s stack label, so k0s could prune it", obj.GetKind(), obj.GetName())
+		}
+		if live.GetAnnotations()["k0s.k0sproject.io/stack-checksum"] == "" {
+			t.Errorf("%s %s lost the k0s checksum, so k0s could write its own version back", obj.GetKind(), obj.GetName())
+		}
+	}
+	deployment := liveObject(t, c, "Deployment", "apps/v1", "kube-system", "coredns")
+	containers, _, _ := unstructured.NestedSlice(deployment.Object, "spec", "template", "spec", "containers")
+	if image := containers[0].(map[string]any)["image"]; image != "docker.io/coredns/coredns:1.13.2" {
+		t.Errorf("image %v", image)
+	}
+	if _, found, _ := unstructured.NestedFieldNoCopy(deployment.Object, "spec", "template", "spec", "affinity", "podAntiAffinity", "requiredDuringSchedulingIgnoredDuringExecution"); found {
+		t.Error("a field of k0s that the release does not set must go")
+	}
+	service = liveObject(t, c, "Service", "v1", "kube-system", "kube-dns")
+	if ip, _, _ := unstructured.NestedString(service.Object, "spec", "clusterIP"); ip != dnsIP {
+		t.Errorf("clusterIP %q, want %q", ip, dnsIP)
+	}
+	var configMap corev1.ConfigMap
+	if err := c.Get(ctx, client.ObjectKey{Namespace: "kube-system", Name: "coredns"}, &configMap); err != nil {
+		t.Fatal(err)
+	}
+	if corefile := configMap.Data["Corefile"]; !strings.Contains(corefile, "forward . 217.218.127.127 217.218.155.155\n") {
+		t.Errorf("corefile %q", corefile)
+	}
+}
+
+func TestReleaseApplyAfterTheTakeoverKeepsTheObjects(t *testing.T) {
+	c, _ := StartTestEnv(t)
+	ctx := context.Background()
+	createK0sCoreDNS(t, c)
+	service := liveObject(t, c, "Service", "v1", "kube-system", "kube-dns")
+	dnsIP, _, _ := unstructured.NestedString(service.Object, "spec", "clusterIP")
+	group := releaseCoreDNSGroup(t, dnsIP)
+	if err := adoptK0sCoreDNS(c)(ctx, group); err != nil {
+		t.Fatal(err)
+	}
+	before := string(liveObject(t, c, "Deployment", "apps/v1", "kube-system", "coredns").GetUID())
+	if err := (release.Applier{Client: c}).Apply(ctx, group); err != nil {
+		t.Fatal(err)
+	}
+	live := liveObject(t, c, "Deployment", "apps/v1", "kube-system", "coredns")
+	if string(live.GetUID()) != before || k0sStackLabelOf(live) != "" {
+		t.Fatalf("deployment %s label %q", live.GetUID(), k0sStackLabelOf(live))
+	}
+}
+
+func TestTakeoverIgnoresOtherGroups(t *testing.T) {
+	c, _ := StartTestEnv(t)
+	createK0sCoreDNS(t, c)
+	service := liveObject(t, c, "Service", "v1", "kube-system", "kube-dns")
+	dnsIP, _, _ := unstructured.NestedString(service.Object, "spec", "clusterIP")
+	group := releaseCoreDNSGroup(t, dnsIP)
+	group.Name = "traefik"
+	if err := adoptK0sCoreDNS(c)(context.Background(), group); err != nil {
+		t.Fatal(err)
+	}
+	if k0sStackLabelOf(liveObject(t, c, "Deployment", "apps/v1", "kube-system", "coredns")) != "coredns" {
+		t.Fatal("only the coredns group takes the objects over")
+	}
+}
+
+func TestTakeoverLeavesObjectsOfAnotherOwner(t *testing.T) {
+	c, _ := StartTestEnv(t)
+	ctx := context.Background()
+	foreign := decodeDocuments(t, []byte(k0sCoreDNSObjects))
+	for _, obj := range foreign {
+		obj.SetLabels(map[string]string{"k8s-app": "kube-dns"})
+		obj.SetAnnotations(nil)
+		if err := c.Create(ctx, obj); err != nil {
+			t.Fatal(err)
+		}
+	}
+	service := liveObject(t, c, "Service", "v1", "kube-system", "kube-dns")
+	dnsIP, _, _ := unstructured.NestedString(service.Object, "spec", "clusterIP")
+	before := liveObject(t, c, "Deployment", "apps/v1", "kube-system", "coredns").GetResourceVersion()
+	if err := adoptK0sCoreDNS(c)(ctx, releaseCoreDNSGroup(t, dnsIP)); err != nil {
+		t.Fatal(err)
+	}
+	if after := liveObject(t, c, "Deployment", "apps/v1", "kube-system", "coredns").GetResourceVersion(); after != before {
+		t.Fatal("an object that k0s does not own is not replaced")
+	}
+}
+
+func TestTakeoverOnAClusterWithoutK0sCoreDNS(t *testing.T) {
+	c, _ := StartTestEnv(t)
+	if err := adoptK0sCoreDNS(c)(context.Background(), releaseCoreDNSGroup(t, "10.0.0.10")); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestInstallRunsTheTakeoverBeforeTheCoreDNSGroup(t *testing.T) {
+	c, _ := StartTestEnv(t)
+	createK0sCoreDNS(t, c)
+	service := liveObject(t, c, "Service", "v1", "kube-system", "kube-dns")
+	dnsIP, _, _ := unstructured.NestedString(service.Object, "spec", "clusterIP")
+	if err := beforeGroupHooks(c)(context.Background(), releaseCoreDNSGroup(t, dnsIP)); err != nil {
+		t.Fatal(err)
+	}
+	if k0sStackLabelOf(liveObject(t, c, "Service", "v1", "kube-system", "kube-dns")) != "" {
+		t.Fatal("the hook of an install must take the k0s objects over")
+	}
+}

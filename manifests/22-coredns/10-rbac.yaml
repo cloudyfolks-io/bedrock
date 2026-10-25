@@ -7,7 +7,7 @@ metadata:
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
 metadata:
-  name: system:coredns
+  name: system-coredns
   labels:
     kubernetes.io/bootstrapping: rbac-defaults
 rules:
@@ -24,13 +24,13 @@ rules:
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding
 metadata:
-  name: system:coredns
+  name: system-coredns
   labels:
     kubernetes.io/bootstrapping: rbac-defaults
 roleRef:
   apiGroup: rbac.authorization.k8s.io
   kind: ClusterRole
-  name: system:coredns
+  name: system-coredns
 subjects:
   - kind: ServiceAccount
     name: coredns
