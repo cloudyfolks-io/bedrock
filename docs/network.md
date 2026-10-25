@@ -591,7 +591,14 @@ The rules are, for traffic that comes in on a leg:
 Use the transit leg `allowSources` for the BGP peer.
 A tenant on a leg cannot reach SSH, the API server, the kubelet or a NodePort of the host.
 
-The unit runs before `network-pre.target`, so the table is in place before a leg comes up at boot.
+The unit has `DefaultDependencies=no`, `Before=network-pre.target` and `Wants=network-pre.target`.
+It runs after `nftables.service`, because the stop of that service flushes the whole ruleset.
+At boot, the table is loaded before the network comes up, so the rules on `iifname` are in place before the legs exist.
+This guarantee holds only after the first apply on a host.
+Until the agent applies the `HostConfig` for the first time, a leg that the host already has is not guarded.
+A leg that a unit of your own makes must start after `network-pre.target`.
+On every pass, the agent lists the table and compares it with the table that it loaded.
+If the table is missing or its rules differ, the agent loads it again and the condition `ManagementApplied` of the `Host` shows a failure with the reason `GuardFailed` if that does not work.
 A change of the list replaces the table in one nft transaction: the file creates, deletes and recreates the table.
 No packet passes between the delete and the new rules.
 If you remove all legs, the agent removes the unit, the file and the table.
