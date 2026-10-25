@@ -35,7 +35,7 @@ func hostPreflightInputsChanged(oldHost, newHost *v1alpha1.Host) bool {
 }
 
 func readSettings() []string {
-	names := append([]string{retentionSetting}, registryInputSettings...)
+	names := append([]string{retentionSetting, evictionStrategySetting}, registryInputSettings...)
 	for _, def := range Known() {
 		names = append(names, def.EnabledSetting)
 	}

@@ -73,7 +73,7 @@ when the operator starts, with the first state from the Settings.
 
 ### Conditions
 
-The `Addon` has the condition `Ready`. The addons `kata` and `registry` also have `Preflight`, and `registry` has `RuntimeReady`. The
+The `Addon` has the condition `Ready`. The addons `kata`, `registry` and `descheduler` also have `Preflight`, and `registry` has `RuntimeReady`. The
 field `status.observedGeneration` shows the last generation that Bedrock
 read.
 
@@ -101,6 +101,7 @@ read.
 | `CNPGAddonOff` | `Unknown` | The `registry` addon waits for the addon `cnpg`. |
 | `DatabaseDisabled` | `Unknown` | The `registry` addon waits for the Setting `database.enabled`. |
 | `CertManagerNotReady` | `Unknown` | The `registry` addon waits for cert-manager. |
+| `EvictionStrategyNotLiveMigrate` | `False` | The `descheduler` addon needs the Setting `virt.eviction-strategy` set to `LiveMigrate`. |
 
 ## Kata
 
@@ -310,12 +311,19 @@ object. The `ClusterConfig` of an adopted cluster turns it on with
   75 percent.
 - The policy evicts at most one pod for each host in each run.
 
-An eviction of a `virt-launcher` pod is a live migration only when the VM has
-the `evictionStrategy` `LiveMigrate` or `LiveMigrateIfPossible`. With `None`,
-the eviction shuts the VM down. The default of the Setting
-`virt.eviction-strategy` is `LiveMigrateIfPossible`. Set it to `LiveMigrate`
-when the descheduler must never stop a VM. See Node drains in `compute.md`.
-With `LiveMigrate`, a VM that cannot migrate stays on its host.
+An eviction of a `virt-launcher` pod is a live migration only when the
+KubeVirt eviction strategy is `LiveMigrate`. With `LiveMigrateIfPossible`, the
+eviction shuts down a VM that cannot migrate. With `None`, it shuts down every
+VM. So the addon needs the Setting `virt.eviction-strategy` set to
+`LiveMigrate`. The default of the Setting is `LiveMigrateIfPossible`. See Node
+drains in `compute.md`.
+
+When the Setting has another value, Bedrock does not deploy the CronJob. It
+removes the CronJob if it exists. The condition `Ready` is `False` with the
+reason `PreflightFailed`, and the message tells you to set
+`virt.eviction-strategy` to `LiveMigrate`. The condition `Preflight` shows the
+reason `EvictionStrategyNotLiveMigrate`. Bedrock deploys the CronJob again when
+you set the Setting. A VM that cannot migrate stays on its host.
 
 Turn the addon on:
 

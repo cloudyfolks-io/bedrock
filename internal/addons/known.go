@@ -57,7 +57,7 @@ func perconaDefinition() Definition {
 }
 
 func deschedulerDefinition() Definition {
-	return Definition{Name: Descheduler, EnabledSetting: "descheduler.enabled"}
+	return Definition{Name: Descheduler, EnabledSetting: "descheduler.enabled", Check: DeschedulerCheck}
 }
 
 func lokiDefinition() Definition {
