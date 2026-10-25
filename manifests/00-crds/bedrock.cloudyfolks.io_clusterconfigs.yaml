@@ -232,6 +232,11 @@ spec:
                     - monitors
                     - pools
                     type: object
+                  cephxCipher:
+                    enum:
+                    - aes
+                    - aes256k
+                    type: string
                   devices:
                     items:
                       type: string

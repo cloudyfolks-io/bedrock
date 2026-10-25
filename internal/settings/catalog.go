@@ -153,6 +153,7 @@ func Catalog() []Definition {
 		{"letsencrypt.email", "", "Account email for Let's Encrypt.", free},
 		{"letsencrypt.solver", "http01", "ACME challenge solver.", oneOf("http01", "dns01")},
 		{"storage.replicas", "1", "Ceph pool replica count.", intMin(1)},
+		{"storage.cephx-cipher", "aes", "Key type of the Ceph cephx keys. aes256k needs Linux kernel 7.0 or newer on every host, because the CSI drivers mount with the kernel clients.", oneOf("aes", "aes256k")},
 		{"storage.network", "", "VLAN id of the dedicated storage network.", free},
 		{"migration.network", "", "VLAN id of the dedicated live migration network.", free},
 		{"migration.parallel", "2", "Parallel live migrations per cluster.", intMin(1)},
