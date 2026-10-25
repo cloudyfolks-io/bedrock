@@ -46,6 +46,7 @@ Read `docs/authn.md` for users, groups, LDAP and OIDC, API tokens,
 - [Network](docs/network.md): Fabric networks, subnets, elastic IPs, load balancers, DNS zones and security groups.
 - [Backup](docs/backup.md): back up and restore VMs, etcd snapshots.
 - [Secrets at rest](docs/secrets-at-rest.md): Secret encryption, the key file and KMS v2.
+- [Storage keys](docs/storage.md): the cephx key type, its kernel rule and the rotation stages.
 - [Object storage](docs/object-storage.md): S3 users and buckets on the shared Ceph object store.
 - [Databases](docs/database.md): managed PostgreSQL with users, logical databases, backups and restore.
 - [Registry](docs/registry.md): Harbor registries and robot credentials.
