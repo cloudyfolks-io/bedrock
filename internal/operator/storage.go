@@ -2,6 +2,7 @@ package operator
 
 import (
 	"fmt"
+	"maps"
 	"slices"
 	"strconv"
 
@@ -154,18 +155,42 @@ func cephClusterSpec(image string, hosts []v1alpha1.Host, mons int64, replicas i
 		"mgr":                map[string]any{"count": mgrs, "allowMultiplePerNode": len(hosts) < 2},
 		"dashboard":          map[string]any{"enabled": false},
 		"crashCollector":     map[string]any{"disable": true},
-		"security":           map[string]any{"cephx": map[string]any{"csi": map[string]any{"keyType": "aes"}}},
+		"security":           map[string]any{"cephx": defaultCephx()},
 		"healthCheck":        map[string]any{"muteHealthWarning": mutedHealthWarnings(replicas)},
 		"storage":            map[string]any{"useAllNodes": false, "useAllDevices": false, "nodes": nodes},
 		"priorityClassNames": map[string]any{"mon": "system-node-critical", "osd": "system-node-critical", "mgr": "system-cluster-critical"},
 	}
 }
 
+func defaultCephx() map[string]any {
+	return map[string]any{
+		"allowedCiphers": []any{"aes256k"},
+		"daemon":         map[string]any{"keyRotationPolicy": "KeyGeneration", "keyGeneration": int64(2)},
+		"csi":            map[string]any{"keyRotationPolicy": "KeyGeneration", "keyGeneration": int64(3), "keepPriorKeyCountMax": int64(1), "keyType": "aes256k"},
+		"rbdMirrorPeer":  map[string]any{"keyRotationPolicy": "KeyGeneration", "keyGeneration": int64(2), "keyType": "aes256k"},
+	}
+}
+
+func mergeMaps(base, override map[string]any) map[string]any {
+	merged := maps.Clone(base)
+	for key, value := range override {
+		overrideMap, overrideIsMap := value.(map[string]any)
+		baseMap, baseIsMap := merged[key].(map[string]any)
+		if overrideIsMap && baseIsMap {
+			merged[key] = mergeMaps(baseMap, overrideMap)
+			continue
+		}
+		merged[key] = value
+	}
+	return merged
+}
+
 func mutedHealthWarnings(replicas int) map[string]any {
 	muted := map[string]any{
-		"AUTH_INSECURE_CLIENT_KEY_TYPE": map[string]any{"policy": "mute"},
-		"AUTH_INSECURE_KEYS_ALLOWED":    map[string]any{"policy": "mute"},
-		"AUTH_INSECURE_KEYS_CREATABLE":  map[string]any{"policy": "mute"},
+		"AUTH_EMERGENCY_CIPHERS_SET":    map[string]any{"policy": "unmute"},
+		"AUTH_INSECURE_CLIENT_KEY_TYPE": map[string]any{"policy": "unmute"},
+		"AUTH_INSECURE_KEYS_ALLOWED":    map[string]any{"policy": "unmute"},
+		"AUTH_INSECURE_KEYS_CREATABLE":  map[string]any{"policy": "unmute"},
 	}
 	policy := "unmute"
 	if replicas == 1 {

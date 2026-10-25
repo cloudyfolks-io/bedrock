@@ -157,12 +157,12 @@ func TestRenderStorageAdoptGoldenCephCluster(t *testing.T) {
 		"mgr":             map[string]any{"count": int64(2), "allowMultiplePerNode": false},
 		"dashboard":       map[string]any{"enabled": false},
 		"crashCollector":  map[string]any{"disable": true},
-		"security":        map[string]any{"cephx": map[string]any{"daemon": map[string]any{"keyType": "aes256k", "keyGeneration": int64(2)}}},
+		"security":        map[string]any{"cephx": adoptedGoldenCephx()},
 		"healthCheck": map[string]any{"muteHealthWarning": map[string]any{
-			"AUTH_EMERGENCY_CIPHERS_SET":    map[string]any{"policy": "mute"},
-			"AUTH_INSECURE_CLIENT_KEY_TYPE": map[string]any{"policy": "mute"},
-			"AUTH_INSECURE_KEYS_ALLOWED":    map[string]any{"policy": "mute"},
-			"AUTH_INSECURE_KEYS_CREATABLE":  map[string]any{"policy": "mute"},
+			"AUTH_EMERGENCY_CIPHERS_SET":    map[string]any{"policy": "unmute"},
+			"AUTH_INSECURE_CLIENT_KEY_TYPE": map[string]any{"policy": "unmute"},
+			"AUTH_INSECURE_KEYS_ALLOWED":    map[string]any{"policy": "unmute"},
+			"AUTH_INSECURE_KEYS_CREATABLE":  map[string]any{"policy": "unmute"},
 			"POOL_NO_REDUNDANCY":            map[string]any{"policy": "unmute"},
 			"TOO_FEW_OSDS":                  map[string]any{"policy": "unmute"},
 		}},
@@ -199,10 +199,30 @@ func TestRenderStorageAdoptWithoutCephxKeepsTheDefaultKeys(t *testing.T) {
 		t.Fatal(err)
 	}
 	security, _, _ := unstructured.NestedMap(findObject(out.Objects, "CephCluster", "rook-ceph").Object, "spec", "security")
-	want := map[string]any{"cephx": map[string]any{"csi": map[string]any{"keyType": "aes"}}}
-	if !reflect.DeepEqual(security, want) {
+	if !reflect.DeepEqual(security, map[string]any{"cephx": defaultCephx()}) {
 		t.Fatalf("security %+v", security)
 	}
+}
+
+func TestRenderStorageAdoptKeepsTheOldGenerationsOverTheDefaults(t *testing.T) {
+	in := adoptInput(v1alpha1.ReasonAdopted)
+	in.Cluster.Spec.Storage.Adopt.Cephx = &runtime.RawExtension{Raw: []byte(`{"csi":{"keyGeneration":7,"keyType":"aes"}}`)}
+	out, err := RenderStorage(in)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cephx, _, _ := unstructured.NestedMap(findObject(out.Objects, "CephCluster", "rook-ceph").Object, "spec", "security", "cephx")
+	want := defaultCephx()
+	want["csi"] = map[string]any{"keyRotationPolicy": "KeyGeneration", "keyGeneration": int64(7), "keepPriorKeyCountMax": int64(1), "keyType": "aes"}
+	if !reflect.DeepEqual(cephx, want) {
+		t.Fatalf("cephx %+v", cephx)
+	}
+}
+
+func adoptedGoldenCephx() map[string]any {
+	cephx := defaultCephx()
+	cephx["daemon"] = map[string]any{"keyRotationPolicy": "KeyGeneration", "keyGeneration": int64(2), "keyType": "aes256k"}
+	return cephx
 }
 
 func TestRenderStorageAdoptRejectsBrokenCephx(t *testing.T) {

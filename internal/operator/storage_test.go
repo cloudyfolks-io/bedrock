@@ -14,7 +14,7 @@ import (
 
 func storageInput(hosts []v1alpha1.Host, replicas string) AddonInput {
 	bundle := release.Bundle{}
-	bundle.Spec.Components = []v1alpha1.ReleaseComponent{{Name: "rook", Version: "v1.20.7", Image: "quay.io/ceph/ceph:v20.2.4"}}
+	bundle.Spec.Components = []v1alpha1.ReleaseComponent{{Name: "rook", Version: "1.21.0", Image: "quay.io/ceph/ceph:v20.2.4"}}
 	return AddonInput{Hosts: hosts, Settings: map[string]string{"storage.replicas": replicas}, Bundle: bundle}
 }
 
@@ -410,9 +410,10 @@ func TestRenderStorageMutesOnlyWarningsThatReplicasExplain(t *testing.T) {
 		return got
 	}
 	want := map[string]string{
-		"AUTH_INSECURE_CLIENT_KEY_TYPE": "mute",
-		"AUTH_INSECURE_KEYS_ALLOWED":    "mute",
-		"AUTH_INSECURE_KEYS_CREATABLE":  "mute",
+		"AUTH_EMERGENCY_CIPHERS_SET":    "unmute",
+		"AUTH_INSECURE_CLIENT_KEY_TYPE": "unmute",
+		"AUTH_INSECURE_KEYS_ALLOWED":    "unmute",
+		"AUTH_INSECURE_KEYS_CREATABLE":  "unmute",
 		"POOL_NO_REDUNDANCY":            "mute",
 		"TOO_FEW_OSDS":                  "mute",
 	}
@@ -425,13 +426,19 @@ func TestRenderStorageMutesOnlyWarningsThatReplicasExplain(t *testing.T) {
 	}
 }
 
-func TestRenderStorageGivesCSIKernelCompatibleKeys(t *testing.T) {
+func TestRenderStorageGivesTheAes256kCephxBlock(t *testing.T) {
 	out, err := RenderStorage(storageInput([]v1alpha1.Host{osdHost("a", "/dev/sdb")}, "1"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	keyType, _, _ := unstructured.NestedString(findObject(out.Objects, "CephCluster", "rook-ceph").Object, "spec", "security", "cephx", "csi", "keyType")
-	if keyType != "aes" {
-		t.Fatalf("csi key type %q", keyType)
+	cephx, _, _ := unstructured.NestedMap(findObject(out.Objects, "CephCluster", "rook-ceph").Object, "spec", "security", "cephx")
+	want := map[string]any{
+		"allowedCiphers": []any{"aes256k"},
+		"daemon":         map[string]any{"keyRotationPolicy": "KeyGeneration", "keyGeneration": int64(2)},
+		"csi":            map[string]any{"keyRotationPolicy": "KeyGeneration", "keyGeneration": int64(3), "keepPriorKeyCountMax": int64(1), "keyType": "aes256k"},
+		"rbdMirrorPeer":  map[string]any{"keyRotationPolicy": "KeyGeneration", "keyGeneration": int64(2), "keyType": "aes256k"},
+	}
+	if !reflect.DeepEqual(cephx, want) {
+		t.Fatalf("cephx %+v", cephx)
 	}
 }

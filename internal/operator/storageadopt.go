@@ -126,21 +126,14 @@ func adoptedCephCluster(image string, hosts []v1alpha1.Host, adopt v1alpha1.Adop
 	spec := cephClusterSpec(image, hosts, mons, replicas)
 	spec["network"] = map[string]any{"provider": "host"}
 	spec["mon"] = map[string]any{"count": mons, "allowMultiplePerNode": false}
-	spec["healthCheck"] = map[string]any{"muteHealthWarning": adoptedHealthWarnings(replicas)}
 	if adopt.Cephx != nil && len(adopt.Cephx.Raw) > 0 {
 		var cephx map[string]any
 		if err := utiljson.Unmarshal(adopt.Cephx.Raw, &cephx); err != nil {
 			return nil, fmt.Errorf("storage.adopt.cephx: %w", err)
 		}
-		spec["security"] = map[string]any{"cephx": cephx}
+		spec["security"] = map[string]any{"cephx": mergeMaps(defaultCephx(), cephx)}
 	}
 	return object("ceph.rook.io/v1", "CephCluster", storageNamespace, storageNamespace, spec), nil
-}
-
-func adoptedHealthWarnings(replicas int) map[string]any {
-	muted := mutedHealthWarnings(replicas)
-	muted["AUTH_EMERGENCY_CIPHERS_SET"] = map[string]any{"policy": "mute"}
-	return muted
 }
 
 const verificationFailed = "VerificationFailed"

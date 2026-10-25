@@ -288,6 +288,10 @@ Rules for the file:
 - Set a name in `pools` only for a kind that exists. An empty name skips that kind.
 - Copy the whole `security.cephx` block of the old CephCluster into `adopt.cephx`.
   Rook then keeps the daemon keys and does not rotate them again.
+  Bedrock renders its own `cephx` block for a new cluster: only `aes256k` keys are allowed, the daemon and `rbdMirrorPeer` generations are 2, and the CSI generation is 3.
+  The values in `adopt.cephx` replace the same fields of this block, and a field that you omit keeps the Bedrock value.
+  A `keyGeneration` must not be lower than the one in the old CephCluster. Rook refuses to decrease it.
+  Bedrock does not mute the `AUTH_*` health warnings.
 
 ## 4. Stop the old cluster
 
