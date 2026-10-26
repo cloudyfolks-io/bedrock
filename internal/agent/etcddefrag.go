@@ -38,6 +38,7 @@ const (
 	etcdStatusPath        = "/v3/maintenance/status"
 	etcdDefragmentPath    = "/v3/maintenance/defragment"
 	etcdHealthPath        = "/health"
+	etcdMemberListPath    = "/v3/cluster/member/list"
 	etcdEmptyJSONObject   = "{}"
 	etcdHealthyAnswerWord = "true"
 )
@@ -150,6 +151,43 @@ func etcdMemberHealth(ctx context.Context, c *http.Client, endpoint string) erro
 	return nil
 }
 
+func etcdMemberEndpoints(ctx context.Context, c *http.Client, endpoint string) ([]string, error) {
+	raw, err := etcdCall(ctx, c, http.MethodPost, endpoint+etcdMemberListPath)
+	if err != nil {
+		return nil, err
+	}
+	var list struct {
+		Members []struct {
+			Name       string   `json:"name"`
+			ClientURLs []string `json:"clientURLs"`
+		} `json:"members"`
+	}
+	if err := json.Unmarshal(raw, &list); err != nil {
+		return nil, err
+	}
+	endpoints := make([]string, 0, len(list.Members))
+	for _, member := range list.Members {
+		if len(member.ClientURLs) == 0 || member.ClientURLs[0] == "" {
+			return nil, fmt.Errorf("etcd member %q has no client URL and is not healthy", member.Name)
+		}
+		endpoints = append(endpoints, member.ClientURLs[0])
+	}
+	return endpoints, nil
+}
+
+func etcdAllMembersHealthy(ctx context.Context, c *http.Client, endpoint string) error {
+	endpoints, err := etcdMemberEndpoints(ctx, c, endpoint)
+	if err != nil {
+		return err
+	}
+	for _, member := range endpoints {
+		if err := etcdMemberHealth(ctx, c, member); err != nil {
+			return fmt.Errorf("defrag skipped this week, a member is not healthy: %w", err)
+		}
+	}
+	return nil
+}
+
 func defragMember(ctx context.Context, c *http.Client, endpoint string) (bool, error) {
 	if err := etcdMemberHealth(ctx, c, endpoint); err != nil {
 		return false, err
@@ -229,7 +267,11 @@ func RunEtcdDefrag(ctx context.Context, c client.Client, deps Deps) error {
 	if err != nil {
 		return err
 	}
-	did, err := defragMember(ctx, httpClient, cmp.Or(deps.EtcdEndpoint, etcdDefaultEndpoint))
+	endpoint := cmp.Or(deps.EtcdEndpoint, etcdDefaultEndpoint)
+	if err := etcdAllMembersHealthy(ctx, httpClient, endpoint); err != nil {
+		return err
+	}
+	did, err := defragMember(ctx, httpClient, endpoint)
 	if did && err == nil {
 		logLine("etcd member defragmented")
 	}

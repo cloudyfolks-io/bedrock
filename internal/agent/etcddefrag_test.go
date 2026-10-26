@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -102,6 +103,7 @@ type fakeEtcd struct {
 	healthy  []string
 	requests []string
 	failHeal bool
+	extra    []string
 }
 
 func (f *fakeEtcd) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -115,6 +117,17 @@ func (f *fakeEtcd) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		w.Write([]byte(`{"health":"true"}`))
+	case "/v3/cluster/member/list":
+		scheme := "http"
+		if r.TLS != nil {
+			scheme = "https"
+		}
+		urls := append([]string{scheme + "://" + r.Host}, f.extra...)
+		members := make([]string, len(urls))
+		for i, url := range urls {
+			members[i] = `{"ID":"` + strconv.Itoa(i+1) + `","name":"m` + strconv.Itoa(i+1) + `","clientURLs":["` + url + `"]}`
+		}
+		w.Write([]byte(`{"members":[` + strings.Join(members, ",") + `]}`))
 	case "/v3/maintenance/status":
 		w.Write([]byte(`{"header":{"member_id":"1"},"dbSize":"` + f.size + `","dbSizeInUse":"` + f.inUse + `"}`))
 	case "/v3/maintenance/defragment":
@@ -396,4 +409,36 @@ func TestRunEtcdDefragIgnoresAHostWithoutTheControlPlaneRole(t *testing.T) {
 
 func hostWithRoles(name string, roles ...string) v1alpha1.Host {
 	return v1alpha1.Host{Spec: v1alpha1.HostSpec{Roles: roles}, ObjectMeta: metav1.ObjectMeta{Name: name}}
+}
+
+func TestRunEtcdDefragSkipsTheWeekWhenAnotherMemberIsNotHealthy(t *testing.T) {
+	controllers(t)
+	down := &fakeEtcd{failHeal: true}
+	etcd := &fakeEtcd{size: "1900000000", inUse: "77000000", extra: []string{startEtcd(t, down).URL}}
+	deps := defragDeps(t, startEtcd(t, etcd), "defrag-b", sundayAt(3, 0))
+	err := runAt(t, &deps, sundayAt(3, 16))
+	if err == nil || !strings.Contains(err.Error(), "not healthy") {
+		t.Fatalf("the skip must say why: %v", err)
+	}
+	if etcd.defragments() != 0 {
+		t.Fatalf("defragmented with a sick member: %s", etcd.seen())
+	}
+	down.mu.Lock()
+	down.failHeal = false
+	down.mu.Unlock()
+	if err := runAt(t, &deps, sundayAt(3, 20)); err != nil || etcd.defragments() != 0 {
+		t.Fatalf("the slot of the week is spent: %v %s", err, etcd.seen())
+	}
+	if err := runAt(t, &deps, sundayAt(3, 16).AddDate(0, 0, 7)); err != nil || etcd.defragments() != 1 {
+		t.Fatalf("next week must run: %v %s", err, etcd.seen())
+	}
+}
+
+func TestRunEtcdDefragSkipsTheWeekWhenAMemberHasNoClientURL(t *testing.T) {
+	controllers(t)
+	etcd := &fakeEtcd{size: "1900000000", inUse: "77000000", extra: []string{""}}
+	deps := defragDeps(t, startEtcd(t, etcd), "defrag-b", sundayAt(3, 0))
+	if err := runAt(t, &deps, sundayAt(3, 16)); err == nil || etcd.defragments() != 0 {
+		t.Fatalf("a member that did not start is not healthy: %v %s", err, etcd.seen())
+	}
 }
