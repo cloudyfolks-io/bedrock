@@ -7,7 +7,6 @@ metadata:
     k8s-app: kube-dns
     kubernetes.io/name: CoreDNS
 spec:
-  replicas: 2
   strategy:
     type: RollingUpdate
     rollingUpdate:
@@ -39,13 +38,11 @@ spec:
         kubernetes.io/os: linux
       affinity:
         podAntiAffinity:
-          preferredDuringSchedulingIgnoredDuringExecution:
-            - weight: 100
-              podAffinityTerm:
-                topologyKey: kubernetes.io/hostname
-                labelSelector:
-                  matchLabels:
-                    k8s-app: kube-dns
+          requiredDuringSchedulingIgnoredDuringExecution:
+            - topologyKey: kubernetes.io/hostname
+              labelSelector:
+                matchLabels:
+                  k8s-app: kube-dns
       containers:
         - name: coredns
           image: docker.io/coredns/coredns:1.13.2
@@ -66,7 +63,8 @@ spec:
               path: /ready
               port: 8181
               scheme: HTTP
-            periodSeconds: 5
+            initialDelaySeconds: 30
+            periodSeconds: 2
             failureThreshold: 3
           livenessProbe:
             httpGet:
@@ -77,6 +75,7 @@ spec:
             periodSeconds: 10
             failureThreshold: 5
           securityContext:
+            runAsNonRoot: true
             allowPrivilegeEscalation: false
             readOnlyRootFilesystem: true
             capabilities:
@@ -109,6 +108,9 @@ metadata:
     k8s-app: kube-dns
     kubernetes.io/name: CoreDNS
     kubernetes.io/cluster-service: "true"
+  annotations:
+    prometheus.io/scrape: "true"
+    prometheus.io/port: "9153"
 spec:
   clusterIP: ${BEDROCK_DNS_IP}
   selector:
@@ -126,3 +128,17 @@ spec:
       port: 9153
       targetPort: metrics
       protocol: TCP
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: coredns
+  namespace: kube-system
+  labels:
+    k8s-app: kube-dns
+    kubernetes.io/name: CoreDNS
+spec:
+  maxUnavailable: 1
+  selector:
+    matchLabels:
+      k8s-app: kube-dns

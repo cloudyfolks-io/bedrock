@@ -72,14 +72,17 @@ func replacementOf(desired, live *unstructured.Unstructured) *unstructured.Unstr
 		}
 	}
 	replacement.SetAnnotations(annotations)
-	if live.GetKind() == "Service" {
-		keepServiceAddress(replacement, live)
+	switch live.GetKind() {
+	case "Service":
+		keepFields(replacement, live, serviceKeepsFromLive)
+	case "Deployment":
+		keepFields(replacement, live, []string{"replicas"})
 	}
 	return replacement
 }
 
-func keepServiceAddress(replacement, live *unstructured.Unstructured) {
-	for _, field := range serviceKeepsFromLive {
+func keepFields(replacement, live *unstructured.Unstructured, fields []string) {
+	for _, field := range fields {
 		if value, found, _ := unstructured.NestedFieldCopy(live.Object, "spec", field); found {
 			_ = unstructured.SetNestedField(replacement.Object, value, "spec", field)
 		}

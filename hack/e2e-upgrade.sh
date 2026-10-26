@@ -197,6 +197,7 @@ assert_cluster_dns() {
   kubectl -n kube-system rollout status deployment/coredns --timeout=60s || return 1
   grep -q -- '--disable-components[= ][^ ]*coredns' /etc/systemd/system/k0scontroller.service || return 1
   test ! -e /var/lib/k0s/manifests/coredns || return 1
+  test "$(kubectl -n kube-system get poddisruptionbudget coredns -o jsonpath='{.spec.maxUnavailable}')" = 1 || return 1
   pod_ip=$(kubectl -n kube-system get pods -l k8s-app=kube-dns -o jsonpath='{.items[0].status.podIP}') || return 1
   api_ip=$(kubectl -n default get service kubernetes -o jsonpath='{.spec.clusterIP}') || return 1
   python3 - "$pod_ip" "$api_ip" <<'PY'

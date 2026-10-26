@@ -15,6 +15,7 @@ const (
 	dnsNamespace    = "kube-system"
 	dnsName         = "coredns"
 	keyDNSUpstreams = "dns.upstreams"
+	maxDNSReplicas  = 2
 )
 
 var dnsAddon = Addon{Name: "dns", Condition: v1alpha1.ConditionDNSReady, Render: RenderDNS}
@@ -31,5 +32,10 @@ func RenderDNS(in AddonInput) (Rendered, error) {
 		return Rendered{SkipReason: "DNSNotInRelease", SkipMessage: fmt.Sprintf("ConfigMap %s/%s is not in the release", dnsNamespace, dnsName)}, nil
 	}
 	probe := Probe{GVK: deploymentGVK, Key: client.ObjectKey{Namespace: dnsNamespace, Name: dnsName}, Gate: release.DefaultGate}
-	return Rendered{Objects: []*unstructured.Unstructured{config}, Probes: []Probe{probe}}, nil
+	return Rendered{Objects: []*unstructured.Unstructured{config, dnsReplicas(len(in.Hosts))}, Probes: []Probe{probe}}, nil
+}
+
+func dnsReplicas(hosts int) *unstructured.Unstructured {
+	replicas := int64(min(max(hosts, 1), maxDNSReplicas))
+	return object("apps/v1", "Deployment", dnsNamespace, dnsName, map[string]any{"replicas": replicas})
 }

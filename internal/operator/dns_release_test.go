@@ -119,7 +119,51 @@ func TestCoreDNSReleaseDeploymentMountsTheCorefileOfTheConfigMap(t *testing.T) {
 	if policy, _, _ := unstructured.NestedString(deployment.Object, "spec", "template", "spec", "dnsPolicy"); policy != "Default" {
 		t.Fatalf("dnsPolicy %q", policy)
 	}
-	if replicas, _, _ := unstructured.NestedFieldNoCopy(deployment.Object, "spec", "replicas"); fmt.Sprint(replicas) != "2" {
-		t.Fatalf("replicas %v", replicas)
+	if _, found, _ := unstructured.NestedFieldNoCopy(deployment.Object, "spec", "replicas"); found {
+		t.Fatal("the addon owns the replicas, one for each host up to two")
+	}
+}
+
+func TestCoreDNSReleaseDeploymentSpreadsReplicasAndDropsRoot(t *testing.T) {
+	deployment := findKind(t, corednsManifest(t), "Deployment", "coredns")
+	terms, _, _ := unstructured.NestedSlice(deployment.Object, "spec", "template", "spec", "affinity", "podAntiAffinity", "requiredDuringSchedulingIgnoredDuringExecution")
+	if len(terms) != 1 || terms[0].(map[string]any)["topologyKey"] != "kubernetes.io/hostname" {
+		t.Fatalf("anti-affinity %v", terms)
+	}
+	containers, _, _ := unstructured.NestedSlice(deployment.Object, "spec", "template", "spec", "containers")
+	container := containers[0].(map[string]any)
+	if nonRoot, _, _ := unstructured.NestedBool(container, "securityContext", "runAsNonRoot"); !nonRoot {
+		t.Fatalf("securityContext %v", container["securityContext"])
+	}
+	capabilities, _, _ := unstructured.NestedStringSlice(container, "securityContext", "capabilities", "add")
+	if len(capabilities) != 1 || capabilities[0] != "NET_BIND_SERVICE" {
+		t.Fatalf("capabilities %v", capabilities)
+	}
+	delay, _, _ := unstructured.NestedFieldNoCopy(container, "readinessProbe", "initialDelaySeconds")
+	if fmt.Sprint(delay) != "30" {
+		t.Fatalf("readiness delay %v", delay)
+	}
+}
+
+func TestCoreDNSReleaseServiceCarriesTheScrapeAnnotations(t *testing.T) {
+	service := findKind(t, corednsManifest(t), "Service", "kube-dns")
+	if service.GetAnnotations()["prometheus.io/scrape"] != "true" || service.GetAnnotations()["prometheus.io/port"] != "9153" {
+		t.Fatalf("annotations %v", service.GetAnnotations())
+	}
+}
+
+func TestCoreDNSReleaseHasADisruptionBudgetNamedCoreDNS(t *testing.T) {
+	budget := findKind(t, corednsManifest(t), "PodDisruptionBudget", "coredns")
+	if budget.GetNamespace() != "kube-system" || budget.GetAPIVersion() != "policy/v1" {
+		t.Fatalf("budget %v", budget.Object)
+	}
+	if limit, _, _ := unstructured.NestedFieldNoCopy(budget.Object, "spec", "maxUnavailable"); fmt.Sprint(limit) != "1" {
+		t.Fatalf("maxUnavailable %v", limit)
+	}
+	if _, found, _ := unstructured.NestedFieldNoCopy(budget.Object, "spec", "minAvailable"); found {
+		t.Fatal("one limit only")
+	}
+	if app, _, _ := unstructured.NestedString(budget.Object, "spec", "selector", "matchLabels", "k8s-app"); app != "kube-dns" {
+		t.Fatalf("selector %v", budget.Object["spec"])
 	}
 }

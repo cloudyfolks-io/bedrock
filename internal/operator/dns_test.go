@@ -6,6 +6,7 @@ import (
 
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 
+	"github.com/cloudyfolks-io/bedrock/api/v1alpha1"
 	"github.com/cloudyfolks-io/bedrock/internal/release"
 )
 
@@ -22,11 +23,54 @@ func dnsBundle() release.Bundle {
 
 func corefileOf(t *testing.T, rendered Rendered) string {
 	t.Helper()
-	if len(rendered.Objects) != 1 {
-		t.Fatalf("objects %d, skip %q", len(rendered.Objects), rendered.SkipReason)
+	for _, obj := range rendered.Objects {
+		if obj.GetKind() == "ConfigMap" {
+			text, _, _ := unstructured.NestedString(obj.Object, "data", "Corefile")
+			return text
+		}
 	}
-	text, _, _ := unstructured.NestedString(rendered.Objects[0].Object, "data", "Corefile")
-	return text
+	t.Fatalf("no ConfigMap in %d objects, skip %q", len(rendered.Objects), rendered.SkipReason)
+	return ""
+}
+
+func replicasOf(t *testing.T, hosts int) any {
+	t.Helper()
+	list := make([]v1alpha1.Host, hosts)
+	rendered, err := RenderDNS(AddonInput{Bundle: dnsBundle(), Hosts: list, Settings: map[string]string{}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, obj := range rendered.Objects {
+		if obj.GetKind() == "Deployment" && obj.GetName() == "coredns" && obj.GetNamespace() == "kube-system" {
+			replicas, _, _ := unstructured.NestedFieldNoCopy(obj.Object, "spec", "replicas")
+			return replicas
+		}
+	}
+	t.Fatalf("no Deployment in %d objects", len(rendered.Objects))
+	return nil
+}
+
+func TestRenderDNSRunsOneReplicaForEachHostUpToTwo(t *testing.T) {
+	cases := map[int]int64{0: 1, 1: 1, 2: 2, 3: 2, 9: 2}
+	for hosts, want := range cases {
+		if got := replicasOf(t, hosts); got != want {
+			t.Errorf("%d hosts: replicas %v, want %d", hosts, got, want)
+		}
+	}
+}
+
+func TestRenderDNSSetsOnlyTheReplicasOfTheDeployment(t *testing.T) {
+	rendered, err := RenderDNS(AddonInput{Bundle: dnsBundle(), Hosts: make([]v1alpha1.Host, 2), Settings: map[string]string{}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, obj := range rendered.Objects {
+		if obj.GetKind() == "Deployment" {
+			if _, found, _ := unstructured.NestedMap(obj.Object, "spec", "template"); found || len(obj.Object["spec"].(map[string]any)) != 1 {
+				t.Fatalf("the release owns every other field: %v", obj.Object)
+			}
+		}
+	}
 }
 
 func TestRenderDNSForwardsToTheNodeResolvConfByDefault(t *testing.T) {

@@ -2,6 +2,7 @@ package operator
 
 import (
 	"context"
+	"fmt"
 	"strings"
 	"testing"
 
@@ -61,7 +62,7 @@ metadata:
   labels: {k8s-app: kube-dns, k0s.k0sproject.io/stack: coredns}
   annotations: {k0s.k0sproject.io/stack-checksum: sum-deploy, k0s.k0sproject.io/last-applied-configuration: "{}"}
 spec:
-  replicas: 1
+  replicas: 3
   selector:
     matchLabels: {k8s-app: kube-dns}
   template:
@@ -74,9 +75,27 @@ spec:
             - topologyKey: kubernetes.io/hostname
               labelSelector:
                 matchLabels: {k8s-app: kube-dns}
+      topologySpreadConstraints:
+        - topologyKey: topology.kubernetes.io/zone
+          maxSkew: 1
+          whenUnsatisfiable: ScheduleAnyway
+          labelSelector:
+            matchLabels: {k8s-app: kube-dns}
       containers:
         - name: coredns
           image: registry.k8s.io/coredns/coredns:v1.12.0
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: coredns
+  namespace: kube-system
+  labels: {k8s-app: kube-dns, k0s.k0sproject.io/stack: coredns}
+  annotations: {k0s.k0sproject.io/stack-checksum: sum-pdb}
+spec:
+  minAvailable: 50%
+  selector:
+    matchLabels: {k8s-app: kube-dns}
 ---
 apiVersion: v1
 kind: Service
@@ -160,7 +179,7 @@ func TestTakeoverReplacesTheK0sObjectsInPlace(t *testing.T) {
 	if image := containers[0].(map[string]any)["image"]; image != "docker.io/coredns/coredns:1.13.2" {
 		t.Errorf("image %v", image)
 	}
-	if _, found, _ := unstructured.NestedFieldNoCopy(deployment.Object, "spec", "template", "spec", "affinity", "podAntiAffinity", "requiredDuringSchedulingIgnoredDuringExecution"); found {
+	if _, found, _ := unstructured.NestedFieldNoCopy(deployment.Object, "spec", "template", "spec", "topologySpreadConstraints"); found {
 		t.Error("a field of k0s that the release does not set must go")
 	}
 	service = liveObject(t, c, "Service", "v1", "kube-system", "kube-dns")
@@ -301,5 +320,42 @@ func TestTakeoverDoesNotMarkTheClusterForOtherGroups(t *testing.T) {
 	}
 	if takeoverMark(t, c) != "" {
 		t.Fatal("only the coredns group marks the take over")
+	}
+}
+
+func TestTakeoverKeepsTheReplicasThatTheAddonOwns(t *testing.T) {
+	c, _ := StartTestEnv(t)
+	createCluster(t, c)
+	createK0sCoreDNS(t, c)
+	service := liveObject(t, c, "Service", "v1", "kube-system", "kube-dns")
+	dnsIP, _, _ := unstructured.NestedString(service.Object, "spec", "clusterIP")
+	if err := adoptK0sCoreDNS(c)(context.Background(), releaseCoreDNSGroup(t, dnsIP)); err != nil {
+		t.Fatal(err)
+	}
+	deployment := liveObject(t, c, "Deployment", "apps/v1", "kube-system", "coredns")
+	if replicas, _, _ := unstructured.NestedFieldNoCopy(deployment.Object, "spec", "replicas"); fmt.Sprint(replicas) != "3" {
+		t.Fatalf("replicas %v: a replace without them would drop the cluster to one", replicas)
+	}
+}
+
+func TestTakeoverReplacesTheK0sDisruptionBudget(t *testing.T) {
+	c, _ := StartTestEnv(t)
+	createCluster(t, c)
+	createK0sCoreDNS(t, c)
+	service := liveObject(t, c, "Service", "v1", "kube-system", "kube-dns")
+	dnsIP, _, _ := unstructured.NestedString(service.Object, "spec", "clusterIP")
+	before := string(liveObject(t, c, "PodDisruptionBudget", "policy/v1", "kube-system", "coredns").GetUID())
+	if err := adoptK0sCoreDNS(c)(context.Background(), releaseCoreDNSGroup(t, dnsIP)); err != nil {
+		t.Fatal(err)
+	}
+	budget := liveObject(t, c, "PodDisruptionBudget", "policy/v1", "kube-system", "coredns")
+	if string(budget.GetUID()) != before || k0sStackLabelOf(budget) != "" {
+		t.Fatalf("budget %s label %q", budget.GetUID(), k0sStackLabelOf(budget))
+	}
+	if limit, _, _ := unstructured.NestedFieldNoCopy(budget.Object, "spec", "maxUnavailable"); fmt.Sprint(limit) != "1" {
+		t.Fatalf("maxUnavailable %v", limit)
+	}
+	if _, found, _ := unstructured.NestedFieldNoCopy(budget.Object, "spec", "minAvailable"); found {
+		t.Fatal("the k0s limit must go")
 	}
 }
