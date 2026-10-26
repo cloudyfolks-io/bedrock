@@ -363,7 +363,7 @@ provider_underlay_up() {
   ip link set bdrsvc0 up
   ip link set bdrsvc0p netns bdrext
   ip -n bdrext link set bdrsvc0p up
-  ip -n bdrext addr add 203.0.113.250/24 dev bdrsvc0p
+  ip -n bdrext addr add 203.0.112.250/22 dev bdrsvc0p
   underlay_is_ready
 }
 
@@ -377,7 +377,7 @@ provider_network_entry() {
 }
 
 services_network_entry() {
-  echo "{name: services, interface: bdrsvc0, cidr: 203.0.113.0/24, gateway: 203.0.113.1, excludeIPs: [\"203.0.113.240..203.0.113.254\"], role: services}"
+  echo "{name: services, interface: bdrsvc0, cidr: 203.0.112.0/22, gateway: 203.0.112.1, excludeIPs: [\"203.0.115.240..203.0.115.254\"], role: services}"
 }
 
 docs_restore_script() {
