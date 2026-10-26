@@ -71,7 +71,7 @@ func appendMissing(list []string, item string) []string {
 	return append(list, item)
 }
 
-func adoptK0sImages(root string, lists map[string][]string, fallbackVersion string) error {
+func adoptK0sImages(root string, lists map[string][]string, legacyVersion string) error {
 	entries, err := os.ReadDir(filepath.Join(root, k0sImagesDir))
 	if errors.Is(err, fs.ErrNotExist) {
 		return nil
@@ -89,7 +89,13 @@ func adoptK0sImages(root string, lists map[string][]string, fallbackVersion stri
 		if isArchivedFile(source, archived) {
 			continue
 		}
-		targets := filingTargets(entry.Name(), lists, fallbackVersion)
+		if entry.Name() == airgapFile && archivedAirgapEqual(root, source) {
+			if err := os.Remove(source); err != nil {
+				return err
+			}
+			continue
+		}
+		targets := filingTargets(entry.Name(), lists, legacyVersion)
 		if len(targets) == 0 {
 			logLine(fmt.Sprintf("image tarball %s is not in any release image list, k0s keeps importing it", entry.Name()))
 			continue
@@ -101,14 +107,39 @@ func adoptK0sImages(root string, lists map[string][]string, fallbackVersion stri
 	return nil
 }
 
+func archivedAirgapEqual(root, source string) bool {
+	versions, _ := os.ReadDir(filepath.Join(root, archiveDir))
+	return slices.ContainsFunc(versions, func(version os.DirEntry) bool {
+		same, err := sameContent(source, filepath.Join(archiveVersionDir(root, version.Name()), airgapFile))
+		return err == nil && same
+	})
+}
+
+func legacyAirgapVersion(ctx context.Context, c client.Reader, deps Deps) string {
+	var upgrades v1alpha1.NodeUpgradeList
+	if err := c.List(ctx, &upgrades); err != nil {
+		return ""
+	}
+	legacy := ""
+	for _, upgrade := range upgrades.Items {
+		if upgrade.Spec.Node == deps.Node && upgrade.Spec.Version == deps.Version && upgrade.Spec.From != deps.Version {
+			legacy = upgrade.Spec.From
+		}
+	}
+	return legacy
+}
+
 type filingTarget struct{ version, name string }
 
-func filingTargets(file string, lists map[string][]string, fallbackVersion string) []filingTarget {
+func filingTargets(file string, lists map[string][]string, legacyVersion string) []filingTarget {
 	if match := versionedAirgapName.FindStringSubmatch(file); match != nil {
 		return []filingTarget{{match[1], airgapFile}}
 	}
 	if file == airgapFile {
-		return []filingTarget{{fallbackVersion, airgapFile}}
+		if legacyVersion == "" {
+			return nil
+		}
+		return []filingTarget{{legacyVersion, airgapFile}}
 	}
 	var targets []filingTarget
 	for version, files := range lists {
