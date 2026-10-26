@@ -149,7 +149,7 @@ assert_bundle_images_present() {
 assert_k0s_binary_matches_release() {
   local actual expected
   actual=$(sha256sum /usr/local/bin/k0s | awk '{print "sha256:"$1}')
-  expected=$(awk -v arch="$arch:" '$1 == arch {print $2}' "$release_dir/release.yaml")
+  expected=$(awk -v arch="$arch:" '/^k0sChecksums:/ {inside = 1; next} /^[^ ]/ {inside = 0} inside && $1 == arch {print $2}' "$release_dir/release.yaml")
   [ "$actual" = "$expected" ] && return 0
   echo "k0s binary checksum mismatch: installed $actual, $release_dir/release.yaml has '$expected' for $arch" >&2
   return 1
