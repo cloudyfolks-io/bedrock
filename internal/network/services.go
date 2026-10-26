@@ -65,9 +65,6 @@ func MissingServicesSettings(c Config) []string {
 	case found && !identityExcluded(s.IdentityRange, pool):
 		missing = append(missing, keyServicesIdentityRange+"="+s.IdentityRange+" (not inside one excludeIPs entry of the provider network)")
 	}
-	if cfg := c.DatabaseVIPRange; cfg != "" && found && !insidePool(cfg, pool) {
-		missing = append(missing, keyDatabaseVIPRange+"="+cfg+" (not inside the cidr of the services provider network)")
-	}
 	return missing
 }
 
@@ -159,10 +156,8 @@ func servicesACLs(cfg Config, pn v1alpha1.ProviderNetworkSpec) ([]fabric.ACL, er
 		vips = netip.PrefixFrom(pool.Addr(), servicesVIPPrefixBits)
 	}
 	exempt := []string{vips.String()}
-	for _, candidate := range []string{cfg.DatabaseVIPRange} {
-		if candidate != "" && insidePool(candidate, pn) {
-			exempt = append(exempt, candidate)
-		}
+	if cfg.DatabaseVIPRange != "" && insidePool(cfg.DatabaseVIPRange, pn) {
+		exempt = append(exempt, cfg.DatabaseVIPRange)
 	}
 	match := fmt.Sprintf("%s && %s", exemptClause("ip4.src", pool.String(), exempt), exemptClause("ip4.dst", pool.String(), exempt))
 	return []fabric.ACL{{Direction: servicesACLDirection, Priority: servicesACLPriority, Match: match, Action: servicesACLAction}}, nil

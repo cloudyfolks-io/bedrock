@@ -44,14 +44,13 @@ func TestServicesACLIgnoresARangeOutsideThePool(t *testing.T) {
 	}
 }
 
-func TestMissingServicesSettingsRefusesADatabaseRangeOutsideThePool(t *testing.T) {
-	cfg := configOf(t, servicesValues(servicesL2Pools, map[string]string{"database.vip-range": "10.20.0.0/24"}))
-	missing := MissingServicesSettings(cfg)
-	if len(missing) != 1 || !strings.Contains(missing[0], "database.vip-range=10.20.0.0/24") {
+func TestServicesPlaneStaysConfiguredWithADatabaseRangeOutsideThePool(t *testing.T) {
+	values := servicesValues(servicesL2Pools, map[string]string{"database.vip-range": "10.20.0.0/24"})
+	if missing := MissingServicesSettings(configOf(t, values)); len(missing) != 0 {
 		t.Fatalf("missing %v", missing)
 	}
-	inside := configOf(t, servicesValues(servicesL2Pools, map[string]string{"database.vip-range": "100.66.16.0/21"}))
-	if missing := MissingServicesSettings(inside); len(missing) != 0 {
-		t.Fatalf("missing %v", missing)
+	want := "ip4.src == 100.66.0.0/15 && ip4.src != 100.66.0.0/24 && ip4.dst == 100.66.0.0/15 && ip4.dst != 100.66.0.0/24"
+	if got := servicesACLMatch(t, values); got != want {
+		t.Fatalf("match %s", got)
 	}
 }
