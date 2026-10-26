@@ -222,6 +222,13 @@ func RunInit(ctx context.Context, args []string, deps InitDeps, stdout, stderr i
 		}
 	}
 
+	if cfg.Spec.Network.ManagementCIDR == "" {
+		cfg.Spec.Network.ManagementCIDR, err = host.InterfaceCIDR(ctx, deps.Exec, cfg.Spec.Network.ManagementInterface)
+		if err != nil {
+			return fail(stderr, fmt.Errorf("management network: %w", err))
+		}
+	}
+
 	step(stdout, "vip %s on %s", cfg.Spec.API.VIP, cfg.Spec.Network.ManagementInterface)
 	if err := host.EnsureAddress(ctx, deps.Exec, cfg.Spec.API.VIP, cfg.Spec.Network.ManagementInterface); err != nil {
 		return fail(stderr, err)
@@ -241,12 +248,6 @@ func RunInit(ctx context.Context, args []string, deps InitDeps, stdout, stderr i
 		}
 	}
 
-	if cfg.Spec.Network.ManagementCIDR == "" {
-		cfg.Spec.Network.ManagementCIDR, err = host.InterfaceCIDR(ctx, deps.Exec, cfg.Spec.Network.ManagementInterface)
-		if err != nil {
-			return fail(stderr, fmt.Errorf("management network: %w", err))
-		}
-	}
 	step(stdout, "writing k0s.yaml")
 	var encryptionArgs map[string]string
 	if encryptionFile != nil {

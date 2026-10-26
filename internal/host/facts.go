@@ -195,6 +195,8 @@ func primaryAddress(ctx context.Context, e Exec, iface string) (string, error) {
 	return "", fmt.Errorf("no IPv4 address on %s", iface)
 }
 
+const hostPrefixLen = 32
+
 func InterfaceCIDR(ctx context.Context, e Exec, iface string) (string, error) {
 	out, err := e.Run(ctx, "ip", "-json", "-4", "addr", "show", "dev", iface)
 	if err != nil {
@@ -207,18 +209,15 @@ func InterfaceCIDR(ctx context.Context, e Exec, iface string) (string, error) {
 	var found []addrInfo
 	for _, entry := range entries {
 		for _, info := range entry.AddrInfo {
-			if info.Family == "inet" && info.Local != "" {
+			if info.Family == "inet" && info.Local != "" && info.PrefixLen != hostPrefixLen {
 				found = append(found, info)
 			}
 		}
 	}
-	switch len(found) {
-	case 0:
-		return "", fmt.Errorf("no IPv4 address on %s", iface)
-	case 1:
+	if len(found) == 1 {
 		return maskedAddress(found[0], iface)
 	}
-	return "", fmt.Errorf("%s has %d IPv4 addresses and the management network is ambiguous: set managementCIDR", iface, len(found))
+	return "", fmt.Errorf("%s has %d IPv4 networks and the management network is ambiguous: set managementCIDR", iface, len(found))
 }
 
 func maskedAddress(info addrInfo, iface string) (string, error) {
