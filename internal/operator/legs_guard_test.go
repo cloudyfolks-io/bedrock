@@ -107,3 +107,43 @@ func TestTenantLegsReturnGuardsAgain(t *testing.T) {
 		t.Fatalf("condition %+v", got)
 	}
 }
+
+func managedHost(name string, applied metav1.ConditionStatus) *v1alpha1.Host {
+	return &v1alpha1.Host{
+		ObjectMeta: metav1.ObjectMeta{Name: name},
+		Spec:       v1alpha1.HostSpec{Management: v1alpha1.ManagementSpec{Enabled: true}},
+		Status:     v1alpha1.HostStatus{Conditions: []metav1.Condition{{Type: v1alpha1.ConditionManagementApplied, Status: applied, Reason: "r"}}},
+	}
+}
+
+func TestTenantLegsGuardedNeedsEveryHostToApplyTheGuard(t *testing.T) {
+	r, c, _ := legsGuardReconciler(t)
+	ctx := context.Background()
+	for _, host := range []*v1alpha1.Host{managedHost("node-a", metav1.ConditionTrue), managedHost("node-b", metav1.ConditionFalse)} {
+		if err := c.Create(ctx, host); err != nil {
+			t.Fatal(err)
+		}
+	}
+	setTenantLegs(t, c, []v1alpha1.TenantLegSpec{{Interface: "br-public.30"}})
+	if err := r.reconcileTenantLegs(ctx); err != nil {
+		t.Fatal(err)
+	}
+	got := legsGuardedCondition(t, c)
+	if got == nil || got.Status != metav1.ConditionFalse || got.Reason != "HostsNotGuarded" || !strings.Contains(got.Message, "node-b") || strings.Contains(got.Message, "node-a") {
+		t.Fatalf("condition %+v", got)
+	}
+	var node v1alpha1.Host
+	if err := c.Get(ctx, client.ObjectKey{Name: "node-b"}, &node); err != nil {
+		t.Fatal(err)
+	}
+	node.Status.Conditions[0].Status = metav1.ConditionTrue
+	if err := c.Update(ctx, &node); err != nil {
+		t.Fatal(err)
+	}
+	if err := r.reconcileTenantLegs(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if got := legsGuardedCondition(t, c); got == nil || got.Status != metav1.ConditionTrue || got.Reason != "Guarded" {
+		t.Fatalf("condition %+v", got)
+	}
+}
