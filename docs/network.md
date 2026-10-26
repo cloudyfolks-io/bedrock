@@ -716,7 +716,7 @@ The agent needs the `nftables` package, and the operator adds it to the packages
 
 A host that came from the legacy Ansible roles already has the table `inet tenant_legs` and the unit `tenant-legs.service`.
 The two tables do not conflict, because each one has its own name and both only drop.
-After the cutover, remove the legacy unit by hand on every host: `systemctl disable --now tenant-legs.service`, then delete `/etc/nftables.d/tenant-legs.nft` and the unit file.
+Remove the legacy unit by hand only after `TenantLegsGuarded` is `True` and the counters of `bedrock_legs` go up on every host: `systemctl disable --now tenant-legs.service`, then delete `/etc/nftables.d/tenant-legs.nft` and the unit file.
 Bedrock does not remove them.
 
 ### NodePort scope
