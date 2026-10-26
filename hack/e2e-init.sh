@@ -129,8 +129,8 @@ if [ -n "${BUNDLE:-}" ]; then
   printf '[plugins."io.containerd.cri.v1.images".registry]\nconfig_path = "/etc/k0s/containerd.d/certs.d"\n' > /etc/k0s/containerd.d/cri-registry.toml
   printf 'server = "https://127.0.0.1:1"\n' > /etc/k0s/containerd.d/certs.d/_default/hosts.toml
   run_init "$bin" init -f "$workdir/cluster.yaml" --bundle "$BUNDLE" --timeout 45m
-  test -f /var/lib/k0s/images/k0s-airgap.tar
-  test "$(ls /var/lib/k0s/images/*.tar | wc -l)" -ge 3
+  retry_until 120 compgen -G "/var/lib/bedrock/images/$version/*/k0s-airgap.tar"
+  test "$(ls /var/lib/bedrock/images/$version/*/*.tar | wc -l)" -ge 3
   sha256sum /usr/local/bin/k0s | awk '{print "sha256:"$1}' | grep -qx "$(awk -v arch="$arch:" '$1 == arch {print $2}' "$release_dir/release.yaml")"
 else
   mkdir -p "$workdir/preload"
