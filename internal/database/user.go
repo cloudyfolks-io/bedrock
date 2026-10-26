@@ -356,7 +356,11 @@ func (r *UserReconciler) syncEngine(ctx context.Context, in userSync) (accessOut
 		}
 		return readyOutcome(), r.recordCreated(ctx, user, desired, held)
 	}
-	if in.State.Password != "" && user.Status.PasswordDigest != passwordDigest(*user, in.State.Password) {
+	if user.Status.PasswordDigest == "" {
+		if err := recordPasswordSynced(ctx, r.Client, user, in.State.Password); err != nil {
+			return accessOutcome{}, err
+		}
+	} else if in.State.Password != "" && user.Status.PasswordDigest != passwordDigest(*user, in.State.Password) {
 		if err := resetAccountPassword(ctx, in.Access, spec.Name, spec.Password); err != nil {
 			return accessOutcome{}, err
 		}

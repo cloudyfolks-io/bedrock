@@ -110,3 +110,24 @@ func TestAManagedUserAndSchemaKeepWorkingWithoutTheAnnotation(t *testing.T) {
 		t.Fatalf("schema reason %s status %+v", reason, schema.Status)
 	}
 }
+
+func TestAnUpgradeSeedsThePasswordDigestWithoutAnEngineCall(t *testing.T) {
+	for _, kind := range []string{v1alpha1.DatabaseEngineMySQL, v1alpha1.DatabaseEngineValkey} {
+		c, fake := startEnv(t), &fakeEngine{}
+		db := readyEngineDatabase(t, c, kind)
+		user := newUser(t, c, db, "alice", func(u *v1alpha1.DatabaseUser) {
+			if kind == v1alpha1.DatabaseEngineValkey {
+				u.Spec.KeyPrefix = "p:"
+			}
+		})
+		reconcileUserOf(t, c, fake, kind, user)
+		password := string(getSecret(t, c, db.Namespace, "alice-db").Data["password"])
+		reloadUser(t, c, user).Status.PasswordDigest = ""
+		must(t, c.Status().Update(context.Background(), user))
+		fake.reset()
+		reconcileUserOf(t, c, fake, kind, user)
+		if len(fake.scripts) != 0 || !passwordSynced(t, c, user, password) {
+			t.Fatalf("%s: scripts %v digest %q", kind, fake.scripts, user.Status.PasswordDigest)
+		}
+	}
+}
