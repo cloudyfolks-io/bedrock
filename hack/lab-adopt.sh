@@ -74,6 +74,9 @@ osd_map() { ceph_op osd tree -f json | jq -r '. as $t | [$t.nodes[] | select(.ty
 crush_hosts() { ceph_op osd tree -f json | jq -r '[.nodes[] | select(.type == "host") | .name] | sort | join(",")'; }
 pool_names() { ceph_op osd pool ls -f json | jq -r 'sort | join(",")'; }
 pool_sizes() { ceph_op osd pool ls detail -f json | jq -r '[.[] | "\(.pool_name):\(.size)"] | sort | join(",")'; }
+osd_keys_sha() { ceph_op auth ls -f json | jq -r '.auth_dump[] | select(.entity | startswith("osd.")) | "\(.entity) \(.key)"' | sort | sha_of; }
+cephx_old_spec() { kubectl -n rook-ceph get cephcluster rook-ceph -o json | jq -c '.spec.security.cephx | {daemonGeneration: .daemon.keyGeneration, csiGeneration: .csi.keyGeneration, csiKeep: .csi.keepPriorKeyCountMax}'; }
+cephx_generations() { kubectl -n rook-ceph get cephcluster rook-ceph -o json | jq -c '.status.cephx | map_values(.keyGeneration)'; }
 health_ok() { ceph_op status -f json | jq -e '.health.status == "HEALTH_OK"' >/dev/null; }
 diagnose() { kubectl get pods -A -o wide || true; ceph_op status || true; }
 phase_ready() {
@@ -262,6 +265,14 @@ echo "STATE:OLD_POOLS=$pools"
 flags=$(ceph_op fs get filesystem-data -f json | jq -c '.mdsmap.flags_state')
 echo "flags_state of the old CephFS: $flags"
 printf '%s' "$flags" | jq -e 'has("joinable") and has("refuse_client_session")' >/dev/null
+spec=$(cephx_old_spec)
+echo "STATE:OLD_CEPHX_SPEC=$spec"
+printf '%s' "$spec" | jq -e 'all(.[]; type == "number")' >/dev/null
+generations=$(cephx_generations)
+echo "STATE:OLD_CEPHX_GENERATIONS=$generations"
+printf '%s' "$generations" | jq -e 'type == "object" and length > 0' >/dev/null
+keys=$(osd_keys_sha)
+echo "STATE:OLD_OSD_KEYS_SHA=$keys"
 SCRIPT
 }
 
@@ -760,10 +771,180 @@ check_operator_restart() {
   vm_run 1 "$(script_operator_restart)"
 }
 
+script_cephx_spec() {
+  cat <<'SCRIPT'
+spec=$(kubectl -n rook-ceph get cephcluster rook-ceph -o json)
+echo "info: spec.security.cephx $(jq -c .spec.security.cephx <<<"$spec")"
+echo "info: spec.healthCheck.muteHealthWarning $(jq -c .spec.healthCheck.muteHealthWarning <<<"$spec")"
+jq -e --argjson old "$OLD_SPEC" '.spec.security.cephx as $c | $c.allowedCiphers == ["aes256k"] and $c.csi.keyType == "aes256k" and $c.csi.keyGeneration == $old.csiGeneration and $c.csi.keepPriorKeyCountMax == $old.csiKeep and $c.daemon.keyGeneration == $old.daemonGeneration' <<<"$spec" >/dev/null || {
+  echo "the CephCluster cephx spec is not allowedCiphers [aes256k] with the generations of the old cluster: $OLD_SPEC"
+  exit 1
+}
+jq -e '(.spec.healthCheck.muteHealthWarning // {}) as $m | all(["AUTH_EMERGENCY_CIPHERS_SET", "AUTH_INSECURE_CLIENT_KEY_TYPE", "AUTH_INSECURE_KEYS_ALLOWED", "AUTH_INSECURE_KEYS_CREATABLE"][]; . as $n | ($m[$n].policy // "unmute") == "unmute")' <<<"$spec" >/dev/null || {
+  echo "an AUTH_ health warning is muted"
+  exit 1
+}
+SCRIPT
+}
+
+check_cephx_spec() {
+  vm_run 1 "$(script_cephx_spec)" OLD_SPEC="$OLD_CEPHX_SPEC"
+}
+
+check_cephx_condition() {
+  expect_equal "True/Restricted" "$(vm_run 1 "echo \"\$(condition_status cluster cluster StorageCephxRestricted)/\$(condition_reason cluster cluster StorageCephxRestricted)\"")" "condition StorageCephxRestricted"
+}
+
+script_no_auth_warning() {
+  cat <<'SCRIPT'
+no_auth_check() { ceph_op health detail -f json | jq -e '[(.checks // {}) | keys[] | select(startswith("AUTH_"))] | length == 0'; }
+retry_until 900 no_auth_check || { ceph_op health detail; exit 1; }
+SCRIPT
+}
+
+check_no_auth_warning() {
+  vm_run 1 "$(script_no_auth_warning)"
+}
+
+script_no_rotation() {
+  cat <<'SCRIPT'
+new=$(cephx_generations)
+echo "info: key generations before $OLD_GENERATIONS, after $new"
+jq -ne --argjson old "$OLD_GENERATIONS" --argjson new "$new" '$new != null and ($old | to_entries | all(.value == $new[.key]))' >/dev/null || {
+  echo "a key generation changed during the adoption"
+  exit 1
+}
+[ "$(osd_keys_sha)" = "$OLD_KEYS_SHA" ] || {
+  echo "an OSD key differs from the old cluster"
+  exit 1
+}
+SCRIPT
+}
+
+check_no_key_rotation() {
+  vm_run 1 "$(script_no_rotation)" OLD_GENERATIONS="$OLD_CEPHX_GENERATIONS" OLD_KEYS_SHA="$OLD_OSD_KEYS_SHA"
+}
+
+script_cephx_workload() {
+  cat <<'SCRIPT'
+cleanup() { kubectl -n default delete pod/lab-cephx pvc/lab-cephx-rbd pvc/lab-cephx-fs --ignore-not-found --wait=false >/dev/null 2>&1 || true; }
+trap cleanup EXIT
+image=$(kubectl -n rook-ceph get cephcluster rook-ceph -o jsonpath='{.spec.cephVersion.image}')
+sed "s|__IMAGE__|$image|" <<'MANIFEST' | kubectl -n default apply -f -
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: lab-cephx-rbd
+spec:
+  accessModes: [ReadWriteOnce]
+  storageClassName: block
+  resources:
+    requests:
+      storage: 1Gi
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: lab-cephx-fs
+spec:
+  accessModes: [ReadWriteMany]
+  storageClassName: filesystem
+  resources:
+    requests:
+      storage: 1Gi
+---
+apiVersion: v1
+kind: Pod
+metadata:
+  name: lab-cephx
+spec:
+  restartPolicy: Never
+  containers:
+    - name: rw
+      image: __IMAGE__
+      imagePullPolicy: IfNotPresent
+      command:
+        - sh
+        - -c
+        - |
+          set -e
+          awk '$2 == "/rbd" && $1 ~ "^/dev/rbd" {found = 1} END {exit !found}' /proc/mounts
+          awk '$2 == "/fs" && $3 == "ceph" {found = 1} END {exit !found}' /proc/mounts
+          for dir in /rbd /fs; do
+            printf lab-cephx-ok >"$dir/probe"
+            sync
+            test "$(cat "$dir/probe")" = lab-cephx-ok
+          done
+          echo LAB-CEPHX-DONE
+      volumeMounts:
+        - name: rbd
+          mountPath: /rbd
+        - name: fs
+          mountPath: /fs
+  volumes:
+    - name: rbd
+      persistentVolumeClaim:
+        claimName: lab-cephx-rbd
+    - name: fs
+      persistentVolumeClaim:
+        claimName: lab-cephx-fs
+MANIFEST
+start=$SECONDS
+pod_done() { [ "$(kubectl -n default get pod lab-cephx -o jsonpath='{.status.phase}')" = Succeeded ]; }
+pod_failed() { [ "$(kubectl -n default get pod lab-cephx -o jsonpath='{.status.phase}')" = Failed ]; }
+until pod_done; do
+  if pod_failed || [ "$SECONDS" -ge "$((start + 900))" ]; then
+    kubectl -n default get pvc,pod -o wide
+    kubectl -n default describe pod lab-cephx | tail -n 30
+    kubectl -n default logs lab-cephx || true
+    echo "the pod did not mount both volumes, write and read"
+    exit 1
+  fi
+  sleep 3
+done
+node=$(kubectl -n default get pod lab-cephx -o jsonpath='{.spec.nodeName}')
+echo "info: pod ran on $node, kernel $(kubectl get node "$node" -o jsonpath='{.status.nodeInfo.kernelVersion}')"
+echo "info: pvc phases $(kubectl -n default get pvc lab-cephx-rbd lab-cephx-fs -o jsonpath='{range .items[*]}{.metadata.name}={.status.phase} {end}')"
+kubectl -n default logs lab-cephx | grep -qx LAB-CEPHX-DONE
+SCRIPT
+}
+
+check_cephx_workload() {
+  vm_run 1 "$(script_cephx_workload)"
+}
+
+script_dump_keys() {
+  cat <<'SCRIPT'
+out=$(op_exec ceph auth dump-keys --format=json --connect-timeout=10 "$rook_conf") || {
+  echo "ceph auth dump-keys failed in the Rook operator pod"
+  exit 1
+}
+printf '%s' "$out" | jq -e . >/dev/null || {
+  echo "ceph auth dump-keys did not print JSON"
+  exit 1
+}
+echo "info: dump-keys top-level type $(printf '%s' "$out" | jq -r type), strings other than the cipher names are masked"
+echo "info: dump-keys shape $(printf '%s' "$out" | jq -c 'walk(if type == "string" and . != "aes" and . != "aes256k" then "<str>" else . end)' | cut -c1-600)"
+echo "info: dump-keys cipher strings $(printf '%s' "$out" | jq -c '[.. | strings | select(. == "aes" or . == "aes256k")] | group_by(.) | map({(.[0]): length}) | add')"
+printf '%s' "$out" | jq -e '[.. | strings] | contains(["aes256k"])' >/dev/null || {
+  echo "the stage B parser needs the string aes256k in ceph auth dump-keys, and the output has none"
+  exit 1
+}
+printf '%s' "$out" | jq -e '[.. | strings] | contains(["aes"]) | not' >/dev/null || {
+  echo "the stage B parser rejects the string aes in ceph auth dump-keys, and the output has it"
+  exit 1
+}
+SCRIPT
+}
+
+check_dump_keys() {
+  vm_run 1 "$(script_dump_keys)"
+}
+
 stage_check() {
   local failed=0 entry
   state_load
-  require_state FSID MON_IDS OSD_MAP IMG_SHA_1 IMG_SHA_2 FS_SHA S3_SHA_1 S3_SHA_2
+  require_state FSID MON_IDS OSD_MAP IMG_SHA_1 IMG_SHA_2 FS_SHA S3_SHA_1 S3_SHA_2 OLD_CEPHX_SPEC OLD_CEPHX_GENERATIONS OLD_OSD_KEYS_SHA
   for entry in \
     "fsid is unchanged|check_fsid" \
     "monitor ids are unchanged|check_monitor_ids" \
@@ -787,7 +968,13 @@ stage_check() {
     "all daemons run the bundle Ceph release|check_ceph_release" \
     "all PGs active+clean and nothing misplaced|check_pgs_clean" \
     "no key material in cluster or logs|check_no_key_material" \
-    "operator restart keeps the adoption|check_operator_restart"; do
+    "operator restart keeps the adoption|check_operator_restart" \
+    "CephCluster restricts ciphers to aes256k and keeps the old generations|check_cephx_spec" \
+    "condition StorageCephxRestricted is Restricted|check_cephx_condition" \
+    "no AUTH_ health warning|check_no_auth_warning" \
+    "adoption rotated no key|check_no_key_rotation" \
+    "RBD and CephFS volumes mount, write and read|check_cephx_workload" \
+    "ceph auth dump-keys passes the stage B parser|check_dump_keys"; do
     verdict "${entry%|*}" "${entry#*|}" || failed=1
   done
   if [ "$failed" -eq 1 ]; then
