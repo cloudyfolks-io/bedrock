@@ -22,12 +22,32 @@ func gatewayNodes() map[string]string {
 	return map[string]string{fabric.LabelExternalGateway: "true"}
 }
 
-func providerObjects(cfg Config, pn v1alpha1.ProviderNetworkSpec) []*unstructured.Unstructured {
-	return []*unstructured.Unstructured{
-		fabric.ProviderNetwork(underlayMeta("ProviderNetwork", pn.Name), pn.Interface, gatewayNodes()),
-		fabric.Vlan(underlayMeta("Vlan", pn.Name), int(pn.Vlan), pn.Name),
-		externalVlanSubnet(cfg, pn),
+type vlanKey struct {
+	iface string
+	id    int32
+}
+
+func providerObjects(cfg Config, pns []v1alpha1.ProviderNetworkSpec) []*unstructured.Unstructured {
+	var objects []*unstructured.Unstructured
+	carriers := map[string]string{}
+	vlans := map[vlanKey]string{}
+	for _, pn := range pns {
+		carrier, known := carriers[pn.Interface]
+		if !known {
+			carrier = pn.Name
+			carriers[pn.Interface] = carrier
+			objects = append(objects, fabric.ProviderNetwork(underlayMeta("ProviderNetwork", carrier), pn.Interface, gatewayNodes()))
+		}
+		key := vlanKey{pn.Interface, pn.Vlan}
+		vlan, known := vlans[key]
+		if !known {
+			vlan = pn.Name
+			vlans[key] = vlan
+			objects = append(objects, fabric.Vlan(underlayMeta("Vlan", vlan), int(pn.Vlan), carrier))
+		}
+		objects = append(objects, externalVlanSubnet(cfg, pn, vlan))
 	}
+	return objects
 }
 
 func poolMeta(pn v1alpha1.ProviderNetworkSpec) fabric.Meta {
@@ -36,8 +56,8 @@ func poolMeta(pn v1alpha1.ProviderNetworkSpec) fabric.Meta {
 	return meta
 }
 
-func externalVlanSubnet(cfg Config, pn v1alpha1.ProviderNetworkSpec) *unstructured.Unstructured {
-	return fabric.Subnet(poolMeta(pn), fabric.SubnetSpec{CIDR: pn.CIDR, Gateway: pn.Gateway, Vlan: pn.Name, ExcludeIPs: pn.ExcludeIPs, ACLs: servicesACLs(cfg, pn)})
+func externalVlanSubnet(cfg Config, pn v1alpha1.ProviderNetworkSpec, vlan string) *unstructured.Unstructured {
+	return fabric.Subnet(poolMeta(pn), fabric.SubnetSpec{CIDR: pn.CIDR, Gateway: pn.Gateway, Vlan: vlan, ExcludeIPs: pn.ExcludeIPs, ACLs: servicesACLs(cfg, pn)})
 }
 
 func externalOverlaySubnet(pn v1alpha1.ProviderNetworkSpec) *unstructured.Unstructured {
@@ -64,26 +84,24 @@ func RenderUnderlay(cfg Config) ([]*unstructured.Unstructured, []string) {
 }
 
 func renderL2(cfg Config) []*unstructured.Unstructured {
-	var objects []*unstructured.Unstructured
-	for _, pn := range cfg.ProviderNetworks {
-		objects = append(objects, providerObjects(cfg, pn)...)
-	}
-	return objects
+	return providerObjects(cfg, cfg.ProviderNetworks)
 }
 
 func renderBGP(cfg Config) ([]*unstructured.Unstructured, []string) {
-	var objects []*unstructured.Unstructured
+	var underlay []v1alpha1.ProviderNetworkSpec
+	var overlay []*unstructured.Unstructured
 	for _, pn := range cfg.ProviderNetworks {
 		switch {
 		case pn.Name == cfg.BGP.Transit:
 			pn.Role = v1alpha1.ProviderRoleTransit
-			objects = append(objects, providerObjects(cfg, pn)...)
+			underlay = append(underlay, pn)
 		case isServicesPool(pn):
-			objects = append(objects, providerObjects(cfg, pn)...)
+			underlay = append(underlay, pn)
 		default:
-			objects = append(objects, externalOverlaySubnet(pn))
+			overlay = append(overlay, externalOverlaySubnet(pn))
 		}
 	}
+	objects := append(providerObjects(cfg, underlay), overlay...)
 	if missing := MissingBGPSettings(cfg); len(missing) > 0 {
 		return objects, []string{fmt.Sprintf("BGP mode needs these settings before the BgpConf is rendered: %s", strings.Join(missing, ", "))}
 	}

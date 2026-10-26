@@ -22,8 +22,8 @@ The section "How to read conditions" lists every reason.
 
 | Bedrock object | Fabric or Kubernetes object | Name |
 |---|---|---|
-| each provider network | `ProviderNetwork` | the provider network name |
-| each provider network | `Vlan` | the provider network name |
+| each interface of the provider networks | `ProviderNetwork` | the name of the first provider network that uses the interface |
+| each interface and VLAN id of the provider networks | `Vlan` | the name of the first provider network that uses the pair |
 | each provider network | `Subnet` | `provider-<name>` |
 | bgp mode | `BgpConf` | `bedrock` |
 | `Network` | `Vpc` | the Network name |
@@ -337,9 +337,16 @@ When you delete a Network, the controller deletes these objects before it delete
 
 Each provider network with the role `services` has an ACL with the direction `to-lport` and the priority 2000.
 It drops traffic when the source and the destination are both in the provider network and both outside the first /24.
-So guests of different Networks cannot reach each other on the plane, but they can reach the services.
-In bgp mode a provider network with the role `services` has its own `ProviderNetwork` and `Vlan`, as the transit network has.
+So guests of different Networks cannot reach each other on the plane, but they can reach the services, and the services can reach them.
+This isolation is a security boundary.
+The operator always renders the ACL for a provider network with the role `services`, and no Setting turns it off.
+For the CIDR `100.66.0.0/15` the match is `ip4.src == 100.66.0.0/15 && ip4.src != 100.66.0.0/24 && ip4.dst == 100.66.0.0/15 && ip4.dst != 100.66.0.0/24`.
+In bgp mode a provider network with the role `services` has a `Vlan`, as the transit network has.
 The ACL, the `ProviderNetwork` and the `Vlan` depend on the role only, so a wrong Setting never removes them.
+
+Provider networks can share an interface, and they can share a VLAN id.
+The operator makes one `ProviderNetwork` for each interface and one `Vlan` for each pair of interface and VLAN id.
+Each provider network keeps its own `Subnet`, so two networks with different CIDRs on the same untagged interface (VLAN id 0) work together.
 
 If a Setting is wrong, the Network gets `ExternalReady=False` with the reason `ServicesNotConfigured`.
 The Vpc keeps its other entries, and the controller does not delete the identity objects.
