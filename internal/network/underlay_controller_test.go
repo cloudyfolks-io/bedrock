@@ -154,3 +154,75 @@ func TestUnderlayReconcilerFollowsTheBgpSessionSettings(t *testing.T) {
 		t.Fatalf("filter and tables %v", spec)
 	}
 }
+
+func seedOldPerPoolUnderlay(t *testing.T, c client.Client) {
+	t.Helper()
+	cfg := configOf(t, map[string]string{"network.provider-networks": sharedVlanPools})
+	for _, pn := range cfg.ProviderNetworks {
+		subnet, err := externalVlanSubnet(cfg, pn, pn.Name)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, o := range []*unstructured.Unstructured{existingProvider(pn.Name, pn.Interface), existingVlan(pn.Name, 0, pn.Name), subnet} {
+			if err := c.Create(context.Background(), o); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+}
+
+func foreignSubnetOnVlan(vlan string) *unstructured.Unstructured {
+	return fabric.Subnet(fabric.Meta{Name: "held-" + vlan}, fabric.SubnetSpec{CIDR: "10.250.0.0/24", Gateway: "10.250.0.1", Vlan: vlan})
+}
+
+func TestUnderlayReconcilerUpgradesPerPoolObjectsToSharedOnes(t *testing.T) {
+	c, _ := testEnv(t)
+	cleanUnderlay(t, c)
+	seedOldPerPoolUnderlay(t, c)
+	setSetting(t, "network.provider-networks", sharedVlanPools)
+	r := &UnderlayReconciler{Client: c}
+	result, err := r.Reconcile(context.Background(), UnderlayRequest)
+	if err != nil || result.RequeueAfter != 0 {
+		t.Fatalf("result %v err %v", result, err)
+	}
+	got := underlayObjects(t, c)
+	if len(got) != 4 || got["ProviderNetwork/public-a"] == nil || got["Vlan/public-a"] == nil {
+		t.Fatalf("objects %v", got)
+	}
+	for _, subnet := range []string{"Subnet/provider-public-a", "Subnet/provider-public-b"} {
+		if nestedString(t, got[subnet], "spec", "vlan") != "public-a" {
+			t.Fatalf("%s %v", subnet, got[subnet].Object["spec"])
+		}
+	}
+}
+
+func TestUnderlayReconcilerKeepsAVlanAndAProviderNetworkThatAreStillReferenced(t *testing.T) {
+	c, _ := testEnv(t)
+	cleanUnderlay(t, c)
+	seedOldPerPoolUnderlay(t, c)
+	holder := foreignSubnetOnVlan("public-b")
+	if err := c.Create(context.Background(), holder); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = c.Delete(context.Background(), holder) })
+	setSetting(t, "network.provider-networks", sharedVlanPools)
+	r := &UnderlayReconciler{Client: c}
+	result, err := r.Reconcile(context.Background(), UnderlayRequest)
+	if err != nil || result.RequeueAfter == 0 {
+		t.Fatalf("result %v err %v", result, err)
+	}
+	got := underlayObjects(t, c)
+	if got["Vlan/public-b"] == nil || got["ProviderNetwork/public-b"] == nil {
+		t.Fatalf("a referenced object was deleted: %v", got)
+	}
+	if err := c.Delete(context.Background(), holder); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := r.Reconcile(context.Background(), UnderlayRequest); err != nil {
+		t.Fatal(err)
+	}
+	got = underlayObjects(t, c)
+	if got["Vlan/public-b"] != nil || got["ProviderNetwork/public-b"] != nil {
+		t.Fatalf("the duplicates must go once nothing names them: %v", got)
+	}
+}

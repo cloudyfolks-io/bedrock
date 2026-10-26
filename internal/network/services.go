@@ -142,18 +142,18 @@ func ServicesPlane(network v1alpha1.Network, cfg Config, identity string) Servic
 	}
 }
 
-func servicesACLs(cfg Config, pn v1alpha1.ProviderNetworkSpec) []fabric.ACL {
+func servicesACLs(cfg Config, pn v1alpha1.ProviderNetworkSpec) ([]fabric.ACL, error) {
 	if !isServicesPool(pn) {
-		return nil
+		return nil, nil
 	}
 	pool, err := netip.ParsePrefix(pn.CIDR)
 	if err != nil {
-		return nil
+		return nil, fmt.Errorf("services provider network %s: cidr %q: %w", pn.Name, pn.CIDR, err)
 	}
 	vips := pool
 	if pool.Bits() < servicesVIPPrefixBits {
 		vips = netip.PrefixFrom(pool.Addr(), servicesVIPPrefixBits)
 	}
 	match := fmt.Sprintf("ip4.src == %[1]s && ip4.src != %[2]s && ip4.dst == %[1]s && ip4.dst != %[2]s", pool, vips)
-	return []fabric.ACL{{Direction: servicesACLDirection, Priority: servicesACLPriority, Match: match, Action: servicesACLAction}}
+	return []fabric.ACL{{Direction: servicesACLDirection, Priority: servicesACLPriority, Match: match, Action: servicesACLAction}}, nil
 }

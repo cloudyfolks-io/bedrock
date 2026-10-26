@@ -44,7 +44,7 @@ func TestRenderUnderlayBGPBacksTheServicesSubnetWithAVlanAndTheTenantDropACL(t *
 	requireDropACL(t, subnet)
 	objects, _ := RenderUnderlay(configOf(t, values))
 	rendered := byKindAndName(objects)
-	if rendered["ProviderNetwork/services"] == nil || rendered["Vlan/services"] == nil {
+	if countKind(objects, "ProviderNetwork") == 0 || rendered["Vlan/services"] == nil {
 		t.Fatalf("the services pool needs a provider network and a vlan: %v", len(rendered))
 	}
 	public := rendered["Subnet/provider-public"]
@@ -79,7 +79,7 @@ func TestRenderUnderlayKeepsAServicesRolePoolWhateverTheSettingSays(t *testing.T
 				}
 				objects, _ := RenderUnderlay(configOf(t, values))
 				rendered := byKindAndName(objects)
-				if rendered["ProviderNetwork/services"] == nil || rendered["Vlan/services"] == nil {
+				if countKind(objects, "ProviderNetwork") == 0 || rendered["Vlan/services"] == nil {
 					t.Fatal("the provider network and the vlan must stay")
 				}
 				requireDropACL(t, rendered["Subnet/provider-services"])
