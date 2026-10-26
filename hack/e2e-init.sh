@@ -120,6 +120,33 @@ fi
 VERSION=$version VIP=$vip IFACE=$iface EMULATION=$emulation PLATFORM_HOST=$platform_host OSD_DEVICES=$(flow_list "$osd_device") PROVIDER_NETWORKS=$(flow_list "$provider_entry") envsubst < hack/e2e/cluster.yaml.tmpl > "$workdir/cluster.yaml"
 cat "$workdir/cluster.yaml"
 
+archive_dir=/var/lib/bedrock/images
+
+assert_airgap_archived() {
+  retry_until 120 compgen -G "$archive_dir/$version/*/k0s-airgap.tar" && return 0
+  echo "expected k0s-airgap.tar under $archive_dir/$version/*/, found:" >&2
+  ls -laR "$archive_dir" >&2 || true
+  return 1
+}
+
+assert_bundle_images_present() {
+  local count
+  count=$(find /var/lib/k0s/images "$archive_dir" -name '*.tar' | wc -l)
+  [ "$count" -ge 3 ] && return 0
+  echo "expected at least 3 image tarballs in /var/lib/k0s/images or $archive_dir, found $count:" >&2
+  ls -laR /var/lib/k0s/images "$archive_dir" >&2 || true
+  return 1
+}
+
+assert_k0s_binary_matches_release() {
+  local actual expected
+  actual=$(sha256sum /usr/local/bin/k0s | awk '{print "sha256:"$1}')
+  expected=$(awk -v arch="$arch:" '$1 == arch {print $2}' "$release_dir/release.yaml")
+  [ "$actual" = "$expected" ] && return 0
+  echo "k0s binary checksum mismatch: installed $actual, $release_dir/release.yaml has '$expected' for $arch" >&2
+  return 1
+}
+
 run_init() {
   "$@" | (umask 077 && tee "$workdir/init.log") | grep --line-buffered -v '^admin password: '
 }
@@ -129,9 +156,9 @@ if [ -n "${BUNDLE:-}" ]; then
   printf '[plugins."io.containerd.cri.v1.images".registry]\nconfig_path = "/etc/k0s/containerd.d/certs.d"\n' > /etc/k0s/containerd.d/cri-registry.toml
   printf 'server = "https://127.0.0.1:1"\n' > /etc/k0s/containerd.d/certs.d/_default/hosts.toml
   run_init "$bin" init -f "$workdir/cluster.yaml" --bundle "$BUNDLE" --timeout 45m
-  retry_until 120 compgen -G "/var/lib/bedrock/images/$version/*/k0s-airgap.tar"
-  test "$(ls /var/lib/bedrock/images/$version/*/*.tar | wc -l)" -ge 3
-  sha256sum /usr/local/bin/k0s | awk '{print "sha256:"$1}' | grep -qx "$(awk -v arch="$arch:" '$1 == arch {print $2}' "$release_dir/release.yaml")"
+  assert_airgap_archived
+  assert_bundle_images_present
+  assert_k0s_binary_matches_release
 else
   mkdir -p "$workdir/preload"
   docker save "$image" -o "$workdir/preload/bedrock.tar"
