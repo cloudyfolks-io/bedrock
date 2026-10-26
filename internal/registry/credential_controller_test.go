@@ -555,3 +555,21 @@ func TestCredentialDeleteInTheWindowBeforeTheRobotIDWasRecorded(t *testing.T) {
 		t.Error("the robot of the half made credential leaked")
 	}
 }
+
+func TestCredentialLeavesAForeignSecretOfThatNameAlone(t *testing.T) {
+	state := newHarborState(t)
+	foreign := &corev1.Secret{
+		ObjectMeta: metav1.ObjectMeta{Name: "ci-docker", Namespace: tenantNamespace},
+		Type:       corev1.SecretTypeOpaque,
+		Data:       map[string][]byte{"token": []byte("keep")},
+	}
+	r, c := credentialWorld(t, state, credentialFor("ci", "pull"), foreign)
+	reconcileCredential(t, r, "ci")
+	secret := dockerSecret(t, c, "ci")
+	if secret.Type != corev1.SecretTypeOpaque || string(secret.Data["token"]) != "keep" {
+		t.Fatalf("foreign secret changed: type %s data %v", secret.Type, secret.Data)
+	}
+	if got := credentialReady(fetchCredential(t, c, "ci")); got.Status != metav1.ConditionFalse || got.Reason != "SecretNameTaken" {
+		t.Fatalf("condition %+v", got)
+	}
+}

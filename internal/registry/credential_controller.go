@@ -34,6 +34,7 @@ const (
 	reasonRegistryMissing  = "RegistryNotFound"
 	reasonRegistryNotReady = "RegistryNotReady"
 	reasonRobotClaimed     = "RobotClaimed"
+	reasonSecretNameTaken  = "SecretNameTaken"
 	credentialRequeue      = 10 * time.Minute
 	robotSecretLength      = 32
 	dockerConfigKey        = ".dockerconfigjson"
@@ -251,8 +252,12 @@ func (r *CredentialReconciler) keepSecret(ctx context.Context, credential *v1alp
 }
 
 func (r *CredentialReconciler) applySecret(ctx context.Context, credential *v1alpha1.RegistryCredential, got robotFacts, secret *corev1.Secret) (robotFacts, result, error) {
-	if err := r.dropSecretOfOtherType(ctx, secret); err != nil {
+	foreign, err := r.dropSecretOfOtherType(ctx, credential, secret)
+	if err != nil {
 		return got, result{}, err
+	}
+	if foreign {
+		return got, result{reason: reasonSecretNameTaken, message: "the Secret " + secret.Name + " exists and is not owned by this credential", requeue: credentialRequeue}, nil
 	}
 	if err := ssa.Apply(ctx, r.Client, secret, v1alpha1.RegistryFieldManager); err != nil {
 		return got, result{}, err
@@ -261,16 +266,19 @@ func (r *CredentialReconciler) applySecret(ctx context.Context, credential *v1al
 	return got, readyRobot(credential), nil
 }
 
-func (r *CredentialReconciler) dropSecretOfOtherType(ctx context.Context, want *corev1.Secret) error {
+func (r *CredentialReconciler) dropSecretOfOtherType(ctx context.Context, credential *v1alpha1.RegistryCredential, want *corev1.Secret) (bool, error) {
 	var current corev1.Secret
 	err := r.Client.Get(ctx, client.ObjectKeyFromObject(want), &current)
 	if apierrors.IsNotFound(err) || (err == nil && current.Type == want.Type) {
-		return nil
+		return false, nil
 	}
 	if err != nil {
-		return err
+		return false, err
 	}
-	return client.IgnoreNotFound(r.Client.Delete(ctx, &current))
+	if !metav1.IsControlledBy(&current, credential) {
+		return true, nil
+	}
+	return false, client.IgnoreNotFound(r.Client.Delete(ctx, &current))
 }
 
 func (r *CredentialReconciler) dockerSecret(ctx context.Context, credential *v1alpha1.RegistryCredential, host, username, password string) (*corev1.Secret, error) {
