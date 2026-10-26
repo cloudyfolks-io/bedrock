@@ -734,6 +734,7 @@ Then it reads the object again, and the condition `NodePortsScoped` of the `Clus
 The condition is `False` with the reason `NoManagementCIDR`, `K0sConfigUnavailable`, `PatchFailed` or `NotApplied` when the setting is not in place.
 k0s applies the change to kube-proxy by itself, and no restart is needed.
 For a cluster that you made before this setting existed, set `spec.managementCIDR` of the `Cluster`.
+`bedrock upgrade` prints a warning, and does not stop, if `spec.managementCIDR` or `spec.tenantLegs` is empty and a provider network has the role `transit` or `services`.
 For an adopted cluster, use the value of the old `k0s_kube_proxy_node_port_addresses`.
 
 ### Switch rules
