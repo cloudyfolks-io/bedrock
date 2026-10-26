@@ -17,6 +17,7 @@ const (
 	ConditionImagesImported    = "ImagesImported"
 	ConditionMaintenanceMode   = "MaintenanceMode"
 	ConditionRebootPending     = "RebootPending"
+	ConditionTenantLegsPresent = "TenantLegsPresent"
 )
 
 const (

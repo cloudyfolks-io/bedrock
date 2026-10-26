@@ -658,6 +658,11 @@ Never write a rule that isolates tenants by their address.
 A host can have a leg in a tenant-facing provider network.
 A leg is a VLAN interface of the host, for example `br-public.30` for the transit network and `br-public.20` for the services plane.
 Bedrock does not create the leg.
+The name of the leg starts with the host bridge of the carrier provider network: `br-<carrier>`.
+The carrier is the provider network that Bedrock makes for an interface, and by default it has the lowest pool name on that interface.
+To choose the name, set `providerName` on the pools of the interface, for example `providerName: public` for `br-public`.
+All pools of one interface must have the same `providerName`, and two interfaces must not share one.
+A provider network that already exists on the interface keeps its name, and `providerName` does not rename it.
 Make the leg with the `nmstate` field of the Host or with your own unit.
 Bedrock guards the leg.
 
@@ -700,6 +705,9 @@ If you remove all legs, the agent removes the unit, the file and the table.
 This is allowed, but the guard is then gone on every host.
 The operator sets the condition `TenantLegsGuarded` of the `Cluster` to `False` with the reason `NoTenantLegs` and raises a Warning event.
 While the list is not empty, the condition is `True`.
+Each agent sets the condition `TenantLegsPresent` of its `Host`.
+If a listed leg interface does not exist on the host, the condition is `False` with the reason `LegInterfaceMissing` and the interface names in the message.
+In that case the operator sets `TenantLegsGuarded` to `False` with the reason `LegInterfaceMissing`, and the message names each host and interface.
 The agent needs the `nftables` package, and the operator adds it to the packages of the `HostConfig` when the list is not empty.
 
 A host that came from the legacy Ansible roles already has the table `inet tenant_legs` and the unit `tenant-legs.service`.
