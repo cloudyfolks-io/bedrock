@@ -119,3 +119,21 @@ func TestPodNetworkMetadataCarriesTheAddressList(t *testing.T) {
 		t.Fatalf("a list must not set ip_address: %v", annotations)
 	}
 }
+
+func TestPortSecurityOffRendersFalseAndKeepsSecurityGroups(t *testing.T) {
+	annotations, _ := PodNetworkMetadata([]NIC{{Namespace: "t1-prod", Subnet: "default", SecurityGroups: []string{"web"}, PortSecurityOff: true}})
+	prefix := "default.t1-prod.fabric.cloudyfolks.io/"
+	if annotations[prefix+"port_security"] != "false" {
+		t.Fatalf("port_security = %q", annotations[prefix+"port_security"])
+	}
+	if annotations[prefix+"security_groups"] != FabricName("t1-prod", "web") {
+		t.Fatalf("security_groups = %q", annotations[prefix+"security_groups"])
+	}
+}
+
+func TestPortSecurityStaysTrueByDefault(t *testing.T) {
+	annotations, _ := PodNetworkMetadata([]NIC{{Namespace: "t1-prod", Subnet: "default"}})
+	if annotations["default.t1-prod.fabric.cloudyfolks.io/port_security"] != "true" {
+		t.Fatalf("annotations %v", annotations)
+	}
+}

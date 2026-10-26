@@ -105,6 +105,22 @@ A VM with no security group uses the default group `default-<namespace>` of its 
 The VM waits until this group exists.
 Port security is on for each interface.
 
+An entry of `networks` can have `portSecurity: false`.
+The default is `true`, and a VM without the field keeps port security on.
+Only an administrator can set or change `portSecurity`.
+The operator writes the Fabric annotation `port_security: "false"` for this interface.
+The security groups of the interface stay in place.
+
+Fabric v1.2.1 reads `port_security` and the security groups as two separate settings.
+With `port_security` set to `"false"`, Fabric clears the port security of the logical switch port.
+The interface can then send any source MAC address and any source IP address, not only the addresses of its own Subnet.
+The security group rules still apply, because Fabric binds them to the port through its port groups.
+An egress rule matches the destination only.
+A remote-group rule and the same-group rule do not match the source addresses of forwarded client traffic, so only address (CIDR) rules apply to that traffic.
+Use `portSecurity: false` for a VM that forwards traffic with source addresses that are not its own, for example a VPN gateway.
+A change of `portSecurity` reaches a running VM at once.
+A restore from a backup keeps a `portSecurity: false` that an administrator set.
+
 A change of the security groups reaches a running VM at once.
 A change of the Subnets applies at the next restart.
 
