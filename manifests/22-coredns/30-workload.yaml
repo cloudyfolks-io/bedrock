@@ -10,7 +10,8 @@ spec:
   strategy:
     type: RollingUpdate
     rollingUpdate:
-      maxUnavailable: 1
+      maxUnavailable: 0
+      maxSurge: 1
   selector:
     matchLabels:
       k8s-app: kube-dns
@@ -38,11 +39,13 @@ spec:
         kubernetes.io/os: linux
       affinity:
         podAntiAffinity:
-          requiredDuringSchedulingIgnoredDuringExecution:
-            - topologyKey: kubernetes.io/hostname
-              labelSelector:
-                matchLabels:
-                  k8s-app: kube-dns
+          preferredDuringSchedulingIgnoredDuringExecution:
+            - weight: 100
+              podAffinityTerm:
+                topologyKey: kubernetes.io/hostname
+                labelSelector:
+                  matchLabels:
+                    k8s-app: kube-dns
       containers:
         - name: coredns
           image: docker.io/coredns/coredns:1.13.2

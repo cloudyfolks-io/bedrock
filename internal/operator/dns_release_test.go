@@ -126,9 +126,15 @@ func TestCoreDNSReleaseDeploymentMountsTheCorefileOfTheConfigMap(t *testing.T) {
 
 func TestCoreDNSReleaseDeploymentSpreadsReplicasAndDropsRoot(t *testing.T) {
 	deployment := findKind(t, corednsManifest(t), "Deployment", "coredns")
-	terms, _, _ := unstructured.NestedSlice(deployment.Object, "spec", "template", "spec", "affinity", "podAntiAffinity", "requiredDuringSchedulingIgnoredDuringExecution")
-	if len(terms) != 1 || terms[0].(map[string]any)["topologyKey"] != "kubernetes.io/hostname" {
+	terms, _, _ := unstructured.NestedSlice(deployment.Object, "spec", "template", "spec", "affinity", "podAntiAffinity", "preferredDuringSchedulingIgnoredDuringExecution")
+	if len(terms) != 1 || fmt.Sprint(terms[0].(map[string]any)["weight"]) != "100" {
 		t.Fatalf("anti-affinity %v", terms)
+	}
+	if key, _, _ := unstructured.NestedString(terms[0].(map[string]any), "podAffinityTerm", "topologyKey"); key != "kubernetes.io/hostname" {
+		t.Fatalf("topology key %q", key)
+	}
+	if _, found, _ := unstructured.NestedSlice(deployment.Object, "spec", "template", "spec", "affinity", "podAntiAffinity", "requiredDuringSchedulingIgnoredDuringExecution"); found {
+		t.Fatal("a required rule keeps the surge pod of a roll off the only node")
 	}
 	containers, _, _ := unstructured.NestedSlice(deployment.Object, "spec", "template", "spec", "containers")
 	container := containers[0].(map[string]any)
@@ -165,5 +171,23 @@ func TestCoreDNSReleaseHasADisruptionBudgetNamedCoreDNS(t *testing.T) {
 	}
 	if app, _, _ := unstructured.NestedString(budget.Object, "spec", "selector", "matchLabels", "k8s-app"); app != "kube-dns" {
 		t.Fatalf("selector %v", budget.Object["spec"])
+	}
+}
+
+func rollingUpdateLimits(t *testing.T, deployment *unstructured.Unstructured) (unavailable, surge string) {
+	t.Helper()
+	if kind, _, _ := unstructured.NestedString(deployment.Object, "spec", "strategy", "type"); kind != "RollingUpdate" {
+		t.Fatalf("strategy %q", kind)
+	}
+	unavailableValue, _, _ := unstructured.NestedFieldNoCopy(deployment.Object, "spec", "strategy", "rollingUpdate", "maxUnavailable")
+	surgeValue, _, _ := unstructured.NestedFieldNoCopy(deployment.Object, "spec", "strategy", "rollingUpdate", "maxSurge")
+	return fmt.Sprint(unavailableValue), fmt.Sprint(surgeValue)
+}
+
+func TestCoreDNSReleaseKeepsAReadyPodDuringARollForOneAndTwoReplicas(t *testing.T) {
+	deployment := findKind(t, corednsManifest(t), "Deployment", "coredns")
+	unavailable, surge := rollingUpdateLimits(t, deployment)
+	if unavailable != "0" || surge != "1" {
+		t.Fatalf("maxUnavailable %s maxSurge %s", unavailable, surge)
 	}
 }

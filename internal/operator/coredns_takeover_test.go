@@ -63,6 +63,9 @@ metadata:
   annotations: {k0s.k0sproject.io/stack-checksum: sum-deploy, k0s.k0sproject.io/last-applied-configuration: "{}"}
 spec:
   replicas: 3
+  strategy:
+    type: RollingUpdate
+    rollingUpdate: {maxUnavailable: 1, maxSurge: "25%"}
   selector:
     matchLabels: {k8s-app: kube-dns}
   template:
@@ -357,5 +360,27 @@ func TestTakeoverReplacesTheK0sDisruptionBudget(t *testing.T) {
 	}
 	if _, found, _ := unstructured.NestedFieldNoCopy(budget.Object, "spec", "minAvailable"); found {
 		t.Fatal("the k0s limit must go")
+	}
+}
+
+func TestTakeoverSetsTheRollingUpdateThatKeepsAReadyPod(t *testing.T) {
+	c, _ := StartTestEnv(t)
+	createCluster(t, c)
+	createK0sCoreDNS(t, c)
+	service := liveObject(t, c, "Service", "v1", "kube-system", "kube-dns")
+	dnsIP, _, _ := unstructured.NestedString(service.Object, "spec", "clusterIP")
+	if err := adoptK0sCoreDNS(c)(context.Background(), releaseCoreDNSGroup(t, dnsIP)); err != nil {
+		t.Fatal(err)
+	}
+	deployment := liveObject(t, c, "Deployment", "apps/v1", "kube-system", "coredns")
+	if unavailable, surge := rollingUpdateLimits(t, deployment); unavailable != "0" || surge != "1" {
+		t.Fatalf("maxUnavailable %s maxSurge %s", unavailable, surge)
+	}
+	preferred, _, _ := unstructured.NestedSlice(deployment.Object, "spec", "template", "spec", "affinity", "podAntiAffinity", "preferredDuringSchedulingIgnoredDuringExecution")
+	if len(preferred) != 1 {
+		t.Fatalf("anti-affinity %v", deployment.Object["spec"])
+	}
+	if _, found, _ := unstructured.NestedSlice(deployment.Object, "spec", "template", "spec", "affinity", "podAntiAffinity", "requiredDuringSchedulingIgnoredDuringExecution"); found {
+		t.Fatal("the required rule of k0s must go")
 	}
 }

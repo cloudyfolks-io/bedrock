@@ -527,7 +527,7 @@ The sweeper deletes rules whose InternetGateway is gone.
 ## Cluster DNS
 
 Bedrock runs cluster DNS itself. The Deployment `kube-system/coredns` has one replica for each host, up to two.
-The replicas run on different nodes, and the PodDisruptionBudget `coredns` lets a drain stop one at a time.
+The replicas prefer different nodes. A roll starts the new pod before it stops an old one, so one pod stays ready. The PodDisruptionBudget `coredns` lets a drain stop one at a time.
 The addon `dns` sets the replica count.
 The Service `kube-system/kube-dns` takes the tenth address of the service network, for example `10.96.0.10`.
 This is the address that the kubelet gives to every pod as its DNS server.
