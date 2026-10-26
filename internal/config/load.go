@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"net"
 	"net/netip"
 	"os"
@@ -451,8 +452,19 @@ func ToHost(cfg v1alpha1.ClusterConfig, nodeName string) v1alpha1.Host {
 	}
 }
 
+func addonSettingValues(addons map[string]bool) map[string]string {
+	values := map[string]string{}
+	for _, def := range settings.Catalog() {
+		name, isAddon := strings.CutSuffix(def.Key, ".enabled")
+		if enabled, set := addons[name]; isAddon && set {
+			values[def.Key] = strconv.FormatBool(enabled)
+		}
+	}
+	return values
+}
+
 func SettingValues(cfg v1alpha1.ClusterConfig) map[string]string {
-	return map[string]string{
+	values := map[string]string{
 		"platform.host":                 cfg.Spec.Platform.Host,
 		"platform.tls-mode":             cfg.Spec.Platform.TLSMode,
 		"storage.replicas":              strconv.Itoa(int(cfg.Spec.Storage.Replicas)),
@@ -471,6 +483,8 @@ func SettingValues(cfg v1alpha1.ClusterConfig) map[string]string {
 		"egress.no-proxy":               strings.Join(cfg.Spec.Egress.NoProxy, ","),
 		"letsencrypt.dns01-nameservers": strings.Join(cfg.Spec.Egress.DNS01Nameservers, ","),
 	}
+	maps.Copy(values, addonSettingValues(cfg.Spec.Addons))
+	return values
 }
 
 func ToSettings(cfg v1alpha1.ClusterConfig) []v1alpha1.Setting {
