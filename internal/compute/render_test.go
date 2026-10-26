@@ -269,6 +269,15 @@ func TestRenderDiskSerial(t *testing.T) {
 	}
 }
 
+func TestRenderRootDiskSerial(t *testing.T) {
+	in := renderFixture()
+	in.VirtualMachine.Spec.RootDisk.Serial = "WIN-ROOT-0001"
+	root := list(t, templateSpec(t, mustRender(t, in)), "domain", "devices", "disks")[0].(map[string]any)
+	if root["serial"] != "WIN-ROOT-0001" {
+		t.Fatalf("root disk %+v", root)
+	}
+}
+
 func TestRenderHostDevices(t *testing.T) {
 	spec := templateSpec(t, mustRender(t, renderFixture()))
 	want := []any{map[string]any{"name": "hostdev-0", "deviceName": "nvidia.com/GA102"}}

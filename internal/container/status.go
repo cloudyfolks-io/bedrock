@@ -38,6 +38,9 @@ type DeploymentStatus struct {
 
 type PodView struct {
 	Name           string
+	Phase          string
+	Node           string
+	StartedAt      *metav1.Time
 	Ready          bool
 	Terminating    bool
 	Address        string
@@ -52,6 +55,7 @@ type Status struct {
 	Replicas  int32
 	Ready     int32
 	Addresses []string
+	Pods      []v1alpha1.ContainerPodStatus
 }
 
 func Decide(deployment DeploymentStatus, pods []PodView) Status {
@@ -59,6 +63,7 @@ func Decide(deployment DeploymentStatus, pods []PodView) Status {
 		Replicas:  deployment.Replicas,
 		Ready:     deployment.Ready,
 		Addresses: addressesOf(pods),
+		Pods:      podStatusesOf(pods),
 	}
 	if deployment.Desired == 0 {
 		status.Phase, status.Reason, status.Message = v1alpha1.ContainerPhaseStopped, ReasonStopped, "the container is stopped"
@@ -83,6 +88,20 @@ func Decide(deployment DeploymentStatus, pods []PodView) Status {
 		status.Phase, status.Reason, status.Message = v1alpha1.ContainerPhasePending, ReasonDeploying, fmt.Sprintf("%d of %d replicas are ready", deployment.Ready, deployment.Desired)
 	}
 	return status
+}
+
+const maxListedPods = 50
+
+func podStatusesOf(pods []PodView) []v1alpha1.ContainerPodStatus {
+	ordered := slices.SortedFunc(slices.Values(pods), func(a, b PodView) int { return cmp.Compare(a.Name, b.Name) })
+	if len(ordered) > maxListedPods {
+		ordered = ordered[:maxListedPods]
+	}
+	var out []v1alpha1.ContainerPodStatus
+	for _, pod := range ordered {
+		out = append(out, v1alpha1.ContainerPodStatus{Name: pod.Name, Phase: pod.Phase, Ready: pod.Ready, Node: pod.Node, StartedAt: pod.StartedAt})
+	}
+	return out
 }
 
 func fatalReason(pod PodView) string {
@@ -156,7 +175,7 @@ func desiredOf(c v1alpha1.Container, deployment *appsv1.Deployment) int32 {
 }
 
 func PodViewOf(pod corev1.Pod, subnet string) PodView {
-	view := PodView{Name: pod.Name, Terminating: pod.DeletionTimestamp != nil, Address: podAddress(pod, subnet)}
+	view := PodView{Name: pod.Name, Phase: string(pod.Status.Phase), Node: pod.Spec.NodeName, StartedAt: pod.Status.StartTime, Terminating: pod.DeletionTimestamp != nil, Address: podAddress(pod, subnet)}
 	for _, condition := range pod.Status.Conditions {
 		if condition.Type == corev1.PodReady && condition.Status == corev1.ConditionTrue {
 			view.Ready = true
@@ -209,5 +228,6 @@ func StatusOf(c v1alpha1.Container, gate *Gate, decided Status, deploymentName s
 		ReadyReplicas: decided.Ready,
 		Addresses:     decided.Addresses,
 		Deployment:    deploymentName,
+		Pods:          decided.Pods,
 	}
 }

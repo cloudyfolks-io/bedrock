@@ -278,7 +278,7 @@ func devicesOf(vm v1alpha1.VirtualMachine, in RenderInput) map[string]any {
 }
 
 func disksOf(in RenderInput) []any {
-	disks := []any{map[string]any{"name": "rootdisk", "disk": rootDiskDevice(in.RootVolume), "bootOrder": int64(1)}}
+	disks := []any{rootDiskEntry(in)}
 	for index := 0; index < len(in.CDROMs); index++ {
 		disks = append(disks, map[string]any{
 			"name":      cdromDiskName(index),
@@ -295,6 +295,14 @@ func disksOf(in RenderInput) []any {
 		disks = append(disks, map[string]any{"name": "vol-" + key, "disk": disk, "serial": serialOf(in.VirtualMachine.Spec.Disks, volume.Name, key)})
 	}
 	return append(disks, map[string]any{"name": "cloudinit", "disk": map[string]any{}})
+}
+
+func rootDiskEntry(in RenderInput) map[string]any {
+	entry := map[string]any{"name": "rootdisk", "disk": rootDiskDevice(in.RootVolume), "bootOrder": int64(1)}
+	if serial := in.VirtualMachine.Spec.RootDisk.Serial; serial != "" {
+		entry["serial"] = serial
+	}
+	return entry
 }
 
 func rootDiskDevice(volume *ResolvedVolume) map[string]any {

@@ -328,6 +328,9 @@ func TestReconcileReadsPodsForAddressesAndFatalReasons(t *testing.T) {
 		t.Fatalf("addresses %v", got.Status.Addresses)
 	}
 	requireReady(t, got, metav1.ConditionTrue, ReasonRunning)
+	if len(got.Status.Pods) != 2 || got.Status.Pods[0].Name != "web-1-a" || got.Status.Pods[1].Name != "web-1-b" || !got.Status.Pods[0].Ready {
+		t.Fatalf("pods %+v", got.Status.Pods)
+	}
 
 	broken := createPod(t, c, ns, "web-1-c", "web")
 	updateStatus(t, c, &broken, func(p *corev1.Pod) {
@@ -379,7 +382,11 @@ func TestLooselyLabeledPodsDoNotCountForTheContainer(t *testing.T) {
 		p.Status.ContainerStatuses = []corev1.ContainerStatus{{Name: "app", State: corev1.ContainerState{Waiting: &corev1.ContainerStateWaiting{Reason: "ErrImagePull", Message: "denied"}}}}
 	})
 	reconcileContainer(t, r, ns, "web")
-	requireReady(t, getContainer(t, c, ns, "web"), metav1.ConditionFalse, ReasonDeploying)
+	got := getContainer(t, c, ns, "web")
+	requireReady(t, got, metav1.ConditionFalse, ReasonDeploying)
+	if len(got.Status.Pods) != 0 {
+		t.Fatalf("a pod with matching labels but another owner must not be listed: %+v", got.Status.Pods)
+	}
 }
 
 func TestResourceQuotaRefusesAContainerOverTheCount(t *testing.T) {

@@ -295,13 +295,15 @@ func TestRenderDeploymentFSGroup(t *testing.T) {
 func TestRenderDeploymentEnvironment(t *testing.T) {
 	in := withSpec(func(s *v1alpha1.ContainerSpec) {
 		s.Env = []v1alpha1.ContainerEnvVar{
-			{Name: "MODE", Value: "prod"},
+			{Name: "MODE", Value: ptr.To("prod")},
+			{Name: "EMPTY", Value: ptr.To("")},
 			{Name: "TOKEN", ValueFrom: &v1alpha1.ContainerEnvSource{SecretKeyRef: &v1alpha1.ContainerSecretKeyRef{Name: "creds", Key: "token"}}},
 		}
 	})
 	deployment, _ := mustDeployment(t, in)
 	want := []corev1.EnvVar{
 		{Name: "MODE", Value: "prod"},
+		{Name: "EMPTY", Value: ""},
 		{Name: "TOKEN", ValueFrom: &corev1.EnvVarSource{SecretKeyRef: &corev1.SecretKeySelector{LocalObjectReference: corev1.LocalObjectReference{Name: "creds"}, Key: "token"}}},
 	}
 	if got := appContainer(t, deployment).Env; !reflect.DeepEqual(got, want) {
@@ -388,7 +390,7 @@ func fullInput() RenderInput {
 	in := withSpec(func(s *v1alpha1.ContainerSpec) {
 		s.Command = []string{"/bin/web"}
 		s.Args = []string{"a"}
-		s.Env = []v1alpha1.ContainerEnvVar{{Name: "A", Value: "1"}}
+		s.Env = []v1alpha1.ContainerEnvVar{{Name: "A", Value: ptr.To("1")}}
 		s.Ports = []v1alpha1.ContainerPort{{Port: 80}}
 		s.FSGroup = ptr.To(int64(10))
 		s.Probes = &v1alpha1.ContainerProbes{Liveness: &v1alpha1.ContainerProbe{Exec: &v1alpha1.ContainerExec{Command: []string{"x"}}}}

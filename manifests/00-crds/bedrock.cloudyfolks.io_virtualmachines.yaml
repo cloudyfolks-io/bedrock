@@ -228,6 +228,10 @@ spec:
                 type: string
               rootDisk:
                 properties:
+                  serial:
+                    maxLength: 36
+                    pattern: ^[A-Za-z0-9._-]+$
+                    type: string
                   sizeGi:
                     format: int32
                     minimum: 1
@@ -251,6 +255,9 @@ spec:
                     and rootDisk.volumeRef excludes sizeGi and storageClass
                   rule: 'has(self.volumeRef) ? (!has(self.sizeGi) && !has(self.storageClass))
                     : has(self.sizeGi)'
+                - message: rootDisk.serial is immutable
+                  rule: '!has(oldSelf.serial) || (has(self.serial) && self.serial
+                    == oldSelf.serial)'
               running:
                 default: true
                 type: boolean

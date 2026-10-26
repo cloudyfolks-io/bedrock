@@ -111,6 +111,22 @@ func TestValidateGuestIdentity(t *testing.T) {
 	}
 }
 
+func TestValidateRootDiskSerial(t *testing.T) {
+	vm := validFixture()
+	vm.Spec.RootDisk.Serial = "bad serial"
+	if !hasField(ValidateVirtualMachine(vm), "spec.rootDisk.serial") {
+		t.Fatal("a bad root disk serial must be refused")
+	}
+	vm.Spec.RootDisk.Serial = "WIN-ROOT-0001"
+	if issues := ValidateVirtualMachine(vm); len(issues) != 0 {
+		t.Fatalf("issues %v", issueFields(issues))
+	}
+	vm.Spec.RootDisk = v1alpha1.VMRootDisk{VolumeRef: "boot1", Serial: "WIN-ROOT-0001"}
+	if issues := ValidateVirtualMachine(vm); len(issues) != 0 {
+		t.Fatalf("issues %v", issueFields(issues))
+	}
+}
+
 func TestValidateFirmware(t *testing.T) {
 	vm := validFixture()
 	vm.Spec.Firmware = &v1alpha1.VMFirmware{SecureBoot: true}

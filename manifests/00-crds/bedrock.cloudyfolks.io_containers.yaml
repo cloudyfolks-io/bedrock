@@ -466,6 +466,27 @@ spec:
                 - Stopped
                 - Failed
                 type: string
+              pods:
+                items:
+                  properties:
+                    name:
+                      type: string
+                    node:
+                      type: string
+                    phase:
+                      type: string
+                    ready:
+                      type: boolean
+                    startedAt:
+                      format: date-time
+                      type: string
+                  required:
+                  - name
+                  - ready
+                  type: object
+                maxItems: 50
+                type: array
+                x-kubernetes-list-type: atomic
               readyReplicas:
                 format: int32
                 type: integer

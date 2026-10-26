@@ -21,7 +21,7 @@ func validContainer(name string) *v1alpha1.Container {
 			Command: []string{"/bin/web"},
 			Args:    []string{"--port", "8080"},
 			Env: []v1alpha1.ContainerEnvVar{
-				{Name: "MODE", Value: "prod"},
+				{Name: "MODE", Value: ptr.To("prod")},
 				{Name: "TOKEN", ValueFrom: &v1alpha1.ContainerEnvSource{SecretKeyRef: &v1alpha1.ContainerSecretKeyRef{Name: "creds", Key: "token"}}},
 			},
 			Ports:   []v1alpha1.ContainerPort{{Name: "http", Port: 8080, Protocol: "TCP"}},
@@ -33,6 +33,26 @@ func validContainer(name string) *v1alpha1.Container {
 			ImagePullSecrets: []string{"registry-credentials"},
 			Network:          v1alpha1.ContainerNetwork{SubnetRef: "default", SecurityGroups: []string{"web"}},
 		},
+	}
+}
+
+func TestContainerEnvEmptyValue(t *testing.T) {
+	c, _ := StartTestEnv(t)
+	ctx := context.Background()
+	container := validContainer("env-empty")
+	container.Spec.Env = []v1alpha1.ContainerEnvVar{{Name: "EMPTY", Value: ptr.To("")}, {Name: "UNSET", ValueFrom: &v1alpha1.ContainerEnvSource{SecretKeyRef: &v1alpha1.ContainerSecretKeyRef{Name: "s", Key: "k"}}}}
+	if err := c.Create(ctx, container); err != nil {
+		t.Fatalf("an empty env value must be accepted: %v", err)
+	}
+	var fresh v1alpha1.Container
+	if err := c.Get(ctx, client.ObjectKeyFromObject(container), &fresh); err != nil {
+		t.Fatal(err)
+	}
+	if got := fresh.Spec.Env[0].Value; got == nil || *got != "" {
+		t.Fatalf("the empty value must stay set: %v", got)
+	}
+	if fresh.Spec.Env[1].Value != nil {
+		t.Fatal("an unset value must stay unset")
 	}
 }
 
@@ -172,12 +192,14 @@ func TestContainerRefusesWrongMixes(t *testing.T) {
 		{"port-zero", func(x *v1alpha1.Container) { x.Spec.Ports = []v1alpha1.ContainerPort{{Port: 0, Protocol: "TCP"}} }, "spec.ports"},
 		{"port-protocol", func(x *v1alpha1.Container) { x.Spec.Ports = []v1alpha1.ContainerPort{{Port: 80, Protocol: "ICMP"}} }, "Unsupported value"},
 		{"env-both", func(x *v1alpha1.Container) {
-			x.Spec.Env = []v1alpha1.ContainerEnvVar{{Name: "A", Value: "1", ValueFrom: &v1alpha1.ContainerEnvSource{SecretKeyRef: &v1alpha1.ContainerSecretKeyRef{Name: "s", Key: "k"}}}}
+			x.Spec.Env = []v1alpha1.ContainerEnvVar{{Name: "A", Value: ptr.To("1"), ValueFrom: &v1alpha1.ContainerEnvSource{SecretKeyRef: &v1alpha1.ContainerSecretKeyRef{Name: "s", Key: "k"}}}}
 		}, "set exactly one of value and valueFrom"},
 		{"env-neither", func(x *v1alpha1.Container) { x.Spec.Env = []v1alpha1.ContainerEnvVar{{Name: "A"}} }, "set exactly one of value and valueFrom"},
-		{"env-name", func(x *v1alpha1.Container) { x.Spec.Env = []v1alpha1.ContainerEnvVar{{Name: "1=A", Value: "1"}} }, "spec.env"},
+		{"env-name", func(x *v1alpha1.Container) {
+			x.Spec.Env = []v1alpha1.ContainerEnvVar{{Name: "1=A", Value: ptr.To("1")}}
+		}, "spec.env"},
 		{"env-duplicate", func(x *v1alpha1.Container) {
-			x.Spec.Env = []v1alpha1.ContainerEnvVar{{Name: "A", Value: "1"}, {Name: "A", Value: "2"}}
+			x.Spec.Env = []v1alpha1.ContainerEnvVar{{Name: "A", Value: ptr.To("1")}, {Name: "A", Value: ptr.To("2")}}
 		}, "Duplicate value"},
 		{"request-above-limit", func(x *v1alpha1.Container) {
 			x.Spec.Resources.Requests.CPU = ptr.To(resource.MustParse("2"))

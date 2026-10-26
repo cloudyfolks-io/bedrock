@@ -77,10 +77,11 @@ func imageIssues(spec v1alpha1.VirtualMachineSpec) []Issue {
 }
 
 func rootDiskIssues(root v1alpha1.VMRootDisk) []Issue {
+	issues := serialIssues("spec.rootDisk.serial", root.Serial, maxDiskSerialLength)
 	if root.VolumeRef == "" {
-		return nil
+		return issues
 	}
-	return subdomainIssues("spec.rootDisk.volumeRef", root.VolumeRef)
+	return append(issues, subdomainIssues("spec.rootDisk.volumeRef", root.VolumeRef)...)
 }
 
 func diskIssues(disks []v1alpha1.VMDisk) []Issue {
