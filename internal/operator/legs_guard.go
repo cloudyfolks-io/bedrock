@@ -16,20 +16,45 @@ import (
 
 const (
 	reasonLegsGuarded  = "Guarded"
+	reasonHostsOpen    = "HostsNotGuarded"
 	reasonNoTenantLegs = "NoTenantLegs"
 	reasonLegMissing   = "LegInterfaceMissing"
 )
 
-func missingLegs(hosts []v1alpha1.Host) []string {
-	var missing []string
-	for _, h := range hosts {
-		cond := meta.FindStatusCondition(h.Status.Conditions, v1alpha1.ConditionTenantLegsPresent)
-		if cond != nil && cond.Status == metav1.ConditionFalse && cond.Reason == reasonLegMissing {
-			missing = append(missing, fmt.Sprintf("host %s: interface %s", h.Name, cond.Message))
+func hostGuardGaps(host v1alpha1.Host) (string, bool) {
+	legs := meta.FindStatusCondition(host.Status.Conditions, v1alpha1.ConditionTenantLegsPresent)
+	switch {
+	case legs != nil && legs.Status == metav1.ConditionFalse && legs.Reason == reasonLegMissing:
+		return "interface " + legs.Message, true
+	case !host.Spec.Management.Enabled:
+		return "", false
+	case !meta.IsStatusConditionTrue(host.Status.Conditions, v1alpha1.ConditionManagementApplied):
+		return "guard not applied", true
+	case legs == nil:
+		return "tenant legs not reported", true
+	case legs.Status != metav1.ConditionTrue:
+		return "tenant legs " + legs.Reason, true
+	}
+	return "", false
+}
+
+func (r *ClusterReconciler) hostsWithoutGuard(ctx context.Context) (string, []string, error) {
+	var hosts v1alpha1.HostList
+	if err := r.APIReader.List(ctx, &hosts); err != nil {
+		return "", nil, err
+	}
+	reason := reasonHostsOpen
+	var open []string
+	for _, host := range hosts.Items {
+		if gap, found := hostGuardGaps(host); found {
+			if strings.HasPrefix(gap, "interface ") {
+				reason = reasonLegMissing
+			}
+			open = append(open, fmt.Sprintf("host %s: %s", host.Name, gap))
 		}
 	}
-	slices.Sort(missing)
-	return missing
+	slices.Sort(open)
+	return reason, open, nil
 }
 
 func (r *ClusterReconciler) reconcileTenantLegs(ctx context.Context) error {
@@ -40,17 +65,15 @@ func (r *ClusterReconciler) reconcileTenantLegs(ctx context.Context) error {
 	previous := meta.FindStatusCondition(cluster.Status.Conditions, v1alpha1.ConditionTenantLegsGuarded)
 	switch {
 	case len(cluster.Spec.TenantLegs) > 0:
-		var hosts v1alpha1.HostList
-		if err := r.APIReader.List(ctx, &hosts); err != nil {
+		reason, open, err := r.hostsWithoutGuard(ctx)
+		if err != nil {
 			return err
 		}
-		if missing := missingLegs(hosts.Items); len(missing) > 0 {
-			message := "a tenant leg interface does not exist: " + strings.Join(missing, "; ")
-			return r.writeStatus(ctx, func(s *v1alpha1.ClusterStatus) {
-				setCondition(s, v1alpha1.ConditionTenantLegsGuarded, metav1.ConditionFalse, reasonLegMissing, message, cluster.Generation)
-			})
-		}
 		return r.writeStatus(ctx, func(s *v1alpha1.ClusterStatus) {
+			if len(open) > 0 {
+				setCondition(s, v1alpha1.ConditionTenantLegsGuarded, metav1.ConditionFalse, reason, "hosts without the guard: "+strings.Join(open, "; "), cluster.Generation)
+				return
+			}
 			setCondition(s, v1alpha1.ConditionTenantLegsGuarded, metav1.ConditionTrue, reasonLegsGuarded, "", cluster.Generation)
 		})
 	case previous != nil && previous.Status == metav1.ConditionTrue:
