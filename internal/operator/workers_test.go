@@ -28,8 +28,8 @@ func TestWorkerOrderAndSteps(t *testing.T) {
 	}{
 		"worker":                 {hostWithRoles("w-a", v1alpha1.RoleWorkload), []string{v1alpha1.StepPreload, v1alpha1.StepK0sUpdate, v1alpha1.StepAgentUpdate, v1alpha1.StepReboot}},
 		"worker in a window":     {windowed(hostWithRoles("w-a", v1alpha1.RoleCephOSD)), []string{v1alpha1.StepPreload, v1alpha1.StepK0sUpdate, v1alpha1.StepAgentUpdate, v1alpha1.StepOSUpdate, v1alpha1.StepReboot}},
-		"controller":             {hostWithRoles("cp-a", v1alpha1.RoleControlPlane, v1alpha1.RoleWorkload), []string{v1alpha1.StepPreload, v1alpha1.StepAgentUpdate, v1alpha1.StepReboot}},
-		"controller in a window": {windowed(hostWithRoles("cp-a", v1alpha1.RoleControlPlane)), []string{v1alpha1.StepPreload, v1alpha1.StepAgentUpdate, v1alpha1.StepOSUpdate, v1alpha1.StepReboot}},
+		"controller":             {hostWithRoles("cp-a", v1alpha1.RoleControlPlane, v1alpha1.RoleWorkload), []string{v1alpha1.StepPreload, v1alpha1.StepAgentUpdate, v1alpha1.StepK0sUpdate, v1alpha1.StepReboot}},
+		"controller in a window": {windowed(hostWithRoles("cp-a", v1alpha1.RoleControlPlane)), []string{v1alpha1.StepPreload, v1alpha1.StepAgentUpdate, v1alpha1.StepK0sUpdate, v1alpha1.StepOSUpdate, v1alpha1.StepReboot}},
 	}
 	for name, tc := range cases {
 		t.Run(name, func(t *testing.T) {
@@ -125,11 +125,11 @@ func TestWorkersPhase(t *testing.T) {
 		t.Fatal(err)
 	}
 	run(phaseResult{Message: "workers: node-a drained"})
-	if steps := getNodeUpgrade(t, ctx, c, "node-a").Spec.Steps; !slices.Equal(steps, []string{v1alpha1.StepPreload, v1alpha1.StepAgentUpdate, v1alpha1.StepReboot}) {
+	if steps := getNodeUpgrade(t, ctx, c, "node-a").Spec.Steps; !slices.Equal(steps, []string{v1alpha1.StepPreload, v1alpha1.StepAgentUpdate, v1alpha1.StepK0sUpdate, v1alpha1.StepReboot}) {
 		t.Fatalf("node-a steps %v", steps)
 	}
-	finishSteps(t, ctx, c, "node-a", v1alpha1.StepAgentUpdate)
-	run(phaseResult{Message: "workers: updating node-a: Preload Succeeded, AgentUpdate Succeeded, Reboot Pending"})
+	finishSteps(t, ctx, c, "node-a", v1alpha1.StepAgentUpdate, v1alpha1.StepK0sUpdate)
+	run(phaseResult{Message: "workers: updating node-a: Preload Succeeded, AgentUpdate Succeeded, K0sUpdate Succeeded, Reboot Pending"})
 	finishSteps(t, ctx, c, "node-a", v1alpha1.StepReboot)
 	run(phaseResult{Message: "workers: waiting for k0s v1.36.3+k0s.0 on node-a"})
 	setK0sVersion(t, ctx, c, "node-a", targetK0s)
@@ -177,7 +177,7 @@ func TestWorkersPhaseOnASingleNode(t *testing.T) {
 	createPod(t, ctx, c, web)
 	createClusterWithStatus(t, ctx, c, "v2", upgradeStatusIn(v1alpha1.PhaseWorkers))
 	env := upgradeEnv{Client: c}
-	for _, want := range []string{"workers: node-a drain skipped", "workers: updating node-a: Preload Succeeded, AgentUpdate Pending, Reboot Pending"} {
+	for _, want := range []string{"workers: node-a drain skipped", "workers: updating node-a: Preload Succeeded, AgentUpdate Pending, K0sUpdate Pending, Reboot Pending"} {
 		got, err := workers(ctx, env, getCluster(t, ctx, c))
 		if err != nil || got != (phaseResult{Message: want}) {
 			t.Fatalf("result %+v err %v, want %q", got, err, want)

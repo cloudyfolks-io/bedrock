@@ -38,14 +38,10 @@ func workerOrder(hosts []v1alpha1.Host) []string {
 }
 
 func updateSteps(host v1alpha1.Host) []string {
-	return slices.Concat([]string{v1alpha1.StepPreload}, k0sSteps(host), []string{v1alpha1.StepAgentUpdate}, osSteps(host), []string{v1alpha1.StepReboot})
-}
-
-func k0sSteps(host v1alpha1.Host) []string {
 	if v1alpha1.HostHasRole(host, v1alpha1.RoleControlPlane) {
-		return nil
+		return slices.Concat([]string{v1alpha1.StepPreload, v1alpha1.StepAgentUpdate, v1alpha1.StepK0sUpdate}, osSteps(host), []string{v1alpha1.StepReboot})
 	}
-	return []string{v1alpha1.StepK0sUpdate}
+	return slices.Concat([]string{v1alpha1.StepPreload, v1alpha1.StepK0sUpdate, v1alpha1.StepAgentUpdate}, osSteps(host), []string{v1alpha1.StepReboot})
 }
 
 func osSteps(host v1alpha1.Host) []string {
