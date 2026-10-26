@@ -625,14 +625,14 @@ services_settings() {
 
 services_checks() {
   local identity
-  services_settings services 203.0.113.240/29 203.0.113.10
+  services_settings services 203.0.115.240/29 203.0.112.10
   wait_not_empty 180 get network "$TENANT" -o jsonpath='{.status.servicesIdentity}'
   wait_reason 180 network "$TENANT" ExternalReady Connected
   identity=$(kubectl get network "$TENANT" -o jsonpath='{.status.servicesIdentity}')
   case "$identity" in
-  203.0.113.24[1-6]) ;;
+  203.0.115.24[1-6]) ;;
   *)
-    echo "services identity $identity is not a usable address of 203.0.113.240/29" >&2
+    echo "services identity $identity is not a usable address of 203.0.115.240/29" >&2
     return 1
     ;;
   esac

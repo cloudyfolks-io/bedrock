@@ -5,6 +5,7 @@ import (
 	"net/netip"
 	"slices"
 	"strconv"
+	"strings"
 
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 
@@ -154,6 +155,18 @@ func servicesACLs(cfg Config, pn v1alpha1.ProviderNetworkSpec) ([]fabric.ACL, er
 	if pool.Bits() < servicesVIPPrefixBits {
 		vips = netip.PrefixFrom(pool.Addr(), servicesVIPPrefixBits)
 	}
-	match := fmt.Sprintf("ip4.src == %[1]s && ip4.src != %[2]s && ip4.dst == %[1]s && ip4.dst != %[2]s", pool, vips)
+	exempt := []string{vips.String()}
+	if cfg.DatabaseVIPRange != "" && insidePool(cfg.DatabaseVIPRange, pn) {
+		exempt = append(exempt, cfg.DatabaseVIPRange)
+	}
+	match := fmt.Sprintf("%s && %s", exemptClause("ip4.src", pool.String(), exempt), exemptClause("ip4.dst", pool.String(), exempt))
 	return []fabric.ACL{{Direction: servicesACLDirection, Priority: servicesACLPriority, Match: match, Action: servicesACLAction}}, nil
+}
+
+func exemptClause(field, pool string, exempt []string) string {
+	clauses := []string{field + " == " + pool}
+	for _, prefix := range exempt {
+		clauses = append(clauses, field+" != "+prefix)
+	}
+	return strings.Join(clauses, " && ")
 }

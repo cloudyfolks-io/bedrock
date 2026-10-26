@@ -52,11 +52,23 @@ func lowestName(pns []v1alpha1.ProviderNetworkSpec, keep func(v1alpha1.ProviderN
 	return slices.Min(names)
 }
 
+func explicitCarrier(iface string, pns []v1alpha1.ProviderNetworkSpec) string {
+	for _, pn := range pns {
+		if pn.Interface == iface && pn.ProviderName != "" {
+			return pn.ProviderName
+		}
+	}
+	return ""
+}
+
 func carrierFor(iface string, pns []v1alpha1.ProviderNetworkSpec, existing []*unstructured.Unstructured) string {
 	owners := slices.DeleteFunc(slices.Clone(existing), func(o *unstructured.Unstructured) bool {
 		return o.GetKind() != "ProviderNetwork" || interfaceOf(o) != iface
 	})
 	if len(owners) == 0 {
+		if named := explicitCarrier(iface, pns); named != "" {
+			return named
+		}
 		return lowestName(pns, func(pn v1alpha1.ProviderNetworkSpec) bool { return pn.Interface == iface })
 	}
 	slices.SortFunc(owners, func(x, y *unstructured.Unstructured) int {

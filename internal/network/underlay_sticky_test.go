@@ -126,7 +126,7 @@ func TestRenderUnderlayIrCentralLayout(t *testing.T) {
 			t.Fatalf("subnet %s", subnet)
 		}
 	}
-	requireDropACL(t, got["Subnet/provider-services"])
+	requireACLMatch(t, got["Subnet/provider-services"], "ip4.src == 100.66.0.0/15 && ip4.src != 100.66.0.0/24 && ip4.dst == 100.66.0.0/15 && ip4.dst != 100.66.0.0/24")
 }
 
 func mapValues(m map[string]*unstructured.Unstructured) []*unstructured.Unstructured {

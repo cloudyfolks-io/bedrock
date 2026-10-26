@@ -336,11 +336,16 @@ The router port and the entry in `extraExternalSubnets` stay.
 When you delete a Network, the controller deletes these objects before it deletes the Vpc.
 
 Each provider network with the role `services` has an ACL with the direction `to-lport` and the priority 2000.
-It drops traffic when the source and the destination are both in the provider network and both outside the first /24.
+It drops traffic when the source and the destination are both in the provider network and both outside the first /24, and outside `database.vip-range`.
+The range is exempt only when it is inside the provider network.
+The database proxy of a tenant reaches its gate address in `database.vip-range` from the identity address, so the ACL must not drop this traffic.
+The identity range is not exempt: traffic between two identity addresses stays dropped, so Networks stay isolated.
+If `database.vip-range` is set and is not inside the provider network with the role `services`, the services plane is not configured and the reason is `ServicesNotConfigured`.
 So guests of different Networks cannot reach each other on the plane, but they can reach the services, and the services can reach them.
 This isolation is a security boundary.
 The operator always renders the ACL for a provider network with the role `services`, and no Setting turns it off.
-For the CIDR `100.66.0.0/15` the match is `ip4.src == 100.66.0.0/15 && ip4.src != 100.66.0.0/24 && ip4.dst == 100.66.0.0/15 && ip4.dst != 100.66.0.0/24`.
+For the CIDR `100.66.0.0/15` with no other range inside it, the match is `ip4.src == 100.66.0.0/15 && ip4.src != 100.66.0.0/24 && ip4.dst == 100.66.0.0/15 && ip4.dst != 100.66.0.0/24`.
+With `database.vip-range` `100.66.16.0/21`, each side also has `!= 100.66.16.0/21`.
 In bgp mode a provider network with the role `services` has a `Vlan`, as the transit network has.
 The ACL, the `ProviderNetwork` and the `Vlan` depend on the role only, so a wrong Setting never removes them.
 
@@ -658,6 +663,11 @@ Never write a rule that isolates tenants by their address.
 A host can have a leg in a tenant-facing provider network.
 A leg is a VLAN interface of the host, for example `br-public.30` for the transit network and `br-public.20` for the services plane.
 Bedrock does not create the leg.
+The name of the leg starts with the host bridge of the carrier provider network: `br-<carrier>`.
+The carrier is the provider network that Bedrock makes for an interface, and by default it has the lowest pool name on that interface.
+To choose the name, set `providerName` on the pools of the interface, for example `providerName: public` for `br-public`.
+All pools of one interface must have the same `providerName`, and two interfaces must not share one.
+A provider network that already exists on the interface keeps its name, and `providerName` does not rename it.
 Make the leg with the `nmstate` field of the Host or with your own unit.
 Bedrock guards the leg.
 
@@ -700,11 +710,14 @@ If you remove all legs, the agent removes the unit, the file and the table.
 This is allowed, but the guard is then gone on every host.
 The operator sets the condition `TenantLegsGuarded` of the `Cluster` to `False` with the reason `NoTenantLegs` and raises a Warning event.
 While the list is not empty, the condition is `True`.
+Each agent sets the condition `TenantLegsPresent` of its `Host`.
+If a listed leg interface does not exist on the host, the condition is `False` with the reason `LegInterfaceMissing` and the interface names in the message.
+In that case the operator sets `TenantLegsGuarded` to `False` with the reason `LegInterfaceMissing`, and the message names each host and interface.
 The agent needs the `nftables` package, and the operator adds it to the packages of the `HostConfig` when the list is not empty.
 
 A host that came from the legacy Ansible roles already has the table `inet tenant_legs` and the unit `tenant-legs.service`.
 The two tables do not conflict, because each one has its own name and both only drop.
-After the cutover, remove the legacy unit by hand on every host: `systemctl disable --now tenant-legs.service`, then delete `/etc/nftables.d/tenant-legs.nft` and the unit file.
+Remove the legacy unit by hand only after `TenantLegsGuarded` is `True` and the counters of `bedrock_legs` go up on every host: `systemctl disable --now tenant-legs.service`, then delete `/etc/nftables.d/tenant-legs.nft` and the unit file.
 Bedrock does not remove them.
 
 ### NodePort scope
@@ -722,6 +735,7 @@ Then it reads the object again, and the condition `NodePortsScoped` of the `Clus
 The condition is `False` with the reason `NoManagementCIDR`, `K0sConfigUnavailable`, `PatchFailed` or `NotApplied` when the setting is not in place.
 k0s applies the change to kube-proxy by itself, and no restart is needed.
 For a cluster that you made before this setting existed, set `spec.managementCIDR` of the `Cluster`.
+`bedrock upgrade` prints a warning, and does not stop, if `spec.managementCIDR` or `spec.tenantLegs` is empty and a provider network has the role `transit` or `services`.
 For an adopted cluster, use the value of the old `k0s_kube_proxy_node_port_addresses`.
 
 ### Switch rules

@@ -127,6 +127,10 @@ spec:
                               type: string
                             name:
                               type: string
+                            providerName:
+                              maxLength: 30
+                              pattern: ^[a-z0-9]([-a-z0-9]*[a-z0-9])?$
+                              type: string
                             role:
                               enum:
                               - tenant

@@ -35,6 +35,8 @@ const (
 	keyServicesIdentityRange   = "network.services.identity-range"
 	keyServicesResolver        = "network.services.resolver"
 
+	keyDatabaseVIPRange = "database.vip-range"
+
 	keyLBCIDR    = "network.load-balancer.cidr"
 	keyLBGateway = "network.load-balancer.gateway"
 
@@ -77,6 +79,7 @@ type Config struct {
 	MTU              int
 	PeeringRange     string
 	Services         Services
+	DatabaseVIPRange string
 	LoadBalancer     LoadBalancerPlane
 
 	ReservedCIDRs       []string
@@ -121,6 +124,7 @@ func ParseConfig(values map[string]string) (Config, error) {
 		PeeringRange:     effective[keyPeeringRange],
 		Services:         Services{ProviderNetwork: effective[keyServicesProviderNetwork], IdentityRange: effective[keyServicesIdentityRange], Resolver: effective[keyServicesResolver]},
 		LoadBalancer:     plane,
+		DatabaseVIPRange: values[keyDatabaseVIPRange],
 
 		ReservedCIDRs:       splitList(effective[keyReservedCIDRs]),
 		SubnetAllowedRanges: splitList(effective[keySubnetAllowedRanges]),

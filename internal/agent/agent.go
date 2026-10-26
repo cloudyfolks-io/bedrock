@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
@@ -222,9 +224,10 @@ func tick(ctx context.Context, c client.Client, deps Deps) (inventoryErr, writeE
 	}
 	var conditions []metav1.Condition
 	if current.Spec.Management.Enabled {
-		applied, managed := manage(ctx, c, deps, current)
+		applied, managed, legs := manage(ctx, c, deps, current)
 		next.Applied = applied
 		conditions = append(conditions, managed, maintain(ctx, deps, current))
+		conditions = append(conditions, legsPresence(deps, legs, current.Generation)...)
 	} else {
 		conditions = append(conditions, condition(v1alpha1.ConditionManagementApplied, metav1.ConditionFalse, "ManagementDisabled", "", current.Generation))
 	}
@@ -245,14 +248,14 @@ func reportTime(previous *metav1.Time, deps Deps) *metav1.Time {
 	return &reported
 }
 
-func manage(ctx context.Context, c client.Client, deps Deps, current v1alpha1.Host) (*v1alpha1.AppliedConfig, metav1.Condition) {
+func manage(ctx context.Context, c client.Client, deps Deps, current v1alpha1.Host) (*v1alpha1.AppliedConfig, metav1.Condition, []v1alpha1.TenantLegSpec) {
 	var config v1alpha1.HostConfig
 	err := c.Get(ctx, client.ObjectKey{Name: deps.Node}, &config)
 	if errors.IsNotFound(err) {
-		return current.Status.Applied, condition(v1alpha1.ConditionManagementApplied, metav1.ConditionFalse, "NoHostConfig", "no HostConfig for this host yet", current.Generation)
+		return current.Status.Applied, condition(v1alpha1.ConditionManagementApplied, metav1.ConditionFalse, "NoHostConfig", "no HostConfig for this host yet", current.Generation), nil
 	}
 	if err != nil {
-		return current.Status.Applied, condition(v1alpha1.ConditionManagementApplied, metav1.ConditionFalse, "ReadFailed", err.Error(), current.Generation)
+		return current.Status.Applied, condition(v1alpha1.ConditionManagementApplied, metav1.ConditionFalse, "ReadFailed", err.Error(), current.Generation), nil
 	}
 	applied := current.Status.Applied
 	hostDeps := hostconfig.Deps{Exec: deps.Exec, Root: deps.Root, Packages: deps.Packages}
@@ -260,12 +263,28 @@ func manage(ctx context.Context, c client.Client, deps Deps, current v1alpha1.Ho
 		steps := deps.Apply(ctx, hostDeps, config.Spec)
 		applied = &v1alpha1.AppliedConfig{Generation: config.Generation, Steps: steps}
 	} else if err := deps.Guard(ctx, hostDeps, config.Spec); err != nil {
-		return applied, condition(v1alpha1.ConditionManagementApplied, metav1.ConditionFalse, "GuardFailed", err.Error(), current.Generation)
+		return applied, condition(v1alpha1.ConditionManagementApplied, metav1.ConditionFalse, "GuardFailed", err.Error(), current.Generation), config.Spec.TenantLegs
 	}
 	if hostconfig.Failed(applied.Steps) {
-		return applied, condition(v1alpha1.ConditionManagementApplied, metav1.ConditionFalse, "StepFailed", firstFailure(applied.Steps), current.Generation)
+		return applied, condition(v1alpha1.ConditionManagementApplied, metav1.ConditionFalse, "StepFailed", firstFailure(applied.Steps), current.Generation), config.Spec.TenantLegs
 	}
-	return applied, condition(v1alpha1.ConditionManagementApplied, metav1.ConditionTrue, "Applied", "", current.Generation)
+	return applied, condition(v1alpha1.ConditionManagementApplied, metav1.ConditionTrue, "Applied", "", current.Generation), config.Spec.TenantLegs
+}
+
+func legsPresence(deps Deps, legs []v1alpha1.TenantLegSpec, generation int64) []metav1.Condition {
+	if len(legs) == 0 {
+		return nil
+	}
+	var missing []string
+	for _, leg := range legs {
+		if _, err := os.Stat(filepath.Join(deps.Root, "sys", "class", "net", leg.Interface)); err != nil {
+			missing = append(missing, leg.Interface)
+		}
+	}
+	if len(missing) > 0 {
+		return []metav1.Condition{condition(v1alpha1.ConditionTenantLegsPresent, metav1.ConditionFalse, "LegInterfaceMissing", strings.Join(missing, ","), generation)}
+	}
+	return []metav1.Condition{condition(v1alpha1.ConditionTenantLegsPresent, metav1.ConditionTrue, "Present", "", generation)}
 }
 
 func maintain(ctx context.Context, deps Deps, current v1alpha1.Host) metav1.Condition {

@@ -23,6 +23,7 @@ import (
 
 	"github.com/cloudyfolks-io/bedrock/api/v1alpha1"
 	"github.com/cloudyfolks-io/bedrock/internal/depot"
+	"github.com/cloudyfolks-io/bedrock/internal/network"
 	"github.com/cloudyfolks-io/bedrock/internal/release"
 	"github.com/cloudyfolks-io/bedrock/internal/settings"
 )
@@ -125,6 +126,9 @@ func RunUpgrade(ctx context.Context, o upgradeOptions, deps UpgradeDeps, stdout,
 	if err := requirePlatformHost(ctx, c); err != nil {
 		return fail(stderr, err)
 	}
+	if err := warnNetworkScope(ctx, c, cluster, stderr); err != nil {
+		return fail(stderr, err)
+	}
 	since, err := requestUpgrade(ctx, c, cluster, o, deps, stdout)
 	if err != nil {
 		return fail(stderr, err)
@@ -143,6 +147,35 @@ func requirePlatformHost(ctx context.Context, c client.Client) error {
 	}
 	if host.Spec.Value == "" {
 		return fmt.Errorf("the cluster has no platform.host; set it before the upgrade: %s", settings.PlatformHostPatchCommand)
+	}
+	return nil
+}
+
+func networkScopeWarnings(cluster v1alpha1.Cluster, pools []v1alpha1.ProviderNetworkSpec) []string {
+	scoped := slices.ContainsFunc(pools, func(pn v1alpha1.ProviderNetworkSpec) bool {
+		return pn.Role == v1alpha1.ProviderRoleTransit || pn.Role == v1alpha1.ProviderRoleServices
+	})
+	var warnings []string
+	if scoped && cluster.Spec.ManagementCIDR == "" {
+		warnings = append(warnings, "warning: spec.managementCIDR is empty, NodePorts stay open on the transit and services networks")
+	}
+	if scoped && len(cluster.Spec.TenantLegs) == 0 {
+		warnings = append(warnings, "warning: spec.tenantLegs is empty, the hosts do not guard the legs of the transit and services networks")
+	}
+	return warnings
+}
+
+func warnNetworkScope(ctx context.Context, c client.Client, cluster v1alpha1.Cluster, stderr io.Writer) error {
+	var setting v1alpha1.Setting
+	if err := c.Get(ctx, client.ObjectKey{Name: network.SettingProviderNetworks}, &setting); client.IgnoreNotFound(err) != nil {
+		return err
+	}
+	pools, err := settings.DecodeProviderNetworks(setting.Spec.Value)
+	if err != nil {
+		return err
+	}
+	for _, warning := range networkScopeWarnings(cluster, pools) {
+		fmt.Fprintln(stderr, warning)
 	}
 	return nil
 }
