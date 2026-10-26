@@ -292,6 +292,16 @@ func (r Resolver) stepRuntime(ctx context.Context, _ v1alpha1.Container, in reso
 	return in, nil, nil
 }
 
+func hasDockerConfig(secret corev1.Secret) bool {
+	switch secret.Type {
+	case corev1.SecretTypeDockerConfigJson:
+		return len(secret.Data[corev1.DockerConfigJsonKey]) != 0
+	case corev1.SecretTypeDockercfg:
+		return len(secret.Data[corev1.DockerConfigKey]) != 0
+	}
+	return false
+}
+
 func (r Resolver) stepPullSecrets(ctx context.Context, c v1alpha1.Container, in resolved) (resolved, *Gate, error) {
 	reader := r.Secrets
 	if reader == nil {
@@ -306,8 +316,8 @@ func (r Resolver) stepPullSecrets(ctx context.Context, c v1alpha1.Container, in 
 		if err != nil {
 			return in, nil, err
 		}
-		if secret.Type != corev1.SecretTypeDockerConfigJson && secret.Type != corev1.SecretTypeDockercfg {
-			return in, gateOf(ReasonSecretTypeInvalid, "the pull secret %q must have the type %s or %s; a registry credential that adopted a robot has no password until the annotation bedrock.cloudyfolks.io/reset-secret gets a new value", name, corev1.SecretTypeDockerConfigJson, corev1.SecretTypeDockercfg), nil
+		if !hasDockerConfig(secret) {
+			return in, gateOf(ReasonSecretTypeInvalid, "the pull secret %q must have the type %s with the key %s, or the type %s with the key %s; a registry credential that adopted a robot has no password until the annotation bedrock.cloudyfolks.io/reset-secret gets a new value", name, corev1.SecretTypeDockerConfigJson, corev1.DockerConfigJsonKey, corev1.SecretTypeDockercfg, corev1.DockerConfigKey), nil
 		}
 	}
 	return in, nil, nil

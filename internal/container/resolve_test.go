@@ -325,6 +325,24 @@ func TestResolveRefusesAPullSecretWithoutADockerConfig(t *testing.T) {
 	requireGate(t, gate, ReasonSecretTypeInvalid)
 }
 
+func TestHasDockerConfigNeedsTheKeyOfTheType(t *testing.T) {
+	cases := []struct {
+		secret corev1.Secret
+		want   bool
+	}{
+		{corev1.Secret{Type: corev1.SecretTypeDockerConfigJson, Data: map[string][]byte{corev1.DockerConfigJsonKey: []byte("{}")}}, true},
+		{corev1.Secret{Type: corev1.SecretTypeDockercfg, Data: map[string][]byte{corev1.DockerConfigKey: []byte("{}")}}, true},
+		{corev1.Secret{Type: corev1.SecretTypeDockerConfigJson}, false},
+		{corev1.Secret{Type: corev1.SecretTypeDockercfg, Data: map[string][]byte{corev1.DockerConfigJsonKey: []byte("{}")}}, false},
+		{corev1.Secret{Type: corev1.SecretTypeOpaque, Data: map[string][]byte{"username": []byte("robot")}}, false},
+	}
+	for i, tc := range cases {
+		if got := hasDockerConfig(tc.secret); got != tc.want {
+			t.Errorf("case %d: got %v", i, got)
+		}
+	}
+}
+
 func TestVolumeHolderPrefersTheOldestConsumer(t *testing.T) {
 	at := func(seconds int) metav1.Time {
 		return metav1.NewTime(time.Date(2026, 10, 19, 10, 0, seconds, 0, time.UTC))
