@@ -189,12 +189,13 @@ func (r *CredentialReconciler) holderOf(ctx context.Context, credential *v1alpha
 }
 
 func (r *CredentialReconciler) takeOver(ctx context.Context, credential *v1alpha1.RegistryCredential, registry *v1alpha1.Registry, hc *harbor.Client, got robotFacts, robot harbor.Robot) (robotFacts, result, error) {
+	sameRobot := credential.Status.RobotID == robot.ID
 	if err := r.recordRobot(ctx, credential, robotNameOf(credential), robot.ID); err != nil {
 		return got, result{}, err
 	}
 	got.robotName, got.robotID, got.username = robotNameOf(credential), robot.ID, robot.Name
 	got.secretReset = credential.Annotations[AnnotationResetSecret]
-	if r.secretIsValid(ctx, credential, robot.Name, registry.Status.Host) {
+	if sameRobot && r.secretIsValid(ctx, credential, robot.Name, registry.Status.Host) {
 		got.secretKept = false
 		got.secretName = SecretName(credential)
 		return got, readyRobot(credential), nil

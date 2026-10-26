@@ -379,6 +379,26 @@ func TestCredentialRotatedAfterAdoptionSurvivesARegistryBlip(t *testing.T) {
 	}
 }
 
+func TestCredentialAdoptionDropsTheSecretOfARecreatedRobot(t *testing.T) {
+	state, r, c := adoptedCredential(t)
+	credential := fetchCredential(t, c, "ci")
+	credential.Annotations[AnnotationResetSecret] = "rotate"
+	if err := c.Update(context.Background(), credential); err != nil {
+		t.Fatal(err)
+	}
+	reconcileCredential(t, r, "ci")
+	state.project("acme-images").robots = []fakeRobot{{id: 701, name: "ci", secret: "theirs", created: time.Now()}}
+	reconcileCredential(t, r, "ci")
+	secret := dockerSecret(t, c, "ci")
+	got := fetchCredential(t, c, "ci")
+	if _, has := secret.Data["password"]; has || secret.Type != corev1.SecretTypeOpaque || got.Status.RobotID != 701 {
+		t.Fatalf("type %s keys %v robot %d", secret.Type, secret.Data, got.Status.RobotID)
+	}
+	if kept := meta.FindStatusCondition(got.Status.Conditions, "SecretKept"); kept == nil || kept.Status != metav1.ConditionTrue {
+		t.Errorf("condition %+v", kept)
+	}
+}
+
 func TestCredentialWaitsForTheRegistry(t *testing.T) {
 	state := newHarborState(t)
 	c := fakeCluster(t, addonObject("registry", true), adminSecretObject(), namespaceObject(tenantNamespace), credentialFor("ci", "pull"))
