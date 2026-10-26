@@ -141,6 +141,12 @@ func TestCoreDNSReleaseDeploymentSpreadsReplicasAndDropsRoot(t *testing.T) {
 	if nonRoot, _, _ := unstructured.NestedBool(container, "securityContext", "runAsNonRoot"); !nonRoot {
 		t.Fatalf("securityContext %v", container["securityContext"])
 	}
+	if user, _, _ := unstructured.NestedFieldNoCopy(container, "securityContext", "runAsUser"); fmt.Sprint(user) != "65532" {
+		t.Fatalf("runAsNonRoot needs a numeric runAsUser, got %v", user)
+	}
+	if group, _, _ := unstructured.NestedFieldNoCopy(container, "securityContext", "runAsGroup"); fmt.Sprint(group) != "65532" {
+		t.Fatalf("runAsGroup %v", group)
+	}
 	capabilities, _, _ := unstructured.NestedStringSlice(container, "securityContext", "capabilities", "add")
 	if len(capabilities) != 1 || capabilities[0] != "NET_BIND_SERVICE" {
 		t.Fatalf("capabilities %v", capabilities)
