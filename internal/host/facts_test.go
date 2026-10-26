@@ -210,8 +210,28 @@ func TestInterfaceCIDRNeedsAPrefixLength(t *testing.T) {
 	}
 }
 
-func TestInterfaceCIDRRefusesSeveralAddresses(t *testing.T) {
-	exec := &FakeExec{Responses: map[string]string{"ip -json -4 addr show dev eth0": `[{"addr_info":[{"family":"inet","local":"10.0.10.10","prefixlen":32},{"family":"inet","local":"10.0.10.11","prefixlen":24}]}]`}}
+func addrExec(addrs string) *FakeExec {
+	return &FakeExec{Responses: map[string]string{"ip -json -4 addr show dev eth0": `[{"addr_info":[` + addrs + `]}]`}}
+}
+
+func TestInterfaceCIDRIgnoresHostAddresses(t *testing.T) {
+	exec := addrExec(`{"family":"inet","local":"192.168.5.15","prefixlen":24},{"family":"inet","local":"192.168.5.250","prefixlen":32}`)
+	got, err := InterfaceCIDR(context.Background(), exec, "eth0")
+	if err != nil || got != "192.168.5.0/24" {
+		t.Fatalf("cidr %q err %v", got, err)
+	}
+}
+
+func TestInterfaceCIDRRefusesSeveralNetworks(t *testing.T) {
+	exec := addrExec(`{"family":"inet","local":"10.0.10.11","prefixlen":24},{"family":"inet","local":"10.0.20.11","prefixlen":24}`)
+	_, err := InterfaceCIDR(context.Background(), exec, "eth0")
+	if err == nil || !strings.Contains(err.Error(), "managementCIDR") {
+		t.Fatalf("err %v", err)
+	}
+}
+
+func TestInterfaceCIDRRefusesOnlyHostAddresses(t *testing.T) {
+	exec := addrExec(`{"family":"inet","local":"10.0.10.10","prefixlen":32}`)
 	_, err := InterfaceCIDR(context.Background(), exec, "eth0")
 	if err == nil || !strings.Contains(err.Error(), "managementCIDR") {
 		t.Fatalf("err %v", err)

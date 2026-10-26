@@ -229,6 +229,18 @@ func TestRunInitHappyPath(t *testing.T) {
 	if err != nil || string(vipUnit) != host.VIPUnit("10.0.10.10", "bond0.10") {
 		t.Fatalf("vip unit %q %v", vipUnit, err)
 	}
+	lastShow, replace := -1, -1
+	for i, call := range e.Calls {
+		if call == "ip -json -4 addr show dev bond0.10" {
+			lastShow = i
+		}
+		if call == "ip addr replace 10.0.10.10/32 dev bond0.10" {
+			replace = i
+		}
+	}
+	if lastShow < 0 || replace < 0 || lastShow > replace {
+		t.Fatalf("management CIDR read at %d after the vip at %d", lastShow, replace)
+	}
 	vipEnabled := false
 	for _, call := range e.Calls {
 		if call == "systemctl enable bedrock-vip.service" {
