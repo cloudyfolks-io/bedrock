@@ -189,6 +189,26 @@ func TestEndpointReconcilerMakesAndRemovesTheObjects(t *testing.T) {
 	}
 }
 
+func TestEndpointReconcilerDeletesTheCertificateWhenATLSSecretIsSet(t *testing.T) {
+	c, r := endpointWorld(t, map[string]string{"objectstorage.public-host": "s3.example.test"})
+	if _, err := r.Reconcile(context.Background(), ctrl.Request{}); err != nil {
+		t.Fatal(err)
+	}
+	if !endpointExists(t, c, "cert-manager.io/v1", "Certificate") {
+		t.Fatal("no certificate before the TLS secret")
+	}
+	setting := &v1alpha1.Setting{ObjectMeta: metav1.ObjectMeta{Name: "objectstorage.tls-secret"}, Spec: v1alpha1.SettingSpec{Value: "s3-wildcard"}}
+	if err := c.Create(context.Background(), setting); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := r.Reconcile(context.Background(), ctrl.Request{}); err != nil {
+		t.Fatal(err)
+	}
+	if endpointExists(t, c, "cert-manager.io/v1", "Certificate") || !endpointExists(t, c, "traefik.io/v1alpha1", "IngressRoute") {
+		t.Fatal("the certificate must go and the route must stay")
+	}
+}
+
 func TestEndpointReconcilerDoesNothingWithoutAHost(t *testing.T) {
 	c, r := endpointWorld(t, map[string]string{})
 	if _, err := r.Reconcile(context.Background(), ctrl.Request{}); err != nil {
