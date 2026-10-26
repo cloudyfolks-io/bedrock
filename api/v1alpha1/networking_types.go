@@ -187,6 +187,8 @@ type LoadBalancerStatus struct {
 	CommonStatus `json:",inline"`
 	// +optional
 	Address string `json:"address,omitempty"`
+	// +optional
+	InternalAddress string `json:"internalAddress,omitempty"`
 }
 
 // +kubebuilder:object:root=true

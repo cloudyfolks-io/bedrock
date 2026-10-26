@@ -468,6 +468,8 @@ It has the same `Vip` and `SwitchLBRule` objects as an internal balancer, so ten
 This holds only when all targets use one Subnet.
 A waiting `Vip` does not delay the public rules.
 The field `status.address` stays the ElasticIP address.
+The field `status.internalAddress` shows the address of the `Vip` in the load balancer plane.
+It is empty while Fabric has not allocated the `Vip`, when the targets use more than one Subnet, and for a LoadBalancer without `elasticIPRef`.
 
 A LoadBalancer without `elasticIPRef` is an internal balancer.
 It becomes one Fabric `SwitchLBRule` for each listener and one Fabric `Vip`.

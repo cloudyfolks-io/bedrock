@@ -61,21 +61,26 @@ func (r *LoadBalancerReconciler) Reconcile(ctx context.Context, req reconcile.Re
 	if err != nil {
 		return reconcile.Result{}, err
 	}
-	address, err := r.address(ctx, lb)
+	address, internal, err := r.addresses(ctx, lb)
 	if err != nil {
 		return reconcile.Result{}, err
 	}
-	return r.publish(ctx, lb, cond, idle, requeue, address), nil
+	return r.publish(ctx, lb, cond, idle, requeue, address, internal), nil
 }
 
-func (r *LoadBalancerReconciler) address(ctx context.Context, lb v1alpha1.LoadBalancer) (string, error) {
-	if lb.Spec.ElasticIPRef != "" {
-		eip, v, err := r.elasticIP(ctx, lb)
-		if err != nil || v != nil {
-			return "", err
-		}
-		return eip.Status.Address, nil
+func (r *LoadBalancerReconciler) addresses(ctx context.Context, lb v1alpha1.LoadBalancer) (string, string, error) {
+	vip, err := r.vipAddress(ctx, lb)
+	if err != nil || lb.Spec.ElasticIPRef == "" {
+		return vip, "", err
 	}
+	eip, v, err := r.elasticIP(ctx, lb)
+	if err != nil || v != nil {
+		return "", vip, err
+	}
+	return eip.Status.Address, vip, nil
+}
+
+func (r *LoadBalancerReconciler) vipAddress(ctx context.Context, lb v1alpha1.LoadBalancer) (string, error) {
 	vip, err := getObject(ctx, r.Client, fabric.VipGVK, InternalVipName(lb.Namespace, lb.Name))
 	if apierrors.IsNotFound(err) || (err == nil && !ownedBy(vip, &lb)) {
 		return "", nil
@@ -86,11 +91,11 @@ func (r *LoadBalancerReconciler) address(ctx context.Context, lb v1alpha1.LoadBa
 	return fabric.VipAddress(vip), nil
 }
 
-func (r *LoadBalancerReconciler) publish(ctx context.Context, lb v1alpha1.LoadBalancer, cond metav1.Condition, idle []string, requeue time.Duration, address string) reconcile.Result {
+func (r *LoadBalancerReconciler) publish(ctx context.Context, lb v1alpha1.LoadBalancer, cond metav1.Condition, idle []string, requeue time.Duration, address, internal string) reconcile.Result {
 	body := &v1alpha1.LoadBalancer{
 		TypeMeta:   metav1.TypeMeta{APIVersion: v1alpha1.GroupVersion.String(), Kind: "LoadBalancer"},
 		ObjectMeta: metav1.ObjectMeta{Namespace: lb.Namespace, Name: lb.Name},
-		Status:     v1alpha1.LoadBalancerStatus{CommonStatus: v1alpha1.CommonStatus{ObservedGeneration: lb.Generation, Conditions: withIdle(withCondition(lb.Status.Conditions, cond), lb.Generation, idle)}, Address: address},
+		Status:     v1alpha1.LoadBalancerStatus{CommonStatus: v1alpha1.CommonStatus{ObservedGeneration: lb.Generation, Conditions: withIdle(withCondition(lb.Status.Conditions, cond), lb.Generation, idle)}, Address: address, InternalAddress: internal},
 	}
 	if err := applyStatus(ctx, r.Client, body); err != nil && requeue == 0 {
 		return reconcile.Result{RequeueAfter: waitRequeue}
