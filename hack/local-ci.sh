@@ -344,7 +344,7 @@ run_upgrade() {
 
 run_e2e_upgrade() { run_upgrade "" ""; }
 run_e2e_upgrade_abort() { run_upgrade "" ABORT_IN=ControlPlane; }
-run_e2e_upgrade_from_release() { run_upgrade "VERSION_A_REF=$release_ref" "INIT_A=dist/e2e-init-$version_a.sh ASSERT_AUTHN=1"; }
+run_e2e_upgrade_from_release() { run_upgrade "VERSION_A_REF=$release_ref" "INIT_A=dist/e2e-init-$version_a.sh ASSERT_AUTHN=1 VERSION_A_ARCHIVES=0"; }
 
 cache_size() {
   if [ -d dist/cache ]; then

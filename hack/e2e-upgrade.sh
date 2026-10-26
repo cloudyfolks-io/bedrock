@@ -15,6 +15,7 @@ cli_b=dist/bedrock-$VERSION_B-linux-$arch
 abort_in=${ABORT_IN:-}
 init_a=${INIT_A:-hack/e2e-init.sh}
 assert_authn=${ASSERT_AUTHN:-}
+version_a_archives=${VERSION_A_ARCHIVES:-1}
 export PLATFORM_HOST=${PLATFORM_HOST:-e2e.bedrock.test}
 workdir=$(mktemp -d)
 export KUBECONFIG=/var/lib/k0s/pki/admin.conf
@@ -283,14 +284,16 @@ spec:
   value: "$admin_recipient"
 SETTING
 
-retry_until 300 archived_file "$VERSION_A" "$image_a_file"
-legacy_source=$(compgen -G "/var/lib/bedrock/images/$VERSION_A/*/$image_a_file")
-legacy_sum=$(sha256sum "$legacy_source" | cut -d' ' -f1)
-cp "$legacy_source" "/var/lib/k0s/images/$image_a_file"
-retry_until 300 k0s_images_dir_empty
-test "$(sha256sum "$legacy_source" | cut -d' ' -f1)" = "$legacy_sum"
-retry_until 300 airgap_images_held "$VERSION_A"
-assert_images_pinned "$image_a"
+if [ "$version_a_archives" = 1 ]; then
+  retry_until 300 archived_file "$VERSION_A" "$image_a_file"
+  legacy_source=$(compgen -G "/var/lib/bedrock/images/$VERSION_A/*/$image_a_file")
+  legacy_sum=$(sha256sum "$legacy_source" | cut -d' ' -f1)
+  cp "$legacy_source" "/var/lib/k0s/images/$image_a_file"
+  retry_until 300 k0s_images_dir_empty
+  test "$(sha256sum "$legacy_source" | cut -d' ' -f1)" = "$legacy_sum"
+  retry_until 300 airgap_images_held "$VERSION_A"
+  assert_images_pinned "$image_a"
+fi
 
 "$cli_b" upgrade --to "$VERSION_B" --bundle "$bundle_b" --yes --timeout 2h > "$workdir/upgrade.log" 2>&1 &
 upgrade=$!
@@ -361,11 +364,13 @@ if [ -n "$abort_in" ]; then
   kubectl get host "$node" -o jsonpath='{.status.restore.backup}' | grep -q "^/var/lib/bedrock/backups/bedrock-$VERSION_A-"
   test -n "$(kubectl -n bedrock-system get deploy/bedrock-operator -o jsonpath='{.spec.template.metadata.annotations.kubectl\.kubernetes\.io/restartedAt}')"
   test -n "$(kubectl -n kube-system get daemonset/fabric-cni -o jsonpath='{.spec.template.metadata.annotations.kubectl\.kubernetes\.io/restartedAt}')"
-  archived_file "$VERSION_A" k0s-airgap.tar
   test ! -e "/var/lib/bedrock/images/$VERSION_B"
-  retry_until 300 k0s_images_dir_empty
-  retry_until 300 airgap_images_held "$VERSION_A"
-  assert_images_pinned "$image_a"
+  if [ "$version_a_archives" = 1 ]; then
+    archived_file "$VERSION_A" k0s-airgap.tar
+    retry_until 300 k0s_images_dir_empty
+    retry_until 300 airgap_images_held "$VERSION_A"
+    assert_images_pinned "$image_a"
+  fi
   for _ in $(seq 1 60); do
     if [ -z "$(kubectl get nodeupgrades -o name)" ]; then break; fi
     sleep 5
