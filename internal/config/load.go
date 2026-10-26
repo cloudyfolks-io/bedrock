@@ -239,6 +239,9 @@ func validateManagementNetwork(network v1alpha1.ClusterNetworkSpec) error {
 		if seen[leg.Interface] {
 			return fmt.Errorf("spec.network.tenantLegs lists %s twice", leg.Interface)
 		}
+		if leg.Interface == network.ManagementInterface || leg.Interface == vlanParent(network.ManagementInterface) {
+			return fmt.Errorf("spec.network.tenantLegs %s is the management interface or its VLAN parent", leg.Interface)
+		}
 		seen[leg.Interface] = true
 		for _, source := range leg.AllowSources {
 			prefix, err := netip.ParsePrefix(source)
@@ -251,6 +254,11 @@ func validateManagementNetwork(network v1alpha1.ClusterNetworkSpec) error {
 		}
 	}
 	return nil
+}
+
+func vlanParent(name string) string {
+	parent, _, _ := strings.Cut(name, ".")
+	return parent
 }
 
 func validateClusterServices(cfg v1alpha1.ClusterConfig) error {

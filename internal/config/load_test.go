@@ -721,6 +721,13 @@ func TestValidateRejectsBadManagementCIDRAndLegs(t *testing.T) {
 		"any source": func(c *v1alpha1.ClusterConfig) {
 			c.Spec.Network.TenantLegs = []v1alpha1.TenantLegSpec{{Interface: "leg0", AllowSources: []string{"::/0"}}}
 		},
+		"leg is the management interface": func(c *v1alpha1.ClusterConfig) {
+			c.Spec.Network.TenantLegs = []v1alpha1.TenantLegSpec{{Interface: c.Spec.Network.ManagementInterface}}
+		},
+		"leg is the vlan parent of the management interface": func(c *v1alpha1.ClusterConfig) {
+			c.Spec.Network.ManagementInterface = "bond0.10"
+			c.Spec.Network.TenantLegs = []v1alpha1.TenantLegSpec{{Interface: "bond0"}}
+		},
 		"duplicate leg": func(c *v1alpha1.ClusterConfig) {
 			c.Spec.Network.TenantLegs = []v1alpha1.TenantLegSpec{{Interface: "leg0"}, {Interface: "leg0"}}
 		},
