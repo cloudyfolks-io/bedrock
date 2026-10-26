@@ -116,7 +116,9 @@ func adoptedCephxCipher(raw *runtime.RawExtension) string {
 	if err != nil || object == nil {
 		return cephx.Aes
 	}
-	if csi, _ := object["csi"].(map[string]any); csi["keyType"] == cephx.Aes256k {
+	csi, _ := object["csi"].(map[string]any)
+	allowed, _ := object["allowedCiphers"].([]any)
+	if csi["keyType"] == cephx.Aes256k || slices.Contains(allowed, any(cephx.Aes256k)) {
 		return cephx.Aes256k
 	}
 	return cephx.Aes

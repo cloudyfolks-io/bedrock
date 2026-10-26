@@ -41,8 +41,13 @@ spec:
         filesystem: filesystem-data
         objectStore: objectstore
       cephx:
+        allowedCiphers: [aes256k]
         daemon:
+          keyGeneration: 2
+        csi:
           keyType: aes256k
+          keyGeneration: 3
+        rbdMirrorPeer:
           keyGeneration: 2
   registry:
     bundle: /opt/bedrock/bundle.tar.zst
