@@ -177,6 +177,21 @@ func TestASecondRunChangesNothing(t *testing.T) {
 	}
 }
 
+func TestPreloadedCoreKeysAreNeverOverwritten(t *testing.T) {
+	server := fakeS3(t, http.StatusOK, "")
+	preloaded := &corev1.Secret{
+		ObjectMeta: metav1.ObjectMeta{Namespace: Namespace, Name: "harbor-core-keys"},
+		Data:       map[string][]byte{"secretKey": []byte("0123456789abcdef"), "secret": []byte("old-core"), "CSRF_KEY": []byte("old-csrf")},
+	}
+	r, c := newReconciler(t, server.URL, append(append(platformSettings(), readyStores()...), preloaded)...)
+	reconcileOnce(t, r)
+	reconcileOnce(t, r)
+	data := getSecret(t, c, "harbor-core-keys").Data
+	if string(data["secretKey"]) != "0123456789abcdef" || string(data["secret"]) != "old-core" || string(data["CSRF_KEY"]) != "old-csrf" || len(data) != 3 {
+		t.Errorf("the core keys changed: %v", data)
+	}
+}
+
 func TestAStorePendingUntilTheRookUserIsReady(t *testing.T) {
 	server := fakeS3(t, http.StatusOK, "")
 	c := fakeCluster(t, append(platformSettings(), readyStores()...)...)

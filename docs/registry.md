@@ -257,6 +257,12 @@ The addon never changes the owner.
 Bedrock makes the Secret `harbor-admin` only if it does not exist.
 An administrator who moves an older Harbor database writes this Secret with the old admin password before the addon starts.
 Then Bedrock uses that password.
+The Secret `harbor-core-keys` in the same namespace holds the keys that encrypt fields of the Harbor database.
+Bedrock makes it only if it does not exist and never changes it.
+An administrator who moves an older Harbor database writes it before the addon starts, with the keys `secretKey`, `secret` and `CSRF_KEY`.
+`secretKey` must have 16 characters and must be the old Harbor `secretKey`.
+Without the old `secretKey`, Harbor cannot read the encrypted fields of the database.
+The addon makes no Secret and no database before `registry.host` is set.
 Harbor projects and robots come back with the database.
 Adopt them with the annotation `bedrock.cloudyfolks.io/adopt: "true"`.
 Adoption keeps the retention policy of a project when the Registry has no `retention`.
