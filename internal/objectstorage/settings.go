@@ -32,12 +32,13 @@ const (
 	keyMaxBuckets       = "objectstorage.max-buckets"
 	keyPublicHost       = "objectstorage.public-host"
 	keyPublicAliases    = "objectstorage.public-aliases"
+	keyTLSSecret        = "objectstorage.tls-secret"
 	settingPrefix       = "objectstorage."
 )
 
 var platformBucketKeys = []string{"registry.bucket", "database.backup.bucket"}
 
-var ruleKeys = []string{keyReservedNames, keyReservedPrefixes, keyCORSOrigins, keyMaxBuckets, keyPublicHost, keyPublicAliases}
+var ruleKeys = []string{keyReservedNames, keyReservedPrefixes, keyCORSOrigins, keyMaxBuckets, keyPublicHost, keyPublicAliases, keyTLSSecret}
 
 func ParseRules(values map[string]string) (Rules, error) {
 	effective := make(map[string]string, len(ruleKeys))
@@ -70,6 +71,7 @@ func ParseRules(values map[string]string) (Rules, error) {
 		MaxBuckets:       maxBuckets,
 		PublicHost:       effective[keyPublicHost],
 		PublicAliases:    splitList(effective[keyPublicAliases]),
+		TLSSecret:        effective[keyTLSSecret],
 	}, nil
 }
 

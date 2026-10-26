@@ -63,22 +63,28 @@ func EndpointObjects(rules Rules, tlsMode string) []*unstructured.Unstructured {
 	if hosts == nil {
 		return nil
 	}
-	return []*unstructured.Unstructured{
-		endpointObject("cert-manager.io/v1", "Certificate", map[string]any{
-			"secretName": publicSecretName,
-			"dnsNames":   certificateNames(rules, issuerFor(tlsMode)),
-			"issuerRef":  map[string]any{"kind": "ClusterIssuer", "name": issuerFor(tlsMode)},
-		}),
-		endpointObject("traefik.io/v1alpha1", "IngressRoute", map[string]any{
-			"entryPoints": []any{"websecure"},
-			"routes": []any{map[string]any{
-				"match":    routeMatch(rules),
-				"kind":     "Rule",
-				"services": []any{map[string]any{"name": ServiceName, "port": gatewayPort}},
-			}},
-			"tls": map[string]any{"secretName": publicSecretName},
-		}),
+	secretName := publicSecretName
+	if rules.TLSSecret != "" {
+		secretName = rules.TLSSecret
 	}
+	route := endpointObject("traefik.io/v1alpha1", "IngressRoute", map[string]any{
+		"entryPoints": []any{"websecure"},
+		"routes": []any{map[string]any{
+			"match":    routeMatch(rules),
+			"kind":     "Rule",
+			"services": []any{map[string]any{"name": ServiceName, "port": gatewayPort}},
+		}},
+		"tls": map[string]any{"secretName": secretName},
+	})
+	if rules.TLSSecret != "" {
+		return []*unstructured.Unstructured{route}
+	}
+	certificate := endpointObject("cert-manager.io/v1", "Certificate", map[string]any{
+		"secretName": publicSecretName,
+		"dnsNames":   certificateNames(rules, issuerFor(tlsMode)),
+		"issuerRef":  map[string]any{"kind": "ClusterIssuer", "name": issuerFor(tlsMode)},
+	})
+	return []*unstructured.Unstructured{certificate, route}
 }
 
 func certificateNames(rules Rules, issuer string) []any {
@@ -87,7 +93,7 @@ func certificateNames(rules Rules, issuer string) []any {
 	for _, host := range hosts {
 		names = append(names, host)
 	}
-	if len(rules.PublicAliases) > 0 && issuer == issuerCA {
+	if issuer == issuerCA {
 		for _, host := range hosts {
 			names = append(names, "*."+host)
 		}
@@ -103,10 +109,8 @@ func routeMatch(rules Rules) string {
 	for _, host := range hosts {
 		matches = append(matches, "(Host(`"+host+"`) && "+adminGuard+")")
 	}
-	if len(rules.PublicAliases) > 0 {
-		for _, host := range hosts {
-			matches = append(matches, "HostRegexp(`^[a-z0-9-]+\\."+strings.ReplaceAll(host, ".", "\\.")+"$`)")
-		}
+	for _, host := range hosts {
+		matches = append(matches, "HostRegexp(`^[a-z0-9-]+\\."+strings.ReplaceAll(host, ".", "\\.")+"$`)")
 	}
 	return strings.Join(matches, " || ")
 }
@@ -158,13 +162,23 @@ func (r *EndpointReconciler) converge(ctx context.Context, rules Rules, tlsMode 
 			return err
 		}
 	}
+	if rules.TLSSecret != "" {
+		return r.removeKind(ctx, "cert-manager.io/v1", "Certificate")
+	}
+	return nil
+}
+
+func (r *EndpointReconciler) removeKind(ctx context.Context, apiVersion, kind string) error {
+	obj := endpointObject(apiVersion, kind, nil)
+	if err := client.IgnoreNotFound(r.Client.Delete(ctx, obj)); err != nil && !meta.IsNoMatchError(err) {
+		return err
+	}
 	return nil
 }
 
 func (r *EndpointReconciler) remove(ctx context.Context) error {
 	for _, apiKind := range [][2]string{{"cert-manager.io/v1", "Certificate"}, {"traefik.io/v1alpha1", "IngressRoute"}} {
-		obj := endpointObject(apiKind[0], apiKind[1], nil)
-		if err := client.IgnoreNotFound(r.Client.Delete(ctx, obj)); err != nil && !meta.IsNoMatchError(err) {
+		if err := r.removeKind(ctx, apiKind[0], apiKind[1]); err != nil {
 			return err
 		}
 	}

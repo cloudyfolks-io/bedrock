@@ -42,7 +42,7 @@ func TestEndpointObjectsForOneHost(t *testing.T) {
 		},
 		"spec": map[string]any{
 			"secretName": "objectstorage-public-tls",
-			"dnsNames":   []any{"s3.example.test"},
+			"dnsNames":   []any{"s3.example.test", "*.s3.example.test"},
 			"issuerRef":  map[string]any{"kind": "ClusterIssuer", "name": "bedrock-ca"},
 		},
 	}
@@ -57,7 +57,7 @@ func TestEndpointObjectsForOneHost(t *testing.T) {
 		"spec": map[string]any{
 			"entryPoints": []any{"websecure"},
 			"routes": []any{map[string]any{
-				"match":    "(Host(`s3.example.test`) && !(Path(`/admin`) || PathPrefix(`/admin/`)))",
+				"match":    "(Host(`s3.example.test`) && !(Path(`/admin`) || PathPrefix(`/admin/`))) || HostRegexp(`^[a-z0-9-]+\\.s3\\.example\\.test$`)",
 				"kind":     "Rule",
 				"services": []any{map[string]any{"name": "rook-ceph-rgw-bedrock-rgw", "port": int64(80)}},
 			}},
@@ -72,7 +72,7 @@ func TestEndpointObjectsForOneHost(t *testing.T) {
 	}
 }
 
-func TestEndpointObjectsWithAliasesAddVirtualHostRules(t *testing.T) {
+func TestEndpointObjectsAddVirtualHostRulesForEveryHost(t *testing.T) {
 	rules := Rules{PublicHost: "s3.example.test", PublicAliases: []string{"s3.alias.test"}}
 	objects := EndpointObjects(rules, "SelfSigned")
 	names, _, _ := unstructured.NestedStringSlice(objects[0].Object, "spec", "dnsNames")
@@ -100,6 +100,24 @@ func TestEndpointCertificateUsesLetsEncryptWithoutWildcards(t *testing.T) {
 		got, _, _ := unstructured.NestedString(EndpointObjects(rules, mode)[0].Object, "spec", "issuerRef", "name")
 		if got != "bedrock-ca" {
 			t.Fatalf("mode %q gave issuer %q", mode, got)
+		}
+	}
+}
+
+func TestEndpointWithATLSSecretMakesNoCertificate(t *testing.T) {
+	rules := Rules{PublicHost: "s3.example.test", TLSSecret: "s3-wildcard"}
+	for _, mode := range []string{"LetsEncrypt", "SelfSigned"} {
+		objects := EndpointObjects(rules, mode)
+		if len(objects) != 1 || objects[0].GetKind() != "IngressRoute" {
+			t.Fatalf("mode %q objects %+v", mode, objects)
+		}
+		secret, _, _ := unstructured.NestedString(objects[0].Object, "spec", "tls", "secretName")
+		if secret != "s3-wildcard" {
+			t.Fatalf("tls secret %q", secret)
+		}
+		routes, _, _ := unstructured.NestedSlice(objects[0].Object, "spec", "routes")
+		if !strings.Contains(routes[0].(map[string]any)["match"].(string), "HostRegexp(") {
+			t.Fatalf("no virtual-host rule: %v", routes)
 		}
 	}
 }

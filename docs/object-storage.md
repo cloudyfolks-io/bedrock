@@ -136,6 +136,7 @@ If the store refuses the policy, the bucket shows the reason `PolicyRejected`.
 | `objectstorage.max-buckets` | `100` | Buckets for each project. |
 | `objectstorage.public-host` | empty | DNS name of the public HTTPS endpoint. |
 | `objectstorage.public-aliases` | empty | More DNS names for the public endpoint. |
+| `objectstorage.tls-secret` | empty | TLS Secret in the namespace `rook-ceph` for the public endpoint. |
 
 A user of the group `bedrock:bedrock-admins` can make a bucket with a reserved name.
 The administrator sets the annotation `bedrock.cloudyfolks.io/reserved-name-approved: "true"` on the bucket.
@@ -159,7 +160,14 @@ It works inside the cluster only.
 
 With `objectstorage.public-host`, Bedrock makes a certificate and a Traefik route for the host and its aliases.
 The endpoint in `status.endpoint` is `https://<public-host>`.
-With aliases, the route also accepts `<bucket>.<host>` for virtual-host addressing.
+The route also accepts `<bucket>.<host>` for each host, for virtual-host addressing.
+Rook gives the same names to the object store, so the store finds the bucket in the host name.
+With the TLS mode `SelfSigned` or `Custom`, the certificate holds `*.<host>` for each host.
+Let's Encrypt cannot issue a wildcard name with the solver `http01`.
+With the TLS mode `LetsEncrypt`, the certificate holds the plain hosts only, and a virtual-host request fails the TLS check.
+To serve virtual-host requests in that mode, make a TLS Secret that holds `<host>` and `*.<host>` for each host in the namespace `rook-ceph`.
+Then set `objectstorage.tls-secret` to its name.
+Bedrock then makes no Certificate, deletes the one it made before, and the route uses your Secret.
 Bedrock never exposes the admin API.
 
 ## Delete

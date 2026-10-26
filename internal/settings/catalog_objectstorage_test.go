@@ -13,6 +13,7 @@ func TestObjectStorageCatalogKeysAndDefaults(t *testing.T) {
 		"objectstorage.max-buckets":              "100",
 		"objectstorage.public-host":              "",
 		"objectstorage.public-aliases":           "",
+		"objectstorage.tls-secret":               "",
 	}
 	for key, def := range want {
 		got, ok := Lookup(key)
@@ -73,6 +74,9 @@ func TestObjectStorageListsValidate(t *testing.T) {
 		{"objectstorage.public-aliases", "s3.a.example.com,s3.b.example.com", true},
 		{"objectstorage.public-aliases", "s3.a.example.com,", false},
 		{"objectstorage.public-aliases", "bad name", false},
+		{"objectstorage.tls-secret", "", true},
+		{"objectstorage.tls-secret", "s3-wildcard-tls", true},
+		{"objectstorage.tls-secret", "Bad_Name", false},
 	}
 	for _, tc := range cases {
 		if err := validates(t, tc.key, tc.value); (err == nil) != tc.valid {
