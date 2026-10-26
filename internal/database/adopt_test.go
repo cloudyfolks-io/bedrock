@@ -7,6 +7,7 @@ import (
 
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	"github.com/cloudyfolks-io/bedrock/api/v1alpha1"
@@ -95,7 +96,7 @@ func TestAnAdoptedRoleKeepsItsPasswordAndTheSecretHoldsNone(t *testing.T) {
 		t.Fatalf("scripts %v", fake.scripts)
 	}
 	secret := getSecret(t, c, db.Namespace, "alice-db")
-	if len(secret.Data["password"]) != 0 || secret.Annotations[annotationPasswordSynced] != "true" || strings.Contains(string(secret.Data["uri"]), "@@") {
+	if len(secret.Data["password"]) != 0 || !passwordSynced(t, c, user, "") || strings.Contains(string(secret.Data["uri"]), "@@") {
 		t.Fatalf("secret %v %v", secret.Data, secret.Annotations)
 	}
 	fake.reset()
@@ -128,7 +129,7 @@ func TestAnAdoptedRoleTakesTheChosenPassword(t *testing.T) {
 		}
 	}
 	secret := getSecret(t, c, db.Namespace, "alice-db")
-	if string(secret.Data["password"]) != chosenPassword || secret.Annotations[annotationPasswordSynced] != "true" {
+	if string(secret.Data["password"]) != chosenPassword || !passwordSynced(t, c, user, chosenPassword) {
 		t.Fatalf("secret %v", secret.Annotations)
 	}
 }
@@ -165,8 +166,8 @@ func TestAChangedChosenPasswordIsSetInTheEngine(t *testing.T) {
 	must(t, c.Update(context.Background(), source))
 	reconcileUser(t, c, fake, user)
 	secret := getSecret(t, c, db.Namespace, "bob-db")
-	if string(secret.Data["password"]) != "Another-Passw0rd!x#2027" || fake.count(`ALTER ROLE "bob" PASSWORD 'SCRAM-SHA-256$`) != 1 || secret.Annotations[annotationPasswordSynced] != "true" {
-		t.Fatalf("scripts %v annotations %v", fake.scripts, secret.Annotations)
+	if string(secret.Data["password"]) != "Another-Passw0rd!x#2027" || fake.count(`ALTER ROLE "bob" PASSWORD 'SCRAM-SHA-256$`) != 1 || !passwordSynced(t, c, user, "Another-Passw0rd!x#2027") {
+		t.Fatalf("scripts %v", fake.scripts)
 	}
 }
 
@@ -229,6 +230,7 @@ func TestOurOwnCreateIsNotMistakenForAForeignRoleAfterACrash(t *testing.T) {
 	reconcileUser(t, c, fake, user)
 	reloadUser(t, c, user)
 	user.Status.AppliedGrants = ""
+	user.Status.RoleCreateIntent = string(user.UID)
 	must(t, c.Status().Update(context.Background(), user))
 	fake.handle = existsOn("CREATE ROLE")
 	reconcileUser(t, c, fake, user)
@@ -281,14 +283,31 @@ func TestAnAdoptedPostgresDatabaseGetsItsGroupRoles(t *testing.T) {
 	}
 }
 
-func secretMarker(t *testing.T, c client.Client, namespace string) (string, bool) {
+func intentOf(t *testing.T, c client.Client, user *v1alpha1.DatabaseUser) string {
 	t.Helper()
-	secret := getSecret(t, c, namespace, "alice-db")
-	value, found := secret.Annotations[annotationRoleIntent]
-	return value, found
+	return reloadUser(t, c, user).Status.RoleCreateIntent
 }
 
-func TestARoleThatExistsWithoutTheIntentMarkerIsNeverTouched(t *testing.T) {
+func passwordSynced(t *testing.T, c client.Client, user *v1alpha1.DatabaseUser, password string) bool {
+	t.Helper()
+	return reloadUser(t, c, user).Status.PasswordDigest == passwordDigest(*user, password)
+}
+
+func markIntent(t *testing.T, c client.Client, user *v1alpha1.DatabaseUser, value string) {
+	t.Helper()
+	reloadUser(t, c, user).Status.RoleCreateIntent = value
+	must(t, c.Status().Update(context.Background(), user))
+}
+
+func forgeSecretAnnotations(t *testing.T, c client.Client, namespace string, uid types.UID) {
+	t.Helper()
+	secret := getSecret(t, c, namespace, "alice-db")
+	secret.Annotations["bedrock.cloudyfolks.io/role-create-intent"] = string(uid)
+	secret.Annotations["bedrock.cloudyfolks.io/password-synced"] = "true"
+	must(t, c.Update(context.Background(), &secret))
+}
+
+func TestARoleThatExistsWithoutTheIntentIsNeverTouched(t *testing.T) {
 	c := startEnv(t)
 	fake := &fakeEngine{handle: existsOn("CREATE ROLE")}
 	db := readyDatabase(t, c)
@@ -299,72 +318,81 @@ func TestARoleThatExistsWithoutTheIntentMarkerIsNeverTouched(t *testing.T) {
 	if reason, _ := readyReasonOf(user.Status.Conditions); reason != ReasonNameTaken || fake.count("ALTER ROLE") != 0 {
 		t.Fatalf("reason %s scripts %v", reason, fake.scripts)
 	}
-	if _, found := secretMarker(t, c, db.Namespace); found {
-		t.Fatal("the intent marker stays after the refusal")
+	if user.Status.RoleCreateIntent != "" {
+		t.Fatal("the intent stays after the refusal")
 	}
 }
 
-func TestTheIntentMarkerIsWrittenBeforeTheCreateAndRemovedAfterTheSync(t *testing.T) {
+func TestForgedSecretAnnotationsNeverMakeARoleOurs(t *testing.T) {
+	c := startEnv(t)
+	fake := &fakeEngine{handle: existsOn("CREATE ROLE")}
+	db := readyDatabase(t, c)
+	user := newUser(t, c, db, "alice", nil)
+	reconcileUser(t, c, fake, user)
+	forgeSecretAnnotations(t, c, db.Namespace, user.UID)
+	fake.reset()
+	reconcileUser(t, c, fake, user)
+	reloadUser(t, c, user)
+	if reason, _ := readyReasonOf(user.Status.Conditions); reason != ReasonNameTaken || fake.count("ALTER ROLE") != 0 || user.Status.AppliedGrants != "" {
+		t.Fatalf("reason %s scripts %v", reason, fake.scripts)
+	}
+}
+
+func TestTheIntentIsWrittenToTheStatusBeforeTheCreateAndClearedAfter(t *testing.T) {
 	c := startEnv(t)
 	db := readyDatabase(t, c)
 	var user *v1alpha1.DatabaseUser
-	var markerAtCreate string
+	var intentAtCreate string
 	fake := &fakeEngine{handle: func(script string) (string, error) {
-		if strings.Contains(script, "CREATE ROLE") {
-			markerAtCreate, _ = secretMarker(t, c, db.Namespace)
+		if strings.Contains(script, "CREATE ROLE") && user != nil {
+			var stored v1alpha1.DatabaseUser
+			must(t, c.Get(context.Background(), client.ObjectKeyFromObject(user), &stored))
+			intentAtCreate = stored.Status.RoleCreateIntent
 		}
 		return "", nil
 	}}
 	user = newUser(t, c, db, "alice", nil)
 	reconcileUser(t, c, fake, user)
 	reloadUser(t, c, user)
-	if markerAtCreate != string(user.UID) {
-		t.Fatalf("marker at the create %q, user %q", markerAtCreate, user.UID)
-	}
-	if reason, _ := readyReasonOf(user.Status.Conditions); reason != ReasonReady {
-		t.Fatalf("reason %s", reason)
+	if intentAtCreate != string(user.UID) {
+		t.Fatalf("intent at the create %q, user %q", intentAtCreate, user.UID)
 	}
 	secret := getSecret(t, c, db.Namespace, "alice-db")
-	if _, found := secret.Annotations[annotationRoleIntent]; found || secret.Annotations[annotationPasswordSynced] != "true" {
-		t.Fatalf("annotations %v", secret.Annotations)
+	if reason, _ := readyReasonOf(user.Status.Conditions); reason != ReasonReady || user.Status.RoleCreateIntent != "" || !passwordSynced(t, c, user, string(secret.Data["password"])) {
+		t.Fatalf("status %+v", user.Status)
+	}
+	if _, found := secret.Annotations["bedrock.cloudyfolks.io/password-synced"]; found {
+		t.Fatalf("the Secret carries state: %v", secret.Annotations)
 	}
 }
 
-func markIntent(t *testing.T, c client.Client, namespace, value string) {
-	t.Helper()
-	secret := getSecret(t, c, namespace, "alice-db")
-	secret.Annotations[annotationRoleIntent] = value
-	must(t, c.Update(context.Background(), &secret))
-}
-
-func TestARoleWithOurIntentMarkerGetsTheSecretPassword(t *testing.T) {
+func TestARoleWithOurIntentInTheStatusGetsTheSecretPassword(t *testing.T) {
 	c := startEnv(t)
 	fake := &fakeEngine{handle: existsOn("CREATE ROLE")}
 	db := readyDatabase(t, c)
 	user := newUser(t, c, db, "alice", nil)
 	reconcileUser(t, c, fake, user)
 	password := string(getSecret(t, c, db.Namespace, "alice-db").Data["password"])
-	markIntent(t, c, db.Namespace, string(user.UID))
+	markIntent(t, c, user, string(user.UID))
 	fake.reset()
 	reconcileUser(t, c, fake, user)
 	reloadUser(t, c, user)
-	if reason, _ := readyReasonOf(user.Status.Conditions); reason != ReasonReady || user.Status.AppliedGrants == "" {
+	if reason, _ := readyReasonOf(user.Status.Conditions); reason != ReasonReady || user.Status.AppliedGrants == "" || user.Status.RoleCreateIntent != "" {
 		t.Fatalf("status %+v", user.Status)
 	}
 	after := getSecret(t, c, db.Namespace, "alice-db")
-	_, found := after.Annotations[annotationRoleIntent]
-	if fake.count(`ALTER ROLE "alice" PASSWORD 'SCRAM-SHA-256$`) != 1 || string(after.Data["password"]) != password || after.Annotations[annotationPasswordSynced] != "true" || found {
-		t.Fatalf("scripts %v secret %v", fake.scripts, after.Annotations)
+	if fake.count(`ALTER ROLE "alice" PASSWORD 'SCRAM-SHA-256$`) != 1 || string(after.Data["password"]) != password || !passwordSynced(t, c, user, password) {
+		t.Fatalf("scripts %v", fake.scripts)
 	}
 }
 
-func TestARoleWithAnotherIntentMarkerIsNeverTouched(t *testing.T) {
+func TestARoleWithAnotherIntentIsNeverTouched(t *testing.T) {
 	c := startEnv(t)
 	fake := &fakeEngine{handle: existsOn("CREATE ROLE")}
 	db := readyDatabase(t, c)
 	user := newUser(t, c, db, "alice", nil)
 	reconcileUser(t, c, fake, user)
-	markIntent(t, c, db.Namespace, "another-uid")
+	markIntent(t, c, user, "another-uid")
 	fake.reset()
 	reconcileUser(t, c, fake, user)
 	reloadUser(t, c, user)
@@ -373,22 +401,19 @@ func TestARoleWithAnotherIntentMarkerIsNeverTouched(t *testing.T) {
 	}
 }
 
-func TestAForeignRoleThatAppearsBeforeTheCreateRemovesTheMarker(t *testing.T) {
+func TestAForeignRoleThatAppearsBeforeTheCreateClearsTheIntent(t *testing.T) {
 	c := startEnv(t)
 	db := readyDatabase(t, c)
 	fake := &fakeEngine{handle: existsOn("CREATE ROLE")}
 	user := newUser(t, c, db, "alice", nil)
 	reconcileUser(t, c, fake, user)
 	reloadUser(t, c, user)
-	if reason, _ := readyReasonOf(user.Status.Conditions); reason != ReasonNameTaken || user.Status.AppliedGrants != "" {
-		t.Fatalf("status %+v", user.Status)
-	}
-	if _, found := secretMarker(t, c, db.Namespace); found || fake.count("ALTER ROLE") != 0 {
-		t.Fatalf("marker found %v scripts %v", found, fake.scripts)
+	if reason, _ := readyReasonOf(user.Status.Conditions); reason != ReasonNameTaken || user.Status.AppliedGrants != "" || user.Status.RoleCreateIntent != "" || fake.count("ALTER ROLE") != 0 {
+		t.Fatalf("status %+v scripts %v", user.Status, fake.scripts)
 	}
 }
 
-func TestAMySQLAccountWithOurIntentMarkerGetsTheSecretPassword(t *testing.T) {
+func TestAMySQLAccountWithOurIntentInTheStatusGetsTheSecretPassword(t *testing.T) {
 	c := startEnv(t)
 	fake := &fakeEngine{handle: func(script string) (string, error) {
 		if strings.Contains(script, "CREATE USER") {
@@ -399,7 +424,7 @@ func TestAMySQLAccountWithOurIntentMarkerGetsTheSecretPassword(t *testing.T) {
 	db := readyEngineDatabase(t, c, v1alpha1.DatabaseEngineMySQL)
 	user := newUser(t, c, db, "alice", nil)
 	reconcileUserOf(t, c, fake, v1alpha1.DatabaseEngineMySQL, user)
-	markIntent(t, c, db.Namespace, string(user.UID))
+	markIntent(t, c, user, string(user.UID))
 	fake.reset()
 	reconcileUserOf(t, c, fake, v1alpha1.DatabaseEngineMySQL, user)
 	reloadUser(t, c, user)

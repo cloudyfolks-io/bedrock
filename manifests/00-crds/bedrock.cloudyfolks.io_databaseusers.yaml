@@ -170,6 +170,12 @@ spec:
               observedGeneration:
                 format: int64
                 type: integer
+              passwordDigest:
+                maxLength: 64
+                type: string
+              roleCreateIntent:
+                maxLength: 64
+                type: string
               username:
                 maxLength: 63
                 type: string

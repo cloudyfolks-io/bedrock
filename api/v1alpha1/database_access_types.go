@@ -61,6 +61,12 @@ type DatabaseUserStatus struct {
 	// +kubebuilder:validation:MaxLength=64
 	// +optional
 	AppliedGrants string `json:"appliedGrants,omitempty"`
+	// +kubebuilder:validation:MaxLength=64
+	// +optional
+	RoleCreateIntent string `json:"roleCreateIntent,omitempty"`
+	// +kubebuilder:validation:MaxLength=64
+	// +optional
+	PasswordDigest string `json:"passwordDigest,omitempty"`
 }
 
 // +kubebuilder:object:root=true

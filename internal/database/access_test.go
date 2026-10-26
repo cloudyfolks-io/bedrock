@@ -146,7 +146,7 @@ func TestUserIsMadeWithCredentialsAndAVerifier(t *testing.T) {
 		string(secret.Data["uri"]) != "postgresql://alice:"+password+"@10.100.0.2:5432/app" {
 		t.Fatalf("secret %v", secret.Data)
 	}
-	if len(secret.OwnerReferences) != 1 || secret.Labels[v1alpha1.LabelKind] != "DatabaseUser" || secret.Annotations[annotationPasswordSynced] != "true" {
+	if len(secret.OwnerReferences) != 1 || secret.Labels[v1alpha1.LabelKind] != "DatabaseUser" || !passwordSynced(t, c, user, password) {
 		t.Fatalf("secret meta %v %v", secret.OwnerReferences, secret.Annotations)
 	}
 	if engine.count(`CREATE ROLE "alice" LOGIN`) != 1 || engine.count(`GRANT "app_rw" TO "alice"`) != 1 {
@@ -271,7 +271,7 @@ func TestUserPasswordResetFollowsTheAnnotationOnly(t *testing.T) {
 	reconcileUser(t, c, engine, user)
 	secret := getSecret(t, c, db.Namespace, "alice-db")
 	after := string(secret.Data["password"])
-	if after == before || secret.Annotations[annotationPasswordSynced] != "true" || engine.count(`ALTER ROLE "alice" PASSWORD 'SCRAM-SHA-256$`) != 1 {
+	if after == before || !passwordSynced(t, c, user, after) || engine.count(`ALTER ROLE "alice" PASSWORD 'SCRAM-SHA-256$`) != 1 {
 		t.Fatalf("reset: password changed %v, scripts %v", after != before, engine.scripts)
 	}
 	for _, script := range engine.scripts {
@@ -620,7 +620,7 @@ func TestUserSecretWithoutAnnotationsDoesNotPanicAndIsHealed(t *testing.T) {
 	must(t, c.Update(context.Background(), user))
 	reconcileUser(t, c, engine, user)
 	healed := getSecret(t, c, db.Namespace, "alice-db")
-	if healed.Annotations[annotationPasswordSynced] != "true" || healed.Annotations[annotationResetApplied] != "one" {
+	if !passwordSynced(t, c, user, string(healed.Data["password"])) || healed.Annotations[annotationResetApplied] != "one" {
 		t.Fatalf("annotations %v", healed.Annotations)
 	}
 }

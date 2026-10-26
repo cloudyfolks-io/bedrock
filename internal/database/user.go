@@ -62,6 +62,11 @@ func GrantsHash(username string, grants []v1alpha1.DatabaseGrant) string {
 	return hex.EncodeToString(sum[:])[:16]
 }
 
+func passwordDigest(user v1alpha1.DatabaseUser, password string) string {
+	sum := sha256.Sum256([]byte(string(user.UID) + "|" + password))
+	return hex.EncodeToString(sum[:])
+}
+
 func validateUser(user v1alpha1.DatabaseUser) string {
 	username := UsernameOf(user)
 	if !postgres.ValidIdentifier(username) {
@@ -222,8 +227,6 @@ func conditionTrue(conditions []metav1.Condition) bool {
 
 type userSecretState struct {
 	Password string
-	Synced   bool
-	Intent   bool
 }
 
 func connectionDatabase(user v1alpha1.DatabaseUser) string {
@@ -266,7 +269,7 @@ func ensureUserSecret(ctx context.Context, c client.Client, user v1alpha1.Databa
 					return err
 				}
 			}
-			created := userSecret(user, project, userSecretData(user, kind, password, endpoint), map[string]string{annotationPasswordSynced: unsynced, annotationResetApplied: token})
+			created := userSecret(user, project, userSecretData(user, kind, password, endpoint), map[string]string{annotationResetApplied: token})
 			state = userSecretState{Password: password}
 			return c.Create(ctx, created, client.FieldOwner(v1alpha1.DatabaseFieldManager))
 		}
@@ -283,19 +286,15 @@ func ensureUserSecret(ctx context.Context, c client.Client, user v1alpha1.Databa
 		password := string(secret.Data["password"])
 		switch {
 		case chosen != "":
-			if chosen != password {
-				password = chosen
-				secret.Annotations[annotationPasswordSynced] = unsynced
-			}
+			password = chosen
 		case token != "" && token != secret.Annotations[annotationResetApplied]:
 			if password, err = credential.Password(); err != nil {
 				return err
 			}
-			secret.Annotations[annotationPasswordSynced] = unsynced
 			secret.Annotations[annotationResetApplied] = token
 		}
 		secret.Data = userSecretData(user, kind, password, endpoint)
-		state = userSecretState{Password: password, Synced: secret.Annotations[annotationPasswordSynced] == synced, Intent: secret.Annotations[annotationRoleIntent] == string(user.UID)}
+		state = userSecretState{Password: password}
 		if equality.Semantic.DeepEqual(before.Data, secret.Data) && equality.Semantic.DeepEqual(before.Annotations, secret.Annotations) {
 			return nil
 		}
@@ -317,38 +316,24 @@ func userSecret(user v1alpha1.DatabaseUser, project Project, data map[string][]b
 	}
 }
 
-func patchUserSecretAnnotations(ctx context.Context, c client.Client, user v1alpha1.DatabaseUser, edit func(map[string]string)) error {
-	return retry.RetryOnConflict(retry.DefaultRetry, func() error {
-		var secret corev1.Secret
-		if err := c.Get(ctx, client.ObjectKey{Namespace: user.Namespace, Name: UserSecretName(user)}, &secret); err != nil {
-			return err
-		}
-		before := secret.DeepCopy()
-		if secret.Annotations == nil {
-			secret.Annotations = map[string]string{}
-		}
-		edit(secret.Annotations)
-		return c.Patch(ctx, &secret, client.MergeFromWithOptions(before, client.MergeFromWithOptimisticLock{}), client.FieldOwner(v1alpha1.DatabaseFieldManager))
+func recordUserState(ctx context.Context, c client.Client, user *v1alpha1.DatabaseUser, edit func(*v1alpha1.DatabaseUserStatus)) error {
+	return updateStatus(ctx, c, client.ObjectKeyFromObject(user), func() *v1alpha1.DatabaseUser { return &v1alpha1.DatabaseUser{} }, func(current *v1alpha1.DatabaseUser) {
+		edit(&current.Status)
+		edit(&user.Status)
 	})
 }
 
-func markUserPasswordSynced(ctx context.Context, c client.Client, user v1alpha1.DatabaseUser) error {
-	return patchUserSecretAnnotations(ctx, c, user, func(annotations map[string]string) {
-		annotations[annotationPasswordSynced] = synced
-		delete(annotations, annotationRoleIntent)
-	})
+func writeRoleIntent(ctx context.Context, c client.Client, user *v1alpha1.DatabaseUser) error {
+	return recordUserState(ctx, c, user, func(status *v1alpha1.DatabaseUserStatus) { status.RoleCreateIntent = string(user.UID) })
 }
 
-func writeRoleIntent(ctx context.Context, c client.Client, user v1alpha1.DatabaseUser) error {
-	return patchUserSecretAnnotations(ctx, c, user, func(annotations map[string]string) {
-		annotations[annotationRoleIntent] = string(user.UID)
-	})
+func removeRoleIntent(ctx context.Context, c client.Client, user *v1alpha1.DatabaseUser) error {
+	return recordUserState(ctx, c, user, func(status *v1alpha1.DatabaseUserStatus) { status.RoleCreateIntent = "" })
 }
 
-func removeRoleIntent(ctx context.Context, c client.Client, user v1alpha1.DatabaseUser) error {
-	return patchUserSecretAnnotations(ctx, c, user, func(annotations map[string]string) {
-		delete(annotations, annotationRoleIntent)
-	})
+func recordPasswordSynced(ctx context.Context, c client.Client, user *v1alpha1.DatabaseUser, password string) error {
+	digest := passwordDigest(*user, password)
+	return recordUserState(ctx, c, user, func(status *v1alpha1.DatabaseUserStatus) { status.PasswordDigest = digest })
 }
 
 type userSync struct {
@@ -365,19 +350,17 @@ func (r *UserReconciler) syncEngine(ctx context.Context, in userSync) (accessOut
 	desired := accountHash(*user)
 	spec := userSpecOf(*user, in.State.Password)
 	if user.Status.AppliedGrants == "" {
-		if blocked, err := r.createRole(ctx, in, spec); err != nil || blocked != nil {
+		held, blocked, err := r.createRole(ctx, in, spec)
+		if err != nil || blocked != nil {
 			return orBlocked(blocked), err
 		}
-		if err := markUserPasswordSynced(ctx, r.Client, *user); err != nil {
-			return accessOutcome{}, err
-		}
-		return readyOutcome(), r.recordGrants(ctx, user, desired)
+		return readyOutcome(), r.recordCreated(ctx, user, desired, held)
 	}
-	if !in.State.Synced {
+	if in.State.Password != "" && user.Status.PasswordDigest != passwordDigest(*user, in.State.Password) {
 		if err := resetAccountPassword(ctx, in.Access, spec.Name, spec.Password); err != nil {
 			return accessOutcome{}, err
 		}
-		if err := markUserPasswordSynced(ctx, r.Client, *user); err != nil {
+		if err := recordPasswordSynced(ctx, r.Client, user, in.State.Password); err != nil {
 			return accessOutcome{}, err
 		}
 	}
@@ -397,37 +380,50 @@ func (r *UserReconciler) recordGrants(ctx context.Context, user *v1alpha1.Databa
 	})
 }
 
-func (r *UserReconciler) createRole(ctx context.Context, in userSync, spec engine.UserSpec) (*accessOutcome, error) {
-	if !in.State.Synced && !in.State.Intent {
-		if err := writeRoleIntent(ctx, r.Client, *in.User); err != nil {
-			return nil, err
+func (r *UserReconciler) recordCreated(ctx context.Context, user *v1alpha1.DatabaseUser, grants, password string) error {
+	digest := passwordDigest(*user, password)
+	return recordUserState(ctx, r.Client, user, func(status *v1alpha1.DatabaseUserStatus) {
+		status.AppliedGrants = grants
+		status.PasswordDigest = digest
+		status.RoleCreateIntent = ""
+	})
+}
+
+func (r *UserReconciler) createRole(ctx context.Context, in userSync, spec engine.UserSpec) (string, *accessOutcome, error) {
+	ours := in.User.Status.RoleCreateIntent == string(in.User.UID)
+	if !ours {
+		if err := writeRoleIntent(ctx, r.Client, in.User); err != nil {
+			return "", nil, err
 		}
 	}
 	err := createAccount(ctx, in.Access, spec)
+	if err == nil {
+		return in.State.Password, nil, nil
+	}
 	if !engine.IsExists(err) {
-		return nil, err
+		return "", nil, err
 	}
 	switch {
-	case in.State.Synced:
-	case in.State.Intent:
+	case ours:
 		if err := resetAccountPassword(ctx, in.Access, spec.Name, spec.Password); err != nil {
-			return nil, err
+			return "", nil, err
 		}
 	case !adopting(in.User):
-		if err := removeRoleIntent(ctx, r.Client, *in.User); err != nil {
-			return nil, err
+		if err := removeRoleIntent(ctx, r.Client, in.User); err != nil {
+			return "", nil, err
 		}
-		return &accessOutcome{reason: ReasonNameTaken, message: "the user " + spec.Name + " exists in the engine; an administrator can set the annotation " + v1alpha1.AnnotationAdopt + " to adopt it", requeue: accessBackoff}, nil
+		return "", &accessOutcome{reason: ReasonNameTaken, message: "the user " + spec.Name + " exists in the engine; an administrator can set the annotation " + v1alpha1.AnnotationAdopt + " to adopt it", requeue: accessBackoff}, nil
 	case in.Chosen != "":
 		if err := resetAccountPassword(ctx, in.Access, spec.Name, spec.Password); err != nil {
-			return nil, err
+			return "", nil, err
 		}
 	default:
 		if err := keepEnginePassword(ctx, r.Client, *in.User, in.Kind, in.Endpoint); err != nil {
-			return nil, err
+			return "", nil, err
 		}
+		return "", nil, setAccountGrants(ctx, in.Access, spec)
 	}
-	return nil, setAccountGrants(ctx, in.Access, spec)
+	return in.State.Password, nil, setAccountGrants(ctx, in.Access, spec)
 }
 
 func keepEnginePassword(ctx context.Context, c client.Client, user v1alpha1.DatabaseUser, kind string, endpoint Endpoint) error {
@@ -441,7 +437,6 @@ func keepEnginePassword(ctx context.Context, c client.Client, user v1alpha1.Data
 		if secret.Annotations == nil {
 			secret.Annotations = map[string]string{}
 		}
-		secret.Annotations[annotationPasswordSynced] = synced
 		return c.Patch(ctx, &secret, client.MergeFromWithOptions(before, client.MergeFromWithOptimisticLock{}), client.FieldOwner(v1alpha1.DatabaseFieldManager))
 	})
 }
