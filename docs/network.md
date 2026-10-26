@@ -468,6 +468,8 @@ It has the same `Vip` and `SwitchLBRule` objects as an internal balancer, so ten
 This holds only when all targets use one Subnet.
 A waiting `Vip` does not delay the public rules.
 The field `status.address` stays the ElasticIP address.
+The field `status.internalAddress` shows the address of the `Vip` in the load balancer plane.
+It is empty while Fabric has not allocated the `Vip`, when the targets use more than one Subnet, and for a LoadBalancer without `elasticIPRef`.
 
 A LoadBalancer without `elasticIPRef` is an internal balancer.
 It becomes one Fabric `SwitchLBRule` for each listener and one Fabric `Vip`.
@@ -728,6 +730,10 @@ nft list table inet bedrock_legs
 ```
 
 The counters of the `counter drop` rules must go up.
+
+## Run a second ingress
+
+The Traefik of Bedrock reads IngressRoutes, Middlewares, ServersTransports and Ingresses only in the namespaces `traefik`, `bedrock-system`, `bedrock-registry`, `cdi` and `rook-ceph`. These are the namespaces where Bedrock renders its own routes: the panel and API host, the sign-in host, the upload host, the registry and the public object storage host. A route in any other namespace is ignored by Bedrock. To run a second Traefik for your own workloads, install it in its own namespace with its own IngressClass and its own entry points, and give it only the namespaces of your workloads. Do not put your routes in the namespaces above, because the Traefik of Bedrock serves them there. The second Traefik must not read those namespaces either, or it serves the routes of Bedrock too.
 
 ## Settings
 

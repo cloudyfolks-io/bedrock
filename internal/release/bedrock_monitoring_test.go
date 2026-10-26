@@ -60,6 +60,7 @@ var meteringSeries = []string{
 	"bedrock:project_vm_network_receive_bytes:increase1h",
 	"bedrock:project_vm_network_transmit_bytes:increase1h",
 	"bedrock:project_pod_network_transmit_bytes:increase1h",
+	"bedrock:project_pod_network_receive_bytes:increase1h",
 }
 
 var sourceMetrics = []string{
@@ -72,6 +73,7 @@ var sourceMetrics = []string{
 	"kubevirt_vmi_network_transmit_bytes_total",
 	"kube_namespace_labels",
 	"kube_ovn_interface_rx_bytes",
+	"kube_ovn_interface_tx_bytes",
 }
 
 var metricIdentifier = regexp.MustCompile(`\b(?:kubevirt_|kube_)[a-z0-9_]+`)
@@ -293,6 +295,19 @@ func TestPodEgressRuleReadsTheReceivedBytesOfThePodInterfaces(t *testing.T) {
 		}
 	}
 	t.Fatal("no pod egress rule")
+}
+
+func TestPodIngressRuleReadsTheTransmittedBytesOfThePodInterfaces(t *testing.T) {
+	prefix := `sum (label_replace(increase(kube_ovn_interface_tx_bytes[1h]), "namespace", "$1", "pod_namespace", "(.*)") * on (namespace)`
+	for _, rule := range meteringRules(t) {
+		if rule.record == "bedrock:project_pod_network_receive_bytes:increase1h" {
+			if !strings.HasPrefix(rule.expr, prefix) {
+				t.Fatalf("expr %s", rule.expr)
+			}
+			return
+		}
+	}
+	t.Fatal("no pod ingress rule")
 }
 
 func TestFabricPingerServiceMonitorScrapesTheInterfaceCounters(t *testing.T) {

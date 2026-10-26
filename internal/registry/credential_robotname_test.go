@@ -56,8 +56,8 @@ func TestCredentialAdoptsAnExistingRobotNameWithTheAnnotation(t *testing.T) {
 	if credentialReady(got).Status != metav1.ConditionTrue || got.Status.RobotID != 700 || got.Status.Username != "robot$acme-images+customer-ci" {
 		t.Fatalf("status %+v", got.Status)
 	}
-	if len(state.project("acme-images").robots) != 1 {
-		t.Fatal("a second robot was made")
+	if len(state.project("acme-images").robots) != 1 || len(state.robotSets) != 0 {
+		t.Fatal("a second robot was made or the secret was reset")
 	}
 }
 

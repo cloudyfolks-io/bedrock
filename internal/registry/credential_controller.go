@@ -37,6 +37,8 @@ const (
 	credentialRequeue      = 10 * time.Minute
 	robotSecretLength      = 32
 	dockerConfigKey        = ".dockerconfigjson"
+	conditionSecretKept    = "SecretKept"
+	reasonPasswordKept     = "PasswordKept"
 )
 
 type CredentialReconciler struct {
@@ -74,6 +76,7 @@ type robotFacts struct {
 	username    string
 	secretReset string
 	secretName  string
+	secretKept  bool
 }
 
 func (r *CredentialReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
@@ -98,7 +101,7 @@ func (r *CredentialReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 }
 
 func (r *CredentialReconciler) reconcileRobot(ctx context.Context, credential *v1alpha1.RegistryCredential) (robotFacts, result, error) {
-	var none robotFacts
+	none := statusFacts(credential)
 	var registry v1alpha1.Registry
 	err := r.Client.Get(ctx, client.ObjectKey{Namespace: credential.Namespace, Name: credential.Spec.RegistryRef.Name}, &registry)
 	if apierrors.IsNotFound(err) {
@@ -123,7 +126,7 @@ func (r *CredentialReconciler) reconcileRobot(ctx context.Context, credential *v
 }
 
 func (r *CredentialReconciler) ensureRobot(ctx context.Context, credential *v1alpha1.RegistryCredential, registry *v1alpha1.Registry, hc *harbor.Client, project string) (robotFacts, result, error) {
-	got := robotFacts{robotID: credential.Status.RobotID, robotName: credential.Status.RobotName, username: credential.Status.Username, secretReset: credential.Status.SecretReset, secretName: credential.Status.SecretName}
+	got := robotFacts{robotID: credential.Status.RobotID, robotName: credential.Status.RobotName, username: credential.Status.Username, secretReset: credential.Status.SecretReset, secretName: credential.Status.SecretName, secretKept: meta.IsStatusConditionTrue(credential.Status.Conditions, conditionSecretKept)}
 	owned := credential.Status.RobotName == robotNameOf(credential)
 	robot, found, err := hc.FindRobot(ctx, project, robotNameOf(credential))
 	if err != nil {
@@ -186,15 +189,26 @@ func (r *CredentialReconciler) holderOf(ctx context.Context, credential *v1alpha
 }
 
 func (r *CredentialReconciler) takeOver(ctx context.Context, credential *v1alpha1.RegistryCredential, registry *v1alpha1.Registry, hc *harbor.Client, got robotFacts, robot harbor.Robot) (robotFacts, result, error) {
+	sameRobot := credential.Status.RobotID == robot.ID
 	if err := r.recordRobot(ctx, credential, robotNameOf(credential), robot.ID); err != nil {
 		return got, result{}, err
 	}
-	return r.resetRobot(ctx, credential, registry, hc, got, robot)
+	got.robotName, got.robotID, got.username = robotNameOf(credential), robot.ID, robot.Name
+	got.secretReset = credential.Annotations[AnnotationResetSecret]
+	if sameRobot && r.secretIsValid(ctx, credential, robot.Name, registry.Status.Host) {
+		got.secretKept = false
+		got.secretName = SecretName(credential)
+		return got, readyRobot(credential), nil
+	}
+	return r.keepSecret(ctx, credential, registry, got)
 }
 
 func (r *CredentialReconciler) healRobot(ctx context.Context, credential *v1alpha1.RegistryCredential, registry *v1alpha1.Registry, hc *harbor.Client, got robotFacts, robot harbor.Robot) (robotFacts, result, error) {
 	got.robotName, got.robotID, got.username = robotNameOf(credential), robot.ID, robot.Name
 	requested := credential.Annotations[AnnotationResetSecret]
+	if requested == credential.Status.SecretReset && got.secretKept {
+		return r.keepSecret(ctx, credential, registry, got)
+	}
 	if requested != credential.Status.SecretReset || !r.secretIsValid(ctx, credential, robot.Name, registry.Status.Host) {
 		return r.resetRobot(ctx, credential, registry, hc, got, robot)
 	}
@@ -223,6 +237,23 @@ func (r *CredentialReconciler) writeSecret(ctx context.Context, credential *v1al
 	if err != nil {
 		return got, result{}, err
 	}
+	got.secretKept = false
+	return r.applySecret(ctx, credential, got, secret)
+}
+
+func (r *CredentialReconciler) keepSecret(ctx context.Context, credential *v1alpha1.RegistryCredential, registry *v1alpha1.Registry, got robotFacts) (robotFacts, result, error) {
+	secret, err := r.keptSecret(ctx, credential, registry.Status.Host, got.username)
+	if err != nil {
+		return got, result{}, err
+	}
+	got.secretKept = true
+	return r.applySecret(ctx, credential, got, secret)
+}
+
+func (r *CredentialReconciler) applySecret(ctx context.Context, credential *v1alpha1.RegistryCredential, got robotFacts, secret *corev1.Secret) (robotFacts, result, error) {
+	if err := r.dropSecretOfOtherType(ctx, secret); err != nil {
+		return got, result{}, err
+	}
 	if err := ssa.Apply(ctx, r.Client, secret, v1alpha1.RegistryFieldManager); err != nil {
 		return got, result{}, err
 	}
@@ -230,11 +261,32 @@ func (r *CredentialReconciler) writeSecret(ctx context.Context, credential *v1al
 	return got, readyRobot(credential), nil
 }
 
+func (r *CredentialReconciler) dropSecretOfOtherType(ctx context.Context, want *corev1.Secret) error {
+	var current corev1.Secret
+	err := r.Client.Get(ctx, client.ObjectKeyFromObject(want), &current)
+	if apierrors.IsNotFound(err) || (err == nil && current.Type == want.Type) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	return client.IgnoreNotFound(r.Client.Delete(ctx, &current))
+}
+
 func (r *CredentialReconciler) dockerSecret(ctx context.Context, credential *v1alpha1.RegistryCredential, host, username, password string) (*corev1.Secret, error) {
 	config, err := dockerConfig(host, username, password)
 	if err != nil {
 		return nil, err
 	}
+	data := map[string][]byte{dockerConfigKey: config, "host": []byte(host), "username": []byte(username), "password": []byte(password)}
+	return r.credentialSecret(ctx, credential, corev1.SecretTypeDockerConfigJson, data)
+}
+
+func (r *CredentialReconciler) keptSecret(ctx context.Context, credential *v1alpha1.RegistryCredential, host, username string) (*corev1.Secret, error) {
+	return r.credentialSecret(ctx, credential, corev1.SecretTypeOpaque, map[string][]byte{"host": []byte(host), "username": []byte(username)})
+}
+
+func (r *CredentialReconciler) credentialSecret(ctx context.Context, credential *v1alpha1.RegistryCredential, secretType corev1.SecretType, data map[string][]byte) (*corev1.Secret, error) {
 	project, _, err := objectstorage.LoadProject(ctx, r.Client, credential.Namespace)
 	if err != nil {
 		return nil, err
@@ -248,8 +300,8 @@ func (r *CredentialReconciler) dockerSecret(ctx context.Context, credential *v1a
 			Labels:          platform.Labels("RegistryCredential", credential.Name, project.Tenant, project.Name),
 			OwnerReferences: []metav1.OwnerReference{*owner},
 		},
-		Type: corev1.SecretTypeDockerConfigJson,
-		Data: map[string][]byte{dockerConfigKey: config, "host": []byte(host), "username": []byte(username), "password": []byte(password)},
+		Type: secretType,
+		Data: data,
 	}, nil
 }
 
@@ -317,7 +369,7 @@ func (r *CredentialReconciler) deleteOwnRobot(ctx context.Context, credential *v
 
 func statusFacts(credential *v1alpha1.RegistryCredential) robotFacts {
 	status := credential.Status
-	return robotFacts{robotID: status.RobotID, robotName: status.RobotName, username: status.Username, secretReset: status.SecretReset, secretName: status.SecretName}
+	return robotFacts{robotID: status.RobotID, robotName: status.RobotName, username: status.Username, secretReset: status.SecretReset, secretName: status.SecretName, secretKept: meta.IsStatusConditionTrue(status.Conditions, conditionSecretKept)}
 }
 
 func (r *CredentialReconciler) recordRobot(ctx context.Context, credential *v1alpha1.RegistryCredential, name string, id int64) error {
@@ -374,8 +426,17 @@ func (r *CredentialReconciler) writeStatus(ctx context.Context, credential *v1al
 		current.ObservedGeneration = credential.Generation
 		current.RobotID, current.RobotName, current.Username = got.robotID, got.robotName, got.username
 		current.SecretReset, current.SecretName = got.secretReset, got.secretName
+		setSecretKept(&current.Conditions, got.secretKept, credential.Generation)
 		meta.SetStatusCondition(&current.Conditions, metav1.Condition{Type: conditionReady, Status: status, Reason: out.reason, Message: out.message, ObservedGeneration: credential.Generation})
 	})
+}
+
+func setSecretKept(conditions *[]metav1.Condition, kept bool, generation int64) {
+	if !kept {
+		meta.RemoveStatusCondition(conditions, conditionSecretKept)
+		return
+	}
+	meta.SetStatusCondition(conditions, metav1.Condition{Type: conditionSecretKept, Status: metav1.ConditionTrue, Reason: reasonPasswordKept, Message: "the robot keeps the password that the customer already has; the Secret has no password key; change the annotation " + AnnotationResetSecret + " to set a new password", ObservedGeneration: generation})
 }
 
 func credentialsOfRegistry(c client.Client) handler.MapFunc {

@@ -16,7 +16,20 @@ ports:
           scheme: https
           permanent: true
 providers:
+  kubernetesCRD:
+    namespaces:
+      - traefik
+      - bedrock-system
+      - bedrock-registry
+      - cdi
+      - rook-ceph
   kubernetesIngress:
+    namespaces:
+      - traefik
+      - bedrock-system
+      - bedrock-registry
+      - cdi
+      - rook-ceph
     publishedService:
       enabled: true
 tlsStore:

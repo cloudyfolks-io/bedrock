@@ -219,6 +219,7 @@ Run `kubectl describe container <name>` and read the condition `Ready`.
 | `VolumeClassUnsupported` | The Volume has not the storage class `filesystem`. | Create the Volume with the storage class `filesystem`. |
 | `RuntimeUnavailable` | The RuntimeClass of the Setting does not exist. | Turn on the addon `kata` on a host with KVM, or set the Setting to `none` on a cluster with no KVM. |
 | `PullSecretNotFound` | A pull Secret does not exist. | Create the Secret or correct `imagePullSecrets`. |
+| `SecretTypeInvalid` | A pull Secret is not of the type `kubernetes.io/dockerconfigjson` or `kubernetes.io/dockercfg`. A Secret of an adopted registry robot has no password. | Correct the Secret. For an adopted robot, set a new value of the annotation `bedrock.cloudyfolks.io/reset-secret` on the `RegistryCredential`. |
 | `ApplyFailed` | The cluster refused the Deployment or the autoscaler. | Read the operator log. |
 | `NameConflict` | An object of the same name exists and another owner has it. | Rename the Container or delete the other object. |
 | `QuotaExceeded` | The quota of the project refuses a pod of the Container. The message is the text of the quota. | Free quota, lower `replicas` or the requests, or ask for a larger quota. |

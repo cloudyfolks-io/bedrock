@@ -48,6 +48,15 @@ func addressOf(t *testing.T, c client.Client, namespace, name string) string {
 	return lb.Status.Address
 }
 
+func internalAddressOf(t *testing.T, c client.Client, namespace, name string) string {
+	t.Helper()
+	var lb v1alpha1.LoadBalancer
+	if err := c.Get(context.Background(), client.ObjectKey{Namespace: namespace, Name: name}, &lb); err != nil {
+		t.Fatal(err)
+	}
+	return lb.Status.InternalAddress
+}
+
 func rulesOf(t *testing.T, c client.Client, name string) []*unstructured.Unstructured {
 	t.Helper()
 	rules, err := listObjects(context.Background(), c, fabric.RouterLBRuleGVK, client.MatchingLabels{v1alpha1.LabelKind: "LoadBalancer", v1alpha1.LabelName: name})
@@ -582,5 +591,8 @@ func TestLoadBalancerWithElasticIPKeepsItsInternalVip(t *testing.T) {
 	}
 	if got := addressOf(t, f.c, f.namespace, "lb1"); got != "91.246.31.20" {
 		t.Fatalf("status address must stay the public one, got %q", got)
+	}
+	if got := internalAddressOf(t, f.c, f.namespace, "lb1"); got != "100.69.0.2" {
+		t.Fatalf("status internal address %q", got)
 	}
 }
