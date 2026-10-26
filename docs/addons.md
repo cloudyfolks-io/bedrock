@@ -601,7 +601,7 @@ from the side of the switch, so the bytes that a pod sends are `rx_bytes` of its
 and the bytes that a pod receives are `tx_bytes` of its port. The series
 `bedrock:project_pod_network_receive_bytes:increase1h` has the same labels and the
 same limits as the egress series.
-The series covers VMs and containers. A VM is a launcher pod, so the VM series and
+The series covers VMs and containers, and counts the virt-launcher pod of a VM like any other pod. A VM is a launcher pod, so the VM series and
 this series count the same VM traffic: use one of them for a VM, never the sum.
 A pod that was deleted inside the hour loses the last part of its increase.
 The series counts all bytes that leave the pod interface, inside the VPC and to the
