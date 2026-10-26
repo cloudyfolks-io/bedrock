@@ -172,7 +172,7 @@ func warnNetworkScope(ctx context.Context, c client.Client, cluster v1alpha1.Clu
 	}
 	pools, err := settings.DecodeProviderNetworks(setting.Spec.Value)
 	if err != nil {
-		return nil
+		return err
 	}
 	for _, warning := range networkScopeWarnings(cluster, pools) {
 		fmt.Fprintln(stderr, warning)
