@@ -350,6 +350,45 @@ func TestRegistryImagesAreInTheImageList(t *testing.T) {
 	}
 }
 
+func TestDeschedulerComponentRendersTheLegacyPolicy(t *testing.T) {
+	bundle, _ := buildReal(t, "descheduler")
+	objects := bundle.Addons["descheduler"]
+	if objectNamed(objects, "CronJob", "descheduler") == nil {
+		t.Fatal("missing CronJob descheduler")
+	}
+	cron := objectNamed(objects, "CronJob", "descheduler")
+	if schedule, _, _ := unstructured.NestedString(cron.Object, "spec", "schedule"); schedule != "*/15 * * * *" {
+		t.Errorf("schedule %q", schedule)
+	}
+	if selector, found, _ := unstructured.NestedMap(cron.Object, "spec", "jobTemplate", "spec", "template", "spec", "nodeSelector"); found && len(selector) > 0 {
+		t.Errorf("nodeSelector %v", selector)
+	}
+	policy := objectNamed(objects, "ConfigMap", "descheduler")
+	if policy == nil {
+		t.Fatal("missing ConfigMap descheduler")
+	}
+	raw, _, _ := unstructured.NestedString(policy.Object, "data", "policy.yaml")
+	for _, want := range []string{"maxNoOfPodsToEvictPerNode: 1", "kubevirt.io: virt-launcher", "LowNodeUtilization", "memory: 60", "memory: 75"} {
+		if !strings.Contains(raw, want) {
+			t.Errorf("policy lacks %q:\n%s", want, raw)
+		}
+	}
+	for _, obj := range objects {
+		for key := range obj.GetAnnotations() {
+			if strings.HasPrefix(key, "helm.sh/hook") {
+				t.Errorf("%s %s has %s", obj.GetKind(), obj.GetName(), key)
+			}
+		}
+	}
+}
+
+func TestDeschedulerImageIsInTheImageList(t *testing.T) {
+	bundle, _ := buildReal(t, "descheduler")
+	if !slices.Contains(bundle.Images, "registry.k8s.io/descheduler/descheduler:v0.35.1") {
+		t.Errorf("images %v", bundle.Images)
+	}
+}
+
 func TestPerconaComponentRendersTheOperator(t *testing.T) {
 	bundle, _ := buildReal(t, "percona-ps")
 	objects := bundle.Addons["percona-ps"]

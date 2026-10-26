@@ -28,7 +28,7 @@ type Definition struct {
 }
 
 func Known() []Definition {
-	return []Definition{kataDefinition(), lokiDefinition(), clustersDefinition(), cnpgDefinition(), registryDefinition(), perconaDefinition()}
+	return []Definition{kataDefinition(), lokiDefinition(), clustersDefinition(), cnpgDefinition(), registryDefinition(), perconaDefinition(), deschedulerDefinition()}
 }
 
 func Lookup(name string) (Definition, bool) {
@@ -54,6 +54,10 @@ func cnpgDefinition() Definition {
 
 func perconaDefinition() Definition {
 	return Definition{Name: PerconaPS, EnabledSetting: "percona-ps.enabled"}
+}
+
+func deschedulerDefinition() Definition {
+	return Definition{Name: Descheduler, EnabledSetting: "descheduler.enabled", Check: DeschedulerCheck}
 }
 
 func lokiDefinition() Definition {

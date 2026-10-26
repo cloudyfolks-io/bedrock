@@ -5,9 +5,9 @@ import (
 	"testing"
 )
 
-func TestKnownAddonsAreKataLokiClustersCNPGRegistryAndPercona(t *testing.T) {
+func TestKnownAddonsAreKataLokiClustersCNPGRegistryPerconaAndDescheduler(t *testing.T) {
 	known := Known()
-	if len(known) != 6 || known[0].Name != "kata" || known[1].Name != "loki" || known[2].Name != "clusters" || known[3].Name != "cnpg" || known[4].Name != "registry" || known[5].Name != "percona-ps" {
+	if len(known) != 7 || known[0].Name != "kata" || known[1].Name != "loki" || known[2].Name != "clusters" || known[3].Name != "cnpg" || known[4].Name != "registry" || known[5].Name != "percona-ps" || known[6].Name != "descheduler" {
 		t.Fatalf("known %+v", known)
 	}
 	if known[0].EnabledSetting != "kata.enabled" || len(known[0].Values) != 0 || known[0].Preflight == nil || known[0].Vars != nil {
@@ -31,6 +31,13 @@ func TestKnownAddonsAreKataLokiClustersCNPGRegistryAndPercona(t *testing.T) {
 	percona := known[5]
 	if percona.EnabledSetting != "percona-ps.enabled" || len(percona.Values) != 0 || percona.Vars != nil || percona.Preflight != nil {
 		t.Errorf("percona-ps %+v", percona)
+	}
+	descheduler := known[6]
+	if descheduler.EnabledSetting != "descheduler.enabled" || len(descheduler.Values) != 0 || descheduler.Vars != nil || descheduler.Preflight != nil {
+		t.Errorf("descheduler %+v", descheduler)
+	}
+	if _, ok := Lookup("descheduler"); !ok {
+		t.Error("Lookup(descheduler)")
 	}
 	if _, ok := Lookup("percona-ps"); !ok {
 		t.Error("Lookup(percona-ps)")

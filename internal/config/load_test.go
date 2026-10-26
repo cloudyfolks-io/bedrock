@@ -130,7 +130,7 @@ func TestToObjects(t *testing.T) {
 		t.Fatalf("host %+v", host.Spec)
 	}
 	settings := ToSettings(cfg)
-	want := map[string]string{"platform.tls-mode": "SelfSigned", "storage.replicas": "1", "kata.enabled": "true", "platform.host": "cloud.example.com"}
+	want := map[string]string{"platform.tls-mode": "SelfSigned", "storage.replicas": "1", "kata.enabled": "true", "descheduler.enabled": "false", "platform.host": "cloud.example.com"}
 	for _, s := range settings {
 		if v, ok := want[s.Name]; ok && s.Spec.Value != v {
 			t.Fatalf("setting %s = %q, want %q", s.Name, s.Spec.Value, v)

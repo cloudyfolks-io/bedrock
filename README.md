@@ -68,4 +68,5 @@ Read `docs/authn.md` for users, groups, LDAP and OIDC, API tokens,
 - [Proxy and panel API](docs/proxy.md): the edge service for the panel and the API.
 - [Panel](docs/panel.md): the web console.
 - [Addons, audit and monitoring](docs/addons.md): optional addons, audit log and metering.
+- [Maintenance](docs/maintenance.md): etcd defragmentation and runbooks for host work.
 - [End-to-end jobs](docs/e2e.md): how the e2e jobs run and what they prove.

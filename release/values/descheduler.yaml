@@ -1,0 +1,29 @@
+kind: CronJob
+schedule: "*/15 * * * *"
+successfulJobsHistoryLimit: 3
+failedJobsHistoryLimit: 1
+deschedulerPolicyAPIVersion: descheduler/v1alpha2
+deschedulerPolicy:
+  maxNoOfPodsToEvictPerNode: 1
+  profiles:
+    - name: kubevirt-rebalance
+      pluginConfig:
+        - name: DefaultEvictor
+          args:
+            evictLocalStoragePods: false
+            evictSystemCriticalPods: false
+            ignorePvcPods: false
+            nodeFit: true
+            labelSelector:
+              matchLabels:
+                kubevirt.io: virt-launcher
+        - name: LowNodeUtilization
+          args:
+            thresholds:
+              memory: 60
+            targetThresholds:
+              memory: 75
+      plugins:
+        balance:
+          enabled:
+            - LowNodeUtilization
