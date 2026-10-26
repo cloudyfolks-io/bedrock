@@ -573,3 +573,21 @@ func TestCredentialLeavesAForeignSecretOfThatNameAlone(t *testing.T) {
 		t.Fatalf("condition %+v", got)
 	}
 }
+
+func TestCredentialLeavesAForeignSecretOfTheSameTypeAlone(t *testing.T) {
+	state := newHarborState(t)
+	foreign := &corev1.Secret{
+		ObjectMeta: metav1.ObjectMeta{Name: "ci-docker", Namespace: tenantNamespace},
+		Type:       corev1.SecretTypeDockerConfigJson,
+		Data:       map[string][]byte{".dockerconfigjson": []byte("{}"), "password": []byte("tenant")},
+	}
+	r, c := credentialWorld(t, state, credentialFor("ci", "pull"), foreign)
+	reconcileCredential(t, r, "ci")
+	secret := dockerSecret(t, c, "ci")
+	if string(secret.Data["password"]) != "tenant" || len(secret.OwnerReferences) != 0 {
+		t.Fatalf("foreign secret changed: data %v owners %v", secret.Data, secret.OwnerReferences)
+	}
+	if got := credentialReady(fetchCredential(t, c, "ci")); got.Status != metav1.ConditionFalse || got.Reason != "SecretNameTaken" {
+		t.Fatalf("condition %+v", got)
+	}
+}

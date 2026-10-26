@@ -269,7 +269,7 @@ func (r *CredentialReconciler) applySecret(ctx context.Context, credential *v1al
 func (r *CredentialReconciler) dropSecretOfOtherType(ctx context.Context, credential *v1alpha1.RegistryCredential, want *corev1.Secret) (bool, error) {
 	var current corev1.Secret
 	err := r.Client.Get(ctx, client.ObjectKeyFromObject(want), &current)
-	if apierrors.IsNotFound(err) || (err == nil && current.Type == want.Type) {
+	if apierrors.IsNotFound(err) {
 		return false, nil
 	}
 	if err != nil {
@@ -277,6 +277,9 @@ func (r *CredentialReconciler) dropSecretOfOtherType(ctx context.Context, creden
 	}
 	if !metav1.IsControlledBy(&current, credential) {
 		return true, nil
+	}
+	if current.Type == want.Type {
+		return false, nil
 	}
 	return false, client.IgnoreNotFound(r.Client.Delete(ctx, &current))
 }
