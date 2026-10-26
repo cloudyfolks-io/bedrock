@@ -304,3 +304,22 @@ tests:
         exp_samples:
           - labels: '{project="web", tenant="acme"}'
             value: 180
+  - name: pod ingress counts the transmitted bytes of the pod interfaces of a project
+    interval: 1m
+    input_series:
+      - series: 'kube_namespace_labels{namespace="acme-web", label_bedrock_cloudyfolks_io_tenant="acme", label_bedrock_cloudyfolks_io_project="web"}'
+        values: '1+0x61'
+      - series: 'kube_ovn_interface_tx_bytes{namespace="kube-system", hostname="n1", interfaceName="a1b2", pod_name="web-1", pod_namespace="acme-web"}'
+        values: '1000000000+1048576x61'
+      - series: 'kube_ovn_interface_tx_bytes{namespace="kube-system", hostname="n2", interfaceName="c3d4", pod_name="web-2", pod_namespace="acme-web"}'
+        values: '5000000000+2097152x61'
+      - series: 'kube_ovn_interface_tx_bytes{namespace="kube-system", hostname="n1", interfaceName="e5f6", pod_name="coredns-1", pod_namespace="kube-system"}'
+        values: '1000000000+9999999x61'
+      - series: 'kube_ovn_interface_tx_bytes{namespace="kube-system", hostname="n1", interfaceName="ovn0", pod_name="", pod_namespace=""}'
+        values: '1000000000+9999999x61'
+    promql_expr_test:
+      - expr: 'round(bedrock:project_pod_network_receive_bytes:increase1h, 1) / 1048576'
+        eval_time: 1h
+        exp_samples:
+          - labels: '{project="web", tenant="acme"}'
+            value: 180

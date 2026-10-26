@@ -561,6 +561,7 @@ labels of the project namespaces. They never match a namespace name.
 | `bedrock:project_vm_network_receive_bytes:increase1h` | Received bytes in the last hour, summed after the increase of each VM series | `kubevirt_vmi_network_receive_bytes_total` |
 | `bedrock:project_vm_network_transmit_bytes:increase1h` | Sent bytes in the last hour, summed after the increase of each VM series | `kubevirt_vmi_network_transmit_bytes_total` |
 | `bedrock:project_pod_network_transmit_bytes:increase1h` | Bytes that all pods of the project sent in the last hour, summed after the increase of each pod interface | `kube_ovn_interface_rx_bytes` |
+| `bedrock:project_pod_network_receive_bytes:increase1h` | Bytes that all pods of the project received in the last hour, summed after the increase of each pod interface | `kube_ovn_interface_tx_bytes` |
 
 ### Labels
 
@@ -590,12 +591,16 @@ an earlier query can miss it.
 | Network GB, in | `bedrock:project_vm_network_receive_bytes:increase1h / 1073741824` |
 | Network GB, out | `bedrock:project_vm_network_transmit_bytes:increase1h / 1073741824` |
 | Pod network GB, out | `bedrock:project_pod_network_transmit_bytes:increase1h / 1073741824` |
+| Pod network GB, in | `bedrock:project_pod_network_receive_bytes:increase1h / 1073741824` |
 
 The series `bedrock:project_pod_network_transmit_bytes:increase1h` comes from the
 Fabric pinger. The pinger exports the counters of every OVS port with the labels
 `pod_name` and `pod_namespace`, and Fabric v1.2.1 has no other per-pod or per-port
 byte counter. The ServiceMonitor `bedrock-fabric-pinger` scrapes it. OVS counts
-from the side of the switch, so the bytes that a pod sends are `rx_bytes` of its port.
+from the side of the switch, so the bytes that a pod sends are `rx_bytes` of its port
+and the bytes that a pod receives are `tx_bytes` of its port. The series
+`bedrock:project_pod_network_receive_bytes:increase1h` has the same labels and the
+same limits as the egress series.
 The series covers VMs and containers. A VM is a launcher pod, so the VM series and
 this series count the same VM traffic: use one of them for a VM, never the sum.
 A pod that was deleted inside the hour loses the last part of its increase.
