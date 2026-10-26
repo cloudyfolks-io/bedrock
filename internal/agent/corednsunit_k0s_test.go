@@ -67,3 +67,40 @@ func TestK0sUpdateLeavesTheWorkerUnitAlone(t *testing.T) {
 		t.Fatalf("a worker has no control plane unit to change: %v", fake.calls)
 	}
 }
+
+func TestK0sReconfigureDisablesTheK0sCoreDNSAndRestartsOnce(t *testing.T) {
+	env, fake := k0sStepEnv(t, "k0s-dns-d", v1alpha1.RoleControlPlane)
+	root := env.Deps.Root
+	writeFixtureFile(t, filepath.Join(root, "usr/local/bin/k0s"), "new k0s")
+	fake.running = newK0s
+	writeFixtureFile(t, filepath.Join(root, "etc/k0s/k0s.yaml"), "apiVersion: k0s.k0sproject.io/v1beta1\n")
+	writeFixtureFile(t, controllerUnitPath(root), controllerUnit)
+	outcome, err := k0sReconfigure(context.Background(), env)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(readFixtureFile(t, controllerUnitPath(root)), "helm,coredns ") {
+		t.Fatal("the unit must disable coredns")
+	}
+	reload := slices.Index(fake.calls, "systemctl daemon-reload")
+	restart := slices.Index(fake.calls, "systemctl restart --no-block k0scontroller.service")
+	if reload < 0 || restart < reload || outcome.Message != "k0scontroller.service reconfigured and restarted" {
+		t.Fatalf("outcome %+v %v", outcome, fake.calls)
+	}
+}
+
+func TestK0sReconfigureDoesNotRestartAnUpToDateUnit(t *testing.T) {
+	env, fake := k0sStepEnv(t, "k0s-dns-e", v1alpha1.RoleControlPlane)
+	root := env.Deps.Root
+	fake.running = newK0s
+	writeFixtureFile(t, controllerUnitPath(root), strings.Replace(controllerUnit, "helm ", "helm,coredns ", 1))
+	outcome, err := k0sReconfigure(context.Background(), env)
+	if err != nil || outcome.Message != "k0scontroller.service already configured" {
+		t.Fatalf("outcome %+v %v", outcome, err)
+	}
+	for _, call := range fake.calls {
+		if strings.HasPrefix(call, "systemctl restart") || call == "systemctl daemon-reload" {
+			t.Fatalf("unexpected call %q", call)
+		}
+	}
+}

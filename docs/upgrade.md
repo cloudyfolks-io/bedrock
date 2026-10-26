@@ -36,7 +36,8 @@ The link names have the form `<version>-<file>`.
 ## CoreDNS after `bedrock upgrade abort`
 
 An upgrade moves cluster DNS from the CoreDNS of k0s to the CoreDNS of the release.
-The `K0sUpdate` step disables the k0s CoreDNS in the k0s unit of each control plane node. On an upgrade from a release that does not do this, the Workers phase runs `K0sUpdate` again on each control plane node after `AgentUpdate`, so the new agent changes the unit and restarts k0s once.
+The `K0sUpdate` step of the new agent disables the k0s CoreDNS in the k0s unit of each control plane node.
+On an upgrade from a release whose agent does not do this, the old agent runs `K0sUpdate` in the ControlPlane phase and the unit keeps the k0s CoreDNS. The Workers phase then runs the step `K0sReconfigure` on each control plane node after `AgentUpdate`. The new agent changes the unit and restarts k0s only when the unit changed. So k0s restarts twice per control plane node on such an upgrade, one node at a time, and each restart waits for `/readyz`. The k0s CoreDNS runs until the second restart.
 The Components phase then takes over the objects of k0s, and the `Prune` step removes the old k0s manifest directory.
 `bedrock upgrade abort` does not change the unit file. The flag `--disable-components` keeps `coredns`.
 Cluster DNS keeps working in every case below, because an object is never deleted and the Service keeps its address.

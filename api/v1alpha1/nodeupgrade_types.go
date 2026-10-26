@@ -5,15 +5,16 @@ import (
 )
 
 const (
-	StepPreload     = "Preload"
-	StepBackup      = "Backup"
-	StepK0sUpdate   = "K0sUpdate"
-	StepAgentUpdate = "AgentUpdate"
-	StepOSUpdate    = "OSUpdate"
-	StepReboot      = "Reboot"
-	StepPrune       = "Prune"
-	StepCleanup     = "Cleanup"
-	StepRestore     = "Restore"
+	StepPreload        = "Preload"
+	StepBackup         = "Backup"
+	StepK0sUpdate      = "K0sUpdate"
+	StepK0sReconfigure = "K0sReconfigure"
+	StepAgentUpdate    = "AgentUpdate"
+	StepOSUpdate       = "OSUpdate"
+	StepReboot         = "Reboot"
+	StepPrune          = "Prune"
+	StepCleanup        = "Cleanup"
+	StepRestore        = "Restore"
 
 	StepPending   = "Pending"
 	StepRunning   = "Running"
@@ -50,7 +51,7 @@ type NodeUpgradeSpec struct {
 	// +listType=set
 	// +kubebuilder:validation:MaxItems=9
 	// +kubebuilder:validation:items:MaxLength=16
-	// +kubebuilder:validation:items:Enum=Preload;Backup;K0sUpdate;AgentUpdate;OSUpdate;Reboot;Prune;Cleanup;Restore
+	// +kubebuilder:validation:items:Enum=Preload;Backup;K0sUpdate;K0sReconfigure;AgentUpdate;OSUpdate;Reboot;Prune;Cleanup;Restore
 	Steps []string `json:"steps,omitempty"`
 }
 
