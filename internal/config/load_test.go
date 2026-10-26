@@ -589,3 +589,74 @@ func TestToHostTakesTheDevicesOfItsAdoptNode(t *testing.T) {
 		t.Fatalf("unlisted node got devices %v", got)
 	}
 }
+
+func adoptConfigWithCephx(cephxJSON string) v1alpha1.ClusterConfig {
+	cfg := v1alpha1.ClusterConfig{}
+	cfg.Spec.Storage.Adopt = &v1alpha1.AdoptSpec{}
+	if cephxJSON != "" {
+		cfg.Spec.Storage.Adopt.Cephx = &runtime.RawExtension{Raw: []byte(cephxJSON)}
+	}
+	return cfg
+}
+
+func TestWithCephxCipherPicksByKernelOnAFreshCluster(t *testing.T) {
+	cases := map[string]string{"7.0.1": "aes256k", "6.8.0-45-generic": "aes", "": "aes"}
+	for kernel, want := range cases {
+		if got := WithCephxCipher(v1alpha1.ClusterConfig{}, kernel).Spec.Storage.CephxCipher; got != want {
+			t.Errorf("kernel %q: got %q, want %q", kernel, got, want)
+		}
+	}
+}
+
+func TestWithCephxCipherKeepsTheExplicitChoice(t *testing.T) {
+	cfg := v1alpha1.ClusterConfig{}
+	cfg.Spec.Storage.CephxCipher = "aes"
+	if got := WithCephxCipher(cfg, "7.0.1").Spec.Storage.CephxCipher; got != "aes" {
+		t.Fatalf("got %q", got)
+	}
+}
+
+func TestWithCephxCipherCopiesTheLiveModeOfAnAdoptedCluster(t *testing.T) {
+	live := `{"csi":{"keyType":"aes256k","keyGeneration":3}}`
+	if got := WithCephxCipher(adoptConfigWithCephx(live), "5.15.0").Spec.Storage.CephxCipher; got != "aes256k" {
+		t.Fatalf("aes256k cluster: got %q", got)
+	}
+	if got := WithCephxCipher(adoptConfigWithCephx(`{"csi":{"keyType":"aes","keyGeneration":1}}`), "7.0.1").Spec.Storage.CephxCipher; got != "aes" {
+		t.Fatalf("aes cluster: got %q", got)
+	}
+	if got := WithCephxCipher(adoptConfigWithCephx(""), "7.0.1").Spec.Storage.CephxCipher; got != "aes" {
+		t.Fatalf("no cephx: got %q", got)
+	}
+}
+
+func TestToSettingsCarriesTheCephxCipher(t *testing.T) {
+	values := map[string]string{}
+	for _, s := range ToSettings(WithCephxCipher(v1alpha1.ClusterConfig{}, "7.0.1")) {
+		values[s.Name] = s.Spec.Value
+	}
+	if values["storage.cephx-cipher"] != "aes256k" {
+		t.Fatalf("settings %v", values)
+	}
+	for _, s := range ToSettings(v1alpha1.ClusterConfig{}) {
+		if s.Name == "storage.cephx-cipher" && s.Spec.Value != "aes" {
+			t.Fatalf("default %q", s.Spec.Value)
+		}
+	}
+}
+
+func TestValidateAdoptCephxNeedsTheGenerationsOfTheOldCluster(t *testing.T) {
+	cases := map[string]bool{
+		`{"daemon":{"keyType":"aes256k","keyGeneration":2}}`: true,
+		`{"daemon":{"keyType":"aes256k"}}`:                   false,
+		`{"csi":{"keyType":"aes"}}`:                          false,
+		`{"csi":{"keyType":"aes256k","keyGeneration":3},"daemon":{"keyGeneration":2},"rbdMirrorPeer":{"keyGeneration":2}}`: true,
+		`{"csi":{"keyType":"aes256k","keyGeneration":3},"daemon":{"keyGeneration":2}}`:                                     false,
+		`{"allowedCiphers":["aes256k"],"csi":{"keyType":"aes256k","keyGeneration":3},"rbdMirrorPeer":{"keyGeneration":2}}`: false,
+	}
+	for raw, valid := range cases {
+		err := validateAdoptCephx(&runtime.RawExtension{Raw: []byte(raw)})
+		if valid != (err == nil) {
+			t.Errorf("%s: err %v, want valid %v", raw, err, valid)
+		}
+	}
+}

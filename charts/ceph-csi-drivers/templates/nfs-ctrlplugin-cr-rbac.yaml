@@ -113,6 +113,8 @@ rules:
   verbs:
   - get
   - list
+  - watch
+  - update
 - apiGroups:
   - ""
   resources:
@@ -142,4 +144,29 @@ rules:
   - get
   - list
   - watch
+- apiGroups:
+  - groupsnapshot.storage.k8s.io
+  resources:
+  - volumegroupsnapshotclasses
+  verbs:
+  - get
+  - list
+  - watch
+- apiGroups:
+  - groupsnapshot.storage.k8s.io
+  resources:
+  - volumegroupsnapshotcontents
+  verbs:
+  - get
+  - list
+  - watch
+  - update
+  - patch
+- apiGroups:
+  - groupsnapshot.storage.k8s.io
+  resources:
+  - volumegroupsnapshotcontents/status
+  verbs:
+  - update
+  - patch
 {{- end }}

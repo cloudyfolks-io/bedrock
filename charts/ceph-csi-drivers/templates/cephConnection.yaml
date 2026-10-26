@@ -1,6 +1,7 @@
 {{- $root := . -}}
 {{- range $cephConnection := .Values.cephConnections -}}
 {{- if $cephConnection.name -}}
+---
 apiVersion: csi.ceph.io/v1
 kind: CephConnection
 metadata:
@@ -11,7 +12,9 @@ spec:
   {{- range $cephConnection.monitors }}
   - {{ . }}
   {{- end }}
-  rbdMirrorDaemonCount: {{ $cephConnection.rbdMirrorDaemonCount }}
+  {{- with $cephConnection.rbdMirrorDaemonCount }}
+  rbdMirrorDaemonCount: {{ . }}
+  {{- end }}
   {{- with $cephConnection.crushLocationLabels }}
   readAffinity:
     crushLocationLabels:

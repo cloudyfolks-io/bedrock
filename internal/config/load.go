@@ -19,6 +19,7 @@ import (
 	"sigs.k8s.io/yaml"
 
 	"github.com/cloudyfolks-io/bedrock/api/v1alpha1"
+	"github.com/cloudyfolks-io/bedrock/internal/cephx"
 	"github.com/cloudyfolks-io/bedrock/internal/dnsname"
 	"github.com/cloudyfolks-io/bedrock/internal/settings"
 )
@@ -94,6 +95,43 @@ func WithDefaults(cfg v1alpha1.ClusterConfig) v1alpha1.ClusterConfig {
 	return out
 }
 
+func WithCephxCipher(cfg v1alpha1.ClusterConfig, kernel string) v1alpha1.ClusterConfig {
+	out := *cfg.DeepCopy()
+	if out.Spec.Storage.CephxCipher == "" {
+		out.Spec.Storage.CephxCipher = pickCephxCipher(out.Spec.Storage.Adopt, kernel)
+	}
+	return out
+}
+
+func pickCephxCipher(adopt *v1alpha1.AdoptSpec, kernel string) string {
+	if adopt == nil {
+		return cephx.ForKernel(kernel)
+	}
+	return adoptedCephxCipher(adopt.Cephx)
+}
+
+func adoptedCephxCipher(raw *runtime.RawExtension) string {
+	object, err := cephxObject(raw)
+	if err != nil || object == nil {
+		return cephx.Aes
+	}
+	if csi, _ := object["csi"].(map[string]any); csi["keyType"] == cephx.Aes256k {
+		return cephx.Aes256k
+	}
+	return cephx.Aes
+}
+
+func cephxObject(raw *runtime.RawExtension) (map[string]any, error) {
+	if raw == nil {
+		return nil, nil
+	}
+	var object map[string]any
+	if err := json.Unmarshal(raw.Raw, &object); err != nil || object == nil {
+		return nil, fmt.Errorf("storage.adopt.cephx: not a JSON object")
+	}
+	return object, nil
+}
+
 func fallback(value, def string) string {
 	if value == "" {
 		return def
@@ -155,6 +193,9 @@ func Validate(cfg v1alpha1.ClusterConfig) error {
 	if s.Storage.Replicas < 1 {
 		return fmt.Errorf("spec.storage.replicas must be at least 1")
 	}
+	if cipher := s.Storage.CephxCipher; cipher != "" && cipher != cephx.Aes && cipher != cephx.Aes256k {
+		return fmt.Errorf("spec.storage.cephxCipher must be %s or %s", cephx.Aes, cephx.Aes256k)
+	}
 	if err := validateAdopt(s.Storage); err != nil {
 		return err
 	}
@@ -207,13 +248,23 @@ func validateAdopt(storage v1alpha1.StorageSpec) error {
 	return nil
 }
 
-func validateAdoptCephx(cephx *runtime.RawExtension) error {
-	if cephx == nil {
-		return nil
+var cephxKeyedSections = []string{"daemon", "csi", "rbdMirrorPeer"}
+
+func validateAdoptCephx(raw *runtime.RawExtension) error {
+	object, err := cephxObject(raw)
+	if err != nil || object == nil {
+		return err
 	}
-	var object map[string]any
-	if err := json.Unmarshal(cephx.Raw, &object); err != nil || object == nil {
-		return fmt.Errorf("storage.adopt.cephx: not a JSON object")
+	rotated := adoptedCephxCipher(raw) == cephx.Aes256k
+	for _, name := range cephxKeyedSections {
+		section, present := object[name]
+		if !present && !rotated {
+			continue
+		}
+		fields, _ := section.(map[string]any)
+		if _, ok := fields["keyGeneration"].(float64); !ok {
+			return fmt.Errorf("storage.adopt.cephx.%s.keyGeneration: required, Rook refuses a lower generation than the old cluster has", name)
+		}
 	}
 	return nil
 }
@@ -350,6 +401,7 @@ func ToSettings(cfg v1alpha1.ClusterConfig) []v1alpha1.Setting {
 		"platform.host":             cfg.Spec.Platform.Host,
 		"platform.tls-mode":         cfg.Spec.Platform.TLSMode,
 		"storage.replicas":          strconv.Itoa(int(cfg.Spec.Storage.Replicas)),
+		"storage.cephx-cipher":      fallback(cfg.Spec.Storage.CephxCipher, cephx.Aes),
 		"storage.network":           vlanValue(cfg.Spec.Network.StorageVlan),
 		"migration.network":         vlanValue(cfg.Spec.Network.MigrationVlan),
 		"virt.emulation":            strconv.FormatBool(cfg.Spec.Virtualization.Emulation),

@@ -157,7 +157,7 @@ func TestRenderStorageAdoptGoldenCephCluster(t *testing.T) {
 		"mgr":             map[string]any{"count": int64(2), "allowMultiplePerNode": false},
 		"dashboard":       map[string]any{"enabled": false},
 		"crashCollector":  map[string]any{"disable": true},
-		"security":        map[string]any{"cephx": map[string]any{"daemon": map[string]any{"keyType": "aes256k", "keyGeneration": int64(2)}}},
+		"security":        map[string]any{"cephx": adoptedGoldenCephx()},
 		"healthCheck": map[string]any{"muteHealthWarning": map[string]any{
 			"AUTH_EMERGENCY_CIPHERS_SET":    map[string]any{"policy": "mute"},
 			"AUTH_INSECURE_CLIENT_KEY_TYPE": map[string]any{"policy": "mute"},
@@ -199,9 +199,30 @@ func TestRenderStorageAdoptWithoutCephxKeepsTheDefaultKeys(t *testing.T) {
 		t.Fatal(err)
 	}
 	security, _, _ := unstructured.NestedMap(findObject(out.Objects, "CephCluster", "rook-ceph").Object, "spec", "security")
-	want := map[string]any{"cephx": map[string]any{"csi": map[string]any{"keyType": "aes"}}}
-	if !reflect.DeepEqual(security, want) {
+	if !reflect.DeepEqual(security, map[string]any{"cephx": map[string]any{"csi": map[string]any{"keyType": "aes"}}}) {
 		t.Fatalf("security %+v", security)
+	}
+}
+
+func TestRenderStorageAdoptKeepsTheOldGenerationsOverTheDefaults(t *testing.T) {
+	in := withCipher(adoptInput(v1alpha1.ReasonAdopted), "aes256k")
+	in.Cluster.Spec.Storage.Adopt.Cephx = &runtime.RawExtension{Raw: []byte(`{"csi":{"keyGeneration":7,"keyType":"aes256k"}}`)}
+	out, err := RenderStorage(in)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cephx, _, _ := unstructured.NestedMap(findObject(out.Objects, "CephCluster", "rook-ceph").Object, "spec", "security", "cephx")
+	want := stageACephx()
+	want["csi"] = map[string]any{"keyRotationPolicy": "KeyGeneration", "keyGeneration": int64(7), "keepPriorKeyCountMax": int64(1), "keyType": "aes256k"}
+	if !reflect.DeepEqual(cephx, want) {
+		t.Fatalf("cephx %+v", cephx)
+	}
+}
+
+func adoptedGoldenCephx() map[string]any {
+	return map[string]any{
+		"csi":    map[string]any{"keyType": "aes"},
+		"daemon": map[string]any{"keyType": "aes256k", "keyGeneration": int64(2)},
 	}
 }
 

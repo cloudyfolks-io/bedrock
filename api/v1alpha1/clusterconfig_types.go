@@ -68,6 +68,9 @@ type StorageSpec struct {
 	// +kubebuilder:validation:Minimum=1
 	// +optional
 	Replicas int32 `json:"replicas,omitempty"`
+	// +kubebuilder:validation:Enum=aes;aes256k
+	// +optional
+	CephxCipher string `json:"cephxCipher,omitempty"`
 	// +optional
 	Adopt *AdoptSpec `json:"adopt,omitempty"`
 }

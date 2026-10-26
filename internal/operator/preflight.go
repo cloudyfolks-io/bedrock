@@ -44,6 +44,8 @@ type preflightInput struct {
 	VMIs      []unstructured.Unstructured
 	VMs       []unstructured.Unstructured
 	Now       time.Time
+
+	CephxCipher string
 }
 
 func preflight(ctx context.Context, env upgradeEnv, cluster v1alpha1.Cluster) (phaseResult, error) {
@@ -79,6 +81,10 @@ func gatherPreflight(ctx context.Context, env upgradeEnv, cluster v1alpha1.Clust
 	if err != nil {
 		return preflightInput{}, err
 	}
+	values, err := settingValues(ctx, env.Client)
+	if err != nil {
+		return preflightInput{}, err
+	}
 	ceph, cephErr := readCeph(ctx, env.Client, env.Exec)
 	return preflightInput{
 		Cluster:   cluster,
@@ -92,6 +98,8 @@ func gatherPreflight(ctx context.Context, env upgradeEnv, cluster v1alpha1.Clust
 		VMIs:      vmis,
 		VMs:       vms,
 		Now:       time.Now(),
+
+		CephxCipher: values[cephxCipherKey],
 	}, nil
 }
 
@@ -125,7 +133,7 @@ func errorText(err error) string {
 }
 
 func preflightProblem(in preflightInput) string {
-	checks := []func(preflightInput) []string{adoptionProblems, releaseProblems, depotProblems, nodeProblems, spareProblems, hostProblems, etcdProblems, cephProblems, vmProblems}
+	checks := []func(preflightInput) []string{adoptionProblems, releaseProblems, depotProblems, nodeProblems, spareProblems, hostProblems, etcdProblems, cephProblems, cephxProblems, vmProblems}
 	var problems []string
 	for _, check := range checks {
 		problems = append(problems, check(in)...)
@@ -362,6 +370,10 @@ func cephProblems(in preflightInput) []string {
 		return []string{problem}
 	}
 	return nil
+}
+
+func cephxProblems(in preflightInput) []string {
+	return cephxKernelProblems(in.CephxCipher, in.Hosts)
 }
 
 func vmProblems(in preflightInput) []string {

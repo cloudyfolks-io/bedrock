@@ -178,3 +178,20 @@ func TestOSKey(t *testing.T) {
 		}
 	}
 }
+
+func TestGatherReadsTheKernelRelease(t *testing.T) {
+	root := fakeRoot(t, true)
+	if err := os.MkdirAll(filepath.Join(root, "proc", "sys", "kernel"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "proc", "sys", "kernel", "osrelease"), []byte("6.8.0-45-generic\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	facts, err := Gather(context.Background(), fakeIP(), root, func(string) (uint64, error) { return 50 << 30, nil }, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if facts.Kernel != "6.8.0-45-generic" {
+		t.Fatalf("kernel %q", facts.Kernel)
+	}
+}

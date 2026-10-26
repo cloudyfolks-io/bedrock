@@ -730,3 +730,23 @@ func TestRunJoinRunningNodeSkipsEncryptionFetch(t *testing.T) {
 		t.Fatalf("join api requests %d, want none", requests.Load())
 	}
 }
+
+func TestRunJoinRefusesAKernelThatCannotMountAes256kKeys(t *testing.T) {
+	root, e := fakeHost(t)
+	if err := os.MkdirAll(filepath.Join(root, "proc", "sys", "kernel"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "proc", "sys", "kernel", "osrelease"), []byte("6.8.0-45-generic\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	raw, err := k0s.EncodeToken(k0s.Token{Version: "v0.1.0-test", Roles: []string{"workload"}, K0sToken: "tok", VIP: "10.0.10.10", K0sVersion: "1.36.3+k0s.0", SupportedOS: []string{"ubuntu-24.04"}, CephxCipher: "aes256k"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	deps := InitDeps{Exec: e, Uid: 0, FreeBytes: func(string) (uint64, error) { return 100 << 30, nil }, Root: root, Executable: fakeExecutable(t)}
+	var out, errOut bytes.Buffer
+	code := RunJoin(context.Background(), []string{"--token", raw, "--data-dir", filepath.Join(root, "var", "lib", "k0s"), "--k0s-bin", "/usr/local/bin/k0s"}, deps, &out, &errOut)
+	if code == 0 || !strings.Contains(out.String(), "kernel 7.0") {
+		t.Fatalf("exit %d\nstdout %s\nstderr %s", code, out.String(), errOut.String())
+	}
+}

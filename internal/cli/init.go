@@ -177,6 +177,7 @@ func RunInit(ctx context.Context, args []string, deps InitDeps, stdout, stderr i
 	if err != nil {
 		return fail(stderr, err)
 	}
+	cfg = config.WithCephxCipher(cfg, facts.Kernel)
 	results, err := preflightResults(ctx, deps, k0sClient, preflight.Run, facts, cfg, bundle.Spec.SupportedOS)
 	if err != nil {
 		return fail(stderr, err)

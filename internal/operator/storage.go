@@ -44,9 +44,10 @@ func RenderStorage(in AddonInput) (Rendered, error) {
 	if err != nil {
 		return Rendered{}, err
 	}
-	cluster := cephCluster(image, hosts, monCount(replicas), replicas)
+	plan := planCephx(in, nil)
+	cluster := cephCluster(image, hosts, monCount(replicas), replicas, plan)
 	objects := slices.Concat([]*unstructured.Unstructured{cluster}, storageObjects(replicas, hosts, hostingNames(in)))
-	return Rendered{Objects: objects, Probes: []Probe{cephClusterProbe(cephGate(deviceCount(hosts)))}}, nil
+	return Rendered{Objects: objects, Probes: []Probe{cephClusterProbe(cephGate(deviceCount(hosts)))}, Conditions: plan.Conditions}, nil
 }
 
 func noDevices() Rendered {
@@ -130,11 +131,11 @@ func monCount(replicas int) int64 {
 	return 1
 }
 
-func cephCluster(image string, hosts []v1alpha1.Host, mons int64, replicas int) *unstructured.Unstructured {
-	return object("ceph.rook.io/v1", "CephCluster", storageNamespace, storageNamespace, cephClusterSpec(image, hosts, mons, replicas))
+func cephCluster(image string, hosts []v1alpha1.Host, mons int64, replicas int, plan cephxPlan) *unstructured.Unstructured {
+	return object("ceph.rook.io/v1", "CephCluster", storageNamespace, storageNamespace, cephClusterSpec(image, hosts, mons, replicas, plan))
 }
 
-func cephClusterSpec(image string, hosts []v1alpha1.Host, mons int64, replicas int) map[string]any {
+func cephClusterSpec(image string, hosts []v1alpha1.Host, mons int64, replicas int, plan cephxPlan) map[string]any {
 	nodes := make([]any, 0, len(hosts))
 	for _, host := range hosts {
 		devices := make([]any, 0, len(host.Spec.Storage.Devices))
@@ -154,26 +155,11 @@ func cephClusterSpec(image string, hosts []v1alpha1.Host, mons int64, replicas i
 		"mgr":                map[string]any{"count": mgrs, "allowMultiplePerNode": len(hosts) < 2},
 		"dashboard":          map[string]any{"enabled": false},
 		"crashCollector":     map[string]any{"disable": true},
-		"security":           map[string]any{"cephx": map[string]any{"csi": map[string]any{"keyType": "aes"}}},
-		"healthCheck":        map[string]any{"muteHealthWarning": mutedHealthWarnings(replicas)},
+		"security":           map[string]any{"cephx": plan.Cephx},
+		"healthCheck":        map[string]any{"muteHealthWarning": healthWarnings(plan, replicas)},
 		"storage":            map[string]any{"useAllNodes": false, "useAllDevices": false, "nodes": nodes},
 		"priorityClassNames": map[string]any{"mon": "system-node-critical", "osd": "system-node-critical", "mgr": "system-cluster-critical"},
 	}
-}
-
-func mutedHealthWarnings(replicas int) map[string]any {
-	muted := map[string]any{
-		"AUTH_INSECURE_CLIENT_KEY_TYPE": map[string]any{"policy": "mute"},
-		"AUTH_INSECURE_KEYS_ALLOWED":    map[string]any{"policy": "mute"},
-		"AUTH_INSECURE_KEYS_CREATABLE":  map[string]any{"policy": "mute"},
-	}
-	policy := "unmute"
-	if replicas == 1 {
-		policy = "mute"
-	}
-	muted["POOL_NO_REDUNDANCY"] = map[string]any{"policy": policy}
-	muted["TOO_FEW_OSDS"] = map[string]any{"policy": policy}
-	return muted
 }
 
 func replicated(replicas int) map[string]any {

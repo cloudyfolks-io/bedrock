@@ -43,6 +43,9 @@ New claims wait for a short time while the class is missing.
 
 - Every old Ceph daemon runs the same Ceph major release as the bundle, and at least v20.2.1.
   Read the release of the bundle in the `rook` component of `release/components.yaml`.
+- The old cluster runs Rook v1.20 or v1.21. Bedrock runs the Rook operator of the bundle and upgrades it in place.
+- Every host runs a Linux kernel 5.11 or newer. Rook v1.21 requires Ceph msgr2 by default.
+  With `aes256k` keys every host needs kernel 7.0 or newer, because the CSI kernel clients mount the volumes.
 - The old cluster shows `HEALTH_OK` and all PGs are `active+clean`.
 - Every adopted pool has a size that is not larger than `storage.replicas`.
   Adoption refuses the other case, because Rook would shrink the pool.
@@ -286,6 +289,9 @@ Rules for the file:
 - Set a name in `pools` only for a kind that exists. An empty name skips that kind.
 - Copy the whole `security.cephx` block of the old CephCluster into `adopt.cephx`.
   Rook then keeps the daemon keys and does not rotate them again.
+  `adopt.cephx` must carry `keyGeneration` in every section that it has. If the block has `csi.keyType: aes256k`, it must have the sections `daemon`, `csi` and `rbdMirrorPeer`. `bedrock init` refuses a block without them, because Rook refuses a lower generation.
+  Bedrock copies the live mode: `csi.keyType: aes256k` selects the cipher `aes256k`, other blocks select `aes`. See [Storage keys](../storage.md).
+  When the old block has `allowedCiphers`, Bedrock restricts the ciphers at once. Without it, Bedrock rotates first and restricts later.
 
 ## 4. Stop the old cluster
 

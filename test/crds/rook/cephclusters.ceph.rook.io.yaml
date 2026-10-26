@@ -176,6 +176,11 @@ spec:
                     type: boolean
                   ssl:
                     type: boolean
+                  sslCertificateRef:
+                    maxLength: 253
+                    minLength: 1
+                    pattern: ^[a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*$
+                    type: string
                   urlPrefix:
                     type: string
                 type: object
@@ -267,6 +272,8 @@ spec:
                               type: integer
                             grpc:
                               properties:
+                                mode:
+                                  type: string
                                 port:
                                   format: int32
                                   type: integer
@@ -300,6 +307,8 @@ spec:
                                   - type: integer
                                   - type: string
                                   x-kubernetes-int-or-string: true
+                                protocol:
+                                  type: string
                                 scheme:
                                   type: string
                               required:
@@ -372,6 +381,8 @@ spec:
                               type: integer
                             grpc:
                               properties:
+                                mode:
+                                  type: string
                                 port:
                                   format: int32
                                   type: integer
@@ -405,6 +416,8 @@ spec:
                                   - type: integer
                                   - type: string
                                   x-kubernetes-int-or-string: true
+                                protocol:
+                                  type: string
                                 scheme:
                                   type: string
                               required:
@@ -892,8 +905,7 @@ spec:
                 - message: zones must be less than or equal to count
                   rule: '!has(self.zones) || (has(self.zones) && (size(self.zones) <= self.count))'
                 - message: stretchCluster zones must be equal to 3
-                  rule: '!has(self.stretchCluster) || (has(self.stretchCluster) && (size(self.stretchCluster.zones) > 0) &&
-                    (size(self.stretchCluster.zones) == 3))'
+                  rule: '!has(self.stretchCluster) || (has(self.stretchCluster) && (size(self.stretchCluster.zones) > 0) && (size(self.stretchCluster.zones) == 3))'
               monitoring:
                 nullable: true
                 properties:
@@ -959,6 +971,46 @@ spec:
                     type: string
                   metricsDisabled:
                     type: boolean
+                  metricsTLS:
+                    properties:
+                      ca:
+                        maxProperties: 1
+                        minProperties: 1
+                        properties:
+                          configMap:
+                            properties:
+                              key:
+                                type: string
+                              name:
+                                default: ''
+                                type: string
+                              optional:
+                                type: boolean
+                            required:
+                            - key
+                            type: object
+                            x-kubernetes-map-type: atomic
+                          secret:
+                            properties:
+                              key:
+                                type: string
+                              name:
+                                default: ''
+                                type: string
+                              optional:
+                                type: boolean
+                            required:
+                            - key
+                            type: object
+                            x-kubernetes-map-type: atomic
+                        type: object
+                      secretName:
+                        maxLength: 253
+                        minLength: 1
+                        type: string
+                    required:
+                    - secretName
+                    type: object
                   port:
                     maximum: 65535
                     minimum: 0
@@ -1035,8 +1087,7 @@ spec:
                 x-kubernetes-preserve-unknown-fields: true
                 x-kubernetes-validations:
                 - message: at least one network selector must be specified when using multus
-                  rule: '!has(self.provider) || (self.provider != ''multus'' || (self.provider == ''multus'' && size(self.selectors)
-                    > 0))'
+                  rule: '!has(self.provider) || (self.provider != ''multus'' || (self.provider == ''multus'' && size(self.selectors) > 0))'
                 - message: the legacy hostNetwork setting can only be set if the network.provider is set to the empty string
                   rule: '!has(self.hostNetwork) || self.hostNetwork == false || !has(self.provider) || self.provider == ""'
               placement:
