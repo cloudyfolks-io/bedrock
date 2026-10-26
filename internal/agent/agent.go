@@ -68,6 +68,12 @@ func Run(ctx context.Context, c client.WithWatch, deps Deps) error {
 		if err := RunUpgrades(ctx, c, deps, Steps()); err != nil {
 			fmt.Fprintf(os.Stderr, "agent: upgrade: %v\n", err)
 		}
+		if err := adoptK0sImages(deps.Root, releaseLists(ctx, c, deps.Root), deps.Version); err != nil {
+			fmt.Fprintf(os.Stderr, "agent: image archive: %v\n", err)
+		}
+		if err := syncHostImages(ctx, deps); err != nil {
+			fmt.Fprintf(os.Stderr, "agent: images: %v\n", err)
+		}
 		if err := EnableAuthnArgs(ctx, c, deps); err != nil {
 			fmt.Fprintf(os.Stderr, "agent: authn flags: %v\n", err)
 		}
@@ -217,6 +223,7 @@ func tick(ctx context.Context, c client.Client, deps Deps) (inventoryErr, writeE
 	} else {
 		conditions = append(conditions, condition(v1alpha1.ConditionManagementApplied, metav1.ConditionFalse, "ManagementDisabled", "", current.Generation))
 	}
+	conditions = append(conditions, importsCondition(deps, current.Generation)...)
 	next.Conditions = stable(current.Status.Conditions, conditions)
 	if err := ApplyStatus(ctx, c, deps.Node, next); err != nil {
 		return invErr, err

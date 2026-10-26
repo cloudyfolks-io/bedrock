@@ -97,6 +97,15 @@ for dir in $DIRS; do
 done
 k0s restore --config-out /root/restore/k0s.yaml "$1"
 printf '{"backup":"%s","completedAt":"%s"}\n' "$BACKUP" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" > /var/lib/bedrock/restore.json
+if [ ! -e /var/lib/k0s/containerd ]; then
+  mkdir -p /var/lib/k0s/images /var/lib/bedrock
+  for FILE in /var/lib/bedrock/images/*/*/*.tar; do
+    [ -e "$FILE" ] || continue
+    VERSION=$(basename "$(dirname "$(dirname "$FILE")")")
+    echo "$VERSION-$(basename "$FILE")" >> /var/lib/bedrock/image-links
+    ln -f "$FILE" "/var/lib/k0s/images/$VERSION-$(basename "$FILE")" || cp "$FILE" "/var/lib/k0s/images/$VERSION-$(basename "$FILE")"
+  done
+fi
 systemctl start k0scontroller
 EOF
 ```
@@ -120,6 +129,15 @@ for dir in $DIRS; do
 done
 k0s restore --config-out /root/restore/k0s.yaml "$1"
 printf '{"backup":"%s","completedAt":"%s"}\n' "$BACKUP" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" > /var/lib/bedrock/restore.json
+if [ ! -e /var/lib/k0s/containerd ]; then
+  mkdir -p /var/lib/k0s/images /var/lib/bedrock
+  for FILE in /var/lib/bedrock/images/*/*/*.tar; do
+    [ -e "$FILE" ] || continue
+    VERSION=$(basename "$(dirname "$(dirname "$FILE")")")
+    echo "$VERSION-$(basename "$FILE")" >> /var/lib/bedrock/image-links
+    ln -f "$FILE" "/var/lib/k0s/images/$VERSION-$(basename "$FILE")" || cp "$FILE" "/var/lib/k0s/images/$VERSION-$(basename "$FILE")"
+  done
+fi
 systemctl start k0scontroller
 EOF
 ```
@@ -143,7 +161,7 @@ The archive also contains the OVN databases `ovnnb_db.db` and `ovnsb_db.db`.
 This procedure does not use them.
 
 A scheduled etcd snapshot (`etcd-*`) holds no image tarballs. The script
-keeps the directory `/var/lib/k0s/images` on the host. On a rebuilt host,
+keeps the image archive `/var/lib/bedrock/images` on the host. On a rebuilt host,
 put the images of the bundle back before you run the script. See
 [Etcd snapshots](../backup.md#etcd-snapshots).
 
