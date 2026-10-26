@@ -121,6 +121,15 @@ func preloadImages(ctx context.Context, deps Deps, bundleURL, dir string, wanted
 	return len(wanted), syncHostImages(ctx, deps)
 }
 
+func ArchiveInitBundle(root, bundleDir string) error {
+	manifest := filepath.Join(bundleDir, release.BundleFileName)
+	spec, err := readBundleSpec(manifest)
+	if err != nil {
+		return err
+	}
+	return keepTarball(manifest, filepath.Join(archiveVersionDir(root, spec.Version), release.BundleFileName))
+}
+
 func keepTarball(staged, dest string) error {
 	if _, err := os.Stat(dest); err == nil {
 		return nil
