@@ -254,7 +254,10 @@ func TestVMInstanceTypeAndPreferenceMustExist(t *testing.T) {
 	r := newVMReconciler(c)
 	createVM(t, c, ns, "no-type", func(vm *v1alpha1.VirtualMachine) { vm.Spec.InstanceType = "u9.none" })
 	createVM(t, c, ns, "no-preference", func(vm *v1alpha1.VirtualMachine) { vm.Spec.Preference = "nope" })
-	createVM(t, c, ns, "from-image", func(vm *v1alpha1.VirtualMachine) { vm.Spec.Preference = "" })
+	createVM(t, c, ns, "from-image", func(vm *v1alpha1.VirtualMachine) {
+		vm.Spec.Preference = ""
+		vm.Spec.Disks = nil
+	})
 	for _, name := range []string{"no-type", "no-preference", "from-image"} {
 		reconcileVM(t, r, ns, name)
 	}
