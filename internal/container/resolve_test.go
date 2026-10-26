@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
@@ -313,6 +314,15 @@ func TestResolvePullSecretNotFound(t *testing.T) {
 	bad := createContainer(t, c, ns, "bad", func(s *v1alpha1.ContainerSpec) { s.ImagePullSecrets = []string{"registry", "missing"} })
 	_, gate := resolveContainer(t, c, bad)
 	requireGate(t, gate, ReasonPullSecretNotFound)
+}
+
+func TestResolveRefusesAPullSecretWithoutADockerConfig(t *testing.T) {
+	c, _ := startEnv(t)
+	ns := seedPlatform(t, c)
+	createObject(t, c, &corev1.Secret{ObjectMeta: metav1.ObjectMeta{Namespace: ns, Name: "kept"}, Type: corev1.SecretTypeOpaque, Data: map[string][]byte{"username": []byte("robot")}})
+	container := createContainer(t, c, ns, "kept-pull", func(s *v1alpha1.ContainerSpec) { s.ImagePullSecrets = []string{"kept"} })
+	_, gate := resolveContainer(t, c, container)
+	requireGate(t, gate, ReasonSecretTypeInvalid)
 }
 
 func TestVolumeHolderPrefersTheOldestConsumer(t *testing.T) {

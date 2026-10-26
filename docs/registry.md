@@ -193,8 +193,16 @@ The registry must be ready.
 Until then the credential shows the reason `RegistryNotFound` or `RegistryNotReady`.
 A robot with the same name that exists already gives `NameTaken`.
 An administrator can adopt it with the annotation `bedrock.cloudyfolks.io/adopt: "true"`.
-Bedrock then takes the robot over and sets a new secret.
-The login name stays the same, and the old secret stops working.
+Bedrock then takes the robot over and does not change its secret.
+The password that the customer has stays valid, and the login name stays the same.
+Bedrock never stored this password, so the Secret `<name>-docker` has the type `Opaque` and only the keys `host` and `username`.
+It has no `password` key and no `.dockerconfigjson` key.
+The condition `SecretKept` is `True` with the reason `PasswordKept`.
+A Container or a Build that uses this Secret as a pull or push Secret waits with the reason `SecretTypeInvalid` until the password is set.
+To set a new password, change the annotation `bedrock.cloudyfolks.io/reset-secret` to a new value.
+Bedrock then sets a new secret on the robot, replaces the Secret with the type `kubernetes.io/dockerconfigjson` and removes the condition `SecretKept`.
+The old password stops working then.
+A robot that Bedrock creates always gets a new secret and a full Secret.
 Bedrock finds the robot only inside the Harbor project of the Registry.
 A robot that another credential holds already gives the reason `RobotClaimed`, and Bedrock changes nothing.
 
@@ -210,6 +218,7 @@ Both kinds report the condition `Ready`.
 | `NameInvalid` | `Registry` | The project name does not follow the rules. |
 | `NameReserved` | `Registry` | The name or its prefix is reserved and the object has no approval. |
 | `NameTaken` | both | The project or the robot exists and the object does not own it. |
+| `PasswordKept` | `RegistryCredential` | The reason of the condition `SecretKept`. The adopted robot keeps its password, and the Secret has no password. |
 | `RobotClaimed` | `RegistryCredential` | The adopt annotation is set, but another credential holds the robot. |
 | `WebhookSecretMissing` | `Registry` | The Secret or the key of `webhook.authHeaderSecretRef` does not exist. |
 | `NotEmpty` | `Registry` | The delete waits because the project has repositories and `forceDestroy` is `false`. |

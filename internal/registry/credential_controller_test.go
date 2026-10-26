@@ -10,6 +10,7 @@ import (
 
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/utils/ptr"
 	ctrl "sigs.k8s.io/controller-runtime"
@@ -267,20 +268,63 @@ func TestCredentialThatNeverOwnedARobotLeavesItAlone(t *testing.T) {
 	}
 }
 
-func TestCredentialAdoptsARobotWithTheAnnotation(t *testing.T) {
+func adoptedCredential(t *testing.T) (*harborState, *CredentialReconciler, client.Client) {
+	t.Helper()
 	state := newHarborState(t)
 	credential := credentialFor("ci", "pull")
 	credential.Annotations = map[string]string{AnnotationAdopt: "true"}
 	r, c := credentialWorld(t, state, credential)
 	state.project("acme-images").robots = []fakeRobot{{id: 700, name: "ci", secret: "old"}}
 	reconcileCredential(t, r, "ci")
+	return state, r, c
+}
+
+func TestCredentialAdoptionKeepsTheRobotSecret(t *testing.T) {
+	state, r, c := adoptedCredential(t)
+	reconcileCredential(t, r, "ci")
 	got := fetchCredential(t, c, "ci")
 	secret := dockerSecret(t, c, "ci")
-	if credentialReady(got).Status != metav1.ConditionTrue || got.Status.RobotID != 700 || string(secret.Data["password"]) == "old" || len(state.robotSets) != 1 {
+	if credentialReady(got).Status != metav1.ConditionTrue || got.Status.RobotID != 700 || got.Status.SecretName != "ci-docker" || len(state.robotSets) != 0 {
 		t.Fatalf("status %+v sets %v", got.Status, state.robotSets)
 	}
-	if state.project("acme-images").robots[0].secret != string(secret.Data["password"]) {
-		t.Error("the robot secret is not the Secret")
+	if state.project("acme-images").robots[0].secret != "old" {
+		t.Error("the robot secret changed")
+	}
+	if _, has := secret.Data["password"]; has || secret.Type != corev1.SecretTypeOpaque || len(secret.Data[".dockerconfigjson"]) != 0 {
+		t.Errorf("type %s keys %v", secret.Type, secret.Data)
+	}
+	if string(secret.Data["username"]) != "robot$acme-images+ci" || string(secret.Data["host"]) != "registry.example.com" {
+		t.Errorf("keys %v", secret.Data)
+	}
+	kept := meta.FindStatusCondition(got.Status.Conditions, "SecretKept")
+	if kept == nil || kept.Status != metav1.ConditionTrue || kept.Reason != "PasswordKept" {
+		t.Errorf("condition %+v", kept)
+	}
+}
+
+func TestCredentialRotateAfterAdoptionSetsANewSecret(t *testing.T) {
+	state, r, c := adoptedCredential(t)
+	credential := fetchCredential(t, c, "ci")
+	credential.Annotations[AnnotationResetSecret] = "rotate"
+	if err := c.Update(context.Background(), credential); err != nil {
+		t.Fatal(err)
+	}
+	reconcileCredential(t, r, "ci")
+	secret := dockerSecret(t, c, "ci")
+	password := string(secret.Data["password"])
+	if len(state.robotSets) != 1 || password == "" || password == "old" || state.project("acme-images").robots[0].secret != password {
+		t.Fatalf("sets %v password %q", state.robotSets, password)
+	}
+	if secret.Type != corev1.SecretTypeDockerConfigJson || len(secret.Data[".dockerconfigjson"]) == 0 {
+		t.Errorf("type %s keys %v", secret.Type, secret.Data)
+	}
+	got := fetchCredential(t, c, "ci")
+	if meta.FindStatusCondition(got.Status.Conditions, "SecretKept") != nil || got.Status.SecretReset != "rotate" {
+		t.Errorf("status %+v", got.Status)
+	}
+	reconcileCredential(t, r, "ci")
+	if len(state.robotSets) != 1 {
+		t.Errorf("a second run reset again: %v", state.robotSets)
 	}
 }
 

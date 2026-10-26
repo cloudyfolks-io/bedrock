@@ -170,7 +170,7 @@ The operator tries again every 30 seconds.
 | `NoDNSServers` | The Subnet has no `dnsServers`, and the Settings `network.dns-servers` and `network.services.resolver` are empty. A build never uses the cluster DNS. | Set `dnsServers` on the Subnet, or set one of the two Settings. |
 | `WaitingForDefaultSecurityGroup` | The default security group of the project does not exist yet. | Wait. The network area makes it. |
 | `SecretNotFound` | The git Secret or the push Secret does not exist in the namespace. | Create the Secret. The operator starts the build when it exists. |
-| `SecretTypeInvalid` | The push Secret is not of the type `kubernetes.io/dockerconfigjson`, or the git Secret has no `username` or no `token`. | Correct the Secret. |
+| `SecretTypeInvalid` | The push Secret is not of the type `kubernetes.io/dockerconfigjson`, or the git Secret has no `username` or no `token`. A Secret of an adopted registry robot has no password and no Docker configuration. | Correct the Secret. For an adopted robot, set a new value of the annotation `bedrock.cloudyfolks.io/reset-secret` on the `RegistryCredential`. |
 | `KataUnavailable` | The RuntimeClass `kata` does not exist, or the Addon `kata` is not `Ready`. | Run builds on a cluster with KVM and an enabled `kata` Addon. |
 | `ApplyFailed` | The cluster refused the Job or the ConfigMap. | Ask an administrator to read the operator log. |
 | `NameConflict` | A Job or a ConfigMap of the same name exists and the Build does not own it. | Use another name for the Build. |

@@ -298,12 +298,16 @@ func (r Resolver) stepPullSecrets(ctx context.Context, c v1alpha1.Container, in 
 		reader = r.Client
 	}
 	for _, name := range c.Spec.ImagePullSecrets {
-		err := reader.Get(ctx, client.ObjectKey{Namespace: c.Namespace, Name: name}, &corev1.Secret{})
+		var secret corev1.Secret
+		err := reader.Get(ctx, client.ObjectKey{Namespace: c.Namespace, Name: name}, &secret)
 		if notFound(err) {
 			return in, gateOf(ReasonPullSecretNotFound, "the pull secret %q does not exist", name), nil
 		}
 		if err != nil {
 			return in, nil, err
+		}
+		if secret.Type != corev1.SecretTypeDockerConfigJson && secret.Type != corev1.SecretTypeDockercfg {
+			return in, gateOf(ReasonSecretTypeInvalid, "the pull secret %q must have the type %s or %s; a registry credential that adopted a robot has no password until the annotation bedrock.cloudyfolks.io/reset-secret gets a new value", name, corev1.SecretTypeDockerConfigJson, corev1.SecretTypeDockercfg), nil
 		}
 	}
 	return in, nil, nil
