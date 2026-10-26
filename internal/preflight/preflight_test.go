@@ -66,6 +66,45 @@ func TestRunFatalFailures(t *testing.T) {
 	}
 }
 
+func TestRunSwapBlocksAndNamesTheDevice(t *testing.T) {
+	facts := goodFacts()
+	facts.Swaps = []string{"/swap.img"}
+	results := Run(context.Background(), goodExec(), facts, []host.Device{{Path: "/dev/sdb", Block: true}}, goodConfig(), []string{"ubuntu-24.04"})
+	if !Blocked(results) {
+		t.Fatal("swap must block")
+	}
+	out := Format(results)
+	for _, want := range []string{"[fail] swap:", "/swap.img", "swapoff", "/etc/fstab"} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("missing %q in %s", want, out)
+		}
+	}
+}
+
+func TestRunSwapMessageFitsTheDeviceKind(t *testing.T) {
+	zram := swapMessage([]string{"/dev/zram0"})
+	if !strings.Contains(zram, "zram") || strings.Contains(zram, "/etc/fstab") {
+		t.Fatalf("zram message %q", zram)
+	}
+	file := swapMessage([]string{"/swap.img"})
+	if !strings.Contains(file, "/etc/fstab") || strings.Contains(file, "zram") {
+		t.Fatalf("file message %q", file)
+	}
+	both := swapMessage([]string{"/dev/zram0", "/swap.img"})
+	if !strings.Contains(both, "zram") || !strings.Contains(both, "/etc/fstab") {
+		t.Fatalf("mixed message %q", both)
+	}
+}
+
+func TestRunUbuntu2604IsSupported(t *testing.T) {
+	facts := goodFacts()
+	facts.OSVersionID = "26.04"
+	results := Run(context.Background(), goodExec(), facts, []host.Device{{Path: "/dev/sdb", Block: true}}, goodConfig(), []string{"ubuntu-26.04"})
+	if Blocked(results) {
+		t.Fatalf("unexpected block: %s", Format(results))
+	}
+}
+
 func TestRunWarningsDoNotBlock(t *testing.T) {
 	facts := goodFacts()
 	facts.KVM = false

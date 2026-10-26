@@ -288,8 +288,13 @@ disk_entries() {
 vm_config() {
   local id=$1
   cat <<CONFIG
-base:
-- template:_images/ubuntu-24.04
+images:
+- location: "https://cloud-images.ubuntu.com/releases/resolute/release-20261016/ubuntu-26.04-server-cloudimg-amd64.img"
+  arch: x86_64
+  digest: "sha256:5645d0318ad21f643ebb1ac4567514620e9893380b07b0201fda163baa5b7eb5"
+- location: "https://cloud-images.ubuntu.com/releases/resolute/release-20261016/ubuntu-26.04-server-cloudimg-arm64.img"
+  arch: aarch64
+  digest: "sha256:8eb876c2ccc4b6ff89e4a65d511815923b285e04503ba465809bf587f763da24"
 vmType: qemu
 cpus: $cpus
 memory: ${memory}GiB

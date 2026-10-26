@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -103,9 +104,67 @@ func TestGatherWithoutIOMMU(t *testing.T) {
 	}
 }
 
+func TestGatherListsSwapDevices(t *testing.T) {
+	root := fakeRoot(t, true)
+	if err := os.MkdirAll(filepath.Join(root, "proc"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	swaps := "Filename\t\t\t\tType\t\tSize\t\tUsed\t\tPriority\n/swap.img                               file\t\t8388604\t\t0\t\t-2\n/dev/zram0                              partition\t4194300\t\t0\t\t100\n"
+	if err := os.WriteFile(filepath.Join(root, "proc", "swaps"), []byte(swaps), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	facts, err := Gather(context.Background(), fakeIP(), root, func(string) (uint64, error) { return 50 << 30, nil }, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(facts.Swaps) != 2 || facts.Swaps[0] != "/swap.img" || facts.Swaps[1] != "/dev/zram0" {
+		t.Fatalf("swaps %v", facts.Swaps)
+	}
+}
+
+func TestGatherWithoutSwap(t *testing.T) {
+	root := fakeRoot(t, true)
+	if err := os.MkdirAll(filepath.Join(root, "proc"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "proc", "swaps"), []byte("Filename\t\t\t\tType\t\tSize\t\tUsed\t\tPriority\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	facts, err := Gather(context.Background(), fakeIP(), root, func(string) (uint64, error) { return 50 << 30, nil }, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(facts.Swaps) != 0 {
+		t.Fatalf("swaps %v", facts.Swaps)
+	}
+}
+
+func TestGatherWithoutProcSwapsMeansNoSwap(t *testing.T) {
+	root := fakeRoot(t, true)
+	facts, err := Gather(context.Background(), fakeIP(), root, func(string) (uint64, error) { return 50 << 30, nil }, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(facts.Swaps) != 0 {
+		t.Fatalf("swaps %v", facts.Swaps)
+	}
+}
+
+func TestGatherFailsWhenProcSwapsCannotBeRead(t *testing.T) {
+	root := fakeRoot(t, true)
+	if err := os.MkdirAll(filepath.Join(root, "proc", "swaps"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	_, err := Gather(context.Background(), fakeIP(), root, func(string) (uint64, error) { return 50 << 30, nil }, 0)
+	if err == nil || !strings.Contains(err.Error(), "swaps") {
+		t.Fatalf("err %v", err)
+	}
+}
+
 func TestOSKey(t *testing.T) {
 	cases := map[[2]string]string{
 		{"ubuntu", "24.04"}: "ubuntu-24.04",
+		{"ubuntu", "26.04"}: "ubuntu-26.04",
 		{"debian", "13"}:    "debian-13",
 		{"fedora", "43"}:    "fedora-43",
 		{"rhel", "9.4"}:     "rhel-9",
