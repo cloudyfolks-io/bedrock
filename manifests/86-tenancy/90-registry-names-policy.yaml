@@ -122,7 +122,7 @@ spec:
     - expression: >-
         'bedrock:bedrock-admins' in request.userInfo.groups ||
         request.operation == 'UPDATE' ||
-        !object.metadata.name.startsWith('platform-')
+        (!object.metadata.name.startsWith('platform-') && !(has(object.spec.robotName) && object.spec.robotName.startsWith('platform-')))
       message: "only an administrator may use the name prefix platform-"
       reason: Forbidden
     - expression: >-

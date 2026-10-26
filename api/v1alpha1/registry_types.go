@@ -72,6 +72,8 @@ type RegistryStatus struct {
 	HardBytes int64 `json:"hardBytes,omitempty"`
 	// +optional
 	RepositoryCount int64 `json:"repositoryCount,omitempty"`
+	// +optional
+	RetentionApplied bool `json:"retentionApplied,omitempty"`
 }
 
 // +kubebuilder:object:root=true
@@ -107,6 +109,10 @@ type RegistryCredentialSpec struct {
 	RegistryRef RegistryReference `json:"registryRef"`
 	// +kubebuilder:validation:Enum=pull;pushPull;manage
 	Permission string `json:"permission"`
+	// +kubebuilder:validation:Pattern=`^[a-z0-9]+([._-][a-z0-9]+)*$`
+	// +kubebuilder:validation:MaxLength=100
+	// +optional
+	RobotName string `json:"robotName,omitempty"`
 }
 
 type RegistryCredentialStatus struct {

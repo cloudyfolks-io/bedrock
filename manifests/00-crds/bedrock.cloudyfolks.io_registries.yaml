@@ -194,6 +194,8 @@ spec:
               repositoryCount:
                 format: int64
                 type: integer
+              retentionApplied:
+                type: boolean
               usedBytes:
                 format: int64
                 type: integer

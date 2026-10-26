@@ -5,6 +5,7 @@ import (
 	"time"
 
 	corev1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/types"
@@ -94,12 +95,12 @@ func (r *UserReconciler) finalize(ctx context.Context, user *v1alpha1.ObjectStor
 }
 
 func (r *UserReconciler) release(ctx context.Context, user *v1alpha1.ObjectStorageUser) error {
-	rgwName := RGWUserName(user.Namespace, user.Name)
+	rgwName := rgwUserOf(user)
 	rook, found, err := getRook(ctx, r.Client, cephObjectStoreUserGVK, client.ObjectKey{Namespace: StoreNamespace, Name: rgwName})
 	if err != nil {
 		return err
 	}
-	if found && hasAccountRef(rook) {
+	if found && hasAccountRef(rook) && ownsRookUser(rook, user) {
 		r.dropPolicy(ctx, user.Namespace, rgwName)
 		if err := client.IgnoreNotFound(r.Client.Delete(ctx, rook)); err != nil {
 			return err
@@ -135,16 +136,57 @@ func (r *UserReconciler) converge(ctx context.Context, user *v1alpha1.ObjectStor
 	}
 	account, ready, err := EnsureAccount(ctx, r.Client, project)
 	if err != nil || !ready {
-		return userState{outcome: accountPending()}, err
+		blockedBy, err := accountBlocked(err)
+		return userState{outcome: blockedBy}, err
 	}
 	return r.converged(ctx, user, project, account)
 }
 
+func ownsRookUser(rook *unstructured.Unstructured, user *v1alpha1.ObjectStorageUser) bool {
+	owner := platform.OwnerOf(rook)
+	return owner.Kind == "ObjectStorageUser" && owner.Name == user.Name && owner.Namespace == user.Namespace && owner.UID == user.UID
+}
+
+func (r *UserReconciler) adoptionRefusal(ctx context.Context, user *v1alpha1.ObjectStorageUser, project Project, account Account) (outcome, error) {
+	rgwName := rgwUserOf(user)
+	rook, found, err := getRook(ctx, r.Client, cephObjectStoreUserGVK, client.ObjectKey{Namespace: StoreNamespace, Name: rgwName})
+	if err != nil {
+		return outcome{}, err
+	}
+	if found && ownsRookUser(rook, user) {
+		return outcome{}, nil
+	}
+	if found {
+		return outcome{reason: reasonUserClaimed, message: "the RGW user " + rgwName + " belongs to another object", requeue: steadyRequeue}, nil
+	}
+	exists, err := r.S3.UserExists(ctx, r.Endpoint, Region, account.Root, rgwName)
+	switch {
+	case err != nil:
+		return outcome{reason: failureReason(err, "AdoptCheckFailed"), message: err.Error(), requeue: pendingRequeue}, nil
+	case !exists:
+		return outcome{reason: reasonAdoptUserMissing, message: "the account of this project holds no RGW user " + rgwName, requeue: steadyRequeue}, nil
+	}
+	return r.claimRookUser(ctx, user, project)
+}
+
+func (r *UserReconciler) claimRookUser(ctx context.Context, user *v1alpha1.ObjectStorageUser, project Project) (outcome, error) {
+	err := r.Client.Create(ctx, CephUser(user, project), client.FieldOwner(v1alpha1.ObjectStorageFieldManager))
+	if apierrors.IsAlreadyExists(err) {
+		return outcome{reason: reasonUserClaimed, message: "the RGW user " + rgwUserOf(user) + " belongs to another object", requeue: steadyRequeue}, nil
+	}
+	return outcome{}, err
+}
+
 func (r *UserReconciler) converged(ctx context.Context, user *v1alpha1.ObjectStorageUser, project Project, account Account) (userState, error) {
+	if user.Annotations[AdoptUserAnnotation] != "" {
+		if refusal, err := r.adoptionRefusal(ctx, user, project, account); err != nil || refusal.reason != "" {
+			return userState{outcome: refusal}, err
+		}
+	}
 	if err := ssa.Apply(ctx, r.Client, CephUser(user, project), v1alpha1.ObjectStorageFieldManager); err != nil {
 		return userState{}, err
 	}
-	rgwName := RGWUserName(user.Namespace, user.Name)
+	rgwName := rgwUserOf(user)
 	rook, found, err := getRook(ctx, r.Client, cephObjectStoreUserGVK, client.ObjectKey{Namespace: StoreNamespace, Name: rgwName})
 	if err != nil {
 		return userState{}, err
@@ -192,7 +234,7 @@ func (r *UserReconciler) isLegacy(ctx context.Context, user *v1alpha1.ObjectStor
 	if user.Spec.Permission == "" {
 		return true, nil
 	}
-	rgwName := RGWUserName(user.Namespace, user.Name)
+	rgwName := rgwUserOf(user)
 	_, old, err := getRook(ctx, r.Client, cephObjectStoreUserGVK, client.ObjectKey{Namespace: user.Namespace, Name: rgwName})
 	if err != nil || old {
 		return old, err

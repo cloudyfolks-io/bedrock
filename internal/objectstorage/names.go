@@ -4,6 +4,8 @@ import (
 	"errors"
 	"regexp"
 	"strings"
+
+	"github.com/cloudyfolks-io/bedrock/api/v1alpha1"
 )
 
 const (
@@ -21,6 +23,8 @@ const (
 	AppliedCORSAnnotation       = "bedrock.cloudyfolks.io/applied-cors"
 
 	ReservedNameApprovedAnnotation = "bedrock.cloudyfolks.io/reserved-name-approved"
+	AdoptUserAnnotation            = "bedrock.cloudyfolks.io/adopt-rgw-user"
+	AccountNameAnnotation          = "bedrock.cloudyfolks.io/object-storage-account"
 )
 
 var bucketNamePattern = regexp.MustCompile(`^[a-z0-9][a-z0-9-]{1,61}[a-z0-9]$`)
@@ -32,6 +36,13 @@ var (
 
 func RGWUserName(namespace, name string) string {
 	return namespace + "." + name
+}
+
+func rgwUserOf(user *v1alpha1.ObjectStorageUser) string {
+	if adopted := user.Annotations[AdoptUserAnnotation]; adopted != "" {
+		return adopted
+	}
+	return RGWUserName(user.Namespace, user.Name)
 }
 
 func SplitRGWUserName(id string) (namespace, name string, ok bool) {

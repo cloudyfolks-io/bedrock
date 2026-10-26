@@ -118,7 +118,8 @@ func (r *BucketReconciler) converge(ctx context.Context, bucket *v1alpha1.Object
 	}
 	account, ready, err := EnsureAccount(ctx, r.Client, project)
 	if err != nil || !ready {
-		return bucketState{outcome: accountPending()}, err
+		blockedBy, err := accountBlocked(err)
+		return bucketState{outcome: blockedBy}, err
 	}
 	state := bucketState{}
 	state.outcome, err = r.ensureBucket(ctx, account.Root, name)

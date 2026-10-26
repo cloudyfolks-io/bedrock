@@ -59,6 +59,7 @@ var meteringSeries = []string{
 	"bedrock:project_vm_network_transmit_bytes:rate5m",
 	"bedrock:project_vm_network_receive_bytes:increase1h",
 	"bedrock:project_vm_network_transmit_bytes:increase1h",
+	"bedrock:project_pod_network_transmit_bytes:increase1h",
 }
 
 var sourceMetrics = []string{
@@ -70,6 +71,7 @@ var sourceMetrics = []string{
 	"kubevirt_vmi_network_receive_bytes_total",
 	"kubevirt_vmi_network_transmit_bytes_total",
 	"kube_namespace_labels",
+	"kube_ovn_interface_rx_bytes",
 }
 
 var metricIdentifier = regexp.MustCompile(`\b(?:kubevirt_|kube_)[a-z0-9_]+`)
@@ -276,6 +278,36 @@ func TestKubeVirtServiceMonitorScrapesTheMetricsService(t *testing.T) {
 	}
 	endpoint := endpoints[0].(map[string]any)
 	if endpoint["port"] != "metrics" || endpoint["scheme"] != "https" || endpoint["honorLabels"] != true {
+		t.Fatalf("endpoint %v", endpoint)
+	}
+}
+
+func TestPodEgressRuleReadsTheReceivedBytesOfThePodInterfaces(t *testing.T) {
+	prefix := `sum (label_replace(increase(kube_ovn_interface_rx_bytes[1h]), "namespace", "$1", "pod_namespace", "(.*)") * on (namespace)`
+	for _, rule := range meteringRules(t) {
+		if rule.record == "bedrock:project_pod_network_transmit_bytes:increase1h" {
+			if !strings.HasPrefix(rule.expr, prefix) {
+				t.Fatalf("expr %s", rule.expr)
+			}
+			return
+		}
+	}
+	t.Fatal("no pod egress rule")
+}
+
+func TestFabricPingerServiceMonitorScrapesTheInterfaceCounters(t *testing.T) {
+	monitor := objectNamed(sourceObjects(t), "ServiceMonitor", "bedrock-fabric-pinger")
+	if monitor == nil {
+		t.Fatal("missing ServiceMonitor bedrock-fabric-pinger")
+	}
+	selector, _, _ := unstructured.NestedStringMap(monitor.Object, "spec", "selector", "matchLabels")
+	namespaces, _, _ := unstructured.NestedStringSlice(monitor.Object, "spec", "namespaceSelector", "matchNames")
+	endpoints, _, _ := unstructured.NestedSlice(monitor.Object, "spec", "endpoints")
+	if selector["app.kubernetes.io/name"] != "fabric-pinger" || !slices.Equal(namespaces, []string{"kube-system"}) || len(endpoints) != 1 {
+		t.Fatalf("selector %v namespaces %v endpoints %v", selector, namespaces, endpoints)
+	}
+	endpoint := endpoints[0].(map[string]any)
+	if endpoint["port"] != "metrics" || endpoint["honorLabels"] != true {
 		t.Fatalf("endpoint %v", endpoint)
 	}
 }

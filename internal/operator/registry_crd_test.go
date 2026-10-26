@@ -159,3 +159,17 @@ func TestRegistryCredentialSpecIsImmutable(t *testing.T) {
 	stored.Spec.RegistryRef.Name = "other"
 	updateInvalid(t, c, &stored, "spec is immutable")
 }
+
+func TestRegistryCredentialRobotName(t *testing.T) {
+	c, _ := StartTestEnv(t)
+	named := credentialObject("named", "images", "pull")
+	named.Spec.RobotName = "key_acme.ci-1"
+	createValid(t, c, named)
+	for _, bad := range []string{"Upper", "has space", "-lead", "trail-", "a+b", strings.Repeat("a", 101)} {
+		invalid := credentialObject("bad-robot", "images", "pull")
+		invalid.Spec.RobotName = bad
+		createInvalid(t, c, invalid, "spec.robotName")
+	}
+	named.Spec.RobotName = "other"
+	updateInvalid(t, c, named, "spec is immutable")
+}
