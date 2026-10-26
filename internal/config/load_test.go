@@ -599,11 +599,41 @@ func adoptConfigWithCephx(cephxJSON string) v1alpha1.ClusterConfig {
 	return cfg
 }
 
+func configWithClusterServices(t *testing.T) v1alpha1.ClusterConfig {
+	t.Helper()
+	cfg, err := Load(filepath.Join("testdata", "single-node.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg.Spec.DNS.Upstreams = []string{"217.218.127.127", "217.218.155.155"}
+	cfg.Spec.Egress = v1alpha1.EgressSpec{
+		HTTPProxy:        "http://proxy.kube-system:10808",
+		NoProxy:          []string{"10.0.0.0/8", ".svc"},
+		DNS01Nameservers: []string{"https://one.one.one.one/dns-query"},
+	}
+	return cfg
+}
+
 func TestWithCephxCipherPicksByKernelOnAFreshCluster(t *testing.T) {
 	cases := map[string]string{"7.0.1": "aes256k", "6.8.0-45-generic": "aes", "": "aes"}
 	for kernel, want := range cases {
 		if got := WithCephxCipher(v1alpha1.ClusterConfig{}, kernel).Spec.Storage.CephxCipher; got != want {
 			t.Errorf("kernel %q: got %q, want %q", kernel, got, want)
+		}
+	}
+}
+
+func TestSettingValuesCarryDNSAndEgress(t *testing.T) {
+	got := SettingValues(configWithClusterServices(t))
+	want := map[string]string{
+		"dns.upstreams":                 "217.218.127.127 217.218.155.155",
+		"egress.http-proxy":             "http://proxy.kube-system:10808",
+		"egress.no-proxy":               "10.0.0.0/8,.svc",
+		"letsencrypt.dns01-nameservers": "https://one.one.one.one/dns-query",
+	}
+	for key, value := range want {
+		if got[key] != value {
+			t.Errorf("%s = %q, want %q", key, got[key], value)
 		}
 	}
 }
@@ -705,6 +735,51 @@ func TestValidateRejectsBadManagementCIDRAndLegs(t *testing.T) {
 	cfg.Spec.Network.ManagementCIDR = "10.0.10.0/24"
 	cfg.Spec.Network.TenantLegs = []v1alpha1.TenantLegSpec{{Interface: "br-public.30", AllowSources: []string{"100.65.0.1/32"}}}
 	if err := Validate(cfg); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestSettingValuesAreEmptyWithoutDNSAndEgress(t *testing.T) {
+	cfg, err := Load(filepath.Join("testdata", "single-node.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := SettingValues(cfg)
+	for _, key := range []string{"dns.upstreams", "egress.http-proxy", "egress.no-proxy", "letsencrypt.dns01-nameservers"} {
+		if value, ok := got[key]; !ok || value != "" {
+			t.Errorf("%s = %q (present %v)", key, value, ok)
+		}
+	}
+}
+
+func TestToSettingsCarriesDNSAndEgress(t *testing.T) {
+	got := map[string]string{}
+	for _, s := range ToSettings(configWithClusterServices(t)) {
+		got[s.Name] = s.Spec.Value
+	}
+	if got["dns.upstreams"] != "217.218.127.127 217.218.155.155" || got["egress.http-proxy"] != "http://proxy.kube-system:10808" {
+		t.Fatalf("settings %v", got)
+	}
+}
+
+func TestValidateRejectsAnInvalidDNSOrEgressValue(t *testing.T) {
+	cases := map[string]func(*v1alpha1.ClusterConfig){
+		"spec.dns.upstreams":           func(c *v1alpha1.ClusterConfig) { c.Spec.DNS.Upstreams = []string{"dns.example.com"} },
+		"spec.egress.httpProxy":        func(c *v1alpha1.ClusterConfig) { c.Spec.Egress.HTTPProxy = "proxy:3128" },
+		"spec.egress.noProxy":          func(c *v1alpha1.ClusterConfig) { c.Spec.Egress.NoProxy = []string{"a b"} },
+		"spec.egress.dns01Nameservers": func(c *v1alpha1.ClusterConfig) { c.Spec.Egress.DNS01Nameservers = []string{"1.1.1.1"} },
+	}
+	for field, mutate := range cases {
+		cfg := configWithClusterServices(t)
+		mutate(&cfg)
+		if err := Validate(cfg); err == nil || !strings.Contains(err.Error(), field) {
+			t.Errorf("%s: error %v", field, err)
+		}
+	}
+}
+
+func TestValidateAcceptsDNSAndEgress(t *testing.T) {
+	if err := Validate(configWithClusterServices(t)); err != nil {
 		t.Fatal(err)
 	}
 }

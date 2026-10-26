@@ -25,8 +25,8 @@ import (
 )
 
 const (
-	defaultPodCIDR     = "10.16.0.0/16"
-	defaultServiceCIDR = "10.96.0.0/12"
+	DefaultPodCIDR     = "10.16.0.0/16"
+	DefaultServiceCIDR = "10.96.0.0/12"
 	DefaultJoinCIDR    = "100.64.0.0/16"
 
 	adoptDevicePrefix = "/dev/disk/by-id/"
@@ -70,8 +70,8 @@ func WithDefaults(cfg v1alpha1.ClusterConfig) v1alpha1.ClusterConfig {
 	out := *cfg.DeepCopy()
 	out.Spec.API.VIPMode = fallback(out.Spec.API.VIPMode, "arp")
 	out.Spec.Platform.TLSMode = fallback(out.Spec.Platform.TLSMode, "SelfSigned")
-	out.Spec.Network.Fabric.PodCIDR = fallback(out.Spec.Network.Fabric.PodCIDR, defaultPodCIDR)
-	out.Spec.Network.Fabric.ServiceCIDR = fallback(out.Spec.Network.Fabric.ServiceCIDR, defaultServiceCIDR)
+	out.Spec.Network.Fabric.PodCIDR = fallback(out.Spec.Network.Fabric.PodCIDR, DefaultPodCIDR)
+	out.Spec.Network.Fabric.ServiceCIDR = fallback(out.Spec.Network.Fabric.ServiceCIDR, DefaultServiceCIDR)
 	out.Spec.Network.Fabric.JoinCIDR = fallback(out.Spec.Network.Fabric.JoinCIDR, DefaultJoinCIDR)
 	out.Spec.Network.Fabric.EIPMode = fallback(out.Spec.Network.Fabric.EIPMode, "l2")
 	if out.Spec.Storage.Replicas == 0 {
@@ -170,7 +170,7 @@ func Validate(cfg v1alpha1.ClusterConfig) error {
 			return fmt.Errorf("spec.network.fabric cidr %q: %w", cidr, err)
 		}
 	}
-	if s.Network.Fabric.PodCIDR != defaultPodCIDR || s.Network.Fabric.ServiceCIDR != defaultServiceCIDR || s.Network.Fabric.JoinCIDR != DefaultJoinCIDR {
+	if s.Network.Fabric.PodCIDR != DefaultPodCIDR || s.Network.Fabric.ServiceCIDR != DefaultServiceCIDR || s.Network.Fabric.JoinCIDR != DefaultJoinCIDR {
 		return fmt.Errorf("custom CIDRs arrive in a later release")
 	}
 	if mtu := s.Network.PodMTU; mtu != 0 && (mtu < 576 || mtu > 9000) {
@@ -192,6 +192,9 @@ func Validate(cfg v1alpha1.ClusterConfig) error {
 	}
 	if err := settings.ValidateProviderNetworks(s.Network.Fabric.ProviderNetworks); err != nil {
 		return fmt.Errorf("spec.network.fabric.providerNetworks: %w", err)
+	}
+	if err := validateClusterServices(cfg); err != nil {
+		return err
 	}
 	if s.Storage.Replicas < 1 {
 		return fmt.Errorf("spec.storage.replicas must be at least 1")
@@ -244,6 +247,23 @@ func validateManagementNetwork(network v1alpha1.ClusterNetworkSpec) error {
 			if prefix.Bits() == 0 {
 				return fmt.Errorf("spec.network.tenantLegs %s allowSources: %s matches every address", leg.Interface, source)
 			}
+		}
+	}
+	return nil
+}
+
+func validateClusterServices(cfg v1alpha1.ClusterConfig) error {
+	values := SettingValues(cfg)
+	fields := []struct{ field, key string }{
+		{"spec.dns.upstreams", "dns.upstreams"},
+		{"spec.egress.httpProxy", "egress.http-proxy"},
+		{"spec.egress.noProxy", "egress.no-proxy"},
+		{"spec.egress.dns01Nameservers", "letsencrypt.dns01-nameservers"},
+	}
+	for _, f := range fields {
+		definition, _ := settings.Lookup(f.key)
+		if err := definition.Validate(values[f.key]); err != nil {
+			return fmt.Errorf("%s: %w", f.field, err)
 		}
 	}
 	return nil
@@ -431,22 +451,30 @@ func ToHost(cfg v1alpha1.ClusterConfig, nodeName string) v1alpha1.Host {
 	}
 }
 
-func ToSettings(cfg v1alpha1.ClusterConfig) []v1alpha1.Setting {
-	values := map[string]string{
-		"platform.host":             cfg.Spec.Platform.Host,
-		"platform.tls-mode":         cfg.Spec.Platform.TLSMode,
-		"storage.replicas":          strconv.Itoa(int(cfg.Spec.Storage.Replicas)),
-		"storage.cephx-cipher":      fallback(cfg.Spec.Storage.CephxCipher, cephx.Aes),
-		"storage.network":           vlanValue(cfg.Spec.Network.StorageVlan),
-		"migration.network":         vlanValue(cfg.Spec.Network.MigrationVlan),
-		"virt.emulation":            strconv.FormatBool(cfg.Spec.Virtualization.Emulation),
-		"kata.enabled":              strconv.FormatBool(cfg.Spec.Addons["kata"]),
-		"loki.enabled":              strconv.FormatBool(cfg.Spec.Addons["loki"]),
-		"clusters.enabled":          strconv.FormatBool(cfg.Spec.Addons["clusters"]),
-		"descheduler.enabled":       strconv.FormatBool(cfg.Spec.Addons["descheduler"]),
-		"network.eip-mode":          cfg.Spec.Network.Fabric.EIPMode,
-		"network.provider-networks": providerNetworksValue(cfg),
+func SettingValues(cfg v1alpha1.ClusterConfig) map[string]string {
+	return map[string]string{
+		"platform.host":                 cfg.Spec.Platform.Host,
+		"platform.tls-mode":             cfg.Spec.Platform.TLSMode,
+		"storage.replicas":              strconv.Itoa(int(cfg.Spec.Storage.Replicas)),
+		"storage.cephx-cipher":          fallback(cfg.Spec.Storage.CephxCipher, cephx.Aes),
+		"storage.network":               vlanValue(cfg.Spec.Network.StorageVlan),
+		"migration.network":             vlanValue(cfg.Spec.Network.MigrationVlan),
+		"virt.emulation":                strconv.FormatBool(cfg.Spec.Virtualization.Emulation),
+		"kata.enabled":                  strconv.FormatBool(cfg.Spec.Addons["kata"]),
+		"loki.enabled":                  strconv.FormatBool(cfg.Spec.Addons["loki"]),
+		"clusters.enabled":              strconv.FormatBool(cfg.Spec.Addons["clusters"]),
+		"descheduler.enabled":           strconv.FormatBool(cfg.Spec.Addons["descheduler"]),
+		"network.eip-mode":              cfg.Spec.Network.Fabric.EIPMode,
+		"network.provider-networks":     providerNetworksValue(cfg),
+		"dns.upstreams":                 strings.Join(cfg.Spec.DNS.Upstreams, " "),
+		"egress.http-proxy":             cfg.Spec.Egress.HTTPProxy,
+		"egress.no-proxy":               strings.Join(cfg.Spec.Egress.NoProxy, ","),
+		"letsencrypt.dns01-nameservers": strings.Join(cfg.Spec.Egress.DNS01Nameservers, ","),
 	}
+}
+
+func ToSettings(cfg v1alpha1.ClusterConfig) []v1alpha1.Setting {
+	values := SettingValues(cfg)
 	keys := make([]string, 0, len(values))
 	for k := range values {
 		keys = append(keys, k)

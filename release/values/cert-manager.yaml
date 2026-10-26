@@ -6,3 +6,13 @@ global:
     namespace: cert-manager
 startupapicheck:
   enabled: false
+extraArgs:
+  - ${BEDROCK_DNS01_NAMESERVERS_ARG}
+  - ${BEDROCK_DNS01_ONLY_ARG}
+extraEnv:
+  - name: HTTP_PROXY
+    value: ${BEDROCK_EGRESS_HTTP_PROXY}
+  - name: HTTPS_PROXY
+    value: ${BEDROCK_EGRESS_HTTP_PROXY}
+  - name: NO_PROXY
+    value: ${BEDROCK_EGRESS_NO_PROXY}

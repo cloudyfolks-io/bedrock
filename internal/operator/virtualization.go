@@ -50,7 +50,10 @@ func RenderVirtualization(in AddonInput) (Rendered, error) {
 	if err != nil {
 		return Rendered{}, err
 	}
-	objects := append([]*unstructured.Unstructured{kubeVirt(emulation, tuning, migration, smbios, eviction), cdi()}, policies...)
+	if err := validateSettings(in.Settings, keyEgressProxy, keyEgressNoProxy); err != nil {
+		return Rendered{}, err
+	}
+	objects := append([]*unstructured.Unstructured{kubeVirt(emulation, tuning, migration, smbios, eviction), cdi(in.Settings[keyEgressProxy], release.NoProxy(in.Settings[keyEgressNoProxy], in.Cluster.Spec.API.VIP))}, policies...)
 	probes := []Probe{
 		{GVK: kubeVirtGVK, Key: client.ObjectKey{Namespace: kubevirtNamespace, Name: "kubevirt"}, Gate: release.PhaseGate("Deployed")},
 		{GVK: cdiGVK, Key: client.ObjectKey{Name: "cdi"}, Gate: release.PhaseGate("Deployed")},
@@ -108,13 +111,21 @@ func withSMBIOS(configuration, smbios map[string]any) map[string]any {
 	return configuration
 }
 
-func cdi() *unstructured.Unstructured {
+func cdi(proxy, noProxy string) *unstructured.Unstructured {
 	return object("cdi.kubevirt.io/v1beta1", "CDI", "", "cdi", map[string]any{
 		"imagePullPolicy": "IfNotPresent",
-		"config":          map[string]any{"featureGates": []any{"HonorWaitForFirstConsumer"}},
+		"config":          withImportProxy(map[string]any{"featureGates": []any{"HonorWaitForFirstConsumer"}}, proxy, noProxy),
 		"infra":           linuxNodeSelector(),
 		"workload":        linuxNodeSelector(),
 	})
+}
+
+func withImportProxy(config map[string]any, proxy, noProxy string) map[string]any {
+	if proxy == "" {
+		return config
+	}
+	config["importProxy"] = map[string]any{"HTTPProxy": proxy, "HTTPSProxy": proxy, "noProxy": noProxy}
+	return config
 }
 
 func linuxNodeSelector() map[string]any {

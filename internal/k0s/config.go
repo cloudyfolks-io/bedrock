@@ -6,7 +6,7 @@ import (
 	sigyaml "sigs.k8s.io/yaml"
 )
 
-var DefaultDisabledComponents = []string{"konnectivity-server", "metrics-server", "helm"}
+var DefaultDisabledComponents = []string{"konnectivity-server", "metrics-server", "helm", "coredns"}
 
 type Config struct {
 	VIP          string

@@ -28,6 +28,10 @@ components:
     namespace: kube-system
     values: release/values/fabric.yaml
     crdsToGroup: crds
+  - name: coredns
+    order: 22
+    version: 1.13.2
+    dirs: [manifests/22-coredns]
   - name: multus
     order: 25
     version: v4.3.1

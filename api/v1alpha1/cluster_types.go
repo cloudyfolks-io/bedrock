@@ -7,6 +7,8 @@ import (
 const (
 	ClusterName = "cluster"
 
+	AnnotationK0sCoreDNSTakeover = "bedrock.cloudyfolks.io/k0s-coredns-takeover"
+
 	PhaseIdle         = "Idle"
 	PhasePreflight    = "Preflight"
 	PhaseBackup       = "Backup"
@@ -49,6 +51,8 @@ const (
 	ConditionProxyReady             = "ProxyReady"
 	ConditionNodePortsScoped        = "NodePortsScoped"
 	ConditionTenantLegsGuarded      = "TenantLegsGuarded"
+	ConditionDNSReady               = "DNSReady"
+	ConditionEgressReady            = "EgressReady"
 )
 
 type APISpec struct {

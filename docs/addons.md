@@ -269,6 +269,51 @@ The condition `RuntimeReady` shows the state of these objects.
 | `database.enabled` | `false` | Turns on the database platform. |
 | `database.backup.bucket` | `bedrock-database-backups` | Bucket of the platform database backups. |
 
+## Egress proxy
+
+Some upstream services are reachable only through an HTTP proxy.
+Bedrock does not run this proxy. It points cert-manager and CDI at the proxy that you give.
+The value has the same format as `registry.http-proxy`: an `http` or `https` URL with a host.
+
+| Setting | Default | Meaning |
+|---|---|---|
+| `egress.http-proxy` | empty | Proxy URL. Empty means no proxy. |
+| `egress.no-proxy` | empty | Comma list of hosts, domains and networks that bypass the proxy. |
+| `letsencrypt.dns01-nameservers` | empty | Comma list of `host:port` servers or `https` DNS-over-HTTPS URLs for the DNS-01 self check. |
+
+With `egress.http-proxy` set, the cert-manager controller gets the variables `HTTP_PROXY`, `HTTPS_PROXY` and `NO_PROXY`.
+The CDI object gets `spec.config.importProxy` with `HTTPProxy`, `HTTPSProxy` and `noProxy`.
+Bedrock always adds the pod network, the service network, the API address, `localhost`, `127.0.0.1`, `cluster.local` and `.svc` to the no-proxy list.
+`egress.no-proxy` adds more entries, for example your own domains.
+`registry.http-proxy` stays a separate Setting.
+
+With `letsencrypt.dns01-nameservers` set, cert-manager asks only these servers for the DNS-01 self check.
+An empty value keeps the resolver of the node.
+A DNS-over-HTTPS URL goes through the proxy when `egress.http-proxy` is set.
+
+The addon `egress` applies the cert-manager Deployment with the values and shows the condition `EgressReady` on the Cluster.
+A change of a Setting restarts the cert-manager controller.
+The CDI change needs no restart of a VM.
+
+The cluster configuration of `bedrock init` has the same values.
+The first cert-manager and CDI use them.
+
+```yaml
+spec:
+  egress:
+    httpProxy: http://proxy.kube-system:10808
+    noProxy: [10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16, cluster.local, .svc]
+    dns01Nameservers: [https://one.one.one.one/dns-query]
+```
+
+Example:
+
+```
+kubectl patch setting egress.http-proxy --type merge -p '{"spec":{"value":"http://proxy.kube-system:10808"}}'
+kubectl patch setting egress.no-proxy --type merge -p '{"spec":{"value":"10.0.0.0/8,172.16.0.0/12,192.168.0.0/16,cluster.local,.svc"}}'
+kubectl patch setting letsencrypt.dns01-nameservers --type merge -p '{"spec":{"value":"https://one.one.one.one/dns-query"}}'
+```
+
 ## Percona Server for MySQL
 
 The addon `percona-ps` installs the Percona Operator for MySQL in the

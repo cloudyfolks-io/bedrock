@@ -538,6 +538,71 @@ When the ElasticIP is deleted or changes its target, the operator deletes the ru
 When you delete the InternetGateway, the operator deletes the rules and then releases the object.
 The sweeper deletes rules whose InternetGateway is gone.
 
+## Cluster DNS
+
+Bedrock runs cluster DNS itself. The Deployment `kube-system/coredns` has one replica for each host, up to two.
+The replicas prefer different nodes. A roll starts the new pod before it stops an old one, so one pod stays ready. The PodDisruptionBudget `coredns` lets a drain stop one at a time.
+The addon `dns` sets the replica count.
+The Service `kube-system/kube-dns` takes the tenth address of the service network, for example `10.96.0.10`.
+This is the address that the kubelet gives to every pod as its DNS server.
+
+Bedrock turns off the CoreDNS of k0s with `--disable-components=coredns`.
+k0s writes its own ConfigMap again, so a change of the forwarders does not stay.
+The component `coredns` of the release holds the objects that do not change.
+The addon `dns` owns the ConfigMap `kube-system/coredns`, and the condition `DNSReady` of the Cluster shows its state.
+
+The Setting `dns.upstreams` sets where CoreDNS sends every name that is not in the cluster.
+
+| Value | Result |
+|---|---|
+| empty | CoreDNS forwards to the `resolv.conf` of the node. |
+| `217.218.127.127 217.218.155.155` | CoreDNS forwards to exactly these servers, in this order. |
+
+Separate the addresses with single spaces.
+CoreDNS reloads the ConfigMap by itself, so the change needs no restart.
+
+Give the upstreams in the cluster configuration of `bedrock init` too, so the first CoreDNS never uses the node `resolv.conf`:
+
+```yaml
+spec:
+  dns:
+    upstreams: [217.218.127.127, 217.218.155.155]
+```
+
+`bedrock init` writes the Setting `dns.upstreams` from this list and renders it into the first CoreDNS.
+
+Use `dns.upstreams` when a node has a resolver that only answers private zones.
+A host with systemd-resolved can list that per-link resolver in `/run/systemd/resolve/resolv.conf` next to the public servers.
+Names that are not in the private zones then get relay answers.
+With `dns.upstreams` set, CoreDNS never reads the file of the node.
+
+The kubelet reads a `resolv.conf` file for the pods that use the node DNS policy.
+k0s chooses `/run/systemd/resolve/resolv.conf` by itself when `/etc/resolv.conf` has the systemd-resolved stub address `127.0.0.53` as its only server.
+Bedrock sets no `--resolv-conf` flag.
+If `/etc/resolv.conf` has other servers next to the stub, the kubelet reads that file and the pods get the stub address.
+Make `/etc/resolv.conf` a link to the stub file in that case.
+
+A cluster that Bedrock installed before this release runs the CoreDNS of k0s.
+The upgrade moves it to the CoreDNS of the release in this order:
+
+1. The `K0sUpdate` step adds `coredns` to `--disable-components` in `/etc/systemd/system/k0scontroller.service` of each control plane node and restarts k0s.
+   The objects of k0s stay in the cluster, so cluster DNS keeps working.
+2. The `Components` phase takes over the objects of k0s before it applies the group `coredns`.
+   The objects have the same names (`coredns`, `kube-dns`, `system-coredns`), the same selector and the same Service address.
+   Bedrock replaces each object in place, so nothing is deleted and the Service keeps its address.
+   The only gap is the restart of the CoreDNS pods.
+3. Bedrock removes the label `k0s.k0sproject.io/stack` from the objects, so k0s cannot prune them.
+   It keeps the checksum annotation of k0s, so k0s does not write its own version back when it restarts.
+4. The operator marks the Cluster with the annotation `bedrock.cloudyfolks.io/k0s-coredns-takeover: done`.
+   Then the `Prune` step on each control plane node removes the old k0s manifest directory `/var/lib/k0s/manifests/coredns`.
+   The step fails and keeps the directory if an object of the old k0s stack still has the stack label, because k0s would delete that object.
+
+The upgrade ends with one CoreDNS Deployment, owned by Bedrock.
+
+Bedrock does not delete a CoreDNS that it did not create.
+A cluster that runs another CoreDNS on the same Service address must remove it first.
+Remove the Deployment and the Service of the other CoreDNS, and Bedrock creates its own at the next release apply.
+
 ## DNS zones
 
 A Fabric `DNSZone` applies to a whole VPC.

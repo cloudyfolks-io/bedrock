@@ -149,6 +149,8 @@ func (h *k0sHost) Run(ctx context.Context, name string, args ...string) (string,
 		}
 		h.running, h.starting = h.versions[string(raw)], h.startPolls
 		return "", nil
+	case call == "systemctl daemon-reload":
+		return "", nil
 	case call == "/usr/local/bin/k0s status -o json" && h.starting > 0:
 		h.starting--
 		return "", errors.New("k0s is not running")

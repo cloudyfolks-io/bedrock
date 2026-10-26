@@ -3,6 +3,7 @@ package release
 import (
 	"context"
 	"fmt"
+	"maps"
 	"sort"
 	"strings"
 	"time"
@@ -37,6 +38,16 @@ func Vars(ctx context.Context, c client.Client, vip string) (map[string]string, 
 	if len(ips) > 0 {
 		vars[VarMasterIPs] = strings.Join(ips, ",")
 	}
+	values, err := settingValues(ctx, c)
+	if err != nil {
+		return nil, err
+	}
+	dns, err := dnsVars(ctx, c)
+	if err != nil {
+		return nil, err
+	}
+	maps.Copy(vars, SettingVars(values, vip))
+	maps.Copy(vars, dns)
 	return vars, nil
 }
 

@@ -53,6 +53,9 @@ func prune(ctx context.Context, env StepEnv) (Outcome, error) {
 	if err := removeOtherDepots(deps.Root, env.Target.Spec.Version); err != nil {
 		return Outcome{}, err
 	}
+	if err := removeStaleCoreDNSManifests(ctx, env); err != nil {
+		return Outcome{}, err
+	}
 	return Outcome{Message: fmt.Sprintf("removed %d images", count)}, nil
 }
 
