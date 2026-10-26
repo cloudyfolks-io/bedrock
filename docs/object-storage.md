@@ -161,6 +161,8 @@ It works inside the cluster only.
 With `objectstorage.public-host`, Bedrock makes a certificate and a Traefik route for the host and its aliases.
 The endpoint in `status.endpoint` is `https://<public-host>`.
 The route also accepts `<bucket>.<host>` for each host, for virtual-host addressing.
+Bedrock makes this match in its own Traefik route `objectstorage-public-wildcard` with priority 1, so any other route wins over it.
+Bedrock refuses `objectstorage.public-host` and `objectstorage.public-aliases` when a name is equal to, or a parent of, `registry.host`, a registry alias, `registry.admin-host` or `platform.host`.
 Rook gives the same names to the object store, so the store finds the bucket in the host name.
 With the TLS mode `SelfSigned` or `Custom`, the certificate holds `*.<host>` for each host.
 Let's Encrypt cannot issue a wildcard name with the solver `http01`.
@@ -168,6 +170,8 @@ With the TLS mode `LetsEncrypt`, the certificate holds the plain hosts only, and
 To serve virtual-host requests in that mode, make a TLS Secret that holds `<host>` and `*.<host>` for each host in the namespace `rook-ceph`.
 Then set `objectstorage.tls-secret` to its name.
 Bedrock then makes no Certificate, deletes the one it made before, and the route uses your Secret.
+Bedrock deletes only a Certificate that has its own labels.
+If the Secret does not exist in `rook-ceph`, Bedrock writes a log line and Traefik serves its default certificate.
 Bedrock never exposes the admin API.
 
 ## Delete

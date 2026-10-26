@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 
+	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/meta"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -29,7 +30,7 @@ func TestEndpointObjectsAreEmptyWithoutAHost(t *testing.T) {
 
 func TestEndpointObjectsForOneHost(t *testing.T) {
 	objects := EndpointObjects(Rules{PublicHost: "s3.example.test"}, "SelfSigned")
-	if len(objects) != 2 {
+	if len(objects) != 3 {
 		t.Fatalf("objects %+v", objects)
 	}
 	wantCertificate := map[string]any{
@@ -57,7 +58,7 @@ func TestEndpointObjectsForOneHost(t *testing.T) {
 		"spec": map[string]any{
 			"entryPoints": []any{"websecure"},
 			"routes": []any{map[string]any{
-				"match":    "(Host(`s3.example.test`) && !(Path(`/admin`) || PathPrefix(`/admin/`))) || HostRegexp(`^[a-z0-9-]+\\.s3\\.example\\.test$`)",
+				"match":    "(Host(`s3.example.test`) && !(Path(`/admin`) || PathPrefix(`/admin/`)))",
 				"kind":     "Rule",
 				"services": []any{map[string]any{"name": "rook-ceph-rgw-bedrock-rgw", "port": int64(80)}},
 			}},
@@ -69,6 +70,28 @@ func TestEndpointObjectsForOneHost(t *testing.T) {
 	}
 	if !reflect.DeepEqual(objects[1].Object, wantRoute) {
 		t.Fatalf("route %+v", objects[1].Object)
+	}
+	wantWildcard := map[string]any{
+		"apiVersion": "traefik.io/v1alpha1",
+		"kind":       "IngressRoute",
+		"metadata": map[string]any{
+			"name":      "objectstorage-public-wildcard",
+			"namespace": "rook-ceph",
+			"labels":    map[string]any{"bedrock.cloudyfolks.io/kind": "IngressRoute", "bedrock.cloudyfolks.io/name": "objectstorage-public-wildcard"},
+		},
+		"spec": map[string]any{
+			"entryPoints": []any{"websecure"},
+			"routes": []any{map[string]any{
+				"match":    "HostRegexp(`^[a-z0-9-]+\\.s3\\.example\\.test$`)",
+				"kind":     "Rule",
+				"priority": int64(1),
+				"services": []any{map[string]any{"name": "rook-ceph-rgw-bedrock-rgw", "port": int64(80)}},
+			}},
+			"tls": map[string]any{"secretName": "objectstorage-public-tls"},
+		},
+	}
+	if !reflect.DeepEqual(objects[2].Object, wantWildcard) {
+		t.Fatalf("wildcard route %+v", objects[2].Object)
 	}
 }
 
@@ -82,9 +105,14 @@ func TestEndpointObjectsAddVirtualHostRulesForEveryHost(t *testing.T) {
 	}
 	routes, _, _ := unstructured.NestedSlice(objects[1].Object, "spec", "routes")
 	match := routes[0].(map[string]any)["match"]
-	want := "(Host(`s3.example.test`) && !(Path(`/admin`) || PathPrefix(`/admin/`))) || (Host(`s3.alias.test`) && !(Path(`/admin`) || PathPrefix(`/admin/`))) || HostRegexp(`^[a-z0-9-]+\\.s3\\.example\\.test$`) || HostRegexp(`^[a-z0-9-]+\\.s3\\.alias\\.test$`)"
+	want := "(Host(`s3.example.test`) && !(Path(`/admin`) || PathPrefix(`/admin/`))) || (Host(`s3.alias.test`) && !(Path(`/admin`) || PathPrefix(`/admin/`)))"
 	if match != want {
 		t.Fatalf("match %q", match)
+	}
+	wildcard, _, _ := unstructured.NestedSlice(objects[2].Object, "spec", "routes")
+	wantWildcard := "HostRegexp(`^[a-z0-9-]+\\.s3\\.example\\.test$`) || HostRegexp(`^[a-z0-9-]+\\.s3\\.alias\\.test$`)"
+	if wildcard[0].(map[string]any)["match"] != wantWildcard || wildcard[0].(map[string]any)["priority"] != int64(1) {
+		t.Fatalf("wildcard %v", wildcard)
 	}
 }
 
@@ -108,17 +136,53 @@ func TestEndpointWithATLSSecretMakesNoCertificate(t *testing.T) {
 	rules := Rules{PublicHost: "s3.example.test", TLSSecret: "s3-wildcard"}
 	for _, mode := range []string{"LetsEncrypt", "SelfSigned"} {
 		objects := EndpointObjects(rules, mode)
-		if len(objects) != 1 || objects[0].GetKind() != "IngressRoute" {
+		if len(objects) != 2 || objects[0].GetKind() != "IngressRoute" {
 			t.Fatalf("mode %q objects %+v", mode, objects)
 		}
 		secret, _, _ := unstructured.NestedString(objects[0].Object, "spec", "tls", "secretName")
 		if secret != "s3-wildcard" {
 			t.Fatalf("tls secret %q", secret)
 		}
-		routes, _, _ := unstructured.NestedSlice(objects[0].Object, "spec", "routes")
+		routes, _, _ := unstructured.NestedSlice(objects[1].Object, "spec", "routes")
 		if !strings.Contains(routes[0].(map[string]any)["match"].(string), "HostRegexp(") {
 			t.Fatalf("no virtual-host rule: %v", routes)
 		}
+	}
+}
+
+func TestEndpointReconcilerKeepsAForeignCertificate(t *testing.T) {
+	c, r := endpointWorld(t, map[string]string{"objectstorage.public-host": "s3.example.test", "objectstorage.tls-secret": "s3-wildcard"})
+	foreign := &unstructured.Unstructured{Object: map[string]any{
+		"apiVersion": "cert-manager.io/v1", "kind": "Certificate",
+		"metadata": map[string]any{"name": "objectstorage-public", "namespace": StoreNamespace},
+	}}
+	if err := c.Create(context.Background(), foreign); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := r.Reconcile(context.Background(), ctrl.Request{}); err != nil {
+		t.Fatal(err)
+	}
+	if !endpointExists(t, c, "cert-manager.io/v1", "Certificate") {
+		t.Fatal("a Certificate that Bedrock did not make was deleted")
+	}
+}
+
+func TestParseRulesRefusesAHostThatCoversAnotherBedrockHost(t *testing.T) {
+	cases := []map[string]string{
+		{"objectstorage.public-host": "example.test", "registry.host": "registry.example.test"},
+		{"objectstorage.public-host": "s3.example.test", "objectstorage.public-aliases": "example.test", "registry.aliases": "r.example.test"},
+		{"objectstorage.public-host": "example.test", "registry.admin-host": "admin.example.test"},
+		{"objectstorage.public-host": "example.test", "platform.host": "example.test"},
+		{"objectstorage.public-host": "example.test", "platform.host": "platform.example.test"},
+	}
+	for _, values := range cases {
+		if _, err := ParseRules(values); err == nil {
+			t.Errorf("values %v were accepted", values)
+		}
+	}
+	allowed := map[string]string{"objectstorage.public-host": "s3.example.test", "registry.host": "registry.example.test", "platform.host": "example.test"}
+	if _, err := ParseRules(allowed); err != nil {
+		t.Errorf("a sibling host was refused: %v", err)
 	}
 }
 
@@ -143,6 +207,9 @@ func endpointWorld(t *testing.T, values map[string]string) (client.Client, *Endp
 	t.Helper()
 	scheme := runtime.NewScheme()
 	if err := v1alpha1.AddToScheme(scheme); err != nil {
+		t.Fatal(err)
+	}
+	if err := corev1.AddToScheme(scheme); err != nil {
 		t.Fatal(err)
 	}
 	builder := fake.NewClientBuilder().WithScheme(scheme)
@@ -273,8 +340,7 @@ func TestAdminGuardHitsOnlyTheExactPathsOfThePlainHost(t *testing.T) {
 		t.Fatalf("a bare /admin prefix would block admin-logs and admin-report.csv: %s", match)
 	}
 	for _, part := range strings.Split(match, " || ") {
-		guarded := strings.Contains(part, "/admin")
-		if strings.HasPrefix(part, "HostRegexp") == guarded {
+		if !strings.Contains(part, "/admin") || strings.HasPrefix(part, "HostRegexp") {
 			t.Fatalf("rule %q: the guard belongs on plain Host rules only", part)
 		}
 	}

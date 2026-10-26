@@ -2,6 +2,7 @@ package objectstorage
 
 import (
 	"context"
+	"fmt"
 	"slices"
 	"strconv"
 	"strings"
@@ -58,6 +59,10 @@ func ParseRules(values map[string]string) (Rules, error) {
 		if name := effectiveValue(values, key); name != "" && !slices.Contains(reserved, name) {
 			reserved = append(reserved, name)
 		}
+	}
+	covering := publicHosts(Rules{PublicHost: effective[keyPublicHost], PublicAliases: splitList(effective[keyPublicAliases])})
+	if err := refuseCoveredHosts(covering, bedrockHosts(values)); err != nil {
+		return Rules{}, err
 	}
 	maxBuckets, _ := strconv.Atoi(effective[keyMaxBuckets])
 	origins := splitList(effective[keyCORSOrigins])
@@ -165,4 +170,25 @@ func (r *BucketReconciler) bucketsOfSetting(ctx context.Context, _ client.Object
 		requests = append(requests, reconcile.Request{NamespacedName: client.ObjectKeyFromObject(&buckets.Items[i])})
 	}
 	return requests
+}
+
+func bedrockHosts(values map[string]string) []string {
+	hosts := splitList(values["registry.aliases"])
+	for _, key := range []string{"registry.host", "registry.admin-host", "platform.host"} {
+		if values[key] != "" {
+			hosts = append(hosts, values[key])
+		}
+	}
+	return hosts
+}
+
+func refuseCoveredHosts(publicHosts, others []string) error {
+	for _, public := range publicHosts {
+		for _, other := range others {
+			if other == public || strings.HasSuffix(other, "."+public) {
+				return fmt.Errorf("the object storage host %q covers the Bedrock host %q, so the wildcard route would take its traffic", public, other)
+			}
+		}
+	}
+	return nil
 }

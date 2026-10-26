@@ -4,6 +4,8 @@ import (
 	"context"
 	"strings"
 
+	corev1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	ctrl "sigs.k8s.io/controller-runtime"
@@ -21,6 +23,8 @@ const (
 	ServiceName       = "rook-ceph-rgw-" + StoreName
 	ServiceHost       = ServiceName + "." + StoreNamespace + ".svc"
 	publicName        = "objectstorage-public"
+	wildcardName      = "objectstorage-public-wildcard"
+	wildcardPriority  = int64(1)
 	publicSecretName  = "objectstorage-public-tls"
 	issuerCA          = "bedrock-ca"
 	issuerLetsEncrypt = "letsencrypt"
@@ -67,24 +71,33 @@ func EndpointObjects(rules Rules, tlsMode string) []*unstructured.Unstructured {
 	if rules.TLSSecret != "" {
 		secretName = rules.TLSSecret
 	}
-	route := endpointObject("traefik.io/v1alpha1", "IngressRoute", map[string]any{
-		"entryPoints": []any{"websecure"},
-		"routes": []any{map[string]any{
-			"match":    routeMatch(rules),
-			"kind":     "Rule",
-			"services": []any{map[string]any{"name": ServiceName, "port": gatewayPort}},
-		}},
-		"tls": map[string]any{"secretName": secretName},
-	})
+	route := endpointObject("traefik.io/v1alpha1", "IngressRoute", publicName, publicRouteSpec(routeMatch(rules), secretName, nil))
+	wildcard := endpointObject("traefik.io/v1alpha1", "IngressRoute", wildcardName, publicRouteSpec(wildcardMatch(rules), secretName, wildcardPriority))
 	if rules.TLSSecret != "" {
-		return []*unstructured.Unstructured{route}
+		return []*unstructured.Unstructured{route, wildcard}
 	}
-	certificate := endpointObject("cert-manager.io/v1", "Certificate", map[string]any{
+	certificate := endpointObject("cert-manager.io/v1", "Certificate", publicName, map[string]any{
 		"secretName": publicSecretName,
 		"dnsNames":   certificateNames(rules, issuerFor(tlsMode)),
 		"issuerRef":  map[string]any{"kind": "ClusterIssuer", "name": issuerFor(tlsMode)},
 	})
-	return []*unstructured.Unstructured{certificate, route}
+	return []*unstructured.Unstructured{certificate, route, wildcard}
+}
+
+func publicRouteSpec(match, secretName string, priority any) map[string]any {
+	rule := map[string]any{
+		"match":    match,
+		"kind":     "Rule",
+		"services": []any{map[string]any{"name": ServiceName, "port": gatewayPort}},
+	}
+	if priority != nil {
+		rule["priority"] = priority
+	}
+	return map[string]any{
+		"entryPoints": []any{"websecure"},
+		"routes":      []any{rule},
+		"tls":         map[string]any{"secretName": secretName},
+	}
 }
 
 func certificateNames(rules Rules, issuer string) []any {
@@ -109,20 +122,26 @@ func routeMatch(rules Rules) string {
 	for _, host := range hosts {
 		matches = append(matches, "(Host(`"+host+"`) && "+adminGuard+")")
 	}
+	return strings.Join(matches, " || ")
+}
+
+func wildcardMatch(rules Rules) string {
+	hosts := publicHosts(rules)
+	matches := make([]string, 0, len(hosts))
 	for _, host := range hosts {
 		matches = append(matches, "HostRegexp(`^[a-z0-9-]+\\."+strings.ReplaceAll(host, ".", "\\.")+"$`)")
 	}
 	return strings.Join(matches, " || ")
 }
 
-func endpointObject(apiVersion, kind string, spec map[string]any) *unstructured.Unstructured {
+func endpointObject(apiVersion, kind, name string, spec map[string]any) *unstructured.Unstructured {
 	return &unstructured.Unstructured{Object: map[string]any{
 		"apiVersion": apiVersion,
 		"kind":       kind,
 		"metadata": map[string]any{
-			"name":      publicName,
+			"name":      name,
 			"namespace": StoreNamespace,
-			"labels":    map[string]any{v1alpha1.LabelKind: kind, v1alpha1.LabelName: publicName},
+			"labels":    map[string]any{v1alpha1.LabelKind: kind, v1alpha1.LabelName: name},
 		},
 		"spec": spec,
 	}}
@@ -163,22 +182,44 @@ func (r *EndpointReconciler) converge(ctx context.Context, rules Rules, tlsMode 
 		}
 	}
 	if rules.TLSSecret != "" {
-		return r.removeKind(ctx, "cert-manager.io/v1", "Certificate")
+		if err := r.removeOwned(ctx, "cert-manager.io/v1", "Certificate", publicName); err != nil {
+			return err
+		}
+		return r.warnOnMissingSecret(ctx, rules.TLSSecret)
 	}
 	return nil
 }
 
-func (r *EndpointReconciler) removeKind(ctx context.Context, apiVersion, kind string) error {
-	obj := endpointObject(apiVersion, kind, nil)
-	if err := client.IgnoreNotFound(r.Client.Delete(ctx, obj)); err != nil && !meta.IsNoMatchError(err) {
+func (r *EndpointReconciler) warnOnMissingSecret(ctx context.Context, name string) error {
+	err := r.Client.Get(ctx, client.ObjectKey{Namespace: StoreNamespace, Name: name}, &corev1.Secret{})
+	if apierrors.IsNotFound(err) {
+		logf.FromContext(ctx).Info("objectstorage.tls-secret names a Secret that does not exist, Traefik serves its default certificate", "secret", name, "namespace", StoreNamespace)
+		return nil
+	}
+	return err
+}
+
+func (r *EndpointReconciler) removeOwned(ctx context.Context, apiVersion, kind, name string) error {
+	obj := endpointObject(apiVersion, kind, name, nil)
+	live := &unstructured.Unstructured{}
+	live.SetAPIVersion(apiVersion)
+	live.SetKind(kind)
+	err := r.Client.Get(ctx, client.ObjectKeyFromObject(obj), live)
+	if apierrors.IsNotFound(err) || meta.IsNoMatchError(err) {
+		return nil
+	}
+	if err != nil {
 		return err
 	}
-	return nil
+	if live.GetLabels()[v1alpha1.LabelName] != name {
+		return nil
+	}
+	return client.IgnoreNotFound(r.Client.Delete(ctx, live))
 }
 
 func (r *EndpointReconciler) remove(ctx context.Context) error {
-	for _, apiKind := range [][2]string{{"cert-manager.io/v1", "Certificate"}, {"traefik.io/v1alpha1", "IngressRoute"}} {
-		if err := r.removeKind(ctx, apiKind[0], apiKind[1]); err != nil {
+	for _, target := range [][3]string{{"cert-manager.io/v1", "Certificate", publicName}, {"traefik.io/v1alpha1", "IngressRoute", publicName}, {"traefik.io/v1alpha1", "IngressRoute", wildcardName}} {
+		if err := r.removeOwned(ctx, target[0], target[1], target[2]); err != nil {
 			return err
 		}
 	}
