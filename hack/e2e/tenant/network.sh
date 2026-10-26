@@ -644,3 +644,201 @@ services_checks() {
 network_services_identity() {
   services_checks
 }
+
+guard_namespace=guard-e2e
+guard_leg_address=192.0.2.249
+guard_leg_interface=br-public
+guard_node_port=30180
+
+host_default_interface() {
+  ip -json route show default | jq -r '.[0].dev'
+}
+
+host_management_address() {
+  ip -json -4 addr show dev "$(host_default_interface)" | jq -r '.[0].addr_info[0].local'
+}
+
+host_management_cidr() {
+  local interface_address
+  interface_address=$(ip -json -4 addr show dev "$(host_default_interface)" | jq -r '.[0].addr_info[0] | "\(.local)/\(.prefixlen)"')
+  python3 -c 'import ipaddress,sys; print(ipaddress.ip_interface(sys.argv[1]).network)' "$interface_address"
+}
+
+ensure_management_cidr() {
+  local want=$1 current
+  current=$(kubectl get cluster cluster -o jsonpath='{.spec.managementCIDR}')
+  if [ -z "$current" ]; then
+    kubectl patch cluster cluster --type merge -p "{\"spec\":{\"managementCIDR\":\"$want\"}}"
+    return
+  fi
+  expect_equal "$want" "$current" "management cidr of the cluster"
+}
+
+guard_backend_manifest() {
+  cat <<BACKEND
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: $guard_namespace
+---
+apiVersion: v1
+kind: Pod
+metadata:
+  name: backend
+  namespace: $guard_namespace
+  labels:
+    app: backend
+spec:
+  containers:
+    - name: httpd
+      image: docker.io/library/busybox:1.37.0
+      imagePullPolicy: IfNotPresent
+      command: ["sh", "-c", "mkdir -p /www && echo guard-e2e > /www/index.html && exec httpd -f -p 8080 -h /www"]
+      readinessProbe:
+        tcpSocket:
+          port: 8080
+        periodSeconds: 3
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: backend
+  namespace: $guard_namespace
+spec:
+  type: NodePort
+  selector:
+    app: backend
+  ports:
+    - port: 8080
+      targetPort: 8080
+      nodePort: $guard_node_port
+BACKEND
+}
+
+guard_probe_script() {
+  cat <<SCRIPT
+#!/bin/sh
+reach() {
+  reply=\$(printf 'GET / HTTP/1.0\r\n\r\n' | nc -w 3 $guard_leg_address \$1 2>/dev/null)
+  if [ -n "\$reply" ]; then echo ok; else echo fail; fi
+}
+round=0
+while [ \$round -lt 300 ]; do
+  round=\$((round + 1))
+  ssh_result=\$(reach 22)
+  api_result=\$(reach 6443)
+  port_result=\$(reach $guard_node_port)
+  control=fail
+  if ping -c 1 -W 2 192.0.2.250 >/dev/null 2>&1; then control=ok; fi
+  echo "GUARD-ROUND \$round p22=\$ssh_result p6443=\$api_result np=\$port_result ctl=\$control" > /dev/console
+  sleep 2
+done
+SCRIPT
+}
+
+guard_probe_manifest() {
+  cat <<VM
+apiVersion: bedrock.cloudyfolks.io/v1alpha1
+kind: VirtualMachine
+metadata:
+  name: guard-probe
+spec:
+  instanceType: u1.nano
+  preference: cirros
+  image:
+    name: cirros
+    scope: cluster
+  rootDisk:
+    sizeGi: 2
+  networks:
+    - subnetRef: default
+      securityGroups: [web]
+  cloudInit:
+    userData: |
+$(guard_probe_script | sed 's/^/      /')
+  running: true
+VM
+}
+
+guard_line() {
+  guest_console_log guard-probe | tr -d '\r' | sed -n 's/.*GUARD-ROUND //p' | sed 's/ *$//' | tail -1
+}
+
+guard_round() {
+  local line
+  line=$(guard_line)
+  echo "${line%% *}"
+}
+
+guard_line_has() {
+  local minimum=$1 want=$2 line
+  line=$(guard_line)
+  [ "${line%% *}" -ge "$minimum" ] && [[ " $line " == *" $want "* ]]
+}
+
+legs_table_lists_interfaces() {
+  local table
+  table=$(nft list table inet bedrock_legs) || return 1
+  [[ "$table" == *'"br-public"'* && "$table" == *'"br-services"'* ]]
+}
+
+legs_chain_counts_drops() {
+  local chain
+  chain=$(nft list chain inet bedrock_legs "$1") || return 1
+  [[ "$chain" =~ counter\ packets\ [1-9][0-9]*\ bytes ]]
+}
+
+host_serves_node_port() {
+  [ "$(curl -sS --max-time 5 "http://$1:$guard_node_port/")" = guard-e2e ]
+}
+
+host_guard_cleanup() {
+  local status=$1
+  if [ "$status" -ne 0 ]; then
+    guard_line >&2 || true
+    nft list table inet bedrock_legs >&2 || true
+    ip -br addr show "$guard_leg_interface" >&2 || true
+    kubectl -n "$guard_namespace" get pods,svc -o wide >&2 || true
+  fi
+  probe_vm_cleanup guard-probe "$status"
+  ip addr del "$guard_leg_address/24" dev "$guard_leg_interface" 2>/dev/null || true
+  kubectl delete namespace "$guard_namespace" --ignore-not-found
+  wait_gone 180 namespace "$guard_namespace"
+  internet_gateway_cleanup 0
+}
+
+host_guard_checks() {
+  local management_address before later
+  management_address=$(host_management_address)
+  guard_backend_manifest | kubectl apply -f -
+  kubectl -n "$guard_namespace" wait --for=condition=Ready pod/backend --timeout=300s
+  retry_until 120 ip link show "$guard_leg_interface"
+  ip addr add "$guard_leg_address/24" dev "$guard_leg_interface"
+  ip link set "$guard_leg_interface" up
+  internet_gateway_manifest | kubectl -n "$NS" apply -f -
+  wait_reason 120 elasticip igw-ip Ready Attached -n "$NS"
+  wait_reason 180 internetgateway igw1 Ready Programmed -n "$NS"
+  guard_probe_manifest | kubectl -n "$NS" apply -f -
+  wait_jsonpath 600 Running -n "$NS" get virtualmachine guard-probe -o jsonpath='{.status.phase}'
+  retry_until 600 guard_line_has 1 "p22=ok"
+  ensure_management_cidr "$(host_management_cidr)"
+  kubectl patch cluster cluster --type merge -p '{"spec":{"tenantLegs":[{"interface":"br-public"},{"interface":"br-services"}]}}'
+  wait_condition 300 cluster cluster TenantLegsGuarded True
+  wait_condition 300 cluster cluster NodePortsScoped True
+  retry_until 600 legs_table_lists_interfaces
+  retry_until 120 host_serves_node_port "$management_address"
+  before=$(guard_round)
+  retry_until 300 guard_line_has "$((before + 2))" "p22=fail p6443=fail np=fail ctl=ok"
+  later=$(guard_round)
+  retry_until 300 guard_line_has "$((later + 2))" "p22=fail p6443=fail np=fail ctl=ok"
+  retry_until 60 legs_chain_counts_drops leg_input
+  retry_until 60 legs_chain_counts_drops prerouting
+  host_serves_node_port "$management_address"
+}
+
+network_host_guard() {
+  (
+    trap 'host_guard_cleanup "$?"' EXIT
+    host_guard_checks
+  )
+}
