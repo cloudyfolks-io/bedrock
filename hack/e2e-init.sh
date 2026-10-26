@@ -129,11 +129,19 @@ assert_airgap_archived() {
   return 1
 }
 
+archived_tarball_count() {
+  find "$archive_dir/$version" -name '*.tar' | wc -l
+}
+
+bundle_archive_settled() {
+  [ -z "$(find /var/lib/k0s/images -name '*.tar')" ] && [ "$(archived_tarball_count)" -eq "$1" ]
+}
+
 assert_bundle_images_present() {
-  local count
-  count=$(find /var/lib/k0s/images "$archive_dir" -name '*.tar' | wc -l)
-  [ "$count" -ge 3 ] && return 0
-  echo "expected at least 3 image tarballs in /var/lib/k0s/images or $archive_dir, found $count:" >&2
+  local expected
+  expected=$(sed -n 's/^\([0-9][0-9]*\) image archives copied$/\1/p' "$workdir/init.log")
+  retry_until 300 bundle_archive_settled "$expected" && return 0
+  echo "expected no tarball in /var/lib/k0s/images and $expected in $archive_dir/$version, found $(archived_tarball_count) archived:" >&2
   ls -laR /var/lib/k0s/images "$archive_dir" >&2 || true
   return 1
 }
