@@ -271,10 +271,10 @@ To move an older Harbor database, use this order.
 3. Wait until the Cluster `harbor-db` is ready. The condition `RuntimeReady` of the addon shows the reason `Held`.
 4. Restore the older database into `harbor-db` with `pg_restore`.
 5. Link the image bucket to the user `bedrock-registry` with `radosgw-admin bucket link`.
-6. Set `registry.hold` to `false`. Bedrock then starts `harbor-core` and `harbor-jobservice`.
+6. Set `registry.hold` to `false`. Bedrock then starts `harbor-core`, `harbor-jobservice` and `harbor-exporter`.
 
-While `registry.hold` is `true`, Bedrock makes every object, but `harbor-core` and `harbor-jobservice` stay at zero replicas.
-Harbor runs its database migration in `harbor-core`, so nothing touches the database before step 6.
+While `registry.hold` is `true`, Bedrock makes every object, but `harbor-core`, `harbor-jobservice` and `harbor-exporter` stay at zero replicas.
+Harbor runs its database migration in `harbor-core`, and the exporter reads the database too, so nothing touches the database before step 6.
 
 Harbor projects and robots come back with the database.
 Adopt them with the annotation `bedrock.cloudyfolks.io/adopt: "true"`.

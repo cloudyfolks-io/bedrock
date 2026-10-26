@@ -224,12 +224,12 @@ func TestRegistryReadsEverySecretFromTheRuntimeNames(t *testing.T) {
 }
 
 func TestRegistryHoldKeepsTheDatabaseWorkloadsAtZero(t *testing.T) {
-	input := []*unstructured.Unstructured{deployment("harbor-core", 1), deployment("harbor-registry", 1), deployment("harbor-jobservice", 1)}
+	input := []*unstructured.Unstructured{deployment("harbor-core", 1), deployment("harbor-registry", 1), deployment("harbor-jobservice", 1), deployment("harbor-exporter", 1)}
 	got, err := registryAdjust(input, map[string]string{"registry.replicas": "3", "registry.hold": "true"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := map[string]int64{"harbor-core": 0, "harbor-jobservice": 0, "harbor-registry": 3}
+	want := map[string]int64{"harbor-core": 0, "harbor-jobservice": 0, "harbor-exporter": 0, "harbor-registry": 3}
 	for _, obj := range got {
 		replicas, _, _ := unstructured.NestedInt64(obj.Object, "spec", "replicas")
 		if replicas != want[obj.GetName()] {
@@ -240,8 +240,15 @@ func TestRegistryHoldKeepsTheDatabaseWorkloadsAtZero(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if replicas, _, _ := unstructured.NestedInt64(released[0].Object, "spec", "replicas"); replicas != 3 {
-		t.Errorf("released core replicas %d", replicas)
+	for _, obj := range released {
+		replicas, _, _ := unstructured.NestedInt64(obj.Object, "spec", "replicas")
+		want := int64(3)
+		if obj.GetName() == "harbor-exporter" {
+			want = 1
+		}
+		if replicas != want {
+			t.Errorf("released %s replicas %d", obj.GetName(), replicas)
+		}
 	}
 }
 

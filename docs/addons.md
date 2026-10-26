@@ -244,7 +244,7 @@ The condition `RuntimeReady` shows the state of these objects.
 | Reason of `RuntimeReady` | Meaning |
 |---|---|
 | `Ready` | All objects are applied. |
-| `Held` | The Setting `registry.hold` is `true`. Bedrock made every object, and `harbor-core` and `harbor-jobservice` stay at zero replicas. |
+| `Held` | The Setting `registry.hold` is `true`. Bedrock made every object, and `harbor-core`, `harbor-jobservice` and `harbor-exporter` stay at zero replicas. |
 | `InvalidSettings` | A Setting of the registry has a wrong value. |
 | `StorePending` | A user of the object store is not ready yet. |
 | `BucketNotOwned` | The bucket exists and another identity owns it. Bedrock never changes the owner. An administrator links the bucket to the user `bedrock-registry` with `radosgw-admin bucket link`. |
@@ -259,7 +259,7 @@ The condition `RuntimeReady` shows the state of these objects.
 | `registry.admin-host` | empty | DNS name of the Harbor portal. |
 | `registry.admin-allow-cidrs` | empty | Networks that can open the portal. |
 | `registry.replicas` | `2` | Replicas of core, registry and jobservice (1 to 5). |
-| `registry.hold` | `false` | While `true`, core and jobservice stay at zero replicas. |
+| `registry.hold` | `false` | While `true`, core, jobservice and exporter stay at zero replicas. |
 | `registry.db-instances` | `2` | Instances of `harbor-db` (1 to 3). |
 | `registry.storage-class` | `block` | StorageClass of the database and Redis. |
 | `registry.bucket` | `bedrock-registry` | Bucket of the image data. |
