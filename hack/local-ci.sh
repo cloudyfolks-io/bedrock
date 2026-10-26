@@ -193,10 +193,18 @@ vm_up() {
   vm_down
   vm_osd_disk_create
   vm_config >"$tmp/vm.yaml"
-  limactl start --name "$vm" --tty=false "$tmp/vm.yaml"
+  if ! vm_start; then
+    echo "warning: the VM did not boot, retrying once" >&2
+    limactl delete --force "$vm" || true
+    vm_start
+  fi
   if ! wait_ntp; then
     echo "warning: the VM clock is not NTP synchronized" >&2
   fi
+}
+
+vm_start() {
+  limactl start --name "$vm" --tty=false "$tmp/vm.yaml"
 }
 
 vm_down() {
