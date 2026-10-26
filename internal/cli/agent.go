@@ -100,6 +100,7 @@ func runAgent(ctx context.Context, o agentOptions, deps agentDeps, stderr io.Wri
 		Interval:     o.interval,
 		Inventory:    inventory.Gather,
 		Apply:        hostconfig.Apply,
+		Guard:        hostconfig.GuardLegs,
 		Packages:     pkgmgr.Manager{Exec: deps.Exec, Family: family, Root: o.root},
 		Version:      Version,
 		Hostname:     os.Hostname,

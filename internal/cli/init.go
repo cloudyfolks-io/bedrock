@@ -241,6 +241,12 @@ func RunInit(ctx context.Context, args []string, deps InitDeps, stdout, stderr i
 		}
 	}
 
+	if cfg.Spec.Network.ManagementCIDR == "" {
+		cfg.Spec.Network.ManagementCIDR, err = host.InterfaceCIDR(ctx, deps.Exec, cfg.Spec.Network.ManagementInterface)
+		if err != nil {
+			return fail(stderr, fmt.Errorf("management network: %w", err))
+		}
+	}
 	step(stdout, "writing k0s.yaml")
 	var encryptionArgs map[string]string
 	if encryptionFile != nil {
@@ -496,7 +502,7 @@ func removeBundleDir(dir string) {
 
 func writeK0sConfig(path string, cfg v1alpha1.ClusterConfig, extra map[string]string) error {
 	sans := []string{cfg.Spec.API.VIP, "api." + cfg.Spec.Platform.Host}
-	raw, err := k0s.RenderConfig(k0s.Config{VIP: cfg.Spec.API.VIP, SANs: sans, PodCIDR: cfg.Spec.Network.Fabric.PodCIDR, ServiceCIDR: cfg.Spec.Network.Fabric.ServiceCIDR, APIExtraArgs: apiExtraArgs(extra)})
+	raw, err := k0s.RenderConfig(k0s.Config{VIP: cfg.Spec.API.VIP, SANs: sans, PodCIDR: cfg.Spec.Network.Fabric.PodCIDR, ServiceCIDR: cfg.Spec.Network.Fabric.ServiceCIDR, APIExtraArgs: apiExtraArgs(extra), NodePortAddresses: nodePortAddresses(cfg.Spec.Network.ManagementCIDR)})
 	if err != nil {
 		return err
 	}
@@ -504,6 +510,13 @@ func writeK0sConfig(path string, cfg v1alpha1.ClusterConfig, extra map[string]st
 		return err
 	}
 	return os.WriteFile(path, raw, 0o600)
+}
+
+func nodePortAddresses(managementCIDR string) []string {
+	if managementCIDR == "" {
+		return nil
+	}
+	return []string{managementCIDR}
 }
 
 func apiExtraArgs(extra map[string]string) map[string]string {

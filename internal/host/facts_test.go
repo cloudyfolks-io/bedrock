@@ -195,3 +195,25 @@ func TestGatherReadsTheKernelRelease(t *testing.T) {
 		t.Fatalf("kernel %q", facts.Kernel)
 	}
 }
+
+func TestInterfaceCIDRMasksTheAddress(t *testing.T) {
+	got, err := InterfaceCIDR(context.Background(), fakeIP(), "bond0.10")
+	if err != nil || got != "10.0.10.0/24" {
+		t.Fatalf("cidr %q err %v", got, err)
+	}
+}
+
+func TestInterfaceCIDRNeedsAPrefixLength(t *testing.T) {
+	exec := &FakeExec{Responses: map[string]string{"ip -json -4 addr show dev eth0": `[{"addr_info":[{"family":"inet","local":"10.0.10.11"}]}]`}}
+	if got, err := InterfaceCIDR(context.Background(), exec, "eth0"); err == nil {
+		t.Fatalf("cidr %q without a prefix length", got)
+	}
+}
+
+func TestInterfaceCIDRRefusesSeveralAddresses(t *testing.T) {
+	exec := &FakeExec{Responses: map[string]string{"ip -json -4 addr show dev eth0": `[{"addr_info":[{"family":"inet","local":"10.0.10.10","prefixlen":32},{"family":"inet","local":"10.0.10.11","prefixlen":24}]}]`}}
+	_, err := InterfaceCIDR(context.Background(), exec, "eth0")
+	if err == nil || !strings.Contains(err.Error(), "managementCIDR") {
+		t.Fatalf("err %v", err)
+	}
+}

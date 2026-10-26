@@ -113,7 +113,7 @@ func fakeHost(t *testing.T) (string, *host.FakeExec) {
 	_ = os.WriteFile(filepath.Join(root, "dev", "kvm"), nil, 0o600)
 	e := &host.FakeExec{Responses: map[string]string{
 		"ip -json route show default":                 `[{"dst":"default","dev":"bond0.10"}]`,
-		"ip -json -4 addr show dev bond0.10":          `[{"addr_info":[{"family":"inet","local":"10.0.10.11"}]}]`,
+		"ip -json -4 addr show dev bond0.10":          `[{"addr_info":[{"family":"inet","local":"10.0.10.11","prefixlen":24}]}]`,
 		"ip -json link show":                          `[{"ifname":"lo"},{"ifname":"bond0.10"}]`,
 		"timedatectl show -p NTPSynchronized --value": "yes\n",
 		"hostname": "node-1\n",
@@ -1438,5 +1438,19 @@ func TestRunInitRefusesAnUnusableEncryptionFile(t *testing.T) {
 				t.Fatalf("the encryption Secret must not exist: %v", err)
 			}
 		})
+	}
+}
+
+func TestRunInitScopesNodePortsToTheManagementNetwork(t *testing.T) {
+	run := prepareInit(t)
+	runPreparedInit(t, run)
+	var doc map[string]any
+	if err := sigyaml.Unmarshal([]byte(readInitFile(t, initK0sConfigPath(run))), &doc); err != nil {
+		t.Fatal(err)
+	}
+	proxy := doc["spec"].(map[string]any)["network"].(map[string]any)["kubeProxy"].(map[string]any)
+	addresses := proxy["nodePortAddresses"].([]any)
+	if len(addresses) != 1 || addresses[0] != "10.0.10.0/24" || proxy["mode"] != "iptables" {
+		t.Fatalf("kubeProxy %v", proxy)
 	}
 }

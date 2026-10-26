@@ -36,6 +36,7 @@ type Deps struct {
 	Interval     time.Duration
 	Inventory    func(context.Context, host.Exec, string) (v1alpha1.Inventory, error)
 	Apply        func(context.Context, hostconfig.Deps, v1alpha1.HostConfigSpec) []v1alpha1.StepResult
+	Guard        func(context.Context, hostconfig.Deps, v1alpha1.HostConfigSpec) error
 	Packages     pkgmgr.Manager
 	Version      string
 	Hostname     func() (string, error)
@@ -254,9 +255,12 @@ func manage(ctx context.Context, c client.Client, deps Deps, current v1alpha1.Ho
 		return current.Status.Applied, condition(v1alpha1.ConditionManagementApplied, metav1.ConditionFalse, "ReadFailed", err.Error(), current.Generation)
 	}
 	applied := current.Status.Applied
+	hostDeps := hostconfig.Deps{Exec: deps.Exec, Root: deps.Root, Packages: deps.Packages}
 	if applied == nil || applied.Generation != config.Generation || hostconfig.Failed(applied.Steps) {
-		steps := deps.Apply(ctx, hostconfig.Deps{Exec: deps.Exec, Root: deps.Root, Packages: deps.Packages}, config.Spec)
+		steps := deps.Apply(ctx, hostDeps, config.Spec)
 		applied = &v1alpha1.AppliedConfig{Generation: config.Generation, Steps: steps}
+	} else if err := deps.Guard(ctx, hostDeps, config.Spec); err != nil {
+		return applied, condition(v1alpha1.ConditionManagementApplied, metav1.ConditionFalse, "GuardFailed", err.Error(), current.Generation)
 	}
 	if hostconfig.Failed(applied.Steps) {
 		return applied, condition(v1alpha1.ConditionManagementApplied, metav1.ConditionFalse, "StepFailed", firstFailure(applied.Steps), current.Generation)

@@ -87,6 +87,12 @@ spec:
                   rule: self == oldSelf
               maintenanceWindow:
                 type: string
+              managementCIDR:
+                maxLength: 43
+                type: string
+                x-kubernetes-validations:
+                - message: managementCIDR must be a CIDR
+                  rule: isCIDR(self)
               nodeConcurrency:
                 default: 1
                 format: int32
@@ -162,6 +168,33 @@ spec:
                     - pools
                     type: object
                 type: object
+              tenantLegs:
+                items:
+                  properties:
+                    allowSources:
+                      items:
+                        maxLength: 43
+                        type: string
+                        x-kubernetes-validations:
+                        - message: every allowSources entry must be a CIDR
+                          rule: isCIDR(self)
+                        - message: allowSources must not match every address
+                          rule: '!isCIDR(self) || cidr(self).prefixLength() > 0'
+                      maxItems: 32
+                      type: array
+                      x-kubernetes-list-type: set
+                    interface:
+                      maxLength: 15
+                      pattern: ^[A-Za-z0-9_.-]+$
+                      type: string
+                  required:
+                  - interface
+                  type: object
+                maxItems: 16
+                type: array
+                x-kubernetes-list-map-keys:
+                - interface
+                x-kubernetes-list-type: map
               upgrade:
                 properties:
                   action:

@@ -11,6 +11,7 @@ import (
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/wait"
+	"k8s.io/client-go/tools/record"
 	"k8s.io/client-go/util/retry"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -30,6 +31,7 @@ type ClusterReconciler struct {
 	UpgradeInterval time.Duration
 	Exec            execFunc
 	Dial            func(ctx context.Context, address string) error
+	Recorder        record.EventRecorder
 }
 
 func (r *ClusterReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
@@ -48,6 +50,12 @@ func (r *ClusterReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 		return r.reconcileInstall(ctx, cluster)
 	case routeSteady:
 		if err := r.reconcileSteady(ctx, cluster); err != nil {
+			return ctrl.Result{}, err
+		}
+		if err := r.reconcileTenantLegs(ctx); err != nil {
+			return ctrl.Result{}, err
+		}
+		if err := r.reconcileNodePorts(ctx); err != nil {
 			return ctrl.Result{}, err
 		}
 		wait, err := r.reconcileEncryption(ctx)

@@ -29,7 +29,19 @@ func RenderHostConfig(_ v1alpha1.Host, cluster v1alpha1.Cluster) v1alpha1.HostCo
 	if cluster.Spec.Registry.Mirror != "" {
 		spec.ContainerdMirrors = []v1alpha1.MirrorSpec{{Registry: "_default", Endpoint: cluster.Spec.Registry.Mirror}}
 	}
+	if len(cluster.Spec.TenantLegs) > 0 {
+		spec.TenantLegs = tenantLegs(cluster.Spec.TenantLegs)
+		spec.Packages = []string{"nftables"}
+	}
 	return spec
+}
+
+func tenantLegs(legs []v1alpha1.TenantLegSpec) []v1alpha1.TenantLegSpec {
+	out := make([]v1alpha1.TenantLegSpec, len(legs))
+	for i, leg := range legs {
+		out[i] = *leg.DeepCopy()
+	}
+	return out
 }
 
 func (r *HostReconciler) ensureHostConfig(ctx context.Context, host v1alpha1.Host, cluster v1alpha1.Cluster) error {

@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
+	"net/netip"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -41,8 +42,9 @@ type link struct {
 }
 
 type addrInfo struct {
-	Family string `json:"family"`
-	Local  string `json:"local"`
+	Family    string `json:"family"`
+	Local     string `json:"local"`
+	PrefixLen int    `json:"prefixlen"`
 }
 
 type addrEntry struct {
@@ -191,6 +193,40 @@ func primaryAddress(ctx context.Context, e Exec, iface string) (string, error) {
 		}
 	}
 	return "", fmt.Errorf("no IPv4 address on %s", iface)
+}
+
+func InterfaceCIDR(ctx context.Context, e Exec, iface string) (string, error) {
+	out, err := e.Run(ctx, "ip", "-json", "-4", "addr", "show", "dev", iface)
+	if err != nil {
+		return "", err
+	}
+	var entries []addrEntry
+	if err := json.Unmarshal([]byte(out), &entries); err != nil {
+		return "", fmt.Errorf("parse addresses: %w", err)
+	}
+	var found []addrInfo
+	for _, entry := range entries {
+		for _, info := range entry.AddrInfo {
+			if info.Family == "inet" && info.Local != "" {
+				found = append(found, info)
+			}
+		}
+	}
+	switch len(found) {
+	case 0:
+		return "", fmt.Errorf("no IPv4 address on %s", iface)
+	case 1:
+		return maskedAddress(found[0], iface)
+	}
+	return "", fmt.Errorf("%s has %d IPv4 addresses and the management network is ambiguous: set managementCIDR", iface, len(found))
+}
+
+func maskedAddress(info addrInfo, iface string) (string, error) {
+	addr, err := netip.ParseAddr(info.Local)
+	if err != nil || info.PrefixLen < 1 || info.PrefixLen > 32 {
+		return "", fmt.Errorf("address %s/%d on %s is not usable", info.Local, info.PrefixLen, iface)
+	}
+	return netip.PrefixFrom(addr, info.PrefixLen).Masked().String(), nil
 }
 
 func HasAddress(ctx context.Context, e Exec, ip string) (bool, error) {

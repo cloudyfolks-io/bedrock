@@ -72,7 +72,7 @@ func setupControllers(mgr ctrl.Manager, cfg *rest.Config, bundle release.Bundle)
 	if err != nil {
 		return err
 	}
-	if err := (&ClusterReconciler{Client: mgr.GetClient(), APIReader: mgr.GetAPIReader(), Bundle: bundle, Gates: release.Gates{}, Interval: 2 * time.Second, GroupTimeout: 30 * time.Minute, UpgradeInterval: 10 * time.Second, Exec: exec, Dial: dialTCP}).SetupWithManager(mgr); err != nil {
+	if err := (&ClusterReconciler{Client: mgr.GetClient(), APIReader: mgr.GetAPIReader(), Bundle: bundle, Gates: release.Gates{}, Interval: 2 * time.Second, GroupTimeout: 30 * time.Minute, UpgradeInterval: 10 * time.Second, Exec: exec, Dial: dialTCP, Recorder: mgr.GetEventRecorderFor("bedrock-operator")}).SetupWithManager(mgr); err != nil {
 		return err
 	}
 	if err := (&StorageTopologyReconciler{Client: mgr.GetClient()}).SetupWithManager(mgr); err != nil {

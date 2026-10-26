@@ -568,6 +568,102 @@ The policy never allows more than the Fabric group.
 A group that a VM or a Container uses cannot be deleted.
 Remove the group from the VM or the Container first.
 
+## Underlay isolation
+
+Warning: the address ranges of tenant VPCs can overlap the underlay.
+A tenant range can contain the management range, the node addresses and the API address.
+For this reason, isolation is by interface only.
+Never write a rule that isolates tenants by their address.
+
+A host can have a leg in a tenant-facing provider network.
+A leg is a VLAN interface of the host, for example `br-public.30` for the transit network and `br-public.20` for the services plane.
+Bedrock does not create the leg.
+Make the leg with the `nmstate` field of the Host or with your own unit.
+Bedrock guards the leg.
+
+### Host guard
+
+Set `spec.network.tenantLegs` in the cluster configuration at install, or `spec.tenantLegs` of the `Cluster` object later.
+Each entry has an `interface`, and an optional list `allowSources` of CIDRs.
+
+```yaml
+spec:
+  tenantLegs:
+    - interface: br-public.30
+      allowSources: [100.65.0.1/32]
+    - interface: br-public.20
+```
+
+The operator copies the list to the `HostConfig` of every host.
+The agent installs the nft table `inet bedrock_legs` and the unit `bedrock-tenant-legs.service`.
+The rules are, for traffic that comes in on a leg:
+
+- A new connection to a TCP or UDP port from 30000 to 32767 of a local address is dropped, before the NodePort rules of kube-proxy.
+- Traffic to the host is accepted only if it is part of an established connection, comes from an address of `allowSources` of that leg, or is ICMP echo-request, destination-unreachable or time-exceeded, or an IPv6 neighbor discovery, packet-too-big, destination-unreachable or time-exceeded message. All other traffic is counted and dropped.
+- Forwarded traffic is accepted only if it is part of an established connection or was translated by DNAT. All other traffic is counted and dropped.
+
+Use the transit leg `allowSources` for the BGP peer.
+An entry of `allowSources` must not have the prefix length 0. The configuration, the `Cluster` and the `HostConfig` reject `0.0.0.0/0` and `::/0`.
+A tenant on a leg cannot reach SSH, the API server, the kubelet or a NodePort of the host.
+
+The unit has `DefaultDependencies=no`, `Before=network-pre.target` and `Wants=network-pre.target`.
+It runs after `nftables.service`, because the stop of that service flushes the whole ruleset.
+At boot, the table is loaded before the network comes up, so the rules on `iifname` are in place before the legs exist.
+This guarantee holds only after the first apply on a host.
+Until the agent applies the `HostConfig` for the first time, a leg that the host already has is not guarded.
+A leg that a unit of your own makes must start after `network-pre.target`.
+On every pass, the agent lists the table and compares it with the table that it loaded.
+If the table is missing or its rules differ, the agent loads it again and the condition `ManagementApplied` of the `Host` shows a failure with the reason `GuardFailed` if that does not work.
+A change of the list replaces the table in one nft transaction: the file creates, deletes and recreates the table.
+No packet passes between the delete and the new rules.
+If you remove all legs, the agent removes the unit, the file and the table.
+This is allowed, but the guard is then gone on every host.
+The operator sets the condition `TenantLegsGuarded` of the `Cluster` to `False` with the reason `NoTenantLegs` and raises a Warning event.
+While the list is not empty, the condition is `True`.
+The agent needs the `nftables` package, and the operator adds it to the packages of the `HostConfig` when the list is not empty.
+
+A host that came from the legacy Ansible roles already has the table `inet tenant_legs` and the unit `tenant-legs.service`.
+The two tables do not conflict, because each one has its own name and both only drop.
+After the cutover, remove the legacy unit by hand on every host: `systemctl disable --now tenant-legs.service`, then delete `/etc/nftables.d/tenant-legs.nft` and the unit file.
+Bedrock does not remove them.
+
+### NodePort scope
+
+Bedrock sets `spec.network.kubeProxy` in the k0s configuration: mode `iptables`, `nodePortAddresses` with the management CIDR, `metricsBindAddress` `0.0.0.0:10249` and `healthzBindAddress` `0.0.0.0:10256`.
+A NodePort answers only on the management network of a host.
+The management CIDR is `spec.network.managementCIDR` of the cluster configuration, and `spec.managementCIDR` of the `Cluster`.
+If you do not set it at install, `bedrock init` uses the network of the address on `spec.network.managementInterface`.
+If that interface has more than one IPv4 address, `bedrock init` stops and asks you to set `spec.network.managementCIDR`.
+Controllers run k0s with dynamic config, so k0s reads `kubeProxy` from the object `clusterconfigs.k0s.k0sproject.io` `kube-system/k0s`, not from the file `k0s.yaml`.
+At install, the file seeds that object on the first start of k0s. An adopted cluster is a new install, so it gets the setting in the same way.
+On a running cluster, the operator patches only `spec.network.kubeProxy.nodePortAddresses` of that object, with `spec.managementCIDR` of the `Cluster`, when the field is empty.
+It keeps every other `kubeProxy` field, a `nodePortAddresses` list that an administrator set, and a disabled kube-proxy.
+Then it reads the object again, and the condition `NodePortsScoped` of the `Cluster` shows the result.
+The condition is `False` with the reason `NoManagementCIDR`, `K0sConfigUnavailable`, `PatchFailed` or `NotApplied` when the setting is not in place.
+k0s applies the change to kube-proxy by itself, and no restart is needed.
+For a cluster that you made before this setting existed, set `spec.managementCIDR` of the `Cluster`.
+For an adopted cluster, use the value of the old `k0s_kube_proxy_node_port_addresses`.
+
+### Switch rules
+
+Add a rule on the switch too, with the same intent.
+Drop the traffic of every tenant VLAN to the management range, except from the sources that you name, for example the BGP peer.
+The host guard is the second layer.
+Do not rely on only one of them.
+
+### Lab check
+
+On a host with a leg, run these commands from a machine on the tenant VLAN.
+The first two must time out, and the BGP session must stay up.
+
+```
+nc -vz -w 3 <host leg address> 22
+nc -vz -w 3 <host leg address> 30080
+nft list table inet bedrock_legs
+```
+
+The counters of the `counter drop` rules must go up.
+
 ## Settings
 
 | Key | Default | Meaning |

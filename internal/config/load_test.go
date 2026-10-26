@@ -660,3 +660,51 @@ func TestValidateAdoptCephxNeedsTheGenerationsOfTheOldCluster(t *testing.T) {
 		}
 	}
 }
+
+func TestToClusterCarriesManagementCIDRAndTenantLegs(t *testing.T) {
+	cfg := v1alpha1.ClusterConfig{}
+	cfg.Spec.Network.ManagementCIDR = "10.0.10.0/24"
+	cfg.Spec.Network.TenantLegs = []v1alpha1.TenantLegSpec{{Interface: "br-public.30", AllowSources: []string{"100.65.0.1/32"}}}
+	spec := ToCluster(cfg).Spec
+	if spec.ManagementCIDR != "10.0.10.0/24" || len(spec.TenantLegs) != 1 || spec.TenantLegs[0].AllowSources[0] != "100.65.0.1/32" {
+		t.Fatalf("spec %+v", spec)
+	}
+	spec.TenantLegs[0].AllowSources[0] = "changed"
+	if cfg.Spec.Network.TenantLegs[0].AllowSources[0] == "changed" {
+		t.Fatal("ToCluster must not share leg sources with the config")
+	}
+}
+
+func TestValidateRejectsBadManagementCIDRAndLegs(t *testing.T) {
+	base, err := Load(filepath.Join("testdata", "single-node.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for name, mutate := range map[string]func(*v1alpha1.ClusterConfig){
+		"management cidr": func(c *v1alpha1.ClusterConfig) { c.Spec.Network.ManagementCIDR = "10.0.10.1" },
+		"leg interface": func(c *v1alpha1.ClusterConfig) {
+			c.Spec.Network.TenantLegs = []v1alpha1.TenantLegSpec{{Interface: "a b"}}
+		},
+		"leg source": func(c *v1alpha1.ClusterConfig) {
+			c.Spec.Network.TenantLegs = []v1alpha1.TenantLegSpec{{Interface: "leg0", AllowSources: []string{"nope"}}}
+		},
+		"any source": func(c *v1alpha1.ClusterConfig) {
+			c.Spec.Network.TenantLegs = []v1alpha1.TenantLegSpec{{Interface: "leg0", AllowSources: []string{"::/0"}}}
+		},
+		"duplicate leg": func(c *v1alpha1.ClusterConfig) {
+			c.Spec.Network.TenantLegs = []v1alpha1.TenantLegSpec{{Interface: "leg0"}, {Interface: "leg0"}}
+		},
+	} {
+		cfg := *base.DeepCopy()
+		mutate(&cfg)
+		if err := Validate(cfg); err == nil {
+			t.Fatalf("%s: expected an error", name)
+		}
+	}
+	cfg := *base.DeepCopy()
+	cfg.Spec.Network.ManagementCIDR = "10.0.10.0/24"
+	cfg.Spec.Network.TenantLegs = []v1alpha1.TenantLegSpec{{Interface: "br-public.30", AllowSources: []string{"100.65.0.1/32"}}}
+	if err := Validate(cfg); err != nil {
+		t.Fatal(err)
+	}
+}
