@@ -26,12 +26,19 @@ type TenantQuota struct {
 	Projects *int32 `json:"projects,omitempty"`
 }
 
+// +kubebuilder:validation:XValidation:rule="!has(oldSelf.vrfId) || (has(self.vrfId) && self.vrfId == oldSelf.vrfId)",message="vrfId is immutable once set"
+// +kubebuilder:validation:XValidation:rule="has(oldSelf.vrfId) || !has(self.vrfId)",message="vrfId can only be set when the Tenant is created"
 type TenantNetworkSpec struct {
 	// +kubebuilder:validation:MaxLength=43
 	// +kubebuilder:validation:XValidation:rule="isCIDR(self)",message="vpcCIDR must be a CIDR"
 	// +kubebuilder:validation:XValidation:rule="!isCIDR(self) || (cidr(self).ip().family() == 4 && cidr(self).prefixLength() <= 24)",message="vpcCIDR must be IPv4 with a prefix length of at most 24"
 	// +kubebuilder:validation:XValidation:rule="self == oldSelf",message="vpcCIDR is immutable"
 	VPCCIDR string `json:"vpcCIDR"`
+	// +optional
+	// +kubebuilder:validation:Minimum=1
+	// +kubebuilder:validation:Maximum=65535
+	// +kubebuilder:validation:XValidation:rule="self < 253 || self > 255",message="vrfId must not be a host routing table: 253, 254 and 255 are reserved"
+	VrfID *int32 `json:"vrfId,omitempty"`
 }
 
 type TenantSpec struct {
@@ -49,6 +56,9 @@ type TenantStatus struct {
 	CommonStatus `json:",inline"`
 	// +optional
 	VPC string `json:"vpc,omitempty"`
+	// +optional
+	// +listType=set
+	ProviderNetworks []string `json:"providerNetworks,omitempty"`
 	// +optional
 	Usage TenantQuota `json:"usage,omitempty"`
 }

@@ -358,3 +358,80 @@ func TestResolveVolumeMountedByAnInstance(t *testing.T) {
 		t.Fatalf("message %q", gate.Message)
 	}
 }
+
+func TestResolveFillsTheAddressList(t *testing.T) {
+	c, _ := startEnv(t)
+	ns := seedPlatform(t, c)
+	container := createContainer(t, c, ns, "web", func(s *v1alpha1.ContainerSpec) {
+		s.Network.Addresses = []string{"10.100.0.51", "10.100.0.52"}
+	})
+	in, gate := resolveContainer(t, c, container)
+	if gate != nil {
+		t.Fatalf("gate %+v", gate)
+	}
+	if !reflect.DeepEqual(in.NIC.Addresses, []string{"10.100.0.51", "10.100.0.52"}) || in.NIC.Address != "" {
+		t.Fatalf("nic %+v", in.NIC)
+	}
+}
+
+func TestResolveAddressListRefusesAnEntryOutsideTheSubnet(t *testing.T) {
+	c, _ := startEnv(t)
+	ns := seedPlatform(t, c)
+	container := createContainer(t, c, ns, "web", func(s *v1alpha1.ContainerSpec) {
+		s.Network.Addresses = []string{"10.100.0.51", "10.101.0.5"}
+	})
+	_, gate := resolveContainer(t, c, container)
+	requireGate(t, gate, ReasonAddressOutsideSubnet)
+}
+
+func TestResolveAddressListRefusesAReservedEntry(t *testing.T) {
+	c, _ := startEnv(t)
+	ns := seedPlatform(t, c)
+	container := createContainer(t, c, ns, "web", func(s *v1alpha1.ContainerSpec) {
+		s.Network.Addresses = []string{"10.100.0.51", "10.100.0.0"}
+	})
+	_, gate := resolveContainer(t, c, container)
+	requireGate(t, gate, ReasonAddressReserved)
+}
+
+func TestResolveAddressListIsPinnedByAnOlderContainer(t *testing.T) {
+	c, _ := startEnv(t)
+	ns := seedPlatform(t, c)
+	first := createContainer(t, c, ns, "first", func(s *v1alpha1.ContainerSpec) { s.Network.Address = "10.100.0.62" })
+	time.Sleep(1100 * time.Millisecond)
+	second := createContainer(t, c, ns, "second", func(s *v1alpha1.ContainerSpec) {
+		s.Network.Addresses = []string{"10.100.0.61", "10.100.0.62"}
+	})
+	if _, gate := resolveContainer(t, c, first); gate != nil {
+		t.Fatalf("the older container keeps the address: %+v", gate)
+	}
+	_, gate := resolveContainer(t, c, second)
+	requireGate(t, gate, ReasonAddressInUse)
+	if !strings.Contains(gate.Message, "first") || !strings.Contains(gate.Message, "10.100.0.62") {
+		t.Fatalf("message %q", gate.Message)
+	}
+}
+
+func TestResolveAddressListRefusesAnEntryHeldByAnotherPod(t *testing.T) {
+	c, _ := startEnv(t)
+	ns := seedPlatform(t, c)
+	createFabricIP(t, c, "other-pod."+ns, ns, "other-pod", network.FabricName(ns, "default"), "10.100.0.72")
+	container := createContainer(t, c, ns, "web", func(s *v1alpha1.ContainerSpec) {
+		s.Network.Addresses = []string{"10.100.0.71", "10.100.0.72"}
+	})
+	_, gate := resolveContainer(t, c, container)
+	requireGate(t, gate, ReasonAddressInUse)
+}
+
+func TestResolveAddressListAcceptsEntriesHeldByItsOwnPods(t *testing.T) {
+	c, _ := startEnv(t)
+	ns := seedPlatform(t, c)
+	container := createContainer(t, c, ns, "web", func(s *v1alpha1.ContainerSpec) {
+		s.Network.Addresses = []string{"10.100.0.81", "10.100.0.82"}
+	})
+	createPod(t, c, ns, "web-6d8f-abcde", "web")
+	createFabricIP(t, c, "web-6d8f-abcde."+ns, ns, "web-6d8f-abcde", network.FabricName(ns, "default"), "10.100.0.81")
+	if _, gate := resolveContainer(t, c, container); gate != nil {
+		t.Fatalf("a pod of the container may hold an entry: %+v", gate)
+	}
+}

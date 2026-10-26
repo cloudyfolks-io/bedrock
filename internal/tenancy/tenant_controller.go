@@ -10,14 +10,19 @@ import (
 	rbacv1 "k8s.io/api/rbac/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/util/retry"
 	ctrl "sigs.k8s.io/controller-runtime"
+	"sigs.k8s.io/controller-runtime/pkg/builder"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	"sigs.k8s.io/controller-runtime/pkg/handler"
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
+	"sigs.k8s.io/controller-runtime/pkg/predicate"
+	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	"github.com/cloudyfolks-io/bedrock/api/v1alpha1"
+	"github.com/cloudyfolks-io/bedrock/internal/network"
 	"github.com/cloudyfolks-io/bedrock/internal/ssa"
 )
 
@@ -53,18 +58,46 @@ func (r *TenantReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctr
 	if countErr != nil {
 		return ctrl.Result{}, countErr
 	}
+	providers, providersErr := r.providerNetworks(ctx, tenant)
 	networkErr := r.applyNetwork(ctx, tenant, networks)
 	ownersErr := r.applyOwners(ctx, tenant, projects, networks)
 	observation := TenantObservation{
-		Tenant:     tenant,
-		Network:    r.observeNetwork(ctx, tenant),
-		Projects:   projects,
-		ElasticIPs: elasticIPs,
-		NetworkErr: networkErr,
-		OwnersErr:  ownersErr,
+		Tenant:              tenant,
+		Network:             r.observeNetwork(ctx, tenant),
+		Projects:            projects,
+		ElasticIPs:          elasticIPs,
+		ProviderNetworks:    providers,
+		ProviderNetworksErr: providersErr,
+		NetworkErr:          networkErr,
+		OwnersErr:           ownersErr,
 	}
 	r.writeStatus(ctx, tenant, TenantStatus(observation))
 	return ctrl.Result{RequeueAfter: Interval}, errors.Join(networkErr, ownersErr)
+}
+
+func (r *TenantReconciler) providerNetworks(ctx context.Context, tenant v1alpha1.Tenant) ([]string, error) {
+	cfg, err := network.LoadConfig(ctx, r.Reader)
+	if err != nil {
+		return tenant.Status.ProviderNetworks, err
+	}
+	return TenantProviderNetworks(cfg.ProviderNetworks), nil
+}
+
+func (r *TenantReconciler) allTenants(ctx context.Context, _ client.Object) []reconcile.Request {
+	var tenants v1alpha1.TenantList
+	if err := r.Client.List(ctx, &tenants); err != nil {
+		logf.FromContext(ctx).Error(err, "list the tenants")
+		return nil
+	}
+	requests := make([]reconcile.Request, 0, len(tenants.Items))
+	for _, tenant := range tenants.Items {
+		requests = append(requests, reconcile.Request{NamespacedName: types.NamespacedName{Name: tenant.Name}})
+	}
+	return requests
+}
+
+func isProviderNetworksSetting(obj client.Object) bool {
+	return obj.GetName() == network.SettingProviderNetworks
 }
 
 func (r *TenantReconciler) listOfTenant(ctx context.Context, tenant string) ([]v1alpha1.Project, []v1alpha1.Network, error) {
@@ -119,6 +152,7 @@ func (r *TenantReconciler) SetupWithManager(mgr ctrl.Manager) error {
 		For(&v1alpha1.Tenant{}).
 		Watches(&v1alpha1.Network{}, handler.EnqueueRequestsFromMapFunc(tenantOfNetwork)).
 		Watches(&v1alpha1.Project{}, handler.EnqueueRequestsFromMapFunc(tenantOfProject)).
+		Watches(&v1alpha1.Setting{}, handler.EnqueueRequestsFromMapFunc(r.allTenants), builder.WithPredicates(predicate.NewPredicateFuncs(isProviderNetworksSetting))).
 		Owns(&rbacv1.ClusterRole{}).
 		Owns(&rbacv1.ClusterRoleBinding{}).
 		Complete(r)

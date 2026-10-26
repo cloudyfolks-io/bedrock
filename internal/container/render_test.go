@@ -175,6 +175,7 @@ func TestRenderDeploymentStrategy(t *testing.T) {
 		want appsv1.DeploymentStrategyType
 	}{
 		{"plain", baseInput(), appsv1.RollingUpdateDeploymentStrategyType},
+		{"address list", withSpec(func(s *v1alpha1.ContainerSpec) { s.Network.Addresses = []string{"10.0.0.9", "10.0.0.10"} }), appsv1.RecreateDeploymentStrategyType},
 		{"pinned", withSpec(func(s *v1alpha1.ContainerSpec) { s.Network.Address = "10.0.0.9" }), appsv1.RecreateDeploymentStrategyType},
 		{"volumes", withSpec(func(s *v1alpha1.ContainerSpec) {
 			s.Volumes = []v1alpha1.ContainerVolume{{VolumeRef: "data", MountPath: "/data"}}

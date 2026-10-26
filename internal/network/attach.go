@@ -8,6 +8,7 @@ import (
 const (
 	providerAnnotationDomain = ".cloudyfolks.io/"
 	addressAnnotation        = "ip_address"
+	poolAnnotation           = "ip_pool"
 )
 
 type NIC struct {
@@ -15,6 +16,7 @@ type NIC struct {
 	Subnet         string
 	MAC            string
 	Address        string
+	Addresses      []string
 	SecurityGroups []string
 }
 
@@ -47,6 +49,9 @@ func nicAnnotations(index int, nic NIC) map[string]string {
 	}
 	if nic.Address != "" {
 		annotations[prefix+addressAnnotation] = nic.Address
+	}
+	if len(nic.Addresses) > 0 {
+		annotations[prefix+poolAnnotation] = strings.Join(nic.Addresses, ",")
 	}
 	if index > 0 {
 		annotations[prefix+"default_route"] = "false"

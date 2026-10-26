@@ -30,17 +30,20 @@ The condition `Ready` shows the reason `NotInProject`.
 | `autoscale` | `min`, `max`, `cpuPercent` and `memoryPercent`. |
 | `volumes` | At most 8 Volumes with a `volumeRef` and a `mountPath`. |
 | `imagePullSecrets` | Names of Secrets of the type `kubernetes.io/dockerconfigjson` in the namespace. |
-| `network` | `subnetRef` (the default is `default`), an optional `address` and `securityGroups`. |
+| `network` | `subnetRef` (the default is `default`), an optional `address` or `addresses`, and `securityGroups`. |
 
 The name of a Container has at most 52 characters and is a DNS label.
 The `subnetRef` and the `address` cannot change after the create.
+An entry of `addresses` cannot change. You can add entries to the list.
 A reference must not hold `/`, `,`, `{`, a space or an upper-case letter.
 
 These rules are checked by the API server.
 
 - `replicas` and `autoscale` exclude each other.
 - An `address` and `volumes` need `replicas` of at most 1 and no `autoscale`.
-- An `address` and `volumes` need the strategy `Recreate`.
+- `addresses` and `address` exclude each other.
+- `addresses` need `replicas` of at most the number of entries and no `autoscale`.
+- An `address`, `addresses` and `volumes` need the strategy `Recreate`.
 - A probe needs an `exec` command.
 
 The operator checks these rules after the API server.
@@ -101,6 +104,17 @@ The Container then has one replica and the strategy `Recreate`, so two pods neve
 The reasons are `AddressOutsideSubnet`, `AddressReserved` and `AddressInUse`.
 The address is also `AddressInUse` when another Container pins it, or when another pod holds it.
 The older Container keeps the address.
+
+### Address list
+
+Set `network.addresses` to give each replica one address from a list of the Subnet.
+Each entry must be an IPv4 address inside the Subnet, and entries are unique.
+The list has at most 20 entries.
+`replicas` must not be more than the number of entries, and the strategy is `Recreate`.
+The operator writes the list to the pod annotation `<provider>.cloudyfolks.io/ip_pool`.
+Fabric gives each pod the first address of the list that no other pod holds (`pkg/controller/pod.go:2577-2599` and the annotation `fabric.cloudyfolks.io/ip_pool` in `pkg/util/const.go:34` of Fabric v1.2.1).
+The same rules as for `address` apply to every entry: `AddressOutsideSubnet`, `AddressReserved` and `AddressInUse`.
+An older Container that pins an entry, as `address` or in `addresses`, keeps it.
 
 ## Volumes
 
@@ -181,7 +195,7 @@ The addon `kata` creates the RuntimeClass `kata`. See `docs/addons.md`.
 - At most 20 replicas, 8 ports, 8 volumes and 8 security groups.
 - One container in a pod. The container is named `app`.
 - Only `exec` probes.
-- A Container with an `address` or with `volumes` has at most one replica.
+- A Container with an `address` or with `volumes` has at most one replica. A Container with `addresses` has at most as many replicas as entries.
 - The quota key `count/containers.bedrock.cloudyfolks.io` limits the number of Containers of a project. The quota of memory and CPU counts the requests of the pods and the overhead of Kata.
 - The two-interface model, custom domains, ingress, container plans and revisions are not part of the Container kind.
 

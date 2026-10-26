@@ -238,3 +238,25 @@ func TestNetworkVrfIDValidation(t *testing.T) {
 	free.Spec.VrfID = ptr.To(int32(1600))
 	updateInvalid(t, c, free, "vrfId can only be set when the Network is created")
 }
+
+func TestTenantVrfIDValidation(t *testing.T) {
+	c, _ := StartTestEnv(t)
+	for _, id := range []int32{0, 253, 255, 65536} {
+		bad := validTenant(fmt.Sprintf("vrf%d", id))
+		bad.Spec.Network.VrfID = ptr.To(id)
+		createInvalid(t, c, bad, "vrfId")
+	}
+	tenant := validTenant("vrfok")
+	tenant.Spec.Network.VrfID = ptr.To(int32(1500))
+	createValid(t, c, tenant)
+	changed := tenant.DeepCopy()
+	changed.Spec.Network.VrfID = ptr.To(int32(1501))
+	updateInvalid(t, c, changed, "vrfId is immutable once set")
+	cleared := tenant.DeepCopy()
+	cleared.Spec.Network.VrfID = nil
+	updateInvalid(t, c, cleared, "vrfId is immutable once set")
+	late := validTenant("vrflate")
+	createValid(t, c, late)
+	late.Spec.Network.VrfID = ptr.To(int32(1600))
+	updateInvalid(t, c, late, "vrfId can only be set when the Tenant is created")
+}

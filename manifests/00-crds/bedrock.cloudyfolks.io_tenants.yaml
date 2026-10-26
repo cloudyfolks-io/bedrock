@@ -60,9 +60,24 @@ spec:
                         <= 24)'
                     - message: vpcCIDR is immutable
                       rule: self == oldSelf
+                  vrfId:
+                    format: int32
+                    maximum: 65535
+                    minimum: 1
+                    type: integer
+                    x-kubernetes-validations:
+                    - message: 'vrfId must not be a host routing table: 253, 254 and
+                        255 are reserved'
+                      rule: self < 253 || self > 255
                 required:
                 - vpcCIDR
                 type: object
+                x-kubernetes-validations:
+                - message: vrfId is immutable once set
+                  rule: '!has(oldSelf.vrfId) || (has(self.vrfId) && self.vrfId ==
+                    oldSelf.vrfId)'
+                - message: vrfId can only be set when the Tenant is created
+                  rule: has(oldSelf.vrfId) || !has(self.vrfId)
               owners:
                 items:
                   properties:
@@ -177,6 +192,11 @@ spec:
               observedGeneration:
                 format: int64
                 type: integer
+              providerNetworks:
+                items:
+                  type: string
+                type: array
+                x-kubernetes-list-type: set
               usage:
                 properties:
                   cpu:

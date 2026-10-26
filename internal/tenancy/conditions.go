@@ -17,6 +17,8 @@ const (
 	ConditionSubnetReady    = "SubnetReady"
 	ConditionQuotaReady     = "QuotaReady"
 	ConditionAccessReady    = "AccessReady"
+
+	ConditionProviderNetworksKnown = "ProviderNetworksKnown"
 )
 
 const (
@@ -41,6 +43,7 @@ const (
 	ReasonQuotaUnavailable     = "QuotaUnavailable"
 	ReasonQuotaRequired        = "QuotaRequired"
 	ReasonPending              = "Pending"
+	ReasonSettingInvalid       = "SettingInvalid"
 )
 
 func withCondition(conditions []metav1.Condition, next metav1.Condition) []metav1.Condition {

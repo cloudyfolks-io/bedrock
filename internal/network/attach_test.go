@@ -109,3 +109,13 @@ func TestPodNetworkMetadataOfAnAutoNICIsUnchanged(t *testing.T) {
 		t.Fatalf("annotations %v labels %v", annotations, labels)
 	}
 }
+
+func TestPodNetworkMetadataCarriesTheAddressList(t *testing.T) {
+	annotations, _ := PodNetworkMetadata([]NIC{{Namespace: "t1-prod", Subnet: "default", Addresses: []string{"10.100.0.50", "10.100.0.51"}}})
+	if annotations["default.t1-prod.fabric.cloudyfolks.io/ip_pool"] != "10.100.0.50,10.100.0.51" {
+		t.Fatalf("annotations %v", annotations)
+	}
+	if _, found := annotations["default.t1-prod.fabric.cloudyfolks.io/ip_address"]; found {
+		t.Fatalf("a list must not set ip_address: %v", annotations)
+	}
+}
