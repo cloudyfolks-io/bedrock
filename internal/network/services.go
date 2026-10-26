@@ -5,6 +5,7 @@ import (
 	"net/netip"
 	"slices"
 	"strconv"
+	"strings"
 
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 
@@ -63,6 +64,9 @@ func MissingServicesSettings(c Config) []string {
 		missing = append(missing, keyServicesIdentityRange+"="+s.IdentityRange+" (not inside the cidr of the provider network)")
 	case found && !identityExcluded(s.IdentityRange, pool):
 		missing = append(missing, keyServicesIdentityRange+"="+s.IdentityRange+" (not inside one excludeIPs entry of the provider network)")
+	}
+	if cfg := c.DatabaseVIPRange; cfg != "" && found && !insidePool(cfg, pool) {
+		missing = append(missing, keyDatabaseVIPRange+"="+cfg+" (not inside the cidr of the services provider network)")
 	}
 	return missing
 }
@@ -154,6 +158,20 @@ func servicesACLs(cfg Config, pn v1alpha1.ProviderNetworkSpec) ([]fabric.ACL, er
 	if pool.Bits() < servicesVIPPrefixBits {
 		vips = netip.PrefixFrom(pool.Addr(), servicesVIPPrefixBits)
 	}
-	match := fmt.Sprintf("ip4.src == %[1]s && ip4.src != %[2]s && ip4.dst == %[1]s && ip4.dst != %[2]s", pool, vips)
+	exempt := []string{vips.String()}
+	for _, candidate := range []string{cfg.DatabaseVIPRange, cfg.Services.IdentityRange} {
+		if candidate != "" && insidePool(candidate, pn) {
+			exempt = append(exempt, candidate)
+		}
+	}
+	match := fmt.Sprintf("%s && %s", exemptClause("ip4.src", pool.String(), exempt), exemptClause("ip4.dst", pool.String(), exempt))
 	return []fabric.ACL{{Direction: servicesACLDirection, Priority: servicesACLPriority, Match: match, Action: servicesACLAction}}, nil
+}
+
+func exemptClause(field, pool string, exempt []string) string {
+	clauses := []string{field + " == " + pool}
+	for _, prefix := range exempt {
+		clauses = append(clauses, field+" != "+prefix)
+	}
+	return strings.Join(clauses, " && ")
 }

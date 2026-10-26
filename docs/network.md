@@ -336,11 +336,15 @@ The router port and the entry in `extraExternalSubnets` stay.
 When you delete a Network, the controller deletes these objects before it deletes the Vpc.
 
 Each provider network with the role `services` has an ACL with the direction `to-lport` and the priority 2000.
-It drops traffic when the source and the destination are both in the provider network and both outside the first /24.
+It drops traffic when the source and the destination are both in the provider network and both outside the first /24, outside `database.vip-range` and outside `network.services.identity-range`.
+The two ranges are exempt only when they are inside the provider network.
+The database proxy of a tenant reaches its gate address in `database.vip-range` from the identity address, so the ACL must not drop this traffic.
+If `database.vip-range` is set and is not inside the provider network with the role `services`, the services plane is not configured and the reason is `ServicesNotConfigured`.
 So guests of different Networks cannot reach each other on the plane, but they can reach the services, and the services can reach them.
 This isolation is a security boundary.
 The operator always renders the ACL for a provider network with the role `services`, and no Setting turns it off.
-For the CIDR `100.66.0.0/15` the match is `ip4.src == 100.66.0.0/15 && ip4.src != 100.66.0.0/24 && ip4.dst == 100.66.0.0/15 && ip4.dst != 100.66.0.0/24`.
+For the CIDR `100.66.0.0/15` with no other range inside it, the match is `ip4.src == 100.66.0.0/15 && ip4.src != 100.66.0.0/24 && ip4.dst == 100.66.0.0/15 && ip4.dst != 100.66.0.0/24`.
+With `database.vip-range` `100.66.16.0/21` and `network.services.identity-range` `100.67.0.0/16`, each side also has `!= 100.66.16.0/21` and `!= 100.67.0.0/16`.
 In bgp mode a provider network with the role `services` has a `Vlan`, as the transit network has.
 The ACL, the `ProviderNetwork` and the `Vlan` depend on the role only, so a wrong Setting never removes them.
 

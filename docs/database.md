@@ -20,7 +20,7 @@ The area is off by default. Do these steps as an administrator.
 
 1. Turn the addon `cnpg` on: `kubectl patch addon cnpg --type merge -p '{"spec":{"enabled":true}}'`.
    The addon installs the CloudNativePG operator and the Barman Cloud plugin. See `docs/addons.md`.
-2. Set `database.vip-range` to an IPv4 network of the services plane, for example `100.66.16.0/21`.
+2. Set `database.vip-range` to an IPv4 network inside the services provider network, for example `100.66.16.0/21`. The services plane is not configured if the range is outside it. The ACL of the plane does not drop the traffic to this range.
 3. Make at least one `DatabaseClass`.
 4. Set `database.enabled` to `true`.
 

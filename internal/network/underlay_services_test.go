@@ -18,13 +18,17 @@ func servicesSubnetOf(t *testing.T, values map[string]string) *unstructured.Unst
 
 func requireDropACL(t *testing.T, subnet *unstructured.Unstructured) {
 	t.Helper()
+	requireACLMatch(t, subnet, "ip4.src == 100.66.0.0/15 && ip4.src != 100.66.0.0/24 && ip4.src != 100.67.0.0/16 && ip4.dst == 100.66.0.0/15 && ip4.dst != 100.66.0.0/24 && ip4.dst != 100.67.0.0/16")
+}
+
+func requireACLMatch(t *testing.T, subnet *unstructured.Unstructured, want string) {
+	t.Helper()
 	acls, _, _ := unstructured.NestedSlice(subnet.Object, "spec", "acls")
 	if len(acls) != 1 {
 		t.Fatalf("acls %v", acls)
 	}
 	acl := acls[0].(map[string]any)
 	match, _ := acl["match"].(string)
-	want := "ip4.src == 100.66.0.0/15 && ip4.src != 100.66.0.0/24 && ip4.dst == 100.66.0.0/15 && ip4.dst != 100.66.0.0/24"
 	if acl["direction"] != "to-lport" || acl["priority"] != int64(2000) || acl["action"] != "drop" || match != want {
 		t.Fatalf("acl %v", acl)
 	}
