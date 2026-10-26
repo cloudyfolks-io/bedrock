@@ -22,6 +22,10 @@ const (
 type ProviderNetworkSpec struct {
 	Name      string `json:"name"`
 	Interface string `json:"interface"`
+	// +kubebuilder:validation:MaxLength=30
+	// +kubebuilder:validation:Pattern=`^[a-z0-9]([-a-z0-9]*[a-z0-9])?$`
+	// +optional
+	ProviderName string `json:"providerName,omitempty"`
 	// +optional
 	Vlan    int32  `json:"vlan,omitempty"`
 	CIDR    string `json:"cidr"`

@@ -192,6 +192,34 @@ func ValidateProviderNetworks(list []v1alpha1.ProviderNetworkSpec) error {
 			return fmt.Errorf("provider network %q: %w", pn.Name, err)
 		}
 	}
+	return validateProviderNames(list)
+}
+
+func validateProviderNames(list []v1alpha1.ProviderNetworkSpec) error {
+	byInterface := map[string]string{}
+	byName := map[string]string{}
+	for _, pn := range list {
+		name := pn.ProviderName
+		if name == "" {
+			continue
+		}
+		if err := dnsLabelValue(name); err != nil || len(name) > maxProviderNameLength {
+			return fmt.Errorf("provider network %q: providerName must be a DNS label of at most %d characters", pn.Name, maxProviderNameLength)
+		}
+		if previous, found := byInterface[pn.Interface]; found && previous != name {
+			return fmt.Errorf("provider network %q: providerName %q conflicts with %q on interface %s", pn.Name, name, previous, pn.Interface)
+		}
+		if iface, found := byName[name]; found && iface != pn.Interface {
+			return fmt.Errorf("provider network %q: providerName %q is already used on interface %s", pn.Name, name, iface)
+		}
+		byInterface[pn.Interface] = name
+		byName[name] = pn.Interface
+	}
+	for _, pn := range list {
+		if iface, found := byName[pn.Name]; found && iface != pn.Interface {
+			return fmt.Errorf("provider network %q: the name is the providerName of interface %s", pn.Name, iface)
+		}
+	}
 	return nil
 }
 
