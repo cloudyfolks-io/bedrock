@@ -402,7 +402,12 @@ func TestLoadReadsAdopt(t *testing.T) {
 	if err := yaml.Unmarshal(adopt.Cephx.Raw, &cephx); err != nil {
 		t.Fatal(err)
 	}
-	want := map[string]any{"daemon": map[string]any{"keyType": "aes256k", "keyGeneration": float64(2)}}
+	want := map[string]any{
+		"allowedCiphers": []any{"aes256k"},
+		"daemon":         map[string]any{"keyGeneration": float64(2)},
+		"csi":            map[string]any{"keyType": "aes256k", "keyGeneration": float64(3)},
+		"rbdMirrorPeer":  map[string]any{"keyGeneration": float64(2)},
+	}
 	if !reflect.DeepEqual(cephx, want) {
 		t.Fatalf("cephx %v, want %v", cephx, want)
 	}
@@ -524,7 +529,7 @@ func TestLoadRefusesScalarCephx(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	scalar := strings.Replace(string(base), "      cephx:\n        daemon:\n          keyType: aes256k\n          keyGeneration: 2\n", "      cephx: foo\n", 1)
+	scalar := strings.Replace(string(base), "      cephx:\n        allowedCiphers: [aes256k]\n        daemon:\n          keyGeneration: 2\n        csi:\n          keyType: aes256k\n          keyGeneration: 3\n        rbdMirrorPeer:\n          keyGeneration: 2\n", "      cephx: foo\n", 1)
 	if scalar == string(base) {
 		t.Fatal("testdata has no cephx block to replace")
 	}
@@ -659,6 +664,13 @@ func TestWithCephxCipherCopiesTheLiveModeOfAnAdoptedCluster(t *testing.T) {
 	}
 }
 
+func TestWithCephxCipherReadsAllowedCiphers(t *testing.T) {
+	raw := `{"allowedCiphers":["aes256k"],"daemon":{"keyGeneration":2}}`
+	if got := WithCephxCipher(adoptConfigWithCephx(raw), "5.15.0").Spec.Storage.CephxCipher; got != "aes256k" {
+		t.Fatalf("allowedCiphers aes256k: got %q", got)
+	}
+}
+
 func TestToSettingsCarriesTheCephxCipher(t *testing.T) {
 	values := map[string]string{}
 	for _, s := range ToSettings(WithCephxCipher(v1alpha1.ClusterConfig{}, "7.0.1")) {
@@ -720,6 +732,13 @@ func TestValidateRejectsBadManagementCIDRAndLegs(t *testing.T) {
 		},
 		"any source": func(c *v1alpha1.ClusterConfig) {
 			c.Spec.Network.TenantLegs = []v1alpha1.TenantLegSpec{{Interface: "leg0", AllowSources: []string{"::/0"}}}
+		},
+		"leg is the management interface": func(c *v1alpha1.ClusterConfig) {
+			c.Spec.Network.TenantLegs = []v1alpha1.TenantLegSpec{{Interface: c.Spec.Network.ManagementInterface}}
+		},
+		"leg is the vlan parent of the management interface": func(c *v1alpha1.ClusterConfig) {
+			c.Spec.Network.ManagementInterface = "bond0.10"
+			c.Spec.Network.TenantLegs = []v1alpha1.TenantLegSpec{{Interface: "bond0"}}
 		},
 		"duplicate leg": func(c *v1alpha1.ClusterConfig) {
 			c.Spec.Network.TenantLegs = []v1alpha1.TenantLegSpec{{Interface: "leg0"}, {Interface: "leg0"}}

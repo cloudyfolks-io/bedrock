@@ -1,14 +1,17 @@
 package agent
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"runtime"
 	"slices"
 	"testing"
 
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	sigyaml "sigs.k8s.io/yaml"
 
+	"github.com/cloudyfolks-io/bedrock/api/v1alpha1"
 	"github.com/cloudyfolks-io/bedrock/internal/release"
 )
 
@@ -58,15 +61,42 @@ func TestAdoptLeavesATarballThatNoVersionNamesUntouched(t *testing.T) {
 
 func TestAdoptFilesAirgapTarballsByVersion(t *testing.T) {
 	root := t.TempDir()
-	writeImageTarball(t, root, "k0s-airgap.tar")
-	writeImageTarball(t, root, "k0s-airgap-v0.3.0.tar")
+	writeFixtureFile(t, k0sFile(root, "k0s-airgap.tar"), "old airgap")
+	writeFixtureFile(t, k0sFile(root, "k0s-airgap-v0.3.0.tar"), "new airgap")
 	if err := adoptK0sImages(root, nil, "v0.2.0"); err != nil {
 		t.Fatal(err)
 	}
-	for _, version := range []string{"v0.2.0", "v0.3.0"} {
-		if readFixtureFile(t, archiveFile(root, version, "k0s-airgap.tar")) != "tar" {
+	for version, want := range map[string]string{"v0.2.0": "old airgap", "v0.3.0": "new airgap"} {
+		if readFixtureFile(t, archiveFile(root, version, "k0s-airgap.tar")) != want {
 			t.Fatalf("%s must hold its airgap tarball", version)
 		}
+	}
+	if len(k0sDirEntries(t, root)) != 0 {
+		t.Fatalf("left %v", k0sDirEntries(t, root))
+	}
+}
+
+func TestAdoptFilesAnUnversionedAirgapUnderTheReleaseItCameFromBesideTheNewOne(t *testing.T) {
+	root := t.TempDir()
+	writeFixtureFile(t, k0sFile(root, "k0s-airgap-v0.6.0.tar"), "new airgap")
+	writeFixtureFile(t, k0sFile(root, "k0s-airgap.tar"), "old airgap")
+	if err := adoptK0sImages(root, nil, "v0.5.0"); err != nil {
+		t.Fatal(err)
+	}
+	if readFixtureFile(t, archiveFile(root, "v0.6.0", "k0s-airgap.tar")) != "new airgap" || readFixtureFile(t, archiveFile(root, "v0.5.0", "k0s-airgap.tar")) != "old airgap" {
+		t.Fatal("each airgap must sit under its own version")
+	}
+	if len(k0sDirEntries(t, root)) != 0 {
+		t.Fatalf("left %v", k0sDirEntries(t, root))
+	}
+}
+
+func TestAdoptRemovesAnUnversionedAirgapThatIsAlreadyArchived(t *testing.T) {
+	root := t.TempDir()
+	writeFixtureFile(t, archiveFile(root, "v0.5.0", "k0s-airgap.tar"), "same")
+	writeFixtureFile(t, k0sFile(root, "k0s-airgap.tar"), "same")
+	if err := adoptK0sImages(root, nil, ""); err != nil {
+		t.Fatal(err)
 	}
 	if len(k0sDirEntries(t, root)) != 0 {
 		t.Fatalf("left %v", k0sDirEntries(t, root))
@@ -227,5 +257,19 @@ func TestSettleArchiveDropsTheTargetVersionWhenTheKeptVersionIsMissing(t *testin
 	}
 	if readFixtureFile(t, archiveFile(root, "v0.2.0", "shared.tar")) != "shared" {
 		t.Fatal("a tarball the kept version names must be carried before the other version goes")
+	}
+}
+
+func TestLegacyAirgapVersionIsTheReleaseTheHostUpgradedFrom(t *testing.T) {
+	ctx := context.Background()
+	upgrade := &v1alpha1.NodeUpgrade{ObjectMeta: metav1.ObjectMeta{Name: v1alpha1.NodeUpgradeName("v0.6.0", "cp-legacy-airgap")}, Spec: v1alpha1.NodeUpgradeSpec{Node: "cp-legacy-airgap", Version: "v0.6.0", From: "v0.5.0", Attempt: 1, Steps: []string{v1alpha1.StepPreload}}}
+	if err := k8sClient.Create(ctx, upgrade); err != nil {
+		t.Fatal(err)
+	}
+	if got := legacyAirgapVersion(ctx, k8sClient, Deps{Node: "cp-legacy-airgap", Version: "v0.6.0"}); got != "v0.5.0" {
+		t.Fatalf("legacy version %q", got)
+	}
+	if got := legacyAirgapVersion(ctx, k8sClient, Deps{Node: "cp-legacy-airgap-other", Version: "v0.6.0"}); got != "" {
+		t.Fatalf("a host without an upgrade has no legacy version, got %q", got)
 	}
 }

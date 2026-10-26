@@ -271,8 +271,13 @@ spec:
         filesystem: <old CephFS>
         objectStore: <old object store>
       cephx:
+        allowedCiphers: [aes256k]
         daemon:
+          keyGeneration: 2
+        csi:
           keyType: aes256k
+          keyGeneration: 3
+        rbdMirrorPeer:
           keyGeneration: 2
   roles: [control-plane, ceph-osd, fabric-gateway, workload]
 ```
@@ -290,7 +295,7 @@ Rules for the file:
 - Copy the whole `security.cephx` block of the old CephCluster into `adopt.cephx`.
   Rook then keeps the daemon keys and does not rotate them again.
   `adopt.cephx` must carry `keyGeneration` in every section that it has. If the block has `csi.keyType: aes256k`, it must have the sections `daemon`, `csi` and `rbdMirrorPeer`. `bedrock init` refuses a block without them, because Rook refuses a lower generation.
-  Bedrock copies the live mode: `csi.keyType: aes256k` selects the cipher `aes256k`, other blocks select `aes`. See [Storage keys](../storage.md).
+  Bedrock copies the live mode: `csi.keyType: aes256k` or `allowedCiphers` with `aes256k` selects the cipher `aes256k`, other blocks select `aes`. See [Storage keys](../storage.md).
   When the old block has `allowedCiphers`, Bedrock restricts the ciphers at once. Without it, Bedrock rotates first and restricts later.
 
 ## 4. Stop the old cluster

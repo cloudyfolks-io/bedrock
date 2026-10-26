@@ -72,7 +72,7 @@ func Run(ctx context.Context, c client.WithWatch, deps Deps) error {
 		if err := RunUpgrades(ctx, c, deps, Steps()); err != nil {
 			fmt.Fprintf(os.Stderr, "agent: upgrade: %v\n", err)
 		}
-		if err := adoptK0sImages(deps.Root, releaseLists(ctx, c, deps.Root), deps.Version); err != nil {
+		if err := adoptK0sImages(deps.Root, releaseLists(ctx, c, deps.Root), legacyAirgapVersion(ctx, c, deps)); err != nil {
 			fmt.Fprintf(os.Stderr, "agent: image archive: %v\n", err)
 		}
 		if err := syncHostImages(ctx, deps); err != nil {

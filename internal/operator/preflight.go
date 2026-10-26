@@ -334,12 +334,7 @@ func hostCheckProblems(in preflightInput, host v1alpha1.Host) []string {
 }
 
 func diskNeed(in preflightInput, host v1alpha1.Host) int64 {
-	checks := host.Status.Checks
-	need := 2*hostBundleBytes(in, host) + kubeletReserve(in, host)
-	if backup, ok := backupHost(in.Hosts); ok && backup.Name == host.Name {
-		need += 2 * checks.ImagesBytes
-	}
-	return need
+	return 2*hostBundleBytes(in, host) + kubeletReserve(in, host)
 }
 
 func kubeletReserve(in preflightInput, host v1alpha1.Host) int64 {

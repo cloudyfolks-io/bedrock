@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"net"
 	"net/netip"
 	"os"
@@ -115,7 +116,9 @@ func adoptedCephxCipher(raw *runtime.RawExtension) string {
 	if err != nil || object == nil {
 		return cephx.Aes
 	}
-	if csi, _ := object["csi"].(map[string]any); csi["keyType"] == cephx.Aes256k {
+	csi, _ := object["csi"].(map[string]any)
+	allowed, _ := object["allowedCiphers"].([]any)
+	if csi["keyType"] == cephx.Aes256k || slices.Contains(allowed, any(cephx.Aes256k)) {
 		return cephx.Aes256k
 	}
 	return cephx.Aes
@@ -238,6 +241,9 @@ func validateManagementNetwork(network v1alpha1.ClusterNetworkSpec) error {
 		if seen[leg.Interface] {
 			return fmt.Errorf("spec.network.tenantLegs lists %s twice", leg.Interface)
 		}
+		if leg.Interface == network.ManagementInterface || leg.Interface == vlanParent(network.ManagementInterface) {
+			return fmt.Errorf("spec.network.tenantLegs %s is the management interface or its VLAN parent", leg.Interface)
+		}
 		seen[leg.Interface] = true
 		for _, source := range leg.AllowSources {
 			prefix, err := netip.ParsePrefix(source)
@@ -250,6 +256,11 @@ func validateManagementNetwork(network v1alpha1.ClusterNetworkSpec) error {
 		}
 	}
 	return nil
+}
+
+func vlanParent(name string) string {
+	parent, _, _ := strings.Cut(name, ".")
+	return parent
 }
 
 func validateClusterServices(cfg v1alpha1.ClusterConfig) error {
@@ -451,8 +462,19 @@ func ToHost(cfg v1alpha1.ClusterConfig, nodeName string) v1alpha1.Host {
 	}
 }
 
+func addonSettingValues(addons map[string]bool) map[string]string {
+	values := map[string]string{}
+	for _, def := range settings.Catalog() {
+		name, isAddon := strings.CutSuffix(def.Key, ".enabled")
+		if enabled, set := addons[name]; isAddon && set {
+			values[def.Key] = strconv.FormatBool(enabled)
+		}
+	}
+	return values
+}
+
 func SettingValues(cfg v1alpha1.ClusterConfig) map[string]string {
-	return map[string]string{
+	values := map[string]string{
 		"platform.host":                 cfg.Spec.Platform.Host,
 		"platform.tls-mode":             cfg.Spec.Platform.TLSMode,
 		"storage.replicas":              strconv.Itoa(int(cfg.Spec.Storage.Replicas)),
@@ -471,6 +493,8 @@ func SettingValues(cfg v1alpha1.ClusterConfig) map[string]string {
 		"egress.no-proxy":               strings.Join(cfg.Spec.Egress.NoProxy, ","),
 		"letsencrypt.dns01-nameservers": strings.Join(cfg.Spec.Egress.DNS01Nameservers, ","),
 	}
+	maps.Copy(values, addonSettingValues(cfg.Spec.Addons))
+	return values
 }
 
 func ToSettings(cfg v1alpha1.ClusterConfig) []v1alpha1.Setting {
