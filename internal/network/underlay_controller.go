@@ -28,7 +28,7 @@ const (
 
 var UnderlayRequest = reconcile.Request{NamespacedName: types.NamespacedName{Name: "underlay"}}
 
-var underlayKinds = []schema.GroupVersionKind{fabric.ProviderNetworkGVK, fabric.VlanGVK, fabric.SubnetGVK, fabric.BgpConfGVK}
+var underlayKinds = []schema.GroupVersionKind{fabric.SubnetGVK, fabric.VlanGVK, fabric.ProviderNetworkGVK, fabric.BgpConfGVK}
 
 type UnderlayReconciler struct {
 	Client client.Client
@@ -39,7 +39,14 @@ func (r *UnderlayReconciler) Reconcile(ctx context.Context, _ reconcile.Request)
 	if err != nil {
 		return reconcile.Result{}, warn(ctx, r.Client, settingReference(keyProviderNetwork), "InvalidSettings", err.Error())
 	}
-	objects, warnings := RenderUnderlay(cfg)
+	existing, err := r.existingCarriers(ctx)
+	if err != nil {
+		return reconcile.Result{}, err
+	}
+	objects, warnings, err := RenderUnderlayOver(cfg, existing)
+	if err != nil {
+		return reconcile.Result{}, warn(ctx, r.Client, settingReference(keyProviderNetwork), "InvalidSettings", err.Error())
+	}
 	for _, message := range warnings {
 		if err := warn(ctx, r.Client, settingReference(keyProviderNetwork), ReasonBGPNotConfigured, message); err != nil {
 			return reconcile.Result{}, err
@@ -62,6 +69,18 @@ func (r *UnderlayReconciler) Reconcile(ctx context.Context, _ reconcile.Request)
 	return reconcile.Result{}, nil
 }
 
+func (r *UnderlayReconciler) existingCarriers(ctx context.Context) ([]*unstructured.Unstructured, error) {
+	var existing []*unstructured.Unstructured
+	for _, gvk := range []schema.GroupVersionKind{fabric.ProviderNetworkGVK, fabric.VlanGVK} {
+		objects, err := listObjects(ctx, r.Client, gvk, client.MatchingLabels{LabelComponent: ComponentUnderlay})
+		if err != nil {
+			return nil, err
+		}
+		existing = append(existing, objects...)
+	}
+	return existing, nil
+}
+
 func identity(u *unstructured.Unstructured) string {
 	return u.GetKind() + "/" + u.GetName()
 }
@@ -77,12 +96,41 @@ func (r *UnderlayReconciler) prune(ctx context.Context, wanted map[string]bool) 
 			if wanted[identity(object)] {
 				continue
 			}
+			if holder, held, err := r.holder(ctx, gvk, object.GetName()); err != nil {
+				return "", err
+			} else if held {
+				refused = append(refused, identity(object)+": still used by "+holder)
+				continue
+			}
 			if err := deleteObject(ctx, r.Client, gvk, object.GetName()); err != nil {
 				refused = append(refused, identity(object)+": "+err.Error())
 			}
 		}
 	}
 	return strings.Join(refused, "; "), nil
+}
+
+func (r *UnderlayReconciler) holder(ctx context.Context, gvk schema.GroupVersionKind, name string) (string, bool, error) {
+	var holderGVK schema.GroupVersionKind
+	var field string
+	switch gvk {
+	case fabric.VlanGVK:
+		holderGVK, field = fabric.SubnetGVK, "vlan"
+	case fabric.ProviderNetworkGVK:
+		holderGVK, field = fabric.VlanGVK, "provider"
+	default:
+		return "", false, nil
+	}
+	holders, err := listObjects(ctx, r.Client, holderGVK)
+	if err != nil {
+		return "", false, err
+	}
+	for _, h := range holders {
+		if nestedStringOf(h, "spec", field) == name {
+			return identity(h), true, nil
+		}
+	}
+	return "", false, nil
 }
 
 func toUnderlay(context.Context, client.Object) []reconcile.Request {

@@ -22,8 +22,8 @@ The section "How to read conditions" lists every reason.
 
 | Bedrock object | Fabric or Kubernetes object | Name |
 |---|---|---|
-| each interface of the provider networks | `ProviderNetwork` | the name of the first provider network that uses the interface |
-| each interface and VLAN id of the provider networks | `Vlan` | the name of the first provider network that uses the pair |
+| each interface of the provider networks | `ProviderNetwork` | the name of the `ProviderNetwork` that already exists for the interface, or else the lowest provider network name on the interface |
+| each interface and VLAN id of the provider networks | `Vlan` | the name of the `Vlan` that already exists for the pair, or else the lowest provider network name of the pair |
 | each provider network | `Subnet` | `provider-<name>` |
 | bgp mode | `BgpConf` | `bedrock` |
 | `Network` | `Vpc` | the Network name |
@@ -347,6 +347,12 @@ The ACL, the `ProviderNetwork` and the `Vlan` depend on the role only, so a wron
 Provider networks can share an interface, and they can share a VLAN id.
 The operator makes one `ProviderNetwork` for each interface and one `Vlan` for each pair of interface and VLAN id.
 Each provider network keeps its own `Subnet`, so two networks with different CIDRs on the same untagged interface (VLAN id 0) work together.
+The names are stable.
+An existing `ProviderNetwork` or `Vlan` keeps its name and its `spec.provider`.
+Changing the order of the list, removing a provider network, or changing between `l2` and `bgp` never renames them.
+The operator deletes a `Vlan` only when no `Subnet` names it, and a `ProviderNetwork` only when no `Vlan` names it.
+Until then the underlay reports `InUse` and the operator tries again.
+If the CIDR of a services provider network is not valid, the operator renders no underlay object and reports `InvalidSettings`.
 
 If a Setting is wrong, the Network gets `ExternalReady=False` with the reason `ServicesNotConfigured`.
 The Vpc keeps its other entries, and the controller does not delete the identity objects.

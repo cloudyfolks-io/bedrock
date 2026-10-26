@@ -53,7 +53,7 @@ func TestRenderUnderlayTwoVlansOnOneInterfaceShareTheProviderNetwork(t *testing.
 	}
 	got := byKindAndName(objects)
 	for _, name := range []string{"Vlan/transit", "Vlan/public"} {
-		if nestedString(t, got[name], "spec", "provider") != "transit" {
+		if nestedString(t, got[name], "spec", "provider") != "public" {
 			t.Fatalf("%s %v", name, got[name].Object["spec"])
 		}
 	}
@@ -66,10 +66,10 @@ func TestRenderUnderlayBGPTransitAndServicesOnOneInterfaceShareTheProviderNetwor
 	values := bgpValues(servicesValues(servicesBGPPools, nil))
 	objects, _ := RenderUnderlay(configOf(t, values))
 	got := byKindAndName(objects)
-	if countKind(objects, "ProviderNetwork") != 1 || got["ProviderNetwork/transit"] == nil {
+	if countKind(objects, "ProviderNetwork") != 1 || got["ProviderNetwork/services"] == nil {
 		t.Fatalf("provider networks %d", countKind(objects, "ProviderNetwork"))
 	}
-	if nestedString(t, got["Vlan/services"], "spec", "provider") != "transit" {
+	if nestedString(t, got["Vlan/services"], "spec", "provider") != "services" {
 		t.Fatalf("vlan %v", got["Vlan/services"].Object["spec"])
 	}
 }
