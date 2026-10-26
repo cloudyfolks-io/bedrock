@@ -13,7 +13,7 @@ import (
 
 const retentionSetting = "loki.retention-days"
 
-var registryInputSettings = []string{"registry.host", "registry.storage-class", "registry.bucket", "registry.http-proxy", "registry.replicas", "database.enabled"}
+var registryInputSettings = []string{"registry.host", "registry.storage-class", "registry.bucket", "registry.http-proxy", "registry.replicas", "registry.hold", "database.enabled"}
 
 func kvmOf(host *v1alpha1.Host) *bool {
 	if host.Status.Checks == nil {

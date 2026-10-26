@@ -192,6 +192,19 @@ func TestPreloadedCoreKeysAreNeverOverwritten(t *testing.T) {
 	}
 }
 
+func TestHoldMakesEverythingAndReportsHeld(t *testing.T) {
+	server := fakeS3(t, http.StatusOK, "")
+	r, c := newReconciler(t, server.URL, append(append(platformSettings(), readyStores()...), setting("registry.hold", "true"))...)
+	reconcileOnce(t, r)
+	if !exists(c, "v1", "Secret", "harbor-admin") || !exists(c, "postgresql.cnpg.io/v1", "Cluster", "harbor-db") {
+		t.Fatal("a held registry must still make the database and the Secrets")
+	}
+	condition := runtimeCondition(t, c)
+	if condition == nil || condition.Reason != "Held" || condition.Status != metav1.ConditionFalse {
+		t.Fatalf("condition %+v", condition)
+	}
+}
+
 func TestAStorePendingUntilTheRookUserIsReady(t *testing.T) {
 	server := fakeS3(t, http.StatusOK, "")
 	c := fakeCluster(t, append(platformSettings(), readyStores()...)...)

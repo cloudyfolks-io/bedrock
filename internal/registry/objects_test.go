@@ -226,6 +226,16 @@ func TestEveryObjectIsLabelledAsManaged(t *testing.T) {
 	}
 }
 
+func TestParseConfigReadsTheHold(t *testing.T) {
+	held, err := ParseConfig(map[string]string{"registry.hold": "true"})
+	if err != nil || !held.Hold {
+		t.Fatalf("config %+v error %v", held, err)
+	}
+	if free, _ := ParseConfig(nil); free.Hold {
+		t.Fatal("the hold is on by default")
+	}
+}
+
 func TestParseConfigUsesDefaultsAndValidates(t *testing.T) {
 	config, err := ParseConfig(map[string]string{"registry.host": "r.example.com", "registry.aliases": "a.example.com,b.example.com", "platform.tls-mode": "LetsEncrypt"})
 	if err != nil {

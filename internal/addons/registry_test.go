@@ -223,8 +223,30 @@ func TestRegistryReadsEverySecretFromTheRuntimeNames(t *testing.T) {
 	}
 }
 
+func TestRegistryHoldKeepsTheDatabaseWorkloadsAtZero(t *testing.T) {
+	input := []*unstructured.Unstructured{deployment("harbor-core", 1), deployment("harbor-registry", 1), deployment("harbor-jobservice", 1)}
+	got, err := registryAdjust(input, map[string]string{"registry.replicas": "3", "registry.hold": "true"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := map[string]int64{"harbor-core": 0, "harbor-jobservice": 0, "harbor-registry": 3}
+	for _, obj := range got {
+		replicas, _, _ := unstructured.NestedInt64(obj.Object, "spec", "replicas")
+		if replicas != want[obj.GetName()] {
+			t.Errorf("%s replicas %d", obj.GetName(), replicas)
+		}
+	}
+	released, err := registryAdjust(input, map[string]string{"registry.replicas": "3", "registry.hold": "false"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if replicas, _, _ := unstructured.NestedInt64(released[0].Object, "spec", "replicas"); replicas != 3 {
+		t.Errorf("released core replicas %d", replicas)
+	}
+}
+
 func TestRegistryReadSettingsTriggerTheAddon(t *testing.T) {
-	for _, name := range []string{"registry.enabled", "registry.host", "registry.replicas", "registry.bucket", "registry.storage-class", "registry.http-proxy", "database.enabled"} {
+	for _, name := range []string{"registry.enabled", "registry.host", "registry.replicas", "registry.bucket", "registry.storage-class", "registry.http-proxy", "registry.hold", "database.enabled"} {
 		if !strings.Contains(strings.Join(readSettings(), ","), name) {
 			t.Errorf("%s does not trigger the addon", name)
 		}

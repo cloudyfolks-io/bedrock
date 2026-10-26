@@ -2,6 +2,7 @@ package addons
 
 import (
 	"fmt"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -13,6 +14,8 @@ const (
 	registryEnabledSetting = "registry.enabled"
 	registryHostSetting    = "registry.host"
 )
+
+var registryDatabaseDeployments = []string{"harbor-core", "harbor-jobservice"}
 
 var registryScaledDeployments = []string{"harbor-core", "harbor-registry", "harbor-jobservice"}
 
@@ -84,13 +87,20 @@ func registryAdjust(objects []*unstructured.Unstructured, settings map[string]st
 		}
 		copied := obj.DeepCopy()
 		if copied.GetKind() == "Deployment" && isScaled(copied.GetName()) {
-			if err := unstructured.SetNestedField(copied.Object, replicas, "spec", "replicas"); err != nil {
+			if err := unstructured.SetNestedField(copied.Object, replicasOf(copied.GetName(), replicas, settings), "spec", "replicas"); err != nil {
 				return nil, err
 			}
 		}
 		adjusted = append(adjusted, copied)
 	}
 	return adjusted, nil
+}
+
+func replicasOf(name string, replicas int64, settings map[string]string) int64 {
+	if settings["registry.hold"] == "true" && slices.Contains(registryDatabaseDeployments, name) {
+		return 0
+	}
+	return replicas
 }
 
 func isScaled(name string) bool {
