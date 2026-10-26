@@ -221,7 +221,7 @@ assert_no_image_pull_failures() {
 }
 
 assert_cluster_dns() {
-  local owners owned pod_ip api_ip
+  local owners owned pod_ip api_ip dns_ip
   test "$(kubectl -n kube-system get deployments -l k8s-app=kube-dns -o name | wc -l)" -eq 1 || return 1
   owners=$(kubectl -n kube-system get deployment coredns -o jsonpath='{.metadata.managedFields[*].manager}') || return 1
   grep -qw bedrock-release <<<"$owners" || return 1
@@ -231,27 +231,32 @@ assert_cluster_dns() {
   grep -q -- '--disable-components[= ][^ ]*coredns' /etc/systemd/system/k0scontroller.service || return 1
   test ! -e /var/lib/k0s/manifests/coredns || return 1
   test "$(kubectl -n kube-system get poddisruptionbudget coredns -o jsonpath='{.spec.maxUnavailable}')" = 1 || return 1
+  dns_ip=$(kubectl -n kube-system get service kube-dns -o jsonpath='{.spec.clusterIP}') || return 1
+  [ "$dns_ip" = "$dns_ip_a" ] || { echo "kube-dns clusterIP changed from $dns_ip_a to $dns_ip" >&2; return 1; }
   pod_ip=$(kubectl -n kube-system get pods -l k8s-app=kube-dns -o jsonpath='{.items[0].status.podIP}') || return 1
   api_ip=$(kubectl -n default get service kubernetes -o jsonpath='{.spec.clusterIP}') || return 1
-  python3 - "$pod_ip" "$api_ip" <<'PY'
+  python3 - "$api_ip" "$pod_ip" "$dns_ip" <<'PY'
 import socket, struct, sys
 
-server, expected = sys.argv[1], sys.argv[2]
+expected = sys.argv[1]
 name = b"".join(bytes([len(label)]) + label.encode() for label in "kubernetes.default.svc.cluster.local".split(".")) + b"\0"
 query = struct.pack(">HHHHHH", 0x1234, 0x0100, 1, 0, 0, 0) + name + struct.pack(">HH", 1, 1)
-sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-sock.settimeout(5)
-sock.sendto(query, (server, 53))
-reply = sock.recv(512)
-answers = struct.unpack(">H", reply[6:8])[0]
-if reply[3] & 0x0F != 0 or answers < 1 or socket.inet_ntoa(reply[-4:]) != expected:
-    sys.exit("cluster DNS did not answer kubernetes.default.svc.cluster.local with " + expected)
+for server in sys.argv[2:]:
+    sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    sock.settimeout(5)
+    sock.sendto(query, (server, 53))
+    reply = sock.recv(512)
+    answers = struct.unpack(">H", reply[6:8])[0]
+    if reply[3] & 0x0F != 0 or answers < 1 or socket.inet_ntoa(reply[-4:]) != expected:
+        sys.exit("cluster DNS at " + server + " did not answer kubernetes.default.svc.cluster.local with " + expected)
 PY
 }
 
 BUNDLE=dist/bedrock-$VERSION_A-bundle-$arch.tar.zst VERSION=$VERSION_A IMAGE=$image_a \
   BIN=dist/bedrock-$VERSION_A-linux-$arch RELEASE_DIR=dist/release-$VERSION_A ARCH=$arch bash "$init_a"
 
+dns_ip_a=$(kubectl -n kube-system get service kube-dns -o jsonpath='{.spec.clusterIP}')
+test -n "$dns_ip_a"
 node=$(hostname | tr '[:upper:]' '[:lower:]')
 test "$(kubectl get host "$node" -o jsonpath='{.spec.management.enabled}')" != "true"
 kubectl wait --for=jsonpath='{.status.conditions[?(@.type=="ManagementApplied")].reason}'=ManagementDisabled host/"$node" --timeout=180s
