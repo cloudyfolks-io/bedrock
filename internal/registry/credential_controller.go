@@ -101,7 +101,7 @@ func (r *CredentialReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 }
 
 func (r *CredentialReconciler) reconcileRobot(ctx context.Context, credential *v1alpha1.RegistryCredential) (robotFacts, result, error) {
-	var none robotFacts
+	none := statusFacts(credential)
 	var registry v1alpha1.Registry
 	err := r.Client.Get(ctx, client.ObjectKey{Namespace: credential.Namespace, Name: credential.Spec.RegistryRef.Name}, &registry)
 	if apierrors.IsNotFound(err) {
@@ -194,6 +194,11 @@ func (r *CredentialReconciler) takeOver(ctx context.Context, credential *v1alpha
 	}
 	got.robotName, got.robotID, got.username = robotNameOf(credential), robot.ID, robot.Name
 	got.secretReset = credential.Annotations[AnnotationResetSecret]
+	if r.secretIsValid(ctx, credential, robot.Name, registry.Status.Host) {
+		got.secretKept = false
+		got.secretName = SecretName(credential)
+		return got, readyRobot(credential), nil
+	}
 	return r.keepSecret(ctx, credential, registry, got)
 }
 

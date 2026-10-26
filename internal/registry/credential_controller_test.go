@@ -345,6 +345,40 @@ func TestCredentialResumesACreateThatLostItsStatus(t *testing.T) {
 	}
 }
 
+func TestCredentialRotatedAfterAdoptionSurvivesARegistryBlip(t *testing.T) {
+	state, r, c := adoptedCredential(t)
+	credential := fetchCredential(t, c, "ci")
+	credential.Annotations[AnnotationResetSecret] = "rotate"
+	if err := c.Update(context.Background(), credential); err != nil {
+		t.Fatal(err)
+	}
+	reconcileCredential(t, r, "ci")
+	password := string(dockerSecret(t, c, "ci").Data["password"])
+	var registry v1alpha1.Registry
+	if err := c.Get(context.Background(), client.ObjectKey{Namespace: tenantNamespace, Name: "images"}, &registry); err != nil {
+		t.Fatal(err)
+	}
+	ready := registry.Status.DeepCopy().Conditions
+	registry.Status.Conditions = nil
+	if err := c.Status().Update(context.Background(), &registry); err != nil {
+		t.Fatal(err)
+	}
+	reconcileCredential(t, r, "ci")
+	registry.Status.Conditions = ready
+	if err := c.Status().Update(context.Background(), &registry); err != nil {
+		t.Fatal(err)
+	}
+	reconcileCredential(t, r, "ci")
+	secret := dockerSecret(t, c, "ci")
+	got := fetchCredential(t, c, "ci")
+	if string(secret.Data["password"]) != password || secret.Type != corev1.SecretTypeDockerConfigJson || len(state.robotSets) != 1 {
+		t.Fatalf("type %s password %q want %q sets %v", secret.Type, secret.Data["password"], password, state.robotSets)
+	}
+	if got.Status.RobotID != 700 || meta.FindStatusCondition(got.Status.Conditions, "SecretKept") != nil {
+		t.Errorf("status %+v", got.Status)
+	}
+}
+
 func TestCredentialWaitsForTheRegistry(t *testing.T) {
 	state := newHarborState(t)
 	c := fakeCluster(t, addonObject("registry", true), adminSecretObject(), namespaceObject(tenantNamespace), credentialFor("ci", "pull"))
