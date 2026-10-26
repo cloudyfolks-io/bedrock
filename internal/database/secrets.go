@@ -167,8 +167,15 @@ func AdminURI(password, host string, port int32) string {
 	return ConnectionURI(v1alpha1.DatabaseEnginePostgreSQL, engine.AdminUser, password, host, port, engine.DefaultDatabase)
 }
 
+func userInfoOf(user, password string) *url.Userinfo {
+	if password == "" {
+		return url.User(user)
+	}
+	return url.UserPassword(user, password)
+}
+
 func ConnectionURI(kind, user, password, host string, port int32, database string) string {
-	address := &url.URL{User: url.UserPassword(user, password), Host: net.JoinHostPort(host, strconv.Itoa(int(port)))}
+	address := &url.URL{User: userInfoOf(user, password), Host: net.JoinHostPort(host, strconv.Itoa(int(port)))}
 	switch kind {
 	case v1alpha1.DatabaseEngineMySQL:
 		address.Scheme, address.Path = "mysql", "/"+database

@@ -80,6 +80,16 @@ spec:
                 maxLength: 64
                 pattern: ^[A-Za-z0-9:_.\-]*$
                 type: string
+              passwordSecretRef:
+                properties:
+                  name:
+                    maxLength: 253
+                    minLength: 1
+                    pattern: ^[a-z0-9]([-a-z0-9.]*[a-z0-9])?$
+                    type: string
+                required:
+                - name
+                type: object
               username:
                 pattern: ^[a-z][a-z0-9_]{1,62}$
                 type: string
@@ -160,6 +170,12 @@ spec:
               observedGeneration:
                 format: int64
                 type: integer
+              passwordDigest:
+                maxLength: 64
+                type: string
+              roleCreateIntent:
+                maxLength: 64
+                type: string
               username:
                 maxLength: 63
                 type: string

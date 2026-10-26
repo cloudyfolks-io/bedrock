@@ -37,3 +37,18 @@ func TestBucketConflict(t *testing.T) {
 		t.Fatal("an unrelated key was refused")
 	}
 }
+
+func TestRetentionConflict(t *testing.T) {
+	if err := RetentionConflict(map[string]string{}); err != nil {
+		t.Fatal(err)
+	}
+	if err := RetentionConflict(map[string]string{"database.backup.retention-days-min": "10", "database.backup.retention-days-max": "10"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := RetentionConflict(map[string]string{"database.backup.retention-days-min": "11", "database.backup.retention-days-max": "10"}); err == nil {
+		t.Fatal("a minimum above the maximum was accepted")
+	}
+	if err := Conflict("database.backup.retention-days-max", map[string]string{"database.backup.retention-days-min": "20", "database.backup.retention-days-max": "10"}); err == nil {
+		t.Fatal("Conflict ignores the retention keys")
+	}
+}

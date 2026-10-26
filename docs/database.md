@@ -65,14 +65,16 @@ A class with `highAvailability: true` makes 3 instances. Other classes make 1 in
 | `class` | The name of a `DatabaseClass`. A change must keep `highAvailability`. |
 | `storageGi` | The storage in GiB. It is between the class minimum and maximum. It can only grow. |
 | `subnetRef` | A `Subnet` of the project. The default is `default`. It cannot change. |
+| `endpoint.address` | An optional IPv4 address in the CIDR of the subnet. The proxy pod gets this address. It cannot be the gateway, the network or broadcast address, an excluded address or an address that another workload holds. It cannot change or be added after the create. Without it, the operator picks the lowest free address. |
 | `allowedCIDRs` | The networks that can connect. The default is the CIDR of the subnet. |
 | `backup.enabled` | The default is `true`. A Valkey database must set `false`. |
+| `backup.retentionDays` | Optional, 1 to 365. The days of backups and WAL that this database keeps. It must be inside `database.backup.retention-days-min` and `-max`, or the reason is `RetentionOutOfRange` and the controller changes nothing. Without it the Setting `database.backup.retention-days` applies. It needs `backup.enabled`. A lower value removes the backups that are older than the new value. |
 | `restore` | `sourceUID` and an optional `targetTime`. It cannot change after the create. |
 | `suspended` | Hibernates the engine. |
 
 The name has at most 52 characters and is a DNS label.
 
-The `status` shows `phase`, `conditions`, `addresses` (`subnet`, `ip` and `port`), `credentialsSecret`, `instances`, `backup` and `stats`.
+The `status` shows `phase`, `conditions`, `addresses` (`subnet`, `ip` and `port`), `credentialsSecret`, `instances`, `backup` (with `request`) and `stats`.
 
 | Phase | Meaning |
 |---|---|
@@ -94,7 +96,7 @@ The `status` shows `phase`, `conditions`, `addresses` (`subnet`, `ip` and `port`
 
 ### DatabaseUser
 
-`DatabaseUser` has these fields: `databaseRef`, `username` and `grants`.
+`DatabaseUser` has these fields: `databaseRef`, `username`, `grants` and `passwordSecretRef`.
 A grant has a `database` (`app` or the name of a ready `DatabaseSchema`) and a `level` (`readonly`, `readwrite` or `all`).
 The user name is `spec.username`, or the name of the object when you set no `username`.
 It must match `^[a-z][a-z0-9_]{1,62}$`.
@@ -102,6 +104,9 @@ These names are reserved: `postgres`, `dbadmin`, `streaming_replica`, `cnpg_pool
 
 The operator makes the Secret `<name>-db` with the keys `username`, `password`, `host`, `port` and `uri`.
 Set the annotation `bedrock.cloudyfolks.io/reset-password` to a new value to make a new password.
+`passwordSecretRef.name` names a Secret in the project with the key `password`. The operator sets this password and does not make one.
+The password has 16 to 128 characters: letters, digits and `!#$%&()*+,-./:;<=>?@[]^_{|}~`. A change of the Secret changes the password within one minute. The operator never logs the password and never sends it as plain text to the engine. When `passwordSecretRef` is set, the reset-password annotation has no effect. When you remove it, the user keeps the last password.
+If the role already exists in the engine (PostgreSQL, MySQL and Valkey), the reason is `NameTaken`. An administrator can set the annotation `bedrock.cloudyfolks.io/adopt` to `true`. The operator then adopts the role and sets its grants. It keeps the password of the role, unless `passwordSecretRef` is set. When it keeps the password, the key `password` of the Secret `<name>-db` is empty and the `uri` has no password. If the operator stops after it made a role and before it saved the status, the status keeps `roleCreateIntent` with the UID of the object. The next pass then knows that the operator made the role, sets the password of the Secret on it and finishes. Only the operator can write the status, so a role without this fact is never changed without the adopt annotation, whatever a project member writes to the Secret.
 When you delete the object, the operator moves the objects of the role to `dbadmin` and drops the role.
 If the role still owns objects that cannot move, the reason is `UserOwnsObjects` and the object stays.
 
@@ -115,6 +120,7 @@ The database `app` exists from the first setup and has no object.
 `deletionPolicy` is `Retain` (the default) or `Delete`.
 `Delete` drops the database when you delete the object. `Retain` removes only the object.
 The operator makes three group roles for each database: `<name>_ro`, `<name>_rw` and `<name>_all`.
+If the database already exists in the engine, the reason is `NameTaken`. An administrator can set the annotation `bedrock.cloudyfolks.io/adopt` to `true` to adopt it (PostgreSQL makes the group roles then).
 
 ## The admin account
 
@@ -152,6 +158,11 @@ A tenant cannot read this Secret.
 - `database.backup.retention-days` is the number of days of backups and WAL (1 to 365, default 7).
 - `status.backup` shows `items`, `lastAt`, `pitrFrom`, `pitrTo` and `sizeBytes`. The size is read every 10 minutes.
 
+To start one backup at once, set the annotation `bedrock.cloudyfolks.io/backup-requested` on the `Database` to an RFC 3339 time, for example the current time. Project editors and administrators can set it.
+The operator starts one backup when the time is newer than `status.backup.request.at`. The same or an older time starts nothing. The backup is a CNPG `Backup` (PostgreSQL) or a Percona backup (MySQL) in `bedrock-dbaas`.
+`status.backup.request` shows `at`, `phase` (`Pending`, `Running`, `Completed`, `Failed` or `Refused`), `backupID`, `reason` and `message`. `Pending` lasts until the engine is ready.
+The request is `Refused` with the reason `BackupNotSupported` for Valkey, `BackupsDisabled` when `backup.enabled` is `false`, `InvalidBackupRequest` when the value is not an RFC 3339 time, `BackupRequestInFuture` when the time is more than 5 minutes ahead, and `BackupInProgress` when a backup of an earlier request is not finished.
+
 To restore, set `spec.restore.sourceUID` to the UID of the source database. Add `targetTime` for a point in time.
 
 - The source does not need to be a live object. An old UID works when the prefix `<uid>/` has at least one object.
@@ -184,6 +195,8 @@ The sweeper deletes the prefix and the ConfigMap after `database.backup.retentio
 | `database.vip-range` | empty | The network of the gate addresses. Empty gives `VIPRangeMissing`. |
 | `database.backup.bucket` | `bedrock-database-backups` | The bucket of the backups. |
 | `database.backup.retention-days` | `7` | Days of backups. |
+| `database.backup.retention-days-min` | `1` | Smallest `backup.retentionDays` of a database. |
+| `database.backup.retention-days-max` | `365` | Largest `backup.retentionDays` of a database. |
 | `database.backup.retention-after-delete` | `168h` | The time that the backups of a deleted database stay. |
 | `database.upgrade.backup-max-age` | `26h` | The age limit of the backup that an upgrade needs. An older backup makes a new pre-upgrade backup. |
 
@@ -276,7 +289,7 @@ The condition `Ready` shows one of these reasons.
 | `EngineUnavailable` | The engine did not answer a command. |
 | `EngineRejected` | The engine refused a command. |
 | `Ready` | The object is as the spec says. |
-| `NameTaken` | A Secret, SecurityGroup or Service that the operator needs exists and the object does not own it. |
+| `NameTaken` | A Secret, SecurityGroup or Service that the operator needs exists and the object does not own it. A role or logical database of that name exists in the engine and the object has no adopt annotation. |
 | `UpgradeNotSupported` | The version of a running database changed. The operator keeps the old render. |
 | `ClassChangeNotSupported` | The new class has another `highAvailability`. |
 | `VersionNotAvailable` | The `DatabaseVersion` does not exist, or it is disabled for a new database. |
@@ -291,7 +304,15 @@ The condition `Ready` shows one of these reasons.
 | `BackupStorePending` | The identity of the backup store is not ready. |
 | `BackupStoreFailed` | The object store refused the backup bucket or does not answer. |
 | `ApplyFailed` | The API server refused an object. |
+| `RetentionOutOfRange` | `backup.retentionDays` is outside the Settings `database.backup.retention-days-min` and `-max`. |
+| `BackupNotSupported` | A backup was requested for a Valkey database. |
+| `InvalidBackupRequest` | The annotation `bedrock.cloudyfolks.io/backup-requested` is not an RFC 3339 time. |
+| `BackupRequestInFuture` | The time of the annotation is more than 5 minutes ahead. |
+| `BackupInProgress` | A backup of an earlier request is not finished. |
+| `PasswordSecretNotFound` | The Secret of `passwordSecretRef` does not exist in the project. |
 | `AddressUnavailable` | The subnet or the gate range has no free address. |
+| `EndpointAddressInvalid` | `spec.endpoint.address` is outside the subnet, or it is the gateway, the network or broadcast address, or an excluded address. |
+| `EndpointAddressTaken` | Another database, VM or container holds `spec.endpoint.address`. |
 | `Provisioning` | The database is new and not ready yet. |
 | `Restoring` | A restore is not ready yet. |
 | `Suspended` | `spec.suspended` is `true`. |

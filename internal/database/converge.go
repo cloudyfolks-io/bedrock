@@ -97,7 +97,7 @@ func (r *Reconciler) prepare(ctx context.Context, in *flow) (*Refusal, error) {
 	} else if refused := checkExisting(catalog, db, cluster); refused != nil {
 		return refused, nil
 	}
-	steps := []func(context.Context, *flow) (*Refusal, error){r.preparePlatform, r.prepareCapacity, r.prepareSubnet, r.preparePods, r.prepareVIPRange, r.prepareBackupStore, r.prepareRestore, r.prepareOperations}
+	steps := []func(context.Context, *flow) (*Refusal, error){r.preparePlatform, r.prepareCapacity, r.prepareSubnet, r.prepareEndpointAddress, r.preparePods, r.prepareVIPRange, r.prepareRetention, r.prepareBackupStore, r.prepareRestore, r.prepareOperations}
 	for _, step := range steps {
 		if refused, err := step(ctx, in); err != nil || refused != nil {
 			return refused, err
@@ -149,6 +149,16 @@ func (r *Reconciler) prepareSubnet(ctx context.Context, in *flow) (*Refusal, err
 	return refused, err
 }
 
+func (r *Reconciler) prepareEndpointAddress(_ context.Context, in *flow) (*Refusal, error) {
+	if _, recorded := AddressOf(*in.db, in.subnet.Name); recorded {
+		return nil, nil
+	}
+	if problem := PinnedAddressProblem(*in.db, in.subnet); problem != "" {
+		return refusal(ReasonEndpointAddressInvalid, "%s", problem), nil
+	}
+	return nil, nil
+}
+
 func (r *Reconciler) preparePods(ctx context.Context, in *flow) (*Refusal, error) {
 	pods, refused, err := resolvePods(ctx, r.Client, r.Images, in.subnet)
 	in.pods = pods
@@ -167,6 +177,10 @@ func (r *Reconciler) prepareVIPRange(ctx context.Context, in *flow) (*Refusal, e
 		return nil, err
 	}
 	return refusal(ReasonVIPRangeMissing, "the Setting database.vip-range is empty"), nil
+}
+
+func (r *Reconciler) prepareRetention(_ context.Context, in *flow) (*Refusal, error) {
+	return RetentionRefusal(in.cfg, in.db.Spec.Backup), nil
 }
 
 func (r *Reconciler) prepareBackupStore(ctx context.Context, in *flow) (*Refusal, error) {
@@ -293,7 +307,7 @@ func (r *Reconciler) specOf(in *flow) engine.Spec {
 		StorageClass: StorageClass,
 		Labels:       labels,
 		PodLabels:    podLabels,
-		Backup:       BackupSpecOf(in.cfg, r.Store, db.Spec.Backup.Enabled),
+		Backup:       BackupSpecOf(in.cfg, r.Store, db.Spec.Backup),
 		Restore:      restoreOf(db, in.dest),
 		Images:       in.catalog.Version.Spec.Companions,
 		Suspended:    db.Spec.Suspended,
@@ -387,6 +401,8 @@ func (r *Reconciler) applyProxy(ctx context.Context, in *flow, vip string) (*Ref
 	switch {
 	case errors.Is(err, network.ErrNoFreeAddress):
 		return refusal(ReasonAddressUnavailable, "the subnet %s has no free address", in.subnet.Name), nil
+	case errors.Is(err, ErrEndpointAddressTaken):
+		return refusal(ReasonEndpointAddressTaken, "the endpoint address %s is in use in the subnet %s", PinnedAddress(*in.db), in.subnet.Name), nil
 	case err != nil:
 		return nil, fmt.Errorf("allocate the proxy address: %w", err)
 	}
@@ -499,7 +515,7 @@ func (r *Reconciler) observe(ctx context.Context, in *flow, refused *Refusal) (O
 		r.settleEngine(ctx, in, &observed)
 		r.recordApplied(in, primary, &observed)
 	}
-	observed.Backup = r.observeBackup(ctx, in)
+	observed.Backup = r.observeBackup(ctx, in, observed.EngineReady && refused == nil)
 	return observed, nil
 }
 
@@ -550,14 +566,18 @@ func engineStepReason(err error) string {
 	return "a setup step failed"
 }
 
-func (r *Reconciler) observeBackup(ctx context.Context, in *flow) *v1alpha1.DatabaseBackupStatus {
+func (r *Reconciler) observeBackup(ctx context.Context, in *flow, ready bool) *v1alpha1.DatabaseBackupStatus {
 	db := *in.db
-	if !db.Spec.Backup.Enabled {
-		return nil
-	}
 	backups, err := ListBackups(ctx, r.Live, db)
 	if err != nil {
 		return db.Status.Backup
+	}
+	request := r.startRequestedBackup(ctx, in, PlanBackupRequest(db, backups, ready, r.now()))
+	if !db.Spec.Backup.Enabled {
+		if request == nil {
+			return nil
+		}
+		return &v1alpha1.DatabaseBackupStatus{Request: request}
 	}
 	size, sampledAt := int64(0), (*metav1.Time)(nil)
 	if db.Status.Backup != nil {
@@ -566,7 +586,26 @@ func (r *Reconciler) observeBackup(ctx context.Context, in *flow) *v1alpha1.Data
 	if sampled, at, err := SampleBackupSize(ctx, r.Live, r.Store, in.cfg, db, r.now()); err == nil {
 		size, sampledAt = sampled, at
 	}
-	return BackupStatusOf(backups, r.now(), size, sampledAt)
+	status := BackupStatusOf(backups, r.now(), size, sampledAt)
+	status.Request = request
+	return status
+}
+
+func (r *Reconciler) startRequestedBackup(ctx context.Context, in *flow, plan BackupRequestPlan) *v1alpha1.DatabaseBackupRequest {
+	if plan.Create == "" {
+		return plan.Status
+	}
+	backup, err := PreUpgradeBackup(in.db.Spec.Engine, r.specOf(in), plan.Create)
+	if err != nil {
+		return plan.Status
+	}
+	backup.SetAnnotations(map[string]string{annotationBackupRequestedAt: plan.Status.At.UTC().Format(time.RFC3339)})
+	if err := client.IgnoreAlreadyExists(r.Client.Create(ctx, backup, client.FieldOwner(v1alpha1.DatabaseFieldManager))); err != nil {
+		return plan.Status
+	}
+	started := *plan.Status
+	started.Phase = v1alpha1.DatabaseBackupRequestRunning
+	return &started
 }
 
 func statsDue(db v1alpha1.Database, now time.Time) bool {

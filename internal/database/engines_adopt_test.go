@@ -19,8 +19,11 @@ func TestExistingMySQLAndValkeyAccountsAreAdopted(t *testing.T) {
 		exists         error
 		edit           func(*v1alpha1.DatabaseUser)
 	}{
-		{v1alpha1.DatabaseEngineMySQL, "ALTER USER 'carol'", engine.ErrExists, nil},
-		{v1alpha1.DatabaseEngineValkey, "ACL SETUSER carol", nil, func(user *v1alpha1.DatabaseUser) { user.Spec.KeyPrefix = "p:" }},
+		{v1alpha1.DatabaseEngineMySQL, "GRANT SELECT", engine.ErrExists, func(user *v1alpha1.DatabaseUser) { user.Annotations = adoptAnnotation() }},
+		{v1alpha1.DatabaseEngineValkey, "ACL SETUSER carol", nil, func(user *v1alpha1.DatabaseUser) {
+			user.Spec.KeyPrefix = "p:"
+			user.Annotations = adoptAnnotation()
+		}},
 	}
 	for _, tc := range cases {
 		fake := &fakeEngine{handle: func(script string) (string, error) {
@@ -51,7 +54,7 @@ func TestAnExistingMySQLDatabaseIsAdoptedBySchema(t *testing.T) {
 		return "", nil
 	}}
 	db := readyEngineDatabase(t, c, v1alpha1.DatabaseEngineMySQL)
-	schema := &v1alpha1.DatabaseSchema{ObjectMeta: metav1.ObjectMeta{Name: "reports", Namespace: db.Namespace}, Spec: v1alpha1.DatabaseSchemaSpec{DatabaseRef: db.Name}}
+	schema := &v1alpha1.DatabaseSchema{ObjectMeta: metav1.ObjectMeta{Name: "reports", Namespace: db.Namespace, Annotations: adoptAnnotation()}, Spec: v1alpha1.DatabaseSchemaSpec{DatabaseRef: db.Name}}
 	create(t, c, schema)
 	_, err := (&SchemaReconciler{Client: c, Engine: fake.factoryOf(v1alpha1.DatabaseEngineMySQL)}).Reconcile(context.Background(), requestOf(schema))
 	must(t, err)

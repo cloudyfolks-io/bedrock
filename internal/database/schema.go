@@ -96,6 +96,9 @@ func (r *SchemaReconciler) converge(ctx context.Context, schema *v1alpha1.Databa
 		return accessOutcome{}, err
 	}
 	err = createDatabase(ctx, engineAccess, SchemaNameOf(*schema))
+	if engine.IsExists(err) && !adopting(schema) {
+		return accessOutcome{reason: ReasonNameTaken, message: "the database " + SchemaNameOf(*schema) + " exists in the engine; an administrator can set the annotation " + v1alpha1.AnnotationAdopt + " to adopt it", requeue: accessBackoff}, nil
+	}
 	if engine.IsExists(err) {
 		err = r.adoptSchema(ctx, engineAccess, SchemaNameOf(*schema))
 	}

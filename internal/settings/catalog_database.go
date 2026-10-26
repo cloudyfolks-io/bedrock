@@ -23,6 +23,8 @@ func databaseDefinitions() []Definition {
 		{"database.provision-timeout", "30m", "Time after which a Database that is not ready becomes Failed.", duration(time.Minute)},
 		{"database.backup.bucket", "bedrock-database-backups", "Bucket of the object store that holds the backups of all databases, one prefix for each database.", bucketNameValue},
 		{"database.backup.retention-days", "7", "Days of backups and WAL archive that a database keeps, from 1 to 365.", intBetween(1, 365)},
+		{"database.backup.retention-days-min", "1", "Smallest value that a Database may set in backup.retentionDays, from 1 to 365.", intBetween(1, 365)},
+		{"database.backup.retention-days-max", "365", "Largest value that a Database may set in backup.retentionDays, from 1 to 365.", intBetween(1, 365)},
 		{"database.backup.retention-after-delete", "168h", "Time that the backups of a deleted database stay in the bucket before the sweeper removes them.", duration(0)},
 		{"database.vip-range", "", "IPv4 CIDR in the services plane that holds the addresses of the database gates, for example 100.66.16.0/21. Empty refuses every create with the reason VIPRangeMissing.", ipv4CIDRValue},
 		{"database.exec-timeout", "120s", "Time limit of one SQL script that the operator runs in an engine pod.", wholeSecondsBetween(5*time.Second, 10*time.Minute)},

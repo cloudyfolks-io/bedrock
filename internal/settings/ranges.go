@@ -4,9 +4,12 @@ import (
 	"fmt"
 	"net/netip"
 	"slices"
+	"strconv"
 )
 
 var bucketKeys = []string{"registry.bucket", "database.backup.bucket"}
+
+var retentionKeys = []string{"database.backup.retention-days-min", "database.backup.retention-days-max"}
 
 var addressRangeKeys = []string{"database.vip-range", "network.services.identity-range", "network.load-balancer.cidr"}
 
@@ -16,6 +19,8 @@ func Conflict(key string, values map[string]string) error {
 		return RangeConflict(values)
 	case slices.Contains(bucketKeys, key):
 		return BucketConflict(values)
+	case slices.Contains(retentionKeys, key):
+		return RetentionConflict(values)
 	}
 	return nil
 }
@@ -51,6 +56,22 @@ func RangeConflict(values map[string]string) error {
 				return fmt.Errorf("the ranges %s %s and %s %s overlap", addressRangeKeys[i], prefixes[i], addressRangeKeys[j], prefixes[j])
 			}
 		}
+	}
+	return nil
+}
+
+func RetentionConflict(values map[string]string) error {
+	bounds := make([]int, len(retentionKeys))
+	for i, key := range retentionKeys {
+		value := values[key]
+		if value == "" {
+			def, _ := Lookup(key)
+			value = def.Default
+		}
+		bounds[i], _ = strconv.Atoi(value)
+	}
+	if bounds[0] > bounds[1] {
+		return fmt.Errorf("%s must not be above %s, they are %d and %d", retentionKeys[0], retentionKeys[1], bounds[0], bounds[1])
 	}
 	return nil
 }

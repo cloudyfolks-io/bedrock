@@ -163,3 +163,69 @@ func TestDatabaseStorageDoesNotShrink(t *testing.T) {
 		t.Fatalf("growth must pass: %v", err)
 	}
 }
+
+func TestDatabaseEndpointAddressFormat(t *testing.T) {
+	c, _ := StartTestEnv(t)
+
+	for name, address := range map[string]string{"not-ip": "database", "ipv6": "fd00::5", "range": "10.0.0.256", "cidr": "10.0.0.5/24"} {
+		db := newDatabase("pin-"+name, "postgresql")
+		db.Spec.Endpoint = &v1alpha1.DatabaseEndpointSpec{Address: address}
+		createInvalid(t, c, db, "endpoint.address")
+	}
+	pinned := newDatabase("pin-ok", "postgresql")
+	pinned.Spec.Endpoint = &v1alpha1.DatabaseEndpointSpec{Address: "10.0.0.5"}
+	createValid(t, c, pinned)
+	reload(t, c, pinned)
+	if pinned.Spec.Endpoint == nil || pinned.Spec.Endpoint.Address != "10.0.0.5" {
+		t.Fatalf("endpoint %+v", pinned.Spec.Endpoint)
+	}
+}
+
+func TestDatabaseEndpointAddressIsImmutable(t *testing.T) {
+	c, _ := StartTestEnv(t)
+
+	pinned := newDatabase("pin-fixed", "postgresql")
+	pinned.Spec.Endpoint = &v1alpha1.DatabaseEndpointSpec{Address: "10.0.0.5"}
+	createValid(t, c, pinned)
+
+	moved := pinned.DeepCopy()
+	moved.Spec.Endpoint.Address = "10.0.0.6"
+	updateInvalid(t, c, moved, "endpoint.address is immutable")
+	removed := pinned.DeepCopy()
+	removed.Spec.Endpoint = nil
+	updateInvalid(t, c, removed, "endpoint is immutable")
+
+	plain := newDatabase("pin-late", "postgresql")
+	createValid(t, c, plain)
+	late := plain.DeepCopy()
+	late.Spec.Endpoint = &v1alpha1.DatabaseEndpointSpec{Address: "10.0.0.7"}
+	updateInvalid(t, c, late, "endpoint is immutable")
+}
+
+func TestDatabaseBackupRetentionDays(t *testing.T) {
+	c, _ := StartTestEnv(t)
+	thirty, zero, over := int32(30), int32(0), int32(366)
+
+	kept := newDatabase("retained", "postgresql")
+	kept.Spec.Backup.RetentionDays = &thirty
+	createValid(t, c, kept)
+	reload(t, c, kept)
+	if kept.Spec.Backup.RetentionDays == nil || *kept.Spec.Backup.RetentionDays != 30 {
+		t.Fatalf("backup %+v", kept.Spec.Backup)
+	}
+	for name, value := range map[string]*int32{"zero": &zero, "over": &over} {
+		bad := newDatabase("retention-"+name, "postgresql")
+		bad.Spec.Backup.RetentionDays = value
+		createInvalid(t, c, bad, "retentionDays")
+	}
+	off := newDatabase("retention-off", "mysql")
+	off.Spec.Backup.Enabled = false
+	off.Spec.Backup.RetentionDays = &thirty
+	createInvalid(t, c, off, "retentionDays needs backup.enabled")
+	retained := kept.DeepCopy()
+	sixty := int32(60)
+	retained.Spec.Backup.RetentionDays = &sixty
+	if err := c.Update(context.Background(), retained); err != nil {
+		t.Fatalf("the retention stays mutable: %v", err)
+	}
+}

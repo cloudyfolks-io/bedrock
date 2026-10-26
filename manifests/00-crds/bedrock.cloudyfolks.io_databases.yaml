@@ -70,14 +70,35 @@ spec:
                   enabled:
                     default: true
                     type: boolean
+                  retentionDays:
+                    format: int32
+                    maximum: 365
+                    minimum: 1
+                    type: integer
                 required:
                 - enabled
                 type: object
+                x-kubernetes-validations:
+                - message: retentionDays needs backup.enabled to be true
+                  rule: '!has(self.retentionDays) || self.enabled'
               class:
                 maxLength: 63
                 minLength: 1
                 pattern: ^[a-z0-9]([-a-z0-9]*[a-z0-9])?$
                 type: string
+              endpoint:
+                properties:
+                  address:
+                    maxLength: 15
+                    type: string
+                    x-kubernetes-validations:
+                    - message: endpoint.address must be an IPv4 address
+                      rule: isIP(self) && ip(self).family() == 4
+                    - message: endpoint.address is immutable
+                      rule: self == oldSelf
+                required:
+                - address
+                type: object
               engine:
                 enum:
                 - postgresql
@@ -141,6 +162,8 @@ spec:
               rule: self.engine != 'valkey' || !has(self.restore)
             - message: restore is immutable
               rule: has(self.restore) == has(oldSelf.restore)
+            - message: endpoint is immutable
+              rule: has(self.endpoint) == has(oldSelf.endpoint)
           status:
             properties:
               addresses:
@@ -224,6 +247,31 @@ spec:
                   pitrTo:
                     format: date-time
                     type: string
+                  request:
+                    properties:
+                      at:
+                        format: date-time
+                        type: string
+                      backupID:
+                        maxLength: 253
+                        type: string
+                      message:
+                        maxLength: 512
+                        type: string
+                      phase:
+                        enum:
+                        - Pending
+                        - Running
+                        - Completed
+                        - Failed
+                        - Refused
+                        type: string
+                      reason:
+                        maxLength: 63
+                        type: string
+                    required:
+                    - phase
+                    type: object
                   sizeBytes:
                     format: int64
                     minimum: 0
