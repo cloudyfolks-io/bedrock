@@ -44,8 +44,9 @@ func planCephx(in AddonInput, adoptCephx map[string]any) cephxPlan {
 	if cipher != cephx.Aes256k {
 		return withAdoptedCephx(aesPlan(), adoptCephx)
 	}
+	_, adoptRestricts := adoptCephx["allowedCiphers"]
 	blocking := cephxKernelProblems(cipher, hostsWithKernel(in.Hosts))
-	if len(blocking) > 0 && !in.CephxLive.Aes256kKeys {
+	if len(blocking) > 0 && !in.CephxLive.Aes256kKeys && !adoptRestricts {
 		plan := aesPlan()
 		plan.Conditions = []metav1.Condition{restrictedCondition(metav1.ConditionFalse, "KernelTooOld", strings.Join(blocking, "; "))}
 		return withAdoptedCephx(plan, adoptCephx)

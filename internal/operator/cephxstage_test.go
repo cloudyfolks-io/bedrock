@@ -172,3 +172,60 @@ func TestAuthDumpKeysMustHoldNoAesKey(t *testing.T) {
 		t.Fatal("output that proves nothing must fail")
 	}
 }
+
+const liveCephxOfIrCentral1 = `{"allowedCiphers":["aes256k"],"daemon":{"keyRotationPolicy":"KeyGeneration","keyGeneration":2},"csi":{"keyRotationPolicy":"KeyGeneration","keyGeneration":3,"keepPriorKeyCountMax":1,"keyType":"aes256k"},"rbdMirrorPeer":{"keyRotationPolicy":"KeyGeneration","keyGeneration":2,"keyType":"aes256k"}}`
+
+func adoptedLiveInput() AddonInput {
+	in := withCipher(adoptInput(v1alpha1.ReasonAdopted), "aes256k")
+	in.Cluster.Spec.Storage.Adopt.Cephx = &runtime.RawExtension{Raw: []byte(liveCephxOfIrCentral1)}
+	return in
+}
+
+func TestRenderStorageAdoptedLiveCephxRendersTheSecurityAndHealthBlocksExactly(t *testing.T) {
+	out, err := RenderStorage(adoptedLiveInput())
+	if err != nil {
+		t.Fatal(err)
+	}
+	spec := findObject(out.Objects, "CephCluster", "rook-ceph").Object["spec"].(map[string]any)
+	wantSecurity := map[string]any{"cephx": map[string]any{
+		"allowedCiphers": []any{"aes256k"},
+		"daemon":         map[string]any{"keyRotationPolicy": "KeyGeneration", "keyGeneration": int64(2)},
+		"csi":            map[string]any{"keyRotationPolicy": "KeyGeneration", "keyGeneration": int64(3), "keepPriorKeyCountMax": int64(1), "keyType": "aes256k"},
+		"rbdMirrorPeer":  map[string]any{"keyRotationPolicy": "KeyGeneration", "keyGeneration": int64(2), "keyType": "aes256k"},
+	}}
+	if !reflect.DeepEqual(spec["security"], wantSecurity) {
+		t.Fatalf("security %+v", spec["security"])
+	}
+	wantHealth := map[string]any{"muteHealthWarning": map[string]any{
+		"AUTH_EMERGENCY_CIPHERS_SET":    map[string]any{"policy": "unmute"},
+		"AUTH_INSECURE_CLIENT_KEY_TYPE": map[string]any{"policy": "unmute"},
+		"AUTH_INSECURE_KEYS_ALLOWED":    map[string]any{"policy": "unmute"},
+		"AUTH_INSECURE_KEYS_CREATABLE":  map[string]any{"policy": "unmute"},
+		"POOL_NO_REDUNDANCY":            map[string]any{"policy": "unmute"},
+		"TOO_FEW_OSDS":                  map[string]any{"policy": "unmute"},
+	}}
+	if !reflect.DeepEqual(spec["healthCheck"], wantHealth) {
+		t.Fatalf("healthCheck %+v", spec["healthCheck"])
+	}
+}
+
+func TestRenderStorageAdoptedRestrictedClusterIgnoresTheKernelGate(t *testing.T) {
+	in := adoptedLiveInput()
+	old := osdHost("old", "/dev/sdc")
+	old.Status.Inventory.Firmware.Kernel = "6.8.0-45-generic"
+	in.Hosts = append(in.Hosts, old)
+	cephx, out := renderedCephx(t, in)
+	if !reflect.DeepEqual(cephx["allowedCiphers"], []any{"aes256k"}) || cephx["csi"].(map[string]any)["keyType"] != "aes256k" {
+		t.Fatalf("cephx %+v", cephx)
+	}
+	for _, condition := range out.Conditions {
+		if condition.Reason == "KernelTooOld" {
+			t.Fatalf("conditions %+v", out.Conditions)
+		}
+	}
+	for check, policy := range authPolicies(t, in) {
+		if strings.HasPrefix(check, "AUTH_") && policy != "unmute" {
+			t.Errorf("%s is %s", check, policy)
+		}
+	}
+}
