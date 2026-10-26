@@ -4,11 +4,13 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 
 	"github.com/cloudyfolks-io/bedrock/api/v1alpha1"
 )
@@ -90,8 +92,14 @@ func TestPruneRefusesToRemoveTheManifestsWhileK0sObjectsKeepTheStackLabel(t *tes
 	env := pruneEnvWithStaleDir(t)
 	markTakeoverDone(t)
 	labeledDeployment(t, "coredns")
-	if _, err := prune(context.Background(), env); err == nil {
+	_, err := prune(context.Background(), env)
+	if err == nil {
 		t.Fatal("removing the dir while the label is on an object would make k0s delete the object")
+	}
+	for _, part := range []string{"Deployment kube-system/coredns", "kubectl -n kube-system label deployment coredns k0s.k0sproject.io/stack-", "Prune"} {
+		if !strings.Contains(err.Error(), part) {
+			t.Fatalf("the message must name the repair, missing %q: %v", part, err)
+		}
 	}
 	if _, err := os.Stat(staleCoreDNSDir(env.Deps.Root)); err != nil {
 		t.Fatalf("the dir must stay: %v", err)
@@ -115,5 +123,13 @@ func TestPruneWithoutTheStaleDirNeedsNoCluster(t *testing.T) {
 	env.Client = k8sClient
 	if _, err := prune(context.Background(), env); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestRepairCommandOfAClusterScopedObject(t *testing.T) {
+	object := &unstructured.Unstructured{Object: map[string]any{"metadata": map[string]any{"name": "system-coredns"}}}
+	object.SetKind("ClusterRole")
+	if got := labelRepairCommand(object); got != "kubectl label clusterrole system-coredns k0s.k0sproject.io/stack-" {
+		t.Fatalf("command %q", got)
 	}
 }

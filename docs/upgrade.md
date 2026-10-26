@@ -33,3 +33,21 @@ To let k0s manage CoreDNS again, do these steps on each control plane node:
 2. Run `systemctl daemon-reload` and `systemctl restart k0scontroller`.
 
 k0s then writes its own CoreDNS objects over the existing ones. Do this only on a cluster that runs the old release.
+
+## The Prune step finds the k0s stack label again
+
+The `Prune` step keeps the old k0s manifest directory `/var/lib/k0s/manifests/coredns` while an object of the old k0s stack has the label `k0s.k0sproject.io/stack=coredns`.
+k0s puts the label back when a new leader applies a stack file that differs from the live objects.
+With the directory removed, k0s would delete every labelled object, and cluster DNS would stop.
+The step then fails and its message names the object and the command to repair it, for example:
+
+```
+kubectl -n kube-system label deployment coredns k0s.k0sproject.io/stack-
+```
+
+Find every labelled object, remove the label from each one, and run the `Prune` step again:
+
+```
+kubectl get deployments,services,configmaps,serviceaccounts,poddisruptionbudgets -n kube-system -l k0s.k0sproject.io/stack=coredns
+kubectl get clusterroles,clusterrolebindings -l k0s.k0sproject.io/stack=coredns
+```

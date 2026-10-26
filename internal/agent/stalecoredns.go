@@ -7,6 +7,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
@@ -61,8 +62,16 @@ func requireNoK0sCoreDNSObjects(ctx context.Context, c client.Client) error {
 		}
 		if len(list.Items) > 0 {
 			item := list.Items[0]
-			return fmt.Errorf("k0s still owns %s %s/%s: removing its CoreDNS manifests would make k0s delete it", gvk.Kind, item.GetNamespace(), item.GetName())
+			return fmt.Errorf("k0s owns %s %s/%s again, and removing its CoreDNS manifests would make k0s delete it. Repair by hand: run `%s` for every object with the label, then run the Prune step again", gvk.Kind, item.GetNamespace(), item.GetName(), labelRepairCommand(&item))
 		}
 	}
 	return nil
+}
+
+func labelRepairCommand(object *unstructured.Unstructured) string {
+	target := strings.ToLower(object.GetKind()) + " " + object.GetName()
+	if object.GetNamespace() != "" {
+		return "kubectl -n " + object.GetNamespace() + " label " + target + " " + k0sStackLabel + "-"
+	}
+	return "kubectl label " + target + " " + k0sStackLabel + "-"
 }
