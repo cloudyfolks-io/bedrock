@@ -159,7 +159,7 @@ func servicesACLs(cfg Config, pn v1alpha1.ProviderNetworkSpec) ([]fabric.ACL, er
 		vips = netip.PrefixFrom(pool.Addr(), servicesVIPPrefixBits)
 	}
 	exempt := []string{vips.String()}
-	for _, candidate := range []string{cfg.DatabaseVIPRange, cfg.Services.IdentityRange} {
+	for _, candidate := range []string{cfg.DatabaseVIPRange} {
 		if candidate != "" && insidePool(candidate, pn) {
 			exempt = append(exempt, candidate)
 		}

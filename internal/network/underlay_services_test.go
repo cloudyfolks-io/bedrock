@@ -18,7 +18,7 @@ func servicesSubnetOf(t *testing.T, values map[string]string) *unstructured.Unst
 
 func requireDropACL(t *testing.T, subnet *unstructured.Unstructured) {
 	t.Helper()
-	requireACLMatch(t, subnet, "ip4.src == 100.66.0.0/15 && ip4.src != 100.66.0.0/24 && ip4.src != 100.67.0.0/16 && ip4.dst == 100.66.0.0/15 && ip4.dst != 100.66.0.0/24 && ip4.dst != 100.67.0.0/16")
+	requireACLMatch(t, subnet, "ip4.src == 100.66.0.0/15 && ip4.src != 100.66.0.0/24 && ip4.dst == 100.66.0.0/15 && ip4.dst != 100.66.0.0/24")
 }
 
 func requireACLMatch(t *testing.T, subnet *unstructured.Unstructured, want string) {

@@ -17,19 +17,23 @@ func servicesACLMatch(t *testing.T, values map[string]string) string {
 	return match
 }
 
-func TestServicesACLExemptsTheDatabaseVIPRangeAndTheIdentityRange(t *testing.T) {
+func TestServicesACLExemptsTheDatabaseVIPRangeOnly(t *testing.T) {
 	values := servicesValues(servicesL2Pools, map[string]string{"database.vip-range": "100.66.16.0/21"})
-	want := "ip4.src == 100.66.0.0/15 && ip4.src != 100.66.0.0/24 && ip4.src != 100.66.16.0/21 && ip4.src != 100.67.0.0/16 && " +
-		"ip4.dst == 100.66.0.0/15 && ip4.dst != 100.66.0.0/24 && ip4.dst != 100.66.16.0/21 && ip4.dst != 100.67.0.0/16"
+	want := "ip4.src == 100.66.0.0/15 && ip4.src != 100.66.0.0/24 && ip4.src != 100.66.16.0/21 && " +
+		"ip4.dst == 100.66.0.0/15 && ip4.dst != 100.66.0.0/24 && ip4.dst != 100.66.16.0/21"
 	if got := servicesACLMatch(t, values); got != want {
 		t.Fatalf("match %s", got)
 	}
 }
 
-func TestServicesACLWithoutADatabaseRangeExemptsOnlyTheFirstNetworkAndTheIdentityRange(t *testing.T) {
-	got := servicesACLMatch(t, servicesValues(servicesL2Pools, nil))
-	if strings.Contains(got, "100.66.16.0") || !strings.Contains(got, "ip4.dst != 100.67.0.0/16") {
-		t.Fatalf("match %s", got)
+func TestServicesACLKeepsIdentityToIdentityDropped(t *testing.T) {
+	values := servicesValues(servicesL2Pools, map[string]string{"database.vip-range": "100.66.16.0/21"})
+	match := servicesACLMatch(t, values)
+	if strings.Contains(match, "100.67.") {
+		t.Fatalf("the identity range must not be exempt: %s", match)
+	}
+	if !strings.Contains(match, "ip4.dst != 100.66.16.0/21") {
+		t.Fatalf("identity to the database VIP must pass: %s", match)
 	}
 }
 
