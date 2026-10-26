@@ -266,6 +266,25 @@ The addon never changes the owner.
 Bedrock makes the Secret `harbor-admin` only if it does not exist.
 An administrator who moves an older Harbor database writes this Secret with the old admin password before the addon starts.
 Then Bedrock uses that password.
+The Secret `harbor-core-keys` in the same namespace holds the keys that encrypt fields of the Harbor database.
+Bedrock makes it only if it does not exist and never changes it.
+An administrator who moves an older Harbor database writes it before the addon starts, with the keys `secretKey`, `secret` and `CSRF_KEY`.
+`secretKey` must have 16 characters and must be the old Harbor `secretKey`.
+Without the old `secretKey`, Harbor cannot read the encrypted fields of the database.
+The addon makes no Secret and no database before `registry.host` is set.
+
+To move an older Harbor database, use this order.
+
+1. Write the Secrets `harbor-admin` and `harbor-core-keys` in the namespace `bedrock-registry` with the old values.
+2. Set the Setting `registry.hold` to `true`, then set `registry.host`.
+3. Wait until the Cluster `harbor-db` is ready. The condition `RuntimeReady` of the addon shows the reason `Held`.
+4. Restore the older database into `harbor-db` with `pg_restore`.
+5. Link the image bucket to the user `bedrock-registry` with `radosgw-admin bucket link`.
+6. Set `registry.hold` to `false`. Bedrock then starts `harbor-core`, `harbor-jobservice` and `harbor-exporter`.
+
+While `registry.hold` is `true`, Bedrock makes every object, but `harbor-core`, `harbor-jobservice` and `harbor-exporter` stay at zero replicas.
+Harbor runs its database migration in `harbor-core`, and the exporter reads the database too, so nothing touches the database before step 6.
+
 Harbor projects and robots come back with the database.
 Adopt them with the annotation `bedrock.cloudyfolks.io/adopt: "true"`.
 Adoption keeps the retention policy of a project when the Registry has no `retention`.

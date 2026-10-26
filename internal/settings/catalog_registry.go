@@ -43,6 +43,7 @@ func registryDefinitions() []Definition {
 		{"registry.admin-host", "", "DNS name of the Harbor portal. Empty keeps the portal off the public routes.", domainName},
 		{"registry.admin-allow-cidrs", "", "Comma list of IPv4 networks that may open the portal on registry.admin-host.", cidrListValue},
 		{"registry.replicas", "2", "Replicas of the Harbor core, registry and jobservice, from 1 to 5.", intBetween(minRegistryReplicas, maxRegistryReplicas)},
+		{"registry.hold", "false", "While true, the addon makes the database and the Secrets but keeps harbor-core and harbor-jobservice at zero replicas, so an administrator can restore an older database first. Set false to start them.", boolean},
 		{"registry.db-instances", "2", "Instances of the Harbor database, from 1 to 3.", intBetween(minRegistryDBReplicas, maxRegistryDBReplicas)},
 		{"registry.storage-class", "block", "StorageClass of the Harbor database and the Harbor Redis volume.", storageClassName},
 		{"registry.bucket", "bedrock-registry", "Name of the bucket that holds the image blobs.", bucketNameValue},

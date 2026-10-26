@@ -641,6 +641,24 @@ func TestKubeVIPDataEnablesServicesMode(t *testing.T) {
 	}
 }
 
+func TestKubeVIPDataLeavesForeignLoadBalancerClassesAlone(t *testing.T) {
+	for key := range kubeVIPData("10.0.0.250", "eth0") {
+		if strings.HasPrefix(key, "lb_class") {
+			t.Fatalf("key %q changes how kube-vip filters Services by load balancer class", key)
+		}
+	}
+}
+
+func TestKubeVIPManifestSetsNoLoadBalancerClassEnvironment(t *testing.T) {
+	manifest, err := os.ReadFile("../../manifests/10-kube-vip/kube-vip.yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(strings.ToLower(string(manifest)), "lb_class") {
+		t.Fatal("the kube-vip manifest sets a load balancer class option")
+	}
+}
+
 type initRun struct {
 	c    client.Client
 	root string

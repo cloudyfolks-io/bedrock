@@ -2,6 +2,7 @@ package addons
 
 import (
 	"fmt"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -13,6 +14,8 @@ const (
 	registryEnabledSetting = "registry.enabled"
 	registryHostSetting    = "registry.host"
 )
+
+var registryDatabaseDeployments = []string{"harbor-core", "harbor-jobservice", "harbor-exporter"}
 
 var registryScaledDeployments = []string{"harbor-core", "harbor-registry", "harbor-jobservice"}
 
@@ -83,14 +86,25 @@ func registryAdjust(objects []*unstructured.Unstructured, settings map[string]st
 			continue
 		}
 		copied := obj.DeepCopy()
-		if copied.GetKind() == "Deployment" && isScaled(copied.GetName()) {
-			if err := unstructured.SetNestedField(copied.Object, replicas, "spec", "replicas"); err != nil {
+		if copied.GetKind() == "Deployment" {
+			if err := setReplicas(copied, replicas, settings); err != nil {
 				return nil, err
 			}
 		}
 		adjusted = append(adjusted, copied)
 	}
 	return adjusted, nil
+}
+
+func setReplicas(deployment *unstructured.Unstructured, replicas int64, settings map[string]string) error {
+	name := deployment.GetName()
+	switch {
+	case settings["registry.hold"] == "true" && slices.Contains(registryDatabaseDeployments, name):
+		return unstructured.SetNestedField(deployment.Object, int64(0), "spec", "replicas")
+	case isScaled(name):
+		return unstructured.SetNestedField(deployment.Object, replicas, "spec", "replicas")
+	}
+	return nil
 }
 
 func isScaled(name string) bool {

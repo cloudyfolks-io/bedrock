@@ -15,6 +15,7 @@ type Rules struct {
 	MaxBuckets       int
 	PublicHost       string
 	PublicAliases    []string
+	TLSSecret        string
 }
 
 func DefaultRules() Rules {

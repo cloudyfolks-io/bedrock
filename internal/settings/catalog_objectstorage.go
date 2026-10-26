@@ -6,6 +6,8 @@ import (
 	"regexp"
 	"strings"
 
+	"k8s.io/apimachinery/pkg/util/validation"
+
 	"github.com/cloudyfolks-io/bedrock/internal/dnsname"
 )
 
@@ -27,7 +29,15 @@ func objectStorageDefinitions() []Definition {
 		{"objectstorage.max-buckets", "100", "Buckets that one project may hold, from 1 to 10000. Buckets that exist stay when the value is lowered.", intBetween(minBuckets, maxBuckets)},
 		{"objectstorage.public-host", "", "DNS name of the public HTTPS endpoint of object storage. Empty keeps the store inside the cluster.", domainName},
 		{"objectstorage.public-aliases", "", "Comma list of extra DNS names that serve the public endpoint, next to objectstorage.public-host.", entryList("DNS name", dnsname.Valid)},
+		{"objectstorage.tls-secret", "", "Name of a TLS Secret in the namespace rook-ceph for the public endpoint, for example a wildcard certificate. With a value, Bedrock makes no Certificate and routes with this Secret. Empty lets cert-manager issue the certificate.", secretName},
 	}
+}
+
+func secretName(v string) error {
+	if v == "" || len(validation.IsDNS1123Subdomain(v)) == 0 {
+		return nil
+	}
+	return fmt.Errorf("value %q is not a valid Secret name", v)
 }
 
 func entryList(what string, valid func(string) bool) func(string) error {

@@ -93,6 +93,9 @@ func (r *AddonReconciler) converge(ctx context.Context) (result, error) {
 			return failure(err)
 		}
 	}
+	if config.Hold {
+		return result{reason: "Held", message: "registry.hold is true: harbor-core, harbor-jobservice and harbor-exporter stay at zero replicas", requeue: steadyRequeue}, nil
+	}
 	return result{ready: true, reason: "Ready", message: "the registry runtime objects are applied", requeue: steadyRequeue}, nil
 }
 
