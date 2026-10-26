@@ -26,6 +26,7 @@ import (
 
 	"github.com/cloudyfolks-io/bedrock/api/v1alpha1"
 	"github.com/cloudyfolks-io/bedrock/internal/addons"
+	"github.com/cloudyfolks-io/bedrock/internal/agent"
 	"github.com/cloudyfolks-io/bedrock/internal/audit"
 	"github.com/cloudyfolks-io/bedrock/internal/authn/apiserver"
 	"github.com/cloudyfolks-io/bedrock/internal/authn/methods"
@@ -264,6 +265,11 @@ func RunInit(ctx context.Context, args []string, deps InitDeps, stdout, stderr i
 			return fail(stderr, err)
 		}
 		fmt.Fprintf(stdout, "%d image archives copied\n", n)
+		if o.bundleDir != "" {
+			if err := agent.ArchiveInitBundle(deps.Root, o.bundleDir); err != nil {
+				return fail(stderr, err)
+			}
+		}
 	}
 
 	step(stdout, "installing k0s controller")

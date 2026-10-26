@@ -577,6 +577,10 @@ func TestRunInitFromBundle(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(workDir, "bundle")); !os.IsNotExist(err) {
 		t.Fatal("extracted bundle dir must be removed after a successful init")
 	}
+	archived := filepath.Join(workDir, "images", "v0.1.0-test", fixtureArch, release.BundleFileName)
+	if _, err := os.Stat(archived); err != nil {
+		t.Fatalf("init must archive the bundle spec for the agent: %v", err)
+	}
 }
 
 func TestRunInitWritesMirror(t *testing.T) {
