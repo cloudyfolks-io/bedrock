@@ -2,7 +2,10 @@ crds:
   enabled: true
 frr:
   enabled: true
+networkPolicies:
+  enforcement: "${BEDROCK_NP_ENFORCEMENT}"
 networking:
+  enableSsl: "${BEDROCK_FABRIC_ENABLE_SSL}"
   pods:
     cidr:
       v4: 10.16.0.0/16

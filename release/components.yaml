@@ -28,6 +28,7 @@ components:
     namespace: kube-system
     values: release/values/fabric.yaml
     crdsToGroup: crds
+    omit: [Secret/fabric-tls]
   - name: coredns
     order: 22
     version: 1.13.2

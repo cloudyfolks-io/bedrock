@@ -211,6 +211,56 @@ Only the platform can.
 See `docs/network.md`.
 Only the operator can set or change the labels `bedrock.cloudyfolks.io/tenant` and `bedrock.cloudyfolks.io/project` on a namespace.
 
+## Pod network admission
+
+The setting `tenancy.pod-network-admission` controls the admission of the network shape of a tenant pod.
+It is `off` by default.
+
+| Value | Effect |
+|---|---|
+| `off` | Bedrock removes the bindings. The policies do nothing. |
+| `audit` | A pod that breaks a rule is admitted. The API server counts the failure and writes it in its audit log. |
+| `deny` | A pod that breaks a rule is rejected. |
+
+The policies are `bedrock-tenant-pod-network`, `bedrock-tenant-pod-network-subnet` and `bedrock-tenant-pod-network-groups`.
+The operator makes and removes their bindings from the setting.
+A change of the setting acts at once.
+Use `audit` first.
+Move to `deny` when the alert `TenantPodNetworkAudit` is quiet.
+
+The policies work only in a namespace that has the label `bedrock.cloudyfolks.io/tenant`.
+They check a Pod when it is created, and the subresource `pods/ephemeralcontainers` when it is updated.
+They do not check other updates of a Pod, so a label change of a running Pod passes.
+The shape rules apply at creation only.
+
+A Pod must have these fields, which `docs/network.md` explains:
+
+- The label `network.cloudyfolks.com/class` with the value `workload` or `managed`.
+- The annotation `k8s.v1.cni.cncf.io/networks` with the value `kube-system/vpc`.
+- The annotation `fabric.cloudyfolks.io/logical_switch` with the value `tenant-workload` for `workload` and `tenant-managed` for `managed`.
+- The annotations `fabric.cloudyfolks.io/port_security` and `vpc.kube-system.fabric.cloudyfolks.io/port_security` with the value `true`.
+- The annotation `vpc.kube-system.fabric.cloudyfolks.io/logical_switch` with the name of a Fabric Subnet of the project of the Pod.
+- The annotation `vpc.kube-system.fabric.cloudyfolks.io/security_groups` with only Fabric security groups of the project, or empty.
+
+A Pod of the class `workload` must also have `automountServiceAccountToken: false`.
+It must not add the capability `NET_BIND_SERVICE`.
+The policy `bedrock-tenant-pods` already denies every other added capability, so the two policies never deny the same capability.
+
+Fabric names are hashed, so Bedrock does not check a name prefix.
+The two parameter policies read the Fabric `Subnet` and `SecurityGroup` objects.
+An object belongs to the project when its annotation `bedrock.cloudyfolks.io/owner-namespace` is the namespace of the Pod.
+The default security group `default-<namespace>` belongs to the project through its labels.
+The policies check only the objects that exist.
+A name that no object has fails later, when the Pod starts.
+
+These identities are exempt: the groups `system:masters` and `system:nodes`, the service accounts of `kubevirt`, `cdi`, `aaq`, `rook-ceph` and `velero`, the other service accounts of `kube-system`, `system:kube-scheduler` and `system:kube-controller-manager`.
+The workload controllers of `kube-system` (ReplicaSet, StatefulSet, DaemonSet and Job) and the service accounts of `bedrock-system` are not exempt.
+They create the Pods of the pod builders, and the policy must check those Pods.
+
+The alerts `TenantPodNetworkAudit`, `TenantPodNetworkDenied` and `TenantPodNetworkError` use the metric `apiserver_validating_admission_policy_check_total`.
+Turn the setting on only after `network.tenant-management.enabled` is `true` and a pod builder makes the new shape.
+Before that, every tenant Pod breaks the rules.
+
 ## Deletion
 
 Delete a Project to remove its namespace and all objects in it.

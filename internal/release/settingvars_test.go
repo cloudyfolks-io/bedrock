@@ -99,3 +99,14 @@ func TestNoProxyIsEmptyWithoutAProxy(t *testing.T) {
 		t.Fatalf("got %q", got)
 	}
 }
+
+func TestSettingVarsCarryTheFabricSettingsWithTheirDefaults(t *testing.T) {
+	defaults := SettingVars(map[string]string{}, "10.0.10.10")
+	if defaults[VarNPEnforcement] != "standard" || defaults[VarFabricEnableSSL] != "false" {
+		t.Fatalf("defaults %q %q", defaults[VarNPEnforcement], defaults[VarFabricEnableSSL])
+	}
+	set := SettingVars(map[string]string{"network.policy-enforcement": "lax", "network.ovn-tls": "true"}, "10.0.10.10")
+	if set[VarNPEnforcement] != "lax" || set[VarFabricEnableSSL] != "true" {
+		t.Fatalf("set %q %q", set[VarNPEnforcement], set[VarFabricEnableSSL])
+	}
+}

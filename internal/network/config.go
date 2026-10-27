@@ -40,6 +40,11 @@ const (
 	keyLBCIDR    = "network.load-balancer.cidr"
 	keyLBGateway = "network.load-balancer.gateway"
 
+	keyTenantManagementEnabled      = "network.tenant-management.enabled"
+	keyTenantManagementWorkloadCIDR = "network.tenant-management.workload-cidr"
+	keyTenantManagementManagedCIDR  = "network.tenant-management.managed-cidr"
+	keyOVNTLS                       = "network.ovn-tls"
+
 	keyReservedCIDRs       = "network.reserved-cidrs"
 	keySubnetAllowedRanges = "network.subnet-allowed-ranges"
 
@@ -71,6 +76,12 @@ type LoadBalancerPlane struct {
 	Gateway netip.Addr
 }
 
+type TenantManagement struct {
+	Enabled      bool
+	WorkloadCIDR netip.Prefix
+	ManagedCIDR  netip.Prefix
+}
+
 type Config struct {
 	EIPMode          string
 	ProviderNetworks []v1alpha1.ProviderNetworkSpec
@@ -81,6 +92,8 @@ type Config struct {
 	Services         Services
 	DatabaseVIPRange string
 	LoadBalancer     LoadBalancerPlane
+	TenantManagement TenantManagement
+	OVNTLS           bool
 
 	ReservedCIDRs       []string
 	SubnetAllowedRanges []string
@@ -115,6 +128,8 @@ func ParseConfig(values map[string]string) (Config, error) {
 	if err != nil {
 		return Config{}, err
 	}
+	tenantManagement := parseTenantManagement(effective)
+	ovnTLS, _ := strconv.ParseBool(effective[keyOVNTLS])
 	return Config{
 		EIPMode:          effective[keyEIPMode],
 		ProviderNetworks: networks,
@@ -124,6 +139,8 @@ func ParseConfig(values map[string]string) (Config, error) {
 		PeeringRange:     effective[keyPeeringRange],
 		Services:         Services{ProviderNetwork: effective[keyServicesProviderNetwork], IdentityRange: effective[keyServicesIdentityRange], Resolver: effective[keyServicesResolver]},
 		LoadBalancer:     plane,
+		TenantManagement: tenantManagement,
+		OVNTLS:           ovnTLS,
 		DatabaseVIPRange: values[keyDatabaseVIPRange],
 
 		ReservedCIDRs:       splitList(effective[keyReservedCIDRs]),
@@ -138,6 +155,13 @@ func parseLoadBalancerPlane(effective map[string]string) (LoadBalancerPlane, err
 		return LoadBalancerPlane{}, fmt.Errorf("the setting %s %q must be a host address inside %s %q", keyLBGateway, effective[keyLBGateway], keyLBCIDR, effective[keyLBCIDR])
 	}
 	return LoadBalancerPlane{CIDR: prefix, Gateway: gateway}, nil
+}
+
+func parseTenantManagement(effective map[string]string) TenantManagement {
+	enabled, _ := strconv.ParseBool(effective[keyTenantManagementEnabled])
+	workload, _ := netip.ParsePrefix(effective[keyTenantManagementWorkloadCIDR])
+	managed, _ := netip.ParsePrefix(effective[keyTenantManagementManagedCIDR])
+	return TenantManagement{Enabled: enabled, WorkloadCIDR: workload, ManagedCIDR: managed}
 }
 
 func parseBGP(effective map[string]string) (BGP, error) {
@@ -169,6 +193,7 @@ var networkKeys = []string{
 	keyBGPBFD, keyBGPHoldTime, keyBGPKeepaliveTime, keyBGPGracefulRestart, keyBGPAdvertiseFilter, keyBGPRedistributeTables,
 	keyReservedCIDRs, keySubnetAllowedRanges, keyPeeringRange, keyLBCIDR, keyLBGateway,
 	keyServicesProviderNetwork, keyServicesIdentityRange, keyServicesResolver,
+	keyTenantManagementEnabled, keyTenantManagementWorkloadCIDR, keyTenantManagementManagedCIDR, keyOVNTLS,
 }
 
 func defaultDNSServers(effective map[string]string) []string {

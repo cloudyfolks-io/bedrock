@@ -34,6 +34,17 @@ func PlaneReserved(cfg Config) []ReservedRange {
 	return []ReservedRange{{Name: "load balancer plane", CIDR: cfg.LoadBalancer.CIDR.String()}}
 }
 
+func TenantManagementReserved(cfg Config) []ReservedRange {
+	var ranges []ReservedRange
+	if cfg.TenantManagement.WorkloadCIDR.IsValid() {
+		ranges = append(ranges, ReservedRange{Name: "tenant management workload", CIDR: cfg.TenantManagement.WorkloadCIDR.String()})
+	}
+	if cfg.TenantManagement.ManagedCIDR.IsValid() {
+		ranges = append(ranges, ReservedRange{Name: "tenant management managed", CIDR: cfg.TenantManagement.ManagedCIDR.String()})
+	}
+	return ranges
+}
+
 func ReservedRanges(cfg Config, joinCIDR, apiVIP string, nodeIPs []string) []ReservedRange {
 	var ranges []ReservedRange
 	for _, pn := range cfg.ProviderNetworks {
@@ -41,6 +52,7 @@ func ReservedRanges(cfg Config, joinCIDR, apiVIP string, nodeIPs []string) []Res
 	}
 	ranges = append(ranges, SettingReserved(cfg)...)
 	ranges = append(ranges, PlaneReserved(cfg)...)
+	ranges = append(ranges, TenantManagementReserved(cfg)...)
 	if joinCIDR != "" {
 		ranges = append(ranges, ReservedRange{Name: "join subnet", CIDR: joinCIDR})
 	}

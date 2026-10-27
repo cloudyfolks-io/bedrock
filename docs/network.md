@@ -761,6 +761,138 @@ nft list table inet bedrock_legs
 
 The counters of the `counter drop` rules must go up.
 
+## Tenant management subnets
+
+Today a tenant pod has one interface, and it is in the VPC of the tenant.
+The platform cannot reach such a pod.
+The setting `network.tenant-management.enabled` prepares a second shape.
+In this shape the first interface (eth0) of a pod is on a shared platform Subnet.
+The second interface (net1) is on the Subnet of the project.
+The setting only makes the Subnets, the ACLs and the attachment.
+It does not change a pod builder.
+Until a pod builder uses them, no pod uses these objects.
+
+The default is `false`.
+`false` removes the objects that Bedrock made.
+
+### Objects
+
+The underlay controller makes these objects when the setting is `true`.
+It removes them when the setting is `false` or when you remove the setting.
+
+| Object | Name | Range or content |
+|---|---|---|
+| Fabric `Subnet` in the VPC `ovn-cluster` | `tenant-workload` | `network.tenant-management.workload-cidr`, default `100.72.0.0/13`. For customer code: containers and builds. |
+| Fabric `Subnet` in the VPC `ovn-cluster` | `tenant-managed` | `network.tenant-management.managed-cidr`, default `100.80.0.0/13`. For the engines of the platform: databases and control planes. |
+| `NetworkAttachmentDefinition` | `kube-system/vpc` | Type `fabric`, provider `vpc.kube-system.fabric`. It names no Subnet. Each pod picks the Subnet of net1 with the annotation `vpc.kube-system.fabric.cloudyfolks.io/logical_switch`. |
+
+The gateway of each Subnet is its first host address: `100.72.0.1` and `100.80.0.1` by default.
+The MTU is 1500.
+The Subnets carry the label `network.bedrock.cloudyfolks.io/component: underlay`, so the sweeper keeps them.
+Bedrock never sets `private` or `allowSubnets` on these Subnets.
+These fields add their own ACLs at priority 1000 to 1002, and they would clash with the rules below.
+Nothing is allocated for each tenant, so there is no tenant limit.
+When a Subnet is too small, add a Subnet of the same class with the same ACLs.
+
+A pod of the class `workload` has its eth0 on `tenant-workload`.
+A pod of the class `managed` has its eth0 on `tenant-managed`.
+The label `network.cloudyfolks.com/class` holds the class.
+Other services use this label, so its name does not change.
+
+### Ranges
+
+Bedrock reserves both ranges, also when the setting is `false`.
+No Network range and no Subnet can overlap them, even when you set `network.reserved-cidrs` to something narrow.
+The two ranges must not overlap each other.
+They must not overlap the other ranges of Bedrock.
+These are the ranges of the settings `network.load-balancer.cidr`, `network.services.identity-range` and `database.vip-range`, the provider networks, the peering range, and the management, join, pod and service ranges of the cluster.
+Bedrock refuses an overlap with the event reason `InvalidSettings`.
+The prefix of each range must be 30 or shorter.
+
+### Platform ranges
+
+The set P is the list of platform ranges that a pod on eth0 must not open a new connection to.
+Bedrock builds P from the cluster at each reconcile:
+
+| Member | Source |
+|---|---|
+| Management range | `spec.managementCIDR` of the `Cluster`. It is not in P when it is empty. |
+| Join range | `spec.joinCIDR` of the `Cluster`, default `100.64.0.0/16`. |
+| Pod range | `10.16.0.0/16`. |
+| Transit range | The CIDR of the provider network that has the role `transit`, or that `network.bgp.transit-network` names. |
+| Services range | The CIDR of the provider network that has the role `services`. The identity range and `database.vip-range` are inside it. |
+
+The service range `10.96.0.0/12` is not in P.
+It is blocked on `tenant-workload` only.
+The load balancer plane is not in P.
+Each VPC has its own copy of it, and a pod does not reach it through eth0.
+
+The ranges of P are platform ranges.
+A tenant VPC can overlap some of them, for example `10.16.0.0/16`.
+The ACLs match only on eth0 of the two Subnets above, and never on net1.
+So they do not isolate tenants by the address of a tenant VPC.
+
+### Switch rules
+
+Priority is the OVN priority.
+A higher number wins.
+
+| Subnet | Direction | Priority | Match | Action |
+|---|---|---|---|---|
+| `tenant-workload` | from-lport | 3500 | `ct.new && ip4.dst == {P, service range}` | drop |
+| `tenant-workload` | from-lport | 3500 | `arp.op == 1 && arp.tpa != <gateway>` | drop |
+| `tenant-workload` | to-lport | 2500 | Source and destination are in the range, and neither is the gateway. | drop |
+| `tenant-workload` | to-lport | 2500 | `ip6` | drop |
+| `tenant-workload` | to-lport | 1000 | `ip4.src == {P}` | allow-related |
+| `tenant-managed` | from-lport | 3500 | `ct.new && ip4.dst == {P}` | drop |
+| `tenant-managed` | to-lport | 2500 | `ip6` | drop |
+| `tenant-managed` | to-lport | 1000 | `ip4.src == {P}` | allow-related |
+
+- The drop at 3500 is above the allow of the node port group (3000). Without it a pod could open a connection to its own node.
+- `ct.new` means the first packet of a connection. A reply to a connection that the platform started, for example a kubelet probe, is not new and passes.
+- The rule at 1000 makes OVN track the connections that no other rule tracks. It is below the NetworkPolicy default drop (2000), so it never opens what a policy closes.
+- The ACL runs before load balancing. A Service address matches as the Service address. `tenant-managed` pods reach the API server only through the Service address `10.96.0.1`, because the management range is in P. They cannot use the address of a node.
+- The drop of ARP requests that are not for the gateway stops address scans on the shared L2.
+- Both Subnets are IPv4 only. The `ip6` drop at 2500 stops IPv6 between pods on the shared L2, which no IPv4 rule covers.
+- `tenant-managed` has no rule between its pods. The pods of one instance must reach each other. Use a NetworkPolicy for each instance to separate tenants.
+
+### Disable
+
+Set `network.tenant-management.enabled` to `false`.
+Bedrock removes the two Subnets and the attachment.
+Fabric keeps a Subnet until no pod uses it.
+Move or delete the pods first.
+Bedrock removes only a `kube-system/vpc` attachment that it made.
+It never removes an attachment of the same name from another source.
+
+### NetworkPolicy enforcement
+
+The setting `network.policy-enforcement` sets `networkPolicies.enforcement` of the Fabric chart.
+`standard` is the default of the chart.
+`standard` blocks all traffic that no policy allows.
+`lax` also lets ARP, DHCP and ICMP through.
+Fabric before the move to Bedrock used `lax`.
+Look at `kubectl get networkpolicies -A` before you change the value.
+
+### OVN database TLS
+
+The setting `network.ovn-tls` sets `networking.enableSsl` of the Fabric chart.
+The default is `false`.
+Bedrock makes the Secret `fabric-tls` in `kube-system` when the setting is `true` and the Secret does not exist.
+The Secret holds a new CA and a certificate for 10 years, and Bedrock never replaces it.
+The release does not carry the Secret, because it would hold a private key.
+To rotate the certificate, delete the Secret and restart the OVN components.
+
+### How a change reaches the cluster
+
+`network.policy-enforcement` and `network.ovn-tls` are values of the Fabric release.
+Bedrock reads them when it renders the release, as for the other values of Fabric.
+A change reaches the cluster at the next upgrade run, or at the next `bedrock release`.
+A change of `network.policy-enforcement` restarts the Fabric controller.
+A change of `network.ovn-tls` restarts ovn-central, the controller, the monitor, the pinger and every ovs-ovn pod.
+The ovs-ovn update strategy is `OnDelete`, so the operator restarts the ovs-ovn pods node by node in the upgrade run.
+Plan a window for `network.ovn-tls`.
+
 ## Run a second ingress
 
 The Traefik of Bedrock reads IngressRoutes, Middlewares, ServersTransports and Ingresses only in the namespaces `traefik`, `bedrock-system`, `bedrock-registry`, `cdi` and `rook-ceph`. These are the namespaces where Bedrock renders its own routes: the panel and API host, the sign-in host, the upload host, the registry and the public object storage host. A route in any other namespace is ignored by Bedrock. To run a second Traefik for your own workloads, install it in its own namespace with its own IngressClass and its own entry points, and give it only the namespaces of your workloads. Do not put your routes in the namespaces above, because the Traefik of Bedrock serves them there. The second Traefik must not read those namespaces either, or it serves the routes of Bedrock too.
@@ -784,11 +916,16 @@ The Traefik of Bedrock reads IngressRoutes, Middlewares, ServersTransports and I
 | `network.dns-servers` | empty | Comma list of IPv4 resolvers that DHCP gives to guests. A Subnet that sets `dnsServers` uses its own list. Empty uses `network.services.resolver`. |
 | `network.load-balancer.cidr` | `100.69.0.0/24` | IPv4 network of the load balancer plane. Every Network gets one hidden Fabric Subnet with this range, and internal load balancers take their virtual addresses there. Bedrock reserves it, so no Network range and no Subnet can overlap it. Set it before the first Network exists. BGP never advertises it. |
 | `network.load-balancer.gateway` | `100.69.0.1` | IPv4 address of the plane gateway. It must be inside `network.load-balancer.cidr` and must not be its network or broadcast address. |
+| `network.tenant-management.enabled` | `false` | Create the Subnets `tenant-workload` and `tenant-managed` in the default VPC, with their switch ACLs, and the NetworkAttachmentDefinition `kube-system/vpc`. `false` removes them. See [Tenant management subnets](#tenant-management-subnets). |
+| `network.tenant-management.workload-cidr` | `100.72.0.0/13` | IPv4 network of `tenant-workload`. The gateway is its first host address. Bedrock reserves it. |
+| `network.tenant-management.managed-cidr` | `100.80.0.0/13` | IPv4 network of `tenant-managed`. The gateway is its first host address. Bedrock reserves it. |
+| `network.policy-enforcement` | `standard` | NetworkPolicy enforcement of Fabric: `standard` blocks all traffic that no policy allows, `lax` also lets ARP, DHCP and ICMP through. A change reaches the cluster at the next upgrade run. |
+| `network.ovn-tls` | `false` | Encrypt the OVN database connections of Fabric with TLS. A change reaches the cluster at the next upgrade run and restarts all OVN components. See [OVN database TLS](#ovn-database-tls). |
 | `network.peering.range` | `169.254.0.0/16` | IPv4 network from which each NetworkPeering without `connectCIDR` gets a /30 connect network. The prefix must be 30 or shorter. |
 | `network.services.provider-network` | empty | Name of the provider network with the role `services`. Every external Network attaches to it. Empty turns the services plane off. |
 | `network.services.identity-range` | empty | IPv4 network inside the services provider network. Each Network gets one address from it for source NAT. The prefix must be 30 or shorter. |
 | `network.services.resolver` | empty | IPv4 address of the resolver on the services plane. DHCP gives it to guests when `network.dns-servers` is empty. |
-| `network.reserved-cidrs` | `100.64.0.0/10` | Comma list of IPv4 networks. No Network range and no Subnet can overlap them. They belong to the platform planes. |
+| `network.reserved-cidrs` | `100.64.0.0/10` | Comma list of IPv4 networks. No Network range and no Subnet can overlap them. They belong to the platform planes. The tenant management ranges and the load balancer plane are reserved also when they are not in this list. |
 | `network.subnet-allowed-ranges` | `10.0.0.0/8,172.16.0.0/12,192.168.0.0/16` | Comma list of IPv4 networks. Every Subnet must be inside one of them. Use `0.0.0.0/0` to allow every address. |
 | `network.mtu` | empty | MTU in bytes, from 576 to 9000, of every Subnet that sets no `mtu`. Empty lets Fabric choose. A running guest learns a new value at its next DHCP lease, and the pod interface of a VM keeps its MTU until the VM restarts. |
 
@@ -898,6 +1035,10 @@ An empty `network.bgp.advertise-filter` now advertises only the ElasticIP routes
 Before, a BGP cluster with no ElasticIP and an empty filter advertised all routes.
 After this release, such a cluster stops advertising its tenant routes.
 Set `network.bgp.advertise-filter` to the prefixes that you want to advertise, to keep them.
+
+The settings `network.tenant-management.enabled`, `network.policy-enforcement` and `network.ovn-tls` keep the behavior of earlier releases by default.
+`network.policy-enforcement` is `standard`, as in the chart.
+A cluster that ran with `lax` before must set `lax` to keep its enforcement.
 
 ## Inspect Fabric
 

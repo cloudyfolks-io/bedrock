@@ -14,7 +14,7 @@ func TestReservedRangesListsPlatformRanges(t *testing.T) {
 		names[i] = r.Name + " " + r.CIDR
 	}
 	want := []string{
-		"provider network public 91.246.31.0/24", "reserved 100.64.0.0/10 100.64.0.0/10", "load balancer plane 100.69.0.0/24", "join subnet 100.64.0.0/16", "management 10.0.10.10/32",
+		"provider network public 91.246.31.0/24", "reserved 100.64.0.0/10 100.64.0.0/10", "load balancer plane 100.69.0.0/24", "tenant management workload 100.72.0.0/13", "tenant management managed 100.80.0.0/13", "join subnet 100.64.0.0/16", "management 10.0.10.10/32",
 		"management 10.0.10.11/32", "management 10.0.10.12/32",
 	}
 	if !slices.Equal(names, want) {
@@ -24,8 +24,8 @@ func TestReservedRangesListsPlatformRanges(t *testing.T) {
 
 func TestReservedRangesSkipsEmptyAndInvalidAddresses(t *testing.T) {
 	got := ReservedRanges(configOf(t, map[string]string{}), "", "", []string{"", "nonsense"})
-	if len(got) != 2 || got[0].CIDR != "100.64.0.0/10" || got[1].CIDR != "100.69.0.0/24" {
-		t.Fatalf("only the reserved cidrs setting and the load balancer plane are left: %v", got)
+	if len(got) != 4 || got[0].CIDR != "100.64.0.0/10" || got[1].CIDR != "100.69.0.0/24" || got[2].CIDR != "100.72.0.0/13" || got[3].CIDR != "100.80.0.0/13" {
+		t.Fatalf("only the reserved cidrs setting and the platform planes are left: %v", got)
 	}
 }
 

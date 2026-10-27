@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 
@@ -32,6 +33,7 @@ type ComponentConfig struct {
 	KeepTags    bool     `json:"keepTags,omitempty"`
 	Addon       bool     `json:"addon,omitempty"`
 	NoHooks     bool     `json:"noHooks,omitempty"`
+	Omit        []string `json:"omit,omitempty"`
 }
 
 type BuildConfig struct {
@@ -319,6 +321,7 @@ func renderComponent(component ComponentConfig, dirs map[string]string, opts Bui
 		if err != nil {
 			return nil, err
 		}
+		templated = withoutOmitted(templated, component.Omit)
 		if component.Namespace != "" {
 			templated, err = defaultNamespaces(templated, component.Namespace)
 			if err != nil {
@@ -328,6 +331,12 @@ func renderComponent(component ComponentConfig, dirs map[string]string, opts Bui
 		objects = append(objects, templated...)
 	}
 	return placeCRDs(component, dirs, objects)
+}
+
+func withoutOmitted(objects []*unstructured.Unstructured, omit []string) []*unstructured.Unstructured {
+	return slices.DeleteFunc(slices.Clone(objects), func(obj *unstructured.Unstructured) bool {
+		return slices.Contains(omit, obj.GetKind()+"/"+obj.GetName())
+	})
 }
 
 func namespaceFirst(component ComponentConfig) []*unstructured.Unstructured {
