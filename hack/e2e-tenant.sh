@@ -201,7 +201,6 @@ steps=(
   network_elastic_ip_quota
   network_load_balancer_and_dns
   network_internet_gateway
-  network_host_guard
   network_peering
   network_internal_load_balancer
   network_services_identity
@@ -275,6 +274,7 @@ steps=(
   metering_logs
   metering_reader_policy
   addons_grafana_and_alerts
+  network_host_guard
   cascade_project
   cascade_tenant
 )
