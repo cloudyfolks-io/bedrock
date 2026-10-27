@@ -52,6 +52,9 @@ func registryNameWorld(t *testing.T) (admin, alice, root client.Client) {
 	if err := eventuallyForbidden(t, denyCreate(admin, alice, namedRegistry("probe", "library", nil))); err == nil {
 		t.Fatal("the registry name policy never denied")
 	}
+	if err := eventuallyForbidden(t, denyCreate(admin, alice, namedRegistry("probe-annotation", "acme-probe", map[string]string{"bedrock.cloudyfolks.io/adopt": "true"}))); err == nil {
+		t.Fatal("the registry annotation policy never denied")
+	}
 	return admin, alice, root
 }
 
