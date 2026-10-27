@@ -788,6 +788,20 @@ legs_chain_counts_drops() {
   [[ "$chain" =~ counter\ packets\ [1-9][0-9]*\ bytes ]]
 }
 
+legs_table_absent() {
+  ! nft list table inet bedrock_legs >/dev/null 2>&1
+}
+
+host_node_name() {
+  hostname | tr '[:upper:]' '[:lower:]'
+}
+
+enable_host_management() {
+  local node=$1
+  kubectl patch host "$node" --type merge -p '{"spec":{"management":{"enabled":true}}}'
+  wait_condition 300 host "$node" ManagementApplied True
+}
+
 host_serves_node_port() {
   [ "$(curl -sS --max-time 5 "http://$1:$guard_node_port/")" = guard-e2e ]
 }
@@ -801,6 +815,8 @@ host_guard_cleanup() {
     kubectl -n "$guard_namespace" get pods,svc -o wide >&2 || true
   fi
   probe_vm_cleanup guard-probe "$status"
+  kubectl patch cluster cluster --type merge -p '{"spec":{"tenantLegs":null}}' || true
+  retry_until 120 legs_table_absent || true
   ip addr del "$guard_leg_address/24" dev "$guard_leg_interface" 2>/dev/null || true
   kubectl delete namespace "$guard_namespace" --ignore-not-found
   wait_gone 180 namespace "$guard_namespace"
@@ -822,6 +838,7 @@ host_guard_checks() {
   wait_jsonpath 600 Running -n "$NS" get virtualmachine guard-probe -o jsonpath='{.status.phase}'
   retry_until 600 guard_line_has 1 "p22=ok"
   ensure_management_cidr "$(host_management_cidr)"
+  enable_host_management "$(host_node_name)"
   kubectl patch cluster cluster --type merge -p '{"spec":{"tenantLegs":[{"interface":"br-public"},{"interface":"br-services"}]}}'
   wait_condition 300 cluster cluster TenantLegsGuarded True
   wait_condition 300 cluster cluster NodePortsScoped True

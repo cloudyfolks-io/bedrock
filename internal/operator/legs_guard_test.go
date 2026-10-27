@@ -194,3 +194,57 @@ func TestTenantLegsGuardedNeedsPresentLegsOnManagedHosts(t *testing.T) {
 		})
 	}
 }
+
+func unmanagedHost(name string) *v1alpha1.Host {
+	return &v1alpha1.Host{
+		ObjectMeta: metav1.ObjectMeta{Name: name},
+		Status: v1alpha1.HostStatus{Conditions: []metav1.Condition{
+			{Type: v1alpha1.ConditionManagementApplied, Status: metav1.ConditionFalse, Reason: "ManagementDisabled"},
+		}},
+	}
+}
+
+func TestTenantLegsGuardedNeedsManagementOnEveryHost(t *testing.T) {
+	cases := []struct {
+		name       string
+		hosts      []*v1alpha1.Host
+		wantStatus metav1.ConditionStatus
+		wantNamed  []string
+		wantAbsent []string
+	}{
+		{"unmanaged host", []*v1alpha1.Host{unmanagedHost("node-a")}, metav1.ConditionFalse, []string{"host node-a: management disabled"}, nil},
+		{"managed guarded and unmanaged", []*v1alpha1.Host{managedHost("node-a", metav1.ConditionTrue), unmanagedHost("node-b")}, metav1.ConditionFalse, []string{"host node-b: management disabled"}, []string{"node-a"}},
+		{"all managed and guarded", []*v1alpha1.Host{managedHost("node-a", metav1.ConditionTrue), managedHost("node-b", metav1.ConditionTrue)}, metav1.ConditionTrue, nil, nil},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			r, c, _ := legsGuardReconciler(t)
+			for _, host := range tc.hosts {
+				if err := c.Create(context.Background(), host); err != nil {
+					t.Fatal(err)
+				}
+			}
+			setTenantLegs(t, c, []v1alpha1.TenantLegSpec{{Interface: "br-public.30"}})
+			if err := r.reconcileTenantLegs(context.Background()); err != nil {
+				t.Fatal(err)
+			}
+			got := legsGuardedCondition(t, c)
+			if got == nil || got.Status != tc.wantStatus {
+				t.Fatalf("condition %+v", got)
+			}
+			if tc.wantStatus == metav1.ConditionFalse && got.Reason != "HostsNotGuarded" {
+				t.Fatalf("reason %q", got.Reason)
+			}
+			for _, want := range tc.wantNamed {
+				if !strings.Contains(got.Message, want) {
+					t.Fatalf("message %q lacks %q", got.Message, want)
+				}
+			}
+			for _, absent := range tc.wantAbsent {
+				if strings.Contains(got.Message, absent) {
+					t.Fatalf("message %q names %q", got.Message, absent)
+				}
+			}
+		})
+	}
+}

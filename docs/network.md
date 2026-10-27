@@ -709,7 +709,10 @@ No packet passes between the delete and the new rules.
 If you remove all legs, the agent removes the unit, the file and the table.
 This is allowed, but the guard is then gone on every host.
 The operator sets the condition `TenantLegsGuarded` of the `Cluster` to `False` with the reason `NoTenantLegs` and raises a Warning event.
-While the list is not empty, the condition is `True`.
+The agent applies the guard only on a host with management enabled (`spec.management.enabled`).
+While the list is not empty, the condition is `True` only if every `Host` has management enabled and reports `ManagementApplied` and `TenantLegsPresent` as `True`.
+A host with management disabled makes the condition `False` with the reason `HostsNotGuarded` and the message `management disabled`.
+The condition does not block any other function of the cluster.
 Each agent sets the condition `TenantLegsPresent` of its `Host`.
 If a listed leg interface does not exist on the host, the condition is `False` with the reason `LegInterfaceMissing` and the interface names in the message.
 In that case the operator sets `TenantLegsGuarded` to `False` with the reason `LegInterfaceMissing`, and the message names each host and interface.

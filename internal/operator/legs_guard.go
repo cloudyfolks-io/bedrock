@@ -24,10 +24,10 @@ const (
 func hostGuardGaps(host v1alpha1.Host) (string, bool) {
 	legs := meta.FindStatusCondition(host.Status.Conditions, v1alpha1.ConditionTenantLegsPresent)
 	switch {
+	case !host.Spec.Management.Enabled:
+		return "management disabled", true
 	case legs != nil && legs.Status == metav1.ConditionFalse && legs.Reason == reasonLegMissing:
 		return "interface " + legs.Message, true
-	case !host.Spec.Management.Enabled:
-		return "", false
 	case !meta.IsStatusConditionTrue(host.Status.Conditions, v1alpha1.ConditionManagementApplied):
 		return "guard not applied", true
 	case legs == nil:

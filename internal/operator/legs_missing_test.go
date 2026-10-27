@@ -13,9 +13,11 @@ import (
 func hostWithLegCondition(name string, status metav1.ConditionStatus, reason, message string) *v1alpha1.Host {
 	return &v1alpha1.Host{
 		ObjectMeta: metav1.ObjectMeta{Name: name},
-		Status: v1alpha1.HostStatus{Conditions: []metav1.Condition{{
-			Type: v1alpha1.ConditionTenantLegsPresent, Status: status, Reason: reason, Message: message, LastTransitionTime: metav1.Now(),
-		}}},
+		Spec:       v1alpha1.HostSpec{Management: v1alpha1.ManagementSpec{Enabled: true}},
+		Status: v1alpha1.HostStatus{Conditions: []metav1.Condition{
+			{Type: v1alpha1.ConditionManagementApplied, Status: metav1.ConditionTrue, Reason: "r", LastTransitionTime: metav1.Now()},
+			{Type: v1alpha1.ConditionTenantLegsPresent, Status: status, Reason: reason, Message: message, LastTransitionTime: metav1.Now()},
+		}},
 	}
 }
 
