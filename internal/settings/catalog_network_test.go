@@ -16,6 +16,8 @@ func TestNetworkCatalogKeysAndDefaults(t *testing.T) {
 		"network.peering.range":  "169.254.0.0/16",
 		"network.reserved-cidrs": "100.64.0.0/10", "network.subnet-allowed-ranges": "10.0.0.0/8,172.16.0.0/12,192.168.0.0/16",
 		"network.load-balancer.cidr": "100.69.0.0/24", "network.load-balancer.gateway": "100.69.0.1",
+		"network.tenant-management.enabled": "false", "network.tenant-management.workload-cidr": "100.72.0.0/13", "network.tenant-management.managed-cidr": "100.80.0.0/13",
+		"network.policy-enforcement": "standard", "network.ovn-tls": "false", "tenancy.pod-network-admission": "off",
 	}
 	for key, def := range want {
 		got, ok := Lookup(key)
@@ -267,5 +269,24 @@ func TestParseAddressRange(t *testing.T) {
 	first, last, err = ParseAddressRange("10.0.0.2")
 	if err != nil || first != last {
 		t.Fatal(first, last, err)
+	}
+}
+
+func TestTenantManagementAndFabricSettingsValidation(t *testing.T) {
+	cases := []struct {
+		key, value string
+		valid      bool
+	}{
+		{"network.tenant-management.enabled", "true", true}, {"network.tenant-management.enabled", "yes", false},
+		{"network.tenant-management.workload-cidr", "100.72.0.0/13", true}, {"network.tenant-management.workload-cidr", "100.72.0.1/13", false},
+		{"network.tenant-management.managed-cidr", "fd00::/64", false}, {"network.tenant-management.managed-cidr", "100.80.0.0/31", false},
+		{"network.policy-enforcement", "lax", true}, {"network.policy-enforcement", "standard", true}, {"network.policy-enforcement", "strict", false},
+		{"network.ovn-tls", "true", true}, {"network.ovn-tls", "on", false},
+		{"tenancy.pod-network-admission", "off", true}, {"tenancy.pod-network-admission", "audit", true}, {"tenancy.pod-network-admission", "deny", true}, {"tenancy.pod-network-admission", "warn", false},
+	}
+	for _, c := range cases {
+		if (validates(t, c.key, c.value) == nil) != c.valid {
+			t.Fatalf("%s %q valid=%v", c.key, c.value, c.valid)
+		}
 	}
 }

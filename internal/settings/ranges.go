@@ -11,7 +11,7 @@ var bucketKeys = []string{"registry.bucket", "database.backup.bucket"}
 
 var retentionKeys = []string{"database.backup.retention-days-min", "database.backup.retention-days-max"}
 
-var addressRangeKeys = []string{"database.vip-range", "network.services.identity-range", "network.load-balancer.cidr"}
+var addressRangeKeys = []string{"database.vip-range", "network.services.identity-range", "network.load-balancer.cidr", "network.tenant-management.workload-cidr", "network.tenant-management.managed-cidr"}
 
 func Conflict(key string, values map[string]string) error {
 	switch {
