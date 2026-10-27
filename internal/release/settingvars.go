@@ -13,6 +13,7 @@ import (
 
 	"github.com/cloudyfolks-io/bedrock/api/v1alpha1"
 	"github.com/cloudyfolks-io/bedrock/internal/config"
+	"github.com/cloudyfolks-io/bedrock/internal/settings"
 )
 
 const (
@@ -22,6 +23,8 @@ const (
 	VarEgressNoProxy       = "BEDROCK_EGRESS_NO_PROXY"
 	VarDNS01NameserversArg = "BEDROCK_DNS01_NAMESERVERS_ARG"
 	VarDNS01OnlyArg        = "BEDROCK_DNS01_ONLY_ARG"
+	VarNPEnforcement       = "BEDROCK_NP_ENFORCEMENT"
+	VarFabricEnableSSL     = "BEDROCK_FABRIC_ENABLE_SSL"
 
 	NodeResolvConf = "/etc/resolv.conf"
 
@@ -41,6 +44,8 @@ func SettingVars(values map[string]string, apiAddress string) map[string]string 
 		VarEgressNoProxy:       egressNoProxy(values, apiAddress),
 		VarDNS01NameserversArg: "",
 		VarDNS01OnlyArg:        "",
+		VarNPEnforcement:       settings.OrDefault(values["network.policy-enforcement"], "network.policy-enforcement"),
+		VarFabricEnableSSL:     settings.OrDefault(values["network.ovn-tls"], "network.ovn-tls"),
 	}
 	if nameservers := values["letsencrypt.dns01-nameservers"]; nameservers != "" {
 		vars[VarDNS01NameserversArg] = "--dns01-recursive-nameservers=" + nameservers
