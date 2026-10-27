@@ -330,9 +330,14 @@ script_prepare_vm() {
   cat <<'SCRIPT'
 export DEBIAN_FRONTEND=noninteractive
 apt-get update -qq
-apt-get install -y -qq jq "linux-modules-extra-$(uname -r)" >/dev/null
+apt-get install -y -qq jq >/dev/null
+if apt-cache show "linux-modules-extra-$(uname -r)" >/dev/null 2>&1; then
+  apt-get install -y -qq "linux-modules-extra-$(uname -r)" >/dev/null
+fi
 modprobe openvswitch
 modprobe geneve
+modinfo rbd >/dev/null
+modinfo ceph >/dev/null
 SCRIPT
 }
 
