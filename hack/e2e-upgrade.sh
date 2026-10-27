@@ -165,17 +165,31 @@ image_pinned_clean() {
     END { exit !(found && !bad) }'
 }
 
+image_unpinned() {
+  /usr/local/bin/k0s ctr --namespace k8s.io images ls | awk -v name="$1" '
+    index($1, name) && $NF ~ /io.cri-containerd.pinned=pinned/ { pinned = 1 }
+    END { exit pinned }'
+}
+
+airgap_names() {
+  local tarball
+  tarball=$(compgen -G "/var/lib/bedrock/images/$1/*/k0s-airgap.tar") || return 1
+  tar -xOf "$tarball" index.json | grep -o '"org.opencontainers.image.ref.name": *"[^"]*"' | sed -E 's/.*: *"([^"]*)"/\1/'
+}
+
 assert_images_pinned() {
-  local repo_b=${1%%[:@]*}
-  retry_until 300 image_pinned_clean "/pause:"
-  retry_until 300 image_pinned_clean "/kube-proxy:"
-  retry_until 300 image_pinned_clean "$repo_b:"
+  local repo=${2%%[:@]*} names name
+  names=$(airgap_names "$1" | grep -E '/(pause|kube-proxy):')
+  grep -q '/kube-proxy:' <<<"$names"
+  for name in $names; do
+    retry_until 300 image_pinned_clean "$name"
+  done
+  retry_until 300 image_pinned_clean "$repo:"
 }
 
 airgap_images_held() {
-  local tarball names held name
-  tarball=$(compgen -G "/var/lib/bedrock/images/$1/*/k0s-airgap.tar") || return 1
-  names=$(tar -xOf "$tarball" index.json | grep -o '"org.opencontainers.image.ref.name": *"[^"]*"' | sed -E 's/.*: *"([^"]*)"/\1/')
+  local names held name
+  names=$(airgap_names "$1") || return 1
   test -n "$names"
   held=$(/usr/local/bin/k0s ctr --namespace k8s.io images ls -q) || return 1
   while read -r name; do
@@ -297,9 +311,10 @@ if [ "$version_a_archives" = 1 ]; then
   retry_until 300 k0s_images_dir_empty
   test "$(sha256sum "$legacy_source" | cut -d' ' -f1)" = "$legacy_sum"
   retry_until 300 airgap_images_held "$VERSION_A"
-  assert_images_pinned "$image_a"
+  assert_images_pinned "$VERSION_A" "$image_a"
 fi
 
+kube_proxy_a=$(airgap_names "$VERSION_A" 2>/dev/null | grep '/kube-proxy:' || true)
 "$cli_b" upgrade --to "$VERSION_B" --bundle "$bundle_b" --yes --timeout 2h > "$workdir/upgrade.log" 2>&1 &
 upgrade=$!
 depot=""
@@ -374,7 +389,7 @@ if [ -n "$abort_in" ]; then
     archived_file "$VERSION_A" k0s-airgap.tar
     retry_until 300 k0s_images_dir_empty
     retry_until 300 airgap_images_held "$VERSION_A"
-    assert_images_pinned "$image_a"
+    assert_images_pinned "$VERSION_A" "$image_a"
   fi
   for _ in $(seq 1 60); do
     if [ -z "$(kubectl get nodeupgrades -o name)" ]; then break; fi
@@ -615,7 +630,10 @@ if [ "$image_a_file" != "$image_b_file" ]; then
 fi
 retry_until 300 k0s_images_dir_empty
 retry_until 300 airgap_images_held "$VERSION_B"
-assert_images_pinned "$image_b"
+assert_images_pinned "$VERSION_B" "$image_b"
+if [ -n "$kube_proxy_a" ] && ! airgap_names "$VERSION_B" | grep -qxF "$kube_proxy_a"; then
+  retry_until 300 image_unpinned "$kube_proxy_a"
+fi
 test "$(kubectl get node "$node" -o jsonpath='{.spec.unschedulable}')" != "true"
 kubectl wait --for=condition=Ready node --all --timeout=300s
 grep -qx 'server = "https://127.0.0.1:1"' /etc/k0s/containerd.d/certs.d/_default/hosts.toml
@@ -664,7 +682,7 @@ assert_no_image_pull_failures
 images_after=$(k0s_images_listing)
 test -z "$(comm -23 <(printf '%s\n' "$images_before") <(printf '%s\n' "$images_after"))"
 retry_until 300 k0s_images_dir_empty
-assert_images_pinned "$image_b"
+assert_images_pinned "$VERSION_B" "$image_b"
 kubectl -n default delete configmap,pod "$restore_marker"
 rm -rf /root/restore /var/lib/k0s/.pre-restore-*
 echo "e2e-upgrade passed"
