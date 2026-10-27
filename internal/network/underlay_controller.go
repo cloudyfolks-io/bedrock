@@ -2,9 +2,11 @@ package network
 
 import (
 	"context"
+	"slices"
 	"strings"
 	"time"
 
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
@@ -52,12 +54,25 @@ func (r *UnderlayReconciler) Reconcile(ctx context.Context, _ reconcile.Request)
 			return reconcile.Result{}, err
 		}
 	}
+	ranges, err := r.clusterRanges(ctx)
+	if err != nil {
+		return reconcile.Result{}, err
+	}
+	if cfg.TenantManagement.Enabled {
+		if err := TenantManagementConflict(cfg, ranges); err != nil {
+			return reconcile.Result{}, warn(ctx, r.Client, settingReference(keyTenantManagementEnabled), "InvalidSettings", err.Error())
+		}
+	}
+	objects = append(objects, TenantManagementSubnets(cfg, ranges)...)
 	wanted := map[string]bool{}
 	for _, object := range objects {
 		if err := ssa.Apply(ctx, r.Client, object, v1alpha1.NetworkFieldManager); err != nil {
 			return reconcile.Result{}, err
 		}
 		wanted[identity(object)] = true
+	}
+	if err := r.syncAttachment(ctx, cfg.TenantManagement.Enabled); err != nil {
+		return reconcile.Result{}, err
 	}
 	refused, err := r.prune(ctx, wanted)
 	if err != nil {
@@ -67,6 +82,30 @@ func (r *UnderlayReconciler) Reconcile(ctx context.Context, _ reconcile.Request)
 		return reconcile.Result{RequeueAfter: underlayRetry}, warn(ctx, r.Client, settingReference(keyProviderNetwork), ReasonInUse, refused)
 	}
 	return reconcile.Result{}, nil
+}
+
+func (r *UnderlayReconciler) clusterRanges(ctx context.Context) (ClusterRanges, error) {
+	var cluster v1alpha1.Cluster
+	err := r.Client.Get(ctx, client.ObjectKey{Name: v1alpha1.ClusterName}, &cluster)
+	if apierrors.IsNotFound(err) {
+		return DefaultClusterRanges(), nil
+	}
+	return ClusterRangesOf(cluster), err
+}
+
+func (r *UnderlayReconciler) syncAttachment(ctx context.Context, enabled bool) error {
+	if enabled {
+		return ssa.Apply(ctx, r.Client, VPCAttachment(), v1alpha1.NetworkFieldManager)
+	}
+	existing := newObject(attachmentGVK, VPCAttachmentName)
+	err := r.Client.Get(ctx, client.ObjectKey{Namespace: VPCAttachmentNamespace, Name: VPCAttachmentName}, existing)
+	if apierrors.IsNotFound(err) || (err == nil && existing.GetLabels()[LabelComponent] != ComponentUnderlay) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	return client.IgnoreNotFound(r.Client.Delete(ctx, existing))
 }
 
 func (r *UnderlayReconciler) existingCarriers(ctx context.Context) ([]*unstructured.Unstructured, error) {
@@ -141,8 +180,9 @@ func (r *UnderlayReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	networkSettings := predicate.NewPredicateFuncs(func(obj client.Object) bool { return strings.HasPrefix(obj.GetName(), settingPrefix) })
 	underlayLabel := predicate.NewPredicateFuncs(func(obj client.Object) bool { return obj.GetLabels()[LabelComponent] == ComponentUnderlay })
 	b := ctrl.NewControllerManagedBy(mgr).Named(underlayControllerID).
-		Watches(&v1alpha1.Setting{}, handler.EnqueueRequestsFromMapFunc(toUnderlay), builder.WithPredicates(networkSettings))
-	for _, gvk := range underlayKinds {
+		Watches(&v1alpha1.Setting{}, handler.EnqueueRequestsFromMapFunc(toUnderlay), builder.WithPredicates(networkSettings)).
+		Watches(&v1alpha1.Cluster{}, handler.EnqueueRequestsFromMapFunc(toUnderlay))
+	for _, gvk := range append(slices.Clone(underlayKinds), attachmentGVK) {
 		object := newObject(gvk, "")
 		b = b.Watches(object, handler.EnqueueRequestsFromMapFunc(toUnderlay), builder.WithPredicates(underlayLabel))
 	}
