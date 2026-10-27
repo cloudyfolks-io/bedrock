@@ -127,7 +127,11 @@ func ArchiveInitBundle(root, bundleDir string) error {
 	if err != nil {
 		return err
 	}
-	return keepTarball(manifest, filepath.Join(archiveVersionDir(root, spec.Version), release.BundleFileName))
+	archive := archiveVersionDir(root, spec.Version)
+	if err := keepTarball(filepath.Join(bundleDir, bundleImagesDir, airgapFile), filepath.Join(archive, airgapFile)); err != nil {
+		return err
+	}
+	return keepTarball(manifest, filepath.Join(archive, release.BundleFileName))
 }
 
 func keepTarball(staged, dest string) error {

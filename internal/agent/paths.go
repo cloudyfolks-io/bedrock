@@ -13,6 +13,7 @@ const (
 	containerdStore   = "var/lib/k0s/containerd"
 	archiveDir        = "var/lib/bedrock/images"
 	airgapFile        = "k0s-airgap.tar"
+	bundleImagesDir   = "images"
 	adminKubeconfig   = "var/lib/k0s/pki/admin.conf"
 	authnDir          = "etc/bedrock/authn"
 )

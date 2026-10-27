@@ -18,13 +18,14 @@ func TestInitBundleSpecLetsTheAgentArchiveEveryPreloadedTarball(t *testing.T) {
 		t.Fatal(err)
 	}
 	writeFixtureFile(t, filepath.Join(bundleDir, release.BundleFileName), string(spec))
+	writeFixtureFile(t, filepath.Join(bundleDir, bundleImagesDir, airgapFile), "tar")
 	for _, name := range []string{airgapFile, "a.tar", "b.tar"} {
 		writeImageTarball(t, root, name)
 	}
 	if err := ArchiveInitBundle(root, bundleDir); err != nil {
 		t.Fatal(err)
 	}
-	if err := adoptK0sImages(root, releaseLists(t.Context(), nil, root), "dev"); err != nil {
+	if err := adoptK0sImages(root, releaseLists(t.Context(), nil, root), ""); err != nil {
 		t.Fatal(err)
 	}
 	for _, name := range []string{airgapFile, "a.tar", "b.tar", release.BundleFileName} {
@@ -41,6 +42,7 @@ func TestArchiveInitBundleKeepsTheBundleSpecAfterTheBundleDirIsRemoved(t *testin
 	root := t.TempDir()
 	bundleDir := t.TempDir()
 	writeFixtureFile(t, filepath.Join(bundleDir, release.BundleFileName), "version: dev\n")
+	writeFixtureFile(t, filepath.Join(bundleDir, bundleImagesDir, airgapFile), "tar")
 	if err := ArchiveInitBundle(root, bundleDir); err != nil {
 		t.Fatal(err)
 	}
