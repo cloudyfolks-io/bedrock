@@ -23,6 +23,8 @@ import (
 	"github.com/cloudyfolks-io/bedrock/internal/ssa"
 )
 
+const leaderRoleName = "bedrock-operator-leader"
+
 func OperatorRole(bundle release.Bundle) (rbacv1.ClusterRole, error) {
 	objects := releaseObjects(bundle)
 	addonKinds, err := renderedAddonKinds(bundle)
@@ -46,7 +48,29 @@ func ensureOperatorRole(ctx context.Context, c client.Client, bundle release.Bun
 	if err != nil {
 		return err
 	}
-	return ssa.Apply(ctx, c, &role, v1alpha1.OperatorFieldManager)
+	leader, binding := leaderElectionAccess()
+	for _, obj := range []runtime.Object{&leader, &binding, &role} {
+		if err := ssa.Apply(ctx, c, obj, v1alpha1.OperatorFieldManager); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func leaderElectionAccess() (rbacv1.Role, rbacv1.RoleBinding) {
+	meta := metav1.ObjectMeta{Name: leaderRoleName, Namespace: release.SystemNamespace, Labels: map[string]string{release.ComponentLabel: "bedrock"}}
+	role := rbacv1.Role{
+		TypeMeta:   metav1.TypeMeta{APIVersion: rbacv1.SchemeGroupVersion.String(), Kind: "Role"},
+		ObjectMeta: meta,
+		Rules:      []rbacv1.PolicyRule{{APIGroups: []string{"coordination.k8s.io"}, Resources: []string{"leases"}, Verbs: standardVerbs()}},
+	}
+	binding := rbacv1.RoleBinding{
+		TypeMeta:   metav1.TypeMeta{APIVersion: rbacv1.SchemeGroupVersion.String(), Kind: "RoleBinding"},
+		ObjectMeta: meta,
+		RoleRef:    rbacv1.RoleRef{APIGroup: rbacv1.GroupName, Kind: "Role", Name: leaderRoleName},
+		Subjects:   []rbacv1.Subject{{Kind: "ServiceAccount", Name: operatorDeployment, Namespace: release.SystemNamespace}},
+	}
+	return role, binding
 }
 
 func RoleYAML(role rbacv1.ClusterRole) ([]byte, error) {
