@@ -71,6 +71,13 @@ func PlatformRanges(cfg Config, cluster ClusterRanges) []string {
 	return slices.Compact(ranges)
 }
 
+func TenantManagementMissing(cfg Config, cluster ClusterRanges) error {
+	if cfg.TenantManagement.Enabled && cluster.Management == "" {
+		return fmt.Errorf("%s needs spec.managementCIDR of the Cluster: without it the node network is not in the platform ranges", keyTenantManagementEnabled)
+	}
+	return nil
+}
+
 func TenantManagementConflict(cfg Config, cluster ClusterRanges) error {
 	var others []ReservedRange
 	for _, pn := range cfg.ProviderNetworks {

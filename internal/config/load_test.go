@@ -802,3 +802,18 @@ func TestValidateAcceptsDNSAndEgress(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+func TestInstallNeverCarriesTheOVNTLSSetting(t *testing.T) {
+	cfg, err := Load(filepath.Join("testdata", "single-node.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, found := SettingValues(cfg)["network.ovn-tls"]; found {
+		t.Fatal("a fresh install must not enable OVN TLS: ovn-central would wait for fabric-tls before the operator can run")
+	}
+	for _, setting := range ToSettings(cfg) {
+		if setting.Name == "network.ovn-tls" {
+			t.Fatal("a fresh install must not write the setting network.ovn-tls")
+		}
+	}
+}
