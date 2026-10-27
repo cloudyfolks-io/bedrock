@@ -11,6 +11,8 @@ import (
 	rbacv1 "k8s.io/api/rbac/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apiserver/pkg/admission/plugin/policy/validating"
 	"k8s.io/apiserver/pkg/cel/openapi/resolver"
 	"k8s.io/client-go/discovery"
@@ -241,19 +243,24 @@ func TestPodNetworkDenyAdmitsGoodPodsAndDeniesBadOnes(t *testing.T) {
 		pod     *corev1.Pod
 		message string
 	}{
-		"no class":                    {tenantPod("a", "workload", withLabel("network.cloudyfolks.com/class", "")), "must be workload or managed"},
-		"wrong networks":              {tenantPod("b", "workload", withAnnotation("k8s.v1.cni.cncf.io/networks", "kube-system/vpc,other/x")), "kube-system/vpc"},
-		"missing networks":            {tenantPod("c", "workload", withoutAnnotation("k8s.v1.cni.cncf.io/networks")), "kube-system/vpc"},
-		"eth0 on the managed subnet":  {tenantPod("d", "workload", withAnnotation(ethZeroDomain+"logical_switch", "tenant-managed")), "eth0 logical_switch"},
-		"eth0 on the workload subnet": {tenantPod("e", "managed", withAnnotation(ethZeroDomain+"logical_switch", "tenant-workload")), "eth0 logical_switch"},
-		"eth0 port security off":      {tenantPod("f", "workload", withAnnotation(ethZeroDomain+"port_security", "false")), "port_security"},
-		"net1 port security off":      {tenantPod("g", "managed", withAnnotation(netOneDomain+"port_security", "false")), "port_security"},
-		"net1 port security missing":  {tenantPod("h", "managed", withoutAnnotation(netOneDomain+"port_security")), "port_security"},
-		"net1 subnet missing":         {tenantPod("i", "managed", withoutAnnotation(netOneDomain+"logical_switch")), "net1 logical_switch"},
-		"net1 subnet of another":      {tenantPod("j", "managed", withAnnotation(netOneDomain+"logical_switch", foreignSubnet)), "net1 logical_switch"},
-		"net1 group of another":       {tenantPod("k", "managed", withAnnotation(netOneDomain+"security_groups", podNetworkGroup+","+foreignGroup)), "net1 security_groups"},
-		"workload with a token":       {tenantPod("l", "workload", func(p *corev1.Pod) { p.Spec.AutomountServiceAccountToken = nil }), "automountServiceAccountToken"},
-		"workload with NET_BIND":      {tenantPod("m", "workload", withAddedCapability("NET_BIND_SERVICE")), "NET_BIND_SERVICE"},
+		"no class":                     {tenantPod("a", "workload", withLabel("network.cloudyfolks.com/class", "")), "must be workload or managed"},
+		"wrong networks":               {tenantPod("b", "workload", withAnnotation("k8s.v1.cni.cncf.io/networks", "kube-system/vpc,other/x")), "kube-system/vpc"},
+		"missing networks":             {tenantPod("c", "workload", withoutAnnotation("k8s.v1.cni.cncf.io/networks")), "kube-system/vpc"},
+		"eth0 on the managed subnet":   {tenantPod("d", "workload", withAnnotation(ethZeroDomain+"logical_switch", "tenant-managed")), "eth0 logical_switch"},
+		"eth0 on the workload subnet":  {tenantPod("e", "managed", withAnnotation(ethZeroDomain+"logical_switch", "tenant-workload")), "eth0 logical_switch"},
+		"eth0 port security off":       {tenantPod("f", "workload", withAnnotation(ethZeroDomain+"port_security", "false")), "port_security"},
+		"net1 port security off":       {tenantPod("g", "managed", withAnnotation(netOneDomain+"port_security", "false")), "port_security"},
+		"net1 port security missing":   {tenantPod("h", "managed", withoutAnnotation(netOneDomain+"port_security")), "port_security"},
+		"net1 subnet missing":          {tenantPod("i", "managed", withoutAnnotation(netOneDomain+"logical_switch")), "net1 logical_switch"},
+		"net1 subnet of another":       {tenantPod("j", "managed", withAnnotation(netOneDomain+"logical_switch", foreignSubnet)), "net1 logical_switch"},
+		"net1 group of another":        {tenantPod("k", "managed", withAnnotation(netOneDomain+"security_groups", podNetworkGroup+","+foreignGroup)), "net1 security_groups"},
+		"workload with a token":        {tenantPod("l", "workload", func(p *corev1.Pod) { p.Spec.AutomountServiceAccountToken = nil }), "automountServiceAccountToken"},
+		"net1 group list with a space": {tenantPod("n", "managed", withAnnotation(netOneDomain+"security_groups", podNetworkGroup+", "+foreignGroup)), "clean names"},
+		"net1 group list with a tab":   {tenantPod("o", "managed", withAnnotation(netOneDomain+"security_groups", podNetworkGroup+"\t"+foreignGroup)), "clean names"},
+		"net1 group list with a hole":  {tenantPod("p", "managed", withAnnotation(netOneDomain+"security_groups", podNetworkGroup+",,"+podNetworkGroup)), "clean names"},
+		"net1 group list trailing":     {tenantPod("q", "managed", withAnnotation(netOneDomain+"security_groups", podNetworkGroup+",")), "clean names"},
+		"net1 subnet with a space":     {tenantPod("r", "managed", withAnnotation(netOneDomain+"logical_switch", podNetworkSubnet+" ")), "clean names"},
+		"workload with NET_BIND":       {tenantPod("m", "workload", withAddedCapability("NET_BIND_SERVICE")), "NET_BIND_SERVICE"},
 	}
 	for name, c := range bad {
 		err := w.user.Create(context.Background(), c.pod)
@@ -368,4 +375,24 @@ func TestPodNetworkPolicyAddsNoSecondDenialForOtherCapabilities(t *testing.T) {
 	if strings.Contains(err.Error(), "class workload containers must not add NET_BIND_SERVICE") {
 		t.Fatalf("the pod network policy must not deny it a second time: %v", err)
 	}
+}
+
+func TestPodNetworkAdmitsAPodWhenNoSecurityGroupOrSubnetExists(t *testing.T) {
+	w := newPodNetworkWorld(t)
+	ctx := context.Background()
+	for _, gvk := range []schema.GroupVersionKind{fabric.SecurityGroupGVK, fabric.SubnetGVK} {
+		list := &unstructured.UnstructuredList{}
+		list.SetGroupVersionKind(gvk.GroupVersion().WithKind(gvk.Kind + "List"))
+		if err := w.admin.List(ctx, list); err != nil {
+			t.Fatal(err)
+		}
+		for i := range list.Items {
+			if err := w.admin.Delete(ctx, &list.Items[i]); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	w.setMode(t, "deny")
+	w.waitDenying(t)
+	mustCreate(t, w.user, tenantPod("bare", "managed", withoutAnnotation(netOneDomain+"security_groups")))
 }

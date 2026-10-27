@@ -61,7 +61,7 @@ func podNetworkBinding(policy podNetworkPolicy, actions []admissionregistrationv
 		Spec: admissionregistrationv1.ValidatingAdmissionPolicyBindingSpec{PolicyName: policy.name, ValidationActions: actions},
 	}
 	if policy.parameterized {
-		notFound := admissionregistrationv1.DenyAction
+		notFound := admissionregistrationv1.AllowAction
 		binding.Spec.ParamRef = &admissionregistrationv1.ParamRef{Selector: &metav1.LabelSelector{}, ParameterNotFoundAction: &notFound}
 	}
 	return binding

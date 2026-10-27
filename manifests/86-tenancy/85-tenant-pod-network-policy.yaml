@@ -37,6 +37,10 @@ spec:
       expression: "'network.cloudyfolks.com/class' in variables.labels ? variables.labels['network.cloudyfolks.com/class'] : ''"
     - name: created
       expression: "request.operation == 'CREATE'"
+    - name: net1Subnet
+      expression: "'vpc.kube-system.fabric.cloudyfolks.io/logical_switch' in variables.annotations ? variables.annotations['vpc.kube-system.fabric.cloudyfolks.io/logical_switch'] : ''"
+    - name: net1Groups
+      expression: "'vpc.kube-system.fabric.cloudyfolks.io/security_groups' in variables.annotations ? variables.annotations['vpc.kube-system.fabric.cloudyfolks.io/security_groups'] : ''"
     - name: eth0Subnet
       expression: "variables.class == 'workload' ? 'tenant-workload' : 'tenant-managed'"
     - name: podSpec
@@ -59,6 +63,12 @@ spec:
       reason: Forbidden
     - expression: "!variables.created || ('vpc.kube-system.fabric.cloudyfolks.io/logical_switch' in variables.annotations && variables.annotations['vpc.kube-system.fabric.cloudyfolks.io/logical_switch'] != '')"
       message: "net1 logical_switch must name a subnet of the project"
+      reason: Forbidden
+    - expression: >-
+        !variables.created ||
+        (!variables.net1Subnet.matches('[ \\t\\r\\n]') && !variables.net1Groups.matches('[ \\t\\r\\n]') &&
+        (variables.net1Groups == '' || variables.net1Groups.split(',').all(g, g != '')))
+      message: "net1 logical_switch and security_groups must hold clean names: no whitespace and no empty list item"
       reason: Forbidden
     - expression: "!variables.created || variables.class != 'workload' || (has(variables.podSpec.automountServiceAccountToken) && variables.podSpec.automountServiceAccountToken == false)"
       message: "class workload pods must set automountServiceAccountToken to false"
