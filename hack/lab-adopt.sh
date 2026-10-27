@@ -4,7 +4,7 @@ set -euo pipefail
 prefix=adoptlab
 ids=(1 2 3)
 letters=(a b)
-cpus=4
+cpus=8
 memory=14
 root_gb=100
 osd_gb=20

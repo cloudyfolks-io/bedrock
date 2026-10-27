@@ -338,6 +338,7 @@ modprobe openvswitch
 modprobe geneve
 modinfo rbd >/dev/null
 modinfo ceph >/dev/null
+systemctl stop lima-guestagent
 SCRIPT
 }
 
