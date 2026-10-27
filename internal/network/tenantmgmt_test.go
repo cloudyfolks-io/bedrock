@@ -11,6 +11,8 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+
+	"github.com/cloudyfolks-io/bedrock/api/v1alpha1"
 )
 
 var tenantRanges = ClusterRanges{Management: "10.0.10.0/24", Join: "100.64.0.0/16", Pod: "10.16.0.0/16", Service: "10.96.0.0/12"}
@@ -164,6 +166,7 @@ func TestUnderlayReconcilerAppliesAndRemovesTenantManagement(t *testing.T) {
 	c, _ := testEnv(t)
 	cleanUnderlay(t, c)
 	t.Cleanup(func() { purgeKind(context.Background(), c, attachmentGVK) })
+	withManagementCIDR(t, c)
 	setSetting(t, "network.tenant-management.enabled", "true")
 	reconcileUnderlay(t, c)
 	got := underlayObjects(t, c)
@@ -207,5 +210,43 @@ func TestSweeperDoesNotSweepTenantManagementSubnets(t *testing.T) {
 	subnet.SetCreationTimestamp(metav1.NewTime(time.Now().Add(-time.Hour)))
 	if orphans := FindOrphans([]*unstructured.Unstructured{subnet}, nil, time.Now(), time.Minute); len(orphans) != 0 {
 		t.Fatalf("orphans %v", orphans)
+	}
+}
+
+func withManagementCIDR(t *testing.T, c client.Client) {
+	t.Helper()
+	ctx := context.Background()
+	cluster := &v1alpha1.Cluster{ObjectMeta: metav1.ObjectMeta{Name: v1alpha1.ClusterName}, Spec: v1alpha1.ClusterSpec{DesiredVersion: "v1", API: v1alpha1.APISpec{VIP: "10.0.10.10"}, ManagementCIDR: "10.0.10.0/24"}}
+	if err := c.Create(ctx, cluster); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = c.Delete(ctx, cluster) })
+}
+
+func TestTenantManagementMissingNeedsTheManagementRange(t *testing.T) {
+	cfg := enabledConfig(t)
+	if err := TenantManagementMissing(cfg, ClusterRanges{Join: "100.64.0.0/16"}); err == nil {
+		t.Fatal("an empty management range was accepted")
+	}
+	if err := TenantManagementMissing(cfg, tenantRanges); err != nil {
+		t.Fatal(err)
+	}
+	if err := TenantManagementMissing(configOf(t, map[string]string{}), ClusterRanges{}); err != nil {
+		t.Fatalf("a disabled setting needs nothing: %v", err)
+	}
+}
+
+func TestUnderlayReconcilerRendersNothingWithoutAManagementRange(t *testing.T) {
+	c, _ := testEnv(t)
+	cleanUnderlay(t, c)
+	t.Cleanup(func() { purgeKind(context.Background(), c, attachmentGVK) })
+	setSetting(t, "network.tenant-management.enabled", "true")
+	reconcileUnderlay(t, c)
+	if got := underlayObjects(t, c); got["Subnet/tenant-workload"] != nil || got["Subnet/tenant-managed"] != nil {
+		t.Fatalf("objects %v", got)
+	}
+	err := c.Get(context.Background(), client.ObjectKey{Namespace: "kube-system", Name: "vpc"}, newObject(attachmentGVK, "vpc"))
+	if !apierrors.IsNotFound(err) {
+		t.Fatalf("no attachment without the management range: %v", err)
 	}
 }

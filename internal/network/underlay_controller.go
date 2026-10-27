@@ -58,6 +58,12 @@ func (r *UnderlayReconciler) Reconcile(ctx context.Context, _ reconcile.Request)
 	if err != nil {
 		return reconcile.Result{}, err
 	}
+	if err := TenantManagementMissing(cfg, ranges); err != nil {
+		if err := warn(ctx, r.Client, settingReference(keyTenantManagementEnabled), "InvalidSettings", err.Error()); err != nil {
+			return reconcile.Result{}, err
+		}
+		cfg.TenantManagement.Enabled = false
+	}
 	if cfg.TenantManagement.Enabled {
 		if err := TenantManagementConflict(cfg, ranges); err != nil {
 			return reconcile.Result{}, warn(ctx, r.Client, settingReference(keyTenantManagementEnabled), "InvalidSettings", err.Error())
