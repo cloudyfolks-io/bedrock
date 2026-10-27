@@ -74,6 +74,9 @@ func (r *UnderlayReconciler) Reconcile(ctx context.Context, _ reconcile.Request)
 	if err := r.syncAttachment(ctx, cfg.TenantManagement.Enabled); err != nil {
 		return reconcile.Result{}, err
 	}
+	if err := r.ensureOVNTLS(ctx, cfg.OVNTLS); err != nil {
+		return reconcile.Result{}, err
+	}
 	refused, err := r.prune(ctx, wanted)
 	if err != nil {
 		return reconcile.Result{}, err
@@ -106,6 +109,17 @@ func (r *UnderlayReconciler) syncAttachment(ctx context.Context, enabled bool) e
 		return err
 	}
 	return client.IgnoreNotFound(r.Client.Delete(ctx, existing))
+}
+
+func (r *UnderlayReconciler) ensureOVNTLS(ctx context.Context, enabled bool) error {
+	if !enabled {
+		return nil
+	}
+	secret, err := OVNTLSSecret(time.Now())
+	if err != nil {
+		return err
+	}
+	return client.IgnoreAlreadyExists(r.Client.Create(ctx, secret))
 }
 
 func (r *UnderlayReconciler) existingCarriers(ctx context.Context) ([]*unstructured.Unstructured, error) {
