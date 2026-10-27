@@ -11,6 +11,7 @@ func tenancyRules() []rbacv1.PolicyRule {
 		{APIGroups: []string{""}, Resources: []string{"namespaces"}, Verbs: standardVerbsWithoutDelete()},
 		{APIGroups: []string{"networking.k8s.io"}, Resources: []string{"networkpolicies"}, Verbs: standardVerbs()},
 		{APIGroups: []string{rbacv1.GroupName}, Resources: []string{"clusterroles", "clusterrolebindings", "rolebindings"}, Verbs: standardVerbs()},
+		{APIGroups: []string{"admissionregistration.k8s.io"}, Resources: []string{"validatingadmissionpolicybindings"}, Verbs: standardVerbs()},
 		{APIGroups: []string{"aaq.kubevirt.io"}, Resources: []string{"applicationawareresourcequotas"}, Verbs: standardVerbs()},
 	}
 }
