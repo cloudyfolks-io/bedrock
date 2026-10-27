@@ -881,6 +881,10 @@ The default is `false`.
 Bedrock makes the Secret `fabric-tls` in `kube-system` when the setting is `true` and the Secret does not exist.
 The Secret holds a new CA and a certificate for 10 years, and Bedrock never replaces it.
 The release does not carry the Secret, because it would hold a private key.
+Turn the setting on only after the install.
+The cluster configuration of `bedrock init` has no field for it, so a new cluster always starts with `false`.
+OVN TLS needs a running operator, and the operator needs the CNI, and the CNI needs the OVN database.
+Do not write the Setting before the install ends.
 To rotate the certificate, delete the Secret and restart the OVN components.
 
 ### How a change reaches the cluster
