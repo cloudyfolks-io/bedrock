@@ -13,7 +13,10 @@ import (
 	"github.com/cloudyfolks-io/bedrock/api/v1alpha1"
 )
 
-const restoreRunbook = "docs/runbooks/restore-control-plane.md"
+const (
+	restoreRunbook     = "docs/runbooks/restore-control-plane.md"
+	maxCleanupAttempts = 5
+)
 
 type actionFunc func(ctx context.Context, env upgradeEnv, cluster v1alpha1.Cluster) error
 
@@ -120,13 +123,31 @@ func cleanUp(ctx context.Context, env upgradeEnv, cluster v1alpha1.Cluster) (str
 	if len(summary.Waiting) > 0 {
 		return fmt.Sprintf("abort: cleanup %d/%d nodes, waiting for %s", summary.Succeeded+len(summary.Failed), summary.Total, strings.Join(summary.Waiting, ", ")), false, nil
 	}
+	if len(summary.Failed) > 0 {
+		return retryCleanup(ctx, env, cluster, strings.Join(summary.Failed, "; "))
+	}
 	if err := deleteNodeUpgrades(ctx, env.Client, upgrade.To); err != nil {
 		return "", false, err
 	}
-	if len(summary.Failed) > 0 {
-		return "cleanup failed on " + strings.Join(summary.Failed, "; "), true, nil
-	}
 	return "", true, nil
+}
+
+func retryCleanup(ctx context.Context, env upgradeEnv, cluster v1alpha1.Cluster, failure string) (string, bool, error) {
+	upgrade := *cluster.Status.Upgrade
+	if upgrade.Attempt >= maxCleanupAttempts {
+		message := fmt.Sprintf("abort: cleanup failed on %s after %d attempts: fix the host, then delete its NodeUpgrade to run the cleanup again", failure, upgrade.Attempt)
+		return message, false, writeClusterStatus(ctx, env.Client, func(s *v1alpha1.ClusterStatus) {
+			*s = failPhase(*s, message, cluster.Generation)
+		})
+	}
+	next := upgrade.Attempt + 1
+	if err := raiseAttempts(ctx, env.Client, upgrade.To, next); err != nil {
+		return "", false, err
+	}
+	message := fmt.Sprintf("abort: cleanup failed on %s, attempt %d", failure, next)
+	return message, false, writeClusterStatus(ctx, env.Client, func(s *v1alpha1.ClusterStatus) {
+		s.Upgrade.Attempt = next
+	})
 }
 
 func restoreOperatorImage(ctx context.Context, c client.Client, version string) error {
