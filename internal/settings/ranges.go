@@ -11,11 +11,15 @@ var bucketKeys = []string{"registry.bucket", "database.backup.bucket"}
 
 var retentionKeys = []string{"database.backup.retention-days-min", "database.backup.retention-days-max"}
 
-var addressRangeKeys = []string{"database.vip-range", "network.services.identity-range", "network.load-balancer.cidr", "network.tenant-management.workload-cidr", "network.tenant-management.managed-cidr"}
+const tenantManagementEnabledKey = "network.tenant-management.enabled"
+
+var tenantManagementRangeKeys = []string{"network.tenant-management.workload-cidr", "network.tenant-management.managed-cidr"}
+
+var addressRangeKeys = append([]string{"database.vip-range", "network.services.identity-range", "network.load-balancer.cidr"}, tenantManagementRangeKeys...)
 
 func Conflict(key string, values map[string]string) error {
 	switch {
-	case slices.Contains(addressRangeKeys, key):
+	case slices.Contains(addressRangeKeys, key) || key == tenantManagementEnabledKey:
 		return RangeConflict(values)
 	case slices.Contains(bucketKeys, key):
 		return BucketConflict(values)
@@ -41,14 +45,13 @@ func BucketConflict(values map[string]string) error {
 }
 
 func RangeConflict(values map[string]string) error {
+	enabled := effectiveValue(tenantManagementEnabledKey, values) == "true"
 	prefixes := make([]netip.Prefix, len(addressRangeKeys))
 	for i, key := range addressRangeKeys {
-		value := values[key]
-		if value == "" {
-			def, _ := Lookup(key)
-			value = def.Default
+		if !enabled && slices.Contains(tenantManagementRangeKeys, key) {
+			continue
 		}
-		prefixes[i], _ = netip.ParsePrefix(value)
+		prefixes[i], _ = netip.ParsePrefix(effectiveValue(key, values))
 	}
 	for i := range prefixes {
 		for j := i + 1; j < len(prefixes); j++ {
@@ -58,6 +61,14 @@ func RangeConflict(values map[string]string) error {
 		}
 	}
 	return nil
+}
+
+func effectiveValue(key string, values map[string]string) string {
+	if value := values[key]; value != "" {
+		return value
+	}
+	def, _ := Lookup(key)
+	return def.Default
 }
 
 func RetentionConflict(values map[string]string) error {
