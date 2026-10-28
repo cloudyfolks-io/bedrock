@@ -546,3 +546,27 @@ func TestRetainedTarballsAreTheKeptListIncludingCarriedFiles(t *testing.T) {
 		t.Fatalf("retained %v, want %v", files, want)
 	}
 }
+
+type refusingContainerd struct {
+	inner    host.Exec
+	refusals int
+}
+
+func (r *refusingContainerd) Run(ctx context.Context, name string, args ...string) (string, error) {
+	if r.refusals > 0 && len(args) > 0 && args[0] == "ctr" {
+		r.refusals--
+		return "", errors.New("dial unix /run/k0s/containerd.sock: connect: connection refused")
+	}
+	return r.inner.Run(ctx, name, args...)
+}
+
+func TestCleanupWaitsUntilContainerdAnswers(t *testing.T) {
+	env, container := finishEnv(t, namesOf(t, oldOnly, newOnly, shared, retagged))
+	env.Deps.Exec = &refusingContainerd{inner: env.Deps.Exec, refusals: 3}
+	if _, err := cleanup(context.Background(), env); err != nil {
+		t.Fatalf("a refused ctr call must be retried: %v", err)
+	}
+	if len(removed(container)) == 0 {
+		t.Fatal("the images of the target must be removed after containerd answers")
+	}
+}
