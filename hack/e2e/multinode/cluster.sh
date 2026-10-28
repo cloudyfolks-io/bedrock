@@ -106,6 +106,14 @@ mons_in_quorum_are() {
   [ "$(ceph_op quorum_status -f json | jq '.quorum_names | length')" = "$1" ]
 }
 
+pgs_active() {
+  ceph_op status -f json | jq -e '.pgmap.num_pgs > 0 and .pgmap.num_pgs == ([.pgmap.pgs_by_state[] | select(.state_name | startswith("active")) | .count] | add)' >/dev/null
+}
+
+node_ready() {
+  [ "$(kubectl get node "$1" -o jsonpath='{.status.conditions[?(@.type=="Ready")].status}')" = True ]
+}
+
 check_ceph_topology() {
   retry_until 1800 mons_in_quorum_are 3 || {
     ceph_op status >&2

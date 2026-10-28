@@ -60,6 +60,7 @@ const (
 	ReasonConnectCIDRInUse               = "ConnectCIDRInUse"
 	ReasonPeeringExists                  = "PeeringExists"
 	ReasonServicesNotConfigured          = "ServicesNotConfigured"
+	ReasonMTUExceedsUnderlay             = "MTUExceedsUnderlay"
 )
 
 var AllReasons = sortedReasons([]string{
@@ -75,6 +76,7 @@ var AllReasons = sortedReasons([]string{
 	ReasonTargetInUse, ReasonWaitingForDefaultSecurityGroup, ReasonCIDRReserved, ReasonCIDROutsideAllowedRanges,
 	ReasonVRFInUse, ReasonVRFReserved, ReasonNoPoolCapacity,
 	ReasonQuotaExceeded, ReasonGatewayExists, ReasonConnectCIDRInUse, ReasonPeeringExists, ReasonServicesNotConfigured,
+	ReasonMTUExceedsUnderlay,
 })
 
 func sortedReasons(reasons []string) []string {

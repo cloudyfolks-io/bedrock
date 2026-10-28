@@ -45,6 +45,31 @@ check_migration_ip_mac() {
   delete_vms "$NS" lab-mig
 }
 
+apply_xfer_security_group() {
+  kubectl -n "$NS" apply -f - <<SECURITYGROUP
+apiVersion: bedrock.cloudyfolks.io/v1alpha1
+kind: SecurityGroup
+metadata:
+  name: lab-xfer
+spec:
+  ingress:
+    - protocol: tcp
+      port: 9000
+      cidr: 0.0.0.0/0
+    - protocol: icmp
+      cidr: 0.0.0.0/0
+  egress:
+    - protocol: all
+      cidr: 0.0.0.0/0
+SECURITYGROUP
+  wait_condition 180 securitygroup lab-xfer Ready True -n "$NS"
+}
+
+delete_xfer_security_group() {
+  kubectl -n "$NS" delete securitygroup lab-xfer --wait=false
+  wait_gone 300 securitygroup lab-xfer -n "$NS"
+}
+
 xfer_server_ip() {
   echo "$(subnet_base "$NS" default).50"
 }
@@ -53,12 +78,13 @@ xfer_pair() {
   local server_ip client_ip
   server_ip=$(xfer_server_ip)
   client_ip=$(subnet_base "$NS" default).51
+  apply_xfer_security_group
   vm_manifest lab-xfer-server "$NS" "$(guest_script server '')" "$(
-    network_yaml default "$server_ip"
+    network_yaml default "$server_ip" lab-xfer
     avoid_node_yaml "$(lab_node 2)"
   )" | kubectl apply -f -
   vm_manifest lab-xfer-client "$NS" "$(guest_script client "$server_ip")" "$(
-    network_yaml default "$client_ip"
+    network_yaml default "$client_ip" lab-xfer
     pin_node_yaml "$(lab_node 2)"
   )" | kubectl apply -f -
   start_guest "$NS" lab-xfer-server
@@ -110,6 +136,7 @@ check_pinned_after_migration() {
   }
   echo "info: a VM with the pinned address $ip moved from $before to $(vm_node "$NS" lab-xfer-server) and the client on $(vm_node "$NS" lab-xfer-client) read $xfer_bytes bytes from it again"
   delete_vms "$NS" lab-xfer-server lab-xfer-client
+  delete_xfer_security_group
 }
 
 guest_sees_disk() {
@@ -215,12 +242,13 @@ spec:
 SUBNET
   wait_reason 120 subnet lab-mtu1500 Ready Applied -n "$NS"
   base=10.100.16
+  apply_xfer_security_group
   vm_manifest lab-mtu-server "$NS" "$(guest_script server '')" "$(
-    network_yaml lab-mtu1500 "$base.50"
+    network_yaml lab-mtu1500 "$base.50" lab-xfer
     avoid_node_yaml "$(lab_node 2)"
   )" | kubectl apply -f -
   vm_manifest lab-mtu-client "$NS" "$(guest_script client "$base.50")" "$(
-    network_yaml lab-mtu1500 "$base.51"
+    network_yaml lab-mtu1500 "$base.51" lab-xfer
     pin_node_yaml "$(lab_node 2)"
   )" | kubectl apply -f -
   start_guest "$NS" lab-mtu-server
@@ -233,6 +261,7 @@ SUBNET
   fi
   echo "info: 8b: with Subnet mtu 1500 on an underlay of $(underlay_mtu), guest MTU $(guest_value "$NS" lab-mtu-client NET | awk '{print $3}'), the read of $xfer_bytes bytes $verdict at $best bytes"
   delete_vms "$NS" lab-mtu-server lab-mtu-client
+  delete_xfer_security_group
   kubectl -n "$NS" delete subnet lab-mtu1500 --wait=false
   wait_gone 300 subnet lab-mtu1500 -n "$NS"
 }

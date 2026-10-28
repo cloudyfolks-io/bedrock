@@ -70,6 +70,9 @@ network_yaml() {
   if [ -n "${2:-}" ]; then
     printf '      address: %s\n' "$2"
   fi
+  if [ -n "${3:-}" ]; then
+    printf '      securityGroups: [%s]\n' "$3"
+  fi
 }
 
 prefer_node_yaml() {

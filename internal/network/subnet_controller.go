@@ -130,6 +130,17 @@ func (r *SubnetReconciler) check(ctx context.Context, subnet v1alpha1.Subnet, cf
 	if v := CheckExcludeIPs(subnet.Spec.CIDR, subnet.Spec.ExcludeIPs); v != nil {
 		return SubnetInput{}, v, nil
 	}
+	var hosts v1alpha1.HostList
+	if err := r.Client.List(ctx, &hosts); err != nil {
+		return SubnetInput{}, nil, err
+	}
+	var nodes corev1.NodeList
+	if err := r.Client.List(ctx, &nodes); err != nil {
+		return SubnetInput{}, nil, err
+	}
+	if v := MTUViolation(mtuOf(subnet, cfg.MTU), UnderlayMTU(nodes.Items, hosts.Items)); v != nil {
+		return SubnetInput{}, v, nil
+	}
 	if !v1alpha1.IsConditionTrue(network.Status.Conditions, v1alpha1.ConditionReady) {
 		return SubnetInput{}, &Violation{Reason: ReasonNetworkNotReady, Message: fmt.Sprintf("the Network %q is not ready yet", network.Name)}, nil
 	}

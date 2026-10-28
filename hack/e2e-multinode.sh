@@ -195,7 +195,21 @@ stage_tenant() {
 script_reset_node() {
   cat <<'SCRIPT'
 k0s stop || true
-k0s reset
+for mount in $(findmnt -rn -o TARGET | grep '/var/lib/kubelet/plugins/kubernetes.io/csi' | sort -r); do
+  umount -l "$mount" || true
+done
+for device in /dev/rbd[0-9]*; do
+  [ -b "$device" ] && rbd unmap -o force "$device" || true
+done
+timeout 600 k0s reset || {
+  status=$?
+  echo "k0s reset ended with $status, state of the node follows" >&2
+  ps -eo pid,stat,wchan:32,cmd | awk '$2 ~ /D/' >&2
+  ls /dev/rbd[0-9]* >&2 || true
+  findmnt -rn -o TARGET,SOURCE | grep -E 'rbd|csi' >&2 || true
+  dmesg | tail -n 40 >&2
+  exit "$status"
+}
 SCRIPT
 }
 
@@ -261,13 +275,19 @@ check_restore() {
     return 1
   }
   started=$(vm_run 1 'date -u +%s') || return 1
+  vm_run 1 'ceph_op osd set noout' || return 1
   vm_run 3 'systemctl stop k0scontroller' || return 1
   vm_run 2 'systemctl stop k0scontroller' || return 1
   vm_run 1 "restore_node_one $snapshot" || return 1
   vm_run 1 'retry_until 900 kubectl get --raw=/readyz' || return 1
   token=$(vm_run 1 "$bedrock_bin token create --roles $join_roles --expiry 2h") || return 1
   rejoin_node 2 "$token" || return 1
+  vm_run 1 "retry_until 1800 node_ready $(lab_node 2)" || return 1
+  vm_run 1 'retry_until 1800 pgs_active' || return 1
   rejoin_node 3 "$token" || return 1
+  vm_run 1 "retry_until 1800 node_ready $(lab_node 3)" || return 1
+  vm_run 1 'retry_until 1800 pgs_active' || return 1
+  vm_run 1 'ceph_op osd unset noout' || return 1
   vm_run 1 "$bedrock_bin restart-workloads" || return 1
   early=$(vm_run 1 "restore_settle $started") || return 1
   log "waiting ${restore_window}s for the taint eviction window"

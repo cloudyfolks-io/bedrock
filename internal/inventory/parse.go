@@ -149,6 +149,33 @@ func ParseIPLink(raw []byte, sysRoot string) ([]v1alpha1.NICInfo, error) {
 	return nics, nil
 }
 
+type ipAddr struct {
+	Name     string `json:"ifname"`
+	MTU      int32  `json:"mtu"`
+	AddrInfo []struct {
+		Local string `json:"local"`
+	} `json:"addr_info"`
+}
+
+func ParseIPAddr(raw []byte) ([]v1alpha1.LinkInfo, error) {
+	var links []ipAddr
+	if err := json.Unmarshal(raw, &links); err != nil {
+		return nil, fmt.Errorf("ip addr: %w", err)
+	}
+	out := make([]v1alpha1.LinkInfo, 0, len(links))
+	for _, link := range links {
+		if link.Name == "lo" {
+			continue
+		}
+		info := v1alpha1.LinkInfo{Name: link.Name, MTU: link.MTU}
+		for _, a := range link.AddrInfo {
+			info.Addresses = append(info.Addresses, a.Local)
+		}
+		out = append(out, info)
+	}
+	return out, nil
+}
+
 func readSpeed(path string) int32 {
 	raw, err := os.ReadFile(path)
 	if err != nil {
