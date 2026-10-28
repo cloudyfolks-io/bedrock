@@ -169,11 +169,15 @@ put the images of the bundle back before you run the script. See
 
 Do this step only when the cluster has more than one controller.
 
-On each other controller, remove its state:
+Ceph keeps one replica on each host, and a pool needs two replicas to
+serve IO. Do this step for one controller at a time. A reset of two
+controllers at once makes the placement groups of Ceph inactive, and
+`k0s reset` then waits for ever on a mapped RBD device.
+
+Before the first controller, tell Ceph not to mark the OSDs out:
 
 ```sh
-k0s reset
-reboot
+kubectl -n rook-ceph exec deploy/rook-ceph-operator -- ceph --conf=/var/lib/rook/rook-ceph/rook-ceph.config osd set noout
 ```
 
 On the backup node, make a join token:
@@ -182,11 +186,34 @@ On the backup node, make a join token:
 bedrock token create --roles control-plane
 ```
 
-On each other controller, join with the token and the bundle of the
-previous version:
+Then, on one other controller, remove its state. Stop the workloads that
+use RBD volumes on the node first, or force-unmap the RBD devices, so that
+the reset does not wait for IO:
+
+```sh
+timeout 600 k0s reset
+reboot
+```
+
+On that controller, join with the token and the bundle of the previous
+version:
 
 ```sh
 bedrock join --token <token> --bundle <bundle of the previous version>
+```
+
+Wait until the node is `Ready` and all placement groups are active. Then
+do the next controller:
+
+```sh
+kubectl get node <name>
+kubectl -n rook-ceph exec deploy/rook-ceph-operator -- ceph --conf=/var/lib/rook/rook-ceph/rook-ceph.config status
+```
+
+After the last controller, remove the flag:
+
+```sh
+kubectl -n rook-ceph exec deploy/rook-ceph-operator -- ceph --conf=/var/lib/rook/rook-ceph/rook-ceph.config osd unset noout
 ```
 
 ## 4. Restart the kubelet on every worker
