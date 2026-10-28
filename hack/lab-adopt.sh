@@ -125,6 +125,11 @@ fs.shutdown()
 print(hashlib.sha256(data).hexdigest())
 PY
 }
+k0s_diagnose() {
+  journalctl -u k0scontroller --no-pager -n 200 || true
+  systemctl status k0scontroller || true
+  exit 1
+}
 FUNCTIONS
 }
 
@@ -152,9 +157,9 @@ spec:
     kuberouter:
       metricsPort: 0
 CONFIG
-k0s install controller --enable-worker --no-taints --config /etc/k0s/k0s.yaml --kubelet-extra-args="--node-ip=$IP"
-k0s start
-retry_until 300 k0s kubectl get nodes
+k0s install controller --enable-worker --no-taints --config /etc/k0s/k0s.yaml --kubelet-extra-args="--node-ip=$IP" || k0s_diagnose
+k0s start || k0s_diagnose
+retry_until 300 k0s kubectl get nodes || k0s_diagnose
 SCRIPT
 }
 
@@ -226,7 +231,7 @@ stage_old() {
   state_load
   log "k0s $k0s_version on $(vm_name 1)"
   vm_run 1 "$(script_old_controller)" IP="$(node_ip 1)" K0S_SRC="$k0s_source"
-  token=$(vm_run 1 'k0s token create --role worker --expiry 2h')
+  token=$(vm_run 1 'k0s token create --role worker --expiry 2h || k0s_diagnose')
   for id in 2 3; do
     log "k0s $k0s_version worker on $(vm_name "$id")"
     vm_run "$id" "$(script_old_worker)" IP="$(node_ip "$id")" K0S_SRC="$k0s_source" TOKEN="$token"
