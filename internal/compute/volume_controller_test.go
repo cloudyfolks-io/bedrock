@@ -216,16 +216,14 @@ func TestVolumeExpandsThePVC(t *testing.T) {
 	}
 }
 
-func TestVolumeShrinkIsRefused(t *testing.T) {
+func TestVolumeAcceptsAClaimEnlargedByTheFilesystemOverhead(t *testing.T) {
 	c, _ := startEnv(t)
 	ns := uniqueNamespace(t, c)
-	createPVC(t, c, ns, "data1", 20, "block")
+	createPVC(t, c, ns, "data1", 11, "block")
 	newVolume(t, c, ns, "data1", func(v *v1alpha1.Volume) {})
-	requireVolumeReason(t, reconcileVolume(t, c, ns, "data1"), "ShrinkRefused")
-	var pvc corev1.PersistentVolumeClaim
-	must(t, c.Get(context.Background(), client.ObjectKey{Namespace: ns, Name: "data1"}, &pvc))
-	if got := pvc.Spec.Resources.Requests.Storage().String(); got != "20Gi" {
-		t.Fatalf("request %s", got)
+	volume := reconcileVolume(t, c, ns, "data1")
+	if cond := volumeReady(volume); cond != nil && cond.Reason == "ShrinkRefused" {
+		t.Fatalf("Ready %+v", cond)
 	}
 }
 
