@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-set -euo pipefail
+set -Eeuo pipefail
 
 source "$(dirname "${BASH_SOURCE[0]}")/e2e/lib.sh"
 
@@ -80,6 +80,7 @@ dump() {
   fi
   rm -rf "$workdir"
 }
+trap 'echo "failed: $BASH_COMMAND at line $LINENO" >&2' ERR
 trap dump EXIT
 
 upgrade_archives() {
