@@ -51,7 +51,6 @@ const (
 	ReasonStopping               = "Stopping"
 	ReasonFailed                 = "Failed"
 	ReasonSourceNotReady         = "SourceNotReady"
-	ReasonShrinkRefused          = "ShrinkRefused"
 	ReasonExpansionUnsupported   = "ExpansionNotSupported"
 	ReasonInUse                  = "InUse"
 	ReasonNoSnapshotClass        = "NoSnapshotClass"

@@ -234,10 +234,7 @@ func (r *VolumeReconciler) cloneSource(ctx context.Context, volume v1alpha1.Volu
 
 func (r *VolumeReconciler) resize(ctx context.Context, volume v1alpha1.Volume, pvc corev1.PersistentVolumeClaim) (*Gate, error) {
 	requested := ceilGi(pvc.Spec.Resources.Requests.Storage().Value())
-	switch {
-	case volume.Spec.SizeGi < requested:
-		return gateOf(ReasonShrinkRefused, "the claim holds %dGi and cannot shrink to %dGi", requested, volume.Spec.SizeGi), nil
-	case volume.Spec.SizeGi == requested:
+	if volume.Spec.SizeGi <= requested {
 		return nil, nil
 	}
 	expandable, err := r.expandable(ctx, pvc)

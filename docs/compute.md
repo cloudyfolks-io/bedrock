@@ -416,7 +416,6 @@ Run `kubectl describe virtualmachine <name>` and read the condition `Ready`.
 | `NameConflict` | An object of another owner has a name that the operator needs. | Rename your Volume, Secret or snapshot. |
 | `WaitingForDefaultSecurityGroup` | The default security group of the project does not exist yet. | Wait. The operator checks again in 30 seconds. |
 | `SourceNotReady` | The source of a Volume is not ready. | Check the image, the snapshot or the source Volume. |
-| `ShrinkRefused` | The size is smaller than the claim. | Use a size that is not smaller. |
 | `InUse` | A VM lists the Volume that you delete. | Remove the Volume from the VM. |
 | `VolumeNotFound` on a snapshot | The Volume or its claim does not exist. | Create the Volume first. |
 | `NoSnapshotClass` | No snapshot class serves the Volume. | Use a storage class with a snapshot class. |
