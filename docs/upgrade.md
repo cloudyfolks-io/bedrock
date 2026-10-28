@@ -33,6 +33,14 @@ If the archive of the version to keep does not exist, it removes nothing.
 The restore scripts of [Backup](backup.md#etcd-snapshots) do the same link step on a host with no containerd store.
 The link names have the form `<version>-<file>`.
 
+## Cleanup failure during `bedrock upgrade abort`
+
+The abort runs the `Cleanup` step on each host. The abort is finished only when `Cleanup` succeeded on every host. The operator then deletes the NodeUpgrades and sets the phase `Idle` with the reason `Aborted`.
+The agent retries `k0s ctr` calls of `Cleanup` while containerd is down or restarts, with a backoff, for up to 6 attempts.
+If the step still fails on a host, the operator runs it again on every host that failed. The cluster stays in its phase, and the message of the upgrade names the host and the error, for example `abort: cleanup failed on node-b: <error>, attempt 2`.
+The operator makes at most 5 attempts. After that it sets the phase `Failed` with the reason `PhaseFailed`. The message names the host, the error, and the number of attempts. The abort action stays set.
+To run the cleanup again after you fix the host, delete the NodeUpgrade of the host: `kubectl delete nodeupgrade <version>-<node>`. The operator creates it again and the step runs.
+
 ## CoreDNS after `bedrock upgrade abort`
 
 An upgrade moves cluster DNS from the CoreDNS of k0s to the CoreDNS of the release.

@@ -32,6 +32,7 @@ const (
 	k0sControllerUnit = "k0scontroller.service"
 	k0sWorkerUnit     = "k0sworker.service"
 	preRestorePrefix  = ".pre-restore-"
+	cleanupAttempts   = 6
 )
 
 var k0sRestoreTargets = []string{"etcd", "pki", "manifests", "images", "helmhome"}
@@ -61,10 +62,17 @@ func prune(ctx context.Context, env StepEnv) (Outcome, error) {
 
 func cleanup(ctx context.Context, env StepEnv) (Outcome, error) {
 	deps := env.Deps
-	count, imagesErr := removeImages(ctx, deps, env.Target.Spec.Images, env.From.Spec.Images)
+	var count int
+	imagesErr := retryCall(ctx, cleanupAttempts, deps.K0sPoll, func() error {
+		removed, err := removeImages(ctx, deps, env.Target.Spec.Images, env.From.Spec.Images)
+		count = removed
+		return err
+	})
 	err := errors.Join(
 		imagesErr,
-		restoreArchiveOf(ctx, deps, env.From.Spec.Version, archiveFileNames(releaseRefs(env.From))),
+		retryCall(ctx, cleanupAttempts, deps.K0sPoll, func() error {
+			return restoreArchiveOf(ctx, deps, env.From.Spec.Version, archiveFileNames(releaseRefs(env.From)))
+		}),
 		removeUpgradeFiles(deps.Root, env.Upgrade.Spec.Version),
 		removePreRestoreData(deps.Root),
 	)
