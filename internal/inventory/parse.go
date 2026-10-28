@@ -128,6 +128,7 @@ type ipLink struct {
 	LinkType  string `json:"link_type"`
 	OperState string `json:"operstate"`
 	Address   string `json:"address"`
+	MTU       int32  `json:"mtu"`
 	LinkInfo  *struct {
 		Kind string `json:"info_kind"`
 	} `json:"linkinfo"`
@@ -144,7 +145,7 @@ func ParseIPLink(raw []byte, sysRoot string) ([]v1alpha1.NICInfo, error) {
 			continue
 		}
 		dev := filepath.Join(sysRoot, "class", "net", link.Name)
-		nics = append(nics, v1alpha1.NICInfo{Name: link.Name, MAC: link.Address, Link: link.OperState == "UP", SpeedMbps: readSpeed(filepath.Join(dev, "speed")), PCIAddress: linkBase(filepath.Join(dev, "device")), Driver: linkBase(filepath.Join(dev, "device", "driver"))})
+		nics = append(nics, v1alpha1.NICInfo{Name: link.Name, MAC: link.Address, Link: link.OperState == "UP", MTU: link.MTU, SpeedMbps: readSpeed(filepath.Join(dev, "speed")), PCIAddress: linkBase(filepath.Join(dev, "device")), Driver: linkBase(filepath.Join(dev, "device", "driver"))})
 	}
 	return nics, nil
 }

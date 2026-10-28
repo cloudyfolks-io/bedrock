@@ -94,6 +94,7 @@ type NICInfo struct {
 	Name       string `json:"name"`
 	MAC        string `json:"mac"`
 	SpeedMbps  int32  `json:"speedMbps,omitempty"`
+	MTU        int32  `json:"mtu,omitempty"`
 	Link       bool   `json:"link"`
 	PCIAddress string `json:"pciAddress,omitempty"`
 	Driver     string `json:"driver,omitempty"`

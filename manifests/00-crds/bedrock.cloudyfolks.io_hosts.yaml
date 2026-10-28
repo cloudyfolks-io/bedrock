@@ -312,6 +312,9 @@ spec:
                           type: boolean
                         mac:
                           type: string
+                        mtu:
+                          format: int32
+                          type: integer
                         name:
                           type: string
                         pciAddress:
