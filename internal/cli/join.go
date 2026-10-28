@@ -190,6 +190,9 @@ func RunJoin(ctx context.Context, args []string, deps InitDeps, stdout, stderr i
 			if err := installAuthnFiles(deps.Root, token.AuthnFiles); err != nil {
 				return fail(stderr, err)
 			}
+			if err := installAuditFiles(deps.Root); err != nil {
+				return fail(stderr, err)
+			}
 			if encryptionFile != nil {
 				if err := installEncryptionFile(deps.Root, encryptionFile); err != nil {
 					return fail(stderr, err)
