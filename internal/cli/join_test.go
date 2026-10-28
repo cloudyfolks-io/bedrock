@@ -361,6 +361,54 @@ func TestJoinWritesAuthnFiles(t *testing.T) {
 	}
 }
 
+func auditPolicyPaths(root string) []string {
+	return []string{filepath.Join(root, "etc", "bedrock", "audit", "policy.yaml")}
+}
+
+func joinAuditPolicyPresentAtStart(t *testing.T, token string, controlPlane bool) (bool, int) {
+	t.Helper()
+	root, e := fakeHost(t)
+	dataDir := filepath.Join(root, "var", "lib", "k0s")
+	e.Errors["/usr/local/bin/k0s status --data-dir "+dataDir] = &host.ExitError{Code: 1}
+	tokenPath := filepath.Join(root, "etc", "k0s", "join-token")
+	if !controlPlane {
+		installArgs := k0s.InstallArgs(k0s.InstallOptions{Role: "worker", Force: true, TokenFile: tokenPath, Labels: roles.Labels([]string{"workload"}), KubeletExtraArgs: []string{"--node-status-update-frequency=4s"}, DataDir: dataDir, KubeletRootDir: k0s.DefaultKubeletRootDir})
+		e.Responses["/usr/local/bin/k0s "+strings.Join(installArgs, " ")] = ""
+	}
+	if controlPlane {
+		installArgs := k0s.InstallArgs(k0s.InstallOptions{
+			Role: "controller", Force: true, ConfigPath: filepath.Join(root, "etc", "k0s", "k0s.yaml"), TokenFile: filepath.Join(root, "etc", "k0s", "join-token"),
+			EnableWorker: true, NoTaints: true, DynamicConfig: true, Labels: roles.Labels([]string{"control-plane"}),
+			KubeletExtraArgs: []string{"--node-status-update-frequency=4s"}, DataDir: dataDir, KubeletRootDir: k0s.DefaultKubeletRootDir, DisableComponents: k0s.DefaultDisabledComponents,
+		})
+		e.Responses["/usr/local/bin/k0s "+strings.Join(installArgs, " ")] = ""
+	}
+	present := false
+	exec := filesAtStart{FakeExec: e, paths: auditPolicyPaths(root), present: &present}
+	deps := InitDeps{Exec: exec, Uid: 0, FreeBytes: func(string) (uint64, error) { return 100 << 30, nil }, Root: root, Executable: fakeExecutable(t), NewClient: clusterWith(t)}
+	var out, errOut bytes.Buffer
+	code := RunJoin(context.Background(), []string{"--token", token, "--data-dir", dataDir, "--k0s-bin", "/usr/local/bin/k0s"}, deps, &out, &errOut)
+	if code != 0 {
+		t.Fatalf("exit %d\nstdout %s\nstderr %s", code, out.String(), errOut.String())
+	}
+	_, statErr := os.Stat(auditPolicyPaths(root)[0])
+	return present, map[bool]int{true: 1, false: 0}[statErr == nil]
+}
+
+func TestJoinWritesAuditPolicyBeforeStart(t *testing.T) {
+	present, _ := joinAuditPolicyPresentAtStart(t, controlPlaneJoinToken(t), true)
+	if !present {
+		t.Fatal("the audit policy must exist before k0s starts on a control-plane join")
+	}
+}
+
+func TestJoinWorkerWritesNoAuditPolicy(t *testing.T) {
+	_, written := joinAuditPolicyPresentAtStart(t, joinToken(t), false)
+	if written != 0 {
+		t.Fatal("a worker join must not write the audit policy")
+	}
+}
+
 func TestJoinRefusesControllerTokenWithoutAuthnFiles(t *testing.T) {
 	root, e := fakeHost(t)
 	dataDir := filepath.Join(root, "var", "lib", "k0s")
