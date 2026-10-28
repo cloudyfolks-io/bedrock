@@ -36,6 +36,9 @@ func PlaneReserved(cfg Config) []ReservedRange {
 
 func TenantManagementReserved(cfg Config) []ReservedRange {
 	var ranges []ReservedRange
+	if !cfg.TenantManagement.Enabled {
+		return nil
+	}
 	if cfg.TenantManagement.WorkloadCIDR.IsValid() {
 		ranges = append(ranges, ReservedRange{Name: "tenant management workload", CIDR: cfg.TenantManagement.WorkloadCIDR.String()})
 	}

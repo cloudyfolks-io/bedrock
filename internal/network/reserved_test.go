@@ -7,7 +7,7 @@ import (
 )
 
 func TestReservedRangesListsPlatformRanges(t *testing.T) {
-	cfg := configOf(t, map[string]string{"network.provider-networks": publicNetworks})
+	cfg := configOf(t, map[string]string{"network.provider-networks": publicNetworks, "network.tenant-management.enabled": "true"})
 	got := ReservedRanges(cfg, "100.64.0.0/16", "10.0.10.10", []string{"10.0.10.11", "10.0.10.12"})
 	names := make([]string, len(got))
 	for i, r := range got {
@@ -23,9 +23,17 @@ func TestReservedRangesListsPlatformRanges(t *testing.T) {
 }
 
 func TestReservedRangesSkipsEmptyAndInvalidAddresses(t *testing.T) {
-	got := ReservedRanges(configOf(t, map[string]string{}), "", "", []string{"", "nonsense"})
+	got := ReservedRanges(configOf(t, map[string]string{"network.tenant-management.enabled": "true"}), "", "", []string{"", "nonsense"})
 	if len(got) != 4 || got[0].CIDR != "100.64.0.0/10" || got[1].CIDR != "100.69.0.0/24" || got[2].CIDR != "100.72.0.0/13" || got[3].CIDR != "100.80.0.0/13" {
 		t.Fatalf("only the reserved cidrs setting and the platform planes are left: %v", got)
+	}
+}
+
+func TestReservedRangesSkipsTenantManagementWhenDisabled(t *testing.T) {
+	for _, r := range ReservedRanges(configOf(t, map[string]string{}), "", "", nil) {
+		if strings.HasPrefix(r.Name, "tenant management") {
+			t.Fatalf("a disabled feature reserved %s", r.Name)
+		}
 	}
 }
 
