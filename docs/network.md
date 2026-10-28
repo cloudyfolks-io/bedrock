@@ -143,12 +143,16 @@ Geneve adds 100 bytes to every packet between nodes.
 Keep `network.mtu` and `spec.mtu` at or below the MTU of the node NICs minus 100.
 A larger value drops or fragments the packets between nodes.
 The operator enforces this rule when it knows the underlay MTU.
-The underlay MTU is the smallest `mtu` of the NICs with a link in the inventory of all Hosts.
+The underlay MTU is the MTU of the interface that holds the internal IP address of the node, because Geneve uses this interface.
+The interface can be a VLAN interface, such as `bond0.10`, and the operator uses its own MTU.
+The operator takes the smallest value of all nodes.
+Other NICs do not change the value.
+When one node has no Host inventory or no such interface, the underlay MTU is unknown.
 When the MTU of a Subnet, from `spec.mtu` or from `network.mtu`, is more than the underlay MTU minus 100, the Subnet is not ready.
 Its condition `Ready` is `False` with the reason `MTUExceedsUnderlay`, and the operator writes nothing to Fabric.
 For example, 1500 is refused on an underlay of 1500, and 1400 is accepted.
 Also, 9000 is refused on an underlay of 9000, and 8900 is accepted.
-When no Host reports an MTU, the operator accepts every value.
+When the underlay MTU is unknown, the operator accepts every value.
 A cluster whose node NICs have an MTU of 1500 must leave `network.mtu` empty, or set 1400 or less.
 Set `network.mtu` to 1500 only when the node NICs have an MTU of 1600 or more.
 

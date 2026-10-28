@@ -134,7 +134,11 @@ func (r *SubnetReconciler) check(ctx context.Context, subnet v1alpha1.Subnet, cf
 	if err := r.Client.List(ctx, &hosts); err != nil {
 		return SubnetInput{}, nil, err
 	}
-	if v := MTUViolation(mtuOf(subnet, cfg.MTU), UnderlayMTU(hosts.Items)); v != nil {
+	var nodes corev1.NodeList
+	if err := r.Client.List(ctx, &nodes); err != nil {
+		return SubnetInput{}, nil, err
+	}
+	if v := MTUViolation(mtuOf(subnet, cfg.MTU), UnderlayMTU(nodes.Items, hosts.Items)); v != nil {
 		return SubnetInput{}, v, nil
 	}
 	if !v1alpha1.IsConditionTrue(network.Status.Conditions, v1alpha1.ConditionReady) {

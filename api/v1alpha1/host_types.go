@@ -94,10 +94,15 @@ type NICInfo struct {
 	Name       string `json:"name"`
 	MAC        string `json:"mac"`
 	SpeedMbps  int32  `json:"speedMbps,omitempty"`
-	MTU        int32  `json:"mtu,omitempty"`
 	Link       bool   `json:"link"`
 	PCIAddress string `json:"pciAddress,omitempty"`
 	Driver     string `json:"driver,omitempty"`
+}
+
+type LinkInfo struct {
+	Name      string   `json:"name"`
+	MTU       int32    `json:"mtu"`
+	Addresses []string `json:"addresses,omitempty"`
 }
 
 type PCIInfo struct {
@@ -125,6 +130,8 @@ type Inventory struct {
 	Disks []DiskInfo `json:"disks,omitempty"`
 	// +optional
 	NICs []NICInfo `json:"nics,omitempty"`
+	// +optional
+	Links []LinkInfo `json:"links,omitempty"`
 	// +optional
 	PCI []PCIInfo `json:"pci,omitempty"`
 	// +optional

@@ -300,6 +300,23 @@ spec:
                       osVersion:
                         type: string
                     type: object
+                  links:
+                    items:
+                      properties:
+                        addresses:
+                          items:
+                            type: string
+                          type: array
+                        mtu:
+                          format: int32
+                          type: integer
+                        name:
+                          type: string
+                      required:
+                      - mtu
+                      - name
+                      type: object
+                    type: array
                   memoryBytes:
                     format: int64
                     type: integer
@@ -312,9 +329,6 @@ spec:
                           type: boolean
                         mac:
                           type: string
-                        mtu:
-                          format: int32
-                          type: integer
                         name:
                           type: string
                         pciAddress:
