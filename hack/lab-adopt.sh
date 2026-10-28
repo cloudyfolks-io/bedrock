@@ -936,7 +936,7 @@ printf '%s' "$out" | jq -e '[.. | strings] | contains(["aes256k"])' >/dev/null |
   echo "the stage B parser needs the string aes256k in ceph auth dump-keys, and the output has none"
   exit 1
 }
-printf '%s' "$out" | jq -e '[.. | strings] | contains(["aes"]) | not' >/dev/null || {
+printf '%s' "$out" | jq -e '[.. | strings | select(. == "aes")] | length == 0' >/dev/null || {
   echo "the stage B parser rejects the string aes in ceph auth dump-keys, and the output has it"
   exit 1
 }
