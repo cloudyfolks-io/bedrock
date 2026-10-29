@@ -275,6 +275,13 @@ cat >/usr/local/bin/kubectl <<'KUBECTL'
 exec /usr/local/bin/k0s kubectl "$@"
 KUBECTL
 chmod +x /usr/local/bin/kubectl
+ip netns add bdrext 2>/dev/null || true
+ip link show bdrpub0 >/dev/null 2>&1 || ip link add bdrpub0 type veth peer name bdrpub0p
+ip link set bdrpub0 up
+ip link set bdrpub0p netns bdrext 2>/dev/null || true
+ip -n bdrext link set lo up
+ip -n bdrext link set bdrpub0p up
+ip -n bdrext addr replace 203.0.113.250/24 dev bdrpub0p
 SCRIPT
 }
 

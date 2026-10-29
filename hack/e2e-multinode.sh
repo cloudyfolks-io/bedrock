@@ -33,6 +33,7 @@ state_file=$lab_dir/state.env
 bundle=$repo/dist/bedrock-dev-bundle-$arch.tar.zst
 bedrock_bin=$repo/dist/bedrock-dev-linux-$arch
 snapshot_tag=tenant-ready
+provider_networks='[{"name":"public","interface":"bdrpub0","cidr":"203.0.113.0/24","gateway":"203.0.113.1","excludeIPs":["203.0.113.250"]}]'
 
 source "$repo/hack/lab/lib.sh"
 
@@ -187,8 +188,16 @@ stage_install() {
   vm_run 1 wait_install
 }
 
+script_provider_networks() {
+  cat <<'SCRIPT'
+kubectl patch setting network.provider-networks --type merge -p "$(jq -nc --arg value "$PROVIDER_NETWORKS" '{spec: {value: $value}}')"
+wait_jsonpath 300 true get provider-networks.fabric.cloudyfolks.io public -o jsonpath='{.status.ready}'
+SCRIPT
+}
+
 stage_tenant() {
   state_load
+  vm_run 1 "$(script_provider_networks)" PROVIDER_NETWORKS="$provider_networks"
   vm_run 1 setup_tenant
 }
 
