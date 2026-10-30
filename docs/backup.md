@@ -533,6 +533,52 @@ rm -rf /root/restore
 When the cluster works, delete the directory `/var/lib/k0s/.pre-restore-<time>`
 that the script made.
 
+## Off-cluster copy of the database backups
+
+The backups of the databases are in the bucket `database.backup.bucket` of
+the object store in the cluster. When `database.enabled` is `true` and
+`backup.target` is set, the operator makes the CronJob `database-offsite` in
+the namespace `bedrock-dbaas`. It runs `rclone copy` from that bucket to:
+
+```
+<bucket of backup.target>/<prefix>/databases/
+```
+
+The copy never deletes. A backup that the retention of the database removes
+stays in the copy. Set a lifecycle rule on the bucket of the target to
+remove old objects under `<prefix>/databases/`. A copy that never deletes
+cannot be emptied by a sync from an empty bucket after a total loss.
+
+- `database.backup.offsite-schedule` sets the time. The default is
+  `0 * * * *` (each hour, UTC).
+- The source uses the Secret `database-backups-s3`. The destination uses
+  the keys of `backup.credentials-secret`. The operator copies the keys to
+  the Secret `database-offsite-s3` in `bedrock-dbaas`. No key is in a
+  manifest.
+- The image of rclone is in the release (`docker.io/rclone/rclone`, pinned
+  by version and digest) and in the bundle.
+- When `database.enabled` is `false` or `backup.target` is empty, the
+  operator deletes the CronJob and the Secret.
+- The CronJob has no metric of its own. Use the metric of
+  kube-state-metrics `kube_cronjob_status_last_successful_time{namespace="bedrock-dbaas",cronjob="database-offsite"}`.
+  Alert when it is older than two schedule intervals.
+
+### Restore the database backups after you lose the cluster
+
+1. Build the new cluster. Set `backup.target`, `backup.credentials-secret`
+   and enable `database.enabled`.
+2. The operator makes the empty bucket `database.backup.bucket` in the new
+   object store.
+3. Copy the objects back with the keys of `backup.target` as the source and
+   the keys of the Secret `database-backups-s3` in `bedrock-dbaas` as the
+   destination:
+   `rclone copy SRC:<bucket>/<prefix>/databases/ DST:<database.backup.bucket>/`
+   (rclone remotes of type `s3`, the in-cluster endpoint
+   `http://<object store service>:80`).
+4. Create the `Database` objects again with the same names and uids as the
+   restore of a database requires (see [Database](database.md)), and
+   restore from the copied backups.
+
 ## Sealed archives
 
 Every archive that a host writes is sealed. This is true for etcd snapshots
@@ -725,8 +771,7 @@ archive and its sealed copy count as one archive.
 - A backup is crash-consistent.
 - A restore cannot rename a VM.
 - A schedule fires at most once per hour.
-- Etcd snapshots stay on the host unless `backup.target` is set. The
-  database backup bucket has no off-cluster copy.
+- Etcd snapshots stay on the host unless `backup.target` is set.
 - Without an admin recipient, only the host that wrote an archive can open
   it.
 - A change of the admin recipients does not change archives that exist.

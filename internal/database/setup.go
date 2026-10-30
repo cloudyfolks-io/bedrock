@@ -34,6 +34,9 @@ func SetupWithManager(mgr ctrl.Manager, images []string) error {
 	if err := (&SchemaReconciler{Client: mgr.GetClient(), Engine: engine}).SetupWithManager(mgr); err != nil {
 		return err
 	}
+	if err := (&OffsiteReconciler{Client: mgr.GetClient(), Live: mgr.GetAPIReader(), Images: images}).SetupWithManager(mgr); err != nil {
+		return err
+	}
 	store := BackupStore{S3: &s3.Client{}, Endpoint: objectstorage.Endpoint, Region: objectstorage.Region}
 	reconciler := &Reconciler{
 		Client: mgr.GetClient(), Live: mgr.GetAPIReader(), Images: images, Store: store, Alloc: &Allocator{}, Engine: engine,
