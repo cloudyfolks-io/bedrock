@@ -1,0 +1,139 @@
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: bedrock-operator
+  namespace: monitoring
+spec:
+  groups:
+    - name: bedrock.operator
+      rules:
+        - alert: BedrockOperatorDown
+          expr: 'absent(up{job="bedrock-operator"} == 1)'
+          for: 5m
+          labels:
+            severity: critical
+          annotations:
+            summary: 'The Bedrock operator is not scraped or is down.'
+            description: 'Prometheus cannot scrape the Bedrock operator for 5 minutes. Upgrades, Hosts and addons are not reconciled.'
+            runbook_url: https://github.com/cloudyfolks-io/bedrock/blob/main/docs/alerts.md#bedrockoperatordown
+        - alert: BedrockOperatorNoLeader
+          expr: 'sum(leader_election_master_status{name="bedrock-operator"}) < 1'
+          for: 5m
+          labels:
+            severity: critical
+          annotations:
+            summary: 'No Bedrock operator holds the leader lease.'
+            description: 'The operator runs but no pod holds the lease bedrock-operator. Nothing is reconciled.'
+            runbook_url: https://github.com/cloudyfolks-io/bedrock/blob/main/docs/alerts.md#bedrockoperatornoleader
+        - alert: BedrockReconcileErrors
+          expr: 'sum by (controller) (rate(controller_runtime_reconcile_errors_total{job="bedrock-operator"}[10m])) > 0'
+          for: 30m
+          labels:
+            severity: warning
+          annotations:
+            summary: 'A Bedrock controller fails to reconcile.'
+            description: 'The controller {{ $labels.controller }} returned reconcile errors for 30 minutes.'
+            runbook_url: https://github.com/cloudyfolks-io/bedrock/blob/main/docs/alerts.md#bedrockreconcileerrors
+    - name: bedrock.upgrade
+      rules:
+        - alert: BedrockUpgradeFailed
+          expr: 'bedrock_cluster_phase{phase="Failed"} == 1'
+          for: 5m
+          labels:
+            severity: critical
+          annotations:
+            summary: 'The Bedrock upgrade is in the phase Failed.'
+            description: 'The Cluster is in the phase Failed. The upgrade does not continue.'
+            runbook_url: https://github.com/cloudyfolks-io/bedrock/blob/main/docs/alerts.md#bedrockupgradefailed
+        - alert: BedrockUpgradeStuck
+          expr: 'time() - bedrock_cluster_upgrade_phase_start_timestamp_seconds{phase!~"Idle|Failed"} > 14400'
+          for: 5m
+          labels:
+            severity: warning
+          annotations:
+            summary: 'A Bedrock upgrade phase runs for more than 4 hours.'
+            description: 'The upgrade phase {{ $labels.phase }} runs for more than 4 hours without a change.'
+            runbook_url: https://github.com/cloudyfolks-io/bedrock/blob/main/docs/alerts.md#bedrockupgradestuck
+        - alert: BedrockUpgradeBlocked
+          expr: 'bedrock_condition_status{kind="Cluster",type="UpgradeBlocked"} == 1'
+          for: 30m
+          labels:
+            severity: warning
+          annotations:
+            summary: 'The Bedrock upgrade is blocked.'
+            description: 'The Cluster has the condition UpgradeBlocked for 30 minutes. The reason is {{ $labels.reason }}.'
+            runbook_url: https://github.com/cloudyfolks-io/bedrock/blob/main/docs/alerts.md#bedrockupgradeblocked
+        - alert: BedrockNodeUpgradeStepFailed
+          expr: 'bedrock_nodeupgrade_step_failed == 1'
+          for: 10m
+          labels:
+            severity: critical
+          annotations:
+            summary: 'A node upgrade step failed.'
+            description: 'The step {{ $labels.step }} of the NodeUpgrade for the node {{ $labels.node }} failed.'
+            runbook_url: https://github.com/cloudyfolks-io/bedrock/blob/main/docs/alerts.md#bedrocknodeupgradestepfailed
+        - alert: BedrockNodeUpgradeStepRetrying
+          expr: 'bedrock_nodeupgrade_step_attempt > 2'
+          for: 10m
+          labels:
+            severity: warning
+          annotations:
+            summary: 'A node upgrade step retries many times.'
+            description: 'The step {{ $labels.step }} of the NodeUpgrade for the node {{ $labels.node }} is at attempt {{ $value }}.'
+            runbook_url: https://github.com/cloudyfolks-io/bedrock/blob/main/docs/alerts.md#bedrocknodeupgradestepretrying
+    - name: bedrock.conditions
+      rules:
+        - alert: BedrockClusterConditionFalse
+          expr: 'bedrock_condition_status{kind="Cluster",type=~"Available|StorageReady|VirtualizationReady|PlatformReady|AuthnReady|UploadReady|ProxyReady|DNSReady|EgressReady"} == 0'
+          for: 15m
+          labels:
+            severity: warning
+          annotations:
+            summary: 'A Cluster condition is False.'
+            description: 'The condition {{ $labels.type }} of the Cluster is False for 15 minutes. The reason is {{ $labels.reason }}.'
+            runbook_url: https://github.com/cloudyfolks-io/bedrock/blob/main/docs/alerts.md#bedrockclusterconditionfalse
+        - alert: BedrockTenantLegsUnguarded
+          expr: 'bedrock_condition_status{kind="Cluster",type="TenantLegsGuarded"} == 0'
+          for: 10m
+          labels:
+            severity: critical
+          annotations:
+            summary: 'Hosts do not guard the tenant legs.'
+            description: 'spec.tenantLegs is set and the condition TenantLegsGuarded is False. Tenant traffic can reach the underlay. The reason is {{ $labels.reason }}.'
+            runbook_url: https://github.com/cloudyfolks-io/bedrock/blob/main/docs/alerts.md#bedrocktenantlegsunguarded
+        - alert: BedrockNodePortsUnscoped
+          expr: 'bedrock_condition_status{kind="Cluster",type="NodePortsScoped"} == 0'
+          for: 15m
+          labels:
+            severity: critical
+          annotations:
+            summary: 'NodePort services are not scoped.'
+            description: 'The condition NodePortsScoped is False. NodePort services can be open on more addresses than wanted. The reason is {{ $labels.reason }}.'
+            runbook_url: https://github.com/cloudyfolks-io/bedrock/blob/main/docs/alerts.md#bedrocknodeportsunscoped
+        - alert: BedrockEncryptionRotationStalled
+          expr: 'bedrock_condition_status{kind="Cluster",type="EncryptionRotationStalled"} == 1'
+          for: 10m
+          labels:
+            severity: critical
+          annotations:
+            summary: 'The secret encryption rotation is stalled.'
+            description: 'The rotation of the encryption key of the Secrets is stalled. The reason is {{ $labels.reason }}.'
+            runbook_url: https://github.com/cloudyfolks-io/bedrock/blob/main/docs/alerts.md#bedrockencryptionrotationstalled
+        - alert: BedrockClusterDegraded
+          expr: 'bedrock_condition_status{kind="Cluster",type="Degraded"} == 1'
+          for: 15m
+          labels:
+            severity: warning
+          annotations:
+            summary: 'The Cluster is Degraded.'
+            description: 'The Cluster has the condition Degraded for 15 minutes. The reason is {{ $labels.reason }}.'
+            runbook_url: https://github.com/cloudyfolks-io/bedrock/blob/main/docs/alerts.md#bedrockclusterdegraded
+        - alert: BedrockHostConditionFalse
+          expr: 'bedrock_condition_status{kind="Host",type=~"ManagementApplied|ImagesImported|TenantLegsPresent",reason!="ManagementDisabled"} == 0'
+          for: 15m
+          labels:
+            severity: warning
+          annotations:
+            summary: 'A Host condition is False.'
+            description: 'The condition {{ $labels.type }} of the Host {{ $labels.name }} is False for 15 minutes. The reason is {{ $labels.reason }}.'
+            runbook_url: https://github.com/cloudyfolks-io/bedrock/blob/main/docs/alerts.md#bedrockhostconditionfalse

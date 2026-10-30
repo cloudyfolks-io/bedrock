@@ -17,7 +17,7 @@ func TestAddonsDocNamesEveryContractName(t *testing.T) {
 	doc := string(raw)
 	required := []string{
 		"kata", "loki", "clusters", "clusters.enabled", "clusters.versions", "k0smotron",
-		"alertmanager.webhook-url", "audit.level", "kata.enabled", "loki.enabled", "loki.retention-days",
+		"alertmanager.webhook-url", "alertmanager.critical-webhook-url", "alertmanager.warning-webhook-url", "alertmanager.heartbeat-url", "audit.level", "kata.enabled", "loki.enabled", "loki.retention-days",
 		"bedrock:project_vm_running:count", "bedrock:project_vm_vcpu:sum", "bedrock:project_vm_memory_bytes:sum",
 		"bedrock:project_volume_requested_bytes:sum", "bedrock:project_vm_cpu_usage_cores:rate5m",
 		"bedrock:project_vm_network_receive_bytes:rate5m", "bedrock:project_vm_network_transmit_bytes:rate5m",

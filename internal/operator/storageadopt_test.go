@@ -156,6 +156,7 @@ func TestRenderStorageAdoptGoldenCephCluster(t *testing.T) {
 		"mon":             map[string]any{"count": int64(3), "allowMultiplePerNode": false},
 		"mgr":             map[string]any{"count": int64(2), "allowMultiplePerNode": false},
 		"dashboard":       map[string]any{"enabled": false},
+		"monitoring":      map[string]any{"enabled": true},
 		"crashCollector":  map[string]any{"disable": true},
 		"security":        map[string]any{"cephx": adoptedGoldenCephx()},
 		"healthCheck": map[string]any{"muteHealthWarning": map[string]any{

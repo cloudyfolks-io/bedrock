@@ -1,0 +1,135 @@
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: bedrock-ceph
+  namespace: monitoring
+spec:
+  groups:
+    - name: bedrock.ceph
+      rules:
+        - alert: CephMetricsAbsent
+          expr: 'absent(ceph_health_status)'
+          for: 10m
+          labels:
+            severity: warning
+          annotations:
+            summary: 'Prometheus has no Ceph metrics.'
+            description: 'The series ceph_health_status is missing for 10 minutes. The mgr service monitor is not scraped, or the mgr is down. All other Ceph alerts are blind.'
+            runbook_url: https://github.com/cloudyfolks-io/bedrock/blob/main/docs/alerts.md#cephmetricsabsent
+        - alert: CephHealthError
+          expr: 'ceph_health_status == 2'
+          for: 5m
+          labels:
+            severity: critical
+          annotations:
+            summary: 'Ceph reports HEALTH_ERR.'
+            description: 'The Ceph cluster is in HEALTH_ERR. Tenant disks can be blocked.'
+            runbook_url: https://github.com/cloudyfolks-io/bedrock/blob/main/docs/alerts.md#cephhealtherror
+        - alert: CephHealthWarning
+          expr: 'ceph_health_status == 1'
+          for: 30m
+          labels:
+            severity: warning
+          annotations:
+            summary: 'Ceph reports HEALTH_WARN for 30 minutes.'
+            description: 'The Ceph cluster is in HEALTH_WARN for longer than 30 minutes.'
+            runbook_url: https://github.com/cloudyfolks-io/bedrock/blob/main/docs/alerts.md#cephhealthwarning
+        - alert: CephMonQuorumAtRisk
+          expr: '(count(ceph_mon_quorum_status == 1) or vector(0)) < count(ceph_mon_quorum_status)'
+          for: 5m
+          labels:
+            severity: warning
+          annotations:
+            summary: 'A Ceph monitor is out of quorum.'
+            description: 'At least one Ceph monitor is not in the quorum. One more failure can stop the cluster.'
+            runbook_url: https://github.com/cloudyfolks-io/bedrock/blob/main/docs/alerts.md#cephmonquorumatrisk
+        - alert: CephMonQuorumLost
+          expr: '(count(ceph_mon_quorum_status == 1) or vector(0)) <= count(ceph_mon_quorum_status) / 2'
+          for: 1m
+          labels:
+            severity: critical
+          annotations:
+            summary: 'Ceph has no monitor quorum.'
+            description: 'Half or more of the Ceph monitors are out of the quorum. Ceph refuses all I/O.'
+            runbook_url: https://github.com/cloudyfolks-io/bedrock/blob/main/docs/alerts.md#cephmonquorumlost
+        - alert: CephOSDDown
+          expr: 'ceph_osd_up == 0'
+          for: 5m
+          labels:
+            severity: warning
+          annotations:
+            summary: 'A Ceph OSD is down.'
+            description: 'The OSD {{ $labels.ceph_daemon }} is down for 5 minutes. Ceph starts to copy its data to other OSDs after 10 minutes.'
+            runbook_url: https://github.com/cloudyfolks-io/bedrock/blob/main/docs/alerts.md#cephosddown
+        - alert: CephOSDNearFull
+          expr: 'ceph_health_detail{name="OSD_NEARFULL"} > 0'
+          for: 5m
+          labels:
+            severity: warning
+          annotations:
+            summary: 'A Ceph OSD is above the nearfull ratio.'
+            description: 'At least one OSD uses more than 85 percent of its space.'
+            runbook_url: https://github.com/cloudyfolks-io/bedrock/blob/main/docs/alerts.md#cephosdnearfull
+        - alert: CephOSDBackfillFull
+          expr: 'ceph_health_detail{name="OSD_BACKFILLFULL"} > 0'
+          for: 1m
+          labels:
+            severity: critical
+          annotations:
+            summary: 'A Ceph OSD is above the backfillfull ratio.'
+            description: 'At least one OSD uses more than 90 percent of its space. Ceph stops to copy data to it, so the recovery cannot finish.'
+            runbook_url: https://github.com/cloudyfolks-io/bedrock/blob/main/docs/alerts.md#cephosdbackfillfull
+        - alert: CephOSDFull
+          expr: 'ceph_health_detail{name="OSD_FULL"} > 0'
+          for: 1m
+          labels:
+            severity: critical
+          annotations:
+            summary: 'A Ceph OSD is full.'
+            description: 'At least one OSD uses more than 95 percent of its space. Ceph blocks writes to the pools on it. Tenant VMs hang on write.'
+            runbook_url: https://github.com/cloudyfolks-io/bedrock/blob/main/docs/alerts.md#cephosdfull
+        - alert: CephOSDUsageAboveOneLossLimit
+          expr: 'ceph_osd_stat_bytes_used / ceph_osd_stat_bytes > 0.40'
+          for: 30m
+          labels:
+            severity: warning
+          annotations:
+            summary: 'A Ceph OSD is above 40 percent used.'
+            description: 'The OSD {{ $labels.ceph_daemon }} uses more than 40 percent of its space. The failure domain is the host and each host has two OSDs. If one OSD fails, its data goes to the other OSD of the host, which then passes the backfillfull ratio of 90 percent. The cluster cannot survive the loss of one OSD.'
+            runbook_url: https://github.com/cloudyfolks-io/bedrock/blob/main/docs/alerts.md#cephosdusageaboveonelosslimit
+        - alert: CephPoolNearQuota
+          expr: 'ceph_pool_stored / ceph_pool_quota_bytes > 0.8 and ceph_pool_quota_bytes > 0'
+          for: 15m
+          labels:
+            severity: warning
+          annotations:
+            summary: 'A Ceph pool is above 80 percent of its quota.'
+            description: 'The pool {{ $labels.name }} stores more than 80 percent of its quota. At the quota, writes to the pool fail.'
+            runbook_url: https://github.com/cloudyfolks-io/bedrock/blob/main/docs/alerts.md#cephpoolnearquota
+        - alert: CephPGsNotClean
+          expr: 'sum(ceph_pg_total) - sum(ceph_pg_clean) > 0'
+          for: 30m
+          labels:
+            severity: warning
+          annotations:
+            summary: 'Ceph has PGs that are not clean.'
+            description: 'Some placement groups are not active+clean for 30 minutes. Data has fewer copies than wanted.'
+            runbook_url: https://github.com/cloudyfolks-io/bedrock/blob/main/docs/alerts.md#cephpgsnotclean
+        - alert: CephPGsNotActive
+          expr: 'sum(ceph_pg_total) - sum(ceph_pg_active) > 0'
+          for: 5m
+          labels:
+            severity: critical
+          annotations:
+            summary: 'Ceph has PGs that are not active.'
+            description: 'Some placement groups are not active for 5 minutes. I/O to the data in them is blocked.'
+            runbook_url: https://github.com/cloudyfolks-io/bedrock/blob/main/docs/alerts.md#cephpgsnotactive
+        - alert: CephSlowOps
+          expr: 'ceph_healthcheck_slow_ops > 0'
+          for: 5m
+          labels:
+            severity: warning
+          annotations:
+            summary: 'Ceph has slow operations.'
+            description: 'Ceph reports slow operations for 5 minutes. VMs can hang on disk I/O and RBD clients can stop.'
+            runbook_url: https://github.com/cloudyfolks-io/bedrock/blob/main/docs/alerts.md#cephslowops

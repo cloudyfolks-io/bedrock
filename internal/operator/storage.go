@@ -158,6 +158,7 @@ func cephClusterSpec(image string, hosts []v1alpha1.Host, mons int64, replicas i
 		"mon":                map[string]any{"count": mons, "allowMultiplePerNode": len(hosts) < 3},
 		"mgr":                map[string]any{"count": mgrs, "allowMultiplePerNode": len(hosts) < 2},
 		"dashboard":          map[string]any{"enabled": false},
+		"monitoring":         map[string]any{"enabled": true},
 		"crashCollector":     map[string]any{"disable": true},
 		"security":           map[string]any{"cephx": plan.Cephx},
 		"healthCheck":        map[string]any{"muteHealthWarning": healthWarnings(plan, replicas)},

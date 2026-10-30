@@ -31,6 +31,9 @@ const (
 	alertmanagerKey     = "alertmanager.yaml"
 	grafanaAdminSecret  = "bedrock-grafana-admin"
 	webhookSetting      = "alertmanager.webhook-url"
+	criticalSetting     = "alertmanager.critical-webhook-url"
+	warningSetting      = "alertmanager.warning-webhook-url"
+	heartbeatSetting    = "alertmanager.heartbeat-url"
 	conditionWebhook    = "AlertmanagerWebhook"
 	passwordLength      = 24
 	passwordAlphabet    = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789"
@@ -54,15 +57,47 @@ func AuditConfigMap(level string) (*corev1.ConfigMap, error) {
 	}, nil
 }
 
-func AlertmanagerSecret(webhookURL string) (*corev1.Secret, error) {
+type AlertmanagerTargets struct {
+	Default   string
+	Critical  string
+	Warning   string
+	Heartbeat string
+}
+
+func webhookReceiver(name, url string, resolved bool) map[string]any {
+	return map[string]any{"name": name, "webhook_configs": []map[string]any{{"url": url, "send_resolved": resolved}}}
+}
+
+func alertmanagerRoutes(targets AlertmanagerTargets) []map[string]any {
+	watchdog := map[string]any{"receiver": "null", "matchers": []string{`alertname = "Watchdog"`}}
+	if targets.Heartbeat != "" {
+		watchdog = map[string]any{"receiver": "bedrock-heartbeat", "matchers": []string{`alertname = "Watchdog"`}, "group_wait": "0s", "group_interval": "1m", "repeat_interval": "1m"}
+	}
+	routes := []map[string]any{watchdog, {"receiver": "null", "matchers": []string{`alertname = "InfoInhibitor"`}}}
+	if targets.Critical != "" {
+		routes = append(routes, map[string]any{"receiver": "bedrock-critical", "matchers": []string{`severity = "critical"`}})
+	}
+	if targets.Warning != "" {
+		routes = append(routes, map[string]any{"receiver": "bedrock-warning", "matchers": []string{`severity = "warning"`}})
+	}
+	return routes
+}
+
+func AlertmanagerSecret(targets AlertmanagerTargets) (*corev1.Secret, error) {
 	receiver := "null"
 	receivers := []map[string]any{{"name": "null"}}
-	if webhookURL != "" {
+	if targets.Default != "" {
 		receiver = "bedrock-webhook"
-		receivers = append(receivers, map[string]any{
-			"name":            "bedrock-webhook",
-			"webhook_configs": []map[string]any{{"url": webhookURL, "send_resolved": true}},
-		})
+		receivers = append(receivers, webhookReceiver("bedrock-webhook", targets.Default, true))
+	}
+	if targets.Critical != "" {
+		receivers = append(receivers, webhookReceiver("bedrock-critical", targets.Critical, true))
+	}
+	if targets.Warning != "" {
+		receivers = append(receivers, webhookReceiver("bedrock-warning", targets.Warning, true))
+	}
+	if targets.Heartbeat != "" {
+		receivers = append(receivers, webhookReceiver("bedrock-heartbeat", targets.Heartbeat, false))
 	}
 	config := map[string]any{
 		"route": map[string]any{
@@ -71,7 +106,7 @@ func AlertmanagerSecret(webhookURL string) (*corev1.Secret, error) {
 			"group_wait":      "30s",
 			"group_interval":  "5m",
 			"repeat_interval": "12h",
-			"routes":          []map[string]any{{"receiver": "null", "matchers": []string{`alertname =~ "Watchdog|InfoInhibitor"`}}},
+			"routes":          alertmanagerRoutes(targets),
 		},
 		"receivers":     receivers,
 		"inhibit_rules": []map[string]any{{"source_matchers": []string{`severity = "critical"`}, "target_matchers": []string{`severity = "warning"`}, "equal": []string{"alertname", "namespace"}}},
@@ -139,7 +174,7 @@ func (r *ObservabilityReconciler) Reconcile(ctx context.Context, _ ctrl.Request)
 	}
 	err = errors.Join(
 		r.applyAudit(ctx, values["audit.level"]),
-		r.applyAlertmanager(ctx, values[webhookSetting]),
+		r.applyAlertmanager(ctx, alertmanagerTargets(values)),
 		r.ensureGrafanaAdmin(ctx),
 	)
 	return ctrl.Result{RequeueAfter: DefaultReadyInterval}, err
@@ -153,12 +188,29 @@ func (r *ObservabilityReconciler) applyAudit(ctx context.Context, level string) 
 	return ssa.Apply(ctx, r.Client, config, v1alpha1.AddonsFieldManager)
 }
 
-func (r *ObservabilityReconciler) applyAlertmanager(ctx context.Context, webhookURL string) error {
-	if err := validWebhookURL(webhookURL); err != nil {
+func validOrEmpty(key, value string) string {
+	def, _ := settings.Lookup(key)
+	if def.Validate(value) != nil {
+		return ""
+	}
+	return value
+}
+
+func alertmanagerTargets(values map[string]string) AlertmanagerTargets {
+	return AlertmanagerTargets{
+		Default:   values[webhookSetting],
+		Critical:  validOrEmpty(criticalSetting, values[criticalSetting]),
+		Warning:   validOrEmpty(warningSetting, values[warningSetting]),
+		Heartbeat: validOrEmpty(heartbeatSetting, values[heartbeatSetting]),
+	}
+}
+
+func (r *ObservabilityReconciler) applyAlertmanager(ctx context.Context, targets AlertmanagerTargets) error {
+	if err := validWebhookURL(targets.Default); err != nil {
 		r.reportWebhook(ctx, metav1.ConditionFalse, "InvalidURL", err.Error())
 		return r.ensureAlertmanagerConfig(ctx)
 	}
-	secret, err := AlertmanagerSecret(webhookURL)
+	secret, err := AlertmanagerSecret(targets)
 	if err != nil {
 		return fmt.Errorf("alertmanager config: %w", err)
 	}
@@ -175,7 +227,7 @@ func (r *ObservabilityReconciler) ensureAlertmanagerConfig(ctx context.Context) 
 	if err == nil || !apierrors.IsNotFound(err) {
 		return err
 	}
-	secret, err := AlertmanagerSecret("")
+	secret, err := AlertmanagerSecret(AlertmanagerTargets{})
 	if err != nil {
 		return fmt.Errorf("alertmanager config: %w", err)
 	}

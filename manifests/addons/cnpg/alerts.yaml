@@ -17,6 +17,7 @@ spec:
             description: >-
               Pod {{ $labels.pod }} of the database {{ $labels.label_bedrock_cloudyfolks_io_name }} ({{ $labels.label_app_kubernetes_io_instance }}) has a replication lag of {{ $value }} seconds.
 
+            runbook_url: https://github.com/cloudyfolks-io/bedrock/blob/main/docs/alerts.md#dbaasreplicationlag
         - alert: DbaasBackupStale
           expr: (time() - cnpg_collector_last_available_backup_timestamp{namespace="bedrock-dbaas"} > 129600) * on(namespace,pod) group_left(label_app_kubernetes_io_instance, label_bedrock_cloudyfolks_io_name) kube_pod_labels{namespace="bedrock-dbaas",label_app_kubernetes_io_managed_by=~"bedrock|percona-server-mysql-operator"}
           for: 30m
@@ -27,6 +28,7 @@ spec:
             description: >-
               The database {{ $labels.label_bedrock_cloudyfolks_io_name }} ({{ $labels.label_app_kubernetes_io_instance }}) last backed up more than 36 hours ago.
 
+            runbook_url: https://github.com/cloudyfolks-io/bedrock/blob/main/docs/alerts.md#dbaasbackupstale
         - alert: DbaasWalArchiveFailing
           expr: (increase(cnpg_pg_stat_archiver_failed_count{namespace="bedrock-dbaas"}[15m]) > 0) * on(namespace,pod) group_left(label_app_kubernetes_io_instance, label_bedrock_cloudyfolks_io_name) kube_pod_labels{namespace="bedrock-dbaas",label_app_kubernetes_io_managed_by=~"bedrock|percona-server-mysql-operator"}
           labels:
@@ -35,3 +37,5 @@ spec:
             summary: WAL archiving to the object store is failing.
             description: >-
               Pod {{ $labels.pod }} of the database {{ $labels.label_bedrock_cloudyfolks_io_name }} ({{ $labels.label_app_kubernetes_io_instance }}) failed to archive WAL in the last 15 minutes. Point-in-time restore is at risk.
+
+            runbook_url: https://github.com/cloudyfolks-io/bedrock/blob/main/docs/alerts.md#dbaaswalarchivefailing

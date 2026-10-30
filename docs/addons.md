@@ -586,6 +586,25 @@ sends all alerts to the receiver `null`. The alerts `Watchdog` and
 `InfoInhibitor` always go to `null`. A `critical` alert mutes a `warning`
 alert with the same `alertname` and `namespace`.
 
+### Alert routing by severity and the heartbeat
+
+Three more Settings change the routing. Each takes an `http` or `https` URL.
+
+| Setting | Effect |
+|---|---|
+| `alertmanager.critical-webhook-url` | Alerts with `severity="critical"` go to this URL. |
+| `alertmanager.warning-webhook-url` | Alerts with `severity="warning"` go to this URL. |
+| `alertmanager.heartbeat-url` | Alertmanager posts the always-firing alert `Watchdog` to this URL every minute. |
+
+When a severity Setting is empty, those alerts go to `alertmanager.webhook-url`.
+When all Settings are empty, all alerts go to the receiver `null`.
+
+Use the heartbeat URL with a dead-man switch service, for example a
+healthchecks.io ping URL. The service alerts you when the pings stop. Then you
+know that Prometheus, Alertmanager or the network to the service is down.
+Without a heartbeat, `Watchdog` goes to `null`. `InfoInhibitor` always goes to
+`null`. An invalid optional URL is ignored.
+
 A webhook URL can hold a token. Bedrock puts it in a Secret, but the
 Setting stays readable for everyone who can read Settings. Do not put
 secrets in the Setting when other people can read it.
