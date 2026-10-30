@@ -644,7 +644,7 @@ func TestAStuckTokenRequestOfARemovedWorkerSetsACondition(t *testing.T) {
 	if _, reason := h.readyReason("prod"); reason == ReasonWorkerCleanupPending {
 		t.Fatal("a fresh deletion is not stuck")
 	}
-	h.now = epoch.Add(240 * time.Hour)
+	h.now = time.Now().Add(time.Hour)
 	h.reconcile("prod")
 	if status, reason := h.readyReason("prod"); status != "False" || reason != ReasonWorkerCleanupPending {
 		t.Fatalf("ready %s %s", status, reason)
