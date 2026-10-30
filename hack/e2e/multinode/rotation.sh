@@ -51,7 +51,7 @@ key_rotation_fixture() {
   padding=$(head -c 2048 /dev/zero | tr '\0' x)
   kubectl create namespace "$rotation_namespace" --dry-run=client -o yaml | kubectl apply -f - >/dev/null
   seq 1 "$rotation_secret_count" |
-    awk -v namespace="$rotation_namespace" -v padding="$padding" '{ printf "apiVersion: v1\nkind: Secret\nmetadata:\n  name: lab-rot-%d\n  namespace: %s\nstringData:\n  payload: \"%s\"\n---\n", $1, namespace, padding }' |
+    awk -v ns="$rotation_namespace" -v padding="$padding" '{ printf "apiVersion: v1\nkind: Secret\nmetadata:\n  name: lab-rot-%d\n  namespace: %s\nstringData:\n  payload: \"%s\"\n---\n", $1, ns, padding }' |
     kubectl apply -f - >/dev/null
   secret_key_name "$rotation_namespace" lab-rot-1
 }

@@ -220,16 +220,7 @@ check_smbios() {
   delete_vms "$NS2" lab-smbios
 }
 
-xfer_lines_are_at_least() {
-  [ "$(guest_lines "$1" "$2" | grep -c '^XFER ')" -ge "$3" ]
-}
-
-xfer_best() {
-  guest_lines "$1" "$2" | awk '$1 == "XFER" && $3 + 0 > m { m = $3 + 0 } END { print m + 0 }'
-}
-
-check_mtu_1500_finding() {
-  local base best verdict
+check_mtu_1500_refused() {
   kubectl -n "$NS" apply -f - <<SUBNET
 apiVersion: bedrock.cloudyfolks.io/v1alpha1
 kind: Subnet
@@ -240,28 +231,8 @@ spec:
   cidr: 10.100.16.0/24
   mtu: 1500
 SUBNET
-  wait_reason 120 subnet lab-mtu1500 Ready Applied -n "$NS"
-  base=10.100.16
-  apply_xfer_security_group
-  vm_manifest lab-mtu-server "$NS" "$(guest_script server '')" "$(
-    network_yaml lab-mtu1500 "$base.50" lab-xfer
-    avoid_node_yaml "$(lab_node 2)"
-  )" | kubectl apply -f -
-  vm_manifest lab-mtu-client "$NS" "$(guest_script client "$base.50")" "$(
-    network_yaml lab-mtu1500 "$base.51" lab-xfer
-    pin_node_yaml "$(lab_node 2)"
-  )" | kubectl apply -f -
-  start_guest "$NS" lab-mtu-server
-  start_guest "$NS" lab-mtu-client
-  retry_until 900 xfer_lines_are_at_least "$NS" lab-mtu-client 3
-  best=$(xfer_best "$NS" lab-mtu-client)
-  verdict=stalled
-  if [ "$best" -ge "$xfer_bytes" ]; then
-    verdict=completed
-  fi
-  echo "info: 8b: with Subnet mtu 1500 on an underlay of $(underlay_mtu), guest MTU $(guest_value "$NS" lab-mtu-client NET | awk '{print $3}'), the read of $xfer_bytes bytes $verdict at $best bytes"
-  delete_vms "$NS" lab-mtu-server lab-mtu-client
-  delete_xfer_security_group
+  wait_reason 120 subnet lab-mtu1500 Ready MTUExceedsUnderlay -n "$NS"
+  echo "info: 8b: Subnet mtu 1500 on an underlay of $(underlay_mtu) is refused with MTUExceedsUnderlay"
   kubectl -n "$NS" delete subnet lab-mtu1500 --wait=false
   wait_gone 300 subnet lab-mtu1500 -n "$NS"
 }
