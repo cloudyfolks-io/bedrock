@@ -276,7 +276,7 @@ func RunInit(ctx context.Context, args []string, deps InitDeps, stdout, stderr i
 	if !running {
 		if err := k0sClient.Install(ctx, k0s.InstallOptions{
 			Role: "controller", Force: true, ConfigPath: configPath, EnableWorker: true, NoTaints: true, DynamicConfig: true,
-			Labels: roles.Labels(cfg.Spec.Roles), KubeletExtraArgs: []string{"--node-status-update-frequency=4s"}, DataDir: o.dataDir, KubeletRootDir: k0s.DefaultKubeletRootDir, DisableComponents: k0s.DefaultDisabledComponents,
+			Labels: roles.Labels(cfg.Spec.Roles), KubeletExtraArgs: k0s.InstallKubeletArgs(deps.Root), DataDir: o.dataDir, KubeletRootDir: k0s.DefaultKubeletRootDir, DisableComponents: k0s.DefaultDisabledComponents,
 		}); err != nil {
 			return fail(stderr, err)
 		}

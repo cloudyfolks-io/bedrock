@@ -315,7 +315,15 @@ func TestRenderStorageIncludesTheObjectStore(t *testing.T) {
 				"dataPool":               pool,
 				"preservePoolsOnDelete":  true,
 				"allowUsersInNamespaces": []any{"*"},
-				"gateway":                map[string]any{"port": int64(80), "instances": tc.instances},
+				"gateway": map[string]any{
+					"port": int64(80), "instances": tc.instances,
+					"resources": map[string]any{"requests": map[string]any{"cpu": "1", "memory": "2Gi"}, "limits": map[string]any{"cpu": "2", "memory": "4Gi"}},
+					"rgwConfig": map[string]any{
+						"rgw_gc_max_concurrent_io": "20", "rgw_override_bucket_index_max_shards": "101", "rgw_bucket_quota_ttl": "60",
+						"rgw_user_quota_bucket_sync_interval": "60", "rgw_user_quota_sync_interval": "60",
+					},
+				},
+				"protocols": map[string]any{"enableAPIs": []any{"s3", "admin", "iam"}},
 			}
 			if !reflect.DeepEqual(store.Object["spec"], want) {
 				t.Fatalf("spec %+v", store.Object["spec"])

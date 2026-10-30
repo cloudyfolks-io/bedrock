@@ -172,6 +172,16 @@ func TestRenderStorageAdoptGoldenCephCluster(t *testing.T) {
 			map[string]any{"name": "node-3", "devices": []any{map[string]any{"name": "/dev/disk/by-id/wwn-0x4"}}},
 		}},
 		"priorityClassNames": map[string]any{"mon": "system-node-critical", "osd": "system-node-critical", "mgr": "system-cluster-critical"},
+		"resources": map[string]any{
+			"osd": map[string]any{"requests": map[string]any{"cpu": "2", "memory": "5Gi"}, "limits": map[string]any{"cpu": "2", "memory": "5Gi"}},
+			"mon": map[string]any{"requests": map[string]any{"cpu": "500m", "memory": "2Gi"}, "limits": map[string]any{"memory": "3Gi"}},
+			"mgr": map[string]any{"requests": map[string]any{"cpu": "500m", "memory": "1Gi"}, "limits": map[string]any{"memory": "2Gi"}},
+		},
+		"cephConfig": map[string]any{
+			"osd":    map[string]any{"osd_memory_target": "4294967296"},
+			"global": map[string]any{"rbd_blocklist_on_break_lock": "false", "rbd_blocklist_expire_seconds": "60"},
+			"mon":    map[string]any{"mon_osd_blocklist_default_expire": "60"},
+		},
 	}
 	if !reflect.DeepEqual(cluster.Object["spec"], want) {
 		t.Fatalf("spec %+v", cluster.Object["spec"])
