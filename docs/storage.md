@@ -51,3 +51,30 @@ kubectl patch setting storage.cephx-cipher --type=merge -p '{"spec":{"value":"ae
 ```
 
 Watch the stages with `kubectl get cluster bedrock -o jsonpath='{.status.conditions[?(@.type=="StorageCephxRestricted")]}'`.
+
+## Resources of the Ceph pods
+
+Bedrock sets requests and limits on the Ceph pods in the CephCluster, CephFilesystem and CephObjectStore specs. An adopted CephCluster gets the same values.
+The OSD request is equal to its limit for memory and CPU. This gives the OSD pods the Guaranteed QoS class, so the kernel kills them last.
+
+| Setting | Default | Use |
+|---|---|---|
+| `storage.osd-memory` | `5Gi` | Request and limit of each OSD. |
+| `storage.osd-memory-target` | `4Gi` | `osd_memory_target` of each OSD. It must be lower than `storage.osd-memory`. |
+| `storage.osd-cpu` | `2` | CPU request and limit of each OSD. |
+| `storage.mon-memory` | `2Gi` | Request of each mon. The limit is 1.5 times the request. |
+| `storage.mgr-memory` | `1Gi` | Request of each mgr. The limit is twice the request. |
+| `storage.mds-memory` | `2Gi` | Request of each metadata server. The limit is twice the request. |
+| `storage.rgw-memory` | `2Gi` | Request of each object gateway. The limit is twice the request. |
+
+The OSD memory target of 4 GiB is the value of the old ir-central-1 cluster. The limit is 25 percent higher, because an OSD can use more than its target for a short time.
+The CPU requests are 500m for mon, mgr and mds, and 1 CPU (limit 2) for rgw. The old cluster used 1 CPU for mgr and 2 CPU for each OSD.
+Two OSDs, one mon, one mgr, one mds and one rgw on a host request 16 GiB of memory. Size the memory of the hosts with this value and with the kubelet reservations in `docs/upgrade.md`. A lab with small nodes must lower these settings before the first install.
+
+Bedrock also carries these settings of the old cluster:
+
+- `rbd_blocklist_on_break_lock=false`, `rbd_blocklist_expire_seconds=60` and `mon_osd_blocklist_default_expire=60`, so a host that comes back after a crash is not blocked for an hour.
+- The object gateway options `rgw_gc_max_concurrent_io=20`, `rgw_override_bucket_index_max_shards=101`, `rgw_bucket_quota_ttl=60`, `rgw_user_quota_bucket_sync_interval=60` and `rgw_user_quota_sync_interval=60`.
+- The object gateway APIs `s3`, `admin` and `iam`.
+
+Bedrock does not carry `osd_pool_default_pg_autoscale_mode=on` (this is the Ceph default), the crash collector retention (the crash collector is off), the pool option `bulk` and `enableRBDStats` (adopted pools keep them), and the dashboard.

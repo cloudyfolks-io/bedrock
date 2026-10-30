@@ -44,9 +44,13 @@ func RenderStorage(in AddonInput) (Rendered, error) {
 	if err != nil {
 		return Rendered{}, err
 	}
+	sizing, err := cephSizingFrom(in.Settings)
+	if err != nil {
+		return Rendered{}, err
+	}
 	plan := planCephx(in, nil)
-	cluster := cephCluster(image, hosts, monCount(replicas), replicas, plan)
-	objects := slices.Concat([]*unstructured.Unstructured{cluster}, storageObjects(replicas, hosts, hostingNames(in)))
+	cluster := cephCluster(image, hosts, monCount(replicas), replicas, plan, sizing)
+	objects := slices.Concat([]*unstructured.Unstructured{cluster}, storageObjects(replicas, hosts, hostingNames(in), sizing))
 	return Rendered{Objects: objects, Probes: []Probe{cephClusterProbe(cephGate(deviceCount(hosts)))}, Conditions: plan.Conditions}, nil
 }
 
@@ -66,15 +70,15 @@ func storageSettings(in AddonInput) (string, int, error) {
 	return image, replicas, nil
 }
 
-func storageObjects(replicas int, hosts []v1alpha1.Host, dnsNames []string) []*unstructured.Unstructured {
+func storageObjects(replicas int, hosts []v1alpha1.Host, dnsNames []string, sizing cephSizing) []*unstructured.Unstructured {
 	return []*unstructured.Unstructured{
 		cephBlockPool(replicas),
-		cephFilesystem(replicas, len(hosts) > 1),
+		cephFilesystem(replicas, len(hosts) > 1, sizing),
 		blockStorageClass("block", "Delete", true),
 		blockStorageClass("block-retain", "Retain", false),
 		filesystemStorageClass(),
 		blockSnapshotClass(),
-		cephObjectStore(replicas, len(hosts), dnsNames),
+		cephObjectStore(replicas, len(hosts), dnsNames, sizing),
 		bucketStorageClass(),
 	}
 }
@@ -131,11 +135,11 @@ func monCount(replicas int) int64 {
 	return 1
 }
 
-func cephCluster(image string, hosts []v1alpha1.Host, mons int64, replicas int, plan cephxPlan) *unstructured.Unstructured {
-	return object("ceph.rook.io/v1", "CephCluster", storageNamespace, storageNamespace, cephClusterSpec(image, hosts, mons, replicas, plan))
+func cephCluster(image string, hosts []v1alpha1.Host, mons int64, replicas int, plan cephxPlan, sizing cephSizing) *unstructured.Unstructured {
+	return object("ceph.rook.io/v1", "CephCluster", storageNamespace, storageNamespace, cephClusterSpec(image, hosts, mons, replicas, plan, sizing))
 }
 
-func cephClusterSpec(image string, hosts []v1alpha1.Host, mons int64, replicas int, plan cephxPlan) map[string]any {
+func cephClusterSpec(image string, hosts []v1alpha1.Host, mons int64, replicas int, plan cephxPlan, sizing cephSizing) map[string]any {
 	nodes := make([]any, 0, len(hosts))
 	for _, host := range hosts {
 		devices := make([]any, 0, len(host.Spec.Storage.Devices))
@@ -159,6 +163,8 @@ func cephClusterSpec(image string, hosts []v1alpha1.Host, mons int64, replicas i
 		"healthCheck":        map[string]any{"muteHealthWarning": healthWarnings(plan, replicas)},
 		"storage":            map[string]any{"useAllNodes": false, "useAllDevices": false, "nodes": nodes},
 		"priorityClassNames": map[string]any{"mon": "system-node-critical", "osd": "system-node-critical", "mgr": "system-cluster-critical"},
+		"resources":          map[string]any{"osd": sizing.osd, "mon": sizing.mon, "mgr": sizing.mgr},
+		"cephConfig":         sizing.cephConfig(),
 	}
 }
 
@@ -173,16 +179,16 @@ func cephBlockPool(replicas int) *unstructured.Unstructured {
 	})
 }
 
-func cephFilesystem(replicas int, standby bool) *unstructured.Unstructured {
+func cephFilesystem(replicas int, standby bool, sizing cephSizing) *unstructured.Unstructured {
 	return object("ceph.rook.io/v1", "CephFilesystem", storageNamespace, filesystemName, map[string]any{
 		"metadataPool":               map[string]any{"replicated": replicated(replicas)},
 		"dataPools":                  []any{map[string]any{"name": "data0", "failureDomain": cephFailureDomain, "replicated": replicated(replicas)}},
 		"preserveFilesystemOnDelete": true,
-		"metadataServer":             map[string]any{"activeCount": int64(1), "activeStandby": standby},
+		"metadataServer":             map[string]any{"activeCount": int64(1), "activeStandby": standby, "resources": sizing.mds},
 	})
 }
 
-func cephObjectStore(replicas, hosts int, dnsNames []string) *unstructured.Unstructured {
+func cephObjectStore(replicas, hosts int, dnsNames []string, sizing cephSizing) *unstructured.Unstructured {
 	instances := int64(1)
 	if hosts > 1 {
 		instances = 2
@@ -192,7 +198,8 @@ func cephObjectStore(replicas, hosts int, dnsNames []string) *unstructured.Unstr
 		"dataPool":               map[string]any{"failureDomain": cephFailureDomain, "replicated": replicated(replicas)},
 		"preservePoolsOnDelete":  true,
 		"allowUsersInNamespaces": []any{"*"},
-		"gateway":                map[string]any{"port": int64(80), "instances": instances},
+		"gateway":                map[string]any{"port": int64(80), "instances": instances, "resources": sizing.rgw, "rgwConfig": rgwConfigTuning},
+		"protocols":              map[string]any{"enableAPIs": []any{"s3", "admin", "iam"}},
 	}
 	if len(dnsNames) > 0 {
 		names := make([]any, len(dnsNames))

@@ -64,11 +64,15 @@ func renderAdopted(in AddonInput, adopt v1alpha1.AdoptSpec) (Rendered, error) {
 	if err != nil {
 		return Rendered{}, err
 	}
+	sizing, err := cephSizingFrom(in.Settings)
+	if err != nil {
+		return Rendered{}, err
+	}
 	plan := planCephx(in, adoptCephx)
-	cluster := adoptedCephCluster(image, hosts, adopt, replicas, plan)
+	cluster := adoptedCephCluster(image, hosts, adopt, replicas, plan, sizing)
 	switch phase {
 	case v1alpha1.ReasonAdopted:
-		objects := slices.Concat([]*unstructured.Unstructured{cluster}, storageObjects(replicas, hosts, hostingNames(in)))
+		objects := slices.Concat([]*unstructured.Unstructured{cluster}, storageObjects(replicas, hosts, hostingNames(in), sizing))
 		return Rendered{Objects: objects, Probes: []Probe{cephClusterProbe(adoptedGate(cephGate(deviceCount(hosts)), in.CephProblems))}, Conditions: plan.Conditions}, nil
 	case "", v1alpha1.ReasonWaitingForIdentity, v1alpha1.ReasonWaitingForHosts:
 		quorum := adoptedCondition(v1alpha1.ReasonWaitingForQuorum, "the CephCluster is rendered and waits for every monitor to join the quorum")
@@ -123,9 +127,9 @@ func monitorsWithoutHost(monitors []v1alpha1.AdoptMonitor, osdNodes []string) []
 	return missing
 }
 
-func adoptedCephCluster(image string, hosts []v1alpha1.Host, adopt v1alpha1.AdoptSpec, replicas int, plan cephxPlan) *unstructured.Unstructured {
+func adoptedCephCluster(image string, hosts []v1alpha1.Host, adopt v1alpha1.AdoptSpec, replicas int, plan cephxPlan, sizing cephSizing) *unstructured.Unstructured {
 	mons := int64(len(adopt.Monitors))
-	spec := cephClusterSpec(image, hosts, mons, replicas, plan)
+	spec := cephClusterSpec(image, hosts, mons, replicas, plan, sizing)
 	spec["network"] = map[string]any{"provider": "host"}
 	spec["mon"] = map[string]any{"count": mons, "allowMultiplePerNode": false}
 	return object("ceph.rook.io/v1", "CephCluster", storageNamespace, storageNamespace, spec)
