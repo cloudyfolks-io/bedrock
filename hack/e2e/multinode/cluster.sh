@@ -94,6 +94,28 @@ check_control_plane() {
   wait_jsonpath 600 3 -n kube-system get daemonset kube-vip -o jsonpath='{.status.numberReady}'
 }
 
+ovn_central_ready_replicas() {
+  kubectl -n kube-system get deployment ovn-central -o jsonpath='{.status.readyReplicas}'
+}
+
+ovn_raft_members() {
+  kubectl -n kube-system exec deployment/ovn-central -- ovs-appctl -t /var/run/ovn/ovn"$1"_db.ctl cluster/status "$2" | grep -cE '\(([0-9a-f]+) at (tcp|ssl):'
+}
+
+ovn_central_converged() {
+  [ "$(ovn_central_ready_replicas)" = 3 ] &&
+    [ "$(ovn_raft_members nb OVN_Northbound)" = 3 ] &&
+    [ "$(ovn_raft_members sb OVN_Southbound)" = 3 ]
+}
+
+check_ovn_central() {
+  retry_until 1800 ovn_central_converged || {
+    kubectl -n kube-system get deployment ovn-central -o wide >&2
+    kubectl -n kube-system exec deployment/ovn-central -- ovs-appctl -t /var/run/ovn/ovnnb_db.ctl cluster/status OVN_Northbound >&2
+    return 1
+  }
+}
+
 osds_per_host() {
   ceph_op osd tree -f json | jq -r '[.nodes[] | select(.type == "host") | (.children // [] | length)] | sort | join(" ")'
 }

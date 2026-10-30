@@ -344,6 +344,7 @@ check_key_rotation() {
 
 check_entries=(
   "three control-plane nodes|remote_check check_control_plane"
+  "ovn-central has 3 ready replicas and 3 raft members|remote_check check_ovn_central"
   "Ceph runs 3 monitors and 6 OSDs on 3 hosts|remote_check check_ceph_topology"
   "every replicated pool has size 3|remote_check check_pool_sizes"
   "block Volume gets ReadWriteMany in Block mode (Q5)|remote_check check_volume_access_mode"
