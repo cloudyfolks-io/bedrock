@@ -389,7 +389,7 @@ func TestRookValues(t *testing.T) {
 		"crds":                           map[string]any{"enabled": true},
 		"csi":                            map[string]any{"installCsiOperator": true},
 		"enableDiscoveryDaemon":          false,
-		"monitoring":                     map[string]any{"enabled": false},
+		"monitoring":                     map[string]any{"enabled": true},
 		"obcAllowAdditionalConfigFields": "maxObjects,maxSize,bucketMaxObjects,bucketMaxSize,bucketOwner",
 	}
 	if !reflect.DeepEqual(values, want) {
