@@ -1,0 +1,63 @@
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: bedrock-backup
+  namespace: monitoring
+spec:
+  groups:
+    - name: bedrock.backup
+      rules:
+        - alert: BedrockEtcdSnapshotFailing
+          expr: 'bedrock_etcd_snapshot_failing == 1'
+          for: 1h
+          labels:
+            severity: warning
+          annotations:
+            summary: 'An etcd snapshot fails.'
+            description: 'The agent on {{ $labels.instance }} fails to take the etcd snapshot for more than 1 hour.'
+            runbook_url: https://github.com/cloudyfolks-io/bedrock/blob/main/docs/alerts.md#bedrocketcdsnapshotfailing
+        - alert: BedrockEtcdSnapshotStale
+          expr: 'bedrock_etcd_snapshot_last_success_timestamp_seconds > 0 and time() - bedrock_etcd_snapshot_last_success_timestamp_seconds > 172800'
+          for: 15m
+          labels:
+            severity: critical
+          annotations:
+            summary: 'The newest etcd snapshot is older than 2 days.'
+            description: 'The newest etcd snapshot on {{ $labels.instance }} is older than 2 days. The default schedule is daily. If you set a slower schedule, raise this limit.'
+            runbook_url: https://github.com/cloudyfolks-io/bedrock/blob/main/docs/alerts.md#bedrocketcdsnapshotstale
+        - alert: BedrockEtcdSnapshotMissing
+          expr: 'bedrock_etcd_snapshot_last_success_timestamp_seconds == 0'
+          for: 3d
+          labels:
+            severity: critical
+          annotations:
+            summary: 'A controller host has no etcd snapshot.'
+            description: 'The controller {{ $labels.instance }} has no etcd snapshot for 3 days.'
+            runbook_url: https://github.com/cloudyfolks-io/bedrock/blob/main/docs/alerts.md#bedrocketcdsnapshotmissing
+        - alert: BedrockEtcdOffClusterUploadStale
+          expr: 'time() - bedrock_backup_last_upload_timestamp_seconds{kind="etcd"} > 93600'
+          for: 15m
+          labels:
+            severity: critical
+          annotations:
+            summary: 'The newest off-cluster etcd copy is older than 26 hours.'
+            description: 'The newest etcd snapshot that reached the backup target is older than 26 hours on {{ $labels.instance }}. The series exists only when backup.target is set.'
+            runbook_url: https://github.com/cloudyfolks-io/bedrock/blob/main/docs/alerts.md#bedrocketcdoffclusteruploadstale
+        - alert: BedrockEtcdOffClusterCopyFailing
+          expr: 'bedrock_condition_status{kind="Host",type="EtcdOffClusterCopy"} == 0'
+          for: 15m
+          labels:
+            severity: critical
+          annotations:
+            summary: 'A Host fails to copy etcd snapshots off the cluster.'
+            description: 'The condition EtcdOffClusterCopy of the Host {{ $labels.name }} is False for 15 minutes. The reason is {{ $labels.reason }}.'
+            runbook_url: https://github.com/cloudyfolks-io/bedrock/blob/main/docs/alerts.md#bedrocketcdoffclustercopyfailing
+        - alert: BedrockEtcdSnapshotMetricsAbsent
+          expr: 'absent(bedrock_etcd_snapshot_last_success_timestamp_seconds)'
+          for: 1h
+          labels:
+            severity: warning
+          annotations:
+            summary: 'No etcd snapshot metrics exist.'
+            description: 'Prometheus has no series for the etcd snapshots for 1 hour. The agent does not write the textfile, or the node exporter does not read it. The backup alerts are blind.'
+            runbook_url: https://github.com/cloudyfolks-io/bedrock/blob/main/docs/alerts.md#bedrocketcdsnapshotmetricsabsent
