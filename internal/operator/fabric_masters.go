@@ -52,6 +52,9 @@ func (r *ClusterReconciler) reconcileFabricMasters(ctx context.Context) error {
 	if cluster.Annotations[fabricMastersAppliedAnnotation] == normalizedAddresses(desired) {
 		return nil
 	}
+	if liveNodeIPs(central) == normalizedAddresses(desired) && centralReady(central) {
+		return r.recordFabricMasters(ctx, cluster, desired)
+	}
 	env := r.upgradeEnv()
 	err = release.InstallGroup(ctx, r.Client, r.Bundle, release.WithPodMTU(vars, cluster.Spec.PodMTU), r.Gates, r.Interval, r.GroupTimeout, fabricGroupName, beforeGroupHooks(r.Client), componentHook(env, cluster))
 	if err != nil {
@@ -68,6 +71,10 @@ func (r *ClusterReconciler) reconcileFabricMasters(ctx context.Context) error {
 		}
 		return err
 	}
+	return r.recordFabricMasters(ctx, cluster, desired)
+}
+
+func (r *ClusterReconciler) recordFabricMasters(ctx context.Context, cluster v1alpha1.Cluster, desired string) error {
 	marked := cluster.DeepCopy()
 	if marked.Annotations == nil {
 		marked.Annotations = map[string]string{}
@@ -79,6 +86,26 @@ func (r *ClusterReconciler) reconcileFabricMasters(ctx context.Context) error {
 	return r.writeStatus(ctx, func(s *v1alpha1.ClusterStatus) {
 		setCondition(s, conditionFabricMastersApplied, metav1.ConditionTrue, "Applied", desired, cluster.Generation)
 	})
+}
+
+func liveNodeIPs(central appsv1.Deployment) string {
+	for _, container := range central.Spec.Template.Spec.Containers {
+		for _, env := range container.Env {
+			if env.Name == "NODE_IPS" {
+				return normalizedAddresses(env.Value)
+			}
+		}
+	}
+	return ""
+}
+
+func centralReady(central appsv1.Deployment) bool {
+	want := int32(1)
+	if central.Spec.Replicas != nil {
+		want = *central.Spec.Replicas
+	}
+	status := central.Status
+	return want > 0 && status.ObservedGeneration >= central.Generation && status.UpdatedReplicas == want && status.ReadyReplicas == want && status.Replicas == want
 }
 
 func normalizedAddresses(list string) string {

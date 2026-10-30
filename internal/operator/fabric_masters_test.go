@@ -13,6 +13,7 @@ import (
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
+	"github.com/cloudyfolks-io/bedrock/api/v1alpha1"
 	"github.com/cloudyfolks-io/bedrock/internal/release"
 )
 
@@ -175,5 +176,46 @@ func TestFabricMastersRetryTheWaitUntilItSucceeds(t *testing.T) {
 	}
 	if gateCalls.Load() != settled {
 		t.Fatal("a completed set must not run the apply again")
+	}
+}
+
+func TestFabricMastersRecordWithoutApplyWhenTheLiveSetMatches(t *testing.T) {
+	c, _ := StartTestEnv(t)
+	ctx := context.Background()
+	gateFails.Store(false)
+	r := fabricMastersReconciler(t, c)
+	addMasterNode(t, c, "host-1", "10.0.10.11")
+	if err := r.install(ctx, 1, map[string]string{release.VarVIP: "10.0.0.10", release.VarMasterIPs: "10.0.10.11"}); err != nil {
+		t.Fatal(err)
+	}
+	var deployment appsv1.Deployment
+	if err := c.Get(ctx, client.ObjectKey{Namespace: fabricNamespace, Name: ovnCentralDeployment}, &deployment); err != nil {
+		t.Fatal(err)
+	}
+	replicas := int32(1)
+	deployment.Spec.Replicas = &replicas
+	if err := c.Update(ctx, &deployment); err != nil {
+		t.Fatal(err)
+	}
+	deployment.Status = appsv1.DeploymentStatus{ObservedGeneration: deployment.Generation, Replicas: 1, UpdatedReplicas: 1, ReadyReplicas: 1}
+	if err := c.Status().Update(ctx, &deployment); err != nil {
+		t.Fatal(err)
+	}
+	before := gateCalls.Load()
+	if err := r.reconcileFabricMasters(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if gateCalls.Load() != before {
+		t.Fatal("a matching ready Deployment must not be applied")
+	}
+	var cluster v1alpha1.Cluster
+	if err := c.Get(ctx, client.ObjectKey{Name: v1alpha1.ClusterName}, &cluster); err != nil {
+		t.Fatal(err)
+	}
+	if cluster.Annotations[fabricMastersAppliedAnnotation] != "10.0.10.11" {
+		t.Fatalf("annotations %v", cluster.Annotations)
+	}
+	if condition := clusterConditionOf(t, c, conditionFabricMastersApplied); condition == nil || condition.Status != metav1.ConditionTrue {
+		t.Fatalf("condition %+v", condition)
 	}
 }
