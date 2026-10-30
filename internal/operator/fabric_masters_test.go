@@ -2,6 +2,7 @@ package operator
 
 import (
 	"context"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -64,12 +65,20 @@ func liveCentralIPs(t *testing.T, c client.Client) (string, int64) {
 	return deployment.Spec.Template.Spec.Containers[0].Env[0].Value, deployment.Generation
 }
 
+var (
+	gateCalls atomic.Int32
+	gateFails atomic.Bool
+)
+
 func fabricMastersReconciler(t *testing.T, c client.Client) *ClusterReconciler {
 	t.Helper()
 	if err := c.Create(context.Background(), newCluster("v0.1.0-test")); err != nil {
 		t.Fatal(err)
 	}
-	return &ClusterReconciler{Client: c, APIReader: c, Bundle: ovnCentralBundle(t), Gates: release.Gates{schema.GroupKind{Group: "apps", Kind: "Deployment"}: func(*unstructured.Unstructured) release.Readiness { return release.Readiness{Ready: true} }}, Interval: 50 * time.Millisecond, GroupTimeout: 5 * time.Second}
+	return &ClusterReconciler{Client: c, APIReader: c, Bundle: ovnCentralBundle(t), Gates: release.Gates{schema.GroupKind{Group: "apps", Kind: "Deployment"}: func(*unstructured.Unstructured) release.Readiness {
+		gateCalls.Add(1)
+		return release.Readiness{Ready: !gateFails.Load(), Failed: gateFails.Load()}
+	}}, Interval: 50 * time.Millisecond, GroupTimeout: 5 * time.Second}
 }
 
 func TestFabricMastersFollowTheControlPlaneNodes(t *testing.T) {
@@ -124,5 +133,47 @@ func TestFabricMastersWaitForTheInstall(t *testing.T) {
 	var deployment appsv1.Deployment
 	if err := c.Get(ctx, client.ObjectKey{Namespace: fabricNamespace, Name: ovnCentralDeployment}, &deployment); err == nil {
 		t.Fatal("nothing must be applied before the install")
+	}
+}
+
+func TestFabricMastersRetryTheWaitUntilItSucceeds(t *testing.T) {
+	c, _ := StartTestEnv(t)
+	ctx := context.Background()
+	gateFails.Store(false)
+	r := fabricMastersReconciler(t, c)
+	addMasterNode(t, c, "host-1", "10.0.10.11")
+	if err := r.install(ctx, 1, map[string]string{release.VarVIP: "10.0.0.10", release.VarMasterIPs: "10.0.10.11"}); err != nil {
+		t.Fatal(err)
+	}
+	addMasterNode(t, c, "host-2", "10.0.10.12")
+	gateFails.Store(true)
+	if err := r.reconcileFabricMasters(ctx); err == nil {
+		t.Fatal("a failed wait must fail the reconcile")
+	}
+	if ips, _ := liveCentralIPs(t, c); ips != "10.0.10.11,10.0.10.12" {
+		t.Fatalf("the apply must have happened: NODE_IPS %q", ips)
+	}
+	if condition := clusterConditionOf(t, c, conditionFabricMastersApplied); condition == nil || condition.Status != metav1.ConditionFalse {
+		t.Fatalf("condition %+v", condition)
+	}
+
+	gateFails.Store(false)
+	before := gateCalls.Load()
+	if err := r.reconcileFabricMasters(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if gateCalls.Load() == before {
+		t.Fatal("the next reconcile must retry the wait")
+	}
+	if condition := clusterConditionOf(t, c, conditionFabricMastersApplied); condition == nil || condition.Status != metav1.ConditionTrue {
+		t.Fatalf("condition %+v", condition)
+	}
+
+	settled := gateCalls.Load()
+	if err := r.reconcileFabricMasters(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if gateCalls.Load() != settled {
+		t.Fatal("a completed set must not run the apply again")
 	}
 }

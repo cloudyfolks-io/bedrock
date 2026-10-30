@@ -8,6 +8,7 @@ import (
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/event"
 	"sigs.k8s.io/controller-runtime/pkg/predicate"
@@ -18,9 +19,10 @@ import (
 )
 
 const (
-	ovnCentralDeployment = "ovn-central"
-	ovnCentralNodeIPsEnv = "NODE_IPS"
-	fabricGroupName      = "fabric"
+	ovnCentralDeployment           = "ovn-central"
+	conditionFabricMastersApplied  = "FabricMastersApplied"
+	fabricMastersAppliedAnnotation = "bedrock.cloudyfolks.io/fabric-masters-applied"
+	fabricGroupName                = "fabric"
 )
 
 func (r *ClusterReconciler) reconcileFabricMasters(ctx context.Context) error {
@@ -47,31 +49,42 @@ func (r *ClusterReconciler) reconcileFabricMasters(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	if sameAddresses(liveNodeIPs(central), desired) {
+	if cluster.Annotations[fabricMastersAppliedAnnotation] == normalizedAddresses(desired) {
 		return nil
 	}
 	env := r.upgradeEnv()
-	return release.InstallGroup(ctx, r.Client, r.Bundle, release.WithPodMTU(vars, cluster.Spec.PodMTU), r.Gates, r.Interval, r.GroupTimeout, fabricGroupName, beforeGroupHooks(r.Client), componentHook(env, cluster))
-}
-
-func liveNodeIPs(central appsv1.Deployment) string {
-	for _, container := range central.Spec.Template.Spec.Containers {
-		for _, env := range container.Env {
-			if env.Name == ovnCentralNodeIPsEnv {
-				return env.Value
-			}
+	err = release.InstallGroup(ctx, r.Client, r.Bundle, release.WithPodMTU(vars, cluster.Spec.PodMTU), r.Gates, r.Interval, r.GroupTimeout, fabricGroupName, beforeGroupHooks(r.Client), componentHook(env, cluster))
+	if err != nil {
+		if ctx.Err() != nil {
+			return err
 		}
+		if r.Recorder != nil {
+			r.Recorder.Event(&cluster, corev1.EventTypeWarning, "FabricMastersFailed", err.Error())
+		}
+		if writeErr := r.writeStatus(ctx, func(s *v1alpha1.ClusterStatus) {
+			setCondition(s, conditionFabricMastersApplied, metav1.ConditionFalse, "ApplyFailed", err.Error(), cluster.Generation)
+		}); writeErr != nil {
+			return writeErr
+		}
+		return err
 	}
-	return ""
+	marked := cluster.DeepCopy()
+	if marked.Annotations == nil {
+		marked.Annotations = map[string]string{}
+	}
+	marked.Annotations[fabricMastersAppliedAnnotation] = normalizedAddresses(desired)
+	if err := r.Client.Patch(ctx, marked, client.MergeFrom(&cluster)); err != nil {
+		return err
+	}
+	return r.writeStatus(ctx, func(s *v1alpha1.ClusterStatus) {
+		setCondition(s, conditionFabricMastersApplied, metav1.ConditionTrue, "Applied", desired, cluster.Generation)
+	})
 }
 
-func sameAddresses(live, desired string) bool {
-	split := func(list string) []string {
-		parts := strings.Split(strings.ReplaceAll(list, " ", ""), ",")
-		slices.Sort(parts)
-		return parts
-	}
-	return slices.Equal(split(live), split(desired))
+func normalizedAddresses(list string) string {
+	parts := strings.Split(strings.ReplaceAll(list, " ", ""), ",")
+	slices.Sort(parts)
+	return strings.Join(parts, ",")
 }
 
 func fabricMasterChange() predicate.Predicate {
