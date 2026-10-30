@@ -16,7 +16,7 @@ import (
 	"github.com/cloudyfolks-io/bedrock/internal/release"
 )
 
-const releaseUsage = "usage: bedrock release build --config FILE --version VERSION --image IMAGE --out DIR [--helm helm] [--k0s-version V] [--upgrade-from V1,V2] [--binaries DIR]\n       bedrock release apply --dir DIR [--timeout 10m] [--interval 2s]\n       bedrock release rbac --release DIR --out FILE"
+const releaseUsage = "usage: bedrock release build --config FILE --version VERSION --image IMAGE --out DIR [--helm helm] [--k0s-version V] [--upgrade-from V1,V2] [--binaries DIR]\n       bedrock release apply --dir DIR [--timeout 10m] [--interval 2s]\n       bedrock release rbac --release DIR --out FILE\n       bedrock release pin-image --release DIR --digest sha256:HEX"
 
 func releaseCommand(args []string, stdout, stderr io.Writer) int {
 	if len(args) == 0 {
@@ -30,6 +30,8 @@ func releaseCommand(args []string, stdout, stderr io.Writer) int {
 		return releaseApply(args[1:], stdout, stderr)
 	case "rbac":
 		return releaseRBAC(args[1:], stdout, stderr)
+	case "pin-image":
+		return releasePinImage(args[1:], stdout, stderr)
 	}
 	fmt.Fprintln(stderr, releaseUsage)
 	return 2
@@ -172,4 +174,24 @@ func splitList(value string) []string {
 		}
 	}
 	return items
+}
+
+func releasePinImage(args []string, stdout, stderr io.Writer) int {
+	flags := flag.NewFlagSet("release pin-image", flag.ContinueOnError)
+	flags.SetOutput(stderr)
+	dir := flags.String("release", "dist/release", "release directory")
+	digest := flags.String("digest", "", "digest of the pushed bedrock image")
+	if err := flags.Parse(args); err != nil {
+		return 2
+	}
+	if *digest == "" {
+		fmt.Fprintln(stderr, "release pin-image: --digest is required")
+		return 2
+	}
+	if err := release.PinOwnImage(*dir, *digest); err != nil {
+		fmt.Fprintln(stderr, err)
+		return 1
+	}
+	fmt.Fprintf(stdout, "bedrock image pinned to %s\n", *digest)
+	return 0
 }

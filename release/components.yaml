@@ -13,7 +13,8 @@ supportedOS:
   - centos-stream-9
   - sles-16
   - sles-15
-upgradeFrom: []
+upgradeFrom:
+  - v0.5.0
 components:
   - name: crds
     order: 0

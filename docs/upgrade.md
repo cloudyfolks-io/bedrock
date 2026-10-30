@@ -112,3 +112,8 @@ The OSD, mon, mgr, mds and rgw pods are not part of the reservation. They have t
 
 The agent writes the values as `--system-reserved`, `--kube-reserved` and `--eviction-hard` in `--kubelet-extra-args` of the k0s unit. `bedrock init` and `bedrock join` write them on a new host.
 An existing host gets them in the `K0sReconfigure` step of the Workers phase. The step reads the settings of the cluster, changes the unit, runs `systemctl daemon-reload` and restarts k0s one node at a time, after the drain. Flags that an administrator added to `--kubelet-extra-args` stay.
+
+## Upgrade from v0.5.0
+
+The release `upgradeFrom` list names the versions that a release can replace. The 1.0 line lists `v0.5.0`. `hack/check-release.sh` fails when this list is empty.
+The release workflow pushes the Bedrock image, then runs `bedrock release pin-image` with the digest of the image. The files `release.yaml`, `images.txt` and the manifests in the bundle then name the image as `<tag>@sha256:<digest>`. The release directory inside the image keeps the tag, because the digest of an image cannot be part of the image.
