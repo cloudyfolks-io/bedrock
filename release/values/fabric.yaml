@@ -21,3 +21,14 @@ masterNodes: ["${BEDROCK_MASTER_IPS}"]
 ovsOvn:
   updateStrategy:
     type: OnDelete
+prometheusRule:
+  enabled: true
+controller:
+  serviceMonitor:
+    enabled: true
+monitor:
+  serviceMonitor:
+    enabled: true
+agent:
+  serviceMonitor:
+    enabled: true
