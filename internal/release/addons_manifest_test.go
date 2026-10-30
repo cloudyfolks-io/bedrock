@@ -12,6 +12,12 @@ import (
 
 func buildReal(t *testing.T, names ...string) (Bundle, string) {
 	t.Helper()
+	return buildRealWithValues(t, names[0], "", names[1:]...)
+}
+
+func buildRealWithValues(t *testing.T, name, values string, more ...string) (Bundle, string) {
+	t.Helper()
+	names := append([]string{name}, more...)
 	cfg, err := LoadBuildConfig(filepath.Join("..", "..", "release", "components.yaml"))
 	if err != nil {
 		t.Fatal(err)
@@ -19,6 +25,9 @@ func buildReal(t *testing.T, names ...string) (Bundle, string) {
 	selected := cfg.Components[:0:0]
 	for _, component := range cfg.Components {
 		if slices.Contains(names, component.Name) || component.Name == "crds" {
+			if values != "" && component.Name == name {
+				component.Values = values
+			}
 			selected = append(selected, component)
 		}
 	}

@@ -15,3 +15,5 @@ spec:
           annotations:
             summary: The etcd database is above 70 percent of its quota.
             description: The etcd database is larger than 1503238554 bytes. The quota is 2147483648 bytes. At the quota etcd refuses all writes. The agent defragments each member every Sunday. Defragment the members by hand if the size stays high.
+
+            runbook_url: https://github.com/cloudyfolks-io/bedrock/blob/main/docs/alerts.md#etcddatabasenearquota

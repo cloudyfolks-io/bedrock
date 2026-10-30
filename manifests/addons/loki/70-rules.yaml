@@ -14,3 +14,5 @@ spec:
           annotations:
             summary: Loki drops log lines.
             description: Loki discarded log lines in the last 10 minutes. Read the label reason of loki_discarded_samples_total.
+
+            runbook_url: https://github.com/cloudyfolks-io/bedrock/blob/main/docs/alerts.md#lokidiscardslogs
