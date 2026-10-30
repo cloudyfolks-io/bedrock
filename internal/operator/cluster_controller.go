@@ -6,6 +6,7 @@ import (
 	"slices"
 	"time"
 
+	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/equality"
 	"k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
@@ -14,6 +15,7 @@ import (
 	"k8s.io/client-go/tools/record"
 	"k8s.io/client-go/util/retry"
 	ctrl "sigs.k8s.io/controller-runtime"
+	"sigs.k8s.io/controller-runtime/pkg/builder"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	"github.com/cloudyfolks-io/bedrock/api/v1alpha1"
@@ -50,6 +52,9 @@ func (r *ClusterReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 		return r.reconcileInstall(ctx, cluster)
 	case routeSteady:
 		if err := r.reconcileSteady(ctx, cluster); err != nil {
+			return ctrl.Result{}, err
+		}
+		if err := r.reconcileFabricMasters(ctx); err != nil {
 			return ctrl.Result{}, err
 		}
 		if err := r.reconcileTenantLegs(ctx); err != nil {
@@ -249,5 +254,6 @@ func (r *ClusterReconciler) SetupWithManager(mgr ctrl.Manager) error {
 		For(&v1alpha1.Cluster{}).
 		Watches(&v1alpha1.NodeUpgrade{}, enqueueCluster()).
 		Watches(&v1alpha1.Host{}, enqueueCluster()).
+		Watches(&corev1.Node{}, enqueueCluster(), builder.WithPredicates(fabricMasterChange())).
 		Complete(r)
 }
