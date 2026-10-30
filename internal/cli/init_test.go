@@ -200,7 +200,7 @@ func TestRunInitHappyPath(t *testing.T) {
 	installArgs := k0s.InstallArgs(k0s.InstallOptions{
 		Role: "controller", Force: true, ConfigPath: k0sConfigPath, EnableWorker: true, NoTaints: true, DynamicConfig: true,
 		Labels:            roles.Labels([]string{"control-plane", "ceph-osd", "fabric-gateway"}),
-		KubeletExtraArgs:  []string{"--node-status-update-frequency=4s"},
+		KubeletExtraArgs:  defaultKubeletArgs,
 		DataDir:           dataDir,
 		KubeletRootDir:    k0s.DefaultKubeletRootDir,
 		DisableComponents: k0s.DefaultDisabledComponents,
@@ -522,7 +522,7 @@ func TestRunInitFromBundle(t *testing.T) {
 	installArgs := k0s.InstallArgs(k0s.InstallOptions{
 		Role: "controller", Force: true, ConfigPath: k0sConfigPath, EnableWorker: true, NoTaints: true, DynamicConfig: true,
 		Labels:            roles.Labels([]string{"control-plane", "ceph-osd", "fabric-gateway"}),
-		KubeletExtraArgs:  []string{"--node-status-update-frequency=4s"},
+		KubeletExtraArgs:  defaultKubeletArgs,
 		DataDir:           dataDir,
 		KubeletRootDir:    k0s.DefaultKubeletRootDir,
 		DisableComponents: k0s.DefaultDisabledComponents,
@@ -619,7 +619,7 @@ func TestRunInitWritesMirror(t *testing.T) {
 	installArgs := k0s.InstallArgs(k0s.InstallOptions{
 		Role: "controller", Force: true, ConfigPath: k0sConfigPath, EnableWorker: true, NoTaints: true, DynamicConfig: true,
 		Labels:            roles.Labels([]string{"control-plane", "ceph-osd", "fabric-gateway"}),
-		KubeletExtraArgs:  []string{"--node-status-update-frequency=4s"},
+		KubeletExtraArgs:  defaultKubeletArgs,
 		DataDir:           dataDir,
 		KubeletRootDir:    k0s.DefaultKubeletRootDir,
 		DisableComponents: k0s.DefaultDisabledComponents,
@@ -717,7 +717,7 @@ func prepareInit(t *testing.T) initRun {
 	installArgs := k0s.InstallArgs(k0s.InstallOptions{
 		Role: "controller", Force: true, ConfigPath: filepath.Join(root, "etc", "k0s", "k0s.yaml"), EnableWorker: true, NoTaints: true, DynamicConfig: true,
 		Labels:            roles.Labels([]string{"control-plane", "ceph-osd", "fabric-gateway"}),
-		KubeletExtraArgs:  []string{"--node-status-update-frequency=4s"},
+		KubeletExtraArgs:  defaultKubeletArgs,
 		DataDir:           dataDir,
 		KubeletRootDir:    k0s.DefaultKubeletRootDir,
 		DisableComponents: k0s.DefaultDisabledComponents,

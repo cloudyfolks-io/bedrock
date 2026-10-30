@@ -90,3 +90,25 @@ Find every labelled object, remove the label from each one, and run the `Prune` 
 kubectl get deployments,services,configmaps,serviceaccounts,poddisruptionbudgets -n kube-system -l k0s.k0sproject.io/stack=coredns
 kubectl get clusterroles,clusterrolebindings -l k0s.k0sproject.io/stack=coredns
 ```
+
+## Kubelet reservations and eviction
+
+Each host runs tenant VMs and Ceph together. The kubelet keeps memory and CPU for the operating system and the k0s processes, and it evicts pods before the host is out of memory or disk.
+These settings control the values. Change them with `kubectl edit setting <key>`.
+
+| Setting | Default | Use |
+|---|---|---|
+| `kubelet.system-reserved-memory` | `2Gi` | Operating system and host daemons. |
+| `kubelet.kube-reserved-memory` | `4Gi` | etcd, kube-apiserver, kube-controller-manager, kube-scheduler, kubelet and containerd. |
+| `kubelet.system-reserved-cpu` | `500m` | Operating system and host daemons. |
+| `kubelet.kube-reserved-cpu` | `1` | k0s processes. |
+| `kubelet.eviction-memory-available` | `1Gi` | Hard eviction threshold of `memory.available`. |
+| `kubelet.eviction-nodefs-available` | `10%` | Hard eviction threshold of `nodefs.available`. |
+| `kubelet.eviction-imagefs-available` | `15%` | Hard eviction threshold of `imagefs.available`. |
+
+The defaults fit a 3-host hyperconverged cluster with 2 OSDs on each host and 128 GiB of memory. Bedrock also sets `nodefs.inodesFree<5%`.
+A memory value is never larger than one eighth of the memory of the node. This keeps small lab nodes usable.
+The OSD, mon, mgr, mds and rgw pods are not part of the reservation. They have their own requests, see `docs/storage.md`.
+
+The agent writes the values as `--system-reserved`, `--kube-reserved` and `--eviction-hard` in `--kubelet-extra-args` of the k0s unit. `bedrock init` and `bedrock join` write them on a new host.
+An existing host gets them in the `K0sReconfigure` step of the Workers phase. The step reads the settings of the cluster, changes the unit, runs `systemctl daemon-reload` and restarts k0s one node at a time, after the drain. Flags that an administrator added to `--kubelet-extra-args` stay.

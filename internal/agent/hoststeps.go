@@ -125,7 +125,11 @@ func reconfigureUnit(ctx context.Context, env StepEnv, service k0sService) (bool
 		return false, err
 	}
 	dns, err := ensureCoreDNSDisabled(ctx, env, service)
-	return authn || audit || dns, err
+	if err != nil {
+		return false, err
+	}
+	kubelet, err := ensureKubeletArgs(ctx, env, service)
+	return authn || audit || dns || kubelet, err
 }
 
 func k0sReconfigure(ctx context.Context, env StepEnv) (Outcome, error) {

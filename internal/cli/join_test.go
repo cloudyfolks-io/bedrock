@@ -72,7 +72,7 @@ func TestRunJoinInstallsWhenNotRunning(t *testing.T) {
 	dataDir := filepath.Join(root, "var", "lib", "k0s")
 	e.Errors["/usr/local/bin/k0s status --data-dir "+dataDir] = &host.ExitError{Code: 1}
 	tokenPath := filepath.Join(root, "etc", "k0s", "join-token")
-	installArgs := k0s.InstallArgs(k0s.InstallOptions{Role: "worker", Force: true, TokenFile: tokenPath, Labels: roles.Labels([]string{"workload"}), KubeletExtraArgs: []string{"--node-status-update-frequency=4s"}, DataDir: dataDir, KubeletRootDir: k0s.DefaultKubeletRootDir})
+	installArgs := k0s.InstallArgs(k0s.InstallOptions{Role: "worker", Force: true, TokenFile: tokenPath, Labels: roles.Labels([]string{"workload"}), KubeletExtraArgs: defaultKubeletArgs, DataDir: dataDir, KubeletRootDir: k0s.DefaultKubeletRootDir})
 	e.Responses["/usr/local/bin/k0s "+strings.Join(installArgs, " ")] = ""
 	executable := fakeExecutable(t)
 	deps := InitDeps{Exec: e, Uid: 0, FreeBytes: func(string) (uint64, error) { return 100 << 30, nil }, Root: root, Executable: executable}
@@ -104,7 +104,7 @@ func TestRunJoinAcceptsAVIPThatAnswersPing(t *testing.T) {
 	delete(e.Errors, "ping -c 1 -W 1 10.0.10.10")
 	e.Responses["ping -c 1 -W 1 10.0.10.10"] = ""
 	tokenPath := filepath.Join(root, "etc", "k0s", "join-token")
-	installArgs := k0s.InstallArgs(k0s.InstallOptions{Role: "worker", Force: true, TokenFile: tokenPath, Labels: roles.Labels([]string{"workload"}), KubeletExtraArgs: []string{"--node-status-update-frequency=4s"}, DataDir: dataDir, KubeletRootDir: k0s.DefaultKubeletRootDir})
+	installArgs := k0s.InstallArgs(k0s.InstallOptions{Role: "worker", Force: true, TokenFile: tokenPath, Labels: roles.Labels([]string{"workload"}), KubeletExtraArgs: defaultKubeletArgs, DataDir: dataDir, KubeletRootDir: k0s.DefaultKubeletRootDir})
 	e.Responses["/usr/local/bin/k0s "+strings.Join(installArgs, " ")] = ""
 	deps := InitDeps{Exec: e, Uid: 0, FreeBytes: func(string) (uint64, error) { return 100 << 30, nil }, Root: root, Executable: fakeExecutable(t)}
 	var out, errOut bytes.Buffer
@@ -167,7 +167,7 @@ func TestRunJoinControlPlaneEnablesWorkerWithoutWorkloadRole(t *testing.T) {
 	installArgs := k0s.InstallArgs(k0s.InstallOptions{
 		Role: "controller", Force: true, ConfigPath: configPath, TokenFile: tokenPath,
 		EnableWorker: true, NoTaints: true, DynamicConfig: true, Labels: roles.Labels([]string{"control-plane"}),
-		KubeletExtraArgs: []string{"--node-status-update-frequency=4s"}, DataDir: dataDir, KubeletRootDir: k0s.DefaultKubeletRootDir, DisableComponents: k0s.DefaultDisabledComponents,
+		KubeletExtraArgs: defaultKubeletArgs, DataDir: dataDir, KubeletRootDir: k0s.DefaultKubeletRootDir, DisableComponents: k0s.DefaultDisabledComponents,
 	})
 	e.Responses["/usr/local/bin/k0s "+strings.Join(installArgs, " ")] = ""
 	executable := fakeExecutable(t)
@@ -209,7 +209,7 @@ func TestRunJoinFromBundle(t *testing.T) {
 	bundlePath, sum := buildFixtureBundle(t, "v0.1.0-test", "v1.99.0+k0s.0")
 	e.Errors[k0sBin+" status --data-dir "+dataDir] = &host.ExitError{Code: 1}
 	tokenPath := filepath.Join(root, "etc", "k0s", "join-token")
-	installArgs := k0s.InstallArgs(k0s.InstallOptions{Role: "worker", Force: true, TokenFile: tokenPath, Labels: roles.Labels([]string{"workload"}), KubeletExtraArgs: []string{"--node-status-update-frequency=4s"}, DataDir: dataDir, KubeletRootDir: k0s.DefaultKubeletRootDir})
+	installArgs := k0s.InstallArgs(k0s.InstallOptions{Role: "worker", Force: true, TokenFile: tokenPath, Labels: roles.Labels([]string{"workload"}), KubeletExtraArgs: defaultKubeletArgs, DataDir: dataDir, KubeletRootDir: k0s.DefaultKubeletRootDir})
 	e.Responses[k0sBin+" "+strings.Join(installArgs, " ")] = ""
 	e.Responses[k0sBin+" start"] = ""
 	token, err := k0s.EncodeToken(k0s.Token{
@@ -278,7 +278,7 @@ func TestRunJoinWritesMirror(t *testing.T) {
 	dataDir := filepath.Join(root, "var", "lib", "k0s")
 	e.Errors["/usr/local/bin/k0s status --data-dir "+dataDir] = &host.ExitError{Code: 1}
 	tokenPath := filepath.Join(root, "etc", "k0s", "join-token")
-	installArgs := k0s.InstallArgs(k0s.InstallOptions{Role: "worker", Force: true, TokenFile: tokenPath, Labels: roles.Labels([]string{"workload"}), KubeletExtraArgs: []string{"--node-status-update-frequency=4s"}, DataDir: dataDir, KubeletRootDir: k0s.DefaultKubeletRootDir})
+	installArgs := k0s.InstallArgs(k0s.InstallOptions{Role: "worker", Force: true, TokenFile: tokenPath, Labels: roles.Labels([]string{"workload"}), KubeletExtraArgs: defaultKubeletArgs, DataDir: dataDir, KubeletRootDir: k0s.DefaultKubeletRootDir})
 	e.Responses["/usr/local/bin/k0s "+strings.Join(installArgs, " ")] = ""
 	token, err := k0s.EncodeToken(k0s.Token{
 		Version: "v0.1.0-test", Roles: []string{"workload"}, K0sToken: "tok",
@@ -336,7 +336,7 @@ func TestJoinWritesAuthnFiles(t *testing.T) {
 	installArgs := k0s.InstallArgs(k0s.InstallOptions{
 		Role: "controller", Force: true, ConfigPath: filepath.Join(root, "etc", "k0s", "k0s.yaml"), TokenFile: filepath.Join(root, "etc", "k0s", "join-token"),
 		EnableWorker: true, NoTaints: true, DynamicConfig: true, Labels: roles.Labels([]string{"control-plane"}),
-		KubeletExtraArgs: []string{"--node-status-update-frequency=4s"}, DataDir: dataDir, KubeletRootDir: k0s.DefaultKubeletRootDir, DisableComponents: k0s.DefaultDisabledComponents,
+		KubeletExtraArgs: defaultKubeletArgs, DataDir: dataDir, KubeletRootDir: k0s.DefaultKubeletRootDir, DisableComponents: k0s.DefaultDisabledComponents,
 	})
 	e.Responses["/usr/local/bin/k0s "+strings.Join(installArgs, " ")] = ""
 	present := false
@@ -372,14 +372,14 @@ func joinAuditPolicyPresentAtStart(t *testing.T, token string, controlPlane bool
 	e.Errors["/usr/local/bin/k0s status --data-dir "+dataDir] = &host.ExitError{Code: 1}
 	tokenPath := filepath.Join(root, "etc", "k0s", "join-token")
 	if !controlPlane {
-		installArgs := k0s.InstallArgs(k0s.InstallOptions{Role: "worker", Force: true, TokenFile: tokenPath, Labels: roles.Labels([]string{"workload"}), KubeletExtraArgs: []string{"--node-status-update-frequency=4s"}, DataDir: dataDir, KubeletRootDir: k0s.DefaultKubeletRootDir})
+		installArgs := k0s.InstallArgs(k0s.InstallOptions{Role: "worker", Force: true, TokenFile: tokenPath, Labels: roles.Labels([]string{"workload"}), KubeletExtraArgs: defaultKubeletArgs, DataDir: dataDir, KubeletRootDir: k0s.DefaultKubeletRootDir})
 		e.Responses["/usr/local/bin/k0s "+strings.Join(installArgs, " ")] = ""
 	}
 	if controlPlane {
 		installArgs := k0s.InstallArgs(k0s.InstallOptions{
 			Role: "controller", Force: true, ConfigPath: filepath.Join(root, "etc", "k0s", "k0s.yaml"), TokenFile: filepath.Join(root, "etc", "k0s", "join-token"),
 			EnableWorker: true, NoTaints: true, DynamicConfig: true, Labels: roles.Labels([]string{"control-plane"}),
-			KubeletExtraArgs: []string{"--node-status-update-frequency=4s"}, DataDir: dataDir, KubeletRootDir: k0s.DefaultKubeletRootDir, DisableComponents: k0s.DefaultDisabledComponents,
+			KubeletExtraArgs: defaultKubeletArgs, DataDir: dataDir, KubeletRootDir: k0s.DefaultKubeletRootDir, DisableComponents: k0s.DefaultDisabledComponents,
 		})
 		e.Responses["/usr/local/bin/k0s "+strings.Join(installArgs, " ")] = ""
 	}
@@ -476,7 +476,7 @@ func controllerJoinHost(t *testing.T) (string, string, *host.FakeExec) {
 	installArgs := k0s.InstallArgs(k0s.InstallOptions{
 		Role: "controller", Force: true, ConfigPath: filepath.Join(root, "etc", "k0s", "k0s.yaml"), TokenFile: filepath.Join(root, "etc", "k0s", "join-token"),
 		EnableWorker: true, NoTaints: true, DynamicConfig: true, Labels: roles.Labels([]string{"control-plane"}),
-		KubeletExtraArgs: []string{"--node-status-update-frequency=4s"}, DataDir: dataDir, KubeletRootDir: k0s.DefaultKubeletRootDir, DisableComponents: k0s.DefaultDisabledComponents,
+		KubeletExtraArgs: defaultKubeletArgs, DataDir: dataDir, KubeletRootDir: k0s.DefaultKubeletRootDir, DisableComponents: k0s.DefaultDisabledComponents,
 	})
 	e.Responses["/usr/local/bin/k0s "+strings.Join(installArgs, " ")] = ""
 	return root, dataDir, e
@@ -748,7 +748,7 @@ func TestRunJoinWorkerSkipsEncryption(t *testing.T) {
 	root, e := fakeHost(t)
 	dataDir := filepath.Join(root, "var", "lib", "k0s")
 	e.Errors["/usr/local/bin/k0s status --data-dir "+dataDir] = &host.ExitError{Code: 1}
-	installArgs := k0s.InstallArgs(k0s.InstallOptions{Role: "worker", Force: true, TokenFile: filepath.Join(root, "etc", "k0s", "join-token"), Labels: roles.Labels([]string{"workload"}), KubeletExtraArgs: []string{"--node-status-update-frequency=4s"}, DataDir: dataDir, KubeletRootDir: k0s.DefaultKubeletRootDir})
+	installArgs := k0s.InstallArgs(k0s.InstallOptions{Role: "worker", Force: true, TokenFile: filepath.Join(root, "etc", "k0s", "join-token"), Labels: roles.Labels([]string{"workload"}), KubeletExtraArgs: defaultKubeletArgs, DataDir: dataDir, KubeletRootDir: k0s.DefaultKubeletRootDir})
 	e.Responses["/usr/local/bin/k0s "+strings.Join(installArgs, " ")] = ""
 	k0sToken, requests := startJoinAPI(t, http.StatusOK, newJoinCA(t))
 	token := encryptionJoinToken(t, []string{"workload"}, k0sToken, encryption.Args())
@@ -798,3 +798,5 @@ func TestRunJoinRefusesAKernelThatCannotMountAes256kKeys(t *testing.T) {
 		t.Fatalf("exit %d\nstdout %s\nstderr %s", code, out.String(), errOut.String())
 	}
 }
+
+var defaultKubeletArgs = k0s.KubeletArgs(k0s.ReservationsFrom(nil), 0)

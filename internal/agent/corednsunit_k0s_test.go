@@ -43,7 +43,7 @@ func TestK0sUpdateKeepsAUnitThatDisablesCoreDNSAlready(t *testing.T) {
 	root := env.Deps.Root
 	writeFixtureFile(t, filepath.Join(root, "usr/local/bin/k0s"), "new k0s")
 	fake.running = newK0s
-	unit := strings.Replace(controllerUnit, "helm ", "helm,coredns ", 1)
+	unit := upToDateUnit()
 	writeFixtureFile(t, controllerUnitPath(root), unit)
 	outcome, err := k0sUpdate(context.Background(), env)
 	if err != nil || outcome.Message != "k0s already at v1.36.3+k0s.0" || slices.Contains(fake.calls, "systemctl daemon-reload") {
@@ -93,7 +93,7 @@ func TestK0sReconfigureDoesNotRestartAnUpToDateUnit(t *testing.T) {
 	env, fake := k0sStepEnv(t, "k0s-dns-e", v1alpha1.RoleControlPlane)
 	root := env.Deps.Root
 	fake.running = newK0s
-	writeFixtureFile(t, controllerUnitPath(root), strings.Replace(controllerUnit, "helm ", "helm,coredns ", 1))
+	writeFixtureFile(t, controllerUnitPath(root), upToDateUnit())
 	outcome, err := k0sReconfigure(context.Background(), env)
 	if err != nil || outcome.Message != "k0scontroller.service already configured" {
 		t.Fatalf("outcome %+v %v", outcome, err)
@@ -103,4 +103,9 @@ func TestK0sReconfigureDoesNotRestartAnUpToDateUnit(t *testing.T) {
 			t.Fatalf("unexpected call %q", call)
 		}
 	}
+}
+
+func upToDateUnit() string {
+	unit, _ := withKubeletArgs(strings.Replace(controllerUnit, "helm ", "helm,coredns ", 1), wantedKubeletArgs)
+	return unit
 }
