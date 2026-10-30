@@ -173,6 +173,8 @@ else
   run_init "$bin" init -f "$workdir/cluster.yaml" --release-dir "$release_dir" --images-dir "$workdir/preload" --timeout 45m
 fi
 
+apply_settings "${single_vm_sizing_settings[@]}"
+
 install -m 0600 /dev/null "$admin_password_file"
 grep '^admin password: ' "$workdir/init.log" | sed 's/^admin password: //' >"$admin_password_file"
 if [ "${GITHUB_ACTIONS:-}" = true ]; then

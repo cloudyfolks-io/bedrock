@@ -509,6 +509,7 @@ $(script_adopt_prepare)" CONFIG_FILE="$remote_config_file" KEY_FILE="$remote_key
   done
   log "bedrock init on $(vm_name 1)"
   vm_run 1 "$(script_adopt_init)" REPO="$repo" BIN="$bedrock_bin" BUNDLE="$bundle" CONFIG_FILE="$remote_config_file"
+  vm_run 1 'apply_settings "${lab_sizing_settings[@]}"'
   token=$(vm_run 1 "$bedrock_bin token create --roles ceph-osd,workload --expiry 1h")
   log "bedrock join on $(vm_name 2) and $(vm_name 3)"
   join_nodes "$token"

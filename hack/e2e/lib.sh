@@ -56,6 +56,16 @@ jsonpath_not_empty() {
   [ -n "$(jsonpath_of "$@")" ]
 }
 
+apply_settings() {
+  local pair
+  for pair in "$@"; do
+    jq -nc --arg name "${pair%%=*}" --arg value "${pair#*=}" '{apiVersion: "bedrock.cloudyfolks.io/v1alpha1", kind: "Setting", metadata: {name: $name}, spec: {value: $value}}' | kubectl apply -f -
+  done
+}
+
+lab_sizing_settings=(storage.osd-memory=2Gi storage.osd-memory-target=1536Mi storage.osd-cpu=1 storage.mon-memory=1Gi storage.mgr-memory=512Mi storage.mds-memory=512Mi storage.rgw-memory=512Mi)
+single_vm_sizing_settings=(storage.osd-memory=3Gi storage.osd-memory-target=2Gi storage.osd-cpu=1 storage.mon-memory=1Gi storage.mgr-memory=512Mi storage.mds-memory=1Gi storage.rgw-memory=1Gi)
+
 wait_jsonpath() {
   local timeout=$1 want=$2
   shift 2

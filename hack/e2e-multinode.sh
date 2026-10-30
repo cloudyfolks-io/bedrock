@@ -177,6 +177,7 @@ stage_install() {
   vm_run 1 "$(script_install_config)" CONFIG_FILE="$remote_config_file"
   log "bedrock init on $(vm_name 1)"
   vm_run 1 "$(script_init)" REPO="$repo" BIN="$bedrock_bin" BUNDLE="$bundle" CONFIG_FILE="$remote_config_file"
+  vm_run 1 'apply_settings "${lab_sizing_settings[@]}"'
   for id in 2 3; do
     token=$(vm_run 1 "$bedrock_bin token create --roles $join_roles --expiry 1h")
     log "bedrock join on $(vm_name "$id")"
