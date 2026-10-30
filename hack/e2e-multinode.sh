@@ -352,7 +352,7 @@ check_entries=(
   "pinned address survives a live migration|remote_check check_pinned_after_migration"
   "hot-plugged volume shows in the guest (Q2)|remote_check check_hotplug"
   "SMBIOS UUID of one VM name in two namespaces (Q3)|remote_check check_smbios"
-  "Subnet MTU 1500 on an underlay of 1500 (finding)|remote_check check_mtu_1500_finding"
+  "Subnet MTU 1500 on an underlay of 1500 is refused|remote_check check_mtu_1500_refused"
   "drain with LiveMigrateIfPossible and LiveMigrate|remote_check check_drain"
   "etcd restore with running VMs|check_restore"
   "three control-plane nodes after the restore|remote_check check_control_plane"
