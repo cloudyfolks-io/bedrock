@@ -49,6 +49,7 @@ type Deps struct {
 	ProbeTimeout time.Duration
 	AuthnOwner   apiserver.Owner
 	EtcdEndpoint string
+	AdminClient  func(kubeconfig string) (client.Client, error)
 }
 
 func Run(ctx context.Context, c client.WithWatch, deps Deps) error {

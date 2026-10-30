@@ -110,6 +110,10 @@ func runAgent(ctx context.Context, o agentOptions, deps agentDeps, stderr io.Wri
 		K0sPoll:      agent.K0sRestartPoll,
 		ProbeTimeout: agent.FactProbeTimeout,
 		AuthnOwner:   apiserver.APIServerOwner(),
+		AdminClient: func(kubeconfig string) (client.Client, error) {
+			c, _, err := deps.Load(kubeconfig)
+			return c, err
+		},
 	}
 	for {
 		changed, err := runUntilKubeconfigChanges(ctx, o, deps, loopDeps, stderr)

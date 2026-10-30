@@ -2,6 +2,7 @@ package agent
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -9,11 +10,28 @@ import (
 
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/apimachinery/pkg/runtime/schema"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	"github.com/cloudyfolks-io/bedrock/api/v1alpha1"
 )
+
+type deniedClient struct{ client.Client }
+
+var errNodeIdentity = apierrors.NewForbidden(schema.GroupResource{Group: "bedrock.cloudyfolks.io", Resource: "clusters"}, "cluster", errors.New("node identity"))
+
+func (deniedClient) Get(context.Context, client.ObjectKey, client.Object, ...client.GetOption) error {
+	return errNodeIdentity
+}
+
+func (deniedClient) List(context.Context, client.ObjectList, ...client.ListOption) error {
+	return errNodeIdentity
+}
+
+func nodeIdentityClient() client.Client { return deniedClient{k8sClient} }
 
 func staleCoreDNSDir(root string) string {
 	return filepath.Join(root, "var/lib/k0s/manifests/coredns")
@@ -22,7 +40,8 @@ func staleCoreDNSDir(root string) string {
 func pruneEnvWithStaleDir(t *testing.T) StepEnv {
 	t.Helper()
 	env, _ := finishEnv(t, nil)
-	env.Client = k8sClient
+	env.Client = nodeIdentityClient()
+	env.Deps.AdminClient = func(string) (client.Client, error) { return k8sClient, nil }
 	writeFixtureFile(t, filepath.Join(staleCoreDNSDir(env.Deps.Root), "coredns.yaml"), "kind: Deployment\n")
 	return env
 }
