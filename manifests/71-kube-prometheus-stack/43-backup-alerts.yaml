@@ -52,6 +52,15 @@ spec:
             summary: 'A Host fails to copy etcd snapshots off the cluster.'
             description: 'The condition EtcdOffClusterCopy of the Host {{ $labels.name }} is False for 15 minutes. The reason is {{ $labels.reason }}.'
             runbook_url: https://github.com/cloudyfolks-io/bedrock/blob/main/docs/alerts.md#bedrocketcdoffclustercopyfailing
+        - alert: BedrockDatabaseOffClusterCopyStale
+          expr: 'time() - kube_cronjob_status_last_successful_time{cronjob="database-offsite"} > 10800'
+          for: 15m
+          labels:
+            severity: critical
+          annotations:
+            summary: 'The newest off-cluster database copy is older than 3 hours.'
+            description: 'The CronJob database-offsite in {{ $labels.namespace }} has no successful run for more than 3 hours. The series exists only when backup.target is set.'
+            runbook_url: https://github.com/cloudyfolks-io/bedrock/blob/main/docs/alerts.md#bedrockdatabaseoffclustercopystale
         - alert: BedrockEtcdSnapshotMetricsAbsent
           expr: 'absent(bedrock_etcd_snapshot_last_success_timestamp_seconds)'
           for: 1h

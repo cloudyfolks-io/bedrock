@@ -166,9 +166,13 @@ The newest etcd snapshot that reached the backup target is older than 26 hours. 
 
 The condition `EtcdOffClusterCopy` of a Host is False for 15 minutes. Read the message of the condition and the journal of `bedrock-agent` on the host. Check the Setting `backup.target`.
 
+### BedrockDatabaseOffClusterCopyStale
+
+The CronJob `database-offsite` has no successful run for more than 3 hours. The operator makes the CronJob only when the Setting `backup.target` is set. Read the logs of the newest Job in the namespace `bedrock-dbaas`. Check the Secret `database-offsite-s3` and the network to the target.
+
 ### BedrockEtcdSnapshotMetricsAbsent
 
-Check that the file /var/lib/node_exporter/textfile_collector/bedrock_etcd_snapshot.prom exists on the controller hosts. Check that the node exporter has the textfile collector and the mount.
+Check that the file /var/lib/node_exporter/textfile_collector/bedrock_etcd_snapshot.prom exists on the controller hosts. The upload metric is in the file /var/lib/node_exporter/textfile_collector/bedrock_backup.prom. Check that the node exporter has the textfile collector and the mount.
 
 ## etcd and tenant network
 
