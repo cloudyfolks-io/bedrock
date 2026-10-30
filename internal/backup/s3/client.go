@@ -61,22 +61,33 @@ func (c Client) Delete(ctx context.Context, key string) error {
 }
 
 func (c Client) List(ctx context.Context, prefix string) ([]string, error) {
-	query := url.Values{"list-type": {"2"}, "prefix": {prefix}}
-	body, err := c.do(ctx, request{method: http.MethodGet, query: query, payload: emptyPayload})
-	if err != nil {
-		return nil, err
+	var keys []string
+	token := ""
+	for {
+		query := url.Values{"list-type": {"2"}, "prefix": {prefix}}
+		if token != "" {
+			query.Set("continuation-token", token)
+		}
+		body, err := c.do(ctx, request{method: http.MethodGet, query: query, payload: emptyPayload})
+		if err != nil {
+			return nil, err
+		}
+		var page struct {
+			Contents              []struct{ Key string }
+			IsTruncated           bool
+			NextContinuationToken string
+		}
+		if err := xml.Unmarshal(body, &page); err != nil {
+			return nil, fmt.Errorf("list %s: %w", prefix, err)
+		}
+		for _, item := range page.Contents {
+			keys = append(keys, item.Key)
+		}
+		if !page.IsTruncated || page.NextContinuationToken == "" {
+			return keys, nil
+		}
+		token = page.NextContinuationToken
 	}
-	var result struct {
-		Contents []struct{ Key string }
-	}
-	if err := xml.Unmarshal(body, &result); err != nil {
-		return nil, fmt.Errorf("list %s: %w", prefix, err)
-	}
-	keys := make([]string, 0, len(result.Contents))
-	for _, item := range result.Contents {
-		keys = append(keys, item.Key)
-	}
-	return keys, nil
 }
 
 func (c Client) do(ctx context.Context, req request) ([]byte, error) {

@@ -6,9 +6,11 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"os"
 	"path/filepath"
 	"slices"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -19,6 +21,7 @@ type fakeServer struct {
 	mu       sync.Mutex
 	objects  map[string]string
 	failPuts int
+	pageSize int
 	puts     int
 	server   *httptest.Server
 }
@@ -52,20 +55,35 @@ func (f *fakeServer) handle(w http.ResponseWriter, r *http.Request) {
 		delete(f.objects, key)
 		w.WriteHeader(http.StatusNoContent)
 	case http.MethodGet:
-		f.list(w, r.URL.Query().Get("prefix"))
+		f.list(w, r.URL.Query())
 	}
 }
 
-func (f *fakeServer) list(w http.ResponseWriter, prefix string) {
+func (f *fakeServer) list(w http.ResponseWriter, query url.Values) {
 	type item struct{ Key string }
 	var out struct {
-		XMLName  xml.Name `xml:"ListBucketResult"`
-		Contents []item
+		XMLName               xml.Name `xml:"ListBucketResult"`
+		Contents              []item
+		IsTruncated           bool
+		NextContinuationToken string
 	}
+	var matching []string
 	for key := range f.objects {
-		if strings.HasPrefix(key, prefix) {
-			out.Contents = append(out.Contents, item{key})
+		if strings.HasPrefix(key, query.Get("prefix")) {
+			matching = append(matching, key)
 		}
+	}
+	slices.Sort(matching)
+	start, _ := strconv.Atoi(query.Get("continuation-token"))
+	end := min(start+f.pageSize, len(matching))
+	if f.pageSize == 0 {
+		end = len(matching)
+	}
+	for _, key := range matching[start:end] {
+		out.Contents = append(out.Contents, item{key})
+	}
+	if end < len(matching) {
+		out.IsTruncated, out.NextContinuationToken = true, strconv.Itoa(end)
 	}
 	xml.NewEncoder(w).Encode(out)
 }
@@ -144,5 +162,18 @@ func TestClientErrorIsNotRetried(t *testing.T) {
 	c := Client{Endpoint: deny.URL, Region: "r", Bucket: "bucket", AccessKey: "AK", SecretKey: "SK", HTTP: deny.Client(), Now: time.Now, Sleep: func(d time.Duration) { sleeps = append(sleeps, d) }}
 	if _, err := c.List(context.Background(), "x/"); err == nil || len(sleeps) != 0 {
 		t.Fatalf("sleeps %v err %v", sleeps, err)
+	}
+}
+
+func TestListFollowsContinuationToken(t *testing.T) {
+	f := newFakeServer(t)
+	f.pageSize = 2
+	for _, key := range []string{"p/a", "p/b", "p/c", "p/d", "p/e", "q/z"} {
+		f.objects[key] = "x"
+	}
+	var sleeps []time.Duration
+	keys, err := testClient(f, &sleeps).List(context.Background(), "p/")
+	if err != nil || !slices.Equal(keys, []string{"p/a", "p/b", "p/c", "p/d", "p/e"}) {
+		t.Fatalf("keys %v err %v", keys, err)
 	}
 }
