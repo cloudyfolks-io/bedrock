@@ -22,6 +22,7 @@ func databaseDefinitions() []Definition {
 		{"database.upgrade.backup-max-age", "26h", "Age limit of the newest completed backup that a PostgreSQL or MySQL version upgrade accepts. An older backup makes the controller request a new one first.", duration(time.Hour)},
 		{"database.provision-timeout", "30m", "Time after which a Database that is not ready becomes Failed.", duration(time.Minute)},
 		{"database.backup.bucket", "bedrock-database-backups", "Bucket of the object store that holds the backups of all databases, one prefix for each database.", bucketNameValue},
+		{"database.backup.offsite-schedule", "0 * * * *", "Cron schedule, five fields, UTC, of the copy of the database backup bucket to backup.target under databases/. The copy runs only when database.enabled is true and backup.target is set.", cronSchedule},
 		{"database.backup.retention-days", "7", "Days of backups and WAL archive that a database keeps, from 1 to 365.", intBetween(1, 365)},
 		{"database.backup.retention-days-min", "1", "Smallest value that a Database may set in backup.retentionDays, from 1 to 365.", intBetween(1, 365)},
 		{"database.backup.retention-days-max", "365", "Largest value that a Database may set in backup.retentionDays, from 1 to 365.", intBetween(1, 365)},

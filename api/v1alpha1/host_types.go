@@ -13,11 +13,12 @@ const (
 	RoleFabricGateway = "fabric-gateway"
 	RoleWorkload      = "workload"
 
-	ConditionManagementApplied = "ManagementApplied"
-	ConditionImagesImported    = "ImagesImported"
-	ConditionMaintenanceMode   = "MaintenanceMode"
-	ConditionRebootPending     = "RebootPending"
-	ConditionTenantLegsPresent = "TenantLegsPresent"
+	ConditionManagementApplied  = "ManagementApplied"
+	ConditionImagesImported     = "ImagesImported"
+	ConditionEtcdOffClusterCopy = "EtcdOffClusterCopy"
+	ConditionMaintenanceMode    = "MaintenanceMode"
+	ConditionRebootPending      = "RebootPending"
+	ConditionTenantLegsPresent  = "TenantLegsPresent"
 )
 
 const (

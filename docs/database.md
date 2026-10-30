@@ -194,6 +194,7 @@ The sweeper deletes the prefix and the ConfigMap after `database.backup.retentio
 | `database.exec-timeout` | `120s` | The time limit of one SQL script. |
 | `database.vip-range` | empty | The network of the gate addresses. Empty gives `VIPRangeMissing`. |
 | `database.backup.bucket` | `bedrock-database-backups` | The bucket of the backups. |
+| `database.backup.offsite-schedule` | `0 * * * *` | Cron schedule of the copy of the backup bucket to `backup.target`. See [Backup](backup.md). |
 | `database.backup.retention-days` | `7` | Days of backups. |
 | `database.backup.retention-days-min` | `1` | Smallest `backup.retentionDays` of a database. |
 | `database.backup.retention-days-max` | `365` | Largest `backup.retentionDays` of a database. |

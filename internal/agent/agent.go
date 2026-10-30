@@ -116,6 +116,9 @@ func snapshotLoop(ctx context.Context, c client.Client, deps Deps) {
 		if err := RunEtcdSnapshots(ctx, c, deps); err != nil {
 			fmt.Fprintf(os.Stderr, "agent: etcd snapshot: %v\n", err)
 		}
+		if err := RunEtcdShip(ctx, c, deps); err != nil {
+			fmt.Fprintf(os.Stderr, "agent: etcd ship: %v\n", err)
+		}
 		if err := RunEtcdDefrag(ctx, c, deps); err != nil {
 			fmt.Fprintf(os.Stderr, "agent: etcd defrag: %v\n", err)
 		}
@@ -233,6 +236,7 @@ func tick(ctx context.Context, c client.Client, deps Deps) (inventoryErr, writeE
 		conditions = append(conditions, condition(v1alpha1.ConditionManagementApplied, metav1.ConditionFalse, "ManagementDisabled", "", current.Generation))
 	}
 	conditions = append(conditions, importsCondition(deps, current.Generation)...)
+	conditions = append(conditions, shipCondition(deps, current.Generation)...)
 	next.Conditions = stable(current.Status.Conditions, conditions)
 	if err := ApplyStatus(ctx, c, deps.Node, next); err != nil {
 		return invErr, err

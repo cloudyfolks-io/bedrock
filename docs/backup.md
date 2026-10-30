@@ -359,10 +359,53 @@ the encryption key of the Secrets. See [Secrets at rest](secrets-at-rest.md).
 The host keeps the newest 7 snapshots. Backups of an upgrade
 (`bedrock-*.tar.gz.age`) are not touched.
 
-Snapshots stay on the host. They are not copied to the backup target. To
-protect them from the loss of a disk, copy the files off the host with your
-own tools. A copy is safe, because the file is sealed. Read
-[Sealed archives](#sealed-archives) before you rely on a copy.
+### Off-cluster copy
+
+When `backup.target` is set, every control-plane host also uploads its
+sealed snapshots to the bucket of the target. The key is:
+
+```
+<prefix>/etcd/<host>/etcd-<stamp>.tar.gz.age
+```
+
+`<prefix>` is the prefix of `backup.target`. The upload uses the keys in
+the Secret of `backup.credentials-secret` (`access-key-id` and
+`secret-access-key`, and `ca.crt` if the endpoint needs it). The agent
+uploads the file as it is. It never uploads a plain archive.
+
+- The agent keeps the newest 7 snapshots of each host in the bucket. It
+  deletes older ones.
+- A failed request is tried again 4 times with a pause of 1, 2 and 4
+  seconds. After that, the agent tries again at the next cycle.
+- When `backup.archive-recipients` is empty or not valid, the agent uploads
+  nothing. The Host condition `EtcdOffClusterCopy` is `False` with the
+  reason `ArchiveRecipientsMissing`. A failed upload gives the reason
+  `UploadFailed`. A wrong target or Secret gives `BackupTargetInvalid` or
+  `BackupCredentialsInvalid`.
+- The agent writes the time of the last upload to
+  `/var/lib/node_exporter/textfile_collector/bedrock_backup.prom`:
+  `bedrock_backup_last_upload_timestamp_seconds{kind="etcd"}`. The node
+  exporter must read this directory. Alert when the value is older than
+  two snapshot intervals.
+
+Without `backup.target`, snapshots stay on the host. Copy them with your own
+tools. Read [Sealed archives](#sealed-archives) before you rely on a copy.
+
+#### Restore after you lose all hosts
+
+1. Build new control-plane hosts with the same Bedrock release. Install
+   the `bedrock` binary and the bundle.
+2. Get the admin identity (`admin.key`) and a copy of
+   `/etc/bedrock/encryption/encryption.yaml` from your off-cluster vault.
+3. List the bucket and pick the newest archive of the host you want:
+   `<prefix>/etcd/<host>/etcd-<stamp>.tar.gz.age`. Use any S3 client with
+   the keys of the target.
+4. Download the file to `/var/lib/bedrock/backups/` on the new host.
+5. Put `encryption.yaml` back to `/etc/bedrock/encryption/encryption.yaml`.
+6. Run the restore script with the admin identity, as described below and
+   in [Secrets at rest](secrets-at-rest.md). Then follow
+   [the runbook](runbooks/restore-control-plane.md) to join the other
+   control-plane hosts.
 
 To restore a snapshot, use the script on the host. Use the k0s version that
 took the snapshot. The script opens and unpacks the archive before it stops
@@ -489,6 +532,52 @@ rm -rf /root/restore
 
 When the cluster works, delete the directory `/var/lib/k0s/.pre-restore-<time>`
 that the script made.
+
+## Off-cluster copy of the database backups
+
+The backups of the databases are in the bucket `database.backup.bucket` of
+the object store in the cluster. When `database.enabled` is `true` and
+`backup.target` is set, the operator makes the CronJob `database-offsite` in
+the namespace `bedrock-dbaas`. It runs `rclone copy` from that bucket to:
+
+```
+<bucket of backup.target>/<prefix>/databases/
+```
+
+The copy never deletes. A backup that the retention of the database removes
+stays in the copy. Set a lifecycle rule on the bucket of the target to
+remove old objects under `<prefix>/databases/`. A copy that never deletes
+cannot be emptied by a sync from an empty bucket after a total loss.
+
+- `database.backup.offsite-schedule` sets the time. The default is
+  `0 * * * *` (each hour, UTC).
+- The source uses the Secret `database-backups-s3`. The destination uses
+  the keys of `backup.credentials-secret`. The operator copies the keys to
+  the Secret `database-offsite-s3` in `bedrock-dbaas`. No key is in a
+  manifest.
+- The image of rclone is in the release (`docker.io/rclone/rclone`, pinned
+  by version and digest) and in the bundle.
+- When `database.enabled` is `false` or `backup.target` is empty, the
+  operator deletes the CronJob and the Secret.
+- The CronJob has no metric of its own. Use the metric of
+  kube-state-metrics `kube_cronjob_status_last_successful_time{namespace="bedrock-dbaas",cronjob="database-offsite"}`.
+  Alert when it is older than two schedule intervals.
+
+### Restore the database backups after you lose the cluster
+
+1. Build the new cluster. Set `backup.target`, `backup.credentials-secret`
+   and enable `database.enabled`.
+2. The operator makes the empty bucket `database.backup.bucket` in the new
+   object store.
+3. Copy the objects back with the keys of `backup.target` as the source and
+   the keys of the Secret `database-backups-s3` in `bedrock-dbaas` as the
+   destination:
+   `rclone copy SRC:<bucket>/<prefix>/databases/ DST:<database.backup.bucket>/`
+   (rclone remotes of type `s3`, the in-cluster endpoint
+   `http://<object store service>:80`).
+4. Create the `Database` objects again with the same names and uids as the
+   restore of a database requires (see [Database](database.md)), and
+   restore from the copied backups.
 
 ## Sealed archives
 
@@ -682,7 +771,7 @@ archive and its sealed copy count as one archive.
 - A backup is crash-consistent.
 - A restore cannot rename a VM.
 - A schedule fires at most once per hour.
-- Etcd snapshots stay on the host.
+- Etcd snapshots stay on the host unless `backup.target` is set.
 - Without an admin recipient, only the host that wrote an archive can open
   it.
 - A change of the admin recipients does not change archives that exist.
