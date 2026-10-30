@@ -16,3 +16,6 @@ extraEnv:
     value: ${BEDROCK_EGRESS_HTTP_PROXY}
   - name: NO_PROXY
     value: ${BEDROCK_EGRESS_NO_PROXY}
+prometheus:
+  servicemonitor:
+    enabled: true
