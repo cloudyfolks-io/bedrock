@@ -40,14 +40,18 @@ func removeStaleCoreDNSManifests(ctx context.Context, env StepEnv) error {
 	} else if err != nil {
 		return err
 	}
+	admin, err := env.Deps.AdminClient(filepath.Join(env.Deps.Root, adminKubeconfig))
+	if err != nil {
+		return err
+	}
 	var cluster v1alpha1.Cluster
-	if err := env.Client.Get(ctx, client.ObjectKey{Name: v1alpha1.ClusterName}, &cluster); err != nil {
+	if err := admin.Get(ctx, client.ObjectKey{Name: v1alpha1.ClusterName}, &cluster); err != nil {
 		return err
 	}
 	if cluster.Annotations[v1alpha1.AnnotationK0sCoreDNSTakeover] != takeoverDone {
 		return nil
 	}
-	if err := requireNoK0sCoreDNSObjects(ctx, env.Client); err != nil {
+	if err := requireNoK0sCoreDNSObjects(ctx, admin); err != nil {
 		return err
 	}
 	return os.RemoveAll(dir)
