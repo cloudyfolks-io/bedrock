@@ -120,7 +120,7 @@ func TestPodViewOfReadsPhaseNodeAndStart(t *testing.T) {
 		Spec:       corev1.PodSpec{NodeName: "node-a"},
 		Status:     corev1.PodStatus{Phase: corev1.PodRunning, StartTime: &started},
 	}
-	view := PodViewOf(pod, "default")
+	view := PodViewOf(pod, "default", time.Time{})
 	if view.Phase != "Running" || view.Node != "node-a" || view.StartedAt == nil || !view.StartedAt.Equal(&started) {
 		t.Fatalf("view %+v", view)
 	}
@@ -182,17 +182,17 @@ func TestPodViewOfReadsTheFabricAddress(t *testing.T) {
 			Conditions: []corev1.PodCondition{{Type: corev1.PodReady, Status: corev1.ConditionTrue}},
 		},
 	}
-	view := PodViewOf(pod, "default")
+	view := PodViewOf(pod, "default", time.Time{})
 	if view.Address != "10.0.0.7" || !view.Ready || view.Terminating {
 		t.Fatalf("view %+v", view)
 	}
 	delete(pod.Annotations, "default.t1-prod.fabric.cloudyfolks.io/allocated")
-	if got := PodViewOf(pod, "default").Address; got != "10.9.9.9" {
+	if got := PodViewOf(pod, "default", time.Time{}).Address; got != "10.9.9.9" {
 		t.Fatalf("an unallocated annotation falls back to the pod address: %q", got)
 	}
 	pod.Status.ContainerStatuses = []corev1.ContainerStatus{{State: corev1.ContainerState{Waiting: &corev1.ContainerStateWaiting{Reason: "ErrImagePull", Message: "denied"}}}}
 	pod.DeletionTimestamp = &metav1.Time{Time: time.Now()}
-	view = PodViewOf(pod, "default")
+	view = PodViewOf(pod, "default", time.Time{})
 	if view.WaitingReason != "ErrImagePull" || view.WaitingMessage != "denied" || !view.Terminating {
 		t.Fatalf("view %+v", view)
 	}
@@ -251,5 +251,34 @@ func TestDeploymentStatusOfReadsAQuotaRefusal(t *testing.T) {
 	}}}
 	if got := DeploymentStatusOf(c, cleared).QuotaMessage; got != "" {
 		t.Fatalf("a cleared failure is not surfaced: %q", got)
+	}
+}
+
+func TestPodViewOfFlagsAPodHeldByTheQuotaGateAfterTheGrace(t *testing.T) {
+	created := time.Date(2026, 10, 19, 12, 0, 0, 0, time.UTC)
+	pod := corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{Name: "web-1", CreationTimestamp: metav1.NewTime(created)},
+		Spec:       corev1.PodSpec{SchedulingGates: []corev1.PodSchedulingGate{{Name: "ApplicationAwareQuotaGate"}}},
+	}
+	if PodViewOf(pod, "default", created.Add(5*time.Second)).QuotaGated {
+		t.Fatal("a fresh gate is normal")
+	}
+	if !PodViewOf(pod, "default", created.Add(time.Minute)).QuotaGated {
+		t.Fatal("an old gate means the quota holds the pod")
+	}
+	pod.Spec.SchedulingGates = []corev1.PodSchedulingGate{{Name: "other"}}
+	if PodViewOf(pod, "default", created.Add(time.Minute)).QuotaGated {
+		t.Fatal("another gate is not the quota")
+	}
+}
+
+func TestADeploymentWithAGatedPodShowsQuotaExceeded(t *testing.T) {
+	got := Decide(settled(4, 4, 4, 1), []PodView{{Name: "a", Ready: true}, {Name: "b", QuotaGated: true}})
+	if got.Reason != ReasonQuotaExceeded || got.Phase != v1alpha1.ContainerPhasePending {
+		t.Fatalf("status %+v", got)
+	}
+	stopped := Decide(settled(0, 0, 0, 0), []PodView{{Name: "b", QuotaGated: true}})
+	if stopped.Reason != ReasonStopped {
+		t.Fatalf("status %+v", stopped)
 	}
 }

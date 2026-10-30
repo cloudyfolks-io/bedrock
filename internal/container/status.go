@@ -17,6 +17,9 @@ import (
 )
 
 const (
+	quotaGate      = "ApplicationAwareQuotaGate"
+	quotaGateGrace = 30 * time.Second
+
 	waitingImagePullBackOff     = "ImagePullBackOff"
 	waitingErrImagePull         = "ErrImagePull"
 	waitingInvalidImageName     = "InvalidImageName"
@@ -46,6 +49,7 @@ type PodView struct {
 	Address        string
 	WaitingReason  string
 	WaitingMessage string
+	QuotaGated     bool
 }
 
 type Status struct {
@@ -71,6 +75,10 @@ func Decide(deployment DeploymentStatus, pods []PodView) Status {
 	}
 	if deployment.QuotaMessage != "" {
 		status.Phase, status.Reason, status.Message = v1alpha1.ContainerPhasePending, ReasonQuotaExceeded, deployment.QuotaMessage
+		return status
+	}
+	if gated, ok := firstQuotaGated(pods); ok {
+		status.Phase, status.Reason, status.Message = v1alpha1.ContainerPhasePending, ReasonQuotaExceeded, fmt.Sprintf("the quota of the project holds the pod %s: read the events of the pod", gated.Name)
 		return status
 	}
 	fatal, hasFatal := firstFatal(pods)
@@ -117,6 +125,16 @@ func isFatalWaiting(reason string) bool {
 		return true
 	}
 	return false
+}
+
+func firstQuotaGated(pods []PodView) (PodView, bool) {
+	ordered := slices.SortedFunc(slices.Values(pods), func(a, b PodView) int { return cmp.Compare(a.Name, b.Name) })
+	for _, pod := range ordered {
+		if !pod.Terminating && pod.QuotaGated {
+			return pod, true
+		}
+	}
+	return PodView{}, false
 }
 
 func firstFatal(pods []PodView) (PodView, bool) {
@@ -174,8 +192,13 @@ func desiredOf(c v1alpha1.Container, deployment *appsv1.Deployment) int32 {
 	return c.Spec.Autoscale.Min
 }
 
-func PodViewOf(pod corev1.Pod, subnet string) PodView {
-	view := PodView{Name: pod.Name, Phase: string(pod.Status.Phase), Node: pod.Spec.NodeName, StartedAt: pod.Status.StartTime, Terminating: pod.DeletionTimestamp != nil, Address: podAddress(pod, subnet)}
+func quotaGatedFor(pod corev1.Pod, now time.Time) bool {
+	held := slices.ContainsFunc(pod.Spec.SchedulingGates, func(gate corev1.PodSchedulingGate) bool { return gate.Name == quotaGate })
+	return held && now.Sub(pod.CreationTimestamp.Time) > quotaGateGrace
+}
+
+func PodViewOf(pod corev1.Pod, subnet string, now time.Time) PodView {
+	view := PodView{Name: pod.Name, Phase: string(pod.Status.Phase), Node: pod.Spec.NodeName, StartedAt: pod.Status.StartTime, Terminating: pod.DeletionTimestamp != nil, Address: podAddress(pod, subnet), QuotaGated: quotaGatedFor(pod, now)}
 	for _, condition := range pod.Status.Conditions {
 		if condition.Type == corev1.PodReady && condition.Status == corev1.ConditionTrue {
 			view.Ready = true

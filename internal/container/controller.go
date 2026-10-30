@@ -204,7 +204,7 @@ func (r *Reconciler) observe(ctx context.Context, c v1alpha1.Container) (Status,
 	}
 	views := make([]PodView, 0, len(pods))
 	for _, pod := range pods {
-		views = append(views, PodViewOf(pod, SubnetName(c.Spec)))
+		views = append(views, PodViewOf(pod, SubnetName(c.Spec), r.now()))
 	}
 	return Decide(DeploymentStatusOf(c, observed), views), nil
 }
