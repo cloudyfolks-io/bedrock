@@ -74,6 +74,9 @@ spec:
         - name: operator
           image: ghcr.io/cloudyfolks-io/bedrock:dev
           args: ["operator"]
+          ports:
+            - name: metrics
+              containerPort: 8080
           env:
             - name: BEDROCK_RELEASE_DIR
               value: /release

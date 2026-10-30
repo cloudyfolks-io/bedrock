@@ -12,6 +12,7 @@ import (
 	"k8s.io/client-go/rest"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	metricsserver "sigs.k8s.io/controller-runtime/pkg/metrics/server"
 
 	"github.com/cloudyfolks-io/bedrock/api/v1alpha1"
 	"github.com/cloudyfolks-io/bedrock/internal/release"
@@ -36,6 +37,7 @@ type RunOptions struct {
 func managerOptions(scheme *runtime.Scheme) ctrl.Options {
 	return ctrl.Options{
 		Scheme:                  scheme,
+		Metrics:                 metricsserver.Options{BindAddress: metricsAddress},
 		LeaderElection:          true,
 		LeaderElectionID:        "bedrock-operator",
 		LeaderElectionNamespace: "bedrock-system",
@@ -53,6 +55,9 @@ func Run(ctx context.Context, cfg *rest.Config, scheme *runtime.Scheme, opts Run
 		return err
 	}
 	if err := setupControllers(mgr, cfg, bundle); err != nil {
+		return err
+	}
+	if err := registerStatusMetrics(mgr.GetClient()); err != nil {
 		return err
 	}
 	if err := mgr.Add(seeder{client: mgr.GetClient()}); err != nil {
