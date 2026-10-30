@@ -908,6 +908,30 @@ A change of `network.ovn-tls` restarts ovn-central, the controller, the monitor,
 The ovs-ovn update strategy is `OnDelete`, so the operator restarts the ovs-ovn pods node by node in the upgrade run.
 Plan a window for `network.ovn-tls`.
 
+### OVN database members
+
+The OVN databases run in the Deployment `ovn-central` in `kube-system`.
+It has one replica for each node with the label `fabric/role=master`.
+Each control-plane node has this label.
+The list of the node addresses is the variable `NODE_IPS` of the Deployment.
+
+The operator compares `NODE_IPS` with the addresses of the nodes that have the label.
+When they differ, the operator renders the `fabric` group of the release again and applies it.
+This happens when a control-plane node joins, and when a node object is deleted.
+It does not happen when the list is the same.
+
+When the cluster grows from one node to three nodes, the new pods join the raft cluster through the address of the first node.
+The pod on the first node keeps its database file and stays up until the two new members are ready.
+The cluster keeps its data, and it always has a majority.
+
+When a node object is deleted, the replica count goes down and the other pods restart one by one.
+The raft cluster still lists the removed member.
+Remove it with `ovs-appctl -t /var/run/ovn/ovnnb_db.ctl cluster/kick OVN_Northbound <server id>`, and the same for `ovnsb_db.ctl` and `OVN_Southbound`.
+Find the server ID in the output of `cluster/status`.
+
+To check a cluster with three nodes, make sure that `kubectl -n kube-system get deployment ovn-central` shows 3/3.
+The output of `cluster/status` must list three servers for each database.
+
 ## Run a second ingress
 
 The Traefik of Bedrock reads IngressRoutes, Middlewares, ServersTransports and Ingresses only in the namespaces `traefik`, `bedrock-system`, `bedrock-registry`, `cdi` and `rook-ceph`. These are the namespaces where Bedrock renders its own routes: the panel and API host, the sign-in host, the upload host, the registry and the public object storage host. A route in any other namespace is ignored by Bedrock. To run a second Traefik for your own workloads, install it in its own namespace with its own IngressClass and its own entry points, and give it only the namespaces of your workloads. Do not put your routes in the namespaces above, because the Traefik of Bedrock serves them there. The second Traefik must not read those namespaces either, or it serves the routes of Bedrock too.
