@@ -31,18 +31,7 @@ func InstallGroups(ctx context.Context, c client.Client, bundle Bundle, vars map
 	}
 	applier := Applier{Client: c}
 	for _, group := range bundle.Groups {
-		groupCtx, cancel := groupContext(ctx, groupTimeout)
-		err := before(groupCtx, group)
-		if err == nil {
-			err = applier.Apply(groupCtx, group)
-		}
-		if err == nil {
-			err = WaitGroup(groupCtx, c, gates, group, interval)
-		}
-		if err == nil {
-			err = after(groupCtx, group)
-		}
-		cancel()
+		err := applyGroup(ctx, c, applier, gates, group, interval, groupTimeout, before, after)
 		report(group, err)
 		if err != nil {
 			return fmt.Errorf("group %s: %w", group.Name, err)
@@ -60,4 +49,41 @@ func groupContext(ctx context.Context, timeout time.Duration) (context.Context, 
 		return context.WithCancel(ctx)
 	}
 	return context.WithTimeout(ctx, timeout)
+}
+
+func InstallGroup(ctx context.Context, c client.Client, bundle Bundle, vars map[string]string, gates Gates, interval, groupTimeout time.Duration, name string, before, after func(ctx context.Context, group Group) error) error {
+	bundle, err := Substitute(bundle, vars)
+	if err != nil {
+		return err
+	}
+	bundle, err = SetPodMTU(bundle, vars)
+	if err != nil {
+		return err
+	}
+	for _, group := range bundle.Groups {
+		if group.Name != name {
+			continue
+		}
+		if err := applyGroup(ctx, c, Applier{Client: c}, gates, group, interval, groupTimeout, before, after); err != nil {
+			return fmt.Errorf("group %s: %w", group.Name, err)
+		}
+		return nil
+	}
+	return fmt.Errorf("group %s: not in the release", name)
+}
+
+func applyGroup(ctx context.Context, c client.Client, applier Applier, gates Gates, group Group, interval, timeout time.Duration, before, after func(ctx context.Context, group Group) error) error {
+	groupCtx, cancel := groupContext(ctx, timeout)
+	defer cancel()
+	err := before(groupCtx, group)
+	if err == nil {
+		err = applier.Apply(groupCtx, group)
+	}
+	if err == nil {
+		err = WaitGroup(groupCtx, c, gates, group, interval)
+	}
+	if err == nil {
+		err = after(groupCtx, group)
+	}
+	return err
 }
