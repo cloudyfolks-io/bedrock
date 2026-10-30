@@ -291,10 +291,10 @@ check_restore() {
   vm_run 1 'retry_until 900 kubectl get --raw=/readyz' || return 1
   token=$(vm_run 1 "$bedrock_bin token create --roles $join_roles --expiry 2h") || return 1
   rejoin_node 2 "$token" || return 1
-  vm_run 1 "retry_until 1800 node_ready $(lab_node 2)" || return 1
+  vm_run 1 "retry_until 1800 node_ready $(node_name 2)" || return 1
   vm_run 1 'retry_until 1800 pgs_active' || return 1
   rejoin_node 3 "$token" || return 1
-  vm_run 1 "retry_until 1800 node_ready $(lab_node 3)" || return 1
+  vm_run 1 "retry_until 1800 node_ready $(node_name 3)" || return 1
   vm_run 1 'retry_until 1800 pgs_active' || return 1
   vm_run 1 'ceph_op osd unset noout' || return 1
   vm_run 1 "$bedrock_bin restart-workloads" || return 1
