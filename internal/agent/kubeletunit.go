@@ -10,9 +10,11 @@ import (
 	"slices"
 	"strings"
 
+	"sigs.k8s.io/controller-runtime/pkg/client"
+
+	"github.com/cloudyfolks-io/bedrock/api/v1alpha1"
 	"github.com/cloudyfolks-io/bedrock/internal/host"
 	"github.com/cloudyfolks-io/bedrock/internal/k0s"
-	"github.com/cloudyfolks-io/bedrock/internal/settings"
 )
 
 const unitDir = "etc/systemd/system"
@@ -63,6 +65,18 @@ func withKubeletArgs(unit string, wanted []string) (string, bool) {
 	return unit[:match[0]] + next + unit[match[1]:], true
 }
 
+func reservationValues(ctx context.Context, c client.Reader) (map[string]string, error) {
+	values := map[string]string{}
+	for _, key := range k0s.ReservationKeys {
+		var setting v1alpha1.Setting
+		if err := c.Get(ctx, client.ObjectKey{Name: key}, &setting); client.IgnoreNotFound(err) != nil {
+			return nil, err
+		}
+		values[key] = setting.Spec.Value
+	}
+	return values, nil
+}
+
 func ensureKubeletArgs(ctx context.Context, env StepEnv, service k0sService) (bool, error) {
 	path := filepath.Join(env.Deps.Root, unitDir, service.Unit)
 	current, err := os.ReadFile(path)
@@ -72,7 +86,7 @@ func ensureKubeletArgs(ctx context.Context, env StepEnv, service k0sService) (bo
 	if err != nil {
 		return false, err
 	}
-	values, err := settings.Effective(ctx, env.Client)
+	values, err := reservationValues(ctx, env.Client)
 	if err != nil {
 		return false, err
 	}

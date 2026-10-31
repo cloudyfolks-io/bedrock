@@ -368,10 +368,14 @@ sealed snapshots to the bucket of the target. The key is:
 <prefix>/etcd/<host>/etcd-<stamp>.tar.gz.age
 ```
 
-`<prefix>` is the prefix of `backup.target`. The upload uses the keys in
-the Secret of `backup.credentials-secret` (`access-key-id` and
-`secret-access-key`, and `ca.crt` if the endpoint needs it). The agent
-uploads the file as it is. It never uploads a plain archive.
+`<prefix>` is the prefix of `backup.target`. The operator copies
+`access-key-id`, `secret-access-key` and, if present, `ca.crt` from the
+Secret of `backup.credentials-secret` to the Secret
+`bedrock-agent-backup-s3` in `bedrock-system`. It keeps the copy in sync
+and deletes it when `backup.target` is empty. The agent reads only this
+copy and the setting `backup.target`. It never reads the Secret of
+`backup.credentials-secret`. The agent uploads the file as it is. It never
+uploads a plain archive.
 
 - The agent keeps the newest 7 snapshots of each host in the bucket. It
   deletes older ones.

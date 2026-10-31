@@ -79,6 +79,7 @@ func resetTargetState(t *testing.T) {
 	for _, name := range []string{CredentialsSecretName, RepositorySecretName, "other"} {
 		_ = k8sClient.Delete(ctx, &corev1.Secret{ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: VeleroNamespace}})
 	}
+	_ = k8sClient.Delete(ctx, &corev1.Secret{ObjectMeta: metav1.ObjectMeta{Name: AgentCredentialsName, Namespace: SystemNamespace}})
 	class := &unstructured.Unstructured{}
 	class.SetGroupVersionKind(schema.GroupVersionKind{Group: "snapshot.storage.k8s.io", Version: "v1", Kind: "VolumeSnapshotClass"})
 	class.SetName(SnapshotClassName)
@@ -151,6 +152,13 @@ func TestTargetRendersTheLocation(t *testing.T) {
 	}
 	if string(credentials.Data[CredentialsKey]) != "[default]\naws_access_key_id="+testAccessKey+"\naws_secret_access_key="+testSecretKey+"\n" {
 		t.Fatalf("credentials %q", credentials.Data[CredentialsKey])
+	}
+	agent := &corev1.Secret{}
+	if err := k8sClient.Get(context.Background(), client.ObjectKey{Namespace: SystemNamespace, Name: AgentCredentialsName}, agent); err != nil {
+		t.Fatal(err)
+	}
+	if string(agent.Data["access-key-id"]) != testAccessKey || string(agent.Data["secret-access-key"]) != testSecretKey || len(agent.Data) != 2 {
+		t.Fatalf("agent credentials %v", agent.Data)
 	}
 	repository := &corev1.Secret{}
 	if err := k8sClient.Get(context.Background(), client.ObjectKey{Namespace: VeleroNamespace, Name: RepositorySecretName}, repository); err != nil {
@@ -241,6 +249,7 @@ func TestTargetEmptyRemovesTheLocation(t *testing.T) {
 		err := k8sClient.Get(context.Background(), client.ObjectKey{Namespace: VeleroNamespace, Name: name}, &corev1.Secret{})
 		requireGone(t, err)
 	}
+	requireGone(t, k8sClient.Get(context.Background(), client.ObjectKey{Namespace: SystemNamespace, Name: AgentCredentialsName}, &corev1.Secret{}))
 	if err := k8sClient.Get(context.Background(), client.ObjectKey{Namespace: VeleroNamespace, Name: "other"}, &corev1.Secret{}); err != nil {
 		t.Fatalf("foreign secret removed: %v", err)
 	}
