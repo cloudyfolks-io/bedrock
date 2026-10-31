@@ -25,6 +25,7 @@ func InstallGroups(ctx context.Context, c client.Client, bundle Bundle, vars map
 	if err != nil {
 		return err
 	}
+	bundle = SetCentralTopology(bundle, vars)
 	previous, err := ReadInventory(ctx, c)
 	if err != nil {
 		return err
@@ -60,6 +61,7 @@ func InstallGroup(ctx context.Context, c client.Client, bundle Bundle, vars map[
 	if err != nil {
 		return err
 	}
+	bundle = SetCentralTopology(bundle, vars)
 	for _, group := range bundle.Groups {
 		if group.Name != name {
 			continue

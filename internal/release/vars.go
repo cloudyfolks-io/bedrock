@@ -4,14 +4,9 @@ import (
 	"context"
 	"fmt"
 	"maps"
-	"sort"
-	"strings"
 	"time"
 
-	corev1 "k8s.io/api/core/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
-
-	"github.com/cloudyfolks-io/bedrock/internal/roles"
 )
 
 const (
@@ -20,23 +15,13 @@ const (
 )
 
 func Vars(ctx context.Context, c client.Client, vip string) (map[string]string, error) {
-	var nodes corev1.NodeList
-	if err := c.List(ctx, &nodes, client.MatchingLabels{roles.FabricRoleLabel: "master"}); err != nil {
+	masters, err := MasterNodes(ctx, c)
+	if err != nil {
 		return nil, err
 	}
-	var ips []string
-	for _, node := range nodes.Items {
-		for _, addr := range node.Status.Addresses {
-			if addr.Type == corev1.NodeInternalIP {
-				ips = append(ips, addr.Address)
-				break
-			}
-		}
-	}
-	sort.Strings(ips)
 	vars := map[string]string{VarVIP: vip}
-	if len(ips) > 0 {
-		vars[VarMasterIPs] = strings.Join(ips, ",")
+	if len(masters) > 0 {
+		vars = WithMasters(vars, masters)
 	}
 	values, err := settingValues(ctx, c)
 	if err != nil {
