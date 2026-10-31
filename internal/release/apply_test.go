@@ -11,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
 	rbacv1 "k8s.io/api/rbac/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
@@ -367,5 +368,65 @@ func TestApplyRenamesTheOperatorBindingWithoutChangingRoleRef(t *testing.T) {
 		if obj.GetKind() == "ClusterRoleBinding" && obj.GetName() == "bedrock-operator" {
 			t.Fatal("the manifest must not define a ClusterRoleBinding named bedrock-operator, so prune removes the old one")
 		}
+	}
+}
+
+func hookJob(addresses string) *unstructured.Unstructured {
+	return &unstructured.Unstructured{Object: map[string]any{
+		"apiVersion": "batch/v1", "kind": "Job",
+		"metadata": map[string]any{"name": "fabric-post-upgrade-hook", "namespace": "default"},
+		"spec": map[string]any{"template": map[string]any{
+			"spec": map[string]any{
+				"restartPolicy": "Never",
+				"containers": []any{map[string]any{
+					"name": "hook", "image": "example.com/hook:1",
+					"env": []any{map[string]any{"name": "OVN_DB_IPS", "value": addresses}},
+				}},
+			},
+		}},
+	}}
+}
+
+func TestApplyRecreatesAJobWhoseTemplateChanged(t *testing.T) {
+	c, _ := startTestEnv(t)
+	ctx := context.Background()
+	applier := Applier{Client: c}
+	if err := applier.Apply(ctx, Group{Name: "fabric", Objects: []*unstructured.Unstructured{hookJob("10.0.0.1")}}); err != nil {
+		t.Fatal(err)
+	}
+	if err := applier.Apply(ctx, Group{Name: "fabric", Objects: []*unstructured.Unstructured{hookJob("10.0.0.1,10.0.0.2,10.0.0.3")}}); err != nil {
+		t.Fatalf("re-apply with a new template: %v", err)
+	}
+	var job batchv1.Job
+	if err := c.Get(ctx, client.ObjectKey{Namespace: "default", Name: "fabric-post-upgrade-hook"}, &job); err != nil {
+		t.Fatal(err)
+	}
+	if got := job.Spec.Template.Spec.Containers[0].Env[0].Value; got != "10.0.0.1,10.0.0.2,10.0.0.3" {
+		t.Fatalf("OVN_DB_IPS %q", got)
+	}
+}
+
+func TestApplyKeepsAJobWhoseTemplateIsUnchanged(t *testing.T) {
+	c, _ := startTestEnv(t)
+	ctx := context.Background()
+	applier := Applier{Client: c}
+	group := Group{Name: "fabric", Objects: []*unstructured.Unstructured{hookJob("10.0.0.1")}}
+	if err := applier.Apply(ctx, group); err != nil {
+		t.Fatal(err)
+	}
+	var first batchv1.Job
+	key := client.ObjectKey{Namespace: "default", Name: "fabric-post-upgrade-hook"}
+	if err := c.Get(ctx, key, &first); err != nil {
+		t.Fatal(err)
+	}
+	if err := applier.Apply(ctx, group); err != nil {
+		t.Fatal(err)
+	}
+	var second batchv1.Job
+	if err := c.Get(ctx, key, &second); err != nil {
+		t.Fatal(err)
+	}
+	if first.UID != second.UID {
+		t.Fatal("an unchanged Job must not be recreated")
 	}
 }
