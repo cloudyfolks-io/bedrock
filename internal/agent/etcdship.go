@@ -22,6 +22,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	"github.com/cloudyfolks-io/bedrock/api/v1alpha1"
+	backupapi "github.com/cloudyfolks-io/bedrock/internal/backup"
 	"github.com/cloudyfolks-io/bedrock/internal/backup/s3"
 	"github.com/cloudyfolks-io/bedrock/internal/backup/seal"
 	"github.com/cloudyfolks-io/bedrock/internal/backup/target"
@@ -100,21 +101,17 @@ func shipOnce(ctx context.Context, c client.Client, deps Deps, rawTarget string,
 }
 
 func shipClient(ctx context.Context, c client.Client, deps Deps, tgt target.Target) (s3.Client, string, error) {
-	name, err := settingValue(ctx, c, credentialsKey)
-	if err != nil {
-		return s3.Client{}, ReasonShipUploadFailed, err
-	}
 	var secret corev1.Secret
-	err = c.Get(ctx, client.ObjectKey{Namespace: release.SystemNamespace, Name: name}, &secret)
-	if name == "" || apierrors.IsNotFound(err) {
-		return s3.Client{}, ReasonShipCredentials, fmt.Errorf("secret %s/%s does not exist: set %s", release.SystemNamespace, name, credentialsKey)
+	err := c.Get(ctx, client.ObjectKey{Namespace: release.SystemNamespace, Name: backupapi.AgentCredentialsName}, &secret)
+	if apierrors.IsNotFound(err) {
+		return s3.Client{}, ReasonShipCredentials, fmt.Errorf("secret %s/%s does not exist: set %s", release.SystemNamespace, backupapi.AgentCredentialsName, credentialsKey)
 	}
 	if err != nil {
 		return s3.Client{}, ReasonShipUploadFailed, err
 	}
 	access, key := string(secret.Data["access-key-id"]), string(secret.Data["secret-access-key"])
 	if access == "" || key == "" {
-		return s3.Client{}, ReasonShipCredentials, fmt.Errorf("secret %s lacks access-key-id or secret-access-key", name)
+		return s3.Client{}, ReasonShipCredentials, fmt.Errorf("secret %s lacks access-key-id or secret-access-key", backupapi.AgentCredentialsName)
 	}
 	httpClient, err := shipHTTP(deps, secret.Data["ca.crt"])
 	if err != nil {

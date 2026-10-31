@@ -18,6 +18,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	"github.com/cloudyfolks-io/bedrock/api/v1alpha1"
+	backupapi "github.com/cloudyfolks-io/bedrock/internal/backup"
 	"github.com/cloudyfolks-io/bedrock/internal/release"
 )
 
@@ -84,7 +85,7 @@ func shipSetup(t *testing.T, bucket *shipBucket, withRecipient bool) Deps {
 		t.Fatal(err)
 	}
 	secret := &corev1.Secret{
-		ObjectMeta: metav1.ObjectMeta{Name: "ship-creds", Namespace: release.SystemNamespace},
+		ObjectMeta: metav1.ObjectMeta{Name: backupapi.AgentCredentialsName, Namespace: release.SystemNamespace},
 		Data:       map[string][]byte{"access-key-id": []byte("AK"), "secret-access-key": []byte("SK")},
 	}
 	if err := k8sClient.Create(context.Background(), secret); err != nil {
@@ -92,7 +93,6 @@ func shipSetup(t *testing.T, bucket *shipBucket, withRecipient bool) Deps {
 	}
 	t.Cleanup(func() { k8sClient.Delete(context.Background(), secret) })
 	createSetting(t, targetKey, "s3://"+strings.TrimPrefix(bucket.server.URL, "http://")+"/bucket/pre?insecure=true")
-	createSetting(t, credentialsKey, "ship-creds")
 	if withRecipient {
 		createSetting(t, archiveRecipientsKey, newRecipient(t).Recipient().String())
 	}

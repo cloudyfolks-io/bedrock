@@ -196,7 +196,12 @@ func TestAgentCallsStayWithinTheRightsOfTheNodeIdentity(t *testing.T) {
 			t.Fatalf("a Node without address must fail with a plain error, got %v", err)
 		}
 	})
-	t.Run("etcd ship", func(t *testing.T) {
-		t.Skip("ship reads backup.target, backup.credentials-secret and a Secret in bedrock-system that no agent RBAC grants; tracked as a separate gap")
+	t.Run("etcd ship reads backup.target and the agent credentials Secret", func(t *testing.T) {
+		shipDeps := shipSetup(t, newShipBucket(t), true)
+		shipDeps.Node = identityNode
+		writeLocalSnapshots(t, shipDeps, "etcd-20261008T020000Z"+sealedSuffix)
+		if err := RunEtcdShip(ctx, nodeClient, shipDeps); err != nil {
+			t.Fatal(err)
+		}
 	})
 }
