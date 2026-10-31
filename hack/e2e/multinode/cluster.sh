@@ -28,6 +28,19 @@ diagnose_cluster() {
   kubectl get pods -A -o wide || true
   kubectl get cluster cluster -o yaml || true
   ceph_op status || true
+  diagnose_ovn_central
+}
+
+diagnose_ovn_central() {
+  local pod
+  for pod in $(kubectl -n kube-system get pods -l app=ovn-central -o name); do
+    echo "--- $pod"
+    kubectl -n kube-system describe "$pod" || true
+    kubectl -n kube-system logs "$pod" --all-containers || true
+    kubectl -n kube-system logs "$pod" --all-containers --previous || true
+    kubectl -n kube-system exec "$pod" -- ovn-appctl -t /var/run/ovn/ovnnb_db.ctl cluster/status OVN_Northbound || true
+    kubectl -n kube-system exec "$pod" -- ovn-appctl -t /var/run/ovn/ovnsb_db.ctl cluster/status OVN_Southbound || true
+  done
 }
 
 diagnose_vms() {
