@@ -63,7 +63,7 @@ func TestProxyRules(t *testing.T) {
 		{"batch", "jobs", "get"},
 		{"", "pods", "list"},
 		{"", "pods/log", "get"},
-		{"", "pods/exec", "create"},
+		{"", "pods/exec", "create"}, {"", "pods/exec", "get"},
 	})
 	for _, rule := range ProxyRules() {
 		if slices.Contains(rule.Resources, "secrets") || slices.Contains(rule.Verbs, "delete") || slices.Contains(rule.Verbs, "*") {
