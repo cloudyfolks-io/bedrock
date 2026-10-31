@@ -2,7 +2,6 @@ package operator
 
 import (
 	"context"
-	"maps"
 	"slices"
 	"strings"
 
@@ -54,14 +53,19 @@ func (r *ClusterReconciler) reconcileFabricMasters(ctx context.Context) error {
 	if cluster.Annotations[fabricMastersAppliedAnnotation] == normalizedAddresses(desired) {
 		return nil
 	}
-	if normalizedAddresses(liveNodeIPs(central)) == normalizedAddresses(desired) && centralReady(central) {
+	if normalizedAddresses(liveNodeIPs(central)) == normalizedAddresses(desired) && centralSettled(central) {
 		return r.recordFabricMasters(ctx, cluster, desired)
 	}
+	masters, err := release.MasterNodes(ctx, r.Client)
+	if err != nil {
+		return err
+	}
 	env := r.upgradeEnv()
-	members := growthSteps(liveNodeIPs(central), desired)
-	err = r.growCentral(ctx, release.WithPodMTU(vars, cluster.Spec.PodMTU), members)
+	steps := growthSteps(central, masters)
+	base := release.WithPodMTU(vars, cluster.Spec.PodMTU)
+	err = r.growCentral(ctx, base, steps)
 	if err == nil {
-		err = release.InstallGroup(ctx, r.Client, r.Bundle, withMasterIPs(release.WithPodMTU(vars, cluster.Spec.PodMTU), members[len(members)-1]), r.Gates, r.Interval, r.GroupTimeout, fabricGroupName, beforeGroupHooks(r.Client), componentHook(env, cluster))
+		err = release.InstallGroup(ctx, r.Client, r.Bundle, release.WithMasters(base, steps[len(steps)-1]), r.Gates, r.Interval, r.GroupTimeout, fabricGroupName, beforeGroupHooks(r.Client), componentHook(env, cluster))
 	}
 	if err != nil {
 		if ctx.Err() != nil {
@@ -80,20 +84,17 @@ func (r *ClusterReconciler) reconcileFabricMasters(ctx context.Context) error {
 	return r.recordFabricMasters(ctx, cluster, desired)
 }
 
-func (r *ClusterReconciler) growCentral(ctx context.Context, vars map[string]string, steps []string) error {
+func (r *ClusterReconciler) growCentral(ctx context.Context, vars map[string]string, steps [][]release.MasterNode) error {
 	centralOnly := onlyCentral(r.Bundle)
 	for _, step := range steps {
-		if err := release.InstallGroup(ctx, r.Client, centralOnly, withMasterIPs(vars, step), r.Gates, r.Interval, r.GroupTimeout, fabricGroupName, release.SkipHook, release.SkipHook); err != nil {
+		if err := release.InstallGroup(ctx, r.Client, centralOnly, release.WithMasters(vars, step), r.Gates, r.Interval, r.GroupTimeout, fabricGroupName, release.SkipHook, release.SkipHook); err != nil {
+			return err
+		}
+		if err := r.waitRaftMembers(ctx, len(step)); err != nil {
 			return err
 		}
 	}
 	return nil
-}
-
-func withMasterIPs(vars map[string]string, addresses string) map[string]string {
-	out := maps.Clone(vars)
-	out[release.VarMasterIPs] = addresses
-	return out
 }
 
 func onlyCentral(bundle release.Bundle) release.Bundle {
@@ -109,21 +110,35 @@ func onlyCentral(bundle release.Bundle) release.Bundle {
 	return release.Bundle{Spec: bundle.Spec, Groups: groups}
 }
 
-func growthSteps(live, desired string) []string {
-	current := splitAddresses(live)
-	target := splitAddresses(desired)
-	if len(current) == 0 || len(current) >= len(target) || !subset(current, target) {
-		return []string{desired}
+func growthSteps(central appsv1.Deployment, masters []release.MasterNode) [][]release.MasterNode {
+	current := splitAddresses(liveNodeIPs(central))
+	if len(current) > 0 && int(centralReplicas(central)) != len(current) {
+		current = current[:1]
 	}
-	var steps []string
-	for _, address := range target {
-		if slices.Contains(current, address) {
+	if len(current) == 0 || len(current) >= len(masters) || !subset(current, addressesOf(masters)) {
+		return [][]release.MasterNode{masters}
+	}
+	members := make([]release.MasterNode, 0, len(masters))
+	for _, address := range current {
+		members = append(members, masters[slices.IndexFunc(masters, func(m release.MasterNode) bool { return m.Address == address })])
+	}
+	var steps [][]release.MasterNode
+	for _, master := range masters {
+		if slices.Contains(current, master.Address) {
 			continue
 		}
-		current = append(current, address)
-		steps = append(steps, strings.Join(current, ","))
+		members = append(slices.Clone(members), master)
+		steps = append(steps, members)
 	}
 	return steps
+}
+
+func addressesOf(masters []release.MasterNode) []string {
+	out := make([]string, len(masters))
+	for i, master := range masters {
+		out[i] = master.Address
+	}
+	return out
 }
 
 func splitAddresses(list string) []string {
@@ -167,13 +182,17 @@ func liveNodeIPs(central appsv1.Deployment) string {
 	return ""
 }
 
-func centralReady(central appsv1.Deployment) bool {
-	want := int32(1)
-	if central.Spec.Replicas != nil {
-		want = *central.Spec.Replicas
+func centralReplicas(central appsv1.Deployment) int32 {
+	if central.Spec.Replicas == nil {
+		return 1
 	}
+	return *central.Spec.Replicas
+}
+
+func centralSettled(central appsv1.Deployment) bool {
+	want := centralReplicas(central)
 	status := central.Status
-	return want > 0 && status.ObservedGeneration >= central.Generation && status.UpdatedReplicas == want && status.ReadyReplicas == want && status.Replicas == want
+	return int(want) == len(splitAddresses(liveNodeIPs(central))) && want > 0 && status.ObservedGeneration >= central.Generation && status.UpdatedReplicas == want && status.ReadyReplicas == want && status.Replicas == want
 }
 
 func normalizedAddresses(list string) string {
