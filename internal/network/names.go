@@ -31,6 +31,7 @@ const (
 	listenerRuleMax     = 59
 	securityGroupPrefix = "sg.bedrock.cloudyfolks.io/"
 	providerPrefix      = "provider-"
+	vpcLetterPrefix     = "v-"
 )
 
 func shorten(key, identity string, max int) string {
@@ -60,6 +61,9 @@ func FabricName(namespace, name string) string {
 }
 
 func VpcName(network string) string {
+	if network != "" && network[0] >= '0' && network[0] <= '9' {
+		return vpcLetterPrefix + network
+	}
 	return network
 }
 
