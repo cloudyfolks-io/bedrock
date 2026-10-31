@@ -2,6 +2,7 @@ package operator
 
 import (
 	"context"
+	"maps"
 	"slices"
 	"strings"
 
@@ -9,6 +10,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/event"
 	"sigs.k8s.io/controller-runtime/pkg/predicate"
@@ -52,11 +54,15 @@ func (r *ClusterReconciler) reconcileFabricMasters(ctx context.Context) error {
 	if cluster.Annotations[fabricMastersAppliedAnnotation] == normalizedAddresses(desired) {
 		return nil
 	}
-	if liveNodeIPs(central) == normalizedAddresses(desired) && centralReady(central) {
+	if normalizedAddresses(liveNodeIPs(central)) == normalizedAddresses(desired) && centralReady(central) {
 		return r.recordFabricMasters(ctx, cluster, desired)
 	}
 	env := r.upgradeEnv()
-	err = release.InstallGroup(ctx, r.Client, r.Bundle, release.WithPodMTU(vars, cluster.Spec.PodMTU), r.Gates, r.Interval, r.GroupTimeout, fabricGroupName, beforeGroupHooks(r.Client), componentHook(env, cluster))
+	members := growthSteps(liveNodeIPs(central), desired)
+	err = r.growCentral(ctx, release.WithPodMTU(vars, cluster.Spec.PodMTU), members)
+	if err == nil {
+		err = release.InstallGroup(ctx, r.Client, r.Bundle, withMasterIPs(release.WithPodMTU(vars, cluster.Spec.PodMTU), members[len(members)-1]), r.Gates, r.Interval, r.GroupTimeout, fabricGroupName, beforeGroupHooks(r.Client), componentHook(env, cluster))
+	}
 	if err != nil {
 		if ctx.Err() != nil {
 			return err
@@ -72,6 +78,68 @@ func (r *ClusterReconciler) reconcileFabricMasters(ctx context.Context) error {
 		return err
 	}
 	return r.recordFabricMasters(ctx, cluster, desired)
+}
+
+func (r *ClusterReconciler) growCentral(ctx context.Context, vars map[string]string, steps []string) error {
+	centralOnly := onlyCentral(r.Bundle)
+	for _, step := range steps {
+		if err := release.InstallGroup(ctx, r.Client, centralOnly, withMasterIPs(vars, step), r.Gates, r.Interval, r.GroupTimeout, fabricGroupName, release.SkipHook, release.SkipHook); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func withMasterIPs(vars map[string]string, addresses string) map[string]string {
+	out := maps.Clone(vars)
+	out[release.VarMasterIPs] = addresses
+	return out
+}
+
+func onlyCentral(bundle release.Bundle) release.Bundle {
+	groups := make([]release.Group, len(bundle.Groups))
+	for i, group := range bundle.Groups {
+		groups[i] = group
+		if group.Name == fabricGroupName {
+			groups[i].Objects = slices.DeleteFunc(slices.Clone(group.Objects), func(obj *unstructured.Unstructured) bool {
+				return obj.GetKind() != "Deployment" || obj.GetName() != ovnCentralDeployment
+			})
+		}
+	}
+	return release.Bundle{Spec: bundle.Spec, Groups: groups}
+}
+
+func growthSteps(live, desired string) []string {
+	current := splitAddresses(live)
+	target := splitAddresses(desired)
+	if len(current) == 0 || len(current) >= len(target) || !subset(current, target) {
+		return []string{desired}
+	}
+	var steps []string
+	for _, address := range target {
+		if slices.Contains(current, address) {
+			continue
+		}
+		current = append(current, address)
+		steps = append(steps, strings.Join(current, ","))
+	}
+	return steps
+}
+
+func splitAddresses(list string) []string {
+	if strings.TrimSpace(list) == "" {
+		return nil
+	}
+	return strings.Split(strings.ReplaceAll(list, " ", ""), ",")
+}
+
+func subset(part, whole []string) bool {
+	for _, address := range part {
+		if !slices.Contains(whole, address) {
+			return false
+		}
+	}
+	return true
 }
 
 func (r *ClusterReconciler) recordFabricMasters(ctx context.Context, cluster v1alpha1.Cluster, desired string) error {
@@ -92,7 +160,7 @@ func liveNodeIPs(central appsv1.Deployment) string {
 	for _, container := range central.Spec.Template.Spec.Containers {
 		for _, env := range container.Env {
 			if env.Name == "NODE_IPS" {
-				return normalizedAddresses(env.Value)
+				return env.Value
 			}
 		}
 	}
