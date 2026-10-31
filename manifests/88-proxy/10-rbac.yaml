@@ -117,7 +117,7 @@ rules:
     verbs: [get]
   - apiGroups: [""]
     resources: [pods/exec]
-    verbs: [create]
+    verbs: [create, get]
   - apiGroups: [kubevirt.io]
     resources: [virtualmachineinstancemigrations]
     verbs: [create]
