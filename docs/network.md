@@ -26,7 +26,8 @@ The section "How to read conditions" lists every reason.
 | each interface and VLAN id of the provider networks | `Vlan` | the name of the `Vlan` that already exists for the pair, or else the lowest provider network name of the pair |
 | each provider network | `Subnet` | `provider-<name>` |
 | bgp mode | `BgpConf` | `bedrock` |
-| `Network` | `Vpc` | the Network name |
+| `Network` | `Vpc` | the Network name, or `v-<name>` when the name starts with a digit |
+| `Network` | `Subnet` for the load balancer plane | `<vpc>-lb` |
 | `Network` with the services plane | `OvnEip` | `<vpc>-provider-<pool>` for the router port, and `<vpc>-services-snat` for the identity address |
 | `Network` with the services plane | `OvnSnatRule` | `<vpc>-services-snat-0` to `<vpc>-services-snat-2` |
 | `NetworkPeering` | `Vpc` | `vpcPeerings` and `staticRoutes` of both Networks |
@@ -1078,6 +1079,11 @@ Set `network.bgp.advertise-filter` to the prefixes that you want to advertise, t
 The settings `network.tenant-management.enabled`, `network.policy-enforcement` and `network.ovn-tls` keep the behavior of earlier releases by default.
 `network.policy-enforcement` is `standard`, as in the chart.
 A cluster that ran with `lax` before must set `lax` to keep its enforcement.
+
+A Network whose name starts with a digit gets a Vpc named `v-<name>`, because Fabric builds OVN address set names from the Vpc name and they must start with a letter.
+A Network that never became ready under the old name left a Vpc and a Subnet named with the bare Network name, and Fabric cannot delete them.
+After the upgrade, Bedrock deletes the Network by the new names, and the sweep removes the old objects when Fabric can delete them.
+If a `Vpc` or `Subnet` with a digit-leading name stays in `kubectl get vpcs,subnets`, remove its finalizers once with `kubectl patch <kind> <name> --type merge -p {metadata:{finalizers:null}}`.
 
 ## Inspect Fabric
 

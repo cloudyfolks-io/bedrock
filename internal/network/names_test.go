@@ -162,3 +162,15 @@ func TestInternalVipNameIsDistinctFromTheOldVipName(t *testing.T) {
 		t.Fatal("the name must be stable and unique per LoadBalancer")
 	}
 }
+
+func TestVpcNameStartsWithALetterWhenTheNetworkStartsWithADigit(t *testing.T) {
+	if got := VpcName("3oqdv5m4bk"); got != "v-3oqdv5m4bk" {
+		t.Fatalf("got %q", got)
+	}
+	if got := VpcName("acme"); got != "acme" {
+		t.Fatalf("a Network that starts with a letter must keep its Vpc name, got %q", got)
+	}
+	if got := VpcName("3oqdv5m4bk"); strings.ReplaceAll(got+".u2o_overlay_cidrs.ip4", "-", ".")[0] == '3' {
+		t.Fatal("the overlay address set name must start with a letter")
+	}
+}

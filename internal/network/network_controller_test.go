@@ -846,3 +846,17 @@ func TestNetworkReconcilerKeepsAProvisionedNetworkWithARedistributedVrfID(t *tes
 		t.Fatal("the VRFPolicy condition must go when the Setting no longer lists the id")
 	}
 }
+
+func TestNetworkReconcilerNamesThePlaneSubnetAfterTheVpcOfADigitNetwork(t *testing.T) {
+	c := cleanEnv(t)
+	network := networkOf("3"+unique(t, "net"), "acme", "10.100.0.0/16")
+	requireAccepted(t, c, network)
+	reconcileNetwork(t, c, network.Name)
+	vpc := VpcName(network.Name)
+	if got := getNetwork(t, c, network.Name).Status.VPC; got != vpc {
+		t.Fatalf("status VPC %q, want %q", got, vpc)
+	}
+	if planeSubnetOf(t, c, vpc).GetName() != LBSubnetName(vpc) {
+		t.Fatal("the plane Subnet must be named after the Vpc")
+	}
+}
