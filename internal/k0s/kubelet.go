@@ -26,6 +26,16 @@ type Reservations struct {
 	EvictImagefs string
 }
 
+var ReservationKeys = []string{
+	settings.KubeletSystemReservedMemory,
+	settings.KubeletKubeReservedMemory,
+	settings.KubeletSystemReservedCPU,
+	settings.KubeletKubeReservedCPU,
+	settings.KubeletEvictionMemory,
+	settings.KubeletEvictionNodefs,
+	settings.KubeletEvictionImagefs,
+}
+
 func ReservationsFrom(values map[string]string) Reservations {
 	get := func(key string) string { return settings.OrDefault(values[key], key) }
 	return Reservations{

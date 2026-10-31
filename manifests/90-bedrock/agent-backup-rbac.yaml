@@ -7,7 +7,16 @@ metadata:
 rules:
   - apiGroups: [bedrock.cloudyfolks.io]
     resources: [settings]
-    resourceNames: [backup.etcd-schedule, backup.archive-recipients]
+    resourceNames:
+      - backup.etcd-schedule
+      - backup.archive-recipients
+      - kubelet.system-reserved-memory
+      - kubelet.kube-reserved-memory
+      - kubelet.system-reserved-cpu
+      - kubelet.kube-reserved-cpu
+      - kubelet.eviction-memory-available
+      - kubelet.eviction-nodefs-available
+      - kubelet.eviction-imagefs-available
     verbs: [get]
 ---
 apiVersion: rbac.authorization.k8s.io/v1
