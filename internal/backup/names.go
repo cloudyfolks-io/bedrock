@@ -15,6 +15,7 @@ const (
 	CredentialsSecretName = "bedrock-backup-credentials"
 	CredentialsKey        = "cloud"
 	RepositorySecretName  = "velero-repo-credentials"
+	AgentCredentialsName  = "bedrock-agent-backup-s3"
 	RepositoryKey         = "repository-password"
 	SnapshotClassName     = "velero-block"
 	RBDDriver             = "rook-ceph.rbd.csi.ceph.com"

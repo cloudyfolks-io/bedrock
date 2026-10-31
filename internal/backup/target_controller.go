@@ -130,6 +130,7 @@ func (r *TargetReconciler) applyAll(ctx context.Context, tgt target.Target, secr
 	objects := []runtime.Object{
 		RepositorySecret(string(secret.Data[keyRepositoryPass])),
 		CredentialsSecret(string(secret.Data[keyAccessKeyID]), string(secret.Data[keySecretAccessKey])),
+		AgentCredentialsSecret(string(secret.Data[keyAccessKeyID]), string(secret.Data[keySecretAccessKey]), secret.Data[keyCA]),
 		SnapshotClass(),
 		StorageLocation(tgt, secret.Data[keyCA]),
 	}
@@ -146,6 +147,7 @@ func (r *TargetReconciler) removeOwned(ctx context.Context) error {
 		veleroStub("BackupStorageLocation", LocationName),
 		&corev1.Secret{ObjectMeta: metav1.ObjectMeta{Name: CredentialsSecretName, Namespace: VeleroNamespace}},
 		&corev1.Secret{ObjectMeta: metav1.ObjectMeta{Name: RepositorySecretName, Namespace: VeleroNamespace}},
+		&corev1.Secret{ObjectMeta: metav1.ObjectMeta{Name: AgentCredentialsName, Namespace: SystemNamespace}},
 	}
 	for _, obj := range owned {
 		if err := deleteOwned(ctx, r.Client, obj); err != nil {
