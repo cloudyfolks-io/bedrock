@@ -107,7 +107,7 @@ func (r *NetworkReconciler) Reconcile(ctx context.Context, req reconcile.Request
 		if err != nil {
 			return reconcile.Result{}, err
 		}
-		return r.publish(ctx, &network, notReadyStatus(network, ReasonFabricConflict, fmt.Sprintf("a Fabric Subnet named %s belongs to another owner", LBSubnetName(network.Name))))
+		return r.publish(ctx, &network, notReadyStatus(network, ReasonFabricConflict, fmt.Sprintf("a Fabric Subnet named %s belongs to another owner", LBSubnetName(VpcName(network.Name)))))
 	}
 	observed, err := getObject(ctx, r.Client, fabric.VpcGVK, vpc.GetName())
 	if err != nil {
@@ -131,7 +131,7 @@ func (r *NetworkReconciler) peerLinks(ctx context.Context, network *v1alpha1.Net
 }
 
 func (r *NetworkReconciler) applyLBPlane(ctx context.Context, network *v1alpha1.Network, cfg Config) (bool, error) {
-	meta := fabric.Meta{Name: LBSubnetName(network.Name), Labels: ObjectLabels("Network", network.Name, network.Spec.TenantRef, ""), Annotations: OwnerAnnotations(network)}
+	meta := fabric.Meta{Name: LBSubnetName(VpcName(network.Name)), Labels: ObjectLabels("Network", network.Name, network.Spec.TenantRef, ""), Annotations: OwnerAnnotations(network)}
 	subnet := fabric.PlaneSubnet(meta, VpcName(network.Name), cfg.LoadBalancer.CIDR.String(), cfg.LoadBalancer.Gateway.String())
 	if conflict, err := r.conflicts(ctx, subnet, network); err != nil || conflict {
 		return conflict, err
@@ -439,7 +439,7 @@ func (r *NetworkReconciler) finalize(ctx context.Context, network *v1alpha1.Netw
 		return reconcile.Result{RequeueAfter: terminatingRequeue}, nil
 	}
 	if !gone {
-		r.writeTerminatingStatus(ctx, network, notReadyStatus(*network, ReasonTerminating, fmt.Sprintf("waiting for Fabric to delete the load balancer plane Subnet %s and the Vpc", LBSubnetName(network.Name))))
+		r.writeTerminatingStatus(ctx, network, notReadyStatus(*network, ReasonTerminating, fmt.Sprintf("waiting for Fabric to delete the load balancer plane Subnet %s and the Vpc", LBSubnetName(VpcName(network.Name)))))
 		return reconcile.Result{RequeueAfter: terminatingRequeue}, nil
 	}
 	return reconcile.Result{}, releaseFinalizer(ctx, r.Client, network)
@@ -461,7 +461,7 @@ func (r *NetworkReconciler) planeHolders(ctx context.Context, network *v1alpha1.
 	if err != nil {
 		return nil, err
 	}
-	plane := LBSubnetName(network.Name)
+	plane := LBSubnetName(VpcName(network.Name))
 	var holders []string
 	for _, vip := range vips {
 		if subnet, _, _ := unstructured.NestedString(vip.Object, "spec", "subnet"); subnet != plane {
@@ -494,7 +494,7 @@ func remainingSubnets(facts []SubnetFacts) string {
 }
 
 func (r *NetworkReconciler) deleteOwnedFabric(ctx context.Context, network *v1alpha1.Network) (bool, error) {
-	if gone, err := r.deleteOwned(ctx, network, fabric.SubnetGVK, LBSubnetName(network.Name)); err != nil || !gone {
+	if gone, err := r.deleteOwned(ctx, network, fabric.SubnetGVK, LBSubnetName(VpcName(network.Name))); err != nil || !gone {
 		return false, err
 	}
 	return r.deleteOwned(ctx, network, fabric.VpcGVK, VpcName(network.Name))
