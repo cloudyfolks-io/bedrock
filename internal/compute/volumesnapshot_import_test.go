@@ -13,7 +13,6 @@ import (
 	"github.com/cloudyfolks-io/bedrock/api/v1alpha1"
 )
 
-
 const (
 	importedContentName  = "snapcontent-7d1f0c2e"
 	importedSnapshotName = "snap1"
