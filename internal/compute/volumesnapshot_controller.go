@@ -179,14 +179,12 @@ func (r *VolumeSnapshotReconciler) observe(ctx context.Context, snapshot v1alpha
 	if ready, _, _ := unstructured.NestedBool(csi.Object, "status", "readyToUse"); ready {
 		restore, _, _ := unstructured.NestedString(csi.Object, "status", "restoreSize")
 		size, _ := resource.ParseQuantity(restore)
-		bytes, err := r.contentSizeBytes(ctx, csi)
-		if err != nil {
-			return snapshotOutcome{}, err
-		}
+		bytes := r.contentSizeBytes(ctx, csi)
 		if bytes <= 0 {
 			bytes = size.Value()
 		}
 		if bytes <= 0 {
+			var err error
 			if bytes, err = r.sourceSizeBytes(ctx, snapshot); err != nil {
 				return snapshotOutcome{}, err
 			}
@@ -204,16 +202,19 @@ func parseSizeAnnotation(value string) int64 {
 	return bytes
 }
 
-func (r *VolumeSnapshotReconciler) contentSizeBytes(ctx context.Context, csi *unstructured.Unstructured) (int64, error) {
+func (r *VolumeSnapshotReconciler) contentSizeBytes(ctx context.Context, csi *unstructured.Unstructured) int64 {
+	if static, _, _ := unstructured.NestedString(csi.Object, "spec", "source", "volumeSnapshotContentName"); static == "" {
+		return 0
+	}
 	name, _, _ := unstructured.NestedString(csi.Object, "status", "boundVolumeSnapshotContentName")
 	if name == "" {
-		return 0, nil
+		return 0
 	}
 	content := emptyOf(csiSnapshotContentGVK)
 	if err := r.Client.Get(ctx, client.ObjectKey{Name: name}, content); err != nil {
-		return 0, client.IgnoreNotFound(err)
+		return 0
 	}
-	return parseSizeAnnotation(content.GetAnnotations()[sizeBytesAnnotation]), nil
+	return parseSizeAnnotation(content.GetAnnotations()[sizeBytesAnnotation])
 }
 
 func (r *VolumeSnapshotReconciler) sourceSizeBytes(ctx context.Context, snapshot v1alpha1.VolumeSnapshot) (int64, error) {
