@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"sort"
+	"strconv"
 	"time"
 
 	corev1 "k8s.io/api/core/v1"
@@ -20,6 +21,8 @@ import (
 
 	"github.com/cloudyfolks-io/bedrock/api/v1alpha1"
 )
+
+const sizeBytesAnnotation = "bedrock.cloudyfolks.io/size-bytes"
 
 const annotationDefaultSnapshotClass = "snapshot.storage.kubernetes.io/is-default-class"
 
@@ -176,9 +179,60 @@ func (r *VolumeSnapshotReconciler) observe(ctx context.Context, snapshot v1alpha
 	if ready, _, _ := unstructured.NestedBool(csi.Object, "status", "readyToUse"); ready {
 		restore, _, _ := unstructured.NestedString(csi.Object, "status", "restoreSize")
 		size, _ := resource.ParseQuantity(restore)
-		return snapshotOutcome{Phase: v1alpha1.VolumeSnapshotPhaseReady, SizeBytes: size.Value()}, nil
+		bytes, err := r.contentSizeBytes(ctx, csi)
+		if err != nil {
+			return snapshotOutcome{}, err
+		}
+		if bytes <= 0 {
+			bytes = size.Value()
+		}
+		if bytes <= 0 {
+			if bytes, err = r.sourceSizeBytes(ctx, snapshot); err != nil {
+				return snapshotOutcome{}, err
+			}
+		}
+		return snapshotOutcome{Phase: v1alpha1.VolumeSnapshotPhaseReady, SizeBytes: bytes}, nil
 	}
 	return snapshotOutcome{Phase: v1alpha1.VolumeSnapshotPhasePending}, nil
+}
+
+func parseSizeAnnotation(value string) int64 {
+	bytes, err := strconv.ParseInt(value, 10, 64)
+	if err != nil || bytes <= 0 {
+		return 0
+	}
+	return bytes
+}
+
+func (r *VolumeSnapshotReconciler) contentSizeBytes(ctx context.Context, csi *unstructured.Unstructured) (int64, error) {
+	name, _, _ := unstructured.NestedString(csi.Object, "status", "boundVolumeSnapshotContentName")
+	if name == "" {
+		return 0, nil
+	}
+	content := emptyOf(csiSnapshotContentGVK)
+	if err := r.Client.Get(ctx, client.ObjectKey{Name: name}, content); err != nil {
+		return 0, client.IgnoreNotFound(err)
+	}
+	return parseSizeAnnotation(content.GetAnnotations()[sizeBytesAnnotation]), nil
+}
+
+func (r *VolumeSnapshotReconciler) sourceSizeBytes(ctx context.Context, snapshot v1alpha1.VolumeSnapshot) (int64, error) {
+	var pvc corev1.PersistentVolumeClaim
+	err := r.Client.Get(ctx, client.ObjectKey{Namespace: snapshot.Namespace, Name: snapshot.Spec.VolumeRef}, &pvc)
+	if client.IgnoreNotFound(err) != nil {
+		return 0, err
+	}
+	if err == nil {
+		if capacity := pvc.Status.Capacity[corev1.ResourceStorage]; capacity.Value() > 0 {
+			return capacity.Value(), nil
+		}
+	}
+	var volume v1alpha1.Volume
+	err = r.Client.Get(ctx, client.ObjectKey{Namespace: snapshot.Namespace, Name: snapshot.Spec.VolumeRef}, &volume)
+	if client.IgnoreNotFound(err) != nil {
+		return 0, err
+	}
+	return int64(volume.Spec.SizeGi) << 30, nil
 }
 
 func snapshotCondition(snapshot v1alpha1.VolumeSnapshot, done snapshotOutcome) metav1.Condition {
@@ -186,6 +240,8 @@ func snapshotCondition(snapshot v1alpha1.VolumeSnapshot, done snapshotOutcome) m
 	switch {
 	case done.Gate != nil:
 		cond.Status, cond.Reason, cond.Message = metav1.ConditionFalse, done.Gate.Reason, done.Gate.Message
+	case done.Phase == v1alpha1.VolumeSnapshotPhaseReady && done.SizeBytes <= 0:
+		cond.Status, cond.Reason, cond.Message = metav1.ConditionTrue, "SizeUnknown", "the snapshot is ready but its size is not known"
 	case done.Phase == v1alpha1.VolumeSnapshotPhaseReady:
 		cond.Status, cond.Reason, cond.Message = metav1.ConditionTrue, "Ready", "the snapshot is ready"
 	case done.Phase == v1alpha1.VolumeSnapshotPhaseFailed:
