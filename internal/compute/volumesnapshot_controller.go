@@ -176,9 +176,35 @@ func (r *VolumeSnapshotReconciler) observe(ctx context.Context, snapshot v1alpha
 	if ready, _, _ := unstructured.NestedBool(csi.Object, "status", "readyToUse"); ready {
 		restore, _, _ := unstructured.NestedString(csi.Object, "status", "restoreSize")
 		size, _ := resource.ParseQuantity(restore)
-		return snapshotOutcome{Phase: v1alpha1.VolumeSnapshotPhaseReady, SizeBytes: size.Value()}, nil
+		bytes := size.Value()
+		if bytes <= 0 {
+			var err error
+			if bytes, err = r.sourceSizeBytes(ctx, snapshot); err != nil {
+				return snapshotOutcome{}, err
+			}
+		}
+		return snapshotOutcome{Phase: v1alpha1.VolumeSnapshotPhaseReady, SizeBytes: bytes}, nil
 	}
 	return snapshotOutcome{Phase: v1alpha1.VolumeSnapshotPhasePending}, nil
+}
+
+func (r *VolumeSnapshotReconciler) sourceSizeBytes(ctx context.Context, snapshot v1alpha1.VolumeSnapshot) (int64, error) {
+	var pvc corev1.PersistentVolumeClaim
+	err := r.Client.Get(ctx, client.ObjectKey{Namespace: snapshot.Namespace, Name: snapshot.Spec.VolumeRef}, &pvc)
+	if client.IgnoreNotFound(err) != nil {
+		return 0, err
+	}
+	if err == nil {
+		if capacity := pvc.Status.Capacity[corev1.ResourceStorage]; capacity.Value() > 0 {
+			return capacity.Value(), nil
+		}
+	}
+	var volume v1alpha1.Volume
+	err = r.Client.Get(ctx, client.ObjectKey{Namespace: snapshot.Namespace, Name: snapshot.Spec.VolumeRef}, &volume)
+	if client.IgnoreNotFound(err) != nil {
+		return 0, err
+	}
+	return int64(volume.Spec.SizeGi) << 30, nil
 }
 
 func snapshotCondition(snapshot v1alpha1.VolumeSnapshot, done snapshotOutcome) metav1.Condition {

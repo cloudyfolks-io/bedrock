@@ -8,6 +8,8 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 
+	"sigs.k8s.io/controller-runtime/pkg/client"
+
 	"github.com/cloudyfolks-io/bedrock/api/v1alpha1"
 )
 
@@ -94,5 +96,35 @@ func TestVolumeSnapshotAdoptsAnImportedStaticSnapshot(t *testing.T) {
 	}
 	if meta.FindStatusCondition(snapshot.Status.Conditions, v1alpha1.ConditionReady).Status != metav1.ConditionTrue {
 		t.Fatalf("conditions %+v", snapshot.Status.Conditions)
+	}
+}
+
+func TestVolumeSnapshotSizesAStaticSnapshotWithoutRestoreSizeFromTheClaim(t *testing.T) {
+	c, _ := startEnv(t)
+	ensureStorageClass(t, c, "block", rbdProvisioner, true)
+	ensureSnapshotClass(t, c, "block", rbdProvisioner, nil)
+	ns := uniqueNamespace(t, c)
+	createVolume(t, c, ns, "data1")
+	createPVC(t, c, ns, "data1", 10, "block")
+	stale := emptyOf(csiSnapshotContentGVK)
+	stale.SetName(importedContentName)
+	_ = client.IgnoreNotFound(c.Delete(context.Background(), stale))
+	createObject(t, c, importedContent(ns))
+	csi := importedSnapshot(ns)
+	createObject(t, c, csi)
+	csi.Object["status"] = map[string]any{
+		"boundVolumeSnapshotContentName": importedContentName,
+		"readyToUse":                     true,
+	}
+	must(t, c.Status().Update(context.Background(), csi))
+	createObject(t, c, &v1alpha1.VolumeSnapshot{
+		ObjectMeta: metav1.ObjectMeta{Namespace: ns, Name: importedSnapshotName},
+		Spec:       v1alpha1.VolumeSnapshotSpec{VolumeRef: "data1"},
+	})
+	reconcileSnapshot(t, &VolumeSnapshotReconciler{Client: c}, ns)
+
+	snapshot := requireSnapshotReason(t, c, ns, "Ready")
+	if snapshot.Status.Phase != "Ready" || snapshot.Status.SizeBytes != 10<<30 {
+		t.Fatalf("status %+v", snapshot.Status)
 	}
 }
