@@ -127,12 +127,14 @@ apiVersion: bedrock.cloudyfolks.io/v1alpha1
 kind: Registry
 metadata:
   name: library
+spec: {}
 RESERVED
   expect_refused "only an administrator may use a reserved registry name" as_user alice -n acme-data apply -f - <<MIRROR
 apiVersion: bedrock.cloudyfolks.io/v1alpha1
 kind: Registry
 metadata:
   name: mirror-docker
+spec: {}
 MIRROR
   expect_refused "only an administrator may use the name prefix platform-" as_user alice -n acme-data apply -f - <<PLATFORM
 apiVersion: bedrock.cloudyfolks.io/v1alpha1
