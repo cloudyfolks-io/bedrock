@@ -35,6 +35,11 @@ func TestRenderVirtualizationDefaults(t *testing.T) {
 	if len(gates) != 1 || gates[0] != "HonorWaitForFirstConsumer" || selector != "linux" {
 		t.Fatalf("cdi spec %+v", cdi.Object["spec"])
 	}
+	requests, _, _ := unstructured.NestedStringMap(cdi.Object, "spec", "config", "podResourceRequirements", "requests")
+	limits, _, _ := unstructured.NestedStringMap(cdi.Object, "spec", "config", "podResourceRequirements", "limits")
+	if requests["cpu"] != "100m" || requests["memory"] != "128Mi" || limits["memory"] != "1Gi" {
+		t.Fatalf("cdi pod resources %+v", cdi.Object["spec"])
+	}
 	if len(out.Probes) != 2 || out.Probes[0].GVK.Kind != "KubeVirt" || out.Probes[0].Key.Namespace != "kubevirt" || out.Probes[1].GVK.Kind != "CDI" || out.Probes[1].Key.Name != "cdi" {
 		t.Fatalf("probes %+v", out.Probes)
 	}

@@ -114,10 +114,17 @@ func withSMBIOS(configuration, smbios map[string]any) map[string]any {
 func cdi(proxy, noProxy string) *unstructured.Unstructured {
 	return object("cdi.kubevirt.io/v1beta1", "CDI", "", "cdi", map[string]any{
 		"imagePullPolicy": "IfNotPresent",
-		"config":          withImportProxy(map[string]any{"featureGates": []any{"HonorWaitForFirstConsumer"}}, proxy, noProxy),
+		"config":          withImportProxy(map[string]any{"featureGates": []any{"HonorWaitForFirstConsumer"}, "podResourceRequirements": importerResources()}, proxy, noProxy),
 		"infra":           linuxNodeSelector(),
 		"workload":        linuxNodeSelector(),
 	})
+}
+
+func importerResources() map[string]any {
+	return map[string]any{
+		"requests": map[string]any{"cpu": "100m", "memory": "128Mi"},
+		"limits":   map[string]any{"memory": "1Gi"},
+	}
 }
 
 func withImportProxy(config map[string]any, proxy, noProxy string) map[string]any {
