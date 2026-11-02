@@ -258,6 +258,11 @@ func (f *fakeS3) adminCall(w http.ResponseWriter, r *http.Request) {
 		_ = json.NewEncoder(w).Encode(answer)
 		return
 	}
+	if _, quota := query["quota"]; quota && query.Get("uid") == "" {
+		w.WriteHeader(http.StatusBadRequest)
+		_, _ = w.Write([]byte(`{"Code":"InvalidArgument"}`))
+		return
+	}
 	if query.Get("enabled") == "false" {
 		delete(f.quotas, bucket)
 		return
