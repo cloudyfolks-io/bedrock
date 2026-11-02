@@ -7,7 +7,6 @@ import (
 	"os"
 
 	ctrl "sigs.k8s.io/controller-runtime"
-	"sigs.k8s.io/controller-runtime/pkg/log/zap"
 
 	"github.com/cloudyfolks-io/bedrock/internal/operator"
 )
@@ -19,7 +18,6 @@ func operatorCommand(args []string, _, stderr io.Writer) int {
 	if err := flags.Parse(args); err != nil {
 		return 2
 	}
-	ctrl.SetLogger(zap.New())
 	cfg, err := ctrl.GetConfig()
 	if err != nil {
 		fmt.Fprintln(stderr, err)
