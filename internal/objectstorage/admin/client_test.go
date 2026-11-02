@@ -74,11 +74,11 @@ func TestBucketStatsOfAnEmptyBucket(t *testing.T) {
 
 func TestSetBucketQuota(t *testing.T) {
 	endpoint, calls := server(t, func(_ seen, w http.ResponseWriter) {})
-	if err := client().SetBucketQuota(context.Background(), endpoint, "us-east-1", credentials, "acme-data", 1073741824, 500); err != nil {
+	if err := client().SetBucketQuota(context.Background(), endpoint, "us-east-1", credentials, "bedrock-admin", "acme-data", 1073741824, 500); err != nil {
 		t.Fatal(err)
 	}
 	call := calls()[0]
-	if call.method != "PUT" || call.path != "/admin/bucket" || call.query.Get("bucket") != "acme-data" || call.query.Get("max-size") != "1073741824" || call.query.Get("max-objects") != "500" || call.query.Get("enabled") != "true" {
+	if call.method != "PUT" || call.path != "/admin/bucket" || call.query.Get("bucket") != "acme-data" || call.query.Get("uid") != "bedrock-admin" || call.query.Get("max-size") != "1073741824" || call.query.Get("max-objects") != "500" || call.query.Get("enabled") != "true" {
 		t.Fatalf("call %+v", call)
 	}
 	if _, found := call.query["quota"]; !found {
@@ -88,7 +88,7 @@ func TestSetBucketQuota(t *testing.T) {
 
 func TestSetBucketQuotaTreatsZeroAsUnlimited(t *testing.T) {
 	endpoint, calls := server(t, func(_ seen, w http.ResponseWriter) {})
-	if err := client().SetBucketQuota(context.Background(), endpoint, "us-east-1", credentials, "b", 0, 10); err != nil {
+	if err := client().SetBucketQuota(context.Background(), endpoint, "us-east-1", credentials, "bedrock-admin", "b", 0, 10); err != nil {
 		t.Fatal(err)
 	}
 	if query := calls()[0].query; query.Get("max-size") != "-1" || query.Get("max-objects") != "10" {
@@ -98,11 +98,11 @@ func TestSetBucketQuotaTreatsZeroAsUnlimited(t *testing.T) {
 
 func TestRemoveBucketQuota(t *testing.T) {
 	endpoint, calls := server(t, func(_ seen, w http.ResponseWriter) {})
-	if err := client().RemoveBucketQuota(context.Background(), endpoint, "us-east-1", credentials, "b"); err != nil {
+	if err := client().RemoveBucketQuota(context.Background(), endpoint, "us-east-1", credentials, "bedrock-admin", "b"); err != nil {
 		t.Fatal(err)
 	}
 	call := calls()[0]
-	if call.method != "PUT" || call.query.Get("enabled") != "false" || call.query.Get("bucket") != "b" {
+	if call.method != "PUT" || call.query.Get("enabled") != "false" || call.query.Get("bucket") != "b" || call.query.Get("uid") != "bedrock-admin" {
 		t.Fatalf("call %+v", call)
 	}
 }
@@ -126,7 +126,7 @@ func TestErrorsCarryTheCodeAndHideCredentials(t *testing.T) {
 		w.WriteHeader(http.StatusForbidden)
 		io.WriteString(w, `{"Code":"AccessDenied","Message":"key AK secret SK","RequestId":"x"}`)
 	})
-	err := client().SetBucketQuota(context.Background(), endpoint, "us-east-1", credentials, "b", 1, 1)
+	err := client().SetBucketQuota(context.Background(), endpoint, "us-east-1", credentials, "bedrock-admin", "b", 1, 1)
 	if !s3.IsCode(err, "AccessDenied") {
 		t.Fatalf("error %v", err)
 	}
@@ -137,7 +137,7 @@ func TestErrorsCarryTheCodeAndHideCredentials(t *testing.T) {
 
 func TestServerErrorsAreUnavailable(t *testing.T) {
 	endpoint, _ := server(t, func(_ seen, w http.ResponseWriter) { w.WriteHeader(http.StatusBadGateway) })
-	if err := client().RemoveBucketQuota(context.Background(), endpoint, "us-east-1", credentials, "b"); !s3.IsUnavailable(err) {
+	if err := client().RemoveBucketQuota(context.Background(), endpoint, "us-east-1", credentials, "bedrock-admin", "b"); !s3.IsUnavailable(err) {
 		t.Fatalf("error %v", err)
 	}
 	if _, err := client().BucketStats(context.Background(), "http://127.0.0.1:1", "us-east-1", credentials, "b"); !s3.IsUnavailable(err) {

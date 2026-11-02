@@ -71,10 +71,10 @@ func (r *BucketReconciler) reconcileQuota(ctx context.Context, bucket *v1alpha1.
 	var callErr error
 	target := wanted
 	if wanted == noQuota {
-		callErr = r.Admin.RemoveBucketQuota(ctx, r.Endpoint, Region, keys, name)
+		callErr = r.Admin.RemoveBucketQuota(ctx, r.Endpoint, Region, keys, AdminUserName, name)
 		target = ""
 	} else {
-		callErr = r.Admin.SetBucketQuota(ctx, r.Endpoint, Region, keys, name, bytes, objects)
+		callErr = r.Admin.SetBucketQuota(ctx, r.Endpoint, Region, keys, AdminUserName, name, bytes, objects)
 	}
 	if callErr == nil {
 		callErr = r.setAnnotation(ctx, bucket, AppliedQuotaAnnotation, target)

@@ -49,13 +49,13 @@ func (c *Client) BucketStats(ctx context.Context, endpoint, region string, creds
 	return Stats{Bytes: main.SizeActual, Objects: main.NumObjects}, nil
 }
 
-func (c *Client) SetBucketQuota(ctx context.Context, endpoint, region string, creds s3.Credentials, bucket string, bytes, objects int64) error {
-	query := url.Values{"quota": {""}, "bucket": {bucket}, "max-size": {limit(bytes)}, "max-objects": {limit(objects)}, "enabled": {"true"}}
+func (c *Client) SetBucketQuota(ctx context.Context, endpoint, region string, creds s3.Credentials, uid, bucket string, bytes, objects int64) error {
+	query := url.Values{"quota": {""}, "uid": {uid}, "bucket": {bucket}, "max-size": {limit(bytes)}, "max-objects": {limit(objects)}, "enabled": {"true"}}
 	return c.call(ctx, http.MethodPut, endpoint, region, creds, "/admin/bucket", bucket, query, nil)
 }
 
-func (c *Client) RemoveBucketQuota(ctx context.Context, endpoint, region string, creds s3.Credentials, bucket string) error {
-	query := url.Values{"quota": {""}, "bucket": {bucket}, "enabled": {"false"}}
+func (c *Client) RemoveBucketQuota(ctx context.Context, endpoint, region string, creds s3.Credentials, uid, bucket string) error {
+	query := url.Values{"quota": {""}, "uid": {uid}, "bucket": {bucket}, "enabled": {"false"}}
 	return c.call(ctx, http.MethodPut, endpoint, region, creds, "/admin/bucket", bucket, query, nil)
 }
 
