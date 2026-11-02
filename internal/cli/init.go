@@ -13,6 +13,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strings"
 	"time"
 
@@ -80,6 +81,7 @@ type initOptions struct {
 	bundle     string
 	workDir    string
 	bundleDir  string
+	kubelet    kubeletValues
 }
 
 func parseInitFlags(args []string, stderr io.Writer) (initOptions, error) {
@@ -96,6 +98,7 @@ func parseInitFlags(args []string, stderr io.Writer) (initOptions, error) {
 	flags.StringVar(&o.bundle, "bundle", "", "install from this bundle archive")
 	flags.StringVar(&o.workDir, "work-dir", "/var/lib/bedrock", "directory for extracted bundles")
 	flags.DurationVar(&o.timeout, "timeout", 30*time.Minute, "overall timeout")
+	flags.Var(&o.kubelet, "kubelet-setting", "kubelet reservation or eviction setting as key=value, repeatable")
 	if err := flags.Parse(args); err != nil {
 		return o, err
 	}
@@ -276,7 +279,7 @@ func RunInit(ctx context.Context, args []string, deps InitDeps, stdout, stderr i
 	if !running {
 		if err := k0sClient.Install(ctx, k0s.InstallOptions{
 			Role: "controller", Force: true, ConfigPath: configPath, EnableWorker: true, NoTaints: true, DynamicConfig: true,
-			Labels: roles.Labels(cfg.Spec.Roles), KubeletExtraArgs: k0s.InstallKubeletArgs(deps.Root), DataDir: o.dataDir, KubeletRootDir: k0s.DefaultKubeletRootDir, DisableComponents: k0s.DefaultDisabledComponents,
+			Labels: roles.Labels(cfg.Spec.Roles), KubeletExtraArgs: k0s.InstallKubeletArgs(deps.Root, o.kubelet), DataDir: o.dataDir, KubeletRootDir: k0s.DefaultKubeletRootDir, DisableComponents: k0s.DefaultDisabledComponents,
 		}); err != nil {
 			return fail(stderr, err)
 		}
@@ -354,7 +357,7 @@ func RunInit(ctx context.Context, args []string, deps InitDeps, stdout, stderr i
 	if err != nil {
 		return fail(stderr, err)
 	}
-	if err := createObjects(ctx, c, cfg, nodeName); err != nil {
+	if err := createObjects(ctx, c, cfg, nodeName, o.kubelet); err != nil {
 		return fail(stderr, err)
 	}
 
@@ -556,7 +559,7 @@ func applyKubeVIPConfig(ctx context.Context, c client.Client, vip, iface string)
 	return ssa.Apply(ctx, c, cm, initFieldOwner)
 }
 
-func createObjects(ctx context.Context, c client.Client, cfg v1alpha1.ClusterConfig, nodeName string) error {
+func createObjects(ctx context.Context, c client.Client, cfg v1alpha1.ClusterConfig, nodeName string, kubelet map[string]string) error {
 	cluster := config.ToCluster(cfg)
 	if err := createOrUpdateSpec(ctx, c, &cluster, func(existing *v1alpha1.Cluster) { existing.Spec = cluster.Spec }); err != nil {
 		return err
@@ -565,7 +568,7 @@ func createObjects(ctx context.Context, c client.Client, cfg v1alpha1.ClusterCon
 	if err := createOrUpdateSpec(ctx, c, &h, func(existing *v1alpha1.Host) { existing.Spec = h.Spec }); err != nil {
 		return err
 	}
-	for _, setting := range config.ToSettings(cfg) {
+	for _, setting := range slices.Concat(config.ToSettings(cfg), kubeletSettingObjects(kubelet)) {
 		s := setting
 		s.TypeMeta = metav1.TypeMeta{APIVersion: v1alpha1.GroupVersion.String(), Kind: "Setting"}
 		if err := ssa.Apply(ctx, c, &s, initFieldOwner); err != nil {

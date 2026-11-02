@@ -98,8 +98,8 @@ func NodeMemory(root string) int64 {
 	return bytes
 }
 
-func InstallKubeletArgs(root string) []string {
-	return KubeletArgs(ReservationsFrom(nil), NodeMemory(root))
+func InstallKubeletArgs(root string, values map[string]string) []string {
+	return KubeletArgs(ReservationsFrom(values), NodeMemory(root))
 }
 
 func UnitEscape(arg string) string {

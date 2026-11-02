@@ -34,6 +34,7 @@ type joinOptions struct {
 	bundle     string
 	workDir    string
 	adopt      string
+	kubelet    kubeletValues
 }
 
 func joinCommand(args []string, stdout, stderr io.Writer) int {
@@ -54,6 +55,7 @@ func RunJoin(ctx context.Context, args []string, deps InitDeps, stdout, stderr i
 	flags.StringVar(&o.bundle, "bundle", "", "install from this bundle archive")
 	flags.StringVar(&o.workDir, "work-dir", "/var/lib/bedrock", "directory for extracted bundles")
 	flags.StringVar(&o.adopt, "adopt-config", "", "cluster configuration file with spec.storage.adopt, to check this host for the adopted Ceph cluster")
+	flags.Var(&o.kubelet, "kubelet-setting", "kubelet reservation or eviction setting as key=value, repeatable")
 	if err := flags.Parse(args); err != nil {
 		return 2
 	}
@@ -157,7 +159,7 @@ func RunJoin(ctx context.Context, args []string, deps InitDeps, stdout, stderr i
 	controlPlane := hasRole(nodeRoles, v1alpha1.RoleControlPlane)
 	running := k0sClient.Running(ctx)
 	var encryptionFile []byte
-	opts := k0s.InstallOptions{Role: "worker", TokenFile: tokenPath, Labels: roles.Labels(nodeRoles), KubeletExtraArgs: k0s.InstallKubeletArgs(deps.Root), DataDir: o.dataDir, KubeletRootDir: k0s.DefaultKubeletRootDir}
+	opts := k0s.InstallOptions{Role: "worker", TokenFile: tokenPath, Labels: roles.Labels(nodeRoles), KubeletExtraArgs: k0s.InstallKubeletArgs(deps.Root, o.kubelet), DataDir: o.dataDir, KubeletRootDir: k0s.DefaultKubeletRootDir}
 	if controlPlane {
 		if len(token.K0sConfig) == 0 {
 			return fail(stderr, fmt.Errorf("join: token has no k0s config for a control-plane join"))
@@ -178,7 +180,7 @@ func RunJoin(ctx context.Context, args []string, deps InitDeps, stdout, stderr i
 		if err := host.EnsureVIPUnit(ctx, deps.Exec, deps.Root, token.VIP, facts.DefaultInterface); err != nil {
 			return fail(stderr, err)
 		}
-		opts = k0s.InstallOptions{Role: "controller", ConfigPath: configPath, TokenFile: tokenPath, EnableWorker: true, NoTaints: true, DynamicConfig: true, Labels: roles.Labels(nodeRoles), KubeletExtraArgs: k0s.InstallKubeletArgs(deps.Root), DataDir: o.dataDir, KubeletRootDir: k0s.DefaultKubeletRootDir, DisableComponents: k0s.DefaultDisabledComponents}
+		opts = k0s.InstallOptions{Role: "controller", ConfigPath: configPath, TokenFile: tokenPath, EnableWorker: true, NoTaints: true, DynamicConfig: true, Labels: roles.Labels(nodeRoles), KubeletExtraArgs: k0s.InstallKubeletArgs(deps.Root, o.kubelet), DataDir: o.dataDir, KubeletRootDir: k0s.DefaultKubeletRootDir, DisableComponents: k0s.DefaultDisabledComponents}
 	}
 	step(stdout, "installing k0s %s", opts.Role)
 	if !running {
