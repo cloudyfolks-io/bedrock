@@ -113,7 +113,7 @@ objectstorage_roundtrip() {
   bucket=$(kubectl -n "$NS" get objectstoragebucket data -o jsonpath='{.status.bucketName}')
   s3_job s3-roundtrip writer "$bucket" true
   kubectl -n objectstorage-e2e wait --for=condition=complete job/s3-roundtrip --timeout=300s
-  s3_job s3-denied reader "$bucket" false
+  s3_job s3-denied reader "$NS-other" false
   kubectl -n objectstorage-e2e wait --for=condition=complete job/s3-denied --timeout=300s
 }
 
