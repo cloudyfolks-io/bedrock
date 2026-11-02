@@ -84,4 +84,5 @@ jobs:
             sha256sum -c --ignore-missing SHA256SUMS
             ```
           generate_release_notes: true
+          prerelease: ${{ contains(github.ref_name, '-') }}
           fail_on_unmatched_files: true
