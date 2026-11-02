@@ -30,7 +30,7 @@ func ProxyRules() []rbacv1.PolicyRule {
 		rule("batch", []string{"jobs"}, "get"),
 		rule("apps", []string{"deployments"}, "get"),
 		rule("apps", []string{"replicasets"}, "list"),
-		rule("", []string{"pods"}, "list"),
+		rule("", []string{"pods"}, "get", "list"),
 		rule("", []string{"pods/log"}, "get"),
 		rule("", []string{"pods/exec"}, "create", "get"),
 	}

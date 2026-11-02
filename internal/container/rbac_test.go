@@ -61,7 +61,7 @@ func TestProxyRules(t *testing.T) {
 		{"apps", "deployments", "get"}, {"apps", "replicasets", "list"},
 		{"bedrock.cloudyfolks.io", "builds", "get"},
 		{"batch", "jobs", "get"},
-		{"", "pods", "list"},
+		{"", "pods", "get"}, {"", "pods", "list"},
 		{"", "pods/log", "get"},
 		{"", "pods/exec", "create"}, {"", "pods/exec", "get"},
 	})
