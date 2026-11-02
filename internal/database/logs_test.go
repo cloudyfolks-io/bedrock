@@ -77,9 +77,9 @@ func TestLogsReadTheEngineContainerOfThePrimaryPod(t *testing.T) {
 	}
 	for kind, container := range cases {
 		recorder := &logRecorder{body: "line one\nline two\n"}
-		pod := logPod("uid-1-1", "uid-1", true)
+		pod := logPod("uid-1-1", "db-uid-1", true)
 		if kind == v1alpha1.DatabaseEngineMySQL {
-			pod.Labels = map[string]string{"app.kubernetes.io/instance": "uid-1", "app.kubernetes.io/component": "mysql", "mysql.percona.com/primary": "true"}
+			pod.Labels = map[string]string{"app.kubernetes.io/instance": "db-uid-1", "app.kubernetes.io/component": "mysql", "mysql.percona.com/primary": "true"}
 		}
 		response := callLogs(Logs(recorder.source), logsClient(t, kind, pod), "orders", http.MethodGet, "")
 		if response.Code != http.StatusOK || response.Body.String() != "line one\nline two\n" || !strings.HasPrefix(response.Header().Get("Content-Type"), "text/plain") {
@@ -98,13 +98,13 @@ func TestLogsTailDefaultAndMaximum(t *testing.T) {
 	}{{"", 200}, {"tail=50", 50}, {"tail=500", 500}, {"tail=501", 500}, {"tail=100000", 500}, {"tail=0", 200}, {"tail=-5", 200}, {"tail=1", 1}}
 	for _, c := range cases {
 		recorder := &logRecorder{body: "x\n"}
-		callLogs(Logs(recorder.source), logsClient(t, "postgresql", logPod("uid-1-1", "uid-1", true)), "orders", http.MethodGet, c.query)
+		callLogs(Logs(recorder.source), logsClient(t, "postgresql", logPod("uid-1-1", "db-uid-1", true)), "orders", http.MethodGet, c.query)
 		if len(recorder.calls) != 1 || recorder.calls[0].tail != c.tail {
 			t.Errorf("%q: calls %+v, want tail %d", c.query, recorder.calls, c.tail)
 		}
 	}
 	recorder := &logRecorder{}
-	response := callLogs(Logs(recorder.source), logsClient(t, "postgresql", logPod("uid-1-1", "uid-1", true)), "orders", http.MethodGet, "tail=many")
+	response := callLogs(Logs(recorder.source), logsClient(t, "postgresql", logPod("uid-1-1", "db-uid-1", true)), "orders", http.MethodGet, "tail=many")
 	if response.Code != http.StatusBadRequest || len(recorder.calls) != 0 {
 		t.Fatalf("a bad tail: %d calls %d", response.Code, len(recorder.calls))
 	}
@@ -112,7 +112,7 @@ func TestLogsTailDefaultAndMaximum(t *testing.T) {
 
 func TestLogsOutputIsCapped(t *testing.T) {
 	recorder := &logRecorder{body: strings.Repeat("a", MaxLogBytes+4096)}
-	response := callLogs(Logs(recorder.source), logsClient(t, "postgresql", logPod("uid-1-1", "uid-1", true)), "orders", http.MethodGet, "")
+	response := callLogs(Logs(recorder.source), logsClient(t, "postgresql", logPod("uid-1-1", "db-uid-1", true)), "orders", http.MethodGet, "")
 	if response.Code != http.StatusOK || response.Body.Len() != MaxLogBytes {
 		t.Fatalf("status %d length %d", response.Code, response.Body.Len())
 	}
@@ -121,8 +121,8 @@ func TestLogsOutputIsCapped(t *testing.T) {
 func TestLogsWithoutAReadyPod(t *testing.T) {
 	for name, pods := range map[string][]client.Object{
 		"no pod":                  nil,
-		"pod not ready":           {logPod("uid-1-1", "uid-1", false)},
-		"pod of another database": {logPod("uid-2-1", "uid-2", true)},
+		"pod not ready":           {logPod("uid-1-1", "db-uid-1", false)},
+		"pod of another database": {logPod("uid-2-1", "db-uid-2", true)},
 	} {
 		recorder := &logRecorder{}
 		response := callLogs(Logs(recorder.source), logsClient(t, "postgresql", pods...), "orders", http.MethodGet, "")
@@ -134,7 +134,7 @@ func TestLogsWithoutAReadyPod(t *testing.T) {
 
 func TestLogsPicksTheReadyPodOfTheDatabaseOnly(t *testing.T) {
 	recorder := &logRecorder{body: "x\n"}
-	objects := []client.Object{logPod("uid-1-1", "uid-1", false), logPod("uid-1-2", "uid-1", true), logPod("uid-2-1", "uid-2", true)}
+	objects := []client.Object{logPod("uid-1-1", "db-uid-1", false), logPod("uid-1-2", "db-uid-1", true), logPod("uid-2-1", "db-uid-2", true)}
 	callLogs(Logs(recorder.source), logsClient(t, "postgresql", objects...), "orders", http.MethodGet, "")
 	if len(recorder.calls) != 1 || recorder.calls[0].pod != "uid-1-2" {
 		t.Fatalf("calls %+v", recorder.calls)
@@ -143,7 +143,7 @@ func TestLogsPicksTheReadyPodOfTheDatabaseOnly(t *testing.T) {
 
 func TestLogsOfAMissingDatabaseAndOtherMethods(t *testing.T) {
 	recorder := &logRecorder{}
-	c := logsClient(t, "postgresql", logPod("uid-1-1", "uid-1", true))
+	c := logsClient(t, "postgresql", logPod("uid-1-1", "db-uid-1", true))
 	if response := callLogs(Logs(recorder.source), c, "ghost", http.MethodGet, ""); response.Code != http.StatusNotFound {
 		t.Fatalf("missing database: %d", response.Code)
 	}
@@ -160,7 +160,7 @@ func TestLogsOfAMissingDatabaseAndOtherMethods(t *testing.T) {
 
 func TestLogsOfAnUnreachablePodIsABadGateway(t *testing.T) {
 	recorder := &logRecorder{err: io.ErrUnexpectedEOF}
-	response := callLogs(Logs(recorder.source), logsClient(t, "postgresql", logPod("uid-1-1", "uid-1", true)), "orders", http.MethodGet, "")
+	response := callLogs(Logs(recorder.source), logsClient(t, "postgresql", logPod("uid-1-1", "db-uid-1", true)), "orders", http.MethodGet, "")
 	if response.Code != http.StatusBadGateway {
 		t.Fatalf("status %d", response.Code)
 	}

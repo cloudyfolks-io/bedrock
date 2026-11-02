@@ -126,7 +126,7 @@ func (r *Reconciler) databaseOfInstance(ctx context.Context, obj client.Object) 
 		return nil
 	}
 	for i := range list.Items {
-		if string(list.Items[i].UID) == uid {
+		if Name(list.Items[i].UID) == uid {
 			return []reconcile.Request{{NamespacedName: client.ObjectKeyFromObject(&list.Items[i])}}
 		}
 	}

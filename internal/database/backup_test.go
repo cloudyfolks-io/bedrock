@@ -164,7 +164,7 @@ func TestListBackupsKeepsOnlyTheBackupsOfTheCluster(t *testing.T) {
 	c := startEnv(t)
 	ensurePlatformNamespace(t, c)
 	db, _ := storedDatabase(t, c, nil)
-	mine := backupObject("mine-"+nextSequence(), string(db.UID), "completed", "2026-10-18T02:00:00Z", "2026-10-18T02:05:00Z")
+	mine := backupObject("mine-"+nextSequence(), Name(db.UID), "completed", "2026-10-18T02:00:00Z", "2026-10-18T02:05:00Z")
 	other := backupObject("other-"+nextSequence(), "someone-else", "completed", "2026-10-18T02:00:00Z", "2026-10-18T02:05:00Z")
 	create(t, c, mine)
 	create(t, c, other)

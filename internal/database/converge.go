@@ -297,6 +297,7 @@ func (r *Reconciler) specOf(in *flow) engine.Spec {
 	class := in.catalog.Class.Spec
 	return engine.Spec{
 		Name:         Name(db.UID),
+		BackupID:     string(db.UID),
 		Namespace:    PlatformNamespace,
 		Version:      db.Spec.Version,
 		Image:        in.image,

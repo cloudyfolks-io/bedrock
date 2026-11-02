@@ -10,7 +10,7 @@ frontend db
     tcp-request session reject unless { ssl_c_s_dn(CN) -m str 0b0c0d0e-1111-4222-8333-444455556666 }
     default_backend engine
 backend engine
-    server db 0b0c0d0e-1111-4222-8333-444455556666-db.bedrock-dbaas.svc.cluster.local:5432 check
+    server db db-0b0c0d0e-1111-4222-8333-444455556666-db.bedrock-dbaas.svc.cluster.local:5432 check
 frontend health
     mode http
     bind :8404

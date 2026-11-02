@@ -81,7 +81,7 @@ func proxySelector(db v1alpha1.Database) map[string]string {
 
 func ProxyObjects(in ProxyInput) ([]*unstructured.Unstructured, error) {
 	db := in.Database
-	config, err := ProxyConfig(in.VIP, in.Port, ServerName(Name(db.UID)))
+	config, err := ProxyConfig(in.VIP, in.Port, ServerName(string(db.UID)))
 	if err != nil {
 		return nil, err
 	}
@@ -98,7 +98,7 @@ func ProxyObjects(in ProxyInput) ([]*unstructured.Unstructured, error) {
 		return nil, err
 	}
 	certificate := CertificateObject(CertSpec{
-		Name: EndpointName(db), Namespace: db.Namespace, SecretName: EndpointName(db), CommonName: Name(db.UID),
+		Name: EndpointName(db), Namespace: db.Namespace, SecretName: EndpointName(db), CommonName: string(db.UID),
 		Usages: ClientCertUsages(), Labels: labels, OwnerRefs: owners, SecretLabels: labels,
 	})
 	attachment := network.PodAttachment(network.NIC{Namespace: db.Namespace, Subnet: in.Subnet.Name, Address: in.Address, SecurityGroups: []string{SecurityGroupName(db.UID)}})

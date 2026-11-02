@@ -8,6 +8,7 @@ import (
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
+	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	"github.com/cloudyfolks-io/bedrock/api/v1alpha1"
@@ -136,7 +137,7 @@ func (r *Reconciler) mysqlDestination(ctx context.Context, cfg Config, sourceUID
 	}
 	var own []unstructured.Unstructured
 	for _, backup := range list.Items {
-		if backupClusterOf(&backup) == sourceUID {
+		if backupClusterOf(&backup) == Name(types.UID(sourceUID)) {
 			own = append(own, backup)
 		}
 	}

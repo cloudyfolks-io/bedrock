@@ -49,7 +49,7 @@ func TestNoAnnotationNoBackupRequest(t *testing.T) {
 
 func TestANewRequestMakesOneBackupWhenTheEngineIsReady(t *testing.T) {
 	plan := PlanBackupRequest(requesting(requestedAt, nil, nil), nil, true, planNow)
-	want := "uid-1-req-" + "1792573200"
+	want := "db-uid-1-req-" + "1792573200"
 	if plan.Create != want || plan.Status.Phase != v1alpha1.DatabaseBackupRequestPending || plan.Status.BackupID != want || !plan.Status.At.Time.Equal(requestedAt) {
 		t.Fatalf("plan %+v status %+v", plan, plan.Status)
 	}
@@ -67,7 +67,7 @@ func TestARequestWaitsForTheEngineAndThenStarts(t *testing.T) {
 }
 
 func TestARunningRequestFollowsItsBackup(t *testing.T) {
-	name := "uid-1-req-1"
+	name := "db-uid-1-req-1"
 	running := backupRequestOf(requestedAt, v1alpha1.DatabaseBackupRequestRunning, name)
 	done := requestedAt.Add(time.Minute)
 	cases := map[string]struct {
@@ -88,7 +88,7 @@ func TestARunningRequestFollowsItsBackup(t *testing.T) {
 }
 
 func TestAnOlderOrEqualTimeStartsNoSecondBackup(t *testing.T) {
-	last := backupRequestOf(requestedAt, v1alpha1.DatabaseBackupRequestCompleted, "uid-1-req-1")
+	last := backupRequestOf(requestedAt, v1alpha1.DatabaseBackupRequestCompleted, "db-uid-1-req-1")
 	for _, at := range []time.Time{requestedAt, requestedAt.Add(-time.Hour)} {
 		plan := PlanBackupRequest(requesting(at, last, nil), nil, true, planNow)
 		if plan.Create != "" || plan.Status.Phase != v1alpha1.DatabaseBackupRequestCompleted {
@@ -122,16 +122,16 @@ func TestARequestIsRefusedWithAReason(t *testing.T) {
 }
 
 func TestARequestIsRefusedWhileAnEarlierRequestedBackupRuns(t *testing.T) {
-	last := backupRequestOf(requestedAt, v1alpha1.DatabaseBackupRequestRunning, "uid-1-req-1")
+	last := backupRequestOf(requestedAt, v1alpha1.DatabaseBackupRequestRunning, "db-uid-1-req-1")
 	for label, tc := range map[string]struct {
 		backups []*unstructured.Unstructured
 		refused bool
 	}{
-		"running":   {[]*unstructured.Unstructured{cnpgBackupObject("uid-1-req-1", "running", nil, "")}, true},
-		"started":   {[]*unstructured.Unstructured{cnpgBackupObject("uid-1-req-1", "started", nil, "")}, true},
-		"completed": {[]*unstructured.Unstructured{cnpgBackupObject("uid-1-req-1", "completed", &planNow, "stoppedAt")}, false},
-		"failed":    {[]*unstructured.Unstructured{cnpgBackupObject("uid-1-req-1", "failed", nil, "")}, false},
-		"other":     {[]*unstructured.Unstructured{cnpgBackupObject("uid-1-pre-upgrade", "running", nil, "")}, false},
+		"running":   {[]*unstructured.Unstructured{cnpgBackupObject("db-uid-1-req-1", "running", nil, "")}, true},
+		"started":   {[]*unstructured.Unstructured{cnpgBackupObject("db-uid-1-req-1", "started", nil, "")}, true},
+		"completed": {[]*unstructured.Unstructured{cnpgBackupObject("db-uid-1-req-1", "completed", &planNow, "stoppedAt")}, false},
+		"failed":    {[]*unstructured.Unstructured{cnpgBackupObject("db-uid-1-req-1", "failed", nil, "")}, false},
+		"other":     {[]*unstructured.Unstructured{cnpgBackupObject("db-uid-1-pre-upgrade", "running", nil, "")}, false},
 	} {
 		plan := PlanBackupRequest(requesting(requestedAt.Add(time.Hour), last, nil), tc.backups, true, planNow)
 		if tc.refused && (plan.Create != "" || plan.Status.Phase != v1alpha1.DatabaseBackupRequestRefused || plan.Status.Reason != ReasonBackupInProgress) {
@@ -144,7 +144,7 @@ func TestARequestIsRefusedWhileAnEarlierRequestedBackupRuns(t *testing.T) {
 }
 
 func TestARequestMoreThanFiveMinutesAheadIsRefusedAndBlocksNothing(t *testing.T) {
-	last := backupRequestOf(requestedAt, v1alpha1.DatabaseBackupRequestCompleted, "uid-1-req-1")
+	last := backupRequestOf(requestedAt, v1alpha1.DatabaseBackupRequestCompleted, "db-uid-1-req-1")
 	far := PlanBackupRequest(requesting(planNow.Add(6*time.Minute), last, nil), nil, true, planNow)
 	if far.Create != "" || far.Status.Phase != v1alpha1.DatabaseBackupRequestRefused || far.Status.Reason != ReasonBackupRequestInFuture || !far.Status.At.Time.Equal(requestedAt) {
 		t.Fatalf("far %+v", far.Status)
@@ -186,7 +186,7 @@ func TestARequestedBackupRunsOnceAndTheResultShowsInTheStatus(t *testing.T) {
 	w.reconcile()
 	w.reconcile()
 	created := w.requestedBackups()
-	if len(created) != 1 || created[0].GetKind() != "Backup" || backupClusterOf(created[0]) != string(w.db.UID) {
+	if len(created) != 1 || created[0].GetKind() != "Backup" || backupClusterOf(created[0]) != Name(w.db.UID) {
 		t.Fatalf("backups %v", created)
 	}
 	request := w.db.Status.Backup.Request

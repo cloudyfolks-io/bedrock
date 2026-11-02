@@ -82,7 +82,8 @@
           "isWALArchiver": true,
           "name": "barman-cloud.cloudnative-pg.io",
           "parameters": {
-            "barmanObjectName": "0b0c0d0e-1111-4222-8333-444455556666"
+            "barmanObjectName": "0b0c0d0e-1111-4222-8333-444455556666",
+            "serverName": "0b0c0d0e-1111-4222-8333-444455556666"
           }
         }
       ],

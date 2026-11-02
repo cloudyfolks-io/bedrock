@@ -38,6 +38,7 @@ func podLabels() map[string]string {
 func bedrockSpec() engine.Spec {
 	return engine.Spec{
 		Name:         testUID,
+		BackupID:     testUID,
 		Namespace:    "bedrock-dbaas",
 		Version:      "17",
 		Image:        "ghcr.io/cloudnative-pg/postgresql:17.9-minimal-trixie@sha256:3c9f2df53e15f3fff0aee630beffe73936590333b7fd80f2239bf59b22a9852e",
@@ -95,7 +96,7 @@ func dadehatSpec(restore bool) engine.Spec {
 		"bedrock.cloudyfolks.com/project-id":  "99999999-1111-4222-8333-444455556666",
 	}
 	spec := engine.Spec{
-		Name: testUID, Namespace: "dbaas", Version: "17",
+		Name: testUID, BackupID: testUID, Namespace: "dbaas", Version: "17",
 		Image:    "registry.cloudyfolks.com/mirror-ghcr/example/engine@sha256:" + strings.Repeat("0", 64),
 		CPUMilli: 500, MemoryMi: 1024, StorageGi: 20, Instances: 1, StorageClass: "storage-block",
 		Labels: labels, PodLabels: labels,

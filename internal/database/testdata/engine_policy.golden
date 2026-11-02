@@ -3,7 +3,7 @@
     "apiVersion": "networking.k8s.io/v1",
     "kind": "NetworkPolicy",
     "metadata": {
-      "name": "0b0c0d0e-1111-4222-8333-444455556666",
+      "name": "db-0b0c0d0e-1111-4222-8333-444455556666",
       "namespace": "bedrock-dbaas"
     },
     "spec": {
@@ -13,7 +13,7 @@
             {
               "podSelector": {
                 "matchLabels": {
-                  "app.kubernetes.io/instance": "0b0c0d0e-1111-4222-8333-444455556666"
+                  "app.kubernetes.io/instance": "db-0b0c0d0e-1111-4222-8333-444455556666"
                 }
               }
             }
@@ -22,7 +22,7 @@
       ],
       "podSelector": {
         "matchLabels": {
-          "app.kubernetes.io/instance": "0b0c0d0e-1111-4222-8333-444455556666",
+          "app.kubernetes.io/instance": "db-0b0c0d0e-1111-4222-8333-444455556666",
           "bedrock.cloudyfolks.io/database-role": "engine"
         }
       },

@@ -210,7 +210,7 @@ func SampleBackupSize(ctx context.Context, c client.Reader, store BackupStore, c
 	if err != nil {
 		return 0, nil, err
 	}
-	usage, err := store.S3.UsageOfPrefix(ctx, store.Endpoint, store.Region, keys, cfg.BackupBucket, Name(db.UID)+"/")
+	usage, err := store.S3.UsageOfPrefix(ctx, store.Endpoint, store.Region, keys, cfg.BackupBucket, string(db.UID)+"/")
 	if err != nil {
 		return keptSize(previous), keptTime(previous), err
 	}

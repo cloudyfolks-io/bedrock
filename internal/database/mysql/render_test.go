@@ -48,6 +48,7 @@ func companions() map[string]string {
 func bedrockSpec() engine.Spec {
 	return engine.Spec{
 		Name:         testUID,
+		BackupID:     testUID,
 		Namespace:    "bedrock-dbaas",
 		Version:      "8.4",
 		Image:        "docker.io/percona/percona-server:8.4.10-10.1@sha256:ee",
@@ -106,7 +107,7 @@ func dadehatSpec(instances int, restore bool) engine.Spec {
 		"bedrock.cloudyfolks.com/project-id":  "99999999-1111-4222-8333-444455556666",
 	}
 	spec := engine.Spec{
-		Name: testUID, Namespace: "dbaas", Version: "17",
+		Name: testUID, BackupID: testUID, Namespace: "dbaas", Version: "17",
 		Image:    "registry.cloudyfolks.com/mirror-ghcr/example/engine@sha256:" + strings.Repeat("0", 64),
 		CPUMilli: 500, MemoryMi: 1024, StorageGi: 20, Instances: instances, StorageClass: "storage-block",
 		Labels: dadehatLabels, PodLabels: dadehatLabels,

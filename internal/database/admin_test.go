@@ -168,13 +168,13 @@ func TestNoPasswordReachesTheCommandLineTheScriptOrTheLog(t *testing.T) {
 	ctx = logf.IntoContext(ctx, sink)
 	executor := &recordingExecutor{}
 	pod := &corev1.Pod{
-		ObjectMeta: metav1.ObjectMeta{Name: "primary", Namespace: PlatformNamespace, Labels: map[string]string{"cnpg.io/cluster": string(db.UID), "cnpg.io/instanceRole": "primary"}},
+		ObjectMeta: metav1.ObjectMeta{Name: "primary", Namespace: PlatformNamespace, Labels: map[string]string{"cnpg.io/cluster": Name(db.UID), "cnpg.io/instanceRole": "primary"}},
 		Status:     corev1.PodStatus{Phase: corev1.PodRunning, Conditions: []corev1.PodCondition{{Type: corev1.PodReady, Status: corev1.ConditionTrue}}},
 	}
 	runner := exec.Runner{Pods: fake.NewClientBuilder().WithObjects(pod).Build(), Executor: executor, Locks: &exec.Locks{}, Timeout: 5 * time.Second}
-	target := postgres.Target(PlatformNamespace, string(db.UID))
+	target := postgres.Target(PlatformNamespace, Name(db.UID))
 	run := func(ctx context.Context, script string) (string, error) {
-		return runner.Run(ctx, string(db.UID), target, script)
+		return runner.Run(ctx, Name(db.UID), target, script)
 	}
 	must(t, EnsureBootstrapped(ctx, c, run, execTimeout, db))
 	must(t, SyncAdmin(ctx, c, run, execTimeout, *db))
