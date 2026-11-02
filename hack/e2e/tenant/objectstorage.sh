@@ -19,7 +19,7 @@ s3_aws() {
   kubectl -n objectstorage-e2e run "s3-$RANDOM" --rm -i --restart=Never --image="$s3_image" --image-pull-policy=IfNotPresent \
     --env=AWS_ACCESS_KEY_ID="$(object_user_key "$user" AccessKey)" --env=AWS_SECRET_ACCESS_KEY="$(object_user_key "$user" SecretKey)" \
     --env=AWS_DEFAULT_REGION=us-east-1 --env=AWS_EC2_METADATA_DISABLED=true -- \
-    --endpoint-url "$rgw_endpoint" "$@"
+    ${S3_DEBUG:+--debug} --endpoint-url "$rgw_endpoint" "$@"
 }
 
 s3_put() {
@@ -120,9 +120,9 @@ objectstorage_roundtrip() {
 objectstorage_permissions() {
   retry_until 120 s3_put writer "s3://$NS-data/hello.txt"
   s3_get reader "s3://$NS-data/hello.txt" >/dev/null
-  expect_refused AccessDenied s3_put reader "s3://$NS-data/denied.txt"
-  expect_refused AccessDenied s3_lists reader "s3://$NS-other"
-  expect_refused AccessDenied s3_lists writer "s3://$NS-other"
+  S3_DEBUG=1 expect_refused AccessDenied s3_put reader "s3://$NS-data/denied.txt"
+  S3_DEBUG=1 expect_refused AccessDenied s3_lists reader "s3://$NS-other"
+  S3_DEBUG=1 expect_refused AccessDenied s3_lists writer "s3://$NS-other"
   retry_until 120 s3_lists all "s3://$NS-other"
   bucket_removed "$NS" other
 }
@@ -176,7 +176,7 @@ objectstorage_force_destroy() {
   retry_until 120 s3_put all "s3://$NS-scratch/one.txt"
   retry_until 120 s3_put all "s3://$NS-guarded/one.txt"
   bucket_removed "$NS" scratch
-  expect_refused NoSuchBucket s3_lists all "s3://$NS-scratch"
+  S3_DEBUG=1 expect_refused NoSuchBucket s3_lists all "s3://$NS-scratch"
   kubectl -n "$NS" delete objectstoragebucket guarded --wait=false
   wait_reason 300 objectstoragebucket guarded Ready NotEmpty -n "$NS"
   kubectl -n "$NS" patch objectstoragebucket guarded --type merge -p '{"spec":{"forceDestroy":true}}'
