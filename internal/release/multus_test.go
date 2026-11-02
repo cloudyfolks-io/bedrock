@@ -64,3 +64,21 @@ func TestMultusDoesNotRemoveItsCNIConfigOnExit(t *testing.T) {
 		t.Fatal("ConfigMap multus-daemon-config not found")
 	}
 }
+
+func TestMultusDaemonIsNodeCritical(t *testing.T) {
+	objects, err := loadObjects(os.DirFS(filepath.Join("..", "..")), "manifests/25-multus", "multus")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, obj := range objects {
+		if obj.GetKind() != "DaemonSet" || obj.GetName() != "kube-multus-ds" {
+			continue
+		}
+		priority, _, _ := unstructured.NestedString(obj.Object, "spec", "template", "spec", "priorityClassName")
+		if priority != "system-node-critical" {
+			t.Fatalf("kube-multus-ds has priority class %q; every pod network goes through it, so it must preempt workloads on a full node", priority)
+		}
+		return
+	}
+	t.Fatal("DaemonSet kube-multus-ds not found")
+}
