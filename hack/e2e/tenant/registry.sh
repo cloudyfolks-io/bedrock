@@ -180,6 +180,7 @@ registry_spikes() {
   user=$(registry_login_value ci username)
   old=$(registry_login_value ci password)
   kubectl -n "$NS" delete secret ci-docker
+  kubectl -n "$NS" annotate registrycredential ci bedrock.cloudyfolks.io/e2e-touch="$(date +%s)" --overwrite
   retry_until 180 kubectl -n "$NS" get secret ci-docker
   new=$(registry_login_value ci password)
   test "$old" != "$new"
