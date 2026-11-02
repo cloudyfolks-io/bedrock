@@ -142,7 +142,6 @@ vm_provision() {
   cat <<'SCRIPT'
 #!/bin/sh
 set -e
-sysctl -w fs.inotify.max_user_instances=8192 fs.inotify.max_user_watches=1048576 vm.max_map_count=262144
 cat >/usr/local/bin/kubectl <<'KUBECTL'
 #!/bin/sh
 exec /usr/local/bin/k0s kubectl "$@"

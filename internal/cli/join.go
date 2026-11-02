@@ -136,6 +136,11 @@ func RunJoin(ctx context.Context, args []string, deps InitDeps, stdout, stderr i
 		}
 	}
 
+	step(stdout, "kernel limits")
+	if err := host.EnsureBaseSysctls(ctx, deps.Exec, deps.Root); err != nil {
+		return fail(stderr, err)
+	}
+
 	step(stdout, "containerd device ownership")
 	if err := host.EnsureDeviceOwnership(deps.Root); err != nil {
 		return fail(stderr, err)
