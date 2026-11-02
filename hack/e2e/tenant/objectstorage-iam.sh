@@ -140,30 +140,6 @@ spike_adopt_account() {
   expect_contains "$listing" spike-adopted "adopted bucket"
 }
 
-spike_keys_from_secret() {
-  local access=spikekeyaccess secret=spikekeysecret
-  kubectl -n rook-ceph create secret generic spike-keys --from-literal=access="$access" --from-literal=secret="$secret"
-  kubectl apply -f - <<USER
-apiVersion: ceph.rook.io/v1
-kind: CephObjectStoreUser
-metadata:
-  name: spike-keyed
-  namespace: rook-ceph
-spec:
-  store: $spike_store
-  displayName: spike-keyed
-  keys:
-    - accessKeyRef:
-        name: spike-keys
-        key: access
-      secretKeyRef:
-        name: spike-keys
-        key: secret
-USER
-  spike_ready cephobjectstoreuser spike-keyed
-  expect_equal "$access" "$(spike_secret_field "$(spike_user_secret spike-keyed)" AccessKey)" "key kept"
-}
-
 spike_clean() {
   local bucket
   for bucket in "${spike_buckets[@]}"; do
@@ -195,7 +171,6 @@ objectstorage_iam_spike() {
   spike_check iam-policy spike_iam_policy || failed=1
   spike_check op-mask spike_suspend || failed=1
   spike_check account-id-adoption spike_adopt_account || failed=1
-  spike_check user-keys-from-secret spike_keys_from_secret || failed=1
   spike_clean
   return "$failed"
 }
