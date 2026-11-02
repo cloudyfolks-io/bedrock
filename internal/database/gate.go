@@ -63,7 +63,7 @@ func gateSelector(uid types.UID) map[string]string {
 
 func GateObjects(in GateInput) ([]*unstructured.Unstructured, error) {
 	db := in.Database
-	config, err := GateConfig(GateSpec{ListenPort: in.Port, BackendHost: BackendHost(db.UID), BackendPort: in.Port, ClientCN: Name(db.UID)})
+	config, err := GateConfig(GateSpec{ListenPort: in.Port, BackendHost: BackendHost(db.UID), BackendPort: in.Port, ClientCN: string(db.UID)})
 	if err != nil {
 		return nil, err
 	}
@@ -79,8 +79,8 @@ func GateObjects(in GateInput) ([]*unstructured.Unstructured, error) {
 	secretLabels, secretAnnotations := OwnedMetadata(db, in.Project)
 	certificate := CertificateObject(CertSpec{
 		SecretLabels: secretLabels, SecretAnnotations: secretAnnotations,
-		Name: ServerCertName(db.UID), Namespace: PlatformNamespace, SecretName: ServerSecretName(db.UID), CommonName: Name(db.UID),
-		DNSNames: []string{ServerName(Name(db.UID)), "localhost"}, IPs: []string{"127.0.0.1"}, Usages: ServerCertUsages(),
+		Name: ServerCertName(db.UID), Namespace: PlatformNamespace, SecretName: ServerSecretName(db.UID), CommonName: string(db.UID),
+		DNSNames: []string{ServerName(string(db.UID)), "localhost"}, IPs: []string{"127.0.0.1"}, Usages: ServerCertUsages(),
 	})
 	podLabels := map[string]string{LabelComponent: ComponentGate}
 	for key, value := range labels {

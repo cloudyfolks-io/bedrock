@@ -12,7 +12,7 @@ database_uid() {
 }
 
 database_primary_pod() {
-  kubectl -n "$database_namespace" get pods -l "cnpg.io/cluster=$(database_uid "$1"),cnpg.io/instanceRole=primary" -o jsonpath='{.items[0].metadata.name}'
+  kubectl -n "$database_namespace" get pods -l "cnpg.io/cluster=db-$(database_uid "$1"),cnpg.io/instanceRole=primary" -o jsonpath='{.items[0].metadata.name}'
 }
 
 database_sql() {
@@ -87,12 +87,12 @@ database_create() {
   expect_equal app "$(database_secret_field orders-admin database)" "admin secret database"
   test -n "$(database_secret_field orders-admin password)"
   expect_contains "$(database_secret_field orders-admin uri)" "postgresql://dbadmin:" "admin secret uri"
-  expect_equal "" "$(kubectl -n "$NS" get pods -l "cnpg.io/cluster=$uid" -o name)" "engine pods in the project namespace"
+  expect_equal "" "$(kubectl -n "$NS" get pods -l "cnpg.io/cluster=db-$uid" -o name)" "engine pods in the project namespace"
   expect_equal "" "$(kubectl -n "$NS" get clusters.postgresql.cnpg.io -o name 2>/dev/null || true)" "engine clusters in the project namespace"
   expect_equal "" "$(kubectl -n "$NS" get secrets -o name | grep -F "$uid" || true)" "platform secrets in the project namespace"
-  test -n "$(kubectl -n "$database_namespace" get pods -l "cnpg.io/cluster=$uid" -o name)"
-  expect_equal 1 "$(kubectl -n "$NS" get pods -l "app.kubernetes.io/instance=$uid,app.kubernetes.io/component=endpoint" -o name | wc -l)" "proxy pods"
-  expect_equal "$ip" "$(kubectl -n "$NS" get pods -l "app.kubernetes.io/instance=$uid,app.kubernetes.io/component=endpoint" -o jsonpath='{.items[0].status.podIP}')" "proxy pod address"
+  test -n "$(kubectl -n "$database_namespace" get pods -l "cnpg.io/cluster=db-$uid" -o name)"
+  expect_equal 1 "$(kubectl -n "$NS" get pods -l "app.kubernetes.io/instance=db-$uid,app.kubernetes.io/component=endpoint" -o name | wc -l)" "proxy pods"
+  expect_equal "$ip" "$(kubectl -n "$NS" get pods -l "app.kubernetes.io/instance=db-$uid,app.kubernetes.io/component=endpoint" -o jsonpath='{.items[0].status.podIP}')" "proxy pod address"
   wait_condition 60 database orders EngineReady True -n "$NS"
   wait_condition 60 database orders GateReady True -n "$NS"
   wait_condition 60 database orders EndpointReady True -n "$NS"
@@ -195,11 +195,11 @@ metadata:
   name: $1
   namespace: $database_namespace
   labels:
-    app.kubernetes.io/instance: $(database_uid orders)
+    app.kubernetes.io/instance: db-$(database_uid orders)
 spec:
   method: plugin
   cluster:
-    name: $(database_uid orders)
+    name: db-$(database_uid orders)
   pluginConfiguration:
     name: barman-cloud.cloudnative-pg.io
 BACKUP
@@ -269,7 +269,7 @@ VERSION
 database_engine_objects() {
   local uid=$1 kind
   for kind in clusters.postgresql.cnpg.io scheduledbackups.postgresql.cnpg.io objectstores.barmancloud.cnpg.io deployments services secrets networkpolicies certificates.cert-manager.io persistentvolumeclaims pods configmaps; do
-    kubectl -n "$database_namespace" get "$kind" -l "app.kubernetes.io/instance=$uid" -o name
+    kubectl -n "$database_namespace" get "$kind" -l "app.kubernetes.io/instance=db-$uid" -o name
   done
 }
 
@@ -353,14 +353,14 @@ database_engine_pod() {
 
 database_mysql_query() {
   local uid=$1 pod
-  pod=$(database_engine_pod "$uid" "app.kubernetes.io/instance=$uid,mysql.percona.com/primary=true")
+  pod=$(database_engine_pod "$uid" "app.kubernetes.io/instance=db-$uid,mysql.percona.com/primary=true")
   kubectl -n bedrock-dbaas exec -i "$pod" -c mysql -- sh -c 'MYSQL_PWD="$(cat /etc/mysql/mysql-users-secret/root)" exec mysql --no-defaults --socket=/var/lib/mysql/mysql.sock -uroot --batch --raw --skip-column-names'
 }
 
 database_valkey_cli() {
   local uid=$1 pod
   shift
-  pod=$(database_engine_pod "$uid" "app.kubernetes.io/instance=$uid,app.kubernetes.io/component=engine")
+  pod=$(database_engine_pod "$uid" "app.kubernetes.io/instance=db-$uid,app.kubernetes.io/component=engine")
   kubectl -n bedrock-dbaas exec "$pod" -c valkey -- valkey-cli -e --no-auth-warning "$@"
 }
 
@@ -376,7 +376,7 @@ database_mysql_create() {
   database_wait_ready sqldb
   uid=$(database_uid sqldb)
   wait_not_empty 60 -n "$NS" get secret sqldb-admin -o jsonpath='{.data.password}'
-  expect_equal "$uid" "$(kubectl -n bedrock-dbaas get perconaservermysql "$uid" -o jsonpath='{.metadata.name}')" "engine object name"
+  expect_equal "db-$uid" "$(kubectl -n bedrock-dbaas get perconaservermysql "db-$uid" -o jsonpath='{.metadata.name}')" "engine object name"
   wait_not_empty 60 -n "$NS" get database sqldb -o jsonpath='{.status.addresses[0].ip}'
   wait_empty 30 -n "$NS" get pods -l app.kubernetes.io/name=percona-server
 }
@@ -505,12 +505,12 @@ database_mysql_backup_and_restore() {
 apiVersion: ps.percona.com/v1
 kind: PerconaServerMySQLBackup
 metadata:
-  name: $uid-e2e
+  name: db-$uid-e2e
 spec:
-  clusterName: $uid
+  clusterName: db-$uid
   storageName: rgw
 BACKUP
-  wait_jsonpath 900 Succeeded -n bedrock-dbaas get perconaservermysqlbackup "$uid-e2e" -o jsonpath='{.status.state}'
+  wait_jsonpath 900 Succeeded -n bedrock-dbaas get perconaservermysqlbackup "db-$uid-e2e" -o jsonpath='{.status.state}'
   database_apply sqlrestore mysql 8.4 true 5 "  restore:
     sourceUID: $uid"
   database_wait_ready sqlrestore
@@ -546,7 +546,7 @@ database_mysql_resize() {
 }
 
 database_volume_is() {
-  [ "$(kubectl -n bedrock-dbaas get pvc -l "app.kubernetes.io/instance=$1" -o jsonpath='{.items[0].status.capacity.storage}')" = "$2" ]
+  [ "$(kubectl -n bedrock-dbaas get pvc -l "app.kubernetes.io/instance=db-$1" -o jsonpath='{.items[0].status.capacity.storage}')" = "$2" ]
 }
 
 database_postgres_upgrade() {
@@ -572,7 +572,7 @@ database_valkey_suspend_resume_logs() {
   password=$(database_secret_field cachedb-admin password)
   kubectl -n "$NS" patch database cachedb --type merge -p '{"spec":{"suspended":true}}'
   wait_jsonpath 300 Suspended -n "$NS" get database cachedb -o jsonpath='{.status.phase}'
-  wait_jsonpath 120 0 -n bedrock-dbaas get deployment "$uid" -o jsonpath='{.spec.replicas}'
+  wait_jsonpath 120 0 -n bedrock-dbaas get deployment "db-$uid" -o jsonpath='{.spec.replicas}'
   kubectl -n "$NS" patch database cachedb --type merge -p '{"spec":{"suspended":false}}'
   database_wait_ready cachedb 600
   expect_equal "$address" "$(database_address cachedb)" "address after the resume"

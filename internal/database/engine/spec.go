@@ -15,6 +15,7 @@ const (
 
 type Spec struct {
 	Name         string
+	BackupID     string
 	Namespace    string
 	Version      string
 	Image        string

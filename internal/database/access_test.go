@@ -561,7 +561,7 @@ func (s *stderrExecutor) Exec(_ context.Context, request exec.Request) (exec.Res
 
 func realStderrFactory(executor exec.Executor, db *v1alpha1.Database) EngineFactory {
 	pod := &corev1.Pod{
-		ObjectMeta: metav1.ObjectMeta{Name: "primary", Namespace: PlatformNamespace, Labels: map[string]string{"cnpg.io/cluster": string(db.UID), "cnpg.io/instanceRole": "primary"}},
+		ObjectMeta: metav1.ObjectMeta{Name: "primary", Namespace: PlatformNamespace, Labels: map[string]string{"cnpg.io/cluster": Name(db.UID), "cnpg.io/instanceRole": "primary"}},
 		Status:     corev1.PodStatus{Phase: corev1.PodRunning, Conditions: []corev1.PodCondition{{Type: corev1.PodReady, Status: corev1.ConditionTrue}}},
 	}
 	runner := exec.Runner{Pods: fake.NewClientBuilder().WithObjects(pod).Build(), Executor: executor, Locks: &exec.Locks{}, Timeout: 5 * time.Second}

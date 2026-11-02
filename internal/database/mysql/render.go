@@ -161,7 +161,7 @@ func backupBlock(s engine.Spec) map[string]any {
 		"enabled": true,
 		"storages": map[string]any{StorageName: map[string]any{
 			"type": "s3",
-			"s3":   s3Block(s.Backup, s.Name),
+			"s3":   s3Block(s.Backup, s.BackupID),
 		}},
 		"schedule": []any{map[string]any{
 			"name": "daily", "schedule": "0 2 * * *", "keep": int64(s.Backup.RetentionDays), "storageName": StorageName,

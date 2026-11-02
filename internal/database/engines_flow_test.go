@@ -45,14 +45,14 @@ func valkeyWorld(t *testing.T) *world {
 func (w *world) valkeyDeployment() appsv1.Deployment {
 	w.t.Helper()
 	var deployment appsv1.Deployment
-	must(w.t, w.c.Get(context.Background(), client.ObjectKey{Namespace: PlatformNamespace, Name: string(w.db.UID)}, &deployment))
+	must(w.t, w.c.Get(context.Background(), client.ObjectKey{Namespace: PlatformNamespace, Name: Name(w.db.UID)}, &deployment))
 	return deployment
 }
 
 func (w *world) bringUpValkey() {
 	w.t.Helper()
 	w.reconcile()
-	w.setDeploymentReady(PlatformNamespace, string(w.db.UID), 1)
+	w.setDeploymentReady(PlatformNamespace, Name(w.db.UID), 1)
 	w.setSecurityGroupReady()
 	w.reconcile()
 	w.setDeploymentReady(PlatformNamespace, GateName(w.db.UID), 1)
@@ -168,7 +168,7 @@ func (w *world) setMySQLReady() {
 	w.t.Helper()
 	cluster := &unstructured.Unstructured{}
 	cluster.SetGroupVersionKind(mysql.ClusterGVK)
-	must(w.t, w.c.Get(context.Background(), client.ObjectKey{Namespace: PlatformNamespace, Name: string(w.db.UID)}, cluster))
+	must(w.t, w.c.Get(context.Background(), client.ObjectKey{Namespace: PlatformNamespace, Name: Name(w.db.UID)}, cluster))
 	must(w.t, unstructured.SetNestedField(cluster.Object, "ready", "status", "state"))
 	must(w.t, unstructured.SetNestedField(cluster.Object, int64(1), "status", "mysql", "ready"))
 	must(w.t, w.c.Status().Update(context.Background(), cluster))
@@ -183,7 +183,7 @@ func TestAMySQLDatabaseComesUpThroughThePerconaCluster(t *testing.T) {
 	w.reconcile()
 	cluster := &unstructured.Unstructured{}
 	cluster.SetGroupVersionKind(mysql.ClusterGVK)
-	must(t, w.c.Get(context.Background(), client.ObjectKey{Namespace: PlatformNamespace, Name: string(w.db.UID)}, cluster))
+	must(t, w.c.Get(context.Background(), client.ObjectKey{Namespace: PlatformNamespace, Name: Name(w.db.UID)}, cluster))
 	if image, _, _ := unstructured.NestedString(cluster.Object, "spec", "mysql", "image"); image != mysqlImage {
 		t.Fatalf("mysql image %q", image)
 	}

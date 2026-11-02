@@ -2,7 +2,7 @@
   {
     "apiVersion": "v1",
     "data": {
-      "haproxy.cfg": "global\n    maxconn 4096\ndefaults\n    mode tcp\n    timeout connect 5s\n    timeout client 1h\n    timeout server 1h\nfrontend db\n    bind :5432 ssl crt /certs/server.pem ssl-min-ver TLSv1.2 ca-file /certs/ca.crt verify required\n    tcp-request session reject unless { ssl_c_s_dn(CN) -m str 0b0c0d0e-1111-4222-8333-444455556666 }\n    default_backend engine\nbackend engine\n    server db 0b0c0d0e-1111-4222-8333-444455556666-db.bedrock-dbaas.svc.cluster.local:5432 check\nfrontend health\n    mode http\n    bind :8404\n    monitor-uri /healthz\n    monitor fail if { nbsrv(engine) lt 1 }\n"
+      "haproxy.cfg": "global\n    maxconn 4096\ndefaults\n    mode tcp\n    timeout connect 5s\n    timeout client 1h\n    timeout server 1h\nfrontend db\n    bind :5432 ssl crt /certs/server.pem ssl-min-ver TLSv1.2 ca-file /certs/ca.crt verify required\n    tcp-request session reject unless { ssl_c_s_dn(CN) -m str 0b0c0d0e-1111-4222-8333-444455556666 }\n    default_backend engine\nbackend engine\n    server db db-0b0c0d0e-1111-4222-8333-444455556666-db.bedrock-dbaas.svc.cluster.local:5432 check\nfrontend health\n    mode http\n    bind :8404\n    monitor-uri /healthz\n    monitor fail if { nbsrv(engine) lt 1 }\n"
     },
     "kind": "ConfigMap",
     "metadata": {
@@ -11,14 +11,14 @@
         "bedrock.cloudyfolks.io/owner-uid": "0b0c0d0e-1111-4222-8333-444455556666"
       },
       "labels": {
-        "app.kubernetes.io/instance": "0b0c0d0e-1111-4222-8333-444455556666",
+        "app.kubernetes.io/instance": "db-0b0c0d0e-1111-4222-8333-444455556666",
         "app.kubernetes.io/managed-by": "bedrock",
         "bedrock.cloudyfolks.io/kind": "Database",
         "bedrock.cloudyfolks.io/name": "orders",
         "bedrock.cloudyfolks.io/project": "web",
         "bedrock.cloudyfolks.io/tenant": "acme"
       },
-      "name": "0b0c0d0e-1111-4222-8333-444455556666-gate",
+      "name": "db-0b0c0d0e-1111-4222-8333-444455556666-gate",
       "namespace": "bedrock-dbaas"
     }
   },
@@ -31,14 +31,14 @@
         "bedrock.cloudyfolks.io/owner-uid": "0b0c0d0e-1111-4222-8333-444455556666"
       },
       "labels": {
-        "app.kubernetes.io/instance": "0b0c0d0e-1111-4222-8333-444455556666",
+        "app.kubernetes.io/instance": "db-0b0c0d0e-1111-4222-8333-444455556666",
         "app.kubernetes.io/managed-by": "bedrock",
         "bedrock.cloudyfolks.io/kind": "Database",
         "bedrock.cloudyfolks.io/name": "orders",
         "bedrock.cloudyfolks.io/project": "web",
         "bedrock.cloudyfolks.io/tenant": "acme"
       },
-      "name": "0b0c0d0e-1111-4222-8333-444455556666-server",
+      "name": "db-0b0c0d0e-1111-4222-8333-444455556666-server",
       "namespace": "bedrock-dbaas"
     },
     "spec": {
@@ -67,14 +67,14 @@
         "size": 256
       },
       "renewBefore": "8760h0m0s",
-      "secretName": "0b0c0d0e-1111-4222-8333-444455556666-server-tls",
+      "secretName": "db-0b0c0d0e-1111-4222-8333-444455556666-server-tls",
       "secretTemplate": {
         "annotations": {
           "bedrock.cloudyfolks.io/owner-namespace": "acme-web",
           "bedrock.cloudyfolks.io/owner-uid": "0b0c0d0e-1111-4222-8333-444455556666"
         },
         "labels": {
-          "app.kubernetes.io/instance": "0b0c0d0e-1111-4222-8333-444455556666",
+          "app.kubernetes.io/instance": "db-0b0c0d0e-1111-4222-8333-444455556666",
           "app.kubernetes.io/managed-by": "bedrock",
           "bedrock.cloudyfolks.io/kind": "Database",
           "bedrock.cloudyfolks.io/name": "orders",
@@ -98,14 +98,14 @@
         "bedrock.cloudyfolks.io/owner-uid": "0b0c0d0e-1111-4222-8333-444455556666"
       },
       "labels": {
-        "app.kubernetes.io/instance": "0b0c0d0e-1111-4222-8333-444455556666",
+        "app.kubernetes.io/instance": "db-0b0c0d0e-1111-4222-8333-444455556666",
         "app.kubernetes.io/managed-by": "bedrock",
         "bedrock.cloudyfolks.io/kind": "Database",
         "bedrock.cloudyfolks.io/name": "orders",
         "bedrock.cloudyfolks.io/project": "web",
         "bedrock.cloudyfolks.io/tenant": "acme"
       },
-      "name": "0b0c0d0e-1111-4222-8333-444455556666-gate",
+      "name": "db-0b0c0d0e-1111-4222-8333-444455556666-gate",
       "namespace": "bedrock-dbaas"
     },
     "spec": {
@@ -113,7 +113,7 @@
       "selector": {
         "matchLabels": {
           "app.kubernetes.io/component": "gate",
-          "app.kubernetes.io/instance": "0b0c0d0e-1111-4222-8333-444455556666"
+          "app.kubernetes.io/instance": "db-0b0c0d0e-1111-4222-8333-444455556666"
         }
       },
       "strategy": {
@@ -122,11 +122,11 @@
       "template": {
         "metadata": {
           "annotations": {
-            "bedrock.cloudyfolks.io/config-hash": "fb39525e91b158bc"
+            "bedrock.cloudyfolks.io/config-hash": "1e195de8af1233f2"
           },
           "labels": {
             "app.kubernetes.io/component": "gate",
-            "app.kubernetes.io/instance": "0b0c0d0e-1111-4222-8333-444455556666",
+            "app.kubernetes.io/instance": "db-0b0c0d0e-1111-4222-8333-444455556666",
             "app.kubernetes.io/managed-by": "bedrock",
             "bedrock.cloudyfolks.io/kind": "Database",
             "bedrock.cloudyfolks.io/name": "orders",
@@ -233,7 +233,7 @@
                           "path": "ca.crt"
                         }
                       ],
-                      "name": "0b0c0d0e-1111-4222-8333-444455556666-server-tls"
+                      "name": "db-0b0c0d0e-1111-4222-8333-444455556666-server-tls"
                     }
                   },
                   {
@@ -244,7 +244,7 @@
                           "path": "haproxy.cfg"
                         }
                       ],
-                      "name": "0b0c0d0e-1111-4222-8333-444455556666-gate"
+                      "name": "db-0b0c0d0e-1111-4222-8333-444455556666-gate"
                     }
                   }
                 ]
@@ -264,14 +264,14 @@
         "bedrock.cloudyfolks.io/owner-uid": "0b0c0d0e-1111-4222-8333-444455556666"
       },
       "labels": {
-        "app.kubernetes.io/instance": "0b0c0d0e-1111-4222-8333-444455556666",
+        "app.kubernetes.io/instance": "db-0b0c0d0e-1111-4222-8333-444455556666",
         "app.kubernetes.io/managed-by": "bedrock",
         "bedrock.cloudyfolks.io/kind": "Database",
         "bedrock.cloudyfolks.io/name": "orders",
         "bedrock.cloudyfolks.io/project": "web",
         "bedrock.cloudyfolks.io/tenant": "acme"
       },
-      "name": "0b0c0d0e-1111-4222-8333-444455556666",
+      "name": "db-0b0c0d0e-1111-4222-8333-444455556666",
       "namespace": "bedrock-dbaas"
     },
     "spec": {
@@ -281,7 +281,7 @@
             {
               "podSelector": {
                 "matchLabels": {
-                  "app.kubernetes.io/instance": "0b0c0d0e-1111-4222-8333-444455556666"
+                  "app.kubernetes.io/instance": "db-0b0c0d0e-1111-4222-8333-444455556666"
                 }
               }
             }
@@ -290,7 +290,7 @@
       ],
       "podSelector": {
         "matchLabels": {
-          "app.kubernetes.io/instance": "0b0c0d0e-1111-4222-8333-444455556666",
+          "app.kubernetes.io/instance": "db-0b0c0d0e-1111-4222-8333-444455556666",
           "bedrock.cloudyfolks.io/database-role": "engine"
         }
       },

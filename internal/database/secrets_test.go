@@ -57,7 +57,7 @@ func TestEnsureEngineSecretsIsIdempotentAndKeepsThePasswords(t *testing.T) {
 	if string(again.Data["password"]) != string(app.Data["password"]) {
 		t.Fatal("a second ensure changed the password")
 	}
-	if app.Labels[v1alpha1.LabelKind] != Kind || app.Labels[LabelInstance] != string(db.UID) || app.Annotations[platform.AnnotationOwnerUID] != string(db.UID) {
+	if app.Labels[v1alpha1.LabelKind] != Kind || app.Labels[LabelInstance] != Name(db.UID) || app.Annotations[platform.AnnotationOwnerUID] != string(db.UID) {
 		t.Fatalf("labels %v annotations %v", app.Labels, app.Annotations)
 	}
 	if len(app.OwnerReferences) != 0 {

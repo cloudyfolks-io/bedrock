@@ -7,7 +7,7 @@
     "kind": "ConfigMap",
     "metadata": {
       "labels": {
-        "app.kubernetes.io/instance": "0b0c0d0e-1111-4222-8333-444455556666",
+        "app.kubernetes.io/instance": "db-0b0c0d0e-1111-4222-8333-444455556666",
         "app.kubernetes.io/managed-by": "bedrock",
         "bedrock.cloudyfolks.io/kind": "Database",
         "bedrock.cloudyfolks.io/name": "orders",
@@ -33,7 +33,7 @@
     "kind": "Certificate",
     "metadata": {
       "labels": {
-        "app.kubernetes.io/instance": "0b0c0d0e-1111-4222-8333-444455556666",
+        "app.kubernetes.io/instance": "db-0b0c0d0e-1111-4222-8333-444455556666",
         "app.kubernetes.io/managed-by": "bedrock",
         "bedrock.cloudyfolks.io/kind": "Database",
         "bedrock.cloudyfolks.io/name": "orders",
@@ -76,7 +76,7 @@
       "secretTemplate": {
         "annotations": {},
         "labels": {
-          "app.kubernetes.io/instance": "0b0c0d0e-1111-4222-8333-444455556666",
+          "app.kubernetes.io/instance": "db-0b0c0d0e-1111-4222-8333-444455556666",
           "app.kubernetes.io/managed-by": "bedrock",
           "bedrock.cloudyfolks.io/kind": "Database",
           "bedrock.cloudyfolks.io/name": "orders",
@@ -96,7 +96,7 @@
     "kind": "Deployment",
     "metadata": {
       "labels": {
-        "app.kubernetes.io/instance": "0b0c0d0e-1111-4222-8333-444455556666",
+        "app.kubernetes.io/instance": "db-0b0c0d0e-1111-4222-8333-444455556666",
         "app.kubernetes.io/managed-by": "bedrock",
         "bedrock.cloudyfolks.io/kind": "Database",
         "bedrock.cloudyfolks.io/name": "orders",
@@ -121,7 +121,7 @@
       "selector": {
         "matchLabels": {
           "app.kubernetes.io/component": "endpoint",
-          "app.kubernetes.io/instance": "0b0c0d0e-1111-4222-8333-444455556666"
+          "app.kubernetes.io/instance": "db-0b0c0d0e-1111-4222-8333-444455556666"
         }
       },
       "strategy": {
@@ -138,7 +138,7 @@
           },
           "labels": {
             "app.kubernetes.io/component": "endpoint",
-            "app.kubernetes.io/instance": "0b0c0d0e-1111-4222-8333-444455556666",
+            "app.kubernetes.io/instance": "db-0b0c0d0e-1111-4222-8333-444455556666",
             "app.kubernetes.io/managed-by": "bedrock",
             "bedrock.cloudyfolks.io/kind": "Database",
             "bedrock.cloudyfolks.io/name": "orders",

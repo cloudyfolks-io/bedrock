@@ -50,7 +50,7 @@ func (w *world) preBackups() []*unstructured.Unstructured {
 func (w *world) addPreBackup(name, phase string, stopped time.Time, annotations map[string]string) {
 	w.t.Helper()
 	ctx := context.Background()
-	backup, err := PreUpgradeBackup(v1alpha1.DatabaseEnginePostgreSQL, engine.Spec{Name: string(w.db.UID), Namespace: PlatformNamespace}, name)
+	backup, err := PreUpgradeBackup(v1alpha1.DatabaseEnginePostgreSQL, engine.Spec{Name: Name(w.db.UID), Namespace: PlatformNamespace}, name)
 	must(w.t, err)
 	backup.SetAnnotations(annotations)
 	must(w.t, w.c.Create(ctx, backup))
@@ -63,7 +63,7 @@ func (w *world) addPreBackup(name, phase string, stopped time.Time, annotations 
 
 func TestAnOldPreUpgradeBackupDoesNotCountAndANewOneIsRequested(t *testing.T) {
 	w := upgradeWorld(t, true)
-	w.addPreBackup(string(w.db.UID)+"-pre-1", "completed", w.clock.Add(-72*time.Hour), map[string]string{annotationUpgradeTarget: "18", annotationUpgradeRequest: w.clock.Add(-73 * time.Hour).UTC().Format(time.RFC3339)})
+	w.addPreBackup(Name(w.db.UID)+"-pre-1", "completed", w.clock.Add(-72*time.Hour), map[string]string{annotationUpgradeTarget: "18", annotationUpgradeRequest: w.clock.Add(-73 * time.Hour).UTC().Format(time.RFC3339)})
 	w.requestUpgrade()
 	w.reconcile()
 	w.reconcile()
@@ -78,7 +78,7 @@ func TestAnOldPreUpgradeBackupDoesNotCountAndANewOneIsRequested(t *testing.T) {
 
 func TestAPreUpgradeBackupForAnotherTargetDoesNotCount(t *testing.T) {
 	w := upgradeWorld(t, true)
-	w.addPreBackup(string(w.db.UID)+"-pre-2", "completed", w.clock.Add(-time.Hour), map[string]string{annotationUpgradeTarget: "17", annotationUpgradeRequest: w.clock.Add(-2 * time.Hour).UTC().Format(time.RFC3339)})
+	w.addPreBackup(Name(w.db.UID)+"-pre-2", "completed", w.clock.Add(-time.Hour), map[string]string{annotationUpgradeTarget: "17", annotationUpgradeRequest: w.clock.Add(-2 * time.Hour).UTC().Format(time.RFC3339)})
 	w.requestUpgrade()
 	w.reconcile()
 	w.reconcile()
@@ -153,7 +153,7 @@ func (w *world) mysqlSize() int64 {
 	w.t.Helper()
 	cluster := &unstructured.Unstructured{}
 	cluster.SetGroupVersionKind(primaryGVK(v1alpha1.DatabaseEngineMySQL))
-	must(w.t, w.c.Get(context.Background(), client.ObjectKey{Namespace: PlatformNamespace, Name: string(w.db.UID)}, cluster))
+	must(w.t, w.c.Get(context.Background(), client.ObjectKey{Namespace: PlatformNamespace, Name: Name(w.db.UID)}, cluster))
 	size, _, _ := unstructured.NestedInt64(cluster.Object, "spec", "mysql", "size")
 	return size
 }
@@ -239,7 +239,7 @@ func TestAFlipAfterTheLossOfTheEngineObjectIsRefused(t *testing.T) {
 		primary := &unstructured.Unstructured{}
 		primary.SetGroupVersionKind(primaryGVK(w.db.Spec.Engine))
 		primary.SetNamespace(PlatformNamespace)
-		primary.SetName(string(w.db.UID))
+		primary.SetName(Name(w.db.UID))
 		must(t, w.c.Delete(ctx, primary))
 		if name == "postgresql" {
 			ha := &v1alpha1.DatabaseClass{ObjectMeta: metav1.ObjectMeta{Name: w.class + "-ha"}, Spec: v1alpha1.DatabaseClassSpec{CPU: resource.MustParse("500m"), Memory: resource.MustParse("1Gi"), MinStorageGi: 5, MaxStorageGi: 100, HighAvailability: true, Enabled: true}}

@@ -142,7 +142,7 @@ func (w *world) cluster() *unstructured.Unstructured {
 	w.t.Helper()
 	cluster := &unstructured.Unstructured{}
 	cluster.SetGroupVersionKind(ClusterGVK)
-	must(w.t, w.c.Get(context.Background(), client.ObjectKey{Namespace: PlatformNamespace, Name: string(w.db.UID)}, cluster))
+	must(w.t, w.c.Get(context.Background(), client.ObjectKey{Namespace: PlatformNamespace, Name: Name(w.db.UID)}, cluster))
 	return cluster
 }
 

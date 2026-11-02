@@ -19,9 +19,9 @@ const (
 )
 
 func Name(uid types.UID) string {
-	return string(uid)
+	return "db-" + string(uid)
 }
 
 func Suffixed(uid types.UID, suffix string) string {
-	return string(uid) + "-" + suffix
+	return Name(uid) + "-" + suffix
 }

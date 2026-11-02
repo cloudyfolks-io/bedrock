@@ -119,9 +119,9 @@ func Render(s engine.Spec) ([]*unstructured.Unstructured, error) {
 	if s.Backup.Enabled {
 		spec["plugins"] = []any{map[string]any{
 			"name": PluginName, "isWALArchiver": true,
-			"parameters": map[string]any{"barmanObjectName": s.Name},
+			"parameters": map[string]any{"barmanObjectName": s.Name, "serverName": s.BackupID},
 		}}
-		out = append(out, objectStore(s, s.Name, s.Name))
+		out = append(out, objectStore(s, s.Name, s.BackupID))
 	}
 	if s.Restore != nil {
 		spec["externalClusters"] = externalClusters(s)

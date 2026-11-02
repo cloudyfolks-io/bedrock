@@ -157,8 +157,7 @@ func TestDeleteRemovesTheKeySecretsOfBothCertificatesAndLeavesForeignOnes(t *tes
 	w := newWorld(t, nil)
 	ctx := context.Background()
 	w.bringUp()
-	uid := string(w.db.UID)
-	labels := map[string]string{LabelInstance: uid, LabelManagedBy: ManagedBy}
+	labels := map[string]string{LabelInstance: Name(w.db.UID), LabelManagedBy: ManagedBy}
 	server := &corev1.Secret{ObjectMeta: metav1.ObjectMeta{Name: ServerSecretName(w.db.UID), Namespace: PlatformNamespace, Labels: labels}}
 	client1 := &corev1.Secret{ObjectMeta: metav1.ObjectMeta{Name: EndpointName(*w.db), Namespace: w.namespace, Labels: labels}}
 	foreign := &corev1.Secret{ObjectMeta: metav1.ObjectMeta{Name: "orders-other", Namespace: w.namespace}}

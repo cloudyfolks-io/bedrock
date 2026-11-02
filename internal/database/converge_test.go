@@ -94,7 +94,7 @@ func TestEveryEngineObjectCarriesTheLabelsAndNoOwnerReference(t *testing.T) {
 		if labels[v1alpha1.LabelKind] != Kind || labels[v1alpha1.LabelName] != "orders" || labels[v1alpha1.LabelTenant] != "acme" || labels[v1alpha1.LabelProject] != "web" || len(obj.GetOwnerReferences()) != 0 {
 			t.Errorf("%s %s: labels %v owners %v", obj.GetKind(), obj.GetName(), labels, obj.GetOwnerReferences())
 		}
-		if !strings.HasPrefix(obj.GetName(), string(w.db.UID)) {
+		if !strings.HasPrefix(obj.GetName(), Name(w.db.UID)) {
 			t.Errorf("%s %s is not named with the UID", obj.GetKind(), obj.GetName())
 		}
 	}
@@ -121,7 +121,7 @@ func TestTheClusterRendersFromTheClassVersionAndSettings(t *testing.T) {
 		t.Fatalf("limits %v", limits)
 	}
 	stores := spec["plugins"].([]any)[0].(map[string]any)["parameters"].(map[string]any)
-	if stores["barmanObjectName"] != string(w.db.UID) {
+	if stores["barmanObjectName"] != Name(w.db.UID) {
 		t.Fatalf("plugin %v", stores)
 	}
 }
@@ -202,7 +202,7 @@ func TestAnOperatorRestartInTheMiddleOfACreateKeepsTheAddresses(t *testing.T) {
 	w.r = w.reconciler()
 	w.reconcile()
 	var services corev1.ServiceList
-	must(t, w.c.List(ctx, &services, client.InNamespace(PlatformNamespace), client.MatchingLabels{LabelInstance: string(w.db.UID)}))
+	must(t, w.c.List(ctx, &services, client.InNamespace(PlatformNamespace), client.MatchingLabels{LabelInstance: Name(w.db.UID)}))
 	vips := 0
 	for _, service := range services.Items {
 		if service.Name == VIPName(w.db.UID) {
@@ -332,7 +332,7 @@ func TestBackupStatusAndHealthComeFromTheBackupObjects(t *testing.T) {
 	w.bringUp()
 	ctx := context.Background()
 	w.s3.put(string(w.db.UID)+"/base/1", 700)
-	backup := backupObject("first-"+nextSequence(), string(w.db.UID), "completed", w.clock.Add(-time.Hour).UTC().Format(time.RFC3339), w.clock.Add(-50*time.Minute).UTC().Format(time.RFC3339))
+	backup := backupObject("first-"+nextSequence(), Name(w.db.UID), "completed", w.clock.Add(-time.Hour).UTC().Format(time.RFC3339), w.clock.Add(-50*time.Minute).UTC().Format(time.RFC3339))
 	must(t, w.c.Create(ctx, backup))
 	backup.Object["status"] = map[string]any{"phase": "completed", "startedAt": w.clock.Add(-time.Hour).UTC().Format(time.RFC3339), "stoppedAt": w.clock.Add(-50 * time.Minute).UTC().Format(time.RFC3339)}
 	must(t, w.c.Status().Update(ctx, backup))

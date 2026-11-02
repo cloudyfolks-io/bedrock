@@ -117,7 +117,7 @@ func TestGateCertificatesCarryTheDatabaseNameAndTheRightUsages(t *testing.T) {
 	objects, _ := GateObjects(GateInput{Database: goldenDatabase(), Project: goldenProject(), Image: haproxy, Port: 5432})
 	server := objectOfKind(objects, "Certificate")
 	spec := server.Object["spec"].(map[string]any)
-	if spec["commonName"] != gateUID || spec["secretName"] != gateUID+"-server-tls" {
+	if spec["commonName"] != gateUID || spec["secretName"] != "db-"+gateUID+"-server-tls" {
 		t.Fatalf("server certificate %v", spec)
 	}
 	issuer := spec["issuerRef"].(map[string]any)
@@ -146,7 +146,7 @@ func TestGateObjectsAreAdoptedAndHaveNoOwnerReference(t *testing.T) {
 	}
 	for _, obj := range objects {
 		labels := obj.GetLabels()
-		if labels[v1alpha1.LabelKind] != Kind || labels[LabelInstance] != gateUID || labels[LabelManagedBy] != ManagedBy || labels[v1alpha1.LabelTenant] != "acme" {
+		if labels[v1alpha1.LabelKind] != Kind || labels[LabelInstance] != "db-"+gateUID || labels[LabelManagedBy] != ManagedBy || labels[v1alpha1.LabelTenant] != "acme" {
 			t.Errorf("%s labels %v", obj.GetKind(), labels)
 		}
 		if len(obj.GetOwnerReferences()) != 0 || obj.GetAnnotations()["bedrock.cloudyfolks.io/owner-uid"] != gateUID {
@@ -185,7 +185,7 @@ func TestCertificatesLabelTheirSecretsSoTheDeleteAndTheSweeperFindThem(t *testin
 	proxy, _ := ProxyObjects(goldenProxy())
 	for name, certificate := range map[string]*unstructured.Unstructured{"server": objectOfKind(gate, "Certificate"), "client": objectOfKind(proxy, "Certificate")} {
 		labels, _, _ := unstructured.NestedStringMap(certificate.Object, "spec", "secretTemplate", "labels")
-		if labels[LabelInstance] != gateUID || labels[LabelManagedBy] != ManagedBy || labels[v1alpha1.LabelKind] != Kind || labels[v1alpha1.LabelTenant] != "acme" || labels[v1alpha1.LabelProject] != "web" || labels[v1alpha1.LabelName] != "orders" {
+		if labels[LabelInstance] != "db-"+gateUID || labels[LabelManagedBy] != ManagedBy || labels[v1alpha1.LabelKind] != Kind || labels[v1alpha1.LabelTenant] != "acme" || labels[v1alpha1.LabelProject] != "web" || labels[v1alpha1.LabelName] != "orders" {
 			t.Errorf("%s certificate secret labels %v", name, labels)
 		}
 	}
