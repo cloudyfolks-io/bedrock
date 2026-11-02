@@ -64,6 +64,7 @@ apply_settings() {
 }
 
 lab_sizing_settings=(storage.osd-memory=2Gi storage.osd-memory-target=1536Mi storage.osd-cpu=1 storage.mon-memory=1Gi storage.mgr-memory=512Mi storage.mds-memory=512Mi storage.rgw-memory=512Mi)
+lab_kubelet_flags=(--kubelet-setting=kubelet.eviction-memory-available=256Mi --kubelet-setting=kubelet.system-reserved-memory=512Mi --kubelet-setting=kubelet.kube-reserved-memory=1Gi)
 single_vm_sizing_settings=(storage.osd-memory=3Gi storage.osd-memory-target=2Gi storage.osd-cpu=1 storage.mon-memory=1Gi storage.mgr-memory=512Mi storage.mds-memory=1Gi storage.rgw-memory=1Gi)
 
 wait_jsonpath() {

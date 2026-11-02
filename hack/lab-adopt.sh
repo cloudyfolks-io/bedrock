@@ -429,14 +429,14 @@ SCRIPT
 script_adopt_init() {
   cat <<'SCRIPT'
 cd "$REPO"
-"$BIN" init -f "$CONFIG_FILE" --bundle "$BUNDLE" --timeout 45m 2>&1 | awk '!/^admin password: /'
+"$BIN" init -f "$CONFIG_FILE" --bundle "$BUNDLE" --timeout 45m "${lab_kubelet_flags[@]}" 2>&1 | awk '!/^admin password: /'
 SCRIPT
 }
 
 script_adopt_join() {
   cat <<'SCRIPT'
 cd "$REPO"
-"$BIN" join --token "$TOKEN" --bundle "$BUNDLE" --adopt-config "$CONFIG_FILE" 2>&1
+"$BIN" join --token "$TOKEN" --bundle "$BUNDLE" --adopt-config "$CONFIG_FILE" "${lab_kubelet_flags[@]}" 2>&1
 SCRIPT
 }
 

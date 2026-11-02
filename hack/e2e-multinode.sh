@@ -46,7 +46,7 @@ stages, in order:
   install   run bedrock init on node 1 and bedrock join on nodes 2 and 3, wait for the storage;
             LAB_EMULATION=kvm|tcg|auto sets the guest virtualization, default auto
   tenant    create a tenant, two projects and the cirros image
-  check     run every check, print PASS or FAIL for each, write dist/lab-multinode/result.txt
+  check     run every check, or only those matching a word of CHECKS, print PASS or FAIL for each, write dist/lab-multinode/result.txt
   snapshot  stop the VMs, snapshot every disk, start the VMs; run it after tenant
   rewind    restore the snapshot of every disk and start the VMs again
   down      remove the lab VMs and their disks
@@ -100,14 +100,14 @@ SCRIPT
 script_init() {
   cat <<'SCRIPT'
 cd "$REPO"
-"$BIN" init -f "$CONFIG_FILE" --bundle "$BUNDLE" --timeout 45m 2>&1 | awk '!/^admin password: /'
+"$BIN" init -f "$CONFIG_FILE" --bundle "$BUNDLE" --timeout 45m "${lab_kubelet_flags[@]}" 2>&1 | awk '!/^admin password: /'
 SCRIPT
 }
 
 script_join() {
   cat <<'SCRIPT'
 cd "$REPO"
-"$BIN" join --token "$TOKEN" --bundle "$BUNDLE" 2>&1
+"$BIN" join --token "$TOKEN" --bundle "$BUNDLE" "${lab_kubelet_flags[@]}" 2>&1
 SCRIPT
 }
 
@@ -367,11 +367,20 @@ collect_diagnostics() {
   vm_run 1 diagnose_vms >"$lab_dir/diag-$1.log" 2>&1 || true
 }
 
+check_selected() {
+  local pattern
+  for pattern in ${CHECKS:-}; do
+    [[ $1 == *"$pattern"* ]] && return 0
+  done
+  [ -z "${CHECKS:-}" ]
+}
+
 run_checks() {
   local failed=0 entry n=0 words
   state_load
   for entry in "${check_entries[@]}"; do
     n=$((n + 1))
+    check_selected "$entry" || continue
     read -r -a words <<<"${entry#*|}"
     if ! verdict "${entry%%|*}" "${words[@]}"; then
       failed=1
