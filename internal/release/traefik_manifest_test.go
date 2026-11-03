@@ -1,6 +1,7 @@
 package release
 
 import (
+	"strings"
 	"testing"
 
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
@@ -37,5 +38,24 @@ func TestTraefikRunsOnControlPlaneNodesAndKeepsTheClientAddress(t *testing.T) {
 	}
 	if policy, _, _ := unstructured.NestedString(service.Object, "spec", "externalTrafficPolicy"); policy != "Local" {
 		t.Errorf("externalTrafficPolicy %q", policy)
+	}
+}
+
+func TestTraefikRendersTheDefaultTLSOption(t *testing.T) {
+	option := objectNamed(traefikObjects(t), "TLSOption", "default")
+	if option == nil {
+		t.Fatal("missing TLSOption default")
+	}
+	if got, _, _ := unstructured.NestedString(option.Object, "spec", "minVersion"); got != "VersionTLS12" {
+		t.Errorf("minVersion %q", got)
+	}
+	suites, _, _ := unstructured.NestedStringSlice(option.Object, "spec", "cipherSuites")
+	if len(suites) != 6 {
+		t.Errorf("cipherSuites %v", suites)
+	}
+	for _, suite := range suites {
+		if !strings.HasPrefix(suite, "TLS_ECDHE_") {
+			t.Errorf("cipher suite %s", suite)
+		}
 	}
 }

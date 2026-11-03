@@ -751,6 +751,7 @@ rules:
   - ingressroutes
   - middlewares
   - serverstransports
+  - tlsoptions
   - tlsstores
   verbs:
   - create
