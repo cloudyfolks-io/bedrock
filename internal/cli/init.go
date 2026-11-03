@@ -555,7 +555,7 @@ func hasRole(list []string, role string) bool {
 func kubeVIPData(vip, iface string) map[string]string {
 	return map[string]string{
 		"address": vip, "vip_interface": iface, "vip_subnet": "32", "cp_enable": "true", "svc_enable": "true", "vip_arp": "true",
-		"vip_leaderelection": "true", "port": "6443", "vip_leaseduration": "5", "vip_renewdeadline": "3", "vip_retryperiod": "1",
+		"vip_leaderelection": "true", "port": "6443",
 	}
 }
 

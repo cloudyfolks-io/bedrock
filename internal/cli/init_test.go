@@ -658,6 +658,14 @@ func TestKubeVIPDataEnablesServicesMode(t *testing.T) {
 	}
 }
 
+func TestKubeVIPDataLeavesLeaseTimingsToTheDaemonSet(t *testing.T) {
+	for key := range kubeVIPData("10.0.0.250", "eth0") {
+		if strings.HasPrefix(key, "vip_lease") || strings.HasPrefix(key, "vip_renew") || strings.HasPrefix(key, "vip_retry") {
+			t.Fatalf("key %q sets a lease timing in two places", key)
+		}
+	}
+}
+
 func TestKubeVIPDataLeavesForeignLoadBalancerClassesAlone(t *testing.T) {
 	for key := range kubeVIPData("10.0.0.250", "eth0") {
 		if strings.HasPrefix(key, "lb_class") {

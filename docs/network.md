@@ -375,6 +375,13 @@ If a Setting is wrong, the Network gets `ExternalReady=False` with the reason `S
 The Vpc keeps its other entries, and the controller does not delete the identity objects.
 If the identity range has no free address, the Network gets `Ready=False` with the reason `NoPoolCapacity`.
 
+### kube-vip leases
+
+The kube-vip DaemonSet uses a lease time of 15 seconds, a renew deadline of 10 seconds and a retry period of 2 seconds.
+A slow lease write must not move an address, because each move resets every flow on it.
+A node that stops still loses its addresses to another node in 15 seconds.
+The DaemonSet sets these values itself, so they win over the ConfigMap `kube-vip` of an older release.
+
 ## Elastic IPs
 
 An `ElasticIP` reserves an address from a provider network.
