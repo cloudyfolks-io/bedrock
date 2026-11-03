@@ -174,6 +174,23 @@ echo "METER-DONE" > /dev/console
 SCRIPT
 }
 
+transfer_security_group_manifest() {
+  cat <<SECURITYGROUP
+apiVersion: bedrock.cloudyfolks.io/v1alpha1
+kind: SecurityGroup
+metadata:
+  name: metering-xfer
+spec:
+  ingress:
+    - protocol: tcp
+      port: $metering_transfer_port
+      cidr: 10.100.18.0/24
+  egress:
+    - protocol: all
+      cidr: 0.0.0.0/0
+SECURITYGROUP
+}
+
 transfer_vm_manifest() {
   cat <<VM
 apiVersion: bedrock.cloudyfolks.io/v1alpha1
@@ -191,6 +208,7 @@ spec:
   networks:
     - subnetRef: metering
       address: $2
+      securityGroups: [metering-xfer]
   cloudInit:
     userData: |
 $($3 | sed 's/^/      /')
@@ -213,6 +231,7 @@ transfer_cleanup() {
   wait_empty 180 -n "$NS" get pods -l 'vm.kubevirt.io/name in (meter-client,meter-server)'
   wait_gone 180 datavolume meter-client-root -n "$NS"
   wait_gone 180 datavolume meter-server-root -n "$NS"
+  kubectl -n "$NS" delete securitygroup metering-xfer --ignore-not-found
   kubectl -n "$NS" delete subnet metering --ignore-not-found
   wait_gone 180 subnet metering -n "$NS"
 }
@@ -221,6 +240,8 @@ transfer_checks() {
   local received=$1 transmitted=$2 minimum=$((metering_transfer_bytes * 9 / 10))
   transfer_subnet_manifest | kubectl -n "$NS" apply -f -
   wait_reason 120 subnet metering Ready Applied -n "$NS"
+  transfer_security_group_manifest | kubectl -n "$NS" apply -f -
+  wait_condition 180 securitygroup metering-xfer Ready True -n "$NS"
   transfer_vm_manifest meter-server "$metering_transfer_server" transfer_server_script | kubectl -n "$NS" apply -f -
   transfer_vm_manifest meter-client 10.100.18.11 transfer_client_script | kubectl -n "$NS" apply -f -
   wait_jsonpath 600 Running -n "$NS" get virtualmachine meter-server -o jsonpath='{.status.phase}'
