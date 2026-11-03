@@ -49,11 +49,11 @@ BACKUP
   test -n "$id"
   expect_equal 1 "$(kubectl -n "$NS" get virtualmachinebackups.bedrock.cloudyfolks.io once -o json | jq '.status.backups | length')" "backup entries"
   wait_not_empty 60 -n "$NS" get virtualmachinebackups.bedrock.cloudyfolks.io once -o jsonpath='{.status.lastBackup}'
-  expect_equal Completed "$(kubectl -n velero get backup "$id" -o jsonpath='{.status.phase}')" "velero backup phase"
+  expect_equal Completed "$(kubectl -n velero get backups.velero.io "$id" -o jsonpath='{.status.phase}')" "velero backup phase"
   expect_equal vm1 "$(kubectl -n "$NS" get virtualmachine vm1 -o jsonpath='{.metadata.labels.bedrock\.cloudyfolks\.io/backup-vm}')" "backup label on the VM"
   retry_until 120 listing_has "$id"
   sleep 60
-  expect_equal 1 "$(kubectl -n velero get backups -l bedrock.cloudyfolks.io/name=once -o name | wc -l)" "velero backups of once"
+  expect_equal 1 "$(kubectl -n velero get backups.velero.io -l bedrock.cloudyfolks.io/name=once -o name | wc -l)" "velero backups of once"
   echo "$id" >"$workdir/backup-id"
 }
 
@@ -81,7 +81,7 @@ RESTORE
   after=$(kubectl -n "$NS" get datavolume vm1-root -o jsonpath='{.metadata.uid}')
   test "$before" != "$after"
   expect_equal 0 "$(restore_hold_count)" "restore holds"
-  expect_equal Completed "$(kubectl -n velero get restore -l bedrock.cloudyfolks.io/name=again -o jsonpath='{.items[0].status.phase}')" "velero restore phase"
+  expect_equal Completed "$(kubectl -n velero get restores.velero.io -l bedrock.cloudyfolks.io/name=again -o jsonpath='{.items[0].status.phase}')" "velero restore phase"
   kubectl -n "$NS" apply -f - <<REFUSED
 apiVersion: bedrock.cloudyfolks.io/v1alpha1
 kind: VirtualMachineRestore
@@ -117,9 +117,9 @@ RESTORE
   kubectl -n "$NS" get virtualmachines.bedrock.cloudyfolks.io vm1
   wait_jsonpath 600 Running -n "$NS" get virtualmachines.bedrock.cloudyfolks.io vm1 -o jsonpath='{.status.phase}'
   expect_equal "$spec" "$(kubectl -n "$NS" get virtualmachines.bedrock.cloudyfolks.io vm1 -o json | jq -cS .spec)" "spec of vm1"
-  restore=$(kubectl -n velero get restore -l bedrock.cloudyfolks.io/name=recover -o jsonpath='{.items[0].metadata.name}')
+  restore=$(kubectl -n velero get restores.velero.io -l bedrock.cloudyfolks.io/name=recover -o jsonpath='{.items[0].metadata.name}')
   test -n "$restore"
-  expect_equal Completed "$(kubectl -n velero get restore "$restore" -o jsonpath='{.status.phase}')" "velero restore phase"
+  expect_equal Completed "$(kubectl -n velero get restores.velero.io "$restore" -o jsonpath='{.status.phase}')" "velero restore phase"
   expect_equal "$restore" "$(kubectl -n "$NS" get pvc vm1-root -o jsonpath='{.metadata.labels.velero\.io/restore-name}')" "restore name on the root claim"
   expect_equal "" "$(kubectl -n "$NS" get virtualmachines.bedrock.cloudyfolks.io vm1 -o jsonpath='{.metadata.annotations.bedrock\.cloudyfolks\.io/restore-hold}')" "restore hold on vm1"
   expect_equal 0 "$(restore_hold_count)" "restore holds"
