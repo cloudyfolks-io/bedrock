@@ -261,7 +261,7 @@ The call answers 409 when the database has no ready pod.
 
 ## Alerts
 
-The alerts `DbaasDiskNearlyFull`, `DbaasDiskCritical`, `DbaasPodNotReady`, `DbaasPodRestarting` and `DbaasValkeyMemoryHigh` ship with the base. The alerts `DbaasReplicationLag`, `DbaasBackupStale` and `DbaasWalArchiveFailing` ship with the `cnpg` addon.
+The alerts `ManagedDatabaseDiskNearlyFull`, `ManagedDatabaseDiskCritical`, `ManagedDatabasePodNotReady`, `ManagedDatabasePodRestarting` and `ManagedDatabaseValkeyMemoryHigh` ship with the base. The alerts `ManagedDatabaseReplicationLag`, `ManagedDatabaseBackupStale` and `ManagedDatabaseWalArchiveFailing` ship with the `cnpg` addon.
 Each alert names the database with its UID and its name. A suspended database has no pod, so no alert fires.
 
 ## Reasons

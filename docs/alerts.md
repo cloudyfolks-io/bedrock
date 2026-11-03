@@ -234,34 +234,34 @@ OVSDB requests are slow. Check the load and the disk of the hosts that run ovn-c
 
 Loki discards log lines. Read the label `reason` of `loki_discarded_samples_total`. Raise the limits or the volume size, or reduce the log rate.
 
-### DbaasReplicationLag
+### ManagedDatabaseReplicationLag
 
 A PostgreSQL replica is more than 30 seconds behind. Check the load, the network and the disk of the replica pod. See [Database](database.md).
 
-### DbaasBackupStale
+### ManagedDatabaseBackupStale
 
 A PostgreSQL cluster has no backup newer than 36 hours. Check the backup object store and the Cluster backup status. See [Database](database.md).
 
-### DbaasWalArchiveFailing
+### ManagedDatabaseWalArchiveFailing
 
 WAL archiving to the object store fails. The disk can fill. Check the object store and the credentials. See [Database](database.md).
 
-### DbaasDiskNearlyFull
+### ManagedDatabaseDiskNearlyFull
 
 A database volume is nearly full. Grow the volume or delete data. See [Database](database.md).
 
-### DbaasDiskCritical
+### ManagedDatabaseDiskCritical
 
 A database volume is almost full. Grow the volume now. See [Database](database.md).
 
-### DbaasPodNotReady
+### ManagedDatabasePodNotReady
 
 A database pod is not ready. Run `kubectl describe pod` in the project namespace and read the events. See [Database](database.md).
 
-### DbaasPodRestarting
+### ManagedDatabasePodRestarting
 
 A database pod restarts again and again. Read the previous container log. See [Database](database.md).
 
-### DbaasValkeyMemoryHigh
+### ManagedDatabaseValkeyMemoryHigh
 
 A Valkey instance uses most of its memory. Raise the memory or reduce the data. See [Database](database.md).

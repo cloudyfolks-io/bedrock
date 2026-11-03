@@ -93,14 +93,14 @@ func TestAlertRulesAreMonitoringObjectsInTheMonitoringNamespace(t *testing.T) {
 
 func TestTheEightDadehatAlertsAreKept(t *testing.T) {
 	want := map[string][3]string{
-		"DbaasDiskNearlyFull":    {"10m", "warning", ""},
-		"DbaasDiskCritical":      {"5m", "critical", ""},
-		"DbaasPodNotReady":       {"10m", "critical", ""},
-		"DbaasPodRestarting":     {"5m", "warning", ""},
-		"DbaasReplicationLag":    {"5m", "warning", ""},
-		"DbaasBackupStale":       {"30m", "warning", ""},
-		"DbaasWalArchiveFailing": {"", "critical", ""},
-		"DbaasValkeyMemoryHigh":  {"10m", "warning", ""},
+		"ManagedDatabaseDiskNearlyFull":    {"10m", "warning", ""},
+		"ManagedDatabaseDiskCritical":      {"5m", "critical", ""},
+		"ManagedDatabasePodNotReady":       {"10m", "critical", ""},
+		"ManagedDatabasePodRestarting":     {"5m", "warning", ""},
+		"ManagedDatabaseReplicationLag":    {"5m", "warning", ""},
+		"ManagedDatabaseBackupStale":       {"30m", "warning", ""},
+		"ManagedDatabaseWalArchiveFailing": {"", "critical", ""},
+		"ManagedDatabaseValkeyMemoryHigh":  {"10m", "warning", ""},
 	}
 	got := allAlerts(t)
 	if len(got) != len(want) {
@@ -129,10 +129,10 @@ func TestPostgreSQLAlertsShipWithTheCNPGAddonAndTheRestWithTheBase(t *testing.T)
 		slices.Sort(out)
 		return out
 	}
-	if got := names(postgresql); !slices.Equal(got, []string{"DbaasBackupStale", "DbaasReplicationLag", "DbaasWalArchiveFailing"}) {
+	if got := names(postgresql); !slices.Equal(got, []string{"ManagedDatabaseBackupStale", "ManagedDatabaseReplicationLag", "ManagedDatabaseWalArchiveFailing"}) {
 		t.Errorf("cnpg alerts %v", got)
 	}
-	if got := names(generic); !slices.Equal(got, []string{"DbaasDiskCritical", "DbaasDiskNearlyFull", "DbaasPodNotReady", "DbaasPodRestarting", "DbaasValkeyMemoryHigh"}) {
+	if got := names(generic); !slices.Equal(got, []string{"ManagedDatabaseDiskCritical", "ManagedDatabaseDiskNearlyFull", "ManagedDatabasePodNotReady", "ManagedDatabasePodRestarting", "ManagedDatabaseValkeyMemoryHigh"}) {
 		t.Errorf("base alerts %v", got)
 	}
 	for _, a := range postgresql {
@@ -245,7 +245,7 @@ func TestEveryAlertNeedsARunningPodSoASuspendedDatabaseStaysQuiet(t *testing.T) 
 
 func TestTheValkeyMemoryAlertReadsTheExporterSeries(t *testing.T) {
 	for _, a := range allAlerts(t) {
-		if a.name == "DbaasValkeyMemoryHigh" && (!strings.Contains(a.expr, "redis_memory_used_bytes") || !strings.Contains(a.expr, "redis_memory_max_bytes")) {
+		if a.name == "ManagedDatabaseValkeyMemoryHigh" && (!strings.Contains(a.expr, "redis_memory_used_bytes") || !strings.Contains(a.expr, "redis_memory_max_bytes")) {
 			t.Errorf("expr %s", a.expr)
 		}
 	}
