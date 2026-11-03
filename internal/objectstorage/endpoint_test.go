@@ -345,3 +345,136 @@ func TestAdminGuardHitsOnlyTheExactPathsOfThePlainHost(t *testing.T) {
 		}
 	}
 }
+
+func objectNamed(objects []*unstructured.Unstructured, kind, name string) *unstructured.Unstructured {
+	for _, obj := range objects {
+		if obj.GetKind() == kind && obj.GetName() == name {
+			return obj
+		}
+	}
+	return nil
+}
+
+func middlewareOf(t *testing.T, c client.Client) (*unstructured.Unstructured, bool) {
+	t.Helper()
+	obj := &unstructured.Unstructured{}
+	obj.SetGroupVersionKind(schema.GroupVersionKind{Group: "traefik.io", Version: "v1alpha1", Kind: "Middleware"})
+	err := c.Get(context.Background(), client.ObjectKey{Namespace: StoreNamespace, Name: "objectstorage-public-rate-limit"}, obj)
+	if err != nil && client.IgnoreNotFound(err) != nil {
+		t.Fatal(err)
+	}
+	return obj, err == nil
+}
+
+func TestEndpointObjectsRateLimitTheBothPublicRoutes(t *testing.T) {
+	objects := EndpointObjects(Rules{PublicHost: "s3.example.test", RateLimitAverage: 50, RateLimitBurst: 120}, "SelfSigned")
+	middleware := objectNamed(objects, "Middleware", "objectstorage-public-rate-limit")
+	if middleware == nil {
+		t.Fatalf("objects %+v", objects)
+	}
+	average, _, _ := unstructured.NestedInt64(middleware.Object, "spec", "rateLimit", "average")
+	burst, _, _ := unstructured.NestedInt64(middleware.Object, "spec", "rateLimit", "burst")
+	if average != 50 || burst != 120 || middleware.GetNamespace() != StoreNamespace {
+		t.Fatalf("middleware %+v", middleware.Object)
+	}
+	for _, name := range []string{"objectstorage-public", "objectstorage-public-wildcard"} {
+		route := objectNamed(objects, "IngressRoute", name)
+		routes, _, _ := unstructured.NestedSlice(route.Object, "spec", "routes")
+		got := routes[0].(map[string]any)["middlewares"]
+		if !reflect.DeepEqual(got, []any{map[string]any{"name": "objectstorage-public-rate-limit"}}) {
+			t.Errorf("%s middlewares %v", name, got)
+		}
+	}
+}
+
+func TestEndpointObjectsHaveNoMiddlewareWithoutARateLimit(t *testing.T) {
+	objects := EndpointObjects(Rules{PublicHost: "s3.example.test"}, "SelfSigned")
+	if objectNamed(objects, "Middleware", "objectstorage-public-rate-limit") != nil {
+		t.Fatal("middleware made")
+	}
+	route := objectNamed(objects, "IngressRoute", "objectstorage-public")
+	routes, _, _ := unstructured.NestedSlice(route.Object, "spec", "routes")
+	if _, found := routes[0].(map[string]any)["middlewares"]; found {
+		t.Fatal("route references a middleware")
+	}
+}
+
+func TestEndpointReconcilerMakesTheMiddlewareFromTheSetting(t *testing.T) {
+	c, r := endpointWorld(t, map[string]string{"objectstorage.public-host": "s3.example.test", "objectstorage.rate-limit": "30,60"})
+	if _, err := r.Reconcile(context.Background(), ctrl.Request{}); err != nil {
+		t.Fatal(err)
+	}
+	middleware, found := middlewareOf(t, c)
+	if !found {
+		t.Fatal("middleware missing")
+	}
+	average, _, _ := unstructured.NestedInt64(middleware.Object, "spec", "rateLimit", "average")
+	burst, _, _ := unstructured.NestedInt64(middleware.Object, "spec", "rateLimit", "burst")
+	if average != 30 || burst != 60 {
+		t.Fatalf("middleware %+v", middleware.Object)
+	}
+}
+
+func TestEndpointReconcilerUsesTheDefaultRateLimit(t *testing.T) {
+	c, r := endpointWorld(t, map[string]string{"objectstorage.public-host": "s3.example.test"})
+	if _, err := r.Reconcile(context.Background(), ctrl.Request{}); err != nil {
+		t.Fatal(err)
+	}
+	middleware, found := middlewareOf(t, c)
+	if !found {
+		t.Fatal("middleware missing")
+	}
+	average, _, _ := unstructured.NestedInt64(middleware.Object, "spec", "rateLimit", "average")
+	burst, _, _ := unstructured.NestedInt64(middleware.Object, "spec", "rateLimit", "burst")
+	if average != 200 || burst != 400 {
+		t.Fatalf("middleware %+v", middleware.Object)
+	}
+}
+
+func TestEndpointReconcilerKeepsTheDefaultRateLimitForAnEmptySetting(t *testing.T) {
+	c, r := endpointWorld(t, map[string]string{"objectstorage.public-host": "s3.example.test", "objectstorage.rate-limit": ""})
+	if _, err := r.Reconcile(context.Background(), ctrl.Request{}); err != nil {
+		t.Fatal(err)
+	}
+	middleware, found := middlewareOf(t, c)
+	if !found {
+		t.Fatal("middleware missing")
+	}
+	average, _, _ := unstructured.NestedInt64(middleware.Object, "spec", "rateLimit", "average")
+	if average != 200 {
+		t.Fatalf("middleware %+v", middleware.Object)
+	}
+}
+
+func TestEndpointReconcilerRefusesABadRateLimit(t *testing.T) {
+	c, r := endpointWorld(t, map[string]string{"objectstorage.public-host": "s3.example.test", "objectstorage.rate-limit": "fast"})
+	if _, err := r.Reconcile(context.Background(), ctrl.Request{}); err != nil {
+		t.Fatal(err)
+	}
+	if _, found := middlewareOf(t, c); found {
+		t.Fatal("middleware made")
+	}
+}
+
+func TestEndpointReconcilerRemovesTheMiddlewareWhenTheSettingIsOff(t *testing.T) {
+	c, r := endpointWorld(t, map[string]string{"objectstorage.public-host": "s3.example.test"})
+	if _, err := r.Reconcile(context.Background(), ctrl.Request{}); err != nil {
+		t.Fatal(err)
+	}
+	if _, found := middlewareOf(t, c); !found {
+		t.Fatal("no middleware before the setting is emptied")
+	}
+	setting := &v1alpha1.Setting{ObjectMeta: metav1.ObjectMeta{Name: "objectstorage.rate-limit"}, Spec: v1alpha1.SettingSpec{Value: "off"}}
+	if err := c.Create(context.Background(), setting); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := r.Reconcile(context.Background(), ctrl.Request{}); err != nil {
+		t.Fatal(err)
+	}
+	if _, found := middlewareOf(t, c); found {
+		t.Fatal("the middleware stayed")
+	}
+	if !endpointExists(t, c, "traefik.io/v1alpha1", "IngressRoute") {
+		t.Fatal("the route must stay")
+	}
+}

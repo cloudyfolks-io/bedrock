@@ -940,6 +940,14 @@ Find the server ID in the output of `cluster/status`.
 To check a cluster with three nodes, make sure that `kubectl -n kube-system get deployment ovn-central` shows 3/3.
 The output of `cluster/status` must list three servers for each database.
 
+## Client address
+
+Traefik runs on each control-plane node, and the Service of Traefik uses `externalTrafficPolicy: Local`.
+The VIP always sits on a node that has a Traefik pod, and the pod sees the real source address of each client.
+With the policy `Cluster`, all clients would look like one node address.
+The Setting `registry.admin-allow-cidrs` and the rate limit of the public object storage route (`objectstorage.rate-limit`) use the source address.
+Without the policy `Local`, they would act on the node address and not on the client.
+
 ## Run a second ingress
 
 The Traefik of Bedrock reads IngressRoutes, Middlewares, ServersTransports and Ingresses only in the namespaces `traefik`, `bedrock-system`, `bedrock-registry`, `cdi` and `rook-ceph`. These are the namespaces where Bedrock renders its own routes: the panel and API host, the sign-in host, the upload host, the registry and the public object storage host. A route in any other namespace is ignored by Bedrock. To run a second Traefik for your own workloads, install it in its own namespace with its own IngressClass and its own entry points, and give it only the namespaces of your workloads. Do not put your routes in the namespaces above, because the Traefik of Bedrock serves them there. The second Traefik must not read those namespaces either, or it serves the routes of Bedrock too.

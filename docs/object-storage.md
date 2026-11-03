@@ -137,6 +137,7 @@ If the store refuses the policy, the bucket shows the reason `PolicyRejected`.
 | `objectstorage.public-host` | empty | DNS name of the public HTTPS endpoint. |
 | `objectstorage.public-aliases` | empty | More DNS names for the public endpoint. |
 | `objectstorage.tls-secret` | empty | TLS Secret in the namespace `rook-ceph` for the public endpoint. |
+| `objectstorage.rate-limit` | `200,400` | Requests for each second that one source address may send to the public endpoint, as average,burst. The value `off` turns the limit off. |
 
 A user of the group `bedrock:bedrock-admins` can make a bucket with a reserved name.
 The administrator sets the annotation `bedrock.cloudyfolks.io/reserved-name-approved: "true"` on the bucket.

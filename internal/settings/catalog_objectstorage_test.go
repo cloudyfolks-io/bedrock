@@ -14,6 +14,7 @@ func TestObjectStorageCatalogKeysAndDefaults(t *testing.T) {
 		"objectstorage.public-host":              "",
 		"objectstorage.public-aliases":           "",
 		"objectstorage.tls-secret":               "",
+		"objectstorage.rate-limit":               "200,400",
 	}
 	for key, def := range want {
 		got, ok := Lookup(key)
@@ -77,6 +78,14 @@ func TestObjectStorageListsValidate(t *testing.T) {
 		{"objectstorage.tls-secret", "", true},
 		{"objectstorage.tls-secret", "s3-wildcard-tls", true},
 		{"objectstorage.tls-secret", "Bad_Name", false},
+		{"objectstorage.rate-limit", "", true},
+		{"objectstorage.rate-limit", "200,400", true},
+		{"objectstorage.rate-limit", "200", false},
+		{"objectstorage.rate-limit", "off", true},
+		{"objectstorage.rate-limit", "400,200", true},
+		{"objectstorage.rate-limit", "-1,5", false},
+		{"objectstorage.rate-limit", "0,10", false},
+		{"objectstorage.rate-limit", "a,b", false},
 	}
 	for _, tc := range cases {
 		if err := validates(t, tc.key, tc.value); (err == nil) != tc.valid {

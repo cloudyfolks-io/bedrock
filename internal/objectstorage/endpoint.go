@@ -23,6 +23,7 @@ const (
 	ServiceName       = "rook-ceph-rgw-" + StoreName
 	ServiceHost       = ServiceName + "." + StoreNamespace + ".svc"
 	publicName        = "objectstorage-public"
+	rateLimitName     = "objectstorage-public-rate-limit"
 	wildcardName      = "objectstorage-public-wildcard"
 	wildcardPriority  = int64(1)
 	publicSecretName  = "objectstorage-public-tls"
@@ -71,24 +72,39 @@ func EndpointObjects(rules Rules, tlsMode string) []*unstructured.Unstructured {
 	if rules.TLSSecret != "" {
 		secretName = rules.TLSSecret
 	}
-	route := endpointObject("traefik.io/v1alpha1", "IngressRoute", publicName, publicRouteSpec(routeMatch(rules), secretName, nil))
-	wildcard := endpointObject("traefik.io/v1alpha1", "IngressRoute", wildcardName, publicRouteSpec(wildcardMatch(rules), secretName, wildcardPriority))
+	var limit []*unstructured.Unstructured
+	var middlewares []any
+	if rules.RateLimitAverage > 0 {
+		limit = []*unstructured.Unstructured{rateLimitMiddleware(rules)}
+		middlewares = []any{map[string]any{"name": rateLimitName}}
+	}
+	route := endpointObject("traefik.io/v1alpha1", "IngressRoute", publicName, publicRouteSpec(routeMatch(rules), secretName, nil, middlewares))
+	wildcard := endpointObject("traefik.io/v1alpha1", "IngressRoute", wildcardName, publicRouteSpec(wildcardMatch(rules), secretName, wildcardPriority, middlewares))
 	if rules.TLSSecret != "" {
-		return []*unstructured.Unstructured{route, wildcard}
+		return append(limit, route, wildcard)
 	}
 	certificate := endpointObject("cert-manager.io/v1", "Certificate", publicName, map[string]any{
 		"secretName": publicSecretName,
 		"dnsNames":   certificateNames(rules, issuerFor(tlsMode)),
 		"issuerRef":  map[string]any{"kind": "ClusterIssuer", "name": issuerFor(tlsMode)},
 	})
-	return []*unstructured.Unstructured{certificate, route, wildcard}
+	return append(limit, certificate, route, wildcard)
 }
 
-func publicRouteSpec(match, secretName string, priority any) map[string]any {
+func rateLimitMiddleware(rules Rules) *unstructured.Unstructured {
+	return endpointObject("traefik.io/v1alpha1", "Middleware", rateLimitName, map[string]any{
+		"rateLimit": map[string]any{"average": int64(rules.RateLimitAverage), "burst": int64(rules.RateLimitBurst)},
+	})
+}
+
+func publicRouteSpec(match, secretName string, priority any, middlewares []any) map[string]any {
 	rule := map[string]any{
 		"match":    match,
 		"kind":     "Rule",
 		"services": []any{map[string]any{"name": ServiceName, "port": gatewayPort}},
+	}
+	if middlewares != nil {
+		rule["middlewares"] = middlewares
 	}
 	if priority != nil {
 		rule["priority"] = priority
@@ -181,6 +197,11 @@ func (r *EndpointReconciler) converge(ctx context.Context, rules Rules, tlsMode 
 			return err
 		}
 	}
+	if rules.RateLimitAverage == 0 {
+		if err := r.removeOwned(ctx, "traefik.io/v1alpha1", "Middleware", rateLimitName); err != nil {
+			return err
+		}
+	}
 	if rules.TLSSecret != "" {
 		if err := r.removeOwned(ctx, "cert-manager.io/v1", "Certificate", publicName); err != nil {
 			return err
@@ -218,7 +239,7 @@ func (r *EndpointReconciler) removeOwned(ctx context.Context, apiVersion, kind, 
 }
 
 func (r *EndpointReconciler) remove(ctx context.Context) error {
-	for _, target := range [][3]string{{"cert-manager.io/v1", "Certificate", publicName}, {"traefik.io/v1alpha1", "IngressRoute", publicName}, {"traefik.io/v1alpha1", "IngressRoute", wildcardName}} {
+	for _, target := range [][3]string{{"cert-manager.io/v1", "Certificate", publicName}, {"traefik.io/v1alpha1", "IngressRoute", publicName}, {"traefik.io/v1alpha1", "IngressRoute", wildcardName}, {"traefik.io/v1alpha1", "Middleware", rateLimitName}} {
 		if err := r.removeOwned(ctx, target[0], target[1], target[2]); err != nil {
 			return err
 		}

@@ -16,6 +16,8 @@ type Rules struct {
 	PublicHost       string
 	PublicAliases    []string
 	TLSSecret        string
+	RateLimitAverage int
+	RateLimitBurst   int
 }
 
 func DefaultRules() Rules {

@@ -18,7 +18,7 @@ func TestParseRulesUsesTheDefaults(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := Rules{ReservedNames: []string{"admin", "bedrock-registry", "bedrock-database-backups"}, MaxBuckets: 100}
+	want := Rules{ReservedNames: []string{"admin", "bedrock-registry", "bedrock-database-backups"}, MaxBuckets: 100, RateLimitAverage: 200, RateLimitBurst: 400}
 	if !reflect.DeepEqual(rules, want) {
 		t.Fatalf("rules %+v", rules)
 	}
@@ -32,6 +32,7 @@ func TestParseRulesReadsEveryValue(t *testing.T) {
 		"objectstorage.max-buckets":              "7",
 		"objectstorage.public-host":              "s3.example.test",
 		"objectstorage.public-aliases":           "s3.a.test,s3.b.test",
+		"objectstorage.rate-limit":               "10,20",
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -43,6 +44,8 @@ func TestParseRulesReadsEveryValue(t *testing.T) {
 		MaxBuckets:       7,
 		PublicHost:       "s3.example.test",
 		PublicAliases:    []string{"s3.a.test", "s3.b.test"},
+		RateLimitAverage: 10,
+		RateLimitBurst:   20,
 	}
 	if !reflect.DeepEqual(rules, want) {
 		t.Fatalf("rules %+v", rules)

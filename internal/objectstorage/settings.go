@@ -34,12 +34,13 @@ const (
 	keyPublicHost       = "objectstorage.public-host"
 	keyPublicAliases    = "objectstorage.public-aliases"
 	keyTLSSecret        = "objectstorage.tls-secret"
+	keyRateLimit        = "objectstorage.rate-limit"
 	settingPrefix       = "objectstorage."
 )
 
 var platformBucketKeys = []string{"registry.bucket", "database.backup.bucket"}
 
-var ruleKeys = []string{keyReservedNames, keyReservedPrefixes, keyCORSOrigins, keyMaxBuckets, keyPublicHost, keyPublicAliases, keyTLSSecret}
+var ruleKeys = []string{keyReservedNames, keyReservedPrefixes, keyCORSOrigins, keyMaxBuckets, keyPublicHost, keyPublicAliases, keyTLSSecret, keyRateLimit}
 
 func ParseRules(values map[string]string) (Rules, error) {
 	effective := make(map[string]string, len(ruleKeys))
@@ -69,7 +70,10 @@ func ParseRules(values map[string]string) (Rules, error) {
 	for i, origin := range origins {
 		origins[i] = strings.TrimSuffix(origin, "/")
 	}
+	average, burst := splitRateLimit(effective[keyRateLimit])
 	return Rules{
+		RateLimitAverage: average,
+		RateLimitBurst:   burst,
 		ReservedNames:    reserved,
 		ReservedPrefixes: splitList(effective[keyReservedPrefixes]),
 		CORSOrigins:      origins,
@@ -78,6 +82,16 @@ func ParseRules(values map[string]string) (Rules, error) {
 		PublicAliases:    splitList(effective[keyPublicAliases]),
 		TLSSecret:        effective[keyTLSSecret],
 	}, nil
+}
+
+func splitRateLimit(value string) (int, int) {
+	parts := strings.Split(value, ",")
+	if len(parts) != 2 {
+		return 0, 0
+	}
+	average, _ := strconv.Atoi(parts[0])
+	burst, _ := strconv.Atoi(parts[1])
+	return average, burst
 }
 
 func effectiveValue(values map[string]string, key string) string {

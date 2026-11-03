@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"net/url"
 	"regexp"
+	"strconv"
 	"strings"
 
 	"k8s.io/apimachinery/pkg/util/validation"
@@ -30,7 +31,23 @@ func objectStorageDefinitions() []Definition {
 		{"objectstorage.public-host", "", "DNS name of the public HTTPS endpoint of object storage. Empty keeps the store inside the cluster.", domainName},
 		{"objectstorage.public-aliases", "", "Comma list of extra DNS names that serve the public endpoint, next to objectstorage.public-host.", entryList("DNS name", dnsname.Valid)},
 		{"objectstorage.tls-secret", "", "Name of a TLS Secret in the namespace rook-ceph for the public endpoint, for example a wildcard certificate. With a value, Bedrock makes no Certificate and routes with this Secret. Empty lets cert-manager issue the certificate.", secretName},
+		{"objectstorage.rate-limit", "200,400", "Requests for each second that one source address may send to the public endpoint of object storage, as average,burst. The value off turns the limit off. Empty keeps the default. The limit needs the client address: see docs/network.md.", rateLimit},
 	}
+}
+
+func rateLimit(v string) error {
+	if v == "" || v == "off" {
+		return nil
+	}
+	parts := strings.Split(v, ",")
+	if len(parts) == 2 {
+		average, errAverage := strconv.Atoi(parts[0])
+		burst, errBurst := strconv.Atoi(parts[1])
+		if errAverage == nil && errBurst == nil && average >= 1 && burst >= 1 {
+			return nil
+		}
+	}
+	return fmt.Errorf("value %q is not off or average,burst with positive whole numbers", v)
 }
 
 func secretName(v string) error {
