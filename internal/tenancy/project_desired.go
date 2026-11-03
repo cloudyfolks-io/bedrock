@@ -40,6 +40,12 @@ func DesiredNamespace(project v1alpha1.Project) corev1.Namespace {
 	}
 }
 
+const (
+	uploadProxyNamespace = "cdi"
+	uploadProxyLabel     = "cdi.kubevirt.io"
+	uploadProxyName      = "cdi-uploadproxy"
+)
+
 func DesiredNetworkPolicy(project v1alpha1.Project) networkingv1.NetworkPolicy {
 	return networkingv1.NetworkPolicy{
 		TypeMeta:   metav1.TypeMeta{APIVersion: networkingv1.SchemeGroupVersion.String(), Kind: "NetworkPolicy"},
@@ -51,6 +57,10 @@ func DesiredNetworkPolicy(project v1alpha1.Project) networkingv1.NetworkPolicy {
 			PolicyTypes: []networkingv1.PolicyType{networkingv1.PolicyTypeIngress},
 			Ingress: []networkingv1.NetworkPolicyIngressRule{{From: []networkingv1.NetworkPolicyPeer{
 				{NamespaceSelector: &metav1.LabelSelector{MatchLabels: map[string]string{v1alpha1.LabelTenant: project.Spec.TenantRef}}},
+				{
+					NamespaceSelector: &metav1.LabelSelector{MatchLabels: map[string]string{corev1.LabelMetadataName: uploadProxyNamespace}},
+					PodSelector:       &metav1.LabelSelector{MatchLabels: map[string]string{uploadProxyLabel: uploadProxyName}},
+				},
 			}}},
 		},
 	}
