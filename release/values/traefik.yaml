@@ -1,6 +1,12 @@
 deployment:
-  replicas: 1
+  kind: DaemonSet
+nodeSelector:
+  bedrock.cloudyfolks.io/role-control-plane: "true"
+tolerations:
+  - operator: Exists
 service:
+  spec:
+    externalTrafficPolicy: Local
   annotations:
     kube-vip.io/loadbalancerIPs: "${BEDROCK_VIP}"
 ports:

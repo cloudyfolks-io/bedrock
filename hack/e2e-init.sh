@@ -205,7 +205,7 @@ kubectl -n kube-system rollout status deployment/snapshot-controller --timeout=3
 kubectl -n rook-ceph rollout status deployment/rook-ceph-operator --timeout=300s
 kubectl -n kubevirt rollout status deployment/virt-operator --timeout=300s
 kubectl -n cdi rollout status deployment/cdi-operator --timeout=300s
-kubectl -n traefik rollout status deployment/traefik --timeout=300s
+kubectl -n traefik rollout status daemonset/traefik --timeout=300s
 kubectl wait --for=jsonpath='{.status.phase}'=Deployed -n kubevirt kubevirt/kubevirt --timeout=900s
 kubectl -n kubevirt get kubevirt kubevirt -o jsonpath='{.spec.configuration.developerConfiguration.useEmulation}' | grep -qx "$emulation"
 kubectl wait --for=jsonpath='{.status.phase}'=Deployed cdi/cdi --timeout=600s
