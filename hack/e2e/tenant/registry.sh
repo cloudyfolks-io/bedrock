@@ -42,7 +42,12 @@ registry_token() {
 registry_token_works() {
   local token
   token=$(registry_token "$1" "$2" "$3") || return 1
-  [ -n "$token" ] && [ "$token" != null ]
+  [ -n "$token" ] && [ "$token" != null ] || return 1
+  printf '%s' "$token" | token_actions | grep -qx "${3##*:}"
+}
+
+token_actions() {
+  python3 -c 'import base64, json, sys; part = sys.stdin.read().split(".")[1]; part += "=" * (-len(part) % 4); [print(action) for grant in json.loads(base64.urlsafe_b64decode(part)).get("access") or [] for action in grant.get("actions") or []]'
 }
 
 registry_credential() {
