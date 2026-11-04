@@ -255,7 +255,7 @@ database_isolation() {
   expect_equal yes "$(as_user alice auth can-i list databaseversions.bedrock.cloudyfolks.io || true)" "alice reading the catalog"
   expect_equal yes "$(as_user alice auth can-i create databases.bedrock.cloudyfolks.io -n "$NS" || true)" "alice making a database"
   expect_refused "Forbidden" as_user alice -n "$database_namespace" get pods
-  expect_refused "only an administrator" as_user alice apply -f - <<VERSION
+  expect_refused "forbidden" as_user alice apply -f - <<VERSION
 apiVersion: bedrock.cloudyfolks.io/v1alpha1
 kind: DatabaseClass
 metadata:
