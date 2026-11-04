@@ -29,9 +29,6 @@
       },
       "instanceSidecarConfiguration": {
         "resources": {
-          "limits": {
-            "memory": "256Mi"
-          },
           "requests": {
             "cpu": "50m",
             "memory": "64Mi"
@@ -71,9 +68,6 @@
       },
       "instanceSidecarConfiguration": {
         "resources": {
-          "limits": {
-            "memory": "256Mi"
-          },
           "requests": {
             "cpu": "50m",
             "memory": "64Mi"

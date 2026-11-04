@@ -171,10 +171,7 @@ func objectStore(s engine.Spec, name, prefix string) *unstructured.Unstructured 
 }
 
 func sidecarResources() map[string]any {
-	return map[string]any{
-		"requests": map[string]any{"cpu": "50m", "memory": "64Mi"},
-		"limits":   map[string]any{"memory": "256Mi"},
-	}
+	return map[string]any{"requests": map[string]any{"cpu": "50m", "memory": "64Mi"}}
 }
 
 func Patches(s engine.Spec) ([]engine.Patch, error) {

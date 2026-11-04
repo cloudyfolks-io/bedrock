@@ -154,6 +154,7 @@ func withDadehatDifferences(objects []*unstructured.Unstructured) []*unstructure
 		obj.SetAPIVersion("ps.percona.com/v1alpha1")
 		unstructured.RemoveNestedField(obj.Object, "spec", "proxy", "router")
 		unstructured.RemoveNestedField(obj.Object, "spec", "proxy", "haproxy", "labels")
+		unstructured.RemoveNestedField(obj.Object, "spec", "backup", "resources")
 		if enabled, found, _ := unstructured.NestedBool(obj.Object, "spec", "proxy", "haproxy", "enabled"); found && !enabled {
 			unstructured.RemoveNestedField(obj.Object, "spec", "proxy")
 		}
@@ -415,5 +416,13 @@ func TestEveryMySQLPodKindCarriesTheRoleAndInstanceLabels(t *testing.T) {
 		if _, set := labels["app.kubernetes.io/component"]; set {
 			t.Errorf("%s pods must leave the component label to the operator: %v", name, labels)
 		}
+	}
+}
+
+func TestBackupSidecarHasRequests(t *testing.T) {
+	block := backupBlock(engine.Spec{Backup: engine.BackupSpec{Enabled: true, Bucket: "backups", RetentionDays: 7}, BackupID: "x"})
+	requests, ok := block["resources"].(map[string]any)["requests"].(map[string]any)
+	if !ok || requests["cpu"] == nil || requests["memory"] == nil {
+		t.Fatalf("backup resources = %v; the databases quota refuses the xtrabackup sidecar without requests", block["resources"])
 	}
 }

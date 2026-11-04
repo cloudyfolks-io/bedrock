@@ -170,7 +170,12 @@ func backupBlock(s engine.Spec) map[string]any {
 	if image := s.Images[ImageBackup]; image != "" {
 		backup["image"] = image
 	}
+	backup["resources"] = sidecarRequests()
 	return backup
+}
+
+func sidecarRequests() map[string]any {
+	return map[string]any{"requests": map[string]any{"cpu": "100m", "memory": "128Mi"}}
 }
 
 func clusterSpec(s engine.Spec) map[string]any {
@@ -253,7 +258,7 @@ func patchSpec(s engine.Spec) map[string]any {
 		spec["proxy"] = map[string]any{"haproxy": map[string]any{"enabled": true, "size": 3}}
 	}
 	if image := s.Images[ImageBackup]; image != "" && s.Backup.Enabled {
-		spec["backup"] = map[string]any{"image": image}
+		spec["backup"] = map[string]any{"image": image, "resources": sidecarRequests()}
 	}
 	return spec
 }

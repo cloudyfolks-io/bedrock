@@ -18,6 +18,12 @@
       "backup": {
         "enabled": true,
         "image": "docker.io/percona/percona-xtrabackup:8.4.0-6.1@sha256:aa",
+        "resources": {
+          "requests": {
+            "cpu": "100m",
+            "memory": "128Mi"
+          }
+        },
         "schedule": [
           {
             "keep": 7,
