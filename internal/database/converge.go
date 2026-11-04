@@ -219,11 +219,25 @@ func (r *Reconciler) prepareRestore(ctx context.Context, in *flow) (*Refusal, er
 		if refused := CheckRestore(check); refused != nil {
 			return refused, nil
 		}
+		if refused, err := r.checkSourceUsers(ctx, *in.db); err != nil || refused != nil {
+			return refused, err
+		}
 	}
 	if in.db.Spec.Engine != v1alpha1.DatabaseEngineMySQL {
 		return nil, nil
 	}
 	return r.prepareMySQLRestore(ctx, in)
+}
+
+func (r *Reconciler) checkSourceUsers(ctx context.Context, db v1alpha1.Database) (*Refusal, error) {
+	if db.Spec.Engine != v1alpha1.DatabaseEngineMySQL {
+		return nil, nil
+	}
+	_, found, err := SourceUsers(ctx, r.Live, db.Spec.Restore.SourceUID)
+	if err != nil || found {
+		return nil, err
+	}
+	return refusal(ReasonRestoreSourceEmpty, "%s", ErrSourceUsersGone.Error()), nil
 }
 
 func (r *Reconciler) prepareMySQLRestore(ctx context.Context, in *flow) (*Refusal, error) {

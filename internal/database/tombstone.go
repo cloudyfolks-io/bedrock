@@ -108,5 +108,32 @@ func purge(ctx context.Context, c client.Client, store BackupStore, cfg Config, 
 	if err := store.S3.DeletePrefix(ctx, store.Endpoint, store.Region, keys, cfg.BackupBucket, prefix); err != nil {
 		return err
 	}
+	users := &corev1.Secret{ObjectMeta: metav1.ObjectMeta{Name: tombstone.Name, Namespace: PlatformNamespace}}
+	if err := c.Delete(ctx, users); client.IgnoreNotFound(err) != nil {
+		return err
+	}
 	return client.IgnoreNotFound(c.Delete(ctx, tombstone))
+}
+
+func EnsureTombstoneUsers(ctx context.Context, c client.Client, db v1alpha1.Database, project Project) error {
+	if db.Spec.Engine != v1alpha1.DatabaseEngineMySQL {
+		return nil
+	}
+	var users corev1.Secret
+	err := c.Get(ctx, client.ObjectKey{Namespace: PlatformNamespace, Name: Suffixed(db.UID, SecretSuperuser)}, &users)
+	if apierrors.IsNotFound(err) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	kept := &corev1.Secret{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: TombstoneName(db.UID), Namespace: PlatformNamespace,
+			Labels: v1alpha1.TenantLabels(tombstoneKind, db.Name, project.Tenant, project.Name),
+		},
+		Type: corev1.SecretTypeOpaque,
+		Data: users.Data,
+	}
+	return client.IgnoreAlreadyExists(c.Create(ctx, kept, client.FieldOwner(v1alpha1.DatabaseFieldManager)))
 }

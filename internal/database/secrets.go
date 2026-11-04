@@ -2,6 +2,7 @@ package database
 
 import (
 	"context"
+	"errors"
 	"net"
 	"net/url"
 	"strconv"
@@ -9,6 +10,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/util/retry"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
@@ -78,6 +80,9 @@ func superuserData(kind, password string) (map[string]string, error) {
 func EnsureEngineSecrets(ctx context.Context, c client.Client, db v1alpha1.Database, project Project) error {
 	if err := createIfAbsent(ctx, c, Suffixed(db.UID, SecretSuperuser), func(password string) (*corev1.Secret, error) {
 		data, err := superuserData(db.Spec.Engine, password)
+		if err == nil && db.Spec.Engine == v1alpha1.DatabaseEngineMySQL && restored(db) {
+			data, err = sourceUsers(ctx, c, db.Spec.Restore.SourceUID)
+		}
 		return EngineSecret(Suffixed(db.UID, SecretSuperuser), db, project, data, nil), err
 	}); err != nil {
 		return err
@@ -222,4 +227,32 @@ func EnsureAdminCopy(ctx context.Context, c client.Client, db v1alpha1.Database,
 		return err
 	}
 	return ssa.Apply(ctx, c, AdminCopy(db, project, state.Password, host, port), v1alpha1.DatabaseFieldManager)
+}
+
+var ErrSourceUsersGone = errors.New("the system passwords of the source database are gone")
+
+func SourceUsers(ctx context.Context, c client.Reader, sourceUID string) (map[string][]byte, bool, error) {
+	for _, name := range []string{Suffixed(types.UID(sourceUID), SecretSuperuser), TombstoneName(types.UID(sourceUID))} {
+		var secret corev1.Secret
+		err := c.Get(ctx, client.ObjectKey{Namespace: PlatformNamespace, Name: name}, &secret)
+		if err == nil {
+			return secret.Data, true, nil
+		}
+		if !apierrors.IsNotFound(err) {
+			return nil, false, err
+		}
+	}
+	return nil, false, nil
+}
+
+func sourceUsers(ctx context.Context, c client.Reader, sourceUID string) (map[string]string, error) {
+	raw, found, err := SourceUsers(ctx, c, sourceUID)
+	if err != nil || !found {
+		return nil, errors.Join(err, ErrSourceUsersGone)
+	}
+	data := make(map[string]string, len(raw))
+	for key, value := range raw {
+		data[key] = string(value)
+	}
+	return data, nil
 }

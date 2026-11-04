@@ -171,7 +171,9 @@ To restore, set `spec.restore.sourceUID` to the UID of the source database. Add 
 
 When you delete a database, the operator leaves the ConfigMap `tombstone-<uid>` in `bedrock-dbaas`.
 The annotation `bedrock.cloudyfolks.io/delete-after` holds the time.
-The sweeper deletes the prefix and the ConfigMap after `database.backup.retention-after-delete`.
+For MySQL it also keeps the Secret `tombstone-<uid>` with the system passwords of the database, because a MySQL restore must start with the passwords of its source.
+A MySQL restore whose source has neither a live superuser Secret nor this Secret is refused with `RestoreSourceEmpty`.
+The sweeper deletes the prefix, the ConfigMap and the Secret after `database.backup.retention-after-delete`.
 
 ## Quota and capacity
 

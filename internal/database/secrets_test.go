@@ -2,6 +2,7 @@ package database
 
 import (
 	"context"
+	"errors"
 	"net/url"
 	"strings"
 	"testing"
@@ -151,5 +152,30 @@ func TestAdminURIEscapesUnusualCharacters(t *testing.T) {
 	}
 	if password, _ := parsed.User.Password(); password != "p@ss/word:1" || parsed.Host != "10.0.0.1:5432" {
 		t.Fatalf("uri %s", uri)
+	}
+}
+
+func TestARestoredMySQLDatabaseTakesTheSystemPasswordsOfItsSource(t *testing.T) {
+	c := startEnv(t)
+	ctx := context.Background()
+	users := map[string][]byte{"root": []byte("source-root"), "operator": []byte("source-operator")}
+	for name, kept := range map[string]string{"live": Suffixed("live-uid", SecretSuperuser), "deleted": TombstoneName("deleted-uid")} {
+		create(t, c, &corev1.Secret{ObjectMeta: metav1.ObjectMeta{Name: kept, Namespace: PlatformNamespace}, Data: users})
+		db, project := storedDatabase(t, c, func(db *v1alpha1.Database) {
+			db.Spec.Engine = v1alpha1.DatabaseEngineMySQL
+			db.Spec.Restore = &v1alpha1.DatabaseRestore{SourceUID: name + "-uid"}
+		})
+		must(t, EnsureEngineSecrets(ctx, c, *db, project))
+		got := getSecret(t, c, PlatformNamespace, Suffixed(db.UID, SecretSuperuser))
+		if string(got.Data["root"]) != "source-root" || string(got.Data["operator"]) != "source-operator" || len(got.Data) != 2 {
+			t.Errorf("%s source: superuser %v", name, got.Data)
+		}
+	}
+	gone, project := storedDatabase(t, c, func(db *v1alpha1.Database) {
+		db.Spec.Engine = v1alpha1.DatabaseEngineMySQL
+		db.Spec.Restore = &v1alpha1.DatabaseRestore{SourceUID: "gone-uid"}
+	})
+	if err := EnsureEngineSecrets(ctx, c, *gone, project); !errors.Is(err, ErrSourceUsersGone) {
+		t.Fatalf("err %v", err)
 	}
 }

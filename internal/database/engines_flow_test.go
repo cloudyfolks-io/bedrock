@@ -7,9 +7,11 @@ import (
 	"time"
 
 	appsv1 "k8s.io/api/apps/v1"
+	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/apimachinery/pkg/types"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
@@ -307,7 +309,11 @@ func TestAMySQLRestoreStartsOnAReadyClusterAndHoldsTheDatabaseUntilItSucceeds(t 
 	setAddon(t, w.c, "percona-ps", true)
 	w.addVersion(v1alpha1.DatabaseVersionSpec{Engine: "mysql", Major: "8.4", Image: mysqlImage, Port: 3306, Enabled: true, Companions: map[string]string{"haproxy": haproxyPercona}})
 	w.s3.put(source+"/db-"+source+"-2026-11-04-15:14:24-full/xtrabackup_checkpoints", 10)
+	create(t, w.c, &corev1.Secret{ObjectMeta: metav1.ObjectMeta{Name: TombstoneName(types.UID(source)), Namespace: PlatformNamespace}, Data: map[string][]byte{"root": []byte("source-root")}})
 	w.reconcile()
+	if root := getSecret(t, w.c, PlatformNamespace, Suffixed(w.db.UID, SecretSuperuser)).Data["root"]; string(root) != "source-root" {
+		t.Fatalf("the restore target has its own root password %q", root)
+	}
 	if _, found := w.mysqlRestore(); found || w.phase() != "Restoring" {
 		t.Fatalf("restore made before the cluster was ready: %v, phase %s", found, w.phase())
 	}

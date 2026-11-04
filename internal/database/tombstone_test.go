@@ -6,6 +6,7 @@ import (
 	"time"
 
 	corev1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	"github.com/cloudyfolks-io/bedrock/api/v1alpha1"
@@ -157,5 +158,29 @@ func TestPurgeWaitsWhileADatabaseStillRestoresFromThePrefix(t *testing.T) {
 	must(t, PurgeBackups(ctx, c, store, cfg, now))
 	if fake.has(string(gone.UID) + "/base/1") {
 		t.Fatal("the prefix stayed after the restore finished")
+	}
+}
+
+func TestADeletedMySQLDatabaseKeepsItsSystemPasswordsUntilThePurge(t *testing.T) {
+	c, _, store, cfg := purgeWorld(t)
+	ctx := context.Background()
+	db, project := storedDatabase(t, c, func(db *v1alpha1.Database) { db.Spec.Engine = v1alpha1.DatabaseEngineMySQL })
+	users := map[string][]byte{"root": []byte("r"), "operator": []byte("o")}
+	create(t, c, &corev1.Secret{ObjectMeta: metav1.ObjectMeta{Name: Suffixed(db.UID, SecretSuperuser), Namespace: PlatformNamespace}, Data: users})
+	now := mustTime("2026-10-19T12:00:00Z")
+	must(t, EnsureTombstone(ctx, c, *db, project, time.Hour, now))
+	must(t, EnsureTombstoneUsers(ctx, c, *db, project))
+	kept, found, err := SourceUsers(ctx, c, string(db.UID))
+	must(t, err)
+	if !found || string(kept["operator"]) != "o" {
+		t.Fatalf("kept %v found %v", kept, found)
+	}
+	must(t, c.Delete(ctx, &corev1.Secret{ObjectMeta: metav1.ObjectMeta{Name: Suffixed(db.UID, SecretSuperuser), Namespace: PlatformNamespace}}))
+	if _, found, _ := SourceUsers(ctx, c, string(db.UID)); !found {
+		t.Fatal("the passwords went with the engine objects")
+	}
+	must(t, PurgeBackups(ctx, c, store, cfg, now.Add(time.Hour)))
+	if _, found, _ := SourceUsers(ctx, c, string(db.UID)); found {
+		t.Fatal("the passwords outlived the purge")
 	}
 }

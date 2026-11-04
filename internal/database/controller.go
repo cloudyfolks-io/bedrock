@@ -120,6 +120,9 @@ func (r *Reconciler) finalize(ctx context.Context, db v1alpha1.Database) (ctrl.R
 	if err := EnsureTombstone(ctx, r.Client, db, project, cfg.RetentionAfterDelete, r.now()); err != nil {
 		return ctrl.Result{}, fmt.Errorf("leave the tombstone: %w", err)
 	}
+	if err := EnsureTombstoneUsers(ctx, r.Client, db, project); err != nil {
+		return ctrl.Result{}, fmt.Errorf("keep the system passwords: %w", err)
+	}
 	if err := DeleteProxySecret(ctx, r.Client, db); err != nil {
 		return ctrl.Result{}, fmt.Errorf("delete the proxy certificate: %w", err)
 	}
