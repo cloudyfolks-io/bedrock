@@ -11,6 +11,7 @@ import (
 const (
 	AdminUser       = "dbadmin"
 	DefaultDatabase = "app"
+	LabelBackupOf   = "bedrock.cloudyfolks.io/backup-of"
 )
 
 type Spec struct {

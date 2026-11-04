@@ -34,6 +34,9 @@
         ],
         "storages": {
           "rgw": {
+            "labels": {
+              "bedrock.cloudyfolks.io/backup-of": "0b0c0d0e-1111-4222-8333-444455556666"
+            },
             "resources": {
               "requests": {
                 "cpu": "100m",

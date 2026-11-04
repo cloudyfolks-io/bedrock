@@ -163,6 +163,7 @@ func withDadehatDifferences(objects []*unstructured.Unstructured) []*unstructure
 		unstructured.RemoveNestedField(obj.Object, "spec", "enableVolumeExpansion")
 		unstructured.RemoveNestedField(obj.Object, "spec", "initContainer")
 		unstructured.RemoveNestedField(obj.Object, "spec", "backup", "storages", StorageName, "resources")
+		unstructured.RemoveNestedField(obj.Object, "spec", "backup", "storages", StorageName, "labels")
 		unstructured.RemoveNestedField(obj.Object, "spec", "proxy", "haproxy", "resources")
 		unstructured.RemoveNestedField(obj.Object, "spec", "proxy", "haproxy", "sidecarResources")
 		if enabled, found, _ := unstructured.NestedBool(obj.Object, "spec", "proxy", "haproxy", "enabled"); found && !enabled {
@@ -456,5 +457,13 @@ func TestEveryOperatorContainerHasRequests(t *testing.T) {
 		if !found || requests["cpu"] == "" || requests["memory"] == "" {
 			t.Errorf("%v has no requests; the databases quota refuses the pod", path)
 		}
+	}
+}
+
+func TestBackupJobsCarryTheLabelTheEnginePolicyLetsIn(t *testing.T) {
+	cluster := clusterOf(t, mustRender(t, bedrockSpec()))
+	labels, _, _ := unstructured.NestedStringMap(cluster, "spec", "backup", "storages", StorageName, "labels")
+	if labels[engine.LabelBackupOf] != testUID {
+		t.Fatalf("backup job labels %v; the job cannot reach the xtrabackup sidecar without them", labels)
 	}
 }

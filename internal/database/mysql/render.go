@@ -163,6 +163,7 @@ func backupBlock(s engine.Spec) map[string]any {
 			"type":      "s3",
 			"s3":        s3Block(s.Backup, s.BackupID),
 			"resources": sidecarRequests(),
+			"labels":    map[string]any{engine.LabelBackupOf: s.Name},
 		}},
 		"schedule": []any{map[string]any{
 			"name": "daily", "schedule": "0 2 * * *", "keep": int64(s.Backup.RetentionDays), "storageName": StorageName,

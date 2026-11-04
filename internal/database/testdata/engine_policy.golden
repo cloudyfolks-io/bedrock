@@ -16,6 +16,13 @@
                   "app.kubernetes.io/instance": "db-0b0c0d0e-1111-4222-8333-444455556666"
                 }
               }
+            },
+            {
+              "podSelector": {
+                "matchLabels": {
+                  "bedrock.cloudyfolks.io/backup-of": "db-0b0c0d0e-1111-4222-8333-444455556666"
+                }
+              }
             }
           ]
         }

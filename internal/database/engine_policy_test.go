@@ -7,6 +7,7 @@ import (
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 
 	"github.com/cloudyfolks-io/bedrock/api/v1alpha1"
+	"github.com/cloudyfolks-io/bedrock/internal/database/engine"
 )
 
 func TestTheEngineNetworkPolicySelectsEveryEngineByRole(t *testing.T) {
@@ -24,6 +25,10 @@ func TestTheEngineNetworkPolicySelectsEveryEngineByRole(t *testing.T) {
 	peer := from[0].(map[string]any)["from"].([]any)[0].(map[string]any)["podSelector"].(map[string]any)
 	if labels := peer["matchLabels"].(map[string]any); labels[LabelInstance] != "db-u1" || len(labels) != 1 || peer["matchExpressions"] != nil {
 		t.Fatalf("peers of one database %v", peer)
+	}
+	backups := from[0].(map[string]any)["from"].([]any)[1].(map[string]any)["podSelector"].(map[string]any)["matchLabels"].(map[string]any)
+	if backups[engine.LabelBackupOf] != "db-u1" || len(backups) != 1 {
+		t.Fatalf("the backup jobs of one database are not let in: %v", backups)
 	}
 }
 

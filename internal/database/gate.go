@@ -14,6 +14,7 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 
 	"github.com/cloudyfolks-io/bedrock/api/v1alpha1"
+	"github.com/cloudyfolks-io/bedrock/internal/database/engine"
 )
 
 const annotationConfigHash = "bedrock.cloudyfolks.io/config-hash"
@@ -114,9 +115,10 @@ func EnginePolicyObject(db v1alpha1.Database) (*unstructured.Unstructured, error
 		Spec: networkingv1.NetworkPolicySpec{
 			PodSelector: metav1.LabelSelector{MatchLabels: map[string]string{LabelInstance: uid, LabelRole: RoleEngine}},
 			PolicyTypes: []networkingv1.PolicyType{networkingv1.PolicyTypeIngress},
-			Ingress: []networkingv1.NetworkPolicyIngressRule{{From: []networkingv1.NetworkPolicyPeer{{
-				PodSelector: &metav1.LabelSelector{MatchLabels: map[string]string{LabelInstance: uid}},
-			}}}},
+			Ingress: []networkingv1.NetworkPolicyIngressRule{{From: []networkingv1.NetworkPolicyPeer{
+				{PodSelector: &metav1.LabelSelector{MatchLabels: map[string]string{LabelInstance: uid}}},
+				{PodSelector: &metav1.LabelSelector{MatchLabels: map[string]string{engine.LabelBackupOf: uid}}},
+			}}},
 		},
 	})
 }
