@@ -145,6 +145,9 @@ func TestRenderEqualsTheDadehatGolden(t *testing.T) {
 
 func withDadehatDifferences(objects []*unstructured.Unstructured) []*unstructured.Unstructured {
 	for _, obj := range objects {
+		if obj.GetKind() == "Service" {
+			_ = unstructured.SetNestedField(obj.Object, "mysql", "spec", "selector", componentLabel)
+		}
 		if obj.GetKind() == RestoreGVK.Kind {
 			obj.SetAPIVersion("ps.percona.com/v1alpha1")
 		}
@@ -224,7 +227,7 @@ func TestRenderServiceSelectsThePrimary(t *testing.T) {
 	service := objs[len(objs)-1]
 	selector, _, _ := unstructured.NestedStringMap(service.Object, "spec", "selector")
 	want := map[string]string{
-		"app.kubernetes.io/instance": testUID, "app.kubernetes.io/component": "mysql", "mysql.percona.com/primary": "true",
+		"app.kubernetes.io/instance": testUID, "app.kubernetes.io/component": "database", "mysql.percona.com/primary": "true",
 	}
 	if len(selector) != len(want) {
 		t.Fatalf("selector %v", selector)

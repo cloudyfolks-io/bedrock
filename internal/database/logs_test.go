@@ -79,7 +79,7 @@ func TestLogsReadTheEngineContainerOfThePrimaryPod(t *testing.T) {
 		recorder := &logRecorder{body: "line one\nline two\n"}
 		pod := logPod("uid-1-1", "db-uid-1", true)
 		if kind == v1alpha1.DatabaseEngineMySQL {
-			pod.Labels = map[string]string{"app.kubernetes.io/instance": "db-uid-1", "app.kubernetes.io/component": "mysql", "mysql.percona.com/primary": "true"}
+			pod.Labels = map[string]string{"app.kubernetes.io/instance": "db-uid-1", "app.kubernetes.io/component": "database", "mysql.percona.com/primary": "true"}
 		}
 		response := callLogs(Logs(recorder.source), logsClient(t, kind, pod), "orders", http.MethodGet, "")
 		if response.Code != http.StatusOK || response.Body.String() != "line one\nline two\n" || !strings.HasPrefix(response.Header().Get("Content-Type"), "text/plain") {

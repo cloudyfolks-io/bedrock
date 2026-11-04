@@ -236,7 +236,7 @@ func Render(s engine.Spec) ([]*unstructured.Unstructured, error) {
 
 func ServiceSelector(name string) map[string]string {
 	return map[string]string{
-		"app.kubernetes.io/instance": name, componentLabel: "mysql", "mysql.percona.com/primary": "true",
+		"app.kubernetes.io/instance": name, componentLabel: "database", "mysql.percona.com/primary": "true",
 	}
 }
 
@@ -297,7 +297,7 @@ func Target(namespace, name string) exec.Target {
 	script := `MYSQL_PWD="$(cat ` + rootPasswordFile + `)" exec env LC_ALL=C mysql --no-defaults --socket=` + socketPath + ` -uroot --batch --raw --skip-column-names --default-character-set=utf8mb4`
 	return exec.Target{
 		Namespace: namespace,
-		Selector:  client.MatchingLabels{"app.kubernetes.io/instance": name, "app.kubernetes.io/component": "mysql", "mysql.percona.com/primary": "true"},
+		Selector:  client.MatchingLabels(ServiceSelector(name)),
 		Container: "mysql",
 		Command:   []string{"sh", "-c", script},
 		Classify:  func(stderr string) exec.Kind { return engine.KindOf(Classify(stderr)) },
