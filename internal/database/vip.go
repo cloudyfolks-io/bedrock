@@ -18,7 +18,10 @@ import (
 	"github.com/cloudyfolks-io/bedrock/api/v1alpha1"
 )
 
-const annotationKubeVIP = "kube-vip.io/loadbalancerIPs"
+const (
+	annotationKubeVIP          = "kube-vip.io/loadbalancerIPs"
+	annotationKubeVIPInterface = "kube-vip.io/serviceInterface"
+)
 
 var (
 	ErrVIPRangeMissing = errors.New("the Setting database.vip-range is empty")
@@ -77,15 +80,19 @@ func TakenVIPs(ctx context.Context, live client.Reader) (map[netip.Addr]bool, er
 	return taken, nil
 }
 
-func VIPService(db v1alpha1.Database, project Project, vip string, port int) (*unstructured.Unstructured, error) {
+func VIPService(db v1alpha1.Database, project Project, vip, iface string, port int) (*unstructured.Unstructured, error) {
 	if _, err := netip.ParseAddr(vip); err != nil || !validPort(port) {
 		return nil, fmt.Errorf("the gate address needs a valid IP and port")
+	}
+	annotations := map[string]string{annotationKubeVIP: vip}
+	if iface != "" {
+		annotations[annotationKubeVIPInterface] = iface
 	}
 	service, err := toUnstructured(&corev1.Service{
 		TypeMeta: metav1.TypeMeta{APIVersion: "v1", Kind: "Service"},
 		ObjectMeta: metav1.ObjectMeta{
 			Name: VIPName(db.UID), Namespace: PlatformNamespace,
-			Annotations: map[string]string{annotationKubeVIP: vip},
+			Annotations: annotations,
 		},
 		Spec: corev1.ServiceSpec{
 			Type:                  corev1.ServiceTypeLoadBalancer,
@@ -112,7 +119,17 @@ func (a *Allocator) EnsureVIP(ctx context.Context, c client.Client, live client.
 	found := err == nil
 	if found {
 		if address := strings.TrimSpace(existing.Annotations[annotationKubeVIP]); address != "" {
-			return address, nil
+			if existing.Annotations[annotationKubeVIPInterface] == cfg.VIPInterface || existing.Labels[LabelInstance] != Name(db.UID) {
+				return address, nil
+			}
+			service, err := VIPService(db, project, address, cfg.VIPInterface, port)
+			if err != nil {
+				return "", err
+			}
+			if err := c.Delete(ctx, &existing); client.IgnoreNotFound(err) != nil {
+				return "", err
+			}
+			return address, c.Create(ctx, service, client.FieldOwner(v1alpha1.DatabaseFieldManager))
 		}
 		if existing.Labels[LabelInstance] != Name(db.UID) {
 			return "", ErrVIPNameTaken
@@ -132,7 +149,7 @@ func (a *Allocator) EnsureVIP(ctx context.Context, c client.Client, live client.
 	if err != nil {
 		return "", err
 	}
-	service, err := VIPService(db, project, vip, port)
+	service, err := VIPService(db, project, vip, cfg.VIPInterface, port)
 	if err != nil {
 		return "", err
 	}
@@ -141,7 +158,9 @@ func (a *Allocator) EnsureVIP(ctx context.Context, c client.Client, live client.
 		if existing.Annotations == nil {
 			existing.Annotations = map[string]string{}
 		}
-		existing.Annotations[annotationKubeVIP] = vip
+		for key, value := range service.GetAnnotations() {
+			existing.Annotations[key] = value
+		}
 		return vip, c.Patch(ctx, &existing, client.MergeFrom(before), client.FieldOwner(v1alpha1.DatabaseFieldManager))
 	}
 	if err := c.Create(ctx, service, client.FieldOwner(v1alpha1.DatabaseFieldManager)); err != nil {

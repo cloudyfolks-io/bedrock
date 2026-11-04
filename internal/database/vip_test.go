@@ -69,12 +69,12 @@ func TestServiceAddressesCoverEveryWayToHoldAnAddress(t *testing.T) {
 }
 
 func TestVIPServiceGolden(t *testing.T) {
-	service, err := VIPService(goldenDatabase(), goldenProject(), "100.66.16.2", 5432)
+	service, err := VIPService(goldenDatabase(), goldenProject(), "100.66.16.2", "", 5432)
 	if err != nil {
 		t.Fatal(err)
 	}
 	goldenList(t, "vip_service", []*unstructured.Unstructured{service})
-	if _, err := VIPService(goldenDatabase(), goldenProject(), "nonsense", 5432); err == nil {
+	if _, err := VIPService(goldenDatabase(), goldenProject(), "nonsense", "", 5432); err == nil {
 		t.Fatal("a bad address was accepted")
 	}
 }
@@ -173,5 +173,53 @@ func TestEnsureVIPWithoutARangeIsRefusedAndMakesNoService(t *testing.T) {
 	var service corev1.Service
 	if err := c.Get(context.Background(), client.ObjectKey{Namespace: PlatformNamespace, Name: VIPName(db.UID)}, &service); err == nil {
 		t.Fatal("a service was made without a range")
+	}
+}
+
+func TestVIPServiceAnnouncesOnTheInterfaceOnlyWhenSet(t *testing.T) {
+	with, err := VIPService(goldenDatabase(), goldenProject(), "100.66.16.2", "br-public.20", 5432)
+	must(t, err)
+	if got := with.GetAnnotations()[annotationKubeVIPInterface]; got != "br-public.20" {
+		t.Fatalf("interface annotation %q", got)
+	}
+	without, err := VIPService(goldenDatabase(), goldenProject(), "100.66.16.2", "", 5432)
+	must(t, err)
+	if _, found := without.GetAnnotations()[annotationKubeVIPInterface]; found {
+		t.Fatal("the interface annotation is set for an empty Setting")
+	}
+}
+
+func TestEnsureVIPRecreatesTheServiceWhenTheInterfaceChanges(t *testing.T) {
+	c := startEnv(t)
+	ctx := context.Background()
+	ensurePlatformNamespace(t, c)
+	cfg := vipConfig(t, "100.80.0.0/24")
+	db, project := storedDatabase(t, c, nil)
+	a := &Allocator{}
+	key := client.ObjectKey{Namespace: PlatformNamespace, Name: VIPName(db.UID)}
+
+	vip, err := a.EnsureVIP(ctx, c, c, cfg, *db, project, 5432)
+	must(t, err)
+	var before corev1.Service
+	must(t, c.Get(ctx, key, &before))
+	if _, found := before.Annotations[annotationKubeVIPInterface]; found {
+		t.Fatal("the interface annotation is set for an empty Setting")
+	}
+
+	cfg.VIPInterface = "br-services"
+	again, err := a.EnsureVIP(ctx, c, c, cfg, *db, project, 5432)
+	must(t, err)
+	var after corev1.Service
+	must(t, c.Get(ctx, key, &after))
+	if again != vip || after.Annotations[annotationKubeVIP] != vip || after.Annotations[annotationKubeVIPInterface] != "br-services" || after.UID == before.UID {
+		t.Fatalf("address %s then %s, annotations %v, same object %v", vip, again, after.Annotations, after.UID == before.UID)
+	}
+
+	_, err = a.EnsureVIP(ctx, c, c, cfg, *db, project, 5432)
+	must(t, err)
+	var stable corev1.Service
+	must(t, c.Get(ctx, key, &stable))
+	if stable.UID != after.UID {
+		t.Fatal("an unchanged Setting recreated the Service")
 	}
 }

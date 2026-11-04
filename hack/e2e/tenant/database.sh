@@ -60,7 +60,9 @@ database_prepare() {
     return 1
   fi
   database_setting database.enabled true
+  ip addr replace 203.0.112.2/22 dev br-services
   database_setting database.vip-range "$E2E_DATABASE_VIP_RANGE"
+  database_setting database.vip-interface br-services
   kubectl patch addon cnpg --type merge -p '{"spec":{"enabled":true}}'
   wait_condition 900 addon cnpg Ready True
   wait_not_empty 120 get databaseversion postgresql-17 -o jsonpath='{.spec.image}'

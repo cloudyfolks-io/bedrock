@@ -136,7 +136,7 @@ The engine pods are in `bedrock-dbaas`. A pod in a tenant subnet cannot reach th
 The operator builds a path of three hops.
 
 1. A proxy pod in the project subnet. It is a Deployment named `<name>-endpoint` with one replica, a pinned address and the Kata runtime class (the Setting `container.runtime-class`). A SecurityGroup named `database-<first 8 characters of the UID>` allows the engine port from `allowedCIDRs`.
-2. A mutual TLS link from the proxy to a kube-vip address. The address comes from `database.vip-range`. The Service is `<uid>-vip` with the annotation `kube-vip.io/loadbalancerIPs`.
+2. A mutual TLS link from the proxy to a kube-vip address. The address comes from `database.vip-range`. The Service is `<uid>-vip` with the annotation `kube-vip.io/loadbalancerIPs`. When `database.vip-interface` is set, the Service also has the annotation `kube-vip.io/serviceInterface` with this value, and kube-vip announces the address on this interface. kube-vip reads this annotation only when it adds a Service, so the operator deletes and creates the Service again when the Setting changes.
 3. A gate pod in `bedrock-dbaas`. It ends the TLS and sends plain TCP to the engine. The gate accepts only a client certificate with the common name equal to the UID of its database.
 
 The CA of this path is the ClusterIssuer `bedrock-database-ca`. Only the addon `cnpg` makes it.
@@ -193,6 +193,7 @@ The sweeper deletes the prefix and the ConfigMap after `database.backup.retentio
 | `database.provision-timeout` | `30m` | The time after which a database that is not ready is `Failed`. |
 | `database.exec-timeout` | `120s` | The time limit of one SQL script. |
 | `database.vip-range` | empty | The network of the gate addresses. Empty gives `VIPRangeMissing`. |
+| `database.vip-interface` | empty | The host interface on the services plane where kube-vip announces the gate addresses, for example `br-public.20`. It must exist on the control-plane hosts with an address in the services provider network. Empty announces them on the management interface. |
 | `database.backup.bucket` | `bedrock-database-backups` | The bucket of the backups. |
 | `database.backup.offsite-schedule` | `0 * * * *` | Cron schedule of the copy of the backup bucket to `backup.target`. See [Backup](backup.md). |
 | `database.backup.retention-days` | `7` | Days of backups. |

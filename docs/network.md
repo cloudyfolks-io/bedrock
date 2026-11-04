@@ -351,6 +351,7 @@ Each provider network with the role `services` has an ACL with the direction `to
 It drops traffic when the source and the destination are both in the provider network and both outside the first /24, and outside `database.vip-range`.
 The range is exempt only when it is inside the provider network.
 The database proxy of a tenant reaches its gate address in `database.vip-range` from the identity address, so the ACL must not drop this traffic.
+Set `database.vip-interface` to the host interface on the services plane, so that kube-vip announces the gate addresses there and not on the management interface.
 The identity range is not exempt: traffic between two identity addresses stays dropped, so Networks stay isolated.
 If `database.vip-range` is set and is not inside the provider network with the role `services`, the services plane is not configured and the reason is `ServicesNotConfigured`.
 So guests of different Networks cannot reach each other on the plane, but they can reach the services, and the services can reach them.

@@ -28,6 +28,7 @@ func databaseDefinitions() []Definition {
 		{"database.backup.retention-days-max", "365", "Largest value that a Database may set in backup.retentionDays, from 1 to 365.", intBetween(1, 365)},
 		{"database.backup.retention-after-delete", "168h", "Time that the backups of a deleted database stay in the bucket before the sweeper removes them.", duration(0)},
 		{"database.vip-range", "", "IPv4 CIDR in the services plane that holds the addresses of the database gates, for example 100.66.16.0/21. Empty refuses every create with the reason VIPRangeMissing.", ipv4CIDRValue},
+		{"database.vip-interface", "", "Host interface on the services plane where kube-vip announces the gate addresses, for example br-public.20. It must exist on the control-plane hosts with an address in the services provider network. Empty announces them on the management interface.", interfaceNameValue},
 		{"database.exec-timeout", "120s", "Time limit of one SQL script that the operator runs in an engine pod.", wholeSecondsBetween(5*time.Second, 10*time.Minute)},
 	}
 }
@@ -43,6 +44,15 @@ func ipv4CIDRValue(v string) error {
 		return fmt.Errorf("value %q is not an IPv4 network of at most /29, like 100.66.16.0/21", v)
 	}
 	return nil
+}
+
+var interfaceNamePattern = regexp.MustCompile(`^[A-Za-z0-9._-]{1,15}$`)
+
+func interfaceNameValue(v string) error {
+	if v == "" || interfaceNamePattern.MatchString(v) {
+		return nil
+	}
+	return fmt.Errorf("value %q is not a Linux interface name of 1 to 15 letters, digits, dots, dashes and underscores", v)
 }
 
 func bucketNameValue(v string) error {

@@ -24,6 +24,7 @@ const (
 	keyExecTimeout      = "database.exec-timeout"
 	keyBackupBucket     = "database.backup.bucket"
 	keyVIPRange         = "database.vip-range"
+	keyVIPInterface     = "database.vip-interface"
 	keyRetentionDays    = "database.backup.retention-days"
 	keyRetentionDelete  = "database.backup.retention-after-delete"
 	keyRetentionMin     = "database.backup.retention-days-min"
@@ -32,7 +33,7 @@ const (
 	settingPrefix       = "database."
 )
 
-var configKeys = []string{keyEnabled, keyCapacityCPU, keyCapacityMemory, keyCapacityPods, keyMaxUtilization, keySweeperDryRun, keyProvisionTimeout, keyExecTimeout, keyBackupBucket, keyVIPRange, keyRetentionDays, keyRetentionMin, keyRetentionMax, keyRetentionDelete, keyBackupMaxAge}
+var configKeys = []string{keyEnabled, keyCapacityCPU, keyCapacityMemory, keyCapacityPods, keyMaxUtilization, keySweeperDryRun, keyProvisionTimeout, keyExecTimeout, keyBackupBucket, keyVIPRange, keyVIPInterface, keyRetentionDays, keyRetentionMin, keyRetentionMax, keyRetentionDelete, keyBackupMaxAge}
 
 type Config struct {
 	Enabled              bool
@@ -45,6 +46,7 @@ type Config struct {
 	ExecTimeout          time.Duration
 	BackupBucket         string
 	VIPRange             netip.Prefix
+	VIPInterface         string
 	RetentionDays        int
 	RetentionMin         int
 	RetentionMax         int
@@ -94,6 +96,7 @@ func ParseConfig(values map[string]string) (Config, error) {
 		ExecTimeout:          execTimeout,
 		BackupBucket:         effective[keyBackupBucket],
 		VIPRange:             vipRange,
+		VIPInterface:         effective[keyVIPInterface],
 		RetentionDays:        retentionDays,
 		RetentionMin:         retentionMin,
 		RetentionMax:         retentionMax,

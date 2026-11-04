@@ -435,7 +435,7 @@ func TestAForeignSecurityGroupOfTheDatabaseNameIsLeftAlone(t *testing.T) {
 func TestAnExistingVIPServiceWithoutTheAnnotationIsAdoptedOrReported(t *testing.T) {
 	w := newWorld(t, nil)
 	ctx := context.Background()
-	mine, _ := VIPService(*w.db, Project{Namespace: w.namespace, Tenant: "acme", Name: "web"}, "10.1.1.1", 5432)
+	mine, _ := VIPService(*w.db, Project{Namespace: w.namespace, Tenant: "acme", Name: "web"}, "10.1.1.1", "", 5432)
 	unstructured.RemoveNestedField(mine.Object, "metadata", "annotations")
 	must(t, w.c.Create(ctx, mine))
 	w.reconcile()
