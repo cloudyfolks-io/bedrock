@@ -181,9 +181,10 @@ func sidecarRequests() map[string]any {
 
 func clusterSpec(s engine.Spec) map[string]any {
 	spec := map[string]any{
-		"crVersion":   CRVersion,
-		"secretsName": engine.Named(s.Name, "superuser"),
-		"mysql":       mysqlBlock(s),
+		"crVersion":             CRVersion,
+		"secretsName":           engine.Named(s.Name, "superuser"),
+		"mysql":                 mysqlBlock(s),
+		"enableVolumeExpansion": true,
 	}
 	if image := s.Images[ImageInit]; image != "" {
 		spec["initContainer"] = map[string]any{"image": image}

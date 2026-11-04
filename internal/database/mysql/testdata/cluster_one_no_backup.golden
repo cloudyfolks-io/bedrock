@@ -16,6 +16,7 @@
     },
     "spec": {
       "crVersion": "1.2.0",
+      "enableVolumeExpansion": true,
       "initContainer": {
         "image": "docker.io/percona/percona-server-mysql-operator:1.2.0@sha256:cc"
       },

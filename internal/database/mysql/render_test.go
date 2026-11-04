@@ -160,6 +160,7 @@ func withDadehatDifferences(objects []*unstructured.Unstructured) []*unstructure
 		unstructured.RemoveNestedField(obj.Object, "spec", "proxy", "router")
 		unstructured.RemoveNestedField(obj.Object, "spec", "proxy", "haproxy", "labels")
 		unstructured.RemoveNestedField(obj.Object, "spec", "backup", "resources")
+		unstructured.RemoveNestedField(obj.Object, "spec", "enableVolumeExpansion")
 		unstructured.RemoveNestedField(obj.Object, "spec", "initContainer")
 		unstructured.RemoveNestedField(obj.Object, "spec", "backup", "storages", StorageName, "resources")
 		unstructured.RemoveNestedField(obj.Object, "spec", "proxy", "haproxy", "resources")
@@ -191,6 +192,7 @@ func TestRenderClusterRules(t *testing.T) {
 		`"secretsName":"` + testUID + `-superuser"`, `"prefix":"` + testUID + `"`, `"storageName":"rgw"`,
 		`"schedule":"0 2 * * *"`, `"keep":7`, `"crVersion":"1.2.0"`,
 		`"initContainer":{"image":"docker.io/percona/percona-server-mysql-operator:1.2.0@sha256:cc"}`,
+		`"enableVolumeExpansion":true`,
 		`"toolkit":{"image":"docker.io/percona/percona-toolkit:3.7.1-4@sha256:dd"}`,
 		`"image":"docker.io/percona/percona-xtrabackup:8.4.0-6.1@sha256:aa"`,
 	} {
