@@ -149,7 +149,7 @@ objectstorage_quota() {
   kubectl -n "$NS" patch objectstoragebucket data --type merge -p '{"spec":{"quota":{"bytes":"1Mi"}}}'
   wait_jsonpath 300 1048576/0 -n "$NS" get objectstoragebucket data -o jsonpath="$applied_quota_annotation"
   wait_condition 300 objectstoragebucket data QuotaApplied True -n "$NS"
-  expect_refused QuotaExceeded s3_put writer "s3://$NS-data/big.bin" "$over_quota"
+  S3_DEBUG=1 expect_refused QuotaExceeded s3_put writer "s3://$NS-data/big.bin" "$over_quota"
   kubectl -n "$NS" patch objectstoragebucket data --type merge -p '{"spec":{"quota":null}}'
   wait_jsonpath 300 "" -n "$NS" get objectstoragebucket data -o jsonpath="$applied_quota_annotation"
   retry_until 120 s3_put writer "s3://$NS-data/big.bin" "$over_quota"
