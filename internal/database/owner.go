@@ -82,6 +82,13 @@ func InstanceSelector(db v1alpha1.Database) client.MatchingLabels {
 	return client.MatchingLabels{LabelManagedBy: ManagedBy, LabelInstance: Name(db.UID)}
 }
 
+func engineSelector(db v1alpha1.Database, gvk schema.GroupVersionKind) client.MatchingLabels {
+	if gvk == SecretGVK {
+		return client.MatchingLabels{LabelInstance: Name(db.UID)}
+	}
+	return InstanceSelector(db)
+}
+
 func OwnerExists(c client.Reader) func(context.Context, platform.Owner) (bool, error) {
 	return func(ctx context.Context, owner platform.Owner) (bool, error) {
 		if owner.Kind != Kind || owner.UID == "" {
@@ -125,7 +132,7 @@ func EngineObjects(ctx context.Context, c client.Reader, db v1alpha1.Database) (
 	for _, gvk := range EngineGVKs() {
 		list := &unstructured.UnstructuredList{}
 		list.SetGroupVersionKind(gvk.GroupVersion().WithKind(gvk.Kind + "List"))
-		err := c.List(ctx, list, client.InNamespace(PlatformNamespace), InstanceSelector(db))
+		err := c.List(ctx, list, client.InNamespace(PlatformNamespace), engineSelector(db, gvk))
 		if meta.IsNoMatchError(err) {
 			continue
 		}

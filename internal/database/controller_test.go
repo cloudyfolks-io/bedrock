@@ -8,6 +8,7 @@ import (
 	"k8s.io/apimachinery/pkg/api/meta"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/types"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
@@ -186,5 +187,30 @@ func TestDeleteDoesNotTakeASecretOfTheProxyNameThatTheDatabaseDoesNotOwn(t *test
 	must(t, DeleteProxySecret(ctx, w.c, *w.db))
 	if !exists(w.c, taken) {
 		t.Fatal("a Secret without the instance label was deleted")
+	}
+}
+
+func TestDeleteRemovesTheSecretsAnEngineOperatorMadeAndLeavesOtherDatabases(t *testing.T) {
+	w := newWorld(t, nil)
+	ctx := context.Background()
+	w.bringUp()
+	operatorLabels := func(uid types.UID) map[string]string {
+		return map[string]string{LabelInstance: Name(uid), LabelManagedBy: "percona-server-mysql-operator"}
+	}
+	root := &corev1.Secret{ObjectMeta: metav1.ObjectMeta{Name: Name(w.db.UID) + "-psuser-root", Namespace: PlatformNamespace, Labels: operatorLabels(w.db.UID)}}
+	other := &corev1.Secret{ObjectMeta: metav1.ObjectMeta{Name: "db-other-psuser-root", Namespace: PlatformNamespace, Labels: operatorLabels("other")}}
+	for _, secret := range []*corev1.Secret{root, other} {
+		create(t, w.c, secret)
+	}
+	must(t, w.c.Delete(ctx, w.db))
+	for i := 0; i < 2; i++ {
+		_, err := w.r.Reconcile(ctx, ctrl.Request{NamespacedName: client.ObjectKeyFromObject(w.db)})
+		must(t, err)
+	}
+	if exists(w.c, root) {
+		t.Fatal("the root secret of the operator outlived the database")
+	}
+	if !exists(w.c, other) {
+		t.Fatal("the delete removed a secret of another database")
 	}
 }

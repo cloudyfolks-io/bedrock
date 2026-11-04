@@ -157,6 +157,7 @@ func withDadehatDifferences(objects []*unstructured.Unstructured) []*unstructure
 			continue
 		}
 		obj.SetAPIVersion("ps.percona.com/v1alpha1")
+		obj.SetFinalizers(nil)
 		unstructured.RemoveNestedField(obj.Object, "spec", "proxy", "router")
 		unstructured.RemoveNestedField(obj.Object, "spec", "proxy", "haproxy", "labels")
 		unstructured.RemoveNestedField(obj.Object, "spec", "backup", "resources")
@@ -477,5 +478,18 @@ func TestRestoreHealthWaitsForASucceededRestore(t *testing.T) {
 	}
 	if RestoreHealth(nil).Ready {
 		t.Error("a restore that was not made yet counts as done")
+	}
+}
+
+func TestTheClusterAsksTheOperatorToDeleteItsVolumesSecretsAndCertificates(t *testing.T) {
+	var cluster *unstructured.Unstructured
+	for _, obj := range mustRender(t, bedrockSpec()) {
+		if obj.GetKind() == ClusterGVK.Kind {
+			cluster = obj
+		}
+	}
+	got := strings.Join(cluster.GetFinalizers(), ",")
+	if got != "percona.com/delete-mysql-pvc,percona.com/delete-ssl" {
+		t.Fatalf("finalizers %q; without them the volumes, the root secrets and the certificates outlive the database", got)
 	}
 }

@@ -231,8 +231,11 @@ func Render(s engine.Spec) ([]*unstructured.Unstructured, error) {
 	}
 	out := []*unstructured.Unstructured{{Object: map[string]any{
 		"apiVersion": "ps.percona.com/v1", "kind": ClusterGVK.Kind,
-		"metadata": map[string]any{"name": s.Name, "namespace": s.Namespace, "labels": engine.Labels(s.Labels)},
-		"spec":     clusterSpec(s),
+		"metadata": map[string]any{
+			"name": s.Name, "namespace": s.Namespace, "labels": engine.Labels(s.Labels),
+			"finalizers": []any{"percona.com/delete-mysql-pvc", "percona.com/delete-ssl"},
+		},
+		"spec": clusterSpec(s),
 	}}}
 	if s.Restore != nil {
 		out = append(out, restoreObject(s))

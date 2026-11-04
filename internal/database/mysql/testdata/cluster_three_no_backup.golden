@@ -3,6 +3,10 @@
     "apiVersion": "ps.percona.com/v1",
     "kind": "PerconaServerMySQL",
     "metadata": {
+      "finalizers": [
+        "percona.com/delete-mysql-pvc",
+        "percona.com/delete-ssl"
+      ],
       "labels": {
         "app.kubernetes.io/instance": "0b0c0d0e-1111-4222-8333-444455556666",
         "app.kubernetes.io/managed-by": "bedrock",

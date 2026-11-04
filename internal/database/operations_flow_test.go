@@ -241,6 +241,10 @@ func TestAFlipAfterTheLossOfTheEngineObjectIsRefused(t *testing.T) {
 		primary.SetNamespace(PlatformNamespace)
 		primary.SetName(Name(w.db.UID))
 		must(t, w.c.Delete(ctx, primary))
+		if err := w.c.Get(ctx, client.ObjectKeyFromObject(primary), primary); err == nil {
+			primary.SetFinalizers(nil)
+			must(t, w.c.Update(ctx, primary))
+		}
 		if name == "postgresql" {
 			ha := &v1alpha1.DatabaseClass{ObjectMeta: metav1.ObjectMeta{Name: w.class + "-ha"}, Spec: v1alpha1.DatabaseClassSpec{CPU: resource.MustParse("500m"), Memory: resource.MustParse("1Gi"), MinStorageGi: 5, MaxStorageGi: 100, HighAvailability: true, Enabled: true}}
 			create(t, w.c, ha)
