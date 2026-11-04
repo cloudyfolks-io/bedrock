@@ -149,7 +149,7 @@ database_sslrequest() {
     guest_console_log "$database_probe_vm" >&2 || true
     return 1
   }
-  expect_equal N "$(database_probe_reply)" "answer of the proxy to an SSLRequest"
+  expect_equal S "$(database_probe_reply)" "answer of the engine to an SSLRequest"
   kubectl -n "$NS" delete virtualmachine "$database_probe_vm"
   wait_gone 180 virtualmachine "$database_probe_vm" -n "$NS"
   wait_gone 180 datavolume "$database_probe_vm-root" -n "$NS"

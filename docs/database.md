@@ -144,7 +144,7 @@ A tenant cannot make a cert-manager object.
 
 Limits:
 
-- The customer connects to the address in `status.addresses` with plain TCP. The proxy does not offer TLS to the customer.
+- The customer connects to the address in `status.addresses`. The proxy passes the connection through, and the engine offers TLS with its own certificate. A client with `sslmode=disable` connects with plain TCP.
 - A change of the allowlist or a renewed certificate restarts the proxy or the gate. The connection stops for a short time.
 
 ## Backups and restore
