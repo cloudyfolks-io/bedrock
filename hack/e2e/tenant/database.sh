@@ -502,7 +502,7 @@ database_valkey_user_set() {
 database_mysql_backup_and_restore() {
   local uid restored restored_uid
   uid=$(database_uid sqldb)
-  database_mysql_query "$uid" <<<"CREATE TABLE app.proof (v int); INSERT INTO app.proof VALUES (42);"
+  database_mysql_query "$uid" <<<"CREATE TABLE app.proof (v int PRIMARY KEY); INSERT INTO app.proof VALUES (42);"
   kubectl -n bedrock-dbaas apply -f - <<BACKUP
 apiVersion: ps.percona.com/v1
 kind: PerconaServerMySQLBackup
