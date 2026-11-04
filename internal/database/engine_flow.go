@@ -63,7 +63,7 @@ func readyInstances(kind string, obj *unstructured.Unstructured) int32 {
 func reportedImage(kind string, obj *unstructured.Unstructured) string {
 	switch kind {
 	case v1alpha1.DatabaseEngineMySQL:
-		image, _, _ := unstructured.NestedString(obj.Object, "status", "mysql", "image")
+		image, _, _ := unstructured.NestedString(obj.Object, "spec", "mysql", "image")
 		return image
 	case v1alpha1.DatabaseEngineValkey:
 		containers, _, _ := unstructured.NestedSlice(obj.Object, "spec", "template", "spec", "containers")
