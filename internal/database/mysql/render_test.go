@@ -467,3 +467,15 @@ func TestBackupJobsCarryTheLabelTheEnginePolicyLetsIn(t *testing.T) {
 		t.Fatalf("backup job labels %v; the job cannot reach the xtrabackup sidecar without them", labels)
 	}
 }
+
+func TestRestoreHealthWaitsForASucceededRestore(t *testing.T) {
+	for state, ready := range map[string]bool{"": false, "Starting": false, "Running": false, "Error": false, "Failed": false, "Succeeded": true} {
+		restore := &unstructured.Unstructured{Object: map[string]any{"status": map[string]any{"state": state}}}
+		if got := RestoreHealth(restore); got.Ready != ready || !ready && got.Reason == "" {
+			t.Errorf("state %q gives %+v", state, got)
+		}
+	}
+	if RestoreHealth(nil).Ready {
+		t.Error("a restore that was not made yet counts as done")
+	}
+}

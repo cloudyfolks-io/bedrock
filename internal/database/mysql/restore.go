@@ -10,6 +10,8 @@ import (
 	"time"
 
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+
+	"github.com/cloudyfolks-io/bedrock/internal/database/engine"
 )
 
 const succeededState = "Succeeded"
@@ -78,4 +80,25 @@ func ResolveDestination(ctx context.Context, backups []unstructured.Unstructured
 		return destination, nil
 	}
 	return DiscoverDestination(ctx, lister, bucket, sourceUID)
+}
+
+func RestoreName(cluster string) string { return engine.Named(cluster, "restore") }
+
+func RestoreDestination(obj *unstructured.Unstructured) string {
+	destination, _, _ := unstructured.NestedString(obj.Object, "spec", "backupSource", "destination")
+	return destination
+}
+
+func RestoreHealth(obj *unstructured.Unstructured) engine.Health {
+	if obj == nil {
+		return engine.Health{Reason: "the restore waits for the new cluster"}
+	}
+	state, _, _ := unstructured.NestedString(obj.Object, "status", "state")
+	switch state {
+	case succeededState:
+		return engine.Health{Ready: true}
+	case "Failed", "Error":
+		return engine.Health{Reason: "the restore failed"}
+	}
+	return engine.Health{Reason: "restoring the backup"}
 }

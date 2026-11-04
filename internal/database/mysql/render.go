@@ -211,7 +211,7 @@ func clusterSpec(s engine.Spec) map[string]any {
 func restoreObject(s engine.Spec) *unstructured.Unstructured {
 	return &unstructured.Unstructured{Object: map[string]any{
 		"apiVersion": "ps.percona.com/v1", "kind": RestoreGVK.Kind,
-		"metadata": map[string]any{"name": engine.Named(s.Name, "restore"), "namespace": s.Namespace, "labels": engine.Labels(s.Labels)},
+		"metadata": map[string]any{"name": RestoreName(s.Name), "namespace": s.Namespace, "labels": engine.Labels(s.Labels)},
 		"spec": map[string]any{
 			"clusterName": s.Name,
 			"backupSource": map[string]any{

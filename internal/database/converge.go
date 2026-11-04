@@ -56,6 +56,8 @@ type flow struct {
 	preBackups []*unstructured.Unstructured
 	image      string
 	dest       string
+	cluster    *unstructured.Unstructured
+	restore    *unstructured.Unstructured
 }
 
 func (r *Reconciler) converge(ctx context.Context, cfg Config, project Project, db *v1alpha1.Database) (Observed, error) {
@@ -80,7 +82,7 @@ func (r *Reconciler) prepare(ctx context.Context, in *flow) (*Refusal, error) {
 	if err != nil {
 		return nil, err
 	}
-	in.exists = exists
+	in.exists, in.cluster = exists, cluster
 	catalog, refused, err := resolveCatalog(ctx, r.Live, db)
 	if err != nil || refused != nil {
 		return refused, err
@@ -203,18 +205,37 @@ func (r *Reconciler) prepareBackupStore(ctx context.Context, in *flow) (*Refusal
 }
 
 func (r *Reconciler) prepareRestore(ctx context.Context, in *flow) (*Refusal, error) {
-	if in.exists || in.db.Spec.Restore == nil {
+	if in.db.Spec.Restore == nil || in.db.Annotations[annotationReadyOnce] == "true" {
 		return nil, nil
 	}
-	check, err := LoadRestoreCheck(ctx, r.Live, r.Store, in.cfg, *in.db, r.now())
-	if err != nil {
-		if s3.IsUnavailable(err) {
-			return refusal(ReasonBackupStoreFailed, "the object store is not reachable"), nil
+	if !in.exists {
+		check, err := LoadRestoreCheck(ctx, r.Live, r.Store, in.cfg, *in.db, r.now())
+		if err != nil {
+			if s3.IsUnavailable(err) {
+				return refusal(ReasonBackupStoreFailed, "the object store is not reachable"), nil
+			}
+			return nil, err
 		}
-		return nil, err
+		if refused := CheckRestore(check); refused != nil {
+			return refused, nil
+		}
 	}
-	if refused := CheckRestore(check); refused != nil || in.db.Spec.Engine != v1alpha1.DatabaseEngineMySQL {
-		return refused, nil
+	if in.db.Spec.Engine != v1alpha1.DatabaseEngineMySQL {
+		return nil, nil
+	}
+	return r.prepareMySQLRestore(ctx, in)
+}
+
+func (r *Reconciler) prepareMySQLRestore(ctx context.Context, in *flow) (*Refusal, error) {
+	restore := &unstructured.Unstructured{}
+	restore.SetGroupVersionKind(mysql.RestoreGVK)
+	err := r.Live.Get(ctx, client.ObjectKey{Namespace: PlatformNamespace, Name: mysql.RestoreName(Name(in.db.UID))}, restore)
+	switch {
+	case err == nil:
+		in.restore, in.dest = restore, mysql.RestoreDestination(restore)
+		return nil, nil
+	case !apierrors.IsNotFound(err) && !meta.IsNoMatchError(err):
+		return nil, err
 	}
 	destination, err := r.mysqlDestination(ctx, in.cfg, in.db.Spec.Restore.SourceUID)
 	switch {
@@ -309,18 +330,27 @@ func (r *Reconciler) specOf(in *flow) engine.Spec {
 		Labels:       labels,
 		PodLabels:    podLabels,
 		Backup:       BackupSpecOf(in.cfg, r.Store, db.Spec.Backup),
-		Restore:      restoreOf(db, in.dest),
+		Restore:      restoreOf(in),
 		Images:       in.catalog.Version.Spec.Companions,
 		Suspended:    db.Spec.Suspended,
 	}
 }
 
-func restoreOf(db v1alpha1.Database, destination string) *engine.RestoreSpec {
-	restore := RestoreSpecOf(db)
-	if restore != nil {
-		restore.Destination = destination
+func restoreOf(in *flow) *engine.RestoreSpec {
+	restore := RestoreSpecOf(*in.db)
+	if restore == nil || in.db.Spec.Engine != v1alpha1.DatabaseEngineMySQL {
+		return restore
 	}
+	clusterReady := in.cluster != nil && mysql.Health(in.cluster).Ready
+	if !awaitsRestore(*in.db) || in.dest == "" || in.restore == nil && !clusterReady {
+		return nil
+	}
+	restore.Destination = in.dest
 	return restore
+}
+
+func awaitsRestore(db v1alpha1.Database) bool {
+	return db.Spec.Engine == v1alpha1.DatabaseEngineMySQL && db.Spec.Restore != nil && db.Annotations[annotationReadyOnce] != "true"
 }
 
 func (r *Reconciler) applyEngine(ctx context.Context, in *flow) error {
@@ -505,6 +535,9 @@ func (r *Reconciler) observe(ctx context.Context, in *flow, refused *Refusal) (O
 		return observed, err
 	default:
 		health := healthFor(db.Spec.Engine, primary)
+		if health.Ready && awaitsRestore(*db) {
+			health = mysql.RestoreHealth(in.restore)
+		}
 		observed.EngineReady, observed.EngineReason = health.Ready, health.Reason
 		observed.Instances = readyInstances(db.Spec.Engine, primary)
 	}

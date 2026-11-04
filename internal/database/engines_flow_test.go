@@ -286,3 +286,48 @@ func reconcileUserOf(t *testing.T, c client.Client, engine *fakeEngine, kind str
 func requestOf(object client.Object) ctrl.Request {
 	return ctrl.Request{NamespacedName: client.ObjectKeyFromObject(object)}
 }
+
+func (w *world) mysqlRestore() (*unstructured.Unstructured, bool) {
+	w.t.Helper()
+	restore := &unstructured.Unstructured{}
+	restore.SetGroupVersionKind(mysql.RestoreGVK)
+	err := w.c.Get(context.Background(), client.ObjectKey{Namespace: PlatformNamespace, Name: mysql.RestoreName(Name(w.db.UID))}, restore)
+	if client.IgnoreNotFound(err) != nil {
+		w.t.Fatal(err)
+	}
+	return restore, err == nil
+}
+
+func TestAMySQLRestoreStartsOnAReadyClusterAndHoldsTheDatabaseUntilItSucceeds(t *testing.T) {
+	source := "33333333-4444-5555-6666-777777777777"
+	w := newWorld(t, func(spec *v1alpha1.DatabaseSpec) {
+		spec.Engine, spec.Version = v1alpha1.DatabaseEngineMySQL, "8.4"
+		spec.Restore = &v1alpha1.DatabaseRestore{SourceUID: source}
+	})
+	setAddon(t, w.c, "percona-ps", true)
+	w.addVersion(v1alpha1.DatabaseVersionSpec{Engine: "mysql", Major: "8.4", Image: mysqlImage, Port: 3306, Enabled: true, Companions: map[string]string{"haproxy": haproxyPercona}})
+	w.s3.put(source+"/db-"+source+"-2026-11-04-15:14:24-full/xtrabackup_checkpoints", 10)
+	w.reconcile()
+	if _, found := w.mysqlRestore(); found || w.phase() != "Restoring" {
+		t.Fatalf("restore made before the cluster was ready: %v, phase %s", found, w.phase())
+	}
+	w.setMySQLReady()
+	w.setSecurityGroupReady()
+	w.reconcile()
+	restore, found := w.mysqlRestore()
+	if !found || !strings.HasSuffix(mysql.RestoreDestination(restore), "/"+source+"/db-"+source+"-2026-11-04-15:14:24-full") {
+		t.Fatalf("restore %v found %v", restore, found)
+	}
+	w.setDeploymentReady(PlatformNamespace, GateName(w.db.UID), 1)
+	w.setDeploymentReady(w.namespace, EndpointName(*w.db), 1)
+	w.reconcile()
+	if w.phase() != "Restoring" || w.engine.count("CREATE USER IF NOT EXISTS 'dbadmin'") != 0 {
+		t.Fatalf("phase %s before the restore ended, scripts %v", w.phase(), w.engine.scripts)
+	}
+	must(t, unstructured.SetNestedField(restore.Object, "Succeeded", "status", "state"))
+	must(t, w.c.Status().Update(context.Background(), restore))
+	w.reconcile()
+	if w.phase() != "Ready" || w.engine.count("CREATE USER IF NOT EXISTS 'dbadmin'") == 0 {
+		t.Fatalf("phase %s reason %s after the restore", w.phase(), w.reason())
+	}
+}
