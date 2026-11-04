@@ -24,12 +24,12 @@ var (
 	hashRe  = regexp.MustCompile(`^0x[0-9a-f]{20,400}$`)
 	errnoRe = regexp.MustCompile(`ERROR (\d{4}) \([0-9A-Z]{5}\)`)
 
-	InternalUsers = []string{"operator", "xtrabackup", "monitor", "clustercheck", "proxyadmin", "replication", "orchestrator", "heartbeat"}
+	InternalUsers = []string{"operator", "xtrabackup", "monitor", "replication", "orchestrator", "heartbeat", "clusterset"}
 
 	reservedAccounts = map[string]bool{
 		"root": true, engine.AdminUser: true, "mysql.sys": true, "mysql.session": true, "mysql.infoschema": true,
-		"operator": true, "xtrabackup": true, "monitor": true, "clustercheck": true,
-		"proxyadmin": true, "replication": true, "orchestrator": true, "heartbeat": true,
+		"operator": true, "xtrabackup": true, "monitor": true, "replication": true,
+		"orchestrator": true, "heartbeat": true, "clusterset": true,
 	}
 
 	systemSchemas = map[string]bool{"mysql": true, "sys": true, "information_schema": true, "performance_schema": true}
@@ -265,7 +265,7 @@ func DeleteDatabaseScript(database string, grantees []string) (string, error) {
 
 var ListUsersQuery = queryPreamble() + `SELECT u.user, coalesce(d.db, ''), coalesce(d.Create_priv, ''), coalesce(d.Insert_priv, '')
 FROM mysql.user u LEFT JOIN mysql.db d ON d.user = u.user AND d.host = u.host
-WHERE u.host = '%' AND u.user NOT IN ('dbadmin', 'operator', 'xtrabackup', 'monitor', 'replication', 'orchestrator', 'clustercheck', 'proxyadmin', 'heartbeat', 'mysql.sys', 'mysql.session', 'mysql.infoschema')
+WHERE u.host = '%' AND u.user NOT IN ('dbadmin', 'operator', 'xtrabackup', 'monitor', 'replication', 'orchestrator', 'heartbeat', 'clusterset', 'mysql.sys', 'mysql.session', 'mysql.infoschema')
 ORDER BY u.user, d.db;
 `
 

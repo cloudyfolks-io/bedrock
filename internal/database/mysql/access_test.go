@@ -307,7 +307,7 @@ func TestSuperuserHoldsRootAndTheInternalUsers(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if string(data["root"]) != "root-secret" || len(data) != 9 {
+	if string(data["root"]) != "root-secret" || len(data) != len(InternalUsers)+1 {
 		t.Fatalf("keys %d", len(data))
 	}
 	seen := map[string]bool{}
@@ -317,5 +317,14 @@ func TestSuperuserHoldsRootAndTheInternalUsers(t *testing.T) {
 			t.Errorf("password of %s: %q", user, password)
 		}
 		seen[password] = true
+	}
+}
+
+func TestInternalUsersAreSystemUsersOfTheOperator(t *testing.T) {
+	operatorUsers := map[string]bool{"heartbeat": true, "monitor": true, "operator": true, "orchestrator": true, "replication": true, "xtrabackup": true, "clusterset": true}
+	for _, user := range InternalUsers {
+		if !operatorUsers[user] {
+			t.Fatalf("internal user %q is unknown to the Percona operator, which then never creates the internal secret", user)
+		}
 	}
 }
