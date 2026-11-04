@@ -34,6 +34,12 @@
         ],
         "storages": {
           "rgw": {
+            "resources": {
+              "requests": {
+                "cpu": "100m",
+                "memory": "128Mi"
+              }
+            },
             "s3": {
               "bucket": "bedrock-database-backups",
               "credentialsSecret": "database-backups-s3",

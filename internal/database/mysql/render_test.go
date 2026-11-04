@@ -150,6 +150,7 @@ func withDadehatDifferences(objects []*unstructured.Unstructured) []*unstructure
 		}
 		if obj.GetKind() == RestoreGVK.Kind {
 			obj.SetAPIVersion("ps.percona.com/v1alpha1")
+			unstructured.RemoveNestedField(obj.Object, "spec", "backupSource", "storage", "resources")
 		}
 		if obj.GetKind() != ClusterGVK.Kind {
 			continue
@@ -158,6 +159,9 @@ func withDadehatDifferences(objects []*unstructured.Unstructured) []*unstructure
 		unstructured.RemoveNestedField(obj.Object, "spec", "proxy", "router")
 		unstructured.RemoveNestedField(obj.Object, "spec", "proxy", "haproxy", "labels")
 		unstructured.RemoveNestedField(obj.Object, "spec", "backup", "resources")
+		unstructured.RemoveNestedField(obj.Object, "spec", "backup", "storages", StorageName, "resources")
+		unstructured.RemoveNestedField(obj.Object, "spec", "proxy", "haproxy", "resources")
+		unstructured.RemoveNestedField(obj.Object, "spec", "proxy", "haproxy", "sidecarResources")
 		if enabled, found, _ := unstructured.NestedBool(obj.Object, "spec", "proxy", "haproxy", "enabled"); found && !enabled {
 			unstructured.RemoveNestedField(obj.Object, "spec", "proxy")
 		}
@@ -427,5 +431,22 @@ func TestBackupSidecarHasRequests(t *testing.T) {
 	requests, ok := block["resources"].(map[string]any)["requests"].(map[string]any)
 	if !ok || requests["cpu"] == nil || requests["memory"] == nil {
 		t.Fatalf("backup resources = %v; the databases quota refuses the xtrabackup sidecar without requests", block["resources"])
+	}
+}
+
+func TestEveryOperatorContainerHasRequests(t *testing.T) {
+	spec := bedrockSpec()
+	spec.Instances = 3
+	cluster := clusterOf(t, mustRender(t, spec))
+	for _, path := range [][]string{
+		{"spec", "backup", "resources"},
+		{"spec", "backup", "storages", StorageName, "resources"},
+		{"spec", "proxy", "haproxy", "resources"},
+		{"spec", "proxy", "haproxy", "sidecarResources", "mysql-monit"},
+	} {
+		requests, found, _ := unstructured.NestedStringMap(cluster, append(path, "requests")...)
+		if !found || requests["cpu"] == "" || requests["memory"] == "" {
+			t.Errorf("%v has no requests; the databases quota refuses the pod", path)
+		}
 	}
 }

@@ -34,6 +34,12 @@
         ],
         "storages": {
           "rgw": {
+            "resources": {
+              "requests": {
+                "cpu": "100m",
+                "memory": "128Mi"
+              }
+            },
             "s3": {
               "bucket": "bedrock-database-backups",
               "credentialsSecret": "database-backups-s3",
@@ -96,6 +102,20 @@
             "bedrock.cloudyfolks.io/project": "web",
             "bedrock.cloudyfolks.io/tenant": "acme"
           },
+          "resources": {
+            "requests": {
+              "cpu": "100m",
+              "memory": "128Mi"
+            }
+          },
+          "sidecarResources": {
+            "mysql-monit": {
+              "requests": {
+                "cpu": "100m",
+                "memory": "128Mi"
+              }
+            }
+          },
           "size": 3
         },
         "router": {
@@ -127,6 +147,12 @@
       "backupSource": {
         "destination": "s3://bedrock-database-backups/aaaaaaaa-1111-4222-8333-444455556666/2026-10-01-02:00:00-full",
         "storage": {
+          "resources": {
+            "requests": {
+              "cpu": "100m",
+              "memory": "128Mi"
+            }
+          },
           "s3": {
             "bucket": "bedrock-database-backups",
             "credentialsSecret": "database-backups-s3",

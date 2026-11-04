@@ -66,6 +66,20 @@
             "bedrock.cloudyfolks.io/project": "web",
             "bedrock.cloudyfolks.io/tenant": "acme"
           },
+          "resources": {
+            "requests": {
+              "cpu": "100m",
+              "memory": "128Mi"
+            }
+          },
+          "sidecarResources": {
+            "mysql-monit": {
+              "requests": {
+                "cpu": "100m",
+                "memory": "128Mi"
+              }
+            }
+          },
           "size": 3
         },
         "router": {

@@ -149,7 +149,10 @@ func mysqlBlock(s engine.Spec) map[string]any {
 }
 
 func proxyBlock(s engine.Spec) map[string]any {
-	haproxy := map[string]any{"enabled": true, "size": int64(3), "labels": podLabels(s)}
+	haproxy := map[string]any{
+		"enabled": true, "size": int64(3), "labels": podLabels(s),
+		"resources": sidecarRequests(), "sidecarResources": map[string]any{"mysql-monit": sidecarRequests()},
+	}
 	if image := s.Images[ImageHAProxy]; image != "" {
 		haproxy["image"] = image
 	}
@@ -160,8 +163,9 @@ func backupBlock(s engine.Spec) map[string]any {
 	backup := map[string]any{
 		"enabled": true,
 		"storages": map[string]any{StorageName: map[string]any{
-			"type": "s3",
-			"s3":   s3Block(s.Backup, s.BackupID),
+			"type":      "s3",
+			"s3":        s3Block(s.Backup, s.BackupID),
+			"resources": sidecarRequests(),
 		}},
 		"schedule": []any{map[string]any{
 			"name": "daily", "schedule": "0 2 * * *", "keep": int64(s.Backup.RetentionDays), "storageName": StorageName,
@@ -210,7 +214,7 @@ func restoreObject(s engine.Spec) *unstructured.Unstructured {
 			"clusterName": s.Name,
 			"backupSource": map[string]any{
 				"destination": s.Restore.Destination,
-				"storage":     map[string]any{"type": "s3", "s3": s3Block(s.Backup, "")},
+				"storage":     map[string]any{"type": "s3", "s3": s3Block(s.Backup, ""), "resources": sidecarRequests()},
 			},
 		},
 	}}
