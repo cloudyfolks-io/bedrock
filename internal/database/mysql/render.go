@@ -214,7 +214,7 @@ func restoreObject(s engine.Spec) *unstructured.Unstructured {
 			"clusterName": s.Name,
 			"backupSource": map[string]any{
 				"destination": s.Restore.Destination,
-				"storage":     map[string]any{"type": "s3", "s3": s3Block(s.Backup, ""), "resources": sidecarRequests()},
+				"storage":     map[string]any{"type": "s3", "s3": s3Block(s.Backup, s.Restore.SourceUID), "resources": sidecarRequests()},
 			},
 		},
 	}}

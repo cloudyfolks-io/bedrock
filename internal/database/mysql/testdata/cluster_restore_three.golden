@@ -157,6 +157,7 @@
             "bucket": "bedrock-database-backups",
             "credentialsSecret": "database-backups-s3",
             "endpointUrl": "http://rook-ceph-rgw-bedrock-rgw.rook-ceph.svc:80",
+            "prefix": "aaaaaaaa-1111-4222-8333-444455556666",
             "region": "us-east-1"
           },
           "type": "s3"

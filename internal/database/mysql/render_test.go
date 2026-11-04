@@ -150,6 +150,7 @@ func withDadehatDifferences(objects []*unstructured.Unstructured) []*unstructure
 		}
 		if obj.GetKind() == RestoreGVK.Kind {
 			obj.SetAPIVersion("ps.percona.com/v1alpha1")
+			unstructured.RemoveNestedField(obj.Object, "spec", "backupSource", "storage", "s3", "prefix")
 			unstructured.RemoveNestedField(obj.Object, "spec", "backupSource", "storage", "resources")
 		}
 		if obj.GetKind() != ClusterGVK.Kind {
@@ -297,6 +298,10 @@ func TestRestoreObjectPointsAtTheDestination(t *testing.T) {
 	cluster, _, _ := unstructured.NestedString(restore.Object, "spec", "clusterName")
 	if got != destination || cluster != testUID || restore.GetName() != testUID+"-restore" {
 		t.Errorf("restore %v", restore.Object)
+	}
+	prefix, _, _ := unstructured.NestedString(restore.Object, "spec", "backupSource", "storage", "s3", "prefix")
+	if prefix != sourceUID {
+		t.Errorf("restore prefix %q; the operator looks for the backup under the prefix of the source database", prefix)
 	}
 }
 
