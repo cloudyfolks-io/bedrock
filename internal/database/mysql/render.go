@@ -142,9 +142,6 @@ func mysqlBlock(s engine.Spec) map[string]any {
 	if labels := podLabels(s); len(labels) > 0 {
 		block["labels"] = labels
 	}
-	if image := s.Images[ImageInit]; image != "" {
-		block["initImage"] = image
-	}
 	return block
 }
 
@@ -187,6 +184,9 @@ func clusterSpec(s engine.Spec) map[string]any {
 		"crVersion":   CRVersion,
 		"secretsName": engine.Named(s.Name, "superuser"),
 		"mysql":       mysqlBlock(s),
+	}
+	if image := s.Images[ImageInit]; image != "" {
+		spec["initContainer"] = map[string]any{"image": image}
 	}
 	if s.Instances == 1 {
 		spec["unsafeFlags"] = map[string]any{"mysqlSize": true, "proxy": true}
