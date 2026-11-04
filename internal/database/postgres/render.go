@@ -156,7 +156,8 @@ func objectStore(s engine.Spec, name, prefix string) *unstructured.Unstructured 
 		"apiVersion": "barmancloud.cnpg.io/v1", "kind": "ObjectStore",
 		"metadata": map[string]any{"name": name, "namespace": s.Namespace, "labels": engine.Labels(s.Labels)},
 		"spec": map[string]any{
-			"retentionPolicy": fmt.Sprintf("%dd", s.Backup.RetentionDays),
+			"retentionPolicy":              fmt.Sprintf("%dd", s.Backup.RetentionDays),
+			"instanceSidecarConfiguration": map[string]any{"resources": sidecarResources()},
 			"configuration": map[string]any{
 				"destinationPath": fmt.Sprintf("s3://%s/%s/", s.Backup.Bucket, prefix),
 				"endpointURL":     s.Backup.Endpoint,
@@ -167,6 +168,13 @@ func objectStore(s engine.Spec, name, prefix string) *unstructured.Unstructured 
 			},
 		},
 	}}
+}
+
+func sidecarResources() map[string]any {
+	return map[string]any{
+		"requests": map[string]any{"cpu": "50m", "memory": "64Mi"},
+		"limits":   map[string]any{"memory": "256Mi"},
+	}
 }
 
 func Patches(s engine.Spec) ([]engine.Patch, error) {

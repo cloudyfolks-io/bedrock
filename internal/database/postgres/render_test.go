@@ -312,3 +312,13 @@ func TestHealthForEachClusterPhase(t *testing.T) {
 		}
 	}
 }
+
+func TestObjectStoreGivesTheBackupSidecarRequests(t *testing.T) {
+	store := objectStore(engine.Spec{Namespace: "bedrock-dbaas", Backup: engine.BackupSpec{Enabled: true, Bucket: "backups", RetentionDays: 7}}, "db-x", "x")
+	for _, resource := range []string{"cpu", "memory"} {
+		value, found, err := unstructured.NestedString(store.Object, "spec", "instanceSidecarConfiguration", "resources", "requests", resource)
+		if err != nil || !found || value == "" {
+			t.Fatalf("sidecar request %s = %q %v %v; the databases quota refuses a pod without it", resource, value, found, err)
+		}
+	}
+}

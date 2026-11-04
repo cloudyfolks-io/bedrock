@@ -27,6 +27,17 @@
           }
         }
       },
+      "instanceSidecarConfiguration": {
+        "resources": {
+          "limits": {
+            "memory": "256Mi"
+          },
+          "requests": {
+            "cpu": "50m",
+            "memory": "64Mi"
+          }
+        }
+      },
       "retentionPolicy": "7d"
     }
   },
@@ -55,6 +66,17 @@
           "secretAccessKey": {
             "key": "ACCESS_SECRET_KEY",
             "name": "dbaas-backups-rgw"
+          }
+        }
+      },
+      "instanceSidecarConfiguration": {
+        "resources": {
+          "limits": {
+            "memory": "256Mi"
+          },
+          "requests": {
+            "cpu": "50m",
+            "memory": "64Mi"
           }
         }
       },

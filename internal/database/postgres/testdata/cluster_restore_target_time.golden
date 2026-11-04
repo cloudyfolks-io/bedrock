@@ -29,6 +29,17 @@
           }
         }
       },
+      "instanceSidecarConfiguration": {
+        "resources": {
+          "limits": {
+            "memory": "256Mi"
+          },
+          "requests": {
+            "cpu": "50m",
+            "memory": "64Mi"
+          }
+        }
+      },
       "retentionPolicy": "7d"
     }
   },
@@ -59,6 +70,17 @@
           "secretAccessKey": {
             "key": "ACCESS_SECRET_KEY",
             "name": "database-backups-s3"
+          }
+        }
+      },
+      "instanceSidecarConfiguration": {
+        "resources": {
+          "limits": {
+            "memory": "256Mi"
+          },
+          "requests": {
+            "cpu": "50m",
+            "memory": "64Mi"
           }
         }
       },
