@@ -219,14 +219,14 @@ It is `off` by default.
 | Value | Effect |
 |---|---|
 | `off` | Bedrock removes the bindings. The policies do nothing. |
-| `audit` | A pod that breaks a rule is admitted. The API server counts the failure and writes it in its audit log. |
+| `audit` | A pod that breaks a rule is admitted. The API server counts the failure. Audit records are available only when API audit logging is enabled. |
 | `deny` | A pod that breaks a rule is rejected. |
 
 The policies are `bedrock-tenant-pod-network`, `bedrock-tenant-pod-network-subnet` and `bedrock-tenant-pod-network-groups`.
 The operator makes and removes their bindings from the setting.
 A change of the setting acts at once.
 Use `audit` first.
-Move to `deny` when the alert `TenantPodNetworkAudit` is quiet.
+Before moving to `deny`, verify representative pod creation, builds, VM hot-plug and database operations. Check their pod templates and the admission metrics. A quiet `TenantPodNetworkAudit` alert alone does not prove that an unused path works.
 
 The policies work only in a namespace that has the label `bedrock.cloudyfolks.io/tenant`.
 They check a Pod when it is created, and the subresource `pods/ephemeralcontainers` when it is updated.

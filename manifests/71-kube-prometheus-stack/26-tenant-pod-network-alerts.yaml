@@ -15,7 +15,7 @@ spec:
             severity: warning
           annotations:
             summary: Tenant pods break the pod network policy in audit mode.
-            description: The policy {{ $labels.policy }} found {{ $value }} pod requests that break it in the last 15 minutes. The binding only audits, so the pods were admitted. Find them in the audit log of the API server, in the annotation validation.policy.admission.k8s.io/validation_failure, or fix the pod builder. Then set tenancy.pod-network-admission to deny.
+            description: The policy {{ $labels.policy }} found {{ $value }} pod requests that break it in the last 15 minutes. The binding only audits, so the pods were admitted. Check the pod templates and canary requests. If API audit logging is enabled, find validation.policy.admission.k8s.io/validation_failure in the audit records. Fix the pod builder and verify the affected paths before enabling deny.
             runbook_url: https://github.com/cloudyfolks-io/bedrock/blob/main/docs/alerts.md#tenantpodnetworkaudit
         - alert: TenantPodNetworkDenied
           expr: >-
@@ -30,11 +30,11 @@ spec:
         - alert: TenantPodNetworkError
           expr: >-
             sum by (policy, policy_binding, error_type) (increase(apiserver_validating_admission_policy_check_total{policy=~"bedrock-tenant-pod-network.*",
-            error_type!~"no_error|"}[15m])) > 0
+            error_type=~"compile_error|out_of_budget"}[15m])) > 0
           labels:
             severity: warning
           annotations:
             summary: The pod network policy fails to evaluate.
-            description: The policy {{ $labels.policy }} returned {{ $labels.error_type }} errors. A CEL expression does not compile or breaks on some pods. The policy fails closed, so with a deny binding this blocks pods.
+            description: The policy {{ $labels.policy }} returned {{ $labels.error_type }} errors. A CEL expression does not compile or exceeds its evaluation budget. The policy fails closed, so with a deny binding this blocks pods. The invalid_error label marks an ordinary validation failure and is covered by the Audit and Denied alerts.
 
             runbook_url: https://github.com/cloudyfolks-io/bedrock/blob/main/docs/alerts.md#tenantpodnetworkerror

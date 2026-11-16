@@ -182,7 +182,7 @@ The etcd database is larger than 70 percent of its quota. See [The alert EtcdDat
 
 ### TenantPodNetworkAudit
 
-A tenant pod request breaks the pod network policy in audit mode. Find the pods in the audit log of the API server, in the annotation `validation.policy.admission.k8s.io/validation_failure`. Fix the pod builder. Then set `tenancy.pod-network-admission` to `deny`.
+A tenant pod request breaks the pod network policy in audit mode. Check the pod templates and make representative canary requests. If API audit logging is enabled, find the pods through the annotation `validation.policy.admission.k8s.io/validation_failure` in the audit records. The metric does not identify the rejected fields or pods. Fix the pod builder and verify the affected paths before enabling `deny`.
 
 ### TenantPodNetworkDenied
 
@@ -190,7 +190,7 @@ The pod network policy rejects tenant pods. Customer workloads can fail to start
 
 ### TenantPodNetworkError
 
-The pod network policy fails to evaluate. A CEL expression does not compile or breaks on some pods. The policy fails closed.
+The pod network policy fails to evaluate. The metric label `compile_error` means a CEL expression does not compile. The label `out_of_budget` means evaluation exceeds its budget. The policy fails closed. The label `invalid_error` means an ordinary validation failure; the Audit and Denied alerts cover it.
 
 ## Fabric
 

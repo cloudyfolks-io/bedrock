@@ -1,6 +1,7 @@
 package release
 
 import (
+	"regexp"
 	"strings"
 	"testing"
 
@@ -29,7 +30,7 @@ func TestTenantPodNetworkAlertsCoverAuditDenyAndError(t *testing.T) {
 	want := map[string]struct{ severity, fragment string }{
 		"TenantPodNetworkAudit":  {"warning", `enforcement_action=~"audit|warn"`},
 		"TenantPodNetworkDenied": {"critical", `enforcement_action="deny"`},
-		"TenantPodNetworkError":  {"warning", `error_type!~"no_error|"`},
+		"TenantPodNetworkError":  {"warning", `error_type=~"compile_error|out_of_budget"`},
 	}
 	if len(alerts) != len(want) {
 		t.Fatalf("alerts %v", alerts)
@@ -44,6 +45,24 @@ func TestTenantPodNetworkAlertsCoverAuditDenyAndError(t *testing.T) {
 		}
 		if expr := alert["expr"].(string); !strings.Contains(expr, expected.fragment) {
 			t.Errorf("%s expr %q lacks %s", name, expr, expected.fragment)
+		}
+	}
+}
+
+func TestTenantPodNetworkErrorExcludesValidationFailures(t *testing.T) {
+	expr := tenantPodNetworkAlerts(t)["TenantPodNetworkError"]["expr"].(string)
+	_, selector, found := strings.Cut(expr, `error_type=~"`)
+	if !found {
+		t.Fatal("missing error type matcher")
+	}
+	pattern, _, found := strings.Cut(selector, `"`)
+	if !found {
+		t.Fatal("unterminated error type matcher")
+	}
+	matcher := regexp.MustCompile("^(?:" + pattern + ")$")
+	for label, want := range map[string]bool{"compile_error": true, "out_of_budget": true, "invalid_error": false, "no_error": false, "": false} {
+		if got := matcher.MatchString(label); got != want {
+			t.Errorf("error type %q selected = %t, want %t", label, got, want)
 		}
 	}
 }
