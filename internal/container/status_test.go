@@ -198,6 +198,23 @@ func TestPodViewOfReadsTheFabricAddress(t *testing.T) {
 	}
 }
 
+func TestPodViewKeepsTheVPCAddressWhenTheClassLabelIsRemoved(t *testing.T) {
+	pod := corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{Annotations: map[string]string{
+			"vpc.kube-system.fabric.cloudyfolks.io/allocated":  "true",
+			"vpc.kube-system.fabric.cloudyfolks.io/ip_address": "10.20.0.7",
+		}},
+		Status: corev1.PodStatus{PodIP: "100.72.0.8"},
+	}
+	if got := PodViewOf(pod, "default", time.Time{}).Address; got != "10.20.0.7" {
+		t.Fatalf("VPC address %q", got)
+	}
+	delete(pod.Annotations, "vpc.kube-system.fabric.cloudyfolks.io/ip_address")
+	if got := PodViewOf(pod, "default", time.Time{}).Address; got != "" {
+		t.Fatalf("an unknown VPC address must not use the management PodIP: %q", got)
+	}
+}
+
 func TestStatusOfBuildsTheReadyCondition(t *testing.T) {
 	now := time.Date(2026, 10, 19, 12, 0, 0, 0, time.UTC)
 	earlier := metav1.NewTime(now.Add(-time.Hour))

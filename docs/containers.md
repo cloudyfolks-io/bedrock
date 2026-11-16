@@ -26,7 +26,7 @@ The condition `Ready` shows the reason `NotInProject`.
 | `replicas` | From 0 to 20. Without `replicas` and without `autoscale` the container has one replica. |
 | `strategy` | `Recreate` or `RollingUpdate`. |
 | `fsGroup` | The group of the mounted volumes. |
-| `probes` | `liveness` and `readiness`. Only `exec` probes exist. |
+| `probes` | `liveness` and `readiness`. Each has one `exec`, `httpGet`, `tcpSocket` or `grpc` handler. Network handlers need tenant management networking. |
 | `autoscale` | `min`, `max`, `cpuPercent` and `memoryPercent`. |
 | `volumes` | At most 8 Volumes with a `volumeRef` and a `mountPath`. |
 | `imagePullSecrets` | Names of Secrets of the type `kubernetes.io/dockerconfigjson` in the namespace. |
@@ -44,7 +44,7 @@ These rules are checked by the API server.
 - `addresses` and `address` exclude each other.
 - `addresses` need `replicas` of at most the number of entries and no `autoscale`.
 - An `address`, `addresses` and `volumes` need the strategy `Recreate`.
-- A probe needs an `exec` command.
+- A probe needs exactly one handler. An `exec` handler needs a command. A network handler needs a numeric port from 1 to 65535.
 
 The operator checks these rules after the API server.
 It reports the reason `InvalidSpec`.
@@ -83,8 +83,21 @@ The pod has no cluster network, no ClusterIP and no cluster DNS.
 When the Subnet or the Setting `network.dns-servers` has DNS servers, the pod gets them with `dnsPolicy: None`.
 Without DNS servers the pod keeps the default DNS settings.
 
-The node cannot reach the pod network.
-A probe of the kind `httpGet` or `tcpSocket` never succeeds, so only `exec` probes exist.
+On this one-interface path, the node cannot reach the pod network. The operator refuses `httpGet`, `tcpSocket` and `grpc` probes. An `exec` probe runs inside the container and still works.
+
+When `network.tenant-management.enabled` is true, the pod instead gets eth0
+on `tenant-workload` and net1 on its project subnet through `kube-system/vpc`.
+The default route uses net1. Return routes through eth0 use the actual
+management, join and pod networks of the Cluster and the configured workload
+subnet gateway. The management subnet ACL allows kubelet probe replies and
+blocks new workload connections to the platform networks. The operator
+refuses this path when the Cluster management range is missing.
+
+This path supports HTTP, TCP and gRPC probes from the kubelet through eth0.
+An HTTP handler has `httpGet.port` and an optional `httpGet.path`. A TCP
+handler has `tcpSocket.port`. A gRPC handler has `grpc.port` and an optional
+`grpc.service`. Container status reports the VPC address of net1; it does not
+report the management address as the workload address.
 
 The operator gives the pod the same annotations as a VM pod.
 They are in `docs/network.md`.
@@ -194,10 +207,10 @@ The addon `kata` creates the RuntimeClass `kata`. See `docs/addons.md`.
 
 - At most 20 replicas, 8 ports, 8 volumes and 8 security groups.
 - One container in a pod. The container is named `app`.
-- Only `exec` probes.
+- Network probes require tenant management networking; the one-interface path supports `exec` only.
 - A Container with an `address` or with `volumes` has at most one replica. A Container with `addresses` has at most as many replicas as entries.
 - The quota key `count/containers.bedrock.cloudyfolks.io` limits the number of Containers of a project. The quota of memory and CPU counts the requests of the pods and the overhead of Kata.
-- The two-interface model, custom domains, ingress, container plans and revisions are not part of the Container kind.
+- The cluster setting selects the interface model. Custom domains, ingress, container plans and revisions are not part of the Container kind.
 
 ## Troubleshooting
 

@@ -13,13 +13,15 @@ const (
 )
 
 type NIC struct {
-	Namespace       string
-	Subnet          string
-	MAC             string
-	Address         string
-	Addresses       []string
-	SecurityGroups  []string
-	PortSecurityOff bool
+	Class            string
+	ManagementRoutes []PodRoute
+	Namespace        string
+	Subnet           string
+	MAC              string
+	Address          string
+	Addresses        []string
+	SecurityGroups   []string
+	PortSecurityOff  bool
 }
 
 func nicPrefix(nic NIC) string {

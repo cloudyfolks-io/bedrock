@@ -133,7 +133,8 @@ func (r *Reconciler) converge(ctx context.Context, cluster v1alpha1.KubernetesCl
 			return outcome{}, fmt.Errorf("record the control plane address: %w", err)
 		}
 	}
-	return r.provision(ctx, cluster, labels, address)
+	resolved.Address, resolved.NIC.Address = address, address
+	return r.provision(ctx, cluster, labels, resolved)
 }
 
 func retryFor(gate *Gate) time.Duration {
@@ -171,8 +172,8 @@ func (e nameConflict) Error() string {
 	return fmt.Sprintf("the name of the %s %q is used by an object that this resource does not own", e.Kind, e.Name)
 }
 
-func (r *Reconciler) provision(ctx context.Context, cluster v1alpha1.KubernetesCluster, labels map[string]string, address string) (outcome, error) {
-	done, err := r.provisionAll(ctx, cluster, labels, address)
+func (r *Reconciler) provision(ctx context.Context, cluster v1alpha1.KubernetesCluster, labels map[string]string, resolved Resolved) (outcome, error) {
+	done, err := r.provisionAll(ctx, cluster, labels, resolved)
 	var conflict nameConflict
 	if errors.As(err, &conflict) {
 		return outcome{Gate: gateOf(ReasonNameConflict, "%s", conflict.Error()), RequeueAfter: applyFailureRetry}, nil
@@ -184,8 +185,8 @@ func (r *Reconciler) provision(ctx context.Context, cluster v1alpha1.KubernetesC
 	return done, err
 }
 
-func (r *Reconciler) provisionAll(ctx context.Context, cluster v1alpha1.KubernetesCluster, labels map[string]string, address string) (outcome, error) {
-	controlPlane, err := RenderControlPlane(ControlPlaneInput{Cluster: cluster, Labels: labels, Address: address})
+func (r *Reconciler) provisionAll(ctx context.Context, cluster v1alpha1.KubernetesCluster, labels map[string]string, resolved Resolved) (outcome, error) {
+	controlPlane, err := RenderControlPlane(ControlPlaneInput{Cluster: cluster, Labels: labels, Address: resolved.Address, NIC: resolved.NIC, RuntimeClass: resolved.RuntimeClass})
 	if err != nil {
 		return outcome{}, err
 	}

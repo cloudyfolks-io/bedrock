@@ -73,41 +73,51 @@ func (r Resolver) Resolve(ctx context.Context, c v1alpha1.Container, labels map[
 
 func (r Resolver) stepSubnet(ctx context.Context, c v1alpha1.Container, in resolved) (resolved, *Gate, error) {
 	name := SubnetName(c.Spec)
-	subnet, dns, gate, err := r.resolveSubnet(ctx, c.Namespace, name)
+	subnet, cfg, gate, err := r.resolveSubnet(ctx, c.Namespace, name)
 	if err != nil || gate != nil {
 		return in, gate, err
 	}
 	in.subnet = subnet
-	in.NIC = network.NIC{Namespace: c.Namespace, Subnet: name, Address: c.Spec.Network.Address, Addresses: slices.Clone(c.Spec.Network.Addresses), SecurityGroups: slices.Clone(c.Spec.Network.SecurityGroups)}
-	in.DNSServers = dns
+	in.NIC, err = network.ResolvePodNIC(ctx, r.Client, cfg, network.NIC{Class: network.NetworkClassWorkload, Namespace: c.Namespace, Subnet: name, Address: c.Spec.Network.Address, Addresses: slices.Clone(c.Spec.Network.Addresses), SecurityGroups: slices.Clone(c.Spec.Network.SecurityGroups)})
+	if err != nil {
+		return in, nil, err
+	}
+	if c.Spec.Probes != nil && in.NIC.Class == "" {
+		for _, probe := range []*v1alpha1.ContainerProbe{c.Spec.Probes.Liveness, c.Spec.Probes.Readiness} {
+			if probe != nil && (probe.HTTPGet != nil || probe.TCPSocket != nil || probe.GRPC != nil) {
+				return in, gateOf(ReasonInvalidSpec, "network probes need the tenant management network"), nil
+			}
+		}
+	}
+	in.DNSServers = DNSServersOf(subnet, cfg.DNSServers)
 	return in, nil, nil
 }
 
-func (r Resolver) resolveSubnet(ctx context.Context, namespace, name string) (v1alpha1.Subnet, []string, *Gate, error) {
+func (r Resolver) resolveSubnet(ctx context.Context, namespace, name string) (v1alpha1.Subnet, network.Config, *Gate, error) {
 	var subnet v1alpha1.Subnet
 	err := r.Client.Get(ctx, client.ObjectKey{Namespace: namespace, Name: name}, &subnet)
 	if notFound(err) {
-		return subnet, nil, gateOf(ReasonSubnetNotFound, "the subnet %q does not exist", name), nil
+		return subnet, network.Config{}, gateOf(ReasonSubnetNotFound, "the subnet %q does not exist", name), nil
 	}
 	if err != nil {
-		return subnet, nil, nil, err
+		return subnet, network.Config{}, nil, err
 	}
 	if !meta.IsStatusConditionTrue(subnet.Status.Conditions, v1alpha1.ConditionReady) {
-		return subnet, nil, gateOf(ReasonSubnetNotReady, "the subnet %q is not ready", name), nil
+		return subnet, network.Config{}, gateOf(ReasonSubnetNotReady, "the subnet %q is not ready", name), nil
 	}
 	var parent v1alpha1.Network
 	err = r.Client.Get(ctx, client.ObjectKey{Name: subnet.Spec.NetworkRef}, &parent)
 	if err != nil && !notFound(err) {
-		return subnet, nil, nil, err
+		return subnet, network.Config{}, nil, err
 	}
 	if err != nil || parent.Status.VPC == "" {
-		return subnet, nil, gateOf(ReasonSubnetNotReady, "the network %q of the subnet %q is not ready", subnet.Spec.NetworkRef, name), nil
+		return subnet, network.Config{}, gateOf(ReasonSubnetNotReady, "the network %q of the subnet %q is not ready", subnet.Spec.NetworkRef, name), nil
 	}
 	cfg, err := network.LoadConfig(ctx, r.Client)
 	if err != nil {
-		return subnet, nil, nil, err
+		return subnet, network.Config{}, nil, err
 	}
-	return subnet, DNSServersOf(subnet, cfg.DNSServers), nil, nil
+	return subnet, cfg, nil, nil
 }
 
 func DNSServersOf(subnet v1alpha1.Subnet, fallback []string) []string {

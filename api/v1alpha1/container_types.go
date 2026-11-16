@@ -102,10 +102,13 @@ type ContainerExec struct {
 	Command []string `json:"command"`
 }
 
-// +kubebuilder:validation:XValidation:rule="has(self.exec)",message="only exec probes are supported"
+// +kubebuilder:validation:XValidation:rule="[has(self.exec), has(self.httpGet), has(self.tcpSocket), has(self.grpc)].filter(h, h).size() == 1 && (!has(self.httpGet) || (self.httpGet.port >= 1 && self.httpGet.port <= 65535)) && (!has(self.tcpSocket) || (self.tcpSocket.port >= 1 && self.tcpSocket.port <= 65535)) && (!has(self.grpc) || (self.grpc.port >= 1 && self.grpc.port <= 65535))",message="a probe needs exactly one handler and a valid port for a network handler"
 type ContainerProbe struct {
 	// +optional
-	Exec *ContainerExec `json:"exec,omitempty"`
+	Exec      *ContainerExec      `json:"exec,omitempty"`
+	HTTPGet   *ContainerHTTPGet   `json:"httpGet,omitempty"`
+	TCPSocket *ContainerTCPSocket `json:"tcpSocket,omitempty"`
+	GRPC      *ContainerGRPC      `json:"grpc,omitempty"`
 	// +kubebuilder:validation:Minimum=0
 	// +optional
 	InitialDelaySeconds *int32 `json:"initialDelaySeconds,omitempty"`
@@ -121,6 +124,20 @@ type ContainerProbe struct {
 	// +kubebuilder:validation:Minimum=1
 	// +optional
 	FailureThreshold *int32 `json:"failureThreshold,omitempty"`
+}
+
+type ContainerHTTPGet struct {
+	Path string `json:"path,omitempty"`
+	Port int32  `json:"port"`
+}
+
+type ContainerTCPSocket struct {
+	Port int32 `json:"port"`
+}
+
+type ContainerGRPC struct {
+	Port    int32  `json:"port"`
+	Service string `json:"service,omitempty"`
 }
 
 type ContainerProbes struct {

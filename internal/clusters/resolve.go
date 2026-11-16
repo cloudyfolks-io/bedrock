@@ -7,6 +7,7 @@ import (
 	"net/netip"
 	"slices"
 
+	nodev1 "k8s.io/api/node/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
@@ -15,6 +16,7 @@ import (
 
 	"github.com/cloudyfolks-io/bedrock/api/v1alpha1"
 	"github.com/cloudyfolks-io/bedrock/internal/addons"
+	"github.com/cloudyfolks-io/bedrock/internal/container"
 	"github.com/cloudyfolks-io/bedrock/internal/k0sversion"
 	"github.com/cloudyfolks-io/bedrock/internal/network"
 	"github.com/cloudyfolks-io/bedrock/internal/settings"
@@ -45,6 +47,8 @@ type Resolved struct {
 	Subnet       v1alpha1.Subnet
 	Address      string
 	AddressIsNew bool
+	NIC          network.NIC
+	RuntimeClass string
 }
 
 type resolveStep func(ctx context.Context, cluster v1alpha1.KubernetesCluster, in Resolved) (Resolved, *Gate, error)
@@ -55,7 +59,7 @@ func notFound(err error) bool {
 
 func (r Resolver) Resolve(ctx context.Context, cluster v1alpha1.KubernetesCluster) (Resolved, *Gate, error) {
 	var in Resolved
-	steps := []resolveStep{r.stepAddon, r.stepSubnet, r.stepSecurityGroups, r.stepCIDRs, r.stepVersion, r.stepAddress}
+	steps := []resolveStep{r.stepAddon, r.stepSubnet, r.stepSecurityGroups, r.stepCIDRs, r.stepVersion, r.stepAddress, r.stepPodNetwork}
 	for _, step := range steps {
 		next, gate, err := step(ctx, cluster, in)
 		if err != nil || gate != nil {
@@ -63,6 +67,36 @@ func (r Resolver) Resolve(ctx context.Context, cluster v1alpha1.KubernetesCluste
 		}
 		in = next
 	}
+	return in, nil, nil
+}
+
+func (r Resolver) stepPodNetwork(ctx context.Context, cluster v1alpha1.KubernetesCluster, in Resolved) (Resolved, *Gate, error) {
+	cfg, err := network.LoadConfig(ctx, r.Client)
+	if err != nil {
+		return in, nil, err
+	}
+	in.NIC, err = network.ResolvePodNIC(ctx, r.Client, cfg, network.NIC{
+		Namespace: cluster.Namespace, Subnet: in.Subnet.Name, Address: in.Address,
+		SecurityGroups: cluster.Spec.ControlPlane.SecurityGroups, Class: network.NetworkClassManaged,
+	})
+	if err != nil || !cfg.TenantManagement.Enabled {
+		return in, nil, err
+	}
+	name, err := (container.Resolver{Client: r.Client}).RuntimeClassName(ctx)
+	if err != nil {
+		return in, nil, err
+	}
+	if name == "" {
+		return in, gateOf(ReasonRuntimeUnavailable, "the managed control plane needs a RuntimeClass in the Setting %s", container.RuntimeSetting), nil
+	}
+	err = r.Client.Get(ctx, client.ObjectKey{Name: name}, &nodev1.RuntimeClass{})
+	if apierrors.IsNotFound(err) {
+		return in, gateOf(ReasonRuntimeUnavailable, "the RuntimeClass %q does not exist", name), nil
+	}
+	if err != nil {
+		return in, nil, err
+	}
+	in.RuntimeClass = name
 	return in, nil, nil
 }
 

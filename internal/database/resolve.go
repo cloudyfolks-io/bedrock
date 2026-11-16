@@ -91,6 +91,7 @@ type Pods struct {
 	Image        string
 	RuntimeClass string
 	DNSServers   []string
+	NIC          network.NIC
 }
 
 func resolvePods(ctx context.Context, c client.Client, images []string, subnet v1alpha1.Subnet) (Pods, *Refusal, error) {
@@ -115,6 +116,10 @@ func resolvePods(ctx context.Context, c client.Client, images []string, subnet v
 		pods.RuntimeClass = name
 	}
 	networks, err := network.LoadConfig(ctx, c)
+	if err != nil {
+		return pods, nil, err
+	}
+	pods.NIC, err = network.ResolvePodNIC(ctx, c, networks, network.NIC{Namespace: subnet.Namespace, Subnet: subnet.Name, Class: network.NetworkClassManaged})
 	if err != nil {
 		return pods, nil, err
 	}

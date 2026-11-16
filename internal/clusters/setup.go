@@ -3,9 +3,11 @@ package clusters
 import (
 	"context"
 	"slices"
+	"strings"
 	"time"
 
 	corev1 "k8s.io/api/core/v1"
+	nodev1 "k8s.io/api/node/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	ctrl "sigs.k8s.io/controller-runtime"
@@ -40,8 +42,10 @@ func (r *Reconciler) SetupWithManager(mgr ctrl.Manager) error {
 			return obj.GetName() == addons.Clusters
 		}))).
 		Watches(&v1alpha1.Setting{}, handler.EnqueueRequestsFromMapFunc(r.allClusters), builder.WithPredicates(predicate.NewPredicateFuncs(func(obj client.Object) bool {
-			return obj.GetName() == VersionsSetting
+			return obj.GetName() == VersionsSetting || strings.HasPrefix(obj.GetName(), "network.") || obj.GetName() == "container.runtime-class"
 		}))).
+		Watches(&v1alpha1.Cluster{}, handler.EnqueueRequestsFromMapFunc(r.allClusters)).
+		Watches(&nodev1.RuntimeClass{}, handler.EnqueueRequestsFromMapFunc(r.allClusters)).
 		WithOptions(controller.Options{MaxConcurrentReconciles: 1}).
 		Complete(r)
 }

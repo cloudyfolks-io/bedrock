@@ -3,6 +3,7 @@ package container
 import (
 	"context"
 	"slices"
+	"strings"
 	"time"
 
 	appsv1 "k8s.io/api/apps/v1"
@@ -47,8 +48,9 @@ func (r *Reconciler) SetupWithManager(mgr ctrl.Manager) error {
 		Watches(&v1alpha1.SecurityGroup{}, handler.EnqueueRequestsFromMapFunc(r.containersOf(usesGroup))).
 		Watches(&v1alpha1.Volume{}, handler.EnqueueRequestsFromMapFunc(r.containersOf(usesVolume))).
 		Watches(&nodev1.RuntimeClass{}, handler.EnqueueRequestsFromMapFunc(r.allContainers)).
+		Watches(&v1alpha1.Cluster{}, handler.EnqueueRequestsFromMapFunc(r.allContainers)).
 		Watches(&v1alpha1.Setting{}, handler.EnqueueRequestsFromMapFunc(r.allContainers), builder.WithPredicates(predicate.NewPredicateFuncs(func(obj client.Object) bool {
-			return obj.GetName() == RuntimeSetting
+			return obj.GetName() == RuntimeSetting || strings.HasPrefix(obj.GetName(), "network.")
 		}))).
 		Complete(r)
 }

@@ -44,6 +44,9 @@ func TestResolveSucceedsWithTheFixture(t *testing.T) {
 	if resolved.Address != "10.100.0.10" || !resolved.AddressIsNew {
 		t.Fatalf("resolved %+v", resolved)
 	}
+	if resolved.NIC.Class != "" || len(resolved.NIC.ManagementRoutes) != 0 || resolved.RuntimeClass != "" {
+		t.Fatalf("disabled management networking changed the control plane: %+v", resolved)
+	}
 }
 
 func TestResolveKeepsTheRecordedAddress(t *testing.T) {

@@ -73,6 +73,7 @@ type ProxyInput struct {
 	RuntimeClass string
 	DNSServers   []string
 	Revision     int64
+	NIC          network.NIC
 }
 
 func proxySelector(db v1alpha1.Database) map[string]string {
@@ -101,7 +102,10 @@ func ProxyObjects(in ProxyInput) ([]*unstructured.Unstructured, error) {
 		Name: EndpointName(db), Namespace: db.Namespace, SecretName: EndpointName(db), CommonName: string(db.UID),
 		Usages: ClientCertUsages(), Labels: labels, OwnerRefs: owners, SecretLabels: labels,
 	})
-	attachment := network.PodAttachment(network.NIC{Namespace: db.Namespace, Subnet: in.Subnet.Name, Address: in.Address, SecurityGroups: []string{SecurityGroupName(db.UID)}})
+	nic := in.NIC
+	nic.Namespace, nic.Subnet, nic.Address = db.Namespace, in.Subnet.Name, in.Address
+	nic.SecurityGroups = []string{SecurityGroupName(db.UID)}
+	attachment := network.PodAttachment(nic)
 	podLabels := map[string]string{LabelComponent: ComponentProxy}
 	for key, value := range labels {
 		podLabels[key] = value

@@ -24,18 +24,20 @@ const (
 )
 
 type ControlPlaneInput struct {
-	Cluster v1alpha1.KubernetesCluster
-	Labels  map[string]string
-	Address string
+	Cluster      v1alpha1.KubernetesCluster
+	Labels       map[string]string
+	Address      string
+	NIC          network.NIC
+	RuntimeClass string
 }
 
 func controlPlaneNIC(in ControlPlaneInput) network.NIC {
-	return network.NIC{
-		Namespace:      in.Cluster.Namespace,
-		Subnet:         SubnetName(in.Cluster.Spec),
-		Address:        in.Address,
-		SecurityGroups: in.Cluster.Spec.ControlPlane.SecurityGroups,
-	}
+	nic := in.NIC
+	nic.Namespace = in.Cluster.Namespace
+	nic.Subnet = SubnetName(in.Cluster.Spec)
+	nic.Address = in.Address
+	nic.SecurityGroups = in.Cluster.Spec.ControlPlane.SecurityGroups
+	return nic
 }
 
 func controlPlanePatch(in ControlPlaneInput) (string, error) {
@@ -45,6 +47,9 @@ func controlPlanePatch(in ControlPlaneInput) (string, error) {
 		template["labels"] = toAny(attachment.Labels)
 	}
 	patch := map[string]any{"spec": map[string]any{"template": map[string]any{"metadata": template}}}
+	if in.RuntimeClass != "" {
+		patch["spec"].(map[string]any)["template"].(map[string]any)["spec"] = map[string]any{"runtimeClassName": in.RuntimeClass}
+	}
 	body, err := sigyaml.Marshal(patch)
 	if err != nil {
 		return "", fmt.Errorf("marshal the control plane patch: %w", err)

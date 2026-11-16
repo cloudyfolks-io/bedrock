@@ -129,14 +129,18 @@ func (r BuildResolver) stepTimeout(ctx context.Context, b v1alpha1.Build, in Bui
 
 func (r BuildResolver) stepSubnet(ctx context.Context, b v1alpha1.Build, in BuildInput) (BuildInput, *Gate, error) {
 	name := b.Spec.Network.SubnetRef
-	_, dns, gate, err := Resolver{Client: r.Client}.resolveSubnet(ctx, b.Namespace, name)
+	subnet, cfg, gate, err := Resolver{Client: r.Client}.resolveSubnet(ctx, b.Namespace, name)
 	if err != nil || gate != nil {
 		return in, gate, err
 	}
+	dns := DNSServersOf(subnet, cfg.DNSServers)
 	if len(dns) == 0 {
 		return in, gateOf(ReasonNoDNSServers, "the subnet %q has no DNS servers, and the Settings network.dns-servers and network.services.resolver are empty, so the build would use the cluster DNS", name), nil
 	}
-	in.NIC = network.NIC{Namespace: b.Namespace, Subnet: name}
+	in.NIC, err = network.ResolvePodNIC(ctx, r.Client, cfg, network.NIC{Class: network.NetworkClassWorkload, Namespace: b.Namespace, Subnet: name})
+	if err != nil {
+		return in, nil, err
+	}
 	in.DNSServers = dns
 	return in, nil, nil
 }

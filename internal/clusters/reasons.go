@@ -12,6 +12,7 @@ const (
 	ReasonSecurityGroupNotReady = "SecurityGroupNotReady"
 	ReasonCIDROverlap           = "CIDROverlap"
 	ReasonVersionNotAllowed     = "VersionNotAllowed"
+	ReasonRuntimeUnavailable    = "RuntimeUnavailable"
 	ReasonAddressOutsideSubnet  = network.ReasonAddressOutsideSubnet
 	ReasonAddressReserved       = network.ReasonAddressReserved
 	ReasonAddressInUse          = network.ReasonAddressInUse
@@ -31,7 +32,7 @@ const (
 func Reasons() []string {
 	return []string{
 		ReasonNotInProject, ReasonInvalidSpec, ReasonAddonDisabled, ReasonSubnetNotFound, ReasonSubnetNotReady,
-		ReasonNoExternalPath, ReasonSecurityGroupNotReady, ReasonCIDROverlap, ReasonVersionNotAllowed,
+		ReasonNoExternalPath, ReasonSecurityGroupNotReady, ReasonCIDROverlap, ReasonVersionNotAllowed, ReasonRuntimeUnavailable,
 		ReasonAddressOutsideSubnet, ReasonAddressReserved, ReasonAddressInUse, ReasonAddressExhausted, ReasonExcludeIPsInvalid,
 		ReasonApplyFailed, ReasonNameConflict, ReasonControlPlaneNotReady, ReasonWorkersNotReady, ReasonWorkerFailed, ReasonWorkerCleanupPending,
 		ReasonSuspending, ReasonSuspended, ReasonReady, ReasonDeleting,

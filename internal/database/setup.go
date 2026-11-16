@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	appsv1 "k8s.io/api/apps/v1"
+	nodev1 "k8s.io/api/node/v1"
 	"k8s.io/apimachinery/pkg/types"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/builder"
@@ -113,6 +114,8 @@ func (r *Reconciler) SetupWithManager(mgr ctrl.Manager) error {
 		Watches(&appsv1.Deployment{}, handler.EnqueueRequestsFromMapFunc(r.databaseOfInstance), builder.WithPredicates(predicate.NewPredicateFuncs(inPlatformNamespace))).
 		Watches(&v1alpha1.Subnet{}, handler.EnqueueRequestsFromMapFunc(r.databasesOfSubnet)).
 		Watches(&v1alpha1.Setting{}, handler.EnqueueRequestsFromMapFunc(r.allDatabases), builder.WithPredicates(predicate.NewPredicateFuncs(databaseSetting))).
+		Watches(&v1alpha1.Cluster{}, handler.EnqueueRequestsFromMapFunc(r.allDatabases)).
+		Watches(&nodev1.RuntimeClass{}, handler.EnqueueRequestsFromMapFunc(r.allDatabases)).
 		Watches(&v1alpha1.Addon{}, handler.EnqueueRequestsFromMapFunc(r.allDatabases), builder.WithPredicates(predicate.NewPredicateFuncs(engineAddon))).
 		Complete(r)
 }
@@ -148,7 +151,7 @@ func (r *Reconciler) databasesOfSubnet(ctx context.Context, obj client.Object) [
 }
 
 func databaseSetting(obj client.Object) bool {
-	return strings.HasPrefix(obj.GetName(), settingPrefix)
+	return strings.HasPrefix(obj.GetName(), settingPrefix) || strings.HasPrefix(obj.GetName(), "network.") || obj.GetName() == "container.runtime-class"
 }
 
 func (r *Reconciler) allDatabases(ctx context.Context, _ client.Object) []reconcile.Request {
@@ -188,6 +191,6 @@ func CachedTypes() []client.Object {
 	return []client.Object{
 		&v1alpha1.Database{}, &v1alpha1.DatabaseUser{}, &v1alpha1.DatabaseSchema{},
 		&v1alpha1.Setting{}, &v1alpha1.Addon{}, &v1alpha1.Subnet{}, &v1alpha1.SecurityGroup{},
-		&appsv1.Deployment{},
+		&appsv1.Deployment{}, &v1alpha1.Cluster{}, &nodev1.RuntimeClass{},
 	}
 }

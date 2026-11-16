@@ -65,6 +65,13 @@ The VM of a worker has the name `<cluster>-<worker>`.
 ## Control plane address
 
 The control plane pod has a fixed address.
+
+When `network.tenant-management.enabled` is true, the control plane uses
+`tenant-managed` on eth0 and its project subnet on net1. The fixed address
+and the API endpoint stay on net1. The management routes use the current
+Cluster ranges. The runtime comes from `container.runtime-class`; a missing
+RuntimeClass or the value `none` gives `RuntimeUnavailable`. When management
+networking is disabled, the existing single-interface pod shape stays in use.
 The address is the `externalAddress` of the cluster and a name in the certificate of the API server.
 A changed address would break every join token, so the address cannot change.
 
@@ -203,6 +210,7 @@ The condition `Ready` has one of these reasons.
 | `SecurityGroupNotReady` | A SecurityGroup does not exist or is not ready. | Make the group or wait. |
 | `CIDROverlap` | A cluster CIDR overlaps the other CIDR, a Subnet of the Network or a platform range. | Choose other CIDRs. They are immutable, so make a new cluster. |
 | `VersionNotAllowed` | The version is not in the Setting `clusters.versions`. | Use an allowed version, or ask an administrator to change the Setting. |
+| `RuntimeUnavailable` | Tenant management networking needs the configured control-plane RuntimeClass, and it is absent or disabled. | Install the RuntimeClass selected by `container.runtime-class`. |
 | `AddressOutsideSubnet` | `controlPlane.address` is not inside the Subnet. | Use an address of the Subnet. |
 | `AddressReserved` | `controlPlane.address` is the gateway, the network or broadcast address, or an excluded address. | Use another address. |
 | `AddressInUse` | Another pod or cluster holds `controlPlane.address`. | Use another address or leave the field empty. |

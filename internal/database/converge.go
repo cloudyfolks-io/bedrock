@@ -477,7 +477,7 @@ func (r *Reconciler) applyProxy(ctx context.Context, in *flow, vip string) (*Ref
 	}
 	objects, err := ProxyObjects(ProxyInput{
 		Database: *in.db, Project: in.project, Image: in.pods.Image, Subnet: in.subnet, Address: address, VIP: vip, Port: in.port,
-		RuntimeClass: in.pods.RuntimeClass, DNSServers: in.pods.DNSServers, Revision: revision,
+		RuntimeClass: in.pods.RuntimeClass, DNSServers: in.pods.DNSServers, Revision: revision, NIC: in.pods.NIC,
 	})
 	if err != nil {
 		return nil, err

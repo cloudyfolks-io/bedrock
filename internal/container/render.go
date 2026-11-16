@@ -30,6 +30,13 @@ type RenderInput struct {
 
 func RenderDeployment(in RenderInput) (*unstructured.Unstructured, error) {
 	spec := in.Container.Spec
+	if spec.Probes != nil && in.NIC.Class == "" {
+		for _, probe := range []*v1alpha1.ContainerProbe{spec.Probes.Liveness, spec.Probes.Readiness} {
+			if probe != nil && (probe.HTTPGet != nil || probe.TCPSocket != nil || probe.GRPC != nil) {
+				return nil, fmt.Errorf("network probes need the tenant management network")
+			}
+		}
+	}
 	attachment := network.PodAttachment(in.NIC)
 	deployment := appsv1.Deployment{
 		TypeMeta: metav1.TypeMeta{APIVersion: "apps/v1", Kind: "Deployment"},
@@ -293,22 +300,30 @@ func writeProbes(obj *unstructured.Unstructured, probes *v1alpha1.ContainerProbe
 }
 
 func probeOf(probe v1alpha1.ContainerProbe) map[string]any {
-	var words []string
-	if probe.Exec != nil {
-		words = probe.Exec.Command
-	}
-	command := make([]any, len(words))
-	for i, word := range words {
-		command[i] = word
-	}
-	return map[string]any{
-		"exec":                map[string]any{"command": command},
+	out := map[string]any{
 		"initialDelaySeconds": int64(valueOr(probe.InitialDelaySeconds, 0)),
 		"periodSeconds":       int64(valueOr(probe.PeriodSeconds, 10)),
 		"timeoutSeconds":      int64(valueOr(probe.TimeoutSeconds, 1)),
 		"successThreshold":    int64(valueOr(probe.SuccessThreshold, 1)),
 		"failureThreshold":    int64(valueOr(probe.FailureThreshold, 3)),
 	}
+	if probe.Exec != nil {
+		command := make([]any, len(probe.Exec.Command))
+		for i, word := range probe.Exec.Command {
+			command[i] = word
+		}
+		out["exec"] = map[string]any{"command": command}
+	}
+	if probe.HTTPGet != nil {
+		out["httpGet"] = map[string]any{"path": probe.HTTPGet.Path, "port": int64(probe.HTTPGet.Port)}
+	}
+	if probe.TCPSocket != nil {
+		out["tcpSocket"] = map[string]any{"port": int64(probe.TCPSocket.Port)}
+	}
+	if probe.GRPC != nil {
+		out["grpc"] = map[string]any{"port": int64(probe.GRPC.Port), "service": probe.GRPC.Service}
+	}
+	return out
 }
 
 func valueOr(value *int32, fallback int32) int32 {

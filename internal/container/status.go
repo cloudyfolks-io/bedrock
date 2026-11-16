@@ -213,6 +213,14 @@ func PodViewOf(pod corev1.Pod, subnet string, now time.Time) PodView {
 }
 
 func podAddress(pod corev1.Pod, subnet string) string {
+	if pod.Labels[network.NetworkClassLabel] != "" {
+		return network.PodVPCAddress(pod)
+	}
+	for key := range pod.Annotations {
+		if strings.HasPrefix(key, "vpc.kube-system.fabric.cloudyfolks.io/") {
+			return network.PodVPCAddress(pod)
+		}
+	}
 	prefix := network.SubnetProvider(pod.Namespace, subnet) + ".cloudyfolks.io/"
 	if address := strings.TrimSpace(pod.Annotations[prefix+"ip_address"]); address != "" && pod.Annotations[prefix+"allocated"] == "true" {
 		return strings.TrimSpace(strings.Split(address, ",")[0])
