@@ -48,6 +48,9 @@ func CheckRestore(in RestoreCheck) *Refusal {
 	if in.PrefixObjects == 0 {
 		return &Refusal{Reason: ReasonRestoreSourceEmpty, Message: "the backup prefix " + restore.SourceUID + "/ holds no object"}
 	}
+	if in.Source == nil && in.TombstoneNamespace == "" {
+		return &Refusal{Reason: ReasonRestoreSourceMismatch, Message: "the source backup has no project ownership record"}
+	}
 	return nil
 }
 

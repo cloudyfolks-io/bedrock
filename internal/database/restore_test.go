@@ -6,6 +6,7 @@ import (
 	"time"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/util/uuid"
 
 	"github.com/cloudyfolks-io/bedrock/api/v1alpha1"
 )
@@ -46,10 +47,10 @@ func TestCheckRestore(t *testing.T) {
 		reason string
 	}{
 		{"no restore", RestoreCheck{Target: targetOf("a", func(db *v1alpha1.Database) { db.Spec.Restore = nil }), Now: restoreNow}, ""},
-		{"a source that names no live object but has backups", RestoreCheck{Target: targetOf("a", nil), PrefixObjects: 3, Now: restoreNow}, ""},
+		{"a source without an ownership record", RestoreCheck{Target: targetOf("a", nil), PrefixObjects: 3, Now: restoreNow}, ReasonRestoreSourceMismatch},
 		{"a live source of the same shape", RestoreCheck{Target: targetOf("a", nil), Source: sourceOf("a", nil), PrefixObjects: 3, Now: restoreNow}, ""},
 		{"a live source with less storage", RestoreCheck{Target: targetOf("a", nil), Source: sourceOf("a", func(db *v1alpha1.Database) { db.Spec.StorageGi = 10 }), PrefixObjects: 1, Now: restoreNow}, ""},
-		{"a past target time", RestoreCheck{Target: targetOf("a", func(db *v1alpha1.Database) { db.Spec.Restore.TargetTime = &past }), PrefixObjects: 1, Now: restoreNow}, ""},
+		{"a past target time", RestoreCheck{Target: targetOf("a", func(db *v1alpha1.Database) { db.Spec.Restore.TargetTime = &past }), TombstoneNamespace: "a", PrefixObjects: 1, Now: restoreNow}, ""},
 		{"a future target time", RestoreCheck{Target: targetOf("a", func(db *v1alpha1.Database) { db.Spec.Restore.TargetTime = &future }), PrefixObjects: 1, Now: restoreNow}, ReasonRestoreTargetInFuture},
 		{"an empty prefix", RestoreCheck{Target: targetOf("a", nil), Now: restoreNow}, ReasonRestoreSourceEmpty},
 		{"a live source with an empty prefix", RestoreCheck{Target: targetOf("a", nil), Source: sourceOf("a", nil), Now: restoreNow}, ReasonRestoreSourceEmpty},
@@ -120,12 +121,20 @@ func TestLoadRestoreCheckFindsALiveSourceTheTombstoneAndThePrefix(t *testing.T) 
 		t.Fatalf("refusal %+v", refusal)
 	}
 
-	fake.put("33333333-4444-5555-6666-777777777777/base/1", 10)
-	imported := targetOf(source.Namespace, func(db *v1alpha1.Database) { db.Spec.Restore.SourceUID = "33333333-4444-5555-6666-777777777777" })
+	importedUID := uuid.NewUUID()
+	fake.put(string(importedUID)+"/base/1", 10)
+	imported := targetOf(source.Namespace, func(db *v1alpha1.Database) { db.Spec.Restore.SourceUID = string(importedUID) })
 	check, err = LoadRestoreCheck(ctx, c, store, cfg, imported, restoreNow)
 	must(t, err)
-	if check.Source != nil || check.PrefixObjects != 1 || CheckRestore(check) != nil {
-		t.Fatalf("a source that names no live object: %+v", check)
+	if check.Source != nil || check.PrefixObjects != 1 || CheckRestore(check) == nil {
+		t.Fatalf("an imported source without ownership: %+v", check)
+	}
+	importedSource := v1alpha1.Database{ObjectMeta: metav1.ObjectMeta{Name: "imported", Namespace: source.Namespace, UID: importedUID}}
+	must(t, EnsureTombstone(ctx, c, importedSource, project, time.Hour, restoreNow))
+	check, err = LoadRestoreCheck(ctx, c, store, cfg, imported, restoreNow)
+	must(t, err)
+	if CheckRestore(check) != nil {
+		t.Fatalf("an imported source with project ownership: %+v", check)
 	}
 }
 

@@ -12,6 +12,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/apimachinery/pkg/util/uuid"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
@@ -301,7 +302,7 @@ func (w *world) mysqlRestore() (*unstructured.Unstructured, bool) {
 }
 
 func TestAMySQLRestoreStartsOnAReadyClusterAndHoldsTheDatabaseUntilItSucceeds(t *testing.T) {
-	source := "33333333-4444-5555-6666-777777777777"
+	source := string(uuid.NewUUID())
 	w := newWorld(t, func(spec *v1alpha1.DatabaseSpec) {
 		spec.Engine, spec.Version = v1alpha1.DatabaseEngineMySQL, "8.4"
 		spec.Restore = &v1alpha1.DatabaseRestore{SourceUID: source}
@@ -309,6 +310,8 @@ func TestAMySQLRestoreStartsOnAReadyClusterAndHoldsTheDatabaseUntilItSucceeds(t 
 	setAddon(t, w.c, "percona-ps", true)
 	w.addVersion(v1alpha1.DatabaseVersionSpec{Engine: "mysql", Major: "8.4", Image: mysqlImage, Port: 3306, Enabled: true, Companions: map[string]string{"haproxy": haproxyPercona}})
 	w.s3.put(source+"/db-"+source+"-2026-11-04-15:14:24-full/xtrabackup_checkpoints", 10)
+	imported := v1alpha1.Database{ObjectMeta: metav1.ObjectMeta{Name: "imported", Namespace: w.namespace, UID: types.UID(source)}}
+	must(t, EnsureTombstone(context.Background(), w.c, imported, testProject("x"), time.Hour, w.clock))
 	create(t, w.c, &corev1.Secret{ObjectMeta: metav1.ObjectMeta{Name: TombstoneName(types.UID(source)), Namespace: PlatformNamespace}, Data: map[string][]byte{"root": []byte("source-root")}})
 	w.reconcile()
 	if root := getSecret(t, w.c, PlatformNamespace, Suffixed(w.db.UID, SecretSuperuser)).Data["root"]; string(root) != "source-root" {

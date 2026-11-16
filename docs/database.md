@@ -165,7 +165,7 @@ The request is `Refused` with the reason `BackupNotSupported` for Valkey, `Backu
 
 To restore, set `spec.restore.sourceUID` to the UID of the source database. Add `targetTime` for a point in time.
 
-- The source does not need to be a live object. An old UID works when the prefix `<uid>/` has at least one object.
+- The source does not need to be a live object. An old UID needs a backup prefix and a tombstone that records the same project namespace. A prefix without a project ownership record is refused with `RestoreSourceMismatch`.
 - A live source must have the same engine and version. Its storage must not be larger than `storageGi`. It must be in the same project.
 - The restored database gets a new admin password.
 
@@ -353,5 +353,6 @@ Only the tombstone stays, until it expires.
 
 A database that existed before Bedrock can be restored from its backups.
 Set `spec.restore.sourceUID` to the old UUID and set `database.backup.bucket` to the bucket that holds its prefix.
+Before the restore, an administrator must create the ConfigMap `tombstone-<old UUID>` in `bedrock-dbaas` with `data.namespace` set to the target project namespace and `data.name` set to the old database name. This record binds the imported backup to its project. Do not set a deletion deadline until the import is complete.
 This is a generic feature. The product has no field for the import only.
 The move of data is a one-time job outside the product.

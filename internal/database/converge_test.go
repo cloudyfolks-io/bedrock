@@ -11,6 +11,8 @@ import (
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/apimachinery/pkg/util/uuid"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 
@@ -292,10 +294,13 @@ func TestANewDatabaseThatStaysNotReadyFailsAfterTheProvisionTimeout(t *testing.T
 }
 
 func TestARestoredDatabaseShowsRestoringAndResetsTheAdminPassword(t *testing.T) {
+	sourceUID := string(uuid.NewUUID())
 	w := newWorld(t, func(spec *v1alpha1.DatabaseSpec) {
-		spec.Restore = &v1alpha1.DatabaseRestore{SourceUID: "33333333-4444-5555-6666-777777777777"}
+		spec.Restore = &v1alpha1.DatabaseRestore{SourceUID: sourceUID}
 	})
-	w.s3.put("33333333-4444-5555-6666-777777777777/base/1", 10)
+	w.s3.put(sourceUID+"/base/1", 10)
+	source := v1alpha1.Database{ObjectMeta: metav1.ObjectMeta{Name: "imported", Namespace: w.namespace, UID: types.UID(sourceUID)}}
+	must(t, EnsureTombstone(context.Background(), w.c, source, testProject("x"), time.Hour, w.clock))
 	w.reconcile()
 	if w.phase() != "Restoring" {
 		t.Fatalf("phase %s reason %s", w.phase(), w.reason())
