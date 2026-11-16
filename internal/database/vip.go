@@ -118,8 +118,11 @@ func (a *Allocator) EnsureVIP(ctx context.Context, c client.Client, live client.
 	err := live.Get(ctx, client.ObjectKey{Namespace: PlatformNamespace, Name: VIPName(db.UID)}, &existing)
 	found := err == nil
 	if found {
+		if existing.Labels[LabelInstance] != Name(db.UID) {
+			return "", ErrVIPNameTaken
+		}
 		if address := strings.TrimSpace(existing.Annotations[annotationKubeVIP]); address != "" {
-			if existing.Annotations[annotationKubeVIPInterface] == cfg.VIPInterface || existing.Labels[LabelInstance] != Name(db.UID) {
+			if existing.Annotations[annotationKubeVIPInterface] == cfg.VIPInterface {
 				return address, nil
 			}
 			service, err := VIPService(db, project, address, cfg.VIPInterface, port)
@@ -130,9 +133,6 @@ func (a *Allocator) EnsureVIP(ctx context.Context, c client.Client, live client.
 				return "", err
 			}
 			return address, c.Create(ctx, service, client.FieldOwner(v1alpha1.DatabaseFieldManager))
-		}
-		if existing.Labels[LabelInstance] != Name(db.UID) {
-			return "", ErrVIPNameTaken
 		}
 	}
 	if err != nil && !apierrors.IsNotFound(err) {

@@ -176,6 +176,37 @@ func TestEnsureVIPWithoutARangeIsRefusedAndMakesNoService(t *testing.T) {
 	}
 }
 
+func TestEnsureVIPRejectsForeignServices(t *testing.T) {
+	for name, annotations := range map[string]map[string]string{
+		"with an address":    {annotationKubeVIP: "100.79.0.1"},
+		"without an address": nil,
+	} {
+		t.Run(name, func(t *testing.T) {
+			c := startEnv(t)
+			ctx := context.Background()
+			ensurePlatformNamespace(t, c)
+			db, project := storedDatabase(t, c, nil)
+			service := &corev1.Service{
+				ObjectMeta: metav1.ObjectMeta{Name: VIPName(db.UID), Namespace: PlatformNamespace, Annotations: annotations},
+				Spec:       corev1.ServiceSpec{Type: corev1.ServiceTypeLoadBalancer, Ports: []corev1.ServicePort{{Port: 80}}},
+			}
+			create(t, c, service)
+			key := client.ObjectKeyFromObject(service)
+			var before corev1.Service
+			must(t, c.Get(ctx, key, &before))
+			vip, err := (&Allocator{}).EnsureVIP(ctx, c, c, vipConfig(t, "100.79.0.0/24"), *db, project, 5432)
+			if err != ErrVIPNameTaken || vip != "" {
+				t.Fatalf("address %q, error %v", vip, err)
+			}
+			var after corev1.Service
+			must(t, c.Get(ctx, key, &after))
+			if after.UID != before.UID || after.ResourceVersion != before.ResourceVersion {
+				t.Fatal("the foreign Service changed")
+			}
+		})
+	}
+}
+
 func TestVIPServiceAnnouncesOnTheInterfaceOnlyWhenSet(t *testing.T) {
 	with, err := VIPService(goldenDatabase(), goldenProject(), "100.66.16.2", "br-public.20", 5432)
 	must(t, err)
