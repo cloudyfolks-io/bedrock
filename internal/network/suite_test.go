@@ -128,6 +128,7 @@ func setSetting(t *testing.T, key, value string) {
 var purgedBedrockKinds = []string{"NetworkPeering", "Network", "Subnet", "ElasticIP", "LoadBalancer", "InternetGateway", "DNSZone", "SecurityGroup", "VirtualMachine", "Container", "Tenant"}
 
 var purgedFabricKinds = []schema.GroupVersionKind{
+	fabric.LoadBalancerPoolGVK,
 	fabric.OvnSnatRuleGVK, fabric.OvnFipGVK, fabric.OvnEipGVK, fabric.RouterLBRuleGVK, fabric.SwitchLBRuleGVK, fabric.VipGVK, fabric.DNSZoneGVK, fabric.SecurityGroupGVK,
 	fabric.SubnetGVK, fabric.VpcGVK, fabric.VlanGVK, fabric.ProviderNetworkGVK, fabric.BgpConfGVK, fabric.IPGVK,
 }

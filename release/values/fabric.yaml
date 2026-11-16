@@ -1,5 +1,7 @@
 crds:
   enabled: true
+features:
+  enableOvnLbSvc: true
 frr:
   enabled: true
 networkPolicies:

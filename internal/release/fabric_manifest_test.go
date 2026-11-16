@@ -57,6 +57,13 @@ func TestFabricNetworkPolicyEnforcementComesFromTheSetting(t *testing.T) {
 	}
 }
 
+func TestFabricHandlesClaimedLoadBalancerServices(t *testing.T) {
+	args := fabricControllerArgs(t)
+	if !slices.Contains(args, any("--enable-ovn-lb-svc=true")) {
+		t.Fatalf("args %v", args)
+	}
+}
+
 func TestFabricTLSComesFromTheSettingAndTheBundleHoldsNoKey(t *testing.T) {
 	bundle, _ := buildReal(t, "fabric")
 	objects := groupObjects(bundle, "fabric")

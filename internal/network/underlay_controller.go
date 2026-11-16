@@ -77,6 +77,10 @@ func (r *UnderlayReconciler) Reconcile(ctx context.Context, _ reconcile.Request)
 		}
 		wanted[identity(object)] = true
 	}
+	servicesReady, err := r.syncServicesPool(ctx, cfg)
+	if err != nil {
+		return reconcile.Result{}, err
+	}
 	if err := r.syncAttachment(ctx, cfg.TenantManagement.Enabled); err != nil {
 		return reconcile.Result{}, err
 	}
@@ -89,6 +93,9 @@ func (r *UnderlayReconciler) Reconcile(ctx context.Context, _ reconcile.Request)
 	}
 	if refused != "" {
 		return reconcile.Result{RequeueAfter: underlayRetry}, warn(ctx, r.Client, settingReference(keyProviderNetwork), ReasonInUse, refused)
+	}
+	if !servicesReady {
+		return reconcile.Result{RequeueAfter: underlayRetry}, nil
 	}
 	return reconcile.Result{}, nil
 }
@@ -173,6 +180,8 @@ func (r *UnderlayReconciler) holder(ctx context.Context, gvk schema.GroupVersion
 	var holderGVK schema.GroupVersionKind
 	var field string
 	switch gvk {
+	case fabric.SubnetGVK:
+		holderGVK, field = fabric.LoadBalancerPoolGVK, "subnet"
 	case fabric.VlanGVK:
 		holderGVK, field = fabric.SubnetGVK, "vlan"
 	case fabric.ProviderNetworkGVK:
@@ -205,6 +214,12 @@ func (r *UnderlayReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	for _, gvk := range append(slices.Clone(underlayKinds), attachmentGVK) {
 		object := newObject(gvk, "")
 		b = b.Watches(object, handler.EnqueueRequestsFromMapFunc(toUnderlay), builder.WithPredicates(underlayLabel))
+	}
+	servicesObject := predicate.NewPredicateFuncs(func(obj client.Object) bool {
+		return obj.GetName() == servicesLoadBalancerPoolName || obj.GetName() == tenantManagementVPC
+	})
+	for _, gvk := range []schema.GroupVersionKind{fabric.LoadBalancerPoolGVK, fabric.VpcGVK} {
+		b = b.Watches(newObject(gvk, ""), handler.EnqueueRequestsFromMapFunc(toUnderlay), builder.WithPredicates(servicesObject))
 	}
 	return b.Complete(r)
 }

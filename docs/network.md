@@ -327,6 +327,33 @@ Three Settings turn it on:
 The first /24 of the services provider network is for the addresses of the services.
 Put the resolver there.
 
+Bedrock enables Fabric's `ovn-lb-svc` controller and creates the non-default
+`LoadBalancerPool` named `services-plane` on `provider-<services provider name>`.
+The pool announces addresses through OVN in L2 mode. The operator enables
+external access on Fabric's existing `ovn-cluster` Vpc and adds this subnet to
+its `extraExternalSubnets`. Other Vpc settings and external subnets stay unchanged.
+Fabric must create the default Vpc and make its services router port Ready
+before a Service can claim an address.
+
+A platform Service uses the class `fabric.cloudyfolks.io/loadbalancer`, the
+label `fabric.cloudyfolks.io/lb-pool: services-plane` and, for a fixed address,
+the annotation `lb.fabric.cloudyfolks.io/ips`. Bedrock does not change existing
+Services or their addresses. The API ingress and database gate Services keep
+their kube-vip configuration.
+
+The operator refuses an existing pool that it does not own or whose settings
+differ. It never changes a pool's subnet because Fabric would replace its
+allocated addresses. Disabling the services setting keeps the pool and default
+Vpc attachment. The underlay subnet cannot be pruned while a pool references it.
+Before removing or replacing the pool, move or drain its Services, detach the
+default Vpc from the old subnet and remove the pool through the cluster's
+infrastructure configuration.
+
+This path requires a Fabric release with the claimed-Service controller fix.
+Fabric `v1.2.2` can process a claimed Service through both its pool controller
+and its legacy Service controller; do not migrate platform Service VIPs with
+that version.
+
 For each Network with `enableExternal`, the Network controller does these steps:
 
 1. It adds the provider network to `extraExternalSubnets` of the Vpc, after the other entries.

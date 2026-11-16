@@ -10,6 +10,7 @@ import (
 var requiredKinds = []schema.GroupKind{
 	{Group: fabric.Group, Kind: "Vpc"},
 	{Group: fabric.Group, Kind: "Subnet"},
+	{Group: fabric.Group, Kind: "LoadBalancerPool"},
 	attachmentGVK.GroupKind(),
 }
 

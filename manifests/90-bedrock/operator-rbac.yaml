@@ -379,6 +379,7 @@ rules:
   resources:
   - bgp-confs
   - dns-zones
+  - loadbalancer-pools
   - ovn-eips
   - ovn-fips
   - ovn-snat-rules
