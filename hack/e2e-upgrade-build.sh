@@ -20,7 +20,9 @@ build() {
   local image=$registry/bedrock:$version
   # Old VERSION_A_REF trees may not have the split build/render targets.
   if grep -q '^release-from-build:' Makefile; then
-    make build binaries VERSION="$version"
+    # Containerfile copies dist/release. Render with this version's config
+    # before building its image; the configured image is not digest-resolved.
+    make build binaries release-from-build VERSION="$version" IMAGE="$image" PIN_DIGESTS=1 K0S_VERSION="$k0s" UPGRADE_FROM="$from" RELEASE_CONFIG="$config"
   else
     make build release VERSION="$version" IMAGE="$image" PIN_DIGESTS=1 K0S_VERSION="$k0s" UPGRADE_FROM="$from" RELEASE_CONFIG="$config"
   fi

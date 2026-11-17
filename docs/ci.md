@@ -23,3 +23,9 @@ independent installation, upgrade, recovery and abort assertions are unchanged.
 `bundle-from-release` are explicit CI steps, not incremental build caches:
 callers must build the matching binaries first and render after publishing the
 image so pinned digests remain correct.
+
+Image preparation also renders `dist/release` before Docker builds, because
+`Containerfile` embeds it. The configured Bedrock image is excluded from digest
+resolution, so preparation does not require that image to exist in the registry.
+Host-install E2E jobs use supported Ubuntu 24.04 explicitly; runner label
+migrations must not silently bypass the installer's operating-system preflight.
