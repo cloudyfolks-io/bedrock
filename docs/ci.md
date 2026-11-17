@@ -3,6 +3,8 @@
 PRs cancel superseded runs. Fast validation and the complete envtest package
 partition run independently; E2E no longer waits for envtest. Both partitions
 together test every Go package once (including unit tests in envtest packages).
+Envtest runs at most two packages concurrently: each starts its own etcd and
+API server. This limits runner contention, not coverage, and adds no retries.
 
 Every code PR runs kind. Auth/UI changes add authn; compute/network/tenancy/
 images/objectstorage changes add tenant. Mixed changes union their suites.
