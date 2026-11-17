@@ -16,7 +16,10 @@ to pass. A selected PR run is not release evidence.
 
 UI outputs are tested/built once and shared only inside the same workflow run,
 named for its exact SHA. Versioned binaries and release manifests are not reused
-across incompatible release configs or versions. `release-from-build` and
+across incompatible release configs or versions. Both upgrade variants consume
+one exact-source archive containing the identical version A/B inputs; their
+independent installation, upgrade, recovery and abort assertions are unchanged.
+`release-from-build` and
 `bundle-from-release` are explicit CI steps, not incremental build caches:
 callers must build the matching binaries first and render after publishing the
 image so pinned digests remain correct.

@@ -55,3 +55,6 @@ class PlanTest(unittest.TestCase):
         release = (Path(__file__).resolve().parents[1] / ".github/workflows/release.yml").read_text()
         self.assertIn("uses: ./.github/workflows/ci.yml", release)
         self.assertIn("needs: qualification", release)
+        self.assertEqual(workflow.count("hack/e2e-upgrade-build.sh"), 1)
+        self.assertIn("needs: [upgrade-build]", workflow)
+        self.assertIn('test "$(cat dist/upgrade-source)" = "$(git rev-parse HEAD)"', workflow)
