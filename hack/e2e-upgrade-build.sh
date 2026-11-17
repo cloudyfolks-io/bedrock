@@ -18,10 +18,19 @@ retry() {
 build() {
   local version=$1 k0s=$2 from=$3 config=$4
   local image=$registry/bedrock:$version
-  make build release VERSION="$version" IMAGE="$image" PIN_DIGESTS=1 K0S_VERSION="$k0s" UPGRADE_FROM="$from" RELEASE_CONFIG="$config"
+  # Old VERSION_A_REF trees may not have the split build/render targets.
+  if grep -q '^release-from-build:' Makefile; then
+    make build binaries VERSION="$version"
+  else
+    make build release VERSION="$version" IMAGE="$image" PIN_DIGESTS=1 K0S_VERSION="$k0s" UPGRADE_FROM="$from" RELEASE_CONFIG="$config"
+  fi
   retry 3 docker build --build-arg VERSION="$version" -t "$image" -f Containerfile .
   docker push "$image"
-  make bundle VERSION="$version" IMAGE="$image" PIN_DIGESTS=1 K0S_VERSION="$k0s" UPGRADE_FROM="$from" BUNDLE_ARCH="$arch" RELEASE_CONFIG="$config"
+  if grep -q '^release-from-build:' Makefile; then
+    make release-from-build bundle-from-release VERSION="$version" IMAGE="$image" PIN_DIGESTS=1 K0S_VERSION="$k0s" UPGRADE_FROM="$from" BUNDLE_ARCH="$arch" RELEASE_CONFIG="$config"
+  else
+    make bundle VERSION="$version" IMAGE="$image" PIN_DIGESTS=1 K0S_VERSION="$k0s" UPGRADE_FROM="$from" BUNDLE_ARCH="$arch" RELEASE_CONFIG="$config"
+  fi
   rm -rf "dist/release-$version"
   cp -r dist/release "dist/release-$version"
 }
@@ -44,7 +53,7 @@ build_from_ref() {
   git worktree add --detach "$worktree_a" "$ref"
   mkdir -p "$worktree_a/dist" "$repo/dist/cache"
   ln -s "$repo/dist/cache" "$worktree_a/dist/cache"
-  (cd "$worktree_a" && hack/e2e-release-config.sh release/components.yaml dist/components-e2e.yaml && build "$version" "$k0s" "" dist/components-e2e.yaml)
+  (cd "$worktree_a" && hack/e2e-release-config.sh release/components.yaml dist/components-e2e.yaml && UI_PREBUILT=0 build "$version" "$k0s" "" dist/components-e2e.yaml)
   cp "$worktree_a"/dist/bedrock-"$version"-* dist/
   rm -rf "dist/release-$version"
   cp -r "$worktree_a/dist/release-$version" "dist/release-$version"

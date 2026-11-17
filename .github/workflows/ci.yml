@@ -1,8 +1,39 @@
 name: ci
 on:
   pull_request:
+  schedule:
+    - cron: "20 1 * * *"
+  workflow_dispatch:
+  workflow_call:
+permissions:
+  contents: read
+concurrency:
+  group: ci-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 jobs:
-  test:
+  plan:
+    runs-on: ubuntu-latest
+    outputs:
+      jobs: ${{ steps.plan.outputs.jobs }}
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+      - id: plan
+        env:
+          EVENT: ${{ github.event_name }}
+          BASE: ${{ github.event.pull_request.base.sha }}
+          HEAD: ${{ github.event.pull_request.head.sha }}
+        run: |
+          : > changed-paths
+          if [ "$EVENT" = pull_request ]; then
+            # --no-renames includes both sides of moves, preventing scope evasion.
+            git diff --no-renames --name-only -z "$BASE...$HEAD" > changed-paths
+            python3 hack/ci_plan.py --paths-file changed-paths >> "$GITHUB_OUTPUT"
+          else
+            python3 hack/ci_plan.py --paths-file changed-paths --full >> "$GITHUB_OUTPUT"
+          fi
+  fast-checks:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
@@ -21,15 +52,48 @@ jobs:
       - run: make generate crds
       - run: git diff --exit-code && test -z "$(git status --porcelain)"
       - run: make lint
-      - run: make test
+      - run: python3 -m unittest discover -s hack -p 'test_ci_*.py'
+      - run: make test-unit
       - run: make release VERSION=ci
       - run: hack/check-release.sh
-      - run: make rbac && git diff --exit-code manifests/90-bedrock/operator-rbac.yaml
-  e2e-kind:
+      - run: make rbac UI_PREBUILT=1 && git diff --exit-code manifests/90-bedrock/operator-rbac.yaml
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ui-${{ github.sha }}
+          include-hidden-files: true
+          path: |
+            internal/authn/server/ui/dist
+            internal/proxy/ui/dist
+  envtest:
     runs-on: ubuntu-latest
-    needs: test
     steps:
       - uses: actions/checkout@v5
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+      - run: make test-envtest
+  # Preserve the existing required "test" check's complete test semantics.
+  test:
+    runs-on: ubuntu-latest
+    needs: [fast-checks, envtest]
+    if: always()
+    steps:
+      - env:
+          FAST: ${{ needs.fast-checks.result }}
+          ENVTEST: ${{ needs.envtest.result }}
+        run: test "$FAST" = success && test "$ENVTEST" = success
+  e2e-kind:
+    runs-on: ubuntu-latest
+    needs: [fast-checks, plan]
+    if: contains(fromJSON(needs.plan.outputs.jobs), 'kind')
+    env:
+      UI_PREBUILT: "1"
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/download-artifact@v4
+        with:
+          name: ui-${{ github.sha }}
+          path: internal
       - uses: actions/setup-go@v6
         with:
           go-version-file: go.mod
@@ -48,9 +112,16 @@ jobs:
       - run: make e2e-kind
   e2e-init:
     runs-on: ubuntu-latest
-    needs: test
+    needs: [fast-checks, plan]
+    if: contains(fromJSON(needs.plan.outputs.jobs), 'init')
+    env:
+      UI_PREBUILT: "1"
     steps:
       - uses: actions/checkout@v5
+      - uses: actions/download-artifact@v4
+        with:
+          name: ui-${{ github.sha }}
+          path: internal
       - run: sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL && df -h /
       - uses: actions/setup-go@v6
         with:
@@ -69,9 +140,16 @@ jobs:
       - run: sudo -E env "PATH=$PATH" KUBECONFIG=/var/lib/k0s/pki/admin.conf hack/e2e-init.sh
   e2e-bundle:
     runs-on: ubuntu-latest
-    needs: test
+    needs: [fast-checks, plan]
+    if: contains(fromJSON(needs.plan.outputs.jobs), 'bundle')
+    env:
+      UI_PREBUILT: "1"
     steps:
       - uses: actions/checkout@v5
+      - uses: actions/download-artifact@v4
+        with:
+          name: ui-${{ github.sha }}
+          path: internal
       - run: sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL && df -h /
       - uses: actions/setup-go@v6
         with:
@@ -85,19 +163,26 @@ jobs:
       - uses: azure/setup-helm@v4
         with:
           version: v3.19.0
-      - run: make build release VERSION=dev IMAGE=localhost:5000/bedrock:dev PIN_DIGESTS=1
+      - run: make build binaries VERSION=dev
       - run: docker build -t localhost:5000/bedrock:dev -f Containerfile .
       - run: docker run --rm -d -p 5000:5000 --name registry registry:3
       - run: for i in $(seq 1 30); do curl -sf http://localhost:5000/v2/ && break; sleep 1; done; curl -sf http://localhost:5000/v2/
       - run: docker push localhost:5000/bedrock:dev
-      - run: make bundle VERSION=dev IMAGE=localhost:5000/bedrock:dev PIN_DIGESTS=1
+      - run: make release-from-build bundle-from-release VERSION=dev IMAGE=localhost:5000/bedrock:dev PIN_DIGESTS=1
       - run: docker rm -f registry
       - run: sudo -E env "PATH=$PATH" KUBECONFIG=/var/lib/k0s/pki/admin.conf BUNDLE=dist/bedrock-dev-bundle-amd64.tar.zst IMAGE=localhost:5000/bedrock:dev hack/e2e-init.sh
   e2e-authn:
     runs-on: ubuntu-latest
-    needs: test
+    needs: [fast-checks, plan]
+    if: contains(fromJSON(needs.plan.outputs.jobs), 'authn')
+    env:
+      UI_PREBUILT: "1"
     steps:
       - uses: actions/checkout@v5
+      - uses: actions/download-artifact@v4
+        with:
+          name: ui-${{ github.sha }}
+          path: internal
       - run: sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL && df -h /
       - uses: actions/setup-go@v6
         with:
@@ -111,12 +196,12 @@ jobs:
       - uses: azure/setup-helm@v4
         with:
           version: v3.19.0
-      - run: make build release VERSION=dev IMAGE=localhost:5000/bedrock:dev PIN_DIGESTS=1
+      - run: make build binaries VERSION=dev
       - run: docker build -t localhost:5000/bedrock:dev -f Containerfile .
       - run: docker run --rm -d -p 5000:5000 --name registry registry:3
       - run: for i in $(seq 1 30); do curl -sf http://localhost:5000/v2/ && break; sleep 1; done; curl -sf http://localhost:5000/v2/
       - run: docker push localhost:5000/bedrock:dev
-      - run: make bundle VERSION=dev IMAGE=localhost:5000/bedrock:dev PIN_DIGESTS=1
+      - run: make release-from-build bundle-from-release VERSION=dev IMAGE=localhost:5000/bedrock:dev PIN_DIGESTS=1
       - run: docker rm -f registry
       - run: CGO_ENABLED=0 go test -c -tags e2e -o dist/e2e-authn-amd64.test ./test/e2e/authn
       - run: make crane && CRANE=$(go env GOPATH)/bin/crane hack/e2e-authn-images.sh
@@ -125,9 +210,16 @@ jobs:
   e2e-tenant:
     runs-on: ubuntu-latest
     timeout-minutes: 120
-    needs: test
+    needs: [fast-checks, plan]
+    if: contains(fromJSON(needs.plan.outputs.jobs), 'tenant')
+    env:
+      UI_PREBUILT: "1"
     steps:
       - uses: actions/checkout@v5
+      - uses: actions/download-artifact@v4
+        with:
+          name: ui-${{ github.sha }}
+          path: internal
       - run: sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /usr/local/.ghcup /usr/local/share/boost /usr/share/swift /usr/local/share/powershell /opt/hostedtoolcache/* && docker image prune -af && df -h /
       - uses: actions/setup-go@v6
         with:
@@ -142,12 +234,12 @@ jobs:
         with:
           version: v3.19.0
       - run: hack/e2e-release-config.sh release/components.yaml dist/components-e2e.yaml
-      - run: make build release VERSION=dev IMAGE=localhost:5000/bedrock:dev PIN_DIGESTS=1 RELEASE_CONFIG=dist/components-e2e.yaml
+      - run: make build binaries VERSION=dev
       - run: docker build -t localhost:5000/bedrock:dev -f Containerfile .
       - run: docker run --rm -d -p 5000:5000 --name registry registry:3
       - run: for i in $(seq 1 30); do curl -sf http://localhost:5000/v2/ && break; sleep 1; done; curl -sf http://localhost:5000/v2/
       - run: docker push localhost:5000/bedrock:dev
-      - run: make bundle VERSION=dev IMAGE=localhost:5000/bedrock:dev PIN_DIGESTS=1 RELEASE_CONFIG=dist/components-e2e.yaml
+      - run: make release-from-build bundle-from-release VERSION=dev IMAGE=localhost:5000/bedrock:dev PIN_DIGESTS=1 RELEASE_CONFIG=dist/components-e2e.yaml
       - run: docker rm -f registry && docker system prune -af && df -h /
       - run: CGO_ENABLED=0 go test -c -tags e2e -o dist/e2e-tenant-amd64.test ./test/e2e/tenant
       - run: make crane && CRANE=$(go env GOPATH)/bin/crane hack/e2e-tenant-images.sh
@@ -156,7 +248,8 @@ jobs:
   e2e-upgrade:
     name: ${{ matrix.name }}
     runs-on: ubuntu-latest
-    needs: test
+    needs: [fast-checks, plan]
+    if: contains(fromJSON(needs.plan.outputs.jobs), 'upgrade')
     strategy:
       fail-fast: false
       matrix:
@@ -166,6 +259,7 @@ jobs:
           - name: e2e-upgrade-abort
             abort: ControlPlane
     env:
+      UI_PREBUILT: "1"
       VERSION_A: v0.0.0-e2e.1
       VERSION_B: v0.0.0-e2e.2
       K0S_A: v1.36.2+k0s.0
@@ -173,6 +267,10 @@ jobs:
       ABORT_IN: ${{ matrix.abort }}
     steps:
       - uses: actions/checkout@v5
+      - uses: actions/download-artifact@v4
+        with:
+          name: ui-${{ github.sha }}
+          path: internal
       - run: sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /usr/local/.ghcup /usr/local/share/boost /usr/share/swift /usr/local/share/powershell /opt/hostedtoolcache/* && docker image prune -af && df -h /
       - uses: actions/setup-go@v6
         with:
