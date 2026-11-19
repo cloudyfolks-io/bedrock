@@ -5,8 +5,12 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/klauspost/compress/zstd"
 	"sigs.k8s.io/yaml"
@@ -35,8 +39,11 @@ func writeBedrockBinary(t *testing.T, content string) string {
 }
 
 func fakePull(calls *[]string) func(context.Context, string, string) (string, error) {
+	var lock sync.Mutex
 	return func(_ context.Context, ref, dest string) (string, error) {
+		lock.Lock()
 		*calls = append(*calls, ref)
+		lock.Unlock()
 		return "sha256:" + strings.Repeat("e", 64), os.WriteFile(dest, []byte("layout:"+ref), 0o644)
 	}
 }
@@ -80,6 +87,49 @@ func TestBuildBundleLaysOutEverything(t *testing.T) {
 		if info.Mode()&0o111 == 0 {
 			t.Fatalf("%s must be executable", binary)
 		}
+	}
+}
+
+func TestBuildBundlePullsImagesConcurrentlyAndKeepsManifestOrder(t *testing.T) {
+	releaseDir := t.TempDir()
+	refs := []string{"quay.io/a/b:3", "quay.io/a/b:1", "quay.io/a/b:2", "quay.io/a/b:4"}
+	writeReleaseFixture(t, releaseDir, refs)
+	k0s := filepath.Join(t.TempDir(), "k0s-bin")
+	airgap := filepath.Join(t.TempDir(), "airgap.tar")
+	if err := os.WriteFile(k0s, []byte("k0s"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(airgap, []byte("airgap"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	var started atomic.Int32
+	allStarted := make(chan struct{})
+	var calls []string
+	writeLayout := fakePull(&calls)
+	pull := func(ctx context.Context, ref, dest string) (string, error) {
+		if started.Add(1) == bundlePullLimit {
+			close(allStarted)
+		}
+		select {
+		case <-allStarted:
+			return writeLayout(ctx, ref, dest)
+		case <-ctx.Done():
+			return "", ctx.Err()
+		}
+	}
+	spec, err := BuildBundle(ctx, BundleInputs{ReleaseDir: releaseDir, Arch: "amd64", K0sBinary: k0s, BedrockBinary: writeBedrockBinary(t, "bedrock"), K0sAirgap: airgap, Pull: pull}, t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got []string
+	for _, image := range spec.Images {
+		got = append(got, image.Ref)
+	}
+	want := append(slices.Clone(refs), "ghcr.io/cloudyfolks-io/bedrock:v0.1.0")
+	if !slices.Equal(got, want) {
+		t.Fatalf("got %v, want %v", got, want)
 	}
 }
 

@@ -13,6 +13,7 @@ import (
 	"regexp"
 	"slices"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/cloudyfolks-io/bedrock/internal/host"
@@ -48,9 +49,12 @@ func TestRunBundleBuildProducesArchive(t *testing.T) {
 	airgap := filepath.Join(t.TempDir(), "airgap.tar")
 	os.WriteFile(airgap, []byte("airgap"), 0o644)
 	var pullArgs []string
+	var pullLock sync.Mutex
 	deps := BundleDeps{
 		Pull: func(_ context.Context, ref, dest, cacheDir, arch string) (string, error) {
+			pullLock.Lock()
 			pullArgs = append(pullArgs, cacheDir+" "+arch)
+			pullLock.Unlock()
 			return "sha256:" + strings.Repeat("f", 64), os.WriteFile(dest, []byte(ref), 0o644)
 		},
 		Airgap: func(_ context.Context, _, _, _, _ string) (string, error) { return airgap, nil },

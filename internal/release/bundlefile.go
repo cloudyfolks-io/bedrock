@@ -11,6 +11,7 @@ import (
 	"regexp"
 
 	"github.com/klauspost/compress/zstd"
+	"golang.org/x/sync/errgroup"
 	sigyaml "sigs.k8s.io/yaml"
 )
 
@@ -21,6 +22,7 @@ const (
 	bundleBedrockPath = "bedrock/bedrock"
 	bundleImagesDir   = "images"
 	bundleAirgapFile  = "k0s-airgap.tar"
+	bundlePullLimit   = 4
 )
 
 var unsafeRefChars = regexp.MustCompile(`[^A-Za-z0-9._-]`)
@@ -77,18 +79,44 @@ func BuildBundle(ctx context.Context, in BundleInputs, workDir string) (BundleSp
 		return BundleSpec{}, err
 	}
 	refs := mergeImages(bundle.Images, []string{bundle.Spec.Image})
-	images := make([]BundleImage, 0, len(refs))
-	imageDigest := ""
-	for _, ref := range refs {
+	images := make([]BundleImage, len(refs))
+	files := make(map[string]string, len(refs))
+	for i, ref := range refs {
 		file := ImageFileName(ref)
-		digest, err := in.Pull(ctx, ref, filepath.Join(imagesDir, file))
-		if err != nil {
-			return BundleSpec{}, fmt.Errorf("image %s: %w", ref, err)
+		if previous, exists := files[file]; exists {
+			return BundleSpec{}, fmt.Errorf("images %s and %s have the same archive name", previous, ref)
 		}
-		if ref == bundle.Spec.Image {
-			imageDigest = digest
+		files[file] = ref
+		images[i] = BundleImage{Ref: ref, File: file}
+	}
+	pulls, pullContext := errgroup.WithContext(ctx)
+	pulls.SetLimit(bundlePullLimit)
+	for i := range images {
+		if pullContext.Err() != nil {
+			break
 		}
-		images = append(images, BundleImage{Ref: ref, Digest: digest, File: file})
+		pulls.Go(func() error {
+			image := &images[i]
+			digest, err := in.Pull(pullContext, image.Ref, filepath.Join(imagesDir, image.File))
+			if err != nil {
+				return fmt.Errorf("image %s: %w", image.Ref, err)
+			}
+			image.Digest = digest
+			return nil
+		})
+	}
+	if err := pulls.Wait(); err != nil {
+		return BundleSpec{}, err
+	}
+	if err := ctx.Err(); err != nil {
+		return BundleSpec{}, err
+	}
+	imageDigest := ""
+	for _, image := range images {
+		if image.Ref == bundle.Spec.Image {
+			imageDigest = image.Digest
+			break
+		}
 	}
 	spec := BundleSpec{Version: bundle.Spec.Version, Arch: in.Arch, Image: bundle.Spec.Image, ImageDigest: imageDigest, K0sVersion: bundle.Spec.K0sVersion, Images: images}
 	raw, err := sigyaml.Marshal(spec)
