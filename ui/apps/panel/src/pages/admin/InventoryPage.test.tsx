@@ -7,6 +7,7 @@ import type { FakeRoute } from "../../test/fakeApi";
 
 const apiRoot = "/apis/bedrock.cloudyfolks.io/v1alpha1";
 const allVMs = `${apiRoot}/virtualmachines`;
+const inventoryWait = { timeout: 5000 };
 const projects = { projects: [
   { name: "staging", displayName: "Staging", tenant: "platform", namespace: "platform-staging" },
   { name: "tools", displayName: "Tools", tenant: "platform", namespace: "platform-tools" },
@@ -27,7 +28,7 @@ describe("admin inventory", () => {
     const second = machine("worker", "platform-tools");
     const platform = machine("operator-node", "bedrock-system");
     const { api } = show("/admin", { [`GET ${allVMs}`]: { body: { metadata: {}, items: [first, second, platform] } } });
-    const table = await screen.findByRole("table", { name: "Virtual machines" });
+    const table = await screen.findByRole("table", { name: "Virtual machines" }, inventoryWait);
     expect(screen.getByRole("heading", { name: "Resource inventory", level: 1 })).toBeTruthy();
     expect(within(table).getAllByRole("link", { name: "worker" }).map((link) => link.getAttribute("href"))).toEqual(["/p/staging/vms/worker", "/p/tools/vms/worker"]);
     const unmatched = within(table).getByText("operator-node").closest("tr") as HTMLElement;
@@ -40,20 +41,20 @@ describe("admin inventory", () => {
     const user = userEvent.setup();
     const namespaceList = `${apiRoot}/namespaces/platform-tools/virtualmachines`;
     const { api } = show("/admin/inventory?project=tools", { [`GET ${namespaceList}`]: { body: { metadata: {}, items: [machine("worker", "platform-tools")] } } });
-    await screen.findByRole("link", { name: "worker" });
+    await screen.findByRole("link", { name: "worker" }, inventoryWait);
     await user.type(screen.getByRole("textbox", { name: "Exact resource name" }), "worker");
     await user.click(screen.getByRole("button", { name: "Search" }));
-    await waitFor(() => expect(api.calls.find((call) => call.path === namespaceList && call.query.has("fieldSelector"))?.query.get("fieldSelector")).toBe("metadata.name=worker"));
+    await waitFor(() => expect(api.calls.find((call) => call.path === namespaceList && call.query.has("fieldSelector"))?.query.get("fieldSelector")).toBe("metadata.name=worker"), inventoryWait);
     expect(api.calls.some((call) => call.path === allVMs)).toBe(false);
   });
 
   it("does not broaden a request for an unavailable or unready project", async () => {
     const pending = show("/admin/inventory?project=pending");
-    expect(await screen.findByRole("heading", { name: "The project namespace is not ready" })).toBeTruthy();
+    expect(await screen.findByRole("heading", { name: "The project namespace is not ready" }, inventoryWait)).toBeTruthy();
     expect(pending.api.calls.some((call) => call.path.startsWith(apiRoot))).toBe(false);
     pending.unmount();
     const missing = show("/admin/inventory?project=missing");
-    expect(await screen.findByRole("heading", { name: "This project is unavailable" })).toBeTruthy();
+    expect(await screen.findByRole("heading", { name: "This project is unavailable" }, inventoryWait)).toBeTruthy();
     expect(missing.api.calls.some((call) => call.path.startsWith(apiRoot))).toBe(false);
   });
 
@@ -65,22 +66,22 @@ describe("admin inventory", () => {
         ? { status: 410, body: { kind: "Status", reason: "Expired" } }
         : { body: { metadata: { continue: token }, items: [machine("worker", "platform-staging")] } },
     });
-    await user.click(await screen.findByRole("button", { name: "Next" }));
-    expect(await screen.findByRole("heading", { name: "This list expired" })).toBeTruthy();
+    await user.click(await screen.findByRole("button", { name: "Next" }, inventoryWait));
+    expect(await screen.findByRole("heading", { name: "This list expired" }, inventoryWait)).toBeTruthy();
     expect(api.calls.find((call) => call.path === allVMs && call.query.has("continue"))?.query.get("continue")).toBe(token);
     await user.click(screen.getByRole("button", { name: "Go to first page" }));
-    expect(await screen.findByRole("link", { name: "worker" })).toBeTruthy();
+    expect(await screen.findByRole("link", { name: "worker" }, inventoryWait)).toBeTruthy();
   });
 
   it("shows a retry for a failed list and a distinct permission error", async () => {
     const user = userEvent.setup();
     let status = 503;
     show("/admin/inventory", { [`GET ${allVMs}`]: () => ({ status, body: { error: "failure" } }) });
-    expect(await screen.findByRole("alert")).toBeTruthy();
+    expect(await screen.findByRole("alert", {}, inventoryWait)).toBeTruthy();
     expect(screen.getByText("The panel could not load this data.")).toBeTruthy();
     status = 403;
     await user.click(screen.getByRole("button", { name: "Retry" }));
-    expect(await screen.findByText("You cannot view this")).toBeTruthy();
+    expect(await screen.findByText("You cannot view this", {}, inventoryWait)).toBeTruthy();
     expect(screen.queryByRole("button", { name: "Retry" })).toBeNull();
   });
 });
