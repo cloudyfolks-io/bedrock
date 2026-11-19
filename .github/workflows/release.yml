@@ -3,7 +3,12 @@ on:
   push:
     tags: ["v*"]
 jobs:
+  qualification:
+    uses: ./.github/workflows/ci.yml
+    permissions:
+      contents: read
   release:
+    needs: qualification
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -34,7 +39,7 @@ jobs:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
-      - run: make release binaries VERSION=${{ github.ref_name }} PIN_DIGESTS=1
+      - run: make release VERSION=${{ github.ref_name }} PIN_DIGESTS=1
       - id: image
         uses: docker/build-push-action@v7
         with:

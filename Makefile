@@ -19,9 +19,14 @@ UPGRADE_FROM ?=
 .PHONY: build test lint generate crds envtest-assets e2e-kind e2e-init e2e-bundle e2e-authn e2e-tenant controller-gen release crane bundle binaries rbac local-ci ui
 
 ui:
+ifeq ($(UI_PREBUILT),1)
+	test -f internal/authn/server/ui/dist/index.html
+	test -f internal/proxy/ui/dist/index.html
+else
 	cd ui && pnpm install --frozen-lockfile && pnpm -r test && pnpm -r typecheck && pnpm --filter login build && pnpm --filter panel build
 	touch internal/authn/server/ui/dist/.keep
 	touch internal/proxy/ui/dist/.keep
+endif
 
 build: ui
 	CGO_ENABLED=0 $(GO) build -trimpath -ldflags "-X github.com/cloudyfolks-io/bedrock/internal/cli.Version=$(VERSION)" -o $(BIN) ./cmd/bedrock
@@ -31,6 +36,13 @@ binaries: ui
 
 test: envtest-assets
 	KUBEBUILDER_ASSETS="$$($(ENVTEST) use $(ENVTEST_K8S_VERSION) -p path)" $(GO) test ./... -count=1 -timeout 45m
+
+.PHONY: test-unit test-envtest release-from-build bundle-from-release
+test-unit:
+	bash hack/ci-test.sh unit
+
+test-envtest: envtest-assets
+	KUBEBUILDER_ASSETS="$$($(ENVTEST) use $(ENVTEST_K8S_VERSION) -p path)" bash hack/ci-test.sh envtest
 
 lint:
 	$(GO) vet ./...
@@ -52,13 +64,16 @@ envtest-assets:
 crane:
 	@test -x $(CRANE) || $(GO) install github.com/google/go-containerregistry/cmd/crane@$(CRANE_VERSION)
 
-e2e-kind: build crds release crane
+e2e-kind: crds crane
 	CRANE=$(CRANE) hack/e2e-kind.sh
 
 e2e-init: build release
 	hack/e2e-init.sh
 
 release: build binaries
+	$(MAKE) release-from-build
+
+release-from-build:
 	@command -v $(HELM) >/dev/null || { echo "helm is required"; exit 1; }
 	$(BIN) release build --config $(RELEASE_CONFIG) --version $(VERSION) --image $(IMAGE) --out dist/release --helm $(HELM) --cache-dir dist/cache --binaries dist $(if $(PIN_DIGESTS),--pin-digests,) $(if $(K0S_VERSION),--k0s-version $(K0S_VERSION),) $(if $(UPGRADE_FROM),--upgrade-from $(UPGRADE_FROM),)
 
@@ -66,6 +81,9 @@ rbac: build
 	$(BIN) release rbac --release dist/release --out manifests/90-bedrock/operator-rbac.yaml
 
 bundle: build release
+	$(MAKE) bundle-from-release
+
+bundle-from-release:
 	$(BIN) bundle build --release dist/release --arch $(BUNDLE_ARCH) --out dist/bedrock-$(VERSION)-bundle-$(BUNDLE_ARCH).tar.zst --cache-dir dist/cache --bedrock-binary dist/bedrock-$(VERSION)-linux-$(BUNDLE_ARCH)
 
 e2e-bundle: bundle
