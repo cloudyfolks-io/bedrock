@@ -1,6 +1,6 @@
 # fabric Helm chart
 
-![Version: 1.2.2](https://img.shields.io/badge/Version-1.2.2-informational?style=flat-square)
+![Version: 1.2.6](https://img.shields.io/badge/Version-1.2.6-informational?style=flat-square)
 
 fabric is a Kubernetes network fabric for multi-tenant clouds. The project started as a fork of Kube-OVN and is now a standalone project.
 CRDs ship in the embedded `fabric-crds` subchart, so `helm upgrade` keeps them up to date. Set `crds.enabled=false` to manage CRDs yourself.
@@ -12,7 +12,7 @@ CRDs ship in the embedded `fabric-crds` subchart, so `helm upgrade` keeps them u
 The Helm chart is available from GitHub Container Registry:
 
 ```bash
-helm install fabric oci://ghcr.io/cloudyfolks-io/charts/fabric --version 1.2.2
+helm install fabric oci://ghcr.io/cloudyfolks-io/charts/fabric --version 1.2.6
 ```
 
 ### From Source
@@ -620,7 +620,7 @@ false
   "images": {
     "fabric": {
       "repository": "fabric",
-      "tag": "v1.2.2"
+      "tag": "v1.2.6"
     }
   },
   "registry": {
@@ -2366,7 +2366,7 @@ false
 			<td>ovsOvn.dpdkHybrid.tag</td>
 			<td>string</td>
 			<td><pre lang="json">
-"v1.2.2"
+"v1.2.6"
 </pre>
 </td>
 			<td>DPDK image tag.</td>
@@ -3076,4 +3076,3 @@ true
 	</tr>
 	</tbody>
 </table>
-

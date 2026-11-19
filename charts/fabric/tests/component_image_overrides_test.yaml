@@ -31,7 +31,7 @@ tests:
     asserts:
       - equal:
           path: spec.template.spec.containers[0].image
-          value: ghcr.io/cloudyfolks-io/fabric:v1.2.1
+          value: ghcr.io/cloudyfolks-io/fabric:v1.2.6
 
   - it: uses the Kubernetes capability name without the CAP_ prefix
     template: agent/agent-daemonset.yaml

@@ -2,8 +2,8 @@ apiVersion: v2
 name: fabric
 description: Kubernetes network fabric for multi-tenant clouds, built on OVN with BGP at the edge
 type: application
-version: 1.2.2
-appVersion: v1.2.2
+version: 1.2.6
+appVersion: v1.2.6
 kubeVersion: ">= 1.29.0-0"
 home: https://github.com/cloudyfolks-io/fabric
 sources:
@@ -20,5 +20,5 @@ maintainers:
     url: https://github.com/cloudyfolks-io
 dependencies:
   - name: fabric-crds
-    version: 1.2.2
+    version: 1.2.6
     condition: crds.enabled
