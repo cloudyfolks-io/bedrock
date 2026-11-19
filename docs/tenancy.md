@@ -82,6 +82,14 @@ Without the quota component, the project has no member access.
 If the quota object or its CRD disappears later, the operator removes the RoleBindings.
 It creates them again when the quota is back.
 
+## Services in a project
+
+Editors and owners can create and edit ordinary Kubernetes Services. A Service of type `LoadBalancer` can use the cluster's default Fabric address pool.
+
+Fabric owns the Service names that start with `slr-` and `rlr-`. Only trusted controllers and cluster administrators can change generated frontend Services or set Fabric VPC, switch, VIP, health check, and address pool annotations. A tenant can change an ordinary Service while keeping the VPC annotation that Fabric sets.
+
+Before an upgrade, check for existing Services that use a reserved name or these annotations. Confirm the owner and the purpose of each Service. Use a Bedrock LoadBalancer or a Service that an administrator configures when the workload needs a fixed address or an explicit pool. Verify that the upgrade preserves those addresses and connections.
+
 ## Create a project
 
 Create a Project object as a tenant owner.
