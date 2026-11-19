@@ -799,4 +799,4 @@ func TestRunJoinRefusesAKernelThatCannotMountAes256kKeys(t *testing.T) {
 	}
 }
 
-var defaultKubeletArgs = k0s.KubeletArgs(k0s.ReservationsFrom(nil), 0)
+var defaultKubeletArgs = k0s.KubeletArgs(k0s.KubeletConfigFrom(nil), 0)

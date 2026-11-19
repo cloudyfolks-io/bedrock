@@ -12,7 +12,7 @@ import (
 	"github.com/cloudyfolks-io/bedrock/internal/k0s"
 )
 
-var wantedKubeletArgs = k0s.KubeletArgs(k0s.ReservationsFrom(nil), 0)
+var wantedKubeletArgs = k0s.KubeletArgs(k0s.KubeletConfigFrom(nil), 0)
 
 const bareKubeletUnit = "[Service]\nExecStart=/usr/local/bin/k0s controller --config=/etc/k0s/k0s.yaml --kubelet-extra-args=--node-status-update-frequency=4s --enable-worker\n"
 
@@ -63,15 +63,19 @@ func TestK0sReconfigureAppliesTheKubeletSettingsOfTheCluster(t *testing.T) {
 	writeFixtureFile(t, filepath.Join(root, "usr/local/bin/k0s"), "new k0s")
 	fake.running = newK0s
 	writeFixtureFile(t, filepath.Join(root, "etc/k0s/k0s.yaml"), "apiVersion: k0s.k0sproject.io/v1beta1\n")
-	writeFixtureFile(t, controllerUnitPath(root), strings.Replace(controllerUnit, "helm ", "helm,coredns ", 1))
-	if err := env.Client.Create(context.Background(), &v1alpha1.Setting{ObjectMeta: metav1.ObjectMeta{Name: "kubelet.kube-reserved-memory"}, Spec: v1alpha1.SettingSpec{Value: "6Gi"}}); err != nil {
-		t.Fatal(err)
+	unit, _ := withKubeletArgs(strings.Replace(controllerUnit, "helm ", "helm,coredns ", 1), []string{"--max-pods=200"})
+	writeFixtureFile(t, controllerUnitPath(root), unit)
+	for name, value := range map[string]string{"kubelet.kube-reserved-memory": "6Gi", "kubelet.max-pods": "220"} {
+		if err := env.Client.Create(context.Background(), &v1alpha1.Setting{ObjectMeta: metav1.ObjectMeta{Name: name}, Spec: v1alpha1.SettingSpec{Value: value}}); err != nil {
+			t.Fatal(err)
+		}
 	}
 	outcome, err := k0sReconfigure(context.Background(), env)
 	if err != nil || outcome.Message != "k0scontroller.service reconfigured and restarted" {
 		t.Fatalf("outcome %+v %v", outcome, err)
 	}
-	if unit := readFixtureFile(t, controllerUnitPath(root)); !strings.Contains(unit, "--kube-reserved=cpu=1,memory=6Gi") {
+	if unit := readFixtureFile(t, controllerUnitPath(root)); !strings.Contains(unit, "--kube-reserved=cpu=1,memory=6Gi") ||
+		!strings.Contains(unit, "--max-pods=220") || strings.Count(unit, "--max-pods=") != 1 {
 		t.Fatalf("unit:\n%s", unit)
 	}
 	if !slices.Contains(fake.calls, "systemctl daemon-reload") {

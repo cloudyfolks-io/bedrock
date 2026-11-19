@@ -55,7 +55,7 @@ func RunJoin(ctx context.Context, args []string, deps InitDeps, stdout, stderr i
 	flags.StringVar(&o.bundle, "bundle", "", "install from this bundle archive")
 	flags.StringVar(&o.workDir, "work-dir", "/var/lib/bedrock", "directory for extracted bundles")
 	flags.StringVar(&o.adopt, "adopt-config", "", "cluster configuration file with spec.storage.adopt, to check this host for the adopted Ceph cluster")
-	flags.Var(&o.kubelet, "kubelet-setting", "kubelet reservation or eviction setting as key=value, repeatable")
+	flags.Var(&o.kubelet, "kubelet-setting", "kubelet setting as key=value, repeatable")
 	if err := flags.Parse(args); err != nil {
 		return 2
 	}

@@ -65,9 +65,9 @@ func withKubeletArgs(unit string, wanted []string) (string, bool) {
 	return unit[:match[0]] + next + unit[match[1]:], true
 }
 
-func reservationValues(ctx context.Context, c client.Reader) (map[string]string, error) {
+func kubeletValues(ctx context.Context, c client.Reader) (map[string]string, error) {
 	values := map[string]string{}
-	for _, key := range k0s.ReservationKeys {
+	for _, key := range k0s.KubeletSettingKeys {
 		var setting v1alpha1.Setting
 		if err := c.Get(ctx, client.ObjectKey{Name: key}, &setting); client.IgnoreNotFound(err) != nil {
 			return nil, err
@@ -86,11 +86,11 @@ func ensureKubeletArgs(ctx context.Context, env StepEnv, service k0sService) (bo
 	if err != nil {
 		return false, err
 	}
-	values, err := reservationValues(ctx, env.Client)
+	values, err := kubeletValues(ctx, env.Client)
 	if err != nil {
 		return false, err
 	}
-	wanted := k0s.KubeletArgs(k0s.ReservationsFrom(values), k0s.NodeMemory(env.Deps.Root))
+	wanted := k0s.InstallKubeletArgs(env.Deps.Root, values)
 	next, changed := withKubeletArgs(string(current), wanted)
 	if !changed {
 		return false, nil

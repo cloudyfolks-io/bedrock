@@ -105,12 +105,13 @@ These settings control the values. Change them with `kubectl edit setting <key>`
 | `kubelet.eviction-memory-available` | `1Gi` | Hard eviction threshold of `memory.available`. |
 | `kubelet.eviction-nodefs-available` | `10%` | Hard eviction threshold of `nodefs.available`. |
 | `kubelet.eviction-imagefs-available` | `15%` | Hard eviction threshold of `imagefs.available`. |
+| `kubelet.max-pods` | empty | Maximum Pods per node. Empty keeps the existing host flag or the k0s default. |
 
 The defaults fit a 3-host hyperconverged cluster with 2 OSDs on each host and 128 GiB of memory. Bedrock also sets `nodefs.inodesFree<5%`.
 A memory value is never larger than one eighth of the memory of the node. This keeps small lab nodes usable.
 The OSD, mon, mgr, mds and rgw pods are not part of the reservation. They have their own requests, see `docs/storage.md`.
 
-The agent writes the values as `--system-reserved`, `--kube-reserved` and `--eviction-hard` in `--kubelet-extra-args` of the k0s unit. `bedrock init` and `bedrock join` write them on a new host.
+The agent writes the values as `--system-reserved`, `--kube-reserved`, `--eviction-hard` and, when set, `--max-pods` in `--kubelet-extra-args` of the k0s unit. `bedrock init` and `bedrock join` write them on a new host. Use `--kubelet-setting kubelet.max-pods=220` to set the Pod limit during installation.
 An existing host gets them in the `K0sReconfigure` step of the Workers phase. The step reads the settings of the cluster, changes the unit, runs `systemctl daemon-reload` and restarts k0s one node at a time, after the drain. Flags that an administrator added to `--kubelet-extra-args` stay.
 
 ## Upgrade from v0.5.0

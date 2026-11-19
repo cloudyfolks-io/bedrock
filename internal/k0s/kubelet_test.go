@@ -6,7 +6,7 @@ import (
 )
 
 func TestKubeletArgsDefaultsForALargeHost(t *testing.T) {
-	got := KubeletArgs(ReservationsFrom(nil), 128<<30)
+	got := KubeletArgs(KubeletConfigFrom(nil), 128<<30)
 	want := []string{
 		"--node-status-update-frequency=4s",
 		"--system-reserved=cpu=500m,memory=2Gi",
@@ -24,12 +24,14 @@ func TestKubeletArgsUseTheClusterSettings(t *testing.T) {
 		"kubelet.kube-reserved-cpu":         "2",
 		"kubelet.eviction-memory-available": "2Gi",
 		"kubelet.eviction-nodefs-available": "5%",
+		"kubelet.max-pods":                  "220",
 	}
-	got := KubeletArgs(ReservationsFrom(values), 128<<30)
+	got := KubeletArgs(KubeletConfigFrom(values), 128<<30)
 	want := []string{
 		"--system-reserved=cpu=500m,memory=3Gi",
 		"--kube-reserved=cpu=2,memory=4Gi",
 		"--eviction-hard=memory.available<2Gi,nodefs.available<5%,nodefs.inodesFree<5%,imagefs.available<15%",
+		"--max-pods=220",
 	}
 	if !slices.Equal(got[1:], want) {
 		t.Fatalf("got %v, want %v", got[1:], want)
@@ -37,7 +39,7 @@ func TestKubeletArgsUseTheClusterSettings(t *testing.T) {
 }
 
 func TestKubeletArgsCapReservationsOnASmallNode(t *testing.T) {
-	got := KubeletArgs(ReservationsFrom(nil), 8<<30)
+	got := KubeletArgs(KubeletConfigFrom(nil), 8<<30)
 	want := []string{
 		"--system-reserved=cpu=500m,memory=1Gi",
 		"--kube-reserved=cpu=1,memory=1Gi",

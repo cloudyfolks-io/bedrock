@@ -3,6 +3,7 @@ package k0s
 import (
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 
 	"k8s.io/apimachinery/pkg/api/resource"
@@ -16,7 +17,7 @@ const (
 	reservedMemoryDivisor = 8
 )
 
-type Reservations struct {
+type KubeletConfig struct {
 	SystemMemory string
 	KubeMemory   string
 	SystemCPU    string
@@ -24,9 +25,10 @@ type Reservations struct {
 	EvictMemory  string
 	EvictNodefs  string
 	EvictImagefs string
+	MaxPods      int64
 }
 
-var ReservationKeys = []string{
+var KubeletSettingKeys = []string{
 	settings.KubeletSystemReservedMemory,
 	settings.KubeletKubeReservedMemory,
 	settings.KubeletSystemReservedCPU,
@@ -34,11 +36,16 @@ var ReservationKeys = []string{
 	settings.KubeletEvictionMemory,
 	settings.KubeletEvictionNodefs,
 	settings.KubeletEvictionImagefs,
+	settings.KubeletMaxPods,
 }
 
-func ReservationsFrom(values map[string]string) Reservations {
+func KubeletConfigFrom(values map[string]string) KubeletConfig {
 	get := func(key string) string { return settings.OrDefault(values[key], key) }
-	return Reservations{
+	maxPods, err := strconv.ParseInt(get(settings.KubeletMaxPods), 10, 32)
+	if err != nil {
+		maxPods = 0
+	}
+	return KubeletConfig{
 		SystemMemory: get(settings.KubeletSystemReservedMemory),
 		KubeMemory:   get(settings.KubeletKubeReservedMemory),
 		SystemCPU:    get(settings.KubeletSystemReservedCPU),
@@ -46,6 +53,7 @@ func ReservationsFrom(values map[string]string) Reservations {
 		EvictMemory:  get(settings.KubeletEvictionMemory),
 		EvictNodefs:  get(settings.KubeletEvictionNodefs),
 		EvictImagefs: get(settings.KubeletEvictionImagefs),
+		MaxPods:      maxPods,
 	}
 }
 
@@ -71,19 +79,23 @@ func capEviction(value string, nodeMemory int64) string {
 	return cappedQuantity(value, nodeMemory)
 }
 
-func KubeletArgs(r Reservations, nodeMemory int64) []string {
+func KubeletArgs(r KubeletConfig, nodeMemory int64) []string {
 	eviction := strings.Join([]string{
 		"memory.available<" + capEviction(r.EvictMemory, nodeMemory),
 		"nodefs.available<" + r.EvictNodefs,
 		"nodefs.inodesFree<5%",
 		"imagefs.available<" + r.EvictImagefs,
 	}, ",")
-	return []string{
+	args := []string{
 		nodeStatusUpdateFlag,
 		"--system-reserved=cpu=" + r.SystemCPU + ",memory=" + cappedQuantity(r.SystemMemory, nodeMemory),
 		"--kube-reserved=cpu=" + r.KubeCPU + ",memory=" + cappedQuantity(r.KubeMemory, nodeMemory),
 		"--eviction-hard=" + eviction,
 	}
+	if r.MaxPods > 0 {
+		args = append(args, "--max-pods="+strconv.FormatInt(r.MaxPods, 10))
+	}
+	return args
 }
 
 func NodeMemory(root string) int64 {
@@ -99,7 +111,7 @@ func NodeMemory(root string) int64 {
 }
 
 func InstallKubeletArgs(root string, values map[string]string) []string {
-	return KubeletArgs(ReservationsFrom(values), NodeMemory(root))
+	return KubeletArgs(KubeletConfigFrom(values), NodeMemory(root))
 }
 
 func UnitEscape(arg string) string {

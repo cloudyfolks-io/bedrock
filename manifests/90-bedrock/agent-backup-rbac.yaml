@@ -17,6 +17,7 @@ rules:
       - kubelet.eviction-memory-available
       - kubelet.eviction-nodefs-available
       - kubelet.eviction-imagefs-available
+      - kubelet.max-pods
     verbs: [get]
 ---
 apiVersion: rbac.authorization.k8s.io/v1

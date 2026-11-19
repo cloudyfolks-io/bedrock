@@ -98,7 +98,7 @@ func parseInitFlags(args []string, stderr io.Writer) (initOptions, error) {
 	flags.StringVar(&o.bundle, "bundle", "", "install from this bundle archive")
 	flags.StringVar(&o.workDir, "work-dir", "/var/lib/bedrock", "directory for extracted bundles")
 	flags.DurationVar(&o.timeout, "timeout", 30*time.Minute, "overall timeout")
-	flags.Var(&o.kubelet, "kubelet-setting", "kubelet reservation or eviction setting as key=value, repeatable")
+	flags.Var(&o.kubelet, "kubelet-setting", "kubelet setting as key=value, repeatable")
 	if err := flags.Parse(args); err != nil {
 		return o, err
 	}

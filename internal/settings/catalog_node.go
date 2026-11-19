@@ -15,6 +15,7 @@ const (
 	KubeletEvictionMemory       = "kubelet.eviction-memory-available"
 	KubeletEvictionNodefs       = "kubelet.eviction-nodefs-available"
 	KubeletEvictionImagefs      = "kubelet.eviction-imagefs-available"
+	KubeletMaxPods              = "kubelet.max-pods"
 )
 
 func evictionThreshold(v string) error {
@@ -40,5 +41,6 @@ func nodeDefinitions() []Definition {
 		{KubeletEvictionMemory, "1Gi", "Hard eviction threshold of memory.available, a quantity or a percentage. Capped at one eighth of the node memory when it is a quantity.", evictionThreshold},
 		{KubeletEvictionNodefs, "10%", "Hard eviction threshold of nodefs.available, a quantity or a percentage.", evictionThreshold},
 		{KubeletEvictionImagefs, "15%", "Hard eviction threshold of imagefs.available, a quantity or a percentage.", evictionThreshold},
+		{KubeletMaxPods, "", "Maximum Pods per node. An empty value keeps the existing kubelet flag or the k0s default. Applied on install, join and the K0sReconfigure upgrade step.", intBetween(1, 1<<31-1)},
 	}
 }

@@ -17,8 +17,8 @@ func (k *kubeletValues) String() string { return fmt.Sprint(map[string]string(*k
 
 func (k *kubeletValues) Set(pair string) error {
 	key, value, found := strings.Cut(pair, "=")
-	if !found || !slices.Contains(k0s.ReservationKeys, key) {
-		return fmt.Errorf("kubelet setting %q must be one of %s as key=value", pair, strings.Join(k0s.ReservationKeys, ", "))
+	if !found || !slices.Contains(k0s.KubeletSettingKeys, key) {
+		return fmt.Errorf("kubelet setting %q must be one of %s as key=value", pair, strings.Join(k0s.KubeletSettingKeys, ", "))
 	}
 	def, _ := settings.Lookup(key)
 	if err := def.Validate(value); err != nil {
