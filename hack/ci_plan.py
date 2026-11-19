@@ -4,7 +4,7 @@ import argparse
 import json
 from pathlib import Path
 
-ALL = {"kind", "init", "bundle", "authn", "tenant", "upgrade"}
+ALL = {"kind", "bundle", "authn", "tenant", "upgrade"}
 
 
 def select(paths, full=False):
@@ -20,7 +20,7 @@ def select(paths, full=False):
             selected.add("authn")
         elif path.startswith("internal/authn/"):
             selected.add("authn")
-        elif path.startswith(("internal/compute/", "internal/network/", "internal/tenancy/",
+        elif path.startswith(("internal/compute/", "internal/database/", "internal/network/", "internal/tenancy/",
                               "internal/images/", "internal/objectstorage/")):
             selected.add("tenant")
         elif path.startswith("test/e2e/authn/"):

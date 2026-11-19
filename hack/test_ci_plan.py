@@ -22,6 +22,7 @@ class PlanTest(unittest.TestCase):
         self.assertEqual(select(["docs/design.md"]), [])
         self.assertEqual(select(["internal/authn/server/server.go"]), ["authn", "kind"])
         self.assertEqual(select(["internal/compute/container.go"]), ["kind", "tenant"])
+        self.assertEqual(select(["internal/database/endpoint.go"]), ["kind", "tenant"])
         self.assertEqual(select(["internal/authn/a.go", "internal/network/b.go"]),
                          ["authn", "kind", "tenant"])
 
@@ -45,6 +46,7 @@ class PlanTest(unittest.TestCase):
         for job in ALL:
             self.assertIn(f"  e2e-{job}:", workflow)
         self.assertIn("name: e2e-upgrade-abort", workflow)
+        self.assertNotIn("  e2e-init:", workflow)
         envtest = workflow.split("  envtest:\n")[1].split("  test:")[0]
         self.assertNotIn("needs:", envtest)
         self.assertIn("make test-envtest", envtest)

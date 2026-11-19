@@ -12,31 +12,27 @@ class PreparationTest(unittest.TestCase):
     def test_embedded_release_is_rendered_before_each_docker_build(self):
         self.assertIn("COPY dist/release /release", (ROOT / "Containerfile").read_text())
         workflow = (ROOT / ".github/workflows/ci.yml").read_text()
-        for job in ("e2e-init", "e2e-bundle", "e2e-authn", "e2e-tenant"):
+        for job in ("e2e-bundle", "e2e-authn", "e2e-tenant"):
             block = re.search(
                 rf"^  {job}:\n(.*?)(?=^  [a-z]|\Z)", workflow, re.M | re.S
             ).group(1)
             with self.subTest(job=job):
                 before, after = block.split("- run: docker build", 1)
-                render = "make build release" if job == "e2e-init" else "make build binaries release-from-build"
-                self.assertIn(render, before)
-                if job != "e2e-init":
-                    self.assertIn("IMAGE=localhost:5000/bedrock:dev PIN_DIGESTS=1", before)
-                    self.assertLess(after.index("docker push"), after.index("bundle-from-release"))
+                self.assertIn("make build binaries release-from-build", before)
+                self.assertIn("IMAGE=localhost:5000/bedrock:dev PIN_DIGESTS=1", before)
+                self.assertLess(after.index("docker push"), after.index("bundle-from-release"))
                 if job == "e2e-tenant":
                     self.assertIn("RELEASE_CONFIG=dist/components-e2e.yaml", before)
 
     def test_host_install_runners_are_supported(self):
         workflow = (ROOT / ".github/workflows/ci.yml").read_text()
         supported = (ROOT / "release/components.yaml").read_text()
-        for job in ("e2e-init", "e2e-bundle", "e2e-authn", "e2e-tenant", "e2e-upgrade"):
+        for job in ("e2e-bundle", "e2e-authn", "e2e-tenant", "e2e-upgrade"):
             runner = re.search(rf"^  {job}:\n.*?runs-on: (\S+)", workflow, re.M | re.S).group(1)
             self.assertEqual(runner, "ubuntu-24.04", job)
             self.assertIn(runner, supported)
 
     def test_upgrade_prepares_each_versions_embedded_release(self):
-        # Execute the real orchestration with stubbed builders. No registries,
-        # Docker daemon, UI compilation or network access are needed.
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             (root / "hack").mkdir()

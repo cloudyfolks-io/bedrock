@@ -6,13 +6,14 @@ together test every Go package once (including unit tests in envtest packages).
 Envtest runs at most two packages concurrently: each starts its own etcd and
 API server. This limits runner contention, not coverage, and adds no retries.
 
-Every code PR runs kind. Auth/UI changes add authn; compute/network/tenancy/
+Every code PR runs kind. Auth/UI changes add authn; compute/database/network/tenancy/
 images/objectstorage changes add tenant. Mixed changes union their suites.
 Unknown, shared, dependency, installer, release and upgrade changes run everything.
 Documentation-only changes still run validation and envtest.
 
-Nightly and manual CI run all seven E2E variants, including standalone offline
-bundle installation and both upgrade success/abort paths. Before publishing,
+Nightly and manual CI run all six E2E variants, including standalone offline
+bundle installation and both upgrade success/abort paths. The offline bundle
+job runs the host install smoke test. Before publishing,
 manually run `ci` on the final candidate and require all jobs, including envtest,
 to pass. A selected PR run is not release evidence.
 
