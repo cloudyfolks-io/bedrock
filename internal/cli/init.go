@@ -139,6 +139,10 @@ func RunInit(ctx context.Context, args []string, deps InitDeps, stdout, stderr i
 	if err != nil {
 		return fail(stderr, err)
 	}
+	kubeletArgs, err := k0s.InstallKubeletArgs(deps.Root, o.kubelet)
+	if err != nil {
+		return fail(stderr, err)
+	}
 
 	k0sClient := k0s.Client{Exec: deps.Exec, Binary: o.k0sBin, DataDir: o.dataDir}
 	adopt := cfg.Spec.Storage.Adopt
@@ -284,7 +288,7 @@ func RunInit(ctx context.Context, args []string, deps InitDeps, stdout, stderr i
 	if !running {
 		if err := k0sClient.Install(ctx, k0s.InstallOptions{
 			Role: "controller", Force: true, ConfigPath: configPath, EnableWorker: true, NoTaints: true, DynamicConfig: true,
-			Labels: roles.Labels(cfg.Spec.Roles), KubeletExtraArgs: k0s.InstallKubeletArgs(deps.Root, o.kubelet), DataDir: o.dataDir, KubeletRootDir: k0s.DefaultKubeletRootDir, DisableComponents: k0s.DefaultDisabledComponents,
+			Labels: roles.Labels(cfg.Spec.Roles), KubeletExtraArgs: kubeletArgs, DataDir: o.dataDir, KubeletRootDir: k0s.DefaultKubeletRootDir, DisableComponents: k0s.DefaultDisabledComponents,
 		}); err != nil {
 			return fail(stderr, err)
 		}

@@ -1,6 +1,7 @@
 package k0s
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -26,6 +27,7 @@ type KubeletConfig struct {
 	EvictNodefs  string
 	EvictImagefs string
 	MaxPods      int64
+	ResolverFile string
 }
 
 var KubeletSettingKeys = []string{
@@ -37,6 +39,7 @@ var KubeletSettingKeys = []string{
 	settings.KubeletEvictionNodefs,
 	settings.KubeletEvictionImagefs,
 	settings.KubeletMaxPods,
+	settings.KubeletResolverFile,
 }
 
 func KubeletConfigFrom(values map[string]string) KubeletConfig {
@@ -54,6 +57,7 @@ func KubeletConfigFrom(values map[string]string) KubeletConfig {
 		EvictNodefs:  get(settings.KubeletEvictionNodefs),
 		EvictImagefs: get(settings.KubeletEvictionImagefs),
 		MaxPods:      maxPods,
+		ResolverFile: get(settings.KubeletResolverFile),
 	}
 }
 
@@ -95,6 +99,9 @@ func KubeletArgs(r KubeletConfig, nodeMemory int64) []string {
 	if r.MaxPods > 0 {
 		args = append(args, "--max-pods="+strconv.FormatInt(r.MaxPods, 10))
 	}
+	if r.ResolverFile != "" {
+		args = append(args, "--resolv-conf="+r.ResolverFile)
+	}
 	return args
 }
 
@@ -110,8 +117,23 @@ func NodeMemory(root string) int64 {
 	return bytes
 }
 
-func InstallKubeletArgs(root string, values map[string]string) []string {
-	return KubeletArgs(KubeletConfigFrom(values), NodeMemory(root))
+func InstallKubeletArgs(root string, values map[string]string) ([]string, error) {
+	config := KubeletConfigFrom(values)
+	if config.ResolverFile != "" {
+		definition, _ := settings.Lookup(settings.KubeletResolverFile)
+		if err := definition.Validate(config.ResolverFile); err != nil {
+			return nil, fmt.Errorf("kubelet resolver file: %w", err)
+		}
+		name := filepath.Join(root, strings.TrimPrefix(config.ResolverFile, "/"))
+		info, err := os.Stat(name)
+		if err != nil {
+			return nil, fmt.Errorf("check the kubelet resolver file: %w", err)
+		}
+		if !info.Mode().IsRegular() {
+			return nil, fmt.Errorf("the kubelet resolver file %s is not a regular file", config.ResolverFile)
+		}
+	}
+	return KubeletArgs(config, NodeMemory(root)), nil
 }
 
 func UnitEscape(arg string) string {

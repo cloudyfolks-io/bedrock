@@ -1,6 +1,8 @@
 package k0s
 
 import (
+	"os"
+	"path/filepath"
 	"slices"
 	"testing"
 )
@@ -47,6 +49,32 @@ func TestKubeletArgsCapReservationsOnASmallNode(t *testing.T) {
 	}
 	if !slices.Equal(got[1:], want) {
 		t.Fatalf("got %v, want %v", got[1:], want)
+	}
+}
+
+func TestInstallKubeletArgsRequiresTheConfiguredResolverFile(t *testing.T) {
+	root := t.TempDir()
+	const resolver = "/run/systemd/resolve/resolv.conf"
+	values := map[string]string{"kubelet.resolv-conf": resolver}
+	if args, err := InstallKubeletArgs(root, values); err == nil || args != nil {
+		t.Fatalf("accepted a missing resolver file: %v %v", args, err)
+	}
+	file := filepath.Join(root, resolver)
+	if err := os.MkdirAll(file, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if args, err := InstallKubeletArgs(root, values); err == nil || args != nil {
+		t.Fatalf("accepted a resolver directory: %v %v", args, err)
+	}
+	if err := os.Remove(file); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(file, []byte("nameserver 192.0.2.53\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	args, err := InstallKubeletArgs(root, values)
+	if err != nil || !slices.Contains(args, "--resolv-conf="+resolver) {
+		t.Fatalf("did not configure the resolver file: %v %v", args, err)
 	}
 }
 

@@ -645,7 +645,7 @@ With `dns.upstreams` set, CoreDNS never reads the file of the node.
 
 The kubelet reads a `resolv.conf` file for the pods that use the node DNS policy.
 k0s chooses `/run/systemd/resolve/resolv.conf` by itself when `/etc/resolv.conf` has the systemd-resolved stub address `127.0.0.53` as its only server.
-Bedrock sets no `--resolv-conf` flag.
+Bedrock uses this k0s behavior when `kubelet.resolv-conf` is empty. Set this Setting to an absolute resolver file path to use that file for Pods that use node DNS. The file must exist on each host before Bedrock writes the kubelet configuration.
 If `/etc/resolv.conf` has other servers next to the stub, the kubelet reads that file and the pods get the stub address.
 Make `/etc/resolv.conf` a link to the stub file in that case.
 

@@ -90,7 +90,10 @@ func ensureKubeletArgs(ctx context.Context, env StepEnv, service k0sService) (bo
 	if err != nil {
 		return false, err
 	}
-	wanted := k0s.InstallKubeletArgs(env.Deps.Root, values)
+	wanted, err := k0s.InstallKubeletArgs(env.Deps.Root, values)
+	if err != nil {
+		return false, err
+	}
 	next, changed := withKubeletArgs(string(current), wanted)
 	if !changed {
 		return false, nil

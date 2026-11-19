@@ -2,6 +2,8 @@ package settings
 
 import (
 	"fmt"
+	"path"
+	"regexp"
 	"strings"
 
 	"k8s.io/apimachinery/pkg/api/resource"
@@ -16,7 +18,17 @@ const (
 	KubeletEvictionNodefs       = "kubelet.eviction-nodefs-available"
 	KubeletEvictionImagefs      = "kubelet.eviction-imagefs-available"
 	KubeletMaxPods              = "kubelet.max-pods"
+	KubeletResolverFile         = "kubelet.resolv-conf"
 )
+
+var resolverPathPattern = regexp.MustCompile(`^/[a-zA-Z0-9._/-]+$`)
+
+func resolverFileValue(value string) error {
+	if value == "" || resolverPathPattern.MatchString(value) && path.Clean(value) == value {
+		return nil
+	}
+	return fmt.Errorf("must be a clean absolute file path with no spaces or special characters")
+}
 
 func evictionThreshold(v string) error {
 	if v == "" {
@@ -42,5 +54,6 @@ func nodeDefinitions() []Definition {
 		{KubeletEvictionNodefs, "10%", "Hard eviction threshold of nodefs.available, a quantity or a percentage.", evictionThreshold},
 		{KubeletEvictionImagefs, "15%", "Hard eviction threshold of imagefs.available, a quantity or a percentage.", evictionThreshold},
 		{KubeletMaxPods, "", "Maximum Pods per node. An empty value keeps the existing kubelet flag or the k0s default. Applied on install, join and the K0sReconfigure upgrade step.", intBetween(1, 1<<31-1)},
+		{KubeletResolverFile, "", "Absolute path to the resolver file for Pods that use node DNS. The file must exist on each host. An empty value keeps the existing kubelet flag or k0s resolver selection.", resolverFileValue},
 	}
 }

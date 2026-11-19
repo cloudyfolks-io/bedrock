@@ -44,9 +44,9 @@ func TestWithKubeletArgsAddsTheFlagWhenMissing(t *testing.T) {
 }
 
 func TestWithKubeletArgsKeepsFlagsOfTheAdminAndChangesManagedOnes(t *testing.T) {
-	unit := "ExecStart=/k0s worker --kubelet-extra-args=\"--max-pods=200 --kube-reserved=cpu=9,memory=9Gi\"\n"
+	unit := "ExecStart=/k0s worker --kubelet-extra-args=\"--max-pods=200 --resolv-conf=/etc/custom.conf --kube-reserved=cpu=9,memory=9Gi\"\n"
 	got, _ := withKubeletArgs(unit, wantedKubeletArgs)
-	if !strings.Contains(got, "--max-pods=200") || strings.Contains(got, "memory=9Gi") {
+	if !strings.Contains(got, "--max-pods=200") || !strings.Contains(got, "--resolv-conf=/etc/custom.conf") || strings.Contains(got, "memory=9Gi") {
 		t.Fatalf("unit:\n%s", got)
 	}
 }
@@ -63,9 +63,11 @@ func TestK0sReconfigureAppliesTheKubeletSettingsOfTheCluster(t *testing.T) {
 	writeFixtureFile(t, filepath.Join(root, "usr/local/bin/k0s"), "new k0s")
 	fake.running = newK0s
 	writeFixtureFile(t, filepath.Join(root, "etc/k0s/k0s.yaml"), "apiVersion: k0s.k0sproject.io/v1beta1\n")
-	unit, _ := withKubeletArgs(strings.Replace(controllerUnit, "helm ", "helm,coredns ", 1), []string{"--max-pods=200"})
+	const resolver = "/run/systemd/resolve/resolv.conf"
+	writeFixtureFile(t, filepath.Join(root, resolver), "nameserver 192.0.2.53\n")
+	unit, _ := withKubeletArgs(strings.Replace(controllerUnit, "helm ", "helm,coredns ", 1), []string{"--max-pods=200", "--resolv-conf=/etc/custom.conf"})
 	writeFixtureFile(t, controllerUnitPath(root), unit)
-	for name, value := range map[string]string{"kubelet.kube-reserved-memory": "6Gi", "kubelet.max-pods": "220"} {
+	for name, value := range map[string]string{"kubelet.kube-reserved-memory": "6Gi", "kubelet.max-pods": "220", "kubelet.resolv-conf": resolver} {
 		if err := env.Client.Create(context.Background(), &v1alpha1.Setting{ObjectMeta: metav1.ObjectMeta{Name: name}, Spec: v1alpha1.SettingSpec{Value: value}}); err != nil {
 			t.Fatal(err)
 		}
@@ -75,7 +77,8 @@ func TestK0sReconfigureAppliesTheKubeletSettingsOfTheCluster(t *testing.T) {
 		t.Fatalf("outcome %+v %v", outcome, err)
 	}
 	if unit := readFixtureFile(t, controllerUnitPath(root)); !strings.Contains(unit, "--kube-reserved=cpu=1,memory=6Gi") ||
-		!strings.Contains(unit, "--max-pods=220") || strings.Count(unit, "--max-pods=") != 1 {
+		!strings.Contains(unit, "--max-pods=220") || strings.Count(unit, "--max-pods=") != 1 ||
+		!strings.Contains(unit, "--resolv-conf="+resolver) || strings.Count(unit, "--resolv-conf=") != 1 {
 		t.Fatalf("unit:\n%s", unit)
 	}
 	if !slices.Contains(fake.calls, "systemctl daemon-reload") {
