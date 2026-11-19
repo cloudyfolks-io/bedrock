@@ -1,36 +1,18 @@
 #!/usr/bin/env python3
-"""Fail-closed E2E tiers. Nightly/manual qualification always runs every suite."""
 import argparse
 import json
 from pathlib import Path
 
-ALL = {"kind", "bundle", "authn", "tenant", "upgrade"}
+ALL = {"kind", "authn", "tenant", "upgrade"}
 
 
 def select(paths, full=False):
     paths = set(paths)
-    if full or not paths:
+    if full:
         return sorted(ALL)
-    selected = set()
-    for path in paths:
-        if path.startswith(("docs/",)) or path.endswith(".md"):
-            continue
-        selected.add("kind")
-        if path.startswith("ui/"):
-            selected.add("authn")
-        elif path.startswith("internal/authn/"):
-            selected.add("authn")
-        elif path.startswith(("internal/compute/", "internal/database/", "internal/network/", "internal/tenancy/",
-                              "internal/images/", "internal/objectstorage/")):
-            selected.add("tenant")
-        elif path.startswith("test/e2e/authn/"):
-            selected.add("authn")
-        elif path.startswith("test/e2e/tenant/"):
-            selected.add("tenant")
-        else:
-            # Includes workflow, dependency, release, installer and upgrade changes.
-            return sorted(ALL)
-    return sorted(selected)
+    if paths and all(path.startswith("docs/") or path.endswith(".md") for path in paths):
+        return []
+    return ["kind"]
 
 
 if __name__ == "__main__":

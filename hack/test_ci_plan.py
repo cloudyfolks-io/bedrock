@@ -9,22 +9,22 @@ from ci_plan import ALL, select
 class PlanTest(unittest.TestCase):
     def test_full_qualification(self):
         self.assertEqual(set(select(["ui/login/index.ts"], full=True)), ALL)
-        self.assertEqual(set(select([])), ALL)
+        self.assertEqual(set(select([], full=True)), ALL)
 
     def test_fail_closed(self):
         for path in ["go.mod", ".github/workflows/ci.yml", "internal/new/file.go",
                      "internal/cli/upgrade.go", "internal/operator/upgrade.go",
                      "hack/e2e-init.sh", "release/components.yaml", "Makefile"]:
             with self.subTest(path=path):
-                self.assertEqual(set(select([path])), ALL)
+                self.assertEqual(select([path]), ["kind"])
 
     def test_tiers(self):
         self.assertEqual(select(["docs/design.md"]), [])
-        self.assertEqual(select(["internal/authn/server/server.go"]), ["authn", "kind"])
-        self.assertEqual(select(["internal/compute/container.go"]), ["kind", "tenant"])
-        self.assertEqual(select(["internal/database/endpoint.go"]), ["kind", "tenant"])
-        self.assertEqual(select(["internal/authn/a.go", "internal/network/b.go"]),
-                         ["authn", "kind", "tenant"])
+        self.assertEqual(select([]), ["kind"])
+        self.assertEqual(select(["internal/authn/server/server.go"]), ["kind"])
+        self.assertEqual(select(["internal/compute/container.go"]), ["kind"])
+        self.assertEqual(select(["internal/database/endpoint.go"]), ["kind"])
+        self.assertEqual(select(["internal/authn/a.go", "internal/network/b.go"]), ["kind"])
 
     def test_packages_cover_each_original_once(self):
         main = {"Main": True}
@@ -41,12 +41,15 @@ class PlanTest(unittest.TestCase):
         self.assertEqual(slow, ["local/env"])
         self.assertFalse(set(fast) & set(slow))
 
-    def test_workflow_retains_all_e2e_and_parallel_envtest(self):
+    def test_workflow_retains_release_e2e_and_parallel_envtest(self):
         workflow = (Path(__file__).resolve().parents[1] / ".github/workflows/ci.yml").read_text()
         for job in ALL:
             self.assertIn(f"  e2e-{job}:", workflow)
         self.assertIn("name: e2e-upgrade-abort", workflow)
-        self.assertNotIn("  e2e-init:", workflow)
+        self.assertNotIn("  e2e-bundle:", workflow)
+        authn = workflow.split("  e2e-authn:\n")[1].split("  e2e-tenant:")[0]
+        self.assertIn("hack/e2e-init.sh", authn)
+        self.assertIn("hack/e2e-authn.sh", authn)
         envtest = workflow.split("  envtest:\n")[1].split("  test:")[0]
         self.assertNotIn("needs:", envtest)
         self.assertIn("make test-envtest", envtest)

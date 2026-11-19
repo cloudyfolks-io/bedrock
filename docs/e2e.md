@@ -8,8 +8,7 @@ Each job starts a real single-node cluster and checks the product from the outsi
 | Job | What it proves |
 | --- | --- |
 | `e2e-kind` | The operator and the CRDs work in a kind cluster. |
-| `e2e-bundle` | `bedrock init` builds a cluster from the offline bundle. |
-| `e2e-authn` | Local, LDAP and OIDC login, tokens and the Kubernetes API webhook. |
+| `e2e-authn` | Offline bundle installation, local, LDAP and OIDC login, tokens and the Kubernetes API webhook. |
 | `e2e-tenant` | Tenants, projects, images, VMs, networks, backups, object storage, the panel and the metering, all together. |
 | `e2e-upgrade`, `e2e-upgrade-abort`, `e2e-upgrade-from-release` | The cluster upgrade and its rollback. The backup archives stay sealed. |
 
@@ -41,7 +40,8 @@ The full run takes about 6 hours.
 7. `e2e-tenant`
 8. `e2e-upgrade-from-release`
 
-GitHub runs the same jobs from `.github/workflows/ci.yml`.
+GitHub runs the kind smoke test for code pull requests. Scheduled, manual and
+tagged release runs add sign-in, tenant workloads, upgrade and rollback.
 The `make e2e-tenant` target runs the tenant job on a host that you prepared.
 
 ## Shared files
