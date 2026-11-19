@@ -30,8 +30,11 @@ func NamespaceObject() *corev1.Namespace {
 
 func QuotaObject(cfg Config) *corev1.ResourceQuota {
 	return &corev1.ResourceQuota{
-		TypeMeta:   metav1.TypeMeta{APIVersion: "v1", Kind: "ResourceQuota"},
-		ObjectMeta: metav1.ObjectMeta{Name: QuotaName, Namespace: PlatformNamespace, Labels: platformLabels("ResourceQuota", QuotaName)},
+		TypeMeta: metav1.TypeMeta{APIVersion: "v1", Kind: "ResourceQuota"},
+		ObjectMeta: metav1.ObjectMeta{
+			Name: QuotaName, Namespace: PlatformNamespace, Labels: platformLabels("ResourceQuota", QuotaName),
+			Annotations: map[string]string{v1alpha1.DatabaseQuotaMaxUtilization: strconv.FormatFloat(cfg.MaxUtilization, 'g', -1, 64)},
+		},
 		Spec: corev1.ResourceQuotaSpec{Hard: corev1.ResourceList{
 			corev1.ResourceRequestsCPU:    cfg.CapacityCPU,
 			corev1.ResourceRequestsMemory: cfg.CapacityMemory,
