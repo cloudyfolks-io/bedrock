@@ -38,3 +38,166 @@ metadata:
 spec:
   policyName: bedrock-database-adopt
   validationActions: [Deny]
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicy
+metadata:
+  name: bedrock-database-security-group
+  labels:
+    bedrock.cloudyfolks.io/kind: ValidatingAdmissionPolicy
+    bedrock.cloudyfolks.io/name: bedrock-database-security-group
+spec:
+  failurePolicy: Fail
+  matchConstraints:
+    namespaceSelector:
+      matchExpressions:
+        - key: bedrock.cloudyfolks.io/tenant
+          operator: Exists
+    resourceRules:
+      - apiGroups: [bedrock.cloudyfolks.io]
+        apiVersions: [v1alpha1]
+        operations: [UPDATE, DELETE]
+        resources: [securitygroups]
+  matchConditions:
+    - name: require-database-security-group-checks
+      expression: >-
+        !(request.userInfo.username in [
+          'system:serviceaccount:bedrock-system:bedrock-operator',
+          'system:serviceaccount:kube-system:namespace-controller',
+          'system:serviceaccount:kube-system:generic-garbage-collector',
+          'system:kube-controller-manager'
+        ])
+  validations:
+    - expression: >-
+        (has(request.userInfo.groups) && ('system:masters' in request.userInfo.groups || 'bedrock:bedrock-admins' in request.userInfo.groups)) ||
+        !has(oldObject.metadata.ownerReferences) ||
+        !oldObject.metadata.ownerReferences.exists(owner,
+          owner.apiVersion == 'bedrock.cloudyfolks.io/v1alpha1' && owner.kind == 'Database' && owner.?controller.orValue(false))
+      message: "only the database controller or an administrator can change the database security group"
+      reason: Forbidden
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicyBinding
+metadata:
+  name: bedrock-database-security-group
+  labels:
+    bedrock.cloudyfolks.io/kind: ValidatingAdmissionPolicyBinding
+    bedrock.cloudyfolks.io/name: bedrock-database-security-group
+spec:
+  policyName: bedrock-database-security-group
+  validationActions: [Deny]
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicy
+metadata:
+  name: bedrock-database-proxy-identity
+  labels:
+    bedrock.cloudyfolks.io/kind: ValidatingAdmissionPolicy
+    bedrock.cloudyfolks.io/name: bedrock-database-proxy-identity
+spec:
+  failurePolicy: Fail
+  matchConstraints:
+    namespaceSelector:
+      matchExpressions:
+        - key: bedrock.cloudyfolks.io/tenant
+          operator: Exists
+    resourceRules:
+      - apiGroups: [""]
+        apiVersions: [v1]
+        operations: [CREATE, UPDATE, DELETE]
+        resources: [pods, configmaps, secrets]
+      - apiGroups: [apps]
+        apiVersions: [v1]
+        operations: [CREATE, UPDATE, DELETE]
+        resources: [deployments, replicasets]
+  matchConditions:
+    - name: require-proxy-identity-checks
+      expression: >-
+        !(has(request.userInfo.groups) && ('system:masters' in request.userInfo.groups || 'bedrock:bedrock-admins' in request.userInfo.groups)) &&
+        !(request.userInfo.username == 'system:serviceaccount:bedrock-system:bedrock-operator') &&
+        !(request.resource.resource == 'replicasets' && request.userInfo.username == 'system:serviceaccount:kube-system:deployment-controller') &&
+        !(request.resource.resource == 'pods' && request.userInfo.username == 'system:serviceaccount:kube-system:replicaset-controller') &&
+        !(request.resource.resource == 'secrets' && request.userInfo.username == 'system:serviceaccount:cert-manager:cert-manager') &&
+        !(request.operation == 'DELETE' && request.userInfo.username in [
+          'system:serviceaccount:kube-system:namespace-controller',
+          'system:serviceaccount:kube-system:generic-garbage-collector',
+          'system:kube-controller-manager'
+        ])
+  variables:
+    - name: prefix
+      expression: "'bedrock-db-proxy-'"
+    - name: key
+      expression: "'bedrock.cloudyfolks.io/database-gate-client'"
+  validations:
+    - expression: >-
+        !request.name.startsWith(variables.prefix) &&
+        (object == null ||
+          (!object.metadata.?name.orValue('').startsWith(variables.prefix) &&
+           !object.metadata.?generateName.orValue('').startsWith(variables.prefix) &&
+           !(variables.key in object.metadata.?labels.orValue({})))) &&
+        (oldObject == null || !(variables.key in oldObject.metadata.?labels.orValue({})))
+      message: "only the platform can manage a database proxy resource or identity"
+      reason: Forbidden
+    - expression: >-
+        request.resource.group != 'apps' ||
+        ((object == null || !(variables.key in object.spec.template.metadata.?labels.orValue({}))) &&
+         (oldObject == null || !(variables.key in oldObject.spec.template.metadata.?labels.orValue({}))))
+      message: "only the platform can set the database proxy identity on a pod template"
+      reason: Forbidden
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicyBinding
+metadata:
+  name: bedrock-database-proxy-identity
+  labels:
+    bedrock.cloudyfolks.io/kind: ValidatingAdmissionPolicyBinding
+    bedrock.cloudyfolks.io/name: bedrock-database-proxy-identity
+spec:
+  policyName: bedrock-database-proxy-identity
+  validationActions: [Deny]
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicy
+metadata:
+  name: bedrock-database-proxy-access
+  labels:
+    bedrock.cloudyfolks.io/kind: ValidatingAdmissionPolicy
+    bedrock.cloudyfolks.io/name: bedrock-database-proxy-access
+spec:
+  failurePolicy: Fail
+  matchConstraints:
+    namespaceSelector:
+      matchExpressions:
+        - key: bedrock.cloudyfolks.io/tenant
+          operator: Exists
+    resourceRules:
+      - apiGroups: [""]
+        apiVersions: [v1]
+        operations: [CONNECT]
+        resources: [pods/exec, pods/attach, pods/portforward]
+      - apiGroups: [""]
+        apiVersions: [v1]
+        operations: [UPDATE]
+        resources: [pods/ephemeralcontainers]
+      - apiGroups: [apps]
+        apiVersions: [v1]
+        operations: [UPDATE]
+        resources: [deployments/scale, replicasets/scale]
+  validations:
+    - expression: >-
+        !request.name.startsWith('bedrock-db-proxy-') ||
+        (has(request.userInfo.groups) && ('system:masters' in request.userInfo.groups || 'bedrock:bedrock-admins' in request.userInfo.groups)) ||
+        request.userInfo.username == 'system:serviceaccount:bedrock-system:bedrock-operator'
+      message: "only the platform can access managed database proxy subresources"
+      reason: Forbidden
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicyBinding
+metadata:
+  name: bedrock-database-proxy-access
+  labels:
+    bedrock.cloudyfolks.io/kind: ValidatingAdmissionPolicyBinding
+    bedrock.cloudyfolks.io/name: bedrock-database-proxy-access
+spec:
+  policyName: bedrock-database-proxy-access
+  validationActions: [Deny]

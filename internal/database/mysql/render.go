@@ -72,6 +72,14 @@ func configuration(memoryMi int) string {
 	}, "\n")
 }
 
+func engineConfiguration(s engine.Spec) string {
+	config := configuration(s.MemoryMi)
+	if s.TLSSecret != "" {
+		config += "require_secure_transport=ON\n"
+	}
+	return config
+}
+
 func checkSpec(s engine.Spec) error {
 	if s.Instances != 1 && s.Instances != 3 {
 		return fmt.Errorf("instances must be 1 or 3")
@@ -137,7 +145,7 @@ func mysqlBlock(s engine.Spec) map[string]any {
 		"image":         s.Image,
 		"resources":     engine.ResourceBlock(s.CPUMilli, s.MemoryMi),
 		"volumeSpec":    map[string]any{"persistentVolumeClaim": volumeClaim(s)},
-		"configuration": configuration(s.MemoryMi),
+		"configuration": engineConfiguration(s),
 	}
 	if labels := podLabels(s); len(labels) > 0 {
 		block["labels"] = labels
@@ -190,6 +198,9 @@ func clusterSpec(s engine.Spec) map[string]any {
 	if image := s.Images[ImageInit]; image != "" {
 		spec["initContainer"] = map[string]any{"image": image}
 	}
+	if s.TLSSecret != "" {
+		spec["sslSecretName"] = s.TLSSecret
+	}
 	if s.Instances == 1 {
 		spec["unsafeFlags"] = map[string]any{"mysqlSize": true, "proxy": true}
 		spec["proxy"] = map[string]any{"haproxy": map[string]any{"enabled": false}, "router": map[string]any{"enabled": false}}
@@ -209,6 +220,7 @@ func clusterSpec(s engine.Spec) map[string]any {
 }
 
 func restoreObject(s engine.Spec) *unstructured.Unstructured {
+	backup, prefix, _ := s.Restore.BackupSource(s.Backup)
 	return &unstructured.Unstructured{Object: map[string]any{
 		"apiVersion": "ps.percona.com/v1", "kind": RestoreGVK.Kind,
 		"metadata": map[string]any{"name": RestoreName(s.Name), "namespace": s.Namespace, "labels": engine.Labels(s.Labels)},
@@ -216,7 +228,7 @@ func restoreObject(s engine.Spec) *unstructured.Unstructured {
 			"clusterName": s.Name,
 			"backupSource": map[string]any{
 				"destination": s.Restore.Destination,
-				"storage":     map[string]any{"type": "s3", "s3": s3Block(s.Backup, s.Restore.SourceUID), "resources": sidecarRequests()},
+				"storage":     map[string]any{"type": "s3", "s3": s3Block(backup, prefix), "resources": sidecarRequests()},
 			},
 		},
 	}}
@@ -254,7 +266,7 @@ func patchSpec(s engine.Spec) map[string]any {
 		"size":          s.Instances,
 		"image":         s.Image,
 		"resources":     engine.ResourceBlock(s.CPUMilli, s.MemoryMi),
-		"configuration": configuration(s.MemoryMi),
+		"configuration": engineConfiguration(s),
 		"volumeSpec": map[string]any{"persistentVolumeClaim": map[string]any{
 			"resources": map[string]any{"requests": map[string]any{"storage": fmt.Sprintf("%dGi", s.StorageGi)}},
 		}},

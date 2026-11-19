@@ -1,11 +1,14 @@
 package database
 
-import "k8s.io/apimachinery/pkg/types"
+import (
+	"github.com/cloudyfolks-io/bedrock/api/v1alpha1"
+	"k8s.io/apimachinery/pkg/types"
+)
 
 const (
-	PlatformNamespace = "bedrock-dbaas"
+	PlatformNamespace = v1alpha1.DatabasePlatformNamespace
 	Kind              = "Database"
-	QuotaName         = "databases"
+	QuotaName         = v1alpha1.DatabaseQuotaName
 	EnginesPolicy     = "engines"
 
 	LabelManagedBy  = "app.kubernetes.io/managed-by"

@@ -4,10 +4,13 @@ import (
 	"strings"
 	"testing"
 
+	networkingv1 "k8s.io/api/networking/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/apimachinery/pkg/runtime"
 
 	"github.com/cloudyfolks-io/bedrock/api/v1alpha1"
+	"github.com/cloudyfolks-io/bedrock/internal/network"
 )
 
 const (
@@ -102,6 +105,43 @@ func TestGateObjectsGolden(t *testing.T) {
 		t.Fatal(err)
 	}
 	goldenList(t, "gate_objects", objects)
+}
+
+func TestLegacyEndpointUsesTheProtectedManagedGate(t *testing.T) {
+	proxy := goldenProxy()
+	db := proxy.Database
+	db.Spec.Endpoint = &v1alpha1.DatabaseEndpointSpec{Address: "100.69.0.10", LoadBalancerRef: "source-frontend", Port: 6432}
+	proxy.Database = db
+	proxy.NIC.Class = network.NetworkClassManaged
+	proxy.VIP = "10.96.0.40"
+	objects, err := GateObjects(GateInput{Database: db, Project: proxy.Project, Image: proxy.Image, Port: proxy.Port})
+	must(t, err)
+	var policy networkingv1.NetworkPolicy
+	must(t, runtime.DefaultUnstructuredConverter.FromUnstructured(objects[0].Object, &policy))
+	if len(policy.Spec.Ingress) != 1 || len(policy.Spec.Ingress[0].From) != 1 {
+		t.Fatalf("unexpected gate peers: %+v", policy.Spec.Ingress)
+	}
+	peer := policy.Spec.Ingress[0].From[0]
+	if peer.NamespaceSelector.MatchLabels["kubernetes.io/metadata.name"] != db.Namespace ||
+		peer.PodSelector.MatchLabels[managedProxyLabel] != gateUID || peer.PodSelector.MatchLabels[network.NetworkClassLabel] != network.NetworkClassManaged ||
+		policy.Spec.Ingress[0].Ports[0].Port.IntVal != int32(proxy.Port) {
+		t.Fatalf("the gate did not scope access to its managed proxy: %+v", policy.Spec)
+	}
+	service, err := managedGateService(db, proxy.Project, proxy.Port)
+	must(t, err)
+	if serviceType, _, _ := unstructured.NestedString(service.Object, "spec", "type"); serviceType != "ClusterIP" || service.GetAnnotations()[annotationKubeVIP] != "" {
+		t.Fatal("the managed gate Service must stay inside the management interface")
+	}
+	objects, err = ProxyObjects(proxy)
+	must(t, err)
+	config, _, _ := unstructured.NestedString(objects[0].Object, "data", ConfigFile)
+	if !strings.Contains(config, "bind 10.100.0.2:5432") || strings.Contains(config, "bind :5432") || !strings.Contains(config, "server gate 10.96.0.40:5432") {
+		t.Fatalf("the proxy must listen on its private NIC and connect to the managed gate: %s", config)
+	}
+	labels, _, _ := unstructured.NestedStringMap(objectOfKind(objects, "Deployment").Object, "spec", "template", "metadata", "labels")
+	if labels[managedProxyLabel] != gateUID || labels[network.NetworkClassLabel] != network.NetworkClassManaged || !strings.HasPrefix(EndpointName(db), managedProxyPrefix) {
+		t.Fatalf("the proxy identity is incomplete: %v", labels)
+	}
 }
 
 func objectOfKind(objects []*unstructured.Unstructured, kind string) *unstructured.Unstructured {

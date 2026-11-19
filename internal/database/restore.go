@@ -17,6 +17,7 @@ type RestoreCheck struct {
 	TombstoneNamespace string
 	PrefixObjects      int
 	Now                time.Time
+	Imported           *engine.RestoreBackup
 }
 
 func RestoreSpecOf(db v1alpha1.Database) *engine.RestoreSpec {
@@ -93,14 +94,23 @@ func LoadRestoreCheck(ctx context.Context, c client.Reader, store BackupStore, c
 	if found {
 		check.TombstoneNamespace = namespace
 	}
-	keys, err := BackupCredentials(ctx, c)
+	imported, err := importedRestore(ctx, c, db)
+	if err != nil {
+		return check, err
+	}
+	check.Imported = imported
+	bucket, prefix := cfg.BackupBucket, sourceUID
+	if imported != nil {
+		bucket, prefix = imported.Bucket, imported.Prefix
+	}
+	keys, err := restoreCredentials(ctx, c, imported)
 	if apierrors.IsNotFound(err) {
 		return check, nil
 	}
 	if err != nil {
 		return check, err
 	}
-	page, err := store.S3.ListObjectsV2(ctx, store.Endpoint, store.Region, keys, cfg.BackupBucket, sourceUID+"/", "")
+	page, err := store.S3.ListObjectsV2(ctx, store.Endpoint, store.Region, keys, bucket, prefix+"/", "")
 	if err != nil {
 		return check, err
 	}

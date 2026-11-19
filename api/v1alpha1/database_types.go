@@ -40,11 +40,33 @@ type DatabaseRestore struct {
 	TargetTime *metav1.Time `json:"targetTime,omitempty"`
 }
 
+// +kubebuilder:validation:XValidation:rule="self == oldSelf",message="endpoint is immutable"
+// +kubebuilder:validation:XValidation:rule="has(self.loadBalancerRef) == has(self.port)",message="endpoint.loadBalancerRef and endpoint.port must be set together"
 type DatabaseEndpointSpec struct {
 	// +kubebuilder:validation:MaxLength=15
 	// +kubebuilder:validation:XValidation:rule="isIP(self) && ip(self).family() == 4",message="endpoint.address must be an IPv4 address"
 	// +kubebuilder:validation:XValidation:rule="self == oldSelf",message="endpoint.address is immutable"
 	Address string `json:"address"`
+	// +kubebuilder:validation:MaxLength=55
+	// +kubebuilder:validation:Pattern=`^[a-z0-9]([-a-z0-9]*[a-z0-9])?$`
+	// +optional
+	LoadBalancerRef string `json:"loadBalancerRef,omitempty"`
+	// +kubebuilder:validation:Minimum=1
+	// +kubebuilder:validation:Maximum=65535
+	// +optional
+	Port int32 `json:"port,omitempty"`
+}
+
+func DatabaseEndpointClaimName(loadBalancerRef string) string {
+	return "database-endpoint-" + loadBalancerRef
+}
+
+func DatabaseEndpointOpenName(loadBalancerRef string) string {
+	return DatabaseEndpointClaimName(loadBalancerRef) + "-open"
+}
+
+func DatabaseEndpointStartName(loadBalancerRef string) string {
+	return DatabaseEndpointClaimName(loadBalancerRef) + "-start"
 }
 
 // +kubebuilder:validation:XValidation:rule="!has(self.retentionDays) || self.enabled",message="retentionDays needs backup.enabled to be true"
@@ -197,6 +219,10 @@ type DatabaseStatus struct {
 	// +optional
 	// +listType=atomic
 	Addresses []DatabaseAddress `json:"addresses,omitempty"`
+	// +kubebuilder:validation:MaxLength=15
+	// +kubebuilder:validation:XValidation:rule="isIP(self) && ip(self).family() == 4",message="proxyAddress must be an IPv4 address"
+	// +optional
+	ProxyAddress string `json:"proxyAddress,omitempty"`
 	// +kubebuilder:validation:MaxLength=253
 	// +optional
 	CredentialsSecret string `json:"credentialsSecret,omitempty"`

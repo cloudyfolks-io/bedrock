@@ -92,6 +92,19 @@ func EnsureEngineSecrets(ctx context.Context, c client.Client, db v1alpha1.Datab
 		state = unsynced
 	}
 	return createIfAbsent(ctx, c, Suffixed(db.UID, SecretApp), func(password string) (*corev1.Secret, error) {
+		imported, err := readImport(ctx, c, db, v1alpha1.DatabaseImportAdminName(db.Name), db.Name)
+		if err != nil {
+			return nil, err
+		}
+		if imported == nil && db.Annotations[v1alpha1.DatabaseImportMarker] == "true" {
+			return nil, errors.New("the imported customer administrator credentials are pending")
+		}
+		if imported != nil {
+			password = string(imported.Data[passwordKey])
+			if password == "" {
+				return nil, errors.New("the imported customer administrator password is missing")
+			}
+		}
 		return EngineSecret(Suffixed(db.UID, SecretApp), db, project, map[string]string{"username": engine.AdminUser, passwordKey: password}, map[string]string{
 			annotationPasswordSynced: state,
 			annotationResetApplied:   db.Annotations[v1alpha1.AnnotationResetPassword],
@@ -226,7 +239,30 @@ func EnsureAdminCopy(ctx context.Context, c client.Client, db v1alpha1.Database,
 	if err != nil {
 		return err
 	}
-	return ssa.Apply(ctx, c, AdminCopy(db, project, state.Password, host, port), v1alpha1.DatabaseFieldManager)
+	copy := AdminCopy(db, project, state.Password, host, port)
+	tls, err := importedTLS(ctx, c, db)
+	if err != nil {
+		return err
+	}
+	if tls != nil {
+		copy.StringData["ca.crt"] = string(tls.Data["ca.crt"])
+		connection, err := url.Parse(copy.StringData["uri"])
+		if err != nil {
+			return err
+		}
+		query := connection.Query()
+		switch db.Spec.Engine {
+		case v1alpha1.DatabaseEnginePostgreSQL:
+			query.Set("sslmode", "verify-full")
+		case v1alpha1.DatabaseEngineMySQL:
+			query.Set("ssl-mode", "VERIFY_IDENTITY")
+		case v1alpha1.DatabaseEngineValkey:
+			connection.Scheme = "rediss"
+		}
+		connection.RawQuery = query.Encode()
+		copy.StringData["uri"] = connection.String()
+	}
+	return ssa.Apply(ctx, c, copy, v1alpha1.DatabaseFieldManager)
 }
 
 var ErrSourceUsersGone = errors.New("the system passwords of the source database are gone")

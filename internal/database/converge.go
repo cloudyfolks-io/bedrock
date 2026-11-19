@@ -44,20 +44,24 @@ type Observed struct {
 }
 
 type flow struct {
-	cfg        Config
-	db         *v1alpha1.Database
-	project    Project
-	catalog    Catalog
-	subnet     v1alpha1.Subnet
-	pods       Pods
-	port       int
-	exists     bool
-	plan       Result
-	preBackups []*unstructured.Unstructured
-	image      string
-	dest       string
-	cluster    *unstructured.Unstructured
-	restore    *unstructured.Unstructured
+	cfg         Config
+	db          *v1alpha1.Database
+	project     Project
+	catalog     Catalog
+	subnet      v1alpha1.Subnet
+	pods        Pods
+	port        int
+	legacy      *legacyEndpoint
+	exists      bool
+	plan        Result
+	preBackups  []*unstructured.Unstructured
+	image       string
+	dest        string
+	cluster     *unstructured.Unstructured
+	restore     *unstructured.Unstructured
+	source      *engine.RestoreBackup
+	tlsSecret   string
+	tlsRevision string
 }
 
 func (r *Reconciler) converge(ctx context.Context, cfg Config, project Project, db *v1alpha1.Database) (Observed, error) {
@@ -151,7 +155,10 @@ func (r *Reconciler) prepareSubnet(ctx context.Context, in *flow) (*Refusal, err
 	return refused, err
 }
 
-func (r *Reconciler) prepareEndpointAddress(_ context.Context, in *flow) (*Refusal, error) {
+func (r *Reconciler) prepareEndpointAddress(ctx context.Context, in *flow) (*Refusal, error) {
+	if hasLegacyEndpoint(*in.db) {
+		return r.prepareLegacyEndpoint(ctx, in)
+	}
 	if _, recorded := AddressOf(*in.db, in.subnet.Name); recorded {
 		return nil, nil
 	}
@@ -164,11 +171,14 @@ func (r *Reconciler) prepareEndpointAddress(_ context.Context, in *flow) (*Refus
 func (r *Reconciler) preparePods(ctx context.Context, in *flow) (*Refusal, error) {
 	pods, refused, err := resolvePods(ctx, r.Client, r.Images, in.subnet)
 	in.pods = pods
+	if err == nil && refused == nil && in.legacy != nil && pods.NIC.Class != network.NetworkClassManaged {
+		return refusal(ReasonProxyWaiting, "the legacy frontend needs the managed network interface"), nil
+	}
 	return refused, err
 }
 
 func (r *Reconciler) prepareVIPRange(ctx context.Context, in *flow) (*Refusal, error) {
-	if in.cfg.VIPRange.IsValid() {
+	if in.legacy != nil || in.cfg.VIPRange.IsValid() {
 		return nil, nil
 	}
 	err := r.Live.Get(ctx, client.ObjectKey{Namespace: PlatformNamespace, Name: VIPName(in.db.UID)}, &corev1.Service{})
@@ -205,7 +215,15 @@ func (r *Reconciler) prepareBackupStore(ctx context.Context, in *flow) (*Refusal
 }
 
 func (r *Reconciler) prepareRestore(ctx context.Context, in *flow) (*Refusal, error) {
-	if in.db.Spec.Restore == nil || in.db.Annotations[annotationReadyOnce] == "true" {
+	if in.db.Spec.Restore == nil {
+		return nil, nil
+	}
+	source, err := importedRestore(ctx, r.Live, *in.db)
+	if err != nil {
+		return nil, err
+	}
+	in.source = source
+	if in.db.Annotations[annotationReadyOnce] == "true" {
 		return nil, nil
 	}
 	if !in.exists {
@@ -250,6 +268,10 @@ func (r *Reconciler) prepareMySQLRestore(ctx context.Context, in *flow) (*Refusa
 		return nil, nil
 	case !apierrors.IsNotFound(err) && !meta.IsNoMatchError(err):
 		return nil, err
+	}
+	if in.source != nil {
+		in.dest = in.source.Destination
+		return nil, nil
 	}
 	destination, err := r.mysqlDestination(ctx, in.cfg, in.db.Spec.Restore.SourceUID)
 	switch {
@@ -302,10 +324,18 @@ func (r *Reconciler) apply(ctx context.Context, in *flow) (*Refusal, error) {
 	if err := EnsureEngineSecrets(ctx, r.Client, db, in.project); err != nil {
 		return nil, fmt.Errorf("make the engine secrets: %w", err)
 	}
+	tls, err := importedTLS(ctx, r.Live, db)
+	if err != nil {
+		return nil, fmt.Errorf("read the imported customer certificate: %w", err)
+	}
+	if tls != nil {
+		in.tlsSecret = tls.Name
+		in.tlsRevision = configHash(string(tls.Data["tls.crt"]), string(tls.Data["ca.crt"]))
+	}
 	if err := r.applyEngine(ctx, in); err != nil {
 		return nil, fmt.Errorf("apply the engine: %w", err)
 	}
-	vip, err := r.Alloc.EnsureVIP(ctx, r.Client, r.Live, in.cfg, db, in.project, in.port)
+	vip, err := r.gateAddress(ctx, in)
 	switch {
 	case errors.Is(err, ErrVIPRangeMissing):
 		return refusal(ReasonVIPRangeMissing, "the Setting database.vip-range is empty"), nil
@@ -345,6 +375,8 @@ func (r *Reconciler) specOf(in *flow) engine.Spec {
 		PodLabels:    podLabels,
 		Backup:       BackupSpecOf(in.cfg, r.Store, db.Spec.Backup),
 		Restore:      restoreOf(in),
+		TLSSecret:    in.tlsSecret,
+		TLSRevision:  in.tlsRevision,
 		Images:       in.catalog.Version.Spec.Companions,
 		Suspended:    db.Spec.Suspended,
 	}
@@ -352,7 +384,11 @@ func (r *Reconciler) specOf(in *flow) engine.Spec {
 
 func restoreOf(in *flow) *engine.RestoreSpec {
 	restore := RestoreSpecOf(*in.db)
-	if restore == nil || in.db.Spec.Engine != v1alpha1.DatabaseEngineMySQL {
+	if restore == nil {
+		return restore
+	}
+	restore.Backup = in.source
+	if in.db.Spec.Engine != v1alpha1.DatabaseEngineMySQL {
 		return restore
 	}
 	clusterReady := in.cluster != nil && mysql.Health(in.cluster).Ready
@@ -458,17 +494,23 @@ func (r *Reconciler) applyProxy(ctx context.Context, in *flow, vip string) (*Ref
 	case err != nil && !apierrors.IsNotFound(err):
 		return nil, err
 	}
-	if err := ssa.Apply(ctx, r.Client, SecurityGroupObject(*in.db, in.project, in.subnet, vip, in.port), v1alpha1.DatabaseFieldManager); err != nil {
+	gateSource := vip
+	if in.legacy != nil {
+		gateSource = ""
+	}
+	if err := ssa.Apply(ctx, r.Client, SecurityGroupObject(proxyDatabase(in), in.project, in.subnet, gateSource, in.port), v1alpha1.DatabaseFieldManager); err != nil {
 		return nil, fmt.Errorf("apply the security group: %w", err)
 	}
-	if err := EnsureAdminCopy(ctx, r.Client, *in.db, in.project, address, int32(in.port)); err != nil {
+	host, port := customerEndpoint(*in.db, address, int32(in.port))
+	if err := EnsureAdminCopy(ctx, r.Client, *in.db, in.project, host, port); err != nil {
 		return nil, fmt.Errorf("copy the admin secret: %w", err)
 	}
 	var group v1alpha1.SecurityGroup
 	if err := r.Live.Get(ctx, client.ObjectKey{Namespace: in.db.Namespace, Name: SecurityGroupName(in.db.UID)}, &group); err != nil {
 		return nil, err
 	}
-	if !meta.IsStatusConditionTrue(group.Status.Conditions, v1alpha1.ConditionReady) {
+	if !meta.IsStatusConditionTrue(group.Status.Conditions, v1alpha1.ConditionReady) ||
+		in.legacy != nil && group.Status.ObservedGeneration != group.Generation {
 		return nil, nil
 	}
 	revision, err := certificateRevision(ctx, r.Live, client.ObjectKey{Namespace: in.db.Namespace, Name: EndpointName(*in.db)})
@@ -490,7 +532,7 @@ func (r *Reconciler) applyProxy(ctx context.Context, in *flow, vip string) (*Ref
 			return nil, fmt.Errorf("%s %s: %w", obj.GetKind(), obj.GetName(), err)
 		}
 	}
-	return nil, nil
+	return r.applyLegacyFrontend(ctx, in, address)
 }
 
 func (r *Reconciler) foreign(ctx context.Context, desired *unstructured.Unstructured, db v1alpha1.Database) (*Refusal, error) {
@@ -535,7 +577,12 @@ func (r *Reconciler) observe(ctx context.Context, in *flow, refused *Refusal) (O
 	if observed.GateReady, err = r.readyDeployment(ctx, client.ObjectKey{Namespace: PlatformNamespace, Name: GateName(db.UID)}); err != nil {
 		return observed, err
 	}
-	if observed.EndpointReady, err = r.readyDeployment(ctx, client.ObjectKey{Namespace: db.Namespace, Name: EndpointName(*db)}); err != nil {
+	if hasLegacyEndpoint(*db) {
+		observed.EndpointReady, err = r.legacyFrontendReady(ctx, in)
+	} else {
+		observed.EndpointReady, err = r.readyDeployment(ctx, client.ObjectKey{Namespace: db.Namespace, Name: EndpointName(*db)})
+	}
+	if err != nil {
 		return observed, err
 	}
 	primary := &unstructured.Unstructured{}
@@ -586,7 +633,8 @@ func (r *Reconciler) settleEngine(ctx context.Context, in *flow, observed *Obser
 		observed.Stats = SampleStats(ctx, in.db.Spec.Engine, access.Run, in.db.Status.Stats, r.now())
 	}
 	if address, found := AddressOf(*in.db, in.subnet.Name); found {
-		if err := EnsureAdminCopy(ctx, r.Client, *in.db, in.project, address, int32(in.port)); err != nil {
+		host, port := customerEndpoint(*in.db, address, int32(in.port))
+		if err := EnsureAdminCopy(ctx, r.Client, *in.db, in.project, host, port); err != nil {
 			observed.EngineReason = "the admin secret could not be copied"
 		}
 	}

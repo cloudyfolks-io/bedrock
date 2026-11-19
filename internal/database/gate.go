@@ -12,9 +12,11 @@ import (
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/apimachinery/pkg/util/intstr"
 
 	"github.com/cloudyfolks-io/bedrock/api/v1alpha1"
 	"github.com/cloudyfolks-io/bedrock/internal/database/engine"
+	"github.com/cloudyfolks-io/bedrock/internal/network"
 )
 
 const annotationConfigHash = "bedrock.cloudyfolks.io/config-hash"
@@ -101,10 +103,38 @@ func GateObjects(in GateInput) ([]*unstructured.Unstructured, error) {
 		return nil, err
 	}
 	objects := []*unstructured.Unstructured{configMap, certificate, deployment, policy}
+	if hasLegacyEndpoint(db) {
+		policy, err := managedGatePolicy(db, in.Port)
+		if err != nil {
+			return nil, err
+		}
+		objects = append([]*unstructured.Unstructured{policy}, objects...)
+	}
 	for i := range objects {
 		objects[i] = Adopt(objects[i], db, in.Project)
 	}
 	return objects, nil
+}
+
+func managedGatePolicy(db v1alpha1.Database, port int) (*unstructured.Unstructured, error) {
+	protocol, listener := corev1.ProtocolTCP, intstr.FromInt32(int32(port))
+	return toUnstructured(&networkingv1.NetworkPolicy{
+		TypeMeta:   metav1.TypeMeta{APIVersion: "networking.k8s.io/v1", Kind: "NetworkPolicy"},
+		ObjectMeta: metav1.ObjectMeta{Name: GateName(db.UID), Namespace: PlatformNamespace},
+		Spec: networkingv1.NetworkPolicySpec{
+			PodSelector: metav1.LabelSelector{MatchLabels: gateSelector(db.UID)},
+			PolicyTypes: []networkingv1.PolicyType{networkingv1.PolicyTypeIngress},
+			Ingress: []networkingv1.NetworkPolicyIngressRule{{
+				From: []networkingv1.NetworkPolicyPeer{{
+					NamespaceSelector: &metav1.LabelSelector{MatchLabels: map[string]string{corev1.LabelMetadataName: db.Namespace}},
+					PodSelector: &metav1.LabelSelector{MatchLabels: map[string]string{
+						managedProxyLabel: string(db.UID), network.NetworkClassLabel: network.NetworkClassManaged,
+					}},
+				}},
+				Ports: []networkingv1.NetworkPolicyPort{{Protocol: &protocol, Port: &listener}},
+			}},
+		},
+	})
 }
 
 func EnginePolicyObject(db v1alpha1.Database) (*unstructured.Unstructured, error) {

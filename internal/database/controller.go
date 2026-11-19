@@ -56,6 +56,12 @@ func (r *Reconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Resu
 	if !db.DeletionTimestamp.IsZero() {
 		return r.finalize(ctx, db)
 	}
+	if db.Spec.Suspended && hasLegacyEndpoint(db) {
+		gone, err := r.removeLegacyFrontend(ctx, db)
+		if err != nil || !gone {
+			return ctrl.Result{RequeueAfter: deleteRequeue}, err
+		}
+	}
 	cfg, err := LoadConfig(ctx, r.Client)
 	if err != nil {
 		return ctrl.Result{}, err
@@ -109,6 +115,14 @@ func (r *Reconciler) finalize(ctx context.Context, db v1alpha1.Database) (ctrl.R
 	if !controllerutil.ContainsFinalizer(&db, Finalizer) {
 		return ctrl.Result{}, nil
 	}
+	gone, err := r.removeLegacyFrontend(ctx, db)
+	if err != nil || !gone {
+		return ctrl.Result{RequeueAfter: deleteRequeue}, err
+	}
+	gone, err = r.releaseLegacyVIP(ctx, db)
+	if err != nil || !gone {
+		return ctrl.Result{RequeueAfter: deleteRequeue}, err
+	}
 	cfg, err := LoadConfig(ctx, r.Client)
 	if err != nil {
 		return ctrl.Result{}, err
@@ -126,7 +140,7 @@ func (r *Reconciler) finalize(ctx context.Context, db v1alpha1.Database) (ctrl.R
 	if err := DeleteProxySecret(ctx, r.Client, db); err != nil {
 		return ctrl.Result{}, fmt.Errorf("delete the proxy certificate: %w", err)
 	}
-	gone, err := DeleteEngineObjects(ctx, r.Client, db)
+	gone, err = DeleteEngineObjects(ctx, r.Client, db)
 	if err != nil {
 		return ctrl.Result{}, fmt.Errorf("delete the engine objects: %w", err)
 	}
@@ -224,7 +238,7 @@ func conditionsOf(observed Observed, verdict Verdict, backup BackupVerdict, gene
 		{Type: v1alpha1.ConditionReady, Status: truth(verdict.Phase == v1alpha1.DatabasePhaseReady), Reason: verdict.Reason, Message: verdict.Message, ObservedGeneration: generation},
 		{Type: ConditionEngineReady, Status: truth(observed.EngineReady), Reason: engineReason, Message: engineMessage, ObservedGeneration: generation},
 		{Type: ConditionGateReady, Status: truth(observed.GateReady), Reason: gateReason, Message: "the gate deployment of the database", ObservedGeneration: generation},
-		{Type: ConditionEndpointReady, Status: truth(observed.EndpointReady), Reason: endpointReason, Message: "the proxy deployment in the subnet", ObservedGeneration: generation},
+		{Type: ConditionEndpointReady, Status: truth(observed.EndpointReady), Reason: endpointReason, Message: "the proxy deployment and frontend of the database", ObservedGeneration: generation},
 		{Type: ConditionBackupHealthy, Status: backupStatus, Reason: backup.Reason, Message: backup.Message, ObservedGeneration: generation},
 	}
 }

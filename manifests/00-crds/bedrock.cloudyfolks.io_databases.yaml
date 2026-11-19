@@ -96,9 +96,24 @@ spec:
                       rule: isIP(self) && ip(self).family() == 4
                     - message: endpoint.address is immutable
                       rule: self == oldSelf
+                  loadBalancerRef:
+                    maxLength: 55
+                    pattern: ^[a-z0-9]([-a-z0-9]*[a-z0-9])?$
+                    type: string
+                  port:
+                    format: int32
+                    maximum: 65535
+                    minimum: 1
+                    type: integer
                 required:
                 - address
                 type: object
+                x-kubernetes-validations:
+                - message: endpoint is immutable
+                  rule: self == oldSelf
+                - message: endpoint.loadBalancerRef and endpoint.port must be set
+                    together
+                  rule: has(self.loadBalancerRef) == has(self.port)
               engine:
                 enum:
                 - postgresql
@@ -362,6 +377,12 @@ spec:
                 - Deleting
                 - Failed
                 type: string
+              proxyAddress:
+                maxLength: 15
+                type: string
+                x-kubernetes-validations:
+                - message: proxyAddress must be an IPv4 address
+                  rule: isIP(self) && ip(self).family() == 4
               stats:
                 properties:
                   connections:

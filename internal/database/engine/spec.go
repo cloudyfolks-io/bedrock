@@ -30,6 +30,8 @@ type Spec struct {
 	Images       map[string]string
 	Backup       BackupSpec
 	Restore      *RestoreSpec
+	TLSSecret    string
+	TLSRevision  string
 	Suspended    bool
 }
 
@@ -46,6 +48,25 @@ type RestoreSpec struct {
 	SourceUID   string
 	TargetTime  *time.Time
 	Destination string
+	Backup      *RestoreBackup
+}
+
+type RestoreBackup struct {
+	Bucket      string
+	Prefix      string
+	ServerName  string
+	SecretName  string
+	Destination string
+}
+
+func (r RestoreSpec) BackupSource(active BackupSpec) (BackupSpec, string, string) {
+	if r.Backup == nil {
+		return active, r.SourceUID, r.SourceUID
+	}
+	active.Bucket = r.Backup.Bucket
+	active.SecretName = r.Backup.SecretName
+	active.RetentionDays = 0
+	return active, r.Backup.Prefix, r.Backup.ServerName
 }
 
 type Health struct {

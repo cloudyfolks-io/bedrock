@@ -25,6 +25,9 @@ const (
 	instanceLabel  = "app.kubernetes.io/instance"
 	engineValue    = "engine"
 	runAsID        = int64(999)
+	socketDir      = "/run/valkey"
+	socketPath     = socketDir + "/valkey.sock"
+	tlsDir         = "/tls"
 )
 
 const initScript = `set -eu
@@ -77,8 +80,12 @@ func securityContext() map[string]any {
 	}
 }
 
-func execProbe(initialDelay int64) map[string]any {
-	command := []any{"valkey-cli", "-e", "--no-auth-warning", "--user", PlatformUser, "ping"}
+func execProbe(s engine.Spec, initialDelay int64) map[string]any {
+	command := []any{"valkey-cli", "-e", "--no-auth-warning", "--user", PlatformUser}
+	if s.TLSSecret != "" {
+		command = append(command, "-s", socketPath)
+	}
+	command = append(command, "ping")
 	return map[string]any{
 		"exec": map[string]any{"command": command}, "initialDelaySeconds": initialDelay,
 		"periodSeconds": int64(10), "timeoutSeconds": int64(5), "failureThreshold": int64(3),
@@ -94,6 +101,11 @@ func serverArguments(s engine.Spec) []any {
 	}
 	for _, command := range renamedCommands {
 		arguments = append(arguments, "--rename-command", command, "")
+	}
+	if s.TLSSecret != "" {
+		arguments = append(arguments, "--port", "0", "--tls-port", strconv.Itoa(Port),
+			"--tls-cert-file", tlsDir+"/tls.crt", "--tls-key-file", tlsDir+"/tls.key", "--tls-ca-cert-file", tlsDir+"/ca.crt",
+			"--tls-auth-clients", "no", "--unixsocket", socketPath, "--unixsocketperm", "770")
 	}
 	return arguments
 }
@@ -120,35 +132,55 @@ func serverContainer(s engine.Spec, mount []any) map[string]any {
 		"resources":       engine.ResourceBlock(s.CPUMilli, s.MemoryMi),
 		"volumeMounts":    mount,
 		"securityContext": securityContext(),
-		"readinessProbe":  execProbe(5),
-		"livenessProbe":   execProbe(30),
+		"readinessProbe":  execProbe(s, 5),
+		"livenessProbe":   execProbe(s, 30),
 	}
 }
 
 func exporterContainer(s engine.Spec) map[string]any {
 	sidecarSecurity := securityContext()
 	sidecarSecurity["readOnlyRootFilesystem"] = true
-	return map[string]any{
+	address := "redis://127.0.0.1:" + strconv.Itoa(Port)
+	if s.TLSSecret != "" {
+		address = "unix://" + socketPath
+	}
+	container := map[string]any{
 		"name": "exporter", "image": s.Images[ImageExporter],
 		"ports": []any{map[string]any{"name": "metrics", "containerPort": int64(MetricsPort)}},
 		"env": []any{
-			map[string]any{"name": "REDIS_ADDR", "value": "redis://127.0.0.1:" + strconv.Itoa(Port)},
+			map[string]any{"name": "REDIS_ADDR", "value": address},
 			map[string]any{"name": "REDIS_USER", "value": ExporterUser},
 			secretEnv("REDIS_PASSWORD", engine.Named(s.Name, "superuser"), "exporter-password"),
 		},
 		"resources":       engine.ResourceBlock(50, 64),
 		"securityContext": sidecarSecurity,
 	}
+	if s.TLSSecret != "" {
+		container["volumeMounts"] = []any{map[string]any{"name": "socket", "mountPath": socketDir}}
+	}
+	return container
 }
 
 func podSpec(s engine.Spec) map[string]any {
 	mount := []any{map[string]any{"name": "data", "mountPath": "/data", "subPath": "data"}}
+	serverMount := mount
+	volumes := []any{map[string]any{"name": "data", "persistentVolumeClaim": map[string]any{"claimName": engine.Named(s.Name, "data")}}}
+	if s.TLSSecret != "" {
+		serverMount = append(serverMount,
+			map[string]any{"name": "customer-tls", "mountPath": tlsDir, "readOnly": true},
+			map[string]any{"name": "socket", "mountPath": socketDir},
+		)
+		volumes = append(volumes,
+			map[string]any{"name": "customer-tls", "secret": map[string]any{"secretName": s.TLSSecret, "defaultMode": int64(0o440)}},
+			map[string]any{"name": "socket", "emptyDir": map[string]any{}},
+		)
+	}
 	return map[string]any{
 		"automountServiceAccountToken": false,
 		"securityContext":              map[string]any{"fsGroup": runAsID},
 		"initContainers":               []any{aclInitContainer(s, mount)},
-		"containers":                   []any{serverContainer(s, mount), exporterContainer(s)},
-		"volumes":                      []any{map[string]any{"name": "data", "persistentVolumeClaim": map[string]any{"claimName": engine.Named(s.Name, "data")}}},
+		"containers":                   []any{serverContainer(s, serverMount), exporterContainer(s)},
+		"volumes":                      volumes,
 	}
 }
 
@@ -175,6 +207,10 @@ func replicas(s engine.Spec) int64 {
 }
 
 func deployment(s engine.Spec) *unstructured.Unstructured {
+	metadata := map[string]any{"labels": engine.Labels(s.PodLabels)}
+	if s.TLSRevision != "" {
+		metadata["annotations"] = map[string]any{"bedrock.cloudyfolks.io/customer-tls-revision": s.TLSRevision}
+	}
 	return &unstructured.Unstructured{Object: map[string]any{
 		"apiVersion": "apps/v1", "kind": "Deployment",
 		"metadata": map[string]any{"name": s.Name, "namespace": s.Namespace, "labels": engine.Labels(s.Labels)},
@@ -182,7 +218,7 @@ func deployment(s engine.Spec) *unstructured.Unstructured {
 			"replicas": replicas(s), "strategy": map[string]any{"type": "Recreate"},
 			"selector": map[string]any{"matchLabels": engine.Labels(Selector(s.Name))},
 			"template": map[string]any{
-				"metadata": map[string]any{"labels": engine.Labels(s.PodLabels)},
+				"metadata": metadata,
 				"spec":     podSpec(s),
 			},
 		},
@@ -250,11 +286,13 @@ func Health(obj *unstructured.Unstructured) engine.Health {
 }
 
 func Target(namespace, name string) exec.Target {
+	script := `if [ -S "` + socketPath + `" ]; then set -- -s "` + socketPath + `" "$@"; fi
+exec valkey-cli -e --no-auth-warning --user ` + PlatformUser + ` "$@"`
 	return exec.Target{
 		Namespace: namespace,
 		Selector:  client.MatchingLabels(Selector(name)),
 		Container: "valkey",
-		Command:   []string{"valkey-cli", "-e", "--no-auth-warning", "--user", PlatformUser},
+		Command:   []string{"sh", "-c", script, "valkey-cli"},
 		Classify:  func(stderr string) exec.Kind { return engine.KindOf(Classify(stderr)) },
 	}
 }

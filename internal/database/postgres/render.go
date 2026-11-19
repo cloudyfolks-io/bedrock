@@ -81,13 +81,14 @@ func bootstrap(s engine.Spec) map[string]any {
 }
 
 func externalClusters(s engine.Spec) []any {
+	_, _, server := s.Restore.BackupSource(s.Backup)
 	return []any{map[string]any{
 		"name": "source",
 		"plugin": map[string]any{
 			"name": PluginName,
 			"parameters": map[string]any{
 				"barmanObjectName": engine.Named(s.Name, "source"),
-				"serverName":       s.Restore.SourceUID,
+				"serverName":       server,
 			},
 		},
 	}}
@@ -115,6 +116,12 @@ func Render(s engine.Spec) ([]*unstructured.Unstructured, error) {
 	if s.StorageClass != "" {
 		spec["storage"].(map[string]any)["storageClass"] = s.StorageClass
 	}
+	if s.TLSSecret != "" {
+		spec["certificates"] = map[string]any{"serverTLSSecret": s.TLSSecret, "serverCASecret": s.TLSSecret}
+		spec["postgresql"].(map[string]any)["pg_hba"] = []any{
+			"host all postgres all reject", "hostssl all all all scram-sha-256", "host all all all reject",
+		}
+	}
 	out := []*unstructured.Unstructured{}
 	if s.Backup.Enabled {
 		spec["plugins"] = []any{map[string]any{
@@ -125,7 +132,10 @@ func Render(s engine.Spec) ([]*unstructured.Unstructured, error) {
 	}
 	if s.Restore != nil {
 		spec["externalClusters"] = externalClusters(s)
-		out = append(out, objectStore(s, engine.Named(s.Name, "source"), s.Restore.SourceUID))
+		backup, prefix, _ := s.Restore.BackupSource(s.Backup)
+		source := s
+		source.Backup = backup
+		out = append(out, objectStore(source, engine.Named(s.Name, "source"), prefix))
 	}
 	out = append(out, &unstructured.Unstructured{Object: map[string]any{
 		"apiVersion": "postgresql.cnpg.io/v1", "kind": "Cluster",
@@ -152,21 +162,24 @@ func scheduledBackup(s engine.Spec) *unstructured.Unstructured {
 }
 
 func objectStore(s engine.Spec, name, prefix string) *unstructured.Unstructured {
+	spec := map[string]any{
+		"instanceSidecarConfiguration": map[string]any{"resources": sidecarResources()},
+		"configuration": map[string]any{
+			"destinationPath": fmt.Sprintf("s3://%s/%s/", s.Backup.Bucket, prefix),
+			"endpointURL":     s.Backup.Endpoint,
+			"s3Credentials": map[string]any{
+				"accessKeyId":     map[string]any{"name": s.Backup.SecretName, "key": "ACCESS_KEY_ID"},
+				"secretAccessKey": map[string]any{"name": s.Backup.SecretName, "key": "ACCESS_SECRET_KEY"},
+			},
+		},
+	}
+	if s.Backup.RetentionDays > 0 {
+		spec["retentionPolicy"] = fmt.Sprintf("%dd", s.Backup.RetentionDays)
+	}
 	return &unstructured.Unstructured{Object: map[string]any{
 		"apiVersion": "barmancloud.cnpg.io/v1", "kind": "ObjectStore",
 		"metadata": map[string]any{"name": name, "namespace": s.Namespace, "labels": engine.Labels(s.Labels)},
-		"spec": map[string]any{
-			"retentionPolicy":              fmt.Sprintf("%dd", s.Backup.RetentionDays),
-			"instanceSidecarConfiguration": map[string]any{"resources": sidecarResources()},
-			"configuration": map[string]any{
-				"destinationPath": fmt.Sprintf("s3://%s/%s/", s.Backup.Bucket, prefix),
-				"endpointURL":     s.Backup.Endpoint,
-				"s3Credentials": map[string]any{
-					"accessKeyId":     map[string]any{"name": s.Backup.SecretName, "key": "ACCESS_KEY_ID"},
-					"secretAccessKey": map[string]any{"name": s.Backup.SecretName, "key": "ACCESS_SECRET_KEY"},
-				},
-			},
-		},
+		"spec":     spec,
 	}}
 }
 

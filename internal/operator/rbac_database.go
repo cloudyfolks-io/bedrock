@@ -13,8 +13,10 @@ func databaseRules() []rbacv1.PolicyRule {
 		{APIGroups: []string{"barmancloud.cnpg.io"}, Resources: []string{"objectstores"}, Verbs: standardVerbs()},
 		{APIGroups: []string{""}, Resources: []string{"configmaps", "persistentvolumeclaims", "resourcequotas", "serviceaccounts", "services"}, Verbs: standardVerbs()},
 		{APIGroups: []string{""}, Resources: []string{"secrets"}, Verbs: []string{"create", "delete", "get", "patch", "update"}},
+		{APIGroups: []string{""}, Resources: []string{"endpoints"}, Verbs: []string{"get"}},
 		{APIGroups: []string{"networking.k8s.io"}, Resources: []string{"networkpolicies"}, Verbs: standardVerbs()},
 		{APIGroups: []string{"apps"}, Resources: []string{"deployments"}, Verbs: standardVerbs()},
+		{APIGroups: []string{"apps"}, Resources: []string{"replicasets"}, Verbs: []string{"get"}},
 		{APIGroups: []string{"cert-manager.io"}, Resources: []string{"certificates"}, Verbs: standardVerbs()},
 		{APIGroups: []string{"node.k8s.io"}, Resources: []string{"runtimeclasses"}, Verbs: read},
 	}

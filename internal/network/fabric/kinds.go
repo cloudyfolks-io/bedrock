@@ -26,5 +26,6 @@ var (
 	BgpConfGVK          = gvk("BgpConf")
 	VipGVK              = gvk("Vip")
 	SwitchLBRuleGVK     = gvk("SwitchLBRule")
+	LoadBalancerGVK     = gvk("LoadBalancer")
 	LoadBalancerPoolGVK = gvk("LoadBalancerPool")
 )

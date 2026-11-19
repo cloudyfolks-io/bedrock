@@ -63,6 +63,9 @@ func TestOperatorRoleCoversDatabases(t *testing.T) {
 	if !allows(role, "", "pods/exec", "create") || !allows(role, "", "pods", "list") {
 		t.Error("the operator must run SQL in the engine pods")
 	}
+	if !allows(role, "", "endpoints", "get") || !allows(role, "apps", "replicasets", "get") {
+		t.Error("the operator must verify the deployed legacy frontend and its proxy")
+	}
 	for _, denied := range [][3]string{
 		{"", "namespaces", "delete"},
 		{"apiextensions.k8s.io", "customresourcedefinitions", "delete"},

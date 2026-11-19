@@ -65,7 +65,8 @@ A class with `highAvailability: true` makes 3 instances. Other classes make 1 in
 | `class` | The name of a `DatabaseClass`. A change must keep `highAvailability`. |
 | `storageGi` | The storage in GiB. It is between the class minimum and maximum. It can only grow. |
 | `subnetRef` | A `Subnet` of the project. The default is `default`. It cannot change. |
-| `endpoint.address` | An optional IPv4 address in the CIDR of the subnet. The proxy pod gets this address. It cannot be the gateway, the network or broadcast address, an excluded address or an address that another workload holds. It cannot change or be added after the create. Without it, the operator picks the lowest free address. |
+| `endpoint.address` | An optional IPv4 address for the customer endpoint. For a direct endpoint, the proxy pod gets this address from the project subnet. The operator rejects network, broadcast, gateway, excluded and in-use addresses. Without this field the operator picks the lowest free address in the subnet. |
+| `endpoint.loadBalancerRef`, `endpoint.port` | A Fabric frontend name and TCP port for an administrator-approved migration. Set both fields with `endpoint.address` to keep a legacy IPv4 address in the load balancer plane of the project Network. |
 | `allowedCIDRs` | The networks that can connect. The default is the CIDR of the subnet. |
 | `backup.enabled` | The default is `true`. A Valkey database must set `false`. |
 | `backup.retentionDays` | Optional, 1 to 365. The days of backups and WAL that this database keeps. It must be inside `database.backup.retention-days-min` and `-max`, or the reason is `RetentionOutOfRange` and the controller changes nothing. Without it the Setting `database.backup.retention-days` applies. It needs `backup.enabled`. A lower value removes the backups that are older than the new value. |
@@ -74,7 +75,7 @@ A class with `highAvailability: true` makes 3 instances. Other classes make 1 in
 
 The name has at most 52 characters and is a DNS label.
 
-The `status` shows `phase`, `conditions`, `addresses` (`subnet`, `ip` and `port`), `credentialsSecret`, `instances`, `backup` (with `request`) and `stats`.
+The `status` shows `phase`, `conditions`, `addresses` (`subnet`, `ip` and `port`), `credentialsSecret`, `instances`, `backup` (with `request`) and `stats`. For an imported frontend, `addresses` gives the customer IPv4 address and TCP port. `proxyAddress` gives the private proxy NIC address.
 
 | Phase | Meaning |
 |---|---|
@@ -91,8 +92,25 @@ The `status` shows `phase`, `conditions`, `addresses` (`subnet`, `ip` and `port`
 | `Ready` | The phase is `Ready`. |
 | `EngineReady` | The engine reports a healthy cluster and the first setup ran. |
 | `GateReady` | The gate Deployment is ready. |
-| `EndpointReady` | The proxy Deployment in the subnet is ready. |
+| `EndpointReady` | The proxy Deployment in the subnet is ready. For an imported frontend, the controller also checks the Fabric VIP, frontend and backend endpoints. |
 | `BackupHealthy` | The last completed backup is not older than 36 hours. |
+
+### Keep a legacy database frontend
+
+Create the `Database` in its project namespace with `spec.suspended` set to `true`. Set the three endpoint fields at creation. These fields cannot change. Then create the immutable ConfigMap `database-endpoint-<loadBalancerRef>` in `bedrock-dbaas` with these keys.
+
+| Keys | Values |
+|---|---|
+| `namespace`, `database`, `uid` | The target Database namespace, name and Kubernetes UID. |
+| `address`, `port` | The exact legacy IPv4 address and TCP port. |
+| `loadBalancerID`, `projectID`, `environment` | The source network service IDs and environment. |
+| `legacyVPC`, `legacyNamespace` | The source Fabric VPC and backend namespace. An existing rule must match both values. |
+| `subnetUID`, `network` | The target Subnet Kubernetes UID and its `spec.networkRef`. |
+| `jobCIDR` | The IPv4 network of the migration job. The controller uses only this range for customer access during verification. |
+
+Follow the migration procedure to freeze the source before you activate the Database. The migration command records start approval in the immutable ConfigMap `database-endpoint-<loadBalancerRef>-start` in `bedrock-dbaas`. The operator reserves the legacy VIP in the load balancer plane and sets the approved Fabric frontend to use the private proxy NIC. Verify the data and connect at the legacy address and port before you open access to customers. The migration command records open approval in `database-endpoint-<loadBalancerRef>-open`. The controller accepts both approval records only when they match the database, subnet, network and endpoint claim UIDs and names.
+
+An imported frontend needs the two-interface managed Pod network. The proxy listens on its private project NIC and connects to the internal gate Service on its managed network. The gate NetworkPolicy accepts only the controller-managed proxy identity for this Database.
 
 ### DatabaseUser
 

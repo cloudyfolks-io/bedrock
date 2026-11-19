@@ -5,6 +5,7 @@ import (
 	"maps"
 	"net"
 	"regexp"
+	"strconv"
 	"strings"
 
 	appsv1 "k8s.io/api/apps/v1"
@@ -91,6 +92,10 @@ func GateConfig(s GateSpec) (string, error) {
 }
 
 func ProxyConfig(vip string, port int, serverName string) (string, error) {
+	return proxyConfig(vip, "", port, serverName)
+}
+
+func proxyConfig(vip, address string, port int, serverName string) (string, error) {
 	if net.ParseIP(vip) == nil || !validPort(port) || !serverNamePattern.MatchString(serverName) {
 		return "", fmt.Errorf("invalid gate address, port or server name")
 	}
@@ -103,7 +108,7 @@ func ProxyConfig(vip string, port int, serverName string) (string, error) {
 		"    timeout client 1h",
 		"    timeout server 1h",
 		"frontend db",
-		fmt.Sprintf("    bind :%d", port),
+		"    bind " + net.JoinHostPort(address, strconv.Itoa(port)),
 		"    default_backend gate",
 		"backend gate",
 		fmt.Sprintf("    server gate %s:%d ssl crt %s/%s ssl-min-ver TLSv1.2 ca-file %s/%s verify required sni str(%s) verifyhost %s check check-ssl",

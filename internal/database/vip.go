@@ -16,6 +16,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	"github.com/cloudyfolks-io/bedrock/api/v1alpha1"
+	"github.com/cloudyfolks-io/bedrock/internal/ssa"
 )
 
 const (
@@ -105,6 +106,54 @@ func VIPService(db v1alpha1.Database, project Project, vip, iface string, port i
 		return nil, err
 	}
 	return Adopt(service, db, project), nil
+}
+
+func managedGateService(db v1alpha1.Database, project Project, port int) (*unstructured.Unstructured, error) {
+	listener := int32(port)
+	service, err := toUnstructured(&corev1.Service{
+		TypeMeta:   metav1.TypeMeta{APIVersion: "v1", Kind: "Service"},
+		ObjectMeta: metav1.ObjectMeta{Name: VIPName(db.UID), Namespace: PlatformNamespace},
+		Spec: corev1.ServiceSpec{
+			Type: corev1.ServiceTypeClusterIP, Selector: gateSelector(db.UID),
+			Ports: []corev1.ServicePort{{Name: "db", Port: listener, TargetPort: intstr.FromInt32(listener), Protocol: corev1.ProtocolTCP}},
+		},
+	})
+	if err != nil {
+		return nil, err
+	}
+	return Adopt(service, db, project), nil
+}
+
+func (r *Reconciler) gateAddress(ctx context.Context, in *flow) (string, error) {
+	db := *in.db
+	if in.legacy == nil {
+		return r.Alloc.EnsureVIP(ctx, r.Client, r.Live, in.cfg, db, in.project, in.port)
+	}
+	want, err := managedGateService(db, in.project, in.port)
+	if err != nil {
+		return "", err
+	}
+	var service unstructured.Unstructured
+	service.SetGroupVersionKind(ServiceGVK)
+	key := client.ObjectKeyFromObject(want)
+	err = r.Live.Get(ctx, key, &service)
+	if client.IgnoreNotFound(err) != nil {
+		return "", err
+	}
+	if err == nil && !ownedFrontend(&service, db) {
+		return "", ErrVIPNameTaken
+	}
+	if err := ssa.Apply(ctx, r.Client, want, v1alpha1.DatabaseFieldManager); err != nil {
+		return "", err
+	}
+	if err := r.Live.Get(ctx, key, &service); err != nil {
+		return "", err
+	}
+	address, _, _ := unstructured.NestedString(service.Object, "spec", "clusterIP")
+	if !parseAddr(address).Is4() {
+		return "", fmt.Errorf("the managed database gate Service needs an IPv4 cluster address")
+	}
+	return address, nil
 }
 
 type Allocator struct {

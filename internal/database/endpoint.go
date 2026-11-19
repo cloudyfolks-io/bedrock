@@ -24,10 +24,29 @@ const SuffixEndpoint = "endpoint"
 var ErrEndpointAddressTaken = errors.New("the pinned endpoint address is in use")
 
 func PinnedAddress(db v1alpha1.Database) string {
-	if db.Spec.Endpoint == nil {
+	if db.Spec.Endpoint == nil || hasLegacyEndpoint(db) {
 		return ""
 	}
 	return db.Spec.Endpoint.Address
+}
+
+func hasLegacyEndpoint(db v1alpha1.Database) bool {
+	return db.Spec.Endpoint != nil && db.Spec.Endpoint.LoadBalancerRef != ""
+}
+
+func customerEndpoint(db v1alpha1.Database, address string, port int32) (string, int32) {
+	if hasLegacyEndpoint(db) {
+		return db.Spec.Endpoint.Address, db.Spec.Endpoint.Port
+	}
+	return address, port
+}
+
+func proxyAddressOf(db v1alpha1.Database, subnet string) (string, bool) {
+	if hasLegacyEndpoint(db) {
+		_, belongs := AddressOf(db, subnet)
+		return db.Status.ProxyAddress, belongs && db.Status.ProxyAddress != ""
+	}
+	return AddressOf(db, subnet)
 }
 
 func PinnedAddressProblem(db v1alpha1.Database, subnet v1alpha1.Subnet) string {
@@ -41,7 +60,15 @@ func PinnedAddressProblem(db v1alpha1.Database, subnet v1alpha1.Subnet) string {
 	return ""
 }
 
-func EndpointName(db v1alpha1.Database) string { return db.Name + "-" + SuffixEndpoint }
+const managedProxyPrefix = "bedrock-db-proxy-"
+const managedProxyLabel = "bedrock.cloudyfolks.io/database-gate-client"
+
+func EndpointName(db v1alpha1.Database) string {
+	if hasLegacyEndpoint(db) {
+		return managedProxyPrefix + string(db.UID)
+	}
+	return db.Name + "-" + SuffixEndpoint
+}
 
 func SecurityGroupName(uid types.UID) string {
 	name := string(uid)
@@ -82,7 +109,14 @@ func proxySelector(db v1alpha1.Database) map[string]string {
 
 func ProxyObjects(in ProxyInput) ([]*unstructured.Unstructured, error) {
 	db := in.Database
-	config, err := ProxyConfig(in.VIP, in.Port, ServerName(string(db.UID)))
+	listen := ""
+	if hasLegacyEndpoint(db) {
+		listen = in.Address
+		if !parseAddr(listen).Is4() {
+			return nil, fmt.Errorf("the managed proxy needs a private IPv4 address")
+		}
+	}
+	config, err := proxyConfig(in.VIP, listen, in.Port, ServerName(string(db.UID)))
 	if err != nil {
 		return nil, err
 	}
@@ -112,6 +146,9 @@ func ProxyObjects(in ProxyInput) ([]*unstructured.Unstructured, error) {
 	}
 	for key, value := range attachment.Labels {
 		podLabels[key] = value
+	}
+	if hasLegacyEndpoint(db) {
+		podLabels[managedProxyLabel] = string(db.UID)
 	}
 	annotations := map[string]string{annotationConfigHash: configHash(config, strconv.FormatInt(in.Revision, 10))}
 	for key, value := range attachment.Annotations {
@@ -180,7 +217,7 @@ func pinnedByProxy(deployment *unstructured.Unstructured) string {
 func (a *Allocator) EnsureAddress(ctx context.Context, c client.Client, live client.Reader, db *v1alpha1.Database, subnet v1alpha1.Subnet, port int32) (string, error) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
-	if address, found := AddressOf(*db, subnet.Name); found {
+	if address, found := proxyAddressOf(*db, subnet.Name); found {
 		return address, nil
 	}
 	if address := a.proxyAddress(ctx, live, *db); address != "" {
@@ -218,6 +255,9 @@ func (a *Allocator) proxyAddress(ctx context.Context, live client.Reader, db v1a
 	if err := live.Get(ctx, client.ObjectKey{Namespace: db.Namespace, Name: EndpointName(db)}, deployment); err != nil {
 		return ""
 	}
+	if !metav1.IsControlledBy(deployment, &db) {
+		return ""
+	}
 	if address := pinnedByProxy(deployment); parseAddr(address).IsValid() {
 		return address
 	}
@@ -239,7 +279,7 @@ func (a *Allocator) reservedByDatabases(ctx context.Context, live client.Reader,
 		if other.UID == db.UID {
 			continue
 		}
-		if address, found := AddressOf(other, subnet); found {
+		if address, found := proxyAddressOf(other, subnet); found {
 			reserved = append(reserved, address)
 		}
 	}
@@ -252,10 +292,14 @@ func (a *Allocator) record(ctx context.Context, c client.Client, db *v1alpha1.Da
 		if err := c.Get(ctx, client.ObjectKeyFromObject(db), &current); err != nil {
 			return err
 		}
-		if existing, found := AddressOf(current, subnet); found && existing != address {
+		if existing, found := proxyAddressOf(current, subnet); found && existing != address {
 			return errors.New("another address was recorded first")
 		}
-		current.Status.Addresses = []v1alpha1.DatabaseAddress{{Subnet: subnet, IP: address, Port: port}}
+		customerAddress, customerPort := customerEndpoint(current, address, port)
+		current.Status.Addresses = []v1alpha1.DatabaseAddress{{Subnet: subnet, IP: customerAddress, Port: customerPort}}
+		if hasLegacyEndpoint(current) {
+			current.Status.ProxyAddress = address
+		}
 		if err := c.Status().Update(ctx, &current, client.FieldOwner(v1alpha1.DatabaseFieldManager)); err != nil {
 			return err
 		}

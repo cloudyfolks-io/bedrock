@@ -94,6 +94,12 @@ rules:
 - apiGroups:
   - apps
   resources:
+  - replicasets
+  verbs:
+  - get
+- apiGroups:
+  - apps
+  resources:
   - deployments
   verbs:
   - get
@@ -380,6 +386,7 @@ rules:
   - bgp-confs
   - dns-zones
   - loadbalancer-pools
+  - loadbalancers
   - ovn-eips
   - ovn-fips
   - ovn-snat-rules
@@ -890,6 +897,7 @@ rules:
 - apiGroups:
   - ""
   resources:
+  - endpoints
   - secrets
   verbs:
   - get
