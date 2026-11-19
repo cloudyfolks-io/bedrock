@@ -56,11 +56,16 @@ describe("AddonsPage", () => {
     await user.paste('{"retention": "7d"}');
     await user.click(within(loki).getByRole("button", { name: "Save values" }));
     await waitFor(() => expect(api.calls.some((call) => call.method === "PATCH")).toBe(true));
-    expect(api.calls.find((call) => call.method === "PATCH")?.body).toEqual({ spec: { values: { retention: "7d" } } });
+    const patch = api.calls.find((call) => call.method === "PATCH");
+    expect(patch?.headers.get("Content-Type")).toBe("application/json-patch+json");
+    expect(patch?.body).toEqual([
+      { op: "test", path: "/metadata/resourceVersion", value: "100" },
+      { op: "add", path: "/spec/values", value: { retention: "7d" } },
+    ]);
   });
 
-  it("hides the switch without update permission", async () => {
-    render((check) => check.verb !== "update");
+  it("hides the switch without patch permission", async () => {
+    render((check) => check.verb !== "patch");
     const loki = (await screen.findByRole("region", { name: "loki" })) as HTMLElement;
     await waitFor(() => expect(within(loki).queryByRole("switch")).toBeNull());
     expect(within(loki).queryByRole("button", { name: "Save values" })).toBeNull();

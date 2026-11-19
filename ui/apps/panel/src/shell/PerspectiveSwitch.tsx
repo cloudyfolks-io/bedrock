@@ -10,7 +10,7 @@ export function PerspectiveSwitch() {
   }
   return (
     <nav className="br-perspective" aria-label={t({ id: "shell.perspective.label", message: "Perspective" })}>
-      <NavLink to="/admin/hosts" className="br-perspective-link">
+      <NavLink to="/admin" className="br-perspective-link">
         {t({ id: "shell.perspective.admin", message: "Admin" })}
       </NavLink>
       <NavLink to="/p" className="br-perspective-link">

@@ -37,6 +37,9 @@ msgstr "Start"
 msgid "action.stop"
 msgstr "Stop"
 
+msgid "addons.conflict"
+msgstr "The addon values changed while you were editing them."
+
 msgid "addons.enabled"
 msgstr "Enabled"
 
@@ -698,6 +701,54 @@ msgstr "Upload"
 msgid "images.upload.title"
 msgstr "Upload {0}"
 
+msgid "inventory.allProjects"
+msgstr "All projects"
+
+msgid "inventory.empty"
+msgstr "No resources match"
+
+msgid "inventory.expired"
+msgstr "This list expired"
+
+msgid "inventory.first"
+msgstr "Go to first page"
+
+msgid "inventory.name"
+msgstr "Exact resource name"
+
+msgid "inventory.next"
+msgstr "Next"
+
+msgid "inventory.noProject"
+msgstr "No linked project"
+
+msgid "inventory.page"
+msgstr "Page {page}"
+
+msgid "inventory.pages"
+msgstr "Inventory pages"
+
+msgid "inventory.previous"
+msgstr "Previous"
+
+msgid "inventory.projectPending"
+msgstr "The project namespace is not ready"
+
+msgid "inventory.projectUnavailable"
+msgstr "This project is unavailable"
+
+msgid "inventory.resourceType"
+msgstr "Resource type"
+
+msgid "inventory.search"
+msgstr "Search"
+
+msgid "inventory.tenant"
+msgstr "Tenant"
+
+msgid "inventory.unknownType"
+msgstr "Select a resource type"
+
 msgid "list.actions.header"
 msgstr "Actions"
 
@@ -817,6 +868,9 @@ msgstr "Internet gateways"
 msgid "nav.item.kubernetesClusters"
 msgstr "Kubernetes clusters"
 
+msgid "nav.item.inventory"
+msgstr "Resource inventory"
+
 msgid "nav.item.loadBalancers"
 msgstr "Load balancers"
 
@@ -898,6 +952,9 @@ msgstr "Networks belong to the tenant. Subnets of your project still work."
 msgid "networks.forbidden.title"
 msgstr "You cannot list networks"
 
+msgid "query.error"
+msgstr "The panel could not load this data."
+
 msgid "registry.showLogin"
 msgstr "Show login"
 
@@ -912,6 +969,9 @@ msgstr "Applied"
 
 msgid "settings.col.key"
 msgstr "Setting"
+
+msgid "settings.conflict"
+msgstr "This setting changed while you were editing it."
 
 msgid "settings.desc.additionalCa"
 msgstr "PEM bundle of extra CAs trusted for outbound connections."
@@ -1014,6 +1074,9 @@ msgstr "Change the platform host"
 
 msgid "settings.pending"
 msgstr "Pending"
+
+msgid "settings.useCurrent"
+msgstr "Use current value"
 
 msgid "settings.usesDefault"
 msgstr "Uses the default"

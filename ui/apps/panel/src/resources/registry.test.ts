@@ -42,6 +42,7 @@ describe("registry", () => {
     }
     for (const perspective of ["admin", "project"] as const) {
       const paths = primaryDefinitionsFor(perspective).map((def) => def.path);
+      if (perspective === "admin") paths.push("inventory");
       const navPaths = navigationFor(perspective, "web").flatMap((section) => section.items.map((item) => item.id));
       expect(new Set(paths)).toEqual(new Set(navPaths));
       expect(definitionsFor(perspective).length).toBeGreaterThan(0);

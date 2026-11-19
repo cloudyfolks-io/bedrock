@@ -12,7 +12,7 @@ describe("shell in right-to-left", () => {
     });
     expect(document.documentElement.dir).toBe("rtl");
     await waitFor(() => expect(container.querySelector(".br-nav-link")).toBeTruthy());
-    expect(container.querySelector("nav.br-sidebar")).toBeTruthy();
+    expect(container.querySelector("nav.br-sidebar-links")).toBeTruthy();
     await waitFor(() => expect(container.querySelectorAll(".br-icon--directional").length).toBeGreaterThan(0));
     expect(container.querySelector(".br-breadcrumb-separator.br-icon--directional")).toBeTruthy();
     expect(screen.getByRole("link", { name: /ماشین/ })).toBeTruthy();

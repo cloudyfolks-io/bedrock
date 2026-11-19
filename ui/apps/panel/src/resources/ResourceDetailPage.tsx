@@ -2,13 +2,13 @@ import { useMemo, useState, type ReactNode } from "react";
 import { useParams } from "react-router";
 import { useLingui } from "@lingui/react/macro";
 import { Button, Table, TableBody, TableCell, TableHead, TableHeaderCell, TableRow } from "@bedrock/design";
-import { isHttpError } from "../api/http";
 import type { Condition, KubeObject } from "../api/types";
 import { useProjects } from "../api/projects";
 import { useCans, type Check } from "../authz/authz";
 import { EmptyState } from "../components/EmptyState";
 import { Ltr } from "../components/Ltr";
 import { PageHeader } from "../components/PageHeader";
+import { QueryFailure } from "../components/QueryFailure";
 import { Spinner } from "../components/Spinner";
 import { StatusBadge } from "../components/StatusBadge";
 import { NotFoundPage } from "../pages/NotFoundPage";
@@ -76,8 +76,8 @@ function DetailBody({ def, namespace, name, projectName, children }: { def: Reso
   if (query.isPending) {
     return <Spinner />;
   }
-  if (isHttpError(query.error) && query.error.status === 403) {
-    return <EmptyState title={t({ id: "list.forbidden.title", message: "You cannot view this" })} />;
+  if (query.isError) {
+    return <><PageHeader title={name} breadcrumbs={crumbs} /><QueryFailure error={query.error} retry={() => void query.refetch()} /></>;
   }
   if (query.data === null || query.data === undefined) {
     return (

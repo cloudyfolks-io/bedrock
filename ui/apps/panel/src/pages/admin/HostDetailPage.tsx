@@ -11,6 +11,7 @@ import { ConfirmSimpleDialog } from "../../components/ConfirmDialogs";
 import { EmptyState } from "../../components/EmptyState";
 import { Ltr } from "../../components/Ltr";
 import { PageHeader } from "../../components/PageHeader";
+import { QueryFailure } from "../../components/QueryFailure";
 import { Spinner } from "../../components/Spinner";
 import { LazyEditDialog } from "../../forms/LazyDialogs";
 import { formatBytes } from "../../format";
@@ -212,12 +213,18 @@ export default function HostDetailPage() {
   const [editing, setEditing] = useState(false);
   const ref = def ? refOf(def) : { group: "", version: "", plural: "", namespaced: false };
   const query = useLiveObject(ref, undefined, name);
-  const [canUpdate] = useCans([{ verb: "update", group: ref.group, resource: ref.plural, name }]);
+  const [canPatch, canUpdate] = useCans([
+    { verb: "patch", group: ref.group, resource: ref.plural, name },
+    { verb: "update", group: ref.group, resource: ref.plural, name },
+  ]);
   if (!def) {
     return null;
   }
   if (query.isPending) {
     return <Spinner />;
+  }
+  if (query.isError) {
+    return <><PageHeader title={name} /><QueryFailure error={query.error} retry={() => void query.refetch()} /></>;
   }
   const host = query.data;
   if (!host) {
@@ -242,21 +249,23 @@ export default function HostDetailPage() {
       <PageHeader
         title={name}
         breadcrumbs={[{ label: t({ id: "nav.item.hosts", message: "Hosts" }), to: "/admin/hosts" }, { label: name }]}
-        actions={
-          canUpdate === "allowed" ? (
-            <>
+        actions={(
+          <>
+            {canPatch === "allowed" ? (
               <Switch
                 label={t({ id: "hostDetail.maintenance", message: "Maintenance mode" })}
                 checked={maintenanceOn}
                 disabled={pending}
                 onCheckedChange={(next) => (next ? setConfirming(true) : void setMaintenance(false))}
               />
+            ) : null}
+            {canUpdate === "allowed" ? (
               <Button variant="secondary" onClick={() => setEditing(true)}>
                 {t({ id: "hostDetail.editRoles", message: "Edit roles" })}
               </Button>
-            </>
-          ) : null
-        }
+            ) : null}
+          </>
+        )}
       />
       <Tabs value={tab} onValueChange={(next) => setParams({ tab: next })}>
         <TabList>

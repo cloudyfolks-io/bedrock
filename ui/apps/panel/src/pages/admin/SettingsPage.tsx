@@ -11,6 +11,7 @@ import { ConfirmSimpleDialog } from "../../components/ConfirmDialogs";
 import { EmptyState } from "../../components/EmptyState";
 import { Ltr } from "../../components/Ltr";
 import { PageHeader } from "../../components/PageHeader";
+import { QueryFailure } from "../../components/QueryFailure";
 import { Spinner } from "../../components/Spinner";
 import { textAt } from "../../resources/path";
 import { definitionFor, refOf } from "../../resources/registry";
@@ -26,27 +27,41 @@ function SettingRow({ setting, canUpdate }: { setting: KubeObject; canUpdate: bo
   const meta = settingMeta(key);
   const stored = textAt(setting, "spec.value");
   const fallback = textAt(setting, "status.default");
-  const [draft, setDraft] = useState(stored !== "" ? stored : fallback);
+  const [edit, setEdit] = useState<{ base: string; value: string }>();
   const [error, setError] = useState<string | undefined>();
   const [confirming, setConfirming] = useState(false);
   const [busy, setBusy] = useState(false);
   const effective = stored !== "" ? stored : fallback;
+  const draft = edit?.value ?? effective;
+  const stale = edit !== undefined && effective !== edit.base && draft !== effective;
   const usesDefault = stored === "" || stored === fallback;
   const applied = textAt(setting, "status.applied");
 
+  function setDraft(value: string) {
+    setEdit((current) => value === effective ? undefined : { base: current?.base ?? effective, value });
+    setError(undefined);
+  }
+
   async function save() {
-    if (!def) {
+    if (!def || !canUpdate || busy || stale) {
       return;
     }
     setBusy(true);
     setError(undefined);
     try {
-      await kubeClient(http).mergePatch(refOf(def), undefined, key, { spec: { value: draft } });
-      void queryClient.invalidateQueries({ queryKey: listKey(refOf(def), undefined, {}) });
+      await kubeClient(http).mergePatch(refOf(def), undefined, key, {
+        ...(setting.metadata.resourceVersion ? { metadata: { resourceVersion: setting.metadata.resourceVersion } } : {}),
+        spec: { value: draft },
+      });
+      await queryClient.invalidateQueries({ queryKey: listKey(refOf(def), undefined, {}) });
+      setEdit(undefined);
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : t({ id: "action.error.failed", message: "The action failed" }));
       if (isHttpError(reason) && reason.status === 403) {
         setError(t({ id: "action.error.forbidden", message: "You are not allowed to do this" }));
+      }
+      if (isHttpError(reason) && reason.status === 409) {
+        await queryClient.invalidateQueries({ queryKey: listKey(refOf(def), undefined, {}) });
       }
     } finally {
       setBusy(false);
@@ -56,13 +71,13 @@ function SettingRow({ setting, canUpdate }: { setting: KubeObject; canUpdate: bo
   const label = key;
   const control =
     meta.kind === "boolean" ? (
-      <Switch label={label} checked={draft === "true"} onCheckedChange={(next) => setDraft(next ? "true" : "false")} disabled={!canUpdate} />
+      <Switch label={label} checked={draft === "true"} onCheckedChange={(next) => setDraft(next ? "true" : "false")} disabled={!canUpdate || busy} />
     ) : meta.kind === "enum" ? (
-      <Select label={label} value={draft} options={meta.options.map((option) => ({ value: option, label: option }))} onValueChange={setDraft} disabled={!canUpdate} {...(error ? { error } : {})} />
+      <Select label={label} value={draft} options={meta.options.map((option) => ({ value: option, label: option }))} onValueChange={setDraft} disabled={!canUpdate || busy} {...(error ? { error } : {})} />
     ) : meta.kind === "multiline" ? (
-      <CodeTextarea label={label} value={draft} onChange={setDraft} readOnly={!canUpdate} {...(error ? { error } : {})} />
+      <CodeTextarea label={label} value={draft} onChange={setDraft} readOnly={!canUpdate || busy} {...(error ? { error } : {})} />
     ) : (
-      <TextField label={label} name={key} value={draft} onChange={setDraft} readOnly={!canUpdate} dir="ltr" {...(error ? { error } : {})} />
+      <TextField label={label} name={key} value={draft} onChange={setDraft} readOnly={!canUpdate || busy} dir="ltr" {...(error ? { error } : {})} />
     );
 
   return (
@@ -73,10 +88,17 @@ function SettingRow({ setting, canUpdate }: { setting: KubeObject; canUpdate: bo
       </TableCell>
       <TableCell>
         {control}
+        {meta.kind === "boolean" && error ? <p role="alert" className="br-field-error">{error}</p> : null}
         {canUpdate ? (
-          <Button variant="primary" disabled={busy || draft === effective} onClick={() => (key === "platform.host" ? setConfirming(true) : void save())}>
+          <Button variant="primary" disabled={busy || stale || draft === effective} onClick={() => (key === "platform.host" ? setConfirming(true) : void save())}>
             {t({ id: "common.action.save", message: "Save" })}
           </Button>
+        ) : null}
+        {stale ? (
+          <>
+            <p role="alert">{t({ id: "settings.conflict", message: "This setting changed while you were editing it." })}</p>
+            <Button variant="secondary" onClick={() => setDraft(effective)}>{t({ id: "settings.useCurrent", message: "Use current value" })}</Button>
+          </>
         ) : null}
         {usesDefault ? <span className="br-help">{t({ id: "settings.usesDefault", message: "Uses the default" })}</span> : null}
       </TableCell>
@@ -101,14 +123,18 @@ export default function SettingsPage() {
   const def = definitionFor("settings");
   const ref = def ? refOf(def) : { group: "", version: "", plural: "", namespaced: false };
   const query = useLiveList(ref, {});
-  const canUpdate = useCan({ verb: "update", group: ref.group, resource: ref.plural }) === "allowed";
+  const canUpdate = useCan({ verb: "patch", group: ref.group, resource: ref.plural }) === "allowed";
+  const title = t({ id: "nav.item.settings", message: "Settings" });
   if (query.isPending) {
     return <Spinner />;
+  }
+  if (query.isError) {
+    return <><PageHeader title={title} /><QueryFailure error={query.error} retry={() => void query.refetch()} /></>;
   }
   const groups = groupSettings(query.data?.items ?? []);
   return (
     <>
-      <PageHeader title={t({ id: "nav.item.settings", message: "Settings" })} />
+      <PageHeader title={title} />
       {groups.length === 0 ? <EmptyState title={t({ id: "list.empty.title", message: "Nothing here yet" })} /> : null}
       {groups.map((group) => (
         <section key={group.prefix} className="br-section">

@@ -27,8 +27,9 @@ The server stays the authority. The panel only hides what the user cannot use.
 
 | Route | Page |
 |---|---|
-| `/` | Redirect to the stored perspective |
-| `/admin` | Redirect to `/admin/hosts` |
+| `/` | Open the stored perspective. On the first sign-in, open inventory for an administrator or projects for a project user. |
+| `/admin` | Redirect to `/admin/inventory` |
+| `/admin/inventory` | Resource inventory across projects |
 | `/admin/hosts` | Hosts |
 | `/admin/hosts/:name` | Host detail: overview, inventory, metrics, maintenance mode |
 | `/admin/settings` | Settings, grouped by prefix |
@@ -75,9 +76,15 @@ The server stays the authority. The panel only hides what the user cannot use.
 
 Every other kind with a namespace has a detail page at `/p/:project/<path>/:name`.
 
+## Resource inventory
+
+Select a resource type in the admin perspective. Select a project to list resources in its namespace. Select **All projects** to list resources across namespaces, including namespaces with no linked Bedrock project. The inventory shows each resource name, namespace, project and status. Networks belong to tenants. Their inventory shows the tenant.
+
+Use the exact resource name to find a resource. The address keeps the resource type, project and name filters so you can share the view with an authorized administrator. The inventory shows one page at a time. Open the first page again if the list expires. Open a linked resource to see its details and available actions.
+
 ## Live updates
 
-Every list and every detail page stays live. One WebSocket carries all updates.
+The resource lists and detail pages use one WebSocket for live updates. The admin inventory uses paged requests.
 The page loads a list first. It then subscribes at the version of that list.
 When the proxy sends `relist`, the page loads the list again and subscribes again.
 When the connection breaks, the panel connects again with a growing delay.

@@ -1,14 +1,15 @@
 import { useNavigate } from "react-router";
 import { useLingui } from "@lingui/react/macro";
 import { Select } from "@bedrock/design";
-import { useProjects } from "../api/projects";
+import { projectOptions, useProjects } from "../api/projects";
 import { writeStored } from "../storage";
 import { useCurrentProjectName } from "./context";
 
 export function ProjectPicker() {
   const { t } = useLingui();
   const navigate = useNavigate();
-  const projects = useProjects().data ?? [];
+  const query = useProjects();
+  const projects = query.isSuccess ? query.data : [];
   const current = useCurrentProjectName() ?? "";
   if (projects.length === 0) {
     return null;
@@ -17,7 +18,7 @@ export function ProjectPicker() {
     <Select
       label={t({ id: "shell.project.label", message: "Project" })}
       value={projects.some((project) => project.name === current) ? current : ""}
-      options={projects.map((project) => ({ value: project.name, label: project.displayName || project.name }))}
+      options={projectOptions(projects)}
       onValueChange={(name) => {
         writeStored("project", name);
         void navigate(`/p/${name}/vms`);

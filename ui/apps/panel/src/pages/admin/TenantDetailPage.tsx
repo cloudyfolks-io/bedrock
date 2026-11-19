@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { useParams } from "react-router";
+import { Link, useParams } from "react-router";
 import { useLingui } from "@lingui/react/macro";
 import { Button, Progress, Table, TableBody, TableCell, TableHead, TableHeaderCell, TableRow } from "@bedrock/design";
 import type { KubeObject } from "../../api/types";
@@ -7,6 +7,7 @@ import { useCans } from "../../authz/authz";
 import { EmptyState } from "../../components/EmptyState";
 import { Ltr } from "../../components/Ltr";
 import { PageHeader } from "../../components/PageHeader";
+import { QueryFailure } from "../../components/QueryFailure";
 import { Spinner } from "../../components/Spinner";
 import { LazyCreateDialog, LazyEditDialog } from "../../forms/LazyDialogs";
 import { formatQuantity, parseQuantity } from "../../format";
@@ -72,6 +73,9 @@ export default function TenantDetailPage() {
   if (tenant.isPending) {
     return <Spinner />;
   }
+  if (tenant.isError) {
+    return <><PageHeader title={name} /><QueryFailure error={tenant.error} retry={() => void tenant.refetch()} /></>;
+  }
   if (!tenant.data) {
     return <EmptyState title={t({ id: "detail.deleted.title", message: "This object was deleted" })} />;
   }
@@ -105,12 +109,14 @@ export default function TenantDetailPage() {
       </section>
       <section className="br-section">
         <h2>{t({ id: "tenantDetail.projects", message: "Projects" })}</h2>
-        {canCreate === "allowed" ? (
+        {canCreate === "allowed" && projects.isSuccess ? (
           <Button variant="primary" onClick={() => setCreating(true)}>
             {t({ id: "tenantDetail.createProject", message: "Create project" })}
           </Button>
         ) : null}
-        <Table caption={t({ id: "tenantDetail.projects", message: "Projects" })}>
+        {projects.isPending ? <Spinner /> : null}
+        {projects.isError ? <QueryFailure error={projects.error} retry={() => void projects.refetch()} /> : null}
+        {projects.isSuccess ? <Table caption={t({ id: "tenantDetail.projects", message: "Projects" })}>
           <TableHead>
             <TableRow>
               <TableHeaderCell>{t({ id: "col.name", message: "Name" })}</TableHeaderCell>
@@ -122,7 +128,7 @@ export default function TenantDetailPage() {
           <TableBody>
             {own.map((project) => (
               <TableRow key={project.metadata.uid ?? project.metadata.name}>
-                <TableCell>{project.metadata.name}</TableCell>
+                <TableCell>{textAt(project, "status.namespace") ? <Link to={`/admin/inventory?project=${project.metadata.name}`}>{project.metadata.name}</Link> : project.metadata.name}</TableCell>
                 <TableCell><Ltr>{textAt(project, "status.namespace")}</Ltr></TableCell>
                 <TableCell>{String(listAt(project, "spec.members").length)}</TableCell>
                 <TableCell>
@@ -140,7 +146,7 @@ export default function TenantDetailPage() {
               </TableRow>
             ))}
           </TableBody>
-        </Table>
+        </Table> : null}
       </section>
       {runner.dialogs}
       {creating ? <LazyCreateDialog def={projectDef} initialSpec={{ tenantRef: name }} lockedPaths={["tenantRef"]} onClose={() => setCreating(false)} /> : null}

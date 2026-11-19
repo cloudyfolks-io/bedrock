@@ -113,7 +113,7 @@ describe("UpgradesPage", () => {
   });
 
   it("hides the controls without update permission", async () => {
-    render(clusterWith({ phase: "Failed" }), (check) => check.verb !== "update");
+    render(clusterWith({ phase: "Failed" }), (check) => check.verb !== "patch" && check.verb !== "update");
     await screen.findByRole("list", { name: "Upgrade phases" });
     await waitFor(() => expect(screen.queryByRole("button", { name: "Start upgrade" })).toBeNull());
     expect(screen.queryByRole("button", { name: "Resume" })).toBeNull();

@@ -55,7 +55,7 @@ describe("SettingsPage", () => {
     await user.click(within(row).getByRole("button", { name: "Save" }));
     await waitFor(() => expect(api.calls.some((call) => call.method === "PATCH")).toBe(true));
     const patch = api.calls.find((call) => call.method === "PATCH");
-    expect(patch?.body).toEqual({ spec: { value: "8h" } });
+    expect(patch?.body).toEqual({ metadata: { resourceVersion: "100" }, spec: { value: "8h" } });
     expect(patch?.path).toBe(`${path}/authn.session-ttl`);
   });
 
@@ -107,7 +107,7 @@ describe("SettingsPage", () => {
   });
 
   it("TestReadOnlyWithoutPermission", async () => {
-    render((check) => check.verb !== "update");
+    render((check) => check.verb !== "patch");
     const row = (await screen.findByText("authn.session-ttl", { selector: "bdi" })).closest("tr") as HTMLElement;
     await waitFor(() => expect((within(row).getByRole("textbox") as HTMLInputElement).readOnly).toBe(true));
     expect(within(row).queryByRole("button", { name: "Save" })).toBeNull();

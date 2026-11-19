@@ -2,7 +2,9 @@ import { lazy, type ReactElement } from "react";
 import { Navigate, Outlet, Route, Routes, useParams } from "react-router";
 import { useLingui } from "@lingui/react/macro";
 import { useProjects } from "../api/projects";
+import { useSession } from "../api/session";
 import { EmptyState } from "../components/EmptyState";
+import { QueryFailure } from "../components/QueryFailure";
 import { Spinner } from "../components/Spinner";
 import { AccountPage } from "../pages/AccountPage";
 import { NotFoundPage } from "../pages/NotFoundPage";
@@ -15,6 +17,7 @@ import { AdminOnly } from "./context";
 import { Shell } from "./Shell";
 
 const HostsPage = lazy(() => import("../pages/admin/HostsPage"));
+const InventoryPage = lazy(() => import("../pages/admin/InventoryPage"));
 const HostDetailPage = lazy(() => import("../pages/admin/HostDetailPage"));
 const UpgradesPage = lazy(() => import("../pages/admin/UpgradesPage"));
 const AddonsPage = lazy(() => import("../pages/admin/AddonsPage"));
@@ -70,7 +73,9 @@ function detailPage(def: ResourceDef): ReactElement {
 }
 
 function HomeRedirect() {
-  return <Navigate to={readStored("perspective") === "admin" ? "/admin" : "/p"} replace />;
+  const admin = useSession().data?.admin === true;
+  const preference = readStored("perspective");
+  return <Navigate to={admin && preference !== "project" ? "/admin" : "/p"} replace />;
 }
 
 function ProjectIndex() {
@@ -78,6 +83,9 @@ function ProjectIndex() {
   const projects = useProjects();
   if (projects.isPending) {
     return <Spinner />;
+  }
+  if (projects.isError) {
+    return <QueryFailure error={projects.error} retry={() => void projects.refetch()} />;
   }
   const list = projects.data ?? [];
   const stored = readStored("project");
@@ -96,16 +104,24 @@ function ProjectIndex() {
 function ProjectScope() {
   const { project = "" } = useParams();
   const projects = useProjects();
-  const known = projects.data?.some((candidate) => candidate.name === project) === true;
+  const selected = projects.isSuccess ? projects.data.find((candidate) => candidate.name === project) : undefined;
   useEffect(() => {
-    if (known) {
+    if (selected?.namespace) {
       writeStored("project", project);
     }
-  }, [known, project]);
+  }, [selected?.namespace, project]);
   if (projects.isPending) {
     return <Spinner />;
   }
-  return known ? <Outlet /> : <NotFoundPage />;
+  if (projects.isError) {
+    return <QueryFailure error={projects.error} retry={() => void projects.refetch()} />;
+  }
+  return selected?.namespace ? <Outlet /> : selected ? <ProjectPending /> : <NotFoundPage />;
+}
+
+function ProjectPending() {
+  const { t } = useLingui();
+  return <EmptyState title={t({ id: "inventory.projectPending", message: "The project namespace is not ready" })} />;
 }
 
 export function AppRoutes() {
@@ -121,7 +137,8 @@ export function AppRoutes() {
             </AdminOnly>
           }
         >
-          <Route index element={<Navigate to="/admin/hosts" replace />} />
+          <Route index element={<Navigate to="inventory" replace />} />
+          <Route path="inventory" element={<InventoryPage />} />
           {primaryDefinitionsFor("admin").flatMap((def) => [
             <Route key={def.path} path={def.path} element={listPage(def)} />,
             <Route key={`${def.path}/:name`} path={`${def.path}/:name`} element={detailPage(def)} />,

@@ -12,6 +12,7 @@ import { ConfirmSimpleDialog, ConfirmTypedDialog } from "../../components/Confir
 import { EmptyState } from "../../components/EmptyState";
 import { Ltr } from "../../components/Ltr";
 import { PageHeader } from "../../components/PageHeader";
+import { QueryFailure } from "../../components/QueryFailure";
 import { PhaseBadge, phaseMessages } from "../../components/StatusBadge";
 import { Spinner } from "../../components/Spinner";
 import { MetricChart } from "../../charts/MetricChart";
@@ -50,12 +51,15 @@ export default function UpgradesPage() {
   const releaseDef = requireDef("releases");
   const clusters = useLiveList(refOf(clusterDef), {});
   const releases = useLiveList(refOf(releaseDef), {});
-  const cluster: KubeObject | undefined = clusters.data?.items.find((item) => item.metadata.name === "cluster") ?? clusters.data?.items[0];
+  const cluster: KubeObject | undefined = clusters.data?.items.find((item) => item.metadata.name === "cluster");
   const [target, setTarget] = useState("");
   const [starting, setStarting] = useState(false);
   const [aborting, setAborting] = useState(false);
   const [editing, setEditing] = useState(false);
-  const [canUpdate] = useCans([{ verb: "update", group: clusterDef.group, resource: "clusters", name: "cluster" }]);
+  const [canPatch, canUpdate] = useCans([
+    { verb: "patch", group: clusterDef.group, resource: clusterDef.plural, name: "cluster" },
+    { verb: "update", group: clusterDef.group, resource: clusterDef.plural, name: "cluster" },
+  ]);
 
   async function patch(body: unknown) {
     try {
@@ -69,6 +73,14 @@ export default function UpgradesPage() {
   if (clusters.isPending || releases.isPending) {
     return <Spinner />;
   }
+  if (clusters.isError || releases.isError) {
+    return (
+      <>
+        <PageHeader title={t({ id: "nav.item.upgrades", message: "Upgrades" })} />
+        <QueryFailure error={clusters.error ?? releases.error} retry={() => void Promise.all([clusters.refetch(), releases.refetch()])} />
+      </>
+    );
+  }
   if (!cluster) {
     return <EmptyState title={t({ id: "list.empty.title", message: "Nothing here yet" })} />;
   }
@@ -78,14 +90,14 @@ export default function UpgradesPage() {
   const targets = upgradeTargets(releases.data?.items ?? [], current);
   const failed = phase === "Failed";
   const blocked = conditionOf(cluster, "UpgradeBlocked");
-  const writable = canUpdate === "allowed";
+  const writable = canPatch === "allowed";
 
   return (
     <>
       <PageHeader
         title={t({ id: "nav.item.upgrades", message: "Upgrades" })}
         actions={
-          writable ? (
+          canUpdate === "allowed" ? (
             <Button variant="secondary" onClick={() => setEditing(true)}>
               {t({ id: "upgrades.editSettings", message: "Edit upgrade settings" })}
             </Button>

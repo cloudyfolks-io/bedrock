@@ -49,7 +49,7 @@ describe("shell", () => {
     for (const heading of ["Infrastructure", "Platform", "Tenancy", "Catalog"]) {
       expect(within(nav).getByRole("heading", { name: heading })).toBeTruthy();
     }
-    expect(hrefs(nav)).toEqual(["/admin/hosts", "/admin/upgrades", "/admin/network-peerings", "/admin/settings", "/admin/addons", "/admin/tenants", "/admin/cluster-images", "/admin/database-versions", "/admin/database-classes"]);
+    expect(hrefs(nav)).toEqual(["/admin/inventory", "/admin/hosts", "/admin/upgrades", "/admin/network-peerings", "/admin/settings", "/admin/addons", "/admin/tenants", "/admin/cluster-images", "/admin/database-versions", "/admin/database-classes"]);
   });
 
   it("TestNonAdminNeverSeesAdmin", async () => {
@@ -57,6 +57,15 @@ describe("shell", () => {
     await waitFor(() => expect(screen.getByTestId("path").textContent).toBe("/p/db/vms"));
     expect(screen.queryByRole("navigation", { name: "Perspective" })).toBeNull();
     expect(screen.queryByRole("link", { name: "Admin" })).toBeNull();
+  });
+
+  it("opens inventory for an administrator on first sign-in and uses their saved preference later", async () => {
+    const first = app("/");
+    await waitFor(() => expect(screen.getByTestId("path").textContent).toBe("/admin/inventory"));
+    first.unmount();
+    localStorage.setItem("bedrock.panel.perspective", "project");
+    app("/");
+    await waitFor(() => expect(screen.getByTestId("path").textContent).toBe("/p/db/vms"));
   });
 
   it("TestProjectNavFollowsTheRouteTable", async () => {
@@ -128,6 +137,20 @@ describe("shell", () => {
     const { api } = app("/p/nope/vms");
     expect(await screen.findByText("Page not found")).toBeTruthy();
     expect(api.calls.some((call) => call.path.includes("/namespaces/"))).toBe(false);
+  });
+
+  it("shows retry when the project list fails and sends no namespace request", async () => {
+    const { api } = app("/p/web/vms", { api: { "GET /proxy/v1/projects": { status: 503 } } });
+    expect(await screen.findByRole("button", { name: "Retry" })).toBeTruthy();
+    expect(screen.queryByText("Page not found")).toBeNull();
+    expect(api.calls.some((call) => call.path.includes("/namespaces/"))).toBe(false);
+  });
+
+  it("waits for a project namespace before opening resource pages", async () => {
+    const pending = { projects: [{ name: "pending", displayName: "Pending", tenant: "acme", namespace: "" }] };
+    const { api } = app("/p/pending/vms", { api: { "GET /proxy/v1/projects": { body: pending } } });
+    expect(await screen.findByText("The project namespace is not ready")).toBeTruthy();
+    expect(api.calls.some((call) => call.path.endsWith("/virtualmachines"))).toBe(false);
   });
 
   it("TestSignOutPostsWithCsrfAndGoesHome", async () => {
