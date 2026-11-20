@@ -9,6 +9,7 @@ bin=${BIN:-bin/bedrock}
 release_dir=${RELEASE_DIR:-dist/release}
 arch=${ARCH:-$(uname -m | sed 's/x86_64/amd64/;s/aarch64/arm64/')}
 emulation=${EMULATION:-true}
+ovn_tls=${E2E_OVN_TLS:-false}
 platform_host=${PLATFORM_HOST:-e2e.bedrock.test}
 workdir=$(mktemp -d)
 admin_password_file=${ADMIN_PASSWORD_FILE:-/var/lib/bedrock/e2e-admin-password}
@@ -117,7 +118,11 @@ if [ -n "${E2E_PROVIDER_NETWORK:-}" ]; then
   provider_entry="$(provider_network_entry "$E2E_PROVIDER_NETWORK"), $(services_network_entry)"
 fi
 
-VERSION=$version VIP=$vip IFACE=$iface EMULATION=$emulation PLATFORM_HOST=$platform_host OSD_DEVICES=$(flow_list "$osd_device") PROVIDER_NETWORKS=$(flow_list "$provider_entry") envsubst < hack/e2e/cluster.yaml.tmpl > "$workdir/cluster.yaml"
+case "$ovn_tls" in
+true|false) ;;
+*) printf 'E2E_OVN_TLS must be true or false\n' >&2; exit 1 ;;
+esac
+VERSION=$version VIP=$vip IFACE=$iface EMULATION=$emulation OVN_TLS=$ovn_tls PLATFORM_HOST=$platform_host OSD_DEVICES=$(flow_list "$osd_device") PROVIDER_NETWORKS=$(flow_list "$provider_entry") envsubst < hack/e2e/cluster.yaml.tmpl > "$workdir/cluster.yaml"
 cat "$workdir/cluster.yaml"
 
 archive_dir=/var/lib/bedrock/images
@@ -188,6 +193,13 @@ ip -4 addr show dev "$iface" | grep -q "$vip"
 kubectl -n kube-system rollout status daemonset/kube-vip --timeout=120s
 kubectl get cluster cluster -o jsonpath='{.status.version}' | grep -qx "$version"
 kubectl wait --for=condition=Available cluster/cluster --timeout=120s
+if [ "$ovn_tls" = true ]; then
+  expect_equal true "$(kubectl get setting network.ovn-tls -o jsonpath='{.spec.value}')" "OVN TLS setting"
+  kubectl -n kube-system exec deployment/ovn-central -c ovn-central -- timeout 20 ovsdb-client \
+    -p /var/run/tls/key -c /var/run/tls/cert -C /var/run/tls/cacert list-dbs "ssl:$nodeip:6641" | grep -Fx OVN_Northbound
+  kubectl -n kube-system exec deployment/ovn-central -c ovn-central -- timeout 20 ovsdb-client \
+    -p /var/run/tls/key -c /var/run/tls/cert -C /var/run/tls/cacert list-dbs "ssl:$nodeip:6642" | grep -Fx OVN_Southbound
+fi
 expect_equal '600 kube-apiserver' "$(stat -c '%a %U' /etc/bedrock/encryption/encryption.yaml)" "encryption file mode and owner"
 expect_equal '700 kube-apiserver' "$(stat -c '%a %U' /etc/bedrock/encryption)" "encryption directory mode and owner"
 assert_secret_encrypted kube-system bedrock-secrets-encryption
