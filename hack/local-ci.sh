@@ -309,7 +309,7 @@ run_e2e_tenant() {
   CGO_ENABLED=0 GOOS=linux GOARCH="$arch" go test -c -tags e2e -o "dist/e2e-tenant-$arch.test" ./test/e2e/tenant
   ARCH="$arch" hack/e2e-tenant-images.sh
   vm_osd=1 vm_up
-  in_vm "" "apt-get update -qq && apt-get install -y -qq jq"
+  in_vm "" "command -v jq >/dev/null || { apt-get -o Acquire::Retries=1 -o Acquire::http::Timeout=20 -o Acquire::https::Timeout=20 update -qq && apt-get -o Acquire::Retries=1 -o Acquire::http::Timeout=20 -o Acquire::https::Timeout=20 install -y -qq jq; }"
   in_vm "KUBECONFIG=/var/lib/k0s/pki/admin.conf BUNDLE=dist/bedrock-dev-bundle-$arch.tar.zst IMAGE=localhost:$port/bedrock:dev BIN=dist/bedrock-dev-linux-$arch ARCH=$arch EMULATION=$(emulation_flag) E2E_OVN_TLS=true E2E_OSD_DEVICE=blank E2E_PROVIDER_NETWORK=public" hack/e2e-init.sh
   in_vm "BEDROCK_BIN=dist/bedrock-dev-linux-$arch E2E_TEST=dist/e2e-tenant-$arch.test E2E_DATABASE_VIP_RANGE=203.0.113.128/26" hack/e2e-tenant.sh
   rm -f "dist/bedrock-dev-bundle-$arch.tar.zst"
