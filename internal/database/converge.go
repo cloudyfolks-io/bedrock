@@ -62,6 +62,7 @@ type flow struct {
 	source      *engine.RestoreBackup
 	tlsSecret   string
 	tlsRevision string
+	customerCA  []byte
 }
 
 func (r *Reconciler) converge(ctx context.Context, cfg Config, project Project, db *v1alpha1.Database) (Observed, error) {
@@ -103,7 +104,7 @@ func (r *Reconciler) prepare(ctx context.Context, in *flow) (*Refusal, error) {
 	} else if refused := checkExisting(catalog, db, cluster); refused != nil {
 		return refused, nil
 	}
-	steps := []func(context.Context, *flow) (*Refusal, error){r.preparePlatform, r.prepareCapacity, r.prepareSubnet, r.prepareEndpointAddress, r.preparePods, r.prepareVIPRange, r.prepareRetention, r.prepareBackupStore, r.prepareRestore, r.prepareOperations}
+	steps := []func(context.Context, *flow) (*Refusal, error){r.preparePlatform, r.prepareCapacity, r.prepareSubnet, r.prepareEndpointAddress, r.prepareCustomerTLS, r.preparePods, r.prepareVIPRange, r.prepareRetention, r.prepareBackupStore, r.prepareRestore, r.prepareOperations}
 	for _, step := range steps {
 		if refused, err := step(ctx, in); err != nil || refused != nil {
 			return refused, err
@@ -165,6 +166,27 @@ func (r *Reconciler) prepareEndpointAddress(ctx context.Context, in *flow) (*Ref
 	if problem := PinnedAddressProblem(*in.db, in.subnet); problem != "" {
 		return refusal(ReasonEndpointAddressInvalid, "%s", problem), nil
 	}
+	return nil, nil
+}
+
+func (r *Reconciler) prepareCustomerTLS(ctx context.Context, in *flow) (*Refusal, error) {
+	tls, err := importedTLS(ctx, r.Live, *in.db)
+	switch {
+	case errors.Is(err, errImportBinding):
+		return refusal(ReasonApplyFailed, "the imported customer TLS Secret is bound to a different database"), nil
+	case errors.Is(err, errMissingImportTLS), errors.Is(err, errInvalidImportTLS):
+		return refusal(ReasonApplyFailed, "%s", err), nil
+	case err != nil:
+		return nil, fmt.Errorf("read the imported customer TLS Secret: %w", err)
+	case tls == nil:
+		if engineUsesImportedTLS(*in.db, in.cluster) {
+			return refusal(ReasonApplyFailed, "%s", errMissingImportTLS), nil
+		}
+		return nil, nil
+	}
+	in.tlsSecret = tls.Name
+	in.customerCA = tls.Data["ca.crt"]
+	in.tlsRevision = configHash(string(tls.Data["tls.crt"]), string(in.customerCA))
 	return nil, nil
 }
 
@@ -323,14 +345,6 @@ func (r *Reconciler) apply(ctx context.Context, in *flow) (*Refusal, error) {
 	db := *in.db
 	if err := EnsureEngineSecrets(ctx, r.Client, db, in.project); err != nil {
 		return nil, fmt.Errorf("make the engine secrets: %w", err)
-	}
-	tls, err := importedTLS(ctx, r.Live, db)
-	if err != nil {
-		return nil, fmt.Errorf("read the imported customer certificate: %w", err)
-	}
-	if tls != nil {
-		in.tlsSecret = tls.Name
-		in.tlsRevision = configHash(string(tls.Data["tls.crt"]), string(tls.Data["ca.crt"]))
 	}
 	if err := r.applyEngine(ctx, in); err != nil {
 		return nil, fmt.Errorf("apply the engine: %w", err)
@@ -502,7 +516,7 @@ func (r *Reconciler) applyProxy(ctx context.Context, in *flow, vip string) (*Ref
 		return nil, fmt.Errorf("apply the security group: %w", err)
 	}
 	host, port := customerEndpoint(*in.db, address, int32(in.port))
-	if err := EnsureAdminCopy(ctx, r.Client, *in.db, in.project, host, port); err != nil {
+	if err := EnsureAdminCopy(ctx, r.Client, *in.db, in.project, host, port, in.customerCA); err != nil {
 		return nil, fmt.Errorf("copy the admin secret: %w", err)
 	}
 	var group v1alpha1.SecurityGroup
@@ -634,7 +648,7 @@ func (r *Reconciler) settleEngine(ctx context.Context, in *flow, observed *Obser
 	}
 	if address, found := AddressOf(*in.db, in.subnet.Name); found {
 		host, port := customerEndpoint(*in.db, address, int32(in.port))
-		if err := EnsureAdminCopy(ctx, r.Client, *in.db, in.project, host, port); err != nil {
+		if err := EnsureAdminCopy(ctx, r.Client, *in.db, in.project, host, port, in.customerCA); err != nil {
 			observed.EngineReason = "the admin secret could not be copied"
 		}
 	}

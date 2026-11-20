@@ -108,7 +108,7 @@ func TestAdminCopyHasTheConnectionFieldsAndOverwritesDrift(t *testing.T) {
 	must(t, EnsureEngineSecrets(ctx, c, *db, project))
 	state, err := ReadAdmin(ctx, c, *db)
 	must(t, err)
-	must(t, EnsureAdminCopy(ctx, c, *db, project, "10.100.0.7", 5432))
+	must(t, EnsureAdminCopy(ctx, c, *db, project, "10.100.0.7", 5432, nil))
 
 	copySecret := getSecret(t, c, db.Namespace, db.Name+"-admin")
 	data := map[string]string{}
@@ -131,13 +131,13 @@ func TestAdminCopyHasTheConnectionFieldsAndOverwritesDrift(t *testing.T) {
 	copySecret.Data["password"] = []byte("tampered")
 	copySecret.Data["host"] = []byte("1.2.3.4")
 	must(t, c.Update(ctx, &copySecret))
-	must(t, EnsureAdminCopy(ctx, c, *db, project, "10.100.0.7", 5432))
+	must(t, EnsureAdminCopy(ctx, c, *db, project, "10.100.0.7", 5432, nil))
 	fixed := getSecret(t, c, db.Namespace, db.Name+"-admin")
 	if string(fixed.Data["password"]) != state.Password || string(fixed.Data["host"]) != "10.100.0.7" {
 		t.Fatalf("drift stayed: %v", fixed.Data)
 	}
 
-	must(t, EnsureAdminCopy(ctx, c, *db, project, "10.100.0.8", 5433))
+	must(t, EnsureAdminCopy(ctx, c, *db, project, "10.100.0.8", 5433, nil))
 	moved := getSecret(t, c, db.Namespace, db.Name+"-admin")
 	if string(moved.Data["host"]) != "10.100.0.8" || !strings.HasSuffix(string(moved.Data["uri"]), "@10.100.0.8:5433/app") {
 		t.Fatalf("address change %v", moved.Data)

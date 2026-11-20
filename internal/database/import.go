@@ -2,16 +2,24 @@ package database
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	"github.com/cloudyfolks-io/bedrock/api/v1alpha1"
 	"github.com/cloudyfolks-io/bedrock/internal/database/engine"
 	"github.com/cloudyfolks-io/bedrock/internal/objectstorage/s3"
+)
+
+var (
+	errImportBinding    = errors.New("the import material is bound to a different database")
+	errMissingImportTLS = errors.New("the imported customer TLS Secret is missing")
+	errInvalidImportTLS = errors.New("the imported customer TLS Secret is invalid")
 )
 
 func readImport(ctx context.Context, reader client.Reader, db v1alpha1.Database, name, source string) (*corev1.Secret, error) {
@@ -27,7 +35,7 @@ func readImport(ctx context.Context, reader client.Reader, db v1alpha1.Database,
 		secret.Annotations[v1alpha1.DatabaseImportTarget] != db.Name ||
 		secret.Annotations[v1alpha1.DatabaseImportTargetUID] != string(db.UID) ||
 		secret.Annotations[v1alpha1.DatabaseImportSource] != "databases/"+source {
-		return nil, fmt.Errorf("the import material is bound to a different database")
+		return nil, errImportBinding
 	}
 	return &secret, nil
 }
@@ -39,17 +47,45 @@ func importedTLS(ctx context.Context, reader client.Reader, db v1alpha1.Database
 	}
 	if secret == nil {
 		if hasLegacyEndpoint(db) {
-			return nil, fmt.Errorf("the adopted endpoint has no customer certificate")
+			return nil, errMissingImportTLS
 		}
 		return nil, nil
 	}
 	if db.Spec.Endpoint == nil {
-		return nil, fmt.Errorf("the imported customer certificate has no endpoint")
+		return nil, fmt.Errorf("%w: the database has no endpoint", errInvalidImportTLS)
 	}
 	if secret.Type != corev1.SecretTypeTLS {
-		return nil, fmt.Errorf("the imported customer certificate must use a Kubernetes TLS Secret")
+		return nil, fmt.Errorf("%w: use a Secret of type kubernetes.io/tls", errInvalidImportTLS)
 	}
-	return secret, v1alpha1.CheckDatabaseTLS(db.Spec.Endpoint.Address, secret.Data["tls.crt"], secret.Data["tls.key"], secret.Data["ca.crt"])
+	if err := v1alpha1.CheckDatabaseTLS(db.Spec.Endpoint.Address, secret.Data["tls.crt"], secret.Data["tls.key"], secret.Data["ca.crt"]); err != nil {
+		return nil, fmt.Errorf("%w: %w", errInvalidImportTLS, err)
+	}
+	return secret, nil
+}
+
+func engineUsesImportedTLS(db v1alpha1.Database, primary *unstructured.Unstructured) bool {
+	if primary == nil {
+		return false
+	}
+	name := v1alpha1.BoundDatabaseImportName(v1alpha1.DatabaseImportTLSName(db.Name), string(db.UID))
+	switch db.Spec.Engine {
+	case v1alpha1.DatabaseEnginePostgreSQL:
+		secret, _, _ := unstructured.NestedString(primary.Object, "spec", "certificates", "serverTLSSecret")
+		return secret == name
+	case v1alpha1.DatabaseEngineMySQL:
+		secret, _, _ := unstructured.NestedString(primary.Object, "spec", "sslSecretName")
+		return secret == name
+	case v1alpha1.DatabaseEngineValkey:
+		volumes, _, _ := unstructured.NestedSlice(primary.Object, "spec", "template", "spec", "volumes")
+		for _, volume := range volumes {
+			fields, _ := volume.(map[string]any)
+			secret, _, _ := unstructured.NestedString(fields, "secret", "secretName")
+			if secret == name {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 func importedRestore(ctx context.Context, reader client.Reader, db v1alpha1.Database) (*engine.RestoreBackup, error) {

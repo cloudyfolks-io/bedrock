@@ -234,18 +234,14 @@ func adminCopyData(kind, password, host string, port int32) map[string]string {
 	return data
 }
 
-func EnsureAdminCopy(ctx context.Context, c client.Client, db v1alpha1.Database, project Project, host string, port int32) error {
+func EnsureAdminCopy(ctx context.Context, c client.Client, db v1alpha1.Database, project Project, host string, port int32, customerCA []byte) error {
 	state, err := ReadAdmin(ctx, c, db)
 	if err != nil {
 		return err
 	}
 	copy := AdminCopy(db, project, state.Password, host, port)
-	tls, err := importedTLS(ctx, c, db)
-	if err != nil {
-		return err
-	}
-	if tls != nil {
-		copy.StringData["ca.crt"] = string(tls.Data["ca.crt"])
+	if len(customerCA) != 0 {
+		copy.StringData["ca.crt"] = string(customerCA)
 		connection, err := url.Parse(copy.StringData["uri"])
 		if err != nil {
 			return err
