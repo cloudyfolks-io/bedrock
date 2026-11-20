@@ -14,7 +14,7 @@ const (
 	VarVIP       = "BEDROCK_VIP"
 )
 
-func Vars(ctx context.Context, c client.Client, vip string) (map[string]string, error) {
+func Vars(ctx context.Context, c client.Reader, vip string) (map[string]string, error) {
 	masters, err := MasterNodes(ctx, c)
 	if err != nil {
 		return nil, err

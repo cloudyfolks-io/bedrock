@@ -597,14 +597,6 @@ func applyKubeVIPConfig(ctx context.Context, c client.Client, vip, iface string)
 }
 
 func createObjects(ctx context.Context, c client.Client, cfg v1alpha1.ClusterConfig, nodeName string, kubelet map[string]string) error {
-	cluster := config.ToCluster(cfg)
-	if err := createOrUpdateSpec(ctx, c, &cluster, func(existing *v1alpha1.Cluster) { existing.Spec = cluster.Spec }); err != nil {
-		return err
-	}
-	h := config.ToHost(cfg, nodeName)
-	if err := createOrUpdateSpec(ctx, c, &h, func(existing *v1alpha1.Host) { existing.Spec = h.Spec }); err != nil {
-		return err
-	}
 	for _, setting := range slices.Concat(config.ToSettings(cfg), kubeletSettingObjects(kubelet)) {
 		s := setting
 		s.TypeMeta = metav1.TypeMeta{APIVersion: v1alpha1.GroupVersion.String(), Kind: "Setting"}
@@ -612,7 +604,12 @@ func createObjects(ctx context.Context, c client.Client, cfg v1alpha1.ClusterCon
 			return err
 		}
 	}
-	return nil
+	cluster := config.ToCluster(cfg)
+	if err := createOrUpdateSpec(ctx, c, &cluster, func(existing *v1alpha1.Cluster) { existing.Spec = cluster.Spec }); err != nil {
+		return err
+	}
+	host := config.ToHost(cfg, nodeName)
+	return createOrUpdateSpec(ctx, c, &host, func(existing *v1alpha1.Host) { existing.Spec = host.Spec })
 }
 
 func createOrUpdateSpec[O any, T interface {

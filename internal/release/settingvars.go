@@ -86,7 +86,7 @@ func DNSAddress(apiServiceIP string) (string, bool) {
 	return addr.String(), true
 }
 
-func settingValues(ctx context.Context, c client.Client) (map[string]string, error) {
+func settingValues(ctx context.Context, c client.Reader) (map[string]string, error) {
 	var list v1alpha1.SettingList
 	err := c.List(ctx, &list)
 	if meta.IsNoMatchError(err) {
@@ -102,7 +102,7 @@ func settingValues(ctx context.Context, c client.Client) (map[string]string, err
 	return values, nil
 }
 
-func dnsVars(ctx context.Context, c client.Client) (map[string]string, error) {
+func dnsVars(ctx context.Context, c client.Reader) (map[string]string, error) {
 	var service corev1.Service
 	err := c.Get(ctx, client.ObjectKey{Namespace: kubernetesServiceNamespace, Name: kubernetesServiceName}, &service)
 	if errors.IsNotFound(err) {

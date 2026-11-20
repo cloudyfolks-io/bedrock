@@ -26,7 +26,7 @@ type MasterNode struct {
 	Address string
 }
 
-func MasterNodes(ctx context.Context, c client.Client) ([]MasterNode, error) {
+func MasterNodes(ctx context.Context, c client.Reader) ([]MasterNode, error) {
 	var nodes corev1.NodeList
 	if err := c.List(ctx, &nodes, client.MatchingLabels{roles.FabricRoleLabel: "master"}); err != nil {
 		return nil, err

@@ -106,7 +106,7 @@ func (r *ClusterReconciler) reconcileInstall(ctx context.Context, cluster v1alph
 			return ctrl.Result{}, err
 		}
 	}
-	vars, err := release.Vars(ctx, r.Client, cluster.Spec.API.VIP)
+	vars, err := release.Vars(ctx, r.APIReader, cluster.Spec.API.VIP)
 	if err != nil {
 		return ctrl.Result{}, err
 	}
