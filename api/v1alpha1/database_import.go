@@ -4,6 +4,7 @@ import (
 	"crypto/tls"
 	"crypto/x509"
 	"errors"
+	"time"
 )
 
 const (
@@ -24,6 +25,10 @@ func DatabaseImportTLSName(source string) string { return "import-tls-" + source
 func BoundDatabaseImportName(name, uid string) string { return name + "-" + uid }
 
 func CheckDatabaseTLS(host string, cert, key, ca []byte) error {
+	return CheckDatabaseTLSAt(host, cert, key, ca, time.Time{})
+}
+
+func CheckDatabaseTLSAt(host string, cert, key, ca []byte, at time.Time) error {
 	if host == "" {
 		return errors.New("the database endpoint name is missing")
 	}
@@ -47,7 +52,7 @@ func CheckDatabaseTLS(host string, cert, key, ca []byte) error {
 	if err != nil {
 		return errors.New("the database certificate is invalid")
 	}
-	if _, err := leaf.Verify(x509.VerifyOptions{DNSName: host, Roots: roots, Intermediates: chain}); err != nil {
+	if _, err := leaf.Verify(x509.VerifyOptions{DNSName: host, Roots: roots, Intermediates: chain, CurrentTime: at}); err != nil {
 		return errors.New("the database certificate is invalid for the customer endpoint or its certificate authority")
 	}
 	return nil
