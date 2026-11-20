@@ -356,11 +356,8 @@ func TestFabricMastersStopGrowingWhenAMemberDoesNotJoin(t *testing.T) {
 		t.Fatalf("the next member must wait for the previous one: NODE_IPS %q", ips)
 	}
 	var hook batchv1.Job
-	if err := c.Get(context.Background(), client.ObjectKey{Namespace: fabricNamespace, Name: "fabric-post-upgrade-hook"}, &hook); err != nil {
-		t.Fatal(err)
-	}
-	if got := hook.Spec.Template.Spec.Containers[0].Env[0].Value; got != "10.0.10.11" {
-		t.Fatalf("consumers must keep the old members until the database grew: OVN_DB_IPS %q", got)
+	if err := c.Get(context.Background(), client.ObjectKey{Namespace: fabricNamespace, Name: "fabric-post-upgrade-hook"}, &hook); !apierrors.IsNotFound(err) {
+		t.Fatalf("the upgrade Job must wait until the database grows: %v", err)
 	}
 	if condition := clusterConditionOf(t, c, conditionFabricMastersApplied); condition == nil || condition.Status != metav1.ConditionFalse {
 		t.Fatalf("condition %+v", condition)
