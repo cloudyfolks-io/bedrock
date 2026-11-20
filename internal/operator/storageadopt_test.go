@@ -546,6 +546,10 @@ const (
 	keyZones      = "radosgw-admin zone list"
 	keyOldZone    = "sh -c zone-pools objectstore objectstore"
 	keyNewZone    = "sh -c zone-pools objectstore bedrock-rgw"
+	keyOldPeriod  = "sh -c period-status objectstore objectstore bedrock-rgw"
+	keyNewPeriod  = "sh -c period-status bedrock-rgw objectstore bedrock-rgw"
+	keySamePeriod = "sh -c period-status bedrock-rgw bedrock-rgw bedrock-rgw"
+	keyCommit     = "sh -c period-commit bedrock-rgw"
 )
 
 var (
@@ -624,6 +628,13 @@ func (f *fakeCeph) run(_ context.Context, command []string) ([]byte, error) {
 		if strings.HasPrefix(key, "sh -c zone-pools ") {
 			return zonePoolLines(output), nil
 		}
+		if strings.HasPrefix(key, "sh -c period-status ") {
+			var status string
+			if err := json.Unmarshal(output, &status); err != nil {
+				return nil, err
+			}
+			return []byte(status), nil
+		}
 		return output, nil
 	}
 	f.mutations = append(f.mutations, key)
@@ -645,6 +656,9 @@ func fixtureFrom(t *testing.T, file string, overrides ...map[string]any) *fakeCe
 	if err := json.Unmarshal(data, &outputs); err != nil {
 		t.Fatal(err)
 	}
+	outputs[keyOldPeriod] = json.RawMessage(`"stale"`)
+	outputs[keyNewPeriod] = json.RawMessage(`"current"`)
+	outputs[keySamePeriod] = json.RawMessage(`"current"`)
 	for _, group := range overrides {
 		for key, value := range group {
 			if value == nil {
@@ -798,7 +812,7 @@ func TestRenamePlan(t *testing.T) {
 			[]map[string]any{filesystemDone(), {keyRealms: nameList("realms", "bedrock-rgw")}},
 			slices.Concat(rgwIdentityRename[1:], rgwZoneSet, rgwPoolRenames, rgwPeriodCommit),
 		},
-		{"RGW pools renamed and zone rewritten, period state is not read", allDone(t), nil},
+		{"RGW pools renamed and zone rewritten with a stale period", append(allDone(t), map[string]any{keyNewPeriod: "stale"}), rgwPeriodCommit},
 		{"all done", allDone(t), nil},
 		{
 			"no CephFS and no object store",
@@ -874,12 +888,13 @@ func TestRenamePlanCommitsThePeriodAfterEveryRGWPoolRename(t *testing.T) {
 }
 
 type rgwSimulator struct {
-	pools     []string
-	realm     string
-	zoneGroup string
-	zone      string
-	rewritten bool
-	ran       []string
+	pools           []string
+	realm           string
+	zoneGroup       string
+	zone            string
+	rewritten       bool
+	periodCommitted bool
+	ran             []string
 }
 
 func newRGWSimulator() *rgwSimulator {
@@ -918,6 +933,11 @@ func (s *rgwSimulator) run(_ context.Context, command []string) ([]byte, error) 
 		return s.json(nameList("zonegroups", s.zoneGroup))
 	case key == keyZones:
 		return s.json(nameList("zones", s.zone))
+	case key == keyOldPeriod && s.realm == "objectstore", key == keyNewPeriod && s.realm == "bedrock-rgw":
+		if s.periodCommitted {
+			return []byte("current\n"), nil
+		}
+		return []byte("stale\n"), nil
 	case strings.HasPrefix(key, "sh -c zone-pools "):
 		if s.rewritten {
 			return nil, nil
@@ -945,7 +965,7 @@ func (s *rgwSimulator) run(_ context.Context, command []string) ([]byte, error) 
 		s.zone = "bedrock-rgw"
 	case strings.HasPrefix(key, "sh -c zone-rewrite "):
 		s.rewritten = true
-	case strings.HasPrefix(key, "sh -c period-commit "):
+	case key == keyCommit:
 		if s.rewritten {
 			for _, pool := range rgwPoolNames("bedrock-rgw") {
 				if !s.has(pool) {
@@ -953,6 +973,7 @@ func (s *rgwSimulator) run(_ context.Context, command []string) ([]byte, error) 
 				}
 			}
 		}
+		s.periodCommitted = true
 	default:
 		return nil, fmt.Errorf("unexpected command %q", key)
 	}
@@ -980,6 +1001,58 @@ func TestRGWRenameEndsAdoptedWithoutTheCommitCreatingTargetPools(t *testing.T) {
 	slices.Sort(pools)
 	if !slices.Equal(pools, want) {
 		t.Fatalf("pools %v, want %v", pools, want)
+	}
+}
+
+func TestAdoptStepResumesAfterTheLastRGWPoolRename(t *testing.T) {
+	adopt := adoptSpec()
+	adopt.Pools.Block = ""
+	adopt.Pools.Filesystem = ""
+	sim := newRGWSimulator()
+	ctx := context.Background()
+	interrupt := func(ctx context.Context, command []string) ([]byte, error) {
+		if commandKey(command) == keyCommit {
+			return nil, errors.New("connection lost before commit")
+		}
+		return sim.run(ctx, command)
+	}
+	if got := adoptStep(ctx, interrupt, *adopt, 3); got.Reason != v1alpha1.ReasonRenameFailed {
+		t.Fatalf("first condition %+v", got)
+	}
+	if !sim.has("bedrock-rgw.rgw.otp") || sim.has("objectstore.rgw.otp") || sim.periodCommitted {
+		t.Fatalf("pool and period state after interruption: %+v", sim)
+	}
+	mutations := len(sim.ran)
+	if got := adoptStep(ctx, sim.run, *adopt, 3); got.Reason != v1alpha1.ReasonRenaming {
+		t.Fatalf("resume condition %+v", got)
+	}
+	if !slices.Equal(sim.ran[mutations:], []string{keyCommit}) {
+		t.Fatalf("resume ran %v", sim.ran[mutations:])
+	}
+	for range 2 {
+		if got := adoptStep(ctx, sim.run, *adopt, 3); got.Reason != v1alpha1.ReasonAdopted || got.Status != metav1.ConditionTrue {
+			t.Fatalf("committed condition %+v", got)
+		}
+	}
+	if len(sim.ran) != mutations+1 {
+		t.Fatalf("commands after commit %v", sim.ran[mutations+1:])
+	}
+}
+
+func TestAdoptStepRejectsAnAmbiguousRGWTopologyBeforeMutations(t *testing.T) {
+	for name, override := range map[string]map[string]any{
+		"unexpected period map":  {keyOldPeriod: "invalid"},
+		"conflicting realm":      {keyRealms: nameList("realms", "objectstore", "bedrock-rgw")},
+		"conflicting zone group": {keyZoneGroups: nameList("zonegroups", "objectstore", "bedrock-rgw")},
+		"conflicting zone":       {keyZones: nameList("zones", "objectstore", "bedrock-rgw")},
+	} {
+		t.Run(name, func(t *testing.T) {
+			fake := cephFixture(t, override)
+			got := adoptStep(context.Background(), fake.run, *adoptSpec(), 3)
+			if got.Reason != v1alpha1.ReasonRenameFailed || !strings.Contains(got.Message, "RGW topology is ambiguous") || len(fake.mutations) != 0 {
+				t.Fatalf("condition %+v, mutations %v", got, fake.mutations)
+			}
+		})
 	}
 }
 
@@ -1363,7 +1436,25 @@ func writeZoneStub(t *testing.T, getScript string) (string, string, string) {
 	dir := t.TempDir()
 	zoneGet := filepath.Join(dir, "zone-get.json")
 	zoneSet := filepath.Join(dir, "zone-set.json")
-	stub := "#!/bin/sh\ncase \"$1 $2\" in\n\"zone get\") " + getScript + " ;;\n\"zone set\") tee \"$ZONE_SET\" ;;\n\"period update\") echo PERIODSTDOUT; echo PERIODSTDERR >&2; exit \"${PERIOD_EXIT:-0}\" ;;\nesac\n"
+	stub := `#!/bin/sh
+case "$1 $2" in
+"zone get") ` + getScript + ` ;;
+"zone set") tee "$ZONE_SET" ;;
+"period get")
+  test "$#" -eq 4 && test "$3" = "--rgw-realm=${PERIOD_REALM:-objectstore}" || exit 9
+  if [ "${PERIOD_GET_EXIT:-0}" != 0 ]; then
+    echo PERIODPRIVATEERROR >&2
+    exit "$PERIOD_GET_EXIT"
+  fi
+  if [ -n "$PERIOD_GET" ]; then
+    cat "$PERIOD_GET"
+  else
+    printf '%s\n' '{"period_map":{"zonegroups":[{"name":"objectstore","zones":[{"name":"objectstore"}],"secret":"PERIODSECRET"}]}}'
+  fi
+  ;;
+"period update") echo PERIODSTDOUT; echo PERIODSTDERR >&2; exit "${PERIOD_EXIT:-0}" ;;
+esac
+`
 	if err := os.WriteFile(filepath.Join(dir, "radosgw-admin"), []byte(stub), 0o700); err != nil {
 		t.Fatal(err)
 	}
@@ -1529,7 +1620,7 @@ func withRealShell(t *testing.T, fake *fakeCeph) (runFunc, *[][]byte, string, st
 		var err error
 		if command[0] == "sh" {
 			out, err = shellArgs(command, dir, zoneGet, zoneSet).Output()
-			if command[3] == "zone-pools" {
+			if command[3] == "zone-pools" || command[3] == "period-status" {
 				fake.reads = append(fake.reads, commandKey(command))
 			} else {
 				fake.mutations = append(fake.mutations, commandKey(command))
@@ -1601,6 +1692,67 @@ func TestPeriodCommitPrintsNothingAndKeepsTheError(t *testing.T) {
 	}
 }
 
+func TestPeriodReadProjectsTheCommittedTopologyWithoutCredentials(t *testing.T) {
+	period := func(groups string) string {
+		return `{"period_map":{"zonegroups":[` + groups + `]},"secret":"PERIODSECRET"}`
+	}
+	const ready = `{"name":"bedrock-rgw","zones":[{"name":"bedrock-rgw"}]}`
+	const legacy = `{"name":"objectstore","zones":[{"name":"objectstore"}]}`
+	cases := []struct {
+		name, realm, manifest string
+		status                string
+	}{
+		{"fresh legacy", "objectstore", period(legacy), "stale"},
+		{"renamed before commit", "bedrock-rgw", period(legacy), "stale"},
+		{"renamed after commit", "bedrock-rgw", period(ready), "current"},
+		{"mixed period", "bedrock-rgw", period(`{"name":"bedrock-rgw","zones":[{"name":"objectstore"}]}`), "stale"},
+		{"two zone groups", "bedrock-rgw", period(ready + "," + legacy), "invalid"},
+		{"two zones", "bedrock-rgw", period(`{"name":"bedrock-rgw","zones":[{"name":"bedrock-rgw"},{"name":"objectstore"}]}`), "invalid"},
+		{"unrelated name", "bedrock-rgw", period(`{"name":"bedrock-rgw","zones":[{"name":"PERIODSECRET"}]}`), "invalid"},
+		{"empty period", "bedrock-rgw", period(""), "invalid"},
+		{"invalid JSON", "bedrock-rgw", "PERIODSECRET", "invalid"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			dir, zoneGet, zoneSet := writeZoneStub(t, `cat "$ZONE_GET"`)
+			fixture := filepath.Join(dir, "period-get.json")
+			if err := os.WriteFile(fixture, []byte(tc.manifest), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			run := func(_ context.Context, args []string) ([]byte, error) {
+				cmd := shellArgs(args, dir, zoneGet, zoneSet)
+				cmd.Env = append(cmd.Env, "PERIOD_GET="+fixture, "PERIOD_REALM="+tc.realm)
+				out, err := cmd.CombinedOutput()
+				if string(out) != tc.status+"\n" {
+					t.Fatalf("the command must project only %q, got %q", tc.status, out)
+				}
+				return out, err
+			}
+			stale, err := periodStale(context.Background(), run, tc.realm, "objectstore")
+			if stale != (tc.status == "stale") || errors.Is(err, errObjectStoreNames) != (tc.status == "invalid") {
+				t.Fatalf("stale %t, error %v", stale, err)
+			}
+		})
+	}
+}
+
+func TestPeriodReadFailureDoesNotPrintTheAdminError(t *testing.T) {
+	dir, zoneGet, zoneSet := writeZoneStub(t, `cat "$ZONE_GET"`)
+	run := func(_ context.Context, args []string) ([]byte, error) {
+		cmd := shellArgs(args, dir, zoneGet, zoneSet)
+		cmd.Env = append(cmd.Env, "PERIOD_GET_EXIT=5")
+		out, err := cmd.CombinedOutput()
+		if len(out) != 0 || err == nil {
+			t.Fatalf("the admin read must fail silently, got %q and %v", out, err)
+		}
+		return out, err
+	}
+	stale, err := periodStale(context.Background(), run, "objectstore", "objectstore")
+	if stale || err == nil || err.Error() != "cannot read the committed RGW period for realm objectstore" {
+		t.Fatalf("stale %t, error %v", stale, err)
+	}
+}
+
 func TestTheZoneSystemKeyNeverReachesTheOperator(t *testing.T) {
 	fake := cephFixture(t)
 	run, received, zoneSet, _ := withRealShell(t, fake)
@@ -1616,7 +1768,7 @@ func TestTheZoneSystemKeyNeverReachesTheOperator(t *testing.T) {
 		t.Fatalf("condition %+v", got)
 	}
 	for _, out := range *received {
-		for _, secret := range []string{"ZONESECRET", "ZONEACCESS", "system_key", "secret_key", "PERIODSTDOUT"} {
+		for _, secret := range []string{"ZONESECRET", "ZONEACCESS", "system_key", "secret_key", "PERIODSTDOUT", "PERIODSECRET"} {
 			if bytes.Contains(out, []byte(secret)) {
 				t.Fatalf("the operator received %s in %q", secret, out)
 			}

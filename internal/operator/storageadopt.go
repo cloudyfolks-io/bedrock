@@ -340,13 +340,34 @@ printf '%s' "$zone" | sed "s/\"$1\\.rgw\\./\"$2.rgw./g" | radosgw-admin zone set
 
 	periodCommitScript = `radosgw-admin period update --commit --rgw-realm="$1" "$2" >/dev/null`
 
+	periodStatusScript = `set -e
+period=$(radosgw-admin period get --rgw-realm="$1" "$4" 2>/dev/null)
+printf '%s' "$period" | python3 -c '
+import json
+import sys
+
+old, current = sys.argv[1:]
+try:
+    group, = json.load(sys.stdin)["period_map"]["zonegroups"]
+    zone, = group["zones"]
+    names = group["name"], zone["name"]
+    if any(name not in (old, current) for name in names):
+        raise ValueError
+except (KeyError, TypeError, ValueError):
+    print("invalid")
+else:
+    print("current" if names == (current, current) else "stale")
+' "$2" "$3"`
+
 	zoneStalePoolsScript = `set -e
 zone=$(radosgw-admin zone get --rgw-zone="$2" "$3")
 printf '%s' "$zone" | grep -o "\"$1\\.rgw\\.[^\"]*\"" || [ $? -eq 1 ]`
 )
 
 var (
-	errZonePools    = errors.New("cannot read the pools of the zone")
+	errZonePools        = errors.New("cannot read the pools of the zone")
+	errObjectStoreNames = errors.New("the RGW topology is ambiguous")
+
 	adoptStepPhases = []string{
 		v1alpha1.ReasonWaitingForQuorum,
 		v1alpha1.ReasonWaitingForOSDs,
@@ -385,6 +406,7 @@ type cephState struct {
 	ZoneGroups     []string
 	Zones          []string
 	ZoneStalePools []string
+	PeriodStale    bool
 }
 
 type poolMove struct {
@@ -412,7 +434,7 @@ func adoptStep(ctx context.Context, run runFunc, adopt v1alpha1.AdoptSpec, repli
 		return adoptedCondition(v1alpha1.ReasonRenameFailed, message)
 	}
 	state, err := readCephState(ctx, run, adopt)
-	if errors.Is(err, errZonePools) {
+	if errors.Is(err, errZonePools) || errors.Is(err, errObjectStoreNames) {
 		return adoptedCondition(v1alpha1.ReasonRenameFailed, safeMessage(err.Error()))
 	}
 	if err != nil {
@@ -596,6 +618,22 @@ func periodCommit() renameCommand {
 	}
 }
 
+func periodStale(ctx context.Context, run runFunc, realm, old string) (bool, error) {
+	out, err := run(ctx, []string{"sh", "-c", periodStatusScript, "period-status", realm, old, objectStoreName, rookConfFlag})
+	if err != nil {
+		return false, fmt.Errorf("cannot read the committed RGW period for realm %s", realm)
+	}
+	switch strings.TrimSpace(string(out)) {
+	case "current":
+		return false, nil
+	case "stale":
+		if old != objectStoreName {
+			return true, nil
+		}
+	}
+	return false, fmt.Errorf("%w: the committed period must contain one zonegroup and one zone with the old or Bedrock names", errObjectStoreNames)
+}
+
 func zoneStalePoolsCommand(old, zone string) []string {
 	return []string{"sh", "-c", zoneStalePoolsScript, "zone-pools", escapedDots(old), zone, rookConfFlag}
 }
@@ -702,7 +740,8 @@ func readFilesystemFlags(ctx context.Context, run runFunc, name string) (bool, b
 }
 
 func readObjectStore(ctx context.Context, run runFunc, adopt v1alpha1.AdoptSpec, state cephState) (cephState, error) {
-	if adopt.Pools.ObjectStore == "" {
+	old := adopt.Pools.ObjectStore
+	if old == "" {
 		return state, nil
 	}
 	var realms struct {
@@ -724,21 +763,34 @@ func readObjectStore(ctx context.Context, run runFunc, adopt v1alpha1.AdoptSpec,
 		return cephState{}, err
 	}
 	state.Realms, state.ZoneGroups, state.Zones = realms.Realms, zoneGroups.ZoneGroups, zones.Zones
-	zone := zoneToRead(zones.Zones, adopt.Pools.ObjectStore)
+	if old != objectStoreName {
+		for _, names := range [][]string{state.Realms, state.ZoneGroups, state.Zones} {
+			if slices.Contains(names, old) && slices.Contains(names, objectStoreName) {
+				return cephState{}, fmt.Errorf("%w: both the old and Bedrock names exist", errObjectStoreNames)
+			}
+		}
+	}
+	zone := objectStoreNameToRead(state.Zones, old)
 	if zone == "" {
 		return state, nil
 	}
-	out, err := run(ctx, zoneStalePoolsCommand(adopt.Pools.ObjectStore, zone))
+	out, err := run(ctx, zoneStalePoolsCommand(old, zone))
 	if err != nil {
 		return cephState{}, fmt.Errorf("%w: %w", errZonePools, err)
 	}
 	state.ZoneStalePools = quotedNames(out)
+	if realm := objectStoreNameToRead(state.Realms, old); realm != "" {
+		state.PeriodStale, err = periodStale(ctx, run, realm, old)
+		if err != nil {
+			return cephState{}, err
+		}
+	}
 	return state, nil
 }
 
-func zoneToRead(zones []string, old string) string {
+func objectStoreNameToRead(names []string, old string) string {
 	for _, name := range []string{objectStoreName, old} {
-		if slices.Contains(zones, name) {
+		if slices.Contains(names, name) {
 			return name
 		}
 	}
@@ -851,7 +903,7 @@ func objectStorePlan(state cephState, old string) []renameCommand {
 		plan = append(plan, zonePoolRewrite(old))
 	}
 	plan = append(plan, poolRenames(objectStorePoolMoves(state, old))...)
-	if len(plan) > 0 {
+	if len(plan) > 0 || state.PeriodStale {
 		plan = append(plan, periodCommit())
 	}
 	return plan
