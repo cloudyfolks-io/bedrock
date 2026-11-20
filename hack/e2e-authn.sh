@@ -25,9 +25,9 @@ dump() {
     kubectl -n authn-e2e logs deploy/openldap --tail=100 || true
     kubectl -n authn-e2e logs deploy/dex --tail=100 || true
     echo "--- auth requests"
-    kubectl -n bedrock-system get authrequests -o yaml || true
+    kubectl -n bedrock-system get authrequests -o 'custom-columns=CLIENT:.spec.clientID,STEP:.status.login.step,DONE:.status.done,EXPIRES:.spec.expiresAt' || true
     echo "--- device requests"
-    kubectl -n bedrock-system get devicerequests -o yaml || true
+    kubectl -n bedrock-system get devicerequests -o 'custom-columns=CLIENT:.spec.clientID,STATE:.status.state,EXPIRES:.spec.expiresAt' || true
     echo "--- kube-apiserver authentication lines"
     journalctl -u k0scontroller --no-pager | grep -i authentication | tail -100 || true
   fi

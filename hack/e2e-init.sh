@@ -63,7 +63,8 @@ dump() {
     kubectl -n kube-system get ds kube-multus-ds -o wide || true
     kubectl -n kubevirt get kubevirt kubevirt -o yaml || true
     kubectl get cdi cdi -o yaml || true
-    kubectl -n traefik get certificate,secret platform-tls -o yaml || true
+    kubectl -n traefik get certificate platform-tls -o yaml || true
+    kubectl -n traefik get secret platform-tls -o 'custom-columns=NAME:.metadata.name,TYPE:.type' || true
     echo "--- fabric logs"
     for pod in $(kubectl -n kube-system get pods -o name 2>/dev/null | grep -E 'fabric|ovn|ovs' || true); do
       echo "--- $pod"; kubectl -n kube-system logs "$pod" --tail=100 --all-containers || true
