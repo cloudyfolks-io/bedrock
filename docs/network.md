@@ -925,14 +925,15 @@ Look at `kubectl get networkpolicies -A` before you change the value.
 
 The setting `network.ovn-tls` sets `networking.enableSsl` of the Fabric chart.
 The default is `false`.
-Bedrock makes the Secret `fabric-tls` in `kube-system` when the setting is `true` and the Secret does not exist.
-The Secret holds a new CA and a certificate for 10 years, and Bedrock never replaces it.
-The release does not carry the Secret, because it would hold a private key.
-Turn the setting on only after the install.
-The cluster configuration of `bedrock init` has no field for it, so a new cluster always starts with `false`.
-OVN TLS needs a running operator, and the operator needs the CNI, and the CNI needs the OVN database.
-Do not write the Setting before the install ends.
-To rotate the certificate, delete the Secret and restart the OVN components.
+To start a new cluster with TLS, set `spec.network.fabric.ovnTLS: true` in the cluster configuration.
+`bedrock init` creates the Secret `kube-system/fabric-tls` before it applies the Fabric manifests.
+A new Secret holds a CA and a client and server certificate that are valid for 10 years.
+If the Secret already exists, init checks its key and certificates and keeps the existing data.
+Init records the configured mode in `network.ovn-tls`.
+On a retry with the field omitted, init keeps the mode of the installed Fabric workloads.
+If TLS is on and the setting is empty, init records `true`.
+Init keeps a setting value that an administrator already set for a later upgrade.
+Use the upgrade procedure to change the mode of an installed Fabric cluster.
 
 ### How a change reaches the cluster
 

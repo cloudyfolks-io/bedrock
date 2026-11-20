@@ -803,17 +803,41 @@ func TestValidateAcceptsDNSAndEgress(t *testing.T) {
 	}
 }
 
-func TestInstallNeverCarriesTheOVNTLSSetting(t *testing.T) {
-	cfg, err := Load(filepath.Join("testdata", "single-node.yaml"))
+func TestInstallWritesTheOVNTLSSettingOnlyWhenConfigured(t *testing.T) {
+	raw, err := os.ReadFile(filepath.Join("testdata", "single-node.yaml"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, found := SettingValues(cfg)["network.ovn-tls"]; found {
-		t.Fatal("a fresh install must not enable OVN TLS: ovn-central would wait for fabric-tls before the operator can run")
-	}
-	for _, setting := range ToSettings(cfg) {
-		if setting.Name == "network.ovn-tls" {
-			t.Fatal("a fresh install must not write the setting network.ovn-tls")
-		}
+	for _, mode := range []string{"", "true", "false"} {
+		t.Run("mode="+mode, func(t *testing.T) {
+			config := string(raw)
+			if mode != "" {
+				config = strings.Replace(config, "    fabric:\n", "    fabric:\n      ovnTLS: "+mode+"\n", 1)
+			}
+			path := filepath.Join(t.TempDir(), "cluster.yaml")
+			if err := os.WriteFile(path, []byte(config), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			cfg, err := Load(path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			key := "network.ovn-tls"
+			value, found := SettingValues(cfg)[key]
+			if value != mode || found != (mode != "") {
+				t.Fatalf("%s setting = %q, present = %v", key, value, found)
+			}
+			for _, setting := range ToSettings(cfg) {
+				if setting.Name == key {
+					if mode == "" || setting.Spec.Value != mode {
+						t.Fatalf("unexpected %s setting object with value %q", key, setting.Spec.Value)
+					}
+					return
+				}
+			}
+			if mode != "" {
+				t.Fatalf("missing %s setting object", key)
+			}
+		})
 	}
 }

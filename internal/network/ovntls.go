@@ -1,16 +1,21 @@
 package network
 
 import (
+	"context"
 	"crypto/rand"
 	"crypto/rsa"
+	"crypto/tls"
 	"crypto/x509"
 	"crypto/x509/pkix"
 	"encoding/pem"
+	"fmt"
 	"math/big"
 	"time"
 
 	corev1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
 const (
@@ -71,4 +76,58 @@ func OVNTLSSecret(now time.Time) (*corev1.Secret, error) {
 			"key":    pemBlock("RSA PRIVATE KEY", x509.MarshalPKCS1PrivateKey(key)),
 		},
 	}, nil
+}
+
+func EnsureOVNTLSSecret(ctx context.Context, c client.Client, now time.Time) error {
+	name := client.ObjectKey{Namespace: OVNTLSSecretNamespace, Name: OVNTLSSecretName}
+	var existing corev1.Secret
+	err := c.Get(ctx, name, &existing)
+	if apierrors.IsNotFound(err) {
+		secret, generateErr := OVNTLSSecret(now)
+		if generateErr != nil {
+			return generateErr
+		}
+		err = c.Create(ctx, secret)
+		if !apierrors.IsAlreadyExists(err) {
+			return err
+		}
+		err = c.Get(ctx, name, &existing)
+	}
+	if err != nil {
+		return err
+	}
+	return validateOVNTLSSecret(existing, now)
+}
+
+func validateOVNTLSSecret(secret corev1.Secret, now time.Time) error {
+	name := client.ObjectKeyFromObject(&secret)
+	if !secret.DeletionTimestamp.IsZero() {
+		return fmt.Errorf("OVN TLS secret %s is marked for deletion", name)
+	}
+	pair, err := tls.X509KeyPair(secret.Data["cert"], secret.Data["key"])
+	if err != nil {
+		return fmt.Errorf("OVN TLS secret %s has an invalid certificate or key: %w", name, err)
+	}
+	leaf, err := x509.ParseCertificate(pair.Certificate[0])
+	if err != nil {
+		return fmt.Errorf("parse the certificate in OVN TLS secret %s: %w", name, err)
+	}
+	roots := x509.NewCertPool()
+	if !roots.AppendCertsFromPEM(secret.Data["cacert"]) {
+		return fmt.Errorf("OVN TLS secret %s has no valid CA certificate", name)
+	}
+	intermediates := x509.NewCertPool()
+	for _, raw := range pair.Certificate[1:] {
+		cert, err := x509.ParseCertificate(raw)
+		if err != nil {
+			return fmt.Errorf("parse the certificate chain in OVN TLS secret %s: %w", name, err)
+		}
+		intermediates.AddCert(cert)
+	}
+	for _, usage := range []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth, x509.ExtKeyUsageClientAuth} {
+		if _, err := leaf.Verify(x509.VerifyOptions{CurrentTime: now, Roots: roots, Intermediates: intermediates, KeyUsages: []x509.ExtKeyUsage{usage}}); err != nil {
+			return fmt.Errorf("verify the certificate in OVN TLS secret %s: %w", name, err)
+		}
+	}
+	return nil
 }

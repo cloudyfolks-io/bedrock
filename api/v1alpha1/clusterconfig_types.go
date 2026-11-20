@@ -45,6 +45,7 @@ type FabricSpec struct {
 	ServiceCIDR string `json:"serviceCIDR,omitempty"`
 	// +optional
 	JoinCIDR string `json:"joinCIDR,omitempty"`
+	OVNTLS   *bool  `json:"ovnTLS,omitempty"`
 	// +kubebuilder:validation:Enum=bgp;l2
 	// +optional
 	EIPMode string `json:"eipMode,omitempty"`

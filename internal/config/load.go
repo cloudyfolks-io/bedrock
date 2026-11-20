@@ -493,6 +493,9 @@ func SettingValues(cfg v1alpha1.ClusterConfig) map[string]string {
 		"egress.no-proxy":               strings.Join(cfg.Spec.Egress.NoProxy, ","),
 		"letsencrypt.dns01-nameservers": strings.Join(cfg.Spec.Egress.DNS01Nameservers, ","),
 	}
+	if tls := cfg.Spec.Network.Fabric.OVNTLS; tls != nil {
+		values["network.ovn-tls"] = strconv.FormatBool(*tls)
+	}
 	maps.Copy(values, addonSettingValues(cfg.Spec.Addons))
 	return values
 }

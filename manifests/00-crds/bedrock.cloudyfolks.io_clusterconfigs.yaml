@@ -109,6 +109,8 @@ spec:
                         type: string
                       joinCIDR:
                         type: string
+                      ovnTLS:
+                        type: boolean
                       podCIDR:
                         type: string
                       providerNetworks:

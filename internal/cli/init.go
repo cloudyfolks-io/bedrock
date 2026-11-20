@@ -179,6 +179,10 @@ func RunInit(ctx context.Context, args []string, deps InitDeps, stdout, stderr i
 	if cfg.Spec.Version != bundle.Spec.Version {
 		return fail(stderr, fmt.Errorf("config version %s does not match release %s", cfg.Spec.Version, bundle.Spec.Version))
 	}
+	usesOVNTLS := release.Uses(bundle, release.VarFabricEnableSSL)
+	if cfg.Spec.Network.Fabric.OVNTLS != nil && !usesOVNTLS {
+		return fail(stderr, fmt.Errorf("this release does not support configuring OVN TLS during init"))
+	}
 
 	step(stdout, "preflight")
 	facts, err := host.Gather(ctx, deps.Exec, deps.Root, deps.FreeBytes, deps.Uid)
@@ -356,12 +360,25 @@ func RunInit(ctx context.Context, args []string, deps InitDeps, stdout, stderr i
 		return fail(stderr, err)
 	}
 	vars = release.WithPodMTU(vars, cfg.Spec.Network.PodMTU)
-	maps.Copy(vars, release.SettingVars(config.SettingValues(cfg), cfg.Spec.API.VIP))
+	settingValues := config.SettingValues(cfg)
+	if usesOVNTLS {
+		mode, err := prepareInitOVNTLS(ctx, c, settingValues[initOVNTLSSetting], vars[release.VarFabricEnableSSL], time.Now())
+		if err != nil {
+			return fail(stderr, err)
+		}
+		settingValues[initOVNTLSSetting] = mode
+	}
+	maps.Copy(vars, release.SettingVars(settingValues, cfg.Spec.API.VIP))
 	if err := release.InstallGroups(ctx, c, bundle, vars, release.Gates{}, 2*time.Second, 30*time.Minute, report, grafanaAdminHook(c, rand.Reader), rookIdentityHook(c, adopt, rookSecret)); err != nil {
 		return fail(stderr, err)
 	}
 
 	step(stdout, "creating cluster objects")
+	if settingValues[initOVNTLSSetting] == "true" && cfg.Spec.Network.Fabric.OVNTLS == nil {
+		if err := recordInstalledOVNTLS(ctx, c); err != nil {
+			return fail(stderr, err)
+		}
+	}
 	nodeName, err := k0sClient.NodeName(ctx)
 	if err != nil {
 		return fail(stderr, err)
