@@ -430,6 +430,8 @@ func TestRunInitBlockedByPreflight(t *testing.T) {
 }
 
 const fakeK0sContent = "fake-k0s-binary-content"
+const fixtureImageDigest = "sha256:1111111111111111111111111111111111111111111111111111111111111111"
+const fixtureImage = "quay.io/a/b@" + fixtureImageDigest
 
 var fixtureArch = goruntime.GOARCH
 
@@ -459,10 +461,11 @@ func buildFixtureBundle(t *testing.T, version, k0sVersion string) (path, checksu
 	if err := os.WriteFile(filepath.Join(releaseDir, "release.yaml"), []byte(releaseYAML), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(releaseDir, "images.txt"), []byte("quay.io/a/b@sha256:"+strings.Repeat("1", 64)+"\n"), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(releaseDir, "images.txt"), []byte(fixtureImage+"\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(releaseDir, "manifests", "00-crds", "a.yaml"), []byte("apiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: a\n  namespace: default\n"), 0o644); err != nil {
+	manifest := "apiVersion: v1\nkind: Pod\nmetadata:\n  name: a\n  namespace: default\nspec:\n  containers:\n    - name: fixture\n      image: " + fixtureImage + "\n"
+	if err := os.WriteFile(filepath.Join(releaseDir, "manifests", "00-crds", "a.yaml"), []byte(manifest), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	airgap := filepath.Join(t.TempDir(), "airgap.tar")
@@ -532,6 +535,8 @@ func TestRunInitFromBundle(t *testing.T) {
 	e.Responses[k0sBin+" start"] = ""
 	e.Responses[k0sBin+" kubectl get --raw=/readyz"] = "ok"
 	e.Errors[k0sBin+" status --data-dir "+dataDir] = &host.ExitError{Code: 1}
+	imageCheck := k0sBin + " ctr --namespace k8s.io images ls"
+	e.Responses[imageCheck] = "REF TYPE DIGEST\n" + fixtureImage + " application/vnd.oci.image.index.v1+json " + fixtureImageDigest + "\n"
 
 	executable := fakeExecutable(t)
 	deps := InitDeps{
@@ -547,6 +552,9 @@ func TestRunInitFromBundle(t *testing.T) {
 	code := RunInit(ctx, []string{"-f", configPath, "--bundle", bundlePath, "--work-dir", workDir, "--k0s-bin", k0sBin, "--data-dir", dataDir, "--timeout", "30s"}, deps, &out, &errOut)
 	if code != 0 {
 		t.Fatalf("exit %d\nstdout %s\nstderr %s", code, out.String(), errOut.String())
+	}
+	if !slices.Contains(e.Calls, imageCheck) {
+		t.Fatal("bundle init did not check the imported image")
 	}
 	got, err := os.ReadFile(k0sBin)
 	if err != nil {

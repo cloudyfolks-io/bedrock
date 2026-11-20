@@ -10,7 +10,9 @@ import (
 	"slices"
 	"strings"
 	"syscall"
+	"time"
 
+	"k8s.io/apimachinery/pkg/util/wait"
 	sigyaml "sigs.k8s.io/yaml"
 
 	"github.com/cloudyfolks-io/bedrock/internal/depot"
@@ -115,7 +117,7 @@ func preloadImages(ctx context.Context, deps Deps, bundleURL, dir string, wanted
 	if err := os.RemoveAll(dir); err != nil {
 		return 0, err
 	}
-	if err := requireImages(ctx, deps.Exec, wanted); err != nil {
+	if err := requireImages(ctx, deps.Exec, k0s.DefaultBinary, wanted); err != nil {
 		return 0, err
 	}
 	return len(wanted), syncHostImages(ctx, deps)
@@ -178,8 +180,8 @@ func containerdImages(ctx context.Context, e host.Exec) ([]string, error) {
 	return strings.Fields(out), nil
 }
 
-func requireImages(ctx context.Context, e host.Exec, wanted []string) error {
-	targets, err := containerdTargets(ctx, e)
+func requireImages(ctx context.Context, e host.Exec, binary string, wanted []string) error {
+	targets, err := containerdTargets(ctx, e, binary)
 	if err != nil {
 		return err
 	}
@@ -202,8 +204,25 @@ func requireImages(ctx context.Context, e host.Exec, wanted []string) error {
 	return nil
 }
 
-func containerdTargets(ctx context.Context, e host.Exec) (map[string]string, error) {
-	out, err := e.Run(ctx, k0s.DefaultBinary, "ctr", "--namespace", "k8s.io", "images", "ls")
+func WaitForImages(ctx context.Context, e host.Exec, binary string, wanted []string, interval time.Duration) error {
+	if len(wanted) == 0 {
+		return nil
+	}
+	var lastErr error
+	err := wait.PollUntilContextCancel(ctx, interval, true, func(ctx context.Context) (bool, error) {
+		checkCtx, cancel := context.WithTimeout(ctx, ctrCallTimeout)
+		defer cancel()
+		lastErr = requireImages(checkCtx, e, binary, wanted)
+		return lastErr == nil, nil
+	})
+	if err != nil {
+		return fmt.Errorf("wait for offline images: %w", errors.Join(err, lastErr))
+	}
+	return nil
+}
+
+func containerdTargets(ctx context.Context, e host.Exec, binary string) (map[string]string, error) {
+	out, err := e.Run(ctx, binary, "ctr", "--namespace", "k8s.io", "images", "ls")
 	if err != nil {
 		return nil, err
 	}

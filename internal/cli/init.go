@@ -369,7 +369,18 @@ func RunInit(ctx context.Context, args []string, deps InitDeps, stdout, stderr i
 		settingValues[initOVNTLSSetting] = mode
 	}
 	maps.Copy(vars, release.SettingVars(settingValues, cfg.Spec.API.VIP))
-	if err := release.InstallGroups(ctx, c, bundle, vars, release.Gates{}, 2*time.Second, 30*time.Minute, report, grafanaAdminHook(c, rand.Reader), rookIdentityHook(c, adopt, rookSecret)); err != nil {
+	grafanaHook := grafanaAdminHook(c, rand.Reader)
+	beforeGroup := grafanaHook
+	if o.bundleDir != "" {
+		beforeGroup = func(ctx context.Context, group release.Group) error {
+			images := release.ImagesOf([]release.Group{group})
+			if err := agent.WaitForImages(ctx, deps.Exec, o.k0sBin, images, 2*time.Second); err != nil {
+				return err
+			}
+			return grafanaHook(ctx, group)
+		}
+	}
+	if err := release.InstallGroups(ctx, c, bundle, vars, release.Gates{}, 2*time.Second, 30*time.Minute, report, beforeGroup, rookIdentityHook(c, adopt, rookSecret)); err != nil {
 		return fail(stderr, err)
 	}
 

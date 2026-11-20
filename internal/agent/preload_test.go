@@ -2,6 +2,7 @@ package agent
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/http/httptest"
 	"os"
@@ -10,6 +11,7 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	sigyaml "sigs.k8s.io/yaml"
@@ -258,6 +260,57 @@ func TestPreloadPinsTheImportedImages(t *testing.T) {
 	want := "/usr/local/bin/k0s ctr --namespace k8s.io images label quay.io/a/b@sha256:" + strings.Repeat("1", 64) + " io.cri-containerd.pinned=pinned"
 	if !slices.Contains(fixture.container.calls, want) {
 		t.Fatalf("the imported image must be pinned: %v", fixture.container.calls)
+	}
+}
+
+type imageListingExec func(context.Context, string, ...string) (string, error)
+
+func (execute imageListingExec) Run(ctx context.Context, name string, args ...string) (string, error) {
+	return execute(ctx, name, args...)
+}
+
+func TestWaitForImagesRequiresImportedDigests(t *testing.T) {
+	names, err := release.ContainerdNames(pinnedImage)
+	if err != nil {
+		t.Fatal(err)
+	}
+	replies := []string{
+		imageListing(names[:1], nil),
+		imageListing(names, map[string]string{names[1]: "sha256:" + strings.Repeat("2", 64)}),
+		imageListing(names, nil),
+	}
+	calls := 0
+	execute := imageListingExec(func(_ context.Context, binary string, args ...string) (string, error) {
+		if binary != "/custom/k0s" || !slices.Equal(args, []string{"ctr", "--namespace", "k8s.io", "images", "ls"}) {
+			t.Fatalf("unexpected command %s %v", binary, args)
+		}
+		if calls >= len(replies) {
+			t.Fatal("the wait continued after the expected image was present")
+		}
+		reply := replies[calls]
+		calls++
+		return reply, nil
+	})
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	if err := WaitForImages(ctx, execute, "/custom/k0s", []string{pinnedImage}, time.Millisecond); err != nil {
+		t.Fatal(err)
+	}
+	if calls != len(replies) {
+		t.Fatalf("image listing checks %d, want %d", calls, len(replies))
+	}
+}
+
+func TestWaitForImagesReportsMissingImagesOnCancel(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	execute := imageListingExec(func(_ context.Context, _ string, _ ...string) (string, error) {
+		cancel()
+		return imageListing(nil, nil), nil
+	})
+	err := WaitForImages(ctx, execute, "/custom/k0s", []string{pinnedImage}, time.Millisecond)
+	if !errors.Is(err, context.Canceled) || !strings.Contains(err.Error(), pinnedImage) {
+		t.Fatalf("wait error %v", err)
 	}
 }
 
