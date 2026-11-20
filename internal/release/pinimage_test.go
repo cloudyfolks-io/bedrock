@@ -3,6 +3,7 @@ package release
 import (
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 )
@@ -64,5 +65,61 @@ func TestPinOwnImageRefusesAPinnedImageAndABadDigest(t *testing.T) {
 	}
 	if err := PinOwnImage(dir, "latest"); err == nil {
 		t.Fatal("a bad digest must be refused")
+	}
+	dir = writeTree(t, map[string]string{"release.yaml": "version: v1.0.0\nimage: " + ownImage + "\n"})
+	if err := PinOwnImage(dir, "sha256:1234"); err == nil {
+		t.Fatal("a short digest must be refused")
+	}
+}
+
+func TestRunningImageMatchesThePublishedBundle(t *testing.T) {
+	other := ownImage + "-other"
+	workload := "apiVersion: v1\nkind: Pod\nmetadata:\n  name: workload\nspec:\n  containers:\n    - name: own\n      image: " + ownImage + "\n    - name: other\n      image: " + other + "\n"
+	dir := writeTree(t, map[string]string{
+		"release.yaml":                  "version: v1.0.0\nimage: " + ownImage + "\ncomponents:\n- name: proxy\n  image: " + ownImage + "\n- name: other\n  image: " + other + "\nimages:\n  - " + ownImage + "\n  - " + other + "\n",
+		"images.txt":                    ownImage + "\n" + other + "\n",
+		"manifests/90-bedrock/pod.yaml": workload,
+		"manifests/addons/app/pod.yaml": workload,
+	})
+	embedded, err := Load(os.DirFS(dir))
+	if err != nil {
+		t.Fatal(err)
+	}
+	pinned, err := WithRunningImage(embedded, ownImage+"@"+ownDigest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	original, err := Load(os.DirFS(dir))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(embedded, original) {
+		t.Fatal("the embedded bundle changed")
+	}
+	if err := PinOwnImage(dir, ownDigest); err != nil {
+		t.Fatal(err)
+	}
+	published, err := Load(os.DirFS(dir))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(pinned, published) {
+		t.Fatalf("the running bundle differs from the published bundle: pinned image %s, published image %s", pinned.Spec.Image, published.Spec.Image)
+	}
+}
+
+func TestRunningImageRefusesADifferentImageOrInvalidDigest(t *testing.T) {
+	var bundle Bundle
+	bundle.Spec.Image = ownImage
+	for _, image := range []string{ownImage + "-other@" + ownDigest, ownImage + "@sha256:1234", ownImage + "@sha256:" + strings.Repeat("g", 64)} {
+		if _, err := WithRunningImage(bundle, image); err == nil {
+			t.Errorf("accepted %s", image)
+		}
+	}
+	for _, image := range []string{ownImage, ownImage + "@" + ownDigest} {
+		bundle.Spec.Image = image
+		if got, err := WithRunningImage(bundle, image); err != nil || !reflect.DeepEqual(got, bundle) {
+			t.Errorf("unchanged image %s returned %s, %v", image, got.Spec.Image, err)
+		}
 	}
 }

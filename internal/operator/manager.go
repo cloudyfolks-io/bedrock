@@ -54,6 +54,14 @@ func Run(ctx context.Context, cfg *rest.Config, scheme *runtime.Scheme, opts Run
 	if err != nil {
 		return err
 	}
+	podName, err := runningOperatorPodName()
+	if err != nil {
+		return fmt.Errorf("get operator pod name: %w", err)
+	}
+	bundle, err = runningOperatorBundle(ctx, mgr.GetAPIReader(), bundle, podName)
+	if err != nil {
+		return err
+	}
 	if err := setupControllers(mgr, cfg, bundle); err != nil {
 		return err
 	}
@@ -64,6 +72,33 @@ func Run(ctx context.Context, cfg *rest.Config, scheme *runtime.Scheme, opts Run
 		return err
 	}
 	return mgr.Start(ctx)
+}
+
+func runningOperatorPodName() (string, error) {
+	if name := os.Getenv("POD_NAME"); name != "" {
+		return name, nil
+	}
+	if os.Getenv("KUBERNETES_SERVICE_HOST") == "" {
+		return "", nil
+	}
+	return os.Hostname()
+}
+
+func runningOperatorBundle(ctx context.Context, reader client.Reader, bundle release.Bundle, podName string) (release.Bundle, error) {
+	if podName == "" {
+		return bundle, nil
+	}
+	key := client.ObjectKey{Namespace: release.SystemNamespace, Name: podName}
+	var pod corev1.Pod
+	if err := reader.Get(ctx, key, &pod); err != nil {
+		return release.Bundle{}, fmt.Errorf("read operator pod %s: %w", key, err)
+	}
+	for _, container := range pod.Spec.Containers {
+		if container.Name == operatorContainer {
+			return release.WithRunningImage(bundle, container.Image)
+		}
+	}
+	return release.Bundle{}, fmt.Errorf("pod %s has no container %s", key, operatorContainer)
 }
 
 func setupControllers(mgr ctrl.Manager, cfg *rest.Config, bundle release.Bundle) error {

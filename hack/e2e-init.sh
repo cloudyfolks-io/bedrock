@@ -211,7 +211,14 @@ expect_equal '600 kube-apiserver' "$(stat -c '%a %U' /etc/bedrock/encryption/enc
 expect_equal '700 kube-apiserver' "$(stat -c '%a %U' /etc/bedrock/encryption)" "encryption directory mode and owner"
 assert_secret_encrypted kube-system bedrock-secrets-encryption
 case "$image" in
-localhost:*) test "$(kubectl -n bedrock-system get deploy/bedrock-operator -o jsonpath='{.spec.template.spec.containers[0].image}')" = "$image" ;;
+localhost:*)
+  for workload in bedrock-operator bedrock-authn bedrock-proxy; do
+    actual_image=$(kubectl -n bedrock-system get "deployment/$workload" -o jsonpath='{.spec.template.spec.containers[0].image}')
+    expect_equal "$image" "$actual_image" "image for deployment/$workload"
+  done
+  expect_equal "$image" "$(kubectl get "release/$version" -o jsonpath='{.spec.image}')" "image for release/$version"
+  kubectl wait --for=condition=Ready "release/$version" --timeout=60s
+  ;;
 esac
 waiting=$(kubectl get pods -A -o jsonpath='{range .items[*]}{.status.containerStatuses[*].state.waiting.reason}{"\n"}{end}')
 if grep -qE 'ImagePullBackOff|ErrImagePull' <<<"$waiting"; then

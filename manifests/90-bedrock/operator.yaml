@@ -80,6 +80,10 @@ spec:
           env:
             - name: BEDROCK_RELEASE_DIR
               value: /release
+            - name: POD_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
           resources:
             requests:
               cpu: 50m

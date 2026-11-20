@@ -427,13 +427,17 @@ func rewriteBedrockImage(files []rendered, image string) []rendered {
 func rewriteImageRefs(files []rendered, decide func(current string) (string, bool)) []rendered {
 	out := make([]rendered, 0, len(files))
 	for _, file := range files {
-		objects := make([]*unstructured.Unstructured, 0, len(file.objects))
-		for _, obj := range file.objects {
-			copy := obj.DeepCopy()
-			walkImageFields(copy.Object, decide)
-			objects = append(objects, copy)
-		}
-		out = append(out, rendered{group: file.group, file: file.file, objects: objects})
+		out = append(out, rendered{group: file.group, file: file.file, objects: rewriteObjectImages(file.objects, decide)})
+	}
+	return out
+}
+
+func rewriteObjectImages(objects []*unstructured.Unstructured, decide func(current string) (string, bool)) []*unstructured.Unstructured {
+	out := make([]*unstructured.Unstructured, 0, len(objects))
+	for _, obj := range objects {
+		copy := obj.DeepCopy()
+		walkImageFields(copy.Object, decide)
+		out = append(out, copy)
 	}
 	return out
 }
