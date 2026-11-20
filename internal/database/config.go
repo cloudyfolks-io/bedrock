@@ -15,6 +15,7 @@ import (
 
 const (
 	keyEnabled          = "database.enabled"
+	keyMySQLRuntime     = "database.mysql.runtime-class"
 	keyCapacityCPU      = "database.capacity.cpu"
 	keyCapacityMemory   = "database.capacity.memory"
 	keyCapacityPods     = "database.capacity.pods"
@@ -33,10 +34,11 @@ const (
 	settingPrefix       = "database."
 )
 
-var configKeys = []string{keyEnabled, keyCapacityCPU, keyCapacityMemory, keyCapacityPods, keyMaxUtilization, keySweeperDryRun, keyProvisionTimeout, keyExecTimeout, keyBackupBucket, keyVIPRange, keyVIPInterface, keyRetentionDays, keyRetentionMin, keyRetentionMax, keyRetentionDelete, keyBackupMaxAge}
+var configKeys = []string{keyEnabled, keyMySQLRuntime, keyCapacityCPU, keyCapacityMemory, keyCapacityPods, keyMaxUtilization, keySweeperDryRun, keyProvisionTimeout, keyExecTimeout, keyBackupBucket, keyVIPRange, keyVIPInterface, keyRetentionDays, keyRetentionMin, keyRetentionMax, keyRetentionDelete, keyBackupMaxAge}
 
 type Config struct {
 	Enabled              bool
+	MySQLRuntimeClass    string
 	CapacityCPU          resource.Quantity
 	CapacityMemory       resource.Quantity
 	CapacityPods         int
@@ -87,6 +89,7 @@ func ParseConfig(values map[string]string) (Config, error) {
 	backupMaxAge, _ := time.ParseDuration(effective[keyBackupMaxAge])
 	return Config{
 		Enabled:              enabled,
+		MySQLRuntimeClass:    effective[keyMySQLRuntime],
 		CapacityCPU:          resource.MustParse(effective[keyCapacityCPU]),
 		CapacityMemory:       resource.MustParse(effective[keyCapacityMemory]),
 		CapacityPods:         pods,

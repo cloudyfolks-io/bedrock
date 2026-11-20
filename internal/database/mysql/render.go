@@ -150,6 +150,9 @@ func mysqlBlock(s engine.Spec) map[string]any {
 	if labels := podLabels(s); len(labels) > 0 {
 		block["labels"] = labels
 	}
+	if s.RuntimeClassName != "" {
+		block["runtimeClassName"] = s.RuntimeClassName
+	}
 	return block
 }
 

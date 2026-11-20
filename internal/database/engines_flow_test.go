@@ -8,7 +8,9 @@ import (
 
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
+	nodev1 "k8s.io/api/node/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/types"
@@ -167,26 +169,26 @@ func TestAnUpgradeWaitsForOneFreshBackup(t *testing.T) {
 	}
 }
 
-func (w *world) setMySQLReady() {
+func (w *world) mysqlCluster() *unstructured.Unstructured {
 	w.t.Helper()
 	cluster := &unstructured.Unstructured{}
 	cluster.SetGroupVersionKind(mysql.ClusterGVK)
 	must(w.t, w.c.Get(context.Background(), client.ObjectKey{Namespace: PlatformNamespace, Name: Name(w.db.UID)}, cluster))
+	return cluster
+}
+
+func (w *world) setMySQLReady() {
+	w.t.Helper()
+	cluster := w.mysqlCluster()
 	must(w.t, unstructured.SetNestedField(cluster.Object, "ready", "status", "state"))
 	must(w.t, unstructured.SetNestedField(cluster.Object, int64(1), "status", "mysql", "ready"))
 	must(w.t, w.c.Status().Update(context.Background(), cluster))
 }
 
 func TestAMySQLDatabaseComesUpThroughThePerconaCluster(t *testing.T) {
-	w := newWorld(t, func(spec *v1alpha1.DatabaseSpec) {
-		spec.Engine, spec.Version = v1alpha1.DatabaseEngineMySQL, "8.4"
-	})
-	setAddon(t, w.c, "percona-ps", true)
-	w.addVersion(v1alpha1.DatabaseVersionSpec{Engine: "mysql", Major: "8.4", Image: mysqlImage, Port: 3306, Enabled: true, Companions: map[string]string{"haproxy": haproxyPercona}})
+	w := mysqlWorld(t, "single")
 	w.reconcile()
-	cluster := &unstructured.Unstructured{}
-	cluster.SetGroupVersionKind(mysql.ClusterGVK)
-	must(t, w.c.Get(context.Background(), client.ObjectKey{Namespace: PlatformNamespace, Name: Name(w.db.UID)}, cluster))
+	cluster := w.mysqlCluster()
 	if image, _, _ := unstructured.NestedString(cluster.Object, "spec", "mysql", "image"); image != mysqlImage {
 		t.Fatalf("mysql image %q", image)
 	}
@@ -205,6 +207,101 @@ func TestAMySQLDatabaseComesUpThroughThePerconaCluster(t *testing.T) {
 	secret := getSecret(t, w.c, w.namespace, AdminCopyName(*w.db))
 	if !strings.HasPrefix(string(secret.Data["uri"]), "mysql://dbadmin:") || string(secret.Data["database"]) != "app" {
 		t.Fatalf("admin copy %v", secret.Data)
+	}
+}
+
+func TestExistingMySQLKeepsTheDefaultRuntime(t *testing.T) {
+	w := mysqlWorld(t, "single")
+	w.reconcile()
+	class := &nodev1.RuntimeClass{ObjectMeta: metav1.ObjectMeta{Name: "mysql-runtime-existing"}, Handler: "test-runtime"}
+	create(t, w.c, class)
+	t.Cleanup(func() { _ = w.c.Delete(context.Background(), class) })
+	setSetting(t, w.c, keyMySQLRuntime, class.Name)
+	w.reconcile()
+	if name, found, err := unstructured.NestedString(w.mysqlCluster().Object, "spec", "mysql", "runtimeClassName"); found || err != nil {
+		t.Fatalf("the existing cluster changed from the default runtime to %q with error %v", name, err)
+	}
+	if w.reason() == ReasonRuntimeUnavailable {
+		t.Fatal("the setting blocked an existing cluster")
+	}
+}
+
+func TestNewMySQLRequiresAndKeepsTheConfiguredRuntime(t *testing.T) {
+	w := mysqlWorld(t, "single")
+	class := &nodev1.RuntimeClass{
+		ObjectMeta: metav1.ObjectMeta{Name: "mysql-runtime-provision"},
+		Handler:    "test-runtime",
+		Overhead: &nodev1.Overhead{PodFixed: corev1.ResourceList{
+			corev1.ResourceCPU:    resource.MustParse("250m"),
+			corev1.ResourceMemory: resource.MustParse("512Mi"),
+		}},
+	}
+	setSetting(t, w.c, keyMySQLRuntime, class.Name)
+	w.reconcile()
+	requireRefusal(t, w, ReasonRuntimeUnavailable)
+	if exists(w.c, secretKey(PlatformNamespace, Suffixed(w.db.UID, SecretApp))) {
+		t.Fatal("the engine secrets were made before the RuntimeClass check")
+	}
+	create(t, w.c, class)
+	t.Cleanup(func() { _ = w.c.Delete(context.Background(), class) })
+	setQuotaStatus(t, w.c, "800m", "0", "400Gi", "0")
+	w.reconcile()
+	requireRefusal(t, w, ReasonCapacityExceeded)
+	setQuotaStatus(t, w.c, "100", "0", "400Gi", "0")
+	w.reconcile()
+	want := class.Name
+	got, _, err := unstructured.NestedString(w.mysqlCluster().Object, "spec", "mysql", "runtimeClassName")
+	if got != want || err != nil {
+		t.Fatalf("new MySQL RuntimeClass %q, want %q with no error, got %v", got, want, err)
+	}
+	must(t, w.c.Delete(context.Background(), class))
+	for _, setting := range []string{"mysql-runtime-other", ""} {
+		setSetting(t, w.c, keyMySQLRuntime, setting)
+		w.reconcile()
+		got, _, err := unstructured.NestedString(w.mysqlCluster().Object, "spec", "mysql", "runtimeClassName")
+		if got != want || err != nil || w.reason() == ReasonRuntimeUnavailable {
+			t.Fatalf("setting %q left runtime %q, reason %s and error %v, want runtime %q without a refusal", setting, got, w.reason(), err, want)
+		}
+	}
+}
+
+func TestMySQLRuntimeDoesNotOverwriteAConcurrentWrite(t *testing.T) {
+	w := mysqlWorld(t, "single")
+	ctx := context.Background()
+	class := &nodev1.RuntimeClass{ObjectMeta: metav1.ObjectMeta{Name: "mysql-runtime-concurrent"}, Handler: "test-runtime"}
+	create(t, w.c, class)
+	t.Cleanup(func() { _ = w.c.Delete(ctx, class) })
+	setSetting(t, w.c, keyMySQLRuntime, class.Name)
+	cfg, err := LoadConfig(ctx, w.c)
+	must(t, err)
+	project, _, err := ProjectOf(ctx, w.c, w.namespace)
+	must(t, err)
+	pending := &flow{cfg: cfg, db: w.db, project: project}
+	refused, err := w.r.prepare(ctx, pending)
+	must(t, err)
+	if refused != nil {
+		t.Fatalf("prepare refused the new cluster %+v", refused)
+	}
+	setSetting(t, w.c, keyMySQLRuntime, "")
+	w.reconcile()
+	if err := w.r.applyEngine(ctx, pending); !apierrors.IsAlreadyExists(err) {
+		t.Fatalf("the stale create returned %v, want AlreadyExists", err)
+	}
+	pending = &flow{cfg: cfg, db: w.db, project: project}
+	refused, err = w.r.prepare(ctx, pending)
+	must(t, err)
+	if refused != nil {
+		t.Fatalf("prepare refused the existing cluster %+v", refused)
+	}
+	cluster := w.mysqlCluster()
+	must(t, unstructured.SetNestedField(cluster.Object, class.Name, "spec", "mysql", "runtimeClassName"))
+	must(t, w.c.Update(ctx, cluster))
+	if err := w.r.applyEngine(ctx, pending); !apierrors.IsConflict(err) {
+		t.Fatalf("the stale update returned %v, want Conflict", err)
+	}
+	w.reconcile()
+	if name, _, err := unstructured.NestedString(w.mysqlCluster().Object, "spec", "mysql", "runtimeClassName"); name != class.Name || err != nil {
+		t.Fatalf("reconcile left runtime %q with error %v, want %q", name, err, class.Name)
 	}
 }
 

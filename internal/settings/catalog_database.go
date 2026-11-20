@@ -7,6 +7,8 @@ import (
 	"regexp"
 	"strconv"
 	"time"
+
+	"k8s.io/apimachinery/pkg/util/validation"
 )
 
 func databaseDefinitions() []Definition {
@@ -14,6 +16,7 @@ func databaseDefinitions() []Definition {
 		{"cnpg.enabled", "false", "Initial state of the cnpg addon. Change the Addon object after install.", boolean},
 		{"percona-ps.enabled", "false", "Initial state of the percona-ps addon. Change the Addon object after install.", boolean},
 		{"database.enabled", "false", "Turns the Database kinds on. When false, no platform object exists and a Database shows the reason DatabaseDisabled.", boolean},
+		{"database.mysql.runtime-class", "", "RuntimeClass for new MySQL server pods. Empty uses the default runtime. Existing clusters keep their RuntimeClass.", runtimeClassName},
 		{"database.capacity.cpu", "32", "CPU requests that all engine pods may hold together in the namespace bedrock-dbaas.", positiveQuantity},
 		{"database.capacity.memory", "128Gi", "Memory requests that all engine pods may hold together in the namespace bedrock-dbaas.", positiveQuantity},
 		{"database.capacity.pods", "150", "Pods that the namespace bedrock-dbaas may hold, from 1 to 100000.", intBetween(1, 100000)},
@@ -34,6 +37,13 @@ func databaseDefinitions() []Definition {
 }
 
 var bucketNamePattern = regexp.MustCompile(`^[a-z0-9][a-z0-9-]{1,61}[a-z0-9]$`)
+
+func runtimeClassName(v string) error {
+	if v == "" || len(validation.IsDNS1123Subdomain(v)) == 0 {
+		return nil
+	}
+	return fmt.Errorf("value %q is not a valid RuntimeClass name", v)
+}
 
 func ipv4CIDRValue(v string) error {
 	if v == "" {

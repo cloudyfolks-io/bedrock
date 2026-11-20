@@ -7,6 +7,7 @@ func TestDatabaseCatalogKeysAndDefaults(t *testing.T) {
 		"cnpg.enabled":                           "false",
 		"percona-ps.enabled":                     "false",
 		"database.enabled":                       "false",
+		"database.mysql.runtime-class":           "",
 		"database.capacity.cpu":                  "32",
 		"database.capacity.memory":               "128Gi",
 		"database.capacity.pods":                 "150",
@@ -40,6 +41,9 @@ func TestDatabaseSettingsValidate(t *testing.T) {
 	}{
 		{"database.enabled", "true", true},
 		{"database.enabled", "maybe", false},
+		{"database.mysql.runtime-class", "kata", true},
+		{"database.mysql.runtime-class", "sandbox.runtime", true},
+		{"database.mysql.runtime-class", "Kata Runtime", false},
 		{"database.capacity.cpu", "500m", true},
 		{"database.capacity.cpu", "0", false},
 		{"database.capacity.cpu", "-1", false},

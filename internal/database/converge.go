@@ -7,6 +7,7 @@ import (
 	"time"
 
 	corev1 "k8s.io/api/core/v1"
+	nodev1 "k8s.io/api/node/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -20,6 +21,7 @@ import (
 	"github.com/cloudyfolks-io/bedrock/internal/database/postgres"
 	"github.com/cloudyfolks-io/bedrock/internal/network"
 	"github.com/cloudyfolks-io/bedrock/internal/objectstorage/s3"
+	"github.com/cloudyfolks-io/bedrock/internal/platform"
 	"github.com/cloudyfolks-io/bedrock/internal/ssa"
 )
 
@@ -63,6 +65,13 @@ type flow struct {
 	tlsSecret   string
 	tlsRevision string
 	customerCA  []byte
+
+	mysqlRuntime mysqlRuntime
+}
+
+type mysqlRuntime struct {
+	name     string
+	overhead corev1.ResourceList
 }
 
 func (r *Reconciler) converge(ctx context.Context, cfg Config, project Project, db *v1alpha1.Database) (Observed, error) {
@@ -104,6 +113,11 @@ func (r *Reconciler) prepare(ctx context.Context, in *flow) (*Refusal, error) {
 	} else if refused := checkExisting(catalog, db, cluster); refused != nil {
 		return refused, nil
 	}
+	runtime, refused, err := resolveMySQLRuntime(ctx, r.Live, db, cluster, in.cfg.MySQLRuntimeClass)
+	if err != nil || refused != nil {
+		return refused, err
+	}
+	in.mysqlRuntime = runtime
 	steps := []func(context.Context, *flow) (*Refusal, error){r.preparePlatform, r.prepareCapacity, r.prepareSubnet, r.prepareEndpointAddress, r.prepareCustomerTLS, r.preparePods, r.prepareVIPRange, r.prepareRetention, r.prepareBackupStore, r.prepareRestore, r.prepareOperations}
 	for _, step := range steps {
 		if refused, err := step(ctx, in); err != nil || refused != nil {
@@ -121,6 +135,34 @@ func (r *Reconciler) clusterOf(ctx context.Context, db v1alpha1.Database) (*unst
 		return nil, false, nil
 	}
 	return primary, err == nil, err
+}
+
+func resolveMySQLRuntime(ctx context.Context, c client.Reader, db v1alpha1.Database, cluster *unstructured.Unstructured, configured string) (mysqlRuntime, *Refusal, error) {
+	if db.Spec.Engine != v1alpha1.DatabaseEngineMySQL {
+		return mysqlRuntime{}, nil, nil
+	}
+	if cluster != nil {
+		if platform.OwnerOf(cluster).UID != db.UID {
+			return mysqlRuntime{}, refusal(ReasonNameTaken, "the MySQL cluster %s exists and this database does not own it", cluster.GetName()), nil
+		}
+		name, _, err := unstructured.NestedString(cluster.Object, "spec", "mysql", "runtimeClassName")
+		return mysqlRuntime{name: name}, nil, err
+	}
+	if configured == "" {
+		return mysqlRuntime{}, nil, nil
+	}
+	var class nodev1.RuntimeClass
+	if err := c.Get(ctx, client.ObjectKey{Name: configured}, &class); err != nil {
+		if apierrors.IsNotFound(err) {
+			return mysqlRuntime{}, refusal(ReasonRuntimeUnavailable, "the RuntimeClass %q set by %s does not exist", configured, keyMySQLRuntime), nil
+		}
+		return mysqlRuntime{}, nil, err
+	}
+	selected := mysqlRuntime{name: class.Name}
+	if class.Overhead != nil {
+		selected.overhead = class.Overhead.PodFixed
+	}
+	return selected, nil, nil
 }
 
 func (r *Reconciler) preparePlatform(ctx context.Context, in *flow) (*Refusal, error) {
@@ -145,6 +187,8 @@ func (r *Reconciler) prepareCapacity(ctx context.Context, in *flow) (*Refusal, e
 	}
 	instances := int64(Instances(in.catalog.Class))
 	cpu, memory := in.catalog.Class.Spec.CPU.DeepCopy(), in.catalog.Class.Spec.Memory.DeepCopy()
+	cpu.Add(in.mysqlRuntime.overhead[corev1.ResourceCPU])
+	memory.Add(in.mysqlRuntime.overhead[corev1.ResourceMemory])
 	cpu.SetMilli(cpu.MilliValue() * instances)
 	memory.Set(memory.Value() * instances)
 	return CheckCapacity(quota, cpu, memory, in.cfg.MaxUtilization), nil
@@ -393,6 +437,8 @@ func (r *Reconciler) specOf(in *flow) engine.Spec {
 		TLSRevision:  in.tlsRevision,
 		Images:       in.catalog.Version.Spec.Companions,
 		Suspended:    db.Spec.Suspended,
+
+		RuntimeClassName: in.mysqlRuntime.name,
 	}
 }
 
@@ -423,8 +469,18 @@ func (r *Reconciler) applyEngine(ctx context.Context, in *flow) error {
 	if err != nil {
 		return err
 	}
-	for _, obj := range objects {
-		err := ssa.Apply(ctx, r.Client, Adopt(obj, *in.db, in.project), v1alpha1.DatabaseFieldManager)
+	for _, rendered := range objects {
+		obj := Adopt(rendered, *in.db, in.project)
+		mysqlCluster := obj.GroupVersionKind() == mysql.ClusterGVK
+		var err error
+		if mysqlCluster && !in.exists {
+			err = r.Client.Create(ctx, obj, client.FieldOwner(v1alpha1.DatabaseFieldManager))
+		} else {
+			if mysqlCluster {
+				obj.SetResourceVersion(in.cluster.GetResourceVersion())
+			}
+			err = ssa.Apply(ctx, r.Client, obj, v1alpha1.DatabaseFieldManager)
+		}
 		if meta.IsNoMatchError(err) && obj.GroupVersionKind() == PodMonitorGVK {
 			continue
 		}

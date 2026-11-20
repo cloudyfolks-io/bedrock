@@ -99,6 +99,21 @@ func TestRenderGolden(t *testing.T) {
 	}
 }
 
+func TestRuntimeClassChangesOnlyTheMySQLServerPodSpec(t *testing.T) {
+	spec := withRestore(bedrockSpec())
+	baseline := mustRender(t, spec)
+	spec.RuntimeClassName = "mysql-runtime"
+	got := mustRender(t, spec)
+	name, _, err := unstructured.NestedString(got[0].Object, "spec", "mysql", "runtimeClassName")
+	if name != spec.RuntimeClassName || err != nil {
+		t.Fatalf("MySQL RuntimeClass %q, want %q with no error, got %v", name, spec.RuntimeClassName, err)
+	}
+	unstructured.RemoveNestedField(got[0].Object, "spec", "mysql", "runtimeClassName")
+	if got, want := objectsJSON(t, got), objectsJSON(t, baseline); string(got) != string(want) {
+		t.Fatal("the RuntimeClass also changed other settings or objects")
+	}
+}
+
 func dadehatSpec(instances int, restore bool) engine.Spec {
 	dadehatLabels := map[string]string{
 		"app.kubernetes.io/instance":          testUID,

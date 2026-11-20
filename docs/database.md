@@ -205,6 +205,7 @@ The sweeper deletes the prefix, the ConfigMap and the Secret after `database.bac
 | Setting | Default | Meaning |
 |---|---|---|
 | `database.enabled` | `false` | Turns the area on. |
+| `database.mysql.runtime-class` | empty | RuntimeClass for new MySQL server pods. Empty uses the default runtime. |
 | `database.capacity.cpu` | `32` | CPU requests of the platform namespace. |
 | `database.capacity.memory` | `128Gi` | Memory requests of the platform namespace. |
 | `database.capacity.pods` | `150` | Pods of the platform namespace. |
@@ -235,6 +236,16 @@ Without the addon, the condition `Ready` shows the reason `EngineNotAvailable`.
 - The names `app`, `mysql`, `sys`, `information_schema` and `performance_schema` are reserved: a `DatabaseSchema` with one of them shows `InvalidSpec`, and no script drops them.
 - A restore uses a full backup. A MySQL restore has no target time: `restore.targetTime` shows the reason `RestoreTimeUnsupported`.
 - If the source `Database` does not exist, the controller reads the newest backup directory under `<bucket>/<sourceUID>/`. If there is none, the reason is `RestoreSourceEmpty`.
+
+### MySQL server runtime
+
+Set `database.mysql.runtime-class` to an installed RuntimeClass to select it for new MySQL clusters. A missing class stops provisioning with the reason `RuntimeUnavailable`. Each existing cluster keeps the runtime in its Percona object. Changing or clearing the setting does not restart those clusters. Keep their RuntimeClasses installed so that replacement server pods can start. While any cluster uses this setting, keep a Bedrock version that preserves the runtime.
+
+The class applies to all containers in each MySQL server pod, including the backup sidecar. The HAProxy pods, tenant proxy, database gate, separate backup and restore Jobs, PostgreSQL and Valkey keep their runtime settings.
+
+Before enabling the setting in a region, use a test cluster with real KVM access on the worker nodes. For the release `kata` class, check the eligible node labels and available capacity for every replica. Allow an additional 250 millicores and 512 MiB per MySQL server pod for this class. Confirm that the Percona cluster, StatefulSet and running server pods all specify the class and that the nodes start the configured runtime handler.
+
+Test both MySQL 8.4 and 9.7. For each version, test access through the tenant endpoint, write a row, restart a server pod and read that row from its persistent disk. For a three-instance cluster, check that all replicas can schedule on eligible nodes and that the group remains healthy after a restart. Then run a full backup to object storage, restore to a new cluster and verify the row through the restored endpoint. Check that the sidecar and the separate backup and restore Jobs complete their work.
 
 ## Valkey
 
@@ -320,7 +331,7 @@ The condition `Ready` shows one of these reasons.
 | `SubnetNotFound` | The subnet does not exist. |
 | `SubnetNotReady` | The subnet is not ready. |
 | `EndpointImageMissing` | The release holds no HAProxy image. |
-| `RuntimeUnavailable` | The RuntimeClass of the Setting `container.runtime-class` does not exist. |
+| `RuntimeUnavailable` | The RuntimeClass set for the tenant endpoint by `container.runtime-class` or for a new MySQL cluster by `database.mysql.runtime-class` does not exist. |
 | `DNSMissing` | The Setting `network.dns-servers` and the subnet have no DNS server. |
 | `VIPRangeMissing` | `database.vip-range` is empty. |
 | `BackupStorePending` | The identity of the backup store is not ready. |

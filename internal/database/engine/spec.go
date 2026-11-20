@@ -33,6 +33,8 @@ type Spec struct {
 	TLSSecret    string
 	TLSRevision  string
 	Suspended    bool
+
+	RuntimeClassName string
 }
 
 type BackupSpec struct {
