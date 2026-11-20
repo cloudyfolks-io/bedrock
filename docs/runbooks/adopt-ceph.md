@@ -832,15 +832,20 @@ Set `LAB_OVN_TLS=true` on the `export` stage to enable TLS in the target cluster
 hack/lab-adopt.sh up
 hack/lab-adopt.sh old
 hack/lab-adopt.sh export
+hack/lab-adopt.sh snapshot before-stop
 hack/lab-adopt.sh stop
-hack/lab-adopt.sh snapshot
+hack/lab-adopt.sh snapshot after-stop
 hack/lab-adopt.sh adopt
 hack/lab-adopt.sh check
+hack/lab-adopt.sh rewind before-stop
+hack/lab-adopt.sh check-legacy
 hack/lab-adopt.sh down
 ```
 
 `hack/lab-adopt.sh all` runs the stages from `up` to `check`.
-Run `snapshot` after `stop` when you want to repeat `adopt`. Run `rewind` to go back to that point.
+Run `rewind after-stop` when you want to repeat `adopt`.
+The default checkpoint for `snapshot` and `rewind` is `after-stop`.
+Run `rewind before-stop` to restore the legacy cluster from before the cutover, then run `check-legacy` to verify the old data.
 
 | Stage | What it does |
 | --- | --- |
@@ -848,16 +853,17 @@ Run `snapshot` after `stop` when you want to repeat `adopt`. Run `rewind` to go 
 | `old` | Installs k0s and Rook with the old values in `hack/lab/old-rook-values.yaml`. Writes two RBD images, a CephFS file, and a bucket with two S3 objects. |
 | `export` | Writes the key file and the cluster configuration from `hack/lab/adopt.yaml.tmpl`. Records the fsid, the monitor ids, the OSD ids and the pool sizes. |
 | `stop` | Does section 4 of this runbook: `noout`, Rook scale down, copy of `/var/lib/rook`, `k0s reset`. |
-| `snapshot` | Stops the VMs, snapshots every disk as `after-stop`, and starts the VMs. |
-| `rewind` | Restores the snapshot of every disk and starts the VMs. The disks are as `stop` left them. |
+| `snapshot` | Stops the VMs, saves a named checkpoint of every disk and starts the VMs. |
+| `rewind` | Restores every disk to the named checkpoint and starts the VMs. |
 | `adopt` | Runs `bedrock init` and `bedrock join --adopt-config` and waits for `Adopted`. Deletes the key file, unsets `noout` and waits for `StorageReady`. |
 | `check` | Prints `PASS` or `FAIL` for each assertion. The exit status is not zero if one fails. |
+| `check-legacy` | Waits for the restored legacy Ceph cluster to be healthy. Reads the FSID and checks the RBD, CephFS and RGW data against the saved hashes. |
 | `down` | Removes the lab VMs, their disks and the lab secrets. It does not touch other VMs. |
 
 The lab files are in `dist/lab/`. They hold lab keys.
 The `down` stage deletes the key file, the exports, the state file and the copies of `/var/lib/rook`.
-The lab uses raw OSDs. It does not run the rollback and it does not mount CephFS with the kernel client.
-The lab does not cover these cases. Do them in the rehearsal on the real hardware:
+The lab uses Ceph OSDs in raw mode and reads the CephFS file with the CephFS library.
+Rehearse these cases on the real hardware.
 
 - OSDs in LVM mode.
 - A rename command that fails, and the retry after it.

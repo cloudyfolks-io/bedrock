@@ -41,7 +41,7 @@ source "$repo/hack/lab/lib.sh"
 
 usage() {
   cat <<USAGE
-usage: hack/lab-adopt.sh <stage>
+usage: hack/lab-adopt.sh <stage> [checkpoint]
 
 stages, in order:
   up      build the bundle, start three lima VMs, check the network and the disks
@@ -50,10 +50,15 @@ stages, in order:
   stop    set noout, stop Rook, copy /var/lib/rook, run k0s reset
   adopt   run bedrock init and bedrock join, wait for StorageAdopted
   check   run every assertion, print PASS or FAIL for each
-  snapshot  stop the VMs, snapshot every disk, start the VMs; run it after stop
-  rewind    restore the snapshot of every disk and start the VMs again
+  snapshot  stop the VMs, snapshot every disk and start the VMs
+  rewind    restore every disk from the checkpoint and start the VMs
+  check-legacy  read the legacy FSID, RBD images, CephFS file and S3 objects
   down    remove the lab VMs, their disks and the lab secrets
   all     up, old, export, stop, adopt and check; the VMs stay, run down after
+
+Use before-stop after export to save the legacy cluster for the rollback check.
+Use after-stop after stop to save the cluster for another adoption attempt.
+Snapshot and rewind use after-stop by default.
 
 The lab needs a Linux host with KVM, about 46 GiB of free RAM and no running gate.
 Set LAB_RELEASE_VERSION to use the existing bundle and binary in dist/.
@@ -525,8 +530,11 @@ lab_ceph() {
 }
 
 check_fsid() {
-  expect_equal "$FSID" "$(lab_ceph fsid)" "ceph fsid" || return 1
-  expect_equal "$FSID" "$(vm_run 1 'kubectl -n rook-ceph get secret rook-ceph-mon -o jsonpath="{.data.fsid}" | base64 -d')" "fsid of the Secret rook-ceph-mon"
+  local actual
+  actual=$(lab_ceph fsid) || return 1
+  expect_equal "$FSID" "$actual" "ceph fsid" || return 1
+  actual=$(vm_run 1 'kubectl -n rook-ceph get secret rook-ceph-mon -o jsonpath="{.data.fsid}" | base64 -d') || return 1
+  expect_equal "$FSID" "$actual" "fsid of the Secret rook-ceph-mon"
 }
 
 check_monitor_ids() {
@@ -608,21 +616,23 @@ check_pool_sizes() {
 }
 
 check_rbd_data() {
-  local n want got
+  local pool=${1:-bedrock-block} n want got
   for n in 1 2; do
     want=IMG_SHA_$n
-    got=$(vm_run 1 "op_exec sh -c \"rbd \$rook_conf export --no-progress bedrock-block/lab-img$n - | sha256sum\" | cut -d' ' -f1")
+    got=$(vm_run 1 "rbd_op export --no-progress $pool/lab-img$n - | sha_of") || return 1
     expect_equal "${!want}" "$got" "sha256 of the RBD image lab-img$n" || return 1
   done
 }
 
 check_cephfs_file() {
-  expect_equal "$FS_SHA" "$(vm_run 1 'fs_file read bedrock-fs')" "sha256 of the CephFS file"
+  local filesystem=${1:-bedrock-fs} got
+  got=$(vm_run 1 "fs_file read $filesystem") || return 1
+  expect_equal "$FS_SHA" "$got" "sha256 of the CephFS file"
 }
 
 script_s3_get() {
   cat <<'SCRIPT'
-endpoint=$(rgw_service bedrock-rgw)
+endpoint=$(rgw_service "$RGW_STORE")
 get_object() { s3 -o /dev/null "http://$endpoint/lab-bucket/lab-object-1"; }
 retry_until 600 get_object
 s3 "http://$endpoint/lab-bucket/lab-object-$N" | sha_of
@@ -630,10 +640,11 @@ SCRIPT
 }
 
 check_s3_objects() {
-  local n want
+  local store=${1:-bedrock-rgw} n want got
   for n in 1 2; do
     want=S3_SHA_$n
-    expect_equal "${!want}" "$(vm_run 1 "$(script_s3_get)" N="$n")" "sha256 of the S3 object lab-object-$n read with the old key" || return 1
+    got=$(vm_run 1 "$(script_s3_get)" RGW_STORE="$store" N="$n") || return 1
+    expect_equal "${!want}" "$got" "sha256 of the S3 object lab-object-$n read with the old key" || return 1
   done
 }
 
@@ -992,16 +1003,18 @@ stage_check() {
   fi
   return "$failed"
 }
-snapshot_tag=after-stop
 
-stage_snapshot() {
-  lab_snapshot "$snapshot_tag"
+stage_check_legacy() {
+  local failed=0
+  state_load
+  require_state FSID IMG_SHA_1 IMG_SHA_2 FS_SHA S3_SHA_1 S3_SHA_2
+  verdict "legacy Ceph is healthy" check_health_ok || return 1
+  verdict "legacy Ceph keeps its fsid" check_fsid || return 1
+  verdict "legacy RBD images match their sha256" check_rbd_data storage-block || failed=1
+  verdict "legacy CephFS file matches its sha256" check_cephfs_file filesystem-data || failed=1
+  verdict "legacy S3 objects match their sha256" check_s3_objects objectstore || failed=1
+  return "$failed"
 }
-
-stage_rewind() {
-  lab_rewind "$snapshot_tag"
-}
-
 
 stage_down() {
   lab_down
@@ -1022,7 +1035,22 @@ main() {
   cd "$repo"
   check_lab_config
   case "${1:-}" in
-  up | old | export | stop | adopt | check | snapshot | rewind | down | all) "stage_$1" ;;
+  up | old | export | stop | adopt | check | down | all) "stage_$1" ;;
+  check-legacy) stage_check_legacy ;;
+  snapshot | rewind)
+    local checkpoint=${2-after-stop}
+    if [ "$#" -gt 2 ]; then
+      usage >&2
+      return 2
+    fi
+    case "$checkpoint" in
+    before-stop | after-stop) "lab_$1" "$checkpoint" ;;
+    *)
+      printf '%s\n' 'The checkpoint must be before-stop or after-stop.' >&2
+      return 2
+      ;;
+    esac
+    ;;
   *)
     usage >&2
     return 2
