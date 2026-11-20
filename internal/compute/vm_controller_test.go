@@ -777,6 +777,7 @@ func readyVolume(t *testing.T, c client.Client, ns, name string) {
 	t.Helper()
 	createVolume(t, c, ns, name)
 	reconcileVolume(t, c, ns, name)
+	createPVC(t, c, ns, name, 10, "block")
 	setDataVolumePhase(t, c, ns, name, "Succeeded")
 	reconcileVolume(t, c, ns, name)
 }

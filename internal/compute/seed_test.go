@@ -147,10 +147,7 @@ func seedPlatformIn(t *testing.T, c client.Client, ns string) {
 	createSecurityGroup(t, c, ns, "web", metav1.ConditionTrue)
 	ensureUnstructured(t, c, fabricGroupGVK, network.DefaultSecurityGroupName(ns), map[string]any{})
 	createSSHKey(t, c, ns, "alice", metav1.ConditionTrue)
-	createVolume(t, c, ns, "data1")
-	reconcileVolume(t, c, ns, "data1")
-	setDataVolumePhase(t, c, ns, "data1", "Succeeded")
-	reconcileVolume(t, c, ns, "data1")
+	readyVolume(t, c, ns, "data1")
 }
 
 func createFabricIP(t *testing.T, c client.Client, name, namespace, pod, subnet, address string) {

@@ -216,6 +216,57 @@ func TestVolumeExpandsThePVC(t *testing.T) {
 	}
 }
 
+func TestVolumeUsesTheBoundClaimStatus(t *testing.T) {
+	c, _ := startEnv(t)
+	ns := uniqueNamespace(t, c)
+	newVolume(t, c, ns, "data1", func(v *v1alpha1.Volume) {})
+	reconcileVolume(t, c, ns, "data1")
+	setDataVolumePhase(t, c, ns, "data1", "Succeeded")
+	volume := reconcileVolume(t, c, ns, "data1")
+	if volume.Status.Phase != v1alpha1.VolumePhasePending || volume.Status.ActualSizeGi != 0 {
+		t.Fatalf("status before the claim exists: %+v", volume.Status)
+	}
+
+	pvc := createPVC(t, c, ns, "data1", 10, "block")
+	updateStatus(t, c, pvc, func(p *corev1.PersistentVolumeClaim) { p.Status.Phase = corev1.ClaimPending })
+	setDataVolumePhase(t, c, ns, "data1", "WaitForFirstConsumer")
+	volume = reconcileVolume(t, c, ns, "data1")
+	requireVolumeReason(t, volume, "WaitForFirstConsumer")
+	if volume.Status.Phase != v1alpha1.VolumePhaseAvailable || volume.Status.ActualSizeGi != 0 {
+		t.Fatalf("status before the first consumer binds the claim: %+v", volume.Status)
+	}
+
+	must(t, c.Get(context.Background(), client.ObjectKeyFromObject(pvc), pvc))
+	updateStatus(t, c, pvc, func(p *corev1.PersistentVolumeClaim) { p.Status.Phase = corev1.ClaimBound })
+	setDataVolumePhase(t, c, ns, "data1", "PendingPopulation")
+	volume = reconcileVolume(t, c, ns, "data1")
+	requireVolumeReason(t, volume, "PendingPopulation")
+	if volume.Status.Phase != v1alpha1.VolumePhaseAvailable || volume.Status.ActualSizeGi != 10 {
+		t.Fatalf("status while the bound claim needs population: %+v", volume.Status)
+	}
+
+	setDataVolumePhase(t, c, ns, "data1", "Succeeded")
+	volume = reconcileVolume(t, c, ns, "data1")
+	requireVolumeReason(t, volume, "Bound")
+	if volume.Status.Phase != v1alpha1.VolumePhaseAvailable || volume.Status.ActualSizeGi != 10 {
+		t.Fatalf("status for the bound claim: %+v", volume.Status)
+	}
+
+	must(t, c.Get(context.Background(), client.ObjectKeyFromObject(pvc), pvc))
+	updateStatus(t, c, pvc, func(p *corev1.PersistentVolumeClaim) { p.Status.Phase = corev1.ClaimLost })
+	volume.Spec.SizeGi = 20
+	must(t, c.Update(context.Background(), &volume))
+	volume = reconcileVolume(t, c, ns, "data1")
+	requireVolumeReason(t, volume, "ClaimLost")
+	if volume.Status.Phase != v1alpha1.VolumePhaseFailed || volume.Status.ActualSizeGi != 0 || volumeReady(volume).Status != metav1.ConditionFalse {
+		t.Fatalf("status for the lost claim: %+v", volume.Status)
+	}
+	must(t, c.Get(context.Background(), client.ObjectKeyFromObject(pvc), pvc))
+	if got := pvc.Spec.Resources.Requests.Storage().String(); got != "10Gi" {
+		t.Fatalf("the lost claim changed size to %s", got)
+	}
+}
+
 func TestVolumeAcceptsAClaimEnlargedByTheFilesystemOverhead(t *testing.T) {
 	c, _ := startEnv(t)
 	ns := uniqueNamespace(t, c)

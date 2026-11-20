@@ -82,6 +82,7 @@ func TestVolumeWritesRetryAfterAConflict(t *testing.T) {
 	if *calls < 2 || !containsString(volume.Finalizers, FinalizerVolumeInUse) {
 		t.Fatalf("the finalizer was lost (calls %d)", *calls)
 	}
+	createPVC(t, plain, ns, "data1", 10, "block")
 	setDataVolumePhase(t, plain, ns, "data1", "Succeeded")
 	wrapped, calls = conflictOnce(base)
 	reconcileVolume(t, wrapped, ns, "data1")

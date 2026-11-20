@@ -30,10 +30,11 @@ type VolumeReconciler struct {
 }
 
 type volumeOutcome struct {
-	Gate       *Gate
-	Phase      string
-	AttachedTo string
-	ActualGi   int32
+	Gate            *Gate
+	Phase           string
+	DataVolumePhase string
+	AttachedTo      string
+	ActualGi        int32
 }
 
 func (r *VolumeReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
@@ -155,6 +156,13 @@ func (r *VolumeReconciler) converge(ctx context.Context, volume v1alpha1.Volume,
 	if err != nil {
 		return volumeOutcome{}, err
 	}
+	if pvc.Status.Phase == corev1.ClaimLost {
+		return volumeOutcome{
+			Gate:       gateOf("ClaimLost", "the persistent volume claim lost its backing volume"),
+			Phase:      v1alpha1.VolumePhaseFailed,
+			AttachedTo: owner,
+		}, nil
+	}
 	if gate, err := r.resize(ctx, volume, pvc); err != nil || gate != nil {
 		return volumeOutcome{Gate: gate, AttachedTo: owner}, err
 	}
@@ -267,10 +275,15 @@ func (r *VolumeReconciler) observe(ctx context.Context, volume v1alpha1.Volume, 
 	}
 	phase, _, _ := unstructured.NestedString(claim.Object, "status", "phase")
 	var capacity int32
-	if pvc != nil {
+	if pvc != nil && pvc.Status.Phase == corev1.ClaimBound {
 		capacity = ActualSizeGi(pvc.Status.Capacity[corev1.ResourceStorage])
 	}
-	return volumeOutcome{Phase: VolumePhaseOf(phase, owner, capacity, volume.Spec.SizeGi), AttachedTo: owner, ActualGi: capacity}, nil
+	return volumeOutcome{
+		Phase:           VolumePhaseOf(phase, owner, capacity, volume.Spec.SizeGi),
+		DataVolumePhase: phase,
+		AttachedTo:      owner,
+		ActualGi:        capacity,
+	}, nil
 }
 
 func volumeCondition(volume v1alpha1.Volume, done volumeOutcome) metav1.Condition {
@@ -278,6 +291,10 @@ func volumeCondition(volume v1alpha1.Volume, done volumeOutcome) metav1.Conditio
 	switch {
 	case done.Gate != nil:
 		cond.Status, cond.Reason, cond.Message = metav1.ConditionFalse, done.Gate.Reason, done.Gate.Message
+	case done.DataVolumePhase == "WaitForFirstConsumer":
+		cond.Status, cond.Reason, cond.Message = metav1.ConditionTrue, "WaitForFirstConsumer", "a workload can use the volume to start storage provisioning"
+	case done.DataVolumePhase == "PendingPopulation":
+		cond.Status, cond.Reason, cond.Message = metav1.ConditionTrue, "PendingPopulation", "storage population is incomplete"
 	case done.Phase == v1alpha1.VolumePhaseAvailable || done.Phase == v1alpha1.VolumePhaseInUse:
 		cond.Status, cond.Reason, cond.Message = metav1.ConditionTrue, "Bound", "the volume is ready"
 	default:

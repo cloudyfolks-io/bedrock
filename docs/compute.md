@@ -218,6 +218,12 @@ A Volume can be used by one VM only.
 The VM that is older wins.
 The other VM has the reason `VolumeInUse`.
 You can add and remove Volumes while the VM runs.
+
+The Volume `Ready` condition has reason `Bound` when CDI has populated the
+Volume and Kubernetes reports a bound claim with capacity. A workload can use
+a Volume with reason `WaitForFirstConsumer` or `PendingPopulation` while
+storage provisioning completes. A lost claim gives the Volume phase `Failed`
+and reason `ClaimLost`.
 The disk bus is the bus of the VM entry or else the bus of the Volume.
 
 A delete of a Volume waits until no VM lists the Volume.
