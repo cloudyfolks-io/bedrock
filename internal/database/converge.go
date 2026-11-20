@@ -666,6 +666,11 @@ func (r *Reconciler) observeBackup(ctx context.Context, in *flow, ready bool) *v
 	db := *in.db
 	backups, err := ListBackups(ctx, r.Live, db)
 	if err != nil {
+		if db.Spec.Engine == v1alpha1.DatabaseEngineMySQL && db.Status.Backup != nil {
+			status := *db.Status.Backup
+			status.PITRFrom, status.PITRTo = nil, nil
+			return &status
+		}
 		return db.Status.Backup
 	}
 	request := r.startRequestedBackup(ctx, in, PlanBackupRequest(db, backups, ready, r.now()))
@@ -682,7 +687,7 @@ func (r *Reconciler) observeBackup(ctx context.Context, in *flow, ready bool) *v
 	if sampled, at, err := SampleBackupSize(ctx, r.Live, r.Store, in.cfg, db, r.now()); err == nil {
 		size, sampledAt = sampled, at
 	}
-	status := BackupStatusOf(backups, r.now(), size, sampledAt)
+	status := BackupStatusOf(db.Spec.Engine, backups, r.now(), size, sampledAt)
 	status.Request = request
 	return status
 }

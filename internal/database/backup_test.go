@@ -2,6 +2,7 @@ package database
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
 
@@ -107,7 +108,7 @@ func mustTime(value string) time.Time {
 }
 
 func TestBackupStatusWithNoBackups(t *testing.T) {
-	status := BackupStatusOf(nil, mustTime("2026-10-19T12:00:00Z"), 0, nil)
+	status := BackupStatusOf(v1alpha1.DatabaseEnginePostgreSQL, nil, mustTime("2026-10-19T12:00:00Z"), 0, nil)
 	if status.LastAt != nil || status.PITRFrom != nil || status.PITRTo != nil || len(status.Items) != 0 || status.SizeBytes != 0 {
 		t.Fatalf("status %+v", status)
 	}
@@ -121,7 +122,7 @@ func TestBackupStatusWithTwoCompletedBackupsAndARunningOne(t *testing.T) {
 		backupObject("b2", "uid", "completed", "2026-10-18T02:00:00Z", "2026-10-18T02:06:00Z"),
 		backupObject("b3", "uid", "running", "2026-10-19T02:00:00Z", ""),
 	}
-	status := BackupStatusOf(backups, now, 4096, &sampled)
+	status := BackupStatusOf(v1alpha1.DatabaseEnginePostgreSQL, backups, now, 4096, &sampled)
 	if len(status.Items) != 3 || status.Items[0].ID != "b3" || status.Items[1].ID != "b2" || status.Items[2].ID != "b1" {
 		t.Fatalf("items %+v", status.Items)
 	}
@@ -141,7 +142,7 @@ func TestBackupStatusIgnoresAFailedBackupForTheWindow(t *testing.T) {
 		backupObject("good", "uid", "completed", "2026-10-18T02:00:00Z", "2026-10-18T02:05:00Z"),
 		backupObject("bad", "uid", "failed", "2026-10-19T02:00:00Z", "2026-10-19T02:01:00Z"),
 	}
-	status := BackupStatusOf(backups, mustTime("2026-10-19T12:00:00Z"), 0, nil)
+	status := BackupStatusOf(v1alpha1.DatabaseEnginePostgreSQL, backups, mustTime("2026-10-19T12:00:00Z"), 0, nil)
 	if len(status.Items) != 2 || status.Items[0].ID != "bad" || status.Items[0].Phase != "failed" {
 		t.Fatalf("items %+v", status.Items)
 	}
@@ -155,8 +156,45 @@ func TestBackupStatusKeepsAtMostOneHundredItems(t *testing.T) {
 	for i := 0; i < 120; i++ {
 		backups = append(backups, backupObject("b"+string(rune('a'+i%26))+string(rune('a'+i/26)), "uid", "completed", "2026-10-18T02:00:00Z", "2026-10-18T02:05:00Z"))
 	}
-	if got := len(BackupStatusOf(backups, time.Now(), 0, nil).Items); got != 100 {
+	if got := len(BackupStatusOf(v1alpha1.DatabaseEnginePostgreSQL, backups, time.Now(), 0, nil).Items); got != 100 {
 		t.Fatalf("items %d", got)
+	}
+}
+
+func TestMySQLBackupStatusKeepsCompletedBackupWithoutAPITRWindow(t *testing.T) {
+	completed := mustTime("2026-10-18T02:05:00Z")
+	backup := &unstructured.Unstructured{Object: map[string]any{
+		"apiVersion": "ps.percona.com/v1", "kind": "PerconaServerMySQLBackup",
+		"metadata": map[string]any{"name": "mysql-backup", "creationTimestamp": "2026-10-18T02:00:00Z"},
+		"status":   map[string]any{"state": "Succeeded", "completed": completed.Format(time.RFC3339)},
+	}}
+	status := BackupStatusOf(v1alpha1.DatabaseEngineMySQL, []*unstructured.Unstructured{backup}, completed.Add(time.Hour), 4096, nil)
+	if status.PITRFrom != nil || status.PITRTo != nil {
+		t.Fatalf("MySQL PITR window = %v to %v", status.PITRFrom, status.PITRTo)
+	}
+	if status.LastAt == nil || !status.LastAt.Time.Equal(completed) || status.SizeBytes != 4096 || len(status.Items) != 1 ||
+		status.Items[0].ID != "mysql-backup" || status.Items[0].Phase != backupPhaseCompleted {
+		t.Fatalf("status %+v", status)
+	}
+}
+
+type failingBackupList struct{ client.Reader }
+
+func (failingBackupList) List(context.Context, client.ObjectList, ...client.ListOption) error {
+	return errors.New("the backup list failed")
+}
+
+func TestMySQLBackupStatusClearsAnOldWindowWhenTheListFails(t *testing.T) {
+	last := metav1.NewTime(mustTime("2026-10-18T02:05:00Z"))
+	previous := &v1alpha1.DatabaseBackupStatus{LastAt: &last, PITRFrom: &last, PITRTo: &last, SizeBytes: 4096}
+	db := &v1alpha1.Database{Spec: v1alpha1.DatabaseSpec{Engine: v1alpha1.DatabaseEngineMySQL}, Status: v1alpha1.DatabaseStatus{Backup: previous}}
+	r := Reconciler{Live: failingBackupList{}}
+	status := r.observeBackup(context.Background(), &flow{db: db}, true)
+	if status.PITRFrom != nil || status.PITRTo != nil || !status.LastAt.Equal(&last) || status.SizeBytes != 4096 {
+		t.Fatalf("status %+v", status)
+	}
+	if previous.PITRFrom == nil || previous.PITRTo == nil {
+		t.Fatal("the backup observer changed its input")
 	}
 }
 

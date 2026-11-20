@@ -149,7 +149,7 @@ func timeField(obj *unstructured.Unstructured, field string) *metav1.Time {
 	return &metav1.Time{Time: parsed.UTC()}
 }
 
-func BackupStatusOf(backups []*unstructured.Unstructured, now time.Time, sizeBytes int64, sampledAt *metav1.Time) *v1alpha1.DatabaseBackupStatus {
+func BackupStatusOf(engineName string, backups []*unstructured.Unstructured, now time.Time, sizeBytes int64, sampledAt *metav1.Time) *v1alpha1.DatabaseBackupStatus {
 	items := make([]v1alpha1.DatabaseBackupItem, 0, len(backups))
 	var completed []metav1.Time
 	for _, backup := range backups {
@@ -167,9 +167,11 @@ func BackupStatusOf(backups []*unstructured.Unstructured, now time.Time, sizeByt
 	status := &v1alpha1.DatabaseBackupStatus{Items: items, SizeBytes: sizeBytes, SizeSampledAt: sampledAt}
 	if len(completed) > 0 {
 		sort.Slice(completed, func(i, j int) bool { return completed[i].Before(&completed[j]) })
-		first, last := completed[0], completed[len(completed)-1]
-		status.PITRFrom, status.LastAt = &first, &last
-		status.PITRTo = &metav1.Time{Time: now.UTC()}
+		status.LastAt = &completed[len(completed)-1]
+		if engineName == v1alpha1.DatabaseEnginePostgreSQL {
+			status.PITRFrom = &completed[0]
+			status.PITRTo = &metav1.Time{Time: now.UTC()}
+		}
 	}
 	return status
 }
