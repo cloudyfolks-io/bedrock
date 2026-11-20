@@ -17,12 +17,32 @@ state_file=${state_file:?}
 arch=${arch:?}
 bundle=${bundle:?}
 bedrock_bin=${bedrock_bin:?}
+release_version=${release_version:?}
+ovn_tls=${LAB_OVN_TLS:-false}
 ids=("${ids[@]}")
 letters=("${letters[@]}")
 base_images=("${base_images[@]}")
 vm_env=("${vm_env[@]}")
 bundle_make_args=("${bundle_make_args[@]}")
 source "$repo/hack/e2e/lib.sh"
+
+check_lab_config() {
+  if [[ ! $release_version =~ ^[[:alnum:]][[:alnum:].+-]*$ ]]; then
+    printf '%s\n' 'LAB_RELEASE_VERSION must be a release version' >&2
+    return 1
+  fi
+  case "$ovn_tls" in
+    true | false) ;;
+    *) printf '%s\n' 'LAB_OVN_TLS must be true or false' >&2; return 1 ;;
+  esac
+}
+
+check_lab_artifacts() {
+  if [ ! -f "$bundle" ] || [ ! -r "$bundle" ] || [ ! -f "$bedrock_bin" ] || [ ! -x "$bedrock_bin" ]; then
+    printf 'The release needs a readable bundle and an executable binary under %s/dist\n' "$repo" >&2
+    return 1
+  fi
+}
 
 log() {
   printf '== %s\n' "$*"
@@ -232,8 +252,7 @@ bundle_build() {
   make bundle VERSION=dev IMAGE="$image" PIN_DIGESTS=1 BUNDLE_ARCH="$arch" "$@"
   registry_down
   remove_bundle_images
-  test -f "$bundle"
-  test -x "$bedrock_bin"
+  check_lab_artifacts
 }
 
 qemu_wrapper() {
@@ -402,12 +421,17 @@ verify_vm() {
 }
 
 lab_up() {
+  if [ -n "${LAB_RELEASE_VERSION:-}" ]; then
+    check_lab_artifacts
+  fi
   require_host
   mkdir -p "$lab_dir"
   lab_down
   rm -f "$state_file"
   guard_host
-  bundle_build "${bundle_make_args[@]}"
+  if [ -z "${LAB_RELEASE_VERSION:-}" ]; then
+    bundle_build "${bundle_make_args[@]}"
+  fi
   qemu_wrapper_write
   local id
   for id in "${ids[@]}"; do

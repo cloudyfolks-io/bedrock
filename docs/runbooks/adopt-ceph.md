@@ -824,6 +824,9 @@ It is not a job of `hack/local-ci.sh`. Run it by hand on a Linux host.
 
 The host needs about 46 GiB of free RAM, KVM, Lima, Docker, Go, Helm and `make`.
 Do not run it while a gate runs.
+To use a prebuilt release, set `LAB_RELEASE_VERSION` for each stage and put its matching binary and bundle in `dist/`.
+The `old` stage also needs the k0s binary in `dist/cache/k0s/`.
+Set `LAB_OVN_TLS=true` on the `export` stage to enable TLS in the target cluster.
 
 ```sh
 hack/lab-adopt.sh up

@@ -32,8 +32,9 @@ repo=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 arch=$(uname -m | sed 's/x86_64/amd64/;s/aarch64/arm64/')
 lab_dir=$repo/dist/lab
 state_file=$lab_dir/state.env
-bundle=$repo/dist/bedrock-dev-bundle-$arch.tar.zst
-bedrock_bin=$repo/dist/bedrock-dev-linux-$arch
+release_version=${LAB_RELEASE_VERSION:-dev}
+bundle=$repo/dist/bedrock-$release_version-bundle-$arch.tar.zst
+bedrock_bin=$repo/dist/bedrock-$release_version-linux-$arch
 k0s_source=$repo/dist/cache/k0s/$k0s_version/$arch
 
 source "$repo/hack/lab/lib.sh"
@@ -55,6 +56,8 @@ stages, in order:
   all     up, old, export, stop, adopt and check; the VMs stay, run down after
 
 The lab needs a Linux host with KVM, about 46 GiB of free RAM and no running gate.
+Set LAB_RELEASE_VERSION to use the existing bundle and binary in dist/.
+Set LAB_OVN_TLS=true to use TLS for both OVN databases.
 USAGE
 }
 
@@ -318,8 +321,8 @@ hosts_flow() {
 
 render_adopt_config() {
   local monitors=$1 hosts=$2 emulation=$3
-  VERSION=dev VIP=$vip IFACE=$iface PLATFORM_HOST=$platform_host FSID=$FSID KEY_FILE=$remote_key_file MONITORS=$monitors HOSTS=$hosts EMULATION=$emulation \
-    envsubst "\${VERSION} \${VIP} \${IFACE} \${PLATFORM_HOST} \${FSID} \${KEY_FILE} \${MONITORS} \${HOSTS} \${EMULATION}" <"$repo/hack/lab/adopt.yaml.tmpl"
+  VERSION=$release_version VIP=$vip IFACE=$iface PLATFORM_HOST=$platform_host FSID=$FSID KEY_FILE=$remote_key_file MONITORS=$monitors HOSTS=$hosts EMULATION=$emulation OVN_TLS=$ovn_tls \
+    envsubst "\${VERSION} \${VIP} \${IFACE} \${PLATFORM_HOST} \${FSID} \${KEY_FILE} \${MONITORS} \${HOSTS} \${EMULATION} \${OVN_TLS}" <"$repo/hack/lab/adopt.yaml.tmpl"
 }
 
 stage_export() {
@@ -1017,6 +1020,7 @@ stage_all() {
 
 main() {
   cd "$repo"
+  check_lab_config
   case "${1:-}" in
   up | old | export | stop | adopt | check | snapshot | rewind | down | all) "stage_$1" ;;
   *)

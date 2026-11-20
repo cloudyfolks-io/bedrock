@@ -30,8 +30,9 @@ repo=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 arch=$(uname -m | sed 's/x86_64/amd64/;s/aarch64/arm64/')
 lab_dir=$repo/dist/lab-multinode
 state_file=$lab_dir/state.env
-bundle=$repo/dist/bedrock-dev-bundle-$arch.tar.zst
-bedrock_bin=$repo/dist/bedrock-dev-linux-$arch
+release_version=${LAB_RELEASE_VERSION:-dev}
+bundle=$repo/dist/bedrock-$release_version-bundle-$arch.tar.zst
+bedrock_bin=$repo/dist/bedrock-$release_version-linux-$arch
 snapshot_tag=tenant-ready
 provider_networks='[{"name":"public","interface":"bdrpub0","cidr":"203.0.113.0/24","gateway":"203.0.113.1","excludeIPs":["203.0.113.250"]}]'
 
@@ -53,6 +54,8 @@ stages, in order:
   all       up, install, tenant and check; the VMs stay, run down after
 
 The lab needs a Linux host with KVM, about 46 GiB of free RAM and no running gate or adopt lab.
+Set LAB_RELEASE_VERSION to use the existing bundle and binary in dist/.
+Set LAB_OVN_TLS=true to use TLS for both OVN databases.
 USAGE
 }
 
@@ -81,12 +84,14 @@ node_devices_json() {
 
 render_config() {
   local emulation=$1
-  VERSION=dev VIP=$vip IFACE=$iface PLATFORM_HOST=$platform_host DEVICES=$(flow_list "$(node_devices 1 | sed 's/ /, /g')") EMULATION=$emulation \
-    envsubst "\${VERSION} \${VIP} \${IFACE} \${PLATFORM_HOST} \${DEVICES} \${EMULATION}" <"$repo/hack/lab/multinode.yaml.tmpl"
+  VERSION=$release_version VIP=$vip IFACE=$iface PLATFORM_HOST=$platform_host DEVICES=$(flow_list "$(node_devices 1 | sed 's/ /, /g')") EMULATION=$emulation OVN_TLS=$ovn_tls \
+    envsubst "\${VERSION} \${VIP} \${IFACE} \${PLATFORM_HOST} \${DEVICES} \${EMULATION} \${OVN_TLS}" <"$repo/hack/lab/multinode.yaml.tmpl"
 }
 
 stage_up() {
-  "$repo/hack/e2e-release-config.sh" "$repo/release/components.yaml" "$repo/$release_config"
+  if [ -z "${LAB_RELEASE_VERSION:-}" ]; then
+    "$repo/hack/e2e-release-config.sh" "$repo/release/components.yaml" "$repo/$release_config"
+  fi
   lab_up
 }
 
@@ -422,6 +427,7 @@ stage_all() {
 
 main() {
   cd "$repo"
+  check_lab_config
   case "${1:-}" in
   up | install | tenant | check | snapshot | rewind | down | all) "stage_$1" ;;
   *)

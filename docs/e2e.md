@@ -197,6 +197,12 @@ The VM code is in `hack/lab/lib.sh`. The adoption lab uses the same file.
 The VMs boot the Ubuntu 26.04 cloud image. `vm_config` pins the build `release-20261016` and its sha256 digests. Change the pin when the build leaves cloud-images.ubuntu.com.
 The checks are in `hack/e2e/multinode/`.
 
+To test a prebuilt release in either lab, put its matching Linux binary and bundle in `dist/`.
+Set `LAB_RELEASE_VERSION` to the version in both file names for each stage.
+The multi-node lab needs a bundle with the test images.
+Set `LAB_OVN_TLS=true` to enable TLS when the lab creates the target cluster.
+Use a dedicated worktree and `LIMA_HOME` to preserve the disks and results of other lab runs.
+
 ```
 hack/e2e-multinode.sh all
 hack/e2e-multinode.sh down
