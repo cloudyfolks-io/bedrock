@@ -92,6 +92,38 @@ func TestVolumeWritesRetryAfterAConflict(t *testing.T) {
 	}
 }
 
+func TestVolumeDoesNotPublishBoundForANewerSpec(t *testing.T) {
+	base, plain := watchClient(t)
+	ns := uniqueNamespace(t, plain)
+	newVolume(t, plain, ns, "data1", func(v *v1alpha1.Volume) {})
+	reconcileVolume(t, plain, ns, "data1")
+	createPVC(t, plain, ns, "data1", 10, "block")
+	setDataVolumePhase(t, plain, ns, "data1", "Succeeded")
+	wrapped := interceptor.NewClient(base, interceptor.Funcs{
+		SubResourceUpdate: func(ctx context.Context, c client.Client, subResource string, obj client.Object, opts ...client.SubResourceUpdateOption) error {
+			var current v1alpha1.Volume
+			if err := c.Get(ctx, client.ObjectKeyFromObject(obj), &current); err != nil {
+				return err
+			}
+			current.Spec.SizeGi = 20
+			if err := c.Update(ctx, &current); err != nil {
+				return err
+			}
+			return c.SubResource(subResource).Update(ctx, obj, opts...)
+		},
+	})
+	volume := reconcileVolume(t, wrapped, ns, "data1")
+	if volume.Spec.SizeGi != 20 || volume.Status.ObservedGeneration == volume.Generation {
+		t.Fatalf("generation %d spec %+v status %+v", volume.Generation, volume.Spec, volume.Status)
+	}
+	requireVolumeReason(t, volume, "Pending")
+	volume = reconcileVolume(t, plain, ns, "data1")
+	requireVolumeReason(t, volume, "Resizing")
+	if volume.Status.ObservedGeneration != volume.Generation {
+		t.Fatalf("generation %d status %+v", volume.Generation, volume.Status)
+	}
+}
+
 func TestVolumeSnapshotStatusWriteRetriesAfterAConflict(t *testing.T) {
 	base, plain := watchClient(t)
 	ns, r := snapshotFixture(t, plain, "block", rbdProvisioner, nil)

@@ -309,6 +309,9 @@ func (r *VolumeReconciler) writeStatus(ctx context.Context, volume v1alpha1.Volu
 		if err := r.Client.Get(ctx, client.ObjectKeyFromObject(&volume), &current); err != nil {
 			return client.IgnoreNotFound(err)
 		}
+		if current.UID != volume.UID || current.Generation != volume.Generation {
+			return nil
+		}
 		desired := current.DeepCopy()
 		desired.Status.ObservedGeneration = current.Generation
 		desired.Status.AttachedTo, desired.Status.ActualSizeGi = done.AttachedTo, done.ActualGi
