@@ -270,15 +270,20 @@ run_e2e_kind() {
   remove_job_images
 }
 
-run_e2e_bundle() {
+build_offline_release() {
+  local release_config=$1 image="localhost:$port/bedrock:dev"
   ensure_images
   registry_up
-  make build release binaries VERSION=dev IMAGE="localhost:$port/bedrock:dev" PIN_DIGESTS=1
-  retry 3 docker build -t "localhost:$port/bedrock:dev" -f Containerfile .
-  retry 3 docker push "localhost:$port/bedrock:dev"
-  make bundle VERSION=dev IMAGE="localhost:$port/bedrock:dev" PIN_DIGESTS=1 BUNDLE_ARCH="$arch"
+  make build binaries release-from-build VERSION=dev IMAGE="$image" PIN_DIGESTS=1 RELEASE_CONFIG="$release_config"
+  retry 3 docker build -t "$image" -f Containerfile .
+  retry 3 docker push "$image"
+  make release-from-build bundle-from-release VERSION=dev IMAGE="$image" PIN_DIGESTS=1 RELEASE_CONFIG="$release_config" BUNDLE_ARCH="$arch"
   registry_down
   remove_job_images
+}
+
+run_e2e_bundle() {
+  build_offline_release release/components.yaml
   vm_up
   in_vm "KUBECONFIG=/var/lib/k0s/pki/admin.conf BUNDLE=dist/bedrock-dev-bundle-$arch.tar.zst IMAGE=localhost:$port/bedrock:dev BIN=dist/bedrock-dev-linux-$arch ARCH=$arch EMULATION=$(emulation_flag)" hack/e2e-init.sh
   rm -f "dist/bedrock-dev-bundle-$arch.tar.zst"
@@ -286,14 +291,7 @@ run_e2e_bundle() {
 }
 
 run_e2e_authn() {
-  ensure_images
-  registry_up
-  make build release binaries VERSION=dev IMAGE="localhost:$port/bedrock:dev" PIN_DIGESTS=1
-  retry 3 docker build -t "localhost:$port/bedrock:dev" -f Containerfile .
-  retry 3 docker push "localhost:$port/bedrock:dev"
-  make bundle VERSION=dev IMAGE="localhost:$port/bedrock:dev" PIN_DIGESTS=1 BUNDLE_ARCH="$arch"
-  registry_down
-  remove_job_images
+  build_offline_release release/components.yaml
   CGO_ENABLED=0 GOOS=linux GOARCH="$arch" go test -c -tags e2e -o "dist/e2e-authn-$arch.test" ./test/e2e/authn
   ARCH="$arch" hack/e2e-authn-images.sh
   vm_up
@@ -305,15 +303,8 @@ run_e2e_authn() {
 
 run_e2e_tenant() {
   local release_config=dist/components-e2e.yaml
-  ensure_images
-  registry_up
   hack/e2e-release-config.sh release/components.yaml "$release_config"
-  make build release binaries VERSION=dev IMAGE="localhost:$port/bedrock:dev" PIN_DIGESTS=1 RELEASE_CONFIG="$release_config"
-  retry 3 docker build -t "localhost:$port/bedrock:dev" -f Containerfile .
-  retry 3 docker push "localhost:$port/bedrock:dev"
-  make bundle VERSION=dev IMAGE="localhost:$port/bedrock:dev" PIN_DIGESTS=1 BUNDLE_ARCH="$arch" RELEASE_CONFIG="$release_config"
-  registry_down
-  remove_job_images
+  build_offline_release "$release_config"
   CGO_ENABLED=0 GOOS=linux GOARCH="$arch" go test -c -tags e2e -o "dist/e2e-tenant-$arch.test" ./test/e2e/tenant
   ARCH="$arch" hack/e2e-tenant-images.sh
   vm_osd=1 vm_up
