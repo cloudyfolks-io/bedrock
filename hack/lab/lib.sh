@@ -354,10 +354,26 @@ vm_up() {
 script_prepare_vm() {
   cat <<'SCRIPT'
 export DEBIAN_FRONTEND=noninteractive
-apt-get update -qq
-apt-get install -y -qq jq >/dev/null
-if apt-cache show "linux-modules-extra-$(uname -r)" >/dev/null 2>&1; then
-  apt-get install -y -qq "linux-modules-extra-$(uname -r)" >/dev/null
+packages=()
+if ! command -v jq >/dev/null; then
+  packages+=(jq)
+fi
+module_package=
+for module in openvswitch geneve rbd ceph; do
+  if ! modinfo "$module" >/dev/null 2>&1; then
+    module_package="linux-modules-extra-$(uname -r)"
+    break
+  fi
+done
+if [ "${#packages[@]}" -gt 0 ] || [ -n "$module_package" ]; then
+  apt_options=(-o Acquire::Retries=1 -o Acquire::http::Timeout=20 -o Acquire::https::Timeout=20 -o DPkg::Lock::Timeout=60)
+  timeout 120s apt-get "${apt_options[@]}" update -qq
+  if [ -n "$module_package" ] && apt-cache show "$module_package" >/dev/null 2>&1; then
+    packages+=("$module_package")
+  fi
+  if [ "${#packages[@]}" -gt 0 ]; then
+    apt-get "${apt_options[@]}" install -y -qq "${packages[@]}" >/dev/null
+  fi
 fi
 modprobe openvswitch
 modprobe geneve
