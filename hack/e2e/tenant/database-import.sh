@@ -40,7 +40,7 @@ database_import_approve() {
     kubectl -n "$database_namespace" create -f -
 }
 
-database_import_certificate() {
+database_import_material() {
   openssl req -x509 -sha256 -newkey ec -pkeyopt ec_paramgen_curve:P-256 -nodes -days 2 \
     -subj /CN=legacy-database-fixture-ca -keyout "$certificate_dir/ca.key" -out "$certificate_dir/ca.crt"
   openssl req -new -sha256 -newkey ec -pkeyopt ec_paramgen_curve:P-256 -nodes \
@@ -49,19 +49,49 @@ database_import_certificate() {
   openssl x509 -req -sha256 -days 1 -in "$certificate_dir/tls.csr" \
     -CA "$certificate_dir/ca.crt" -CAkey "$certificate_dir/ca.key" -CAcreateserial \
     -extfile "$certificate_dir/extensions" -out "$certificate_dir/tls.crt"
-  kubectl -n "$database_namespace" create secret generic "$certificate_secret" --type=kubernetes.io/tls \
-    --dry-run=client -o json --from-file="ca.crt=$certificate_dir/ca.crt" \
-    --from-file="tls.crt=$certificate_dir/tls.crt" --from-file="tls.key=$certificate_dir/tls.key" |
-    jq --arg project "$NS" --arg database "$database" --arg uid "$uid" '.metadata.annotations = {
-      "dadehat.cloudyfolks.com/source": ("databases/" + $database),
-      "bedrock.cloudyfolks.io/import-project": $project,
-      "bedrock.cloudyfolks.io/import-target": $database,
-      "bedrock.cloudyfolks.io/import-target-uid": $uid
-    }' | kubectl -n "$database_namespace" create -f -
+  openssl rand -hex 24 | tr -d '\n' >"$certificate_dir/password"
+  {
+    kubectl -n "$database_namespace" create secret generic "$certificate_secret" --type=kubernetes.io/tls \
+      --dry-run=client -o json --from-file="ca.crt=$certificate_dir/ca.crt" \
+      --from-file="tls.crt=$certificate_dir/tls.crt" --from-file="tls.key=$certificate_dir/tls.key"
+    kubectl -n "$database_namespace" create secret generic "$admin_secret" \
+      --dry-run=client -o json --from-file="password=$certificate_dir/password"
+  } | jq -s --arg project "$NS" --arg database "$database" --arg uid "$uid" '{apiVersion:"v1", kind:"List", items: map(.metadata.annotations = {
+    "dadehat.cloudyfolks.com/source": ("databases/" + $database),
+    "bedrock.cloudyfolks.io/import-project": $project,
+    "bedrock.cloudyfolks.io/import-target": $database,
+    "bedrock.cloudyfolks.io/import-target-uid": $uid
+  })}' | kubectl -n "$database_namespace" create -f -
+}
+
+database_import_customer_pod() {
+  local client_image
+  client_image=$(kubectl get databaseversion postgresql-17 -o jsonpath='{.spec.image}')
+  test -n "$client_image"
+  container_proof_address="$customer_address" container_proof_pod "$customer_pod" '' |
+    kubectl -n "$NS" create --dry-run=client -f - -o json |
+    jq --arg image "$client_image" '.spec.containers += [{name:"postgres-client", image:$image, imagePullPolicy:"IfNotPresent", command:["sleep", "7200"]}]' |
+    as_operator -n "$NS" create -f -
+}
+
+database_import_verified_login() {
+  {
+    cat "$certificate_dir/password"
+    printf '\n'
+    cat "$certificate_dir/ca.crt"
+  } | kubectl -n "$NS" exec -i "$customer_pod" -c postgres-client -- sh -ec '
+    IFS= read -r PGPASSWORD
+    root_ca=$(mktemp)
+    trap '\''rm -f "$root_ca"'\'' EXIT
+    cat >"$root_ca"
+    export PGPASSWORD PGSSLMODE=verify-full PGSSLROOTCERT="$root_ca" PGCONNECT_TIMEOUT=5
+    psql -XAtq -v ON_ERROR_STOP=1 -h "$1" -p "$2" -U dbadmin -d app \
+      -c "SELECT 1 FROM pg_stat_ssl WHERE pid = pg_backend_pid() AND ssl"
+  ' database-login "$address" "$port"
 }
 
 database_import_reply() {
-  kubectl -n "$NS" exec "$1" -- sh -c '
+  kubectl -n "$NS" exec "$1" -c app -- sh -c '
     printf "\000\000\000\010\004\322\026\057" |
       timeout 7 nc -w 5 "$1" "$2" | od -An -c | tr -d "[:space:]"
   ' database-probe "$address" "$port"
@@ -93,7 +123,7 @@ database_import_cleanup() {
   wait_gone 120 loadbalancers.fabric.cloudyfolks.io "$frontend" || cleanup_failed=1
   kubectl -n "$database_namespace" delete configmap "$claim" "$claim-start" "$claim-open" --ignore-not-found || cleanup_failed=1
   if [ -n "$certificate_secret" ]; then
-    kubectl -n "$database_namespace" delete secret "$certificate_secret" --ignore-not-found || cleanup_failed=1
+    kubectl -n "$database_namespace" delete secret "$certificate_secret" "$admin_secret" --ignore-not-found || cleanup_failed=1
   fi
   rm -r "$certificate_dir" || cleanup_failed=1
   kubectl patch setting network.tenant-management.enabled --type merge -p "$(jq -c '{spec: {value: .spec.value}}' <<<"$managed_before")" || cleanup_failed=1
@@ -114,7 +144,7 @@ database_import_frontend() (
   local customer_pod=database-import-customer customer_address=10.100.0.242
   local legacy_id=11111111-1111-4111-8111-111111111111 project_id=22222222-2222-4222-8222-222222222222
   local management_before managed_before managed_applied network vpc uid subnet_uid legacy_uid proxy_address
-  local certificate_dir certificate_secret=
+  local certificate_dir certificate_secret= admin_secret=
 
   management_before=$(kubectl get cluster cluster -o jsonpath='{.spec.managementCIDR}')
   managed_before=$(kubectl get setting network.tenant-management.enabled -o json)
@@ -134,7 +164,7 @@ database_import_frontend() (
   test -n "$subnet_uid"
   test -n "$vpc"
   container_proof_address="$job_address" container_proof_pod "$job_pod" '' | as_operator -n "$NS" create -f -
-  container_proof_address="$customer_address" container_proof_pod "$customer_pod" '' | as_operator -n "$NS" create -f -
+  database_import_customer_pod
   kubectl -n "$NS" wait --for=condition=Ready "pod/$job_pod" "pod/$customer_pod" --timeout=180s
   expect_equal "$job_address" "$(kubectl -n "$NS" get pod "$job_pod" -o jsonpath='{.status.podIP}')" "migration probe project address"
   expect_equal "$customer_address" "$(kubectl -n "$NS" get pod "$customer_pod" -o jsonpath='{.status.podIP}')" "customer probe project address"
@@ -156,7 +186,9 @@ SPEC
   uid=$(database_uid "$database")
   test -n "$uid"
   certificate_secret="import-tls-$database-$uid"
-  database_import_certificate
+  admin_secret="import-admin-$database-$uid"
+  kubectl -n "$NS" annotate database "$database" bedrock.cloudyfolks.io/import=true
+  database_import_material
   database_import_claim
   kubectl -n "$NS" patch database "$database" --type merge -p '{"spec":{"suspended":false}}'
   wait_jsonpath 180 'the legacy frontend needs administrator approval to start' -n "$NS" get database "$database" -o jsonpath='{.status.conditions[?(@.type=="Ready")].message}'
@@ -177,6 +209,7 @@ SPEC
 
   database_import_approve open
   retry_until 90 database_import_reply_is "$customer_pod" S
+  expect_equal 1 "$(database_import_verified_login)" "TLS login at the legacy address with the original trust and password"
   database_import_reply_is "$job_pod" ''
 
   kubectl -n "$NS" patch database "$database" --type merge -p '{"spec":{"suspended":true}}'
