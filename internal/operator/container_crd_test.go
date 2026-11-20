@@ -231,7 +231,7 @@ func TestContainerRefusesWrongMixes(t *testing.T) {
 		{"limit-above-maximum", func(x *v1alpha1.Container) {
 			x.Spec.Resources.Limits.CPU = ptr.To(resource.MustParse("33"))
 		}, "limits.cpu must be at most 32"},
-		{"probe-without-exec", func(x *v1alpha1.Container) { x.Spec.Probes.Liveness = &v1alpha1.ContainerProbe{} }, "only exec probes are supported"},
+		{"probe-without-handler", func(x *v1alpha1.Container) { x.Spec.Probes.Liveness = &v1alpha1.ContainerProbe{} }, "a probe needs exactly one handler"},
 		{"empty-exec", func(x *v1alpha1.Container) {
 			x.Spec.Probes.Readiness = &v1alpha1.ContainerProbe{Exec: &v1alpha1.ContainerExec{}}
 		}, "spec.probes.readiness.exec.command"},
