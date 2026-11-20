@@ -40,6 +40,26 @@ database_import_approve() {
     kubectl -n "$database_namespace" create -f -
 }
 
+database_import_certificate() {
+  openssl req -x509 -sha256 -newkey ec -pkeyopt ec_paramgen_curve:P-256 -nodes -days 2 \
+    -subj /CN=legacy-database-fixture-ca -keyout "$certificate_dir/ca.key" -out "$certificate_dir/ca.crt"
+  openssl req -new -sha256 -newkey ec -pkeyopt ec_paramgen_curve:P-256 -nodes \
+    -subj /CN=legacy-database-fixture -keyout "$certificate_dir/tls.key" -out "$certificate_dir/tls.csr"
+  printf 'subjectAltName=IP:%s\nextendedKeyUsage=serverAuth\n' "$address" >"$certificate_dir/extensions"
+  openssl x509 -req -sha256 -days 1 -in "$certificate_dir/tls.csr" \
+    -CA "$certificate_dir/ca.crt" -CAkey "$certificate_dir/ca.key" -CAcreateserial \
+    -extfile "$certificate_dir/extensions" -out "$certificate_dir/tls.crt"
+  kubectl -n "$database_namespace" create secret generic "$certificate_secret" --type=kubernetes.io/tls \
+    --dry-run=client -o json --from-file="ca.crt=$certificate_dir/ca.crt" \
+    --from-file="tls.crt=$certificate_dir/tls.crt" --from-file="tls.key=$certificate_dir/tls.key" |
+    jq --arg project "$NS" --arg database "$database" --arg uid "$uid" '.metadata.annotations = {
+      "dadehat.cloudyfolks.com/source": ("databases/" + $database),
+      "bedrock.cloudyfolks.io/import-project": $project,
+      "bedrock.cloudyfolks.io/import-target": $database,
+      "bedrock.cloudyfolks.io/import-target-uid": $uid
+    }' | kubectl -n "$database_namespace" create -f -
+}
+
 database_import_reply() {
   kubectl -n "$NS" exec "$1" -- sh -c '
     printf "\000\000\000\010\004\322\026\057" |
@@ -72,6 +92,10 @@ database_import_cleanup() {
   kubectl delete loadbalancers.fabric.cloudyfolks.io "$frontend" --ignore-not-found --wait=false || cleanup_failed=1
   wait_gone 120 loadbalancers.fabric.cloudyfolks.io "$frontend" || cleanup_failed=1
   kubectl -n "$database_namespace" delete configmap "$claim" "$claim-start" "$claim-open" --ignore-not-found || cleanup_failed=1
+  if [ -n "$certificate_secret" ]; then
+    kubectl -n "$database_namespace" delete secret "$certificate_secret" --ignore-not-found || cleanup_failed=1
+  fi
+  rm -r "$certificate_dir" || cleanup_failed=1
   kubectl patch setting network.tenant-management.enabled --type merge -p "$(jq -c '{spec: {value: .spec.value}}' <<<"$managed_before")" || cleanup_failed=1
   wait_jsonpath 120 "$managed_applied" get setting network.tenant-management.enabled -o jsonpath='{.status.applied}' || cleanup_failed=1
   if [ -z "$management_before" ]; then
@@ -90,10 +114,12 @@ database_import_frontend() (
   local customer_pod=database-import-customer customer_address=10.100.0.242
   local legacy_id=11111111-1111-4111-8111-111111111111 project_id=22222222-2222-4222-8222-222222222222
   local management_before managed_before managed_applied network vpc uid subnet_uid legacy_uid proxy_address
+  local certificate_dir certificate_secret=
 
   management_before=$(kubectl get cluster cluster -o jsonpath='{.spec.managementCIDR}')
   managed_before=$(kubectl get setting network.tenant-management.enabled -o json)
   managed_applied=$(jq -er '.status.applied | select(. == "false" or . == "true")' <<<"$managed_before")
+  certificate_dir=$(mktemp -d)
   trap 'database_import_cleanup "$?"' EXIT
   if [ -z "$management_before" ]; then
     ensure_management_cidr "$(host_management_cidr)"
@@ -129,6 +155,8 @@ SPEC
   )"
   uid=$(database_uid "$database")
   test -n "$uid"
+  certificate_secret="import-tls-$database-$uid"
+  database_import_certificate
   database_import_claim
   kubectl -n "$NS" patch database "$database" --type merge -p '{"spec":{"suspended":false}}'
   wait_jsonpath 180 'the legacy frontend needs administrator approval to start' -n "$NS" get database "$database" -o jsonpath='{.status.conditions[?(@.type=="Ready")].message}'
@@ -143,6 +171,7 @@ SPEC
   expect_equal "$legacy_uid" "$(kubectl get loadbalancers.fabric.cloudyfolks.io "$frontend" -o jsonpath='{.metadata.uid}')" "adopted Fabric frontend UID"
   expect_equal "$vpc $address $port/TCP $proxy_address" "$(kubectl get loadbalancers.fabric.cloudyfolks.io "$frontend" -o jsonpath='{.spec.vpc} {.status.vip} {.status.ports} {.spec.endpoints[0]}')" "adopted endpoint and private proxy"
   expect_equal "$address:$port" "$(database_secret_field "$database-admin" host):$(database_secret_field "$database-admin" port)" "published customer endpoint"
+  expect_equal "$(cat "$certificate_dir/ca.crt")" "$(database_secret_field "$database-admin" 'ca\.crt')" "published legacy certificate authority"
   retry_until 90 database_import_reply_is "$job_pod" S
   database_import_reply_is "$customer_pod" ''
 
