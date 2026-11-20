@@ -26,6 +26,7 @@ const (
 	cephfsProvisioner  = "rook-ceph.cephfs.csi.ceph.com"
 	cephFailureDomain  = "host"
 	storageReplicasKey = "storage.replicas"
+	objectGatewayName  = "rook-ceph-rgw-" + objectStoreName + "-a"
 )
 
 var storageAddon = Addon{Name: "storage", Condition: v1alpha1.ConditionStorageReady, Render: RenderStorage, Advance: advanceAdoption}
@@ -51,7 +52,7 @@ func RenderStorage(in AddonInput) (Rendered, error) {
 	plan := planCephx(in, nil)
 	cluster := cephCluster(image, hosts, monCount(replicas), replicas, plan, sizing)
 	objects := slices.Concat([]*unstructured.Unstructured{cluster}, storageObjects(replicas, hosts, hostingNames(in), sizing))
-	return Rendered{Objects: objects, Probes: []Probe{cephClusterProbe(cephGate(deviceCount(hosts)))}, Conditions: plan.Conditions}, nil
+	return Rendered{Objects: objects, Probes: storageProbes(cephGate(deviceCount(hosts)), len(hosts)), Conditions: plan.Conditions}, nil
 }
 
 func noDevices() Rendered {
@@ -85,6 +86,28 @@ func storageObjects(replicas int, hosts []v1alpha1.Host, dnsNames []string, sizi
 
 func cephClusterProbe(gate release.Gate) Probe {
 	return Probe{GVK: cephClusterGVK, Key: client.ObjectKey{Namespace: storageNamespace, Name: storageNamespace}, Gate: gate}
+}
+
+func storageProbes(ceph release.Gate, hosts int) []Probe {
+	return []Probe{
+		cephClusterProbe(ceph),
+		{
+			GVK: schema.GroupVersionKind{Group: "apps", Version: "v1", Kind: "Deployment"},
+			Key: client.ObjectKey{Namespace: storageNamespace, Name: objectGatewayName},
+			Gate: func(gateway *unstructured.Unstructured) release.Readiness {
+				want := gatewayInstances(hosts)
+				replicas, _, _ := unstructured.NestedInt64(gateway.Object, "spec", "replicas")
+				if replicas != want {
+					return release.Readiness{Reason: "WaitingForObjectGateway", Message: fmt.Sprintf("%s has %d of %d configured replicas", gateway.GetName(), replicas, want)}
+				}
+				readiness := release.DefaultGate(gateway)
+				if !readiness.Ready {
+					readiness.Reason = "WaitingForObjectGateway"
+				}
+				return readiness
+			},
+		},
+	}
 }
 
 func osdHosts(hosts []v1alpha1.Host) []v1alpha1.Host {
@@ -189,17 +212,20 @@ func cephFilesystem(replicas int, standby bool, sizing cephSizing) *unstructured
 	})
 }
 
-func cephObjectStore(replicas, hosts int, dnsNames []string, sizing cephSizing) *unstructured.Unstructured {
-	instances := int64(1)
+func gatewayInstances(hosts int) int64 {
 	if hosts > 1 {
-		instances = 2
+		return 2
 	}
+	return 1
+}
+
+func cephObjectStore(replicas, hosts int, dnsNames []string, sizing cephSizing) *unstructured.Unstructured {
 	spec := map[string]any{
 		"metadataPool":           map[string]any{"failureDomain": cephFailureDomain, "replicated": replicated(replicas)},
 		"dataPool":               map[string]any{"failureDomain": cephFailureDomain, "replicated": replicated(replicas)},
 		"preservePoolsOnDelete":  true,
 		"allowUsersInNamespaces": []any{"*"},
-		"gateway":                map[string]any{"port": int64(80), "instances": instances, "resources": sizing.rgw, "rgwConfig": rgwConfigTuning},
+		"gateway":                map[string]any{"port": int64(80), "instances": gatewayInstances(hosts), "resources": sizing.rgw, "rgwConfig": rgwConfigTuning},
 		"protocols":              map[string]any{"enableAPIs": []any{"s3", "admin", "iam"}},
 	}
 	if len(dnsNames) > 0 {

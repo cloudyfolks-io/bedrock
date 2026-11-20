@@ -316,7 +316,7 @@ func TestRenderStorageAdoptedRendersTheSameObjectsAsAFreshCluster(t *testing.T) 
 		t.Fatal("pools and classes of an adopted cluster must match a fresh cluster")
 	}
 	healthy := cephClusterWith("Ready", "HEALTH_OK", map[string]any{"ceph version 20.2.4": int64(4)})
-	if len(adopted.Probes) != 1 || !adopted.Probes[0].Gate(healthy).Ready {
+	if len(adopted.Probes) != 2 || !adopted.Probes[0].Gate(healthy).Ready {
 		t.Fatalf("probes %+v", adopted.Probes)
 	}
 	if len(adopted.Conditions) != 0 {

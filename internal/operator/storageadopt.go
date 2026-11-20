@@ -73,7 +73,7 @@ func renderAdopted(in AddonInput, adopt v1alpha1.AdoptSpec) (Rendered, error) {
 	switch phase {
 	case v1alpha1.ReasonAdopted:
 		objects := slices.Concat([]*unstructured.Unstructured{cluster}, storageObjects(replicas, hosts, hostingNames(in), sizing))
-		return Rendered{Objects: objects, Probes: []Probe{cephClusterProbe(adoptedGate(cephGate(deviceCount(hosts)), in.CephProblems))}, Conditions: plan.Conditions}, nil
+		return Rendered{Objects: objects, Probes: storageProbes(adoptedGate(cephGate(deviceCount(hosts)), in.CephProblems), len(hosts)), Conditions: plan.Conditions}, nil
 	case "", v1alpha1.ReasonWaitingForIdentity, v1alpha1.ReasonWaitingForHosts:
 		quorum := adoptedCondition(v1alpha1.ReasonWaitingForQuorum, "the CephCluster is rendered and waits for every monitor to join the quorum")
 		return adoptionPending(cluster, v1alpha1.ReasonWaitingForQuorum, quorum), nil

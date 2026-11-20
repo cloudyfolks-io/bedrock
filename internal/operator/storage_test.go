@@ -110,7 +110,7 @@ func TestRenderStorageSingleNode(t *testing.T) {
 	if driver != "rook-ceph.rbd.csi.ceph.com" || snap.GetAPIVersion() != "snapshot.storage.k8s.io/v1" {
 		t.Fatalf("snapshot class %+v", snap.Object)
 	}
-	if len(out.Probes) != 1 || out.Probes[0].Key.Name != "rook-ceph" || out.Probes[0].GVK.Kind != "CephCluster" {
+	if len(out.Probes) != 2 || out.Probes[0].Key.Name != "rook-ceph" || out.Probes[0].GVK.Kind != "CephCluster" {
 		t.Fatalf("probes %+v", out.Probes)
 	}
 }
@@ -135,6 +135,48 @@ func TestRenderStorageThreeNodes(t *testing.T) {
 	domain, _, _ := unstructured.NestedString(pool.Object, "spec", "failureDomain")
 	if size != 3 || !safe || domain != "host" {
 		t.Fatalf("pool spec %+v", pool.Object["spec"])
+	}
+}
+
+func TestStorageWaitsForObjectGatewayReplicas(t *testing.T) {
+	fresh := storageInput(adoptHosts(), "3")
+	adopted := adoptInput(v1alpha1.ReasonAdopted)
+	for _, input := range []AddonInput{fresh, adopted} {
+		out, err := RenderStorage(input)
+		if err != nil {
+			t.Fatal(err)
+		}
+		probe := out.Probes[1]
+		if probe.GVK.Kind != "Deployment" || probe.Key.Namespace != "rook-ceph" || probe.Key.Name != "rook-ceph-rgw-bedrock-rgw-a" {
+			t.Fatalf("object gateway probe %+v", probe.Key)
+		}
+		for _, tc := range []struct {
+			name     string
+			spec     int64
+			ready    int64
+			observed int64
+			want     bool
+		}{
+			{name: "scaled down", spec: 1, ready: 1, observed: 2},
+			{name: "one gateway ready", spec: 2, ready: 1, observed: 2},
+			{name: "stale status", spec: 2, ready: 2, observed: 1},
+			{name: "both gateways ready", spec: 2, ready: 2, observed: 2, want: true},
+		} {
+			t.Run(tc.name, func(t *testing.T) {
+				deployment := object("apps/v1", "Deployment", probe.Key.Namespace, probe.Key.Name, map[string]any{"replicas": tc.spec})
+				deployment.SetGeneration(2)
+				deployment.Object["status"] = map[string]any{
+					"observedGeneration": tc.observed,
+					"replicas":           tc.spec,
+					"updatedReplicas":    tc.spec,
+					"availableReplicas":  tc.ready,
+				}
+				result := probe.Gate(deployment)
+				if result.Ready != tc.want || !tc.want && (result.Reason != "WaitingForObjectGateway" || result.Message == "") {
+					t.Fatalf("gate %+v, want ready %t", result, tc.want)
+				}
+			})
+		}
 	}
 }
 
@@ -368,7 +410,7 @@ func TestRenderStorageKeepsTheOtherObjects(t *testing.T) {
 			t.Fatalf("missing %v", key)
 		}
 	}
-	if len(out.Probes) != 1 || out.Probes[0].GVK.Kind != "CephCluster" {
+	if len(out.Probes) != 2 || out.Probes[0].GVK.Kind != "CephCluster" {
 		t.Fatalf("probes %+v", out.Probes)
 	}
 }
