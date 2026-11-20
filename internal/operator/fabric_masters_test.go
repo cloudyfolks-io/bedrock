@@ -11,6 +11,7 @@ import (
 	appsv1 "k8s.io/api/apps/v1"
 	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
@@ -39,7 +40,10 @@ func ovnCentralBundle(t *testing.T) release.Bundle {
 	}}
 	hook := &unstructured.Unstructured{Object: map[string]any{
 		"apiVersion": "batch/v1", "kind": "Job",
-		"metadata": map[string]any{"name": "fabric-post-upgrade-hook", "namespace": fabricNamespace},
+		"metadata": map[string]any{
+			"name": "fabric-post-upgrade-hook", "namespace": fabricNamespace,
+			"annotations": map[string]any{"helm.sh/hook": "post-upgrade"},
+		},
 		"spec": map[string]any{"template": map[string]any{"spec": map[string]any{
 			"restartPolicy": "Never",
 			"containers": []any{map[string]any{
@@ -299,6 +303,13 @@ func TestFabricMastersRecreateTheCompletedHookJob(t *testing.T) {
 	installedOneMasterThenJoined(t, c, r, "10.0.10.12", "10.0.10.13")
 	var before batchv1.Job
 	key := client.ObjectKey{Namespace: fabricNamespace, Name: "fabric-post-upgrade-hook"}
+	if err := c.Get(ctx, key, &before); !apierrors.IsNotFound(err) {
+		t.Fatalf("initial install must omit the upgrade Job: %v", err)
+	}
+	vars := map[string]string{release.VarVIP: "10.0.0.10", release.VarMasterIPs: "10.0.10.11"}
+	if err := release.UpgradeGroup(ctx, c, r.Bundle, vars, r.Gates, r.Interval, r.GroupTimeout, fabricGroupName, release.SkipHook, release.SkipHook); err != nil {
+		t.Fatal(err)
+	}
 	if err := c.Get(ctx, key, &before); err != nil {
 		t.Fatal(err)
 	}

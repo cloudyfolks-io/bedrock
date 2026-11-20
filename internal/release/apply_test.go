@@ -147,6 +147,67 @@ func TestInstallAppliesAllGroupsAndPrunes(t *testing.T) {
 	}
 }
 
+func TestReleaseAppliesHelmHooksOnlyForMatchingEvents(t *testing.T) {
+	c, _ := startTestEnv(t)
+	ctx := context.Background()
+	if err := c.Create(ctx, &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: SystemNamespace}}); err != nil {
+		t.Fatal(err)
+	}
+	object := func(name, hook string) *unstructured.Unstructured {
+		obj := &unstructured.Unstructured{}
+		obj.SetAPIVersion("v1")
+		obj.SetKind("ConfigMap")
+		obj.SetName(name)
+		obj.SetNamespace(SystemNamespace)
+		if hook != "" {
+			obj.SetAnnotations(map[string]string{"helm.sh/hook": hook})
+		}
+		return obj
+	}
+	bundle := Bundle{Groups: []Group{{Name: "fabric", Order: 20, Objects: []*unstructured.Unstructured{
+		object("after-upgrade", "post-upgrade"), object("regular", ""), object("after-install", "post-install"),
+		object("before-upgrade", "pre-upgrade"), object("before-install", "pre-install"),
+		object("after-delete", "post-delete"), object("chart-test", "test"),
+	}}}}
+	var seen []string
+	gates := Gates{{Kind: "ConfigMap"}: func(obj *unstructured.Unstructured) Readiness {
+		seen = append(seen, obj.GetName())
+		return Readiness{Ready: true}
+	}}
+	report := func(Group, error) {}
+	assertSeen := func(want []string) {
+		t.Helper()
+		if !slices.Equal(seen, want) {
+			t.Fatalf("objects checked %v, want %v", seen, want)
+		}
+		seen = nil
+	}
+	if err := InstallGroups(ctx, c, bundle, nil, gates, time.Second, time.Minute, report, SkipHook, SkipHook); err != nil {
+		t.Fatal(err)
+	}
+	assertSeen([]string{"before-install", "regular", "after-install"})
+	if err := UpgradeGroups(ctx, c, bundle, nil, gates, time.Second, time.Minute, report, SkipHook, SkipHook); err != nil {
+		t.Fatal(err)
+	}
+	assertSeen([]string{"before-upgrade", "regular", "after-upgrade"})
+	if err := InstallGroup(ctx, c, bundle, nil, gates, time.Second, time.Minute, "fabric", SkipHook, SkipHook); err != nil {
+		t.Fatal(err)
+	}
+	assertSeen([]string{"regular"})
+	if err := Install(ctx, c, bundle, nil, gates, time.Second, time.Minute, report); err != nil {
+		t.Fatal(err)
+	}
+	assertSeen([]string{"regular"})
+	for _, obj := range bundle.Groups[0].Objects {
+		if obj.GetName() == "regular" {
+			continue
+		}
+		if err := c.Get(ctx, client.ObjectKeyFromObject(obj), &corev1.ConfigMap{}); !errors.IsNotFound(err) {
+			t.Fatalf("hook %s still exists: %v", obj.GetName(), err)
+		}
+	}
+}
+
 func TestInstallGroupsRunsTheHookAfterEachGate(t *testing.T) {
 	c, _ := startTestEnv(t)
 	ctx := context.Background()
