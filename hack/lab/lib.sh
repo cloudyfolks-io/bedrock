@@ -345,7 +345,7 @@ vm_up() {
   local id=$1 vm letter
   vm=$(vm_name "$id")
   for letter in "${letters[@]}"; do
-    limactl disk create "$(disk_name "$id" "$letter")" --size "${osd_gb}GiB" --format raw --tty=false
+    limactl disk create "$(disk_name "$id" "$letter")" --size "${osd_gb}GiB" --format qcow2 --tty=false
   done
   vm_config "$id" >"$lab_dir/$vm.yaml"
   env "$(qemu_variable)=$lab_dir/qemu-serial.sh" limactl start --name "$vm" --tty=false "$lab_dir/$vm.yaml"
