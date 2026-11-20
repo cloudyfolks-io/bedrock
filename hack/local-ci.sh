@@ -16,7 +16,8 @@ repo=$(git rev-parse --show-toplevel)
 arch=$(uname -m | sed 's/x86_64/amd64/;s/aarch64/arm64/')
 base_images=(golang:1.27 gcr.io/distroless/static:nonroot registry:3 node:24-bookworm-slim)
 version_a=v0.0.0-e2e.1
-upgrade_env="REGISTRY=localhost:$port ARCH=$arch VERSION_A=$version_a VERSION_B=v0.0.0-e2e.2 K0S_A=v1.36.2+k0s.0 K0S_B=v1.36.3+k0s.1"
+version_b=v0.0.0-e2e.2
+upgrade_env="REGISTRY=localhost:$port ARCH=$arch VERSION_A=$version_a VERSION_B=$version_b K0S_A=v1.36.2+k0s.0 K0S_B=v1.36.3+k0s.1"
 release_ref=${CI_RELEASE_REF:-v0.5.0}
 known_jobs=(test e2e-kind e2e-bundle e2e-upgrade e2e-upgrade-abort e2e-authn e2e-tenant e2e-upgrade-from-release)
 vm_path=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
@@ -328,13 +329,16 @@ run_upgrade() {
     return 1
   fi
   in_vm "$upgrade_env $job_env EMULATION=$(emulation_flag)" hack/e2e-upgrade.sh
-  rm -f dist/bedrock-*-bundle-*.tar.zst dist/e2e-init-*.sh
+  rm -f "dist/bedrock-$version_a-bundle-$arch.tar.zst" "dist/bedrock-$version_b-bundle-$arch.tar.zst"
   vm_down
 }
 
 run_e2e_upgrade() { run_upgrade "" ""; }
 run_e2e_upgrade_abort() { run_upgrade "" ABORT_IN=ControlPlane; }
-run_e2e_upgrade_from_release() { run_upgrade "VERSION_A_REF=$release_ref" "INIT_A=dist/e2e-init-$version_a.sh ASSERT_AUTHN=1 VERSION_A_ARCHIVES=0"; }
+run_e2e_upgrade_from_release() {
+  run_upgrade "VERSION_A_REF=$release_ref" "INIT_A=dist/e2e-init-$version_a.sh ASSERT_AUTHN=1 VERSION_A_ARCHIVES=0"
+  rm -f "dist/e2e-init-$version_a.sh"
+}
 
 cache_size() {
   if [ -d dist/cache ]; then
@@ -360,7 +364,6 @@ cleanup() {
   vm_down
   registry_down
   remove_job_images
-  rm -f dist/bedrock-*-bundle-*.tar.zst dist/e2e-init-*.sh
   rm -rf dist/.bundle-* dist/.ref-* dist/e2e
   rm -rf "$tmp"
   printf '%s' "$summary"
