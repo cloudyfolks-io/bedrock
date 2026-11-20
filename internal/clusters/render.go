@@ -66,16 +66,20 @@ func toAny(in map[string]string) map[string]any {
 }
 
 func k0sConfig(in ControlPlaneInput) map[string]any {
-	network := in.Cluster.Spec.Network
+	api := map[string]any{"sans": []any{in.Address}}
+	if in.NIC.Class == network.NetworkClassManaged {
+		api["address"] = in.Address
+	}
+	clusterNetwork := in.Cluster.Spec.Network
 	return map[string]any{
 		"apiVersion": "k0s.k0sproject.io/v1beta1",
 		"kind":       "ClusterConfig",
 		"spec": map[string]any{
-			"api": map[string]any{"sans": []any{in.Address}},
+			"api": api,
 			"network": map[string]any{
 				"provider":    "kuberouter",
-				"podCIDR":     network.PodCIDR,
-				"serviceCIDR": network.ServiceCIDR,
+				"podCIDR":     clusterNetwork.PodCIDR,
+				"serviceCIDR": clusterNetwork.ServiceCIDR,
 			},
 		},
 	}

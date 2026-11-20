@@ -65,4 +65,7 @@ func TestRenderManagedControlPlaneKeepsTheVPCAddressAndSetsBothNetworks(t *testi
 	if nested[string](t, obj, "spec", "externalAddress") != in.Address {
 		t.Fatal("the control plane address changed to its management address")
 	}
+	if nested[string](t, obj, "spec", "k0sConfig", "spec", "api", "address") != in.Address {
+		t.Fatal("the child API server must advertise the tenant address")
+	}
 }

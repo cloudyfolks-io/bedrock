@@ -68,9 +68,11 @@ The control plane pod has a fixed address.
 
 When `network.tenant-management.enabled` is true, the control plane uses
 `tenant-managed` on eth0 and its project subnet on net1. The fixed address
-and the API endpoint stay on net1. The management routes use the current
-Cluster ranges. The runtime comes from `container.runtime-class`; a missing
-RuntimeClass or the value `none` gives `RuntimeUnavailable`. When management
+and the API endpoint stay on net1. The child API server advertises the net1
+address so workers can reach the child `kubernetes` Service. The management
+routes use the current Cluster ranges. The runtime comes from
+`container.runtime-class`. A missing RuntimeClass or the value `none` gives
+`RuntimeUnavailable`. When management
 networking is disabled, the existing single-interface pod shape stays in use.
 The address is the `externalAddress` of the cluster and a name in the certificate of the API server.
 A changed address would break every join token, so the address cannot change.

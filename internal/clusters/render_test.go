@@ -118,6 +118,10 @@ func TestRenderControlPlaneK0sConfigHasTheSANAndTheCIDRs(t *testing.T) {
 	if len(sans) != 1 || sans[0] != "10.100.0.10" {
 		t.Errorf("sans %v", sans)
 	}
+	api := nested[map[string]any](t, obj, "spec", "k0sConfig", "spec", "api")
+	if _, exists := api["address"]; exists {
+		t.Errorf("the single-interface control plane sets an explicit API address: %v", api)
+	}
 	net := nested[map[string]any](t, obj, "spec", "k0sConfig", "spec", "network")
 	if net["provider"] != "kuberouter" || net["podCIDR"] != "100.64.0.0/16" || net["serviceCIDR"] != "100.65.0.0/16" {
 		t.Errorf("network %v", net)
