@@ -28,6 +28,6 @@ panel_served() {
 }
 
 panel_login_and_stream() {
-  BEDROCK_HOST=$HOST ADMIN_PASSWORD=$(cat "$admin_password_file") TOKEN_ADMIN=$(cat "$TOKEN_DIR/admin") \
+  BEDROCK_HOST=$HOST VM=vm1 ADMIN_PASSWORD=$(cat "$admin_password_file") TOKEN_ADMIN=$(cat "$TOKEN_DIR/admin") TOKEN_VIEWER=$(cat "$TOKEN_DIR/carol") \
     "$test_bin" -test.count=1 -test.v -test.timeout 10m -test.run '^TestPanelLoginAndStream$'
 }
