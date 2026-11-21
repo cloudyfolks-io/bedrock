@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -322,6 +323,38 @@ func TestRestoreObjectPointsAtTheDestination(t *testing.T) {
 	prefix, _, _ := unstructured.NestedString(restore.Object, "spec", "backupSource", "storage", "s3", "prefix")
 	if prefix != sourceUID {
 		t.Errorf("restore prefix %q; the operator looks for the backup under the prefix of the source database", prefix)
+	}
+}
+
+func TestImportedRestoreWithBackupsDisabledUsesTheXtraBackupImage(t *testing.T) {
+	spec := withRestore(withoutBackup(bedrockSpec()))
+	spec.Restore.Destination = "s3://legacy-backups/" + sourceUID + "/2026-10-01-02:00:00-full"
+	spec.Restore.Backup = &engine.RestoreBackup{Bucket: "legacy-backups", Prefix: sourceUID, ServerName: sourceUID, SecretName: "import-backup"}
+	objects := mustRender(t, spec)
+	if len(objects) != 3 || objects[1].GroupVersionKind() != RestoreGVK {
+		t.Fatalf("expected one Percona restore object, got %v", objects)
+	}
+	backup, _, err := unstructured.NestedMap(objects[0].Object, "spec", "backup")
+	want := map[string]any{"enabled": false, "image": spec.Images[ImageBackup], "resources": sidecarRequests()}
+	if err != nil || !reflect.DeepEqual(backup, want) {
+		t.Fatalf("restore cluster backup settings = %v, want %v, error = %v", backup, want, err)
+	}
+	source, _, err := unstructured.NestedMap(objects[1].Object, "spec", "backupSource")
+	want = map[string]any{
+		"destination": spec.Restore.Destination,
+		"storage": map[string]any{
+			"type": "s3", "resources": sidecarRequests(), "s3": map[string]any{
+				"bucket": "legacy-backups", "prefix": sourceUID, "credentialsSecret": "import-backup",
+				"endpointUrl": spec.Backup.Endpoint, "region": spec.Backup.Region,
+			},
+		},
+	}
+	if err != nil || !reflect.DeepEqual(source, want) {
+		t.Fatalf("restore source = %v, want %v, error = %v", source, want, err)
+	}
+	spec.Images = nil
+	if _, err := Render(spec); err != ErrRestoreImageMissing {
+		t.Fatalf("restore missing its XtraBackup image returned %v", err)
 	}
 }
 

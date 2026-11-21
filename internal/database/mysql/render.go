@@ -39,6 +39,7 @@ var (
 
 	ErrTargetTimeUnsupported = errors.New("a MySQL restore has no target time")
 	ErrDestinationMissing    = errors.New("a MySQL restore needs the destination of a backup")
+	ErrRestoreImageMissing   = errors.New("a MySQL restore without backups needs the XtraBackup image from the database version")
 )
 
 func GVKs() []schema.GroupVersionKind {
@@ -99,6 +100,9 @@ func checkRestore(s engine.Spec) error {
 	}
 	if s.Restore.Destination == "" {
 		return ErrDestinationMissing
+	}
+	if !s.Backup.Enabled && s.Images[ImageBackup] == "" {
+		return ErrRestoreImageMissing
 	}
 	return nil
 }
@@ -218,6 +222,12 @@ func clusterSpec(s engine.Spec) map[string]any {
 	}
 	if s.Backup.Enabled {
 		spec["backup"] = backupBlock(s)
+	} else if s.Restore != nil {
+		spec["backup"] = map[string]any{
+			"enabled":   false,
+			"image":     s.Images[ImageBackup],
+			"resources": sidecarRequests(),
+		}
 	}
 	return spec
 }
