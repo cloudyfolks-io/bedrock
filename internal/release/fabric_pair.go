@@ -9,10 +9,12 @@ import (
 
 	"github.com/google/go-containerregistry/pkg/name"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	k8sversion "k8s.io/apimachinery/pkg/util/version"
 	"sigs.k8s.io/yaml"
 )
 
 var fabricReleaseTag = regexp.MustCompile(`^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$`)
+var fabricACLReceiptVersion = k8sversion.MustParseSemantic("v1.2.7")
 
 func FabricImageFromValues(raw []byte) (string, error) {
 	var values map[string]any
@@ -26,6 +28,10 @@ func FabricImageFromValues(raw []byte) (string, error) {
 	if addressErr != nil || repositoryErr != nil || tagErr != nil || address == "" || repository == "" ||
 		!pinned || !fabricReleaseTag.MatchString(version) || !validImageDigest(digest) {
 		return "", fmt.Errorf("set global.registry.address, global.images.fabric.repository and global.images.fabric.tag with a vX.Y.Z@sha256 digest in the Fabric release values")
+	}
+	parsedVersion, err := k8sversion.ParseSemantic(version)
+	if err != nil || !parsedVersion.AtLeast(fabricACLReceiptVersion) {
+		return "", fmt.Errorf("the Fabric release must be v%s or later to report the applied ACL generation", fabricACLReceiptVersion)
 	}
 	base := address + "/" + repository
 	if path.Clean(base) != base || strings.HasPrefix(base, "/") {

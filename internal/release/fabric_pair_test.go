@@ -27,6 +27,7 @@ global:
 		{"missing registry", strings.Replace(values, "    address: ghcr.io/cloudyfolks-io\n", "", 1)},
 		{"missing repository", strings.Replace(values, "      repository: fabric\n", "", 1)},
 		{"mutable tag", strings.Replace(values, tag, "v1.2.6", 1)},
+		{"release without ACL receipt", strings.Replace(values, tag, "v1.2.6@"+ownDigest, 1)},
 		{"nonrelease tag", strings.Replace(values, tag, "dev@"+ownDigest, 1)},
 		{"malformed digest", strings.Replace(values, tag, "v1.2.7@sha256:01234", 1)},
 		{"malformed registry", strings.Replace(values, "ghcr.io/cloudyfolks-io", "https://ghcr.io/cloudyfolks-io", 1)},
