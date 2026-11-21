@@ -1,5 +1,7 @@
 #!/usr/bin/env bash
+set +x
 set -euo pipefail
+umask 077
 
 if [[ ${E2E_MANAGED_SQLITE_WORKER:-} != 1 || $# != 3 || ! ${1:-} =~ ^[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}$ ]]; then
   printf '%s\n' 'Usage: E2E_MANAGED_SQLITE_WORKER=1 bash hack/e2e-managed-sqlite-worker.sh <isolated-guest-kube-system-uid> <sqlite-source.json> <worker-assets-dir>' >&2
@@ -16,16 +18,17 @@ if [[ $(kubectl --request-timeout=10s get namespace kube-system -o jsonpath='{.m
   exit 1
 fi
 
-source "$(dirname "${BASH_SOURCE[0]}")/e2e/lib.sh"
+script_dir=$(dirname "${BASH_SOURCE[0]}")
+source "$script_dir/e2e/lib.sh"
 
-source_receipt=$2
+[[ -f $2 && ! -L $2 && -O $2 ]]
+source_receipt=$(realpath -e -- "$2")
 assets=$3
 namespace=bedrock-e2e-sqlite-source
 cluster=sqlite-source
 service=sqlite-endpoint
 worker=sqlite-worker
 root_disk=$worker-root
-node_probe=sqlite-worker-state
 release=k0s-v1.36.3+k0s.1
 busybox=docker.io/library/busybox:1.37.0
 
@@ -49,8 +52,19 @@ busybox_sha=$(jq -er '.busybox_tar_sha256' "$asset_receipt")
 busybox_digest=$(jq -er '.busybox_digest' "$asset_receipt")
 ubuntu_digest=$(jq -er '.ubuntu_digest' "$asset_receipt")
 printf '%s  %s\n' "$k0s_sha" "$assets/k0s" "$airgap_sha" "$assets/k0s-airgap.tar" "$busybox_sha" "$assets/busybox.tar" | sha256sum -c --status
+proof_dir=${E2E_MANAGED_SQLITE_WORKER_PROOF_DIR:-"$(dirname -- "$source_receipt")/worker-prejoin"}
+proof_parent=$(dirname -- "$proof_dir")
+[[ $proof_dir == /* && $(realpath -e -- "$proof_parent") == "$proof_parent" && -O $proof_parent &&
+  $(stat -c '%a' -- "$proof_parent") == 700 ]]
+mkdir -m 0700 -- "$proof_dir"
+install -m 0600 -- "$source_receipt" "$proof_dir/source.json"
+install -m 0600 -- "$asset_receipt" "$proof_dir/assets.json"
+source_sum=$(sha256sum -- "$proof_dir/source.json")
+asset_sum=$(sha256sum -- "$proof_dir/assets.json")
 
-address=$(kubectl -n "$namespace" get service "$service" -o jsonpath='{.spec.clusterIP}')
+service_record=$(kubectl -n "$namespace" get service "$service" -o json)
+address=$(jq -er .spec.clusterIP <<<"$service_record")
+service_uid=$(jq -er '.metadata.uid | select(length>0)' <<<"$service_record")
 [[ $address =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]]
 endpoint=https://$address:6443
 cluster_uid=$(kubectl -n "$namespace" get "cluster.k0smotron.io/$cluster" -o json | jq -er --arg address "$address" --arg version "${release#k0s-}" '
@@ -205,10 +219,13 @@ metadata:
   name: $worker
 spec:
   clusterName: $cluster
-  expiry: 1h
+  expiry: 90m
   role: worker
 EOF
 wait_not_empty 180 -n "$namespace" get jointokenrequest.k0smotron.io "$worker" -o jsonpath='{.status.tokenID}'
+join_request_uid=$(kubectl -n "$namespace" get jointokenrequest.k0smotron.io "$worker" -o jsonpath='{.metadata.uid}')
+join_secret_uid=$(kubectl -n "$namespace" get secret "$worker" -o jsonpath='{.metadata.uid}')
+test -n "$join_request_uid" && test -n "$join_secret_uid"
 token=$(kubectl -n "$namespace" get secret "$worker" -o jsonpath='{.data.token}')
 [[ $token =~ ^[A-Za-z0-9+/=]+$ ]]
 printf '%s' "$token" | base64 -d | base64 -d | gzip -d | awk -v endpoint="$endpoint" '
@@ -232,20 +249,27 @@ write_files:
     content: |
       set -eu
       install -d -m 0755 /var/lib/k0s/images /var/lib/sqlite-continuity
+      printf '%s\n' 'Downloading the k0s binary.'
       curl -fsS --retry 4 --connect-timeout 10 --max-time 900 http://$asset_ip:8080/k0s -o /usr/local/bin/k0s
+      printf '%s\n' 'Downloading the k0s airgap images.'
       curl -fsS --retry 4 --connect-timeout 10 --max-time 900 http://$asset_ip:8080/k0s-airgap.tar -o /var/lib/k0s/images/k0s-airgap.tar
+      printf '%s\n' 'Downloading the worker workload image.'
       curl -fsS --retry 4 --connect-timeout 10 --max-time 300 http://$asset_ip:8080/busybox.tar -o /var/lib/k0s/images/busybox.tar
       printf '%s  %s\n' '$k0s_sha' /usr/local/bin/k0s '$airgap_sha' /var/lib/k0s/images/k0s-airgap.tar '$busybox_sha' /var/lib/k0s/images/busybox.tar | sha256sum -c --status
       chmod 0755 /usr/local/bin/k0s
       /usr/local/bin/k0s version | grep -Fx '${release#k0s-}'
       printf '%s\n' 'sqlite-worker-data-before-handoff' > /var/lib/sqlite-continuity/marker
       sync
+      printf '%s\n' 'Installing the k0s worker.'
       /usr/local/bin/k0s install worker --token-file=/etc/k0s/join.token
       /usr/local/bin/k0s start
+      printf '%s\n' 'Started the k0s worker service.'
 runcmd:
   - [/bin/sh, /usr/local/sbin/join-sqlite-worker]
 EOF
 unset token
+bootstrap_uid=$(kubectl -n "$namespace" get secret "$worker-bootstrap" -o jsonpath='{.metadata.uid}')
+test -n "$bootstrap_uid"
 
 firmware_uid=$(cat /proc/sys/kernel/random/uuid)
 mac_seed=$(printf '%s' "$cluster_uid" | sha256sum)
@@ -290,59 +314,6 @@ spec:
 EOF
 
 wait_jsonpath 900 Running -n "$namespace" get virtualmachineinstance.kubevirt.io "$worker" -o jsonpath='{.status.phase}'
-retry_until 1200 child_kubectl wait --for=condition=Ready "node/$worker" --timeout=10s
-node_uid=$(child_kubectl get node "$worker" -o json | jq -er '
-  select(.status.nodeInfo.operatingSystem == "linux" and .status.nodeInfo.architecture == "amd64" and
-    (.status.nodeInfo.osImage | startswith("Ubuntu 24.04"))) | .metadata.uid | select(length > 0)
-')
-lease=$(child_kubectl -n kube-node-lease get lease "$worker" -o jsonpath='{.spec.renewTime}')
-test -n "$node_uid" && test -n "$lease"
-
-child_kubectl -n default create -f - >&2 <<EOF
-apiVersion: v1
-kind: Pod
-metadata:
-  name: $node_probe
-spec:
-  nodeName: $worker
-  automountServiceAccountToken: false
-  containers:
-    - name: marker
-      image: $busybox
-      imagePullPolicy: Never
-      command: [/bin/sh, -ec, 'cat /data/marker && exec sleep 86400']
-      volumeMounts:
-        - name: state
-          mountPath: /data
-          readOnly: true
-  volumes:
-    - name: state
-      hostPath: {path: /var/lib/sqlite-continuity, type: Directory}
-EOF
-retry_until 900 child_kubectl -n default wait --for=condition=Ready "pod/$node_probe" --timeout=10s
-child_kubectl -n default get pod "$node_probe" -o json | jq -e --arg digest "$busybox_digest" '
-  any(.status.containerStatuses[]; .name == "marker" and (.imageID | endswith($digest)))
-' >/dev/null
-expect_equal sqlite-worker-data-before-handoff "$(child_kubectl -n default logs "$node_probe")" 'workload logs through Konnectivity' >&2
-expect_equal sqlite-worker-data-before-handoff "$(child_kubectl -n default exec "$node_probe" -- cat /data/marker)" 'workload data through Konnectivity' >&2
-workload_data=$(child_kubectl -n default exec "$node_probe" -- sha256sum /data/marker)
-workload_sha=${workload_data%% *}
-expected_workload_data=$(printf '%s\n' sqlite-worker-data-before-handoff | sha256sum)
-expect_equal "${expected_workload_data%% *}" "$workload_sha" 'exact workload data SHA-256' >&2
-workload_uid=$(child_kubectl -n default get pod "$node_probe" -o jsonpath='{.metadata.uid}')
-test -n "$workload_uid"
-kubectl -n "$namespace" delete jointokenrequest.k0smotron.io "$worker" --wait=true --timeout=120s >&2
-wait_gone 120 -n "$namespace" secret "$worker"
-
-lease_renewed() {
-  local current
-  current=$(child_kubectl -n kube-node-lease get lease "$worker" -o jsonpath='{.spec.renewTime}') || return 1
-  [[ $current > $lease ]]
-}
-
-retry_until 120 lease_renewed
-expect_equal "$node_uid" "$(child_kubectl get node "$worker" -o jsonpath='{.metadata.uid}')" 'worker Node UID after token revocation' >&2
-lease=$(child_kubectl -n kube-node-lease get lease "$worker" -o jsonpath='{.spec.renewTime}')
 vm_uid=$(kubectl -n "$namespace" get virtualmachine.kubevirt.io "$worker" -o jsonpath='{.metadata.uid}')
 vmi_uid=$(kubectl -n "$namespace" get virtualmachineinstance.kubevirt.io "$worker" -o json |
   jq -er --arg vm "$vm_uid" --arg firmware "$firmware_uid" --arg mac "$mac" --arg root "$root_disk" '
@@ -354,11 +325,19 @@ vmi_uid=$(kubectl -n "$namespace" get virtualmachineinstance.kubevirt.io "$worke
 test -n "$vm_uid" && test -n "$vmi_uid"
 expect_equal "$root_claim_uid" "$(kubectl -n "$namespace" get pvc "$root_disk" -o jsonpath='{.metadata.uid}')" 'worker root claim UID' >&2
 expect_equal "$root_volume_uid" "$(kubectl get pv "$root_volume" -o jsonpath='{.metadata.uid}')" 'worker root volume UID' >&2
-
-jq -n --arg source "$cluster_uid" --arg name "$worker" --arg node "$node_uid" --arg lease "$lease" --arg vm "$vm_uid" \
-  --arg vmi "$vmi_uid" --arg mac "$mac" --arg firmware "$firmware_uid" --arg claim "$root_disk" --arg cuid "$root_claim_uid" \
-  --arg volume "$root_volume" --arg vuid "$root_volume_uid" --arg workload "$workload_uid" --arg ubuntu "$ubuntu_digest" \
-  --arg binary "$k0s_sha" --arg image "$busybox_digest" --arg data_sha "$workload_sha" '{source_cluster_uid:$source, worker:$name, node_uid:$node, lease_renew_time:$lease,
-    vm_uid:$vm, vmi_uid:$vmi, mac_address:$mac, firmware_uuid:$firmware, disk_serial:"sqlite-worker-root", root_claim:$claim,
-    root_claim_uid:$cuid, root_volume:$volume, root_volume_uid:$vuid, workload_pod_uid:$workload, ubuntu_digest:$ubuntu,
-    k0s_sha256:$binary, workload_image_digest:$image, workload_data_sha256:$data_sha}'
+expect_equal "$service_uid" "$(kubectl -n "$namespace" get service "$service" -o jsonpath='{.metadata.uid}')" 'SQLite source Service UID' >&2
+prejoin=$proof_dir/worker-prejoin.json
+jq -n --arg guest "$1" --arg source_sha "${source_sum%% *}" --arg assets_sha "${asset_sum%% *}" \
+  --arg ns "$namespace_uid" --arg cluster "$cluster_uid" --arg service "$service_uid" --arg vm "$vm_uid" --arg vmi "$vmi_uid" \
+  --arg claim "$root_claim_uid" --arg volume "$root_volume" --arg pv "$root_volume_uid" --arg mac "$mac" --arg firmware "$firmware_uid" \
+  --arg request "$join_request_uid" --arg token "$join_secret_uid" --arg bootstrap "$bootstrap_uid" '
+  {version:1,scope:"synthetic-sqlite-worker-prejoin",guest_uid:$guest,source_receipt_sha256:$source_sha,assets_receipt_sha256:$assets_sha,
+   namespace_uid:$ns,source_cluster_uid:$cluster,service_uid:$service,vm_uid:$vm,vmi_uid:$vmi,root_claim_uid:$claim,root_volume:$volume,
+   root_volume_uid:$pv,mac_address:$mac,firmware_uuid:$firmware,join_token_request_uid:$request,join_token_secret_uid:$token,
+   bootstrap_secret_uid:$bootstrap}' >"$proof_dir/prejoin.tmp"
+ln -T -- "$proof_dir/prejoin.tmp" "$prejoin"
+rm -- "$proof_dir/prejoin.tmp"
+prejoin_sum=$(sha256sum -- "$prejoin")
+printf 'Saved private worker inputs in %s. Pre-join SHA-256 is %s.\n' "$proof_dir" "${prejoin_sum%% *}" >&2
+E2E_MANAGED_SQLITE_WORKER_CONFIRM=1 bash "$script_dir/e2e-managed-sqlite-worker-confirm.sh" "$1" "$proof_dir/source.json" \
+  "$proof_dir/assets.json" "$prejoin" "${prejoin_sum%% *}"
