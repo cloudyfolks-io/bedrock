@@ -164,10 +164,10 @@ func deploymentOf(p proxyDeployment) (*unstructured.Unstructured, error) {
 	if p.Name == "" || p.Namespace == "" || p.Image == "" || !validPort(p.Port) {
 		return nil, fmt.Errorf("a proxy deployment needs a name, a namespace, an image and a port")
 	}
-	probe := func(path string, initial int32) *corev1.Probe {
+	probe := func(path string, failures int32) *corev1.Probe {
 		return &corev1.Probe{
-			ProbeHandler:        corev1.ProbeHandler{Exec: &corev1.ExecAction{Command: []string{"wget", "-q", "-O", "/dev/null", fmt.Sprintf("http://127.0.0.1:%d%s", HealthPort, path)}}},
-			InitialDelaySeconds: initial, PeriodSeconds: 10, TimeoutSeconds: 3, FailureThreshold: 3,
+			ProbeHandler:  corev1.ProbeHandler{Exec: &corev1.ExecAction{Command: []string{"wget", "-q", "-O", "/dev/null", fmt.Sprintf("http://127.0.0.1:%d%s", HealthPort, path)}}},
+			PeriodSeconds: 10, TimeoutSeconds: 10, FailureThreshold: failures,
 		}
 	}
 	resources := corev1.ResourceList{corev1.ResourceCPU: resource.MustParse("100m"), corev1.ResourceMemory: resource.MustParse("128Mi")}
@@ -182,8 +182,9 @@ func deploymentOf(p proxyDeployment) (*unstructured.Unstructured, error) {
 			Ports:           []corev1.ContainerPort{{Name: "db", ContainerPort: int32(p.Port)}},
 			Resources:       corev1.ResourceRequirements{Requests: resources, Limits: resources},
 			VolumeMounts:    []corev1.VolumeMount{{Name: "certs", MountPath: CertDir, ReadOnly: true}},
-			ReadinessProbe:  probe(readinessPath, 2),
-			LivenessProbe:   probe(livenessPath, 15),
+			StartupProbe:    probe(livenessPath, 12),
+			ReadinessProbe:  probe(readinessPath, 3),
+			LivenessProbe:   probe(livenessPath, 3),
 			SecurityContext: &corev1.SecurityContext{AllowPrivilegeEscalation: ptr.To(false), Capabilities: &corev1.Capabilities{Drop: []corev1.Capability{"ALL"}}},
 		}},
 		Volumes: []corev1.Volume{{Name: "certs", VolumeSource: p.Volume}},
