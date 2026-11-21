@@ -43,6 +43,8 @@ const (
 	exchangeSecret   = "e2e-exchange-client-secret"
 	exchangeAudience = "dadehat-test"
 	svcTokenUser     = "svc-token-user"
+	ldapUser         = "ldap-e2e-operator"
+	ldapPassword     = "ldap-e2e-operator-pw"
 	lockoutUser      = "lockout-target"
 	lockoutPassword  = "lockout-target-pw"
 	disableDeadline  = 60 * time.Second
@@ -395,20 +397,28 @@ func testLDAPUser(t *testing.T, e env) {
 	c := newLoginClient(t, e)
 	verifier := randomToken(32)
 	ch := c.startAuthorize(t, clientCLI, verifier, loginScopes)
-	ch = c.username(t, ch, "alice")
-	requireChallenge(t, "alice: after username", ch, "password")
-	ch = c.password(t, ch, "alice-e2e-pw")
-	requireChallenge(t, "alice: after password", ch, "done")
+	ch = c.username(t, ch, ldapUser)
+	requireChallenge(t, "LDAP after username", ch, "password")
+	ch = c.password(t, ch, ldapPassword)
+	requireChallenge(t, "LDAP after password", ch, "done")
 	tokens := tokensFrom(t, e, tokenRequest(t, e, codeForm(clientCLI, verifier, c.finishLogin(t, ch))))
+	var user v1alpha1.User
+	key := client.ObjectKey{Namespace: release.SystemNamespace, Name: v1alpha1.UserObjectName(ldapUser)}
+	if err := e.k8s.Get(context.Background(), key, &user); err != nil {
+		t.Fatalf("read the LDAP user %s: %v", ldapUser, err)
+	}
+	if user.Spec.Source != "corp-ldap" || !slices.Contains(user.Spec.Methods, v1alpha1.MethodLDAP) {
+		t.Fatalf("LDAP user %s has source %q and methods %v", ldapUser, user.Spec.Source, user.Spec.Methods)
+	}
 	whoami := kubectlWhoami(t, e.api, tokens.AccessToken)
-	if whoami.Status.UserInfo.Username != "bedrock:alice" || !slices.Contains(whoami.Status.UserInfo.Groups, "bedrock:ops") {
-		t.Fatalf("alice: whoami = %q in %v, want bedrock:alice in bedrock:ops", whoami.Status.UserInfo.Username, whoami.Status.UserInfo.Groups)
+	if want := v1alpha1.AuthnPrefix + ldapUser; whoami.Status.UserInfo.Username != want || !slices.Contains(whoami.Status.UserInfo.Groups, "bedrock:ops") {
+		t.Fatalf("whoami = %q in %v, want %q in bedrock:ops", whoami.Status.UserInfo.Username, whoami.Status.UserInfo.Groups, want)
 	}
 	if !kubectlCanI(t, e.api, tokens.AccessToken, "get", "pods", "team-a") {
-		t.Fatalf("alice: denied get pods in team-a, want allowed")
+		t.Fatalf("LDAP user %s cannot get pods in team-a", ldapUser)
 	}
 	if kubectlCanI(t, e.api, tokens.AccessToken, "get", "pods", "default") {
-		t.Fatalf("alice: allowed get pods in default, want denied")
+		t.Fatalf("LDAP user %s can get pods in default", ldapUser)
 	}
 }
 
