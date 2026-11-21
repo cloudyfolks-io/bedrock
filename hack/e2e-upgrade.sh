@@ -161,8 +161,11 @@ archived_file() {
 }
 
 image_pinned_clean() {
-  /usr/local/bin/k0s ctr --namespace k8s.io images ls | awk -v pattern="$1" '
-    index($1, pattern) { found = 1; if ($NF !~ /io.cri-containerd.pinned=pinned/ || $0 ~ /io.k0sproject.ocibundle-paths/) bad = 1 }
+  /usr/local/bin/k0s ctr --namespace k8s.io images ls | awk -v name="$1" '
+    $1 == name {
+      found = 1
+      if ($NF !~ /(^|,)io\.cri-containerd\.pinned=pinned(,|$)/ || $0 ~ /io\.k0sproject\.ocibundle-paths=/) bad = 1
+    }
     END { exit !(found && !bad) }'
 }
 
@@ -179,13 +182,24 @@ airgap_names() {
 }
 
 assert_images_pinned() {
-  local repo=${2%%[:@]*} names name
-  names=$(airgap_names "$1" | grep -E '/(pause|kube-proxy):')
-  grep -q '/kube-proxy:' <<<"$names"
-  for name in $names; do
-    retry_until 300 image_pinned_clean "$name"
-  done
-  retry_until 300 image_pinned_clean "$repo:"
+  local image=$2 base=${2%@*} names name
+  names=$(airgap_names "$1" | grep -E '/(pause|kube-proxy):') || return 1
+  grep -q '/kube-proxy:' <<<"$names" || return 1
+  while IFS= read -r name; do
+    retry_until 300 image_pinned_clean "$name" || return 1
+  done <<<"$names"
+  if [[ $image == *@* && ${base##*/} == *:* ]]; then
+    retry_until 300 image_pinned_clean "$base" || return 1
+    image=${base%:*}@${image##*@}
+  fi
+  retry_until 300 image_pinned_clean "$image"
+}
+
+operator_image_matches() {
+  local image
+  image=$(kubectl --request-timeout=10s -n bedrock-system get deployment bedrock-operator \
+    -o jsonpath='{.spec.template.spec.containers[?(@.name=="operator")].image}') || return 1
+  test "$image" = "$1"
 }
 
 airgap_images_held() {
@@ -270,6 +284,7 @@ PY
 BUNDLE=dist/bedrock-$VERSION_A-bundle-$arch.tar.zst VERSION=$VERSION_A IMAGE=$image_a \
   BIN=dist/bedrock-$VERSION_A-linux-$arch RELEASE_DIR=dist/release-$VERSION_A ARCH=$arch bash "$init_a"
 
+retry_until 180 operator_image_matches "$image_a"
 dns_ip_a=$(kubectl -n kube-system get service kube-dns -o jsonpath='{.spec.clusterIP}')
 test -n "$dns_ip_a"
 node=$(hostname | tr '[:upper:]' '[:lower:]')
@@ -380,7 +395,7 @@ if [ -n "$abort_in" ]; then
   kubectl get cluster cluster -o jsonpath='{.status.version}' | grep -qx "$VERSION_A"
   kubectl get cluster cluster -o jsonpath='{.spec.desiredVersion}' | grep -qx "$VERSION_A"
   /usr/local/bin/k0s version | grep -qx "$K0S_A"
-  test "$(kubectl -n bedrock-system get deploy/bedrock-operator -o jsonpath='{.spec.template.spec.containers[0].image}')" = "$image_a"
+  retry_until 180 operator_image_matches "$image_a"
   kubectl -n bedrock-system rollout status deploy/bedrock-operator --timeout=300s
   kubectl get host "$node" -o jsonpath='{.status.restore.backup}' | grep -q "^/var/lib/bedrock/backups/bedrock-$VERSION_A-"
   test -n "$(kubectl -n bedrock-system get deploy/bedrock-operator -o jsonpath='{.spec.template.metadata.annotations.kubectl\.kubernetes\.io/restartedAt}')"
@@ -617,7 +632,7 @@ rm -f "$workdir/etcd-snapshot.tar.gz"
 /usr/local/bin/k0s version | grep -qx "$K0S_B"
 kubectl get host "$node" -o jsonpath='{.status.k0sVersion}' | grep -qx "$K0S_B"
 kubectl get host "$node" -o jsonpath='{.status.agentVersion}' | grep -qx "$VERSION_B"
-test "$(kubectl -n bedrock-system get deploy/bedrock-operator -o jsonpath='{.spec.template.spec.containers[0].image}')" = "$image_b"
+retry_until 180 operator_image_matches "$image_b"
 kubectl -n bedrock-system rollout status deploy/bedrock-operator --timeout=300s
 test -n "$(kubectl -n bedrock-system get events --field-selector involvedObject.name=bedrock-smoke -o name)"
 kubectl -n bedrock-system wait --for=delete virtualmachine/bedrock-smoke --timeout=300s
@@ -677,6 +692,7 @@ echo "the marker ConfigMap is back: etcd holds the state of the snapshot"
 retry_until 1800 node_lease_renewed_since "$restore_started"
 kubectl wait --for=condition=Ready node --all --timeout=300s
 kubectl -n bedrock-system rollout status deploy/bedrock-operator --timeout=300s
+retry_until 180 operator_image_matches "$image_b"
 retry_until 900 pod_started_since "$restore_started"
 kubectl -n default wait --for=condition=Ready "pod/$restore_marker" --timeout=300s
 assert_no_image_pull_failures
