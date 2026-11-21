@@ -89,27 +89,29 @@ wait_gone() {
   local timeout=$1
   shift
   retry_until "$timeout" kubectl_absent "$@" || {
-    echo "still present: kubectl $*" >&2
+    printf 'Could not verify absence with kubectl get %s\n' "$*" >&2
     return 1
   }
 }
 
 list_empty() {
-  [ -z "$(kubectl "$@" -o name 2>/dev/null)" ]
+  local names
+  names=$(kubectl "$@" -o name 2>/dev/null) || return 1
+  [ -z "$names" ]
 }
 
 wait_empty() {
   local timeout=$1
   shift
   retry_until "$timeout" list_empty "$@" || {
-    echo "objects remain: kubectl $*" >&2
+    printf 'Could not verify an empty result with kubectl %s\n' "$*" >&2
     kubectl "$@" -o name >&2 || true
     return 1
   }
 }
 
 kubectl_absent() {
-  ! kubectl get "$@" >/dev/null 2>&1
+  list_empty get "$@" --ignore-not-found
 }
 
 condition_status() {

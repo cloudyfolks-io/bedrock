@@ -18,6 +18,32 @@ def ci_jobs():
 
 
 class PreparationTest(unittest.TestCase):
+    def test_kubernetes_absence_checks_require_a_successful_response(self):
+        script = """
+set -euo pipefail
+source "$1"
+kubectl() {
+  [[ " $* " == *" -o name "* ]] || return 2
+  if [[ " $* " == *" pod fixture "* && " $* " != *" --ignore-not-found "* ]]; then
+    return 2
+  fi
+  case "$response" in
+    absent) return 0 ;;
+    present) printf 'pod/fixture\\n' ;;
+    unavailable) return 1 ;;
+  esac
+}
+response=absent
+kubectl_absent pod fixture
+list_empty get pods
+for response in present unavailable; do
+  if kubectl_absent pod fixture || list_empty get pods; then
+    exit 1
+  fi
+done
+"""
+        subprocess.run(["bash", "-c", script, "test", str(ROOT / "hack/e2e/lib.sh")], check=True)
+
     def test_embedded_release_is_rendered_before_each_docker_build(self):
         containerfile = (ROOT / "Containerfile").read_text().splitlines()
         self.assertIn("COPY --from=build /src/dist/release /release", containerfile)
