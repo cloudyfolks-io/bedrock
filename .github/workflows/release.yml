@@ -2,6 +2,11 @@ name: release
 on:
   push:
     tags: ["v*"]
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+env:
+  BEDROCK_IMAGE_REPOSITORY: ghcr.io/cloudyfolks-io/bedrock
 jobs:
   qualification:
     uses: ./.github/workflows/ci.yml
@@ -16,8 +21,11 @@ jobs:
       id-token: write
     outputs:
       digest: ${{ steps.image.outputs.digest }}
+      assets: ${{ steps.split.outputs.assets }}
     steps:
       - uses: actions/checkout@v5
+      - name: Check the release tag
+        run: '[[ $GITHUB_REF_NAME =~ ^v[0-9A-Za-z_.-]{0,127}$ ]]'
       - run: sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /usr/local/.ghcup /usr/local/share/boost /usr/share/swift /usr/local/share/powershell /opt/hostedtoolcache/CodeQL && docker image prune -af && df -h /
       - uses: actions/setup-go@v6
         with:
@@ -48,12 +56,11 @@ jobs:
           context: .
           file: Containerfile
           platforms: linux/amd64,linux/arm64
-          push: true
-          tags: ghcr.io/cloudyfolks-io/bedrock:${{ github.ref_name }}
+          outputs: type=image,name=${{ env.BEDROCK_IMAGE_REPOSITORY }},push=true,push-by-digest=true,name-canonical=true
           build-args: VERSION=${{ github.ref_name }}
       - name: Verify Fabric in the pushed Bedrock images
         env:
-          BEDROCK_RELEASE_IMAGE: ghcr.io/cloudyfolks-io/bedrock@${{ steps.image.outputs.digest }}
+          BEDROCK_RELEASE_IMAGE: ${{ env.BEDROCK_IMAGE_REPOSITORY }}@${{ steps.image.outputs.digest }}
         run: |
           release_dir=$(mktemp -d "$RUNNER_TEMP/bedrock-image-release.XXXXXX")
           container=
@@ -67,7 +74,9 @@ jobs:
             docker rm "$container" >/dev/null
             container=
           done
-      - run: bin/bedrock release pin-image --release dist/release --digest ${{ steps.image.outputs.digest }}
+      - run: bin/bedrock release pin-image --release dist/release --digest "$RELEASE_DIGEST"
+        env:
+          RELEASE_DIGEST: ${{ steps.image.outputs.digest }}
       - run: REQUIRE_PINNED_IMAGE=1 hack/check-release.sh dist/release
       - name: Build the offline bundle and verify its Fabric pin
         run: |
@@ -78,15 +87,26 @@ jobs:
             --bedrock-binary "dist/bedrock-$GITHUB_REF_NAME-linux-amd64"
           tar --zstd -xf "$bundle" -C "$bundle_dir" release
           bin/bedrock release verify-fabric --release "$bundle_dir/release" --values release/values/fabric.yaml
-      - run: cosign sign --yes ghcr.io/cloudyfolks-io/bedrock@${{ steps.image.outputs.digest }}
-      - run: cd dist && sha256sum bedrock-${{ github.ref_name }}-linux-amd64 bedrock-${{ github.ref_name }}-linux-arm64 bedrock-${{ github.ref_name }}-bundle-amd64.tar.zst > SHA256SUMS
+      - run: cosign sign --yes "$BEDROCK_IMAGE_REPOSITORY@$RELEASE_DIGEST"
+        env:
+          RELEASE_DIGEST: ${{ steps.image.outputs.digest }}
+      - run: cd dist && sha256sum "bedrock-$GITHUB_REF_NAME-linux-amd64" "bedrock-$GITHUB_REF_NAME-linux-arm64" "bedrock-$GITHUB_REF_NAME-bundle-amd64.tar.zst" > SHA256SUMS
       - run: cosign sign-blob --yes --bundle dist/SHA256SUMS.sigstore.json dist/SHA256SUMS
-      - run: cd dist && split -b 1900M -d -a 2 bedrock-${{ github.ref_name }}-bundle-amd64.tar.zst bedrock-${{ github.ref_name }}-bundle-amd64.tar.zst.part && rm bedrock-${{ github.ref_name }}-bundle-amd64.tar.zst
+      - id: split
+        run: |
+          cd dist
+          archive="bedrock-$GITHUB_REF_NAME-bundle-amd64.tar.zst"
+          split -b 1900M -d -a 2 "$archive" "$archive.part"
+          rm "$archive"
+          printf 'assets=assets-%s\n' "$GITHUB_RUN_ATTEMPT" >> "$GITHUB_OUTPUT"
       - uses: actions/upload-artifact@v7
         with:
-          name: assets
+          name: ${{ steps.split.outputs.assets }}
+          if-no-files-found: error
           path: |
-            dist/bedrock-*
+            dist/bedrock-${{ github.ref_name }}-linux-amd64
+            dist/bedrock-${{ github.ref_name }}-linux-arm64
+            dist/bedrock-${{ github.ref_name }}-bundle-amd64.tar.zst.part[0-9][0-9]
             dist/SHA256SUMS
             dist/SHA256SUMS.sigstore.json
   publish:
@@ -94,26 +114,179 @@ jobs:
     needs: release
     permissions:
       contents: write
+      packages: write
+    defaults:
+      run:
+        shell: bash
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      RELEASE_DIGEST: ${{ needs.release.outputs.digest }}
     steps:
       - uses: actions/download-artifact@v8
         with:
-          name: assets
+          name: ${{ needs.release.outputs.assets }}
           path: dist
+      - name: Verify release asset inputs
+        working-directory: dist
+        run: |
+          prefix="bedrock-$GITHUB_REF_NAME"
+          archive="$prefix-bundle-amd64.tar.zst"
+          digest_pattern='^[0-9a-f]{64}$'
+          shopt -s nullglob
+          parts=("$archive".part[0-9][0-9])
+          test "${#parts[@]}" -gt 0
+          for i in "${!parts[@]}"; do
+            test "${parts[i]}" = "$(printf '%s.part%02d' "$archive" "$i")"
+          done
+          file_hash() {
+            awk -v asset="$1" '$2 == asset {print $1}' SHA256SUMS
+          }
+          for binary in "$prefix-linux-amd64" "$prefix-linux-arm64"; do
+            expected=$(file_hash "$binary")
+            [[ $expected =~ $digest_pattern ]]
+            printf '%s  %s\n' "$expected" "$binary" | sha256sum --check -
+          done
+          expected=$(file_hash "$archive")
+          actual=$(cat -- "${parts[@]}" | sha256sum)
+          [[ $expected =~ $digest_pattern && ${actual%% *} == "$expected" ]]
+          for file in "$prefix-linux-amd64" "$prefix-linux-arm64" "${parts[@]}" SHA256SUMS SHA256SUMS.sigstore.json; do
+            test -s "$file" || exit 1
+            checksum=$(sha256sum -- "$file")
+            jq -nc --arg name "$file" --argjson size "$(stat -c '%s' -- "$file")" \
+              --arg digest "sha256:${checksum%% *}" '{name:$name,size:$size,digest:$digest}'
+          done | jq -s 'sort_by(.name)' > "$RUNNER_TEMP/bedrock-release-assets.json"
+      - name: Check for a published GitHub release
+        id: existing
+        run: |
+          existing=$(gh api --paginate "repos/$GITHUB_REPOSITORY/releases?per_page=100" |
+            jq -sc --arg tag "$GITHUB_REF_NAME" '
+              [.[][] | select(.tag_name == $tag)] |
+              if length > 1 then error("the release tag has multiple GitHub releases") else .[0] // null end')
+          jq -r '"published=\(. != null and .draft == false)"' <<<"$existing" >> "$GITHUB_OUTPUT"
+      - name: Check the public image tag before uploading assets
+        env:
+          ALREADY_PUBLISHED: ${{ steps.existing.outputs.published }}
+        run: |
+          [[ $RELEASE_DIGEST =~ ^sha256:[0-9a-f]{64}$ ]]
+          repo=${BEDROCK_IMAGE_REPOSITORY#ghcr.io/}
+          token=$(curl --fail --silent --show-error --connect-timeout 15 --max-time 60 --user "$GITHUB_ACTOR:$GH_TOKEN" --get https://ghcr.io/token \
+            --data-urlencode service=ghcr.io --data-urlencode "scope=repository:$repo:pull" |
+            jq -er '.token | select(type == "string" and length > 0)')
+          printf '::add-mask::%s\n' "$token"
+          manifest=$(mktemp "$RUNNER_TEMP/bedrock-version.XXXXXX")
+          trap 'rm -f -- "$manifest"' EXIT
+          accept=application/vnd.oci.image.index.v1+json,application/vnd.docker.distribution.manifest.list.v2+json,application/vnd.oci.image.manifest.v1+json,application/vnd.docker.distribution.manifest.v2+json
+          status=$(curl --silent --show-error --connect-timeout 15 --max-time 60 --header "Authorization: Bearer $token" \
+            --header "Accept: $accept" --output "$manifest" --write-out '%{http_code}' "https://ghcr.io/v2/$repo/manifests/$GITHUB_REF_NAME")
+          case "$status" in
+            200)
+              checksum=$(sha256sum -- "$manifest")
+              if [[ sha256:${checksum%% *} != "$RELEASE_DIGEST" ]]; then
+                printf '%s\n' 'The public image tag already points to a different digest.' >&2
+                exit 1
+              fi
+              ;;
+            404)
+              if [[ $ALREADY_PUBLISHED == true ]] || ! jq -e 'any(.errors[]?; .code == "MANIFEST_UNKNOWN")' "$manifest" >/dev/null; then
+                printf '%s\n' 'The public image tag could not be confirmed absent for this draft.' >&2
+                exit 1
+              fi
+              ;;
+            *)
+              printf 'Could not inspect the public image tag, HTTP %s\n' "$status" >&2
+              exit 1
+              ;;
+          esac
       - uses: softprops/action-gh-release@v3
+        if: steps.existing.outputs.published != 'true'
         with:
+          draft: true
           files: |
             dist/bedrock-${{ github.ref_name }}-linux-amd64
             dist/bedrock-${{ github.ref_name }}-linux-arm64
-            dist/bedrock-${{ github.ref_name }}-bundle-amd64.tar.zst.part*
+            dist/bedrock-${{ github.ref_name }}-bundle-amd64.tar.zst.part[0-9][0-9]
             dist/SHA256SUMS
             dist/SHA256SUMS.sigstore.json
           body: |
             The offline bundle is split in parts below 2 GiB. Join the parts and check the sum before `bedrock init --bundle`:
 
             ```
-            cat bedrock-${{ github.ref_name }}-bundle-amd64.tar.zst.part* > bedrock-${{ github.ref_name }}-bundle-amd64.tar.zst
+            cat bedrock-${{ github.ref_name }}-bundle-amd64.tar.zst.part[0-9][0-9] > bedrock-${{ github.ref_name }}-bundle-amd64.tar.zst
             sha256sum -c --ignore-missing SHA256SUMS
             ```
           generate_release_notes: true
           prerelease: ${{ contains(github.ref_name, '-') }}
           fail_on_unmatched_files: true
+      - name: Verify uploaded release assets
+        id: assets
+        env:
+          ALREADY_PUBLISHED: ${{ steps.existing.outputs.published }}
+        run: |
+          release_id=$(gh api --paginate "repos/$GITHUB_REPOSITORY/releases?per_page=100" |
+            jq -ser --arg tag "$GITHUB_REF_NAME" --argjson published "$ALREADY_PUBLISHED" '
+              [.[][] | select(.tag_name == $tag)] | select(length == 1) | .[0] |
+              select(.draft == ($published | not)) | .id | select(type == "number")')
+          gh api --paginate "repos/$GITHUB_REPOSITORY/releases/$release_id/assets?per_page=100" |
+            jq -se --slurpfile expected "$RUNNER_TEMP/bedrock-release-assets.json" '
+              [.[][] | {name,size,digest,state}] | sort_by(.name) as $assets |
+              all($assets[]; .state == "uploaded" and .size > 0) and
+              ($assets | map({name,size,digest})) == $expected[0]' >/dev/null
+          printf 'release_id=%s\n' "$release_id" >> "$GITHUB_OUTPUT"
+      - name: Promote the signed image digest
+        env:
+          ALREADY_PUBLISHED: ${{ steps.existing.outputs.published }}
+        run: |
+          [[ $RELEASE_DIGEST =~ ^sha256:[0-9a-f]{64}$ ]]
+          repo=${BEDROCK_IMAGE_REPOSITORY#ghcr.io/}
+          endpoint="https://ghcr.io/v2/$repo/manifests"
+          accept=application/vnd.oci.image.index.v1+json,application/vnd.docker.distribution.manifest.list.v2+json,application/vnd.oci.image.manifest.v1+json,application/vnd.docker.distribution.manifest.v2+json
+          token=$(curl --fail --silent --show-error --connect-timeout 15 --max-time 60 --user "$GITHUB_ACTOR:$GH_TOKEN" --get https://ghcr.io/token \
+            --data-urlencode service=ghcr.io --data-urlencode "scope=repository:$repo:pull,push" |
+            jq -er '.token | select(type == "string" and length > 0)')
+          printf '::add-mask::%s\n' "$token"
+          scratch=$(mktemp -d "$RUNNER_TEMP/bedrock-publish.XXXXXX")
+          trap 'rm -rf -- "$scratch"' EXIT
+          read_manifest() {
+            curl --silent --show-error --connect-timeout 15 --max-time 60 --header "Authorization: Bearer $token" --header "Accept: $accept" \
+              --output "$2" --write-out '%{http_code}' "$endpoint/$1"
+          }
+          manifest_digest() {
+            local checksum
+            checksum=$(sha256sum -- "$1")
+            printf 'sha256:%s\n' "${checksum%% *}"
+          }
+          test "$(read_manifest "$RELEASE_DIGEST" "$scratch/index.json")" = 200
+          test "$(manifest_digest "$scratch/index.json")" = "$RELEASE_DIGEST"
+          media_type=$(jq -er '.mediaType | select(. == "application/vnd.oci.image.index.v1+json" or . == "application/vnd.docker.distribution.manifest.list.v2+json")' "$scratch/index.json")
+          visible=$(read_manifest "$GITHUB_REF_NAME" "$scratch/version.json")
+          case "$visible" in
+            200)
+              if [[ $(manifest_digest "$scratch/version.json") != "$RELEASE_DIGEST" ]]; then
+                printf '%s\n' 'The public image tag already points to a different digest.' >&2
+                exit 1
+              fi
+              ;;
+            404)
+              if [[ $ALREADY_PUBLISHED == true ]] || ! jq -e 'any(.errors[]?; .code == "MANIFEST_UNKNOWN")' "$scratch/version.json" >/dev/null; then
+                printf '%s\n' 'The public image tag could not be confirmed absent for this draft.' >&2
+                exit 1
+              fi
+              curl --fail --silent --show-error --connect-timeout 15 --max-time 60 --output /dev/null --request PUT --header "Authorization: Bearer $token" \
+                --header "Content-Type: $media_type" --data-binary "@$scratch/index.json" "$endpoint/$GITHUB_REF_NAME"
+              ;;
+            *)
+              printf 'Could not inspect the public image tag, HTTP %s\n' "$visible" >&2
+              exit 1
+              ;;
+          esac
+          test "$(read_manifest "$GITHUB_REF_NAME" "$scratch/version.json")" = 200
+          test "$(manifest_digest "$scratch/version.json")" = "$RELEASE_DIGEST"
+      - name: Publish the verified GitHub release
+        if: steps.existing.outputs.published != 'true'
+        env:
+          RELEASE_ID: ${{ steps.assets.outputs.release_id }}
+        run: |
+          endpoint="repos/$GITHUB_REPOSITORY/releases/$RELEASE_ID"
+          gh api "$endpoint" | jq -e --arg tag "$GITHUB_REF_NAME" '.tag_name == $tag and .draft == true' >/dev/null
+          gh api --method PATCH "$endpoint" --field draft=false |
+            jq -e --arg tag "$GITHUB_REF_NAME" '.tag_name == $tag and .draft == false' >/dev/null
