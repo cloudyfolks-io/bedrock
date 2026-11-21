@@ -44,18 +44,23 @@ func ProjectNetworksHandler(upstream *Upstream, privileged client.Client) http.H
 			upstreamFailure(w, r, "read the project for network inventory", err)
 			return
 		}
-		if len(projects.Items) != 1 || projects.Items[0].Name != name || projects.Items[0].Status.Namespace == "" || projects.Items[0].Spec.TenantRef == "" {
+		if len(projects.Items) != 1 || projects.Items[0].Name != name || projects.Items[0].Spec.TenantRef == "" {
 			httpjson.WriteError(w, http.StatusNotFound, "not_found")
 			return
 		}
 		project := projects.Items[0]
+		namespace := projectListNamespace(project)
+		if namespace == "" {
+			httpjson.WriteError(w, http.StatusNotFound, "not_found")
+			return
+		}
 		config := upstream.RESTConfig(caller.Token)
 		reviews, err := kubernetes.NewForConfig(config)
 		if err != nil {
 			upstreamFailure(w, r, "build the project access client", err)
 			return
 		}
-		access, err := reviewAll(ctx, reviews, []authorizationv1.ResourceAttributes{listProjectsAttributes(), projectProbe(project.Status.Namespace)})
+		access, err := reviewAll(ctx, reviews, []authorizationv1.ResourceAttributes{listProjectsAttributes(), projectProbe(namespace)})
 		if err != nil {
 			upstreamFailure(w, r, "review access to the network project", err)
 			return
@@ -69,7 +74,7 @@ func ProjectNetworksHandler(upstream *Upstream, privileged client.Client) http.H
 			upstreamFailure(w, r, "build the network inventory client", err)
 			return
 		}
-		networks, err := projectNetworks(ctx, reader, reviews, project)
+		networks, err := projectNetworks(ctx, reader, reviews, project.Spec.TenantRef, namespace)
 		if errors.Is(err, errNetworkInventoryLimit) {
 			httpjson.WriteError(w, http.StatusUnprocessableEntity, "network_inventory_limit")
 			return
@@ -89,13 +94,13 @@ func ProjectNetworksHandler(upstream *Upstream, privileged client.Client) http.H
 	})
 }
 
-func projectNetworks(ctx context.Context, reader client.Reader, reviews kubernetes.Interface, project v1alpha1.Project) ([]v1alpha1.Network, error) {
-	items, listErr := listTenantNetworks(ctx, reader, project.Spec.TenantRef)
+func projectNetworks(ctx context.Context, reader client.Reader, reviews kubernetes.Interface, tenant, namespace string) ([]v1alpha1.Network, error) {
+	items, listErr := listTenantNetworks(ctx, reader, tenant)
 	if !apierrors.IsForbidden(listErr) {
 		return items, listErr
 	}
 	review, err := reviews.AuthorizationV1().SelfSubjectRulesReviews().Create(ctx,
-		&authorizationv1.SelfSubjectRulesReview{Spec: authorizationv1.SelfSubjectRulesReviewSpec{Namespace: project.Status.Namespace}}, metav1.CreateOptions{})
+		&authorizationv1.SelfSubjectRulesReview{Spec: authorizationv1.SelfSubjectRulesReviewSpec{Namespace: namespace}}, metav1.CreateOptions{})
 	if err != nil {
 		return nil, err
 	}
@@ -121,7 +126,7 @@ func projectNetworks(ctx context.Context, reader client.Reader, reviews kubernet
 			return nil, err
 		}
 		allowed = true
-		if network.Spec.TenantRef == project.Spec.TenantRef {
+		if network.Spec.TenantRef == tenant {
 			items = append(items, network)
 		}
 	}

@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	authorizationv1 "k8s.io/api/authorization/v1"
 	corev1 "k8s.io/api/core/v1"
 	rbacv1 "k8s.io/api/rbac/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -17,6 +18,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client/interceptor"
 
 	"github.com/cloudyfolks-io/bedrock/api/v1alpha1"
+	"github.com/cloudyfolks-io/bedrock/internal/tenancy"
 )
 
 func TestProjectNetworksUseTheCallersRealKubernetesPermissions(t *testing.T) {
@@ -126,6 +128,29 @@ func TestProjectNetworkListRejectsOverflow(t *testing.T) {
 	items, err := listTenantNetworks(context.Background(), fakeReader(t, networks...), "acme")
 	if len(items) != 0 || err != errNetworkInventoryLimit {
 		t.Fatalf("got %d records and %v, want no partial list and the inventory limit error", len(items), err)
+	}
+}
+
+func TestProjectNetworksRejectBlockedNamespacesBeforeAuthorization(t *testing.T) {
+	api := newReviewAPI(t, func(authorizationv1.ResourceAttributes) bool { return true })
+	upstream := api.upstream(t)
+	for _, reason := range []string{tenancy.ReasonNamespaceConflict, tenancy.ReasonNamespaceTerminating} {
+		t.Run(reason, func(t *testing.T) {
+			project := projectWithBlockedNamespace("network-home", "acme-network-home", reason)
+			reader := interceptor.NewClient(fakeReader(t), interceptor.Funcs{
+				List: func(_ context.Context, _ client.WithWatch, objects client.ObjectList, _ ...client.ListOption) error {
+					objects.(*v1alpha1.ProjectList).Items = []v1alpha1.Project{*project}
+					return nil
+				},
+			})
+			handler := asCaller(ProjectNetworksHandler(upstream, reader), "token-alice")
+			request := httptest.NewRequest(http.MethodGet, PathProjects+"/network-home/networks", nil)
+			request.SetPathValue("project", "network-home")
+			response := do(handler, request)
+			if response.Code != http.StatusNotFound || len(api.seen()) != 0 {
+				t.Fatalf("status %d, upstream requests %d", response.Code, len(api.seen()))
+			}
+		})
 	}
 }
 
