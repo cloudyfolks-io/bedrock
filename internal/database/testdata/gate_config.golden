@@ -13,6 +13,8 @@ backend engine
     server db db-0b0c0d0e-1111-4222-8333-444455556666-db.bedrock-dbaas.svc.cluster.local:5432 check
 frontend health
     mode http
-    bind :8404
-    monitor-uri /healthz
-    monitor fail if { nbsrv(engine) lt 1 }
+    bind 127.0.0.1:8404
+    http-request return status 200 if { path -m str /healthz }
+    http-request return status 200 if { path -m str /readyz } { nbsrv(engine) gt 0 }
+    http-request return status 503 if { path -m str /readyz }
+    http-request return status 404

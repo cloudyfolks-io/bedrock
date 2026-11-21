@@ -2,7 +2,7 @@
   {
     "apiVersion": "v1",
     "data": {
-      "haproxy.cfg": "global\n    maxconn 4096\ndefaults\n    mode tcp\n    timeout connect 5s\n    timeout client 1h\n    timeout server 1h\nfrontend db\n    bind :5432 ssl crt /certs/server.pem ssl-min-ver TLSv1.2 ca-file /certs/ca.crt verify required\n    tcp-request session reject unless { ssl_c_s_dn(CN) -m str 0b0c0d0e-1111-4222-8333-444455556666 }\n    default_backend engine\nbackend engine\n    server db db-0b0c0d0e-1111-4222-8333-444455556666-db.bedrock-dbaas.svc.cluster.local:5432 check\nfrontend health\n    mode http\n    bind :8404\n    monitor-uri /healthz\n    monitor fail if { nbsrv(engine) lt 1 }\n"
+      "haproxy.cfg": "global\n    maxconn 4096\ndefaults\n    mode tcp\n    timeout connect 5s\n    timeout client 1h\n    timeout server 1h\nfrontend db\n    bind :5432 ssl crt /certs/server.pem ssl-min-ver TLSv1.2 ca-file /certs/ca.crt verify required\n    tcp-request session reject unless { ssl_c_s_dn(CN) -m str 0b0c0d0e-1111-4222-8333-444455556666 }\n    default_backend engine\nbackend engine\n    server db db-0b0c0d0e-1111-4222-8333-444455556666-db.bedrock-dbaas.svc.cluster.local:5432 check\nfrontend health\n    mode http\n    bind 127.0.0.1:8404\n    http-request return status 200 if { path -m str /healthz }\n    http-request return status 200 if { path -m str /readyz } { nbsrv(engine) gt 0 }\n    http-request return status 503 if { path -m str /readyz }\n    http-request return status 404\n"
     },
     "kind": "ConfigMap",
     "metadata": {
@@ -122,7 +122,7 @@
       "template": {
         "metadata": {
           "annotations": {
-            "bedrock.cloudyfolks.io/config-hash": "1e195de8af1233f2"
+            "bedrock.cloudyfolks.io/config-hash": "efd8bf149a4a90f3"
           },
           "labels": {
             "app.kubernetes.io/component": "gate",
@@ -173,7 +173,7 @@
                     "-q",
                     "-O",
                     "/dev/null",
-                    "http://127.0.0.1:8404/healthz"
+                    "http://127.0.0.1:8404/readyz"
                   ]
                 },
                 "failureThreshold": 3,

@@ -12,6 +12,8 @@ backend gate
     server gate 100.66.16.2:5432 ssl crt /certs/tenant.pem ssl-min-ver TLSv1.2 ca-file /certs/ca.crt verify required sni str(0b0c0d0e-1111-4222-8333-444455556666.dbaas.internal) verifyhost 0b0c0d0e-1111-4222-8333-444455556666.dbaas.internal check check-ssl
 frontend health
     mode http
-    bind :8404
-    monitor-uri /healthz
-    monitor fail if { nbsrv(gate) lt 1 }
+    bind 127.0.0.1:8404
+    http-request return status 200 if { path -m str /healthz }
+    http-request return status 200 if { path -m str /readyz } { nbsrv(gate) gt 0 }
+    http-request return status 503 if { path -m str /readyz }
+    http-request return status 404

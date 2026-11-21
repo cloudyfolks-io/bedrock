@@ -24,6 +24,8 @@ const (
 	TenantPEMFile     = "tenant.pem"
 	CAFile            = "ca.crt"
 	HealthPort        = int32(8404)
+	livenessPath      = "/healthz"
+	readinessPath     = "/readyz"
 	ServerNameSuffix  = ".dbaas.internal"
 	proxyUserID       = int64(1000)
 	ComponentProxy    = "endpoint"
@@ -84,9 +86,11 @@ func GateConfig(s GateSpec) (string, error) {
 		fmt.Sprintf("    server db %s:%d check", s.BackendHost, s.BackendPort),
 		"frontend health",
 		"    mode http",
-		fmt.Sprintf("    bind :%d", HealthPort),
-		"    monitor-uri /healthz",
-		"    monitor fail if { nbsrv(engine) lt 1 }",
+		fmt.Sprintf("    bind 127.0.0.1:%d", HealthPort),
+		"    http-request return status 200 if { path -m str " + livenessPath + " }",
+		"    http-request return status 200 if { path -m str " + readinessPath + " } { nbsrv(engine) gt 0 }",
+		"    http-request return status 503 if { path -m str " + readinessPath + " }",
+		"    http-request return status 404",
 		"",
 	}, "\n"), nil
 }
@@ -115,9 +119,11 @@ func proxyConfig(vip, address string, port int, serverName string) (string, erro
 			vip, port, CertDir, TenantPEMFile, CertDir, CAFile, serverName, serverName),
 		"frontend health",
 		"    mode http",
-		fmt.Sprintf("    bind :%d", HealthPort),
-		"    monitor-uri /healthz",
-		"    monitor fail if { nbsrv(gate) lt 1 }",
+		fmt.Sprintf("    bind 127.0.0.1:%d", HealthPort),
+		"    http-request return status 200 if { path -m str " + livenessPath + " }",
+		"    http-request return status 200 if { path -m str " + readinessPath + " } { nbsrv(gate) gt 0 }",
+		"    http-request return status 503 if { path -m str " + readinessPath + " }",
+		"    http-request return status 404",
 		"",
 	}, "\n"), nil
 }
@@ -158,9 +164,9 @@ func deploymentOf(p proxyDeployment) (*unstructured.Unstructured, error) {
 	if p.Name == "" || p.Namespace == "" || p.Image == "" || !validPort(p.Port) {
 		return nil, fmt.Errorf("a proxy deployment needs a name, a namespace, an image and a port")
 	}
-	probe := func(initial int32) *corev1.Probe {
+	probe := func(path string, initial int32) *corev1.Probe {
 		return &corev1.Probe{
-			ProbeHandler:        corev1.ProbeHandler{Exec: &corev1.ExecAction{Command: []string{"wget", "-q", "-O", "/dev/null", fmt.Sprintf("http://127.0.0.1:%d/healthz", HealthPort)}}},
+			ProbeHandler:        corev1.ProbeHandler{Exec: &corev1.ExecAction{Command: []string{"wget", "-q", "-O", "/dev/null", fmt.Sprintf("http://127.0.0.1:%d%s", HealthPort, path)}}},
 			InitialDelaySeconds: initial, PeriodSeconds: 10, TimeoutSeconds: 3, FailureThreshold: 3,
 		}
 	}
@@ -176,8 +182,8 @@ func deploymentOf(p proxyDeployment) (*unstructured.Unstructured, error) {
 			Ports:           []corev1.ContainerPort{{Name: "db", ContainerPort: int32(p.Port)}},
 			Resources:       corev1.ResourceRequirements{Requests: resources, Limits: resources},
 			VolumeMounts:    []corev1.VolumeMount{{Name: "certs", MountPath: CertDir, ReadOnly: true}},
-			ReadinessProbe:  probe(2),
-			LivenessProbe:   probe(15),
+			ReadinessProbe:  probe(readinessPath, 2),
+			LivenessProbe:   probe(livenessPath, 15),
 			SecurityContext: &corev1.SecurityContext{AllowPrivilegeEscalation: ptr.To(false), Capabilities: &corev1.Capabilities{Drop: []corev1.Capability{"ALL"}}},
 		}},
 		Volumes: []corev1.Volume{{Name: "certs", VolumeSource: p.Volume}},

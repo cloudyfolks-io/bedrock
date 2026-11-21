@@ -12,6 +12,7 @@ import (
 	"fmt"
 	"math/big"
 	"net"
+	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -90,7 +91,7 @@ func startHAProxy(t *testing.T, image, dir string, publish bool) (name string) {
 	return name
 }
 
-func echoServer(t *testing.T) int {
+func echoServer(t *testing.T) net.Listener {
 	t.Helper()
 	listener, err := net.Listen("tcp", "0.0.0.0:0")
 	must(t, err)
@@ -110,7 +111,7 @@ func echoServer(t *testing.T) int {
 			}()
 		}
 	}()
-	return listener.Addr().(*net.TCPAddr).Port
+	return listener
 }
 
 func through(t *testing.T, address string) (string, error) {
@@ -134,6 +135,23 @@ func through(t *testing.T, address string) (string, error) {
 	}
 }
 
+func awaitHAProxyStatus(t *testing.T, name, path string, status int) {
+	t.Helper()
+	address := fmt.Sprintf("http://127.0.0.1:%d%s", HealthPort, path)
+	want := fmt.Sprintf("HTTP/1.1 %d ", status)
+	deadline := time.Now().Add(15 * time.Second)
+	for {
+		out, err := exec.Command("docker", "exec", name, "wget", "-S", "-O", "/dev/null", "-T", "2", address).CombinedOutput()
+		if strings.Contains(string(out), want) {
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("HAProxy %s did not return %d for %s: %v\n%s", name, status, path, err, out)
+		}
+		time.Sleep(200 * time.Millisecond)
+	}
+}
+
 func TestGateAcceptsItsOwnProxyAndRefusesEveryOtherClientWithRealHAProxy(t *testing.T) {
 	image := os.Getenv("BEDROCK_TEST_HAPROXY_IMAGE")
 	if image == "" {
@@ -142,7 +160,8 @@ func TestGateAcceptsItsOwnProxyAndRefusesEveryOtherClientWithRealHAProxy(t *test
 	ca, strangerCA := newTestCA(t, "database-ca"), newTestCA(t, "stranger-ca")
 	serverName := ServerName(gateUID)
 	server := ca.issue(t, 10, gateUID, 1, []string{serverName, "localhost"}, []net.IP{net.ParseIP("127.0.0.1")})
-	backendPort := echoServer(t)
+	backend := echoServer(t)
+	backendPort := backend.Addr().(*net.TCPAddr).Port
 	hostGateway := docker(t, "network", "inspect", "bridge", "-f", "{{(index .IPAM.Config 0).Gateway}}")
 
 	gateConfig, err := GateConfig(GateSpec{ListenPort: 5432, BackendHost: hostGateway, BackendPort: backendPort, ClientCN: gateUID})
@@ -155,20 +174,33 @@ func TestGateAcceptsItsOwnProxyAndRefusesEveryOtherClientWithRealHAProxy(t *test
 	must(t, err)
 	proxyOf := func(files map[string][]byte) string {
 		files[ConfigFile] = []byte(proxyConfig)
-		name := startHAProxy(t, image, writeDir(t, files), true)
-		return docker(t, "port", name, "5432/tcp")
+		return startHAProxy(t, image, writeDir(t, files), true)
 	}
 	own := proxyOf(map[string][]byte{TenantPEMFile: ca.issue(t, 11, gateUID, 2, nil, nil), CAFile: ca.pem})
 	otherCN := proxyOf(map[string][]byte{TenantPEMFile: ca.issue(t, 12, otherUID, 2, nil, nil), CAFile: ca.pem})
 	otherCA := proxyOf(map[string][]byte{TenantPEMFile: strangerCA.issue(t, 13, gateUID, 2, nil, nil), CAFile: ca.pem})
 
-	if line, err := through(t, own); err != nil || line != "hello\n" {
+	if line, err := through(t, docker(t, "port", own, "5432/tcp")); err != nil || line != "hello\n" {
 		t.Fatalf("the proxy of the database was refused: %q %v", line, err)
 	}
-	if line, err := through(t, otherCN); err == nil || line != "" {
+	if line, err := through(t, docker(t, "port", otherCN, "5432/tcp")); err == nil || line != "" {
 		t.Fatalf("a proxy with the certificate of database B reached database A: %q %v", line, err)
 	}
-	if line, err := through(t, otherCA); err == nil || line != "" {
+	if line, err := through(t, docker(t, "port", otherCA, "5432/tcp")); err == nil || line != "" {
 		t.Fatalf("a proxy with a certificate of another CA reached the gate: %q %v", line, err)
 	}
+	t.Run("backend outages affect readiness only", func(t *testing.T) {
+		for _, name := range []string{gate, own} {
+			awaitHAProxyStatus(t, name, livenessPath, http.StatusOK)
+			awaitHAProxyStatus(t, name, readinessPath, http.StatusOK)
+			awaitHAProxyStatus(t, name, livenessPath+"/", http.StatusNotFound)
+			awaitHAProxyStatus(t, name, readinessPath+"/", http.StatusNotFound)
+		}
+		must(t, backend.Close())
+		awaitHAProxyStatus(t, gate, readinessPath, http.StatusServiceUnavailable)
+		awaitHAProxyStatus(t, gate, livenessPath, http.StatusOK)
+		docker(t, "stop", "-t", "2", gate)
+		awaitHAProxyStatus(t, own, readinessPath, http.StatusServiceUnavailable)
+		awaitHAProxyStatus(t, own, livenessPath, http.StatusOK)
+	})
 }

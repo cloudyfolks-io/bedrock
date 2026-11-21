@@ -2,7 +2,7 @@
   {
     "apiVersion": "v1",
     "data": {
-      "haproxy.cfg": "global\n    maxconn 2048\ndefaults\n    mode tcp\n    timeout connect 5s\n    timeout client 1h\n    timeout server 1h\nfrontend db\n    bind :5432\n    default_backend gate\nbackend gate\n    server gate 100.66.16.2:5432 ssl crt /certs/tenant.pem ssl-min-ver TLSv1.2 ca-file /certs/ca.crt verify required sni str(0b0c0d0e-1111-4222-8333-444455556666.dbaas.internal) verifyhost 0b0c0d0e-1111-4222-8333-444455556666.dbaas.internal check check-ssl\nfrontend health\n    mode http\n    bind :8404\n    monitor-uri /healthz\n    monitor fail if { nbsrv(gate) lt 1 }\n"
+      "haproxy.cfg": "global\n    maxconn 2048\ndefaults\n    mode tcp\n    timeout connect 5s\n    timeout client 1h\n    timeout server 1h\nfrontend db\n    bind :5432\n    default_backend gate\nbackend gate\n    server gate 100.66.16.2:5432 ssl crt /certs/tenant.pem ssl-min-ver TLSv1.2 ca-file /certs/ca.crt verify required sni str(0b0c0d0e-1111-4222-8333-444455556666.dbaas.internal) verifyhost 0b0c0d0e-1111-4222-8333-444455556666.dbaas.internal check check-ssl\nfrontend health\n    mode http\n    bind 127.0.0.1:8404\n    http-request return status 200 if { path -m str /healthz }\n    http-request return status 200 if { path -m str /readyz } { nbsrv(gate) gt 0 }\n    http-request return status 503 if { path -m str /readyz }\n    http-request return status 404\n"
     },
     "kind": "ConfigMap",
     "metadata": {
@@ -130,7 +130,7 @@
       "template": {
         "metadata": {
           "annotations": {
-            "bedrock.cloudyfolks.io/config-hash": "8e698347d441ed10",
+            "bedrock.cloudyfolks.io/config-hash": "48014bc05ebd5d67",
             "default.acme-web.fabric.cloudyfolks.io/ip_address": "10.100.0.2",
             "default.acme-web.fabric.cloudyfolks.io/port_security": "true",
             "default.acme-web.fabric.cloudyfolks.io/security_groups": "acme-web-database-0b0c0d0e-04bddd387630",
@@ -186,7 +186,7 @@
                     "-q",
                     "-O",
                     "/dev/null",
-                    "http://127.0.0.1:8404/healthz"
+                    "http://127.0.0.1:8404/readyz"
                   ]
                 },
                 "failureThreshold": 3,
