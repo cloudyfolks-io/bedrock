@@ -6,8 +6,8 @@ source "$(dirname "${BASH_SOURCE[0]}")/e2e/lib.sh"
 : "${VERSION_A:?}" "${VERSION_B:?}" "${K0S_A:?}" "${K0S_B:?}"
 registry=${REGISTRY:-localhost:5000}
 arch=${ARCH:-$(uname -m | sed 's/x86_64/amd64/;s/aarch64/arm64/')}
-image_a=$registry/bedrock:$VERSION_A
-image_b=$registry/bedrock:$VERSION_B
+image_a=${IMAGE_A:-$registry/bedrock:$VERSION_A}
+image_b=${IMAGE_B:-$registry/bedrock:$VERSION_B}
 image_a_file=$(printf '%s' "$image_a" | sed -E 's/[^A-Za-z0-9._-]/_/g').tar
 image_b_file=$(printf '%s' "$image_b" | sed -E 's/[^A-Za-z0-9._-]/_/g').tar
 bundle_b=dist/bedrock-$VERSION_B-bundle-$arch.tar.zst
