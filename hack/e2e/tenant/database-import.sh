@@ -18,7 +18,7 @@ spec:
   ports:
     - name: database
       port: $port
-      targetPort: 5432
+      targetPort: $proxy_port
       protocol: TCP
 FRONTEND
 }
@@ -90,17 +90,36 @@ database_import_verified_login() {
   ' database-login "$address" "$port"
 }
 
+database_import_tls_session() {
+  exec kubectl -n "$NS" exec -i "$customer_pod" -c postgres-client -- sh -ec '
+    IFS= read -r PGPASSWORD
+    root_ca=$(mktemp)
+    trap '\''rm -f "$root_ca"'\'' EXIT
+    while IFS= read -r line; do
+      printf "%s\n" "$line"
+      if [ "$line" = "-----END CERTIFICATE-----" ]; then
+        break
+      fi
+    done >"$root_ca"
+    export PGPASSWORD PGSSLMODE=verify-full PGSSLROOTCERT="$root_ca" PGCONNECT_TIMEOUT=5
+    result=0
+    psql -XAtqw -v ON_ERROR_STOP=1 "host=$1 port=$2 user=dbadmin dbname=app tcp_user_timeout=10000" || result=$?
+    printf "session-exit:%s\n" "$result"
+    exit "$result"
+  ' database-session "$address" "$port"
+}
+
 database_import_reply() {
   kubectl -n "$NS" exec "$1" -c app -- sh -c '
     printf "\000\000\000\010\004\322\026\057" |
       timeout 7 nc -w 5 "$1" "$2" | od -An -c | tr -d "[:space:]"
-  ' database-probe "$address" "$port"
+  ' database-probe "$2" "$3"
 }
 
 database_import_reply_is() {
-  local got
-  got=$(database_import_reply "$1") || return 1
-  expect_equal "$2" "$got" "PostgreSQL SSLRequest from $1 to $address:$port"
+  local got probe_address=${3:-$address} probe_port=${4:-$port}
+  got=$(database_import_reply "$1" "$probe_address" "$probe_port") || return 1
+  expect_equal "$2" "$got" "PostgreSQL SSLRequest from $1 to $probe_address:$probe_port"
 }
 
 database_import_ovn_withdrawn() {
@@ -109,9 +128,28 @@ database_import_ovn_withdrawn() {
   [[ "$frontends" != *"$address:$port"* ]]
 }
 
+database_import_wait_withdrawn() {
+  wait_gone 180 loadbalancers.fabric.cloudyfolks.io "$frontend"
+  wait_gone 180 switch-lb-rules.fabric.cloudyfolks.io "flb-$frontend"
+  wait_gone 180 service "slr-flb-$frontend" -n "$NS"
+  wait_gone 180 endpoints "slr-flb-$frontend" -n "$NS"
+  wait_empty 180 -n "$NS" get pods -l "app.kubernetes.io/instance=db-$uid,app.kubernetes.io/component=endpoint"
+  retry_until 120 database_import_ovn_withdrawn
+}
+
 database_import_cleanup() {
   local status=$1 cleanup_failed=0
+  if [ -n "$tls_session_input" ]; then
+    exec {tls_session_input}>&-
+  fi
+  if [ -n "$tls_session_pid" ]; then
+    kill "$tls_session_pid" 2>/dev/null || true
+    wait "$tls_session_pid" 2>/dev/null || true
+  fi
   if [ "$status" -ne 0 ]; then
+    if [ -f "$certificate_dir/session.log" ]; then
+      cat "$certificate_dir/session.log" >&2
+    fi
     kubectl -n "$NS" get database "$database" -o yaml >&2 || true
     kubectl get loadbalancers.fabric.cloudyfolks.io "$frontend" -o yaml >&2 || true
     kubectl -n "$NS" get pods "$job_pod" "$customer_pod" -o wide >&2 || true
@@ -139,12 +177,13 @@ database_import_cleanup() {
 
 database_import_frontend() (
   local database=imported-orders frontend=legacy-orders claim=database-endpoint-legacy-orders
-  local address=100.69.0.240 port=6432 legacy_backend=10.100.0.245
+  local address=100.69.0.240 port=6432 proxy_port=5432 legacy_backend=10.100.0.245
   local job_pod=database-import-job job_address=10.100.0.241
   local customer_pod=database-import-customer customer_address=10.100.0.242
   local legacy_id=11111111-1111-4111-8111-111111111111 project_id=22222222-2222-4222-8222-222222222222
   local management_before managed_before managed_applied network vpc uid subnet_uid legacy_uid proxy_address
   local certificate_dir certificate_secret= admin_secret=
+  local tls_session_pid= tls_session_input=
 
   management_before=$(kubectl get cluster cluster -o jsonpath='{.spec.managementCIDR}')
   managed_before=$(kubectl get setting network.tenant-management.enabled -o json)
@@ -212,13 +251,58 @@ SPEC
   expect_equal 1 "$(database_import_verified_login)" "TLS login at the legacy address with the original trust and password"
   database_import_reply_is "$job_pod" ''
 
+  if [ "${E2E_ONLY:-}" = database_import_frontend ]; then
+    local engine_uid session_result=0
+    engine_uid=$(kubectl -n "$database_namespace" get clusters.postgresql.cnpg.io "db-$uid" -o jsonpath='{.metadata.uid}')
+    test -n "$engine_uid"
+    database_import_reply_is "$customer_pod" S "$proxy_address" "$proxy_port"
+    mkfifo "$certificate_dir/session.in"
+    database_import_tls_session <"$certificate_dir/session.in" >"$certificate_dir/session.log" 2>&1 &
+    tls_session_pid=$!
+    exec {tls_session_input}>"$certificate_dir/session.in"
+    {
+      cat "$certificate_dir/password"
+      printf '\n'
+      cat "$certificate_dir/ca.crt"
+      printf '%s\n' "SELECT 'session-before:' || pg_backend_pid() FROM pg_stat_ssl WHERE pid = pg_backend_pid() AND ssl;"
+    } >&"$tls_session_input"
+    retry_until 30 grep -Eq '^session-before:[0-9]+$' "$certificate_dir/session.log"
+    kill -0 "$tls_session_pid"
+
+    kubectl -n "$database_namespace" delete configmap "$claim-open"
+    wait_jsonpath 180 'the database endpoint needs administrator approval to reopen customer access' -n "$NS" get database "$database" -o jsonpath='{.status.conditions[?(@.type=="Ready")].message}'
+    wait_jsonpath 180 0 -n "$NS" get deployment "bedrock-db-proxy-$uid" -o jsonpath='{.spec.replicas}'
+    database_import_wait_withdrawn
+    kubectl -n "$NS" get database "$database" -o json |
+      jq -e --arg uid "$uid" '.metadata.uid == $uid and .spec.suspended != true' >/dev/null
+    expect_equal "$engine_uid" "$(kubectl -n "$database_namespace" get clusters.postgresql.cnpg.io "db-$uid" -o jsonpath='{.metadata.uid}')" "original PostgreSQL engine after revocation"
+    wait_jsonpath 60 1 -n "$database_namespace" get clusters.postgresql.cnpg.io "db-$uid" -o jsonpath='{.status.readyInstances}'
+    printf '%s\n' '\echo session-after-attempt' "SELECT 'session-after:' || pg_backend_pid();" '\q' >&"$tls_session_input"
+    exec {tls_session_input}>&-
+    tls_session_input=
+    retry_until 30 grep -q '^session-exit:' "$certificate_dir/session.log"
+    wait "$tls_session_pid" || session_result=$?
+    tls_session_pid=
+    grep -qx 'session-after-attempt' "$certificate_dir/session.log"
+    grep -qx 'session-exit:2' "$certificate_dir/session.log"
+    expect_equal 2 "$session_result" "established PostgreSQL session exit status"
+    if grep -q '^session-after:' "$certificate_dir/session.log"; then
+      echo "the established PostgreSQL session returned a result after revocation" >&2
+      return 1
+    fi
+    database_import_reply_is "$customer_pod" ''
+    database_import_reply_is "$customer_pod" '' "$proxy_address" "$proxy_port"
+    database_import_reply_is "$job_pod" ''
+    database_import_reply_is "$job_pod" '' "$proxy_address" "$proxy_port"
+
+    database_import_approve open
+    database_wait_ready "$database"
+    retry_until 90 database_import_reply_is "$customer_pod" S
+    database_import_reply_is "$customer_pod" S "$proxy_address" "$proxy_port"
+  fi
+
   kubectl -n "$NS" patch database "$database" --type merge -p '{"spec":{"suspended":true}}'
   wait_jsonpath 300 Suspended -n "$NS" get database "$database" -o jsonpath='{.status.phase}'
-  wait_gone 180 loadbalancers.fabric.cloudyfolks.io "$frontend"
-  wait_gone 180 switch-lb-rules.fabric.cloudyfolks.io "flb-$frontend"
-  wait_gone 180 service "slr-flb-$frontend" -n "$NS"
-  wait_gone 180 endpoints "slr-flb-$frontend" -n "$NS"
-  wait_empty 180 -n "$NS" get pods -l "app.kubernetes.io/instance=db-$uid,app.kubernetes.io/component=endpoint"
-  retry_until 120 database_import_ovn_withdrawn
+  database_import_wait_withdrawn
   database_import_reply_is "$customer_pod" ''
 )
