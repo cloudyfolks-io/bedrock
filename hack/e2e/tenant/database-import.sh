@@ -114,6 +114,43 @@ database_import_restore_acknowledged_write() {
   database_import_reply_is "$customer_pod" ''
 }
 
+database_import_approval_ids() {
+  kubectl -n "$database_namespace" get configmap "$claim-start" "$claim-open" -o json |
+    jq -er '
+      .items | sort_by(.metadata.name)
+      | select(length == 2 and all(.[]; .immutable == true and ((.metadata.uid // "") | length > 0)))
+      | map(.metadata.uid) | join(" ")
+    '
+}
+
+database_import_engine_claims() {
+  kubectl -n "$database_namespace" get persistentvolumeclaims -l "cnpg.io/cluster=db-$uid" -o json |
+    jq -cer '
+      .items | sort_by(.metadata.name)
+      | select(length > 0 and all(.[];
+          .status.phase == "Bound"
+          and ((.spec.volumeName // "") | length > 0)
+          and ((.metadata.uid // "") | length > 0)))
+      | map({name: .metadata.name, uid: .metadata.uid, volume: .spec.volumeName})
+    '
+}
+
+database_import_resume_checkpoint() {
+  local approved=$1 reservation_uid=$2 engine_claims=$3 rows
+  expect_equal "$reservation_uid $address" "$(kubectl get vips.fabric.cloudyfolks.io "db-$uid-frontend-vip" -o jsonpath='{.metadata.uid} {.status.v4ip}')" "VIP reservation during suspension"
+  expect_equal "$approved" "$(database_import_approval_ids)" "retained approvals during suspension"
+  as_user bob -n "$NS" patch database "$database" --type merge -p '{"spec":{"suspended":false}}'
+  database_wait_ready "$database"
+  retry_until 90 database_import_reply_is "$customer_pod" S
+  expect_equal "$uid" "$(database_uid "$database")" "Database UID after customer resume"
+  expect_equal "$reservation_uid $address" "$(kubectl get vips.fabric.cloudyfolks.io "db-$uid-frontend-vip" -o jsonpath='{.metadata.uid} {.status.v4ip}')" "VIP reservation after customer resume"
+  expect_equal "$approved" "$(database_import_approval_ids)" "retained approvals after customer resume"
+  expect_equal "$engine_claims" "$(database_import_engine_claims)" "original volume bindings after customer resume"
+  rows=$(database_import_customer_sql "SELECT string_agg(value, ',' ORDER BY value) FROM cutover_proof;") || return 1
+  expect_equal 'after-open,baseline' "$rows" "customer data over the original TLS endpoint after resume"
+  database_import_reply_is "$job_pod" ''
+}
+
 database_import_tls_session() {
   exec kubectl -n "$NS" exec -i "$customer_pod" -c postgres-client -- sh -ec '
     IFS= read -r PGPASSWORD
@@ -216,6 +253,7 @@ database_import_frontend() (
   local certificate_dir certificate_secret= admin_secret=
   local tls_session_pid= tls_session_input=
   local backup_enabled=false restored= recovery_backup=
+  local approved= reservation_uid= engine_claims=
 
   if [[ "${E2E_ONLY:-}" = database_import_frontend && "${E2E_DATABASE_POST_OPEN_RECOVERY:-}" = 1 ]]; then
     backup_enabled=true
@@ -344,6 +382,10 @@ SPEC
 
   if [ -n "$recovery_backup" ]; then
     database_import_backup_acknowledged_write
+    approved=$(database_import_approval_ids)
+    reservation_uid=$(kubectl get vips.fabric.cloudyfolks.io "db-$uid-frontend-vip" -o jsonpath='{.metadata.uid}')
+    test -n "$reservation_uid"
+    engine_claims=$(database_import_engine_claims)
   fi
 
   kubectl -n "$NS" patch database "$database" --type merge -p '{"spec":{"suspended":true}}'
@@ -351,6 +393,9 @@ SPEC
   database_import_wait_withdrawn
   database_import_reply_is "$customer_pod" ''
   if [ -n "$restored" ]; then
+    wait_empty 300 -n "$database_namespace" get pods -l "cnpg.io/cluster=db-$uid"
+    expect_equal "$engine_claims" "$(database_import_engine_claims)" "retained volume bindings while the engine is stopped"
     database_import_restore_acknowledged_write
+    database_import_resume_checkpoint "$approved" "$reservation_uid" "$engine_claims"
   fi
 )
