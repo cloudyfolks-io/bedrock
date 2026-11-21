@@ -41,7 +41,10 @@ member_service = "kmc-etcd-source-etcd"
 member_host = member_service + "-0." + member_service
 etcd_endpoint = "https://" + member_service + ":2379"
 target = "etcd-controller-recovery"
-label = {"migration.cloudyfolks.io/purpose": target}
+purpose_label = "migration.cloudyfolks.io/purpose"
+label = {purpose_label: target}
+reachable_name = "etcd-reachable-member"
+reachable_label = {purpose_label: "etcd-member-recovery"}
 probe_name = "etcd-api-recovery-probe"
 gate = [{"name": "e2e.bedrock.cloudyfolks.io/etcd-controller-approved"}]
 driver = "rook-ceph.rbd.csi.ceph.com"
@@ -228,17 +231,47 @@ def pinned_image(image, prefix):
     return image
 
 
-def verified_member(member, source):
+def selects(selector, labels):
+    if any(labels.get(key) != value for key, value in selector.get("matchLabels", {}).items()):
+        return False
+    for clause in selector.get("matchExpressions", []):
+        key, operator, values = clause["key"], clause["operator"], clause.get("values", [])
+        matches = {"In": key in labels and labels[key] in values, "NotIn": key not in labels or labels[key] not in values,
+                   "Exists": key in labels, "DoesNotExist": key not in labels}
+        require(operator in matches)
+        if not matches[operator]:
+            return False
+    return True
+
+
+def verify_member_policy(member, controller_uid):
+    policies = inventory(f"/apis/networking.k8s.io/v1/namespaces/{namespace}/networkpolicies", "NetworkPolicyList")
+    matching = [item for item in policies if selects(item["spec"]["podSelector"], reachable_label)]
+    require(len(matching) == 1)
+    policy = matching[0]
+    info = metadata(policy, member["network_policy_uid"])
+    require(info["name"] == reachable_name and info["namespace"] == namespace and not info.get("ownerReferences"))
+    spec = policy["spec"]
+    expected = {"podSelector": {"matchLabels": reachable_label}, "policyTypes": ["Ingress", "Egress"],
+                "ingress": [{"from": [{"podSelector": {"matchLabels": label}}], "ports": [{"port": 2379, "protocol": "TCP"}]}],
+                "egress": []}
+    require({**spec, "egress": spec.get("egress", [])} == expected)
+    pods = inventory(f"/api/v1/namespaces/{namespace}/pods", "PodList")
+    require([item["metadata"]["uid"] for item in pods if selects({"matchLabels": label}, item["metadata"].get("labels", {}))] ==
+            ([controller_uid] if controller_uid else []))
+
+
+def verified_member(member, source, controller_uid):
     require(member["scope"] == "synthetic-etcd-reachable-member",
             "Supply the approved reachable etcd member receipt. The loopback recovery receipt cannot be used.")
     name, expected = member["pod_name"], member["pod_uid"]
     address = ipaddress.IPv4Address(member["pod_ip"])
-    require(name != "etcd-native-restart" and name != source["etcd"]["pod"] and
-            re.fullmatch(r"[a-z0-9]([a-z0-9.-]*[a-z0-9])?", name) and
+    require(name == reachable_name and
             address.is_private and not (address.is_unspecified or address.is_loopback or address.is_link_local))
     obj = get("pod", name)
     info = metadata(obj, expected)
-    require(not info.get("ownerReferences") and not any(obj["spec"].get(key, False) for key in ("hostNetwork", "hostPID", "hostIPC")) and
+    require(info.get("labels") == reachable_label and not info.get("ownerReferences") and
+            not any(obj["spec"].get(key, False) for key in ("hostNetwork", "hostPID", "hostIPC")) and
             not obj["spec"].get("ephemeralContainers") and obj["spec"]["automountServiceAccountToken"] is False and
             obj["status"]["phase"] == "Running" and obj["status"]["podIP"] == str(address))
     container, = obj["spec"]["containers"]
@@ -253,6 +286,7 @@ def verified_member(member, source):
             observed["endpoint"] == etcd_endpoint and
             all(int(observed[key]) >= int(original[key]) > 0 for key in ("committed_revision", "raft_term", "raft_index", "raft_applied_index")) and
             int(observed["committed_revision"]) >= int(source["marker"]["revision"]))
+    verify_member_policy(member, controller_uid)
     return str(address)
 
 
@@ -507,7 +541,7 @@ def remove_pod(name, expected_uid):
     ns("delete", "--raw", f"/api/v1/namespaces/{namespace}/pods/{name}", "-f", "-", body=encode(deletion))
 
 
-def service_marker(kubeconfig, source, evidence, image, controller_uid, address, original_selector):
+def service_marker(kubeconfig, source, evidence, image, controller_uid, address, original_selector, member):
     wanted = {"apiVersion": "v1", "kind": "Pod", "metadata": {"name": probe_name, "namespace": namespace,
               "labels": {"migration.cloudyfolks.io/purpose": probe_name}},
               "spec": {"automountServiceAccountToken": False, "enableServiceLinks": False, "restartPolicy": "Never",
@@ -531,12 +565,14 @@ def service_marker(kubeconfig, source, evidence, image, controller_uid, address,
         for selector, expected in ((original_selector, []), (label, [controller_uid])):
             require([item["metadata"]["uid"] for item in pods if all(item["metadata"].get("labels", {}).get(key) == value
                     for key, value in selector.items())] == expected)
+        verify_member_policy(member, controller_uid)
         resource_version = route(source, original_selector, label)
         wait_for(lambda: route_ready(source, controller_uid, address))
         require(service_state(source, label)["resourceVersion"] == resource_version and route_ready(source, controller_uid, address))
         verified_marker(probe_name, "probe", kubeconfig, source, evidence)
         require(probe_runtime(probe_uid, dry["spec"], image) == runtime and
                 service_state(source, label)["resourceVersion"] == resource_version and route_ready(source, controller_uid, address))
+        verify_member_policy(member, controller_uid)
     finally:
         remove_pod(probe_name, probe_uid)
         wait_for(lambda: all(item["metadata"]["uid"] != probe_uid for item in
@@ -606,7 +642,7 @@ def main(guest, source_path, source_sha, proof_dir, api_dir, api_sha, claim_path
     service_state(source, original_selector)
     require(not any(item["endpoints"] for item in endpoint_slices(api_name)))
     verify_frozen_source(source, frozen, stored)
-    member_ip = verified_member(member, source)
+    member_ip = verified_member(member, source, "")
     member_image = pinned_image(member["image"], "quay.io/k0sproject/etcd")
     require(source["etcd"]["image_id"].endswith(member_image.rsplit("@", 1)[1]))
     image_digest = re.search(r"sha256:[0-9a-f]{64}$", source["controller"]["image_id"])
@@ -630,7 +666,7 @@ def main(guest, source_path, source_sha, proof_dir, api_dir, api_sha, claim_path
         require(current["spec"] == dry["spec"] and current["spec"]["schedulingGates"] == gate)
         verify_frozen_source(source, frozen, stored)
         verify_disk_users(source, claim, member, target_uid)
-        require(verified_member(member, source) == member_ip and approved_signers(claim, source, api) == projections)
+        require(verified_member(member, source, target_uid) == member_ip and approved_signers(claim, source, api) == projections)
         changes = [{"op": "test", "path": "/metadata/uid", "value": target_uid},
                    {"op": "test", "path": "/metadata/resourceVersion", "value": info["resourceVersion"]},
                    {"op": "test", "path": "/spec/schedulingGates", "value": gate},
@@ -641,15 +677,15 @@ def main(guest, source_path, source_sha, proof_dir, api_dir, api_sha, claim_path
         ip, _ = runtime
         wait_for(lambda: verified_marker(target, "controller", kubeconfig, source, api,
                  ("--server=https://" + ip + ":6443", "--tls-server-name=" + source["api_service"]["address"])))
-        require(verified_member(member, source) == member_ip)
+        require(verified_member(member, source, target_uid) == member_ip)
         moving = True
-        probe_uid, route_version = service_marker(kubeconfig, source, api, image, target_uid, ip, original_selector)
+        probe_uid, route_version = service_marker(kubeconfig, source, api, image, target_uid, ip, original_selector, member)
         verify_frozen_source(source, frozen, stored)
         verify_source_denials(source, image)
         verify_disk_users(source, claim, member, target_uid)
         require(service_state(source, label)["resourceVersion"] == route_version)
         require(route_ready(source, target_uid, ip) and controller_runtime(target_uid, spec, image) == runtime and
-                verified_member(member, source) == member_ip and approved_signers(claim, source, api) == projections)
+                verified_member(member, source, target_uid) == member_ip and approved_signers(claim, source, api) == projections)
         receipt_sha = publish(proof_dir, {"version": 1, "scope": "synthetic-etcd-controller-start", **scope,
                                           "source_service_uid": source["api_service"]["uid"], "controller_pod_uid": target_uid,
                                           "api_probe_pod_uid": probe_uid, "service_resource_version": route_version,
