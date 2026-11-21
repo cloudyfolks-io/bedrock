@@ -128,14 +128,74 @@ spec:
       expression: "'bedrock-db-proxy-'"
     - name: key
       expression: "'bedrock.cloudyfolks.io/database-gate-client'"
+    - name: previousLabels
+      expression: "oldObject.metadata.?labels.orValue({})"
+    - name: previousGateIdentity
+      expression: "variables.previousLabels[?variables.key].orValue('')"
+    - name: protectedPodUpdate
+      expression: >-
+        request.operation == 'UPDATE' && request.resource.group == '' && request.resource.resource == 'pods' &&
+        variables.previousGateIdentity != '' &&
+        variables.previousLabels[?'network.cloudyfolks.com/class'].orValue('') == 'managed' &&
+        variables.previousLabels[?'app.kubernetes.io/managed-by'].orValue('') == 'bedrock' &&
+        variables.previousLabels[?'app.kubernetes.io/component'].orValue('') == 'endpoint' &&
+        variables.previousLabels[?'app.kubernetes.io/instance'].orValue('') == 'db-' + variables.previousGateIdentity &&
+        request.name.startsWith(variables.prefix + variables.previousGateIdentity + '-') &&
+        oldObject.metadata.?ownerReferences.orValue([]).exists(owner,
+          owner.apiVersion == 'apps/v1' && owner.kind == 'ReplicaSet' && owner.uid != '' &&
+          owner.name.startsWith(variables.prefix + variables.previousGateIdentity + '-') &&
+          oldObject.metadata.?generateName.orValue('') == owner.name + '-' && owner.?controller.orValue(false)) &&
+        object.metadata.?generateName == oldObject.metadata.?generateName &&
+        object.metadata.?labels == oldObject.metadata.?labels &&
+        object.metadata.?ownerReferences == oldObject.metadata.?ownerReferences &&
+        object.metadata.?finalizers == oldObject.metadata.?finalizers
+    - name: previousPodSpec
+      expression: "dyn(oldObject).spec"
+    - name: updatedPodSpec
+      expression: "dyn(object).spec"
+    - name: previousAnnotations
+      expression: "oldObject.metadata.?annotations.orValue({})"
+    - name: updatedAnnotations
+      expression: "object.metadata.?annotations.orValue({})"
+    - name: providerPrefixes
+      expression: "['fabric.cloudyfolks.io/', 'vpc.kube-system.fabric.cloudyfolks.io/']"
+    - name: aaqPodUpdate
+      expression: >-
+        request.userInfo.username == 'system:serviceaccount:aaq:aaq-controller' && variables.protectedPodUpdate &&
+        variables.previousPodSpec.?schedulingGates.orValue([]).map(gate, gate.name) == ['ApplicationAwareQuotaGate'] &&
+        variables.updatedPodSpec.?schedulingGates.orValue([]).size() == 0 &&
+        variables.previousAnnotations == variables.updatedAnnotations &&
+        variables.previousPodSpec.containers == variables.updatedPodSpec.containers &&
+        variables.previousPodSpec.?initContainers == variables.updatedPodSpec.?initContainers &&
+        variables.previousPodSpec.?activeDeadlineSeconds == variables.updatedPodSpec.?activeDeadlineSeconds &&
+        variables.previousPodSpec.?terminationGracePeriodSeconds == variables.updatedPodSpec.?terminationGracePeriodSeconds &&
+        variables.previousPodSpec.?tolerations == variables.updatedPodSpec.?tolerations &&
+        variables.previousPodSpec.?nodeSelector == variables.updatedPodSpec.?nodeSelector &&
+        variables.previousPodSpec.?affinity == variables.updatedPodSpec.?affinity
+    - name: fabricPodUpdate
+      expression: >-
+        request.userInfo.username == 'system:serviceaccount:kube-system:ovn' && variables.protectedPodUpdate &&
+        variables.previousPodSpec == variables.updatedPodSpec &&
+        variables.previousAnnotations.all(key,
+          key in variables.updatedAnnotations ||
+          (variables.previousAnnotations[key] == 'true' && variables.providerPrefixes.exists(prefix,
+            key == prefix + 'allocated' || key == prefix + 'routed'))) &&
+        variables.updatedAnnotations.all(key,
+          (key in variables.previousAnnotations && variables.previousAnnotations[key] == variables.updatedAnnotations[key]) ||
+          key == 'fabric.cloudyfolks.io/ip_address' ||
+          variables.providerPrefixes.exists(prefix,
+            ((key == prefix + 'allocated' || key == prefix + 'routed') && variables.updatedAnnotations[key] == 'true') ||
+            (key == prefix + 'pod_nic_type' && variables.previousAnnotations[?key].orValue('') == '') ||
+            ['mac_address', 'cidr', 'gateway', 'logical_router', 'vlan_id', 'provider_network'].exists(field, key == prefix + field)))
   validations:
     - expression: >-
-        !request.name.startsWith(variables.prefix) &&
-        (object == null ||
-          (!object.metadata.?name.orValue('').startsWith(variables.prefix) &&
-           !object.metadata.?generateName.orValue('').startsWith(variables.prefix) &&
-           !(variables.key in object.metadata.?labels.orValue({})))) &&
-        (oldObject == null || !(variables.key in oldObject.metadata.?labels.orValue({})))
+        (!request.name.startsWith(variables.prefix) &&
+         (object == null ||
+           (!object.metadata.?name.orValue('').startsWith(variables.prefix) &&
+            !object.metadata.?generateName.orValue('').startsWith(variables.prefix) &&
+            !(variables.key in object.metadata.?labels.orValue({})))) &&
+         (oldObject == null || !(variables.key in oldObject.metadata.?labels.orValue({})))) ||
+        variables.aaqPodUpdate || variables.fabricPodUpdate
       message: "only the platform can manage a database proxy resource or identity"
       reason: Forbidden
     - expression: >-
