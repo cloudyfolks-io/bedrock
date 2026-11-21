@@ -176,7 +176,8 @@ A tenant cannot read this Secret.
 
 - The schedule is `0 0 2 * * *` with the Barman Cloud plugin.
 - `database.backup.retention-days` is the number of days of backups and WAL (1 to 365, default 7).
-- `status.backup` shows `items`, `lastAt` and `sizeBytes`. The operator reads the size every 10 minutes. PostgreSQL can also show a point-in-time recovery window in `pitrFrom` and `pitrTo`. MySQL restores use full backups.
+- `status.backup` shows `items`, `lastAt` and `sizeBytes`. The operator reads the size every 10 minutes.
+- For PostgreSQL, Barman reports the earliest recovery point in `pitrFrom` and the end of the last successful backup in `pitrTo`. The fields can remain after Kubernetes removes the Backup records when the database's current backup store still confirms both bounds. Verify WAL coverage for the recovery time that you need. MySQL restores use full backups.
 
 To start one backup at once, set the annotation `bedrock.cloudyfolks.io/backup-requested` on the `Database` to an RFC 3339 time, for example the current time. Project editors and administrators can set it.
 The operator starts one backup when the time is newer than `status.backup.request.at`. The same or an older time starts nothing. The backup is a CNPG `Backup` (PostgreSQL) or a Percona backup (MySQL) in `bedrock-dbaas`.

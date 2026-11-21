@@ -2,6 +2,7 @@ package database
 
 import (
 	"context"
+	"encoding/json"
 	"sort"
 	"time"
 
@@ -140,8 +141,8 @@ func ListBackups(ctx context.Context, c client.Reader, db v1alpha1.Database) ([]
 	return own, nil
 }
 
-func timeField(obj *unstructured.Unstructured, field string) *metav1.Time {
-	raw, _, _ := unstructured.NestedString(obj.Object, "status", field)
+func timeField(obj *unstructured.Unstructured, fields ...string) *metav1.Time {
+	raw, _, _ := unstructured.NestedString(obj.Object, append([]string{"status"}, fields...)...)
 	parsed, err := time.Parse(time.RFC3339, raw)
 	if err != nil {
 		return nil
@@ -149,7 +150,7 @@ func timeField(obj *unstructured.Unstructured, field string) *metav1.Time {
 	return &metav1.Time{Time: parsed.UTC()}
 }
 
-func BackupStatusOf(engineName string, backups []*unstructured.Unstructured, now time.Time, sizeBytes int64, sampledAt *metav1.Time) *v1alpha1.DatabaseBackupStatus {
+func BackupStatusOf(backups []*unstructured.Unstructured, sizeBytes int64, sampledAt *metav1.Time) *v1alpha1.DatabaseBackupStatus {
 	items := make([]v1alpha1.DatabaseBackupItem, 0, len(backups))
 	var completed []metav1.Time
 	for _, backup := range backups {
@@ -168,12 +169,65 @@ func BackupStatusOf(engineName string, backups []*unstructured.Unstructured, now
 	if len(completed) > 0 {
 		sort.Slice(completed, func(i, j int) bool { return completed[i].Before(&completed[j]) })
 		status.LastAt = &completed[len(completed)-1]
-		if engineName == v1alpha1.DatabaseEnginePostgreSQL {
-			status.PITRFrom = &completed[0]
-			status.PITRTo = &metav1.Time{Time: now.UTC()}
-		}
 	}
 	return status
+}
+
+func nativeRecoveryWindow(ctx context.Context, c client.Reader, db v1alpha1.Database, project Project, spec engine.BackupSpec, lastAt *metav1.Time, now time.Time) (*metav1.Time, *metav1.Time) {
+	if db.Spec.Engine != v1alpha1.DatabaseEnginePostgreSQL || !spec.Enabled || db.UID == "" ||
+		db.CreationTimestamp.IsZero() || spec.Bucket == "" || spec.Endpoint == "" || spec.SecretName == "" {
+		return nil, nil
+	}
+
+	store := &unstructured.Unstructured{}
+	store.SetGroupVersionKind(ObjectStoreGVK)
+	key := client.ObjectKey{Namespace: PlatformNamespace, Name: Name(db.UID)}
+	err := c.Get(ctx, key, store)
+	created := store.GetCreationTimestamp()
+	if err != nil || store.GetUID() == "" || store.GetDeletionTimestamp() != nil || created.IsZero() ||
+		platform.OwnerOf(store) != OwnerOf(db, project) {
+		return nil, nil
+	}
+
+	destination, _, _ := unstructured.NestedString(store.Object, "spec", "configuration", "destinationPath")
+	endpoint, _, _ := unstructured.NestedString(store.Object, "spec", "configuration", "endpointURL")
+	accessKey, _, _ := unstructured.NestedMap(store.Object, "spec", "configuration", "s3Credentials", "accessKeyId")
+	secretKey, _, _ := unstructured.NestedMap(store.Object, "spec", "configuration", "s3Credentials", "secretAccessKey")
+	server := string(db.UID)
+	if destination != "s3://"+spec.Bucket+"/"+server+"/" || endpoint != spec.Endpoint ||
+		accessKey["name"] != spec.SecretName || accessKey["key"] != "ACCESS_KEY_ID" ||
+		secretKey["name"] != spec.SecretName || secretKey["key"] != "ACCESS_SECRET_KEY" {
+		return nil, nil
+	}
+
+	from := timeField(store, "serverRecoveryWindow", server, "firstRecoverabilityPoint")
+	to := timeField(store, "serverRecoveryWindow", server, "lastSuccessfulBackupTime")
+	if from == nil || to == nil || from.Time.Before(db.CreationTimestamp.Time) || to.Time.Before(from.Time) ||
+		to.Time.Before(created.Time) || to.Time.After(now) || (lastAt != nil && to.Time.Before(lastAt.Time)) {
+		return nil, nil
+	}
+	if store.GetGeneration() > 1 {
+		specWriteKnown := false
+		for _, entry := range store.GetManagedFields() {
+			if entry.Subresource != "" || entry.FieldsV1 == nil {
+				continue
+			}
+			var fields map[string]json.RawMessage
+			if json.Unmarshal(entry.FieldsV1.GetRawBytes(), &fields) != nil {
+				return nil, nil
+			}
+			if _, ownsSpec := fields["f:spec"]; ownsSpec {
+				if entry.Time == nil || !to.Time.After(entry.Time.Time) {
+					return nil, nil
+				}
+				specWriteKnown = true
+			}
+		}
+		if !specWriteKnown {
+			return nil, nil
+		}
+	}
+	return from, to
 }
 
 func backupItemOf(backup *unstructured.Unstructured) v1alpha1.DatabaseBackupItem {

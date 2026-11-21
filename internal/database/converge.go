@@ -755,12 +755,12 @@ func (r *Reconciler) observeBackup(ctx context.Context, in *flow, ready bool) *v
 	db := *in.db
 	backups, err := ListBackups(ctx, r.Live, db)
 	if err != nil {
-		if db.Spec.Engine == v1alpha1.DatabaseEngineMySQL && db.Status.Backup != nil {
+		if db.Status.Backup != nil {
 			status := *db.Status.Backup
 			status.PITRFrom, status.PITRTo = nil, nil
 			return &status
 		}
-		return db.Status.Backup
+		return nil
 	}
 	request := r.startRequestedBackup(ctx, in, PlanBackupRequest(db, backups, ready, r.now()))
 	if !db.Spec.Backup.Enabled {
@@ -776,8 +776,10 @@ func (r *Reconciler) observeBackup(ctx context.Context, in *flow, ready bool) *v
 	if sampled, at, err := SampleBackupSize(ctx, r.Live, r.Store, in.cfg, db, r.now()); err == nil {
 		size, sampledAt = sampled, at
 	}
-	status := BackupStatusOf(db.Spec.Engine, backups, r.now(), size, sampledAt)
+	status := BackupStatusOf(backups, size, sampledAt)
 	status.Request = request
+	spec := BackupSpecOf(in.cfg, r.Store, db.Spec.Backup)
+	status.PITRFrom, status.PITRTo = nativeRecoveryWindow(ctx, r.Live, db, in.project, spec, status.LastAt, r.now())
 	return status
 }
 

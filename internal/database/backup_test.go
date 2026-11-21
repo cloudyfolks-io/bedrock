@@ -12,7 +12,9 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	"github.com/cloudyfolks-io/bedrock/api/v1alpha1"
+	"github.com/cloudyfolks-io/bedrock/internal/database/engine"
 	"github.com/cloudyfolks-io/bedrock/internal/objectstorage"
+	"github.com/cloudyfolks-io/bedrock/internal/platform"
 )
 
 func backupWorld(t *testing.T) (client.Client, *fakeS3, BackupStore) {
@@ -108,46 +110,46 @@ func mustTime(value string) time.Time {
 }
 
 func TestBackupStatusWithNoBackups(t *testing.T) {
-	status := BackupStatusOf(v1alpha1.DatabaseEnginePostgreSQL, nil, mustTime("2026-10-19T12:00:00Z"), 0, nil)
+	status := BackupStatusOf(nil, 0, nil)
 	if status.LastAt != nil || status.PITRFrom != nil || status.PITRTo != nil || len(status.Items) != 0 || status.SizeBytes != 0 {
 		t.Fatalf("status %+v", status)
 	}
 }
 
 func TestBackupStatusWithTwoCompletedBackupsAndARunningOne(t *testing.T) {
-	now := mustTime("2026-10-19T12:00:00Z")
 	sampled := metav1.NewTime(mustTime("2026-10-19T11:55:00Z"))
 	backups := []*unstructured.Unstructured{
 		backupObject("b1", "uid", "completed", "2026-10-17T02:00:00Z", "2026-10-17T02:05:00Z"),
 		backupObject("b2", "uid", "completed", "2026-10-18T02:00:00Z", "2026-10-18T02:06:00Z"),
 		backupObject("b3", "uid", "running", "2026-10-19T02:00:00Z", ""),
 	}
-	status := BackupStatusOf(v1alpha1.DatabaseEnginePostgreSQL, backups, now, 4096, &sampled)
+	status := BackupStatusOf(backups, 4096, &sampled)
 	if len(status.Items) != 3 || status.Items[0].ID != "b3" || status.Items[1].ID != "b2" || status.Items[2].ID != "b1" {
 		t.Fatalf("items %+v", status.Items)
 	}
 	if status.Items[0].Phase != "running" || status.Items[0].CompletedAt != nil || status.Items[1].CompletedAt == nil {
 		t.Fatalf("items %+v", status.Items)
 	}
-	if !status.PITRFrom.Time.Equal(mustTime("2026-10-17T02:05:00Z")) || !status.LastAt.Time.Equal(mustTime("2026-10-18T02:06:00Z")) || !status.PITRTo.Time.Equal(now) {
-		t.Fatalf("window %v %v %v", status.PITRFrom, status.LastAt, status.PITRTo)
+	if status.LastAt == nil || !status.LastAt.Time.Equal(mustTime("2026-10-18T02:06:00Z")) ||
+		status.PITRFrom != nil || status.PITRTo != nil {
+		t.Fatalf("status %+v", status)
 	}
 	if status.SizeBytes != 4096 || !status.SizeSampledAt.Equal(&sampled) {
 		t.Fatalf("size %d %v", status.SizeBytes, status.SizeSampledAt)
 	}
 }
 
-func TestBackupStatusIgnoresAFailedBackupForTheWindow(t *testing.T) {
+func TestBackupStatusIgnoresAFailedBackupForLastAt(t *testing.T) {
 	backups := []*unstructured.Unstructured{
 		backupObject("good", "uid", "completed", "2026-10-18T02:00:00Z", "2026-10-18T02:05:00Z"),
 		backupObject("bad", "uid", "failed", "2026-10-19T02:00:00Z", "2026-10-19T02:01:00Z"),
 	}
-	status := BackupStatusOf(v1alpha1.DatabaseEnginePostgreSQL, backups, mustTime("2026-10-19T12:00:00Z"), 0, nil)
+	status := BackupStatusOf(backups, 0, nil)
 	if len(status.Items) != 2 || status.Items[0].ID != "bad" || status.Items[0].Phase != "failed" {
 		t.Fatalf("items %+v", status.Items)
 	}
-	if !status.LastAt.Time.Equal(mustTime("2026-10-18T02:05:00Z")) || !status.PITRFrom.Equal(status.LastAt) {
-		t.Fatalf("window %v %v", status.PITRFrom, status.LastAt)
+	if status.LastAt == nil || !status.LastAt.Time.Equal(mustTime("2026-10-18T02:05:00Z")) {
+		t.Fatalf("last backup %v", status.LastAt)
 	}
 }
 
@@ -156,7 +158,7 @@ func TestBackupStatusKeepsAtMostOneHundredItems(t *testing.T) {
 	for i := 0; i < 120; i++ {
 		backups = append(backups, backupObject("b"+string(rune('a'+i%26))+string(rune('a'+i/26)), "uid", "completed", "2026-10-18T02:00:00Z", "2026-10-18T02:05:00Z"))
 	}
-	if got := len(BackupStatusOf(v1alpha1.DatabaseEnginePostgreSQL, backups, time.Now(), 0, nil).Items); got != 100 {
+	if got := len(BackupStatusOf(backups, 0, nil).Items); got != 100 {
 		t.Fatalf("items %d", got)
 	}
 }
@@ -168,7 +170,7 @@ func TestMySQLBackupStatusKeepsCompletedBackupWithoutAPITRWindow(t *testing.T) {
 		"metadata": map[string]any{"name": "mysql-backup", "creationTimestamp": "2026-10-18T02:00:00Z"},
 		"status":   map[string]any{"state": "Succeeded", "completed": completed.Format(time.RFC3339)},
 	}}
-	status := BackupStatusOf(v1alpha1.DatabaseEngineMySQL, []*unstructured.Unstructured{backup}, completed.Add(time.Hour), 4096, nil)
+	status := BackupStatusOf([]*unstructured.Unstructured{backup}, 4096, nil)
 	if status.PITRFrom != nil || status.PITRTo != nil {
 		t.Fatalf("MySQL PITR window = %v to %v", status.PITRFrom, status.PITRTo)
 	}
@@ -184,17 +186,144 @@ func (failingBackupList) List(context.Context, client.ObjectList, ...client.List
 	return errors.New("the backup list failed")
 }
 
-func TestMySQLBackupStatusClearsAnOldWindowWhenTheListFails(t *testing.T) {
+func TestBackupStatusClearsAnOldWindowWhenTheListFails(t *testing.T) {
 	last := metav1.NewTime(mustTime("2026-10-18T02:05:00Z"))
 	previous := &v1alpha1.DatabaseBackupStatus{LastAt: &last, PITRFrom: &last, PITRTo: &last, SizeBytes: 4096}
-	db := &v1alpha1.Database{Spec: v1alpha1.DatabaseSpec{Engine: v1alpha1.DatabaseEngineMySQL}, Status: v1alpha1.DatabaseStatus{Backup: previous}}
-	r := Reconciler{Live: failingBackupList{}}
-	status := r.observeBackup(context.Background(), &flow{db: db}, true)
-	if status.PITRFrom != nil || status.PITRTo != nil || !status.LastAt.Equal(&last) || status.SizeBytes != 4096 {
-		t.Fatalf("status %+v", status)
+	for _, engine := range []string{v1alpha1.DatabaseEnginePostgreSQL, v1alpha1.DatabaseEngineMySQL} {
+		t.Run(engine, func(t *testing.T) {
+			db := &v1alpha1.Database{Spec: v1alpha1.DatabaseSpec{Engine: engine}, Status: v1alpha1.DatabaseStatus{Backup: previous}}
+			r := Reconciler{Live: failingBackupList{}}
+			status := r.observeBackup(t.Context(), &flow{db: db}, true)
+			if status.PITRFrom != nil || status.PITRTo != nil || !status.LastAt.Equal(&last) || status.SizeBytes != 4096 {
+				t.Fatalf("status %+v", status)
+			}
+		})
 	}
 	if previous.PITRFrom == nil || previous.PITRTo == nil {
 		t.Fatal("the backup observer changed its input")
+	}
+}
+
+type recoveryWindowReader struct {
+	client.Reader
+	store *unstructured.Unstructured
+}
+
+func (r recoveryWindowReader) Get(_ context.Context, key client.ObjectKey, obj client.Object, _ ...client.GetOption) error {
+	if r.store == nil {
+		return errors.New("the backup store read failed")
+	}
+	target, ok := obj.(*unstructured.Unstructured)
+	if !ok || target.GroupVersionKind() != ObjectStoreGVK || key != client.ObjectKeyFromObject(r.store) {
+		return errors.New("the backup store key differs")
+	}
+	*target = *r.store.DeepCopy()
+	return nil
+}
+
+func TestNativePostgresRecoveryWindow(t *testing.T) {
+	created := mustTime("2026-10-17T00:00:00Z")
+	from := mustTime("2026-10-17T02:00:00Z")
+	to := mustTime("2026-10-18T02:00:00Z")
+	now := mustTime("2026-10-18T12:00:00Z")
+	last := metav1.NewTime(to)
+	project := Project{Namespace: "test-project", Tenant: "test", Name: "project"}
+	db := v1alpha1.Database{
+		ObjectMeta: metav1.ObjectMeta{Name: "orders", Namespace: project.Namespace, UID: "postgres-uid", CreationTimestamp: metav1.NewTime(created)},
+		Spec:       v1alpha1.DatabaseSpec{Engine: v1alpha1.DatabaseEnginePostgreSQL},
+	}
+	spec := engine.BackupSpec{Enabled: true, Bucket: "backups", Endpoint: "http://rgw", SecretName: BackupSecretName}
+	store := Adopt(&unstructured.Unstructured{Object: map[string]any{
+		"apiVersion": ObjectStoreGVK.GroupVersion().String(),
+		"kind":       ObjectStoreGVK.Kind,
+		"metadata":   map[string]any{"name": Name(db.UID), "namespace": PlatformNamespace},
+		"spec": map[string]any{"configuration": map[string]any{
+			"destinationPath": "s3://backups/postgres-uid/",
+			"endpointURL":     spec.Endpoint,
+			"s3Credentials": map[string]any{
+				"accessKeyId":     map[string]any{"name": spec.SecretName, "key": "ACCESS_KEY_ID"},
+				"secretAccessKey": map[string]any{"name": spec.SecretName, "key": "ACCESS_SECRET_KEY"},
+			},
+		}},
+		"status": map[string]any{"serverRecoveryWindow": map[string]any{
+			string(db.UID): map[string]any{
+				"firstRecoverabilityPoint": from.Format(time.RFC3339),
+				"lastSuccessfulBackupTime": to.Format(time.RFC3339),
+			},
+			"another-server": map[string]any{
+				"firstRecoverabilityPoint": created.Format(time.RFC3339),
+				"lastSuccessfulBackupTime": now.Format(time.RFC3339),
+			},
+		}},
+	}}, db, project)
+	store.SetUID("object-store-uid")
+	store.SetGeneration(1)
+	store.SetCreationTimestamp(metav1.NewTime(created))
+
+	gotFrom, gotTo := nativeRecoveryWindow(t.Context(), recoveryWindowReader{store: store}, db, project, spec, &last, now)
+	if gotFrom == nil || gotTo == nil || !gotFrom.Time.Equal(from) || !gotTo.Time.Equal(to) {
+		t.Fatalf("recovery window %v to %v, want %v to %v", gotFrom, gotTo, from, to)
+	}
+	gotFrom, gotTo = nativeRecoveryWindow(t.Context(), recoveryWindowReader{store: store}, db, project, spec, nil, now)
+	if gotFrom == nil || gotTo == nil || !gotFrom.Time.Equal(from) || !gotTo.Time.Equal(to) {
+		t.Fatalf("recovery window without Backup records %v to %v, want %v to %v", gotFrom, gotTo, from, to)
+	}
+	configuration := []string{"spec", "configuration"}
+	window := []string{"status", "serverRecoveryWindow", string(db.UID)}
+	cases := []struct {
+		name  string
+		path  []string
+		value any
+	}{
+		{"foreign owner", []string{"metadata", "annotations", platform.AnnotationOwnerUID}, "foreign-uid"},
+		{"foreign prefix", append(configuration, "destinationPath"), "s3://backups/previous-uid/"},
+		{"foreign endpoint", append(configuration, "endpointURL"), "https://other-rgw"},
+		{"wrong access key", append(configuration, "s3Credentials", "accessKeyId", "key"), "AWS_ACCESS_KEY_ID"},
+		{"wrong secret key", append(configuration, "s3Credentials", "secretAccessKey", "key"), "AWS_SECRET_ACCESS_KEY"},
+		{"missing access key", append(configuration, "s3Credentials", "accessKeyId", "key"), nil},
+		{"missing server", window, nil},
+		{"invalid start", append(window, "firstRecoverabilityPoint"), "invalid"},
+		{"reversed window", append(window, "firstRecoverabilityPoint"), to.Add(time.Second).Format(time.RFC3339)},
+		{"future checkpoint", append(window, "lastSuccessfulBackupTime"), now.Add(time.Second).Format(time.RFC3339)},
+		{"stale checkpoint", append(window, "lastSuccessfulBackupTime"), to.Add(-time.Second).Format(time.RFC3339)},
+		{"replaced store", []string{"metadata", "creationTimestamp"}, to.Add(time.Second).Format(time.RFC3339)},
+		{"store deleting", []string{"metadata", "deletionTimestamp"}, now.Format(time.RFC3339)},
+		{"store revision without write evidence", []string{"metadata", "generation"}, int64(2)},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			candidate := store.DeepCopy()
+			if tc.value == nil {
+				unstructured.RemoveNestedField(candidate.Object, tc.path...)
+			} else {
+				must(t, unstructured.SetNestedField(candidate.Object, tc.value, tc.path...))
+			}
+			start, end := nativeRecoveryWindow(t.Context(), recoveryWindowReader{store: candidate}, db, project, spec, &last, now)
+			if start != nil || end != nil {
+				t.Fatalf("recovery window %v to %v", start, end)
+			}
+		})
+	}
+	if start, end := nativeRecoveryWindow(t.Context(), recoveryWindowReader{}, db, project, spec, &last, now); start != nil || end != nil {
+		t.Fatalf("recovery window after failed read %v to %v", start, end)
+	}
+
+	store.SetGeneration(2)
+	statusWrite := metav1.NewTime(now)
+	specWrite := metav1.NewTime(to.Add(-time.Second))
+	fields := metav1.NewFieldsV1(`{"f:spec":{}}`)
+	store.SetManagedFields([]metav1.ManagedFieldsEntry{
+		{Manager: v1alpha1.DatabaseFieldManager, FieldsType: "FieldsV1", Time: &specWrite, FieldsV1: fields},
+		{Manager: "barman", Subresource: "status", FieldsType: "FieldsV1", Time: &statusWrite, FieldsV1: fields},
+	})
+	if start, end := nativeRecoveryWindow(t.Context(), recoveryWindowReader{store: store}, db, project, spec, &last, now); start == nil || end == nil {
+		t.Fatalf("recovery window after verified store change %v to %v", start, end)
+	}
+	entries := store.GetManagedFields()
+	entries[0].Time = &statusWrite
+	store.SetManagedFields(entries)
+	if start, end := nativeRecoveryWindow(t.Context(), recoveryWindowReader{store: store}, db, project, spec, &last, now); start != nil || end != nil {
+		t.Fatalf("recovery window before the current store revision %v to %v", start, end)
 	}
 }
 

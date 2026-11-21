@@ -337,18 +337,58 @@ func TestBackupStatusAndHealthComeFromTheBackupObjects(t *testing.T) {
 	w.bringUp()
 	ctx := context.Background()
 	w.s3.put(string(w.db.UID)+"/base/1", 700)
-	backup := backupObject("first-"+nextSequence(), Name(w.db.UID), "completed", w.clock.Add(-time.Hour).UTC().Format(time.RFC3339), w.clock.Add(-50*time.Minute).UTC().Format(time.RFC3339))
+	w.clock = w.clock.Add(2 * time.Hour)
+	started := w.clock.Add(-time.Hour).UTC().Format(time.RFC3339)
+	completed := w.clock.Add(-50 * time.Minute).UTC().Format(time.RFC3339)
+	backup := backupObject("first-"+nextSequence(), Name(w.db.UID), "completed", started, completed)
 	must(t, w.c.Create(ctx, backup))
-	backup.Object["status"] = map[string]any{"phase": "completed", "startedAt": w.clock.Add(-time.Hour).UTC().Format(time.RFC3339), "stoppedAt": w.clock.Add(-50 * time.Minute).UTC().Format(time.RFC3339)}
+	backup.Object["status"] = map[string]any{"phase": "completed", "startedAt": started, "stoppedAt": completed}
 	must(t, w.c.Status().Update(ctx, backup))
 	w.clock = w.clock.Add(11 * time.Minute)
 	w.reconcile()
 	status := w.db.Status.Backup
-	if status == nil || len(status.Items) != 1 || status.LastAt == nil || status.SizeBytes != 700 {
+	if status == nil || len(status.Items) != 1 || status.LastAt == nil || status.SizeBytes != 700 ||
+		status.PITRFrom != nil || status.PITRTo != nil {
 		t.Fatalf("backup status %+v", status)
 	}
 	if condition := meta.FindStatusCondition(w.db.Status.Conditions, ConditionBackupHealthy); condition == nil || condition.Status != metav1.ConditionTrue || condition.Reason != "BackupCurrent" {
 		t.Fatalf("condition %+v", condition)
+	}
+
+	store := &unstructured.Unstructured{}
+	store.SetGroupVersionKind(ObjectStoreGVK)
+	key := client.ObjectKey{Name: Name(w.db.UID), Namespace: PlatformNamespace}
+	must(t, w.c.Get(ctx, key, store))
+	store.Object["status"] = map[string]any{"serverRecoveryWindow": map[string]any{
+		string(w.db.UID): map[string]any{
+			"firstRecoverabilityPoint": completed,
+			"lastSuccessfulBackupTime": completed,
+		},
+	}}
+	must(t, w.c.Status().Update(ctx, store))
+	w.reconcile()
+	status = w.db.Status.Backup
+	if status == nil || status.PITRFrom == nil || status.PITRTo == nil ||
+		!status.PITRFrom.Time.Equal(mustTime(completed)) || !status.PITRTo.Time.Equal(mustTime(completed)) {
+		t.Fatalf("backup recovery bounds %+v", status)
+	}
+
+	must(t, w.c.Delete(ctx, backup))
+	w.reconcile()
+	status = w.db.Status.Backup
+	if status == nil || len(status.Items) != 0 || status.LastAt != nil || status.PITRFrom == nil ||
+		status.PITRTo == nil || !status.PITRTo.Time.Equal(mustTime(completed)) {
+		t.Fatalf("backup status after removing the Backup record %+v", status)
+	}
+
+	must(t, w.c.Get(ctx, key, store))
+	store.Object["status"] = map[string]any{}
+	must(t, w.c.Status().Update(ctx, store))
+	w.reconcile()
+	status = w.db.Status.Backup
+	if status == nil || len(status.Items) != 0 || status.LastAt != nil || status.SizeBytes != 700 ||
+		status.PITRFrom != nil || status.PITRTo != nil {
+		t.Fatalf("backup status without current bounds %+v", status)
 	}
 }
 
