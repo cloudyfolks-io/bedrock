@@ -107,6 +107,8 @@ iface=$(ip -json route show default | python3 -c 'import json,sys; print(json.lo
 nodeip=$(ip -json -4 addr show dev "$iface" | python3 -c 'import json,sys; print(json.load(sys.stdin)[0]["addr_info"][0]["local"])')
 vip=$(echo "$nodeip" | awk -F. '{printf "%s.%s.%s.250", $1, $2, $3}')
 if [ "$vip" = "$nodeip" ]; then vip=$(echo "$nodeip" | awk -F. '{printf "%s.%s.%s.251", $1, $2, $3}'); fi
+pin_hosts "$vip" "$platform_host"
+expect_equal "$vip" "$(getent ahostsv4 "sso.$platform_host" | awk 'NR == 1 {print $1}')" "control-plane issuer address"
 
 osd_device=$(resolve_osd_device)
 if [ -n "${E2E_OSD_DEVICE:-}" ]; then
