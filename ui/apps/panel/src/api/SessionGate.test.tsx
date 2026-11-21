@@ -90,6 +90,41 @@ describe("SessionGate", () => {
     expect(calls).toBe(2);
   });
 
+  it("withholds admin content after a failed session recheck until retry succeeds", async () => {
+    const user = userEvent.setup();
+    const assign = vi.fn();
+    let calls = 0;
+    const { queryClient } = renderPanel(
+      <SessionGate>
+        <p>Admin inventory</p>
+      </SessionGate>,
+      {
+        session: null,
+        assign,
+        api: {
+          "GET /proxy/v1/session": () => {
+            calls += 1;
+            return calls === 2 ? { status: 502, body: { error: "upstream_unavailable" } } : { body: session };
+          },
+        },
+      },
+    );
+    expect(await screen.findByText("Admin inventory")).toBeTruthy();
+
+    await act(async () => {
+      await queryClient.invalidateQueries({ queryKey: sessionKey });
+    });
+
+    const retry = await screen.findByRole("button", { name: "Retry" });
+    expect(queryClient.getQueryData(sessionKey)).toEqual(session);
+    expect(screen.queryByText("Admin inventory")).toBeNull();
+    expect(assign).not.toHaveBeenCalled();
+
+    await user.click(retry);
+    expect(await screen.findByText("Admin inventory")).toBeTruthy();
+    expect(calls).toBe(3);
+  });
+
   it("TestCsrfIsHeldInMemoryOnly", async () => {
     function Probe() {
       const query = useSession();

@@ -83,9 +83,6 @@ export function SessionGate({ children }: { children: ReactNode }) {
     assign(loginUrl(returnTo));
   }, [unauthenticated, assign, returnTo]);
 
-  if (query.data && !unauthenticated) {
-    return <Fragment key={sessionScope(query.data)}>{children}</Fragment>;
-  }
   if (unauthenticated && blocked) {
     return (
       <GateCard>
@@ -103,6 +100,9 @@ export function SessionGate({ children }: { children: ReactNode }) {
         </Button>
       </GateCard>
     );
+  }
+  if (query.data && !unauthenticated) {
+    return <Fragment key={sessionScope(query.data)}>{children}</Fragment>;
   }
   return <Spinner />;
 }
