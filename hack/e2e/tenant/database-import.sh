@@ -189,12 +189,31 @@ database_import_ovn_withdrawn() {
   [[ "$frontends" != *"$address:$port"* ]]
 }
 
+database_import_proxy_stopped() {
+  kubectl -n "$NS" get pods -l "app.kubernetes.io/instance=db-$uid,app.kubernetes.io/component=endpoint" -o json |
+    jq -e '
+      def stopped($containers; $statuses):
+        ($containers | map(.name) | sort) == ($statuses | map(.name) | sort) and
+        all($statuses[];
+          .ready == false and .state.running == null and .state.waiting == null and
+          (.state.terminated.finishedAt | type == "string" and length > 0) and
+          .state.terminated.reason != "ContainerStatusUnknown");
+      (.items | type == "array") and all(.items[];
+        (.status.phase == "Succeeded" or .status.phase == "Failed") and
+        all(.status.conditions[]?; (.type != "Ready" and .type != "ContainersReady") or .status != "True") and
+        (.spec.containers | length > 0) and
+        stopped(.spec.containers; (.status.containerStatuses // [])) and
+        stopped((.spec.initContainers // []); (.status.initContainerStatuses // [])) and
+        stopped((.spec.ephemeralContainers // []); (.status.ephemeralContainerStatuses // [])))
+    ' >/dev/null
+}
+
 database_import_wait_withdrawn() {
   wait_gone 180 loadbalancers.fabric.cloudyfolks.io "$frontend"
   wait_gone 180 switch-lb-rules.fabric.cloudyfolks.io "flb-$frontend"
   wait_gone 180 service "slr-flb-$frontend" -n "$NS"
   wait_gone 180 endpoints "slr-flb-$frontend" -n "$NS"
-  wait_empty 180 -n "$NS" get pods -l "app.kubernetes.io/instance=db-$uid,app.kubernetes.io/component=endpoint"
+  retry_until 180 database_import_proxy_stopped
   retry_until 120 database_import_ovn_withdrawn
 }
 

@@ -390,7 +390,8 @@ func TestLegacyEndpointReconcileWithdrawsWhenAuthorizationIsLost(t *testing.T) {
 			frontend.SetUID("uid-frontend")
 			foreign := fabric.SwitchLBRule(fabric.Meta{Name: in.db.Spec.Endpoint.LoadBalancerRef}, in.db.Spec.Endpoint.Address, "another-namespace", []string{"192.0.2.1"}, nil)
 			pod := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "draining-proxy", Namespace: in.db.Namespace,
-				Labels: map[string]string{managedProxyLabel: string(in.db.UID)}}}
+				Labels: map[string]string{managedProxyLabel: string(in.db.UID)}},
+				Spec: corev1.PodSpec{Containers: []corev1.Container{{Name: "haproxy"}}}}
 			objects := []client.Object{in.db, &in.subnet, proxy, frontend, foreign, pod}
 			if reason != "missing claim" && !in.db.Spec.Suspended {
 				objects = append(objects, claim)
@@ -412,7 +413,7 @@ func TestLegacyEndpointReconcileWithdrawsWhenAuthorizationIsLost(t *testing.T) {
 				open.Data["claimUID"] = "other-claim"
 				objects = append(objects, open)
 			}
-			c := fake.NewClientBuilder().WithScheme(testScheme(t)).WithStatusSubresource(in.db, proxy).WithObjects(objects...).Build()
+			c := fake.NewClientBuilder().WithScheme(testScheme(t)).WithStatusSubresource(in.db, proxy, pod).WithObjects(objects...).Build()
 			r := &Reconciler{Client: c, Live: c}
 			req := ctrl.Request{NamespacedName: client.ObjectKeyFromObject(in.db)}
 			assertRequeue := func(want ctrl.Result) {
@@ -435,8 +436,14 @@ func TestLegacyEndpointReconcileWithdrawsWhenAuthorizationIsLost(t *testing.T) {
 			proxy.Status = appsv1.DeploymentStatus{ObservedGeneration: proxy.Generation}
 			must(t, c.Status().Update(ctx, proxy))
 			assertRequeue(ctrl.Result{RequeueAfter: deleteRequeue})
-			must(t, c.Delete(ctx, pod))
+			must(t, c.Get(ctx, client.ObjectKeyFromObject(pod), pod))
+			pod.Status.Phase = corev1.PodSucceeded
+			pod.Status.ContainerStatuses = []corev1.ContainerStatus{{Name: "haproxy", State: corev1.ContainerState{
+				Terminated: &corev1.ContainerStateTerminated{Reason: "Completed", FinishedAt: metav1.Unix(100, 0)},
+			}}}
+			must(t, c.Status().Update(ctx, pod))
 			assertRequeue(ctrl.Result{RequeueAfter: gateRequeue})
+			must(t, c.Get(ctx, client.ObjectKeyFromObject(pod), pod))
 			must(t, c.Get(ctx, client.ObjectKeyFromObject(proxy), proxy))
 			if ptr.Deref(proxy.Spec.Replicas, 1) != 0 {
 				t.Fatal("the proxy restarted without authorization")
@@ -446,6 +453,64 @@ func TestLegacyEndpointReconcileWithdrawsWhenAuthorizationIsLost(t *testing.T) {
 				if !slices.Equal(group.Spec.Ingress, []v1alpha1.SecurityGroupRule{databaseIngressRule("192.0.2.0/24", int32(in.port))}) {
 					t.Fatal("withdrawal changed the customer group")
 				}
+			}
+		})
+	}
+}
+
+func TestLegacyProxyPodStoppedRequiresAllContainerTerminations(t *testing.T) {
+	finished := metav1.Unix(100, 0)
+	pod := corev1.Pod{
+		Spec: corev1.PodSpec{
+			Containers:          []corev1.Container{{Name: "haproxy"}},
+			InitContainers:      []corev1.Container{{Name: "setup"}},
+			EphemeralContainers: []corev1.EphemeralContainer{{EphemeralContainerCommon: corev1.EphemeralContainerCommon{Name: "diagnostic"}}},
+		},
+		Status: corev1.PodStatus{
+			Phase:                      corev1.PodSucceeded,
+			ContainerStatuses:          []corev1.ContainerStatus{{Name: "haproxy", State: corev1.ContainerState{Terminated: &corev1.ContainerStateTerminated{FinishedAt: finished}}}},
+			InitContainerStatuses:      []corev1.ContainerStatus{{Name: "setup", State: corev1.ContainerState{Terminated: &corev1.ContainerStateTerminated{FinishedAt: finished}}}},
+			EphemeralContainerStatuses: []corev1.ContainerStatus{{Name: "diagnostic", State: corev1.ContainerState{Terminated: &corev1.ContainerStateTerminated{FinishedAt: finished}}}},
+		},
+	}
+	for _, test := range []struct {
+		name   string
+		change func(*corev1.Pod)
+		want   bool
+	}{
+		{name: "succeeded", change: func(*corev1.Pod) {}, want: true},
+		{name: "failed with terminated process", change: func(pod *corev1.Pod) {
+			pod.Status.Phase = corev1.PodFailed
+			pod.Status.ContainerStatuses[0].State.Terminated.ExitCode = 137
+		}, want: true},
+		{name: "pending", change: func(pod *corev1.Pod) { pod.Status.Phase = corev1.PodPending }},
+		{name: "running", change: func(pod *corev1.Pod) { pod.Status.Phase = corev1.PodRunning }},
+		{name: "unknown phase", change: func(pod *corev1.Pod) { pod.Status.Phase = corev1.PodUnknown }},
+		{name: "ready pod", change: func(pod *corev1.Pod) {
+			pod.Status.Conditions = []corev1.PodCondition{{Type: corev1.PodReady, Status: corev1.ConditionTrue}}
+		}},
+		{name: "missing proxy status", change: func(pod *corev1.Pod) { pod.Status.ContainerStatuses = nil }},
+		{name: "unknown terminated process", change: func(pod *corev1.Pod) {
+			pod.Status.ContainerStatuses[0].State.Terminated.Reason = "ContainerStatusUnknown"
+		}},
+		{name: "missing termination time", change: func(pod *corev1.Pod) {
+			pod.Status.ContainerStatuses[0].State.Terminated.FinishedAt = metav1.Time{}
+		}},
+		{name: "running init sidecar", change: func(pod *corev1.Pod) {
+			pod.Status.InitContainerStatuses[0].State = corev1.ContainerState{Running: &corev1.ContainerStateRunning{}}
+		}},
+		{name: "waiting ephemeral container", change: func(pod *corev1.Pod) {
+			pod.Status.EphemeralContainerStatuses[0].State = corev1.ContainerState{Waiting: &corev1.ContainerStateWaiting{}}
+		}},
+		{name: "wrong ephemeral status name", change: func(pod *corev1.Pod) {
+			pod.Status.EphemeralContainerStatuses[0].Name = "another-container"
+		}},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			current := pod.DeepCopy()
+			test.change(current)
+			if got := legacyProxyPodStopped(current); got != test.want {
+				t.Fatalf("managed proxy stopped = %t, want %t", got, test.want)
 			}
 		})
 	}

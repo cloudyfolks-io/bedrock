@@ -665,7 +665,7 @@ func (r *Reconciler) legacyEndpointActive(ctx context.Context, db v1alpha1.Datab
 			return true, nil
 		}
 	}
-	return r.legacyProxyHasPods(ctx, db)
+	return r.legacyProxyHasActivePods(ctx, db)
 }
 
 func (r *Reconciler) withdrawLegacyEndpoint(ctx context.Context, db v1alpha1.Database) (bool, error) {
@@ -690,14 +690,72 @@ func (r *Reconciler) stopLegacyProxy(ctx context.Context, db v1alpha1.Database) 
 			return false, nil
 		}
 	}
-	pods, err := r.legacyProxyHasPods(ctx, db)
+	pods, err := r.legacyProxyHasActivePods(ctx, db)
 	return err == nil && !pods, err
 }
 
-func (r *Reconciler) legacyProxyHasPods(ctx context.Context, db v1alpha1.Database) (bool, error) {
+func (r *Reconciler) legacyProxyHasActivePods(ctx context.Context, db v1alpha1.Database) (bool, error) {
 	var pods corev1.PodList
-	err := r.Live.List(ctx, &pods, client.InNamespace(db.Namespace), client.MatchingLabels{managedProxyLabel: string(db.UID)})
-	return len(pods.Items) != 0, err
+	if err := r.Live.List(ctx, &pods, client.InNamespace(db.Namespace), client.MatchingLabels{managedProxyLabel: string(db.UID)}); err != nil {
+		return false, err
+	}
+	if pods.Continue != "" {
+		return false, errors.New("the managed proxy pod list is incomplete")
+	}
+	for i := range pods.Items {
+		if !legacyProxyPodStopped(&pods.Items[i]) {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
+func legacyProxyPodStopped(pod *corev1.Pod) bool {
+	if pod.Status.Phase != corev1.PodSucceeded && pod.Status.Phase != corev1.PodFailed {
+		return false
+	}
+	for _, condition := range pod.Status.Conditions {
+		if (condition.Type == corev1.PodReady || condition.Type == corev1.ContainersReady) && condition.Status == corev1.ConditionTrue {
+			return false
+		}
+	}
+	if len(pod.Spec.Containers) == 0 || len(pod.Spec.Containers) != len(pod.Status.ContainerStatuses) ||
+		len(pod.Spec.InitContainers) != len(pod.Status.InitContainerStatuses) ||
+		len(pod.Spec.EphemeralContainers) != len(pod.Status.EphemeralContainerStatuses) {
+		return false
+	}
+	for _, container := range pod.Spec.Containers {
+		if !legacyProxyContainerStopped(container.Name, pod.Status.ContainerStatuses) {
+			return false
+		}
+	}
+	for _, container := range pod.Spec.InitContainers {
+		if !legacyProxyContainerStopped(container.Name, pod.Status.InitContainerStatuses) {
+			return false
+		}
+	}
+	for _, container := range pod.Spec.EphemeralContainers {
+		if !legacyProxyContainerStopped(container.Name, pod.Status.EphemeralContainerStatuses) {
+			return false
+		}
+	}
+	return true
+}
+
+func legacyProxyContainerStopped(name string, statuses []corev1.ContainerStatus) bool {
+	stopped := false
+	for _, status := range statuses {
+		if status.Name != name {
+			continue
+		}
+		state := status.State
+		if stopped || status.Ready || state.Running != nil || state.Waiting != nil || state.Terminated == nil ||
+			state.Terminated.FinishedAt.IsZero() || state.Terminated.Reason == "ContainerStatusUnknown" {
+			return false
+		}
+		stopped = true
+	}
+	return stopped
 }
 
 func (r *Reconciler) removeLegacyFrontend(ctx context.Context, db v1alpha1.Database) (bool, error) {
