@@ -261,9 +261,10 @@ probe_before=$(probe_identity) || fail 'The isolated API probe does not match th
 if ! [[ $(controller_identity) == "$controller_before" && $(service_identity) == "$service_before" ]] || ! endpoints_match "$pod_ip"; then
   fail 'The source route or controller changed before the marker check.'
 fi
-if ! timeout 25s kubectl --request-timeout=20s -n "$namespace" exec -i "$probe_name" -c client -- \
+child_kubectl=(timeout 25s kubectl --request-timeout=20s -n "$namespace" exec -i "$probe_name" -c client --
   env HTTPS_PROXY= https_proxy= HTTP_PROXY= http_proxy= ALL_PROXY= all_proxy= \
-  k0s kubectl --kubeconfig=/dev/stdin --request-timeout=15s -n default get configmap "$marker" -o json \
+  k0s kubectl --kubeconfig=/dev/stdin --request-timeout=15s)
+if ! "${child_kubectl[@]}" -n default get configmap "$marker" -o json \
   <"$work/original.kubeconfig" 2>/dev/null |
   jq -ce --slurpfile source "$approved" '
     $source[0].marker as $m |
@@ -273,6 +274,22 @@ if ! timeout 25s kubectl --request-timeout=20s -n "$namespace" exec -i "$probe_n
     {name:.metadata.name,uid:.metadata.uid,revision:.metadata.resourceVersion,state:.data.state}' >"$work/marker" 2>/dev/null; then
   fail 'The original TLS Service did not return the approved marker.'
 fi
+
+endpoint_configmap_uid=
+deadline=$((SECONDS + 60))
+while (( SECONDS < deadline )); do
+  if endpoint_configmap_uid=$("${child_kubectl[@]}" get --raw /api/v1/namespaces/kube-system/configmaps/control-plane-endpoint \
+    <"$work/original.kubeconfig" 2>/dev/null | jq -er --slurpfile source "$approved" --arg uid "$uid_pattern" '
+      select(.apiVersion=="v1" and .kind=="ConfigMap" and .metadata.namespace=="kube-system" and
+        .metadata.name=="control-plane-endpoint" and .metadata.deletionTimestamp==null and (.binaryData // {})=={} and
+        .data=={apiServerHost:$source[0].api_service.address,apiServerPort:"6443"}) |
+      .metadata.uid | select(test($uid) and .!="00000000-0000-0000-0000-000000000000")' 2>/dev/null); then
+    break
+  fi
+  endpoint_configmap_uid=
+  sleep 2
+done
+[[ $endpoint_configmap_uid =~ $uid_pattern ]] || fail 'The original TLS Service did not return the expected control-plane endpoint ConfigMap.'
 
 if ! [[ $(kc get namespace kube-system -o jsonpath='{.metadata.uid}') == "$guest_uid" &&
   $(controller_identity) == "$controller_before" && $(service_identity) == "$service_before" && $(probe_identity) == "$probe_before" ]] ||
@@ -287,11 +304,11 @@ source_secret "$cluster-kubeconfig" value >"$work/kubeconfig-current" &&
   fail 'The original kubeconfig or its source CA changed during the marker check.'
 
 jq -n --slurpfile source "$approved" --arg input "$source_sha" --arg config "$(file_hash "$work/original.kubeconfig")" \
-  --arg ca "$(file_hash "$work/source-ca.der")" --arg marker "$(file_hash "$work/marker")" '
+  --arg ca "$(file_hash "$work/source-ca.der")" --arg marker "$(file_hash "$work/marker")" --arg endpoint_uid "$endpoint_configmap_uid" '
   $source[0] as $s |
   {version:1,guest_uid:$s.guest_uid,namespace_uid:$s.namespace_uid,source_cluster_uid:$s.cluster_uid,
    service_uid:$s.api_service.uid,controller_pod_uid:$s.controller.pod_uid,source_receipt_sha256:$input,
-   kubeconfig_sha256:$config,ca_certificate_sha256:$ca,marker_sha256:$marker}' >"$work/api-evidence.json"
+   kubeconfig_sha256:$config,ca_certificate_sha256:$ca,marker_sha256:$marker,endpoint_configmap_uid:$endpoint_uid}' >"$work/api-evidence.json"
 ln -T -- "$work/original.kubeconfig" "$out/original.kubeconfig"
 ln -T -- "$work/api-evidence.json" "$out/api-evidence.json"
 file_hash "$out/api-evidence.json"

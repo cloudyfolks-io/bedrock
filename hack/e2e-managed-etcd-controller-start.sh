@@ -419,17 +419,51 @@ def route_ready(source, pod_uid, address):
     return entry["conditions"].get("ready") is True and not entry["conditions"].get("terminating")
 
 
-def controller_pod(stored, source, claim, member, member_ip, image, projections, claim_sha, member_sha):
+def controller_stacks(stored, source):
+    original, = [item for item in stored["stateful_sets"]["items"] if item["metadata"]["uid"] == source["controller"]["statefulset_uid"]]
+    spec = original["spec"]["template"]["spec"]
+    controller, = spec["containers"]
+    address = str(ipaddress.IPv4Address(source["api_service"]["address"]))
+    endpoint = ("apiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: control-plane-endpoint\n  namespace: kube-system\n"
+                f'data:\n  apiServerHost: "{address}"\n  apiServerPort: "6443"\n')
+    telemetry = ('\napiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: k0s-telemetry\n  namespace: kube-system\n'
+                 'data:\n  provider: "k0smotron"\n')
+    stacks = []
+    for name, path, key, content in (
+            ("kmc-etcd-source-endpoint", "/var/lib/k0s/manifests/kmc-etcd-source-endpoint", "endpoint.yaml", endpoint),
+            ("kmc-etcd-source-telemetry-config", "/var/lib/k0s/manifests/k0s-telemetry", "configmap.yaml", telemetry)):
+        volume, = [item for item in spec["volumes"] if item["name"] == name]
+        expected_volume = {"name": name, "configMap": {"name": name, "defaultMode": 0o644}}
+        require(volume == expected_volume or volume == {"name": name, "configMap": {"name": name}})
+        mount, = [item for item in controller["volumeMounts"] if item["name"] == name]
+        require(mount == {"name": name, "mountPath": path, "readOnly": True})
+        recorded, = [item for item in stored["config_maps"]["items"] if item["metadata"]["namespace"] == namespace and
+                     item["metadata"]["name"] == name]
+        current = get("configmap", name)
+        for config_map in (recorded, current):
+            info = metadata(config_map, recorded["metadata"]["uid"])
+            source_owner(config_map, source["cluster_uid"])
+            require(info["name"] == name and info["namespace"] == namespace and info["resourceVersion"] and
+                    info["ownerReferences"] == recorded["metadata"]["ownerReferences"] and
+                    config_map.get("apiVersion", "v1") == "v1" and config_map.get("kind", "ConfigMap") == "ConfigMap" and
+                    not config_map.get("binaryData") and config_map["data"] == {key: content})
+        stacks.append({"volume": expected_volume, "mount": mount, "file": path + "/" + key, "sha256": digest(content.encode())})
+    return stacks
+
+
+def controller_pod(stored, source, claim, member, member_ip, image, projections, stacks, claim_sha, member_sha):
     original, = [item for item in stored["stateful_sets"]["items"] if item["metadata"]["uid"] == source["controller"]["statefulset_uid"]]
     template, = original["spec"]["template"]["spec"]["containers"]
     original_mount = next(item for item in template["volumeMounts"] if item["mountPath"] == "/var/lib/k0s")
     maps = {item["metadata"]["name"]: item for item in stored["config_maps"]["items"] if item["metadata"]["namespace"] == namespace}
     script = maps["kmc-entrypoint-etcd-source-config"]["data"]["k0smotron-entrypoint.sh"]
     config = maps["kmc-etcd-source-config"]["data"]["K0SMOTRON_K0S_YAML"]
+    check_stacks = "".join(f"checksum=$(sha256sum '{stack['file']}')\n"
+                           f"[ \"${{checksum%% *}}\" = '{stack['sha256']}' ] || exit 1\n" for stack in stacks)
     one_use = "set -C\n: > /var/lib/k0s/.bedrock-etcd-controller-started\nset +C\n"
     controller = {"name": "controller", "image": image, "imagePullPolicy": "Never", "command": ["/bin/sh", "-ec"],
-                  "args": [one_use + script], "env": [{"name": "K0SMOTRON_K0S_YAML", "value": config}], "resources": template.get("resources", {}),
-                  "volumeMounts": [original_mount],
+                  "args": [check_stacks + one_use + script], "env": [{"name": "K0SMOTRON_K0S_YAML", "value": config}],
+                  "resources": template.get("resources", {}), "volumeMounts": [original_mount, *(stack["mount"] for stack in stacks)],
                   "readinessProbe": {"exec": {"command": ["k0s", "status"]}, "periodSeconds": 5, "timeoutSeconds": 5,
                                      "successThreshold": 1, "failureThreshold": 3}}
     for key in ("ports", "securityContext"):
@@ -453,7 +487,7 @@ def controller_pod(stored, source, claim, member, member_ip, image, projections,
            "hostname": source["controller"]["pod"], "hostAliases": [{"ip": member_ip, "hostnames": [member_service, member_host]}],
            "terminationGracePeriodSeconds": source_spec.get("terminationGracePeriodSeconds", 30),
            "volumes": [{"name": original_mount["name"], "persistentVolumeClaim": {"claimName": claim}},
-                       {"name": "certs", "projected": {"defaultMode": 0o400, "sources": projections}}],
+                       {"name": "certs", "projected": {"defaultMode": 0o400, "sources": projections}}, *(stack["volume"] for stack in stacks)],
            "initContainers": [signer, probe], "containers": [controller]}
     if "securityContext" in source_spec:
         pod["securityContext"] = source_spec["securityContext"]
@@ -502,12 +536,16 @@ def controller_runtime(expected, spec, image):
     return str(ipaddress.IPv4Address(status["podIP"])), container["containerID"]
 
 
-def verified_marker(pod, container, kubeconfig, source, evidence, extra=()):
+def child_configmap(pod, container, kubeconfig, path, extra):
     command = ["kubectl", "--request-timeout=20s", "-n", namespace, "exec", "-i", pod, "-c", container, "--",
                "env", "HTTPS_PROXY=", "https_proxy=", "HTTP_PROXY=", "http_proxy=", "ALL_PROXY=", "all_proxy=",
                "k0s", "kubectl", "--kubeconfig=/dev/stdin", "--request-timeout=10s", *extra,
-               "get", "--raw", "/api/v1/namespaces/default/configmaps/" + source["marker"]["name"]]
-    obj = json.loads(run(command, kubeconfig), object_pairs_hook=unique)
+               "get", "--raw", path]
+    return json.loads(run(command, kubeconfig), object_pairs_hook=unique)
+
+
+def verified_marker(pod, container, kubeconfig, source, evidence, extra=()):
+    obj = child_configmap(pod, container, kubeconfig, "/api/v1/namespaces/default/configmaps/" + source["marker"]["name"], extra)
     expected = source["marker"]
     info = metadata(obj, expected["uid"])
     require(obj["kind"] == "ConfigMap" and obj["apiVersion"] == "v1" and info["namespace"] == "default" and
@@ -515,6 +553,14 @@ def verified_marker(pod, container, kubeconfig, source, evidence, extra=()):
     result = {"name": info["name"], "uid": info["uid"], "revision": info["resourceVersion"], "state": obj["data"]["state"]}
     require(digest(encode(result)) == evidence["marker_sha256"])
     return True
+
+
+def verify_child_endpoint(pod, container, kubeconfig, source, evidence, extra=()):
+    obj = child_configmap(pod, container, kubeconfig, "/api/v1/namespaces/kube-system/configmaps/control-plane-endpoint", extra)
+    info = metadata(obj, evidence["endpoint_configmap_uid"])
+    require(obj["kind"] == "ConfigMap" and obj["apiVersion"] == "v1" and info["namespace"] == "kube-system" and
+            info["name"] == "control-plane-endpoint" and not obj.get("binaryData") and
+            obj["data"] == {"apiServerHost": source["api_service"]["address"], "apiServerPort": "6443"})
 
 
 def probe_runtime(expected_uid, admitted, image):
@@ -570,6 +616,7 @@ def service_marker(kubeconfig, source, evidence, image, controller_uid, address,
         wait_for(lambda: route_ready(source, controller_uid, address))
         require(service_state(source, label)["resourceVersion"] == resource_version and route_ready(source, controller_uid, address))
         verified_marker(probe_name, "probe", kubeconfig, source, evidence)
+        verify_child_endpoint(probe_name, "probe", kubeconfig, source, evidence)
         require(probe_runtime(probe_uid, dry["spec"], image) == runtime and
                 service_state(source, label)["resourceVersion"] == resource_version and route_ready(source, controller_uid, address))
         verify_member_policy(member, controller_uid)
@@ -616,6 +663,7 @@ def main(guest, source_path, source_sha, proof_dir, api_dir, api_sha, claim_path
     scope = {"guest_uid": guest, "namespace_uid": source["namespace_uid"], "source_cluster_uid": source["cluster_uid"], "source_receipt_sha256": source_sha}
     for record in (claim, member, api):
         require(record["version"] == 1 and all(record[key] == value for key, value in scope.items()))
+    require(uid(api.get("endpoint_configmap_uid")), "The original API evidence must identify the control-plane endpoint ConfigMap.")
     require(member["scope"] == "synthetic-etcd-reachable-member",
             "Supply the approved reachable etcd member receipt. The loopback recovery receipt cannot be used.")
     require(source["version"] == 1 and source["guest_uid"] == guest and source["namespace"] == namespace and source["cluster"] == cluster and
@@ -649,9 +697,10 @@ def main(guest, source_path, source_sha, proof_dir, api_dir, api_sha, claim_path
     require(image_digest)
     image = pinned_image("quay.io/k0sproject/k0s@" + image_digest[0], "quay.io/k0sproject/k0s")
     projections = approved_signers(claim, source, api)
+    stacks = controller_stacks(stored, source)
     verify_disk_users(source, claim, member, "")
     verify_source_denials(source, image)
-    wanted = controller_pod(stored, source, claim["execution_disk"]["claim"], member, member_ip, image, projections, claim_sha, member_sha)
+    wanted = controller_pod(stored, source, claim["execution_disk"]["claim"], member, member_ip, image, projections, stacks, claim_sha, member_sha)
     body = encode(wanted)
     dry = ns("create", "--dry-run=server", "-f", "-", "-o", "json", body=body)
     validate_admitted(dry, wanted)
@@ -667,6 +716,7 @@ def main(guest, source_path, source_sha, proof_dir, api_dir, api_sha, claim_path
         verify_frozen_source(source, frozen, stored)
         verify_disk_users(source, claim, member, target_uid)
         require(verified_member(member, source, target_uid) == member_ip and approved_signers(claim, source, api) == projections)
+        require(controller_stacks(stored, source) == stacks)
         changes = [{"op": "test", "path": "/metadata/uid", "value": target_uid},
                    {"op": "test", "path": "/metadata/resourceVersion", "value": info["resourceVersion"]},
                    {"op": "test", "path": "/spec/schedulingGates", "value": gate},
@@ -675,8 +725,9 @@ def main(guest, source_path, source_sha, proof_dir, api_dir, api_sha, claim_path
         spec = {key: value for key, value in current["spec"].items() if key != "schedulingGates"}
         runtime = wait_for(lambda: controller_runtime(target_uid, spec, image))
         ip, _ = runtime
-        wait_for(lambda: verified_marker(target, "controller", kubeconfig, source, api,
-                 ("--server=https://" + ip + ":6443", "--tls-server-name=" + source["api_service"]["address"])))
+        direct = ("--server=https://" + ip + ":6443", "--tls-server-name=" + source["api_service"]["address"])
+        wait_for(lambda: verified_marker(target, "controller", kubeconfig, source, api, direct))
+        verify_child_endpoint(target, "controller", kubeconfig, source, api, direct)
         require(verified_member(member, source, target_uid) == member_ip)
         moving = True
         probe_uid, route_version = service_marker(kubeconfig, source, api, image, target_uid, ip, original_selector, member)
@@ -685,11 +736,13 @@ def main(guest, source_path, source_sha, proof_dir, api_dir, api_sha, claim_path
         verify_disk_users(source, claim, member, target_uid)
         require(service_state(source, label)["resourceVersion"] == route_version)
         require(route_ready(source, target_uid, ip) and controller_runtime(target_uid, spec, image) == runtime and
-                verified_member(member, source, target_uid) == member_ip and approved_signers(claim, source, api) == projections)
+                verified_member(member, source, target_uid) == member_ip and approved_signers(claim, source, api) == projections and
+                controller_stacks(stored, source) == stacks)
         receipt_sha = publish(proof_dir, {"version": 1, "scope": "synthetic-etcd-controller-start", **scope,
                                           "source_service_uid": source["api_service"]["uid"], "controller_pod_uid": target_uid,
                                           "api_probe_pod_uid": probe_uid, "service_resource_version": route_version,
                                           "member_pod_uid": member["pod_uid"], "controller_image": image, "marker_sha256": api["marker_sha256"],
+                                          "endpoint_configmap_uid": api["endpoint_configmap_uid"],
                                           "api_evidence_sha256": api_sha, "controller_execution_sha256": claim_sha, "reachable_member_sha256": member_sha})
     except (OSError, subprocess.SubprocessError, AttributeError, KeyError, TypeError, ValueError, RecursionError, KeyboardInterrupt):
         if moving:
@@ -719,6 +772,7 @@ try:
     main(*sys.argv[1:])
 except ValueError as error:
     allowed = {failure, "Supply the approved reachable etcd member receipt. The loopback recovery receipt cannot be used.",
+               "The original API evidence must identify the control-plane endpoint ConfigMap.",
                "Preload the approved digest references on the development guest.", "The isolated recovered controller did not become ready within the time limit."}
     sys.exit(str(error) if str(error) in allowed else failure)
 except (OSError, subprocess.SubprocessError, AttributeError, KeyError, TypeError, RecursionError, KeyboardInterrupt):
