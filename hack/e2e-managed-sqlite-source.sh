@@ -12,7 +12,7 @@ if [[ $(uname -s) != Linux || ! -s /var/lib/bedrock/e2e-admin-password || ! -f $
   printf '%s\n' 'Run this fixture inside an initialized Bedrock development guest.' >&2
   exit 1
 fi
-for tool in kubectl jq sha256sum awk; do
+for tool in kubectl jq sha256sum awk base64 timeout; do
   command -v "$tool" >/dev/null
 done
 if [[ $(kubectl --request-timeout=10s get namespace kube-system -o jsonpath='{.metadata.uid}') != "$guest_uid" ]]; then
@@ -171,14 +171,104 @@ volume_uid=$(kubectl get pv "$volume" -o json |
       (.spec.claimRef | .namespace == $ns and .name == $claim and .uid == $uid)) |
     .metadata.uid | select(length > 0)')
 
-child_kubectl() {
-  kubectl -n "$namespace" exec "$pod" -c controller -- k0s kubectl --server="https://$address:6443" --request-timeout=10s "$@"
+service_uid=$(kubectl -n "$namespace" get service "$service" -o jsonpath='{.metadata.uid}')
+controller=$(kubectl -n "$namespace" get pod "$pod" -o json)
+pod_uid=$(jq -er '.metadata.uid | select(length > 0)' <<<"$controller")
+pod_address=$(jq -er '.status.podIP | select(length > 0)' <<<"$controller")
+probe_node=$(jq -er '.spec.nodeName | select(length > 0)' <<<"$controller")
+probe_image=$(jq -er '.spec.containers[] | select(.name == "controller") | .image' <<<"$controller")
+test -n "$service_uid"
+
+probe=$(jq -n --arg node "$probe_node" --arg image "$probe_image" '
+  {apiVersion:"v1",kind:"Pod",metadata:{generateName:"sqlite-source-probe-"},spec:{nodeName:$node,automountServiceAccountToken:false,
+    restartPolicy:"Never",activeDeadlineSeconds:420,containers:[{name:"client",image:$image,imagePullPolicy:"Never",
+      command:["/bin/sh","-c","exec sleep 420"],securityContext:{allowPrivilegeEscalation:false,capabilities:{drop:["ALL"]}}}]}}' |
+  kubectl -n "$namespace" create -f - -o json)
+probe_name=$(jq -er '.metadata.name | select(test("^sqlite-source-probe-[a-z0-9]+$"))' <<<"$probe")
+probe_uid=$(jq -er '.metadata.uid | select(length > 0)' <<<"$probe")
+
+remove_probe() {
+  local status=$?
+  trap - EXIT
+  if ! jq -nc --arg uid "$probe_uid" '{apiVersion:"v1",kind:"DeleteOptions",preconditions:{uid:$uid}}' |
+    kubectl --request-timeout=10s delete --raw "/api/v1/namespaces/$namespace/pods/$probe_name" -f - >/dev/null; then
+    printf '%s\n' 'Could not remove the SQLite client Pod by UID.' >&2
+    exit 1
+  fi
+  exit "$status"
+}
+trap remove_probe EXIT
+kubectl -n "$namespace" wait --for=condition=Ready "pod/$probe_name" --timeout=90s >&2
+
+child_credentials() {
+  kubectl --request-timeout=10s -n "$namespace" get secret "$cluster-kubeconfig" -o json |
+    jq -er --arg uid "$cluster_uid" '
+      select(any(.metadata.ownerReferences[]; .kind == "Cluster" and .uid == $uid and .controller == true)) |
+      .data.value | select(type == "string" and length > 0)' | base64 -d
 }
 
-retry_until 180 child_kubectl get --raw=/readyz
-child_kubectl -n default create configmap "$marker" --from-literal=state=before-handoff >&2
-marker_uid=$(child_kubectl -n default get configmap "$marker" -o jsonpath='{.metadata.uid}')
-test -n "$marker_uid"
+if ! configured_endpoint=$(child_credentials | kubectl --kubeconfig=/dev/stdin config view --minify -o jsonpath='{.clusters[0].cluster.server}' 2>/dev/null) ||
+  [[ $configured_endpoint != "https://$address:6443" ]]; then
+  printf '%s\n' 'The generated child kubeconfig does not identify the private API endpoint.' >&2
+  exit 1
+fi
+
+child_kubectl() {
+  child_credentials | timeout 18s kubectl --request-timeout=15s -n "$namespace" exec -i "$probe_name" -c client -- \
+    k0s kubectl --kubeconfig=/dev/stdin --request-timeout=10s "$@"
+}
+
+endpoint_slices() {
+  kubectl --request-timeout=7s -n "$namespace" get endpointslices.discovery.k8s.io -l "kubernetes.io/service-name=$service" -o json
+}
+
+wait_private_api() {
+  local deadline=$((SECONDS + 180)) first=true slices result reason direct phase
+  while :; do
+    slices=$(endpoint_slices 2>/dev/null) || slices='{"items":[]}'
+    if ! jq -e --arg service "$service_uid" --arg pod "$pod_uid" --arg ip "$pod_address" '
+      .items | length == 1 and all(.[]; .addressType == "IPv4" and any(.metadata.ownerReferences[]; .kind == "Service" and .uid == $service) and
+        ([.ports[] | [.port,.protocol]] | sort) == [[6443,"TCP"],[8132,"TCP"]] and
+        (.endpoints | length == 1 and all(.[]; .conditions.ready == true and .targetRef.uid == $pod and .addresses == [$ip])))
+    ' <<<"$slices" >/dev/null 2>&1; then
+      reason='the Service has no matching Ready backend for both ports'
+    elif result=$(child_kubectl get --raw=/readyz 2>&1) && [[ $result == ok ]]; then
+      return 0
+    else
+      case $result in
+        *x509*|*'TLS handshake'*) reason='TLS validation or handshake failed' ;;
+        *Unauthorized*|*Forbidden*|*'provide credentials'*) reason='the child API refused client authentication or access' ;;
+        *'connection refused'*|*'no route to host'*|*timeout*|*'deadline exceeded'*) reason='the client could not reach the private API in time' ;;
+        *'config'*|*'certificate data'*) reason='the client could not use the generated kubeconfig' ;;
+        *) reason='the child API request failed or returned an unexpected readiness result' ;;
+      esac
+    fi
+    if [[ $first == true ]] || (( SECONDS >= deadline )); then
+      phase=first
+      if (( SECONDS >= deadline )); then phase=last; fi
+      printf 'The %s SQLite private API probe from %s to %s reported that %s.\n' "$phase" "$probe_name" "$address" "$reason" >&2
+      jq -c '[.items[:4][] | {ports:[(.ports // [])[:4][] | [.port,.protocol]],ready:[(.endpoints // [])[:4][] | .conditions.ready]}]' <<<"$slices" >&2
+      if direct=$(child_kubectl --server="https://$pod_address:6443" --tls-server-name="$address" get --raw=/readyz 2>&1) && [[ $direct == ok ]]; then
+        printf '%s\n' 'The direct controller probe passed with the same TLS server identity.' >&2
+      else
+        printf '%s\n' 'The direct controller probe did not return a verified readiness response.' >&2
+      fi
+      first=false
+    fi
+    (( SECONDS < deadline )) || return 1
+    sleep 3
+  done
+}
+
+wait_private_api
+if ! child_kubectl -n default create configmap "$marker" --from-literal=state=before-handoff >/dev/null 2>&1; then
+  printf '%s\n' 'The verified private API did not create the continuity marker.' >&2
+  exit 1
+fi
+if ! marker_uid=$(child_kubectl -n default get configmap "$marker" -o jsonpath='{.metadata.uid}' 2>/dev/null) || [[ -z $marker_uid ]]; then
+  printf '%s\n' 'The verified private API did not return the continuity marker UID.' >&2
+  exit 1
+fi
 
 jq -n --arg ns "$namespace" --arg ns_uid "$namespace_uid" --arg cluster "$cluster" --arg uid "$cluster_uid" \
   --arg service "$service" --arg address "$address" --arg statefulset "$statefulset" --arg marker "$marker" \
