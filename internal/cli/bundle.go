@@ -3,6 +3,7 @@ package cli
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
 	"io"
@@ -14,6 +15,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"syscall"
 
 	"github.com/cloudyfolks-io/bedrock/internal/host"
 	"github.com/cloudyfolks-io/bedrock/internal/release"
@@ -26,7 +28,10 @@ const (
 	oidcIssuer            = "https://token.actions.githubusercontent.com"
 	identityFormat        = `^https://github.com/cloudyfolks-io/bedrock/\.github/workflows/release\.yml@refs/tags/%s$`
 	minCosignVersion      = "v3.0.0"
+	bundlePartCount       = 100
 )
+
+var errReleaseAssetNotFound = errors.New("release asset not found")
 
 type BundleDeps struct {
 	Exec     host.Exec
@@ -159,7 +164,7 @@ func bundlePull(args []string, stdout, stderr io.Writer) int {
 	flags.StringVar(&o.arch, "arch", "amd64", "target architecture")
 	flags.StringVar(&o.baseURL, "base-url", DefaultReleaseBaseURL, "release download base url")
 	flags.Usage = func() {
-		fmt.Fprintf(stderr, "usage: bedrock bundle pull vX.Y.Z --out dir\nthe signature check needs cosign %s or newer\n", minCosignVersion)
+		fmt.Fprintf(stderr, "usage: bedrock bundle pull [--out dir] vX.Y.Z\nthe signature check needs cosign %s or newer\n", minCosignVersion)
 		flags.PrintDefaults()
 	}
 	if err := flags.Parse(args); err != nil {
@@ -174,49 +179,61 @@ func bundlePull(args []string, stdout, stderr io.Writer) int {
 }
 
 func RunBundlePull(ctx context.Context, o bundlePullOptions, deps BundleDeps, stdout, stderr io.Writer) int {
+	asset := BundleAssetName(o.version, o.arch)
+	if filepath.Base(asset) != asset {
+		return fail(stderr, fmt.Errorf("invalid bundle asset name %q", asset))
+	}
 	if err := os.MkdirAll(o.out, 0o755); err != nil {
 		return fail(stderr, err)
 	}
-	asset := BundleAssetName(o.version, o.arch)
-	for _, name := range []string{sumsFile, sigstoreBundleFile, asset} {
-		step(stdout, "downloading %s", name)
-		if err := downloadTo(ctx, o.baseURL+"/"+o.version+"/"+name, filepath.Join(o.out, name)); err != nil {
-			return fail(stderr, err)
-		}
-	}
-	if err := verifySignature(ctx, deps, o, stdout, stderr); err != nil {
-		for _, name := range []string{sumsFile, sigstoreBundleFile, asset} {
-			os.Remove(filepath.Join(o.out, name))
-		}
-		return fail(stderr, err)
-	}
-	sums, err := os.ReadFile(filepath.Join(o.out, sumsFile))
+	staged, err := os.MkdirTemp(o.out, ".bundle-pull-")
 	if err != nil {
 		return fail(stderr, err)
 	}
-	if err := VerifySums(string(sums), o.out, []string{asset}); err != nil {
-		os.Remove(filepath.Join(o.out, asset))
+	defer os.RemoveAll(staged)
+	base := o.baseURL + "/" + o.version + "/"
+	for _, name := range []string{sumsFile, sigstoreBundleFile} {
+		step(stdout, "downloading %s", name)
+		if err := downloadTo(ctx, base+name, filepath.Join(staged, name)); err != nil {
+			return fail(stderr, err)
+		}
+	}
+	if err := verifySignature(ctx, deps, o.version, staged, stdout, stderr); err != nil {
+		return fail(stderr, err)
+	}
+	sums, err := os.ReadFile(filepath.Join(staged, sumsFile))
+	if err != nil {
+		return fail(stderr, err)
+	}
+	step(stdout, "downloading %s", asset)
+	if err := downloadBundle(ctx, base+asset, filepath.Join(staged, asset)); err != nil {
+		return fail(stderr, err)
+	}
+	if err := VerifySums(string(sums), staged, []string{asset}); err != nil {
+		return fail(stderr, err)
+	}
+	if err := publishBundleFiles(staged, o.out, asset); err != nil {
 		return fail(stderr, err)
 	}
 	fmt.Fprintf(stdout, "bundle %s verified at %s\n", o.version, filepath.Join(o.out, asset))
 	return 0
 }
 
-func verifySignature(ctx context.Context, deps BundleDeps, o bundlePullOptions, stdout, stderr io.Writer) error {
+func verifySignature(ctx context.Context, deps BundleDeps, version, dir string, stdout, stderr io.Writer) error {
 	if _, err := deps.LookPath("cosign"); err != nil {
 		fmt.Fprintln(stderr, "warning: cosign not found, signature not verified")
 		return nil
 	}
-	version, err := deps.Exec.Run(ctx, "cosign", "version", "--json")
+	output, err := deps.Exec.Run(ctx, "cosign", "version", "--json")
 	if err != nil {
 		return fmt.Errorf("cosign version: %w", err)
 	}
-	if err := requireCosign(version, minCosignVersion); err != nil {
+	if err := requireCosign(output, minCosignVersion); err != nil {
 		return err
 	}
 	step(stdout, "verifying signature")
-	identity := fmt.Sprintf(identityFormat, regexp.QuoteMeta(o.version))
-	_, err = deps.Exec.Run(ctx, "cosign", "verify-blob", "--bundle", filepath.Join(o.out, sigstoreBundleFile), "--certificate-identity-regexp", identity, "--certificate-oidc-issuer", oidcIssuer, filepath.Join(o.out, sumsFile))
+	identity := fmt.Sprintf(identityFormat, regexp.QuoteMeta(version))
+	_, err = deps.Exec.Run(ctx, "cosign", "verify-blob", "--bundle", filepath.Join(dir, sigstoreBundleFile), "--certificate-identity-regexp", identity, "--certificate-oidc-issuer", oidcIssuer, filepath.Join(dir, sumsFile))
 	if err != nil {
 		return fmt.Errorf("signature verification failed: %w", err)
 	}
@@ -242,33 +259,86 @@ func VerifySums(sumsText, dir string, files []string) error {
 }
 
 func downloadTo(ctx context.Context, url, path string) error {
+	file, err := os.OpenFile(path, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o644)
+	if err != nil {
+		return err
+	}
+	return errors.Join(copyReleaseAsset(ctx, url, file), file.Close())
+}
+
+func downloadBundle(ctx context.Context, url, path string) error {
+	file, err := os.OpenFile(path, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o644)
+	if err != nil {
+		return err
+	}
+	err = copyReleaseAsset(ctx, url, file)
+	if errors.Is(err, errReleaseAssetNotFound) {
+		err = downloadBundleParts(ctx, url, file)
+	}
+	return errors.Join(err, file.Close())
+}
+
+func downloadBundleParts(ctx context.Context, url string, dst io.Writer) error {
+	for index := range bundlePartCount {
+		partURL := fmt.Sprintf("%s.part%02d", url, index)
+		err := copyReleaseAsset(ctx, partURL, dst)
+		if index > 0 && errors.Is(err, errReleaseAssetNotFound) {
+			return nil
+		}
+		if err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func copyReleaseAsset(ctx context.Context, url string, dst io.Writer) error {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
 		return err
 	}
+	req.Header.Set("Accept-Encoding", "identity")
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		return err
 	}
 	defer resp.Body.Close()
+	if resp.StatusCode == http.StatusNotFound {
+		return fmt.Errorf("download %s: status %d: %w", url, resp.StatusCode, errReleaseAssetNotFound)
+	}
 	if resp.StatusCode != http.StatusOK {
 		return fmt.Errorf("download %s: status %d", url, resp.StatusCode)
 	}
-	part := path + ".part"
-	file, err := os.OpenFile(part, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o644)
+	_, err = io.Copy(dst, resp.Body)
+	return err
+}
+
+func publishBundleFiles(staged, out, asset string) error {
+	directory, err := os.Open(out)
 	if err != nil {
 		return err
 	}
-	if _, err := io.Copy(file, resp.Body); err != nil {
-		file.Close()
-		os.Remove(part)
+	defer directory.Close()
+	if err := syscall.Flock(int(directory.Fd()), syscall.LOCK_EX); err != nil {
 		return err
 	}
-	if err := file.Close(); err != nil {
-		os.Remove(part)
-		return err
+	names := []string{sumsFile, sigstoreBundleFile, asset}
+	for _, name := range names {
+		path := filepath.Join(out, name)
+		info, err := os.Lstat(path)
+		if err != nil && !os.IsNotExist(err) {
+			return err
+		}
+		if err == nil && info.IsDir() {
+			return fmt.Errorf("cannot replace directory %s with a release file", path)
+		}
 	}
-	return os.Rename(part, path)
+	for _, name := range names {
+		if err := os.Rename(filepath.Join(staged, name), filepath.Join(out, name)); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func requireCosign(output, minimum string) error {
