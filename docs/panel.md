@@ -78,9 +78,11 @@ Every other kind with a namespace has a detail page at `/p/:project/<path>/:name
 
 ## Resource inventory
 
-Select a resource type in the admin perspective. Select a project to list resources in its namespace. Select **All projects** to list resources across namespaces, including namespaces with no linked Bedrock project. The inventory shows each resource name, namespace, project and status. Networks belong to tenants. Their inventory shows the tenant.
+Select a resource type in the Admin perspective. Select a project to list resources in its namespace. Select **All projects** to list resources across namespaces. The inventory shows the resource name, namespace, project and status. It labels resources in namespaces without a valid project link. If the controller reports that a project namespace is in conflict or is terminating, the project filter becomes unavailable.
 
-Use the exact resource name to find a resource. The address keeps the resource type, project and name filters so you can share the view with an authorized administrator. The inventory shows one page at a time. Open the first page again if the list expires. Open a linked resource to see its details and available actions.
+Networks belong to tenants, and the Network inventory shows the tenant. Clear the project filter to open that inventory. Virtual machine restores have their own resource type. A restore name links to its project's Backups page.
+
+Use the exact resource name to find a resource. The address keeps the resource type, project and name filters so you can share the view with an authorized administrator. The inventory shows one page at a time. Use **Refresh list** to request current results from the first page. If the list expires, use **Go to first page** to start a new list. An empty page can have more results on the next page.
 
 The Project perspective lists the Networks of the selected project's tenant that Kubernetes permits you to read. If you have project access only, use the Subnets page to see the networks attached to your project.
 
