@@ -82,9 +82,11 @@ Select a resource type in the admin perspective. Select a project to list resour
 
 Use the exact resource name to find a resource. The address keeps the resource type, project and name filters so you can share the view with an authorized administrator. The inventory shows one page at a time. Open the first page again if the list expires. Open a linked resource to see its details and available actions.
 
+The Project perspective lists the Networks of the selected project's tenant that Kubernetes permits you to read. If you have project access only, use the Subnets page to see the networks attached to your project.
+
 ## Live updates
 
-The resource lists and detail pages use one WebSocket for live updates. The admin inventory uses paged requests.
+Resource lists and detail pages can use one WebSocket for live updates. The admin inventory uses paged requests. The Project Networks list refreshes after a change in the panel or when the tab regains focus and its data is stale.
 The page loads a list first. It then subscribes at the version of that list.
 When the proxy sends `relist`, the page loads the list again and subscribes again.
 When the connection breaks, the panel connects again with a growing delay.

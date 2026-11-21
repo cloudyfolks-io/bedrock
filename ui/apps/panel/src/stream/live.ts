@@ -65,20 +65,22 @@ function useSubscription(
 
 export function useLiveList<T extends KubeObject = KubeObject>(
   ref: ResourceRef,
-  scope: { namespace?: string; labelSelector?: string },
+  scope: { namespace?: string; labelSelector?: string; listPath?: string },
 ): UseQueryResult<KubeList<T>> & { live: LiveState } {
   const http = useHttp();
   const queryClient = useQueryClient();
   const client = kubeClient(http);
-  const key = listKey(ref, scope.namespace, scope);
+  const resourceKey = listKey(ref, scope.namespace, scope);
+  const key = scope.listPath ? [...resourceKey, scope.listPath] : resourceKey;
+  const listPath = scope.listPath;
   const query = useQuery({
     queryKey: key,
-    queryFn: ({ signal }) => client.list<T>(ref, scope, signal),
+    queryFn: ({ signal }) => listPath ? http.request<KubeList<T>>("GET", listPath, { signal }) : client.list<T>(ref, scope, signal),
     staleTime: listStaleMs,
   });
   const [generation, setGeneration] = useState(0);
   const loaded = query.data !== undefined;
-  const streamed = loaded && ref.group === bedrockGroup;
+  const streamed = loaded && !listPath && ref.group === bedrockGroup;
   const subscription: Subscription = {
     group: ref.group,
     version: ref.version,

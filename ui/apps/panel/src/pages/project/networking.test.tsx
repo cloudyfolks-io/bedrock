@@ -23,6 +23,7 @@ import NetworksPage from "./NetworksPage";
 import SecurityGroupDetailPage from "./SecurityGroupDetailPage";
 
 const projects = { projects: [{ name: "web", displayName: "Web", tenant: "acme", namespace: "acme-web" }] };
+const projectNetworks = "/proxy/v1/projects/web/networks";
 const root = "/apis/bedrock.cloudyfolks.io/v1alpha1";
 const ns = `${root}/namespaces/acme-web`;
 const asList = (value: unknown) => value as KubeList;
@@ -46,21 +47,27 @@ function generic(plural: string) {
 
 describe("NetworksPage", () => {
   it("lists only the networks of the tenant of the project", async () => {
-    renderAt("/p/web/networks", <NetworksPage />, { [`GET ${root}/networks`]: { body: asList(networks) } }, undefined, "/p/:project/networks");
+    const { api } = renderAt("/p/web/networks", <NetworksPage />, { [`GET ${projectNetworks}`]: { body: asList(networks) } }, undefined, "/p/:project/networks");
     const row = (await screen.findByRole("link", { name: "acme" })).closest("tr") as HTMLElement;
     expect(within(row).getByText("10.100.0.0/16")).toBeTruthy();
     expect(screen.queryByRole("link", { name: "beta" })).toBeNull();
+    expect(api.calls.some((call) => call.path === `${root}/networks`)).toBe(false);
   });
 
   it("TestForbiddenNetworkListDegrades", async () => {
-    renderAt("/p/web/networks", <NetworksPage />, { [`GET ${root}/networks`]: { status: 403, body: { error: "forbidden" } } }, undefined, "/p/:project/networks");
+    renderAt("/p/web/networks", <NetworksPage />, { [`GET ${projectNetworks}`]: { status: 403, body: { error: "forbidden" } } }, undefined, "/p/:project/networks");
     expect(await screen.findByText("You cannot list networks")).toBeTruthy();
     expect(screen.getByRole("link", { name: "Subnets" }).getAttribute("href")).toBe("/p/web/subnets");
   });
 
+  it("reports when the length of the network list exceeds the limit", async () => {
+    renderAt("/p/web/networks", <NetworksPage />, { [`GET ${projectNetworks}`]: { status: 422, body: { error: "network_inventory_limit" } } }, undefined, "/p/:project/networks");
+    expect(await screen.findByText("The network list is too large")).toBeTruthy();
+  });
+
   it("presets and locks the tenant on create, and asks for the typed name on delete", async () => {
     const user = userEvent.setup();
-    const { api } = renderAt("/p/web/networks", <NetworksPage />, { [`GET ${root}/networks`]: { body: asList(networks) }, [`DELETE ${root}/networks/acme`]: { body: {} } }, undefined, "/p/:project/networks");
+    const { api } = renderAt("/p/web/networks", <NetworksPage />, { [`GET ${projectNetworks}`]: { body: asList(networks) }, [`DELETE ${root}/networks/acme`]: { body: {} } }, undefined, "/p/:project/networks");
     await user.click(await screen.findByRole("button", { name: "Create" }));
     const tenant = await screen.findByLabelText(/^tenantRef/, undefined, { timeout: 15000 });
     expect((tenant as HTMLInputElement).value).toBe("acme");
@@ -72,6 +79,7 @@ describe("NetworksPage", () => {
     await user.type(within(dialog).getByLabelText("Name"), "acme");
     await user.click(within(dialog).getByRole("button", { name: "Delete" }));
     await waitFor(() => expect(api.calls.some((call) => call.method === "DELETE")).toBe(true));
+    await waitFor(() => expect(api.calls.filter((call) => call.path === projectNetworks).length).toBeGreaterThan(1));
   });
 });
 

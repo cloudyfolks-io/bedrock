@@ -15,6 +15,7 @@ const base = "/apis/bedrock.cloudyfolks.io/v1alpha1";
 function apiRoutes(): Record<string, FakeRoute> {
   const routes: Record<string, FakeRoute> = {
     "GET /proxy/v1/projects": { body: projects },
+    "GET /proxy/v1/projects/web/networks": { body: fixtures["../fixtures/networks.json"] },
     [`GET ${base}/virtualmachines`]: { body: fixtures["../fixtures/virtualmachines.json"] },
   };
   for (const def of definitions) {

@@ -1,5 +1,6 @@
 import { Link } from "react-router";
 import { useLingui } from "@lingui/react/macro";
+import { isHttpError } from "../../api/http";
 import { EmptyState } from "../../components/EmptyState";
 import { definitionFor } from "../../resources/registry";
 import { ResourceListPage } from "../../resources/ResourceListPage";
@@ -15,7 +16,14 @@ export default function NetworksPage() {
   return (
     <ResourceListPage
       def={def}
-      {...(project ? { createSpec: { tenantRef: project.tenant }, lockedPaths: ["tenantRef"] } : {})}
+      {...(project ? {
+        listPath: `/proxy/v1/projects/${encodeURIComponent(project.name)}/networks`,
+        createSpec: { tenantRef: project.tenant },
+        lockedPaths: ["tenantRef"],
+      } : {})}
+      listFailure={(error) => isHttpError(error) && error.code === "network_inventory_limit" ? (
+        <EmptyState title={t({ id: "networks.limit", message: "The network list is too large" })} />
+      ) : null}
       forbidden={
         <EmptyState
           title={t({ id: "networks.forbidden.title", message: "You cannot list networks" })}

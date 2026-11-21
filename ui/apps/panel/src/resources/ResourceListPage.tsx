@@ -60,6 +60,8 @@ interface ListExtras {
   toolbar?: ReactNode;
   actions?: ReactNode | ((context: { canCreate: boolean; project: Project | undefined }) => ReactNode);
   itemFilter?: (object: KubeObject) => boolean;
+  listPath?: string;
+  listFailure?: (error: unknown) => ReactNode;
   readOnly?: boolean;
   embedded?: boolean;
   forbidden?: ReactNode;
@@ -70,10 +72,10 @@ interface ListExtras {
   children?: ReactNode;
 }
 
-function ListBody({ def, namespace, project, help = null, toolbar = null, actions = null, itemFilter, readOnly = false, embedded = false, forbidden, createSpec, lockedPaths, elasticIps, rowItems: extraRowItems, children = null }: { def: ResourceDef; namespace: string | undefined; project: Project | undefined } & ListExtras) {
+function ListBody({ def, namespace, project, help = null, toolbar = null, actions = null, itemFilter, listPath, listFailure, readOnly = false, embedded = false, forbidden, createSpec, lockedPaths, elasticIps, rowItems: extraRowItems, children = null }: { def: ResourceDef; namespace: string | undefined; project: Project | undefined } & ListExtras) {
   const { t, i18n } = useLingui();
   const { locale } = useLocale();
-  const query = useLiveList(refOf(def), namespace === undefined ? {} : { namespace });
+  const query = useLiveList(refOf(def), { ...(namespace === undefined ? {} : { namespace }), ...(listPath === undefined ? {} : { listPath }) });
   const checks = useMemo(() => checksFor(def, namespace), [def, namespace]);
   const access = useCans(checks);
   const runner = useActionRunner(def);
@@ -135,14 +137,14 @@ function ListBody({ def, namespace, project, help = null, toolbar = null, action
     return (
       <>
         {header}
-        <EmptyState
+        {listFailure?.(query.error) ?? <EmptyState
           title={t({ id: "list.error.title", message: "The list did not load" })}
           action={
             <Button variant="primary" onClick={() => void query.refetch()}>
               {t({ id: "common.action.retry", message: "Retry" })}
             </Button>
           }
-        />
+        />}
       </>
     );
   }
@@ -175,7 +177,7 @@ function ListBody({ def, namespace, project, help = null, toolbar = null, action
       <div className="br-toolbar">
         <TextField label={t({ id: "list.filter.label", message: "Filter by name" })} name="filter" value={filter} onChange={setFilter} />
         {toolbar}
-        <LiveIndicator live={query.live} />
+        {!listPath ? <LiveIndicator live={query.live} /> : null}
       </div>
       {empty ? (
         <EmptyState title={t({ id: "list.empty.title", message: "Nothing here yet" })} description={t({ id: "list.empty.description", message: "Objects of this kind appear here." })} action={createButton} />

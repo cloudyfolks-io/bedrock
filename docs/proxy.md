@@ -151,6 +151,8 @@ A user also sees a project when the user can list virtual machines in the namesp
 The proxy reads the projects in pages of 500 and checks every project.
 It keeps each access answer for 30 seconds.
 
+`GET /proxy/v1/projects/<project>/networks` on the console returns Networks from that project's tenant. The user must be able to see the project and read its Networks. The proxy uses the signed-in user's Kubernetes credentials for the Network reads. The answer has at most 500 Networks. A request that exceeds the limit returns an error.
+
 `GET /proxy/v1/session` returns the user, the groups, the CSRF token, the end time and the platform host.
 It never returns a token.
 
