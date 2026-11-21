@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { Fragment, useEffect, useRef, useState, type ReactNode } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useLingui } from "@lingui/react/macro";
 import { useLocation } from "react-router";
@@ -6,7 +6,7 @@ import { Alert, Button, Card } from "@bedrock/design";
 import { Spinner } from "../components/Spinner";
 import { useLocationActions } from "../location";
 import { readSession, removeSession, writeSession } from "../storage";
-import { sessionKey, useHttp } from "./HttpProvider";
+import { sessionKey, sessionScope, useHttp } from "./HttpProvider";
 import { isHttpError, type Http } from "./http";
 import type { Session } from "./types";
 
@@ -35,7 +35,7 @@ export function useSession() {
     queryFn: () => fetchSession(http),
     staleTime: sessionStaleMs,
     retry: false,
-    refetchOnWindowFocus: true,
+    refetchOnWindowFocus: "always",
   });
 }
 
@@ -84,7 +84,7 @@ export function SessionGate({ children }: { children: ReactNode }) {
   }, [unauthenticated, assign, returnTo]);
 
   if (query.data && !unauthenticated) {
-    return <>{children}</>;
+    return <Fragment key={sessionScope(query.data)}>{children}</Fragment>;
   }
   if (unauthenticated && blocked) {
     return (
