@@ -280,6 +280,13 @@ steps=(
   cascade_tenant
 )
 
+case "${E2E_ONLY:-}" in
+  database_import_mysql|database_import_valkey)
+    source "$steps_dir/${E2E_ONLY//_/-}.sh"
+    steps+=("$E2E_ONLY")
+    ;;
+esac
+
 selected=$(select_steps "${steps[@]}")
 test -n "$selected"
 if [ -n "${E2E_FROM:-}${E2E_ONLY:-}" ] && ! grep -qx tenancy_users <<<"$selected"; then
