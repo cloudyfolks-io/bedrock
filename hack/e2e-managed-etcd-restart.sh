@@ -3,21 +3,34 @@ set +x
 set -euo pipefail
 umask 077
 
-if [[ ${E2E_MANAGED_ETCD_RESTART:-} != 1 || $# != 9 ||
+run_etcd_member_recovery() {
+local entry=$1 opt_in usage
+shift
+case "$entry" in
+  loopback)
+    opt_in=${E2E_MANAGED_ETCD_RESTART:-}
+    usage='E2E_MANAGED_ETCD_RESTART=1 bash hack/e2e-managed-etcd-restart.sh' ;;
+  reachable)
+    opt_in=${E2E_MANAGED_ETCD_REACHABLE_MEMBER:-}
+    usage='E2E_MANAGED_ETCD_REACHABLE_MEMBER=1 bash hack/e2e-managed-etcd-reachable-member.sh' ;;
+  *) return 2 ;;
+esac
+if [[ $opt_in != 1 || $# != 9 ||
   ! ${1:-} =~ ^[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}$ || ! ${3:-} =~ ^[0-9a-f]{64}$ ||
   ! ${5:-} =~ ^[0-9a-f]{64}$ || ! ${7:-} =~ ^[0-9a-f]{64}$ || ! ${8:-} =~ ^[0-9a-f]{64}$ ]]; then
-  printf '%s\n' 'Usage: E2E_MANAGED_ETCD_RESTART=1 bash hack/e2e-managed-etcd-restart.sh <guest-uid> <source.json> <source-sha> <member-evidence.json> <member-sha> <freeze-and-copy-proof-dir> <custody-sha> <execution-sha> <output-dir>' >&2
-  exit 2
+  printf 'Usage: %s %s\n' "$usage" '<guest-uid> <source.json> <source-sha> <member-evidence.json> <member-sha> <freeze-and-copy-proof-dir> <custody-sha> <execution-sha> <output-dir>' >&2
+  return 2
 fi
 
 export KUBECONFIG=/var/lib/k0s/pki/admin.conf
 if [[ $(uname -s) != Linux || ! -s /var/lib/bedrock/e2e-admin-password || ! -f $KUBECONFIG || -L $KUBECONFIG ]]; then
   printf '%s\n' 'Run this fixture inside an initialized Bedrock development guest.' >&2
-  exit 1
+  return 1
 fi
 
-python3 -I - "$@" <<'PY'
+python3 -I - "$entry" "$@" <<'PY'
 import hashlib
+import ipaddress
 import json
 import os
 from pathlib import Path
@@ -40,6 +53,10 @@ driver = "rook-ceph.rbd.csi.ceph.com"
 snapshot_api = "snapshot.storage.k8s.io"
 pod_name = "etcd-native-restart"
 gate_name = "e2e.bedrock.cloudyfolks.io/etcd-approved"
+reachable_name = "etcd-reachable-member"
+purpose_label = "migration.cloudyfolks.io/purpose"
+reachable_labels = {purpose_label: "etcd-member-recovery"}
+controller_labels = {purpose_label: "etcd-controller-recovery"}
 
 
 def require(condition, message="The approved isolated etcd recovery state could not be verified."):
@@ -366,6 +383,11 @@ client=$3
 peer=$4
 data=/var/lib/k0s/etcd
 pki=/var/lib/k0s/pki/etcd
+listeners=https://127.0.0.1:2379
+if [[ ${BEDROCK_ETCD_POD_IP+x} == x ]]; then
+  [[ $BEDROCK_ETCD_POD_IP =~ ^(10\.[0-9]{1,3}|172\.(1[6-9]|2[0-9]|3[01])|192\.168)\.[0-9]{1,3}\.[0-9]{1,3}$ ]] || exit 1
+  listeners+=,https://$BEDROCK_ETCD_POD_IP:2379
+fi
 for tool in etcd etcdctl stat sha256sum sync; do
   command -v "$tool" >/dev/null || exit 1
 done
@@ -438,7 +460,7 @@ set -C
 set +C
 sync -f .bedrock-etcd-restart-started
 exec -c etcd --name="$member" --data-dir="$data" --initial-cluster="$member=$peer" --initial-cluster-state=existing \
-  --listen-client-urls=https://127.0.0.1:2379 --advertise-client-urls="$client" \
+  --listen-client-urls="$listeners" --advertise-client-urls="$client" \
   --listen-peer-urls=https://127.0.0.1:2380 --initial-advertise-peer-urls="$peer" \
   --client-cert-auth=true --trusted-ca-file="$pki/ca.crt" --cert-file="$pki/server.crt" --key-file="$pki/server.key" \
   --peer-client-cert-auth=true --peer-trusted-ca-file="$pki/ca.crt" --peer-cert-file="$pki/peer.crt" --peer-key-file="$pki/peer.key" \
@@ -466,18 +488,127 @@ exec -c etcd --name="$member" --data-dir="$data" --initial-cluster="$member=$pee
                                                       {"name": "certs", "mountPath": "/var/lib/k0s/pki/etcd", "readOnly": True}]}]}}
 
 
+def reachable_pod(image, claim, tree, execution_sha):
+    pod = recovery_pod(image, claim, tree, execution_sha)
+    spec = pod["spec"]
+    container, = spec["containers"]
+    address = {"name": "BEDROCK_ETCD_POD_IP", "valueFrom": {"fieldRef": {"apiVersion": "v1", "fieldPath": "status.podIP"}}}
+    return {**pod, "metadata": {**pod["metadata"], "name": reachable_name, "labels": reachable_labels},
+            "spec": {**spec, "containers": [{**container, "env": [address]}]}}
+
+
+def reachable_policy():
+    return {"apiVersion": "networking.k8s.io/v1", "kind": "NetworkPolicy", "metadata": {"name": reachable_name, "namespace": namespace},
+            "spec": {"podSelector": {"matchLabels": reachable_labels}, "policyTypes": ["Ingress", "Egress"],
+                     "ingress": [{"from": [{"podSelector": {"matchLabels": controller_labels}}],
+                                  "ports": [{"port": 2379, "protocol": "TCP"}]}], "egress": []}}
+
+
+def selects(selector, labels):
+    if any(labels.get(key) != value for key, value in selector.get("matchLabels", {}).items()):
+        return False
+    for clause in selector.get("matchExpressions", []):
+        key, operation = clause["key"], clause["operator"]
+        values = clause.get("values", [])
+        matches = {"In": key in labels and labels[key] in values, "NotIn": labels.get(key) not in values,
+                   "Exists": key in labels, "DoesNotExist": key not in labels}
+        require(operation in matches)
+        if not matches[operation]:
+            return False
+    return True
+
+
+def no_foreign_routes():
+    pods = inventory(f"/api/v1/namespaces/{namespace}/pods", "PodList")
+    require(not any(selects({"matchLabels": controller_labels}, pod["metadata"].get("labels", {})) for pod in pods))
+    services = inventory(f"/api/v1/namespaces/{namespace}/services", "ServiceList")
+    require(not any(record["spec"].get("selector") and selects({"matchLabels": record["spec"]["selector"]}, reachable_labels)
+                    for record in services))
+
+
+def matching_policies():
+    policies = inventory(f"/apis/networking.k8s.io/v1/namespaces/{namespace}/networkpolicies", "NetworkPolicyList")
+    return [item for item in policies if selects(item["spec"]["podSelector"], reachable_labels)]
+
+
+def verify_network_policy(record, expected, uid):
+    info = metadata(record, uid)
+    require(info["name"] == reachable_name and info["namespace"] == namespace and not info.get("ownerReferences"))
+    spec = record["spec"]
+    require({**spec, "egress": spec.get("egress", [])} == expected["spec"])
+
+
+def prepare_network_policy():
+    no_foreign_routes()
+    require(not matching_policies())
+    policy = reachable_policy()
+    definition = encoded(policy)
+    dry = namespaced("create", "--dry-run=server", "-f", "-", "-o", "json", body=definition)
+    verify_network_policy(dry, policy, dry["metadata"]["uid"])
+    created = namespaced("create", "-f", "-", "-o", "json", body=definition)
+    uid = created["metadata"]["uid"]
+    require(valid_uid(uid))
+    verify_reachable_policy(uid)
+    return uid
+
+
+def verify_reachable_policy(uid):
+    no_foreign_routes()
+    policy, = matching_policies()
+    verify_network_policy(policy, reachable_policy(), uid)
+
+
+def verify_reachable_attachment(disk, snapshot, node):
+    handle = disk_binding(disk, snapshot["name"])
+    attachments = inventory("/apis/storage.k8s.io/v1/volumeattachments", "VolumeAttachmentList")
+    active = [record for record in attachments if record["spec"]["source"].get("persistentVolumeName") == disk["volume"] or
+              record["spec"]["source"].get("inlineVolumeSpec", {}).get("csi", {}).get("volumeHandle") == handle]
+    require(not active or (node and len(active) == 1 and active[0]["spec"]["nodeName"] == node and
+            active[0]["spec"]["attacher"] == driver and active[0]["spec"]["source"] == {"persistentVolumeName": disk["volume"]} and
+            not active[0]["metadata"].get("deletionTimestamp")))
+
+
+def verify_reachable_sockets(uid, address):
+    expected_ip = address.packed[::-1].hex().upper()
+    result = namespaced("exec", reachable_name, "-c", "etcd", "--", "/bin/bash", "-ec", r'''
+set -eu
+expected=$1
+client=0
+peer=0
+pod=0
+for table in /proc/net/tcp /proc/net/tcp6; do
+  [[ -r $table ]] || continue
+  while read -r _ bound _ state _; do
+    [[ $state == 0A ]] || continue
+    case "$bound" in
+      0100007F:094B) client=$((client + 1)) ;;
+      0100007F:094C) peer=$((peer + 1)) ;;
+      "$expected:094B") pod=$((pod + 1)) ;;
+      *:094B|*:094C) exit 1 ;;
+    esac
+  done <"$table"
+done
+[[ $client == 1 && $peer == 1 && $pod == 1 ]] || exit 1
+printf '%s\n' '{"verified":true}'
+''', "etcd-reachable-sockets", expected_ip)
+    require(result == {"verified": True})
+    endpoints = inventory(f"/apis/discovery.k8s.io/v1/namespaces/{namespace}/endpointslices", "EndpointSliceList")
+    require(not any(record.get("targetRef", {}).get("uid") == uid or str(address) in record["addresses"]
+                    for item in endpoints for record in item["endpoints"]))
+
+
 def require_contract(record, expected):
     info, spec = record["metadata"], record["spec"]
     reference, wanted = expected["metadata"], expected["spec"]
-    require(info["name"] == pod_name and info["namespace"] == namespace and info.get("deletionTimestamp") is None and
+    require(info["name"] == reference["name"] and info["namespace"] == namespace and info.get("deletionTimestamp") is None and
             not info.get("ownerReferences") and info["labels"] == reference["labels"] and all(
             info["annotations"][key] == value for key, value in reference["annotations"].items()))
     require(all(spec[key] == value for key, value in wanted.items() if key != "containers") and not any(spec.get(key) for key in
                 ("nodeName", "runtimeClassName", "hostNetwork", "hostPID", "hostIPC", "initContainers", "ephemeralContainers")))
     actual, = spec["containers"]
     target, = wanted["containers"]
-    require(all(actual[key] == value for key, value in target.items()) and not any(actual.get(key) for key in
-                ("env", "envFrom", "ports", "volumeDevices", "lifecycle", "startupProbe", "livenessProbe", "readinessProbe")))
+    require(all(actual[key] == value for key, value in target.items()) and actual.get("env", []) == target.get("env", []) and
+            not any(actual.get(key) for key in ("envFrom", "ports", "volumeDevices", "lifecycle", "startupProbe", "livenessProbe", "readinessProbe")))
 
 
 def runtime(record, uid, spec, image):
@@ -499,8 +630,8 @@ def runtime(record, uid, spec, image):
     return record["spec"]["nodeName"], state["containerID"]
 
 
-def tls_probe(endpoint_url, *operation):
-    return namespaced("exec", pod_name, "-c", "etcd", "--", "/bin/bash", "-ec", r'''
+def tls_probe(name, endpoint_url, *operation):
+    return namespaced("exec", name, "-c", "etcd", "--", "/bin/bash", "-ec", r'''
 endpoint=$1
 shift
 pki=/var/lib/k0s/pki/etcd
@@ -530,30 +661,30 @@ def check_member(identity, source, membership, observed):
     return {**identity, "committed_revision": str(revision), "raft_term": str(term), "raft_index": str(index), "raft_applied_index": str(applied)}
 
 
-def observe(uid, plan, image, original, source):
+def observe(name, uid, plan, image, original, source):
     deadline = time.monotonic() + 240
     while time.monotonic() < deadline:
-        current = runtime(get("pod", pod_name), uid, plan, image)
+        current = runtime(get("pod", name), uid, plan, image)
         if current:
             try:
-                members = tls_probe(endpoint, "member", "list")
-                status = tls_probe(endpoint, "endpoint", "status")
+                members = tls_probe(name, endpoint, "member", "list")
+                status = tls_probe(name, endpoint, "endpoint", "status")
             except (subprocess.CalledProcessError, subprocess.TimeoutExpired):
                 time.sleep(3)
                 continue
-            require(runtime(get("pod", pod_name), uid, plan, image) == current)
+            require(runtime(get("pod", name), uid, plan, image) == current)
             return current, check_member(original["status"], source, members, status)
         time.sleep(3)
     require(False, "The isolated native etcd member did not become ready within the time limit.")
 
 
-def publish(directory, receipt):
+def publish(directory, filename, receipt):
     data = encoded(receipt)
     with tempfile.NamedTemporaryFile(dir=directory, prefix=".etcd-restart-") as record:
         record.write(data)
         record.flush()
         os.fsync(record.fileno())
-        os.link(record.name, directory / "etcd-restart.json")
+        os.link(record.name, directory / filename)
     descriptor = os.open(directory, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
     try:
         os.fsync(descriptor)
@@ -562,9 +693,11 @@ def publish(directory, receipt):
     print(digest(data))
 
 
-def main(guest, source_path, source_sha, original_path, original_sha, proof_dir, custody_sha, execution_sha, output_dir):
+def main(entry, guest, source_path, source_sha, original_path, original_sha, proof_dir, custody_sha, execution_sha, output_dir):
+    builder, filename = {"loopback": (recovery_pod, "etcd-restart.json"),
+                         "reachable": (reachable_pod, "etcd-reachable-member.json")}[entry]
     output = private_dir(Path(output_dir))
-    require(not os.path.lexists(output / "etcd-restart.json"))
+    require(not os.path.lexists(output / filename))
     source_path = Path(source_path)
     source = approved_json(source_path, source_sha)
     original = approved_json(Path(original_path), original_sha)
@@ -573,38 +706,56 @@ def main(guest, source_path, source_sha, original_path, original_sha, proof_dir,
     disk = disks[-1]
     verify_live(source, custody, snapshot, disks, "")
     verify_fences(frozen, source, image)
-    pod = recovery_pod(image, disk["claim"], tree, execution_sha)
+    pod = builder(image, disk["claim"], tree, execution_sha)
+    name = pod["metadata"]["name"]
     definition = encoded(pod)
     dry = namespaced("create", "--dry-run=server", "-f", "-", "-o", "json", body=definition)
     require_contract(dry, pod)
+    policy_uid = prepare_network_policy() if entry == "reachable" else None
     created = namespaced("create", "-f", "-", "-o", "json", body=definition)
     uid = created["metadata"]["uid"]
     require(valid_uid(uid))
     try:
-        proposed = get("pod", pod_name)
+        proposed = get("pod", name)
         info = metadata(proposed, uid)
         require_contract(proposed, pod)
         require(proposed["spec"] == dry["spec"])
         verify_live(source, custody, snapshot, disks, uid)
+        if policy_uid:
+            verify_reachable_policy(policy_uid)
+            verify_reachable_attachment(disk, snapshot, None)
         changes = [{"op": "test", "path": "/metadata/uid", "value": uid},
                    {"op": "test", "path": "/metadata/resourceVersion", "value": info["resourceVersion"]},
                    {"op": "test", "path": "/spec/schedulingGates", "value": [{"name": gate_name}]},
                    {"op": "remove", "path": "/spec/schedulingGates"}]
-        patched = namespaced("patch", "pod", pod_name, "--type=json", "-p", encoded(changes).decode(), "-o", "json")
+        patched = namespaced("patch", "pod", name, "--type=json", "-p", encoded(changes).decode(), "-o", "json")
         spec = {key: value for key, value in proposed["spec"].items() if key != "schedulingGates"}
         runtime(patched, uid, spec, image)
-        current, status = observe(uid, spec, image, original, source)
+        current, status = observe(name, uid, spec, image, original, source)
         verify_live(source, custody, snapshot, disks, uid)
         verify_fences(frozen, source, image)
-        require(runtime(get("pod", pod_name), uid, spec, image) == current)
-        publish(output, {"version": 1, "scope": "synthetic-etcd-native-restart", "guest_uid": guest,
-                         "namespace_uid": source["namespace_uid"], "source_cluster_uid": source["cluster_uid"],
-                         "source_receipt_sha256": source_sha, "original_member_sha256": original_sha, "custody_sha256": custody_sha,
-                         "execution_sha256": execution_sha, "execution_disk": disk, "member_tree_sha256": tree,
-                         "pod_name": pod_name, "pod_uid": uid, "image": image, "status": status})
+        running = get("pod", name)
+        require(runtime(running, uid, spec, image) == current)
+        receipt = {"version": 1, "scope": "synthetic-etcd-native-restart", "guest_uid": guest,
+                   "namespace_uid": source["namespace_uid"], "source_cluster_uid": source["cluster_uid"],
+                   "source_receipt_sha256": source_sha, "original_member_sha256": original_sha, "custody_sha256": custody_sha,
+                   "execution_sha256": execution_sha, "execution_disk": disk, "member_tree_sha256": tree,
+                   "pod_name": name, "pod_uid": uid, "image": image, "status": status}
+        if policy_uid:
+            address = ipaddress.IPv4Address(running["status"]["podIP"])
+            require(address.is_private and not (address.is_loopback or address.is_link_local or address.is_unspecified))
+            verify_reachable_sockets(uid, address)
+            verify_reachable_policy(policy_uid)
+            verify_reachable_attachment(disk, snapshot, current[0])
+            checked = get("pod", name)
+            require(runtime(checked, uid, spec, image) == current and checked["status"]["podIP"] == str(address) and
+                    checked["metadata"]["labels"] == reachable_labels and not checked["metadata"].get("ownerReferences"))
+            receipt = {**receipt, "scope": "synthetic-etcd-reachable-member", "frozen_receipt_sha256": custody["frozen_receipt_sha256"],
+                       "pod_ip": str(address), "container_id": current[1], "network_policy_uid": policy_uid}
+        publish(output, filename, receipt)
     except (OSError, subprocess.SubprocessError, AttributeError, KeyError, TypeError, ValueError, RecursionError, KeyboardInterrupt):
         try:
-            namespaced("delete", "--raw", f"/api/v1/namespaces/{namespace}/pods/{pod_name}", "-f", "-", body=encoded(
+            namespaced("delete", "--raw", f"/api/v1/namespaces/{namespace}/pods/{name}", "-f", "-", body=encoded(
                 {"apiVersion": "v1", "kind": "DeleteOptions", "preconditions": {"uid": uid}}))
         except (OSError, subprocess.SubprocessError, ValueError):
             print("The isolated recovery Pod cleanup could not be verified.", file=sys.stderr)
@@ -622,3 +773,8 @@ except ValueError as error:
 except (OSError, subprocess.SubprocessError, AttributeError, KeyError, TypeError, RecursionError, KeyboardInterrupt):
     sys.exit("The approved isolated etcd recovery state could not be verified.")
 PY
+}
+
+if [[ ${BASH_SOURCE[0]} == "$0" ]]; then
+  run_etcd_member_recovery loopback "$@"
+fi
