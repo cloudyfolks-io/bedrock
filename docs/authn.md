@@ -224,6 +224,10 @@ spec:
 the `Secret`. Register this redirect URI with the upstream provider:
 `https://sso.<platform.host>/api/v1/login/providers/<name>/callback`.
 
+Bedrock checks that the provider is enabled before redirect and again
+when it receives the callback. If the provider changes during the token
+exchange, start the sign-in again with the current provider settings.
+
 Bedrock keeps the upstream `sub` claim in `User.status.upstreamSubject`.
 Bedrock takes the username from a configured claim. The default is
 `preferred_username`. Upstream groups reach Bedrock the same way LDAP
