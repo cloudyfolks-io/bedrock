@@ -7,6 +7,39 @@ import (
 	"github.com/cloudyfolks-io/bedrock/api/v1alpha1"
 )
 
+func TestFabricImageFromValuesRequiresAnExplicitReleasePin(t *testing.T) {
+	const tag = "v1.2.7@" + ownDigest
+	const values = `crds:
+  enabled: true
+global:
+  registry:
+    address: ghcr.io/cloudyfolks-io
+  images:
+    fabric:
+      repository: fabric
+      tag: ` + tag + "\n"
+	const image = "ghcr.io/cloudyfolks-io/fabric:" + tag
+	if got, err := FabricImageFromValues([]byte(values)); err != nil || got != image {
+		t.Fatalf("image = %q, error = %v, want %q", got, err, image)
+	}
+	for _, test := range []struct{ name, values string }{
+		{"chart defaults", "crds:\n  enabled: true\n"},
+		{"missing registry", strings.Replace(values, "    address: ghcr.io/cloudyfolks-io\n", "", 1)},
+		{"missing repository", strings.Replace(values, "      repository: fabric\n", "", 1)},
+		{"mutable tag", strings.Replace(values, tag, "v1.2.6", 1)},
+		{"nonrelease tag", strings.Replace(values, tag, "dev@"+ownDigest, 1)},
+		{"malformed digest", strings.Replace(values, tag, "v1.2.7@sha256:01234", 1)},
+		{"malformed registry", strings.Replace(values, "ghcr.io/cloudyfolks-io", "https://ghcr.io/cloudyfolks-io", 1)},
+		{"duplicate key", values + "      tag: " + tag + "\n"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			if got, err := FabricImageFromValues([]byte(test.values)); err == nil || got != "" {
+				t.Fatalf("image = %q, error = %v, want a rejected pin", got, err)
+			}
+		})
+	}
+}
+
 func TestVerifyFabricPairChecksTheBuiltSchemaAndPinnedImage(t *testing.T) {
 	const image = "localhost:5001/fabric:test@" + ownDigest
 	const oldImage = "ghcr.io/cloudyfolks-io/fabric:v1.2.6@" + ownDigest

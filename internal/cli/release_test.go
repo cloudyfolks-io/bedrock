@@ -26,6 +26,33 @@ func TestReleaseBuildRequiresFlags(t *testing.T) {
 	}
 }
 
+func TestReleaseVerifyFabricRequiresOnePinSource(t *testing.T) {
+	dir := t.TempDir()
+	values := filepath.Join(dir, "fabric.yaml")
+	if err := os.WriteFile(values, []byte("crds:\n  enabled: true\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	for _, test := range []struct {
+		label  string
+		args   []string
+		status int
+		error  string
+	}{
+		{label: "no source", status: 2, error: "exactly one of --values or --image"},
+		{label: "both sources", args: []string{"--values", values, "--image", "example.invalid/fabric:test"}, status: 2, error: "exactly one of --values or --image"},
+		{label: "values without a pin", args: []string{"--values", values}, status: 1, error: "global.images.fabric.tag"},
+		{label: "explicit lab image", args: []string{"--image", "localhost:5000/fabric:dev"}, status: 1, error: "read release.yaml"},
+	} {
+		t.Run(test.label, func(t *testing.T) {
+			var out, errOut bytes.Buffer
+			args := append([]string{"release", "verify-fabric", "--release", dir}, test.args...)
+			if code := Run(args, &out, &errOut); code != test.status || !strings.Contains(errOut.String(), test.error) {
+				t.Fatalf("exit %d, stderr %q, want exit %d and %q", code, errOut.String(), test.status, test.error)
+			}
+		})
+	}
+}
+
 func TestReleaseApplyRequiresDir(t *testing.T) {
 	var out, errOut bytes.Buffer
 	code := Run([]string{"release", "apply"}, &out, &errOut)

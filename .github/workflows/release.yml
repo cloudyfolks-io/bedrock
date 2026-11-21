@@ -39,7 +39,9 @@ jobs:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
-      - run: make release VERSION=${{ github.ref_name }} PIN_DIGESTS=1
+      - run: make release VERSION="$GITHUB_REF_NAME" PIN_DIGESTS=1
+      - name: Verify Fabric in the rendered release
+        run: bin/bedrock release verify-fabric --release dist/release --values release/values/fabric.yaml
       - id: image
         uses: docker/build-push-action@v7
         with:
@@ -49,10 +51,34 @@ jobs:
           push: true
           tags: ghcr.io/cloudyfolks-io/bedrock:${{ github.ref_name }}
           build-args: VERSION=${{ github.ref_name }}
-      - run: cosign sign --yes ghcr.io/cloudyfolks-io/bedrock@${{ steps.image.outputs.digest }}
+      - name: Verify Fabric in the pushed Bedrock images
+        env:
+          BEDROCK_RELEASE_IMAGE: ghcr.io/cloudyfolks-io/bedrock@${{ steps.image.outputs.digest }}
+        run: |
+          release_dir=$(mktemp -d "$RUNNER_TEMP/bedrock-image-release.XXXXXX")
+          container=
+          trap 'if [ -n "$container" ]; then docker rm "$container" >/dev/null; fi; rm -rf "$release_dir"' EXIT
+          for arch in amd64 arm64; do
+            docker pull --platform "linux/$arch" "$BEDROCK_RELEASE_IMAGE"
+            container=$(docker create --pull=never --platform "linux/$arch" "$BEDROCK_RELEASE_IMAGE")
+            mkdir "$release_dir/$arch"
+            docker cp "$container:/release/." "$release_dir/$arch"
+            bin/bedrock release verify-fabric --release "$release_dir/$arch" --values release/values/fabric.yaml
+            docker rm "$container" >/dev/null
+            container=
+          done
       - run: bin/bedrock release pin-image --release dist/release --digest ${{ steps.image.outputs.digest }}
       - run: REQUIRE_PINNED_IMAGE=1 hack/check-release.sh dist/release
-      - run: bin/bedrock bundle build --release dist/release --arch amd64 --out dist/bedrock-${{ github.ref_name }}-bundle-amd64.tar.zst --bedrock-binary dist/bedrock-${{ github.ref_name }}-linux-amd64
+      - name: Build the offline bundle and verify its Fabric pin
+        run: |
+          bundle="dist/bedrock-$GITHUB_REF_NAME-bundle-amd64.tar.zst"
+          bundle_dir=$(mktemp -d "$RUNNER_TEMP/bedrock-offline.XXXXXX")
+          trap 'rm -rf "$bundle_dir"' EXIT
+          bin/bedrock bundle build --release dist/release --arch amd64 --out "$bundle" \
+            --bedrock-binary "dist/bedrock-$GITHUB_REF_NAME-linux-amd64"
+          tar --zstd -xf "$bundle" -C "$bundle_dir" release
+          bin/bedrock release verify-fabric --release "$bundle_dir/release" --values release/values/fabric.yaml
+      - run: cosign sign --yes ghcr.io/cloudyfolks-io/bedrock@${{ steps.image.outputs.digest }}
       - run: cd dist && sha256sum bedrock-${{ github.ref_name }}-linux-amd64 bedrock-${{ github.ref_name }}-linux-arm64 bedrock-${{ github.ref_name }}-bundle-amd64.tar.zst > SHA256SUMS
       - run: cosign sign-blob --yes --bundle dist/SHA256SUMS.sigstore.json dist/SHA256SUMS
       - run: cd dist && split -b 1900M -d -a 2 bedrock-${{ github.ref_name }}-bundle-amd64.tar.zst bedrock-${{ github.ref_name }}-bundle-amd64.tar.zst.part && rm bedrock-${{ github.ref_name }}-bundle-amd64.tar.zst

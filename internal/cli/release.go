@@ -16,7 +16,7 @@ import (
 	"github.com/cloudyfolks-io/bedrock/internal/release"
 )
 
-const releaseUsage = "usage: bedrock release build --config FILE --version VERSION --image IMAGE --out DIR [--helm helm] [--k0s-version V] [--upgrade-from V1,V2] [--binaries DIR]\n       bedrock release apply --dir DIR [--timeout 10m] [--interval 2s]\n       bedrock release rbac --release DIR --out FILE\n       bedrock release pin-image --release DIR --digest sha256:HEX\n       bedrock release verify-fabric --release DIR --image IMAGE"
+const releaseUsage = "usage: bedrock release build --config FILE --version VERSION --image IMAGE --out DIR [--helm helm] [--k0s-version V] [--upgrade-from V1,V2] [--binaries DIR]\n       bedrock release apply --dir DIR [--timeout 10m] [--interval 2s]\n       bedrock release rbac --release DIR --out FILE\n       bedrock release pin-image --release DIR --digest sha256:HEX\n       bedrock release verify-fabric --release DIR (--values FILE | --image IMAGE)"
 
 func releaseCommand(args []string, stdout, stderr io.Writer) int {
 	if len(args) == 0 {
@@ -44,18 +44,30 @@ func releaseVerifyFabric(args []string, stdout, stderr io.Writer) int {
 	flags.SetOutput(stderr)
 	dir := flags.String("release", "dist/release", "built release directory")
 	image := flags.String("image", "", "expected Fabric controller image reference with SHA-256 digest")
+	values := flags.String("values", "", "Fabric release values with an explicit pinned image")
 	if err := flags.Parse(args); err != nil {
 		return 2
 	}
-	if *image == "" || *dir == "" || flags.NArg() != 0 {
-		fmt.Fprintln(stderr, "release verify-fabric needs a release directory and the exact Fabric image")
+	if (*image == "") == (*values == "") || *dir == "" || flags.NArg() != 0 {
+		fmt.Fprintln(stderr, "release verify-fabric needs a release directory and exactly one of --values or --image")
 		return 2
+	}
+	expected := *image
+	if *values != "" {
+		raw, err := os.ReadFile(*values)
+		if err != nil {
+			return fail(stderr, err)
+		}
+		expected, err = release.FabricImageFromValues(raw)
+		if err != nil {
+			return fail(stderr, err)
+		}
 	}
 	bundle, err := release.Load(os.DirFS(*dir))
 	if err != nil {
 		return fail(stderr, err)
 	}
-	if err := release.VerifyFabricPair(bundle, *image); err != nil {
+	if err := release.VerifyFabricPair(bundle, expected); err != nil {
 		return fail(stderr, err)
 	}
 	fmt.Fprintf(stdout, "release %s contains the expected Fabric controller and SecurityGroup schema\n", bundle.Spec.Version)

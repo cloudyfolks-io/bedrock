@@ -2,11 +2,40 @@ package release
 
 import (
 	"fmt"
+	"path"
+	"regexp"
 	"slices"
 	"strings"
 
+	"github.com/google/go-containerregistry/pkg/name"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"sigs.k8s.io/yaml"
 )
+
+var fabricReleaseTag = regexp.MustCompile(`^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$`)
+
+func FabricImageFromValues(raw []byte) (string, error) {
+	var values map[string]any
+	if err := yaml.UnmarshalStrict(raw, &values); err != nil {
+		return "", fmt.Errorf("parse the Fabric release values: %w", err)
+	}
+	address, _, addressErr := unstructured.NestedString(values, "global", "registry", "address")
+	repository, _, repositoryErr := unstructured.NestedString(values, "global", "images", "fabric", "repository")
+	tag, _, tagErr := unstructured.NestedString(values, "global", "images", "fabric", "tag")
+	version, digest, pinned := strings.Cut(tag, "@sha256:")
+	if addressErr != nil || repositoryErr != nil || tagErr != nil || address == "" || repository == "" ||
+		!pinned || !fabricReleaseTag.MatchString(version) || !validImageDigest(digest) {
+		return "", fmt.Errorf("set global.registry.address, global.images.fabric.repository and global.images.fabric.tag with a vX.Y.Z@sha256 digest in the Fabric release values")
+	}
+	base := address + "/" + repository
+	if path.Clean(base) != base || strings.HasPrefix(base, "/") {
+		return "", fmt.Errorf("the Fabric release values do not identify a valid image repository")
+	}
+	if _, err := name.NewTag(base+":"+version, name.StrictValidation); err != nil {
+		return "", fmt.Errorf("the Fabric release values do not identify a valid image repository and tag: %w", err)
+	}
+	return base + ":" + tag, nil
+}
 
 func VerifyFabricPair(bundle Bundle, expectedImage string) error {
 	repository, digest, pinned := strings.Cut(expectedImage, "@sha256:")
