@@ -199,7 +199,11 @@ func (r *Resolver) claimAndRefresh(ctx context.Context, hash string) (Record, er
 		r.releaseQuietly(work, hash)
 		return Record{}, ErrUpstream
 	}
-	next := withTokens(claimed, tokens)
+	next, matches := withTokens(claimed, tokens)
+	if !matches {
+		slog.WarnContext(work, "refreshed identity does not match the session")
+		return Record{}, r.end(work, hash)
+	}
 	if err := r.store.CompleteRefresh(work, hash, r.holder, next); err != nil {
 		slog.ErrorContext(ctx, "store the refreshed tokens", "error", err)
 		return Record{}, ErrUpstream
@@ -266,11 +270,20 @@ func (r *Resolver) rememberMiss(hash string) {
 	}
 }
 
-func withTokens(rec Record, tokens Tokens) Record {
+func withTokens(rec Record, tokens Tokens) (Record, bool) {
+	identity := tokens.Identity
+	if identity.Subject != "" {
+		if identity.Subject != rec.Subject || identity.SessionName != rec.SessionName {
+			return Record{}, false
+		}
+		rec.DisplayName = identity.Name
+		rec.Email = identity.Email
+		rec.Groups = slices.Clone(identity.Groups)
+	}
 	rec.Access = tokens.Access
 	rec.AccessExpiry = tokens.AccessExpiry
 	rec.Refresh = tokens.Refresh
-	return rec
+	return rec, true
 }
 
 func principalOf(rec Record) Principal {
