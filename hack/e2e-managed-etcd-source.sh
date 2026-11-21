@@ -211,7 +211,7 @@ awk -v endpoint="$etcd_endpoint" -v prefix="$cluster" '
 
 child_kubectl() {
   kubectl -n "$namespace" exec "$controller_pod" -c controller -- k0s kubectl --kubeconfig=/var/lib/k0s/pki/admin.conf \
-    --server="https://$address:6443" --request-timeout=10s "$@"
+    --server=https://127.0.0.1:6443 --tls-server-name="$address" --request-timeout=10s "$@"
 }
 
 etcdctl_fixture() {

@@ -87,7 +87,7 @@ kubectl -n "$namespace" get networkpolicy sqlite-source-ingress -o json | jq -e 
 
 child_kubectl() {
   kubectl -n "$namespace" exec -i kmc-sqlite-source-0 -c controller -- k0s kubectl --kubeconfig=/var/lib/k0s/pki/admin.conf \
-    --server="$endpoint" --request-timeout=15s "$@"
+    --server=https://127.0.0.1:6443 --tls-server-name="$address" --request-timeout=15s "$@"
 }
 
 expect_equal "$(jq -er .marker_uid "$source_receipt")" \

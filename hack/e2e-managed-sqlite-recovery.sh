@@ -23,6 +23,7 @@ copy_digest=${6:-}
 migrate=${BEDROCK_MIGRATE:?Set BEDROCK_MIGRATE to the verified Cluster API migration binary.}
 [[ $migrate == /* && -f $migrate && ! -L $migrate && -x $migrate ]]
 [[ $proof_dir == /* && -d $proof_dir && $(realpath -e "$proof_dir") == "$proof_dir" && -O $proof_dir && $(stat -c '%a' "$proof_dir") == 700 ]]
+command -v timeout >/dev/null
 
 source "$(dirname "${BASH_SOURCE[0]}")/e2e/lib.sh"
 
@@ -131,10 +132,40 @@ check_service() {
     ([.spec.ports[] | [.port,.targetPort,.protocol]] | sort)==[[6443,6443,"TCP"],[8132,8132,"TCP"]]' >/dev/null
 }
 
+start_child_client() {
+  local controller node image client
+  probe_backend=$1
+  controller=$(kubectl --request-timeout=10s -n "$namespace" get pod "$probe_backend" -o json)
+  node=$(jq -er '.spec.nodeName | select(length>0)' <<<"$controller")
+  image=$(jq -er '.spec.containers[] | select(.name=="controller") | .image' <<<"$controller")
+  client=$(jq -n --arg node "$node" --arg image "$image" '
+    {apiVersion:"v1",kind:"Pod",metadata:{generateName:"sqlite-recovery-client-"},spec:{nodeName:$node,automountServiceAccountToken:false,
+      restartPolicy:"Never",activeDeadlineSeconds:3600,containers:[{name:"client",image:$image,imagePullPolicy:"Never",
+        command:["/bin/sh","-c","exec sleep 3600"],securityContext:{allowPrivilegeEscalation:false,capabilities:{drop:["ALL"]}}}]}}' |
+    kubectl -n "$namespace" create -f - -o json)
+  probe_name=$(jq -er '.metadata.name | select(test("^sqlite-recovery-client-[a-z0-9]+$"))' <<<"$client")
+  probe_uid=$(jq -er '.metadata.uid | select(length>0)' <<<"$client")
+  kubectl -n "$namespace" wait --for=condition=Ready "pod/$probe_name" --timeout=90s >&2
+}
+
+remove_child_client() {
+  if [[ -z $probe_name ]]; then
+    return 0
+  fi
+  jq -nc --arg uid "$probe_uid" '{apiVersion:"v1",kind:"DeleteOptions",preconditions:{uid:$uid}}' |
+    kubectl --request-timeout=10s delete --raw "/api/v1/namespaces/$namespace/pods/$probe_name" -f - >/dev/null || return 1
+  probe_name=
+}
+
 child_kubectl() {
-  local pod=$1
+  local backend=$1
   shift
-  kubectl -n "$namespace" exec -i "$pod" -c controller -- k0s kubectl --kubeconfig=/dev/stdin --request-timeout=15s "$@" <"$old_config"
+  [[ -n $probe_name && $backend == "$probe_backend" ]] || return 1
+  if ! timeout 25s kubectl --request-timeout=20s -n "$namespace" exec -i "$probe_name" -c client -- \
+    k0s kubectl --kubeconfig=/dev/stdin --request-timeout=15s "$@" <"$old_config" 2>/dev/null; then
+    printf '%s\n' 'The SQLite client request through the private Service failed.' >&2
+    return 1
+  fi
 }
 
 check_child() {
@@ -294,10 +325,12 @@ freeze() {
     select(any(.metadata.ownerReferences[]; .kind=="Cluster" and .uid==$uid and .controller==true)) | .data.value | select(length>0)' |
     base64 -d >"$old_config"
   expect_equal "$endpoint" "$(kubectl --kubeconfig "$old_config" config view --minify -o jsonpath='{.clusters[0].cluster.server}')" 'original kubeconfig endpoint' >&2
+  start_child_client "$source_pod"
   check_child "$source_pod"
   hold_workload
   lease=$(child_kubectl "$source_pod" -n kube-node-lease get lease "$worker" -o jsonpath='{.spec.renewTime}')
   test -n "$lease"
+  remove_child_client
 
   create_fences
   retry_until 90 source_fenced
@@ -509,6 +542,7 @@ restore() {
   check_retained_copy
   source_fenced
   source_stopped
+  start_child_client "$target_pod"
   move_service
   retry_until 120 target_only_endpoints "$target_pod_uid"
   retry_until 180 child_kubectl "$target_pod" get --raw=/readyz
@@ -542,5 +576,16 @@ restore() {
 }
 
 temp_dir=$(mktemp -d "$proof_dir/.sqlite-proof.XXXXXX")
-trap 'rm -rf -- "$temp_dir"' EXIT
+probe_name=
+probe_uid=
+probe_backend=
+
+cleanup() {
+  local status=$?
+  trap - EXIT
+  remove_child_client || status=1
+  rm -rf -- "$temp_dir"
+  exit "$status"
+}
+trap cleanup EXIT
 "$stage"
