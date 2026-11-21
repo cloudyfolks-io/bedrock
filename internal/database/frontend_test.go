@@ -11,7 +11,6 @@ import (
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/util/intstr"
 	"k8s.io/utils/ptr"
-	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 
 	"github.com/cloudyfolks-io/bedrock/api/v1alpha1"
@@ -157,6 +156,7 @@ func TestLegacyEndpointAdoptsOnlyTheApprovedFrontendAfterTheProxyIsReady(t *test
 	}}
 	ip.SetName("proxy-ip")
 	ip.SetGroupVersionKind(fabric.IPGVK)
+	ip.SetLabels(map[string]string{"fabric.cloudyfolks.io/subnet": fabricSubnet})
 	old := &unstructured.Unstructured{Object: map[string]any{
 		"spec": map[string]any{
 			"frontend": map[string]any{"vip": in.db.Spec.Endpoint.Address},
@@ -172,8 +172,7 @@ func TestLegacyEndpointAdoptsOnlyTheApprovedFrontendAfterTheProxyIsReady(t *test
 		sourceProjectLabel: claim.Data["projectID"], sourceEnvironmentLabel: claim.Data["environment"],
 	})
 	start := endpointApproval(claim, v1alpha1.DatabaseEndpointStartName(in.db.Spec.Endpoint.LoadBalancerRef))
-	c := fake.NewClientBuilder().WithScheme(testScheme(t)).WithObjects(claim, start, parent, plane, backend, old, proxy, rs, pod, ip).
-		WithIndex(ip, "network.fabric-ip-address", func(client.Object) []string { return []string{fabricSubnet + "/" + address} }).Build()
+	c := fake.NewClientBuilder().WithScheme(testScheme(t)).WithObjects(claim, start, parent, plane, backend, old, proxy, rs, pod, ip).Build()
 	r := &Reconciler{Client: c, Live: c}
 	if rejected, err := r.prepareLegacyEndpoint(ctx, in); err != nil || rejected != nil {
 		t.Fatalf("could not prepare the endpoint: %v %v", rejected, err)
@@ -282,6 +281,77 @@ func TestLegacyEndpointAdoptsOnlyTheApprovedFrontendAfterTheProxyIsReady(t *test
 	if gone, err := r.removeLegacyFrontend(ctx, *in.db); err != nil || !gone {
 		t.Fatalf("the frontend does not report withdrawal: %t %v", gone, err)
 	}
+}
+
+func TestLegacyProxyUsesLiveFabricIPRecords(t *testing.T) {
+	c := startEnv(t)
+	ctx := context.Background()
+	in, _, _, _, _ := frontendFixture()
+	in.db.Namespace = "legacy-proxy-live-ip"
+	in.subnet.Namespace = in.db.Namespace
+	must(t, c.Create(ctx, &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: in.db.Namespace}}))
+	labels := map[string]string{managedProxyLabel: string(in.db.UID), network.NetworkClassLabel: network.NetworkClassManaged}
+	podSpec := corev1.PodSpec{Containers: []corev1.Container{{Name: "proxy", Image: haproxy}}}
+	template := corev1.PodTemplateSpec{ObjectMeta: metav1.ObjectMeta{Labels: labels}, Spec: podSpec}
+	selector := &metav1.LabelSelector{MatchLabels: labels}
+	proxy := &appsv1.Deployment{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: EndpointName(*in.db), Namespace: in.db.Namespace, OwnerReferences: []metav1.OwnerReference{ownerRefOf(*in.db)},
+		},
+		Spec: appsv1.DeploymentSpec{Replicas: ptr.To[int32](1), Template: template, Selector: selector},
+	}
+	must(t, c.Create(ctx, proxy))
+	proxy.Status = appsv1.DeploymentStatus{Replicas: 1, ReadyReplicas: 1}
+	must(t, c.Status().Update(ctx, proxy))
+	replicaSet := &appsv1.ReplicaSet{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: "proxy-set", Namespace: in.db.Namespace,
+			OwnerReferences: []metav1.OwnerReference{*metav1.NewControllerRef(proxy, appsv1.SchemeGroupVersion.WithKind("Deployment"))},
+		},
+		Spec: appsv1.ReplicaSetSpec{Replicas: ptr.To[int32](1), Template: template, Selector: selector},
+	}
+	must(t, c.Create(ctx, replicaSet))
+	pod := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: "proxy-pod", Namespace: in.db.Namespace, Labels: labels,
+			OwnerReferences: []metav1.OwnerReference{*metav1.NewControllerRef(replicaSet, appsv1.SchemeGroupVersion.WithKind("ReplicaSet"))},
+		},
+		Spec: podSpec,
+	}
+	must(t, c.Create(ctx, pod))
+	pod.Status.Conditions = []corev1.PodCondition{{Type: corev1.PodReady, Status: corev1.ConditionTrue}}
+	must(t, c.Status().Update(ctx, pod))
+	fabricSubnet := network.FabricName(in.db.Namespace, in.subnet.Name)
+	const address = "10.50.0.2"
+	ipRecord := func(name, subnet, ipv4 string) *unstructured.Unstructured {
+		ip := &unstructured.Unstructured{Object: map[string]any{
+			"spec": map[string]any{"namespace": in.db.Namespace, "podName": pod.Name, "subnet": subnet, "v4IpAddress": ipv4},
+		}}
+		ip.SetGroupVersionKind(fabric.IPGVK)
+		ip.SetName(name)
+		ip.SetLabels(map[string]string{"fabric.cloudyfolks.io/subnet": subnet})
+		return ip
+	}
+	r := &Reconciler{Client: c, Live: c}
+	assertReady := func(want bool) {
+		t.Helper()
+		got, err := r.readyLegacyProxy(ctx, *in.db, in.subnet, address)
+		if err != nil || got != want {
+			t.Fatalf("proxy readiness = %t, want %t: %v", got, want, err)
+		}
+	}
+	must(t, c.Create(ctx, ipRecord("different-address", fabricSubnet, "10.50.0.20")))
+	must(t, c.Create(ctx, ipRecord("different-subnet", "another-subnet", address)))
+	assertReady(false)
+	correct := ipRecord("proxy-address", fabricSubnet, address)
+	must(t, c.Create(ctx, correct))
+	assertReady(true)
+	duplicate := ipRecord("duplicate-address", fabricSubnet, address)
+	must(t, unstructured.SetNestedField(duplicate.Object, "foreign-namespace", "spec", "namespace"))
+	must(t, c.Create(ctx, duplicate))
+	assertReady(false)
+	must(t, c.Delete(ctx, correct))
+	assertReady(false)
 }
 
 func TestLegacyEndpointRefusesAVIPOutsideTheApprovedPlaneWithoutCreatingIt(t *testing.T) {

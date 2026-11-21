@@ -55,6 +55,16 @@ func IPsOfAddress(ctx context.Context, c client.Reader, fabricSubnet, address st
 	return listObjects(ctx, c, fabric.IPGVK, client.MatchingFields{fabricIPAddressField: fabricIPAddressKey(fabricSubnet, address)})
 }
 
+func LiveIPsOfAddress(ctx context.Context, live client.Reader, fabricSubnet, address string) ([]*unstructured.Unstructured, error) {
+	ips, err := listObjects(ctx, live, fabric.IPGVK, client.MatchingLabels{labelFabricSubnet: fabricSubnet})
+	if err != nil {
+		return nil, err
+	}
+	return slices.DeleteFunc(ips, func(ip *unstructured.Unstructured) bool {
+		return fabric.IPAddress(ip) != address
+	}), nil
+}
+
 func AddressHeldByAnother(ips []*unstructured.Unstructured, address, namespace, vm string) bool {
 	return slices.ContainsFunc(ips, func(ip *unstructured.Unstructured) bool {
 		ipNamespace, pod, _ := fabric.IPOwner(ip)

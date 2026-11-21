@@ -459,7 +459,7 @@ func (r *Reconciler) readyLegacyProxy(ctx context.Context, db v1alpha1.Database,
 		return false, err
 	}
 	fabricSubnet := network.FabricName(db.Namespace, subnet.Name)
-	ips, err := network.IPsOfAddress(ctx, r.Client, fabricSubnet, address)
+	ips, err := network.LiveIPsOfAddress(ctx, r.Live, fabricSubnet, address)
 	if err != nil {
 		return false, err
 	}
