@@ -44,6 +44,7 @@ reference_claim=etcd-source-reference
 retained_claim=etcd-source-retained
 driver=rook-ceph.rbd.csi.ceph.com
 busybox=docker.io/library/busybox:1.37.0
+busybox_ref="${busybox%:*}@$busybox_digest"
 inventory=$proof_dir/frozen-inventory.json
 frozen=$proof_dir/frozen.json
 output=$proof_dir/etcd-copy
@@ -86,8 +87,11 @@ namespace_uid=$(jq -er '.namespace_uid' "$source_receipt")
 cluster_uid=$(jq -er '.cluster_uid' "$source_receipt")
 source_claim=$(jq -er '.etcd.disk.claim' "$source_receipt")
 source_handle_sha=$(jq -er '.etcd.disk.handle_sha256' "$source_receipt")
-k0s ctr --namespace k8s.io images ls | awk -v image="$busybox" -v digest="$busybox_digest" '
-  $1 == image && $3 == digest { matches++ } END { exit matches != 1 }'
+k0s ctr --namespace k8s.io images ls | awk -v image="$busybox" -v ref="$busybox_ref" -v digest="$busybox_digest" '
+  ($1 == image || $1 == ref) && $3 != digest { invalid++ }
+  $1 == image && $3 == digest { tags++ }
+  $1 == ref && $3 == digest { aliases++ }
+  END { exit invalid || tags != 1 || aliases != 1 }'
 
 sealed_disk() {
   local binding=$1 handle hash
@@ -202,7 +206,7 @@ metadata: {name: etcd-copy-source-probe-$role}
 spec:
   containers:
     - name: probe
-      image: $busybox
+      image: $busybox_ref
       volumeMounts: [{name: source, mountPath: /data, readOnly: true}]
   volumes: [{name: source, persistentVolumeClaim: {claimName: $claim, readOnly: true}}]
 PROBE
@@ -409,7 +413,7 @@ reader_evidence() {
     .kind=="PodList" and (.metadata.continue // "")=="" and (.items|type)=="array" and
     ([.items[] | select(any(.spec.volumes[]?; .persistentVolumeClaim.claimName==$claim)) | .metadata.uid]==[$uid])' >/dev/null || return 1
   kc -n "$namespace" get pod "$reader_name" -o json |
-    jq -ce --arg uid "$reader_uid" --arg claim "$claim" --arg image "$busybox" --arg digest "$busybox_digest" '
+    jq -ce --arg uid "$reader_uid" --arg claim "$claim" --arg image "$busybox_ref" --arg digest "$busybox_digest" '
       select(.metadata.uid==$uid and .metadata.deletionTimestamp==null and (.metadata.ownerReferences // [])==[] and
         .status.phase=="Running" and (.spec.nodeName|length)>0 and .spec.automountServiceAccountToken==false and
         (.spec.hostNetwork // false)==false and (.spec.hostPID // false)==false and (.spec.hostIPC // false)==false and
@@ -454,7 +458,7 @@ spec:
     seccompProfile: {type: RuntimeDefault}
   containers:
     - name: reader
-      image: $busybox
+      image: $busybox_ref
       imagePullPolicy: Never
       command: [sleep, "900"]
       securityContext:
