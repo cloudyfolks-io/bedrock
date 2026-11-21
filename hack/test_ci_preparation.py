@@ -6,31 +6,49 @@ import unittest
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
+OFFLINE_INSTALL_JOBS = ("e2e-authn", "e2e-tenant")
+
+
+def ci_jobs():
+    workflow = (ROOT / ".github/workflows/ci.yml").read_text()
+    return dict(re.findall(
+        r"^  ([a-z][a-z0-9-]*):\n(.*?)(?=^  [a-z][a-z0-9-]*:\n|\Z)",
+        workflow.partition("\njobs:\n")[2], re.M | re.S,
+    ))
 
 
 class PreparationTest(unittest.TestCase):
     def test_embedded_release_is_rendered_before_each_docker_build(self):
-        self.assertIn("COPY dist/release /release", (ROOT / "Containerfile").read_text())
-        workflow = (ROOT / ".github/workflows/ci.yml").read_text()
-        for job in ("e2e-bundle", "e2e-authn", "e2e-tenant"):
-            block = re.search(
-                rf"^  {job}:\n(.*?)(?=^  [a-z]|\Z)", workflow, re.M | re.S
-            ).group(1)
+        containerfile = (ROOT / "Containerfile").read_text().splitlines()
+        self.assertIn("COPY --from=build /src/dist/release /release", containerfile)
+        jobs = ci_jobs()
+        for job in OFFLINE_INSTALL_JOBS:
             with self.subTest(job=job):
-                before, after = block.split("- run: docker build", 1)
-                self.assertIn("make build binaries release-from-build", before)
-                self.assertIn("IMAGE=localhost:5000/bedrock:dev PIN_DIGESTS=1", before)
-                self.assertLess(after.index("docker push"), after.index("bundle-from-release"))
+                self.assertIn(job, jobs)
+                before_build, build, after_build = jobs[job].partition("- run: docker build")
+                self.assertTrue(build, "the job must build the Bedrock image")
+                before_push, push, after_push = after_build.partition("- run: docker push")
+                self.assertTrue(push, "the job must push the built Bedrock image")
+                self.assertIn("make build binaries release-from-build", before_build)
+                self.assertNotIn("bundle-from-release", before_build + before_push)
+                self.assertIn("make release-from-build bundle-from-release", after_push)
+                pin = "IMAGE=localhost:5000/bedrock:dev PIN_DIGESTS=1"
+                self.assertIn(pin, before_build)
+                self.assertIn(pin, after_push)
                 if job == "e2e-tenant":
-                    self.assertIn("RELEASE_CONFIG=dist/components-e2e.yaml", before)
+                    config = "RELEASE_CONFIG=dist/components-e2e.yaml"
+                    self.assertIn(config, before_build)
+                    self.assertIn(config, after_push)
 
     def test_host_install_runners_are_supported(self):
-        workflow = (ROOT / ".github/workflows/ci.yml").read_text()
-        supported = (ROOT / "release/components.yaml").read_text()
-        for job in ("e2e-bundle", "e2e-authn", "e2e-tenant", "e2e-upgrade"):
-            runner = re.search(rf"^  {job}:\n.*?runs-on: (\S+)", workflow, re.M | re.S).group(1)
-            self.assertEqual(runner, "ubuntu-24.04", job)
-            self.assertIn(runner, supported)
+        jobs = ci_jobs()
+        supported = (ROOT / "release/components.yaml").read_text().splitlines()
+        for job in (*OFFLINE_INSTALL_JOBS, "e2e-upgrade"):
+            with self.subTest(job=job):
+                self.assertIn(job, jobs)
+                runners = re.findall(r"^    runs-on: (\S+)$", jobs[job], re.M)
+                self.assertEqual(runners, ["ubuntu-24.04"])
+                self.assertIn(f"  - {runners[0]}", supported)
 
     def test_upgrade_prepares_each_versions_embedded_release(self):
         with tempfile.TemporaryDirectory() as tmp:
