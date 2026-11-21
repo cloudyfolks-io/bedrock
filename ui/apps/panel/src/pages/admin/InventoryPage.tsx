@@ -1,4 +1,5 @@
 import { useId, useState, type FormEvent } from "react";
+import { msg } from "@lingui/core/macro";
 import { useInfiniteQuery } from "@tanstack/react-query";
 import { Link, useSearchParams } from "react-router";
 import { useLingui } from "@lingui/react/macro";
@@ -19,7 +20,7 @@ import { definitionsFor, refOf, type ResourceDef } from "../../resources/registr
 
 const restorePlural = "virtualmachinerestores";
 const inventoryKinds = definitionsFor("project").map((def) => def.plural === restorePlural
-  ? { ...def, path: "restores", title: { id: "inventory.vmRestores", message: "Virtual machine restores" } }
+  ? { ...def, path: "restores", title: msg({ id: "inventory.vmRestores", message: "Virtual machine restores" }) }
   : def);
 const allProjects = "__all__";
 const pageSize = "50";
@@ -75,6 +76,7 @@ function InventoryList({ def, projects, project, name }: { def: ResourceDef; pro
   const current = query.data?.pages[page];
   const next = current?.metadata.continue;
   const items = current?.items ?? [];
+  const pageNumber = page + 1;
 
   function firstPage() {
     setPage(0);
@@ -110,10 +112,10 @@ function InventoryList({ def, projects, project, name }: { def: ResourceDef; pro
   return (
     <>
       <div className="br-toolbar">
-        <Button variant="secondary" disabled={query.isFetching} onClick={firstPage}>{i18n._({ id: "inventory.refresh", message: "Refresh list" })}</Button>
+        <Button variant="secondary" disabled={query.isFetching} onClick={firstPage}>{t({ id: "inventory.refresh", message: "Refresh list" })}</Button>
       </div>
       {items.length === 0 ? (
-        <EmptyState title={next || page > 0 ? i18n._({ id: "inventory.emptyPage", message: "No resources match on this page" }) : t({ id: "inventory.empty", message: "No resources match" })} />
+        <EmptyState title={next || page > 0 ? t({ id: "inventory.emptyPage", message: "No resources match on this page" }) : t({ id: "inventory.empty", message: "No resources match" })} />
       ) : (
         <Table caption={i18n._(def.title)}>
           <TableHead>
@@ -157,7 +159,7 @@ function InventoryList({ def, projects, project, name }: { def: ResourceDef; pro
       {next || page > 0 ? (
         <nav className="br-inventory-pages" aria-label={t({ id: "inventory.pages", message: "Inventory pages" })}>
           <Button variant="secondary" disabled={page === 0 || query.isFetching} onClick={() => setPage(page - 1)}>{t({ id: "inventory.previous", message: "Previous" })}</Button>
-          <span role="status">{t({ id: "inventory.page", message: `Page ${page + 1}` })}</span>
+          <span role="status">{t({ id: "inventory.page", message: `Page ${pageNumber}` })}</span>
           <Button variant="secondary" disabled={!next || query.isFetching} onClick={() => void nextPage()}>{t({ id: "inventory.next", message: "Next" })}</Button>
         </nav>
       ) : null}
@@ -206,8 +208,8 @@ export default function InventoryPage() {
       ) : null}
       {blockedProjectFilter ? (
         <EmptyState
-          title={i18n._({ id: "inventory.networkScope", message: "Networks use tenant scope" })}
-          action={<Button variant="secondary" onClick={() => updateFilter("project", "")}>{i18n._({ id: "inventory.clearProject", message: "Clear project filter" })}</Button>}
+          title={t({ id: "inventory.networkScope", message: "Networks use tenant scope" })}
+          action={<Button variant="secondary" onClick={() => updateFilter("project", "")}>{t({ id: "inventory.clearProject", message: "Clear project filter" })}</Button>}
         />
       ) : null}
       {ready ? <InventoryList key={JSON.stringify([def.path, project?.name, project?.namespace, name])} def={def} projects={projects.data ?? []} project={project} name={name} /> : null}

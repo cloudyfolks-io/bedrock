@@ -97,8 +97,11 @@ describe("admin inventory", () => {
     });
     expect(await screen.findByRole("heading", { name: "No resources match on this page" }, inventoryWait)).toBeTruthy();
     expect(screen.queryByRole("heading", { name: "No resources match" })).toBeNull();
+    const pagesNav = screen.getByRole("navigation", { name: "Inventory pages" });
+    expect(within(pagesNav).getByRole("status").textContent).toBe("Page 1");
     await user.click(screen.getByRole("button", { name: "Next" }));
     expect(await screen.findByRole("link", { name: "worker" }, inventoryWait)).toBeTruthy();
+    expect(within(pagesNav).getByRole("status").textContent).toBe("Page 2");
     await user.click(screen.getByRole("button", { name: "Previous" }));
     expect(screen.getByRole("heading", { name: "No resources match on this page" })).toBeTruthy();
     await user.click(screen.getByRole("button", { name: "Next" }));

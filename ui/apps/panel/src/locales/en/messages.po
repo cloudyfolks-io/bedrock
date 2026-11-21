@@ -704,8 +704,14 @@ msgstr "Upload {0}"
 msgid "inventory.allProjects"
 msgstr "All projects"
 
+msgid "inventory.clearProject"
+msgstr "Clear project filter"
+
 msgid "inventory.empty"
 msgstr "No resources match"
+
+msgid "inventory.emptyPage"
+msgstr "No resources match on this page"
 
 msgid "inventory.expired"
 msgstr "This list expired"
@@ -716,6 +722,9 @@ msgstr "Go to first page"
 msgid "inventory.name"
 msgstr "Exact resource name"
 
+msgid "inventory.networkScope"
+msgstr "Networks use tenant scope"
+
 msgid "inventory.next"
 msgstr "Next"
 
@@ -723,7 +732,7 @@ msgid "inventory.noProject"
 msgstr "No linked project"
 
 msgid "inventory.page"
-msgstr "Page {page}"
+msgstr "Page {pageNumber}"
 
 msgid "inventory.pages"
 msgstr "Inventory pages"
@@ -737,6 +746,9 @@ msgstr "The project namespace is not ready"
 msgid "inventory.projectUnavailable"
 msgstr "This project is unavailable"
 
+msgid "inventory.refresh"
+msgstr "Refresh list"
+
 msgid "inventory.resourceType"
 msgstr "Resource type"
 
@@ -748,6 +760,9 @@ msgstr "Tenant"
 
 msgid "inventory.unknownType"
 msgstr "Select a resource type"
+
+msgid "inventory.vmRestores"
+msgstr "Virtual machine restores"
 
 msgid "list.actions.header"
 msgstr "Actions"
@@ -951,6 +966,9 @@ msgstr "Networks belong to the tenant. Subnets of your project still work."
 
 msgid "networks.forbidden.title"
 msgstr "You cannot list networks"
+
+msgid "networks.limit"
+msgstr "The network list is too large"
 
 msgid "query.error"
 msgstr "The panel could not load this data."
