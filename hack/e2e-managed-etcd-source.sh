@@ -64,7 +64,11 @@ apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata: {name: etcd-source-ingress}
 spec:
-  podSelector: {}
+  podSelector:
+    matchExpressions:
+      - key: migration.cloudyfolks.io/purpose
+        operator: NotIn
+        values: [etcd-member-recovery]
   policyTypes: [Ingress]
   ingress:
     - from: [{podSelector: {}}]
