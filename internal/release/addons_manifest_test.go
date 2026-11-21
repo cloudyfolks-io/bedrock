@@ -122,7 +122,12 @@ func TestKataComponentTunesTheRuntime(t *testing.T) {
 		t.Fatalf("missing the drop-in ConfigMap: %v", kinds(objects))
 	}
 	dropIn, _, _ := unstructured.NestedString(config.Object, "data", "dropin-qemu.toml")
-	for _, line := range []string{"[hypervisor.qemu]", "default_memory = 512", `virtio_fs_extra_args = ["--thread-pool-size=1", "--announce-submounts", "--xattr"]`} {
+	for _, line := range []string{
+		"[hypervisor.qemu]",
+		"default_memory = 512",
+		`virtio_fs_extra_args = ["--thread-pool-size=1", "--announce-submounts", "--xattr"]`,
+		"[agent.kata]\ndial_timeout = 90",
+	} {
 		if !strings.Contains(dropIn, line) {
 			t.Errorf("drop-in does not hold %q: %s", line, dropIn)
 		}
