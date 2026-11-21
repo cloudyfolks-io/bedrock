@@ -7,10 +7,13 @@ import (
 
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/util/intstr"
 	"k8s.io/utils/ptr"
+	ctrl "sigs.k8s.io/controller-runtime"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 
 	"github.com/cloudyfolks-io/bedrock/api/v1alpha1"
@@ -124,6 +127,12 @@ func TestLegacyEndpointKeepsTheMigrationCIDRUntilTheApprovedOpen(t *testing.T) {
 	marker.Data["claimUID"] = string(claim.UID)
 	must(t, c.Create(ctx, marker))
 	check("172.20.0.0/16")
+	group := SecurityGroupObject(*in.db, in.project, in.subnet, "", in.port)
+	must(t, c.Create(ctx, group))
+	must(t, c.Delete(ctx, marker))
+	if rejected, err := r.prepareLegacyEndpoint(ctx, in); err != nil || rejected == nil || rejected.Reason != ReasonProxyWaiting {
+		t.Fatalf("prepare accepted an open group after revocation: %v %v", rejected, err)
+	}
 }
 
 func TestLegacyEndpointAdoptsOnlyTheApprovedFrontendAfterTheProxyIsReady(t *testing.T) {
@@ -172,7 +181,10 @@ func TestLegacyEndpointAdoptsOnlyTheApprovedFrontendAfterTheProxyIsReady(t *test
 		sourceProjectLabel: claim.Data["projectID"], sourceEnvironmentLabel: claim.Data["environment"],
 	})
 	start := endpointApproval(claim, v1alpha1.DatabaseEndpointStartName(in.db.Spec.Endpoint.LoadBalancerRef))
-	c := fake.NewClientBuilder().WithScheme(testScheme(t)).WithObjects(claim, start, parent, plane, backend, old, proxy, rs, pod, ip).Build()
+	closed := in.db.DeepCopy()
+	closed.Spec.AllowedCIDRs = []string{claim.Data["jobCIDR"]}
+	group := SecurityGroupObject(*closed, in.project, in.subnet, "", in.port)
+	c := fake.NewClientBuilder().WithScheme(testScheme(t)).WithObjects(claim, start, parent, plane, backend, old, proxy, rs, pod, ip, group).Build()
 	r := &Reconciler{Client: c, Live: c}
 	if rejected, err := r.prepareLegacyEndpoint(ctx, in); err != nil || rejected != nil {
 		t.Fatalf("could not prepare the endpoint: %v %v", rejected, err)
@@ -354,10 +366,135 @@ func TestLegacyProxyUsesLiveFabricIPRecords(t *testing.T) {
 	assertReady(false)
 }
 
+func TestLegacyEndpointReconcileWithdrawsWhenAuthorizationIsLost(t *testing.T) {
+	for _, reason := range []string{"missing claim", "invalid claim", "missing start", "invalid start", "suspended without a claim", "missing open", "invalid open", "missing group", "foreign group"} {
+		t.Run(reason, func(t *testing.T) {
+			ctx := context.Background()
+			in, claim, _, _, _ := frontendFixture()
+			in.db.Spec.Suspended = reason == "suspended without a claim"
+			start := endpointApproval(claim, v1alpha1.DatabaseEndpointStartName(in.db.Spec.Endpoint.LoadBalancerRef))
+			if reason == "invalid claim" {
+				claim.Data["uid"] = "other-database"
+			}
+			if reason == "invalid start" {
+				start.Data["claimUID"] = "other-claim"
+			}
+			proxy := &appsv1.Deployment{
+				ObjectMeta: metav1.ObjectMeta{Name: EndpointName(*in.db), Namespace: in.db.Namespace, UID: "uid-proxy", Generation: 2,
+					OwnerReferences: []metav1.OwnerReference{ownerRefOf(*in.db)}},
+				Spec:   appsv1.DeploymentSpec{Replicas: ptr.To[int32](1)},
+				Status: appsv1.DeploymentStatus{ObservedGeneration: 2, Replicas: 1},
+			}
+			endpoint := legacyEndpoint{settings: *in.db.Spec.Endpoint, vpc: "net-acme"}
+			frontend := endpoint.loadBalancer(*in.db, in.project, "10.50.0.2", in.port)
+			frontend.SetUID("uid-frontend")
+			foreign := fabric.SwitchLBRule(fabric.Meta{Name: in.db.Spec.Endpoint.LoadBalancerRef}, in.db.Spec.Endpoint.Address, "another-namespace", []string{"192.0.2.1"}, nil)
+			pod := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "draining-proxy", Namespace: in.db.Namespace,
+				Labels: map[string]string{managedProxyLabel: string(in.db.UID)}}}
+			objects := []client.Object{in.db, &in.subnet, proxy, frontend, foreign, pod}
+			if reason != "missing claim" && !in.db.Spec.Suspended {
+				objects = append(objects, claim)
+			}
+			if reason != "missing start" {
+				objects = append(objects, start)
+			}
+			var group *v1alpha1.SecurityGroup
+			if reason == "missing open" || reason == "invalid open" || reason == "foreign group" {
+				in.db.Spec.AllowedCIDRs = []string{"192.0.2.0/24"}
+				group = SecurityGroupObject(*in.db, in.project, in.subnet, "", in.port)
+				if reason == "foreign group" {
+					group.OwnerReferences[0].UID = "foreign-database"
+				}
+				objects = append(objects, group)
+			}
+			if reason == "invalid open" {
+				open := endpointApproval(claim, v1alpha1.DatabaseEndpointOpenName(in.db.Spec.Endpoint.LoadBalancerRef))
+				open.Data["claimUID"] = "other-claim"
+				objects = append(objects, open)
+			}
+			c := fake.NewClientBuilder().WithScheme(testScheme(t)).WithStatusSubresource(in.db, proxy).WithObjects(objects...).Build()
+			r := &Reconciler{Client: c, Live: c}
+			req := ctrl.Request{NamespacedName: client.ObjectKeyFromObject(in.db)}
+			assertRequeue := func(want ctrl.Result) {
+				t.Helper()
+				got, err := r.Reconcile(ctx, req)
+				if err != nil || got != want {
+					t.Fatalf("reconcile = %+v, want %+v: %v", got, want, err)
+				}
+			}
+			assertRequeue(ctrl.Result{RequeueAfter: deleteRequeue})
+			must(t, c.Get(ctx, client.ObjectKeyFromObject(proxy), proxy))
+			if ptr.Deref(proxy.Spec.Replicas, 1) != 0 {
+				t.Fatal("the unapproved proxy is still enabled")
+			}
+			if err := c.Get(ctx, client.ObjectKeyFromObject(frontend), frontend); !apierrors.IsNotFound(err) {
+				t.Fatalf("the unapproved frontend was not withdrawn: %v", err)
+			}
+			must(t, c.Get(ctx, client.ObjectKeyFromObject(foreign), foreign))
+			assertRequeue(ctrl.Result{RequeueAfter: deleteRequeue})
+			proxy.Status = appsv1.DeploymentStatus{ObservedGeneration: proxy.Generation}
+			must(t, c.Status().Update(ctx, proxy))
+			assertRequeue(ctrl.Result{RequeueAfter: deleteRequeue})
+			must(t, c.Delete(ctx, pod))
+			assertRequeue(ctrl.Result{RequeueAfter: gateRequeue})
+			must(t, c.Get(ctx, client.ObjectKeyFromObject(proxy), proxy))
+			if ptr.Deref(proxy.Spec.Replicas, 1) != 0 {
+				t.Fatal("the proxy restarted without authorization")
+			}
+			if group != nil {
+				must(t, c.Get(ctx, client.ObjectKeyFromObject(group), group))
+				if !slices.Equal(group.Spec.Ingress, []v1alpha1.SecurityGroupRule{databaseIngressRule("192.0.2.0/24", int32(in.port))}) {
+					t.Fatal("withdrawal changed the customer group")
+				}
+			}
+		})
+	}
+}
+
+func TestLegacyEndpointAuthorizationPreservesOtherDeployments(t *testing.T) {
+	ctx := context.Background()
+	in, claim, _, _, _ := frontendFixture()
+	direct := in.db.DeepCopy()
+	direct.Name, direct.UID = "direct-db", "direct-uid"
+	direct.Spec.Endpoint = &v1alpha1.DatabaseEndpointSpec{Address: "10.50.0.2"}
+	foreign := &appsv1.Deployment{
+		ObjectMeta: metav1.ObjectMeta{Name: EndpointName(*in.db), Namespace: in.db.Namespace, UID: "foreign-proxy",
+			OwnerReferences: []metav1.OwnerReference{ownerRefOf(*direct)}},
+		Spec: appsv1.DeploymentSpec{Replicas: ptr.To[int32](1)},
+	}
+	nativeProxy := foreign.DeepCopy()
+	nativeProxy.Name, nativeProxy.UID = EndpointName(*direct), "direct-proxy"
+	c := fake.NewClientBuilder().WithScheme(testScheme(t)).WithStatusSubresource(in.db).WithObjects(in.db, direct, &in.subnet, foreign, nativeProxy).Build()
+	r := &Reconciler{Client: c, Live: c}
+	for _, db := range []*v1alpha1.Database{in.db, direct} {
+		_, err := r.Reconcile(ctx, ctrl.Request{NamespacedName: client.ObjectKeyFromObject(db)})
+		must(t, err)
+	}
+	for _, deploy := range []*appsv1.Deployment{foreign, nativeProxy} {
+		must(t, c.Get(ctx, client.ObjectKeyFromObject(deploy), deploy))
+		if ptr.Deref(deploy.Spec.Replicas, 0) != 1 {
+			t.Fatalf("reconcile scaled an unrelated Deployment %s", deploy.Name)
+		}
+	}
+	start := endpointApproval(claim, v1alpha1.DatabaseEndpointStartName(in.db.Spec.Endpoint.LoadBalancerRef))
+	must(t, c.Create(ctx, claim))
+	must(t, c.Create(ctx, start))
+	if rejected, err := r.legacyEndpointAuthorization(ctx, *in.db); err != nil || rejected != nil {
+		t.Fatalf("a first start with no owned proxy was refused: %v %v", rejected, err)
+	}
+	group := SecurityGroupObject(*in.db, in.project, in.subnet, "", in.port)
+	group.OwnerReferences[0].UID = direct.UID
+	must(t, c.Create(ctx, group))
+	if rejected, err := r.legacyEndpointAuthorization(ctx, *in.db); err != nil || rejected != nil {
+		t.Fatalf("a foreign group and proxy forced withdrawal: %v %v", rejected, err)
+	}
+}
+
 func TestLegacyEndpointRefusesAVIPOutsideTheApprovedPlaneWithoutCreatingIt(t *testing.T) {
 	in, claim, parent, plane, backend := frontendFixture()
 	must(t, unstructured.SetNestedField(plane.Object, "100.128.0.0/16", "spec", "cidrBlock"))
-	c := fake.NewClientBuilder().WithScheme(testScheme(t)).WithObjects(claim, parent, plane, backend).Build()
+	start := endpointApproval(claim, v1alpha1.DatabaseEndpointStartName(in.db.Spec.Endpoint.LoadBalancerRef))
+	c := fake.NewClientBuilder().WithScheme(testScheme(t)).WithObjects(claim, start, parent, plane, backend).Build()
 	rejected, err := (&Reconciler{Client: c, Live: c}).prepareLegacyEndpoint(context.Background(), in)
 	if err != nil || rejected == nil || rejected.Reason != ReasonEndpointAddressInvalid {
 		t.Fatalf("expected an invalid VIP refusal, got %v %v", rejected, err)

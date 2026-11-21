@@ -177,10 +177,10 @@ func SecurityGroupObject(db v1alpha1.Database, project Project, subnet v1alpha1.
 	cidrs := AllowedCIDRs(db, subnet)
 	ingress := make([]v1alpha1.SecurityGroupRule, 0, len(cidrs)+1)
 	for _, cidr := range cidrs {
-		ingress = append(ingress, v1alpha1.SecurityGroupRule{Protocol: "tcp", Port: int32(port), CIDR: cidr})
+		ingress = append(ingress, databaseIngressRule(cidr, int32(port)))
 	}
 	if vip != "" {
-		ingress = append(ingress, v1alpha1.SecurityGroupRule{Protocol: "tcp", Port: int32(port), CIDR: vip + "/32"})
+		ingress = append(ingress, databaseIngressRule(vip+"/32", int32(port)))
 	}
 	return &v1alpha1.SecurityGroup{
 		TypeMeta: metav1.TypeMeta{APIVersion: v1alpha1.GroupVersion.String(), Kind: "SecurityGroup"},
@@ -193,6 +193,10 @@ func SecurityGroupObject(db v1alpha1.Database, project Project, subnet v1alpha1.
 			Egress:  []v1alpha1.SecurityGroupRule{{Protocol: "all", CIDR: "0.0.0.0/0"}},
 		},
 	}
+}
+
+func databaseIngressRule(cidr string, port int32) v1alpha1.SecurityGroupRule {
+	return v1alpha1.SecurityGroupRule{Protocol: v1alpha1.SecurityGroupProtocolTCP, Port: port, CIDR: cidr}
 }
 
 func AddressOf(db v1alpha1.Database, subnet string) (string, bool) {

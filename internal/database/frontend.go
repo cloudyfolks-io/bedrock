@@ -2,6 +2,7 @@ package database
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/netip"
 	"reflect"
@@ -15,6 +16,7 @@ import (
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/util/validation"
+	"k8s.io/utils/ptr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	"github.com/cloudyfolks-io/bedrock/api/v1alpha1"
@@ -103,31 +105,106 @@ func proxyDatabase(in *flow) v1alpha1.Database {
 	return db
 }
 
-func (r *Reconciler) prepareLegacyEndpoint(ctx context.Context, in *flow) (*Refusal, error) {
-	db := *in.db
+func (r *Reconciler) legacyEndpointClaim(ctx context.Context, db v1alpha1.Database, subnet v1alpha1.Subnet) (corev1.ConfigMap, *Refusal, error) {
 	spec := db.Spec.Endpoint
 	var claim corev1.ConfigMap
 	err := r.Live.Get(ctx, client.ObjectKey{Namespace: PlatformNamespace, Name: v1alpha1.DatabaseEndpointClaimName(spec.LoadBalancerRef)}, &claim)
 	if apierrors.IsNotFound(err) {
-		return refusal(ReasonEndpointAddressInvalid, "the legacy VIP needs an endpoint claim"), nil
+		return claim, refusal(ReasonEndpointAddressInvalid, "the legacy VIP needs an endpoint claim"), nil
 	}
+	if err != nil {
+		return claim, nil, err
+	}
+	if problem := validateEndpointClaim(db, subnet, claim); problem != nil {
+		return claim, problem, nil
+	}
+	if !db.Spec.Suspended {
+		started, err := r.legacyEndpointStageApproved(ctx, claim, v1alpha1.DatabaseEndpointStartName(spec.LoadBalancerRef))
+		if err != nil {
+			return claim, nil, err
+		}
+		if !started {
+			return claim, refusal(ReasonProxyWaiting, "the legacy frontend needs administrator approval to start"), nil
+		}
+	}
+	return claim, nil, nil
+}
+
+func (r *Reconciler) legacyEndpointStageApproved(ctx context.Context, claim corev1.ConfigMap, name string) (bool, error) {
+	var marker corev1.ConfigMap
+	err := r.Live.Get(ctx, client.ObjectKey{Namespace: PlatformNamespace, Name: name}, &marker)
+	return err == nil && approvedEndpointMarker(claim, marker), client.IgnoreNotFound(err)
+}
+
+func (r *Reconciler) legacyEndpointAuthorization(ctx context.Context, db v1alpha1.Database) (*Refusal, error) {
+	subnet, problem, err := resolveSubnet(ctx, r.Live, db)
 	if err != nil {
 		return nil, err
 	}
-	if problem := validateEndpointClaim(db, in.subnet, claim); problem != nil {
-		return problem, nil
+	if (problem != nil && problem.Reason != ReasonSubnetNotReady) || !subnet.DeletionTimestamp.IsZero() {
+		return refusal(ReasonEndpointAddressInvalid, "the approved proxy subnet is missing or being deleted"), nil
 	}
-	markerNames := [2]string{v1alpha1.DatabaseEndpointStartName(spec.LoadBalancerRef), v1alpha1.DatabaseEndpointOpenName(spec.LoadBalancerRef)}
-	var approvals [2]bool
-	for i, name := range markerNames {
-		var marker corev1.ConfigMap
-		err := r.Live.Get(ctx, client.ObjectKey{Namespace: PlatformNamespace, Name: name}, &marker)
-		if client.IgnoreNotFound(err) != nil {
-			return nil, err
+	claim, rejected, err := r.legacyEndpointClaim(ctx, db, subnet)
+	if err != nil || rejected != nil {
+		return rejected, err
+	}
+	_, rejected, err = r.legacyEndpointOpen(ctx, db, claim)
+	return rejected, err
+}
+
+func ownedByDatabase(obj metav1.Object, db v1alpha1.Database) bool {
+	owner := metav1.GetControllerOf(obj)
+	return owner != nil && db.UID != "" && owner.UID == db.UID && owner.Name == db.Name && owner.Kind == Kind && owner.APIVersion == v1alpha1.GroupVersion.String()
+}
+
+func (r *Reconciler) legacyEndpointOpen(ctx context.Context, db v1alpha1.Database, claim corev1.ConfigMap) (bool, *Refusal, error) {
+	open, err := r.legacyEndpointStageApproved(ctx, claim, v1alpha1.DatabaseEndpointOpenName(db.Spec.Endpoint.LoadBalancerRef))
+	if open || err != nil {
+		return open, nil, err
+	}
+	var group v1alpha1.SecurityGroup
+	err = r.Live.Get(ctx, client.ObjectKey{Namespace: db.Namespace, Name: SecurityGroupName(db.UID)}, &group)
+	if client.IgnoreNotFound(err) != nil {
+		return false, nil, err
+	}
+	if err == nil && group.DeletionTimestamp.IsZero() && ownedByDatabase(&group, db) {
+		jobCIDR, _ := netip.ParsePrefix(claim.Data["jobCIDR"])
+		ingress := group.Spec.Ingress
+		if len(ingress) == 1 && validPort(int(ingress[0].Port)) && ingress[0] == databaseIngressRule(jobCIDR.Masked().String(), ingress[0].Port) {
+			return false, nil, nil
 		}
-		approvals[i] = err == nil && approvedEndpointMarker(claim, marker)
+		if len(ingress) > 0 {
+			return false, refusal(ReasonProxyWaiting, "the database endpoint needs administrator approval to reopen customer access"), nil
+		}
 	}
-	started, open := approvals[0], approvals[0] && approvals[1]
+	active, err := r.legacyEndpointActive(ctx, db)
+	if err != nil || !active {
+		return false, nil, err
+	}
+	return false, refusal(ReasonProxyWaiting, "the active legacy endpoint has no approved job ingress security group"), nil
+}
+
+func (r *Reconciler) prepareLegacyEndpoint(ctx context.Context, in *flow) (*Refusal, error) {
+	db := *in.db
+	spec := db.Spec.Endpoint
+	claim, rejected, err := r.legacyEndpointClaim(ctx, db, in.subnet)
+	if err != nil || rejected != nil {
+		if err == nil && !db.Spec.Suspended {
+			_, err = r.withdrawLegacyEndpoint(ctx, db)
+		}
+		return rejected, err
+	}
+	started := !db.Spec.Suspended
+	open := false
+	if started {
+		open, rejected, err = r.legacyEndpointOpen(ctx, db, claim)
+		if err != nil || rejected != nil {
+			if err == nil {
+				_, err = r.withdrawLegacyEndpoint(ctx, db)
+			}
+			return rejected, err
+		}
+	}
 	jobCIDR, _ := netip.ParsePrefix(claim.Data["jobCIDR"])
 
 	var parent v1alpha1.Network
@@ -174,12 +251,6 @@ func (r *Reconciler) prepareLegacyEndpoint(ctx context.Context, in *flow) (*Refu
 	if !owned || planeOwner.Name != parent.Name || planeOwner.Namespace != "" || planeUID != parent.UID || planeVPC != parent.Status.VPC ||
 		network.CheckNICAddress(addressSpace, spec.Address) != nil {
 		return refusal(ReasonEndpointAddressInvalid, "the legacy VIP is outside the usable address range of the Network load balancer subnet"), nil
-	}
-	if !db.Spec.Suspended && !started {
-		if _, err := r.removeLegacyFrontend(ctx, db); err != nil {
-			return nil, err
-		}
-		return refusal(ReasonProxyWaiting, "the legacy frontend needs administrator approval to start"), nil
 	}
 	in.legacy = &legacyEndpoint{
 		settings: *spec, vpc: parent.Status.VPC, plane: plane,
@@ -574,6 +645,59 @@ func hasFrontendTarget(endpoints corev1.Endpoints, address string, port int32) b
 	subset := endpoints.Subsets[0]
 	return len(subset.Addresses) == 1 && subset.Addresses[0].IP == address && len(subset.NotReadyAddresses) == 0 &&
 		len(subset.Ports) == 1 && subset.Ports[0].Port == port && subset.Ports[0].Protocol == corev1.ProtocolTCP
+}
+
+func (r *Reconciler) legacyEndpointActive(ctx context.Context, db v1alpha1.Database) (bool, error) {
+	var proxy appsv1.Deployment
+	err := r.Live.Get(ctx, client.ObjectKey{Namespace: db.Namespace, Name: EndpointName(db)}, &proxy)
+	if client.IgnoreNotFound(err) != nil {
+		return false, err
+	}
+	if err == nil && ownedByDatabase(&proxy, db) && (ptr.Deref(proxy.Spec.Replicas, 1) != 0 || proxy.Status.Replicas != 0 || proxy.Status.ObservedGeneration < proxy.Generation) {
+		return true, nil
+	}
+	for _, kind := range []schema.GroupVersionKind{fabric.LoadBalancerGVK, fabric.SwitchLBRuleGVK} {
+		obj, err := endpointObject(ctx, r.Live, kind, db.Spec.Endpoint.LoadBalancerRef)
+		if err != nil {
+			return false, err
+		}
+		if obj != nil && ownedFrontend(obj, db) {
+			return true, nil
+		}
+	}
+	return r.legacyProxyHasPods(ctx, db)
+}
+
+func (r *Reconciler) withdrawLegacyEndpoint(ctx context.Context, db v1alpha1.Database) (bool, error) {
+	proxyStopped, proxyErr := r.stopLegacyProxy(ctx, db)
+	frontendGone, frontendErr := r.removeLegacyFrontend(ctx, db)
+	return proxyStopped && frontendGone, errors.Join(proxyErr, frontendErr)
+}
+
+func (r *Reconciler) stopLegacyProxy(ctx context.Context, db v1alpha1.Database) (bool, error) {
+	var proxy appsv1.Deployment
+	err := r.Live.Get(ctx, client.ObjectKey{Namespace: db.Namespace, Name: EndpointName(db)}, &proxy)
+	if client.IgnoreNotFound(err) != nil {
+		return false, err
+	}
+	if err == nil && proxy.DeletionTimestamp.IsZero() && ownedByDatabase(&proxy, db) {
+		if ptr.Deref(proxy.Spec.Replicas, 1) != 0 {
+			before := proxy.DeepCopy()
+			proxy.Spec.Replicas = ptr.To[int32](0)
+			return false, r.Client.Patch(ctx, &proxy, client.MergeFromWithOptions(before, client.MergeFromWithOptimisticLock{}), client.FieldOwner(v1alpha1.DatabaseFieldManager))
+		}
+		if proxy.Status.ObservedGeneration < proxy.Generation || proxy.Status.Replicas != 0 {
+			return false, nil
+		}
+	}
+	pods, err := r.legacyProxyHasPods(ctx, db)
+	return err == nil && !pods, err
+}
+
+func (r *Reconciler) legacyProxyHasPods(ctx context.Context, db v1alpha1.Database) (bool, error) {
+	var pods corev1.PodList
+	err := r.Live.List(ctx, &pods, client.InNamespace(db.Namespace), client.MatchingLabels{managedProxyLabel: string(db.UID)})
+	return len(pods.Items) != 0, err
 }
 
 func (r *Reconciler) removeLegacyFrontend(ctx context.Context, db v1alpha1.Database) (bool, error) {

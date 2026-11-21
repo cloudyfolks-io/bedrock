@@ -57,14 +57,36 @@ func (r *Reconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Resu
 		return r.finalize(ctx, db)
 	}
 	if db.Spec.Suspended && hasLegacyEndpoint(db) {
-		gone, err := r.removeLegacyFrontend(ctx, db)
+		gone, err := r.withdrawLegacyEndpoint(ctx, db)
 		if err != nil || !gone {
 			return ctrl.Result{RequeueAfter: deleteRequeue}, err
+		}
+	}
+	var authorization *Refusal
+	withdrawn := true
+	if !db.Spec.Suspended && hasLegacyEndpoint(db) {
+		var err error
+		authorization, err = r.legacyEndpointAuthorization(ctx, db)
+		if err != nil {
+			return ctrl.Result{}, err
+		}
+		if authorization != nil {
+			withdrawn, err = r.withdrawLegacyEndpoint(ctx, db)
+			if err != nil {
+				return ctrl.Result{}, err
+			}
 		}
 	}
 	cfg, err := LoadConfig(ctx, r.Client)
 	if err != nil {
 		return ctrl.Result{}, err
+	}
+	if authorization != nil {
+		_, err := r.publish(ctx, cfg, &db, Observed{Refusal: authorization})
+		if !withdrawn {
+			return ctrl.Result{RequeueAfter: deleteRequeue}, err
+		}
+		return ctrl.Result{RequeueAfter: gateRequeue}, err
 	}
 	project, inProject, err := ProjectOf(ctx, r.Client, db.Namespace)
 	if err != nil {
