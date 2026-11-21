@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"reflect"
 	"time"
 
 	corev1 "k8s.io/api/core/v1"
@@ -66,7 +67,8 @@ type flow struct {
 	tlsRevision string
 	customerCA  []byte
 
-	mysqlRuntime mysqlRuntime
+	mysqlRuntime   mysqlRuntime
+	legacyACLReady bool
 }
 
 type mysqlRuntime struct {
@@ -568,7 +570,8 @@ func (r *Reconciler) applyProxy(ctx context.Context, in *flow, vip string) (*Ref
 	if in.legacy != nil {
 		gateSource = ""
 	}
-	if err := ssa.Apply(ctx, r.Client, SecurityGroupObject(proxyDatabase(in), in.project, in.subnet, gateSource, in.port), v1alpha1.DatabaseFieldManager); err != nil {
+	desired := SecurityGroupObject(proxyDatabase(in), in.project, in.subnet, gateSource, in.port)
+	if err := ssa.Apply(ctx, r.Client, desired, v1alpha1.DatabaseFieldManager); err != nil {
 		return nil, fmt.Errorf("apply the security group: %w", err)
 	}
 	host, port := customerEndpoint(*in.db, address, int32(in.port))
@@ -579,9 +582,14 @@ func (r *Reconciler) applyProxy(ctx context.Context, in *flow, vip string) (*Ref
 	if err := r.Live.Get(ctx, client.ObjectKey{Namespace: in.db.Namespace, Name: SecurityGroupName(in.db.UID)}, &group); err != nil {
 		return nil, err
 	}
-	if !meta.IsStatusConditionTrue(group.Status.Conditions, v1alpha1.ConditionReady) ||
-		in.legacy != nil && group.Status.ObservedGeneration != group.Generation {
+	if !meta.IsStatusConditionTrue(group.Status.Conditions, v1alpha1.ConditionReady) {
 		return nil, nil
+	}
+	if in.legacy != nil {
+		in.legacyACLReady, err = r.legacySecurityGroupReady(ctx, *in.db, &group, desired)
+		if err != nil || !in.legacyACLReady {
+			return nil, err
+		}
 	}
 	revision, err := certificateRevision(ctx, r.Live, client.ObjectKey{Namespace: in.db.Namespace, Name: EndpointName(*in.db)})
 	if err != nil {
@@ -603,6 +611,15 @@ func (r *Reconciler) applyProxy(ctx context.Context, in *flow, vip string) (*Ref
 		}
 	}
 	return r.applyLegacyFrontend(ctx, in, address)
+}
+
+func (r *Reconciler) legacySecurityGroupReady(ctx context.Context, db v1alpha1.Database, group, desired *v1alpha1.SecurityGroup) (bool, error) {
+	ready := meta.FindStatusCondition(group.Status.Conditions, v1alpha1.ConditionReady)
+	if !ownedByDatabase(group, db) || !group.DeletionTimestamp.IsZero() || !reflect.DeepEqual(group.Spec, desired.Spec) ||
+		group.Status.ObservedGeneration != group.Generation || ready == nil || ready.Status != metav1.ConditionTrue || ready.ObservedGeneration != group.Generation {
+		return false, nil
+	}
+	return network.SecurityGroupGenerationProgrammed(ctx, r.Live, group)
 }
 
 func (r *Reconciler) foreign(ctx context.Context, desired *unstructured.Unstructured, db v1alpha1.Database) (*Refusal, error) {
@@ -648,7 +665,9 @@ func (r *Reconciler) observe(ctx context.Context, in *flow, refused *Refusal) (O
 		return observed, err
 	}
 	if hasLegacyEndpoint(*db) {
-		observed.EndpointReady, err = r.legacyFrontendReady(ctx, in)
+		if in.legacyACLReady {
+			observed.EndpointReady, err = r.legacyFrontendReady(ctx, in)
+		}
 	} else {
 		observed.EndpointReady, err = r.readyDeployment(ctx, client.ObjectKey{Namespace: db.Namespace, Name: EndpointName(*db)})
 	}

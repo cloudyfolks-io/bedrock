@@ -1,17 +1,21 @@
 package network
 
 import (
+	"context"
 	"fmt"
 	"net/netip"
+	"reflect"
 	"slices"
 	"strings"
 
 	corev1 "k8s.io/api/core/v1"
 	networkingv1 "k8s.io/api/networking/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/util/intstr"
 	"k8s.io/utils/ptr"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	"github.com/cloudyfolks-io/bedrock/api/v1alpha1"
 	"github.com/cloudyfolks-io/bedrock/internal/network/fabric"
@@ -36,6 +40,34 @@ type Rule struct {
 	Protocol      string
 	PortMin       int
 	PortMax       int
+}
+
+func SecurityGroupGenerationProgrammed(ctx context.Context, live client.Reader, group *v1alpha1.SecurityGroup) (bool, error) {
+	name := FabricName(group.Namespace, group.Name)
+	observed, err := getObject(ctx, live, fabric.SecurityGroupGVK, name)
+	if apierrors.IsNotFound(err) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	owner, uid, found := OwnerOf(observed)
+	if !found || owner != client.ObjectKeyFromObject(group) || uid != group.UID || observed.GetUID() == "" || !observed.GetDeletionTimestamp().IsZero() {
+		return false, nil
+	}
+	generation, _, _ := unstructured.NestedInt64(observed.Object, "status", "observedGeneration")
+	ingressReady, _, _ := unstructured.NestedBool(observed.Object, "status", "ingressLastSyncSuccess")
+	egressReady, _, _ := unstructured.NestedBool(observed.Object, "status", "egressLastSyncSuccess")
+	if generation <= 0 || generation != observed.GetGeneration() || !ingressReady || !egressReady || !fabric.SecurityGroupProgrammed(observed) {
+		return false, nil
+	}
+	ingress, ingressProblem := FabricRules(group.Namespace, NormalizeRules(group.Spec.Ingress))
+	egress, egressProblem := FabricRules(group.Namespace, NormalizeRules(group.Spec.Egress))
+	if ingressProblem != nil || egressProblem != nil {
+		return false, nil
+	}
+	desired := fabric.SecurityGroup(fabric.Meta{Name: name}, ingress, EgressOrDefault(egress))
+	return reflect.DeepEqual(observed.Object["spec"], desired.Object["spec"]), nil
 }
 
 func NormalizeRules(spec []v1alpha1.SecurityGroupRule) []Rule {

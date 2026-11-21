@@ -92,7 +92,7 @@ The `status` shows `phase`, `conditions`, `addresses` (`subnet`, `ip` and `port`
 | `Ready` | The phase is `Ready`. |
 | `EngineReady` | The engine reports a healthy cluster and the first setup ran. |
 | `GateReady` | The gate Deployment is ready. |
-| `EndpointReady` | The proxy Deployment in the subnet is ready. For an imported frontend, the controller also checks the Fabric VIP, frontend and backend endpoints. |
+| `EndpointReady` | The proxy Deployment in the subnet is ready. For an imported frontend, the controller also checks the Fabric SecurityGroup generation, VIP, frontend and backend endpoints. |
 | `BackupHealthy` | The last completed backup is not older than 36 hours. |
 
 ### Keep a legacy database frontend
@@ -111,6 +111,8 @@ Create the `Database` in its project namespace with `spec.suspended` set to `tru
 Follow the migration procedure to freeze the source before you activate the Database. The migration command records start approval in the immutable ConfigMap `database-endpoint-<loadBalancerRef>-start` in `bedrock-dbaas`. The operator reserves the legacy VIP in the load balancer plane and sets the approved Fabric frontend to use the private proxy NIC. Verify the data and connect at the legacy address and port before you open access to customers. The migration command records open approval in `database-endpoint-<loadBalancerRef>-open`. The controller accepts both approval records only when they match the database, subnet, network and endpoint claim UIDs and names.
 
 An imported frontend needs the two-interface managed Pod network. The proxy listens on its private project NIC and connects to the internal gate Service on its managed network. The gate NetworkPolicy accepts only the controller-managed proxy identity for this Database.
+
+Use the paired Fabric release and CRD that report the current SecurityGroup generation. Bedrock waits for Fabric to program ingress and egress for the selected rules before it creates or retargets the imported frontend. Bedrock also checks this status before it reports the endpoint ready.
 
 ### DatabaseUser
 
