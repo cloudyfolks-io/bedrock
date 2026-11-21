@@ -190,18 +190,21 @@ ACCESS
 }
 
 database_backup_manifest() {
+  local name=$1 source=${2:-orders} uid
+  uid=$(database_uid "$source")
+  test -n "$uid"
   cat <<BACKUP
 apiVersion: postgresql.cnpg.io/v1
 kind: Backup
 metadata:
-  name: $1
+  name: $name
   namespace: $database_namespace
   labels:
-    app.kubernetes.io/instance: db-$(database_uid orders)
+    app.kubernetes.io/instance: db-$uid
 spec:
   method: plugin
   cluster:
-    name: db-$(database_uid orders)
+    name: db-$uid
   pluginConfiguration:
     name: barman-cloud.cloudnative-pg.io
 BACKUP

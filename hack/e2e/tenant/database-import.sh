@@ -74,7 +74,8 @@ database_import_customer_pod() {
     as_operator -n "$NS" create -f -
 }
 
-database_import_verified_login() {
+database_import_customer_sql() {
+  local query=$1
   {
     cat "$certificate_dir/password"
     printf '\n'
@@ -85,9 +86,32 @@ database_import_verified_login() {
     trap '\''rm -f "$root_ca"'\'' EXIT
     cat >"$root_ca"
     export PGPASSWORD PGSSLMODE=verify-full PGSSLROOTCERT="$root_ca" PGCONNECT_TIMEOUT=5
-    psql -XAtq -v ON_ERROR_STOP=1 -h "$1" -p "$2" -U dbadmin -d app \
-      -c "SELECT 1 FROM pg_stat_ssl WHERE pid = pg_backend_pid() AND ssl"
-  ' database-login "$address" "$port"
+    psql -XAtqw -v ON_ERROR_STOP=1 -h "$1" -p "$2" -U dbadmin -d app -c "$3"
+  ' database-query "$address" "$port" "$query"
+}
+
+database_import_backup_acknowledged_write() {
+  local result
+  result=$(database_import_customer_sql "BEGIN; SET LOCAL synchronous_commit=on; INSERT INTO cutover_proof VALUES ('after-open'); COMMIT; SELECT value FROM cutover_proof WHERE value = 'after-open';") || return 1
+  expect_equal after-open "$result" "acknowledged write over the original endpoint"
+  database_backup_manifest "$recovery_backup" "$database" | kubectl create -f -
+  expect_equal "db-$uid" "$(kubectl -n "$database_namespace" get backups.postgresql.cnpg.io "$recovery_backup" -o jsonpath='{.spec.cluster.name}')" "owner of the new backup"
+  wait_jsonpath 900 completed -n "$database_namespace" get backups.postgresql.cnpg.io "$recovery_backup" -o jsonpath='{.status.phase}'
+  wait_not_empty 120 get backups.postgresql.cnpg.io "$recovery_backup" -n "$database_namespace" -o jsonpath='{.status.stoppedAt}'
+}
+
+database_import_restore_acknowledged_write() {
+  local restored_uid rows
+  database_apply "$restored" postgresql 17 false 5 "  subnetRef: default
+  restore:
+    sourceUID: $uid"
+  database_wait_ready "$restored" 1800
+  restored_uid=$(database_uid "$restored")
+  test -n "$restored_uid"
+  test "$restored_uid" != "$uid"
+  rows=$(database_sql "$restored" -c "SELECT string_agg(value, ',' ORDER BY value) FROM cutover_proof;") || return 1
+  expect_equal 'after-open,baseline' "$rows" "baseline and acknowledged customer rows in the recovery database"
+  database_import_reply_is "$customer_pod" ''
 }
 
 database_import_tls_session() {
@@ -154,6 +178,13 @@ database_import_cleanup() {
     kubectl get loadbalancers.fabric.cloudyfolks.io "$frontend" -o yaml >&2 || true
     kubectl -n "$NS" get pods "$job_pod" "$customer_pod" -o wide >&2 || true
   fi
+  if [ -n "$restored" ]; then
+    kubectl -n "$NS" delete database "$restored" --ignore-not-found --wait=false || cleanup_failed=1
+    wait_gone 300 database "$restored" -n "$NS" || cleanup_failed=1
+  fi
+  if [ -n "$recovery_backup" ]; then
+    kubectl -n "$database_namespace" delete backups.postgresql.cnpg.io "$recovery_backup" --ignore-not-found --wait=false || cleanup_failed=1
+  fi
   kubectl -n "$NS" delete database "$database" --ignore-not-found --wait=false || cleanup_failed=1
   wait_gone 300 database "$database" -n "$NS" || cleanup_failed=1
   kubectl -n "$NS" delete pod "$job_pod" "$customer_pod" --ignore-not-found --wait=false || cleanup_failed=1
@@ -184,6 +215,13 @@ database_import_frontend() (
   local management_before managed_before managed_applied network vpc uid subnet_uid legacy_uid proxy_address
   local certificate_dir certificate_secret= admin_secret=
   local tls_session_pid= tls_session_input=
+  local backup_enabled=false restored= recovery_backup=
+
+  if [[ "${E2E_ONLY:-}" = database_import_frontend && "${E2E_DATABASE_POST_OPEN_RECOVERY:-}" = 1 ]]; then
+    backup_enabled=true
+    restored=imported-orders-checkpoint
+    recovery_backup=imported-orders-after-open
+  fi
 
   management_before=$(kubectl get cluster cluster -o jsonpath='{.spec.managementCIDR}')
   managed_before=$(kubectl get setting network.tenant-management.enabled -o json)
@@ -212,7 +250,7 @@ database_import_frontend() (
   legacy_uid=$(kubectl get loadbalancers.fabric.cloudyfolks.io "$frontend" -o jsonpath='{.metadata.uid}')
   test -n "$legacy_uid"
   wait_jsonpath 120 "$NS/slr-flb-$frontend" get loadbalancers.fabric.cloudyfolks.io "$frontend" -o jsonpath='{.status.service}'
-  database_apply "$database" postgresql 17 false 5 "$(cat <<SPEC
+  database_apply "$database" postgresql 17 "$backup_enabled" 5 "$(cat <<SPEC
   subnetRef: default
   suspended: true
   allowedCIDRs: [$customer_address/32]
@@ -245,10 +283,13 @@ SPEC
   expect_equal "$(cat "$certificate_dir/ca.crt")" "$(database_secret_field "$database-admin" 'ca\.crt')" "published legacy certificate authority"
   retry_until 90 database_import_reply_is "$job_pod" S
   database_import_reply_is "$customer_pod" ''
+  if [ -n "$restored" ]; then
+    database_sql "$database" -c "SET ROLE dbadmin; CREATE TABLE cutover_proof (value text PRIMARY KEY); INSERT INTO cutover_proof VALUES ('baseline');"
+  fi
 
   database_import_approve open
   retry_until 90 database_import_reply_is "$customer_pod" S
-  expect_equal 1 "$(database_import_verified_login)" "TLS login at the legacy address with the original trust and password"
+  expect_equal 1 "$(database_import_customer_sql 'SELECT 1 FROM pg_stat_ssl WHERE pid = pg_backend_pid() AND ssl')" "TLS login at the legacy address with the original trust and password"
   database_import_reply_is "$job_pod" ''
 
   if [ "${E2E_ONLY:-}" = database_import_frontend ]; then
@@ -301,8 +342,15 @@ SPEC
     database_import_reply_is "$customer_pod" S "$proxy_address" "$proxy_port"
   fi
 
+  if [ -n "$recovery_backup" ]; then
+    database_import_backup_acknowledged_write
+  fi
+
   kubectl -n "$NS" patch database "$database" --type merge -p '{"spec":{"suspended":true}}'
   wait_jsonpath 300 Suspended -n "$NS" get database "$database" -o jsonpath='{.status.phase}'
   database_import_wait_withdrawn
   database_import_reply_is "$customer_pod" ''
+  if [ -n "$restored" ]; then
+    database_import_restore_acknowledged_write
+  fi
 )
