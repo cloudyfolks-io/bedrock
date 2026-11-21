@@ -32,11 +32,26 @@ done
 entries=$(find "$out" -mindepth 1 -maxdepth 1 -print -quit)
 [[ -z $entries ]] || fail 'Use an empty output directory.'
 work=$(mktemp -d "$out/.etcd-api.XXXXXX")
+probe_name=
+probe_uid=
+remove_probe() {
+  [[ -n $probe_name && -n $probe_uid ]] || return 0
+  jq -nc --arg uid "$probe_uid" '{apiVersion:"v1",kind:"DeleteOptions",preconditions:{uid:$uid}}' |
+    kubectl --request-timeout=10s delete --raw "/api/v1/namespaces/$namespace/pods/$probe_name" -f - >/dev/null 2>&1 || return 1
+  probe_name=
+  probe_uid=
+}
 cleanup() {
+  local result=$?
+  if ! remove_probe; then
+    printf '%s\n' 'The isolated API probe cleanup could not be verified.' >&2
+    result=1
+  fi
   if [[ "$out/original.kubeconfig" -ef "$work/original.kubeconfig" && ! "$out/api-evidence.json" -ef "$work/api-evidence.json" ]]; then
     rm -f -- "$out/original.kubeconfig"
   fi
   rm -rf -- "$work"
+  exit "$result"
 }
 trap cleanup EXIT
 
@@ -81,6 +96,7 @@ cluster=etcd-source
 service=etcd-endpoint
 controller_set=kmc-etcd-source
 controller_pod=kmc-etcd-source-0
+controller_image=quay.io/k0sproject/k0s:v1.36.3-k0s.1
 marker=bedrock-etcd-continuity
 endpoint=$(jq -er --arg guest "$guest_uid" --arg ns "$namespace" --arg cluster "$cluster" --arg service "$service" \
   --arg set "$controller_set" --arg pod "$controller_pod" --arg marker "$marker" --arg uid "$uid_pattern" '
@@ -123,18 +139,52 @@ source_identity() {
 }
 
 controller_identity() {
-  kc -n "$namespace" get pod "$controller_pod" -o json | jq -ce --slurpfile source "$approved" '
+  kc -n "$namespace" get pod "$controller_pod" -o json | jq -ce --slurpfile source "$approved" --arg image "$controller_image" '
     $source[0].controller as $c |
     select(.metadata.uid==$c.pod_uid and .metadata.deletionTimestamp==null and .status.phase=="Running" and
       (.spec.hostNetwork // false)==false and (.status.podIP | test("^[0-9]+([.][0-9]+){3}$")) and
       (.metadata.ownerReferences | length==1 and any(.[];
         .apiVersion=="apps/v1" and .kind=="StatefulSet" and .name==$c.statefulset and .uid==$c.statefulset_uid and .controller==true)) and
       any(.spec.volumes[]; .name==$c.statefulset and .persistentVolumeClaim.claimName==$c.disk.claim) and
-      ((.spec.ephemeralContainers // []) | length==0) and (.spec.containers | length==1 and .[0].name=="controller") and
+      ((.spec.ephemeralContainers // []) | length==0) and (.spec.containers | length==1 and .[0].name=="controller" and .[0].image==$image) and
+      (.spec.nodeName | type=="string" and length>0) and
       any(.status.conditions[]; .type=="Ready" and .status=="True") and
       (.status.containerStatuses | length==1 and any(.[];
         .name=="controller" and .ready==true and .state.running!=null and .imageID==$c.image_id and (.containerID | length)>0))) |
-    {ip:.status.podIP,container_id:.status.containerStatuses[0].containerID}'
+    {ip:.status.podIP,node:.spec.nodeName,container_id:.status.containerStatuses[0].containerID,image_id:.status.containerStatuses[0].imageID}'
+}
+
+start_probe() {
+  local created node
+  node=$(jq -er .node <<<"$controller_before") || return 1
+  created=$(jq -nc --arg image "$controller_image" --arg node "$node" '
+    {apiVersion:"v1",kind:"Pod",metadata:{generateName:"etcd-api-probe-",labels:{"migration.cloudyfolks.io/purpose":"etcd-api-probe"}},
+     spec:{nodeName:$node,automountServiceAccountToken:false,enableServiceLinks:false,restartPolicy:"Never",activeDeadlineSeconds:180,
+       containers:[{name:"client",image:$image,imagePullPolicy:"Never",command:["/bin/sh","-c","exec sleep 180"],
+                    securityContext:{allowPrivilegeEscalation:false,capabilities:{drop:["ALL"]}}}]}}' |
+    kc -n "$namespace" create -f - -o json 2>/dev/null) || return 1
+  probe_name=$(jq -er '.metadata.name | select(test("^etcd-api-probe-[a-z0-9]+$"))' <<<"$created") || return 1
+  probe_uid=$(jq -er --arg uid "$uid_pattern" '.metadata.uid | select(test($uid) and .!="00000000-0000-0000-0000-000000000000")' <<<"$created") || return 1
+  timeout 75s kubectl --request-timeout=70s -n "$namespace" wait --for=condition=Ready "pod/$probe_name" --timeout=65s >/dev/null 2>&1
+}
+
+probe_identity() {
+  kc -n "$namespace" get pod "$probe_name" -o json 2>/dev/null |
+    jq -ce --arg uid "$probe_uid" --arg ns "$namespace" --arg name "$probe_name" --arg image "$controller_image" \
+      --argjson backend "$controller_before" '
+      select(.metadata.uid==$uid and .metadata.name==$name and .metadata.namespace==$ns and .metadata.deletionTimestamp==null and
+        .metadata.labels=={"migration.cloudyfolks.io/purpose":"etcd-api-probe"} and (.metadata.ownerReferences // [])==[] and
+        .status.phase=="Running" and (.status.podIP | test("^[0-9]+([.][0-9]+){3}$") and .!=$backend.ip) and
+        .spec.nodeName==$backend.node and .spec.automountServiceAccountToken==false and .spec.enableServiceLinks==false and
+        .spec.restartPolicy=="Never" and .spec.activeDeadlineSeconds==180 and
+        ([.spec.hostNetwork,.spec.hostPID,.spec.hostIPC] | all(.[]; (. // false)==false)) and
+        ([.spec.volumes,.spec.initContainers,.spec.ephemeralContainers] | all(.[]; (. // [])==[])) and
+        (.spec.containers | length==1 and all(.[]; .name=="client" and .image==$image and .imagePullPolicy=="Never" and
+          .command==["/bin/sh","-c","exec sleep 180"] and ([.args,.env,.envFrom,.volumeMounts,.volumeDevices,.ports] | all(.[]; (. // [])==[])) and
+          .securityContext=={allowPrivilegeEscalation:false,capabilities:{drop:["ALL"]}})) and
+        (.status.containerStatuses | length==1 and all(.[]; .name=="client" and .ready==true and .state.running!=null and
+          .restartCount==0 and .imageID==$backend.image_id and (.containerID | length>0)))) |
+      {ip:.status.podIP,container_id:.status.containerStatuses[0].containerID}' 2>/dev/null
 }
 
 service_identity() {
@@ -206,7 +256,12 @@ jq -er .value "$work/ca-source" | base64 -d >"$work/source-ca" 2>/dev/null ||
 openssl x509 -in "$work/source-ca" -outform DER >"$work/source-ca.der" 2>/dev/null ||
   fail 'The source CA is not a valid certificate.'
 
-if ! timeout 25s kubectl --request-timeout=20s -n "$namespace" exec -i "$controller_pod" -c controller -- \
+start_probe || fail 'The isolated API probe could not start.'
+probe_before=$(probe_identity) || fail 'The isolated API probe does not match the original controller image and approved client shape.'
+if ! [[ $(controller_identity) == "$controller_before" && $(service_identity) == "$service_before" ]] || ! endpoints_match "$pod_ip"; then
+  fail 'The source route or controller changed before the marker check.'
+fi
+if ! timeout 25s kubectl --request-timeout=20s -n "$namespace" exec -i "$probe_name" -c client -- \
   env HTTPS_PROXY= https_proxy= HTTP_PROXY= http_proxy= ALL_PROXY= all_proxy= \
   k0s kubectl --kubeconfig=/dev/stdin --request-timeout=15s -n default get configmap "$marker" -o json \
   <"$work/original.kubeconfig" 2>/dev/null |
@@ -220,10 +275,11 @@ if ! timeout 25s kubectl --request-timeout=20s -n "$namespace" exec -i "$control
 fi
 
 if ! [[ $(kc get namespace kube-system -o jsonpath='{.metadata.uid}') == "$guest_uid" &&
-  $(controller_identity) == "$controller_before" && $(service_identity) == "$service_before" ]] ||
+  $(controller_identity) == "$controller_before" && $(service_identity) == "$service_before" && $(probe_identity) == "$probe_before" ]] ||
   ! source_identity || ! endpoints_match "$pod_ip"; then
   fail 'The source route or controller changed during the marker check.'
 fi
+remove_probe || fail 'The isolated API probe could not be removed.'
 source_secret "$cluster-kubeconfig" value >"$work/kubeconfig-current" &&
   source_secret "$cluster-ca" tls.crt >"$work/ca-current" &&
   [[ $(file_hash "$work/kubeconfig-current") == "$(file_hash "$work/kubeconfig-source")" &&
