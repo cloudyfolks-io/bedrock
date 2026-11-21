@@ -42,6 +42,8 @@ snapshot=etcd-source-frozen
 snapshot_class=etcd-source-retain
 reference_claim=etcd-source-reference
 retained_claim=etcd-source-retained
+execution_claim=etcd-source-execution
+clone_claims=("$reference_claim" "$retained_claim" "$execution_claim")
 driver=rook-ceph.rbd.csi.ceph.com
 busybox=docker.io/library/busybox:1.37.0
 busybox_ref="${busybox%:*}@$busybox_digest"
@@ -227,7 +229,7 @@ sealed_source=$(sealed_disk "$source_disk")
   fail 'The frozen etcd source handle changed.'
 unique_disks "[$source_disk]" || fail 'The frozen etcd source has an ambiguous RBD binding.'
 
-for resource in "volumesnapshot.snapshot.storage.k8s.io/$snapshot" "pvc/$reference_claim" "pvc/$retained_claim"; do
+for resource in "volumesnapshot.snapshot.storage.k8s.io/$snapshot" "${clone_claims[@]/#/pvc/}"; do
   kubectl_absent -n "$namespace" "$resource" || fail 'Use a fresh isolated guest without an earlier etcd copy.'
 done
 kubectl_absent "volumesnapshotclass.snapshot.storage.k8s.io/$snapshot_class" ||
@@ -300,7 +302,7 @@ snapshot_binding() {
 snapshot_proof=$(snapshot_binding)
 frozen_source || fail 'The approved source changed during snapshot capture.'
 declare -A clone_uid
-for claim in "$reference_claim" "$retained_claim"; do
+for claim in "${clone_claims[@]}"; do
   clone_uid[$claim]=$(kc -n "$namespace" create -f - -o json <<CLAIM | jq -er --arg uid "$uid_pattern" '.metadata.uid | select(test($uid))'
 apiVersion: v1
 kind: PersistentVolumeClaim
@@ -315,18 +317,21 @@ spec:
 CLAIM
   )
 done
-for claim in "$reference_claim" "$retained_claim"; do
+for claim in "${clone_claims[@]}"; do
   wait_jsonpath 360 Bound -n "$namespace" get pvc "$claim" -o jsonpath='{.status.phase}'
 done
 reference=$(disk_binding "$reference_claim" "$snapshot" 1Gi)
 retained=$(disk_binding "$retained_claim" "$snapshot" 1Gi)
+execution=$(disk_binding "$execution_claim" "$snapshot" 1Gi)
 [[ $(jq -er '.claim_uid' <<<"$reference") == "${clone_uid[$reference_claim]}" &&
-  $(jq -er '.claim_uid' <<<"$retained") == "${clone_uid[$retained_claim]}" ]] ||
+  $(jq -er '.claim_uid' <<<"$retained") == "${clone_uid[$retained_claim]}" &&
+  $(jq -er '.claim_uid' <<<"$execution") == "${clone_uid[$execution_claim]}" ]] ||
   fail 'An independently created clone claim was replaced.'
-jq -ne --argjson original "$source_disk" --argjson ref "$reference" --argjson copy "$retained" '
-  [$original,$ref,$copy] | (map(.claim_uid)|unique|length)==3 and (map(.volume)|unique|length)==3 and
-    (map(.volume_uid)|unique|length)==3 and (map(.handle)|unique|length)==3' >/dev/null
-unique_disks "[$source_disk,$reference,$retained]" || fail 'The etcd copies have an ambiguous RBD binding.'
+disks="[$source_disk,$reference,$retained,$execution]"
+jq -e '
+  (map(.claim_uid)|unique|length)==4 and (map(.volume)|unique|length)==4 and
+  (map(.volume_uid)|unique|length)==4 and (map(.handle)|unique|length)==4' <<<"$disks" >/dev/null
+unique_disks "$disks" || fail 'The etcd copies have an ambiguous RBD binding.'
 
 work=$(mktemp -d "$proof_dir/.etcd-copy.XXXXXX")
 evidence=$work/evidence
@@ -502,23 +507,12 @@ READER
 
 extract_clone "$reference" reference
 extract_clone "$retained" retained
+extract_clone "$execution" execution
 tree_sha=$(jq -er '.member_tree_sha256' "$work/reference.json")
-jq -e --arg sha "$tree_sha" --slurpfile original "$work/reference.json" '
-  .member_tree_sha256==$sha and .pod_uid!=$original[0].pod_uid and .container_id!=$original[0].container_id' "$work/retained.json" >/dev/null
-
-if ! frozen_source || ! source_fences; then
-  fail 'The approved source changed during the read-only extractions.'
-fi
-[[ $(file_hash "$migrate") == "$migrate_sha" && $(file_hash "$frozen") == "$freeze_sha" &&
-  $(storage_class_identity) == "$storage_class_uid" && $(snapshot_class_identity) == "$snapshot_class_uid" &&
-  $(ceph_identity) == "$ceph_fsid" && $(snapshot_binding) == "$snapshot_proof" &&
-  $(disk_binding "$source_claim" "" 1Gi) == "$source_disk" &&
-  $(disk_binding "$reference_claim" "$snapshot" 1Gi) == "$reference" &&
-  $(disk_binding "$retained_claim" "$snapshot" 1Gi) == "$retained" ]] ||
-  fail 'A receipt or the approved snapshot custody changed.'
-if ! unique_disks "[$source_disk,$reference,$retained]" || ! unattached "$reference" || ! unattached "$retained"; then
-  fail 'An RBD claim remains in use or has an ambiguous binding.'
-fi
+jq -es --arg sha "$tree_sha" '
+  length==3 and all(.[]; .member_tree_sha256==$sha and .read_only==true) and
+  (map(.pod_uid)|unique|length)==3 and (map(.container_id)|unique|length)==3' \
+  "$work/reference.json" "$work/retained.json" "$work/execution.json" >/dev/null
 
 jq -n --arg freeze "$frozen_approval" --argjson source "$sealed_source" --argjson snapshot "$snapshot_proof" \
   --argjson reference "$(sealed_disk "$reference")" --argjson retained "$(sealed_disk "$retained")" --arg tree "$tree_sha" '
@@ -536,7 +530,38 @@ jq -n --arg freeze "$freeze_sha" --arg guest "$guest_uid" --arg ns "$namespace_u
   {version:1,scope:"synthetic-shared-snapshot",guest_uid:$guest,namespace_uid:$ns,source_cluster_uid:$cluster,frozen_receipt_sha256:$freeze,
    ceph_fsid:$fsid,storage_class_uid:$storage,snapshot_class:$class,snapshot_class_uid:$class_uid,data_proof_sha256:$proof,
    datastore_approval_sha256:$datastore,reference_reader:$reference[0],retained_reader:$retained[0]}' >"$evidence/custody.json"
+custody_sha=$(file_hash "$evidence/custody.json")
+sealed_execution=$(sealed_disk "$execution")
+jq --argjson execution "$sealed_execution" '.retained_disk=$execution' \
+  "$evidence/data-proof.json" >"$evidence/execution-data-proof.json"
+execution_proof_sha=$(file_hash "$evidence/execution-data-proof.json")
+"$migrate" verify-legacy-etcd-datastore "$inventory" "$inventory_sha" "$source_receipt" "$source_sha" "$guest_uid" \
+  "$evidence/execution-data-proof.json" "$execution_proof_sha" "$evidence/reference" "$evidence/execution" >"$evidence/execution-datastore.json"
+execution_datastore_sha=$(jq -er --arg frozen "$frozen_approval" --arg proof "$execution_proof_sha" --arg tree "$tree_sha" --arg sha "$sha_pattern" '
+  select(.version==1 and .frozen_approval_sha256==$frozen and .data_proof_sha256==$proof and .member_tree_sha256==$tree and
+    .matched_files>=2 and .matched_bytes>0) | .approval_sha256 | select(test($sha))' "$evidence/execution-datastore.json")
+jq -n --arg guest "$guest_uid" --arg ns "$namespace_uid" --arg cluster "$cluster_uid" --arg freeze "$freeze_sha" \
+  --arg custody "$custody_sha" --argjson disk "$sealed_execution" --argjson snapshot "$snapshot_proof" \
+  --arg tree "$tree_sha" --arg proof "$execution_proof_sha" --arg datastore "$execution_datastore_sha" \
+  --slurpfile reader "$work/execution.json" '
+  {version:1,scope:"synthetic-etcd-execution",guest_uid:$guest,namespace_uid:$ns,source_cluster_uid:$cluster,
+   frozen_receipt_sha256:$freeze,custody_sha256:$custody,execution_disk:$disk,execution_reader:$reader[0],snapshot:$snapshot,
+   member_tree_sha256:$tree,execution_data_proof_sha256:$proof,execution_datastore_approval_sha256:$datastore}' >"$evidence/etcd-execution.json"
+if ! frozen_source || ! source_fences; then
+  fail 'The approved source changed before the copy receipt was published.'
+fi
+[[ $(file_hash "$migrate") == "$migrate_sha" && $(file_hash "$frozen") == "$freeze_sha" &&
+  $(storage_class_identity) == "$storage_class_uid" && $(snapshot_class_identity) == "$snapshot_class_uid" &&
+  $(ceph_identity) == "$ceph_fsid" && $(snapshot_binding) == "$snapshot_proof" &&
+  $(disk_binding "$source_claim" "" 1Gi) == "$source_disk" &&
+  $(disk_binding "$reference_claim" "$snapshot" 1Gi) == "$reference" &&
+  $(disk_binding "$retained_claim" "$snapshot" 1Gi) == "$retained" &&
+  $(disk_binding "$execution_claim" "$snapshot" 1Gi) == "$execution" ]] ||
+  fail 'A receipt or the approved snapshot custody changed.'
+if ! unique_disks "$disks" || ! unattached "$reference" || ! unattached "$retained" || ! unattached "$execution"; then
+  fail 'An RBD claim remains in use or has an ambiguous binding.'
+fi
 mv -T --no-clobber -- "$evidence" "$output"
 [[ ! -e $evidence && -d $output && ! -L $output ]]
-printf '%s\n' 'Both extracts share one synthetic RBD snapshot. The regional independent backup and native recovery gates still apply.' >&2
-file_hash "$output/custody.json"
+printf '%s\n' 'The three verified claims share one synthetic RBD snapshot. The regional independent backup and native recovery gates still apply.' >&2
+printf '%s\n' "$custody_sha"
