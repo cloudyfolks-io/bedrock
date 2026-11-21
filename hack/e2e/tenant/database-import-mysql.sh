@@ -85,6 +85,24 @@ database_import_mysql_backup_secret() {
     ' | kubectl -n "$database_namespace" create -f -
 }
 
+database_import_mysql_wait_restore() {
+  local restore=db-$uid-restore deadline=$((SECONDS + 1800)) state= phase=
+  while [ "$SECONDS" -lt "$deadline" ]; do
+    state=$(kubectl --request-timeout=10s -n "$database_namespace" get perconaservermysqlrestore "$restore" \
+      --ignore-not-found -o jsonpath='{.status.state}') || return 1
+    phase=$(kubectl --request-timeout=10s -n "$NS" get database "$database" -o jsonpath='{.status.phase}') || return 1
+    case "$state" in
+      Failed|Error) break ;;
+      Succeeded) if [ "$phase" = Ready ]; then return 0; fi ;;
+    esac
+    if [ "$phase" = Failed ]; then break; fi
+    sleep 5
+  done
+  printf 'MySQL restore state %s and database phase %s\n' "${state:-Pending}" "${phase:-Pending}" >&2
+  kubectl --request-timeout=10s -n "$database_namespace" get job "xb-restore-$restore" --ignore-not-found >&2 || true
+  return 1
+}
+
 database_import_mysql_cleanup() {
   local status=$1 failed=0
   database_import_cleanup "$status" || failed=1
@@ -216,8 +234,8 @@ SPEC
   wait_jsonpath 180 'the legacy frontend needs administrator approval to start' -n "$NS" get database "$database" -o jsonpath='{.status.conditions[?(@.type=="Ready")].message}'
   expect_equal "$legacy_uid $legacy_backend" "$(kubectl get loadbalancers.fabric.cloudyfolks.io "$frontend" -o jsonpath='{.metadata.uid} {.spec.endpoints[0]}')" "legacy frontend before start"
   database_import_approve start
-  database_wait_ready "$database" 1800
-  wait_jsonpath 120 Succeeded -n "$database_namespace" get perconaservermysqlrestore "db-$uid-restore" -o jsonpath='{.status.state}'
+  database_import_mysql_wait_restore
+  wait_condition 60 database "$database" Ready True -n "$NS"
   kubectl -n "$database_namespace" get perconaservermysqlrestore "db-$uid-restore" -o json |
     jq -e --arg destination "$destination" --arg bucket "$bucket" --arg prefix "$source_uid" --arg secret "$backup_secret" '
       .spec.backupSource as $backup | $backup.destination == $destination and

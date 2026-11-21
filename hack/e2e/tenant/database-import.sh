@@ -233,6 +233,13 @@ database_import_cleanup() {
     kubectl -n "$NS" get database "$database" -o yaml >&2 || true
     kubectl get loadbalancers.fabric.cloudyfolks.io "$frontend" -o yaml >&2 || true
     kubectl -n "$NS" get pods "$job_pod" "$customer_pod" -o wide >&2 || true
+    if [ -n "${uid:-}" ]; then
+      local pod
+      while IFS= read -r pod; do
+        kubectl --request-timeout=10s -n "$NS" logs "$pod" -c haproxy --tail=60 >&2 || true
+        kubectl --request-timeout=10s -n "$NS" logs "$pod" -c haproxy --tail=60 --previous >&2 || true
+      done < <(kubectl --request-timeout=10s -n "$NS" get pods -l "bedrock.cloudyfolks.io/database-gate-client=$uid" -o name)
+    fi
   fi
   if [ -n "$restored" ]; then
     kubectl -n "$NS" delete database "$restored" --ignore-not-found --wait=false || cleanup_failed=1
