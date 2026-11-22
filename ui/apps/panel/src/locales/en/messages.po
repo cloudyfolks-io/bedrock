@@ -1330,8 +1330,20 @@ msgstr "Degraded"
 msgid "upgrades.editSettings"
 msgstr "Edit upgrade settings"
 
+msgid "upgrades.phaseStartedAt"
+msgstr "Phase start (UTC)"
+
+msgid "upgrades.recovery"
+msgstr "Upgrade recovery"
+
 msgid "upgrades.resume"
 msgstr "Resume"
+
+msgid "upgrades.resumeRequested"
+msgstr "Resume requested."
+
+msgid "upgrades.rollbackRequested"
+msgstr "Rollback requested."
 
 msgid "upgrades.start.button"
 msgstr "Start upgrade"
@@ -1341,6 +1353,12 @@ msgstr "Upgrade the cluster to {target}."
 
 msgid "upgrades.start.title"
 msgstr "Start an upgrade"
+
+msgid "upgrades.startRequested"
+msgstr "Upgrade requested."
+
+msgid "upgrades.startedAt"
+msgstr "Upgrade start (UTC)"
 
 msgid "upgrades.step.active"
 msgstr "In progress"

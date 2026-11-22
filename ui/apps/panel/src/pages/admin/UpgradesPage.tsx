@@ -16,7 +16,9 @@ import { QueryFailure } from "../../components/QueryFailure";
 import { PhaseBadge, phaseMessages } from "../../components/StatusBadge";
 import { Spinner } from "../../components/Spinner";
 import { MetricChart } from "../../charts/MetricChart";
+import { formatDateTime } from "../../format";
 import { LazyEditDialog } from "../../forms/LazyDialogs";
+import { useLocale } from "../../LocaleProvider";
 import { listAt, textAt } from "../../resources/path";
 import { definitionFor, refOf, type ResourceDef } from "../../resources/registry";
 import { useLiveList } from "../../stream/live";
@@ -30,6 +32,7 @@ const stateLabels: Record<string, MessageDescriptor> = {
 };
 
 const conditionTypes = ["Available", "Progressing", "Degraded", "UpgradeBlocked"];
+const rollbackPhases = ["Preflight", "Backup", "Preload", "ControlPlane"];
 
 interface Component { name: string; version?: string; available: boolean; degraded: boolean; message?: string }
 interface Backup { time: string; location: string; digest: string }
@@ -44,6 +47,7 @@ function requireDef(plural: string): ResourceDef {
 
 export default function UpgradesPage() {
   const { t, i18n } = useLingui();
+  const { locale } = useLocale();
   const http = useHttp();
   const toast = useToast();
   const queryClient = useQueryClient();
@@ -53,20 +57,27 @@ export default function UpgradesPage() {
   const releases = useLiveList(refOf(releaseDef), {});
   const cluster: KubeObject | undefined = clusters.data?.items.find((item) => item.metadata.name === "cluster");
   const [target, setTarget] = useState("");
-  const [starting, setStarting] = useState(false);
-  const [aborting, setAborting] = useState(false);
+  const [confirmation, setConfirmation] = useState<{ action: "start" | "abort"; revision: string } | null>(null);
+  const [submitting, setSubmitting] = useState(false);
   const [editing, setEditing] = useState(false);
   const [canPatch, canUpdate] = useCans([
     { verb: "patch", group: clusterDef.group, resource: clusterDef.plural, name: "cluster" },
     { verb: "update", group: clusterDef.group, resource: clusterDef.plural, name: "cluster" },
   ]);
 
-  async function patch(body: unknown) {
+  async function patch(spec: Record<string, unknown>) {
+    const resourceVersion = cluster?.metadata.resourceVersion;
+    if (!resourceVersion || submitting) {
+      return;
+    }
+    setSubmitting(true);
     try {
-      await kubeClient(http).mergePatch(refOf(clusterDef), undefined, "cluster", body);
-      void queryClient.invalidateQueries({ queryKey: listKey(refOf(clusterDef), undefined, {}) });
+      await kubeClient(http).mergePatch(refOf(clusterDef), undefined, "cluster", { metadata: { resourceVersion }, spec });
     } catch (error) {
       toast.show({ tone: "danger", title: t({ id: "action.error.failed", message: "The action failed" }), description: error instanceof Error ? error.message : "" });
+    } finally {
+      await queryClient.invalidateQueries({ queryKey: listKey(refOf(clusterDef), undefined, {}) });
+      setSubmitting(false);
     }
   }
 
@@ -86,11 +97,32 @@ export default function UpgradesPage() {
   }
   const phase = textAt(cluster, "status.phase");
   const current = textAt(cluster, "status.version");
-  const steps = phaseSteps(phase, textAt(cluster, "status.upgrade.failedPhase"));
+  const desired = textAt(cluster, "spec.desiredVersion");
+  const action = textAt(cluster, "spec.upgrade.action");
+  const activeTarget = textAt(cluster, "status.upgrade.to");
+  const failedPhase = textAt(cluster, "status.upgrade.failedPhase");
+  const message = textAt(cluster, "status.upgrade.message");
+  const startedAt = textAt(cluster, "status.upgrade.startedAt");
+  const phaseStartedAt = textAt(cluster, "status.upgrade.phaseStartedAt");
+  const steps = phaseSteps(phase, failedPhase);
   const targets = upgradeTargets(releases.data?.items ?? [], current);
-  const failed = phase === "Failed";
+  const targetAvailable = targets.some((release) => textAt(release, "spec.version") === target);
+  const progressing = conditionOf(cluster, "Progressing");
   const blocked = conditionOf(cluster, "UpgradeBlocked");
-  const writable = canPatch === "allowed";
+  const blockedRequest = blocked?.status === "True" && blocked.observedGeneration === cluster.metadata.generation;
+  const upgradeRequested = phase === "Idle" && desired !== "" && desired !== current && !blockedRequest;
+  const revision = cluster.metadata.resourceVersion ?? "";
+  const writable = canPatch === "allowed" && revision !== "";
+  const canStart = writable && phase === "Idle" && activeTarget === "" && action === "" && !upgradeRequested;
+  const failed = writable && phase === "Failed" && activeTarget !== "" && action === "" && progressing?.reason !== "RestoreManual";
+  const canResume = failed && failedPhase !== "";
+  const canAbort = failed && rollbackPhases.includes(failedPhase);
+  const confirmStart = canStart && targetAvailable && confirmation?.action === "start" && confirmation.revision === revision && !submitting;
+  const confirmAbort = canAbort && confirmation?.action === "abort" && confirmation.revision === revision && !submitting;
+  const requestMessage = action === "abort" ? t({ id: "upgrades.rollbackRequested", message: "Rollback requested." })
+    : action === "resume" ? t({ id: "upgrades.resumeRequested", message: "Resume requested." })
+    : upgradeRequested ? t({ id: "upgrades.startRequested", message: "Upgrade requested." })
+    : "";
 
   return (
     <>
@@ -108,13 +140,25 @@ export default function UpgradesPage() {
         <dt>{t({ id: "col.version", message: "Version" })}</dt>
         <dd><Ltr>{current || "—"}</Ltr></dd>
         <dt>{t({ id: "col.desiredVersion", message: "Desired version" })}</dt>
-        <dd><Ltr>{textAt(cluster, "spec.desiredVersion")}</Ltr></dd>
+        <dd><Ltr>{desired}</Ltr></dd>
         <dt>{t({ id: "col.phase", message: "Phase" })}</dt>
         <dd>{phase ? <PhaseBadge phase={phase} /> : "—"}</dd>
         <dt>{t({ id: "upgrades.window", message: "Maintenance window" })}</dt>
         <dd>{textAt(cluster, "spec.maintenanceWindow") || "—"}</dd>
         <dt>{t({ id: "upgrades.concurrency", message: "Node concurrency" })}</dt>
         <dd>{textAt(cluster, "spec.nodeConcurrency") || "—"}</dd>
+        {startedAt ? (
+          <>
+            <dt>{t({ id: "upgrades.startedAt", message: "Upgrade start (UTC)" })}</dt>
+            <dd><time dateTime={startedAt}>{formatDateTime(startedAt, locale)}</time></dd>
+          </>
+        ) : null}
+        {phaseStartedAt ? (
+          <>
+            <dt>{t({ id: "upgrades.phaseStartedAt", message: "Phase start (UTC)" })}</dt>
+            <dd><time dateTime={phaseStartedAt}>{formatDateTime(phaseStartedAt, locale)}</time></dd>
+          </>
+        ) : null}
       </dl>
       <ol className="br-steps" aria-label={t({ id: "upgrades.timeline", message: "Upgrade phases" })}>
         {steps.map((step) => (
@@ -124,8 +168,10 @@ export default function UpgradesPage() {
           </li>
         ))}
       </ol>
-      {blocked?.status === "True" ? <p role="status" className="br-help">{blocked.message ?? blocked.reason}</p> : null}
-      {writable ? (
+      {requestMessage ? <p role="status" className="br-help">{requestMessage}</p> : null}
+      {message ? <p role="status" className="br-help">{message}</p> : null}
+      {blockedRequest ? <p role="status" className="br-help">{blocked.message ?? blocked.reason}</p> : null}
+      {canStart ? (
         <section className="br-section">
           <h2>{t({ id: "upgrades.start.title", message: "Start an upgrade" })}</h2>
           <Select
@@ -134,18 +180,23 @@ export default function UpgradesPage() {
             options={targets.map((release) => ({ value: textAt(release, "spec.version"), label: textAt(release, "spec.version") }))}
             onValueChange={setTarget}
           />
-          <Button variant="primary" disabled={target === ""} onClick={() => setStarting(true)}>
+          <Button variant="primary" disabled={!targetAvailable || submitting} onClick={() => setConfirmation({ action: "start", revision })}>
             {t({ id: "upgrades.start.button", message: "Start upgrade" })}
           </Button>
-          {failed ? (
-            <>
-              <Button variant="secondary" onClick={() => void patch({ spec: { upgrade: { action: "resume" } } })}>
-                {t({ id: "upgrades.resume", message: "Resume" })}
-              </Button>
-              <Button variant="danger" onClick={() => setAborting(true)}>
-                {t({ id: "upgrades.abort", message: "Abort" })}
-              </Button>
-            </>
+        </section>
+      ) : null}
+      {canResume || canAbort ? (
+        <section className="br-section">
+          <h2>{t({ id: "upgrades.recovery", message: "Upgrade recovery" })}</h2>
+          {canResume ? (
+            <Button variant="secondary" disabled={submitting} onClick={() => void patch({ upgrade: { action: "resume" } })}>
+              {t({ id: "upgrades.resume", message: "Resume" })}
+            </Button>
+          ) : null}
+          {canAbort ? (
+            <Button variant="danger" disabled={submitting} onClick={() => setConfirmation({ action: "abort", revision })}>
+              {t({ id: "upgrades.abort", message: "Abort" })}
+            </Button>
           ) : null}
         </section>
       ) : null}
@@ -212,24 +263,31 @@ export default function UpgradesPage() {
       </Table>
       <MetricChart title={t({ id: "upgrades.ceph", message: "Ceph usage" })} queries={["ceph.used", "ceph.capacity"]} unit="bytes" />
       <ConfirmSimpleDialog
-        open={starting}
+        open={confirmStart}
         title={t({ id: "upgrades.start.title", message: "Start an upgrade" })}
         description={t({ id: "upgrades.start.description", message: `Upgrade the cluster to ${target}.` })}
         confirmLabel={t({ id: "upgrades.start.button", message: "Start upgrade" })}
-        onConfirm={() => void patch({ spec: { desiredVersion: target } })}
-        onCancel={() => setStarting(false)}
+        onConfirm={() => {
+          setConfirmation(null);
+          if (confirmStart) {
+            void patch(blockedRequest && target === desired ? { upgrade: { action: "resume" } } : { desiredVersion: target });
+          }
+        }}
+        onCancel={() => setConfirmation(null)}
       />
       <ConfirmTypedDialog
-        open={aborting}
+        open={confirmAbort}
         word="abort"
         title={t({ id: "upgrades.abort.title", message: "Abort the upgrade" })}
         description={t({ id: "upgrades.abort.description", message: "Type abort to stop the failed upgrade." })}
         confirmLabel={t({ id: "upgrades.abort", message: "Abort" })}
         onConfirm={() => {
-          void patch({ spec: { upgrade: { action: "abort" } } });
-          setAborting(false);
+          setConfirmation(null);
+          if (confirmAbort) {
+            void patch({ upgrade: { action: "abort" } });
+          }
         }}
-        onCancel={() => setAborting(false)}
+        onCancel={() => setConfirmation(null)}
       />
       {editing ? <LazyEditDialog def={clusterDef} object={cluster} onClose={() => setEditing(false)} /> : null}
     </>
