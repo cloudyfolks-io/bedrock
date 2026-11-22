@@ -8,6 +8,8 @@ import (
 	"encoding/xml"
 	"fmt"
 	"net/http"
+	"net/url"
+	"slices"
 	"strings"
 )
 
@@ -46,6 +48,40 @@ func (c *Client) CreateBucket(ctx context.Context, endpoint, region string, cred
 		return err
 	}
 	return failure(got, bucket, "create-bucket")
+}
+
+func (c *Client) OwnsBucket(ctx context.Context, endpoint, region string, creds Credentials, bucket string) (bool, error) {
+	query := url.Values{"max-buckets": {"1000"}, "prefix": {bucket}}
+	seen := make(map[string]bool)
+	for {
+		got, err := c.do(ctx, call{operation: "list-buckets", method: http.MethodGet, endpoint: endpoint, region: region,
+			path: "/", query: query.Encode(), creds: creds})
+		if err != nil {
+			return false, err
+		}
+		if err := failure(got, bucket, "list-buckets"); err != nil {
+			return false, err
+		}
+		var page struct {
+			XMLName xml.Name `xml:"ListAllMyBucketsResult"`
+			Names   []string `xml:"Buckets>Bucket>Name"`
+			Next    string   `xml:"ContinuationToken"`
+		}
+		if err := xml.Unmarshal(got.body, &page); err != nil {
+			return false, fmt.Errorf("s3 list-buckets: invalid ownership response")
+		}
+		if slices.Contains(page.Names, bucket) {
+			return true, nil
+		}
+		if page.Next == "" {
+			return false, nil
+		}
+		if seen[page.Next] {
+			return false, fmt.Errorf("s3 list-buckets: repeated continuation token")
+		}
+		seen[page.Next] = true
+		query.Set("continuation-token", page.Next)
+	}
 }
 
 func (c *Client) DeleteBucket(ctx context.Context, endpoint, region string, creds Credentials, bucket string) error {

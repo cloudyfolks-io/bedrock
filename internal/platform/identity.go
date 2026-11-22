@@ -111,5 +111,14 @@ func EnsureStoreBucket(ctx context.Context, store *s3.Client, endpoint, region s
 	if err == nil || s3.IsCode(err, s3.BucketAlreadyOwnedByYou) {
 		return nil
 	}
+	if s3.IsCode(err, "TooManyBuckets") || s3.IsCode(err, s3.BucketAlreadyExists) {
+		owned, checkErr := store.OwnsBucket(ctx, endpoint, region, keys, bucket)
+		if checkErr != nil {
+			return errors.Join(err, checkErr)
+		}
+		if owned {
+			return nil
+		}
+	}
 	return err
 }
