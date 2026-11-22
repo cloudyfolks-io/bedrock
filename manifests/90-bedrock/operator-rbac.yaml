@@ -725,6 +725,8 @@ rules:
   - volumesnapshotcontents
   verbs:
   - get
+  - list
+  - watch
 - apiGroups:
   - snapshot.storage.k8s.io
   resources:

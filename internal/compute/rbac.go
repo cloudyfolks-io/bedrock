@@ -22,7 +22,7 @@ func OperatorRules() []rbacv1.PolicyRule {
 		rule("", []string{"pods"}, "list", "patch", "watch"),
 		rule("snapshot.storage.k8s.io", []string{"volumesnapshots"}, "create", "get", "list", "watch"),
 		rule("snapshot.storage.k8s.io", []string{"volumesnapshotclasses"}, "list"),
-		rule("snapshot.storage.k8s.io", []string{"volumesnapshotcontents"}, "get"),
+		rule("snapshot.storage.k8s.io", []string{"volumesnapshotcontents"}, "get", "list", "watch"),
 		rule("storage.k8s.io", []string{"storageclasses"}, "list", "watch"),
 		rule("fabric.cloudyfolks.io", []string{"security-groups"}, "get"),
 		rule("fabric.cloudyfolks.io", []string{"ips"}, "get", "list", "watch"),
