@@ -98,7 +98,8 @@ func importedRestore(ctx context.Context, reader client.Reader, db v1alpha1.Data
 		return nil, err
 	}
 	bucket, prefix, server := string(secret.Data["bucket"]), string(secret.Data["prefix"]), string(secret.Data["serverName"])
-	if bucket == "" || strings.ContainsAny(bucket, "/?#%@") || prefix != source || server != source ||
+	ownedServer := server == source || (db.Spec.Engine == v1alpha1.DatabaseEnginePostgreSQL && server == "db-"+source)
+	if bucket == "" || strings.ContainsAny(bucket, "/?#%@") || prefix != source || !ownedServer ||
 		len(secret.Data["ACCESS_KEY_ID"]) == 0 || len(secret.Data["ACCESS_SECRET_KEY"]) == 0 {
 		return nil, fmt.Errorf("the imported backup location or credentials are incomplete")
 	}

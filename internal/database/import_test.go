@@ -51,6 +51,27 @@ func TestImportedBackupKeepsTheSourceBucketAndCredentials(t *testing.T) {
 	if check.PrefixObjects != 1 || check.Imported == nil || check.Imported.Bucket != "db-"+source || check.Imported.SecretName != secret.Name {
 		t.Fatalf("restore did not use the imported backup location")
 	}
+	secret.Data["serverName"] = []byte("db-" + source)
+	must(t, client.Update(ctx, secret))
+	check, err = LoadRestoreCheck(ctx, client, store, Config{BackupBucket: "regional"}, target, restoreNow)
+	must(t, err)
+	if check.Imported == nil || check.Imported.Prefix != source || check.Imported.ServerName != "db-"+source {
+		t.Fatal("the imported PostgreSQL archive lost its original server name")
+	}
+	mysql := target
+	mysql.Spec.Engine = v1alpha1.DatabaseEngineMySQL
+	secret.Data["destination"] = []byte("s3://db-" + source + "/" + source + "/full")
+	must(t, client.Update(ctx, secret))
+	if _, err := importedRestore(ctx, client, mysql); err == nil {
+		t.Fatal("MySQL accepted a PostgreSQL backup server name")
+	}
+	secret.Data["serverName"] = []byte("db-" + string(target.UID))
+	must(t, client.Update(ctx, secret))
+	if _, err := importedRestore(ctx, client, target); err == nil {
+		t.Fatal("PostgreSQL accepted a different source database ID")
+	}
+	secret.Data["serverName"] = []byte(source)
+	must(t, client.Update(ctx, secret))
 	foreign := target
 	foreign.Namespace = "another-project"
 	if _, err := importedRestore(ctx, client, foreign); err == nil {
