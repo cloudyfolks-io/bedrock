@@ -47,6 +47,9 @@ func CheckRestore(in RestoreCheck) *Refusal {
 		return &Refusal{Reason: ReasonRestoreSourceMismatch, Message: "the source database belonged to another project"}
 	}
 	if in.PrefixObjects == 0 {
+		if in.Imported != nil && in.Imported.Postgres != nil {
+			return &Refusal{Reason: ReasonRestoreSourceEmpty, Message: "the selected PostgreSQL base has no nonempty backup.info object"}
+		}
 		return &Refusal{Reason: ReasonRestoreSourceEmpty, Message: "the backup prefix " + restore.SourceUID + "/ holds no object"}
 	}
 	if in.Source == nil && in.TombstoneNamespace == "" {
@@ -94,7 +97,7 @@ func LoadRestoreCheck(ctx context.Context, c client.Reader, store BackupStore, c
 	if found {
 		check.TombstoneNamespace = namespace
 	}
-	imported, err := importedRestore(ctx, c, db)
+	imported, secret, err := importedRestoreMaterial(ctx, c, db)
 	if err != nil {
 		return check, err
 	}
@@ -103,17 +106,30 @@ func LoadRestoreCheck(ctx context.Context, c client.Reader, store BackupStore, c
 	if imported != nil {
 		bucket, prefix = imported.Bucket, imported.Prefix
 	}
-	keys, err := restoreCredentials(ctx, c, imported)
+	keys, err := restoreCredentials(ctx, c, secret)
 	if apierrors.IsNotFound(err) {
 		return check, nil
 	}
 	if err != nil {
 		return check, err
 	}
-	page, err := store.S3.ListObjectsV2(ctx, store.Endpoint, store.Region, keys, bucket, prefix+"/", "")
+	lookup := prefix + "/"
+	if imported != nil && imported.Postgres != nil {
+		lookup += imported.ServerName + "/base/" + imported.Postgres.BackupID + "/backup.info"
+	}
+	page, err := store.S3.ListObjectsV2(ctx, store.Endpoint, store.Region, keys, bucket, lookup, "")
 	if err != nil {
 		return check, err
 	}
-	check.PrefixObjects = len(page.Objects)
+	if imported != nil && imported.Postgres != nil {
+		for _, object := range page.Objects {
+			if object.Key == lookup && object.Size > 0 {
+				check.PrefixObjects = 1
+				break
+			}
+		}
+	} else {
+		check.PrefixObjects = len(page.Objects)
+	}
 	return check, nil
 }

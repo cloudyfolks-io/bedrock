@@ -58,6 +58,12 @@ func checkSpec(s engine.Spec) error {
 	if s.CPUMilli <= 0 || s.MemoryMi <= 0 || s.StorageGi <= 0 {
 		return fmt.Errorf("cpu, memory and storage must be greater than zero")
 	}
+	if r := s.Restore; r != nil && r.Backup != nil && r.Backup.Postgres != nil {
+		if r.SourceUID == "" || r.Backup.Prefix != r.SourceUID || (r.Backup.ServerName != r.SourceUID && r.Backup.ServerName != "db-"+r.SourceUID) || r.Backup.Destination != "" || r.Backup.Bucket == "" || r.Backup.SecretName == "" {
+			return fmt.Errorf("the selected PostgreSQL backup must belong to the imported source")
+		}
+		return r.Backup.Postgres.Validate(r.TargetTime)
+	}
 	return nil
 }
 
@@ -74,10 +80,24 @@ func bootstrap(s engine.Spec) map[string]any {
 		}}
 	}
 	recovery := map[string]any{"source": "source", "database": engine.DefaultDatabase, "owner": engine.AdminUser, "secret": app}
-	if s.Restore.TargetTime != nil {
-		recovery["recoveryTarget"] = map[string]any{"targetTime": s.Restore.TargetTime.UTC().Format("2006-01-02 15:04:05.000000+00")}
+	if target := recoveryTarget(s.Restore); len(target) > 0 {
+		recovery["recoveryTarget"] = target
 	}
 	return map[string]any{"recovery": recovery}
+}
+
+func recoveryTarget(restore *engine.RestoreSpec) map[string]any {
+	target := map[string]any{}
+	if restore.Backup != nil && restore.Backup.Postgres != nil {
+		target["backupID"] = restore.Backup.Postgres.BackupID
+		if restore.TargetTime == nil {
+			target["targetImmediate"] = true
+		}
+	}
+	if restore.TargetTime != nil {
+		target["targetTime"] = restore.TargetTime.UTC().Format("2006-01-02 15:04:05.000000+00")
+	}
+	return target
 }
 
 func externalClusters(s engine.Spec) []any {

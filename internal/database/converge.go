@@ -286,15 +286,20 @@ func (r *Reconciler) prepareRestore(ctx context.Context, in *flow) (*Refusal, er
 	if in.db.Spec.Restore == nil {
 		return nil, nil
 	}
-	source, err := importedRestore(ctx, r.Live, *in.db)
-	if err != nil {
-		return nil, err
-	}
-	in.source = source
-	if in.db.Annotations[annotationReadyOnce] == "true" {
-		return nil, nil
-	}
-	if !in.exists {
+	readyBefore := in.db.Annotations[annotationReadyOnce] == "true"
+	if readyBefore || in.exists {
+		source, err := importedRestore(ctx, r.Live, *in.db)
+		if err != nil {
+			return nil, err
+		}
+		in.source = source
+		if err := r.checkExistingPostgresRestore(ctx, in); err != nil {
+			return nil, err
+		}
+		if readyBefore {
+			return nil, nil
+		}
+	} else {
 		check, err := LoadRestoreCheck(ctx, r.Live, r.Store, in.cfg, *in.db, r.now())
 		if err != nil {
 			if s3.IsUnavailable(err) {
@@ -302,6 +307,7 @@ func (r *Reconciler) prepareRestore(ctx context.Context, in *flow) (*Refusal, er
 			}
 			return nil, err
 		}
+		in.source = check.Imported
 		if refused := CheckRestore(check); refused != nil {
 			return refused, nil
 		}
@@ -475,12 +481,13 @@ func (r *Reconciler) applyEngine(ctx context.Context, in *flow) error {
 		obj := Adopt(rendered, *in.db, in.project)
 		mysqlCluster := obj.GroupVersionKind() == mysql.ClusterGVK
 		var err error
-		if mysqlCluster && !in.exists {
-			err = r.Client.Create(ctx, obj, client.FieldOwner(v1alpha1.DatabaseFieldManager))
+		selected := in.source != nil && in.source.Postgres != nil
+		primary := mysqlCluster || selected && obj.GroupVersionKind() == ClusterGVK
+		if selected && obj.GroupVersionKind() == ObjectStoreGVK && obj.GetName() == engine.Named(spec.Name, "source") {
+			err = r.applySelectedPostgresStore(ctx, in, obj)
+		} else if primary {
+			err = applyObservedEngineObject(ctx, r.Client, obj, in.cluster)
 		} else {
-			if mysqlCluster {
-				obj.SetResourceVersion(in.cluster.GetResourceVersion())
-			}
 			err = ssa.Apply(ctx, r.Client, obj, v1alpha1.DatabaseFieldManager)
 		}
 		if meta.IsNoMatchError(err) && obj.GroupVersionKind() == PodMonitorGVK {

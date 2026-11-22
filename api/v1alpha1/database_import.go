@@ -8,12 +8,15 @@ import (
 )
 
 const (
-	DatabaseImportNamespace = DatabasePlatformNamespace
-	DatabaseImportMarker    = "bedrock.cloudyfolks.io/import"
-	DatabaseImportSource    = "dadehat.cloudyfolks.com/source"
-	DatabaseImportProject   = "bedrock.cloudyfolks.io/import-project"
-	DatabaseImportTarget    = "bedrock.cloudyfolks.io/import-target"
-	DatabaseImportTargetUID = "bedrock.cloudyfolks.io/import-target-uid"
+	DatabaseImportBackupID        = "backupID"
+	DatabaseImportTargetImmediate = "targetImmediate"
+	DatabaseImportTargetTime      = "targetTime"
+	DatabaseImportNamespace       = DatabasePlatformNamespace
+	DatabaseImportMarker          = "bedrock.cloudyfolks.io/import"
+	DatabaseImportSource          = "dadehat.cloudyfolks.com/source"
+	DatabaseImportProject         = "bedrock.cloudyfolks.io/import-project"
+	DatabaseImportTarget          = "bedrock.cloudyfolks.io/import-target"
+	DatabaseImportTargetUID       = "bedrock.cloudyfolks.io/import-target-uid"
 )
 
 func DatabaseImportBackupName(source string) string { return "import-backup-" + source }

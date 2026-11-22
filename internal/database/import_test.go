@@ -16,13 +16,16 @@ import (
 	"time"
 
 	corev1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	"github.com/cloudyfolks-io/bedrock/api/v1alpha1"
 	"github.com/cloudyfolks-io/bedrock/internal/database/engine"
+	"github.com/cloudyfolks-io/bedrock/internal/database/postgres"
 )
 
 func importFixture(db v1alpha1.Database, name, source string, fields map[string][]byte) *corev1.Secret {
@@ -251,5 +254,240 @@ func TestImportedTLSReachesEveryEngine(t *testing.T) {
 				t.Fatal("the engine did not receive its customer certificate")
 			}
 		})
+	}
+}
+
+func TestSelectedPostgresImportPreflight(t *testing.T) {
+	c, fake, store := backupWorld(t)
+	ctx := t.Context()
+	target := targetOf("selected-test", func(db *v1alpha1.Database) {
+		db.UID = "ac9a3716-988b-4703-b9ec-f25d8686315c"
+		db.Annotations = map[string]string{v1alpha1.DatabaseImportMarker: "true"}
+	})
+	source := target.Spec.Restore.SourceUID
+	id := "20261017T010000"
+	name := v1alpha1.DatabaseImportBackupName(source)
+	secret := importFixture(target, name, source, map[string][]byte{
+		"bucket": []byte("db-" + source), "prefix": []byte(source), "serverName": []byte("db-" + source),
+		"ACCESS_KEY_ID": []byte("key"), "ACCESS_SECRET_KEY": []byte("token"),
+		v1alpha1.DatabaseImportBackupID: []byte(id), v1alpha1.DatabaseImportTargetImmediate: []byte("true"),
+	})
+	immutable := true
+	secret.Immutable = &immutable
+	must(t, c.Create(ctx, secret))
+	path := source + "/db-" + source + "/base/" + id + "/backup.info"
+	fake.put(source+"/db-"+source+"/base/20261018T010000/backup.info", 120)
+	fake.put(path+".bak", 120)
+	query := func() (RestoreCheck, error) {
+		return LoadRestoreCheck(ctx, c, store, Config{BackupBucket: "global"}, target, restoreNow)
+	}
+	check, err := query()
+	must(t, err)
+	if check.PrefixObjects != 0 || check.Imported.Postgres.BackupID != id {
+		t.Fatal("another base or metadata suffix satisfied exact-selection preflight")
+	}
+	fake.put(path, 0)
+	check, err = query()
+	must(t, err)
+	if check.PrefixObjects != 0 {
+		t.Fatal("empty backup.info satisfied preflight")
+	}
+	fake.put(path, 120)
+	check, err = query()
+	must(t, err)
+	if check.PrefixObjects != 1 {
+		t.Fatal("exact archived base was not observed")
+	}
+	must(t, c.Delete(ctx, secret))
+	if _, err := query(); err == nil {
+		t.Fatal("missing selected source fell back to shared credentials")
+	}
+}
+
+func TestSelectedPostgresImportValidatesApproval(t *testing.T) {
+	at := metav1.NewTime(time.Date(2026, 10, 18, 1, 2, 3, 0, time.UTC))
+	for _, kind := range []string{"immediate", "time", "legacy", "missing id", "empty id", "invalid calendar id", "missing target", "false immediate", "two targets", "unexpected request time", "missing request time", "wrong time", "invalid time", "lost precision", "mutable", "mysql", "valkey", "destination"} {
+		t.Run(kind, func(t *testing.T) {
+			db := targetOf("target", func(*v1alpha1.Database) {})
+			id, imm, timed := v1alpha1.DatabaseImportBackupID, v1alpha1.DatabaseImportTargetImmediate, v1alpha1.DatabaseImportTargetTime
+			fields := map[string][]byte{id: []byte("20261017T010000"), imm: []byte("true")}
+			s := importFixture(db, "backup", db.Spec.Restore.SourceUID, fields)
+			immutable := true
+			s.Immutable = &immutable
+			switch kind {
+			case "legacy":
+				delete(fields, id)
+				delete(fields, imm)
+			case "missing id":
+				delete(fields, id)
+			case "empty id":
+				fields[id] = nil
+			case "invalid calendar id":
+				fields[id] = []byte("20260230T010000")
+			case "missing target":
+				delete(fields, imm)
+			case "false immediate":
+				fields[imm] = []byte("false")
+			case "two targets":
+				fields[timed] = []byte(at.Format(time.RFC3339))
+			case "unexpected request time":
+				db.Spec.Restore.TargetTime = &at
+			case "time", "missing request time", "wrong time", "invalid time", "lost precision":
+				delete(fields, imm)
+				fields[timed] = []byte("2026-10-18T04:32:03+03:30")
+				db.Spec.Restore.TargetTime = &at
+				switch kind {
+				case "missing request time":
+					db.Spec.Restore.TargetTime = nil
+				case "wrong time":
+					fields[timed] = []byte("2026-10-18T04:32:04+03:30")
+				case "invalid time":
+					fields[timed] = []byte("unbounded")
+				case "lost precision":
+					ns := metav1.NewTime(at.Add(time.Nanosecond))
+					db.Spec.Restore.TargetTime = &ns
+					fields[timed] = []byte(ns.Format(time.RFC3339Nano))
+				}
+			case "mutable":
+				s.Immutable = nil
+			case "mysql":
+				db.Spec.Engine = v1alpha1.DatabaseEngineMySQL
+			case "valkey":
+				db.Spec.Engine = v1alpha1.DatabaseEngineValkey
+			case "destination":
+				fields["destination"] = []byte("s3://elsewhere")
+			}
+			got, err := importedPostgresPoint(db, s)
+			switch kind {
+			case "legacy":
+				if err != nil || got != nil {
+					t.Fatal("unselected import changed")
+				}
+			case "immediate":
+				if err != nil || got == nil || got.BackupID != "20261017T010000" || got.TargetTime != nil {
+					t.Fatalf("invalid immediate selection: %+v %v", got, err)
+				}
+			case "time":
+				if err != nil || got == nil || got.TargetTime == nil || !got.TargetTime.Equal(at.Time) {
+					t.Fatalf("invalid selected time: %+v %v", got, err)
+				}
+			default:
+				if err == nil {
+					t.Fatal("invalid import selection accepted")
+				}
+			}
+		})
+	}
+}
+
+func TestSelectedPostgresExistingBootstrap(t *testing.T) {
+	c, _, store := backupWorld(t)
+	ctx := t.Context()
+	db := targetOf("existing-target", func(db *v1alpha1.Database) {
+		db.UID = "446cb0ed-b11a-4914-befc-a441f607296a"
+		db.Annotations = map[string]string{}
+	})
+	id := "20261017T010000"
+	source := db.Spec.Restore.SourceUID
+	secret := importFixture(db, v1alpha1.DatabaseImportBackupName(source), source, map[string][]byte{
+		"bucket": []byte("imports"), "prefix": []byte(source), "serverName": []byte(source), "ACCESS_KEY_ID": []byte("key"), "ACCESS_SECRET_KEY": []byte("secret"),
+		v1alpha1.DatabaseImportBackupID: []byte(id), v1alpha1.DatabaseImportTargetImmediate: []byte("true"),
+	})
+	immutable := true
+	secret.Immutable = &immutable
+	must(t, c.Create(ctx, secret))
+	selected, err := importedRestore(ctx, c, db)
+	must(t, err)
+	rs := RestoreSpecOf(db)
+	rs.Backup = selected
+	s := engine.Spec{Name: Name(db.UID), Namespace: PlatformNamespace, CPUMilli: 100, MemoryMi: 256, StorageGi: 1, Instances: 1, Restore: rs, Backup: engine.BackupSpec{Endpoint: store.Endpoint}}
+	objects, err := postgres.Render(s)
+	must(t, err)
+	var cluster, objectStore *unstructured.Unstructured
+	for _, item := range objects {
+		switch item.GetKind() {
+		case "Cluster":
+			cluster = Adopt(item, db, Project{})
+		case "ObjectStore":
+			objectStore = Adopt(item, db, Project{})
+		}
+	}
+	must(t, c.Create(ctx, objectStore))
+	r := &Reconciler{Client: c, Live: c, Store: store}
+	desiredCluster := cluster.DeepCopy()
+	must(t, applyObservedEngineObject(ctx, c, desiredCluster, nil))
+	if err := applyObservedEngineObject(ctx, c, desiredCluster, nil); !apierrors.IsAlreadyExists(err) {
+		t.Fatalf("first admission replaced an existing Cluster: %v", err)
+	}
+	observed := cluster.DeepCopy()
+	must(t, c.Get(ctx, client.ObjectKeyFromObject(cluster), observed))
+	admitted, _, err := unstructured.NestedSlice(observed.Object, "spec", "externalClusters")
+	must(t, err)
+	plugin, _, err := unstructured.NestedMap(admitted[0].(map[string]any), "plugin")
+	must(t, err)
+	if plugin["enabled"] != true || plugin["isWALArchiver"] != false {
+		t.Fatal("the test API did not admit the pinned CNPG plugin defaults")
+	}
+	_, err = r.prepareRestore(ctx, &flow{db: &db, exists: true, cluster: observed})
+	must(t, err)
+	changed := observed.DeepCopy()
+	changed.SetLabels(map[string]string{"test": "modified"})
+	must(t, c.Update(ctx, changed))
+	if err := applyObservedEngineObject(ctx, c, desiredCluster, observed); !apierrors.IsConflict(err) {
+		t.Fatalf("the Cluster changed after inspection: %v", err)
+	}
+	foreign := objectStore.DeepCopy()
+	foreign.SetAnnotations(nil)
+	must(t, c.Update(ctx, foreign))
+	if err := r.applySelectedPostgresStore(ctx, &flow{db: &db}, objectStore); !errors.Is(err, errChangedPostgresRestore) {
+		t.Fatalf("initial admission adopted a foreign ObjectStore: %v", err)
+	}
+	objectStore.SetResourceVersion(foreign.GetResourceVersion())
+	must(t, c.Update(ctx, objectStore))
+	for _, ready := range []string{"", "true"} {
+		db.Annotations[annotationReadyOnce] = ready
+		for _, mode := range []string{"same", "admission defaults", "disabled plugin", "wrong WAL archiver", "extra plugin parameter", "extra bootstrap", "alternate backup", "alternate snapshot", "other id", "not selected", "source name", "foreign server"} {
+			child := cluster.DeepCopy()
+			switch mode {
+			case "admission defaults", "disabled plugin", "wrong WAL archiver", "extra plugin parameter":
+				sources, _, err := unstructured.NestedSlice(child.Object, "spec", "externalClusters")
+				must(t, err)
+				source := sources[0].(map[string]any)
+				must(t, unstructured.SetNestedField(source, mode != "disabled plugin", "plugin", "enabled"))
+				must(t, unstructured.SetNestedField(source, mode == "wrong WAL archiver", "plugin", "isWALArchiver"))
+				if mode == "extra plugin parameter" {
+					must(t, unstructured.SetNestedField(source, "extra", "plugin", "parameters", "extra"))
+				}
+				must(t, unstructured.SetNestedSlice(child.Object, sources, "spec", "externalClusters"))
+			case "extra bootstrap":
+				must(t, unstructured.SetNestedField(child.Object, map[string]any{}, "spec", "bootstrap", "initdb"))
+			case "alternate backup":
+				must(t, unstructured.SetNestedField(child.Object, map[string]any{"name": "another"}, "spec", "bootstrap", "recovery", "backup"))
+			case "alternate snapshot":
+				must(t, unstructured.SetNestedField(child.Object, map[string]any{}, "spec", "bootstrap", "recovery", "volumeSnapshots"))
+			case "other id":
+				must(t, unstructured.SetNestedField(child.Object, "20261018T010000", "spec", "bootstrap", "recovery", "recoveryTarget", "backupID"))
+			case "not selected":
+				unstructured.RemoveNestedField(child.Object, "spec", "bootstrap", "recovery", "recoveryTarget")
+			case "source name":
+				must(t, unstructured.SetNestedField(child.Object, "other", "spec", "bootstrap", "recovery", "source"))
+			case "foreign server":
+				unstructured.RemoveNestedField(child.Object, "spec", "externalClusters")
+			}
+			in := &flow{db: &db, exists: true, cluster: child}
+			_, err := r.prepareRestore(ctx, in)
+			if (err == nil) != (mode == "same" || mode == "admission defaults") {
+				t.Fatalf("ready=%s mode=%s error=%v", ready, mode, err)
+			}
+		}
+	}
+	must(t, unstructured.SetNestedField(objectStore.Object, "s3://another/", "spec", "configuration", "destinationPath"))
+	must(t, c.Update(ctx, objectStore))
+	if _, err := r.prepareRestore(ctx, &flow{db: &db, cluster: cluster, exists: true}); !errors.Is(err, errChangedPostgresRestore) {
+		t.Fatalf("source was repointed: %v", err)
+	}
+	must(t, c.Delete(ctx, secret))
+	if _, err := r.prepareRestore(ctx, &flow{db: &db, cluster: cluster, exists: true}); !errors.Is(err, errChangedPostgresRestore) {
+		t.Fatalf("existing selection was silently dropped: %v", err)
 	}
 }

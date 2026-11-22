@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -320,5 +321,47 @@ func TestObjectStoreGivesTheBackupSidecarRequests(t *testing.T) {
 		if err != nil || !found || value == "" {
 			t.Fatalf("sidecar request %s = %q %v %v; the databases quota refuses a pod without it", resource, value, found, err)
 		}
+	}
+}
+
+func TestSelectedPostgresRender(t *testing.T) {
+	at := time.Date(2026, 10, 18, 1, 2, 3, 0, time.UTC)
+	for _, kind := range []string{"immediate", "time", "wrong time", "missing date approval", "bad id", "foreign repository"} {
+		t.Run(kind, func(t *testing.T) {
+			s := restoreSpec(bedrockSpec(), nil)
+			selected := &engine.PostgresRestorePoint{BackupID: "20261017T010000"}
+			s.Restore.Backup = &engine.RestoreBackup{Bucket: "imports", Prefix: sourceUID, ServerName: "db-" + sourceUID, SecretName: "uid-bound-source", Postgres: selected}
+			expected := map[string]any{"backupID": selected.BackupID, "targetImmediate": true}
+			switch kind {
+			case "time":
+				s.Restore.TargetTime = &at
+				selected.TargetTime = &at
+				expected = map[string]any{"backupID": selected.BackupID, "targetTime": "2026-10-18 01:02:03.000000+00"}
+			case "wrong time":
+				later := at.Add(time.Second)
+				s.Restore.TargetTime = &at
+				selected.TargetTime = &later
+			case "missing date approval":
+				s.Restore.TargetTime = &at
+			case "bad id":
+				selected.BackupID = "latest"
+			case "foreign repository":
+				s.Restore.Backup.ServerName = "foreign"
+			}
+			objects, err := Render(s)
+			if kind != "immediate" && kind != "time" {
+				if err == nil || len(objects) != 0 {
+					t.Fatal("unsafe selection produced native objects")
+				}
+				return
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			target, found, err := unstructured.NestedMap(clusterOf(t, objects), "spec", "bootstrap", "recovery", "recoveryTarget")
+			if err != nil || !found || !reflect.DeepEqual(target, expected) {
+				t.Fatalf("recoveryTarget=%v want %v", target, expected)
+			}
+		})
 	}
 }

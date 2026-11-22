@@ -53,7 +53,24 @@ type RestoreSpec struct {
 	Backup      *RestoreBackup
 }
 
+type PostgresRestorePoint struct {
+	BackupID   string
+	TargetTime *time.Time
+}
+
+func (p PostgresRestorePoint) Validate(requested *time.Time) error {
+	stamp, err := time.Parse("20060102T150405", p.BackupID)
+	if err != nil || stamp.Year() == 0 || stamp.Format("20060102T150405") != p.BackupID {
+		return fmt.Errorf("the imported PostgreSQL backup ID is not a Barman storage ID")
+	}
+	if (p.TargetTime == nil) != (requested == nil) || (p.TargetTime != nil && (!p.TargetTime.Equal(*requested) || p.TargetTime.IsZero() || p.TargetTime.Nanosecond()%1000 != 0)) {
+		return fmt.Errorf("the imported PostgreSQL recovery point differs from the requested target time or exceeds microsecond precision")
+	}
+	return nil
+}
+
 type RestoreBackup struct {
+	Postgres    *PostgresRestorePoint
 	Bucket      string
 	Prefix      string
 	ServerName  string
