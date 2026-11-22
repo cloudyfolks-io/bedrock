@@ -201,14 +201,16 @@ if grep -Eq '^job\.batch/fabric-(pre-upgrade|post-upgrade|post-delete)-hook$' <<
   printf '%s\n' 'initial install started a Fabric upgrade or delete hook' >&2
   exit 1
 fi
+ovn_tls_ready() {
+  local -a exec_ovn=(timeout 30 kubectl -n kube-system exec deployment/ovn-central -c ovn-central -- timeout 20)
+  local -a credentials=(-p /var/run/tls/key -c /var/run/tls/cert -C /var/run/tls/cacert)
+  "${exec_ovn[@]}" ovsdb-client "${credentials[@]}" list-dbs "ssl:$nodeip:6641" | grep -Fx OVN_Northbound || return 1
+  "${exec_ovn[@]}" ovsdb-client "${credentials[@]}" list-dbs "ssl:$nodeip:6642" | grep -Fx OVN_Southbound || return 1
+  "${exec_ovn[@]}" ovn-nbctl --db="ssl:$nodeip:6641" "${credentials[@]}" get NB_Global . options:version_compatibility
+}
 if [ "$ovn_tls" = true ]; then
   expect_equal true "$(kubectl get setting network.ovn-tls -o jsonpath='{.spec.value}')" "OVN TLS setting"
-  kubectl -n kube-system exec deployment/ovn-central -c ovn-central -- timeout 20 ovsdb-client \
-    -p /var/run/tls/key -c /var/run/tls/cert -C /var/run/tls/cacert list-dbs "ssl:$nodeip:6641" | grep -Fx OVN_Northbound
-  kubectl -n kube-system exec deployment/ovn-central -c ovn-central -- timeout 20 ovsdb-client \
-    -p /var/run/tls/key -c /var/run/tls/cert -C /var/run/tls/cacert list-dbs "ssl:$nodeip:6642" | grep -Fx OVN_Southbound
-  kubectl -n kube-system exec deployment/ovn-central -c ovn-central -- timeout 20 ovn-nbctl --db="ssl:$nodeip:6641" \
-    -p /var/run/tls/key -c /var/run/tls/cert -C /var/run/tls/cacert get NB_Global . options:version_compatibility >/dev/null
+  retry_until 120 ovn_tls_ready
 fi
 expect_equal '600 kube-apiserver' "$(stat -c '%a %U' /etc/bedrock/encryption/encryption.yaml)" "encryption file mode and owner"
 expect_equal '700 kube-apiserver' "$(stat -c '%a %U' /etc/bedrock/encryption)" "encryption directory mode and owner"
