@@ -186,10 +186,21 @@ func TestReleaseAppliesHelmHooksOnlyForMatchingEvents(t *testing.T) {
 		t.Fatal(err)
 	}
 	assertSeen([]string{"before-install", "regular", "after-install"})
-	if err := UpgradeGroups(ctx, c, bundle, nil, gates, time.Second, time.Minute, report, SkipHook, SkipHook); err != nil {
+	beforeReady := func(_ context.Context, group Group) error {
+		if len(group.Objects) != 1 || group.Objects[0].GetName() != "regular" {
+			t.Fatal("the upgrade rollout must receive the regular resources")
+		}
+		seen = append(seen, "before-ready")
+		return nil
+	}
+	if err := UpgradeGroups(ctx, c, bundle, nil, gates, time.Second, time.Minute, report, SkipHook, beforeReady, SkipHook); err != nil {
 		t.Fatal(err)
 	}
-	assertSeen([]string{"before-upgrade", "regular", "after-upgrade"})
+	assertSeen([]string{"before-upgrade", "before-ready", "regular", "after-upgrade"})
+	if err := UpgradeGroup(ctx, c, bundle, nil, gates, time.Second, time.Minute, "fabric", SkipHook, beforeReady, SkipHook); err != nil {
+		t.Fatal(err)
+	}
+	assertSeen([]string{"before-upgrade", "before-ready", "regular", "after-upgrade"})
 	if err := InstallGroup(ctx, c, bundle, nil, gates, time.Second, time.Minute, "fabric", SkipHook, SkipHook); err != nil {
 		t.Fatal(err)
 	}

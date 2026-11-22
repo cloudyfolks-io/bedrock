@@ -126,6 +126,10 @@ func createOVSDaemonSet(t *testing.T, ctx context.Context, c client.Client) apps
 	if err := c.Create(ctx, &daemonSet); err != nil {
 		t.Fatal(err)
 	}
+	daemonSet.Status.ObservedGeneration = daemonSet.Generation
+	if err := c.Status().Update(ctx, &daemonSet); err != nil {
+		t.Fatal(err)
+	}
 	for revision, hash := range []string{"old", "new"} {
 		history := &appsv1.ControllerRevision{
 			ObjectMeta: metav1.ObjectMeta{
@@ -233,6 +237,62 @@ func TestCycleOVS(t *testing.T) {
 	}
 }
 
+func TestComponentsReplaceOVSBeforeWaitingForFabricPinger(t *testing.T) {
+	c, _ := StartTestEnv(t)
+	ctx, cancel := context.WithTimeout(t.Context(), 30*time.Second)
+	defer cancel()
+	if err := c.Create(ctx, &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: release.SystemNamespace}}); err != nil {
+		t.Fatal(err)
+	}
+	createClusterWithStatus(t, ctx, c, "v2", upgradeStatusIn(v1alpha1.PhaseComponents))
+	addMasterNode(t, c, "node-a", "10.0.10.11")
+	ovs := createOVSDaemonSet(t, ctx, c)
+	createPod(t, ctx, c, ovsPod("ovs-ovn-a", "node-a", "old", true))
+	controller := &fakeDaemonSetController{}
+	go controller.run(ctx, c, []string{"node-a"})
+
+	bundle := fabricAgentBundle(t)
+	pinger := bundle.Groups[0].Objects[0]
+	pinger.SetName("fabric-pinger")
+	central := ovnCentralBundle(t).Groups[0].Objects[0]
+	spec, err := runtime.DefaultUnstructuredConverter.ToUnstructured(&ovs.Spec)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ovsManifest := &unstructured.Unstructured{Object: map[string]any{
+		"apiVersion": "apps/v1", "kind": "DaemonSet", "spec": spec,
+		"metadata": map[string]any{"name": ovs.Name, "namespace": ovs.Namespace},
+	}}
+	bundle.Groups[0].Objects = []*unstructured.Unstructured{central, pinger, ovsManifest}
+	centralChecks, ovsChecks := 0, 0
+	pingerReady := false
+	gates := release.Gates{
+		{Group: "apps", Kind: "Deployment"}: func(*unstructured.Unstructured) release.Readiness {
+			centralChecks++
+			if centralChecks <= 2 && len(controller.order()) != 0 {
+				t.Fatal("OVS restarted before ovn-central was ready")
+			}
+			return release.Readiness{Ready: centralChecks >= 2}
+		},
+		{Group: "apps", Kind: "DaemonSet"}: func(obj *unstructured.Unstructured) release.Readiness {
+			if obj.GetName() == ovsDaemonSet {
+				ovsChecks++
+				if ovsChecks <= 3 && len(controller.order()) != 0 {
+					t.Fatal("OVS restarted before its DaemonSet was ready")
+				}
+				return release.Readiness{Ready: ovsChecks >= 3}
+			}
+			pingerReady = slices.Equal(controller.order(), []string{"node-a"})
+			return release.Readiness{Ready: pingerReady, Message: "fabric-pinger requires the current OVS revision"}
+		},
+	}
+	env := upgradeEnv{Client: c, Bundle: bundle, Gates: gates, PollInterval: 50 * time.Millisecond, GroupTimeout: 5 * time.Second}
+	result, err := components(ctx, env, getCluster(t, ctx, c))
+	if err != nil || result != (phaseResult{Done: true}) || !pingerReady {
+		t.Fatalf("Fabric rollout returned %+v, pinger ready %t, error %v", result, pingerReady, err)
+	}
+}
+
 func TestCycleOVSTimesOutNamingTheNode(t *testing.T) {
 	c, _ := StartTestEnv(t)
 	ctx := context.Background()
@@ -243,6 +303,41 @@ func TestCycleOVSTimesOutNamingTheNode(t *testing.T) {
 	err := cycleOVS(short, c, 50*time.Millisecond)
 	if err == nil || !strings.HasPrefix(err.Error(), "ovs-ovn on node-a: waiting for the new pod: ") {
 		t.Fatalf("error %v", err)
+	}
+}
+
+func TestCycleOVSWaitsForAnIdentifiedRevision(t *testing.T) {
+	c, _ := StartTestEnv(t)
+	ctx := t.Context()
+	ds := createOVSDaemonSet(t, ctx, c)
+	createPod(t, ctx, c, ovsPod("ovs-ovn-a", "node-a", "old", true))
+	ds.Status.ObservedGeneration = 0
+	if err := c.Status().Update(ctx, &ds); err != nil {
+		t.Fatal(err)
+	}
+	done, message, err := cycleOVSOn(ctx, c, "node-a")
+	if err != nil || done || !strings.Contains(message, "has not observed generation") {
+		t.Fatalf("unexpected response for an unobserved generation: %t %s %v", done, message, err)
+	}
+	var revision appsv1.ControllerRevision
+	if err := c.Get(ctx, client.ObjectKey{Namespace: fabricNamespace, Name: ovsDaemonSet + "-new"}, &revision); err != nil {
+		t.Fatal(err)
+	}
+	delete(revision.Labels, revisionHashLabel)
+	if err := c.Update(ctx, &revision); err != nil {
+		t.Fatal(err)
+	}
+	ds.Status.ObservedGeneration = ds.Generation
+	if err := c.Status().Update(ctx, &ds); err != nil {
+		t.Fatal(err)
+	}
+	done, message, err = cycleOVSOn(ctx, c, "node-a")
+	if err != nil || done || !strings.Contains(message, "has no controller revision hash") {
+		t.Fatalf("unexpected response for a missing revision hash: %t %s %v", done, message, err)
+	}
+	var pod corev1.Pod
+	if err := c.Get(ctx, client.ObjectKey{Namespace: fabricNamespace, Name: "ovs-ovn-a"}, &pod); err != nil || pod.DeletionTimestamp != nil {
+		t.Fatalf("the running OVS pod must remain available: %v", err)
 	}
 }
 

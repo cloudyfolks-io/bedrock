@@ -8,13 +8,14 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
-type helmHookEvents struct {
-	before string
-	after  string
+type groupEvents struct {
+	beforeReady func(context.Context, Group) error
+	before      string
+	after       string
 }
 
 func Install(ctx context.Context, c client.Client, bundle Bundle, vars map[string]string, gates Gates, interval, groupTimeout time.Duration, report func(group Group, err error)) error {
-	return applyGroups(ctx, c, bundle, vars, gates, interval, groupTimeout, report, SkipHook, SkipHook, helmHookEvents{})
+	return applyGroups(ctx, c, bundle, vars, gates, interval, groupTimeout, report, SkipHook, SkipHook, groupEvents{})
 }
 
 func SkipHook(context.Context, Group) error {
@@ -22,14 +23,14 @@ func SkipHook(context.Context, Group) error {
 }
 
 func InstallGroups(ctx context.Context, c client.Client, bundle Bundle, vars map[string]string, gates Gates, interval, groupTimeout time.Duration, report func(group Group, err error), before, after func(ctx context.Context, group Group) error) error {
-	return applyGroups(ctx, c, bundle, vars, gates, interval, groupTimeout, report, before, after, helmHookEvents{before: "pre-install", after: "post-install"})
+	return applyGroups(ctx, c, bundle, vars, gates, interval, groupTimeout, report, before, after, groupEvents{before: "pre-install", after: "post-install"})
 }
 
-func UpgradeGroups(ctx context.Context, c client.Client, bundle Bundle, vars map[string]string, gates Gates, interval, groupTimeout time.Duration, report func(group Group, err error), before, after func(ctx context.Context, group Group) error) error {
-	return applyGroups(ctx, c, bundle, vars, gates, interval, groupTimeout, report, before, after, helmHookEvents{before: "pre-upgrade", after: "post-upgrade"})
+func UpgradeGroups(ctx context.Context, c client.Client, bundle Bundle, vars map[string]string, gates Gates, interval, groupTimeout time.Duration, report func(group Group, err error), before, beforeReady, after func(ctx context.Context, group Group) error) error {
+	return applyGroups(ctx, c, bundle, vars, gates, interval, groupTimeout, report, before, after, groupEvents{before: "pre-upgrade", beforeReady: beforeReady, after: "post-upgrade"})
 }
 
-func applyGroups(ctx context.Context, c client.Client, bundle Bundle, vars map[string]string, gates Gates, interval, groupTimeout time.Duration, report func(group Group, err error), before, after func(ctx context.Context, group Group) error, events helmHookEvents) error {
+func applyGroups(ctx context.Context, c client.Client, bundle Bundle, vars map[string]string, gates Gates, interval, groupTimeout time.Duration, report func(group Group, err error), before, after func(ctx context.Context, group Group) error, events groupEvents) error {
 	bundle, err := Substitute(bundle, vars)
 	if err != nil {
 		return err
@@ -69,14 +70,14 @@ func groupContext(ctx context.Context, timeout time.Duration) (context.Context, 
 }
 
 func InstallGroup(ctx context.Context, c client.Client, bundle Bundle, vars map[string]string, gates Gates, interval, groupTimeout time.Duration, name string, before, after func(ctx context.Context, group Group) error) error {
-	return applyNamedGroup(ctx, c, bundle, vars, gates, interval, groupTimeout, name, before, after, helmHookEvents{})
+	return applyNamedGroup(ctx, c, bundle, vars, gates, interval, groupTimeout, name, before, after, groupEvents{})
 }
 
-func UpgradeGroup(ctx context.Context, c client.Client, bundle Bundle, vars map[string]string, gates Gates, interval, groupTimeout time.Duration, name string, before, after func(ctx context.Context, group Group) error) error {
-	return applyNamedGroup(ctx, c, bundle, vars, gates, interval, groupTimeout, name, before, after, helmHookEvents{before: "pre-upgrade", after: "post-upgrade"})
+func UpgradeGroup(ctx context.Context, c client.Client, bundle Bundle, vars map[string]string, gates Gates, interval, groupTimeout time.Duration, name string, before, beforeReady, after func(ctx context.Context, group Group) error) error {
+	return applyNamedGroup(ctx, c, bundle, vars, gates, interval, groupTimeout, name, before, after, groupEvents{before: "pre-upgrade", beforeReady: beforeReady, after: "post-upgrade"})
 }
 
-func applyNamedGroup(ctx context.Context, c client.Client, bundle Bundle, vars map[string]string, gates Gates, interval, groupTimeout time.Duration, name string, before, after func(ctx context.Context, group Group) error, events helmHookEvents) error {
+func applyNamedGroup(ctx context.Context, c client.Client, bundle Bundle, vars map[string]string, gates Gates, interval, groupTimeout time.Duration, name string, before, after func(ctx context.Context, group Group) error, events groupEvents) error {
 	bundle, err := Substitute(bundle, vars)
 	if err != nil {
 		return err
@@ -99,7 +100,7 @@ func applyNamedGroup(ctx context.Context, c client.Client, bundle Bundle, vars m
 	return fmt.Errorf("group %s: not in the release", name)
 }
 
-func applyGroup(ctx context.Context, c client.Client, applier Applier, gates Gates, group Group, interval, timeout time.Duration, before, after func(ctx context.Context, group Group) error, events helmHookEvents) error {
+func applyGroup(ctx context.Context, c client.Client, applier Applier, gates Gates, group Group, interval, timeout time.Duration, before, after func(ctx context.Context, group Group) error, events groupEvents) error {
 	groupCtx, cancel := groupContext(ctx, timeout)
 	defer cancel()
 	if err := before(groupCtx, group); err != nil {
@@ -113,6 +114,11 @@ func applyGroup(ctx context.Context, c client.Client, applier Applier, gates Gat
 		phase := forHelmEvents(group, event)
 		if err := applier.Apply(groupCtx, phase); err != nil {
 			return err
+		}
+		if event == "" && events.beforeReady != nil {
+			if err := events.beforeReady(groupCtx, phase); err != nil {
+				return err
+			}
 		}
 		if err := WaitGroup(groupCtx, c, gates, phase, interval); err != nil {
 			return err

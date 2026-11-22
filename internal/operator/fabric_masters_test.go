@@ -307,7 +307,7 @@ func TestFabricMastersRecreateTheCompletedHookJob(t *testing.T) {
 		t.Fatalf("initial install must omit the upgrade Job: %v", err)
 	}
 	vars := map[string]string{release.VarVIP: "10.0.0.10", release.VarMasterIPs: "10.0.10.11"}
-	if err := release.UpgradeGroup(ctx, c, r.Bundle, vars, r.Gates, r.Interval, r.GroupTimeout, fabricGroupName, release.SkipHook, release.SkipHook); err != nil {
+	if err := release.UpgradeGroup(ctx, c, r.Bundle, vars, r.Gates, r.Interval, r.GroupTimeout, fabricGroupName, release.SkipHook, release.SkipHook, release.SkipHook); err != nil {
 		t.Fatal(err)
 	}
 	if err := c.Get(ctx, key, &before); err != nil {

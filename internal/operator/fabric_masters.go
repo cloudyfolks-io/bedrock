@@ -65,7 +65,7 @@ func (r *ClusterReconciler) reconcileFabricMasters(ctx context.Context) error {
 	base := release.WithPodMTU(vars, cluster.Spec.PodMTU)
 	err = r.growCentral(ctx, base, steps)
 	if err == nil {
-		err = release.UpgradeGroup(ctx, r.Client, r.Bundle, release.WithMasters(base, steps[len(steps)-1]), r.Gates, r.Interval, r.GroupTimeout, fabricGroupName, beforeGroupHooks(r.Client), componentHook(env, cluster))
+		err = release.UpgradeGroup(ctx, r.Client, r.Bundle, release.WithMasters(base, steps[len(steps)-1]), r.Gates, r.Interval, r.GroupTimeout, fabricGroupName, beforeGroupHooks(r.Client), prepareComponentRollout(env), componentHook(env, cluster))
 	}
 	if err != nil {
 		if ctx.Err() != nil {
