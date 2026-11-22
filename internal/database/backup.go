@@ -227,7 +227,16 @@ func nativeRecoveryWindow(ctx context.Context, c client.Reader, db v1alpha1.Data
 			return nil, nil
 		}
 	}
-	return from, to
+	first, _, _ := unstructured.NestedString(store.Object, "status", "serverRecoveryWindow", server, "firstRecoverabilityPoint")
+	lower := from.Time.Truncate(time.Microsecond)
+	if !v1alpha1.HasDatabaseTimePrecision(first) {
+		lower = lower.Add(time.Microsecond)
+	}
+	upper := to.Time.Truncate(time.Microsecond)
+	if lower.After(upper) {
+		return nil, nil
+	}
+	return &metav1.Time{Time: lower}, &metav1.Time{Time: upper}
 }
 
 func backupItemOf(backup *unstructured.Unstructured) v1alpha1.DatabaseBackupItem {

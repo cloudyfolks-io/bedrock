@@ -37,7 +37,10 @@ type DatabaseRestore struct {
 	// +kubebuilder:validation:Pattern=`^[a-z0-9]([-a-z0-9]*[a-z0-9])?$`
 	SourceUID string `json:"sourceUID"`
 	// +optional
-	TargetTime *metav1.Time `json:"targetTime,omitempty"`
+	// +kubebuilder:validation:Type=string
+	// +kubebuilder:validation:Pattern=`^[^.,]+([.,][0-9]{1,6}0*(Z|[+-][0-9]{2}:[0-9]{2}))?$`
+	TargetTime        *metav1.Time `json:"targetTime,omitempty"`
+	inexactTargetTime string       `json:"-"`
 }
 
 // +kubebuilder:validation:XValidation:rule="self == oldSelf",message="endpoint is immutable"

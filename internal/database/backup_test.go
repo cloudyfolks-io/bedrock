@@ -270,6 +270,25 @@ func TestNativePostgresRecoveryWindow(t *testing.T) {
 	}
 	configuration := []string{"spec", "configuration"}
 	window := []string{"status", "serverRecoveryWindow", string(db.UID)}
+	for _, bounds := range []struct{ first, last, from, to string }{
+		{"02:00:00.1234560000", "02:00:00.123458", "02:00:00.123456", "02:00:00.123458"},
+		{"02:00:00.1234560001", "02:00:00.1234589", "02:00:00.123457", "02:00:00.123458"},
+		{"02:00:00.1234560001", "02:00:00.1234569999", "", ""},
+	} {
+		candidate := store.DeepCopy()
+		must(t, unstructured.SetNestedField(candidate.Object, "2026-10-18T"+bounds.first+"Z", append(window, "firstRecoverabilityPoint")...))
+		must(t, unstructured.SetNestedField(candidate.Object, "2026-10-18T"+bounds.last+"Z", append(window, "lastSuccessfulBackupTime")...))
+		start, end := nativeRecoveryWindow(t.Context(), recoveryWindowReader{store: candidate}, db, project, spec, nil, now)
+		if bounds.from == "" {
+			if start != nil || end != nil {
+				t.Fatalf("a window without an exact microsecond advertised %v to %v", start, end)
+			}
+			continue
+		}
+		if start == nil || end == nil || start.Format("15:04:05.000000") != bounds.from || end.Format("15:04:05.000000") != bounds.to {
+			t.Fatalf("unexpected microsecond bounds for %v: %v to %v", bounds, start, end)
+		}
+	}
 	cases := []struct {
 		name  string
 		path  []string

@@ -11,6 +11,10 @@ import (
 
 func CheckEngineRules(spec v1alpha1.DatabaseSpec, class v1alpha1.DatabaseClassSpec) *Refusal {
 	switch spec.Engine {
+	case v1alpha1.DatabaseEnginePostgreSQL:
+		if spec.Restore != nil && spec.Restore.HasInexactTargetTime() {
+			return &Refusal{Reason: ReasonRestoreTimeUnsupported, Message: "the restore target time exceeds PostgreSQL microsecond precision"}
+		}
 	case v1alpha1.DatabaseEngineValkey:
 		return checkValkeyRules(spec, class)
 	case v1alpha1.DatabaseEngineMySQL:
