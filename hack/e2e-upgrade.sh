@@ -358,6 +358,23 @@ if [ -n "$abort_in" ]; then
     sleep 5
   done
   test "$phase" = "$abort_in"
+  if [ "$version_a_archives" = 0 ]; then
+    backup_record=$(kubectl --request-timeout=10s get cluster cluster -o json |
+      jq -er --arg phase "$abort_in" --arg prefix "host:$node:$backups/bedrock-$VERSION_A-" '
+        .status | select(.phase == $phase) | .upgrade.backup as $location
+        | select(($location | startswith($prefix)) and
+            ($location | ltrimstr($prefix) | test("^[0-9]{8}T[0-9]{6}Z\\.tar\\.gz$")))
+        | [.backups[] | select(.location == $location)]
+        | select(length == 1 and (.[0].digest | test("^sha256:[0-9a-f]{64}$")))
+        | [$location, .[0].digest] | @tsv')
+    IFS=$'\t' read -r legacy_backup_location legacy_backup_digest <<<"$backup_record"
+    legacy_backup=${legacy_backup_location#host:"$node":}
+    test "$(upgrade_archives)" = "$legacy_backup"
+    test -f "$legacy_backup"
+    test ! -L "$legacy_backup"
+    test "$(realpath -e -- "$legacy_backup")" = "$legacy_backup"
+    test "$(stat -c '%a:%u:%h' -- "$legacy_backup")" = '600:0:1'
+  fi
   aborted=0
   for _ in $(seq 1 60); do
     if "$cli_b" upgrade abort --yes; then
@@ -413,8 +430,19 @@ if [ -n "$abort_in" ]; then
   done
   test -z "$(kubectl get nodeupgrades -o name)"
   test -z "$(find /var/lib/k0s -maxdepth 1 -name '.pre-restore-*')"
-  test "$(upgrade_archives | wc -l)" -eq 1
-  assert_age_file "$(newest_upgrade_archive)"
+  if [ "$version_a_archives" = 0 ]; then
+    test "$(kubectl get host "$node" -o jsonpath='{.status.restore.backup}')" = "$legacy_backup"
+    test "$(upgrade_archives)" = "$legacy_backup"
+    test -f "$legacy_backup"
+    test ! -L "$legacy_backup"
+    test "$(realpath -e -- "$legacy_backup")" = "$legacy_backup"
+    test "$(stat -c '%a:%u:%h' -- "$legacy_backup")" = '600:0:1'
+    printf '%s  %s\n' "${legacy_backup_digest#sha256:}" "$legacy_backup" | sha256sum --check --status
+    gzip -t -- "$legacy_backup"
+  else
+    test "$(upgrade_archives | wc -l)" -eq 1
+    assert_age_file "$(newest_upgrade_archive)"
+  fi
   kubectl wait --for=condition=Ready node --all --timeout=300s
   grep -qx 'server = "https://127.0.0.1:1"' /etc/k0s/containerd.d/certs.d/_default/hosts.toml
   assert_no_image_pull_failures
