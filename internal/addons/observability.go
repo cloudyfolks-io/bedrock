@@ -26,17 +26,20 @@ import (
 )
 
 const (
-	monitoringNamespace = "monitoring"
-	alertmanagerSecret  = "bedrock-alertmanager-config"
-	alertmanagerKey     = "alertmanager.yaml"
-	grafanaAdminSecret  = "bedrock-grafana-admin"
-	webhookSetting      = "alertmanager.webhook-url"
-	criticalSetting     = "alertmanager.critical-webhook-url"
-	warningSetting      = "alertmanager.warning-webhook-url"
-	heartbeatSetting    = "alertmanager.heartbeat-url"
-	conditionWebhook    = "AlertmanagerWebhook"
-	passwordLength      = 24
-	passwordAlphabet    = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789"
+	monitoringNamespace   = "monitoring"
+	alertmanagerSecret    = "bedrock-alertmanager-config"
+	alertmanagerKey       = "alertmanager.yaml"
+	grafanaAdminSecret    = "bedrock-grafana-admin"
+	webhookSetting        = "alertmanager.webhook-url"
+	criticalSetting       = "alertmanager.critical-webhook-url"
+	warningSetting        = "alertmanager.warning-webhook-url"
+	heartbeatSetting      = "alertmanager.heartbeat-url"
+	infoSetting           = "alertmanager.info-webhook-url"
+	heartbeatProxySetting = "alertmanager.heartbeat-proxy-url"
+	routingProfileSetting = "alertmanager.routing-profile"
+	conditionWebhook      = "AlertmanagerWebhook"
+	passwordLength        = 24
+	passwordAlphabet      = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789"
 )
 
 var secretTypeMeta = metav1.TypeMeta{APIVersion: "v1", Kind: "Secret"}
@@ -58,10 +61,13 @@ func AuditConfigMap(level string) (*corev1.ConfigMap, error) {
 }
 
 type AlertmanagerTargets struct {
-	Default   string
-	Critical  string
-	Warning   string
-	Heartbeat string
+	Default        string
+	Critical       string
+	Warning        string
+	Heartbeat      string
+	Info           string
+	HeartbeatProxy string
+	RoutingProfile string
 }
 
 func webhookReceiver(name, url string, resolved bool) map[string]any {
@@ -83,7 +89,7 @@ func alertmanagerRoutes(targets AlertmanagerTargets) []map[string]any {
 	return routes
 }
 
-func AlertmanagerSecret(targets AlertmanagerTargets) (*corev1.Secret, error) {
+func standardAlertmanagerConfig(targets AlertmanagerTargets) map[string]any {
 	receiver := "null"
 	receivers := []map[string]any{{"name": "null"}}
 	if targets.Default != "" {
@@ -99,7 +105,7 @@ func AlertmanagerSecret(targets AlertmanagerTargets) (*corev1.Secret, error) {
 	if targets.Heartbeat != "" {
 		receivers = append(receivers, webhookReceiver("bedrock-heartbeat", targets.Heartbeat, false))
 	}
-	config := map[string]any{
+	return map[string]any{
 		"route": map[string]any{
 			"receiver":        receiver,
 			"group_by":        []string{"alertname", "namespace"},
@@ -110,6 +116,21 @@ func AlertmanagerSecret(targets AlertmanagerTargets) (*corev1.Secret, error) {
 		},
 		"receivers":     receivers,
 		"inhibit_rules": []map[string]any{{"source_matchers": []string{`severity = "critical"`}, "target_matchers": []string{`severity = "warning"`}, "equal": []string{"alertname", "namespace"}}},
+	}
+}
+
+func AlertmanagerSecret(targets AlertmanagerTargets) (*corev1.Secret, error) {
+	var config map[string]any
+	switch targets.RoutingProfile {
+	case "", "bedrock":
+		config = standardAlertmanagerConfig(targets)
+	case "legacy":
+		if err := validateLegacyAlertmanagerTargets(targets); err != nil {
+			return nil, err
+		}
+		config = legacyAlertmanagerConfig(targets)
+	default:
+		return nil, errors.New("unknown Alertmanager routing profile")
 	}
 	raw, err := sigyaml.Marshal(config)
 	if err != nil {
@@ -197,27 +218,52 @@ func validOrEmpty(key, value string) string {
 }
 
 func alertmanagerTargets(values map[string]string) AlertmanagerTargets {
-	return AlertmanagerTargets{
-		Default:   values[webhookSetting],
-		Critical:  validOrEmpty(criticalSetting, values[criticalSetting]),
-		Warning:   validOrEmpty(warningSetting, values[warningSetting]),
-		Heartbeat: validOrEmpty(heartbeatSetting, values[heartbeatSetting]),
+	targets := AlertmanagerTargets{
+		Default:        values[webhookSetting],
+		Critical:       values[criticalSetting],
+		Warning:        values[warningSetting],
+		Heartbeat:      values[heartbeatSetting],
+		Info:           values[infoSetting],
+		HeartbeatProxy: values[heartbeatProxySetting],
+		RoutingProfile: values[routingProfileSetting],
 	}
+	if targets.RoutingProfile == "" || targets.RoutingProfile == "bedrock" {
+		targets.Critical = validOrEmpty(criticalSetting, targets.Critical)
+		targets.Warning = validOrEmpty(warningSetting, targets.Warning)
+		targets.Heartbeat = validOrEmpty(heartbeatSetting, targets.Heartbeat)
+	}
+	return targets
 }
 
 func (r *ObservabilityReconciler) applyAlertmanager(ctx context.Context, targets AlertmanagerTargets) error {
+	if targets.RoutingProfile != "" && targets.RoutingProfile != "bedrock" {
+		secret, err := AlertmanagerSecret(targets)
+		if err == nil {
+			if err := r.writeAlertmanagerConfig(ctx, secret); err != nil {
+				return err
+			}
+			r.reportWebhook(ctx, routingProfileSetting, metav1.ConditionTrue, "Applied", "the legacy routing profile is in the Alertmanager configuration")
+			return nil
+		}
+		r.reportWebhook(ctx, routingProfileSetting, metav1.ConditionFalse, "InvalidRoutingProfile", err.Error())
+		closed, err := AlertmanagerSecret(AlertmanagerTargets{})
+		if err != nil {
+			return err
+		}
+		return r.writeAlertmanagerConfig(ctx, closed)
+	}
 	if err := validWebhookURL(targets.Default); err != nil {
-		r.reportWebhook(ctx, metav1.ConditionFalse, "InvalidURL", err.Error())
+		r.reportWebhook(ctx, webhookSetting, metav1.ConditionFalse, "InvalidURL", err.Error())
 		return r.ensureAlertmanagerConfig(ctx)
 	}
 	secret, err := AlertmanagerSecret(targets)
 	if err != nil {
 		return fmt.Errorf("alertmanager config: %w", err)
 	}
-	if err := ssa.Apply(ctx, r.Client, secret, v1alpha1.AddonsFieldManager); err != nil {
-		return fmt.Errorf("alertmanager config in namespace %s: %w", monitoringNamespace, err)
+	if err := r.writeAlertmanagerConfig(ctx, secret); err != nil {
+		return err
 	}
-	r.reportWebhook(ctx, metav1.ConditionTrue, "Applied", "the webhook is in the Alertmanager configuration")
+	r.reportWebhook(ctx, webhookSetting, metav1.ConditionTrue, "Applied", "the webhook is in the Alertmanager configuration")
 	return nil
 }
 
@@ -231,6 +277,10 @@ func (r *ObservabilityReconciler) ensureAlertmanagerConfig(ctx context.Context) 
 	if err != nil {
 		return fmt.Errorf("alertmanager config: %w", err)
 	}
+	return r.writeAlertmanagerConfig(ctx, secret)
+}
+
+func (r *ObservabilityReconciler) writeAlertmanagerConfig(ctx context.Context, secret *corev1.Secret) error {
 	if err := ssa.Apply(ctx, r.Client, secret, v1alpha1.AddonsFieldManager); err != nil {
 		return fmt.Errorf("alertmanager config in namespace %s: %w", monitoringNamespace, err)
 	}
@@ -242,10 +292,10 @@ func validWebhookURL(webhookURL string) error {
 	return def.Validate(webhookURL)
 }
 
-func (r *ObservabilityReconciler) reportWebhook(ctx context.Context, status metav1.ConditionStatus, reason, message string) {
+func (r *ObservabilityReconciler) reportWebhook(ctx context.Context, settingName string, status metav1.ConditionStatus, reason, message string) {
 	err := retry.RetryOnConflict(retry.DefaultRetry, func() error {
 		var setting v1alpha1.Setting
-		if err := r.Client.Get(ctx, client.ObjectKey{Name: webhookSetting}, &setting); err != nil {
+		if err := r.Client.Get(ctx, client.ObjectKey{Name: settingName}, &setting); err != nil {
 			return client.IgnoreNotFound(err)
 		}
 		v1alpha1.SetCondition(&setting.Status.Conditions, metav1.Condition{Type: conditionWebhook, Status: status, Reason: reason, Message: message, ObservedGeneration: setting.Generation})

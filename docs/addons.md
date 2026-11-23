@@ -609,6 +609,23 @@ A webhook URL can hold a token. Bedrock puts it in a Secret, but the
 Setting stays readable for everyone who can read Settings. Do not put
 secrets in the Setting when other people can read it.
 
+### Legacy Alertmanager routing
+
+The default `alertmanager.routing-profile` value is `bedrock`. Select
+`legacy` only when recovering Alertmanager state from the legacy routing
+rules. This profile uses the original `warning`, `critical`, `info`, and
+`heartbeat` receiver names and groups by `environment`, `alertname`, and
+`namespace`.
+
+Clear `alertmanager.webhook-url` before selecting `legacy`. Set
+`alertmanager.warning-webhook-url`, `alertmanager.critical-webhook-url`,
+`alertmanager.info-webhook-url`, and `alertmanager.heartbeat-url` to the
+approved destinations. Set `alertmanager.heartbeat-proxy-url` if the
+legacy Watchdog needs an HTTP or HTTPS proxy. The other receivers do not
+use this proxy. An incomplete or invalid legacy profile routes all alerts
+to `null` until its settings are valid. Fence notification egress until
+the restored silence and notification history checks pass.
+
 ## Metering
 
 Bedrock records ten series for each project. Each series has the labels
