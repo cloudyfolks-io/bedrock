@@ -27,6 +27,7 @@ import stat
 import subprocess
 import sys
 import time
+from traceback import walk_tb
 
 namespace = "bedrock-e2e-sqlite-source"
 source_name = "sqlite-source"
@@ -393,13 +394,23 @@ def main(guest, source_path, assets_path, prejoin_path, prejoin_sha):
                       "k0s_sha256": assets["k0s_sha256"], "workload_image_digest": assets["busybox_digest"], "workload_data_sha256": digest(marker)}, indent=2))
 
 
+def report_checkpoint(error):
+    checkpoints = [(frame.f_code.co_name, line) for frame, line in walk_tb(error.__traceback__)
+                   if frame.f_code.co_filename == "<stdin>" and frame.f_code.co_name not in ("<module>", "require")]
+    if checkpoints:
+        name, line = checkpoints[-1]
+        print(f"SQLite worker check stopped in {name} at line {line}.", file=sys.stderr)
+
+
 try:
     main(*sys.argv[1:])
 except ValueError as error:
+    report_checkpoint(error)
     allowed = {failure, "The existing SQLite worker Node did not become Ready.", "The original SQLite worker Lease did not appear.",
                "The exact SQLite worker workload did not become Ready.", "The original SQLite worker token was not revoked.",
                "The SQLite worker Lease disappeared.", "The existing SQLite worker Lease did not renew after token revocation."}
     sys.exit(str(error) if str(error) in allowed else failure)
-except (OSError, EOFError, subprocess.SubprocessError, AttributeError, IndexError, KeyError, TypeError, RecursionError):
+except (OSError, EOFError, subprocess.SubprocessError, AttributeError, IndexError, KeyError, TypeError, RecursionError) as error:
+    report_checkpoint(error)
     sys.exit(failure)
 PY

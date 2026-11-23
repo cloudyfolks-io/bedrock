@@ -40,6 +40,7 @@ import subprocess
 import sys
 import tempfile
 import time
+from traceback import walk_tb
 
 namespace = "bedrock-e2e-etcd-source"
 cluster = "etcd-source"
@@ -762,15 +763,25 @@ def main(entry, guest, source_path, source_sha, original_path, original_sha, pro
         raise
 
 
+def report_checkpoint(error):
+    checkpoints = [(frame.f_code.co_name, line) for frame, line in walk_tb(error.__traceback__)
+                   if frame.f_code.co_filename == "<stdin>" and frame.f_code.co_name not in ("<module>", "require")]
+    if checkpoints:
+        name, line = checkpoints[-1]
+        print(f"etcd recovery check stopped in {name} at line {line}.", file=sys.stderr)
+
+
 try:
     main(*sys.argv[1:])
 except ValueError as error:
+    report_checkpoint(error)
     accepted = {"The approved isolated etcd recovery state could not be verified.",
                 "Preload the digest alias of the original etcd image on the development guest.",
                 "The isolated native etcd process terminated before verification.",
                 "The isolated native etcd member did not become ready within the time limit."}
     sys.exit(str(error) if str(error) in accepted else "The approved isolated etcd recovery state could not be verified.")
-except (OSError, subprocess.SubprocessError, AttributeError, KeyError, TypeError, RecursionError, KeyboardInterrupt):
+except (OSError, subprocess.SubprocessError, AttributeError, KeyError, TypeError, RecursionError, KeyboardInterrupt) as error:
+    report_checkpoint(error)
     sys.exit("The approved isolated etcd recovery state could not be verified.")
 PY
 }
