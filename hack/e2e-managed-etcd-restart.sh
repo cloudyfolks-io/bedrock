@@ -369,8 +369,8 @@ def verify_fences(frozen, source, image):
         for subresource in ((), ("--subresource=scale",)):
             denied(names["scale"], "-n", namespace, "patch", "statefulset", settings["statefulset"], *subresource,
                    "--type=merge", "--dry-run=server", "-p", '{"spec":{"replicas":1}}', "-o", "json")
-        denied(names["retained_disks"], "-n", namespace, "delete", "pvc", claim, "--dry-run=server", "--wait=false", "-o", "json")
-        denied(names["retained_disks"], "delete", "pv", volume, "--dry-run=server", "--wait=false", "-o", "json")
+        denied(names["retained_disks"], "-n", namespace, "delete", "pvc", claim, "--dry-run=server", "--wait=false")
+        denied(names["retained_disks"], "delete", "pv", volume, "--dry-run=server", "--wait=false")
 
 
 def recovery_pod(image, claim, tree, execution_sha):
