@@ -7,6 +7,9 @@ import (
 	"testing"
 
 	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/meta"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	sigyaml "sigs.k8s.io/yaml"
 
@@ -72,6 +75,86 @@ receivers:
 	}
 	if len(receivers) != 4 {
 		t.Fatalf("got %d legacy receivers", len(receivers))
+	}
+}
+
+type applyWithRoutingChange struct {
+	client.Client
+	change func(context.Context) error
+}
+
+func (c applyWithRoutingChange) Apply(ctx context.Context, obj runtime.ApplyConfiguration, opts ...client.ApplyOption) error {
+	if err := c.Client.Apply(ctx, obj, opts...); err != nil {
+		return err
+	}
+	return c.change(ctx)
+}
+
+func TestAlertmanagerStatusDoesNotCertifyChangedRoutingSettings(t *testing.T) {
+	for _, name := range []string{infoSetting, routingProfileSetting} {
+		t.Run(name, func(t *testing.T) {
+			r, c := newObservability(t)
+			for name, value := range map[string]string{
+				routingProfileSetting: "legacy", warningSetting: "https://example.test/warning", criticalSetting: "https://example.test/critical",
+				infoSetting: "https://example.test/info", heartbeatSetting: "https://example.test/ping",
+			} {
+				setSetting(t, c, name, value)
+			}
+			ctx := context.Background()
+			var list v1alpha1.SettingList
+			if err := c.List(ctx, &list); err != nil {
+				t.Fatal(err)
+			}
+			previous := routingSettingsRevisions(list.Items)
+			r.Client = applyWithRoutingChange{Client: c, change: func(ctx context.Context) error {
+				var setting v1alpha1.Setting
+				if err := c.Get(ctx, client.ObjectKey{Name: name}, &setting); err != nil {
+					return err
+				}
+				if name == routingProfileSetting {
+					if err := c.Delete(ctx, &setting); err != nil {
+						return err
+					}
+					return c.Create(ctx, &v1alpha1.Setting{ObjectMeta: metav1.ObjectMeta{Name: name}, Spec: setting.Spec})
+				}
+				setting.Spec.Value = "https://example.test/changed"
+				return c.Update(ctx, &setting)
+			}}
+			err := r.applyAlertmanager(ctx, alertmanagerTargets(listedSettingValues(list.Items)), previous)
+			if err == nil || !strings.Contains(err.Error(), "settings changed during reconciliation") {
+				t.Fatalf("expected a reconciliation retry, got %v", err)
+			}
+			var profile v1alpha1.Setting
+			if err := c.Get(ctx, client.ObjectKey{Name: routingProfileSetting}, &profile); err != nil {
+				t.Fatal(err)
+			}
+			if meta.FindStatusCondition(profile.Status.Conditions, conditionWebhook) != nil {
+				t.Fatal("the stale settings received an Alertmanager condition")
+			}
+			r.Client = c
+			if err := runObservability(t, r); err != nil {
+				t.Fatal(err)
+			}
+			if err := c.List(ctx, &list); err != nil {
+				t.Fatal(err)
+			}
+			digest := routingInputsDigest(routingSettingsRevisions(list.Items))
+			if digest == routingInputsDigest(previous) {
+				t.Fatal("the input digest did not change")
+			}
+			var secret corev1.Secret
+			if err := c.Get(ctx, client.ObjectKey{Namespace: monitoringNamespace, Name: alertmanagerSecret}, &secret); err != nil {
+				t.Fatal(err)
+			}
+			if err := c.Get(ctx, client.ObjectKey{Name: routingProfileSetting}, &profile); err != nil {
+				t.Fatal(err)
+			}
+			condition := meta.FindStatusCondition(profile.Status.Conditions, conditionWebhook)
+			if condition == nil || condition.Status != metav1.ConditionTrue || condition.ObservedGeneration != profile.Generation ||
+				!strings.HasSuffix(condition.Message, digest) || secret.Annotations[alertmanagerInputsDigest] != digest {
+				t.Fatal("the Secret and condition do not certify the new snapshot")
+			}
+		})
 	}
 }
 

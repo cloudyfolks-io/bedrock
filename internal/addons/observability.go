@@ -2,9 +2,12 @@ package addons
 
 import (
 	"context"
+	"crypto/sha256"
 	"errors"
 	"fmt"
 	"io"
+	"maps"
+	"slices"
 
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -14,7 +17,6 @@ import (
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/handler"
-	"sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 	sigyaml "sigs.k8s.io/yaml"
 
@@ -26,20 +28,21 @@ import (
 )
 
 const (
-	monitoringNamespace   = "monitoring"
-	alertmanagerSecret    = "bedrock-alertmanager-config"
-	alertmanagerKey       = "alertmanager.yaml"
-	grafanaAdminSecret    = "bedrock-grafana-admin"
-	webhookSetting        = "alertmanager.webhook-url"
-	criticalSetting       = "alertmanager.critical-webhook-url"
-	warningSetting        = "alertmanager.warning-webhook-url"
-	heartbeatSetting      = "alertmanager.heartbeat-url"
-	infoSetting           = "alertmanager.info-webhook-url"
-	heartbeatProxySetting = "alertmanager.heartbeat-proxy-url"
-	routingProfileSetting = "alertmanager.routing-profile"
-	conditionWebhook      = "AlertmanagerWebhook"
-	passwordLength        = 24
-	passwordAlphabet      = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789"
+	monitoringNamespace      = "monitoring"
+	alertmanagerSecret       = "bedrock-alertmanager-config"
+	alertmanagerKey          = "alertmanager.yaml"
+	grafanaAdminSecret       = "bedrock-grafana-admin"
+	webhookSetting           = "alertmanager.webhook-url"
+	criticalSetting          = "alertmanager.critical-webhook-url"
+	warningSetting           = "alertmanager.warning-webhook-url"
+	heartbeatSetting         = "alertmanager.heartbeat-url"
+	infoSetting              = "alertmanager.info-webhook-url"
+	heartbeatProxySetting    = "alertmanager.heartbeat-proxy-url"
+	routingProfileSetting    = "alertmanager.routing-profile"
+	conditionWebhook         = "AlertmanagerWebhook"
+	alertmanagerInputsDigest = "bedrock.cloudyfolks.io/alertmanager-inputs-sha256"
+	passwordLength           = 24
+	passwordAlphabet         = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789"
 )
 
 var secretTypeMeta = metav1.TypeMeta{APIVersion: "v1", Kind: "Secret"}
@@ -182,20 +185,54 @@ func randomPassword(random io.Reader) (string, error) {
 
 type ObservabilityReconciler struct {
 	Client client.Client
+	Reader client.Reader
 	Random io.Reader
+}
+
+type routingSettingRevision struct {
+	UID        types.UID
+	Generation int64
+}
+
+func routingSettingsRevisions(items []v1alpha1.Setting) map[string]routingSettingRevision {
+	revisions := map[string]routingSettingRevision{}
+	for _, setting := range items {
+		switch setting.Name {
+		case routingProfileSetting, webhookSetting, criticalSetting, warningSetting, infoSetting, heartbeatSetting, heartbeatProxySetting:
+			revisions[setting.Name] = routingSettingRevision{UID: setting.UID, Generation: setting.Generation}
+		}
+	}
+	return revisions
+}
+
+func routingInputsDigest(revisions map[string]routingSettingRevision) string {
+	digest := sha256.New()
+	for _, name := range slices.Sorted(maps.Keys(revisions)) {
+		revision := revisions[name]
+		fmt.Fprintf(digest, "%s\t%s\t%d\n", name, revision.UID, revision.Generation)
+	}
+	return fmt.Sprintf("%x", digest.Sum(nil))
+}
+
+func (r *ObservabilityReconciler) settingReader() client.Reader {
+	if r.Reader != nil {
+		return r.Reader
+	}
+	return r.Client
 }
 
 func (r *ObservabilityReconciler) Reconcile(ctx context.Context, _ ctrl.Request) (ctrl.Result, error) {
 	if err := EnsureMonitoringNamespace(ctx, r.Client); err != nil {
 		return ctrl.Result{}, err
 	}
-	values, err := settingValues(ctx, r.Client)
-	if err != nil {
+	var list v1alpha1.SettingList
+	if err := r.settingReader().List(ctx, &list); err != nil {
 		return ctrl.Result{}, err
 	}
-	err = errors.Join(
+	values := listedSettingValues(list.Items)
+	err := errors.Join(
 		r.applyAudit(ctx, values["audit.level"]),
-		r.applyAlertmanager(ctx, alertmanagerTargets(values)),
+		r.applyAlertmanager(ctx, alertmanagerTargets(values), routingSettingsRevisions(list.Items)),
 		r.ensureGrafanaAdmin(ctx),
 	)
 	return ctrl.Result{RequeueAfter: DefaultReadyInterval}, err
@@ -235,36 +272,38 @@ func alertmanagerTargets(values map[string]string) AlertmanagerTargets {
 	return targets
 }
 
-func (r *ObservabilityReconciler) applyAlertmanager(ctx context.Context, targets AlertmanagerTargets) error {
+func (r *ObservabilityReconciler) applyAlertmanager(ctx context.Context, targets AlertmanagerTargets, revisions map[string]routingSettingRevision) error {
+	digest := routingInputsDigest(revisions)
 	if targets.RoutingProfile != "" && targets.RoutingProfile != "bedrock" {
 		secret, err := AlertmanagerSecret(targets)
 		if err == nil {
+			secret.Annotations = map[string]string{alertmanagerInputsDigest: digest}
 			if err := r.writeAlertmanagerConfig(ctx, secret); err != nil {
 				return err
 			}
-			r.reportWebhook(ctx, routingProfileSetting, metav1.ConditionTrue, "Applied", "the legacy routing profile is in the Alertmanager configuration")
-			return nil
+			return r.reportWebhook(ctx, revisions, routingProfileSetting, metav1.ConditionTrue, "Applied", "the legacy routing profile is in the Alertmanager configuration for input digest "+digest)
 		}
-		r.reportWebhook(ctx, routingProfileSetting, metav1.ConditionFalse, "InvalidRoutingProfile", err.Error())
-		closed, err := AlertmanagerSecret(AlertmanagerTargets{})
-		if err != nil {
-			return err
+		closed, closeErr := AlertmanagerSecret(AlertmanagerTargets{})
+		if closeErr != nil {
+			return closeErr
 		}
-		return r.writeAlertmanagerConfig(ctx, closed)
+		if closeErr := r.writeAlertmanagerConfig(ctx, closed); closeErr != nil {
+			return closeErr
+		}
+		return r.reportWebhook(ctx, revisions, routingProfileSetting, metav1.ConditionFalse, "InvalidRoutingProfile", err.Error())
 	}
 	if err := validWebhookURL(targets.Default); err != nil {
-		r.reportWebhook(ctx, webhookSetting, metav1.ConditionFalse, "InvalidURL", err.Error())
-		return r.ensureAlertmanagerConfig(ctx)
+		return errors.Join(r.ensureAlertmanagerConfig(ctx), r.reportWebhook(ctx, revisions, webhookSetting, metav1.ConditionFalse, "InvalidURL", err.Error()))
 	}
 	secret, err := AlertmanagerSecret(targets)
 	if err != nil {
 		return fmt.Errorf("alertmanager config: %w", err)
 	}
+	secret.Annotations = map[string]string{alertmanagerInputsDigest: digest}
 	if err := r.writeAlertmanagerConfig(ctx, secret); err != nil {
 		return err
 	}
-	r.reportWebhook(ctx, webhookSetting, metav1.ConditionTrue, "Applied", "the webhook is in the Alertmanager configuration")
-	return nil
+	return r.reportWebhook(ctx, revisions, webhookSetting, metav1.ConditionTrue, "Applied", "the webhook is in the Alertmanager configuration for input digest "+digest)
 }
 
 func (r *ObservabilityReconciler) ensureAlertmanagerConfig(ctx context.Context) error {
@@ -292,18 +331,30 @@ func validWebhookURL(webhookURL string) error {
 	return def.Validate(webhookURL)
 }
 
-func (r *ObservabilityReconciler) reportWebhook(ctx context.Context, settingName string, status metav1.ConditionStatus, reason, message string) {
-	err := retry.RetryOnConflict(retry.DefaultRetry, func() error {
-		var setting v1alpha1.Setting
-		if err := r.Client.Get(ctx, client.ObjectKey{Name: settingName}, &setting); err != nil {
-			return client.IgnoreNotFound(err)
+func (r *ObservabilityReconciler) reportWebhook(ctx context.Context, revisions map[string]routingSettingRevision, settingName string, status metav1.ConditionStatus, reason, message string) error {
+	return retry.RetryOnConflict(retry.DefaultRetry, func() error {
+		reader := r.settingReader()
+		var list v1alpha1.SettingList
+		if err := reader.List(ctx, &list); err != nil {
+			return err
 		}
-		v1alpha1.SetCondition(&setting.Status.Conditions, metav1.Condition{Type: conditionWebhook, Status: status, Reason: reason, Message: message, ObservedGeneration: setting.Generation})
+		if !maps.Equal(routingSettingsRevisions(list.Items), revisions) {
+			return errors.New("Alertmanager routing settings changed during reconciliation")
+		}
+		expected, ok := revisions[settingName]
+		if !ok {
+			return nil
+		}
+		var setting v1alpha1.Setting
+		if err := reader.Get(ctx, client.ObjectKey{Name: settingName}, &setting); err != nil {
+			return err
+		}
+		if setting.UID != expected.UID || setting.Generation != expected.Generation {
+			return errors.New("the Alertmanager routing status owner changed during reconciliation")
+		}
+		v1alpha1.SetCondition(&setting.Status.Conditions, metav1.Condition{Type: conditionWebhook, Status: status, Reason: reason, Message: message, ObservedGeneration: expected.Generation})
 		return r.Client.Status().Update(ctx, &setting, client.FieldOwner(v1alpha1.AddonsFieldManager))
 	})
-	if err != nil {
-		log.FromContext(ctx).Error(err, "write webhook condition")
-	}
 }
 
 func (r *ObservabilityReconciler) ensureGrafanaAdmin(ctx context.Context) error {
