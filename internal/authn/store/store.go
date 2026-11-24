@@ -40,22 +40,24 @@ var (
 type Clock func() time.Time
 
 type Config struct {
-	Client   client.Client
-	Reader   client.Reader
-	Random   io.Reader
-	Clock    Clock
-	Settings func(context.Context) (policy.Settings, error)
-	Keys     func(context.Context) ([]keys.Key, error)
+	Client      client.Client
+	Reader      client.Reader
+	Random      io.Reader
+	Clock       Clock
+	Settings    func(context.Context) (policy.Settings, error)
+	Keys        func(context.Context) ([]keys.Key, error)
+	AllowSAxess bool
 }
 
 type Store struct {
-	client   client.Client
-	reader   client.Reader
-	random   io.Reader
-	clock    Clock
-	settings func(context.Context) (policy.Settings, error)
-	keys     func(context.Context) ([]keys.Key, error)
-	created  createdRequests
+	client      client.Client
+	reader      client.Reader
+	random      io.Reader
+	clock       Clock
+	settings    func(context.Context) (policy.Settings, error)
+	keys        func(context.Context) ([]keys.Key, error)
+	allowSAxess bool
+	created     createdRequests
 }
 
 type createdRequests struct {
@@ -65,12 +67,13 @@ type createdRequests struct {
 
 func New(cfg Config) *Store {
 	return &Store{
-		client:   cfg.Client,
-		reader:   cfg.Reader,
-		random:   cfg.Random,
-		clock:    cfg.Clock,
-		settings: cfg.Settings,
-		keys:     cfg.Keys,
+		client:      cfg.Client,
+		reader:      cfg.Reader,
+		random:      cfg.Random,
+		clock:       cfg.Clock,
+		settings:    cfg.Settings,
+		keys:        cfg.Keys,
+		allowSAxess: cfg.AllowSAxess,
 		created: createdRequests{
 			auth:   methods.NewRateLimiter(liveAuthRequests, authRequestLifetime),
 			device: methods.NewRateLimiter(liveDeviceRequests, deviceLifetime),

@@ -9,9 +9,10 @@ import type { ScreenProps } from "../screens";
 export function Username({ challenge, onChallenge }: ScreenProps) {
   const { t } = useLingui();
   const [username, setUsername] = useState("");
-  const { error, submit } = useAnswer(onChallenge);
+  const { error: answerError, submit } = useAnswer(onChallenge);
+  const error = answerError ?? challenge.error?.code;
   const fieldRef = useFocusFirstField();
-  const errorRef = useFocusOnError(error !== null);
+  const errorRef = useFocusOnError(Boolean(error));
 
   return (
     <Card title={t({ id: "login.username.title", message: "Sign in" })}>
@@ -38,6 +39,18 @@ export function Username({ challenge, onChallenge }: ScreenProps) {
         <Button variant="primary" type="submit">
           {t({ id: "login.username.continue", message: "Continue" })}
         </Button>
+        {challenge.saxess ? (
+          <Button
+            variant="secondary"
+            type="button"
+            disabled={!username.trim()}
+            onClick={() => {
+              submit(api.answer({ type: "saxess-start", username }, challenge.csrf ?? ""));
+            }}
+          >
+            {t({ id: "login.saxess.start", message: "Sign in with sAxess Pro" })}
+          </Button>
+        ) : null}
       </form>
       {(challenge.providers ?? []).map((provider) => (
         <Button

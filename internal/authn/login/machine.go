@@ -24,6 +24,7 @@ type Facts struct {
 	Providers     []v1alpha1.IdentityProvider
 	LDAPProviders []string
 	Device        *v1alpha1.DeviceRequest
+	SAxess        bool
 }
 
 type Step struct {
@@ -36,7 +37,7 @@ type Step struct {
 func Start(facts Facts) Step {
 	return Step{
 		State:     v1alpha1.LoginState{Step: methods.ChallengeUsername},
-		Challenge: methods.Challenge{Type: methods.ChallengeUsername, Providers: providerChoices(facts.Providers)},
+		Challenge: methods.Challenge{Type: methods.ChallengeUsername, Providers: providerChoices(facts.Providers), SAxess: facts.SAxess},
 	}
 }
 

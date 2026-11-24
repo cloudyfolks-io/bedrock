@@ -16,6 +16,24 @@ msgstr "Username"
 msgid "login.username.continue"
 msgstr "Continue"
 
+msgid "login.saxess.start"
+msgstr "Sign in with sAxess Pro"
+
+msgid "login.saxess.title"
+msgstr "Approve sign-in with sAxess Pro"
+
+msgid "login.saxess.instructions"
+msgstr "Open the sAxess Pro app and approve this sign-in. Then return here and select Check approval."
+
+msgid "login.saxess.pending"
+msgstr "No approval found. You can check again after approving the request."
+
+msgid "login.saxess.check"
+msgstr "Check approval"
+
+msgid "login.saxess.restart"
+msgstr "If the request expired or was denied, return to the app where you started sign-in and try again."
+
 msgid "login.password.title"
 msgstr "Enter your password"
 

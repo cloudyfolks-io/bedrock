@@ -219,6 +219,36 @@ groups do: only `groupMapping` can turn an upstream group into a
 Bedrock group. An upstream group missing from `groupMapping` grants no
 Bedrock membership, for LDAP and for OIDC alike.
 
+## Experimental sAxess Pro sign-in
+
+sAxess Pro can approve browser sign-in for existing Bedrock administrators.
+It does not grant admin rights, replace Bedrock MFA, or enable CLI sign-in.
+The server and login UI leave it off by default. Standard sAxess is not
+supported by this feature.
+
+For an isolated lab, seed a dedicated Secret in `bedrock-system` with the
+key `state.json` set to `{}`. Do not overwrite that key after seeding.
+Give `bedrock-authn` `get` and `update` on that named Secret only. Pass
+`--experimental-saxess-state-secret NAME` to `bedrock authn serve`.
+
+Use `bedrock authn saxess invite USER --state-secret NAME` to create a
+short-lived credential and a separate signing payload. Treat both as
+sensitive. A device stays pending after mobile registration. Verify the
+card address with the operator before approving it with:
+
+```sh
+bedrock authn saxess approve-device USER --state-secret NAME --device-id ID --public-key KEY
+```
+
+To remove a lost or pending device, use `bedrock authn saxess revoke-device
+USER --state-secret NAME --device-id ID`. If a registration response was lost,
+revoke the pending device and issue a new invite. Treat a state Secret
+restored from backup as invalid for authentication: clear old credentials,
+invites, and approvals before accepting traffic.
+
+Do not enable this feature for real administrators until enrollment and
+approval pass end-to-end with the intended mobile release and a real card.
+
 ## Network exposure
 
 The `bedrock-authn` pods carry a `NetworkPolicy`. This policy allows

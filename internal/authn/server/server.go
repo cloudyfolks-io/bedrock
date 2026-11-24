@@ -36,6 +36,7 @@ import (
 	"github.com/cloudyfolks-io/bedrock/internal/authn/store"
 	"github.com/cloudyfolks-io/bedrock/internal/authn/webhook"
 	"github.com/cloudyfolks-io/bedrock/internal/release"
+	"github.com/cloudyfolks-io/bedrock/internal/saxess"
 )
 
 const (
@@ -81,6 +82,7 @@ type Config struct {
 	Clock         func() time.Time
 	UI            fs.FS
 	WebhookSecret func(context.Context) (string, error)
+	SAxess        *saxess.Backend
 }
 
 type keyCache struct {
@@ -118,15 +120,20 @@ func New(ctx context.Context, cfg Config) (http.Handler, error) {
 	}
 	settings := func(ctx context.Context) (policy.Settings, error) { return policy.ReadSettings(ctx, direct) }
 	host := hostOf(settings)
+	saxessLogin, err := saxessLoginConfig(ctx, cfg.SAxess, host)
+	if err != nil {
+		return nil, err
+	}
 	limiter := methods.NewRateLimiter(attemptsPerMinute, time.Minute)
 	starts := methods.NewRateLimiter(startsPerMinute, time.Minute)
 	st := store.New(store.Config{
-		Client:   direct,
-		Reader:   direct,
-		Random:   cfg.Random,
-		Clock:    cfg.Clock,
-		Settings: settings,
-		Keys:     (&keyCache{reader: direct, clock: cfg.Clock}).load,
+		Client:      direct,
+		Reader:      direct,
+		Random:      cfg.Random,
+		Clock:       cfg.Clock,
+		Settings:    settings,
+		Keys:        (&keyCache{reader: direct, clock: cfg.Clock}).load,
+		AllowSAxess: saxessLogin != nil,
 	})
 	registry := methods.NewRegistry(
 		methods.NewPassword(direct, cfg.Random, settings),
@@ -156,6 +163,7 @@ func New(ctx context.Context, cfg Config) (http.Handler, error) {
 		Lookups:  methods.NewRateLimiter(lookupsPerMinute, time.Minute),
 		Callback: op.AuthCallbackURL(provider),
 		LDAPDial: methods.DialLDAP,
+		SAxess:   saxessLogin,
 	}))))
 	accountHandler := refuseCrossSite(withIssuer(credentials.middleware(isAccountCredentialCheck, account.Handler(account.Deps{
 		Store:    st,
@@ -167,6 +175,7 @@ func New(ctx context.Context, cfg Config) (http.Handler, error) {
 		Limiter:  limiter,
 	}))))
 	mux := http.NewServeMux()
+	mountSAxessMobile(mux, cfg.SAxess, cfg.Clock)
 	mux.Handle(pathLogin, loginHandler)
 	mux.Handle(pathAccount, accountHandler)
 	mux.Handle(pathAccount+"/", accountHandler)
@@ -175,7 +184,7 @@ func New(ctx context.Context, cfg Config) (http.Handler, error) {
 	mux.Handle(uiPrefix, UIHandler(cfg.UI))
 	mux.HandleFunc("GET "+pathHealthz, healthz)
 	mux.Handle("GET "+pathReadyz, readyz(st))
-	mux.Handle(pathAuthorizeDone, sessionBound(direct, provider))
+	mux.Handle(pathAuthorizeDone, sessionBound(direct, saxessLogin != nil, provider))
 	mux.Handle(pathToken, withIssuer(tokenHandler(provider)))
 	mux.Handle(pathAuthorize, limitByClientIP(starts, cfg.Clock, provider))
 	mux.Handle(pathDevice, limitByClientIP(starts, cfg.Clock, provider))
@@ -206,7 +215,7 @@ func ClusterHandler(reader client.Reader, host func(context.Context) (string, er
 	})
 }
 
-func sessionBound(reader client.Reader, next http.Handler) http.Handler {
+func sessionBound(reader client.Reader, allowSAxess bool, next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		id, err := op.ParseAuthorizeCallbackRequest(r)
 		if err != nil {
@@ -224,6 +233,10 @@ func sessionBound(reader client.Reader, next http.Handler) http.Handler {
 		case !sessionMatches(request.Status.Session, r):
 			httpjson.WriteError(w, http.StatusUnauthorized, "no_session")
 		default:
+			if err := store.CheckAuthRequestSubject(r.Context(), reader, request, allowSAxess); err != nil {
+				httpjson.WriteError(w, http.StatusUnauthorized, "no_session")
+				return
+			}
 			next.ServeHTTP(w, r)
 		}
 	})

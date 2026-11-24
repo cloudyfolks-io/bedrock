@@ -30,6 +30,7 @@ import (
 	"github.com/cloudyfolks-io/bedrock/internal/authn/server"
 	"github.com/cloudyfolks-io/bedrock/internal/operator"
 	"github.com/cloudyfolks-io/bedrock/internal/release"
+	"github.com/cloudyfolks-io/bedrock/internal/saxess"
 )
 
 const (
@@ -48,17 +49,19 @@ type AuthnDeps struct {
 }
 
 type serveOptions struct {
-	listen  string
-	tlsCert string
-	tlsKey  string
-	uiDir   string
+	listen            string
+	tlsCert           string
+	tlsKey            string
+	uiDir             string
+	saxessStateSecret string
 }
 
 func authnCommand(args []string, stdout, stderr io.Writer) int {
 	if len(args) == 0 {
-		fmt.Fprintln(stderr, "usage: bedrock authn serve [--listen :8443] [--tls-cert /tls/tls.crt] [--tls-key /tls/tls.key] [--ui-dir <dir>]")
+		fmt.Fprintln(stderr, "usage: bedrock authn serve [--listen :8443] [--tls-cert /tls/tls.crt] [--tls-key /tls/tls.key] [--ui-dir <dir>] [--experimental-saxess-state-secret NAME]")
 		fmt.Fprintln(stderr, resetPasswordUsage)
 		fmt.Fprintln(stderr, createAdminUsage)
+		fmt.Fprintln(stderr, saxessUsage)
 		return 2
 	}
 	switch args[0] {
@@ -69,6 +72,8 @@ func authnCommand(args []string, stdout, stderr io.Writer) int {
 		return RunResetPassword(context.Background(), args[1:], newClusterClient, rand.Reader, stdout, stderr)
 	case "create-admin":
 		return RunCreateAdmin(context.Background(), args[1:], newClusterClient, rand.Reader, stdout, stderr)
+	case "saxess":
+		return runSAxess(context.Background(), args[1:], newClusterClient, stdout, stderr)
 	}
 	fmt.Fprintf(stderr, "unknown authn command: %s\n", args[0])
 	return 2
@@ -100,12 +105,17 @@ func RunAuthnServe(ctx context.Context, args []string, deps AuthnDeps, stdout, s
 	if err != nil {
 		return fail(stderr, err)
 	}
+	var saxessBackend *saxess.Backend
+	if options.saxessStateSecret != "" {
+		saxessBackend = newSAxessBackend(c, options.saxessStateSecret)
+	}
 	handler, err := server.New(ctx, server.Config{
 		RestConfig:    tuned,
 		Random:        rand.Reader,
 		Clock:         time.Now,
 		UI:            ui,
 		WebhookSecret: webhookToken(c),
+		SAxess:        saxessBackend,
 	})
 	if err != nil {
 		return fail(stderr, err)
@@ -127,6 +137,7 @@ func parseServeFlags(args []string, stderr io.Writer) (serveOptions, error) {
 	tlsCert := flags.String("tls-cert", "/tls/tls.crt", "TLS certificate file")
 	tlsKey := flags.String("tls-key", "/tls/tls.key", "TLS private key file")
 	uiDir := flags.String("ui-dir", "", "directory of a built login UI to serve instead of the embedded one")
+	stateSecret := flags.String("experimental-saxess-state-secret", "", "enable sAxess with a pre-provisioned state Secret in bedrock-system")
 	if err := flags.Parse(args); err != nil {
 		return serveOptions{}, err
 	}
@@ -135,7 +146,18 @@ func parseServeFlags(args []string, stderr io.Writer) (serveOptions, error) {
 		fmt.Fprintln(stderr, err)
 		return serveOptions{}, err
 	}
-	return serveOptions{listen: *listen, tlsCert: *tlsCert, tlsKey: *tlsKey, uiDir: *uiDir}, nil
+	var invalidSecret bool
+	flags.Visit(func(f *flag.Flag) {
+		if f.Name == "experimental-saxess-state-secret" {
+			invalidSecret = !validSAxessSecretName(*stateSecret)
+		}
+	})
+	if invalidSecret {
+		err := errors.New("--experimental-saxess-state-secret must name a valid Kubernetes Secret")
+		fmt.Fprintln(stderr, err)
+		return serveOptions{}, err
+	}
+	return serveOptions{listen: *listen, tlsCert: *tlsCert, tlsKey: *tlsKey, uiDir: *uiDir, saxessStateSecret: *stateSecret}, nil
 }
 
 func serveTLS(ctx context.Context, listener net.Listener, handler http.Handler, certificate func(*tls.ClientHelloInfo) (*tls.Certificate, error), background <-chan error, stderr io.Writer) int {
