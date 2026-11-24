@@ -158,7 +158,7 @@ describe("authz", () => {
   });
 
   it("TestNoRetryTimerSurvivesUnmount", async () => {
-    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "queueMicrotask"] });
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
     const view = renderPanel(
       <Can check={create}>
         <span>can-create</span>
