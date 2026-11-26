@@ -68,7 +68,7 @@ spec:
     matchExpressions:
       - key: migration.cloudyfolks.io/purpose
         operator: NotIn
-        values: [etcd-member-recovery]
+        values: [etcd-member-recovery, etcd-native-restart]
   policyTypes: [Ingress]
   ingress:
     - from: [{podSelector: {}}]
