@@ -16,9 +16,16 @@ database_primary_pod() {
 }
 
 database_sql() {
-  local name=$1
+  local name=$1 pod
   shift
-  kubectl -n "$database_namespace" exec "$(database_primary_pod "$name")" -c postgres -- psql -X -q -A -t -h /controller/run -U postgres -d "${DATABASE_SQL_DB:-app}" -v ON_ERROR_STOP=1 "$@"
+  pod=$(database_primary_pod "$name") || return 1
+  database_postgres_exec "$pod" "$@"
+}
+
+database_postgres_exec() {
+  local pod=$1
+  shift
+  kubectl -n "$database_namespace" exec "$pod" -c postgres -- psql -X -q -A -t -h /controller/run -U postgres -d "${DATABASE_SQL_DB:-app}" -v ON_ERROR_STOP=1 "$@"
 }
 
 database_manifest() {
@@ -218,19 +225,54 @@ database_restore_manifest() {
 RESTORE
 }
 
+database_postgres_wal_archived() {
+  local name=$1 wal=$2 archived
+  archived=$(database_sql "$name" -c "select last_archived_wal = '$wal'
+    or (pg_stat_file('pg_wal/archive_status/$wal.done', true)).modification is not null
+    from pg_stat_archiver") || return 1
+  [ "$archived" = t ]
+}
+
+database_postgres_switch_and_wait() {
+  local name=$1 wal LC_ALL=C
+  # PostgreSQL 17 returns an end+1 LSN. Map its last byte, not a following
+  # segment when the LSN lands exactly on a boundary.
+  wal=$(database_sql "$name" -c "select pg_walfile_name(pg_switch_wal() - 1::numeric)") || return 1
+  if ! [[ "$wal" =~ ^[0-9A-F]{24}$ ]]; then
+    echo "Expected one uppercase 24-hex WAL filename for $name" >&2
+    return 1
+  fi
+  retry_until 300 database_postgres_wal_archived "$name" "$wal" || {
+    echo "WAL $wal did not archive for $name" >&2
+    return 1
+  }
+  printf '%s\n' "$wal"
+}
+
+database_postgres_seed_backup() {
+  local source=$1
+  # A separate psql invocation commits each insert before switching WAL.
+  database_sql "$source" -c "create table if not exists proof (v text); insert into proof values ('before')" >/dev/null || return 1
+  database_postgres_switch_and_wait "$source"
+}
+
 database_backup_restore() {
-  local uid target
+  local uid target wal
   uid=$(database_uid orders)
-  database_sql orders -c "create table if not exists proof (v text); insert into proof values ('before')" >/dev/null
+  wal=$(database_postgres_seed_backup orders) || return 1
+  database_backup_checkpoint postgres-base-wal-archived "{\"wal\":\"$wal\"}"
   database_backup_manifest e2e-first | kubectl apply -f -
   wait_jsonpath 900 completed -n "$database_namespace" get backups.postgresql.cnpg.io e2e-first -o jsonpath='{.status.phase}'
   wait_not_empty 600 get database orders -n "$NS" -o jsonpath='{.status.backup.lastAt}'
-  database_sql orders -c "insert into proof values ('kept'); select pg_switch_wal()" >/dev/null
+  database_sql orders -c "insert into proof values ('kept')" >/dev/null || return 1
+  wal=$(database_postgres_switch_and_wait orders) || return 1
+  database_backup_checkpoint postgres-pitr-kept-wal-archived "{\"wal\":\"$wal\"}"
   sleep 15
   target=$(database_sql orders -c "select to_char(now() at time zone 'utc', 'YYYY-MM-DD\"T\"HH24:MI:SS\"Z\"')")
   sleep 5
-  database_sql orders -c "insert into proof values ('after'); select pg_switch_wal()" >/dev/null
-  sleep 20
+  database_sql orders -c "insert into proof values ('after')" >/dev/null || return 1
+  wal=$(database_postgres_switch_and_wait orders) || return 1
+  database_backup_checkpoint postgres-pitr-after-wal-archived "{\"wal\":\"$wal\"}"
   database_wait_backup_size
   {
     database_manifest orders-restored "$(database_restore_manifest "$uid" "$target")"
@@ -358,7 +400,12 @@ database_engine_pod() {
 
 database_mysql_query() {
   local uid=$1 pod
-  pod=$(database_engine_pod "$uid" "app.kubernetes.io/instance=db-$uid,mysql.percona.com/primary=true")
+  pod=$(database_engine_pod "$uid" "app.kubernetes.io/instance=db-$uid,mysql.percona.com/primary=true") || return 1
+  database_mysql_exec "$pod"
+}
+
+database_mysql_exec() {
+  local pod=$1
   kubectl -n bedrock-dbaas exec -i "$pod" -c mysql -- sh -c 'MYSQL_PWD="$(cat /etc/mysql/mysql-users-secret/root)" exec mysql --no-defaults --socket=/var/lib/mysql/mysql.sock -uroot --batch --raw --skip-column-names'
 }
 
@@ -502,20 +549,44 @@ database_valkey_user_set() {
   [ "$(database_valkey_cli "$1" --user cacheuser --pass "$2" SET orders:probe x)" = OK ]
 }
 
+database_mysql_backup_job() {
+  local uid=$1 backup=$2 backup_uid=$3
+  kubectl -n "$database_namespace" get jobs -o json |
+    jq -ec --arg backup "$backup" --arg backup_uid "$backup_uid" --arg cluster "db-$uid" '
+      [.items[] | select([.metadata.ownerReferences[]? | select(.controller == true)]
+        | length == 1 and (.[0] | .uid == $backup_uid and .name == $backup
+          and .kind == "PerconaServerMySQLBackup" and .apiVersion == "ps.percona.com/v1"))]
+      | select(length == 1) | .[0]
+      | select(.metadata.labels["bedrock.cloudyfolks.io/backup-of"] == $cluster
+          and .spec.template.metadata.labels["bedrock.cloudyfolks.io/backup-of"] == $cluster)
+      | select(.status.succeeded == 1
+          and any(.status.conditions[]?; .type == "Complete" and .status == "True"))
+      | {backup_uid: $backup_uid, job_name: .metadata.name, job_uid: .metadata.uid}
+    ' || {
+    echo "Expected one completed backup Job owned by $backup with backup-of=db-$uid on the Job and Pod template" >&2
+    return 1
+  }
+}
+
 database_mysql_backup_and_restore() {
-  local uid restored restored_uid
+  local uid backup backup_uid job_evidence restored restored_uid
   uid=$(database_uid sqldb)
+  backup="db-$uid-e2e"
   database_mysql_query "$uid" <<<"CREATE TABLE app.proof (v int PRIMARY KEY); INSERT INTO app.proof VALUES (42);"
-  kubectl -n bedrock-dbaas apply -f - <<BACKUP
+  backup_uid=$(kubectl -n "$database_namespace" apply -f - -o jsonpath='{.metadata.uid}' <<BACKUP
 apiVersion: ps.percona.com/v1
 kind: PerconaServerMySQLBackup
 metadata:
-  name: db-$uid-e2e
+  name: $backup
 spec:
   clusterName: db-$uid
   storageName: rgw
 BACKUP
-  wait_jsonpath 900 Succeeded -n bedrock-dbaas get perconaservermysqlbackup "db-$uid-e2e" -o jsonpath='{.status.state}'
+  ) || return 1
+  test -n "$backup_uid" || return 1
+  wait_jsonpath 900 Succeeded -n "$database_namespace" get perconaservermysqlbackup "$backup" -o jsonpath='{.status.state}' || return 1
+  job_evidence=$(database_mysql_backup_job "$uid" "$backup" "$backup_uid") || return 1
+  database_backup_checkpoint mysql-backup-job-succeeded "$job_evidence"
   database_apply sqlrestore mysql 8.4 true 5 "  restore:
     sourceUID: $uid"
   database_wait_ready sqlrestore
