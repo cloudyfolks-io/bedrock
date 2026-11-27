@@ -316,7 +316,7 @@ def verify_frozen_source(source, frozen, stored):
     metadata(backend, source["etcd"]["service"]["uid"])
     source_owner(backend, source["cluster_uid"])
     original, = [item for item in stored["services"]["items"] if item["metadata"]["uid"] == source["etcd"]["service"]["uid"]]
-    require(backend["spec"] == original["spec"] and not any(item["endpoints"] for item in endpoint_slices(member_service)))
+    require(backend["spec"] == original["spec"] and no_endpoints(member_service))
     for role, suffix in (("pods", "pods"), ("scale", "scale"), ("retained_disks", "disks")):
         name = "bedrock-e2e-etcd-freeze-" + suffix
         policy = kc("get", "validatingadmissionpolicy", name, "-o", "json")
@@ -374,8 +374,20 @@ def verify_disk_users(source, claim_proof, member, controller_uid):
 
 def endpoint_slices(service):
     result = ns("get", "endpointslices.discovery.k8s.io", "-l", "kubernetes.io/service-name=" + service, "-o", "json")
-    require(not result["metadata"].get("continue"))
+    require(not result["metadata"].get("continue") and not result["metadata"].get("remainingItemCount") and
+            isinstance(result["items"], list))
     return result["items"]
+
+
+def slice_endpoints(item):
+    require(isinstance(item, dict) and "endpoints" in item)
+    records = item["endpoints"]
+    require(records is None or isinstance(records, list))
+    return [] if records is None else records
+
+
+def no_endpoints(service):
+    return not any([slice_endpoints(item) for item in endpoint_slices(service)])
 
 
 def service_state(source, selector):
@@ -404,19 +416,27 @@ def route(source, old_selector, new_selector):
 
 
 def route_ready(source, pod_uid, address):
-    slices = endpoint_slices(api_name)
-    require(all(item["addressType"] == "IPv4" and not item["metadata"].get("deletionTimestamp") and
+    endpoints = []
+    for item in endpoint_slices(api_name):
+        records = slice_endpoints(item)
+        require(item["addressType"] == "IPv4" and not item["metadata"].get("deletionTimestamp") and
                 any(ref["kind"] == "Service" and ref["name"] == api_name and ref["uid"] == source["api_service"]["uid"]
-                    for ref in item["metadata"]["ownerReferences"]) and
-                (not item["endpoints"] or sorted((port["name"], port["port"], port["protocol"]) for port in item["ports"]) ==
-                 [("api", 6443, "TCP"), ("konnectivity", 8132, "TCP")]) for item in slices))
-    endpoints = [entry for item in slices for entry in item["endpoints"]]
+                    for ref in item["metadata"]["ownerReferences"]))
+        if records:
+            require(sorted((port["name"], port["port"], port["protocol"]) for port in item["ports"]) ==
+                    [("api", 6443, "TCP"), ("konnectivity", 8132, "TCP")])
+            endpoints.extend(records)
     if not endpoints:
         return False
+    require(len(endpoints) == 1)
     entry, = endpoints
-    require(entry["addresses"] == [address] and all(entry["targetRef"][key] == value for key, value in
+    require(isinstance(entry, dict) and isinstance(entry.get("targetRef"), dict) and
+            entry["addresses"] == [address] and all(entry["targetRef"].get(key) == value for key, value in
             (("kind", "Pod"), ("name", target), ("namespace", namespace), ("uid", pod_uid))))
-    return entry["conditions"].get("ready") is True and not entry["conditions"].get("terminating")
+    conditions = entry["conditions"]
+    require(isinstance(conditions, dict) and all(conditions.get(key) is None or type(conditions[key]) is bool
+                                               for key in ("ready", "serving", "terminating")))
+    return conditions.get("ready") is True and conditions.get("terminating") is not True
 
 
 def controller_stacks(stored, source):
@@ -476,18 +496,31 @@ def controller_pod(stored, source, claim, member, member_ip, image, projections,
               "args": ['for file; do test -f "/data/pki/$file" && test ! -L "/data/pki/$file" && cmp -s "/data/pki/$file" "/signers/$file" || exit 1; done',
                        "verify-signers", *files],
               "volumeMounts": [data_mount, cert_mount], "securityContext": {"allowPrivilegeEscalation": False}}
+    # The pinned etcd image defaults to UID 1001; only this probe needs a UID override.
+    tls_files = {"etcd-ca.crt", "apiserver-etcd-client.crt", "apiserver-etcd-client.key"}
+    tls_sources = []
+    for entry in projections:
+        secret = entry["secret"]
+        items = [item for item in secret["items"] if item["path"] in tls_files]
+        if items:
+            tls_sources.append({"secret": {**secret, "items": items}})
+    require({item["path"] for entry in tls_sources for item in entry["secret"]["items"]} == tls_files)
     probe = {"name": "verify-member-tls", "image": member["image"], "imagePullPolicy": "Never",
              "command": ["/bin/bash", "-ec"],
              "args": ['exec -c etcdctl "$@"', "etcdctl", "--endpoints=" + etcd_endpoint, "--cacert=/signers/etcd-ca.crt",
                          "--cert=/signers/apiserver-etcd-client.crt", "--key=/signers/apiserver-etcd-client.key",
                          "--insecure-transport=false", "--insecure-skip-tls-verify=false", "--dial-timeout=5s", "--command-timeout=15s",
-                         "endpoint", "health"], "volumeMounts": [cert_mount], "securityContext": {"allowPrivilegeEscalation": False}}
+                         "endpoint", "health"], "volumeMounts": [{**cert_mount, "name": "member-tls"}],
+             "securityContext": {"runAsUser": 0, "runAsGroup": 0, "runAsNonRoot": False, "allowPrivilegeEscalation": False,
+                                 "readOnlyRootFilesystem": True, "capabilities": {"drop": ["ALL"]}}}
     source_spec = original["spec"]["template"]["spec"]
     pod = {"schedulingGates": gate, "restartPolicy": "Never", "automountServiceAccountToken": False, "enableServiceLinks": False,
            "hostname": source["controller"]["pod"], "hostAliases": [{"ip": member_ip, "hostnames": [member_service, member_host]}],
            "terminationGracePeriodSeconds": source_spec.get("terminationGracePeriodSeconds", 30),
            "volumes": [{"name": original_mount["name"], "persistentVolumeClaim": {"claimName": claim}},
-                       {"name": "certs", "projected": {"defaultMode": 0o400, "sources": projections}}, *(stack["volume"] for stack in stacks)],
+                       {"name": "certs", "projected": {"defaultMode": 0o400, "sources": projections}},
+                       {"name": "member-tls", "projected": {"defaultMode": 0o400, "sources": tls_sources}},
+                       *(stack["volume"] for stack in stacks)],
            "initContainers": [signer, probe], "containers": [controller]}
     if "securityContext" in source_spec:
         pod["securityContext"] = source_spec["securityContext"]
@@ -688,7 +721,7 @@ def main(guest, source_path, source_sha, proof_dir, api_dir, api_sha, claim_path
     require(not current_config["metadata"].get("deletionTimestamp") and base64.b64decode(current_config["data"]["value"], validate=True) == kubeconfig)
     original_selector = {"statefulset.kubernetes.io/pod-name": source["controller"]["pod"]}
     service_state(source, original_selector)
-    require(not any(item["endpoints"] for item in endpoint_slices(api_name)))
+    require(no_endpoints(api_name))
     verify_frozen_source(source, frozen, stored)
     member_ip = verified_member(member, source, "")
     member_image = pinned_image(member["image"], "quay.io/k0sproject/etcd")
@@ -750,7 +783,7 @@ def main(guest, source_path, source_sha, proof_dir, api_dir, api_sha, claim_path
                 if get("service", api_name)["spec"]["selector"] != original_selector:
                     route(source, label, original_selector)
                 service_state(source, original_selector)
-                wait_for(lambda: not any(item["endpoints"] for item in endpoint_slices(api_name)))
+                wait_for(lambda: no_endpoints(api_name))
             except (OSError, subprocess.SubprocessError, KeyError, ValueError):
                 print("Could not confirm that the isolated API Service selector was restored.", file=sys.stderr)
         try:
