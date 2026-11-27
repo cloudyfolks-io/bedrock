@@ -85,7 +85,18 @@ describe("MetricChart", () => {
 
   it("hides the chart when metrics are forbidden", async () => {
     const { container } = render({ "GET /proxy/v1/metrics/range": { status: 403, body: { error: "forbidden" } } });
-    await waitFor(() => expect(container.querySelector(".br-chart")).toBeNull());
+    expect(await screen.findByText("You cannot view these metrics.")).toBeTruthy();
+    expect(container.querySelector(".br-chart")).toBeNull();
+  });
+
+  it("distinguishes an empty result from an unexpected API failure", async () => {
+    const view = render({ "GET /proxy/v1/metrics/range": { body: { ...matrix, data: { ...matrix.data, result: [] } } } });
+    expect(await screen.findByText("No samples in this time range.")).toBeTruthy();
+    expect(screen.queryByRole("img")).toBeNull();
+    view.unmount();
+    render({ "GET /proxy/v1/metrics/range": { status: 502 } });
+    expect(await screen.findByText("Metrics did not load.")).toBeTruthy();
+    expect(mocks.createChart).not.toHaveBeenCalled();
   });
 
   it("TestChartHasATextAlternative with minimum, maximum and last value", async () => {

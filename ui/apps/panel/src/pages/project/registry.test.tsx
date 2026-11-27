@@ -57,7 +57,7 @@ describe("Registries", () => {
     expect(within(row).getByText("2 GiB")).toBeTruthy();
     expect(within(row).getByText("3")).toBeTruthy();
     const taken = (await screen.findByRole("link", { name: "taken" })).closest("tr") as HTMLElement;
-    expect(within(taken).getByText("0 GiB")).toBeTruthy();
+    expect(within(taken).getByText("Unlimited")).toBeTruthy();
   });
 
   it("offers a create form with the project name", async () => {

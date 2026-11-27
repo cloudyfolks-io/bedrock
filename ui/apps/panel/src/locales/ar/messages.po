@@ -7,6 +7,87 @@ msgstr ""
 "X-Generator: @lingui/cli\n"
 "Language: ar\n"
 
+msgid "backups.restore.source.changed"
+msgstr "تغيرت النسخة الاحتياطية. أغلق هذه النافذة واختر النسخة الاحتياطية مجددًا."
+
+msgid "backups.restore.target.changed"
+msgstr "تغيّر الهدف. أكّد الاسم مجددًا لاستبدال الجهاز الحالي."
+
+msgid "wizard.volume.claimedByVm"
+msgstr "مذكور في إعدادات الجهاز الافتراضي {owner}"
+
+msgid "wizard.volumes.claimsError"
+msgstr "تعذّر التحقق من وحدات التخزين المشار إليها في إعدادات الأجهزة الافتراضية."
+
+msgid "list.resultCount"
+msgstr "النتائج المعروضة: {rowCount}"
+
+msgid "list.sortBy"
+msgstr "الفرز حسب"
+
+msgid "list.sortAscending"
+msgstr "فرز تصاعدي"
+
+msgid "list.sortDescending"
+msgstr "فرز تنازلي"
+
+msgid "metrics.denied"
+msgstr "ليس لديك إذن لعرض هذه المقاييس."
+
+msgid "metrics.failed"
+msgstr "تعذّر تحميل المقاييس."
+
+msgid "metrics.loading"
+msgstr "جارٍ تحميل المقاييس…"
+
+msgid "metrics.noSamples"
+msgstr "لا توجد عينات في هذه الفترة الزمنية."
+
+msgid "metrics.partial"
+msgstr "بعض سلاسل المقاييس غير متاحة."
+
+msgid "nav.scope.admin"
+msgstr "الإدارة"
+
+msgid "nav.scope.project"
+msgstr "موارد المشروع"
+
+msgid "overview.updatesPaused"
+msgstr "بعض التحديثات المباشرة متوقفة مؤقتًا."
+
+msgid "action.accepted"
+msgstr "تم قبول الطلب"
+
+msgid "credentials.copyFailed"
+msgstr "تعذّر نسخ بيانات الاعتماد"
+
+msgid "images.upload.transferred"
+msgstr "تم نقل الملف"
+
+msgid "images.upload.processing"
+msgstr "لا تزال المنصة بحاجة إلى معالجة الصورة."
+
+msgid "pendingWrites.action"
+msgstr "جارٍ إرسال الطلب"
+
+msgid "shell.userMenu.signingOut"
+msgstr "جارٍ تسجيل الخروج…"
+
+msgid "shell.userMenu.signOutFailed"
+msgstr "تعذّر تسجيل الخروج"
+
+msgid "pendingWrites.create"
+msgstr "جارٍ الإنشاء"
+
+msgid "pendingWrites.delete"
+msgstr "جارٍ الحذف"
+
+msgid "pendingWrites.global"
+msgstr "التغييرات قيد التنفيذ"
+
+msgid "pendingWrites.update"
+msgstr "جارٍ الحفظ"
+
 msgid "account.downloads.title"
 msgstr "التنزيلات"
 
@@ -698,6 +779,12 @@ msgstr "رفع"
 msgid "images.upload.title"
 msgstr "رفع {0}"
 
+msgid "inventory.rowsOnPage"
+msgstr "الصفوف في هذه الصفحة: {rowCount}"
+
+msgid "inventory.subtitle"
+msgstr "اعثر على الموارد عبر المشاريع والمستأجرين."
+
 msgid "list.actions.header"
 msgstr "الإجراءات"
 
@@ -897,6 +984,39 @@ msgstr "تتبع الشبكات المستأجر. تبقى الشبكات الف
 
 msgid "networks.forbidden.title"
 msgstr "لا يمكنك عرض الشبكات"
+
+msgid "overview.allHosts"
+msgstr "عرض جميع المضيفين"
+
+msgid "overview.hostList"
+msgstr "المضيفون في لمحة"
+
+msgid "overview.noHosts"
+msgstr "لا يوجد مضيفون مسجلون."
+
+msgid "overview.readiness"
+msgstr "جاهزية المضيفين"
+
+msgid "nav.item.inventory"
+msgstr "جرد الموارد"
+
+msgid "overview.readinessDescription"
+msgstr "حالة الجاهزية المبلّغ عنها للمضيفين المسجلين."
+
+msgid "overview.resourceSummary"
+msgstr "ملخص الموارد"
+
+msgid "overview.restricted"
+msgstr "الوصول مقيّد"
+
+msgid "overview.subtitle"
+msgstr "راقب مخزون العنقود وتعرّف على المضيفين الجاهزين."
+
+msgid "overview.title"
+msgstr "نظرة عامة على البنية التحتية"
+
+msgid "overview.unavailable"
+msgstr "البيانات غير متاحة"
 
 msgid "registry.showLogin"
 msgstr "عرض بيانات الدخول"
@@ -1500,3 +1620,636 @@ msgstr "بيانات مستخدم cloud-init"
 
 msgid "wizard.virtioWin"
 msgstr "إرفاق برامج تشغيل virtio-win"
+
+msgid "account.downloads.caDescription"
+msgstr "استخدم هذه الشهادة للوثوق باتصالات TLS مع عنقود يستخدم جهة تصديق خاصة."
+
+msgid "account.downloads.kubeconfigDescription"
+msgstr "اضبط kubectl للاتصال بعنقود بيدروك هذا."
+
+msgid "addons.addValues"
+msgstr "إضافة قيم مخصصة"
+
+msgid "addons.advancedValues"
+msgstr "قيم متقدمة (JSON)"
+
+msgid "addons.conflict"
+msgstr "تغيّرت قيم الإضافة أثناء تعديلها."
+
+msgid "addons.health"
+msgstr "الحالة التشغيلية"
+
+msgid "addons.noCustomValues"
+msgstr "لا توجد قيم مخصصة"
+
+msgid "addons.valuesLabel"
+msgstr "قيم {name}"
+
+msgid "backups.history.id"
+msgstr "معرّف النسخة الاحتياطية"
+
+msgid "backups.history.schedule"
+msgstr "جدول النسخ الاحتياطي"
+
+msgid "backups.history.title"
+msgstr "سجل النسخ الاحتياطية"
+
+msgid "backups.restore.target.checking"
+msgstr "جارٍ التحقق من وجود الجهاز الهدف…"
+
+msgid "backups.restore.target.error"
+msgstr "تعذّر التحقق من الجهاز الافتراضي الهدف."
+
+msgid "backups.restore.target.exists"
+msgstr "الجهاز الهدف موجود بالفعل. اختر الاستبدال للاستعادة مكانه."
+
+msgid "backups.restore.target.missing"
+msgstr "الجهاز الهدف غير موجود. ستنشئه عملية الاستعادة."
+
+msgid "backups.restore.target.overwrite"
+msgstr "ستستبدل عملية الاستعادة الجهاز الحالي."
+
+msgid "backups.restore.target.replaceMissing"
+msgstr "يتطلب الاستبدال جهازًا موجودًا. أوقف خيار الاستبدال لاستعادة هذا الجهاز."
+
+msgid "backups.restore.target.unknown"
+msgstr "تعذّر تحديد الجهاز الافتراضي الهدف."
+
+msgid "backups.schedules"
+msgstr "جداول النسخ الاحتياطي"
+
+msgid "col.destination"
+msgstr "الوجهة"
+
+msgid "console.noEndpoint"
+msgstr "لا تتوفر نقطة اتصال بوحدة التحكم"
+
+msgid "detail.advanced"
+msgstr "خيارات متقدمة"
+
+msgid "detail.copy.entry"
+msgstr "نسخ {name} {0}"
+
+msgid "detail.copy.failure"
+msgstr "تعذّر النسخ إلى الحافظة"
+
+msgid "detail.copy.field"
+msgstr "نسخ {name}"
+
+msgid "detail.copy.label"
+msgstr "نسخ"
+
+msgid "detail.copy.success"
+msgstr "تم النسخ إلى الحافظة"
+
+msgid "detail.field.addressPort"
+msgstr "العنوان والمنفذ"
+
+msgid "detail.field.appliedValue"
+msgstr "القيمة المطبّقة"
+
+msgid "detail.field.backupId"
+msgstr "معرّف النسخة الاحتياطية"
+
+msgid "detail.field.backupsEnabled"
+msgstr "النسخ الاحتياطي مفعّل"
+
+msgid "detail.field.finishedAt"
+msgstr "وقت الانتهاء"
+
+msgid "detail.field.instances"
+msgstr "المثيلات"
+
+msgid "detail.field.internalAddress"
+msgstr "العنوان الداخلي"
+
+msgid "detail.field.lastBackup"
+msgstr "آخر نسخة احتياطية"
+
+msgid "detail.field.objects"
+msgstr "الكائنات"
+
+msgid "detail.field.port"
+msgstr "المنفذ"
+
+msgid "detail.field.projectName"
+msgstr "اسم المشروع"
+
+msgid "detail.field.proxyAddress"
+msgstr "عنوان الخادم الوكيل"
+
+msgid "detail.field.publicKey"
+msgstr "المفتاح العام"
+
+msgid "detail.field.readyReplicas"
+msgstr "النسخ الجاهزة"
+
+msgid "detail.field.requestedValue"
+msgstr "القيمة المطلوبة"
+
+msgid "detail.field.resultImage"
+msgstr "الصورة الناتجة"
+
+msgid "detail.field.revision"
+msgstr "المراجعة"
+
+msgid "detail.summary.empty"
+msgstr "لا تتوفر تفاصيل بعد."
+
+msgid "detail.summary.title"
+msgstr "نظرة عامة"
+
+msgid "eip.attach.lb.empty"
+msgstr "لا يشير أي موازن حمل في هذا المشروع إلى عنوان IP المرن هذا. عيّن العنوان في حقل IP المرن أولًا."
+
+msgid "eip.attach.targets.error"
+msgstr "تعذّر تحميل الأهداف. تحقّق من صلاحياتك وحاول مجددًا."
+
+msgid "eip.attach.targets.loading"
+msgstr "جارٍ تحميل الأهداف…"
+
+msgid "eip.attach.unavailable"
+msgstr "لم يعد عنوان IP المرن هذا متاحًا للإرفاق."
+
+msgid "eip.attach.vm.empty"
+msgstr "لا تتوفر واجهات شبكة متوافقة للأجهزة الافتراضية."
+
+msgid "hostDetail.appliedEmpty"
+msgstr "لم يبلّغ المضيف عن أي خطوات إعداد."
+
+msgid "hostDetail.cpuEmpty"
+msgstr "لم يبلّغ المضيف عن بيانات المعالج أو الذاكرة."
+
+msgid "hostDetail.disksEmpty"
+msgstr "لم يبلّغ المضيف عن أي أقراص."
+
+msgid "hostDetail.firmwareEmpty"
+msgstr "لم يبلّغ المضيف عن بيانات البرنامج الثابت أو النظام."
+
+msgid "hostDetail.nicsEmpty"
+msgstr "لم يبلّغ المضيف عن أي واجهات شبكة."
+
+msgid "hostDetail.pciEmpty"
+msgstr "لم يبلّغ المضيف عن أي أجهزة PCI."
+
+msgid "inventory.allProjects"
+msgstr "كل المشاريع"
+
+msgid "inventory.clearProject"
+msgstr "إلغاء تصفية المشاريع"
+
+msgid "inventory.empty"
+msgstr "لا توجد موارد مطابقة"
+
+msgid "inventory.emptyPage"
+msgstr "لا توجد موارد مطابقة في هذه الصفحة"
+
+msgid "inventory.expired"
+msgstr "انتهت صلاحية هذه القائمة"
+
+msgid "inventory.first"
+msgstr "الانتقال إلى الصفحة الأولى"
+
+msgid "inventory.name"
+msgstr "اسم المورد كما هو"
+
+msgid "inventory.networkScope"
+msgstr "الشبكات على مستوى المستأجر"
+
+msgid "inventory.next"
+msgstr "التالي"
+
+msgid "inventory.noProject"
+msgstr "لا يوجد مشروع مرتبط"
+
+msgid "inventory.page"
+msgstr "الصفحة {pageNumber}"
+
+msgid "inventory.pages"
+msgstr "صفحات المخزون"
+
+msgid "inventory.previous"
+msgstr "السابق"
+
+msgid "inventory.projectPending"
+msgstr "مساحة أسماء المشروع غير جاهزة"
+
+msgid "inventory.projectUnavailable"
+msgstr "هذا المشروع غير متاح"
+
+msgid "inventory.refresh"
+msgstr "تحديث القائمة"
+
+msgid "inventory.resourceType"
+msgstr "نوع المورد"
+
+msgid "inventory.search"
+msgstr "بحث"
+
+msgid "inventory.tenant"
+msgstr "المستأجر"
+
+msgid "inventory.unknownType"
+msgstr "اختر نوع المورد"
+
+msgid "inventory.vmRestores"
+msgstr "عمليات استعادة الأجهزة الافتراضية"
+
+msgid "lb.elasticIp.empty"
+msgstr "لا تتوفر عناوين IP مرنة متوافقة. تحقّق من صلاحياتك أو احجز عنوانًا مرنًا في هذا المشروع."
+
+msgid "lb.elasticIp.help"
+msgstr "لإتاحة الواجهة الأمامية للعامة، اختر عنوان IP مرنًا هنا. ثم اختر «إرفاق» من خيارات العنوان."
+
+msgid "lb.elasticIp.internal"
+msgstr "داخلي فقط"
+
+msgid "networks.limit"
+msgstr "قائمة الشبكات كبيرة جدًا"
+
+msgid "query.error"
+msgstr "تعذّر تحميل هذه البيانات في اللوحة."
+
+msgid "registry.quota.unlimited"
+msgstr "بلا حد"
+
+msgid "settings.awaitingValidation"
+msgstr "بانتظار التحقق"
+
+msgid "settings.categories"
+msgstr "الفئات"
+
+msgid "settings.configured"
+msgstr "مضبوط"
+
+msgid "settings.conflict"
+msgstr "تغيّر هذا الإعداد أثناء تعديله."
+
+msgid "settings.currentValue"
+msgstr "القيمة الحالية"
+
+msgid "settings.description"
+msgstr "أدر إعدادات العنقود بالكامل واطّلع على القيم التي اجتازت التحقق."
+
+msgid "settings.details"
+msgstr "التفاصيل"
+
+msgid "settings.disabled"
+msgstr "معطّل"
+
+msgid "settings.editLabel"
+msgstr "تعديل {label}"
+
+msgid "settings.enabled"
+msgstr "مفعّل"
+
+msgid "settings.group.alertmanager"
+msgstr "التنبيهات"
+
+msgid "settings.group.audit"
+msgstr "تسجيل أحداث التدقيق"
+
+msgid "settings.group.authn"
+msgstr "تسجيل الدخول والجلسات"
+
+msgid "settings.group.backup"
+msgstr "النسخ الاحتياطية"
+
+msgid "settings.group.build"
+msgstr "عمليات البناء"
+
+msgid "settings.group.clusters"
+msgstr "عناقيد Kubernetes"
+
+msgid "settings.group.cnpg"
+msgstr "مشغّل PostgreSQL"
+
+msgid "settings.group.compute"
+msgstr "حدود موارد الحوسبة"
+
+msgid "settings.group.container"
+msgstr "الحاويات"
+
+msgid "settings.group.database"
+msgstr "قواعد البيانات المُدارة"
+
+msgid "settings.group.descheduler"
+msgstr "Descheduler"
+
+msgid "settings.group.dns"
+msgstr "DNS"
+
+msgid "settings.group.egress"
+msgstr "حركة المرور الصادرة"
+
+msgid "settings.group.images"
+msgstr "فهرس الصور"
+
+msgid "settings.group.kata"
+msgstr "بيئة تشغيل Kata"
+
+msgid "settings.group.letsencrypt"
+msgstr "Let's Encrypt"
+
+msgid "settings.group.loki"
+msgstr "جمع السجلات"
+
+msgid "settings.group.migration"
+msgstr "الترحيل المباشر"
+
+msgid "settings.group.network"
+msgstr "الشبكات"
+
+msgid "settings.group.objectstorage"
+msgstr "تخزين الكائنات"
+
+msgid "settings.group.overcommit"
+msgstr "الحجز الزائد للموارد"
+
+msgid "settings.group.perconaPs"
+msgstr "مشغّل MySQL"
+
+msgid "settings.group.platform"
+msgstr "الوصول إلى المنصة"
+
+msgid "settings.group.registry"
+msgstr "سجل الحاويات"
+
+msgid "settings.group.storage"
+msgstr "التخزين"
+
+msgid "settings.group.tenancy"
+msgstr "المستأجرون"
+
+msgid "settings.group.virt"
+msgstr "الافتراضية"
+
+msgid "settings.label.additionalCa"
+msgstr "شهادات موثوقة إضافية"
+
+msgid "settings.label.alertWebhook"
+msgstr "خطاف ويب للتنبيهات"
+
+msgid "settings.label.auditLevel"
+msgstr "مستوى تدقيق طلبات القراءة"
+
+msgid "settings.label.authnLockout"
+msgstr "حد محاولات الدخول قبل القفل"
+
+msgid "settings.label.authnRefreshTtl"
+msgstr "مدة صلاحية رمز التحديث"
+
+msgid "settings.label.authnSecondFactor"
+msgstr "اشتراط عامل مصادقة ثانٍ"
+
+msgid "settings.label.authnSessionTtl"
+msgstr "مدة صلاحية الجلسة"
+
+msgid "settings.label.backupArchiveRecipients"
+msgstr "مستلمو الأرشيف المشفّر"
+
+msgid "settings.label.backupCredentials"
+msgstr "مورد Secret لبيانات اعتماد النسخ الاحتياطي"
+
+msgid "settings.label.backupEtcd"
+msgstr "جدول لقطات etcd"
+
+msgid "settings.label.backupTarget"
+msgstr "وجهة النسخ الاحتياطي"
+
+msgid "settings.label.customTls"
+msgstr "مورد Secret لشهادة TLS المخصصة"
+
+msgid "settings.label.imagesKeep"
+msgstr "عدد إصدارات الصور المحتفَظ بها"
+
+msgid "settings.label.imagesRefresh"
+msgstr "جدول تحديث الصور"
+
+msgid "settings.label.kataEnabled"
+msgstr "تفعيل Kata عند التثبيت"
+
+msgid "settings.label.letsencryptEmail"
+msgstr "البريد الإلكتروني للحساب"
+
+msgid "settings.label.letsencryptSolver"
+msgstr "طريقة حل تحدي ACME"
+
+msgid "settings.label.lokiEnabled"
+msgstr "تفعيل Loki عند التثبيت"
+
+msgid "settings.label.lokiRetention"
+msgstr "مدة الاحتفاظ بالسجلات (بالأيام)"
+
+msgid "settings.label.migrationNetwork"
+msgstr "معرّف VLAN لشبكة الترحيل"
+
+msgid "settings.label.migrationParallel"
+msgstr "عدد عمليات الترحيل المباشر المتوازية"
+
+msgid "settings.label.networkDns"
+msgstr "خوادم DNS للمستأجرين"
+
+msgid "settings.label.networkEipMode"
+msgstr "وضع عناوين IP المرنة"
+
+msgid "settings.label.networkProviders"
+msgstr "شبكات المزود"
+
+msgid "settings.label.overcommitCpu"
+msgstr "نسبة الحجز الزائد للمعالج"
+
+msgid "settings.label.overcommitMemory"
+msgstr "نسبة الحجز الزائد للذاكرة"
+
+msgid "settings.label.platformHost"
+msgstr "اسم مضيف المنصة"
+
+msgid "settings.label.storageNetwork"
+msgstr "معرّف VLAN لشبكة التخزين"
+
+msgid "settings.label.storageReplicas"
+msgstr "عدد نسخ Ceph"
+
+msgid "settings.label.tlsMode"
+msgstr "مصدر شهادة TLS"
+
+msgid "settings.label.virtEmulation"
+msgstr "المحاكاة البرمجية"
+
+msgid "settings.notSet"
+msgstr "غير محدد"
+
+msgid "settings.override"
+msgstr "قيمة بديلة"
+
+msgid "settings.rejected"
+msgstr "مرفوض"
+
+msgid "settings.resultCount"
+msgstr "عدد الإعدادات المعروضة: {count}"
+
+msgid "settings.saved"
+msgstr "تم حفظ التغيير"
+
+msgid "settings.search"
+msgstr "البحث في كل الإعدادات"
+
+msgid "settings.searchResults"
+msgstr "نتائج البحث"
+
+msgid "settings.useCurrent"
+msgstr "استخدام القيمة الحالية"
+
+msgid "settings.useDefault"
+msgstr "استخدام القيمة الافتراضية"
+
+msgid "settings.validated"
+msgstr "تم التحقق"
+
+msgid "settings.validationUnknown"
+msgstr "حالة التحقق غير معروفة"
+
+msgid "settings.valueLabel"
+msgstr "قيمة {label}"
+
+msgid "tenantDetail.projectsEmpty"
+msgstr "لا توجد مشاريع لهذا المستأجر."
+
+msgid "tenantDetail.quota.bytes"
+msgstr "{number} {unit, select, KiB {كيبي بايت} MiB {ميبي بايت} GiB {غيبي بايت} TiB {تيبي بايت} PiB {بيبي بايت} other {بايت}}"
+
+msgid "tenantDetail.quota.noUsage"
+msgstr "{resource}: الحد {limit} (بيانات الاستخدام غير متاحة)"
+
+msgid "tenantDetail.quota.storage"
+msgstr "التخزين"
+
+msgid "tenantDetail.quota.usage"
+msgstr "{resource}: {usedDisplay} من {limit}"
+
+msgid "upgrades.blocked"
+msgstr "الترقية محظورة"
+
+msgid "upgrades.currentVersion"
+msgstr "الإصدار الحالي"
+
+msgid "upgrades.phaseStartedAt"
+msgstr "بدء المرحلة (UTC)"
+
+msgid "upgrades.recovery"
+msgstr "التعافي من تعثّر الترقية"
+
+msgid "upgrades.resumeRequested"
+msgstr "تم طلب استئناف الترقية."
+
+msgid "upgrades.rollbackRequested"
+msgstr "تم طلب التراجع عن الترقية."
+
+msgid "upgrades.startRequested"
+msgstr "تم طلب الترقية."
+
+msgid "upgrades.startedAt"
+msgstr "بدء الترقية (UTC)"
+
+msgid "upgrades.status"
+msgstr "حالة الترقية"
+
+msgid "vmDetail.actions.more"
+msgstr "مزيد من إجراءات الجهاز الافتراضي"
+
+msgid "vmDetail.overview.connection"
+msgstr "الاتصال"
+
+msgid "vmDetail.overview.hardware"
+msgstr "العتاد"
+
+msgid "volumes.expand.currentSize"
+msgstr "الحجم الحالي"
+
+msgid "wizard.iso.askAdmin"
+msgstr "اطلب من أحد مشرفي المشروع إتاحة صورة ISO."
+
+msgid "wizard.iso.empty"
+msgstr "لا توجد صور ISO جاهزة"
+
+msgid "wizard.iso.loadError"
+msgstr "تعذّر التحقق من جميع صور ISO."
+
+msgid "wizard.iso.loading"
+msgstr "جارٍ البحث عن صور ISO جاهزة…"
+
+msgid "wizard.iso.notReady"
+msgstr "اختر صورة ISO جاهزة."
+
+msgid "wizard.iso.refresh"
+msgstr "تحديث الصور"
+
+msgid "wizard.iso.selectionPending"
+msgstr "صورة ISO المحددة غير جاهزة."
+
+msgid "wizard.iso.uploadHelp"
+msgstr "ارفع صورة ISO ثم انتظر حتى تعالجها المنصة."
+
+msgid "wizard.iso.waitForReady"
+msgstr "حدّث القائمة بعد اكتمال المعالجة، أو اختر صورة ISO أخرى جاهزة."
+
+msgid "wizard.leave.submitting"
+msgstr "المغادرة لا تلغي طلبًا سبق إرساله."
+
+msgid "wizard.review.advanced"
+msgstr "المواصفات المتقدمة (JSON)"
+
+msgid "wizard.review.boot"
+msgstr "الإقلاع"
+
+msgid "wizard.review.bootOrder"
+msgstr "ترتيب الإقلاع"
+
+msgid "wizard.review.bootOrderIso"
+msgstr "القرص الجذري، ثم محركات CD-ROM"
+
+msgid "wizard.review.extraCdroms"
+msgstr "محركات CD-ROM إضافية"
+
+msgid "wizard.review.extraVolumes"
+msgstr "الأقراص الموجودة"
+
+msgid "wizard.review.none"
+msgstr "لم يُحدّد شيء"
+
+msgid "wizard.steps.progress"
+msgstr "الخطوة {0} من {1}"
+
+msgid "wizard.volume.attached"
+msgstr "مرفق بـ {owner}"
+
+msgid "wizard.volume.inUse"
+msgstr "قيد الاستخدام؛ المالك غير معروف"
+
+msgid "wizard.volume.missing"
+msgstr "غير موجود في هذا المشروع"
+
+msgid "wizard.volume.remove"
+msgstr "أزل {name} للمتابعة."
+
+msgid "wizard.volume.removeAction"
+msgstr "إزالة {name}"
+
+msgid "wizard.volume.unavailable"
+msgstr "غير متاح للإرفاق"
+
+msgid "wizard.volume.unverified"
+msgstr "تعذّر التحقق من الأقراص المحددة. أعد المحاولة أو أزلها للمتابعة."
+
+msgid "wizard.volumes.empty"
+msgstr "لا توجد أقراص في هذا المشروع."
+
+msgid "wizard.volumes.error"
+msgstr "تعذّر تحميل أقراص المشروع."
+
+msgid "wizard.volumes.loading"
+msgstr "جارٍ تحميل أقراص المشروع…"
+
+msgid "metrics.stale"
+msgstr "تعذّر تحديث المقاييس. تُعرض العينات السابقة."

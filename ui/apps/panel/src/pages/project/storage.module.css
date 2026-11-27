@@ -1,0 +1,116 @@
+.backups {
+  display: grid;
+  gap: 1.25rem;
+  min-inline-size: 0;
+}
+
+.backups > :global(.br-page-header) {
+  margin-block-end: 0;
+}
+
+.history,
+.fields {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: .75rem;
+  min-inline-size: 0;
+}
+
+.history,
+.volumeMetric > :global(.br-chart) {
+  padding: .875rem 1rem;
+  border: 1px solid var(--br-color-border);
+  border-radius: .75rem;
+  background: var(--br-color-surface);
+}
+
+.history h3,
+.volumeMetric h3 {
+  margin: 0;
+  font-size: 1rem;
+}
+
+.history > :global(.br-field) {
+  inline-size: min(100%, 24rem);
+}
+
+.history :global(.br-table-caption) {
+  color: var(--br-color-text-muted);
+  font-size: .875rem;
+}
+
+.history :global(.br-td) bdi {
+  white-space: nowrap;
+}
+
+.emptyRow,
+.reason > span,
+.facts dt {
+  color: var(--br-color-text-muted);
+}
+
+.reason {
+  display: grid;
+  gap: .25rem;
+}
+
+.reason > span {
+  font-size: .875rem;
+  overflow-wrap: anywhere;
+}
+
+.fields p {
+  margin: 0;
+}
+
+.rule {
+  padding-block-start: .75rem;
+  border-block-start: 1px solid var(--br-color-border);
+}
+
+.facts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: .5rem 1.25rem;
+  margin: 0;
+  padding-block-end: .75rem;
+  border-block-end: 1px solid var(--br-color-border);
+}
+
+.facts div {
+  min-inline-size: 0;
+}
+
+.facts dt {
+  font-size: .8125rem;
+}
+
+.facts dd {
+  margin: .2rem 0 0;
+  overflow-wrap: anywhere;
+}
+
+.imageTabs,
+.imageTabs :global(.br-tab-panel),
+.volumeMetric > :global(.br-chart) {
+  min-inline-size: 0;
+}
+
+.imageTabs :global(.br-tab-list) {
+  flex-wrap: wrap;
+  gap: 0 .25rem;
+}
+
+.imageTabs :global(.br-tab-panel) {
+  padding-block: .875rem 0;
+}
+
+.volumeMetric:empty {
+  display: none;
+}
+
+.volumeMetric :global(.br-toolbar) {
+  gap: .5rem 1rem;
+  margin-block-end: .5rem;
+  align-items: center;
+}

@@ -26,7 +26,7 @@ function apiRoutes(): Record<string, FakeRoute> {
   return routes;
 }
 
-const paths = ["/admin/inventory", ...primaryDefinitionsFor("admin").map((def) => `/admin/${def.path}`), ...primaryDefinitionsFor("project").map((def) => `/p/web/${def.path}`), "/account"];
+const paths = ["/admin/overview", "/admin/inventory", ...primaryDefinitionsFor("admin").map((def) => `/admin/${def.path}`), ...primaryDefinitionsFor("project").map((def) => `/p/web/${def.path}`), "/account"];
 
 describe("every page", () => {
   for (const locale of ["en", "ar"] as Locale[]) {

@@ -7,6 +7,87 @@ msgstr ""
 "X-Generator: @lingui/cli\n"
 "Language: fa\n"
 
+msgid "backups.restore.source.changed"
+msgstr "نسخه پشتیبان تغییر کرد. این پنجره را ببندید و نسخه پشتیبان را دوباره انتخاب کنید."
+
+msgid "backups.restore.target.changed"
+msgstr "مقصد تغییر کرد. برای جایگزینی ماشین فعلی، نام آن را دوباره تأیید کنید."
+
+msgid "wizard.volume.claimedByVm"
+msgstr "در پیکربندی ماشین مجازی {owner} استفاده شده است"
+
+msgid "wizard.volumes.claimsError"
+msgstr "مشخص نشد ماشین‌های مجازی از کدام والیوم‌ها استفاده می‌کنند."
+
+msgid "list.resultCount"
+msgstr "{rowCount} مورد نمایش داده می‌شود"
+
+msgid "list.sortBy"
+msgstr "مرتب‌سازی بر اساس"
+
+msgid "list.sortAscending"
+msgstr "مرتب‌سازی صعودی"
+
+msgid "list.sortDescending"
+msgstr "مرتب‌سازی نزولی"
+
+msgid "metrics.denied"
+msgstr "اجازه مشاهده این سنجه‌ها را ندارید."
+
+msgid "metrics.failed"
+msgstr "سنجه‌ها بارگیری نشدند."
+
+msgid "metrics.loading"
+msgstr "در حال بارگیری سنجه‌ها…"
+
+msgid "metrics.noSamples"
+msgstr "در این بازه زمانی داده‌ای ثبت نشده است."
+
+msgid "metrics.partial"
+msgstr "داده‌های بعضی از سنجه‌ها در دسترس نیست."
+
+msgid "nav.scope.admin"
+msgstr "مدیریت"
+
+msgid "nav.scope.project"
+msgstr "منابع پروژه"
+
+msgid "overview.updatesPaused"
+msgstr "بعضی از به‌روزرسانی‌های زنده متوقف شده‌اند."
+
+msgid "action.accepted"
+msgstr "درخواست پذیرفته شد"
+
+msgid "credentials.copyFailed"
+msgstr "کپی اطلاعات ورود انجام نشد"
+
+msgid "images.upload.transferred"
+msgstr "انتقال فایل انجام شد"
+
+msgid "images.upload.processing"
+msgstr "پردازش ایمیج هنوز در پلتفرم انجام نشده است."
+
+msgid "pendingWrites.action"
+msgstr "در حال ارسال درخواست"
+
+msgid "shell.userMenu.signingOut"
+msgstr "در حال خروج…"
+
+msgid "shell.userMenu.signOutFailed"
+msgstr "خروج انجام نشد"
+
+msgid "pendingWrites.create"
+msgstr "در حال ایجاد"
+
+msgid "pendingWrites.delete"
+msgstr "در حال حذف"
+
+msgid "pendingWrites.global"
+msgstr "تغییرات در حال انجام است"
+
+msgid "pendingWrites.update"
+msgstr "در حال ذخیره"
+
 msgid "account.downloads.title"
 msgstr "دریافت‌ها"
 
@@ -698,6 +779,12 @@ msgstr "بارگذاری"
 msgid "images.upload.title"
 msgstr "بارگذاری {0}"
 
+msgid "inventory.rowsOnPage"
+msgstr "ردیف‌های این صفحه: {rowCount}"
+
+msgid "inventory.subtitle"
+msgstr "منابع را در پروژه‌ها و مستأجران پیدا کنید."
+
 msgid "list.actions.header"
 msgstr "عملیات"
 
@@ -897,6 +984,39 @@ msgstr "شبکه‌ها به مستأجر تعلق دارند. زیرشبکه‌
 
 msgid "networks.forbidden.title"
 msgstr "شما اجازه فهرست‌کردن شبکه‌ها را ندارید"
+
+msgid "overview.allHosts"
+msgstr "مشاهده همه میزبان‌ها"
+
+msgid "overview.hostList"
+msgstr "میزبان‌ها در یک نگاه"
+
+msgid "overview.noHosts"
+msgstr "هیچ میزبانی ثبت نشده است."
+
+msgid "overview.readiness"
+msgstr "آمادگی میزبان‌ها"
+
+msgid "nav.item.inventory"
+msgstr "موجودی منابع"
+
+msgid "overview.readinessDescription"
+msgstr "وضعیت آمادگی گزارش‌شده برای میزبان‌های ثبت‌شده."
+
+msgid "overview.resourceSummary"
+msgstr "خلاصه منابع"
+
+msgid "overview.restricted"
+msgstr "دسترسی محدود است"
+
+msgid "overview.subtitle"
+msgstr "موجودی خوشه و آمادگی میزبان‌ها را بررسی کنید."
+
+msgid "overview.title"
+msgstr "نمای کلی زیرساخت"
+
+msgid "overview.unavailable"
+msgstr "داده‌ها در دسترس نیستند"
 
 msgid "registry.showLogin"
 msgstr "نمایش ورود"
@@ -1500,3 +1620,636 @@ msgstr "داده کاربر cloud-init"
 
 msgid "wizard.virtioWin"
 msgstr "اتصال درایورهای virtio-win"
+
+msgid "account.downloads.caDescription"
+msgstr "با این گواهی می‌توانید به اتصال‌های TLS خوشه‌ای که از CA خصوصی استفاده می‌کند، اعتماد کنید."
+
+msgid "account.downloads.kubeconfigDescription"
+msgstr "برای اتصال به این خوشه Bedrock، ابزار kubectl را پیکربندی کنید."
+
+msgid "addons.addValues"
+msgstr "افزودن مقادیر سفارشی"
+
+msgid "addons.advancedValues"
+msgstr "مقادیر پیشرفته (JSON)"
+
+msgid "addons.conflict"
+msgstr "مقادیر افزونه هنگام ویرایش تغییر کردند."
+
+msgid "addons.health"
+msgstr "سلامت"
+
+msgid "addons.noCustomValues"
+msgstr "مقدار سفارشی وجود ندارد"
+
+msgid "addons.valuesLabel"
+msgstr "مقادیر {name}"
+
+msgid "backups.history.id"
+msgstr "شناسه نسخه پشتیبان"
+
+msgid "backups.history.schedule"
+msgstr "زمان‌بندی پشتیبان‌گیری"
+
+msgid "backups.history.title"
+msgstr "تاریخچه پشتیبان‌گیری"
+
+msgid "backups.restore.target.checking"
+msgstr "در حال بررسی وجود ماشین مجازی مقصد…"
+
+msgid "backups.restore.target.error"
+msgstr "بررسی ماشین مجازی مقصد ممکن نبود."
+
+msgid "backups.restore.target.exists"
+msgstr "ماشین مجازی مقصد از قبل وجود دارد. برای بازیابی روی آن، گزینه جایگزینی را انتخاب کنید."
+
+msgid "backups.restore.target.missing"
+msgstr "ماشین مجازی مقصد وجود ندارد و با بازیابی ایجاد می‌شود."
+
+msgid "backups.restore.target.overwrite"
+msgstr "بازیابی، ماشین مجازی موجود را جایگزین می‌کند."
+
+msgid "backups.restore.target.replaceMissing"
+msgstr "جایگزینی به ماشین مجازی موجود نیاز دارد. برای بازیابی این ماشین، گزینه جایگزینی را غیرفعال کنید."
+
+msgid "backups.restore.target.unknown"
+msgstr "ماشین مجازی مقصد شناسایی نشد."
+
+msgid "backups.schedules"
+msgstr "زمان‌بندی‌های پشتیبان‌گیری"
+
+msgid "col.destination"
+msgstr "مقصد"
+
+msgid "console.noEndpoint"
+msgstr "نشانی اتصال به کنسول در دسترس نیست"
+
+msgid "detail.advanced"
+msgstr "پیشرفته"
+
+msgid "detail.copy.entry"
+msgstr "کپی {name} {0}"
+
+msgid "detail.copy.failure"
+msgstr "کپی در حافظه موقت ممکن نبود"
+
+msgid "detail.copy.field"
+msgstr "کپی {name}"
+
+msgid "detail.copy.label"
+msgstr "کپی"
+
+msgid "detail.copy.success"
+msgstr "در حافظه موقت کپی شد"
+
+msgid "detail.field.addressPort"
+msgstr "نشانی و پورت"
+
+msgid "detail.field.appliedValue"
+msgstr "مقدار اعمال‌شده"
+
+msgid "detail.field.backupId"
+msgstr "شناسه نسخه پشتیبان"
+
+msgid "detail.field.backupsEnabled"
+msgstr "پشتیبان‌گیری فعال است"
+
+msgid "detail.field.finishedAt"
+msgstr "زمان پایان"
+
+msgid "detail.field.instances"
+msgstr "نمونه‌ها"
+
+msgid "detail.field.internalAddress"
+msgstr "نشانی داخلی"
+
+msgid "detail.field.lastBackup"
+msgstr "آخرین پشتیبان‌گیری"
+
+msgid "detail.field.objects"
+msgstr "اشیا"
+
+msgid "detail.field.port"
+msgstr "پورت"
+
+msgid "detail.field.projectName"
+msgstr "نام پروژه"
+
+msgid "detail.field.proxyAddress"
+msgstr "نشانی پراکسی"
+
+msgid "detail.field.publicKey"
+msgstr "کلید عمومی"
+
+msgid "detail.field.readyReplicas"
+msgstr "نسخه‌های آماده"
+
+msgid "detail.field.requestedValue"
+msgstr "مقدار درخواستی"
+
+msgid "detail.field.resultImage"
+msgstr "تصویر خروجی"
+
+msgid "detail.field.revision"
+msgstr "بازبینی"
+
+msgid "detail.summary.empty"
+msgstr "هنوز جزئیاتی در دسترس نیست."
+
+msgid "detail.summary.title"
+msgstr "نمای کلی"
+
+msgid "eip.attach.lb.empty"
+msgstr "هیچ توزیع‌کننده باری در این پروژه به این آی‌پی شناور اشاره نمی‌کند. ابتدا آی‌پی شناور را در تنظیمات توزیع‌کننده بار مشخص کنید."
+
+msgid "eip.attach.targets.error"
+msgstr "بارگذاری مقصدها ممکن نبود. دسترسی خود را بررسی و دوباره تلاش کنید."
+
+msgid "eip.attach.targets.loading"
+msgstr "در حال بارگذاری مقصدها…"
+
+msgid "eip.attach.unavailable"
+msgstr "این آی‌پی شناور دیگر قابل اتصال نیست."
+
+msgid "eip.attach.vm.empty"
+msgstr "هیچ رابط شبکه سازگاری برای ماشین‌های مجازی در دسترس نیست."
+
+msgid "hostDetail.appliedEmpty"
+msgstr "هیچ مرحله‌ای از پیکربندی گزارش نشده است."
+
+msgid "hostDetail.cpuEmpty"
+msgstr "اطلاعات پردازنده یا حافظه گزارش نشده است."
+
+msgid "hostDetail.disksEmpty"
+msgstr "هیچ دیسکی گزارش نشده است."
+
+msgid "hostDetail.firmwareEmpty"
+msgstr "اطلاعات میان‌افزار یا سیستم گزارش نشده است."
+
+msgid "hostDetail.nicsEmpty"
+msgstr "هیچ رابط شبکه‌ای گزارش نشده است."
+
+msgid "hostDetail.pciEmpty"
+msgstr "هیچ دستگاه PCI گزارش نشده است."
+
+msgid "inventory.allProjects"
+msgstr "همه پروژه‌ها"
+
+msgid "inventory.clearProject"
+msgstr "حذف فیلتر پروژه"
+
+msgid "inventory.empty"
+msgstr "منبع منطبقی پیدا نشد"
+
+msgid "inventory.emptyPage"
+msgstr "منبع منطبقی در این صفحه نیست"
+
+msgid "inventory.expired"
+msgstr "اعتبار این فهرست به پایان رسیده است"
+
+msgid "inventory.first"
+msgstr "رفتن به صفحه اول"
+
+msgid "inventory.name"
+msgstr "نام دقیق منبع"
+
+msgid "inventory.networkScope"
+msgstr "شبکه‌ها در سطح مستأجر هستند"
+
+msgid "inventory.next"
+msgstr "بعدی"
+
+msgid "inventory.noProject"
+msgstr "بدون پروژه مرتبط"
+
+msgid "inventory.page"
+msgstr "صفحه {pageNumber}"
+
+msgid "inventory.pages"
+msgstr "صفحه‌های فهرست منابع"
+
+msgid "inventory.previous"
+msgstr "قبلی"
+
+msgid "inventory.projectPending"
+msgstr "فضای نام پروژه آماده نیست"
+
+msgid "inventory.projectUnavailable"
+msgstr "این پروژه در دسترس نیست"
+
+msgid "inventory.refresh"
+msgstr "به‌روزرسانی فهرست"
+
+msgid "inventory.resourceType"
+msgstr "نوع منبع"
+
+msgid "inventory.search"
+msgstr "جست‌وجو"
+
+msgid "inventory.tenant"
+msgstr "مستأجر"
+
+msgid "inventory.unknownType"
+msgstr "نوع منبع را انتخاب کنید"
+
+msgid "inventory.vmRestores"
+msgstr "بازیابی‌های ماشین مجازی"
+
+msgid "lb.elasticIp.empty"
+msgstr "آی‌پی شناور سازگاری برای انتخاب وجود ندارد. دسترسی خود را بررسی کنید یا در این پروژه آی‌پی شناور رزرو کنید."
+
+msgid "lb.elasticIp.help"
+msgstr "برای دسترسی عمومی، اینجا یک آی‌پی شناور انتخاب کنید. سپس گزینه «اتصال» را برای آن آی‌پی بزنید."
+
+msgid "lb.elasticIp.internal"
+msgstr "فقط داخلی"
+
+msgid "networks.limit"
+msgstr "فهرست شبکه‌ها بیش از حد طولانی است"
+
+msgid "query.error"
+msgstr "پنل نتوانست این داده‌ها را بارگذاری کند."
+
+msgid "registry.quota.unlimited"
+msgstr "نامحدود"
+
+msgid "settings.awaitingValidation"
+msgstr "در انتظار اعتبارسنجی"
+
+msgid "settings.categories"
+msgstr "دسته‌بندی‌ها"
+
+msgid "settings.configured"
+msgstr "پیکربندی‌شده"
+
+msgid "settings.conflict"
+msgstr "این تنظیم هنگام ویرایش تغییر کرد."
+
+msgid "settings.currentValue"
+msgstr "مقدار فعلی"
+
+msgid "settings.description"
+msgstr "تنظیمات کل خوشه را مدیریت کنید و ببینید کدام مقادیر معتبرند."
+
+msgid "settings.details"
+msgstr "جزئیات"
+
+msgid "settings.disabled"
+msgstr "غیرفعال"
+
+msgid "settings.editLabel"
+msgstr "ویرایش {label}"
+
+msgid "settings.enabled"
+msgstr "فعال"
+
+msgid "settings.group.alertmanager"
+msgstr "هشدارها"
+
+msgid "settings.group.audit"
+msgstr "ثبت رویدادهای ممیزی"
+
+msgid "settings.group.authn"
+msgstr "ورود و نشست‌ها"
+
+msgid "settings.group.backup"
+msgstr "پشتیبان‌گیری"
+
+msgid "settings.group.build"
+msgstr "ساخت‌ها"
+
+msgid "settings.group.clusters"
+msgstr "خوشه‌های کوبرنتیز"
+
+msgid "settings.group.cnpg"
+msgstr "اپراتور PostgreSQL"
+
+msgid "settings.group.compute"
+msgstr "محدودیت‌های منابع پردازشی"
+
+msgid "settings.group.container"
+msgstr "کانتینرها"
+
+msgid "settings.group.database"
+msgstr "پایگاه‌های داده مدیریت‌شده"
+
+msgid "settings.group.descheduler"
+msgstr "Descheduler"
+
+msgid "settings.group.dns"
+msgstr "DNS"
+
+msgid "settings.group.egress"
+msgstr "ترافیک خروجی"
+
+msgid "settings.group.images"
+msgstr "کاتالوگ تصاویر"
+
+msgid "settings.group.kata"
+msgstr "محیط اجرای Kata"
+
+msgid "settings.group.letsencrypt"
+msgstr "Let's Encrypt"
+
+msgid "settings.group.loki"
+msgstr "جمع‌آوری گزارش‌ها"
+
+msgid "settings.group.migration"
+msgstr "انتقال زنده"
+
+msgid "settings.group.network"
+msgstr "شبکه"
+
+msgid "settings.group.objectstorage"
+msgstr "ذخیره‌سازی شیء"
+
+msgid "settings.group.overcommit"
+msgstr "بیش‌تخصیص منابع"
+
+msgid "settings.group.perconaPs"
+msgstr "اپراتور MySQL"
+
+msgid "settings.group.platform"
+msgstr "دسترسی به پلتفرم"
+
+msgid "settings.group.registry"
+msgstr "رجیستری کانتینر"
+
+msgid "settings.group.storage"
+msgstr "ذخیره‌سازی"
+
+msgid "settings.group.tenancy"
+msgstr "مدیریت مستأجرها"
+
+msgid "settings.group.virt"
+msgstr "مجازی‌سازی"
+
+msgid "settings.label.additionalCa"
+msgstr "گواهی‌های مورد اعتماد بیشتر"
+
+msgid "settings.label.alertWebhook"
+msgstr "وب‌هوک هشدار"
+
+msgid "settings.label.auditLevel"
+msgstr "سطح ممیزی درخواست‌های خواندن"
+
+msgid "settings.label.authnLockout"
+msgstr "آستانه قفل ورود"
+
+msgid "settings.label.authnRefreshTtl"
+msgstr "عمر توکن تازه‌سازی"
+
+msgid "settings.label.authnSecondFactor"
+msgstr "الزام احراز هویت با عامل دوم"
+
+msgid "settings.label.authnSessionTtl"
+msgstr "عمر نشست"
+
+msgid "settings.label.backupArchiveRecipients"
+msgstr "گیرندگان رمزنگاری بایگانی"
+
+msgid "settings.label.backupCredentials"
+msgstr "Secret اعتبارنامه‌های پشتیبان‌گیری"
+
+msgid "settings.label.backupEtcd"
+msgstr "زمان‌بندی اسنپ‌شات etcd"
+
+msgid "settings.label.backupTarget"
+msgstr "مقصد پشتیبان‌گیری"
+
+msgid "settings.label.customTls"
+msgstr "Secret سفارشی TLS"
+
+msgid "settings.label.imagesKeep"
+msgstr "تعداد نسخه‌های تصویر برای نگهداری"
+
+msgid "settings.label.imagesRefresh"
+msgstr "زمان‌بندی به‌روزرسانی تصاویر"
+
+msgid "settings.label.kataEnabled"
+msgstr "فعال‌سازی Kata هنگام نصب"
+
+msgid "settings.label.letsencryptEmail"
+msgstr "ایمیل حساب"
+
+msgid "settings.label.letsencryptSolver"
+msgstr "روش حل چالش ACME"
+
+msgid "settings.label.lokiEnabled"
+msgstr "فعال‌سازی Loki هنگام نصب"
+
+msgid "settings.label.lokiRetention"
+msgstr "مدت نگهداری گزارش‌ها (روز)"
+
+msgid "settings.label.migrationNetwork"
+msgstr "VLAN شبکه انتقال"
+
+msgid "settings.label.migrationParallel"
+msgstr "انتقال‌های زنده هم‌زمان"
+
+msgid "settings.label.networkDns"
+msgstr "سرورهای DNS مستأجر"
+
+msgid "settings.label.networkEipMode"
+msgstr "حالت آی‌پی شناور"
+
+msgid "settings.label.networkProviders"
+msgstr "شبکه‌های ارائه‌دهنده"
+
+msgid "settings.label.overcommitCpu"
+msgstr "نسبت بیش‌تخصیص پردازنده"
+
+msgid "settings.label.overcommitMemory"
+msgstr "نسبت بیش‌تخصیص حافظه"
+
+msgid "settings.label.platformHost"
+msgstr "نام میزبان پلتفرم"
+
+msgid "settings.label.storageNetwork"
+msgstr "VLAN شبکه ذخیره‌سازی"
+
+msgid "settings.label.storageReplicas"
+msgstr "نسخه‌های Ceph"
+
+msgid "settings.label.tlsMode"
+msgstr "منبع گواهی TLS"
+
+msgid "settings.label.virtEmulation"
+msgstr "شبیه‌سازی نرم‌افزاری"
+
+msgid "settings.notSet"
+msgstr "تنظیم نشده"
+
+msgid "settings.override"
+msgstr "مقدار سفارشی"
+
+msgid "settings.rejected"
+msgstr "رد شده"
+
+msgid "settings.resultCount"
+msgstr "تعداد تنظیمات نمایش‌داده‌شده: {count}"
+
+msgid "settings.saved"
+msgstr "تغییر ذخیره شد"
+
+msgid "settings.search"
+msgstr "جست‌وجو در همه تنظیمات"
+
+msgid "settings.searchResults"
+msgstr "نتایج جست‌وجو"
+
+msgid "settings.useCurrent"
+msgstr "استفاده از مقدار فعلی"
+
+msgid "settings.useDefault"
+msgstr "استفاده از مقدار پیش‌فرض"
+
+msgid "settings.validated"
+msgstr "اعتبارسنجی شده"
+
+msgid "settings.validationUnknown"
+msgstr "وضعیت اعتبارسنجی نامشخص"
+
+msgid "settings.valueLabel"
+msgstr "مقدار {label}"
+
+msgid "tenantDetail.projectsEmpty"
+msgstr "این مستأجر پروژه‌ای ندارد."
+
+msgid "tenantDetail.quota.bytes"
+msgstr "{number} {unit, select, KiB {KiB} MiB {MiB} GiB {GiB} TiB {TiB} PiB {PiB} other {B}}"
+
+msgid "tenantDetail.quota.noUsage"
+msgstr "{resource}: سقف {limit} (مصرف گزارش نشده است)"
+
+msgid "tenantDetail.quota.storage"
+msgstr "ذخیره‌سازی"
+
+msgid "tenantDetail.quota.usage"
+msgstr "{resource}: {usedDisplay} از {limit}"
+
+msgid "upgrades.blocked"
+msgstr "ارتقا مسدود شده است"
+
+msgid "upgrades.currentVersion"
+msgstr "نسخه فعلی"
+
+msgid "upgrades.phaseStartedAt"
+msgstr "زمان شروع مرحله (UTC)"
+
+msgid "upgrades.recovery"
+msgstr "بازیابی ارتقا"
+
+msgid "upgrades.resumeRequested"
+msgstr "درخواست ادامه ارتقا ارسال شد."
+
+msgid "upgrades.rollbackRequested"
+msgstr "درخواست بازگشت به نسخه قبلی ارسال شد."
+
+msgid "upgrades.startRequested"
+msgstr "درخواست ارتقا ارسال شد."
+
+msgid "upgrades.startedAt"
+msgstr "زمان شروع ارتقا (UTC)"
+
+msgid "upgrades.status"
+msgstr "وضعیت ارتقا"
+
+msgid "vmDetail.actions.more"
+msgstr "عملیات بیشتر ماشین مجازی"
+
+msgid "vmDetail.overview.connection"
+msgstr "اتصال"
+
+msgid "vmDetail.overview.hardware"
+msgstr "سخت‌افزار"
+
+msgid "volumes.expand.currentSize"
+msgstr "اندازه فعلی"
+
+msgid "wizard.iso.askAdmin"
+msgstr "از مدیر پروژه بخواهید یک تصویر ISO در دسترس قرار دهد."
+
+msgid "wizard.iso.empty"
+msgstr "هیچ تصویر ISO آماده‌ای وجود ندارد"
+
+msgid "wizard.iso.loadError"
+msgstr "بررسی همه تصاویر ISO ممکن نبود."
+
+msgid "wizard.iso.loading"
+msgstr "در حال بررسی تصاویر ISO آماده…"
+
+msgid "wizard.iso.notReady"
+msgstr "یک تصویر ISO آماده انتخاب کنید."
+
+msgid "wizard.iso.refresh"
+msgstr "به‌روزرسانی فهرست تصاویر"
+
+msgid "wizard.iso.selectionPending"
+msgstr "تصویر ISO انتخاب‌شده آماده نیست."
+
+msgid "wizard.iso.uploadHelp"
+msgstr "یک تصویر ISO بارگذاری کنید و منتظر بمانید تا پلتفرم آن را پردازش کند."
+
+msgid "wizard.iso.waitForReady"
+msgstr "پس از پایان پردازش، فهرست را به‌روزرسانی کنید یا تصویر ISO آماده دیگری انتخاب کنید."
+
+msgid "wizard.leave.submitting"
+msgstr "خروج، درخواست ارسال‌شده را لغو نمی‌کند."
+
+msgid "wizard.review.advanced"
+msgstr "مشخصات پیشرفته (JSON)"
+
+msgid "wizard.review.boot"
+msgstr "راه‌اندازی"
+
+msgid "wizard.review.bootOrder"
+msgstr "ترتیب راه‌اندازی"
+
+msgid "wizard.review.bootOrderIso"
+msgstr "ابتدا دیسک ریشه، سپس درایوهای CD-ROM"
+
+msgid "wizard.review.extraCdroms"
+msgstr "درایوهای CD-ROM اضافی"
+
+msgid "wizard.review.extraVolumes"
+msgstr "حجم‌های موجود"
+
+msgid "wizard.review.none"
+msgstr "هیچ موردی انتخاب نشده است"
+
+msgid "wizard.steps.progress"
+msgstr "گام {0} از {1}"
+
+msgid "wizard.volume.attached"
+msgstr "متصل به {owner}"
+
+msgid "wizard.volume.inUse"
+msgstr "در حال استفاده؛ مالک نامشخص"
+
+msgid "wizard.volume.missing"
+msgstr "در این پروژه پیدا نشد"
+
+msgid "wizard.volume.remove"
+msgstr "برای ادامه، {name} را از انتخاب‌ها بردارید."
+
+msgid "wizard.volume.removeAction"
+msgstr "برداشتن {name} از انتخاب‌ها"
+
+msgid "wizard.volume.unavailable"
+msgstr "قابل اتصال نیست"
+
+msgid "wizard.volume.unverified"
+msgstr "بررسی حجم‌های انتخاب‌شده ممکن نبود. دوباره تلاش کنید یا برای ادامه آن‌ها را از انتخاب‌ها بردارید."
+
+msgid "wizard.volumes.empty"
+msgstr "حجمی در این پروژه وجود ندارد."
+
+msgid "wizard.volumes.error"
+msgstr "بارگذاری حجم‌های پروژه ممکن نبود."
+
+msgid "wizard.volumes.loading"
+msgstr "در حال بارگذاری حجم‌های پروژه…"
+
+msgid "metrics.stale"
+msgstr "به‌روزرسانی سنجه‌ها ممکن نبود. نمونه‌های قبلی نمایش داده می‌شوند."

@@ -7,6 +7,7 @@ export type SettingKind = "text" | "boolean" | "enum" | "multiline";
 export interface SettingMeta {
   kind: SettingKind;
   options: string[];
+  label: MessageDescriptor | undefined;
   description: MessageDescriptor | undefined;
 }
 
@@ -16,7 +17,41 @@ const enums: Record<string, string[]> = {
   "platform.tls-mode": ["SelfSigned", "LetsEncrypt", "Custom"],
   "letsencrypt.solver": ["http01", "dns01"],
   "audit.level": ["Metadata", "RequestResponse"],
-  "network.eip-mode": ["arp", "bgp"],
+  "network.eip-mode": ["l2", "bgp"],
+};
+
+const labels: Record<string, MessageDescriptor> = {
+  "platform.host": msg({ id: "settings.label.platformHost", message: "Platform hostname" }),
+  "platform.tls-mode": msg({ id: "settings.label.tlsMode", message: "TLS certificate source" }),
+  "platform.additional-ca": msg({ id: "settings.label.additionalCa", message: "Additional trusted certificates" }),
+  "platform.custom-tls": msg({ id: "settings.label.customTls", message: "Custom TLS secret" }),
+  "letsencrypt.email": msg({ id: "settings.label.letsencryptEmail", message: "Account email" }),
+  "letsencrypt.solver": msg({ id: "settings.label.letsencryptSolver", message: "ACME challenge solver" }),
+  "storage.replicas": msg({ id: "settings.label.storageReplicas", message: "Ceph replicas" }),
+  "storage.network": msg({ id: "settings.label.storageNetwork", message: "Storage network VLAN" }),
+  "migration.network": msg({ id: "settings.label.migrationNetwork", message: "Migration network VLAN" }),
+  "migration.parallel": msg({ id: "settings.label.migrationParallel", message: "Parallel live migrations" }),
+  "virt.emulation": msg({ id: "settings.label.virtEmulation", message: "Software emulation" }),
+  "overcommit.cpu": msg({ id: "settings.label.overcommitCpu", message: "CPU overcommit ratio" }),
+  "overcommit.memory": msg({ id: "settings.label.overcommitMemory", message: "Memory overcommit ratio" }),
+  "backup.target": msg({ id: "settings.label.backupTarget", message: "Backup destination" }),
+  "backup.credentials-secret": msg({ id: "settings.label.backupCredentials", message: "Backup credentials secret" }),
+  "backup.etcd-schedule": msg({ id: "settings.label.backupEtcd", message: "etcd snapshot schedule" }),
+  "backup.archive-recipients": msg({ id: "settings.label.backupArchiveRecipients", message: "Archive encryption recipients" }),
+  "audit.level": msg({ id: "settings.label.auditLevel", message: "Read request audit level" }),
+  "loki.retention-days": msg({ id: "settings.label.lokiRetention", message: "Log retention (days)" }),
+  "kata.enabled": msg({ id: "settings.label.kataEnabled", message: "Enable Kata at install" }),
+  "loki.enabled": msg({ id: "settings.label.lokiEnabled", message: "Enable Loki at install" }),
+  "images.refresh-schedule": msg({ id: "settings.label.imagesRefresh", message: "Image refresh schedule" }),
+  "images.keep": msg({ id: "settings.label.imagesKeep", message: "Image versions to keep" }),
+  "authn.require-second-factor": msg({ id: "settings.label.authnSecondFactor", message: "Require a second factor" }),
+  "authn.session-ttl": msg({ id: "settings.label.authnSessionTtl", message: "Session lifetime" }),
+  "authn.refresh-ttl": msg({ id: "settings.label.authnRefreshTtl", message: "Refresh token lifetime" }),
+  "authn.lockout-threshold": msg({ id: "settings.label.authnLockout", message: "Sign-in lockout threshold" }),
+  "network.eip-mode": msg({ id: "settings.label.networkEipMode", message: "Elastic IP mode" }),
+  "network.provider-networks": msg({ id: "settings.label.networkProviders", message: "Provider networks" }),
+  "network.dns-servers": msg({ id: "settings.label.networkDns", message: "Tenant DNS servers" }),
+  "alertmanager.webhook-url": msg({ id: "settings.label.alertWebhook", message: "Alert webhook" }),
 };
 
 const descriptions: Record<string, MessageDescriptor> = {
@@ -54,18 +89,60 @@ const descriptions: Record<string, MessageDescriptor> = {
 };
 
 export function settingMeta(key: string): SettingMeta {
-  const kind: SettingKind = booleanKeys.has(key) ? "boolean" : multilineKeys.has(key) ? "multiline" : enums[key] ? "enum" : "text";
-  return { kind, options: enums[key] ?? [], description: descriptions[key] };
+  const kind: SettingKind = booleanKeys.has(key) ? "boolean" : multilineKeys.has(key) ? "multiline" : Object.hasOwn(enums, key) ? "enum" : "text";
+  return { kind, options: kind === "enum" ? enums[key] ?? [] : [], label: Object.hasOwn(labels, key) ? labels[key] : undefined, description: Object.hasOwn(descriptions, key) ? descriptions[key] : undefined };
 }
 
-export const settingGroupOrder = ["platform", "letsencrypt", "network", "storage", "migration", "overcommit", "virt", "backup", "audit", "alertmanager", "loki", "kata", "images", "authn"];
+const groupLabels: Record<string, MessageDescriptor> = {
+  platform: msg({ id: "settings.group.platform", message: "Platform access" }),
+  letsencrypt: msg({ id: "settings.group.letsencrypt", message: "Let’s Encrypt" }),
+  authn: msg({ id: "settings.group.authn", message: "Sign-in and sessions" }),
+  network: msg({ id: "settings.group.network", message: "Networking" }),
+  dns: msg({ id: "settings.group.dns", message: "DNS" }),
+  egress: msg({ id: "settings.group.egress", message: "Outbound traffic" }),
+  storage: msg({ id: "settings.group.storage", message: "Storage" }),
+  objectstorage: msg({ id: "settings.group.objectstorage", message: "Object storage" }),
+  migration: msg({ id: "settings.group.migration", message: "Live migration" }),
+  overcommit: msg({ id: "settings.group.overcommit", message: "Overcommit" }),
+  virt: msg({ id: "settings.group.virt", message: "Virtualization" }),
+  compute: msg({ id: "settings.group.compute", message: "Compute limits" }),
+  container: msg({ id: "settings.group.container", message: "Containers" }),
+  clusters: msg({ id: "settings.group.clusters", message: "Kubernetes clusters" }),
+  database: msg({ id: "settings.group.database", message: "Managed databases" }),
+  cnpg: msg({ id: "settings.group.cnpg", message: "PostgreSQL operator" }),
+  "percona-ps": msg({ id: "settings.group.perconaPs", message: "MySQL operator" }),
+  registry: msg({ id: "settings.group.registry", message: "Container registry" }),
+  build: msg({ id: "settings.group.build", message: "Builds" }),
+  backup: msg({ id: "settings.group.backup", message: "Backups" }),
+  audit: msg({ id: "settings.group.audit", message: "Audit logging" }),
+  alertmanager: msg({ id: "settings.group.alertmanager", message: "Alerting" }),
+  loki: msg({ id: "settings.group.loki", message: "Log collection" }),
+  kata: msg({ id: "settings.group.kata", message: "Kata runtime" }),
+  descheduler: msg({ id: "settings.group.descheduler", message: "Descheduler" }),
+  images: msg({ id: "settings.group.images", message: "Image catalog" }),
+  tenancy: msg({ id: "settings.group.tenancy", message: "Tenancy" }),
+};
 
-export function groupSettings(settings: readonly KubeObject[]): { prefix: string; items: KubeObject[] }[] {
-  const prefixOf = (setting: KubeObject) => setting.metadata.name.split(".")[0] ?? "";
-  const prefixes = [...new Set(settings.map(prefixOf))];
-  const ordered = [...settingGroupOrder.filter((prefix) => prefixes.includes(prefix)), ...prefixes.filter((prefix) => !settingGroupOrder.includes(prefix)).sort()];
+const settingGroupOrder = Object.keys(groupLabels);
+const platformOrder = ["platform.host", "platform.tls-mode", "platform.custom-tls", "platform.additional-ca"];
+
+export function humanizeSetting(text: string): string {
+  return text.replace(/[.-]+/g, " ").replace(/^./, (first) => first.toUpperCase());
+}
+
+export function groupSettings(settings: readonly KubeObject[]): { prefix: string; label: MessageDescriptor | undefined; items: KubeObject[] }[] {
+  const groups = new Map<string, KubeObject[]>();
+  for (const item of settings) {
+    const prefix = item.metadata.name.split(".")[0] ?? "";
+    const items = groups.get(prefix);
+    if (items) items.push(item);
+    else groups.set(prefix, [item]);
+  }
+  const ordered = [...settingGroupOrder.filter((prefix) => groups.has(prefix)), ...[...groups.keys()].filter((prefix) => !Object.hasOwn(groupLabels, prefix)).sort()];
+  const priority = (name: string) => platformOrder.includes(name) ? platformOrder.indexOf(name) : platformOrder.length;
   return ordered.map((prefix) => ({
     prefix,
-    items: settings.filter((setting) => prefixOf(setting) === prefix).sort((left, right) => left.metadata.name.localeCompare(right.metadata.name)),
+    label: Object.hasOwn(groupLabels, prefix) ? groupLabels[prefix] : undefined,
+    items: (groups.get(prefix) ?? []).sort((left, right) => priority(left.metadata.name) - priority(right.metadata.name) || left.metadata.name.localeCompare(right.metadata.name)),
   }));
 }

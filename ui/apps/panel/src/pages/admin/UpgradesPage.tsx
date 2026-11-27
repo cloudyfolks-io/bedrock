@@ -2,8 +2,7 @@ import { useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { useLingui } from "@lingui/react/macro";
 import { msg } from "@lingui/core/macro";
-import type { MessageDescriptor } from "@lingui/core";
-import { Badge, Button, Select, Table, TableBody, TableCell, TableHead, TableHeaderCell, TableRow, useToast } from "@bedrock/design";
+import { Badge, Button, Select, TableBody, TableCell, TableHead, TableHeaderCell, TableRow, useToast } from "@bedrock/design";
 import { useHttp } from "../../api/HttpProvider";
 import { conditionOf, kubeClient, listKey } from "../../api/kube";
 import type { KubeObject } from "../../api/types";
@@ -22,9 +21,11 @@ import { useLocale } from "../../LocaleProvider";
 import { listAt, textAt } from "../../resources/path";
 import { definitionFor, refOf, type ResourceDef } from "../../resources/registry";
 import { useLiveList } from "../../stream/live";
+import styles from "../operator.module.css";
+import { OperatorSection as Section, OperatorTable } from "./OperatorSection";
 import { phaseSteps, upgradeTargets } from "./upgradeHelpers";
 
-const stateLabels: Record<string, MessageDescriptor> = {
+const stateLabels = {
   done: msg({ id: "upgrades.step.done", message: "Done" }),
   active: msg({ id: "upgrades.step.active", message: "In progress" }),
   pending: msg({ id: "upgrades.step.pending", message: "Pending" }),
@@ -47,6 +48,7 @@ function requireDef(plural: string): ResourceDef {
 
 export default function UpgradesPage() {
   const { t, i18n } = useLingui();
+  const title = t({ id: "nav.item.upgrades", message: "Upgrades" });
   const { locale } = useLocale();
   const http = useHttp();
   const toast = useToast();
@@ -76,7 +78,7 @@ export default function UpgradesPage() {
     } catch (error) {
       toast.show({ tone: "danger", title: t({ id: "action.error.failed", message: "The action failed" }), description: error instanceof Error ? error.message : "" });
     } finally {
-      await queryClient.invalidateQueries({ queryKey: listKey(refOf(clusterDef), undefined, {}) });
+      await queryClient.invalidateQueries({ queryKey: listKey(refOf(clusterDef), undefined, {}) }, { cancelRefetch: false });
       setSubmitting(false);
     }
   }
@@ -87,13 +89,13 @@ export default function UpgradesPage() {
   if (clusters.isError || releases.isError) {
     return (
       <>
-        <PageHeader title={t({ id: "nav.item.upgrades", message: "Upgrades" })} />
+        <PageHeader title={title} />
         <QueryFailure error={clusters.error ?? releases.error} retry={() => void Promise.all([clusters.refetch(), releases.refetch()])} />
       </>
     );
   }
   if (!cluster) {
-    return <EmptyState title={t({ id: "list.empty.title", message: "Nothing here yet" })} />;
+    return <><PageHeader title={title} /><EmptyState title={t({ id: "list.empty.title", message: "Nothing here yet" })} /></>;
   }
   const phase = textAt(cluster, "status.phase");
   const current = textAt(cluster, "status.version");
@@ -101,7 +103,6 @@ export default function UpgradesPage() {
   const action = textAt(cluster, "spec.upgrade.action");
   const activeTarget = textAt(cluster, "status.upgrade.to");
   const failedPhase = textAt(cluster, "status.upgrade.failedPhase");
-  const message = textAt(cluster, "status.upgrade.message");
   const startedAt = textAt(cluster, "status.upgrade.startedAt");
   const phaseStartedAt = textAt(cluster, "status.upgrade.phaseStartedAt");
   const steps = phaseSteps(phase, failedPhase);
@@ -110,6 +111,8 @@ export default function UpgradesPage() {
   const progressing = conditionOf(cluster, "Progressing");
   const blocked = conditionOf(cluster, "UpgradeBlocked");
   const blockedRequest = blocked?.status === "True" && blocked.observedGeneration === cluster.metadata.generation;
+  const activeStep = steps.find((step) => step.state === "active" || step.state === "failed");
+  const message = textAt(cluster, "status.upgrade.message") || (activeStep || phase === "Failed" ? progressing?.message : "") || "";
   const upgradeRequested = phase === "Idle" && desired !== "" && desired !== current && !blockedRequest;
   const revision = cluster.metadata.resourceVersion ?? "";
   const writable = canPatch === "allowed" && revision !== "";
@@ -123,11 +126,12 @@ export default function UpgradesPage() {
     : action === "resume" ? t({ id: "upgrades.resumeRequested", message: "Resume requested." })
     : upgradeRequested ? t({ id: "upgrades.startRequested", message: "Upgrade requested." })
     : "";
+  const timeline = t({ id: "upgrades.timeline", message: "Upgrade phases" });
 
   return (
-    <>
+    <div className={styles.stack}>
       <PageHeader
-        title={t({ id: "nav.item.upgrades", message: "Upgrades" })}
+        title={title}
         actions={
           canUpdate === "allowed" ? (
             <Button variant="secondary" onClick={() => setEditing(true)}>
@@ -136,71 +140,103 @@ export default function UpgradesPage() {
           ) : null
         }
       />
-      <dl className="br-facts">
-        <dt>{t({ id: "col.version", message: "Version" })}</dt>
-        <dd><Ltr>{current || "—"}</Ltr></dd>
-        <dt>{t({ id: "col.desiredVersion", message: "Desired version" })}</dt>
-        <dd><Ltr>{desired}</Ltr></dd>
-        <dt>{t({ id: "col.phase", message: "Phase" })}</dt>
-        <dd>{phase ? <PhaseBadge phase={phase} /> : "—"}</dd>
-        <dt>{t({ id: "upgrades.window", message: "Maintenance window" })}</dt>
-        <dd>{textAt(cluster, "spec.maintenanceWindow") || "—"}</dd>
-        <dt>{t({ id: "upgrades.concurrency", message: "Node concurrency" })}</dt>
-        <dd>{textAt(cluster, "spec.nodeConcurrency") || "—"}</dd>
-        {startedAt ? (
-          <>
-            <dt>{t({ id: "upgrades.startedAt", message: "Upgrade start (UTC)" })}</dt>
-            <dd><time dateTime={startedAt}>{formatDateTime(startedAt, locale)}</time></dd>
-          </>
+      <Section title={t({ id: "upgrades.status", message: "Upgrade status" })}>
+        <dl className={styles.facts}>
+          <dt>{t({ id: "upgrades.currentVersion", message: "Current version" })}</dt>
+          <dd><Ltr>{current || "—"}</Ltr></dd>
+          <dt>{t({ id: "col.desiredVersion", message: "Desired version" })}</dt>
+          <dd><Ltr>{desired || "—"}</Ltr></dd>
+          {activeTarget && activeTarget !== desired ? (
+            <>
+              <dt>{t({ id: "upgrades.target", message: "Target version" })}</dt>
+              <dd><Ltr>{activeTarget}</Ltr></dd>
+            </>
+          ) : null}
+          <dt>{t({ id: "col.phase", message: "Phase" })}</dt>
+          <dd className={styles.actions}>
+            {phase ? <PhaseBadge phase={activeStep?.name ?? phase} /> : "—"}
+            {activeStep ? <Badge tone={activeStep.state === "failed" ? "danger" : "info"}>{i18n._(stateLabels[activeStep.state])}</Badge> : null}
+          </dd>
+        </dl>
+        {blockedRequest ? (
+          <div className={`${styles.sectionBody} ${styles.notice}`} role="status">
+            <div className={styles.actions}>
+              <Badge tone="warning">{t({ id: "upgrades.blocked", message: "Upgrade blocked" })}</Badge>
+              {blocked.reason ? <Ltr>{blocked.reason}</Ltr> : null}
+            </div>
+            {blocked.message ? <p dir="auto">{blocked.message}</p> : null}
+          </div>
         ) : null}
-        {phaseStartedAt ? (
-          <>
-            <dt>{t({ id: "upgrades.phaseStartedAt", message: "Phase start (UTC)" })}</dt>
-            <dd><time dateTime={phaseStartedAt}>{formatDateTime(phaseStartedAt, locale)}</time></dd>
-          </>
+        {requestMessage ? <p role="status" className={`${styles.sectionBody} ${styles.help}`}>{requestMessage}</p> : null}
+        {message ? <p role="status" dir="auto" className={`${styles.sectionBody} ${styles.help}`}>{message}</p> : null}
+        {startedAt || phaseStartedAt ? (
+          <dl className={`${styles.facts} ${styles.rule}`}>
+            {startedAt ? (
+              <>
+                <dt>{t({ id: "upgrades.startedAt", message: "Upgrade start (UTC)" })}</dt>
+                <dd><time dateTime={startedAt}>{formatDateTime(startedAt, locale)}</time></dd>
+              </>
+            ) : null}
+            {phaseStartedAt ? (
+              <>
+                <dt>{t({ id: "upgrades.phaseStartedAt", message: "Phase start (UTC)" })}</dt>
+                <dd><time dateTime={phaseStartedAt}>{formatDateTime(phaseStartedAt, locale)}</time></dd>
+              </>
+            ) : null}
+          </dl>
         ) : null}
-      </dl>
-      <ol className="br-steps" aria-label={t({ id: "upgrades.timeline", message: "Upgrade phases" })}>
-        {steps.map((step) => (
-          <li key={step.name} className="br-step" data-state={step.state} aria-current={step.state === "active" ? "step" : undefined}>
-            <span>{phaseMessages[step.name] ? i18n._(phaseMessages[step.name] as MessageDescriptor) : step.name}</span>{" "}
-            <Badge tone={step.state === "done" ? "success" : step.state === "failed" ? "danger" : step.state === "active" ? "info" : "neutral"}>{i18n._(stateLabels[step.state] as MessageDescriptor)}</Badge>
-          </li>
-        ))}
-      </ol>
-      {requestMessage ? <p role="status" className="br-help">{requestMessage}</p> : null}
-      {message ? <p role="status" className="br-help">{message}</p> : null}
-      {blockedRequest ? <p role="status" className="br-help">{blocked.message ?? blocked.reason}</p> : null}
+      </Section>
       {canStart ? (
-        <section className="br-section">
-          <h2>{t({ id: "upgrades.start.title", message: "Start an upgrade" })}</h2>
-          <Select
-            label={t({ id: "upgrades.target", message: "Target version" })}
-            value={target}
-            options={targets.map((release) => ({ value: textAt(release, "spec.version"), label: textAt(release, "spec.version") }))}
-            onValueChange={setTarget}
-          />
-          <Button variant="primary" disabled={!targetAvailable || submitting} onClick={() => setConfirmation({ action: "start", revision })}>
-            {t({ id: "upgrades.start.button", message: "Start upgrade" })}
-          </Button>
-        </section>
+        <Section title={t({ id: "upgrades.start.title", message: "Start an upgrade" })}>
+          <div className={`${styles.sectionBody} ${styles.formRow}`}>
+            <Select
+              label={t({ id: "upgrades.target", message: "Target version" })}
+              value={target}
+              options={targets.map((release) => ({ value: textAt(release, "spec.version"), label: textAt(release, "spec.version") }))}
+              onValueChange={setTarget}
+            />
+            <Button variant="primary" disabled={!targetAvailable || submitting} onClick={() => setConfirmation({ action: "start", revision })}>
+              {t({ id: "upgrades.start.button", message: "Start upgrade" })}
+            </Button>
+          </div>
+        </Section>
       ) : null}
       {canResume || canAbort ? (
-        <section className="br-section">
-          <h2>{t({ id: "upgrades.recovery", message: "Upgrade recovery" })}</h2>
-          {canResume ? (
-            <Button variant="secondary" disabled={submitting} onClick={() => void patch({ upgrade: { action: "resume" } })}>
-              {t({ id: "upgrades.resume", message: "Resume" })}
-            </Button>
-          ) : null}
-          {canAbort ? (
-            <Button variant="danger" disabled={submitting} onClick={() => setConfirmation({ action: "abort", revision })}>
-              {t({ id: "upgrades.abort", message: "Abort" })}
-            </Button>
-          ) : null}
-        </section>
+        <Section title={t({ id: "upgrades.recovery", message: "Upgrade recovery" })}>
+          <div className={`${styles.sectionBody} ${styles.actions}`}>
+            {canResume ? (
+              <Button variant="secondary" disabled={submitting} onClick={() => void patch({ upgrade: { action: "resume" } })}>
+                {t({ id: "upgrades.resume", message: "Resume" })}
+              </Button>
+            ) : null}
+            {canAbort ? (
+              <Button variant="danger" disabled={submitting} onClick={() => setConfirmation({ action: "abort", revision })}>
+                {t({ id: "upgrades.abort", message: "Abort" })}
+              </Button>
+            ) : null}
+          </div>
+        </Section>
       ) : null}
-      <Table caption={t({ id: "detail.conditions.title", message: "Conditions" })}>
+      <Section title={timeline}>
+        <ol className={styles.timeline} role="list" aria-label={timeline}>
+          {steps.map((step) => {
+            const label = phaseMessages[step.name];
+            return (
+              <li key={step.name} data-state={step.state} aria-current={step === activeStep ? "step" : undefined}>
+                <span>{label ? i18n._(label) : step.name}</span>
+                <Badge tone={step.state === "done" ? "success" : step.state === "failed" ? "danger" : step.state === "active" ? "info" : "neutral"}>{i18n._(stateLabels[step.state])}</Badge>
+              </li>
+            );
+          })}
+        </ol>
+        <dl className={`${styles.facts} ${styles.rule}`}>
+          <dt>{t({ id: "upgrades.window", message: "Maintenance window" })}</dt>
+          <dd>{textAt(cluster, "spec.maintenanceWindow") || "—"}</dd>
+          <dt>{t({ id: "upgrades.concurrency", message: "Node concurrency" })}</dt>
+          <dd>{textAt(cluster, "spec.nodeConcurrency") || "—"}</dd>
+        </dl>
+      </Section>
+      <OperatorTable title={t({ id: "detail.conditions.title", message: "Conditions" })}>
         <TableHead>
           <TableRow>
             <TableHeaderCell>{t({ id: "detail.conditions.type", message: "Type" })}</TableHeaderCell>
@@ -220,8 +256,8 @@ export default function UpgradesPage() {
             );
           })}
         </TableBody>
-      </Table>
-      <Table caption={t({ id: "upgrades.components", message: "Components" })}>
+      </OperatorTable>
+      <OperatorTable title={t({ id: "upgrades.components", message: "Components" })}>
         <TableHead>
           <TableRow>
             <TableHeaderCell>{t({ id: "col.name", message: "Name" })}</TableHeaderCell>
@@ -242,8 +278,8 @@ export default function UpgradesPage() {
             </TableRow>
           ))}
         </TableBody>
-      </Table>
-      <Table caption={t({ id: "upgrades.backups", message: "Upgrade backups" })}>
+      </OperatorTable>
+      <OperatorTable title={t({ id: "upgrades.backups", message: "Upgrade backups" })}>
         <TableHead>
           <TableRow>
             <TableHeaderCell>{t({ id: "upgrades.backup.time", message: "Time" })}</TableHeaderCell>
@@ -260,8 +296,12 @@ export default function UpgradesPage() {
             </TableRow>
           ))}
         </TableBody>
-      </Table>
-      <MetricChart title={t({ id: "upgrades.ceph", message: "Ceph usage" })} queries={["ceph.used", "ceph.capacity"]} unit="bytes" />
+      </OperatorTable>
+      <Section title={t({ id: "hostDetail.tab.metrics", message: "Metrics" })}>
+        <div className={styles.sectionBody}>
+          <MetricChart title={t({ id: "upgrades.ceph", message: "Ceph usage" })} queries={["ceph.used", "ceph.capacity"]} unit="bytes" />
+        </div>
+      </Section>
       <ConfirmSimpleDialog
         open={confirmStart}
         title={t({ id: "upgrades.start.title", message: "Start an upgrade" })}
@@ -290,6 +330,6 @@ export default function UpgradesPage() {
         onCancel={() => setConfirmation(null)}
       />
       {editing ? <LazyEditDialog def={clusterDef} object={cluster} onClose={() => setEditing(false)} /> : null}
-    </>
+    </div>
   );
 }

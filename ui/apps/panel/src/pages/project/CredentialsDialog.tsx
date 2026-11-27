@@ -67,9 +67,13 @@ function Body({ namespace, secretName, hidden }: { namespace: string; secretName
               ) : null}
               <Button
                 variant="secondary"
-                onClick={() => {
-                  void navigator.clipboard?.writeText(value);
-                  toast.show({ tone: "info", title: t({ id: "credentials.copied", message: `${name} copied` }) });
+                onClick={async () => {
+                  try {
+                    await navigator.clipboard.writeText(value);
+                    toast.show({ tone: "info", title: t({ id: "credentials.copied", message: `${name} copied` }) });
+                  } catch {
+                    toast.show({ tone: "danger", title: t({ id: "credentials.copyFailed", message: "Could not copy the credential" }) });
+                  }
                 }}
               >
                 {t({ id: "credentials.copy", message: `Copy ${name}` })}

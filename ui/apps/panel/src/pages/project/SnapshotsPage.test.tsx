@@ -21,11 +21,12 @@ function render() {
 }
 
 describe("SnapshotsPage", () => {
-  it("lists the volume, phase and retention", async () => {
+  it("lists the volume, phase, size and retention", async () => {
     render();
     const row = (await screen.findByRole("link", { name: "data-1-snap" })).closest("tr") as HTMLElement;
     expect(within(row).getByText("data-1")).toBeTruthy();
     expect(within(row).getByText("Ready")).toBeTruthy();
+    expect(within(row).getByText("100 GiB")).toBeTruthy();
     expect(within(row).getByText("168h")).toBeTruthy();
   });
 

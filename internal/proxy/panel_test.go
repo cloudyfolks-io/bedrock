@@ -11,10 +11,11 @@ import (
 
 func builtPanel() fstest.MapFS {
 	return fstest.MapFS{
-		"index.html":         {Data: []byte("<div id=\"root\"></div>")},
-		"assets/app-1a2b.js": {Data: []byte("console.log(1)")},
-		"favicon.svg":        {Data: []byte("<svg/>")},
-		".keep":              {Data: nil},
+		"index.html":                   {Data: []byte("<div id=\"root\"></div>")},
+		"assets/app-1a2b.js":           {Data: []byte("console.log(1)")},
+		"_next/static/chunks/app-1.js": {Data: []byte("console.log(2)")},
+		"favicon.svg":                  {Data: []byte("<svg/>")},
+		".keep":                        {Data: nil},
 	}
 }
 
@@ -32,6 +33,16 @@ func TestPanelFallbackAndNotBuilt(t *testing.T) {
 	}
 	if rec := serve(handler, http.MethodGet, "/assets/missing.js", "console.lab.example"); rec.Code != http.StatusNotFound {
 		t.Errorf("missing asset: %d", rec.Code)
+	}
+	if rec := serve(handler, http.MethodGet, "/_next/static/chunks/app-1.js", "console.lab.example"); rec.Code != http.StatusOK ||
+		rec.Header().Get("Cache-Control") != "public, max-age=31536000, immutable" || rec.Body.String() != "console.log(2)" {
+		t.Errorf("Next.js asset: %d %q", rec.Code, rec.Body.String())
+	}
+	if rec := serve(handler, http.MethodGet, "/_next/static/missing.js", "console.lab.example"); rec.Code != http.StatusNotFound {
+		t.Errorf("missing Next.js asset: %d", rec.Code)
+	}
+	if rec := serve(handler, http.MethodGet, "/brand/missing.woff2", "console.lab.example"); rec.Code != http.StatusNotFound {
+		t.Errorf("missing brand asset: %d", rec.Code)
 	}
 	if rec := serve(handler, http.MethodGet, "/favicon.svg", "console.lab.example"); rec.Code != http.StatusOK || rec.Body.String() != "<svg/>" {
 		t.Errorf("favicon: %d %q", rec.Code, rec.Body.String())

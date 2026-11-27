@@ -43,8 +43,9 @@ function render(list: KubeList, allow: (check: Check) => boolean = () => true, s
 describe("helpers", () => {
   it("phaseSteps marks done, active and pending", () => {
     const steps = phaseSteps("Workers");
-    expect(steps.map((step) => step.state)).toEqual(["done", "done", "done", "done", "done", "done", "active", "pending"]);
-    expect(phaseSteps("Failed", "Preload").map((step) => step.state)).toEqual(["done", "done", "done", "failed", "pending", "pending", "pending", "pending"]);
+    expect(steps.map((step) => step.state)).toEqual(["done", "done", "done", "done", "done", "active", "pending"]);
+    expect(phaseSteps("Failed", "Preload").map((step) => step.state)).toEqual(["done", "done", "failed", "pending", "pending", "pending", "pending"]);
+    expect(phaseSteps("Idle").every((step) => step.state === "pending")).toBe(true);
   });
 
   it("upgradeTargets lists releases that upgrade from the running version", () => {
@@ -54,15 +55,23 @@ describe("helpers", () => {
 });
 
 describe("UpgradesPage", () => {
-  it("TestPhaseTimeline shows text states", async () => {
+  it("leads with versions and the active step before the ordered phases", async () => {
     render(clusterWith({}));
+    const status = await screen.findByRole("region", { name: "Upgrade status" });
     const list = await screen.findByRole("list", { name: "Upgrade phases" });
+    expect(status.compareDocumentPosition(list) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(within(status).getByText("v0.0.9")).toBeTruthy();
+    expect(within(status).getByText("v0.1.0")).toBeTruthy();
+    expect(within(status).getByText("Workers")).toBeTruthy();
+    expect(within(status).getByText("In progress")).toBeTruthy();
+    expect(within(status).getByText("workers are upgrading")).toBeTruthy();
     const items = within(list).getAllByRole("listitem");
-    expect(items).toHaveLength(8);
-    expect(items[6]?.getAttribute("data-state")).toBe("active");
-    expect(within(items[6] as HTMLElement).getByText("In progress")).toBeTruthy();
+    expect(items).toHaveLength(7);
+    expect(within(list).queryByText("Idle")).toBeNull();
+    expect(items[5]?.getAttribute("aria-current")).toBe("step");
+    expect(within(items[5] as HTMLElement).getByText("In progress")).toBeTruthy();
     expect(within(items[0] as HTMLElement).getByText("Done")).toBeTruthy();
-    expect(within(items[7] as HTMLElement).getByText("Pending")).toBeTruthy();
+    expect(within(items[6] as HTMLElement).getByText("Pending")).toBeTruthy();
   });
 
   it("TestConditionsAndComponents", async () => {
@@ -96,7 +105,10 @@ describe("UpgradesPage", () => {
     const user = userEvent.setup();
     const list = clusterWith({ phase: "Idle", upgrade: null, conditions: [{ type: "UpgradeBlocked", status: "True", reason: "NodeNotReady", message: "host-03 is not ready", lastTransitionTime: "2026-10-01T10:00:00Z" }] });
     const { api } = render(list);
-    expect(await screen.findByText("host-03 is not ready", { selector: "p" })).toBeTruthy();
+    const status = within(await screen.findByRole("region", { name: "Upgrade status" }));
+    expect(status.getByText("Upgrade blocked")).toBeTruthy();
+    expect(status.getByText("NodeNotReady")).toBeTruthy();
+    expect(status.getByText("host-03 is not ready")).toBeTruthy();
     await user.click(screen.getByRole("combobox", { name: /Target version/ }));
     await user.click(await screen.findByRole("option", { name: "v0.1.0" }));
     await user.click(screen.getByRole("button", { name: "Start upgrade" }));
@@ -178,7 +190,7 @@ describe("UpgradesPage", () => {
       },
     }));
     expect(await screen.findByText("Waiting for host-03")).toBeTruthy();
-    expect(within(list).getAllByRole("listitem")[3]?.getAttribute("data-state")).toBe("active");
+    expect(within(list).getAllByRole("listitem")[2]?.getAttribute("data-state")).toBe("active");
     expect(screen.getByText("Upgrade start (UTC)").nextElementSibling?.querySelector("time")?.dateTime).toBe(upgrade.startedAt);
     expect(screen.getByText("Phase start (UTC)").nextElementSibling?.querySelector("time")?.dateTime).toBe(upgrade.phaseStartedAt);
     expect(screen.queryByRole("alertdialog")).toBeNull();

@@ -1,6 +1,7 @@
 import { msg } from "@lingui/core/macro";
 import type { MessageDescriptor } from "@lingui/core";
 import type { DiskStep, DiskValues, IsoStep, IsoValues, WizardImage } from "./types";
+import type { WizardVolume } from "./useWizardData";
 
 export const diskSteps: DiskStep[] = ["basics", "image", "size", "disks", "network", "access", "review"];
 export const isoSteps: IsoStep[] = ["basics", "iso", "size", "firmware", "disks", "network", "review"];
@@ -92,6 +93,39 @@ function subnetProblems(subnetRef: string): Problem[] {
   return subnetRef === "" ? [{ field: "subnetRef", message: messages.subnet }] : [];
 }
 
+export function volumeProblem(volumes: readonly WizardVolume[], name: string): MessageDescriptor | undefined {
+  const volume = volumes.find((candidate) => candidate.name === name);
+  if (!volume) {
+    return msg({ id: "wizard.volume.missing", message: "Not found in this project" });
+  }
+  if (volume.attachedTo !== "") {
+    const owner = volume.attachedTo;
+    return msg({ id: "wizard.volume.attached", message: `Attached to ${owner}` });
+  }
+  if (volume.claimedByVm !== "") {
+    const owner = volume.claimedByVm;
+    return msg({ id: "wizard.volume.claimedByVm", message: `Referenced by VM ${owner}` });
+  }
+  if (volume.phase === "InUse") {
+    return msg({ id: "wizard.volume.inUse", message: "In use; owner unknown" });
+  }
+  if (volume.phase !== "Available" || !volume.ready || volume.deleting) {
+    return msg({ id: "wizard.volume.unavailable", message: "Not available to attach" });
+  }
+  return undefined;
+}
+
+export function extraVolumeProblem(selected: readonly string[], volumes: readonly WizardVolume[] | undefined): Problem[] {
+  if (selected.length === 0) {
+    return [];
+  }
+  if (!volumes) {
+    return [{ field: "extraVolumes", message: msg({ id: "wizard.volume.unverified", message: "Could not verify the selected volumes. Retry or remove them to continue." }) }];
+  }
+  const name = selected.find((entry) => volumeProblem(volumes, entry) !== undefined);
+  return name === undefined ? [] : [{ field: "extraVolumes", message: msg({ id: "wizard.volume.remove", message: `Remove ${name} to continue.` }) }];
+}
+
 export function diskStepProblems(step: DiskStep, values: DiskValues, environment: StepEnvironment): Problem[] {
   switch (step) {
     case "basics":
@@ -113,12 +147,21 @@ export function diskStepProblems(step: DiskStep, values: DiskValues, environment
   }
 }
 
+export function readyIsos(images: readonly WizardImage[]): WizardImage[] {
+  const projectNames = new Set(images.filter(({ scope }) => scope === "project").map(({ name }) => name));
+  return images.filter(({ type, phase, scope, name }) => type === "iso" && phase === "Ready" && (scope === "project" || !projectNames.has(name)));
+}
+
 export function isoStepProblems(step: IsoStep, values: IsoValues, environment: StepEnvironment): Problem[] {
   switch (step) {
     case "basics":
       return nameProblems(values.name, environment.vmNames);
     case "iso":
-      return values.isoName === "" ? [{ field: "isoName", message: messages.chooseIso }] : [];
+      if (values.isoName === "") {
+        return [{ field: "isoName", message: messages.chooseIso }];
+      }
+      return readyIsos(environment.images).some(({ name }) => name === values.isoName)
+        ? [] : [{ field: "isoName", message: msg({ id: "wizard.iso.notReady", message: "Choose an ISO that is ready." }) }];
     case "size":
       return sizeProblems(values);
     case "disks":

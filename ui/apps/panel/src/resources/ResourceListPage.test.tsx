@@ -1,7 +1,7 @@
 import { act, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { Route, Routes } from "react-router";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import type { Check } from "../api/types";
 import { createFakeSockets } from "../test/fakeSocket";
 import { virtualMachines } from "../test/fixtures";
@@ -76,9 +76,13 @@ describe("ResourceListPage", () => {
     const user = userEvent.setup();
     const { container } = renderVms();
     await screen.findByRole("link", { name: "web-1" });
+    const table = screen.getByRole("table");
+    expect(table.closest("[tabindex]")?.getAttribute("tabindex")).toBe("0");
     const names = () => [...container.querySelectorAll("tbody tr td:first-child")].map((cell) => cell.textContent);
     expect(names()).toEqual(["db-1", "old", "web-1"]);
-    await user.click(screen.getByRole("button", { name: "Name" }));
+    const sortByName = screen.getByRole("button", { name: "Name" });
+    sortByName.focus();
+    await user.keyboard("{Enter}");
     expect(screen.getByRole("columnheader", { name: "Name" }).getAttribute("aria-sort")).toBe("descending");
     expect(names()).toEqual(["web-1", "old", "db-1"]);
     await user.type(screen.getByLabelText("Filter by name"), "web");
@@ -86,6 +90,24 @@ describe("ResourceListPage", () => {
     await user.clear(screen.getByLabelText("Filter by name"));
     await user.type(screen.getByLabelText("Filter by name"), "zzz");
     expect(await screen.findByText("No match")).toBeTruthy();
+  });
+
+  it("shows one compact row with status, address and actions, and keeps mobile sorting", async () => {
+    vi.stubGlobal("matchMedia", () => ({ matches: true, addEventListener() {}, removeEventListener() {} }));
+    try {
+      const user = userEvent.setup();
+      renderVms({ allow: (check) => check.verb === "delete" });
+      const list = await screen.findByRole("list", { name: "Virtual machines" });
+      expect(screen.queryByRole("table")).toBeNull();
+      const source = within(list).getByRole("link", { name: "web-1" }).closest("li")!;
+      expect(within(source).getByText("Running")).toBeTruthy();
+      expect(within(source).getByText("10.100.0.5")).toBeTruthy();
+      expect(await within(source).findByRole("button", { name: "Actions for web-1" })).toBeTruthy();
+      await user.click(screen.getByRole("button", { name: "Sort descending" }));
+      expect(within(list).getAllByRole("listitem")[0]?.textContent).toContain("web-1");
+    } finally {
+      vi.unstubAllGlobals();
+    }
   });
 
   it("TestForbiddenListShowsNoAccess", async () => {

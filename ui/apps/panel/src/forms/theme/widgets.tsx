@@ -66,12 +66,13 @@ export function TextareaWidget(props: WidgetProps) {
 
 export function SelectWidget(props: WidgetProps) {
   const error = firstError(props);
-  const options = (props.options.enumOptions ?? []).map((option) => ({ value: String(option.value), label: String(option.label) }));
+  const options = (props.options.enumOptions ?? []).map((option) => ({ value: String(option.value), label: option.value === "" && props.placeholder ? props.placeholder : String(option.label) }));
   return (
     <Select
       label={labelOf(props)}
       value={props.value === undefined || props.value === null ? "" : String(props.value)}
       options={options}
+      {...(props.placeholder ? { placeholder: props.placeholder } : {})}
       onValueChange={(next) => props.onChange(next === "" ? undefined : next)}
       {...(error ? { error } : {})}
       disabled={props.disabled || props.readonly}

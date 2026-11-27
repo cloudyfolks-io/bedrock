@@ -1,6 +1,8 @@
 import { useLingui } from "@lingui/react/macro";
-import { Checkbox, NumberField, Select, Switch, TextField } from "@bedrock/design";
+import { Button, Checkbox, NumberField, Select, Switch, TextField } from "@bedrock/design";
 import type { WizardData } from "../useWizardData";
+import { volumeProblem } from "../wizardSteps";
+import styles from "../wizard.module.css";
 
 export interface Common {
   name: string;
@@ -69,15 +71,59 @@ export function DisksStep({ values, set, data, errors, extra }: StepProps<Common
     <>
       <NumberField label={t({ id: "wizard.rootDisk", message: "Root disk size (GiB)" })} value={values.rootDiskGi} onValueChange={(rootDiskGi) => set({ rootDiskGi })} min={1} {...(errors.rootDiskGi ? { error: errors.rootDiskGi } : {})} />
       <TextField label={t({ id: "col.storageClass", message: "Storage class" })} name="storage-class" dir="ltr" autoComplete="off" value={values.storageClass} onChange={(storageClass) => set({ storageClass })} />
-      {extra ? (
-        <fieldset className="br-form-object">
-          <legend>{t({ id: "wizard.extraVolumes", message: "Attach existing volumes" })}</legend>
-          {data.volumes.map((volume) => (
-            <Checkbox key={volume} label={volume} checked={extra.selected.includes(volume)} onCheckedChange={(on) => extra.onChange(on ? withValue(extra.selected, volume) : withoutValue(extra.selected, volume))} />
-          ))}
-        </fieldset>
-      ) : null}
+      {extra ? <ExistingVolumes data={data} {...extra} error={errors.extraVolumes} /> : null}
     </>
+  );
+}
+
+function ExistingVolumes({ data, selected, onChange, error }: {
+  data: WizardData;
+  selected: string[];
+  onChange: (volumes: string[]) => void;
+  error: string | undefined;
+}) {
+  const { t, i18n } = useLingui();
+  const { volumes, volumeStatus, refreshVolumes } = data;
+  const names = [...new Set([...(volumes ?? []).map(({ name }) => name), ...selected])];
+  return (
+    <fieldset className="br-form-object">
+      <legend>{t({ id: "wizard.extraVolumes", message: "Attach existing volumes" })}</legend>
+      {volumeStatus === "loading" ? (
+        <p className={styles.note} role="status">{t({ id: "wizard.volumes.loading", message: "Loading project volumes…" })}</p>
+      ) : volumeStatus !== "ready" ? (
+        <div className={styles.inlineActions}>
+          <p className={styles.note} role="status">{volumeStatus === "vm-error"
+            ? t({ id: "wizard.volumes.claimsError", message: "Could not verify which volumes are referenced by virtual machines." })
+            : t({ id: "wizard.volumes.error", message: "Could not load project volumes." })}</p>
+          <Button variant="secondary" onClick={() => void refreshVolumes()}>{t({ id: "common.action.retry", message: "Retry" })}</Button>
+        </div>
+      ) : volumes?.length === 0 ? (
+        <p className={styles.note}>{t({ id: "wizard.volumes.empty", message: "No existing volumes in this project." })}</p>
+      ) : null}
+      {error ? <p className={`br-field-error ${styles.note}`} role="alert" tabIndex={-1} aria-invalid="true">{error}</p> : null}
+      {names.map((name) => {
+        const problem = volumes && volumeProblem(volumes, name);
+        const checked = selected.includes(name);
+        const unavailable = !volumes || problem !== undefined;
+        return (
+          <div className={styles.inlineActions} key={name}>
+            <Checkbox
+              label={problem ? `${name} · ${i18n._(problem)}` : name}
+              checked={checked}
+              disabled={unavailable}
+              onCheckedChange={(on) => {
+                if (!unavailable) onChange(on ? withValue(selected, name) : withoutValue(selected, name));
+              }}
+            />
+            {checked && unavailable ? (
+              <Button variant="secondary" onClick={() => onChange(withoutValue(selected, name))}>
+                {t({ id: "wizard.volume.removeAction", message: `Remove ${name}` })}
+              </Button>
+            ) : null}
+          </div>
+        );
+      })}
+    </fieldset>
   );
 }
 

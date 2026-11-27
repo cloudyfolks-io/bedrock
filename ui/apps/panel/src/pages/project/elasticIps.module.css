@@ -1,0 +1,15 @@
+.fields {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: .75rem;
+}
+
+.fields > .fields {
+  padding-block-start: .75rem;
+  border-block-start: 1px solid var(--br-color-border);
+}
+
+.fields p {
+  margin: 0;
+  color: var(--br-color-text-muted);
+}

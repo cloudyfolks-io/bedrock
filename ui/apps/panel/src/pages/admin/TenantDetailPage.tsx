@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { Link, useParams } from "react-router";
 import { useLingui } from "@lingui/react/macro";
+import { msg } from "@lingui/core/macro";
 import { Button, Progress, Table, TableBody, TableCell, TableHead, TableHeaderCell, TableRow } from "@bedrock/design";
 import type { KubeObject } from "../../api/types";
 import { useCans } from "../../authz/authz";
@@ -10,13 +11,27 @@ import { PageHeader } from "../../components/PageHeader";
 import { QueryFailure } from "../../components/QueryFailure";
 import { Spinner } from "../../components/Spinner";
 import { LazyCreateDialog, LazyEditDialog } from "../../forms/LazyDialogs";
-import { formatQuantity, parseQuantity } from "../../format";
+import { formatBytes, formatNumber, parseQuantity } from "../../format";
+import { useLocale } from "../../LocaleProvider";
 import { listAt, textAt } from "../../resources/path";
 import { definitionFor, refOf, type ResourceDef } from "../../resources/registry";
 import { useActionRunner } from "../../resources/useActionRunner";
 import { useLiveList, useLiveObject } from "../../stream/live";
+import styles from "../operator.module.css";
+import { OperatorSection } from "./OperatorSection";
 
-const quotaKeys = ["cpu", "memory", "storage", "projects", "elasticIPs"];
+const quotaLabels = {
+  cpu: msg({ id: "wizard.cores", message: "CPU cores" }),
+  memory: msg({ id: "col.memory", message: "Memory" }),
+  storage: msg({ id: "tenantDetail.quota.storage", message: "Storage" }),
+  projects: msg({ id: "tenantDetail.projects", message: "Projects" }),
+  elasticIPs: msg({ id: "nav.item.elasticIps", message: "Elastic IPs" }),
+};
+const quotaKeys = Object.keys(quotaLabels) as (keyof typeof quotaLabels)[];
+const quotaBytes = msg({
+  id: "tenantDetail.quota.bytes",
+  message: "{number} {unit, select, KiB {KiB} MiB {MiB} GiB {GiB} TiB {TiB} PiB {PiB} other {B}}",
+});
 
 function required(plural: string): ResourceDef {
   const def = definitionFor(plural);
@@ -31,21 +46,36 @@ function amount(value: unknown): number {
 }
 
 function QuotaRows({ tenant }: { tenant: KubeObject }) {
-  const { t } = useLingui();
+  const { t, i18n } = useLingui();
+  const { locale } = useLocale();
   const quota = (tenant.spec?.quota ?? {}) as Record<string, unknown>;
   const usage = (tenant.status?.usage ?? {}) as Record<string, unknown>;
   const keys = quotaKeys.filter((key) => quota[key] !== undefined);
   if (keys.length === 0) {
-    return <p>{t({ id: "tenantDetail.noQuota", message: "No quota is set." })}</p>;
+    return <p className={`${styles.sectionBody} ${styles.help}`}>{t({ id: "tenantDetail.noQuota", message: "No quota is set." })}</p>;
+  }
+  function formatAmount(key: keyof typeof quotaLabels, value: number, raw: unknown): string {
+    if (!Number.isFinite(value)) return typeof raw === "string" ? raw : "—";
+    if (key !== "memory" && key !== "storage") return formatNumber(value, locale);
+    const [number = "", unit = "B"] = formatBytes(value, locale).split(" ");
+    return i18n._({ ...quotaBytes, values: { number, unit } });
   }
   return (
-    <ul className="br-quota">
+    <ul className={styles.quota} role="list">
       {keys.map((key) => {
-        const used = amount(usage[key] ?? 0);
+        const used = amount(usage[key]);
         const max = amount(quota[key]);
+        const resource = i18n._(quotaLabels[key]);
+        const limit = formatAmount(key, max, quota[key]);
+        const usedDisplay = formatAmount(key, used, usage[key]);
+        const label = usage[key] === undefined
+          ? t({ id: "tenantDetail.quota.noUsage", message: `${resource}: ${limit} limit (usage not reported)` })
+          : t({ id: "tenantDetail.quota.usage", message: `${resource}: ${usedDisplay} / ${limit}` });
         return (
-          <li key={key}>
-            <Progress label={`${key}: ${String(usage[key] ?? 0)} / ${String(quota[key])}`} value={Number.isFinite(used) ? used : 0} max={Number.isFinite(max) && max > 0 ? max : 1} />
+          <li key={key} className={styles.sectionBody}>
+            {Number.isFinite(used) && Number.isFinite(max) && max > 0
+              ? <Progress label={label} value={Math.min(used, max)} max={max} />
+              : label}
           </li>
         );
       })}
@@ -83,7 +113,7 @@ export default function TenantDetailPage() {
   const deleteAction = projectDef.actions.find((action) => action.id === "delete");
 
   return (
-    <>
+    <div className={styles.stack}>
       <PageHeader
         title={textAt(tenant.data, "spec.displayName") || name}
         breadcrumbs={[{ label: t({ id: "nav.item.tenants", message: "Tenants" }), to: "/admin/tenants" }, { label: name }]}
@@ -95,28 +125,28 @@ export default function TenantDetailPage() {
           ) : null
         }
       />
-      <dl className="br-facts">
+      <dl className={`${styles.surface} ${styles.facts}`}>
         <dt>{t({ id: "col.vpcCidr", message: "VPC CIDR" })}</dt>
-        <dd><Ltr>{textAt(tenant.data, "spec.network.vpcCIDR")}</Ltr></dd>
+        <dd><Ltr>{textAt(tenant.data, "spec.network.vpcCIDR") || "—"}</Ltr></dd>
         <dt>{t({ id: "col.owners", message: "Owners" })}</dt>
         <dd>{(listAt(tenant.data, "spec.owners") as { kind: string; name: string }[]).map((owner) => `${owner.kind} ${owner.name}`).join(", ") || "—"}</dd>
-        <dt>{t({ id: "tenantDetail.memoryQuota", message: "Memory quota" })}</dt>
-        <dd>{textAt(tenant.data, "spec.quota.memory") ? formatQuantity(textAt(tenant.data, "spec.quota.memory")) : "—"}</dd>
       </dl>
-      <section className="br-section">
-        <h2>{t({ id: "tenantDetail.quota", message: "Quota use" })}</h2>
+      <OperatorSection title={t({ id: "tenantDetail.quota", message: "Quota use" })}>
         <QuotaRows tenant={tenant.data} />
-      </section>
-      <section className="br-section">
-        <h2>{t({ id: "tenantDetail.projects", message: "Projects" })}</h2>
-        {canCreate === "allowed" && projects.isSuccess ? (
+      </OperatorSection>
+      <OperatorSection title={t({ id: "tenantDetail.projects", message: "Projects" })} actions={
+        canCreate === "allowed" && projects.isSuccess ? (
           <Button variant="primary" onClick={() => setCreating(true)}>
             {t({ id: "tenantDetail.createProject", message: "Create project" })}
           </Button>
-        ) : null}
+        ) : null
+      }>
         {projects.isPending ? <Spinner /> : null}
         {projects.isError ? <QueryFailure error={projects.error} retry={() => void projects.refetch()} /> : null}
-        {projects.isSuccess ? <Table caption={t({ id: "tenantDetail.projects", message: "Projects" })}>
+        {projects.isSuccess && own.length === 0 ? (
+          <p className={`${styles.sectionBody} ${styles.help}`}>{t({ id: "tenantDetail.projectsEmpty", message: "No projects in this tenant." })}</p>
+        ) : null}
+        {projects.isSuccess && own.length > 0 ? <Table caption={t({ id: "tenantDetail.projects", message: "Projects" })}>
           <TableHead>
             <TableRow>
               <TableHeaderCell>{t({ id: "col.name", message: "Name" })}</TableHeaderCell>
@@ -132,26 +162,28 @@ export default function TenantDetailPage() {
                 <TableCell><Ltr>{textAt(project, "status.namespace")}</Ltr></TableCell>
                 <TableCell>{String(listAt(project, "spec.members").length)}</TableCell>
                 <TableCell>
-                  {canUpdate === "allowed" ? (
-                    <Button variant="secondary" onClick={() => setEditingProject(project)}>
-                      {t({ id: "tenantDetail.editProject", message: `Edit ${project.metadata.name}` })}
-                    </Button>
-                  ) : null}
-                  {canDelete === "allowed" && deleteAction ? (
-                    <Button variant="danger" onClick={() => runner.request(deleteAction, project)}>
-                      {t({ id: "tenantDetail.deleteProject", message: `Delete ${project.metadata.name}` })}
-                    </Button>
-                  ) : null}
+                  <div className={styles.actions}>
+                    {canUpdate === "allowed" ? (
+                      <Button variant="secondary" onClick={() => setEditingProject(project)}>
+                        {t({ id: "tenantDetail.editProject", message: `Edit ${project.metadata.name}` })}
+                      </Button>
+                    ) : null}
+                    {canDelete === "allowed" && deleteAction ? (
+                      <Button variant="danger" onClick={() => runner.request(deleteAction, project)}>
+                        {t({ id: "tenantDetail.deleteProject", message: `Delete ${project.metadata.name}` })}
+                      </Button>
+                    ) : null}
+                  </div>
                 </TableCell>
               </TableRow>
             ))}
           </TableBody>
         </Table> : null}
-      </section>
+      </OperatorSection>
       {runner.dialogs}
       {creating ? <LazyCreateDialog def={projectDef} initialSpec={{ tenantRef: name }} lockedPaths={["tenantRef"]} onClose={() => setCreating(false)} /> : null}
       {editingProject ? <LazyEditDialog def={projectDef} object={editingProject} onClose={() => setEditingProject(undefined)} /> : null}
       {editingTenant ? <LazyEditDialog def={tenantDef} object={tenant.data} onClose={() => setEditingTenant(false)} /> : null}
-    </>
+    </div>
   );
 }

@@ -7,6 +7,87 @@ msgstr ""
 "X-Generator: @lingui/cli\n"
 "Language: en\n"
 
+msgid "backups.restore.source.changed"
+msgstr "The backup changed. Close this dialog and select the backup again."
+
+msgid "backups.restore.target.changed"
+msgstr "The target changed. Confirm the name again to replace the current machine."
+
+msgid "wizard.volume.claimedByVm"
+msgstr "Referenced by VM {owner}"
+
+msgid "wizard.volumes.claimsError"
+msgstr "Could not verify which volumes are referenced by virtual machines."
+
+msgid "list.resultCount"
+msgstr "{rowCount} shown"
+
+msgid "list.sortBy"
+msgstr "Sort by"
+
+msgid "list.sortAscending"
+msgstr "Sort ascending"
+
+msgid "list.sortDescending"
+msgstr "Sort descending"
+
+msgid "metrics.denied"
+msgstr "You cannot view these metrics."
+
+msgid "metrics.failed"
+msgstr "Metrics did not load."
+
+msgid "metrics.loading"
+msgstr "Loading metrics…"
+
+msgid "metrics.noSamples"
+msgstr "No samples in this time range."
+
+msgid "metrics.partial"
+msgstr "Some metric series are missing."
+
+msgid "nav.scope.admin"
+msgstr "Administration"
+
+msgid "nav.scope.project"
+msgstr "Project resources"
+
+msgid "overview.updatesPaused"
+msgstr "Some live updates are paused."
+
+msgid "action.accepted"
+msgstr "Request accepted"
+
+msgid "credentials.copyFailed"
+msgstr "Could not copy the credential"
+
+msgid "images.upload.transferred"
+msgstr "File transferred"
+
+msgid "images.upload.processing"
+msgstr "The platform still needs to process the image."
+
+msgid "pendingWrites.action"
+msgstr "Requesting action"
+
+msgid "shell.userMenu.signingOut"
+msgstr "Signing out…"
+
+msgid "shell.userMenu.signOutFailed"
+msgstr "Could not sign out"
+
+msgid "pendingWrites.create"
+msgstr "Creating"
+
+msgid "pendingWrites.delete"
+msgstr "Deleting"
+
+msgid "pendingWrites.global"
+msgstr "Changes in progress"
+
+msgid "pendingWrites.update"
+msgstr "Saving"
+
 msgid "account.downloads.title"
 msgstr "Downloads"
 
@@ -752,8 +833,14 @@ msgstr "Refresh list"
 msgid "inventory.resourceType"
 msgstr "Resource type"
 
+msgid "inventory.rowsOnPage"
+msgstr "Rows on this page: {rowCount}"
+
 msgid "inventory.search"
 msgstr "Search"
+
+msgid "inventory.subtitle"
+msgstr "Find resources across projects and tenants."
 
 msgid "inventory.tenant"
 msgstr "Tenant"
@@ -969,6 +1056,36 @@ msgstr "You cannot list networks"
 
 msgid "networks.limit"
 msgstr "The network list is too large"
+
+msgid "overview.allHosts"
+msgstr "View all hosts"
+
+msgid "overview.hostList"
+msgstr "Hosts at a glance"
+
+msgid "overview.noHosts"
+msgstr "No hosts registered."
+
+msgid "overview.readiness"
+msgstr "Host readiness"
+
+msgid "overview.readinessDescription"
+msgstr "Reported readiness across registered hosts."
+
+msgid "overview.resourceSummary"
+msgstr "Resource summary"
+
+msgid "overview.restricted"
+msgstr "Access restricted"
+
+msgid "overview.subtitle"
+msgstr "Monitor cluster inventory and see which hosts are ready."
+
+msgid "overview.title"
+msgstr "Infrastructure overview"
+
+msgid "overview.unavailable"
+msgstr "Data unavailable"
 
 msgid "query.error"
 msgstr "The panel could not load this data."
@@ -1599,3 +1716,546 @@ msgstr "Cloud-init user data"
 
 msgid "wizard.virtioWin"
 msgstr "Attach the virtio-win drivers"
+
+msgid "account.downloads.caDescription"
+msgstr "Use this certificate to trust TLS connections to a cluster that uses a private CA."
+
+msgid "account.downloads.kubeconfigDescription"
+msgstr "Configure kubectl to connect to this Bedrock cluster."
+
+msgid "addons.addValues"
+msgstr "Add custom values"
+
+msgid "addons.advancedValues"
+msgstr "Advanced values (JSON)"
+
+msgid "addons.health"
+msgstr "Health"
+
+msgid "addons.noCustomValues"
+msgstr "No custom values"
+
+msgid "addons.valuesLabel"
+msgstr "{name} values"
+
+msgid "backups.history.id"
+msgstr "Backup ID"
+
+msgid "backups.history.schedule"
+msgstr "Backup schedule"
+
+msgid "backups.history.title"
+msgstr "Backup history"
+
+msgid "backups.restore.target.checking"
+msgstr "Checking whether the target exists…"
+
+msgid "backups.restore.target.error"
+msgstr "Could not check the target virtual machine."
+
+msgid "backups.restore.target.exists"
+msgstr "The target already exists. Choose replacement to restore over it."
+
+msgid "backups.restore.target.missing"
+msgstr "The target does not exist. This restore will create it."
+
+msgid "backups.restore.target.overwrite"
+msgstr "This restore will overwrite the existing machine."
+
+msgid "backups.restore.target.replaceMissing"
+msgstr "Replacement requires an existing target. Turn replacement off to restore this machine."
+
+msgid "backups.restore.target.unknown"
+msgstr "The target virtual machine could not be identified."
+
+msgid "backups.schedules"
+msgstr "Backup schedules"
+
+msgid "col.destination"
+msgstr "Destination"
+
+msgid "console.noEndpoint"
+msgstr "No console endpoint is available"
+
+msgid "detail.advanced"
+msgstr "Advanced"
+
+msgid "detail.copy.entry"
+msgstr "Copy {name} {0}"
+
+msgid "detail.copy.failure"
+msgstr "Could not copy to clipboard"
+
+msgid "detail.copy.field"
+msgstr "Copy {name}"
+
+msgid "detail.copy.label"
+msgstr "Copy"
+
+msgid "detail.copy.success"
+msgstr "Copied to clipboard"
+
+msgid "detail.field.addressPort"
+msgstr "Address and port"
+
+msgid "detail.field.appliedValue"
+msgstr "Applied value"
+
+msgid "detail.field.backupId"
+msgstr "Backup ID"
+
+msgid "detail.field.backupsEnabled"
+msgstr "Backups enabled"
+
+msgid "detail.field.finishedAt"
+msgstr "Finished at"
+
+msgid "detail.field.instances"
+msgstr "Instances"
+
+msgid "detail.field.internalAddress"
+msgstr "Internal address"
+
+msgid "detail.field.lastBackup"
+msgstr "Last backup"
+
+msgid "detail.field.objects"
+msgstr "Objects"
+
+msgid "detail.field.port"
+msgstr "Port"
+
+msgid "detail.field.projectName"
+msgstr "Project name"
+
+msgid "detail.field.proxyAddress"
+msgstr "Proxy address"
+
+msgid "detail.field.publicKey"
+msgstr "Public key"
+
+msgid "detail.field.readyReplicas"
+msgstr "Ready replicas"
+
+msgid "detail.field.requestedValue"
+msgstr "Requested value"
+
+msgid "detail.field.resultImage"
+msgstr "Result image"
+
+msgid "detail.field.revision"
+msgstr "Revision"
+
+msgid "detail.summary.empty"
+msgstr "No details are available yet."
+
+msgid "detail.summary.title"
+msgstr "Overview"
+
+msgid "eip.attach.lb.empty"
+msgstr "No load balancer in this project references this Elastic IP. Set its Elastic IP field first."
+
+msgid "eip.attach.targets.error"
+msgstr "Targets could not be loaded. Check your access and try again."
+
+msgid "eip.attach.targets.loading"
+msgstr "Loading targets…"
+
+msgid "eip.attach.unavailable"
+msgstr "This Elastic IP is no longer available to attach."
+
+msgid "eip.attach.vm.empty"
+msgstr "No compatible virtual machine network interfaces are available."
+
+msgid "hostDetail.appliedEmpty"
+msgstr "No configuration steps reported."
+
+msgid "hostDetail.cpuEmpty"
+msgstr "No CPU or memory data reported."
+
+msgid "hostDetail.disksEmpty"
+msgstr "No disks reported."
+
+msgid "hostDetail.firmwareEmpty"
+msgstr "No firmware or system data reported."
+
+msgid "hostDetail.nicsEmpty"
+msgstr "No network interfaces reported."
+
+msgid "hostDetail.pciEmpty"
+msgstr "No PCI devices reported."
+
+msgid "lb.elasticIp.empty"
+msgstr "No compatible Elastic IPs are available to select. Check your access or reserve an Elastic IP in this project."
+
+msgid "lb.elasticIp.help"
+msgstr "For a public frontend, select an Elastic IP here. Then use Attach on the Elastic IP."
+
+msgid "lb.elasticIp.internal"
+msgstr "Internal only"
+
+msgid "registry.quota.unlimited"
+msgstr "Unlimited"
+
+msgid "settings.awaitingValidation"
+msgstr "Awaiting validation"
+
+msgid "settings.categories"
+msgstr "Categories"
+
+msgid "settings.configured"
+msgstr "Configured"
+
+msgid "settings.currentValue"
+msgstr "Current value"
+
+msgid "settings.description"
+msgstr "Manage cluster-wide configuration and see which values pass validation."
+
+msgid "settings.details"
+msgstr "Details"
+
+msgid "settings.disabled"
+msgstr "Disabled"
+
+msgid "settings.editLabel"
+msgstr "Edit {label}"
+
+msgid "settings.enabled"
+msgstr "Enabled"
+
+msgid "settings.group.alertmanager"
+msgstr "Alerting"
+
+msgid "settings.group.audit"
+msgstr "Audit logging"
+
+msgid "settings.group.authn"
+msgstr "Sign-in and sessions"
+
+msgid "settings.group.backup"
+msgstr "Backups"
+
+msgid "settings.group.build"
+msgstr "Builds"
+
+msgid "settings.group.clusters"
+msgstr "Kubernetes clusters"
+
+msgid "settings.group.cnpg"
+msgstr "PostgreSQL operator"
+
+msgid "settings.group.compute"
+msgstr "Compute limits"
+
+msgid "settings.group.container"
+msgstr "Containers"
+
+msgid "settings.group.database"
+msgstr "Managed databases"
+
+msgid "settings.group.descheduler"
+msgstr "Descheduler"
+
+msgid "settings.group.dns"
+msgstr "DNS"
+
+msgid "settings.group.egress"
+msgstr "Outbound traffic"
+
+msgid "settings.group.images"
+msgstr "Image catalog"
+
+msgid "settings.group.kata"
+msgstr "Kata runtime"
+
+msgid "settings.group.letsencrypt"
+msgstr "Let’s Encrypt"
+
+msgid "settings.group.loki"
+msgstr "Log collection"
+
+msgid "settings.group.migration"
+msgstr "Live migration"
+
+msgid "settings.group.network"
+msgstr "Networking"
+
+msgid "settings.group.objectstorage"
+msgstr "Object storage"
+
+msgid "settings.group.overcommit"
+msgstr "Overcommit"
+
+msgid "settings.group.perconaPs"
+msgstr "MySQL operator"
+
+msgid "settings.group.platform"
+msgstr "Platform access"
+
+msgid "settings.group.registry"
+msgstr "Container registry"
+
+msgid "settings.group.storage"
+msgstr "Storage"
+
+msgid "settings.group.tenancy"
+msgstr "Tenancy"
+
+msgid "settings.group.virt"
+msgstr "Virtualization"
+
+msgid "settings.label.additionalCa"
+msgstr "Additional trusted certificates"
+
+msgid "settings.label.alertWebhook"
+msgstr "Alert webhook"
+
+msgid "settings.label.auditLevel"
+msgstr "Read request audit level"
+
+msgid "settings.label.authnLockout"
+msgstr "Sign-in lockout threshold"
+
+msgid "settings.label.authnRefreshTtl"
+msgstr "Refresh token lifetime"
+
+msgid "settings.label.authnSecondFactor"
+msgstr "Require a second factor"
+
+msgid "settings.label.authnSessionTtl"
+msgstr "Session lifetime"
+
+msgid "settings.label.backupArchiveRecipients"
+msgstr "Archive encryption recipients"
+
+msgid "settings.label.backupCredentials"
+msgstr "Backup credentials secret"
+
+msgid "settings.label.backupEtcd"
+msgstr "etcd snapshot schedule"
+
+msgid "settings.label.backupTarget"
+msgstr "Backup destination"
+
+msgid "settings.label.customTls"
+msgstr "Custom TLS secret"
+
+msgid "settings.label.imagesKeep"
+msgstr "Image versions to keep"
+
+msgid "settings.label.imagesRefresh"
+msgstr "Image refresh schedule"
+
+msgid "settings.label.kataEnabled"
+msgstr "Enable Kata at install"
+
+msgid "settings.label.letsencryptEmail"
+msgstr "Account email"
+
+msgid "settings.label.letsencryptSolver"
+msgstr "ACME challenge solver"
+
+msgid "settings.label.lokiEnabled"
+msgstr "Enable Loki at install"
+
+msgid "settings.label.lokiRetention"
+msgstr "Log retention (days)"
+
+msgid "settings.label.migrationNetwork"
+msgstr "Migration network VLAN"
+
+msgid "settings.label.migrationParallel"
+msgstr "Parallel live migrations"
+
+msgid "settings.label.networkDns"
+msgstr "Tenant DNS servers"
+
+msgid "settings.label.networkEipMode"
+msgstr "Elastic IP mode"
+
+msgid "settings.label.networkProviders"
+msgstr "Provider networks"
+
+msgid "settings.label.overcommitCpu"
+msgstr "CPU overcommit ratio"
+
+msgid "settings.label.overcommitMemory"
+msgstr "Memory overcommit ratio"
+
+msgid "settings.label.platformHost"
+msgstr "Platform hostname"
+
+msgid "settings.label.storageNetwork"
+msgstr "Storage network VLAN"
+
+msgid "settings.label.storageReplicas"
+msgstr "Ceph replicas"
+
+msgid "settings.label.tlsMode"
+msgstr "TLS certificate source"
+
+msgid "settings.label.virtEmulation"
+msgstr "Software emulation"
+
+msgid "settings.notSet"
+msgstr "Not set"
+
+msgid "settings.override"
+msgstr "Override"
+
+msgid "settings.rejected"
+msgstr "Rejected"
+
+msgid "settings.resultCount"
+msgstr "Settings shown: {count}"
+
+msgid "settings.saved"
+msgstr "Change saved"
+
+msgid "settings.search"
+msgstr "Search all settings"
+
+msgid "settings.searchResults"
+msgstr "Search results"
+
+msgid "settings.useDefault"
+msgstr "Use default"
+
+msgid "settings.validated"
+msgstr "Validated"
+
+msgid "settings.validationUnknown"
+msgstr "Validation unknown"
+
+msgid "settings.valueLabel"
+msgstr "Value for {label}"
+
+msgid "tenantDetail.projectsEmpty"
+msgstr "No projects in this tenant."
+
+msgid "tenantDetail.quota.bytes"
+msgstr "{number} {unit, select, KiB {KiB} MiB {MiB} GiB {GiB} TiB {TiB} PiB {PiB} other {B}}"
+
+msgid "tenantDetail.quota.noUsage"
+msgstr "{resource}: {limit} limit (usage not reported)"
+
+msgid "tenantDetail.quota.storage"
+msgstr "Storage"
+
+msgid "tenantDetail.quota.usage"
+msgstr "{resource}: {usedDisplay} / {limit}"
+
+msgid "upgrades.blocked"
+msgstr "Upgrade blocked"
+
+msgid "upgrades.currentVersion"
+msgstr "Current version"
+
+msgid "upgrades.status"
+msgstr "Upgrade status"
+
+msgid "vmDetail.actions.more"
+msgstr "More VM actions"
+
+msgid "vmDetail.overview.connection"
+msgstr "Connection"
+
+msgid "vmDetail.overview.hardware"
+msgstr "Hardware"
+
+msgid "volumes.expand.currentSize"
+msgstr "Current size"
+
+msgid "wizard.iso.askAdmin"
+msgstr "Ask a project administrator to make an ISO available."
+
+msgid "wizard.iso.empty"
+msgstr "No ready ISO images"
+
+msgid "wizard.iso.loadError"
+msgstr "Could not check all ISO images."
+
+msgid "wizard.iso.loading"
+msgstr "Checking for ready ISO images…"
+
+msgid "wizard.iso.notReady"
+msgstr "Choose an ISO that is ready."
+
+msgid "wizard.iso.refresh"
+msgstr "Refresh images"
+
+msgid "wizard.iso.selectionPending"
+msgstr "The selected ISO is not ready."
+
+msgid "wizard.iso.uploadHelp"
+msgstr "Upload an ISO, then wait for the platform to process it."
+
+msgid "wizard.iso.waitForReady"
+msgstr "Refresh after the platform finishes processing, or select another ready ISO."
+
+msgid "wizard.leave.submitting"
+msgstr "Leaving does not cancel a request that was already sent."
+
+msgid "wizard.review.advanced"
+msgstr "Advanced specification (JSON)"
+
+msgid "wizard.review.boot"
+msgstr "Boot"
+
+msgid "wizard.review.bootOrder"
+msgstr "Boot order"
+
+msgid "wizard.review.bootOrderIso"
+msgstr "Root disk, then CD-ROMs"
+
+msgid "wizard.review.extraCdroms"
+msgstr "Additional CD-ROMs"
+
+msgid "wizard.review.extraVolumes"
+msgstr "Existing volumes"
+
+msgid "wizard.review.none"
+msgstr "None selected"
+
+msgid "wizard.steps.progress"
+msgstr "Step {0} of {1}"
+
+msgid "wizard.volume.attached"
+msgstr "Attached to {owner}"
+
+msgid "wizard.volume.inUse"
+msgstr "In use; owner unknown"
+
+msgid "wizard.volume.missing"
+msgstr "Not found in this project"
+
+msgid "wizard.volume.remove"
+msgstr "Remove {name} to continue."
+
+msgid "wizard.volume.removeAction"
+msgstr "Remove {name}"
+
+msgid "wizard.volume.unavailable"
+msgstr "Not available to attach"
+
+msgid "wizard.volume.unverified"
+msgstr "Could not verify the selected volumes. Retry or remove them to continue."
+
+msgid "wizard.volumes.empty"
+msgstr "No existing volumes in this project."
+
+msgid "wizard.volumes.error"
+msgstr "Could not load project volumes."
+
+msgid "wizard.volumes.loading"
+msgstr "Loading project volumes…"
+
+msgid "metrics.stale"
+msgstr "Could not refresh metrics. Showing previous samples."
+
+msgid "registry.quota.default"
+msgstr "Platform default"
+
+msgid "registry.quota.gib"
+msgstr "{size} GiB"

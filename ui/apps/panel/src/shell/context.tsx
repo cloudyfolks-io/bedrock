@@ -1,19 +1,18 @@
 import { useEffect, type ReactNode } from "react";
-import { Navigate, useLocation, useMatch } from "react-router";
+import { Navigate, useMatch } from "react-router";
 import { useSession } from "../api/session";
 import { useProjects, type Project } from "../api/projects";
 import { readStored, writeStored } from "../storage";
-import type { Perspective } from "./navigation";
 
-export function usePerspective(): { perspective: Perspective; setPerspective: (perspective: Perspective) => void } {
-  const { pathname } = useLocation();
-  const perspective: Perspective = pathname === "/admin" || pathname.startsWith("/admin/") ? "admin" : pathname.startsWith("/p") ? "project" : (readStored("perspective") === "admin" ? "admin" : "project");
+export function useRememberScope() {
+  const admin = useMatch("/admin/*");
+  const project = useMatch("/p/*");
+  const scope = admin ? "admin" : project ? "project" : undefined;
   useEffect(() => {
-    if (pathname.startsWith("/admin") || pathname.startsWith("/p")) {
-      writeStored("perspective", perspective);
+    if (scope) {
+      writeStored("perspective", scope);
     }
-  }, [pathname, perspective]);
-  return { perspective, setPerspective: (next) => writeStored("perspective", next) };
+  }, [scope]);
 }
 
 export function useCurrentProjectName(): string | undefined {

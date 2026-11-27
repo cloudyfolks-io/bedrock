@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { cidrSummary, exposesSsh, isIp, listenerSummary, networkCidrs, ruleSummary } from "./summaries";
+import { cidrSummary, exposesSsh, isIp, listenerSummary, loadBalancerElasticIPOptions, networkCidrs, rulePorts, shortImageDigest } from "./summaries";
 
 describe("summaries", () => {
   it("cidrSummary counts addresses", () => {
@@ -16,10 +16,30 @@ describe("summaries", () => {
     expect(networkCidrs(network({}))).toBe("");
   });
 
-  it("TestRuleSummary", () => {
-    expect(ruleSummary({ protocol: "tcp", port: 22, cidr: "10.0.0.0/8" })).toBe("tcp 22 from 10.0.0.0/8");
-    expect(ruleSummary({ protocol: "tcp", port: 8000, endPort: 8100, securityGroupRef: "web" })).toBe("tcp 8000-8100 from group web");
-    expect(ruleSummary({ cidr: "0.0.0.0/0" })).toBe("all from 0.0.0.0/0");
+  it("shows single, ranged and unrestricted ports", () => {
+    expect(rulePorts({ port: 22 })).toBe("22");
+    expect(rulePorts({ port: 8000, endPort: 8100 })).toBe("8000-8100");
+    expect(rulePorts({})).toBe("—");
+  });
+
+  it("shortens only a full SHA-256 image digest", () => {
+    const image = "registry.test/postgres:17";
+    expect(shortImageDigest(`${image}@sha256:${"0123456789ab".padEnd(64, "d")}`)).toBe(`${image}@sha256:0123456789ab…`);
+    expect(shortImageDigest(image)).toBe(image);
+    expect(shortImageDigest(`${image}@sha256:abcd`)).toBe(`${image}@sha256:abcd`);
+  });
+
+  it("offers free and same-load-balancer addresses while preserving the saved reference", () => {
+    const items = [
+      { metadata: { name: "reserved" } },
+      { metadata: { name: "attached" }, spec: { target: { kind: "LoadBalancer", name: "web" } } },
+      { metadata: { name: "other-lb" }, spec: { target: { kind: "LoadBalancer", name: "other" } } },
+      { metadata: { name: "vm" }, spec: { target: { kind: "VirtualMachine", name: "web" } } },
+      { metadata: { name: "deleting", deletionTimestamp: "2026-11-27" } },
+    ];
+    expect(loadBalancerElasticIPOptions(items, "web", "missing")).toEqual(["", "reserved", "attached", "missing"]);
+    expect(loadBalancerElasticIPOptions(items, "", "")).toEqual(["", "reserved"]);
+    expect(loadBalancerElasticIPOptions([], "web", "existing")).toEqual(["", "existing"]);
   });
 
   it("listenerSummary", () => {

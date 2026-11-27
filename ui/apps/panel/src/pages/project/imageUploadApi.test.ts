@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { createHttp } from "../../api/http";
 import { FakeXhr } from "../../test/fakeXhr";
-import { isUploadUrl, requestUploadToken, uploadFile } from "./imageUpload";
+import { isUploadUrl, requestUploadToken, uploadFile } from "./imageUploadApi";
 
 describe("isUploadUrl", () => {
   it("accepts only https on upload.<host> without port or credentials", () => {
@@ -20,7 +20,9 @@ describe("TestNoTokenInUrls", () => {
     const grant = { url: "https://upload.lab.test/v1beta1/upload-async", token: "grant-secret-token", expiresAt: "2026-10-09T00:00:00Z" };
     const fetchMock = vi.fn(() => Promise.resolve(new Response(JSON.stringify(grant), { status: 200 })));
     const http = createHttp({ fetch: fetchMock as unknown as typeof fetch, csrf: () => csrf, onUnauthenticated: () => {} });
-    const received = await requestUploadToken(http, "web-ns", "installer");
+    const controller = new AbortController();
+    const received = await requestUploadToken(http, "web-ns", "installer", controller.signal);
+    expect(fetchMock).toHaveBeenCalledWith(expect.any(String), expect.objectContaining({ signal: controller.signal }));
     const pending = uploadFile(received.url, received.token, new File(["x"], "a.iso"), () => {}, new AbortController().signal);
     FakeXhr.latest().finish(200);
     await pending;
@@ -31,5 +33,11 @@ describe("TestNoTokenInUrls", () => {
       expect(url).not.toContain(grant.token);
     }
     expect(FakeXhr.latest().headers.Authorization).toBe(`Bearer ${grant.token}`);
+  });
+
+  it("does not start a transfer with an aborted signal", async () => {
+    const signal = AbortSignal.abort();
+    await expect(uploadFile("https://upload.lab.test", "token", new File(["x"], "a.iso"), () => {}, signal)).rejects.toMatchObject({ name: "AbortError" });
+    expect(FakeXhr.instances).toHaveLength(0);
   });
 });

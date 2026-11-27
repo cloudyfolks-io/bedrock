@@ -15,7 +15,7 @@ export function MenuButton({ label, items }: { label: string; items: MenuItem[] 
         <span aria-hidden="true">⋯</span>
       </Menu.Trigger>
       <Menu.Portal>
-        <Menu.Positioner>
+        <Menu.Positioner align="end" sideOffset={6} collisionPadding={8}>
           <Menu.Popup className="br-menu-popup">
             {items.map((item) => (
               <Menu.Item

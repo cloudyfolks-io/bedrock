@@ -138,6 +138,22 @@ describe("consoles", () => {
     expect(mocks.createSerial).not.toHaveBeenCalled();
   });
 
+  it("does not say a running VM is ready for console when no endpoint is available", () => {
+    const original = vm("web-1");
+    renderPanel(<ConsoleTab vm={{ ...original, status: { ...original.status, console: {} } }} allowVnc allowSerial />);
+    expect(screen.getByText("No console endpoint is available")).toBeTruthy();
+    expect(mocks.createVnc).not.toHaveBeenCalled();
+    expect(mocks.createSerial).not.toHaveBeenCalled();
+  });
+
+  it("selects Serial when it is the only offered endpoint, even with both permissions", async () => {
+    const original = vm("web-1");
+    renderPanel(<ConsoleTab vm={{ ...original, status: { ...original.status, console: { serialPath: "/apis/bedrock.cloudyfolks.io/v1alpha1/x/console/serial" } } }} allowVnc allowSerial />);
+    expect(await screen.findByRole("tab", { name: "Serial console", selected: true })).toBeTruthy();
+    await waitFor(() => expect(mocks.createSerial).toHaveBeenCalledTimes(1));
+    expect(mocks.createVnc).not.toHaveBeenCalled();
+  });
+
   it("TestSessionEndedDuringConsoleShowsSignIn", async () => {
     const view = renderPanel(<ConsoleTab vm={vm("web-1")} allowVnc allowSerial />);
     await waitFor(() => expect(mocks.createVnc).toHaveBeenCalledTimes(1));

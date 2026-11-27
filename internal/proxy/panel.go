@@ -45,18 +45,23 @@ func servePanelFile(w http.ResponseWriter, r *http.Request, fsys fs.FS) {
 	}
 	name := strings.TrimPrefix(path.Clean("/"+r.URL.Path), "/")
 	switch {
-	case strings.HasPrefix(name, assetsPrefix) && isPanelFile(fsys, name):
+	case immutablePanelAsset(name) && isPanelFile(fsys, name):
 		w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
 		http.ServeFileFS(w, r, fsys, name)
-	case strings.HasPrefix(name, assetsPrefix):
-		http.NotFound(w, r)
 	case name != "" && name != indexFile && isPanelFile(fsys, name):
 		http.ServeFileFS(w, r, fsys, name)
+	case name == "_next" || strings.HasPrefix(name, "_next/") || strings.HasPrefix(name, assetsPrefix) ||
+		name == "brand" || strings.HasPrefix(name, "brand/"):
+		http.NotFound(w, r)
 	default:
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		w.Header().Set("Cache-Control", "no-cache")
 		_, _ = w.Write(index)
 	}
+}
+
+func immutablePanelAsset(name string) bool {
+	return strings.HasPrefix(name, assetsPrefix) || strings.HasPrefix(name, "_next/static/")
 }
 
 func setPanelHeaders(w http.ResponseWriter, host string) {

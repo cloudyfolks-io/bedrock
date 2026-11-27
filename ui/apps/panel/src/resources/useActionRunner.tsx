@@ -1,10 +1,9 @@
 import { useRef, useState, type ReactNode } from "react";
-import { useQueryClient } from "@tanstack/react-query";
 import { useLingui } from "@lingui/react/macro";
 import { useToast } from "@bedrock/design";
 import { useHttp } from "../api/HttpProvider";
 import { isHttpError } from "../api/http";
-import { kubeClient, listKey, objectKey } from "../api/kube";
+import { kubeClient } from "../api/kube";
 import type { KubeObject } from "../api/types";
 import { ConfirmDeleteDialog, ConfirmSimpleDialog } from "../components/ConfirmDialogs";
 import { refOf, type ActionDef, type ResourceDef } from "./registry";
@@ -23,7 +22,6 @@ export function useActionRunner(def: ResourceDef): ActionRunner {
   const { t, i18n } = useLingui();
   const http = useHttp();
   const toast = useToast();
-  const queryClient = useQueryClient();
   const [pending, setPending] = useState<Pending | undefined>();
   const busy = useRef(new Set<string>());
   const ref = refOf(def);
@@ -50,9 +48,7 @@ export function useActionRunner(def: ResourceDef): ActionRunner {
     busy.current.add(key);
     try {
       const message = await perform(action, object);
-      toast.show({ tone: "success", title: i18n._(action.label), description: message ?? t({ id: "action.done", message: "Done" }) });
-      void queryClient.invalidateQueries({ queryKey: listKey(ref, object.metadata.namespace, {}) });
-      void queryClient.invalidateQueries({ queryKey: objectKey(ref, object.metadata.namespace, object.metadata.name) });
+      toast.show({ tone: "success", title: i18n._(action.label), description: message ?? t({ id: "action.accepted", message: "Request accepted" }) });
     } catch (error) {
       const forbidden = isHttpError(error) && error.status === 403;
       toast.show({

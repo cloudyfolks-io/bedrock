@@ -3,7 +3,9 @@
   "compilerOptions": {
     "noEmit": true,
     "allowImportingTsExtensions": true,
-    "types": ["vite/client", "vitest/globals", "node"]
+    "types": ["vite/client", "vitest/globals", "node"],
+    "plugins": [{ "name": "next" }]
   },
-  "include": ["src", "scripts", "vite.config.ts", "vitest.config.ts", "lingui.config.ts"]
+  "include": ["next-env.d.ts", "src", "scripts", "vitest.config.ts", "lingui.config.ts", ".next/types/**/*.ts"],
+  "exclude": ["node_modules"]
 }

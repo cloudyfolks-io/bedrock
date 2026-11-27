@@ -6,6 +6,7 @@ import { useLocale } from "../LocaleProvider";
 import { RangePicker } from "./RangePicker";
 import { toAlignedData, type AlignedData } from "./toAlignedData";
 import type { ChartHandle } from "./uplotAdapter";
+import styles from "./metricChart.module.css";
 
 interface Props {
   title: string;
@@ -41,10 +42,13 @@ export function MetricChart({ title, queries, unit, namespace, name }: Props) {
   const outcomes = useMetricRanges(queries.map((query) => ({ query, namespace, name, range })));
   const unavailable = outcomes.some((outcome) => outcome.unavailable);
   const forbidden = outcomes.length > 0 && outcomes.every((outcome) => outcome.forbidden);
+  const failed = outcomes.some((outcome) => outcome.failed);
+  const pending = outcomes.some((outcome) => outcome.pending);
   const end = Math.floor(Date.now() / 1000);
   const step = stepFor(ranges[range]);
   const merged = useMemo(() => mergeOutcomes(queries, outcomes, end - ranges[range], end, step), [queries, outcomes, range, step, end]);
-  const hasData = merged.labels.length > 0;
+  const values = (merged.data.slice(1) as (number | null)[][]).flatMap((column) => column.filter((value): value is number => value !== null));
+  const hasData = values.length > 0;
   const dataRef = useRef(merged.data);
   dataRef.current = merged.data;
   const seriesKey = merged.labels.join("|");
@@ -56,7 +60,7 @@ export function MetricChart({ title, queries, unit, namespace, name }: Props) {
   }, []);
 
   useEffect(() => {
-    if (unavailable || forbidden || !hasData || !container.current) {
+    if (!hasData || !container.current) {
       return undefined;
     }
     let cancelled = false;
@@ -76,16 +80,28 @@ export function MetricChart({ title, queries, unit, namespace, name }: Props) {
       handle.current?.destroy();
       handle.current = undefined;
     };
-  }, [unavailable, forbidden, hasData, seriesKey, themeVersion]);
+  }, [hasData, seriesKey, themeVersion]);
 
   useEffect(() => {
     handle.current?.setData(merged.data);
   }, [merged.data]);
 
   if (forbidden) {
-    return null;
+    return <p role="status" className={styles.message}>{t({ id: "metrics.denied", message: "You cannot view these metrics." })}</p>;
   }
-  const values = (merged.data.slice(1) as (number | null)[][]).flatMap((column) => column.filter((value): value is number => value !== null));
+  const stale = outcomes.some((outcome) => outcome.failed && outcome.result);
+  const incomplete = unavailable || outcomes.some((outcome) => outcome.forbidden || (outcome.failed && !outcome.result));
+  const message = hasData
+    ? stale
+      ? t({ id: "metrics.stale", message: "Could not refresh metrics. Showing previous samples." })
+      : incomplete ? t({ id: "metrics.partial", message: "Some metric series are missing." }) : undefined
+    : pending
+      ? t({ id: "metrics.loading", message: "Loading metrics…" })
+      : failed
+        ? t({ id: "metrics.failed", message: "Metrics did not load." })
+        : unavailable
+          ? t({ id: "metrics.unavailable", message: "Metrics are not available" })
+          : t({ id: "metrics.noSamples", message: "No samples in this time range." });
   const summary =
     values.length === 0
       ? ""
@@ -95,19 +111,18 @@ export function MetricChart({ title, queries, unit, namespace, name }: Props) {
         });
 
   return (
-    <section className="br-chart">
-      <div className="br-toolbar">
+    <section className={`br-chart ${styles.chart}`}>
+      <header className="br-toolbar">
         <h3>{title}</h3>
         <RangePicker value={range} onChange={setRange} />
-      </div>
-      {unavailable ? (
-        <p role="status">{t({ id: "metrics.unavailable", message: "Metrics are not available" })}</p>
-      ) : (
+      </header>
+      {message ? <p role="status" className={styles.message}>{message}</p> : null}
+      {hasData ? (
         <>
           <div ref={container} dir="ltr" role="img" aria-label={title} className="br-chart-canvas" />
           <p className="br-visually-hidden">{summary}</p>
         </>
-      )}
+      ) : null}
     </section>
   );
 }

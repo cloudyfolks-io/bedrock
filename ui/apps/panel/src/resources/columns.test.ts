@@ -1,6 +1,11 @@
+import { createElement } from "react";
+import { screen } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 import type { KubeObject } from "../api/types";
-import { columnsByPlural } from "./columns";
+import { renderPanel } from "../test/renderPanel";
+import { columnsByPlural, type ColumnContext } from "./columns";
+
+const context: ColumnContext = { locale: "en", now: new Date(), detailPath: () => undefined };
 
 const elasticIp = (spec: Record<string, unknown>, status: Record<string, unknown>): KubeObject =>
   ({ apiVersion: "bedrock.cloudyfolks.io/v1alpha1", kind: "ElasticIP", metadata: { name: "ip1", namespace: "acme-web" }, spec, status }) as KubeObject;
@@ -113,5 +118,32 @@ describe("database access columns", () => {
   it("shows the real database name of a schema", () => {
     const schema = { apiVersion: "bedrock.cloudyfolks.io/v1alpha1", kind: "DatabaseSchema", metadata: { name: "scratch", namespace: "acme-web" }, spec: {}, status: { name: "scratch_data" } } as KubeObject;
     expect(columnsByPlural.databaseschemas?.find((def) => def.id === "databaseName")?.sortValue?.(schema)).toBe("scratch_data");
+  });
+});
+
+describe("database image column", () => {
+  it("shows a short digest but keeps the full reference for the tooltip and sorting", () => {
+    const column = columnsByPlural.databaseversions?.find((def) => def.id === "image");
+    const image = `registry.test/postgres:17@sha256:${"a".repeat(64)}`;
+    const object = database({ image }, {});
+    renderPanel(createElement("div", undefined, column?.render(object, context)));
+    expect(screen.getByTitle(image).textContent).toBe("registry.test/postgres:17@sha256:aaaaaaaaaaaa…");
+    expect(column?.sortValue?.(object)).toBe(image);
+    expect(object.spec?.image).toBe(image);
+  });
+});
+
+describe("registry quota column", () => {
+  it("distinguishes unlimited, inherited, and finite quotas", () => {
+    const column = columnsByPlural.registries?.find((def) => def.id === "quota");
+    const registry = { kind: "Registry", metadata: { name: "test" } };
+    renderPanel(createElement("div", undefined,
+      createElement("span", undefined, column?.render({ ...registry, spec: { quotaGB: 0 } }, context)),
+      createElement("span", undefined, column?.render(registry, context)),
+      createElement("span", undefined, column?.render({ ...registry, spec: { quotaGB: 10 } }, context)),
+    ));
+    expect(screen.getByText("Unlimited")).toBeTruthy();
+    expect(screen.getByText("Platform default")).toBeTruthy();
+    expect(screen.getByText("10 GiB")).toBeTruthy();
   });
 });

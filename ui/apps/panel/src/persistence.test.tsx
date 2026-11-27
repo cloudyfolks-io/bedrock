@@ -4,7 +4,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { AppRoutes } from "./shell/routes";
 import { renderPanel } from "./test/renderPanel";
 
-const documented = ["bedrock.panel.locale", "bedrock.panel.theme", "bedrock.panel.perspective", "bedrock.panel.project"];
+const documented = ["bedrock.panel.locale", "bedrock.panel.perspective", "bedrock.panel.project"];
 
 describe("persistence", () => {
   afterEach(() => localStorage.clear());
@@ -15,14 +15,14 @@ describe("persistence", () => {
       route: "/admin/hosts",
       api: { "GET /proxy/v1/projects": { body: { projects: [{ name: "web", displayName: "Web", tenant: "acme", namespace: "acme-web" }] } } },
     });
-    await user.click(await screen.findByRole("link", { name: "Projects" }));
+    await user.click(await screen.findByRole("button", { name: "Compute" }));
+    await user.click(await screen.findByRole("link", { name: "Virtual machines" }));
     await waitFor(() => expect(localStorage.getItem("bedrock.panel.project")).toBe("web"));
     await user.click(screen.getByRole("combobox", { name: /Language/ }));
     await user.click(await screen.findByRole("option", { name: "العربية" }));
-    await user.click(screen.getAllByRole("combobox")[2] as HTMLElement);
-    await user.click((await screen.findAllByRole("option"))[2] as HTMLElement);
+    expect(document.documentElement.dataset.theme).toBe("dark");
     const keys = Object.keys(localStorage);
-    expect(keys.length).toBeGreaterThanOrEqual(4);
+    expect(keys.length).toBeGreaterThanOrEqual(3);
     for (const key of keys) {
       expect(documented).toContain(key);
     }

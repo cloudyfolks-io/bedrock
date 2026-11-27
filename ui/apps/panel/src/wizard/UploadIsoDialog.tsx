@@ -23,6 +23,7 @@ export function UploadIsoDialog({ namespace, onClose, onUploaded }: Props) {
   const queryClient = useQueryClient();
   const def = definitionFor("images");
   const [name, setName] = useState("");
+  const [creating, setCreating] = useState(false);
   const [created, setCreated] = useState<string | undefined>();
   const ref = def ? refOf(def) : { group: "", version: "", plural: "", namespaced: true };
   const image = useQuery({
@@ -33,6 +34,7 @@ export function UploadIsoDialog({ namespace, onClose, onUploaded }: Props) {
   });
 
   async function create() {
+    setCreating(true);
     try {
       await kubeClient(http).create(ref, namespace, {
         apiVersion: "bedrock.cloudyfolks.io/v1alpha1",
@@ -41,8 +43,11 @@ export function UploadIsoDialog({ namespace, onClose, onUploaded }: Props) {
         spec: { type: "iso", source: { upload: {} } },
       });
       setCreated(name);
+      toast.show({ tone: "success", title: t({ id: "action.accepted", message: "Request accepted" }) });
     } catch (error) {
       toast.show({ tone: "danger", title: t({ id: "action.error.failed", message: "The action failed" }), description: error instanceof Error ? error.message : "" });
+    } finally {
+      setCreating(false);
     }
   }
 
@@ -68,12 +73,12 @@ export function UploadIsoDialog({ namespace, onClose, onUploaded }: Props) {
       }}
       title={t({ id: "wizard.uploadIso", message: "Upload a new ISO" })}
       actions={
-        <Button variant="primary" disabled={!dnsLabel.test(name) || created !== undefined} onClick={() => void create()}>
+        <Button variant="primary" disabled={!dnsLabel.test(name) || creating || created !== undefined} onClick={() => void create()}>
           {t({ id: "common.action.create", message: "Create" })}
         </Button>
       }
     >
-      <TextField label={t({ id: "forms.name.label", message: "Name" })} name="iso-name" dir="ltr" autoComplete="off" value={name} onChange={setName} />
+      <TextField label={t({ id: "forms.name.label", message: "Name" })} name="iso-name" dir="ltr" autoComplete="off" value={name} onChange={setName} disabled={creating || created !== undefined} />
       {created !== undefined ? <p role="status">{t({ id: "wizard.uploadIso.waiting", message: "Preparing the upload" })}</p> : null}
     </Dialog>
   );

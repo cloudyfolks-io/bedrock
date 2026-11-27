@@ -1,16 +1,18 @@
 import type { ReactNode } from "react";
 import { Link } from "react-router";
 import { msg } from "@lingui/core/macro";
+import { Trans } from "@lingui/react/macro";
 import type { MessageDescriptor } from "@lingui/core";
 import { Badge } from "@bedrock/design";
 import type { KubeObject } from "../api/types";
 import { Ltr } from "../components/Ltr";
 import { PhaseBadge, StatusBadge } from "../components/StatusBadge";
-import { formatBytes, formatQuantity, formatRelative } from "../format";
+import { formatBytes, formatNumber, formatQuantity, formatRelative } from "../format";
 import type { Locale } from "../i18n";
 import { listAt, textAt, valueAt } from "./path";
 import { vmSize } from "./vmSize";
-import { listenersOf, memberCount, networkCidrs, osSummary, ownerCount } from "./summaries";
+import { listenersOf, memberCount, networkCidrs, osSummary, ownerCount, shortImageDigest } from "./summaries";
+import styles from "./columns.module.css";
 
 export interface ColumnContext {
   locale: Locale;
@@ -29,12 +31,16 @@ export interface ColumnDef {
 
 const dash = "—";
 
+function token(value: string): ReactNode {
+  return <span className={styles.token}><Ltr>{value}</Ltr></span>;
+}
+
 function text(id: string, label: MessageDescriptor, path: string): ColumnDef {
   return { id, label, render: (object) => textAt(object, path) || dash, sortValue: (object) => textAt(object, path) };
 }
 
 function ltrText(id: string, label: MessageDescriptor, path: string): ColumnDef {
-  return { id, label, render: (object) => (textAt(object, path) ? <Ltr>{textAt(object, path)}</Ltr> : dash), sortValue: (object) => textAt(object, path) };
+  return { id, label, render: (object) => (textAt(object, path) ? token(textAt(object, path)) : dash), sortValue: (object) => textAt(object, path) };
 }
 
 function count(id: string, label: MessageDescriptor, compute: (object: KubeObject) => number): ColumnDef {
@@ -55,7 +61,7 @@ const name: ColumnDef = {
   label: msg({ id: "col.name", message: "Name" }),
   render: (object, context) => {
     const to = context.detailPath(object);
-    return to ? <Link to={to}>{object.metadata.name}</Link> : object.metadata.name;
+    return to ? <Link className={styles.wordBoundaries} to={to}>{object.metadata.name}</Link> : <span className={styles.wordBoundaries}>{object.metadata.name}</span>;
   },
   sortValue: (object) => object.metadata.name,
 };
@@ -125,7 +131,7 @@ const containerAddresses: ColumnDef = {
   label: msg({ id: "col.addresses", message: "Addresses" }),
   render: (object) => {
     const ips = listAt(object, "status.addresses").map((entry) => String(entry)).filter((ip) => ip !== "");
-    return ips.length === 0 ? dash : ips.map((ip) => <Ltr key={ip}>{`${ip} `}</Ltr>);
+    return ips.length === 0 ? dash : ips.map((ip) => <span className={styles.token} key={ip}><Ltr>{`${ip} `}</Ltr></span>);
   },
   sortValue: (object) => String(listAt(object, "status.addresses")[0] ?? ""),
 };
@@ -155,7 +161,7 @@ const addresses: ColumnDef = {
   label: msg({ id: "col.addresses", message: "Addresses" }),
   render: (object) => {
     const ips = (listAt(object, "status.addresses") as { ip?: string }[]).map((entry) => entry.ip ?? "").filter((ip) => ip !== "");
-    return ips.length === 0 ? dash : ips.map((ip) => <Ltr key={ip}>{`${ip} `}</Ltr>);
+    return ips.length === 0 ? dash : ips.map((ip) => <span className={styles.token} key={ip}><Ltr>{`${ip} `}</Ltr></span>);
   },
   sortValue: (object) => String((listAt(object, "status.addresses")[0] as { ip?: string } | undefined)?.ip ?? ""),
 };
@@ -163,7 +169,7 @@ const addresses: ColumnDef = {
 const target: ColumnDef = {
   id: "target",
   label: msg({ id: "col.target", message: "Target" }),
-  render: (object) => (textAt(object, "spec.target.name") ? <Ltr>{`${textAt(object, "spec.target.kind")} ${textAt(object, "spec.target.name")}`}</Ltr> : dash),
+  render: (object) => (textAt(object, "spec.target.name") ? token(`${textAt(object, "spec.target.kind")} ${textAt(object, "spec.target.name")}`) : dash),
   sortValue: (object) => textAt(object, "spec.target.name"),
 };
 
@@ -276,10 +282,40 @@ const lbAddress: ColumnDef = {
   id: "elasticIp",
   label: msg({ id: "col.elasticIp", message: "Elastic IP" }),
   render: (object, context) => {
-    const eip = context.elasticIps?.find((candidate) => textAt(candidate, "spec.target.kind") === "LoadBalancer" && textAt(candidate, "spec.target.name") === object.metadata.name);
-    return eip ? <Ltr>{[eip.metadata.name, textAt(eip, "status.address")].filter((part) => part !== "").join(" ")}</Ltr> : dash;
+    const ref = textAt(object, "spec.elasticIPRef");
+    if (!ref) return dash;
+    const eip = context.elasticIps?.find((candidate) => candidate.metadata.namespace === object.metadata.namespace && candidate.metadata.name === ref &&
+      !candidate.metadata.deletionTimestamp && textAt(candidate, "spec.target.kind") === "LoadBalancer" && textAt(candidate, "spec.target.name") === object.metadata.name);
+    return token([ref, eip ? textAt(eip, "status.address") : ""].filter(Boolean).join(" "));
   },
-  sortValue: (object) => object.metadata.name,
+  sortValue: (object) => textAt(object, "spec.elasticIPRef"),
+};
+
+const databaseImage: ColumnDef = {
+  ...ltrText("image", L.image, "spec.image"),
+  render: (object) => {
+    const image = textAt(object, "spec.image");
+    if (!image) return dash;
+    const short = shortImageDigest(image);
+    const at = short.lastIndexOf("@");
+    return <Ltr><span className={styles.wordBoundaries} title={image}>{at === -1 ? short : <>{short.slice(0, at)}<wbr />{short.slice(at)}</>}</span></Ltr>;
+  },
+};
+
+const registryQuota: ColumnDef = {
+  id: "quota",
+  label: L.quota,
+  render: (object, { locale }) => {
+    const value = valueAt(object, "spec.quotaGB");
+    if (typeof value !== "number") return <Trans id="registry.quota.default">Platform default</Trans>;
+    if (value === 0) return <Trans id="registry.quota.unlimited">Unlimited</Trans>;
+    const size = formatNumber(value, locale);
+    return <Trans id="registry.quota.gib">{size} GiB</Trans>;
+  },
+  sortValue: (object) => {
+    const value = valueAt(object, "spec.quotaGB");
+    return typeof value !== "number" ? -1 : value === 0 ? Number.POSITIVE_INFINITY : value;
+  },
 };
 
 export const columnsByPlural: Record<string, ColumnDef[]> = {
@@ -306,7 +342,7 @@ export const columnsByPlural: Record<string, ColumnDef[]> = {
     count("versions", L.versions, (object) => listAt(object, "status.versions").length),
   ],
   networkpeerings: [name, { id: "networks", label: L.networks, render: (object) => (networkRefsOf(object) ? <Ltr>{networkRefsOf(object)}</Ltr> : dash), sortValue: networkRefsOf }, ltrText("connectCidr", L.connectCidr, "status.connectCIDR"), status, age],
-  networks: [name, text("tenant", L.tenant, "spec.tenantRef"), { id: "cidr", label: L.cidr, render: (object) => (networkCidrs(object) ? <Ltr>{networkCidrs(object)}</Ltr> : dash), sortValue: networkCidrs }, flag("external", L.external, "spec.enableExternal"), text("vpc", L.vpc, "status.vpc"), status],
+  networks: [name, text("tenant", L.tenant, "spec.tenantRef"), { id: "cidr", label: L.cidr, render: (object) => (networkCidrs(object) ? <Ltr><span className={styles.wordBoundaries}>{networkCidrs(object)}</span></Ltr> : dash), sortValue: networkCidrs }, flag("external", L.external, "spec.enableExternal"), text("vpc", L.vpc, "status.vpc"), status],
   virtualmachines: [name, phase, text("node", L.node, "status.node"), addresses, { id: "instanceType", label: L.instanceType, render: (object) => vmSize(object) || dash, sortValue: vmSize }, age],
   containers: [name, phase, ltrText("image", L.image, "spec.image"), replicas, containerAddresses, age],
   builds: [name, phase, text("type", L.type, "spec.type"), ltrText("image", L.image, "spec.output.image"), age],
@@ -314,7 +350,7 @@ export const columnsByPlural: Record<string, ColumnDef[]> = {
   databases: [name, phase, text("engine", L.engine, "spec.engine"), version("version", L.version, "spec.version"), text("class", L.class, "spec.class"), addresses],
   databaseusers: [name, text("database", L.database, "spec.databaseRef"), text("username", L.username, "status.username"), count("grants", L.grants, (object) => listAt(object, "spec.grants").length), status],
   databaseschemas: [name, text("database", L.database, "spec.databaseRef"), text("databaseName", L.databaseName, "status.name"), text("policy", L.policy, "spec.deletionPolicy"), status],
-  databaseversions: [name, text("engine", L.engine, "spec.engine"), version("version", L.version, "spec.major"), ltrText("image", L.image, "spec.image"), flag("enabled", L.enabled, "spec.enabled"), text("eolDate", L.eolDate, "spec.eolDate")],
+  databaseversions: [name, text("engine", L.engine, "spec.engine"), version("version", L.version, "spec.major"), databaseImage, flag("enabled", L.enabled, "spec.enabled"), text("eolDate", L.eolDate, "spec.eolDate")],
   databaseclasses: [name, quota("cpu", L.cpu, "spec.cpu"), quota("memory", L.memory, "spec.memory"), gi("minStorage", L.minStorage, "spec.minStorageGi"), flag("highAvailability", L.highAvailability, "spec.highAvailability"), flag("enabled", L.enabled, "spec.enabled")],
   sshkeys: [
     name,
@@ -340,7 +376,7 @@ export const columnsByPlural: Record<string, ColumnDef[]> = {
     sizeBytes("usage", L.usage, "status.usage.bytes"),
     status,
   ],
-  registries: [name, ltrText("host", L.host, "status.host"), gi("quota", L.quota, "spec.quotaGB"), sizeBytes("usage", L.usage, "status.usedBytes"), text("repositories", L.repositories, "status.repositoryCount"), status],
+  registries: [name, ltrText("host", L.host, "status.host"), registryQuota, sizeBytes("usage", L.usage, "status.usedBytes"), text("repositories", L.repositories, "status.repositoryCount"), status],
   registrycredentials: [name, text("registry", L.registry, "spec.registryRef.name"), text("permission", L.permission, "spec.permission"), ltrText("username", L.username, "status.username"), ltrText("loginSecret", L.loginSecret, "status.secretName"), status],
   objectstorageusers: [name, text("displayName", L.displayName, "spec.displayName"), text("permission", L.permission, "spec.permission"), count("buckets", L.buckets, (object) => listAt(object, "spec.buckets").length), flag("suspended", L.suspended, "spec.suspended"), status],
 };

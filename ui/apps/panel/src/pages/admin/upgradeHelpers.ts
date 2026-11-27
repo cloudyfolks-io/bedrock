@@ -1,7 +1,7 @@
 import type { KubeObject } from "../../api/types";
 import { listAt, textAt } from "../../resources/path";
 
-export const upgradePhases = ["Idle", "Preflight", "Backup", "Preload", "ControlPlane", "Components", "Workers", "Verify"] as const;
+const upgradePhases = ["Preflight", "Backup", "Preload", "ControlPlane", "Components", "Workers", "Verify"] as const;
 
 export interface PhaseStep {
   name: string;

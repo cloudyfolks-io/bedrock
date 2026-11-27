@@ -1,0 +1,39 @@
+.chart {
+  min-inline-size: 0;
+  border: 1px solid var(--br-color-border);
+  border-radius: .625rem;
+  background: var(--br-color-surface);
+}
+
+.chart header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: .5rem 1rem;
+  padding: .75rem .875rem;
+  border-block-end: 1px solid var(--br-color-border);
+  border-start-start-radius: inherit;
+  border-start-end-radius: inherit;
+  background: var(--br-color-surface-raised);
+}
+
+.chart h3 {
+  margin: 0;
+  font-size: .875rem;
+}
+
+.chart :global(.br-select-trigger) {
+  min-inline-size: 0;
+}
+
+.chart :global(.br-chart-canvas),
+.message {
+  margin: .875rem;
+  min-inline-size: 0;
+}
+
+.message {
+  color: var(--br-color-text-muted);
+  font-size: .875rem;
+}

@@ -42,7 +42,7 @@ describe("registry", () => {
     }
     for (const perspective of ["admin", "project"] as const) {
       const paths = primaryDefinitionsFor(perspective).map((def) => def.path);
-      if (perspective === "admin") paths.push("inventory");
+      if (perspective === "admin") paths.push("overview", "inventory");
       const navPaths = navigationFor(perspective, "web").flatMap((section) => section.items.map((item) => item.id));
       expect(new Set(paths)).toEqual(new Set(navPaths));
       expect(definitionsFor(perspective).length).toBeGreaterThan(0);
@@ -65,6 +65,12 @@ describe("registry", () => {
       expect(def.columns.length).toBeGreaterThan(0);
       expect(def.columns.length).toBeLessThanOrEqual(6);
     }
+  });
+
+  it("exposes the load balancer's Elastic IP as a reference field", () => {
+    const loadBalancer = definitionFor("loadbalancers");
+    expect(loadBalancer?.refFields?.elasticIPRef).toBe("elasticips");
+    expect(loadBalancer?.uiSchema?.elasticIPRef?.["ui:widget"]).not.toBe("hidden");
   });
 
   it("TestFixturesMatchCRDSchemas", () => {

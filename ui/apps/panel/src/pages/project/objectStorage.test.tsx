@@ -1,7 +1,7 @@
 import { screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { Route, Routes } from "react-router";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import type { Check, KubeList } from "../../api/types";
 import buckets from "../../fixtures/objectstoragebuckets.json";
 import users from "../../fixtures/objectstorageusers.json";
@@ -86,6 +86,27 @@ describe("ObjectUsersPage", () => {
 });
 
 describe("CredentialsDialog", () => {
+  it("only reports copied credentials after the clipboard write succeeds", async () => {
+    const user = userEvent.setup();
+    let complete = () => {};
+    const write = new Promise<void>((resolve) => { complete = resolve; });
+    const writeText = vi.spyOn(navigator.clipboard, "writeText").mockReturnValueOnce(write);
+    renderUsers(() => true, { [`GET ${secretPath}`]: { body: secret() } });
+    await user.click(await screen.findByRole("button", { name: "Actions for app" }));
+    await user.click(await screen.findByRole("menuitem", { name: "Show credentials" }));
+    const copy = await screen.findByRole("button", { name: "Copy AccessKey" });
+    await user.click(copy);
+    expect(writeText).toHaveBeenCalledWith("AKIA123");
+    expect(screen.queryByText("AccessKey copied")).toBeNull();
+    complete();
+    expect(await screen.findByText("AccessKey copied")).toBeTruthy();
+
+    writeText.mockRejectedValueOnce(new Error("Permission denied"));
+    await user.click(screen.getByRole("button", { name: "Copy SecretKey" }));
+    expect(await screen.findByText("Could not copy the credential")).toBeTruthy();
+    expect(screen.queryByText("SecretKey copied")).toBeNull();
+  });
+
   it("TestCredentialsAreFetchedOnDemand and the secret is masked until revealed", async () => {
     const user = userEvent.setup();
     const { api } = renderUsers(() => true, { [`GET ${secretPath}`]: { body: secret({ Binary: btoa(String.fromCharCode(255, 254, 253)) }) } });

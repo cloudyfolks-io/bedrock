@@ -1,4 +1,4 @@
-import { screen, waitFor } from "@testing-library/react";
+import { screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { Route, Routes } from "react-router";
 import { describe, expect, it } from "vitest";
@@ -49,16 +49,50 @@ describe("HostDetailPage", () => {
     expect(screen.getByText("bond0 up")).toBeTruthy();
   });
 
-  it("shows the inventory tables", async () => {
+  it("shows labeled inventory fields and keeps identifiers left to right", async () => {
     const user = userEvent.setup();
-    render(host("host-01"));
-    await user.click(await screen.findByRole("tab", { name: "Inventory" }));
-    expect(await screen.findByText("/dev/nvme0n1")).toBeTruthy();
+    render(host("host-01"), () => true, "/admin/hosts/host-01?tab=unknown");
+    const overview = await screen.findByRole("tab", { name: "Overview", selected: true });
+    overview.focus();
+    await user.keyboard("{ArrowRight}");
+    expect(document.activeElement).toBe(screen.getByRole("tab", { name: "Inventory" }));
+    await user.keyboard("{Enter}");
+    const disks = within(await screen.findByRole("region", { name: "Disks" }));
+    expect(disks.getByText("/dev/nvme0n1").getAttribute("dir")).toBe("ltr");
+    expect(disks.getByText("Path")).toBeTruthy();
     expect(screen.getByText("894.3 GiB")).toBeTruthy();
     expect(screen.getByText("3c:ec:ef:00:00:01")).toBeTruthy();
     expect(screen.getAllByText("0000:41:00.0").length).toBeGreaterThan(0);
     expect(screen.getByText("256 GiB")).toBeTruthy();
     expect(screen.getByText("AMD EPYC 7543")).toBeTruthy();
+  });
+
+  it("keeps readiness and controller details above all tabs", async () => {
+    const user = userEvent.setup();
+    render(host("host-03"), () => false, "/admin/hosts/host-03?tab=inventory");
+    const status = (await screen.findByText("AgentNotReporting")).closest<HTMLElement>('[role="status"]')!;
+    expect(status.closest("header")).toBe(screen.getByRole("heading", { level: 1 }).closest("header"));
+    expect(within(status).getByText("Not ready")).toBeTruthy();
+    expect(within(status).getByText("no heartbeat for 5m")).toBeTruthy();
+    expect(status.compareDocumentPosition(screen.getByRole("tablist")) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    for (const tab of ["Overview", "Metrics", "Inventory"]) {
+      await user.click(screen.getByRole("tab", { name: tab }));
+      expect(screen.getByRole("tab", { name: tab, selected: true })).toBeTruthy();
+      expect(within(status).getByText("AgentNotReporting")).toBeTruthy();
+    }
+  });
+
+  it("names unreported inventory and configuration instead of showing empty tables", async () => {
+    const user = userEvent.setup();
+    render({ ...host("host-03"), status: {} });
+    expect(await screen.findByText("No configuration steps reported.")).toBeTruthy();
+    await user.click(screen.getByRole("tab", { name: "Inventory" }));
+    expect(screen.getByText("No CPU or memory data reported.")).toBeTruthy();
+    expect(screen.getByText("No disks reported.")).toBeTruthy();
+    expect(screen.getByText("No network interfaces reported.")).toBeTruthy();
+    expect(screen.getByText("No PCI devices reported.")).toBeTruthy();
+    expect(screen.getByText("No firmware or system data reported.")).toBeTruthy();
+    expect(screen.queryByRole("table")).toBeNull();
   });
 
   it("TestMaintenanceToggleUsesMergePatch", async () => {

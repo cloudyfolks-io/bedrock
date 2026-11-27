@@ -1,9 +1,10 @@
 import { render } from "@testing-library/react";
 import type { ReactElement } from "react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { MemoryRouter } from "react-router";
+import { createMemoryRouter, MemoryRouter, Outlet, type RouteObject } from "react-router";
+import { RouterProvider } from "react-router/dom";
 import { ToastProvider } from "@bedrock/design";
-import { ThemeChoiceProvider } from "../theme";
+import { ThemeProvider } from "@bedrock/design";
 import { HttpProvider, sessionKey } from "../api/HttpProvider";
 import type { Session } from "../api/types";
 import type { Locale } from "../i18n";
@@ -40,7 +41,11 @@ export interface PanelRender extends Omit<ReturnType<typeof render>, "rerender">
   queryClient: QueryClient;
 }
 
-export function renderPanel(node: ReactElement, options: RenderOptions = {}): PanelRender {
+type RoutedPanelRender = Omit<PanelRender, "rerender"> & { router: ReturnType<typeof createMemoryRouter> };
+
+export function renderPanel(node: ReactElement, options?: RenderOptions): PanelRender;
+export function renderPanel(routes: RouteObject[], options: RenderOptions & { initialEntries?: string[] }): RoutedPanelRender;
+export function renderPanel(node: ReactElement | RouteObject[], options: RenderOptions & { initialEntries?: string[] } = {}): PanelRender | RoutedPanelRender {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   const api = createFakeApi(options.api ?? {}, options.allow ?? (() => true));
   const sockets = options.socket ?? createFakeSockets();
@@ -49,25 +54,34 @@ export function renderPanel(node: ReactElement, options: RenderOptions = {}): Pa
     queryClient.setQueryData(sessionKey, { ...defaultSession, ...options.session });
   }
   const assign = options.assign ?? (() => {});
-  const wrap = (content: ReactElement) => (
+  const providers = (content: ReactElement) => (
+    <LocationProvider actions={{ assign }}>
+      <HttpProvider>
+        <StreamProvider createSocket={sockets.create}>
+          <AuthzProvider>{content}</AuthzProvider>
+        </StreamProvider>
+      </HttpProvider>
+    </LocationProvider>
+  );
+  const wrap = (router: ReactElement) => (
     <QueryClientProvider client={queryClient}>
       <LocaleProvider initial={options.locale ?? "en"}>
-        <ThemeChoiceProvider>
+        <ThemeProvider theme="dark">
           <ToastProvider>
-            <MemoryRouter initialEntries={[options.route ?? "/"]}>
-              <LocationProvider actions={{ assign }}>
-                <HttpProvider>
-                  <StreamProvider createSocket={sockets.create}>
-                    <AuthzProvider>{content}</AuthzProvider>
-                  </StreamProvider>
-                </HttpProvider>
-              </LocationProvider>
-            </MemoryRouter>
+            {router}
           </ToastProvider>
-        </ThemeChoiceProvider>
+        </ThemeProvider>
       </LocaleProvider>
     </QueryClientProvider>
   );
-  const result = render(wrap(node));
-  return { ...result, rerender: (next: ReactElement) => result.rerender(wrap(next)), api, sockets, queryClient };
+  if (Array.isArray(node)) {
+    const router = createMemoryRouter(
+      [{ id: "panel-test-providers", element: providers(<Outlet />), children: node }],
+      { initialEntries: options.initialEntries ?? [options.route ?? "/"] },
+    );
+    return { ...render(wrap(<RouterProvider router={router} />)), api, sockets, queryClient, router };
+  }
+  const declarative = (content: ReactElement) => wrap(<MemoryRouter initialEntries={[options.route ?? "/"]}>{providers(content)}</MemoryRouter>);
+  const result = render(declarative(node));
+  return { ...result, rerender: (next: ReactElement) => result.rerender(declarative(next)), api, sockets, queryClient };
 }

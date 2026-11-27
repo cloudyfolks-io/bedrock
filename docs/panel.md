@@ -16,19 +16,22 @@ When the session ends, the panel sends the user to sign in again. It does this o
 When the sign-in fails two times in 10 seconds, the panel stops. It shows an error card with a retry link.
 The user menu has the sign-out item. It sends `POST /oauth/logout` and then opens `/`.
 
-## The two perspectives
+## Console navigation
 
-The admin perspective shows when the session answer says `admin`. The group `bedrock-admins` gives this.
-The project perspective lists the projects of the user. The panel reads them from `GET /proxy/v1/projects`.
-A user who is not an admin cannot open the admin routes. The panel sends this user to `/p`.
-The server stays the authority. The panel only hides what the user cannot use.
+One sidebar groups infrastructure and product pages. Administrators see
+infrastructure, platform, tenancy, and catalog links. The Project control
+sets the scope for project links and preserves the current product when
+switching projects. Admin pages stay open when the selected project changes.
+Users who are not administrators cannot open admin routes; the panel sends
+them to `/p`. The server remains the authority for access.
 
 ## Pages
 
 | Route | Page |
 |---|---|
-| `/` | Open the stored perspective. On the first sign-in, open inventory for an administrator or projects for a project user. |
-| `/admin` | Redirect to `/admin/inventory` |
+| `/` | Open the stored perspective. On the first sign-in, open the overview for an administrator or projects for a project user. |
+| `/admin` | Redirect to `/admin/overview` |
+| `/admin/overview` | Cluster inventory counts and host readiness |
 | `/admin/inventory` | Resource inventory across projects |
 | `/admin/hosts` | Hosts |
 | `/admin/hosts/:name` | Host detail: overview, inventory, metrics, maintenance mode |
@@ -72,7 +75,7 @@ The server stays the authority. The panel only hides what the user cannot use.
 | `/p/:project/object-users` | Object storage users and their credentials |
 | `/p/:project/registries` | Registries |
 | `/p/:project/registry-credentials` | Registry credentials and their login |
-| `/account` | Language, theme and downloads |
+| `/account` | Language and downloads |
 
 Every other kind with a namespace has a detail page at `/p/:project/<path>/:name`.
 
@@ -103,6 +106,14 @@ A check that is pending or failed hides the action.
 When the server refuses an action that the panel showed, the panel shows a message.
 If a button is missing, ask a project owner or an admin for the role.
 
+## In-progress changes
+
+The panel marks writes as pending immediately. New resources can appear as
+non-actionable rows while the server creates them. Changes that Bedrock
+applies asynchronously are acknowledged as requested, not completed.
+The server still reports readiness, deletion, and credentials. If a write
+fails, the panel removes the pending change and keeps the latest server data.
+
 ## Languages and direction
 
 The panel speaks English, Persian and Arabic.
@@ -111,10 +122,9 @@ IP addresses, CIDRs, names, YAML and JSON stay left to right.
 Change the language in the top bar or on the account page. The panel keeps the choice in the browser.
 A native speaker must review the Persian and Arabic text before a release.
 
-## Themes
+## Appearance
 
-The panel has a light theme and a dark theme. The choice `System` follows the browser.
-Change the theme in the top bar or on the account page.
+The sCloud console uses a dark theme in both perspectives, independent of the browser setting.
 
 ## Consoles
 
@@ -158,9 +168,14 @@ The user menu and the account page offer `/kubeconfig`. They offer `/ca.crt` whe
 
 Run `make ui` to build the panel and the login app.
 Run `pnpm --filter panel test` to run the tests.
-The build writes into `internal/proxy/ui/dist`. The proxy embeds that directory.
+Next.js exports the panel as static files. The build copies them into
+`internal/proxy/ui/dist`, which the Go proxy embeds. The proxy serves the
+same shell on resource URLs, so project and resource names can be resolved
+at runtime without a separate Node.js server. The build serves Next.js
+bootstrap code as same-origin files to preserve the proxy's script policy.
 Before the first build, the directory holds only `.keep`. The proxy then shows a placeholder page.
-`pnpm --filter panel build` checks the size. The first script must stay under 600 KiB. The whole output must stay under 8 MiB. The consoles and the charts must be separate chunks.
+`pnpm --filter panel build` limits startup JavaScript to 1 MiB and the full
+export to 8 MiB. Consoles and charts must stay in separate lazy chunks.
 
 ## Add a new kind
 

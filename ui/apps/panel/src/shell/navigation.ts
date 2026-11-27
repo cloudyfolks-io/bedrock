@@ -24,7 +24,7 @@ function adminNavigation(): NavSection[] {
     {
       id: "infrastructure",
       label: msg({ id: "nav.section.infrastructure", message: "Infrastructure" }),
-      items: [item("inventory", msg({ id: "nav.item.inventory", message: "Resource inventory" }), "/admin"), item("hosts", msg({ id: "nav.item.hosts", message: "Hosts" }), "/admin"), item("upgrades", msg({ id: "nav.item.upgrades", message: "Upgrades" }), "/admin"), item("network-peerings", msg({ id: "nav.item.networkPeerings", message: "Network peerings" }), "/admin")],
+      items: [item("overview", msg({ id: "overview.title", message: "Overview" }), "/admin"), item("inventory", msg({ id: "nav.item.inventory", message: "Resource inventory" }), "/admin"), item("hosts", msg({ id: "nav.item.hosts", message: "Hosts" }), "/admin"), item("upgrades", msg({ id: "nav.item.upgrades", message: "Upgrades" }), "/admin"), item("network-peerings", msg({ id: "nav.item.networkPeerings", message: "Network peerings" }), "/admin")],
     },
     {
       id: "platform",

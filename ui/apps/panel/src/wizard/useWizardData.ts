@@ -1,9 +1,9 @@
 import { useQueries } from "@tanstack/react-query";
 import { useHttp } from "../api/HttpProvider";
 import { isHttpError } from "../api/http";
-import { kubeClient, type ResourceRef } from "../api/kube";
+import { conditionOf, kubeClient, type ResourceRef } from "../api/kube";
 import type { KubeObject } from "../api/types";
-import { textAt, valueAt } from "../resources/path";
+import { listAt, textAt, valueAt } from "../resources/path";
 import { definitionFor, refOf } from "../resources/registry";
 import { useCurrentProject } from "../shell/context";
 import { instanceTypes as fixedInstanceTypes, type InstanceType } from "./instanceTypes";
@@ -13,13 +13,26 @@ export interface WizardData {
   ready: boolean;
   namespace: string;
   images: WizardImage[];
+  imageStatus: "loading" | "error" | "ready";
+  refreshImages: () => void;
   vmNames: string[];
   subnets: string[];
   securityGroups: string[];
   sshKeys: string[];
-  volumes: string[];
+  volumes: WizardVolume[] | undefined;
+  volumeStatus: "loading" | "volume-error" | "vm-error" | "ready";
+  refreshVolumes: () => Promise<WizardVolume[] | undefined>;
   instanceTypes: InstanceType[];
   defaultSubnet: string;
+}
+
+export interface WizardVolume {
+  name: string;
+  phase: string;
+  attachedTo: string;
+  claimedByVm: string;
+  ready: boolean;
+  deleting: boolean;
 }
 
 const instanceTypeRef: ResourceRef = { group: "instancetype.kubevirt.io", version: "v1beta1", plural: "virtualmachineclusterinstancetypes", namespaced: false };
@@ -55,7 +68,30 @@ function toInstanceType(object: KubeObject): InstanceType | undefined {
   return { name: object.metadata.name, vcpu, memoryGiB: match[2] === "Gi" ? Number(match[1]) : Number(match[1]) / 1024 };
 }
 
-export function useWizardData(): WizardData {
+function projectVolumes(namespace: string, volumes: KubeObject[], vms: KubeObject[]): WizardVolume[] {
+  const claims = new Map<string, string>();
+  for (const vm of vms) {
+    if (vm.metadata.namespace !== namespace) continue;
+    const refs = [valueAt(vm, "spec.rootDisk.volumeRef"), ...listAt(vm, "spec.disks").map((disk) => valueAt(disk, "volumeRef"))];
+    for (const ref of refs) {
+      if (typeof ref === "string" && ref !== "" && !claims.has(ref)) claims.set(ref, vm.metadata.name);
+    }
+  }
+  return volumes.filter(({ metadata }) => metadata.namespace === namespace).map((volume) => {
+    const { name, generation, deletionTimestamp } = volume.metadata;
+    const ready = conditionOf(volume, "Ready");
+    return {
+      name,
+      phase: textAt(volume, "status.phase"),
+      attachedTo: textAt(volume, "status.attachedTo"),
+      claimedByVm: claims.get(name) ?? "",
+      ready: ready?.status === "True" && (generation === undefined || ready.observedGeneration === generation),
+      deleting: Boolean(deletionTimestamp),
+    };
+  });
+}
+
+export function useWizardData({ loadVolumes = false }: { loadVolumes?: boolean } = {}): WizardData {
   const http = useHttp();
   const project = useCurrentProject();
   const namespace = project?.namespace ?? "";
@@ -65,7 +101,7 @@ export function useWizardData(): WizardData {
     enabled: namespace !== "",
     retry: false,
     staleTime: 5_000,
-    queryFn: async () => (await client.list(refOf(required(plural)), required(plural).scope === "Namespaced" ? { namespace } : {})).items,
+    queryFn: async ({ signal }: { signal: AbortSignal }) => (await client.list(refOf(required(plural)), required(plural).scope === "Namespaced" ? { namespace } : {}, signal)).items,
   });
   const [images, clusterImages, vms, subnets, groups, keys, volumes, types, projectObject] = useQueries({
     queries: [
@@ -75,7 +111,7 @@ export function useWizardData(): WizardData {
       list("subnets"),
       list("securitygroups"),
       list("sshkeys"),
-      list("volumes"),
+      { ...list("volumes"), enabled: namespace !== "" && loadVolumes },
       {
         queryKey: ["wizard", "instancetypes"],
         retry: false,
@@ -94,17 +130,30 @@ export function useWizardData(): WizardData {
   const subnetNames = (subnets.data ?? []).map((item) => item.metadata.name);
   const projectSubnet = textAt(projectObject.data ?? { metadata: { name: "" } }, "status.subnet");
   const defaultSubnet = subnetNames.includes(projectSubnet) ? projectSubnet : subnetNames.includes("default") ? "default" : (subnetNames[0] ?? "");
-  const loaded = [images, vms, subnets].every((query) => query.isSuccess || (query.isError && isHttpError(query.error)));
+  const loaded = !vms.isPending && [images, subnets].every((query) => query.isSuccess || (query.isError && isHttpError(query.error)));
   const remoteTypes = types.data && types.data.length > 0 ? types.data : fixedInstanceTypes;
+  const available = (volumeList: typeof volumes, vmList: typeof vms) =>
+    volumeList.isSuccess && vmList.isSuccess ? projectVolumes(namespace, volumeList.data, vmList.data) : undefined;
   return {
     ready: namespace !== "" && loaded,
     namespace,
-    images: [...(images.data ?? []).map((item) => imageOf(item, "project")), ...(clusterImages.data ?? []).map((item) => imageOf(item, "cluster"))],
-    vmNames: (vms.data ?? []).map((item) => item.metadata.name),
+    images: [...(images.isSuccess ? images.data : []).map((item) => imageOf(item, "project")), ...(clusterImages.isSuccess ? clusterImages.data : []).map((item) => imageOf(item, "cluster"))],
+    imageStatus: images.isFetching || clusterImages.isFetching || images.isPending || clusterImages.isPending ? "loading" : images.isError || clusterImages.isError ? "error" : "ready",
+    refreshImages: () => {
+      void images.refetch();
+      void clusterImages.refetch();
+    },
+    vmNames: (vms.isSuccess ? vms.data : []).filter(({ metadata }) => metadata.namespace === namespace).map(({ metadata }) => metadata.name),
     subnets: subnetNames,
     securityGroups: (groups.data ?? []).map((item) => item.metadata.name),
     sshKeys: (keys.data ?? []).map((item) => item.metadata.name),
-    volumes: (volumes.data ?? []).map((item) => item.metadata.name),
+    volumes: available(volumes, vms),
+    volumeStatus: [volumes, vms].some((query) => query.isPending || (query.isError && query.isFetching)) ? "loading"
+      : volumes.isError ? "volume-error" : vms.isError ? "vm-error" : "ready",
+    refreshVolumes: async () => {
+      const [freshVolumes, freshVms] = await Promise.all([volumes.refetch(), vms.refetch()]);
+      return available(freshVolumes, freshVms);
+    },
     instanceTypes: remoteTypes,
     defaultSubnet,
   };

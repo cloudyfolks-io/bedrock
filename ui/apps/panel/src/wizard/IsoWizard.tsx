@@ -1,7 +1,5 @@
 import { useEffect, useState } from "react";
-import { useNavigate } from "react-router";
 import { useForm, useStore } from "@tanstack/react-form";
-import { useQueryClient } from "@tanstack/react-query";
 import { useLingui } from "@lingui/react/macro";
 import { msg } from "@lingui/core/macro";
 import { useToast } from "@bedrock/design";
@@ -20,8 +18,8 @@ import { IsoStep } from "./steps/IsoStep";
 import { ReviewStep } from "./steps/ReviewStep";
 import type { IsoStep as IsoStepId, IsoValues } from "./types";
 import { useWizardData } from "./useWizardData";
-import { WizardFrame, type StepInfo } from "./WizardFrame";
-import { hasChanges, isoStepProblems, isoSteps, stepOfField } from "./wizardSteps";
+import { useWizardNavigation, WizardFrame, type StepInfo } from "./WizardFrame";
+import { hasChanges, isoStepProblems, isoSteps, readyIsos, stepOfField } from "./wizardSteps";
 
 const labels: Record<IsoStepId, StepInfo["label"]> = {
   basics: msg({ id: "wizard.step.basics", message: "Basics" }),
@@ -51,32 +49,38 @@ const initial: IsoValues = {
 };
 
 export default function IsoWizard() {
+  const projectName = useCurrentProjectName() ?? "";
+  return <IsoWizardForm key={projectName} projectName={projectName} />;
+}
+
+function IsoWizardForm({ projectName }: { projectName: string }) {
   const { t, i18n } = useLingui();
   const http = useHttp();
   const toast = useToast();
-  const navigate = useNavigate();
-  const queryClient = useQueryClient();
   const def = definitionFor("virtualmachines");
   const data = useWizardData();
-  const projectName = useCurrentProjectName() ?? "";
   const canCreate = useCan({ verb: "create", group: "bedrock.cloudyfolks.io", resource: "virtualmachines", namespace: data.namespace });
   const form = useForm({ defaultValues: initial });
   const values = useStore(form.store, (state) => state.values);
   const [index, setIndex] = useState(0);
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [busy, setBusy] = useState(false);
+  const [prefilledSubnet, setPrefilledSubnet] = useState("");
   const step = isoSteps[index] ?? "basics";
+  const navigation = useWizardNavigation(hasChanges(values, { ...initial, subnetRef: prefilledSubnet }));
+  const environment = { vmNames: data.vmNames, images: data.images, subnets: data.subnets };
 
   useEffect(() => {
     if (data.defaultSubnet !== "" && form.getFieldValue("subnetRef") === "") {
       form.setFieldValue("subnetRef", data.defaultSubnet);
+      setPrefilledSubnet(data.defaultSubnet);
     }
   }, [data.defaultSubnet, form]);
 
   const set = (patch: Partial<IsoValues>) => Object.entries(patch).forEach(([key, value]) => form.setFieldValue(key as never, value as never));
 
   function next() {
-    const problems = isoStepProblems(step, values, { vmNames: data.vmNames, images: data.images, subnets: data.subnets });
+    const problems = isoStepProblems(step, values, environment);
     setErrors(Object.fromEntries(problems.map((problem) => [problem.field, i18n._(problem.message)])));
     if (problems.length === 0) {
       setIndex((current) => Math.min(isoSteps.length - 1, current + 1));
@@ -84,24 +88,28 @@ export default function IsoWizard() {
   }
 
   async function submit() {
-    if (!def) {
+    if (!def || canCreate !== "allowed" || busy) {
       return;
     }
-    const { name } = values;
+    const [problem] = isoStepProblems("iso", values, environment);
+    if (problem) {
+      setErrors({ [problem.field]: i18n._(problem.message) });
+      setIndex(isoSteps.indexOf("iso"));
+      return;
+    }
     setBusy(true);
     try {
       await kubeClient(http).create(refOf(def), data.namespace, buildIsoVirtualMachine(values, { namespace: data.namespace }));
-      toast.show({ tone: "success", title: t({ id: "forms.create.done", message: `Created ${name}` }) });
-      void queryClient.invalidateQueries({ queryKey: ["kube", def.group, def.plural] });
-      form.reset();
-      void navigate(`/p/${projectName}/vms/${values.name}?tab=console`);
+      toast.show({ tone: "success", title: t({ id: "action.accepted", message: "Request accepted" }) });
+      navigation.complete(`/p/${projectName}/vms/${values.name}?tab=console`);
     } catch (error) {
       if (isKubeStatusError(error) && error.reason === "AlreadyExists") {
         setErrors({ name: t({ id: "forms.name.exists", message: "An object with this name already exists" }) });
         setIndex(0);
       } else if (isKubeStatusError(error) && error.causes.length > 0) {
-        const target = isoSteps.indexOf(stepOfField(error.causes[0]?.field ?? "") as IsoStepId);
-        setErrors({ rootDiskGi: error.causes[0]?.message ?? "" });
+        const step = stepOfField(error.causes[0]?.field ?? "") as IsoStepId;
+        const target = isoSteps.indexOf(step);
+        setErrors({ [step === "iso" ? "isoName" : "rootDiskGi"]: error.causes[0]?.message ?? "" });
         setIndex(target >= 0 ? target : index);
       } else {
         toast.show({ tone: "danger", title: t({ id: "action.error.failed", message: "The action failed" }), description: error instanceof Error ? error.message : "" });
@@ -133,7 +141,7 @@ export default function IsoWizard() {
     ) : step === "network" ? (
       <NetworkStep {...props} />
     ) : (
-      <ReviewStep object={buildIsoVirtualMachine(values, { namespace: data.namespace })} />
+      <ReviewStep values={values} object={buildIsoVirtualMachine(values, { namespace: data.namespace })} />
     );
 
   return (
@@ -141,8 +149,10 @@ export default function IsoWizard() {
       title={t({ id: "wizard.iso.title", message: "Install a virtual machine from an ISO" })}
       steps={isoSteps.map((id) => ({ id, label: labels[id] }))}
       index={index}
-      dirty={hasChanges(values, { ...initial, subnetRef: data.defaultSubnet })}
+      blocker={navigation.blocker}
       busy={busy}
+      nextDisabled={step === "iso" && readyIsos(data.images).length === 0}
+      errors={errors}
       leaveTo={`/p/${projectName}/vms`}
       onBack={() => setIndex((current) => Math.max(0, current - 1))}
       onNext={next}

@@ -27,7 +27,7 @@ describe("admin inventory", () => {
     const first = machine("worker", "platform-staging");
     const second = machine("worker", "platform-tools");
     const platform = machine("operator-node", "bedrock-system");
-    const { api } = show("/admin", { [`GET ${allVMs}`]: { body: { metadata: {}, items: [first, second, platform] } } });
+    const { api } = show("/admin/inventory", { [`GET ${allVMs}`]: { body: { metadata: {}, items: [first, second, platform] } } });
     const table = await screen.findByRole("table", { name: "Virtual machines" }, inventoryWait);
     expect(screen.getByRole("heading", { name: "Resource inventory", level: 1 })).toBeTruthy();
     expect(within(table).getAllByRole("link", { name: "worker" }).map((link) => link.getAttribute("href"))).toEqual(["/p/staging/vms/worker", "/p/tools/vms/worker"]);
