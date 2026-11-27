@@ -3,6 +3,7 @@ package release
 import (
 	"bytes"
 	"context"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -22,6 +23,48 @@ import (
 	"github.com/google/go-containerregistry/pkg/v1/random"
 	"github.com/google/go-containerregistry/pkg/v1/remote"
 )
+
+func TestBlobCacheLockStopsWaitingWhenRequestExpires(t *testing.T) {
+	dir := t.TempDir()
+	digest := strings.Repeat("a", 64)
+	path := filepath.Join(dir, "blobs", "sha256", digest+".lock")
+	owner, err := lockFile(context.Background(), path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { owner.Close() })
+	ctx, cancel := context.WithTimeout(context.Background(), 150*time.Millisecond)
+	defer cancel()
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, "https://example.invalid/v2/test/blobs/sha256:"+digest, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	result := make(chan error, 1)
+	go func() {
+		_, err := (blobCache{dir: dir}).RoundTrip(req)
+		result <- err
+	}()
+	select {
+	case err := <-result:
+		if !errors.Is(err, context.DeadlineExceeded) {
+			t.Fatalf("got %v, want context deadline exceeded", err)
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("request waited for the lock after its deadline")
+	}
+	if err := owner.Close(); err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel = context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	next, err := lockFile(ctx, path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := next.Close(); err != nil {
+		t.Fatal(err)
+	}
+}
 
 type cdnHit struct {
 	hex  string

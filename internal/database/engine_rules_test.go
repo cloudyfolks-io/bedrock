@@ -34,13 +34,17 @@ func TestEngineRulesForValkey(t *testing.T) {
 		{"mysql high availability", specOf("mysql", nil), highAvailability, ""},
 		{"mysql restore", specOf("mysql", func(s *v1alpha1.DatabaseSpec) { s.Restore = &v1alpha1.DatabaseRestore{SourceUID: "abc"} }), single, ""},
 		{"mysql target time", specOf("mysql", func(s *v1alpha1.DatabaseSpec) {
-			at := metav1.NewTime(time.Now().Add(-time.Hour))
+			at := metav1.NewTime(time.Unix(1700000000, 123456000).UTC())
 			s.Restore = &v1alpha1.DatabaseRestore{SourceUID: "abc", TargetTime: &at}
 		}), single, ReasonRestoreTimeUnsupported},
 		{"postgresql target time", specOf("postgresql", func(s *v1alpha1.DatabaseSpec) {
-			at := metav1.NewTime(time.Now().Add(-time.Hour))
+			at := metav1.NewTime(time.Unix(1700000000, 123456000).UTC())
 			s.Restore = &v1alpha1.DatabaseRestore{SourceUID: "abc", TargetTime: &at}
 		}), single, ""},
+		{"postgresql inexact target time", specOf("postgresql", func(s *v1alpha1.DatabaseSpec) {
+			at := metav1.NewTime(time.Unix(1700000000, 123456001).UTC())
+			s.Restore = &v1alpha1.DatabaseRestore{SourceUID: "abc", TargetTime: &at}
+		}), single, ReasonRestoreTimeUnsupported},
 	}
 	for _, c := range cases {
 		refusal := CheckEngineRules(c.spec, c.class)

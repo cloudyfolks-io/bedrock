@@ -8,8 +8,16 @@ bin=${BEDROCK_BIN:-bin/bedrock}
 test_bin=${E2E_TEST:-dist/e2e-tenant.test}
 cache=${E2E_TENANT_CACHE:-dist/cache/e2e-tenant}
 steps_dir=$(dirname "${BASH_SOURCE[0]}")/e2e/tenant
-workdir=$(mktemp -d)
 export KUBECONFIG=/var/lib/k0s/pki/admin.conf
+
+# This case reuses prepared fixtures. Do not pin hosts, install binaries, issue
+# tokens, or run the generic dumps/cleanup against the fixture cluster.
+if [[ ${E2E_ONLY:-} == database_backup_egress ]]; then
+  exec python3 "$steps_dir/database-backup-egress-run.py" --run
+fi
+
+source "$steps_dir/database-backup-evidence.sh"
+workdir=$(mktemp -d)
 export BEDROCK_CA=$workdir/platform-ca.crt
 export TOKEN_DIR=$workdir/tokens
 export TENANT=acme
@@ -111,9 +119,16 @@ dump_workloads() {
 
 dump() {
   local status=$?
+  trap - EXIT
   if [ "$status" -ne 0 ]; then
-    dump_cluster
-    dump_workloads
+    database_backup_failure "$status" || printf '%s\n' 'Could not write database backup failure evidence' >&2
+    (dump_cluster) || true
+    (dump_workloads) || true
+    if [ -z "${E2E_FROM:-}${E2E_ONLY:-}" ]; then
+      (e2e_cleanup) || true
+    fi
+    rm -rf "$workdir" || true
+    exit "$status"
   fi
   if [ -z "${E2E_FROM:-}${E2E_ONLY:-}" ]; then
     e2e_cleanup
@@ -146,8 +161,10 @@ done
 
 run_step() {
   local started=$SECONDS
+  database_backup_begin "$1"
   echo "=== $1"
   "$1"
+  database_backup_begin ""
   echo "=== $1 passed in $((SECONDS - started))s"
 }
 
