@@ -10,6 +10,7 @@ import styles from "./metricChart.module.css";
 
 interface Props {
   title: string;
+  heading?: "h2" | "h3";
   queries: string[];
   unit: Unit;
   namespace?: string | undefined;
@@ -32,7 +33,7 @@ function mergeOutcomes(queries: string[], outcomes: MetricOutcome[], start: numb
   return { data: [times, ...columns] as AlignedData, labels: parts.flatMap((part) => part.labels) };
 }
 
-export function MetricChart({ title, queries, unit, namespace, name }: Props) {
+export function MetricChart({ title, heading: Heading = "h2", queries, unit, namespace, name }: Props) {
   const { t } = useLingui();
   const { locale } = useLocale();
   const [range, setRange] = useState<Range>("1h");
@@ -113,7 +114,7 @@ export function MetricChart({ title, queries, unit, namespace, name }: Props) {
   return (
     <section className={`br-chart ${styles.chart}`}>
       <header className="br-toolbar">
-        <h3>{title}</h3>
+        <Heading className={styles.title}>{title}</Heading>
         <RangePicker value={range} onChange={setRange} />
       </header>
       {message ? <p role="status" className={styles.message}>{message}</p> : null}

@@ -299,7 +299,7 @@ export default function UpgradesPage() {
       </OperatorTable>
       <Section title={t({ id: "hostDetail.tab.metrics", message: "Metrics" })}>
         <div className={styles.sectionBody}>
-          <MetricChart title={t({ id: "upgrades.ceph", message: "Ceph usage" })} queries={["ceph.used", "ceph.capacity"]} unit="bytes" />
+          <MetricChart heading="h3" title={t({ id: "upgrades.ceph", message: "Ceph usage" })} queries={["ceph.used", "ceph.capacity"]} unit="bytes" />
         </div>
       </Section>
       <ConfirmSimpleDialog

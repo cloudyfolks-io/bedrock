@@ -18,7 +18,7 @@
   background: var(--br-color-surface-raised);
 }
 
-.chart h3 {
+.title {
   margin: 0;
   font-size: .875rem;
 }
