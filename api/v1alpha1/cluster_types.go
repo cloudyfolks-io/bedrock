@@ -7,6 +7,8 @@ import (
 const (
 	ClusterName = "cluster"
 
+	AnnotationK0sCoreDNSTakeover = "bedrock.cloudyfolks.io/k0s-coredns-takeover"
+
 	PhaseIdle         = "Idle"
 	PhasePreflight    = "Preflight"
 	PhaseBackup       = "Backup"
@@ -37,15 +39,20 @@ const (
 	ReasonPoolSizeTooSmall   = "PoolSizeTooSmall"
 	ReasonRenameFailed       = "RenameFailed"
 
-	ConditionAvailable           = "Available"
-	ConditionUpgradeBlocked      = "UpgradeBlocked"
-	ConditionStorageReady        = "StorageReady"
-	ConditionStorageAdopted      = "StorageAdopted"
-	ConditionVirtualizationReady = "VirtualizationReady"
-	ConditionPlatformReady       = "PlatformReady"
-	ConditionAuthnReady          = "AuthnReady"
-	ConditionUploadReady         = "UploadReady"
-	ConditionProxyReady          = "ProxyReady"
+	ConditionAvailable              = "Available"
+	ConditionUpgradeBlocked         = "UpgradeBlocked"
+	ConditionStorageReady           = "StorageReady"
+	ConditionStorageAdopted         = "StorageAdopted"
+	ConditionStorageCephxRestricted = "StorageCephxRestricted"
+	ConditionVirtualizationReady    = "VirtualizationReady"
+	ConditionPlatformReady          = "PlatformReady"
+	ConditionAuthnReady             = "AuthnReady"
+	ConditionUploadReady            = "UploadReady"
+	ConditionProxyReady             = "ProxyReady"
+	ConditionNodePortsScoped        = "NodePortsScoped"
+	ConditionTenantLegsGuarded      = "TenantLegsGuarded"
+	ConditionDNSReady               = "DNSReady"
+	ConditionEgressReady            = "EgressReady"
 )
 
 type APISpec struct {
@@ -68,6 +75,9 @@ type KMSSpec struct {
 type EncryptionSpec struct {
 	// +optional
 	KMS *KMSSpec `json:"kms,omitempty"`
+	// +kubebuilder:validation:Enum="";rotate;revert
+	// +optional
+	Action string `json:"action,omitempty"`
 }
 
 type UpgradeSpec struct {
@@ -98,6 +108,19 @@ type ClusterSpec struct {
 	// +kubebuilder:validation:XValidation:rule="self == oldSelf",message="joinCIDR is immutable"
 	// +optional
 	JoinCIDR string `json:"joinCIDR,omitempty"`
+	// +kubebuilder:validation:Minimum=576
+	// +kubebuilder:validation:Maximum=9000
+	// +optional
+	PodMTU int32 `json:"podMTU,omitempty"`
+	// +kubebuilder:validation:MaxLength=43
+	// +kubebuilder:validation:XValidation:rule="isCIDR(self)",message="managementCIDR must be a CIDR"
+	// +optional
+	ManagementCIDR string `json:"managementCIDR,omitempty"`
+	// +optional
+	// +listType=map
+	// +listMapKey=interface
+	// +kubebuilder:validation:MaxItems=16
+	TenantLegs []TenantLegSpec `json:"tenantLegs,omitempty"`
 }
 
 type ClusterStorageSpec struct {
@@ -134,6 +157,23 @@ type UpgradeStatus struct {
 	Message string `json:"message,omitempty"`
 }
 
+type EncryptionRotationStatus struct {
+	// +optional
+	Phase string `json:"phase,omitempty"`
+	// +optional
+	OldKey string `json:"oldKey,omitempty"`
+	// +optional
+	NewKey string `json:"newKey,omitempty"`
+	// +optional
+	Reverting bool `json:"reverting,omitempty"`
+	// +optional
+	RewrittenSecrets int64 `json:"rewrittenSecrets,omitempty"`
+	// +optional
+	LastRotatedAt *metav1.Time `json:"lastRotatedAt,omitempty"`
+	// +optional
+	Message string `json:"message,omitempty"`
+}
+
 type ClusterStatus struct {
 	// +optional
 	ObservedGeneration int64 `json:"observedGeneration,omitempty"`
@@ -149,6 +189,8 @@ type ClusterStatus struct {
 	Backups []BackupRecord `json:"backups,omitempty"`
 	// +optional
 	Upgrade *UpgradeStatus `json:"upgrade,omitempty"`
+	// +optional
+	Encryption *EncryptionRotationStatus `json:"encryption,omitempty"`
 }
 
 // +kubebuilder:object:root=true

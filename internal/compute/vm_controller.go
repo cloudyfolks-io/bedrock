@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
+	"slices"
 	"strings"
 	"time"
 
@@ -38,6 +40,7 @@ type GuestInfoFunc func(ctx context.Context, namespace, name string) (v1alpha1.V
 type VirtualMachineReconciler struct {
 	Client    client.Client
 	Secrets   client.Reader
+	FabricIPs client.Reader
 	Scheme    *runtime.Scheme
 	GuestInfo GuestInfoFunc
 	Now       func() time.Time
@@ -74,12 +77,15 @@ func (r *VirtualMachineReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 	if err := r.writeStatus(ctx, vm, done.Gate, obs); err != nil {
 		return ctrl.Result{}, fmt.Errorf("write the virtual machine status: %w", err)
 	}
-	return ctrl.Result{RequeueAfter: requeueAfter(done, obs, expiring)}, nil
+	return ctrl.Result{RequeueAfter: requeueAfter(vm, done, obs, expiring)}, nil
 }
 
-func requeueAfter(done outcome, obs observation, expiring bool) time.Duration {
+func requeueAfter(vm v1alpha1.VirtualMachine, done outcome, obs observation, expiring bool) time.Duration {
 	if done.RequeueAfter > 0 {
 		return done.RequeueAfter
+	}
+	if awaitsPinnedAddress(vm, obs) {
+		return applyFailureRetry
 	}
 	if expiring || obs.Phase == v1alpha1.VMPhaseRunning || obs.Phase == v1alpha1.VMPhaseMigrating {
 		return observeInterval
@@ -123,7 +129,7 @@ func retryFor(gate *Gate) time.Duration {
 	switch gate.Reason {
 	case ReasonInstanceTypeNotFound, ReasonPreferenceNotFound:
 		return catalogRetry
-	case ReasonWaitingForDefaultGroup:
+	case ReasonWaitingForDefaultGroup, ReasonAddressInUse:
 		return applyFailureRetry
 	}
 	return 0
@@ -135,6 +141,9 @@ func (r *VirtualMachineReconciler) apply(ctx context.Context, in RenderInput) (o
 		return outcome{Gate: gateOf(ReasonInvalidSpec, "%s", err.Error())}, nil
 	}
 	err = r.applyRendered(ctx, in, rendered)
+	if err == nil && in.PendingRootVolume != "" {
+		return outcome{Gate: gateOf(ReasonRootVolumeSwapPending, "the virtual machine boots from %q until it is stopped, then it boots from %q", in.RootVolume.Name, in.PendingRootVolume)}, nil
+	}
 	var conflict nameConflict
 	if errors.As(err, &conflict) {
 		return outcome{Gate: gateOf(ReasonNameConflict, "%s", conflict.Error()), RequeueAfter: applyFailureRetry}, nil
@@ -154,14 +163,19 @@ func (r *VirtualMachineReconciler) applyRendered(ctx context.Context, in RenderI
 	if err := ssa.Apply(ctx, r.Client, rendered.Secret, v1alpha1.ComputeFieldManager); err != nil {
 		return fmt.Errorf("apply the cloud-init secret: %w", err)
 	}
-	claims := append([]*unstructured.Unstructured{rendered.RootClaim}, rendered.CDROMClaims...)
+	claims := slices.Clone(rendered.CDROMClaims)
+	if rendered.RootClaim != nil {
+		claims = append([]*unstructured.Unstructured{rendered.RootClaim}, claims...)
+	}
 	for _, claim := range claims {
 		if err := createIfAbsent(ctx, r.Client, claim); err != nil {
 			return fmt.Errorf("create the claim %s: %w", claim.GetName(), err)
 		}
 	}
-	if err := growClaim(ctx, r.Client, vm.Namespace, RootClaimName(vm.Name), vm.Spec.RootDisk.SizeGi); err != nil {
-		return fmt.Errorf("grow the root claim: %w", err)
+	if rendered.RootClaim != nil {
+		if err := growClaim(ctx, r.Client, vm.Namespace, RootClaimName(vm.Name), vm.Spec.RootDisk.SizeGi); err != nil {
+			return fmt.Errorf("grow the root claim: %w", err)
+		}
 	}
 	if err := guardOwnership(ctx, r.Client, kubeVirtVMGVK, rendered.VirtualMachine); err != nil {
 		return err
@@ -319,6 +333,7 @@ func (r *VirtualMachineReconciler) syncLauncherPods(ctx context.Context, vm v1al
 		return err
 	}
 	annotations, labels := network.PodNetworkMetadata(nics)
+	maps.DeleteFunc(annotations, func(key, _ string) bool { return network.IsAddressAnnotation(key) })
 	for index := range pods.Items {
 		pod := &pods.Items[index]
 		if !pod.DeletionTimestamp.IsZero() {
@@ -405,6 +420,7 @@ func statusOf(vm v1alpha1.VirtualMachine, gate *Gate, obs observation, now time.
 		ElasticIP:    obs.ElasticIP,
 		GuestAgent:   obs.GuestAgent,
 		Console:      ConsoleFor(obs.Phase, vm.Namespace, vm.Name),
+		Migration:    obs.Migration,
 	}
 	conditions := Conditions(vm.Generation, obs.Phase, vm.Spec.Running, gate, obs.KubeVirt)
 	status.Conditions = mergeConditions(vm.Status.Conditions, conditions, now)

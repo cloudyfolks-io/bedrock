@@ -1,16 +1,28 @@
 import { useState } from "react";
-import { useQueryClient } from "@tanstack/react-query";
+import { msg } from "@lingui/core/macro";
 import { useLingui } from "@lingui/react/macro";
 import { Button, Dialog, NumberField, TextField, useToast } from "@bedrock/design";
 import { useHttp } from "../../api/HttpProvider";
-import { kubeClient, listKey } from "../../api/kube";
+import { kubeClient } from "../../api/kube";
 import type { KubeObject } from "../../api/types";
 import { useCans } from "../../authz/authz";
+import { Ltr } from "../../components/Ltr";
+import { formatBytes } from "../../format";
+import { useLocale } from "../../LocaleProvider";
+import type { ColumnDef } from "../../resources/columns";
 import { definitionFor, refOf } from "../../resources/registry";
 import { ResourceListPage } from "../../resources/ResourceListPage";
 import { useCurrentProject } from "../../shell/context";
+import styles from "./storage.module.css";
 
 const dnsLabel = /^[a-z0-9]([-a-z0-9]*[a-z0-9])?$/;
+
+const snapshotSize: ColumnDef = {
+  id: "size",
+  label: msg({ id: "col.size", message: "Size" }),
+  render: (object, { locale }) => typeof object.status?.sizeBytes === "number" ? formatBytes(object.status.sizeBytes, locale) : "—",
+  sortValue: (object) => Number(object.status?.sizeBytes ?? 0),
+};
 
 export function volumeFromSnapshot(snapshot: KubeObject, name: string, sizeGi: number): KubeObject {
   return {
@@ -23,9 +35,9 @@ export function volumeFromSnapshot(snapshot: KubeObject, name: string, sizeGi: n
 
 function RestoreDialog({ snapshot, onClose }: { snapshot: KubeObject; onClose: () => void }) {
   const { t } = useLingui();
+  const { locale } = useLocale();
   const http = useHttp();
   const toast = useToast();
-  const queryClient = useQueryClient();
   const volumes = definitionFor("volumes");
   const bytes = Number(snapshot.status?.sizeBytes ?? 0);
   const [name, setName] = useState("");
@@ -39,7 +51,6 @@ function RestoreDialog({ snapshot, onClose }: { snapshot: KubeObject; onClose: (
     try {
       await kubeClient(http).create(refOf(volumes), snapshot.metadata.namespace, volumeFromSnapshot(snapshot, name, size));
       toast.show({ tone: "success", title: t({ id: "snapshots.restore.done", message: `Volume ${name} created` }) });
-      void queryClient.invalidateQueries({ queryKey: listKey(refOf(volumes), snapshot.metadata.namespace, {}) });
       onClose();
     } catch (error) {
       toast.show({ tone: "danger", title: t({ id: "action.error.failed", message: "The action failed" }), description: error instanceof Error ? error.message : "" });
@@ -61,8 +72,14 @@ function RestoreDialog({ snapshot, onClose }: { snapshot: KubeObject; onClose: (
         </Button>
       }
     >
-      <TextField label={t({ id: "forms.name.label", message: "Name" })} name="volume-name" value={name} onChange={setName} dir="ltr" autoComplete="off" />
-      <NumberField label={t({ id: "volumes.expand.size", message: "New size (GiB)" })} value={size} onValueChange={setSize} min={1} />
+      <div className={styles.fields}>
+        <dl className={styles.facts}>
+          <div><dt>{t({ id: "col.source", message: "Source" })}</dt><dd><Ltr>{snapshot.metadata.name}</Ltr></dd></div>
+          <div><dt>{t({ id: "col.size", message: "Size" })}</dt><dd>{bytes > 0 ? formatBytes(bytes, locale) : "—"}</dd></div>
+        </dl>
+        <TextField label={t({ id: "forms.name.label", message: "Name" })} name="volume-name" value={name} onChange={setName} dir="ltr" autoComplete="off" />
+        <NumberField label={t({ id: "volumes.expand.size", message: "New size (GiB)" })} value={size} onValueChange={setSize} min={1} />
+      </div>
     </Dialog>
   );
 }
@@ -78,7 +95,7 @@ export default function SnapshotsPage() {
   }
   return (
     <ResourceListPage
-      def={def}
+      def={{ ...def, columns: def.columns.flatMap((column) => column.id === "phase" ? [column, snapshotSize] : [column]) }}
       rowItems={(object) =>
         canCreate === "allowed" ? [{ id: "restore", label: t({ id: "snapshots.restore.title", message: "Restore to a new volume" }), disabled: object.status?.phase !== "Ready", onSelect: () => setRestoring(object) }] : []
       }

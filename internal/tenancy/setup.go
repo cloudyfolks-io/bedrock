@@ -10,5 +10,8 @@ func SetupWithManager(mgr ctrl.Manager) error {
 		return err
 	}
 	projects := &ProjectReconciler{Client: mgr.GetClient(), Reader: mgr.GetAPIReader()}
-	return projects.SetupWithManager(mgr)
+	if err := projects.SetupWithManager(mgr); err != nil {
+		return err
+	}
+	return (&PodNetworkAdmissionReconciler{Client: mgr.GetClient()}).SetupWithManager(mgr)
 }

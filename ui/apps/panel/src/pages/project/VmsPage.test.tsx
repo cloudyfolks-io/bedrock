@@ -3,13 +3,14 @@ import userEvent from "@testing-library/user-event";
 import { Route, Routes } from "react-router";
 import { describe, expect, it } from "vitest";
 import type { Check } from "../../api/types";
+import type { Locale } from "../../i18n";
 import { virtualMachines } from "../../test/fixtures";
 import { renderPanel } from "../../test/renderPanel";
 import VmsPage from "./VmsPage";
 
 const projects = { projects: [{ name: "web", displayName: "Web", tenant: "acme", namespace: "acme-web" }] };
 
-function render(allow: (check: Check) => boolean = () => true) {
+function render(allow: (check: Check) => boolean = () => true, locale: Locale = "en") {
   return renderPanel(
     <Routes>
       <Route path="/p/:project/vms" element={<VmsPage />} />
@@ -17,6 +18,7 @@ function render(allow: (check: Check) => boolean = () => true) {
     {
       route: "/p/web/vms",
       allow,
+      locale,
       api: { "GET /proxy/v1/projects": { body: projects }, "GET /apis/bedrock.cloudyfolks.io/v1alpha1/namespaces/acme-web/virtualmachines": { body: virtualMachines() } },
     },
   );
@@ -36,10 +38,22 @@ describe("VmsPage", () => {
     const user = userEvent.setup();
     const { container } = render();
     await screen.findByRole("link", { name: "web-1" });
-    await user.click(screen.getByRole("combobox", { name: /Phase/ }));
+    const phase = screen.getByRole("combobox", { name: "Phase" });
+    expect(phase.textContent).toContain("All phases");
+    await user.click(phase);
     await user.click(await screen.findByRole("option", { name: "Failed" }));
     await waitFor(() => expect(container.querySelectorAll("tbody tr")).toHaveLength(1));
     expect(screen.getByRole("link", { name: "old" })).toBeTruthy();
+  });
+
+  it("uses the same Persian phase label in the picker and badge", async () => {
+    const user = userEvent.setup();
+    render(undefined, "fa");
+    expect(await screen.findByText("ناموفق")).toBeTruthy();
+    await user.click(screen.getByRole("combobox"));
+    await user.click(await screen.findByRole("option", { name: "ناموفق" }));
+    expect(screen.getByRole("link", { name: "old" })).toBeTruthy();
+    expect(screen.queryByRole("link", { name: "web-1" })).toBeNull();
   });
 
   it("routes the create buttons when create is allowed", async () => {

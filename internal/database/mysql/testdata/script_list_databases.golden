@@ -1,0 +1,2 @@
+SET SESSION max_execution_time = 30000;
+SELECT schema_name FROM information_schema.schemata WHERE schema_name NOT IN ('mysql', 'sys', 'information_schema', 'performance_schema') ORDER BY 1;

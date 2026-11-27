@@ -1,0 +1,171 @@
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicy
+metadata:
+  name: bedrock-tenant-pod-network
+  labels:
+    bedrock.cloudyfolks.io/kind: ValidatingAdmissionPolicy
+    bedrock.cloudyfolks.io/name: bedrock-tenant-pod-network
+spec:
+  failurePolicy: Fail
+  matchConstraints:
+    namespaceSelector:
+      matchExpressions:
+        - key: bedrock.cloudyfolks.io/tenant
+          operator: Exists
+    resourceRules:
+      - apiGroups: [""]
+        apiVersions: [v1]
+        operations: [CREATE]
+        resources: [pods]
+      - apiGroups: [""]
+        apiVersions: [v1]
+        operations: [UPDATE]
+        resources: [pods/ephemeralcontainers]
+  matchConditions:
+    - name: not-a-platform-identity
+      expression: >-
+        !((has(request.userInfo.groups) && ('system:masters' in request.userInfo.groups || 'system:nodes' in request.userInfo.groups)) ||
+        ['kubevirt', 'cdi', 'aaq', 'rook-ceph', 'velero'].exists(n, request.userInfo.username.startsWith('system:serviceaccount:' + n + ':')) ||
+        (request.userInfo.username.startsWith('system:serviceaccount:kube-system:') && !(request.userInfo.username in ['system:serviceaccount:kube-system:replicaset-controller', 'system:serviceaccount:kube-system:statefulset-controller', 'system:serviceaccount:kube-system:daemonset-controller', 'system:serviceaccount:kube-system:job-controller'])) ||
+        request.userInfo.username in ['system:kube-scheduler', 'system:kube-controller-manager'])
+  variables:
+    - name: annotations
+      expression: "has(object.metadata.annotations) ? object.metadata.annotations : {}"
+    - name: labels
+      expression: "has(object.metadata.labels) ? object.metadata.labels : {}"
+    - name: class
+      expression: "'network.cloudyfolks.com/class' in variables.labels ? variables.labels['network.cloudyfolks.com/class'] : ''"
+    - name: created
+      expression: "request.operation == 'CREATE'"
+    - name: net1Subnet
+      expression: "'vpc.kube-system.fabric.cloudyfolks.io/logical_switch' in variables.annotations ? variables.annotations['vpc.kube-system.fabric.cloudyfolks.io/logical_switch'] : ''"
+    - name: net1Groups
+      expression: "'vpc.kube-system.fabric.cloudyfolks.io/security_groups' in variables.annotations ? variables.annotations['vpc.kube-system.fabric.cloudyfolks.io/security_groups'] : ''"
+    - name: eth0Subnet
+      expression: "variables.class == 'workload' ? 'tenant-workload' : 'tenant-managed'"
+    - name: podSpec
+      expression: "object.spec"
+  validations:
+    - expression: "!variables.created || variables.class in ['workload', 'managed']"
+      message: "label network.cloudyfolks.com/class must be workload or managed"
+      reason: Forbidden
+    - expression: "!variables.created || ('k8s.v1.cni.cncf.io/networks' in variables.annotations && variables.annotations['k8s.v1.cni.cncf.io/networks'] == 'kube-system/vpc')"
+      message: "annotation k8s.v1.cni.cncf.io/networks must be exactly kube-system/vpc"
+      reason: Forbidden
+    - expression: "!variables.created || ('fabric.cloudyfolks.io/logical_switch' in variables.annotations && variables.annotations['fabric.cloudyfolks.io/logical_switch'] == variables.eth0Subnet)"
+      message: "eth0 logical_switch must be tenant-workload for class workload and tenant-managed for class managed"
+      reason: Forbidden
+    - expression: >-
+        !variables.created ||
+        ('fabric.cloudyfolks.io/port_security' in variables.annotations && variables.annotations['fabric.cloudyfolks.io/port_security'] == 'true' &&
+        'vpc.kube-system.fabric.cloudyfolks.io/port_security' in variables.annotations && variables.annotations['vpc.kube-system.fabric.cloudyfolks.io/port_security'] == 'true')
+      message: "port_security must be true on eth0 and on net1"
+      reason: Forbidden
+    - expression: "!variables.created || ('vpc.kube-system.fabric.cloudyfolks.io/logical_switch' in variables.annotations && variables.annotations['vpc.kube-system.fabric.cloudyfolks.io/logical_switch'] != '')"
+      message: "net1 logical_switch must name a subnet of the project"
+      reason: Forbidden
+    - expression: >-
+        !variables.created ||
+        (!variables.net1Subnet.matches('[ \\t\\r\\n]') && !variables.net1Groups.matches('[ \\t\\r\\n]') &&
+        (variables.net1Groups == '' || variables.net1Groups.split(',').all(g, g != '')))
+      message: "net1 logical_switch and security_groups must hold clean names: no whitespace and no empty list item"
+      reason: Forbidden
+    - expression: "!variables.created || variables.class != 'workload' || (has(variables.podSpec.automountServiceAccountToken) && variables.podSpec.automountServiceAccountToken == false)"
+      message: "class workload pods must set automountServiceAccountToken to false"
+      reason: Forbidden
+    - expression: >-
+        variables.class != 'workload' ||
+        (variables.podSpec.containers.all(c, !has(c.securityContext) || !has(c.securityContext.capabilities) || !has(c.securityContext.capabilities.add) || !('NET_BIND_SERVICE' in c.securityContext.capabilities.add)) &&
+        (!has(variables.podSpec.initContainers) || variables.podSpec.initContainers.all(c, !has(c.securityContext) || !has(c.securityContext.capabilities) || !has(c.securityContext.capabilities.add) || !('NET_BIND_SERVICE' in c.securityContext.capabilities.add))) &&
+        (!has(variables.podSpec.ephemeralContainers) || variables.podSpec.ephemeralContainers.all(c, !has(c.securityContext) || !has(c.securityContext.capabilities) || !has(c.securityContext.capabilities.add) || !('NET_BIND_SERVICE' in c.securityContext.capabilities.add))))
+      message: "class workload containers must not add NET_BIND_SERVICE, bedrock-tenant-pods denies every other added capability"
+      reason: Forbidden
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicy
+metadata:
+  name: bedrock-tenant-pod-network-subnet
+  labels:
+    bedrock.cloudyfolks.io/kind: ValidatingAdmissionPolicy
+    bedrock.cloudyfolks.io/name: bedrock-tenant-pod-network-subnet
+spec:
+  failurePolicy: Fail
+  paramKind:
+    apiVersion: fabric.cloudyfolks.io/v1
+    kind: Subnet
+  matchConstraints:
+    namespaceSelector:
+      matchExpressions:
+        - key: bedrock.cloudyfolks.io/tenant
+          operator: Exists
+    resourceRules:
+      - apiGroups: [""]
+        apiVersions: [v1]
+        operations: [CREATE]
+        resources: [pods]
+  matchConditions:
+    - name: not-a-platform-identity
+      expression: >-
+        !((has(request.userInfo.groups) && ('system:masters' in request.userInfo.groups || 'system:nodes' in request.userInfo.groups)) ||
+        ['kubevirt', 'cdi', 'aaq', 'rook-ceph', 'velero'].exists(n, request.userInfo.username.startsWith('system:serviceaccount:' + n + ':')) ||
+        (request.userInfo.username.startsWith('system:serviceaccount:kube-system:') && !(request.userInfo.username in ['system:serviceaccount:kube-system:replicaset-controller', 'system:serviceaccount:kube-system:statefulset-controller', 'system:serviceaccount:kube-system:daemonset-controller', 'system:serviceaccount:kube-system:job-controller'])) ||
+        request.userInfo.username in ['system:kube-scheduler', 'system:kube-controller-manager'])
+  variables:
+    - name: annotations
+      expression: "has(object.metadata.annotations) ? object.metadata.annotations : {}"
+    - name: net1Subnet
+      expression: "'vpc.kube-system.fabric.cloudyfolks.io/logical_switch' in variables.annotations ? variables.annotations['vpc.kube-system.fabric.cloudyfolks.io/logical_switch'] : ''"
+    - name: owner
+      expression: "has(params.metadata.annotations) && 'bedrock.cloudyfolks.io/owner-namespace' in params.metadata.annotations ? params.metadata.annotations['bedrock.cloudyfolks.io/owner-namespace'] : ''"
+  validations:
+    - expression: "params.metadata.name != variables.net1Subnet || variables.owner == request.namespace"
+      message: "net1 logical_switch must name a subnet of the project"
+      reason: Forbidden
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicy
+metadata:
+  name: bedrock-tenant-pod-network-groups
+  labels:
+    bedrock.cloudyfolks.io/kind: ValidatingAdmissionPolicy
+    bedrock.cloudyfolks.io/name: bedrock-tenant-pod-network-groups
+spec:
+  failurePolicy: Fail
+  paramKind:
+    apiVersion: fabric.cloudyfolks.io/v1
+    kind: SecurityGroup
+  matchConstraints:
+    namespaceSelector:
+      matchExpressions:
+        - key: bedrock.cloudyfolks.io/tenant
+          operator: Exists
+    resourceRules:
+      - apiGroups: [""]
+        apiVersions: [v1]
+        operations: [CREATE]
+        resources: [pods]
+  matchConditions:
+    - name: not-a-platform-identity
+      expression: >-
+        !((has(request.userInfo.groups) && ('system:masters' in request.userInfo.groups || 'system:nodes' in request.userInfo.groups)) ||
+        ['kubevirt', 'cdi', 'aaq', 'rook-ceph', 'velero'].exists(n, request.userInfo.username.startsWith('system:serviceaccount:' + n + ':')) ||
+        (request.userInfo.username.startsWith('system:serviceaccount:kube-system:') && !(request.userInfo.username in ['system:serviceaccount:kube-system:replicaset-controller', 'system:serviceaccount:kube-system:statefulset-controller', 'system:serviceaccount:kube-system:daemonset-controller', 'system:serviceaccount:kube-system:job-controller'])) ||
+        request.userInfo.username in ['system:kube-scheduler', 'system:kube-controller-manager'])
+  variables:
+    - name: annotations
+      expression: "has(object.metadata.annotations) ? object.metadata.annotations : {}"
+    - name: net1Groups
+      expression: "'vpc.kube-system.fabric.cloudyfolks.io/security_groups' in variables.annotations ? variables.annotations['vpc.kube-system.fabric.cloudyfolks.io/security_groups'] : ''"
+    - name: paramAnnotations
+      expression: "has(params.metadata.annotations) ? params.metadata.annotations : {}"
+    - name: paramLabels
+      expression: "has(params.metadata.labels) ? params.metadata.labels : {}"
+    - name: ownedByProject
+      expression: >-
+        ('bedrock.cloudyfolks.io/owner-namespace' in variables.paramAnnotations && variables.paramAnnotations['bedrock.cloudyfolks.io/owner-namespace'] == request.namespace) ||
+        ('bedrock.cloudyfolks.io/kind' in variables.paramLabels && variables.paramLabels['bedrock.cloudyfolks.io/kind'] == 'Namespace' &&
+        'bedrock.cloudyfolks.io/name' in variables.paramLabels && variables.paramLabels['bedrock.cloudyfolks.io/name'] == request.namespace)
+  validations:
+    - expression: "variables.net1Groups == '' || !(params.metadata.name in variables.net1Groups.split(',')) || variables.ownedByProject"
+      message: "net1 security_groups must all be security groups of the project"
+      reason: Forbidden

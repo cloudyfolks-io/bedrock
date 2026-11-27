@@ -2,6 +2,7 @@ package compute
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
 
@@ -11,6 +12,7 @@ import (
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/client/interceptor"
 
 	"github.com/cloudyfolks-io/bedrock/api/v1alpha1"
 )
@@ -213,5 +215,29 @@ func TestVolumeSnapshotRefusesAForeignCSISnapshot(t *testing.T) {
 	csi := requirePresent(t, c, csiSnapshotGVK, ns, "snap1")
 	if claim, _, _ := unstructured.NestedString(csi.Object, "spec", "source", "persistentVolumeClaimName"); claim != "other" {
 		t.Fatalf("the snapshot changed: %+v", csi.Object)
+	}
+}
+
+func TestVolumeSnapshotReadyWhenContentIsUnreadable(t *testing.T) {
+	c, cfg := startEnv(t)
+	watching, err := client.NewWithWatch(cfg, client.Options{Scheme: testScheme(t)})
+	must(t, err)
+	ns, r := snapshotFixture(t, c, "block", rbdProvisioner, nil)
+	reconcileSnapshot(t, r, ns)
+	csi := requirePresent(t, c, csiSnapshotGVK, ns, "snap1")
+	csi.Object["status"] = map[string]any{"readyToUse": true, "restoreSize": "10Gi", "boundVolumeSnapshotContentName": "snapcontent-1"}
+	must(t, c.Status().Update(context.Background(), csi))
+	r.Client = interceptor.NewClient(watching, interceptor.Funcs{
+		Get: func(ctx context.Context, w client.WithWatch, key client.ObjectKey, obj client.Object, opts ...client.GetOption) error {
+			if obj.GetObjectKind().GroupVersionKind().Kind == csiSnapshotContentGVK.Kind {
+				return apierrors.NewForbidden(csiSnapshotContentGVK.GroupVersion().WithResource("volumesnapshotcontents").GroupResource(), key.Name, errors.New("denied"))
+			}
+			return w.Get(ctx, key, obj, opts...)
+		},
+	})
+	reconcileSnapshot(t, r, ns)
+	snapshot := requireSnapshotReason(t, c, ns, "Ready")
+	if snapshot.Status.SizeBytes != 10<<30 {
+		t.Fatalf("status %+v", snapshot.Status)
 	}
 }

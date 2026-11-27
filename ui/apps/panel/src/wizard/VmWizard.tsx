@@ -1,7 +1,5 @@
 import { useEffect, useState } from "react";
-import { useNavigate } from "react-router";
 import { useForm, useStore } from "@tanstack/react-form";
-import { useQueryClient } from "@tanstack/react-query";
 import { useLingui } from "@lingui/react/macro";
 import { msg } from "@lingui/core/macro";
 import { useToast } from "@bedrock/design";
@@ -20,8 +18,8 @@ import { ImageStep } from "./steps/ImageStep";
 import { ReviewStep } from "./steps/ReviewStep";
 import type { DiskStep, DiskValues } from "./types";
 import { useWizardData } from "./useWizardData";
-import { WizardFrame, type StepInfo } from "./WizardFrame";
-import { diskStepProblems, diskSteps, hasChanges, stepOfField } from "./wizardSteps";
+import { useWizardNavigation, WizardFrame, type StepInfo } from "./WizardFrame";
+import { diskStepProblems, diskSteps, extraVolumeProblem, hasChanges, stepOfField } from "./wizardSteps";
 
 const labels: Record<DiskStep, StepInfo["label"]> = {
   basics: msg({ id: "wizard.step.basics", message: "Basics" }),
@@ -38,6 +36,9 @@ const initial: DiskValues = {
   imageName: "",
   imageScope: "cluster",
   instanceType: "",
+  customSize: false,
+  cores: null,
+  memoryMiB: null,
   preference: "",
   rootDiskGi: 20,
   storageClass: "",
@@ -50,25 +51,30 @@ const initial: DiskValues = {
 };
 
 export default function VmWizard() {
+  const projectName = useCurrentProjectName() ?? "";
+  return <VmWizardForm key={projectName} projectName={projectName} />;
+}
+
+function VmWizardForm({ projectName }: { projectName: string }) {
   const { t, i18n } = useLingui();
   const http = useHttp();
   const toast = useToast();
-  const navigate = useNavigate();
-  const queryClient = useQueryClient();
   const def = definitionFor("virtualmachines");
-  const data = useWizardData();
+  const data = useWizardData({ loadVolumes: true });
   const canCreate = useCan({ verb: "create", group: "bedrock.cloudyfolks.io", resource: "virtualmachines", namespace: data.namespace });
   const form = useForm({ defaultValues: initial });
   const values = useStore(form.store, (state) => state.values);
   const [index, setIndex] = useState(0);
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [busy, setBusy] = useState(false);
-  const projectName = useCurrentProjectName() ?? "";
+  const [prefilledSubnet, setPrefilledSubnet] = useState("");
   const step = diskSteps[index] ?? "basics";
+  const navigation = useWizardNavigation(hasChanges(values, { ...initial, subnetRef: prefilledSubnet }));
 
   useEffect(() => {
     if (data.defaultSubnet !== "" && form.getFieldValue("subnetRef") === "") {
       form.setFieldValue("subnetRef", data.defaultSubnet);
+      setPrefilledSubnet(data.defaultSubnet);
     }
   }, [data.defaultSubnet, form]);
 
@@ -76,7 +82,10 @@ export default function VmWizard() {
   const environment = { vmNames: data.vmNames, images: data.images, subnets: data.subnets };
 
   function validate(current: DiskStep): boolean {
-    const problems = diskStepProblems(current, values, environment);
+    const problems = [
+      ...diskStepProblems(current, values, environment),
+      ...(current === "disks" ? extraVolumeProblem(values.extraVolumes, data.volumes) : []),
+    ];
     setErrors(Object.fromEntries(problems.map((problem) => [problem.field, i18n._(problem.message)])));
     return problems.length === 0;
   }
@@ -88,18 +97,25 @@ export default function VmWizard() {
   }
 
   async function submit() {
-    if (!def) {
+    if (!def || canCreate !== "allowed" || busy) {
       return;
     }
     const object = buildDiskVirtualMachine(values, { namespace: data.namespace });
-    const { name } = values;
     setBusy(true);
     try {
+      if (values.extraVolumes.length > 0) {
+        const latest = await data.refreshVolumes();
+        if (!navigation.active.current) return;
+        const [problem] = extraVolumeProblem(values.extraVolumes, latest);
+        if (problem) {
+          setErrors({ [problem.field]: i18n._(problem.message) });
+          setIndex(diskSteps.indexOf("disks"));
+          return;
+        }
+      }
       await kubeClient(http).create(refOf(def), data.namespace, object);
-      toast.show({ tone: "success", title: t({ id: "forms.create.done", message: `Created ${name}` }) });
-      void queryClient.invalidateQueries({ queryKey: ["kube", def.group, def.plural] });
-      form.reset();
-      void navigate(`/p/${projectName}/vms/${values.name}`);
+      toast.show({ tone: "success", title: t({ id: "action.accepted", message: "Request accepted" }) });
+      navigation.complete(`/p/${projectName}/vms/${values.name}`);
     } catch (error) {
       if (isKubeStatusError(error) && error.reason === "AlreadyExists") {
         setErrors({ name: t({ id: "forms.name.exists", message: "An object with this name already exists" }) });
@@ -141,7 +157,7 @@ export default function VmWizard() {
     ) : step === "access" ? (
       <AccessStep values={values} set={set} data={data} errors={errors} />
     ) : (
-      <ReviewStep object={buildDiskVirtualMachine(values, { namespace: data.namespace })} />
+      <ReviewStep values={values} object={buildDiskVirtualMachine(values, { namespace: data.namespace })} />
     );
 
   return (
@@ -149,8 +165,9 @@ export default function VmWizard() {
       title={t({ id: "wizard.title", message: "Create a virtual machine" })}
       steps={diskSteps.map((id) => ({ id, label: labels[id] }))}
       index={index}
-      dirty={hasChanges(values, { ...initial, subnetRef: data.defaultSubnet })}
+      blocker={navigation.blocker}
       busy={busy}
+      errors={errors}
       leaveTo={`/p/${projectName}/vms`}
       onBack={() => setIndex((current) => Math.max(0, current - 1))}
       onNext={next}
@@ -164,7 +181,10 @@ export default function VmWizard() {
 function fieldOfCause(field: string): string {
   const table: [string, string][] = [
     ["spec.rootDisk", "rootDiskGi"],
+    ["spec.disks", "extraVolumes"],
     ["spec.instanceType", "instanceType"],
+    ["spec.compute.cores", "cores"],
+    ["spec.compute.memoryMiB", "memoryMiB"],
     ["spec.image", "imageName"],
     ["spec.networks", "subnetRef"],
     ["spec.cloudInit", "userData"],

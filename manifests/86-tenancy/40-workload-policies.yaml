@@ -14,8 +14,12 @@ spec:
         operations: [CREATE, UPDATE]
         resources: [pods, pods/ephemeralcontainers]
   matchConditions:
-    - name: bedrock-identity
-      expression: "request.userInfo.username.startsWith('bedrock:')"
+    - name: not-a-platform-identity
+      expression: >-
+        request.userInfo.username.startsWith('bedrock:') ||
+        !((has(request.userInfo.groups) && ('system:masters' in request.userInfo.groups || 'system:nodes' in request.userInfo.groups)) ||
+        ['kube-system', 'kubevirt', 'cdi', 'aaq', 'rook-ceph', 'bedrock-system', 'velero'].exists(n, request.userInfo.username.startsWith('system:serviceaccount:' + n + ':')) ||
+        request.userInfo.username in ['system:kube-scheduler', 'system:kube-controller-manager'])
   variables:
     - name: podSpec
       expression: "object.spec"
@@ -78,8 +82,12 @@ spec:
         operations: [CREATE, UPDATE]
         resources: [jobs]
   matchConditions:
-    - name: bedrock-identity
-      expression: "request.userInfo.username.startsWith('bedrock:')"
+    - name: not-a-platform-identity
+      expression: >-
+        request.userInfo.username.startsWith('bedrock:') ||
+        !((has(request.userInfo.groups) && ('system:masters' in request.userInfo.groups || 'system:nodes' in request.userInfo.groups)) ||
+        ['kube-system', 'kubevirt', 'cdi', 'aaq', 'rook-ceph', 'bedrock-system', 'velero'].exists(n, request.userInfo.username.startsWith('system:serviceaccount:' + n + ':')) ||
+        request.userInfo.username in ['system:kube-scheduler', 'system:kube-controller-manager'])
   variables:
     - name: podSpec
       expression: "object.spec.template.spec"
@@ -138,8 +146,12 @@ spec:
         operations: [CREATE, UPDATE]
         resources: [cronjobs]
   matchConditions:
-    - name: bedrock-identity
-      expression: "request.userInfo.username.startsWith('bedrock:')"
+    - name: not-a-platform-identity
+      expression: >-
+        request.userInfo.username.startsWith('bedrock:') ||
+        !((has(request.userInfo.groups) && ('system:masters' in request.userInfo.groups || 'system:nodes' in request.userInfo.groups)) ||
+        ['kube-system', 'kubevirt', 'cdi', 'aaq', 'rook-ceph', 'bedrock-system', 'velero'].exists(n, request.userInfo.username.startsWith('system:serviceaccount:' + n + ':')) ||
+        request.userInfo.username in ['system:kube-scheduler', 'system:kube-controller-manager'])
   variables:
     - name: podSpec
       expression: "object.spec.jobTemplate.spec.template.spec"

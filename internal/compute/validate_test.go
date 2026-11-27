@@ -94,6 +94,39 @@ func TestValidateRefusesDuplicateVolumes(t *testing.T) {
 	}
 }
 
+func TestValidateGuestIdentity(t *testing.T) {
+	vm := validFixture()
+	vm.Spec.Firmware = &v1alpha1.VMFirmware{UUID: "not-a-uuid", Serial: "bad serial"}
+	vm.Spec.Disks[0].Serial = "bad serial"
+	issues := ValidateVirtualMachine(vm)
+	for _, field := range []string{"spec.firmware.uuid", "spec.firmware.serial", "spec.disks[0].serial"} {
+		if !hasField(issues, field) {
+			t.Errorf("%s must be refused: %v", field, issueFields(issues))
+		}
+	}
+	vm.Spec.Firmware = &v1alpha1.VMFirmware{UUID: "6f1f3a52-2f0b-4c1e-9d55-0c6f1d7a9e10", Serial: "SN-0001"}
+	vm.Spec.Disks[0].Serial = "vol0123456789abcdef"
+	if issues := ValidateVirtualMachine(vm); len(issues) != 0 {
+		t.Fatalf("issues %v", issueFields(issues))
+	}
+}
+
+func TestValidateRootDiskSerial(t *testing.T) {
+	vm := validFixture()
+	vm.Spec.RootDisk.Serial = "bad serial"
+	if !hasField(ValidateVirtualMachine(vm), "spec.rootDisk.serial") {
+		t.Fatal("a bad root disk serial must be refused")
+	}
+	vm.Spec.RootDisk.Serial = "WIN-ROOT-0001"
+	if issues := ValidateVirtualMachine(vm); len(issues) != 0 {
+		t.Fatalf("issues %v", issueFields(issues))
+	}
+	vm.Spec.RootDisk = v1alpha1.VMRootDisk{VolumeRef: "boot1", Serial: "WIN-ROOT-0001"}
+	if issues := ValidateVirtualMachine(vm); len(issues) != 0 {
+		t.Fatalf("issues %v", issueFields(issues))
+	}
+}
+
 func TestValidateFirmware(t *testing.T) {
 	vm := validFixture()
 	vm.Spec.Firmware = &v1alpha1.VMFirmware{SecureBoot: true}
@@ -196,5 +229,22 @@ func TestScopedAffinityAllowsOwnTerms(t *testing.T) {
 	}
 	if out, err := ScopedAffinity(nil); out != nil || err != nil {
 		t.Fatalf("nil gave %v %v", out, err)
+	}
+}
+
+func TestComputeIssuesEnforceTheLimits(t *testing.T) {
+	limits := ComputeLimits{MaxCores: 32, MaxMemoryMiB: 131072}
+	if issues := ComputeIssues(nil, limits); len(issues) != 0 {
+		t.Fatalf("%+v", issues)
+	}
+	if issues := ComputeIssues(&v1alpha1.VMCompute{Cores: 32, MemoryMiB: 131072}, limits); len(issues) != 0 {
+		t.Fatalf("%+v", issues)
+	}
+	over := ComputeIssues(&v1alpha1.VMCompute{Cores: 33, MemoryMiB: 131073}, limits)
+	if !hasField(over, "spec.compute.cores") || !hasField(over, "spec.compute.memoryMiB") || len(over) != 2 {
+		t.Fatalf("%+v", over)
+	}
+	if !strings.Contains(over[0].Message, "32") || over[0].Reason != ReasonInvalidSpec {
+		t.Fatalf("%+v", over[0])
 	}
 }

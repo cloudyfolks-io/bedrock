@@ -17,6 +17,7 @@ type Token struct {
 	K0sChecksums map[string]string `json:"k0sChecksums"`
 	SupportedOS  []string          `json:"supportedOS"`
 	Mirror       string            `json:"mirror,omitempty"`
+	CephxCipher  string            `json:"cephxCipher,omitempty"`
 	AuthnFiles   map[string][]byte `json:"authnFiles,omitempty"`
 }
 

@@ -2,10 +2,12 @@ package network
 
 import (
 	"context"
+	"strconv"
 	"strings"
 	"testing"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/utils/ptr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	"github.com/cloudyfolks-io/bedrock/api/v1alpha1"
@@ -22,6 +24,13 @@ func networkOf(name, tenant, cidr string) *v1alpha1.Network {
 	return &v1alpha1.Network{
 		ObjectMeta: metav1.ObjectMeta{Name: name},
 		Spec:       v1alpha1.NetworkSpec{TenantRef: tenant, CIDR: cidr},
+	}
+}
+
+func networkOfRanges(name, tenant string, cidrs ...string) *v1alpha1.Network {
+	return &v1alpha1.Network{
+		ObjectMeta: metav1.ObjectMeta{Name: name},
+		Spec:       v1alpha1.NetworkSpec{TenantRef: tenant, CIDRs: cidrs},
 	}
 }
 
@@ -66,6 +75,46 @@ func TestSubnetGatewayMustBeInsideTheCIDR(t *testing.T) {
 	garbage := subnetOf(ns, "garbage", "10.100.1.0/24")
 	garbage.Spec.Gateway = "not-an-ip"
 	requireRejected(t, c, garbage, "gateway")
+}
+
+func TestSubnetMTUMustBeFrom576To9000(t *testing.T) {
+	c, _ := testEnv(t)
+	ns := newNamespace(t, "crd", unique(t, "p"))
+	requireAccepted(t, c, subnetOf(ns, "unset", "10.100.1.0/24"))
+	for i, mtu := range []int32{576, 1500, 9000} {
+		subnet := subnetOf(ns, "valid-"+strconv.Itoa(i), "10.100."+strconv.Itoa(i+10)+".0/24")
+		subnet.Spec.MTU = ptr.To(mtu)
+		requireAccepted(t, c, subnet)
+	}
+	for i, mtu := range []int32{575, 0, -1, 9001} {
+		subnet := subnetOf(ns, "invalid-"+strconv.Itoa(i), "10.100."+strconv.Itoa(i+20)+".0/24")
+		subnet.Spec.MTU = ptr.To(mtu)
+		requireRejected(t, c, subnet, "mtu")
+	}
+}
+
+func TestSubnetDNSServersMustBeUpToFourIPv4Addresses(t *testing.T) {
+	c, _ := testEnv(t)
+	ns := newNamespace(t, "crd", unique(t, "p"))
+	valid := [][]string{{"100.66.0.53"}, {"1.1.1.1", "8.8.8.8", "9.9.9.9", "100.66.0.53"}}
+	for i, servers := range valid {
+		subnet := subnetOf(ns, "valid-"+strconv.Itoa(i), "10.100."+strconv.Itoa(i+10)+".0/24")
+		subnet.Spec.DNSServers = servers
+		requireAccepted(t, c, subnet)
+	}
+	invalid := [][]string{
+		{"1.1.1.1", "8.8.8.8", "9.9.9.9", "100.66.0.53", "10.0.0.2"},
+		{"fd00::53"},
+		{"1.1.1.1", "fd00::53"},
+		{"dns.example"},
+		{""},
+		{strings.Repeat("1", 46)},
+	}
+	for i, servers := range invalid {
+		subnet := subnetOf(ns, "invalid-"+strconv.Itoa(i), "10.100."+strconv.Itoa(i+20)+".0/24")
+		subnet.Spec.DNSServers = servers
+		requireRejected(t, c, subnet, "dnsServers")
+	}
 }
 
 func TestSubnetNameMustBeADNSLabel(t *testing.T) {
@@ -128,6 +177,28 @@ func TestElasticIPProviderNetworkAndAddressAreImmutable(t *testing.T) {
 	same.Spec.Address = "192.0.2.50"
 	same.Labels = map[string]string{"k": "v"}
 	if err := c.Update(ctx, same); err != nil {
+		t.Fatalf("an unchanged update must be accepted: %v", err)
+	}
+}
+
+func TestElasticIPProviderNetworkIsOptionalButAnAddressNeedsIt(t *testing.T) {
+	c, _ := testEnv(t)
+	ns := newNamespace(t, "crd", unique(t, "p"))
+	open := elasticIPOf(ns, "open", "")
+	open.Spec.ProviderNetwork = ""
+	requireAccepted(t, c, open)
+	pinned := elasticIPOf(ns, "pinned", "192.0.2.60")
+	pinned.Spec.ProviderNetwork = ""
+	requireRejected(t, c, pinned, "address needs providerNetwork")
+
+	named := open.DeepCopy()
+	named.Spec.ProviderNetwork = "public"
+	if err := c.Update(context.Background(), named); err == nil {
+		t.Fatal("providerNetwork must not be set after create")
+	}
+	same := open.DeepCopy()
+	same.Labels = map[string]string{"k": "v"}
+	if err := c.Update(context.Background(), same); err != nil {
 		t.Fatalf("an unchanged update must be accepted: %v", err)
 	}
 }

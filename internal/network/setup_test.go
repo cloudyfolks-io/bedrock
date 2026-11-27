@@ -10,6 +10,7 @@ import (
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/client-go/rest"
 	"k8s.io/utils/ptr"
@@ -128,6 +129,8 @@ func isReady(c client.Client, obj client.Object) bool {
 		return v1alpha1.IsConditionTrue(o.Status.Conditions, v1alpha1.ConditionReady)
 	case *v1alpha1.DNSZone:
 		return v1alpha1.IsConditionTrue(o.Status.Conditions, v1alpha1.ConditionReady)
+	case *v1alpha1.InternetGateway:
+		return v1alpha1.IsConditionTrue(o.Status.Conditions, v1alpha1.ConditionReady)
 	}
 	return false
 }
@@ -148,6 +151,9 @@ func TestManagerProgramsTheWholeChain(t *testing.T) {
 	eip1.Spec.Target = vmTarget("vm1")
 	eip2 := elasticIPOf(ns, "eip2", "")
 	eip2.Spec.Target = lbTarget("lb1")
+	eip3 := elasticIPOf(ns, "eip3", "")
+	eip3.Spec.Target = igwTarget("igw1")
+	igw := internetGatewayFor(ns, "igw1", "chain", "eip3")
 	lb := loadBalancerFor(ns, "lb1", "eip2")
 	lb.Spec.Listeners[0].Targets = []v1alpha1.LoadBalancerTarget{{VMRef: "vm1", Port: 8080}}
 	zone := zoneFor(ns, "zone1", dbRecord)
@@ -157,10 +163,10 @@ func TestManagerProgramsTheWholeChain(t *testing.T) {
 	if err := fabrictest.CreateIP(ctx, c, "vm1."+ns+".default", ns, "vm1", FabricName(ns, "default"), "10.100.1.5"); err != nil {
 		t.Fatal(err)
 	}
-	for _, obj := range []client.Object{eip1, eip2, lb, zone} {
+	for _, obj := range []client.Object{eip1, eip2, eip3, igw, lb, zone} {
 		requireAccepted(t, c, obj)
 	}
-	ready := []client.Object{network, def, other, web, eip1, eip2, lb, zone}
+	ready := []client.Object{network, def, other, web, eip1, eip2, eip3, igw, lb, zone}
 	eventually(t, 90*time.Second, "every object is ready", func() bool {
 		for _, obj := range ready {
 			if !isReady(c, obj) {
@@ -172,7 +178,7 @@ func TestManagerProgramsTheWholeChain(t *testing.T) {
 	if prefix := netip.MustParsePrefix("192.0.2.0/24"); !prefix.Contains(netip.MustParseAddr(eip1.Status.Address)) {
 		t.Fatalf("address %q", eip1.Status.Address)
 	}
-	for _, obj := range []client.Object{zone, lb, eip2, eip1, vm, web, def, other, network} {
+	for _, obj := range []client.Object{zone, lb, igw, eip3, eip2, eip1, vm, web, def, other, network} {
 		if err := c.Delete(ctx, obj); err != nil {
 			t.Fatal(err)
 		}
@@ -181,7 +187,7 @@ func TestManagerProgramsTheWholeChain(t *testing.T) {
 		return len(leftovers(t, c, ns)) == 0
 	})
 	eventually(t, 90*time.Second, "every Bedrock object is gone", func() bool {
-		for _, obj := range []client.Object{network, def, other, web, eip1, eip2, lb, zone} {
+		for _, obj := range []client.Object{network, def, other, web, eip1, eip2, eip3, igw, lb, zone} {
 			if err := c.Get(ctx, client.ObjectKeyFromObject(obj), obj); !apierrors.IsNotFound(err) {
 				return false
 			}
@@ -288,4 +294,34 @@ func TestManagerRetriesElasticIPsWhenTheTargetHolderIsDeleted(t *testing.T) {
 		reason := reasonOf(c, waiter)
 		return reason != "" && reason != ReasonTargetInUse
 	})
+}
+
+func fabricSubnetMTU(c client.Client, namespace, name string) int64 {
+	fabricSubnet, err := fabricSubnetOf(c, namespace, name)
+	if err != nil {
+		return 0
+	}
+	mtu, _, _ := unstructured.NestedInt64(fabricSubnet.Object, "spec", "mtu")
+	return mtu
+}
+
+func TestManagerAppliesAnMTUSettingChangeToAnExistingSubnet(t *testing.T) {
+	c, ctx := startChain(t)
+	ns := newNamespaceIn(t, c, "mtuchain", "net")
+	requireAccepted(t, c, networkOf("mtuchain", "mtuchain", "10.100.0.0/16"))
+	subnet := policySubnet(ns, "default", "mtuchain", "10.100.1.0/24")
+	requireAccepted(t, c, subnet)
+	eventually(t, 60*time.Second, "the Subnet is ready without an MTU", func() bool {
+		_, err := fabricSubnetOf(c, ns, "default")
+		return isReady(c, subnet) && err == nil && fabricSubnetMTU(c, ns, "default") == 0
+	})
+	setting := &v1alpha1.Setting{ObjectMeta: metav1.ObjectMeta{Name: "network.mtu"}, Spec: v1alpha1.SettingSpec{Value: "1400"}}
+	requireAccepted(t, c, setting)
+	t.Cleanup(func() { _ = c.Delete(context.Background(), setting) })
+	eventually(t, 30*time.Second, "the Fabric Subnet follows the Setting", func() bool {
+		return fabricSubnetMTU(c, ns, "default") == 1400
+	})
+	if err := c.Get(ctx, client.ObjectKeyFromObject(subnet), subnet); err != nil || subnet.Generation != 1 {
+		t.Fatalf("the Subnet must stay untouched: generation %d, error %v", subnet.Generation, err)
+	}
 }

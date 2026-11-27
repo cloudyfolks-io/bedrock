@@ -32,7 +32,7 @@ export function pickLocale(stored: string | null, acceptLanguage: readonly strin
 }
 
 export function activate(locale: Locale): void {
-  i18n.load(locale, catalogs[locale]);
+  i18n.load(locale, locale === "en" ? en : { ...en, ...catalogs[locale] });
   i18n.activate(locale);
   document.documentElement.lang = locale;
   document.documentElement.dir = dirOf(locale);

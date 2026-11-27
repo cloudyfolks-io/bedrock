@@ -88,15 +88,11 @@ func k0sUpdate(ctx context.Context, env StepEnv) (Outcome, error) {
 	if err != nil {
 		return Outcome{}, err
 	}
-	reconfigured, err := ensureAuthnArgs(env.Deps.Root, service)
+	reconfigured, err := reconfigureUnit(ctx, env, service)
 	if err != nil {
 		return Outcome{}, err
 	}
-	auditReconfigured, err := ensureAuditArgs(env.Deps.Root, service)
-	if err != nil {
-		return Outcome{}, err
-	}
-	restart := reconfigured || auditReconfigured || k0sConfigNewerThanAPIServer(env.Deps.Root, service)
+	restart := reconfigured || k0sConfigNewerThanAPIServer(env.Deps.Root, service)
 	installed := filepath.Join(env.Deps.Root, k0s.DefaultBinary)
 	current := hasChecksum(installed, checksum)
 	if current && !restart && settledK0sVersion(ctx, env) == version {
@@ -117,6 +113,44 @@ func k0sUpdate(ctx context.Context, env StepEnv) (Outcome, error) {
 		return Outcome{}, err
 	}
 	return Outcome{Message: fmt.Sprintf("k0s %s installed, restarted %s", version, service.Unit)}, nil
+}
+
+func reconfigureUnit(ctx context.Context, env StepEnv, service k0sService) (bool, error) {
+	authn, err := ensureAuthnArgs(env.Deps.Root, service)
+	if err != nil {
+		return false, err
+	}
+	audit, err := ensureAuditArgs(env.Deps.Root, service)
+	if err != nil {
+		return false, err
+	}
+	dns, err := ensureCoreDNSDisabled(ctx, env, service)
+	if err != nil {
+		return false, err
+	}
+	kubelet, err := ensureKubeletArgs(ctx, env, service)
+	return authn || audit || dns || kubelet, err
+}
+
+func k0sReconfigure(ctx context.Context, env StepEnv) (Outcome, error) {
+	service, err := k0sServiceFor(ctx, env)
+	if err != nil {
+		return Outcome{}, err
+	}
+	reconfigured, err := reconfigureUnit(ctx, env, service)
+	if err != nil {
+		return Outcome{}, err
+	}
+	if !reconfigured && !k0sConfigNewerThanAPIServer(env.Deps.Root, service) {
+		return Outcome{Message: service.Unit + " already configured"}, nil
+	}
+	if _, err := env.Deps.Exec.Run(ctx, "systemctl", "restart", "--no-block", service.Unit); err != nil {
+		return Outcome{}, err
+	}
+	if err := awaitK0s(ctx, env, service.Probes); err != nil {
+		return Outcome{}, err
+	}
+	return Outcome{Message: service.Unit + " reconfigured and restarted"}, nil
 }
 
 func settledK0sVersion(ctx context.Context, env StepEnv) string {

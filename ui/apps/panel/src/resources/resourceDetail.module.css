@@ -1,0 +1,163 @@
+.layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: clamp(1rem, 2vw, 1.4rem);
+}
+
+.layout > :global(.br-page-header) {
+  margin: 0;
+}
+
+.layout > :global(.br-page-header) :global(.br-page-title-row) {
+  justify-content: flex-start;
+}
+
+.layout > :global(.br-page-header) :global(.br-page-actions) {
+  flex: 1 1 auto;
+  justify-content: space-between;
+  min-inline-size: 0;
+}
+
+.controls,
+.health {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: .5rem;
+  align-self: center;
+}
+
+.controls:empty {
+  display: none;
+}
+
+.health :global(.br-badge) {
+  white-space: nowrap;
+}
+
+.panel {
+  --detail-inset: clamp(.9rem, 2.2vw, 1.3rem);
+  min-inline-size: 0;
+  border: 1px solid var(--br-color-border);
+  border-radius: .875rem;
+  background: var(--br-color-surface);
+}
+
+.sectionHeading,
+.advanced summary {
+  margin: 0;
+  padding: .95rem var(--detail-inset);
+  font-size: 1rem;
+  font-weight: 600;
+}
+
+.facts {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 15rem), 1fr));
+  gap: 0 1.25rem;
+  margin: 0;
+  padding-inline: var(--detail-inset);
+  padding-block-end: .35rem;
+}
+
+.facts > div {
+  min-inline-size: 0;
+  border-block-start: 1px solid var(--br-color-border);
+  padding-block: .65rem;
+}
+
+.facts dt,
+.advanced summary span,
+.empty {
+  color: var(--br-color-text-muted);
+  font-size: .875rem;
+}
+
+.facts dd {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: .5rem;
+  margin: .25rem 0 0;
+  min-block-size: 2rem;
+}
+
+.value {
+  min-inline-size: 0;
+  overflow-wrap: anywhere;
+}
+
+.value a {
+  color: var(--br-color-primary);
+  text-decoration: underline;
+  text-underline-offset: .2em;
+}
+
+.copy {
+  flex: none;
+}
+
+.empty {
+  margin: 0;
+  padding: 0 var(--detail-inset) .95rem;
+}
+
+.panel > :global(.br-table-scroll) {
+  position: relative;
+  border-end-start-radius: .875rem;
+  border-end-end-radius: .875rem;
+}
+
+.panel :global(.br-table-caption) {
+  position: absolute;
+  inline-size: 1px;
+  block-size: 1px;
+  clip-path: inset(50%);
+  overflow: hidden;
+  padding: 0;
+}
+
+.panel :is(:global(.br-th), :global(.br-td)) {
+  padding: .65rem var(--detail-inset);
+  overflow-wrap: anywhere;
+}
+
+.panel :global(.br-th),
+.panel :global(.br-td):nth-child(2) {
+  white-space: nowrap;
+}
+
+@media (max-width: 42rem) {
+  .panel :is(:global(.br-th), :global(.br-td)) {
+    padding-inline: .5rem;
+  }
+}
+
+.advanced summary {
+  cursor: pointer;
+}
+
+.advanced summary span {
+  margin-inline-start: .75rem;
+  font-weight: 400;
+}
+
+.specification {
+  margin: 0;
+  max-block-size: 28rem;
+  padding: .95rem var(--detail-inset);
+  border-block-start: 1px solid var(--br-color-border);
+  border-radius: 0 0 .875rem .875rem;
+  background: var(--br-color-surface-raised);
+}
+
+.specification code {
+  font: inherit;
+}
+
+.panel > :global(.br-table-scroll):focus-visible,
+.advanced summary:focus-visible,
+.specification:focus-visible {
+  outline: 2px solid var(--br-color-focus-ring);
+  outline-offset: 2px;
+}

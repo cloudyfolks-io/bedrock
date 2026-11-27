@@ -95,6 +95,16 @@ func CredentialsSecret(accessKeyID, secretAccessKey string) *corev1.Secret {
 	return secretOf(CredentialsSecretName, map[string][]byte{CredentialsKey: []byte(file)})
 }
 
+func AgentCredentialsSecret(accessKeyID, secretAccessKey string, ca []byte) *corev1.Secret {
+	data := map[string][]byte{keyAccessKeyID: []byte(accessKeyID), keySecretAccessKey: []byte(secretAccessKey)}
+	if len(ca) > 0 {
+		data[keyCA] = ca
+	}
+	secret := secretOf(AgentCredentialsName, data)
+	secret.Namespace = SystemNamespace
+	return secret
+}
+
 func RepositorySecret(password string) *corev1.Secret {
 	return secretOf(RepositorySecretName, map[string][]byte{RepositoryKey: []byte(password)})
 }

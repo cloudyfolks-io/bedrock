@@ -12,6 +12,8 @@ spec:
     family: ubuntu
     version: "24.04"
     preference: ubuntu
+    displayName: Ubuntu 24.04
+    architecture: amd64
   source:
     registry:
       image: quay.io/containerdisks/ubuntu:24.04

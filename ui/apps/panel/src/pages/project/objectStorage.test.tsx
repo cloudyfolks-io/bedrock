@@ -1,7 +1,7 @@
 import { screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { Route, Routes } from "react-router";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import type { Check, KubeList } from "../../api/types";
 import buckets from "../../fixtures/objectstoragebuckets.json";
 import users from "../../fixtures/objectstorageusers.json";
@@ -38,7 +38,7 @@ describe("Buckets", () => {
     expect(validateBucket({ policy: "{oops" })[0]?.field).toBe("spec.policy");
   });
 
-  it("lists buckets and offers the users as a select", async () => {
+  it("lists buckets with their name, endpoint, quota and usage", async () => {
     const user = userEvent.setup();
     const def = definitionFor("objectstoragebuckets");
     if (!def) {
@@ -48,18 +48,31 @@ describe("Buckets", () => {
       <Routes>
         <Route path="/p/:project/buckets" element={<ResourceListPage def={def} />} />
       </Routes>,
-      { route: "/p/web/buckets", api: { ...openApiRoutes(), "GET /proxy/v1/projects": { body: projects }, [`GET ${ns}/objectstoragebuckets`]: { body: buckets as unknown as KubeList }, [`GET ${ns}/objectstorageusers`]: { body: users as unknown as KubeList } } },
+      { route: "/p/web/buckets", api: { ...openApiRoutes(), "GET /proxy/v1/projects": { body: projects }, [`GET ${ns}/objectstoragebuckets`]: { body: buckets as unknown as KubeList } } },
     );
     const row = (await screen.findByRole("link", { name: "assets" })).closest("tr") as HTMLElement;
-    expect(within(row).getByText("app")).toBeTruthy();
-    expect(row.querySelector('bdi[dir="ltr"]')?.textContent).toBe("https://s3.lab.example.test");
+    const ltr = Array.from(row.querySelectorAll('bdi[dir="ltr"]')).map((element) => element.textContent);
+    expect(ltr).toEqual(["acme-web-assets", "https://s3.lab.example.test"]);
     expect(within(row).getByText("100 GiB")).toBeTruthy();
+    expect(within(row).getByText("5 GiB")).toBeTruthy();
     await user.click(screen.getByRole("button", { name: "Create" }));
-    expect(await screen.findByRole("combobox", { name: /userRef/ }, { timeout: 15000 })).toBeTruthy();
+    expect(await screen.findByRole("textbox", { name: /bucketName/ }, { timeout: 15000 })).toBeTruthy();
+    expect(screen.queryByRole("combobox", { name: /userRef/ })).toBeNull();
   });
 });
 
 describe("ObjectUsersPage", () => {
+  it("lists the permission, the buckets in scope and the suspended flag", async () => {
+    renderUsers();
+    const app = (await screen.findByRole("link", { name: "app" })).closest("tr") as HTMLElement;
+    expect(within(app).getByText("readWrite")).toBeTruthy();
+    expect(within(app).getByText("2")).toBeTruthy();
+    expect(within(app).queryByText("✓")).toBeNull();
+    const ci = (await screen.findByRole("link", { name: "ci" })).closest("tr") as HTMLElement;
+    expect(within(ci).getByText("read")).toBeTruthy();
+    expect(within(ci).getByText("✓")).toBeTruthy();
+  });
+
   it("shows credentials only when reading secrets is allowed", async () => {
     const user = userEvent.setup();
     const denied = renderUsers((check) => check.resource !== "secrets");
@@ -73,6 +86,27 @@ describe("ObjectUsersPage", () => {
 });
 
 describe("CredentialsDialog", () => {
+  it("only reports copied credentials after the clipboard write succeeds", async () => {
+    const user = userEvent.setup();
+    let complete = () => {};
+    const write = new Promise<void>((resolve) => { complete = resolve; });
+    const writeText = vi.spyOn(navigator.clipboard, "writeText").mockReturnValueOnce(write);
+    renderUsers(() => true, { [`GET ${secretPath}`]: { body: secret() } });
+    await user.click(await screen.findByRole("button", { name: "Actions for app" }));
+    await user.click(await screen.findByRole("menuitem", { name: "Show credentials" }));
+    const copy = await screen.findByRole("button", { name: "Copy AccessKey" });
+    await user.click(copy);
+    expect(writeText).toHaveBeenCalledWith("AKIA123");
+    expect(screen.queryByText("AccessKey copied")).toBeNull();
+    complete();
+    expect(await screen.findByText("AccessKey copied")).toBeTruthy();
+
+    writeText.mockRejectedValueOnce(new Error("Permission denied"));
+    await user.click(screen.getByRole("button", { name: "Copy SecretKey" }));
+    expect(await screen.findByText("Could not copy the credential")).toBeTruthy();
+    expect(screen.queryByText("SecretKey copied")).toBeNull();
+  });
+
   it("TestCredentialsAreFetchedOnDemand and the secret is masked until revealed", async () => {
     const user = userEvent.setup();
     const { api } = renderUsers(() => true, { [`GET ${secretPath}`]: { body: secret({ Binary: btoa(String.fromCharCode(255, 254, 253)) }) } });

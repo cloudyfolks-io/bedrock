@@ -12,6 +12,8 @@ spec:
     family: ubuntu
     version: "26.04"
     preference: ubuntu
+    displayName: Ubuntu 26.04
+    architecture: amd64
   source:
     registry:
       image: quay.io/containerdisks/ubuntu:26.04

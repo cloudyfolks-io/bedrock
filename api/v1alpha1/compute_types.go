@@ -32,13 +32,25 @@ const (
 	VolumeSnapshotPhaseFailed  = "Failed"
 )
 
+// +kubebuilder:validation:XValidation:rule="has(self.volumeRef) ? (!has(self.sizeGi) && !has(self.storageClass)) : has(self.sizeGi)",message="rootDisk.sizeGi is required without rootDisk.volumeRef, and rootDisk.volumeRef excludes sizeGi and storageClass"
+// +kubebuilder:validation:XValidation:rule="!has(oldSelf.serial) || (has(self.serial) && self.serial == oldSelf.serial)",message="rootDisk.serial is immutable"
 type VMRootDisk struct {
 	// +kubebuilder:validation:Minimum=1
 	// +kubebuilder:validation:XValidation:rule="self >= oldSelf",message="rootDisk.sizeGi can only grow"
-	SizeGi int32 `json:"sizeGi"`
+	// +optional
+	SizeGi int32 `json:"sizeGi,omitempty"`
 	// +kubebuilder:validation:XValidation:rule="self == oldSelf",message="rootDisk.storageClass is immutable"
 	// +optional
 	StorageClass string `json:"storageClass,omitempty"`
+	// +kubebuilder:validation:MinLength=1
+	// +kubebuilder:validation:MaxLength=253
+	// +kubebuilder:validation:Pattern=`^[a-z0-9]([-a-z0-9.]*[a-z0-9])?$`
+	// +optional
+	VolumeRef string `json:"volumeRef,omitempty"`
+	// +kubebuilder:validation:MaxLength=36
+	// +kubebuilder:validation:Pattern=`^[A-Za-z0-9._-]+$`
+	// +optional
+	Serial string `json:"serial,omitempty"`
 }
 
 type VMDisk struct {
@@ -49,6 +61,10 @@ type VMDisk struct {
 	// +kubebuilder:validation:Enum=virtio;sata;scsi
 	// +optional
 	Bus string `json:"bus,omitempty"`
+	// +kubebuilder:validation:MaxLength=36
+	// +kubebuilder:validation:Pattern=`^[A-Za-z0-9._-]+$`
+	// +optional
+	Serial string `json:"serial,omitempty"`
 }
 
 type VMCDROM struct {
@@ -76,6 +92,12 @@ type VMNetwork struct {
 	// +kubebuilder:validation:Pattern=`^([0-9a-fA-F]{2}:){5}[0-9a-fA-F]{2}$`
 	// +optional
 	MACAddress string `json:"macAddress,omitempty"`
+	// +kubebuilder:validation:MaxLength=15
+	// +kubebuilder:validation:XValidation:rule="isIP(self) && ip(self).family() == 4",message="address must be an IPv4 address"
+	// +optional
+	Address string `json:"address,omitempty"`
+	// +optional
+	PortSecurity *bool `json:"portSecurity,omitempty"`
 }
 
 // +kubebuilder:validation:XValidation:rule="!has(self.secretRef) || (!has(self.userData) && !has(self.networkData))",message="secretRef excludes userData and networkData"
@@ -107,6 +129,13 @@ type VMFirmware struct {
 	SecureBoot bool `json:"secureBoot,omitempty"`
 	// +optional
 	TPM bool `json:"tpm,omitempty"`
+	// +kubebuilder:validation:Pattern=`^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$`
+	// +optional
+	UUID string `json:"uuid,omitempty"`
+	// +kubebuilder:validation:MaxLength=64
+	// +kubebuilder:validation:Pattern=`^[A-Za-z0-9._-]+$`
+	// +optional
+	Serial string `json:"serial,omitempty"`
 }
 
 type VMCPU struct {
@@ -124,10 +153,27 @@ type VMScheduling struct {
 	Affinity *corev1.Affinity `json:"affinity,omitempty"`
 }
 
+type VMCompute struct {
+	// +kubebuilder:validation:Minimum=1
+	Cores int32 `json:"cores"`
+	// +kubebuilder:validation:Minimum=128
+	MemoryMiB int32 `json:"memoryMiB"`
+}
+
 // +kubebuilder:validation:XValidation:rule="!has(self.image) || self.image.name.matches('^[a-z0-9]([-a-z0-9.]*[a-z0-9])?$')",message="image.name must be a DNS subdomain"
+// +kubebuilder:validation:XValidation:rule="has(self.compute) != has(self.instanceType)",message="exactly one of compute and instanceType is required"
+// +kubebuilder:validation:XValidation:rule="!has(self.rootDisk.volumeRef) || !has(self.image)",message="image and rootDisk.volumeRef exclude each other"
+// +kubebuilder:validation:XValidation:rule="!has(self.rootDisk.volumeRef) || !has(self.disks) || !self.disks.exists(d, d.volumeRef == self.rootDisk.volumeRef)",message="the root volume cannot also be listed in disks"
+// +kubebuilder:validation:XValidation:rule="has(self.rootDisk.volumeRef) == has(oldSelf.rootDisk.volumeRef)",message="rootDisk.volumeRef cannot be added or removed"
+// +kubebuilder:validation:XValidation:rule="!has(self.rootDisk.volumeRef) || !has(oldSelf.rootDisk.volumeRef) || self.rootDisk.volumeRef == oldSelf.rootDisk.volumeRef || (has(self.running) && !self.running)",message="rootDisk.volumeRef can change only while the virtual machine is stopped"
+// +kubebuilder:validation:XValidation:rule="(has(self.firmware) && has(self.firmware.uuid)) == (has(oldSelf.firmware) && has(oldSelf.firmware.uuid)) && (!(has(self.firmware) && has(self.firmware.uuid)) || self.firmware.uuid == oldSelf.firmware.uuid)",message="firmware.uuid is immutable"
+// +kubebuilder:validation:XValidation:rule="(has(self.firmware) && has(self.firmware.serial)) == (has(oldSelf.firmware) && has(oldSelf.firmware.serial)) && (!(has(self.firmware) && has(self.firmware.serial)) || self.firmware.serial == oldSelf.firmware.serial)",message="firmware.serial is immutable"
 type VirtualMachineSpec struct {
 	// +kubebuilder:validation:MinLength=1
-	InstanceType string `json:"instanceType"`
+	// +optional
+	InstanceType string `json:"instanceType,omitempty"`
+	// +optional
+	Compute *VMCompute `json:"compute,omitempty"`
 	// +optional
 	Preference string `json:"preference,omitempty"`
 	// +optional
@@ -144,6 +190,7 @@ type VirtualMachineSpec struct {
 	CDROMs []VMCDROM `json:"cdroms,omitempty"`
 	// +kubebuilder:validation:MaxItems=8
 	// +kubebuilder:validation:XValidation:rule="self.all(a, self.exists_one(b, b.subnetRef == a.subnetRef))",message="a subnet can be attached once"
+	// +kubebuilder:validation:XValidation:rule="self.all(n, oldSelf.all(o, o.subnetRef != n.subnetRef || (has(o.address) == has(n.address) && (!has(n.address) || n.address == o.address))))",message="address is immutable"
 	// +optional
 	// +listType=atomic
 	Networks []VMNetwork `json:"networks,omitempty"`
@@ -196,6 +243,15 @@ type VMConsole struct {
 	SerialPath string `json:"serialPath,omitempty"`
 }
 
+type VMMigration struct {
+	Name  string `json:"name"`
+	Phase string `json:"phase"`
+	// +optional
+	StartedAt *metav1.Time `json:"startedAt,omitempty"`
+	// +optional
+	Message string `json:"message,omitempty"`
+}
+
 type VirtualMachineStatus struct {
 	CommonStatus `json:",inline"`
 	// +kubebuilder:validation:Enum=Stopped;Starting;Running;Migrating;Stopping;Failed
@@ -212,6 +268,8 @@ type VirtualMachineStatus struct {
 	GuestAgent *VMGuestAgent `json:"guestAgent,omitempty"`
 	// +optional
 	Console *VMConsole `json:"console,omitempty"`
+	// +optional
+	Migration *VMMigration `json:"migration,omitempty"`
 }
 
 // +kubebuilder:object:root=true

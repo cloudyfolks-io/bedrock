@@ -1,0 +1,593 @@
+package registry
+
+import (
+	"context"
+	"encoding/base64"
+	"slices"
+	"strconv"
+	"testing"
+	"time"
+
+	corev1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apimachinery/pkg/api/meta"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/utils/ptr"
+	ctrl "sigs.k8s.io/controller-runtime"
+	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
+
+	"github.com/cloudyfolks-io/bedrock/api/v1alpha1"
+	"github.com/cloudyfolks-io/bedrock/internal/platform"
+	"github.com/cloudyfolks-io/bedrock/internal/registry/harbor"
+)
+
+func readyRegistry(name, project string) *v1alpha1.Registry {
+	reg := registryFor(name, project)
+	reg.Status.ProjectName = project
+	reg.Status.Host = "registry.example.com"
+	reg.Status.Conditions = []metav1.Condition{{Type: "Ready", Status: metav1.ConditionTrue, Reason: "Ready", LastTransitionTime: metav1.Now()}}
+	return reg
+}
+
+func credentialFor(name, permission string) *v1alpha1.RegistryCredential {
+	return &v1alpha1.RegistryCredential{
+		ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: tenantNamespace},
+		Spec:       v1alpha1.RegistryCredentialSpec{RegistryRef: v1alpha1.RegistryReference{Name: "images"}, Permission: permission},
+	}
+}
+
+func credentialWorld(t *testing.T, state *harborState, objects ...client.Object) (*CredentialReconciler, client.Client) {
+	t.Helper()
+	state.addProject("acme-images", 5)
+	all := append([]client.Object{
+		addonObject("registry", true), adminSecretObject(), namespaceObject(tenantNamespace), readyRegistry("images", "acme-images"),
+	}, objects...)
+	c := fakeCluster(t, all...)
+	return &CredentialReconciler{Client: c, BaseURL: state.server.URL, Random: seeded(11)}, c
+}
+
+func reconcileCredential(t *testing.T, r *CredentialReconciler, name string) ctrl.Result {
+	t.Helper()
+	got, err := r.Reconcile(context.Background(), ctrl.Request{NamespacedName: client.ObjectKey{Namespace: tenantNamespace, Name: name}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return got
+}
+
+func fetchCredential(t *testing.T, c client.Client, name string) *v1alpha1.RegistryCredential {
+	t.Helper()
+	var credential v1alpha1.RegistryCredential
+	if err := c.Get(context.Background(), client.ObjectKey{Namespace: tenantNamespace, Name: name}, &credential); err != nil {
+		t.Fatal(err)
+	}
+	return &credential
+}
+
+func credentialReady(credential *v1alpha1.RegistryCredential) metav1.Condition {
+	for _, condition := range credential.Status.Conditions {
+		if condition.Type == "Ready" {
+			return condition
+		}
+	}
+	return metav1.Condition{}
+}
+
+func dockerSecret(t *testing.T, c client.Client, name string) corev1.Secret {
+	t.Helper()
+	var secret corev1.Secret
+	if err := c.Get(context.Background(), client.ObjectKey{Namespace: tenantNamespace, Name: name + "-docker"}, &secret); err != nil {
+		t.Fatalf("secret %s-docker: %v", name, err)
+	}
+	return secret
+}
+
+func TestCredentialMakesTheRobotForEveryPermission(t *testing.T) {
+	for _, permission := range []string{"pull", "pushPull", "manage"} {
+		state := newHarborState(t)
+		r, c := credentialWorld(t, state, credentialFor("ci", permission))
+		reconcileCredential(t, r, "ci")
+		credential := fetchCredential(t, c, "ci")
+		if got := credentialReady(credential); got.Status != metav1.ConditionTrue {
+			t.Fatalf("%s: condition %+v", permission, got)
+		}
+		robots := state.project("acme-images").robots
+		if len(robots) != 1 || robots[0].name != "ci" {
+			t.Fatalf("%s: robots %+v", permission, robots)
+		}
+		want, _ := harbor.AccessFor(permission)
+		if len(robots[0].access) != len(want) {
+			t.Errorf("%s: access %v", permission, robots[0].access)
+		}
+		if credential.Status.SecretName != "ci-docker" || credential.Status.Username != "robot$acme-images+ci" || credential.Status.RobotID != robots[0].id {
+			t.Errorf("%s: status %+v", permission, credential.Status)
+		}
+	}
+}
+
+func TestCredentialSecretShapeGolden(t *testing.T) {
+	state := newHarborState(t)
+	r, c := credentialWorld(t, state, credentialFor("ci", "pushPull"))
+	reconcileCredential(t, r, "ci")
+	secret := dockerSecret(t, c, "ci")
+	auth := base64.StdEncoding.EncodeToString([]byte("robot$acme-images+ci:secret-1"))
+	want := `{"auths":{"registry.example.com":{"auth":"` + auth + `","password":"secret-1","username":"robot$acme-images+ci"}}}`
+	if secret.Type != corev1.SecretTypeDockerConfigJson || string(secret.Data[".dockerconfigjson"]) != want {
+		t.Errorf("type %s config %s", secret.Type, secret.Data[".dockerconfigjson"])
+	}
+	for key, value := range map[string]string{"host": "registry.example.com", "username": "robot$acme-images+ci", "password": "secret-1"} {
+		if string(secret.Data[key]) != value {
+			t.Errorf("%s = %q", key, secret.Data[key])
+		}
+	}
+	if len(secret.Data) != 4 {
+		t.Errorf("keys %d", len(secret.Data))
+	}
+	if len(secret.OwnerReferences) != 1 || secret.OwnerReferences[0].Name != "ci" || secret.OwnerReferences[0].Kind != "RegistryCredential" {
+		t.Errorf("owner %v", secret.OwnerReferences)
+	}
+	if secret.Labels["bedrock.cloudyfolks.io/kind"] != "RegistryCredential" || secret.Labels["bedrock.cloudyfolks.io/name"] != "ci" {
+		t.Errorf("labels %v", secret.Labels)
+	}
+}
+
+func TestCredentialSecondRunKeepsTheLogin(t *testing.T) {
+	state := newHarborState(t)
+	r, c := credentialWorld(t, state, credentialFor("ci", "pull"))
+	reconcileCredential(t, r, "ci")
+	first := string(dockerSecret(t, c, "ci").Data["password"])
+	reconcileCredential(t, r, "ci")
+	if got := string(dockerSecret(t, c, "ci").Data["password"]); got != first || len(state.robotSets) != 0 || len(state.project("acme-images").robots) != 1 {
+		t.Errorf("password %q sets %v robots %d", got, state.robotSets, len(state.project("acme-images").robots))
+	}
+}
+
+func TestCredentialHealsAMissingSecret(t *testing.T) {
+	state := newHarborState(t)
+	r, c := credentialWorld(t, state, credentialFor("ci", "pull"))
+	reconcileCredential(t, r, "ci")
+	first := string(dockerSecret(t, c, "ci").Data["password"])
+	if err := c.Delete(context.Background(), &corev1.Secret{ObjectMeta: metav1.ObjectMeta{Namespace: tenantNamespace, Name: "ci-docker"}}); err != nil {
+		t.Fatal(err)
+	}
+	reconcileCredential(t, r, "ci")
+	healed := dockerSecret(t, c, "ci")
+	if string(healed.Data["password"]) == first || len(state.robotSets) != 1 {
+		t.Fatalf("password %q sets %v", healed.Data["password"], state.robotSets)
+	}
+	if got := state.project("acme-images").robots[0].secret; got != string(healed.Data["password"]) {
+		t.Errorf("the robot secret %q is not the Secret %q", got, healed.Data["password"])
+	}
+}
+
+func TestCredentialHealsABrokenSecret(t *testing.T) {
+	state := newHarborState(t)
+	r, c := credentialWorld(t, state, credentialFor("ci", "pull"))
+	reconcileCredential(t, r, "ci")
+	secret := dockerSecret(t, c, "ci")
+	secret.Data = map[string][]byte{"password": []byte("x")}
+	if err := c.Update(context.Background(), &secret); err != nil {
+		t.Fatal(err)
+	}
+	reconcileCredential(t, r, "ci")
+	if len(state.robotSets) != 1 || len(dockerSecret(t, c, "ci").Data) != 4 {
+		t.Errorf("sets %v keys %d", state.robotSets, len(dockerSecret(t, c, "ci").Data))
+	}
+}
+
+func TestCredentialResetsTheSecretWhenTheAnnotationChanges(t *testing.T) {
+	state := newHarborState(t)
+	r, c := credentialWorld(t, state, credentialFor("ci", "pull"))
+	reconcileCredential(t, r, "ci")
+	first := string(dockerSecret(t, c, "ci").Data["password"])
+	credential := fetchCredential(t, c, "ci")
+	credential.Annotations = map[string]string{AnnotationResetSecret: "one"}
+	if err := c.Update(context.Background(), credential); err != nil {
+		t.Fatal(err)
+	}
+	reconcileCredential(t, r, "ci")
+	second := string(dockerSecret(t, c, "ci").Data["password"])
+	if second == first || len(state.robotSets) != 1 || fetchCredential(t, c, "ci").Status.SecretReset != "one" {
+		t.Fatalf("password %q sets %v", second, state.robotSets)
+	}
+	reconcileCredential(t, r, "ci")
+	if got := string(dockerSecret(t, c, "ci").Data["password"]); got != second || len(state.robotSets) != 1 {
+		t.Errorf("a second run changed the login: %q %v", got, state.robotSets)
+	}
+	credential = fetchCredential(t, c, "ci")
+	credential.Annotations[AnnotationResetSecret] = "two"
+	if err := c.Update(context.Background(), credential); err != nil {
+		t.Fatal(err)
+	}
+	reconcileCredential(t, r, "ci")
+	if len(state.robotSets) != 2 {
+		t.Errorf("sets %v", state.robotSets)
+	}
+}
+
+func TestCredentialWithTheResetAnnotationAtCreateDoesNotResetTwice(t *testing.T) {
+	state := newHarborState(t)
+	credential := credentialFor("ci", "pull")
+	credential.Annotations = map[string]string{AnnotationResetSecret: "start"}
+	r, c := credentialWorld(t, state, credential)
+	reconcileCredential(t, r, "ci")
+	reconcileCredential(t, r, "ci")
+	if len(state.robotSets) != 0 || fetchCredential(t, c, "ci").Status.SecretReset != "start" {
+		t.Errorf("sets %v", state.robotSets)
+	}
+}
+
+func TestCredentialDeleteRemovesTheRobotAndTheFinalizer(t *testing.T) {
+	state := newHarborState(t)
+	r, c := credentialWorld(t, state, credentialFor("ci", "pull"))
+	reconcileCredential(t, r, "ci")
+	if err := c.Delete(context.Background(), fetchCredential(t, c, "ci")); err != nil {
+		t.Fatal(err)
+	}
+	reconcileCredential(t, r, "ci")
+	var gone v1alpha1.RegistryCredential
+	err := c.Get(context.Background(), client.ObjectKey{Namespace: tenantNamespace, Name: "ci"}, &gone)
+	if !apierrors.IsNotFound(err) || len(state.project("acme-images").robots) != 0 {
+		t.Fatalf("object error %v robots %d", err, len(state.project("acme-images").robots))
+	}
+}
+
+func TestCredentialDeleteAfterTheProjectIsGone(t *testing.T) {
+	state := newHarborState(t)
+	r, c := credentialWorld(t, state, credentialFor("ci", "pull"))
+	reconcileCredential(t, r, "ci")
+	state.mu.Lock()
+	delete(state.projects, "acme-images")
+	state.mu.Unlock()
+	if err := c.Delete(context.Background(), fetchCredential(t, c, "ci")); err != nil {
+		t.Fatal(err)
+	}
+	reconcileCredential(t, r, "ci")
+	var gone v1alpha1.RegistryCredential
+	if err := c.Get(context.Background(), client.ObjectKey{Namespace: tenantNamespace, Name: "ci"}, &gone); !apierrors.IsNotFound(err) {
+		t.Fatalf("the object stayed: %v", err)
+	}
+}
+
+func TestCredentialThatNeverOwnedARobotLeavesItAlone(t *testing.T) {
+	state := newHarborState(t)
+	r, c := credentialWorld(t, state, credentialFor("ci", "pull"))
+	state.project("acme-images").robots = []fakeRobot{{id: 700, name: "ci", secret: "theirs"}}
+	reconcileCredential(t, r, "ci")
+	credential := fetchCredential(t, c, "ci")
+	if got := credentialReady(credential); got.Reason != "NameTaken" || got.Status != metav1.ConditionFalse {
+		t.Fatalf("condition %+v", got)
+	}
+	if err := c.Delete(context.Background(), credential); err != nil {
+		t.Fatal(err)
+	}
+	reconcileCredential(t, r, "ci")
+	if len(state.project("acme-images").robots) != 1 || state.project("acme-images").robots[0].secret != "theirs" {
+		t.Error("a foreign robot was changed or deleted")
+	}
+}
+
+func adoptedCredential(t *testing.T) (*harborState, *CredentialReconciler, client.Client) {
+	t.Helper()
+	state := newHarborState(t)
+	credential := credentialFor("ci", "pull")
+	credential.Annotations = map[string]string{AnnotationAdopt: "true"}
+	r, c := credentialWorld(t, state, credential)
+	state.project("acme-images").robots = []fakeRobot{{id: 700, name: "ci", secret: "old"}}
+	reconcileCredential(t, r, "ci")
+	return state, r, c
+}
+
+func TestCredentialAdoptionKeepsTheRobotSecret(t *testing.T) {
+	state, r, c := adoptedCredential(t)
+	reconcileCredential(t, r, "ci")
+	got := fetchCredential(t, c, "ci")
+	secret := dockerSecret(t, c, "ci")
+	if credentialReady(got).Status != metav1.ConditionTrue || got.Status.RobotID != 700 || got.Status.SecretName != "ci-docker" || len(state.robotSets) != 0 {
+		t.Fatalf("status %+v sets %v", got.Status, state.robotSets)
+	}
+	if state.project("acme-images").robots[0].secret != "old" {
+		t.Error("the robot secret changed")
+	}
+	if _, has := secret.Data["password"]; has || secret.Type != corev1.SecretTypeOpaque || len(secret.Data[".dockerconfigjson"]) != 0 {
+		t.Errorf("type %s keys %v", secret.Type, secret.Data)
+	}
+	if string(secret.Data["username"]) != "robot$acme-images+ci" || string(secret.Data["host"]) != "registry.example.com" {
+		t.Errorf("keys %v", secret.Data)
+	}
+	kept := meta.FindStatusCondition(got.Status.Conditions, "SecretKept")
+	if kept == nil || kept.Status != metav1.ConditionTrue || kept.Reason != "PasswordKept" {
+		t.Errorf("condition %+v", kept)
+	}
+}
+
+func TestCredentialRotateAfterAdoptionSetsANewSecret(t *testing.T) {
+	state, r, c := adoptedCredential(t)
+	credential := fetchCredential(t, c, "ci")
+	credential.Annotations[AnnotationResetSecret] = "rotate"
+	if err := c.Update(context.Background(), credential); err != nil {
+		t.Fatal(err)
+	}
+	reconcileCredential(t, r, "ci")
+	secret := dockerSecret(t, c, "ci")
+	password := string(secret.Data["password"])
+	if len(state.robotSets) != 1 || password == "" || password == "old" || state.project("acme-images").robots[0].secret != password {
+		t.Fatalf("sets %v password %q", state.robotSets, password)
+	}
+	if secret.Type != corev1.SecretTypeDockerConfigJson || len(secret.Data[".dockerconfigjson"]) == 0 {
+		t.Errorf("type %s keys %v", secret.Type, secret.Data)
+	}
+	got := fetchCredential(t, c, "ci")
+	if meta.FindStatusCondition(got.Status.Conditions, "SecretKept") != nil || got.Status.SecretReset != "rotate" {
+		t.Errorf("status %+v", got.Status)
+	}
+	reconcileCredential(t, r, "ci")
+	if len(state.robotSets) != 1 {
+		t.Errorf("a second run reset again: %v", state.robotSets)
+	}
+}
+
+func TestCredentialResumesACreateThatLostItsStatus(t *testing.T) {
+	state := newHarborState(t)
+	credential := credentialFor("ci", "pull")
+	credential.Status.RobotName = "ci"
+	credential.Status.RobotMarkedAt = ptr.To(metav1.NewTime(time.Now().Add(-time.Minute)))
+	r, c := credentialWorld(t, state, credential)
+	state.project("acme-images").robots = []fakeRobot{{id: 700, name: "ci", secret: "lost", created: time.Now()}}
+	reconcileCredential(t, r, "ci")
+	got := fetchCredential(t, c, "ci")
+	if credentialReady(got).Status != metav1.ConditionTrue || got.Status.RobotID != 700 || len(state.project("acme-images").robots) != 1 {
+		t.Fatalf("status %+v", got.Status)
+	}
+	if string(dockerSecret(t, c, "ci").Data["password"]) == "lost" {
+		t.Error("the lost secret was reused")
+	}
+}
+
+func TestCredentialRotatedAfterAdoptionSurvivesARegistryBlip(t *testing.T) {
+	state, r, c := adoptedCredential(t)
+	credential := fetchCredential(t, c, "ci")
+	credential.Annotations[AnnotationResetSecret] = "rotate"
+	if err := c.Update(context.Background(), credential); err != nil {
+		t.Fatal(err)
+	}
+	reconcileCredential(t, r, "ci")
+	password := string(dockerSecret(t, c, "ci").Data["password"])
+	var registry v1alpha1.Registry
+	if err := c.Get(context.Background(), client.ObjectKey{Namespace: tenantNamespace, Name: "images"}, &registry); err != nil {
+		t.Fatal(err)
+	}
+	ready := registry.Status.DeepCopy().Conditions
+	registry.Status.Conditions = nil
+	if err := c.Status().Update(context.Background(), &registry); err != nil {
+		t.Fatal(err)
+	}
+	reconcileCredential(t, r, "ci")
+	registry.Status.Conditions = ready
+	if err := c.Status().Update(context.Background(), &registry); err != nil {
+		t.Fatal(err)
+	}
+	reconcileCredential(t, r, "ci")
+	secret := dockerSecret(t, c, "ci")
+	got := fetchCredential(t, c, "ci")
+	if string(secret.Data["password"]) != password || secret.Type != corev1.SecretTypeDockerConfigJson || len(state.robotSets) != 1 {
+		t.Fatalf("type %s password %q want %q sets %v", secret.Type, secret.Data["password"], password, state.robotSets)
+	}
+	if got.Status.RobotID != 700 || meta.FindStatusCondition(got.Status.Conditions, "SecretKept") != nil {
+		t.Errorf("status %+v", got.Status)
+	}
+}
+
+func TestCredentialAdoptionDropsTheSecretOfARecreatedRobot(t *testing.T) {
+	state, r, c := adoptedCredential(t)
+	credential := fetchCredential(t, c, "ci")
+	credential.Annotations[AnnotationResetSecret] = "rotate"
+	if err := c.Update(context.Background(), credential); err != nil {
+		t.Fatal(err)
+	}
+	reconcileCredential(t, r, "ci")
+	state.project("acme-images").robots = []fakeRobot{{id: 701, name: "ci", secret: "theirs", created: time.Now()}}
+	reconcileCredential(t, r, "ci")
+	secret := dockerSecret(t, c, "ci")
+	got := fetchCredential(t, c, "ci")
+	if _, has := secret.Data["password"]; has || secret.Type != corev1.SecretTypeOpaque || got.Status.RobotID != 701 {
+		t.Fatalf("type %s keys %v robot %d", secret.Type, secret.Data, got.Status.RobotID)
+	}
+	if kept := meta.FindStatusCondition(got.Status.Conditions, "SecretKept"); kept == nil || kept.Status != metav1.ConditionTrue {
+		t.Errorf("condition %+v", kept)
+	}
+}
+
+func TestCredentialWaitsForTheRegistry(t *testing.T) {
+	state := newHarborState(t)
+	c := fakeCluster(t, addonObject("registry", true), adminSecretObject(), namespaceObject(tenantNamespace), credentialFor("ci", "pull"))
+	r := &CredentialReconciler{Client: c, BaseURL: state.server.URL}
+	reconcileCredential(t, r, "ci")
+	if got := credentialReady(fetchCredential(t, c, "ci")); got.Reason != "RegistryNotFound" || got.Status != metav1.ConditionFalse {
+		t.Fatalf("condition %+v", got)
+	}
+	unready := registryFor("images", "acme-images")
+	if err := c.Create(context.Background(), unready); err != nil {
+		t.Fatal(err)
+	}
+	reconcileCredential(t, r, "ci")
+	if got := credentialReady(fetchCredential(t, c, "ci")); got.Reason != "RegistryNotReady" {
+		t.Fatalf("condition %+v", got)
+	}
+}
+
+func TestCredentialIsNotAvailableWithTheAddonOff(t *testing.T) {
+	state := newHarborState(t)
+	c := fakeCluster(t, addonObject("registry", false), adminSecretObject(), namespaceObject(tenantNamespace), readyRegistry("images", "acme-images"), credentialFor("ci", "pull"))
+	r := &CredentialReconciler{Client: c, BaseURL: state.server.URL}
+	reconcileCredential(t, r, "ci")
+	if got := credentialReady(fetchCredential(t, c, "ci")); got.Reason != "RegistryNotAvailable" {
+		t.Fatalf("condition %+v", got)
+	}
+}
+
+func TestCredentialAddsItsFinalizer(t *testing.T) {
+	state := newHarborState(t)
+	r, c := credentialWorld(t, state, credentialFor("ci", "pull"))
+	reconcileCredential(t, r, "ci")
+	if !controllerutil.ContainsFinalizer(fetchCredential(t, c, "ci"), platform.Finalizer("RegistryCredential")) {
+		t.Error("no finalizer")
+	}
+}
+
+func TestCredentialOfARegistryEnqueuesItsCredentials(t *testing.T) {
+	other := credentialFor("other", "pull")
+	other.Spec.RegistryRef.Name = "elsewhere"
+	c := fakeCluster(t, credentialFor("ci", "pull"), other)
+	requests := credentialsOfRegistry(c)(context.Background(), readyRegistry("images", "acme-images"))
+	names := []string{}
+	for _, request := range requests {
+		names = append(names, request.Name)
+	}
+	if !slices.Equal(names, []string{"ci"}) {
+		t.Errorf("requests %v", names)
+	}
+}
+
+func TestCredentialDoesNotClaimARobotOlderThanItsMarker(t *testing.T) {
+	state := newHarborState(t)
+	credential := credentialFor("ci", "pull")
+	credential.Status.RobotName = "ci"
+	credential.Status.RobotMarkedAt = ptr.To(metav1.Now())
+	r, c := credentialWorld(t, state, credential)
+	state.project("acme-images").robots = []fakeRobot{{id: 700, name: "ci", secret: "theirs", created: time.Now().Add(-time.Hour)}}
+	reconcileCredential(t, r, "ci")
+	got := fetchCredential(t, c, "ci")
+	if credentialReady(got).Reason != "NameTaken" || got.Status.RobotID != 0 || len(state.robotSets) != 0 {
+		t.Fatalf("status %+v sets %v", got.Status, state.robotSets)
+	}
+	if err := c.Delete(context.Background(), got); err != nil {
+		t.Fatal(err)
+	}
+	reconcileCredential(t, r, "ci")
+	if len(state.project("acme-images").robots) != 1 {
+		t.Error("a foreign robot was deleted")
+	}
+}
+
+func TestCredentialDoesNotClaimARobotWithAnotherID(t *testing.T) {
+	state := newHarborState(t)
+	credential := credentialFor("ci", "pull")
+	credential.Status.RobotName = "ci"
+	credential.Status.RobotID = 5
+	credential.Status.RobotMarkedAt = ptr.To(metav1.NewTime(time.Now().Add(-time.Hour)))
+	r, c := credentialWorld(t, state, credential)
+	state.project("acme-images").robots = []fakeRobot{{id: 700, name: "ci", secret: "theirs", created: time.Now()}}
+	reconcileCredential(t, r, "ci")
+	if got := credentialReady(fetchCredential(t, c, "ci")); got.Reason != "NameTaken" || len(state.robotSets) != 0 {
+		t.Fatalf("condition %+v sets %v", got, state.robotSets)
+	}
+}
+
+func TestCredentialDoesNotClaimARobotThatAppearsAfterAFailedCreate(t *testing.T) {
+	state := newHarborState(t)
+	r, c := credentialWorld(t, state, credentialFor("ci", "pull"))
+	state.failRobotCreate = true
+	reconcileCredential(t, r, "ci")
+	got := fetchCredential(t, c, "ci")
+	if got.Status.RobotName != "" || got.Status.RobotMarkedAt != nil {
+		t.Fatalf("the marker stayed after a failed create: %+v", got.Status)
+	}
+	state.project("acme-images").robots = []fakeRobot{{id: 700, name: "ci", secret: "theirs", created: time.Now()}}
+	reconcileCredential(t, r, "ci")
+	if got := credentialReady(fetchCredential(t, c, "ci")); got.Reason != "NameTaken" || len(state.robotSets) != 0 {
+		t.Fatalf("condition %+v sets %v", got, state.robotSets)
+	}
+}
+
+func TestCredentialRecordsTheRobotIDAtOnce(t *testing.T) {
+	state := newHarborState(t)
+	r, c := credentialWorld(t, state, credentialFor("ci", "pull"))
+	reconcileCredential(t, r, "ci")
+	got := fetchCredential(t, c, "ci")
+	if got.Status.RobotID != state.project("acme-images").robots[0].id || got.Status.RobotMarkedAt == nil {
+		t.Fatalf("status %+v", got.Status)
+	}
+}
+
+func TestCredentialFindsItsRobotBeyondTheFirstPageAndIgnoresForeignOnes(t *testing.T) {
+	state := newHarborState(t)
+	r, c := credentialWorld(t, state, credentialFor("ci", "pull"))
+	reconcileCredential(t, r, "ci")
+	own := state.project("acme-images")
+	for i := range 150 {
+		own.robots = append([]fakeRobot{{id: int64(2000 + i), name: "filler" + strconv.Itoa(i), created: time.Now()}}, own.robots...)
+	}
+	other := state.addProject("other-project", 1)
+	other.robots = []fakeRobot{{id: 5000, name: "ci", secret: "theirs", created: time.Now()}}
+	state.mu.Lock()
+	state.ignoreRobotFilter = true
+	state.mu.Unlock()
+	credential := fetchCredential(t, c, "ci")
+	credential.Annotations = map[string]string{AnnotationResetSecret: "now"}
+	if err := c.Update(context.Background(), credential); err != nil {
+		t.Fatal(err)
+	}
+	reconcileCredential(t, r, "ci")
+	got := fetchCredential(t, c, "ci")
+	if credentialReady(got).Status != metav1.ConditionTrue || len(state.robotSets) != 1 || state.robotSets[0] != strconv.FormatInt(got.Status.RobotID, 10) {
+		t.Fatalf("status %+v sets %v", got.Status, state.robotSets)
+	}
+	if other.robots[0].secret != "theirs" {
+		t.Error("a robot of another project got a new secret")
+	}
+}
+
+func TestCredentialDeleteInTheWindowBeforeTheRobotIDWasRecorded(t *testing.T) {
+	state := newHarborState(t)
+	credential := credentialFor("ci", "pull")
+	credential.Finalizers = []string{platform.Finalizer("RegistryCredential")}
+	credential.Status.RobotName = "ci"
+	credential.Status.RobotMarkedAt = ptr.To(metav1.NewTime(time.Now().Add(-time.Minute)))
+	r, c := credentialWorld(t, state, credential)
+	state.project("acme-images").robots = []fakeRobot{{id: 700, name: "ci", created: time.Now()}}
+	if err := c.Delete(context.Background(), fetchCredential(t, c, "ci")); err != nil {
+		t.Fatal(err)
+	}
+	reconcileCredential(t, r, "ci")
+	if len(state.project("acme-images").robots) != 0 {
+		t.Error("the robot of the half made credential leaked")
+	}
+}
+
+func TestCredentialLeavesAForeignSecretOfThatNameAlone(t *testing.T) {
+	state := newHarborState(t)
+	foreign := &corev1.Secret{
+		ObjectMeta: metav1.ObjectMeta{Name: "ci-docker", Namespace: tenantNamespace},
+		Type:       corev1.SecretTypeOpaque,
+		Data:       map[string][]byte{"token": []byte("keep")},
+	}
+	r, c := credentialWorld(t, state, credentialFor("ci", "pull"), foreign)
+	reconcileCredential(t, r, "ci")
+	secret := dockerSecret(t, c, "ci")
+	if secret.Type != corev1.SecretTypeOpaque || string(secret.Data["token"]) != "keep" {
+		t.Fatalf("foreign secret changed: type %s data %v", secret.Type, secret.Data)
+	}
+	if got := credentialReady(fetchCredential(t, c, "ci")); got.Status != metav1.ConditionFalse || got.Reason != "SecretNameTaken" {
+		t.Fatalf("condition %+v", got)
+	}
+}
+
+func TestCredentialLeavesAForeignSecretOfTheSameTypeAlone(t *testing.T) {
+	state := newHarborState(t)
+	foreign := &corev1.Secret{
+		ObjectMeta: metav1.ObjectMeta{Name: "ci-docker", Namespace: tenantNamespace},
+		Type:       corev1.SecretTypeDockerConfigJson,
+		Data:       map[string][]byte{".dockerconfigjson": []byte("{}"), "password": []byte("tenant")},
+	}
+	r, c := credentialWorld(t, state, credentialFor("ci", "pull"), foreign)
+	reconcileCredential(t, r, "ci")
+	secret := dockerSecret(t, c, "ci")
+	if string(secret.Data["password"]) != "tenant" || len(secret.OwnerReferences) != 0 {
+		t.Fatalf("foreign secret changed: data %v owners %v", secret.Data, secret.OwnerReferences)
+	}
+	if got := credentialReady(fetchCredential(t, c, "ci")); got.Status != metav1.ConditionFalse || got.Reason != "SecretNameTaken" {
+		t.Fatalf("condition %+v", got)
+	}
+}

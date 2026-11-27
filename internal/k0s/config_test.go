@@ -80,3 +80,34 @@ func TestAPIExtraArg(t *testing.T) {
 		t.Fatal("want parse error")
 	}
 }
+
+func TestRenderConfigScopesNodePorts(t *testing.T) {
+	raw, err := RenderConfig(Config{PodCIDR: "10.16.0.0/16", ServiceCIDR: "10.96.0.0/12", NodePortAddresses: []string{"10.0.10.0/24"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var doc map[string]any
+	if err := sigyaml.Unmarshal(raw, &doc); err != nil {
+		t.Fatal(err)
+	}
+	want := map[string]any{
+		"mode":               "iptables",
+		"nodePortAddresses":  []any{"10.0.10.0/24"},
+		"metricsBindAddress": "0.0.0.0:10249",
+		"healthzBindAddress": "0.0.0.0:10256",
+	}
+	got := doc["spec"].(map[string]any)["network"].(map[string]any)["kubeProxy"]
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("kubeProxy %v", got)
+	}
+}
+
+func TestRenderConfigLeavesKubeProxyAloneWithoutNodePortAddresses(t *testing.T) {
+	raw, err := RenderConfig(Config{PodCIDR: "10.16.0.0/16", ServiceCIDR: "10.96.0.0/12"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(raw), "kubeProxy") {
+		t.Fatalf("raw %s", raw)
+	}
+}

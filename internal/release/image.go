@@ -22,7 +22,7 @@ func FromImage(ctx context.Context, ref, arch, dest string) error {
 	if err != nil {
 		return err
 	}
-	img, err := remote.Image(parsed, remote.WithContext(ctx), remote.WithPlatform(v1.Platform{OS: "linux", Architecture: arch}))
+	img, err := remote.Image(parsed, remote.WithContext(ctx), remote.WithTransport(downloadTransport), remote.WithPlatform(v1.Platform{OS: "linux", Architecture: arch}))
 	if err != nil {
 		return fmt.Errorf("pull %s: %w", ref, err)
 	}

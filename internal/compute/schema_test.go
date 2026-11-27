@@ -259,3 +259,226 @@ func TestSchemaRefusesBadCPUModel(t *testing.T) {
 		vm.Spec.CPU = &v1alpha1.VMCPU{Model: "host-model"}
 	}))
 }
+
+func TestSchemaRefusesBadNICAddress(t *testing.T) {
+	c, _ := startEnv(t)
+	ns := uniqueNamespace(t, c)
+	cases := map[string]string{
+		"hostname":     "web",
+		"ipv6":         "fd00::5",
+		"ipv4 mapped":  "::ffff:10.0.0.5",
+		"out of range": "10.0.0.256",
+		"prefix":       "10.0.0.5/24",
+		"leading zero": "010.0.0.5",
+		"padded":       " 10.0.0.5",
+	}
+	for label, address := range cases {
+		requireRefused(t, c, label, schemaVM(ns, func(vm *v1alpha1.VirtualMachine) { vm.Spec.Networks[0].Address = address }))
+	}
+	requireAccepted(t, c, schemaVM(ns, func(vm *v1alpha1.VirtualMachine) { vm.Spec.Networks[0].Address = "10.100.0.50" }))
+}
+
+func TestSchemaNICAddressIsImmutable(t *testing.T) {
+	c, _ := startEnv(t)
+	ctx := context.Background()
+	ns := uniqueNamespace(t, c)
+	vm := schemaVM(ns, func(vm *v1alpha1.VirtualMachine) {
+		vm.Spec.Networks = []v1alpha1.VMNetwork{{SubnetRef: "default", Address: "10.100.0.50"}, {SubnetRef: "backend"}, {SubnetRef: "data", Address: "10.102.0.7"}}
+	})
+	requireAccepted(t, c, vm)
+	vm.Spec.Running = false
+	if err := c.Update(ctx, vm); err != nil {
+		t.Fatalf("an update that keeps the addresses: %v", err)
+	}
+	mutations := map[string]func(*v1alpha1.VirtualMachine){
+		"change": func(v *v1alpha1.VirtualMachine) { v.Spec.Networks[0].Address = "10.100.0.51" },
+		"remove": func(v *v1alpha1.VirtualMachine) { v.Spec.Networks[0].Address = "" },
+		"add":    func(v *v1alpha1.VirtualMachine) { v.Spec.Networks[1].Address = "10.101.0.9" },
+		"swap": func(v *v1alpha1.VirtualMachine) {
+			v.Spec.Networks[0].Address, v.Spec.Networks[2].Address = v.Spec.Networks[2].Address, v.Spec.Networks[0].Address
+		},
+	}
+	for label, mutate := range mutations {
+		changed := vm.DeepCopy()
+		mutate(changed)
+		requireUpdateRefused(t, c, label, changed)
+	}
+	reordered := vm.DeepCopy()
+	reordered.Spec.Networks[0], reordered.Spec.Networks[2] = reordered.Spec.Networks[2], reordered.Spec.Networks[0]
+	if err := c.Update(ctx, reordered); err != nil {
+		t.Fatalf("reorder: %v", err)
+	}
+	reordered.Spec.Networks = reordered.Spec.Networks[:2]
+	if err := c.Update(ctx, reordered); err != nil {
+		t.Fatalf("detach a network: %v", err)
+	}
+	reordered.Spec.Networks = append(reordered.Spec.Networks, v1alpha1.VMNetwork{SubnetRef: "default", Address: "10.100.0.77"})
+	if err := c.Update(ctx, reordered); err != nil {
+		t.Fatalf("attach the network again with a new address: %v", err)
+	}
+}
+
+func TestSchemaRequiresExactlyOneSize(t *testing.T) {
+	c, _ := startEnv(t)
+	ns := uniqueNamespace(t, c)
+	compute := &v1alpha1.VMCompute{Cores: 4, MemoryMiB: 4096}
+	requireAccepted(t, c, schemaVM(ns, func(vm *v1alpha1.VirtualMachine) { vm.Spec.InstanceType, vm.Spec.Compute = "", compute }))
+	for label, mutate := range map[string]func(*v1alpha1.VirtualMachine){
+		"both":    func(vm *v1alpha1.VirtualMachine) { vm.Spec.Compute = compute },
+		"neither": func(vm *v1alpha1.VirtualMachine) { vm.Spec.InstanceType = "" },
+		"zero cores": func(vm *v1alpha1.VirtualMachine) {
+			vm.Spec.InstanceType, vm.Spec.Compute = "", &v1alpha1.VMCompute{Cores: 0, MemoryMiB: 4096}
+		},
+		"tiny memory": func(vm *v1alpha1.VirtualMachine) {
+			vm.Spec.InstanceType, vm.Spec.Compute = "", &v1alpha1.VMCompute{Cores: 1, MemoryMiB: 64}
+		},
+	} {
+		requireRefused(t, c, label, schemaVM(ns, mutate))
+	}
+}
+
+func TestSchemaRefusesSizeMessageNamesBothFields(t *testing.T) {
+	c, _ := startEnv(t)
+	ns := uniqueNamespace(t, c)
+	err := c.Create(context.Background(), schemaVM(ns, func(vm *v1alpha1.VirtualMachine) { vm.Spec.Compute = &v1alpha1.VMCompute{Cores: 1, MemoryMiB: 512} }))
+	if err == nil || !strings.Contains(err.Error(), "exactly one of compute and instanceType") {
+		t.Fatalf("%v", err)
+	}
+}
+
+func TestSchemaSizeChangeAndSwitchAreAllowed(t *testing.T) {
+	c, _ := startEnv(t)
+	ns := uniqueNamespace(t, c)
+	vm := schemaVM(ns, func(vm *v1alpha1.VirtualMachine) {
+		vm.Spec.InstanceType, vm.Spec.Compute = "", &v1alpha1.VMCompute{Cores: 2, MemoryMiB: 2048}
+	})
+	requireAccepted(t, c, vm)
+	vm.Spec.Compute = &v1alpha1.VMCompute{Cores: 8, MemoryMiB: 16384}
+	must(t, c.Update(context.Background(), vm))
+	vm.Spec.Compute, vm.Spec.InstanceType = nil, "u1.medium"
+	must(t, c.Update(context.Background(), vm))
+}
+
+func fromVolume(volume string) func(*v1alpha1.VirtualMachine) {
+	return func(vm *v1alpha1.VirtualMachine) {
+		vm.Spec.Image = nil
+		vm.Spec.RootDisk = v1alpha1.VMRootDisk{VolumeRef: volume}
+	}
+}
+
+func TestSchemaRootDiskFromAVolume(t *testing.T) {
+	c, _ := startEnv(t)
+	ns := uniqueNamespace(t, c)
+	requireAccepted(t, c, schemaVM(ns, fromVolume("boot1")))
+	cases := map[string]func(*v1alpha1.VirtualMachine){
+		"with size":          func(vm *v1alpha1.VirtualMachine) { fromVolume("boot1")(vm); vm.Spec.RootDisk.SizeGi = 20 },
+		"with storage class": func(vm *v1alpha1.VirtualMachine) { fromVolume("boot1")(vm); vm.Spec.RootDisk.StorageClass = "block" },
+		"with image": func(vm *v1alpha1.VirtualMachine) {
+			fromVolume("boot1")(vm)
+			vm.Spec.Image = &v1alpha1.ImageRef{Name: "ubuntu-24.04"}
+		},
+		"also a disk":       func(vm *v1alpha1.VirtualMachine) { fromVolume("data1")(vm) },
+		"foreign name":      fromVolume("a/b"),
+		"no size no volume": func(vm *v1alpha1.VirtualMachine) { vm.Spec.RootDisk = v1alpha1.VMRootDisk{} },
+	}
+	for label, mutate := range cases {
+		requireRefused(t, c, label, schemaVM(ns, mutate))
+	}
+}
+
+func TestSchemaRootVolumeSwapNeedsAStoppedVM(t *testing.T) {
+	c, _ := startEnv(t)
+	ns := uniqueNamespace(t, c)
+	ctx := context.Background()
+	vm := schemaVM(ns, fromVolume("boot1"))
+	requireAccepted(t, c, vm)
+	vm.Spec.RootDisk.VolumeRef = "boot2"
+	if err := c.Update(ctx, vm); !apierrors.IsInvalid(err) || !strings.Contains(err.Error(), "stopped") {
+		t.Fatalf("a swap on a running VM: %v", err)
+	}
+	vm.Spec.Running = false
+	must(t, c.Update(ctx, vm))
+}
+
+func TestSchemaRootDiskModeIsFixed(t *testing.T) {
+	c, _ := startEnv(t)
+	ns := uniqueNamespace(t, c)
+	ctx := context.Background()
+	owned := schemaVM(ns, func(vm *v1alpha1.VirtualMachine) { vm.Spec.Running = false })
+	requireAccepted(t, c, owned)
+	owned.Spec.Image = nil
+	owned.Spec.RootDisk = v1alpha1.VMRootDisk{VolumeRef: "boot1"}
+	if err := c.Update(ctx, owned); !apierrors.IsInvalid(err) {
+		t.Fatalf("owned to volume: %v", err)
+	}
+	booted := schemaVM(ns, func(vm *v1alpha1.VirtualMachine) { fromVolume("boot1")(vm); vm.Spec.Running = false })
+	requireAccepted(t, c, booted)
+	booted.Spec.RootDisk = v1alpha1.VMRootDisk{SizeGi: 20}
+	if err := c.Update(ctx, booted); !apierrors.IsInvalid(err) {
+		t.Fatalf("volume to owned: %v", err)
+	}
+}
+
+func TestSchemaRefusesBadGuestIdentity(t *testing.T) {
+	c, _ := startEnv(t)
+	ns := uniqueNamespace(t, c)
+	cases := map[string]func(*v1alpha1.VirtualMachine){
+		"uuid text": func(vm *v1alpha1.VirtualMachine) { vm.Spec.Firmware = &v1alpha1.VMFirmware{UUID: "web-1"} },
+		"uuid short": func(vm *v1alpha1.VirtualMachine) {
+			vm.Spec.Firmware = &v1alpha1.VMFirmware{UUID: "6f1f3a52-2f0b-4c1e-9d55"}
+		},
+		"serial space": func(vm *v1alpha1.VirtualMachine) { vm.Spec.Firmware = &v1alpha1.VMFirmware{Serial: "a b"} },
+		"serial long": func(vm *v1alpha1.VirtualMachine) {
+			vm.Spec.Firmware = &v1alpha1.VMFirmware{Serial: strings.Repeat("a", 65)}
+		},
+		"disk serial": func(vm *v1alpha1.VirtualMachine) { vm.Spec.Disks[0].Serial = "a b" },
+		"disk long":   func(vm *v1alpha1.VirtualMachine) { vm.Spec.Disks[0].Serial = strings.Repeat("a", 37) },
+	}
+	for label, mutate := range cases {
+		requireRefused(t, c, label, schemaVM(ns, mutate))
+	}
+	requireAccepted(t, c, schemaVM(ns, func(vm *v1alpha1.VirtualMachine) {
+		vm.Spec.Firmware = &v1alpha1.VMFirmware{UUID: "6f1f3a52-2f0b-4c1e-9d55-0c6f1d7a9e10", Serial: "SN-0001"}
+		vm.Spec.Disks[0].Serial = "vol0123456789abcdef"
+	}))
+}
+
+func TestSchemaFirmwareIdentityIsImmutable(t *testing.T) {
+	c, _ := startEnv(t)
+	ctx := context.Background()
+	ns := uniqueNamespace(t, c)
+	identified := schemaVM(ns, func(vm *v1alpha1.VirtualMachine) {
+		vm.Spec.Firmware = &v1alpha1.VMFirmware{UEFI: true, UUID: "6f1f3a52-2f0b-4c1e-9d55-0c6f1d7a9e10", Serial: "SN-0001"}
+	})
+	requireAccepted(t, c, identified)
+	identified.Spec.Running = false
+	identified.Spec.Firmware.TPM = true
+	if err := c.Update(ctx, identified); err != nil {
+		t.Fatalf("an update that keeps the identity: %v", err)
+	}
+	for label, mutate := range map[string]func(*v1alpha1.VirtualMachine){
+		"uuid change":   func(v *v1alpha1.VirtualMachine) { v.Spec.Firmware.UUID = "7f1f3a52-2f0b-4c1e-9d55-0c6f1d7a9e10" },
+		"uuid remove":   func(v *v1alpha1.VirtualMachine) { v.Spec.Firmware.UUID = "" },
+		"serial change": func(v *v1alpha1.VirtualMachine) { v.Spec.Firmware.Serial = "SN-0002" },
+		"serial remove": func(v *v1alpha1.VirtualMachine) { v.Spec.Firmware.Serial = "" },
+		"firmware drop": func(v *v1alpha1.VirtualMachine) { v.Spec.Firmware = nil },
+	} {
+		changed := identified.DeepCopy()
+		mutate(changed)
+		requireUpdateRefused(t, c, label, changed)
+	}
+	plain := schemaVM(ns, func(*v1alpha1.VirtualMachine) {})
+	requireAccepted(t, c, plain)
+	for label, firmware := range map[string]*v1alpha1.VMFirmware{
+		"uuid add":   {UUID: "6f1f3a52-2f0b-4c1e-9d55-0c6f1d7a9e10"},
+		"serial add": {Serial: "SN-0001"},
+	} {
+		changed := plain.DeepCopy()
+		changed.Spec.Firmware = firmware
+		requireUpdateRefused(t, c, label, changed)
+	}
+	plain.Spec.Firmware = &v1alpha1.VMFirmware{UEFI: true}
+	if err := c.Update(ctx, plain); err != nil {
+		t.Fatalf("firmware without identity: %v", err)
+	}
+}

@@ -183,12 +183,39 @@ func (r *SecurityGroupReconciler) usedBy(ctx context.Context, group *v1alpha1.Se
 	for _, vm := range vms.Items {
 		for _, n := range vm.Spec.Networks {
 			if slices.Contains(n.SecurityGroups, group.Name) {
-				users = append(users, vm.Name)
+				users = append(users, "VirtualMachine/"+vm.Name)
 				break
 			}
 		}
 	}
+	var containers v1alpha1.ContainerList
+	if err := r.Client.List(ctx, &containers, client.InNamespace(group.Namespace)); err != nil {
+		return nil, err
+	}
+	for _, container := range containers.Items {
+		if slices.Contains(container.Spec.Network.SecurityGroups, group.Name) {
+			users = append(users, "Container/"+container.Name)
+		}
+	}
+	var clusters v1alpha1.KubernetesClusterList
+	if err := r.Client.List(ctx, &clusters, client.InNamespace(group.Namespace)); err != nil {
+		return nil, err
+	}
+	for _, cluster := range clusters.Items {
+		if kubernetesClusterUses(cluster.Spec, group.Name) {
+			users = append(users, "KubernetesCluster/"+cluster.Name)
+		}
+	}
 	return users, nil
+}
+
+func kubernetesClusterUses(spec v1alpha1.KubernetesClusterSpec, group string) bool {
+	if slices.Contains(spec.ControlPlane.SecurityGroups, group) {
+		return true
+	}
+	return slices.ContainsFunc(spec.Workers, func(worker v1alpha1.KubernetesWorker) bool {
+		return slices.Contains(worker.SecurityGroups, group)
+	})
 }
 
 func (r *SecurityGroupReconciler) finalize(ctx context.Context, group *v1alpha1.SecurityGroup) (reconcile.Result, error) {
@@ -197,7 +224,7 @@ func (r *SecurityGroupReconciler) finalize(ctx context.Context, group *v1alpha1.
 		return reconcile.Result{}, err
 	}
 	if len(users) > 0 {
-		message := fmt.Sprintf("the VMs %v use this security group; remove it from them first", users)
+		message := fmt.Sprintf("%v use this security group; remove it from them first", users)
 		return r.publish(ctx, *group, falseCondition(v1alpha1.ConditionReady, group.Generation, ReasonInUse, message), terminatingRequeue)
 	}
 	np := &networkingv1.NetworkPolicy{ObjectMeta: metav1.ObjectMeta{Namespace: group.Namespace, Name: policyNamePrefix + group.Name}}

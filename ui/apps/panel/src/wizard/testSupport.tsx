@@ -1,6 +1,6 @@
 import { screen } from "@testing-library/react";
 import type userEvent from "@testing-library/user-event";
-import { Route, Routes, useLocation } from "react-router";
+import { Outlet, useLocation } from "react-router";
 import type { ReactElement } from "react";
 import type { Check, KubeList } from "../api/types";
 import clusterimages from "../fixtures/clusterimages.json";
@@ -41,13 +41,10 @@ export function wizardApi(extra: Record<string, FakeRoute> = {}): Record<string,
 
 export function renderWizard(element: ReactElement, path: string, options: { api?: Record<string, FakeRoute>; allow?: (check: Check) => boolean; locale?: RenderOptions["locale"] } = {}) {
   return renderPanel(
-    <>
-      <Routes>
-        <Route path={path} element={element} />
-        <Route path="*" element={<span>elsewhere</span>} />
-      </Routes>
-      <Path />
-    </>,
+    [{
+      element: <><Outlet /><Path /></>,
+      children: [{ path, element }, { path: "*", element: <span>elsewhere</span> }],
+    }],
     { route: path.replace(":project", "web"), ...(options.allow ? { allow: options.allow } : {}), ...(options.locale ? { locale: options.locale } : {}), api: wizardApi(options.api) },
   );
 }

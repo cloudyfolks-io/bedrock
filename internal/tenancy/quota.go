@@ -19,6 +19,10 @@ const (
 	resourceRequestsMemory  corev1.ResourceName = "requests.memory"
 	resourceRequestsStorage corev1.ResourceName = "requests.storage"
 	resourceCountVMs        corev1.ResourceName = "count/virtualmachines.bedrock.cloudyfolks.io"
+	resourceCountContainers corev1.ResourceName = "count/containers.bedrock.cloudyfolks.io"
+	resourceCountClusters   corev1.ResourceName = "count/kubernetesclusters.bedrock.cloudyfolks.io"
+	resourceCountDatabases  corev1.ResourceName = "count/databases.bedrock.cloudyfolks.io"
+	resourceCountRegistries corev1.ResourceName = "count/registries.bedrock.cloudyfolks.io"
 )
 
 type Decision struct {
@@ -82,6 +86,18 @@ func QuotaHard(quota v1alpha1.ProjectQuota) corev1.ResourceList {
 	if quota.VMs != nil {
 		hard[resourceCountVMs] = *resource.NewQuantity(int64(*quota.VMs), resource.DecimalSI)
 	}
+	if quota.Containers != nil {
+		hard[resourceCountContainers] = *resource.NewQuantity(int64(*quota.Containers), resource.DecimalSI)
+	}
+	if quota.KubernetesClusters != nil {
+		hard[resourceCountClusters] = *resource.NewQuantity(int64(*quota.KubernetesClusters), resource.DecimalSI)
+	}
+	if quota.Databases != nil {
+		hard[resourceCountDatabases] = *resource.NewQuantity(int64(*quota.Databases), resource.DecimalSI)
+	}
+	if quota.Registries != nil {
+		hard[resourceCountRegistries] = *resource.NewQuantity(int64(*quota.Registries), resource.DecimalSI)
+	}
 	return hard
 }
 
@@ -98,6 +114,18 @@ func ProjectUsage(used corev1.ResourceList) v1alpha1.ProjectQuota {
 	}
 	if value, found := used[resourceCountVMs]; found {
 		usage.VMs = ptr.To(int32(value.Value()))
+	}
+	if value, found := used[resourceCountContainers]; found {
+		usage.Containers = ptr.To(int32(value.Value()))
+	}
+	if value, found := used[resourceCountClusters]; found {
+		usage.KubernetesClusters = ptr.To(int32(value.Value()))
+	}
+	if value, found := used[resourceCountDatabases]; found {
+		usage.Databases = ptr.To(int32(value.Value()))
+	}
+	if value, found := used[resourceCountRegistries]; found {
+		usage.Registries = ptr.To(int32(value.Value()))
 	}
 	return usage
 }

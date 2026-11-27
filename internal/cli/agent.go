@@ -16,6 +16,7 @@ import (
 
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
+	"github.com/cloudyfolks-io/bedrock/api/v1alpha1"
 	"github.com/cloudyfolks-io/bedrock/internal/agent"
 	"github.com/cloudyfolks-io/bedrock/internal/authn/apiserver"
 	"github.com/cloudyfolks-io/bedrock/internal/depot"
@@ -47,7 +48,7 @@ func agentCommand(args []string, _, stderr io.Writer) int {
 	flags.StringVar(&o.kubeconfig, "kubeconfig", filepath.Join("/var/lib/k0s", "kubelet.conf"), "kubelet kubeconfig with the node identity")
 	flags.StringVar(&o.node, "node", "", "node name, default is the lowercase hostname")
 	flags.StringVar(&o.root, "root", "/", "host root")
-	flags.DurationVar(&o.interval, "interval", 60*time.Second, "reconcile interval")
+	flags.DurationVar(&o.interval, "interval", v1alpha1.AgentReportInterval, "reconcile interval")
 	if err := flags.Parse(args); err != nil {
 		return 2
 	}
@@ -99,6 +100,7 @@ func runAgent(ctx context.Context, o agentOptions, deps agentDeps, stderr io.Wri
 		Interval:     o.interval,
 		Inventory:    inventory.Gather,
 		Apply:        hostconfig.Apply,
+		Guard:        hostconfig.GuardLegs,
 		Packages:     pkgmgr.Manager{Exec: deps.Exec, Family: family, Root: o.root},
 		Version:      Version,
 		Hostname:     os.Hostname,
@@ -108,6 +110,10 @@ func runAgent(ctx context.Context, o agentOptions, deps agentDeps, stderr io.Wri
 		K0sPoll:      agent.K0sRestartPoll,
 		ProbeTimeout: agent.FactProbeTimeout,
 		AuthnOwner:   apiserver.APIServerOwner(),
+		AdminClient: func(kubeconfig string) (client.Client, error) {
+			c, _, err := deps.Load(kubeconfig)
+			return c, err
+		},
 	}
 	for {
 		changed, err := runUntilKubeconfigChanges(ctx, o, deps, loopDeps, stderr)

@@ -1,13 +1,13 @@
 #!/usr/bin/env bash
-set -euo pipefail
+set -Eeuo pipefail
 
 source "$(dirname "${BASH_SOURCE[0]}")/e2e/lib.sh"
 
 : "${VERSION_A:?}" "${VERSION_B:?}" "${K0S_A:?}" "${K0S_B:?}"
 registry=${REGISTRY:-localhost:5000}
 arch=${ARCH:-$(uname -m | sed 's/x86_64/amd64/;s/aarch64/arm64/')}
-image_a=$registry/bedrock:$VERSION_A
-image_b=$registry/bedrock:$VERSION_B
+image_a=${IMAGE_A:-$registry/bedrock:$VERSION_A}
+image_b=${IMAGE_B:-$registry/bedrock:$VERSION_B}
 image_a_file=$(printf '%s' "$image_a" | sed -E 's/[^A-Za-z0-9._-]/_/g').tar
 image_b_file=$(printf '%s' "$image_b" | sed -E 's/[^A-Za-z0-9._-]/_/g').tar
 bundle_b=dist/bedrock-$VERSION_B-bundle-$arch.tar.zst
@@ -15,6 +15,7 @@ cli_b=dist/bedrock-$VERSION_B-linux-$arch
 abort_in=${ABORT_IN:-}
 init_a=${INIT_A:-hack/e2e-init.sh}
 assert_authn=${ASSERT_AUTHN:-}
+version_a_archives=${VERSION_A_ARCHIVES:-1}
 export PLATFORM_HOST=${PLATFORM_HOST:-e2e.bedrock.test}
 workdir=$(mktemp -d)
 export KUBECONFIG=/var/lib/k0s/pki/admin.conf
@@ -48,7 +49,12 @@ dump() {
     echo "--- agent log"
     journalctl -u bedrock-agent.service --no-pager -n 300 || true
     echo "--- k0s log"
-    journalctl -u k0scontroller --no-pager -n 200 || true
+    journalctl -u k0scontroller --no-pager -n 3000 | grep -v "component=grpc" | tail -200 || true
+    echo "--- kubelet log"
+    journalctl -u k0scontroller --no-pager --since "-60min" | grep "component=kubelet" | tail -150 || true
+    echo "--- k0s service"
+    systemctl status k0scontroller --no-pager -l | head -30 || true
+    ss -ltnp | grep -E ":(6443|10250) " || true
     echo "--- depot and backups"
     find /var/lib/bedrock -maxdepth 4 | head -100 || true
     echo "--- disk"
@@ -74,6 +80,7 @@ dump() {
   fi
   rm -rf "$workdir"
 }
+trap 'echo "failed: $BASH_COMMAND at line $LINENO" >&2' ERR
 trap dump EXIT
 
 upgrade_archives() {
@@ -145,24 +152,68 @@ k0s_archive_entries() {
   tar -xzOf "$snapshot" "$member" | tar -tz
 }
 
-docs_restore_script() {
-  awk -v intro="$1" '
-    /^## / { in_section = ($0 == "## Etcd snapshots"); armed = 0; next }
-    in_section && index($0, intro) == 1 { armed = 1; next }
-    armed && $0 == "```sh" { inside = 1; next }
-    inside && $0 == "```" { exit }
-    inside { print }
-  ' "$2"
-}
-
-docs_restore_script_valid() {
-  head -n 1 "$1" | grep -Eq "^SNAPSHOT=[^ ]+ sh -eu <<'EOF'\$" &&
-    tail -n 1 "$1" | grep -qx EOF &&
-    grep -q '^k0s restore ' "$1"
-}
-
 k0s_images_listing() {
-  find /var/lib/k0s/images -type f -printf '%P %s\n' | sort
+  find /var/lib/bedrock/images -type f -printf '%P %s\n' | sort
+}
+
+archived_file() {
+  test -n "$(compgen -G "/var/lib/bedrock/images/$1/*/$2")"
+}
+
+image_pinned_clean() {
+  /usr/local/bin/k0s ctr --namespace k8s.io images ls | awk -v name="$1" '
+    $1 == name {
+      found = 1
+      if ($NF !~ /(^|,)io\.cri-containerd\.pinned=pinned(,|$)/ || $0 ~ /io\.k0sproject\.ocibundle-paths=/) bad = 1
+    }
+    END { exit !(found && !bad) }'
+}
+
+image_unpinned() {
+  /usr/local/bin/k0s ctr --namespace k8s.io images ls | awk -v name="$1" '
+    index($1, name) && $NF ~ /io.cri-containerd.pinned=pinned/ { pinned = 1 }
+    END { exit pinned }'
+}
+
+airgap_names() {
+  local tarball
+  tarball=$(compgen -G "/var/lib/bedrock/images/$1/*/k0s-airgap.tar") || return 1
+  tar -xOf "$tarball" index.json | grep -o '"org.opencontainers.image.ref.name": *"[^"]*"' | sed -E 's/.*: *"([^"]*)"/\1/'
+}
+
+assert_images_pinned() {
+  local image=$2 base=${2%@*} names name
+  names=$(airgap_names "$1" | grep -E '/(pause|kube-proxy):') || return 1
+  grep -q '/kube-proxy:' <<<"$names" || return 1
+  while IFS= read -r name; do
+    retry_until 300 image_pinned_clean "$name" || return 1
+  done <<<"$names"
+  if [[ $image == *@* && ${base##*/} == *:* ]]; then
+    retry_until 300 image_pinned_clean "$base" || return 1
+    image=${base%:*}@${image##*@}
+  fi
+  retry_until 300 image_pinned_clean "$image"
+}
+
+operator_image_matches() {
+  local image
+  image=$(kubectl --request-timeout=10s -n bedrock-system get deployment bedrock-operator \
+    -o jsonpath='{.spec.template.spec.containers[?(@.name=="operator")].image}') || return 1
+  test "$image" = "$1"
+}
+
+airgap_images_held() {
+  local names held name
+  names=$(airgap_names "$1") || return 1
+  test -n "$names"
+  held=$(/usr/local/bin/k0s ctr --namespace k8s.io images ls -q) || return 1
+  while read -r name; do
+    grep -qxF "$name" <<<"$held" || return 1
+  done <<<"$names"
+}
+
+k0s_images_dir_empty() {
+  test -z "$(find /var/lib/k0s/images -type f 2>/dev/null)"
 }
 
 local_pause_image() {
@@ -198,9 +249,44 @@ assert_no_image_pull_failures() {
   fi
 }
 
+assert_cluster_dns() {
+  local owners owned pod_ip api_ip dns_ip
+  test "$(kubectl -n kube-system get deployments -l k8s-app=kube-dns -o name | wc -l)" -eq 1 || return 1
+  owners=$(kubectl -n kube-system get deployment coredns -o jsonpath='{.metadata.managedFields[*].manager}') || return 1
+  grep -qw bedrock-release <<<"$owners" || return 1
+  owned=$(kubectl -n kube-system get deployments,services,configmaps -l k0s.k0sproject.io/stack=coredns -o name) || return 1
+  [ -z "$owned" ] || return 1
+  kubectl -n kube-system rollout status deployment/coredns --timeout=60s || return 1
+  grep -q -- '--disable-components[= ][^ ]*coredns' /etc/systemd/system/k0scontroller.service || return 1
+  test ! -e /var/lib/k0s/manifests/coredns || return 1
+  test "$(kubectl -n kube-system get poddisruptionbudget coredns -o jsonpath='{.spec.maxUnavailable}')" = 1 || return 1
+  dns_ip=$(kubectl -n kube-system get service kube-dns -o jsonpath='{.spec.clusterIP}') || return 1
+  [ "$dns_ip" = "$dns_ip_a" ] || { echo "kube-dns clusterIP changed from $dns_ip_a to $dns_ip" >&2; return 1; }
+  pod_ip=$(kubectl -n kube-system get pods -l k8s-app=kube-dns -o jsonpath='{.items[0].status.podIP}') || return 1
+  api_ip=$(kubectl -n default get service kubernetes -o jsonpath='{.spec.clusterIP}') || return 1
+  python3 - "$api_ip" "$pod_ip" "$dns_ip" <<'PY'
+import socket, struct, sys
+
+expected = sys.argv[1]
+name = b"".join(bytes([len(label)]) + label.encode() for label in "kubernetes.default.svc.cluster.local".split(".")) + b"\0"
+query = struct.pack(">HHHHHH", 0x1234, 0x0100, 1, 0, 0, 0) + name + struct.pack(">HH", 1, 1)
+for server in sys.argv[2:]:
+    sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    sock.settimeout(5)
+    sock.sendto(query, (server, 53))
+    reply = sock.recv(512)
+    answers = struct.unpack(">H", reply[6:8])[0]
+    if reply[3] & 0x0F != 0 or answers < 1 or socket.inet_ntoa(reply[-4:]) != expected:
+        sys.exit("cluster DNS at " + server + " did not answer kubernetes.default.svc.cluster.local with " + expected)
+PY
+}
+
 BUNDLE=dist/bedrock-$VERSION_A-bundle-$arch.tar.zst VERSION=$VERSION_A IMAGE=$image_a \
   BIN=dist/bedrock-$VERSION_A-linux-$arch RELEASE_DIR=dist/release-$VERSION_A ARCH=$arch bash "$init_a"
 
+retry_until 180 operator_image_matches "$image_a"
+dns_ip_a=$(kubectl -n kube-system get service kube-dns -o jsonpath='{.spec.clusterIP}')
+test -n "$dns_ip_a"
 node=$(hostname | tr '[:upper:]' '[:lower:]')
 test "$(kubectl get host "$node" -o jsonpath='{.spec.management.enabled}')" != "true"
 kubectl wait --for=jsonpath='{.status.conditions[?(@.type=="ManagementApplied")].reason}'=ManagementDisabled host/"$node" --timeout=180s
@@ -233,6 +319,18 @@ spec:
   value: "$admin_recipient"
 SETTING
 
+if [ "$version_a_archives" = 1 ]; then
+  retry_until 300 archived_file "$VERSION_A" "$image_a_file"
+  legacy_source=$(compgen -G "/var/lib/bedrock/images/$VERSION_A/*/$image_a_file")
+  legacy_sum=$(sha256sum "$legacy_source" | cut -d' ' -f1)
+  cp "$legacy_source" "/var/lib/k0s/images/$image_a_file"
+  retry_until 300 k0s_images_dir_empty
+  test "$(sha256sum "$legacy_source" | cut -d' ' -f1)" = "$legacy_sum"
+  retry_until 300 airgap_images_held "$VERSION_A"
+  assert_images_pinned "$VERSION_A" "$image_a"
+fi
+
+kube_proxy_a=$(airgap_names "$VERSION_A" 2>/dev/null | grep '/kube-proxy:' || true)
 "$cli_b" upgrade --to "$VERSION_B" --bundle "$bundle_b" --yes --timeout 2h > "$workdir/upgrade.log" 2>&1 &
 upgrade=$!
 depot=""
@@ -260,6 +358,23 @@ if [ -n "$abort_in" ]; then
     sleep 5
   done
   test "$phase" = "$abort_in"
+  if [ "$version_a_archives" = 0 ]; then
+    backup_record=$(kubectl --request-timeout=10s get cluster cluster -o json |
+      jq -er --arg phase "$abort_in" --arg prefix "host:$node:$backups/bedrock-$VERSION_A-" '
+        .status | select(.phase == $phase) | .upgrade.backup as $location
+        | select(($location | startswith($prefix)) and
+            ($location | ltrimstr($prefix) | test("^[0-9]{8}T[0-9]{6}Z\\.tar\\.gz$")))
+        | [.backups[] | select(.location == $location)]
+        | select(length == 1 and (.[0].digest | test("^sha256:[0-9a-f]{64}$")))
+        | [$location, .[0].digest] | @tsv')
+    IFS=$'\t' read -r legacy_backup_location legacy_backup_digest <<<"$backup_record"
+    legacy_backup=${legacy_backup_location#host:"$node":}
+    test "$(upgrade_archives)" = "$legacy_backup"
+    test -f "$legacy_backup"
+    test ! -L "$legacy_backup"
+    test "$(realpath -e -- "$legacy_backup")" = "$legacy_backup"
+    test "$(stat -c '%a:%u:%h' -- "$legacy_backup")" = '600:0:1'
+  fi
   aborted=0
   for _ in $(seq 1 60); do
     if "$cli_b" upgrade abort --yes; then
@@ -297,21 +412,37 @@ if [ -n "$abort_in" ]; then
   kubectl get cluster cluster -o jsonpath='{.status.version}' | grep -qx "$VERSION_A"
   kubectl get cluster cluster -o jsonpath='{.spec.desiredVersion}' | grep -qx "$VERSION_A"
   /usr/local/bin/k0s version | grep -qx "$K0S_A"
-  test "$(kubectl -n bedrock-system get deploy/bedrock-operator -o jsonpath='{.spec.template.spec.containers[0].image}')" = "$image_a"
+  retry_until 180 operator_image_matches "$image_a"
   kubectl -n bedrock-system rollout status deploy/bedrock-operator --timeout=300s
   kubectl get host "$node" -o jsonpath='{.status.restore.backup}' | grep -q "^/var/lib/bedrock/backups/bedrock-$VERSION_A-"
   test -n "$(kubectl -n bedrock-system get deploy/bedrock-operator -o jsonpath='{.spec.template.metadata.annotations.kubectl\.kubernetes\.io/restartedAt}')"
   test -n "$(kubectl -n kube-system get daemonset/fabric-cni -o jsonpath='{.spec.template.metadata.annotations.kubectl\.kubernetes\.io/restartedAt}')"
-  test -f /var/lib/k0s/images/k0s-airgap.tar
-  test ! -e "/var/lib/k0s/images/k0s-airgap-$VERSION_B.tar"
+  test ! -e "/var/lib/bedrock/images/$VERSION_B"
+  if [ "$version_a_archives" = 1 ]; then
+    archived_file "$VERSION_A" k0s-airgap.tar
+    retry_until 300 k0s_images_dir_empty
+    retry_until 300 airgap_images_held "$VERSION_A"
+    assert_images_pinned "$VERSION_A" "$image_a"
+  fi
   for _ in $(seq 1 60); do
     if [ -z "$(kubectl get nodeupgrades -o name)" ]; then break; fi
     sleep 5
   done
   test -z "$(kubectl get nodeupgrades -o name)"
   test -z "$(find /var/lib/k0s -maxdepth 1 -name '.pre-restore-*')"
-  test "$(upgrade_archives | wc -l)" -eq 1
-  assert_age_file "$(newest_upgrade_archive)"
+  if [ "$version_a_archives" = 0 ]; then
+    test "$(kubectl get host "$node" -o jsonpath='{.status.restore.backup}')" = "$legacy_backup"
+    test "$(upgrade_archives)" = "$legacy_backup"
+    test -f "$legacy_backup"
+    test ! -L "$legacy_backup"
+    test "$(realpath -e -- "$legacy_backup")" = "$legacy_backup"
+    test "$(stat -c '%a:%u:%h' -- "$legacy_backup")" = '600:0:1'
+    printf '%s  %s\n' "${legacy_backup_digest#sha256:}" "$legacy_backup" | sha256sum --check --status
+    gzip -t -- "$legacy_backup"
+  else
+    test "$(upgrade_archives | wc -l)" -eq 1
+    assert_age_file "$(newest_upgrade_archive)"
+  fi
   kubectl wait --for=condition=Ready node --all --timeout=300s
   grep -qx 'server = "https://127.0.0.1:1"' /etc/k0s/containerd.d/certs.d/_default/hosts.toml
   assert_no_image_pull_failures
@@ -411,6 +542,7 @@ kubectl get cluster cluster -o jsonpath='{.status.version}' | grep -qx "$VERSION
 kubectl get cluster cluster -o jsonpath='{.status.phase}' | grep -qx Idle
 kubectl get cluster cluster -o jsonpath='{.status.conditions[?(@.type=="Available")].reason}' | grep -qx Upgraded
 kubectl get cluster cluster -o jsonpath='{.status.conditions[?(@.type=="UpgradeBlocked")].reason}' | grep -qx Passed
+retry_until 300 assert_cluster_dns
 kubectl get cluster cluster -o jsonpath='{.status.backups[0].location}' | grep -q "^host:$node:/var/lib/bedrock/backups/bedrock-$VERSION_A-"
 retry_until 600 upgrade_archive_sealed
 archive=$(newest_upgrade_archive)
@@ -528,17 +660,23 @@ rm -f "$workdir/etcd-snapshot.tar.gz"
 /usr/local/bin/k0s version | grep -qx "$K0S_B"
 kubectl get host "$node" -o jsonpath='{.status.k0sVersion}' | grep -qx "$K0S_B"
 kubectl get host "$node" -o jsonpath='{.status.agentVersion}' | grep -qx "$VERSION_B"
-test "$(kubectl -n bedrock-system get deploy/bedrock-operator -o jsonpath='{.spec.template.spec.containers[0].image}')" = "$image_b"
+retry_until 180 operator_image_matches "$image_b"
 kubectl -n bedrock-system rollout status deploy/bedrock-operator --timeout=300s
 test -n "$(kubectl -n bedrock-system get events --field-selector involvedObject.name=bedrock-smoke -o name)"
 kubectl -n bedrock-system wait --for=delete virtualmachine/bedrock-smoke --timeout=300s
 test -z "$(kubectl get nodeupgrades -o name)"
 test ! -e "/var/lib/bedrock/staged/$VERSION_B"
 test ! -e /var/lib/bedrock/previous/k0s
-test -f "/var/lib/k0s/images/k0s-airgap-$VERSION_B.tar"
-test ! -e /var/lib/k0s/images/k0s-airgap.tar
+archived_file "$VERSION_B" k0s-airgap.tar
+test ! -e "/var/lib/bedrock/images/$VERSION_A"
 if [ "$image_a_file" != "$image_b_file" ]; then
-  test ! -e "/var/lib/k0s/images/$image_a_file"
+  test -z "$(compgen -G "/var/lib/bedrock/images/*/*/$image_a_file")"
+fi
+retry_until 300 k0s_images_dir_empty
+retry_until 300 airgap_images_held "$VERSION_B"
+assert_images_pinned "$VERSION_B" "$image_b"
+if [ -n "$kube_proxy_a" ] && ! airgap_names "$VERSION_B" | grep -qxF "$kube_proxy_a"; then
+  retry_until 300 image_unpinned "$kube_proxy_a"
 fi
 test "$(kubectl get node "$node" -o jsonpath='{.spec.unschedulable}')" != "true"
 kubectl wait --for=condition=Ready node --all --timeout=300s
@@ -565,19 +703,31 @@ kubectl -n default delete configmap,pod "$restore_marker"
 retry_until 300 container_gone "${restore_container#containerd://}"
 restore_started=$(date -u +%s)
 bash -x "$restore_script"
+k0s_started=$(date -u -d "$(systemctl show k0scontroller -p ActiveEnterTimestamp --value)" +%s)
+lease_deadline=$((k0s_started + 120))
+lease_now=$(date -u +%s)
+if [ "$lease_now" -lt "$lease_deadline" ]; then sleep $((lease_deadline - lease_now)); fi
+node_lease_renewed_since "$k0s_started" || {
+  echo "the kubelet lease was not renewed within 120 s after k0s started" >&2
+  exit 1
+}
+echo "the kubelet lease renewed within 120 s after k0s started"
 retry_until 600 kubectl get --raw=/readyz
 print_restore_state
 retry_until 300 kubectl patch setting backup.etcd-schedule --type merge -p '{"spec":{"value":""}}'
 test "$(kubectl -n default get configmap "$restore_marker" -o jsonpath='{.data.state}')" = before-snapshot
 echo "the marker ConfigMap is back: etcd holds the state of the snapshot"
-retry_until 300 node_lease_renewed_since "$restore_started"
+retry_until 1800 node_lease_renewed_since "$restore_started"
 kubectl wait --for=condition=Ready node --all --timeout=300s
 kubectl -n bedrock-system rollout status deploy/bedrock-operator --timeout=300s
-retry_until 300 pod_started_since "$restore_started"
+retry_until 180 operator_image_matches "$image_b"
+retry_until 900 pod_started_since "$restore_started"
 kubectl -n default wait --for=condition=Ready "pod/$restore_marker" --timeout=300s
 assert_no_image_pull_failures
 images_after=$(k0s_images_listing)
 test -z "$(comm -23 <(printf '%s\n' "$images_before") <(printf '%s\n' "$images_after"))"
+retry_until 300 k0s_images_dir_empty
+assert_images_pinned "$VERSION_B" "$image_b"
 kubectl -n default delete configmap,pod "$restore_marker"
 rm -rf /root/restore /var/lib/k0s/.pre-restore-*
 echo "e2e-upgrade passed"

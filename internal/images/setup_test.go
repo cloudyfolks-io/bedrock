@@ -149,6 +149,39 @@ func TestWriteStatusSkipsWhenUnchanged(t *testing.T) {
 	}
 }
 
+func TestWriteStatusIgnoresAnObsoleteImage(t *testing.T) {
+	for _, tc := range []struct {
+		name       string
+		uid        types.UID
+		generation int64
+	}{
+		{name: "new generation", uid: "original", generation: 2},
+		{name: "replacement", uid: "replacement", generation: 1},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			original := &v1alpha1.ClusterImage{
+				ObjectMeta: metav1.ObjectMeta{Name: "windows", UID: "original", Generation: 1},
+			}
+			current := original.DeepCopy()
+			current.UID = tc.uid
+			current.Generation = tc.generation
+			c := fake.NewClientBuilder().WithScheme(testScheme(t)).
+				WithObjects(current).WithStatusSubresource(current).Build()
+			result := Result{Phase: v1alpha1.ImagePhaseReady, DataSource: "previous-disk"}
+			if err := writeStatus(t.Context(), c, original, clusterImageStatus, result, testNow); err != nil {
+				t.Fatal(err)
+			}
+			var got v1alpha1.ClusterImage
+			if err := c.Get(t.Context(), client.ObjectKeyFromObject(original), &got); err != nil {
+				t.Fatal(err)
+			}
+			if got.Status.Phase != "" || got.Status.ObservedGeneration != 0 || got.Status.DataSource != "" {
+				t.Fatalf("obsolete result changed the current image status: %+v", got.Status)
+			}
+		})
+	}
+}
+
 func managerFor(t *testing.T, cfg *rest.Config) ctrl.Manager {
 	t.Helper()
 	mgr, err := ctrl.NewManager(cfg, ctrl.Options{

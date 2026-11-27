@@ -11,7 +11,7 @@ func TestContainerdName(t *testing.T) {
 		"docker.io/traefik:v3.7.13":   "docker.io/library/traefik:v3.7.13",
 		"docker.io/traefik@" + digest: "docker.io/library/traefik@" + digest,
 		"traefik:v3.7.13":             "docker.io/library/traefik:v3.7.13",
-		"docker.io/rook/ceph:v1.20.7": "docker.io/rook/ceph:v1.20.7",
+		"docker.io/rook/ceph:v1.21.0": "docker.io/rook/ceph:v1.21.0",
 		"quay.io/ceph/ceph:v20.2.4":   "quay.io/ceph/ceph:v20.2.4",
 		"localhost:5000/bedrock:dev":  "localhost:5000/bedrock:dev",
 	}

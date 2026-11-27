@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"net"
 	"net/netip"
 	"os"
@@ -19,13 +20,14 @@ import (
 	"sigs.k8s.io/yaml"
 
 	"github.com/cloudyfolks-io/bedrock/api/v1alpha1"
+	"github.com/cloudyfolks-io/bedrock/internal/cephx"
 	"github.com/cloudyfolks-io/bedrock/internal/dnsname"
 	"github.com/cloudyfolks-io/bedrock/internal/settings"
 )
 
 const (
-	defaultPodCIDR     = "10.16.0.0/16"
-	defaultServiceCIDR = "10.96.0.0/12"
+	DefaultPodCIDR     = "10.16.0.0/16"
+	DefaultServiceCIDR = "10.96.0.0/12"
 	DefaultJoinCIDR    = "100.64.0.0/16"
 
 	adoptDevicePrefix = "/dev/disk/by-id/"
@@ -69,8 +71,8 @@ func WithDefaults(cfg v1alpha1.ClusterConfig) v1alpha1.ClusterConfig {
 	out := *cfg.DeepCopy()
 	out.Spec.API.VIPMode = fallback(out.Spec.API.VIPMode, "arp")
 	out.Spec.Platform.TLSMode = fallback(out.Spec.Platform.TLSMode, "SelfSigned")
-	out.Spec.Network.Fabric.PodCIDR = fallback(out.Spec.Network.Fabric.PodCIDR, defaultPodCIDR)
-	out.Spec.Network.Fabric.ServiceCIDR = fallback(out.Spec.Network.Fabric.ServiceCIDR, defaultServiceCIDR)
+	out.Spec.Network.Fabric.PodCIDR = fallback(out.Spec.Network.Fabric.PodCIDR, DefaultPodCIDR)
+	out.Spec.Network.Fabric.ServiceCIDR = fallback(out.Spec.Network.Fabric.ServiceCIDR, DefaultServiceCIDR)
 	out.Spec.Network.Fabric.JoinCIDR = fallback(out.Spec.Network.Fabric.JoinCIDR, DefaultJoinCIDR)
 	out.Spec.Network.Fabric.EIPMode = fallback(out.Spec.Network.Fabric.EIPMode, "l2")
 	if out.Spec.Storage.Replicas == 0 {
@@ -85,7 +87,52 @@ func WithDefaults(cfg v1alpha1.ClusterConfig) v1alpha1.ClusterConfig {
 	if _, ok := out.Spec.Addons["loki"]; !ok {
 		out.Spec.Addons["loki"] = false
 	}
+	if _, ok := out.Spec.Addons["clusters"]; !ok {
+		out.Spec.Addons["clusters"] = false
+	}
+	if _, ok := out.Spec.Addons["descheduler"]; !ok {
+		out.Spec.Addons["descheduler"] = false
+	}
 	return out
+}
+
+func WithCephxCipher(cfg v1alpha1.ClusterConfig, kernel string) v1alpha1.ClusterConfig {
+	out := *cfg.DeepCopy()
+	if out.Spec.Storage.CephxCipher == "" {
+		out.Spec.Storage.CephxCipher = pickCephxCipher(out.Spec.Storage.Adopt, kernel)
+	}
+	return out
+}
+
+func pickCephxCipher(adopt *v1alpha1.AdoptSpec, kernel string) string {
+	if adopt == nil {
+		return cephx.ForKernel(kernel)
+	}
+	return adoptedCephxCipher(adopt.Cephx)
+}
+
+func adoptedCephxCipher(raw *runtime.RawExtension) string {
+	object, err := cephxObject(raw)
+	if err != nil || object == nil {
+		return cephx.Aes
+	}
+	csi, _ := object["csi"].(map[string]any)
+	allowed, _ := object["allowedCiphers"].([]any)
+	if csi["keyType"] == cephx.Aes256k || slices.Contains(allowed, any(cephx.Aes256k)) {
+		return cephx.Aes256k
+	}
+	return cephx.Aes
+}
+
+func cephxObject(raw *runtime.RawExtension) (map[string]any, error) {
+	if raw == nil {
+		return nil, nil
+	}
+	var object map[string]any
+	if err := json.Unmarshal(raw.Raw, &object); err != nil || object == nil {
+		return nil, fmt.Errorf("storage.adopt.cephx: not a JSON object")
+	}
+	return object, nil
 }
 
 func fallback(value, def string) string {
@@ -126,8 +173,14 @@ func Validate(cfg v1alpha1.ClusterConfig) error {
 			return fmt.Errorf("spec.network.fabric cidr %q: %w", cidr, err)
 		}
 	}
-	if s.Network.Fabric.PodCIDR != defaultPodCIDR || s.Network.Fabric.ServiceCIDR != defaultServiceCIDR || s.Network.Fabric.JoinCIDR != DefaultJoinCIDR {
+	if s.Network.Fabric.PodCIDR != DefaultPodCIDR || s.Network.Fabric.ServiceCIDR != DefaultServiceCIDR || s.Network.Fabric.JoinCIDR != DefaultJoinCIDR {
 		return fmt.Errorf("custom CIDRs arrive in a later release")
+	}
+	if mtu := s.Network.PodMTU; mtu != 0 && (mtu < 576 || mtu > 9000) {
+		return fmt.Errorf("spec.network.podMTU must be from 576 to 9000, got %d", mtu)
+	}
+	if err := validateManagementNetwork(s.Network); err != nil {
+		return err
 	}
 	if !slices.Contains([]string{"bgp", "l2"}, s.Network.Fabric.EIPMode) {
 		return fmt.Errorf("spec.network.fabric.eipMode must be bgp or l2")
@@ -143,8 +196,14 @@ func Validate(cfg v1alpha1.ClusterConfig) error {
 	if err := settings.ValidateProviderNetworks(s.Network.Fabric.ProviderNetworks); err != nil {
 		return fmt.Errorf("spec.network.fabric.providerNetworks: %w", err)
 	}
+	if err := validateClusterServices(cfg); err != nil {
+		return err
+	}
 	if s.Storage.Replicas < 1 {
 		return fmt.Errorf("spec.storage.replicas must be at least 1")
+	}
+	if cipher := s.Storage.CephxCipher; cipher != "" && cipher != cephx.Aes && cipher != cephx.Aes256k {
+		return fmt.Errorf("spec.storage.cephxCipher must be %s or %s", cephx.Aes, cephx.Aes256k)
 	}
 	if err := validateAdopt(s.Storage); err != nil {
 		return err
@@ -162,6 +221,61 @@ func Validate(cfg v1alpha1.ClusterConfig) error {
 	}
 	if !slices.Contains(s.Roles, v1alpha1.RoleCephOSD) {
 		return fmt.Errorf("the first node must carry the ceph-osd role")
+	}
+	return nil
+}
+
+var legInterfacePattern = regexp.MustCompile(`^[A-Za-z0-9_.-]{1,15}$`)
+
+func validateManagementNetwork(network v1alpha1.ClusterNetworkSpec) error {
+	if cidr := network.ManagementCIDR; cidr != "" {
+		if _, err := netip.ParsePrefix(cidr); err != nil {
+			return fmt.Errorf("spec.network.managementCIDR: %w", err)
+		}
+	}
+	seen := map[string]bool{}
+	for _, leg := range network.TenantLegs {
+		if !legInterfacePattern.MatchString(leg.Interface) {
+			return fmt.Errorf("spec.network.tenantLegs interface %q is not a valid interface name", leg.Interface)
+		}
+		if seen[leg.Interface] {
+			return fmt.Errorf("spec.network.tenantLegs lists %s twice", leg.Interface)
+		}
+		if leg.Interface == network.ManagementInterface || leg.Interface == vlanParent(network.ManagementInterface) {
+			return fmt.Errorf("spec.network.tenantLegs %s is the management interface or its VLAN parent", leg.Interface)
+		}
+		seen[leg.Interface] = true
+		for _, source := range leg.AllowSources {
+			prefix, err := netip.ParsePrefix(source)
+			if err != nil {
+				return fmt.Errorf("spec.network.tenantLegs %s allowSources: %w", leg.Interface, err)
+			}
+			if prefix.Bits() == 0 {
+				return fmt.Errorf("spec.network.tenantLegs %s allowSources: %s matches every address", leg.Interface, source)
+			}
+		}
+	}
+	return nil
+}
+
+func vlanParent(name string) string {
+	parent, _, _ := strings.Cut(name, ".")
+	return parent
+}
+
+func validateClusterServices(cfg v1alpha1.ClusterConfig) error {
+	values := SettingValues(cfg)
+	fields := []struct{ field, key string }{
+		{"spec.dns.upstreams", "dns.upstreams"},
+		{"spec.egress.httpProxy", "egress.http-proxy"},
+		{"spec.egress.noProxy", "egress.no-proxy"},
+		{"spec.egress.dns01Nameservers", "letsencrypt.dns01-nameservers"},
+	}
+	for _, f := range fields {
+		definition, _ := settings.Lookup(f.key)
+		if err := definition.Validate(values[f.key]); err != nil {
+			return fmt.Errorf("%s: %w", f.field, err)
+		}
 	}
 	return nil
 }
@@ -198,13 +312,23 @@ func validateAdopt(storage v1alpha1.StorageSpec) error {
 	return nil
 }
 
-func validateAdoptCephx(cephx *runtime.RawExtension) error {
-	if cephx == nil {
-		return nil
+var cephxKeyedSections = []string{"daemon", "csi", "rbdMirrorPeer"}
+
+func validateAdoptCephx(raw *runtime.RawExtension) error {
+	object, err := cephxObject(raw)
+	if err != nil || object == nil {
+		return err
 	}
-	var object map[string]any
-	if err := json.Unmarshal(cephx.Raw, &object); err != nil || object == nil {
-		return fmt.Errorf("storage.adopt.cephx: not a JSON object")
+	rotated := adoptedCephxCipher(raw) == cephx.Aes256k
+	for _, name := range cephxKeyedSections {
+		section, present := object[name]
+		if !present && !rotated {
+			continue
+		}
+		fields, _ := section.(map[string]any)
+		if _, ok := fields["keyGeneration"].(float64); !ok {
+			return fmt.Errorf("storage.adopt.cephx.%s.keyGeneration: required, Rook refuses a lower generation than the old cluster has", name)
+		}
 	}
 	return nil
 }
@@ -309,6 +433,9 @@ func ToCluster(cfg v1alpha1.ClusterConfig) v1alpha1.Cluster {
 			Registry:        v1alpha1.RegistrySpec{Mirror: cfg.Spec.Registry.Mirror},
 			Encryption:      *cfg.Spec.Encryption.DeepCopy(),
 			JoinCIDR:        cfg.Spec.Network.Fabric.JoinCIDR,
+			PodMTU:          cfg.Spec.Network.PodMTU,
+			ManagementCIDR:  cfg.Spec.Network.ManagementCIDR,
+			TenantLegs:      cfg.DeepCopy().Spec.Network.TenantLegs,
 			Storage:         v1alpha1.ClusterStorageSpec{Adopt: adoptWithoutKeyFile(cfg.Spec.Storage.Adopt)},
 		},
 	}
@@ -335,19 +462,46 @@ func ToHost(cfg v1alpha1.ClusterConfig, nodeName string) v1alpha1.Host {
 	}
 }
 
-func ToSettings(cfg v1alpha1.ClusterConfig) []v1alpha1.Setting {
-	values := map[string]string{
-		"platform.host":             cfg.Spec.Platform.Host,
-		"platform.tls-mode":         cfg.Spec.Platform.TLSMode,
-		"storage.replicas":          strconv.Itoa(int(cfg.Spec.Storage.Replicas)),
-		"storage.network":           vlanValue(cfg.Spec.Network.StorageVlan),
-		"migration.network":         vlanValue(cfg.Spec.Network.MigrationVlan),
-		"virt.emulation":            strconv.FormatBool(cfg.Spec.Virtualization.Emulation),
-		"kata.enabled":              strconv.FormatBool(cfg.Spec.Addons["kata"]),
-		"loki.enabled":              strconv.FormatBool(cfg.Spec.Addons["loki"]),
-		"network.eip-mode":          cfg.Spec.Network.Fabric.EIPMode,
-		"network.provider-networks": providerNetworksValue(cfg),
+func addonSettingValues(addons map[string]bool) map[string]string {
+	values := map[string]string{}
+	for _, def := range settings.Catalog() {
+		name, isAddon := strings.CutSuffix(def.Key, ".enabled")
+		if enabled, set := addons[name]; isAddon && set {
+			values[def.Key] = strconv.FormatBool(enabled)
+		}
 	}
+	return values
+}
+
+func SettingValues(cfg v1alpha1.ClusterConfig) map[string]string {
+	values := map[string]string{
+		"platform.host":                 cfg.Spec.Platform.Host,
+		"platform.tls-mode":             cfg.Spec.Platform.TLSMode,
+		"storage.replicas":              strconv.Itoa(int(cfg.Spec.Storage.Replicas)),
+		"storage.cephx-cipher":          fallback(cfg.Spec.Storage.CephxCipher, cephx.Aes),
+		"storage.network":               vlanValue(cfg.Spec.Network.StorageVlan),
+		"migration.network":             vlanValue(cfg.Spec.Network.MigrationVlan),
+		"virt.emulation":                strconv.FormatBool(cfg.Spec.Virtualization.Emulation),
+		"kata.enabled":                  strconv.FormatBool(cfg.Spec.Addons["kata"]),
+		"loki.enabled":                  strconv.FormatBool(cfg.Spec.Addons["loki"]),
+		"clusters.enabled":              strconv.FormatBool(cfg.Spec.Addons["clusters"]),
+		"descheduler.enabled":           strconv.FormatBool(cfg.Spec.Addons["descheduler"]),
+		"network.eip-mode":              cfg.Spec.Network.Fabric.EIPMode,
+		"network.provider-networks":     providerNetworksValue(cfg),
+		"dns.upstreams":                 strings.Join(cfg.Spec.DNS.Upstreams, " "),
+		"egress.http-proxy":             cfg.Spec.Egress.HTTPProxy,
+		"egress.no-proxy":               strings.Join(cfg.Spec.Egress.NoProxy, ","),
+		"letsencrypt.dns01-nameservers": strings.Join(cfg.Spec.Egress.DNS01Nameservers, ","),
+	}
+	if tls := cfg.Spec.Network.Fabric.OVNTLS; tls != nil {
+		values["network.ovn-tls"] = strconv.FormatBool(*tls)
+	}
+	maps.Copy(values, addonSettingValues(cfg.Spec.Addons))
+	return values
+}
+
+func ToSettings(cfg v1alpha1.ClusterConfig) []v1alpha1.Setting {
+	values := SettingValues(cfg)
 	keys := make([]string, 0, len(values))
 	for k := range values {
 		keys = append(keys, k)

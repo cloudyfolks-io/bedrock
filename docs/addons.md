@@ -1,14 +1,14 @@
 # Addons, audit and monitoring
 
 An addon is an optional part of Bedrock. An admin turns an addon on or off
-with an `Addon` object. This page describes the addons `kata` and `loki`,
+with an `Addon` object. This page describes the addons `kata`, `loki`, `clusters`, `cnpg`, `registry`, `percona-ps` and `descheduler`,
 the API server audit log, the monitoring stack and the metering series.
 
 ## Addons
 
 The `Addon` kind has no namespace. The name of the object is the name of
-the addon. Bedrock creates one `Addon` for each addon it knows: `kata` and
-`loki`.
+the addon. Bedrock creates one `Addon` for each addon it knows: `kata`,
+`loki`, `clusters`, `cnpg`, `registry`, `percona-ps` and `descheduler`.
 
 List the addons:
 
@@ -28,13 +28,13 @@ Turn an addon off:
 kubectl patch addon loki --type merge -p '{"spec":{"enabled":false}}'
 ```
 
-The Settings `kata.enabled` and `loki.enabled` set the first state of the
+The Settings `kata.enabled`, `loki.enabled`, `clusters.enabled`, `cnpg.enabled`, `registry.enabled`, `percona-ps.enabled` and `descheduler.enabled` set the first state of the
 `Addon` objects when Bedrock creates them. After that, only the `Addon`
 object counts. A change of the Setting does not change a live addon.
 Bedrock never changes `spec.enabled` by itself.
 
 Bedrock applies the addon objects in a namespace. `kata` uses
-`kube-system`. `loki` uses `monitoring`. Bedrock records the objects of
+`kube-system`. `loki` uses `monitoring`. `cnpg` uses `cnpg`. `registry` uses `bedrock-registry`. `percona-ps` uses `ps-operator`. `descheduler` uses `kube-system`. Bedrock records the objects of
 each addon in the ConfigMap `bedrock-system/bedrock-addon-<name>-inventory`.
 Do not edit this ConfigMap. Bedrock uses it to remove the objects.
 
@@ -47,6 +47,10 @@ An addon can have values. Put them in `spec.values` as flat keys.
 | `kata` | none | | |
 | `loki` | `persistence.size` | `20Gi` | A positive Kubernetes quantity. |
 | `loki` | `persistence.storage-class` | `block` | A DNS-1123 subdomain. |
+| `cnpg` | none | | |
+| `registry` | none | | |
+| `percona-ps` | none | | |
+| `descheduler` | none | | |
 
 An unknown key is an error. The condition `Ready` then shows the reason
 `InvalidValues`. Bedrock changes nothing until you fix the values.
@@ -69,7 +73,7 @@ when the operator starts, with the first state from the Settings.
 
 ### Conditions
 
-The `Addon` has the conditions `Ready` and, for `kata`, `Preflight`. The
+The `Addon` has the condition `Ready`. The addons `kata`, `registry` and `descheduler` also have `Preflight`, and `registry` has `RuntimeReady`. The
 field `status.observedGeneration` shows the last generation that Bedrock
 read.
 
@@ -93,6 +97,11 @@ read.
 | `Passed` | `True` | A workload host has `/dev/kvm`. |
 | `NoKVM` | `False` | No workload host has `/dev/kvm`. |
 | `WaitingForHosts` | `Unknown` | A workload host did not report yet. |
+| `HostNotSet` | `Unknown` | The `registry` addon waits for the Setting `registry.host`. |
+| `CNPGAddonOff` | `Unknown` | The `registry` addon waits for the addon `cnpg`. |
+| `DatabaseDisabled` | `Unknown` | The `registry` addon waits for the Setting `database.enabled`. |
+| `CertManagerNotReady` | `Unknown` | The `registry` addon waits for cert-manager. |
+| `EvictionStrategyNotLiveMigrate` | `False` | The `descheduler` addon needs the Setting `virt.eviction-strategy` set to `LiveMigrate`. |
 
 ## Kata
 
@@ -130,10 +139,250 @@ spec:
       command: ["sleep", "3600"]
 ```
 
+The RuntimeClass adds an overhead of 512Mi memory and 250m CPU to each pod.
+The quota of a project counts this overhead.
+The chart default is 320Mi.
+The values file `release/values/kata.yaml` sets the larger value through the chart value `shims.qemu.runtimeClass.overhead`.
+
+The same values file sets two options of the QEMU shim.
+The chart value `shims.qemu.dropIn` holds a Kata TOML drop-in.
+The chart puts it in the ConfigMap `kata-deploy-custom-configs`, and kata-deploy applies it to the `qemu` configuration as `50-user-overrides.toml`.
+
+| Option | Value | Reason |
+| --- | --- | --- |
+| `default_memory` | 512 | The guest starts with 512 MiB. The shipped default is 2048. |
+| `virtio_fs_extra_args` | `["--thread-pool-size=1", "--announce-submounts", "--xattr"]` | The drop-in replaces the list, so it repeats the two stock values. `--xattr` makes extended attributes work in a volume that the guest shares with the host, for example an `emptyDir`. Tools that set an attribute, such as an image builder, need this. |
+
+The Setting `container.runtime-class` has the default `kata`.
+The controller of the `Container` kind uses its value as the `runtimeClassName` of each pod.
+An empty value keeps the default.
+The value `none` sets no runtime class.
+Use `none` only on a cluster with no KVM, for example the e2e cluster.
+A customer pod then shares the kernel of the node.
+
 When you turn kata off, Bedrock first deletes the DaemonSet. The kata pods
 clean the node when they stop. This can take 10 minutes. Bedrock removes
 the RBAC objects and the RuntimeClasses only after the last kata pod ends.
 The condition `Ready` shows the reason `Pruning` during this time.
+
+## CloudNativePG
+
+The addon `cnpg` installs the CloudNativePG operator and the Barman Cloud
+plugin in the namespace `cnpg`. The managed PostgreSQL databases of the
+`Database` kind need it. The addon is off by default. The Setting
+`cnpg.enabled` sets the first state of the `Addon` object.
+
+- The chart `cloudnative-pg` version 0.29.1 installs the operator.
+- The Barman Cloud plugin v0.13.0 stores backups and write-ahead logs in
+  the object store. It needs cert-manager for its certificates. Bedrock
+  always installs cert-manager. If the CRDs of cert-manager are missing,
+  the condition `Ready` shows the reason `MissingCRD`.
+- The CRDs of both parts are part of the base install. They stay when you
+  turn the addon off, so no database is lost.
+- The release holds the seed `DatabaseVersion` objects `postgresql-16`,
+  `postgresql-17` and `postgresql-18`. The images are pinned by digest.
+
+Turn the addon on:
+
+```
+kubectl patch addon cnpg --type merge -p '{"spec":{"enabled":true}}'
+```
+
+## Registry
+
+The addon `registry` installs one shared Harbor in the namespace
+`bedrock-registry`. The kinds `Registry` and `RegistryCredential` use it.
+The addon is off by default. The Setting `registry.enabled` sets the first
+state of the `Addon` object.
+
+The addon needs four things. The `Preflight` condition names each missing
+one with a reason, and Bedrock changes nothing until all four are there:
+
+- The Setting `registry.host` has a DNS name (`HostNotSet`).
+- The addon `cnpg` is on (`CNPGAddonOff`).
+- The Setting `database.enabled` is `true` (`DatabaseDisabled`).
+- cert-manager is ready (`CertManagerNotReady`).
+
+Bedrock does not turn on `cnpg` or `database.enabled` for you.
+
+Turn the addon on:
+
+```
+kubectl patch setting registry.host --type merge -p '{"spec":{"value":"registry.example.com"}}'
+kubectl patch setting database.enabled --type merge -p '{"spec":{"value":"true"}}'
+kubectl patch addon cnpg --type merge -p '{"spec":{"enabled":true}}'
+kubectl patch addon registry --type merge -p '{"spec":{"enabled":true}}'
+```
+
+The chart `harbor` version 1.18.4 installs Harbor with the core, registry,
+jobservice, portal and exporter services, an internal Redis, no scanner and
+an external database. A controller of Bedrock makes the other objects in
+`bedrock-registry`:
+
+- The namespace. Turning the addon off keeps it, so no data is lost.
+- The Secrets that the chart reads: `harbor-admin`, `harbor-core-keys`,
+  `harbor-jobservice-keys`, `harbor-registry-keys`,
+  `harbor-registry-credentials` and `harbor-db-credentials`. Bedrock makes a
+  Secret only when it does not exist. A Secret that you made before stays as
+  it is.
+- The CloudNativePG cluster `harbor-db`, with the instances from
+  `registry.db-instances`. A daily backup goes to the bucket of
+  `database.backup.bucket` under the prefix `registry/`.
+- The object store user `bedrock-registry` and the bucket of
+  `registry.bucket` for the image data.
+- The certificate `harbor-token`, from the issuer `bedrock-selfsigned`.
+- A certificate and Traefik routes for `registry.host` and each name of
+  `registry.aliases`. Harbor makes the token address from one URL. Each alias
+  route rewrites the header `WWW-Authenticate` so that a client asks the
+  alias for its token.
+- A route for the Harbor portal only when `registry.admin-host` and
+  `registry.admin-allow-cidrs` are both set. Only the listed networks can
+  open it.
+
+The condition `RuntimeReady` shows the state of these objects.
+
+| Reason of `RuntimeReady` | Meaning |
+|---|---|
+| `Ready` | All objects are applied. |
+| `Held` | The Setting `registry.hold` is `true`. Bedrock made every object, and `harbor-core`, `harbor-jobservice` and `harbor-exporter` stay at zero replicas. |
+| `InvalidSettings` | A Setting of the registry has a wrong value. |
+| `StorePending` | A user of the object store is not ready yet. |
+| `BucketNotOwned` | The bucket exists and another identity owns it. Bedrock never changes the owner. An administrator links the bucket to the user `bedrock-registry` with `radosgw-admin bucket link`. |
+| `MissingCRD` | The kind of cert-manager, Traefik or CloudNativePG is not in the cluster. |
+| the reasons of `Preflight` | A prerequisite is missing. |
+
+| Setting | Default | Meaning |
+|---|---|---|
+| `registry.enabled` | `false` | First state of the addon. |
+| `registry.host` | empty | DNS name of the registry. |
+| `registry.aliases` | empty | Comma list of extra DNS names. |
+| `registry.admin-host` | empty | DNS name of the Harbor portal. |
+| `registry.admin-allow-cidrs` | empty | Networks that can open the portal. |
+| `registry.replicas` | `2` | Replicas of core, registry and jobservice (1 to 5). |
+| `registry.hold` | `false` | While `true`, core, jobservice and exporter stay at zero replicas. |
+| `registry.db-instances` | `2` | Instances of `harbor-db` (1 to 3). |
+| `registry.storage-class` | `block` | StorageClass of the database and Redis. |
+| `registry.bucket` | `bedrock-registry` | Bucket of the image data. |
+| `registry.http-proxy` | empty | Proxy for the pull-through caches. |
+| `registry.robot-prefix` | `robot$` | Prefix of each robot login. |
+| `registry.gc-cron` | `0 0 3 * * *` | Garbage collection schedule. |
+| `registry.proxy-caches` | empty | JSON list of pull-through caches. |
+| `registry.webhook-blocked-cidrs` | private, shared, link-local and loopback ranges | Networks that the jobservice cannot reach, so a webhook cannot call into the cluster. |
+| `database.enabled` | `false` | Turns on the database platform. |
+| `database.backup.bucket` | `bedrock-database-backups` | Bucket of the platform database backups. |
+
+## Egress proxy
+
+Some upstream services are reachable only through an HTTP proxy.
+Bedrock does not run this proxy. It points cert-manager and CDI at the proxy that you give.
+The value has the same format as `registry.http-proxy`: an `http` or `https` URL with a host.
+
+| Setting | Default | Meaning |
+|---|---|---|
+| `egress.http-proxy` | empty | Proxy URL. Empty means no proxy. |
+| `egress.no-proxy` | empty | Comma list of hosts, domains and networks that bypass the proxy. |
+| `letsencrypt.dns01-nameservers` | empty | Comma list of `host:port` servers or `https` DNS-over-HTTPS URLs for the DNS-01 self check. |
+
+With `egress.http-proxy` set, the cert-manager controller gets the variables `HTTP_PROXY`, `HTTPS_PROXY` and `NO_PROXY`.
+The CDI object gets `spec.config.importProxy` with `HTTPProxy`, `HTTPSProxy` and `noProxy`.
+Bedrock always adds the pod network, the service network, the API address, `localhost`, `127.0.0.1`, `cluster.local` and `.svc` to the no-proxy list.
+`egress.no-proxy` adds more entries, for example your own domains.
+`registry.http-proxy` stays a separate Setting.
+
+With `letsencrypt.dns01-nameservers` set, cert-manager asks only these servers for the DNS-01 self check.
+An empty value keeps the resolver of the node.
+A DNS-over-HTTPS URL goes through the proxy when `egress.http-proxy` is set.
+
+The addon `egress` applies the cert-manager Deployment with the values and shows the condition `EgressReady` on the Cluster.
+A change of a Setting restarts the cert-manager controller.
+The CDI change needs no restart of a VM.
+
+The cluster configuration of `bedrock init` has the same values.
+The first cert-manager and CDI use them.
+
+```yaml
+spec:
+  egress:
+    httpProxy: http://proxy.kube-system:10808
+    noProxy: [10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16, cluster.local, .svc]
+    dns01Nameservers: [https://one.one.one.one/dns-query]
+```
+
+Example:
+
+```
+kubectl patch setting egress.http-proxy --type merge -p '{"spec":{"value":"http://proxy.kube-system:10808"}}'
+kubectl patch setting egress.no-proxy --type merge -p '{"spec":{"value":"10.0.0.0/8,172.16.0.0/12,192.168.0.0/16,cluster.local,.svc"}}'
+kubectl patch setting letsencrypt.dns01-nameservers --type merge -p '{"spec":{"value":"https://one.one.one.one/dns-query"}}'
+```
+
+## Percona Server for MySQL
+
+The addon `percona-ps` installs the Percona Operator for MySQL in the
+namespace `ps-operator`. The managed MySQL databases of the `Database` kind
+need it. The addon is off by default. The Setting `percona-ps.enabled` sets
+the first state of the `Addon` object.
+
+- The chart `ps-operator` version 1.2.0 installs the operator. The operator
+  image is pinned by digest. The operator watches only the namespace
+  `bedrock-dbaas`.
+- The CRDs are part of the base install. They stay when you turn the addon
+  off, so no database is lost.
+- The release holds the seed `DatabaseVersion` objects `mysql-8.4` and
+  `mysql-9.7`. The server image and the companion images `backup`,
+  `haproxy`, `init` and `toolkit` are pinned by digest.
+- Valkey needs no addon. It works when the Setting `database.enabled` is
+  true.
+
+Turn the addon on:
+
+```
+kubectl patch addon percona-ps --type merge -p '{"spec":{"enabled":true}}'
+```
+
+## Descheduler
+
+The addon `descheduler` moves VMs from a busy host to a quiet host. It installs
+the Kubernetes descheduler in the namespace `kube-system`. The addon is off by
+default. The Setting `descheduler.enabled` sets the first state of the `Addon`
+object. The `ClusterConfig` of an adopted cluster turns it on with
+`spec.addons.descheduler: true`.
+
+- The chart `descheduler` version 0.35.1 installs a CronJob. The CronJob runs
+  every 15 minutes on a managed host.
+- The policy evicts only the pods that have the label `kubevirt.io=virt-launcher`.
+  It does not evict a pod with local storage or a system critical pod. It
+  evicts a pod only when another host can take it.
+- The plugin `LowNodeUtilization` looks at memory only. A host is quiet when it
+  uses less than 60 percent of its memory. A host is busy when it uses more than
+  75 percent.
+- The policy evicts at most one pod for each host in each run.
+
+An eviction of a `virt-launcher` pod is a live migration only when the
+KubeVirt eviction strategy is `LiveMigrate`. With `LiveMigrateIfPossible`, the
+eviction shuts down a VM that cannot migrate. With `None`, it shuts down every
+VM. So the addon needs the Setting `virt.eviction-strategy` set to
+`LiveMigrate`. The default of the Setting is `LiveMigrateIfPossible`. See Node
+drains in `compute.md`.
+
+When the Setting has another value, Bedrock does not deploy the CronJob. It
+removes the CronJob if it exists. The condition `Ready` is `False` with the
+reason `PreflightFailed`, and the message tells you to set
+`virt.eviction-strategy` to `LiveMigrate`. The condition `Preflight` shows the
+reason `EvictionStrategyNotLiveMigrate`. Bedrock deploys the CronJob again when
+you set the Setting. A VM that cannot migrate stays on its host.
+
+Turn the addon on:
+
+```
+kubectl patch addon descheduler --type merge -p '{"spec":{"enabled":true}}'
+```
+
+Show the last runs:
+
+```
+kubectl -n kube-system get jobs -l app.kubernetes.io/name=descheduler
+```
 
 ## Loki
 
@@ -150,10 +399,17 @@ Alloy runs on every node. It sends four sources to Loki:
 
 | Source | Labels | Example query |
 |---|---|---|
-| Container logs | `log_source="container"`, `namespace`, `pod`, `container` | `{namespace="kube-system"}` |
+| Container logs | `log_source="container"`, `namespace`, `pod`, `container`, and for project namespaces `tenant`, `project` | `{tenant="acme", project="web"}` |
 | Journald | `job="journald"`, `unit`, `node` | `{job="journald", unit="k0scontroller.service"}` |
-| VM serial consoles | `log_source="vm-serial-console"`, `vm` | `{log_source="vm-serial-console", vm="web-1"}` |
+| VM serial consoles | `log_source="vm-serial-console"`, `vm`, and for project namespaces `tenant`, `project` | `{tenant="acme", project="web", vm="web-1", log_source="vm-serial-console"}` |
 | API server audit | `job="kube-apiserver-audit"`, `node` | `{job="kube-apiserver-audit"} \|= "objectRef"` |
+
+Alloy copies the namespace labels `bedrock.cloudyfolks.io/tenant` and
+`bedrock.cloudyfolks.io/project` to the stream labels `tenant` and
+`project`. Only the operator can set these labels on a namespace. A
+namespace that is not a project has neither label, so no query with
+`tenant` and `project` reaches the logs of `kube-system`, the journal or the
+audit log.
 
 Serial console logs need the flag `logSerialConsole` on the VM instance.
 The compute controller sets it.
@@ -167,6 +423,17 @@ Neither Loki nor Alloy sends usage data outside the cluster.
 The Setting `loki.retention-days` sets how long Loki keeps logs. The
 default is `14`. A change of the Setting rolls the Loki pod.
 
+Loki has no address outside the cluster. A platform service reads it
+through the API service proxy, as the section Metering shows.
+
+When Loki is on, Prometheus scrapes it through the ServiceMonitor `loki`.
+The PrometheusRule `loki` holds the alert `LokiDiscardsLogs` with the
+severity `warning`. It fires when `loki_discarded_samples_total` rises in 10
+minutes. Loki drops lines when a stream is over a limit, and without this
+alert the loss is silent. The label `reason` names the limit. The addon
+applies these two objects with the others. When the monitoring CRDs are
+missing, the condition `Ready` shows `MissingCRD`.
+
 When you turn Loki off, Bedrock keeps the volume claim `storage-loki-0`.
 The logs stay. To delete the logs, delete the claim:
 
@@ -176,6 +443,35 @@ kubectl -n monitoring delete pvc storage-loki-0
 
 When Loki is on, the Grafana of the monitoring stack gets the data source
 `Loki` from the ConfigMap `loki-datasource`.
+
+## Clusters
+
+The addon `clusters` runs the k0smotron operator, version `v2.1.0`.
+k0smotron makes the control plane of a `KubernetesCluster` as a pod.
+The addon is off by default. The installer for a region turns it on.
+
+The operator runs in the namespace `k0smotron`. Its webhooks use a
+certificate of cert-manager, which Bedrock always installs.
+
+The CustomResourceDefinitions of k0smotron are part of the CRD group of
+the release, not of the addon. They stay when you turn the addon off, so
+no cluster object is lost. Without the addon, no operator reads them.
+A `KubernetesCluster` then shows the reason `AddonDisabled`.
+
+The operator account `system:serviceaccount:k0smotron:k0smotron-controller-manager`
+may make StatefulSets with network annotations. A tenant user may not.
+The control plane pod of a cluster has a fixed address, and the annotations
+carry it.
+
+Two Settings belong to the addon:
+
+| Setting | Default | Meaning |
+|---|---|---|
+| `clusters.enabled` | `false` | First state of the `Addon` object. |
+| `clusters.versions` | `v1.36.3+k0s.1` | Allowed k0s versions, separated by spaces or new lines. The value `any` allows every version of the form `v<major>.<minor>.<patch>+k0s.<n>`. |
+
+The k0s image of the default version is in the offline bundle. Another
+version needs the registry mirror.
 
 ## Audit
 
@@ -246,6 +542,26 @@ kubectl -n monitoring port-forward svc/kube-prometheus-stack-grafana 3000:80
 
 Then open `http://127.0.0.1:3000` and sign in as `admin`.
 
+### Who can read Prometheus and Loki
+
+The NetworkPolicy `monitoring/bedrock-metrics-readers` selects the pods with
+the label `app.kubernetes.io/name` set to `prometheus` or `loki`. It
+allows ingress from these sources only:
+
+- Pods in the namespaces `monitoring` and `bedrock-system`. Grafana,
+  Alertmanager, the Prometheus operator, Alloy and the Bedrock proxy use
+  this path.
+- The join subnet `100.64.0.0/16`. The API server and the kubelet reach a
+  pod from the address of their node in this subnet. The API service proxy
+  and the readiness probe of Prometheus use this path. The policies of
+  `bedrock-authn` and `bedrock-proxy` use the same range.
+
+Egress stays open. A pod of a project cannot connect to Prometheus or Loki,
+because a project namespace is in neither source. Loki has no
+authentication, and the series name every tenant, so this policy is the
+only access control for both. When Loki is off, the second name selects no
+pod.
+
 Two dashboards come with Bedrock:
 
 - `Bedrock / Virtual machines` (`bedrock-vms`): VM state, CPU, memory,
@@ -270,13 +586,32 @@ sends all alerts to the receiver `null`. The alerts `Watchdog` and
 `InfoInhibitor` always go to `null`. A `critical` alert mutes a `warning`
 alert with the same `alertname` and `namespace`.
 
+### Alert routing by severity and the heartbeat
+
+Three more Settings change the routing. Each takes an `http` or `https` URL.
+
+| Setting | Effect |
+|---|---|
+| `alertmanager.critical-webhook-url` | Alerts with `severity="critical"` go to this URL. |
+| `alertmanager.warning-webhook-url` | Alerts with `severity="warning"` go to this URL. |
+| `alertmanager.heartbeat-url` | Alertmanager posts the always-firing alert `Watchdog` to this URL every minute. |
+
+When a severity Setting is empty, those alerts go to `alertmanager.webhook-url`.
+When all Settings are empty, all alerts go to the receiver `null`.
+
+Use the heartbeat URL with a dead-man switch service, for example a
+healthchecks.io ping URL. The service alerts you when the pings stop. Then you
+know that Prometheus, Alertmanager or the network to the service is down.
+Without a heartbeat, `Watchdog` goes to `null`. `InfoInhibitor` always goes to
+`null`. An invalid optional URL is ignored.
+
 A webhook URL can hold a token. Bedrock puts it in a Secret, but the
 Setting stays readable for everyone who can read Settings. Do not put
 secrets in the Setting when other people can read it.
 
 ## Metering
 
-Bedrock records seven series for each project. Each series has the labels
+Bedrock records ten series for each project. Each series has the labels
 `tenant` and `project`. The rules join every source series with the
 labels of the project namespaces. They never match a namespace name.
 
@@ -289,13 +624,119 @@ labels of the project namespaces. They never match a namespace name.
 | `bedrock:project_vm_cpu_usage_cores:rate5m` | Used CPU cores, 5 minute rate | `kubevirt_vmi_cpu_usage_seconds_total` |
 | `bedrock:project_vm_network_receive_bytes:rate5m` | Received bytes per second, 5 minute rate | `kubevirt_vmi_network_receive_bytes_total` |
 | `bedrock:project_vm_network_transmit_bytes:rate5m` | Sent bytes per second, 5 minute rate | `kubevirt_vmi_network_transmit_bytes_total` |
+| `bedrock:project_vm_network_receive_bytes:increase1h` | Received bytes in the last hour, summed after the increase of each VM series | `kubevirt_vmi_network_receive_bytes_total` |
+| `bedrock:project_vm_network_transmit_bytes:increase1h` | Sent bytes in the last hour, summed after the increase of each VM series | `kubevirt_vmi_network_transmit_bytes_total` |
+| `bedrock:project_pod_network_transmit_bytes:increase1h` | Bytes that all pods of the project sent in the last hour, summed after the increase of each pod interface | `kube_ovn_interface_rx_bytes` |
+| `bedrock:project_pod_network_receive_bytes:increase1h` | Bytes that all pods of the project received in the last hour, summed after the increase of each pod interface | `kube_ovn_interface_tx_bytes` |
 
-Prometheus does not have an address outside the cluster. A client inside
-the cluster reads the series through the federation endpoint:
+### Labels
+
+Each series has the labels `tenant` and `project`. They come from the
+namespace labels `bedrock.cloudyfolks.io/tenant` and
+`bedrock.cloudyfolks.io/project`. Only the operator can set these labels.
+The name of the namespace is `<tenant>-<project>`. A namespace with no
+`project` label has no series. Series also exist for platform projects, like
+for all other projects. The consumer must drop the pairs that it does not
+know.
+
+Loki streams of project namespaces have the same two labels, as the
+section Loki shows. A reader always selects `{tenant="<t>", project="<p>"}`.
+
+### Hourly queries
+
+A reader runs these queries as instant queries, one for each closed hour.
+The parameter `time` is the end of the hour.
+Run the query at least 2 minutes after the end of the hour. The last
+rule sample of the hour is written a short time after its timestamp, and
+an earlier query can miss it.
+
+| Unit | Query |
+|---|---|
+| CPU-hours | `sum_over_time(bedrock:project_vm_vcpu:sum[1h]) / 60` |
+| Memory GB-hours | `sum_over_time(bedrock:project_vm_memory_bytes:sum[1h]) / 60 / 1073741824` |
+| Network GB, in | `bedrock:project_vm_network_receive_bytes:increase1h / 1073741824` |
+| Network GB, out | `bedrock:project_vm_network_transmit_bytes:increase1h / 1073741824` |
+| Pod network GB, out | `bedrock:project_pod_network_transmit_bytes:increase1h / 1073741824` |
+| Pod network GB, in | `bedrock:project_pod_network_receive_bytes:increase1h / 1073741824` |
+
+The series `bedrock:project_pod_network_transmit_bytes:increase1h` comes from the
+Fabric pinger. The pinger exports the counters of every OVS port with the labels
+`pod_name` and `pod_namespace`, and Fabric v1.2.1 has no other per-pod or per-port
+byte counter. The ServiceMonitor `bedrock-fabric-pinger` scrapes it. OVS counts
+from the side of the switch, so the bytes that a pod sends are `rx_bytes` of its port
+and the bytes that a pod receives are `tx_bytes` of its port. The series
+`bedrock:project_pod_network_receive_bytes:increase1h` has the same labels and the
+same limits as the egress series.
+The series covers VMs and containers, and counts the virt-launcher pod of a VM like any other pod. A VM is a launcher pod, so the VM series and
+this series count the same VM traffic: use one of them for a VM, never the sum.
+A pod that was deleted inside the hour loses the last part of its increase.
+The series counts all bytes that leave the pod interface, inside the VPC and to the
+internet. No Fabric v1.2.1 metric separates the bytes that leave through the gateway,
+the SNAT rule or an elastic IP. To bill internet egress only, Fabric must export a
+byte counter of the external gateway port or of the NAT rules, per project. Until then
+the series is an upper bound of the egress.
+
+The rule interval is 1 minute. This value is part of the contract. The
+vCPU and memory series have one sample each minute while a VM runs, and no
+sample while no VM runs. The division by 60 turns the samples into hours,
+so a VM that runs 6 minutes of an hour counts 6 minutes. Do not use
+`avg_over_time` for these two units: it counts a full hour for a VM that
+runs 6 minutes.
+
+The network series take the increase of each VM series first and add the
+results second. A VM that ends in the middle of the hour keeps its bytes,
+and a live migration counts the bytes of both series. The error is up to
+one and a half scrape intervals of traffic for each series and hour. The test
+`TestMeteringQueriesPassPromtool` runs these queries with `promtool`.
+
+### Read path
+
+Prometheus and Loki have no address outside the cluster. A service of the
+platform reads them through the API service proxy:
 
 ```
-http://kube-prometheus-stack-prometheus.monitoring.svc:9090/federate?match[]={__name__=~"bedrock:project_.*"}
+/api/v1/namespaces/monitoring/services/kube-prometheus-stack-prometheus:9090/proxy/api/v1/query
+/api/v1/namespaces/monitoring/services/loki:3100/proxy/loki/api/v1/query_range
 ```
+
+The names `kube-prometheus-stack-prometheus:9090` and `loki:3100` are part
+of the contract. The reader needs the verb `get` on `services/proxy` for
+these two names. Bedrock does not ship this role. The IaC of the consumer
+writes it:
+
+```
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: metering-reader
+rules:
+  - apiGroups: [""]
+    resources: [services/proxy]
+    verbs: [get]
+    resourceNames: [kube-prometheus-stack-prometheus:9090, loki:3100]
+```
+
+Bind the role with a RoleBinding in the namespace `monitoring`. This role
+reads the series and the logs of every tenant. Give it to platform
+services only.
+
+The NetworkPolicy of the section "Who can read Prometheus and Loki" keeps
+the pods of the projects away from both services. The API service proxy
+still works.
+
+### Gaps
+
+Prometheus keeps series for 15 days, so a reader can fill a missed hour
+for 15 days. The rules run each minute while Prometheus runs. When
+Prometheus is down for part of an hour, the CPU-hours and the memory
+GB-hours lose the minutes of the outage, and no more. The counters keep
+the traffic of the outage, so the network total of the hour stays complete
+when Prometheus runs at the end of the hour. When Prometheus is down at the
+end of the hour, the query answers with a sample of the last 5 minutes or
+with no value. The reader treats a missing value as a gap.
+
+Loki keeps logs for the number of days in the Setting
+`loki.retention-days`.
 
 ## Troubleshooting
 

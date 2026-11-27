@@ -43,6 +43,26 @@ func VpcExternalSubnets(u *unstructured.Unstructured) []string {
 	return list(u, "status", "extraExternalSubnets")
 }
 
+func VpcSpecExternalSubnets(u *unstructured.Unstructured) []string {
+	return list(u, "spec", "extraExternalSubnets")
+}
+
+func VpcDefaultNextHop(u *unstructured.Unstructured) string {
+	routes, _, _ := unstructured.NestedSlice(u.Object, "spec", "staticRoutes")
+	for _, item := range routes {
+		route, ok := item.(map[string]any)
+		if ok && route["cidr"] == "0.0.0.0/0" {
+			hop, _ := route["nextHopIP"].(string)
+			return hop
+		}
+	}
+	return ""
+}
+
+func VpcStatusPeerings(u *unstructured.Unstructured) []string {
+	return list(u, "status", "vpcPeerings")
+}
+
 func VpcSubnets(u *unstructured.Unstructured) []string {
 	return list(u, "status", "subnets")
 }
@@ -63,6 +83,10 @@ func FipIPName(u *unstructured.Unstructured) string {
 	return text(u, "spec", "ipName")
 }
 
+func SnatRuleReady(u *unstructured.Unstructured) bool {
+	return flag(u, "status", "ready")
+}
+
 func RouterLBRuleService(u *unstructured.Unstructured) string {
 	return text(u, "status", "service")
 }
@@ -81,7 +105,15 @@ func SubnetErrorMessage(u *unstructured.Unstructured) string {
 }
 
 func SubnetUsedAddresses(u *unstructured.Unstructured) int64 {
-	value, found, _ := unstructured.NestedFieldNoCopy(u.Object, "status", "v4usingIPs")
+	return statusNumber(u, "v4usingIPs")
+}
+
+func SubnetAvailableAddresses(u *unstructured.Unstructured) int64 {
+	return statusNumber(u, "v4availableIPs")
+}
+
+func statusNumber(u *unstructured.Unstructured, field string) int64 {
+	value, found, _ := unstructured.NestedFieldNoCopy(u.Object, "status", field)
 	if !found {
 		return 0
 	}

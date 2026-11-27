@@ -2,20 +2,34 @@ package network
 
 import (
 	"slices"
+	"strconv"
 	"strings"
 )
 
-const providerAnnotationDomain = ".cloudyfolks.io/"
+const (
+	providerAnnotationDomain = ".cloudyfolks.io/"
+	addressAnnotation        = "ip_address"
+	poolAnnotation           = "ip_pool"
+)
 
 type NIC struct {
-	Namespace      string
-	Subnet         string
-	MAC            string
-	SecurityGroups []string
+	Class            string
+	ManagementRoutes []PodRoute
+	Namespace        string
+	Subnet           string
+	MAC              string
+	Address          string
+	Addresses        []string
+	SecurityGroups   []string
+	PortSecurityOff  bool
 }
 
 func nicPrefix(nic NIC) string {
 	return SubnetProvider(nic.Namespace, nic.Subnet) + providerAnnotationDomain
+}
+
+func IsAddressAnnotation(key string) bool {
+	return strings.HasSuffix(key, providerAnnotationDomain+addressAnnotation)
 }
 
 func securityGroupNames(nic NIC) string {
@@ -30,12 +44,22 @@ func securityGroupNames(nic NIC) string {
 	return strings.Join(names, ",")
 }
 
+func portSecurityValue(nic NIC) string {
+	return strconv.FormatBool(!nic.PortSecurityOff)
+}
+
 func nicAnnotations(index int, nic NIC) map[string]string {
 	prefix := nicPrefix(nic)
-	annotations := map[string]string{prefix + "port_security": "true"}
+	annotations := map[string]string{prefix + "port_security": portSecurityValue(nic)}
 	annotations[prefix+"security_groups"] = securityGroupNames(nic)
 	if nic.MAC != "" {
 		annotations[prefix+"mac_address"] = nic.MAC
+	}
+	if nic.Address != "" {
+		annotations[prefix+addressAnnotation] = nic.Address
+	}
+	if len(nic.Addresses) > 0 {
+		annotations[prefix+poolAnnotation] = strings.Join(nic.Addresses, ",")
 	}
 	if index > 0 {
 		annotations[prefix+"default_route"] = "false"

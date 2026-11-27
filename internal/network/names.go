@@ -17,17 +17,21 @@ const (
 	LabelManaged             = "network.bedrock.cloudyfolks.io/managed"
 	LabelComponent           = "network.bedrock.cloudyfolks.io/component"
 	ComponentUnderlay        = "underlay"
+	LabelUsability           = "usability"
 	AnnotationOwnerNamespace = "bedrock.cloudyfolks.io/owner-namespace"
 	AnnotationOwnerName      = "bedrock.cloudyfolks.io/owner-name"
 	AnnotationOwnerUID       = "bedrock.cloudyfolks.io/owner-uid"
 	AnnotationVrfID          = "network.bedrock.cloudyfolks.io/vrf-id"
 	ConditionExternalReady   = "ExternalReady"
+	ConditionRangePolicy     = "RangePolicy"
+	ConditionVRFPolicy       = "VRFPolicy"
 
 	labelValueMax       = 63
 	hashLength          = 12
 	listenerRuleMax     = 59
 	securityGroupPrefix = "sg.bedrock.cloudyfolks.io/"
 	providerPrefix      = "provider-"
+	vpcLetterPrefix     = "v-"
 )
 
 func shorten(key, identity string, max int) string {
@@ -57,11 +61,26 @@ func FabricName(namespace, name string) string {
 }
 
 func VpcName(network string) string {
+	if network != "" && network[0] >= '0' && network[0] <= '9' {
+		return vpcLetterPrefix + network
+	}
 	return network
 }
 
 func ExternalSubnetName(providerNetwork string) string {
 	return providerPrefix + providerNetwork
+}
+
+func LBSubnetName(network string) string {
+	name := network + "-lb"
+	if len(name) <= labelValueMax {
+		return name
+	}
+	return shorten(name, network+"/lb", labelValueMax)
+}
+
+func InternalVipName(namespace, loadBalancer string) string {
+	return shorten(namespace+"-"+loadBalancer+"-vip", strings.Join([]string{namespace, loadBalancer, "vip"}, "/"), labelValueMax)
 }
 
 func SubnetProvider(namespace, subnet string) string {
@@ -91,6 +110,10 @@ func ListenerRuleName(namespace, loadBalancer string, port int32, protocol strin
 
 func DNSZoneName(namespace, zone, network string) string {
 	return shorten(namespace+"-"+zone+"-"+network, strings.Join([]string{namespace, zone, network}, "/"), labelValueMax)
+}
+
+func SnatRuleName(network, scope string) string {
+	return shorten(network+"-igw", network+"/"+scope, labelValueMax)
 }
 
 func ObjectLabels(kind, name, tenant, project string) map[string]string {

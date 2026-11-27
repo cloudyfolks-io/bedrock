@@ -56,6 +56,17 @@ jsonpath_not_empty() {
   [ -n "$(jsonpath_of "$@")" ]
 }
 
+apply_settings() {
+  local pair
+  for pair in "$@"; do
+    jq -nc --arg name "${pair%%=*}" --arg value "${pair#*=}" '{apiVersion: "bedrock.cloudyfolks.io/v1alpha1", kind: "Setting", metadata: {name: $name}, spec: {value: $value}}' | kubectl apply -f -
+  done
+}
+
+lab_sizing_settings=(storage.osd-memory=2Gi storage.osd-memory-target=1536Mi storage.osd-cpu=1 storage.mon-memory=1Gi storage.mgr-memory=512Mi storage.mds-memory=512Mi storage.rgw-memory=512Mi)
+lab_kubelet_flags=(--kubelet-setting=kubelet.eviction-memory-available=256Mi --kubelet-setting=kubelet.system-reserved-memory=512Mi --kubelet-setting=kubelet.kube-reserved-memory=1Gi)
+single_vm_sizing_settings=(storage.osd-memory=3Gi storage.osd-memory-target=2Gi storage.osd-cpu=1 storage.mon-memory=1Gi storage.mgr-memory=512Mi storage.mds-memory=1Gi storage.rgw-memory=1Gi)
+
 wait_jsonpath() {
   local timeout=$1 want=$2
   shift 2
@@ -78,27 +89,29 @@ wait_gone() {
   local timeout=$1
   shift
   retry_until "$timeout" kubectl_absent "$@" || {
-    echo "still present: kubectl $*" >&2
+    printf 'Could not verify absence with kubectl get %s\n' "$*" >&2
     return 1
   }
 }
 
 list_empty() {
-  [ -z "$(kubectl "$@" -o name 2>/dev/null)" ]
+  local names
+  names=$(kubectl "$@" -o name 2>/dev/null) || return 1
+  [ -z "$names" ]
 }
 
 wait_empty() {
   local timeout=$1
   shift
   retry_until "$timeout" list_empty "$@" || {
-    echo "objects remain: kubectl $*" >&2
+    printf 'Could not verify an empty result with kubectl %s\n' "$*" >&2
     kubectl "$@" -o name >&2 || true
     return 1
   }
 }
 
 kubectl_absent() {
-  ! kubectl get "$@" >/dev/null 2>&1
+  list_empty get "$@" --ignore-not-found
 }
 
 condition_status() {
@@ -177,6 +190,10 @@ as_user() {
   local user=$1
   shift
   kubectl --as="bedrock:$user" "$@"
+}
+
+guest_console_log() {
+  kubectl -n "$NS" logs -l "vm.kubevirt.io/name=$1" -c guest-console-log --tail=-1
 }
 
 state_dir() {
@@ -342,8 +359,8 @@ underlay_is_ready() {
 
 provider_underlay_up() {
   underlay_remove
-  if ip link show bdrpub0 >/dev/null 2>&1 || ip netns list | grep -qw bdrext; then
-    echo "bdrpub0 or bdrext exists and this run did not create it" >&2
+  if ip link show bdrpub0 >/dev/null 2>&1 || ip link show bdrsvc0 >/dev/null 2>&1 || ip netns list | grep -qw bdrext; then
+    echo "bdrpub0, bdrsvc0 or bdrext exists and this run did not create it" >&2
     return 1
   fi
   ip netns add bdrext
@@ -355,6 +372,11 @@ provider_underlay_up() {
   ip -n bdrext link set lo up
   ip -n bdrext link set bdrpub0p up
   ip -n bdrext addr add 192.0.2.250/24 dev bdrpub0p
+  ip link add bdrsvc0 type veth peer name bdrsvc0p
+  ip link set bdrsvc0 up
+  ip link set bdrsvc0p netns bdrext
+  ip -n bdrext link set bdrsvc0p up
+  ip -n bdrext addr add 203.0.112.250/22 dev bdrsvc0p
   underlay_is_ready
 }
 
@@ -365,4 +387,25 @@ e2e_cleanup() {
 
 provider_network_entry() {
   echo "{name: $1, interface: bdrpub0, cidr: 192.0.2.0/24, gateway: 192.0.2.1}"
+}
+
+services_network_entry() {
+  echo "{name: services, interface: bdrsvc0, cidr: 203.0.112.0/22, gateway: 203.0.112.1, excludeIPs: [\"203.0.115.240..203.0.115.254\"], role: services}"
+}
+
+docs_restore_script() {
+  awk -v intro="$1" '
+    /^## / { in_section = ($0 == "## Etcd snapshots"); armed = 0; next }
+    in_section && index($0, intro) == 1 { armed = 1; next }
+    armed && $0 == "```sh" { inside = 1; next }
+    inside && $0 == "```" { exit }
+    inside { print }
+  ' "$2"
+}
+
+docs_restore_script_valid() {
+  head -n 1 "$1" | grep -Eq "^SNAPSHOT=[^ ]+ sh -eu <<'EOF'\$" &&
+    tail -n 1 "$1" | grep -qx EOF &&
+    grep -q '^k0s restore ' "$1" &&
+    grep -q '^  for FILE in /var/lib/bedrock/images/\*/\*/\*.tar; do$' "$1"
 }

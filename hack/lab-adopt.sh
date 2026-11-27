@@ -4,7 +4,7 @@ set -euo pipefail
 prefix=adoptlab
 ids=(1 2 3)
 letters=(a b)
-cpus=4
+cpus=8
 memory=14
 root_gb=100
 osd_gb=20
@@ -16,13 +16,15 @@ registry_port=${LAB_REGISTRY_PORT:-5002}
 registry_name=$prefix-registry
 min_free_gb=${LAB_MIN_FREE_GB:-25}
 min_mem_gb=${LAB_MIN_MEM_GB:-46}
-k0s_version=v1.36.3+k0s.0
+k0s_version=v1.36.3+k0s.1
 rook_chart_version=v1.20.6
 rook_chart_repo=https://charts.rook.io/release
 s3_access_key=LABACCESSKEY0000001
 s3_secret_key=LABSECRETKEY00000000000000000000000001
 remote_key_file=/root/adopt-keys.yaml
 remote_config_file=/root/adopt.yaml
+vm_env=(S3_ACCESS="$s3_access_key" S3_SECRET="$s3_secret_key")
+bundle_make_args=()
 vm_path=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 base_images=(golang:1.27 gcr.io/distroless/static:nonroot registry:3 node:24-bookworm-slim)
 
@@ -30,15 +32,16 @@ repo=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 arch=$(uname -m | sed 's/x86_64/amd64/;s/aarch64/arm64/')
 lab_dir=$repo/dist/lab
 state_file=$lab_dir/state.env
-bundle=$repo/dist/bedrock-dev-bundle-$arch.tar.zst
-bedrock_bin=$repo/dist/bedrock-dev-linux-$arch
+release_version=${LAB_RELEASE_VERSION:-dev}
+bundle=$repo/dist/bedrock-$release_version-bundle-$arch.tar.zst
+bedrock_bin=$repo/dist/bedrock-$release_version-linux-$arch
 k0s_source=$repo/dist/cache/k0s/$k0s_version/$arch
 
-source "$repo/hack/e2e/lib.sh"
+source "$repo/hack/lab/lib.sh"
 
 usage() {
   cat <<USAGE
-usage: hack/lab-adopt.sh <stage>
+usage: hack/lab-adopt.sh <stage> [checkpoint]
 
 stages, in order:
   up      build the bundle, start three lima VMs, check the network and the disks
@@ -47,110 +50,23 @@ stages, in order:
   stop    set noout, stop Rook, copy /var/lib/rook, run k0s reset
   adopt   run bedrock init and bedrock join, wait for StorageAdopted
   check   run every assertion, print PASS or FAIL for each
-  snapshot  stop the VMs, snapshot every disk, start the VMs; run it after stop
-  rewind    restore the snapshot of every disk and start the VMs again
+  snapshot  stop the VMs, snapshot every disk and start the VMs
+  rewind    restore every disk from the checkpoint and start the VMs
+  check-legacy  read the legacy FSID, RBD images, CephFS file and S3 objects
   down    remove the lab VMs, their disks and the lab secrets
   all     up, old, export, stop, adopt and check; the VMs stay, run down after
 
+Use before-stop after export to save the legacy cluster for the rollback check.
+Use after-stop after stop to save the cluster for another adoption attempt.
+Snapshot and rewind use after-stop by default.
+
 The lab needs a Linux host with KVM, about 46 GiB of free RAM and no running gate.
+Set LAB_RELEASE_VERSION to use the existing bundle and binary in dist/.
+Set LAB_OVN_TLS=true to use TLS for both OVN databases.
 USAGE
 }
 
-log() {
-  printf '== %s\n' "$*"
-}
-
-vm_name() {
-  echo "$prefix-$1"
-}
-
-node_name() {
-  echo "lima-$prefix-$1"
-}
-
-node_ip() {
-  local name=IP_$1
-  echo "${!name}"
-}
-
-disk_name() {
-  echo "$prefix-$1-$2"
-}
-
-disk_path() {
-  echo "/dev/disk/by-id/virtio-$(disk_name "$1" "$2")"
-}
-
-node_devices() {
-  local id=$1 letter paths=()
-  for letter in "${letters[@]}"; do
-    paths+=("$(disk_path "$id" "$letter")")
-  done
-  echo "${paths[*]}"
-}
-
-qemu_variable() {
-  echo "QEMU_SYSTEM_$(uname -m | tr '[:lower:]' '[:upper:]')"
-}
-
-retry() {
-  local attempts=$1 i code=1
-  shift
-  for i in $(seq 1 "$attempts"); do
-    "$@" && return 0
-    code=$?
-    sleep "$((i * 2))"
-  done
-  return "$code"
-}
-
-state_set() {
-  local key=$1 value=$2 tmp
-  touch "$state_file"
-  tmp=$(mktemp "$lab_dir/.state.XXXXXX")
-  grep -v "^$key=" "$state_file" >"$tmp" || true
-  printf '%s=%q\n' "$key" "$value" >>"$tmp"
-  mv "$tmp" "$state_file"
-}
-
-state_load() {
-  if [ -f "$state_file" ]; then
-    source /dev/stdin <"$state_file"
-  fi
-}
-
-state_capture() {
-  local line key
-  while IFS= read -r line; do
-    case "$line" in
-    STATE:*)
-      key=${line#STATE:}
-      if [ -z "${key#*=}" ]; then
-        echo "empty value for ${key%%=*}" >&2
-        return 1
-      fi
-      state_set "${key%%=*}" "${key#*=}"
-      ;;
-    esac
-  done
-}
-
-require_state() {
-  local name
-  for name in "$@"; do
-    if [ -z "${!name:-}" ]; then
-      echo "$name is not recorded, run the earlier stages first" >&2
-      return 1
-    fi
-  done
-}
-
-remote_prelude() {
-  cat <<PRELUDE
-set -euo pipefail
-export KUBECONFIG=/var/lib/k0s/pki/admin.conf
-. "$repo/hack/e2e/lib.sh"
-PRELUDE
+remote_functions() {
   cat <<'FUNCTIONS'
 rook_conf=--conf=/var/lib/rook/rook-ceph/rook-ceph.config
 op_exec() { kubectl -n rook-ceph exec deploy/rook-ceph-operator -- "$@"; }
@@ -166,6 +82,9 @@ osd_map() { ceph_op osd tree -f json | jq -r '. as $t | [$t.nodes[] | select(.ty
 crush_hosts() { ceph_op osd tree -f json | jq -r '[.nodes[] | select(.type == "host") | .name] | sort | join(",")'; }
 pool_names() { ceph_op osd pool ls -f json | jq -r 'sort | join(",")'; }
 pool_sizes() { ceph_op osd pool ls detail -f json | jq -r '[.[] | "\(.pool_name):\(.size)"] | sort | join(",")'; }
+osd_keys_sha() { ceph_op auth ls -f json | jq -r '.auth_dump[] | select(.entity | startswith("osd.")) | "\(.entity) \(.key)"' | sort | sha_of; }
+cephx_old_spec() { kubectl -n rook-ceph get cephcluster rook-ceph -o json | jq -c '.spec.security.cephx | {daemonGeneration: .daemon.keyGeneration, csiGeneration: .csi.keyGeneration, csiKeep: .csi.keepPriorKeyCountMax}'; }
+cephx_generations() { kubectl -n rook-ceph get cephcluster rook-ceph -o json | jq -c '.status.cephx | map_values(.keyGeneration)'; }
 health_ok() { ceph_op status -f json | jq -e '.health.status == "HEALTH_OK"' >/dev/null; }
 diagnose() { kubectl get pods -A -o wide || true; ceph_op status || true; }
 phase_ready() {
@@ -214,291 +133,18 @@ fs.shutdown()
 print(hashlib.sha256(data).hexdigest())
 PY
 }
+k0s_diagnose() {
+  journalctl -u k0scontroller --no-pager -n 200 >&2 || true
+  systemctl status k0scontroller >&2 || true
+  exit 1
+}
 FUNCTIONS
 }
 
-vm_run() {
-  local id=$1 script=$2
-  shift 2
-  limactl shell --workdir / "$(vm_name "$id")" sudo env HOME=/root PATH="$vm_path" S3_ACCESS="$s3_access_key" S3_SECRET="$s3_secret_key" "$@" bash -c "$(remote_prelude)
-$script" </dev/null
-}
-
-vm_put() {
-  limactl copy "$2" "$(vm_name "$1"):$3"
-}
-
-vm_get() {
-  limactl copy "$(vm_name "$1"):$2" "$3"
-}
-
-vm_remove() {
-  if limactl list --quiet 2>/dev/null | grep -qx "$1"; then
-    limactl delete --force "$1"
-  fi
-}
-
-disk_remove() {
-  limactl disk delete --force "$1" >/dev/null 2>&1 || true
-}
-
-lab_down() {
-  local id letter
-  for id in "${ids[@]}"; do
-    vm_remove "$(vm_name "$id")"
-  done
-  for id in "${ids[@]}"; do
-    for letter in "${letters[@]}"; do
-      disk_remove "$(disk_name "$id" "$letter")"
-    done
-  done
-  registry_down
-}
-
-require_host() {
-  local tool missing=0
-  for tool in limactl docker go helm make curl envsubst jq python3; do
-    if ! command -v "$tool" >/dev/null; then
-      echo "$tool is required" >&2
-      missing=1
-    fi
-  done
-  if [ "$(uname -s)" != Linux ]; then
-    echo "hack/lab-adopt.sh runs on a Linux host with KVM" >&2
-    missing=1
-  fi
-  if [ ! -w /dev/kvm ]; then
-    echo "/dev/kvm must be writable for $(id -un)" >&2
-    missing=1
-  fi
-  return "$missing"
-}
-
-guard_host() {
-  local free mem
-  free=$(df -Pk "$repo" | awk 'NR==2 {print int($4/1048576)}')
-  mem=$(awk '/^MemAvailable:/ {print int($2/1048576)}' /proc/meminfo)
-  if [ "$free" -lt "$min_free_gb" ]; then
-    echo "only ${free}GiB free on $repo, need ${min_free_gb}GiB" >&2
-    return 1
-  fi
-  if [ "$mem" -lt "$min_mem_gb" ]; then
-    echo "only ${mem}GiB RAM available, need ${min_mem_gb}GiB for three VMs" >&2
-    return 1
-  fi
-  if limactl list --quiet 2>/dev/null | grep -qx bedrock-ci; then
-    echo "the VM bedrock-ci exists, a gate runs or left it behind" >&2
-    return 1
-  fi
-}
-
-ensure_images() {
-  local image
-  for image in "${base_images[@]}"; do
-    docker image inspect "$image" >/dev/null 2>&1 || retry 5 docker pull "$image"
-  done
-}
-
-registry_up() {
-  registry_down
-  docker run --rm -d -p "127.0.0.1:$registry_port:5000" --name "$registry_name" registry:3
-  retry_until 60 curl -sf "http://localhost:$registry_port/v2/"
-}
-
-registry_down() {
-  docker rm -f "$registry_name" >/dev/null 2>&1 || true
-}
-
-remove_bundle_images() {
-  docker image rm "localhost:$registry_port/bedrock:dev" >/dev/null 2>&1 || true
-}
-
-bundle_build() {
-  local image=localhost:$registry_port/bedrock:dev
-  ensure_images
-  registry_up
-  make build release binaries VERSION=dev IMAGE="$image" PIN_DIGESTS=1
-  retry 3 docker build -t "$image" -f Containerfile .
-  retry 3 docker push "$image"
-  make bundle VERSION=dev IMAGE="$image" PIN_DIGESTS=1 BUNDLE_ARCH="$arch"
-  registry_down
-  remove_bundle_images
-  test -f "$bundle"
-  test -x "$bedrock_bin"
+stage_up() {
+  lab_up
   test -f "$k0s_source"
   install -m 0755 "$(command -v helm)" "$lab_dir/helm"
-}
-
-qemu_wrapper() {
-  cat <<'WRAPPER'
-#!/usr/bin/env bash
-set -euo pipefail
-args=()
-for arg in "$@"; do
-  case "$arg" in
-  file=*/_disks/*/datadisk,if=virtio,*)
-    rest=${arg#*/_disks/}
-    name=${rest%%/*}
-    args+=("${arg/,if=virtio,/,if=none,id=$name,}" -device "virtio-blk-pci,drive=$name,serial=$name")
-    ;;
-  socket,id=*,fd=*)
-    descriptor=${arg##*,fd=}
-    rest=${arg#socket,}
-    args+=("stream,${rest%,fd=*},server=off,addr.type=fd,addr.str=$descriptor")
-    ;;
-  *) args+=("$arg") ;;
-  esac
-done
-exec qemu-system-@ARCH@ "${args[@]}"
-WRAPPER
-}
-
-qemu_wrapper_write() {
-  qemu_wrapper | sed "s/@ARCH@/$(uname -m)/" >"$lab_dir/qemu-serial.sh"
-  chmod +x "$lab_dir/qemu-serial.sh"
-}
-
-vm_provision() {
-  cat <<'SCRIPT'
-#!/bin/sh
-set -e
-sysctl -w fs.inotify.max_user_instances=8192 fs.inotify.max_user_watches=1048576 vm.max_map_count=262144
-cat >/usr/local/bin/kubectl <<'KUBECTL'
-#!/bin/sh
-exec /usr/local/bin/k0s kubectl "$@"
-KUBECTL
-chmod +x /usr/local/bin/kubectl
-SCRIPT
-}
-
-disk_entries() {
-  local id=$1 letter
-  for letter in "${letters[@]}"; do
-    printf -- '- name: %s\n  format: false\n' "$(disk_name "$id" "$letter")"
-  done
-}
-
-vm_config() {
-  local id=$1
-  cat <<CONFIG
-base:
-- template:_images/ubuntu-24.04
-vmType: qemu
-cpus: $cpus
-memory: ${memory}GiB
-disk: ${root_gb}GiB
-mounts:
-- location: "$repo"
-  writable: false
-containerd:
-  system: false
-  user: false
-networks:
-- lima: user-v2
-additionalDisks:
-$(disk_entries "$id")
-provision:
-- mode: system
-  script: |
-$(vm_provision | sed 's/^/    /')
-CONFIG
-}
-
-vm_up() {
-  local id=$1 vm letter
-  vm=$(vm_name "$id")
-  for letter in "${letters[@]}"; do
-    limactl disk create "$(disk_name "$id" "$letter")" --size "${osd_gb}GiB" --format raw --tty=false
-  done
-  vm_config "$id" >"$lab_dir/$vm.yaml"
-  env "$(qemu_variable)=$lab_dir/qemu-serial.sh" limactl start --name "$vm" --tty=false "$lab_dir/$vm.yaml"
-}
-
-script_prepare_vm() {
-  cat <<'SCRIPT'
-export DEBIAN_FRONTEND=noninteractive
-apt-get update -qq
-apt-get install -y -qq jq "linux-modules-extra-$(uname -r)" >/dev/null
-modprobe openvswitch
-modprobe geneve
-SCRIPT
-}
-
-vm_prepare() {
-  vm_run "$1" "$(script_prepare_vm)"
-}
-
-script_verify_vm() {
-  cat <<'SCRIPT'
-test "$(hostname)" = "$EXPECT_HOSTNAME"
-test "$(ip -4 -o addr show dev eth0 | grep -cw "$EXPECT_IP/24")" -ge 1
-test "$(ip -json route show default | jq -r '.[0].dev')" = eth0
-for device in $DEVICES; do
-  test -b "$device"
-done
-curl -sS --max-time 20 -o /dev/null https://quay.io/
-for peer in $PEERS; do
-  ping -c 2 -W 2 "$peer" >/dev/null
-done
-if test -c /dev/kvm; then
-  echo "kvm: yes"
-else
-  echo "kvm: no, virtualization.emulation will be true"
-fi
-SCRIPT
-}
-
-discover_ip() {
-  vm_run "$1" "ip -4 -o addr show dev eth0 | awk '{print \$4}' | cut -d/ -f1 | head -n 1"
-}
-
-record_ips() {
-  local id ip
-  for id in "${ids[@]}"; do
-    ip=$(discover_ip "$id")
-    case "$ip" in
-    "$subnet".*) state_set "IP_$id" "$ip" ;;
-    *)
-      echo "$(vm_name "$id") has the address '$ip', not in $subnet.0/24" >&2
-      return 1
-      ;;
-    esac
-  done
-  state_load
-}
-
-verify_vm() {
-  local id=$1 peers=() other
-  for other in "${ids[@]}"; do
-    if [ "$other" != "$id" ]; then
-      peers+=("$(node_ip "$other")")
-    fi
-  done
-  vm_run "$id" "$(script_verify_vm)" EXPECT_HOSTNAME="$(node_name "$id")" EXPECT_IP="$(node_ip "$id")" DEVICES="$(node_devices "$id")" PEERS="${peers[*]}"
-}
-
-stage_up() {
-  require_host
-  mkdir -p "$lab_dir"
-  lab_down
-  rm -f "$state_file"
-  guard_host
-  bundle_build
-  qemu_wrapper_write
-  local id
-  for id in "${ids[@]}"; do
-    log "starting $(vm_name "$id")"
-    vm_up "$id"
-  done
-  for id in "${ids[@]}"; do
-    log "preparing $(vm_name "$id")"
-    vm_prepare "$id"
-  done
-  record_ips
-  for id in "${ids[@]}"; do
-    log "checking $(vm_name "$id")"
-    verify_vm "$id"
-  done
 }
 
 script_old_controller() {
@@ -519,9 +165,10 @@ spec:
     kuberouter:
       metricsPort: 0
 CONFIG
-k0s install controller --enable-worker --no-taints --config /etc/k0s/k0s.yaml --kubelet-extra-args="--node-ip=$IP"
-k0s start
-retry_until 300 k0s kubectl get nodes
+k0s install controller --enable-worker --no-taints --config /etc/k0s/k0s.yaml --kubelet-extra-args="--node-ip=$IP" || k0s_diagnose
+k0s start || k0s_diagnose
+retry_until 300 k0s kubectl get nodes || k0s_diagnose
+retry_until 300 k0s status || k0s_diagnose
 SCRIPT
 }
 
@@ -593,7 +240,7 @@ stage_old() {
   state_load
   log "k0s $k0s_version on $(vm_name 1)"
   vm_run 1 "$(script_old_controller)" IP="$(node_ip 1)" K0S_SRC="$k0s_source"
-  token=$(vm_run 1 'k0s token create --role worker --expiry 2h')
+  token=$(vm_run 1 'k0s token create --wait --role worker --expiry 2h || k0s_diagnose')
   for id in 2 3; do
     log "k0s $k0s_version worker on $(vm_name "$id")"
     vm_run "$id" "$(script_old_worker)" IP="$(node_ip "$id")" K0S_SRC="$k0s_source" TOKEN="$token"
@@ -632,6 +279,14 @@ echo "STATE:OLD_POOLS=$pools"
 flags=$(ceph_op fs get filesystem-data -f json | jq -c '.mdsmap.flags_state')
 echo "flags_state of the old CephFS: $flags"
 printf '%s' "$flags" | jq -e 'has("joinable") and has("refuse_client_session")' >/dev/null
+spec=$(cephx_old_spec)
+echo "STATE:OLD_CEPHX_SPEC=$spec"
+printf '%s' "$spec" | jq -e 'all(.[]; type == "number")' >/dev/null
+generations=$(cephx_generations)
+echo "STATE:OLD_CEPHX_GENERATIONS=$generations"
+printf '%s' "$generations" | jq -e 'type == "object" and length > 0' >/dev/null
+keys=$(osd_keys_sha)
+echo "STATE:OLD_OSD_KEYS_SHA=$keys"
 SCRIPT
 }
 
@@ -671,8 +326,8 @@ hosts_flow() {
 
 render_adopt_config() {
   local monitors=$1 hosts=$2 emulation=$3
-  VERSION=dev VIP=$vip IFACE=$iface PLATFORM_HOST=$platform_host FSID=$FSID KEY_FILE=$remote_key_file MONITORS=$monitors HOSTS=$hosts EMULATION=$emulation \
-    envsubst "\${VERSION} \${VIP} \${IFACE} \${PLATFORM_HOST} \${FSID} \${KEY_FILE} \${MONITORS} \${HOSTS} \${EMULATION}" <"$repo/hack/lab/adopt.yaml.tmpl"
+  VERSION=$release_version VIP=$vip IFACE=$iface PLATFORM_HOST=$platform_host FSID=$FSID KEY_FILE=$remote_key_file MONITORS=$monitors HOSTS=$hosts EMULATION=$emulation OVN_TLS=$ovn_tls \
+    envsubst "\${VERSION} \${VIP} \${IFACE} \${PLATFORM_HOST} \${FSID} \${KEY_FILE} \${MONITORS} \${HOSTS} \${EMULATION} \${OVN_TLS}" <"$repo/hack/lab/adopt.yaml.tmpl"
 }
 
 stage_export() {
@@ -770,9 +425,6 @@ stage_stop() {
 
 script_adopt_prepare() {
   cat <<'SCRIPT'
-mkdir -p /etc/k0s/containerd.d/certs.d/_default
-printf '[plugins."io.containerd.cri.v1.images".registry]\nconfig_path = "/etc/k0s/containerd.d/certs.d"\n' >/etc/k0s/containerd.d/cri-registry.toml
-printf 'server = "https://127.0.0.1:1"\n' >/etc/k0s/containerd.d/certs.d/_default/hosts.toml
 install -m 0600 /tmp/adopt.yaml "$CONFIG_FILE"
 rm -f /tmp/adopt.yaml
 if [ -f /tmp/adopt-keys.yaml ]; then
@@ -785,14 +437,14 @@ SCRIPT
 script_adopt_init() {
   cat <<'SCRIPT'
 cd "$REPO"
-"$BIN" init -f "$CONFIG_FILE" --bundle "$BUNDLE" --timeout 45m 2>&1 | awk '!/^admin password: /'
+"$BIN" init -f "$CONFIG_FILE" --bundle "$BUNDLE" --timeout 45m "${lab_kubelet_flags[@]}" 2>&1 | awk '!/^admin password: /'
 SCRIPT
 }
 
 script_adopt_join() {
   cat <<'SCRIPT'
 cd "$REPO"
-"$BIN" join --token "$TOKEN" --bundle "$BUNDLE" --adopt-config "$CONFIG_FILE" 2>&1
+"$BIN" join --token "$TOKEN" --bundle "$BUNDLE" --adopt-config "$CONFIG_FILE" "${lab_kubelet_flags[@]}" 2>&1
 SCRIPT
 }
 
@@ -860,10 +512,12 @@ stage_adopt() {
   done
   vm_put 1 "$lab_dir/adopt-keys.yaml" /tmp/adopt-keys.yaml
   for id in "${ids[@]}"; do
-    vm_run "$id" "$(script_adopt_prepare)" CONFIG_FILE="$remote_config_file" KEY_FILE="$remote_key_file"
+    vm_run "$id" "$(script_offline_registry)
+$(script_adopt_prepare)" CONFIG_FILE="$remote_config_file" KEY_FILE="$remote_key_file"
   done
   log "bedrock init on $(vm_name 1)"
   vm_run 1 "$(script_adopt_init)" REPO="$repo" BIN="$bedrock_bin" BUNDLE="$bundle" CONFIG_FILE="$remote_config_file"
+  vm_run 1 'apply_settings "${lab_sizing_settings[@]}"'
   token=$(vm_run 1 "$bedrock_bin token create --roles ceph-osd,workload --expiry 1h")
   log "bedrock join on $(vm_name 2) and $(vm_name 3)"
   join_nodes "$token"
@@ -871,24 +525,16 @@ stage_adopt() {
   vm_run 1 "$(script_adopt_wait)" KEY_FILE="$remote_key_file"
 }
 
-verdict() {
-  local name=$1 check=$2 out
-  if out=$("$check" 2>&1); then
-    printf 'PASS %s\n' "$name"
-    printf '%s\n' "$out" | grep '^info: ' || true
-    return 0
-  fi
-  printf 'FAIL %s: %s\n' "$name" "$(printf '%s' "$out" | tail -n 1 | cut -c1-240)"
-  return 1
-}
-
 lab_ceph() {
   vm_run 1 "ceph_op $*"
 }
 
 check_fsid() {
-  expect_equal "$FSID" "$(lab_ceph fsid)" "ceph fsid" || return 1
-  expect_equal "$FSID" "$(vm_run 1 'kubectl -n rook-ceph get secret rook-ceph-mon -o jsonpath="{.data.fsid}" | base64 -d')" "fsid of the Secret rook-ceph-mon"
+  local actual
+  actual=$(lab_ceph fsid) || return 1
+  expect_equal "$FSID" "$actual" "ceph fsid" || return 1
+  actual=$(vm_run 1 'kubectl -n rook-ceph get secret rook-ceph-mon -o jsonpath="{.data.fsid}" | base64 -d') || return 1
+  expect_equal "$FSID" "$actual" "fsid of the Secret rook-ceph-mon"
 }
 
 check_monitor_ids() {
@@ -970,21 +616,23 @@ check_pool_sizes() {
 }
 
 check_rbd_data() {
-  local n want got
+  local pool=${1:-bedrock-block} n want got
   for n in 1 2; do
     want=IMG_SHA_$n
-    got=$(vm_run 1 "op_exec sh -c \"rbd \$rook_conf export --no-progress bedrock-block/lab-img$n - | sha256sum\" | cut -d' ' -f1")
+    got=$(vm_run 1 "rbd_op export --no-progress $pool/lab-img$n - | sha_of") || return 1
     expect_equal "${!want}" "$got" "sha256 of the RBD image lab-img$n" || return 1
   done
 }
 
 check_cephfs_file() {
-  expect_equal "$FS_SHA" "$(vm_run 1 'fs_file read bedrock-fs')" "sha256 of the CephFS file"
+  local filesystem=${1:-bedrock-fs} got
+  got=$(vm_run 1 "fs_file read $filesystem") || return 1
+  expect_equal "$FS_SHA" "$got" "sha256 of the CephFS file"
 }
 
 script_s3_get() {
   cat <<'SCRIPT'
-endpoint=$(rgw_service bedrock-rgw)
+endpoint=$(rgw_service "$RGW_STORE")
 get_object() { s3 -o /dev/null "http://$endpoint/lab-bucket/lab-object-1"; }
 retry_until 600 get_object
 s3 "http://$endpoint/lab-bucket/lab-object-$N" | sha_of
@@ -992,10 +640,11 @@ SCRIPT
 }
 
 check_s3_objects() {
-  local n want
+  local store=${1:-bedrock-rgw} n want got
   for n in 1 2; do
     want=S3_SHA_$n
-    expect_equal "${!want}" "$(vm_run 1 "$(script_s3_get)" N="$n")" "sha256 of the S3 object lab-object-$n read with the old key" || return 1
+    got=$(vm_run 1 "$(script_s3_get)" RGW_STORE="$store" N="$n") || return 1
+    expect_equal "${!want}" "$got" "sha256 of the S3 object lab-object-$n read with the old key" || return 1
   done
 }
 
@@ -1143,10 +792,180 @@ check_operator_restart() {
   vm_run 1 "$(script_operator_restart)"
 }
 
+script_cephx_spec() {
+  cat <<'SCRIPT'
+spec=$(kubectl -n rook-ceph get cephcluster rook-ceph -o json)
+echo "info: spec.security.cephx $(jq -c .spec.security.cephx <<<"$spec")"
+echo "info: spec.healthCheck.muteHealthWarning $(jq -c .spec.healthCheck.muteHealthWarning <<<"$spec")"
+jq -e --argjson old "$OLD_SPEC" '.spec.security.cephx as $c | $c.allowedCiphers == ["aes256k"] and $c.csi.keyType == "aes256k" and $c.csi.keyGeneration == $old.csiGeneration and $c.csi.keepPriorKeyCountMax == $old.csiKeep and $c.daemon.keyGeneration == $old.daemonGeneration' <<<"$spec" >/dev/null || {
+  echo "the CephCluster cephx spec is not allowedCiphers [aes256k] with the generations of the old cluster: $OLD_SPEC"
+  exit 1
+}
+jq -e '(.spec.healthCheck.muteHealthWarning // {}) as $m | all(["AUTH_EMERGENCY_CIPHERS_SET", "AUTH_INSECURE_CLIENT_KEY_TYPE", "AUTH_INSECURE_KEYS_ALLOWED", "AUTH_INSECURE_KEYS_CREATABLE"][]; . as $n | ($m[$n].policy // "unmute") == "unmute")' <<<"$spec" >/dev/null || {
+  echo "an AUTH_ health warning is muted"
+  exit 1
+}
+SCRIPT
+}
+
+check_cephx_spec() {
+  vm_run 1 "$(script_cephx_spec)" OLD_SPEC="$OLD_CEPHX_SPEC"
+}
+
+check_cephx_condition() {
+  expect_equal "True/Restricted" "$(vm_run 1 "echo \"\$(condition_status cluster cluster StorageCephxRestricted)/\$(condition_reason cluster cluster StorageCephxRestricted)\"")" "condition StorageCephxRestricted"
+}
+
+script_no_auth_warning() {
+  cat <<'SCRIPT'
+no_auth_check() { ceph_op health detail -f json | jq -e '[(.checks // {}) | keys[] | select(startswith("AUTH_"))] | length == 0'; }
+retry_until 900 no_auth_check || { ceph_op health detail; exit 1; }
+SCRIPT
+}
+
+check_no_auth_warning() {
+  vm_run 1 "$(script_no_auth_warning)"
+}
+
+script_no_rotation() {
+  cat <<'SCRIPT'
+new=$(cephx_generations)
+echo "info: key generations before $OLD_GENERATIONS, after $new"
+jq -ne --argjson old "$OLD_GENERATIONS" --argjson new "$new" '$new != null and ($old | to_entries | all(.value == $new[.key]))' >/dev/null || {
+  echo "a key generation changed during the adoption"
+  exit 1
+}
+[ "$(osd_keys_sha)" = "$OLD_KEYS_SHA" ] || {
+  echo "an OSD key differs from the old cluster"
+  exit 1
+}
+SCRIPT
+}
+
+check_no_key_rotation() {
+  vm_run 1 "$(script_no_rotation)" OLD_GENERATIONS="$OLD_CEPHX_GENERATIONS" OLD_KEYS_SHA="$OLD_OSD_KEYS_SHA"
+}
+
+script_cephx_workload() {
+  cat <<'SCRIPT'
+cleanup() { kubectl -n default delete pod/lab-cephx pvc/lab-cephx-rbd pvc/lab-cephx-fs --ignore-not-found --wait=false >/dev/null 2>&1 || true; }
+trap cleanup EXIT
+image=$(kubectl -n rook-ceph get cephcluster rook-ceph -o jsonpath='{.spec.cephVersion.image}')
+sed "s|__IMAGE__|$image|" <<'MANIFEST' | kubectl -n default apply -f -
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: lab-cephx-rbd
+spec:
+  accessModes: [ReadWriteOnce]
+  storageClassName: block
+  resources:
+    requests:
+      storage: 1Gi
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: lab-cephx-fs
+spec:
+  accessModes: [ReadWriteMany]
+  storageClassName: filesystem
+  resources:
+    requests:
+      storage: 1Gi
+---
+apiVersion: v1
+kind: Pod
+metadata:
+  name: lab-cephx
+spec:
+  restartPolicy: Never
+  containers:
+    - name: rw
+      image: __IMAGE__
+      imagePullPolicy: IfNotPresent
+      command:
+        - sh
+        - -c
+        - |
+          set -e
+          awk '$2 == "/rbd" && $1 ~ "^/dev/rbd" {found = 1} END {exit !found}' /proc/mounts
+          awk '$2 == "/fs" && $3 == "ceph" {found = 1} END {exit !found}' /proc/mounts
+          for dir in /rbd /fs; do
+            printf lab-cephx-ok >"$dir/probe"
+            sync
+            test "$(cat "$dir/probe")" = lab-cephx-ok
+          done
+          echo LAB-CEPHX-DONE
+      volumeMounts:
+        - name: rbd
+          mountPath: /rbd
+        - name: fs
+          mountPath: /fs
+  volumes:
+    - name: rbd
+      persistentVolumeClaim:
+        claimName: lab-cephx-rbd
+    - name: fs
+      persistentVolumeClaim:
+        claimName: lab-cephx-fs
+MANIFEST
+start=$SECONDS
+pod_done() { [ "$(kubectl -n default get pod lab-cephx -o jsonpath='{.status.phase}')" = Succeeded ]; }
+pod_failed() { [ "$(kubectl -n default get pod lab-cephx -o jsonpath='{.status.phase}')" = Failed ]; }
+until pod_done; do
+  if pod_failed || [ "$SECONDS" -ge "$((start + 900))" ]; then
+    kubectl -n default get pvc,pod -o wide
+    kubectl -n default describe pod lab-cephx | tail -n 30
+    kubectl -n default logs lab-cephx || true
+    echo "the pod did not mount both volumes, write and read"
+    exit 1
+  fi
+  sleep 3
+done
+node=$(kubectl -n default get pod lab-cephx -o jsonpath='{.spec.nodeName}')
+echo "info: pod ran on $node, kernel $(kubectl get node "$node" -o jsonpath='{.status.nodeInfo.kernelVersion}')"
+echo "info: pvc phases $(kubectl -n default get pvc lab-cephx-rbd lab-cephx-fs -o jsonpath='{range .items[*]}{.metadata.name}={.status.phase} {end}')"
+kubectl -n default logs lab-cephx | grep -qx LAB-CEPHX-DONE
+SCRIPT
+}
+
+check_cephx_workload() {
+  vm_run 1 "$(script_cephx_workload)"
+}
+
+script_dump_keys() {
+  cat <<'SCRIPT'
+out=$(op_exec ceph auth dump-keys --format=json --connect-timeout=10 "$rook_conf") || {
+  echo "ceph auth dump-keys failed in the Rook operator pod"
+  exit 1
+}
+printf '%s' "$out" | jq -e . >/dev/null || {
+  echo "ceph auth dump-keys did not print JSON"
+  exit 1
+}
+echo "info: dump-keys top-level type $(printf '%s' "$out" | jq -r type), strings other than the cipher names are masked"
+echo "info: dump-keys shape $(printf '%s' "$out" | jq -c 'walk(if type == "string" and . != "aes" and . != "aes256k" then "<str>" else . end)' | cut -c1-600)"
+echo "info: dump-keys cipher strings $(printf '%s' "$out" | jq -c '[.. | strings | select(. == "aes" or . == "aes256k")] | group_by(.) | map({(.[0]): length}) | add')"
+printf '%s' "$out" | jq -e '[.. | strings] | contains(["aes256k"])' >/dev/null || {
+  echo "the stage B parser needs the string aes256k in ceph auth dump-keys, and the output has none"
+  exit 1
+}
+printf '%s' "$out" | jq -e '[.. | strings | select(. == "aes")] | length == 0' >/dev/null || {
+  echo "the stage B parser rejects the string aes in ceph auth dump-keys, and the output has it"
+  exit 1
+}
+SCRIPT
+}
+
+check_dump_keys() {
+  vm_run 1 "$(script_dump_keys)"
+}
+
 stage_check() {
   local failed=0 entry
   state_load
-  require_state FSID MON_IDS OSD_MAP IMG_SHA_1 IMG_SHA_2 FS_SHA S3_SHA_1 S3_SHA_2
+  require_state FSID MON_IDS OSD_MAP IMG_SHA_1 IMG_SHA_2 FS_SHA S3_SHA_1 S3_SHA_2 OLD_CEPHX_SPEC OLD_CEPHX_GENERATIONS OLD_OSD_KEYS_SHA
   for entry in \
     "fsid is unchanged|check_fsid" \
     "monitor ids are unchanged|check_monitor_ids" \
@@ -1170,7 +989,13 @@ stage_check() {
     "all daemons run the bundle Ceph release|check_ceph_release" \
     "all PGs active+clean and nothing misplaced|check_pgs_clean" \
     "no key material in cluster or logs|check_no_key_material" \
-    "operator restart keeps the adoption|check_operator_restart"; do
+    "operator restart keeps the adoption|check_operator_restart" \
+    "CephCluster restricts ciphers to aes256k and keeps the old generations|check_cephx_spec" \
+    "condition StorageCephxRestricted is Restricted|check_cephx_condition" \
+    "no AUTH_ health warning|check_no_auth_warning" \
+    "adoption rotated no key|check_no_key_rotation" \
+    "RBD and CephFS volumes mount, write and read|check_cephx_workload" \
+    "ceph auth dump-keys passes the stage B parser|check_dump_keys"; do
     verdict "${entry%|*}" "${entry#*|}" || failed=1
   done
   if [ "$failed" -eq 1 ]; then
@@ -1179,48 +1004,16 @@ stage_check() {
   return "$failed"
 }
 
-snapshot_tag=after-stop
-
-vm_disk_files() {
-  local id=$1 letter
-  echo "${LIMA_HOME:-$HOME/.lima}/$(vm_name "$id")/disk"
-  for letter in "${letters[@]}"; do
-    echo "${LIMA_HOME:-$HOME/.lima}/_disks/$(disk_name "$id" "$letter")/datadisk"
-  done
-}
-
-vm_start_existing() {
-  env "$(qemu_variable)=$lab_dir/qemu-serial.sh" limactl start "$(vm_name "$1")" --tty=false
-}
-
-stage_snapshot() {
-  local id file
-  for id in "${ids[@]}"; do
-    limactl stop "$(vm_name "$id")"
-  done
-  for id in "${ids[@]}"; do
-    while IFS= read -r file; do
-      qemu-img snapshot -c "$snapshot_tag" "$file"
-    done < <(vm_disk_files "$id")
-  done
-  for id in "${ids[@]}"; do
-    vm_start_existing "$id"
-  done
-}
-
-stage_rewind() {
-  local id file
-  for id in "${ids[@]}"; do
-    limactl stop --force "$(vm_name "$id")"
-  done
-  for id in "${ids[@]}"; do
-    while IFS= read -r file; do
-      qemu-img snapshot -a "$snapshot_tag" "$file"
-    done < <(vm_disk_files "$id")
-  done
-  for id in "${ids[@]}"; do
-    vm_start_existing "$id"
-  done
+stage_check_legacy() {
+  local failed=0
+  state_load
+  require_state FSID IMG_SHA_1 IMG_SHA_2 FS_SHA S3_SHA_1 S3_SHA_2
+  verdict "legacy Ceph is healthy" check_health_ok || return 1
+  verdict "legacy Ceph keeps its fsid" check_fsid || return 1
+  verdict "legacy RBD images match their sha256" check_rbd_data storage-block || failed=1
+  verdict "legacy CephFS file matches its sha256" check_cephfs_file filesystem-data || failed=1
+  verdict "legacy S3 objects match their sha256" check_s3_objects objectstore || failed=1
+  return "$failed"
 }
 
 stage_down() {
@@ -1240,8 +1033,24 @@ stage_all() {
 
 main() {
   cd "$repo"
+  check_lab_config
   case "${1:-}" in
-  up | old | export | stop | adopt | check | snapshot | rewind | down | all) "stage_$1" ;;
+  up | old | export | stop | adopt | check | down | all) "stage_$1" ;;
+  check-legacy) stage_check_legacy ;;
+  snapshot | rewind)
+    local checkpoint=${2-after-stop}
+    if [ "$#" -gt 2 ]; then
+      usage >&2
+      return 2
+    fi
+    case "$checkpoint" in
+    before-stop | after-stop) "lab_$1" "$checkpoint" ;;
+    *)
+      printf '%s\n' 'The checkpoint must be before-stop or after-stop.' >&2
+      return 2
+      ;;
+    esac
+    ;;
   *)
     usage >&2
     return 2
@@ -1250,3 +1059,4 @@ main() {
 }
 
 main "$@"
+

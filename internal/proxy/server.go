@@ -145,6 +145,7 @@ func (p serverParts) console() http.Handler {
 	mux.Handle("GET "+PathStream, Authenticate(CookieAuth(p.resolver), RequireOrigin(p.host, StreamHandler(p.upstream, p.resolver, StreamOptions{Context: p.ctx, Clock: p.cfg.Clock}))))
 	mux.Handle("POST "+PathAuthz, p.cookieChain(AuthzHandler(p.upstream)))
 	mux.Handle("GET "+PathProjects, p.cookieChain(ProjectsHandler(p.upstream, p.privileged)))
+	mux.Handle("GET "+PathProjects+"/{project}/networks", p.cookieChain(ProjectNetworksHandler(p.upstream, p.privileged)))
 	mux.Handle("GET "+PathMetrics, p.cookieChain(MetricsHandler(p.upstream, p.cfg.PrometheusURL, p.cfg.Clock)))
 	mux.Handle("GET "+PathKubeconfig, KubeconfigHandler(p.privileged, p.host))
 	mux.Handle("GET "+PathCA, CAHandler(p.privileged))

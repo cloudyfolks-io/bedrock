@@ -7,6 +7,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	"github.com/cloudyfolks-io/bedrock/api/v1alpha1"
+	"github.com/cloudyfolks-io/bedrock/internal/network"
 )
 
 const (
@@ -30,10 +31,14 @@ const (
 	ReasonInstanceTypeNotFound   = "InstanceTypeNotFound"
 	ReasonPreferenceNotFound     = "PreferenceNotFound"
 	ReasonSubnetNotReady         = "SubnetNotReady"
+	ReasonAddressOutsideSubnet   = network.ReasonAddressOutsideSubnet
+	ReasonAddressReserved        = network.ReasonAddressReserved
+	ReasonAddressInUse           = network.ReasonAddressInUse
 	ReasonSecurityGroupNotReady  = "SecurityGroupNotReady"
 	ReasonSSHKeyNotReady         = "SSHKeyNotReady"
 	ReasonVolumeNotFound         = "VolumeNotFound"
 	ReasonVolumeInUse            = "VolumeInUse"
+	ReasonRootVolumeSwapPending  = "RootVolumeSwapPending"
 	ReasonVolumeNotUsable        = "VolumeNotUsable"
 	ReasonRestoreInProgress      = "RestoreInProgress"
 	ReasonApplyFailed            = "ApplyFailed"
@@ -46,7 +51,6 @@ const (
 	ReasonStopping               = "Stopping"
 	ReasonFailed                 = "Failed"
 	ReasonSourceNotReady         = "SourceNotReady"
-	ReasonShrinkRefused          = "ShrinkRefused"
 	ReasonExpansionUnsupported   = "ExpansionNotSupported"
 	ReasonInUse                  = "InUse"
 	ReasonNoSnapshotClass        = "NoSnapshotClass"

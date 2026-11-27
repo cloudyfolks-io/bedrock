@@ -7,7 +7,7 @@ import { listKey } from "../../api/kube";
 import type { KubeObject } from "../../api/types";
 import { definitionFor, refOf } from "../../resources/registry";
 import { useSession } from "../../api/session";
-import { isUploadUrl, requestUploadToken, uploadFile } from "./imageUpload";
+import { isUploadUrl, requestUploadToken, uploadFile } from "./imageUploadApi";
 
 export function ImageUpload({ image, onClose, onUploaded }: { image: KubeObject; onClose: () => void; onUploaded?: () => void }) {
   const { t } = useLingui();
@@ -22,33 +22,53 @@ export function ImageUpload({ image, onClose, onUploaded }: { image: KubeObject;
   const [running, setRunning] = useState(false);
   const controller = useRef<AbortController | undefined>(undefined);
 
+  function cancel() {
+    controller.current?.abort();
+    controller.current = undefined;
+    setProgress(undefined);
+    setRunning(false);
+  }
+
   async function start() {
-    if (!file || !image.metadata.namespace) {
+    if (controller.current || !file || !image.metadata.namespace) {
       return;
     }
     setError(undefined);
+    setProgress(undefined);
     setRunning(true);
     const abort = new AbortController();
     controller.current = abort;
     try {
-      const grant = await requestUploadToken(http, image.metadata.namespace, image.metadata.name);
+      const grant = await requestUploadToken(http, image.metadata.namespace, image.metadata.name, abort.signal);
+      if (abort.signal.aborted) return;
       if (!isUploadUrl(grant.url, host)) {
         setError(t({ id: "images.upload.badUrl", message: "The upload address is not on this platform. The upload was stopped." }));
         return;
       }
-      await uploadFile(grant.url, grant.token, file, (loaded, total) => setProgress({ loaded, total }), abort.signal);
-      toast.show({ tone: "success", title: t({ id: "images.upload.done", message: "Upload finished" }) });
+      setProgress({ loaded: 0, total: file.size });
+      await uploadFile(grant.url, grant.token, file, (loaded, total) => {
+        if (!abort.signal.aborted) setProgress({ loaded, total });
+      }, abort.signal);
+      if (abort.signal.aborted) return;
+      toast.show({
+        tone: "success",
+        title: t({ id: "images.upload.transferred", message: "File transferred" }),
+        description: t({ id: "images.upload.processing", message: "The platform still needs to process the image." }),
+      });
       if (def) {
         void queryClient.invalidateQueries({ queryKey: listKey(refOf(def), image.metadata.namespace, {}) });
       }
       onUploaded?.();
       onClose();
     } catch (reason) {
-      if (!(reason instanceof DOMException && reason.name === "AbortError")) {
+      if (!abort.signal.aborted && !(reason instanceof DOMException && reason.name === "AbortError")) {
         setError(reason instanceof Error ? reason.message : t({ id: "action.error.failed", message: "The action failed" }));
       }
     } finally {
-      setRunning(false);
+      if (controller.current === abort) {
+        controller.current = undefined;
+        setRunning(false);
+      }
     }
   }
 
@@ -57,7 +77,7 @@ export function ImageUpload({ image, onClose, onUploaded }: { image: KubeObject;
       open
       onOpenChange={(next) => {
         if (!next) {
-          controller.current?.abort();
+          cancel();
           onClose();
         }
       }}
@@ -65,7 +85,7 @@ export function ImageUpload({ image, onClose, onUploaded }: { image: KubeObject;
       actions={
         <>
           {running ? (
-            <Button variant="secondary" onClick={() => controller.current?.abort()}>
+            <Button variant="secondary" onClick={cancel}>
               {t({ id: "common.action.cancel", message: "Cancel" })}
             </Button>
           ) : null}
@@ -77,8 +97,9 @@ export function ImageUpload({ image, onClose, onUploaded }: { image: KubeObject;
     >
       <label className="br-field">
         <span className="br-field-label">{t({ id: "images.upload.file", message: "Disk image file" })}</span>
-        <input type="file" accept=".iso,.img,.qcow2" onChange={(event) => setFile(event.target.files?.[0])} />
+        <input type="file" accept=".iso,.img,.qcow2" disabled={running} onChange={(event) => setFile(event.target.files?.[0])} />
       </label>
+      {running && !progress ? <p role="status">{t({ id: "wizard.uploadIso.waiting", message: "Preparing the upload" })}</p> : null}
       {progress ? <Progress label={t({ id: "images.upload.progress", message: "Upload progress" })} value={progress.loaded} max={progress.total || 1} /> : null}
       {error ? <Alert tone="error">{error}</Alert> : null}
     </Dialog>

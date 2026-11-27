@@ -5,6 +5,7 @@ import (
 	"slices"
 	"time"
 
+	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -33,6 +34,24 @@ func violationCondition(conditionType string, generation int64, v *Violation) me
 func withCondition(existing []metav1.Condition, cond metav1.Condition) []metav1.Condition {
 	conditions := slices.Clone(existing)
 	v1alpha1.SetCondition(&conditions, cond)
+	return conditions
+}
+
+func withRangePolicy(existing []metav1.Condition, generation int64, breach *Violation) []metav1.Condition {
+	return withPolicy(existing, ConditionRangePolicy, generation, breach)
+}
+
+func withVRFPolicy(existing []metav1.Condition, generation int64, breach *Violation) []metav1.Condition {
+	return withPolicy(existing, ConditionVRFPolicy, generation, breach)
+}
+
+func withPolicy(existing []metav1.Condition, conditionType string, generation int64, breach *Violation) []metav1.Condition {
+	conditions := slices.Clone(existing)
+	if breach == nil {
+		meta.RemoveStatusCondition(&conditions, conditionType)
+		return conditions
+	}
+	v1alpha1.SetCondition(&conditions, violationCondition(conditionType, generation, breach))
 	return conditions
 }
 

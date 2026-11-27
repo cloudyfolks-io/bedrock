@@ -1,0 +1,293 @@
+# Registry
+
+## What you get
+
+Bedrock can run one shared Harbor for the whole cluster.
+Harbor is an image registry. It speaks the OCI registry protocol and has its own API.
+The `registry` addon installs it. The addon is off by default.
+See `docs/addons.md` for the addon, its Settings and its conditions.
+
+A project uses two kinds:
+
+- `Registry` is one Harbor project. It has a name, a storage quota, a retention policy and a webhook.
+- `RegistryCredential` is one Harbor robot account. Bedrock puts its login in a Secret.
+
+Bedrock does not wrap the content of a registry.
+It has no kind for repositories, artifacts, tags or retention runs.
+Use the OCI protocol and the Harbor API with a robot account for them.
+
+Harbor runs in the namespace `bedrock-registry`.
+A project member cannot read this namespace.
+The member cannot read the Harbor admin password, the registry htpasswd, the S3 key or the robot secret of another project.
+
+## Create a registry
+
+```yaml
+apiVersion: bedrock.cloudyfolks.io/v1alpha1
+kind: Registry
+metadata:
+  name: images
+  namespace: acme-prod
+spec:
+  name: acme-images
+  quotaGB: 10
+  retention:
+    keepLastN: 10
+    retainDays: 30
+    tagPattern: "v*"
+    retainUntagged: false
+    schedule: daily
+  webhook:
+    url: https://hooks.example.com/registry
+    authHeaderSecretRef:
+      name: registry-hook
+      key: token
+```
+
+| Field | Meaning |
+|---|---|
+| `name` | The name of the Harbor project. Optional. The default is `metadata.name`. It has 3 to 30 letters (lowercase), digits and dashes. It starts and ends with a letter or a digit. You cannot change it. |
+| `quotaGB` | The storage quota in GB. `0` means no limit. The default is the Setting `registry.default-quota-gb`, which is `5`. |
+| `retention.keepLastN` | Keep the newest N tags. From 1 to 1000. |
+| `retention.retainDays` | Keep the tags that were pushed in the last N days. From 1 to 3650. |
+| `retention.tagPattern` | The tags that the rules apply to. The default is every tag. |
+| `retention.retainUntagged` | Apply the rules to untagged artifacts. |
+| `retention.schedule` | `off`, `hourly` or `daily`. |
+| `webhook.url` | Harbor sends the events `PUSH_ARTIFACT` and `DELETE_ARTIFACT` to this URL. The policy is named `platform-events`. |
+| `webhook.authHeaderSecretRef` | A Secret and a key in the same namespace. The value is the `Authorization` header of the call. |
+| `forceDestroy` | Delete the images with the object. The default is `false`. |
+
+The retention policy keeps the tags that one of the rules selects.
+If the spec has no `keepLastN` and no `retainDays`, Bedrock clears the policy of the project.
+This holds only for a policy that Bedrock applied before.
+`status.retentionApplied` shows that Bedrock holds a policy.
+If the spec has no `retention` at all and Bedrock never applied a policy, Bedrock leaves the Harbor policy of the project alone.
+So an adopted project keeps its retention policy.
+A `retention` in the spec always wins over the policy in Harbor.
+If you remove `webhook`, Bedrock deletes the policy `platform-events`.
+
+The webhook cannot target a service in the cluster.
+Harbor sends the call from the jobservice pods in `bedrock-registry`.
+A NetworkPolicy named `harbor-jobservice-egress` limits their egress.
+They can reach DNS, the Harbor pods in the namespace and addresses outside the blocked ranges.
+The Setting `registry.webhook-blocked-cidrs` lists the blocked ranges.
+The default has the private ranges, the shared range `100.64.0.0/10`, the link-local range and the loopback range.
+This covers the default pod and service networks.
+If your pod network or service network is outside these ranges, add it to the Setting.
+Bedrock also blocks the address of every node.
+Use a public URL for the webhook.
+
+`status` shows these fields:
+
+| Field | Meaning |
+|---|---|
+| `host` | The registry host. Use it in image names: `<host>/<name>/<repository>:<tag>`. |
+| `projectName` | The Harbor project that the object owns. |
+| `projectID` | The Harbor id of the project. |
+| `usedBytes`, `hardBytes` | The storage used, and the limit. `-1` means no limit. |
+| `repositoryCount` | The number of repositories. |
+
+Bedrock reads the usage from Harbor every 5 minutes.
+If the read fails, the old values stay.
+
+### Names
+
+Harbor project names are unique in the whole cluster.
+If the name is in use, the condition `Ready` shows the reason `NameTaken`.
+Bedrock never takes a project that it did not make.
+
+These names are reserved: the Setting `registry.reserved-names` (default `library`, `admin`, `registry`, `api`, `docs`, `system`, `internal`, `platform` and `builders`).
+The prefixes in `registry.reserved-prefixes` (default `mirror-`) are reserved too.
+Only the group `bedrock:bedrock-admins` can use them.
+A project owner who tries gets an admission error.
+An administrator needs the annotation `bedrock.cloudyfolks.io/reserved-name-approved: "true"` on the object.
+Without it the controller shows the reason `NameReserved`.
+
+A name that was in use is free again after the delete.
+Bedrock does not keep a deleted name for ever.
+
+### Adopt an existing project
+
+An administrator can adopt a Harbor project that exists already.
+For example, a Bedrock install can run next to an older Harbor.
+Set the annotation `bedrock.cloudyfolks.io/adopt: "true"` on the `Registry`.
+The object then takes the project with the same name.
+Only `bedrock:bedrock-admins` can set this annotation, because an unclaimed project holds the images of someone else.
+Without the annotation, an existing name gives `NameTaken`.
+
+### Delete
+
+A registry with repositories and `forceDestroy: false` stays in `Terminating`.
+The condition `Ready` shows the reason `NotEmpty` and `status.repositoryCount` shows the number.
+Set `forceDestroy: true` to continue.
+Bedrock then deletes the robots of the project, then every repository, then the project.
+It deletes 100 repositories in each round, at most 100 rounds in one pass.
+If the project still has repositories after that, the reason is `PurgeIncomplete`, and the next pass continues.
+
+When the namespace of the object is deleting, Bedrock acts as if `forceDestroy` were `true`.
+A project delete is a delete of everything in it.
+
+If the addon is off, a delete of a `Registry` or a `RegistryCredential` that owns a Harbor object waits with the reason `RegistryNotAvailable`.
+A namespace delete waits too, until the addon is on again.
+
+## Create a credential
+
+```yaml
+apiVersion: bedrock.cloudyfolks.io/v1alpha1
+kind: RegistryCredential
+metadata:
+  name: ci
+  namespace: acme-prod
+spec:
+  registryRef:
+    name: images
+  permission: pushPull
+```
+
+| Permission | Access |
+|---|---|
+| `pull` | Pull images. |
+| `pushPull` | Pull and push images. |
+| `manage` | Pull and push images, list and delete repositories, artifacts and tags, and manage the retention policy of the project. |
+
+The spec cannot change after the create. To change the permission, make a new credential.
+The robot has no expiry.
+The name `platform-` as a prefix is for administrators.
+This holds for the object name and for `spec.robotName`.
+
+`spec.robotName` is optional and immutable.
+It is the name of the Harbor robot, and the part of the login after `+`.
+Without it, the robot name is the name of the object.
+Use it to keep a docker login name that exists already, for example `key_acme+ci` with `robotName: ci`.
+The name has lowercase letters, digits, dot, underscore and dash, at most 100 characters.
+A new name follows the rules above.
+A robot with that name that exists already is adopted, as the next section shows.
+
+Bedrock writes the Secret `<name>-docker` in the same namespace.
+It has the type `kubernetes.io/dockerconfigjson`.
+`status.secretName` and `status.username` show the name of the Secret and the login.
+
+| Key | Content |
+|---|---|
+| `.dockerconfigjson` | The Docker client configuration for the registry host. |
+| `host` | The registry host. |
+| `username` | The login of the robot. It has the form `<prefix><project>+<name>`. The prefix is the Setting `registry.robot-prefix`. |
+| `password` | The robot secret. |
+
+Use the Secret as an image pull Secret:
+
+```yaml
+spec:
+  imagePullSecrets:
+    - name: ci-docker
+```
+
+Harbor shows a robot secret only at the create.
+So the Secret in the namespace is the only copy.
+If the Secret is missing or broken, Bedrock sets a new secret on the robot and writes the Secret again.
+To get a new login on purpose, change the annotation `bedrock.cloudyfolks.io/reset-secret` to a new value.
+
+Deleting the credential deletes the robot.
+
+The registry must be ready.
+Until then the credential shows the reason `RegistryNotFound` or `RegistryNotReady`.
+A robot with the same name that exists already gives `NameTaken`.
+An administrator can adopt it with the annotation `bedrock.cloudyfolks.io/adopt: "true"`.
+Bedrock then takes the robot over and does not change its secret.
+The password that the customer has stays valid, and the login name stays the same.
+Bedrock never stored this password, so the Secret `<name>-docker` has the type `Opaque` and only the keys `host` and `username`.
+It has no `password` key and no `.dockerconfigjson` key.
+The condition `SecretKept` is `True` with the reason `PasswordKept`.
+A Container or a Build that uses this Secret as a pull or push Secret waits with the reason `SecretTypeInvalid` until the password is set.
+To set a new password, change the annotation `bedrock.cloudyfolks.io/reset-secret` to a new value.
+Bedrock then sets a new secret on the robot, replaces the Secret with the type `kubernetes.io/dockerconfigjson` and removes the condition `SecretKept`.
+The old password stops working then.
+A robot that Bedrock creates always gets a new secret and a full Secret.
+Bedrock finds the robot only inside the Harbor project of the Registry.
+A robot that another credential holds already gives the reason `RobotClaimed`, and Bedrock changes nothing.
+
+## Conditions
+
+Both kinds report the condition `Ready`.
+
+| Reason | Kind | Meaning |
+|---|---|---|
+| `Ready` | both | The object is applied. This is the only reason with status `True`. |
+| `RegistryNotAvailable` | both | The addon is off, the Secret `harbor-admin` is missing, or Harbor does not answer. |
+| `InvalidSettings` | `Registry` | A Setting of the registry has a wrong value. |
+| `NameInvalid` | `Registry` | The project name does not follow the rules. |
+| `NameReserved` | `Registry` | The name or its prefix is reserved and the object has no approval. |
+| `NameTaken` | both | The project or the robot exists and the object does not own it. |
+| `PasswordKept` | `RegistryCredential` | The reason of the condition `SecretKept`. The adopted robot keeps its password, and the Secret has no password. |
+| `RobotClaimed` | `RegistryCredential` | The adopt annotation is set, but another credential holds the robot. |
+| `WebhookSecretMissing` | `Registry` | The Secret or the key of `webhook.authHeaderSecretRef` does not exist. |
+| `NotEmpty` | `Registry` | The delete waits because the project has repositories and `forceDestroy` is `false`. |
+| `PurgeIncomplete` | `Registry` | The purge of a forced delete is not finished. The next pass continues. |
+| `HarborError` | both | Harbor refused a call. The message has the answer of Harbor. |
+| `RegistryNotFound` | `RegistryCredential` | The `Registry` of `registryRef` does not exist. |
+| `RegistryNotReady` | `RegistryCredential` | The `Registry` is not ready. |
+
+## Pull-through caches
+
+The Setting `registry.proxy-caches` lists caches for base images.
+Each entry has a `name` that starts with `mirror-`, a `type` and an `https` `url`.
+The `type` is a Harbor adapter, for example `docker-hub` or `docker-registry`.
+
+```json
+[{"name":"mirror-docker","type":"docker-hub","url":"https://hub.docker.com"}]
+```
+
+A cache is a Harbor registry endpoint and a public project that uses it.
+Bedrock makes both and does not change them afterwards.
+To use another URL, use a new name.
+If an endpoint with the same name has another type, the condition `HarborConfigured` of the addon shows the reason `ProxyCacheTypeMismatch`.
+The prefix `mirror-` is reserved, so a tenant cannot make a project with such a name.
+
+## Project quota
+
+A project can limit its registries: `spec.quota.registries` of the `Project` is the maximum count.
+The quota key is `count/registries.bedrock.cloudyfolks.io`.
+
+## Limits
+
+- Bedrock has no kind for the content of a registry. Use the OCI protocol and the Harbor API with a `manage` credential.
+- Harbor projects are not Kubernetes objects. A Harbor project that no `Registry` claims stays in Harbor. An administrator removes it.
+- A project name is global, and a deleted name is not reserved.
+- Bedrock does not scan images. The scanner of Harbor is off.
+- The pin tags of deployed images belong to the work on the Container kind.
+
+## The data of an older Harbor
+
+The image bucket of an older Harbor can survive a move to Bedrock.
+The addon waits with the reason `BucketNotOwned` while the bucket belongs to another store user.
+An administrator links the bucket to the user `bedrock-registry` with `radosgw-admin bucket link`.
+The addon never changes the owner.
+
+Bedrock makes the Secret `harbor-admin` only if it does not exist.
+An administrator who moves an older Harbor database writes this Secret with the old admin password before the addon starts.
+Then Bedrock uses that password.
+The Secret `harbor-core-keys` in the same namespace holds the keys that encrypt fields of the Harbor database.
+Bedrock makes it only if it does not exist and never changes it.
+An administrator who moves an older Harbor database writes it before the addon starts, with the keys `secretKey`, `secret` and `CSRF_KEY`.
+`secretKey` must have 16 characters and must be the old Harbor `secretKey`.
+Without the old `secretKey`, Harbor cannot read the encrypted fields of the database.
+The addon makes no Secret and no database before `registry.host` is set.
+
+To move an older Harbor database, use this order.
+
+1. Write the Secrets `harbor-admin` and `harbor-core-keys` in the namespace `bedrock-registry` with the old values.
+2. Set the Setting `registry.hold` to `true`, then set `registry.host`.
+3. Wait until the Cluster `harbor-db` is ready. The condition `RuntimeReady` of the addon shows the reason `Held`.
+4. Restore the older database into `harbor-db` with `pg_restore`.
+5. Link the image bucket to the user `bedrock-registry` with `radosgw-admin bucket link`.
+6. Set `registry.hold` to `false`. Bedrock then starts `harbor-core`, `harbor-jobservice` and `harbor-exporter`.
+
+While `registry.hold` is `true`, Bedrock makes every object, but `harbor-core`, `harbor-jobservice` and `harbor-exporter` stay at zero replicas.
+Harbor runs its database migration in `harbor-core`, and the exporter reads the database too, so nothing touches the database before step 6.
+
+Harbor projects and robots come back with the database.
+Adopt them with the annotation `bedrock.cloudyfolks.io/adopt: "true"`.
+Adoption keeps the retention policy of a project when the Registry has no `retention`.
+A credential names an old robot with `spec.robotName`.
+The Setting `registry.gc-cron` sets the garbage collection schedule of Harbor.
+It has six fields, seconds first, and Bedrock refuses a value with a field out of range.

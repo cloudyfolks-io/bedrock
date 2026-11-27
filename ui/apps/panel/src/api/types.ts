@@ -30,7 +30,7 @@ export interface KubeObject {
 export interface KubeList<T extends KubeObject = KubeObject> {
   apiVersion?: string;
   kind?: string;
-  metadata: { resourceVersion?: string };
+  metadata: { resourceVersion?: string; continue?: string };
   items: T[];
 }
 

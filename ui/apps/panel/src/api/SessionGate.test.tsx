@@ -1,7 +1,8 @@
-import { screen, waitFor } from "@testing-library/react";
+import { act, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { useState } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { SessionGate, loginUrl, safeReturnTo, useSession } from "./session";
+import { SessionGate, loginUrl, safeReturnTo, sessionKey, useSession } from "./session";
 import { renderPanel } from "../test/renderPanel";
 import type { Session } from "./types";
 
@@ -89,6 +90,41 @@ describe("SessionGate", () => {
     expect(calls).toBe(2);
   });
 
+  it("withholds admin content after a failed session recheck until retry succeeds", async () => {
+    const user = userEvent.setup();
+    const assign = vi.fn();
+    let calls = 0;
+    const { queryClient } = renderPanel(
+      <SessionGate>
+        <p>Admin inventory</p>
+      </SessionGate>,
+      {
+        session: null,
+        assign,
+        api: {
+          "GET /proxy/v1/session": () => {
+            calls += 1;
+            return calls === 2 ? { status: 502, body: { error: "upstream_unavailable" } } : { body: session };
+          },
+        },
+      },
+    );
+    expect(await screen.findByText("Admin inventory")).toBeTruthy();
+
+    await act(async () => {
+      await queryClient.invalidateQueries({ queryKey: sessionKey });
+    });
+
+    const retry = await screen.findByRole("button", { name: "Retry" });
+    expect(queryClient.getQueryData(sessionKey)).toEqual(session);
+    expect(screen.queryByText("Admin inventory")).toBeNull();
+    expect(assign).not.toHaveBeenCalled();
+
+    await user.click(retry);
+    expect(await screen.findByText("Admin inventory")).toBeTruthy();
+    expect(calls).toBe(3);
+  });
+
   it("TestCsrfIsHeldInMemoryOnly", async () => {
     function Probe() {
       const query = useSession();
@@ -108,5 +144,28 @@ describe("SessionGate", () => {
         expect(key).not.toContain(session.csrf);
       }
     }
+  });
+
+  it("remounts the panel and clears old project and inventory data when the same user's access changes", async () => {
+    const user = userEvent.setup();
+    function Draft() {
+      const [open, setOpen] = useState(false);
+      return <button onClick={() => setOpen(true)}>{open ? "Draft open" : "Open draft"}</button>;
+    }
+    const { queryClient } = renderPanel(<SessionGate><Draft /></SessionGate>, { session });
+    await user.click(screen.getByRole("button", { name: "Open draft" }));
+    expect(screen.getByRole("button", { name: "Draft open" })).toBeTruthy();
+
+    const inventoryKey = ["admin-inventory", "first-page"];
+    act(() => {
+      queryClient.setQueryData(["projects"], ["old-project"]);
+      queryClient.setQueryData(inventoryKey, ["old-resource"]);
+      queryClient.setQueryData(sessionKey, { ...session, admin: false, user: { ...session.user, groups: ["project-viewer"] } });
+    });
+
+    expect(await screen.findByRole("button", { name: "Open draft" })).toBeTruthy();
+    expect(queryClient.getQueryData(["projects"])).toBeUndefined();
+    expect(queryClient.getQueryData(inventoryKey)).toBeUndefined();
+    expect(queryClient.getQueryData<Session>(sessionKey)?.admin).toBe(false);
   });
 });

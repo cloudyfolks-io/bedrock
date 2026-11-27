@@ -5,6 +5,9 @@ export interface DiskValues {
   imageName: string;
   imageScope: ImageScope;
   instanceType: string;
+  customSize: boolean;
+  cores: number | null;
+  memoryMiB: number | null;
   preference: string;
   rootDiskGi: number | null;
   storageClass: string;
@@ -28,6 +31,9 @@ export interface IsoValues {
   extraCdroms: string[];
   osPreference: string;
   instanceType: string;
+  customSize: boolean;
+  cores: number | null;
+  memoryMiB: number | null;
   rootDiskGi: number | null;
   storageClass: string;
   firmware: Firmware;

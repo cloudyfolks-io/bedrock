@@ -73,8 +73,20 @@ rules:
 - apiGroups:
   - apps
   resources:
+  - deployments
+  verbs:
+  - create
+  - get
+  - list
+  - patch
+  - watch
+- apiGroups:
+  - apps
+  resources:
   - controllerrevisions
   - daemonsets
+  - deployments
+  - statefulsets
   verbs:
   - get
   - list
@@ -82,10 +94,59 @@ rules:
 - apiGroups:
   - apps
   resources:
+  - replicasets
+  verbs:
+  - get
+- apiGroups:
+  - apps
+  resources:
   - deployments
   verbs:
   - get
   - patch
+- apiGroups:
+  - apps
+  resources:
+  - replicasets
+  verbs:
+  - list
+  - watch
+- apiGroups:
+  - autoscaling
+  resources:
+  - horizontalpodautoscalers
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - watch
+- apiGroups:
+  - barmancloud.cnpg.io
+  resources:
+  - objectstores
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - update
+  - watch
+- apiGroups:
+  - batch
+  resources:
+  - cronjobs
+  - jobs
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - update
+  - watch
 - apiGroups:
   - batch
   resources:
@@ -95,8 +156,6 @@ rules:
   - delete
   - get
   - list
-  - patch
-  - update
   - watch
 - apiGroups:
   - bedrock.cloudyfolks.io
@@ -110,13 +169,25 @@ rules:
   - authcodes/status
   - authrequests
   - authrequests/status
+  - builds
+  - builds/status
   - clusterconfigs
   - clusterimages
   - clusterimages/status
   - clusters
   - clusters/status
+  - containers
+  - containers/status
   - credentials
   - credentials/status
+  - databaseclasses
+  - databases
+  - databases/status
+  - databaseschemas
+  - databaseschemas/status
+  - databaseusers
+  - databaseusers/status
+  - databaseversions
   - devicerequests
   - devicerequests/status
   - dnszones
@@ -133,8 +204,14 @@ rules:
   - identityproviders/status
   - images
   - images/status
+  - internetgateways
+  - internetgateways/status
+  - kubernetesclusters
+  - kubernetesclusters/status
   - loadbalancers
   - loadbalancers/status
+  - networkpeerings
+  - networkpeerings/status
   - networks
   - networks/status
   - nodeupgrades
@@ -149,6 +226,12 @@ rules:
   - projects/status
   - refreshtokens
   - refreshtokens/status
+  - registries
+  - registries/finalizers
+  - registries/status
+  - registrycredentials
+  - registrycredentials/finalizers
+  - registrycredentials/status
   - releases
   - releases/status
   - securitygroups
@@ -196,6 +279,9 @@ rules:
 - apiGroups:
   - bedrock.cloudyfolks.io
   resources:
+  - builds/finalizers
+  - containers/finalizers
+  - kubernetesclusters/finalizers
   - securitygroups/finalizers
   - subnets/finalizers
   - virtualmachines/finalizers
@@ -240,6 +326,7 @@ rules:
   - cephblockpools
   - cephclusters
   - cephfilesystems
+  - cephobjectstoreaccounts
   - cephobjectstores
   - cephobjectstoreusers
   verbs:
@@ -263,6 +350,7 @@ rules:
   resources:
   - certificates
   - clusterissuers
+  - issuers
   verbs:
   - create
   - delete
@@ -276,12 +364,8 @@ rules:
   resources:
   - leases
   verbs:
-  - create
-  - delete
   - get
   - list
-  - patch
-  - update
   - watch
 - apiGroups:
   - csi.ceph.io
@@ -301,8 +385,11 @@ rules:
   resources:
   - bgp-confs
   - dns-zones
+  - loadbalancer-pools
+  - loadbalancers
   - ovn-eips
   - ovn-fips
+  - ovn-snat-rules
   - provider-networks
   - router-lb-rules
   - security-groups
@@ -340,6 +427,25 @@ rules:
   - virtualmachineclusterpreferences
   verbs:
   - get
+- apiGroups:
+  - k0s.k0sproject.io
+  resources:
+  - clusterconfigs
+  verbs:
+  - get
+  - patch
+- apiGroups:
+  - k0smotron.io
+  resources:
+  - clusters
+  - jointokenrequests
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - watch
 - apiGroups:
   - k8s.cni.cncf.io
   resources:
@@ -400,9 +506,35 @@ rules:
   - list
   - watch
 - apiGroups:
+  - kubevirt.io
+  resources:
+  - virtualmachineinstances
+  verbs:
+  - list
+- apiGroups:
+  - kubevirt.io
+  resources:
+  - virtualmachineinstancemigrations
+  verbs:
+  - list
+  - watch
+- apiGroups:
+  - migrations.kubevirt.io
+  resources:
+  - migrationpolicies
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - update
+  - watch
+- apiGroups:
   - monitoring.coreos.com
   resources:
   - alertmanagers
+  - podmonitors
   - prometheuses
   - prometheusrules
   - servicemonitors
@@ -452,9 +584,25 @@ rules:
   - update
   - watch
 - apiGroups:
+  - node.k8s.io
+  resources:
+  - runtimeclasses
+  verbs:
+  - get
+  - list
+  - watch
+- apiGroups:
   - objectbucket.io
   resources:
   - objectbucketclaims
+  verbs:
+  - get
+  - list
+  - watch
+- apiGroups:
+  - policy
+  resources:
+  - poddisruptionbudgets
   verbs:
   - create
   - delete
@@ -464,9 +612,25 @@ rules:
   - update
   - watch
 - apiGroups:
-  - policy
+  - postgresql.cnpg.io
   resources:
-  - poddisruptionbudgets
+  - backups
+  - clusters
+  - scheduledbackups
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - update
+  - watch
+- apiGroups:
+  - ps.percona.com
+  resources:
+  - perconaservermysqlbackups
+  - perconaservermysqlrestores
+  - perconaservermysqls
   verbs:
   - create
   - delete
@@ -558,6 +722,14 @@ rules:
 - apiGroups:
   - snapshot.storage.k8s.io
   resources:
+  - volumesnapshotcontents
+  verbs:
+  - get
+  - list
+  - watch
+- apiGroups:
+  - snapshot.storage.k8s.io
+  resources:
   - volumesnapshotclasses
   verbs:
   - list
@@ -589,6 +761,7 @@ rules:
   - ingressroutes
   - middlewares
   - serverstransports
+  - tlsoptions
   - tlsstores
   verbs:
   - create
@@ -641,6 +814,8 @@ rules:
   - ""
   resources:
   - configmaps
+  - persistentvolumeclaims
+  - resourcequotas
   - serviceaccounts
   - services
   verbs:
@@ -663,7 +838,16 @@ rules:
 - apiGroups:
   - ""
   resources:
-  - namespaces
+  - secrets
+  verbs:
+  - create
+  - delete
+  - get
+  - patch
+  - update
+- apiGroups:
+  - ""
+  resources:
   - pods/exec
   verbs:
   - create
@@ -682,6 +866,8 @@ rules:
 - apiGroups:
   - ""
   resources:
+  - configmaps
+  - namespaces
   - secrets
   verbs:
   - create
@@ -713,6 +899,13 @@ rules:
 - apiGroups:
   - ""
   resources:
+  - endpoints
+  - secrets
+  verbs:
+  - get
+- apiGroups:
+  - ""
+  resources:
   - nodes
   verbs:
   - get
@@ -737,4 +930,18 @@ rules:
   verbs:
   - list
   - patch
+  - watch
+- apiGroups:
+  - ""
+  resources:
+  - secrets
+  verbs:
+  - list
+  - update
+- apiGroups:
+  - ""
+  resources:
+  - pods
+  verbs:
+  - list
   - watch

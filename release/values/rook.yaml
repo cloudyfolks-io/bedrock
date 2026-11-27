@@ -5,5 +5,5 @@ csi:
   installCsiOperator: true
 enableDiscoveryDaemon: false
 monitoring:
-  enabled: false
+  enabled: true
 obcAllowAdditionalConfigFields: "maxObjects,maxSize,bucketMaxObjects,bucketMaxSize,bucketOwner"

@@ -10,6 +10,7 @@ import (
 var requiredKinds = []schema.GroupKind{
 	{Group: fabric.Group, Kind: "Vpc"},
 	{Group: fabric.Group, Kind: "Subnet"},
+	{Group: fabric.Group, Kind: "LoadBalancerPool"},
 	attachmentGVK.GroupKind(),
 }
 
@@ -29,11 +30,13 @@ func SetupWithManager(mgr ctrl.Manager) error {
 	for _, r := range []registrar{
 		&UnderlayReconciler{Client: c},
 		&NetworkReconciler{Client: c, Reader: mgr.GetAPIReader()},
+		&NetworkPeeringReconciler{Client: c, Reader: mgr.GetAPIReader()},
 		&SubnetReconciler{Client: c},
 		&SecurityGroupReconciler{Client: c},
 		&DefaultGroupReconciler{Client: c},
 		&ElasticIPReconciler{Client: c},
 		&LoadBalancerReconciler{Client: c, Kinds: known},
+		&InternetGatewayReconciler{Client: c, Kinds: known},
 		&DNSZoneReconciler{Client: c, Kinds: known},
 	} {
 		if err := r.SetupWithManager(mgr); err != nil {

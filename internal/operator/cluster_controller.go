@@ -6,13 +6,16 @@ import (
 	"slices"
 	"time"
 
+	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/equality"
 	"k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/wait"
+	"k8s.io/client-go/tools/record"
 	"k8s.io/client-go/util/retry"
 	ctrl "sigs.k8s.io/controller-runtime"
+	"sigs.k8s.io/controller-runtime/pkg/builder"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	"github.com/cloudyfolks-io/bedrock/api/v1alpha1"
@@ -30,6 +33,7 @@ type ClusterReconciler struct {
 	UpgradeInterval time.Duration
 	Exec            execFunc
 	Dial            func(ctx context.Context, address string) error
+	Recorder        record.EventRecorder
 }
 
 func (r *ClusterReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
@@ -47,7 +51,20 @@ func (r *ClusterReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 	case routeInstall:
 		return r.reconcileInstall(ctx, cluster)
 	case routeSteady:
-		return ctrl.Result{}, r.reconcileSteady(ctx, cluster)
+		if err := r.reconcileSteady(ctx, cluster); err != nil {
+			return ctrl.Result{}, err
+		}
+		if err := r.reconcileFabricMasters(ctx); err != nil {
+			return ctrl.Result{}, err
+		}
+		if err := r.reconcileTenantLegs(ctx); err != nil {
+			return ctrl.Result{}, err
+		}
+		if err := r.reconcileNodePorts(ctx); err != nil {
+			return ctrl.Result{}, err
+		}
+		wait, err := r.reconcileEncryption(ctx)
+		return ctrl.Result{RequeueAfter: wait}, err
 	case routeOld:
 		return runUpgrade(ctx, r.upgradeEnv(), cluster, oldRole())
 	case routeNew:
@@ -89,10 +106,11 @@ func (r *ClusterReconciler) reconcileInstall(ctx context.Context, cluster v1alph
 			return ctrl.Result{}, err
 		}
 	}
-	vars, err := release.Vars(ctx, r.Client, cluster.Spec.API.VIP)
+	vars, err := release.Vars(ctx, r.APIReader, cluster.Spec.API.VIP)
 	if err != nil {
 		return ctrl.Result{}, err
 	}
+	vars = release.WithPodMTU(vars, cluster.Spec.PodMTU)
 	if release.Uses(r.Bundle, release.VarMasterIPs) && vars[release.VarMasterIPs] == "" {
 		return ctrl.Result{RequeueAfter: 15 * time.Second}, r.writeStatus(ctx, func(s *v1alpha1.ClusterStatus) {
 			setCondition(s, v1alpha1.ConditionProgressing, metav1.ConditionTrue, "WaitingForMasterNodes", fmt.Sprintf("no node carries %s=master yet", roles.FabricRoleLabel), cluster.Generation)
@@ -116,7 +134,7 @@ func (r *ClusterReconciler) install(ctx context.Context, generation int64, vars 
 			ctrl.LoggerFrom(ctx).Error(err, "write component status", "component", group.Name)
 		}
 	}
-	err := release.InstallGroups(ctx, r.Client, r.Bundle, vars, r.Gates, r.Interval, r.GroupTimeout, report, authnBootstrapHook(r.Client), release.SkipHook)
+	err := release.InstallGroups(ctx, r.Client, r.Bundle, vars, r.Gates, r.Interval, r.GroupTimeout, report, beforeGroupHooks(r.Client), release.SkipHook)
 	if err != nil {
 		if ctx.Err() != nil {
 			return err
@@ -236,5 +254,6 @@ func (r *ClusterReconciler) SetupWithManager(mgr ctrl.Manager) error {
 		For(&v1alpha1.Cluster{}).
 		Watches(&v1alpha1.NodeUpgrade{}, enqueueCluster()).
 		Watches(&v1alpha1.Host{}, enqueueCluster()).
+		Watches(&corev1.Node{}, enqueueCluster(), builder.WithPredicates(fabricMasterChange())).
 		Complete(r)
 }

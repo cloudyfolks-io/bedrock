@@ -59,6 +59,52 @@ func TestValidateRejectsBadInput(t *testing.T) {
 	}
 }
 
+func TestValidatePodMTU(t *testing.T) {
+	cases := map[int32]bool{-1: false, 0: true, 575: false, 576: true, 1500: true, 9000: true, 9001: false}
+	for mtu, valid := range cases {
+		cfg, err := Load(filepath.Join("testdata", "single-node.yaml"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		cfg.Spec.Network.PodMTU = mtu
+		if err := Validate(cfg); (err == nil) != valid {
+			t.Errorf("podMTU %d: valid %v, error %v", mtu, valid, err)
+		}
+	}
+}
+
+func TestLoadReadsPodMTU(t *testing.T) {
+	raw, err := os.ReadFile(filepath.Join("testdata", "single-node.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(t.TempDir(), "cluster.yaml")
+	patched := strings.Replace(string(raw), "  network:\n", "  network:\n    podMTU: 1500\n", 1)
+	if patched == string(raw) {
+		t.Fatal("the fixture has no network section to patch")
+	}
+	if err := os.WriteFile(path, []byte(patched), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Spec.Network.PodMTU != 1500 || ToCluster(cfg).Spec.PodMTU != 1500 {
+		t.Fatalf("podMTU %d, cluster %d", cfg.Spec.Network.PodMTU, ToCluster(cfg).Spec.PodMTU)
+	}
+}
+
+func TestToClusterLeavesPodMTUEmptyByDefault(t *testing.T) {
+	cfg, err := Load(filepath.Join("testdata", "single-node.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := ToCluster(cfg).Spec.PodMTU; got != 0 {
+		t.Fatalf("podMTU %d", got)
+	}
+}
+
 func TestValidateAllowsNoDevices(t *testing.T) {
 	cfg, err := Load(filepath.Join("testdata", "single-node.yaml"))
 	if err != nil {
@@ -84,7 +130,7 @@ func TestToObjects(t *testing.T) {
 		t.Fatalf("host %+v", host.Spec)
 	}
 	settings := ToSettings(cfg)
-	want := map[string]string{"platform.tls-mode": "SelfSigned", "storage.replicas": "1", "kata.enabled": "true", "platform.host": "cloud.example.com"}
+	want := map[string]string{"platform.tls-mode": "SelfSigned", "storage.replicas": "1", "kata.enabled": "true", "descheduler.enabled": "false", "platform.host": "cloud.example.com"}
 	for _, s := range settings {
 		if v, ok := want[s.Name]; ok && s.Spec.Value != v {
 			t.Fatalf("setting %s = %q, want %q", s.Name, s.Spec.Value, v)
@@ -220,6 +266,30 @@ func TestToSettingsCarriesProviderNetworks(t *testing.T) {
 	}
 }
 
+func TestToSettingsCarriesTheProviderNetworkRole(t *testing.T) {
+	cfg, err := Load(filepath.Join("testdata", "single-node.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg.Spec.Network.Fabric.ProviderNetworks[0].Role = v1alpha1.ProviderRolePlatform
+	for _, s := range ToSettings(cfg) {
+		if s.Name == "network.provider-networks" && !strings.Contains(s.Spec.Value, `"role":"platform"`) {
+			t.Fatalf("value %q", s.Spec.Value)
+		}
+	}
+}
+
+func TestValidateRejectsAnUnknownProviderNetworkRole(t *testing.T) {
+	cfg, err := Load(filepath.Join("testdata", "single-node.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg.Spec.Network.Fabric.ProviderNetworks[0].Role = "public"
+	if err := Validate(cfg); err == nil {
+		t.Fatal("an unknown role must be refused")
+	}
+}
+
 func TestToSettingsWithoutProviderNetworks(t *testing.T) {
 	for _, s := range ToSettings(v1alpha1.ClusterConfig{}) {
 		if s.Name == "network.provider-networks" && s.Spec.Value != "" {
@@ -332,7 +402,12 @@ func TestLoadReadsAdopt(t *testing.T) {
 	if err := yaml.Unmarshal(adopt.Cephx.Raw, &cephx); err != nil {
 		t.Fatal(err)
 	}
-	want := map[string]any{"daemon": map[string]any{"keyType": "aes256k", "keyGeneration": float64(2)}}
+	want := map[string]any{
+		"allowedCiphers": []any{"aes256k"},
+		"daemon":         map[string]any{"keyGeneration": float64(2)},
+		"csi":            map[string]any{"keyType": "aes256k", "keyGeneration": float64(3)},
+		"rbdMirrorPeer":  map[string]any{"keyGeneration": float64(2)},
+	}
 	if !reflect.DeepEqual(cephx, want) {
 		t.Fatalf("cephx %v, want %v", cephx, want)
 	}
@@ -454,7 +529,7 @@ func TestLoadRefusesScalarCephx(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	scalar := strings.Replace(string(base), "      cephx:\n        daemon:\n          keyType: aes256k\n          keyGeneration: 2\n", "      cephx: foo\n", 1)
+	scalar := strings.Replace(string(base), "      cephx:\n        allowedCiphers: [aes256k]\n        daemon:\n          keyGeneration: 2\n        csi:\n          keyType: aes256k\n          keyGeneration: 3\n        rbdMirrorPeer:\n          keyGeneration: 2\n", "      cephx: foo\n", 1)
 	if scalar == string(base) {
 		t.Fatal("testdata has no cephx block to replace")
 	}
@@ -517,5 +592,252 @@ func TestToHostTakesTheDevicesOfItsAdoptNode(t *testing.T) {
 	}
 	if got := ToHost(cfg, "node-9").Spec.Storage.Devices; len(got) != 0 {
 		t.Fatalf("unlisted node got devices %v", got)
+	}
+}
+
+func adoptConfigWithCephx(cephxJSON string) v1alpha1.ClusterConfig {
+	cfg := v1alpha1.ClusterConfig{}
+	cfg.Spec.Storage.Adopt = &v1alpha1.AdoptSpec{}
+	if cephxJSON != "" {
+		cfg.Spec.Storage.Adopt.Cephx = &runtime.RawExtension{Raw: []byte(cephxJSON)}
+	}
+	return cfg
+}
+
+func configWithClusterServices(t *testing.T) v1alpha1.ClusterConfig {
+	t.Helper()
+	cfg, err := Load(filepath.Join("testdata", "single-node.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg.Spec.DNS.Upstreams = []string{"217.218.127.127", "217.218.155.155"}
+	cfg.Spec.Egress = v1alpha1.EgressSpec{
+		HTTPProxy:        "http://proxy.kube-system:10808",
+		NoProxy:          []string{"10.0.0.0/8", ".svc"},
+		DNS01Nameservers: []string{"https://one.one.one.one/dns-query"},
+	}
+	return cfg
+}
+
+func TestWithCephxCipherPicksByKernelOnAFreshCluster(t *testing.T) {
+	cases := map[string]string{"7.0.1": "aes256k", "6.8.0-45-generic": "aes", "": "aes"}
+	for kernel, want := range cases {
+		if got := WithCephxCipher(v1alpha1.ClusterConfig{}, kernel).Spec.Storage.CephxCipher; got != want {
+			t.Errorf("kernel %q: got %q, want %q", kernel, got, want)
+		}
+	}
+}
+
+func TestSettingValuesCarryDNSAndEgress(t *testing.T) {
+	got := SettingValues(configWithClusterServices(t))
+	want := map[string]string{
+		"dns.upstreams":                 "217.218.127.127 217.218.155.155",
+		"egress.http-proxy":             "http://proxy.kube-system:10808",
+		"egress.no-proxy":               "10.0.0.0/8,.svc",
+		"letsencrypt.dns01-nameservers": "https://one.one.one.one/dns-query",
+	}
+	for key, value := range want {
+		if got[key] != value {
+			t.Errorf("%s = %q, want %q", key, got[key], value)
+		}
+	}
+}
+
+func TestWithCephxCipherKeepsTheExplicitChoice(t *testing.T) {
+	cfg := v1alpha1.ClusterConfig{}
+	cfg.Spec.Storage.CephxCipher = "aes"
+	if got := WithCephxCipher(cfg, "7.0.1").Spec.Storage.CephxCipher; got != "aes" {
+		t.Fatalf("got %q", got)
+	}
+}
+
+func TestWithCephxCipherCopiesTheLiveModeOfAnAdoptedCluster(t *testing.T) {
+	live := `{"csi":{"keyType":"aes256k","keyGeneration":3}}`
+	if got := WithCephxCipher(adoptConfigWithCephx(live), "5.15.0").Spec.Storage.CephxCipher; got != "aes256k" {
+		t.Fatalf("aes256k cluster: got %q", got)
+	}
+	if got := WithCephxCipher(adoptConfigWithCephx(`{"csi":{"keyType":"aes","keyGeneration":1}}`), "7.0.1").Spec.Storage.CephxCipher; got != "aes" {
+		t.Fatalf("aes cluster: got %q", got)
+	}
+	if got := WithCephxCipher(adoptConfigWithCephx(""), "7.0.1").Spec.Storage.CephxCipher; got != "aes" {
+		t.Fatalf("no cephx: got %q", got)
+	}
+}
+
+func TestWithCephxCipherReadsAllowedCiphers(t *testing.T) {
+	raw := `{"allowedCiphers":["aes256k"],"daemon":{"keyGeneration":2}}`
+	if got := WithCephxCipher(adoptConfigWithCephx(raw), "5.15.0").Spec.Storage.CephxCipher; got != "aes256k" {
+		t.Fatalf("allowedCiphers aes256k: got %q", got)
+	}
+}
+
+func TestToSettingsCarriesTheCephxCipher(t *testing.T) {
+	values := map[string]string{}
+	for _, s := range ToSettings(WithCephxCipher(v1alpha1.ClusterConfig{}, "7.0.1")) {
+		values[s.Name] = s.Spec.Value
+	}
+	if values["storage.cephx-cipher"] != "aes256k" {
+		t.Fatalf("settings %v", values)
+	}
+	for _, s := range ToSettings(v1alpha1.ClusterConfig{}) {
+		if s.Name == "storage.cephx-cipher" && s.Spec.Value != "aes" {
+			t.Fatalf("default %q", s.Spec.Value)
+		}
+	}
+}
+
+func TestValidateAdoptCephxNeedsTheGenerationsOfTheOldCluster(t *testing.T) {
+	cases := map[string]bool{
+		`{"daemon":{"keyType":"aes256k","keyGeneration":2}}`: true,
+		`{"daemon":{"keyType":"aes256k"}}`:                   false,
+		`{"csi":{"keyType":"aes"}}`:                          false,
+		`{"csi":{"keyType":"aes256k","keyGeneration":3},"daemon":{"keyGeneration":2},"rbdMirrorPeer":{"keyGeneration":2}}`: true,
+		`{"csi":{"keyType":"aes256k","keyGeneration":3},"daemon":{"keyGeneration":2}}`:                                     false,
+		`{"allowedCiphers":["aes256k"],"csi":{"keyType":"aes256k","keyGeneration":3},"rbdMirrorPeer":{"keyGeneration":2}}`: false,
+	}
+	for raw, valid := range cases {
+		err := validateAdoptCephx(&runtime.RawExtension{Raw: []byte(raw)})
+		if valid != (err == nil) {
+			t.Errorf("%s: err %v, want valid %v", raw, err, valid)
+		}
+	}
+}
+
+func TestToClusterCarriesManagementCIDRAndTenantLegs(t *testing.T) {
+	cfg := v1alpha1.ClusterConfig{}
+	cfg.Spec.Network.ManagementCIDR = "10.0.10.0/24"
+	cfg.Spec.Network.TenantLegs = []v1alpha1.TenantLegSpec{{Interface: "br-public.30", AllowSources: []string{"100.65.0.1/32"}}}
+	spec := ToCluster(cfg).Spec
+	if spec.ManagementCIDR != "10.0.10.0/24" || len(spec.TenantLegs) != 1 || spec.TenantLegs[0].AllowSources[0] != "100.65.0.1/32" {
+		t.Fatalf("spec %+v", spec)
+	}
+	spec.TenantLegs[0].AllowSources[0] = "changed"
+	if cfg.Spec.Network.TenantLegs[0].AllowSources[0] == "changed" {
+		t.Fatal("ToCluster must not share leg sources with the config")
+	}
+}
+
+func TestValidateRejectsBadManagementCIDRAndLegs(t *testing.T) {
+	base, err := Load(filepath.Join("testdata", "single-node.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for name, mutate := range map[string]func(*v1alpha1.ClusterConfig){
+		"management cidr": func(c *v1alpha1.ClusterConfig) { c.Spec.Network.ManagementCIDR = "10.0.10.1" },
+		"leg interface": func(c *v1alpha1.ClusterConfig) {
+			c.Spec.Network.TenantLegs = []v1alpha1.TenantLegSpec{{Interface: "a b"}}
+		},
+		"leg source": func(c *v1alpha1.ClusterConfig) {
+			c.Spec.Network.TenantLegs = []v1alpha1.TenantLegSpec{{Interface: "leg0", AllowSources: []string{"nope"}}}
+		},
+		"any source": func(c *v1alpha1.ClusterConfig) {
+			c.Spec.Network.TenantLegs = []v1alpha1.TenantLegSpec{{Interface: "leg0", AllowSources: []string{"::/0"}}}
+		},
+		"leg is the management interface": func(c *v1alpha1.ClusterConfig) {
+			c.Spec.Network.TenantLegs = []v1alpha1.TenantLegSpec{{Interface: c.Spec.Network.ManagementInterface}}
+		},
+		"leg is the vlan parent of the management interface": func(c *v1alpha1.ClusterConfig) {
+			c.Spec.Network.ManagementInterface = "bond0.10"
+			c.Spec.Network.TenantLegs = []v1alpha1.TenantLegSpec{{Interface: "bond0"}}
+		},
+		"duplicate leg": func(c *v1alpha1.ClusterConfig) {
+			c.Spec.Network.TenantLegs = []v1alpha1.TenantLegSpec{{Interface: "leg0"}, {Interface: "leg0"}}
+		},
+	} {
+		cfg := *base.DeepCopy()
+		mutate(&cfg)
+		if err := Validate(cfg); err == nil {
+			t.Fatalf("%s: expected an error", name)
+		}
+	}
+	cfg := *base.DeepCopy()
+	cfg.Spec.Network.ManagementCIDR = "10.0.10.0/24"
+	cfg.Spec.Network.TenantLegs = []v1alpha1.TenantLegSpec{{Interface: "br-public.30", AllowSources: []string{"100.65.0.1/32"}}}
+	if err := Validate(cfg); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestSettingValuesAreEmptyWithoutDNSAndEgress(t *testing.T) {
+	cfg, err := Load(filepath.Join("testdata", "single-node.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := SettingValues(cfg)
+	for _, key := range []string{"dns.upstreams", "egress.http-proxy", "egress.no-proxy", "letsencrypt.dns01-nameservers"} {
+		if value, ok := got[key]; !ok || value != "" {
+			t.Errorf("%s = %q (present %v)", key, value, ok)
+		}
+	}
+}
+
+func TestToSettingsCarriesDNSAndEgress(t *testing.T) {
+	got := map[string]string{}
+	for _, s := range ToSettings(configWithClusterServices(t)) {
+		got[s.Name] = s.Spec.Value
+	}
+	if got["dns.upstreams"] != "217.218.127.127 217.218.155.155" || got["egress.http-proxy"] != "http://proxy.kube-system:10808" {
+		t.Fatalf("settings %v", got)
+	}
+}
+
+func TestValidateRejectsAnInvalidDNSOrEgressValue(t *testing.T) {
+	cases := map[string]func(*v1alpha1.ClusterConfig){
+		"spec.dns.upstreams":           func(c *v1alpha1.ClusterConfig) { c.Spec.DNS.Upstreams = []string{"dns.example.com"} },
+		"spec.egress.httpProxy":        func(c *v1alpha1.ClusterConfig) { c.Spec.Egress.HTTPProxy = "proxy:3128" },
+		"spec.egress.noProxy":          func(c *v1alpha1.ClusterConfig) { c.Spec.Egress.NoProxy = []string{"a b"} },
+		"spec.egress.dns01Nameservers": func(c *v1alpha1.ClusterConfig) { c.Spec.Egress.DNS01Nameservers = []string{"1.1.1.1"} },
+	}
+	for field, mutate := range cases {
+		cfg := configWithClusterServices(t)
+		mutate(&cfg)
+		if err := Validate(cfg); err == nil || !strings.Contains(err.Error(), field) {
+			t.Errorf("%s: error %v", field, err)
+		}
+	}
+}
+
+func TestValidateAcceptsDNSAndEgress(t *testing.T) {
+	if err := Validate(configWithClusterServices(t)); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestInstallWritesTheOVNTLSSettingOnlyWhenConfigured(t *testing.T) {
+	raw, err := os.ReadFile(filepath.Join("testdata", "single-node.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, mode := range []string{"", "true", "false"} {
+		t.Run("mode="+mode, func(t *testing.T) {
+			config := string(raw)
+			if mode != "" {
+				config = strings.Replace(config, "    fabric:\n", "    fabric:\n      ovnTLS: "+mode+"\n", 1)
+			}
+			path := filepath.Join(t.TempDir(), "cluster.yaml")
+			if err := os.WriteFile(path, []byte(config), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			cfg, err := Load(path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			key := "network.ovn-tls"
+			value, found := SettingValues(cfg)[key]
+			if value != mode || found != (mode != "") {
+				t.Fatalf("%s setting = %q, present = %v", key, value, found)
+			}
+			for _, setting := range ToSettings(cfg) {
+				if setting.Name == key {
+					if mode == "" || setting.Spec.Value != mode {
+						t.Fatalf("unexpected %s setting object with value %q", key, setting.Spec.Value)
+					}
+					return
+				}
+			}
+			if mode != "" {
+				t.Fatalf("missing %s setting object", key)
+			}
+		})
 	}
 }

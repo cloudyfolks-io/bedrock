@@ -131,7 +131,7 @@ func requireChallenge(t *testing.T, step string, ch challenge, want string) {
 
 func (c *loginClient) signInAsAdmin(t *testing.T, e env, password string) {
 	t.Helper()
-	start := c.get(t, e.consoleURL("/oauth/login?returnTo=/admin/hosts"))
+	start := c.get(t, e.consoleURL("/oauth/login?returnTo=/admin/inventory"))
 	authorize := redirectLocation(t, "console login", start)
 	if authorize.Host != "sso."+e.host {
 		t.Fatalf("console login redirects to %s, want sso.%s", authorize, e.host)
@@ -147,7 +147,7 @@ func (c *loginClient) signInAsAdmin(t *testing.T, e env, password string) {
 		t.Fatalf("authorize callback redirects to %s, want the console callback", callback)
 	}
 	landing := redirectLocation(t, "console callback", c.get(t, callback.String()))
-	if landing.Path != "/admin/hosts" {
-		t.Fatalf("console callback redirects to %s, want /admin/hosts", landing)
+	if landing.Path != "/admin/inventory" {
+		t.Fatalf("console callback redirects to %s, want /admin/inventory", landing)
 	}
 }

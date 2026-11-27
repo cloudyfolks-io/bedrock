@@ -1,0 +1,123 @@
+.inventory {
+  min-inline-size: 0;
+}
+
+.results {
+  min-inline-size: 0;
+  border: 1px solid var(--br-color-border);
+  border-radius: .625rem;
+  background: var(--br-color-surface);
+  font-size: .875rem;
+}
+
+.resultsHead {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: .25rem .75rem;
+  padding: .75rem 1rem;
+}
+
+.resultsHead h2 {
+  margin: 0;
+  font-size: 1rem;
+  font-weight: 600;
+}
+
+.resultsHead span {
+  color: var(--br-color-text-muted);
+  font-size: .8125rem;
+}
+
+.tableViewport a {
+  color: var(--br-color-primary);
+  text-decoration-thickness: 1px;
+  text-underline-offset: .15em;
+}
+
+.tableViewport a:hover {
+  color: var(--br-color-text);
+}
+
+.filters,
+.search {
+  display: flex;
+  align-items: flex-end;
+  flex-wrap: wrap;
+  gap: .5rem .75rem;
+}
+
+.filters {
+  padding: .75rem 1rem;
+  border-block-end: 1px solid var(--br-color-border);
+  border-start-start-radius: inherit;
+  border-start-end-radius: inherit;
+  background: var(--br-color-surface-raised);
+}
+
+.filters > :global(.br-field),
+.search :global(.br-field) {
+  flex: 1 1 10rem;
+  min-inline-size: 0;
+}
+
+.search {
+  flex: 2 1 17rem;
+}
+
+.filters :is(:global(.br-field-input), :global(.br-select-trigger), :global(.br-button)) {
+  box-sizing: border-box;
+  min-inline-size: 0;
+  min-block-size: 2.25rem;
+}
+
+.results > :is(:global(.br-alert), :global(.br-empty), :global(.br-spinner)) {
+  margin: 1rem;
+}
+
+.tableViewport :global(.br-table-scroll) {
+  position: relative;
+}
+
+.tableViewport :global(.br-table-scroll):focus-visible {
+  outline-offset: -2px;
+}
+
+.tableViewport :global(.br-table-caption) {
+  position: absolute;
+  inline-size: 1px;
+  block-size: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  padding: 0;
+}
+
+.tableViewport :global(.br-th) {
+  background: var(--br-color-surface-raised);
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.tableViewport :is(:global(.br-th), :global(.br-td)) {
+  padding: .5rem 1rem;
+  border-block-start: 1px solid var(--br-color-border);
+  border-block-end: 0;
+  font-size: .875rem;
+}
+
+.tableViewport :global(.br-td) {
+  min-inline-size: 6rem;
+  overflow-wrap: anywhere;
+}
+
+.pagination {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  gap: .5rem;
+  padding: .625rem 1rem;
+  border-block-start: 1px solid var(--br-color-border);
+  color: var(--br-color-text-muted);
+}

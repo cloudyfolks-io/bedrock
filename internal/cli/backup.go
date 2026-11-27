@@ -9,6 +9,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"time"
 
 	"filippo.io/age"
 
@@ -16,9 +17,10 @@ import (
 )
 
 const (
-	backupUsage  = "usage: bedrock backup keygen | decrypt --in <path> --out <path|-> [--identity <path>]"
+	backupUsage  = "usage: bedrock backup keygen | rotate-key | decrypt --in <path> --out <path|-> [--identity <path>]"
 	decryptUsage = "usage: bedrock backup decrypt --in <path> --out <path|-> [--identity <path>]"
 	keygenUsage  = "usage: bedrock backup keygen"
+	rotateUsage  = "usage: bedrock backup rotate-key"
 	stdoutPath   = "-"
 )
 
@@ -30,6 +32,8 @@ func backupCommand(args []string, stdout, stderr io.Writer) int {
 	switch args[0] {
 	case "keygen":
 		return backupKeygen(args[1:], stdout, stderr)
+	case "rotate-key":
+		return RunBackupRotateKey(args[1:], "/", stdout, stderr)
 	case "decrypt":
 		return RunBackupDecrypt(args[1:], "/", stdout, stderr)
 	}
@@ -57,12 +61,30 @@ func backupKeygen(args []string, stdout, stderr io.Writer) int {
 	return 0
 }
 
+func RunBackupRotateKey(args []string, root string, stdout, stderr io.Writer) int {
+	flags := flag.NewFlagSet("backup rotate-key", flag.ContinueOnError)
+	flags.SetOutput(stderr)
+	if err := flags.Parse(args); err != nil {
+		return 2
+	}
+	if flags.NArg() != 0 {
+		fmt.Fprintln(stderr, rotateUsage)
+		return 2
+	}
+	identity, err := seal.RotateHostIdentity(root, time.Now())
+	if err != nil {
+		return fail(stderr, err)
+	}
+	fmt.Fprintln(stdout, identity.Recipient())
+	return 0
+}
+
 func RunBackupDecrypt(args []string, root string, stdout, stderr io.Writer) int {
 	flags := flag.NewFlagSet("backup decrypt", flag.ContinueOnError)
 	flags.SetOutput(stderr)
 	in := flags.String("in", "", "sealed archive path")
 	out := flags.String("out", "", "plain archive path, or - for stdout")
-	identity := flags.String("identity", filepath.Join(root, seal.HostKeyFile), "age identity file")
+	identity := flags.String("identity", "", "age identity file, default is the host key and its retired keys")
 	if err := flags.Parse(args); err != nil {
 		return 2
 	}
@@ -70,14 +92,14 @@ func RunBackupDecrypt(args []string, root string, stdout, stderr io.Writer) int 
 		fmt.Fprintln(stderr, decryptUsage)
 		return 2
 	}
-	if err := decryptArchive(*in, *out, *identity, stdout); err != nil {
+	if err := decryptArchive(*in, *out, root, *identity, stdout); err != nil {
 		return fail(stderr, fmt.Errorf("decrypt %s: %w", *in, err))
 	}
 	return 0
 }
 
-func decryptArchive(in, out, identityPath string, stdout io.Writer) error {
-	identities, err := readIdentities(identityPath)
+func decryptArchive(in, out, root, identityPath string, stdout io.Writer) error {
+	identities, err := loadIdentities(root, identityPath)
 	if err != nil {
 		return err
 	}
@@ -121,6 +143,17 @@ func checkDestination(src *os.File, out string) error {
 		return errors.New("--out is the input archive")
 	}
 	return nil
+}
+
+func loadIdentities(root, identityPath string) ([]age.Identity, error) {
+	if identityPath != "" {
+		return readIdentities(identityPath)
+	}
+	identities, err := seal.HostIdentities(root)
+	if err != nil {
+		return nil, fmt.Errorf("read the host key: %w", err)
+	}
+	return identities, nil
 }
 
 func readIdentities(path string) ([]age.Identity, error) {

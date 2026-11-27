@@ -17,6 +17,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	"github.com/cloudyfolks-io/bedrock/api/v1alpha1"
+	"github.com/cloudyfolks-io/bedrock/internal/release"
 	"github.com/cloudyfolks-io/bedrock/internal/roles"
 )
 
@@ -43,6 +44,8 @@ type preflightInput struct {
 	VMIs      []unstructured.Unstructured
 	VMs       []unstructured.Unstructured
 	Now       time.Time
+
+	CephxCipher string
 }
 
 func preflight(ctx context.Context, env upgradeEnv, cluster v1alpha1.Cluster) (phaseResult, error) {
@@ -78,6 +81,10 @@ func gatherPreflight(ctx context.Context, env upgradeEnv, cluster v1alpha1.Clust
 	if err != nil {
 		return preflightInput{}, err
 	}
+	values, err := settingValues(ctx, env.Client)
+	if err != nil {
+		return preflightInput{}, err
+	}
 	ceph, cephErr := readCeph(ctx, env.Client, env.Exec)
 	return preflightInput{
 		Cluster:   cluster,
@@ -91,6 +98,8 @@ func gatherPreflight(ctx context.Context, env upgradeEnv, cluster v1alpha1.Clust
 		VMIs:      vmis,
 		VMs:       vms,
 		Now:       time.Now(),
+
+		CephxCipher: values[cephxCipherKey],
 	}, nil
 }
 
@@ -124,7 +133,7 @@ func errorText(err error) string {
 }
 
 func preflightProblem(in preflightInput) string {
-	checks := []func(preflightInput) []string{adoptionProblems, releaseProblems, depotProblems, nodeProblems, spareProblems, hostProblems, etcdProblems, cephProblems, vmProblems}
+	checks := []func(preflightInput) []string{adoptionProblems, releaseProblems, depotProblems, nodeProblems, spareProblems, hostProblems, etcdProblems, cephProblems, cephxProblems, vmProblems}
 	var problems []string
 	for _, check := range checks {
 		problems = append(problems, check(in)...)
@@ -151,6 +160,9 @@ func etcdProblems(in preflightInput) []string {
 }
 
 func releaseProblems(in preflightInput) []string {
+	if release.IsDowngrade(in.Running, in.To) {
+		return []string{fmt.Sprintf("release: %s is older than the running %s: a downgrade is not supported", in.To, in.Running)}
+	}
 	if in.Target == nil {
 		return []string{fmt.Sprintf("release: Release/%s does not exist", in.To)}
 	}
@@ -322,12 +334,7 @@ func hostCheckProblems(in preflightInput, host v1alpha1.Host) []string {
 }
 
 func diskNeed(in preflightInput, host v1alpha1.Host) int64 {
-	checks := host.Status.Checks
-	need := 2*hostBundleBytes(in, host) + kubeletReserve(in, host)
-	if backup, ok := backupHost(in.Hosts); ok && backup.Name == host.Name {
-		need += 2 * checks.ImagesBytes
-	}
-	return need
+	return 2*hostBundleBytes(in, host) + kubeletReserve(in, host)
 }
 
 func kubeletReserve(in preflightInput, host v1alpha1.Host) int64 {
@@ -358,6 +365,10 @@ func cephProblems(in preflightInput) []string {
 		return []string{problem}
 	}
 	return nil
+}
+
+func cephxProblems(in preflightInput) []string {
+	return cephxKernelProblems(in.CephxCipher, in.Hosts)
 }
 
 func vmProblems(in preflightInput) []string {

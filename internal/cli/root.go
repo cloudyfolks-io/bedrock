@@ -4,6 +4,9 @@ import (
 	"fmt"
 	"io"
 	"sort"
+
+	ctrl "sigs.k8s.io/controller-runtime"
+	"sigs.k8s.io/controller-runtime/pkg/log/zap"
 )
 
 type Command func(args []string, stdout, stderr io.Writer) int
@@ -43,6 +46,7 @@ func Run(args []string, stdout, stderr io.Writer) int {
 		fmt.Fprintf(stderr, "unknown command: %s\n", args[0])
 		return 2
 	}
+	ctrl.SetLogger(zap.New())
 	return command(args[1:], stdout, stderr)
 }
 

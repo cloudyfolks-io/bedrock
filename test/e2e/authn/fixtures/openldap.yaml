@@ -29,13 +29,13 @@ data:
     cn: reader
     userPassword: reader-e2e-pw
 
-    dn: uid=alice,ou=people,dc=bedrock,dc=test
+    dn: uid=ldap-e2e-operator,ou=people,dc=bedrock,dc=test
     objectClass: inetOrgPerson
-    uid: alice
+    uid: ldap-e2e-operator
     cn: Alice Anderson
     sn: Anderson
-    mail: alice@bedrock.test
-    userPassword: alice-e2e-pw
+    mail: ldap-e2e-operator@bedrock.test
+    userPassword: ldap-e2e-operator-pw
 
     dn: uid=bob,ou=people,dc=bedrock,dc=test
     objectClass: inetOrgPerson
@@ -48,7 +48,7 @@ data:
     dn: cn=platform-ops,ou=groups,dc=bedrock,dc=test
     objectClass: groupOfNames
     cn: platform-ops
-    member: uid=alice,ou=people,dc=bedrock,dc=test
+    member: uid=ldap-e2e-operator,ou=people,dc=bedrock,dc=test
 
     dn: cn=readers,ou=groups,dc=bedrock,dc=test
     objectClass: groupOfNames

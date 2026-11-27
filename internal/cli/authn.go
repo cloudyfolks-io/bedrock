@@ -21,7 +21,6 @@ import (
 	"k8s.io/client-go/util/retry"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
-	"sigs.k8s.io/controller-runtime/pkg/log/zap"
 
 	"github.com/cloudyfolks-io/bedrock/api/v1alpha1"
 	"github.com/cloudyfolks-io/bedrock/internal/authn/apiserver"
@@ -63,7 +62,6 @@ func authnCommand(args []string, stdout, stderr io.Writer) int {
 	}
 	switch args[0] {
 	case "serve":
-		ctrl.SetLogger(zap.New())
 		return RunAuthnServe(ctrl.SetupSignalHandler(), args[1:], AuthnDeps{RestConfig: ctrl.GetConfig, Listen: net.Listen}, stdout, stderr)
 	case "reset-password":
 		return RunResetPassword(context.Background(), args[1:], newClusterClient, rand.Reader, stdout, stderr)

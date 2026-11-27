@@ -231,6 +231,9 @@ func TestClusterReconcilerAppliesItsRoleBeforeUpgrading(t *testing.T) {
 	ctx := context.Background()
 	bundle := rbacBundle(t)
 	bundle.Spec.Version = "v2"
+	if err := c.Create(ctx, &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: release.SystemNamespace}}); err != nil {
+		t.Fatal(err)
+	}
 	createClusterWithStatus(t, ctx, c, "v2", v1alpha1.ClusterStatus{Version: "v1", Phase: v1alpha1.PhaseIdle})
 	existing := &rbacv1.ClusterRole{
 		TypeMeta:   metav1.TypeMeta{APIVersion: rbacv1.SchemeGroupVersion.String(), Kind: "ClusterRole"},

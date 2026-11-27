@@ -55,7 +55,7 @@ func TestAuditConfigMapRejectsAnInvalidLevel(t *testing.T) {
 
 func alertmanagerConfig(t *testing.T, url string) map[string]any {
 	t.Helper()
-	secret, err := AlertmanagerSecret(url)
+	secret, err := AlertmanagerSecret(AlertmanagerTargets{Default: url})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -104,14 +104,91 @@ func TestAlertmanagerSecretWithAWebhook(t *testing.T) {
 	t.Fatal("no bedrock-webhook receiver")
 }
 
-func TestAlertmanagerSecretSilencesTheWatchdog(t *testing.T) {
-	for _, url := range []string{"", "https://hooks.example.test/alert"} {
-		routes := alertmanagerConfig(t, url)["route"].(map[string]any)["routes"].([]any)
-		sub := routes[0].(map[string]any)
-		matcher := sub["matchers"].([]any)[0].(string)
-		if sub["receiver"] != "null" || !strings.Contains(matcher, "Watchdog") || !strings.Contains(matcher, "InfoInhibitor") {
-			t.Errorf("url %q: sub-route %v", url, sub)
+func alertmanagerFor(t *testing.T, targets AlertmanagerTargets) (map[string]any, map[string]map[string]any) {
+	t.Helper()
+	secret, err := AlertmanagerSecret(targets)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var config map[string]any
+	if err := sigyaml.Unmarshal(secret.Data["alertmanager.yaml"], &config); err != nil {
+		t.Fatal(err)
+	}
+	receivers := map[string]map[string]any{}
+	for _, item := range config["receivers"].([]any) {
+		receiver := item.(map[string]any)
+		receivers[receiver["name"].(string)] = receiver
+	}
+	return config, receivers
+}
+
+func routeFor(config map[string]any, matcher string) map[string]any {
+	for _, item := range config["route"].(map[string]any)["routes"].([]any) {
+		route := item.(map[string]any)
+		for _, m := range route["matchers"].([]any) {
+			if m == matcher {
+				return route
+			}
 		}
+	}
+	return nil
+}
+
+func TestAlertmanagerSecretSendsWatchdogAndInfoInhibitorToNullWithoutAHeartbeat(t *testing.T) {
+	for _, url := range []string{"", "https://hooks.example.test/alert"} {
+		config, _ := alertmanagerFor(t, AlertmanagerTargets{Default: url})
+		for _, matcher := range []string{`alertname = "Watchdog"`, `alertname = "InfoInhibitor"`} {
+			route := routeFor(config, matcher)
+			if route == nil || route["receiver"] != "null" {
+				t.Errorf("url %q matcher %s: route %v", url, matcher, route)
+			}
+		}
+		if routeFor(config, `severity = "critical"`) != nil || routeFor(config, `severity = "warning"`) != nil {
+			t.Errorf("url %q: severity routes without targets", url)
+		}
+	}
+}
+
+func TestAlertmanagerSecretRoutesBySeverityAndKeepsTheDefaultAsFallback(t *testing.T) {
+	config, receivers := alertmanagerFor(t, AlertmanagerTargets{Default: "https://hooks.example.test/all", Critical: "https://hooks.example.test/critical", Warning: "https://hooks.example.test/warning"})
+	if config["route"].(map[string]any)["receiver"] != "bedrock-webhook" {
+		t.Fatalf("route %v", config["route"])
+	}
+	for matcher, want := range map[string]string{`severity = "critical"`: "bedrock-critical", `severity = "warning"`: "bedrock-warning"} {
+		route := routeFor(config, matcher)
+		if route == nil || route["receiver"] != want {
+			t.Errorf("%s: route %v", matcher, route)
+		}
+	}
+	hook := receivers["bedrock-critical"]["webhook_configs"].([]any)[0].(map[string]any)
+	if hook["url"] != "https://hooks.example.test/critical" {
+		t.Errorf("hook %v", hook)
+	}
+	only, _ := alertmanagerFor(t, AlertmanagerTargets{Default: "https://hooks.example.test/all", Critical: "https://hooks.example.test/critical"})
+	if routeFor(only, `severity = "warning"`) != nil {
+		t.Error("warning has a route without a warning target")
+	}
+}
+
+func TestAlertmanagerSecretPostsTheWatchdogToTheHeartbeat(t *testing.T) {
+	config, receivers := alertmanagerFor(t, AlertmanagerTargets{Heartbeat: "https://hc.example.test/ping/abc"})
+	route := routeFor(config, `alertname = "Watchdog"`)
+	if route == nil || route["receiver"] != "bedrock-heartbeat" || route["repeat_interval"] != "1m" || route["group_wait"] != "0s" {
+		t.Fatalf("route %v", route)
+	}
+	hook := receivers["bedrock-heartbeat"]["webhook_configs"].([]any)[0].(map[string]any)
+	if hook["url"] != "https://hc.example.test/ping/abc" || hook["send_resolved"] != false {
+		t.Fatalf("hook %v", hook)
+	}
+	if config["route"].(map[string]any)["receiver"] != "null" {
+		t.Fatalf("default receiver %v", config["route"])
+	}
+}
+
+func TestAlertmanagerTargetsDropInvalidOptionalURLs(t *testing.T) {
+	got := alertmanagerTargets(map[string]string{"alertmanager.critical-webhook-url": "not a url", "alertmanager.warning-webhook-url": "https://hooks.example.test/w", "alertmanager.heartbeat-url": "ftp://x"})
+	if got.Critical != "" || got.Heartbeat != "" || got.Warning != "https://hooks.example.test/w" {
+		t.Fatalf("got %+v", got)
 	}
 }
 

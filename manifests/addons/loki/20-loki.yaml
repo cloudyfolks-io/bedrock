@@ -9,6 +9,8 @@ kind: Service
 metadata:
   name: loki
   namespace: monitoring
+  labels:
+    app.kubernetes.io/name: loki
 spec:
   selector:
     app.kubernetes.io/name: loki

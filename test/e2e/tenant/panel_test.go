@@ -7,10 +7,13 @@ import (
 	"encoding/json"
 	"io"
 	"net/http"
+	"net/url"
+	"slices"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/cloudyfolks-io/bedrock/api/v1alpha1"
 	"github.com/gorilla/websocket"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/types"
@@ -115,6 +118,47 @@ func requireAuthz(t *testing.T, e env, c *loginClient, csrf string) {
 	answer := decode[authzAnswer](t, "authz", data)
 	if len(answer.Results) != 2 || !answer.Results[0].Allowed || !answer.Results[1].Allowed {
 		t.Fatalf("authz answer %s, want both allowed for admin", printable(data))
+	}
+}
+
+func requireInventory(t *testing.T, e env, c *loginClient, project, viewerToken string) {
+	t.Helper()
+	status, body := c.request(t, e, http.MethodGet, "/proxy/v1/projects", "", "", "")
+	requireStatus(t, "admin project list", status, http.StatusOK, body)
+	type projectRef struct {
+		Name      string `json:"name"`
+		Namespace string `json:"namespace"`
+	}
+	projects := decode[struct {
+		Projects []projectRef `json:"projects"`
+	}](t, "project list", body)
+	if !slices.ContainsFunc(projects.Projects, func(item projectRef) bool {
+		return item.Name == project && item.Namespace == e.namespace
+	}) {
+		t.Fatalf("the admin project list omits %s in %s", project, e.namespace)
+	}
+	want, err := e.fetch(bedrockVirtualMachine, e.namespace, e.vm)
+	if err != nil {
+		t.Fatalf("read the expected inventory VM: %v", err)
+	}
+	query := url.Values{"limit": {"50"}, "fieldSelector": {"metadata.name=" + e.vm}}
+	clusterList := "/apis/" + bedrockGroupVersion + "/virtualmachines?" + query.Encode()
+	status, body = c.request(t, e, http.MethodGet, clusterList, "", "", "")
+	requireStatus(t, "admin cluster VM list", status, http.StatusOK, body)
+	list := decode[v1alpha1.VirtualMachineList](t, "admin inventory", body)
+	if !slices.ContainsFunc(list.Items, func(item v1alpha1.VirtualMachine) bool {
+		return item.UID == want.GetUID() && item.Name == want.GetName() && item.Namespace == want.GetNamespace()
+	}) {
+		t.Fatalf("the admin inventory omits VM %s/%s", e.namespace, e.vm)
+	}
+	status, body = e.bearer(t, viewerToken, http.MethodGet, e.apiURL(clusterList))
+	requireStatus(t, "project viewer cluster VM list", status, http.StatusForbidden, body)
+	projectList := "/apis/" + bedrockGroupVersion + "/namespaces/" + e.namespace + "/virtualmachines?" + query.Encode()
+	status, body = e.bearer(t, viewerToken, http.MethodGet, e.apiURL(projectList))
+	requireStatus(t, "project viewer namespace VM list", status, http.StatusOK, body)
+	list = decode[v1alpha1.VirtualMachineList](t, "viewer inventory", body)
+	if len(list.Items) != 1 || list.Items[0].UID != want.GetUID() {
+		t.Fatalf("the project inventory does not match VM %s/%s", e.namespace, e.vm)
 	}
 }
 
@@ -238,6 +282,10 @@ func TestPanelLoginAndStream(t *testing.T) {
 
 	t.Run("access checks answer for the admin", func(t *testing.T) {
 		requireAuthz(t, e, c, session.CSRF)
+	})
+
+	t.Run("the admin lists resources and a project viewer stays in their project", func(t *testing.T) {
+		requireInventory(t, e, c, requireEnv(t, "PROJECT"), requireEnv(t, "TOKEN_VIEWER"))
 	})
 
 	previous := e.settingValue(t)

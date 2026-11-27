@@ -6,7 +6,7 @@ import (
 	sigyaml "sigs.k8s.io/yaml"
 )
 
-var DefaultDisabledComponents = []string{"konnectivity-server", "metrics-server", "helm"}
+var DefaultDisabledComponents = []string{"konnectivity-server", "metrics-server", "helm", "coredns"}
 
 type Config struct {
 	VIP          string
@@ -14,6 +14,8 @@ type Config struct {
 	PodCIDR      string
 	ServiceCIDR  string
 	APIExtraArgs map[string]string
+
+	NodePortAddresses []string
 }
 
 func RenderConfig(c Config) ([]byte, error) {
@@ -43,7 +45,19 @@ func RenderConfig(c Config) ([]byte, error) {
 			"telemetry": map[string]any{"enabled": false},
 		},
 	}
+	if len(c.NodePortAddresses) > 0 {
+		doc["spec"].(map[string]any)["network"].(map[string]any)["kubeProxy"] = KubeProxy(c.NodePortAddresses)
+	}
 	return sigyaml.Marshal(doc)
+}
+
+func KubeProxy(nodePortAddresses []string) map[string]any {
+	return map[string]any{
+		"mode":               "iptables",
+		"nodePortAddresses":  nodePortAddresses,
+		"metricsBindAddress": "0.0.0.0:10249",
+		"healthzBindAddress": "0.0.0.0:10256",
+	}
 }
 
 func apiExtraArgs(extra map[string]string) map[string]any {

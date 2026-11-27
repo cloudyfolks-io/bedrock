@@ -13,9 +13,12 @@ const (
 	RoleFabricGateway = "fabric-gateway"
 	RoleWorkload      = "workload"
 
-	ConditionManagementApplied = "ManagementApplied"
-	ConditionMaintenanceMode   = "MaintenanceMode"
-	ConditionRebootPending     = "RebootPending"
+	ConditionManagementApplied  = "ManagementApplied"
+	ConditionImagesImported     = "ImagesImported"
+	ConditionEtcdOffClusterCopy = "EtcdOffClusterCopy"
+	ConditionMaintenanceMode    = "MaintenanceMode"
+	ConditionRebootPending      = "RebootPending"
+	ConditionTenantLegsPresent  = "TenantLegsPresent"
 )
 
 const (
@@ -97,6 +100,12 @@ type NICInfo struct {
 	Driver     string `json:"driver,omitempty"`
 }
 
+type LinkInfo struct {
+	Name      string   `json:"name"`
+	MTU       int32    `json:"mtu"`
+	Addresses []string `json:"addresses,omitempty"`
+}
+
 type PCIInfo struct {
 	Address    string `json:"address"`
 	Vendor     string `json:"vendor"`
@@ -122,6 +131,8 @@ type Inventory struct {
 	Disks []DiskInfo `json:"disks,omitempty"`
 	// +optional
 	NICs []NICInfo `json:"nics,omitempty"`
+	// +optional
+	Links []LinkInfo `json:"links,omitempty"`
 	// +optional
 	PCI []PCIInfo `json:"pci,omitempty"`
 	// +optional
@@ -188,6 +199,17 @@ type AuthnFilesStatus struct {
 	Message string `json:"message,omitempty"`
 }
 
+type EncryptionFileStatus struct {
+	// +optional
+	Hash string `json:"hash,omitempty"`
+	// +optional
+	RestartPending bool `json:"restartPending,omitempty"`
+	// +optional
+	FailedHash string `json:"failedHash,omitempty"`
+	// +optional
+	HandledGrant string `json:"handledGrant,omitempty"`
+}
+
 type HostStatus struct {
 	// +optional
 	ObservedGeneration int64 `json:"observedGeneration,omitempty"`
@@ -215,6 +237,10 @@ type HostStatus struct {
 	Restore *RestoreStatus `json:"restore,omitempty"`
 	// +optional
 	Authn *AuthnFilesStatus `json:"authn,omitempty"`
+	// +optional
+	Encryption *EncryptionFileStatus `json:"encryption,omitempty"`
+	// +optional
+	ReportedAt *metav1.Time `json:"reportedAt,omitempty"`
 }
 
 // +kubebuilder:object:root=true

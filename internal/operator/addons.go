@@ -48,6 +48,7 @@ type AddonInput struct {
 	ProxyInstalled bool
 	CephMonFSID    string
 	CephProblems   []string
+	CephxLive      LiveCephx
 }
 
 type Probe struct {
@@ -58,6 +59,7 @@ type Probe struct {
 
 type Rendered struct {
 	Objects     []*unstructured.Unstructured
+	Absent      []*unstructured.Unstructured
 	Probes      []Probe
 	SkipReason  string
 	SkipMessage string
@@ -157,6 +159,10 @@ func (r *AddonReconciler) input(ctx context.Context, cluster v1alpha1.Cluster) (
 		return AddonInput{}, err
 	}
 	input := AddonInput{Cluster: cluster, Hosts: hosts.Items, Settings: values, Bundle: r.Bundle, PlatformCA: platformCA, WebhookToken: string(secretData(token, WebhookTokenKey)), AuthnInstalled: installed, UploadProxyCA: uploadProxyCA, ProxyInstalled: proxyInstalled, CephMonFSID: monFSID}
+	input.CephxLive, err = readLiveCephx(ctx, r.Client, r.Exec, values[cephxCipherKey])
+	if err != nil {
+		return AddonInput{}, err
+	}
 	input.CephProblems = adoptedProblems(ctx, r.Client, r.Exec, input)
 	if values["platform.tls-mode"] != "Custom" || values["platform.custom-tls"] == "" {
 		return input, nil
@@ -244,7 +250,10 @@ func (r *AddonReconciler) applyRendered(ctx context.Context, addon Addon, render
 		return addonCondition(addon, metav1.ConditionFalse, rendered.SkipReason, rendered.SkipMessage), false
 	}
 	for _, obj := range rendered.Objects {
-		err := ssa.Apply(ctx, r.Client, obj, v1alpha1.OperatorFieldManager)
+		err := dropStaleStorageClass(ctx, r.Client, obj)
+		if err == nil {
+			err = ssa.Apply(ctx, r.Client, obj, v1alpha1.OperatorFieldManager)
+		}
 		if meta.IsNoMatchError(err) {
 			return addonCondition(addon, metav1.ConditionFalse, "MissingCRD", fmt.Sprintf("%s %s: %v", obj.GetKind(), obj.GetName(), err)), false
 		}
@@ -252,7 +261,27 @@ func (r *AddonReconciler) applyRendered(ctx context.Context, addon Addon, render
 			return addonCondition(addon, metav1.ConditionFalse, "ApplyFailed", fmt.Sprintf("%s %s: %v", obj.GetKind(), obj.GetName(), err)), false
 		}
 	}
+	for _, obj := range rendered.Absent {
+		err := r.deleteOwned(ctx, obj)
+		if err != nil && !errors.IsNotFound(err) && !meta.IsNoMatchError(err) {
+			return addonCondition(addon, metav1.ConditionFalse, "ApplyFailed", fmt.Sprintf("%s %s: %v", obj.GetKind(), obj.GetName(), err)), false
+		}
+	}
 	return r.probe(ctx, addon, rendered.Probes), true
+}
+
+func (r *AddonReconciler) deleteOwned(ctx context.Context, want *unstructured.Unstructured) error {
+	live := &unstructured.Unstructured{}
+	live.SetGroupVersionKind(want.GroupVersionKind())
+	if err := r.Client.Get(ctx, client.ObjectKeyFromObject(want), live); err != nil {
+		return err
+	}
+	for key, value := range want.GetLabels() {
+		if live.GetLabels()[key] != value {
+			return nil
+		}
+	}
+	return r.Client.Delete(ctx, live)
 }
 
 func (r *AddonReconciler) advance(ctx context.Context, addon Addon, input AddonInput) []metav1.Condition {

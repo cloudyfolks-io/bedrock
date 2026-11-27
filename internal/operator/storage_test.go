@@ -3,6 +3,7 @@ package operator
 import (
 	"os"
 	"reflect"
+	"strings"
 	"testing"
 
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
@@ -14,7 +15,7 @@ import (
 
 func storageInput(hosts []v1alpha1.Host, replicas string) AddonInput {
 	bundle := release.Bundle{}
-	bundle.Spec.Components = []v1alpha1.ReleaseComponent{{Name: "rook", Version: "v1.20.7", Image: "quay.io/ceph/ceph:v20.2.4"}}
+	bundle.Spec.Components = []v1alpha1.ReleaseComponent{{Name: "rook", Version: "1.21.0", Image: "quay.io/ceph/ceph:v20.2.4"}}
 	return AddonInput{Hosts: hosts, Settings: map[string]string{"storage.replicas": replicas}, Bundle: bundle}
 }
 
@@ -109,7 +110,7 @@ func TestRenderStorageSingleNode(t *testing.T) {
 	if driver != "rook-ceph.rbd.csi.ceph.com" || snap.GetAPIVersion() != "snapshot.storage.k8s.io/v1" {
 		t.Fatalf("snapshot class %+v", snap.Object)
 	}
-	if len(out.Probes) != 1 || out.Probes[0].Key.Name != "rook-ceph" || out.Probes[0].GVK.Kind != "CephCluster" {
+	if len(out.Probes) != 2 || out.Probes[0].Key.Name != "rook-ceph" || out.Probes[0].GVK.Kind != "CephCluster" {
 		t.Fatalf("probes %+v", out.Probes)
 	}
 }
@@ -134,6 +135,48 @@ func TestRenderStorageThreeNodes(t *testing.T) {
 	domain, _, _ := unstructured.NestedString(pool.Object, "spec", "failureDomain")
 	if size != 3 || !safe || domain != "host" {
 		t.Fatalf("pool spec %+v", pool.Object["spec"])
+	}
+}
+
+func TestStorageWaitsForObjectGatewayReplicas(t *testing.T) {
+	fresh := storageInput(adoptHosts(), "3")
+	adopted := adoptInput(v1alpha1.ReasonAdopted)
+	for _, input := range []AddonInput{fresh, adopted} {
+		out, err := RenderStorage(input)
+		if err != nil {
+			t.Fatal(err)
+		}
+		probe := out.Probes[1]
+		if probe.GVK.Kind != "Deployment" || probe.Key.Namespace != "rook-ceph" || probe.Key.Name != "rook-ceph-rgw-bedrock-rgw-a" {
+			t.Fatalf("object gateway probe %+v", probe.Key)
+		}
+		for _, tc := range []struct {
+			name     string
+			spec     int64
+			ready    int64
+			observed int64
+			want     bool
+		}{
+			{name: "scaled down", spec: 1, ready: 1, observed: 2},
+			{name: "one gateway ready", spec: 2, ready: 1, observed: 2},
+			{name: "stale status", spec: 2, ready: 2, observed: 1},
+			{name: "both gateways ready", spec: 2, ready: 2, observed: 2, want: true},
+		} {
+			t.Run(tc.name, func(t *testing.T) {
+				deployment := object("apps/v1", "Deployment", probe.Key.Namespace, probe.Key.Name, map[string]any{"replicas": tc.spec})
+				deployment.SetGeneration(2)
+				deployment.Object["status"] = map[string]any{
+					"observedGeneration": tc.observed,
+					"replicas":           tc.spec,
+					"updatedReplicas":    tc.spec,
+					"availableReplicas":  tc.ready,
+				}
+				result := probe.Gate(deployment)
+				if result.Ready != tc.want || !tc.want && (result.Reason != "WaitingForObjectGateway" || result.Message == "") {
+					t.Fatalf("gate %+v, want ready %t", result, tc.want)
+				}
+			})
+		}
 	}
 }
 
@@ -314,7 +357,15 @@ func TestRenderStorageIncludesTheObjectStore(t *testing.T) {
 				"dataPool":               pool,
 				"preservePoolsOnDelete":  true,
 				"allowUsersInNamespaces": []any{"*"},
-				"gateway":                map[string]any{"port": int64(80), "instances": tc.instances},
+				"gateway": map[string]any{
+					"port": int64(80), "instances": tc.instances,
+					"resources": map[string]any{"requests": map[string]any{"cpu": "1", "memory": "2Gi"}, "limits": map[string]any{"cpu": "2", "memory": "4Gi"}},
+					"rgwConfig": map[string]any{
+						"rgw_gc_max_concurrent_io": "20", "rgw_override_bucket_index_max_shards": "101", "rgw_bucket_quota_ttl": "60",
+						"rgw_user_quota_bucket_sync_interval": "60", "rgw_user_quota_sync_interval": "60",
+					},
+				},
+				"protocols": map[string]any{"enableAPIs": []any{"s3", "admin", "iam"}},
 			}
 			if !reflect.DeepEqual(store.Object["spec"], want) {
 				t.Fatalf("spec %+v", store.Object["spec"])
@@ -333,12 +384,13 @@ func TestRenderStorageIncludesTheBucketClass(t *testing.T) {
 		t.Fatal("no bucket class")
 	}
 	want := map[string]any{
-		"apiVersion":    "storage.k8s.io/v1",
-		"kind":          "StorageClass",
-		"metadata":      map[string]any{"name": "bucket", "labels": map[string]any{"aws-s3/object": ""}},
-		"provisioner":   "rook-ceph.ceph.rook.io/bucket",
-		"parameters":    map[string]any{"objectStoreName": "bedrock-rgw", "objectStoreNamespace": "rook-ceph"},
-		"reclaimPolicy": "Delete",
+		"apiVersion":        "storage.k8s.io/v1",
+		"kind":              "StorageClass",
+		"metadata":          map[string]any{"name": "bucket", "labels": map[string]any{"aws-s3/object": ""}},
+		"provisioner":       "rook-ceph.ceph.rook.io/bucket",
+		"parameters":        map[string]any{"objectStoreName": "bedrock-rgw", "objectStoreNamespace": "rook-ceph"},
+		"reclaimPolicy":     "Delete",
+		"volumeBindingMode": "Immediate",
 	}
 	if !reflect.DeepEqual(class.Object, want) {
 		t.Fatalf("class %+v", class.Object)
@@ -358,7 +410,7 @@ func TestRenderStorageKeepsTheOtherObjects(t *testing.T) {
 			t.Fatalf("missing %v", key)
 		}
 	}
-	if len(out.Probes) != 1 || out.Probes[0].GVK.Kind != "CephCluster" {
+	if len(out.Probes) != 2 || out.Probes[0].GVK.Kind != "CephCluster" {
 		t.Fatalf("probes %+v", out.Probes)
 	}
 }
@@ -387,7 +439,7 @@ func TestRookValues(t *testing.T) {
 		"crds":                           map[string]any{"enabled": true},
 		"csi":                            map[string]any{"installCsiOperator": true},
 		"enableDiscoveryDaemon":          false,
-		"monitoring":                     map[string]any{"enabled": false},
+		"monitoring":                     map[string]any{"enabled": true},
 		"obcAllowAdditionalConfigFields": "maxObjects,maxSize,bucketMaxObjects,bucketMaxSize,bucketOwner",
 	}
 	if !reflect.DeepEqual(values, want) {
@@ -395,23 +447,34 @@ func TestRookValues(t *testing.T) {
 	}
 }
 
+func authPolicies(t *testing.T, in AddonInput) map[string]string {
+	t.Helper()
+	out, err := RenderStorage(in)
+	if err != nil {
+		t.Fatal(err)
+	}
+	muted, _, _ := unstructured.NestedMap(findObject(out.Objects, "CephCluster", "rook-ceph").Object, "spec", "healthCheck", "muteHealthWarning")
+	got := map[string]string{}
+	for check, spec := range muted {
+		got[check], _, _ = unstructured.NestedString(spec.(map[string]any), "policy")
+	}
+	return got
+}
+
+func withCipher(in AddonInput, cipher string) AddonInput {
+	in.Settings["storage.cephx-cipher"] = cipher
+	return in
+}
+
 func TestRenderStorageMutesOnlyWarningsThatReplicasExplain(t *testing.T) {
 	policies := func(replicas string) map[string]string {
-		out, err := RenderStorage(storageInput([]v1alpha1.Host{osdHost("a", "/dev/sdb")}, replicas))
-		if err != nil {
-			t.Fatal(err)
-		}
-		muted, _, _ := unstructured.NestedMap(findObject(out.Objects, "CephCluster", "rook-ceph").Object, "spec", "healthCheck", "muteHealthWarning")
-		got := map[string]string{}
-		for check, spec := range muted {
-			got[check], _, _ = unstructured.NestedString(spec.(map[string]any), "policy")
-		}
-		return got
+		return authPolicies(t, withCipher(storageInput([]v1alpha1.Host{osdHost("a", "/dev/sdb")}, replicas), "aes256k"))
 	}
 	want := map[string]string{
-		"AUTH_INSECURE_CLIENT_KEY_TYPE": "mute",
-		"AUTH_INSECURE_KEYS_ALLOWED":    "mute",
-		"AUTH_INSECURE_KEYS_CREATABLE":  "mute",
+		"AUTH_EMERGENCY_CIPHERS_SET":    "unmute",
+		"AUTH_INSECURE_CLIENT_KEY_TYPE": "unmute",
+		"AUTH_INSECURE_KEYS_ALLOWED":    "unmute",
+		"AUTH_INSECURE_KEYS_CREATABLE":  "unmute",
 		"POOL_NO_REDUNDANCY":            "mute",
 		"TOO_FEW_OSDS":                  "mute",
 	}
@@ -424,13 +487,36 @@ func TestRenderStorageMutesOnlyWarningsThatReplicasExplain(t *testing.T) {
 	}
 }
 
-func TestRenderStorageGivesCSIKernelCompatibleKeys(t *testing.T) {
-	out, err := RenderStorage(storageInput([]v1alpha1.Host{osdHost("a", "/dev/sdb")}, "1"))
+func TestRenderStorageAesModeKeepsTheKeysOfRook120(t *testing.T) {
+	in := storageInput([]v1alpha1.Host{osdHost("a", "/dev/sdb")}, "3")
+	out, err := RenderStorage(in)
 	if err != nil {
 		t.Fatal(err)
 	}
-	keyType, _, _ := unstructured.NestedString(findObject(out.Objects, "CephCluster", "rook-ceph").Object, "spec", "security", "cephx", "csi", "keyType")
-	if keyType != "aes" {
-		t.Fatalf("csi key type %q", keyType)
+	cephx, _, _ := unstructured.NestedMap(findObject(out.Objects, "CephCluster", "rook-ceph").Object, "spec", "security", "cephx")
+	if !reflect.DeepEqual(cephx, map[string]any{"csi": map[string]any{"keyType": "aes"}}) {
+		t.Fatalf("cephx %+v", cephx)
+	}
+	for check, policy := range authPolicies(t, in) {
+		if strings.HasPrefix(check, "AUTH_") && policy != "mute" {
+			t.Errorf("%s is %s", check, policy)
+		}
+	}
+}
+
+func TestRenderStorageGivesTheAes256kCephxBlockToANewCluster(t *testing.T) {
+	out, err := RenderStorage(withCipher(storageInput([]v1alpha1.Host{osdHost("a", "/dev/sdb")}, "1"), "aes256k"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	cephx, _, _ := unstructured.NestedMap(findObject(out.Objects, "CephCluster", "rook-ceph").Object, "spec", "security", "cephx")
+	want := map[string]any{
+		"allowedCiphers": []any{"aes256k"},
+		"daemon":         map[string]any{"keyRotationPolicy": "KeyGeneration", "keyGeneration": int64(2)},
+		"csi":            map[string]any{"keyRotationPolicy": "KeyGeneration", "keyGeneration": int64(3), "keepPriorKeyCountMax": int64(1), "keyType": "aes256k"},
+		"rbdMirrorPeer":  map[string]any{"keyRotationPolicy": "KeyGeneration", "keyGeneration": int64(2), "keyType": "aes256k"},
+	}
+	if !reflect.DeepEqual(cephx, want) {
+		t.Fatalf("cephx %+v", cephx)
 	}
 }

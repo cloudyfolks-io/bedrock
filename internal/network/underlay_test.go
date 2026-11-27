@@ -1,6 +1,8 @@
 package network
 
 import (
+	"net/netip"
+	"reflect"
 	"slices"
 	"strings"
 	"testing"
@@ -63,6 +65,54 @@ func TestRenderUnderlayL2(t *testing.T) {
 		labels := o.GetLabels()
 		if labels[LabelComponent] != ComponentUnderlay || labels[LabelManaged] != "true" || labels[v1alpha1.LabelKind] != o.GetKind() || labels[v1alpha1.LabelName] != o.GetName() {
 			t.Fatalf("labels of %s: %v", o.GetKind(), labels)
+		}
+	}
+}
+
+func TestRenderUnderlayLabelsPoolsByRole(t *testing.T) {
+	roles := map[string]string{"": "public", "tenant": "public", "platform": "private", "transit": "transit", "services": "services"}
+	for role, want := range roles {
+		pn := `{"name":"pool","interface":"bond0","cidr":"198.51.100.0/24","gateway":"198.51.100.1"`
+		if role != "" {
+			pn += `,"role":"` + role + `"`
+		}
+		objects, _ := RenderUnderlay(configOf(t, map[string]string{"network.provider-networks": "[" + pn + "}]"}))
+		subnet := byKindAndName(objects)["Subnet/provider-pool"]
+		if got := subnet.GetLabels()["usability"]; got != want {
+			t.Fatalf("role %q: usability %q, want %q", role, got, want)
+		}
+	}
+}
+
+func TestRenderUnderlayBGPLabelsTheTransitPoolAsTransit(t *testing.T) {
+	for _, role := range []string{"", "tenant", "platform"} {
+		pools := twoNetworks
+		if role != "" {
+			pools = strings.Replace(pools, `"gateway":"192.0.2.1"`, `"gateway":"192.0.2.1","role":"`+role+`"`, 1)
+		}
+		objects, _ := RenderUnderlay(configOf(t, bgpValues(map[string]string{"network.provider-networks": pools})))
+		got := byKindAndName(objects)
+		if label := got["Subnet/provider-transit"].GetLabels()["usability"]; label != "transit" {
+			t.Fatalf("role %q: transit pool usability %q", role, label)
+		}
+		if label := got["Subnet/provider-pool"].GetLabels()["usability"]; label != "public" {
+			t.Fatalf("role %q: tenant pool usability %q", role, label)
+		}
+	}
+}
+
+func TestRenderUnderlayL2KeepsTheRoleOfAPoolNamedLikeTheTransit(t *testing.T) {
+	objects, _ := RenderUnderlay(configOf(t, map[string]string{"network.provider-networks": twoNetworks, "network.bgp.transit-network": "transit"}))
+	if label := byKindAndName(objects)["Subnet/provider-transit"].GetLabels()["usability"]; label != "public" {
+		t.Fatalf("usability %q", label)
+	}
+}
+
+func TestRenderUnderlayLabelsOnlyTheSubnetWithUsability(t *testing.T) {
+	objects, _ := RenderUnderlay(configOf(t, map[string]string{"network.provider-networks": publicNetworks}))
+	for _, o := range objects {
+		if _, found := o.GetLabels()["usability"]; found != (o.GetKind() == "Subnet") {
+			t.Fatalf("%s has the usability label: %v", o.GetKind(), found)
 		}
 	}
 }
@@ -134,6 +184,120 @@ func TestRenderUnderlayBGPConf(t *testing.T) {
 	neighbours, _ := spec["neighbours"].([]any)
 	if len(peers) != 2 || len(neighbours) != 2 || spec["peerASN"] != int64(65000) || spec["localASN"] != int64(65001) || spec["routerId"] != "10.0.0.9" {
 		t.Fatalf("spec %v", spec)
+	}
+}
+
+func bgpConfSpecOf(t *testing.T, values map[string]string) map[string]any {
+	t.Helper()
+	objects, warnings := RenderUnderlay(configOf(t, bgpValues(values)))
+	if len(warnings) != 0 {
+		t.Fatalf("warnings %v", warnings)
+	}
+	spec, _, _ := unstructured.NestedMap(byKindAndName(objects)["BgpConf/bedrock"].Object, "spec")
+	return spec
+}
+
+func peerBFD(spec map[string]any) []any {
+	peers, _ := spec["peers"].([]any)
+	flags := make([]any, len(peers))
+	for i, peer := range peers {
+		flags[i] = peer.(map[string]any)["bfd"]
+	}
+	return flags
+}
+
+func TestRenderUnderlayBGPConfSessionDefaults(t *testing.T) {
+	spec := bgpConfSpecOf(t, nil)
+	if !reflect.DeepEqual(peerBFD(spec), []any{true, true}) || spec["holdTime"] != "9s" || spec["keepaliveTime"] != "3s" || spec["gracefulRestart"] != true {
+		t.Fatalf("spec %v", spec)
+	}
+	if !reflect.DeepEqual(advertisedFilter(t, spec), []string{"0.0.0.0/32"}) {
+		t.Fatalf("an empty filter must render the single entry that matches no route: %v", spec)
+	}
+	if _, found := spec["redistributeTables"]; found {
+		t.Fatalf("redistributeTables must be absent by default: %v", spec)
+	}
+}
+
+func advertisedFilter(t *testing.T, spec map[string]any) []string {
+	t.Helper()
+	items, _ := spec["advertiseFilter"].([]any)
+	filter := make([]string, len(items))
+	for i, item := range items {
+		filter[i] = item.(string)
+	}
+	return filter
+}
+
+func TestRenderUnderlayBGPConfAdvertisesNothingWithAnEmptyFilterAndNoElasticIP(t *testing.T) {
+	filter := advertisedFilter(t, bgpConfSpecOf(t, nil))
+	if len(filter) == 0 {
+		t.Fatal("an empty filter makes Fabric advertise every route")
+	}
+	for _, route := range sampleRoutes {
+		if filterMatches(t, filter, netip.MustParsePrefix(route)) {
+			t.Fatalf("%s must not match %v", route, filter)
+		}
+	}
+}
+
+func TestRenderUnderlayBGPConfKeepsTheElasticIPRoutesWithAnEmptyFilter(t *testing.T) {
+	elasticIPRoutes := []string{"91.246.31.0/24 ge 32 le 32"}
+	fabricMerged := append(advertisedFilter(t, bgpConfSpecOf(t, nil)), elasticIPRoutes...)
+	for _, route := range sampleRoutes {
+		prefix := netip.MustParsePrefix(route)
+		if filterMatches(t, fabricMerged, prefix) != filterMatches(t, elasticIPRoutes, prefix) {
+			t.Fatalf("%s: the merged filter %v differs from the elastic IP routes", route, fabricMerged)
+		}
+	}
+}
+
+func TestRenderUnderlayBGPConfDeniesTheLoadBalancerPlaneWithACustomFilter(t *testing.T) {
+	filter := advertisedFilter(t, bgpConfSpecOf(t, map[string]string{"network.bgp.advertise-filter": "100.64.0.0/10 ge 32 le 32,91.246.31.0/24 ge 32 le 32"}))
+	for route, want := range map[string]bool{"100.69.0.5/32": false, "100.69.0.200/32": false, "100.69.1.5/32": true, "100.70.0.9/32": true, "91.246.31.20/32": true, "10.20.0.0/16": false} {
+		if got := filterMatches(t, filter, netip.MustParsePrefix(route)); got != want {
+			t.Fatalf("%s advertised=%v want %v in %v", route, got, want, filter)
+		}
+	}
+}
+
+func TestRenderUnderlayBGPConfDeniesTheConfiguredLoadBalancerPlane(t *testing.T) {
+	filter := advertisedFilter(t, bgpConfSpecOf(t, map[string]string{"network.load-balancer.cidr": "100.70.0.0/16", "network.load-balancer.gateway": "100.70.0.1", "network.bgp.advertise-filter": "100.64.0.0/10 ge 32 le 32"}))
+	for route, want := range map[string]bool{"100.70.3.5/32": false, "100.69.0.5/32": true} {
+		if got := filterMatches(t, filter, netip.MustParsePrefix(route)); got != want {
+			t.Fatalf("%s advertised=%v want %v in %v", route, got, want, filter)
+		}
+	}
+}
+
+func TestRenderUnderlayBGPConfFollowsEachSessionSetting(t *testing.T) {
+	cases := map[string]struct {
+		key, value string
+		check      func(map[string]any) bool
+	}{
+		"bfd off": {"network.bgp.bfd", "false", func(s map[string]any) bool {
+			return reflect.DeepEqual(peerBFD(s), []any{nil, nil}) && s["holdTime"] == "9s"
+		}},
+		"hold time":      {"network.bgp.hold-time", "30s", func(s map[string]any) bool { return s["holdTime"] == "30s" && s["keepaliveTime"] == "3s" }},
+		"keepalive time": {"network.bgp.keepalive-time", "10s", func(s map[string]any) bool { return s["keepaliveTime"] == "10s" && s["holdTime"] == "9s" }},
+		"graceful restart off": {"network.bgp.graceful-restart", "false", func(s map[string]any) bool {
+			_, found := s["gracefulRestart"]
+			return !found && s["holdTime"] == "9s"
+		}},
+		"advertise filter": {"network.bgp.advertise-filter", "91.246.31.0/24 ge 32 le 32", func(s map[string]any) bool {
+			return reflect.DeepEqual(s["advertiseFilter"], []any{"91.246.31.0/24 ge 32 le 32"})
+		}},
+		"redistribute tables": {"network.bgp.redistribute-tables", "198,200", func(s map[string]any) bool {
+			return reflect.DeepEqual(s["redistributeTables"], []any{int64(198), int64(200)})
+		}},
+	}
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			spec := bgpConfSpecOf(t, map[string]string{tc.key: tc.value})
+			if !tc.check(spec) {
+				t.Fatalf("spec %v", spec)
+			}
+		})
 	}
 }
 

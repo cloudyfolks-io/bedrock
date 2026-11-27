@@ -3,10 +3,13 @@ package release
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	"k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	"github.com/cloudyfolks-io/bedrock/internal/ssa"
@@ -18,11 +21,26 @@ type Applier struct {
 
 func (a Applier) Apply(ctx context.Context, group Group) error {
 	for _, obj := range group.Objects {
-		if err := ssa.Apply(ctx, a.Client, obj, FieldManager); err != nil {
+		if err := a.applyObject(ctx, obj); err != nil {
 			return fmt.Errorf("apply %s %s/%s: %w", obj.GetKind(), obj.GetNamespace(), obj.GetName(), err)
 		}
 	}
 	return nil
+}
+
+func (a Applier) applyObject(ctx context.Context, obj *unstructured.Unstructured) error {
+	err := ssa.Apply(ctx, a.Client, obj, FieldManager)
+	if !immutableJob(obj, err) {
+		return err
+	}
+	if err := a.Client.Delete(ctx, obj, client.PropagationPolicy(metav1.DeletePropagationBackground)); err != nil && !errors.IsNotFound(err) {
+		return err
+	}
+	return ssa.Apply(ctx, a.Client, obj, FieldManager)
+}
+
+func immutableJob(obj *unstructured.Unstructured, err error) bool {
+	return err != nil && obj.GroupVersionKind().GroupKind() == (schema.GroupKind{Group: "batch", Kind: "Job"}) && errors.IsInvalid(err) && strings.Contains(err.Error(), "immutable")
 }
 
 func (a Applier) Prune(ctx context.Context, previous, current Inventory) error {

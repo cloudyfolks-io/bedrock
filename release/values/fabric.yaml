@@ -1,8 +1,13 @@
 crds:
   enabled: true
+features:
+  enableOvnLbSvc: true
 frr:
-  enabled: false
+  enabled: true
+networkPolicies:
+  enforcement: "${BEDROCK_NP_ENFORCEMENT}"
 networking:
+  enableSsl: "${BEDROCK_FABRIC_ENABLE_SSL}"
   pods:
     cidr:
       v4: 10.16.0.0/16
@@ -18,3 +23,14 @@ masterNodes: ["${BEDROCK_MASTER_IPS}"]
 ovsOvn:
   updateStrategy:
     type: OnDelete
+prometheusRule:
+  enabled: true
+controller:
+  serviceMonitor:
+    enabled: true
+monitor:
+  serviceMonitor:
+    enabled: true
+agent:
+  serviceMonitor:
+    enabled: true

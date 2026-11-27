@@ -135,3 +135,42 @@ func TestObjectLabelsWithoutTenant(t *testing.T) {
 		t.Fatalf("unexpected labels %v", labels)
 	}
 }
+
+func TestLBSubnetNameAppendsLBToTheNetwork(t *testing.T) {
+	if got := LBSubnetName("acme"); got != "acme-lb" {
+		t.Fatal(got)
+	}
+}
+
+func TestLBSubnetNameFitsLabelValueForALongNetwork(t *testing.T) {
+	long := strings.Repeat("a", 63)
+	got := LBSubnetName(long)
+	if len(got) > 63 || !dnsLabel.MatchString(got) || got == LBSubnetName(strings.Repeat("a", 62)+"b") {
+		t.Fatalf("name %q", got)
+	}
+	if got != LBSubnetName(long) {
+		t.Fatal("same input must give the same name")
+	}
+}
+
+func TestInternalVipNameIsDistinctFromTheOldVipName(t *testing.T) {
+	got := InternalVipName("t1-prod", "web")
+	if got == FabricName("t1-prod", "web") || got == FabricName("t1-prod", "web-vip") || len(got) > 63 || !dnsLabel.MatchString(got) {
+		t.Fatalf("name %q", got)
+	}
+	if got != InternalVipName("t1-prod", "web") || got == InternalVipName("t1-prod", "web2") {
+		t.Fatal("the name must be stable and unique per LoadBalancer")
+	}
+}
+
+func TestVpcNameStartsWithALetterWhenTheNetworkStartsWithADigit(t *testing.T) {
+	if got := VpcName("3oqdv5m4bk"); got != "v-3oqdv5m4bk" {
+		t.Fatalf("got %q", got)
+	}
+	if got := VpcName("acme"); got != "acme" {
+		t.Fatalf("a Network that starts with a letter must keep its Vpc name, got %q", got)
+	}
+	if got := VpcName("3oqdv5m4bk"); strings.ReplaceAll(got+".u2o_overlay_cidrs.ip4", "-", ".")[0] == '3' {
+		t.Fatal("the overlay address set name must start with a letter")
+	}
+}

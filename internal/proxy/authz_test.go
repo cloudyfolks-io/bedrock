@@ -3,6 +3,7 @@ package proxy
 import (
 	"context"
 	"encoding/json"
+	"maps"
 	"net/http"
 	"net/http/httptest"
 	"strconv"
@@ -20,6 +21,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	"github.com/cloudyfolks-io/bedrock/api/v1alpha1"
+	"github.com/cloudyfolks-io/bedrock/internal/tenancy"
 )
 
 type authzAnswer struct {
@@ -243,6 +245,47 @@ func TestProjectsEndpointShortcutForClusterWideList(t *testing.T) {
 	got := getProjects(t, asCaller(ProjectsHandler(api.upstream(t), reader), "caller-token"))
 	if len(got.Projects) != 2 || probeCount(api) != 0 {
 		t.Fatalf("projects %+v, probes %d", got.Projects, probeCount(api))
+	}
+}
+
+func projectWithBlockedNamespace(name, namespace, reason string) *v1alpha1.Project {
+	project := projectNamed(name, namespace)
+	project.Generation = 4
+	project.Status.Conditions = []metav1.Condition{{Type: tenancy.ConditionNamespaceReady, Status: metav1.ConditionFalse, Reason: reason, ObservedGeneration: 3}}
+	return project
+}
+
+func TestProjectsEndpointWithholdsBlockedNamespaceFromAdministrators(t *testing.T) {
+	api := newReviewAPI(t, func(a authorizationv1.ResourceAttributes) bool { return a.Resource == "projects" && a.Verb == "list" })
+	revalidated := projectNamed("revalidated", "acme-revalidated")
+	revalidated.Generation = 4
+	revalidated.Status.Conditions = []metav1.Condition{{Type: tenancy.ConditionNamespaceReady, Status: metav1.ConditionTrue, Reason: tenancy.ReasonApplied, ObservedGeneration: 4}}
+	reader := fakeReader(t,
+		projectWithBlockedNamespace("conflict", "acme-conflict", tenancy.ReasonNamespaceConflict),
+		projectWithBlockedNamespace("terminating", "acme-terminating", tenancy.ReasonNamespaceTerminating),
+		projectNamed("historical", "acme-historical"), revalidated,
+	)
+	got := getProjects(t, asCaller(ProjectsHandler(api.upstream(t), reader), "token-admin"))
+	mapping := make(map[string]string, len(got.Projects))
+	for _, project := range got.Projects {
+		mapping[project.Name] = project.Namespace
+	}
+	want := map[string]string{"conflict": "", "terminating": "", "historical": "acme-historical", "revalidated": "acme-revalidated"}
+	if !maps.Equal(mapping, want) || probeCount(api) != 0 {
+		t.Fatalf("project namespaces %v, probes %d", mapping, probeCount(api))
+	}
+}
+
+func TestProjectsEndpointDoesNotProbeBlockedNamespaces(t *testing.T) {
+	api := newReviewAPI(t, vmListIn("acme-conflict", "acme-terminating", "acme-historical"))
+	reader := fakeReader(t,
+		projectWithBlockedNamespace("conflict", "acme-conflict", tenancy.ReasonNamespaceConflict),
+		projectWithBlockedNamespace("terminating", "acme-terminating", tenancy.ReasonNamespaceTerminating),
+		projectNamed("historical", "acme-historical"),
+	)
+	got := getProjects(t, asCaller(ProjectsHandler(api.upstream(t), reader), "token-alice"))
+	if len(got.Projects) != 1 || got.Projects[0].Namespace != "acme-historical" || probeCount(api) != 1 {
+		t.Fatalf("projects %+v, authorization probes %+v", got.Projects, api.reviews())
 	}
 }
 

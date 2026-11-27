@@ -32,6 +32,7 @@ const (
 	k0sControllerUnit = "k0scontroller.service"
 	k0sWorkerUnit     = "k0sworker.service"
 	preRestorePrefix  = ".pre-restore-"
+	cleanupAttempts   = 6
 )
 
 var k0sRestoreTargets = []string{"etcd", "pki", "manifests", "images", "helmhome"}
@@ -44,8 +45,7 @@ func prune(ctx context.Context, env StepEnv) (Outcome, error) {
 	if err != nil {
 		return Outcome{}, err
 	}
-	dropped := onlyIn(env.From.Spec.Images, env.Target.Spec.Images)
-	if err := removeImageTarballs(deps.Root, dropped, []string{airgapFile, versionedAirgap(env.From.Spec.Version)}); err != nil {
+	if err := retainAndUnpin(ctx, deps, env.Target.Spec.Version, archiveFileNames(releaseRefs(env.Target))); err != nil {
 		return Outcome{}, err
 	}
 	if err := removeUpgradeFiles(deps.Root, env.Upgrade.Spec.Version); err != nil {
@@ -54,16 +54,25 @@ func prune(ctx context.Context, env StepEnv) (Outcome, error) {
 	if err := removeOtherDepots(deps.Root, env.Target.Spec.Version); err != nil {
 		return Outcome{}, err
 	}
+	if err := removeStaleCoreDNSManifests(ctx, env); err != nil {
+		return Outcome{}, err
+	}
 	return Outcome{Message: fmt.Sprintf("removed %d images", count)}, nil
 }
 
 func cleanup(ctx context.Context, env StepEnv) (Outcome, error) {
 	deps := env.Deps
-	count, imagesErr := removeImages(ctx, deps, env.Target.Spec.Images, env.From.Spec.Images)
-	dropped := onlyIn(env.Target.Spec.Images, env.From.Spec.Images)
+	var count int
+	imagesErr := retryCall(ctx, cleanupAttempts, deps.K0sPoll, func() error {
+		removed, err := removeImages(ctx, deps, env.Target.Spec.Images, env.From.Spec.Images)
+		count = removed
+		return err
+	})
 	err := errors.Join(
 		imagesErr,
-		removeImageTarballs(deps.Root, dropped, []string{versionedAirgap(env.Target.Spec.Version)}),
+		retryCall(ctx, cleanupAttempts, deps.K0sPoll, func() error {
+			return restoreArchiveOf(ctx, deps, env.From.Spec.Version, archiveFileNames(releaseRefs(env.From)))
+		}),
 		removeUpgradeFiles(deps.Root, env.Upgrade.Spec.Version),
 		removePreRestoreData(deps.Root),
 	)
@@ -73,23 +82,28 @@ func cleanup(ctx context.Context, env StepEnv) (Outcome, error) {
 	return Outcome{Message: fmt.Sprintf("removed %d images", count)}, nil
 }
 
-func versionedAirgap(version string) string {
-	return "k0s-airgap-" + version + ".tar"
-}
-
-func removeImageTarballs(root string, refs, names []string) error {
-	dir := filepath.Join(root, k0sImagesDir)
-	toRemove := make([]string, 0, len(refs)+len(names))
-	toRemove = append(toRemove, names...)
-	for _, ref := range refs {
-		toRemove = append(toRemove, release.ImageFileName(ref))
+func retainAndUnpin(ctx context.Context, deps Deps, keepVersion string, keepFiles []string) error {
+	before, err := archivedTarballs(deps.Root)
+	if err != nil {
+		return err
 	}
-	for _, name := range toRemove {
-		if err := os.Remove(filepath.Join(dir, name)); err != nil && !errors.Is(err, fs.ErrNotExist) {
+	if _, err := os.Stat(archiveVersionDir(deps.Root, keepVersion)); err != nil {
+		return nil
+	}
+	if runsContainers(deps.Root) {
+		kept := retainedTarballs(before, keepVersion, keepFiles)
+		if err := unpinStale(ctx, ctrStore{exec: deps.Exec, timeout: ctrCallTimeout}, before, kept); err != nil {
 			return err
 		}
 	}
-	return nil
+	return retainArchive(deps.Root, keepVersion, keepFiles)
+}
+
+func restoreArchiveOf(ctx context.Context, deps Deps, version string, keepFiles []string) error {
+	if err := os.MkdirAll(archiveVersionDir(deps.Root, version), 0o755); err != nil {
+		return err
+	}
+	return retainAndUnpin(ctx, deps, version, keepFiles)
 }
 
 func removeImages(ctx context.Context, deps Deps, drop, keep []string) (int, error) {
@@ -226,6 +240,9 @@ func restore(ctx context.Context, env StepEnv) (Outcome, error) {
 	if err := writeRestoreMarker(deps.Root, backupPath, deps.Now()); err != nil {
 		return Outcome{}, err
 	}
+	if err := linkArchiveWhenStoreIsEmpty(deps.Root, env.Upgrade.Spec.From); err != nil {
+		return Outcome{}, err
+	}
 	if _, err := deps.Exec.Run(ctx, "systemctl", "start", k0sControllerUnit); err != nil {
 		return Outcome{}, err
 	}
@@ -275,12 +292,7 @@ func archiveReader(file io.Reader, archive, root string) (io.Reader, error) {
 }
 
 func readHostIdentities(root string) ([]age.Identity, error) {
-	file, err := os.Open(filepath.Join(root, seal.HostKeyFile))
-	if err != nil {
-		return nil, err
-	}
-	defer file.Close()
-	return age.ParseIdentities(file)
+	return seal.HostIdentities(root)
 }
 
 func readK0sBackup(plain io.Reader, dest string) (string, error) {

@@ -23,6 +23,8 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/metrics/server"
 
 	"github.com/cloudyfolks-io/bedrock/api/v1alpha1"
+	"github.com/cloudyfolks-io/bedrock/internal/network"
+	"github.com/cloudyfolks-io/bedrock/internal/network/fabrictest"
 	"github.com/cloudyfolks-io/bedrock/internal/testenv"
 )
 
@@ -176,6 +178,23 @@ func TestSetupRegistersNoSecretWatch(t *testing.T) {
 	eventually(t, "the informers", func() bool { return recorder.recorded("v1.Pod") })
 	if recorder.recorded("v1.Secret") {
 		t.Fatalf("a compute controller reads or watches Secrets through the cache: %v", recorder.kinds)
+	}
+}
+
+func TestSetupReadsFabricIPsThroughTheCache(t *testing.T) {
+	c, cfg := startFreshEnv(t, testenv.CRDPaths())
+	recorder := &recordingCache{}
+	startRecordedManager(t, cfg, &logLines{}, recorder)
+	ns := uniqueNamespace(t, c)
+	must(t, fabrictest.CreateIP(context.Background(), c, "db-1."+ns, ns, "db-1", network.FabricName(ns, "default"), "10.100.0.50"))
+	seedPlatformIn(t, c, ns)
+	createVM(t, c, ns, "web-1", pinned("10.100.0.50"))
+	eventually(t, "the address conflict", func() bool {
+		cond := readyOf(getVM(t, c, ns, "web-1"))
+		return cond != nil && cond.Reason == ReasonAddressInUse
+	})
+	if !recorder.recorded("UnstructuredList") {
+		t.Fatalf("the Fabric IPs are not read through the cache: %v", recorder.kinds)
 	}
 }
 

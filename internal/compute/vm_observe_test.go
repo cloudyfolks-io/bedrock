@@ -105,7 +105,7 @@ func TestVMStatusFromKubeVirt(t *testing.T) {
 
 func addressAnnotationsIn(ns, subnet, ip, mac string) map[string]string {
 	prefix := network.SubnetProvider(ns, subnet) + ".cloudyfolks.io/"
-	return map[string]string{prefix + "ip_address": ip, prefix + "mac_address": mac}
+	return map[string]string{prefix + "ip_address": ip, prefix + "mac_address": mac, prefix + "allocated": "true"}
 }
 
 func TestVMStatusDuringMigration(t *testing.T) {
@@ -339,5 +339,34 @@ func TestRefs(t *testing.T) {
 	want = []string{"image/cluster/install-iso", "image/project/install-iso", "image/project/mine", "sshkey/alice", "subnet/default", "volume/data1"}
 	if got := Refs(vm); !reflect.DeepEqual(got, want) {
 		t.Fatalf("%v", got)
+	}
+}
+
+func TestVMStatusReportsTheMigrationOfItsOwnVM(t *testing.T) {
+	c, _ := startEnv(t)
+	ns := seedPlatform(t, c)
+	other := uniqueNamespace(t, c)
+	r := runningVM(t, c, ns)
+	createVMI(t, c, ns, "web-1", "node-1")
+	createMigration := func(namespace, name, vmi, phase string) {
+		migration := emptyOf(kubeVirtMigrationGVK)
+		migration.SetNamespace(namespace)
+		migration.SetName(name)
+		migration.Object["spec"] = map[string]any{"vmiName": vmi}
+		must(t, c.Create(context.Background(), migration))
+		migration.Object["status"] = map[string]any{"phase": phase}
+		must(t, c.Status().Update(context.Background(), migration))
+	}
+	createMigration(ns, "web-1-migrate-a", "web-1", "Succeeded")
+	reconcileVM(t, r, ns, "web-1")
+	status := getVM(t, c, ns, "web-1").Status
+	if status.Migration == nil || status.Migration.Name != "web-1-migrate-a" || status.Migration.Phase != "Succeeded" || status.Migration.StartedAt == nil {
+		t.Fatalf("migration %+v", status.Migration)
+	}
+	createMigration(other, "foreign", "web-1", "Running")
+	createMigration(ns, "web-2-migrate", "web-2", "Running")
+	reconcileVM(t, r, ns, "web-1")
+	if got := getVM(t, c, ns, "web-1").Status.Migration; got == nil || got.Name != "web-1-migrate-a" {
+		t.Fatalf("migration of another VM or namespace leaked: %+v", got)
 	}
 }

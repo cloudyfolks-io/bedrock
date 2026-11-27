@@ -27,6 +27,9 @@ describe("ImagesPage", () => {
   it("lists project images with type, phase and digest", async () => {
     render();
     const disk = (await screen.findByRole("link", { name: "custom-disk" })).closest("tr") as HTMLElement;
+    expect(screen.getAllByRole("heading").map((heading) => heading.textContent)).toEqual(["Images"]);
+    expect(screen.getByRole("table", { name: "Project images" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Create" })).toBeTruthy();
     expect(within(disk).getByText("disk")).toBeTruthy();
     expect(within(disk).getByText("Ready")).toBeTruthy();
     expect(disk.querySelector("bdi")?.textContent).toBeTruthy();
@@ -37,8 +40,12 @@ describe("ImagesPage", () => {
   it("shows the catalog read only with no links or actions", async () => {
     const user = userEvent.setup();
     render();
-    await user.click(await screen.findByRole("tab", { name: "Catalog" }));
+    const tabs = await screen.findByRole("tablist", { name: "Images" });
+    await user.click(within(tabs).getByRole("tab", { name: "Catalog" }));
     expect(await screen.findByText("ubuntu-24-04")).toBeTruthy();
+    expect(screen.getAllByRole("heading").map((heading) => heading.textContent)).toEqual(["Images"]);
+    expect(screen.getByRole("table", { name: "Catalog" })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Create" })).toBeNull();
     expect(screen.queryByRole("link", { name: "ubuntu-24-04" })).toBeNull();
     expect(screen.queryByRole("button", { name: /Actions for ubuntu/ })).toBeNull();
     expect(screen.getAllByText("Importing").length).toBeGreaterThan(0);

@@ -103,6 +103,9 @@ spec:
                 type: boolean
               ingressMd5:
                 type: string
+              observedGeneration:
+                format: int64
+                type: integer
               portGroup:
                 type: string
             type: object

@@ -1,0 +1,139 @@
+package engine
+
+import (
+	"fmt"
+	"time"
+
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/apimachinery/pkg/runtime/schema"
+)
+
+const (
+	AdminUser       = "dbadmin"
+	DefaultDatabase = "app"
+	LabelBackupOf   = "bedrock.cloudyfolks.io/backup-of"
+)
+
+type Spec struct {
+	Name         string
+	BackupID     string
+	Namespace    string
+	Version      string
+	Image        string
+	CPUMilli     int
+	MemoryMi     int
+	StorageGi    int
+	Instances    int
+	StorageClass string
+	Labels       map[string]string
+	PodLabels    map[string]string
+	Images       map[string]string
+	Backup       BackupSpec
+	Restore      *RestoreSpec
+	TLSSecret    string
+	TLSRevision  string
+	Suspended    bool
+
+	RuntimeClassName string
+}
+
+type BackupSpec struct {
+	Enabled       bool
+	Bucket        string
+	Endpoint      string
+	Region        string
+	RetentionDays int
+	SecretName    string
+}
+
+type RestoreSpec struct {
+	SourceUID   string
+	TargetTime  *time.Time
+	Destination string
+	Backup      *RestoreBackup
+}
+
+type PostgresRestorePoint struct {
+	BackupID   string
+	TargetTime *time.Time
+}
+
+func (p PostgresRestorePoint) Validate(requested *time.Time) error {
+	stamp, err := time.Parse("20060102T150405", p.BackupID)
+	if err != nil || stamp.Year() == 0 || stamp.Format("20060102T150405") != p.BackupID {
+		return fmt.Errorf("the imported PostgreSQL backup ID is not a Barman storage ID")
+	}
+	if (p.TargetTime == nil) != (requested == nil) || (p.TargetTime != nil && (!p.TargetTime.Equal(*requested) || p.TargetTime.IsZero() || p.TargetTime.Nanosecond()%1000 != 0)) {
+		return fmt.Errorf("the imported PostgreSQL recovery point differs from the requested target time or exceeds microsecond precision")
+	}
+	return nil
+}
+
+type RestoreBackup struct {
+	Postgres    *PostgresRestorePoint
+	Bucket      string
+	Prefix      string
+	ServerName  string
+	SecretName  string
+	Destination string
+}
+
+func (r RestoreSpec) BackupSource(active BackupSpec) (BackupSpec, string, string) {
+	if r.Backup == nil {
+		return active, r.SourceUID, r.SourceUID
+	}
+	active.Bucket = r.Backup.Bucket
+	active.SecretName = r.Backup.SecretName
+	active.RetentionDays = 0
+	return active, r.Backup.Prefix, r.Backup.ServerName
+}
+
+type Health struct {
+	Ready  bool
+	Reason string
+}
+
+type Patch struct {
+	GVK       schema.GroupVersionKind
+	Namespace string
+	Name      string
+	Body      []byte
+}
+
+func Named(name, suffix string) string {
+	if suffix == "" {
+		return name
+	}
+	return name + "-" + suffix
+}
+
+func MemoryString(mi int) string { return fmt.Sprintf("%dMi", mi) }
+
+func CPUString(milli int) string { return fmt.Sprintf("%dm", milli) }
+
+func ResourceBlock(cpuMilli, memoryMi int) map[string]any {
+	return map[string]any{
+		"requests": map[string]any{"cpu": CPUString(cpuMilli), "memory": MemoryString(memoryMi)},
+		"limits":   map[string]any{"cpu": CPUString(cpuMilli), "memory": MemoryString(memoryMi)},
+	}
+}
+
+func Labels(in map[string]string) map[string]any {
+	out := make(map[string]any, len(in))
+	for key, value := range in {
+		out[key] = value
+	}
+	return out
+}
+
+func DBService(s Spec, port int, selector map[string]string) *unstructured.Unstructured {
+	return &unstructured.Unstructured{Object: map[string]any{
+		"apiVersion": "v1", "kind": "Service",
+		"metadata": map[string]any{"name": Named(s.Name, "db"), "namespace": s.Namespace, "labels": Labels(s.Labels)},
+		"spec": map[string]any{
+			"type":     "ClusterIP",
+			"selector": Labels(selector),
+			"ports":    []any{map[string]any{"name": "db", "port": int64(port), "targetPort": int64(port), "protocol": "TCP"}},
+		},
+	}}
+}

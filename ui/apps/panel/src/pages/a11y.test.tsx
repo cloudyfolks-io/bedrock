@@ -13,7 +13,11 @@ const projects = { projects: [{ name: "web", displayName: "Web", tenant: "acme",
 const base = "/apis/bedrock.cloudyfolks.io/v1alpha1";
 
 function apiRoutes(): Record<string, FakeRoute> {
-  const routes: Record<string, FakeRoute> = { "GET /proxy/v1/projects": { body: projects } };
+  const routes: Record<string, FakeRoute> = {
+    "GET /proxy/v1/projects": { body: projects },
+    "GET /proxy/v1/projects/web/networks": { body: fixtures["../fixtures/networks.json"] },
+    [`GET ${base}/virtualmachines`]: { body: fixtures["../fixtures/virtualmachines.json"] },
+  };
   for (const def of definitions) {
     const list = fixtures[`../fixtures/${def.plural}.json`];
     const path = def.scope === "Namespaced" ? `${base}/namespaces/acme-web/${def.plural}` : `${base}/${def.plural}`;
@@ -22,7 +26,7 @@ function apiRoutes(): Record<string, FakeRoute> {
   return routes;
 }
 
-const paths = [...primaryDefinitionsFor("admin").map((def) => `/admin/${def.path}`), ...primaryDefinitionsFor("project").map((def) => `/p/web/${def.path}`), "/account"];
+const paths = ["/admin/overview", "/admin/inventory", ...primaryDefinitionsFor("admin").map((def) => `/admin/${def.path}`), ...primaryDefinitionsFor("project").map((def) => `/p/web/${def.path}`), "/account"];
 
 describe("every page", () => {
   for (const locale of ["en", "ar"] as Locale[]) {

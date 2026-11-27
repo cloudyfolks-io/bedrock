@@ -140,6 +140,10 @@ func TestHostReconcileRendersHostConfigAndManagedLabel(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(cancel)
 
+	cluster := &v1alpha1.Cluster{ObjectMeta: metav1.ObjectMeta{Name: v1alpha1.ClusterName}, Spec: v1alpha1.ClusterSpec{DesiredVersion: "v0.1.0", API: v1alpha1.APISpec{VIP: "10.0.0.10", VIPMode: "arp"}, NodeConcurrency: 1}}
+	if err := c.Create(ctx, cluster); err != nil {
+		t.Fatal(err)
+	}
 	node := &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: "hc-node", Labels: roles.Labels([]string{v1alpha1.RoleWorkload})}}
 	if err := c.Create(ctx, node); err != nil {
 		t.Fatal(err)

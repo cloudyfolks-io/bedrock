@@ -14,10 +14,11 @@ RUN go mod download
 COPY . .
 COPY --from=ui /src/internal/authn/server/ui/dist /src/internal/authn/server/ui/dist
 COPY --from=ui /src/internal/proxy/ui/dist /src/internal/proxy/ui/dist
+RUN chmod -R a+rX dist/release
 ARG VERSION=dev
 RUN CGO_ENABLED=0 GOOS=linux GOARCH=$TARGETARCH go build -trimpath -ldflags "-X github.com/cloudyfolks-io/bedrock/internal/cli.Version=${VERSION}" -o /bedrock ./cmd/bedrock
 
 FROM gcr.io/distroless/static:nonroot
-COPY --from=build /bedrock /bedrock
-COPY dist/release /release
+COPY --from=build --chmod=0755 /bedrock /bedrock
+COPY --from=build /src/dist/release /release
 ENTRYPOINT ["/bedrock"]

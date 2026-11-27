@@ -27,6 +27,7 @@ const (
 	ReasonUnknownProviderNetwork         = "UnknownProviderNetwork"
 	ReasonUnsupported                    = "Unsupported"
 	ReasonAddressOutsideProviderNetwork  = "AddressOutsideProviderNetwork"
+	ReasonAddressOutsideSubnet           = "AddressOutsideSubnet"
 	ReasonAddressReserved                = "AddressReserved"
 	ReasonAddressInUse                   = "AddressInUse"
 	ReasonAllocating                     = "Allocating"
@@ -40,6 +41,7 @@ const (
 	ReasonElasticIPNotFound              = "ElasticIPNotFound"
 	ReasonElasticIPNotReady              = "ElasticIPNotReady"
 	ReasonNoTargets                      = "NoTargets"
+	ReasonNoReadyPods                    = "NoReadyPods"
 	ReasonTargetNetworkMismatch          = "TargetNetworkMismatch"
 	ReasonTargetPortsDiffer              = "TargetPortsDiffer"
 	ReasonNotAttached                    = "NotAttached"
@@ -49,6 +51,16 @@ const (
 	ReasonTargetInUse                    = "TargetInUse"
 	ReasonWaitingForDefaultSecurityGroup = "WaitingForDefaultSecurityGroup"
 	ReasonCIDRReserved                   = "CIDRReserved"
+	ReasonCIDROutsideAllowedRanges       = "CIDROutsideAllowedRanges"
+	ReasonVRFInUse                       = "VRFInUse"
+	ReasonVRFReserved                    = "VRFReserved"
+	ReasonNoPoolCapacity                 = "NoPoolCapacity"
+	ReasonQuotaExceeded                  = "QuotaExceeded"
+	ReasonGatewayExists                  = "GatewayExists"
+	ReasonConnectCIDRInUse               = "ConnectCIDRInUse"
+	ReasonPeeringExists                  = "PeeringExists"
+	ReasonServicesNotConfigured          = "ServicesNotConfigured"
+	ReasonMTUExceedsUnderlay             = "MTUExceedsUnderlay"
 )
 
 var AllReasons = sortedReasons([]string{
@@ -56,12 +68,15 @@ var AllReasons = sortedReasons([]string{
 	ReasonNoProviderNetwork, ReasonBGPNotConfigured, ReasonApplied, ReasonNetworkNotFound, ReasonNetworkNotOwned,
 	ReasonNetworkNotReady, ReasonCIDROutsideNetwork, ReasonCIDROverlap, ReasonGatewayInvalid, ReasonExcludeIPsInvalid,
 	ReasonNamespaceNotLabeled, ReasonFabricNotReady, ReasonInUse, ReasonReserved, ReasonAttached,
-	ReasonUnknownProviderNetwork, ReasonUnsupported, ReasonAddressOutsideProviderNetwork, ReasonAddressReserved,
+	ReasonUnknownProviderNetwork, ReasonUnsupported, ReasonAddressOutsideProviderNetwork, ReasonAddressOutsideSubnet, ReasonAddressReserved,
 	ReasonAddressInUse, ReasonAllocating, ReasonTargetNotFound, ReasonTargetMismatch, ReasonWaitingForAddress,
 	ReasonNetworkNotExternal, ReasonExternalNotConnected, ReasonFRRAgentMissing, ReasonProgrammed,
-	ReasonElasticIPNotFound, ReasonElasticIPNotReady, ReasonNoTargets, ReasonTargetNetworkMismatch,
+	ReasonElasticIPNotFound, ReasonElasticIPNotReady, ReasonNoTargets, ReasonNoReadyPods, ReasonTargetNetworkMismatch,
 	ReasonTargetPortsDiffer, ReasonNotAttached, ReasonInvalidRecords, ReasonRefNotFound, ReasonInvalidRules,
-	ReasonTargetInUse, ReasonWaitingForDefaultSecurityGroup, ReasonCIDRReserved,
+	ReasonTargetInUse, ReasonWaitingForDefaultSecurityGroup, ReasonCIDRReserved, ReasonCIDROutsideAllowedRanges,
+	ReasonVRFInUse, ReasonVRFReserved, ReasonNoPoolCapacity,
+	ReasonQuotaExceeded, ReasonGatewayExists, ReasonConnectCIDRInUse, ReasonPeeringExists, ReasonServicesNotConfigured,
+	ReasonMTUExceedsUnderlay,
 })
 
 func sortedReasons(reasons []string) []string {

@@ -1,0 +1,61 @@
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicy
+metadata:
+  name: bedrock-database-catalog-admin
+  labels:
+    bedrock.cloudyfolks.io/kind: ValidatingAdmissionPolicy
+    bedrock.cloudyfolks.io/name: bedrock-database-catalog-admin
+spec:
+  failurePolicy: Fail
+  matchConstraints:
+    resourceRules:
+      - apiGroups: [bedrock.cloudyfolks.io]
+        apiVersions: [v1alpha1]
+        operations: [CREATE, UPDATE, DELETE]
+        resources: [databaseversions, databaseclasses]
+  matchConditions:
+    - name: bedrock-identity
+      expression: "request.userInfo.username.startsWith('bedrock:')"
+  validations:
+    - expression: "'bedrock:bedrock-admins' in request.userInfo.groups"
+      message: "only an administrator may manage a DatabaseVersion or a DatabaseClass"
+      reason: Forbidden
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicyBinding
+metadata:
+  name: bedrock-database-catalog-admin
+  labels:
+    bedrock.cloudyfolks.io/kind: ValidatingAdmissionPolicyBinding
+    bedrock.cloudyfolks.io/name: bedrock-database-catalog-admin
+spec:
+  policyName: bedrock-database-catalog-admin
+  validationActions: [Deny]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: bedrock-database-catalog-reader
+  labels:
+    bedrock.cloudyfolks.io/kind: ClusterRole
+    bedrock.cloudyfolks.io/name: bedrock-database-catalog-reader
+rules:
+  - apiGroups: [bedrock.cloudyfolks.io]
+    resources: [databaseclasses, databaseversions]
+    verbs: [get, list, watch]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: bedrock-database-catalog-reader
+  labels:
+    bedrock.cloudyfolks.io/kind: ClusterRoleBinding
+    bedrock.cloudyfolks.io/name: bedrock-database-catalog-reader
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: bedrock-database-catalog-reader
+subjects:
+  - apiGroup: rbac.authorization.k8s.io
+    kind: Group
+    name: system:authenticated

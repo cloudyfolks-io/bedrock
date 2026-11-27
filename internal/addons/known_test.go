@@ -5,9 +5,9 @@ import (
 	"testing"
 )
 
-func TestKnownAddonsAreKataAndLoki(t *testing.T) {
+func TestKnownAddonsAreKataLokiClustersCNPGRegistryPerconaAndDescheduler(t *testing.T) {
 	known := Known()
-	if len(known) != 2 || known[0].Name != "kata" || known[1].Name != "loki" {
+	if len(known) != 7 || known[0].Name != "kata" || known[1].Name != "loki" || known[2].Name != "clusters" || known[3].Name != "cnpg" || known[4].Name != "registry" || known[5].Name != "percona-ps" || known[6].Name != "descheduler" {
 		t.Fatalf("known %+v", known)
 	}
 	if known[0].EnabledSetting != "kata.enabled" || len(known[0].Values) != 0 || known[0].Preflight == nil || known[0].Vars != nil {
@@ -24,11 +24,39 @@ func TestKnownAddonsAreKataAndLoki(t *testing.T) {
 	if defaults["persistence.size"] != "20Gi" || defaults["persistence.storage-class"] != "block" || len(defaults) != 2 {
 		t.Errorf("defaults %v", defaults)
 	}
+	cnpg := known[3]
+	if cnpg.EnabledSetting != "cnpg.enabled" || len(cnpg.Values) != 0 || cnpg.Vars != nil {
+		t.Errorf("cnpg %+v", cnpg)
+	}
+	percona := known[5]
+	if percona.EnabledSetting != "percona-ps.enabled" || len(percona.Values) != 0 || percona.Vars != nil || percona.Preflight != nil {
+		t.Errorf("percona-ps %+v", percona)
+	}
+	descheduler := known[6]
+	if descheduler.EnabledSetting != "descheduler.enabled" || len(descheduler.Values) != 0 || descheduler.Vars != nil || descheduler.Preflight != nil {
+		t.Errorf("descheduler %+v", descheduler)
+	}
+	if _, ok := Lookup("descheduler"); !ok {
+		t.Error("Lookup(descheduler)")
+	}
+	if _, ok := Lookup("percona-ps"); !ok {
+		t.Error("Lookup(percona-ps)")
+	}
+	if _, ok := Lookup("cnpg"); !ok {
+		t.Error("Lookup(cnpg)")
+	}
 	if _, ok := Lookup("loki"); !ok {
 		t.Error("Lookup(loki)")
 	}
 	if _, ok := Lookup("nothing"); ok {
 		t.Error("Lookup(nothing)")
+	}
+}
+
+func TestClustersAddonHasNoPreflightValuesOrVars(t *testing.T) {
+	def, ok := Lookup(Clusters)
+	if !ok || def.EnabledSetting != "clusters.enabled" || def.Preflight != nil || def.Vars != nil || len(def.Values) != 0 {
+		t.Fatalf("clusters %+v", def)
 	}
 }
 

@@ -50,6 +50,7 @@ func step(ctx context.Context, c client.Client) {
 	each(ctx, c, fabric.SubnetGVK, func(u *unstructured.Unstructured) { _ = MarkSubnetReady(ctx, c, u.GetName()) })
 	allocate(ctx, c)
 	each(ctx, c, fabric.OvnFipGVK, func(u *unstructured.Unstructured) { _ = MarkFipReady(ctx, c, u.GetName()) })
+	each(ctx, c, fabric.OvnSnatRuleGVK, func(u *unstructured.Unstructured) { _ = MarkSnatRuleReady(ctx, c, u.GetName()) })
 	each(ctx, c, fabric.RouterLBRuleGVK, func(u *unstructured.Unstructured) {
 		_ = MarkRouterLBRuleProgrammed(ctx, c, u.GetName(), "rlr-"+u.GetName())
 	})

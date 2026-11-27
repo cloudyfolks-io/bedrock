@@ -15,6 +15,7 @@ import (
 	"github.com/cloudyfolks-io/bedrock/internal/authn/apiserver"
 	"github.com/cloudyfolks-io/bedrock/internal/host"
 	"github.com/cloudyfolks-io/bedrock/internal/k0s"
+	"github.com/cloudyfolks-io/bedrock/internal/settings"
 )
 
 const tokenUsage = "usage: bedrock token create --roles a,b [--expiry 1h] [--kubeconfig PATH] [--k0s-bin PATH]"
@@ -71,6 +72,11 @@ func buildToken(ctx context.Context, c client.Client, k0sClient k0s.Client, node
 	if err := c.Get(ctx, client.ObjectKey{Name: cluster.Status.Version}, &rel); err != nil {
 		return k0s.Token{}, err
 	}
+	effective, err := settings.Effective(ctx, c)
+	if err != nil {
+		return k0s.Token{}, err
+	}
+	cipher := effective["storage.cephx-cipher"]
 	k0sRole := "worker"
 	var k0sConfig []byte
 	var authnFiles map[string][]byte
@@ -91,7 +97,7 @@ func buildToken(ctx context.Context, c client.Client, k0sClient k0s.Client, node
 	if err != nil {
 		return k0s.Token{}, err
 	}
-	return k0s.Token{Version: rel.Spec.Version, Roles: nodeRoles, K0sToken: k0sToken, K0sConfig: k0sConfig, AuthnFiles: authnFiles, VIP: cluster.Spec.API.VIP, Image: rel.Spec.Image, K0sVersion: rel.Spec.K0sVersion, K0sChecksums: rel.Spec.K0sChecksums, SupportedOS: rel.Spec.SupportedOS, Mirror: cluster.Spec.Registry.Mirror}, nil
+	return k0s.Token{Version: rel.Spec.Version, Roles: nodeRoles, K0sToken: k0sToken, K0sConfig: k0sConfig, AuthnFiles: authnFiles, VIP: cluster.Spec.API.VIP, Image: rel.Spec.Image, K0sVersion: rel.Spec.K0sVersion, K0sChecksums: rel.Spec.K0sChecksums, SupportedOS: rel.Spec.SupportedOS, Mirror: cluster.Spec.Registry.Mirror, CephxCipher: cipher}, nil
 }
 
 func readAuthnFiles(dir string) (map[string][]byte, error) {

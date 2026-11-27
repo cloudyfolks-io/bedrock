@@ -78,18 +78,34 @@ spec:
                 x-kubernetes-list-type: atomic
               quota:
                 properties:
+                  containers:
+                    format: int32
+                    minimum: 0
+                    type: integer
                   cpu:
                     anyOf:
                     - type: integer
                     - type: string
                     pattern: ^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$
                     x-kubernetes-int-or-string: true
+                  databases:
+                    format: int32
+                    minimum: 0
+                    type: integer
+                  kubernetesClusters:
+                    format: int32
+                    minimum: 0
+                    type: integer
                   memory:
                     anyOf:
                     - type: integer
                     - type: string
                     pattern: ^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$
                     x-kubernetes-int-or-string: true
+                  registries:
+                    format: int32
+                    minimum: 0
+                    type: integer
                   storage:
                     anyOf:
                     - type: integer
@@ -182,18 +198,34 @@ spec:
                 type: string
               usage:
                 properties:
+                  containers:
+                    format: int32
+                    minimum: 0
+                    type: integer
                   cpu:
                     anyOf:
                     - type: integer
                     - type: string
                     pattern: ^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$
                     x-kubernetes-int-or-string: true
+                  databases:
+                    format: int32
+                    minimum: 0
+                    type: integer
+                  kubernetesClusters:
+                    format: int32
+                    minimum: 0
+                    type: integer
                   memory:
                     anyOf:
                     - type: integer
                     - type: string
                     pattern: ^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$
                     x-kubernetes-int-or-string: true
+                  registries:
+                    format: int32
+                    minimum: 0
+                    type: integer
                   storage:
                     anyOf:
                     - type: integer

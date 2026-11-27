@@ -83,6 +83,7 @@ spec:
                   - Preload
                   - Backup
                   - K0sUpdate
+                  - K0sReconfigure
                   - AgentUpdate
                   - OSUpdate
                   - Reboot

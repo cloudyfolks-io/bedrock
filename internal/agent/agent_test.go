@@ -33,7 +33,7 @@ func fakeInventory(ctx context.Context, _ host.Exec, _ string) (v1alpha1.Invento
 }
 
 func newDeps(exec *host.FakeExec, now time.Time) Deps {
-	return Deps{Exec: exec, Root: "/nonexistent", Node: "node-a", Now: func() time.Time { return now }, Interval: time.Hour, Inventory: fakeInventory, Apply: hostconfig.Apply, Packages: pkgmgr.Manager{Exec: exec, Family: "apt", Root: "/nonexistent"}, Version: "test", Hostname: func() (string, error) { return "node-a", nil }, DiskSpace: func(string) (host.Space, error) { return host.Space{}, nil }, HTTP: &http.Client{}, ProbeTimeout: time.Minute, AuthnOwner: apiserver.KeepOwner}
+	return Deps{Exec: exec, Root: "/nonexistent", Node: "node-a", Now: func() time.Time { return now }, Interval: time.Hour, Inventory: fakeInventory, Apply: hostconfig.Apply, Guard: hostconfig.GuardLegs, Packages: pkgmgr.Manager{Exec: exec, Family: "apt", Root: "/nonexistent"}, Version: "test", Hostname: func() (string, error) { return "node-a", nil }, DiskSpace: func(string) (host.Space, error) { return host.Space{}, nil }, HTTP: &http.Client{}, ProbeTimeout: time.Minute, AuthnOwner: apiserver.KeepOwner}
 }
 
 func createHost(t *testing.T, name string, managed bool, window string) {
@@ -309,7 +309,7 @@ func TestTickAppliesHostConfigWhenManaged(t *testing.T) {
 	if !v1alpha1.IsConditionTrue(h.Status.Conditions, v1alpha1.ConditionManagementApplied) {
 		t.Fatalf("conditions %+v", h.Status.Conditions)
 	}
-	if h.Status.Applied == nil || h.Status.Applied.Generation != hc.Generation || len(h.Status.Applied.Steps) != 8 {
+	if h.Status.Applied == nil || h.Status.Applied.Generation != hc.Generation || len(h.Status.Applied.Steps) != 9 {
 		t.Fatalf("applied %+v", h.Status.Applied)
 	}
 	calls := len(hostChanges(exec.Calls))
@@ -717,5 +717,68 @@ func TestRunWakesForOwnNodeUpgrades(t *testing.T) {
 	cancel()
 	if err := <-done; err != nil {
 		t.Fatal(err)
+	}
+}
+
+func legsGuardEnv(t *testing.T, node string) (Deps, *host.FakeExec) {
+	t.Helper()
+	createHost(t, node, true, "")
+	createHostConfig(t, node, v1alpha1.HostConfigSpec{TenantLegs: []v1alpha1.TenantLegSpec{{Interface: "br-public.30", AllowSources: []string{"100.65.0.1/32"}}}})
+	exec := &host.FakeExec{
+		Responses:        map[string]string{"nft list table inet bedrock_legs": "table inet bedrock_legs {\n}\n"},
+		ResponsePrefixes: map[string]string{"systemctl ": "", "nft ": "", "sysctl -p ": ""},
+	}
+	deps := newDeps(exec, time.Now())
+	deps.Node = node
+	deps.Root = t.TempDir()
+	return deps, exec
+}
+
+func countCalls(exec *host.FakeExec, call string) int {
+	n := 0
+	for _, c := range exec.Calls {
+		if c == call {
+			n++
+		}
+	}
+	return n
+}
+
+func TestTickRepairsTheLegsGuardAtTheSameGeneration(t *testing.T) {
+	deps, exec := legsGuardEnv(t, "node-guard-a")
+	if err := Tick(context.Background(), k8sClient, deps); err != nil {
+		t.Fatal(err)
+	}
+	restart := "systemctl restart bedrock-tenant-legs.service"
+	reload := "systemctl daemon-reload"
+	restarts, reloads := countCalls(exec, restart), countCalls(exec, reload)
+	if err := Tick(context.Background(), k8sClient, deps); err != nil {
+		t.Fatal(err)
+	}
+	if countCalls(exec, restart) != restarts || countCalls(exec, reload) != reloads {
+		t.Fatalf("an intact guard needs no action: %v", exec.Calls)
+	}
+	exec.Responses["nft list table inet bedrock_legs"] = "table inet bedrock_legs {\n\tchain other {\n\t}\n}\n"
+	if err := Tick(context.Background(), k8sClient, deps); err != nil {
+		t.Fatal(err)
+	}
+	if countCalls(exec, restart) != restarts+1 || countCalls(exec, reload) != reloads {
+		t.Fatalf("a changed table must be loaded again without a new apply: %v", exec.Calls)
+	}
+}
+
+func TestTickReportsAGuardThatCannotBeRepaired(t *testing.T) {
+	deps, exec := legsGuardEnv(t, "node-guard-b")
+	if err := Tick(context.Background(), k8sClient, deps); err != nil {
+		t.Fatal(err)
+	}
+	exec.Responses["nft list table inet bedrock_legs"] = "table inet bedrock_legs {\n\tchain other {\n\t}\n}\n"
+	exec.Errors = map[string]error{"systemctl restart bedrock-tenant-legs.service": errors.New("unit failed")}
+	if err := Tick(context.Background(), k8sClient, deps); err != nil {
+		t.Fatal(err)
+	}
+	cond := requireCondition(t, "node-guard-b", v1alpha1.ConditionManagementApplied)
+	if cond.Status != metav1.ConditionFalse || cond.Reason != "GuardFailed" {
+		t.Fatalf("condition %+v", cond)
 	}
 }

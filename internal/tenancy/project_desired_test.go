@@ -52,7 +52,7 @@ func TestDesiredNetworkPolicy(t *testing.T) {
 	if len(got.Spec.PolicyTypes) != 1 || got.Spec.PolicyTypes[0] != "Ingress" || len(got.Spec.Egress) != 0 {
 		t.Fatalf("types = %v", got.Spec.PolicyTypes)
 	}
-	if len(got.Spec.Ingress) != 1 || len(got.Spec.Ingress[0].From) != 1 {
+	if len(got.Spec.Ingress) != 1 || len(got.Spec.Ingress[0].From) != 2 {
 		t.Fatalf("ingress = %+v", got.Spec.Ingress)
 	}
 	from := got.Spec.Ingress[0].From[0]
@@ -232,4 +232,19 @@ func TestProjectStatusKeepsTheNamespaceOfAProvisionedProject(t *testing.T) {
 	}
 	requireCondition(t, got.Conditions, ConditionQuotaReady, metav1.ConditionFalse, ReasonTenantQuotaExceeded)
 	requireCondition(t, got.Conditions, v1alpha1.ConditionDegraded, metav1.ConditionTrue, "")
+}
+
+func TestDefaultNetworkPolicyLetsOnlyTheUploadProxyInFromOutside(t *testing.T) {
+	project := v1alpha1.Project{ObjectMeta: metav1.ObjectMeta{Name: "shop"}, Spec: v1alpha1.ProjectSpec{TenantRef: "acme"}}
+	peers := DesiredNetworkPolicy(project).Spec.Ingress[0].From
+	if len(peers) != 2 {
+		t.Fatalf("peers = %+v", peers)
+	}
+	proxy := peers[1]
+	if proxy.NamespaceSelector == nil || proxy.NamespaceSelector.MatchLabels[corev1.LabelMetadataName] != "cdi" {
+		t.Fatalf("namespace selector = %+v", proxy.NamespaceSelector)
+	}
+	if proxy.PodSelector == nil || proxy.PodSelector.MatchLabels["cdi.kubevirt.io"] != "cdi-uploadproxy" || len(proxy.PodSelector.MatchLabels) != 1 {
+		t.Fatalf("pod selector = %+v", proxy.PodSelector)
+	}
 }

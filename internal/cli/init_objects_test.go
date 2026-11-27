@@ -24,8 +24,47 @@ import (
 
 	"github.com/cloudyfolks-io/bedrock/api/v1alpha1"
 	"github.com/cloudyfolks-io/bedrock/internal/authn/secret"
+	"github.com/cloudyfolks-io/bedrock/internal/config"
 	"github.com/cloudyfolks-io/bedrock/internal/release"
 )
+
+type clusterCreateClient struct {
+	client.Client
+	beforeCluster func(context.Context)
+}
+
+func (c clusterCreateClient) Create(ctx context.Context, obj client.Object, opts ...client.CreateOption) error {
+	if _, ok := obj.(*v1alpha1.Cluster); ok {
+		c.beforeCluster(ctx)
+	}
+	return c.Client.Create(ctx, obj, opts...)
+}
+
+func TestCreateObjectsStoresOVNTLSBeforeStartingTheOperatorInstall(t *testing.T) {
+	c, _ := startEnv(t)
+	path := filepath.Join(t.TempDir(), "cluster.yaml")
+	if err := os.WriteFile(path, []byte(initConfig), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := config.Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	tls := true
+	cfg.Spec.Network.Fabric.OVNTLS = &tls
+	check := clusterCreateClient{Client: c, beforeCluster: func(ctx context.Context) {
+		vars, err := release.Vars(ctx, c, cfg.Spec.API.VIP)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if vars[release.VarFabricEnableSSL] != "true" {
+			t.Fatal("the new cluster would start Fabric without TLS")
+		}
+	}}
+	if err := createObjects(t.Context(), check, cfg, "node-a", nil); err != nil {
+		t.Fatal(err)
+	}
+}
 
 func hostWithRoles(roles ...string) *v1alpha1.Host {
 	return &v1alpha1.Host{ObjectMeta: metav1.ObjectMeta{Name: "node-a"}, Spec: v1alpha1.HostSpec{Roles: roles}}

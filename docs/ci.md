@@ -6,15 +6,13 @@ together test every Go package once (including unit tests in envtest packages).
 Envtest runs at most two packages concurrently: each starts its own etcd and
 API server. This limits runner contention, not coverage, and adds no retries.
 
-Every code PR runs kind. Auth/UI changes add authn; compute/network/tenancy/
-images/objectstorage changes add tenant. Mixed changes union their suites.
-Unknown, shared, dependency, installer, release and upgrade changes run everything.
-Documentation-only changes still run validation and envtest.
+Code pull requests run the kind smoke test. Documentation-only pull requests
+run validation and envtest.
 
-Nightly and manual CI run all seven E2E variants, including standalone offline
-bundle installation and both upgrade success/abort paths. Before publishing,
-manually run `ci` on the final candidate and require all jobs, including envtest,
-to pass. A selected PR run is not release evidence.
+Scheduled, manual and tagged release runs also test offline installation and
+sign-in, tenant workloads, upgrade and upgrade rollback. The sign-in job runs
+the offline installation smoke test on the same host and bundle. The release
+workflow waits for all qualification jobs before it publishes artifacts.
 
 UI outputs are tested/built once and shared only inside the same workflow run,
 named for its exact SHA. Versioned binaries and release manifests are not reused

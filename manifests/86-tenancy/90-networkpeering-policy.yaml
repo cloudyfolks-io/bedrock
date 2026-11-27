@@ -1,0 +1,33 @@
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicy
+metadata:
+  name: bedrock-networkpeering-admin
+  labels:
+    bedrock.cloudyfolks.io/kind: ValidatingAdmissionPolicy
+    bedrock.cloudyfolks.io/name: bedrock-networkpeering-admin
+spec:
+  failurePolicy: Fail
+  matchConstraints:
+    resourceRules:
+      - apiGroups: [bedrock.cloudyfolks.io]
+        apiVersions: [v1alpha1]
+        operations: [CREATE, UPDATE, DELETE]
+        resources: [networkpeerings]
+  matchConditions:
+    - name: bedrock-identity
+      expression: "request.userInfo.username.startsWith('bedrock:')"
+  validations:
+    - expression: "'bedrock:bedrock-admins' in request.userInfo.groups"
+      message: "only an administrator may manage a NetworkPeering"
+      reason: Forbidden
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicyBinding
+metadata:
+  name: bedrock-networkpeering-admin
+  labels:
+    bedrock.cloudyfolks.io/kind: ValidatingAdmissionPolicyBinding
+    bedrock.cloudyfolks.io/name: bedrock-networkpeering-admin
+spec:
+  policyName: bedrock-networkpeering-admin
+  validationActions: [Deny]

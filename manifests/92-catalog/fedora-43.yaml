@@ -12,6 +12,8 @@ spec:
     family: fedora
     version: "43"
     preference: fedora
+    displayName: Fedora 43
+    architecture: amd64
   source:
     registry:
       image: quay.io/containerdisks/fedora:43

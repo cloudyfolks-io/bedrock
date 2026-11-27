@@ -46,6 +46,14 @@ spec:
             properties:
               os:
                 properties:
+                  architecture:
+                    enum:
+                    - amd64
+                    - arm64
+                    type: string
+                  displayName:
+                    maxLength: 128
+                    type: string
                   family:
                     type: string
                   preference:

@@ -1,6 +1,7 @@
 package network
 
 import (
+	"cmp"
 	"fmt"
 	"slices"
 	"strings"
@@ -19,6 +20,10 @@ type VpcInput struct {
 	Network v1alpha1.Network
 	Config  Config
 	VrfID   uint32
+
+	Attached      []string
+	AttachedRoute string
+	Peers         []PeerLink
 }
 
 type External struct {
@@ -28,6 +33,43 @@ type External struct {
 }
 
 func PlanVpc(in VpcInput) (fabric.VpcSpec, External) {
+	spec, external := planExternal(in)
+	return withRouting(spec, in), external
+}
+
+func withRouting(spec fabric.VpcSpec, in VpcInput) fabric.VpcSpec {
+	spec.Peerings = vpcPeerings(in.Peers)
+	spec.StaticRoutes = vpcStaticRoutes(in)
+	return spec
+}
+
+func vpcPeerings(links []PeerLink) []fabric.Peering {
+	peerings := make([]fabric.Peering, len(links))
+	for i, link := range links {
+		peerings[i] = fabric.Peering{RemoteVpc: link.RemoteVpc, LocalConnectIP: link.LocalIP}
+	}
+	return peerings
+}
+
+func vpcStaticRoutes(in VpcInput) []fabric.StaticRoute {
+	var routes []fabric.StaticRoute
+	add := func(route fabric.StaticRoute) {
+		if !slices.ContainsFunc(routes, func(r fabric.StaticRoute) bool { return r.CIDR == route.CIDR }) {
+			routes = append(routes, route)
+		}
+	}
+	for _, route := range in.Network.Spec.StaticRoutes {
+		add(fabric.StaticRoute{CIDR: route.CIDR, NextHop: route.NextHop})
+	}
+	for _, link := range in.Peers {
+		for _, cidr := range link.RemoteRanges {
+			add(fabric.StaticRoute{CIDR: cidr, NextHop: link.RemoteIP})
+		}
+	}
+	return routes
+}
+
+func planExternal(in VpcInput) (fabric.VpcSpec, External) {
 	if !in.Network.Spec.EnableExternal {
 		return fabric.VpcSpec{}, External{}
 	}
@@ -41,16 +83,66 @@ func PlanVpc(in VpcInput) (fabric.VpcSpec, External) {
 }
 
 func planL2(in VpcInput) (fabric.VpcSpec, External) {
-	subnets := make([]string, len(in.Config.ProviderNetworks))
-	for i, pn := range in.Config.ProviderNetworks {
-		subnets[i] = ExternalSubnetName(pn.Name)
+	kept := keptPools(in.Config, in.Attached)
+	tenants := unattachedTenantPools(in.Config, kept)
+	pools := slices.Concat(kept, tenants)
+	if len(pools) == 0 {
+		return fabric.VpcSpec{}, External{Requested: true, Reason: ReasonNoProviderNetwork, Message: "enableExternal in l2 mode needs a provider network with the role tenant; set network.provider-networks"}
 	}
-	first := in.Config.ProviderNetworks[0]
+	nextHop := pools[0].Gateway
+	if len(kept) > 0 {
+		nextHop = cmp.Or(in.AttachedRoute, nextHop)
+	}
 	return fabric.VpcSpec{
 		EnableExternal:       true,
-		ExtraExternalSubnets: subnets,
-		DefaultRoute:         &fabric.StaticRoute{CIDR: defaultCIDR, NextHop: first.Gateway},
-	}, External{Requested: true, Reason: ReasonConnected}
+		ExtraExternalSubnets: composeExternalSubnets(in.Config, kept, tenants),
+		DefaultRoute:         &fabric.StaticRoute{CIDR: defaultCIDR, NextHop: nextHop},
+	}, connected(in)
+}
+
+func connected(in VpcInput) External {
+	cfg := in.Config
+	if missing := MissingServicesSettings(cfg); len(missing) > 0 {
+		return External{Requested: true, Reason: ReasonServicesNotConfigured, Message: "the services plane needs these settings: " + strings.Join(missing, ", ")}
+	}
+	if cfg.Services.ProviderNetwork == "" && in.Network.Status.ServicesIdentity != "" {
+		return External{Requested: true, Reason: ReasonServicesNotConfigured, Message: "network.services.provider-network is empty, and this Network has a services identity; set the Setting to keep the services plane"}
+	}
+	return External{Requested: true, Reason: ReasonConnected}
+}
+
+func composeExternalSubnets(cfg Config, kept, planned []v1alpha1.ProviderNetworkSpec) []string {
+	var subnets []string
+	add := func(subnet string) {
+		if !slices.Contains(subnets, subnet) {
+			subnets = append(subnets, subnet)
+		}
+	}
+	for _, pn := range slices.Concat(kept, planned) {
+		add(ExternalSubnetName(pn.Name))
+	}
+	if services, ok := ServicesSubnet(cfg); ok {
+		add(services)
+	}
+	return subnets
+}
+
+func keptPools(cfg Config, attached []string) []v1alpha1.ProviderNetworkSpec {
+	var kept []v1alpha1.ProviderNetworkSpec
+	for _, subnet := range attached {
+		if i := slices.IndexFunc(cfg.ProviderNetworks, func(pn v1alpha1.ProviderNetworkSpec) bool { return ExternalSubnetName(pn.Name) == subnet }); i >= 0 {
+			kept = append(kept, cfg.ProviderNetworks[i])
+		}
+	}
+	return kept
+}
+
+func unattachedTenantPools(cfg Config, kept []v1alpha1.ProviderNetworkSpec) []v1alpha1.ProviderNetworkSpec {
+	tenants := slices.DeleteFunc(slices.Clone(cfg.ProviderNetworks), func(pn v1alpha1.ProviderNetworkSpec) bool {
+		return !IsTenantPool(pn) || slices.ContainsFunc(kept, func(k v1alpha1.ProviderNetworkSpec) bool { return k.Name == pn.Name })
+	})
+	slices.SortFunc(tenants, func(a, b v1alpha1.ProviderNetworkSpec) int { return strings.Compare(a.Name, b.Name) })
+	return tenants
 }
 
 func planBGP(in VpcInput) (fabric.VpcSpec, External) {
@@ -61,10 +153,11 @@ func planBGP(in VpcInput) (fabric.VpcSpec, External) {
 	subnet := ExternalSubnetName(transit.Name)
 	return fabric.VpcSpec{
 		EnableExternal:       true,
-		ExtraExternalSubnets: []string{subnet},
+		EnableBfd:            true,
+		ExtraExternalSubnets: composeExternalSubnets(in.Config, keptPools(in.Config, in.Attached), []v1alpha1.ProviderNetworkSpec{transit}),
 		DefaultRoute:         &fabric.StaticRoute{CIDR: defaultCIDR, NextHop: transit.Gateway},
-		Dynamic:              &fabric.DynamicRouting{VrfID: in.VrfID, ExternalSubnet: subnet, Redistribute: []string{"nat", "lb"}},
-	}, External{Requested: true, Reason: ReasonConnected}
+		Dynamic:              &fabric.DynamicRouting{VrfID: in.VrfID, ExternalSubnet: subnet, Redistribute: []string{"nat", "lb"}, LocalOnly: true},
+	}, connected(in)
 }
 
 func NextVrfID(used []uint32) (uint32, error) {

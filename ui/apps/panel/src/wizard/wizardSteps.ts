@@ -1,6 +1,7 @@
 import { msg } from "@lingui/core/macro";
 import type { MessageDescriptor } from "@lingui/core";
 import type { DiskStep, DiskValues, IsoStep, IsoValues, WizardImage } from "./types";
+import type { WizardVolume } from "./useWizardData";
 
 export const diskSteps: DiskStep[] = ["basics", "image", "size", "disks", "network", "access", "review"];
 export const isoSteps: IsoStep[] = ["basics", "iso", "size", "firmware", "disks", "network", "review"];
@@ -52,6 +53,8 @@ const messages = {
   chooseImage: msg({ id: "wizard.error.image", message: "Choose an image" }),
   chooseIso: msg({ id: "wizard.error.iso", message: "Choose an ISO image" }),
   chooseSize: msg({ id: "wizard.error.size", message: "Choose an instance type" }),
+  cores: msg({ id: "wizard.error.cores", message: "Enter the number of CPU cores" }),
+  memory: msg({ id: "wizard.error.memory", message: "Enter at least 128 MiB of memory" }),
   rootDisk: msg({ id: "wizard.error.rootDisk", message: "Enter a root disk size in GiB" }),
   rootDiskSmall: msg({ id: "wizard.error.rootDiskSmall", message: "The root disk is smaller than the image" }),
   subnet: msg({ id: "wizard.error.subnet", message: "Choose a subnet" }),
@@ -72,8 +75,55 @@ function rootDiskProblems(sizeGi: number | null, minimum: number): Problem[] {
   return sizeGi < minimum ? [{ field: "rootDiskGi", message: messages.rootDiskSmall }] : [];
 }
 
+function sizeProblems(values: { instanceType: string; customSize: boolean; cores: number | null; memoryMiB: number | null }): Problem[] {
+  if (!values.customSize) {
+    return values.instanceType === "" ? [{ field: "instanceType", message: messages.chooseSize }] : [];
+  }
+  const problems: Problem[] = [];
+  if (values.cores === null || !Number.isInteger(values.cores) || values.cores < 1) {
+    problems.push({ field: "cores", message: messages.cores });
+  }
+  if (values.memoryMiB === null || !Number.isInteger(values.memoryMiB) || values.memoryMiB < 128) {
+    problems.push({ field: "memoryMiB", message: messages.memory });
+  }
+  return problems;
+}
+
 function subnetProblems(subnetRef: string): Problem[] {
   return subnetRef === "" ? [{ field: "subnetRef", message: messages.subnet }] : [];
+}
+
+export function volumeProblem(volumes: readonly WizardVolume[], name: string): MessageDescriptor | undefined {
+  const volume = volumes.find((candidate) => candidate.name === name);
+  if (!volume) {
+    return msg({ id: "wizard.volume.missing", message: "Not found in this project" });
+  }
+  if (volume.attachedTo !== "") {
+    const owner = volume.attachedTo;
+    return msg({ id: "wizard.volume.attached", message: `Attached to ${owner}` });
+  }
+  if (volume.claimedByVm !== "") {
+    const owner = volume.claimedByVm;
+    return msg({ id: "wizard.volume.claimedByVm", message: `Referenced by VM ${owner}` });
+  }
+  if (volume.phase === "InUse") {
+    return msg({ id: "wizard.volume.inUse", message: "In use; owner unknown" });
+  }
+  if (volume.phase !== "Available" || !volume.ready || volume.deleting) {
+    return msg({ id: "wizard.volume.unavailable", message: "Not available to attach" });
+  }
+  return undefined;
+}
+
+export function extraVolumeProblem(selected: readonly string[], volumes: readonly WizardVolume[] | undefined): Problem[] {
+  if (selected.length === 0) {
+    return [];
+  }
+  if (!volumes) {
+    return [{ field: "extraVolumes", message: msg({ id: "wizard.volume.unverified", message: "Could not verify the selected volumes. Retry or remove them to continue." }) }];
+  }
+  const name = selected.find((entry) => volumeProblem(volumes, entry) !== undefined);
+  return name === undefined ? [] : [{ field: "extraVolumes", message: msg({ id: "wizard.volume.remove", message: `Remove ${name} to continue.` }) }];
 }
 
 export function diskStepProblems(step: DiskStep, values: DiskValues, environment: StepEnvironment): Problem[] {
@@ -83,7 +133,7 @@ export function diskStepProblems(step: DiskStep, values: DiskValues, environment
     case "image":
       return values.imageName === "" ? [{ field: "imageName", message: messages.chooseImage }] : [];
     case "size":
-      return values.instanceType === "" ? [{ field: "instanceType", message: messages.chooseSize }] : [];
+      return sizeProblems(values);
     case "disks": {
       const image = environment.images.find((candidate) => candidate.name === values.imageName && candidate.scope === values.imageScope);
       return rootDiskProblems(values.rootDiskGi, image?.sizeGi ?? 1);
@@ -97,14 +147,23 @@ export function diskStepProblems(step: DiskStep, values: DiskValues, environment
   }
 }
 
+export function readyIsos(images: readonly WizardImage[]): WizardImage[] {
+  const projectNames = new Set(images.filter(({ scope }) => scope === "project").map(({ name }) => name));
+  return images.filter(({ type, phase, scope, name }) => type === "iso" && phase === "Ready" && (scope === "project" || !projectNames.has(name)));
+}
+
 export function isoStepProblems(step: IsoStep, values: IsoValues, environment: StepEnvironment): Problem[] {
   switch (step) {
     case "basics":
       return nameProblems(values.name, environment.vmNames);
     case "iso":
-      return values.isoName === "" ? [{ field: "isoName", message: messages.chooseIso }] : [];
+      if (values.isoName === "") {
+        return [{ field: "isoName", message: messages.chooseIso }];
+      }
+      return readyIsos(environment.images).some(({ name }) => name === values.isoName)
+        ? [] : [{ field: "isoName", message: msg({ id: "wizard.iso.notReady", message: "Choose an ISO that is ready." }) }];
     case "size":
-      return values.instanceType === "" ? [{ field: "instanceType", message: messages.chooseSize }] : [];
+      return sizeProblems(values);
     case "disks":
       return rootDiskProblems(values.rootDiskGi, 1);
     case "network":
@@ -123,6 +182,7 @@ export function stepOfField(field: string): string {
     ["spec.image", "image"],
     ["spec.cdroms", "iso"],
     ["spec.instanceType", "size"],
+    ["spec.compute", "size"],
     ["spec.preference", "size"],
     ["spec.rootDisk", "disks"],
     ["spec.disks", "disks"],

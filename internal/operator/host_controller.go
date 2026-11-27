@@ -3,6 +3,7 @@ package operator
 import (
 	"context"
 	"errors"
+	"fmt"
 	"slices"
 	"time"
 
@@ -59,6 +60,9 @@ func (r *HostReconciler) reconcileHost(ctx context.Context, req ctrl.Request) (c
 	if err != nil {
 		return ctrl.Result{}, err
 	}
+	if err := r.requireClusterForExistingConfig(ctx, host, cluster); err != nil {
+		return ctrl.Result{}, err
+	}
 	host, err = r.ensureAdoptDevices(ctx, host, cluster)
 	if err != nil {
 		return ctrl.Result{}, err
@@ -111,6 +115,20 @@ func (r *HostReconciler) createHostFromNode(ctx context.Context, name string) er
 	devices := v1alpha1.AdoptHostDevices(cluster.Spec.Storage.Adopt, name)
 	host := &v1alpha1.Host{ObjectMeta: metav1.ObjectMeta{Name: name, Labels: map[string]string{v1alpha1.LabelKind: "Host", v1alpha1.LabelName: name}}, Spec: v1alpha1.HostSpec{Roles: nodeRoles, Storage: v1alpha1.HostStorageSpec{Devices: devices}}}
 	return client.IgnoreAlreadyExists(r.Client.Create(ctx, host))
+}
+
+func (r *HostReconciler) requireClusterForExistingConfig(ctx context.Context, host v1alpha1.Host, cluster v1alpha1.Cluster) error {
+	if cluster.Name != "" {
+		return nil
+	}
+	err := r.Client.Get(ctx, client.ObjectKey{Name: host.Name}, &v1alpha1.HostConfig{})
+	if apierrors.IsNotFound(err) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	return fmt.Errorf("the Cluster object is not readable, the HostConfig of %s is kept as it is", host.Name)
 }
 
 func (r *HostReconciler) updateStatus(ctx context.Context, host v1alpha1.Host, next v1alpha1.HostStatus) error {

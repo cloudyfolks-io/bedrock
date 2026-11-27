@@ -23,23 +23,23 @@ type Settings struct {
 }
 
 func ParseSettings(values map[string]string) (Settings, error) {
-	host := settingValue(values, "platform.host")
+	host := settings.OrDefault(values["platform.host"], "platform.host")
 	if host == "" {
 		return Settings{}, errors.New("platform.host is not set")
 	}
-	requireSecondFactor, err := strconv.ParseBool(settingValue(values, "authn.require-second-factor"))
+	requireSecondFactor, err := strconv.ParseBool(settings.OrDefault(values["authn.require-second-factor"], "authn.require-second-factor"))
 	if err != nil {
 		return Settings{}, fmt.Errorf("authn.require-second-factor: %w", err)
 	}
-	sessionTTL, err := time.ParseDuration(settingValue(values, "authn.session-ttl"))
+	sessionTTL, err := time.ParseDuration(settings.OrDefault(values["authn.session-ttl"], "authn.session-ttl"))
 	if err != nil {
 		return Settings{}, fmt.Errorf("authn.session-ttl: %w", err)
 	}
-	refreshTTL, err := time.ParseDuration(settingValue(values, "authn.refresh-ttl"))
+	refreshTTL, err := time.ParseDuration(settings.OrDefault(values["authn.refresh-ttl"], "authn.refresh-ttl"))
 	if err != nil {
 		return Settings{}, fmt.Errorf("authn.refresh-ttl: %w", err)
 	}
-	lockoutThreshold, err := strconv.Atoi(settingValue(values, "authn.lockout-threshold"))
+	lockoutThreshold, err := strconv.Atoi(settings.OrDefault(values["authn.lockout-threshold"], "authn.lockout-threshold"))
 	if err != nil {
 		return Settings{}, fmt.Errorf("authn.lockout-threshold: %w", err)
 	}
@@ -49,16 +49,8 @@ func ParseSettings(values map[string]string) (Settings, error) {
 		RefreshTTL:          refreshTTL,
 		LockoutThreshold:    lockoutThreshold,
 		Host:                host,
-		TLSMode:             settingValue(values, "platform.tls-mode"),
+		TLSMode:             settings.OrDefault(values["platform.tls-mode"], "platform.tls-mode"),
 	}, nil
-}
-
-func settingValue(values map[string]string, key string) string {
-	if value := values[key]; value != "" {
-		return value
-	}
-	def, _ := settings.Lookup(key)
-	return def.Default
 }
 
 func ReadSettings(ctx context.Context, c client.Reader) (Settings, error) {

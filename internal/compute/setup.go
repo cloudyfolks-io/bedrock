@@ -13,6 +13,7 @@ import (
 
 	"github.com/cloudyfolks-io/bedrock/api/v1alpha1"
 	"github.com/cloudyfolks-io/bedrock/internal/kinds"
+	"github.com/cloudyfolks-io/bedrock/internal/network/fabric"
 )
 
 var requiredKinds = []schema.GroupVersionKind{
@@ -24,6 +25,7 @@ var requiredKinds = []schema.GroupVersionKind{
 	csiSnapshotGVK,
 	instanceTypeGVK,
 	preferenceGVK,
+	fabric.IPGVK,
 }
 
 func SetupWithManager(mgr ctrl.Manager) error {
@@ -31,7 +33,7 @@ func SetupWithManager(mgr ctrl.Manager) error {
 }
 
 func setupControllers(mgr ctrl.Manager) error {
-	vms := &VirtualMachineReconciler{Client: mgr.GetClient(), Secrets: mgr.GetAPIReader(), Scheme: mgr.GetScheme(), GuestInfo: guestInfoFrom(mgr.GetConfig()), Now: time.Now}
+	vms := &VirtualMachineReconciler{Client: mgr.GetClient(), Secrets: mgr.GetAPIReader(), FabricIPs: mgr.GetCache(), Scheme: mgr.GetScheme(), GuestInfo: guestInfoFrom(mgr.GetConfig()), Now: time.Now}
 	for _, setup := range []func(ctrl.Manager) error{
 		vms.SetupWithManager,
 		(&VolumeReconciler{Client: mgr.GetClient()}).SetupWithManager,

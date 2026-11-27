@@ -1,0 +1,2 @@
+REVOKE ALL PRIVILEGES ON `a_b`.* FROM 'alice'@'%';
+DROP DATABASE `a_b`;

@@ -9,23 +9,53 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	"github.com/cloudyfolks-io/bedrock/api/v1alpha1"
+	"github.com/cloudyfolks-io/bedrock/internal/network"
 )
 
 type TenantObservation struct {
-	Tenant     v1alpha1.Tenant
-	Network    *v1alpha1.Network
-	Projects   []v1alpha1.Project
-	ElasticIPs int
-	NetworkErr error
-	OwnersErr  error
+	Tenant              v1alpha1.Tenant
+	Network             *v1alpha1.Network
+	Projects            []v1alpha1.Project
+	ElasticIPs          int
+	ProviderNetworks    []string
+	ProviderNetworksErr error
+	NetworkErr          error
+	OwnersErr           error
 }
 
-func DesiredNetwork(tenant v1alpha1.Tenant) v1alpha1.Network {
+func DesiredNetwork(tenant v1alpha1.Tenant, existing *v1alpha1.Network) v1alpha1.Network {
 	return v1alpha1.Network{
 		TypeMeta:   metav1.TypeMeta{APIVersion: v1alpha1.GroupVersion.String(), Kind: "Network"},
 		ObjectMeta: metav1.ObjectMeta{Name: v1alpha1.DefaultNetworkName(tenant.Name), Labels: TenantObjectLabels(tenant)},
-		Spec:       v1alpha1.NetworkSpec{TenantRef: tenant.Name, CIDR: tenant.Spec.Network.VPCCIDR},
+		Spec:       networkSpec(tenant, existing),
 	}
+}
+
+func networkSpec(tenant v1alpha1.Tenant, existing *v1alpha1.Network) v1alpha1.NetworkSpec {
+	vpcCIDR := tenant.Spec.Network.VPCCIDR
+	spec := v1alpha1.NetworkSpec{TenantRef: tenant.Name, EnableExternal: existing == nil || existing.Spec.EnableExternal}
+	spec.VrfID = vrfIDOf(tenant, existing)
+	if existing != nil && existing.Spec.CIDR != "" {
+		spec.CIDR = vpcCIDR
+		return spec
+	}
+	spec.CIDRs = []string{vpcCIDR}
+	return spec
+}
+
+func vrfIDOf(tenant v1alpha1.Tenant, existing *v1alpha1.Network) *int32 {
+	if existing != nil {
+		return existing.Spec.VrfID
+	}
+	return tenant.Spec.Network.VrfID
+}
+
+func defaultNetworkOf(tenant string, networks []v1alpha1.Network) *v1alpha1.Network {
+	index := slices.IndexFunc(networks, func(n v1alpha1.Network) bool { return n.Name == v1alpha1.DefaultNetworkName(tenant) })
+	if index < 0 {
+		return nil
+	}
+	return &networks[index]
 }
 
 func OwnerRole(tenant v1alpha1.Tenant, projectNames, networkNames []string) rbacv1.ClusterRole {
@@ -61,16 +91,35 @@ func TenantStatus(in TenantObservation) v1alpha1.TenantStatus {
 	progressing := flagged(generation, v1alpha1.ConditionProgressing, ReasonSettled, checked, ReasonWaitingForNetwork)
 	degraded := flagged(generation, v1alpha1.ConditionDegraded, ReasonHealthy, checked, ReasonApplyFailed)
 	status := v1alpha1.TenantStatus{
-		Usage: TenantUsage(in.Projects, in.ElasticIPs),
+		Usage:            TenantUsage(in.Projects, in.ElasticIPs),
+		ProviderNetworks: in.ProviderNetworks,
 		CommonStatus: v1alpha1.CommonStatus{
 			ObservedGeneration: generation,
-			Conditions:         withConditions(in.Tenant.Status.Conditions, network, owners, quota, ready, progressing, degraded),
+			Conditions:         withConditions(in.Tenant.Status.Conditions, network, owners, quota, providerNetworksCondition(generation, in.ProviderNetworksErr), ready, progressing, degraded),
 		},
 	}
 	if in.Network != nil {
 		status.VPC = in.Network.Status.VPC
 	}
 	return status
+}
+
+func TenantProviderNetworks(pools []v1alpha1.ProviderNetworkSpec) []string {
+	var names []string
+	for _, pool := range pools {
+		if network.IsTenantPool(pool) {
+			names = append(names, pool.Name)
+		}
+	}
+	slices.Sort(names)
+	return names
+}
+
+func providerNetworksCondition(generation int64, err error) metav1.Condition {
+	if err != nil {
+		return conditionOn(generation, ConditionProviderNetworksKnown, metav1.ConditionFalse, ReasonSettingInvalid, err.Error())
+	}
+	return conditionOn(generation, ConditionProviderNetworksKnown, metav1.ConditionTrue, ReasonAvailable, "")
 }
 
 func readNamed(resource string, names []string) []rbacv1.PolicyRule {

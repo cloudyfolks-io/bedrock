@@ -54,7 +54,7 @@ func InstallArgs(opts InstallOptions) []string {
 		args = append(args, "--labels", joinLabels(opts.Labels))
 	}
 	if len(opts.KubeletExtraArgs) > 0 {
-		args = append(args, "--kubelet-extra-args", strings.Join(opts.KubeletExtraArgs, " "))
+		args = append(args, "--kubelet-extra-args", UnitEscape(strings.Join(opts.KubeletExtraArgs, " ")))
 	}
 	args = append(args, "--data-dir", opts.DataDir)
 	if opts.KubeletRootDir != "" {

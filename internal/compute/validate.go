@@ -3,6 +3,7 @@ package compute
 import (
 	"fmt"
 	"maps"
+	"regexp"
 	"slices"
 
 	"k8s.io/apimachinery/pkg/util/validation"
@@ -10,9 +11,20 @@ import (
 	"github.com/cloudyfolks-io/bedrock/api/v1alpha1"
 )
 
-const maxVMNameLength = 52
+const (
+	maxVMNameLength         = 52
+	maxDiskSerialLength     = 36
+	maxFirmwareSerialLength = 64
+)
+
+var (
+	firmwareUUID     = regexp.MustCompile(`^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$`)
+	serialCharacters = regexp.MustCompile(`^[A-Za-z0-9._-]+$`)
+)
 
 type Issue struct{ Field, Reason, Message string }
+
+type ComputeLimits struct{ MaxCores, MaxMemoryMiB int32 }
 
 func invalid(field, message string) Issue {
 	return Issue{Field: field, Reason: ReasonInvalidSpec, Message: message}
@@ -22,6 +34,7 @@ func ValidateVirtualMachine(vm v1alpha1.VirtualMachine) []Issue {
 	var issues []Issue
 	issues = append(issues, nameIssues(vm.Name)...)
 	issues = append(issues, imageIssues(vm.Spec)...)
+	issues = append(issues, rootDiskIssues(vm.Spec.RootDisk)...)
 	issues = append(issues, diskIssues(vm.Spec.Disks)...)
 	issues = append(issues, cdromIssues(vm.Spec.CDROMs)...)
 	issues = append(issues, networkIssues(vm.Spec.Networks)...)
@@ -63,12 +76,21 @@ func imageIssues(spec v1alpha1.VirtualMachineSpec) []Issue {
 	return subdomainIssues("spec.image.name", spec.Image.Name)
 }
 
+func rootDiskIssues(root v1alpha1.VMRootDisk) []Issue {
+	issues := serialIssues("spec.rootDisk.serial", root.Serial, maxDiskSerialLength)
+	if root.VolumeRef == "" {
+		return issues
+	}
+	return append(issues, subdomainIssues("spec.rootDisk.volumeRef", root.VolumeRef)...)
+}
+
 func diskIssues(disks []v1alpha1.VMDisk) []Issue {
 	var issues []Issue
 	seen := map[string]bool{}
 	for index, disk := range disks {
 		field := fmt.Sprintf("spec.disks[%d].volumeRef", index)
 		issues = append(issues, subdomainIssues(field, disk.VolumeRef)...)
+		issues = append(issues, serialIssues(fmt.Sprintf("spec.disks[%d].serial", index), disk.Serial, maxDiskSerialLength)...)
 		if seen[disk.VolumeRef] {
 			issues = append(issues, invalid(field, "a volume can be listed once"))
 		}
@@ -125,10 +147,31 @@ func keyIssues(keys []string) []Issue {
 }
 
 func firmwareIssues(firmware *v1alpha1.VMFirmware) []Issue {
-	if firmware != nil && firmware.SecureBoot && !firmware.UEFI {
-		return []Issue{invalid("spec.firmware.secureBoot", "secureBoot requires uefi")}
+	if firmware == nil {
+		return nil
 	}
-	return nil
+	var issues []Issue
+	if firmware.SecureBoot && !firmware.UEFI {
+		issues = append(issues, invalid("spec.firmware.secureBoot", "secureBoot requires uefi"))
+	}
+	if firmware.UUID != "" && !firmwareUUID.MatchString(firmware.UUID) {
+		issues = append(issues, invalid("spec.firmware.uuid", "must be a UUID"))
+	}
+	return append(issues, serialIssues("spec.firmware.serial", firmware.Serial, maxFirmwareSerialLength)...)
+}
+
+func serialIssues(field, serial string, limit int) []Issue {
+	if serial == "" {
+		return nil
+	}
+	var issues []Issue
+	if len(serial) > limit {
+		issues = append(issues, invalid(field, fmt.Sprintf("must have at most %d characters", limit)))
+	}
+	if !serialCharacters.MatchString(serial) {
+		issues = append(issues, invalid(field, "may hold only letters, digits, dot, underscore and dash"))
+	}
+	return issues
 }
 
 func schedulingIssues(scheduling *v1alpha1.VMScheduling) []Issue {
@@ -148,6 +191,20 @@ func schedulingIssues(scheduling *v1alpha1.VMScheduling) []Issue {
 	}
 	if _, err := ScopedAffinity(scheduling.Affinity); err != nil {
 		issues = append(issues, invalid("spec.scheduling.affinity", err.Error()))
+	}
+	return issues
+}
+
+func ComputeIssues(compute *v1alpha1.VMCompute, limits ComputeLimits) []Issue {
+	if compute == nil {
+		return nil
+	}
+	var issues []Issue
+	if compute.Cores > limits.MaxCores {
+		issues = append(issues, invalid("spec.compute.cores", fmt.Sprintf("must be at most %d", limits.MaxCores)))
+	}
+	if compute.MemoryMiB > limits.MaxMemoryMiB {
+		issues = append(issues, invalid("spec.compute.memoryMiB", fmt.Sprintf("must be at most %d", limits.MaxMemoryMiB)))
 	}
 	return issues
 }

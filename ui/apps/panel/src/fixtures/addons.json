@@ -41,7 +41,7 @@
       "spec": {
         "enabled": false,
         "values": {
-          "retention": "14d"
+          "persistence.size": "30Gi"
         }
       },
       "status": {
@@ -49,8 +49,8 @@
           {
             "type": "Ready",
             "status": "False",
-            "reason": "PreflightFailed",
-            "message": "kata needs nested virtualization",
+            "reason": "Disabled",
+            "message": "the addon is disabled",
             "lastTransitionTime": "2026-10-01T10:00:00Z"
           }
         ]

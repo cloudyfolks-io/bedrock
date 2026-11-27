@@ -1,0 +1,326 @@
+.layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: clamp(1rem, 2vw, 1.4rem);
+}
+
+.layout[data-embedded] {
+  margin-block: 1.25rem;
+}
+
+.layout > :global(.br-page-header),
+.layout > :global(.br-help) {
+  margin: 0;
+}
+
+.panel {
+  --panel-inset: clamp(.9rem, 2.2vw, 1.3rem);
+  min-inline-size: 0;
+  border: 1px solid var(--br-color-border);
+  border-radius: .875rem;
+  background: var(--br-color-surface);
+}
+
+.embeddedHeader {
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.embeddedHeader h2 {
+  margin-inline-end: auto;
+}
+
+.embeddedHeader h2,
+.sectionHeading {
+  margin: 0;
+  font-size: 1.15rem;
+  font-weight: 600;
+}
+
+.sectionHeading {
+  padding: .95rem var(--panel-inset);
+}
+
+.status {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: .5rem 1rem;
+  padding: .95rem var(--panel-inset);
+}
+
+.status .sectionHeading {
+  padding: 0;
+}
+
+.pendingTag {
+  margin-inline-start: .5rem;
+}
+
+.pendingIndicator {
+  position: fixed;
+  inset-inline-start: var(--br-space-md);
+  inset-block-end: var(--br-space-md);
+  pointer-events: none;
+  z-index: 49;
+}
+
+.toolbar,
+.filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: .75rem 1rem;
+  align-items: flex-end;
+}
+
+.toolbar {
+  justify-content: space-between;
+  padding: .75rem var(--panel-inset);
+  background: var(--br-color-surface-raised);
+  border-start-start-radius: inherit;
+  border-start-end-radius: inherit;
+}
+
+.filters {
+  flex: 1 1 18rem;
+  min-inline-size: 0;
+}
+
+.filters > :global(.br-field) {
+  flex: 0 1 14rem;
+  min-inline-size: 0;
+}
+
+.filters :global(.br-select-trigger) {
+  min-inline-size: 0;
+}
+
+.listMeta {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  gap: .55rem;
+  color: var(--br-color-text-muted);
+  font-size: .8125rem;
+}
+
+.filters :is(:global(.br-field-input), :global(.br-select-trigger)),
+.listPanel :global(.br-td) > :global(.br-button) {
+  border-color: color-mix(in srgb, var(--br-color-text-muted) 55%, var(--br-color-border));
+}
+
+.live {
+  display: inline-flex;
+  align-items: center;
+  align-self: center;
+  gap: .45rem;
+  padding: .25rem .55rem;
+  border: 1px solid var(--br-color-border);
+  border-radius: 2rem;
+  background: var(--br-color-surface-raised);
+}
+
+.live::before {
+  inline-size: .42rem;
+  block-size: .42rem;
+  border-radius: 50%;
+  background: currentColor;
+  content: "";
+}
+
+.listPanel > :global(.br-empty) {
+  margin: 0;
+  border: 0;
+  border-block-start: 1px solid var(--br-color-border);
+  border-radius: 0 0 .875rem .875rem;
+}
+
+.panel > :global(.br-table-scroll) {
+  position: relative;
+  border-end-start-radius: .875rem;
+  border-end-end-radius: .875rem;
+}
+
+.panel > :global(.br-table-scroll):focus-visible,
+.specification:focus-visible {
+  outline: 2px solid var(--br-color-focus-ring);
+  outline-offset: 2px;
+}
+
+.panel > :global(.br-table-scroll) :global(.br-table-caption) {
+  position: absolute;
+  inline-size: 1px;
+  block-size: 1px;
+  clip-path: inset(50%);
+  overflow: hidden;
+  padding: 0;
+}
+
+.panel > :global(.br-table-scroll) :is(:global(.br-th), :global(.br-td)) {
+  padding: .75rem var(--panel-inset);
+  border-block-start: 1px solid var(--br-color-border);
+  border-block-end: 0;
+  font-size: .875rem;
+}
+
+.panel > :global(.br-table-scroll) :global(.br-th) {
+  background: var(--br-color-surface-raised);
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.panel > :global(.br-table-scroll) :global(.br-td) {
+  overflow-wrap: anywhere;
+  font-variant-numeric: tabular-nums;
+}
+
+.panel > :global(.br-table-scroll) tbody tr:focus-within {
+  background: var(--br-color-surface-hover);
+}
+
+.listPanel :global(.br-td) a {
+  color: var(--br-color-primary);
+  font-weight: 600;
+  text-underline-offset: .2em;
+}
+
+.listPanel :is(:global(.br-badge), bdi[dir="ltr"]) {
+  white-space: nowrap;
+}
+
+.listPanel :is(:global(.br-th), :global(.br-td)):last-child {
+  inline-size: 1%;
+  text-align: end;
+}
+
+.listPanel :global(.br-td) > :global(.br-button) {
+  min-inline-size: 2.25rem;
+  padding: .25rem .5rem;
+}
+
+.listPanel > :global(.br-table-scroll) :global(.br-th) {
+  padding-block: .35rem;
+}
+
+.listPanel :global(.br-th-button) {
+  align-items: center;
+  min-block-size: 2rem;
+  inline-size: 100%;
+}
+
+.sortIcon {
+  color: var(--br-color-text-muted);
+}
+
+.listPanel :is([aria-sort="ascending"], [aria-sort="descending"]) :global(.br-th-button),
+.listPanel :global(.br-th-button):hover,
+.listPanel :is([aria-sort="ascending"], [aria-sort="descending"]) .sortIcon {
+  color: var(--br-color-primary);
+}
+
+.panel > .specification {
+  margin: 0;
+  padding: .95rem var(--panel-inset);
+  border-block-start: 1px solid var(--br-color-border);
+  border-radius: 0 0 .875rem .875rem;
+  background: var(--br-color-surface-raised);
+}
+
+.specification code {
+  font: inherit;
+}
+
+.compactRows {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.compactRow {
+  min-inline-size: 0;
+  padding: .875rem var(--panel-inset, 1rem);
+  border-block-start: 1px solid var(--br-color-border);
+}
+
+.compactRowHead,
+.compactRowHead > div {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: .5rem;
+  min-inline-size: 0;
+}
+
+.compactRowHead {
+  justify-content: space-between;
+}
+
+.compactRowHead strong {
+  min-inline-size: 0;
+  overflow-wrap: anywhere;
+}
+
+.compactRowHead :global(.br-button) {
+  min-inline-size: 2.75rem;
+  min-block-size: 2.75rem;
+}
+
+.compactRow a {
+  color: var(--br-color-primary);
+  overflow-wrap: anywhere;
+  text-underline-offset: .18em;
+}
+
+.compactFields {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: .55rem .75rem;
+  margin: .75rem 0 0;
+  font-size: .8125rem;
+}
+
+.compactFields dt {
+  margin-block-end: .15rem;
+  color: var(--br-color-text-muted);
+}
+
+.compactFields dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.compactFields > [data-wide="true"] {
+  grid-column: 1 / -1;
+}
+
+.compactSort {
+  display: flex;
+  align-items: flex-end;
+  gap: .375rem;
+  min-inline-size: 0;
+}
+
+@media (max-width: 42rem) {
+  .toolbar {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    gap: .625rem;
+  }
+
+  .filters {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(min(100%, 9rem), 1fr));
+    gap: .55rem;
+  }
+
+  .compactSort > :first-child {
+    flex: 1;
+    min-inline-size: 0;
+  }
+
+  .listMeta {
+    justify-content: space-between;
+  }
+}

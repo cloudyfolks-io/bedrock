@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"io"
-	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
@@ -56,21 +55,11 @@ func K0sAirgapBundle(ctx context.Context, baseURL, version, arch, cacheDir strin
 }
 
 func fetchSums(ctx context.Context, url string) (map[string]string, error) {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
-	if err != nil {
-		return nil, err
-	}
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		return nil, err
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("download %s: status %d", url, resp.StatusCode)
-	}
-	body, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
-	if err != nil {
-		return nil, err
-	}
-	return ParseSums(string(body)), nil
+	var sums map[string]string
+	err := fetch(ctx, downloadClient, downloadDelays, url, func(body io.Reader) error {
+		data, err := io.ReadAll(io.LimitReader(body, 1<<20))
+		sums = ParseSums(string(data))
+		return err
+	})
+	return sums, err
 }

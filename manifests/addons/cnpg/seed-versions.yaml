@@ -1,0 +1,37 @@
+apiVersion: bedrock.cloudyfolks.io/v1alpha1
+kind: DatabaseVersion
+metadata:
+  name: postgresql-16
+spec:
+  engine: postgresql
+  major: "16"
+  image: ghcr.io/cloudnative-pg/postgresql:16.15-minimal-trixie@sha256:f76ba02680a07bdafaa00c81827351b15e671ac11e0e6a0b72f8ee5835cc82c6
+  port: 5432
+  enabled: true
+  eolDate: "2028-11-09"
+  upgradeTo: ["17", "18"]
+---
+apiVersion: bedrock.cloudyfolks.io/v1alpha1
+kind: DatabaseVersion
+metadata:
+  name: postgresql-17
+spec:
+  engine: postgresql
+  major: "17"
+  image: ghcr.io/cloudnative-pg/postgresql:17.9-minimal-trixie@sha256:3c9f2df53e15f3fff0aee630beffe73936590333b7fd80f2239bf59b22a9852e
+  port: 5432
+  enabled: true
+  eolDate: "2029-11-08"
+  upgradeTo: ["18"]
+---
+apiVersion: bedrock.cloudyfolks.io/v1alpha1
+kind: DatabaseVersion
+metadata:
+  name: postgresql-18
+spec:
+  engine: postgresql
+  major: "18"
+  image: ghcr.io/cloudnative-pg/postgresql:18.6-minimal-trixie@sha256:0675340b02be838319b9b6f323c206693e519dcd62ec729d539be9f46bb7a2f9
+  port: 5432
+  enabled: true
+  eolDate: "2030-11-14"

@@ -8,7 +8,8 @@ export interface BundleFile {
 }
 
 export interface BundleInput {
-  entry: string;
+  entry: string | readonly string[];
+  startupLimit?: number;
   files: BundleFile[];
   lazy?: readonly string[];
 }
@@ -18,8 +19,10 @@ const totalLimit = 8 * 1024 * 1024;
 export const lazyChunks = ["novnc", "xterm", "uplot"] as const;
 
 function entryViolations(input: BundleInput): string[] {
-  const entry = input.files.find((file) => file.name === input.entry);
-  return entry && entry.bytes > entryLimit ? [`entry ${entry.name} is ${entry.bytes} bytes, limit ${entryLimit}`] : [];
+  const names = new Set(typeof input.entry === "string" ? [input.entry] : input.entry);
+  const size = input.files.reduce((sum, file) => sum + (names.has(file.name) ? file.bytes : 0), 0);
+  const limit = input.startupLimit ?? entryLimit;
+  return size > limit ? [`entry scripts are ${size} bytes, limit ${limit}`] : [];
 }
 
 function totalViolations(input: BundleInput): string[] {
@@ -28,8 +31,9 @@ function totalViolations(input: BundleInput): string[] {
 }
 
 function lazyViolations(input: BundleInput): string[] {
+  const names = new Set(typeof input.entry === "string" ? [input.entry] : input.entry);
   return (input.lazy ?? lazyChunks)
-    .filter((marker) => !input.files.some((file) => file.name !== input.entry && file.name.includes(marker)))
+    .filter((marker) => !input.files.some((file) => !names.has(file.name) && file.name.includes(marker)))
     .map((marker) => `no lazy chunk contains ${marker}`);
 }
 
@@ -45,24 +49,33 @@ function listFiles(root: string, dir = ""): BundleFile[] {
   });
 }
 
-function entryOf(root: string): string {
+function entryOf(root: string, manifestPath: string): string[] {
   const html = readFileSync(join(root, "index.html"), "utf8");
-  const match = /<script[^>]*type="module"[^>]*src="\/([^"]+)"/.exec(html);
-  if (!match?.[1]) {
-    throw new Error("index.html has no module script");
+  const scripts = [...html.matchAll(/<script\b[^>]*src="\/([^"]+)"[^>]*>/g)]
+    .filter(([tag]) => !/\snomodule(?:[=\s>])/i.test(tag))
+    .flatMap((match) => match[1] ?? []);
+  const manifest = JSON.parse(readFileSync(manifestPath, "utf8")) as Record<string, { files: string[] }>;
+  const panel = manifest["app/panel.tsx -> ../App"]?.files;
+  if (!scripts.length || !panel?.length) throw new Error("Missing Next.js startup assets");
+  const names = [...new Set([...scripts, ...panel.filter((name) => name.endsWith(".js")).map((name) => `_next/${name}`)])];
+  for (const name of names) {
+    if (!statSync(join(root, name)).isFile()) throw new Error(`Missing entry script ${name}`);
   }
-  return match[1];
+  return names;
 }
 
 function main(): void {
   const root = fileURLToPath(new URL("../../../../internal/proxy/ui/dist", import.meta.url));
   const files = listFiles(root);
-  const violations = checkBundle({ entry: entryOf(root), files, lazy: lazyChunks });
+  const manifest = fileURLToPath(new URL("../.next/react-loadable-manifest.json", import.meta.url));
+  const entry = entryOf(root, manifest);
+  const violations = checkBundle({ entry, files, lazy: lazyChunks, startupLimit: 1024 * 1024 });
   for (const violation of violations) {
     console.error(violation);
   }
   const total = files.reduce((sum, file) => sum + file.bytes, 0);
-  console.log(`dist ${total} bytes in ${files.length} files`);
+  const startup = files.reduce((sum, file) => sum + (entry.includes(file.name) ? file.bytes : 0), 0);
+  console.log(`dist ${total} bytes in ${files.length} files; startup scripts ${startup} bytes`);
   process.exit(violations.length === 0 ? 0 : 1);
 }
 

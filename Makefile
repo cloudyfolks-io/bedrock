@@ -35,7 +35,7 @@ binaries: ui
 	for arch in amd64 arm64; do CGO_ENABLED=0 GOOS=linux GOARCH=$$arch $(GO) build -trimpath -ldflags "-X github.com/cloudyfolks-io/bedrock/internal/cli.Version=$(VERSION)" -o dist/bedrock-$(VERSION)-linux-$$arch ./cmd/bedrock; done
 
 test: envtest-assets
-	KUBEBUILDER_ASSETS="$$($(ENVTEST) use $(ENVTEST_K8S_VERSION) -p path)" $(GO) test ./... -count=1 -timeout 30m
+	KUBEBUILDER_ASSETS="$$($(ENVTEST) use $(ENVTEST_K8S_VERSION) -p path)" $(GO) test ./... -count=1 -timeout 45m
 
 .PHONY: test-unit test-envtest release-from-build bundle-from-release
 test-unit:

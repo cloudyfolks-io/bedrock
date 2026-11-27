@@ -1,0 +1,6 @@
+watchNamespace: bedrock-dbaas
+image:
+  repository: docker.io/percona/percona-server-mysql-operator
+  tag: 1.2.0@sha256:28bfc38c1d4b642e860fda46aa7a964fc2de11a93a6dd05fcd7de4fd782982c8
+  pullPolicy: IfNotPresent
+disableTelemetry: true

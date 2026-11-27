@@ -2,6 +2,8 @@ package network
 
 import (
 	"context"
+	"reflect"
+	"strings"
 	"testing"
 
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -9,6 +11,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/utils/ptr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/interceptor"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
@@ -92,8 +95,13 @@ func TestNetworkReconcilerCreatesVpc(t *testing.T) {
 	if labels[v1alpha1.LabelKind] != "Network" || labels[v1alpha1.LabelName] != network.Name || labels[v1alpha1.LabelTenant] != "acme" || labels[LabelManaged] != "true" {
 		t.Fatalf("labels %v", labels)
 	}
-	if spec, _, _ := unstructured.NestedMap(vpc.Object, "spec"); len(spec) != 0 {
-		t.Fatalf("a private Network has an empty Vpc spec, got %v", spec)
+	if external, _, _ := unstructured.NestedBool(vpc.Object, "spec", "enableExternal"); external {
+		t.Fatal("a private Network has no external connection")
+	}
+	for _, field := range []string{"extraExternalSubnets", "staticRoutes", "vpcPeerings"} {
+		if list, _, _ := unstructured.NestedSlice(vpc.Object, "spec", field); len(list) != 0 {
+			t.Fatalf("a private Network has no %s, got %v", field, list)
+		}
 	}
 	if _, uid, ok := OwnerOf(vpc); !ok || uid != network.UID {
 		t.Fatal("owner annotations are missing")
@@ -110,6 +118,206 @@ func TestNetworkReconcilerCreatesVpc(t *testing.T) {
 		t.Fatalf("a ready Network needs no requeue: %+v", result)
 	}
 	requireCondition(t, getNetwork(t, c, network.Name).Status.Conditions, v1alpha1.ConditionReady, metav1.ConditionTrue, ReasonVpcReady)
+}
+
+func planeSubnetOf(t *testing.T, c client.Client, network string) *unstructured.Unstructured {
+	t.Helper()
+	subnet, err := getObject(context.Background(), c, fabric.SubnetGVK, LBSubnetName(network))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return subnet
+}
+
+func TestNetworkReconcilerCreatesTheLoadBalancerPlaneSubnet(t *testing.T) {
+	c := cleanEnv(t)
+	network := createNetwork(t, c)
+	reconcileNetwork(t, c, network.Name)
+	subnet := planeSubnetOf(t, c, network.Name)
+	want := map[string]any{
+		"protocol": "IPv4", "vpc": network.Name, "cidrBlock": "100.69.0.0/24", "gateway": "100.69.0.1",
+		"gatewayType": "distributed", "natOutgoing": false, "disableGatewayCheck": true,
+		"excludeIps": []any{"100.69.0.1"}, "mtu": int64(1500),
+	}
+	if got, _, _ := unstructured.NestedMap(subnet.Object, "spec"); !reflect.DeepEqual(got, want) {
+		t.Fatalf("spec %v", got)
+	}
+	labels := subnet.GetLabels()
+	if labels[v1alpha1.LabelKind] != "Network" || labels[v1alpha1.LabelName] != network.Name || labels[LabelManaged] != "true" {
+		t.Fatalf("labels %v", labels)
+	}
+	if _, uid, ok := OwnerOf(subnet); !ok || uid != network.UID {
+		t.Fatal("owner annotations are missing")
+	}
+	var subnets v1alpha1.SubnetList
+	if err := c.List(context.Background(), &subnets); err != nil || len(subnets.Items) != 0 {
+		t.Fatalf("the plane has no Bedrock Subnet: %d, %v", len(subnets.Items), err)
+	}
+}
+
+func TestNetworkReconcilerCreatesThePlaneForEveryNetwork(t *testing.T) {
+	c := cleanEnv(t)
+	publicSettings(t)
+	private, external := createNetwork(t, c), createExternalNetwork(t, c)
+	reconcileNetwork(t, c, private.Name)
+	reconcileNetwork(t, c, external.Name)
+	for _, name := range []string{private.Name, external.Name} {
+		if got := nestedString(t, planeSubnetOf(t, c, name), "spec", "vpc"); got != name {
+			t.Fatalf("plane of %s sits in the Vpc %q", name, got)
+		}
+	}
+}
+
+func TestNetworkReconcilerFollowsTheLoadBalancerPlaneSettings(t *testing.T) {
+	c := cleanEnv(t)
+	setSetting(t, "network.load-balancer.cidr", "100.70.0.0/16")
+	setSetting(t, "network.load-balancer.gateway", "100.70.0.1")
+	network := createNetwork(t, c)
+	reconcileNetwork(t, c, network.Name)
+	subnet := planeSubnetOf(t, c, network.Name)
+	if nestedString(t, subnet, "spec", "cidrBlock") != "100.70.0.0/16" || nestedString(t, subnet, "spec", "gateway") != "100.70.0.1" {
+		t.Fatalf("spec %v", subnet.Object["spec"])
+	}
+	if excluded, _, _ := unstructured.NestedStringSlice(subnet.Object, "spec", "excludeIps"); !reflect.DeepEqual(excluded, []string{"100.70.0.1"}) {
+		t.Fatalf("excludeIps %v", excluded)
+	}
+}
+
+func TestNetworkReconcilerKeepsAForeignSubnetOfThePlaneName(t *testing.T) {
+	c := cleanEnv(t)
+	network := createNetwork(t, c)
+	foreign := fabric.PlaneSubnet(fabric.Meta{Name: LBSubnetName(network.Name)}, network.Name, "100.99.0.0/24", "100.99.0.1")
+	if err := c.Create(context.Background(), foreign); err != nil {
+		t.Fatal(err)
+	}
+	reconcileNetwork(t, c, network.Name)
+	if got := nestedString(t, planeSubnetOf(t, c, network.Name), "spec", "cidrBlock"); got != "100.99.0.0/24" {
+		t.Fatalf("a foreign Subnet must stay untouched, cidr %q", got)
+	}
+	requireCondition(t, getNetwork(t, c, network.Name).Status.Conditions, v1alpha1.ConditionReady, metav1.ConditionFalse, ReasonFabricConflict)
+}
+
+func TestNetworkDeletionRemovesThePlaneSubnet(t *testing.T) {
+	c := cleanEnv(t)
+	ctx := context.Background()
+	network := createNetwork(t, c)
+	reconcileNetwork(t, c, network.Name)
+	if err := c.Delete(ctx, &network); err != nil {
+		t.Fatal(err)
+	}
+	reconcileNetwork(t, c, network.Name)
+	if _, err := getObject(ctx, c, fabric.SubnetGVK, LBSubnetName(network.Name)); !apierrors.IsNotFound(err) {
+		t.Fatalf("the plane Subnet must be deleted: %v", err)
+	}
+	if _, err := getObject(ctx, c, fabric.VpcGVK, network.Name); !apierrors.IsNotFound(err) {
+		t.Fatalf("the Vpc must be deleted: %v", err)
+	}
+}
+
+func TestNetworkReconcilerAcceptsEveryPrivateRange(t *testing.T) {
+	c := cleanEnv(t)
+	network := networkOfRanges(unique(t, "net"), "acme", "10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16")
+	requireAccepted(t, c, network)
+	reconcileNetwork(t, c, network.Name)
+	vpcOf(t, c, network.Name)
+	requireCondition(t, getNetwork(t, c, network.Name).Status.Conditions, v1alpha1.ConditionReady, metav1.ConditionFalse, ReasonVpcPending)
+}
+
+func TestNetworkReconcilerRefusesARangeInAReservedRange(t *testing.T) {
+	c := cleanEnv(t)
+	setSetting(t, "network.reserved-cidrs", "100.64.0.0/10,172.16.8.0/24")
+	cases := map[string]*v1alpha1.Network{
+		"cgnat":  networkOfRanges(unique(t, "net"), "acme", "10.100.0.0/16", "100.100.0.0/16"),
+		"inside": networkOfRanges(unique(t, "net"), "acme", "172.16.0.0/16"),
+		"old":    networkOf(unique(t, "net"), "acme", "100.64.0.0/16"),
+	}
+	for name, network := range cases {
+		t.Run(name, func(t *testing.T) {
+			requireAccepted(t, c, network)
+			reconcileNetwork(t, c, network.Name)
+			got := getNetwork(t, c, network.Name)
+			requireCondition(t, got.Status.Conditions, v1alpha1.ConditionReady, metav1.ConditionFalse, ReasonCIDRReserved)
+			message := meta.FindStatusCondition(got.Status.Conditions, v1alpha1.ConditionReady).Message
+			if !strings.Contains(message, "Network cidr") {
+				t.Fatalf("message %q", message)
+			}
+			if _, err := getObject(context.Background(), c, fabric.VpcGVK, network.Name); !apierrors.IsNotFound(err) {
+				t.Fatalf("no Fabric Vpc expected: %v", err)
+			}
+		})
+	}
+}
+
+func TestNetworkReconcilerRefusesARangeThatOverlapsTheLoadBalancerPlane(t *testing.T) {
+	c := cleanEnv(t)
+	setSetting(t, "network.reserved-cidrs", "192.0.2.0/24")
+	network := networkOfRanges(unique(t, "net"), "acme", "10.100.0.0/16", "100.69.0.0/16")
+	requireAccepted(t, c, network)
+	reconcileNetwork(t, c, network.Name)
+	got := getNetwork(t, c, network.Name)
+	requireCondition(t, got.Status.Conditions, v1alpha1.ConditionReady, metav1.ConditionFalse, ReasonCIDRReserved)
+	if message := meta.FindStatusCondition(got.Status.Conditions, v1alpha1.ConditionReady).Message; !strings.Contains(message, "load balancer plane") {
+		t.Fatalf("message %q", message)
+	}
+	if _, err := getObject(context.Background(), c, fabric.VpcGVK, network.Name); !apierrors.IsNotFound(err) {
+		t.Fatalf("no Fabric Vpc expected: %v", err)
+	}
+}
+
+func TestNetworkReconcilerKeepsAProvisionedNetworkInAReservedRange(t *testing.T) {
+	c := cleanEnv(t)
+	setSetting(t, "network.reserved-cidrs", "192.0.2.0/24")
+	network := networkOfRanges(unique(t, "net"), "acme", "10.100.0.0/16", "100.100.0.0/16")
+	requireAccepted(t, c, network)
+	reconcileNetwork(t, c, network.Name)
+	if err := fabrictest.MarkVpcStandby(context.Background(), c, network.Name); err != nil {
+		t.Fatal(err)
+	}
+	reconcileNetwork(t, c, network.Name)
+	requireCondition(t, getNetwork(t, c, network.Name).Status.Conditions, v1alpha1.ConditionReady, metav1.ConditionTrue, ReasonVpcReady)
+
+	setSetting(t, "network.reserved-cidrs", "100.64.0.0/10")
+	reconcileNetwork(t, c, network.Name)
+	got := getNetwork(t, c, network.Name).Status.Conditions
+	requireCondition(t, got, v1alpha1.ConditionReady, metav1.ConditionTrue, ReasonVpcReady)
+	requireCondition(t, got, ConditionRangePolicy, metav1.ConditionFalse, ReasonCIDRReserved)
+
+	setSetting(t, "network.reserved-cidrs", "192.0.2.0/24")
+	reconcileNetwork(t, c, network.Name)
+	if meta.FindStatusCondition(getNetwork(t, c, network.Name).Status.Conditions, ConditionRangePolicy) != nil {
+		t.Fatal("the RangePolicy condition must go when the ranges are fine")
+	}
+}
+
+func TestNetworkReconcilerDoesNotKeepANetworkWithoutAUsableVpc(t *testing.T) {
+	cases := map[string]func(*testing.T, client.Client, string){
+		"owned by another Network": func(t *testing.T, c client.Client, name string) {
+			changeFabricObject(t, c, fabric.VpcGVK, name, disown)
+		},
+		"being deleted": func(t *testing.T, c client.Client, name string) {
+			changeFabricObject(t, c, fabric.VpcGVK, name, hold)
+			if err := c.Delete(context.Background(), vpcOf(t, c, name)); err != nil {
+				t.Fatal(err)
+			}
+		},
+	}
+	for name, spoil := range cases {
+		t.Run(name, func(t *testing.T) {
+			c := cleanEnv(t)
+			setSetting(t, "network.reserved-cidrs", "192.0.2.0/24")
+			network := networkOfRanges(unique(t, "net"), "acme", "10.100.0.0/16", "100.100.0.0/16")
+			requireAccepted(t, c, network)
+			reconcileNetwork(t, c, network.Name)
+			spoil(t, c, network.Name)
+			setSetting(t, "network.reserved-cidrs", "100.64.0.0/10")
+			reconcileNetwork(t, c, network.Name)
+			got := getNetwork(t, c, network.Name).Status.Conditions
+			requireCondition(t, got, v1alpha1.ConditionReady, metav1.ConditionFalse, ReasonCIDRReserved)
+			if meta.FindStatusCondition(got, ConditionRangePolicy) != nil {
+				t.Fatal("a refused Network has no RangePolicy condition")
+			}
+		})
+	}
 }
 
 func TestNetworkReconcilerRendersL2External(t *testing.T) {
@@ -132,6 +340,96 @@ func TestNetworkReconcilerRendersL2External(t *testing.T) {
 	if err := fabrictest.CreateRouterPort(ctx, c, network.Name, "provider-public", "91.246.31.5"); err != nil {
 		t.Fatal(err)
 	}
+	reconcileNetwork(t, c, network.Name)
+	requireCondition(t, getNetwork(t, c, network.Name).Status.Conditions, ConditionExternalReady, metav1.ConditionTrue, ReasonConnected)
+}
+
+const legacyPools = `[{"name":"public","interface":"b","cidr":"91.246.31.0/24","gateway":"91.246.31.1"},{"name":"backup","interface":"b","cidr":"198.51.100.0/24","gateway":"198.51.100.1"}]`
+
+const rolePoolsAfterUpgrade = `[{"name":"public","interface":"b","cidr":"91.246.31.0/24","gateway":"91.246.31.1"},{"name":"backup","role":"platform","interface":"b","cidr":"198.51.100.0/24","gateway":"198.51.100.1"}]`
+
+func vpcExternalSpec(t *testing.T, c client.Client, name string) ([]string, string) {
+	t.Helper()
+	vpc := vpcOf(t, c, name)
+	return fabric.VpcSpecExternalSubnets(vpc), fabric.VpcDefaultNextHop(vpc)
+}
+
+func TestNetworkReconcilerKeepsTheAttachmentsOfAnExistingVpc(t *testing.T) {
+	c := cleanEnv(t)
+	setSetting(t, "network.provider-networks", legacyPools)
+	network := createExternalNetwork(t, c)
+	legacy := fabric.Vpc(fabric.Meta{Name: VpcName(network.Name), Labels: ObjectLabels("Network", network.Name, network.Spec.TenantRef, ""), Annotations: OwnerAnnotations(&network)}, fabric.VpcSpec{
+		EnableExternal:       true,
+		ExtraExternalSubnets: []string{"provider-public", "provider-backup"},
+		DefaultRoute:         &fabric.StaticRoute{CIDR: "0.0.0.0/0", NextHop: "91.246.31.1"},
+	})
+	if err := c.Create(context.Background(), legacy); err != nil {
+		t.Fatal(err)
+	}
+	setSetting(t, "network.provider-networks", rolePoolsAfterUpgrade)
+	reconcileNetwork(t, c, network.Name)
+	subnets, hop := vpcExternalSpec(t, c, network.Name)
+	if len(subnets) != 2 || subnets[0] != "provider-public" || subnets[1] != "provider-backup" || hop != "91.246.31.1" {
+		t.Fatalf("an existing Vpc must keep its attachments: %v via %s", subnets, hop)
+	}
+}
+
+func TestNetworkReconcilerAttachesTenantPoolsToANewVpc(t *testing.T) {
+	c := cleanEnv(t)
+	setSetting(t, "network.provider-networks", rolePoolsAfterUpgrade)
+	network := createExternalNetwork(t, c)
+	reconcileNetwork(t, c, network.Name)
+	subnets, hop := vpcExternalSpec(t, c, network.Name)
+	if len(subnets) != 1 || subnets[0] != "provider-public" || hop != "91.246.31.1" {
+		t.Fatalf("a new Vpc must attach tenant pools only: %v via %s", subnets, hop)
+	}
+}
+
+func TestNetworkReconcilerL2NeedsNoFRRAgent(t *testing.T) {
+	c := cleanEnv(t)
+	publicSettings(t)
+	network := createExternalNetwork(t, c)
+	reconcileNetwork(t, c, network.Name)
+	ctx := context.Background()
+	if err := fabrictest.MarkVpcStandby(ctx, c, network.Name); err != nil {
+		t.Fatal(err)
+	}
+	if err := fabrictest.CreateRouterPort(ctx, c, network.Name, "provider-public", "91.246.31.5"); err != nil {
+		t.Fatal(err)
+	}
+	reconcileNetwork(t, c, network.Name)
+	requireCondition(t, getNetwork(t, c, network.Name).Status.Conditions, ConditionExternalReady, metav1.ConditionTrue, ReasonConnected)
+}
+
+func bgpConnectedNetwork(t *testing.T, c client.Client) v1alpha1.Network {
+	t.Helper()
+	bgpSettings(t)
+	network := createExternalNetwork(t, c)
+	reconcileNetwork(t, c, network.Name)
+	ctx := context.Background()
+	if err := fabrictest.MarkVpcStandby(ctx, c, network.Name); err != nil {
+		t.Fatal(err)
+	}
+	if err := fabrictest.CreateRouterPort(ctx, c, network.Name, "provider-transit", "192.0.2.11"); err != nil {
+		t.Fatal(err)
+	}
+	return network
+}
+
+func TestNetworkReconcilerBGPReportsAMissingFRRAgent(t *testing.T) {
+	c := cleanEnv(t)
+	network := bgpConnectedNetwork(t, c)
+	reconcileNetwork(t, c, network.Name)
+	requireCondition(t, getNetwork(t, c, network.Name).Status.Conditions, ConditionExternalReady, metav1.ConditionFalse, ReasonFRRAgentMissing)
+	installFRRAgent(t, c, 0)
+	reconcileNetwork(t, c, network.Name)
+	requireCondition(t, getNetwork(t, c, network.Name).Status.Conditions, ConditionExternalReady, metav1.ConditionFalse, ReasonFRRAgentMissing)
+}
+
+func TestNetworkReconcilerBGPConnectsWithAReadyFRRAgent(t *testing.T) {
+	c := cleanEnv(t)
+	network := bgpConnectedNetwork(t, c)
+	installFRRAgent(t, c, 1)
 	reconcileNetwork(t, c, network.Name)
 	requireCondition(t, getNetwork(t, c, network.Name).Status.Conditions, ConditionExternalReady, metav1.ConditionTrue, ReasonConnected)
 }
@@ -172,6 +470,19 @@ func TestNetworkReconcilerBGPKeepsTheVrfIDStable(t *testing.T) {
 	reconcileNetwork(t, c, first.Name)
 	if vrfOf(t, c, first.Name) != a || getNetwork(t, c, first.Name).Annotations[AnnotationVrfID] == "" {
 		t.Fatal("the id must not change")
+	}
+}
+
+func TestNetworkReconcilerBGPSetsBfdAndLocalOnly(t *testing.T) {
+	c := cleanEnv(t)
+	bgpSettings(t)
+	network := createExternalNetwork(t, c)
+	reconcileNetwork(t, c, network.Name)
+	vpc := vpcOf(t, c, network.Name)
+	bfd, _, _ := unstructured.NestedBool(vpc.Object, "spec", "enableBfd")
+	localOnly, _, _ := unstructured.NestedBool(vpc.Object, "spec", "dynamicRouting", "localOnly")
+	if !bfd || !localOnly {
+		t.Fatalf("enableBfd %v localOnly %v", bfd, localOnly)
 	}
 }
 
@@ -251,6 +562,58 @@ func TestNetworkDeletionWaitsForSubnets(t *testing.T) {
 	var gone v1alpha1.Network
 	if err := c.Get(ctx, client.ObjectKey{Name: network.Name}, &gone); !apierrors.IsNotFound(err) {
 		t.Fatalf("the finalizer must be gone: %v", err)
+	}
+}
+
+func TestNetworkDeletionNamesTheLoadBalancersThatHoldThePlane(t *testing.T) {
+	c := cleanEnv(t)
+	ctx := context.Background()
+	network := createNetwork(t, c)
+	reconcileNetwork(t, c, network.Name)
+	balancer := &v1alpha1.LoadBalancer{ObjectMeta: metav1.ObjectMeta{Name: "web", Namespace: "acme-shop", UID: "balancer-uid"}}
+	vip := fabric.Vip(fabric.Meta{Name: "acme-shop-web-vip", Annotations: OwnerAnnotations(balancer)}, "acme-shop", LBSubnetName(network.Name))
+	if err := c.Create(ctx, vip); err != nil {
+		t.Fatal(err)
+	}
+	if err := c.Delete(ctx, &network); err != nil {
+		t.Fatal(err)
+	}
+	if result := reconcileNetwork(t, c, network.Name); result.RequeueAfter != terminatingRequeue {
+		t.Fatalf("result %+v", result)
+	}
+	got := getNetwork(t, c, network.Name)
+	requireCondition(t, got.Status.Conditions, v1alpha1.ConditionReady, metav1.ConditionFalse, ReasonTerminating)
+	if message := meta.FindStatusCondition(got.Status.Conditions, v1alpha1.ConditionReady).Message; !strings.Contains(message, "acme-shop/web") {
+		t.Fatalf("the message must name the load balancer: %q", message)
+	}
+	if _, err := getObject(ctx, c, fabric.SubnetGVK, LBSubnetName(network.Name)); err != nil {
+		t.Fatalf("the plane Subnet must stay while a Vip holds it: %v", err)
+	}
+	if err := c.Delete(ctx, vip); err != nil {
+		t.Fatal(err)
+	}
+	reconcileNetwork(t, c, network.Name)
+	if err := c.Get(ctx, client.ObjectKey{Name: network.Name}, &v1alpha1.Network{}); !apierrors.IsNotFound(err) {
+		t.Fatalf("the Network must go once the plane is free: %v", err)
+	}
+}
+
+func TestNetworkDeletionReportsAPlaneThatFabricKeeps(t *testing.T) {
+	c := cleanEnv(t)
+	ctx := context.Background()
+	network := createNetwork(t, c)
+	reconcileNetwork(t, c, network.Name)
+	changeFabricObject(t, c, fabric.SubnetGVK, LBSubnetName(network.Name), hold)
+	if err := c.Delete(ctx, &network); err != nil {
+		t.Fatal(err)
+	}
+	if result := reconcileNetwork(t, c, network.Name); result.RequeueAfter != terminatingRequeue {
+		t.Fatalf("result %+v", result)
+	}
+	got := getNetwork(t, c, network.Name)
+	requireCondition(t, got.Status.Conditions, v1alpha1.ConditionReady, metav1.ConditionFalse, ReasonTerminating)
+	if message := meta.FindStatusCondition(got.Status.Conditions, v1alpha1.ConditionReady).Message; !strings.Contains(message, LBSubnetName(network.Name)) {
+		t.Fatalf("the message must name the plane Subnet: %q", message)
 	}
 }
 
@@ -343,5 +706,157 @@ func TestNetworkReconcilerReadsVrfIDsFromTheAPI(t *testing.T) {
 	a, b := getNetwork(t, c, first.Name).Annotations[AnnotationVrfID], getNetwork(t, c, second.Name).Annotations[AnnotationVrfID]
 	if a == "" || b == "" || a == b {
 		t.Fatalf("ids %q %q", a, b)
+	}
+}
+
+func pinnedNetwork(t *testing.T, c client.Client, name string, id int32) v1alpha1.Network {
+	t.Helper()
+	network := networkOf(name, "acme", "10.100.0.0/16")
+	network.Spec.EnableExternal = true
+	network.Spec.VrfID = ptr.To(id)
+	requireAccepted(t, c, network)
+	return *network
+}
+
+func requireNoVpc(t *testing.T, c client.Client, name string) {
+	t.Helper()
+	if _, err := getObject(context.Background(), c, fabric.VpcGVK, name); !apierrors.IsNotFound(err) {
+		t.Fatalf("no Fabric Vpc expected for %s: %v", name, err)
+	}
+}
+
+func TestNetworkReconcilerBGPUsesThePinnedVrfID(t *testing.T) {
+	c := cleanEnv(t)
+	bgpSettings(t)
+	for _, id := range []int32{7, 1500, 60001} {
+		network := pinnedNetwork(t, c, unique(t, "pin"), id)
+		reconcileNetwork(t, c, network.Name)
+		if got := vrfOf(t, c, network.Name); got != int64(id) {
+			t.Fatalf("pinned %d, Vpc has %d", id, got)
+		}
+		if _, recorded := getNetwork(t, c, network.Name).Annotations[AnnotationVrfID]; recorded {
+			t.Fatal("a pinned Network needs no recorded id")
+		}
+	}
+}
+
+func TestNetworkReconcilerBGPAllocatorSkipsPinnedIDs(t *testing.T) {
+	c := cleanEnv(t)
+	bgpSettings(t)
+	pinned := pinnedNetwork(t, c, unique(t, "pin"), 1000)
+	other := pinnedNetwork(t, c, unique(t, "pin"), 1001)
+	free := createExternalNetwork(t, c)
+	reconcileNetwork(t, c, free.Name)
+	if got := vrfOf(t, c, free.Name); got != 1002 {
+		t.Fatalf("id %d, pinned ids %s and %s must be skipped", got, pinned.Name, other.Name)
+	}
+}
+
+func TestNetworkReconcilerRefusesAPinnedVrfIDThatAnotherNetworkHolds(t *testing.T) {
+	c := cleanEnv(t)
+	bgpSettings(t)
+	allocated := createExternalNetwork(t, c)
+	reconcileNetwork(t, c, allocated.Name)
+	held := vrfOf(t, c, allocated.Name)
+
+	late := pinnedNetwork(t, c, unique(t, "pin"), int32(held))
+	reconcileNetwork(t, c, late.Name)
+	got := getNetwork(t, c, late.Name)
+	requireCondition(t, got.Status.Conditions, v1alpha1.ConditionReady, metav1.ConditionFalse, ReasonVRFInUse)
+	if message := meta.FindStatusCondition(got.Status.Conditions, v1alpha1.ConditionReady).Message; !strings.Contains(message, allocated.Name) {
+		t.Fatalf("the message must name the holder: %q", message)
+	}
+	requireNoVpc(t, c, late.Name)
+	if vrfOf(t, c, allocated.Name) != held {
+		t.Fatal("the holder must keep its id")
+	}
+}
+
+func TestNetworkReconcilerTwoNetworksPinningOneIDLeaveTheOlderTheOwner(t *testing.T) {
+	c := cleanEnv(t)
+	bgpSettings(t)
+	older := pinnedNetwork(t, c, "aaa"+unique(t, ""), 2000)
+	newer := pinnedNetwork(t, c, "bbb"+unique(t, ""), 2000)
+	reconcileNetwork(t, c, older.Name)
+	reconcileNetwork(t, c, newer.Name)
+	if got := vrfOf(t, c, older.Name); got != 2000 {
+		t.Fatalf("id %d", got)
+	}
+	requireCondition(t, getNetwork(t, c, newer.Name).Status.Conditions, v1alpha1.ConditionReady, metav1.ConditionFalse, ReasonVRFInUse)
+	requireNoVpc(t, c, newer.Name)
+}
+
+func TestNetworkReconcilerRefusesAPinnedVrfIDThatAForeignVpcHolds(t *testing.T) {
+	c := cleanEnv(t)
+	bgpSettings(t)
+	foreign := fabric.Vpc(fabric.Meta{Name: unique(t, "foreign")}, fabric.VpcSpec{EnableExternal: true, ExtraExternalSubnets: []string{"x"}, Dynamic: &fabric.DynamicRouting{VrfID: 60001, ExternalSubnet: "x", Redistribute: []string{"nat"}}})
+	if err := c.Create(context.Background(), foreign); err != nil {
+		t.Fatal(err)
+	}
+	network := pinnedNetwork(t, c, unique(t, "pin"), 60001)
+	reconcileNetwork(t, c, network.Name)
+	requireCondition(t, getNetwork(t, c, network.Name).Status.Conditions, v1alpha1.ConditionReady, metav1.ConditionFalse, ReasonVRFInUse)
+	requireNoVpc(t, c, network.Name)
+}
+
+func TestNetworkReconcilerRefusesAPinnedVrfIDOfARedistributedHostTable(t *testing.T) {
+	c := cleanEnv(t)
+	bgpSettings(t)
+	setSetting(t, "network.bgp.redistribute-tables", "7,198")
+	network := pinnedNetwork(t, c, unique(t, "pin"), 198)
+	reconcileNetwork(t, c, network.Name)
+	got := getNetwork(t, c, network.Name)
+	requireCondition(t, got.Status.Conditions, v1alpha1.ConditionReady, metav1.ConditionFalse, ReasonVRFReserved)
+	if message := meta.FindStatusCondition(got.Status.Conditions, v1alpha1.ConditionReady).Message; !strings.Contains(message, "redistributed host table") {
+		t.Fatalf("message %q", message)
+	}
+	requireNoVpc(t, c, network.Name)
+
+	setSetting(t, "network.bgp.redistribute-tables", "7")
+	reconcileNetwork(t, c, network.Name)
+	requireCondition(t, getNetwork(t, c, network.Name).Status.Conditions, v1alpha1.ConditionReady, metav1.ConditionFalse, ReasonVpcPending)
+	if got := vrfOf(t, c, network.Name); got != 198 {
+		t.Fatalf("id %d", got)
+	}
+}
+
+func TestNetworkReconcilerKeepsAProvisionedNetworkWithARedistributedVrfID(t *testing.T) {
+	c := cleanEnv(t)
+	bgpSettings(t)
+	network := pinnedNetwork(t, c, unique(t, "pin"), 198)
+	reconcileNetwork(t, c, network.Name)
+	if err := fabrictest.MarkVpcStandby(context.Background(), c, network.Name); err != nil {
+		t.Fatal(err)
+	}
+	reconcileNetwork(t, c, network.Name)
+	requireCondition(t, getNetwork(t, c, network.Name).Status.Conditions, v1alpha1.ConditionReady, metav1.ConditionTrue, ReasonVpcReady)
+
+	setSetting(t, "network.bgp.redistribute-tables", "198")
+	reconcileNetwork(t, c, network.Name)
+	got := getNetwork(t, c, network.Name).Status.Conditions
+	requireCondition(t, got, v1alpha1.ConditionReady, metav1.ConditionTrue, ReasonVpcReady)
+	requireCondition(t, got, ConditionVRFPolicy, metav1.ConditionFalse, ReasonVRFReserved)
+	if vrfOf(t, c, network.Name) != 198 {
+		t.Fatal("the Vpc must keep its id")
+	}
+
+	setSetting(t, "network.bgp.redistribute-tables", "7")
+	reconcileNetwork(t, c, network.Name)
+	if meta.FindStatusCondition(getNetwork(t, c, network.Name).Status.Conditions, ConditionVRFPolicy) != nil {
+		t.Fatal("the VRFPolicy condition must go when the Setting no longer lists the id")
+	}
+}
+
+func TestNetworkReconcilerNamesThePlaneSubnetAfterTheVpcOfADigitNetwork(t *testing.T) {
+	c := cleanEnv(t)
+	network := networkOf("3"+unique(t, "net"), "acme", "10.100.0.0/16")
+	requireAccepted(t, c, network)
+	reconcileNetwork(t, c, network.Name)
+	vpc := VpcName(network.Name)
+	if got := getNetwork(t, c, network.Name).Status.VPC; got != vpc {
+		t.Fatalf("status VPC %q, want %q", got, vpc)
+	}
+	if planeSubnetOf(t, c, vpc).GetName() != LBSubnetName(vpc) {
+		t.Fatal("the plane Subnet must be named after the Vpc")
 	}
 }

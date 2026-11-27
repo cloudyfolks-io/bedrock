@@ -41,3 +41,55 @@ func TestSubstituteFailsOnUnknownPlaceholder(t *testing.T) {
 		t.Fatalf("err %v", err)
 	}
 }
+
+func objWithArgs(args ...any) *unstructured.Unstructured {
+	return &unstructured.Unstructured{Object: map[string]any{
+		"apiVersion": "apps/v1", "kind": "Deployment", "metadata": map[string]any{"name": "cert-manager"},
+		"spec": map[string]any{"template": map[string]any{"spec": map[string]any{"containers": []any{map[string]any{"name": "c", "args": args}}}}},
+	}}
+}
+
+func substitutedArgs(t *testing.T, vars map[string]string, args ...any) []any {
+	t.Helper()
+	in := Bundle{Groups: []Group{{Name: "cert-manager", Objects: []*unstructured.Unstructured{objWithArgs(args...)}}}}
+	out, err := Substitute(in, vars)
+	if err != nil {
+		t.Fatal(err)
+	}
+	containers, _, _ := unstructured.NestedSlice(out.Groups[0].Objects[0].Object, "spec", "template", "spec", "containers")
+	return containers[0].(map[string]any)["args"].([]any)
+}
+
+func TestSubstituteDropsAListItemThatResolvesToNothing(t *testing.T) {
+	got := substitutedArgs(t, map[string]string{"BEDROCK_FLAG": ""}, "--v=2", "${BEDROCK_FLAG}", "--last")
+	if len(got) != 2 || got[0] != "--v=2" || got[1] != "--last" {
+		t.Fatalf("args %v", got)
+	}
+}
+
+func TestSubstituteKeepsAListItemThatResolvesToText(t *testing.T) {
+	got := substitutedArgs(t, map[string]string{"BEDROCK_FLAG": "--flag=1"}, "--v=2", "${BEDROCK_FLAG}")
+	if len(got) != 2 || got[1] != "--flag=1" {
+		t.Fatalf("args %v", got)
+	}
+}
+
+func TestSubstituteKeepsAnEmptyListItemWithoutAPlaceholder(t *testing.T) {
+	got := substitutedArgs(t, map[string]string{"BEDROCK_FLAG": "x"}, "", "${BEDROCK_FLAG}")
+	if len(got) != 2 || got[0] != "" {
+		t.Fatalf("args %v", got)
+	}
+}
+
+func TestSubstituteKeepsAnEmptyMapValue(t *testing.T) {
+	in := Bundle{Groups: []Group{{Name: "g", Objects: []*unstructured.Unstructured{objWithEnv("${BEDROCK_PROXY}")}}}}
+	out, err := Substitute(in, map[string]string{"BEDROCK_PROXY": ""})
+	if err != nil {
+		t.Fatal(err)
+	}
+	containers, _, _ := unstructured.NestedSlice(out.Groups[0].Objects[0].Object, "spec", "template", "spec", "containers")
+	env := containers[0].(map[string]any)["env"].([]any)
+	if len(env) != 1 || env[0].(map[string]any)["value"] != "" {
+		t.Fatalf("env %v", env)
+	}
+}

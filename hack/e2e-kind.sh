@@ -42,6 +42,7 @@ while read -r ref || [ -n "$ref" ]; do
   kind load image-archive "$tmpdir/image.tar" --name "$cluster"
 done < dist/release/images.txt
 
+kubectl apply --server-side -f charts/kube-prometheus-stack/charts/crds/crds/crd-servicemonitors.yaml
 kubectl apply -f manifests/00-crds
 kubectl apply -f manifests/85-authn/00-namespace.yaml
 kubectl apply -f manifests/90-bedrock

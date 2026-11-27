@@ -12,6 +12,8 @@ spec:
     family: rocky
     version: "9"
     preference: rhel.9
+    displayName: Rocky Linux 9
+    architecture: amd64
   source:
     http:
       url: https://dl.rockylinux.org/pub/rocky/9/images/x86_64/Rocky-9-GenericCloud-Base-9.8-20260525.0.x86_64.qcow2

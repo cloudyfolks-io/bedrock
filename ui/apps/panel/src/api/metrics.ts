@@ -20,6 +20,8 @@ export interface MetricOutcome {
   unavailable: boolean;
   forbidden: boolean;
   result: MatrixResult | undefined;
+  pending?: boolean;
+  failed?: boolean;
 }
 
 const steps = [15, 30, 60, 120, 300, 600, 900, 1800, 3600];
@@ -74,5 +76,9 @@ export function useMetricRanges(paramsList: MetricParams[]): MetricOutcome[] {
       },
     })),
   });
-  return results.map((result) => result.data ?? { unavailable: false, forbidden: false, result: undefined });
+  return results.map((result) => ({
+    ...(result.data ?? { unavailable: false, forbidden: false, result: undefined }),
+    pending: result.isPending,
+    failed: result.isError,
+  }));
 }

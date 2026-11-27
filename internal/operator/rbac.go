@@ -23,6 +23,8 @@ import (
 	"github.com/cloudyfolks-io/bedrock/internal/ssa"
 )
 
+const leaderRoleName = "bedrock-operator-leader"
+
 func OperatorRole(bundle release.Bundle) (rbacv1.ClusterRole, error) {
 	objects := releaseObjects(bundle)
 	addonKinds, err := renderedAddonKinds(bundle)
@@ -46,7 +48,29 @@ func ensureOperatorRole(ctx context.Context, c client.Client, bundle release.Bun
 	if err != nil {
 		return err
 	}
-	return ssa.Apply(ctx, c, &role, v1alpha1.OperatorFieldManager)
+	leader, binding := leaderElectionAccess()
+	for _, obj := range []runtime.Object{&leader, &binding, &role} {
+		if err := ssa.Apply(ctx, c, obj, v1alpha1.OperatorFieldManager); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func leaderElectionAccess() (rbacv1.Role, rbacv1.RoleBinding) {
+	meta := metav1.ObjectMeta{Name: leaderRoleName, Namespace: release.SystemNamespace, Labels: map[string]string{release.ComponentLabel: "bedrock"}}
+	role := rbacv1.Role{
+		TypeMeta:   metav1.TypeMeta{APIVersion: rbacv1.SchemeGroupVersion.String(), Kind: "Role"},
+		ObjectMeta: meta,
+		Rules:      []rbacv1.PolicyRule{{APIGroups: []string{"coordination.k8s.io"}, Resources: []string{"leases"}, Verbs: standardVerbs()}},
+	}
+	binding := rbacv1.RoleBinding{
+		TypeMeta:   metav1.TypeMeta{APIVersion: rbacv1.SchemeGroupVersion.String(), Kind: "RoleBinding"},
+		ObjectMeta: meta,
+		RoleRef:    rbacv1.RoleRef{APIGroup: rbacv1.GroupName, Kind: "Role", Name: leaderRoleName},
+		Subjects:   []rbacv1.Subject{{Kind: "ServiceAccount", Name: operatorDeployment, Namespace: release.SystemNamespace}},
+	}
+	return role, binding
 }
 
 func RoleYAML(role rbacv1.ClusterRole) ([]byte, error) {
@@ -98,12 +122,14 @@ func fixedRules() []rbacv1.PolicyRule {
 		{APIGroups: []string{v1alpha1.GroupVersion.Group}, Resources: bedrockResources(), Verbs: standardVerbs()},
 		{APIGroups: []string{""}, Resources: []string{"nodes"}, Verbs: []string{"get", "list", "patch", "update", "watch"}},
 		{APIGroups: []string{""}, Resources: []string{"pods"}, Verbs: []string{"delete", "get", "list", "watch"}},
+		{APIGroups: []string{""}, Resources: []string{"secrets"}, Verbs: []string{"list", "update"}},
 		{APIGroups: []string{""}, Resources: []string{"pods/eviction"}, Verbs: []string{"create"}},
 		{APIGroups: []string{""}, Resources: []string{"pods/exec"}, Verbs: []string{"create", "get"}},
 		{APIGroups: []string{""}, Resources: []string{"events"}, Verbs: []string{"create", "patch"}},
-		{APIGroups: []string{"coordination.k8s.io"}, Resources: []string{"leases"}, Verbs: standardVerbs()},
+		{APIGroups: []string{"coordination.k8s.io"}, Resources: []string{"leases"}, Verbs: read},
 		{APIGroups: []string{"apps"}, Resources: []string{"controllerrevisions"}, Verbs: read},
 		{APIGroups: []string{"apps"}, Resources: []string{"deployments"}, Verbs: []string{"get", "patch"}},
+		{APIGroups: []string{"k0s.k0sproject.io"}, Resources: []string{"clusterconfigs"}, Verbs: []string{"get", "patch"}},
 		{APIGroups: []string{vmGVK.Group}, Resources: []string{"virtualmachineinstances"}, Verbs: []string{"get", "list"}},
 		{APIGroups: []string{vmGVK.Group}, Resources: []string{"virtualmachines"}, Verbs: []string{"create", "delete", "get", "list", "patch"}},
 		{APIGroups: []string{rbacv1.GroupName}, Resources: []string{"clusterrolebindings", "clusterroles", "rolebindings", "roles"}, Verbs: []string{"bind", "escalate"}},
@@ -117,10 +143,17 @@ func bedrockResources() []string {
 		"apitokens", "apitokens/status",
 		"authcodes", "authcodes/status",
 		"authrequests", "authrequests/status",
+		"builds", "builds/status",
 		"clusterconfigs",
 		"clusterimages", "clusterimages/status",
 		"clusters", "clusters/status",
+		"containers", "containers/status",
 		"credentials", "credentials/status",
+		"databaseclasses",
+		"databases", "databases/status",
+		"databaseschemas", "databaseschemas/status",
+		"databaseusers", "databaseusers/status",
+		"databaseversions",
 		"devicerequests", "devicerequests/status",
 		"dnszones", "dnszones/status",
 		"elasticips", "elasticips/status",
@@ -129,7 +162,10 @@ func bedrockResources() []string {
 		"hosts", "hosts/status",
 		"identityproviders", "identityproviders/status",
 		"images", "images/status",
+		"internetgateways", "internetgateways/status",
+		"kubernetesclusters", "kubernetesclusters/status",
 		"loadbalancers", "loadbalancers/status",
+		"networkpeerings", "networkpeerings/status",
 		"networks", "networks/status",
 		"nodeupgrades", "nodeupgrades/status",
 		"oauthclients", "oauthclients/status",
@@ -137,6 +173,8 @@ func bedrockResources() []string {
 		"objectstorageusers", "objectstorageusers/status",
 		"projects", "projects/status",
 		"refreshtokens", "refreshtokens/status",
+		"registries", "registries/status",
+		"registrycredentials", "registrycredentials/status",
 		"releases", "releases/status",
 		"securitygroups", "securitygroups/status",
 		"sessions", "sessions/status",
@@ -178,7 +216,7 @@ func renderedAddonKinds(bundle release.Bundle) ([]schema.GroupVersionKind, error
 			if err != nil {
 				return nil, fmt.Errorf("%s addon: %w", addon.Name, err)
 			}
-			kinds = append(kinds, objectKinds(rendered.Objects)...)
+			kinds = append(kinds, objectKinds(slices.Concat(rendered.Objects, rendered.Absent))...)
 			for _, probe := range rendered.Probes {
 				kinds = append(kinds, probe.GVK)
 			}

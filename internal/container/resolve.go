@@ -1,0 +1,334 @@
+package container
+
+import (
+	"context"
+	"fmt"
+	"slices"
+
+	corev1 "k8s.io/api/core/v1"
+	nodev1 "k8s.io/api/node/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apimachinery/pkg/api/meta"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/apimachinery/pkg/runtime/schema"
+	"sigs.k8s.io/controller-runtime/pkg/client"
+
+	"github.com/cloudyfolks-io/bedrock/api/v1alpha1"
+	"github.com/cloudyfolks-io/bedrock/internal/network"
+	"github.com/cloudyfolks-io/bedrock/internal/network/fabric"
+)
+
+const (
+	DefaultSubnetName   = "default"
+	RuntimeSetting      = "container.runtime-class"
+	DefaultRuntimeClass = "kata"
+	RuntimeNone         = "none"
+	filesystemClass     = "filesystem"
+)
+
+var fabricGroupGVK = schema.GroupVersionKind{Group: "fabric.cloudyfolks.io", Version: "v1", Kind: "SecurityGroup"}
+
+type Gate struct{ Reason, Message string }
+
+func gateOf(reason, format string, args ...any) *Gate {
+	return &Gate{Reason: reason, Message: fmt.Sprintf(format, args...)}
+}
+
+type Resolver struct {
+	Client    client.Client
+	Secrets   client.Reader
+	FabricIPs client.Reader
+}
+
+type resolved struct {
+	RenderInput
+	subnet v1alpha1.Subnet
+}
+
+type resolveStep func(ctx context.Context, c v1alpha1.Container, in resolved) (resolved, *Gate, error)
+
+func SubnetName(spec v1alpha1.ContainerSpec) string {
+	if spec.Network.SubnetRef == "" {
+		return DefaultSubnetName
+	}
+	return spec.Network.SubnetRef
+}
+
+func notFound(err error) bool {
+	return apierrors.IsNotFound(err) || meta.IsNoMatchError(err)
+}
+
+func (r Resolver) Resolve(ctx context.Context, c v1alpha1.Container, labels map[string]string) (RenderInput, *Gate, error) {
+	in := resolved{RenderInput: RenderInput{Container: c, Labels: labels}}
+	steps := []resolveStep{r.stepSubnet, r.stepAddress, r.stepSecurityGroups, r.stepDefaultGroup, r.stepVolumes, r.stepRuntime, r.stepPullSecrets}
+	for _, step := range steps {
+		next, gate, err := step(ctx, c, in)
+		if err != nil || gate != nil {
+			return in.RenderInput, gate, err
+		}
+		in = next
+	}
+	return in.RenderInput, nil, nil
+}
+
+func (r Resolver) stepSubnet(ctx context.Context, c v1alpha1.Container, in resolved) (resolved, *Gate, error) {
+	name := SubnetName(c.Spec)
+	subnet, cfg, gate, err := r.resolveSubnet(ctx, c.Namespace, name)
+	if err != nil || gate != nil {
+		return in, gate, err
+	}
+	in.subnet = subnet
+	in.NIC, err = network.ResolvePodNIC(ctx, r.Client, cfg, network.NIC{Class: network.NetworkClassWorkload, Namespace: c.Namespace, Subnet: name, Address: c.Spec.Network.Address, Addresses: slices.Clone(c.Spec.Network.Addresses), SecurityGroups: slices.Clone(c.Spec.Network.SecurityGroups)})
+	if err != nil {
+		return in, nil, err
+	}
+	if c.Spec.Probes != nil && in.NIC.Class == "" {
+		for _, probe := range []*v1alpha1.ContainerProbe{c.Spec.Probes.Liveness, c.Spec.Probes.Readiness} {
+			if probe != nil && (probe.HTTPGet != nil || probe.TCPSocket != nil || probe.GRPC != nil) {
+				return in, gateOf(ReasonInvalidSpec, "network probes need the tenant management network"), nil
+			}
+		}
+	}
+	in.DNSServers = DNSServersOf(subnet, cfg.DNSServers)
+	return in, nil, nil
+}
+
+func (r Resolver) resolveSubnet(ctx context.Context, namespace, name string) (v1alpha1.Subnet, network.Config, *Gate, error) {
+	var subnet v1alpha1.Subnet
+	err := r.Client.Get(ctx, client.ObjectKey{Namespace: namespace, Name: name}, &subnet)
+	if notFound(err) {
+		return subnet, network.Config{}, gateOf(ReasonSubnetNotFound, "the subnet %q does not exist", name), nil
+	}
+	if err != nil {
+		return subnet, network.Config{}, nil, err
+	}
+	if !meta.IsStatusConditionTrue(subnet.Status.Conditions, v1alpha1.ConditionReady) {
+		return subnet, network.Config{}, gateOf(ReasonSubnetNotReady, "the subnet %q is not ready", name), nil
+	}
+	var parent v1alpha1.Network
+	err = r.Client.Get(ctx, client.ObjectKey{Name: subnet.Spec.NetworkRef}, &parent)
+	if err != nil && !notFound(err) {
+		return subnet, network.Config{}, nil, err
+	}
+	if err != nil || parent.Status.VPC == "" {
+		return subnet, network.Config{}, gateOf(ReasonSubnetNotReady, "the network %q of the subnet %q is not ready", subnet.Spec.NetworkRef, name), nil
+	}
+	cfg, err := network.LoadConfig(ctx, r.Client)
+	if err != nil {
+		return subnet, network.Config{}, nil, err
+	}
+	return subnet, cfg, nil, nil
+}
+
+func DNSServersOf(subnet v1alpha1.Subnet, fallback []string) []string {
+	if len(subnet.Spec.DNSServers) > 0 {
+		return slices.Clone(subnet.Spec.DNSServers)
+	}
+	return slices.Clone(fallback)
+}
+
+func (r Resolver) stepAddress(ctx context.Context, c v1alpha1.Container, in resolved) (resolved, *Gate, error) {
+	addresses := PinnedAddresses(c.Spec)
+	if len(addresses) == 0 {
+		return in, nil, nil
+	}
+	for _, address := range addresses {
+		if violation := network.CheckNICAddress(in.subnet, address); violation != nil {
+			return in, &Gate{Reason: violation.Reason, Message: violation.Message}, nil
+		}
+	}
+	var containers v1alpha1.ContainerList
+	if err := r.Client.List(ctx, &containers, client.InNamespace(c.Namespace)); err != nil {
+		return in, nil, err
+	}
+	if other, address, held := pinnedBy(containers.Items, c); held {
+		return in, gateOf(ReasonAddressInUse, "the address %s of the subnet %q is pinned by the container %q", address, in.NIC.Subnet, other), nil
+	}
+	pods, err := r.podNames(ctx, c)
+	if err != nil {
+		return in, nil, err
+	}
+	for _, address := range addresses {
+		ips, err := network.IPsOfAddress(ctx, r.FabricIPs, network.FabricName(c.Namespace, in.NIC.Subnet), address)
+		if err != nil {
+			return in, nil, err
+		}
+		if heldByOther(ips, address, c.Namespace, pods) {
+			return in, gateOf(ReasonAddressInUse, "the address %s of the subnet %q is already allocated to another pod", address, in.NIC.Subnet), nil
+		}
+	}
+	return in, nil, nil
+}
+
+func pinnedBy(containers []v1alpha1.Container, c v1alpha1.Container) (string, string, bool) {
+	mine := PinnedAddresses(c.Spec)
+	for index := range containers {
+		other := containers[index]
+		if other.Name == c.Name || SubnetName(other.Spec) != SubnetName(c.Spec) || !network.Older(&other, &c) {
+			continue
+		}
+		if shared := slices.IndexFunc(PinnedAddresses(other.Spec), func(a string) bool { return slices.Contains(mine, a) }); shared >= 0 {
+			return other.Name, PinnedAddresses(other.Spec)[shared], true
+		}
+	}
+	return "", "", false
+}
+
+func heldByOther(ips []*unstructured.Unstructured, address, namespace string, own []string) bool {
+	return slices.ContainsFunc(ips, func(ip *unstructured.Unstructured) bool {
+		ipNamespace, pod, _ := fabric.IPOwner(ip)
+		return fabric.IPAddress(ip) == address && (ipNamespace != namespace || !slices.Contains(own, pod))
+	})
+}
+
+func (r Resolver) podNames(ctx context.Context, c v1alpha1.Container) ([]string, error) {
+	pods, err := network.PodsOfContainer(ctx, r.Client, c)
+	if err != nil {
+		return nil, err
+	}
+	names := make([]string, len(pods))
+	for i, pod := range pods {
+		names[i] = pod.Name
+	}
+	return names, nil
+}
+
+func (r Resolver) stepSecurityGroups(ctx context.Context, c v1alpha1.Container, in resolved) (resolved, *Gate, error) {
+	for _, name := range c.Spec.Network.SecurityGroups {
+		var group v1alpha1.SecurityGroup
+		err := r.Client.Get(ctx, client.ObjectKey{Namespace: c.Namespace, Name: name}, &group)
+		if notFound(err) || (err == nil && !meta.IsStatusConditionTrue(group.Status.Conditions, v1alpha1.ConditionReady)) {
+			return in, gateOf(ReasonSecurityGroupNotReady, "the security group %q is not ready", name), nil
+		}
+		if err != nil {
+			return in, nil, err
+		}
+	}
+	return in, nil, nil
+}
+
+func (r Resolver) stepDefaultGroup(ctx context.Context, c v1alpha1.Container, in resolved) (resolved, *Gate, error) {
+	if len(c.Spec.Network.SecurityGroups) > 0 {
+		return in, nil, nil
+	}
+	gate, err := r.defaultGroupGate(ctx, c.Namespace)
+	return in, gate, err
+}
+
+func (r Resolver) defaultGroupGate(ctx context.Context, namespace string) (*Gate, error) {
+	name := network.DefaultSecurityGroupName(namespace)
+	group := &unstructured.Unstructured{}
+	group.SetGroupVersionKind(fabricGroupGVK)
+	err := r.Client.Get(ctx, client.ObjectKey{Name: name}, group)
+	if notFound(err) {
+		return gateOf(ReasonWaitingForDefaultGroup, "the default security group %q does not exist yet", name), nil
+	}
+	return nil, err
+}
+
+func (r Resolver) stepVolumes(ctx context.Context, c v1alpha1.Container, in resolved) (resolved, *Gate, error) {
+	if len(c.Spec.Volumes) == 0 {
+		return in, nil, nil
+	}
+	var vms v1alpha1.VirtualMachineList
+	if err := r.Client.List(ctx, &vms, client.InNamespace(c.Namespace)); err != nil {
+		return in, nil, err
+	}
+	var containers v1alpha1.ContainerList
+	if err := r.Client.List(ctx, &containers, client.InNamespace(c.Namespace)); err != nil {
+		return in, nil, err
+	}
+	for _, mount := range c.Spec.Volumes {
+		var volume v1alpha1.Volume
+		err := r.Client.Get(ctx, client.ObjectKey{Namespace: c.Namespace, Name: mount.VolumeRef}, &volume)
+		if notFound(err) {
+			return in, gateOf(ReasonVolumeNotFound, "the volume %q does not exist", mount.VolumeRef), nil
+		}
+		if err != nil {
+			return in, nil, err
+		}
+		if volume.Spec.StorageClass != filesystemClass {
+			return in, gateOf(ReasonVolumeClassUnsupported, "the volume %q must have the storage class %q to be shared with a container", mount.VolumeRef, filesystemClass), nil
+		}
+		if holder, held := VolumeHolder(mount.VolumeRef, vms.Items, containers.Items); held && holder != (Holder{Kind: Kind, Name: c.Name}) {
+			return in, gateOf(ReasonVolumeInUse, "the volume %q is used by %s", mount.VolumeRef, holder), nil
+		}
+		instance, err := MountingInstance(ctx, r.Client, c.Namespace, mount.VolumeRef)
+		if err != nil {
+			return in, nil, err
+		}
+		if instance != "" {
+			return in, gateOf(ReasonVolumeInUse, "the volume %q is mounted by the instance %s", mount.VolumeRef, instance), nil
+		}
+	}
+	return in, nil, nil
+}
+
+func (r Resolver) RuntimeClassName(ctx context.Context) (string, error) {
+	var setting v1alpha1.Setting
+	err := r.Client.Get(ctx, client.ObjectKey{Name: RuntimeSetting}, &setting)
+	if err != nil && !notFound(err) {
+		return "", err
+	}
+	return runtimeClassOf(setting.Spec.Value), nil
+}
+
+func runtimeClassOf(value string) string {
+	switch value {
+	case "":
+		return DefaultRuntimeClass
+	case RuntimeNone:
+		return ""
+	}
+	return value
+}
+
+func (r Resolver) stepRuntime(ctx context.Context, _ v1alpha1.Container, in resolved) (resolved, *Gate, error) {
+	name, err := r.RuntimeClassName(ctx)
+	if err != nil {
+		return in, nil, err
+	}
+	if name == "" {
+		return in, nil, nil
+	}
+	err = r.Client.Get(ctx, client.ObjectKey{Name: name}, &nodev1.RuntimeClass{})
+	if notFound(err) {
+		return in, gateOf(ReasonRuntimeUnavailable, "the RuntimeClass %q does not exist: kata needs a host with KVM, or set the Setting %s to %s", name, RuntimeSetting, RuntimeNone), nil
+	}
+	if err != nil {
+		return in, nil, err
+	}
+	in.RuntimeClass = name
+	return in, nil, nil
+}
+
+func hasDockerConfig(secret corev1.Secret) bool {
+	switch secret.Type {
+	case corev1.SecretTypeDockerConfigJson:
+		return len(secret.Data[corev1.DockerConfigJsonKey]) != 0
+	case corev1.SecretTypeDockercfg:
+		return len(secret.Data[corev1.DockerConfigKey]) != 0
+	}
+	return false
+}
+
+func (r Resolver) stepPullSecrets(ctx context.Context, c v1alpha1.Container, in resolved) (resolved, *Gate, error) {
+	reader := r.Secrets
+	if reader == nil {
+		reader = r.Client
+	}
+	for _, name := range c.Spec.ImagePullSecrets {
+		var secret corev1.Secret
+		err := reader.Get(ctx, client.ObjectKey{Namespace: c.Namespace, Name: name}, &secret)
+		if notFound(err) {
+			return in, gateOf(ReasonPullSecretNotFound, "the pull secret %q does not exist", name), nil
+		}
+		if err != nil {
+			return in, nil, err
+		}
+		if !hasDockerConfig(secret) {
+			return in, gateOf(ReasonSecretTypeInvalid, "the pull secret %q must have the type %s with the key %s, or the type %s with the key %s; a registry credential that adopted a robot has no password until the annotation bedrock.cloudyfolks.io/reset-secret gets a new value", name, corev1.SecretTypeDockerConfigJson, corev1.DockerConfigJsonKey, corev1.SecretTypeDockercfg, corev1.DockerConfigKey), nil
+		}
+	}
+	return in, nil, nil
+}

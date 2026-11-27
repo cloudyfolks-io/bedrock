@@ -238,6 +238,46 @@ func TestRenderFirmwareAndCPU(t *testing.T) {
 	}
 }
 
+func TestRenderFirmwareIdentity(t *testing.T) {
+	in := renderFixture()
+	in.VirtualMachine.Spec.Firmware = &v1alpha1.VMFirmware{UUID: "6f1f3a52-2f0b-4c1e-9d55-0c6f1d7a9e10", Serial: "SN-0001"}
+	firmware, _, _ := unstructured.NestedMap(templateSpec(t, mustRender(t, in)), "domain", "firmware")
+	want := map[string]any{"uuid": "6f1f3a52-2f0b-4c1e-9d55-0c6f1d7a9e10", "serial": "SN-0001"}
+	if !reflect.DeepEqual(firmware, want) {
+		t.Fatalf("firmware %+v", firmware)
+	}
+	in.VirtualMachine.Spec.Firmware.UEFI = true
+	firmware, _, _ = unstructured.NestedMap(templateSpec(t, mustRender(t, in)), "domain", "firmware")
+	secure, found, _ := unstructured.NestedBool(firmware, "bootloader", "efi", "secureBoot")
+	if firmware["uuid"] != want["uuid"] || firmware["serial"] != want["serial"] || secure || !found {
+		t.Fatalf("firmware with uefi %+v", firmware)
+	}
+	in.VirtualMachine.Spec.Firmware = &v1alpha1.VMFirmware{TPM: true}
+	if _, found, _ := unstructured.NestedFieldNoCopy(templateSpec(t, mustRender(t, in)), "domain", "firmware"); found {
+		t.Fatal("firmware must be absent without uuid, serial or uefi")
+	}
+}
+
+func TestRenderDiskSerial(t *testing.T) {
+	in := renderFixture()
+	in.VirtualMachine.Spec.Disks = []v1alpha1.VMDisk{{VolumeRef: "data1", Serial: "vol0123456789abcdef"}, {VolumeRef: "data2"}}
+	in.Volumes = []ResolvedVolume{{Name: "data1"}, {Name: "data2"}}
+	disks := list(t, templateSpec(t, mustRender(t, in)), "domain", "devices", "disks")
+	first, second := disks[2].(map[string]any), disks[3].(map[string]any)
+	if first["serial"] != "vol0123456789abcdef" || second["serial"] != DiskKey("data2") {
+		t.Fatalf("serials %+v %+v", first, second)
+	}
+}
+
+func TestRenderRootDiskSerial(t *testing.T) {
+	in := renderFixture()
+	in.VirtualMachine.Spec.RootDisk.Serial = "WIN-ROOT-0001"
+	root := list(t, templateSpec(t, mustRender(t, in)), "domain", "devices", "disks")[0].(map[string]any)
+	if root["serial"] != "WIN-ROOT-0001" {
+		t.Fatalf("root disk %+v", root)
+	}
+}
+
 func TestRenderHostDevices(t *testing.T) {
 	spec := templateSpec(t, mustRender(t, renderFixture()))
 	want := []any{map[string]any{"name": "hostdev-0", "deviceName": "nvidia.com/GA102"}}
@@ -334,5 +374,164 @@ func TestRenderCloudInitSecretMatchesUserData(t *testing.T) {
 	want, err := UserData(in.UserData, in.SSHKeys)
 	if err != nil || string(out.Secret.Data["userdata"]) != want || !strings.Contains(want, "ssh-ed25519 AAAAk1") {
 		t.Fatalf("%q %v", out.Secret.Data["userdata"], err)
+	}
+}
+
+func TestRenderAddsOnlyTheAddressAnnotationForAPinnedNIC(t *testing.T) {
+	auto := mustRender(t, renderFixture())
+	in := renderFixture()
+	in.NICs[0].Address = "10.100.0.50"
+	pinned := mustRender(t, in)
+	key := "default.acme-web.fabric.cloudyfolks.io/ip_address"
+	annotations, _, _ := unstructured.NestedStringMap(pinned.VirtualMachine.Object, "spec", "template", "metadata", "annotations")
+	if annotations[key] != "10.100.0.50" {
+		t.Fatalf("annotations %+v", annotations)
+	}
+	delete(annotations, key)
+	unstructured.RemoveNestedField(pinned.VirtualMachine.Object, "spec", "template", "metadata", "annotations")
+	must(t, unstructured.SetNestedStringMap(pinned.VirtualMachine.Object, annotations, "spec", "template", "metadata", "annotations"))
+	if !reflect.DeepEqual(auto, pinned) {
+		t.Fatalf("a pinned NIC changes more than the annotation:\nauto   %+v\npinned %+v", auto.VirtualMachine.Object, pinned.VirtualMachine.Object)
+	}
+}
+
+func TestRenderCustomComputeReplacesTheInstanceType(t *testing.T) {
+	in := renderFixture()
+	in.VirtualMachine.Spec.InstanceType = ""
+	in.VirtualMachine.Spec.Compute = &v1alpha1.VMCompute{Cores: 6, MemoryMiB: 6144}
+	out := mustRender(t, in)
+	if _, found, _ := unstructured.NestedMap(out.VirtualMachine.Object, "spec", "instancetype"); found {
+		t.Fatal("a custom size must render no instance type")
+	}
+	domain, _, _ := unstructured.NestedMap(templateSpec(t, out), "domain")
+	cpu, _ := domain["cpu"].(map[string]any)
+	wantCPU := map[string]any{"sockets": int64(6), "cores": int64(1), "threads": int64(1), "dedicatedCpuPlacement": true, "model": "host-model"}
+	if !reflect.DeepEqual(cpu, wantCPU) {
+		t.Fatalf("cpu %+v", cpu)
+	}
+	if want := map[string]any{"guest": "6144Mi"}; !reflect.DeepEqual(domain["memory"], want) {
+		t.Fatalf("memory %+v", domain["memory"])
+	}
+}
+
+func TestRenderCustomComputeAloneSetsOnlyTheTopology(t *testing.T) {
+	in := renderFixture()
+	in.VirtualMachine.Spec.InstanceType = ""
+	in.VirtualMachine.Spec.CPU = nil
+	in.VirtualMachine.Spec.Compute = &v1alpha1.VMCompute{Cores: 2, MemoryMiB: 512}
+	domain, _, _ := unstructured.NestedMap(templateSpec(t, mustRender(t, in)), "domain")
+	if want := map[string]any{"sockets": int64(2), "cores": int64(1), "threads": int64(1)}; !reflect.DeepEqual(domain["cpu"], want) {
+		t.Fatalf("cpu %+v", domain["cpu"])
+	}
+}
+
+func TestRenderCustomComputeCountsInTheFieldOfThePreferenceTopology(t *testing.T) {
+	cases := map[string]map[string]any{
+		"":              {"sockets": int64(3), "cores": int64(1), "threads": int64(1)},
+		"preferSockets": {"sockets": int64(3), "cores": int64(1), "threads": int64(1)},
+		"sockets":       {"sockets": int64(3), "cores": int64(1), "threads": int64(1)},
+		"preferCores":   {"sockets": int64(1), "cores": int64(3), "threads": int64(1)},
+		"cores":         {"sockets": int64(1), "cores": int64(3), "threads": int64(1)},
+		"preferThreads": {"sockets": int64(1), "cores": int64(1), "threads": int64(3)},
+		"threads":       {"sockets": int64(1), "cores": int64(1), "threads": int64(3)},
+		"preferSpread":  {"sockets": int64(3), "cores": int64(1), "threads": int64(1)},
+		"spread":        {"sockets": int64(3), "cores": int64(1), "threads": int64(1)},
+		"preferAny":     {"sockets": int64(3), "cores": int64(1), "threads": int64(1)},
+	}
+	for topology, want := range cases {
+		t.Run(topology, func(t *testing.T) {
+			in := renderFixture()
+			in.VirtualMachine.Spec.InstanceType = ""
+			in.VirtualMachine.Spec.CPU = nil
+			in.VirtualMachine.Spec.Compute = &v1alpha1.VMCompute{Cores: 3, MemoryMiB: 512}
+			in.PreferenceTopology = topology
+			domain, _, _ := unstructured.NestedMap(templateSpec(t, mustRender(t, in)), "domain")
+			if !reflect.DeepEqual(domain["cpu"], want) {
+				t.Fatalf("cpu %+v", domain["cpu"])
+			}
+		})
+	}
+}
+
+func TestRenderCustomComputeSatisfiesThePreferenceRequirements(t *testing.T) {
+	in := renderFixture()
+	in.VirtualMachine.Spec.InstanceType = ""
+	in.VirtualMachine.Spec.CPU = nil
+	in.VirtualMachine.Spec.Preference = "cirros"
+	in.VirtualMachine.Spec.Compute = &v1alpha1.VMCompute{Cores: 2, MemoryMiB: 512}
+	domain, _, _ := unstructured.NestedMap(templateSpec(t, mustRender(t, in)), "domain")
+	cpu, _ := domain["cpu"].(map[string]any)
+	if cpu["sockets"] != int64(2) {
+		t.Fatalf("the cirros preference counts sockets: %+v", cpu)
+	}
+	if want := map[string]any{"guest": "512Mi"}; !reflect.DeepEqual(domain["memory"], want) {
+		t.Fatalf("memory %+v", domain["memory"])
+	}
+}
+
+func TestRenderInstanceTypeSetsNoSize(t *testing.T) {
+	domain, _, _ := unstructured.NestedMap(templateSpec(t, mustRender(t, renderFixture())), "domain")
+	if _, found := domain["memory"]; found {
+		t.Fatalf("memory %+v", domain["memory"])
+	}
+	cpu, _ := domain["cpu"].(map[string]any)
+	for _, field := range []string{"sockets", "cores", "threads"} {
+		if _, found := cpu[field]; found {
+			t.Fatalf("cpu %+v", cpu)
+		}
+	}
+}
+
+func TestRenderRootDiskFromAVolume(t *testing.T) {
+	in := renderFixture()
+	in.VirtualMachine.Spec.Image = nil
+	in.VirtualMachine.Spec.RootDisk = v1alpha1.VMRootDisk{VolumeRef: "boot1"}
+	in.RootImage, in.ImageOS = nil, nil
+	in.RootVolume = &ResolvedVolume{Name: "boot1"}
+	out := mustRender(t, in)
+	if out.RootClaim != nil {
+		t.Fatalf("a root Volume needs no root claim: %+v", out.RootClaim.Object)
+	}
+	spec := templateSpec(t, out)
+	root := list(t, spec, "volumes")[0]
+	if want := map[string]any{"name": "rootdisk", "persistentVolumeClaim": map[string]any{"claimName": "boot1"}}; !reflect.DeepEqual(root, want) {
+		t.Fatalf("root volume %+v", root)
+	}
+	disk := list(t, spec, "domain", "devices", "disks")[0]
+	if want := map[string]any{"name": "rootdisk", "disk": map[string]any{}, "bootOrder": int64(1)}; !reflect.DeepEqual(disk, want) {
+		t.Fatalf("root disk %+v", disk)
+	}
+}
+
+func TestRenderRootVolumeKeepsItsBus(t *testing.T) {
+	in := renderFixture()
+	in.VirtualMachine.Spec.RootDisk = v1alpha1.VMRootDisk{VolumeRef: "boot1"}
+	in.RootVolume = &ResolvedVolume{Name: "boot1", Bus: "sata"}
+	disk := list(t, templateSpec(t, mustRender(t, in)), "domain", "devices", "disks")[0]
+	if want := map[string]any{"name": "rootdisk", "disk": map[string]any{"bus": "sata"}, "bootOrder": int64(1)}; !reflect.DeepEqual(disk, want) {
+		t.Fatalf("root disk %+v", disk)
+	}
+}
+
+func TestRenderWithDNSServersSetsDNSPolicyNone(t *testing.T) {
+	in := renderFixture()
+	in.DNSServers = []string{"198.51.100.53", "198.51.100.54"}
+	spec := templateSpec(t, mustRender(t, in))
+	if spec["dnsPolicy"] != "None" {
+		t.Fatalf("dnsPolicy %v", spec["dnsPolicy"])
+	}
+	nameservers, _, _ := unstructured.NestedStringSlice(spec, "dnsConfig", "nameservers")
+	if !reflect.DeepEqual(nameservers, in.DNSServers) {
+		t.Fatalf("nameservers %v", nameservers)
+	}
+}
+
+func TestRenderWithoutDNSServersKeepsTheClusterDNS(t *testing.T) {
+	spec := templateSpec(t, mustRender(t, renderFixture()))
+	if _, found := spec["dnsPolicy"]; found {
+		t.Fatal("dnsPolicy must be absent")
+	}
+	if _, found := spec["dnsConfig"]; found {
+		t.Fatal("dnsConfig must be absent")
 	}
 }

@@ -1,0 +1,111 @@
+[
+  {
+    "apiVersion": "postgresql.cnpg.io/v1",
+    "kind": "Cluster",
+    "metadata": {
+      "labels": {
+        "app.kubernetes.io/instance": "0b0c0d0e-1111-4222-8333-444455556666",
+        "app.kubernetes.io/managed-by": "bedrock",
+        "bedrock.cloudyfolks.io/kind": "Database",
+        "bedrock.cloudyfolks.io/name": "orders",
+        "bedrock.cloudyfolks.io/project": "web",
+        "bedrock.cloudyfolks.io/tenant": "acme"
+      },
+      "name": "0b0c0d0e-1111-4222-8333-444455556666",
+      "namespace": "bedrock-dbaas"
+    },
+    "spec": {
+      "bootstrap": {
+        "initdb": {
+          "database": "app",
+          "encoding": "UTF8",
+          "localeCType": "C.UTF-8",
+          "localeCollate": "C.UTF-8",
+          "owner": "dbadmin",
+          "secret": {
+            "name": "0b0c0d0e-1111-4222-8333-444455556666-app"
+          }
+        }
+      },
+      "enableSuperuserAccess": true,
+      "imageName": "ghcr.io/cloudnative-pg/postgresql:17.9-minimal-trixie@sha256:3c9f2df53e15f3fff0aee630beffe73936590333b7fd80f2239bf59b22a9852e",
+      "inheritedMetadata": {
+        "labels": {
+          "app.kubernetes.io/component": "engine",
+          "app.kubernetes.io/instance": "0b0c0d0e-1111-4222-8333-444455556666",
+          "app.kubernetes.io/managed-by": "bedrock",
+          "bedrock.cloudyfolks.io/kind": "Database",
+          "bedrock.cloudyfolks.io/name": "orders",
+          "bedrock.cloudyfolks.io/project": "web",
+          "bedrock.cloudyfolks.io/tenant": "acme"
+        }
+      },
+      "instances": 3,
+      "monitoring": {
+        "enablePodMonitor": true
+      },
+      "postgresql": {
+        "parameters": {
+          "effective_cache_size": "614MB",
+          "log_min_error_statement": "panic",
+          "log_timezone": "UTC",
+          "max_connections": "100",
+          "password_encryption": "scram-sha-256",
+          "shared_buffers": "256MB",
+          "timezone": "UTC"
+        },
+        "pg_hba": [
+          "host all postgres all reject"
+        ]
+      },
+      "resources": {
+        "limits": {
+          "cpu": "500m",
+          "memory": "1024Mi"
+        },
+        "requests": {
+          "cpu": "500m",
+          "memory": "1024Mi"
+        }
+      },
+      "storage": {
+        "size": "20Gi",
+        "storageClass": "block"
+      },
+      "superuserSecret": {
+        "name": "0b0c0d0e-1111-4222-8333-444455556666-superuser"
+      }
+    }
+  },
+  {
+    "apiVersion": "v1",
+    "kind": "Service",
+    "metadata": {
+      "labels": {
+        "app.kubernetes.io/instance": "0b0c0d0e-1111-4222-8333-444455556666",
+        "app.kubernetes.io/managed-by": "bedrock",
+        "bedrock.cloudyfolks.io/kind": "Database",
+        "bedrock.cloudyfolks.io/name": "orders",
+        "bedrock.cloudyfolks.io/project": "web",
+        "bedrock.cloudyfolks.io/tenant": "acme"
+      },
+      "name": "0b0c0d0e-1111-4222-8333-444455556666-db",
+      "namespace": "bedrock-dbaas"
+    },
+    "spec": {
+      "ports": [
+        {
+          "name": "db",
+          "port": 5432,
+          "protocol": "TCP",
+          "targetPort": 5432
+        }
+      ],
+      "selector": {
+        "cnpg.io/cluster": "0b0c0d0e-1111-4222-8333-444455556666",
+        "cnpg.io/instanceRole": "primary"
+      },
+      "type": "ClusterIP"
+    }
+  }
+]
