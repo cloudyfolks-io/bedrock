@@ -44,14 +44,14 @@ func TestAuthnServeFlags(t *testing.T) {
 	if defaults != (serveOptions{listen: ":8443", tlsCert: "/tls/tls.crt", tlsKey: "/tls/tls.key"}) {
 		t.Fatalf("defaults %+v", defaults)
 	}
-	custom, err := parseServeFlags([]string{"--listen", "127.0.0.1:9443", "--tls-cert", "/a.crt", "--tls-key", "/a.key", "--ui-dir", "/srv/ui"}, io.Discard)
+	custom, err := parseServeFlags([]string{"--listen", "127.0.0.1:9443", "--tls-cert", "/a.crt", "--tls-key", "/a.key", "--ui-dir", "/srv/ui", "--experimental-saxess-state-secret", "card-state"}, io.Discard)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if custom != (serveOptions{listen: "127.0.0.1:9443", tlsCert: "/a.crt", tlsKey: "/a.key", uiDir: "/srv/ui"}) {
+	if custom != (serveOptions{listen: "127.0.0.1:9443", tlsCert: "/a.crt", tlsKey: "/a.key", uiDir: "/srv/ui", saxessStateSecret: "card-state"}) {
 		t.Fatalf("custom %+v", custom)
 	}
-	for _, args := range [][]string{{"--nope"}, {"extra"}} {
+	for _, args := range [][]string{{"--nope"}, {"extra"}, {"--experimental-saxess-state-secret="}, {"--experimental-saxess-state-secret=other/card-state"}} {
 		if _, err := parseServeFlags(args, io.Discard); err == nil {
 			t.Fatalf("args %v must fail", args)
 		}

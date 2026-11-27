@@ -16,6 +16,24 @@ msgstr "نام کاربری"
 msgid "login.username.continue"
 msgstr "ادامه"
 
+msgid "login.saxess.start"
+msgstr "ورود با sAxess Pro"
+
+msgid "login.saxess.title"
+msgstr "تأیید ورود با sAxess Pro"
+
+msgid "login.saxess.instructions"
+msgstr "برنامه sAxess Pro را باز کنید و این ورود را تأیید کنید. سپس به اینجا برگردید و «بررسی تأیید» را بزنید."
+
+msgid "login.saxess.pending"
+msgstr "هنوز تأییدی دریافت نشده است. بعد از تأیید درخواست، می‌توانید دوباره بررسی کنید."
+
+msgid "login.saxess.check"
+msgstr "بررسی تأیید"
+
+msgid "login.saxess.restart"
+msgstr "اگر درخواست منقضی یا رد شد، به برنامه‌ای که ورود را از آن شروع کردید برگردید و دوباره تلاش کنید."
+
 msgid "login.password.title"
 msgstr "رمز عبور خود را وارد کنید"
 

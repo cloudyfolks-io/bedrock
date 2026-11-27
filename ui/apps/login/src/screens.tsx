@@ -1,5 +1,6 @@
 import type { ComponentType } from "react";
 import { Username } from "./screens/Username";
+import { SAxess } from "./screens/SAxess";
 import { Password } from "./screens/Password";
 import { Totp } from "./screens/Totp";
 import { Recovery } from "./screens/Recovery";
@@ -17,6 +18,7 @@ export interface ScreenProps {
 
 const registry: Record<ChallengeType, ComponentType<ScreenProps>> = {
   username: Username,
+  saxess: SAxess,
   password: Password,
   totp: Totp,
   recovery: Recovery,

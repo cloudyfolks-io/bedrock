@@ -52,6 +52,7 @@ type Deps struct {
 	Lookups  *methods.RateLimiter
 	Callback func(ctx context.Context, id string) string
 	LDAPDial methods.LDAPDialer
+	SAxess   *SAxessConfig
 }
 
 type decoration struct {
@@ -180,6 +181,16 @@ func current(w http.ResponseWriter, r *http.Request, deps Deps) {
 }
 
 func resumeLogin(w http.ResponseWriter, r *http.Request, deps Deps, request v1alpha1.AuthRequest) {
+	if err := checkSAxessLogin(r.Context(), deps, request, request.Status.Login); err != nil {
+		writeCommitError(w, r, err)
+		return
+	}
+	if state := request.Status.Login; state.Step == ChallengeSAxess {
+		if nonce, deadline := saxessPending(state); nonce == "" || !deps.Clock().Before(deadline) {
+			respond(w, r, deps, request, failed(state, errorExpired))
+			return
+		}
+	}
 	facts, err := subjectFacts(r.Context(), deps, request)
 	if err != nil {
 		internal(w, r, err)
@@ -204,11 +215,23 @@ func answer(w http.ResponseWriter, r *http.Request, deps Deps) {
 	}
 	step, updated, err := dispatch(r, deps, request, given)
 	switch {
+	case errors.Is(err, errSAxessPending):
+		httpjson.Write(w, http.StatusOK, withCSRF(step.Challenge, r.Header.Get("X-CSRF-Token")))
 	case errors.Is(err, errUnexpectedAnswer):
 		httpjson.WriteError(w, http.StatusBadRequest, "unexpected_answer")
 	case err != nil:
-		internal(w, r, err)
+		writeCommitError(w, r, err)
 	default:
+		if request.Status.Login.Step == ChallengeSAxess && updated.Status.Subject != "" {
+			// Claim this answer before the normal commit can create an enrollment
+			// or session. A refresh can still retry the bound backend approval.
+			hash, err := claimSAxessAnswer(r.Context(), deps, request)
+			if err != nil {
+				writeCommitError(w, r, err)
+				return
+			}
+			updated.Status.Login.CSRFHash = hash
+		}
 		respond(w, r, deps, updated, step)
 	}
 }
@@ -250,8 +273,13 @@ func upstreamAnswer(r *http.Request, deps Deps, request v1alpha1.AuthRequest, up
 func dispatch(r *http.Request, deps Deps, request v1alpha1.AuthRequest, given methods.Answer) (Step, v1alpha1.AuthRequest, error) {
 	ctx := r.Context()
 	state := request.Status.Login
+	if err := checkSAxessLogin(ctx, deps, request, state); err != nil {
+		return Step{}, request, err
+	}
 	flow := flowOf(r, deps, request)
 	switch {
+	case given.Type == AnswerSAxessStart || given.Type == ChallengeSAxess:
+		return dispatchSAxess(r, deps, request, given)
 	case state.Step == methods.ChallengeUsername && given.Type == methods.ChallengeUsername:
 		username := usernameOf(given.Username)
 		facts, err := usernameFacts(ctx, deps, flow, request, username)
@@ -335,6 +363,13 @@ func respond(w http.ResponseWriter, r *http.Request, deps Deps, request v1alpha1
 }
 
 func commit(w http.ResponseWriter, r *http.Request, deps Deps, request v1alpha1.AuthRequest, step Step) (methods.Challenge, error) {
+	state := step.State
+	if request.Status.Login.Primary == ChallengeSAxess {
+		state = request.Status.Login
+	}
+	if err := checkSAxessLogin(r.Context(), deps, request, state); err != nil {
+		return methods.Challenge{}, err
+	}
 	next, err := decorate(r, deps, request, step)
 	if err != nil {
 		return methods.Challenge{}, err
@@ -462,7 +497,7 @@ func enrollTOTP(ctx context.Context, deps Deps, request v1alpha1.AuthRequest, st
 	if err != nil {
 		return decoration{}, err
 	}
-	user, err := deps.Store.User(ctx, request.Status.Subject)
+	user, err := loginUser(ctx, deps, request)
 	if err != nil {
 		return decoration{}, err
 	}
@@ -487,7 +522,7 @@ func recoveryCodes(ctx context.Context, deps Deps, request v1alpha1.AuthRequest,
 	if err != nil {
 		return decoration{}, err
 	}
-	user, err := deps.Store.User(ctx, request.Status.Subject)
+	user, err := loginUser(ctx, deps, request)
 	if err != nil {
 		return decoration{}, err
 	}
@@ -556,14 +591,15 @@ func loadFacts(ctx context.Context, deps Deps, request v1alpha1.AuthRequest, use
 	if err != nil {
 		return Facts{}, err
 	}
-	return Facts{User: user, Groups: groups, Client: oauth, Settings: settings, Enrolled: enrolled, Providers: providers, Device: device}, nil
+	saxess := request.Status.CookieHash != "" && deps.SAxess != nil && deps.SAxess.Backend != nil && deps.SAxess.eligible(request.Spec, oauth.Spec)
+	return Facts{User: user, Groups: groups, Client: oauth, Settings: settings, Enrolled: enrolled, Providers: providers, Device: device, SAxess: saxess}, nil
 }
 
 func subjectFacts(ctx context.Context, deps Deps, request v1alpha1.AuthRequest) (Facts, error) {
 	if request.Status.Subject == "" {
 		return loadFacts(ctx, deps, request, nil)
 	}
-	user, err := deps.Store.User(ctx, request.Status.Subject)
+	user, err := loginUser(ctx, deps, request)
 	if err != nil {
 		return Facts{}, err
 	}
@@ -600,9 +636,17 @@ func known(user v1alpha1.User) *v1alpha1.User {
 
 func methodUser(ctx context.Context, deps Deps, request v1alpha1.AuthRequest) (v1alpha1.User, error) {
 	if request.Status.Subject != "" {
-		return deps.Store.User(ctx, request.Status.Subject)
+		return loginUser(ctx, deps, request)
 	}
 	return userByUsername(ctx, deps.Client, request.Status.Login.Username)
+}
+
+func loginUser(ctx context.Context, deps Deps, request v1alpha1.AuthRequest) (v1alpha1.User, error) {
+	user, err := deps.Store.User(ctx, request.Status.Subject)
+	if err != nil {
+		return v1alpha1.User{}, err
+	}
+	return user, checkSAxessUser(request.Status.Login, user)
 }
 
 func userByUsername(ctx context.Context, c client.Client, username string) (v1alpha1.User, error) {
@@ -626,6 +670,12 @@ func sessionSubject(ctx context.Context, deps Deps, request v1alpha1.AuthRequest
 	subject, err := deps.Store.Subject(ctx, request.Status.Subject)
 	if err != nil {
 		return methods.Subject{}, err
+	}
+	if err := checkSAxessUser(request.Status.Login, subject.User); err != nil {
+		return methods.Subject{}, err
+	}
+	if request.Status.Login.Primary == ChallengeSAxess && !slices.Contains(subject.Groups, v1alpha1.GroupAdmins) {
+		return methods.Subject{}, errSAxessUser
 	}
 	return methods.Subject{User: subject.User, Groups: subject.Groups, AMR: slices.Clone(request.Status.AMR)}, nil
 }
@@ -905,6 +955,8 @@ func writeCommitError(w http.ResponseWriter, r *http.Request, err error) {
 		httpjson.Write(w, http.StatusOK, expired())
 	case errors.Is(err, errLoginChanged):
 		httpjson.WriteError(w, http.StatusForbidden, "csrf")
+	case errors.Is(err, errSAxessUser):
+		httpjson.Write(w, http.StatusOK, failed(v1alpha1.LoginState{}, methods.FailureInvalidCredentials).Challenge)
 	default:
 		internal(w, r, err)
 	}

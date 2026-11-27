@@ -1,5 +1,6 @@
 export type ChallengeType =
   | "username"
+  | "saxess"
   | "password"
   | "totp"
   | "recovery"
@@ -35,6 +36,7 @@ export interface Challenge {
   type: ChallengeType;
   csrf?: string;
   username?: string;
+  saxess?: boolean;
   methods?: string[];
   providers?: ProviderChoice[];
   redirect?: string;

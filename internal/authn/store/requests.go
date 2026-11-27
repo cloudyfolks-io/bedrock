@@ -13,6 +13,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	"github.com/cloudyfolks-io/bedrock/api/v1alpha1"
+	"github.com/cloudyfolks-io/bedrock/internal/authn/policy"
 	"github.com/cloudyfolks-io/bedrock/internal/authn/secret"
 	"github.com/cloudyfolks-io/bedrock/internal/release"
 )
@@ -255,7 +256,37 @@ func (s *Store) AuthRequestByCode(ctx context.Context, code string) (op.AuthRequ
 	if !request.Status.Done {
 		return nil, errLoginNotDone
 	}
+	if err := CheckAuthRequestSubject(ctx, s.reader, request, s.allowSAxess); err != nil {
+		return nil, err
+	}
 	return AuthRequest{Object: request}, nil
+}
+
+// CheckAuthRequestSubject prevents a replacement user from inheriting an
+// approval tied to another User UID.
+func CheckAuthRequestSubject(ctx context.Context, reader client.Reader, request v1alpha1.AuthRequest, allowSAxess bool) error {
+	if request.Status.Login.Primary != v1alpha1.MethodSAxess {
+		return nil
+	}
+	subject, uid := request.Status.Subject, request.Status.Login.Provider
+	if !allowSAxess || subject == "" || uid == "" {
+		return errLoginNotDone
+	}
+	var user v1alpha1.User
+	if err := reader.Get(ctx, objectKey(subject), &user); err != nil {
+		return err
+	}
+	if string(user.UID) != uid || user.Spec.Disabled || !user.DeletionTimestamp.IsZero() {
+		return errLoginNotDone
+	}
+	var groups v1alpha1.GroupList
+	if err := reader.List(ctx, &groups, client.InNamespace(release.SystemNamespace)); err != nil {
+		return err
+	}
+	if !slices.Contains(policy.EffectiveGroups(user, groups.Items), v1alpha1.GroupAdmins) {
+		return errLoginNotDone
+	}
+	return nil
 }
 
 func (s *Store) DeleteAuthRequest(ctx context.Context, id string) error {

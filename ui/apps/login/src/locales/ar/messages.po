@@ -16,6 +16,24 @@ msgstr "اسم المستخدم"
 msgid "login.username.continue"
 msgstr "متابعة"
 
+msgid "login.saxess.start"
+msgstr "تسجيل الدخول باستخدام sAxess Pro"
+
+msgid "login.saxess.title"
+msgstr "الموافقة على تسجيل الدخول باستخدام sAxess Pro"
+
+msgid "login.saxess.instructions"
+msgstr "افتح تطبيق sAxess Pro ووافق على طلب تسجيل الدخول. ثم ارجع إلى هنا واختر «التحقق من الموافقة»."
+
+msgid "login.saxess.pending"
+msgstr "لم يتم العثور على موافقة. يمكنك التحقق مرة أخرى بعد الموافقة على الطلب."
+
+msgid "login.saxess.check"
+msgstr "التحقق من الموافقة"
+
+msgid "login.saxess.restart"
+msgstr "إذا انتهت صلاحية الطلب أو تم رفضه، فارجع إلى التطبيق الذي بدأت منه تسجيل الدخول وحاول مجددًا."
+
 msgid "login.password.title"
 msgstr "أدخل كلمة المرور الخاصة بك"
 

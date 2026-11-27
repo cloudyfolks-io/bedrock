@@ -49,4 +49,5 @@ const (
 	MethodRecovery = "recovery"
 	MethodLDAP     = "ldap"
 	MethodOIDC     = "oidc"
+	MethodSAxess   = "saxess"
 )

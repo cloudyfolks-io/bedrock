@@ -6,6 +6,7 @@ type Challenge struct {
 	Username      string           `json:"username,omitempty"`
 	Methods       []string         `json:"methods,omitempty"`
 	Providers     []ProviderChoice `json:"providers,omitempty"`
+	SAxess        bool             `json:"saxess,omitempty"`
 	Redirect      string           `json:"redirect,omitempty"`
 	Enroll        *TOTPEnrollment  `json:"enroll,omitempty"`
 	RecoveryCodes []string         `json:"recoveryCodes,omitempty"`

@@ -26,6 +26,7 @@ describe("Username", () => {
       renderWithLocale(<Username challenge={challenge} onChallenge={() => {}} />, locale);
       expect(document.documentElement.dir).toBe(dirOf(locale));
       expect(screen.getByText(expectedMessage(locale, "login.username.title"))).not.toBeNull();
+      expect(screen.queryByRole("button", { name: expectedMessage(locale, "login.saxess.start") })).toBeNull();
       fireEvent.change(screen.getByLabelText(expectedMessage(locale, "login.username.label")), { target: { value: "alice" } });
       fireEvent.click(screen.getByText(expectedMessage(locale, "login.username.continue")));
       await waitFor(() => {
