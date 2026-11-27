@@ -6,6 +6,7 @@ import (
 	"crypto/rand"
 	"errors"
 	"log/slog"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -139,6 +140,75 @@ func TestResolveRefreshesWithinSixtySecondsOfExpiry(t *testing.T) {
 	}
 	if fx.fake.Calls("token:refresh_token") != 1 {
 		t.Fatalf("refresh calls %d after a token with 61 seconds left", fx.fake.Calls("token:refresh_token"))
+	}
+}
+
+func TestResolveRefreshUpdatesTheAdminRole(t *testing.T) {
+	fx := newResolverFixture(t)
+	cookie, _ := fx.seed(t, 10*time.Second)
+	resolver := fx.resolver("proxy-a")
+	ctx := context.Background()
+	for _, groups := range [][]string{nil, {adminGroup, "ops"}} {
+		fx.fake.mutate(func(f *fakeAuthn) {
+			f.identity.Groups = groups
+			f.identity.Name = "Current Name"
+			f.identity.Email = "current@lab.example"
+		})
+		wantAdmin := slices.Contains(groups, adminGroup)
+		got, err := resolver.Resolve(ctx, cookie)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got.Admin != wantAdmin || !slices.Equal(got.Groups, groups) || got.DisplayName != "Current Name" || got.Email != "current@lab.example" {
+			t.Fatalf("session role %v, groups %v, name %q, email %q", got.Admin, got.Groups, got.DisplayName, got.Email)
+		}
+		stored, err := fx.store.Session(ctx, secret.SHA256Hex(cookie))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !slices.Equal(stored.Groups, groups) || stored.DisplayName != got.DisplayName || stored.Email != got.Email {
+			t.Fatal("the refreshed identity was not stored")
+		}
+		fx.clock.Advance(time.Hour)
+	}
+}
+
+func TestResolveEndsWhenTheRefreshedIdentityDiffers(t *testing.T) {
+	cases := []struct {
+		name   string
+		change func(*fakeAuthn)
+	}{
+		{"subject", func(f *fakeAuthn) { f.identity.Subject = "different-user" }},
+		{"session", func(f *fakeAuthn) { f.identity.Session = "different-session" }},
+		{"missing session", func(f *fakeAuthn) { f.noSID = true }},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			fx := newResolverFixture(t)
+			cookie, _ := fx.seed(t, 10*time.Second)
+			fx.fake.mutate(tc.change)
+			ctx := context.Background()
+			if _, err := fx.resolver("proxy-a").Resolve(ctx, cookie); !errors.Is(err, ErrSessionEnded) {
+				t.Fatalf("resolve returned %v, want the session to end", err)
+			}
+			if _, err := fx.store.Session(ctx, secret.SHA256Hex(cookie)); !errors.Is(err, ErrNotFound) {
+				t.Fatalf("read stored session returned %v, want not found", err)
+			}
+		})
+	}
+}
+
+func TestResolveKeepsTheIdentityWhenRefreshOmitsTheIDToken(t *testing.T) {
+	fx := newResolverFixture(t)
+	cookie, old := fx.seed(t, 10*time.Second)
+	fx.fake.mutate(func(f *fakeAuthn) { f.noIDRefresh = true })
+	ctx := context.Background()
+	got, err := fx.resolver("proxy-a").Resolve(ctx, cookie)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !got.Admin || got.Subject != old.Subject || !slices.Equal(got.Groups, old.Groups) || got.DisplayName != old.DisplayName || got.Email != old.Email || got.Access == old.Access {
+		t.Fatal("the browser identity changed or the access token did not rotate")
 	}
 }
 

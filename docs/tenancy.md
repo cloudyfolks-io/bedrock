@@ -52,6 +52,9 @@ The operator creates these objects for the tenant:
 - A ClusterRoleBinding `tenant:acme:owner`.
 
 The field `status.vpc` shows the name of the virtual network.
+The controller follows changes of the Setting `network.provider-networks`. If the Setting cannot be read, the condition `ProviderNetworksKnown` is false with the reason `SettingInvalid`, and the old list stays.
+The field `status.providerNetworks` lists the names of the provider networks that the Networks of the tenant can use.
+The optional field `spec.network.vrfId` sets the VRF id of the default Network. Only an administrator can set it, and only when the Tenant is created.
 The field `status.usage` shows the measured use of the tenant.
 
 ## Owners and members
@@ -66,9 +69,9 @@ A project has three roles.
 
 | Role | Can do |
 |---|---|
-| viewer | Read project objects, pods, logs, services and events. Cannot read Secrets. |
-| editor | All viewer rights. Create and change project objects, pods, Deployments and Secrets. Run `exec`. Start, stop, restart and snapshot VMs. Open VM consoles. Upload images. |
-| owner | All editor rights. Delete many objects at once. Write NetworkPolicies. |
+| viewer | Read project objects (also KubernetesClusters), pods, logs, services and events. Read the logs of containers. Cannot read Secrets. |
+| editor | All viewer rights. Create and change project objects (also KubernetesClusters), pods, Deployments and Secrets. Run `exec`. Start, stop, restart and snapshot VMs. Open VM consoles. Upload images. Run `exec` in a Container and restart it. |
+| owner | All editor rights. Delete many objects at once, also KubernetesClusters. Write NetworkPolicies. |
 
 No project role can migrate a VM.
 Only a cluster administrator can migrate a VM.
@@ -78,6 +81,14 @@ The operator creates the RoleBindings only after it applies the project quota.
 Without the quota component, the project has no member access.
 If the quota object or its CRD disappears later, the operator removes the RoleBindings.
 It creates them again when the quota is back.
+
+## Services in a project
+
+Editors and owners can create and edit ordinary Kubernetes Services. A Service of type `LoadBalancer` can use the cluster's default Fabric address pool.
+
+Fabric owns the Service names that start with `slr-` and `rlr-`. Only trusted controllers and cluster administrators can change generated frontend Services or set Fabric VPC, switch, VIP, health check, and address pool annotations. A tenant can change an ordinary Service while keeping the VPC annotation that Fabric sets.
+
+Before an upgrade, check for existing Services that use a reserved name or these annotations. Confirm the owner and the purpose of each Service. Use a Bedrock LoadBalancer or a Service that an administrator configures when the workload needs a fixed address or an explicit pool. Verify that the upgrade preserves those addresses and connections.
 
 ## Create a project
 
@@ -133,14 +144,20 @@ The quota of a project becomes one ApplicationAwareResourceQuota.
 | memory | requests.memory |
 | storage | requests.storage |
 | vms | count/virtualmachines.bedrock.cloudyfolks.io |
+| containers | count/containers.bedrock.cloudyfolks.io |
+| kubernetesClusters | count/kubernetesclusters.bedrock.cloudyfolks.io |
+| registries | count/registries.bedrock.cloudyfolks.io |
 
 A VM counts its CPU and memory under the same keys as a Pod.
+A Container counts the requests of its pods under the same keys.
+The worker VMs of a KubernetesCluster count as VMs, and the control plane pod counts its requests as a pod.
+The pods of a Container run in Kata, so the quota also counts the overhead of the RuntimeClass `kata`, which is 512Mi memory and 250m CPU for each pod.
 
 The quota of a tenant has three kinds of ceiling.
 
 - `projects` is the maximum count of projects.
 - `cpu`, `memory` and `storage` limit the sum of the project quotas.
-- `elasticIPs` limits the public addresses. The network controller enforces it.
+- `elasticIPs` limits the public addresses. The network controller enforces it. An ElasticIP over the limit reports `QuotaExceeded`. A lowered limit does not remove an ElasticIP that already has an address.
 
 The field `status.usage` shows measured use.
 For a project the use comes from the quota object.
@@ -157,7 +174,13 @@ A Pod with `spec.nodeName` fails in a project namespace.
 ## Network
 
 Each tenant has one Network with the name of the tenant.
-The Network uses the field `vpcCIDR` of the tenant.
+The Network holds the field `vpcCIDR` of the tenant as the only entry of `spec.cidrs`.
+A new default Network has `enableExternal: true`, so it is routed.
+The operator does not change `enableExternal` of a default Network that already exists.
+A Network from an older release has `spec.cidr` with the same range.
+The operator keeps `spec.cidr` on that Network and does not change it.
+When an administrator moves the Network to `spec.cidrs`, the operator keeps the ranges of the administrator.
+The move needs a merge patch that sets `cidrs` and `cidr: null`, as docs/network.md shows.
 The prefix of `vpcCIDR` is at most 24.
 Only IPv4 is possible.
 
@@ -191,7 +214,60 @@ A project user with the prefix `bedrock:` cannot create a Pod or Deployment with
 
 The rule applies only in namespaces with the label `bedrock.cloudyfolks.io/tenant`.
 It covers Pods and the pod templates of Deployments, ReplicaSets, StatefulSets, DaemonSets, Jobs and CronJobs.
+A project user also cannot set network selection annotations on a Pod or in a pod template.
+Only the platform can.
+See `docs/network.md`.
 Only the operator can set or change the labels `bedrock.cloudyfolks.io/tenant` and `bedrock.cloudyfolks.io/project` on a namespace.
+
+## Pod network admission
+
+The setting `tenancy.pod-network-admission` controls the admission of the network shape of a tenant pod.
+It is `off` by default.
+
+| Value | Effect |
+|---|---|
+| `off` | Bedrock removes the bindings. The policies do nothing. |
+| `audit` | A pod that breaks a rule is admitted. The API server counts the failure. Audit records are available only when API audit logging is enabled. |
+| `deny` | A pod that breaks a rule is rejected. |
+
+The policies are `bedrock-tenant-pod-network`, `bedrock-tenant-pod-network-subnet` and `bedrock-tenant-pod-network-groups`.
+The operator makes and removes their bindings from the setting.
+A change of the setting acts at once.
+Use `audit` first.
+Before moving to `deny`, verify representative pod creation, builds, VM hot-plug and database operations. Check their pod templates and the admission metrics. A quiet `TenantPodNetworkAudit` alert alone does not prove that an unused path works.
+
+The policies work only in a namespace that has the label `bedrock.cloudyfolks.io/tenant`.
+They check a Pod when it is created, and the subresource `pods/ephemeralcontainers` when it is updated.
+They do not check other updates of a Pod, so a label change of a running Pod passes.
+The shape rules apply at creation only.
+
+A Pod must have these fields, which `docs/network.md` explains:
+
+- The label `network.cloudyfolks.com/class` with the value `workload` or `managed`.
+- The annotation `k8s.v1.cni.cncf.io/networks` with the value `kube-system/vpc`.
+- The annotation `fabric.cloudyfolks.io/logical_switch` with the value `tenant-workload` for `workload` and `tenant-managed` for `managed`.
+- The annotations `fabric.cloudyfolks.io/port_security` and `vpc.kube-system.fabric.cloudyfolks.io/port_security` with the value `true`.
+- The annotation `vpc.kube-system.fabric.cloudyfolks.io/logical_switch` with the name of a Fabric Subnet of the project of the Pod.
+- The annotation `vpc.kube-system.fabric.cloudyfolks.io/security_groups` with only Fabric security groups of the project, or empty.
+
+A Pod of the class `workload` must also have `automountServiceAccountToken: false`.
+It must not add the capability `NET_BIND_SERVICE`.
+The policy `bedrock-tenant-pods` already denies every other added capability, so the two policies never deny the same capability.
+
+Fabric names are hashed, so Bedrock does not check a name prefix.
+The two parameter policies read the Fabric `Subnet` and `SecurityGroup` objects.
+An object belongs to the project when its annotation `bedrock.cloudyfolks.io/owner-namespace` is the namespace of the Pod.
+The default security group `default-<namespace>` belongs to the project through its labels.
+The policies check only the objects that exist.
+A name that no object has fails later, when the Pod starts.
+
+These identities are exempt: the groups `system:masters` and `system:nodes`, the service accounts of `kubevirt`, `cdi`, `aaq`, `rook-ceph` and `velero`, the other service accounts of `kube-system`, `system:kube-scheduler` and `system:kube-controller-manager`.
+The workload controllers of `kube-system` (ReplicaSet, StatefulSet, DaemonSet and Job) and the service accounts of `bedrock-system` are not exempt.
+They create the Pods of the pod builders, and the policy must check those Pods.
+
+The alerts `TenantPodNetworkAudit`, `TenantPodNetworkDenied` and `TenantPodNetworkError` use the metric `apiserver_validating_admission_policy_check_total`.
+Turn the setting on only after `network.tenant-management.enabled` is `true` and a pod builder makes the new shape.
+Before that, every tenant Pod breaks the rules.
 
 ## Deletion
 

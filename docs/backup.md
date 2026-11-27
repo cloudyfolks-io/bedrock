@@ -359,10 +359,57 @@ the encryption key of the Secrets. See [Secrets at rest](secrets-at-rest.md).
 The host keeps the newest 7 snapshots. Backups of an upgrade
 (`bedrock-*.tar.gz.age`) are not touched.
 
-Snapshots stay on the host. They are not copied to the backup target. To
-protect them from the loss of a disk, copy the files off the host with your
-own tools. A copy is safe, because the file is sealed. Read
-[Sealed archives](#sealed-archives) before you rely on a copy.
+### Off-cluster copy
+
+When `backup.target` is set, every control-plane host also uploads its
+sealed snapshots to the bucket of the target. The key is:
+
+```
+<prefix>/etcd/<host>/etcd-<stamp>.tar.gz.age
+```
+
+`<prefix>` is the prefix of `backup.target`. The operator copies
+`access-key-id`, `secret-access-key` and, if present, `ca.crt` from the
+Secret of `backup.credentials-secret` to the Secret
+`bedrock-agent-backup-s3` in `bedrock-system`. It keeps the copy in sync
+and deletes it when `backup.target` is empty. The agent reads only this
+copy and the setting `backup.target`. It never reads the Secret of
+`backup.credentials-secret`. The agent uploads the file as it is. It never
+uploads a plain archive.
+
+- The agent keeps the newest 7 snapshots of each host in the bucket. It
+  deletes older ones.
+- A failed request is tried again 4 times with a pause of 1, 2 and 4
+  seconds. After that, the agent tries again at the next cycle.
+- When `backup.archive-recipients` is empty or not valid, the agent uploads
+  nothing. The Host condition `EtcdOffClusterCopy` is `False` with the
+  reason `ArchiveRecipientsMissing`. A failed upload gives the reason
+  `UploadFailed`. A wrong target or Secret gives `BackupTargetInvalid` or
+  `BackupCredentialsInvalid`.
+- The agent writes the time of the last upload to
+  `/var/lib/node_exporter/textfile_collector/bedrock_backup.prom`:
+  `bedrock_backup_last_upload_timestamp_seconds{kind="etcd"}`. The node
+  exporter must read this directory. Alert when the value is older than
+  two snapshot intervals.
+
+Without `backup.target`, snapshots stay on the host. Copy them with your own
+tools. Read [Sealed archives](#sealed-archives) before you rely on a copy.
+
+#### Restore after you lose all hosts
+
+1. Build new control-plane hosts with the same Bedrock release. Install
+   the `bedrock` binary and the bundle.
+2. Get the admin identity (`admin.key`) and a copy of
+   `/etc/bedrock/encryption/encryption.yaml` from your off-cluster vault.
+3. List the bucket and pick the newest archive of the host you want:
+   `<prefix>/etcd/<host>/etcd-<stamp>.tar.gz.age`. Use any S3 client with
+   the keys of the target.
+4. Download the file to `/var/lib/bedrock/backups/` on the new host.
+5. Put `encryption.yaml` back to `/etc/bedrock/encryption/encryption.yaml`.
+6. Run the restore script with the admin identity, as described below and
+   in [Secrets at rest](secrets-at-rest.md). Then follow
+   [the runbook](runbooks/restore-control-plane.md) to join the other
+   control-plane hosts.
 
 To restore a snapshot, use the script on the host. Use the k0s version that
 took the snapshot. The script opens and unpacks the archive before it stops
@@ -400,6 +447,15 @@ for dir in $DIRS; do
   if [ -e "/var/lib/k0s/$dir" ]; then mv "/var/lib/k0s/$dir" "$HOLD/"; fi
 done
 k0s restore --config-out /root/restore/k0s.yaml "$1"
+if [ ! -e /var/lib/k0s/containerd ]; then
+  mkdir -p /var/lib/k0s/images /var/lib/bedrock
+  for FILE in /var/lib/bedrock/images/*/*/*.tar; do
+    [ -e "$FILE" ] || continue
+    VERSION=$(basename "$(dirname "$(dirname "$FILE")")")
+    echo "$VERSION-$(basename "$FILE")" >> /var/lib/bedrock/image-links
+    ln -f "$FILE" "/var/lib/k0s/images/$VERSION-$(basename "$FILE")" || cp "$FILE" "/var/lib/k0s/images/$VERSION-$(basename "$FILE")"
+  done
+fi
 systemctl start k0scontroller
 EOF
 ```
@@ -422,18 +478,38 @@ for dir in $DIRS; do
   if [ -e "/var/lib/k0s/$dir" ]; then mv "/var/lib/k0s/$dir" "$HOLD/"; fi
 done
 k0s restore --config-out /root/restore/k0s.yaml "$1"
+if [ ! -e /var/lib/k0s/containerd ]; then
+  mkdir -p /var/lib/k0s/images /var/lib/bedrock
+  for FILE in /var/lib/bedrock/images/*/*/*.tar; do
+    [ -e "$FILE" ] || continue
+    VERSION=$(basename "$(dirname "$(dirname "$FILE")")")
+    echo "$VERSION-$(basename "$FILE")" >> /var/lib/bedrock/image-links
+    ln -f "$FILE" "/var/lib/k0s/images/$VERSION-$(basename "$FILE")" || cp "$FILE" "/var/lib/k0s/images/$VERSION-$(basename "$FILE")"
+  done
+fi
 systemctl start k0scontroller
 EOF
 ```
+
+After a restore, Kubernetes can delete and start again some pods on the
+node, also VM pods. The restored Node object has the state of the snapshot
+time, and the taint manager can evict the pods that do not tolerate a
+`NoExecute` taint. Pods of a Deployment or a StatefulSet start again. A VM
+that cannot migrate restarts. A bare pod with no controller is gone. Plan a
+restore as an outage of the workloads on the node.
 
 The snapshot does not hold the encryption key of the Secrets. On a host that
 lost its disk, put the key at `/etc/bedrock/encryption/encryption.yaml`
 before you run the script. See [Secrets at rest](secrets-at-rest.md).
 
-A scheduled etcd snapshot holds no image tarballs. The script keeps the
-directory `/var/lib/k0s/images` on the host. A snapshot of an older release
-and a backup of an upgrade hold the directory `images`. For these archives,
-the script moves the directory aside and restores it from the archive.
+A scheduled etcd snapshot holds no image tarballs. The host keeps the
+tarballs in the image archive `/var/lib/bedrock/images`, and the directory
+`/var/lib/k0s/images` stays empty. See [Upgrade](upgrade.md). A snapshot of an
+older release and a backup of an upgrade hold the directory `images`. For
+these archives, the script moves the directory aside and restores it from the
+archive. The agent then moves these tarballs into the image archive. When
+the host has no containerd store, the script links the tarballs of the image
+archive into `/var/lib/k0s/images` before it starts k0s.
 
 On a rebuilt host, put the images back before you run the script. Use the
 bundle of the version that took the snapshot, for the architecture of the
@@ -460,6 +536,52 @@ rm -rf /root/restore
 
 When the cluster works, delete the directory `/var/lib/k0s/.pre-restore-<time>`
 that the script made.
+
+## Off-cluster copy of the database backups
+
+The backups of the databases are in the bucket `database.backup.bucket` of
+the object store in the cluster. When `database.enabled` is `true` and
+`backup.target` is set, the operator makes the CronJob `database-offsite` in
+the namespace `bedrock-dbaas`. It runs `rclone copy` from that bucket to:
+
+```
+<bucket of backup.target>/<prefix>/databases/
+```
+
+The copy never deletes. A backup that the retention of the database removes
+stays in the copy. Set a lifecycle rule on the bucket of the target to
+remove old objects under `<prefix>/databases/`. A copy that never deletes
+cannot be emptied by a sync from an empty bucket after a total loss.
+
+- `database.backup.offsite-schedule` sets the time. The default is
+  `0 * * * *` (each hour, UTC).
+- The source uses the Secret `database-backups-s3`. The destination uses
+  the keys of `backup.credentials-secret`. The operator copies the keys to
+  the Secret `database-offsite-s3` in `bedrock-dbaas`. No key is in a
+  manifest.
+- The image of rclone is in the release (`docker.io/rclone/rclone`, pinned
+  by version and digest) and in the bundle.
+- When `database.enabled` is `false` or `backup.target` is empty, the
+  operator deletes the CronJob and the Secret.
+- The CronJob has no metric of its own. Use the metric of
+  kube-state-metrics `kube_cronjob_status_last_successful_time{namespace="bedrock-dbaas",cronjob="database-offsite"}`.
+  Alert when it is older than two schedule intervals.
+
+### Restore the database backups after you lose the cluster
+
+1. Build the new cluster. Set `backup.target`, `backup.credentials-secret`
+   and enable `database.enabled`.
+2. The operator makes the empty bucket `database.backup.bucket` in the new
+   object store.
+3. Copy the objects back with the keys of `backup.target` as the source and
+   the keys of the Secret `database-backups-s3` in `bedrock-dbaas` as the
+   destination:
+   `rclone copy SRC:<bucket>/<prefix>/databases/ DST:<database.backup.bucket>/`
+   (rclone remotes of type `s3`, the in-cluster endpoint
+   `http://<object store service>:80`).
+4. Create the `Database` objects again with the same names and uids as the
+   restore of a database requires (see [Database](database.md)), and
+   restore from the copied backups.
 
 ## Sealed archives
 
@@ -493,6 +615,34 @@ never in an archive. Each control-plane host has its own key.
 
 The host key lets the agent restore an archive while the API server is down.
 This is how the automatic restore of `bedrock upgrade abort` works.
+
+### Rotate the host key
+
+Rotate the host key of one host as root:
+
+```
+bedrock backup rotate-key
+```
+
+The command prints the new public key. It does these steps:
+
+1. It makes a new key.
+2. It keeps the old key in `/etc/bedrock/backup/retired/<UTC stamp>.key`.
+3. It replaces `host.key` in one step, so `host.key` is never missing.
+
+The admin recipients do not change. The agent seals new archives to the new
+host key and to the admin recipients. Old archives stay sealed to the old
+key. The next archive uses the new key, also when the agent runs.
+
+Run the command on each control-plane host. The hosts do not depend on each
+other, so the order does not matter. `bedrock backup decrypt` and the
+automatic restore try the host key first, and then the retired keys.
+
+The agent deletes a retired key when no archive in
+`/var/lib/bedrock/backups` has a stamp at or before the stamp of the retired
+key, and the key is older than one day. The wait of one day covers an archive
+that the agent is making when you rotate. If you copied archives off the host, keep the retired key for as long as
+you keep those copies.
 
 ### Set the admin recipients
 
@@ -567,7 +717,8 @@ Use `bedrock backup decrypt`:
 bedrock backup decrypt --in <archive> --out <file|-> [--identity <key file>]
 ```
 
-The default identity is the host key. To use an admin key, add `--identity`:
+The default identities are the host key and the retired host keys. To use an
+admin key, add `--identity`. The command then uses only that file:
 
 ```
 bedrock backup decrypt --identity admin.key \
@@ -624,7 +775,7 @@ archive and its sealed copy count as one archive.
 - A backup is crash-consistent.
 - A restore cannot rename a VM.
 - A schedule fires at most once per hour.
-- Etcd snapshots stay on the host.
+- Etcd snapshots stay on the host unless `backup.target` is set.
 - Without an admin recipient, only the host that wrote an archive can open
   it.
 - A change of the admin recipients does not change archives that exist.

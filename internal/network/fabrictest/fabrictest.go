@@ -42,6 +42,16 @@ func MarkVpcStandby(ctx context.Context, c client.Client, name string) error {
 	})
 }
 
+func MarkVpcPeered(ctx context.Context, c client.Client, name string, remotes ...string) error {
+	return updateStatus(ctx, c, fabric.VpcGVK, name, func(status, _ map[string]any) {
+		peered, _ := status["vpcPeerings"].([]any)
+		for _, remote := range remotes {
+			peered = append(peered, remote)
+		}
+		status["vpcPeerings"] = peered
+	})
+}
+
 func MarkSubnetReady(ctx context.Context, c client.Client, name string) error {
 	return updateStatus(ctx, c, fabric.SubnetGVK, name, func(status, _ map[string]any) {
 		status["conditions"] = readyCondition()
@@ -51,6 +61,13 @@ func MarkSubnetReady(ctx context.Context, c client.Client, name string) error {
 func SetSubnetUsedAddresses(ctx context.Context, c client.Client, name string, used int64) error {
 	return updateStatus(ctx, c, fabric.SubnetGVK, name, func(status, _ map[string]any) {
 		status["v4usingIPs"] = used
+	})
+}
+
+func SetSubnetCapacity(ctx context.Context, c client.Client, name string, using, available int64) error {
+	return updateStatus(ctx, c, fabric.SubnetGVK, name, func(status, _ map[string]any) {
+		status["v4usingIPs"] = using
+		status["v4availableIPs"] = available
 	})
 }
 
@@ -73,7 +90,7 @@ func MarkVipAllocated(ctx context.Context, c client.Client, name, address string
 	if err := c.Get(ctx, client.ObjectKey{Name: name}, u); err != nil {
 		return err
 	}
-	u.Object["status"] = map[string]any{"v4ip": address, "type": "switch_lb_vip"}
+	u.Object["status"] = map[string]any{"v4ip": address}
 	return c.Update(ctx, u)
 }
 
@@ -85,6 +102,12 @@ func MarkSwitchLBRuleProgrammed(ctx context.Context, c client.Client, name, serv
 
 func MarkFipReady(ctx context.Context, c client.Client, name string) error {
 	return updateStatus(ctx, c, fabric.OvnFipGVK, name, func(status, _ map[string]any) {
+		status["ready"] = true
+	})
+}
+
+func MarkSnatRuleReady(ctx context.Context, c client.Client, name string) error {
+	return updateStatus(ctx, c, fabric.OvnSnatRuleGVK, name, func(status, _ map[string]any) {
 		status["ready"] = true
 	})
 }

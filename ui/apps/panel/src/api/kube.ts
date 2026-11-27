@@ -1,4 +1,5 @@
 import type { Http } from "./http";
+import { desiredFields, trackWrite } from "./pendingWrites";
 import type { Condition, KubeList, KubeObject } from "./types";
 
 export interface ResourceRef {
@@ -67,17 +68,25 @@ export function kubeClient(http: Http): KubeClient {
     list: (ref, scope, signal) =>
       http.request("GET", resourcePath(ref, scope.namespace === undefined ? {} : { namespace: scope.namespace }, selectorQuery(scope)), signal ? { signal } : {}),
     get: (ref, namespace, name) => http.request("GET", resourcePath(ref, withName(namespace, name))),
-    create: (ref, namespace, object) =>
-      http.request("POST", resourcePath(ref, namespace === undefined ? {} : { namespace }, { fieldManager }), { body: object }),
-    replace: (ref, object) =>
-      http.request("PUT", resourcePath(ref, withName(object.metadata.namespace, object.metadata.name), { fieldManager }), { body: object }),
-    mergePatch: (ref, namespace, name, patch) =>
-      http.request("PATCH", resourcePath(ref, withName(namespace, name), { fieldManager }), { body: patch, contentType: merge }),
-    remove: (ref, namespace, name) => http.request("DELETE", resourcePath(ref, withName(namespace, name), { propagationPolicy: "Foreground" })),
-    postSubresource: async (ref, namespace, name, action) => {
+    create: (ref, namespace, object) => trackWrite(http, { kind: "create", ref, namespace, name: object.metadata.name }, () =>
+      http.request("POST", resourcePath(ref, namespace === undefined ? {} : { namespace }, { fieldManager }), { body: object })),
+    replace: (ref, object) => {
+      const { namespace, name, uid } = object.metadata;
+      const desired = desiredFields(ref, object.spec);
+      return trackWrite(http, { kind: "update", ref, namespace, name, ...(uid ? { uid } : {}), ...(desired ? { desired } : {}) }, () =>
+        http.request("PUT", resourcePath(ref, withName(namespace, name), { fieldManager }), { body: object }));
+    },
+    mergePatch: (ref, namespace, name, patch) => {
+      const desired = desiredFields(ref, typeof patch === "object" && patch !== null && "spec" in patch ? patch.spec : undefined);
+      return trackWrite(http, { kind: "update", ref, namespace, name, ...(desired ? { desired } : {}) }, () =>
+        http.request("PATCH", resourcePath(ref, withName(namespace, name), { fieldManager }), { body: patch, contentType: merge }));
+    },
+    remove: (ref, namespace, name) => trackWrite(http, { kind: "delete", ref, namespace, name }, () =>
+      http.request("DELETE", resourcePath(ref, withName(namespace, name), { propagationPolicy: "Foreground" }))),
+    postSubresource: (ref, namespace, name, action) => trackWrite(http, { kind: "action", ref, namespace, name, action }, async () => {
       const answer = await http.request<{ message?: string } | undefined>("POST", resourcePath(ref, { ...withName(namespace, name), subresource: action }), { body: {} });
       return answer?.message;
-    },
+    }),
   };
 }
 

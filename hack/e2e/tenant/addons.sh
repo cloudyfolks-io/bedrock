@@ -55,6 +55,7 @@ addons_loki_on() {
   kubectl -n monitoring rollout status statefulset/loki --timeout=300s
   kubectl -n monitoring rollout status daemonset/alloy --timeout=300s
   retry_until 180 loki_has_lines '{namespace="kube-system"}'
+  expect_equal 0 "$(loki_lines '{namespace="kube-system", tenant!=""}')" "kube-system lines under a tenant label"
   retry_until 180 loki_has_lines '{job="journald", unit="k0scontroller.service"}'
 }
 

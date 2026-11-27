@@ -14,6 +14,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	"github.com/cloudyfolks-io/bedrock/api/v1alpha1"
+	"github.com/cloudyfolks-io/bedrock/internal/network"
 )
 
 const (
@@ -27,6 +28,7 @@ type observation struct {
 	Addresses  []v1alpha1.VMAddress
 	ElasticIP  string
 	GuestAgent *v1alpha1.VMGuestAgent
+	Migration  *v1alpha1.VMMigration
 	KubeVirt   ObservedVM
 }
 
@@ -47,8 +49,8 @@ func Refs(vm v1alpha1.VirtualMachine) []string {
 	for _, key := range vm.Spec.SSHKeys {
 		keys = append(keys, "sshkey/"+key)
 	}
-	for _, disk := range vm.Spec.Disks {
-		keys = append(keys, "volume/"+disk.VolumeRef)
+	for _, volume := range v1alpha1.VolumeRefs(vm) {
+		keys = append(keys, "volume/"+volume)
 	}
 	sort.Strings(keys)
 	return slices.Compact(keys)
@@ -157,6 +159,13 @@ func (r *VirtualMachineReconciler) observe(ctx context.Context, vm v1alpha1.Virt
 	}
 	obs.ElasticIP = elasticIPFor(ips.Items, vm.Name)
 	obs.GuestAgent = r.guestAgent(ctx, vm, obs.KubeVirt.VMIConditions)
+
+	migrations := &unstructured.UnstructuredList{}
+	migrations.SetGroupVersionKind(kubeVirtMigrationGVK.GroupVersion().WithKind("VirtualMachineInstanceMigrationList"))
+	if err := r.Client.List(ctx, migrations, client.InNamespace(vm.Namespace)); err != nil && !notFound(err) {
+		return obs, err
+	}
+	obs.Migration = LatestMigration(vm, migrations.Items)
 	return obs, nil
 }
 
@@ -195,12 +204,16 @@ func (r *VirtualMachineReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	if err := mgr.GetFieldIndexer().IndexField(context.Background(), &v1alpha1.VirtualMachine{}, refsIndex, indexer); err != nil {
 		return err
 	}
+	if err := network.IndexFabricIPs(context.Background(), mgr.GetFieldIndexer()); err != nil {
+		return err
+	}
 	return ctrl.NewControllerManagedBy(mgr).
 		Named("compute-virtualmachine").
 		For(&v1alpha1.VirtualMachine{}).
 		Owns(emptyOf(kubeVirtVMGVK)).
 		Owns(emptyOf(dataVolumeGVK)).
 		Watches(emptyOf(kubeVirtVMIGVK), handler.EnqueueRequestsFromMapFunc(sameName)).
+		Watches(emptyOf(kubeVirtMigrationGVK), handler.EnqueueRequestsFromMapFunc(migrationOwner)).
 		Watches(&corev1.Pod{}, handler.EnqueueRequestsFromMapFunc(launcherOwner)).
 		Watches(&v1alpha1.Subnet{}, handler.EnqueueRequestsFromMapFunc(r.referrers("subnet/"))).
 		Watches(&v1alpha1.SecurityGroup{}, handler.EnqueueRequestsFromMapFunc(r.referrers("securitygroup/"))).
@@ -209,6 +222,7 @@ func (r *VirtualMachineReconciler) SetupWithManager(mgr ctrl.Manager) error {
 		Watches(&v1alpha1.Image{}, handler.EnqueueRequestsFromMapFunc(r.referrers("image/project/"))).
 		Watches(&v1alpha1.ClusterImage{}, handler.EnqueueRequestsFromMapFunc(r.referrers("image/cluster/"))).
 		Watches(&v1alpha1.ElasticIP{}, handler.EnqueueRequestsFromMapFunc(targetedVM)).
+		Watches(&v1alpha1.Setting{}, handler.EnqueueRequestsFromMapFunc(r.affectedBySetting)).
 		Complete(r)
 }
 

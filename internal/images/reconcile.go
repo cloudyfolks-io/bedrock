@@ -65,16 +65,22 @@ func tenantOf(ns corev1.Namespace) (tenant, project string) {
 }
 
 func writeStatus[T client.Object](ctx context.Context, c client.Client, obj T, statusOf func(T) *v1alpha1.ImageStatus, result Result, now time.Time) error {
+	key := client.ObjectKeyFromObject(obj)
+	uid, generation := obj.GetUID(), obj.GetGeneration()
 	return retry.RetryOnConflict(retry.DefaultRetry, func() error {
-		if err := c.Get(ctx, client.ObjectKeyFromObject(obj), obj); err != nil {
+		current := obj.DeepCopyObject().(T)
+		if err := c.Get(ctx, key, current); err != nil {
 			return client.IgnoreNotFound(err)
 		}
-		status := statusOf(obj)
-		next := BuildStatus(*status, obj.GetGeneration(), result, metav1.NewTime(now))
+		if current.GetUID() != uid || current.GetGeneration() != generation || !current.GetDeletionTimestamp().IsZero() {
+			return nil
+		}
+		status := statusOf(current)
+		next := BuildStatus(*status, generation, result, metav1.NewTime(now))
 		if equality.Semantic.DeepEqual(*status, next) {
 			return nil
 		}
 		*status = next
-		return c.Status().Update(ctx, obj, client.FieldOwner(v1alpha1.ImagesFieldManager))
+		return c.Status().Update(ctx, current, client.FieldOwner(v1alpha1.ImagesFieldManager))
 	})
 }

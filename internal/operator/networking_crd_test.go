@@ -92,6 +92,42 @@ func TestElasticIPAndLoadBalancerValidation(t *testing.T) {
 	createInvalid(t, c, &v1alpha1.LoadBalancer{ObjectMeta: metav1.ObjectMeta{Name: "no-listeners", Namespace: "default"}}, "spec.listeners")
 }
 
+func TestInternetGatewayValidation(t *testing.T) {
+	c, _ := StartTestEnv(t)
+	ctx := context.Background()
+
+	viaGateway := &v1alpha1.ElasticIP{
+		ObjectMeta: metav1.ObjectMeta{Name: "egress", Namespace: "default"},
+		Spec:       v1alpha1.ElasticIPSpec{ProviderNetwork: "public", Target: &v1alpha1.ElasticIPTarget{Kind: v1alpha1.ElasticIPTargetInternetGateway, Name: "gw"}},
+	}
+	createValid(t, c, viaGateway)
+	badSubnetRef := &v1alpha1.ElasticIP{ObjectMeta: metav1.ObjectMeta{Name: "bad-subnet-ref", Namespace: "default"}, Spec: v1alpha1.ElasticIPSpec{ProviderNetwork: "public", Target: &v1alpha1.ElasticIPTarget{Kind: v1alpha1.ElasticIPTargetInternetGateway, Name: "gw", SubnetRef: "default"}}}
+	createInvalid(t, c, badSubnetRef, "subnetRef selects a VirtualMachine interface")
+
+	gateway := &v1alpha1.InternetGateway{
+		ObjectMeta: metav1.ObjectMeta{Name: "gw", Namespace: "default"},
+		Spec:       v1alpha1.InternetGatewaySpec{NetworkRef: "acme", ElasticIPRef: "egress"},
+	}
+	createValid(t, c, gateway)
+	if err := c.Status().Update(ctx, gateway); err != nil {
+		t.Fatalf("status must be writable through the status subresource: %v", err)
+	}
+	withSubnet := &v1alpha1.InternetGateway{
+		ObjectMeta: metav1.ObjectMeta{Name: "gw-subnet", Namespace: "default"},
+		Spec:       v1alpha1.InternetGatewaySpec{NetworkRef: "acme", ElasticIPRef: "egress", SubnetRef: "default"},
+	}
+	createValid(t, c, withSubnet)
+
+	createInvalid(t, c, &v1alpha1.InternetGateway{ObjectMeta: metav1.ObjectMeta{Name: "no-eip", Namespace: "default"}, Spec: v1alpha1.InternetGatewaySpec{NetworkRef: "acme"}}, "spec.elasticIPRef")
+	createInvalid(t, c, &v1alpha1.InternetGateway{ObjectMeta: metav1.ObjectMeta{Name: "no-network", Namespace: "default"}, Spec: v1alpha1.InternetGatewaySpec{ElasticIPRef: "egress"}}, "spec.networkRef")
+
+	if err := c.Get(ctx, client.ObjectKeyFromObject(gateway), gateway); err != nil {
+		t.Fatal(err)
+	}
+	gateway.Spec.NetworkRef = "other"
+	updateInvalid(t, c, gateway, "networkRef is immutable")
+}
+
 func TestDNSZoneAndSecurityGroupValidation(t *testing.T) {
 	c, _ := StartTestEnv(t)
 

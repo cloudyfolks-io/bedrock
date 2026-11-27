@@ -1,0 +1,2 @@
+SET SESSION max_execution_time = 30000;
+SELECT DISTINCT user FROM mysql.db WHERE db = 'a_b' AND host = '%';

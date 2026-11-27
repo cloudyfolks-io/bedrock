@@ -1,6 +1,12 @@
 deployment:
-  replicas: 1
+  kind: DaemonSet
+nodeSelector:
+  bedrock.cloudyfolks.io/role-control-plane: "true"
+tolerations:
+  - operator: Exists
 service:
+  spec:
+    externalTrafficPolicy: Local
   annotations:
     kube-vip.io/loadbalancerIPs: "${BEDROCK_VIP}"
 ports:
@@ -16,10 +22,33 @@ ports:
           scheme: https
           permanent: true
 providers:
+  kubernetesCRD:
+    namespaces:
+      - traefik
+      - bedrock-system
+      - bedrock-registry
+      - cdi
+      - rook-ceph
   kubernetesIngress:
+    namespaces:
+      - traefik
+      - bedrock-system
+      - bedrock-registry
+      - cdi
+      - rook-ceph
     publishedService:
       enabled: true
 tlsStore:
   default:
     defaultCertificate:
       secretName: platform-tls
+tlsOptions:
+  default:
+    minVersion: VersionTLS12
+    cipherSuites:
+      - TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256
+      - TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256
+      - TLS_ECDHE_ECDSA_WITH_AES_256_GCM_SHA384
+      - TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384
+      - TLS_ECDHE_ECDSA_WITH_CHACHA20_POLY1305_SHA256
+      - TLS_ECDHE_RSA_WITH_CHACHA20_POLY1305_SHA256

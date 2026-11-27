@@ -2,6 +2,7 @@ import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 import { checkBundle } from "../scripts/checkSize";
+import { externalizeBootstrap } from "../scripts/exportPanel";
 
 function repoFile(path: string): string {
   return readFileSync(resolve(import.meta.dirname, "../../../..", path), "utf8");
@@ -35,12 +36,21 @@ describe("scaffold", () => {
   });
 
   it("TestPanelBuildsIntoTheProxyEmbedDirectory", () => {
-    const vite = repoFile("ui/apps/panel/vite.config.ts");
-    expect(vite).toContain('outDir: "../../../internal/proxy/ui/dist"');
-    expect(vite).toContain("emptyOutDir: true");
+    expect(repoFile("ui/apps/panel/next.config.mjs")).toContain('output: "export"');
+    expect(repoFile("ui/apps/panel/scripts/exportPanel.ts")).toContain("../../../../internal/proxy/ui/dist");
     const ignore = repoFile(".gitignore");
     expect(ignore).toContain("/internal/proxy/ui/dist/*");
     expect(ignore).toContain("!/internal/proxy/ui/dist/.keep");
+  });
+
+  it("keeps the ordered bootstrap CSP-compatible without changing other scripts", () => {
+    const scripts = new Map<string, string>();
+    const html = externalizeBootstrap('<script src="/keep.js" async=""></script><script>self.queue=[1]</script><script>self.queue.push(2)</script>',
+      (name, body) => scripts.set(name, body));
+    expect([...scripts.values()]).toEqual(["self.queue=[1]", "self.queue.push(2)"]);
+    expect(html).toBe('<script src="/keep.js" async=""></script>' +
+      [...scripts.keys()].map((name) => `<script src="/${name}"></script>`).join(""));
+    expect(() => externalizeBootstrap('<script nonce="unknown">doSomething()</script>', () => undefined)).toThrow();
   });
 });
 

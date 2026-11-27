@@ -1,13 +1,13 @@
 import { lazy, type ReactElement } from "react";
-import { Navigate, Outlet, Route, Routes, useParams } from "react-router";
+import { createRoutesFromElements, Navigate, Outlet, Route, useParams, useRoutes } from "react-router";
 import { useLingui } from "@lingui/react/macro";
 import { useProjects } from "../api/projects";
+import { useSession } from "../api/session";
 import { EmptyState } from "../components/EmptyState";
+import { QueryFailure } from "../components/QueryFailure";
 import { Spinner } from "../components/Spinner";
 import { AccountPage } from "../pages/AccountPage";
 import { NotFoundPage } from "../pages/NotFoundPage";
-import { ResourceDetailPage } from "../resources/ResourceDetailPage";
-import { ResourceListPage } from "../resources/ResourceListPage";
 import { primaryDefinitionsFor, type ResourceDef } from "../resources/registry";
 import { readStored, writeStored } from "../storage";
 import { useEffect } from "react";
@@ -15,6 +15,10 @@ import { AdminOnly } from "./context";
 import { Shell } from "./Shell";
 
 const HostsPage = lazy(() => import("../pages/admin/HostsPage"));
+const InventoryPage = lazy(() => import("../pages/admin/InventoryPage"));
+const OverviewPage = lazy(() => import("../pages/admin/OverviewPage"));
+const ResourceDetailPage = lazy(() => import("../resources/ResourceDetailPage").then((page) => ({ default: page.ResourceDetailPage })));
+const ResourceListPage = lazy(() => import("../resources/ResourceListPage").then((page) => ({ default: page.ResourceListPage })));
 const HostDetailPage = lazy(() => import("../pages/admin/HostDetailPage"));
 const UpgradesPage = lazy(() => import("../pages/admin/UpgradesPage"));
 const AddonsPage = lazy(() => import("../pages/admin/AddonsPage"));
@@ -28,6 +32,8 @@ const BackupsPage = lazy(() => import("../pages/project/BackupsPage"));
 const NetworksPage = lazy(() => import("../pages/project/NetworksPage"));
 const ElasticIpsPage = lazy(() => import("../pages/project/ElasticIpsPage"));
 const ObjectUsersPage = lazy(() => import("../pages/project/ObjectUsersPage"));
+const RegistryCredentialsPage = lazy(() => import("../pages/project/RegistryCredentialsPage"));
+const RegistryCredentialDetailPage = lazy(() => import("../pages/project/RegistryCredentialsPage").then((page) => ({ default: page.RegistryCredentialDetailPage })));
 const SecurityGroupDetailPage = lazy(() => import("../pages/project/SecurityGroupDetailPage"));
 const VmWizard = lazy(() => import("../wizard/VmWizard"));
 const IsoWizard = lazy(() => import("../wizard/IsoWizard"));
@@ -49,6 +55,7 @@ const listPages: Record<string, (def: ResourceDef) => ReactElement> = {
   "project/load-balancers": () => <LoadBalancersPage />,
   "project/elastic-ips": () => <ElasticIpsPage />,
   "project/object-users": () => <ObjectUsersPage />,
+  "project/registry-credentials": () => <RegistryCredentialsPage />,
 };
 
 const detailPages: Record<string, (def: ResourceDef) => ReactElement> = {
@@ -57,6 +64,7 @@ const detailPages: Record<string, (def: ResourceDef) => ReactElement> = {
   "project/vms": () => <VmDetailPage />,
   "project/security-groups": () => <SecurityGroupDetailPage />,
   "project/volumes": () => <VolumeDetailPage />,
+  "project/registry-credentials": () => <RegistryCredentialDetailPage />,
 };
 
 function listPage(def: ResourceDef): ReactElement {
@@ -68,7 +76,9 @@ function detailPage(def: ResourceDef): ReactElement {
 }
 
 function HomeRedirect() {
-  return <Navigate to={readStored("perspective") === "admin" ? "/admin" : "/p"} replace />;
+  const admin = useSession().data?.admin === true;
+  const preference = readStored("perspective");
+  return <Navigate to={admin && preference !== "project" ? "/admin" : "/p"} replace />;
 }
 
 function ProjectIndex() {
@@ -76,6 +86,9 @@ function ProjectIndex() {
   const projects = useProjects();
   if (projects.isPending) {
     return <Spinner />;
+  }
+  if (projects.isError) {
+    return <QueryFailure error={projects.error} retry={() => void projects.refetch()} />;
   }
   const list = projects.data ?? [];
   const stored = readStored("project");
@@ -94,52 +107,62 @@ function ProjectIndex() {
 function ProjectScope() {
   const { project = "" } = useParams();
   const projects = useProjects();
-  const known = projects.data?.some((candidate) => candidate.name === project) === true;
+  const selected = projects.isSuccess ? projects.data.find((candidate) => candidate.name === project) : undefined;
   useEffect(() => {
-    if (known) {
+    if (selected?.namespace) {
       writeStored("project", project);
     }
-  }, [known, project]);
+  }, [selected?.namespace, project]);
   if (projects.isPending) {
     return <Spinner />;
   }
-  return known ? <Outlet /> : <NotFoundPage />;
+  if (projects.isError) {
+    return <QueryFailure error={projects.error} retry={() => void projects.refetch()} />;
+  }
+  return selected?.namespace ? <Outlet /> : selected ? <ProjectPending /> : <NotFoundPage />;
 }
 
-export function AppRoutes() {
-  return (
-    <Routes>
-      <Route element={<Shell />}>
-        <Route index element={<HomeRedirect />} />
-        <Route
-          path="admin"
-          element={
-            <AdminOnly>
-              <Outlet />
-            </AdminOnly>
-          }
-        >
-          <Route index element={<Navigate to="/admin/hosts" replace />} />
-          {primaryDefinitionsFor("admin").flatMap((def) => [
-            <Route key={def.path} path={def.path} element={listPage(def)} />,
-            <Route key={`${def.path}/:name`} path={`${def.path}/:name`} element={detailPage(def)} />,
-          ])}
-        </Route>
-        <Route path="p">
-          <Route index element={<ProjectIndex />} />
-          <Route path=":project" element={<ProjectScope />}>
-            <Route index element={<Navigate to="vms" replace />} />
-            <Route path="vms/new" element={<VmWizard />} />
-            <Route path="vms/new-iso" element={<IsoWizard />} />
-            {primaryDefinitionsFor("project").flatMap((def) => [
-              <Route key={def.path} path={def.path} element={listPage(def)} />,
-              <Route key={`${def.path}/:name`} path={`${def.path}/:name`} element={detailPage(def)} />,
-            ])}
-          </Route>
-        </Route>
-        <Route path="account" element={<AccountPage />} />
-        <Route path="*" element={<NotFoundPage />} />
+function ProjectPending() {
+  const { t } = useLingui();
+  return <EmptyState title={t({ id: "inventory.projectPending", message: "The project namespace is not ready" })} />;
+}
+
+export const panelRoutes = createRoutesFromElements(
+  <Route element={<Shell />}>
+    <Route index element={<HomeRedirect />} />
+    <Route
+      path="admin"
+      element={
+        <AdminOnly>
+          <Outlet />
+        </AdminOnly>
+      }
+    >
+      <Route index element={<Navigate to="overview" replace />} />
+      <Route path="overview" element={<OverviewPage />} />
+      <Route path="inventory" element={<InventoryPage />} />
+      {primaryDefinitionsFor("admin").flatMap((def) => [
+        <Route key={def.path} path={def.path} element={listPage(def)} />,
+        <Route key={`${def.path}/:name`} path={`${def.path}/:name`} element={detailPage(def)} />,
+      ])}
+    </Route>
+    <Route path="p">
+      <Route index element={<ProjectIndex />} />
+      <Route path=":project" element={<ProjectScope />}>
+        <Route index element={<Navigate to="vms" replace />} />
+        <Route path="vms/new" element={<VmWizard />} />
+        <Route path="vms/new-iso" element={<IsoWizard />} />
+        {primaryDefinitionsFor("project").flatMap((def) => [
+          <Route key={def.path} path={def.path} element={listPage(def)} />,
+          <Route key={`${def.path}/:name`} path={`${def.path}/:name`} element={detailPage(def)} />,
+        ])}
       </Route>
-    </Routes>
-  );
+    </Route>
+    <Route path="account" element={<AccountPage />} />
+    <Route path="*" element={<NotFoundPage />} />
+  </Route>,
+);
+
+export function AppRoutes() {
+  return useRoutes(panelRoutes);
 }

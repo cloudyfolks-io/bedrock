@@ -77,6 +77,33 @@ func TestVirtualMachineValidation(t *testing.T) {
 	createInvalid(t, c, noRootDisk, "rootDisk.sizeGi")
 }
 
+func TestVirtualMachineRootDiskSerial(t *testing.T) {
+	c, _ := StartTestEnv(t)
+	ctx := context.Background()
+
+	badSerial := validVirtualMachine("bad-root-serial")
+	badSerial.Spec.RootDisk.Serial = "bad serial"
+	createInvalid(t, c, badSerial, "serial")
+
+	longSerial := validVirtualMachine("long-root-serial")
+	longSerial.Spec.RootDisk.Serial = "abcdefghijklmnopqrstuvwxyzabcdefghijk"
+	createInvalid(t, c, longSerial, "serial")
+
+	vm := validVirtualMachine("root-serial")
+	vm.Spec.RootDisk.Serial = "WIN-ROOT-0001"
+	if err := c.Create(ctx, vm); err != nil {
+		t.Fatal(err)
+	}
+	vm.Spec.RootDisk.SizeGi = 50
+	if err := c.Update(ctx, vm); err != nil {
+		t.Fatalf("the root disk must grow with its serial kept: %v", err)
+	}
+	vm.Spec.RootDisk.Serial = "OTHER"
+	updateInvalid(t, c, vm, "rootDisk.serial is immutable")
+	vm.Spec.RootDisk.Serial = ""
+	updateInvalid(t, c, vm, "rootDisk.serial is immutable")
+}
+
 func TestVolumeKindsValidation(t *testing.T) {
 	c, _ := StartTestEnv(t)
 	ctx := context.Background()

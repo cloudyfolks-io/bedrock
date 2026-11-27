@@ -14,12 +14,30 @@ export function listenersOf(object: KubeObject): string {
   return (listAt(object, "spec.listeners") as Listener[]).map(listenerSummary).join(", ");
 }
 
+export function shortImageDigest(image: string): string {
+  return image.replace(/(@sha256:[\da-f]{12})[\da-f]{52}$/i, "$1…");
+}
+
+export function loadBalancerElasticIPOptions(items: readonly KubeObject[], name: string, current: string): string[] {
+  const compatible = items.filter((item) => !item.metadata.deletionTimestamp && (
+    item.spec?.target == null ||
+    (name !== "" && textAt(item, "spec.target.kind") === "LoadBalancer" && textAt(item, "spec.target.name") === name)
+  ));
+  // Keep the saved reference even when it is missing, unreadable or no longer compatible.
+  return [...new Set(["", ...compatible.map((item) => item.metadata.name), current])];
+}
+
 export function ownerCount(object: KubeObject): number {
   return listAt(object, "spec.owners").length;
 }
 
 export function memberCount(object: KubeObject): number {
   return listAt(object, "spec.members").length;
+}
+
+export function networkCidrs(object: KubeObject): string {
+  const cidrs = listAt(object, "spec.cidrs");
+  return cidrs.length > 0 ? cidrs.join(", ") : textAt(object, "spec.cidr");
 }
 
 export function osSummary(object: KubeObject): string {
@@ -55,7 +73,7 @@ export function cidrSummary(cidr: string): string {
   return host > 30 ? `${cidr} (2^${host} addresses)` : `${cidr} (${2 ** host} addresses)`;
 }
 
-interface Rule {
+export interface SecurityGroupRule {
   protocol?: string;
   port?: number;
   endPort?: number;
@@ -63,13 +81,11 @@ interface Rule {
   securityGroupRef?: string;
 }
 
-export function ruleSummary(rule: Rule): string {
-  const ports = rule.port === undefined ? "" : rule.endPort === undefined ? ` ${rule.port}` : ` ${rule.port}-${rule.endPort}`;
-  const source = rule.cidr ? ` from ${rule.cidr}` : rule.securityGroupRef ? ` from group ${rule.securityGroupRef}` : "";
-  return `${rule.protocol ?? "all"}${ports}${source}`;
+export function rulePorts(rule: SecurityGroupRule): string {
+  return rule.port === undefined ? "—" : rule.endPort === undefined ? String(rule.port) : `${rule.port}-${rule.endPort}`;
 }
 
-export function exposesSsh(rule: Rule): boolean {
+export function exposesSsh(rule: SecurityGroupRule): boolean {
   const open = rule.cidr === "0.0.0.0/0" || rule.cidr === "::/0";
   const protocolHasPorts = rule.protocol === "tcp" || rule.protocol === "all" || rule.protocol === undefined;
   const covers = rule.port === undefined ? true : rule.port <= 22 && (rule.endPort ?? rule.port) >= 22;

@@ -1,0 +1,64 @@
+{
+  "apiVersion": "bedrock.cloudyfolks.io/v1alpha1",
+  "kind": "DatabaseSchemaList",
+  "metadata": {
+    "resourceVersion": "100"
+  },
+  "items": [
+    {
+      "apiVersion": "bedrock.cloudyfolks.io/v1alpha1",
+      "kind": "DatabaseSchema",
+      "metadata": {
+        "name": "shop",
+        "uid": "uid-dbschema-shop",
+        "resourceVersion": "100",
+        "creationTimestamp": "2026-10-03T09:00:00Z",
+        "namespace": "acme-web"
+      },
+      "spec": {
+        "databaseRef": "orders",
+        "deletionPolicy": "Retain"
+      },
+      "status": {
+        "name": "shop",
+        "conditions": [
+          {
+            "type": "Ready",
+            "status": "True",
+            "reason": "Ready",
+            "message": "the engine matches the object",
+            "lastTransitionTime": "2026-10-03T09:01:00Z"
+          }
+        ]
+      }
+    },
+    {
+      "apiVersion": "bedrock.cloudyfolks.io/v1alpha1",
+      "kind": "DatabaseSchema",
+      "metadata": {
+        "name": "scratch",
+        "uid": "uid-dbschema-scratch",
+        "resourceVersion": "101",
+        "creationTimestamp": "2026-10-05T09:00:00Z",
+        "namespace": "acme-web"
+      },
+      "spec": {
+        "databaseRef": "orders",
+        "name": "scratch_data",
+        "deletionPolicy": "Delete"
+      },
+      "status": {
+        "name": "scratch_data",
+        "conditions": [
+          {
+            "type": "Ready",
+            "status": "True",
+            "reason": "Ready",
+            "message": "the engine matches the object",
+            "lastTransitionTime": "2026-10-05T09:01:00Z"
+          }
+        ]
+      }
+    }
+  ]
+}

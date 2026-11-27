@@ -1,0 +1,159 @@
+{
+  "apiVersion": "bedrock.cloudyfolks.io/v1alpha1",
+  "kind": "BuildList",
+  "metadata": {
+    "resourceVersion": "100"
+  },
+  "items": [
+    {
+      "apiVersion": "bedrock.cloudyfolks.io/v1alpha1",
+      "kind": "Build",
+      "metadata": {
+        "name": "shop-1",
+        "uid": "uid-build-shop-1",
+        "resourceVersion": "100",
+        "creationTimestamp": "2026-10-01T10:00:00Z",
+        "namespace": "acme-web"
+      },
+      "spec": {
+        "type": "dockerfile",
+        "source": {
+          "git": {
+            "url": "https://git.example.test/acme/shop.git",
+            "revision": "0123456789abcdef0123456789abcdef01234567",
+            "secretRef": "git-credentials"
+          }
+        },
+        "contextPath": ".",
+        "dockerfilePath": "Dockerfile",
+        "output": {
+          "image": "registry.example.test/acme/shop:1",
+          "pushSecretRef": "registry-credentials"
+        },
+        "cache": {
+          "enabled": true
+        },
+        "size": "m",
+        "network": {
+          "subnetRef": "default"
+        }
+      },
+      "status": {
+        "phase": "Succeeded",
+        "reason": "Succeeded",
+        "jobName": "shop-1",
+        "startedAt": "2026-10-01T10:00:05Z",
+        "conditions": [
+          {
+            "type": "Ready",
+            "status": "True",
+            "reason": "Succeeded",
+            "message": "the build succeeded",
+            "lastTransitionTime": "2026-10-01T10:00:05Z"
+          }
+        ],
+        "finishedAt": "2026-10-01T10:04:00Z",
+        "image": "registry.example.test/acme/shop:1"
+      }
+    },
+    {
+      "apiVersion": "bedrock.cloudyfolks.io/v1alpha1",
+      "kind": "Build",
+      "metadata": {
+        "name": "shop-2",
+        "uid": "uid-build-shop-2",
+        "resourceVersion": "100",
+        "creationTimestamp": "2026-10-02T10:00:00Z",
+        "namespace": "acme-web"
+      },
+      "spec": {
+        "type": "buildpacks",
+        "source": {
+          "git": {
+            "url": "https://git.example.test/acme/shop.git",
+            "revision": "0123456789abcdef0123456789abcdef01234567",
+            "secretRef": "git-credentials"
+          }
+        },
+        "contextPath": ".",
+        "dockerfilePath": "Dockerfile",
+        "output": {
+          "image": "registry.example.test/acme/shop:2",
+          "pushSecretRef": "registry-credentials"
+        },
+        "cache": {
+          "enabled": true
+        },
+        "size": "m",
+        "network": {
+          "subnetRef": "default"
+        }
+      },
+      "status": {
+        "phase": "Running",
+        "reason": "Running",
+        "jobName": "shop-2",
+        "startedAt": "2026-10-02T10:00:05Z",
+        "conditions": [
+          {
+            "type": "Ready",
+            "status": "False",
+            "reason": "Running",
+            "message": "the build running",
+            "lastTransitionTime": "2026-10-02T10:00:05Z"
+          }
+        ]
+      }
+    },
+    {
+      "apiVersion": "bedrock.cloudyfolks.io/v1alpha1",
+      "kind": "Build",
+      "metadata": {
+        "name": "shop-3",
+        "uid": "uid-build-shop-3",
+        "resourceVersion": "100",
+        "creationTimestamp": "2026-10-03T10:00:00Z",
+        "namespace": "acme-web"
+      },
+      "spec": {
+        "type": "dockerfile",
+        "source": {
+          "git": {
+            "url": "https://git.example.test/acme/shop.git",
+            "revision": "0123456789abcdef0123456789abcdef01234567",
+            "secretRef": "git-credentials"
+          }
+        },
+        "contextPath": ".",
+        "dockerfilePath": "Dockerfile",
+        "output": {
+          "image": "registry.example.test/acme/shop:3",
+          "pushSecretRef": "registry-credentials"
+        },
+        "cache": {
+          "enabled": true
+        },
+        "size": "m",
+        "network": {
+          "subnetRef": "default"
+        }
+      },
+      "status": {
+        "phase": "Failed",
+        "reason": "Timeout",
+        "jobName": "shop-3",
+        "startedAt": "2026-10-03T10:00:05Z",
+        "conditions": [
+          {
+            "type": "Ready",
+            "status": "False",
+            "reason": "Timeout",
+            "message": "the build failed",
+            "lastTransitionTime": "2026-10-03T10:00:05Z"
+          }
+        ],
+        "finishedAt": "2026-10-03T10:30:05Z"
+      }
+    }
+  ]
+}

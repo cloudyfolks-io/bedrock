@@ -1,0 +1,33 @@
+table inet bedrock_legs
+delete table inet bedrock_legs
+
+table inet bedrock_legs {
+  chain prerouting {
+    type filter hook prerouting priority dstnat - 10; policy accept;
+    iifname { "br-public.20", "br-public.30" } ct state new fib daddr type local meta l4proto { tcp, udp } th dport 30000-32767 counter drop
+  }
+
+  chain input {
+    type filter hook input priority filter - 10; policy accept;
+    iifname { "br-public.20", "br-public.30" } jump leg_input
+  }
+
+  chain forward {
+    type filter hook forward priority filter - 10; policy accept;
+    iifname { "br-public.20", "br-public.30" } jump leg_forward
+  }
+
+  chain leg_forward {
+    ct state established,related accept
+    ct status dnat accept
+    counter drop
+  }
+
+  chain leg_input {
+    ct state established,related accept
+    iifname "br-public.30" ip saddr { 100.65.0.1/32 } accept
+    icmp type { echo-request, destination-unreachable, time-exceeded } accept
+    icmpv6 type { nd-neighbor-solicit, nd-neighbor-advert, packet-too-big, destination-unreachable, time-exceeded } accept
+    counter drop
+  }
+}

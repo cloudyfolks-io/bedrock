@@ -1,0 +1,10 @@
+.tables :global(.br-td) :global(.br-ltr) {
+  white-space: nowrap;
+}
+
+.peer {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: .25rem .5rem;
+}

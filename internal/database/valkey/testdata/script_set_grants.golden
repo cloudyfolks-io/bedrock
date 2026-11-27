@@ -1,0 +1,3 @@
+ACL SETUSER alice resetkeys ~x* resetchannels &x* -@all +@read +@connection +exists +type +ttl +pttl +scan -@dangerous -@admin
+CLIENT KILL USER alice
+ACL SAVE

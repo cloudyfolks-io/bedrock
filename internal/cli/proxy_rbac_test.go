@@ -13,6 +13,8 @@ import (
 	"k8s.io/apimachinery/pkg/util/yaml"
 
 	"github.com/cloudyfolks-io/bedrock/internal/compute"
+	"github.com/cloudyfolks-io/bedrock/internal/container"
+	"github.com/cloudyfolks-io/bedrock/internal/database"
 	"github.com/cloudyfolks-io/bedrock/internal/images"
 )
 
@@ -57,6 +59,8 @@ func TestProxyBaseRoleGrantsExactlyTheNeededRules(t *testing.T) {
 		"bedrock.cloudyfolks.io|projects|list|",
 	}
 	want = append(want, ruleKeys(compute.ProxyRules())...)
+	want = append(want, ruleKeys(container.ProxyRules())...)
+	want = append(want, ruleKeys(database.ProxyRules())...)
 	want = append(want, ruleKeys(images.UploadHandlerRules())...)
 	for _, key := range got {
 		if !slices.Contains(want, key) {

@@ -16,7 +16,6 @@ import (
 	"k8s.io/client-go/rest"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
-	"sigs.k8s.io/controller-runtime/pkg/log/zap"
 
 	"github.com/cloudyfolks-io/bedrock/internal/operator"
 	"github.com/cloudyfolks-io/bedrock/internal/proxy"
@@ -49,7 +48,6 @@ func proxyCommand(args []string, stdout, stderr io.Writer) int {
 		fmt.Fprintln(stderr, proxyUsage)
 		return 2
 	}
-	ctrl.SetLogger(zap.New())
 	return RunProxyServe(ctrl.SetupSignalHandler(), args[1:], ProxyDeps{RestConfig: ctrl.GetConfig, Listen: net.Listen}, stdout, stderr)
 }
 

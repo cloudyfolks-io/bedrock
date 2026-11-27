@@ -58,7 +58,10 @@ func claimSourceSpec(namespace string, source ClaimSource) (map[string]any, erro
 func VolumePhaseOf(dataVolumePhase, attachedTo string, capacityGi, requestedGi int32) string {
 	switch dataVolumePhase {
 	case "Succeeded":
-		if capacityGi > 0 && capacityGi < requestedGi {
+		if capacityGi == 0 {
+			return v1alpha1.VolumePhasePending
+		}
+		if capacityGi < requestedGi {
 			return v1alpha1.VolumePhaseResizing
 		}
 		return usablePhase(attachedTo)

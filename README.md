@@ -11,6 +11,22 @@ Status: pre-release. Follow the milestones in the GitHub project.
     make build
     make test
 
+## Supported hosts
+
+The preflight of `bedrock init`, `bedrock join` and the adoption refuses a host with another operating system.
+The supported list is `supportedOS` in `release/components.yaml`:
+
+- Ubuntu 26.04, 24.04 and 22.04
+- Debian 13 and 12
+- Fedora 43 and 42
+- RHEL 10 and 9
+- CentOS Stream 10 and 9
+- SLES 16 and 15
+
+The host must not use swap. The preflight check `swap` fails when `/proc/swaps` lists a device.
+Run `swapoff` for each device that the message names, and remove its entry from `/etc/fstab`.
+Ubuntu hosts often have `/swap.img`: run `swapoff /swap.img`, then remove the line and the file.
+
 ## Platform domain
 
 `bedrock init` needs a platform domain in `cluster.yaml`:
@@ -46,8 +62,12 @@ Read `docs/authn.md` for users, groups, LDAP and OIDC, API tokens,
 - [Network](docs/network.md): Fabric networks, subnets, elastic IPs, load balancers, DNS zones and security groups.
 - [Backup](docs/backup.md): back up and restore VMs, etcd snapshots.
 - [Secrets at rest](docs/secrets-at-rest.md): Secret encryption, the key file and KMS v2.
+- [Storage keys](docs/storage.md): the cephx key type, its kernel rule and the rotation stages.
 - [Object storage](docs/object-storage.md): S3 users and buckets on the shared Ceph object store.
+- [Databases](docs/database.md): managed PostgreSQL with users, logical databases, backups and restore.
+- [Registry](docs/registry.md): Harbor registries and robot credentials.
 - [Proxy and panel API](docs/proxy.md): the edge service for the panel and the API.
 - [Panel](docs/panel.md): the web console.
 - [Addons, audit and monitoring](docs/addons.md): optional addons, audit log and metering.
+- [Maintenance](docs/maintenance.md): etcd defragmentation and runbooks for host work.
 - [End-to-end jobs](docs/e2e.md): how the e2e jobs run and what they prove.

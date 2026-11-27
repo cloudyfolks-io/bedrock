@@ -1,6 +1,7 @@
 package tenancy
 
 import (
+	"errors"
 	"reflect"
 	"slices"
 	"strings"
@@ -12,6 +13,7 @@ import (
 	"k8s.io/utils/ptr"
 
 	"github.com/cloudyfolks-io/bedrock/api/v1alpha1"
+	"github.com/cloudyfolks-io/bedrock/internal/network"
 )
 
 func acmeTenant(owners ...v1alpha1.SubjectRef) v1alpha1.Tenant {
@@ -47,14 +49,58 @@ func requireCondition(t *testing.T, conditions []metav1.Condition, conditionType
 }
 
 func TestDesiredNetwork(t *testing.T) {
-	got := DesiredNetwork(acmeTenant())
+	got := DesiredNetwork(acmeTenant(), nil)
 	if got.APIVersion != "bedrock.cloudyfolks.io/v1alpha1" || got.Kind != "Network" || got.Name != "acme" {
 		t.Fatalf("got %+v", got.ObjectMeta)
 	}
 	if !reflect.DeepEqual(got.Labels, v1alpha1.TenantLabels("Tenant", "acme", "acme", "")) {
 		t.Fatalf("labels = %v", got.Labels)
 	}
-	if got.Spec.TenantRef != "acme" || got.Spec.CIDR != "10.100.0.0/16" || got.Spec.EnableExternal || len(got.OwnerReferences) != 0 {
+	if got.Spec.TenantRef != "acme" || got.Spec.CIDR != "" || !slices.Equal(got.Spec.CIDRs, []string{"10.100.0.0/16"}) || !got.Spec.EnableExternal || len(got.OwnerReferences) != 0 {
+		t.Fatalf("got %+v", got)
+	}
+}
+
+func TestDesiredNetworkKeepsAnExistingNetworkUnrouted(t *testing.T) {
+	existing := v1alpha1.Network{ObjectMeta: metav1.ObjectMeta{Name: "acme"}, Spec: v1alpha1.NetworkSpec{TenantRef: "acme", CIDRs: []string{"10.100.0.0/16"}}}
+	if got := DesiredNetwork(acmeTenant(), &existing); got.Spec.EnableExternal {
+		t.Fatalf("an existing unrouted Network must stay unrouted: %+v", got.Spec)
+	}
+	oldCIDR := v1alpha1.Network{ObjectMeta: metav1.ObjectMeta{Name: "acme"}, Spec: v1alpha1.NetworkSpec{TenantRef: "acme", CIDR: "10.100.0.0/16"}}
+	if got := DesiredNetwork(acmeTenant(), &oldCIDR); got.Spec.EnableExternal {
+		t.Fatalf("an old Network must stay unrouted: %+v", got.Spec)
+	}
+}
+
+func TestDesiredNetworkKeepsAnExistingNetworkRouted(t *testing.T) {
+	existing := v1alpha1.Network{ObjectMeta: metav1.ObjectMeta{Name: "acme"}, Spec: v1alpha1.NetworkSpec{TenantRef: "acme", CIDRs: []string{"10.100.0.0/16"}, EnableExternal: true}}
+	if got := DesiredNetwork(acmeTenant(), &existing); !got.Spec.EnableExternal {
+		t.Fatalf("a routed Network must stay routed: %+v", got.Spec)
+	}
+}
+
+func TestDesiredNetworkKeepsTheOldCIDROfAnExistingNetwork(t *testing.T) {
+	existing := v1alpha1.Network{ObjectMeta: metav1.ObjectMeta{Name: "acme"}, Spec: v1alpha1.NetworkSpec{TenantRef: "acme", CIDR: "10.100.0.0/16"}}
+	got := DesiredNetwork(acmeTenant(), &existing)
+	if got.Spec.CIDR != "10.100.0.0/16" || len(got.Spec.CIDRs) != 0 || got.Spec.TenantRef != "acme" {
+		t.Fatalf("got %+v", got.Spec)
+	}
+}
+
+func TestDesiredNetworkUsesCIDRsForAMovedNetwork(t *testing.T) {
+	existing := v1alpha1.Network{ObjectMeta: metav1.ObjectMeta{Name: "acme"}, Spec: v1alpha1.NetworkSpec{TenantRef: "acme", CIDRs: []string{"10.100.0.0/16", "172.16.0.0/16"}}}
+	got := DesiredNetwork(acmeTenant(), &existing)
+	if got.Spec.CIDR != "" || !slices.Equal(got.Spec.CIDRs, []string{"10.100.0.0/16"}) {
+		t.Fatalf("got %+v", got.Spec)
+	}
+}
+
+func TestDefaultNetworkOfPicksTheNetworkWithTheTenantName(t *testing.T) {
+	networks := []v1alpha1.Network{{ObjectMeta: metav1.ObjectMeta{Name: "acme-lab"}}, {ObjectMeta: metav1.ObjectMeta{Name: "acme"}}}
+	if got := defaultNetworkOf("acme", networks); got == nil || got.Name != "acme" {
+		t.Fatalf("got %+v", got)
+	}
+	if got := defaultNetworkOf("acme", networks[:1]); got != nil {
 		t.Fatalf("got %+v", got)
 	}
 }
@@ -212,5 +258,75 @@ func TestOwnerRoleTouchesNoPlatformKinds(t *testing.T) {
 				t.Fatalf("rule %+v grants %s", rule, verb)
 			}
 		}
+	}
+}
+
+func TestDesiredNetworkCarriesTheTenantVrfID(t *testing.T) {
+	tenant := acmeTenant()
+	tenant.Spec.Network.VrfID = ptr.To(int32(1500))
+	if got := DesiredNetwork(tenant, nil); got.Spec.VrfID == nil || *got.Spec.VrfID != 1500 {
+		t.Fatalf("vrfId = %v", got.Spec.VrfID)
+	}
+	if got := DesiredNetwork(acmeTenant(), nil); got.Spec.VrfID != nil {
+		t.Fatalf("an unset tenant vrfId must stay unset: %v", got.Spec.VrfID)
+	}
+}
+
+func TestDesiredNetworkKeepsTheVrfIDOfAnExistingNetwork(t *testing.T) {
+	tenant := acmeTenant()
+	tenant.Spec.Network.VrfID = ptr.To(int32(1500))
+	late := v1alpha1.Network{ObjectMeta: metav1.ObjectMeta{Name: "acme"}, Spec: v1alpha1.NetworkSpec{TenantRef: "acme", CIDRs: []string{"10.100.0.0/16"}}}
+	if got := DesiredNetwork(tenant, &late); got.Spec.VrfID != nil {
+		t.Fatalf("a vrfId cannot be added to an existing Network: %v", got.Spec.VrfID)
+	}
+	pinned := v1alpha1.Network{ObjectMeta: metav1.ObjectMeta{Name: "acme"}, Spec: v1alpha1.NetworkSpec{TenantRef: "acme", CIDRs: []string{"10.100.0.0/16"}, VrfID: ptr.To(int32(1500))}}
+	if got := DesiredNetwork(acmeTenant(), &pinned); got.Spec.VrfID == nil || *got.Spec.VrfID != 1500 {
+		t.Fatalf("the vrfId of an existing Network must stay: %v", got.Spec.VrfID)
+	}
+}
+
+func TestTenantProviderNetworksListsTheTenantRoleNames(t *testing.T) {
+	pools := []v1alpha1.ProviderNetworkSpec{
+		{Name: "zeta", Role: v1alpha1.ProviderRoleTenant},
+		{Name: "alpha"},
+		{Name: "mgmt", Role: v1alpha1.ProviderRolePlatform},
+		{Name: "transit", Role: v1alpha1.ProviderRoleTransit},
+		{Name: "svc", Role: v1alpha1.ProviderRoleServices},
+	}
+	if got := TenantProviderNetworks(pools); !slices.Equal(got, []string{"alpha", "zeta"}) {
+		t.Fatalf("got %v", got)
+	}
+	if got := TenantProviderNetworks(nil); len(got) != 0 {
+		t.Fatalf("got %v", got)
+	}
+}
+
+func TestTenantStatusCarriesTheProviderNetworks(t *testing.T) {
+	got := TenantStatus(TenantObservation{Tenant: acmeTenant(), Network: readyNetwork(), ProviderNetworks: []string{"alpha", "zeta"}})
+	if !slices.Equal(got.ProviderNetworks, []string{"alpha", "zeta"}) {
+		t.Fatalf("got %v", got.ProviderNetworks)
+	}
+}
+
+func TestTenantStatusReportsAProviderNetworksReadFailure(t *testing.T) {
+	failed := TenantStatus(TenantObservation{Tenant: acmeTenant(), Network: readyNetwork(), ProviderNetworksErr: errors.New("bad json")})
+	condition := requireCondition(t, failed.Conditions, ConditionProviderNetworksKnown, metav1.ConditionFalse, ReasonSettingInvalid)
+	if condition.Message != "bad json" {
+		t.Fatalf("message = %q", condition.Message)
+	}
+	requireCondition(t, failed.Conditions, v1alpha1.ConditionReady, metav1.ConditionTrue, ReasonReady)
+	ok := TenantStatus(TenantObservation{Tenant: acmeTenant(), Network: readyNetwork()})
+	requireCondition(t, ok.Conditions, ConditionProviderNetworksKnown, metav1.ConditionTrue, ReasonAvailable)
+}
+
+func TestTenantVrfIDHeldByAnotherNetworkIsRefusedOnTheDefaultNetwork(t *testing.T) {
+	tenant := acmeTenant()
+	tenant.Spec.Network.VrfID = ptr.To(int32(1500))
+	desired := DesiredNetwork(tenant, nil)
+	desired.CreationTimestamp = metav1.Unix(2, 0)
+	holder := v1alpha1.Network{ObjectMeta: metav1.ObjectMeta{Name: "other", CreationTimestamp: metav1.Unix(1, 0)}, Spec: v1alpha1.NetworkSpec{VrfID: ptr.To(int32(1500))}}
+	violation := network.VrfInUse(desired, []v1alpha1.Network{holder}, nil)
+	if violation == nil || violation.Reason != network.ReasonVRFInUse {
+		t.Fatalf("violation = %+v", violation)
 	}
 }

@@ -85,8 +85,9 @@ describe("placeholders", () => {
         const expected = sourceVariables(match[2] ?? "");
         scanned += expected.length > 0 ? 1 : 0;
         for (const [locale, messages] of Object.entries(catalogs)) {
-          const actual = catalogVariables(messages[id] ?? "");
-          const plural = (messages[id] ?? "").includes("plural,");
+          const message = messages[id] ?? catalogs.en?.[id] ?? "";
+          const actual = catalogVariables(message);
+          const plural = message.includes("plural,");
           if (!plural && JSON.stringify(actual) !== JSON.stringify(expected)) {
             problems.push(`${locale} ${id}: source ${expected.join(",")} catalog ${actual.join(",")}`);
           }

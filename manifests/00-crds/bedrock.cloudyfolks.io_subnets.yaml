@@ -55,6 +55,15 @@ spec:
               dhcp:
                 default: true
                 type: boolean
+              dnsServers:
+                items:
+                  maxLength: 45
+                  type: string
+                maxItems: 4
+                type: array
+                x-kubernetes-validations:
+                - message: dnsServers must be IPv4 addresses
+                  rule: self.all(s, isIP(s) && ip(s).family() == 4)
               dnsZoneRef:
                 type: string
               excludeIPs:
@@ -68,6 +77,11 @@ spec:
                 x-kubernetes-validations:
                 - message: gateway must be an IP address
                   rule: isIP(self)
+              mtu:
+                format: int32
+                maximum: 9000
+                minimum: 576
+                type: integer
               networkRef:
                 minLength: 1
                 type: string

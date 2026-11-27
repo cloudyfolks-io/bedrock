@@ -90,6 +90,18 @@ func GroupsOfVirtualMachine(vm v1alpha1.VirtualMachine) []reconcile.Request {
 	return requests
 }
 
+func GroupsOfContainer(container v1alpha1.Container) []reconcile.Request {
+	requests := make([]reconcile.Request, len(container.Spec.Network.SecurityGroups))
+	for i, name := range container.Spec.Network.SecurityGroups {
+		requests[i] = requestOf(container.Namespace, name)
+	}
+	return requests
+}
+
+func containerPodsOnly() predicate.Predicate {
+	return predicate.NewPredicateFuncs(func(obj client.Object) bool { return obj.GetLabels()[v1alpha1.LabelKind] == "Container" })
+}
+
 func managedOnly() predicate.Predicate {
 	return predicate.NewPredicateFuncs(func(obj client.Object) bool { return obj.GetLabels()[LabelManaged] == "true" })
 }
@@ -130,6 +142,26 @@ func loadBalancerLister(c client.Reader) func(context.Context, ...client.ListOpt
 	}
 }
 
+func internetGatewayLister(c client.Reader) func(context.Context, ...client.ListOption) []reconcile.Request {
+	return func(ctx context.Context, opts ...client.ListOption) []reconcile.Request {
+		var list v1alpha1.InternetGatewayList
+		if err := c.List(ctx, &list, opts...); err != nil {
+			return nil
+		}
+		return requestsFrom(list.Items)
+	}
+}
+
+func GatewaysOfNetwork(all []v1alpha1.InternetGateway, changed v1alpha1.InternetGateway) []reconcile.Request {
+	var requests []reconcile.Request
+	for _, other := range all {
+		if other.UID != changed.UID && other.Spec.NetworkRef == changed.Spec.NetworkRef {
+			requests = append(requests, requestOf(other.Namespace, other.Name))
+		}
+	}
+	return requests
+}
+
 func dnsZoneLister(c client.Reader) func(context.Context, ...client.ListOption) []reconcile.Request {
 	return func(ctx context.Context, opts ...client.ListOption) []reconcile.Request {
 		var list v1alpha1.DNSZoneList
@@ -143,6 +175,16 @@ func dnsZoneLister(c client.Reader) func(context.Context, ...client.ListOption) 
 func networkLister(c client.Reader) func(context.Context, ...client.ListOption) []reconcile.Request {
 	return func(ctx context.Context, opts ...client.ListOption) []reconcile.Request {
 		var list v1alpha1.NetworkList
+		if err := c.List(ctx, &list, opts...); err != nil {
+			return nil
+		}
+		return requestsFrom(list.Items)
+	}
+}
+
+func subnetLister(c client.Reader) func(context.Context, ...client.ListOption) []reconcile.Request {
+	return func(ctx context.Context, opts ...client.ListOption) []reconcile.Request {
+		var list v1alpha1.SubnetList
 		if err := c.List(ctx, &list, opts...); err != nil {
 			return nil
 		}
@@ -186,7 +228,7 @@ func AddressWaiters(all []v1alpha1.ElasticIP, gone v1alpha1.ElasticIP) []reconci
 	var requests []reconcile.Request
 	for _, other := range all {
 		sameAddress := other.Spec.Address != "" && (other.Spec.Address == gone.Spec.Address || other.Spec.Address == gone.Status.Address)
-		if other.UID != gone.UID && other.Spec.ProviderNetwork == gone.Spec.ProviderNetwork && sameAddress {
+		if other.UID != gone.UID && PoolOf(other) == PoolOf(gone) && sameAddress {
 			requests = append(requests, requestOf(other.Namespace, other.Name))
 		}
 	}

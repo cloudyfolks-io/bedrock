@@ -30,10 +30,22 @@ Rehearse the whole procedure in the lab first. See "Rehearse in the lab" at the 
 Bedrock creates its own StorageClasses `block`, `block-retain`, `filesystem` and `bucket`.
 It does not read the old StorageClasses.
 
+The classes `block` and `block-retain` create new RBD images with the features `layering`, `exclusive-lock`, `object-map`, `fast-diff` and `deep-flatten`.
+Images that exist already keep their own features, because a volume keeps the features it was created with.
+A Kubernetes StorageClass cannot change its parameters.
+When the operator finds a class that it manages with other parameters, it deletes the class and creates it again.
+If another tool owns the class, the operator does not delete it and the addon condition shows the error `ApplyFailed`.
+Then delete the class by hand.
+Deleting a class does not change a volume, a claim or a snapshot that uses it.
+New claims wait for a short time while the class is missing.
+
 ## Requirements
 
 - Every old Ceph daemon runs the same Ceph major release as the bundle, and at least v20.2.1.
   Read the release of the bundle in the `rook` component of `release/components.yaml`.
+- The old cluster runs Rook v1.20 or v1.21. Bedrock runs the Rook operator of the bundle and upgrades it in place.
+- Every host runs a Linux kernel 5.11 or newer. Rook v1.21 requires Ceph msgr2 by default.
+  With `aes256k` keys every host needs kernel 7.0 or newer, because the CSI kernel clients mount the volumes.
 - The old cluster shows `HEALTH_OK` and all PGs are `active+clean`.
 - Every adopted pool has a size that is not larger than `storage.replicas`.
   Adoption refuses the other case, because Rook would shrink the pool.
@@ -259,8 +271,13 @@ spec:
         filesystem: <old CephFS>
         objectStore: <old object store>
       cephx:
+        allowedCiphers: [aes256k]
         daemon:
+          keyGeneration: 2
+        csi:
           keyType: aes256k
+          keyGeneration: 3
+        rbdMirrorPeer:
           keyGeneration: 2
   roles: [control-plane, ceph-osd, fabric-gateway, workload]
 ```
@@ -277,6 +294,9 @@ Rules for the file:
 - Set a name in `pools` only for a kind that exists. An empty name skips that kind.
 - Copy the whole `security.cephx` block of the old CephCluster into `adopt.cephx`.
   Rook then keeps the daemon keys and does not rotate them again.
+  `adopt.cephx` must carry `keyGeneration` in every section that it has. If the block has `csi.keyType: aes256k`, it must have the sections `daemon`, `csi` and `rbdMirrorPeer`. `bedrock init` refuses a block without them, because Rook refuses a lower generation.
+  Bedrock copies the live mode: `csi.keyType: aes256k` or `allowedCiphers` with `aes256k` selects the cipher `aes256k`, other blocks select `aes`. See [Storage keys](../storage.md).
+  When the old block has `allowedCiphers`, Bedrock restricts the ciphers at once. Without it, Bedrock rotates first and restricts later.
 
 ## 4. Stop the old cluster
 
@@ -804,37 +824,46 @@ It is not a job of `hack/local-ci.sh`. Run it by hand on a Linux host.
 
 The host needs about 46 GiB of free RAM, KVM, Lima, Docker, Go, Helm and `make`.
 Do not run it while a gate runs.
+To use a prebuilt release, set `LAB_RELEASE_VERSION` for each stage and put its matching binary and bundle in `dist/`.
+The `old` stage also needs the k0s binary in `dist/cache/k0s/`.
+Set `LAB_OVN_TLS=true` on the `export` stage to enable TLS in the target cluster.
 
 ```sh
 hack/lab-adopt.sh up
 hack/lab-adopt.sh old
 hack/lab-adopt.sh export
+hack/lab-adopt.sh snapshot before-stop
 hack/lab-adopt.sh stop
-hack/lab-adopt.sh snapshot
+hack/lab-adopt.sh snapshot after-stop
 hack/lab-adopt.sh adopt
 hack/lab-adopt.sh check
+hack/lab-adopt.sh rewind before-stop
+hack/lab-adopt.sh check-legacy
 hack/lab-adopt.sh down
 ```
 
 `hack/lab-adopt.sh all` runs the stages from `up` to `check`.
-Run `snapshot` after `stop` when you want to repeat `adopt`. Run `rewind` to go back to that point.
+Run `rewind after-stop` when you want to repeat `adopt`.
+The default checkpoint for `snapshot` and `rewind` is `after-stop`.
+Run `rewind before-stop` to restore the legacy cluster from before the cutover, then run `check-legacy` to verify the old data.
 
 | Stage | What it does |
 | --- | --- |
-| `up` | Builds the bundle from the worktree into `dist/`. Starts three Ubuntu 24.04 VMs (4 vCPU, 14 GiB, 100 GiB root disk) on one Lima user-v2 network, and gives each VM two 20 GiB OSD disks with serial numbers. |
+| `up` | Builds the bundle from the worktree into `dist/`. Starts three Ubuntu 26.04 VMs (4 vCPU, 14 GiB, 100 GiB root disk) on one Lima user-v2 network, and gives each VM two 20 GiB OSD disks with serial numbers. |
 | `old` | Installs k0s and Rook with the old values in `hack/lab/old-rook-values.yaml`. Writes two RBD images, a CephFS file, and a bucket with two S3 objects. |
 | `export` | Writes the key file and the cluster configuration from `hack/lab/adopt.yaml.tmpl`. Records the fsid, the monitor ids, the OSD ids and the pool sizes. |
 | `stop` | Does section 4 of this runbook: `noout`, Rook scale down, copy of `/var/lib/rook`, `k0s reset`. |
-| `snapshot` | Stops the VMs, snapshots every disk as `after-stop`, and starts the VMs. |
-| `rewind` | Restores the snapshot of every disk and starts the VMs. The disks are as `stop` left them. |
+| `snapshot` | Stops the VMs, saves a named checkpoint of every disk and starts the VMs. |
+| `rewind` | Restores every disk to the named checkpoint and starts the VMs. |
 | `adopt` | Runs `bedrock init` and `bedrock join --adopt-config` and waits for `Adopted`. Deletes the key file, unsets `noout` and waits for `StorageReady`. |
 | `check` | Prints `PASS` or `FAIL` for each assertion. The exit status is not zero if one fails. |
+| `check-legacy` | Waits for the restored legacy Ceph cluster to be healthy. Reads the FSID and checks the RBD, CephFS and RGW data against the saved hashes. |
 | `down` | Removes the lab VMs, their disks and the lab secrets. It does not touch other VMs. |
 
 The lab files are in `dist/lab/`. They hold lab keys.
 The `down` stage deletes the key file, the exports, the state file and the copies of `/var/lib/rook`.
-The lab uses raw OSDs. It does not run the rollback and it does not mount CephFS with the kernel client.
-The lab does not cover these cases. Do them in the rehearsal on the real hardware:
+The lab uses Ceph OSDs in raw mode and reads the CephFS file with the CephFS library.
+Rehearse these cases on the real hardware.
 
 - OSDs in LVM mode.
 - A rename command that fails, and the retry after it.

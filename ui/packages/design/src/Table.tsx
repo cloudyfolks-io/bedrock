@@ -2,10 +2,12 @@ import type { ReactNode } from "react";
 
 export function Table({ caption, children }: { caption: string; children: ReactNode }) {
   return (
-    <table className="br-table">
-      <caption className="br-table-caption">{caption}</caption>
-      {children}
-    </table>
+    <div className="br-table-scroll" role="group" aria-label={caption} tabIndex={0}>
+      <table className="br-table">
+        <caption className="br-table-caption">{caption}</caption>
+        {children}
+      </table>
+    </div>
   );
 }
 

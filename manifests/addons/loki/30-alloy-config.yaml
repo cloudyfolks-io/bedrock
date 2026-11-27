@@ -7,6 +7,9 @@ data:
   config.alloy: |
     discovery.kubernetes "pods" {
       role = "pod"
+      attach_metadata {
+        namespace = true
+      }
       selectors {
         role  = "pod"
         field = "spec.nodeName=" + coalesce(sys.env("NODE_NAME"), "")
@@ -20,6 +23,14 @@ data:
         target_label  = "namespace"
       }
       rule {
+        source_labels = ["__meta_kubernetes_namespace_label_bedrock_cloudyfolks_io_tenant"]
+        target_label  = "tenant"
+      }
+      rule {
+        source_labels = ["__meta_kubernetes_namespace_label_bedrock_cloudyfolks_io_project"]
+        target_label  = "project"
+      }
+      rule {
         source_labels = ["__meta_kubernetes_pod_name"]
         target_label  = "pod"
       }
@@ -28,7 +39,7 @@ data:
         target_label  = "container"
       }
       rule {
-        source_labels = ["__meta_kubernetes_pod_label_kubevirt_io_domain"]
+        source_labels = ["__meta_kubernetes_pod_label_vm_kubevirt_io_name"]
         target_label  = "vm"
       }
       rule {

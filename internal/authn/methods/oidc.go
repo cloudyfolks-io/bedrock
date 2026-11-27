@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"strings"
 
 	"github.com/zitadel/oidc/v3/pkg/client/rp"
 	"github.com/zitadel/oidc/v3/pkg/oidc"
@@ -153,9 +154,22 @@ func (m oidcMethod) Name() string { return v1alpha1.MethodOIDC }
 
 func (m oidcMethod) Kind() Kind { return Primary }
 
-func (m oidcMethod) setup(ctx context.Context, flow Flow) (context.Context, v1alpha1.IdentityProvider, UpstreamCookie, rp.RelyingParty, error) {
+func (m oidcMethod) enabledProvider(ctx context.Context, name string) (v1alpha1.IdentityProvider, error) {
 	var provider v1alpha1.IdentityProvider
-	if err := m.client.Get(ctx, client.ObjectKey{Namespace: release.SystemNamespace, Name: flow.AuthRequest.Status.Login.Provider}, &provider); err != nil {
+	if err := m.client.Get(ctx, client.ObjectKey{Namespace: release.SystemNamespace, Name: name}, &provider); err != nil {
+		return v1alpha1.IdentityProvider{}, err
+	}
+	oidcConfig := provider.Spec.OIDC
+	if provider.Spec.Disabled || provider.DeletionTimestamp != nil || provider.Spec.Type != v1alpha1.IdentityProviderTypeOIDC || oidcConfig == nil ||
+		strings.TrimSpace(oidcConfig.Issuer) == "" || strings.TrimSpace(oidcConfig.ClientID) == "" {
+		return v1alpha1.IdentityProvider{}, errors.New("methods: oidc provider is unavailable")
+	}
+	return provider, nil
+}
+
+func (m oidcMethod) setup(ctx context.Context, flow Flow) (context.Context, v1alpha1.IdentityProvider, UpstreamCookie, rp.RelyingParty, error) {
+	provider, err := m.enabledProvider(ctx, flow.AuthRequest.Status.Login.Provider)
+	if err != nil {
 		return ctx, v1alpha1.IdentityProvider{}, UpstreamCookie{}, nil, err
 	}
 	cookie, err := DecodeUpstream(flow.AuthRequest.Status.Login.Upstream)
@@ -194,11 +208,15 @@ func (m oidcMethod) Complete(ctx context.Context, flow Flow, user v1alpha1.User,
 	if nonce == "" || nonce != cookie.Nonce {
 		return Result{Failure: FailureProviderError}, nil
 	}
-	identity, err := ClaimsIdentity(*provider.Spec.OIDC, claims)
+	current, err := m.enabledProvider(ctx, provider.Name)
+	if err != nil || provider.UID == "" || provider.Generation < 1 || current.UID != provider.UID || current.Generation != provider.Generation {
+		return Result{Failure: FailureProviderError}, nil
+	}
+	identity, err := ClaimsIdentity(*current.Spec.OIDC, claims)
 	if err != nil {
 		return Result{Failure: FailureProviderError}, nil
 	}
-	identity.Groups = policy.MapGroups(provider.Spec.GroupMapping, identity.Groups)
+	identity.Groups = policy.MapGroups(current.Spec.GroupMapping, identity.Groups)
 	var existing *v1alpha1.User
 	if user.Name != "" {
 		existing = &user

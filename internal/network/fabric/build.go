@@ -2,6 +2,7 @@ package fabric
 
 import (
 	"maps"
+	"time"
 
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
@@ -24,19 +25,32 @@ type DynamicRouting struct {
 	VrfID          uint32
 	ExternalSubnet string
 	Redistribute   []string
+	LocalOnly      bool
 }
+
+type Peering struct{ RemoteVpc, LocalConnectIP string }
 
 type VpcSpec struct {
 	EnableExternal       bool
+	EnableBfd            bool
 	ExtraExternalSubnets []string
 	DefaultRoute         *StaticRoute
+	StaticRoutes         []StaticRoute
+	Peerings             []Peering
 	Dynamic              *DynamicRouting
+}
+
+type ACL struct {
+	Direction, Match, Action string
+	Priority                 int
 }
 
 type SubnetSpec struct {
 	Vpc, CIDR, Gateway, Provider, Vlan, DHCPOptions string
 	ExcludeIPs                                      []string
+	ACLs                                            []ACL
 	DHCP                                            bool
+	MTU                                             int
 }
 
 type RouterLBPort struct {
@@ -58,6 +72,19 @@ type SGRule struct {
 type BgpPeer struct {
 	Address string
 	ASN     uint32
+	BFD     bool
+}
+
+type BgpConfSpec struct {
+	LocalASN           uint32
+	RouterID           string
+	Peers              []BgpPeer
+	NodeSelector       map[string]string
+	HoldTime           time.Duration
+	KeepaliveTime      time.Duration
+	GracefulRestart    bool
+	AdvertiseFilter    []string
+	RedistributeTables []uint32
 }
 
 func object(kind schema.GroupVersionKind, m Meta, spec map[string]any) *unstructured.Unstructured {
@@ -81,44 +108,79 @@ func anys(values []string) []any {
 	return out
 }
 
-func selector(labels map[string]string) map[string]any {
-	match := make(map[string]any, len(labels))
-	for k, v := range labels {
-		match[k] = v
+func stringMap(values map[string]string) map[string]any {
+	out := make(map[string]any, len(values))
+	for k, v := range values {
+		out[k] = v
 	}
-	return map[string]any{"matchLabels": match}
+	return out
+}
+
+func selector(labels map[string]string) map[string]any {
+	return map[string]any{"matchLabels": stringMap(labels)}
 }
 
 func Vpc(m Meta, s VpcSpec) *unstructured.Unstructured {
-	spec := map[string]any{}
-	if s.EnableExternal {
-		spec["enableExternal"] = true
-		spec["extraExternalSubnets"] = anys(s.ExtraExternalSubnets)
-	}
-	if s.DefaultRoute != nil {
-		spec["staticRoutes"] = []any{map[string]any{"policy": "policyDst", "cidr": s.DefaultRoute.CIDR, "nextHopIP": s.DefaultRoute.NextHop}}
+	spec := map[string]any{
+		"enableExternal":       s.EnableExternal,
+		"extraExternalSubnets": anys(s.ExtraExternalSubnets),
+		"staticRoutes":         vpcRoutes(s),
+		"vpcPeerings":          vpcPeerings(s.Peerings),
+		"enableBfd":            s.EnableBfd,
+		"dynamicRouting":       map[string]any{"enabled": false},
 	}
 	if s.Dynamic != nil {
-		spec["dynamicRouting"] = map[string]any{
-			"enabled":        true,
-			"redistribute":   anys(s.Dynamic.Redistribute),
-			"vrfId":          int64(s.Dynamic.VrfID),
-			"externalSubnet": s.Dynamic.ExternalSubnet,
-		}
+		spec["dynamicRouting"] = dynamicRouting(*s.Dynamic)
 	}
 	return object(VpcGVK, m, spec)
+}
+
+func vpcRoutes(s VpcSpec) []any {
+	var routes []StaticRoute
+	if s.DefaultRoute != nil {
+		routes = append(routes, *s.DefaultRoute)
+	}
+	routes = append(routes, s.StaticRoutes...)
+	out := make([]any, len(routes))
+	for i, r := range routes {
+		out[i] = map[string]any{"policy": "policyDst", "cidr": r.CIDR, "nextHopIP": r.NextHop}
+	}
+	return out
+}
+
+func vpcPeerings(peerings []Peering) []any {
+	out := make([]any, len(peerings))
+	for i, p := range peerings {
+		out[i] = map[string]any{"remoteVpc": p.RemoteVpc, "localConnectIP": p.LocalConnectIP}
+	}
+	return out
+}
+
+func dynamicRouting(d DynamicRouting) map[string]any {
+	routing := map[string]any{
+		"enabled":        true,
+		"redistribute":   anys(d.Redistribute),
+		"vrfId":          int64(d.VrfID),
+		"externalSubnet": d.ExternalSubnet,
+	}
+	if d.LocalOnly {
+		routing["localOnly"] = true
+	}
+	return routing
 }
 
 func Subnet(m Meta, s SubnetSpec) *unstructured.Unstructured {
 	spec := map[string]any{"protocol": "IPv4", "cidrBlock": s.CIDR, "gateway": s.Gateway}
 	set(spec, "vpc", s.Vpc)
 	set(spec, "dhcpV4Options", s.DHCPOptions)
+	if s.MTU > 0 {
+		spec["mtu"] = int64(s.MTU)
+	}
 	if len(s.ExcludeIPs) > 0 {
 		spec["excludeIps"] = anys(s.ExcludeIPs)
 	}
-	if s.DHCP {
-		spec["enableDHCP"] = true
-	}
+	spec["enableDHCP"] = s.DHCP
+	spec["acls"] = acls(s.ACLs)
 	set(spec, "vlan", s.Vlan)
 	set(spec, "provider", s.Provider)
 	if s.Provider != "" {
@@ -128,6 +190,24 @@ func Subnet(m Meta, s SubnetSpec) *unstructured.Unstructured {
 		spec["disableGatewayCheck"] = true
 	}
 	return object(SubnetGVK, m, spec)
+}
+
+func acls(rules []ACL) []any {
+	out := make([]any, len(rules))
+	for i, r := range rules {
+		out[i] = map[string]any{"direction": r.Direction, "priority": int64(r.Priority), "match": r.Match, "action": r.Action}
+	}
+	return out
+}
+
+const planeSubnetMTU = 1500
+
+func PlaneSubnet(m Meta, vpc, cidr, gateway string) *unstructured.Unstructured {
+	return object(SubnetGVK, m, map[string]any{
+		"protocol": "IPv4", "vpc": vpc, "cidrBlock": cidr, "gateway": gateway,
+		"gatewayType": "distributed", "natOutgoing": false, "disableGatewayCheck": true,
+		"excludeIps": anys([]string{gateway}), "mtu": int64(planeSubnetMTU),
+	})
 }
 
 func set(spec map[string]any, key, value string) {
@@ -142,8 +222,20 @@ func OvnEip(m Meta, externalSubnet, address string) *unstructured.Unstructured {
 	return object(OvnEipGVK, m, spec)
 }
 
+func OvnEipLRP(m Meta, externalSubnet string) *unstructured.Unstructured {
+	return object(OvnEipGVK, m, map[string]any{"externalSubnet": externalSubnet, "type": "lrp"})
+}
+
 func OvnFip(m Meta, eip, ipName string) *unstructured.Unstructured {
 	return object(OvnFipGVK, m, map[string]any{"ovnEip": eip, "ipName": ipName})
+}
+
+func OvnSnatRule(m Meta, eip, vpc, v4Cidr string) *unstructured.Unstructured {
+	return object(OvnSnatRuleGVK, m, map[string]any{"ovnEip": eip, "vpc": vpc, "v4IpCidr": v4Cidr})
+}
+
+func OvnSnatRuleForSubnet(m Meta, eip, vpcSubnet string) *unstructured.Unstructured {
+	return object(OvnSnatRuleGVK, m, map[string]any{"ovnEip": eip, "vpcSubnet": vpcSubnet})
 }
 
 func routerLBRule(m Meta, eip, vpc, namespace string, endpoints []string, ports []RouterLBPort) *unstructured.Unstructured {
@@ -170,7 +262,7 @@ func RouterLBRuleWithoutHealthCheck(m Meta, eip, vpc, namespace string, endpoint
 }
 
 func Vip(m Meta, namespace, subnet string) *unstructured.Unstructured {
-	return object(VipGVK, m, map[string]any{"namespace": namespace, "subnet": subnet, "type": "switch_lb_vip"})
+	return object(VipGVK, m, map[string]any{"namespace": namespace, "subnet": subnet})
 }
 
 func SwitchLBRule(m Meta, vip, namespace string, endpoints []string, ports []RouterLBPort) *unstructured.Unstructured {
@@ -224,17 +316,47 @@ func Vlan(m Meta, id int, provider string) *unstructured.Unstructured {
 	return object(VlanGVK, m, map[string]any{"id": int64(id), "provider": provider})
 }
 
-func BgpConf(m Meta, localASN uint32, routerID string, peers []BgpPeer, nodeSelector map[string]string) *unstructured.Unstructured {
-	rendered := make([]any, len(peers))
-	neighbours := make([]any, len(peers))
-	for i, p := range peers {
-		rendered[i] = map[string]any{"address": p.Address, "asn": int64(p.ASN)}
+func BgpConf(m Meta, s BgpConfSpec) *unstructured.Unstructured {
+	rendered := make([]any, len(s.Peers))
+	neighbours := make([]any, len(s.Peers))
+	for i, p := range s.Peers {
+		peer := map[string]any{"address": p.Address, "asn": int64(p.ASN)}
+		if p.BFD {
+			peer["bfd"] = true
+		}
+		rendered[i] = peer
 		neighbours[i] = p.Address
 	}
-	spec := map[string]any{"localASN": int64(localASN), "peers": rendered, "neighbours": neighbours, "nodeSelector": selector(nodeSelector)}
-	set(spec, "routerId", routerID)
-	if len(peers) > 0 {
-		spec["peerASN"] = int64(peers[0].ASN)
+	spec := map[string]any{"localASN": int64(s.LocalASN), "peers": rendered, "neighbours": neighbours, "nodeSelector": stringMap(s.NodeSelector)}
+	set(spec, "routerId", s.RouterID)
+	set(spec, "holdTime", durationText(s.HoldTime))
+	set(spec, "keepaliveTime", durationText(s.KeepaliveTime))
+	if s.GracefulRestart {
+		spec["gracefulRestart"] = true
+	}
+	if len(s.AdvertiseFilter) > 0 {
+		spec["advertiseFilter"] = anys(s.AdvertiseFilter)
+	}
+	if len(s.RedistributeTables) > 0 {
+		spec["redistributeTables"] = int64s(s.RedistributeTables)
+	}
+	if len(s.Peers) > 0 {
+		spec["peerASN"] = int64(s.Peers[0].ASN)
 	}
 	return object(BgpConfGVK, m, spec)
+}
+
+func durationText(d time.Duration) string {
+	if d <= 0 {
+		return ""
+	}
+	return d.String()
+}
+
+func int64s(values []uint32) []any {
+	out := make([]any, len(values))
+	for i, v := range values {
+		out[i] = int64(v)
+	}
+	return out
 }

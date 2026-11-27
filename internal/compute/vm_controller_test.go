@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -253,7 +254,10 @@ func TestVMInstanceTypeAndPreferenceMustExist(t *testing.T) {
 	r := newVMReconciler(c)
 	createVM(t, c, ns, "no-type", func(vm *v1alpha1.VirtualMachine) { vm.Spec.InstanceType = "u9.none" })
 	createVM(t, c, ns, "no-preference", func(vm *v1alpha1.VirtualMachine) { vm.Spec.Preference = "nope" })
-	createVM(t, c, ns, "from-image", func(vm *v1alpha1.VirtualMachine) { vm.Spec.Preference = "" })
+	createVM(t, c, ns, "from-image", func(vm *v1alpha1.VirtualMachine) {
+		vm.Spec.Preference = ""
+		vm.Spec.Disks = nil
+	})
 	for _, name := range []string{"no-type", "no-preference", "from-image"} {
 		reconcileVM(t, r, ns, name)
 	}
@@ -682,4 +686,428 @@ func TestVMAdoptsObjectsThatARestoreLeftWithoutOwner(t *testing.T) {
 			t.Errorf("%s owners %+v, want the virtual machine %s", obj.GetName(), refs, vm.UID)
 		}
 	}
+}
+
+func setSetting(t *testing.T, c client.Client, name, value string) {
+	t.Helper()
+	ctx := context.Background()
+	setting := &v1alpha1.Setting{ObjectMeta: metav1.ObjectMeta{Name: name}, Spec: v1alpha1.SettingSpec{Value: value}}
+	must(t, c.Create(ctx, setting))
+	t.Cleanup(func() { _ = c.Delete(ctx, setting) })
+}
+
+func customSize(cores, memoryMiB int32) func(*v1alpha1.VirtualMachine) {
+	return func(vm *v1alpha1.VirtualMachine) {
+		vm.Spec.InstanceType = ""
+		vm.Spec.Disks = nil
+		vm.Spec.Compute = &v1alpha1.VMCompute{Cores: cores, MemoryMiB: memoryMiB}
+	}
+}
+
+func TestVMWithCustomSizeSkipsTheInstanceType(t *testing.T) {
+	c, _ := startEnv(t)
+	ns := seedPlatform(t, c)
+	createVM(t, c, ns, "web-1", customSize(6, 6144))
+	reconcileVM(t, newVMReconciler(c), ns, "web-1")
+	kubeVirt := requirePresent(t, c, kubeVirtVMGVK, ns, "web-1")
+	if _, found, _ := unstructured.NestedMap(kubeVirt.Object, "spec", "instancetype"); found {
+		t.Fatal("instance type rendered")
+	}
+	sockets, _, _ := unstructured.NestedInt64(kubeVirt.Object, "spec", "template", "spec", "domain", "cpu", "sockets")
+	guest, _, _ := unstructured.NestedString(kubeVirt.Object, "spec", "template", "spec", "domain", "memory", "guest")
+	if sockets != 6 || guest != "6144Mi" {
+		t.Fatalf("sockets %d guest %q", sockets, guest)
+	}
+	requireReason(t, getVM(t, c, ns, "web-1"), "Starting")
+}
+
+func TestVMCustomSizeFollowsThePreferenceTopology(t *testing.T) {
+	c, _ := startEnv(t)
+	ns := seedPlatform(t, c)
+	ensureUnstructured(t, c, preferenceGVK, "by-cores",
+		map[string]any{"cpu": map[string]any{"preferredCPUTopology": "preferCores"}})
+	createVM(t, c, ns, "web-1", func(vm *v1alpha1.VirtualMachine) {
+		customSize(2, 512)(vm)
+		vm.Spec.Preference = "by-cores"
+	})
+	reconcileVM(t, newVMReconciler(c), ns, "web-1")
+	cpu, _, _ := unstructured.NestedMap(requirePresent(t, c, kubeVirtVMGVK, ns, "web-1").Object, "spec", "template", "spec", "domain", "cpu")
+	if want := map[string]any{"sockets": int64(1), "cores": int64(2), "threads": int64(1)}; !reflect.DeepEqual(cpu, want) {
+		t.Fatalf("cpu %+v", cpu)
+	}
+}
+
+func TestVMRefusesASizeOverTheDefaultLimits(t *testing.T) {
+	c, _ := startEnv(t)
+	ns := seedPlatform(t, c)
+	r := newVMReconciler(c)
+	createVM(t, c, ns, "many-cores", customSize(33, 1024))
+	createVM(t, c, ns, "much-memory", customSize(1, 131073))
+	for _, name := range []string{"many-cores", "much-memory"} {
+		reconcileVM(t, r, ns, name)
+		requireReason(t, getVM(t, c, ns, name), "InvalidSpec")
+		requireAbsent(t, c, kubeVirtVMGVK, ns, name)
+	}
+}
+
+func TestVMSizeLimitsFollowTheSettings(t *testing.T) {
+	c, _ := startEnv(t)
+	ns := seedPlatform(t, c)
+	setSetting(t, c, "compute.max-cores", "64")
+	setSetting(t, c, "compute.max-memory-mib", "1024")
+	r := newVMReconciler(c)
+	createVM(t, c, ns, "wide", customSize(64, 1024))
+	createVM(t, c, ns, "heavy", customSize(2, 2048))
+	reconcileVM(t, r, ns, "wide")
+	requirePresent(t, c, kubeVirtVMGVK, ns, "wide")
+	reconcileVM(t, r, ns, "heavy")
+	requireReason(t, getVM(t, c, ns, "heavy"), "InvalidSpec")
+}
+
+func TestVMWithAnInstanceTypeIgnoresTheSizeLimits(t *testing.T) {
+	c, _ := startEnv(t)
+	ns := seedPlatform(t, c)
+	setSetting(t, c, "compute.max-cores", "1")
+	createVM(t, c, ns, "web-1", noMutation)
+	reconcileVM(t, newVMReconciler(c), ns, "web-1")
+	requirePresent(t, c, kubeVirtVMGVK, ns, "web-1")
+}
+
+func readyVolume(t *testing.T, c client.Client, ns, name string) {
+	t.Helper()
+	createVolume(t, c, ns, name)
+	reconcileVolume(t, c, ns, name)
+	createPVC(t, c, ns, name, 10, "block")
+	setDataVolumePhase(t, c, ns, name, "Succeeded")
+	reconcileVolume(t, c, ns, name)
+}
+
+func bootFrom(volume string) func(*v1alpha1.VirtualMachine) {
+	return func(vm *v1alpha1.VirtualMachine) {
+		vm.Spec.Image = nil
+		vm.Spec.RootDisk = v1alpha1.VMRootDisk{VolumeRef: volume}
+	}
+}
+
+func bootClaimName(t *testing.T, c client.Client, ns, name string) string {
+	t.Helper()
+	volumes, _, _ := unstructured.NestedSlice(requirePresent(t, c, kubeVirtVMGVK, ns, name).Object, "spec", "template", "spec", "volumes")
+	claim, _, _ := unstructured.NestedString(volumes[0].(map[string]any), "persistentVolumeClaim", "claimName")
+	return claim
+}
+
+func TestVMBootsFromAVolume(t *testing.T) {
+	c, _ := startEnv(t)
+	ns := seedPlatform(t, c)
+	readyVolume(t, c, ns, "boot1")
+	createVM(t, c, ns, "web-1", bootFrom("boot1"))
+	reconcileVM(t, newVMReconciler(c), ns, "web-1")
+	requireAbsent(t, c, dataVolumeGVK, ns, "web-1-root")
+	if claim := bootClaimName(t, c, ns, "web-1"); claim != "boot1" {
+		t.Fatalf("root claim %q", claim)
+	}
+	requireReason(t, getVM(t, c, ns, "web-1"), "Starting")
+	volume := reconcileVolume(t, c, ns, "boot1")
+	if volume.Status.AttachedTo != "web-1" || volume.Status.Phase != v1alpha1.VolumePhaseInUse {
+		t.Fatalf("volume status %+v", volume.Status)
+	}
+}
+
+func TestVMRefusesARootVolumeAnotherVMUses(t *testing.T) {
+	c, _ := startEnv(t)
+	ns := seedPlatform(t, c)
+	readyVolume(t, c, ns, "boot1")
+	readyVolume(t, c, ns, "boot2")
+	r := newVMReconciler(c)
+	createVM(t, c, ns, "first", bootFrom("boot1"))
+	createVM(t, c, ns, "second", bootFrom("boot1"))
+	createVM(t, c, ns, "third", func(vm *v1alpha1.VirtualMachine) {
+		bootFrom("boot2")(vm)
+		vm.Spec.Disks = []v1alpha1.VMDisk{{VolumeRef: "boot1"}}
+	})
+	for _, name := range []string{"first", "second", "third"} {
+		reconcileVM(t, r, ns, name)
+	}
+	requirePresent(t, c, kubeVirtVMGVK, ns, "first")
+	for _, name := range []string{"second", "third"} {
+		requireReason(t, getVM(t, c, ns, name), "VolumeInUse")
+		requireAbsent(t, c, kubeVirtVMGVK, ns, name)
+	}
+}
+
+func TestVMRefusesADiskVolumeAsRootOfAnotherVM(t *testing.T) {
+	c, _ := startEnv(t)
+	ns := seedPlatform(t, c)
+	r := newVMReconciler(c)
+	createVM(t, c, ns, "older", noMutation)
+	createVM(t, c, ns, "z-booter", func(vm *v1alpha1.VirtualMachine) {
+		bootFrom("data1")(vm)
+		vm.Spec.Disks = nil
+	})
+	reconcileVM(t, r, ns, "older")
+	reconcileVM(t, r, ns, "z-booter")
+	requireReason(t, getVM(t, c, ns, "z-booter"), "VolumeInUse")
+}
+
+func TestVMWaitsForTheRootVolume(t *testing.T) {
+	c, _ := startEnv(t)
+	ns := seedPlatform(t, c)
+	createVolume(t, c, ns, "pending")
+	r := newVMReconciler(c)
+	createVM(t, c, ns, "ghost-boot", bootFrom("ghost"))
+	createVM(t, c, ns, "pending-boot", bootFrom("pending"))
+	reconcileVM(t, r, ns, "ghost-boot")
+	reconcileVM(t, r, ns, "pending-boot")
+	requireReason(t, getVM(t, c, ns, "ghost-boot"), "VolumeNotFound")
+	requireReason(t, getVM(t, c, ns, "pending-boot"), "VolumeNotUsable")
+	requireAbsent(t, c, kubeVirtVMGVK, ns, "pending-boot")
+}
+
+func TestDeletingTheVMKeepsTheRootVolume(t *testing.T) {
+	c, _ := startEnv(t)
+	ns := seedPlatform(t, c)
+	readyVolume(t, c, ns, "boot1")
+	createVM(t, c, ns, "web-1", bootFrom("boot1"))
+	reconcileVM(t, newVMReconciler(c), ns, "web-1")
+	if volume := reconcileVolume(t, c, ns, "boot1"); volume.Status.AttachedTo != "web-1" {
+		t.Fatalf("volume status %+v", volume.Status)
+	}
+	vm := getVM(t, c, ns, "web-1")
+	claim := requirePresent(t, c, dataVolumeGVK, ns, "boot1")
+	for _, ref := range claim.GetOwnerReferences() {
+		if ref.UID == vm.UID {
+			t.Fatalf("the VM owns the claim of the Volume: %+v", ref)
+		}
+	}
+	must(t, c.Delete(context.Background(), &vm))
+	volume := reconcileVolume(t, c, ns, "boot1")
+	if volume.Status.AttachedTo != "" || volume.Status.Phase != v1alpha1.VolumePhaseAvailable || !volume.DeletionTimestamp.IsZero() {
+		t.Fatalf("volume %+v", volume)
+	}
+	requirePresent(t, c, dataVolumeGVK, ns, "boot1")
+}
+
+func TestSwappingTheRootVolumeMovesTheClaim(t *testing.T) {
+	c, _ := startEnv(t)
+	ns := seedPlatform(t, c)
+	readyVolume(t, c, ns, "boot1")
+	readyVolume(t, c, ns, "boot2")
+	r := newVMReconciler(c)
+	createVM(t, c, ns, "web-1", func(vm *v1alpha1.VirtualMachine) {
+		bootFrom("boot1")(vm)
+		vm.Spec.Running = false
+	})
+	reconcileVM(t, r, ns, "web-1")
+	vm := getVM(t, c, ns, "web-1")
+	vm.Spec.RootDisk.VolumeRef = "boot2"
+	must(t, c.Update(context.Background(), &vm))
+	reconcileVM(t, r, ns, "web-1")
+	if claim := bootClaimName(t, c, ns, "web-1"); claim != "boot2" {
+		t.Fatalf("root claim %q", claim)
+	}
+	if released := reconcileVolume(t, c, ns, "boot1"); released.Status.AttachedTo != "" {
+		t.Fatalf("boot1 %+v", released.Status)
+	}
+	if taken := reconcileVolume(t, c, ns, "boot2"); taken.Status.AttachedTo != "web-1" {
+		t.Fatalf("boot2 %+v", taken.Status)
+	}
+}
+
+func TestRefsAndOwnerCountTheRootVolume(t *testing.T) {
+	vm := fixtureVM("acme-web", "web-1")
+	vm.Spec.Image = nil
+	vm.Spec.RootDisk = v1alpha1.VMRootDisk{VolumeRef: "boot1"}
+	if !slices.Contains(Refs(vm), "volume/boot1") {
+		t.Fatalf("refs %v", Refs(vm))
+	}
+	if got := VolumeOwner([]v1alpha1.VirtualMachine{vm}, "boot1"); got != "web-1" {
+		t.Fatalf("owner %q", got)
+	}
+}
+
+func TestSnapshotOfARootVolume(t *testing.T) {
+	c, _ := startEnv(t)
+	ns, r := snapshotFixture(t, c, "block", rbdProvisioner, nil)
+	createVM(t, c, ns, "web-1", func(vm *v1alpha1.VirtualMachine) {
+		bootFrom("data1")(vm)
+		vm.Spec.Disks = nil
+	})
+	reconcileSnapshot(t, r, ns)
+	requireSnapshotReason(t, c, ns, "Pending")
+	csi := requirePresent(t, c, csiSnapshotGVK, ns, "snap1")
+	if claim, _, _ := unstructured.NestedString(csi.Object, "spec", "source", "persistentVolumeClaimName"); claim != "data1" {
+		t.Fatalf("snapshot source %q", claim)
+	}
+}
+
+func mountingInstance(t *testing.T, c client.Client, ns, name, claim string) *unstructured.Unstructured {
+	t.Helper()
+	vmi := emptyOf(kubeVirtVMIGVK)
+	vmi.SetNamespace(ns)
+	vmi.SetName(name)
+	vmi.Object["spec"] = map[string]any{
+		"domain":  map[string]any{"devices": map[string]any{}},
+		"volumes": []any{map[string]any{"name": "rootdisk", "persistentVolumeClaim": map[string]any{"claimName": claim}}},
+	}
+	must(t, c.Create(context.Background(), vmi))
+	return vmi
+}
+
+func TestRootVolumeSwapWaitsForTheInstanceToStop(t *testing.T) {
+	c, _ := startEnv(t)
+	ns := seedPlatform(t, c)
+	readyVolume(t, c, ns, "boot1")
+	readyVolume(t, c, ns, "boot2")
+	r := newVMReconciler(c)
+	createVM(t, c, ns, "web-1", func(vm *v1alpha1.VirtualMachine) { bootFrom("boot1")(vm) })
+	reconcileVM(t, r, ns, "web-1")
+	vmi := mountingInstance(t, c, ns, "web-1", "boot1")
+	vm := getVM(t, c, ns, "web-1")
+	vm.Spec.Running = false
+	vm.Spec.RootDisk.VolumeRef = "boot2"
+	must(t, c.Update(context.Background(), &vm))
+	reconcileVM(t, r, ns, "web-1")
+	if claim := bootClaimName(t, c, ns, "web-1"); claim != "boot1" {
+		t.Fatalf("root claim %q while the instance runs", claim)
+	}
+	requireReason(t, getVM(t, c, ns, "web-1"), "RootVolumeSwapPending")
+	if kubeVirt := requirePresent(t, c, kubeVirtVMGVK, ns, "web-1"); func() string { s, _, _ := unstructured.NestedString(kubeVirt.Object, "spec", "runStrategy"); return s }() != "Halted" {
+		t.Fatal("the stop must still reach KubeVirt")
+	}
+	if old := reconcileVolume(t, c, ns, "boot1"); old.Status.AttachedTo != "web-1" {
+		t.Fatalf("boot1 %+v", old.Status)
+	}
+	must(t, c.Delete(context.Background(), vmi))
+	reconcileVM(t, r, ns, "web-1")
+	if claim := bootClaimName(t, c, ns, "web-1"); claim != "boot2" {
+		t.Fatalf("root claim %q after the stop", claim)
+	}
+	if old := reconcileVolume(t, c, ns, "boot1"); old.Status.AttachedTo != "" {
+		t.Fatalf("boot1 %+v", old.Status)
+	}
+}
+
+func evictionOf(t *testing.T, c client.Client, ns, name string) string {
+	t.Helper()
+	value, _, _ := unstructured.NestedString(requirePresent(t, c, kubeVirtVMGVK, ns, name).Object, "spec", "template", "spec", "evictionStrategy")
+	return value
+}
+
+func TestVMEvictionStrategyFollowsTheSetting(t *testing.T) {
+	c, _ := startEnv(t)
+	ns := seedPlatform(t, c)
+	r := newVMReconciler(c)
+	createVM(t, c, ns, "plain", func(vm *v1alpha1.VirtualMachine) { vm.Spec.Disks = nil })
+	reconcileVM(t, r, ns, "plain")
+	if got := evictionOf(t, c, ns, "plain"); got != "LiveMigrateIfPossible" {
+		t.Fatalf("default %q", got)
+	}
+	setSetting(t, c, "virt.eviction-strategy", "LiveMigrate")
+	createVM(t, c, ns, "followed", func(vm *v1alpha1.VirtualMachine) { vm.Spec.Disks = nil })
+	createVM(t, c, ns, "own", func(vm *v1alpha1.VirtualMachine) {
+		vm.Spec.Disks = nil
+		vm.Spec.EvictionStrategy = v1alpha1.EvictionStrategyNone
+	})
+	reconcileVM(t, r, ns, "followed")
+	reconcileVM(t, r, ns, "own")
+	if got := evictionOf(t, c, ns, "followed"); got != "LiveMigrate" {
+		t.Fatalf("followed %q", got)
+	}
+	if got := evictionOf(t, c, ns, "own"); got != "None" {
+		t.Fatalf("own %q", got)
+	}
+}
+
+func bootOnly(volume string) func(*v1alpha1.VirtualMachine) {
+	return func(vm *v1alpha1.VirtualMachine) {
+		bootFrom(volume)(vm)
+		vm.Spec.Disks = nil
+	}
+}
+
+func TestAVolumeStaysWithTheInstanceThatMountsIt(t *testing.T) {
+	c, _ := startEnv(t)
+	ns := seedPlatform(t, c)
+	readyVolume(t, c, ns, "boot1")
+	readyVolume(t, c, ns, "boot2")
+	r := newVMReconciler(c)
+	createVM(t, c, ns, "a-vm", bootOnly("boot1"))
+	reconcileVM(t, r, ns, "a-vm")
+	vmi := mountingInstance(t, c, ns, "a-vm", "boot1")
+	vm := getVM(t, c, ns, "a-vm")
+	vm.Spec.Running = false
+	vm.Spec.RootDisk.VolumeRef = "boot2"
+	must(t, c.Update(context.Background(), &vm))
+	reconcileVM(t, r, ns, "a-vm")
+	createVM(t, c, ns, "b-vm", bootOnly("boot1"))
+	reconcileVM(t, r, ns, "b-vm")
+	requireReason(t, getVM(t, c, ns, "b-vm"), "VolumeInUse")
+	requireAbsent(t, c, kubeVirtVMGVK, ns, "b-vm")
+	must(t, c.Delete(context.Background(), vmi))
+	reconcileVM(t, r, ns, "a-vm")
+	reconcileVM(t, r, ns, "b-vm")
+	if claim := bootClaimName(t, c, ns, "b-vm"); claim != "boot1" {
+		t.Fatalf("root claim %q", claim)
+	}
+}
+
+func setSubnetDNS(t *testing.T, c client.Client, ns, name string, servers []string) {
+	t.Helper()
+	var subnet v1alpha1.Subnet
+	must(t, c.Get(context.Background(), client.ObjectKey{Namespace: ns, Name: name}, &subnet))
+	subnet.Spec.DNSServers = servers
+	must(t, c.Update(context.Background(), &subnet))
+}
+
+func renderedNameservers(t *testing.T, c client.Client, ns string) (string, []string) {
+	t.Helper()
+	obj := requirePresent(t, c, kubeVirtVMGVK, ns, "web-1")
+	policy, _, _ := unstructured.NestedString(obj.Object, "spec", "template", "spec", "dnsPolicy")
+	servers, _, _ := unstructured.NestedStringSlice(obj.Object, "spec", "template", "spec", "dnsConfig", "nameservers")
+	return policy, servers
+}
+
+func requireNameservers(t *testing.T, c client.Client, ns, wantPolicy string, want []string) {
+	t.Helper()
+	policy, servers := renderedNameservers(t, c, ns)
+	if policy != wantPolicy || !slices.Equal(servers, want) {
+		t.Fatalf("dnsPolicy %q nameservers %v, want %q %v", policy, servers, wantPolicy, want)
+	}
+}
+
+func TestVMReadsTheDNSServersOfTheSubnet(t *testing.T) {
+	c, _ := startEnv(t)
+	ns := seedPlatform(t, c)
+	setSetting(t, c, "network.dns-servers", "203.0.113.1")
+	setSubnetDNS(t, c, ns, "default", []string{"198.51.100.53", "198.51.100.54"})
+	createVM(t, c, ns, "web-1", noMutation)
+	reconcileVM(t, newVMReconciler(c), ns, "web-1")
+	requireNameservers(t, c, ns, "None", []string{"198.51.100.53", "198.51.100.54"})
+}
+
+func TestVMDNSFallsBackToTheSetting(t *testing.T) {
+	c, _ := startEnv(t)
+	ns := seedPlatform(t, c)
+	setSetting(t, c, "network.dns-servers", "203.0.113.1,203.0.113.2")
+	setSetting(t, c, "network.services.resolver", "203.0.113.9")
+	createVM(t, c, ns, "web-1", noMutation)
+	reconcileVM(t, newVMReconciler(c), ns, "web-1")
+	requireNameservers(t, c, ns, "None", []string{"203.0.113.1", "203.0.113.2"})
+}
+
+func TestVMDNSFallsBackToTheResolver(t *testing.T) {
+	c, _ := startEnv(t)
+	ns := seedPlatform(t, c)
+	setSetting(t, c, "network.services.resolver", "203.0.113.9")
+	createVM(t, c, ns, "web-1", noMutation)
+	reconcileVM(t, newVMReconciler(c), ns, "web-1")
+	requireNameservers(t, c, ns, "None", []string{"203.0.113.9"})
+}
+
+func TestVMWithoutDNSConfigurationKeepsTheClusterDNS(t *testing.T) {
+	c, _ := startEnv(t)
+	ns := seedPlatform(t, c)
+	createVM(t, c, ns, "web-1", noMutation)
+	reconcileVM(t, newVMReconciler(c), ns, "web-1")
+	requireNameservers(t, c, ns, "", nil)
 }

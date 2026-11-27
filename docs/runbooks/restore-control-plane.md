@@ -48,6 +48,11 @@ use the `bedrock` binary of the new version:
     `/var/lib/bedrock/backups`. The upgrade writes the `bedrock-*`
     archives. Do not take an `etcd-*` file. It is a scheduled snapshot. It
     holds no images, and it can be newer than the upgrade backup.
+- If you rotated the Secrets key after the time of the archive, the restored
+  etcd holds Secrets that are encrypted with the old key. Before step 2, on
+  each controller, put the key of that time at
+  `/etc/bedrock/encryption/encryption.yaml`. See [Restore an older
+  snapshot](../secrets-at-rest.md#restore-an-older-snapshot).
 - The agent may have already moved the k0s state directories into
   `/var/lib/k0s/.pre-restore-<time>` on that node. Check there first.
 
@@ -69,7 +74,8 @@ Use the script that fits the archive. A sealed archive ends in
 `.tar.gz.age`. A plain archive of an older release ends in `.tar.gz`.
 
 For a sealed archive, use this script. It opens the archive with the host key
-`/etc/bedrock/backup/host.key`. If the host key is missing, copy the admin
+`/etc/bedrock/backup/host.key` and the retired host keys. If the host key is
+missing, copy the admin
 identity to the node. Then add `--identity <key file>` to the `bedrock backup
 decrypt` line.
 
@@ -91,6 +97,15 @@ for dir in $DIRS; do
 done
 k0s restore --config-out /root/restore/k0s.yaml "$1"
 printf '{"backup":"%s","completedAt":"%s"}\n' "$BACKUP" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" > /var/lib/bedrock/restore.json
+if [ ! -e /var/lib/k0s/containerd ]; then
+  mkdir -p /var/lib/k0s/images /var/lib/bedrock
+  for FILE in /var/lib/bedrock/images/*/*/*.tar; do
+    [ -e "$FILE" ] || continue
+    VERSION=$(basename "$(dirname "$(dirname "$FILE")")")
+    echo "$VERSION-$(basename "$FILE")" >> /var/lib/bedrock/image-links
+    ln -f "$FILE" "/var/lib/k0s/images/$VERSION-$(basename "$FILE")" || cp "$FILE" "/var/lib/k0s/images/$VERSION-$(basename "$FILE")"
+  done
+fi
 systemctl start k0scontroller
 EOF
 ```
@@ -114,6 +129,15 @@ for dir in $DIRS; do
 done
 k0s restore --config-out /root/restore/k0s.yaml "$1"
 printf '{"backup":"%s","completedAt":"%s"}\n' "$BACKUP" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" > /var/lib/bedrock/restore.json
+if [ ! -e /var/lib/k0s/containerd ]; then
+  mkdir -p /var/lib/k0s/images /var/lib/bedrock
+  for FILE in /var/lib/bedrock/images/*/*/*.tar; do
+    [ -e "$FILE" ] || continue
+    VERSION=$(basename "$(dirname "$(dirname "$FILE")")")
+    echo "$VERSION-$(basename "$FILE")" >> /var/lib/bedrock/image-links
+    ln -f "$FILE" "/var/lib/k0s/images/$VERSION-$(basename "$FILE")" || cp "$FILE" "/var/lib/k0s/images/$VERSION-$(basename "$FILE")"
+  done
+fi
 systemctl start k0scontroller
 EOF
 ```
@@ -126,11 +150,18 @@ staged files and the `/var/lib/k0s/.pre-restore-*` directories, sets
 Without the marker, the restored operator continues the upgrade from the
 Backup phase.
 
+After a restore, Kubernetes can delete and start again some pods on the
+node, also VM pods. The restored Node object has the state of the snapshot
+time, and the taint manager can evict the pods that do not tolerate a
+`NoExecute` taint. Pods of a Deployment or a StatefulSet start again. A VM
+that cannot migrate restarts. A bare pod with no controller is gone. Plan a
+restore as an outage of the workloads on the node.
+
 The archive also contains the OVN databases `ovnnb_db.db` and `ovnsb_db.db`.
 This procedure does not use them.
 
 A scheduled etcd snapshot (`etcd-*`) holds no image tarballs. The script
-keeps the directory `/var/lib/k0s/images` on the host. On a rebuilt host,
+keeps the image archive `/var/lib/bedrock/images` on the host. On a rebuilt host,
 put the images of the bundle back before you run the script. See
 [Etcd snapshots](../backup.md#etcd-snapshots).
 
@@ -138,11 +169,15 @@ put the images of the bundle back before you run the script. See
 
 Do this step only when the cluster has more than one controller.
 
-On each other controller, remove its state:
+Ceph keeps one replica on each host, and a pool needs two replicas to
+serve IO. Do this step for one controller at a time. A reset of two
+controllers at once makes the placement groups of Ceph inactive, and
+`k0s reset` then waits for ever on a mapped RBD device.
+
+Before the first controller, tell Ceph not to mark the OSDs out:
 
 ```sh
-k0s reset
-reboot
+kubectl -n rook-ceph exec deploy/rook-ceph-operator -- ceph --conf=/var/lib/rook/rook-ceph/rook-ceph.config osd set noout
 ```
 
 On the backup node, make a join token:
@@ -151,11 +186,34 @@ On the backup node, make a join token:
 bedrock token create --roles control-plane
 ```
 
-On each other controller, join with the token and the bundle of the
-previous version:
+Then, on one other controller, remove its state. Stop the workloads that
+use RBD volumes on the node first, or force-unmap the RBD devices, so that
+the reset does not wait for IO:
+
+```sh
+timeout 600 k0s reset
+reboot
+```
+
+On that controller, join with the token and the bundle of the previous
+version:
 
 ```sh
 bedrock join --token <token> --bundle <bundle of the previous version>
+```
+
+Wait until the node is `Ready` and all placement groups are active. Then
+do the next controller:
+
+```sh
+kubectl get node <name>
+kubectl -n rook-ceph exec deploy/rook-ceph-operator -- ceph --conf=/var/lib/rook/rook-ceph/rook-ceph.config status
+```
+
+After the last controller, remove the flag:
+
+```sh
+kubectl -n rook-ceph exec deploy/rook-ceph-operator -- ceph --conf=/var/lib/rook/rook-ceph/rook-ceph.config osd unset noout
 ```
 
 ## 4. Restart the kubelet on every worker

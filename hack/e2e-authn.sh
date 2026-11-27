@@ -6,6 +6,7 @@ source "$(dirname "${BASH_SOURCE[0]}")/e2e/lib.sh"
 admin_password_file=${ADMIN_PASSWORD_FILE:-/var/lib/bedrock/e2e-admin-password}
 bin=${BEDROCK_BIN:-bin/bedrock}
 test_bin=${E2E_TEST:-dist/e2e-authn.test}
+ldap_user=ldap-e2e-operator
 workdir=$(mktemp -d)
 export KUBECONFIG=/var/lib/k0s/pki/admin.conf
 export BEDROCK_CA=/var/lib/bedrock/authn/ca.crt
@@ -25,9 +26,9 @@ dump() {
     kubectl -n authn-e2e logs deploy/openldap --tail=100 || true
     kubectl -n authn-e2e logs deploy/dex --tail=100 || true
     echo "--- auth requests"
-    kubectl -n bedrock-system get authrequests -o yaml || true
+    kubectl -n bedrock-system get authrequests -o 'custom-columns=CLIENT:.spec.clientID,STEP:.status.login.step,DONE:.status.done,EXPIRES:.spec.expiresAt' || true
     echo "--- device requests"
-    kubectl -n bedrock-system get devicerequests -o yaml || true
+    kubectl -n bedrock-system get devicerequests -o 'custom-columns=CLIENT:.spec.clientID,STATE:.status.state,EXPIRES:.spec.expiresAt' || true
     echo "--- kube-apiserver authentication lines"
     journalctl -u k0scontroller --no-pager | grep -i authentication | tail -100 || true
   fi
@@ -76,12 +77,12 @@ kubectl -n bedrock-system rollout status deployment/bedrock-authn --timeout=180s
 for _ in $(seq 1 30); do
   if kubectl -n authn-e2e exec deploy/openldap -- env LDAPTLS_CACERT=/container/service/slapd/assets/certs/ca.crt \
     ldapsearch -x -H ldaps://openldap.authn-e2e.svc:636 -D cn=reader,dc=bedrock,dc=test -w reader-e2e-pw \
-    -b ou=people,dc=bedrock,dc=test "(uid=alice)" -o ldif-wrap=no >"$workdir/ldapsearch.out" 2>"$workdir/ldapsearch.err"; then
+    -b ou=people,dc=bedrock,dc=test "(uid=$ldap_user)" -o ldif-wrap=no >"$workdir/ldapsearch.out" 2>"$workdir/ldapsearch.err"; then
     break
   fi
   sleep 5
 done
-grep -q '^dn: uid=alice,ou=people,dc=bedrock,dc=test$' "$workdir/ldapsearch.out" || {
+grep -Fxq "dn: uid=$ldap_user,ou=people,dc=bedrock,dc=test" "$workdir/ldapsearch.out" || {
   cat "$workdir/ldapsearch.err" "$workdir/ldapsearch.out"
   false
 }

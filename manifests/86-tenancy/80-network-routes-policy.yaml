@@ -1,0 +1,40 @@
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicy
+metadata:
+  name: bedrock-network-routes
+  labels:
+    bedrock.cloudyfolks.io/kind: ValidatingAdmissionPolicy
+    bedrock.cloudyfolks.io/name: bedrock-network-routes
+spec:
+  failurePolicy: Fail
+  matchConstraints:
+    resourceRules:
+      - apiGroups: [bedrock.cloudyfolks.io]
+        apiVersions: [v1alpha1]
+        operations: [CREATE, UPDATE]
+        resources: [networks]
+  matchConditions:
+    - name: bedrock-identity
+      expression: "request.userInfo.username.startsWith('bedrock:')"
+    - name: routes-involved
+      expression: "has(object.spec.staticRoutes) || (request.operation == 'UPDATE' && has(oldObject.spec.staticRoutes))"
+  variables:
+    - name: newRoutes
+      expression: "has(object.spec.staticRoutes) ? object.spec.staticRoutes : []"
+    - name: oldRoutes
+      expression: "request.operation == 'UPDATE' && has(oldObject.spec.staticRoutes) ? oldObject.spec.staticRoutes : []"
+  validations:
+    - expression: "variables.newRoutes == variables.oldRoutes || 'bedrock:bedrock-admins' in request.userInfo.groups"
+      message: "only an administrator may set or change staticRoutes"
+      reason: Forbidden
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicyBinding
+metadata:
+  name: bedrock-network-routes
+  labels:
+    bedrock.cloudyfolks.io/kind: ValidatingAdmissionPolicyBinding
+    bedrock.cloudyfolks.io/name: bedrock-network-routes
+spec:
+  policyName: bedrock-network-routes
+  validationActions: [Deny]

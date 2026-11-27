@@ -140,6 +140,7 @@ func TestGatherUsesExecAndRoot(t *testing.T) {
 		"lscpu -J": string(fixture(t, "lscpu.json")),
 		"lsblk -J -b -d -o NAME,PATH,MODEL,SERIAL,SIZE,ROTA,WWN,TYPE,MOUNTPOINTS,FSTYPE": string(fixture(t, "lsblk.json")),
 		"ip -j link show": string(fixture(t, "iplink.json")),
+		"ip -j addr show": `[{"ifname":"lo","mtu":65536,"addr_info":[{"local":"127.0.0.1"}]},{"ifname":"bond0.10","mtu":9000,"addr_info":[{"local":"10.0.10.5"}]}]`,
 		"lspci -Dvmmnn":   string(fixture(t, "lspci.txt")),
 		"uname -r":        "6.8.0-45-generic\n",
 	}}
@@ -147,7 +148,7 @@ func TestGatherUsesExecAndRoot(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if inv.MemoryBytes != 1024*1024 || inv.CPU.Cores != 16 || len(inv.Disks) != 2 || len(inv.NICs) != 1 || len(inv.PCI) != 2 {
+	if inv.MemoryBytes != 1024*1024 || inv.CPU.Cores != 16 || len(inv.Disks) != 2 || len(inv.NICs) != 1 || len(inv.Links) != 1 || inv.Links[0].MTU != 9000 || len(inv.PCI) != 2 {
 		t.Fatalf("inventory %+v", inv)
 	}
 	if inv.Firmware.BIOS != "2.7" || inv.Firmware.Kernel != "6.8.0-45-generic" || inv.Firmware.OS != "ubuntu" || inv.Firmware.OSVersion != "24.04" {

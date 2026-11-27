@@ -16,6 +16,7 @@ import (
 	rbacv1 "k8s.io/api/rbac/v1"
 
 	"github.com/cloudyfolks-io/bedrock/api/v1alpha1"
+	"github.com/cloudyfolks-io/bedrock/internal/k0s"
 )
 
 func createControlPlaneHost(t *testing.T, name string, roles ...string) {
@@ -278,7 +279,7 @@ func TestAgentBackupRBACManifest(t *testing.T) {
 	if err := sigyaml.Unmarshal([]byte(documents[0]), &role); err != nil {
 		t.Fatal(err)
 	}
-	if len(role.Rules) != 1 || !slices.Equal(role.Rules[0].Resources, []string{"settings"}) || !slices.Equal(role.Rules[0].Verbs, []string{"get"}) || !slices.Equal(role.Rules[0].ResourceNames, []string{"backup.etcd-schedule", "backup.archive-recipients"}) || !slices.Equal(role.Rules[0].APIGroups, []string{"bedrock.cloudyfolks.io"}) {
+	if len(role.Rules) != 1 || !slices.Equal(role.Rules[0].Resources, []string{"settings"}) || !slices.Equal(role.Rules[0].Verbs, []string{"get"}) || !slices.Equal(role.Rules[0].ResourceNames, append([]string{"backup.etcd-schedule", "backup.archive-recipients"}, k0s.KubeletSettingKeys...)) || !slices.Equal(role.Rules[0].APIGroups, []string{"bedrock.cloudyfolks.io"}) {
 		t.Fatalf("rules %+v", role.Rules)
 	}
 	var binding rbacv1.ClusterRoleBinding

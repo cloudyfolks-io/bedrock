@@ -33,6 +33,20 @@ describe("IsoWizard", () => {
     expect(screen.getByRole("button", { name: "Upload a new ISO" })).toBeTruthy();
   });
 
+  it.each(["images", "upload"])("explains the empty picker when %s creation is not permitted", async (permission) => {
+    const user = userEvent.setup();
+    renderWizard(<IsoWizard />, path, {
+      api: { [`GET ${ns}/images`]: { body: imageList(isoImage("pending-iso", "Importing")) } },
+      allow: (check) => !(check.resource === "images" && check.verb === "create" && (check.subresource ?? "images") === permission),
+    });
+    await user.type(await screen.findByLabelText("Name"), "win-1");
+    await next(user);
+    expect(await screen.findByText("No ready ISO images")).toBeTruthy();
+    expect(await screen.findByText("Ask a project administrator to make an ISO available.")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Upload a new ISO" })).toBeNull();
+    expect(screen.getByRole("button", { name: /^Next/ }).matches(":disabled")).toBe(true);
+  });
+
   it("Windows preferences add the virtio-win cdrom and default the firmware, then submit and open the console", async () => {
     const user = userEvent.setup();
     const { api } = renderWizard(<IsoWizard />, path, {
@@ -51,20 +65,29 @@ describe("IsoWizard", () => {
     await next(user);
     await next(user);
     await next(user);
+    expect(screen.getByText("win-iso")).toBeTruthy();
+    expect(screen.getByText("Root disk, then CD-ROMs")).toBeTruthy();
+    expect(screen.getByText("virtio-win")).toBeTruthy();
+    expect(screen.getByText("40 GiB")).toBeTruthy();
+    expect(screen.getByText("default")).toBeTruthy();
+    expect(document.querySelector("details")?.open).toBe(false);
     await user.click(screen.getByRole("button", { name: "Create virtual machine" }));
     await waitFor(() => expect(screen.getByTestId("path").textContent).toBe("/p/web/vms/win-1?tab=console"));
+    expect(screen.getByText("Request accepted")).toBeTruthy();
+    expect(screen.queryByRole("alertdialog")).toBeNull();
     const post = api.calls.find((call) => call.method === "POST" && call.path.endsWith("/virtualmachines"));
     expect(post?.body).toMatchObject({
       spec: { preference: "windows.2k22", cdroms: [{ imageRef: "win-iso" }, { imageRef: "virtio-win" }], firmware: { uefi: true, secureBoot: false, tpm: true } },
     });
   });
 
-  it("uploads a new ISO and selects it", async () => {
+  it("offers Upload when empty, then waits for the uploaded image to be ready", async () => {
     const user = userEvent.setup();
     const grant = { url: "https://upload.e2e.bedrock.test/v1beta1/upload-async", token: "tok", expiresAt: "2026-10-09T00:00:00Z" };
+    let ready = false;
     renderWizard(<IsoWizard />, path, {
       api: {
-        [`GET ${ns}/images`]: { body: imageList() },
+        [`GET ${ns}/images`]: () => ({ body: ready ? imageList(isoImage("fresh-iso")) : imageList() }),
         [`POST ${ns}/images`]: { status: 201, body: {} },
         [`GET ${ns}/images/fresh-iso`]: { body: isoImage("fresh-iso", "WaitingForUpload") },
         [`POST ${ns}/images/fresh-iso/upload`]: { body: grant },
@@ -72,6 +95,7 @@ describe("IsoWizard", () => {
     });
     await user.type(await screen.findByLabelText("Name"), "win-1");
     await next(user);
+    expect(await screen.findByText("No ready ISO images")).toBeTruthy();
     await user.click(await screen.findByRole("button", { name: "Upload a new ISO" }));
     const dialog = await screen.findByRole("dialog");
     await user.type(within(dialog).getByLabelText("Name"), "fresh-iso");
@@ -83,5 +107,13 @@ describe("IsoWizard", () => {
     FakeXhr.latest().finish(200);
     await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
     expect(screen.getByRole("combobox", { name: /Installation ISO/ }).textContent).toContain("fresh-iso");
+    expect(screen.getByRole("button", { name: /^Next/ }).matches(":disabled")).toBe(true);
+    ready = true;
+    const refresh = screen.getByRole("button", { name: "Refresh images" });
+    await waitFor(() => expect(refresh.matches(":disabled")).toBe(false));
+    await user.click(refresh);
+    await waitFor(() => expect(screen.getByRole("button", { name: /^Next/ }).matches(":disabled")).toBe(false));
+    await next(user);
+    expect(await screen.findByRole("heading", { name: "Size", level: 2 })).toBeTruthy();
   });
 });

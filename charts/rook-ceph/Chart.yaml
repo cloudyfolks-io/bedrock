@@ -1,5 +1,5 @@
 apiVersion: v2
-appVersion: v1.20.7
+appVersion: v1.21.0
 dependencies:
 - name: library
   repository: file://../library
@@ -8,10 +8,10 @@ dependencies:
   condition: csi.installCsiOperator
   name: ceph-csi-operator
   repository: https://ceph.github.io/ceph-csi-operator
-  version: 1.0.4
+  version: 1.1.0
 description: File, Block, and Object Storage Services for your Cloud-Native Environment
 icon: https://rook.io/images/rook-logo.svg
 name: rook-ceph
 sources:
 - https://github.com/rook/rook
-version: v1.20.7
+version: 1.21.0

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 
 	corev1 "k8s.io/api/core/v1"
 	storagev1 "k8s.io/api/storage/v1"
@@ -19,6 +20,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	"github.com/cloudyfolks-io/bedrock/api/v1alpha1"
+	"github.com/cloudyfolks-io/bedrock/internal/container"
 )
 
 const FinalizerVolumeInUse = "bedrock.cloudyfolks.io/volume-in-use"
@@ -28,10 +30,11 @@ type VolumeReconciler struct {
 }
 
 type volumeOutcome struct {
-	Gate       *Gate
-	Phase      string
-	AttachedTo string
-	ActualGi   int32
+	Gate            *Gate
+	Phase           string
+	DataVolumePhase string
+	AttachedTo      string
+	ActualGi        int32
 }
 
 func (r *VolumeReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
@@ -43,7 +46,14 @@ func (r *VolumeReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctr
 	if err := r.Client.List(ctx, &vms, client.InNamespace(volume.Namespace)); err != nil {
 		return ctrl.Result{}, err
 	}
-	owner := VolumeOwner(vms.Items, volume.Name)
+	var containers v1alpha1.ContainerList
+	if err := r.Client.List(ctx, &containers, client.InNamespace(volume.Namespace)); err != nil {
+		return ctrl.Result{}, err
+	}
+	owner, err := OwnerOf(ctx, r.Client, vms.Items, containers.Items, volume.Namespace, volume.Name)
+	if err != nil {
+		return ctrl.Result{}, err
+	}
 	if !volume.DeletionTimestamp.IsZero() {
 		return ctrl.Result{}, r.release(ctx, volume, owner)
 	}
@@ -58,7 +68,7 @@ func (r *VolumeReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctr
 	if holder, held := v1alpha1.RestoreHolder(&volume); held {
 		return ctrl.Result{}, r.writeStatus(ctx, volume, volumeOutcome{Gate: gateOf(ReasonRestoreInProgress, "the restore %q holds the volume", holder)})
 	}
-	volume, err := r.addFinalizer(ctx, volume)
+	volume, err = r.addFinalizer(ctx, volume)
 	if err != nil {
 		return ctrl.Result{}, err
 	}
@@ -67,6 +77,14 @@ func (r *VolumeReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctr
 		return ctrl.Result{}, err
 	}
 	return ctrl.Result{}, r.writeStatus(ctx, volume, done)
+}
+
+func OwnerOf(ctx context.Context, c client.Reader, vms []v1alpha1.VirtualMachine, containers []v1alpha1.Container, namespace, volume string) (string, error) {
+	mounted, err := container.MountingInstance(ctx, c, namespace, volume)
+	if err != nil || mounted != "" {
+		return mounted, err
+	}
+	return VolumeConsumer(vms, containers, volume), nil
 }
 
 func (r *VolumeReconciler) addFinalizer(ctx context.Context, volume v1alpha1.Volume) (v1alpha1.Volume, error) {
@@ -102,9 +120,16 @@ func (r *VolumeReconciler) release(ctx context.Context, volume v1alpha1.Volume, 
 		return nil
 	}
 	if owner != "" {
-		return r.writeStatus(ctx, volume, volumeOutcome{Gate: gateOf(ReasonInUse, "the virtual machine %q uses the volume", owner), AttachedTo: owner, Phase: v1alpha1.VolumePhaseInUse})
+		return r.writeStatus(ctx, volume, volumeOutcome{Gate: gateOf(ReasonInUse, "%s uses the volume", describeConsumer(owner)), AttachedTo: owner, Phase: v1alpha1.VolumePhaseInUse})
 	}
 	return r.removeFinalizer(ctx, volume)
+}
+
+func describeConsumer(owner string) string {
+	if name, isContainer := strings.CutPrefix(owner, container.Kind+"/"); isContainer {
+		return fmt.Sprintf("the container %q", name)
+	}
+	return fmt.Sprintf("the virtual machine %q", owner)
 }
 
 func (r *VolumeReconciler) converge(ctx context.Context, volume v1alpha1.Volume, labels map[string]string, owner string) (volumeOutcome, error) {
@@ -130,6 +155,13 @@ func (r *VolumeReconciler) converge(ctx context.Context, volume v1alpha1.Volume,
 	}
 	if err != nil {
 		return volumeOutcome{}, err
+	}
+	if pvc.Status.Phase == corev1.ClaimLost {
+		return volumeOutcome{
+			Gate:       gateOf("ClaimLost", "the persistent volume claim lost its backing volume"),
+			Phase:      v1alpha1.VolumePhaseFailed,
+			AttachedTo: owner,
+		}, nil
 	}
 	if gate, err := r.resize(ctx, volume, pvc); err != nil || gate != nil {
 		return volumeOutcome{Gate: gate, AttachedTo: owner}, err
@@ -210,10 +242,7 @@ func (r *VolumeReconciler) cloneSource(ctx context.Context, volume v1alpha1.Volu
 
 func (r *VolumeReconciler) resize(ctx context.Context, volume v1alpha1.Volume, pvc corev1.PersistentVolumeClaim) (*Gate, error) {
 	requested := ceilGi(pvc.Spec.Resources.Requests.Storage().Value())
-	switch {
-	case volume.Spec.SizeGi < requested:
-		return gateOf(ReasonShrinkRefused, "the claim holds %dGi and cannot shrink to %dGi", requested, volume.Spec.SizeGi), nil
-	case volume.Spec.SizeGi == requested:
+	if volume.Spec.SizeGi <= requested {
 		return nil, nil
 	}
 	expandable, err := r.expandable(ctx, pvc)
@@ -246,10 +275,15 @@ func (r *VolumeReconciler) observe(ctx context.Context, volume v1alpha1.Volume, 
 	}
 	phase, _, _ := unstructured.NestedString(claim.Object, "status", "phase")
 	var capacity int32
-	if pvc != nil {
+	if pvc != nil && pvc.Status.Phase == corev1.ClaimBound {
 		capacity = ActualSizeGi(pvc.Status.Capacity[corev1.ResourceStorage])
 	}
-	return volumeOutcome{Phase: VolumePhaseOf(phase, owner, capacity, volume.Spec.SizeGi), AttachedTo: owner, ActualGi: capacity}, nil
+	return volumeOutcome{
+		Phase:           VolumePhaseOf(phase, owner, capacity, volume.Spec.SizeGi),
+		DataVolumePhase: phase,
+		AttachedTo:      owner,
+		ActualGi:        capacity,
+	}, nil
 }
 
 func volumeCondition(volume v1alpha1.Volume, done volumeOutcome) metav1.Condition {
@@ -257,6 +291,10 @@ func volumeCondition(volume v1alpha1.Volume, done volumeOutcome) metav1.Conditio
 	switch {
 	case done.Gate != nil:
 		cond.Status, cond.Reason, cond.Message = metav1.ConditionFalse, done.Gate.Reason, done.Gate.Message
+	case done.DataVolumePhase == "WaitForFirstConsumer":
+		cond.Status, cond.Reason, cond.Message = metav1.ConditionTrue, "WaitForFirstConsumer", "a workload can use the volume to start storage provisioning"
+	case done.DataVolumePhase == "PendingPopulation":
+		cond.Status, cond.Reason, cond.Message = metav1.ConditionTrue, "PendingPopulation", "storage population is incomplete"
 	case done.Phase == v1alpha1.VolumePhaseAvailable || done.Phase == v1alpha1.VolumePhaseInUse:
 		cond.Status, cond.Reason, cond.Message = metav1.ConditionTrue, "Bound", "the volume is ready"
 	default:
@@ -270,6 +308,9 @@ func (r *VolumeReconciler) writeStatus(ctx context.Context, volume v1alpha1.Volu
 		var current v1alpha1.Volume
 		if err := r.Client.Get(ctx, client.ObjectKeyFromObject(&volume), &current); err != nil {
 			return client.IgnoreNotFound(err)
+		}
+		if current.UID != volume.UID || current.Generation != volume.Generation {
+			return nil
 		}
 		desired := current.DeepCopy()
 		desired.Status.ObservedGeneration = current.Generation
@@ -302,8 +343,26 @@ func (r *VolumeReconciler) SetupWithManager(mgr ctrl.Manager) error {
 		Owns(emptyOf(dataVolumeGVK)).
 		Watches(&corev1.PersistentVolumeClaim{}, handler.EnqueueRequestsFromMapFunc(sameName)).
 		Watches(&v1alpha1.VirtualMachine{}, handler.EnqueueRequestsFromMapFunc(listedVolumes)).
+		Watches(&v1alpha1.Container{}, handler.EnqueueRequestsFromMapFunc(containerVolumes)).
 		Watches(&v1alpha1.VolumeSnapshot{}, handler.EnqueueRequestsFromMapFunc(r.cloningFrom)).
+		Watches(emptyOf(kubeVirtVMIGVK), handler.EnqueueRequestsFromMapFunc(mountedVolumes)).
 		Complete(r)
+}
+
+func mountedVolumes(_ context.Context, obj client.Object) []reconcile.Request {
+	instance, ok := obj.(*unstructured.Unstructured)
+	if !ok {
+		return nil
+	}
+	volumes, _, _ := unstructured.NestedSlice(instance.Object, "spec", "volumes")
+	var requests []reconcile.Request
+	for _, item := range volumes {
+		entry, _ := item.(map[string]any)
+		if name, _, _ := unstructured.NestedString(entry, "persistentVolumeClaim", "claimName"); name != "" {
+			requests = append(requests, reconcile.Request{NamespacedName: client.ObjectKey{Namespace: instance.GetNamespace(), Name: name}})
+		}
+	}
+	return requests
 }
 
 func listedVolumes(_ context.Context, obj client.Object) []reconcile.Request {
@@ -311,9 +370,22 @@ func listedVolumes(_ context.Context, obj client.Object) []reconcile.Request {
 	if !ok {
 		return nil
 	}
-	requests := make([]reconcile.Request, 0, len(vm.Spec.Disks))
-	for _, disk := range vm.Spec.Disks {
-		requests = append(requests, reconcile.Request{NamespacedName: client.ObjectKey{Namespace: vm.Namespace, Name: disk.VolumeRef}})
+	refs := v1alpha1.VolumeRefs(*vm)
+	requests := make([]reconcile.Request, 0, len(refs))
+	for _, ref := range refs {
+		requests = append(requests, reconcile.Request{NamespacedName: client.ObjectKey{Namespace: vm.Namespace, Name: ref}})
+	}
+	return requests
+}
+
+func containerVolumes(_ context.Context, obj client.Object) []reconcile.Request {
+	c, ok := obj.(*v1alpha1.Container)
+	if !ok {
+		return nil
+	}
+	requests := make([]reconcile.Request, 0, len(c.Spec.Volumes))
+	for _, mount := range c.Spec.Volumes {
+		requests = append(requests, reconcile.Request{NamespacedName: client.ObjectKey{Namespace: c.Namespace, Name: mount.VolumeRef}})
 	}
 	return requests
 }

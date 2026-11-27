@@ -16,7 +16,7 @@ import (
 	"github.com/cloudyfolks-io/bedrock/internal/release"
 )
 
-const releaseUsage = "usage: bedrock release build --config FILE --version VERSION --image IMAGE --out DIR [--helm helm] [--k0s-version V] [--upgrade-from V1,V2] [--binaries DIR]\n       bedrock release apply --dir DIR [--timeout 10m] [--interval 2s]\n       bedrock release rbac --release DIR --out FILE"
+const releaseUsage = "usage: bedrock release build --config FILE --version VERSION --image IMAGE --out DIR [--helm helm] [--k0s-version V] [--upgrade-from V1,V2] [--binaries DIR]\n       bedrock release apply --dir DIR [--timeout 10m] [--interval 2s]\n       bedrock release rbac --release DIR --out FILE\n       bedrock release pin-image --release DIR --digest sha256:HEX\n       bedrock release verify-fabric --release DIR (--values FILE | --image IMAGE)"
 
 func releaseCommand(args []string, stdout, stderr io.Writer) int {
 	if len(args) == 0 {
@@ -30,9 +30,48 @@ func releaseCommand(args []string, stdout, stderr io.Writer) int {
 		return releaseApply(args[1:], stdout, stderr)
 	case "rbac":
 		return releaseRBAC(args[1:], stdout, stderr)
+	case "pin-image":
+		return releasePinImage(args[1:], stdout, stderr)
+	case "verify-fabric":
+		return releaseVerifyFabric(args[1:], stdout, stderr)
 	}
 	fmt.Fprintln(stderr, releaseUsage)
 	return 2
+}
+
+func releaseVerifyFabric(args []string, stdout, stderr io.Writer) int {
+	flags := flag.NewFlagSet("release verify-fabric", flag.ContinueOnError)
+	flags.SetOutput(stderr)
+	dir := flags.String("release", "dist/release", "built release directory")
+	image := flags.String("image", "", "expected Fabric controller image reference with SHA-256 digest")
+	values := flags.String("values", "", "Fabric release values with an explicit pinned image")
+	if err := flags.Parse(args); err != nil {
+		return 2
+	}
+	if (*image == "") == (*values == "") || *dir == "" || flags.NArg() != 0 {
+		fmt.Fprintln(stderr, "release verify-fabric needs a release directory and exactly one of --values or --image")
+		return 2
+	}
+	expected := *image
+	if *values != "" {
+		raw, err := os.ReadFile(*values)
+		if err != nil {
+			return fail(stderr, err)
+		}
+		expected, err = release.FabricImageFromValues(raw)
+		if err != nil {
+			return fail(stderr, err)
+		}
+	}
+	bundle, err := release.Load(os.DirFS(*dir))
+	if err != nil {
+		return fail(stderr, err)
+	}
+	if err := release.VerifyFabricPair(bundle, expected); err != nil {
+		return fail(stderr, err)
+	}
+	fmt.Fprintf(stdout, "release %s contains the expected Fabric controller and SecurityGroup schema\n", bundle.Spec.Version)
+	return 0
 }
 
 func releaseBuild(args []string, stdout, stderr io.Writer) int {
@@ -78,6 +117,7 @@ func releaseApply(args []string, stdout, stderr io.Writer) int {
 	timeout := flags.Duration("timeout", 10*time.Minute, "overall timeout")
 	interval := flags.Duration("interval", 2*time.Second, "readiness poll interval")
 	vip := flags.String("vip", "", "cluster api vip")
+	podMTU := flags.Int("pod-mtu", 0, "pod MTU, empty keeps the Fabric detection")
 	if err := flags.Parse(args); err != nil {
 		return 2
 	}
@@ -87,6 +127,10 @@ func releaseApply(args []string, stdout, stderr io.Writer) int {
 	}
 	if *interval <= 0 {
 		fmt.Fprintln(stderr, "release apply: --interval must be positive")
+		return 2
+	}
+	if *podMTU != 0 && (*podMTU < 576 || *podMTU > 9000) {
+		fmt.Fprintf(stderr, "release apply: --pod-mtu must be from 576 to 9000, got %d\n", *podMTU)
 		return 2
 	}
 	bundle, err := release.Load(os.DirFS(*dir))
@@ -116,6 +160,7 @@ func releaseApply(args []string, stdout, stderr io.Writer) int {
 		fmt.Fprintln(stderr, err)
 		return 1
 	}
+	vars = release.WithPodMTU(vars, int32(*podMTU))
 	report := func(group release.Group, err error) {
 		if err != nil {
 			fmt.Fprintf(stdout, "group %s failed\n", group.Name)
@@ -166,4 +211,24 @@ func splitList(value string) []string {
 		}
 	}
 	return items
+}
+
+func releasePinImage(args []string, stdout, stderr io.Writer) int {
+	flags := flag.NewFlagSet("release pin-image", flag.ContinueOnError)
+	flags.SetOutput(stderr)
+	dir := flags.String("release", "dist/release", "release directory")
+	digest := flags.String("digest", "", "digest of the pushed bedrock image")
+	if err := flags.Parse(args); err != nil {
+		return 2
+	}
+	if *digest == "" {
+		fmt.Fprintln(stderr, "release pin-image: --digest is required")
+		return 2
+	}
+	if err := release.PinOwnImage(*dir, *digest); err != nil {
+		fmt.Fprintln(stderr, err)
+		return 1
+	}
+	fmt.Fprintf(stdout, "bedrock image pinned to %s\n", *digest)
+	return 0
 }

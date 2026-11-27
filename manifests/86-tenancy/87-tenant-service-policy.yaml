@@ -1,0 +1,79 @@
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicy
+metadata:
+  name: bedrock-tenant-services
+  labels:
+    bedrock.cloudyfolks.io/kind: ValidatingAdmissionPolicy
+    bedrock.cloudyfolks.io/name: bedrock-tenant-services
+spec:
+  failurePolicy: Fail
+  matchConstraints:
+    namespaceSelector:
+      matchExpressions:
+        - key: bedrock.cloudyfolks.io/tenant
+          operator: Exists
+    resourceRules:
+      - apiGroups: [""]
+        apiVersions: [v1]
+        operations: [CREATE, UPDATE, DELETE]
+        resources: [services]
+        scope: Namespaced
+  matchConditions:
+    - name: require-tenant-service-checks
+      expression: >-
+        !(has(request.userInfo.groups) && ('system:masters' in request.userInfo.groups || 'bedrock:bedrock-admins' in request.userInfo.groups)) &&
+        !(request.userInfo.username in [
+          'system:serviceaccount:kube-system:ovn',
+          'system:serviceaccount:bedrock-system:bedrock-operator',
+          'system:serviceaccount:kube-system:namespace-controller',
+          'system:serviceaccount:kube-system:generic-garbage-collector',
+          'system:kube-controller-manager'
+        ])
+  variables:
+    - name: newAnnotations
+      expression: "object != null && has(object.metadata.annotations) ? object.metadata.annotations : {}"
+    - name: oldAnnotations
+      expression: "oldObject != null && has(oldObject.metadata.annotations) ? oldObject.metadata.annotations : {}"
+    - name: newLabels
+      expression: "object != null && has(object.metadata.labels) ? object.metadata.labels : {}"
+    - name: oldLabels
+      expression: "oldObject != null && has(oldObject.metadata.labels) ? oldObject.metadata.labels : {}"
+    - name: generatedFields
+      expression: "['fabric.cloudyfolks.io/switch_lb_vip', 'fabric.cloudyfolks.io/router_lb_vip']"
+    - name: routingFields
+      expression: >-
+        ['fabric.cloudyfolks.io/logical_router', 'fabric.cloudyfolks.io/logical_switch',
+         'fabric.cloudyfolks.io/vpc', 'fabric.cloudyfolks.io/service_health_check',
+         'fabric.cloudyfolks.io/service_external_ip_from_subnet', 'fabric.cloudyfolks.io/attachmentprovider',
+         'lb.fabric.cloudyfolks.io/address-pool', 'lb.fabric.cloudyfolks.io/ips', 'lb.fabric.cloudyfolks.io/allow-shared-ip']
+  validations:
+    - expression: >-
+        request.operation != 'CREATE' ||
+        !((has(object.metadata.name) && ['slr-', 'rlr-'].exists(p, object.metadata.name.startsWith(p))) ||
+          (has(object.metadata.generateName) && ['slr-', 'rlr-'].exists(p, object.metadata.generateName.startsWith(p))))
+      message: "the slr- and rlr- Service name prefixes are reserved for Fabric"
+      reason: Forbidden
+    - expression: >-
+        !variables.generatedFields.exists(k, k in variables.newAnnotations || k in variables.oldAnnotations) &&
+        !('fabric.cloudyfolks.io/loadbalancer' in variables.newLabels || 'fabric.cloudyfolks.io/loadbalancer' in variables.oldLabels) &&
+        (object == null || !has(object.metadata.ownerReferences) || !object.metadata.ownerReferences.exists(o, o.apiVersion.startsWith('fabric.cloudyfolks.io/'))) &&
+        (oldObject == null || !has(oldObject.metadata.ownerReferences) || !oldObject.metadata.ownerReferences.exists(o, o.apiVersion.startsWith('fabric.cloudyfolks.io/')))
+      message: "only Fabric and platform administrators can manage a Fabric frontend Service"
+      reason: Forbidden
+    - expression: >-
+        request.operation == 'DELETE' || variables.routingFields.all(k,
+          !(k in variables.newAnnotations) && !(k in variables.oldAnnotations) ||
+          (k in variables.newAnnotations && k in variables.oldAnnotations && variables.newAnnotations[k] == variables.oldAnnotations[k]))
+      message: "only Fabric and platform administrators can change Fabric routing annotations on a Service"
+      reason: Forbidden
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicyBinding
+metadata:
+  name: bedrock-tenant-services
+  labels:
+    bedrock.cloudyfolks.io/kind: ValidatingAdmissionPolicyBinding
+    bedrock.cloudyfolks.io/name: bedrock-tenant-services
+spec:
+  policyName: bedrock-tenant-services
+  validationActions: [Deny]

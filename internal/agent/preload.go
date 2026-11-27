@@ -10,7 +10,9 @@ import (
 	"slices"
 	"strings"
 	"syscall"
+	"time"
 
+	"k8s.io/apimachinery/pkg/util/wait"
 	sigyaml "sigs.k8s.io/yaml"
 
 	"github.com/cloudyfolks-io/bedrock/internal/depot"
@@ -99,27 +101,39 @@ func preloadImages(ctx context.Context, deps Deps, bundleURL, dir string, wanted
 			files = append(files, image.File)
 		}
 	}
-	imagesDir := filepath.Join(deps.Root, k0sImagesDir)
+	archive := archiveVersionDir(deps.Root, spec.Version)
 	for _, file := range files {
 		staged := filepath.Join(dir, file)
 		if err := importImage(ctx, deps, bundleURL+"/images/"+file, staged); err != nil {
 			return 0, err
 		}
-		if err := keepTarball(staged, filepath.Join(imagesDir, tarballName(file, spec.Version))); err != nil {
+		if err := keepTarball(staged, filepath.Join(archive, file)); err != nil {
 			return 0, err
 		}
+	}
+	if err := keepTarball(manifest, filepath.Join(archive, release.BundleFileName)); err != nil {
+		return 0, err
 	}
 	if err := os.RemoveAll(dir); err != nil {
 		return 0, err
 	}
-	return len(wanted), requireImages(ctx, deps.Exec, wanted)
+	if err := requireImages(ctx, deps.Exec, k0s.DefaultBinary, wanted); err != nil {
+		return 0, err
+	}
+	return len(wanted), syncHostImages(ctx, deps)
 }
 
-func tarballName(file, version string) string {
-	if file == airgapFile {
-		return versionedAirgap(version)
+func ArchiveInitBundle(root, bundleDir string) error {
+	manifest := filepath.Join(bundleDir, release.BundleFileName)
+	spec, err := readBundleSpec(manifest)
+	if err != nil {
+		return err
 	}
-	return file
+	archive := archiveVersionDir(root, spec.Version)
+	if err := keepTarball(filepath.Join(bundleDir, bundleImagesDir, airgapFile), filepath.Join(archive, airgapFile)); err != nil {
+		return err
+	}
+	return keepTarball(manifest, filepath.Join(archive, release.BundleFileName))
 }
 
 func keepTarball(staged, dest string) error {
@@ -166,8 +180,8 @@ func containerdImages(ctx context.Context, e host.Exec) ([]string, error) {
 	return strings.Fields(out), nil
 }
 
-func requireImages(ctx context.Context, e host.Exec, wanted []string) error {
-	targets, err := containerdTargets(ctx, e)
+func requireImages(ctx context.Context, e host.Exec, binary string, wanted []string) error {
+	targets, err := containerdTargets(ctx, e, binary)
 	if err != nil {
 		return err
 	}
@@ -190,8 +204,25 @@ func requireImages(ctx context.Context, e host.Exec, wanted []string) error {
 	return nil
 }
 
-func containerdTargets(ctx context.Context, e host.Exec) (map[string]string, error) {
-	out, err := e.Run(ctx, k0s.DefaultBinary, "ctr", "--namespace", "k8s.io", "images", "ls")
+func WaitForImages(ctx context.Context, e host.Exec, binary string, wanted []string, interval time.Duration) error {
+	if len(wanted) == 0 {
+		return nil
+	}
+	var lastErr error
+	err := wait.PollUntilContextCancel(ctx, interval, true, func(ctx context.Context) (bool, error) {
+		checkCtx, cancel := context.WithTimeout(ctx, ctrCallTimeout)
+		defer cancel()
+		lastErr = requireImages(checkCtx, e, binary, wanted)
+		return lastErr == nil, nil
+	})
+	if err != nil {
+		return fmt.Errorf("wait for offline images: %w", errors.Join(err, lastErr))
+	}
+	return nil
+}
+
+func containerdTargets(ctx context.Context, e host.Exec, binary string) (map[string]string, error) {
+	out, err := e.Run(ctx, binary, "ctr", "--namespace", "k8s.io", "images", "ls")
 	if err != nil {
 		return nil, err
 	}

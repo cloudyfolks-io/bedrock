@@ -17,15 +17,18 @@ import (
 	"github.com/zitadel/oidc/v3/pkg/client/rp"
 	"github.com/zitadel/oidc/v3/pkg/op"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 
 	"github.com/cloudyfolks-io/bedrock/api/v1alpha1"
 )
 
 type fakeUpstreamIssuer struct {
-	server *httptest.Server
-	key    *rsa.PrivateKey
-	claims map[string]any
+	server      *httptest.Server
+	key         *rsa.PrivateKey
+	claims      map[string]any
+	beforeToken func(context.Context) error
 }
 
 func newFakeUpstreamIssuer(t *testing.T) *fakeUpstreamIssuer {
@@ -63,6 +66,12 @@ func (f *fakeUpstreamIssuer) jwks(w http.ResponseWriter, r *http.Request) {
 }
 
 func (f *fakeUpstreamIssuer) token(w http.ResponseWriter, r *http.Request) {
+	if f.beforeToken != nil {
+		if err := f.beforeToken(r.Context()); err != nil {
+			http.Error(w, "cannot complete the test exchange", http.StatusInternalServerError)
+			return
+		}
+	}
 	signer, err := jose.NewSigner(jose.SigningKey{
 		Algorithm: jose.RS256,
 		Key:       &jose.JSONWebKey{Key: f.key, KeyID: "test-key", Algorithm: "RS256", Use: "sig"},
@@ -171,6 +180,146 @@ func TestOIDCRedirectHasPKCEAndNonce(t *testing.T) {
 	}
 	if query.Get("state") != cookie.State {
 		t.Fatalf("redirect state = %q, want %q", query.Get("state"), cookie.State)
+	}
+}
+
+func TestOIDCRefusesAProviderDisabledAfterRedirect(t *testing.T) {
+	c, _ := startTestEnv(t)
+	issuer := newFakeUpstreamIssuer(t)
+	provider := oidcProviderFixture("disabled-oidc", issuer.server.URL)
+	provider.Spec.GroupMapping = []v1alpha1.GroupMapping{{External: "ops", Group: "bedrock-admins"}}
+	ctx := op.ContextWithIssuer(context.Background(), "https://sso.example.test")
+	if err := c.Create(ctx, &provider); err != nil {
+		t.Fatal(err)
+	}
+	cookie := UpstreamCookie{Verifier: "verifier-value-long-enough-0123456789", Nonce: "a-nonce-value", State: "auth-request-1"}
+	now := time.Now()
+	issuer.claims = map[string]any{
+		"iss": issuer.server.URL, "sub": "subject-1", "aud": provider.Spec.OIDC.ClientID,
+		"exp": now.Add(time.Hour).Unix(), "iat": now.Unix(), "nonce": cookie.Nonce,
+		"preferred_username": "oidc-disabled-test", "groups": []string{"ops"}, "amr": []string{"mfa"},
+	}
+	request := v1alpha1.AuthRequest{Status: v1alpha1.AuthRequestStatus{Login: v1alpha1.LoginState{Provider: provider.Name, Upstream: EncodeUpstream(cookie)}}}
+	flow := Flow{AuthRequest: request, Now: now}
+	setup := fixedRelyingParty("client-secret")
+	upstreamCalls := 0
+	method := NewOIDC(c, func(ctx context.Context, provider v1alpha1.IdentityProvider, redirectURI string) (rp.RelyingParty, error) {
+		upstreamCalls++
+		return setup(ctx, provider, redirectURI)
+	})
+	challenge, err := method.Begin(ctx, flow, v1alpha1.User{})
+	if err != nil || challenge.Type != ChallengeRedirect || upstreamCalls != 1 {
+		t.Fatalf("the enabled provider did not begin a sign-in: %+v, %v", challenge, err)
+	}
+	provider.Spec.Disabled = true
+	if err := c.Update(ctx, &provider); err != nil {
+		t.Fatal(err)
+	}
+	result, err := method.Complete(ctx, flow, v1alpha1.User{}, Answer{Code: "auth-code-1"})
+	if err != nil || result.Failure != FailureProviderError || result.Subject != nil || upstreamCalls != 1 {
+		t.Fatalf("the disabled provider should stop the callback before discovery or exchange: %+v, %v, %d calls", result, err, upstreamCalls)
+	}
+}
+
+func TestOIDCRefusesAProviderChangedDuringTokenExchange(t *testing.T) {
+	c, _ := startTestEnv(t)
+	for _, tt := range []struct {
+		name   string
+		change func(context.Context, v1alpha1.IdentityProvider) error
+	}{
+		{"disabled", func(ctx context.Context, provider v1alpha1.IdentityProvider) error {
+			provider.Spec.Disabled = true
+			return c.Update(ctx, &provider)
+		}},
+		{"group-mapping-changed", func(ctx context.Context, provider v1alpha1.IdentityProvider) error {
+			provider.Spec.GroupMapping = nil
+			return c.Update(ctx, &provider)
+		}},
+		{"replaced", func(ctx context.Context, provider v1alpha1.IdentityProvider) error {
+			if err := c.Delete(ctx, &provider); err != nil {
+				return err
+			}
+			replacement := oidcProviderFixture(provider.Name, provider.Spec.OIDC.Issuer)
+			replacement.Spec = provider.Spec
+			return c.Create(ctx, &replacement)
+		}},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			issuer := newFakeUpstreamIssuer(t)
+			provider := oidcProviderFixture("exchange-oidc-"+tt.name, issuer.server.URL)
+			provider.Spec.GroupMapping = []v1alpha1.GroupMapping{{External: "ops", Group: "bedrock-admins"}}
+			ctx := op.ContextWithIssuer(t.Context(), "https://sso.example.test")
+			if err := c.Create(ctx, &provider); err != nil {
+				t.Fatal(err)
+			}
+			cookie := UpstreamCookie{Verifier: "verifier-value-long-enough-0123456789", Nonce: "a-nonce-value", State: "auth-request-1"}
+			now := time.Now()
+			issuer.claims = map[string]any{
+				"iss": issuer.server.URL, "sub": "subject-1", "aud": provider.Spec.OIDC.ClientID,
+				"exp": now.Add(time.Hour).Unix(), "iat": now.Unix(), "nonce": cookie.Nonce,
+				"preferred_username": "oidc-exchange-test", "groups": []string{"ops"}, "amr": []string{"mfa"},
+			}
+			var once sync.Once
+			var changeErr error
+			changed := make(chan struct{})
+			issuer.beforeToken = func(exchangeCtx context.Context) error {
+				once.Do(func() {
+					changeErr = tt.change(exchangeCtx, provider)
+					close(changed)
+				})
+				return changeErr
+			}
+			request := v1alpha1.AuthRequest{Status: v1alpha1.AuthRequestStatus{Login: v1alpha1.LoginState{Provider: provider.Name, Upstream: EncodeUpstream(cookie)}}}
+			method := NewOIDC(c, fixedRelyingParty("client-secret"))
+			result, err := method.Complete(ctx, Flow{AuthRequest: request, Now: now}, v1alpha1.User{}, Answer{Code: "auth-code-1"})
+			select {
+			case <-changed:
+				if changeErr != nil {
+					t.Fatalf("the provider did not change during token exchange: %v", changeErr)
+				}
+			default:
+				t.Fatal("the sign-in did not reach token exchange")
+			}
+			if err != nil || result.Failure != FailureProviderError || result.Subject != nil {
+				t.Fatalf("the changed provider should stop sign-in: %+v, %v", result, err)
+			}
+			var users v1alpha1.UserList
+			if err := c.List(ctx, &users, client.InNamespace(provider.Namespace)); err != nil || len(users.Items) != 0 {
+				t.Fatalf("the changed provider provisioned a user or the user list failed: %d, %v", len(users.Items), err)
+			}
+		})
+	}
+}
+
+func TestOIDCRefusesInvalidProviderConfiguration(t *testing.T) {
+	scheme := runtime.NewScheme()
+	if err := v1alpha1.AddToScheme(scheme); err != nil {
+		t.Fatal(err)
+	}
+	for _, tt := range []struct {
+		name   string
+		change func(*v1alpha1.IdentityProviderSpec)
+	}{
+		{"different type", func(spec *v1alpha1.IdentityProviderSpec) { spec.Type = v1alpha1.IdentityProviderTypeLDAP }},
+		{"missing OIDC configuration", func(spec *v1alpha1.IdentityProviderSpec) { spec.OIDC = nil }},
+		{"empty issuer", func(spec *v1alpha1.IdentityProviderSpec) { spec.OIDC.Issuer = " " }},
+		{"empty client ID", func(spec *v1alpha1.IdentityProviderSpec) { spec.OIDC.ClientID = " " }},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			provider := oidcProviderFixture("invalid-oidc", "https://issuer.example.test")
+			tt.change(&provider.Spec)
+			c := fake.NewClientBuilder().WithScheme(scheme).WithObjects(&provider).Build()
+			method := NewOIDC(c, func(context.Context, v1alpha1.IdentityProvider, string) (rp.RelyingParty, error) {
+				t.Fatal("an invalid provider reached upstream discovery")
+				return nil, nil
+			})
+			cookie := UpstreamCookie{Verifier: "verifier-value-long-enough-0123456789", Nonce: "a-nonce-value", State: "auth-request-1"}
+			request := v1alpha1.AuthRequest{Status: v1alpha1.AuthRequestStatus{Login: v1alpha1.LoginState{Provider: provider.Name, Upstream: EncodeUpstream(cookie)}}}
+			result, err := method.Complete(t.Context(), Flow{AuthRequest: request}, v1alpha1.User{}, Answer{Code: "auth-code-1"})
+			if err != nil || result.Failure != FailureProviderError || result.Subject != nil {
+				t.Fatalf("an invalid provider was not refused: %+v, %v", result, err)
+			}
+		})
 	}
 }
 

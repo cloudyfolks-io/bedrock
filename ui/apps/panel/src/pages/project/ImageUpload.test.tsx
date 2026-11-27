@@ -1,10 +1,11 @@
-import { screen, waitFor, within } from "@testing-library/react";
+import { act, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { Route, Routes } from "react-router";
 import { beforeEach, describe, expect, it } from "vitest";
 import type { KubeList } from "../../api/types";
 import images from "../../fixtures/images.json";
 import { FakeXhr } from "../../test/fakeXhr";
+import type { FakeRoute } from "../../test/fakeApi";
 import { renderPanel } from "../../test/renderPanel";
 import ImagesPage from "./ImagesPage";
 
@@ -12,7 +13,7 @@ const projects = { projects: [{ name: "web", displayName: "Web", tenant: "acme",
 const api = "/apis/bedrock.cloudyfolks.io/v1alpha1/namespaces/acme-web";
 const grant = { url: "https://upload.e2e.bedrock.test/v1beta1/upload-async", token: "tok-secret-1", expiresAt: "2026-10-08T13:00:00Z" };
 
-function render(upload: () => { status?: number; body?: unknown } = () => ({ body: grant })) {
+function render(upload: FakeRoute = { body: grant }) {
   return renderPanel(
     <Routes>
       <Route path="/p/:project/images" element={<ImagesPage />} />
@@ -66,8 +67,10 @@ describe("ImageUpload", () => {
     xhr.progress(1, 3);
     const bar = await screen.findByRole("progressbar", { name: "Upload progress" });
     expect(bar.getAttribute("aria-valuenow")).toBe("1");
+    expect(screen.queryByText("File transferred")).toBeNull();
     xhr.finish(200);
-    expect(await screen.findByText("Upload finished")).toBeTruthy();
+    expect(await screen.findByText("File transferred")).toBeTruthy();
+    expect(screen.getByText("The platform still needs to process the image.")).toBeTruthy();
     expect(JSON.stringify(Object.entries(localStorage))).not.toContain("tok-secret-1");
     expect(JSON.stringify(Object.entries(sessionStorage))).not.toContain("tok-secret-1");
     expect(JSON.stringify(queryClient.getQueryCache().getAll().map((query) => query.state.data))).not.toContain("tok-secret-1");
@@ -97,6 +100,25 @@ describe("ImageUpload", () => {
     await waitFor(() => expect(FakeXhr.instances).toHaveLength(1));
     await user.click(within(dialog).getByRole("button", { name: "Cancel" }));
     expect(FakeXhr.latest().aborted).toBe(true);
+  });
+
+  it("does not send the file if canceled while waiting for a grant", async () => {
+    const user = userEvent.setup();
+    let release = () => {};
+    const gate = new Promise<void>((resolve) => { release = resolve; });
+    const { api: fake } = render(async () => {
+      await gate;
+      return { body: grant };
+    });
+    const dialog = await openUpload(user);
+    await user.click(within(dialog).getByRole("button", { name: "Upload" }));
+    expect(await within(dialog).findByText("Preparing the upload")).toBeTruthy();
+    await waitFor(() => expect(fake.calls.some((call) => call.path.endsWith("/installer/upload"))).toBe(true));
+    await user.click(within(dialog).getByRole("button", { name: "Cancel" }));
+    expect(within(dialog).queryByText("Preparing the upload")).toBeNull();
+    await act(async () => release());
+    expect(FakeXhr.instances).toHaveLength(0);
+    expect(screen.queryByText("File transferred")).toBeNull();
   });
 
   it("shows the error text of a 409 from the subresource", async () => {

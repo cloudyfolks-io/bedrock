@@ -2,26 +2,27 @@ import { screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { Route, Routes } from "react-router";
 import { describe, expect, it } from "vitest";
-import type { KubeList } from "../../api/types";
+import type { KubeList, KubeObject } from "../../api/types";
 import projects from "../../fixtures/projects.json";
 import tenants from "../../fixtures/tenants.json";
 import { openApiRoutes } from "../../test/openapi";
-import { renderPanel } from "../../test/renderPanel";
+import { renderPanel, type RenderOptions } from "../../test/renderPanel";
 import TenantDetailPage from "./TenantDetailPage";
 
 const base = "/apis/bedrock.cloudyfolks.io/v1alpha1";
-const acme = (tenants as unknown as KubeList).items[0];
+const [acme, beta] = (tenants as unknown as KubeList).items as [KubeObject, KubeObject];
 
-function render() {
+function render(tenant = acme, locale: RenderOptions["locale"] = "en") {
   return renderPanel(
     <Routes>
       <Route path="/admin/tenants/:name" element={<TenantDetailPage />} />
     </Routes>,
     {
-      route: "/admin/tenants/acme",
+      route: `/admin/tenants/${tenant.metadata.name}`,
+      locale,
       api: {
         ...openApiRoutes(),
-        [`GET ${base}/tenants/acme`]: { body: acme },
+        [`GET ${base}/tenants/${tenant.metadata.name}`]: { body: tenant },
         [`GET ${base}/projects`]: { body: projects as unknown as KubeList },
         [`GET ${base}/projects/web`]: { body: (projects as unknown as KubeList).items[1] },
         [`DELETE ${base}/projects/web`]: { body: {} },
@@ -37,10 +38,31 @@ describe("TenantDetailPage", () => {
     expect(screen.getByText("10.100.0.0/16")).toBeTruthy();
     const bars = screen.getAllByRole("progressbar");
     expect(bars.length).toBeGreaterThan(0);
-    expect(screen.getByRole("progressbar", { name: /cpu: 12 \/ 64/ }).getAttribute("aria-valuenow")).toBe("12");
+    expect(screen.getByRole("progressbar", { name: "CPU cores: 12 / 64" }).getAttribute("aria-valuenow")).toBe("12");
+    expect(screen.getByRole("progressbar", { name: "Memory: 48 GiB / 256 GiB" })).toBeTruthy();
+    expect(screen.getByRole("progressbar", { name: "Elastic IPs: 1 / 4" })).toBeTruthy();
     const table = screen.getByRole("table", { name: "Projects" });
     expect(within(table).getByText("web")).toBeTruthy();
     expect(within(table).getByText("acme-db")).toBeTruthy();
+  });
+
+  it("formats tenant quota numbers in Persian", async () => {
+    render(acme, "fa");
+    expect(await screen.findByRole("progressbar", { name: /۱۲.*۶۴/ })).toBeTruthy();
+    expect(screen.getByRole("progressbar", { name: /۴۸.*۲۵۶/ })).toBeTruthy();
+  });
+
+  it("shows an explicit empty state when the tenant has no projects", async () => {
+    render(beta);
+    expect(await screen.findByText("No projects in this tenant.")).toBeTruthy();
+    expect(screen.queryByRole("table", { name: "Projects" })).toBeNull();
+    expect(await screen.findByRole("button", { name: "Create project" })).toBeTruthy();
+  });
+
+  it("does not imply zero usage before the controller reports it", async () => {
+    render({ ...acme, status: {} });
+    expect(await screen.findByText("Memory: 256 GiB limit (usage not reported)")).toBeTruthy();
+    expect(screen.queryByRole("progressbar")).toBeNull();
   });
 
   it("TestProjectMembersEditor opens the edit form with the members array", async () => {

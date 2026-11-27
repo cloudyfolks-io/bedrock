@@ -6,6 +6,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -13,6 +14,7 @@ import (
 	"regexp"
 	"slices"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/cloudyfolks-io/bedrock/internal/host"
@@ -48,9 +50,12 @@ func TestRunBundleBuildProducesArchive(t *testing.T) {
 	airgap := filepath.Join(t.TempDir(), "airgap.tar")
 	os.WriteFile(airgap, []byte("airgap"), 0o644)
 	var pullArgs []string
+	var pullLock sync.Mutex
 	deps := BundleDeps{
 		Pull: func(_ context.Context, ref, dest, cacheDir, arch string) (string, error) {
+			pullLock.Lock()
 			pullArgs = append(pullArgs, cacheDir+" "+arch)
+			pullLock.Unlock()
 			return "sha256:" + strings.Repeat("f", 64), os.WriteFile(dest, []byte(ref), 0o644)
 		},
 		Airgap: func(_ context.Context, _, _, _, _ string) (string, error) { return airgap, nil },
@@ -174,8 +179,143 @@ func TestRunBundlePullVerifiesWithCosign(t *testing.T) {
 	if string(got) != "bundle-bytes" {
 		t.Fatalf("bundle content %q", got)
 	}
-	if len(exec.Calls) != 2 || exec.Calls[0] != "cosign version --json" || !strings.HasPrefix(exec.Calls[1], "cosign verify-blob --bundle "+filepath.Join(out, "SHA256SUMS.sigstore.json")) || !strings.Contains(exec.Calls[1], "refs/tags/"+regexp.QuoteMeta("v0.1.0")) {
+	if len(exec.Calls) != 2 || exec.Calls[0] != "cosign version --json" || !strings.HasPrefix(exec.Calls[1], "cosign verify-blob --bundle "+filepath.Join(out, ".bundle-pull-")) || !strings.Contains(exec.Calls[1], "/"+sigstoreBundleFile+" ") || !strings.Contains(exec.Calls[1], "refs/tags/"+regexp.QuoteMeta("v0.1.0")) {
 		t.Fatalf("cosign call %v", exec.Calls)
+	}
+}
+
+func TestRunBundlePullSplitArchive(t *testing.T) {
+	version := "v0.1.0"
+	asset := BundleAssetName(version, "amd64")
+	bundle := []byte{0, 0xff, '\n', '\r', 0x7f}
+	sum := sha256.Sum256(bundle)
+	sums := hex.EncodeToString(sum[:]) + "  " + asset + "\n"
+	files := []string{sumsFile, sigstoreBundleFile, asset}
+	cases := []struct {
+		name       string
+		status     int
+		parts      map[string][]byte
+		requests   []string
+		errorText  string
+		keepOutput bool
+	}{
+		{
+			name:     "assemble raw bytes",
+			status:   http.StatusNotFound,
+			parts:    map[string][]byte{".part00": bundle[:3], ".part01": bundle[3:]},
+			requests: []string{"", ".part00", ".part01", ".part02"},
+		},
+		{
+			name:       "reject a gap and keep concurrent output",
+			status:     http.StatusNotFound,
+			parts:      map[string][]byte{".part00": bundle[:3], ".part02": bundle[3:]},
+			requests:   []string{"", ".part00", ".part01"},
+			errorText:  "checksum mismatch",
+			keepOutput: true,
+		},
+		{
+			name:      "do not split on server error",
+			status:    http.StatusServiceUnavailable,
+			parts:     map[string][]byte{".part00": bundle},
+			requests:  []string{""},
+			errorText: "status 503",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			out := t.TempDir()
+			var other *httptest.Server
+			otherArchive := []byte("archive from another pull")
+			otherSum := sha256.Sum256(otherArchive)
+			otherSums := hex.EncodeToString(otherSum[:]) + "  " + asset + "\n"
+			if tc.keepOutput {
+				other = bundleServer(t, version, otherArchive, otherSums)
+				defer other.Close()
+			}
+			base := "/" + version + "/"
+			requests := make(chan string, bundlePartCount+1)
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				switch r.URL.Path {
+				case base + sumsFile:
+					_, _ = w.Write([]byte(sums))
+				case base + sigstoreBundleFile:
+					_, _ = w.Write([]byte("{}"))
+				default:
+					suffix, ok := strings.CutPrefix(r.URL.Path, base+asset)
+					if !ok {
+						t.Errorf("unexpected request %s", r.URL.Path)
+						http.NotFound(w, r)
+						return
+					}
+					requests <- suffix
+					if suffix == "" {
+						w.WriteHeader(tc.status)
+						return
+					}
+					if !tc.keepOutput {
+						for _, name := range files {
+							if _, err := os.Lstat(filepath.Join(out, name)); !os.IsNotExist(err) {
+								t.Errorf("%s is visible before verification: %v", name, err)
+							}
+						}
+					}
+					if part, ok := tc.parts[suffix]; ok {
+						_, _ = w.Write(part)
+						return
+					}
+					if other != nil {
+						options := bundlePullOptions{version: version, out: out, arch: "amd64", baseURL: other.URL}
+						deps := BundleDeps{LookPath: func(string) (string, error) { return "", errors.New("not found") }}
+						if code := RunBundlePull(r.Context(), options, deps, io.Discard, io.Discard); code != 0 {
+							t.Errorf("concurrent pull failed with exit %d", code)
+						}
+					}
+					http.NotFound(w, r)
+				}
+			}))
+			defer server.Close()
+			exec := &host.FakeExec{Responses: map[string]string{"cosign version --json": `{"gitVersion":"v3.0.2"}`}, ResponsePrefixes: map[string]string{"cosign verify-blob": ""}}
+			deps := BundleDeps{Exec: exec, LookPath: func(string) (string, error) { return "/usr/bin/cosign", nil }}
+			var stdout, stderr bytes.Buffer
+			code := RunBundlePull(context.Background(), bundlePullOptions{version: version, out: out, arch: "amd64", baseURL: server.URL}, deps, &stdout, &stderr)
+			var gotRequests []string
+			for len(requests) > 0 {
+				gotRequests = append(gotRequests, <-requests)
+			}
+			if !slices.Equal(gotRequests, tc.requests) {
+				t.Fatalf("requested suffixes %q, want %q", gotRequests, tc.requests)
+			}
+			if tc.errorText == "" {
+				got, err := os.ReadFile(filepath.Join(out, asset))
+				if code != 0 || err != nil || !bytes.Equal(got, bundle) || !strings.Contains(stdout.String(), "verified at") {
+					t.Fatalf("exit %d, archive %x, read error %v, stderr %q", code, got, err, stderr.String())
+				}
+				if len(exec.Calls) != 2 || !strings.HasPrefix(exec.Calls[1], "cosign verify-blob ") {
+					t.Fatalf("signature check calls %v", exec.Calls)
+				}
+			} else if code == 0 || !strings.Contains(stderr.String(), tc.errorText) || strings.Contains(stdout.String(), "verified at") {
+				t.Fatalf("exit %d, stdout %q, stderr %q", code, stdout.String(), stderr.String())
+			}
+			entries, err := os.ReadDir(out)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if tc.keepOutput {
+				for name, want := range map[string]string{asset: string(otherArchive), sumsFile: otherSums, sigstoreBundleFile: "{}"} {
+					got, err := os.ReadFile(filepath.Join(out, name))
+					if err != nil || string(got) != want {
+						t.Fatalf("concurrent pull's %s changed: %q, %v", name, got, err)
+					}
+				}
+			}
+			wantCount := len(files)
+			if code != 0 && !tc.keepOutput {
+				wantCount = 0
+			}
+			if len(entries) != wantCount {
+				t.Fatalf("output directory has %v, want %d files", entries, wantCount)
+			}
+		})
 	}
 }
 

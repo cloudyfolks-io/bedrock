@@ -64,6 +64,12 @@ spec:
                 type: string
               encryption:
                 properties:
+                  action:
+                    enum:
+                    - ""
+                    - rotate
+                    - revert
+                    type: string
                   kms:
                     properties:
                       endpoint:
@@ -81,10 +87,21 @@ spec:
                   rule: self == oldSelf
               maintenanceWindow:
                 type: string
+              managementCIDR:
+                maxLength: 43
+                type: string
+                x-kubernetes-validations:
+                - message: managementCIDR must be a CIDR
+                  rule: isCIDR(self)
               nodeConcurrency:
                 default: 1
                 format: int32
                 minimum: 1
+                type: integer
+              podMTU:
+                format: int32
+                maximum: 9000
+                minimum: 576
                 type: integer
               registry:
                 properties:
@@ -151,6 +168,33 @@ spec:
                     - pools
                     type: object
                 type: object
+              tenantLegs:
+                items:
+                  properties:
+                    allowSources:
+                      items:
+                        maxLength: 43
+                        type: string
+                        x-kubernetes-validations:
+                        - message: every allowSources entry must be a CIDR
+                          rule: isCIDR(self)
+                        - message: allowSources must not match every address
+                          rule: '!isCIDR(self) || cidr(self).prefixLength() > 0'
+                      maxItems: 32
+                      type: array
+                      x-kubernetes-list-type: set
+                    interface:
+                      maxLength: 15
+                      pattern: ^[A-Za-z0-9_.-]+$
+                      type: string
+                  required:
+                  - interface
+                  type: object
+                maxItems: 16
+                type: array
+                x-kubernetes-list-map-keys:
+                - interface
+                x-kubernetes-list-type: map
               upgrade:
                 properties:
                   action:
@@ -267,6 +311,25 @@ spec:
                   - type
                   type: object
                 type: array
+              encryption:
+                properties:
+                  lastRotatedAt:
+                    format: date-time
+                    type: string
+                  message:
+                    type: string
+                  newKey:
+                    type: string
+                  oldKey:
+                    type: string
+                  phase:
+                    type: string
+                  reverting:
+                    type: boolean
+                  rewrittenSecrets:
+                    format: int64
+                    type: integer
+                type: object
               observedGeneration:
                 format: int64
                 type: integer

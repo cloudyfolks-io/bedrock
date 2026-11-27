@@ -5,8 +5,9 @@ import (
 )
 
 const (
-	ElasticIPTargetVirtualMachine = "VirtualMachine"
-	ElasticIPTargetLoadBalancer   = "LoadBalancer"
+	ElasticIPTargetVirtualMachine  = "VirtualMachine"
+	ElasticIPTargetLoadBalancer    = "LoadBalancer"
+	ElasticIPTargetInternetGateway = "InternetGateway"
 
 	LoadBalancerProtocolTCP = "TCP"
 	LoadBalancerProtocolUDP = "UDP"
@@ -39,6 +40,15 @@ type SubnetSpec struct {
 	ExcludeIPs []string `json:"excludeIPs,omitempty"`
 	// +optional
 	DNSZoneRef string `json:"dnsZoneRef,omitempty"`
+	// +kubebuilder:validation:Minimum=576
+	// +kubebuilder:validation:Maximum=9000
+	// +optional
+	MTU *int32 `json:"mtu,omitempty"`
+	// +kubebuilder:validation:MaxItems=4
+	// +kubebuilder:validation:items:MaxLength=45
+	// +kubebuilder:validation:XValidation:rule="self.all(s, isIP(s) && ip(s).family() == 4)",message="dnsServers must be IPv4 addresses"
+	// +optional
+	DNSServers []string `json:"dnsServers,omitempty"`
 }
 
 type SubnetStatus struct {
@@ -67,7 +77,7 @@ type SubnetList struct {
 
 // +kubebuilder:validation:XValidation:rule="!has(self.subnetRef) || self.kind == 'VirtualMachine'",message="subnetRef selects a VirtualMachine interface"
 type ElasticIPTarget struct {
-	// +kubebuilder:validation:Enum=VirtualMachine;LoadBalancer
+	// +kubebuilder:validation:Enum=VirtualMachine;LoadBalancer;InternetGateway
 	Kind string `json:"kind"`
 	// +kubebuilder:validation:MinLength=1
 	Name string `json:"name"`
@@ -75,11 +85,13 @@ type ElasticIPTarget struct {
 	SubnetRef string `json:"subnetRef,omitempty"`
 }
 
-// +kubebuilder:validation:XValidation:rule="self.providerNetwork == oldSelf.providerNetwork",message="providerNetwork is immutable"
+// +kubebuilder:validation:XValidation:rule="has(self.providerNetwork) == has(oldSelf.providerNetwork) && (!has(self.providerNetwork) || self.providerNetwork == oldSelf.providerNetwork)",message="providerNetwork is immutable"
+// +kubebuilder:validation:XValidation:rule="!has(self.address) || has(self.providerNetwork)",message="address needs providerNetwork"
 // +kubebuilder:validation:XValidation:rule="has(self.address) == has(oldSelf.address) && (!has(self.address) || self.address == oldSelf.address)",message="address is immutable"
 type ElasticIPSpec struct {
 	// +kubebuilder:validation:MinLength=1
-	ProviderNetwork string `json:"providerNetwork"`
+	// +optional
+	ProviderNetwork string `json:"providerNetwork,omitempty"`
 	// +kubebuilder:validation:MaxLength=45
 	// +kubebuilder:validation:XValidation:rule="isIP(self)",message="address must be an IP address"
 	// +optional
@@ -92,6 +104,8 @@ type ElasticIPStatus struct {
 	CommonStatus `json:",inline"`
 	// +optional
 	Address string `json:"address,omitempty"`
+	// +optional
+	ProviderNetwork string `json:"providerNetwork,omitempty"`
 }
 
 // +kubebuilder:object:root=true
@@ -113,9 +127,14 @@ type ElasticIPList struct {
 	Items           []ElasticIP `json:"items"`
 }
 
+// +kubebuilder:validation:XValidation:rule="has(self.vmRef) != has(self.containerRef)",message="set exactly one of vmRef and containerRef"
 type LoadBalancerTarget struct {
 	// +kubebuilder:validation:MinLength=1
-	VMRef string `json:"vmRef"`
+	// +optional
+	VMRef string `json:"vmRef,omitempty"`
+	// +kubebuilder:validation:MinLength=1
+	// +optional
+	ContainerRef string `json:"containerRef,omitempty"`
 	// +kubebuilder:validation:Minimum=1
 	// +kubebuilder:validation:Maximum=65535
 	Port int32 `json:"port"`
@@ -166,12 +185,17 @@ type LoadBalancerSpec struct {
 
 type LoadBalancerStatus struct {
 	CommonStatus `json:",inline"`
+	// +optional
+	Address string `json:"address,omitempty"`
+	// +optional
+	InternalAddress string `json:"internalAddress,omitempty"`
 }
 
 // +kubebuilder:object:root=true
 // +kubebuilder:resource:scope=Namespaced
 // +kubebuilder:subresource:status
 // +kubebuilder:printcolumn:name="Elastic IP",type=string,JSONPath=`.spec.elasticIPRef`
+// +kubebuilder:printcolumn:name="Address",type=string,JSONPath=`.status.address`
 type LoadBalancer struct {
 	metav1.TypeMeta   `json:",inline"`
 	metav1.ObjectMeta `json:"metadata,omitempty"`
@@ -184,6 +208,40 @@ type LoadBalancerList struct {
 	metav1.TypeMeta `json:",inline"`
 	metav1.ListMeta `json:"metadata,omitempty"`
 	Items           []LoadBalancer `json:"items"`
+}
+
+type InternetGatewaySpec struct {
+	// +kubebuilder:validation:MinLength=1
+	// +kubebuilder:validation:XValidation:rule="self == oldSelf",message="networkRef is immutable"
+	NetworkRef string `json:"networkRef"`
+	// +kubebuilder:validation:MinLength=1
+	ElasticIPRef string `json:"elasticIPRef"`
+	// +kubebuilder:validation:MinLength=1
+	// +optional
+	SubnetRef string `json:"subnetRef,omitempty"`
+}
+
+type InternetGatewayStatus struct {
+	CommonStatus `json:",inline"`
+}
+
+// +kubebuilder:object:root=true
+// +kubebuilder:resource:scope=Namespaced
+// +kubebuilder:subresource:status
+// +kubebuilder:printcolumn:name="Network",type=string,JSONPath=`.spec.networkRef`
+// +kubebuilder:printcolumn:name="Elastic IP",type=string,JSONPath=`.spec.elasticIPRef`
+type InternetGateway struct {
+	metav1.TypeMeta   `json:",inline"`
+	metav1.ObjectMeta `json:"metadata,omitempty"`
+	Spec              InternetGatewaySpec   `json:"spec"`
+	Status            InternetGatewayStatus `json:"status,omitempty"`
+}
+
+// +kubebuilder:object:root=true
+type InternetGatewayList struct {
+	metav1.TypeMeta `json:",inline"`
+	metav1.ListMeta `json:"metadata,omitempty"`
+	Items           []InternetGateway `json:"items"`
 }
 
 type DNSRecord struct {
@@ -286,5 +344,5 @@ type SecurityGroupList struct {
 }
 
 func init() {
-	SchemeBuilder.Register(&Subnet{}, &SubnetList{}, &ElasticIP{}, &ElasticIPList{}, &LoadBalancer{}, &LoadBalancerList{}, &DNSZone{}, &DNSZoneList{}, &SecurityGroup{}, &SecurityGroupList{})
+	SchemeBuilder.Register(&Subnet{}, &SubnetList{}, &ElasticIP{}, &ElasticIPList{}, &LoadBalancer{}, &LoadBalancerList{}, &InternetGateway{}, &InternetGatewayList{}, &DNSZone{}, &DNSZoneList{}, &SecurityGroup{}, &SecurityGroupList{})
 }

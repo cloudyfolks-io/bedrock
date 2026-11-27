@@ -1,0 +1,15 @@
+SET statement_timeout = '30000';
+SET idle_in_transaction_session_timeout = '30000';
+REVOKE "app_ro", "app_rw", "app_all" FROM "alice";
+REVOKE "orders_ro", "orders_rw", "orders_all" FROM "alice";
+GRANT "app_rw" TO "alice";
+\connect "app"
+SET statement_timeout = '30000';
+SET idle_in_transaction_session_timeout = '30000';
+ALTER DEFAULT PRIVILEGES FOR ROLE "alice" IN SCHEMA public GRANT SELECT ON TABLES TO "app_ro", "app_rw", "app_all";
+ALTER DEFAULT PRIVILEGES FOR ROLE "alice" IN SCHEMA public GRANT USAGE, SELECT ON SEQUENCES TO "app_ro", "app_rw", "app_all";
+ALTER DEFAULT PRIVILEGES FOR ROLE "alice" IN SCHEMA public GRANT INSERT, UPDATE, DELETE ON TABLES TO "app_rw", "app_all";
+ALTER DEFAULT PRIVILEGES FOR ROLE "alice" IN SCHEMA public GRANT UPDATE ON SEQUENCES TO "app_rw", "app_all";
+ALTER DEFAULT PRIVILEGES FOR ROLE "alice" IN SCHEMA public GRANT ALL ON TABLES TO "app_all";
+ALTER DEFAULT PRIVILEGES FOR ROLE "alice" IN SCHEMA public GRANT ALL ON TABLES TO "dbadmin";
+ALTER DEFAULT PRIVILEGES FOR ROLE "alice" IN SCHEMA public GRANT ALL ON SEQUENCES TO "dbadmin";

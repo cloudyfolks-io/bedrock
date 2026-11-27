@@ -1,6 +1,8 @@
 import { useState } from "react";
+import { msg } from "@lingui/core/macro";
 import { useLingui } from "@lingui/react/macro";
-import { Tab, TabList, TabPanel, Tabs } from "@bedrock/design";
+import { Tabs as BaseTabs } from "@base-ui/react/tabs";
+import { Tab, TabPanel, Tabs } from "@bedrock/design";
 import type { KubeObject } from "../../api/types";
 import { useCans } from "../../authz/authz";
 import { PageHeader } from "../../components/PageHeader";
@@ -8,6 +10,7 @@ import { definitionFor } from "../../resources/registry";
 import { ResourceListPage } from "../../resources/ResourceListPage";
 import { useCurrentProject } from "../../shell/context";
 import { ImageUpload } from "./ImageUpload";
+import styles from "./storage.module.css";
 
 export default function ImagesPage() {
   const { t } = useLingui();
@@ -21,17 +24,18 @@ export default function ImagesPage() {
     return null;
   }
   return (
-    <>
+    <div className={styles.imageTabs}>
       <PageHeader title={t({ id: "nav.item.images", message: "Images" })} />
       <Tabs value={tab} onValueChange={setTab}>
-        <TabList>
+        <BaseTabs.List className="br-tab-list" aria-label={t({ id: "nav.item.images", message: "Images" })}>
           <Tab value="project">{t({ id: "images.tab.project", message: "Project images" })}</Tab>
           <Tab value="catalog">{t({ id: "images.tab.catalog", message: "Catalog" })}</Tab>
-        </TabList>
+        </BaseTabs.List>
         <TabPanel value="project">
           <ResourceListPage
-            def={images}
+            def={{ ...images, title: msg({ id: "images.tab.project", message: "Project images" }) }}
             embedded
+            hideEmbeddedTitle
             rowItems={(object) =>
               canUpload === "allowed" && object.status?.phase === "WaitingForUpload"
                 ? [{ id: "upload", label: t({ id: "images.upload.start", message: "Upload" }), onSelect: () => setUploading(object) }]
@@ -42,9 +46,9 @@ export default function ImagesPage() {
           </ResourceListPage>
         </TabPanel>
         <TabPanel value="catalog">
-          <ResourceListPage def={catalog} embedded readOnly />
+          <ResourceListPage def={{ ...catalog, title: msg({ id: "images.tab.catalog", message: "Catalog" }) }} embedded hideEmbeddedTitle readOnly />
         </TabPanel>
       </Tabs>
-    </>
+    </div>
   );
 }

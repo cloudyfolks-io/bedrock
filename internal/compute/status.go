@@ -21,7 +21,7 @@ type ObservedVM struct {
 }
 
 var (
-	reasonsBeforeNetwork = []string{ReasonSubnetNotReady, ReasonSecurityGroupNotReady, ReasonWaitingForDefaultGroup}
+	reasonsBeforeNetwork = []string{ReasonSubnetNotReady, ReasonAddressOutsideSubnet, ReasonAddressReserved, ReasonAddressInUse, ReasonSecurityGroupNotReady, ReasonWaitingForDefaultGroup}
 	reasonsAfterNetwork  = []string{ReasonSSHKeyNotReady, ReasonInvalidUserData, ReasonVolumeNotFound, ReasonVolumeInUse, ReasonVolumeNotUsable, ReasonApplyFailed, ReasonNameConflict}
 )
 
@@ -69,7 +69,7 @@ func AddressesOf(pods []corev1.Pod, nodeName, namespace string, subnets []string
 	for _, subnet := range subnets {
 		prefix := network.SubnetProvider(namespace, subnet) + ".cloudyfolks.io/"
 		ips := pod.Annotations[prefix+"ip_address"]
-		if ips == "" {
+		if ips == "" || pod.Annotations[prefix+"allocated"] != "true" {
 			continue
 		}
 		for _, ip := range strings.Split(ips, ",") {

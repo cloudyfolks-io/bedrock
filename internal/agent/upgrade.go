@@ -44,15 +44,16 @@ const (
 
 func Steps() map[string]Step {
 	return map[string]Step{
-		v1alpha1.StepPreload:     preload,
-		v1alpha1.StepBackup:      backup,
-		v1alpha1.StepK0sUpdate:   k0sUpdate,
-		v1alpha1.StepAgentUpdate: agentUpdate,
-		v1alpha1.StepOSUpdate:    osUpdate,
-		v1alpha1.StepReboot:      reboot,
-		v1alpha1.StepPrune:       prune,
-		v1alpha1.StepCleanup:     cleanup,
-		v1alpha1.StepRestore:     restore,
+		v1alpha1.StepPreload:        preload,
+		v1alpha1.StepBackup:         backup,
+		v1alpha1.StepK0sUpdate:      k0sUpdate,
+		v1alpha1.StepK0sReconfigure: k0sReconfigure,
+		v1alpha1.StepAgentUpdate:    agentUpdate,
+		v1alpha1.StepOSUpdate:       osUpdate,
+		v1alpha1.StepReboot:         reboot,
+		v1alpha1.StepPrune:          prune,
+		v1alpha1.StepCleanup:        cleanup,
+		v1alpha1.StepRestore:        restore,
 	}
 }
 

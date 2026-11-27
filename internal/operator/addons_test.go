@@ -9,6 +9,7 @@ import (
 	"time"
 
 	corev1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
@@ -231,5 +232,36 @@ func TestAddonProbeReportsTheReasonOfTheGate(t *testing.T) {
 		if cond.Status != metav1.ConditionFalse || cond.Reason != want || cond.Message != "not yet" {
 			t.Fatalf("gate reason %q: condition %+v", reason, cond)
 		}
+	}
+}
+
+func TestAddonRemovesAbsentObjects(t *testing.T) {
+	stale := &corev1.ConfigMap{ObjectMeta: metav1.ObjectMeta{Namespace: release.SystemNamespace, Name: "stale"}}
+	c := fake.NewClientBuilder().WithObjects(stale).Build()
+	r := &AddonReconciler{Client: c}
+	absent := func(name string) *unstructured.Unstructured {
+		return &unstructured.Unstructured{Object: map[string]any{"apiVersion": "v1", "kind": "ConfigMap", "metadata": map[string]any{"name": name, "namespace": release.SystemNamespace}}}
+	}
+	rendered := Rendered{Absent: []*unstructured.Unstructured{absent("stale"), absent("never-existed")}}
+	for _, obj := range rendered.Absent {
+		obj.SetLabels(map[string]string{release.ComponentLabel: "x"})
+	}
+	stale.Labels = map[string]string{release.ComponentLabel: "x"}
+	c = fake.NewClientBuilder().WithObjects(stale, &corev1.ConfigMap{ObjectMeta: metav1.ObjectMeta{Namespace: release.SystemNamespace, Name: "foreign"}}).Build()
+	r = &AddonReconciler{Client: c}
+	rendered.Absent = append(rendered.Absent, absent("foreign"))
+	rendered.Absent[2].SetLabels(map[string]string{release.ComponentLabel: "x"})
+	for range 2 {
+		condition, applied := r.applyRendered(context.Background(), Addon{Name: "x", Condition: "XReady"}, rendered)
+		if !applied {
+			t.Fatalf("condition %+v", condition)
+		}
+	}
+	err := c.Get(context.Background(), client.ObjectKeyFromObject(stale), &corev1.ConfigMap{})
+	if !apierrors.IsNotFound(err) {
+		t.Fatalf("stale object must be gone: %v", err)
+	}
+	if err := c.Get(context.Background(), client.ObjectKey{Namespace: release.SystemNamespace, Name: "foreign"}, &corev1.ConfigMap{}); err != nil {
+		t.Fatalf("an object without the label must survive: %v", err)
 	}
 }

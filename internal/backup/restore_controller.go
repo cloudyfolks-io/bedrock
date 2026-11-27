@@ -437,8 +437,8 @@ func (r *RestoreReconciler) leftovers(ctx context.Context, scope Scope, vm *v1al
 	for _, object := range own {
 		names = append(names, object.Name)
 	}
-	for _, disk := range vm.Spec.Disks {
-		ending, err := r.oldObjects(ctx, scope.Namespace, v1alpha1.TenantLabels("Volume", disk.VolumeRef, scope.Tenant, scope.Project))
+	for _, ref := range v1alpha1.VolumeRefs(*vm) {
+		ending, err := r.oldObjects(ctx, scope.Namespace, v1alpha1.TenantLabels("Volume", ref, scope.Tenant, scope.Project))
 		if err != nil {
 			return nil, err
 		}
@@ -482,8 +482,8 @@ func (r *RestoreReconciler) prepare(ctx context.Context, vmr *v1alpha1.VirtualMa
 
 func underlyingSelectors(scope Scope, vm *v1alpha1.VirtualMachine) []map[string]string {
 	selectors := []map[string]string{v1alpha1.TenantLabels("VirtualMachine", vm.Name, scope.Tenant, scope.Project)}
-	for _, disk := range vm.Spec.Disks {
-		selectors = append(selectors, v1alpha1.TenantLabels("Volume", disk.VolumeRef, scope.Tenant, scope.Project))
+	for _, ref := range v1alpha1.VolumeRefs(*vm) {
+		selectors = append(selectors, v1alpha1.TenantLabels("Volume", ref, scope.Tenant, scope.Project))
 	}
 	return selectors
 }
@@ -518,9 +518,9 @@ func (r *RestoreReconciler) holdAll(ctx context.Context, restore string, vm *v1a
 	if err := r.patchHold(ctx, vm, WithHold(vm.Annotations, restore)); err != nil {
 		return err
 	}
-	for _, disk := range vm.Spec.Disks {
+	for _, ref := range v1alpha1.VolumeRefs(*vm) {
 		volume := &v1alpha1.Volume{}
-		err := r.Client.Get(ctx, types.NamespacedName{Namespace: vm.Namespace, Name: disk.VolumeRef}, volume)
+		err := r.Client.Get(ctx, types.NamespacedName{Namespace: vm.Namespace, Name: ref}, volume)
 		if apierrors.IsNotFound(err) {
 			continue
 		}

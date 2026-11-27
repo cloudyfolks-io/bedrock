@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -103,9 +104,67 @@ func TestGatherWithoutIOMMU(t *testing.T) {
 	}
 }
 
+func TestGatherListsSwapDevices(t *testing.T) {
+	root := fakeRoot(t, true)
+	if err := os.MkdirAll(filepath.Join(root, "proc"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	swaps := "Filename\t\t\t\tType\t\tSize\t\tUsed\t\tPriority\n/swap.img                               file\t\t8388604\t\t0\t\t-2\n/dev/zram0                              partition\t4194300\t\t0\t\t100\n"
+	if err := os.WriteFile(filepath.Join(root, "proc", "swaps"), []byte(swaps), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	facts, err := Gather(context.Background(), fakeIP(), root, func(string) (uint64, error) { return 50 << 30, nil }, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(facts.Swaps) != 2 || facts.Swaps[0] != "/swap.img" || facts.Swaps[1] != "/dev/zram0" {
+		t.Fatalf("swaps %v", facts.Swaps)
+	}
+}
+
+func TestGatherWithoutSwap(t *testing.T) {
+	root := fakeRoot(t, true)
+	if err := os.MkdirAll(filepath.Join(root, "proc"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "proc", "swaps"), []byte("Filename\t\t\t\tType\t\tSize\t\tUsed\t\tPriority\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	facts, err := Gather(context.Background(), fakeIP(), root, func(string) (uint64, error) { return 50 << 30, nil }, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(facts.Swaps) != 0 {
+		t.Fatalf("swaps %v", facts.Swaps)
+	}
+}
+
+func TestGatherWithoutProcSwapsMeansNoSwap(t *testing.T) {
+	root := fakeRoot(t, true)
+	facts, err := Gather(context.Background(), fakeIP(), root, func(string) (uint64, error) { return 50 << 30, nil }, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(facts.Swaps) != 0 {
+		t.Fatalf("swaps %v", facts.Swaps)
+	}
+}
+
+func TestGatherFailsWhenProcSwapsCannotBeRead(t *testing.T) {
+	root := fakeRoot(t, true)
+	if err := os.MkdirAll(filepath.Join(root, "proc", "swaps"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	_, err := Gather(context.Background(), fakeIP(), root, func(string) (uint64, error) { return 50 << 30, nil }, 0)
+	if err == nil || !strings.Contains(err.Error(), "swaps") {
+		t.Fatalf("err %v", err)
+	}
+}
+
 func TestOSKey(t *testing.T) {
 	cases := map[[2]string]string{
 		{"ubuntu", "24.04"}: "ubuntu-24.04",
+		{"ubuntu", "26.04"}: "ubuntu-26.04",
 		{"debian", "13"}:    "debian-13",
 		{"fedora", "43"}:    "fedora-43",
 		{"rhel", "9.4"}:     "rhel-9",
@@ -117,5 +176,64 @@ func TestOSKey(t *testing.T) {
 		if got := OSKey(in[0], in[1]); got != want {
 			t.Fatalf("OSKey(%q,%q)=%q want %q", in[0], in[1], got, want)
 		}
+	}
+}
+
+func TestGatherReadsTheKernelRelease(t *testing.T) {
+	root := fakeRoot(t, true)
+	if err := os.MkdirAll(filepath.Join(root, "proc", "sys", "kernel"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "proc", "sys", "kernel", "osrelease"), []byte("6.8.0-45-generic\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	facts, err := Gather(context.Background(), fakeIP(), root, func(string) (uint64, error) { return 50 << 30, nil }, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if facts.Kernel != "6.8.0-45-generic" {
+		t.Fatalf("kernel %q", facts.Kernel)
+	}
+}
+
+func TestInterfaceCIDRMasksTheAddress(t *testing.T) {
+	got, err := InterfaceCIDR(context.Background(), fakeIP(), "bond0.10")
+	if err != nil || got != "10.0.10.0/24" {
+		t.Fatalf("cidr %q err %v", got, err)
+	}
+}
+
+func TestInterfaceCIDRNeedsAPrefixLength(t *testing.T) {
+	exec := &FakeExec{Responses: map[string]string{"ip -json -4 addr show dev eth0": `[{"addr_info":[{"family":"inet","local":"10.0.10.11"}]}]`}}
+	if got, err := InterfaceCIDR(context.Background(), exec, "eth0"); err == nil {
+		t.Fatalf("cidr %q without a prefix length", got)
+	}
+}
+
+func addrExec(addrs string) *FakeExec {
+	return &FakeExec{Responses: map[string]string{"ip -json -4 addr show dev eth0": `[{"addr_info":[` + addrs + `]}]`}}
+}
+
+func TestInterfaceCIDRIgnoresHostAddresses(t *testing.T) {
+	exec := addrExec(`{"family":"inet","local":"192.168.5.15","prefixlen":24},{"family":"inet","local":"192.168.5.250","prefixlen":32}`)
+	got, err := InterfaceCIDR(context.Background(), exec, "eth0")
+	if err != nil || got != "192.168.5.0/24" {
+		t.Fatalf("cidr %q err %v", got, err)
+	}
+}
+
+func TestInterfaceCIDRRefusesSeveralNetworks(t *testing.T) {
+	exec := addrExec(`{"family":"inet","local":"10.0.10.11","prefixlen":24},{"family":"inet","local":"10.0.20.11","prefixlen":24}`)
+	_, err := InterfaceCIDR(context.Background(), exec, "eth0")
+	if err == nil || !strings.Contains(err.Error(), "managementCIDR") {
+		t.Fatalf("err %v", err)
+	}
+}
+
+func TestInterfaceCIDRRefusesOnlyHostAddresses(t *testing.T) {
+	exec := addrExec(`{"family":"inet","local":"10.0.10.10","prefixlen":32}`)
+	_, err := InterfaceCIDR(context.Background(), exec, "eth0")
+	if err == nil || !strings.Contains(err.Error(), "managementCIDR") {
+		t.Fatalf("err %v", err)
 	}
 }

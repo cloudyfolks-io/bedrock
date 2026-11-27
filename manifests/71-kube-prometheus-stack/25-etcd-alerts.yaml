@@ -1,0 +1,19 @@
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: bedrock-etcd
+  namespace: monitoring
+spec:
+  groups:
+    - name: bedrock.etcd
+      rules:
+        - alert: EtcdDatabaseNearQuota
+          expr: (max(etcd_mvcc_db_total_size_in_bytes) or max(apiserver_storage_size_bytes)) > 1503238554
+          for: 15m
+          labels:
+            severity: warning
+          annotations:
+            summary: The etcd database is above 70 percent of its quota.
+            description: The etcd database is larger than 1503238554 bytes. The quota is 2147483648 bytes. At the quota etcd refuses all writes. The agent defragments each member every Sunday. Defragment the members by hand if the size stays high.
+
+            runbook_url: https://github.com/cloudyfolks-io/bedrock/blob/main/docs/alerts.md#etcddatabasenearquota

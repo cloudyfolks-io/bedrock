@@ -10,6 +10,8 @@ spec:
     host: ${PLATFORM_HOST}
   network:
     managementInterface: ${IFACE}
+    fabric:
+      ovnTLS: ${OVN_TLS}
   storage:
     replicas: 3
     adopt:
@@ -22,15 +24,16 @@ spec:
         filesystem: filesystem-data
         objectStore: objectstore
       cephx:
+        allowedCiphers:
+          - aes256k
         daemon:
           keyRotationPolicy: KeyGeneration
           keyGeneration: 2
-          keyType: aes256k
         csi:
           keyRotationPolicy: KeyGeneration
-          keyGeneration: 2
+          keyGeneration: 3
           keepPriorKeyCountMax: 1
-          keyType: aes
+          keyType: aes256k
         rbdMirrorPeer:
           keyRotationPolicy: KeyGeneration
           keyGeneration: 2

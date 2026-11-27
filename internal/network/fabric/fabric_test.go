@@ -1,8 +1,10 @@
 package fabric
 
 import (
+	"maps"
 	"reflect"
 	"testing"
+	"time"
 
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 )
@@ -25,7 +27,7 @@ func equal(t *testing.T, got, want map[string]any) {
 
 func TestVpcBuildsPrivateSpec(t *testing.T) {
 	u := Vpc(Meta{Name: "acme"}, VpcSpec{})
-	equal(t, spec(t, u), map[string]any{})
+	equal(t, spec(t, u), vpcDefaults(nil))
 	if u.GetKind() != "Vpc" || u.GetAPIVersion() != "fabric.cloudyfolks.io/v1" || u.GetName() != "acme" {
 		t.Fatalf("unexpected identity %v", u.Object)
 	}
@@ -33,36 +35,73 @@ func TestVpcBuildsPrivateSpec(t *testing.T) {
 
 func TestVpcBuildsL2Spec(t *testing.T) {
 	u := Vpc(Meta{Name: "acme"}, VpcSpec{EnableExternal: true, ExtraExternalSubnets: []string{"provider-public"}, DefaultRoute: &StaticRoute{CIDR: "0.0.0.0/0", NextHop: "192.0.2.1"}})
-	equal(t, spec(t, u), map[string]any{
+	equal(t, spec(t, u), vpcDefaults(map[string]any{
 		"enableExternal":       true,
 		"extraExternalSubnets": []any{"provider-public"},
 		"staticRoutes":         []any{map[string]any{"policy": "policyDst", "cidr": "0.0.0.0/0", "nextHopIP": "192.0.2.1"}},
-	})
+	}))
 }
 
 func TestVpcBuildsBGPSpec(t *testing.T) {
-	u := Vpc(Meta{Name: "acme"}, VpcSpec{EnableExternal: true, ExtraExternalSubnets: []string{"provider-transit"}, Dynamic: &DynamicRouting{VrfID: 1000, ExternalSubnet: "provider-transit", Redistribute: []string{"nat", "lb"}}})
-	equal(t, spec(t, u)["dynamicRouting"].(map[string]any), map[string]any{"enabled": true, "redistribute": []any{"nat", "lb"}, "vrfId": int64(1000), "externalSubnet": "provider-transit"})
+	u := Vpc(Meta{Name: "acme"}, VpcSpec{EnableExternal: true, EnableBfd: true, ExtraExternalSubnets: []string{"provider-transit"}, Dynamic: &DynamicRouting{VrfID: 1000, ExternalSubnet: "provider-transit", Redistribute: []string{"nat", "lb"}, LocalOnly: true}})
+	got := spec(t, u)
+	if got["enableBfd"] != true {
+		t.Fatalf("unexpected spec %#v", got)
+	}
+	equal(t, got["dynamicRouting"].(map[string]any), map[string]any{"enabled": true, "redistribute": []any{"nat", "lb"}, "vrfId": int64(1000), "externalSubnet": "provider-transit", "localOnly": true})
+}
+
+func vpcDefaults(overrides map[string]any) map[string]any {
+	out := map[string]any{
+		"enableExternal":       false,
+		"enableBfd":            false,
+		"extraExternalSubnets": []any{},
+		"staticRoutes":         []any{},
+		"vpcPeerings":          []any{},
+		"dynamicRouting":       map[string]any{"enabled": false},
+	}
+	maps.Copy(out, overrides)
+	return out
+}
+
+func TestVpcWritesEveryManagedFieldWhenEmpty(t *testing.T) {
+	got := spec(t, Vpc(Meta{Name: "acme"}, VpcSpec{}))
+	for _, field := range []string{"enableExternal", "enableBfd", "extraExternalSubnets", "staticRoutes", "vpcPeerings", "dynamicRouting"} {
+		if _, found := got[field]; !found {
+			t.Fatalf("spec.%s is missing: %#v", field, got)
+		}
+	}
+}
+
+func TestVpcWritesBfdOffByDefault(t *testing.T) {
+	u := Vpc(Meta{Name: "acme"}, VpcSpec{EnableExternal: true, Dynamic: &DynamicRouting{VrfID: 1000, ExternalSubnet: "provider-transit", Redistribute: []string{"nat"}}})
+	got := spec(t, u)
+	if got["enableBfd"] != false {
+		t.Fatalf("unexpected spec %#v", got)
+	}
+	if _, found := got["dynamicRouting"].(map[string]any)["localOnly"]; found {
+		t.Fatalf("unexpected spec %#v", got)
+	}
 }
 
 func TestSubnetBuild(t *testing.T) {
-	u := Subnet(Meta{Name: "s"}, SubnetSpec{Vpc: "acme", CIDR: "10.100.1.0/24", Gateway: "10.100.1.1", Provider: "default.t1-prod.fabric", ExcludeIPs: []string{"10.100.1.2..10.100.1.5"}, DHCP: true, DHCPOptions: "dns_server=1.1.1.1;8.8.8.8"})
+	u := Subnet(Meta{Name: "s"}, SubnetSpec{Vpc: "acme", CIDR: "10.100.1.0/24", Gateway: "10.100.1.1", Provider: "default.t1-prod.fabric", ExcludeIPs: []string{"10.100.1.2..10.100.1.5"}, DHCP: true, DHCPOptions: "router=10.100.1.1,mtu=1500,dns_server=1.1.1.1;8.8.8.8", MTU: 1500})
 	equal(t, spec(t, u), map[string]any{
 		"vpc": "acme", "protocol": "IPv4", "cidrBlock": "10.100.1.0/24", "gateway": "10.100.1.1",
 		"excludeIps": []any{"10.100.1.2..10.100.1.5"}, "provider": "default.t1-prod.fabric",
 		"gatewayType": "distributed", "natOutgoing": false, "private": false, "disableGatewayCheck": true,
-		"enableDHCP": true, "dhcpV4Options": "dns_server=1.1.1.1;8.8.8.8",
+		"enableDHCP": true, "dhcpV4Options": "router=10.100.1.1,mtu=1500,dns_server=1.1.1.1;8.8.8.8", "mtu": int64(1500), "acls": []any{},
 	})
 }
 
 func TestUnderlaySubnetBuild(t *testing.T) {
 	u := Subnet(Meta{Name: "provider-public"}, SubnetSpec{CIDR: "192.0.2.0/24", Gateway: "192.0.2.1", Vlan: "public"})
-	equal(t, spec(t, u), map[string]any{"protocol": "IPv4", "cidrBlock": "192.0.2.0/24", "gateway": "192.0.2.1", "vlan": "public"})
+	equal(t, spec(t, u), map[string]any{"protocol": "IPv4", "cidrBlock": "192.0.2.0/24", "gateway": "192.0.2.1", "vlan": "public", "enableDHCP": false, "acls": []any{}})
 }
 
 func TestOverlaySubnetBuild(t *testing.T) {
 	u := Subnet(Meta{Name: "provider-pool"}, SubnetSpec{CIDR: "198.51.100.0/24", Gateway: "198.51.100.1"})
-	equal(t, spec(t, u), map[string]any{"protocol": "IPv4", "cidrBlock": "198.51.100.0/24", "gateway": "198.51.100.1"})
+	equal(t, spec(t, u), map[string]any{"protocol": "IPv4", "cidrBlock": "198.51.100.0/24", "gateway": "198.51.100.1", "enableDHCP": false, "acls": []any{}})
 }
 
 func TestOvnEipBuildWithAndWithoutAddress(t *testing.T) {
@@ -88,6 +127,29 @@ func TestRouterLBRuleBuild(t *testing.T) {
 		"ovnEip": "e", "vpc": "acme", "namespace": "ns", "endpoints": []any{"10.0.0.2"},
 		"ports": []any{map[string]any{"name": "tcp-80", "port": int64(80), "targetPort": int64(8080), "protocol": "TCP"}},
 	})
+}
+
+func TestOvnSnatRuleBuildForACidr(t *testing.T) {
+	u := OvnSnatRule(Meta{Name: "r"}, "e", "acme", "10.0.0.0/8")
+	equal(t, spec(t, u), map[string]any{"ovnEip": "e", "vpc": "acme", "v4IpCidr": "10.0.0.0/8"})
+	if u.GetKind() != "OvnSnatRule" || u.GetAPIVersion() != "fabric.cloudyfolks.io/v1" {
+		t.Fatalf("unexpected identity %v", u.Object)
+	}
+}
+
+func TestOvnSnatRuleBuildForASubnet(t *testing.T) {
+	equal(t, spec(t, OvnSnatRuleForSubnet(Meta{Name: "r"}, "e", "acme-default")), map[string]any{"ovnEip": "e", "vpcSubnet": "acme-default"})
+}
+
+func TestSnatRuleReady(t *testing.T) {
+	u := OvnSnatRule(Meta{Name: "r"}, "e", "acme", "10.0.0.0/8")
+	if SnatRuleReady(u) {
+		t.Fatal("a new rule is not ready")
+	}
+	_ = unstructured.SetNestedField(u.Object, true, "status", "ready")
+	if !SnatRuleReady(u) {
+		t.Fatal("a rule with status.ready is ready")
+	}
 }
 
 func TestDNSZoneBuild(t *testing.T) {
@@ -119,9 +181,38 @@ func TestVlanBuild(t *testing.T) {
 }
 
 func TestBgpConfBuild(t *testing.T) {
-	u := BgpConf(Meta{Name: "bedrock"}, 65001, "10.0.0.9", []BgpPeer{{Address: "10.0.0.1", ASN: 65000}, {Address: "10.0.0.2", ASN: 65001}}, map[string]string{LabelExternalGateway: "true"})
+	u := BgpConf(Meta{Name: "bedrock"}, BgpConfSpec{LocalASN: 65001, RouterID: "10.0.0.9", Peers: []BgpPeer{{Address: "10.0.0.1", ASN: 65000}, {Address: "10.0.0.2", ASN: 65001}}, NodeSelector: map[string]string{LabelExternalGateway: "true"}})
 	got := spec(t, u)
 	if got["localASN"] != int64(65001) || got["routerId"] != "10.0.0.9" || got["peerASN"] != int64(65000) || len(got["peers"].([]any)) != 2 || !reflect.DeepEqual(got["neighbours"], []any{"10.0.0.1", "10.0.0.2"}) {
+		t.Fatalf("unexpected spec %#v", got)
+	}
+	equal(t, got["nodeSelector"].(map[string]any), map[string]any{LabelExternalGateway: "true"})
+	for _, key := range []string{"holdTime", "keepaliveTime", "gracefulRestart", "advertiseFilter", "redistributeTables"} {
+		if _, found := got[key]; found {
+			t.Fatalf("%s must be absent: %#v", key, got)
+		}
+	}
+	if _, found := got["peers"].([]any)[0].(map[string]any)["bfd"]; found {
+		t.Fatalf("bfd must be absent: %#v", got)
+	}
+}
+
+func TestBgpConfBuildTuning(t *testing.T) {
+	u := BgpConf(Meta{Name: "bedrock"}, BgpConfSpec{
+		LocalASN: 65001,
+		Peers:    []BgpPeer{{Address: "10.0.0.1", ASN: 65000, BFD: true}, {Address: "10.0.0.2", ASN: 65001}},
+		HoldTime: 9 * time.Second, KeepaliveTime: 3 * time.Second, GracefulRestart: true,
+		AdvertiseFilter:    []string{"91.246.31.0/24 ge 32 le 32"},
+		RedistributeTables: []uint32{198, 200},
+	})
+	got := spec(t, u)
+	peers := got["peers"].([]any)
+	equal(t, peers[0].(map[string]any), map[string]any{"address": "10.0.0.1", "asn": int64(65000), "bfd": true})
+	equal(t, peers[1].(map[string]any), map[string]any{"address": "10.0.0.2", "asn": int64(65001)})
+	if got["holdTime"] != "9s" || got["keepaliveTime"] != "3s" || got["gracefulRestart"] != true {
+		t.Fatalf("unexpected spec %#v", got)
+	}
+	if !reflect.DeepEqual(got["advertiseFilter"], []any{"91.246.31.0/24 ge 32 le 32"}) || !reflect.DeepEqual(got["redistributeTables"], []any{int64(198), int64(200)}) {
 		t.Fatalf("unexpected spec %#v", got)
 	}
 }
@@ -171,7 +262,19 @@ func TestIPOwner(t *testing.T) {
 }
 
 func TestVipBuild(t *testing.T) {
-	equal(t, spec(t, Vip(Meta{Name: "v"}, "ns", "ns-default-0123")), map[string]any{"namespace": "ns", "subnet": "ns-default-0123", "type": "switch_lb_vip"})
+	equal(t, spec(t, Vip(Meta{Name: "v"}, "ns", "net-lb")), map[string]any{"namespace": "ns", "subnet": "net-lb"})
+}
+
+func TestPlaneSubnetBuild(t *testing.T) {
+	u := PlaneSubnet(Meta{Name: "net-lb"}, "net", "100.69.0.0/24", "100.69.0.1")
+	if u.GetKind() != "Subnet" || u.GetName() != "net-lb" {
+		t.Fatalf("unexpected identity %v", u.Object)
+	}
+	equal(t, spec(t, u), map[string]any{
+		"protocol": "IPv4", "vpc": "net", "cidrBlock": "100.69.0.0/24", "gateway": "100.69.0.1",
+		"gatewayType": "distributed", "natOutgoing": false, "disableGatewayCheck": true,
+		"excludeIps": []any{"100.69.0.1"}, "mtu": int64(1500),
+	})
 }
 
 func TestSwitchLBRuleBuild(t *testing.T) {
@@ -188,5 +291,28 @@ func TestVipAndSwitchRuleReaders(t *testing.T) {
 	rule := &unstructured.Unstructured{Object: map[string]any{"status": map[string]any{"service": "ns/slr-r"}}}
 	if VipAddress(vip) != "10.0.0.200" || SwitchLBRuleService(rule) != "ns/slr-r" || VipAddress(rule) != "" {
 		t.Fatal("unexpected readers")
+	}
+}
+
+func TestSubnetAvailableAddressesAcceptsNumberTypes(t *testing.T) {
+	for _, value := range []any{int64(7), float64(7), "7"} {
+		u := &unstructured.Unstructured{Object: map[string]any{"status": map[string]any{"v4availableIPs": value}}}
+		if got := SubnetAvailableAddresses(u); got != 7 {
+			t.Fatalf("%T gave %d", value, got)
+		}
+	}
+}
+
+func TestVpcReadsItsExternalSpec(t *testing.T) {
+	u := Vpc(Meta{Name: "acme"}, VpcSpec{EnableExternal: true, ExtraExternalSubnets: []string{"provider-a", "provider-b"}, DefaultRoute: &StaticRoute{CIDR: "0.0.0.0/0", NextHop: "192.0.2.1"}})
+	if got := VpcSpecExternalSubnets(u); !reflect.DeepEqual(got, []string{"provider-a", "provider-b"}) {
+		t.Fatalf("subnets %v", got)
+	}
+	if got := VpcDefaultNextHop(u); got != "192.0.2.1" {
+		t.Fatalf("next hop %q", got)
+	}
+	private := Vpc(Meta{Name: "acme"}, VpcSpec{})
+	if len(VpcSpecExternalSubnets(private)) != 0 || VpcDefaultNextHop(private) != "" {
+		t.Fatal("a private Vpc has no external spec")
 	}
 }

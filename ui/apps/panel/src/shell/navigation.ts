@@ -24,7 +24,7 @@ function adminNavigation(): NavSection[] {
     {
       id: "infrastructure",
       label: msg({ id: "nav.section.infrastructure", message: "Infrastructure" }),
-      items: [item("hosts", msg({ id: "nav.item.hosts", message: "Hosts" }), "/admin"), item("upgrades", msg({ id: "nav.item.upgrades", message: "Upgrades" }), "/admin")],
+      items: [item("overview", msg({ id: "overview.title", message: "Overview" }), "/admin"), item("inventory", msg({ id: "nav.item.inventory", message: "Resource inventory" }), "/admin"), item("hosts", msg({ id: "nav.item.hosts", message: "Hosts" }), "/admin"), item("upgrades", msg({ id: "nav.item.upgrades", message: "Upgrades" }), "/admin"), item("network-peerings", msg({ id: "nav.item.networkPeerings", message: "Network peerings" }), "/admin")],
     },
     {
       id: "platform",
@@ -39,7 +39,11 @@ function adminNavigation(): NavSection[] {
     {
       id: "catalog",
       label: msg({ id: "nav.section.catalog", message: "Catalog" }),
-      items: [item("cluster-images", msg({ id: "nav.item.clusterImages", message: "Catalog images" }), "/admin")],
+      items: [
+        item("cluster-images", msg({ id: "nav.item.clusterImages", message: "Catalog images" }), "/admin"),
+        item("database-versions", msg({ id: "nav.item.databaseVersions", message: "Database versions" }), "/admin"),
+        item("database-classes", msg({ id: "nav.item.databaseClasses", message: "Database classes" }), "/admin"),
+      ],
     },
   ];
 }
@@ -50,7 +54,7 @@ function projectNavigation(project: string): NavSection[] {
     {
       id: "compute",
       label: msg({ id: "nav.section.compute", message: "Compute" }),
-      items: [item("vms", msg({ id: "nav.item.vms", message: "Virtual machines" }), base), item("ssh-keys", msg({ id: "nav.item.sshKeys", message: "SSH keys" }), base)],
+      items: [item("vms", msg({ id: "nav.item.vms", message: "Virtual machines" }), base), item("containers", msg({ id: "nav.item.containers", message: "Containers" }), base), item("builds", msg({ id: "nav.item.builds", message: "Builds" }), base), item("kubernetes-clusters", msg({ id: "nav.item.kubernetesClusters", message: "Kubernetes clusters" }), base), item("ssh-keys", msg({ id: "nav.item.sshKeys", message: "SSH keys" }), base)],
     },
     {
       id: "storage",
@@ -70,8 +74,18 @@ function projectNavigation(project: string): NavSection[] {
         item("subnets", msg({ id: "nav.item.subnets", message: "Subnets" }), base),
         item("elastic-ips", msg({ id: "nav.item.elasticIps", message: "Elastic IPs" }), base),
         item("load-balancers", msg({ id: "nav.item.loadBalancers", message: "Load balancers" }), base),
+        item("internet-gateways", msg({ id: "nav.item.internetGateways", message: "Internet gateways" }), base),
         item("dns-zones", msg({ id: "nav.item.dnsZones", message: "DNS zones" }), base),
         item("security-groups", msg({ id: "nav.item.securityGroups", message: "Security groups" }), base),
+      ],
+    },
+    {
+      id: "databases",
+      label: msg({ id: "nav.section.databases", message: "Databases" }),
+      items: [
+        item("databases", msg({ id: "nav.item.databases", message: "Databases" }), base),
+        item("database-users", msg({ id: "nav.item.databaseUsers", message: "Database users" }), base),
+        item("database-schemas", msg({ id: "nav.item.databaseSchemas", message: "Database schemas" }), base),
       ],
     },
     {
@@ -80,6 +94,14 @@ function projectNavigation(project: string): NavSection[] {
       items: [
         item("buckets", msg({ id: "nav.item.buckets", message: "Buckets" }), base),
         item("object-users", msg({ id: "nav.item.objectUsers", message: "Object storage users" }), base),
+      ],
+    },
+    {
+      id: "registry",
+      label: msg({ id: "nav.section.registry", message: "Registry" }),
+      items: [
+        item("registries", msg({ id: "nav.item.registries", message: "Registries" }), base),
+        item("registry-credentials", msg({ id: "nav.item.registryCredentials", message: "Registry credentials" }), base),
       ],
     },
   ];

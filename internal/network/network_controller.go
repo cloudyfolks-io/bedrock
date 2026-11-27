@@ -2,7 +2,9 @@ package network
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -11,6 +13,7 @@ import (
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/client-go/util/retry"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -50,11 +53,39 @@ func (r *NetworkReconciler) Reconcile(ctx context.Context, req reconcile.Request
 	if err != nil {
 		return r.publish(ctx, &network, notReadyStatus(network, ReasonVpcPending, err.Error()))
 	}
+	breach := NetworkReservedOverlap(network.Spec.Ranges(), append(SettingReserved(cfg), PlaneReserved(cfg)...))
+	vrfBreach, err := r.vrfBreach(ctx, &network, cfg)
+	if err != nil {
+		return reconcile.Result{}, err
+	}
+	if breach != nil || vrfBreach != nil {
+		provisioned, err := liveOwnedObject(ctx, r.Client, fabric.VpcGVK, VpcName(network.Name), &network)
+		if err != nil {
+			return reconcile.Result{}, err
+		}
+		refused := RefusalBeforeProvisioning(breach, vrfBreach)
+		if provisioned {
+			refused = RefusalAfterProvisioning(vrfBreach)
+		}
+		if refused != nil {
+			status := notReadyStatus(network, refused.Reason, refused.Message)
+			status.Conditions = withVRFPolicy(withRangePolicy(status.Conditions, network.Generation, nil), network.Generation, nil)
+			return r.publish(ctx, &network, status)
+		}
+	}
 	vrf, err := r.vrfID(ctx, &network, cfg)
 	if err != nil {
 		return reconcile.Result{}, err
 	}
-	spec, external := PlanVpc(VpcInput{Network: network, Config: cfg, VrfID: vrf})
+	attached, route, err := r.existingAttachment(ctx, &network)
+	if err != nil {
+		return reconcile.Result{}, err
+	}
+	peers, err := r.peerLinks(ctx, &network)
+	if err != nil {
+		return reconcile.Result{}, err
+	}
+	spec, external := PlanVpc(VpcInput{Network: network, Config: cfg, VrfID: vrf, Attached: attached, AttachedRoute: route, Peers: peers})
 	vpc := fabric.Vpc(fabric.Meta{Name: VpcName(network.Name), Labels: ObjectLabels("Network", network.Name, network.Spec.TenantRef, ""), Annotations: OwnerAnnotations(&network)}, spec)
 	if conflict, err := r.conflicts(ctx, vpc, &network); err != nil || conflict {
 		if err != nil {
@@ -62,22 +93,65 @@ func (r *NetworkReconciler) Reconcile(ctx context.Context, req reconcile.Request
 		}
 		return r.publish(ctx, &network, notReadyStatus(network, ReasonFabricConflict, fmt.Sprintf("a Fabric Vpc named %s belongs to another owner", vpc.GetName())))
 	}
+	refused, err := r.attachServices(ctx, &network, cfg, external)
+	if err != nil {
+		return reconcile.Result{}, err
+	}
+	if refused != nil {
+		return r.publish(ctx, &network, notReadyStatus(network, refused.Reason, refused.Message))
+	}
 	if err := ssa.Apply(ctx, r.Client, vpc, v1alpha1.NetworkFieldManager); err != nil {
 		return reconcile.Result{}, err
+	}
+	if conflict, err := r.applyLBPlane(ctx, &network, cfg); err != nil || conflict {
+		if err != nil {
+			return reconcile.Result{}, err
+		}
+		return r.publish(ctx, &network, notReadyStatus(network, ReasonFabricConflict, fmt.Sprintf("a Fabric Subnet named %s belongs to another owner", LBSubnetName(VpcName(network.Name)))))
 	}
 	observed, err := getObject(ctx, r.Client, fabric.VpcGVK, vpc.GetName())
 	if err != nil {
 		return reconcile.Result{}, err
 	}
-	status, err := r.observedStatus(ctx, network, observed, spec, external)
+	status, err := r.observedStatus(ctx, network, observed, spec, external, cfg)
 	if err != nil {
 		return reconcile.Result{}, err
 	}
+	status.Conditions = withVRFPolicy(withRangePolicy(status.Conditions, network.Generation, breach), network.Generation, vrfBreach)
 	return r.publish(ctx, &network, status)
 }
 
-func (r *NetworkReconciler) conflicts(ctx context.Context, vpc *unstructured.Unstructured, network *v1alpha1.Network) (bool, error) {
-	existing, err := getObject(ctx, r.Client, fabric.VpcGVK, vpc.GetName())
+func (r *NetworkReconciler) peerLinks(ctx context.Context, network *v1alpha1.Network) ([]PeerLink, error) {
+	var peerings v1alpha1.NetworkPeeringList
+	var networks v1alpha1.NetworkList
+	if err := errors.Join(r.Client.List(ctx, &peerings), r.Client.List(ctx, &networks)); err != nil {
+		return nil, err
+	}
+	return PeerLinks(network.Name, peerings.Items, networks.Items), nil
+}
+
+func (r *NetworkReconciler) applyLBPlane(ctx context.Context, network *v1alpha1.Network, cfg Config) (bool, error) {
+	meta := fabric.Meta{Name: LBSubnetName(VpcName(network.Name)), Labels: ObjectLabels("Network", network.Name, network.Spec.TenantRef, ""), Annotations: OwnerAnnotations(network)}
+	subnet := fabric.PlaneSubnet(meta, VpcName(network.Name), cfg.LoadBalancer.CIDR.String(), cfg.LoadBalancer.Gateway.String())
+	if conflict, err := r.conflicts(ctx, subnet, network); err != nil || conflict {
+		return conflict, err
+	}
+	return false, ssa.Apply(ctx, r.Client, subnet, v1alpha1.NetworkFieldManager)
+}
+
+func (r *NetworkReconciler) existingAttachment(ctx context.Context, network *v1alpha1.Network) ([]string, string, error) {
+	existing, err := getObject(ctx, r.Client, fabric.VpcGVK, VpcName(network.Name))
+	if apierrors.IsNotFound(err) || (err == nil && !ownedBy(existing, network)) {
+		return nil, "", nil
+	}
+	if err != nil {
+		return nil, "", err
+	}
+	return fabric.VpcSpecExternalSubnets(existing), fabric.VpcDefaultNextHop(existing), nil
+}
+
+func (r *NetworkReconciler) conflicts(ctx context.Context, object *unstructured.Unstructured, network *v1alpha1.Network) (bool, error) {
+	existing, err := getObject(ctx, r.Client, object.GroupVersionKind(), object.GetName())
 	if apierrors.IsNotFound(err) {
 		return false, nil
 	}
@@ -91,10 +165,13 @@ func (r *NetworkReconciler) vrfID(ctx context.Context, network *v1alpha1.Network
 	if cfg.EIPMode != EIPModeBGP || !network.Spec.EnableExternal {
 		return 0, nil
 	}
+	if network.Spec.VrfID != nil {
+		return uint32(*network.Spec.VrfID), nil
+	}
 	if recorded, err := strconv.ParseUint(network.Annotations[AnnotationVrfID], 10, 32); err == nil {
 		return uint32(recorded), nil
 	}
-	used, err := r.usedVrfIDs(ctx)
+	used, err := r.usedVrfIDs(ctx, network)
 	if err != nil {
 		return 0, err
 	}
@@ -105,24 +182,53 @@ func (r *NetworkReconciler) vrfID(ctx context.Context, network *v1alpha1.Network
 	return r.recordVrfID(ctx, network, id)
 }
 
-func (r *NetworkReconciler) usedVrfIDs(ctx context.Context) ([]uint32, error) {
-	var used []uint32
+func (r *NetworkReconciler) vrfBreach(ctx context.Context, network *v1alpha1.Network, cfg Config) (*Violation, error) {
+	if network.Spec.VrfID == nil {
+		return nil, nil
+	}
+	if reserved := VrfReserved(uint32(*network.Spec.VrfID), cfg.BGP.RedistributeTables); reserved != nil {
+		return reserved, nil
+	}
+	var networks v1alpha1.NetworkList
+	if err := r.live().List(ctx, &networks); err != nil {
+		return nil, err
+	}
+	foreign, err := r.vpcVrfIDs(ctx, network)
+	if err != nil {
+		return nil, err
+	}
+	return VrfInUse(*network, networks.Items, foreign), nil
+}
+
+func (r *NetworkReconciler) vpcVrfIDs(ctx context.Context, except *v1alpha1.Network) ([]uint32, error) {
+	var ids []uint32
 	vpcs, err := listObjects(ctx, r.Client, fabric.VpcGVK)
 	if err != nil {
 		return nil, err
 	}
 	for _, vpc := range vpcs {
-		if id, found, _ := unstructured.NestedInt64(vpc.Object, "spec", "dynamicRouting", "vrfId"); found {
-			used = append(used, uint32(id))
+		if ownedBy(vpc, except) {
+			continue
 		}
+		if id, found, _ := unstructured.NestedInt64(vpc.Object, "spec", "dynamicRouting", "vrfId"); found {
+			ids = append(ids, uint32(id))
+		}
+	}
+	return ids, nil
+}
+
+func (r *NetworkReconciler) usedVrfIDs(ctx context.Context, network *v1alpha1.Network) ([]uint32, error) {
+	used, err := r.vpcVrfIDs(ctx, network)
+	if err != nil {
+		return nil, err
 	}
 	var networks v1alpha1.NetworkList
 	if err := r.live().List(ctx, &networks); err != nil {
 		return nil, err
 	}
 	for _, n := range networks.Items {
-		if id, err := strconv.ParseUint(n.Annotations[AnnotationVrfID], 10, 32); err == nil {
-			used = append(used, uint32(id))
+		if id, held := HeldVrfID(n); held {
+			used = append(used, id)
 		}
 	}
 	return used, nil
@@ -154,7 +260,7 @@ func withAnnotation(annotations map[string]string, key, value string) map[string
 	return out
 }
 
-func (r *NetworkReconciler) observedStatus(ctx context.Context, network v1alpha1.Network, vpc *unstructured.Unstructured, spec fabric.VpcSpec, external External) (v1alpha1.NetworkStatus, error) {
+func (r *NetworkReconciler) observedStatus(ctx context.Context, network v1alpha1.Network, vpc *unstructured.Unstructured, spec fabric.VpcSpec, external External, cfg Config) (v1alpha1.NetworkStatus, error) {
 	subnets, err := r.acceptedSubnets(ctx, network)
 	if err != nil {
 		return v1alpha1.NetworkStatus{}, err
@@ -168,26 +274,38 @@ func (r *NetworkReconciler) observedStatus(ctx context.Context, network v1alpha1
 	if !external.Requested {
 		meta.RemoveStatusCondition(&conditions, ConditionExternalReady)
 	} else {
-		conditions = withCondition(conditions, r.externalCondition(ctx, network, vpc, spec, external))
+		condition, err := r.externalCondition(ctx, network, vpc, spec, external, cfg)
+		if err != nil {
+			return v1alpha1.NetworkStatus{}, err
+		}
+		conditions = withCondition(conditions, condition)
 	}
 	return v1alpha1.NetworkStatus{
-		CommonStatus: v1alpha1.CommonStatus{ObservedGeneration: network.Generation, Conditions: conditions},
-		VPC:          vpc.GetName(),
-		Subnets:      subnets,
+		CommonStatus:     v1alpha1.CommonStatus{ObservedGeneration: network.Generation, Conditions: conditions},
+		VPC:              vpc.GetName(),
+		Subnets:          subnets,
+		ServicesIdentity: network.Status.ServicesIdentity,
 	}, nil
 }
 
-func (r *NetworkReconciler) externalCondition(ctx context.Context, network v1alpha1.Network, vpc *unstructured.Unstructured, spec fabric.VpcSpec, external External) metav1.Condition {
+func (r *NetworkReconciler) externalCondition(ctx context.Context, network v1alpha1.Network, vpc *unstructured.Unstructured, spec fabric.VpcSpec, external External, cfg Config) (metav1.Condition, error) {
 	if external.Reason != ReasonConnected {
-		return falseCondition(ConditionExternalReady, network.Generation, external.Reason, external.Message)
+		return falseCondition(ConditionExternalReady, network.Generation, external.Reason, external.Message), nil
 	}
-	if message := r.externalGap(ctx, vpc, spec); message != "" {
-		return falseCondition(ConditionExternalReady, network.Generation, ReasonPending, message)
+	if message := r.externalGap(ctx, vpc, spec, cfg); message != "" {
+		return falseCondition(ConditionExternalReady, network.Generation, ReasonPending, message), nil
 	}
-	return trueCondition(ConditionExternalReady, network.Generation, ReasonConnected)
+	gap, err := frrAgentGap(ctx, r.Client, cfg)
+	if err != nil {
+		return metav1.Condition{}, err
+	}
+	if gap != nil {
+		return falseCondition(ConditionExternalReady, network.Generation, gap.Reason, gap.Message), nil
+	}
+	return trueCondition(ConditionExternalReady, network.Generation, ReasonConnected), nil
 }
 
-func (r *NetworkReconciler) externalGap(ctx context.Context, vpc *unstructured.Unstructured, spec fabric.VpcSpec) string {
+func (r *NetworkReconciler) externalGap(ctx context.Context, vpc *unstructured.Unstructured, spec fabric.VpcSpec, cfg Config) string {
 	enabled, _, _ := unstructured.NestedBool(vpc.Object, "status", "enableExternal")
 	if !enabled {
 		return "Fabric has not enabled the external connection yet"
@@ -200,6 +318,12 @@ func (r *NetworkReconciler) externalGap(ctx context.Context, vpc *unstructured.U
 		port, err := getObject(ctx, r.Client, fabric.OvnEipGVK, vpc.GetName()+"-"+subnet)
 		if err != nil || fabric.EipAddress(port) == "" || !fabric.EipReady(port) {
 			return fmt.Sprintf("the router port of %s has no address yet", subnet)
+		}
+	}
+	if services, ok := ServicesSubnet(cfg); ok && containsString(spec.ExtraExternalSubnets, services) {
+		identity, err := getObject(ctx, r.Client, fabric.OvnEipGVK, ServicesIdentityName(vpc.GetName()))
+		if err != nil || fabric.EipAddress(identity) == "" || !fabric.EipReady(identity) {
+			return "the services identity address has no address yet"
 		}
 	}
 	return ""
@@ -219,7 +343,7 @@ func (r *NetworkReconciler) acceptedSubnets(ctx context.Context, network v1alpha
 	if err != nil {
 		return nil, err
 	}
-	accepted := AcceptedSubnets(facts, VerdictsFor(network.Spec.CIDR, facts))
+	accepted := AcceptedSubnets(facts, VerdictsFor(network.Spec.Ranges(), facts))
 	out := make([]v1alpha1.NetworkSubnetStatus, len(accepted))
 	for i, s := range accepted {
 		out[i] = v1alpha1.NetworkSubnetStatus{Namespace: s.Namespace, Name: s.Name, CIDR: s.CIDR}
@@ -292,12 +416,30 @@ func (r *NetworkReconciler) finalize(ctx context.Context, network *v1alpha1.Netw
 		r.writeTerminatingStatus(ctx, network, status)
 		return reconcile.Result{RequeueAfter: terminatingRequeue}, nil
 	}
-	gone, err := r.deleteOwnedVpc(ctx, network)
+	holders, err := r.planeHolders(ctx, network)
 	if err != nil {
-		ctrl.LoggerFrom(ctx).Error(err, "delete the Vpc of the Network", "network", network.Name)
+		ctrl.LoggerFrom(ctx).Error(err, "list the load balancers of the plane", "network", network.Name)
+		return reconcile.Result{RequeueAfter: terminatingRequeue}, nil
+	}
+	if len(holders) > 0 {
+		r.writeTerminatingStatus(ctx, network, notReadyStatus(*network, ReasonTerminating, remainingBalancers(holders)))
+		return reconcile.Result{RequeueAfter: terminatingRequeue}, nil
+	}
+	planeGone, err := r.deleteServicesPlane(ctx, network)
+	if err != nil {
+		ctrl.LoggerFrom(ctx).Error(err, "delete the services plane of the Network", "network", network.Name)
+		return reconcile.Result{RequeueAfter: terminatingRequeue}, nil
+	}
+	if !planeGone {
+		return reconcile.Result{RequeueAfter: terminatingRequeue}, nil
+	}
+	gone, err := r.deleteOwnedFabric(ctx, network)
+	if err != nil {
+		ctrl.LoggerFrom(ctx).Error(err, "delete the Fabric objects of the Network", "network", network.Name)
 		return reconcile.Result{RequeueAfter: terminatingRequeue}, nil
 	}
 	if !gone {
+		r.writeTerminatingStatus(ctx, network, notReadyStatus(*network, ReasonTerminating, fmt.Sprintf("waiting for Fabric to delete the load balancer plane Subnet %s and the Vpc", LBSubnetName(VpcName(network.Name)))))
 		return reconcile.Result{RequeueAfter: terminatingRequeue}, nil
 	}
 	return reconcile.Result{}, releaseFinalizer(ctx, r.Client, network)
@@ -314,6 +456,32 @@ func (r *NetworkReconciler) writeTerminatingStatus(ctx context.Context, network 
 	}
 }
 
+func (r *NetworkReconciler) planeHolders(ctx context.Context, network *v1alpha1.Network) ([]string, error) {
+	vips, err := listObjects(ctx, r.Client, fabric.VipGVK)
+	if err != nil {
+		return nil, err
+	}
+	plane := LBSubnetName(VpcName(network.Name))
+	var holders []string
+	for _, vip := range vips {
+		if subnet, _, _ := unstructured.NestedString(vip.Object, "spec", "subnet"); subnet != plane {
+			continue
+		}
+		if owner, _, ok := OwnerOf(vip); ok {
+			holders = append(holders, owner.String())
+			continue
+		}
+		holders = append(holders, "Vip "+vip.GetName())
+	}
+	slices.Sort(holders)
+	return holders, nil
+}
+
+func remainingBalancers(holders []string) string {
+	shown := holders[:min(len(holders), remainingSubnetsShown)]
+	return fmt.Sprintf("%d internal load balancers hold the load balancer plane: %s; delete them", len(holders), strings.Join(shown, ", "))
+}
+
 func remainingSubnets(facts []SubnetFacts) string {
 	names := make([]string, 0, remainingSubnetsShown)
 	for i, f := range facts {
@@ -325,20 +493,27 @@ func remainingSubnets(facts []SubnetFacts) string {
 	return fmt.Sprintf("%d subnets remain: %s", len(facts), strings.Join(names, ", "))
 }
 
-func (r *NetworkReconciler) deleteOwnedVpc(ctx context.Context, network *v1alpha1.Network) (bool, error) {
-	vpc, err := getObject(ctx, r.Client, fabric.VpcGVK, VpcName(network.Name))
+func (r *NetworkReconciler) deleteOwnedFabric(ctx context.Context, network *v1alpha1.Network) (bool, error) {
+	if gone, err := r.deleteOwned(ctx, network, fabric.SubnetGVK, LBSubnetName(VpcName(network.Name))); err != nil || !gone {
+		return false, err
+	}
+	return r.deleteOwned(ctx, network, fabric.VpcGVK, VpcName(network.Name))
+}
+
+func (r *NetworkReconciler) deleteOwned(ctx context.Context, network *v1alpha1.Network, gvk schema.GroupVersionKind, name string) (bool, error) {
+	object, err := getObject(ctx, r.Client, gvk, name)
 	if apierrors.IsNotFound(err) {
 		return true, nil
 	}
 	if err != nil {
 		return false, err
 	}
-	if !ownedBy(vpc, network) {
+	if !ownedBy(object, network) {
 		return true, nil
 	}
-	if err := client.IgnoreNotFound(r.Client.Delete(ctx, vpc)); err != nil {
+	if err := client.IgnoreNotFound(r.Client.Delete(ctx, object)); err != nil {
 		return false, err
 	}
-	present, err := exists(ctx, r.Client, fabric.VpcGVK, vpc.GetName())
+	present, err := exists(ctx, r.Client, gvk, name)
 	return !present, err
 }

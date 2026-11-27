@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/cloudyfolks-io/bedrock/api/v1alpha1"
+	"github.com/cloudyfolks-io/bedrock/internal/cephx"
 	"github.com/cloudyfolks-io/bedrock/internal/host"
 )
 
@@ -47,17 +48,46 @@ func checks(facts host.Facts, devices []host.Device, cfg v1alpha1.ClusterConfig,
 		check("arch", true, facts.Arch == "amd64" || facts.Arch == "arm64", fmt.Sprintf("unsupported architecture %s", facts.Arch)),
 		check("os", true, slices.Contains(supportedOS, osKey), fmt.Sprintf("%s is not in the supported list %v", osKey, supportedOS)),
 		check("cgroup-v2", true, facts.CgroupV2, "cgroup v2 is required"),
+		check("swap", true, len(facts.Swaps) == 0, swapMessage(facts.Swaps)),
 		check("kvm", false, facts.KVM, "/dev/kvm not found, virtual machines will not start on this host"),
 		check("ntp", false, facts.NTPSynced, "clock is not NTP synchronized"),
 		check("disk", false, facts.FreeVarLibBytes >= minFree, fmt.Sprintf("%d GiB free on /var/lib, at least %d GiB recommended", facts.FreeVarLibBytes>>30, minFree>>30)),
 		check("management-interface", true, slices.Contains(facts.Interfaces, cfg.Spec.Network.ManagementInterface), fmt.Sprintf("interface %s not found", cfg.Spec.Network.ManagementInterface)),
 	}
 	results = append(results, vipResults...)
+	results = append(results, cephxKernelResults(cfg, facts)...)
 	results = append(results, check("iommu", false, facts.IOMMUGroups > 0, "no IOMMU groups found, hardware passthrough will not work"))
 	for _, device := range devices {
 		results = append(results, deviceCheck(device, adoptedFSID(cfg)))
 	}
 	return results
+}
+
+func swapMessage(swaps []string) string {
+	var zram, others []string
+	for _, device := range swaps {
+		if strings.HasPrefix(device, "/dev/zram") {
+			zram = append(zram, device)
+		} else {
+			others = append(others, device)
+		}
+	}
+	var fixes []string
+	if len(others) > 0 {
+		fixes = append(fixes, fmt.Sprintf("%s: run swapoff and remove its entry from /etc/fstab", strings.Join(others, ", ")))
+	}
+	if len(zram) > 0 {
+		fixes = append(fixes, fmt.Sprintf("%s: run swapoff and disable the zram swap service that creates it, for example the zram generator or zram tools unit", strings.Join(zram, ", ")))
+	}
+	return "swap is active, " + strings.Join(fixes, "; ")
+}
+
+func cephxKernelResults(cfg v1alpha1.ClusterConfig, facts host.Facts) []Result {
+	if cfg.Spec.Storage.CephxCipher != cephx.Aes256k {
+		return nil
+	}
+	problem := cephx.KernelProblem(facts.Hostname, facts.Kernel)
+	return []Result{check("cephx-kernel", true, problem == "", problem)}
 }
 
 func minFreeFor(cfg v1alpha1.ClusterConfig) uint64 {

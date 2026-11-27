@@ -45,6 +45,7 @@ func TestOperatorRules(t *testing.T) {
 	requireGrants(t, rules, []grant{
 		{"kubevirt.io", "virtualmachines", "create"}, {"kubevirt.io", "virtualmachines", "patch"}, {"kubevirt.io", "virtualmachines", "watch"},
 		{"kubevirt.io", "virtualmachineinstances", "watch"}, {"kubevirt.io", "virtualmachineinstances", "get"},
+		{"kubevirt.io", "virtualmachineinstancemigrations", "list"}, {"kubevirt.io", "virtualmachineinstancemigrations", "watch"},
 		{"snapshot.kubevirt.io", "virtualmachinesnapshots", "list"}, {"snapshot.kubevirt.io", "virtualmachinesnapshots", "delete"},
 		{"instancetype.kubevirt.io", "virtualmachineclusterinstancetypes", "get"}, {"instancetype.kubevirt.io", "virtualmachineclusterpreferences", "get"},
 		{"subresources.kubevirt.io", "virtualmachineinstances/guestosinfo", "get"},
@@ -54,7 +55,8 @@ func TestOperatorRules(t *testing.T) {
 		{"", "pods", "patch"}, {"", "pods", "watch"},
 		{"snapshot.storage.k8s.io", "volumesnapshots", "create"}, {"snapshot.storage.k8s.io", "volumesnapshots", "watch"},
 		{"snapshot.storage.k8s.io", "volumesnapshotclasses", "list"}, {"storage.k8s.io", "storageclasses", "watch"},
-		{"fabric.cloudyfolks.io", "security-groups", "get"}, {"bedrock.cloudyfolks.io", "volumes/finalizers", "update"},
+		{"fabric.cloudyfolks.io", "security-groups", "get"}, {"fabric.cloudyfolks.io", "ips", "list"},
+		{"fabric.cloudyfolks.io", "ips", "get"}, {"fabric.cloudyfolks.io", "ips", "watch"}, {"bedrock.cloudyfolks.io", "volumes/finalizers", "update"},
 	}, []grant{
 		{"", "secrets", "list"}, {"", "secrets", "watch"}, {"", "secrets", "update"}, {"", "secrets", "delete"},
 		{"kubevirt.io", "virtualmachines", "delete"}, {"kubevirt.io", "virtualmachines", "update"},
@@ -63,6 +65,7 @@ func TestOperatorRules(t *testing.T) {
 		{"cdi.kubevirt.io", "datasources", "get"},
 		{"snapshot.storage.k8s.io", "volumesnapshots", "delete"}, {"snapshot.storage.k8s.io", "volumesnapshots", "patch"}, {"snapshot.storage.k8s.io", "volumesnapshots", "update"},
 		{"", "pods", "delete"}, {"", "persistentvolumeclaims", "delete"},
+		{"fabric.cloudyfolks.io", "ips", "create"}, {"fabric.cloudyfolks.io", "ips", "delete"},
 	})
 	for _, rule := range rules {
 		if contains(rule.Resources, "datavolumes/source") || contains(rule.Resources, "*") || contains(rule.Verbs, "*") || contains(rule.APIGroups, "*") {

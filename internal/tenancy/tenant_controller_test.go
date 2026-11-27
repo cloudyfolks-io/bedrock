@@ -56,7 +56,10 @@ func TestTenantCreatesNetworkRoleAndBinding(t *testing.T) {
 	mustCreate(t, c, tenant)
 	network := &v1alpha1.Network{}
 	waitFor(t, func() bool { return getInto(t, c, "acme", network) })
-	if network.Spec.TenantRef != "acme" || network.Spec.CIDR != "10.100.0.0/16" || !reflect.DeepEqual(network.Labels, v1alpha1.TenantLabels("Tenant", "acme", "acme", "")) {
+	if !network.Spec.EnableExternal {
+		t.Fatalf("a new default Network must be routed: %+v", network.Spec)
+	}
+	if network.Spec.TenantRef != "acme" || network.Spec.CIDR != "" || !reflect.DeepEqual(network.Spec.CIDRs, []string{"10.100.0.0/16"}) || !reflect.DeepEqual(network.Labels, v1alpha1.TenantLabels("Tenant", "acme", "acme", "")) {
 		t.Fatalf("network = %+v", network)
 	}
 	if controllerReferenceUID(network.OwnerReferences, "Tenant") != string(tenant.UID) {
@@ -71,6 +74,66 @@ func TestTenantCreatesNetworkRoleAndBinding(t *testing.T) {
 	}
 	if binding.RoleRef.Name != "tenant:acme:owner" || controllerReferenceUID(binding.OwnerReferences, "Tenant") != string(tenant.UID) {
 		t.Fatalf("binding = %+v", binding)
+	}
+}
+
+func TestTenantDoesNotRouteAnExistingDefaultNetwork(t *testing.T) {
+	c, _ := tenantWorld(t)
+	existing := &v1alpha1.Network{ObjectMeta: metav1.ObjectMeta{Name: "acme"}, Spec: v1alpha1.NetworkSpec{TenantRef: "acme", CIDRs: []string{"10.100.0.0/16"}}}
+	mustCreate(t, c, existing)
+	tenant := acmeWithOwners(defaultOwners()...)
+	mustCreate(t, c, tenant)
+	network := &v1alpha1.Network{}
+	waitFor(t, func() bool {
+		return getInto(t, c, "acme", network) && controllerReferenceUID(network.OwnerReferences, "Tenant") == string(tenant.UID)
+	})
+	if network.Spec.EnableExternal {
+		t.Fatalf("the existing Network must stay unrouted: %+v", network.Spec)
+	}
+}
+
+func TestTenantKeepsAnExistingRoutedDefaultNetworkRouted(t *testing.T) {
+	c, _ := tenantWorld(t)
+	existing := &v1alpha1.Network{ObjectMeta: metav1.ObjectMeta{Name: "acme"}, Spec: v1alpha1.NetworkSpec{TenantRef: "acme", CIDRs: []string{"10.100.0.0/16"}, EnableExternal: true}}
+	mustCreate(t, c, existing)
+	tenant := acmeWithOwners(defaultOwners()...)
+	mustCreate(t, c, tenant)
+	network := &v1alpha1.Network{}
+	waitFor(t, func() bool {
+		return getInto(t, c, "acme", network) && controllerReferenceUID(network.OwnerReferences, "Tenant") == string(tenant.UID)
+	})
+	if !network.Spec.EnableExternal {
+		t.Fatalf("the existing Network must stay routed: %+v", network.Spec)
+	}
+}
+
+func TestTenantLeavesAnOldDefaultNetworkWithOnlyCIDR(t *testing.T) {
+	c, _ := tenantWorld(t)
+	old := &v1alpha1.Network{ObjectMeta: metav1.ObjectMeta{Name: "acme"}, Spec: v1alpha1.NetworkSpec{TenantRef: "acme", CIDR: "10.100.0.0/16"}}
+	mustCreate(t, c, old)
+	tenant := acmeWithOwners(defaultOwners()...)
+	mustCreate(t, c, tenant)
+	network := &v1alpha1.Network{}
+	waitFor(t, func() bool {
+		return getInto(t, c, "acme", network) && controllerReferenceUID(network.OwnerReferences, "Tenant") == string(tenant.UID)
+	})
+	if network.Spec.CIDR != "10.100.0.0/16" || len(network.Spec.CIDRs) != 0 {
+		t.Fatalf("the old Network must keep cidr and get no cidrs: %+v", network.Spec)
+	}
+}
+
+func TestTenantKeepsTheRangesOfAMovedDefaultNetwork(t *testing.T) {
+	c, _ := tenantWorld(t)
+	moved := &v1alpha1.Network{ObjectMeta: metav1.ObjectMeta{Name: "acme"}, Spec: v1alpha1.NetworkSpec{TenantRef: "acme", CIDRs: []string{"10.100.0.0/16", "172.16.0.0/16"}}}
+	mustCreate(t, c, moved)
+	tenant := acmeWithOwners(defaultOwners()...)
+	mustCreate(t, c, tenant)
+	network := &v1alpha1.Network{}
+	waitFor(t, func() bool {
+		return getInto(t, c, "acme", network) && controllerReferenceUID(network.OwnerReferences, "Tenant") == string(tenant.UID)
+	})
+	if network.Spec.CIDR != "" || !reflect.DeepEqual(network.Spec.CIDRs, []string{"10.100.0.0/16", "172.16.0.0/16"}) {
+		t.Fatalf("the moved Network must keep both ranges: %+v", network.Spec)
 	}
 }
 
@@ -392,4 +455,56 @@ func TestTenantShowsWhatBlocksItsTeardown(t *testing.T) {
 		t.Fatalf("message = %q", message)
 	}
 	releaseHold(t, c, network)
+}
+
+func TestTenantStatusListsTheTenantProviderNetworks(t *testing.T) {
+	c, _ := startEnv(t)
+	value := `[{"name":"public-b","role":"tenant","interface":"b","cidr":"192.0.2.0/24","gateway":"192.0.2.1"},{"name":"public-a","interface":"a","cidr":"198.51.100.0/24","gateway":"198.51.100.1"},{"name":"mgmt","role":"platform","interface":"m","cidr":"203.0.113.0/24","gateway":"203.0.113.1"}]`
+	mustCreate(t, c, &v1alpha1.Setting{ObjectMeta: metav1.ObjectMeta{Name: "network.provider-networks"}, Spec: v1alpha1.SettingSpec{Value: value}}, acmeWithOwners(defaultOwners()...))
+	reconciler := &TenantReconciler{Client: c, Reader: c}
+	if _, err := reconciler.Reconcile(context.Background(), reconcile.Request{NamespacedName: client.ObjectKey{Name: "acme"}}); err != nil {
+		t.Fatal(err)
+	}
+	tenant := &v1alpha1.Tenant{}
+	if !getInto(t, c, "acme", tenant) || !reflect.DeepEqual(tenant.Status.ProviderNetworks, []string{"public-a", "public-b"}) {
+		t.Fatalf("status %+v", tenant.Status.ProviderNetworks)
+	}
+}
+
+func providerNetworksSetting(value string) *v1alpha1.Setting {
+	return &v1alpha1.Setting{ObjectMeta: metav1.ObjectMeta{Name: "network.provider-networks"}, Spec: v1alpha1.SettingSpec{Value: value}}
+}
+
+func TestTenantStatusFollowsTheProviderNetworksSetting(t *testing.T) {
+	c, _ := tenantWorld(t)
+	setting := providerNetworksSetting(`[{"name":"public-a","interface":"a","cidr":"198.51.100.0/24","gateway":"198.51.100.1"}]`)
+	mustCreate(t, c, setting, acmeWithOwners(defaultOwners()...))
+	tenant := &v1alpha1.Tenant{}
+	waitFor(t, func() bool {
+		return getInto(t, c, "acme", tenant) && reflect.DeepEqual(tenant.Status.ProviderNetworks, []string{"public-a"})
+	})
+	waitFor(t, func() bool {
+		if !getInto(t, c, setting.Name, setting) {
+			return false
+		}
+		setting.Spec.Value = `[{"name":"public-c","interface":"c","cidr":"192.0.2.0/24","gateway":"192.0.2.1"}]`
+		return c.Update(context.Background(), setting) == nil
+	})
+	waitFor(t, func() bool {
+		return getInto(t, c, "acme", tenant) && reflect.DeepEqual(tenant.Status.ProviderNetworks, []string{"public-c"})
+	})
+}
+
+func TestTenantReportsAnInvalidProviderNetworksSetting(t *testing.T) {
+	c, _ := startEnv(t)
+	mustCreate(t, c, providerNetworksSetting(`not json`), acmeWithOwners(defaultOwners()...))
+	reconciler := &TenantReconciler{Client: c, Reader: c}
+	if _, err := reconciler.Reconcile(context.Background(), reconcile.Request{NamespacedName: client.ObjectKey{Name: "acme"}}); err != nil {
+		t.Fatal(err)
+	}
+	tenant := &v1alpha1.Tenant{}
+	if !getInto(t, c, "acme", tenant) {
+		t.Fatal("tenant not found")
+	}
+	requireCondition(t, tenant.Status.Conditions, ConditionProviderNetworksKnown, metav1.ConditionFalse, ReasonSettingInvalid)
 }

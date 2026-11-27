@@ -83,11 +83,23 @@ dump_workloads() {
   kubectl -n "$S3_NS" get pods,jobs -o wide || true
   kubectl -n "$S3_NS" logs deploy/seaweedfs --tail=200 || true
   kubectl -n "$S3_NS" logs job/make-bucket --tail=50 || true
+  echo "--- databases"
+  kubectl -n bedrock-dbaas get all,perconaservermysqls.ps.percona.com,perconaservermysqlbackups.ps.percona.com,clusters.postgresql.cnpg.io,scheduledbackups.postgresql.cnpg.io,backups.postgresql.cnpg.io,objectstores.barmancloud.cnpg.io,certificates.cert-manager.io,networkpolicies,configmaps -o wide || true
+  kubectl -n ps-operator get pods -o wide || true
+  kubectl -n ps-operator logs deploy/percona-ps-ps-operator --tail=150 || true
+  kubectl -n cnpg get pods -o wide || true
+  kubectl -n cnpg logs deploy/cnpg-cloudnative-pg --tail=150 || true
+  kubectl -n cnpg logs deploy/barman-cloud --tail=100 || true
   echo "--- object storage"
-  kubectl -n rook-ceph get pods,cephobjectstore,cephobjectstoreuser -o wide || true
+  kubectl -n rook-ceph get pods,cephobjectstore,cephobjectstoreaccount,cephobjectstoreuser -o wide || true
   kubectl -n rook-ceph logs deploy/rook-ceph-operator --tail=150 || true
   kubectl -n objectstorage-e2e get jobs,pods -o wide || true
   kubectl -n objectstorage-e2e logs -l job-name --tail=50 --prefix || true
+  echo "--- registry"
+  kubectl -n bedrock-registry get pods,pvc,cluster.postgresql.cnpg.io,certificate,ingressroute -o wide || true
+  kubectl -n bedrock-registry logs deploy/harbor-core --tail=150 || true
+  kubectl -n cnpg logs deploy/cnpg-cloudnative-pg --tail=100 || true
+  kubectl get addon registry -o yaml || true
   dump_nmstate
   echo "--- monitoring and logging"
   kubectl -n monitoring get pods,pvc,addons -o wide || true
@@ -126,8 +138,9 @@ install -m 0755 "$bin" /usr/local/bin/bedrock
 
 k0s ctr --namespace k8s.io images import "$cache/seaweedfs.tar"
 k0s ctr --namespace k8s.io images import "$cache/aws-cli.tar"
+k0s ctr --namespace k8s.io images import "$cache/busybox.tar"
 
-for step_file in encryption addons tenancy images compute network objectstorage backup panel metering cascade; do
+for step_file in encryption addons tenancy images compute network container build clusters objectstorage objectstorage-iam database database-import registry backup panel metering cascade; do
   source "$steps_dir/$step_file.sh"
 done
 
@@ -173,16 +186,82 @@ steps=(
   compute_vm
   compute_hotplug
   compute_snapshot
+  compute_size_and_hotplug
+  compute_boot_volume
+  compute_block_access
   compute_proxy_actions
   compute_console
   network_underlay
+  network_frr_agent
   network_subnet_rules
   network_security_group
+  network_guest_parity
   network_elastic_ip
+  network_elastic_ip_pool_choice
+  network_elastic_ip_quota
   network_load_balancer_and_dns
+  network_internet_gateway
+  network_peering
+  network_internal_load_balancer
+  network_services_identity
   network_isolation
+  container_network_proof
+  container_runtime_gate
+  container_lifecycle
+  container_volume
+  container_load_balancer
+  container_scale_to_zero
+  container_quota_refusal
+  container_proxy
+  container_cleanup
+  build_roles
+  build_missing_secret
+  build_kata_gate
+  build_logs
+  build_immutable
+  build_cleanup
+  clusters_addon_off
+  clusters_proof
+  clusters_provision
+  clusters_duplicate_address
+  clusters_suspend
+  clusters_delete
+  objectstorage_iam_spike
   objectstorage_user_and_bucket
   objectstorage_roundtrip
+  objectstorage_permissions
+  objectstorage_names
+  objectstorage_quota
+  objectstorage_suspend
+  objectstorage_force_destroy
+  objectstorage_public_host
+  database_prepare
+  database_import_frontend
+  database_create
+  database_sslrequest
+  database_access
+  database_backup_restore
+  database_isolation
+  database_extras_prepare
+  database_mysql_create
+  database_valkey_create
+  database_vm_greetings
+  database_mysql_access
+  database_valkey_access
+  database_mysql_backup_and_restore
+  database_mysql_restore_from_deleted
+  database_mysql_resize
+  database_postgres_upgrade
+  database_valkey_suspend_resume_logs
+  database_extras_cleanup
+  database_cleanup
+  registry_enable
+  registry_project_and_names
+  registry_login
+  registry_spikes
+  registry_quota_and_retention
+  registry_force_destroy
+  registry_disable
   backup_target
   backup_once
   backup_restore_replace
@@ -191,12 +270,22 @@ steps=(
   panel_login_and_stream
   metering_usage
   metering_series
+  metering_network_totals
   metering_proxy_range
   metering_logs
+  metering_reader_policy
   addons_grafana_and_alerts
+  network_host_guard
   cascade_project
   cascade_tenant
 )
+
+case "${E2E_ONLY:-}" in
+  database_import_mysql|database_import_valkey)
+    source "$steps_dir/${E2E_ONLY//_/-}.sh"
+    steps+=("$E2E_ONLY")
+    ;;
+esac
 
 selected=$(select_steps "${steps[@]}")
 test -n "$selected"

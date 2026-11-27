@@ -12,9 +12,20 @@ type PlatformSpec struct {
 	TLSMode string `json:"tlsMode,omitempty"`
 }
 
+const (
+	ProviderRoleTenant   = "tenant"
+	ProviderRolePlatform = "platform"
+	ProviderRoleTransit  = "transit"
+	ProviderRoleServices = "services"
+)
+
 type ProviderNetworkSpec struct {
 	Name      string `json:"name"`
 	Interface string `json:"interface"`
+	// +kubebuilder:validation:MaxLength=30
+	// +kubebuilder:validation:Pattern=`^[a-z0-9]([-a-z0-9]*[a-z0-9])?$`
+	// +optional
+	ProviderName string `json:"providerName,omitempty"`
 	// +optional
 	Vlan    int32  `json:"vlan,omitempty"`
 	CIDR    string `json:"cidr"`
@@ -22,6 +33,9 @@ type ProviderNetworkSpec struct {
 	// +optional
 	// +listType=set
 	ExcludeIPs []string `json:"excludeIPs,omitempty"`
+	// +kubebuilder:validation:Enum=tenant;platform;transit;services
+	// +optional
+	Role string `json:"role,omitempty"`
 }
 
 type FabricSpec struct {
@@ -31,6 +45,7 @@ type FabricSpec struct {
 	ServiceCIDR string `json:"serviceCIDR,omitempty"`
 	// +optional
 	JoinCIDR string `json:"joinCIDR,omitempty"`
+	OVNTLS   *bool  `json:"ovnTLS,omitempty"`
 	// +kubebuilder:validation:Enum=bgp;l2
 	// +optional
 	EIPMode string `json:"eipMode,omitempty"`
@@ -46,6 +61,19 @@ type ClusterNetworkSpec struct {
 	MigrationVlan int32 `json:"migrationVlan,omitempty"`
 	// +optional
 	Fabric FabricSpec `json:"fabric,omitempty"`
+	// +kubebuilder:validation:Minimum=576
+	// +kubebuilder:validation:Maximum=9000
+	// +optional
+	PodMTU int32 `json:"podMTU,omitempty"`
+	// +kubebuilder:validation:MaxLength=43
+	// +kubebuilder:validation:XValidation:rule="isCIDR(self)",message="managementCIDR must be a CIDR"
+	// +optional
+	ManagementCIDR string `json:"managementCIDR,omitempty"`
+	// +optional
+	// +listType=map
+	// +listMapKey=interface
+	// +kubebuilder:validation:MaxItems=16
+	TenantLegs []TenantLegSpec `json:"tenantLegs,omitempty"`
 }
 
 type StorageSpec struct {
@@ -54,6 +82,9 @@ type StorageSpec struct {
 	// +kubebuilder:validation:Minimum=1
 	// +optional
 	Replicas int32 `json:"replicas,omitempty"`
+	// +kubebuilder:validation:Enum=aes;aes256k
+	// +optional
+	CephxCipher string `json:"cephxCipher,omitempty"`
 	// +optional
 	Adopt *AdoptSpec `json:"adopt,omitempty"`
 }
@@ -98,6 +129,20 @@ type BundleRegistrySpec struct {
 	Mirror string `json:"mirror,omitempty"`
 }
 
+type DNSSpec struct {
+	// +optional
+	Upstreams []string `json:"upstreams,omitempty"`
+}
+
+type EgressSpec struct {
+	// +optional
+	HTTPProxy string `json:"httpProxy,omitempty"`
+	// +optional
+	NoProxy []string `json:"noProxy,omitempty"`
+	// +optional
+	DNS01Nameservers []string `json:"dns01Nameservers,omitempty"`
+}
+
 type HostDefaults struct {
 	// +optional
 	Management bool `json:"management,omitempty"`
@@ -118,6 +163,10 @@ type ClusterConfigSpec struct {
 	Registry BundleRegistrySpec `json:"registry,omitempty"`
 	// +optional
 	Encryption EncryptionSpec `json:"encryption,omitempty"`
+	// +optional
+	DNS DNSSpec `json:"dns,omitempty"`
+	// +optional
+	Egress EgressSpec `json:"egress,omitempty"`
 	// +optional
 	Addons map[string]bool `json:"addons,omitempty"`
 	// +optional

@@ -1,0 +1,40 @@
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: bedrock-tenant-pod-network
+  namespace: monitoring
+spec:
+  groups:
+    - name: bedrock.tenant-pod-network
+      rules:
+        - alert: TenantPodNetworkAudit
+          expr: >-
+            sum by (policy, policy_binding) (increase(apiserver_validating_admission_policy_check_total{policy=~"bedrock-tenant-pod-network.*",
+            enforcement_action=~"audit|warn"}[15m])) > 0
+          labels:
+            severity: warning
+          annotations:
+            summary: Tenant pods break the pod network policy in audit mode.
+            description: The policy {{ $labels.policy }} found {{ $value }} pod requests that break it in the last 15 minutes. The binding only audits, so the pods were admitted. Check the pod templates and canary requests. If API audit logging is enabled, find validation.policy.admission.k8s.io/validation_failure in the audit records. Fix the pod builder and verify the affected paths before enabling deny.
+            runbook_url: https://github.com/cloudyfolks-io/bedrock/blob/main/docs/alerts.md#tenantpodnetworkaudit
+        - alert: TenantPodNetworkDenied
+          expr: >-
+            sum by (policy, policy_binding) (increase(apiserver_validating_admission_policy_check_total{policy=~"bedrock-tenant-pod-network.*",
+            enforcement_action="deny"}[15m])) > 0
+          labels:
+            severity: critical
+          annotations:
+            summary: The pod network policy rejects tenant pods.
+            description: The policy {{ $labels.policy }} rejected {{ $value }} pod requests in the last 15 minutes. Customer workloads may not start. Find the service that builds the pod without the network annotations.
+            runbook_url: https://github.com/cloudyfolks-io/bedrock/blob/main/docs/alerts.md#tenantpodnetworkdenied
+        - alert: TenantPodNetworkError
+          expr: >-
+            sum by (policy, policy_binding, error_type) (increase(apiserver_validating_admission_policy_check_total{policy=~"bedrock-tenant-pod-network.*",
+            error_type=~"compile_error|out_of_budget"}[15m])) > 0
+          labels:
+            severity: warning
+          annotations:
+            summary: The pod network policy fails to evaluate.
+            description: The policy {{ $labels.policy }} returned {{ $labels.error_type }} errors. A CEL expression does not compile or exceeds its evaluation budget. The policy fails closed, so with a deny binding this blocks pods. The invalid_error label marks an ordinary validation failure and is covered by the Audit and Denied alerts.
+
+            runbook_url: https://github.com/cloudyfolks-io/bedrock/blob/main/docs/alerts.md#tenantpodnetworkerror

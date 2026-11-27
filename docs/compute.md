@@ -18,13 +18,14 @@ The condition `Ready` shows the reason `NotInProject`.
 
 | Field | Meaning |
 |---|---|
-| `instanceType` | Name of a cluster instance type, for example `u1.medium`. |
+| `instanceType` | Name of a cluster instance type, for example `u1.medium`. Use it, or `compute`, never both. |
+| `compute` | A custom size: `cores` and `memoryMiB`. Use it, or `instanceType`, never both. |
 | `preference` | Name of a cluster preference. The image preference is the default. |
 | `image` | Name and scope (`cluster` or `project`) of the root disk image. |
-| `rootDisk` | `sizeGi` and an optional `storageClass`. |
-| `disks` | List of Volumes with an optional bus. |
+| `rootDisk` | `sizeGi` and an optional `storageClass`, or a `volumeRef` to boot from a Volume. |
+| `disks` | List of Volumes with an optional bus and an optional `serial`. |
 | `cdroms` | List of ISO image names. |
-| `networks` | List of Subnets with security groups and an optional MAC address. |
+| `networks` | List of Subnets with security groups, an optional MAC address and an optional fixed `address`. |
 | `cloudInit` | `userData`, `networkData` or a `secretRef`. |
 | `sshKeys` | Names of SSHKey objects. |
 | `running` | The wanted run state. The default is `true`. |
@@ -34,6 +35,23 @@ The condition `Ready` shows the reason `NotInProject`.
 All references are names in the namespace of the VM.
 A reference must not hold `/`, `,`, `{`, a space or an upper-case letter.
 The API server refuses such a reference.
+
+### Custom size
+
+A VM has exactly one size: an `instanceType` or `compute`.
+The API server refuses a VM with both or with none.
+`compute` has `cores` (at least 1) and `memoryMiB` (at least 128).
+The operator writes them to `domain.cpu.cores` and `domain.memory.guest`.
+The operator then sets no instance type on the KubeVirt VM.
+
+The Settings `compute.max-cores` (default 32) and `compute.max-memory-mib` (default 131072) set the upper limits.
+A VM above a limit has the condition `Ready` with the reason `InvalidSpec`.
+The operator checks the VM again when a limit changes.
+The limits do not apply to a VM with an `instanceType`.
+
+You can change `compute` or switch between `compute` and `instanceType` at any time.
+On a running VM the condition `RestartRequired` shows until the next restart.
+The new size applies at the next start.
 
 ### Volume
 
@@ -63,7 +81,7 @@ Each object has the Bedrock object as owner, so a delete removes it.
 | Object | Name | Purpose |
 |---|---|---|
 | KubeVirt `VirtualMachine` | `<vm>` | The running machine. |
-| DataVolume | `<vm>-root` | The root disk. |
+| DataVolume | `<vm>-root` | The root disk. The operator creates no root disk when `rootDisk.volumeRef` is set. |
 | DataVolume | `<vm>-cdrom-<index>` | One claim for each ISO. |
 | Secret | `<vm>-cloudinit` | The cloud-init data. |
 | DataVolume | `<volume>` | The disk of a Volume. |
@@ -87,8 +105,56 @@ A VM with no security group uses the default group `default-<namespace>` of its 
 The VM waits until this group exists.
 Port security is on for each interface.
 
+An entry of `networks` can have `portSecurity: false`.
+The default is `true`, and a VM without the field keeps port security on.
+Only an administrator can set or change `portSecurity`.
+The operator writes the Fabric annotation `port_security: "false"` for this interface.
+The security groups of the interface stay in place.
+
+Fabric v1.2.1 reads `port_security` and the security groups as two separate settings.
+With `port_security` set to `"false"`, Fabric clears the port security of the logical switch port.
+The interface can then send any source MAC address and any source IP address, not only the addresses of its own Subnet.
+The security group rules still apply, because Fabric binds them to the port through its port groups.
+An egress rule matches the destination only.
+A remote-group rule and the same-group rule do not match the source addresses of forwarded client traffic, so only address (CIDR) rules apply to that traffic.
+Use `portSecurity: false` for a VM that forwards traffic with source addresses that are not its own, for example a VPN gateway.
+A change of `portSecurity` reaches a running VM at once.
+A restore from a backup keeps a `portSecurity: false` that an administrator set.
+
 A change of the security groups reaches a running VM at once.
 A change of the Subnets applies at the next restart.
+
+The guest takes its DNS servers from the Subnet of the first network.
+The operator uses `spec.dnsServers` of the Subnet, then the Setting `network.dns-servers`, then the Setting `network.services.resolver`.
+It writes them as `dnsPolicy: None` and `dnsConfig.nameservers` on the KubeVirt VM.
+When none is set, the guest gets the cluster DNS.
+A change of the DNS servers applies at the next restart, and a running VM shows `RestartRequired` until then.
+
+### Fixed address
+
+An entry of `networks` can have an `address`, an IPv4 address.
+The VM keeps this address in the Subnet, also after a restart.
+Without an `address`, Fabric chooses the address.
+The `address` cannot change after you create the VM.
+You cannot add it to an entry later, and you cannot remove it.
+To use another address, change it in two updates: first remove the entry, then add it again with the new address.
+The new address applies when the VM starts again.
+A running VM keeps its address until then.
+
+The operator checks the address before it starts the VM.
+The check fails in these cases:
+
+- The address is not in the CIDR of the Subnet.
+- The address is the gateway, the network address, the broadcast address or an address in `excludeIPs`.
+- Another NIC holds the address.
+  This is the pinned address of an older VM, or an address that Fabric gave to another VM or pod of the Subnet.
+
+When a check fails, the VM does not start.
+The conditions `Ready` and `NetworkReady` show the reason.
+After you remove the cause, the VM starts.
+The operator checks `AddressInUse` again every 30 seconds.
+Fabric can refuse the address after the VM has started, for example when two pods ask for it at the same time.
+Then the pod has no address, and the VM shows `AddressInUse` after at most 30 seconds.
 
 ## Cloud-init and SSH keys
 
@@ -117,6 +183,32 @@ The root disk can grow. It cannot shrink.
 The size of the root disk must be at least the size of the image.
 When you increase `rootDisk.sizeGi`, the operator grows the claim.
 
+### Boot from a Volume
+
+Set `rootDisk.volumeRef` to the name of a Volume of the same project.
+The Volume is the boot disk. The operator creates no `<vm>-root` claim.
+`rootDisk.volumeRef` excludes `rootDisk.sizeGi`, `rootDisk.storageClass` and `image`.
+Set `preference` when the image preference is needed.
+The Volume must have the condition `Ready` and must hold a bootable disk.
+Create it with `source.image` or `source.snapshotRef`.
+The bus of the root disk is the bus of the Volume, or else the choice of the preference.
+
+Only one VM can use a Volume, as a root disk or as a data disk.
+The older VM wins. The other VM has the reason `VolumeInUse`.
+The Volume cannot be both the root disk and a data disk of one VM.
+
+A delete of the VM keeps the Volume.
+The Volume shows `Available` again.
+A VolumeSnapshot of the Volume works at all times.
+
+You can change `rootDisk.volumeRef` only while `running` is `false`.
+This swap gives the VM a different boot disk at the next start.
+While the VM instance still runs, the operator keeps the old boot disk and the old Volume stays `InUse`.
+The VM has the reason `RootVolumeSwapPending` until the instance stops. Then the new Volume is the boot disk.
+You cannot add `rootDisk.volumeRef` to a VM that has an operator root disk.
+You cannot remove it from a VM that has it.
+A backup of the VM includes the root Volume.
+
 A CD-ROM is cloned from an ISO image into a claim of the VM.
 The operator looks for a project image first and then for a cluster image.
 The image must have the type `iso`.
@@ -126,6 +218,12 @@ A Volume can be used by one VM only.
 The VM that is older wins.
 The other VM has the reason `VolumeInUse`.
 You can add and remove Volumes while the VM runs.
+
+The Volume `Ready` condition has reason `Bound` when CDI has populated the
+Volume and Kubernetes reports a bound claim with capacity. A workload can use
+a Volume with reason `WaitForFirstConsumer` or `PendingPopulation` while
+storage provisioning completes. A lost claim gives the Volume phase `Failed`
+and reason `ClaimLost`.
 The disk bus is the bus of the VM entry or else the bus of the Volume.
 
 A delete of a Volume waits until no VM lists the Volume.
@@ -169,13 +267,109 @@ The request must be a same-origin WebSocket request.
 The proxy removes the credentials of the caller before it calls KubeVirt.
 The VM status shows the console paths in `status.console`.
 
+## Node drains
+
+The Setting `virt.eviction-strategy` is the KubeVirt cluster setting `configuration.evictionStrategy`.
+It decides what a node drain does to a VM that has no `evictionStrategy` of its own.
+The `evictionStrategy` field of a VirtualMachine has priority over the Setting.
+When this field is empty, the operator writes the value of the Setting into the KubeVirt VM.
+The default of the Setting is `LiveMigrateIfPossible`, so a cluster that never sets it keeps its old behavior.
+
+| Value | A drain does this to a VM that can migrate | A drain does this to a VM that cannot migrate |
+|---|---|---|
+| `LiveMigrate` | It migrates the VM. | It waits. The drain does not end until the VM can migrate or stops. |
+| `LiveMigrateIfPossible` | It migrates the VM. | It shuts the VM down and the drain continues. |
+| `None` | It shuts the VM down. | It shuts the VM down. |
+
+A change of the Setting changes the KubeVirt VM of every VM that has no `evictionStrategy` of its own.
+The strategy is part of the machine, so each of these VMs that runs shows `RestartRequired` until its next restart.
+The old strategy stays in force until then.
+Set the Setting before the first VM exists.
+The installer sets `LiveMigrate` on ir-central-1 before any VM exists, so no VM there has a restart pending.
+
+A kured reboot starts a drain.
+With `LiveMigrate`, one VM that cannot migrate blocks the reboot of its node.
+With `LiveMigrateIfPossible`, the reboot stops this VM.
+Check the condition `LiveMigratable` of a VM before you plan a reboot.
+
+## Volume hot-plug
+
+KubeVirt 1.9.0 has the feature gate `DeclarativeHotplugVolumes` in state Beta.
+KubeVirt enables a Beta gate unless the cluster setting disables it.
+The source is `pkg/virt-config/featuregate/active.go` and `pkg/virt-config/featuregate/feature-gates.go` (function `IsEnabled`) in the KubeVirt repository at the tag `v1.9.0`.
+So the operator does not list this gate in `featureGates`.
+You can add and remove Volumes in `disks` while a VM runs.
+
+## Support containers
+
+The operator sets the limits of the KubeVirt container `guest-console-log` to 100m CPU and 120M memory.
+The KubeVirt default of 15m CPU slows the console log of a VM that writes much output.
+The limits apply to each new launcher pod.
+A running VM keeps its limits until the next start or migration.
+
+## Live migration status
+
+`status.migration` shows the newest KubeVirt migration of the VM.
+It has the fields `name`, `phase`, `startedAt` and `message`.
+The `phase` is the phase of the KubeVirt migration, for example `Running`, `Succeeded` or `Failed`.
+The `message` holds the failure reason of a failed migration.
+The `startedAt` is the creation time of the migration.
+The operator reads only migrations in the namespace of the VM that name the VM.
+The status is empty when the VM has no migration.
+
+## Guest identity
+
+A guest reads its identity from the virtual hardware.
+Windows activation depends on it.
+
+The Settings `virt.smbios.manufacturer`, `virt.smbios.product`, `virt.smbios.family`, `virt.smbios.version` and `virt.smbios.sku` set the SMBIOS values of all guests.
+An empty Setting keeps the KubeVirt value.
+A change of one of these Settings does not restart a running VM.
+The new value applies at the next start of each VM.
+
+`firmware.uuid` and `firmware.serial` set the UUID and the serial number of one VM.
+You cannot change them, add them or remove them after the VM exists.
+Without them KubeVirt derives the UUID from the VM name.
+
+`disks[].serial` sets the serial number of one disk.
+Without it the serial is a fixed value that the operator derives from the Volume name.
+A serial has at most 36 characters.
+`rootDisk.serial` sets the serial number of the root disk with the same rules.
+It cannot change after it is set.
+Without it the guest sees a serial that KubeVirt derives from the disk name.
+It can hold letters, digits, dot, underscore and dash.
+A change applies at the next start of the VM.
+
 ## Settings
 
 | Setting | Effect |
 |---|---|
+| `virt.smbios.manufacturer`, `.product`, `.family`, `.version`, `.sku` | The SMBIOS values of all guests. The default is empty. See Guest identity. |
 | `overcommit.cpu` | The number of vCPUs for each physical thread. The default is 4. |
 | `overcommit.memory` | The memory overcommit ratio. The minimum is 0.1. The default is 1.0. |
+| `compute.max-cores` | The largest `compute.cores` of a VM. The default is 32. |
+| `compute.max-memory-mib` | The largest `compute.memoryMiB` of a VM. The default is 131072. |
 | `migration.parallel` | The number of live migrations at the same time in the cluster. |
+| `migration.parallel-outbound` | The number of outbound live migrations at the same time on one node. The default is 4. |
+| `migration.bandwidth` | The bandwidth limit of one live migration, in bytes per second. The default is `1Gi`. |
+| `migration.completion-timeout-per-gib` | The seconds for each GiB of guest memory before KubeVirt aborts a live migration. The default is 800. |
+| `migration.progress-timeout` | The seconds without progress before KubeVirt aborts a live migration. The default is 150. |
+| `migration.compression` | Empty or `zstd`. The default is empty. |
+| `virt.eviction-strategy` | `LiveMigrate`, `LiveMigrateIfPossible` or `None`. The default is `LiveMigrateIfPossible`. See Node drains. |
+
+The migration Settings change the KubeVirt configuration.
+A running VM is not restarted and not migrated by this change.
+
+With `migration.compression` set to `zstd`, the operator creates the KubeVirt `MigrationPolicy` `bedrock-compression`.
+The policy matches all VMs and compresses the migration traffic with zstd.
+The compression uses CPU on the source node and is an experimental KubeVirt feature.
+When you set the Setting to empty, the operator deletes the policy.
+
+An upgrade to this release changes the migration configuration of KubeVirt.
+Before, the operator wrote only the number of migrations in the cluster, and KubeVirt used its own defaults for the rest.
+Now the operator writes the four values as well: 4 outbound migrations on one node, the bandwidth `1Gi`, 800 seconds for each GiB and 150 seconds without progress.
+The new values apply to the migrations that start after the upgrade.
+To keep other values, set the four Settings before the upgrade.
 
 A wrong value stops the render of the KubeVirt object.
 The live object does not change.
@@ -214,17 +408,20 @@ Run `kubectl describe virtualmachine <name>` and read the condition `Ready`.
 | `InstanceTypeNotFound` | The instance type does not exist. | List the cluster instance types. |
 | `PreferenceNotFound` | The preference does not exist. | List the cluster preferences. |
 | `SubnetNotReady` | A Subnet is missing or not ready. | Check the Subnet condition. |
+| `AddressOutsideSubnet` | The `address` of a network is not in the CIDR of its Subnet. | Use an address in the CIDR. |
+| `AddressReserved` | The `address` of a network is the gateway, the network address, the broadcast address or an excluded address. | Use another address. |
+| `AddressInUse` | Another VM pins the `address`, or Fabric gave it to another NIC of the Subnet. | Use another address, or free the address. The operator checks again in 30 seconds. |
 | `SecurityGroupNotReady` | A security group is missing or not ready. | Check the security group condition. |
 | `SSHKeyNotReady` | An SSHKey is missing or not valid. | Check the SSHKey condition. |
 | `VolumeNotFound` | A Volume does not exist. | Create the Volume. |
-| `VolumeInUse` | Another VM uses the Volume. | Remove the Volume from one VM. |
+| `VolumeInUse` | Another VM uses the Volume, as a root disk or as a data disk. | Remove the Volume from one VM. |
+| `RootVolumeSwapPending` | `rootDisk.volumeRef` changed while the VM instance still runs. | Stop the VM. The swap happens when the instance is gone. |
 | `VolumeNotUsable` | The Volume is not ready, or its claim belongs to another object. | Wait for the Volume condition `Ready`, or rename the Volume. |
 | `RestoreInProgress` | A restore holds the object. | Wait until the restore ends. |
 | `ApplyFailed` | The cluster refused an object. | Ask an administrator to read the operator log. The operator tries again in 30 seconds. |
 | `NameConflict` | An object of another owner has a name that the operator needs. | Rename your Volume, Secret or snapshot. |
 | `WaitingForDefaultSecurityGroup` | The default security group of the project does not exist yet. | Wait. The operator checks again in 30 seconds. |
 | `SourceNotReady` | The source of a Volume is not ready. | Check the image, the snapshot or the source Volume. |
-| `ShrinkRefused` | The size is smaller than the claim. | Use a size that is not smaller. |
 | `InUse` | A VM lists the Volume that you delete. | Remove the Volume from the VM. |
 | `VolumeNotFound` on a snapshot | The Volume or its claim does not exist. | Create the Volume first. |
 | `NoSnapshotClass` | No snapshot class serves the Volume. | Use a storage class with a snapshot class. |

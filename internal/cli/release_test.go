@@ -26,6 +26,33 @@ func TestReleaseBuildRequiresFlags(t *testing.T) {
 	}
 }
 
+func TestReleaseVerifyFabricRequiresOnePinSource(t *testing.T) {
+	dir := t.TempDir()
+	values := filepath.Join(dir, "fabric.yaml")
+	if err := os.WriteFile(values, []byte("crds:\n  enabled: true\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	for _, test := range []struct {
+		label  string
+		args   []string
+		status int
+		error  string
+	}{
+		{label: "no source", status: 2, error: "exactly one of --values or --image"},
+		{label: "both sources", args: []string{"--values", values, "--image", "example.invalid/fabric:test"}, status: 2, error: "exactly one of --values or --image"},
+		{label: "values without a pin", args: []string{"--values", values}, status: 1, error: "global.images.fabric.tag"},
+		{label: "explicit lab image", args: []string{"--image", "localhost:5000/fabric:dev"}, status: 1, error: "read release.yaml"},
+	} {
+		t.Run(test.label, func(t *testing.T) {
+			var out, errOut bytes.Buffer
+			args := append([]string{"release", "verify-fabric", "--release", dir}, test.args...)
+			if code := Run(args, &out, &errOut); code != test.status || !strings.Contains(errOut.String(), test.error) {
+				t.Fatalf("exit %d, stderr %q, want exit %d and %q", code, errOut.String(), test.status, test.error)
+			}
+		})
+	}
+}
+
 func TestReleaseApplyRequiresDir(t *testing.T) {
 	var out, errOut bytes.Buffer
 	code := Run([]string{"release", "apply"}, &out, &errOut)
@@ -45,6 +72,19 @@ func TestReleaseApplyRejectsNonPositiveInterval(t *testing.T) {
 	}
 	if !bytes.Contains(errOut.Bytes(), []byte("--interval")) {
 		t.Fatalf("stderr %q", errOut.String())
+	}
+}
+
+func TestReleaseApplyRejectsPodMTUOutsideTheRange(t *testing.T) {
+	for _, mtu := range []string{"575", "9001", "-1"} {
+		var out, errOut bytes.Buffer
+		code := Run([]string{"release", "apply", "--dir", ".", "--pod-mtu", mtu}, &out, &errOut)
+		if code != 2 {
+			t.Fatalf("pod-mtu %s: exit %d, want 2", mtu, code)
+		}
+		if !bytes.Contains(errOut.Bytes(), []byte("--pod-mtu")) {
+			t.Fatalf("pod-mtu %s: stderr %q", mtu, errOut.String())
+		}
 	}
 }
 
@@ -68,7 +108,7 @@ func rbacRelease(t *testing.T) string {
 	if err := os.CopyFS(dir, os.DirFS(source)); err != nil {
 		t.Fatal(err)
 	}
-	spec := "version: v0.1.0-test\nimage: ghcr.io/cloudyfolks-io/bedrock:v0.1.0-test\nk0sVersion: v1.36.3+k0s.0\nupgradeFrom: []\ncomponents:\n  - name: bedrock\n    version: v0.1.0-test\n    image: ghcr.io/cloudyfolks-io/bedrock:v0.1.0-test\n  - name: rook\n    version: v1.20.7\n    image: quay.io/ceph/ceph:v20.2.4\nsupportedOS:\n  - ubuntu-24.04\n"
+	spec := "version: v0.1.0-test\nimage: ghcr.io/cloudyfolks-io/bedrock:v0.1.0-test\nk0sVersion: v1.36.3+k0s.0\nupgradeFrom: []\ncomponents:\n  - name: bedrock\n    version: v0.1.0-test\n    image: ghcr.io/cloudyfolks-io/bedrock:v0.1.0-test\n  - name: rook\n    version: 1.21.0\n    image: quay.io/ceph/ceph:v20.2.4\nsupportedOS:\n  - ubuntu-24.04\n"
 	if err := os.WriteFile(filepath.Join(dir, "release.yaml"), []byte(spec), 0o644); err != nil {
 		t.Fatal(err)
 	}

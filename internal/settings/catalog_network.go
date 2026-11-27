@@ -5,8 +5,10 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/netip"
+	"slices"
 	"strconv"
 	"strings"
+	"time"
 
 	"k8s.io/apimachinery/pkg/util/validation"
 
@@ -14,10 +16,20 @@ import (
 )
 
 const (
-	maxProviderNameLength = 30
-	maxInterfaceLength    = 15
-	maxVlan               = 4094
-	rangeSeparator        = ".."
+	maxProviderNameLength      = 30
+	maxInterfaceLength         = 15
+	maxVlan                    = 4094
+	rangeSeparator             = ".."
+	minHoldTime                = 3 * time.Second
+	minKeepaliveTime           = time.Second
+	maxBGPTimer                = 300 * time.Second
+	maxPrefixLength            = 32
+	maxAllocatablePrefixLength = 30
+	maxTableID                 = 999
+	firstReservedTableID       = 253
+	lastReservedTableID        = 255
+	minMTU                     = 576
+	maxMTU                     = 9000
 )
 
 type BGPPeer struct {
@@ -33,9 +45,120 @@ func networkDefinitions() []Definition {
 		{"network.bgp.router-id", "", "BGP router id.", ipv4Value},
 		{"network.bgp.peers", "", "Comma list of <ipv4>@<asn> BGP peers.", bgpPeersValue},
 		{"network.bgp.transit-network", "", "Provider network that carries the router ports in bgp mode.", dnsLabelValue},
-		{"network.dns-servers", "", "Comma list of IPv4 resolvers that DHCP gives to guests.", ipv4ListValue},
+		{"network.dns-servers", "", "Comma list of IPv4 resolvers that DHCP gives to guests. A Subnet that sets dnsServers uses its own list.", ipv4ListValue},
+		{"network.mtu", "", "MTU in bytes, from 576 to 9000, of every Subnet that sets no mtu. Empty lets Fabric choose. Keep it at or below the underlay MTU minus 100. A running guest learns a new value at its next DHCP lease, but the pod interface of a VM keeps its MTU until the VM restarts, so raise it only with a planned VM restart.", intBetween(minMTU, maxMTU)},
+		{"network.services.provider-network", "", "Name of the provider network with the role services. Every external Network attaches to it, gets a router port on it and a pinned address for source NAT. Empty turns the services plane off.", dnsLabelValue},
+		{"network.services.identity-range", "", "IPv4 network inside the services provider network from which each Network gets one address for source NAT. Keep it in the excludeIPs of the provider network. The prefix must be 30 or shorter.", cidrWithin(maxAllocatablePrefixLength)},
+		{"network.services.resolver", "", "IPv4 address of the resolver on the services plane. DHCP gives it to guests when network.dns-servers is empty.", ipv4Value},
+		{"network.reserved-cidrs", "100.64.0.0/10", "Comma list of IPv4 networks that no Subnet and no Network range may overlap. They belong to the platform planes. Empty keeps the default.", cidrListValue},
+		{"network.subnet-allowed-ranges", "10.0.0.0/8,172.16.0.0/12,192.168.0.0/16", "Comma list of IPv4 networks. Every Subnet must be inside one of them. Use 0.0.0.0/0 to allow every address. Empty keeps the default.", cidrListValue},
+		{"network.peering.range", "169.254.0.0/16", "IPv4 network from which each NetworkPeering without connectCIDR gets a /30 connect network. The prefix must be 30 or shorter. Empty keeps the default.", cidrWithin(maxAllocatablePrefixLength)},
+		{"network.load-balancer.cidr", "100.69.0.0/24", "IPv4 network of the load balancer plane. Every Network gets one hidden Fabric Subnet with this range, and internal load balancers take their virtual addresses there. The range repeats in every Network. Bedrock reserves it, so no Network range and no Subnet can overlap it. Set it before the first Network exists. Bedrock removes it from network.bgp.advertise-filter, so BGP never advertises it.", cidrValue},
+		{"network.load-balancer.gateway", "100.69.0.1", "IPv4 address of the load balancer plane gateway. It must be inside network.load-balancer.cidr and must not be its network or broadcast address.", ipv4Value},
+		{"network.tenant-management.enabled", "false", "Create the two shared Fabric Subnets tenant-workload and tenant-managed in the default VPC, with their switch ACLs, and the NetworkAttachmentDefinition kube-system/vpc. Turning it off removes them. Nothing uses them until a pod builder puts a tenant pod on them.", boolean},
+		{"network.tenant-management.workload-cidr", "100.72.0.0/13", "IPv4 network of the Subnet tenant-workload, for the first interface of customer code. The prefix must be 30 or shorter. The gateway is its first host address. Bedrock reserves it, so no Network range and no Subnet can overlap it.", cidrWithin(maxAllocatablePrefixLength)},
+		{"network.tenant-management.managed-cidr", "100.80.0.0/13", "IPv4 network of the Subnet tenant-managed, for the first interface of platform engines. The prefix must be 30 or shorter. The gateway is its first host address. Bedrock reserves it, so no Network range and no Subnet can overlap it.", cidrWithin(maxAllocatablePrefixLength)},
+		{"network.policy-enforcement", "standard", "NetworkPolicy enforcement of Fabric. standard blocks all traffic that no policy allows. lax also lets ARP, DHCP and ICMP through. A change reaches the cluster at the next upgrade run.", oneOf("standard", "lax")},
+		{"network.ovn-tls", "false", "Encrypt the OVN database connections of Fabric with TLS. Bedrock makes the Secret fabric-tls in kube-system when it is missing. A change reaches the cluster at the next upgrade run and restarts ovn-central, the controller, the monitor, the pinger and every ovs-ovn pod, so plan a window.", boolean},
+		{"network.bgp.bfd", "true", "Enable BFD on the BGP peers of the FRR agent. The Fabric Vpc of a Network in bgp mode always has BFD, and this Setting does not change it.", boolean},
+		{"network.bgp.hold-time", "9s", "BGP hold time in whole seconds, from 3s to 300s. A peer refuses a hold time of 1s or 2s.", wholeSecondsBetween(minHoldTime, maxBGPTimer)},
+		{"network.bgp.keepalive-time", "3s", "BGP keepalive time in whole seconds, from 1s to 300s.", wholeSecondsBetween(minKeepaliveTime, maxBGPTimer)},
+		{"network.bgp.graceful-restart", "true", "Keep the BGP routes while a peer restarts.", boolean},
+		{"network.bgp.advertise-filter", "", "Comma list of <cidr> ge <n> le <n> entries, with the mask length <= ge <= le <= 32. The FRR agent advertises only the matching routes and the routes of the elastic IPs. Empty advertises only the elastic IP routes.", advertiseFilterValue},
+		{"network.bgp.redistribute-tables", "", "Comma list of host routing table ids from 1 to 999 that the FRR agent redistributes. 253, 254 and 255 are reserved. Ids from 1000 up are the VRF ids of the VPCs. The list must not hold a VRF id that a Network pins in spec.vrfId.", tableIDsValue},
 	}
 }
+
+func intBetween(minimum, maximum int) func(string) error {
+	return func(v string) error {
+		if v == "" {
+			return nil
+		}
+		n, err := strconv.Atoi(v)
+		if err != nil || n < minimum || n > maximum {
+			return fmt.Errorf("value %q must be an integer from %d to %d", v, minimum, maximum)
+		}
+		return nil
+	}
+}
+
+func wholeSecondsBetween(minimum, maximum time.Duration) func(string) error {
+	return func(v string) error {
+		if v == "" {
+			return nil
+		}
+		d, err := time.ParseDuration(v)
+		if err != nil {
+			return err
+		}
+		if d < minimum || d > maximum || d%time.Second != 0 {
+			return fmt.Errorf("value %s must be whole seconds from %s to %s", d, minimum, maximum)
+		}
+		return nil
+	}
+}
+
+func ParseAdvertiseFilter(v string) ([]string, error) {
+	if v == "" {
+		return nil, nil
+	}
+	items := strings.Split(v, ",")
+	entries := make([]string, len(items))
+	for i, item := range items {
+		entry, err := parseFilterEntry(item)
+		if err != nil {
+			return nil, err
+		}
+		entries[i] = entry
+	}
+	return entries, nil
+}
+
+func parseFilterEntry(item string) (string, error) {
+	fields := strings.Fields(item)
+	if len(fields) != 5 || fields[1] != "ge" || fields[3] != "le" {
+		return "", fmt.Errorf("advertise filter entry %q must look like <cidr> ge <n> le <n>", item)
+	}
+	prefix, err := netip.ParsePrefix(fields[0])
+	if err != nil || !prefix.Addr().Is4() || prefix.Masked() != prefix {
+		return "", fmt.Errorf("advertise filter entry %q: cidr must be a canonical IPv4 network", item)
+	}
+	ge, geErr := strconv.ParseUint(fields[2], 10, 8)
+	le, leErr := strconv.ParseUint(fields[4], 10, 8)
+	if geErr != nil || leErr != nil || ge < uint64(prefix.Bits()) || ge > le || le > maxPrefixLength {
+		return "", fmt.Errorf("advertise filter entry %q: lengths must satisfy mask length <= ge <= le <= %d", item, maxPrefixLength)
+	}
+	return fmt.Sprintf("%s ge %d le %d", prefix, ge, le), nil
+}
+
+func advertiseFilterValue(v string) error {
+	_, err := ParseAdvertiseFilter(v)
+	return err
+}
+
+func ParseTableIDs(v string) ([]uint32, error) {
+	if v == "" {
+		return nil, nil
+	}
+	items := strings.Split(v, ",")
+	ids := make([]uint32, len(items))
+	for i, item := range items {
+		id, err := strconv.ParseUint(item, 10, 32)
+		reserved := id >= firstReservedTableID && id <= lastReservedTableID
+		if err != nil || id < 1 || id > maxTableID || reserved {
+			return nil, fmt.Errorf("table id %q must be an integer from 1 to %d outside %d to %d", item, maxTableID, firstReservedTableID, lastReservedTableID)
+		}
+		ids[i] = uint32(id)
+	}
+	return ids, nil
+}
+
+func tableIDsValue(v string) error {
+	_, err := ParseTableIDs(v)
+	return err
+}
+
+var providerRoles = []string{"", v1alpha1.ProviderRoleTenant, v1alpha1.ProviderRolePlatform, v1alpha1.ProviderRoleTransit, v1alpha1.ProviderRoleServices}
 
 func providerNetworksValue(v string) error {
 	_, err := DecodeProviderNetworks(v)
@@ -74,12 +197,43 @@ func ValidateProviderNetworks(list []v1alpha1.ProviderNetworkSpec) error {
 			return fmt.Errorf("provider network %q: %w", pn.Name, err)
 		}
 	}
+	return validateProviderNames(list)
+}
+
+func validateProviderNames(list []v1alpha1.ProviderNetworkSpec) error {
+	byInterface := map[string]string{}
+	byName := map[string]string{}
+	for _, pn := range list {
+		name := pn.ProviderName
+		if name == "" {
+			continue
+		}
+		if err := dnsLabelValue(name); err != nil || len(name) > maxProviderNameLength {
+			return fmt.Errorf("provider network %q: providerName must be a DNS label of at most %d characters", pn.Name, maxProviderNameLength)
+		}
+		if previous, found := byInterface[pn.Interface]; found && previous != name {
+			return fmt.Errorf("provider network %q: providerName %q conflicts with %q on interface %s", pn.Name, name, previous, pn.Interface)
+		}
+		if iface, found := byName[name]; found && iface != pn.Interface {
+			return fmt.Errorf("provider network %q: providerName %q is already used on interface %s", pn.Name, name, iface)
+		}
+		byInterface[pn.Interface] = name
+		byName[name] = pn.Interface
+	}
+	for _, pn := range list {
+		if iface, found := byName[pn.Name]; found && iface != pn.Interface {
+			return fmt.Errorf("provider network %q: the name is the providerName of interface %s", pn.Name, iface)
+		}
+	}
 	return nil
 }
 
 func validateProviderNetwork(pn v1alpha1.ProviderNetworkSpec) error {
 	if err := dnsLabelValue(pn.Name); err != nil || pn.Name == "" || len(pn.Name) > maxProviderNameLength {
 		return fmt.Errorf("name must be a DNS label of at most %d characters", maxProviderNameLength)
+	}
+	if !slices.Contains(providerRoles, pn.Role) {
+		return fmt.Errorf("role must be one of %s", strings.Join(providerRoles[1:], ", "))
 	}
 	if pn.Interface == "" || len(pn.Interface) > maxInterfaceLength {
 		return fmt.Errorf("interface must have 1 to %d characters", maxInterfaceLength)
@@ -160,6 +314,43 @@ func ipv4ListValue(v string) error {
 		}
 	}
 	return nil
+}
+
+func cidrValue(v string) error {
+	if v == "" {
+		return nil
+	}
+	prefix, err := netip.ParsePrefix(v)
+	if err != nil || !prefix.Addr().Is4() || prefix.Masked() != prefix {
+		return fmt.Errorf("value %q is not a canonical IPv4 network", v)
+	}
+	return nil
+}
+
+func cidrListValue(v string) error {
+	if v == "" {
+		return nil
+	}
+	for _, item := range strings.Split(v, ",") {
+		prefix, err := netip.ParsePrefix(item)
+		if err != nil || !prefix.Addr().Is4() || prefix.Masked() != prefix {
+			return fmt.Errorf("value %q is not a comma list of canonical IPv4 networks", v)
+		}
+	}
+	return nil
+}
+
+func cidrWithin(maxBits int) func(string) error {
+	return func(v string) error {
+		if v == "" {
+			return nil
+		}
+		prefix, err := netip.ParsePrefix(v)
+		if err != nil || !prefix.Addr().Is4() || prefix.Masked() != prefix || prefix.Bits() > maxBits {
+			return fmt.Errorf("value %q is not a canonical IPv4 network with a prefix of %d or shorter", v, maxBits)
+		}
+		return nil
+	}
 }
 
 func dnsLabelValue(v string) error {

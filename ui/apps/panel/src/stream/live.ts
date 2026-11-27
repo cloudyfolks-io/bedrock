@@ -1,15 +1,25 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import { useQuery, useQueryClient, type UseQueryResult } from "@tanstack/react-query";
 import { useHttp } from "../api/HttpProvider";
 import { isHttpError } from "../api/http";
-import { kubeClient, listKey, objectKey, type ResourceRef } from "../api/kube";
+import { kubeClient, listKey, objectKey, resourcePath, type ResourceRef } from "../api/kube";
+import { findPendingWrite, sameResource, usePendingWrites, type PendingWrite } from "../api/pendingWrites";
 import type { KubeList, KubeObject } from "../api/types";
 import { useMultiplexer } from "./StreamProvider";
+import type { Multiplexer } from "./multiplexer";
 import { bedrockGroup, type BookmarkFrame, type EventFrame, type Subscription } from "./protocol";
 
 export type LiveState = "connecting" | "live" | "paused";
 
+interface QueryWatch {
+  state: LiveState;
+  listeners: Set<(state: LiveState) => void>;
+  dispose: () => void;
+}
+
 const listStaleMs = 30_000;
+const objectWatchVersions = new WeakMap<object, string>();
+const queryWatches = new WeakMap<object, Map<Multiplexer, QueryWatch>>();
 
 function identity(object: KubeObject): string {
   return object.metadata.uid ?? `${object.metadata.namespace ?? ""}/${object.metadata.name}`;
@@ -17,6 +27,31 @@ function identity(object: KubeObject): string {
 
 function byName(left: KubeObject, right: KubeObject): number {
   return left.metadata.name.localeCompare(right.metadata.name) || (left.metadata.namespace ?? "").localeCompare(right.metadata.namespace ?? "");
+}
+
+function applyDesired<T extends KubeObject>(object: T, writes: readonly PendingWrite[], ref: ResourceRef): T {
+  const desired = findPendingWrite(writes, ref, object)?.desired;
+  return desired ? { ...object, spec: { ...object.spec, ...desired } } : object;
+}
+
+function projectList<T extends KubeObject>(
+  data: KubeList<T> | undefined,
+  writes: readonly PendingWrite[],
+  ref: ResourceRef,
+  scope: { namespace?: string; labelSelector?: string; listPath?: string; optimisticCreates?: boolean },
+): KubeList<T> | undefined {
+  if (!data || !writes.some((write) => sameResource(write.ref, ref))) return data;
+  const items = data.items.map((item) => applyDesired(item, writes, ref));
+  if (scope.optimisticCreates && !scope.labelSelector && !scope.listPath) {
+    for (const write of writes) {
+      if (write.kind !== "create" || !sameResource(write.ref, ref) ||
+        (ref.namespaced && scope.namespace !== undefined && scope.namespace !== write.namespace) ||
+        (ref.namespaced && write.namespace === undefined) ||
+        items.some((item) => item.metadata.name === write.name && item.metadata.namespace === write.namespace)) continue;
+      items.push({ metadata: { name: write.name, ...(write.namespace ? { namespace: write.namespace } : {}) } } as T);
+    }
+  }
+  return { ...data, items: items.sort(byName) };
 }
 
 export function applyEvent<T extends KubeObject>(items: readonly T[], event: { event: "ADDED" | "MODIFIED" | "DELETED"; object: T }): T[] {
@@ -32,53 +67,110 @@ function isEvent(frame: EventFrame | BookmarkFrame): frame is EventFrame {
 function useSubscription(
   enabled: boolean,
   subscription: Subscription,
-  version: () => string,
+  key: readonly unknown[],
+  version: () => string | undefined,
   onEvent: (frame: EventFrame) => void,
-  onRelist: () => void,
-  dependencyKey: string,
 ): LiveState {
   const multiplexer = useMultiplexer();
+  const queryClient = useQueryClient();
+  const cache = queryClient.getQueryCache();
+  const filter = { queryKey: key, exact: true };
+  const source = cache.find(filter);
   const [state, setState] = useState<LiveState>("connecting");
-  const latest = useRef({ version, onEvent, onRelist });
-  latest.current = { version, onEvent, onRelist };
+  const dependencyKey = JSON.stringify([key, subscription]);
 
   useEffect(() => {
-    if (!enabled) {
-      return undefined;
+    if (!enabled || !source) return;
+    let watches = queryWatches.get(source);
+    if (!watches) {
+      watches = new Map();
+      queryWatches.set(source, watches);
     }
-    setState("connecting");
-    return multiplexer.acquire(subscription, {
-      resourceVersion: () => latest.current.version(),
-      onEvent: (frame) => {
-        if (isEvent(frame)) {
-          latest.current.onEvent(frame);
+    let watch = watches.get(multiplexer);
+    if (!watch) {
+      const shared: QueryWatch = { state: "connecting", listeners: new Set(), dispose: () => {} };
+      const publish = (next: LiveState) => {
+        shared.state = next;
+        for (const listener of shared.listeners) listener(next);
+      };
+      let stop: (() => void) | undefined;
+      const detach = () => {
+        stop?.();
+        stop = undefined;
+      };
+      const attach = () => {
+        if (cache.get(source.queryHash) !== source) return;
+        const snapshot = version();
+        if (snapshot === undefined) return;
+        let active = true;
+        const current = () => active && cache.get(source.queryHash) === source;
+        publish("connecting");
+        const release = multiplexer.acquire(subscription, {
+          resourceVersion: () => version() ?? snapshot,
+          onEvent: (frame) => {
+            if (current() && isEvent(frame)) onEvent(frame);
+          },
+          onRelist: () => {
+            if (!current()) return;
+            detach();
+            void queryClient.invalidateQueries(filter, { cancelRefetch: false });
+          },
+          onError: () => { if (current()) publish("paused"); },
+          onSubscribed: () => { if (current()) publish("live"); },
+        });
+        stop = () => {
+          active = false;
+          release();
+        };
+      };
+      const unsubscribe = cache.subscribe((event) => {
+        if (event.query !== source) return;
+        if (event.type === "removed") detach();
+        if (event.type === "updated" && event.action.type === "success" && !event.action.manual) {
+          // Restart from the HTTP snapshot; the prior watch may have advanced past it.
+          detach();
+          attach();
         }
-      },
-      onRelist: () => latest.current.onRelist(),
-      onError: () => setState("paused"),
-      onSubscribed: () => setState("live"),
-    });
-  }, [multiplexer, enabled, dependencyKey]);
+      });
+      shared.dispose = () => {
+        unsubscribe();
+        detach();
+      };
+      watches.set(multiplexer, shared);
+      watch = shared;
+      attach();
+    }
+    watch.listeners.add(setState);
+    setState(watch.state);
+    return () => {
+      watch.listeners.delete(setState);
+      if (watch.listeners.size === 0) {
+        watch.dispose();
+        watches.delete(multiplexer);
+      }
+    };
+  }, [cache, multiplexer, enabled, source, dependencyKey]);
 
   return enabled ? state : "paused";
 }
 
 export function useLiveList<T extends KubeObject = KubeObject>(
   ref: ResourceRef,
-  scope: { namespace?: string; labelSelector?: string },
+  scope: { namespace?: string; labelSelector?: string; listPath?: string; optimisticCreates?: boolean },
 ): UseQueryResult<KubeList<T>> & { live: LiveState } {
   const http = useHttp();
+  const writes = usePendingWrites(http);
   const queryClient = useQueryClient();
   const client = kubeClient(http);
-  const key = listKey(ref, scope.namespace, scope);
+  const resourceKey = listKey(ref, scope.namespace, scope);
+  const key = scope.listPath ? [...resourceKey, scope.listPath] : resourceKey;
+  const listPath = scope.listPath;
   const query = useQuery({
     queryKey: key,
-    queryFn: ({ signal }) => client.list<T>(ref, scope, signal),
+    queryFn: ({ signal }) => listPath ? http.request<KubeList<T>>("GET", listPath, { signal }) : client.list<T>(ref, scope, signal),
     staleTime: listStaleMs,
   });
-  const [generation, setGeneration] = useState(0);
-  const loaded = query.data !== undefined;
-  const streamed = loaded && ref.group === bedrockGroup;
+  const streamed = !listPath && ref.group === bedrockGroup;
   const subscription: Subscription = {
     group: ref.group,
     version: ref.version,
@@ -90,20 +182,20 @@ export function useLiveList<T extends KubeObject = KubeObject>(
   const live = useSubscription(
     streamed,
     subscription,
-    () => queryClient.getQueryData<KubeList<T>>(key)?.metadata.resourceVersion ?? "",
+    key,
+    () => {
+      const data = queryClient.getQueryData<KubeList<T>>(key);
+      return data ? data.metadata.resourceVersion ?? "" : undefined;
+    },
     (frame) =>
       queryClient.setQueryData<KubeList<T>>(key, (current) =>
         current
           ? { ...current, metadata: { ...current.metadata, resourceVersion: frame.resourceVersion }, items: applyEvent(current.items, { event: frame.event, object: frame.object as T }) }
           : current,
       ),
-    () => {
-      void queryClient.invalidateQueries({ queryKey: key }).then(() => setGeneration((value) => value + 1));
-    },
-    `${JSON.stringify(key)}#${generation}`,
   );
 
-  return Object.assign(query, { live: query.isError ? ("paused" as const) : live });
+  return Object.assign(query, { data: projectList(query.data, writes, ref, scope), live: query.isError || !query.data ? ("paused" as const) : live });
 }
 
 export function useLiveObject<T extends KubeObject = KubeObject>(
@@ -112,40 +204,62 @@ export function useLiveObject<T extends KubeObject = KubeObject>(
   name: string,
 ): UseQueryResult<T | null> & { live: LiveState } {
   const http = useHttp();
+  const writes = usePendingWrites(http);
   const queryClient = useQueryClient();
   const client = kubeClient(http);
   const key = objectKey(ref, namespace, name);
+  const source = () => queryClient.getQueryCache().find({ queryKey: key, exact: true });
+  const fieldSelector = `metadata.name=${name}`;
+  const subscriptionNamespace = namespace === undefined ? {} : { namespace };
+  const streamed = ref.group === bedrockGroup;
   const query = useQuery({
     queryKey: key,
-    queryFn: () =>
-      client.get<T>(ref, namespace, name).catch((error: unknown) => {
-        if (isHttpError(error) && error.status === 404) {
-          return null;
-        }
-        throw error;
-      }),
+    queryFn: async ({ signal }) => {
+      const entry = source();
+      const refresh = entry?.state.data !== undefined;
+      try {
+        const object = await http.request<T>("GET", resourcePath(ref, { ...subscriptionNamespace, name }), { signal });
+        if (entry && !signal.aborted) objectWatchVersions.delete(entry);
+        return object;
+      } catch (error) {
+        if (!isHttpError(error) || error.status !== 404) throw error;
+        if (!streamed || !refresh || !entry) return null;
+        // A GET 404 has no cursor; a name-filtered list lets the watch catch a recreation.
+        const snapshot = await client.list<T>(ref, { ...subscriptionNamespace, fieldSelector }, signal);
+        signal.throwIfAborted();
+        objectWatchVersions.set(entry, snapshot.metadata.resourceVersion ?? "");
+        return snapshot.items[0] ?? null;
+      }
+    },
     staleTime: listStaleMs,
   });
-  const [generation, setGeneration] = useState(0);
-  const present = query.data !== undefined && query.data !== null;
   const subscription: Subscription = {
     group: ref.group,
     version: ref.version,
     resource: ref.plural,
-    fieldSelector: `metadata.name=${name}`,
-    ...(namespace === undefined ? {} : { namespace }),
+    fieldSelector,
+    ...subscriptionNamespace,
   };
 
   const live = useSubscription(
-    present && ref.group === bedrockGroup,
+    streamed,
     subscription,
-    () => queryClient.getQueryData<T | null>(key)?.metadata.resourceVersion ?? "",
-    (frame) => queryClient.setQueryData<T | null>(key, frame.event === "DELETED" ? null : (frame.object as T)),
+    key,
     () => {
-      void queryClient.invalidateQueries({ queryKey: key }).then(() => setGeneration((value) => value + 1));
+      const data = queryClient.getQueryData<T | null>(key);
+      const entry = source();
+      if (data === undefined || !entry) return undefined;
+      return objectWatchVersions.get(entry) ?? (data ? data.metadata.resourceVersion ?? "" : undefined);
     },
-    `${JSON.stringify(key)}#${generation}`,
+    (frame) => {
+      const entry = source();
+      if (entry) objectWatchVersions.set(entry, frame.resourceVersion);
+      queryClient.setQueryData<T | null>(key, frame.event === "DELETED" ? null : (frame.object as T));
+    },
   );
 
-  return Object.assign(query, { live: query.isError ? ("paused" as const) : live });
+  return Object.assign(query, {
+    data: query.data ? applyDesired(query.data, writes, ref) : query.data,
+    live: query.isError || !query.data ? ("paused" as const) : live,
+  });
 }

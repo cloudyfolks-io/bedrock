@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"slices"
+	"strings"
 	"testing"
 	"time"
 
@@ -174,12 +175,23 @@ func TestAbortBeforeControlPlane(t *testing.T) {
 	reportStep(t, ctx, c, "node-a", v1alpha1.NodeUpgradeStepStatus{Name: v1alpha1.StepCleanup, State: v1alpha1.StepSucceeded, Attempt: 1})
 	reportStep(t, ctx, c, "node-b", v1alpha1.NodeUpgradeStepStatus{Name: v1alpha1.StepCleanup, State: v1alpha1.StepFailed, Attempt: 1, Message: "k0s ctr images rm: exit status 1"})
 
+	retrying := runRole(t, ctx, c, oldRole())
+	if retrying.Status.Phase != v1alpha1.PhasePreload || retrying.Status.Upgrade == nil || retrying.Spec.Upgrade.Action != v1alpha1.UpgradeActionAbort {
+		t.Fatalf("an abort with a failed cleanup must stay unfinished: spec %+v status %+v", retrying.Spec, retrying.Status)
+	}
+	if retrying.Status.Upgrade.Message != "abort: cleanup failed on node-b: k0s ctr images rm: exit status 1, attempt 2" || retrying.Status.Upgrade.Attempt != 2 {
+		t.Fatalf("upgrade %+v", retrying.Status.Upgrade)
+	}
+	if attempt := getNodeUpgrade(t, ctx, c, "node-b").Spec.Attempt; attempt != 2 {
+		t.Fatalf("the failed step must run again: attempt %d", attempt)
+	}
+	reportStep(t, ctx, c, "node-b", v1alpha1.NodeUpgradeStepStatus{Name: v1alpha1.StepCleanup, State: v1alpha1.StepSucceeded, Attempt: 2})
+
 	done := runRole(t, ctx, c, oldRole())
-	progressing := meta.FindStatusCondition(done.Status.Conditions, v1alpha1.ConditionProgressing)
 	if done.Status.Phase != v1alpha1.PhaseIdle || done.Status.Upgrade != nil || done.Status.Version != "v1" || done.Spec.DesiredVersion != "v1" || done.Spec.Upgrade.Action != "" {
 		t.Fatalf("spec %+v status %+v", done.Spec, done.Status)
 	}
-	if progressing.Reason != v1alpha1.ReasonAborted || progressing.Message != "cleanup failed on node-b: k0s ctr images rm: exit status 1" {
+	if progressing := meta.FindStatusCondition(done.Status.Conditions, v1alpha1.ConditionProgressing); progressing.Reason != v1alpha1.ReasonAborted || progressing.Message != "" {
 		t.Fatalf("progressing %+v", progressing)
 	}
 	if upgrades, err := listNodeUpgrades(ctx, c, "v2"); err != nil || len(upgrades) != 0 {
@@ -187,16 +199,32 @@ func TestAbortBeforeControlPlane(t *testing.T) {
 	}
 }
 
-func TestAbortRerunKeepsTheCleanupReport(t *testing.T) {
+func TestAbortFailsVisiblyWhenCleanupKeepsFailing(t *testing.T) {
 	c, ctx := abortWorld(t, v1alpha1.PhasePreload)
 	setAction(t, ctx, c, v1alpha1.UpgradeActionAbort)
 	runRole(t, ctx, c, oldRole())
 	reportStep(t, ctx, c, "node-a", v1alpha1.NodeUpgradeStepStatus{Name: v1alpha1.StepCleanup, State: v1alpha1.StepSucceeded, Attempt: 1})
-	reportStep(t, ctx, c, "node-b", v1alpha1.NodeUpgradeStepStatus{Name: v1alpha1.StepCleanup, State: v1alpha1.StepFailed, Attempt: 1, Message: "k0s ctr images rm: exit status 1"})
-	done := runRole(t, ctx, c, oldRole())
+	var got v1alpha1.Cluster
+	for attempt := int32(1); attempt <= maxCleanupAttempts; attempt++ {
+		reportStep(t, ctx, c, "node-b", v1alpha1.NodeUpgradeStepStatus{Name: v1alpha1.StepCleanup, State: v1alpha1.StepFailed, Attempt: attempt, Message: "boom"})
+		got = runRole(t, ctx, c, oldRole())
+	}
+	progressing := meta.FindStatusCondition(got.Status.Conditions, v1alpha1.ConditionProgressing)
+	if got.Status.Phase != v1alpha1.PhaseFailed || got.Status.Upgrade == nil || progressing.Reason != v1alpha1.ReasonPhaseFailed || !strings.Contains(progressing.Message, "node-b: boom") {
+		t.Fatalf("status %+v progressing %+v", got.Status, progressing)
+	}
+	if got.Status.Upgrade.Attempt != maxCleanupAttempts || got.Spec.Upgrade.Action != v1alpha1.UpgradeActionAbort {
+		t.Fatalf("upgrade %+v action %q", got.Status.Upgrade, got.Spec.Upgrade.Action)
+	}
+}
+
+func TestAbortRerunKeepsTheCleanupReport(t *testing.T) {
+	c, ctx := abortWorld(t, v1alpha1.PhasePreload)
 	wantMessage := "cleanup failed on node-b: k0s ctr images rm: exit status 1"
-	if got := meta.FindStatusCondition(done.Status.Conditions, v1alpha1.ConditionProgressing).Message; got != wantMessage {
-		t.Fatalf("setup: progressing message %q", got)
+	done := getCluster(t, ctx, c)
+	done.Status = abortUpgrade(done.Status, wantMessage, done.Generation)
+	if err := c.Status().Update(ctx, &done); err != nil {
+		t.Fatal(err)
 	}
 
 	stale := getCluster(t, ctx, c)

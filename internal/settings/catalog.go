@@ -20,6 +20,7 @@ import (
 	"github.com/cloudyfolks-io/bedrock/internal/backup/seal"
 	"github.com/cloudyfolks-io/bedrock/internal/backup/target"
 	"github.com/cloudyfolks-io/bedrock/internal/dnsname"
+	"github.com/cloudyfolks-io/bedrock/internal/k0sversion"
 )
 
 type Definition struct {
@@ -54,6 +55,11 @@ func intMin(minimum int) func(string) error {
 		}
 		return nil
 	}
+}
+
+func k0sVersions(v string) error {
+	_, err := k0sversion.ParseAllowed(v)
+	return err
 }
 
 func ageRecipients(v string) error {
@@ -147,6 +153,7 @@ func Catalog() []Definition {
 		{"letsencrypt.email", "", "Account email for Let's Encrypt.", free},
 		{"letsencrypt.solver", "http01", "ACME challenge solver.", oneOf("http01", "dns01")},
 		{"storage.replicas", "1", "Ceph pool replica count.", intMin(1)},
+		{"storage.cephx-cipher", "aes", "Key type of the Ceph cephx keys. aes256k needs Linux kernel 7.0 or newer on every host, because the CSI drivers mount with the kernel clients.", oneOf("aes", "aes256k")},
 		{"storage.network", "", "VLAN id of the dedicated storage network.", free},
 		{"migration.network", "", "VLAN id of the dedicated live migration network.", free},
 		{"migration.parallel", "2", "Parallel live migrations per cluster.", intMin(1)},
@@ -159,16 +166,23 @@ func Catalog() []Definition {
 		{"backup.archive-recipients", "", "age recipients (age1...) that can open every backup archive, separated by spaces or new lines. Keep their identities off the cluster.", ageRecipients},
 		{"audit.level", "Metadata", "Audit level for read requests. Writes on Bedrock kinds always use RequestResponse.", oneOf("Metadata", "RequestResponse")},
 		{"loki.retention-days", "14", "Log retention in days when Loki is enabled.", intMin(1)},
+		{"descheduler.enabled", "false", "Initial state of the descheduler addon. Change the Addon object after install.", boolean},
 		{"kata.enabled", "true", "Initial state of the kata addon. Change the Addon object after install.", boolean},
+		{"container.runtime-class", "kata", "RuntimeClass of the pods of Container objects. An empty value keeps the default kata. The value none sets no RuntimeClass: use it only on a cluster with no KVM, because a customer pod then shares the node kernel.", dnsLabelValue},
 		{"loki.enabled", "false", "Initial state of the loki addon. Change the Addon object after install.", boolean},
+		{"clusters.enabled", "false", "Initial state of the clusters addon. Change the Addon object after install.", boolean},
+		{"clusters.versions", "v1.36.3+k0s.1", "k0s versions that a KubernetesCluster may use, separated by spaces or new lines. The value any allows every version that matches v<major>.<minor>.<patch>+k0s.<n>. Only the default version has its k0s image in the offline bundle.", k0sVersions},
 		{"alertmanager.webhook-url", "", "Webhook that receives Alertmanager notifications.", httpURL},
+		{"alertmanager.critical-webhook-url", "", "Webhook for critical alerts. Empty means the default webhook.", httpURL},
+		{"alertmanager.warning-webhook-url", "", "Webhook for warning alerts. Empty means the default webhook.", httpURL},
+		{"alertmanager.heartbeat-url", "", "URL that Alertmanager posts the always-firing Watchdog alert to every minute. Use it with a dead-man switch service. Empty means no heartbeat.", httpURL},
 		{"images.refresh-schedule", "0 3 * * *", "Cron schedule for catalog image refresh.", free},
 		{"images.keep", "3", "Catalog image versions to keep.", intMin(1)},
 		{"authn.require-second-factor", "false", "Require a second factor for every login.", boolean},
 		{"authn.session-ttl", "12h", "Login session cookie lifetime.", duration(5 * time.Minute)},
 		{"authn.refresh-ttl", "720h", "Refresh token lifetime.", duration(time.Hour)},
 		{"authn.lockout-threshold", "5", "Failed password attempts before lockout.", intMin(1)},
-	}, networkDefinitions())
+	}, virtualizationDefinitions(), networkDefinitions(), computeDefinitions(), objectStorageDefinitions(), buildDefinitions(), databaseDefinitions(), registryDefinitions(), egressDefinitions(), tenancyDefinitions(), nodeDefinitions(), storageSizingDefinitions())
 }
 
 func Lookup(key string) (Definition, bool) {
@@ -178,6 +192,14 @@ func Lookup(key string) (Definition, bool) {
 		}
 	}
 	return Definition{}, false
+}
+
+func OrDefault(value, key string) string {
+	if value != "" {
+		return value
+	}
+	def, _ := Lookup(key)
+	return def.Default
 }
 
 func Seed(ctx context.Context, c client.Client) error {

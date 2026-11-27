@@ -34,3 +34,19 @@ func TestRenderHostConfigIsPure(t *testing.T) {
 		t.Fatal("render must not share slices between calls")
 	}
 }
+
+func TestRenderHostConfigTenantLegs(t *testing.T) {
+	cluster := v1alpha1.Cluster{}
+	cluster.Spec.TenantLegs = []v1alpha1.TenantLegSpec{{Interface: "br-public.30", AllowSources: []string{"100.65.0.1/32"}}}
+	spec := RenderHostConfig(v1alpha1.Host{}, cluster)
+	if len(spec.TenantLegs) != 1 || spec.TenantLegs[0].Interface != "br-public.30" || spec.TenantLegs[0].AllowSources[0] != "100.65.0.1/32" {
+		t.Fatalf("legs %+v", spec.TenantLegs)
+	}
+	if len(spec.Packages) != 1 || spec.Packages[0] != "nftables" {
+		t.Fatalf("packages %v", spec.Packages)
+	}
+	spec.TenantLegs[0].AllowSources[0] = "changed"
+	if cluster.Spec.TenantLegs[0].AllowSources[0] == "changed" {
+		t.Fatal("render must not share leg sources with the Cluster")
+	}
+}

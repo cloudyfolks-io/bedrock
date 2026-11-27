@@ -1,5 +1,8 @@
 owned_kinds=(
   virtualmachines.kubevirt.io
+  deployments.apps
+  horizontalpodautoscalers.autoscaling
+  jobs.batch
   datavolumes.cdi.kubevirt.io
   persistentvolumeclaims
   volumesnapshots.snapshot.storage.k8s.io
@@ -12,8 +15,14 @@ owned_kinds=(
   backups.velero.io
   schedules.velero.io
   restores.velero.io
-  objectbucketclaims.objectbucket.io
+  cephobjectstoreaccounts.ceph.rook.io
   cephobjectstoreusers.ceph.rook.io
+  kubernetesclusters.bedrock.cloudyfolks.io
+  clusters.k0smotron.io
+  jointokenrequests.k0smotron.io
+  clusters.postgresql.cnpg.io
+  objectstores.barmancloud.cnpg.io
+  certificates.cert-manager.io
 )
 
 owned_objects_gone() {

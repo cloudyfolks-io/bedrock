@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
@@ -36,6 +38,7 @@ type Deps struct {
 	Interval     time.Duration
 	Inventory    func(context.Context, host.Exec, string) (v1alpha1.Inventory, error)
 	Apply        func(context.Context, hostconfig.Deps, v1alpha1.HostConfigSpec) []v1alpha1.StepResult
+	Guard        func(context.Context, hostconfig.Deps, v1alpha1.HostConfigSpec) error
 	Packages     pkgmgr.Manager
 	Version      string
 	Hostname     func() (string, error)
@@ -45,6 +48,8 @@ type Deps struct {
 	K0sPoll      time.Duration
 	ProbeTimeout time.Duration
 	AuthnOwner   apiserver.Owner
+	EtcdEndpoint string
+	AdminClient  func(kubeconfig string) (client.Client, error)
 }
 
 func Run(ctx context.Context, c client.WithWatch, deps Deps) error {
@@ -68,8 +73,17 @@ func Run(ctx context.Context, c client.WithWatch, deps Deps) error {
 		if err := RunUpgrades(ctx, c, deps, Steps()); err != nil {
 			fmt.Fprintf(os.Stderr, "agent: upgrade: %v\n", err)
 		}
+		if err := adoptK0sImages(deps.Root, releaseLists(ctx, c, deps.Root), legacyAirgapVersion(ctx, c, deps)); err != nil {
+			fmt.Fprintf(os.Stderr, "agent: image archive: %v\n", err)
+		}
+		if err := syncHostImages(ctx, deps); err != nil {
+			fmt.Fprintf(os.Stderr, "agent: images: %v\n", err)
+		}
 		if err := EnableAuthnArgs(ctx, c, deps); err != nil {
 			fmt.Fprintf(os.Stderr, "agent: authn flags: %v\n", err)
+		}
+		if err := ApplyEncryption(ctx, c, deps, func() error { return Report(ctx, c, deps) }); err != nil {
+			fmt.Fprintf(os.Stderr, "agent: encryption config: %v\n", err)
 		}
 		for ready := false; !ready; {
 			select {
@@ -101,6 +115,12 @@ func snapshotLoop(ctx context.Context, c client.Client, deps Deps) {
 		}
 		if err := RunEtcdSnapshots(ctx, c, deps); err != nil {
 			fmt.Fprintf(os.Stderr, "agent: etcd snapshot: %v\n", err)
+		}
+		if err := RunEtcdShip(ctx, c, deps); err != nil {
+			fmt.Fprintf(os.Stderr, "agent: etcd ship: %v\n", err)
+		}
+		if err := RunEtcdDefrag(ctx, c, deps); err != nil {
+			fmt.Fprintf(os.Stderr, "agent: etcd defrag: %v\n", err)
 		}
 		select {
 		case <-ctx.Done():
@@ -164,9 +184,22 @@ type inventoryRead struct {
 }
 
 func Tick(ctx context.Context, c client.Client, deps Deps) error {
+	inventoryErr, writeErr := tick(ctx, c, deps)
+	if writeErr != nil {
+		return writeErr
+	}
+	return inventoryErr
+}
+
+func Report(ctx context.Context, c client.Client, deps Deps) error {
+	_, writeErr := tick(ctx, c, deps)
+	return writeErr
+}
+
+func tick(ctx context.Context, c client.Client, deps Deps) (inventoryErr, writeErr error) {
 	var current v1alpha1.Host
 	if err := c.Get(ctx, client.ObjectKey{Name: deps.Node}, &current); err != nil {
-		return client.IgnoreNotFound(err)
+		return nil, client.IgnoreNotFound(err)
 	}
 	gathered := bounded(ctx, deps.ProbeTimeout, func(probeCtx context.Context) inventoryRead {
 		inv, err := deps.Inventory(probeCtx, deps.Exec, deps.Root)
@@ -187,43 +220,76 @@ func Tick(ctx context.Context, c client.Client, deps Deps) error {
 		Depot:        bounded(ctx, deps.ProbeTimeout, func(probeCtx context.Context) *v1alpha1.DepotStatus { return depotStatus(probeCtx, c, deps) }),
 		Restore:      readRestoreMarker(deps.Root),
 		Authn:        withAuditMessage(syncAuthnFiles(ctx, c, deps, current), auditErr),
+		Encryption:   syncEncryptionStatus(deps, current),
+		ReportedAt:   reportTime(current.Status.ReportedAt, deps),
 	}
 	if invErr != nil {
 		next.Inventory = current.Status.Inventory
 	}
 	var conditions []metav1.Condition
 	if current.Spec.Management.Enabled {
-		applied, managed := manage(ctx, c, deps, current)
+		applied, managed, legs := manage(ctx, c, deps, current)
 		next.Applied = applied
 		conditions = append(conditions, managed, maintain(ctx, deps, current))
+		conditions = append(conditions, legsPresence(deps, legs, current.Generation)...)
 	} else {
 		conditions = append(conditions, condition(v1alpha1.ConditionManagementApplied, metav1.ConditionFalse, "ManagementDisabled", "", current.Generation))
 	}
+	conditions = append(conditions, importsCondition(deps, current.Generation)...)
+	conditions = append(conditions, shipCondition(deps, current.Generation)...)
 	next.Conditions = stable(current.Status.Conditions, conditions)
 	if err := ApplyStatus(ctx, c, deps.Node, next); err != nil {
-		return err
+		return invErr, err
 	}
-	return invErr
+	return invErr, nil
 }
 
-func manage(ctx context.Context, c client.Client, deps Deps, current v1alpha1.Host) (*v1alpha1.AppliedConfig, metav1.Condition) {
+func reportTime(previous *metav1.Time, deps Deps) *metav1.Time {
+	now := deps.Now()
+	if previous != nil && now.Sub(previous.Time) < deps.Interval/2 && !now.Before(previous.Time) {
+		return previous
+	}
+	reported := metav1.NewTime(now)
+	return &reported
+}
+
+func manage(ctx context.Context, c client.Client, deps Deps, current v1alpha1.Host) (*v1alpha1.AppliedConfig, metav1.Condition, []v1alpha1.TenantLegSpec) {
 	var config v1alpha1.HostConfig
 	err := c.Get(ctx, client.ObjectKey{Name: deps.Node}, &config)
 	if errors.IsNotFound(err) {
-		return current.Status.Applied, condition(v1alpha1.ConditionManagementApplied, metav1.ConditionFalse, "NoHostConfig", "no HostConfig for this host yet", current.Generation)
+		return current.Status.Applied, condition(v1alpha1.ConditionManagementApplied, metav1.ConditionFalse, "NoHostConfig", "no HostConfig for this host yet", current.Generation), nil
 	}
 	if err != nil {
-		return current.Status.Applied, condition(v1alpha1.ConditionManagementApplied, metav1.ConditionFalse, "ReadFailed", err.Error(), current.Generation)
+		return current.Status.Applied, condition(v1alpha1.ConditionManagementApplied, metav1.ConditionFalse, "ReadFailed", err.Error(), current.Generation), nil
 	}
 	applied := current.Status.Applied
+	hostDeps := hostconfig.Deps{Exec: deps.Exec, Root: deps.Root, Packages: deps.Packages}
 	if applied == nil || applied.Generation != config.Generation || hostconfig.Failed(applied.Steps) {
-		steps := deps.Apply(ctx, hostconfig.Deps{Exec: deps.Exec, Root: deps.Root, Packages: deps.Packages}, config.Spec)
+		steps := deps.Apply(ctx, hostDeps, config.Spec)
 		applied = &v1alpha1.AppliedConfig{Generation: config.Generation, Steps: steps}
+	} else if err := deps.Guard(ctx, hostDeps, config.Spec); err != nil {
+		return applied, condition(v1alpha1.ConditionManagementApplied, metav1.ConditionFalse, "GuardFailed", err.Error(), current.Generation), config.Spec.TenantLegs
 	}
 	if hostconfig.Failed(applied.Steps) {
-		return applied, condition(v1alpha1.ConditionManagementApplied, metav1.ConditionFalse, "StepFailed", firstFailure(applied.Steps), current.Generation)
+		return applied, condition(v1alpha1.ConditionManagementApplied, metav1.ConditionFalse, "StepFailed", firstFailure(applied.Steps), current.Generation), config.Spec.TenantLegs
 	}
-	return applied, condition(v1alpha1.ConditionManagementApplied, metav1.ConditionTrue, "Applied", "", current.Generation)
+	return applied, condition(v1alpha1.ConditionManagementApplied, metav1.ConditionTrue, "Applied", "", current.Generation), config.Spec.TenantLegs
+}
+
+func legsPresence(deps Deps, legs []v1alpha1.TenantLegSpec, generation int64) []metav1.Condition {
+	if len(legs) == 0 {
+		return nil
+	}
+	var missing []string
+	for _, leg := range legs {
+		if _, err := os.Stat(filepath.Join(deps.Root, "sys", "class", "net", leg.Interface)); err != nil {
+			missing = append(missing, leg.Interface)
+		}
+	}
+	if len(missing) > 0 {
+		return []metav1.Condition{condition(v1alpha1.ConditionTenantLegsPresent, metav1.ConditionFalse, "LegInterfaceMissing", strings.Join(missing, ","), generation)}
+	}
+	return []metav1.Condition{condition(v1alpha1.ConditionTenantLegsPresent, metav1.ConditionTrue, "Present", "", generation)}
 }
 
 func maintain(ctx context.Context, deps Deps, current v1alpha1.Host) metav1.Condition {

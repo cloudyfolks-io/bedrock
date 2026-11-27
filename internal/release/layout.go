@@ -28,7 +28,7 @@ const (
 var pullBackoff = remote.Backoff{Duration: time.Second, Factor: 3, Jitter: 0.1, Steps: 5}
 
 func PullLayout(ctx context.Context, ref, dest, cacheDir, arch string) (string, error) {
-	return pullLayout(ctx, blobCache{dir: cacheDir, next: remote.DefaultTransport, idle: blobIdleTimeout, pause: blobPauseBase}, ref, dest, v1.Platform{OS: "linux", Architecture: arch})
+	return pullLayout(ctx, blobCache{dir: cacheDir, next: downloadTransport, idle: blobIdleTimeout, pause: blobPauseBase}, ref, dest, v1.Platform{OS: "linux", Architecture: arch})
 }
 
 func pullLayout(ctx context.Context, transport http.RoundTripper, ref, dest string, platform v1.Platform) (string, error) {

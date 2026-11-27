@@ -6,6 +6,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 
 	"github.com/cloudyfolks-io/bedrock/api/v1alpha1"
+	"github.com/cloudyfolks-io/bedrock/internal/roles"
 )
 
 func TestRoleLabels(t *testing.T) {
@@ -63,5 +64,21 @@ func TestApplyRolesTaintOrderIsIgnored(t *testing.T) {
 	}
 	if ApplyRoles(node, []string{v1alpha1.RoleControlPlane}, false) {
 		t.Fatal("reordered taints must not report a change")
+	}
+}
+
+func TestApplyRolesGatewayLabelFollowsTheRole(t *testing.T) {
+	node := &corev1.Node{}
+	if !ApplyRoles(node, []string{v1alpha1.RoleWorkload, v1alpha1.RoleFabricGateway}, false) {
+		t.Fatal("adding the role must report a change")
+	}
+	if node.Labels[roles.FabricGWLabel] != "true" {
+		t.Fatalf("gateway label missing: %v", node.Labels)
+	}
+	if !ApplyRoles(node, []string{v1alpha1.RoleWorkload}, false) {
+		t.Fatal("removing the role must report a change")
+	}
+	if _, ok := node.Labels[roles.FabricGWLabel]; ok {
+		t.Fatalf("gateway label must go with the role: %v", node.Labels)
 	}
 }

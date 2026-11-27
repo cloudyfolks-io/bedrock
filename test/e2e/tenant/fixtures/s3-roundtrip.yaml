@@ -37,5 +37,6 @@ spec:
               aws --endpoint-url "$ENDPOINT" s3 cp "s3://$BUCKET/hello.txt" /tmp/get.txt
               test "$(cat /tmp/get.txt)" = "$(cat /tmp/put.txt)"
               if [ "$WANT_VERSIONING" = true ]; then
-                aws --endpoint-url "$ENDPOINT" s3api get-bucket-versioning --bucket "$BUCKET" | grep -q Enabled
+                version=$(aws --endpoint-url "$ENDPOINT" s3api put-object --bucket "$BUCKET" --key versioned.txt --body /tmp/put.txt --query VersionId --output text)
+                test -n "$version" && test "$version" != None && test "$version" != null
               fi

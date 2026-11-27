@@ -270,7 +270,7 @@ func TestAlertmanagerWebhookURLValidation(t *testing.T) {
 }
 
 func TestCatalogHasTheObservabilityKeys(t *testing.T) {
-	want := map[string]string{"audit.level": "Metadata", "loki.retention-days": "14", "kata.enabled": "true", "loki.enabled": "false", "alertmanager.webhook-url": ""}
+	want := map[string]string{"audit.level": "Metadata", "loki.retention-days": "14", "kata.enabled": "true", "loki.enabled": "false", "clusters.enabled": "false", "descheduler.enabled": "false", "clusters.versions": "v1.36.3+k0s.1", "alertmanager.webhook-url": ""}
 	for key, value := range want {
 		def, ok := Lookup(key)
 		if !ok || def.Default != value {
@@ -280,7 +280,7 @@ func TestCatalogHasTheObservabilityKeys(t *testing.T) {
 }
 
 func TestCatalogDescriptionsNameTheAddonObject(t *testing.T) {
-	for _, key := range []string{"kata.enabled", "loki.enabled"} {
+	for _, key := range []string{"kata.enabled", "loki.enabled", "clusters.enabled"} {
 		def, _ := Lookup(key)
 		if !strings.Contains(def.Description, "Addon") {
 			t.Errorf("%s: %q", key, def.Description)
@@ -308,6 +308,43 @@ func TestHTTPURLErrorsDoNotRepeatTheValue(t *testing.T) {
 		}
 		if strings.Contains(err.Error(), "s3cr3t-token") || strings.Contains(err.Error(), "hooks.example.test") {
 			t.Errorf("the error repeats the value: %v", err)
+		}
+	}
+}
+
+func TestContainerRuntimeClassSetting(t *testing.T) {
+	def, ok := Lookup("container.runtime-class")
+	if !ok || def.Default != "kata" {
+		t.Fatalf("setting %+v", def)
+	}
+	if !strings.Contains(def.Description, "none") {
+		t.Fatalf("the description must name the value none: %q", def.Description)
+	}
+	for _, value := range []string{"", "kata", "none", "gvisor-1"} {
+		if err := def.Validate(value); err != nil {
+			t.Errorf("%q: %v", value, err)
+		}
+	}
+	for _, value := range []string{"Kata", "kata_x", "kata x", "kata.x", strings.Repeat("a", 64)} {
+		if err := def.Validate(value); err == nil {
+			t.Errorf("%q passed", value)
+		}
+	}
+}
+
+func TestClustersVersionsSetting(t *testing.T) {
+	def, ok := Lookup("clusters.versions")
+	if !ok {
+		t.Fatal("missing")
+	}
+	for _, valid := range []string{"v1.36.3+k0s.1", "v1.36.3+k0s.1 v1.35.0+k0s.0", "v1.36.3+k0s.1\nv1.35.0+k0s.0", "any"} {
+		if err := def.Validate(valid); err != nil {
+			t.Errorf("%q: %v", valid, err)
+		}
+	}
+	for _, invalid := range []string{"v1.36.3", "latest", "any v1.36.3+k0s.1", "v1.36.3-k0s.1"} {
+		if err := def.Validate(invalid); err == nil {
+			t.Errorf("%q passed", invalid)
 		}
 	}
 }

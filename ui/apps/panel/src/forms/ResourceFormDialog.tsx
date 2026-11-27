@@ -1,14 +1,15 @@
 import { useMemo, useState } from "react";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useQuery } from "@tanstack/react-query";
 import { useLingui } from "@lingui/react/macro";
 import { Alert, Button, Dialog, TextField, useToast } from "@bedrock/design";
 import { useHttp } from "../api/HttpProvider";
 import { isHttpError, isKubeStatusError } from "../api/http";
-import { kubeClient, listKey, objectKey } from "../api/kube";
+import { kubeClient, objectKey } from "../api/kube";
 import { useOpenAPIDocument } from "../api/openapi";
 import type { KubeObject } from "../api/types";
 import { Spinner } from "../components/Spinner";
 import { useCurrentProject } from "../shell/context";
+import { textAt } from "../resources/path";
 import { refOf, type ResourceDef } from "../resources/registry";
 import { causesToErrors, splitCauses, type Cause } from "./errors";
 import { applyRefOptions, markReadonly, toFormSchema } from "./schema";
@@ -67,11 +68,27 @@ interface CreateProps {
   lockedPaths?: string[];
 }
 
+function useLoadBalancerRefUi(def: ResourceDef, refOptions: Record<string, string[]>) {
+  const { t } = useLingui();
+  if (def.plural !== "loadbalancers") return def.uiSchema;
+  const hasOptions = (refOptions.elasticIPRef?.length ?? 0) > 1;
+  return {
+    ...def.uiSchema,
+    elasticIPRef: {
+      "ui:title": t({ id: "col.elasticIp", message: "Elastic IP" }),
+      "ui:placeholder": t({ id: "lb.elasticIp.internal", message: "Internal only" }),
+      "ui:disabled": !hasOptions,
+      "ui:help": hasOptions
+        ? t({ id: "lb.elasticIp.help", message: "For a public frontend, select an Elastic IP here. Then use Attach on the Elastic IP." })
+        : t({ id: "lb.elasticIp.empty", message: "No compatible Elastic IPs are available to select. Check your access or reserve an Elastic IP in this project." }),
+    },
+  };
+}
+
 export function CreateResourceDialog({ def, onClose, initialSpec, lockedPaths = [] }: CreateProps) {
   const { t, i18n } = useLingui();
   const http = useHttp();
   const toast = useToast();
-  const queryClient = useQueryClient();
   const project = useCurrentProject();
   const kind = def.kind;
   const { document, form } = useDocumentSchema(def);
@@ -81,7 +98,8 @@ export function CreateResourceDialog({ def, onClose, initialSpec, lockedPaths = 
   const handle = useWriteHandling();
   const ref = refOf(def);
   const namespace = def.scope === "Namespaced" ? project?.namespace : undefined;
-  const refOptions = useRefOptions(def, namespace, project?.tenant);
+  const refOptions = useRefOptions(def, namespace, project?.tenant, name, typeof initialSpec?.elasticIPRef === "string" ? initialSpec.elasticIPRef : "");
+  const uiSchema = useLoadBalancerRefUi(def, refOptions);
 
   async function submit(spec: Record<string, unknown>) {
     const problems = def.validate?.(spec) ?? [];
@@ -103,7 +121,6 @@ export function CreateResourceDialog({ def, onClose, initialSpec, lockedPaths = 
     try {
       await kubeClient(http).create(ref, namespace, object);
       toast.show({ tone: "success", title: t({ id: "forms.create.done", message: `Created ${name}` }) });
-      void queryClient.invalidateQueries({ queryKey: listKey(ref, namespace, {}) });
       onClose();
     } catch (error) {
       const result = handle(error, form?.schema ?? {});
@@ -146,7 +163,7 @@ export function CreateResourceDialog({ def, onClose, initialSpec, lockedPaths = 
           />
           <CreateForm
             schema={applyRefOptions(form.schema, refOptions)}
-            uiSchema={markReadonly({ ...form.uiSchema, ...def.uiSchema }, lockedPaths)}
+            uiSchema={markReadonly({ ...form.uiSchema, ...uiSchema }, lockedPaths)}
             formData={initialSpec}
             onSubmit={(spec) => void submit(spec)}
             extraErrors={errors.extraErrors}
@@ -170,18 +187,18 @@ function EditBody({ def, object, onClose }: EditProps) {
   const { t, i18n } = useLingui();
   const http = useHttp();
   const toast = useToast();
-  const queryClient = useQueryClient();
   const { document, form } = useDocumentSchema(def);
   const ref = refOf(def);
   const { namespace, name } = object.metadata;
   const project = useCurrentProject();
-  const refOptions = useRefOptions(def, namespace, project?.tenant);
   const latest = useQuery({
     queryKey: ["edit", ...objectKey(ref, namespace, name)],
     queryFn: () => kubeClient(http).get(ref, namespace, name),
     staleTime: 0,
     gcTime: 0,
   });
+  const refOptions = useRefOptions(def, namespace, project?.tenant, name, textAt(latest.data ?? object, "spec.elasticIPRef"));
+  const uiSchema = useLoadBalancerRefUi(def, refOptions);
   const [errors, setErrors] = useState<WriteErrors>(noErrors);
   const [conflict, setConflict] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -199,8 +216,6 @@ function EditBody({ def, object, onClose }: EditProps) {
     try {
       await kubeClient(http).replace(ref, body);
       toast.show({ tone: "success", title: t({ id: "forms.edit.done", message: `Saved ${name}` }) });
-      void queryClient.invalidateQueries({ queryKey: listKey(ref, namespace, {}) });
-      void queryClient.invalidateQueries({ queryKey: objectKey(ref, namespace, name) });
       onClose();
     } catch (error) {
       const result = handle(error, form?.schema ?? {});
@@ -235,7 +250,7 @@ function EditBody({ def, object, onClose }: EditProps) {
       {ready ? (
         <EditForm
           schema={applyRefOptions(form.schema, refOptions)}
-          uiSchema={{ ...form.uiSchema, ...def.uiSchema }}
+          uiSchema={{ ...form.uiSchema, ...uiSchema }}
           immutable={form.immutable}
           formData={(latest.data?.spec ?? {}) as Record<string, unknown>}
           onSubmit={(spec) => void submit(spec)}

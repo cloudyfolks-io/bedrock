@@ -26,6 +26,7 @@ spec:
           annotations:
             summary: 'fabric-controller {{`{{ $labels.instance }}`}} is down'
             description: 'fabric-controller instance {{`{{ $labels.instance }}`}} has been failing scrape for more than 5 minutes.'
+            runbook_url: https://github.com/cloudyfolks-io/bedrock/blob/main/docs/alerts.md#kubeovncontrollerdown
         - alert: KubeOvnControllerAbsent
           expr: absent(up{job="fabric-controller"})
           for: 15m
@@ -40,6 +41,7 @@ spec:
               If no ServiceMonitor or external scrape provides this job yet, either
               enable controller.serviceMonitor or silence/inhibit this alert in
               Alertmanager until scraping is wired up.
+            runbook_url: https://github.com/cloudyfolks-io/bedrock/blob/main/docs/alerts.md#kubeovncontrollerabsent
         - alert: KubeOvnSubnetIPExhaustion
           expr: |
             (subnet_used_ip_count / (subnet_used_ip_count + subnet_available_ip_count)) > 0.9
@@ -47,8 +49,9 @@ spec:
           labels:
             severity: warning
           annotations:
-            summary: 'Kube-OVN subnet {{`{{ $labels.subnet_name }}`}} IP usage is above 90%'
+            summary: 'fabric subnet {{`{{ $labels.subnet_name }}`}} IP usage is above 90%'
             description: 'Subnet {{`{{ $labels.subnet_name }}`}} ({{`{{ $labels.subnet_cidr }}`}}) has exceeded 90% IP allocation for more than 10 minutes.'
+            runbook_url: https://github.com/cloudyfolks-io/bedrock/blob/main/docs/alerts.md#kubeovnsubnetipexhaustion
     - name: fabric.pinger
       rules:
         - alert: KubeOvnOvsDown
@@ -59,6 +62,7 @@ spec:
           annotations:
             summary: 'OVS is down on node {{`{{ $labels.nodeName }}`}}'
             description: 'Pinger has reported OVS down on node {{`{{ $labels.nodeName }}`}} for more than 3 minutes.'
+            runbook_url: https://github.com/cloudyfolks-io/bedrock/blob/main/docs/alerts.md#kubeovnovsdown
         - alert: KubeOvnOvnControllerDown
           expr: pinger_ovn_controller_down == 1
           for: 3m
@@ -67,6 +71,7 @@ spec:
           annotations:
             summary: 'ovn-controller is down on node {{`{{ $labels.nodeName }}`}}'
             description: 'Pinger has reported ovn-controller down on node {{`{{ $labels.nodeName }}`}} for more than 3 minutes.'
+            runbook_url: https://github.com/cloudyfolks-io/bedrock/blob/main/docs/alerts.md#kubeovnovncontrollerdown
         - alert: KubeOvnApiserverUnhealthy
           expr: pinger_apiserver_unhealthy == 1
           for: 5m
@@ -75,6 +80,7 @@ spec:
           annotations:
             summary: 'Pinger reports apiserver unhealthy from node {{`{{ $labels.nodeName }}`}}'
             description: 'Pinger on node {{`{{ $labels.nodeName }}`}} has been unable to reach kube-apiserver for more than 5 minutes.'
+            runbook_url: https://github.com/cloudyfolks-io/bedrock/blob/main/docs/alerts.md#kubeovnapiserverunhealthy
         - alert: KubeOvnInternalDNSUnhealthy
           expr: pinger_internal_dns_unhealthy == 1
           for: 5m
@@ -83,6 +89,7 @@ spec:
           annotations:
             summary: 'Internal DNS unhealthy from node {{`{{ $labels.nodeName }}`}}'
             description: 'Pinger on node {{`{{ $labels.nodeName }}`}} has been unable to resolve the internal DNS target for more than 5 minutes.'
+            runbook_url: https://github.com/cloudyfolks-io/bedrock/blob/main/docs/alerts.md#kubeovninternaldnsunhealthy
     - name: fabric.ovs
       rules:
         - alert: KubeOvnOvsdbSlowRequest
@@ -97,6 +104,7 @@ spec:
           annotations:
             summary: 'OVSDB p95 request latency above 100ms on {{`{{ $labels.instance }}`}} ({{`{{ $labels.db }}`}}/{{`{{ $labels.method }}`}})'
             description: 'The p95 latency of OVSDB client requests for job {{`{{ $labels.job }}`}}, instance {{`{{ $labels.instance }}`}}, db {{`{{ $labels.db }}`}}, method {{`{{ $labels.method }}`}} has exceeded 100ms for more than 10 minutes.'
+            runbook_url: https://github.com/cloudyfolks-io/bedrock/blob/main/docs/alerts.md#kubeovnovsdbslowrequest
     {{- with .Values.prometheusRule.additionalGroups }}
     {{- toYaml . | nindent 4 }}
     {{- end }}

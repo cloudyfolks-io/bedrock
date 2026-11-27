@@ -39,6 +39,7 @@ func components(ctx context.Context, env upgradeEnv, cluster v1alpha1.Cluster) (
 	if err != nil {
 		return phaseResult{}, err
 	}
+	vars = release.WithPodMTU(vars, cluster.Spec.PodMTU)
 	if err := writeClusterStatus(ctx, env.Client, func(s *v1alpha1.ClusterStatus) {
 		*s = resetComponents(*s)
 	}); err != nil {
@@ -51,7 +52,7 @@ func components(ctx context.Context, env upgradeEnv, cluster v1alpha1.Cluster) (
 			ctrl.LoggerFrom(ctx).Error(err, "write component status", "component", group.Name)
 		}
 	}
-	err = release.InstallGroups(ctx, env.Client, env.Bundle, vars, env.Gates, env.PollInterval, env.GroupTimeout, report, authnBootstrapHook(env.Client), componentHook(env, cluster))
+	err = release.UpgradeGroups(ctx, env.Client, env.Bundle, vars, env.Gates, env.PollInterval, env.GroupTimeout, report, beforeGroupHooks(env.Client), prepareComponentRollout(env), componentHook(env, cluster))
 	switch {
 	case err != nil && ctx.Err() != nil:
 		return phaseResult{}, err
@@ -83,11 +84,38 @@ func reportComponent(status v1alpha1.ClusterStatus, component v1alpha1.Component
 	return withMessage(next, fmt.Sprintf("components: %s %s", component.Name, state))
 }
 
+func prepareComponentRollout(env upgradeEnv) func(context.Context, release.Group) error {
+	return func(ctx context.Context, group release.Group) error {
+		if group.Name != fabricGroupName {
+			return nil
+		}
+		prerequisites := release.Group{Name: group.Name}
+		hasOVS := false
+		for _, obj := range group.Objects {
+			if obj.GetNamespace() != fabricNamespace {
+				continue
+			}
+			switch {
+			case obj.GetKind() == "Deployment" && obj.GetName() == ovnCentralDeployment:
+				prerequisites.Objects = append(prerequisites.Objects, obj)
+			case obj.GetKind() == "DaemonSet" && obj.GetName() == ovsDaemonSet:
+				prerequisites.Objects = append(prerequisites.Objects, obj)
+				hasOVS = true
+			}
+		}
+		if !hasOVS {
+			return nil
+		}
+		if err := release.WaitGroup(ctx, env.Client, env.Gates, prerequisites, env.PollInterval); err != nil {
+			return err
+		}
+		return cycleOVS(ctx, env.Client, env.PollInterval)
+	}
+}
+
 func componentHook(env upgradeEnv, cluster v1alpha1.Cluster) func(context.Context, release.Group) error {
 	return func(ctx context.Context, group release.Group) error {
 		switch group.Name {
-		case "fabric":
-			return cycleOVS(ctx, env.Client, env.PollInterval)
 		case "rook-csi":
 			return waitForAddon(ctx, env, cluster, storageAddon)
 		case "kubevirt":
@@ -178,13 +206,16 @@ func ovsRevision(ctx context.Context, c client.Client) (string, bool, error) {
 	if err != nil {
 		return "", false, err
 	}
+	if daemonSet.Status.ObservedGeneration < daemonSet.Generation {
+		return "", false, fmt.Errorf("daemonset %s/%s has not observed generation %d", fabricNamespace, ovsDaemonSet, daemonSet.Generation)
+	}
 	var revisions appsv1.ControllerRevisionList
 	if err := c.List(ctx, &revisions, client.InNamespace(fabricNamespace), client.MatchingLabels{ovsPodLabel: ovsPodLabelValue}); err != nil {
 		return "", false, err
 	}
 	latest, ok := latestRevision(revisions.Items, daemonSet.UID)
-	if !ok {
-		return "", false, fmt.Errorf("daemonset %s/%s has no controller revision", fabricNamespace, ovsDaemonSet)
+	if !ok || latest.Labels[revisionHashLabel] == "" {
+		return "", false, fmt.Errorf("daemonset %s/%s has no controller revision hash", fabricNamespace, ovsDaemonSet)
 	}
 	return latest.Labels[revisionHashLabel], true, nil
 }

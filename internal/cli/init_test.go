@@ -113,7 +113,7 @@ func fakeHost(t *testing.T) (string, *host.FakeExec) {
 	_ = os.WriteFile(filepath.Join(root, "dev", "kvm"), nil, 0o600)
 	e := &host.FakeExec{Responses: map[string]string{
 		"ip -json route show default":                 `[{"dst":"default","dev":"bond0.10"}]`,
-		"ip -json -4 addr show dev bond0.10":          `[{"addr_info":[{"family":"inet","local":"10.0.10.11"}]}]`,
+		"ip -json -4 addr show dev bond0.10":          `[{"addr_info":[{"family":"inet","local":"10.0.10.11","prefixlen":24}]}]`,
 		"ip -json link show":                          `[{"ifname":"lo"},{"ifname":"bond0.10"}]`,
 		"timedatectl show -p NTPSynchronized --value": "yes\n",
 		"hostname": "node-1\n",
@@ -125,6 +125,7 @@ func fakeHost(t *testing.T) (string, *host.FakeExec) {
 		"/usr/local/bin/k0s version":                   "v1.36.3+k0s.0\n",
 		"/usr/local/bin/k0s start":                     "",
 		"/usr/local/bin/k0s kubectl get --raw=/readyz": "ok",
+		"sysctl -p " + filepath.Join(root, "etc", "sysctl.d", "80-bedrock-base.conf"): "",
 	}, Errors: map[string]error{
 		"blkid -p -o value -s TYPE /dev/sdb": &host.ExitError{Code: 2},
 		"ping -c 1 -W 1 10.0.10.10":          &host.ExitError{Code: 1},
@@ -200,7 +201,7 @@ func TestRunInitHappyPath(t *testing.T) {
 	installArgs := k0s.InstallArgs(k0s.InstallOptions{
 		Role: "controller", Force: true, ConfigPath: k0sConfigPath, EnableWorker: true, NoTaints: true, DynamicConfig: true,
 		Labels:            roles.Labels([]string{"control-plane", "ceph-osd", "fabric-gateway"}),
-		KubeletExtraArgs:  []string{"--node-status-update-frequency=4s"},
+		KubeletExtraArgs:  defaultKubeletArgs,
 		DataDir:           dataDir,
 		KubeletRootDir:    k0s.DefaultKubeletRootDir,
 		DisableComponents: k0s.DefaultDisabledComponents,
@@ -228,6 +229,18 @@ func TestRunInitHappyPath(t *testing.T) {
 	vipUnit, err := os.ReadFile(filepath.Join(root, "etc", "systemd", "system", "bedrock-vip.service"))
 	if err != nil || string(vipUnit) != host.VIPUnit("10.0.10.10", "bond0.10") {
 		t.Fatalf("vip unit %q %v", vipUnit, err)
+	}
+	lastShow, replace := -1, -1
+	for i, call := range e.Calls {
+		if call == "ip -json -4 addr show dev bond0.10" {
+			lastShow = i
+		}
+		if call == "ip addr replace 10.0.10.10/32 dev bond0.10" {
+			replace = i
+		}
+	}
+	if lastShow < 0 || replace < 0 || lastShow > replace {
+		t.Fatalf("management CIDR read at %d after the vip at %d", lastShow, replace)
 	}
 	vipEnabled := false
 	for _, call := range e.Calls {
@@ -417,6 +430,8 @@ func TestRunInitBlockedByPreflight(t *testing.T) {
 }
 
 const fakeK0sContent = "fake-k0s-binary-content"
+const fixtureImageDigest = "sha256:1111111111111111111111111111111111111111111111111111111111111111"
+const fixtureImage = "quay.io/a/b@" + fixtureImageDigest
 
 var fixtureArch = goruntime.GOARCH
 
@@ -446,10 +461,11 @@ func buildFixtureBundle(t *testing.T, version, k0sVersion string) (path, checksu
 	if err := os.WriteFile(filepath.Join(releaseDir, "release.yaml"), []byte(releaseYAML), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(releaseDir, "images.txt"), []byte("quay.io/a/b@sha256:"+strings.Repeat("1", 64)+"\n"), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(releaseDir, "images.txt"), []byte(fixtureImage+"\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(releaseDir, "manifests", "00-crds", "a.yaml"), []byte("apiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: a\n  namespace: default\n"), 0o644); err != nil {
+	manifest := "apiVersion: v1\nkind: Pod\nmetadata:\n  name: a\n  namespace: default\nspec:\n  containers:\n    - name: fixture\n      image: " + fixtureImage + "\n"
+	if err := os.WriteFile(filepath.Join(releaseDir, "manifests", "00-crds", "a.yaml"), []byte(manifest), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	airgap := filepath.Join(t.TempDir(), "airgap.tar")
@@ -510,7 +526,7 @@ func TestRunInitFromBundle(t *testing.T) {
 	installArgs := k0s.InstallArgs(k0s.InstallOptions{
 		Role: "controller", Force: true, ConfigPath: k0sConfigPath, EnableWorker: true, NoTaints: true, DynamicConfig: true,
 		Labels:            roles.Labels([]string{"control-plane", "ceph-osd", "fabric-gateway"}),
-		KubeletExtraArgs:  []string{"--node-status-update-frequency=4s"},
+		KubeletExtraArgs:  defaultKubeletArgs,
 		DataDir:           dataDir,
 		KubeletRootDir:    k0s.DefaultKubeletRootDir,
 		DisableComponents: k0s.DefaultDisabledComponents,
@@ -519,6 +535,8 @@ func TestRunInitFromBundle(t *testing.T) {
 	e.Responses[k0sBin+" start"] = ""
 	e.Responses[k0sBin+" kubectl get --raw=/readyz"] = "ok"
 	e.Errors[k0sBin+" status --data-dir "+dataDir] = &host.ExitError{Code: 1}
+	imageCheck := k0sBin + " ctr --namespace k8s.io images ls"
+	e.Responses[imageCheck] = "REF TYPE DIGEST\n" + fixtureImage + " application/vnd.oci.image.index.v1+json " + fixtureImageDigest + "\n"
 
 	executable := fakeExecutable(t)
 	deps := InitDeps{
@@ -534,6 +552,9 @@ func TestRunInitFromBundle(t *testing.T) {
 	code := RunInit(ctx, []string{"-f", configPath, "--bundle", bundlePath, "--work-dir", workDir, "--k0s-bin", k0sBin, "--data-dir", dataDir, "--timeout", "30s"}, deps, &out, &errOut)
 	if code != 0 {
 		t.Fatalf("exit %d\nstdout %s\nstderr %s", code, out.String(), errOut.String())
+	}
+	if !slices.Contains(e.Calls, imageCheck) {
+		t.Fatal("bundle init did not check the imported image")
 	}
 	got, err := os.ReadFile(k0sBin)
 	if err != nil {
@@ -564,6 +585,10 @@ func TestRunInitFromBundle(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(workDir, "bundle")); !os.IsNotExist(err) {
 		t.Fatal("extracted bundle dir must be removed after a successful init")
+	}
+	archived := filepath.Join(workDir, "images", "v0.1.0-test", fixtureArch, release.BundleFileName)
+	if _, err := os.Stat(archived); err != nil {
+		t.Fatalf("init must archive the bundle spec for the agent: %v", err)
 	}
 }
 
@@ -603,7 +628,7 @@ func TestRunInitWritesMirror(t *testing.T) {
 	installArgs := k0s.InstallArgs(k0s.InstallOptions{
 		Role: "controller", Force: true, ConfigPath: k0sConfigPath, EnableWorker: true, NoTaints: true, DynamicConfig: true,
 		Labels:            roles.Labels([]string{"control-plane", "ceph-osd", "fabric-gateway"}),
-		KubeletExtraArgs:  []string{"--node-status-update-frequency=4s"},
+		KubeletExtraArgs:  defaultKubeletArgs,
 		DataDir:           dataDir,
 		KubeletRootDir:    k0s.DefaultKubeletRootDir,
 		DisableComponents: k0s.DefaultDisabledComponents,
@@ -638,6 +663,32 @@ func TestKubeVIPDataEnablesServicesMode(t *testing.T) {
 	data := kubeVIPData("10.0.0.250", "eth0")
 	if data["svc_enable"] != "true" || data["cp_enable"] != "true" || data["address"] != "10.0.0.250" {
 		t.Fatalf("data %+v", data)
+	}
+}
+
+func TestKubeVIPDataLeavesLeaseTimingsToTheDaemonSet(t *testing.T) {
+	for key := range kubeVIPData("10.0.0.250", "eth0") {
+		if strings.HasPrefix(key, "vip_lease") || strings.HasPrefix(key, "vip_renew") || strings.HasPrefix(key, "vip_retry") {
+			t.Fatalf("key %q sets a lease timing in two places", key)
+		}
+	}
+}
+
+func TestKubeVIPDataLeavesForeignLoadBalancerClassesAlone(t *testing.T) {
+	for key := range kubeVIPData("10.0.0.250", "eth0") {
+		if strings.HasPrefix(key, "lb_class") {
+			t.Fatalf("key %q changes how kube-vip filters Services by load balancer class", key)
+		}
+	}
+}
+
+func TestKubeVIPManifestSetsNoLoadBalancerClassEnvironment(t *testing.T) {
+	manifest, err := os.ReadFile("../../manifests/10-kube-vip/kube-vip.yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(strings.ToLower(string(manifest)), "lb_class") {
+		t.Fatal("the kube-vip manifest sets a load balancer class option")
 	}
 }
 
@@ -683,7 +734,7 @@ func prepareInit(t *testing.T) initRun {
 	installArgs := k0s.InstallArgs(k0s.InstallOptions{
 		Role: "controller", Force: true, ConfigPath: filepath.Join(root, "etc", "k0s", "k0s.yaml"), EnableWorker: true, NoTaints: true, DynamicConfig: true,
 		Labels:            roles.Labels([]string{"control-plane", "ceph-osd", "fabric-gateway"}),
-		KubeletExtraArgs:  []string{"--node-status-update-frequency=4s"},
+		KubeletExtraArgs:  defaultKubeletArgs,
 		DataDir:           dataDir,
 		KubeletRootDir:    k0s.DefaultKubeletRootDir,
 		DisableComponents: k0s.DefaultDisabledComponents,
@@ -1438,5 +1489,19 @@ func TestRunInitRefusesAnUnusableEncryptionFile(t *testing.T) {
 				t.Fatalf("the encryption Secret must not exist: %v", err)
 			}
 		})
+	}
+}
+
+func TestRunInitScopesNodePortsToTheManagementNetwork(t *testing.T) {
+	run := prepareInit(t)
+	runPreparedInit(t, run)
+	var doc map[string]any
+	if err := sigyaml.Unmarshal([]byte(readInitFile(t, initK0sConfigPath(run))), &doc); err != nil {
+		t.Fatal(err)
+	}
+	proxy := doc["spec"].(map[string]any)["network"].(map[string]any)["kubeProxy"].(map[string]any)
+	addresses := proxy["nodePortAddresses"].([]any)
+	if len(addresses) != 1 || addresses[0] != "10.0.10.0/24" || proxy["mode"] != "iptables" {
+		t.Fatalf("kubeProxy %v", proxy)
 	}
 }

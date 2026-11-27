@@ -2,13 +2,17 @@ package network
 
 import (
 	"context"
+	"strings"
 	"testing"
 
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/utils/ptr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
@@ -26,7 +30,11 @@ type subnetFixture struct {
 
 func readyNetwork(t *testing.T, c client.Client, tenant string) v1alpha1.Network {
 	t.Helper()
-	network := networkOf(unique(t, "net"), tenant, "10.100.0.0/16")
+	return readyNetworkOf(t, c, networkOf(unique(t, "net"), tenant, "10.100.0.0/16"))
+}
+
+func readyNetworkOf(t *testing.T, c client.Client, network *v1alpha1.Network) v1alpha1.Network {
+	t.Helper()
 	requireAccepted(t, c, network)
 	reconcileNetwork(t, c, network.Name)
 	if err := fabrictest.MarkVpcStandby(context.Background(), c, network.Name); err != nil {
@@ -166,6 +174,248 @@ func TestSubnetReconcilerRejectsCIDROutsideNetwork(t *testing.T) {
 	requireNoFabricSubnet(t, f.c, f.namespace, "outside")
 }
 
+func TestSubnetReconcilerAcceptsSubnetsInEveryRangeOfTheNetwork(t *testing.T) {
+	c := cleanEnv(t)
+	tenant := unique(t, "acme")
+	network := readyNetworkOf(t, c, networkOfRanges(unique(t, "net"), tenant, "10.100.0.0/16", "172.16.0.0/16", "192.168.0.0/24"))
+	namespace := newNamespace(t, tenant, "prod")
+	for name, cidr := range map[string]string{"ten": "10.100.1.0/24", "private": "172.16.7.0/24", "home": "192.168.0.0/25"} {
+		requireAccepted(t, c, policySubnet(namespace, name, network.Name, cidr))
+		reconcileSubnet(t, c, namespace, name)
+		requireSubnetReason(t, c, namespace, name, metav1.ConditionFalse, ReasonFabricNotReady)
+		if _, err := fabricSubnetOf(c, namespace, name); err != nil {
+			t.Fatalf("%s: %v", name, err)
+		}
+	}
+	requireAccepted(t, c, policySubnet(namespace, "stray", network.Name, "172.17.0.0/24"))
+	reconcileSubnet(t, c, namespace, "stray")
+	requireSubnetReason(t, c, namespace, "stray", metav1.ConditionFalse, ReasonCIDROutsideNetwork)
+	requireNoFabricSubnet(t, c, namespace, "stray")
+	got := getSubnet(t, c, namespace, "stray").Status.Conditions
+	if message := meta.FindStatusCondition(got, v1alpha1.ConditionReady).Message; !strings.Contains(message, "one of the cidrs") {
+		t.Fatalf("message %q", message)
+	}
+}
+
+func TestSubnetReconcilerKeepsAnOldNetworkWithOnlyCIDRWorking(t *testing.T) {
+	c := cleanEnv(t)
+	tenant := unique(t, "acme")
+	network := readyNetworkOf(t, c, networkOf(unique(t, "net"), tenant, "10.100.0.0/16"))
+	if network.Spec.CIDR != "10.100.0.0/16" || len(network.Spec.CIDRs) != 0 {
+		t.Fatalf("the Network must keep its old shape: %+v", network.Spec)
+	}
+	namespace := newNamespace(t, tenant, "prod")
+	requireAccepted(t, c, policySubnet(namespace, "inside", network.Name, "10.100.1.0/24"))
+	requireAccepted(t, c, policySubnet(namespace, "outside", network.Name, "172.16.1.0/24"))
+	reconcileSubnet(t, c, namespace, "inside")
+	reconcileSubnet(t, c, namespace, "outside")
+	requireSubnetReason(t, c, namespace, "inside", metav1.ConditionFalse, ReasonFabricNotReady)
+	requireSubnetReason(t, c, namespace, "outside", metav1.ConditionFalse, ReasonCIDROutsideNetwork)
+	requireCondition(t, getNetwork(t, c, network.Name).Status.Conditions, v1alpha1.ConditionReady, metav1.ConditionTrue, ReasonVpcReady)
+}
+
+func TestSubnetReconcilerRejectsCIDRInAReservedRange(t *testing.T) {
+	f := newSubnetFixture(t)
+	setSetting(t, "network.reserved-cidrs", "10.100.5.0/24")
+	f.create(t, f.namespace, "reserved", "10.100.5.128/25")
+	f.create(t, f.namespace, "free", "10.100.6.0/24")
+	reconcileSubnet(t, f.c, f.namespace, "reserved")
+	reconcileSubnet(t, f.c, f.namespace, "free")
+	requireSubnetReason(t, f.c, f.namespace, "reserved", metav1.ConditionFalse, ReasonCIDRReserved)
+	requireNoFabricSubnet(t, f.c, f.namespace, "reserved")
+	got := getSubnet(t, f.c, f.namespace, "reserved").Status.Conditions
+	if message := meta.FindStatusCondition(got, v1alpha1.ConditionReady).Message; !strings.Contains(message, "reserved 10.100.5.0/24") {
+		t.Fatalf("message %q", message)
+	}
+	requireSubnetReason(t, f.c, f.namespace, "free", metav1.ConditionFalse, ReasonFabricNotReady)
+}
+
+func TestSubnetReconcilerRejectsCIDROutsideTheAllowedRanges(t *testing.T) {
+	c := cleanEnv(t)
+	tenant := unique(t, "acme")
+	network := readyNetworkOf(t, c, networkOfRanges(unique(t, "net"), tenant, "10.100.0.0/16", "172.16.0.0/16", "203.0.0.0/16"))
+	namespace := newNamespace(t, tenant, "prod")
+	for name, cidr := range map[string]string{"ten": "10.100.1.0/24", "private": "172.16.1.0/24", "public": "203.0.1.0/24"} {
+		requireAccepted(t, c, policySubnet(namespace, name, network.Name, cidr))
+		reconcileSubnet(t, c, namespace, name)
+	}
+	requireSubnetReason(t, c, namespace, "ten", metav1.ConditionFalse, ReasonFabricNotReady)
+	requireSubnetReason(t, c, namespace, "private", metav1.ConditionFalse, ReasonFabricNotReady)
+	requireSubnetReason(t, c, namespace, "public", metav1.ConditionFalse, ReasonCIDROutsideAllowedRanges)
+	requireNoFabricSubnet(t, c, namespace, "public")
+	got := getSubnet(t, c, namespace, "public").Status.Conditions
+	if message := meta.FindStatusCondition(got, v1alpha1.ConditionReady).Message; !strings.Contains(message, "network.subnet-allowed-ranges") || !strings.Contains(message, "10.0.0.0/8") {
+		t.Fatalf("message %q", message)
+	}
+
+	setSetting(t, "network.subnet-allowed-ranges", "10.0.0.0/8")
+	reconcileSubnet(t, c, namespace, "private")
+	requireSubnetReason(t, c, namespace, "private", metav1.ConditionFalse, ReasonFabricNotReady)
+	requireRangePolicy(t, c, namespace, "private", ReasonCIDROutsideAllowedRanges)
+	requireAccepted(t, c, policySubnet(namespace, "later", network.Name, "172.16.2.0/24"))
+	reconcileSubnet(t, c, namespace, "later")
+	requireSubnetReason(t, c, namespace, "later", metav1.ConditionFalse, ReasonCIDROutsideAllowedRanges)
+	requireNoFabricSubnet(t, c, namespace, "later")
+}
+
+func provisionSubnet(t *testing.T, c client.Client, namespace, name string) {
+	t.Helper()
+	reconcileSubnet(t, c, namespace, name)
+	if err := fabrictest.MarkSubnetReady(context.Background(), c, FabricName(namespace, name)); err != nil {
+		t.Fatal(err)
+	}
+	reconcileSubnet(t, c, namespace, name)
+	reconcileDefaultGroup(t, c, namespace)
+	if err := fabrictest.MarkSecurityGroupProgrammed(context.Background(), c, DefaultSecurityGroupName(namespace)); err != nil {
+		t.Fatal(err)
+	}
+	reconcileSubnet(t, c, namespace, name)
+	requireSubnetReason(t, c, namespace, name, metav1.ConditionTrue, ReasonApplied)
+}
+
+func requireRangePolicy(t *testing.T, c client.Client, namespace, name, reason string) {
+	t.Helper()
+	got := meta.FindStatusCondition(getSubnet(t, c, namespace, name).Status.Conditions, ConditionRangePolicy)
+	if reason == "" {
+		if got != nil {
+			t.Fatalf("no RangePolicy condition expected: %+v", got)
+		}
+		return
+	}
+	if got == nil || got.Status != metav1.ConditionFalse || got.Reason != reason || got.Message == "" {
+		t.Fatalf("RangePolicy want False/%s, got %+v", reason, got)
+	}
+}
+
+func TestSubnetReconcilerKeepsAProvisionedSubnetInAReservedRange(t *testing.T) {
+	c := cleanEnv(t)
+	setSetting(t, "network.reserved-cidrs", "192.0.2.0/24")
+	setSetting(t, "network.subnet-allowed-ranges", "0.0.0.0/0")
+	tenant := unique(t, "acme")
+	network := readyNetworkOf(t, c, networkOfRanges(unique(t, "net"), tenant, "100.100.0.0/16"))
+	namespace := newNamespace(t, tenant, "prod")
+	requireAccepted(t, c, policySubnet(namespace, "old", network.Name, "100.100.1.0/24"))
+	provisionSubnet(t, c, namespace, "old")
+	requireRangePolicy(t, c, namespace, "old", "")
+
+	setSetting(t, "network.reserved-cidrs", "100.64.0.0/10")
+	requireAccepted(t, c, policySubnet(namespace, "fresh", network.Name, "100.100.2.0/24"))
+	reconcileSubnet(t, c, namespace, "old")
+	reconcileSubnet(t, c, namespace, "fresh")
+	requireSubnetReason(t, c, namespace, "old", metav1.ConditionTrue, ReasonApplied)
+	requireRangePolicy(t, c, namespace, "old", ReasonCIDRReserved)
+	requireSubnetReason(t, c, namespace, "fresh", metav1.ConditionFalse, ReasonCIDRReserved)
+	requireNoFabricSubnet(t, c, namespace, "fresh")
+	requireRangePolicy(t, c, namespace, "fresh", "")
+
+	setSetting(t, "network.reserved-cidrs", "192.0.2.0/24")
+	reconcileSubnet(t, c, namespace, "old")
+	requireSubnetReason(t, c, namespace, "old", metav1.ConditionTrue, ReasonApplied)
+	requireRangePolicy(t, c, namespace, "old", "")
+}
+
+func changeFabricObject(t *testing.T, c client.Client, gvk schema.GroupVersionKind, name string, change func(*unstructured.Unstructured)) {
+	t.Helper()
+	object, err := getObject(context.Background(), c, gvk, name)
+	if err != nil {
+		t.Fatal(err)
+	}
+	change(object)
+	if err := c.Update(context.Background(), object); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func disown(object *unstructured.Unstructured) {
+	annotations := object.GetAnnotations()
+	annotations[AnnotationOwnerUID] = "another-owner"
+	object.SetAnnotations(annotations)
+}
+
+func hold(object *unstructured.Unstructured) {
+	object.SetFinalizers([]string{"test.bedrock.cloudyfolks.io/hold"})
+}
+
+func TestSubnetReconcilerDoesNotKeepASubnetWithoutAUsableFabricSubnet(t *testing.T) {
+	cases := map[string]func(*testing.T, client.Client, string){
+		"owned by another Subnet": func(t *testing.T, c client.Client, name string) {
+			changeFabricObject(t, c, fabric.SubnetGVK, name, disown)
+		},
+		"being deleted": func(t *testing.T, c client.Client, name string) {
+			changeFabricObject(t, c, fabric.SubnetGVK, name, hold)
+			object, err := getObject(context.Background(), c, fabric.SubnetGVK, name)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := c.Delete(context.Background(), object); err != nil {
+				t.Fatal(err)
+			}
+		},
+	}
+	for name, spoil := range cases {
+		t.Run(name, func(t *testing.T) {
+			c := cleanEnv(t)
+			setSetting(t, "network.reserved-cidrs", "192.0.2.0/24")
+			setSetting(t, "network.subnet-allowed-ranges", "0.0.0.0/0")
+			tenant := unique(t, "acme")
+			network := readyNetworkOf(t, c, networkOfRanges(unique(t, "net"), tenant, "100.100.0.0/16"))
+			namespace := newNamespace(t, tenant, "prod")
+			requireAccepted(t, c, policySubnet(namespace, "old", network.Name, "100.100.1.0/24"))
+			reconcileSubnet(t, c, namespace, "old")
+			spoil(t, c, FabricName(namespace, "old"))
+			setSetting(t, "network.reserved-cidrs", "100.64.0.0/10")
+			reconcileSubnet(t, c, namespace, "old")
+			requireSubnetReason(t, c, namespace, "old", metav1.ConditionFalse, ReasonCIDRReserved)
+			requireRangePolicy(t, c, namespace, "old", "")
+		})
+	}
+}
+
+func TestSubnetReconcilerKeepsAProvisionedSubnetOutsideTheAllowedRanges(t *testing.T) {
+	c := cleanEnv(t)
+	setSetting(t, "network.subnet-allowed-ranges", "0.0.0.0/0")
+	tenant := unique(t, "acme")
+	network := readyNetworkOf(t, c, networkOfRanges(unique(t, "net"), tenant, "10.100.0.0/16", "203.0.0.0/16"))
+	namespace := newNamespace(t, tenant, "prod")
+	requireAccepted(t, c, policySubnet(namespace, "old", network.Name, "203.0.1.0/24"))
+	provisionSubnet(t, c, namespace, "old")
+
+	setSetting(t, "network.subnet-allowed-ranges", "10.0.0.0/8")
+	requireAccepted(t, c, policySubnet(namespace, "fresh", network.Name, "203.0.2.0/24"))
+	reconcileSubnet(t, c, namespace, "old")
+	reconcileSubnet(t, c, namespace, "fresh")
+	requireSubnetReason(t, c, namespace, "old", metav1.ConditionTrue, ReasonApplied)
+	requireRangePolicy(t, c, namespace, "old", ReasonCIDROutsideAllowedRanges)
+	requireSubnetReason(t, c, namespace, "fresh", metav1.ConditionFalse, ReasonCIDROutsideAllowedRanges)
+	requireNoFabricSubnet(t, c, namespace, "fresh")
+
+	setSetting(t, "network.subnet-allowed-ranges", "0.0.0.0/0")
+	reconcileSubnet(t, c, namespace, "old")
+	requireRangePolicy(t, c, namespace, "old", "")
+}
+
+func TestSubnetReconcilerKeepsRangePolicyWhileTheNetworkIsNotReady(t *testing.T) {
+	c := cleanEnv(t)
+	setSetting(t, "network.subnet-allowed-ranges", "0.0.0.0/0")
+	tenant := unique(t, "acme")
+	network := readyNetworkOf(t, c, networkOfRanges(unique(t, "net"), tenant, "10.100.0.0/16", "203.0.0.0/16"))
+	namespace := newNamespace(t, tenant, "prod")
+	requireAccepted(t, c, policySubnet(namespace, "old", network.Name, "203.0.1.0/24"))
+	provisionSubnet(t, c, namespace, "old")
+	setSetting(t, "network.subnet-allowed-ranges", "10.0.0.0/8")
+	reconcileSubnet(t, c, namespace, "old")
+	requireRangePolicy(t, c, namespace, "old", ReasonCIDROutsideAllowedRanges)
+
+	current := getNetwork(t, c, network.Name)
+	current.Status.Conditions = withCondition(current.Status.Conditions, falseCondition(v1alpha1.ConditionReady, current.Generation, ReasonVpcPending, "waiting"))
+	if err := c.Status().Update(context.Background(), &current); err != nil {
+		t.Fatal(err)
+	}
+	reconcileSubnet(t, c, namespace, "old")
+	requireSubnetReason(t, c, namespace, "old", metav1.ConditionFalse, ReasonNetworkNotReady)
+	requireRangePolicy(t, c, namespace, "old", ReasonCIDROutsideAllowedRanges)
+}
+
 func TestSubnetReconcilerRejectsOverlapKeepingTheOlder(t *testing.T) {
 	f := newSubnetFixture(t)
 	second := newNamespace(t, f.tenant, "zz")
@@ -236,18 +486,79 @@ func TestSubnetReconcilerRejectsInvalidExcludeIPs(t *testing.T) {
 	requireSubnetReason(t, f.c, f.namespace, "default", metav1.ConditionFalse, ReasonExcludeIPsInvalid)
 }
 
+func requireDHCP(t *testing.T, c client.Client, namespace, name string, mtu int64, options string) {
+	t.Helper()
+	fabricSubnet, err := fabricSubnetOf(c, namespace, name)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, found, _ := unstructured.NestedInt64(fabricSubnet.Object, "spec", "mtu")
+	if mtu == 0 && found || mtu != 0 && got != mtu {
+		t.Fatalf("mtu %d (set %v), want %d", got, found, mtu)
+	}
+	gotOptions, optionsFound, _ := unstructured.NestedString(fabricSubnet.Object, "spec", "dhcpV4Options")
+	if gotOptions != options || optionsFound != (options != "") {
+		t.Fatalf("options %q (set %v), want %q", gotOptions, optionsFound, options)
+	}
+}
+
 func TestSubnetDNSServersFromSettingsReachDHCP(t *testing.T) {
 	f := newSubnetFixture(t)
 	setSetting(t, "network.dns-servers", "1.1.1.1,8.8.8.8")
 	f.create(t, f.namespace, "default", "10.100.1.0/24")
 	reconcileSubnet(t, f.c, f.namespace, "default")
-	fabricSubnet, err := fabricSubnetOf(f.c, f.namespace, "default")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if options, _, _ := unstructured.NestedString(fabricSubnet.Object, "spec", "dhcpV4Options"); options != "dns_server=1.1.1.1;8.8.8.8" {
-		t.Fatalf("options %q", options)
-	}
+	requireDHCP(t, f.c, f.namespace, "default", 0, "dns_server=1.1.1.1;8.8.8.8")
+}
+
+func TestSubnetWithoutSettingsGetsNoMTUAndNoDHCPOptions(t *testing.T) {
+	f := newSubnetFixture(t)
+	f.create(t, f.namespace, "default", "10.100.1.0/24")
+	reconcileSubnet(t, f.c, f.namespace, "default")
+	requireDHCP(t, f.c, f.namespace, "default", 0, "")
+}
+
+func TestSubnetMTUFieldNeedsNoSetting(t *testing.T) {
+	f := newSubnetFixture(t)
+	subnet := policySubnet(f.namespace, "default", f.network.Name, "10.100.1.0/24")
+	subnet.Spec.MTU = ptr.To(int32(1400))
+	requireAccepted(t, f.c, subnet)
+	reconcileSubnet(t, f.c, f.namespace, "default")
+	requireDHCP(t, f.c, f.namespace, "default", 1400, "mtu=1400")
+}
+
+func TestSubnetMTUSettingReachesTheFabricSubnet(t *testing.T) {
+	f := newSubnetFixture(t)
+	setSetting(t, "network.mtu", "9000")
+	f.create(t, f.namespace, "default", "10.100.1.0/24")
+	reconcileSubnet(t, f.c, f.namespace, "default")
+	requireDHCP(t, f.c, f.namespace, "default", 9000, "mtu=9000")
+}
+
+func TestSubnetFieldsWinOverSettings(t *testing.T) {
+	f := newSubnetFixture(t)
+	setSetting(t, "network.mtu", "9000")
+	setSetting(t, "network.dns-servers", "1.1.1.1,8.8.8.8")
+	subnet := policySubnet(f.namespace, "default", f.network.Name, "10.100.1.0/24")
+	subnet.Spec.Gateway = "10.100.1.254"
+	subnet.Spec.MTU = ptr.To(int32(1400))
+	subnet.Spec.DNSServers = []string{"100.66.0.53", "100.66.0.54"}
+	requireAccepted(t, f.c, subnet)
+	reconcileSubnet(t, f.c, f.namespace, "default")
+	requireDHCP(t, f.c, f.namespace, "default", 1400, "mtu=1400,dns_server=100.66.0.53;100.66.0.54")
+}
+
+func TestSubnetFollowsASettingChange(t *testing.T) {
+	f := newSubnetFixture(t)
+	f.create(t, f.namespace, "default", "10.100.1.0/24")
+	reconcileSubnet(t, f.c, f.namespace, "default")
+	requireDHCP(t, f.c, f.namespace, "default", 0, "")
+	setSetting(t, "network.mtu", "1400")
+	setSetting(t, "network.dns-servers", "9.9.9.9")
+	reconcileSubnet(t, f.c, f.namespace, "default")
+	requireDHCP(t, f.c, f.namespace, "default", 1400, "mtu=1400,dns_server=9.9.9.9")
+	setSetting(t, "network.mtu", "")
+	reconcileSubnet(t, f.c, f.namespace, "default")
+	requireDHCP(t, f.c, f.namespace, "default", 0, "dns_server=9.9.9.9")
 }
 
 func TestSubnetDeletionWaitsForUsedAddresses(t *testing.T) {
@@ -349,6 +660,7 @@ func reservedFixture(t *testing.T, cidr string) subnetFixture {
 }
 
 func TestSubnetReconcilerRejectsProviderNetworkRanges(t *testing.T) {
+	setSetting(t, "network.subnet-allowed-ranges", "0.0.0.0/0")
 	f := reservedFixture(t, "91.246.0.0/16")
 	f.create(t, f.namespace, "clash", "91.246.31.0/24")
 	f.create(t, f.namespace, "fine", "91.246.40.0/24")
@@ -360,6 +672,7 @@ func TestSubnetReconcilerRejectsProviderNetworkRanges(t *testing.T) {
 }
 
 func TestSubnetReconcilerRejectsTheJoinSubnet(t *testing.T) {
+	setSetting(t, "network.reserved-cidrs", "192.0.2.0/24")
 	f := reservedFixture(t, "100.64.0.0/16")
 	f.create(t, f.namespace, "clash", "100.64.1.0/24")
 	reconcileSubnet(t, f.c, f.namespace, "clash")

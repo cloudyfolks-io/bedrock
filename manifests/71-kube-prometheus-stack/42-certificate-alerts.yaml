@@ -1,0 +1,36 @@
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: bedrock-certificates
+  namespace: monitoring
+spec:
+  groups:
+    - name: bedrock.certificates
+      rules:
+        - alert: CertManagerCertificateNotReady
+          expr: 'certmanager_certificate_ready_status{condition="False"} == 1'
+          for: 15m
+          labels:
+            severity: warning
+          annotations:
+            summary: 'A certificate is not ready.'
+            description: 'The Certificate {{ $labels.name }} in the namespace {{ $labels.exported_namespace }} is not ready for 15 minutes.'
+            runbook_url: https://github.com/cloudyfolks-io/bedrock/blob/main/docs/alerts.md#certmanagercertificatenotready
+        - alert: CertManagerCertificateExpiringSoon
+          expr: 'certmanager_certificate_expiration_timestamp_seconds - time() < 14 * 24 * 3600'
+          for: 1h
+          labels:
+            severity: warning
+          annotations:
+            summary: 'A certificate expires in less than 14 days.'
+            description: 'The Certificate {{ $labels.name }} in the namespace {{ $labels.exported_namespace }} expires in less than 14 days. The renewal does not work.'
+            runbook_url: https://github.com/cloudyfolks-io/bedrock/blob/main/docs/alerts.md#certmanagercertificateexpiringsoon
+        - alert: CertManagerCertificateExpiresInThreeDays
+          expr: 'certmanager_certificate_expiration_timestamp_seconds - time() < 3 * 24 * 3600'
+          for: 10m
+          labels:
+            severity: critical
+          annotations:
+            summary: 'A certificate expires in less than 3 days.'
+            description: 'The Certificate {{ $labels.name }} in the namespace {{ $labels.exported_namespace }} expires in less than 3 days.'
+            runbook_url: https://github.com/cloudyfolks-io/bedrock/blob/main/docs/alerts.md#certmanagercertificateexpiresinthreedays

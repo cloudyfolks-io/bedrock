@@ -9,10 +9,12 @@ import (
 	rbacv1 "k8s.io/api/rbac/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/utils/ptr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	"github.com/cloudyfolks-io/bedrock/api/v1alpha1"
+	"github.com/cloudyfolks-io/bedrock/internal/network/fabric"
 )
 
 func eventuallyForbidden(t *testing.T, attempt func() error) error {
@@ -276,4 +278,193 @@ func TestNamespaceTenantLabelsBelongToTheOperator(t *testing.T) {
 	if err := operatorClient.Create(ctx, namespaceNamed("acme-new", map[string]string{v1alpha1.LabelTenant: "acme"})); err != nil {
 		t.Errorf("the operator could not create: %v", err)
 	}
+}
+
+func vrfPolicyWorld(t *testing.T) (admin, alice, root client.Client) {
+	t.Helper()
+	admin, cfg := startEnv(t)
+	mustCreate(t, admin,
+		&rbacv1.ClusterRole{ObjectMeta: metav1.ObjectMeta{Name: "network-writer"}, Rules: []rbacv1.PolicyRule{{APIGroups: []string{"bedrock.cloudyfolks.io"}, Resources: []string{"networks"}, Verbs: []string{"create", "update", "get"}}}},
+		&rbacv1.ClusterRoleBinding{
+			ObjectMeta: metav1.ObjectMeta{Name: "network-writer"},
+			RoleRef:    rbacv1.RoleRef{APIGroup: rbacv1.GroupName, Kind: "ClusterRole", Name: "network-writer"},
+			Subjects: []rbacv1.Subject{
+				{APIGroup: rbacv1.GroupName, Kind: "User", Name: "bedrock:alice"},
+				{APIGroup: rbacv1.GroupName, Kind: "Group", Name: "bedrock:bedrock-admins"},
+			},
+		},
+	)
+	applyFile(t, admin, manifestPath("86-tenancy", "60-network-vrf-policy.yaml"))
+	alice = actingAs(t, cfg, "bedrock:alice")
+	root = actingAs(t, cfg, "bedrock:root", "bedrock:bedrock-admins", "system:authenticated")
+	if err := eventuallyForbidden(t, denyCreate(admin, alice, networkWithVrf("probe", 1500))); err == nil {
+		t.Fatal("the VRF policy never denied")
+	}
+	return admin, alice, root
+}
+
+func networkWithVrf(name string, id int32) *v1alpha1.Network {
+	network := networkFor(name, "acme")
+	network.Spec.VrfID = ptr.To(id)
+	return network
+}
+
+func TestNonAdminCannotCreateANetworkWithAVrfID(t *testing.T) {
+	_, alice, _ := vrfPolicyWorld(t)
+	err := alice.Create(context.Background(), networkWithVrf("acme-pinned", 1500))
+	if !apierrors.IsForbidden(err) || !strings.Contains(err.Error(), "only an administrator may set or change vrfId") {
+		t.Fatalf("err = %v", err)
+	}
+}
+
+func TestNonAdminCanCreateANetworkWithoutAVrfID(t *testing.T) {
+	_, alice, _ := vrfPolicyWorld(t)
+	mustCreate(t, alice, networkFor("acme-plain", "acme"))
+}
+
+func TestAdminCanSetAVrfID(t *testing.T) {
+	_, _, root := vrfPolicyWorld(t)
+	mustCreate(t, root, networkWithVrf("acme-pinned", 1500))
+	later := networkFor("acme-later", "acme")
+	mustCreate(t, root, later)
+	later.Spec.VrfID = ptr.To(int32(60001))
+	if err := root.Update(context.Background(), later); !apierrors.IsInvalid(err) || !strings.Contains(err.Error(), "vrfId can only be set when the Network is created") {
+		t.Fatalf("pin later err = %v", err)
+	}
+}
+
+func TestNonAdminCannotChangeAVrfIDButCanEditOtherFields(t *testing.T) {
+	admin, alice, _ := vrfPolicyWorld(t)
+	ctx := context.Background()
+	pinned := networkWithVrf("acme-pinned", 1500)
+	mustCreate(t, admin, pinned)
+
+	changed := pinned.DeepCopy()
+	changed.Spec.VrfID = ptr.To(int32(1600))
+	if err := alice.Update(ctx, changed); err == nil {
+		t.Fatal("a tenant user must not change a pinned VRF id")
+	}
+
+	if err := admin.Get(ctx, client.ObjectKey{Name: "acme-pinned"}, pinned); err != nil {
+		t.Fatal(err)
+	}
+	pinned.Spec.EnableExternal = true
+	if err := alice.Update(ctx, pinned); err != nil {
+		t.Fatalf("an unrelated change of a pinned Network must pass: %v", err)
+	}
+}
+
+func poolSubnet(name, usability string) *unstructured.Unstructured {
+	labels := map[string]string{"network.bedrock.cloudyfolks.io/component": "underlay"}
+	if usability != "" {
+		labels["usability"] = usability
+	}
+	return fabric.Subnet(fabric.Meta{Name: "provider-" + name, Labels: labels}, fabric.SubnetSpec{CIDR: "198.51.100.0/24", Gateway: "198.51.100.1"})
+}
+
+func poolPolicyWorld(t *testing.T) (admin, alice, root client.Client) {
+	t.Helper()
+	admin, cfg := startEnv(t)
+	ctx := context.Background()
+	mustCreate(t, admin,
+		&rbacv1.ClusterRole{ObjectMeta: metav1.ObjectMeta{Name: "eip-writer"}, Rules: []rbacv1.PolicyRule{{APIGroups: []string{"bedrock.cloudyfolks.io"}, Resources: []string{"elasticips"}, Verbs: []string{"create", "update", "get"}}}},
+		&rbacv1.ClusterRoleBinding{
+			ObjectMeta: metav1.ObjectMeta{Name: "eip-writer"},
+			RoleRef:    rbacv1.RoleRef{APIGroup: rbacv1.GroupName, Kind: "ClusterRole", Name: "eip-writer"},
+			Subjects: []rbacv1.Subject{
+				{APIGroup: rbacv1.GroupName, Kind: "User", Name: "bedrock:alice"},
+				{APIGroup: rbacv1.GroupName, Kind: "Group", Name: "bedrock:bedrock-admins"},
+			},
+		},
+		namespaceNamed("t-acme", nil),
+	)
+	for _, pool := range []*unstructured.Unstructured{
+		poolSubnet("tenantpool", "public"), poolSubnet("platformpool", "private"), poolSubnet("transitpool", "transit"),
+		poolSubnet("servicespool", "services"), poolSubnet("oldpool", ""),
+	} {
+		if err := admin.Create(ctx, pool); err != nil {
+			t.Fatal(err)
+		}
+	}
+	applyFile(t, admin, manifestPath("86-tenancy", "70-elasticip-pool-policy.yaml"))
+	alice = actingAs(t, cfg, "bedrock:alice")
+	root = actingAs(t, cfg, "bedrock:root", "bedrock:bedrock-admins", "system:authenticated")
+	if err := eventuallyForbidden(t, denyCreate(admin, alice, poolEIP("probe", "platformpool"))); err == nil {
+		t.Fatal("the pool policy never denied")
+	}
+	return admin, alice, root
+}
+
+func poolEIP(name, pool string) *v1alpha1.ElasticIP {
+	return &v1alpha1.ElasticIP{ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: "t-acme"}, Spec: v1alpha1.ElasticIPSpec{ProviderNetwork: pool}}
+}
+
+func TestNonAdminCannotNameAPoolThatIsNotATenantPool(t *testing.T) {
+	_, alice, _ := poolPolicyWorld(t)
+	for _, pool := range []string{"platformpool", "transitpool", "servicespool"} {
+		err := alice.Create(context.Background(), poolEIP("eip-"+pool, pool))
+		if !apierrors.IsForbidden(err) || !strings.Contains(err.Error(), "only an administrator may name a provider network that is not a tenant pool") {
+			t.Fatalf("%s: err = %v", pool, err)
+		}
+	}
+}
+
+func TestNonAdminCanNameATenantPoolOrNone(t *testing.T) {
+	_, alice, _ := poolPolicyWorld(t)
+	mustCreate(t, alice, poolEIP("named", "tenantpool"), poolEIP("unnamed", ""), poolEIP("legacy", "oldpool"), poolEIP("unknown", "ghost"))
+}
+
+func TestAdminCanNameAPlatformPool(t *testing.T) {
+	_, _, root := poolPolicyWorld(t)
+	mustCreate(t, root, poolEIP("platform", "platformpool"), poolEIP("transit", "transitpool"))
+}
+
+func TestNonAdminKeepsEditingAnElasticIPOfAPlatformPool(t *testing.T) {
+	admin, alice, _ := poolPolicyWorld(t)
+	held := poolEIP("held", "platformpool")
+	mustCreate(t, admin, held)
+	held.Labels = map[string]string{"k": "v"}
+	if err := alice.Update(context.Background(), held); err != nil {
+		t.Fatalf("an unrelated change must pass: %v", err)
+	}
+}
+
+func tenantVrfPolicyWorld(t *testing.T) (admin, alice, root client.Client) {
+	t.Helper()
+	admin, cfg := startEnv(t)
+	mustCreate(t, admin,
+		&rbacv1.ClusterRole{ObjectMeta: metav1.ObjectMeta{Name: "tenant-writer"}, Rules: []rbacv1.PolicyRule{{APIGroups: []string{"bedrock.cloudyfolks.io"}, Resources: []string{"tenants"}, Verbs: []string{"create", "update", "get"}}}},
+		&rbacv1.ClusterRoleBinding{
+			ObjectMeta: metav1.ObjectMeta{Name: "tenant-writer"},
+			RoleRef:    rbacv1.RoleRef{APIGroup: rbacv1.GroupName, Kind: "ClusterRole", Name: "tenant-writer"},
+			Subjects: []rbacv1.Subject{
+				{APIGroup: rbacv1.GroupName, Kind: "User", Name: "bedrock:alice"},
+				{APIGroup: rbacv1.GroupName, Kind: "Group", Name: "bedrock:bedrock-admins"},
+			},
+		},
+	)
+	applyFile(t, admin, manifestPath("86-tenancy", "60-network-vrf-policy.yaml"))
+	alice = actingAs(t, cfg, "bedrock:alice")
+	root = actingAs(t, cfg, "bedrock:root", "bedrock:bedrock-admins", "system:authenticated")
+	return admin, alice, root
+}
+
+func tenantWithVrf(name string, id int32) *v1alpha1.Tenant {
+	tenant := acmeWithOwners()
+	tenant.Name = name
+	tenant.Spec.Network.VrfID = ptr.To(id)
+	return tenant
+}
+
+func TestNonAdminCannotCreateATenantWithAVrfID(t *testing.T) {
+	admin, alice, _ := tenantVrfPolicyWorld(t)
+	err := eventuallyForbidden(t, denyCreate(admin, alice, tenantWithVrf("pinneda", 1500)))
+	if !strings.Contains(err.Error(), "only an administrator may set or change vrfId") {
+		t.Fatalf("err = %v", err)
+	}
+}
+
+func TestAdminCanCreateATenantWithAVrfID(t *testing.T) {
+	_, _, root := tenantVrfPolicyWorld(t)
+	mustCreate(t, root, tenantWithVrf("pinnedb", 1500))
 }

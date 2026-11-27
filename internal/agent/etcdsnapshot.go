@@ -27,7 +27,7 @@ const (
 	maxBackoffDoublings  = 20
 )
 
-func RunEtcdSnapshots(ctx context.Context, c client.Client, deps Deps) error {
+func RunEtcdSnapshots(ctx context.Context, c client.Client, deps Deps) (result error) {
 	var own v1alpha1.Host
 	if err := c.Get(ctx, client.ObjectKey{Name: deps.Node}, &own); err != nil {
 		return client.IgnoreNotFound(err)
@@ -35,6 +35,7 @@ func RunEtcdSnapshots(ctx context.Context, c client.Client, deps Deps) error {
 	if !v1alpha1.HostHasRole(own, v1alpha1.RoleControlPlane) {
 		return nil
 	}
+	defer func() { result = errors.Join(result, writeEtcdSnapshotMetrics(deps.Root)) }()
 	expr, err := etcdSchedule(ctx, c)
 	if err != nil {
 		return err

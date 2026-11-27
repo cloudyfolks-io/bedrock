@@ -4,7 +4,7 @@ set -euo pipefail
 vm=${CI_VM:-bedrock-ci}
 cpus=${CI_CPUS:-12}
 memory=${CI_MEMORY:-24}
-disk=${CI_DISK:-100}
+disk=${CI_DISK:-160}
 osd_size=${CI_OSD_GB:-60}
 min_free=${CI_MIN_FREE_GB:-25}
 floor=${CI_FLOOR_GB:-15}
@@ -16,7 +16,8 @@ repo=$(git rev-parse --show-toplevel)
 arch=$(uname -m | sed 's/x86_64/amd64/;s/aarch64/arm64/')
 base_images=(golang:1.27 gcr.io/distroless/static:nonroot registry:3 node:24-bookworm-slim)
 version_a=v0.0.0-e2e.1
-upgrade_env="REGISTRY=localhost:$port ARCH=$arch VERSION_A=$version_a VERSION_B=v0.0.0-e2e.2 K0S_A=v1.36.2+k0s.0 K0S_B=v1.36.3+k0s.0"
+version_b=v0.0.0-e2e.2
+upgrade_env="REGISTRY=localhost:$port ARCH=$arch VERSION_A=$version_a VERSION_B=$version_b K0S_A=v1.36.2+k0s.0 K0S_B=v1.36.3+k0s.1"
 release_ref=${CI_RELEASE_REF:-v0.5.0}
 known_jobs=(test e2e-kind e2e-bundle e2e-upgrade e2e-upgrade-abort e2e-authn e2e-tenant e2e-upgrade-from-release)
 vm_path=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
@@ -142,7 +143,6 @@ vm_provision() {
   cat <<'SCRIPT'
 #!/bin/sh
 set -e
-sysctl -w fs.inotify.max_user_instances=8192 fs.inotify.max_user_watches=1048576 vm.max_map_count=262144
 cat >/usr/local/bin/kubectl <<'KUBECTL'
 #!/bin/sh
 exec /usr/local/bin/k0s kubectl "$@"
@@ -193,10 +193,18 @@ vm_up() {
   vm_down
   vm_osd_disk_create
   vm_config >"$tmp/vm.yaml"
-  limactl start --name "$vm" --tty=false "$tmp/vm.yaml"
+  if ! vm_start; then
+    echo "warning: the VM did not boot, retrying once" >&2
+    limactl delete --force "$vm" || true
+    vm_start
+  fi
   if ! wait_ntp; then
     echo "warning: the VM clock is not NTP synchronized" >&2
   fi
+}
+
+vm_start() {
+  limactl start --name "$vm" --tty=false "$tmp/vm.yaml"
 }
 
 vm_down() {
@@ -263,15 +271,20 @@ run_e2e_kind() {
   remove_job_images
 }
 
-run_e2e_bundle() {
+build_offline_release() {
+  local release_config=$1 image="localhost:$port/bedrock:dev"
   ensure_images
   registry_up
-  make build release binaries VERSION=dev IMAGE="localhost:$port/bedrock:dev" PIN_DIGESTS=1
-  retry 3 docker build -t "localhost:$port/bedrock:dev" -f Containerfile .
-  retry 3 docker push "localhost:$port/bedrock:dev"
-  make bundle VERSION=dev IMAGE="localhost:$port/bedrock:dev" PIN_DIGESTS=1 BUNDLE_ARCH="$arch"
+  make build binaries release-from-build VERSION=dev IMAGE="$image" PIN_DIGESTS=1 RELEASE_CONFIG="$release_config"
+  retry 3 docker build -t "$image" -f Containerfile .
+  retry 3 docker push "$image"
+  make release-from-build bundle-from-release VERSION=dev IMAGE="$image" PIN_DIGESTS=1 RELEASE_CONFIG="$release_config" BUNDLE_ARCH="$arch"
   registry_down
   remove_job_images
+}
+
+run_e2e_bundle() {
+  build_offline_release release/components.yaml
   vm_up
   in_vm "KUBECONFIG=/var/lib/k0s/pki/admin.conf BUNDLE=dist/bedrock-dev-bundle-$arch.tar.zst IMAGE=localhost:$port/bedrock:dev BIN=dist/bedrock-dev-linux-$arch ARCH=$arch EMULATION=$(emulation_flag)" hack/e2e-init.sh
   rm -f "dist/bedrock-dev-bundle-$arch.tar.zst"
@@ -279,14 +292,7 @@ run_e2e_bundle() {
 }
 
 run_e2e_authn() {
-  ensure_images
-  registry_up
-  make build release binaries VERSION=dev IMAGE="localhost:$port/bedrock:dev" PIN_DIGESTS=1
-  retry 3 docker build -t "localhost:$port/bedrock:dev" -f Containerfile .
-  retry 3 docker push "localhost:$port/bedrock:dev"
-  make bundle VERSION=dev IMAGE="localhost:$port/bedrock:dev" PIN_DIGESTS=1 BUNDLE_ARCH="$arch"
-  registry_down
-  remove_job_images
+  build_offline_release release/components.yaml
   CGO_ENABLED=0 GOOS=linux GOARCH="$arch" go test -c -tags e2e -o "dist/e2e-authn-$arch.test" ./test/e2e/authn
   ARCH="$arch" hack/e2e-authn-images.sh
   vm_up
@@ -298,21 +304,14 @@ run_e2e_authn() {
 
 run_e2e_tenant() {
   local release_config=dist/components-e2e.yaml
-  ensure_images
-  registry_up
   hack/e2e-release-config.sh release/components.yaml "$release_config"
-  make build release binaries VERSION=dev IMAGE="localhost:$port/bedrock:dev" PIN_DIGESTS=1 RELEASE_CONFIG="$release_config"
-  retry 3 docker build -t "localhost:$port/bedrock:dev" -f Containerfile .
-  retry 3 docker push "localhost:$port/bedrock:dev"
-  make bundle VERSION=dev IMAGE="localhost:$port/bedrock:dev" PIN_DIGESTS=1 BUNDLE_ARCH="$arch" RELEASE_CONFIG="$release_config"
-  registry_down
-  remove_job_images
+  build_offline_release "$release_config"
   CGO_ENABLED=0 GOOS=linux GOARCH="$arch" go test -c -tags e2e -o "dist/e2e-tenant-$arch.test" ./test/e2e/tenant
   ARCH="$arch" hack/e2e-tenant-images.sh
   vm_osd=1 vm_up
-  in_vm "" "apt-get update -qq && apt-get install -y -qq jq"
-  in_vm "KUBECONFIG=/var/lib/k0s/pki/admin.conf BUNDLE=dist/bedrock-dev-bundle-$arch.tar.zst IMAGE=localhost:$port/bedrock:dev BIN=dist/bedrock-dev-linux-$arch ARCH=$arch EMULATION=$(emulation_flag) E2E_OSD_DEVICE=blank E2E_PROVIDER_NETWORK=public" hack/e2e-init.sh
-  in_vm "BEDROCK_BIN=dist/bedrock-dev-linux-$arch E2E_TEST=dist/e2e-tenant-$arch.test" hack/e2e-tenant.sh
+  in_vm "" "command -v jq >/dev/null || { apt-get -o Acquire::Retries=1 -o Acquire::http::Timeout=20 -o Acquire::https::Timeout=20 update -qq && apt-get -o Acquire::Retries=1 -o Acquire::http::Timeout=20 -o Acquire::https::Timeout=20 install -y -qq jq; }"
+  in_vm "KUBECONFIG=/var/lib/k0s/pki/admin.conf BUNDLE=dist/bedrock-dev-bundle-$arch.tar.zst IMAGE=localhost:$port/bedrock:dev BIN=dist/bedrock-dev-linux-$arch ARCH=$arch EMULATION=$(emulation_flag) E2E_OVN_TLS=true E2E_OSD_DEVICE=blank E2E_PROVIDER_NETWORK=public" hack/e2e-init.sh
+  in_vm "BEDROCK_BIN=dist/bedrock-dev-linux-$arch E2E_TEST=dist/e2e-tenant-$arch.test E2E_DATABASE_VIP_RANGE=203.0.113.128/26" hack/e2e-tenant.sh
   rm -f "dist/bedrock-dev-bundle-$arch.tar.zst"
   vm_down
 }
@@ -330,13 +329,16 @@ run_upgrade() {
     return 1
   fi
   in_vm "$upgrade_env $job_env EMULATION=$(emulation_flag)" hack/e2e-upgrade.sh
-  rm -f dist/bedrock-*-bundle-*.tar.zst dist/e2e-init-*.sh
+  rm -f "dist/bedrock-$version_a-bundle-$arch.tar.zst" "dist/bedrock-$version_b-bundle-$arch.tar.zst"
   vm_down
 }
 
 run_e2e_upgrade() { run_upgrade "" ""; }
 run_e2e_upgrade_abort() { run_upgrade "" ABORT_IN=ControlPlane; }
-run_e2e_upgrade_from_release() { run_upgrade "VERSION_A_REF=$release_ref" "INIT_A=dist/e2e-init-$version_a.sh ASSERT_AUTHN=1"; }
+run_e2e_upgrade_from_release() {
+  run_upgrade "VERSION_A_REF=$release_ref" "INIT_A=dist/e2e-init-$version_a.sh ASSERT_AUTHN=1 VERSION_A_ARCHIVES=0"
+  rm -f "dist/e2e-init-$version_a.sh"
+}
 
 cache_size() {
   if [ -d dist/cache ]; then
@@ -362,7 +364,6 @@ cleanup() {
   vm_down
   registry_down
   remove_job_images
-  rm -f dist/bedrock-*-bundle-*.tar.zst dist/e2e-init-*.sh
   rm -rf dist/.bundle-* dist/.ref-* dist/e2e
   rm -rf "$tmp"
   printf '%s' "$summary"

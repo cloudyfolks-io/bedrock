@@ -4,7 +4,10 @@ import (
 	"bufio"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io/fs"
+	"net/netip"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -16,6 +19,7 @@ type Facts struct {
 	OSID             string
 	OSVersionID      string
 	Arch             string
+	Kernel           string
 	Root             bool
 	Systemd          bool
 	CgroupV2         bool
@@ -26,6 +30,7 @@ type Facts struct {
 	Interfaces       []string
 	FreeVarLibBytes  uint64
 	IOMMUGroups      int
+	Swaps            []string
 }
 
 type route struct {
@@ -37,8 +42,9 @@ type link struct {
 }
 
 type addrInfo struct {
-	Family string `json:"family"`
-	Local  string `json:"local"`
+	Family    string `json:"family"`
+	Local     string `json:"local"`
+	PrefixLen int    `json:"prefixlen"`
 }
 
 type addrEntry struct {
@@ -74,11 +80,16 @@ func Gather(ctx context.Context, e Exec, root string, freeBytes func(string) (ui
 	if err != nil {
 		return Facts{}, err
 	}
+	swaps, err := readSwaps(filepath.Join(root, "proc", "swaps"))
+	if err != nil {
+		return Facts{}, err
+	}
 	return Facts{
 		Hostname:         strings.ToLower(strings.TrimSpace(hostname)),
 		OSID:             id,
 		OSVersionID:      version,
 		Arch:             runtime.GOARCH,
+		Kernel:           kernelRelease(root),
 		Root:             uid == 0,
 		Systemd:          exists(filepath.Join(root, "run", "systemd", "system")),
 		CgroupV2:         exists(filepath.Join(root, "sys", "fs", "cgroup", "cgroup.controllers")),
@@ -89,7 +100,34 @@ func Gather(ctx context.Context, e Exec, root string, freeBytes func(string) (ui
 		Interfaces:       links,
 		FreeVarLibBytes:  free,
 		IOMMUGroups:      countEntries(filepath.Join(root, "sys", "kernel", "iommu_groups")),
+		Swaps:            swaps,
 	}, nil
+}
+
+func readSwaps(path string) ([]string, error) {
+	data, err := os.ReadFile(path)
+	if errors.Is(err, fs.ErrNotExist) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("read swaps: %w", err)
+	}
+	var devices []string
+	for i, line := range strings.Split(string(data), "\n") {
+		fields := strings.Fields(line)
+		if i > 0 && len(fields) > 0 {
+			devices = append(devices, fields[0])
+		}
+	}
+	return devices, nil
+}
+
+func kernelRelease(root string) string {
+	raw, err := os.ReadFile(filepath.Join(root, "proc", "sys", "kernel", "osrelease"))
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(string(raw))
 }
 
 func countEntries(path string) int {
@@ -155,6 +193,39 @@ func primaryAddress(ctx context.Context, e Exec, iface string) (string, error) {
 		}
 	}
 	return "", fmt.Errorf("no IPv4 address on %s", iface)
+}
+
+const hostPrefixLen = 32
+
+func InterfaceCIDR(ctx context.Context, e Exec, iface string) (string, error) {
+	out, err := e.Run(ctx, "ip", "-json", "-4", "addr", "show", "dev", iface)
+	if err != nil {
+		return "", err
+	}
+	var entries []addrEntry
+	if err := json.Unmarshal([]byte(out), &entries); err != nil {
+		return "", fmt.Errorf("parse addresses: %w", err)
+	}
+	var found []addrInfo
+	for _, entry := range entries {
+		for _, info := range entry.AddrInfo {
+			if info.Family == "inet" && info.Local != "" && info.PrefixLen != hostPrefixLen {
+				found = append(found, info)
+			}
+		}
+	}
+	if len(found) == 1 {
+		return maskedAddress(found[0], iface)
+	}
+	return "", fmt.Errorf("%s has %d IPv4 networks and the management network is ambiguous: set managementCIDR", iface, len(found))
+}
+
+func maskedAddress(info addrInfo, iface string) (string, error) {
+	addr, err := netip.ParseAddr(info.Local)
+	if err != nil || info.PrefixLen < 1 || info.PrefixLen > 32 {
+		return "", fmt.Errorf("address %s/%d on %s is not usable", info.Local, info.PrefixLen, iface)
+	}
+	return netip.PrefixFrom(addr, info.PrefixLen).Masked().String(), nil
 }
 
 func HasAddress(ctx context.Context, e Exec, ip string) (bool, error) {

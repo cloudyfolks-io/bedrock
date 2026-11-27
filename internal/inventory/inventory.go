@@ -44,6 +44,14 @@ func Gather(ctx context.Context, e host.Exec, root string) (v1alpha1.Inventory, 
 	if err != nil {
 		return v1alpha1.Inventory{}, err
 	}
+	addrs, err := e.Run(ctx, "ip", "-j", "addr", "show")
+	if err != nil {
+		return v1alpha1.Inventory{}, err
+	}
+	linkInfos, err := ParseIPAddr([]byte(addrs))
+	if err != nil {
+		return v1alpha1.Inventory{}, err
+	}
 	lspci, err := e.Run(ctx, "lspci", "-Dvmmnn")
 	if err != nil {
 		return v1alpha1.Inventory{}, err
@@ -56,7 +64,7 @@ func Gather(ctx context.Context, e host.Exec, root string) (v1alpha1.Inventory, 
 	if err != nil {
 		return v1alpha1.Inventory{}, err
 	}
-	return v1alpha1.Inventory{CPU: cpu, MemoryBytes: memory, Disks: disks, NICs: nics, PCI: pci, Firmware: Firmware(root, strings.TrimSpace(kernel))}, nil
+	return v1alpha1.Inventory{CPU: cpu, MemoryBytes: memory, Disks: disks, NICs: nics, Links: linkInfos, PCI: pci, Firmware: Firmware(root, strings.TrimSpace(kernel))}, nil
 }
 
 func Firmware(root string, kernel string) v1alpha1.FirmwareInfo {

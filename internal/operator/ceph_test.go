@@ -84,7 +84,7 @@ func createRookOperatorPod(t *testing.T, ctx context.Context, c client.Client, n
 	t.Helper()
 	pod := &corev1.Pod{
 		ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: storageNamespace, Labels: map[string]string{"app": "rook-ceph-operator"}},
-		Spec:       corev1.PodSpec{Containers: []corev1.Container{{Name: rookOperatorContainer, Image: "docker.io/rook/ceph:v1.20.7"}}},
+		Spec:       corev1.PodSpec{Containers: []corev1.Container{{Name: rookOperatorContainer, Image: "docker.io/rook/ceph:v1.21.0"}}},
 	}
 	if err := c.Create(ctx, pod); err != nil {
 		t.Fatal(err)

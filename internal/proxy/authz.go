@@ -11,12 +11,14 @@ import (
 	"time"
 
 	authorizationv1 "k8s.io/api/authorization/v1"
+	"k8s.io/apimachinery/pkg/api/meta"
 	"k8s.io/client-go/kubernetes"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	"github.com/cloudyfolks-io/bedrock/api/v1alpha1"
 	"github.com/cloudyfolks-io/bedrock/internal/authn/httpjson"
 	"github.com/cloudyfolks-io/bedrock/internal/authn/secret"
+	"github.com/cloudyfolks-io/bedrock/internal/tenancy"
 )
 
 const (
@@ -137,9 +139,9 @@ func visibleProjects(ctx context.Context, reviews reviewer, projects []v1alpha1.
 	namespaced := make([]v1alpha1.Project, 0, len(projects))
 	attributes := make([]authorizationv1.ResourceAttributes, 0, len(projects))
 	for _, project := range projects {
-		if project.Status.Namespace != "" {
+		if namespace := projectListNamespace(project); namespace != "" {
 			namespaced = append(namespaced, project)
-			attributes = append(attributes, projectProbe(project.Status.Namespace))
+			attributes = append(attributes, projectProbe(namespace))
 		}
 	}
 	results, err := reviews.all(ctx, attributes)
@@ -162,10 +164,18 @@ func viewsOf(projects []v1alpha1.Project) []projectView {
 			Name:        project.Name,
 			DisplayName: project.Spec.DisplayName,
 			Tenant:      project.Spec.TenantRef,
-			Namespace:   project.Status.Namespace,
+			Namespace:   projectListNamespace(project),
 		})
 	}
 	return views
+}
+
+func projectListNamespace(project v1alpha1.Project) string {
+	condition := meta.FindStatusCondition(project.Status.Conditions, tenancy.ConditionNamespaceReady)
+	if condition != nil && (condition.Reason == tenancy.ReasonNamespaceConflict || condition.Reason == tenancy.ReasonNamespaceTerminating) {
+		return ""
+	}
+	return project.Status.Namespace
 }
 
 func listProjectsAttributes() authorizationv1.ResourceAttributes {

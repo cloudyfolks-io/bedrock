@@ -17,6 +17,7 @@ func steps() []step {
 		{name: "kernelCmdline", run: skipStep("applied by a later release")},
 		{name: "units", run: unitsStep},
 		{name: "nmstate", run: skipStep("applied by the nmstate handler")},
+		{name: "tenantLegs", run: legsStep},
 		{name: "containerdMirrors", run: mirrorsStep},
 		{name: "containerdDevices", run: devicesStep},
 	}

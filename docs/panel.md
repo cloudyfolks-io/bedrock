@@ -16,34 +16,44 @@ When the session ends, the panel sends the user to sign in again. It does this o
 When the sign-in fails two times in 10 seconds, the panel stops. It shows an error card with a retry link.
 The user menu has the sign-out item. It sends `POST /oauth/logout` and then opens `/`.
 
-## The two perspectives
+## Console navigation
 
-The admin perspective shows when the session answer says `admin`. The group `bedrock-admins` gives this.
-The project perspective lists the projects of the user. The panel reads them from `GET /proxy/v1/projects`.
-A user who is not an admin cannot open the admin routes. The panel sends this user to `/p`.
-The server stays the authority. The panel only hides what the user cannot use.
+One sidebar groups infrastructure and product pages. Administrators see
+infrastructure, platform, tenancy, and catalog links. The Project control
+sets the scope for project links and preserves the current product when
+switching projects. Admin pages stay open when the selected project changes.
+Users who are not administrators cannot open admin routes; the panel sends
+them to `/p`. The server remains the authority for access.
 
 ## Pages
 
 | Route | Page |
 |---|---|
-| `/` | Redirect to the stored perspective |
-| `/admin` | Redirect to `/admin/hosts` |
+| `/` | Open the stored perspective. On the first sign-in, open the overview for an administrator or projects for a project user. |
+| `/admin` | Redirect to `/admin/overview` |
+| `/admin/overview` | Cluster inventory counts and host readiness |
+| `/admin/inventory` | Resource inventory across projects |
 | `/admin/hosts` | Hosts |
 | `/admin/hosts/:name` | Host detail: overview, inventory, metrics, maintenance mode |
 | `/admin/settings` | Settings, grouped by prefix |
 | `/admin/upgrades` | Upgrade phase, releases, resume and abort |
+| `/admin/network-peerings` | Network peerings |
 | `/admin/tenants` | Tenants |
 | `/admin/tenants/:name` | Tenant detail: quota use and projects |
 | `/admin/cluster-images` | Catalog images |
 | `/admin/cluster-images/:name` | Catalog image detail |
 | `/admin/addons` | Addons |
+| `/admin/database-versions` | Database versions of the catalog |
+| `/admin/database-classes` | Database classes of the catalog |
 | `/p` | Redirect to the stored project, else the first project |
 | `/p/:project` | Redirect to the virtual machines |
 | `/p/:project/vms` | Virtual machines |
 | `/p/:project/vms/new` | Create a virtual machine from an image |
 | `/p/:project/vms/new-iso` | Install a virtual machine from an ISO |
 | `/p/:project/vms/:name` | Virtual machine detail: `?tab=overview`, `console`, `metrics`, `disks`, `networks` |
+| `/p/:project/containers` | Containers |
+| `/p/:project/builds` | Builds |
+| `/p/:project/kubernetes-clusters` | Kubernetes clusters |
 | `/p/:project/volumes` | Volumes |
 | `/p/:project/volumes/:name` | Volume detail with usage chart |
 | `/p/:project/snapshots` | Volume snapshots |
@@ -55,17 +65,33 @@ The server stays the authority. The panel only hides what the user cannot use.
 | `/p/:project/subnets` | Subnets |
 | `/p/:project/elastic-ips` | Elastic IPs, attach and detach |
 | `/p/:project/load-balancers` | Load balancers |
+| `/p/:project/internet-gateways` | Internet gateways |
 | `/p/:project/dns-zones` | DNS zones |
 | `/p/:project/security-groups` | Security groups |
+| `/p/:project/databases` | Managed databases |
+| `/p/:project/database-users` | Database users and their grants |
+| `/p/:project/database-schemas` | Logical databases of a managed database |
 | `/p/:project/buckets` | Buckets |
 | `/p/:project/object-users` | Object storage users and their credentials |
-| `/account` | Language, theme and downloads |
+| `/p/:project/registries` | Registries |
+| `/p/:project/registry-credentials` | Registry credentials and their login |
+| `/account` | Language and downloads |
 
 Every other kind with a namespace has a detail page at `/p/:project/<path>/:name`.
 
+## Resource inventory
+
+Select a resource type in the Admin perspective. Select a project to list resources in its namespace. Select **All projects** to list resources across namespaces. The inventory shows the resource name, namespace, project and status. It labels resources in namespaces without a valid project link. If the controller reports that a project namespace is in conflict or is terminating, the project filter becomes unavailable.
+
+Networks belong to tenants, and the Network inventory shows the tenant. Clear the project filter to open that inventory. Virtual machine restores have their own resource type. A restore name links to its project's Backups page.
+
+Use the exact resource name to find a resource. The address keeps the resource type, project and name filters so you can share the view with an authorized administrator. The inventory shows one page at a time. Use **Refresh list** to request current results from the first page. If the list expires, use **Go to first page** to start a new list. An empty page can have more results on the next page.
+
+The Project perspective lists the Networks of the selected project's tenant that Kubernetes permits you to read. If you have project access only, use the Subnets page to see the networks attached to your project.
+
 ## Live updates
 
-Every list and every detail page stays live. One WebSocket carries all updates.
+Resource lists and detail pages can use one WebSocket for live updates. The admin inventory uses paged requests. The Project Networks list refreshes after a change in the panel or when the tab regains focus and its data is stale.
 The page loads a list first. It then subscribes at the version of that list.
 When the proxy sends `relist`, the page loads the list again and subscribes again.
 When the connection breaks, the panel connects again with a growing delay.
@@ -80,6 +106,14 @@ A check that is pending or failed hides the action.
 When the server refuses an action that the panel showed, the panel shows a message.
 If a button is missing, ask a project owner or an admin for the role.
 
+## In-progress changes
+
+The panel marks writes as pending immediately. New resources can appear as
+non-actionable rows while the server creates them. Changes that Bedrock
+applies asynchronously are acknowledged as requested, not completed.
+The server still reports readiness, deletion, and credentials. If a write
+fails, the panel removes the pending change and keeps the latest server data.
+
 ## Languages and direction
 
 The panel speaks English, Persian and Arabic.
@@ -88,10 +122,9 @@ IP addresses, CIDRs, names, YAML and JSON stay left to right.
 Change the language in the top bar or on the account page. The panel keeps the choice in the browser.
 A native speaker must review the Persian and Arabic text before a release.
 
-## Themes
+## Appearance
 
-The panel has a light theme and a dark theme. The choice `System` follows the browser.
-Change the theme in the top bar or on the account page.
+The sCloud console uses a dark theme in both perspectives, independent of the browser setting.
 
 ## Consoles
 
@@ -117,7 +150,7 @@ A field that cannot change is read-only when the user edits an object.
 The panel sends `PUT` with the version that it read. A conflict asks the user to reload.
 The panel never sends `status`.
 A refused form shows the server messages on the right fields.
-Some fields use a list of objects. Subnets, load balancers and buckets offer a list of names.
+Some fields use a list of objects. Subnets, load balancers, internet gateways and buckets offer a list of names.
 The panel also checks cron schedules, SSH keys, IP addresses, rules and bucket policies before it sends.
 
 ## Upload an ISO
@@ -135,9 +168,14 @@ The user menu and the account page offer `/kubeconfig`. They offer `/ca.crt` whe
 
 Run `make ui` to build the panel and the login app.
 Run `pnpm --filter panel test` to run the tests.
-The build writes into `internal/proxy/ui/dist`. The proxy embeds that directory.
+Next.js exports the panel as static files. The build copies them into
+`internal/proxy/ui/dist`, which the Go proxy embeds. The proxy serves the
+same shell on resource URLs, so project and resource names can be resolved
+at runtime without a separate Node.js server. The build serves Next.js
+bootstrap code as same-origin files to preserve the proxy's script policy.
 Before the first build, the directory holds only `.keep`. The proxy then shows a placeholder page.
-`pnpm --filter panel build` checks the size. The first script must stay under 600 KiB. The whole output must stay under 8 MiB. The consoles and the charts must be separate chunks.
+`pnpm --filter panel build` limits startup JavaScript to 1 MiB and the full
+export to 8 MiB. Consoles and charts must stay in separate lazy chunks.
 
 ## Add a new kind
 

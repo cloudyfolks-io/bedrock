@@ -9,6 +9,7 @@ bin=${BIN:-bin/bedrock}
 release_dir=${RELEASE_DIR:-dist/release}
 arch=${ARCH:-$(uname -m | sed 's/x86_64/amd64/;s/aarch64/arm64/')}
 emulation=${EMULATION:-true}
+ovn_tls=${E2E_OVN_TLS:-false}
 platform_host=${PLATFORM_HOST:-e2e.bedrock.test}
 workdir=$(mktemp -d)
 admin_password_file=${ADMIN_PASSWORD_FILE:-/var/lib/bedrock/e2e-admin-password}
@@ -62,7 +63,8 @@ dump() {
     kubectl -n kube-system get ds kube-multus-ds -o wide || true
     kubectl -n kubevirt get kubevirt kubevirt -o yaml || true
     kubectl get cdi cdi -o yaml || true
-    kubectl -n traefik get certificate,secret platform-tls -o yaml || true
+    kubectl -n traefik get certificate platform-tls -o yaml || true
+    kubectl -n traefik get secret platform-tls -o 'custom-columns=NAME:.metadata.name,TYPE:.type' || true
     echo "--- fabric logs"
     for pod in $(kubectl -n kube-system get pods -o name 2>/dev/null | grep -E 'fabric|ovn|ovs' || true); do
       echo "--- $pod"; kubectl -n kube-system logs "$pod" --tail=100 --all-containers || true
@@ -105,6 +107,8 @@ iface=$(ip -json route show default | python3 -c 'import json,sys; print(json.lo
 nodeip=$(ip -json -4 addr show dev "$iface" | python3 -c 'import json,sys; print(json.load(sys.stdin)[0]["addr_info"][0]["local"])')
 vip=$(echo "$nodeip" | awk -F. '{printf "%s.%s.%s.250", $1, $2, $3}')
 if [ "$vip" = "$nodeip" ]; then vip=$(echo "$nodeip" | awk -F. '{printf "%s.%s.%s.251", $1, $2, $3}'); fi
+pin_hosts "$vip" "$platform_host"
+expect_equal "$vip" "$(getent ahostsv4 "sso.$platform_host" | awk 'NR == 1 {print $1}')" "control-plane issuer address"
 
 osd_device=$(resolve_osd_device)
 if [ -n "${E2E_OSD_DEVICE:-}" ]; then
@@ -114,11 +118,50 @@ fi
 provider_entry=""
 if [ -n "${E2E_PROVIDER_NETWORK:-}" ]; then
   provider_underlay_up
-  provider_entry=$(provider_network_entry "$E2E_PROVIDER_NETWORK")
+  provider_entry="$(provider_network_entry "$E2E_PROVIDER_NETWORK"), $(services_network_entry)"
 fi
 
-VERSION=$version VIP=$vip IFACE=$iface EMULATION=$emulation PLATFORM_HOST=$platform_host OSD_DEVICES=$(flow_list "$osd_device") PROVIDER_NETWORKS=$(flow_list "$provider_entry") envsubst < hack/e2e/cluster.yaml.tmpl > "$workdir/cluster.yaml"
+case "$ovn_tls" in
+true|false) ;;
+*) printf 'E2E_OVN_TLS must be true or false\n' >&2; exit 1 ;;
+esac
+VERSION=$version VIP=$vip IFACE=$iface EMULATION=$emulation OVN_TLS=$ovn_tls PLATFORM_HOST=$platform_host OSD_DEVICES=$(flow_list "$osd_device") PROVIDER_NETWORKS=$(flow_list "$provider_entry") envsubst < hack/e2e/cluster.yaml.tmpl > "$workdir/cluster.yaml"
 cat "$workdir/cluster.yaml"
+
+archive_dir=/var/lib/bedrock/images
+
+assert_airgap_archived() {
+  retry_until 120 compgen -G "$archive_dir/$version/*/k0s-airgap.tar" && return 0
+  echo "expected k0s-airgap.tar under $archive_dir/$version/*/, found:" >&2
+  ls -laR "$archive_dir" >&2 || true
+  return 1
+}
+
+archived_tarball_count() {
+  find "$archive_dir/$version" -name '*.tar' | wc -l
+}
+
+bundle_archive_settled() {
+  [ -z "$(find /var/lib/k0s/images -name '*.tar')" ] && [ "$(archived_tarball_count)" -eq "$1" ]
+}
+
+assert_bundle_images_present() {
+  local expected
+  expected=$(sed -n 's/^\([0-9][0-9]*\) image archives copied$/\1/p' "$workdir/init.log")
+  retry_until 300 bundle_archive_settled "$expected" && return 0
+  echo "expected no tarball in /var/lib/k0s/images and $expected in $archive_dir/$version, found $(archived_tarball_count) archived:" >&2
+  ls -laR /var/lib/k0s/images "$archive_dir" >&2 || true
+  return 1
+}
+
+assert_k0s_binary_matches_release() {
+  local actual expected
+  actual=$(sha256sum /usr/local/bin/k0s | awk '{print "sha256:"$1}')
+  expected=$(awk -v arch="$arch:" '/^k0sChecksums:/ {inside = 1; next} /^[^ ]/ {inside = 0} inside && $1 == arch {print $2}' "$release_dir/release.yaml")
+  [ "$actual" = "$expected" ] && return 0
+  echo "k0s binary checksum mismatch: installed $actual, $release_dir/release.yaml has '$expected' for $arch" >&2
+  return 1
+}
 
 run_init() {
   "$@" | (umask 077 && tee "$workdir/init.log") | grep --line-buffered -v '^admin password: '
@@ -129,14 +172,16 @@ if [ -n "${BUNDLE:-}" ]; then
   printf '[plugins."io.containerd.cri.v1.images".registry]\nconfig_path = "/etc/k0s/containerd.d/certs.d"\n' > /etc/k0s/containerd.d/cri-registry.toml
   printf 'server = "https://127.0.0.1:1"\n' > /etc/k0s/containerd.d/certs.d/_default/hosts.toml
   run_init "$bin" init -f "$workdir/cluster.yaml" --bundle "$BUNDLE" --timeout 45m
-  test -f /var/lib/k0s/images/k0s-airgap.tar
-  test "$(ls /var/lib/k0s/images/*.tar | wc -l)" -ge 3
-  sha256sum /usr/local/bin/k0s | awk '{print "sha256:"$1}' | grep -qx "$(awk -v arch="$arch:" '$1 == arch {print $2}' "$release_dir/release.yaml")"
+  assert_airgap_archived
+  assert_bundle_images_present
+  assert_k0s_binary_matches_release
 else
   mkdir -p "$workdir/preload"
   docker save "$image" -o "$workdir/preload/bedrock.tar"
   run_init "$bin" init -f "$workdir/cluster.yaml" --release-dir "$release_dir" --images-dir "$workdir/preload" --timeout 45m
 fi
+
+apply_settings "${single_vm_sizing_settings[@]}"
 
 install -m 0600 /dev/null "$admin_password_file"
 grep '^admin password: ' "$workdir/init.log" | sed 's/^admin password: //' >"$admin_password_file"
@@ -151,11 +196,34 @@ ip -4 addr show dev "$iface" | grep -q "$vip"
 kubectl -n kube-system rollout status daemonset/kube-vip --timeout=120s
 kubectl get cluster cluster -o jsonpath='{.status.version}' | grep -qx "$version"
 kubectl wait --for=condition=Available cluster/cluster --timeout=120s
+fabric_jobs=$(kubectl -n kube-system get jobs -o name)
+if grep -Eq '^job\.batch/fabric-(pre-upgrade|post-upgrade|post-delete)-hook$' <<<"$fabric_jobs"; then
+  printf '%s\n' 'initial install started a Fabric upgrade or delete hook' >&2
+  exit 1
+fi
+ovn_tls_ready() {
+  local -a exec_ovn=(timeout 30 kubectl -n kube-system exec deployment/ovn-central -c ovn-central -- timeout 20)
+  local -a credentials=(-p /var/run/tls/key -c /var/run/tls/cert -C /var/run/tls/cacert)
+  "${exec_ovn[@]}" ovsdb-client "${credentials[@]}" list-dbs "ssl:$nodeip:6641" | grep -Fx OVN_Northbound || return 1
+  "${exec_ovn[@]}" ovsdb-client "${credentials[@]}" list-dbs "ssl:$nodeip:6642" | grep -Fx OVN_Southbound || return 1
+  "${exec_ovn[@]}" ovn-nbctl --db="ssl:$nodeip:6641" "${credentials[@]}" get NB_Global . options:version_compatibility
+}
+if [ "$ovn_tls" = true ]; then
+  expect_equal true "$(kubectl get setting network.ovn-tls -o jsonpath='{.spec.value}')" "OVN TLS setting"
+  retry_until 120 ovn_tls_ready
+fi
 expect_equal '600 kube-apiserver' "$(stat -c '%a %U' /etc/bedrock/encryption/encryption.yaml)" "encryption file mode and owner"
 expect_equal '700 kube-apiserver' "$(stat -c '%a %U' /etc/bedrock/encryption)" "encryption directory mode and owner"
 assert_secret_encrypted kube-system bedrock-secrets-encryption
 case "$image" in
-localhost:*) test "$(kubectl -n bedrock-system get deploy/bedrock-operator -o jsonpath='{.spec.template.spec.containers[0].image}')" = "$image" ;;
+localhost:*)
+  for workload in bedrock-operator bedrock-authn bedrock-proxy; do
+    actual_image=$(kubectl -n bedrock-system get "deployment/$workload" -o jsonpath='{.spec.template.spec.containers[0].image}')
+    expect_equal "$image" "$actual_image" "image for deployment/$workload"
+  done
+  expect_equal "$image" "$(kubectl get "release/$version" -o jsonpath='{.spec.image}')" "image for release/$version"
+  kubectl wait --for=condition=Ready "release/$version" --timeout=60s
+  ;;
 esac
 waiting=$(kubectl get pods -A -o jsonpath='{range .items[*]}{.status.containerStatuses[*].state.waiting.reason}{"\n"}{end}')
 if grep -qE 'ImagePullBackOff|ErrImagePull' <<<"$waiting"; then
@@ -168,7 +236,7 @@ kubectl -n kube-system rollout status deployment/snapshot-controller --timeout=3
 kubectl -n rook-ceph rollout status deployment/rook-ceph-operator --timeout=300s
 kubectl -n kubevirt rollout status deployment/virt-operator --timeout=300s
 kubectl -n cdi rollout status deployment/cdi-operator --timeout=300s
-kubectl -n traefik rollout status deployment/traefik --timeout=300s
+kubectl -n traefik rollout status daemonset/traefik --timeout=300s
 kubectl wait --for=jsonpath='{.status.phase}'=Deployed -n kubevirt kubevirt/kubevirt --timeout=900s
 kubectl -n kubevirt get kubevirt kubevirt -o jsonpath='{.spec.configuration.developerConfiguration.useEmulation}' | grep -qx "$emulation"
 kubectl wait --for=jsonpath='{.status.phase}'=Deployed cdi/cdi --timeout=600s

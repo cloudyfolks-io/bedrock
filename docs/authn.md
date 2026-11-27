@@ -34,10 +34,22 @@ domain must follow these rules:
 The domain does not need to be registered. For example,
 `e2e.bedrock.test` is valid.
 
-Bedrock serves these names under the domain: `sso.`, `api.`, `console.`
-and `upload.`. The domain itself is also served. Point all of them at the
-cluster VIP. Use your own DNS, or add lines to `/etc/hosts` on each
-client.
+Point the domain and its `sso.`, `api.`, `console.` and `upload.` names
+at the cluster VIP. Set name resolution on clients and on each control-plane
+host before installation. Use DNS for clients. If the controllers depend on
+this cluster for DNS, add the issuer to their `/etc/hosts` before installation.
+
+Each kube-apiserver uses its host resolver to reach the issuer at
+`https://sso.<platform.host>`. It must trust the certificate for that name.
+It reads `/.well-known/openid-configuration` and gets the public signing
+keys from the `jwks_uri` in that document. If sign-in succeeds but an API
+request returns HTTP `401`, check the kube-apiserver logs. Check that the
+affected controller can resolve the issuer and reach both URLs with the CA
+used by its authentication configuration.
+
+After startup, kube-apiserver tries discovery in the background. The authn
+service can accept sign-ins before kube-apiserver can verify the access
+tokens. A failed discovery is retried.
 
 ## Users and groups
 
@@ -212,6 +224,10 @@ spec:
 the `Secret`. Register this redirect URI with the upstream provider:
 `https://sso.<platform.host>/api/v1/login/providers/<name>/callback`.
 
+Bedrock checks that the provider is enabled before redirect and again
+when it receives the callback. If the provider changes during the token
+exchange, start the sign-in again with the current provider settings.
+
 Bedrock keeps the upstream `sub` claim in `User.status.upstreamSubject`.
 Bedrock takes the username from a configured claim. The default is
 `preferred_username`. Upstream groups reach Bedrock the same way LDAP
@@ -381,7 +397,8 @@ changes nothing. To get a new password, use
 
 ## Changing `platform.host`
 
-Change the value with this command:
+Make the new issuer name resolve to the cluster VIP on each control-plane
+host. Then change the setting.
 
 ```sh
 kubectl patch setting platform.host --type merge -p '{"spec":{"value":"<domain>"}}'
@@ -393,16 +410,18 @@ components report `PlatformHostNotSet` and render nothing. Run the
 command above to fix it. `bedrock upgrade` refuses to start until
 `platform.host` is set.
 
-kube-apiserver reloads `authentication.yaml` on every change, so a new
-`platform.host` value takes effect for token verification at once.
+kube-apiserver reloads `authentication.yaml` while it runs. It starts to
+verify tokens for the new issuer after discovery succeeds. Sign in with
+the new domain and check that the access token can make a Kubernetes API
+request.
+
 kube-apiserver reads `webhook.kubeconfig` only when it starts. A change
 there needs a restart of `k0scontroller`. The operator grants the
 restarts one at a time, and the agent on each controller restarts
 `k0scontroller` when it holds a grant. Until that restart,
 `Host.status.authn.webhookRestartPending` is `true` on the affected
 controllers, and `brk_` API tokens on those controllers keep using the
-previous webhook URL. JWT access tokens are not affected, because their
-issuer check follows the reloaded file at once.
+previous webhook URL.
 
 Known limit: the webhook bearer token never rotates after `bedrock init`
 creates it. Changing `platform.host` changes only the webhook URL, not

@@ -13,6 +13,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strings"
 	"time"
 
@@ -26,6 +27,7 @@ import (
 
 	"github.com/cloudyfolks-io/bedrock/api/v1alpha1"
 	"github.com/cloudyfolks-io/bedrock/internal/addons"
+	"github.com/cloudyfolks-io/bedrock/internal/agent"
 	"github.com/cloudyfolks-io/bedrock/internal/audit"
 	"github.com/cloudyfolks-io/bedrock/internal/authn/apiserver"
 	"github.com/cloudyfolks-io/bedrock/internal/authn/methods"
@@ -79,6 +81,7 @@ type initOptions struct {
 	bundle     string
 	workDir    string
 	bundleDir  string
+	kubelet    kubeletValues
 }
 
 func parseInitFlags(args []string, stderr io.Writer) (initOptions, error) {
@@ -95,6 +98,7 @@ func parseInitFlags(args []string, stderr io.Writer) (initOptions, error) {
 	flags.StringVar(&o.bundle, "bundle", "", "install from this bundle archive")
 	flags.StringVar(&o.workDir, "work-dir", "/var/lib/bedrock", "directory for extracted bundles")
 	flags.DurationVar(&o.timeout, "timeout", 30*time.Minute, "overall timeout")
+	flags.Var(&o.kubelet, "kubelet-setting", "kubelet setting as key=value, repeatable")
 	if err := flags.Parse(args); err != nil {
 		return o, err
 	}
@@ -135,6 +139,10 @@ func RunInit(ctx context.Context, args []string, deps InitDeps, stdout, stderr i
 	if err != nil {
 		return fail(stderr, err)
 	}
+	kubeletArgs, err := k0s.InstallKubeletArgs(deps.Root, o.kubelet)
+	if err != nil {
+		return fail(stderr, err)
+	}
 
 	k0sClient := k0s.Client{Exec: deps.Exec, Binary: o.k0sBin, DataDir: o.dataDir}
 	adopt := cfg.Spec.Storage.Adopt
@@ -171,12 +179,17 @@ func RunInit(ctx context.Context, args []string, deps InitDeps, stdout, stderr i
 	if cfg.Spec.Version != bundle.Spec.Version {
 		return fail(stderr, fmt.Errorf("config version %s does not match release %s", cfg.Spec.Version, bundle.Spec.Version))
 	}
+	usesOVNTLS := release.Uses(bundle, release.VarFabricEnableSSL)
+	if cfg.Spec.Network.Fabric.OVNTLS != nil && !usesOVNTLS {
+		return fail(stderr, fmt.Errorf("this release does not support configuring OVN TLS during init"))
+	}
 
 	step(stdout, "preflight")
 	facts, err := host.Gather(ctx, deps.Exec, deps.Root, deps.FreeBytes, deps.Uid)
 	if err != nil {
 		return fail(stderr, err)
 	}
+	cfg = config.WithCephxCipher(cfg, facts.Kernel)
 	results, err := preflightResults(ctx, deps, k0sClient, preflight.Run, facts, cfg, bundle.Spec.SupportedOS)
 	if err != nil {
 		return fail(stderr, err)
@@ -221,11 +234,23 @@ func RunInit(ctx context.Context, args []string, deps InitDeps, stdout, stderr i
 		}
 	}
 
+	if cfg.Spec.Network.ManagementCIDR == "" {
+		cfg.Spec.Network.ManagementCIDR, err = host.InterfaceCIDR(ctx, deps.Exec, cfg.Spec.Network.ManagementInterface)
+		if err != nil {
+			return fail(stderr, fmt.Errorf("management network: %w", err))
+		}
+	}
+
 	step(stdout, "vip %s on %s", cfg.Spec.API.VIP, cfg.Spec.Network.ManagementInterface)
 	if err := host.EnsureAddress(ctx, deps.Exec, cfg.Spec.API.VIP, cfg.Spec.Network.ManagementInterface); err != nil {
 		return fail(stderr, err)
 	}
 	if err := host.EnsureVIPUnit(ctx, deps.Exec, deps.Root, cfg.Spec.API.VIP, cfg.Spec.Network.ManagementInterface); err != nil {
+		return fail(stderr, err)
+	}
+
+	step(stdout, "kernel limits")
+	if err := host.EnsureBaseSysctls(ctx, deps.Exec, deps.Root); err != nil {
 		return fail(stderr, err)
 	}
 
@@ -256,13 +281,18 @@ func RunInit(ctx context.Context, args []string, deps InitDeps, stdout, stderr i
 			return fail(stderr, err)
 		}
 		fmt.Fprintf(stdout, "%d image archives copied\n", n)
+		if o.bundleDir != "" {
+			if err := agent.ArchiveInitBundle(deps.Root, o.bundleDir); err != nil {
+				return fail(stderr, err)
+			}
+		}
 	}
 
 	step(stdout, "installing k0s controller")
 	if !running {
 		if err := k0sClient.Install(ctx, k0s.InstallOptions{
 			Role: "controller", Force: true, ConfigPath: configPath, EnableWorker: true, NoTaints: true, DynamicConfig: true,
-			Labels: roles.Labels(cfg.Spec.Roles), KubeletExtraArgs: []string{"--node-status-update-frequency=4s"}, DataDir: o.dataDir, KubeletRootDir: k0s.DefaultKubeletRootDir, DisableComponents: k0s.DefaultDisabledComponents,
+			Labels: roles.Labels(cfg.Spec.Roles), KubeletExtraArgs: kubeletArgs, DataDir: o.dataDir, KubeletRootDir: k0s.DefaultKubeletRootDir, DisableComponents: k0s.DefaultDisabledComponents,
 		}); err != nil {
 			return fail(stderr, err)
 		}
@@ -329,16 +359,42 @@ func RunInit(ctx context.Context, args []string, deps InitDeps, stdout, stderr i
 	if err != nil {
 		return fail(stderr, err)
 	}
-	if err := release.InstallGroups(ctx, c, bundle, vars, release.Gates{}, 2*time.Second, 30*time.Minute, report, grafanaAdminHook(c, rand.Reader), rookIdentityHook(c, adopt, rookSecret)); err != nil {
+	vars = release.WithPodMTU(vars, cfg.Spec.Network.PodMTU)
+	settingValues := config.SettingValues(cfg)
+	if usesOVNTLS {
+		mode, err := prepareInitOVNTLS(ctx, c, settingValues[initOVNTLSSetting], vars[release.VarFabricEnableSSL], time.Now())
+		if err != nil {
+			return fail(stderr, err)
+		}
+		settingValues[initOVNTLSSetting] = mode
+	}
+	maps.Copy(vars, release.SettingVars(settingValues, cfg.Spec.API.VIP))
+	grafanaHook := grafanaAdminHook(c, rand.Reader)
+	beforeGroup := grafanaHook
+	if o.bundleDir != "" {
+		beforeGroup = func(ctx context.Context, group release.Group) error {
+			images := release.ImagesOf([]release.Group{group})
+			if err := agent.WaitForImages(ctx, deps.Exec, o.k0sBin, images, 2*time.Second); err != nil {
+				return err
+			}
+			return grafanaHook(ctx, group)
+		}
+	}
+	if err := release.InstallGroups(ctx, c, bundle, vars, release.Gates{}, 2*time.Second, 30*time.Minute, report, beforeGroup, rookIdentityHook(c, adopt, rookSecret)); err != nil {
 		return fail(stderr, err)
 	}
 
 	step(stdout, "creating cluster objects")
+	if settingValues[initOVNTLSSetting] == "true" && cfg.Spec.Network.Fabric.OVNTLS == nil {
+		if err := recordInstalledOVNTLS(ctx, c); err != nil {
+			return fail(stderr, err)
+		}
+	}
 	nodeName, err := k0sClient.NodeName(ctx)
 	if err != nil {
 		return fail(stderr, err)
 	}
-	if err := createObjects(ctx, c, cfg, nodeName); err != nil {
+	if err := createObjects(ctx, c, cfg, nodeName, o.kubelet); err != nil {
 		return fail(stderr, err)
 	}
 
@@ -494,7 +550,7 @@ func removeBundleDir(dir string) {
 
 func writeK0sConfig(path string, cfg v1alpha1.ClusterConfig, extra map[string]string) error {
 	sans := []string{cfg.Spec.API.VIP, "api." + cfg.Spec.Platform.Host}
-	raw, err := k0s.RenderConfig(k0s.Config{VIP: cfg.Spec.API.VIP, SANs: sans, PodCIDR: cfg.Spec.Network.Fabric.PodCIDR, ServiceCIDR: cfg.Spec.Network.Fabric.ServiceCIDR, APIExtraArgs: apiExtraArgs(extra)})
+	raw, err := k0s.RenderConfig(k0s.Config{VIP: cfg.Spec.API.VIP, SANs: sans, PodCIDR: cfg.Spec.Network.Fabric.PodCIDR, ServiceCIDR: cfg.Spec.Network.Fabric.ServiceCIDR, APIExtraArgs: apiExtraArgs(extra), NodePortAddresses: nodePortAddresses(cfg.Spec.Network.ManagementCIDR)})
 	if err != nil {
 		return err
 	}
@@ -502,6 +558,13 @@ func writeK0sConfig(path string, cfg v1alpha1.ClusterConfig, extra map[string]st
 		return err
 	}
 	return os.WriteFile(path, raw, 0o600)
+}
+
+func nodePortAddresses(managementCIDR string) []string {
+	if managementCIDR == "" {
+		return nil
+	}
+	return []string{managementCIDR}
 }
 
 func apiExtraArgs(extra map[string]string) map[string]string {
@@ -524,7 +587,7 @@ func hasRole(list []string, role string) bool {
 func kubeVIPData(vip, iface string) map[string]string {
 	return map[string]string{
 		"address": vip, "vip_interface": iface, "vip_subnet": "32", "cp_enable": "true", "svc_enable": "true", "vip_arp": "true",
-		"vip_leaderelection": "true", "port": "6443", "vip_leaseduration": "5", "vip_renewdeadline": "3", "vip_retryperiod": "1",
+		"vip_leaderelection": "true", "port": "6443",
 	}
 }
 
@@ -533,23 +596,20 @@ func applyKubeVIPConfig(ctx context.Context, c client.Client, vip, iface string)
 	return ssa.Apply(ctx, c, cm, initFieldOwner)
 }
 
-func createObjects(ctx context.Context, c client.Client, cfg v1alpha1.ClusterConfig, nodeName string) error {
-	cluster := config.ToCluster(cfg)
-	if err := createOrUpdateSpec(ctx, c, &cluster, func(existing *v1alpha1.Cluster) { existing.Spec = cluster.Spec }); err != nil {
-		return err
-	}
-	h := config.ToHost(cfg, nodeName)
-	if err := createOrUpdateSpec(ctx, c, &h, func(existing *v1alpha1.Host) { existing.Spec = h.Spec }); err != nil {
-		return err
-	}
-	for _, setting := range config.ToSettings(cfg) {
+func createObjects(ctx context.Context, c client.Client, cfg v1alpha1.ClusterConfig, nodeName string, kubelet map[string]string) error {
+	for _, setting := range slices.Concat(config.ToSettings(cfg), kubeletSettingObjects(kubelet)) {
 		s := setting
 		s.TypeMeta = metav1.TypeMeta{APIVersion: v1alpha1.GroupVersion.String(), Kind: "Setting"}
 		if err := ssa.Apply(ctx, c, &s, initFieldOwner); err != nil {
 			return err
 		}
 	}
-	return nil
+	cluster := config.ToCluster(cfg)
+	if err := createOrUpdateSpec(ctx, c, &cluster, func(existing *v1alpha1.Cluster) { existing.Spec = cluster.Spec }); err != nil {
+		return err
+	}
+	host := config.ToHost(cfg, nodeName)
+	return createOrUpdateSpec(ctx, c, &host, func(existing *v1alpha1.Host) { existing.Spec = host.Spec })
 }
 
 func createOrUpdateSpec[O any, T interface {

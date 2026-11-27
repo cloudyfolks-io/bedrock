@@ -2,12 +2,12 @@ package objectstorage
 
 import (
 	"context"
+	"reflect"
 	"testing"
 
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
-	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
@@ -57,14 +57,10 @@ func createBucket(t *testing.T, namespace, name string, spec v1alpha1.ObjectStor
 	}
 }
 
-func userReconciler() *UserReconciler {
-	return &UserReconciler{Client: testClient}
-}
-
-func reconcileUser(t *testing.T, namespace, name string) {
+func reconcileUserWith(t *testing.T, r *UserReconciler, namespace, name string) {
 	t.Helper()
 	request := ctrl.Request{NamespacedName: client.ObjectKey{Namespace: namespace, Name: name}}
-	if _, err := userReconciler().Reconcile(context.Background(), request); err != nil {
+	if _, err := r.Reconcile(context.Background(), request); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -91,15 +87,6 @@ func requireUserReason(t *testing.T, namespace, name string, status metav1.Condi
 	requireCondition(t, readUser(t, namespace, name).Status.Conditions, v1alpha1.ConditionReady, status, reason)
 }
 
-func getCephUser(t *testing.T, namespace, name string) (*unstructured.Unstructured, bool) {
-	t.Helper()
-	obj, found, err := getRook(context.Background(), testClient, cephObjectStoreUserGVK, client.ObjectKey{Namespace: namespace, Name: name})
-	if err != nil {
-		t.Fatal(err)
-	}
-	return obj, found
-}
-
 func countRook(t *testing.T, gvk schema.GroupVersionKind, namespace string) int {
 	t.Helper()
 	list := &unstructured.UnstructuredList{}
@@ -110,172 +97,385 @@ func countRook(t *testing.T, gvk schema.GroupVersionKind, namespace string) int 
 	return len(list.Items)
 }
 
-func createCredentials(t *testing.T, namespace, rgwUser string, data map[string][]byte) {
+func readSecret(t *testing.T, namespace, name string) (*corev1.Secret, bool) {
 	t.Helper()
-	secret := &corev1.Secret{ObjectMeta: metav1.ObjectMeta{Name: CredentialsSecretName(rgwUser), Namespace: namespace}, Data: data}
-	if err := testClient.Create(context.Background(), secret); err != nil {
+	var secret corev1.Secret
+	err := testClient.Get(context.Background(), client.ObjectKey{Namespace: namespace, Name: name}, &secret)
+	if apierrors.IsNotFound(err) {
+		return nil, false
+	}
+	if err != nil {
 		t.Fatal(err)
 	}
-}
-
-func fullCredentials() map[string][]byte {
-	return map[string][]byte{"AccessKey": []byte("AK"), "SecretKey": []byte("SK"), "Endpoint": []byte("http://s3.test")}
+	return &secret, true
 }
 
 func TestUserWaitsForTheStore(t *testing.T) {
 	fresh(t)
-	createUser(t, "acme-prod", "app", v1alpha1.ObjectStorageUserSpec{})
-	reconcileUser(t, "acme-prod", "app")
+	r := userReconcilerAt("http://unused.invalid")
+	createUser(t, "acme-prod", "app", v1alpha1.ObjectStorageUserSpec{Permission: "read"})
+	reconcileUserWith(t, r, "acme-prod", "app")
 	requireUserReason(t, "acme-prod", "app", metav1.ConditionFalse, "StoreNotInstalled")
 	createStore(t, "Progressing")
-	reconcileUser(t, "acme-prod", "app")
+	reconcileUserWith(t, r, "acme-prod", "app")
 	requireUserReason(t, "acme-prod", "app", metav1.ConditionFalse, "StoreNotReady")
-	if countRook(t, cephObjectStoreUserGVK, "acme-prod") != 0 {
-		t.Fatal("a Rook user exists")
+	if countRook(t, cephObjectStoreUserGVK, StoreNamespace) != 0 || countRook(t, cephObjectStoreAccountGVK, StoreNamespace) != 0 {
+		t.Fatal("a Rook object exists")
 	}
 }
 
-func TestUserCreatesTheCephUser(t *testing.T) {
+func TestUserWaitsForTheAccountAndTheRookUser(t *testing.T) {
 	fresh(t)
+	r := userReconcilerAt("http://unused.invalid")
 	createStore(t, "Ready")
-	quota := v1alpha1.ObjectStorageUserQuota{Bytes: resource.NewQuantity(1073741824, resource.BinarySI), Buckets: int32Ptr(5)}
-	createUser(t, "acme-prod", "app", v1alpha1.ObjectStorageUserSpec{DisplayName: "App", Quota: quota})
-	reconcileUser(t, "acme-prod", "app")
-	rgw, found := getCephUser(t, "acme-prod", "acme-prod.app")
+	createUser(t, "acme-prod", "app", v1alpha1.ObjectStorageUserSpec{Permission: "read"})
+	reconcileUserWith(t, r, "acme-prod", "app")
+	requireUserReason(t, "acme-prod", "app", metav1.ConditionFalse, "AccountPending")
+	if countRook(t, cephObjectStoreUserGVK, StoreNamespace) != 0 {
+		t.Fatal("a Rook user exists before the account is ready")
+	}
+	readyAccountOf(t, "acme-prod")
+	reconcileUserWith(t, r, "acme-prod", "app")
+	requireUserReason(t, "acme-prod", "app", metav1.ConditionFalse, "UserPending")
+	rgw, found := getRookUser(t, "acme-prod.app")
 	if !found {
 		t.Fatal("no Rook user")
 	}
-	store, _, _ := unstructured.NestedString(rgw.Object, "spec", "store")
-	display, _, _ := unstructured.NestedString(rgw.Object, "spec", "displayName")
-	buckets, _, _ := unstructured.NestedInt64(rgw.Object, "spec", "quotas", "maxBuckets")
-	if store != "bedrock-rgw" || display != "App" || buckets != 5 {
+	setRookPhase(t, rgw, "Ready")
+	reconcileUserWith(t, r, "acme-prod", "app")
+	requireUserReason(t, "acme-prod", "app", metav1.ConditionFalse, "CredentialsMissing")
+}
+
+func TestUserMakesTheRookUserInTheRookNamespace(t *testing.T) {
+	fresh(t)
+	r := userReconcilerAt("http://unused.invalid")
+	createStore(t, "Ready")
+	createUser(t, "acme-prod", "app", v1alpha1.ObjectStorageUserSpec{Permission: "read", DisplayName: "App"})
+	reconcileUserWith(t, r, "acme-prod", "app")
+	readyAccountOf(t, "acme-prod")
+	reconcileUserWith(t, r, "acme-prod", "app")
+	rgw, found := getRookUser(t, "acme-prod.app")
+	if !found || countRook(t, cephObjectStoreUserGVK, "acme-prod") != 0 {
+		t.Fatal("the Rook user is not only in the Rook namespace")
+	}
+	if len(rgw.GetOwnerReferences()) != 0 {
+		t.Fatalf("owner references %+v", rgw.GetOwnerReferences())
+	}
+	user := readUser(t, "acme-prod", "app")
+	want := map[string]any{
+		"store":       "bedrock-rgw",
+		"displayName": "acme-prod.app",
+		"accountRef":  map[string]any{"name": "acme-prod"},
+	}
+	if !reflect.DeepEqual(rgw.Object["spec"], want) {
 		t.Fatalf("spec %+v", rgw.Object["spec"])
 	}
-	requireUserReason(t, "acme-prod", "app", metav1.ConditionFalse, "UserPending")
+	labels := rgw.GetLabels()
+	if labels["bedrock.cloudyfolks.io/kind"] != "ObjectStorageUser" || labels["bedrock.cloudyfolks.io/name"] != "app" || labels["bedrock.cloudyfolks.io/tenant"] != "acme" || labels["bedrock.cloudyfolks.io/project"] != "prod" {
+		t.Fatalf("labels %+v", labels)
+	}
+	if rgw.GetAnnotations()["bedrock.cloudyfolks.io/owner-uid"] != string(user.UID) || rgw.GetAnnotations()["bedrock.cloudyfolks.io/owner-namespace"] != "acme-prod" {
+		t.Fatalf("annotations %+v", rgw.GetAnnotations())
+	}
 }
 
-func TestUserReportsTheCredentialsSecret(t *testing.T) {
+func TestUserCopiesOnlyItsKeysAndWritesThePolicy(t *testing.T) {
 	fresh(t)
-	createStore(t, "Ready")
-	createUser(t, "acme-prod", "app", v1alpha1.ObjectStorageUserSpec{})
-	reconcileUser(t, "acme-prod", "app")
-	rgw, _ := getCephUser(t, "acme-prod", "acme-prod.app")
-	setRookPhase(t, rgw, "Ready")
-	reconcileUser(t, "acme-prod", "app")
-	requireUserReason(t, "acme-prod", "app", metav1.ConditionFalse, "CredentialsMissing")
-	data := fullCredentials()
-	delete(data, "SecretKey")
-	createCredentials(t, "acme-prod", "acme-prod.app", data)
-	reconcileUser(t, "acme-prod", "app")
-	requireUserReason(t, "acme-prod", "app", metav1.ConditionFalse, "CredentialsMissing")
-	var secret corev1.Secret
-	key := client.ObjectKey{Namespace: "acme-prod", Name: CredentialsSecretName("acme-prod.app")}
-	if err := testClient.Get(context.Background(), key, &secret); err != nil {
-		t.Fatal(err)
-	}
-	secret.Data = fullCredentials()
-	if err := testClient.Update(context.Background(), &secret); err != nil {
-		t.Fatal(err)
-	}
-	reconcileUser(t, "acme-prod", "app")
+	iam, url := newFakeIAM(t)
+	r := userReconcilerAt(url)
+	createBucket(t, "acme-prod", "data", v1alpha1.ObjectStorageBucketSpec{})
+	readyUser(t, r, "acme-prod", "app", v1alpha1.ObjectStorageUserSpec{Permission: "readWrite", Buckets: []string{"data"}})
 	user := readUser(t, "acme-prod", "app")
 	requireCondition(t, user.Status.Conditions, v1alpha1.ConditionReady, metav1.ConditionTrue, "Ready")
-	if user.Status.CredentialsSecret != "rook-ceph-object-user-bedrock-rgw-acme-prod.app" {
-		t.Fatalf("secret %q", user.Status.CredentialsSecret)
+	if user.Status.CredentialsSecret != "app-s3" || user.Status.ARN != "arn:aws:iam::RGW00000000000000001:user/acme-prod.app" {
+		t.Fatalf("status %+v", user.Status)
+	}
+	secret, found := readSecret(t, "acme-prod", "app-s3")
+	if !found {
+		t.Fatal("no Secret app-s3")
+	}
+	if string(secret.Data["AccessKey"]) != "AK" || string(secret.Data["SecretKey"]) != "SK" || string(secret.Data["Endpoint"]) != url {
+		t.Fatalf("secret data %q", secret.Data)
+	}
+	if len(secret.Data) != 3 || secret.Labels["bedrock.cloudyfolks.io/kind"] != "ObjectStorageUser" || !metav1.IsControlledBy(secret, user) {
+		t.Fatalf("secret %+v", secret.ObjectMeta)
+	}
+	var secrets corev1.SecretList
+	if err := testClient.List(context.Background(), &secrets, client.InNamespace("acme-prod")); err != nil {
+		t.Fatal(err)
+	}
+	for _, other := range secrets.Items {
+		if string(other.Data["AccessKey"]) == "ROOTAK" || string(other.Data["SecretKey"]) == "ROOTSK" {
+			t.Fatalf("the root key reached the project namespace in %s", other.Name)
+		}
+	}
+	want, err := UserPolicy("readWrite", []string{"acme-prod-data"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := iam.policy("acme-prod.app"); got != want {
+		t.Fatalf("policy %s", got)
 	}
 }
 
-func TestUserSameNameInTwoProjects(t *testing.T) {
+func TestUserSkipsThePutWhenThePolicyIsCurrent(t *testing.T) {
 	fresh(t)
-	createStore(t, "Ready")
-	createUser(t, "acme-prod", "app", v1alpha1.ObjectStorageUserSpec{})
-	createUser(t, "beta-prod", "app", v1alpha1.ObjectStorageUserSpec{})
-	reconcileUser(t, "acme-prod", "app")
-	reconcileUser(t, "beta-prod", "app")
-	if _, found := getCephUser(t, "acme-prod", "acme-prod.app"); !found {
-		t.Fatal("no acme-prod.app")
-	}
-	if _, found := getCephUser(t, "beta-prod", "beta-prod.app"); !found {
-		t.Fatal("no beta-prod.app")
-	}
-	if countRook(t, cephObjectStoreUserGVK, "acme-prod") != 1 || countRook(t, cephObjectStoreUserGVK, "beta-prod") != 1 {
-		t.Fatal("a namespace holds more than its own user")
+	iam, url := newFakeIAM(t)
+	r := userReconcilerAt(url)
+	readyUser(t, r, "acme-prod", "app", v1alpha1.ObjectStorageUserSpec{Permission: "read"})
+	iam.take()
+	reconcileUserWith(t, r, "acme-prod", "app")
+	if actions := iam.take(); !reflect.DeepEqual(actions, []string{"GetUserPolicy acme-prod.app"}) {
+		t.Fatalf("actions %v", actions)
 	}
 }
 
-func TestUserQuotaChangeIsApplied(t *testing.T) {
+func TestUserPolicyFollowsTheBucketsOfTheProject(t *testing.T) {
 	fresh(t)
-	createStore(t, "Ready")
-	createUser(t, "acme-prod", "app", v1alpha1.ObjectStorageUserSpec{Quota: v1alpha1.ObjectStorageUserQuota{Buckets: int32Ptr(5)}})
-	reconcileUser(t, "acme-prod", "app")
+	iam, url := newFakeIAM(t)
+	r := userReconcilerAt(url)
+	readyUser(t, r, "acme-prod", "app", v1alpha1.ObjectStorageUserSpec{Permission: "read"})
+	only, _ := UserPolicy("read", nil)
+	if got := iam.policy("acme-prod.app"); got != only {
+		t.Fatalf("policy %s", got)
+	}
+	createBucket(t, "acme-prod", "data", v1alpha1.ObjectStorageBucketSpec{})
+	createBucket(t, "acme-prod", "logs", v1alpha1.ObjectStorageBucketSpec{BucketName: "acme-logs"})
+	createBucket(t, "beta-prod", "other", v1alpha1.ObjectStorageBucketSpec{})
+	reconcileUserWith(t, r, "acme-prod", "app")
+	both, _ := UserPolicy("read", []string{"acme-prod-data", "acme-logs"})
+	if got := iam.policy("acme-prod.app"); got != both {
+		t.Fatalf("policy after create %s", got)
+	}
+	if err := testClient.Delete(context.Background(), &v1alpha1.ObjectStorageBucket{ObjectMeta: metav1.ObjectMeta{Name: "data", Namespace: "acme-prod"}}); err != nil {
+		t.Fatal(err)
+	}
+	reconcileUserWith(t, r, "acme-prod", "app")
+	logsOnly, _ := UserPolicy("read", []string{"acme-logs"})
+	if got := iam.policy("acme-prod.app"); got != logsOnly {
+		t.Fatalf("policy after delete %s", got)
+	}
+}
+
+func TestUserPolicyListsOnlyTheNamedBuckets(t *testing.T) {
+	fresh(t)
+	iam, url := newFakeIAM(t)
+	r := userReconcilerAt(url)
+	createBucket(t, "acme-prod", "data", v1alpha1.ObjectStorageBucketSpec{})
+	createBucket(t, "acme-prod", "logs", v1alpha1.ObjectStorageBucketSpec{})
+	readyUser(t, r, "acme-prod", "app", v1alpha1.ObjectStorageUserSpec{Permission: "read", Buckets: []string{"logs", "missing"}})
+	want, _ := UserPolicy("read", []string{"acme-prod-logs"})
+	if got := iam.policy("acme-prod.app"); got != want {
+		t.Fatalf("policy %s", got)
+	}
+}
+
+func TestUserSuspendAndResume(t *testing.T) {
+	fresh(t)
+	_, url := newFakeIAM(t)
+	r := userReconcilerAt(url)
+	readyUser(t, r, "acme-prod", "app", v1alpha1.ObjectStorageUserSpec{Permission: "read"})
+	if mask, found, _ := unstructured.NestedSlice(mustRookUser(t, "acme-prod.app").Object, "spec", "opMask"); found {
+		t.Fatalf("opMask %v before suspend", mask)
+	}
 	user := readUser(t, "acme-prod", "app")
-	user.Spec.Quota.Buckets = int32Ptr(8)
+	user.Spec.Suspended = true
 	if err := testClient.Update(context.Background(), user); err != nil {
 		t.Fatal(err)
 	}
-	reconcileUser(t, "acme-prod", "app")
-	rgw, _ := getCephUser(t, "acme-prod", "acme-prod.app")
-	buckets, _, _ := unstructured.NestedInt64(rgw.Object, "spec", "quotas", "maxBuckets")
-	if buckets != 8 {
-		t.Fatalf("maxBuckets %d", buckets)
+	reconcileUserWith(t, r, "acme-prod", "app")
+	mask, found, _ := unstructured.NestedSlice(mustRookUser(t, "acme-prod.app").Object, "spec", "opMask")
+	if !found || len(mask) != 0 {
+		t.Fatalf("opMask %v found %v", mask, found)
+	}
+	user = readUser(t, "acme-prod", "app")
+	user.Spec.Suspended = false
+	if err := testClient.Update(context.Background(), user); err != nil {
+		t.Fatal(err)
+	}
+	reconcileUserWith(t, r, "acme-prod", "app")
+	if mask, found, _ := unstructured.NestedSlice(mustRookUser(t, "acme-prod.app").Object, "spec", "opMask"); found {
+		t.Fatalf("opMask %v after resume", mask)
 	}
 }
 
-func TestUserRefusesANegativeQuota(t *testing.T) {
-	fresh(t)
-	createStore(t, "Ready")
-	createUser(t, "acme-prod", "app", v1alpha1.ObjectStorageUserSpec{Quota: v1alpha1.ObjectStorageUserQuota{Bytes: resource.NewQuantity(-5, resource.BinarySI)}})
-	reconcileUser(t, "acme-prod", "app")
-	requireUserReason(t, "acme-prod", "app", metav1.ConditionFalse, "QuotaInvalid")
-	if countRook(t, cephObjectStoreUserGVK, "acme-prod") != 0 {
-		t.Fatal("a Rook user exists")
+func mustRookUser(t *testing.T, name string) *unstructured.Unstructured {
+	t.Helper()
+	obj, found := getRookUser(t, name)
+	if !found {
+		t.Fatalf("no Rook user %s", name)
 	}
+	return obj
 }
 
-func TestUserDeletionWaitsForBuckets(t *testing.T) {
+func TestUserDeleteRemovesPolicyRookUserAndSecret(t *testing.T) {
 	fresh(t)
-	createStore(t, "Ready")
-	createUser(t, "acme-prod", "app", v1alpha1.ObjectStorageUserSpec{})
-	reconcileUser(t, "acme-prod", "app")
-	createBucket(t, "acme-prod", "data", v1alpha1.ObjectStorageBucketSpec{UserRef: "app"})
+	iam, url := newFakeIAM(t)
+	r := userReconcilerAt(url)
+	readyUser(t, r, "acme-prod", "app", v1alpha1.ObjectStorageUserSpec{Permission: "read"})
 	if err := testClient.Delete(context.Background(), readUser(t, "acme-prod", "app")); err != nil {
 		t.Fatal(err)
 	}
-	reconcileUser(t, "acme-prod", "app")
-	user := readUser(t, "acme-prod", "app")
-	if user.DeletionTimestamp.IsZero() || len(user.Finalizers) != 1 {
-		t.Fatalf("user %+v", user.ObjectMeta)
+	iam.take()
+	reconcileUserWith(t, r, "acme-prod", "app")
+	if iam.policy("acme-prod.app") != "" {
+		t.Fatal("the policy is still stored")
 	}
-	requireCondition(t, user.Status.Conditions, v1alpha1.ConditionReady, metav1.ConditionFalse, "InUse")
-	bucket := &v1alpha1.ObjectStorageBucket{ObjectMeta: metav1.ObjectMeta{Name: "data", Namespace: "acme-prod"}}
-	if err := testClient.Delete(context.Background(), bucket); err != nil {
-		t.Fatal(err)
+	if _, found := getRookUser(t, "acme-prod.app"); found {
+		t.Fatal("the Rook user is still there")
 	}
-	reconcileUser(t, "acme-prod", "app")
+	if _, found := readSecret(t, "acme-prod", "app-s3"); found {
+		t.Fatal("the Secret is still there")
+	}
 	var gone v1alpha1.ObjectStorageUser
 	err := testClient.Get(context.Background(), client.ObjectKey{Namespace: "acme-prod", Name: "app"}, &gone)
 	if !apierrors.IsNotFound(err) {
 		t.Fatalf("user still there: %v", err)
 	}
+	if _, found, _ := getRook(context.Background(), testClient, cephObjectStoreAccountGVK, client.ObjectKey{Namespace: StoreNamespace, Name: "acme-prod"}); !found {
+		t.Fatal("the last user removed the account")
+	}
+}
+
+func TestUserDeleteWithoutAnAccountStillFinishes(t *testing.T) {
+	fresh(t)
+	r := userReconcilerAt("http://unused.invalid")
+	createStore(t, "Ready")
+	createUser(t, "acme-prod", "app", v1alpha1.ObjectStorageUserSpec{Permission: "read"})
+	reconcileUserWith(t, r, "acme-prod", "app")
+	if err := testClient.Delete(context.Background(), readUser(t, "acme-prod", "app")); err != nil {
+		t.Fatal(err)
+	}
+	reconcileUserWith(t, r, "acme-prod", "app")
+	var gone v1alpha1.ObjectStorageUser
+	if err := testClient.Get(context.Background(), client.ObjectKey{Namespace: "acme-prod", Name: "app"}, &gone); !apierrors.IsNotFound(err) {
+		t.Fatalf("user still there: %v", err)
+	}
+}
+
+func TestUserWithoutAnAccountRefIsLegacy(t *testing.T) {
+	fresh(t)
+	_, url := newFakeIAM(t)
+	r := userReconcilerAt(url)
+	createStore(t, "Ready")
+	legacy := &unstructured.Unstructured{Object: map[string]any{
+		"apiVersion": "ceph.rook.io/v1",
+		"kind":       "CephObjectStoreUser",
+		"metadata":   map[string]any{"name": "acme-prod.app", "namespace": StoreNamespace},
+		"spec":       map[string]any{"store": StoreName},
+	}}
+	if err := testClient.Create(context.Background(), legacy); err != nil {
+		t.Fatal(err)
+	}
+	createUser(t, "acme-prod", "app", v1alpha1.ObjectStorageUserSpec{Permission: "read"})
+	reconcileUserWith(t, r, "acme-prod", "app")
+	requireUserReason(t, "acme-prod", "app", metav1.ConditionFalse, "LegacyUser")
+	if countRook(t, cephObjectStoreAccountGVK, StoreNamespace) != 0 {
+		t.Fatal("an account was made for a legacy user")
+	}
+	if err := testClient.Delete(context.Background(), readUser(t, "acme-prod", "app")); err != nil {
+		t.Fatal(err)
+	}
+	reconcileUserWith(t, r, "acme-prod", "app")
+	if _, found := getRookUser(t, "acme-prod.app"); !found {
+		t.Fatal("the legacy Rook user was deleted")
+	}
+}
+
+func TestUserInTheProjectNamespaceIsLegacy(t *testing.T) {
+	fresh(t)
+	r := userReconcilerAt("http://unused.invalid")
+	createStore(t, "Ready")
+	old := &unstructured.Unstructured{Object: map[string]any{
+		"apiVersion": "ceph.rook.io/v1",
+		"kind":       "CephObjectStoreUser",
+		"metadata":   map[string]any{"name": "acme-prod.app", "namespace": "acme-prod"},
+		"spec":       map[string]any{"store": StoreName},
+	}}
+	if err := testClient.Create(context.Background(), old); err != nil {
+		t.Fatal(err)
+	}
+	createUser(t, "acme-prod", "app", v1alpha1.ObjectStorageUserSpec{Permission: "read"})
+	reconcileUserWith(t, r, "acme-prod", "app")
+	requireUserReason(t, "acme-prod", "app", metav1.ConditionFalse, "LegacyUser")
+}
+
+func TestUserSameNameInTwoProjects(t *testing.T) {
+	fresh(t)
+	r := userReconcilerAt("http://unused.invalid")
+	createStore(t, "Ready")
+	createUser(t, "acme-prod", "app", v1alpha1.ObjectStorageUserSpec{Permission: "read"})
+	createUser(t, "beta-prod", "app", v1alpha1.ObjectStorageUserSpec{Permission: "read"})
+	reconcileUserWith(t, r, "acme-prod", "app")
+	reconcileUserWith(t, r, "beta-prod", "app")
+	readyAccountOf(t, "acme-prod")
+	readyAccountOf(t, "beta-prod")
+	reconcileUserWith(t, r, "acme-prod", "app")
+	reconcileUserWith(t, r, "beta-prod", "app")
+	if _, found := getRookUser(t, "acme-prod.app"); !found {
+		t.Fatal("no acme-prod.app")
+	}
+	if _, found := getRookUser(t, "beta-prod.app"); !found {
+		t.Fatal("no beta-prod.app")
+	}
+	if countRook(t, cephObjectStoreUserGVK, StoreNamespace) != 2 {
+		t.Fatal("the Rook namespace holds more than the two users")
+	}
 }
 
 func TestUserOutsideAProjectNamespace(t *testing.T) {
 	fresh(t)
+	r := userReconcilerAt("http://unused.invalid")
 	createStore(t, "Ready")
-	createUser(t, unlabeledNamespace, "app", v1alpha1.ObjectStorageUserSpec{})
-	reconcileUser(t, unlabeledNamespace, "app")
+	createUser(t, unlabeledNamespace, "app", v1alpha1.ObjectStorageUserSpec{Permission: "read"})
+	reconcileUserWith(t, r, unlabeledNamespace, "app")
 	requireUserReason(t, unlabeledNamespace, "app", metav1.ConditionFalse, "NamespaceNotProject")
+}
+
+func TestUserReportsAnUnavailableStore(t *testing.T) {
+	fresh(t)
+	r := userReconcilerAt("http://127.0.0.1:1")
+	readyUserWithoutPolicy(t, r)
+	requireUserReason(t, "acme-prod", "app", metav1.ConditionFalse, "StoreNotReady")
+}
+
+func readyUserWithoutPolicy(t *testing.T, r *UserReconciler) {
+	t.Helper()
+	createStore(t, "Ready")
+	createUser(t, "acme-prod", "app", v1alpha1.ObjectStorageUserSpec{Permission: "read"})
+	reconcileUserWith(t, r, "acme-prod", "app")
+	readyAccountOf(t, "acme-prod")
+	reconcileUserWith(t, r, "acme-prod", "app")
+	makeRookUserReady(t, "acme-prod.app")
+	reconcileUserWith(t, r, "acme-prod", "app")
 }
 
 func TestUserStatusIsWrittenByTheAreaManager(t *testing.T) {
 	fresh(t)
+	r := userReconcilerAt("http://unused.invalid")
 	createStore(t, "Ready")
-	createUser(t, "acme-prod", "app", v1alpha1.ObjectStorageUserSpec{})
-	reconcileUser(t, "acme-prod", "app")
+	createUser(t, "acme-prod", "app", v1alpha1.ObjectStorageUserSpec{Permission: "read"})
+	reconcileUserWith(t, r, "acme-prod", "app")
 	for _, entry := range readUser(t, "acme-prod", "app").ManagedFields {
 		if entry.Subresource == "status" && entry.Manager == v1alpha1.ObjectStorageFieldManager {
 			return
 		}
 	}
 	t.Fatalf("managed fields %+v", readUser(t, "acme-prod", "app").ManagedFields)
+}
+
+func TestBucketEventsEnqueueEveryUserOfTheNamespace(t *testing.T) {
+	fresh(t)
+	createUser(t, "acme-prod", "app", v1alpha1.ObjectStorageUserSpec{Permission: "read"})
+	createUser(t, "acme-prod", "ci", v1alpha1.ObjectStorageUserSpec{Permission: "read"})
+	createUser(t, "beta-prod", "other", v1alpha1.ObjectStorageUserSpec{Permission: "read"})
+	r := userReconcilerAt("http://unused.invalid")
+	requests := r.usersOfBucket(context.Background(), &v1alpha1.ObjectStorageBucket{ObjectMeta: metav1.ObjectMeta{Name: "data", Namespace: "acme-prod"}})
+	got := map[string]bool{}
+	for _, request := range requests {
+		got[request.String()] = true
+	}
+	if len(got) != 2 || !got["acme-prod/app"] || !got["acme-prod/ci"] {
+		t.Fatalf("requests %v", got)
+	}
 }

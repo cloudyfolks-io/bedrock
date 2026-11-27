@@ -1,0 +1,13 @@
+.wordBoundaries {
+  overflow-wrap: normal;
+  word-break: normal;
+}
+
+.token {
+  direction: ltr;
+  display: inline-block;
+  max-inline-size: 100%;
+  overflow-x: auto;
+  white-space: nowrap;
+  vertical-align: bottom;
+}

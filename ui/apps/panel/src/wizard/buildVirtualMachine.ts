@@ -9,6 +9,10 @@ function networks(subnetRef: string, securityGroups: readonly string[]) {
   return [omitEmpty({ subnetRef, securityGroups: [...securityGroups] })];
 }
 
+function size(values: { instanceType: string; customSize: boolean; cores: number | null; memoryMiB: number | null }) {
+  return values.customSize ? { compute: { cores: values.cores ?? 0, memoryMiB: values.memoryMiB ?? 0 } } : { instanceType: values.instanceType };
+}
+
 function rootDisk(sizeGi: number | null, storageClass: string) {
   return omitEmpty({ sizeGi: sizeGi ?? 0, storageClass });
 }
@@ -22,7 +26,7 @@ export function buildDiskVirtualMachine(values: DiskValues, context: WizardConte
     values.name,
     context.namespace,
     omitEmpty({
-      instanceType: values.instanceType,
+      ...size(values),
       preference: values.preference,
       image: { name: values.imageName, scope: values.imageScope },
       rootDisk: rootDisk(values.rootDiskGi, values.storageClass),
@@ -40,7 +44,7 @@ export function buildIsoVirtualMachine(values: IsoValues, context: WizardContext
     values.name,
     context.namespace,
     omitEmpty({
-      instanceType: values.instanceType,
+      ...size(values),
       preference: values.osPreference,
       cdroms: [values.isoName, ...values.extraCdroms].filter((name) => name !== "").map((imageRef) => ({ imageRef })),
       firmware: { ...values.firmware },

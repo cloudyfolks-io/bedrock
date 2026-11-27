@@ -158,6 +158,7 @@ describe("authz", () => {
   });
 
   it("TestNoRetryTimerSurvivesUnmount", async () => {
+    // Faking queueMicrotask can exhaust the Vitest worker heap.
     vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
     const view = renderPanel(
       <Can check={create}>

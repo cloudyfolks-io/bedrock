@@ -1,0 +1,26 @@
+SET statement_timeout = '30000';
+SET idle_in_transaction_session_timeout = '30000';
+ALTER ROLE "dbadmin" WITH NOSUPERUSER CREATEDB CREATEROLE;
+ALTER ROLE "dbadmin" SET createrole_self_grant = 'inherit,set';
+REVOKE CONNECT, TEMPORARY ON DATABASE "app" FROM PUBLIC;
+GRANT CONNECT ON DATABASE "app" TO "dbadmin";
+\connect "app"
+SET statement_timeout = '30000';
+SET idle_in_transaction_session_timeout = '30000';
+DO $do$ BEGIN IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'app_ro' AND rolcanlogin) THEN RAISE EXCEPTION 'a login role uses a group role name'; END IF; IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'app_ro') THEN CREATE ROLE "app_ro" NOLOGIN; END IF; END $do$;
+DO $do$ BEGIN IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'app_rw' AND rolcanlogin) THEN RAISE EXCEPTION 'a login role uses a group role name'; END IF; IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'app_rw') THEN CREATE ROLE "app_rw" NOLOGIN; END IF; END $do$;
+DO $do$ BEGIN IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'app_all' AND rolcanlogin) THEN RAISE EXCEPTION 'a login role uses a group role name'; END IF; IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'app_all') THEN CREATE ROLE "app_all" NOLOGIN; END IF; END $do$;
+GRANT CONNECT ON DATABASE "app" TO "app_ro", "app_rw", "app_all";
+GRANT USAGE ON SCHEMA public TO "app_ro", "app_rw", "app_all";
+GRANT CREATE ON SCHEMA public TO "app_all";
+GRANT SELECT ON ALL TABLES IN SCHEMA public TO "app_ro", "app_rw", "app_all";
+GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO "app_ro", "app_rw", "app_all";
+GRANT INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO "app_rw", "app_all";
+GRANT UPDATE ON ALL SEQUENCES IN SCHEMA public TO "app_rw", "app_all";
+GRANT ALL ON ALL TABLES IN SCHEMA public TO "app_all";
+GRANT TEMPORARY ON DATABASE "app" TO "app_all";
+ALTER DEFAULT PRIVILEGES FOR ROLE "dbadmin" IN SCHEMA public GRANT SELECT ON TABLES TO "app_ro", "app_rw", "app_all";
+ALTER DEFAULT PRIVILEGES FOR ROLE "dbadmin" IN SCHEMA public GRANT USAGE, SELECT ON SEQUENCES TO "app_ro", "app_rw", "app_all";
+ALTER DEFAULT PRIVILEGES FOR ROLE "dbadmin" IN SCHEMA public GRANT INSERT, UPDATE, DELETE ON TABLES TO "app_rw", "app_all";
+ALTER DEFAULT PRIVILEGES FOR ROLE "dbadmin" IN SCHEMA public GRANT UPDATE ON SEQUENCES TO "app_rw", "app_all";
+ALTER DEFAULT PRIVILEGES FOR ROLE "dbadmin" IN SCHEMA public GRANT ALL ON TABLES TO "app_all";

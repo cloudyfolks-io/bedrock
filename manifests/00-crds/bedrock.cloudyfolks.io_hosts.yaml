@@ -236,6 +236,17 @@ spec:
                 required:
                 - url
                 type: object
+              encryption:
+                properties:
+                  failedHash:
+                    type: string
+                  handledGrant:
+                    type: string
+                  hash:
+                    type: string
+                  restartPending:
+                    type: boolean
+                type: object
               hostname:
                 type: string
               inventory:
@@ -289,6 +300,23 @@ spec:
                       osVersion:
                         type: string
                     type: object
+                  links:
+                    items:
+                      properties:
+                        addresses:
+                          items:
+                            type: string
+                          type: array
+                        mtu:
+                          format: int32
+                          type: integer
+                        name:
+                          type: string
+                      required:
+                      - mtu
+                      - name
+                      type: object
+                    type: array
                   memoryBytes:
                     format: int64
                     type: integer
@@ -345,6 +373,9 @@ spec:
               observedGeneration:
                 format: int64
                 type: integer
+              reportedAt:
+                format: date-time
+                type: string
               restore:
                 properties:
                   backup:

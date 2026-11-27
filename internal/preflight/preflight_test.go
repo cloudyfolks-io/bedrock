@@ -66,6 +66,45 @@ func TestRunFatalFailures(t *testing.T) {
 	}
 }
 
+func TestRunSwapBlocksAndNamesTheDevice(t *testing.T) {
+	facts := goodFacts()
+	facts.Swaps = []string{"/swap.img"}
+	results := Run(context.Background(), goodExec(), facts, []host.Device{{Path: "/dev/sdb", Block: true}}, goodConfig(), []string{"ubuntu-24.04"})
+	if !Blocked(results) {
+		t.Fatal("swap must block")
+	}
+	out := Format(results)
+	for _, want := range []string{"[fail] swap:", "/swap.img", "swapoff", "/etc/fstab"} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("missing %q in %s", want, out)
+		}
+	}
+}
+
+func TestRunSwapMessageFitsTheDeviceKind(t *testing.T) {
+	zram := swapMessage([]string{"/dev/zram0"})
+	if !strings.Contains(zram, "zram") || strings.Contains(zram, "/etc/fstab") {
+		t.Fatalf("zram message %q", zram)
+	}
+	file := swapMessage([]string{"/swap.img"})
+	if !strings.Contains(file, "/etc/fstab") || strings.Contains(file, "zram") {
+		t.Fatalf("file message %q", file)
+	}
+	both := swapMessage([]string{"/dev/zram0", "/swap.img"})
+	if !strings.Contains(both, "zram") || !strings.Contains(both, "/etc/fstab") {
+		t.Fatalf("mixed message %q", both)
+	}
+}
+
+func TestRunUbuntu2604IsSupported(t *testing.T) {
+	facts := goodFacts()
+	facts.OSVersionID = "26.04"
+	results := Run(context.Background(), goodExec(), facts, []host.Device{{Path: "/dev/sdb", Block: true}}, goodConfig(), []string{"ubuntu-26.04"})
+	if Blocked(results) {
+		t.Fatalf("unexpected block: %s", Format(results))
+	}
+}
+
 func TestRunWarningsDoNotBlock(t *testing.T) {
 	facts := goodFacts()
 	facts.KVM = false
@@ -169,5 +208,34 @@ func TestRunJoinKeepsTheOtherChecks(t *testing.T) {
 	}
 	if !failed["root"] || !failed["vip"] {
 		t.Fatalf("want root and vip to fail: %s", Format(results))
+	}
+}
+
+func TestRunRefusesAKernelThatCannotMountAes256kKeys(t *testing.T) {
+	facts := goodFacts()
+	facts.Kernel = "6.8.0-45-generic"
+	cfg := goodConfig()
+	cfg.Spec.Storage.CephxCipher = "aes256k"
+	results := Run(context.Background(), goodExec(), facts, []host.Device{{Path: "/dev/sdb", Block: true}}, cfg, []string{"ubuntu-24.04"})
+	if !Blocked(results) || !strings.Contains(Format(results), "kernel 7.0") {
+		t.Fatalf("expected a block that names the rule: %s", Format(results))
+	}
+	if blocked := Blocked(RunJoin(context.Background(), goodExec(), facts, []host.Device{{Path: "/dev/sdb", Block: true}}, cfg, []string{"ubuntu-24.04"})); !blocked {
+		t.Fatal("a join must block too")
+	}
+}
+
+func TestRunAcceptsTheKernelForAes256kAndAnyKernelForAes(t *testing.T) {
+	facts := goodFacts()
+	facts.Kernel = "7.0.2"
+	cfg := goodConfig()
+	cfg.Spec.Storage.CephxCipher = "aes256k"
+	if Blocked(Run(context.Background(), goodExec(), facts, []host.Device{{Path: "/dev/sdb", Block: true}}, cfg, []string{"ubuntu-24.04"})) {
+		t.Fatal("kernel 7.0 must pass")
+	}
+	facts.Kernel = "5.14.0"
+	cfg.Spec.Storage.CephxCipher = "aes"
+	if Blocked(Run(context.Background(), goodExec(), facts, []host.Device{{Path: "/dev/sdb", Block: true}}, cfg, []string{"ubuntu-24.04"})) {
+		t.Fatal("aes must pass on an old kernel")
 	}
 }

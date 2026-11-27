@@ -38,6 +38,9 @@ spec:
         'system:serviceaccount:kube-system:ovn',
         'system:serviceaccount:kube-system:fabric-cni',
         'system:serviceaccount:kube-system:multus',
+        'system:serviceaccount:kube-system:replicaset-controller',
+        'system:serviceaccount:kube-system:statefulset-controller',
+        'system:serviceaccount:kube-system:job-controller',
         'system:serviceaccount:bedrock-system:bedrock-operator'] ||
         (size(variables.added) == 0 && size(variables.removed) == 0)
       message: "only the platform may set network selection annotations"

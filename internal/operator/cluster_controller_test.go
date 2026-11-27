@@ -4,10 +4,12 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"slices"
 	"sync/atomic"
 	"testing"
 	"time"
 
+	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -110,6 +112,58 @@ func TestClusterReconcilerInstallsEmbeddedRelease(t *testing.T) {
 	if err != nil || len(inv) != 4 {
 		t.Fatalf("inventory %v %v", inv, err)
 	}
+}
+
+func fabricAgentBundle(t *testing.T) release.Bundle {
+	t.Helper()
+	agent := &unstructured.Unstructured{Object: map[string]any{
+		"apiVersion": "apps/v1", "kind": "DaemonSet",
+		"metadata": map[string]any{"name": "fabric-cni", "namespace": "kube-system"},
+		"spec": map[string]any{
+			"selector": map[string]any{"matchLabels": map[string]any{"app": "fabric-cni"}},
+			"template": map[string]any{
+				"metadata": map[string]any{"labels": map[string]any{"app": "fabric-cni"}},
+				"spec": map[string]any{"containers": []any{map[string]any{
+					"name": "cni-server", "image": "example.com/cni:1",
+					"args": []any{"--service-cluster-ip-range=10.96.0.0/12", "--iface=eth0"},
+				}}},
+			},
+		},
+	}}
+	return release.Bundle{Spec: testBundle(t).Spec, Groups: []release.Group{{Order: 20, Name: "fabric", Objects: []*unstructured.Unstructured{agent}}}}
+}
+
+func TestClusterReconcilerInstallsTheFabricAgentWithThePodMTU(t *testing.T) {
+	c, cfg := StartTestEnv(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+	if err := c.Create(ctx, &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: release.SystemNamespace}}); err != nil {
+		t.Fatal(err)
+	}
+	mgr, err := ctrl.NewManager(cfg, testManagerOptions(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	r := &ClusterReconciler{Client: mgr.GetClient(), APIReader: mgr.GetAPIReader(), Bundle: fabricAgentBundle(t), Gates: release.Gates{}, Interval: 200 * time.Millisecond, GroupTimeout: 20 * time.Second}
+	if err := r.SetupWithManager(mgr); err != nil {
+		t.Fatal(err)
+	}
+	go func() { _ = mgr.Start(ctx) }()
+
+	createMasterNode(t, ctx, c)
+	cluster := newCluster("v0.1.0-test")
+	cluster.Spec.PodMTU = 1500
+	if err := c.Create(ctx, cluster); err != nil {
+		t.Fatal(err)
+	}
+	waitFor(t, func() bool {
+		var agent appsv1.DaemonSet
+		if err := c.Get(ctx, client.ObjectKey{Namespace: "kube-system", Name: "fabric-cni"}, &agent); err != nil {
+			return false
+		}
+		args := agent.Spec.Template.Spec.Containers[0].Args
+		return slices.Equal(args, []string{"--service-cluster-ip-range=10.96.0.0/12", "--mtu=1500", "--iface=eth0"})
+	})
 }
 
 func TestClusterReconcilerAwaitsUpgradeForOtherVersion(t *testing.T) {

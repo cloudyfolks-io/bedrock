@@ -1,0 +1,290 @@
+package database
+
+import (
+	"context"
+	"errors"
+	"net"
+	"net/url"
+	"strconv"
+
+	corev1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/client-go/util/retry"
+	"sigs.k8s.io/controller-runtime/pkg/client"
+
+	"github.com/cloudyfolks-io/bedrock/api/v1alpha1"
+	"github.com/cloudyfolks-io/bedrock/internal/database/credential"
+	"github.com/cloudyfolks-io/bedrock/internal/database/engine"
+	"github.com/cloudyfolks-io/bedrock/internal/database/mysql"
+	"github.com/cloudyfolks-io/bedrock/internal/database/valkey"
+	"github.com/cloudyfolks-io/bedrock/internal/ssa"
+)
+
+const (
+	SecretSuperuser = "superuser"
+	SecretApp       = "app"
+	SuffixAdmin     = "admin"
+
+	annotationPasswordSynced = "bedrock.cloudyfolks.io/password-synced"
+	annotationResetApplied   = "bedrock.cloudyfolks.io/reset-applied"
+	postgresSuperuser        = "postgres"
+	passwordKey              = "password"
+	synced                   = "true"
+	unsynced                 = "false"
+)
+
+func restored(db v1alpha1.Database) bool { return db.Spec.Restore != nil }
+
+func EngineSecret(name string, db v1alpha1.Database, project Project, data map[string]string, extra map[string]string) *corev1.Secret {
+	labels, annotations := OwnedMetadata(db, project)
+	for key, value := range extra {
+		annotations[key] = value
+	}
+	return &corev1.Secret{
+		TypeMeta:   metav1.TypeMeta{APIVersion: "v1", Kind: "Secret"},
+		ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: PlatformNamespace, Labels: labels, Annotations: annotations},
+		Type:       secretTypeOf(data),
+		StringData: data,
+	}
+}
+
+func secretTypeOf(data map[string]string) corev1.SecretType {
+	_, named := data["username"]
+	_, keyed := data[passwordKey]
+	if named && keyed {
+		return corev1.SecretTypeBasicAuth
+	}
+	return corev1.SecretTypeOpaque
+}
+
+func superuserData(kind, password string) (map[string]string, error) {
+	var raw map[string][]byte
+	var err error
+	switch kind {
+	case v1alpha1.DatabaseEngineMySQL:
+		raw, err = mysql.Superuser(password)
+	case v1alpha1.DatabaseEngineValkey:
+		raw, err = valkey.Superuser(password)
+	default:
+		return map[string]string{"username": postgresSuperuser, passwordKey: password}, nil
+	}
+	data := make(map[string]string, len(raw))
+	for key, value := range raw {
+		data[key] = string(value)
+	}
+	return data, err
+}
+
+func EnsureEngineSecrets(ctx context.Context, c client.Client, db v1alpha1.Database, project Project) error {
+	if err := createIfAbsent(ctx, c, Suffixed(db.UID, SecretSuperuser), func(password string) (*corev1.Secret, error) {
+		data, err := superuserData(db.Spec.Engine, password)
+		if err == nil && db.Spec.Engine == v1alpha1.DatabaseEngineMySQL && restored(db) {
+			data, err = sourceUsers(ctx, c, db.Spec.Restore.SourceUID)
+		}
+		return EngineSecret(Suffixed(db.UID, SecretSuperuser), db, project, data, nil), err
+	}); err != nil {
+		return err
+	}
+	state := synced
+	if restored(db) {
+		state = unsynced
+	}
+	return createIfAbsent(ctx, c, Suffixed(db.UID, SecretApp), func(password string) (*corev1.Secret, error) {
+		imported, err := readImport(ctx, c, db, v1alpha1.DatabaseImportAdminName(db.Name), db.Name)
+		if err != nil {
+			return nil, err
+		}
+		if imported == nil && db.Annotations[v1alpha1.DatabaseImportMarker] == "true" {
+			return nil, errors.New("the imported customer administrator credentials are pending")
+		}
+		if imported != nil {
+			password = string(imported.Data[passwordKey])
+			if password == "" {
+				return nil, errors.New("the imported customer administrator password is missing")
+			}
+		}
+		return EngineSecret(Suffixed(db.UID, SecretApp), db, project, map[string]string{"username": engine.AdminUser, passwordKey: password}, map[string]string{
+			annotationPasswordSynced: state,
+			annotationResetApplied:   db.Annotations[v1alpha1.AnnotationResetPassword],
+		}), nil
+	})
+}
+
+func createIfAbsent(ctx context.Context, c client.Client, name string, build func(password string) (*corev1.Secret, error)) error {
+	var existing corev1.Secret
+	err := c.Get(ctx, client.ObjectKey{Namespace: PlatformNamespace, Name: name}, &existing)
+	if err == nil {
+		return nil
+	}
+	if !apierrors.IsNotFound(err) {
+		return err
+	}
+	password, err := credential.Password()
+	if err != nil {
+		return err
+	}
+	secret, err := build(password)
+	if err != nil {
+		return err
+	}
+	return client.IgnoreAlreadyExists(c.Create(ctx, secret, client.FieldOwner(v1alpha1.DatabaseFieldManager)))
+}
+
+type AdminState struct {
+	Password string
+	Synced   bool
+	Applied  string
+}
+
+func ReadAdmin(ctx context.Context, c client.Reader, db v1alpha1.Database) (AdminState, error) {
+	var secret corev1.Secret
+	if err := c.Get(ctx, client.ObjectKey{Namespace: PlatformNamespace, Name: Suffixed(db.UID, SecretApp)}, &secret); err != nil {
+		return AdminState{}, err
+	}
+	return AdminState{
+		Password: string(secret.Data[passwordKey]),
+		Synced:   secret.Annotations[annotationPasswordSynced] == synced,
+		Applied:  secret.Annotations[annotationResetApplied],
+	}, nil
+}
+
+func patchAdminSecret(ctx context.Context, c client.Client, db v1alpha1.Database, change func(*corev1.Secret)) error {
+	return retry.RetryOnConflict(retry.DefaultRetry, func() error {
+		var secret corev1.Secret
+		if err := c.Get(ctx, client.ObjectKey{Namespace: PlatformNamespace, Name: Suffixed(db.UID, SecretApp)}, &secret); err != nil {
+			return err
+		}
+		before := secret.DeepCopy()
+		change(&secret)
+		return c.Patch(ctx, &secret, client.MergeFromWithOptions(before, client.MergeFromWithOptimisticLock{}), client.FieldOwner(v1alpha1.DatabaseFieldManager))
+	})
+}
+
+func MarkAdminSynced(ctx context.Context, c client.Client, db v1alpha1.Database) error {
+	return patchAdminSecret(ctx, c, db, func(secret *corev1.Secret) {
+		secret.Annotations[annotationPasswordSynced] = synced
+	})
+}
+
+func ResetAdminPassword(ctx context.Context, c client.Client, db v1alpha1.Database, token string) (string, error) {
+	password, err := credential.Password()
+	if err != nil {
+		return "", err
+	}
+	err = patchAdminSecret(ctx, c, db, func(secret *corev1.Secret) {
+		secret.Data = map[string][]byte{"username": []byte(engine.AdminUser), passwordKey: []byte(password)}
+		secret.Annotations[annotationPasswordSynced] = unsynced
+		secret.Annotations[annotationResetApplied] = token
+	})
+	return password, err
+}
+
+func AdminURI(password, host string, port int32) string {
+	return ConnectionURI(v1alpha1.DatabaseEnginePostgreSQL, engine.AdminUser, password, host, port, engine.DefaultDatabase)
+}
+
+func userInfoOf(user, password string) *url.Userinfo {
+	if password == "" {
+		return url.User(user)
+	}
+	return url.UserPassword(user, password)
+}
+
+func ConnectionURI(kind, user, password, host string, port int32, database string) string {
+	address := &url.URL{User: userInfoOf(user, password), Host: net.JoinHostPort(host, strconv.Itoa(int(port)))}
+	switch kind {
+	case v1alpha1.DatabaseEngineMySQL:
+		address.Scheme, address.Path = "mysql", "/"+database
+	case v1alpha1.DatabaseEngineValkey:
+		address.Scheme = "redis"
+	default:
+		address.Scheme, address.Path = "postgresql", "/"+database
+	}
+	return address.String()
+}
+
+func AdminCopyName(db v1alpha1.Database) string { return db.Name + "-" + SuffixAdmin }
+
+func AdminCopy(db v1alpha1.Database, project Project, password, host string, port int32) *corev1.Secret {
+	return &corev1.Secret{
+		TypeMeta: metav1.TypeMeta{APIVersion: "v1", Kind: "Secret"},
+		ObjectMeta: metav1.ObjectMeta{
+			Name: AdminCopyName(db), Namespace: db.Namespace,
+			Labels:          v1alpha1.TenantLabels(Kind, db.Name, project.Tenant, project.Name),
+			OwnerReferences: []metav1.OwnerReference{*metav1.NewControllerRef(&db, v1alpha1.GroupVersion.WithKind(Kind))},
+		},
+		Type:       corev1.SecretTypeOpaque,
+		StringData: adminCopyData(db.Spec.Engine, password, host, port),
+	}
+}
+
+func adminCopyData(kind, password, host string, port int32) map[string]string {
+	data := map[string]string{
+		"username":  engine.AdminUser,
+		passwordKey: password,
+		"host":      host,
+		"port":      strconv.Itoa(int(port)),
+		"uri":       ConnectionURI(kind, engine.AdminUser, password, host, port, engine.DefaultDatabase),
+	}
+	if kind != v1alpha1.DatabaseEngineValkey {
+		data["database"] = engine.DefaultDatabase
+	}
+	return data
+}
+
+func EnsureAdminCopy(ctx context.Context, c client.Client, db v1alpha1.Database, project Project, host string, port int32, customerCA []byte) error {
+	state, err := ReadAdmin(ctx, c, db)
+	if err != nil {
+		return err
+	}
+	copy := AdminCopy(db, project, state.Password, host, port)
+	if len(customerCA) != 0 {
+		copy.StringData["ca.crt"] = string(customerCA)
+		connection, err := url.Parse(copy.StringData["uri"])
+		if err != nil {
+			return err
+		}
+		query := connection.Query()
+		switch db.Spec.Engine {
+		case v1alpha1.DatabaseEnginePostgreSQL:
+			query.Set("sslmode", "verify-full")
+		case v1alpha1.DatabaseEngineMySQL:
+			query.Set("ssl-mode", "VERIFY_IDENTITY")
+		case v1alpha1.DatabaseEngineValkey:
+			connection.Scheme = "rediss"
+		}
+		connection.RawQuery = query.Encode()
+		copy.StringData["uri"] = connection.String()
+	}
+	return ssa.Apply(ctx, c, copy, v1alpha1.DatabaseFieldManager)
+}
+
+var ErrSourceUsersGone = errors.New("the system passwords of the source database are gone")
+
+func SourceUsers(ctx context.Context, c client.Reader, sourceUID string) (map[string][]byte, bool, error) {
+	for _, name := range []string{Suffixed(types.UID(sourceUID), SecretSuperuser), TombstoneName(types.UID(sourceUID))} {
+		var secret corev1.Secret
+		err := c.Get(ctx, client.ObjectKey{Namespace: PlatformNamespace, Name: name}, &secret)
+		if err == nil {
+			return secret.Data, true, nil
+		}
+		if !apierrors.IsNotFound(err) {
+			return nil, false, err
+		}
+	}
+	return nil, false, nil
+}
+
+func sourceUsers(ctx context.Context, c client.Reader, sourceUID string) (map[string]string, error) {
+	raw, found, err := SourceUsers(ctx, c, sourceUID)
+	if err != nil || !found {
+		return nil, errors.Join(err, ErrSourceUsersGone)
+	}
+	data := make(map[string]string, len(raw))
+	for key, value := range raw {
+		data[key] = string(value)
+	}
+	return data, nil
+}

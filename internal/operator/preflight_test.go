@@ -209,27 +209,16 @@ func TestPreflightProblems(t *testing.T) {
 			in.Hosts[1].Status.Checks.VarLibFreeBytes = 7 * gib
 			return in
 		}, "disk: node-b has 7.0 GiB free in /var/lib, needs 8.0 GiB"},
-		"disk too small on the backup host counts its images twice": {func(in preflightInput) preflightInput {
-			in.Hosts[0].Status.Checks.ImagesBytes = 4 * gib
-			in.Hosts[0].Status.Checks.VarLibFreeBytes = 13 * gib
-			return in
-		}, "disk: node-a has 13.0 GiB free in /var/lib, needs 14.0 GiB"},
-		"images on a non backup host do not count": {func(in preflightInput) preflightInput {
-			in.Hosts[1].Status.Checks.ImagesBytes = 100 * gib
+		"the archive size adds no reserve on the backup host": {func(in preflightInput) preflightInput {
+			in.Hosts[0].Status.Checks.ImagesBytes = 100 * gib
 			return in
 		}, ""},
-		"the backup host needs twice its images and the kubelet reserve": {func(in preflightInput) preflightInput {
+		"the backup host needs its bundle and the kubelet reserve only": {func(in preflightInput) preflightInput {
 			in.Hosts[0].Status.Checks.ImagesBytes = 4 * gib
 			in.Hosts[0].Status.Checks.VarLibSizeBytes = 40 * gib
-			in.Hosts[0].Status.Checks.VarLibFreeBytes = 19 * gib
+			in.Hosts[0].Status.Checks.VarLibFreeBytes = 11 * gib
 			return in
-		}, "disk: node-a has 19.0 GiB free in /var/lib, needs 20.0 GiB"},
-		"the backup host with room for its images and the kubelet reserve": {func(in preflightInput) preflightInput {
-			in.Hosts[0].Status.Checks.ImagesBytes = 4 * gib
-			in.Hosts[0].Status.Checks.VarLibSizeBytes = 40 * gib
-			in.Hosts[0].Status.Checks.VarLibFreeBytes = 20 * gib
-			return in
-		}, ""},
+		}, "disk: node-a has 11.0 GiB free in /var/lib, needs 12.0 GiB"},
 		"another host needs its bundle and the kubelet reserve": {func(in preflightInput) preflightInput {
 			in.Hosts[1].Status.Checks.ImagesBytes = 100 * gib
 			in.Hosts[1].Status.Checks.VarLibSizeBytes = 40 * gib
@@ -299,6 +288,47 @@ func TestPreflightProblems(t *testing.T) {
 	for name, tc := range cases {
 		t.Run(name, func(t *testing.T) {
 			if got := preflightProblem(tc.change(healthyPreflight())); got != tc.want {
+				t.Fatalf("problem %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
+func retagged(in preflightInput, running, to string) preflightInput {
+	in.Running, in.To = running, to
+	target := in.Target.DeepCopy()
+	target.Name, target.Spec.Version, target.Spec.UpgradeFrom = to, to, []string{running}
+	in.Target = target
+	hosts := make([]v1alpha1.Host, 0, len(in.Hosts))
+	for _, host := range in.Hosts {
+		copied := *host.DeepCopy()
+		if copied.Status.Depot != nil {
+			for i := range copied.Status.Depot.Bundles {
+				copied.Status.Depot.Bundles[i].Version = to
+			}
+		}
+		hosts = append(hosts, copied)
+	}
+	in.Hosts = hosts
+	return in
+}
+
+func TestPreflightRefusesADowngrade(t *testing.T) {
+	cases := map[string]struct {
+		running, to, want string
+	}{
+		"older":            {"v0.5.0", "v0.4.0", "release: v0.4.0 is older than the running v0.5.0: a downgrade is not supported"},
+		"older e2e":        {"v0.0.0-e2e.2", "v0.0.0-e2e.1", "release: v0.0.0-e2e.1 is older than the running v0.0.0-e2e.2: a downgrade is not supported"},
+		"equal":            {"v0.5.0", "v0.5.0", ""},
+		"newer":            {"v0.4.0", "v0.5.0", ""},
+		"newer e2e":        {"v0.0.0-e2e.1", "v0.0.0-e2e.2", ""},
+		"to dev":           {"v0.5.0", "dev", ""},
+		"from dev":         {"dev", "v0.5.0", ""},
+		"newer prerelease": {"v0.4.0", "v0.5.0-rc.1", ""},
+	}
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			if got := preflightProblem(retagged(healthyPreflight(), tc.running, tc.to)); got != tc.want {
 				t.Fatalf("problem %q, want %q", got, tc.want)
 			}
 		})

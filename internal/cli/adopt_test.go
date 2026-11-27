@@ -462,7 +462,7 @@ func scriptFreshK0s(_ *testing.T, e *host.FakeExec, root, dataDir string) {
 	installArgs := k0s.InstallArgs(k0s.InstallOptions{
 		Role: "controller", Force: true, ConfigPath: filepath.Join(root, "etc", "k0s", "k0s.yaml"), EnableWorker: true, NoTaints: true, DynamicConfig: true,
 		Labels:            roles.Labels([]string{"control-plane", "ceph-osd", "fabric-gateway"}),
-		KubeletExtraArgs:  []string{"--node-status-update-frequency=4s"},
+		KubeletExtraArgs:  defaultKubeletArgs,
 		DataDir:           dataDir,
 		KubeletRootDir:    k0s.DefaultKubeletRootDir,
 		DisableComponents: k0s.DefaultDisabledComponents,

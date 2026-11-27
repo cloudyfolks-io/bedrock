@@ -54,34 +54,56 @@ func replacePlaceholders(node any, vars map[string]string) error {
 	switch value := node.(type) {
 	case map[string]any:
 		for key, child := range value {
-			if text, ok := child.(string); ok {
-				replaced, err := replaceString(text, vars)
-				if err != nil {
-					return err
-				}
-				value[key] = replaced
-				continue
-			}
-			if err := replacePlaceholders(child, vars); err != nil {
+			replaced, err := replaceChild(child, vars)
+			if err != nil {
 				return err
 			}
+			value[key] = replaced
 		}
 	case []any:
 		for i, child := range value {
-			if text, ok := child.(string); ok {
-				replaced, err := replaceString(text, vars)
-				if err != nil {
-					return err
-				}
-				value[i] = replaced
-				continue
-			}
-			if err := replacePlaceholders(child, vars); err != nil {
+			replaced, err := replaceChild(child, vars)
+			if err != nil {
 				return err
 			}
+			value[i] = replaced
 		}
 	}
 	return nil
+}
+
+func replaceChild(child any, vars map[string]string) (any, error) {
+	switch value := child.(type) {
+	case string:
+		return replaceString(value, vars)
+	case []any:
+		return replaceList(value, vars)
+	}
+	return child, replacePlaceholders(child, vars)
+}
+
+func replaceList(items []any, vars map[string]string) ([]any, error) {
+	kept := make([]any, 0, len(items))
+	for _, item := range items {
+		text, isText := item.(string)
+		if isText && Placeholder.MatchString(text) {
+			replaced, err := replaceString(text, vars)
+			if err != nil {
+				return nil, err
+			}
+			if replaced == "" {
+				continue
+			}
+			kept = append(kept, replaced)
+			continue
+		}
+		replaced, err := replaceChild(item, vars)
+		if err != nil {
+			return nil, err
+		}
+		kept = append(kept, replaced)
+	}
+	return kept, nil
 }
 
 func replaceString(text string, vars map[string]string) (string, error) {

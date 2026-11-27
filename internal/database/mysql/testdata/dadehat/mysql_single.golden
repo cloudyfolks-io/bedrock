@@ -1,0 +1,112 @@
+[
+  {
+    "apiVersion": "ps.percona.com/v1alpha1",
+    "kind": "PerconaServerMySQL",
+    "metadata": {
+      "labels": {
+        "app.kubernetes.io/instance": "0b0c0d0e-1111-4222-8333-444455556666",
+        "app.kubernetes.io/managed-by": "database-api",
+        "bedrock.cloudyfolks.com/environment": "staging",
+        "bedrock.cloudyfolks.com/project-id": "99999999-1111-4222-8333-444455556666"
+      },
+      "name": "0b0c0d0e-1111-4222-8333-444455556666",
+      "namespace": "dbaas"
+    },
+    "spec": {
+      "backup": {
+        "enabled": true,
+        "schedule": [
+          {
+            "keep": 7,
+            "name": "daily",
+            "schedule": "0 2 * * *",
+            "storageName": "rgw"
+          }
+        ],
+        "storages": {
+          "rgw": {
+            "s3": {
+              "bucket": "dbaas-backups",
+              "credentialsSecret": "dbaas-backups-rgw",
+              "endpointUrl": "https://rgw.example.internal",
+              "prefix": "0b0c0d0e-1111-4222-8333-444455556666",
+              "region": "us-east-1"
+            },
+            "type": "s3"
+          }
+        }
+      },
+      "crVersion": "1.2.0",
+      "mysql": {
+        "clusterType": "group-replication",
+        "configuration": "[mysqld]\ncharacter_set_server=utf8mb4\ncollation_server=utf8mb4_0900_ai_ci\ndefault_time_zone=+00:00\nskip_name_resolve=ON\npartial_revokes=ON\ninnodb_buffer_pool_size=563M\nmax_connections=150\n",
+        "image": "registry.cloudyfolks.com/mirror-ghcr/example/engine@sha256:0000000000000000000000000000000000000000000000000000000000000000",
+        "labels": {
+          "app.kubernetes.io/instance": "0b0c0d0e-1111-4222-8333-444455556666",
+          "app.kubernetes.io/managed-by": "database-api",
+          "bedrock.cloudyfolks.com/environment": "staging",
+          "bedrock.cloudyfolks.com/project-id": "99999999-1111-4222-8333-444455556666"
+        },
+        "resources": {
+          "limits": {
+            "cpu": "500m",
+            "memory": "1024Mi"
+          },
+          "requests": {
+            "cpu": "500m",
+            "memory": "1024Mi"
+          }
+        },
+        "size": 1,
+        "volumeSpec": {
+          "persistentVolumeClaim": {
+            "accessModes": [
+              "ReadWriteOnce"
+            ],
+            "resources": {
+              "requests": {
+                "storage": "20Gi"
+              }
+            },
+            "storageClassName": "storage-block"
+          }
+        }
+      },
+      "secretsName": "0b0c0d0e-1111-4222-8333-444455556666-superuser",
+      "unsafeFlags": {
+        "mysqlSize": true,
+        "proxy": true
+      }
+    }
+  },
+  {
+    "apiVersion": "v1",
+    "kind": "Service",
+    "metadata": {
+      "labels": {
+        "app.kubernetes.io/instance": "0b0c0d0e-1111-4222-8333-444455556666",
+        "app.kubernetes.io/managed-by": "database-api",
+        "bedrock.cloudyfolks.com/environment": "staging",
+        "bedrock.cloudyfolks.com/project-id": "99999999-1111-4222-8333-444455556666"
+      },
+      "name": "0b0c0d0e-1111-4222-8333-444455556666-db",
+      "namespace": "dbaas"
+    },
+    "spec": {
+      "ports": [
+        {
+          "name": "db",
+          "port": 3306,
+          "protocol": "TCP",
+          "targetPort": 3306
+        }
+      ],
+      "selector": {
+        "app.kubernetes.io/component": "mysql",
+        "app.kubernetes.io/instance": "0b0c0d0e-1111-4222-8333-444455556666",
+        "mysql.percona.com/primary": "true"
+      },
+      "type": "ClusterIP"
+    }
+  }
+]

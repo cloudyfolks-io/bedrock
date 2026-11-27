@@ -2,9 +2,12 @@ package network
 
 import (
 	"context"
+	"fmt"
+	"net/netip"
 	"slices"
 	"strconv"
 	"strings"
+	"time"
 
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
@@ -16,22 +19,67 @@ const (
 	EIPModeL2  = "l2"
 	EIPModeBGP = "bgp"
 
+	SettingProviderNetworks = "network.provider-networks"
+
 	keyEIPMode         = "network.eip-mode"
-	keyProviderNetwork = "network.provider-networks"
+	keyProviderNetwork = SettingProviderNetworks
 	keyBGPLocalASN     = "network.bgp.local-asn"
 	keyBGPRouterID     = "network.bgp.router-id"
 	keyBGPPeers        = "network.bgp.peers"
 	keyBGPTransit      = "network.bgp.transit-network"
 	keyDNSServers      = "network.dns-servers"
+	keyMTU             = "network.mtu"
+	keyPeeringRange    = "network.peering.range"
+
+	keyServicesProviderNetwork = "network.services.provider-network"
+	keyServicesIdentityRange   = "network.services.identity-range"
+	keyServicesResolver        = "network.services.resolver"
+
+	keyDatabaseVIPRange = "database.vip-range"
+
+	keyLBCIDR    = "network.load-balancer.cidr"
+	keyLBGateway = "network.load-balancer.gateway"
+
+	keyTenantManagementEnabled      = "network.tenant-management.enabled"
+	keyTenantManagementWorkloadCIDR = "network.tenant-management.workload-cidr"
+	keyTenantManagementManagedCIDR  = "network.tenant-management.managed-cidr"
+	keyOVNTLS                       = "network.ovn-tls"
+
+	keyReservedCIDRs       = "network.reserved-cidrs"
+	keySubnetAllowedRanges = "network.subnet-allowed-ranges"
+
+	keyBGPBFD                = "network.bgp.bfd"
+	keyBGPHoldTime           = "network.bgp.hold-time"
+	keyBGPKeepaliveTime      = "network.bgp.keepalive-time"
+	keyBGPGracefulRestart    = "network.bgp.graceful-restart"
+	keyBGPAdvertiseFilter    = "network.bgp.advertise-filter"
+	keyBGPRedistributeTables = "network.bgp.redistribute-tables"
 )
 
 type Peer = settings.BGPPeer
 
 type BGP struct {
-	LocalASN uint32
-	RouterID string
-	Peers    []Peer
-	Transit  string
+	LocalASN           uint32
+	RouterID           string
+	Peers              []Peer
+	Transit            string
+	BFD                bool
+	HoldTime           time.Duration
+	KeepaliveTime      time.Duration
+	GracefulRestart    bool
+	AdvertiseFilter    []string
+	RedistributeTables []uint32
+}
+
+type LoadBalancerPlane struct {
+	CIDR    netip.Prefix
+	Gateway netip.Addr
+}
+
+type TenantManagement struct {
+	Enabled      bool
+	WorkloadCIDR netip.Prefix
+	ManagedCIDR  netip.Prefix
 }
 
 type Config struct {
@@ -39,9 +87,22 @@ type Config struct {
 	ProviderNetworks []v1alpha1.ProviderNetworkSpec
 	BGP              BGP
 	DNSServers       []string
+	MTU              int
+	PeeringRange     string
+	Services         Services
+	DatabaseVIPRange string
+	LoadBalancer     LoadBalancerPlane
+	TenantManagement TenantManagement
+	OVNTLS           bool
+
+	ReservedCIDRs       []string
+	SubnetAllowedRanges []string
 }
 
 func ParseConfig(values map[string]string) (Config, error) {
+	if err := settings.RangeConflict(values); err != nil {
+		return Config{}, err
+	}
 	effective := make(map[string]string)
 	for _, key := range networkKeys {
 		def, _ := settings.Lookup(key)
@@ -58,20 +119,92 @@ func ParseConfig(values map[string]string) (Config, error) {
 	if err != nil {
 		return Config{}, err
 	}
-	peers, err := settings.ParseBGPPeers(effective[keyBGPPeers])
+	bgp, err := parseBGP(effective)
 	if err != nil {
 		return Config{}, err
 	}
-	asn, _ := strconv.ParseUint(effective[keyBGPLocalASN], 10, 32)
+	mtu, _ := strconv.Atoi(effective[keyMTU])
+	plane, err := parseLoadBalancerPlane(effective)
+	if err != nil {
+		return Config{}, err
+	}
+	tenantManagement := parseTenantManagement(effective)
+	ovnTLS, _ := strconv.ParseBool(effective[keyOVNTLS])
 	return Config{
 		EIPMode:          effective[keyEIPMode],
 		ProviderNetworks: networks,
-		BGP:              BGP{LocalASN: uint32(asn), RouterID: effective[keyBGPRouterID], Peers: peers, Transit: effective[keyBGPTransit]},
-		DNSServers:       splitList(effective[keyDNSServers]),
+		BGP:              bgp,
+		DNSServers:       defaultDNSServers(effective),
+		MTU:              mtu,
+		PeeringRange:     effective[keyPeeringRange],
+		Services:         Services{ProviderNetwork: effective[keyServicesProviderNetwork], IdentityRange: effective[keyServicesIdentityRange], Resolver: effective[keyServicesResolver]},
+		LoadBalancer:     plane,
+		TenantManagement: tenantManagement,
+		OVNTLS:           ovnTLS,
+		DatabaseVIPRange: values[keyDatabaseVIPRange],
+
+		ReservedCIDRs:       splitList(effective[keyReservedCIDRs]),
+		SubnetAllowedRanges: splitList(effective[keySubnetAllowedRanges]),
 	}, nil
 }
 
-var networkKeys = []string{keyEIPMode, keyProviderNetwork, keyBGPLocalASN, keyBGPRouterID, keyBGPPeers, keyBGPTransit, keyDNSServers}
+func parseLoadBalancerPlane(effective map[string]string) (LoadBalancerPlane, error) {
+	prefix, _ := netip.ParsePrefix(effective[keyLBCIDR])
+	gateway, _ := netip.ParseAddr(effective[keyLBGateway])
+	if !prefix.Contains(gateway) || isNetworkOrBroadcast(prefix, gateway) {
+		return LoadBalancerPlane{}, fmt.Errorf("the setting %s %q must be a host address inside %s %q", keyLBGateway, effective[keyLBGateway], keyLBCIDR, effective[keyLBCIDR])
+	}
+	return LoadBalancerPlane{CIDR: prefix, Gateway: gateway}, nil
+}
+
+func parseTenantManagement(effective map[string]string) TenantManagement {
+	enabled, _ := strconv.ParseBool(effective[keyTenantManagementEnabled])
+	workload, _ := netip.ParsePrefix(effective[keyTenantManagementWorkloadCIDR])
+	managed, _ := netip.ParsePrefix(effective[keyTenantManagementManagedCIDR])
+	return TenantManagement{Enabled: enabled, WorkloadCIDR: workload, ManagedCIDR: managed}
+}
+
+func parseBGP(effective map[string]string) (BGP, error) {
+	peers, err := settings.ParseBGPPeers(effective[keyBGPPeers])
+	if err != nil {
+		return BGP{}, err
+	}
+	filter, err := settings.ParseAdvertiseFilter(effective[keyBGPAdvertiseFilter])
+	if err != nil {
+		return BGP{}, err
+	}
+	tables, err := settings.ParseTableIDs(effective[keyBGPRedistributeTables])
+	if err != nil {
+		return BGP{}, err
+	}
+	asn, _ := strconv.ParseUint(effective[keyBGPLocalASN], 10, 32)
+	bfd, _ := strconv.ParseBool(effective[keyBGPBFD])
+	graceful, _ := strconv.ParseBool(effective[keyBGPGracefulRestart])
+	hold, _ := time.ParseDuration(effective[keyBGPHoldTime])
+	keepalive, _ := time.ParseDuration(effective[keyBGPKeepaliveTime])
+	return BGP{
+		LocalASN: uint32(asn), RouterID: effective[keyBGPRouterID], Peers: peers, Transit: effective[keyBGPTransit],
+		BFD: bfd, HoldTime: hold, KeepaliveTime: keepalive, GracefulRestart: graceful, AdvertiseFilter: filter, RedistributeTables: tables,
+	}, nil
+}
+
+var networkKeys = []string{
+	keyEIPMode, keyProviderNetwork, keyBGPLocalASN, keyBGPRouterID, keyBGPPeers, keyBGPTransit, keyDNSServers, keyMTU,
+	keyBGPBFD, keyBGPHoldTime, keyBGPKeepaliveTime, keyBGPGracefulRestart, keyBGPAdvertiseFilter, keyBGPRedistributeTables,
+	keyReservedCIDRs, keySubnetAllowedRanges, keyPeeringRange, keyLBCIDR, keyLBGateway,
+	keyServicesProviderNetwork, keyServicesIdentityRange, keyServicesResolver,
+	keyTenantManagementEnabled, keyTenantManagementWorkloadCIDR, keyTenantManagementManagedCIDR, keyOVNTLS,
+}
+
+func defaultDNSServers(effective map[string]string) []string {
+	if servers := splitList(effective[keyDNSServers]); len(servers) > 0 {
+		return servers
+	}
+	if resolver := effective[keyServicesResolver]; resolver != "" {
+		return []string{resolver}
+	}
+	return nil
+}
 
 func splitList(value string) []string {
 	if value == "" {

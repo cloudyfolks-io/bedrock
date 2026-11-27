@@ -77,6 +77,20 @@ spec:
                 x-kubernetes-validations:
                 - message: secretRef excludes userData and networkData
                   rule: '!has(self.secretRef) || (!has(self.userData) && !has(self.networkData))'
+              compute:
+                properties:
+                  cores:
+                    format: int32
+                    minimum: 1
+                    type: integer
+                  memoryMiB:
+                    format: int32
+                    minimum: 128
+                    type: integer
+                required:
+                - cores
+                - memoryMiB
+                type: object
               cpu:
                 properties:
                   dedicated:
@@ -93,6 +107,10 @@ spec:
                       - virtio
                       - sata
                       - scsi
+                      type: string
+                    serial:
+                      maxLength: 36
+                      pattern: ^[A-Za-z0-9._-]+$
                       type: string
                     volumeRef:
                       maxLength: 253
@@ -118,10 +136,17 @@ spec:
                 properties:
                   secureBoot:
                     type: boolean
+                  serial:
+                    maxLength: 64
+                    pattern: ^[A-Za-z0-9._-]+$
+                    type: string
                   tpm:
                     type: boolean
                   uefi:
                     type: boolean
+                  uuid:
+                    pattern: ^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$
+                    type: string
                 type: object
                 x-kubernetes-validations:
                 - message: secureBoot requires uefi
@@ -161,6 +186,12 @@ spec:
               networks:
                 items:
                   properties:
+                    address:
+                      maxLength: 15
+                      type: string
+                      x-kubernetes-validations:
+                      - message: address must be an IPv4 address
+                        rule: isIP(self) && ip(self).family() == 4
                     elasticIPRef:
                       maxLength: 63
                       pattern: ^[a-z0-9]([-a-z0-9]*[a-z0-9])?$
@@ -168,6 +199,8 @@ spec:
                     macAddress:
                       pattern: ^([0-9a-fA-F]{2}:){5}[0-9a-fA-F]{2}$
                       type: string
+                    portSecurity:
+                      type: boolean
                     securityGroups:
                       items:
                         maxLength: 63
@@ -190,10 +223,17 @@ spec:
                 x-kubernetes-validations:
                 - message: a subnet can be attached once
                   rule: self.all(a, self.exists_one(b, b.subnetRef == a.subnetRef))
+                - message: address is immutable
+                  rule: self.all(n, oldSelf.all(o, o.subnetRef != n.subnetRef || (has(o.address)
+                    == has(n.address) && (!has(n.address) || n.address == o.address))))
               preference:
                 type: string
               rootDisk:
                 properties:
+                  serial:
+                    maxLength: 36
+                    pattern: ^[A-Za-z0-9._-]+$
+                    type: string
                   sizeGi:
                     format: int32
                     minimum: 1
@@ -206,9 +246,20 @@ spec:
                     x-kubernetes-validations:
                     - message: rootDisk.storageClass is immutable
                       rule: self == oldSelf
-                required:
-                - sizeGi
+                  volumeRef:
+                    maxLength: 253
+                    minLength: 1
+                    pattern: ^[a-z0-9]([-a-z0-9.]*[a-z0-9])?$
+                    type: string
                 type: object
+                x-kubernetes-validations:
+                - message: rootDisk.sizeGi is required without rootDisk.volumeRef,
+                    and rootDisk.volumeRef excludes sizeGi and storageClass
+                  rule: 'has(self.volumeRef) ? (!has(self.sizeGi) && !has(self.storageClass))
+                    : has(self.sizeGi)'
+                - message: rootDisk.serial is immutable
+                  rule: '!has(oldSelf.serial) || (has(self.serial) && self.serial
+                    == oldSelf.serial)'
               running:
                 default: true
                 type: boolean
@@ -1147,12 +1198,33 @@ spec:
                 type: array
                 x-kubernetes-list-type: set
             required:
-            - instanceType
             - rootDisk
             type: object
             x-kubernetes-validations:
             - message: image.name must be a DNS subdomain
               rule: '!has(self.image) || self.image.name.matches(''^[a-z0-9]([-a-z0-9.]*[a-z0-9])?$'')'
+            - message: exactly one of compute and instanceType is required
+              rule: has(self.compute) != has(self.instanceType)
+            - message: image and rootDisk.volumeRef exclude each other
+              rule: '!has(self.rootDisk.volumeRef) || !has(self.image)'
+            - message: the root volume cannot also be listed in disks
+              rule: '!has(self.rootDisk.volumeRef) || !has(self.disks) || !self.disks.exists(d,
+                d.volumeRef == self.rootDisk.volumeRef)'
+            - message: rootDisk.volumeRef cannot be added or removed
+              rule: has(self.rootDisk.volumeRef) == has(oldSelf.rootDisk.volumeRef)
+            - message: rootDisk.volumeRef can change only while the virtual machine
+                is stopped
+              rule: '!has(self.rootDisk.volumeRef) || !has(oldSelf.rootDisk.volumeRef)
+                || self.rootDisk.volumeRef == oldSelf.rootDisk.volumeRef || (has(self.running)
+                && !self.running)'
+            - message: firmware.uuid is immutable
+              rule: (has(self.firmware) && has(self.firmware.uuid)) == (has(oldSelf.firmware)
+                && has(oldSelf.firmware.uuid)) && (!(has(self.firmware) && has(self.firmware.uuid))
+                || self.firmware.uuid == oldSelf.firmware.uuid)
+            - message: firmware.serial is immutable
+              rule: (has(self.firmware) && has(self.firmware.serial)) == (has(oldSelf.firmware)
+                && has(oldSelf.firmware.serial)) && (!(has(self.firmware) && has(self.firmware.serial))
+                || self.firmware.serial == oldSelf.firmware.serial)
           status:
             properties:
               addresses:
@@ -1246,6 +1318,21 @@ spec:
                     type: string
                   version:
                     type: string
+                type: object
+              migration:
+                properties:
+                  message:
+                    type: string
+                  name:
+                    type: string
+                  phase:
+                    type: string
+                  startedAt:
+                    format: date-time
+                    type: string
+                required:
+                - name
+                - phase
                 type: object
               node:
                 type: string

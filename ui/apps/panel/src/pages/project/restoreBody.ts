@@ -11,6 +11,10 @@ export function restoreBody(backup: KubeObject, choice: RestoreChoice): KubeObje
     apiVersion: "bedrock.cloudyfolks.io/v1alpha1",
     kind: "VirtualMachineRestore",
     metadata: { name: `${backup.metadata.name}-${choice.suffix}`, ...(backup.metadata.namespace === undefined ? {} : { namespace: backup.metadata.namespace }) },
-    spec: { backupRef: backup.metadata.name, backupID: choice.backupID, targetName: String(backup.spec?.vmRef ?? ""), replace: choice.replace },
+    spec: {
+      backupRef: backup.metadata.name,
+      backupID: choice.backupID,
+      ...(choice.replace ? { replace: true } : { targetName: String(backup.spec?.vmRef ?? "") }),
+    },
   };
 }

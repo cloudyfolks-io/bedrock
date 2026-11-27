@@ -2,6 +2,7 @@ package operator
 
 import (
 	"context"
+	"fmt"
 	"strings"
 	"testing"
 
@@ -62,7 +63,7 @@ func TestProjectValidation(t *testing.T) {
 		Spec: v1alpha1.ProjectSpec{
 			TenantRef: "acme",
 			Members:   []v1alpha1.ProjectMember{{Ref: v1alpha1.SubjectRef{Kind: v1alpha1.SubjectKindGroup, Name: "devs"}, Role: v1alpha1.MemberRoleEditor}},
-			Quota:     v1alpha1.ProjectQuota{CPU: ptr.To(resource.MustParse("8")), VMs: ptr.To(int32(5))},
+			Quota:     v1alpha1.ProjectQuota{CPU: ptr.To(resource.MustParse("8")), VMs: ptr.To(int32(5)), Containers: ptr.To(int32(12)), KubernetesClusters: ptr.To(int32(3)), Registries: ptr.To(int32(3))},
 		},
 	}
 	createValid(t, c, project)
@@ -83,6 +84,9 @@ func TestProjectValidation(t *testing.T) {
 		},
 	}
 	createInvalid(t, c, badRole, "Unsupported value")
+
+	negative := &v1alpha1.Project{ObjectMeta: metav1.ObjectMeta{Name: "negative"}, Spec: v1alpha1.ProjectSpec{TenantRef: "acme", Quota: v1alpha1.ProjectQuota{Registries: ptr.To(int32(-1))}}}
+	createInvalid(t, c, negative, "registries")
 
 	badTenantRef := &v1alpha1.Project{ObjectMeta: metav1.ObjectMeta{Name: "bad-ref"}, Spec: v1alpha1.ProjectSpec{TenantRef: strings.Repeat("a", 31)}}
 	createInvalid(t, c, badTenantRef, "spec.tenantRef")
@@ -116,4 +120,143 @@ func TestNetworkValidation(t *testing.T) {
 	updateInvalid(t, c, &fresh, "tenantRef is immutable")
 
 	createInvalid(t, c, &v1alpha1.Network{ObjectMeta: metav1.ObjectMeta{Name: "bad"}, Spec: v1alpha1.NetworkSpec{TenantRef: "acme", CIDR: "10.0.0.0"}}, "cidr must be a CIDR")
+}
+
+func networkWith(name string, spec v1alpha1.NetworkSpec) *v1alpha1.Network {
+	spec.TenantRef = "acme"
+	return &v1alpha1.Network{ObjectMeta: metav1.ObjectMeta{Name: name}, Spec: spec}
+}
+
+func TestNetworkRangesValidation(t *testing.T) {
+	c, _ := StartTestEnv(t)
+	createValid(t, c, networkWith("ranges-old", v1alpha1.NetworkSpec{CIDR: "10.100.0.0/16"}))
+	createValid(t, c, networkWith("ranges-several", v1alpha1.NetworkSpec{CIDRs: []string{"10.0.0.0/16", "172.16.0.0/16", "192.168.0.0/24"}}))
+	createValid(t, c, networkWith("ranges-wide", v1alpha1.NetworkSpec{CIDRs: []string{"10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16"}}))
+
+	createInvalid(t, c, networkWith("ranges-both", v1alpha1.NetworkSpec{CIDR: "10.100.0.0/16", CIDRs: []string{"10.100.0.0/16"}}), "set exactly one of cidr and cidrs")
+	createInvalid(t, c, networkWith("ranges-none", v1alpha1.NetworkSpec{}), "set exactly one of cidr and cidrs")
+	createInvalid(t, c, networkWith("ranges-nested", v1alpha1.NetworkSpec{CIDRs: []string{"10.0.0.0/16", "10.0.1.0/24"}}), "the cidrs must not overlap each other")
+	createInvalid(t, c, networkWith("ranges-nested-first", v1alpha1.NetworkSpec{CIDRs: []string{"10.0.1.0/24", "10.0.0.0/16"}}), "the cidrs must not overlap each other")
+	createInvalid(t, c, networkWith("ranges-twice", v1alpha1.NetworkSpec{CIDRs: []string{"10.0.0.0/16", "10.0.0.0/16"}}), "Duplicate value")
+	createInvalid(t, c, networkWith("ranges-host-bits", v1alpha1.NetworkSpec{CIDRs: []string{"10.0.0.5/16"}}), "every cidrs entry must be a canonical IPv4 network")
+	createInvalid(t, c, networkWith("ranges-ipv6", v1alpha1.NetworkSpec{CIDRs: []string{"fd00::/64"}}), "every cidrs entry must be a canonical IPv4 network")
+	createInvalid(t, c, networkWith("ranges-text", v1alpha1.NetworkSpec{CIDRs: []string{"nonsense"}}), "every cidrs entry must be a canonical IPv4 network")
+
+	many := make([]string, 9)
+	for i := range many {
+		many[i] = fmt.Sprintf("10.%d.0.0/16", i)
+	}
+	createInvalid(t, c, networkWith("ranges-many", v1alpha1.NetworkSpec{CIDRs: many}), "must have at most 8 items")
+}
+
+func TestNetworkRangesMigration(t *testing.T) {
+	c, _ := StartTestEnv(t)
+	ctx := context.Background()
+	old := networkWith("migrate-old", v1alpha1.NetworkSpec{CIDR: "10.100.0.0/16"})
+	createValid(t, c, old)
+
+	keepBoth := old.DeepCopy()
+	keepBoth.Spec.CIDRs = []string{"10.100.0.0/16"}
+	updateInvalid(t, c, keepBoth, "set exactly one of cidr and cidrs")
+
+	drop := old.DeepCopy()
+	drop.Spec.CIDR = ""
+	drop.Spec.CIDRs = []string{"172.16.0.0/16"}
+	updateInvalid(t, c, drop, "cidr can only be replaced by a cidrs list that holds it")
+
+	change := old.DeepCopy()
+	change.Spec.CIDR = "10.101.0.0/16"
+	updateInvalid(t, c, change, "cidr is immutable")
+
+	touched := old.DeepCopy()
+	touched.Labels = map[string]string{"touched": "yes"}
+	touched.Spec.EnableExternal = true
+	if err := c.Update(ctx, touched); err != nil {
+		t.Fatalf("an update of another field of an old Network must be accepted: %v", err)
+	}
+	old = touched
+
+	migrated := old.DeepCopy()
+	migrated.Spec.CIDR = ""
+	migrated.Spec.CIDRs = []string{"10.100.0.0/16", "172.16.0.0/16"}
+	if err := c.Update(ctx, migrated); err != nil {
+		t.Fatalf("replacing cidr by a list that holds it must be accepted: %v", err)
+	}
+
+	grown := migrated.DeepCopy()
+	grown.Spec.CIDRs = append(grown.Spec.CIDRs, "192.168.0.0/24")
+	if err := c.Update(ctx, grown); err != nil {
+		t.Fatalf("adding a range must be accepted: %v", err)
+	}
+
+	shrunk := grown.DeepCopy()
+	shrunk.Spec.CIDRs = []string{"10.100.0.0/16", "192.168.0.0/24"}
+	updateInvalid(t, c, shrunk, "cidrs can only be added to")
+
+	overlapping := grown.DeepCopy()
+	overlapping.Spec.CIDRs = append(overlapping.Spec.CIDRs, "172.16.4.0/24")
+	updateInvalid(t, c, overlapping, "the cidrs must not overlap each other")
+
+	back := grown.DeepCopy()
+	back.Spec.CIDRs = nil
+	back.Spec.CIDR = "10.100.0.0/16"
+	updateInvalid(t, c, back, "cidrs can only be added to")
+}
+
+func TestNetworkVrfIDValidation(t *testing.T) {
+	c, _ := StartTestEnv(t)
+	ctx := context.Background()
+	for _, id := range []int32{1, 7, 252, 256, 1000, 60001, 65535} {
+		createValid(t, c, networkWith(fmt.Sprintf("vrf-ok-%d", id), v1alpha1.NetworkSpec{CIDR: "10.100.0.0/16", VrfID: ptr.To(id)}))
+	}
+	for _, id := range []int32{0, -1, 65536} {
+		createInvalid(t, c, networkWith(fmt.Sprintf("vrf-range-%d", id+1), v1alpha1.NetworkSpec{CIDR: "10.100.0.0/16", VrfID: ptr.To(id)}), "vrfId")
+	}
+	for _, id := range []int32{253, 254, 255} {
+		createInvalid(t, c, networkWith(fmt.Sprintf("vrf-host-%d", id), v1alpha1.NetworkSpec{CIDR: "10.100.0.0/16", VrfID: ptr.To(id)}), "vrfId must not be a host routing table")
+	}
+
+	pinned := networkWith("vrf-pinned", v1alpha1.NetworkSpec{CIDR: "10.100.0.0/16", VrfID: ptr.To(int32(1500))})
+	createValid(t, c, pinned)
+
+	changed := pinned.DeepCopy()
+	changed.Spec.VrfID = ptr.To(int32(1501))
+	updateInvalid(t, c, changed, "vrfId is immutable once set")
+
+	cleared := pinned.DeepCopy()
+	cleared.Spec.VrfID = nil
+	updateInvalid(t, c, cleared, "vrfId is immutable once set")
+
+	touched := pinned.DeepCopy()
+	touched.Spec.EnableExternal = true
+	if err := c.Update(ctx, touched); err != nil {
+		t.Fatalf("an update of another field must be accepted: %v", err)
+	}
+
+	free := networkWith("vrf-later", v1alpha1.NetworkSpec{CIDR: "10.100.0.0/16"})
+	createValid(t, c, free)
+	free.Spec.VrfID = ptr.To(int32(1600))
+	updateInvalid(t, c, free, "vrfId can only be set when the Network is created")
+}
+
+func TestTenantVrfIDValidation(t *testing.T) {
+	c, _ := StartTestEnv(t)
+	for _, id := range []int32{0, 253, 255, 65536} {
+		bad := validTenant(fmt.Sprintf("vrf%d", id))
+		bad.Spec.Network.VrfID = ptr.To(id)
+		createInvalid(t, c, bad, "vrfId")
+	}
+	tenant := validTenant("vrfok")
+	tenant.Spec.Network.VrfID = ptr.To(int32(1500))
+	createValid(t, c, tenant)
+	changed := tenant.DeepCopy()
+	changed.Spec.Network.VrfID = ptr.To(int32(1501))
+	updateInvalid(t, c, changed, "vrfId is immutable once set")
+	cleared := tenant.DeepCopy()
+	cleared.Spec.Network.VrfID = nil
+	updateInvalid(t, c, cleared, "vrfId is immutable once set")
+	late := validTenant("vrflate")
+	createValid(t, c, late)
+	late.Spec.Network.VrfID = ptr.To(int32(1600))
+	updateInvalid(t, c, late, "vrfId can only be set when the Tenant is created")
 }

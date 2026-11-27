@@ -12,6 +12,7 @@ func OperatorRules() []rbacv1.PolicyRule {
 	return []rbacv1.PolicyRule{
 		rule("kubevirt.io", []string{"virtualmachines"}, "create", "get", "list", "patch", "watch"),
 		rule("kubevirt.io", []string{"virtualmachineinstances"}, "get", "list", "watch"),
+		rule("kubevirt.io", []string{"virtualmachineinstancemigrations"}, "list", "watch"),
 		rule("snapshot.kubevirt.io", []string{"virtualmachinesnapshots"}, "delete", "list"),
 		rule("instancetype.kubevirt.io", []string{"virtualmachineclusterinstancetypes", "virtualmachineclusterpreferences"}, "get"),
 		rule("subresources.kubevirt.io", []string{"virtualmachineinstances/guestosinfo"}, "get"),
@@ -21,8 +22,10 @@ func OperatorRules() []rbacv1.PolicyRule {
 		rule("", []string{"pods"}, "list", "patch", "watch"),
 		rule("snapshot.storage.k8s.io", []string{"volumesnapshots"}, "create", "get", "list", "watch"),
 		rule("snapshot.storage.k8s.io", []string{"volumesnapshotclasses"}, "list"),
+		rule("snapshot.storage.k8s.io", []string{"volumesnapshotcontents"}, "get", "list", "watch"),
 		rule("storage.k8s.io", []string{"storageclasses"}, "list", "watch"),
 		rule("fabric.cloudyfolks.io", []string{"security-groups"}, "get"),
+		rule("fabric.cloudyfolks.io", []string{"ips"}, "get", "list", "watch"),
 		rule("bedrock.cloudyfolks.io", []string{"virtualmachines/finalizers", "volumes/finalizers", "volumesnapshots/finalizers"}, "update"),
 	}
 }

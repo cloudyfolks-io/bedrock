@@ -1,0 +1,55 @@
+.header {
+  display: grid;
+  gap: .5rem;
+  min-inline-size: 0;
+  margin-block-end: 1rem;
+}
+
+.header :global(.br-breadcrumb) {
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: .25rem .55rem;
+  overflow-wrap: anywhere;
+}
+
+.header :global(.br-breadcrumb-separator) {
+  margin-inline-end: .55rem;
+}
+
+.header :global(.br-breadcrumb) a {
+  color: inherit;
+  text-decoration: underline;
+  text-underline-offset: .2em;
+}
+
+.header :global(.br-breadcrumb) a:hover {
+  color: var(--br-color-primary);
+}
+
+.header :global(.br-page-title-row) {
+  align-items: center;
+  flex-wrap: wrap;
+  gap: .75rem 1rem;
+}
+
+.title {
+  min-inline-size: 0;
+  overflow-wrap: anywhere;
+}
+
+.title :global(.br-page-title) {
+  font-size: 1.5rem;
+  font-weight: 600;
+  line-height: 1.25;
+}
+
+.title p {
+  margin: .25rem 0 0;
+  color: var(--br-color-text-muted);
+  font-size: .875rem;
+  line-height: 1.5;
+}
+
+.header :global(.br-page-actions):empty {
+  display: none;
+}

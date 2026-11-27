@@ -1,0 +1,111 @@
+.avatar {
+  display: inline-grid;
+  flex: none;
+  place-items: center;
+  box-sizing: border-box;
+  inline-size: 2.25rem;
+  block-size: 2.25rem;
+  border-radius: 50%;
+  background: color-mix(in srgb, var(--br-color-primary) 14%, var(--br-color-surface-raised));
+  color: var(--br-color-primary);
+}
+
+.trigger {
+  padding: 0;
+  border: 1px solid var(--scloud-control-outline, var(--br-color-border));
+  cursor: pointer;
+}
+
+.trigger:not([aria-disabled="true"]):hover,
+.trigger[aria-expanded="true"] {
+  background: color-mix(in srgb, var(--br-color-primary) 24%, var(--br-color-surface-raised));
+}
+
+.trigger:focus-visible {
+  outline: 2px solid var(--br-color-focus-ring);
+  outline-offset: 2px;
+}
+
+.trigger[aria-disabled="true"] {
+  cursor: wait;
+  opacity: 0.6;
+}
+
+.positioner {
+  z-index: 20;
+}
+
+.popup {
+  box-sizing: border-box;
+  inline-size: 16rem;
+  max-inline-size: min(calc(100vw - 16px), var(--available-width, 100vw));
+  max-block-size: var(--available-height, calc(100dvh - 1rem));
+  overflow: auto;
+  padding: var(--br-space-xs);
+  border: 1px solid var(--br-color-border);
+  border-radius: var(--br-radius-md);
+  background: var(--br-color-surface-raised);
+  box-shadow: var(--br-shadow-lg);
+  color: var(--br-color-text);
+  font-size: 0.875rem;
+  line-height: 1.35;
+}
+
+.identity {
+  display: flex;
+  align-items: center;
+  gap: 0.625rem;
+  margin-block-end: var(--br-space-xs);
+  padding: 0.625rem;
+  border-block-end: 1px solid var(--br-color-border);
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
+.item {
+  display: flex;
+  align-items: center;
+  gap: 0.625rem;
+  box-sizing: border-box;
+  inline-size: 100%;
+  min-block-size: 2.5rem;
+  padding: 0.375rem 0.625rem;
+  border-radius: var(--br-radius-sm);
+  color: var(--br-color-text);
+  text-align: start;
+  text-decoration: none;
+  overflow-wrap: anywhere;
+  cursor: pointer;
+}
+
+.item svg {
+  flex: none;
+  color: var(--br-color-text-muted);
+}
+
+.item:hover,
+.item[data-highlighted],
+.item:focus-visible {
+  background: var(--br-color-surface-hover);
+}
+
+.item:focus-visible {
+  outline: 2px solid var(--br-color-focus-ring);
+  outline-offset: -2px;
+}
+
+.separator {
+  block-size: 1px;
+  margin: var(--br-space-xs) 0;
+  border: 0;
+  background: var(--br-color-border);
+}
+
+.signOut,
+.signOut svg {
+  color: var(--br-color-danger);
+}
+
+.signOut:dir(rtl) svg {
+  transform: scaleX(-1);
+}

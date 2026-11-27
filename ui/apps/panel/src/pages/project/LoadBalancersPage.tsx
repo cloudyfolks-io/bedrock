@@ -1,15 +1,19 @@
-import { definitionFor, refOf } from "../../resources/registry";
+import { definitionFor, refOf, type ResourceDef } from "../../resources/registry";
 import { ResourceListPage } from "../../resources/ResourceListPage";
 import { useCurrentProject } from "../../shell/context";
 import { useLiveList } from "../../stream/live";
+
+function LoadBalancerList({ def, eips, namespace }: { def: ResourceDef; eips: ResourceDef; namespace: string }) {
+  const list = useLiveList(refOf(eips), { namespace });
+  return <ResourceListPage def={def} {...(list.isSuccess ? { elasticIps: list.data.items } : {})} />;
+}
 
 export default function LoadBalancersPage() {
   const def = definitionFor("loadbalancers");
   const eips = definitionFor("elasticips");
   const project = useCurrentProject();
-  const list = useLiveList(eips ? refOf(eips) : { group: "", version: "", plural: "", namespaced: true }, project ? { namespace: project.namespace } : {});
   if (!def) {
     return null;
   }
-  return <ResourceListPage def={def} {...(list.data ? { elasticIps: list.data.items } : {})} />;
+  return eips && project?.namespace ? <LoadBalancerList def={def} eips={eips} namespace={project.namespace} /> : <ResourceListPage def={def} />;
 }

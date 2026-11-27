@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"sort"
+	"strconv"
 	"time"
 
 	corev1 "k8s.io/api/core/v1"
@@ -16,10 +17,13 @@ import (
 	"k8s.io/client-go/util/retry"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/handler"
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
 
 	"github.com/cloudyfolks-io/bedrock/api/v1alpha1"
 )
+
+const sizeBytesAnnotation = "bedrock.cloudyfolks.io/size-bytes"
 
 const annotationDefaultSnapshotClass = "snapshot.storage.kubernetes.io/is-default-class"
 
@@ -101,6 +105,9 @@ func (r *VolumeSnapshotReconciler) converge(ctx context.Context, snapshot v1alph
 		return snapshotOutcome{Gate: gateOf(ReasonNotInProject, "the namespace is not a project namespace")}, nil
 	}
 	provisioner, gate, err := r.provisionerOf(ctx, snapshot)
+	if err == nil && gate != nil && gate.Reason == ReasonVolumeNotFound {
+		return r.observeRetained(ctx, snapshot, gate)
+	}
 	if err != nil || gate != nil {
 		return snapshotOutcome{Gate: gate}, err
 	}
@@ -122,6 +129,77 @@ func (r *VolumeSnapshotReconciler) converge(ctx context.Context, snapshot v1alph
 		return snapshotOutcome{}, err
 	}
 	return r.observe(ctx, snapshot)
+}
+
+func (r *VolumeSnapshotReconciler) observeRetained(ctx context.Context, snapshot v1alpha1.VolumeSnapshot, missing *Gate) (snapshotOutcome, error) {
+	unavailable := snapshotOutcome{Gate: missing, Phase: v1alpha1.VolumeSnapshotPhasePending}
+	csi := emptyOf(csiSnapshotGVK)
+	if err := r.Client.Get(ctx, client.ObjectKeyFromObject(&snapshot), csi); err != nil {
+		return unavailable, client.IgnoreNotFound(err)
+	}
+	owner := metav1.GetControllerOf(csi)
+	if owner == nil || owner.UID != snapshot.UID || owner.Name != snapshot.Name ||
+		owner.Kind != "VolumeSnapshot" || owner.APIVersion != v1alpha1.GroupVersion.String() ||
+		csi.GetUID() == "" || csi.GetDeletionTimestamp() != nil {
+		return unavailable, nil
+	}
+	bound, _, _ := unstructured.NestedString(csi.Object, "status", "boundVolumeSnapshotContentName")
+	static, _, _ := unstructured.NestedString(csi.Object, "spec", "source", "volumeSnapshotContentName")
+	pvc, _, _ := unstructured.NestedString(csi.Object, "spec", "source", "persistentVolumeClaimName")
+	ready, _, _ := unstructured.NestedBool(csi.Object, "status", "readyToUse")
+	if !ready || bound == "" {
+		return unavailable, nil
+	}
+	if static != "" {
+		if static != bound || pvc != "" {
+			return unavailable, nil
+		}
+	} else if pvc == "" || pvc != snapshot.Spec.VolumeRef {
+		return unavailable, nil
+	}
+	content := emptyOf(csiSnapshotContentGVK)
+	if err := r.Client.Get(ctx, client.ObjectKey{Name: bound}, content); err != nil {
+		return unavailable, client.IgnoreNotFound(err)
+	}
+	ref, _, _ := unstructured.NestedStringMap(content.Object, "spec", "volumeSnapshotRef")
+	contentReady, _, _ := unstructured.NestedBool(content.Object, "status", "readyToUse")
+	handle, _, _ := unstructured.NestedString(content.Object, "status", "snapshotHandle")
+	sourceHandle, _, _ := unstructured.NestedString(content.Object, "spec", "source", "snapshotHandle")
+	volumeHandle, _, _ := unstructured.NestedString(content.Object, "spec", "source", "volumeHandle")
+	if content.GetDeletionTimestamp() != nil || !contentReady || ref["name"] != csi.GetName() ||
+		ref["namespace"] != csi.GetNamespace() || ref["uid"] != string(csi.GetUID()) ||
+		(ref["kind"] != "" && ref["kind"] != csi.GetKind()) ||
+		(ref["apiVersion"] != "" && ref["apiVersion"] != csi.GetAPIVersion()) {
+		return unavailable, nil
+	}
+	if static != "" {
+		if sourceHandle == "" || volumeHandle != "" || (handle != "" && handle != sourceHandle) {
+			return unavailable, nil
+		}
+	} else if volumeHandle == "" || sourceHandle != "" || handle == "" {
+		return unavailable, nil
+	}
+	for _, child := range []*unstructured.Unstructured{csi, content} {
+		if message, _, _ := unstructured.NestedString(child.Object, "status", "error", "message"); message != "" {
+			return snapshotOutcome{Phase: v1alpha1.VolumeSnapshotPhaseFailed, Message: "the storage driver reported a snapshot error"}, nil
+		}
+	}
+	restore, _, _ := unstructured.NestedString(csi.Object, "status", "restoreSize")
+	quantity, _ := resource.ParseQuantity(restore)
+	contentSize, _, _ := unstructured.NestedInt64(content.Object, "status", "restoreSize")
+	size := int64(0)
+	for _, reported := range []int64{quantity.Value(), contentSize, parseSizeAnnotation(content.GetAnnotations()[sizeBytesAnnotation])} {
+		if reported > 0 {
+			if size > 0 && size != reported {
+				return snapshotOutcome{Gate: gateOf(ReasonSourceNotReady, "the retained snapshot sizes disagree"), Phase: v1alpha1.VolumeSnapshotPhasePending}, nil
+			}
+			size = reported
+		}
+	}
+	if size <= 0 {
+		return snapshotOutcome{Gate: gateOf(ReasonSourceNotReady, "the retained snapshot has no restore size"), Phase: v1alpha1.VolumeSnapshotPhasePending}, nil
+	}
+	return snapshotOutcome{Phase: v1alpha1.VolumeSnapshotPhaseReady, SizeBytes: size}, nil
 }
 
 func (r *VolumeSnapshotReconciler) provisionerOf(ctx context.Context, snapshot v1alpha1.VolumeSnapshot) (string, *Gate, error) {
@@ -176,9 +254,61 @@ func (r *VolumeSnapshotReconciler) observe(ctx context.Context, snapshot v1alpha
 	if ready, _, _ := unstructured.NestedBool(csi.Object, "status", "readyToUse"); ready {
 		restore, _, _ := unstructured.NestedString(csi.Object, "status", "restoreSize")
 		size, _ := resource.ParseQuantity(restore)
-		return snapshotOutcome{Phase: v1alpha1.VolumeSnapshotPhaseReady, SizeBytes: size.Value()}, nil
+		bytes := r.contentSizeBytes(ctx, csi)
+		if bytes <= 0 {
+			bytes = size.Value()
+		}
+		if bytes <= 0 {
+			var err error
+			if bytes, err = r.sourceSizeBytes(ctx, snapshot); err != nil {
+				return snapshotOutcome{}, err
+			}
+		}
+		return snapshotOutcome{Phase: v1alpha1.VolumeSnapshotPhaseReady, SizeBytes: bytes}, nil
 	}
 	return snapshotOutcome{Phase: v1alpha1.VolumeSnapshotPhasePending}, nil
+}
+
+func parseSizeAnnotation(value string) int64 {
+	bytes, err := strconv.ParseInt(value, 10, 64)
+	if err != nil || bytes <= 0 {
+		return 0
+	}
+	return bytes
+}
+
+func (r *VolumeSnapshotReconciler) contentSizeBytes(ctx context.Context, csi *unstructured.Unstructured) int64 {
+	if static, _, _ := unstructured.NestedString(csi.Object, "spec", "source", "volumeSnapshotContentName"); static == "" {
+		return 0
+	}
+	name, _, _ := unstructured.NestedString(csi.Object, "status", "boundVolumeSnapshotContentName")
+	if name == "" {
+		return 0
+	}
+	content := emptyOf(csiSnapshotContentGVK)
+	if err := r.Client.Get(ctx, client.ObjectKey{Name: name}, content); err != nil {
+		return 0
+	}
+	return parseSizeAnnotation(content.GetAnnotations()[sizeBytesAnnotation])
+}
+
+func (r *VolumeSnapshotReconciler) sourceSizeBytes(ctx context.Context, snapshot v1alpha1.VolumeSnapshot) (int64, error) {
+	var pvc corev1.PersistentVolumeClaim
+	err := r.Client.Get(ctx, client.ObjectKey{Namespace: snapshot.Namespace, Name: snapshot.Spec.VolumeRef}, &pvc)
+	if client.IgnoreNotFound(err) != nil {
+		return 0, err
+	}
+	if err == nil {
+		if capacity := pvc.Status.Capacity[corev1.ResourceStorage]; capacity.Value() > 0 {
+			return capacity.Value(), nil
+		}
+	}
+	var volume v1alpha1.Volume
+	err = r.Client.Get(ctx, client.ObjectKey{Namespace: snapshot.Namespace, Name: snapshot.Spec.VolumeRef}, &volume)
+	if client.IgnoreNotFound(err) != nil {
+		return 0, err
+	}
+	return int64(volume.Spec.SizeGi) << 30, nil
 }
 
 func snapshotCondition(snapshot v1alpha1.VolumeSnapshot, done snapshotOutcome) metav1.Condition {
@@ -186,6 +316,8 @@ func snapshotCondition(snapshot v1alpha1.VolumeSnapshot, done snapshotOutcome) m
 	switch {
 	case done.Gate != nil:
 		cond.Status, cond.Reason, cond.Message = metav1.ConditionFalse, done.Gate.Reason, done.Gate.Message
+	case done.Phase == v1alpha1.VolumeSnapshotPhaseReady && done.SizeBytes <= 0:
+		cond.Status, cond.Reason, cond.Message = metav1.ConditionTrue, "SizeUnknown", "the snapshot is ready but its size is not known"
 	case done.Phase == v1alpha1.VolumeSnapshotPhaseReady:
 		cond.Status, cond.Reason, cond.Message = metav1.ConditionTrue, "Ready", "the snapshot is ready"
 	case done.Phase == v1alpha1.VolumeSnapshotPhaseFailed:
@@ -222,5 +354,18 @@ func (r *VolumeSnapshotReconciler) SetupWithManager(mgr ctrl.Manager) error {
 		Named("compute-volumesnapshot").
 		For(&v1alpha1.VolumeSnapshot{}).
 		Owns(emptyOf(csiSnapshotGVK)).
+		Watches(emptyOf(csiSnapshotContentGVK), handler.EnqueueRequestsFromMapFunc(snapshotContentOwner)).
 		Complete(r)
+}
+
+func snapshotContentOwner(_ context.Context, obj client.Object) []ctrl.Request {
+	content, ok := obj.(*unstructured.Unstructured)
+	if !ok {
+		return nil
+	}
+	ref, _, _ := unstructured.NestedStringMap(content.Object, "spec", "volumeSnapshotRef")
+	if ref["uid"] == "" || ref["namespace"] == "" || ref["name"] == "" {
+		return nil
+	}
+	return []ctrl.Request{{NamespacedName: client.ObjectKey{Namespace: ref["namespace"], Name: ref["name"]}}}
 }

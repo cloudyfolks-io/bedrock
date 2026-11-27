@@ -2,6 +2,7 @@ package operator
 
 import (
 	"context"
+	"strings"
 	"testing"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -98,4 +99,34 @@ func TestImageRefreshRefusedForISO(t *testing.T) {
 	iso.Refresh = nil
 	createValid(t, c, &v1alpha1.Image{ObjectMeta: metav1.ObjectMeta{Name: "iso-plain", Namespace: "default"}, Spec: iso})
 	createValid(t, c, &v1alpha1.ClusterImage{ObjectMeta: metav1.ObjectMeta{Name: "iso-plain"}, Spec: iso})
+}
+
+func TestImageCatalogMapping(t *testing.T) {
+	c, _ := StartTestEnv(t)
+	ctx := context.Background()
+
+	spec := registryImageSpec()
+	spec.OS.DisplayName = "Ubuntu Server 24.04 LTS"
+	spec.OS.Architecture = "amd64"
+	uuid := &v1alpha1.ClusterImage{ObjectMeta: metav1.ObjectMeta{Name: "0f8b2c1e-6d4a-4f35-9a7e-3b1c5d2e8f40"}, Spec: spec}
+	createValid(t, c, uuid)
+
+	var fresh v1alpha1.ClusterImage
+	if err := c.Get(ctx, client.ObjectKeyFromObject(uuid), &fresh); err != nil {
+		t.Fatal(err)
+	}
+	if fresh.Spec.OS.DisplayName != "Ubuntu Server 24.04 LTS" || fresh.Spec.OS.Architecture != "amd64" {
+		t.Fatalf("catalog mapping was not stored: %+v", fresh.Spec.OS)
+	}
+
+	upper := &v1alpha1.ClusterImage{ObjectMeta: metav1.ObjectMeta{Name: "0F8B2C1E-6D4A-4F35-9A7E-3B1C5D2E8F40"}, Spec: registryImageSpec()}
+	createInvalid(t, c, upper, "lowercase RFC 1123 subdomain")
+
+	badArch := registryImageSpec()
+	badArch.OS.Architecture = "x86_64"
+	createInvalid(t, c, &v1alpha1.ClusterImage{ObjectMeta: metav1.ObjectMeta{Name: "bad-arch"}, Spec: badArch}, "Unsupported value")
+
+	longName := registryImageSpec()
+	longName.OS.DisplayName = strings.Repeat("a", 129)
+	createInvalid(t, c, &v1alpha1.ClusterImage{ObjectMeta: metav1.ObjectMeta{Name: "long-name"}, Spec: longName}, "Too long")
 }
