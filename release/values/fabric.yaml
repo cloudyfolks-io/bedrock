@@ -1,5 +1,12 @@
 crds:
   enabled: true
+global:
+  registry:
+    address: ghcr.io/cloudyfolks-io
+  images:
+    fabric:
+      repository: fabric
+      tag: v1.2.7@sha256:d7bcafc2d5418c5961e83ec14a75ce7d35c251688dff7e40d2bfeee68f8fe382
 features:
   enableOvnLbSvc: true
 frr:

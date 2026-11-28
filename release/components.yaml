@@ -25,7 +25,7 @@ components:
   - name: fabric
     order: 20
     chart: charts/fabric
-    version: 1.2.6
+    version: 1.2.7
     namespace: kube-system
     values: release/values/fabric.yaml
     crdsToGroup: crds
