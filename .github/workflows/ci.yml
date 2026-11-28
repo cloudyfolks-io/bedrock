@@ -142,7 +142,7 @@ jobs:
       - run: make build binaries release-from-build VERSION=dev IMAGE=localhost:5000/bedrock:dev PIN_DIGESTS=1
       - run: docker build -t localhost:5000/bedrock:dev -f Containerfile .
       - run: docker run --rm -d -p 5000:5000 --name registry registry:3
-      - run: for i in $(seq 1 30); do curl -sf http://localhost:5000/v2/ && break; sleep 1; done; curl -sf http://localhost:5000/v2/
+      - run: for ((attempt=0; attempt<30; attempt++)); do curl -sf http://localhost:5000/v2/ && break; sleep 1; done; curl -sf http://localhost:5000/v2/
       - run: docker push localhost:5000/bedrock:dev
       - run: make release-from-build bundle-from-release VERSION=dev IMAGE=localhost:5000/bedrock:dev PIN_DIGESTS=1
       - run: docker rm -f registry
@@ -180,7 +180,7 @@ jobs:
       - run: make build binaries release-from-build VERSION=dev IMAGE=localhost:5000/bedrock:dev PIN_DIGESTS=1 RELEASE_CONFIG=dist/components-e2e.yaml
       - run: docker build -t localhost:5000/bedrock:dev -f Containerfile .
       - run: docker run --rm -d -p 5000:5000 --name registry registry:3
-      - run: for i in $(seq 1 30); do curl -sf http://localhost:5000/v2/ && break; sleep 1; done; curl -sf http://localhost:5000/v2/
+      - run: for ((attempt=0; attempt<30; attempt++)); do curl -sf http://localhost:5000/v2/ && break; sleep 1; done; curl -sf http://localhost:5000/v2/
       - run: docker push localhost:5000/bedrock:dev
       - run: make release-from-build bundle-from-release VERSION=dev IMAGE=localhost:5000/bedrock:dev PIN_DIGESTS=1 RELEASE_CONFIG=dist/components-e2e.yaml
       - run: docker rm -f registry && docker system prune -af && df -h /
@@ -219,7 +219,7 @@ jobs:
         with:
           version: v3.19.0
       - run: docker run --rm -d -p 5000:5000 --name registry registry:3
-      - run: for i in $(seq 1 30); do curl -sf http://localhost:5000/v2/ && break; sleep 1; done; curl -sf http://localhost:5000/v2/
+      - run: for ((attempt=0; attempt<30; attempt++)); do curl -sf http://localhost:5000/v2/ && break; sleep 1; done; curl -sf http://localhost:5000/v2/
       - run: hack/e2e-upgrade-build.sh && rm -rf dist/cache
       - name: Package compatible upgrade inputs once
         run: |
