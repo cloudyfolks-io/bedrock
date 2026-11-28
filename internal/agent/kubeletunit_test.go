@@ -2,7 +2,6 @@ package agent
 
 import (
 	"context"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -68,9 +67,7 @@ func TestK0sReconfigureAppliesTheKubeletSettingsOfTheCluster(t *testing.T) {
 	unit, _ := withKubeletArgs(strings.Replace(controllerUnit, "helm ", "helm,coredns ", 1), []string{"--max-pods=200", "--resolv-conf=/etc/custom.conf"})
 	writeFixtureFile(t, controllerUnitPath(root), unit)
 	for name, value := range map[string]string{"kubelet.kube-reserved-memory": "6Gi", "kubelet.max-pods": "220", "kubelet.resolv-conf": resolver} {
-		if err := env.Client.Create(context.Background(), &v1alpha1.Setting{ObjectMeta: metav1.ObjectMeta{Name: name}, Spec: v1alpha1.SettingSpec{Value: value}}); err != nil {
-			t.Fatal(err)
-		}
+		createSetting(t, name, value)
 	}
 	outcome, err := k0sReconfigure(context.Background(), env)
 	if err != nil || outcome.Message != "k0scontroller.service reconfigured and restarted" {
