@@ -17,14 +17,34 @@ func allowed(t *testing.T, c client.Client, user string, attributes authorizatio
 	return review.Status.Allowed
 }
 
-func TestProjectRolesWorkThroughRoleBindings(t *testing.T) {
+func projectRoleEnv(t *testing.T, otherNamespaces ...string) client.Client {
+	t.Helper()
 	c, _ := startEnv(t)
 	applyFile(t, c, manifestPath("86-tenancy", "10-project-roles.yaml"))
-	mustCreate(t, c, namespaceNamed("acme-shop", nil), namespaceNamed("acme-other", nil))
+	const namespace = "acme-shop"
+	for _, name := range append([]string{namespace}, otherNamespaces...) {
+		mustCreate(t, c, namespaceNamed(name, nil))
+	}
 	project := shopProject(member("User", "vera", "viewer"), member("User", "eddie", "editor"), member("User", "olga", "owner"))
 	for _, binding := range DesiredRoleBindings(project, nil) {
 		mustCreate(t, c, &binding)
 	}
+	// Persisted bindings can lag in the authorizer's cache. Require a grant for each role before testing denials.
+	for _, check := range []struct{ user, verb string }{
+		{"bedrock:vera", "get"},
+		{"bedrock:eddie", "create"},
+		{"bedrock:olga", "deletecollection"},
+	} {
+		attributes := authorizationv1.ResourceAttributes{
+			Group: "bedrock.cloudyfolks.io", Resource: "databases", Verb: check.verb, Namespace: namespace,
+		}
+		waitFor(t, func() bool { return allowed(t, c, check.user, attributes) })
+	}
+	return c
+}
+
+func TestProjectRolesWorkThroughRoleBindings(t *testing.T) {
+	c := projectRoleEnv(t, "acme-other")
 	const bedrock = "bedrock.cloudyfolks.io"
 	in := func(group, resource, subresource, verb, namespace string) authorizationv1.ResourceAttributes {
 		return authorizationv1.ResourceAttributes{Group: group, Resource: resource, Subresource: subresource, Verb: verb, Namespace: namespace}

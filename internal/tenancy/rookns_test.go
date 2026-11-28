@@ -7,13 +7,7 @@ import (
 )
 
 func TestProjectRolesCannotReachTheRookNamespace(t *testing.T) {
-	c, _ := startEnv(t)
-	applyFile(t, c, manifestPath("86-tenancy", "10-project-roles.yaml"))
-	mustCreate(t, c, namespaceNamed("acme-shop", nil), namespaceNamed("rook-ceph", nil))
-	project := shopProject(member("User", "vera", "viewer"), member("User", "eddie", "editor"), member("User", "olga", "owner"))
-	for _, binding := range DesiredRoleBindings(project, nil) {
-		mustCreate(t, c, &binding)
-	}
+	c := projectRoleEnv(t, "rook-ceph")
 	const rook = "ceph.rook.io"
 	targets := []authorizationv1.ResourceAttributes{
 		{Group: "", Resource: "secrets", Namespace: "rook-ceph"},
@@ -34,13 +28,7 @@ func TestProjectRolesCannotReachTheRookNamespace(t *testing.T) {
 }
 
 func TestProjectRolesStillCoverBothObjectStorageKinds(t *testing.T) {
-	c, _ := startEnv(t)
-	applyFile(t, c, manifestPath("86-tenancy", "10-project-roles.yaml"))
-	mustCreate(t, c, namespaceNamed("acme-shop", nil))
-	project := shopProject(member("User", "vera", "viewer"), member("User", "eddie", "editor"), member("User", "olga", "owner"))
-	for _, binding := range DesiredRoleBindings(project, nil) {
-		mustCreate(t, c, &binding)
-	}
+	c := projectRoleEnv(t)
 	const bedrock = "bedrock.cloudyfolks.io"
 	for _, resource := range []string{"objectstorageusers", "objectstoragebuckets"} {
 		read := authorizationv1.ResourceAttributes{Group: bedrock, Resource: resource, Verb: "get", Namespace: "acme-shop"}
