@@ -3,18 +3,28 @@ package tenancy
 import (
 	"context"
 	"testing"
+	"time"
 
 	authorizationv1 "k8s.io/api/authorization/v1"
+	"k8s.io/apimachinery/pkg/util/wait"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
 func allowed(t *testing.T, c client.Client, user string, attributes authorizationv1.ResourceAttributes) bool {
 	t.Helper()
-	review := &authorizationv1.SubjectAccessReview{Spec: authorizationv1.SubjectAccessReviewSpec{User: user, ResourceAttributes: &attributes}}
-	if err := c.Create(context.Background(), review); err != nil {
+	ok, err := reviewAccess(t.Context(), c, user, attributes)
+	if err != nil {
 		t.Fatal(err)
 	}
-	return review.Status.Allowed
+	return ok
+}
+
+func reviewAccess(ctx context.Context, c client.Client, user string, attributes authorizationv1.ResourceAttributes) (bool, error) {
+	review := &authorizationv1.SubjectAccessReview{Spec: authorizationv1.SubjectAccessReviewSpec{User: user, ResourceAttributes: &attributes}}
+	if err := c.Create(ctx, review); err != nil {
+		return false, err
+	}
+	return review.Status.Allowed, nil
 }
 
 func projectRoleEnv(t *testing.T, otherNamespaces ...string) client.Client {
@@ -38,7 +48,12 @@ func projectRoleEnv(t *testing.T, otherNamespaces ...string) client.Client {
 		attributes := authorizationv1.ResourceAttributes{
 			Group: "bedrock.cloudyfolks.io", Resource: "databases", Verb: check.verb, Namespace: namespace,
 		}
-		waitFor(t, func() bool { return allowed(t, c, check.user, attributes) })
+		err := wait.PollUntilContextTimeout(t.Context(), 100*time.Millisecond, 15*time.Second, true, func(ctx context.Context) (bool, error) {
+			return reviewAccess(ctx, c, check.user, attributes)
+		})
+		if err != nil {
+			t.Fatalf("wait for %s to %s databases: %v", check.user, check.verb, err)
+		}
 	}
 	return c
 }
