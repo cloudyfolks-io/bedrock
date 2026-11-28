@@ -15,7 +15,9 @@ class ExecutionTest(unittest.TestCase):
             go = root / "go"
             go.write_text("""#!/usr/bin/env python3
 import json, os, sys
-if sys.argv[1:] == ["list", "./internal/operator"]:
+if sys.argv[1:] == ["env", "GOFLAGS"]:
+    print(os.environ["TEST_GOFLAGS"])
+elif sys.argv[1:] == ["list", "./internal/operator"]:
     print("local/operator")
 elif sys.argv[1] == "list":
     envtest = ["sigs.k8s.io/controller-runtime/pkg/envtest"]
@@ -32,10 +34,11 @@ else:
 """)
             go.chmod(0o755)
             trace = root / "trace"
-            def run(mode, shard="", fail_on=""):
+            def run(mode, shard="", fail_on="", goflags=""):
                 trace.write_text("")
                 env = dict(os.environ, PATH=f"{root}:{os.environ['PATH']}",
-                           TRACE=str(trace), ENVTEST_SHARD=shard, TEST_FAIL_ON=fail_on)
+                           TRACE=str(trace), ENVTEST_SHARD=shard, TEST_FAIL_ON=fail_on,
+                           TEST_GOFLAGS=goflags)
                 result = subprocess.run(["bash", "hack/ci-test.sh", mode],
                                         cwd=ROOT, env=env, capture_output=True)
                 return result, [json.loads(line) for line in trace.read_text().splitlines()]
@@ -68,3 +71,16 @@ else:
             result, commands = run("envtest", "unexpected")
             self.assertNotEqual(result.returncode, 0)
             self.assertEqual(commands, [])
+
+            for shard in ("operator", "packages"):
+                for goflags in ("-run=^TestCluster", "'--test.skip=^TestCluster$'",
+                                "-list=.", "-short", "-c", "-exec=true"):
+                    with self.subTest(shard=shard, goflags=goflags):
+                        result, commands = run("envtest", shard, goflags=goflags)
+                        self.assertEqual(result.returncode, 2, result.stderr)
+                        self.assertIn(b"GOFLAGS", result.stderr)
+                        self.assertEqual(commands, [])
+
+            result, commands = run("envtest", "operator", goflags="-tags=debug")
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertEqual(len(commands), 2)

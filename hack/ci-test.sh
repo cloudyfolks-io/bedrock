@@ -11,6 +11,15 @@ if [ "$mode" = envtest ]; then
   args=(-p 2 "${args[@]}")
 fi
 
+if [[ "$mode" == envtest && -n "$shard" ]]; then
+  go_flags=$(go env GOFLAGS)
+  test_selection="(^|[[:space:]\"'])--?(test[.])?(run|skip|short|list|c|exec)(=|[[:space:]\"']|$)"
+  if [[ "$go_flags" =~ $test_selection ]]; then
+    printf 'Envtest shards do not accept test selection or execution flags in GOFLAGS.\n' >&2
+    exit 2
+  fi
+fi
+
 case "$mode:$shard" in
   envtest:operator)
     # A–E accounts for about half the operator's control-plane starts.
