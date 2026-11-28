@@ -43,7 +43,7 @@ func (c blobCache) RoundTrip(req *http.Request) (*http.Response, error) {
 		return c.next.RoundTrip(req)
 	}
 	path := filepath.Join(c.dir, "blobs", "sha256", match[1])
-	lock, err := lockFile(path + ".lock")
+	lock, err := lockFile(req.Context(), path+".lock")
 	if err != nil {
 		return nil, err
 	}
@@ -113,7 +113,7 @@ func (c blobCache) fetch(req *http.Request, partial string) (*http.Response, err
 	}
 }
 
-func lockFile(path string) (*os.File, error) {
+func lockFile(ctx context.Context, path string) (*os.File, error) {
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return nil, err
 	}
@@ -121,11 +121,29 @@ func lockFile(path string) (*os.File, error) {
 	if err != nil {
 		return nil, err
 	}
-	if err := syscall.Flock(int(file.Fd()), syscall.LOCK_EX); err != nil {
-		file.Close()
-		return nil, err
+	for {
+		if err = ctx.Err(); err != nil {
+			break
+		}
+		err = syscall.Flock(int(file.Fd()), syscall.LOCK_EX|syscall.LOCK_NB)
+		if err == nil {
+			if err = ctx.Err(); err == nil {
+				return file, nil
+			}
+			break
+		}
+		if err == syscall.EINTR {
+			continue
+		}
+		if err != syscall.EWOULDBLOCK {
+			break
+		}
+		if err = sleep(ctx, 50*time.Millisecond); err != nil {
+			break
+		}
 	}
-	return file, nil
+	file.Close()
+	return nil, err
 }
 
 func writeFrom(path string, offset int64, body io.Reader, timer *time.Timer, idle time.Duration) error {

@@ -27,7 +27,6 @@ func TestOnlyAnAdministratorCanChangeTheDatabaseImportMarker(t *testing.T) {
 			Subjects: []rbacv1.Subject{{Kind: "User", APIGroup: rbacv1.GroupName, Name: username}},
 		},
 	)
-	applyFile(t, admin, manifestPath("86-tenancy", "91-database-import-policy.yaml"))
 	actor := actingAs(t, cfg, username, "system:authenticated")
 	database := &v1alpha1.Database{
 		ObjectMeta: metav1.ObjectMeta{Name: "orders", Namespace: tenant, Annotations: map[string]string{
@@ -35,6 +34,11 @@ func TestOnlyAnAdministratorCanChangeTheDatabaseImportMarker(t *testing.T) {
 		}},
 		Spec: v1alpha1.DatabaseSpec{Engine: "postgresql", Version: "17", Class: "micro", StorageGi: 20},
 	}
+	// Exercise a successful probe before the policy takes effect.
+	if err := denyCreate(admin, admin, database)(); err != nil {
+		t.Fatalf("create before installing the database import policy: %v", err)
+	}
+	applyFile(t, admin, manifestPath("86-tenancy", "91-database-import-policy.yaml"))
 	if err := eventuallyForbidden(t, denyCreate(admin, actor, database)); !apierrors.IsForbidden(err) || !strings.Contains(err.Error(), "database import marker") {
 		t.Fatalf("a database service account could set the import marker: %v", err)
 	}

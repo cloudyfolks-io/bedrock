@@ -7,13 +7,7 @@ import (
 )
 
 func TestProjectRolesCannotReachTheRegistryNamespace(t *testing.T) {
-	c, _ := startEnv(t)
-	applyFile(t, c, manifestPath("86-tenancy", "10-project-roles.yaml"))
-	mustCreate(t, c, namespaceNamed("acme-shop", nil), namespaceNamed("bedrock-registry", nil))
-	project := shopProject(member("User", "vera", "viewer"), member("User", "eddie", "editor"), member("User", "olga", "owner"))
-	for _, binding := range DesiredRoleBindings(project, nil) {
-		mustCreate(t, c, &binding)
-	}
+	c := projectRoleEnv(t, "bedrock-registry")
 	targets := []authorizationv1.ResourceAttributes{
 		{Group: "", Resource: "secrets", Namespace: "bedrock-registry"},
 		{Group: "", Resource: "secrets", Namespace: "bedrock-registry", Name: "harbor-admin"},
@@ -41,13 +35,7 @@ func TestProjectRolesCannotReachTheRegistryNamespace(t *testing.T) {
 }
 
 func TestProjectRolesCoverBothRegistryKinds(t *testing.T) {
-	c, _ := startEnv(t)
-	applyFile(t, c, manifestPath("86-tenancy", "10-project-roles.yaml"))
-	mustCreate(t, c, namespaceNamed("acme-shop", nil))
-	project := shopProject(member("User", "vera", "viewer"), member("User", "eddie", "editor"), member("User", "olga", "owner"))
-	for _, binding := range DesiredRoleBindings(project, nil) {
-		mustCreate(t, c, &binding)
-	}
+	c := projectRoleEnv(t)
 	const bedrock = "bedrock.cloudyfolks.io"
 	for _, resource := range []string{"registries", "registrycredentials"} {
 		read := authorizationv1.ResourceAttributes{Group: bedrock, Resource: resource, Verb: "get", Namespace: "acme-shop"}
@@ -65,13 +53,7 @@ func TestProjectRolesCoverBothRegistryKinds(t *testing.T) {
 }
 
 func TestTheLoginSecretIsReadableInTheProjectNamespaceOnly(t *testing.T) {
-	c, _ := startEnv(t)
-	applyFile(t, c, manifestPath("86-tenancy", "10-project-roles.yaml"))
-	mustCreate(t, c, namespaceNamed("acme-shop", nil), namespaceNamed("acme-other", nil), namespaceNamed("bedrock-registry", nil))
-	project := shopProject(member("User", "vera", "viewer"), member("User", "eddie", "editor"), member("User", "olga", "owner"))
-	for _, binding := range DesiredRoleBindings(project, nil) {
-		mustCreate(t, c, &binding)
-	}
+	c := projectRoleEnv(t, "acme-other", "bedrock-registry")
 	login := func(namespace string) authorizationv1.ResourceAttributes {
 		return authorizationv1.ResourceAttributes{Resource: "secrets", Verb: "get", Namespace: namespace, Name: "ci-docker"}
 	}

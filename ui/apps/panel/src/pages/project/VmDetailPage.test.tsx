@@ -87,7 +87,7 @@ describe("VmDetailPage", () => {
     const user = userEvent.setup();
     const { api } = render("web-1", "/p/web/vms/web-1");
     await user.click(await screen.findByRole("tab", { name: "Metrics" }));
-    expect(await screen.findByRole("heading", { level: 3, name: "CPU use" })).toBeTruthy();
+    expect(await screen.findByRole("heading", { level: 2, name: "CPU use" })).toBeTruthy();
     await waitFor(() => expect(api.calls.some((call) => call.path === "/proxy/v1/metrics/range" && call.query.get("query") === "vm.cpu" && call.query.get("namespace") === "acme-web")).toBe(true));
   });
 

@@ -29,12 +29,14 @@ if [[ $(uname -s) != Linux || ! -s /var/lib/bedrock/e2e-admin-password || ! -f $
 fi
 
 python3 -I - "$entry" "$@" <<'PY'
+from contextlib import ExitStack
 import hashlib
 import ipaddress
 import json
 import os
 from pathlib import Path
 import re
+import signal
 import stat
 import subprocess
 import sys
@@ -369,8 +371,8 @@ def verify_fences(frozen, source, image):
         for subresource in ((), ("--subresource=scale",)):
             denied(names["scale"], "-n", namespace, "patch", "statefulset", settings["statefulset"], *subresource,
                    "--type=merge", "--dry-run=server", "-p", '{"spec":{"replicas":1}}', "-o", "json")
-        denied(names["retained_disks"], "-n", namespace, "delete", "pvc", claim, "--dry-run=server", "--wait=false", "-o", "json")
-        denied(names["retained_disks"], "delete", "pv", volume, "--dry-run=server", "--wait=false", "-o", "json")
+        denied(names["retained_disks"], "-n", namespace, "delete", "pvc", claim, "--dry-run=server", "--wait=false")
+        denied(names["retained_disks"], "delete", "pv", volume, "--dry-run=server", "--wait=false")
 
 
 def recovery_pod(image, claim, tree, execution_sha):
@@ -385,6 +387,7 @@ peer=$4
 data=/var/lib/k0s/etcd
 pki=/var/lib/k0s/pki/etcd
 listeners=https://127.0.0.1:2379
+[[ $EUID == 1001 && $(id -g) == 1001 ]] || exit 1
 if [[ ${BEDROCK_ETCD_POD_IP+x} == x ]]; then
   [[ $BEDROCK_ETCD_POD_IP =~ ^(10\.[0-9]{1,3}|172\.(1[6-9]|2[0-9]|3[01])|192\.168)\.[0-9]{1,3}\.[0-9]{1,3}$ ]] || exit 1
   listeners+=,https://$BEDROCK_ETCD_POD_IP:2379
@@ -406,12 +409,13 @@ while read -r _ _ _ _ path options _; do
 done </proc/self/mountinfo
 [[ $mounted == 1 ]] || exit 1
 cd "$data"
+[[ -r . && -x . ]] || exit 1
 shopt -s dotglob nullglob
 for entry in *; do
   case "$entry" in
     existing|member) ;;
     lost+found)
-      [[ -d $entry && ! -L $entry ]] || exit 1
+      [[ -d $entry && ! -L $entry && -r $entry && -x $entry ]] || exit 1
       contents=(lost+found/*)
       [[ ${#contents[@]} == 0 ]] || exit 1 ;;
     *) exit 1 ;;
@@ -478,7 +482,8 @@ exec -c etcd --name="$member" --data-dir="$data" --initial-cluster="$member=$pee
             "spec": {"schedulingGates": [{"name": gate_name}], "restartPolicy": "Never", "terminationGracePeriodSeconds": 30,
                      "automountServiceAccountToken": False, "enableServiceLinks": False,
                      "hostAliases": [{"ip": "127.0.0.1", "hostnames": [service, advertised_host]}],
-                     "securityContext": {"runAsUser": 0, "seccompProfile": {"type": "RuntimeDefault"}},
+                     "securityContext": {"runAsUser": 1001, "runAsGroup": 1001, "fsGroup": 1001,
+                                         "fsGroupChangePolicy": "OnRootMismatch", "seccompProfile": {"type": "RuntimeDefault"}},
                      "volumes": [{"name": "execution", "persistentVolumeClaim": {"claimName": claim}},
                                  {"name": "certs", "projected": {"defaultMode": 0o400, "sources": projections}}],
                      "containers": [{"name": "etcd", "image": image, "imagePullPolicy": "Never", "command": ["/bin/bash", "-ec"],
@@ -498,11 +503,12 @@ def reachable_pod(image, claim, tree, execution_sha):
             "spec": {**spec, "containers": [{**container, "env": [address]}]}}
 
 
-def reachable_policy():
-    return {"apiVersion": "networking.k8s.io/v1", "kind": "NetworkPolicy", "metadata": {"name": reachable_name, "namespace": namespace},
-            "spec": {"podSelector": {"matchLabels": reachable_labels}, "policyTypes": ["Ingress", "Egress"],
-                     "ingress": [{"from": [{"podSelector": {"matchLabels": controller_labels}}],
-                                  "ports": [{"port": 2379, "protocol": "TCP"}]}], "egress": []}}
+def recovery_policy(name, labels):
+    ingress = [{"from": [{"podSelector": {"matchLabels": controller_labels}}],
+                "ports": [{"port": 2379, "protocol": "TCP"}]}] if name == reachable_name else []
+    return {"apiVersion": "networking.k8s.io/v1", "kind": "NetworkPolicy", "metadata": {"name": name, "namespace": namespace},
+            "spec": {"podSelector": {"matchLabels": labels}, "policyTypes": ["Ingress", "Egress"],
+                     "ingress": ingress, "egress": []}}
 
 
 def selects(selector, labels):
@@ -519,47 +525,46 @@ def selects(selector, labels):
     return True
 
 
-def no_foreign_routes():
+def no_foreign_routes(labels):
     pods = inventory(f"/api/v1/namespaces/{namespace}/pods", "PodList")
     require(not any(selects({"matchLabels": controller_labels}, pod["metadata"].get("labels", {})) for pod in pods))
     services = inventory(f"/api/v1/namespaces/{namespace}/services", "ServiceList")
-    require(not any(record["spec"].get("selector") and selects({"matchLabels": record["spec"]["selector"]}, reachable_labels)
+    require(not any(record["spec"].get("selector") and selects({"matchLabels": record["spec"]["selector"]}, labels)
                     for record in services))
 
 
-def matching_policies():
+def matching_policies(labels):
     policies = inventory(f"/apis/networking.k8s.io/v1/namespaces/{namespace}/networkpolicies", "NetworkPolicyList")
-    return [item for item in policies if selects(item["spec"]["podSelector"], reachable_labels)]
+    return [item for item in policies if selects(item["spec"]["podSelector"], labels)]
 
 
 def verify_network_policy(record, expected, uid):
     info = metadata(record, uid)
-    require(info["name"] == reachable_name and info["namespace"] == namespace and not info.get("ownerReferences"))
+    require(info["name"] == expected["metadata"]["name"] and info["namespace"] == namespace and not info.get("ownerReferences"))
     spec = record["spec"]
-    require({**spec, "egress": spec.get("egress", [])} == expected["spec"])
+    require({**spec, "ingress": spec.get("ingress", []), "egress": spec.get("egress", [])} == expected["spec"])
 
 
-def prepare_network_policy():
-    no_foreign_routes()
-    require(not matching_policies())
-    policy = reachable_policy()
+def prepare_network_policy(policy, labels):
+    no_foreign_routes(labels)
+    require(not matching_policies(labels))
     definition = encoded(policy)
     dry = namespaced("create", "--dry-run=server", "-f", "-", "-o", "json", body=definition)
     verify_network_policy(dry, policy, dry["metadata"]["uid"])
     created = namespaced("create", "-f", "-", "-o", "json", body=definition)
     uid = created["metadata"]["uid"]
     require(valid_uid(uid))
-    verify_reachable_policy(uid)
+    verify_recovery_policy(uid, policy, labels)
     return uid
 
 
-def verify_reachable_policy(uid):
-    no_foreign_routes()
-    policy, = matching_policies()
-    verify_network_policy(policy, reachable_policy(), uid)
+def verify_recovery_policy(uid, expected, labels):
+    no_foreign_routes(labels)
+    policy, = matching_policies(labels)
+    verify_network_policy(policy, expected, uid)
 
 
-def verify_reachable_attachment(disk, snapshot, node):
+def verify_execution_attachment(disk, snapshot, node):
     handle = disk_binding(disk, snapshot["name"])
     attachments = inventory("/apis/storage.k8s.io/v1/volumeattachments", "VolumeAttachmentList")
     active = [record for record in attachments if record["spec"]["source"].get("persistentVolumeName") == disk["volume"] or
@@ -569,9 +574,9 @@ def verify_reachable_attachment(disk, snapshot, node):
             not active[0]["metadata"].get("deletionTimestamp")))
 
 
-def verify_reachable_sockets(uid, address):
-    expected_ip = address.packed[::-1].hex().upper()
-    result = namespaced("exec", reachable_name, "-c", "etcd", "--", "/bin/bash", "-ec", r'''
+def verify_sockets(name, address=None):
+    expected_ip = address.packed[::-1].hex().upper() if address is not None else ""
+    result = namespaced("exec", name, "-c", "etcd", "--", "/bin/bash", "-ec", r'''
 set -eu
 expected=$1
 client=0
@@ -589,13 +594,27 @@ for table in /proc/net/tcp /proc/net/tcp6; do
     esac
   done <"$table"
 done
-[[ $client == 1 && $peer == 1 && $pod == 1 ]] || exit 1
+[[ $client == 1 && $peer == 1 ]] || exit 1
+if [[ -n $expected ]]; then
+  [[ $pod == 1 ]] || exit 1
+else
+  [[ $pod == 0 ]] || exit 1
+fi
 printf '%s\n' '{"verified":true}'
-''', "etcd-reachable-sockets", expected_ip)
+''', "etcd-recovery-sockets", expected_ip)
     require(result == {"verified": True})
+
+
+def verify_unrouted_endpoint(uid, address=None):
     endpoints = inventory(f"/apis/discovery.k8s.io/v1/namespaces/{namespace}/endpointslices", "EndpointSliceList")
-    require(not any(record.get("targetRef", {}).get("uid") == uid or str(address) in record["addresses"]
-                    for item in endpoints for record in item["endpoints"]))
+    for item in endpoints:
+        records = item["endpoints"]
+        require(records is None or isinstance(records, list))
+        for record in [] if records is None else records:
+            target = record.get("targetRef")
+            require((target is None or (isinstance(target, dict) and target.get("uid") != uid)) and
+                    isinstance(record["addresses"], list) and
+                    (address is None or str(address) not in record["addresses"]))
 
 
 def require_contract(record, expected):
@@ -679,19 +698,31 @@ def observe(name, uid, plan, image, original, source):
     require(False, "The isolated native etcd member did not become ready within the time limit.")
 
 
-def publish(directory, filename, receipt):
+def retract_receipt(path, identity):
+    try:
+        if os.path.samestat(path.lstat(), identity):
+            path.unlink()
+    except FileNotFoundError:
+        pass
+
+
+def publish(directory, filename, receipt, rollback):
     data = encoded(receipt)
+    path = directory / filename
     with tempfile.NamedTemporaryFile(dir=directory, prefix=".etcd-restart-") as record:
         record.write(data)
         record.flush()
         os.fsync(record.fileno())
-        os.link(record.name, directory / filename)
+        rollback.callback(retract_receipt, path, os.fstat(record.fileno()))
+        os.link(record.name, path)
     descriptor = os.open(directory, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
     try:
         os.fsync(descriptor)
     finally:
         os.close(descriptor)
-    print(digest(data))
+    print(digest(data), flush=True)
+    # Commit the receipt and any reachable Pod together.
+    rollback.pop_all()
 
 
 def main(entry, guest, source_path, source_sha, original_path, original_sha, proof_dir, custody_sha, execution_sha, output_dir):
@@ -709,22 +740,35 @@ def main(entry, guest, source_path, source_sha, original_path, original_sha, pro
     verify_fences(frozen, source, image)
     pod = builder(image, disk["claim"], tree, execution_sha)
     name = pod["metadata"]["name"]
+    labels = pod["metadata"]["labels"]
+    policy = recovery_policy(name, labels)
     definition = encoded(pod)
     dry = namespaced("create", "--dry-run=server", "-f", "-", "-o", "json", body=definition)
     require_contract(dry, pod)
-    policy_uid = prepare_network_policy() if entry == "reachable" else None
-    created = namespaced("create", "-f", "-", "-o", "json", body=definition)
-    uid = created["metadata"]["uid"]
-    require(valid_uid(uid))
-    try:
+    policy_uid = prepare_network_policy(policy, labels)
+
+    def delete_pod(exc_type, *_):
+        try:
+            namespaced("delete", "--raw", f"/api/v1/namespaces/{namespace}/pods/{name}", "-f", "-", body=encoded(
+                {"apiVersion": "v1", "kind": "DeleteOptions", "preconditions": {"uid": uid}}))
+        except (OSError, subprocess.SubprocessError, ValueError):
+            print("The isolated recovery Pod cleanup could not be verified.", file=sys.stderr)
+            if exc_type is None:
+                raise
+
+    with ExitStack() as rollback:
+        created = namespaced("create", "-f", "-", "-o", "json", body=definition)
+        uid = created["metadata"]["uid"]
+        require(valid_uid(uid))
+        rollback.push(delete_pod)
         proposed = get("pod", name)
         info = metadata(proposed, uid)
         require_contract(proposed, pod)
         require(proposed["spec"] == dry["spec"])
         verify_live(source, custody, snapshot, disks, uid)
-        if policy_uid:
-            verify_reachable_policy(policy_uid)
-            verify_reachable_attachment(disk, snapshot, None)
+        verify_unrouted_endpoint(uid)
+        verify_recovery_policy(policy_uid, policy, labels)
+        verify_execution_attachment(disk, snapshot, None)
         changes = [{"op": "test", "path": "/metadata/uid", "value": uid},
                    {"op": "test", "path": "/metadata/resourceVersion", "value": info["resourceVersion"]},
                    {"op": "test", "path": "/spec/schedulingGates", "value": [{"name": gate_name}]},
@@ -737,30 +781,30 @@ def main(entry, guest, source_path, source_sha, original_path, original_sha, pro
         verify_fences(frozen, source, image)
         running = get("pod", name)
         require(runtime(running, uid, spec, image) == current)
+        address = ipaddress.IPv4Address(running["status"]["podIP"])
+        require(address.is_private and not (address.is_loopback or address.is_link_local or address.is_unspecified))
+        require(running["status"]["podIPs"] == [{"ip": str(address)}])
+        verify_sockets(name, address if entry == "reachable" else None)
+        verify_unrouted_endpoint(uid, address)
+        verify_recovery_policy(policy_uid, policy, labels)
+        verify_execution_attachment(disk, snapshot, current[0])
+        checked = get("pod", name)
+        require(runtime(checked, uid, spec, image) == current and checked["status"]["podIP"] == str(address) and
+                checked["status"]["podIPs"] == running["status"]["podIPs"] and
+                checked["metadata"]["labels"] == labels and not checked["metadata"].get("ownerReferences"))
         receipt = {"version": 1, "scope": "synthetic-etcd-native-restart", "guest_uid": guest,
                    "namespace_uid": source["namespace_uid"], "source_cluster_uid": source["cluster_uid"],
                    "source_receipt_sha256": source_sha, "original_member_sha256": original_sha, "custody_sha256": custody_sha,
                    "execution_sha256": execution_sha, "execution_disk": disk, "member_tree_sha256": tree,
                    "pod_name": name, "pod_uid": uid, "image": image, "status": status}
-        if policy_uid:
-            address = ipaddress.IPv4Address(running["status"]["podIP"])
-            require(address.is_private and not (address.is_loopback or address.is_link_local or address.is_unspecified))
-            verify_reachable_sockets(uid, address)
-            verify_reachable_policy(policy_uid)
-            verify_reachable_attachment(disk, snapshot, current[0])
-            checked = get("pod", name)
-            require(runtime(checked, uid, spec, image) == current and checked["status"]["podIP"] == str(address) and
-                    checked["metadata"]["labels"] == reachable_labels and not checked["metadata"].get("ownerReferences"))
-            receipt = {**receipt, "scope": "synthetic-etcd-reachable-member", "frozen_receipt_sha256": custody["frozen_receipt_sha256"],
-                       "pod_ip": str(address), "container_id": current[1], "network_policy_uid": policy_uid}
-        publish(output, filename, receipt)
-    except (OSError, subprocess.SubprocessError, AttributeError, KeyError, TypeError, ValueError, RecursionError, KeyboardInterrupt):
-        try:
-            namespaced("delete", "--raw", f"/api/v1/namespaces/{namespace}/pods/{name}", "-f", "-", body=encoded(
-                {"apiVersion": "v1", "kind": "DeleteOptions", "preconditions": {"uid": uid}}))
-        except (OSError, subprocess.SubprocessError, ValueError):
-            print("The isolated recovery Pod cleanup could not be verified.", file=sys.stderr)
-        raise
+        if entry == "reachable":
+            state, = checked["status"]["containerStatuses"]
+            require(state["ready"] is True)
+            receipt.update(scope="synthetic-etcd-reachable-member", frozen_receipt_sha256=custody["frozen_receipt_sha256"],
+                           pod_ip=str(address), container_id=current[1], network_policy_uid=policy_uid)
+        else:
+            rollback.close()
+        publish(output, filename, receipt, rollback)
 
 
 def report_checkpoint(error):
@@ -771,7 +815,12 @@ def report_checkpoint(error):
         print(f"etcd recovery check stopped in {name} at line {line}.", file=sys.stderr)
 
 
+def interrupted(*_):
+    raise KeyboardInterrupt
+
+
 try:
+    signal.signal(signal.SIGTERM, interrupted)
     main(*sys.argv[1:])
 except ValueError as error:
     report_checkpoint(error)

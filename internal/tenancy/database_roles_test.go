@@ -7,13 +7,7 @@ import (
 )
 
 func TestProjectRolesCoverTheDatabaseKinds(t *testing.T) {
-	c, _ := startEnv(t)
-	applyFile(t, c, manifestPath("86-tenancy", "10-project-roles.yaml"))
-	mustCreate(t, c, namespaceNamed("acme-shop", nil))
-	project := shopProject(member("User", "vera", "viewer"), member("User", "eddie", "editor"), member("User", "olga", "owner"))
-	for _, binding := range DesiredRoleBindings(project, nil) {
-		mustCreate(t, c, &binding)
-	}
+	c := projectRoleEnv(t)
 	const bedrock = "bedrock.cloudyfolks.io"
 	for _, resource := range []string{"databases", "databaseusers", "databaseschemas"} {
 		for _, verb := range []string{"get", "list", "watch"} {
@@ -46,13 +40,7 @@ func TestProjectRolesCoverTheDatabaseKinds(t *testing.T) {
 }
 
 func TestNoProjectRoleWritesTheStatusOfTheDatabaseKinds(t *testing.T) {
-	c, _ := startEnv(t)
-	applyFile(t, c, manifestPath("86-tenancy", "10-project-roles.yaml"))
-	mustCreate(t, c, namespaceNamed("acme-shop", nil))
-	project := shopProject(member("User", "vera", "viewer"), member("User", "eddie", "editor"), member("User", "olga", "owner"))
-	for _, binding := range DesiredRoleBindings(project, nil) {
-		mustCreate(t, c, &binding)
-	}
+	c := projectRoleEnv(t)
 	for _, resource := range []string{"databases", "databaseusers", "databaseschemas"} {
 		for _, verb := range []string{"create", "update", "patch", "delete"} {
 			attributes := authorizationv1.ResourceAttributes{Group: "bedrock.cloudyfolks.io", Resource: resource, Subresource: "status", Verb: verb, Namespace: "acme-shop"}
@@ -66,13 +54,7 @@ func TestNoProjectRoleWritesTheStatusOfTheDatabaseKinds(t *testing.T) {
 }
 
 func TestNoProjectRoleHasAVerbOnTheDatabasePlatformNamespace(t *testing.T) {
-	c, _ := startEnv(t)
-	applyFile(t, c, manifestPath("86-tenancy", "10-project-roles.yaml"))
-	mustCreate(t, c, namespaceNamed("acme-shop", nil), namespaceNamed("bedrock-dbaas", nil))
-	project := shopProject(member("User", "vera", "viewer"), member("User", "eddie", "editor"), member("User", "olga", "owner"))
-	for _, binding := range DesiredRoleBindings(project, nil) {
-		mustCreate(t, c, &binding)
-	}
+	c := projectRoleEnv(t, "bedrock-dbaas")
 	targets := []authorizationv1.ResourceAttributes{
 		{Group: "", Resource: "pods", Namespace: "bedrock-dbaas"},
 		{Group: "", Resource: "pods", Subresource: "exec", Namespace: "bedrock-dbaas"},

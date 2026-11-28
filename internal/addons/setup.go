@@ -16,7 +16,7 @@ func SetupWithManager(mgr ctrl.Manager, bundle release.Bundle) error {
 	if err := (&KVMLabeler{Client: mgr.GetClient()}).SetupWithManager(mgr); err != nil {
 		return err
 	}
-	if err := (&ObservabilityReconciler{Client: mgr.GetClient(), Random: rand.Reader}).SetupWithManager(mgr); err != nil {
+	if err := (&ObservabilityReconciler{Client: mgr.GetClient(), Reader: mgr.GetAPIReader(), Random: rand.Reader}).SetupWithManager(mgr); err != nil {
 		return err
 	}
 	return addSeeder(mgr)

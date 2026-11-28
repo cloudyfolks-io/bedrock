@@ -7,13 +7,7 @@ import (
 )
 
 func TestProjectRolesGrantDatabaseLogsToEveryRoleInItsOwnProject(t *testing.T) {
-	c, _ := startEnv(t)
-	applyFile(t, c, manifestPath("86-tenancy", "10-project-roles.yaml"))
-	mustCreate(t, c, namespaceNamed("acme-shop", nil), namespaceNamed("acme-other", nil))
-	project := shopProject(member("User", "vera", "viewer"), member("User", "eddie", "editor"), member("User", "olga", "owner"))
-	for _, binding := range DesiredRoleBindings(project, nil) {
-		mustCreate(t, c, &binding)
-	}
+	c := projectRoleEnv(t, "acme-other")
 	const bedrock = "bedrock.cloudyfolks.io"
 	attributes := func(verb, namespace string) authorizationv1.ResourceAttributes {
 		return authorizationv1.ResourceAttributes{Group: bedrock, Resource: "databases", Subresource: "logs", Verb: verb, Namespace: namespace}

@@ -6,7 +6,7 @@ require (
 	filippo.io/age v1.3.2
 	github.com/decred/dcrd/dcrec/secp256k1/v4 v4.4.1
 	github.com/go-asn1-ber/asn1-ber v1.5.8
-	github.com/go-jose/go-jose/v4 v4.1.5
+	github.com/go-jose/go-jose/v4 v4.1.6
 	github.com/go-ldap/ldap/v3 v3.4.14
 	github.com/go-logr/logr v1.4.4
 	github.com/google/go-containerregistry v0.22.1
@@ -31,7 +31,7 @@ require (
 )
 
 require (
-	cel.dev/expr v0.25.1 // indirect
+	cel.dev/expr v0.25.2 // indirect
 	filippo.io/hpke v0.4.0 // indirect
 	github.com/Azure/go-ntlmssp v0.1.1 // indirect
 	github.com/antlr4-go/antlr/v4 v4.13.0 // indirect
@@ -98,7 +98,7 @@ require (
 	go.opentelemetry.io/otel/exporters/otlp/otlptrace v1.40.0 // indirect
 	go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracegrpc v1.40.0 // indirect
 	go.opentelemetry.io/otel/metric v1.46.0 // indirect
-	go.opentelemetry.io/otel/sdk v1.40.0 // indirect
+	go.opentelemetry.io/otel/sdk v1.44.0 // indirect
 	go.opentelemetry.io/otel/trace v1.46.0 // indirect
 	go.opentelemetry.io/proto/otlp v1.9.0 // indirect
 	go.uber.org/multierr v1.11.0 // indirect
@@ -111,9 +111,9 @@ require (
 	golang.org/x/term v0.46.0 // indirect
 	golang.org/x/time v0.14.0 // indirect
 	gomodules.xyz/jsonpatch/v2 v2.4.0 // indirect
-	google.golang.org/genproto/googleapis/api v0.0.0-20260128011058-8636f8732409 // indirect
-	google.golang.org/genproto/googleapis/rpc v0.0.0-20260128011058-8636f8732409 // indirect
-	google.golang.org/grpc v1.79.3 // indirect
+	google.golang.org/genproto/googleapis/api v0.0.0-20260526163538-3dc84a4a5aaa // indirect
+	google.golang.org/genproto/googleapis/rpc v0.0.0-20260526163538-3dc84a4a5aaa // indirect
+	google.golang.org/grpc v1.83.2 // indirect
 	google.golang.org/protobuf v1.36.12-0.20260120151049-f2248ac996af // indirect
 	gopkg.in/evanphx/json-patch.v4 v4.13.0 // indirect
 	gopkg.in/inf.v0 v0.9.1 // indirect

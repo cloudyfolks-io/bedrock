@@ -53,6 +53,9 @@ class PlanTest(unittest.TestCase):
         envtest = workflow.split("  envtest:\n")[1].split("  test:")[0]
         self.assertNotIn("needs:", envtest)
         self.assertIn("make test-envtest", envtest)
+        self.assertIn("fail-fast: false", envtest)
+        self.assertIn("shard: [packages, operator]", envtest)
+        self.assertIn("ENVTEST_SHARD: ${{ matrix.shard }}", envtest)
         self.assertIn("schedule:", workflow)
         self.assertIn("workflow_dispatch:", workflow)
         self.assertIn("needs: [fast-checks, envtest]", workflow)

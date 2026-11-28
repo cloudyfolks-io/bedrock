@@ -222,7 +222,9 @@ def original_token(source, proof, assets):
         require(f"'{assets[key]}' {path}" in data)
     tokens = re.findall(r"(?m)^    content: ([A-Za-z0-9+/=]+)$", data)
     require(len(tokens) == 1)
-    compressed = base64.b64decode(base64.b64decode(tokens[0], validate=True), validate=True)
+    # k0s prints one trailing LF, which k0smotron preserves in the Secret.
+    token = base64.b64decode(tokens[0], validate=True).removesuffix(b"\n")
+    compressed = base64.b64decode(token, validate=True)
     require(len(compressed) <= 16384)
     with gzip.GzipFile(fileobj=io.BytesIO(compressed)) as stream:
         config = stream.read(65537)

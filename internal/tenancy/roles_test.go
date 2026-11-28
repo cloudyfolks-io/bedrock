@@ -3,28 +3,63 @@ package tenancy
 import (
 	"context"
 	"testing"
+	"time"
 
 	authorizationv1 "k8s.io/api/authorization/v1"
+	"k8s.io/apimachinery/pkg/util/wait"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
 func allowed(t *testing.T, c client.Client, user string, attributes authorizationv1.ResourceAttributes) bool {
 	t.Helper()
-	review := &authorizationv1.SubjectAccessReview{Spec: authorizationv1.SubjectAccessReviewSpec{User: user, ResourceAttributes: &attributes}}
-	if err := c.Create(context.Background(), review); err != nil {
+	ok, err := reviewAccess(t.Context(), c, user, attributes)
+	if err != nil {
 		t.Fatal(err)
 	}
-	return review.Status.Allowed
+	return ok
 }
 
-func TestProjectRolesWorkThroughRoleBindings(t *testing.T) {
+func reviewAccess(ctx context.Context, c client.Client, user string, attributes authorizationv1.ResourceAttributes) (bool, error) {
+	review := &authorizationv1.SubjectAccessReview{Spec: authorizationv1.SubjectAccessReviewSpec{User: user, ResourceAttributes: &attributes}}
+	if err := c.Create(ctx, review); err != nil {
+		return false, err
+	}
+	return review.Status.Allowed, nil
+}
+
+func projectRoleEnv(t *testing.T, otherNamespaces ...string) client.Client {
+	t.Helper()
 	c, _ := startEnv(t)
 	applyFile(t, c, manifestPath("86-tenancy", "10-project-roles.yaml"))
-	mustCreate(t, c, namespaceNamed("acme-shop", nil), namespaceNamed("acme-other", nil))
+	const namespace = "acme-shop"
+	for _, name := range append([]string{namespace}, otherNamespaces...) {
+		mustCreate(t, c, namespaceNamed(name, nil))
+	}
 	project := shopProject(member("User", "vera", "viewer"), member("User", "eddie", "editor"), member("User", "olga", "owner"))
 	for _, binding := range DesiredRoleBindings(project, nil) {
 		mustCreate(t, c, &binding)
 	}
+	// Persisted bindings can lag in the authorizer's cache. Require a grant for each role before testing denials.
+	for _, check := range []struct{ user, verb string }{
+		{"bedrock:vera", "get"},
+		{"bedrock:eddie", "create"},
+		{"bedrock:olga", "deletecollection"},
+	} {
+		attributes := authorizationv1.ResourceAttributes{
+			Group: "bedrock.cloudyfolks.io", Resource: "databases", Verb: check.verb, Namespace: namespace,
+		}
+		err := wait.PollUntilContextTimeout(t.Context(), 100*time.Millisecond, 15*time.Second, true, func(ctx context.Context) (bool, error) {
+			return reviewAccess(ctx, c, check.user, attributes)
+		})
+		if err != nil {
+			t.Fatalf("wait for %s to %s databases: %v", check.user, check.verb, err)
+		}
+	}
+	return c
+}
+
+func TestProjectRolesWorkThroughRoleBindings(t *testing.T) {
+	c := projectRoleEnv(t, "acme-other")
 	const bedrock = "bedrock.cloudyfolks.io"
 	in := func(group, resource, subresource, verb, namespace string) authorizationv1.ResourceAttributes {
 		return authorizationv1.ResourceAttributes{Group: group, Resource: resource, Subresource: subresource, Verb: verb, Namespace: namespace}

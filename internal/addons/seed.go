@@ -18,16 +18,20 @@ func settingValues(ctx context.Context, c client.Client) (map[string]string, err
 	if err := c.List(ctx, &list); err != nil {
 		return nil, err
 	}
+	return listedSettingValues(list.Items), nil
+}
+
+func listedSettingValues(items []v1alpha1.Setting) map[string]string {
 	values := map[string]string{}
 	for _, def := range settings.Catalog() {
 		values[def.Key] = def.Default
 	}
-	for _, setting := range list.Items {
+	for _, setting := range items {
 		if setting.Spec.Value != "" {
 			values[setting.Name] = setting.Spec.Value
 		}
 	}
-	return values, nil
+	return values
 }
 
 func Seed(ctx context.Context, c client.Client) error {

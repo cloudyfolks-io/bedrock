@@ -7,9 +7,9 @@ export default function HostMetrics() {
   const { name = "" } = useParams();
   return (
     <>
-      <MetricChart title={t({ id: "metrics.cpu", message: "CPU use" })} queries={["host.cpu"]} unit="ratio" name={name} />
-      <MetricChart title={t({ id: "metrics.memory", message: "Memory use" })} queries={["host.memory"]} unit="ratio" name={name} />
-      <MetricChart title={t({ id: "metrics.network", message: "Network traffic" })} queries={["host.network.rx", "host.network.tx"]} unit="bytesPerSecond" name={name} />
+      <MetricChart heading="h3" title={t({ id: "metrics.cpu", message: "CPU use" })} queries={["host.cpu"]} unit="ratio" name={name} />
+      <MetricChart heading="h3" title={t({ id: "metrics.memory", message: "Memory use" })} queries={["host.memory"]} unit="ratio" name={name} />
+      <MetricChart heading="h3" title={t({ id: "metrics.network", message: "Network traffic" })} queries={["host.network.rx", "host.network.tx"]} unit="bytesPerSecond" name={name} />
     </>
   );
 }

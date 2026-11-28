@@ -29,9 +29,10 @@ func eventuallyForbidden(t *testing.T, attempt func() error) error {
 
 func denyCreate(admin, actor client.Client, obj client.Object) func() error {
 	return func() error {
-		err := actor.Create(context.Background(), obj)
+		probe := obj.DeepCopyObject().(client.Object)
+		err := actor.Create(context.Background(), probe)
 		if err == nil {
-			_ = admin.Delete(context.Background(), obj)
+			_ = admin.Delete(context.Background(), probe)
 		}
 		return err
 	}
