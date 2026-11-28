@@ -9,42 +9,62 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 class ExecutionTest(unittest.TestCase):
-    def test_envtest_bounds_control_planes_and_preserves_failure(self):
+    def test_envtest_shards_cover_packages_and_preserve_failure(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             go = root / "go"
             go.write_text("""#!/usr/bin/env python3
 import json, os, sys
-if sys.argv[1] == "list":
+if sys.argv[1:] == ["list", "./internal/operator"]:
+    print("local/operator")
+elif sys.argv[1] == "list":
+    envtest = ["sigs.k8s.io/controller-runtime/pkg/envtest"]
     for path, deps in [
         ("local/unit", []),
-        ("local/env", ["sigs.k8s.io/controller-runtime/pkg/envtest"]),
+        ("local/env", envtest),
+        ("local/operator", envtest),
     ]:
         print(json.dumps({"ImportPath": path, "Module": {"Main": True}, "Deps": deps}))
 else:
     with open(os.environ["TRACE"], "a") as trace:
         trace.write(json.dumps(sys.argv[1:]) + "\\n")
-    sys.exit(int(os.environ["TEST_EXIT"]))
+    sys.exit(int(os.environ["TEST_FAIL_ON"] in sys.argv))
 """)
             go.chmod(0o755)
             trace = root / "trace"
-            env = dict(os.environ, PATH=f"{root}:{os.environ['PATH']}",
-                       TRACE=str(trace), TEST_EXIT="0")
-            for mode, package in [("unit", "local/unit"), ("envtest", "local/env")]:
+            def run(mode, shard="", fail_on=""):
+                trace.write_text("")
+                env = dict(os.environ, PATH=f"{root}:{os.environ['PATH']}",
+                           TRACE=str(trace), ENVTEST_SHARD=shard, TEST_FAIL_ON=fail_on)
                 result = subprocess.run(["bash", "hack/ci-test.sh", mode],
                                         cwd=ROOT, env=env, capture_output=True)
+                return result, [json.loads(line) for line in trace.read_text().splitlines()]
+
+            base = ["-count=1", "-timeout", "30m"]
+            unit = ["test", *base, "local/unit"]
+            envtest = ["test", "-p", "2", *base]
+            for mode, shard, args in [
+                ("unit", "", unit),
+                ("envtest", "", [*envtest, "local/env", "local/operator"]),
+                ("envtest", "packages", [*envtest, "local/env"]),
+            ]:
+                result, commands = run(mode, shard)
                 self.assertEqual(result.returncode, 0, result.stderr)
-                args = json.loads(trace.read_text().splitlines()[-1])
-                self.assertEqual(args[-1], package)
-                self.assertIn("-count=1", args)
-                self.assertEqual(args.count(package), 1)
-                if mode == "envtest":
-                    self.assertEqual(args[1:3], ["-p", "2"])
-                else:
-                    self.assertNotIn("-p", args)
-            trace.write_text("")
-            env["TEST_EXIT"] = "1"
-            result = subprocess.run(["bash", "hack/ci-test.sh", "envtest"],
-                                    cwd=ROOT, env=env, capture_output=True)
+                self.assertEqual(commands, [args])
+
+            result, commands = run("envtest", fail_on="local/env")
             self.assertNotEqual(result.returncode, 0)
-            self.assertEqual(len(trace.read_text().splitlines()), 1)
+            self.assertEqual(len(commands), 1)
+
+            for fail_on in ["", "-run", "-skip"]:
+                with self.subTest(fail_on=fail_on):
+                    result, commands = run("envtest", "operator", fail_on)
+                    self.assertEqual(result.returncode, int(bool(fail_on)), result.stderr)
+                    self.assertEqual(commands, [
+                        [*envtest, "-run", "^Test[A-E]", "./internal/operator"],
+                        [*envtest, "-skip", "^Test[A-E]", "./internal/operator"],
+                    ])
+
+            result, commands = run("envtest", "unexpected")
+            self.assertNotEqual(result.returncode, 0)
+            self.assertEqual(commands, [])
