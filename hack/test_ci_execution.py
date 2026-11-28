@@ -74,7 +74,7 @@ else:
 
             for shard in ("operator", "packages"):
                 for goflags in ("-run=^TestCluster", "'--test.skip=^TestCluster$'",
-                                "-list=.", "-short", "-c", "-exec=true"):
+                                "-list=.", "-short", "-c", "-exec=true", "-n"):
                     with self.subTest(shard=shard, goflags=goflags):
                         result, commands = run("envtest", shard, goflags=goflags)
                         self.assertEqual(result.returncode, 2, result.stderr)
